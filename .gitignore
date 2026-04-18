@@ -1,0 +1,10 @@
+# Object files
+obj/
+*.o
+
+# Compiled output
+hobbyos
+hobbyos.elf
+
+# Dependencies / System files
+.DS_Store
