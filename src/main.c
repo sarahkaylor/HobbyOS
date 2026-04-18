@@ -1,6 +1,21 @@
 #include <stdint.h>
 #include "virtio_blk.h"
 #include "fat16.h"
+#include "gic.h"
+
+void virtio_blk_handle_irq(void);
+extern int virtio_blk_irq;
+
+void irq_handler_c(void) {
+    uint32_t intid = gic_acknowledge_interrupt();
+    
+    // VirtIO Block IRQ for located slot on virt machine
+    if (intid == (uint32_t)virtio_blk_irq) {
+        virtio_blk_handle_irq();
+    }
+
+    gic_end_interrupt(intid);
+}
 
 // PL011 UART physical base address on QEMU's virt machine
 #define UART0_BASE 0x09000000
@@ -34,10 +49,20 @@ void print_int(int val) {
 void main(void) {
     uart_puts("Booting AArch64 OS...\n");
 
+    gic_init();
+    
+    // Clears the standard I/F interrupt masking flags from the hardware PSTATE
+    // enabling the CPU interface to natively accept GIC triggers dynamically.
+    __asm__ volatile("msr daifclr, #2"); // Enable IRQ in PSTATE
+
     if (virtio_blk_init() != 0) {
         uart_puts("VirtIO Block initialization failed!\n");
         return;
     }
+    
+    // Using the dynamically harvested IRQ slot populated during `virtio_blk_init` scanning,
+    // we instruct the GIC Distributor to unmask and forward the device INTID specifically to this runtime.
+    gic_enable_interrupt(virtio_blk_irq);
     uart_puts("VirtIO Block successfully initialized.\n");
 
     if (fat16_init() != 0) {

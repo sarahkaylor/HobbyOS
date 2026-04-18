@@ -4,7 +4,7 @@ QEMU = /opt/homebrew/bin/qemu-system-aarch64
 
 # Use --target=aarch64-none-elf to instruct clang to build for an AArch64 bare-metal target.
 # -ffreestanding confirms that we don't have a standard library underneath us.
-CFLAGS = -Wall -Wextra -Iinclude --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53
+CFLAGS = -Wall -Wextra -Iinclude --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
 
 # -nostdlib prevents linking against stdlib startup files and libc.
 # -T linker.ld points to our custom linker script.

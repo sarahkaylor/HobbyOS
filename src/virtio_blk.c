@@ -9,18 +9,16 @@
 #define VIRTIO_DEVICE_FEAT_SEL 0x014
 #define VIRTIO_DRIVER_FEAT  0x020
 #define VIRTIO_DRIVER_FEAT_SEL 0x024
+#define VIRTIO_GUEST_PAGE_SIZE 0x028
 #define VIRTIO_QUEUE_SEL    0x030
 #define VIRTIO_QUEUE_NUM_MAX 0x034
 #define VIRTIO_QUEUE_NUM    0x038
-#define VIRTIO_QUEUE_READY  0x044
+#define VIRTIO_QUEUE_ALIGN  0x03C
+#define VIRTIO_QUEUE_PFN    0x040
 #define VIRTIO_QUEUE_NOTIFY 0x050
+#define VIRTIO_INTERRUPT_STATUS 0x060
+#define VIRTIO_INTERRUPT_ACK 0x064
 #define VIRTIO_STATUS       0x070
-#define VIRTIO_QUEUE_DESC_L 0x080
-#define VIRTIO_QUEUE_DESC_H 0x084
-#define VIRTIO_QUEUE_DRV_L  0x090
-#define VIRTIO_QUEUE_DRV_H  0x094
-#define VIRTIO_QUEUE_DEV_L  0x0A0
-#define VIRTIO_QUEUE_DEV_H  0x0A4
 
 #define MMIO_BASE(slot) ((uint8_t*)0x0A000000 + (slot) * 0x200)
 
@@ -54,22 +52,32 @@ struct virtq_used {
     uint16_t avail_event;
 } __attribute__((packed));
 
+// VirtIO MMIO V1 (Legacy) strictly dictates that the descriptor, available ring,
+// and used ring arrays MUST be allocated contiguously in physical memory.
+// The `used` ring must further strictly start on a Page Aligned boundary matching
+// the `VIRTIO_QUEUE_ALIGN` configuration (typically 4096).
+// We simulate this by defining a solitary struct, padding out the internal gap manually.
+struct virtq {
+    struct virtq_desc desc[8];
+    struct virtq_avail avail;
+    uint8_t padding[4096 - (128 + sizeof(struct virtq_avail))];
+    struct virtq_used used;
+} __attribute__((aligned(4096)));
+
 struct virtio_blk_req {
     uint32_t type;
     uint32_t reserved;
     uint64_t sector;
 } __attribute__((packed));
 
-// Statically allocate virtqueue and request buffers to keep it simple
-static struct virtq_desc desc[8] __attribute__((aligned(16)));
-static struct virtq_avail avail __attribute__((aligned(2)));
-static struct virtq_used used __attribute__((aligned(4)));
+static struct virtq vq __attribute__((aligned(4096)));
 
 static struct virtio_blk_req blk_req;
 static uint8_t blk_status;
 
 static uint8_t* blk_mmio = 0;
 static uint16_t ack_used_idx = 0;
+int virtio_blk_irq = -1;
 
 static inline void reg_write32(uint32_t offset, uint32_t val) {
     *(volatile uint32_t*)(blk_mmio + offset) = val;
@@ -77,6 +85,14 @@ static inline void reg_write32(uint32_t offset, uint32_t val) {
 
 static inline uint32_t reg_read32(uint32_t offset) {
     return *(volatile uint32_t*)(blk_mmio + offset);
+}
+
+void virtio_blk_handle_irq(void) {
+    if (!blk_mmio) return;
+    uint32_t status = reg_read32(VIRTIO_INTERRUPT_STATUS);
+    if (status) {
+        reg_write32(VIRTIO_INTERRUPT_ACK, status);
+    }
 }
 
 int virtio_blk_init(void) {
@@ -87,6 +103,7 @@ int virtio_blk_init(void) {
         uint32_t devid = *(volatile uint32_t*)(mmio + VIRTIO_DEVICE_ID);
         if (magic == 0x74726976 && devid == 2) {
             blk_mmio = mmio;
+            virtio_blk_irq = 48 + i;
             break;
         }
     }
@@ -118,24 +135,16 @@ int virtio_blk_init(void) {
     if (!(reg_read32(VIRTIO_STATUS) & 8)) return -1;
 
     // Setup queue 0
+    reg_write32(VIRTIO_GUEST_PAGE_SIZE, 4096);
     reg_write32(VIRTIO_QUEUE_SEL, 0);
     uint32_t max_size = reg_read32(VIRTIO_QUEUE_NUM_MAX);
     if (max_size == 0) return -1;
     
     reg_write32(VIRTIO_QUEUE_NUM, 8);
+    reg_write32(VIRTIO_QUEUE_ALIGN, 4096);
 
-    uint64_t desc_addr = (uint64_t)&desc;
-    uint64_t avail_addr = (uint64_t)&avail;
-    uint64_t used_addr = (uint64_t)&used;
-
-    reg_write32(VIRTIO_QUEUE_DESC_L, (uint32_t)desc_addr);
-    reg_write32(VIRTIO_QUEUE_DESC_H, (uint32_t)(desc_addr >> 32));
-    reg_write32(VIRTIO_QUEUE_DRV_L, (uint32_t)avail_addr);
-    reg_write32(VIRTIO_QUEUE_DRV_H, (uint32_t)(avail_addr >> 32));
-    reg_write32(VIRTIO_QUEUE_DEV_L, (uint32_t)used_addr);
-    reg_write32(VIRTIO_QUEUE_DEV_H, (uint32_t)(used_addr >> 32));
-
-    reg_write32(VIRTIO_QUEUE_READY, 1);
+    uint32_t pfn = (uint32_t)((uint64_t)&vq / 4096);
+    reg_write32(VIRTIO_QUEUE_PFN, pfn);
 
     // Driver OK
     status |= 4; reg_write32(VIRTIO_STATUS, status);
@@ -155,54 +164,48 @@ static int virtio_blk_do_op(uint64_t sector, void* buf, uint32_t type) {
     blk_req.sector = sector;
 
     // Descriptor 0: The request header
-    desc[0].addr = (uint64_t)&blk_req;
-    desc[0].len = sizeof(struct virtio_blk_req);
-    desc[0].flags = 1; // VIRTQ_DESC_F_NEXT
-    desc[0].next = 1;
+    vq.desc[0].addr = (uint64_t)&blk_req;
+    vq.desc[0].len = sizeof(struct virtio_blk_req);
+    vq.desc[0].flags = 1; // VIRTQ_DESC_F_NEXT
+    vq.desc[0].next = 1;
 
     // Descriptor 1: The data buffer
-    desc[1].addr = (uint64_t)buf;
-    desc[1].len = 512; 
-    desc[1].flags = 1 | (type == VIRTIO_BLK_T_IN ? 2 : 0); // VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE
-    desc[1].next = 2;
+    vq.desc[1].addr = (uint64_t)buf;
+    vq.desc[1].len = 512; 
+    vq.desc[1].flags = 1 | (type == VIRTIO_BLK_T_IN ? 2 : 0); // VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE
+    vq.desc[1].next = 2;
 
     // Descriptor 2: The status byte
-    desc[2].addr = (uint64_t)&blk_status;
-    desc[2].len = 1;
-    desc[2].flags = 2; // VIRTQ_DESC_F_WRITE
-    desc[2].next = 0;
+    vq.desc[2].addr = (uint64_t)&blk_status;
+    vq.desc[2].len = 1;
+    vq.desc[2].flags = 2; // VIRTQ_DESC_F_WRITE
+    vq.desc[2].next = 0;
 
     // Publish to available ring
-    uint16_t head_idx = avail.idx;
-    avail.ring[head_idx % 8] = 0; // head descriptor is 0
+    uint16_t head_idx = vq.avail.idx;
+    vq.avail.ring[head_idx % 8] = 0; // head descriptor is 0
     
     // Memory barrier
     __asm__ volatile("dmb sy" ::: "memory");
     
-    avail.idx++;
+    vq.avail.idx++;
     
     __asm__ volatile("dmb sy" ::: "memory");
-
-    uart_puts("Sending notify to QEMU.\n");
 
     // Notify device
     reg_write32(VIRTIO_QUEUE_NOTIFY, 0);
 
-    // Poll for completion with timeout
-    uint32_t timeout = 10000000;
-    while (*(volatile uint16_t*)&used.idx == ack_used_idx && timeout > 0) {
-        timeout--;
-        __asm__ volatile("nop");
+    // Hardware WFI Mechanism:
+    // To strictly eliminate busy-polling queues which aggressively spin the CPU,
+    // the Wait For Interrupt (`wfi`) instruction is evoked. Because PSTATE.I is cleared
+    // down in EL1, the processor enters a genuine low-power sleep.
+    // It wakes autonomously only when the GIC validates the designated interrupt line 
+    // raised by the virtio device once IO completes and edits `used.idx`.
+    while (*(volatile uint16_t*)&vq.used.idx == ack_used_idx) {
+        __asm__ volatile("wfi");
     }
 
-    if (timeout == 0) {
-        uart_puts("QEMU virtio timeout!\n");
-        return -1;
-    }
-
-    uart_puts("QEMU responded.\n");
-
-    ack_used_idx = used.idx;
+    ack_used_idx = vq.used.idx;
     
     // Memory barrier before reading status
     __asm__ volatile("dmb sy" ::: "memory");

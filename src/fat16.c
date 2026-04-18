@@ -4,22 +4,14 @@
 #define MAX_OPEN_FILES 4
 #define SECTOR_SIZE 512
 
-struct fat16_bpb {
-    uint8_t jmp[3];
-    char oem[8];
-    uint16_t bytes_per_sector;
-    uint8_t sectors_per_cluster;
-    uint16_t reserved_sectors;
-    uint8_t fat_count;
-    uint16_t root_dir_entries;
-    uint16_t total_sectors_16;
-    uint8_t media_descriptor;
-    uint16_t sectors_per_fat;
-    uint16_t sectors_per_track;
-    uint16_t heads;
-    uint32_t hidden_sectors;
-    uint32_t total_sectors_32;
-} __attribute__((packed));
+extern void uart_puts(const char* s);
+
+static uint32_t bpb_bytes_per_sector;
+static uint32_t bpb_sectors_per_cluster;
+static uint32_t bpb_reserved_sectors;
+static uint32_t bpb_fat_count;
+static uint32_t bpb_root_dir_entries;
+static uint32_t bpb_sectors_per_fat;
 
 struct fat16_dir_entry {
     char name[11];
@@ -36,7 +28,6 @@ static uint32_t root_dir_sector;
 static uint32_t root_dir_sectors;
 static uint32_t data_sector;
 static uint32_t cluster_size;
-static struct fat16_bpb bpb;
 
 typedef struct {
     int active;
@@ -69,20 +60,36 @@ static int match_name(const char* fat_name, const char* query) {
 
 int fat16_init(void) {
     uint8_t buf[SECTOR_SIZE];
-    if (virtio_blk_read_sector(0, buf, 1) != 0) return -1;
-    
-    // Copy bpb avoiding unaligned access warnings implicitly
-    for (unsigned int i = 0; i < sizeof(bpb); i++) {
-        ((uint8_t*)&bpb)[i] = buf[i];
+    if (virtio_blk_read_sector(0, buf, 1) != 0) {
+        return -1;
     }
     
-    if (bpb.bytes_per_sector != SECTOR_SIZE) return -1;
+    // [CRITICAL DESIGN DECISION - UNALIGNED ACCESS TRAPS]
+    // Because the OS operates natively without enabling the Memory Management Unit (MMU),
+    // AArch64 defaults the environment to strictly `Device-nGnRnE` memory constraints.
+    // Standard LLVM Clang optimizations will detect structures like `((uint8_t*)&bpb)[...` 
+    // or packed struct variable copies, reducing them down to grouped 16/32-bit loads (`ldrh`).
+    // Attempting to `ldrh` from an odd byte boundary (e.g. offset 11) within strict Device Memory
+    // throws an immediate execution abort via Synchronous Exception.
+    // By casting the fetch target via `volatile uint8_t*` and bit-shifting piecemeal,
+    // we explicitly restrict Clang to use individual byte loads (`ldrb`), remaining safe across boundaries.
+    volatile uint8_t* vbuf = (volatile uint8_t*)buf;
+    bpb_bytes_per_sector = vbuf[11] | (vbuf[12] << 8);
+    bpb_sectors_per_cluster = vbuf[13];
+    bpb_reserved_sectors = vbuf[14] | (vbuf[15] << 8);
+    bpb_fat_count = vbuf[16];
+    bpb_root_dir_entries = vbuf[17] | (vbuf[18] << 8);
+    bpb_sectors_per_fat = vbuf[22] | (vbuf[23] << 8);
     
-    fat_sector = bpb.reserved_sectors;
-    root_dir_sector = fat_sector + (bpb.fat_count * bpb.sectors_per_fat);
-    root_dir_sectors = (bpb.root_dir_entries * 32 + (SECTOR_SIZE - 1)) / SECTOR_SIZE;
+    if (bpb_bytes_per_sector != SECTOR_SIZE) {
+        return -1;
+    }
+    
+    fat_sector = bpb_reserved_sectors;
+    root_dir_sector = fat_sector + (bpb_fat_count * bpb_sectors_per_fat);
+    root_dir_sectors = (bpb_root_dir_entries * 32 + (SECTOR_SIZE - 1)) / SECTOR_SIZE;
     data_sector = root_dir_sector + root_dir_sectors;
-    cluster_size = bpb.sectors_per_cluster * SECTOR_SIZE;
+    cluster_size = bpb_sectors_per_cluster * SECTOR_SIZE;
     
     for (int i = 0; i < MAX_OPEN_FILES; i++) open_files[i].active = 0;
     return 0;
@@ -109,8 +116,8 @@ static void write_fat(uint16_t cluster, uint16_t val) {
     p[1] = (val >> 8) & 0xFF;
     virtio_blk_write_sector(sector, buf, 1);
     
-    if (bpb.fat_count > 1) {
-        virtio_blk_write_sector(sector + bpb.sectors_per_fat, buf, 1);
+    if (bpb_fat_count > 1) {
+        virtio_blk_write_sector(sector + bpb_sectors_per_fat, buf, 1);
     }
 }
 
@@ -121,8 +128,8 @@ static uint16_t alloc_cluster(void) {
             // Zero memory in the new cluster 
             uint8_t zero[SECTOR_SIZE];
             for (int i = 0; i < SECTOR_SIZE; i++) zero[i] = 0;
-            uint32_t s = data_sector + (c - 2) * bpb.sectors_per_cluster;
-            for (int i = 0; i < bpb.sectors_per_cluster; i++) {
+            uint32_t s = data_sector + (c - 2) * bpb_sectors_per_cluster;
+            for (uint32_t i = 0; i < bpb_sectors_per_cluster; i++) {
                 virtio_blk_write_sector(s + i, zero, 1);
             }
             return c;
@@ -250,7 +257,7 @@ int file_read(int fd, void* buf, int size) {
         uint32_t bytes_to_read = cluster_size - offset_in_cluster;
         if (bytes_to_read > (uint32_t)size) bytes_to_read = size;
         
-        uint32_t sector_num = data_sector + (c - 2) * bpb.sectors_per_cluster + (offset_in_cluster / SECTOR_SIZE);
+        uint32_t sector_num = data_sector + (c - 2) * bpb_sectors_per_cluster + (offset_in_cluster / SECTOR_SIZE);
         uint32_t offset_in_sector = offset_in_cluster % SECTOR_SIZE;
         
         uint8_t sec_buf[SECTOR_SIZE];
@@ -299,7 +306,7 @@ int file_write(int fd, const void* buf, int size) {
         uint32_t bytes_to_write = cluster_size - offset_in_cluster;
         if (bytes_to_write > (uint32_t)size) bytes_to_write = size;
         
-        uint32_t sector_num = data_sector + (c - 2) * bpb.sectors_per_cluster + (offset_in_cluster / SECTOR_SIZE);
+        uint32_t sector_num = data_sector + (c - 2) * bpb_sectors_per_cluster + (offset_in_cluster / SECTOR_SIZE);
         uint32_t offset_in_sector = offset_in_cluster % SECTOR_SIZE;
         
         uint8_t sec_buf[SECTOR_SIZE];
