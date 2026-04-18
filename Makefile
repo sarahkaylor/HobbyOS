@@ -47,15 +47,19 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.s
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+disk.img:
+	dd if=/dev/zero of=disk.img bs=1M count=512
+	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img
+
 # Target to run the OS inside QEMU
-run: $(TARGET)
-	$(QEMU) -M virt -cpu cortex-a53 -m 128M -kernel $(TARGET) -nographic -append "console=ttyAMA0"
+run: $(TARGET) disk.img
+	$(QEMU) -M virt -cpu cortex-a53 -m 128M -kernel $(TARGET) -nographic -append "console=ttyAMA0" -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0
 
 # Target to exit QEMU properly
 # Note: Ctrl+A, X exists QEMU nographic mode.
 
 # Clean rule to remove build artifacts
 clean:
-	rm -rf $(OBJ_DIR) $(TARGET) hobbyos
+	rm -rf $(OBJ_DIR) $(TARGET) hobbyos disk.img
 
 .PHONY: all clean run

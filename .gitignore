@@ -8,3 +8,6 @@ hobbyos.elf
 
 # Dependencies / System files
 .DS_Store
+
+# Disk images
+disk.img
