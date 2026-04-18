@@ -27,3 +27,12 @@ This document captures the major design decisions, architecture constraints, and
 - **Direct Interpretation:** The OS includes a minimal native parser for FAT-16 tailored specifically for 512-byte block sectors.
 - **Atomic Byte Parsing to avoid Traps:** Packed structs traditionally map out FAT structures like the BPB (BIOS Parameter Block). However, due to `bytes_per_sector` resting unalignedly at offset 11, Clang optimizes fetches using half-word 16-bit loads (`ldrh`), raising fatal alignment faults against the `Device` memory. 
 - **Design Enforcement:** As a strict rule moving forward, HobbyOS maps raw FAT metadata segments directly using `volatile uint8_t*` and parses offsets byte-by-byte into integers natively to completely defeat compiler-introduced Unaligned Access vectors.
+
+## 6. Virtual Memory Protection (MMU)
+- **Identity Mapping:** Rather than offsetting higher-half kernel variables arbitrarily, the entire memory structure explicitly implements identity mappings spanning `0x00000000` to `0x7FFFFFFF` utilizing 2MB contiguous blocks via Level 2 tables dynamically allocated internally.
+- **Cache Avoidance:** All standard Kernel and RAM buffers operate as `MAIR_NORMAL_NC` (Normal Non-Cacheable). Maintaining purely Non-Cacheable architecture provides unaligned-access functionality inherently derived from Normal buffers, while completely bypassing painful architecture-dependent data cache flushes linking the Host DMA from VirtIO devices directly without coherence syncing.
+- **Unprivileged Blocks (EL0):** To separate application context boundaries, `0x44000000` specifically translates mapping constraints strictly to `PT_USER_RW` unlocking dual-execution boundaries without flushing TTBR1 registers explicitly. 
+
+## 7. Execution Hand-Offs & Syscalls
+- **Trap Structures (SVC):** User mode programs compile dynamically into `.bin` containers triggering the `svc #0` hardware traps bypassing conventional external bindings. Utilizing `irq_lower_el` and `sync_lower_el`, the `boot.s` wrappers capture context frames and redirect them down to internal OS handlers.
+- **SPSR Protection:** Exiting EL1 to execute a User process restricts down hardware properties naturally via shifting the process register down to `EL0t` and relying securely on `eret` branching safely natively towards target instruction frames allocated via Virtual Memory dynamically.

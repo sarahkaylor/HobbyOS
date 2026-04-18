@@ -2,7 +2,7 @@
 #include "virtio_blk.h"
 #include "fat16.h"
 #include "gic.h"
-
+#include "mmu.h"
 void virtio_blk_handle_irq(void);
 extern int virtio_blk_irq;
 
@@ -49,6 +49,10 @@ void print_int(int val) {
 void main(void) {
     uart_puts("Booting AArch64 OS...\n");
 
+    // Virtual Memory Protection 
+    mmu_init();
+    uart_puts("MMU Initialized: Page Tables setup securely.\n");
+
     gic_init();
     
     // Clears the standard I/F interrupt masking flags from the hardware PSTATE
@@ -71,27 +75,31 @@ void main(void) {
     }
     uart_puts("FAT-16 filesystem successfully initialized.\n");
 
-    int fd = file_open("TEST.TXT");
+    int fd = file_open("USER.BIN");
     if (fd >= 0) {
-        uart_puts("Opened TEST.TXT successfully.\n");
-        const char* msg = "Hello from FAT16 disk!\n";
-        
-        // Write test
-        int w = file_write(fd, msg, 23);
-        uart_puts("Wrote "); print_int(w); uart_puts(" bytes to disk.\n");
-        
-        // Seek & Read Test
-        file_seek(fd, 0);
-        char readbuf[32];
-        for (int i=0; i<32; i++) readbuf[i] = 0;
-        
-        int r = file_read(fd, readbuf, 23);
-        uart_puts("Read "); print_int(r); uart_puts(" bytes from disk: ");
-        uart_puts(readbuf);
-        
+        uart_puts("Found USER.BIN, reading into User RAM...\n");
+        file_read(fd, (void*)0x44000000, 4096);
         file_close(fd);
+        uart_puts("USER.BIN successfully copied. Dropping to User Space EL0...\n");
+
+        // Setup state for EL0 and jump out
+        __asm__ volatile(
+            // Set ELR_EL1 to the user entry point securely mapped in MMU
+            "mov x0, #0x44000000\n"
+            "msr elr_el1, x0\n"
+            // Set SPSR_EL1 to EL0t (M[3:0] = 0) with unmasked IRQ, FIQ internally
+            "mov x1, #0\n" 
+            "msr spsr_el1, x1\n"
+            // Set user stack pointer allocating 2MB page boundary
+            "mov x1, #0x44200000\n"
+            "msr sp_el0, x1\n"
+            // Clear state variables
+            "mov x0, #0\n"
+            "mov x1, #0\n"
+            "eret\n"
+        );
     } else {
-        uart_puts("Failed to open or create TEST.TXT!\n");
+        uart_puts("Failed to locate USER.BIN on disk image!\n");
     }
 
     uart_puts("System halt.\n");

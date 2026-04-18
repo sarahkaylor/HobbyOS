@@ -4,7 +4,7 @@ QEMU = /opt/homebrew/bin/qemu-system-aarch64
 
 # Use --target=aarch64-none-elf to instruct clang to build for an AArch64 bare-metal target.
 # -ffreestanding confirms that we don't have a standard library underneath us.
-CFLAGS = -Wall -Wextra -Iinclude --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
+CFLAGS = -Wall -Wextra -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
 
 # -nostdlib prevents linking against stdlib startup files and libc.
 # -T linker.ld points to our custom linker script.
@@ -13,7 +13,7 @@ LDFLAGS = -fuse-ld=lld -T linker.ld -nostdlib
 
 # Target and objects
 TARGET = hobbyos.elf
-SRC_DIR = src
+SRC_DIR = src/kernel
 OBJ_DIR = obj
 
 # Find all .c and .s files in the src/ directory
@@ -24,6 +24,11 @@ ASM_SRCS = $(wildcard $(SRC_DIR)/*.s)
 C_OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(C_SRCS))
 ASM_OBJS = $(patsubst $(SRC_DIR)/%.s, $(OBJ_DIR)/%.o, $(ASM_SRCS))
 OBJS = $(ASM_OBJS) $(C_OBJS)
+
+USER_CFLAGS = -Wall -Wextra -Isrc/user_include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
+USER_C = src/user/main.c src/user/libc.c
+USER_OBJ = obj/user_main.o obj/user_libc.o
+USER_BIN = user.bin
 
 # Default rule: build the target
 all: $(TARGET)
@@ -47,12 +52,22 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.s
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-disk.img:
+# Rule to compile user objects
+obj/user_%.o: src/user/%.c
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(USER_BIN): $(USER_OBJ)
+	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o user.elf $(USER_OBJ)
+	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary user.elf $(USER_BIN)
+
+disk.img: $(TARGET) $(USER_BIN)
 	dd if=/dev/zero of=disk.img bs=1M count=512
 	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img
+	/opt/homebrew/bin/mcopy -i disk.img $(USER_BIN) ::/USER.BIN
 
 # Target to run the OS inside QEMU
-run: $(TARGET) disk.img
+run: disk.img
 	$(QEMU) -M virt -cpu cortex-a53 -m 128M -kernel $(TARGET) -nographic -append "console=ttyAMA0" -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0
 
 # Target to exit QEMU properly
@@ -60,6 +75,6 @@ run: $(TARGET) disk.img
 
 # Clean rule to remove build artifacts
 clean:
-	rm -rf $(OBJ_DIR) $(TARGET) hobbyos disk.img
+	rm -rf $(OBJ_DIR) $(TARGET) hobbyos disk.img user.elf $(USER_BIN)
 
 .PHONY: all clean run
