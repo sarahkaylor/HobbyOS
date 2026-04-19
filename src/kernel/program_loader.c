@@ -61,6 +61,9 @@ uart_puts(" bytes from disk\n");
 
     if (setjmp(user_exit_context) != 0) {
         // We returned here via longjmp (from a syscall or fault)
+        // CRITICAL FIX: The AArch64 exception handler automatically masks interrupts. 
+        // We must manually re-enable them (daifclr) when unwinding via longjmp.
+        __asm__ volatile("msr daifclr, #2");
         return 0;
     }
 
