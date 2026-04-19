@@ -26,9 +26,10 @@ ASM_OBJS = $(patsubst $(SRC_DIR)/%.s, $(OBJ_DIR)/%.o, $(ASM_SRCS))
 OBJS = $(ASM_OBJS) $(C_OBJS)
 
 USER_CFLAGS = -Wall -Wextra -Isrc/user_include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
-USER_C = src/user/main.c src/user/libc.c
-USER_OBJ = obj/user_main.o obj/user_libc.o
-USER_BIN = user.bin
+USER_LIBC = src/user/libc.c
+MEM_TEST_BIN = memtest.bin
+FILE_IO_BIN = fileio_test.bin
+CONSOLE_TEST_BIN = console_test.bin
 
 # Default rule: build the target
 all: $(TARGET)
@@ -57,14 +58,37 @@ obj/user_%.o: src/user/%.c
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(USER_BIN): $(USER_OBJ)
-	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o user.elf $(USER_OBJ)
-	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary user.elf $(USER_BIN)
+obj/mem_test.o: src/user/mem_test.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR) 
+	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-disk.img: $(TARGET) $(USER_BIN)
+obj/file_io_test.o: src/user/file_io_test.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR) 
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+obj/console_test.o: src/user/console_test.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(MEM_TEST_BIN): obj/mem_test.o obj/user_libc.o
+	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o memtest.elf $^
+	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary memtest.elf $(MEM_TEST_BIN)
+
+$(FILE_IO_BIN): obj/file_io_test.o obj/user_libc.o 
+	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o fileio_test.elf $^
+	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary fileio_test.elf $(FILE_IO_BIN)
+
+$(CONSOLE_TEST_BIN): obj/console_test.o obj/user_libc.o
+	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o console_test.elf $^
+	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary console_test.elf $(CONSOLE_TEST_BIN)
+
+
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN)
 	dd if=/dev/zero of=disk.img bs=1M count=512
-	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img
-	/opt/homebrew/bin/mcopy -i disk.img $(USER_BIN) ::/USER.BIN
+	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img 
+	/opt/homebrew/bin/mcopy -i disk.img $(MEM_TEST_BIN) ::/MEM_TEST.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(FILE_IO_BIN) ::/FILE_TEST.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(CONSOLE_TEST_BIN) ::/CONSOLE_TEST.BIN
 
 # Target to run the OS inside QEMU
 run: disk.img
@@ -75,6 +99,13 @@ run: disk.img
 
 # Clean rule to remove build artifacts
 clean:
-	rm -rf $(OBJ_DIR) $(TARGET) hobbyos disk.img user.elf $(USER_BIN)
+	rm -rf $(OBJ_DIR) $(TARGET) hobbyos disk.img memtest.elf fileio_test.elf $(MEM_TEST_BIN) $(FILE_IO_BIN)
 
-.PHONY: all clean run
+memtest: $(MEM_TEST_BIN)
+
+fileio_test: $(FILE_IO_BIN) 
+
+tests: memtest fileio_test
+	@echo "Both test programs compiled"
+
+.PHONY: all clean run memtest fileio_test tests

@@ -54,11 +54,13 @@ void mmu_init(void) {
             attr = (PT_MEM_NORMAL << 2) | (1 << 10) | 0b01;
             
             if (addr >= 0x44000000 && addr <= 0x45FFFFFF) {
+                // User space: RW for user, no access for kernel
                 attr |= PT_USER_RW; 
-                attr |= (1ULL << 53); // PXN=1 
+                attr |= (1ULL << 53); // PXN=1 (kernel cannot execute)
             } else {
+                // Kernel space: RW for kernel, no access for user
                 attr |= PT_KERNEL_RW;
-                attr |= (1ULL << 54); // UXN=1 
+                attr |= (1ULL << 54); // UXN=1 (user cannot execute)
             }
         } else {
             attr |= (1ULL << 54) | (1ULL << 53); // Device default fallback

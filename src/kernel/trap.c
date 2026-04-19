@@ -3,6 +3,7 @@
 
 // External functions we need
 extern void uart_puts(const char *s);
+extern void uart_putc(char c);
 extern void gic_enable_interrupt(uint32_t intid);
 extern uint32_t gic_acknowledge_interrupt(void);
 extern void virtio_blk_handle_irq(void);
@@ -47,6 +48,59 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       uart_puts("Unknown System Call Invoked!\n");
       tf->regs[0] = -1; // Return error
     }
+  } else if (ec == 0x24 || ec == 0x25) {
+    // EC = 0x24: Instruction Abort from a lower Exception Level
+    // EC = 0x25: Data Abort from a lower Exception Level
+    uint64_t far;
+    __asm__ volatile("mrs %0, far_el1" : "=r"(far));
+    
+    uint32_t iss = esr & 0x1FFFFFF; // Instruction Specific Syndrome
+    uint32_t fault_code = (iss >> 0) & 0x3F; // Fault Status Code
+    
+    uart_puts("\n[KERNEL] Memory Protection Violation Detected!\n");
+    uart_puts("Fault Address: 0x");
+    void print_int(int val); // temp decl
+    
+    // Print fault address in hex format
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        uint64_t nibble = (far >> shift) & 0xF;
+        if (nibble < 10)
+            uart_putc('0' + nibble);
+        else
+            uart_putc('a' + (nibble - 10));
+    }
+    if (ec == 0x24) {
+        uart_puts("\nFault Type: Instruction Abort\n");
+    } else {
+        uart_puts("\nFault Type: Data Abort\n");
+    }
+uart_puts("Fault Details: Code 0x");
+for (int shift = 4; shift >= 0; shift -= 4) {
+    uint64_t nibble = (fault_code >> shift) & 0xF;
+    if (nibble < 10)
+        uart_putc('0' + nibble);
+    else
+        uart_putc('a' + (nibble - 10));
+}
+uart_puts(" ");
+
+// Decode fault type for both instruction and data aborts
+if (fault_code == 0x7) { // Address size fault, level 0
+    uart_puts("(Address Size Fault)\n");
+} else if (fault_code == 0x9 || fault_code == 0xB) { // Translation/Permission faults, level 1
+    uart_puts("(Permission/Translation Fault - Level 1)\n");
+} else if (fault_code == 0x15 || fault_code == 0x17) { // Translation/Permission faults, level 2
+    uart_puts("(Permission/Translation Fault - Level 2)\n");
+} else {
+    uart_puts("(Unknown Fault Type)\n");
+    }
+    
+    // Terminate the user program by setting a return value of -1
+    uart_puts("[KERNEL] Terminating user program due to memory protection violation.\n");
+    tf->regs[0] = -1; // Return error code
+    
+    // Skip the faulting instruction by advancing ELR_EL1 to avoid infinite loop
+    tf->elr += 4;
   } else {
     // Unhandled Synchronous exception from EL0
     uart_puts("FATAL: Unhandled EL0 Synchronous Exception! EC: ");

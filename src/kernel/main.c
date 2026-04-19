@@ -3,6 +3,8 @@
 #include "fat16.h"
 #include "gic.h"
 #include "mmu.h"
+#include "trap.h"
+#include "program_loader.h"
 void virtio_blk_handle_irq(void);
 extern int virtio_blk_irq;
 
@@ -75,31 +77,20 @@ void main(void) {
     }
     uart_puts("FAT-16 filesystem successfully initialized.\n");
 
-    int fd = file_open("USER.BIN");
-    if (fd >= 0) {
-        uart_puts("Found USER.BIN, reading into User RAM...\n");
-        file_read(fd, (void*)0x44000000, 4096);
-        file_close(fd);
-        uart_puts("USER.BIN successfully copied. Dropping to User Space EL0...\n");
 
-        // Setup state for EL0 and jump out
-        __asm__ volatile(
-            // Set ELR_EL1 to the user entry point securely mapped in MMU
-            "mov x0, #0x44000000\n"
-            "msr elr_el1, x0\n"
-            // Set SPSR_EL1 to EL0t (M[3:0] = 0) with unmasked IRQ, FIQ internally
-            "mov x1, #0\n" 
-            "msr spsr_el1, x1\n"
-            // Set user stack pointer allocating 2MB page boundary
-            "mov x1, #0x44200000\n"
-            "msr sp_el0, x1\n"
-            // Clear state variables
-            "mov x0, #0\n"
-            "mov x1, #0\n"
-            "eret\n"
-        );
-    } else {
-        uart_puts("Failed to locate USER.BIN on disk image!\n");
+    // Load and execute the console tests program
+    if (load_and_run_program("CONSOLE_TEST.BIN") != 0) {
+        uart_puts("Failed to load and execute CONSOLE_TEST.BIN!\n");
+    }
+
+    // Load and execute the memory protection test program
+    if (load_and_run_program("MEM_TEST.BIN") != 0) {
+        uart_puts("Failed to load and execute MEM_TEST.BIN!\n");
+    }
+
+    // Load and execute the file i/o test program
+    if (load_and_run_program("FILE_TEST.BIN") != 0) {
+        uart_puts("Failed to load and execute FILE_TEST.BIN!\n");
     }
 
     uart_puts("System halt.\n");
