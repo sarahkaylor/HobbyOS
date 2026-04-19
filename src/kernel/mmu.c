@@ -55,12 +55,14 @@ void mmu_init(void) {
             
             if (addr >= 0x44000000 && addr <= 0x45FFFFFF) {
                 // User space: RW for user, no access for kernel
-                attr |= PT_USER_RW; 
-                attr |= (1ULL << 53); // PXN=1 (kernel cannot execute)
+                attr |= (0b01ULL << 6); // AP[2:1] = 01 (User RW, Kernel RW)
+                attr |= (1ULL << 53);   // PXN=1 (Privileged Execute Never)
+                // UXN=0 (Unprivileged Execute allowed)
             } else {
                 // Kernel space: RW for kernel, no access for user
-                attr |= PT_KERNEL_RW;
-                attr |= (1ULL << 54); // UXN=1 (user cannot execute)
+                attr |= (0b00ULL << 6); // AP[2:1] = 00 (Kernel RW, User None)
+                // PXN=0 so kernel can execute its own code
+                attr |= (1ULL << 54);   // UXN=1 (User cannot execute kernel pages)
             }
         } else {
             attr |= (1ULL << 54) | (1ULL << 53); // Device default fallback

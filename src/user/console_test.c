@@ -7,7 +7,7 @@ void _start(void) {
           "==============================\n");
 
     // Compute (delay)
-    for (volatile int i = 0; i < 20000000; i++) {}
+    for (volatile int i = 0; i < 2000000; i++) {}
 
     print("Computation finished. Exiting.\n");
 

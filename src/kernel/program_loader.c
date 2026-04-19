@@ -1,5 +1,8 @@
 #include "program_loader.h"
 #include "fat16.h"
+#include "setjmp.h"
+
+jmp_buf user_exit_context;
 
 // Default user program entry point address (as defined in MMU mappings)
 #define USER_PROGRAM_BASE 0x44000000
@@ -9,6 +12,8 @@
 #define MAX_PROGRAM_SIZE  0x10000
 
 extern void uart_puts(const char* s);
+extern void uart_putc(char c);
+extern void uart_print_hex(uint64_t val);
 
 int load_and_run_program(const char* filename) {
     uart_puts("Loading program: ");
@@ -29,10 +34,22 @@ int load_and_run_program(const char* filename) {
     uart_puts(filename);
     uart_puts(", reading into User RAM...\n");
     
-    if (file_read(fd, (void*)USER_PROGRAM_BASE, MAX_PROGRAM_SIZE) < 0) {
+    int bytes_read = file_read(fd, (void*)USER_PROGRAM_BASE, MAX_PROGRAM_SIZE);
+    if (bytes_read < 0) {
         uart_puts("Failed to read ");
         uart_puts(filename);
         uart_puts(" from disk!\n");
+        file_close(fd);
+        return -1;
+    }
+    
+    uart_puts("Read ");
+extern void print_int(int val); // Use existing function
+print_int(bytes_read); 
+uart_puts(" bytes from disk\n");
+
+    if (bytes_read <= 0) {
+        uart_puts("ERROR: Program is empty or failed to read. Aborting.\n");
         file_close(fd);
         return -1;
     }
@@ -42,28 +59,31 @@ int load_and_run_program(const char* filename) {
     uart_puts(filename);
     uart_puts(" successfully copied. Dropping to User Space EL0...\n");
 
-    // Setup state for EL0 and jump to user program
-    __asm__ volatile(
-        // Set ELR_EL1 to the user entry point securely mapped in MMU
-        "mov x0, %[entry]\n"
-        "msr elr_el1, x0\n"
-        // Set SPSR_EL1 to EL0t (M[3:0] = 0) with unmasked IRQ, FIQ internally
-        "mov x1, #0\n" 
-        "msr spsr_el1, x1\n"
-        // Set user stack pointer allocating 2MB page boundary
-        "mov x1, %[stack]\n"
-        "msr sp_el0, x1\n"
-        // Clear state variables
-        "mov x0, #0\n"
-        "mov x1, #0\n"
-        : // No outputs
-        : [entry] "i" (USER_PROGRAM_BASE),
-          [stack]  "i" (USER_STACK_BASE)
-        : "x0", "x1", "memory"
-    );
+    if (setjmp(user_exit_context) != 0) {
+        // We returned here via longjmp (from a syscall or fault)
+        return 0;
+    }
 
-    // Execute the user program (this instruction never returns)
-    __asm__ volatile("eret");
+    uart_puts("Setting up EL0 state...\n");
+    uart_puts("SPSR value: 0x0 (EL0t)\n");
+
+    // Setup state for EL0 and jump to user program
+    // We must do this in a single block and disable interrupts to prevent 
+    // ELR_EL1/SPSR_EL1 from being overwritten by an IRQ during the transition.
+    __asm__ volatile(
+        "msr daifset, #2\n"       // Disable IRQ in EL1
+        "msr elr_el1, %[entry]\n" // Set user entry point
+        "mov x2, #0\n"             // EL0t with DAIF bits cleared (in the SPSR)
+        "msr spsr_el1, x2\n"
+        "msr sp_el0, %[stack]\n"   // Set user stack pointer
+        "mov x0, #0\n"             // Clear x0 for the user program (it becomes EL0's x0)
+        "mov x1, #0\n"             // Clear x1
+        "eret\n"
+        : // No outputs
+        : [entry] "r" ((long)USER_PROGRAM_BASE),
+          [stack] "r" ((long)USER_STACK_BASE)
+        : "x0", "x1", "x2", "memory"
+    );
 
     // This point should never be reached
     return -1;

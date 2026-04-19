@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^pkill -9 qemu-system-aarch64 && cd /Users/sarah/Documents/GitHub/HobbyOS && make run$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

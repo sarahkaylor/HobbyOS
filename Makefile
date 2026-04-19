@@ -86,9 +86,9 @@ $(CONSOLE_TEST_BIN): obj/console_test.o obj/user_libc.o
 disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN)
 	dd if=/dev/zero of=disk.img bs=1M count=512
 	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img 
-	/opt/homebrew/bin/mcopy -i disk.img $(MEM_TEST_BIN) ::/MEM_TEST.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(FILE_IO_BIN) ::/FILE_TEST.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(CONSOLE_TEST_BIN) ::/CONSOLE_TEST.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(MEM_TEST_BIN) ::/MEMTEST.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(FILE_IO_BIN) ::/FILEIO.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(CONSOLE_TEST_BIN) ::/CONSOLE.BIN
 
 # Target to run the OS inside QEMU
 run: disk.img

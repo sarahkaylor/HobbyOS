@@ -52,19 +52,22 @@ vectors:
     // Current EL with SPx (EL1 taking an exception from EL1)
     // Offset 0x200: Synchronous Exceptions (e.g. Unaligned Data Abort, Instruction Abort)
     .align 7
-    b .
+    b kernel_sync_wrapper
     // Offset 0x280: IRQ (Hardware Interrupts)
     .align 7
     b irq_wrapper
     // Offset 0x300: FIQ
     .align 7
     b .
+    // Offset 0x380: SError
     .align 7
     b .
-
+ 
     // Lower EL AArch64 (EL0 to EL1 traps)
+    // Offset 0x400: Synchronous
     .align 7
     b sync_lower_wrapper
+    // Offset 0x480: IRQ
     .align 7
     b irq_lower_wrapper
     .align 7
@@ -225,3 +228,38 @@ irq_lower_wrapper:
     ldp x0, x1, [sp, #0]
     add sp, sp, #272
     eret
+
+    // Lower EL A64 SError
+    .align 7
+    b .
+
+    // Lower EL AArch32 (offset 0x600)
+    .align 7
+    b .
+    .align 7
+    b .
+    .align 7
+    b .
+    .align 7
+    b .
+
+kernel_sync_wrapper:
+    // Simple hang with message to diagnose kernel-level crashes
+    ldr x0, =kernel_fault_msg
+    bl uart_puts
+    mrs x0, esr_el1
+    bl uart_print_hex
+    ldr x0, =kernel_far_msg
+    bl uart_puts
+    mrs x0, far_el1
+    bl uart_print_hex
+    b .
+
+kernel_fault_msg: 
+    .string "\n[KERNEL] FATAL: Synchronous Exception in EL1! ESR: "
+    .align 3
+kernel_far_msg:
+    .string ", FAR: "
+    .align 3
+
+

@@ -45,6 +45,8 @@ static int match_name(const char* fat_name, const char* query) {
     for (int i = 0; i < 11; i++) formatted[i] = ' ';
     int i = 0, j = 0;
     while (query[i] && query[i] != '.' && j < 8) formatted[j++] = query[i++];
+    // Skip any characters in the query name that exceed the 8-character limit
+    while (query[i] && query[i] != '.') i++;
     if (query[i] == '.') {
         i++; j = 8;
         while (query[i] && j < 11) formatted[j++] = query[i++];
@@ -140,20 +142,15 @@ static uint16_t alloc_cluster(void) {
 
 int file_open(const char* filename) {
     uint8_t buf[SECTOR_SIZE];
-    int empty_found = 0;
-    uint32_t empty_sec = 0;
-    uint32_t empty_off = 0;
 
     for (uint32_t i = 0; i < root_dir_sectors; i++) {
         virtio_blk_read_sector(root_dir_sector + i, buf, 1);
         struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
         for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
             if (entries[j].name[0] == 0x00) { // End of dir
-                if (!empty_found) { empty_found = 1; empty_sec = root_dir_sector + i; empty_off = j; }
                 break; 
             }
             if (entries[j].name[0] == (char)0xE5) { // Deleted
-                if (!empty_found) { empty_found = 1; empty_sec = root_dir_sector + i; empty_off = j; }
                 continue;
             }
             if (match_name(entries[j].name, filename)) {
@@ -164,45 +161,22 @@ int file_open(const char* filename) {
                         open_files[fd].dir_sector = root_dir_sector + i;
                         open_files[fd].dir_offset = j;
                         open_files[fd].cursor = 0;
+                        
+                        // Debug: Print file info
+                        uart_puts("Opened file: ");
+                        uart_puts(filename);
+                        uart_puts(", size=");
+                        extern void print_int(int val);
+                        print_int(entries[j].file_size);
+                        uart_puts(", start_cluster=");
+                        print_int(entries[j].start_cluster);
+                        uart_puts("\n");
+                        
                         return fd;
                     }
                 }
                 return -1; // Max open files
             }
-        }
-    }
-    
-    // File not found. Create it if space found
-    if (!empty_found) return -1;
-    
-    for (int fd = 0; fd < MAX_OPEN_FILES; fd++) {
-        if (!open_files[fd].active) {
-            virtio_blk_read_sector(empty_sec, buf, 1);
-            struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
-            
-            // Format name explicitly
-            char formatted[11];
-            for (int k = 0; k < 11; k++) formatted[k] = ' ';
-            int p = 0, q = 0;
-            while (filename[p] && filename[p] != '.' && q < 8) formatted[q++] = filename[p++];
-            if (filename[p] == '.') {
-                p++; q = 8;
-                while (filename[p] && q < 11) formatted[q++] = filename[p++];
-            }
-            for (int k = 0; k < 11; k++) entries[empty_off].name[k] = formatted[k] >= 'a' && formatted[k] <= 'z' ? formatted[k] - 32 : formatted[k];
-            
-            entries[empty_off].attr = 0;
-            entries[empty_off].start_cluster = 0;
-            entries[empty_off].file_size = 0;
-            
-            virtio_blk_write_sector(empty_sec, buf, 1);
-            
-            open_files[fd].active = 1;
-            open_files[fd].entry = entries[empty_off];
-            open_files[fd].dir_sector = empty_sec;
-            open_files[fd].dir_offset = empty_off;
-            open_files[fd].cursor = 0;
-            return fd;
         }
     }
     return -1;
