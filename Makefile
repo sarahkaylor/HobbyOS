@@ -102,7 +102,7 @@ disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TE
 
 # Target to run the OS inside QEMU
 run: disk.img
-	$(QEMU) -M virt -cpu cortex-a53 -m 128M -kernel $(TARGET) -nographic -append "console=ttyAMA0" -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0
+	$(QEMU) -M virt -cpu cortex-a53 -m 128M -kernel $(TARGET) -nographic -append "console=ttyAMA0" -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -semihosting -action shutdown=poweroff
 
 # Target to exit QEMU properly
 # Note: Ctrl+A, X exists QEMU nographic mode.

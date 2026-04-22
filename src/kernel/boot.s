@@ -30,7 +30,30 @@ run_main:
     bl      main
 
 halt:
-    // Infinite loop, wait for interrupt
+    // Shut down QEMU using semihosting SYS_EXIT call.
+    // On AArch64, the semihosting trap instruction is HLT #0xF000.
+    // x0 = operation number: 0x18 = SYS_EXIT_EXTENDED
+    // x1 = parameter block pointer (exit reason)
+    // We use a two-word block on the stack:
+    //   [sp]     = exit reason code 0x20026 (ADP_ExitReason_ApplicationExit + ADP_Stop_NoError)
+    //   [sp + 8] = sub-code 0
+    sub     sp, sp, #16
+    mov     x1, #0x0026              // ADP_ExitReason_ApplicationExit
+    orr     x1, x1, #0x20000         // Combined with ADP_Stop_NoError
+    str     x1, [sp, #0]
+    str     xzr, [sp, #8]
+    ldr     x0, =0x18                // SYS_EXIT_EXTENDED operation
+    mov     x1, sp                   // Parameter block pointer
+    hlt     #0xF000                  // AArch64 semihosting trap
+    
+    // If semihosting is not enabled, fall back to PSCI SYSTEM_OFF
+    ldr     x0, =0xc4000008          // PSCI SYSTEM_OFF function ID (SMC64)
+    mov     x1, #0
+    mov     x2, #0
+    mov     x3, #0
+    smc     #0                       // Secure monitor call
+    
+    // Last resort: infinite loop
     wfi
     b       halt
 
