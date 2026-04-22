@@ -38,20 +38,20 @@ void mmu_init(void) {
     l1_table[1] = ((uint64_t)&l2_table_1) | 0b11;
 
     // 4. Populate L2 Tables
-    // L2 Table 0 covers 0x00000000 - 0x3FFFFFFF
-    for (int i = 0; i < 512; i++) {
+    // L2 Table 0 covers KERNEL_START - KERNEL_END
+    for (int i = 0; i < PAGES_PER_REGION; i++) {
         uint64_t addr = (uint64_t)i * USER_REGION_SIZE;
         uint64_t attr = (PT_MEM_DEVICE << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
         attr |= (1ULL << 54) | (1ULL << 53); // UXN and PXN
         l2_table_0[i] = addr | attr;
     }
 
-    // L2 Table 1 covers 0x40000000 - 0x7FFFFFFF (RAM)
-    for (int i = 0; i < 512; i++) {
-        uint64_t addr = 0x40000000 + (uint64_t)i * USER_REGION_SIZE;
+    // L2 Table 1 covers USER_START - 0x7FFFFFFF (RAM)
+    for (int i = 0; i < PAGES_PER_REGION; i++) {
+        uint64_t addr = USER_START + (uint64_t)i * USER_REGION_SIZE;
         uint64_t attr = (PT_MEM_DEVICE << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
         
-        if (addr >= 0x40000000 && addr <= 0x47FFFFFF) {
+        if (addr >= USER_START && addr <= 0x47FFFFFF) {
             attr = (PT_MEM_NORMAL << 2) | (1 << 10) | 0b01;
             
             if (addr >= USER_VIRT_BASE && addr <= (USER_VIRT_BASE + USER_REGION_SIZE - 1)) {
@@ -111,8 +111,8 @@ uint64_t mmu_make_user_block_desc(uint64_t phys_addr) {
 }
 
 void mmu_switch_user_mapping(uint64_t phys_base) {
-    // The user virtual address USER_VIRT_BASE falls in L1 index 1 (0x40000000-0x7FFFFFFF),
-    // L2 index 32 (USER_VIRT_BASE / USER_REGION_SIZE - 0x40000000 / USER_REGION_SIZE = 32).
+    // The user virtual address USER_VIRT_BASE falls in L1 index 1 (USER_START-USER_END),
+    // L2 index 32 (USER_VIRT_BASE / USER_REGION_SIZE - USER_START / USER_REGION_SIZE = 32).
     // Rewrite that single L2 entry to map to the new physical base.
     l2_table_1[32] = mmu_make_user_block_desc(phys_base);
 

@@ -1,8 +1,5 @@
 #include "gic.h"
-
-// QEMU virt machine GICv2 addresses
-#define GICD_BASE 0x08000000
-#define GICC_BASE 0x08010000
+#include "process.h"
 
 // Distributor Registers
 #define GICD_CTLR         0x000

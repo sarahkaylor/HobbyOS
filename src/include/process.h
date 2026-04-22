@@ -13,16 +13,33 @@
 #define PROC_STATE_RUNNING  2
 #define PROC_STATE_EXITED   3
 
-// Per-process user memory: 2MB region
+#define KERNEL_START        0x00000000
+#define KERNEL_END          0x3FFFFFFF
+
+#define USER_START          0x40000000
+#define USER_END            0x7FFFFFFF
+
+// Page size = 4kb = 0x1000
+#define PAGE_SIZE           0x1000
+
+// Region size memory: 2MB regions for program text
 #define USER_REGION_SIZE    0x200000
+
+// 512 pages per region of size 4k = 2MB
+#define PAGES_PER_REGION   ((USER_REGION_SIZE) / (PAGE_SIZE))
 
 // Virtual address where every process sees its own code/data (identity across all)
 #define USER_VIRT_BASE      0x44000000
-#define USER_VIRT_STACK     (USER_VIRT_BASE + USER_REGION_SIZE)
+// Stack is on the other side
+#define USER_VIRT_STACK     ((USER_VIRT_BASE) + (PAGES_PER_REGION))
 
-// Physical base for dynamically allocated process memory regions
+// Physical base for dynamically allocated process memory regions (heap)
 // Starts above the existing static user region (0x44000000–0x45FFFFFF)
 #define PROC_PHYS_POOL_BASE 0x46000000
+
+// QEMU virt machine GICv2 addresses
+#define GICD_BASE 0x08000000
+#define GICC_BASE 0x08010000
 
 struct process {
     int pid;

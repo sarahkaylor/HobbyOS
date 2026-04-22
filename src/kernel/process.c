@@ -17,6 +17,8 @@ static uint64_t next_phys_alloc = PROC_PHYS_POOL_BASE;
 // Helper: byte-by-byte memory copy (no libc available, avoids SIMD issues)
 // ---------------------------------------------------------------------------
 static void kmemcpy(void *dst, const void *src, uint64_t n) {
+    // we're literally copying memory rather than doing copy-on-write here
+    // keep it simple for now
     volatile uint8_t *d = (volatile uint8_t *)dst;
     volatile const uint8_t *s = (volatile const uint8_t *)src;
     for (uint64_t i = 0; i < n; i++) {
