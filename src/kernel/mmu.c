@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include "mmu.h"
+#include "process.h"
 
 // 4KB Table Arrays
 uint64_t l1_table[512] __attribute__((aligned(4096)));
@@ -39,7 +40,7 @@ void mmu_init(void) {
     // 4. Populate L2 Tables
     // L2 Table 0 covers 0x00000000 - 0x3FFFFFFF
     for (int i = 0; i < 512; i++) {
-        uint64_t addr = (uint64_t)i * 0x200000;
+        uint64_t addr = (uint64_t)i * USER_REGION_SIZE;
         uint64_t attr = (PT_MEM_DEVICE << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
         attr |= (1ULL << 54) | (1ULL << 53); // UXN and PXN
         l2_table_0[i] = addr | attr;
@@ -47,13 +48,13 @@ void mmu_init(void) {
 
     // L2 Table 1 covers 0x40000000 - 0x7FFFFFFF (RAM)
     for (int i = 0; i < 512; i++) {
-        uint64_t addr = 0x40000000 + (uint64_t)i * 0x200000;
+        uint64_t addr = 0x40000000 + (uint64_t)i * USER_REGION_SIZE;
         uint64_t attr = (PT_MEM_DEVICE << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
         
         if (addr >= 0x40000000 && addr <= 0x47FFFFFF) {
             attr = (PT_MEM_NORMAL << 2) | (1 << 10) | 0b01;
             
-            if (addr >= 0x44000000 && addr <= 0x45FFFFFF) {
+            if (addr >= USER_VIRT_BASE && addr <= (USER_VIRT_BASE + USER_REGION_SIZE - 1)) {
                 // User space: RW for user, no access for kernel
                 attr |= (0b01ULL << 6); // AP[2:1] = 01 (User RW, Kernel RW)
                 attr |= (1ULL << 53);   // PXN=1 (Privileged Execute Never)
@@ -100,7 +101,7 @@ void mmu_init(void) {
 
 uint64_t mmu_make_user_block_desc(uint64_t phys_addr) {
     // Build a 2MB block descriptor matching the user-space attributes
-    // used in mmu_init() for the 0x44000000 range:
+    // used in mmu_init() for the USER_VIRT_BASE range:
     //   Normal Non-Cacheable, AP=01 (User RW), PXN=1, UXN=0, AF=1
     uint64_t attr = (PT_MEM_NORMAL << 2) | (1 << 10) | 0b01; // AttrIdx=1, AF, Block
     attr |= (0b01ULL << 6);   // AP[2:1] = 01 (User RW, Kernel RW)
@@ -110,8 +111,8 @@ uint64_t mmu_make_user_block_desc(uint64_t phys_addr) {
 }
 
 void mmu_switch_user_mapping(uint64_t phys_base) {
-    // The user virtual address 0x44000000 falls in L1 index 1 (0x40000000-0x7FFFFFFF),
-    // L2 index 32 (0x44000000 / 0x200000 - 0x40000000 / 0x200000 = 32).
+    // The user virtual address USER_VIRT_BASE falls in L1 index 1 (0x40000000-0x7FFFFFFF),
+    // L2 index 32 (USER_VIRT_BASE / USER_REGION_SIZE - 0x40000000 / USER_REGION_SIZE = 32).
     // Rewrite that single L2 entry to map to the new physical base.
     l2_table_1[32] = mmu_make_user_block_desc(phys_base);
 

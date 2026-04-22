@@ -5,10 +5,6 @@
 
 jmp_buf user_exit_context;
 
-// Default user program entry point address (as defined in MMU mappings)
-#define USER_PROGRAM_BASE 0x44000000
-// User stack pointer address (2MB after program base)
-#define USER_STACK_BASE   0x44200000
 // Maximum size of user program we can load (64KB)
 #define MAX_PROGRAM_SIZE  0x10000
 
@@ -35,7 +31,7 @@ int load_and_run_program(const char* filename) {
     uart_puts(filename);
     uart_puts(", reading into User RAM...\n");
     
-    int bytes_read = file_read(fd, (void*)USER_PROGRAM_BASE, MAX_PROGRAM_SIZE);
+    int bytes_read = file_read(fd, (void*)USER_VIRT_BASE, MAX_PROGRAM_SIZE);
     if (bytes_read < 0) {
         uart_puts("Failed to read ");
         uart_puts(filename);
@@ -84,8 +80,8 @@ uart_puts(" bytes from disk\n");
         "mov x1, #0\n"             // Clear x1
         "eret\n"
         : // No outputs
-        : [entry] "r" ((long)USER_PROGRAM_BASE),
-          [stack] "r" ((long)USER_STACK_BASE)
+        : [entry] "r" ((long)USER_VIRT_BASE),
+          [stack] "r" ((long)(USER_VIRT_BASE + USER_REGION_SIZE))
         : "x0", "x1", "x2", "memory"
     );
 
@@ -101,10 +97,10 @@ int load_program_to_memory(const char* filename, void** buffer) {
 
     // For now, we'll just load to the standard user program area
     if (buffer) {
-        *buffer = (void*)USER_PROGRAM_BASE;
+        *buffer = (void*)USER_VIRT_BASE;
     }
 
-    if (file_read(fd, (void*)USER_PROGRAM_BASE, MAX_PROGRAM_SIZE) < 0) {
+    if (file_read(fd, (void*)USER_VIRT_BASE, MAX_PROGRAM_SIZE) < 0) {
         file_close(fd);
         return -1;
     }
@@ -160,9 +156,9 @@ int load_and_run_program_in_scheduler(const char* filename) {
     file_close(fd);
 
     // Set up the initial context for this process:
-    // ELR = 0x44000000 (virtual entry point, same for all processes)
+    // ELR = USER_VIRT_BASE (virtual entry point, same for all processes)
     // SP_EL0 = top of the 2MB virtual region
-    process_set_entry(pid, USER_PROGRAM_BASE, USER_STACK_BASE);
+    process_set_entry(pid, USER_VIRT_BASE, USER_VIRT_BASE + USER_REGION_SIZE);
 
     return pid;
 }

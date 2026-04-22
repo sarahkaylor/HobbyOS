@@ -38,10 +38,9 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     if (syscall_num == SYS_WRITE) {
       // SYS_WRITE
       // tf->regs[0] contains the pointer to the string
-      // We should ensure the pointer is within User space (e.g. 0x44000000
-      // range)
+      // We should ensure the pointer is within User space (USER_VIRT_BASE range)
       uint64_t ptr = tf->regs[0];
-      if (ptr >= 0x44000000 && ptr < 0x48000000) {
+      if (ptr >= USER_VIRT_BASE && ptr < (USER_VIRT_BASE + USER_REGION_SIZE)) {
         uart_puts((const char *)ptr);
       } else {
         uart_puts("Kernel: Blocked SYS_WRITE pointer out of bounds\n");
