@@ -30,6 +30,7 @@ USER_LIBC = src/user/libc.c
 MEM_TEST_BIN = memtest.bin
 FILE_IO_BIN = fileio_test.bin
 CONSOLE_TEST_BIN = console_test.bin
+FORK_TEST_BIN = fork_test.bin
 
 # Default rule: build the target
 all: $(TARGET)
@@ -70,6 +71,10 @@ obj/console_test.o: src/user/console_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
+obj/fork_test.o: src/user/fork_test.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
 $(MEM_TEST_BIN): obj/mem_test.o obj/user_libc.o
 	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o memtest.elf $^
 	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary memtest.elf $(MEM_TEST_BIN)
@@ -82,13 +87,18 @@ $(CONSOLE_TEST_BIN): obj/console_test.o obj/user_libc.o
 	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o console_test.elf $^
 	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary console_test.elf $(CONSOLE_TEST_BIN)
 
+$(FORK_TEST_BIN): obj/fork_test.o obj/user_libc.o
+	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o fork_test.elf $^
+	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary fork_test.elf $(FORK_TEST_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN)
+
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN)
 	dd if=/dev/zero of=disk.img bs=1M count=512
 	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img 
 	/opt/homebrew/bin/mcopy -i disk.img $(MEM_TEST_BIN) ::/MEMTEST.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(FILE_IO_BIN) ::/FILEIO.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(CONSOLE_TEST_BIN) ::/CONSOLE.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(FORK_TEST_BIN) ::/FORKTEST.BIN
 
 # Target to run the OS inside QEMU
 run: disk.img
@@ -99,13 +109,15 @@ run: disk.img
 
 # Clean rule to remove build artifacts
 clean:
-	rm -rf $(OBJ_DIR) $(TARGET) hobbyos disk.img memtest.elf fileio_test.elf $(MEM_TEST_BIN) $(FILE_IO_BIN)
+	rm -rf $(OBJ_DIR) $(TARGET) hobbyos disk.img memtest.elf fileio_test.elf fork_test.elf $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN)
 
 memtest: $(MEM_TEST_BIN)
 
 fileio_test: $(FILE_IO_BIN) 
 
-tests: memtest fileio_test
-	@echo "Both test programs compiled"
+fork_test: $(FORK_TEST_BIN)
 
-.PHONY: all clean run memtest fileio_test tests
+tests: memtest fileio_test fork_test
+	@echo "All test programs compiled"
+
+.PHONY: all clean run memtest fileio_test fork_test tests

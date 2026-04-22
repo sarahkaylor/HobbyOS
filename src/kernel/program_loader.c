@@ -1,6 +1,7 @@
 #include "program_loader.h"
 #include "fat16.h"
 #include "setjmp.h"
+#include "process.h"
 
 jmp_buf user_exit_context;
 
@@ -110,4 +111,58 @@ int load_program_to_memory(const char* filename, void** buffer) {
 
     file_close(fd);
     return 0;
+}
+
+int load_and_run_program_in_scheduler(const char* filename) {
+    uart_puts("Loading program for scheduler: ");
+    uart_puts(filename);
+    uart_puts("\n");
+
+    // Open the file from disk
+    int fd = file_open(filename);
+    if (fd < 0) {
+        uart_puts("Failed to locate ");
+        uart_puts(filename);
+        uart_puts(" on disk image!\n");
+        return -1;
+    }
+
+    // Create a new process (allocates PID and physical memory)
+    int pid = process_create();
+    if (pid < 0) {
+        uart_puts("Failed to create process for ");
+        uart_puts(filename);
+        uart_puts("!\n");
+        file_close(fd);
+        return -1;
+    }
+
+    // Read the binary directly into the process's physical memory region.
+    // The kernel has identity mapping so we can write to the physical address directly.
+    uint64_t phys_base = process_get_phys_base(pid);
+
+    int bytes_read = file_read(fd, (void*)phys_base, MAX_PROGRAM_SIZE);
+    if (bytes_read < 0) {
+        uart_puts("Failed to read ");
+        uart_puts(filename);
+        uart_puts(" from disk!\n");
+        file_close(fd);
+        return -1;
+    }
+
+    extern void print_int(int val);
+    uart_puts("Read ");
+    print_int(bytes_read);
+    uart_puts(" bytes for PID=");
+    print_int(pid);
+    uart_puts("\n");
+
+    file_close(fd);
+
+    // Set up the initial context for this process:
+    // ELR = 0x44000000 (virtual entry point, same for all processes)
+    // SP_EL0 = top of the 2MB virtual region
+    process_set_entry(pid, USER_PROGRAM_BASE, USER_STACK_BASE);
+
+    return pid;
 }

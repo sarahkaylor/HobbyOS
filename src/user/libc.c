@@ -1,7 +1,8 @@
 #include "libc.h"
 
 #define SYS_WRITE (1)
-#define SYS_EXIT (2)
+#define SYS_EXIT  (2)
+#define SYS_FORK  (3)
 
 static inline long syscall1(long sys_num, long arg0) {
   register long x8 __asm__("x8") = sys_num;
@@ -23,4 +24,8 @@ void exit(void) {
   syscall0(SYS_EXIT);
   while (1)
     ; // Wait for the kernel to halt us safely
+}
+
+int fork(void) {
+  return (int)syscall0(SYS_FORK);
 }

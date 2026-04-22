@@ -2,6 +2,8 @@
 #include "gic.h"
 #include "mmu.h"
 #include "program_loader.h"
+#include "process.h"
+#include "timer.h"
 #include "trap.h"
 #include "virtio_blk.h"
 #include <stdint.h>
@@ -14,6 +16,10 @@ void irq_handler_c(void) {
   // VirtIO Block IRQ for located slot on virt machine
   if (intid == (uint32_t)virtio_blk_irq) {
     virtio_blk_handle_irq();
+  } else if (intid == 30) {
+    // Timer PPI — just reload when taken from EL1
+    // (Scheduling only happens for EL0 interrupts via irq_lower_handler_c)
+    timer_reload();
   }
 
   gic_end_interrupt(intid);
@@ -96,7 +102,7 @@ void main(void) {
   }
   uart_puts("FAT-16 filesystem successfully initialized.\n");
 
-  // Load and execute the console tests program
+  // Load and execute the console tests program (legacy sequential mode)
   if (load_and_run_program("CONSOLE.BIN") != 0) {
     uart_puts("Failed to load and execute CONSOLE.BIN!\n");
   } else {
@@ -115,6 +121,26 @@ void main(void) {
     uart_puts("Failed to load and execute FILEIO.BIN!\n");
   } else {
     uart_puts("FILEIO.BIN executed successfully.\n");
+  }
+
+  // -----------------------------------------------------------------------
+  // Multitasking: Initialize the scheduler, load the fork test, and start
+  // -----------------------------------------------------------------------
+  uart_puts("\n--- Multitasking Subsystem ---\n");
+
+  process_init();
+
+  // Load the fork test program into the scheduler
+  if (load_and_run_program_in_scheduler("FORKTEST.BIN") < 0) {
+    uart_puts("Failed to load FORKTEST.BIN for scheduler!\n");
+  } else {
+    // Enable the timer PPI (INTID 30) for preemptive scheduling
+    gic_enable_interrupt(30);
+    timer_init();
+
+    // Start the scheduler — this will eret into the first process.
+    // Returns when all processes have exited.
+    start_scheduler();
   }
 
   uart_puts("System halt.\n");

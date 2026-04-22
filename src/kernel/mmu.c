@@ -2,9 +2,9 @@
 #include "mmu.h"
 
 // 4KB Table Arrays
-static uint64_t l1_table[512] __attribute__((aligned(4096)));
+uint64_t l1_table[512] __attribute__((aligned(4096)));
 static uint64_t l2_table_0[512] __attribute__((aligned(4096)));
-static uint64_t l2_table_1[512] __attribute__((aligned(4096)));
+uint64_t l2_table_1[512] __attribute__((aligned(4096)));
 
 #define MAIR_DEVICE_nGnRnE  0x00
 #define MAIR_NORMAL_NC      0x44  // Normal Non-Cacheable (avoids explicit flushes)
@@ -96,4 +96,30 @@ void mmu_init(void) {
     
     // Sync
     __asm__ volatile("isb");
+}
+
+uint64_t mmu_make_user_block_desc(uint64_t phys_addr) {
+    // Build a 2MB block descriptor matching the user-space attributes
+    // used in mmu_init() for the 0x44000000 range:
+    //   Normal Non-Cacheable, AP=01 (User RW), PXN=1, UXN=0, AF=1
+    uint64_t attr = (PT_MEM_NORMAL << 2) | (1 << 10) | 0b01; // AttrIdx=1, AF, Block
+    attr |= (0b01ULL << 6);   // AP[2:1] = 01 (User RW, Kernel RW)
+    attr |= (1ULL << 53);     // PXN=1 (Privileged Execute Never)
+    // UXN=0 (User can execute)
+    return phys_addr | attr;
+}
+
+void mmu_switch_user_mapping(uint64_t phys_base) {
+    // The user virtual address 0x44000000 falls in L1 index 1 (0x40000000-0x7FFFFFFF),
+    // L2 index 32 (0x44000000 / 0x200000 - 0x40000000 / 0x200000 = 32).
+    // Rewrite that single L2 entry to map to the new physical base.
+    l2_table_1[32] = mmu_make_user_block_desc(phys_base);
+
+    // Invalidate TLB and synchronize
+    __asm__ volatile(
+        "dsb sy\n"
+        "tlbi vmalle1\n"
+        "dsb sy\n"
+        "isb\n"
+    );
 }

@@ -3,5 +3,6 @@
 
 void print(const char* str);
 void exit(void);
+int fork(void);
 
 #endif

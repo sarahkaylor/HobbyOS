@@ -1,6 +1,8 @@
 #include "trap.h"
 #include <stdint.h>
 #include "setjmp.h"
+#include "process.h"
+#include "timer.h"
 
 extern jmp_buf user_exit_context;
 
@@ -9,11 +11,16 @@ extern void uart_puts(const char *s);
 extern void uart_putc(char c);
 extern void gic_enable_interrupt(uint32_t intid);
 extern uint32_t gic_acknowledge_interrupt(void);
+extern void gic_end_interrupt(uint32_t intid);
 extern void virtio_blk_handle_irq(void);
 extern uint32_t virtio_blk_irq;
 
 #define SYS_WRITE (1)
-#define SYS_EXIT (2)
+#define SYS_EXIT  (2)
+#define SYS_FORK  (3)
+
+// Timer PPI interrupt ID on QEMU virt (non-secure physical timer)
+#define TIMER_PPI_INTID 30
 
 extern void uart_print_hex(uint64_t val);
 
@@ -39,11 +46,24 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       } else {
         uart_puts("Kernel: Blocked SYS_WRITE pointer out of bounds\n");
       }
-      tf->elr += 4;   // Skip the svc instruction
       tf->regs[0] = 0; // Return success
     } else if (syscall_num == SYS_EXIT) {
-      // SYS_EXIT
-      longjmp(user_exit_context, 1);
+      // SYS_EXIT — check if we're running under the scheduler
+      struct process *cur = current_process();
+      if (cur && cur->state == PROC_STATE_RUNNING) {
+        // Running under the scheduler: mark exited and schedule next
+        process_exit(tf);
+        // tf has been updated by schedule() — the eret path will switch to
+        // the next process. We need to reload the timer too.
+        timer_reload();
+      } else {
+        // Legacy sequential mode: longjmp back to load_and_run_program
+        longjmp(user_exit_context, 1);
+      }
+    } else if (syscall_num == SYS_FORK) {
+      // SYS_FORK — duplicate the current process
+      int child_pid = process_fork(tf);
+      tf->regs[0] = (uint64_t)child_pid; // Return child PID to parent
     } else {
       uart_puts("Unknown System Call Invoked!\n");
       tf->regs[0] = -1; // Return error
@@ -68,9 +88,19 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     uart_print_hex(esr);
     uart_puts("\n");
 
-    // Terminate the user program by longjumping back to the loader
-    uart_puts("[KERNEL] Terminating user program due to memory protection violation.\n");
-    longjmp(user_exit_context, 1);
+    // Terminate the user program
+    struct process *cur = current_process();
+    if (cur && cur->state == PROC_STATE_RUNNING) {
+      uart_puts("[KERNEL] Terminating process PID=");
+      extern void print_int(int val);
+      print_int(cur->pid);
+      uart_puts(" due to memory protection violation.\n");
+      process_exit(tf);
+      timer_reload();
+    } else {
+      uart_puts("[KERNEL] Terminating user program due to memory protection violation.\n");
+      longjmp(user_exit_context, 1);
+    }
   } else {
     // Unhandled Synchronous exception from EL0
     uart_puts("\n[KERNEL] FATAL: Unhandled EL0 Synchronous Exception!\n");
@@ -87,10 +117,22 @@ void sync_lower_handler_c(struct trap_frame *tf) {
 }
 
 void irq_lower_handler_c(struct trap_frame *tf) {
-  (void)tf; // We don't dynamically alter trap state on an IRQ natively
-
   uint32_t intid = gic_acknowledge_interrupt();
-  if (intid == virtio_blk_irq) {
+
+  if (intid == TIMER_PPI_INTID) {
+    // Timer tick — perform a context switch if the scheduler is active
+    struct process *cur = current_process();
+    if (cur) {
+      timer_reload();
+      gic_end_interrupt(intid);
+      schedule(tf);
+      return;
+    }
+    // Not under scheduler — just reload and continue
+    timer_reload();
+  } else if (intid == virtio_blk_irq) {
     virtio_blk_handle_irq();
   }
+
+  gic_end_interrupt(intid);
 }
