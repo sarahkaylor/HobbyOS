@@ -123,6 +123,13 @@ void main(void) {
     uart_puts("FILEIO.BIN executed successfully.\n");
   }
 
+  // Load and execute the heap test program
+  if (load_and_run_program("HEAPTEST.BIN") != 0) {
+    uart_puts("Failed to load and execute HEAPTEST.BIN!\n");
+  } else {
+    uart_puts("HEAPTEST.BIN executed successfully.\n");
+  }
+
   // -----------------------------------------------------------------------
   // Multitasking: Initialize the scheduler, load the fork test, and start
   // -----------------------------------------------------------------------

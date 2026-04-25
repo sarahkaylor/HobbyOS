@@ -17,19 +17,31 @@ static uint64_t next_phys_alloc = PROC_PHYS_POOL_BASE;
 // Helper: byte-by-byte memory copy (no libc available, avoids SIMD issues)
 // ---------------------------------------------------------------------------
 static void kmemcpy(void *dst, const void *src, uint64_t n) {
-    // we're literally copying memory rather than doing copy-on-write here
-    // keep it simple for now
-    volatile uint8_t *d = (volatile uint8_t *)dst;
-    volatile const uint8_t *s = (volatile const uint8_t *)src;
-    for (uint64_t i = 0; i < n; i++) {
+    uint64_t *d = (uint64_t *)dst;
+    const uint64_t *s = (const uint64_t *)src;
+    uint64_t i = 0;
+    for (; i < n / 8; i++) {
         d[i] = s[i];
+    }
+    uint8_t *d8 = (uint8_t *)dst;
+    const uint8_t *s8 = (const uint8_t *)src;
+    for (uint64_t j = i * 8; j < n; j++) {
+        d8[j] = s8[j];
     }
 }
 
 static void kmemset(void *dst, uint8_t val, uint64_t n) {
-    volatile uint8_t *d = (volatile uint8_t *)dst;
-    for (uint64_t i = 0; i < n; i++) {
-        d[i] = val;
+    uint64_t v64 = 0;
+    for (int i = 0; i < 8; i++) v64 |= ((uint64_t)val << (i * 8));
+    
+    uint64_t *d = (uint64_t *)dst;
+    uint64_t i = 0;
+    for (; i < n / 8; i++) {
+        d[i] = v64;
+    }
+    uint8_t *d8 = (uint8_t *)dst;
+    for (uint64_t j = i * 8; j < n; j++) {
+        d8[j] = val;
     }
 }
 
@@ -91,9 +103,10 @@ int process_create(void) {
     p->num_open_fds = 0;
 
     // Allocate a 2MB-aligned physical region for user memory
-    // Ensure alignment
-    if (next_phys_alloc & (USER_REGION_SIZE - 1)) {
-        next_phys_alloc = (next_phys_alloc + USER_REGION_SIZE - 1) & ~(USER_REGION_SIZE - 1);
+    // Ensure 2MB alignment for MMU block descriptors
+    uint64_t align_2mb = 0x200000;
+    if (next_phys_alloc & (align_2mb - 1)) {
+        next_phys_alloc = (next_phys_alloc + align_2mb - 1) & ~(align_2mb - 1);
     }
     p->user_phys_base = next_phys_alloc;
     next_phys_alloc += USER_REGION_SIZE;
@@ -240,7 +253,7 @@ int process_fork(struct trap_frame *tf) {
     struct process *child = &proc_table[child_pid];
     child->parent_pid = current_pid;
 
-    // Copy the parent's 2MB user memory to the child's region
+    // Copy the parent's user memory to the child's region
     kmemcpy((void *)child->user_phys_base, (void *)parent->user_phys_base, USER_REGION_SIZE);
 
     // Copy the parent's current register state to the child's saved context

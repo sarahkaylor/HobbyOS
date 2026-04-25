@@ -25,12 +25,13 @@ C_OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(C_SRCS))
 ASM_OBJS = $(patsubst $(SRC_DIR)/%.s, $(OBJ_DIR)/%.o, $(ASM_SRCS))
 OBJS = $(ASM_OBJS) $(C_OBJS)
 
-USER_CFLAGS = -Wall -Wextra -Isrc/user_include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
+USER_CFLAGS = -Wall -Wextra -Isrc/user_include -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
 USER_LIBC = src/user/libc.c
 MEM_TEST_BIN = memtest.bin
 FILE_IO_BIN = fileio_test.bin
 CONSOLE_TEST_BIN = console_test.bin
 FORK_TEST_BIN = fork_test.bin
+HEAP_TEST_BIN = heap_test.bin
 
 # Default rule: build the target
 all: $(TARGET)
@@ -45,17 +46,17 @@ $(TARGET): $(OBJS)
 	$(LD) $(LDFLAGS) -o $@ $^
 
 # Rule to compile .c files into .o files
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c src/include/*.h
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Rule to compile .s files into .o files
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.s
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.s src/include/*.h
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Rule to compile user objects
-obj/user_%.o: src/user/%.c
+obj/user_%.o: src/user/%.c src/user_include/*.h src/include/*.h
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
@@ -75,41 +76,50 @@ obj/fork_test.o: src/user/fork_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(MEM_TEST_BIN): obj/mem_test.o obj/user_libc.o
+obj/heap_test.o: src/user/heap_test.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(MEM_TEST_BIN): obj/mem_test.o obj/user_libc.o obj/user_malloc.o
 	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o memtest.elf $^
 	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary memtest.elf $(MEM_TEST_BIN)
 
-$(FILE_IO_BIN): obj/file_io_test.o obj/user_libc.o 
+$(FILE_IO_BIN): obj/file_io_test.o obj/user_libc.o obj/user_malloc.o
 	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o fileio_test.elf $^
 	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary fileio_test.elf $(FILE_IO_BIN)
 
-$(CONSOLE_TEST_BIN): obj/console_test.o obj/user_libc.o
+$(CONSOLE_TEST_BIN): obj/console_test.o obj/user_libc.o obj/user_malloc.o
 	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o console_test.elf $^
 	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary console_test.elf $(CONSOLE_TEST_BIN)
 
-$(FORK_TEST_BIN): obj/fork_test.o obj/user_libc.o
+$(FORK_TEST_BIN): obj/fork_test.o obj/user_libc.o obj/user_malloc.o
 	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o fork_test.elf $^
 	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary fork_test.elf $(FORK_TEST_BIN)
 
+$(HEAP_TEST_BIN): obj/heap_test.o obj/user_libc.o obj/user_malloc.o
+	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o heap_test.elf $^
+	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary heap_test.elf $(HEAP_TEST_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN)
+
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN)
 	dd if=/dev/zero of=disk.img bs=1M count=512
 	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img 
 	/opt/homebrew/bin/mcopy -i disk.img $(MEM_TEST_BIN) ::/MEMTEST.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(FILE_IO_BIN) ::/FILEIO.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(CONSOLE_TEST_BIN) ::/CONSOLE.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(FORK_TEST_BIN) ::/FORKTEST.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(HEAP_TEST_BIN) ::/HEAPTEST.BIN
 
 # Target to run the OS inside QEMU
 run: disk.img
-	$(QEMU) -M virt -cpu cortex-a53 -m 128M -kernel $(TARGET) -nographic -append "console=ttyAMA0" -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -semihosting -action shutdown=poweroff
+	$(QEMU) -M virt -cpu cortex-a53 -m 4096M -kernel $(TARGET) -nographic -append "console=ttyAMA0" -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -semihosting -action shutdown=poweroff
 
 # Target to exit QEMU properly
 # Note: Ctrl+A, X exists QEMU nographic mode.
 
 # Clean rule to remove build artifacts
 clean:
-	rm -rf $(OBJ_DIR) $(TARGET) hobbyos disk.img memtest.elf fileio_test.elf fork_test.elf $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN)
+	rm -rf $(OBJ_DIR) $(TARGET) hobbyos disk.img memtest.elf fileio_test.elf fork_test.elf heap_test.elf $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN)
 
 memtest: $(MEM_TEST_BIN)
 

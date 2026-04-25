@@ -38,20 +38,22 @@ void mmu_init(void) {
     l1_table[1] = ((uint64_t)&l2_table_1) | 0b11;
 
     // 4. Populate L2 Tables
-    // L2 Table 0 covers KERNEL_START - KERNEL_END
-    for (int i = 0; i < PAGES_PER_REGION; i++) {
-        uint64_t addr = (uint64_t)i * USER_REGION_SIZE;
+    // L2 Table 0 covers KERNEL_START - KERNEL_END (1GB)
+    // Each L2 entry covers 2MB (Level 2 Block Descriptor)
+    for (int i = 0; i < 512; i++) {
+        uint64_t addr = (uint64_t)i * 0x200000; // 2MB blocks
         uint64_t attr = (PT_MEM_DEVICE << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
         attr |= (1ULL << 54) | (1ULL << 53); // UXN and PXN
         l2_table_0[i] = addr | attr;
     }
 
-    // L2 Table 1 covers USER_START - 0x7FFFFFFF (RAM)
-    for (int i = 0; i < PAGES_PER_REGION; i++) {
-        uint64_t addr = USER_START + (uint64_t)i * USER_REGION_SIZE;
+    // L2 Table 1 covers USER_START - 0x7FFFFFFF (RAM, 1GB)
+    for (int i = 0; i < 512; i++) {
+        uint64_t addr = USER_START + (uint64_t)i * 0x200000;
         uint64_t attr = (PT_MEM_DEVICE << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
         
-        if (addr >= USER_START && addr <= 0x47FFFFFF) {
+        // Map up to 1GB as normal RAM if it's within the USER range
+        if (addr >= USER_START && addr <= 0x7FFFFFFF) {
             attr = (PT_MEM_NORMAL << 2) | (1 << 10) | 0b01;
             
             if (addr >= USER_VIRT_BASE && addr <= (USER_VIRT_BASE + USER_REGION_SIZE - 1)) {
@@ -112,9 +114,14 @@ uint64_t mmu_make_user_block_desc(uint64_t phys_addr) {
 
 void mmu_switch_user_mapping(uint64_t phys_base) {
     // The user virtual address USER_VIRT_BASE falls in L1 index 1 (USER_START-USER_END),
-    // L2 index 32 (USER_VIRT_BASE / USER_REGION_SIZE - USER_START / USER_REGION_SIZE = 32).
-    // Rewrite that single L2 entry to map to the new physical base.
-    l2_table_1[32] = mmu_make_user_block_desc(phys_base);
+    // L2 index 32 (USER_VIRT_BASE / 2MB - USER_START / 2MB = 32).
+    // Map multiple 2MB blocks based on USER_REGION_SIZE.
+    int num_blocks = USER_REGION_SIZE / 0x200000;
+    if (USER_REGION_SIZE % 0x200000) num_blocks++;
+
+    for (int i = 0; i < num_blocks; i++) {
+        l2_table_1[32 + i] = mmu_make_user_block_desc(phys_base + (uint64_t)i * 0x200000);
+    }
 
     // Invalidate TLB and synchronize
     __asm__ volatile(
