@@ -3,6 +3,7 @@
 #include "setjmp.h"
 #include "process.h"
 #include "timer.h"
+#include "fat16.h"
 
 extern jmp_buf user_exit_context;
 
@@ -15,14 +16,79 @@ extern void gic_end_interrupt(uint32_t intid);
 extern void virtio_blk_handle_irq(void);
 extern uint32_t virtio_blk_irq;
 
-#define SYS_WRITE (1)
-#define SYS_EXIT  (2)
-#define SYS_FORK  (3)
+#define SYS_WRITE_CONSOLE (1)
+#define SYS_EXIT          (2)
+#define SYS_FORK          (3)
+#define SYS_OPEN          (4)
+#define SYS_CLOSE         (5)
+#define SYS_READ          (6)
+#define SYS_WRITE         (7)
 
 // Timer PPI interrupt ID on QEMU virt (non-secure physical timer)
 #define TIMER_PPI_INTID 30
 
 extern void uart_print_hex(uint64_t val);
+
+static void sys_write_console(struct trap_frame *tf) {
+  uint64_t ptr = tf->regs[0];
+  if (ptr >= USER_VIRT_BASE && ptr < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+    uart_puts((const char *)ptr);
+  } else {
+    uart_puts("Kernel: Blocked SYS_WRITE_CONSOLE pointer out of bounds\n");
+  }
+  tf->regs[0] = 0; // Return success
+}
+
+static void sys_exit(struct trap_frame *tf) {
+  struct process *cur = current_process();
+  if (cur && cur->state == PROC_STATE_RUNNING) {
+    process_exit(tf);
+    timer_reload();
+  } else {
+    longjmp(user_exit_context, 1);
+  }
+}
+
+static void sys_fork(struct trap_frame *tf) {
+  int child_pid = process_fork(tf);
+  tf->regs[0] = (uint64_t)child_pid;
+}
+
+static void sys_open(struct trap_frame *tf) {
+  const char *filename = (const char *)tf->regs[0];
+  if ((uint64_t)filename >= USER_VIRT_BASE && (uint64_t)filename < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+    tf->regs[0] = file_open(filename);
+  } else {
+    tf->regs[0] = -1;
+  }
+}
+
+static void sys_close(struct trap_frame *tf) {
+  int fd = (int)tf->regs[0];
+  tf->regs[0] = file_close(fd);
+}
+
+static void sys_read(struct trap_frame *tf) {
+  int fd = (int)tf->regs[0];
+  void *buf = (void *)tf->regs[1];
+  int size = (int)tf->regs[2];
+  if ((uint64_t)buf >= USER_VIRT_BASE && (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+    tf->regs[0] = file_read(fd, buf, size);
+  } else {
+    tf->regs[0] = -1;
+  }
+}
+
+static void sys_write(struct trap_frame *tf) {
+  int fd = (int)tf->regs[0];
+  const void *buf = (const void *)tf->regs[1];
+  int size = (int)tf->regs[2];
+  if ((uint64_t)buf >= USER_VIRT_BASE && (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+    tf->regs[0] = file_write(fd, buf, size);
+  } else {
+    tf->regs[0] = -1;
+  }
+}
 
 void sync_lower_handler_c(struct trap_frame *tf) {
   uint64_t esr;
@@ -35,34 +101,20 @@ void sync_lower_handler_c(struct trap_frame *tf) {
   if (ec == 0x15) {
     uint64_t syscall_num = tf->regs[8]; // x8 standard
 
-    if (syscall_num == SYS_WRITE) {
-      // SYS_WRITE
-      // tf->regs[0] contains the pointer to the string
-      // We should ensure the pointer is within User space (USER_VIRT_BASE range)
-      uint64_t ptr = tf->regs[0];
-      if (ptr >= USER_VIRT_BASE && ptr < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-        uart_puts((const char *)ptr);
-      } else {
-        uart_puts("Kernel: Blocked SYS_WRITE pointer out of bounds\n");
-      }
-      tf->regs[0] = 0; // Return success
+    if (syscall_num == SYS_WRITE_CONSOLE) {
+      sys_write_console(tf);
     } else if (syscall_num == SYS_EXIT) {
-      // SYS_EXIT — check if we're running under the scheduler
-      struct process *cur = current_process();
-      if (cur && cur->state == PROC_STATE_RUNNING) {
-        // Running under the scheduler: mark exited and schedule next
-        process_exit(tf);
-        // tf has been updated by schedule() — the eret path will switch to
-        // the next process. We need to reload the timer too.
-        timer_reload();
-      } else {
-        // Legacy sequential mode: longjmp back to load_and_run_program
-        longjmp(user_exit_context, 1);
-      }
+      sys_exit(tf);
     } else if (syscall_num == SYS_FORK) {
-      // SYS_FORK — duplicate the current process
-      int child_pid = process_fork(tf);
-      tf->regs[0] = (uint64_t)child_pid; // Return child PID to parent
+      sys_fork(tf);
+    } else if (syscall_num == SYS_OPEN) {
+      sys_open(tf);
+    } else if (syscall_num == SYS_CLOSE) {
+      sys_close(tf);
+    } else if (syscall_num == SYS_READ) {
+      sys_read(tf);
+    } else if (syscall_num == SYS_WRITE) {
+      sys_write(tf);
     } else {
       uart_puts("Unknown System Call Invoked!\n");
       tf->regs[0] = -1; // Return error
