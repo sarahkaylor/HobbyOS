@@ -6,6 +6,7 @@
 #include "timer.h"
 #include "trap.h"
 #include "virtio_blk.h"
+#include "virtio_gpu.h"
 #include <stdint.h>
 void virtio_blk_handle_irq(void);
 extern int virtio_blk_irq;
@@ -79,6 +80,12 @@ void main(void) {
   mmu_init();
   uart_puts("MMU Initialized: Page Tables setup securely.\n");
 
+  if (virtio_gpu_init() == 0) {
+      uart_puts("VirtIO GPU successfully initialized.\n");
+  } else {
+      uart_puts("VirtIO GPU initialization failed!\n");
+  }
+
   gic_init();
 
   // Clears the standard I/F interrupt masking flags from the hardware PSTATE
@@ -139,8 +146,9 @@ void main(void) {
 
   int p1 = load_and_run_program_in_scheduler("SPAWN.BIN");
   int p2 = load_and_run_program_in_scheduler("FORKTEST.BIN");
+  int p3 = load_and_run_program_in_scheduler("GRAPHICS.BIN");
 
-  if (p1 >= 0 || p2 >= 0) {
+  if (p1 >= 0 || p2 >= 0 || p3 >= 0) {
     // Enable the timer PPI (INTID 30) for preemptive scheduling
     gic_enable_interrupt(30);
     timer_init();

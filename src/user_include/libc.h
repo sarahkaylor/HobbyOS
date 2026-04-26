@@ -16,3 +16,5 @@ int write(int fd, const void* buf, int size);
 int spawn(const char* filename);
 
 #endif
+void* map_fb(void);
+void flush_fb(void);

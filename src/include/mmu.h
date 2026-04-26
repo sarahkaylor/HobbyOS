@@ -17,3 +17,4 @@ void mmu_switch_user_mapping(uint64_t phys_base);
 uint64_t mmu_make_user_block_desc(uint64_t phys_addr);
 
 #endif
+void mmu_map_user_framebuffer(uint64_t phys_addr);

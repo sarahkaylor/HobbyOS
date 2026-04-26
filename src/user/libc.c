@@ -9,6 +9,8 @@
 #define SYS_READ          (6)
 #define SYS_WRITE         (7)
 #define SYS_SPAWN         (8)
+#define SYS_MAP_FB        (9)
+#define SYS_FLUSH_FB      (10)
 
 static inline long syscall0(long sys_num) {
   register long x8 __asm__("x8") = sys_num;
@@ -63,4 +65,12 @@ int write(int fd, const void* buf, int size) {
 
 int spawn(const char* filename) {
   return (int)syscall1(SYS_SPAWN, (long)filename);
+}
+
+void* map_fb(void) {
+  return (void*)syscall0(SYS_MAP_FB);
+}
+
+void flush_fb(void) {
+  syscall0(SYS_FLUSH_FB);
 }

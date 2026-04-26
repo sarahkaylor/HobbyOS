@@ -31,9 +31,11 @@ MEM_TEST_BIN = memtest.bin
 FILE_IO_BIN = fileio_test.bin
 CONSOLE_TEST_BIN = console_test.bin
 # Target and objects
+# Target and objects
 SPAWN_TEST_BIN = spawntest.bin
 FORK_TEST_BIN = fork_test.bin
 HEAP_TEST_BIN = heap_test.bin
+GRAPHICS_TEST_BIN = graphics.bin
 
 # Default rule: build the target
 all: $(TARGET)
@@ -86,6 +88,14 @@ obj/heap_test.o: src/user/heap_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
+obj/graphics_test.o: src/user/graphics_test.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+obj/user_graphics.o: src/user/graphics/graphics.c
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
 $(MEM_TEST_BIN): obj/mem_test.o obj/user_libc.o obj/user_malloc.o
 	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o memtest.elf $^
 	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary memtest.elf $(MEM_TEST_BIN)
@@ -110,7 +120,11 @@ $(SPAWN_TEST_BIN): obj/spawn_test.o obj/user_libc.o obj/user_malloc.o
 	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o spawn_test.elf $^
 	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary spawn_test.elf $(SPAWN_TEST_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN)
+$(GRAPHICS_TEST_BIN): obj/graphics_test.o obj/user_libc.o obj/user_malloc.o obj/user_graphics.o
+	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o graphics_test.elf $^
+	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary graphics_test.elf $(GRAPHICS_TEST_BIN)
+
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN)
 	dd if=/dev/zero of=disk.img bs=1M count=512
 	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img 
 	/opt/homebrew/bin/mcopy -i disk.img $(MEM_TEST_BIN) ::/MEMTEST.BIN
@@ -119,12 +133,13 @@ disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TE
 	/opt/homebrew/bin/mcopy -i disk.img $(FORK_TEST_BIN) ::/FORKTEST.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(HEAP_TEST_BIN) ::/HEAPTEST.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(SPAWN_TEST_BIN) ::/SPAWN.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(GRAPHICS_TEST_BIN) ::/GRAPHICS.BIN
 	touch TEST.TXT
 	/opt/homebrew/bin/mcopy -i disk.img TEST.TXT ::/TEST.TXT
 
 # Target to run the OS inside QEMU
 run: disk.img
-	$(QEMU) -M virt -cpu cortex-a53 -m 4096M -kernel $(TARGET) -nographic -append "console=ttyAMA0" -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -semihosting -action shutdown=poweroff
+	$(QEMU) -M virt -cpu cortex-a53 -m 4096M -kernel $(TARGET) -display cocoa -serial stdio -append "console=ttyAMA0" -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -semihosting -action shutdown=poweroff
 
 # Target to exit QEMU properly
 # Note: Ctrl+A, X exists QEMU nographic mode.

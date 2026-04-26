@@ -131,3 +131,18 @@ void mmu_switch_user_mapping(uint64_t phys_base) {
         "isb\n"
     );
 }
+
+void mmu_map_user_framebuffer(uint64_t phys_addr) {
+    // Map to user virtual address 0x50000000
+    // L2 index: (0x50000000 - 0x40000000) / 0x200000 = 128
+    l2_table_1[128] = mmu_make_user_block_desc(phys_addr);
+    l2_table_1[129] = mmu_make_user_block_desc(phys_addr + 0x200000);
+
+    // Invalidate TLB and synchronize
+    __asm__ volatile(
+        "dsb sy\n"
+        "tlbi vmalle1\n"
+        "dsb sy\n"
+        "isb\n"
+    );
+}

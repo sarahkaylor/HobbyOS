@@ -24,6 +24,8 @@ extern uint32_t virtio_blk_irq;
 #define SYS_READ          (6)
 #define SYS_WRITE         (7)
 #define SYS_SPAWN         (8)
+#define SYS_MAP_FB        (9)
+#define SYS_FLUSH_FB      (10)
 
 // Timer PPI interrupt ID on QEMU virt (non-secure physical timer)
 #define TIMER_PPI_INTID 30
@@ -102,6 +104,21 @@ static void sys_spawn(struct trap_frame *tf) {
   }
 }
 
+extern uint32_t* virtio_gpu_get_framebuffer(void);
+extern void virtio_gpu_flush(void);
+extern void mmu_map_user_framebuffer(uint64_t phys_addr);
+
+static void sys_map_fb(struct trap_frame *tf) {
+  uint64_t phys_addr = (uint64_t)virtio_gpu_get_framebuffer();
+  mmu_map_user_framebuffer(phys_addr);
+  tf->regs[0] = 0x50000000; // Return user virtual address
+}
+
+static void sys_flush_fb(struct trap_frame *tf) {
+  virtio_gpu_flush();
+  tf->regs[0] = 0;
+}
+
 void sync_lower_handler_c(struct trap_frame *tf) {
   uint64_t esr;
   __asm__ volatile("mrs %0, esr_el1" : "=r"(esr));
@@ -129,6 +146,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_write(tf);
     } else if (syscall_num == SYS_SPAWN) {
       sys_spawn(tf);
+    } else if (syscall_num == SYS_MAP_FB) {
+      sys_map_fb(tf);
+    } else if (syscall_num == SYS_FLUSH_FB) {
+      sys_flush_fb(tf);
     } else {
       uart_puts("Unknown System Call Invoked!\n");
       tf->regs[0] = -1; // Return error
