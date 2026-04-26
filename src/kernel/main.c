@@ -137,10 +137,10 @@ void main(void) {
 
   process_init();
 
-  // Load the fork test program into the scheduler
-  if (load_and_run_program_in_scheduler("FORKTEST.BIN") < 0) {
-    uart_puts("Failed to load FORKTEST.BIN for scheduler!\n");
-  } else {
+  int p1 = load_and_run_program_in_scheduler("SPAWN.BIN");
+  int p2 = load_and_run_program_in_scheduler("FORKTEST.BIN");
+
+  if (p1 >= 0 || p2 >= 0) {
     // Enable the timer PPI (INTID 30) for preemptive scheduling
     gic_enable_interrupt(30);
     timer_init();

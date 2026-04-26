@@ -30,6 +30,8 @@ USER_LIBC = src/user/libc.c
 MEM_TEST_BIN = memtest.bin
 FILE_IO_BIN = fileio_test.bin
 CONSOLE_TEST_BIN = console_test.bin
+# Target and objects
+SPAWN_TEST_BIN = spawntest.bin
 FORK_TEST_BIN = fork_test.bin
 HEAP_TEST_BIN = heap_test.bin
 
@@ -76,6 +78,10 @@ obj/fork_test.o: src/user/fork_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
+obj/spawn_test.o: src/user/spawn_test.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
 obj/heap_test.o: src/user/heap_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
@@ -100,8 +106,11 @@ $(HEAP_TEST_BIN): obj/heap_test.o obj/user_libc.o obj/user_malloc.o
 	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o heap_test.elf $^
 	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary heap_test.elf $(HEAP_TEST_BIN)
 
+$(SPAWN_TEST_BIN): obj/spawn_test.o obj/user_libc.o obj/user_malloc.o
+	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o spawn_test.elf $^
+	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary spawn_test.elf $(SPAWN_TEST_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN)
 	dd if=/dev/zero of=disk.img bs=1M count=512
 	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img 
 	/opt/homebrew/bin/mcopy -i disk.img $(MEM_TEST_BIN) ::/MEMTEST.BIN
@@ -109,6 +118,7 @@ disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TE
 	/opt/homebrew/bin/mcopy -i disk.img $(CONSOLE_TEST_BIN) ::/CONSOLE.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(FORK_TEST_BIN) ::/FORKTEST.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(HEAP_TEST_BIN) ::/HEAPTEST.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(SPAWN_TEST_BIN) ::/SPAWN.BIN
 	touch TEST.TXT
 	/opt/homebrew/bin/mcopy -i disk.img TEST.TXT ::/TEST.TXT
 
@@ -121,7 +131,7 @@ run: disk.img
 
 # Clean rule to remove build artifacts
 clean:
-	rm -rf $(OBJ_DIR) $(TARGET) hobbyos disk.img memtest.elf fileio_test.elf fork_test.elf heap_test.elf $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN)
+	rm -rf $(OBJ_DIR) $(TARGET) hobbyos disk.img memtest.elf fileio_test.elf fork_test.elf heap_test.elf spawn_test.elf $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN)
 
 memtest: $(MEM_TEST_BIN)
 

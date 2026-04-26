@@ -13,5 +13,6 @@ int open(const char* filename);
 int close(int fd);
 int read(int fd, void* buf, int size);
 int write(int fd, const void* buf, int size);
+int spawn(const char* filename);
 
 #endif

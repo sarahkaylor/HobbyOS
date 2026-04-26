@@ -23,6 +23,7 @@ extern uint32_t virtio_blk_irq;
 #define SYS_CLOSE         (5)
 #define SYS_READ          (6)
 #define SYS_WRITE         (7)
+#define SYS_SPAWN         (8)
 
 // Timer PPI interrupt ID on QEMU virt (non-secure physical timer)
 #define TIMER_PPI_INTID 30
@@ -90,6 +91,17 @@ static void sys_write(struct trap_frame *tf) {
   }
 }
 
+extern int load_and_run_program_in_scheduler(const char* filename);
+
+static void sys_spawn(struct trap_frame *tf) {
+  const char *filename = (const char *)tf->regs[0];
+  if ((uint64_t)filename >= USER_VIRT_BASE && (uint64_t)filename < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+    tf->regs[0] = load_and_run_program_in_scheduler(filename);
+  } else {
+    tf->regs[0] = -1;
+  }
+}
+
 void sync_lower_handler_c(struct trap_frame *tf) {
   uint64_t esr;
   __asm__ volatile("mrs %0, esr_el1" : "=r"(esr));
@@ -115,6 +127,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_read(tf);
     } else if (syscall_num == SYS_WRITE) {
       sys_write(tf);
+    } else if (syscall_num == SYS_SPAWN) {
+      sys_spawn(tf);
     } else {
       uart_puts("Unknown System Call Invoked!\n");
       tf->regs[0] = -1; // Return error
