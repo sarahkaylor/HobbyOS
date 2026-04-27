@@ -1,4 +1,5 @@
 #include "virtio_gpu.h"
+#include "lock.h"
 
 // VirtIO MMIO offsets
 #define VIRTIO_MAGIC        0x000
@@ -58,6 +59,7 @@ struct virtq {
 static struct virtq gpu_vq __attribute__((aligned(4096)));
 static uint8_t* gpu_mmio = 0;
 static uint16_t gpu_ack_used_idx = 0;
+static spinlock_t gpu_lock;
 
 static uint32_t framebuffer[1024 * 768] __attribute__((aligned(2097152)));
 
@@ -70,7 +72,11 @@ static inline uint32_t reg_read32(uint32_t offset) {
 }
 
 static int virtio_gpu_do_cmd(void* req, uint32_t req_size, void* resp, uint32_t resp_size) {
-    if (!gpu_mmio) return -1;
+    uint64_t flags = spinlock_acquire_irqsave(&gpu_lock);
+    if (!gpu_mmio) {
+        spinlock_release_irqrestore(&gpu_lock, flags);
+        return -1;
+    }
 
     gpu_vq.desc[0].addr = (uint64_t)req;
     gpu_vq.desc[0].len = req_size;
@@ -93,22 +99,25 @@ static int virtio_gpu_do_cmd(void* req, uint32_t req_size, void* resp, uint32_t 
 
     // Poll for completion (simple spinlock for now)
     while (*(volatile uint16_t*)&gpu_vq.used.idx == gpu_ack_used_idx) {
-        // __asm__ volatile("wfi"); // Or just spin
+        // We could wfi here if we had an IRQ handler, but let's just spin with lock held 
+        // for simplicity since GPU commands are usually fast.
     }
 
     gpu_ack_used_idx = gpu_vq.used.idx;
     __asm__ volatile("dmb sy" ::: "memory");
 
     struct virtio_gpu_ctrl_hdr* hdr = (struct virtio_gpu_ctrl_hdr*)resp;
-    if (hdr->type >= 0x1200) {
-        return -1; // Error
-    }
-
-    return 0;
+    int res = (hdr->type >= 0x1200 ? -1 : 0);
+    spinlock_release_irqrestore(&gpu_lock, flags);
+    return res;
 }
 
 static int virtio_gpu_do_cmd_with_data(void* req, uint32_t req_size, void* data, uint32_t data_size, void* resp, uint32_t resp_size) {
-    if (!gpu_mmio) return -1;
+    uint64_t flags = spinlock_acquire_irqsave(&gpu_lock);
+    if (!gpu_mmio) {
+        spinlock_release_irqrestore(&gpu_lock, flags);
+        return -1;
+    }
 
     gpu_vq.desc[0].addr = (uint64_t)req;
     gpu_vq.desc[0].len = req_size;
@@ -139,10 +148,12 @@ static int virtio_gpu_do_cmd_with_data(void* req, uint32_t req_size, void* data,
     gpu_ack_used_idx = gpu_vq.used.idx;
     __asm__ volatile("dmb sy" ::: "memory");
 
+    spinlock_release_irqrestore(&gpu_lock, flags);
     return 0;
 }
 
 int virtio_gpu_init(void) {
+    spinlock_init(&gpu_lock);
     for (int i = 0; i < 32; i++) {
         uint8_t* mmio = MMIO_BASE(i);
         uint32_t magic = *(volatile uint32_t*)(mmio + VIRTIO_MAGIC);

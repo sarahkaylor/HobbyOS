@@ -1,4 +1,5 @@
 #include "virtio_blk.h"
+#include "lock.h"
 
 // VirtIO MMIO offsets
 #define VIRTIO_MAGIC        0x000
@@ -78,6 +79,7 @@ static uint8_t blk_status;
 static uint8_t* blk_mmio = 0;
 static uint16_t ack_used_idx = 0;
 int virtio_blk_irq = -1;
+static spinlock_t blk_lock;
 
 static inline void reg_write32(uint32_t offset, uint32_t val) {
     *(volatile uint32_t*)(blk_mmio + offset) = val;
@@ -88,14 +90,20 @@ static inline uint32_t reg_read32(uint32_t offset) {
 }
 
 void virtio_blk_handle_irq(void) {
-    if (!blk_mmio) return;
+    uint64_t flags = spinlock_acquire_irqsave(&blk_lock);
+    if (!blk_mmio) {
+        spinlock_release_irqrestore(&blk_lock, flags);
+        return;
+    }
     uint32_t status = reg_read32(VIRTIO_INTERRUPT_STATUS);
     if (status) {
         reg_write32(VIRTIO_INTERRUPT_ACK, status);
     }
+    spinlock_release_irqrestore(&blk_lock, flags);
 }
 
 int virtio_blk_init(void) {
+    spinlock_init(&blk_lock);
     // Scan for virtio block device (ID 2)
     for (int i = 0; i < 32; i++) {
         uint8_t* mmio = MMIO_BASE(i);
@@ -157,7 +165,11 @@ extern void uart_puts(const char* s);
 extern void print_int(int val);
 
 static int virtio_blk_do_op(uint64_t sector, void* buf, uint32_t type) {
-    if (!blk_mmio) return -1;
+    uint64_t flags = spinlock_acquire_irqsave(&blk_lock);
+    if (!blk_mmio) {
+        spinlock_release_irqrestore(&blk_lock, flags);
+        return -1;
+    }
 
     blk_req.type = type;
     blk_req.reserved = 0;
@@ -202,7 +214,10 @@ static int virtio_blk_do_op(uint64_t sector, void* buf, uint32_t type) {
     // It wakes autonomously only when the GIC validates the designated interrupt line 
     // raised by the virtio device once IO completes and edits `used.idx`.
     while (*(volatile uint16_t*)&vq.used.idx == ack_used_idx) {
+        // Release lock while waiting to allow other CPUs to process interrupts
+        spinlock_release_irqrestore(&blk_lock, flags);
         __asm__ volatile("wfi");
+        flags = spinlock_acquire_irqsave(&blk_lock);
     }
 
     ack_used_idx = vq.used.idx;
@@ -210,7 +225,9 @@ static int virtio_blk_do_op(uint64_t sector, void* buf, uint32_t type) {
     // Memory barrier before reading status
     __asm__ volatile("dmb sy" ::: "memory");
 
-    return blk_status == 0 ? 0 : -1;
+    int res = (blk_status == 0 ? 0 : -1);
+    spinlock_release_irqrestore(&blk_lock, flags);
+    return res;
 }
 
 int virtio_blk_read_sector(uint64_t sector, void* buf, uint32_t count) {

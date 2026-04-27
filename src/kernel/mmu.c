@@ -1,11 +1,13 @@
 #include <stdint.h>
 #include "mmu.h"
 #include "process.h"
+#include "lock.h"
 
 // 4KB Table Arrays
 uint64_t l1_table[512] __attribute__((aligned(4096)));
 static uint64_t l2_table_0[512] __attribute__((aligned(4096)));
 uint64_t l2_table_1[512] __attribute__((aligned(4096)));
+static spinlock_t mmu_lock;
 
 #define MAIR_DEVICE_nGnRnE  0x00
 #define MAIR_NORMAL_NC      0x44  // Normal Non-Cacheable (avoids explicit flushes)
@@ -20,6 +22,7 @@ uint64_t l2_table_1[512] __attribute__((aligned(4096)));
 // 512 entries * 2MB = 1GB of mapped physical space
 
 void mmu_init(void) {
+    spinlock_init(&mmu_lock);
     // 1. Configure the MAIR_EL1 attributes
     uint64_t mair = (MAIR_DEVICE_nGnRnE << (8 * PT_MEM_DEVICE)) |
                     (MAIR_NORMAL_NC << (8 * PT_MEM_NORMAL));
@@ -113,6 +116,7 @@ uint64_t mmu_make_user_block_desc(uint64_t phys_addr) {
 }
 
 void mmu_switch_user_mapping(uint64_t phys_base) {
+    uint64_t flags = spinlock_acquire_irqsave(&mmu_lock);
     // The user virtual address USER_VIRT_BASE falls in L1 index 1 (USER_START-USER_END),
     // L2 index 32 (USER_VIRT_BASE / 2MB - USER_START / 2MB = 32).
     // Map multiple 2MB blocks based on USER_REGION_SIZE.
@@ -130,9 +134,11 @@ void mmu_switch_user_mapping(uint64_t phys_base) {
         "dsb sy\n"
         "isb\n"
     );
+    spinlock_release_irqrestore(&mmu_lock, flags);
 }
 
 void mmu_map_user_framebuffer(uint64_t phys_addr) {
+    uint64_t flags = spinlock_acquire_irqsave(&mmu_lock);
     // Map to user virtual address 0x50000000
     // L2 index: (0x50000000 - 0x40000000) / 0x200000 = 128
     l2_table_1[128] = mmu_make_user_block_desc(phys_addr);
@@ -145,4 +151,5 @@ void mmu_map_user_framebuffer(uint64_t phys_addr) {
         "dsb sy\n"
         "isb\n"
     );
+    spinlock_release_irqrestore(&mmu_lock, flags);
 }

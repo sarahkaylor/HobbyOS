@@ -1,5 +1,6 @@
 #include "fat16.h"
 #include "virtio_blk.h"
+#include "lock.h"
 
 #define MAX_OPEN_FILES 4
 #define SECTOR_SIZE 512
@@ -38,6 +39,7 @@ typedef struct {
 } file_descriptor;
 
 static file_descriptor open_files[MAX_OPEN_FILES];
+static spinlock_t fat_lock;
 
 // Helper: match 8.3 filename
 static int match_name(const char* fat_name, const char* query) {
@@ -61,6 +63,7 @@ static int match_name(const char* fat_name, const char* query) {
 }
 
 int fat16_init(void) {
+    spinlock_init(&fat_lock);
     uint8_t buf[SECTOR_SIZE];
     if (virtio_blk_read_sector(0, buf, 1) != 0) {
         return -1;
@@ -141,10 +144,17 @@ static uint16_t alloc_cluster(void) {
 }
 
 int file_open(const char* filename) {
+    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
     uint8_t buf[SECTOR_SIZE];
 
     for (uint32_t i = 0; i < root_dir_sectors; i++) {
-        virtio_blk_read_sector(root_dir_sector + i, buf, 1);
+        // Release lock during IO to allow other FS operations or interrupts
+        spinlock_release_irqrestore(&fat_lock, flags);
+        if (virtio_blk_read_sector(root_dir_sector + i, buf, 1) != 0) {
+            return -1;
+        }
+        flags = spinlock_acquire_irqsave(&fat_lock);
+
         struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
         for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
             if (entries[j].name[0] == 0x00) { // End of dir
@@ -172,27 +182,41 @@ int file_open(const char* filename) {
                         print_int(entries[j].start_cluster);
                         uart_puts("\n");
                         
+                        spinlock_release_irqrestore(&fat_lock, flags);
                         return fd;
                     }
                 }
+                spinlock_release_irqrestore(&fat_lock, flags);
                 return -1; // Max open files
             }
         }
     }
+    spinlock_release_irqrestore(&fat_lock, flags);
     return -1;
 }
 
 int file_close(int fd) {
-    if (fd < 0 || fd >= MAX_OPEN_FILES || !open_files[fd].active) return -1;
+    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    if (fd < 0 || fd >= MAX_OPEN_FILES || !open_files[fd].active) {
+        spinlock_release_irqrestore(&fat_lock, flags);
+        return -1;
+    }
     
     // Update directory entry dynamically on disk
     uint8_t buf[SECTOR_SIZE];
-    virtio_blk_read_sector(open_files[fd].dir_sector, buf, 1);
-    struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
-    entries[open_files[fd].dir_offset] = open_files[fd].entry;
-    virtio_blk_write_sector(open_files[fd].dir_sector, buf, 1);
+    uint32_t dir_sector = open_files[fd].dir_sector;
+    uint32_t dir_offset = open_files[fd].dir_offset;
+    struct fat16_dir_entry entry = open_files[fd].entry;
     
+    spinlock_release_irqrestore(&fat_lock, flags);
+    virtio_blk_read_sector(dir_sector, buf, 1);
+    struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
+    entries[dir_offset] = entry;
+    virtio_blk_write_sector(dir_sector, buf, 1);
+    
+    flags = spinlock_acquire_irqsave(&fat_lock);
     open_files[fd].active = 0;
+    spinlock_release_irqrestore(&fat_lock, flags);
     return 0;
 }
 
@@ -214,11 +238,18 @@ int file_seek(int fd, int offset) {
 }
 
 int file_read(int fd, void* buf, int size) {
-    if (fd < 0 || fd >= MAX_OPEN_FILES || !open_files[fd].active) return -1;
+    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    if (fd < 0 || fd >= MAX_OPEN_FILES || !open_files[fd].active) {
+        spinlock_release_irqrestore(&fat_lock, flags);
+        return -1;
+    }
     
     uint32_t remaining = open_files[fd].entry.file_size - open_files[fd].cursor;
     if ((uint32_t)size > remaining) size = remaining;
-    if (size == 0) return 0;
+    if (size == 0) {
+        spinlock_release_irqrestore(&fat_lock, flags);
+        return 0;
+    }
     
     uint8_t* out = (uint8_t*)buf;
     int read_bytes = 0;
@@ -235,7 +266,10 @@ int file_read(int fd, void* buf, int size) {
         uint32_t offset_in_sector = offset_in_cluster % SECTOR_SIZE;
         
         uint8_t sec_buf[SECTOR_SIZE];
+        // Release lock during IO
+        spinlock_release_irqrestore(&fat_lock, flags);
         virtio_blk_read_sector(sector_num, sec_buf, 1);
+        flags = spinlock_acquire_irqsave(&fat_lock);
         
         uint32_t chunk = SECTOR_SIZE - offset_in_sector;
         if (chunk > bytes_to_read) chunk = bytes_to_read;
@@ -245,19 +279,30 @@ int file_read(int fd, void* buf, int size) {
         open_files[fd].cursor += chunk;
         size -= chunk;
     }
+    spinlock_release_irqrestore(&fat_lock, flags);
     return read_bytes;
 }
 
 int file_write(int fd, const void* buf, int size) {
-    if (fd < 0 || fd >= MAX_OPEN_FILES || !open_files[fd].active) return -1;
-    if (size == 0) return 0;
+    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    if (fd < 0 || fd >= MAX_OPEN_FILES || !open_files[fd].active) {
+        spinlock_release_irqrestore(&fat_lock, flags);
+        return -1;
+    }
+    if (size == 0) {
+        spinlock_release_irqrestore(&fat_lock, flags);
+        return 0;
+    }
     
     const uint8_t* in = (const uint8_t*)buf;
     int written_bytes = 0;
     
     if (open_files[fd].entry.start_cluster == 0) {
         open_files[fd].entry.start_cluster = alloc_cluster();
-        if (open_files[fd].entry.start_cluster == 0) return 0;
+        if (open_files[fd].entry.start_cluster == 0) {
+            spinlock_release_irqrestore(&fat_lock, flags);
+            return 0;
+        }
     }
     
     while (size > 0) {
@@ -287,11 +332,12 @@ int file_write(int fd, const void* buf, int size) {
         uint32_t chunk = SECTOR_SIZE - offset_in_sector;
         if (chunk > bytes_to_write) chunk = bytes_to_write;
 
+        // Release lock during IO
+        spinlock_release_irqrestore(&fat_lock, flags);
         if (chunk < SECTOR_SIZE) virtio_blk_read_sector(sector_num, sec_buf, 1); // RMW Cycle
-        
         for (uint32_t i = 0; i < chunk; i++) sec_buf[offset_in_sector + i] = in[written_bytes++];
-        
         virtio_blk_write_sector(sector_num, sec_buf, 1);
+        flags = spinlock_acquire_irqsave(&fat_lock);
         
         open_files[fd].cursor += chunk;
         if (open_files[fd].cursor > open_files[fd].entry.file_size) {
@@ -299,5 +345,6 @@ int file_write(int fd, const void* buf, int size) {
         }
         size -= chunk;
     }
+    spinlock_release_irqrestore(&fat_lock, flags);
     return written_bytes;
 }
