@@ -2,6 +2,7 @@
 #define LIBC_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "malloc.h"
 
@@ -15,6 +16,8 @@ int read(int fd, void* buf, int size);
 int write(int fd, const void* buf, int size);
 int spawn(const char* filename);
 
-#endif
 void* map_fb(void);
 void flush_fb(void);
+int get_cpuid(void);
+
+#endif

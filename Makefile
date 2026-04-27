@@ -36,6 +36,7 @@ SPAWN_TEST_BIN = spawntest.bin
 FORK_TEST_BIN = fork_test.bin
 HEAP_TEST_BIN = heap_test.bin
 GRAPHICS_TEST_BIN = graphics.bin
+SMP_TEST_BIN = smp_test.bin
 
 # Default rule: build the target
 all: $(TARGET)
@@ -92,6 +93,10 @@ obj/graphics_test.o: src/user/graphics_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
+obj/smp_test.o: src/user/smp_test.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
 obj/user_graphics.o: src/user/graphics/graphics.c
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
@@ -124,7 +129,11 @@ $(GRAPHICS_TEST_BIN): obj/graphics_test.o obj/user_libc.o obj/user_malloc.o obj/
 	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o graphics_test.elf $^
 	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary graphics_test.elf $(GRAPHICS_TEST_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN)
+$(SMP_TEST_BIN): obj/smp_test.o obj/user_libc.o obj/user_malloc.o
+	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o smp_test.elf $^
+	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary smp_test.elf $(SMP_TEST_BIN)
+
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN)
 	dd if=/dev/zero of=disk.img bs=1M count=512
 	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img 
 	/opt/homebrew/bin/mcopy -i disk.img $(MEM_TEST_BIN) ::/MEMTEST.BIN
@@ -134,12 +143,13 @@ disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TE
 	/opt/homebrew/bin/mcopy -i disk.img $(HEAP_TEST_BIN) ::/HEAPTEST.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(SPAWN_TEST_BIN) ::/SPAWN.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(GRAPHICS_TEST_BIN) ::/GRAPHICS.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(SMP_TEST_BIN) ::/SMPTEST.BIN
 	touch TEST.TXT
 	/opt/homebrew/bin/mcopy -i disk.img TEST.TXT ::/TEST.TXT
 
 # Target to run the OS inside QEMU
 run: disk.img
-	$(QEMU) -M virt -cpu cortex-a53 -m 4096M -kernel $(TARGET) -display cocoa -serial stdio -append "console=ttyAMA0" -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -semihosting -action shutdown=poweroff
+	$(QEMU) -M virt -cpu cortex-a53 -smp 4 -m 4096M -kernel $(TARGET) -display cocoa -serial stdio -append "console=ttyAMA0" -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -semihosting -action shutdown=poweroff
 
 # Target to exit QEMU properly
 # Note: Ctrl+A, X exists QEMU nographic mode.

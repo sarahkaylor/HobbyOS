@@ -15,6 +15,7 @@ extern uint32_t gic_acknowledge_interrupt(void);
 extern void gic_end_interrupt(uint32_t intid);
 extern void virtio_blk_handle_irq(void);
 extern uint32_t virtio_blk_irq;
+extern uint32_t get_cpuid(void);
 
 #define SYS_WRITE_CONSOLE (1)
 #define SYS_EXIT          (2)
@@ -26,6 +27,7 @@ extern uint32_t virtio_blk_irq;
 #define SYS_SPAWN         (8)
 #define SYS_MAP_FB        (9)
 #define SYS_FLUSH_FB      (10)
+#define SYS_GET_CPUID     (11)
 
 // Timer PPI interrupt ID on QEMU virt (non-secure physical timer)
 #define TIMER_PPI_INTID 30
@@ -119,6 +121,10 @@ static void sys_flush_fb(struct trap_frame *tf) {
   tf->regs[0] = 0;
 }
 
+static void sys_get_cpuid(struct trap_frame *tf) {
+    tf->regs[0] = (uint64_t)get_cpuid();
+}
+
 void sync_lower_handler_c(struct trap_frame *tf) {
   uint64_t esr;
   __asm__ volatile("mrs %0, esr_el1" : "=r"(esr));
@@ -150,10 +156,15 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_map_fb(tf);
     } else if (syscall_num == SYS_FLUSH_FB) {
       sys_flush_fb(tf);
+    } else if (syscall_num == SYS_GET_CPUID) {
+      sys_get_cpuid(tf);
     } else {
       uart_puts("Unknown System Call Invoked!\n");
       tf->regs[0] = -1; // Return error
     }
+    
+    // Increment ELR to return after the SVC instruction
+    tf->elr += 4;
   } else if (ec == 0x20 || ec == 0x24) {
     // EC = 0x20: Instruction Abort from a lower Exception Level
     // EC = 0x24: Data Abort from a lower Exception Level

@@ -42,8 +42,8 @@ SECTIONS
         __bss_end = .;
     }
 
-    /* Allocate 64KB for the stack */
+    /* Allocate 256KB for the stack (64KB per core for 4 cores) */
     . = ALIGN(16);
-    . = . + 0x10000;
+    . = . + 0x40000;
     __stack_top = .;
 }

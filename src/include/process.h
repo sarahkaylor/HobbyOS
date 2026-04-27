@@ -4,8 +4,9 @@
 #include "trap.h"
 #include <stdint.h>
 
-#define MAX_PROCESSES 8
+#define MAX_PROCESSES 32
 #define MAX_OPEN_FDS 4
+#define MAX_CPUS 4
 
 // Process states
 #define PROC_STATE_FREE 0

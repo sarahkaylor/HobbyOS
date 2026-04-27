@@ -1,8 +1,8 @@
 #include "fat16.h"
 #include "gic.h"
 #include "mmu.h"
-#include "program_loader.h"
 #include "process.h"
+#include "program_loader.h"
 #include "timer.h"
 #include "trap.h"
 #include "virtio_blk.h"
@@ -10,6 +10,13 @@
 #include <stdint.h>
 void virtio_blk_handle_irq(void);
 extern int virtio_blk_irq;
+extern void smp_init(void);
+extern void mmu_init_core(void);
+extern void gic_init_cpu(void);
+extern uint32_t get_cpuid(void);
+#include "lock.h"
+
+static spinlock_t uart_lock;
 
 void irq_handler_c(void) {
   uint32_t intid = gic_acknowledge_interrupt();
@@ -40,19 +47,23 @@ void uart_putc(char c) {
 }
 
 void uart_puts(const char *s) {
+  uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
   while (*s != '\0') {
     uart_putc(*s);
     s++;
   }
+  spinlock_release_irqrestore(&uart_lock, flags);
 }
 
 void print_int(int val) {
+  uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
   if (val < 0) {
     uart_putc('-');
     val = -val;
   }
   if (val == 0) {
     uart_putc('0');
+    spinlock_release_irqrestore(&uart_lock, flags);
     return;
   }
   char buf[16];
@@ -63,17 +74,22 @@ void print_int(int val) {
   }
   while (idx > 0)
     uart_putc(buf[--idx]);
+  spinlock_release_irqrestore(&uart_lock, flags);
 }
 
 void uart_print_hex(uint64_t val) {
+  uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
   char hex_chars[] = "0123456789ABCDEF";
-  uart_puts("0x");
+  uart_putc('0');
+  uart_putc('x');
   for (int i = 60; i >= 0; i -= 4) {
     uart_putc(hex_chars[(val >> i) & 0xF]);
   }
+  spinlock_release_irqrestore(&uart_lock, flags);
 }
 
 void main(void) {
+  spinlock_init(&uart_lock);
   uart_puts("Booting AArch64 OS...\n");
 
   // Virtual Memory Protection
@@ -81,12 +97,22 @@ void main(void) {
   uart_puts("MMU Initialized: Page Tables setup securely.\n");
 
   if (virtio_gpu_init() == 0) {
-      uart_puts("VirtIO GPU successfully initialized.\n");
+    uart_puts("VirtIO GPU successfully initialized.\n");
   } else {
-      uart_puts("VirtIO GPU initialization failed!\n");
+    uart_puts("VirtIO GPU initialization failed!\n");
   }
 
   gic_init();
+
+  // Initialize multitasking and secondary cores early
+  process_init();
+
+  // Enable the timer PPI (INTID 30) for preemptive scheduling
+  gic_enable_interrupt(30);
+  timer_init();
+
+  // Wake up secondary cores via PSCI
+  smp_init();
 
   // Clears the standard I/F interrupt masking flags from the hardware PSTATE
   // enabling the CPU interface to natively accept GIC triggers dynamically.
@@ -109,54 +135,44 @@ void main(void) {
   }
   uart_puts("FAT-16 filesystem successfully initialized.\n");
 
-  // Load and execute the console tests program (legacy sequential mode)
-  if (load_and_run_program("CONSOLE.BIN") != 0) {
-    uart_puts("Failed to load and execute CONSOLE.BIN!\n");
-  } else {
-    uart_puts("CONSOLE.BIN executed successfully.\n");
-  }
-
-  // Load and execute the memory protection test program
-  if (load_and_run_program("MEMTEST.BIN") != 0) {
-    uart_puts("Failed to load and execute MEMTEST.BIN!\n");
-  } else {
-    uart_puts("MEMTEST.BIN executed successfully.\n");
-  }
-
-  // Load and execute the file i/o test program
-  if (load_and_run_program("FILEIO.BIN") != 0) {
-    uart_puts("Failed to load and execute FILEIO.BIN!\n");
-  } else {
-    uart_puts("FILEIO.BIN executed successfully.\n");
-  }
-
-  // Load and execute the heap test program
-  if (load_and_run_program("HEAPTEST.BIN") != 0) {
-    uart_puts("Failed to load and execute HEAPTEST.BIN!\n");
-  } else {
-    uart_puts("HEAPTEST.BIN executed successfully.\n");
-  }
-
   // -----------------------------------------------------------------------
-  // Multitasking: Initialize the scheduler, load the fork test, and start
+  // Parallel Boot: Load all programs into the scheduler.
+  // Secondary cores are already spinning in start_scheduler() and will
+  // pick these up as soon as they are marked READY.
   // -----------------------------------------------------------------------
-  uart_puts("\n--- Multitasking Subsystem ---\n");
+  uart_puts("\n--- Parallel Program Loading ---\n");
 
-  process_init();
+  load_and_run_program_in_scheduler("CONSOLE.BIN");
+  load_and_run_program_in_scheduler("MEMTEST.BIN");
+  load_and_run_program_in_scheduler("FILEIO.BIN");
+  load_and_run_program_in_scheduler("HEAPTEST.BIN");
+  load_and_run_program_in_scheduler("SPAWN.BIN");
+  load_and_run_program_in_scheduler("FORKTEST.BIN");
+  load_and_run_program_in_scheduler("GRAPHICS.BIN");
+  load_and_run_program_in_scheduler("SMPTEST.BIN");
 
-  int p1 = load_and_run_program_in_scheduler("SPAWN.BIN");
-  int p2 = load_and_run_program_in_scheduler("FORKTEST.BIN");
-  int p3 = load_and_run_program_in_scheduler("GRAPHICS.BIN");
-
-  if (p1 >= 0 || p2 >= 0 || p3 >= 0) {
-    // Enable the timer PPI (INTID 30) for preemptive scheduling
-    gic_enable_interrupt(30);
-    timer_init();
-
-    // Start the scheduler — this will eret into the first process.
-    // Returns when all processes have exited.
-    start_scheduler();
-  }
+  // Join the other cores in the scheduler
+  start_scheduler();
 
   uart_puts("System halt.\n");
+}
+
+void secondary_main(void) {
+  uint32_t cpu = get_cpuid();
+
+  // 1. Initialize local MMU
+  mmu_init_core();
+
+  // 2. Initialize local GIC CPU interface
+  gic_init_cpu();
+
+  // 3. Enable local timer
+  timer_init();
+  gic_enable_interrupt(30);
+
+  // 4. Enable IRQ
+  __asm__ volatile("msr daifclr, #2");
+
+  // 5. Enter scheduler
+  start_scheduler();
 }

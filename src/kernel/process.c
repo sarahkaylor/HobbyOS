@@ -7,9 +7,11 @@ extern void uart_puts(const char *s);
 extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
 
+extern uint32_t get_cpuid(void);
+
 // Process table
 static struct process proc_table[MAX_PROCESSES];
-static int current_pid = -1;
+static int cpu_current_pids[MAX_CPUS];
 static spinlock_t proc_lock;
 
 // Simple bump allocator for 2MB-aligned process memory regions
@@ -62,17 +64,23 @@ void process_init(void) {
         proc_table[i].user_phys_base = 0;
         proc_table[i].num_open_fds = 0;
     }
-    current_pid = -1;
+    for (int i = 0; i < MAX_CPUS; i++) {
+        cpu_current_pids[i] = -1;
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Current process accessor
 // ---------------------------------------------------------------------------
 struct process *current_process(void) {
+    uint32_t cpu = get_cpuid();
+    if (cpu >= MAX_CPUS) return 0;
+    
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     struct process *p = 0;
-    if (current_pid >= 0 && current_pid < MAX_PROCESSES) {
-        p = &proc_table[current_pid];
+    int pid = cpu_current_pids[cpu];
+    if (pid >= 0 && pid < MAX_PROCESSES) {
+        p = &proc_table[pid];
     }
     spinlock_release_irqrestore(&proc_lock, flags);
     return p;
@@ -92,6 +100,7 @@ void process_set_entry(int pid, uint64_t elr, uint64_t sp) {
     proc_table[pid].context[31] = elr;  // ELR (entry point)
     proc_table[pid].context[33] = sp;   // SP_EL0 (stack pointer)
     proc_table[pid].context[32] = 0;    // SPSR = EL0t
+    proc_table[pid].state = PROC_STATE_READY; // Mark as runnable!
     spinlock_release_irqrestore(&proc_lock, flags);
 }
 
@@ -118,7 +127,6 @@ int process_create(void) {
     }
 
     struct process *p = &proc_table[pid];
-    p->state = PROC_STATE_READY;
     p->parent_pid = -1;
     p->num_open_fds = 0;
 
@@ -189,12 +197,17 @@ static void restore_context(struct process *p, struct trap_frame *tf) {
 // Schedule — round-robin context switch
 // ---------------------------------------------------------------------------
 void schedule(struct trap_frame *tf) {
+    uint32_t cpu = get_cpuid();
+    if (cpu >= MAX_CPUS) return;
+
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    int current_pid = cpu_current_pids[cpu];
+
     // If no process is running, find the first ready one
     if (current_pid < 0) {
         for (int i = 0; i < MAX_PROCESSES; i++) {
             if (proc_table[i].state == PROC_STATE_READY) {
-                current_pid = i;
+                cpu_current_pids[cpu] = i;
                 proc_table[i].state = PROC_STATE_RUNNING;
                 restore_context(&proc_table[i], tf);
                 mmu_switch_user_mapping(proc_table[i].user_phys_base);
@@ -203,7 +216,9 @@ void schedule(struct trap_frame *tf) {
             }
         }
         // No runnable processes
-        uart_puts("[KERNEL] No runnable processes. Halting.\n");
+        uart_puts("[KERNEL] CPU ");
+        print_int(cpu);
+        uart_puts(": No runnable processes. Halting.\n");
         spinlock_release_irqrestore(&proc_lock, flags);
         while (1) { __asm__ volatile("wfi"); }
     }
@@ -233,17 +248,26 @@ void schedule(struct trap_frame *tf) {
             spinlock_release_irqrestore(&proc_lock, flags);
             return;
         }
-        uart_puts("[KERNEL] All processes exited. Halting.\n");
+        
+        // This process exited, and no others ready
+        cpu_current_pids[cpu] = -1;
+        uart_puts("[KERNEL] CPU ");
+        print_int(cpu);
+        uart_puts(": All processes completed on this core.\n");
         spinlock_release_irqrestore(&proc_lock, flags);
-        // Return with a halting ELR — jump to a wfi loop in kernel
-        // We'll longjmp back to the scheduler start point
-        extern void scheduler_finished(void);
-        scheduler_finished();
+        
+        // If CPU 0, wait for others or halt
+        if (cpu == 0) {
+            extern void scheduler_finished(void);
+            scheduler_finished();
+        } else {
+            while(1) { __asm__ volatile("wfi"); }
+        }
         return;
     }
 
     // Switch to next process
-    current_pid = next;
+    cpu_current_pids[cpu] = next;
     proc_table[next].state = PROC_STATE_RUNNING;
     restore_context(&proc_table[next], tf);
     mmu_switch_user_mapping(proc_table[next].user_phys_base);
@@ -254,7 +278,9 @@ void schedule(struct trap_frame *tf) {
 // Process Exit — mark current process as exited, schedule next
 // ---------------------------------------------------------------------------
 void process_exit(struct trap_frame *tf) {
+    uint32_t cpu = get_cpuid();
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    int current_pid = cpu_current_pids[cpu];
     if (current_pid < 0) {
         spinlock_release_irqrestore(&proc_lock, flags);
         return;
@@ -262,7 +288,9 @@ void process_exit(struct trap_frame *tf) {
 
     uart_puts("[KERNEL] Process PID=");
     print_int(current_pid);
-    uart_puts(" exited.\n");
+    uart_puts(" exited on CPU ");
+    print_int(cpu);
+    uart_puts(".\n");
 
     proc_table[current_pid].state = PROC_STATE_EXITED;
     spinlock_release_irqrestore(&proc_lock, flags);
@@ -275,7 +303,9 @@ void process_exit(struct trap_frame *tf) {
 // Fork — duplicate the current process
 // ---------------------------------------------------------------------------
 int process_fork(struct trap_frame *tf) {
+    uint32_t cpu = get_cpuid();
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    int current_pid = cpu_current_pids[cpu];
     if (current_pid < 0) {
         spinlock_release_irqrestore(&proc_lock, flags);
         return -1;
@@ -290,7 +320,8 @@ int process_fork(struct trap_frame *tf) {
     if (child_pid < 0) return -1;
 
     flags = spinlock_acquire_irqsave(&proc_lock);
-    parent = &proc_table[current_pid]; // Re-acquire after potential change
+    current_pid = cpu_current_pids[cpu]; // Re-acquire after potential change
+    parent = &proc_table[current_pid];
     struct process *child = &proc_table[child_pid];
     child->parent_pid = current_pid;
 
@@ -321,7 +352,9 @@ int process_fork(struct trap_frame *tf) {
     print_int(current_pid);
     uart_puts(" -> child PID=");
     print_int(child_pid);
-    uart_puts("\n");
+    uart_puts(" (on CPU ");
+    print_int(cpu);
+    uart_puts(")\n");
 
     spinlock_release_irqrestore(&proc_lock, flags);
 
@@ -342,9 +375,12 @@ void scheduler_finished(void) {
 }
 
 void start_scheduler(void) {
-    uart_puts("[KERNEL] Starting preemptive scheduler...\n");
+    uint32_t cpu = get_cpuid();
+    uart_puts("[KERNEL] CPU ");
+    print_int(cpu);
+    uart_puts(": Starting preemptive scheduler...\n");
 
-    if (setjmp(scheduler_return_ctx) != 0) {
+    if (cpu == 0 && setjmp(scheduler_return_ctx) != 0) {
         // All processes exited, returned here via longjmp
         uart_puts("[KERNEL] Scheduler: all processes completed.\n");
         // Re-enable IRQs that may have been masked during exception handling
@@ -352,43 +388,50 @@ void start_scheduler(void) {
         return;
     }
 
-    // Find the first ready process
-    uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-    for (int i = 0; i < MAX_PROCESSES; i++) {
-        if (proc_table[i].state == PROC_STATE_READY) {
-            current_pid = i;
-            proc_table[i].state = PROC_STATE_RUNNING;
+    while (1) {
+        // Find the first ready process
+        uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+        for (int i = 0; i < MAX_PROCESSES; i++) {
+            if (proc_table[i].state == PROC_STATE_READY) {
+                cpu_current_pids[cpu] = i;
+                proc_table[i].state = PROC_STATE_RUNNING;
 
-            // Switch page tables to this process
-            mmu_switch_user_mapping(proc_table[i].user_phys_base);
+                // Switch page tables to this process
+                mmu_switch_user_mapping(proc_table[i].user_phys_base);
 
-            uart_puts("[KERNEL] Launching PID=");
-            print_int(i);
-            uart_puts(" at EL0\n");
+                uart_puts("[KERNEL] Launching PID=");
+                print_int(i);
+                uart_puts(" at EL0 on CPU ");
+                print_int(cpu);
+                uart_puts("\n");
 
-            // Drop to EL0: set up ELR, SPSR, SP_EL0 and eret
-            uint64_t entry = proc_table[i].context[31]; // elr
-            uint64_t sp    = proc_table[i].context[33];  // sp_el0
+                // Drop to EL0: set up ELR, SPSR, SP_EL0 and eret
+                uint64_t entry = proc_table[i].context[31]; // elr
+                uint64_t sp    = proc_table[i].context[33];  // sp_el0
 
-            spinlock_release_irqrestore(&proc_lock, flags);
-            __asm__ volatile(
-                "msr daifset, #2\n"       // Disable IRQ during transition
-                "msr elr_el1, %[entry]\n"
-                "mov x2, #0\n"            // SPSR = EL0t
-                "msr spsr_el1, x2\n"
-                "msr sp_el0, %[stack]\n"
-                "mov x0, #0\n"
-                "mov x1, #0\n"
-                "eret\n"
-                :
-                : [entry] "r" (entry),
-                  [stack] "r" (sp)
-                : "x0", "x1", "x2", "memory"
-            );
+                spinlock_release_irqrestore(&proc_lock, flags);
+                __asm__ volatile(
+                    "msr daifset, #2\n"       // Disable IRQ during transition
+                    "msr elr_el1, %[entry]\n"
+                    "mov x2, #0\n"            // SPSR = EL0t
+                    "msr spsr_el1, x2\n"
+                    "msr sp_el0, %[stack]\n"
+                    "mov x0, #0\n"
+                    "mov x1, #0\n"
+                    "eret\n"
+                    :
+                    : [entry] "r" (entry),
+                      [stack] "r" (sp)
+                    : "x0", "x1", "x2", "memory"
+                );
 
-            // Never reached
-            break;
+                // Never reached
+                break;
+            }
         }
+        spinlock_release_irqrestore(&proc_lock, flags);
+        
+        // No process found, wait for an interrupt (like timer) before trying again
+        __asm__ volatile("wfi");
     }
-    spinlock_release_irqrestore(&proc_lock, flags);
 }

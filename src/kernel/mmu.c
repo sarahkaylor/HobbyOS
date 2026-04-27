@@ -21,13 +21,8 @@ static spinlock_t mmu_lock;
 // Level 2 Block Descriptor (2MB) limits
 // 512 entries * 2MB = 1GB of mapped physical space
 
-void mmu_init(void) {
+void mmu_init_tables(void) {
     spinlock_init(&mmu_lock);
-    // 1. Configure the MAIR_EL1 attributes
-    uint64_t mair = (MAIR_DEVICE_nGnRnE << (8 * PT_MEM_DEVICE)) |
-                    (MAIR_NORMAL_NC << (8 * PT_MEM_NORMAL));
-    __asm__ volatile("msr mair_el1, %0" : : "r"(mair));
-
     // 2. Clear tables
     for (int i = 0; i < 512; i++) {
         l1_table[i] = 0;
@@ -75,6 +70,13 @@ void mmu_init(void) {
         }
         l2_table_1[i] = addr | attr;
     }
+}
+
+void mmu_init_core(void) {
+    // 1. Configure the MAIR_EL1 attributes
+    uint64_t mair = (MAIR_DEVICE_nGnRnE << (8 * PT_MEM_DEVICE)) |
+                    (MAIR_NORMAL_NC << (8 * PT_MEM_NORMAL));
+    __asm__ volatile("msr mair_el1, %0" : : "r"(mair));
 
     // 5. Setup TCR_EL1 (Translation Control Register) 
     // TxSZ=25 (39-bit VA), 4KB Granule, Inner/Outer Non-cacheable (matching our Normal NC policy)
@@ -102,6 +104,11 @@ void mmu_init(void) {
     
     // Sync
     __asm__ volatile("isb");
+}
+
+void mmu_init(void) {
+    mmu_init_tables();
+    mmu_init_core();
 }
 
 uint64_t mmu_make_user_block_desc(uint64_t phys_addr) {

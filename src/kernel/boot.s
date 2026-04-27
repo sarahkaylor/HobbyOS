@@ -5,16 +5,19 @@ _start:
     // Read the CPU ID (MPIDR_EL1)
     mrs     x0, mpidr_el1
     and     x0, x0, #0xFF
-    // If not CPU 0, branch to halt (we only want one core to run this)
-    cbnz    x0, halt
+    
+    // Set stack pointer: __stack_top - (cpu_id * 64KB)
+    mov     x1, #0x10000             // 64KB per CPU
+    mul     x1, x0, x1
+    ldr     x2, =__stack_top
+    sub     sp, x2, x1
 
     // Set Vector Base Address Register for EL1
-    ldr     x0, =vectors
-    msr     vbar_el1, x0
+    ldr     x1, =vectors
+    msr     vbar_el1, x1
 
-    // Set stack pointer
-    ldr     x0, =__stack_top
-    mov     sp, x0
+    // If not CPU 0, branch to halt (secondary cores start here only if not using PSCI)
+    cbnz    x0, halt
 
     // Clear the BSS section
     ldr     x1, =__bss_start
@@ -56,6 +59,29 @@ halt:
     // Last resort: infinite loop
     wfi
     b       halt
+
+.global secondary_entry
+secondary_entry:
+    // Read the CPU ID (MPIDR_EL1)
+    mrs     x0, mpidr_el1
+    and     x0, x0, #0xFF
+
+    // Set stack pointer: __stack_top - (cpu_id * 64KB)
+    mov     x1, #0x10000             // 64KB per CPU
+    mul     x1, x0, x1
+    ldr     x2, =__stack_top
+    sub     sp, x2, x1
+
+    // Set Vector Base Address Register for EL1
+    ldr     x1, =vectors
+    msr     vbar_el1, x1
+
+    // Call the C secondary_main function
+    bl      secondary_main
+
+secondary_halt:
+    wfi
+    b       secondary_halt
 
 // The Vector Base Address Register (VBAR_EL1) requires a 2KB aligned address.
 // This `.align 11` ensures the vector_table symbol sits strictly on a 2048-byte boundary.

@@ -11,6 +11,7 @@
 #define SYS_SPAWN         (8)
 #define SYS_MAP_FB        (9)
 #define SYS_FLUSH_FB      (10)
+#define SYS_GET_CPUID     (11)
 
 static inline long syscall0(long sys_num) {
   register long x8 __asm__("x8") = sys_num;
@@ -73,4 +74,8 @@ void* map_fb(void) {
 
 void flush_fb(void) {
   syscall0(SYS_FLUSH_FB);
+}
+
+int get_cpuid(void) {
+  return (int)syscall0(SYS_GET_CPUID);
 }

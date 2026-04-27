@@ -30,7 +30,7 @@ static inline uint32_t gicc_read32(uint32_t offset) {
     return *(volatile uint32_t*)((uint8_t*)GICC_BASE + offset);
 }
 
-void gic_init(void) {
+void gic_init_distributor(void) {
     // Disable Distributor initially
     gicd_write32(GICD_CTLR, 0);
 
@@ -49,12 +49,19 @@ void gic_init(void) {
 
     // Enable Distributor
     gicd_write32(GICD_CTLR, 1);
+}
 
+void gic_init_cpu(void) {
     // Allow all priority levels higher than 0xF0
     gicc_write32(GICC_PMR, 0xF0);
 
     // Enable CPU Interface
     gicc_write32(GICC_CTLR, 1);
+}
+
+void gic_init(void) {
+    gic_init_distributor();
+    gic_init_cpu();
 }
 
 void gic_enable_interrupt(uint32_t intid) {
