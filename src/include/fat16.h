@@ -26,4 +26,4 @@ int file_write(int fd, const void* buf, int size);
 // Returns 0 on success, -1 on failure.
 int file_seek(int fd, int offset);
 
-#endif
+#endif // FAT16_H

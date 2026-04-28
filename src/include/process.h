@@ -4,94 +4,103 @@
 #include "trap.h"
 #include <stdint.h>
 
-#define MAX_PROCESSES 32
-#define MAX_OPEN_FDS 4
-#define MAX_CPUS 4
+#define MAX_PROCESSES 32 // Maximum number of concurrent processes
+#define MAX_OPEN_FDS 4   // Maximum number of open file descriptors per process
+#define MAX_CPUS 4       // Maximum number of CPU cores supported
 
-// Process states
-#define PROC_STATE_FREE 0
-#define PROC_STATE_ALLOCATED 1
-#define PROC_STATE_READY 2
-#define PROC_STATE_RUNNING 3
-#define PROC_STATE_EXITED 4
+// Process states for lifecycle management
+#define PROC_STATE_FREE 0      // Slot is available for a new process
+#define PROC_STATE_ALLOCATED 1 // Process is being initialized
+#define PROC_STATE_READY 2     // Process is ready to be scheduled
+#define PROC_STATE_RUNNING 3   // Process is currently executing on a CPU
+#define PROC_STATE_EXITED 4    // Process has finished execution
 
+// Kernel memory region (0GB to 1GB)
 #define KERNEL_START 0x00000000
 #define KERNEL_END 0x3FFFFFFF
 
+// User memory region (1GB to 2GB)
 #define USER_START 0x40000000
 #define USER_END 0x7FFFFFFF
 
-// Page size = 4kb = 0x1000
+// Standard 4KB page size
 #define PAGE_SIZE 0x1000
 
-// Region size memory: 64MB total (as requested)
+// Size of the user memory region allocated per process (64MB)
 #define USER_REGION_SIZE    0x4000000
 
-// 512 pages per region of size 4k = 2MB
+// Number of 4KB pages in a 64MB user region
 #define PAGES_PER_REGION ((USER_REGION_SIZE) / (PAGE_SIZE))
 
-// Virtual address where every process sees its own code/data (identity across
-// all)
+// Virtual address base where every user process starts its execution
 #define USER_VIRT_BASE 0x44000000
-// Stack is at the top of the allocated region
+
+// Initial stack pointer for user processes, located at the top of the virtual region
 #define USER_VIRT_STACK ((USER_VIRT_BASE) + (USER_REGION_SIZE))
 
-// Physical base for dynamically allocated process memory regions (heap)
-// Starts safely above the user virtual region
+// Physical address pool base for dynamically allocated process memory
+// This ensures user memory does not overlap with kernel code
 #define PROC_PHYS_POOL_BASE 0x50000000
 
-// QEMU virt machine GICv2 addresses
-#define GICD_BASE 0x08000000
-#define GICC_BASE 0x08010000
+// QEMU Virt machine GICv2 memory-mapped register addresses
+#define GICD_BASE 0x08000000 // Distributor base address
+#define GICC_BASE 0x08010000 // CPU Interface base address
 
+// Process control block (PCB) structure
 struct process {
-  int pid;
-  int state;
-  int parent_pid;
+  int pid;            // Process ID
+  int state;          // Current state (RUNNING, READY, etc.)
+  int parent_pid;     // PID of the parent process (for fork/wait)
 
-  // Saved CPU context: x0–x29 (30 regs), lr (x30), elr, spsr, sp_el0
+  // Saved CPU context used during context switching
+  // Includes x0–x29 (30 regs), lr (x30), elr, spsr, and sp_el0
   uint64_t context[34];
 
-  // Per-process L2 page table for the user virtual region
-  // Dynamically allocated, 512 entries, 4KB aligned
+  // Pointer to the per-process Level 2 page table for user virtual memory
+  // This is dynamically allocated and must be 4KB aligned
   uint64_t *user_l2_table;
 
-  // Physical base of this process's 2MB user memory
+  // Physical base address of the 64MB block allocated for this process
   uint64_t user_phys_base;
 
-  // Open file descriptors (copied on fork)
+  // Array of open file descriptor indices into the global file table
   int open_fds[MAX_OPEN_FDS];
+  
+  // Current count of open file descriptors for this process
   int num_open_fds;
 };
 
-// Initialize the process subsystem (zero out table)
+// Initialize the process subsystem and zero out the process table.
 void process_init(void);
 
-// Create a new process with allocated memory. Returns PID or -1.
+// Create a new process, allocate memory, and initialize its PCB.
+// Returns the new PID or -1 on failure.
 int process_create(void);
 
-// Fork the currently running process. Called from SVC handler.
-// Returns child PID to parent, 0 to child (via trap frame manipulation).
+// Fork the current process to create a child process.
+// Returns child PID to parent, 0 to child.
+// tf: The trap frame containing the parent's CPU state.
 int process_fork(struct trap_frame *tf);
 
-// Round-robin schedule: save current context, load next process.
-// Called from timer IRQ handler with the interrupted process's trap frame.
+// Perform a round-robin context switch.
+// tf: The trap frame of the interrupted process to be saved.
 void schedule(struct trap_frame *tf);
 
-// Mark the current process as exited.
+// Mark the current process as EXITED and cleanup resources.
+// tf: The trap frame of the process calling exit.
 void process_exit(struct trap_frame *tf);
 
-// Start the scheduler: pick the first READY process and eret into it.
-// Does not return.
+// Start the scheduler on the current core.
+// Picks the first READY process and enters user mode via eret.
 void start_scheduler(void);
 
-// Get the currently running process (or NULL)
+// Retrieve the PCB of the process currently running on the local CPU.
 struct process *current_process(void);
 
-// Get the physical base address of a process's user memory
+// Get the physical base address of the memory region for a specific PID.
 uint64_t process_get_phys_base(int pid);
 
-// Set the initial entry point and stack pointer for a process
+// Initialize the entry point (ELR) and stack pointer (SP) for a process.
 void process_set_entry(int pid, uint64_t elr, uint64_t sp);
 
-#endif
+#endif // PROCESS_H

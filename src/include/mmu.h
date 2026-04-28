@@ -3,18 +3,23 @@
 
 #include <stdint.h>
 
-// Boot-time MMU initialization (identity-mapped page tables)
+// Initialize the MMU for the boot core.
+// Sets up identity mapping for the kernel and initial user mappings.
 void mmu_init(void);
 
-// Switch the user-space virtual mapping (0x44000000) to point at a different
-// physical 2MB region. Called during context switches.
-//   phys_base: the physical address of the process's 2MB user memory
+// Switch the user-space virtual mapping (USER_VIRT_BASE) to point at a different
+// physical memory region. Used during context switches to isolate processes.
+// phys_base: The physical address of the process's allocated memory block.
 void mmu_switch_user_mapping(uint64_t phys_base);
 
-// Create and populate an L2 page table entry for a process's user region.
-// This configures the 2MB block descriptor with User RW, PXN=1, Normal NC.
-// Returns the descriptor value to store in the L2 table.
+// Create an ARMv8-A Level 2 Block Descriptor (2MB) for user-space memory.
+// Configures attributes: Normal memory, User Read/Write, PXN=1 (Privileged Execute Never).
+// phys_addr: The physical address to map.
+// Returns: The 64-bit descriptor value.
 uint64_t mmu_make_user_block_desc(uint64_t phys_addr);
 
-#endif
+// Map the physical framebuffer address to the user-space virtual address (0x50000000).
+// Used to enable graphics support in user-mode applications.
 void mmu_map_user_framebuffer(uint64_t phys_addr);
+
+#endif // MMU_H
