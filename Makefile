@@ -168,7 +168,7 @@ run: hobbyos.elf disk.img
 # Clean rule to remove build artifacts
 clean:
 	-pkill qemu-system-aarch64
-	rm -rf $(OBJ_DIR) $(TARGET) hobbyos disk.img memtest.elf fileio_test.elf fork_test.elf heap_test.elf spawn_test.elf $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN)
+	rm -rf $(OBJ_DIR) $(TARGET) hobbyos disk.img *.bin *.elf *.log
 
 memtest: $(MEM_TEST_BIN)
 
