@@ -7,6 +7,7 @@
 #include "trap.h"
 #include "virtio_blk.h"
 #include "virtio_gpu.h"
+#include "fs.h"
 #include <stdint.h>
 void virtio_blk_handle_irq(void);
 extern int virtio_blk_irq;
@@ -18,16 +19,19 @@ extern uint32_t get_cpuid(void);
 
 static spinlock_t uart_lock;
 
-void irq_handler_c(void) {
+void irq_handler_c(struct trap_frame *tf) {
   uint32_t intid = gic_acknowledge_interrupt();
 
   // VirtIO Block IRQ for located slot on virt machine
   if (intid == (uint32_t)virtio_blk_irq) {
     virtio_blk_handle_irq();
   } else if (intid == 30) {
-    // Timer PPI — just reload when taken from EL1
-    // (Scheduling only happens for EL0 interrupts via irq_lower_handler_c)
+    // Timer PPI
     timer_reload();
+    struct process *cur = current_process();
+    if (cur) {
+        schedule(tf);
+    }
   }
 
   gic_end_interrupt(intid);
@@ -39,10 +43,15 @@ void irq_handler_c(void) {
 // Pointer to the data register of the UART
 volatile uint32_t *const UART0_DR = (uint32_t *)UART0_BASE;
 
+// Pointer to the flag register of the UART
+volatile uint32_t *const UART0_FR = (uint32_t *)(UART0_BASE + 0x18);
+
 void uart_putc(char c) {
   if (c == '\n') {
+    while (*UART0_FR & (1 << 5)) { } // Wait until TXFF is clear
     *UART0_DR = (uint32_t)('\r');
   }
+  while (*UART0_FR & (1 << 5)) { } // Wait until TXFF is clear
   *UART0_DR = (uint32_t)(c);
 }
 
@@ -106,6 +115,9 @@ void main(void) {
 
   // Initialize multitasking and secondary cores early
   process_init();
+  fs_init();
+  extern void pipes_init(void);
+  pipes_init();
 
   // Enable the timer PPI (INTID 30) for preemptive scheduling
   gic_enable_interrupt(30);
@@ -142,14 +154,15 @@ void main(void) {
   // -----------------------------------------------------------------------
   uart_puts("\n--- Parallel Program Loading ---\n");
 
-  load_and_run_program_in_scheduler("CONSOLE.BIN");
-  load_and_run_program_in_scheduler("MEMTEST.BIN");
-  load_and_run_program_in_scheduler("FILEIO.BIN");
-  load_and_run_program_in_scheduler("HEAPTEST.BIN");
-  load_and_run_program_in_scheduler("SPAWN.BIN");
-  load_and_run_program_in_scheduler("FORKTEST.BIN");
-  load_and_run_program_in_scheduler("GRAPHICS.BIN");
-  load_and_run_program_in_scheduler("SMPTEST.BIN");
+  // load_and_run_program_in_scheduler("CONSOLE.BIN");
+  // load_and_run_program_in_scheduler("MEMTEST.BIN");
+  // load_and_run_program_in_scheduler("FILEIO.BIN");
+  // load_and_run_program_in_scheduler("HEAPTEST.BIN");
+  // load_and_run_program_in_scheduler("SPAWN.BIN");
+  // load_and_run_program_in_scheduler("FORKTEST.BIN");
+  // load_and_run_program_in_scheduler("GRAPHICS.BIN");
+  // load_and_run_program_in_scheduler("SMPTEST.BIN");
+  load_and_run_program_in_scheduler("PIPETEST.BIN");
 
   // Join the other cores in the scheduler
   start_scheduler();

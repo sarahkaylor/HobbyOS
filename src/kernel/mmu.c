@@ -3,10 +3,12 @@
 #include "process.h"
 #include "lock.h"
 
+extern uint32_t get_cpuid(void);
+
 // 4KB Table Arrays
-uint64_t l1_table[512] __attribute__((aligned(4096)));
+uint64_t l1_table[MAX_CPUS][512] __attribute__((aligned(4096)));
 static uint64_t l2_table_0[512] __attribute__((aligned(4096)));
-uint64_t l2_table_1[512] __attribute__((aligned(4096)));
+uint64_t l2_table_1[MAX_CPUS][512] __attribute__((aligned(4096)));
 static spinlock_t mmu_lock;
 
 #define MAIR_DEVICE_nGnRnE  0x00
@@ -24,16 +26,20 @@ static spinlock_t mmu_lock;
 void mmu_init_tables(void) {
     spinlock_init(&mmu_lock);
     // 2. Clear tables
-    for (int i = 0; i < 512; i++) {
-        l1_table[i] = 0;
-        l2_table_0[i] = 0;
-        l2_table_1[i] = 0;
+    for (int c = 0; c < MAX_CPUS; c++) {
+        for (int i = 0; i < 512; i++) {
+            l1_table[c][i] = 0;
+            l2_table_1[c][i] = 0;
+        }
+        // 3. Link L1 -> L2 Tables
+        // Descriptor type: 0b11 (Table)
+        l1_table[c][0] = ((uint64_t)&l2_table_0) | 0b11;
+        l1_table[c][1] = ((uint64_t)&l2_table_1[c]) | 0b11;
     }
-
-    // 3. Link L1 -> L2 Tables
-    // Descriptor type: 0b11 (Table)
-    l1_table[0] = ((uint64_t)&l2_table_0) | 0b11;
-    l1_table[1] = ((uint64_t)&l2_table_1) | 0b11;
+    
+    for (int i = 0; i < 512; i++) {
+        l2_table_0[i] = 0;
+    }
 
     // 4. Populate L2 Tables
     // L2 Table 0 covers KERNEL_START - KERNEL_END (1GB)
@@ -68,7 +74,10 @@ void mmu_init_tables(void) {
         } else {
             attr |= (1ULL << 54) | (1ULL << 53); // Device default fallback
         }
-        l2_table_1[i] = addr | attr;
+        // L2 Table 1 covers USER_START - 0x7FFFFFFF (RAM, 1GB)
+        for (int c = 0; c < MAX_CPUS; c++) {
+            l2_table_1[c][i] = addr | attr;
+        }
     }
 }
 
@@ -89,8 +98,9 @@ void mmu_init_core(void) {
 
     __asm__ volatile("msr tcr_el1, %0" : : "r"(tcr));
 
-    // 6. Set TTBR0_EL1
-    __asm__ volatile("msr ttbr0_el1, %0" : : "r"((uint64_t)&l1_table));
+    // 6. Set TTBR0_EL1 for this specific CPU
+    uint32_t cpu = get_cpuid();
+    __asm__ volatile("msr ttbr0_el1, %0" : : "r"((uint64_t)&l1_table[cpu]));
 
     // Instruction barrier to ensure writes are complete
     __asm__ volatile("isb");
@@ -130,8 +140,9 @@ void mmu_switch_user_mapping(uint64_t phys_base) {
     int num_blocks = USER_REGION_SIZE / 0x200000;
     if (USER_REGION_SIZE % 0x200000) num_blocks++;
 
+    uint32_t cpu = get_cpuid();
     for (int i = 0; i < num_blocks; i++) {
-        l2_table_1[32 + i] = mmu_make_user_block_desc(phys_base + (uint64_t)i * 0x200000);
+        l2_table_1[cpu][32 + i] = mmu_make_user_block_desc(phys_base + (uint64_t)i * 0x200000);
     }
 
     // Invalidate TLB and synchronize
@@ -147,9 +158,9 @@ void mmu_switch_user_mapping(uint64_t phys_base) {
 void mmu_map_user_framebuffer(uint64_t phys_addr) {
     uint64_t flags = spinlock_acquire_irqsave(&mmu_lock);
     // Map to user virtual address 0x50000000
-    // L2 index: (0x50000000 - 0x40000000) / 0x200000 = 128
-    l2_table_1[128] = mmu_make_user_block_desc(phys_addr);
-    l2_table_1[129] = mmu_make_user_block_desc(phys_addr + 0x200000);
+    uint32_t cpu = get_cpuid();
+    l2_table_1[cpu][128] = mmu_make_user_block_desc(phys_addr);
+    l2_table_1[cpu][129] = mmu_make_user_block_desc(phys_addr + 0x200000);
 
     // Invalidate TLB and synchronize
     __asm__ volatile(

@@ -1,112 +1,60 @@
 #include "program_loader.h"
-#include "fat16.h"
+#include "fs.h"
 #include "setjmp.h"
 #include "process.h"
 
+extern struct process *process_get_pcb(int pid);
+extern void uart_puts(const char* s);
+extern void print_int(int val);
+
 jmp_buf user_exit_context;
 
-// Maximum size of user program we can load (64KB)
 #define MAX_PROGRAM_SIZE  0x10000
-
-extern void uart_puts(const char* s);
-extern void uart_putc(char c);
-extern void uart_print_hex(uint64_t val);
 
 int load_and_run_program(const char* filename) {
     uart_puts("Loading program: ");
     uart_puts(filename);
     uart_puts("\n");
 
-    // Open the file from disk
-    int fd = file_open(filename);
-    if (fd < 0) {
+    struct file f;
+    if (fat16_open(filename, &f) != 0) {
         uart_puts("Failed to locate ");
         uart_puts(filename);
         uart_puts(" on disk image!\n");
         return -1;
     }
 
-    // Read the program into user memory space
-    uart_puts("Found ");
-    uart_puts(filename);
-    uart_puts(", reading into User RAM...\n");
-    
-    int bytes_read = file_read(fd, (void*)USER_VIRT_BASE, MAX_PROGRAM_SIZE);
-    if (bytes_read < 0) {
+    int bytes_read = fat16_read(&f, (void*)USER_VIRT_BASE, MAX_PROGRAM_SIZE);
+    if (bytes_read <= 0) {
         uart_puts("Failed to read ");
         uart_puts(filename);
         uart_puts(" from disk!\n");
-        file_close(fd);
+        fat16_close(&f);
         return -1;
     }
     
-    uart_puts("Read ");
-extern void print_int(int val); // Use existing function
-print_int(bytes_read); 
-uart_puts(" bytes from disk\n");
-
-    if (bytes_read <= 0) {
-        uart_puts("ERROR: Program is empty or failed to read. Aborting.\n");
-        file_close(fd);
-        return -1;
-    }
-
-    // Close the file handle
-    file_close(fd);
-    uart_puts(filename);
-    uart_puts(" successfully copied. Dropping to User Space EL0...\n");
+    fat16_close(&f);
 
     if (setjmp(user_exit_context) != 0) {
-        // We returned here via longjmp (from a syscall or fault)
-        // CRITICAL FIX: The AArch64 exception handler automatically masks interrupts. 
-        // We must manually re-enable them (daifclr) when unwinding via longjmp.
         __asm__ volatile("msr daifclr, #2");
         return 0;
     }
 
-    uart_puts("Setting up EL0 state...\n");
-    uart_puts("SPSR value: 0x0 (EL0t)\n");
-
-    // Setup state for EL0 and jump to user program
-    // We must do this in a single block and disable interrupts to prevent 
-    // ELR_EL1/SPSR_EL1 from being overwritten by an IRQ during the transition.
     __asm__ volatile(
-        "msr daifset, #2\n"       // Disable IRQ in EL1
-        "msr elr_el1, %[entry]\n" // Set user entry point
-        "mov x2, #0\n"             // EL0t with DAIF bits cleared (in the SPSR)
+        "msr daifset, #2\n"
+        "msr elr_el1, %[entry]\n"
+        "mov x2, #0\n"
         "msr spsr_el1, x2\n"
-        "msr sp_el0, %[stack]\n"   // Set user stack pointer
-        "mov x0, #0\n"             // Clear x0 for the user program (it becomes EL0's x0)
-        "mov x1, #0\n"             // Clear x1
+        "msr sp_el0, %[stack]\n"
+        "mov x0, #0\n"
+        "mov x1, #0\n"
         "eret\n"
-        : // No outputs
-        : [entry] "r" ((long)USER_VIRT_BASE),
-          [stack] "r" ((long)(USER_VIRT_BASE + USER_REGION_SIZE))
+        : : [entry] "r" ((long)USER_VIRT_BASE),
+            [stack] "r" ((long)(USER_VIRT_BASE + USER_REGION_SIZE))
         : "x0", "x1", "x2", "memory"
     );
 
-    // This point should never be reached
     return -1;
-}
-
-int load_program_to_memory(const char* filename, void** buffer) {
-    int fd = file_open(filename);
-    if (fd < 0) {
-        return -1;
-    }
-
-    // For now, we'll just load to the standard user program area
-    if (buffer) {
-        *buffer = (void*)USER_VIRT_BASE;
-    }
-
-    if (file_read(fd, (void*)USER_VIRT_BASE, MAX_PROGRAM_SIZE) < 0) {
-        file_close(fd);
-        return -1;
-    }
-
-    file_close(fd);
-    return 0;
 }
 
 int load_and_run_program_in_scheduler(const char* filename) {
@@ -114,51 +62,53 @@ int load_and_run_program_in_scheduler(const char* filename) {
     uart_puts(filename);
     uart_puts("\n");
 
-    // Open the file from disk
-    int fd = file_open(filename);
-    if (fd < 0) {
+    int pid = process_create();
+    if (pid < 0) {
+        uart_puts("Failed to create process for ");
+        uart_puts(filename);
+        uart_puts("!\n");
+        return -1;
+    }
+
+    struct file f;
+    if (fat16_open(filename, &f) != 0) {
         uart_puts("Failed to locate ");
         uart_puts(filename);
         uart_puts(" on disk image!\n");
         return -1;
     }
 
-    // Create a new process (allocates PID and physical memory)
-    int pid = process_create();
-    if (pid < 0) {
-        uart_puts("Failed to create process for ");
-        uart_puts(filename);
-        uart_puts("!\n");
-        file_close(fd);
-        return -1;
-    }
-
-    // Read the binary directly into the process's physical memory region.
-    // The kernel has identity mapping so we can write to the physical address directly.
     uint64_t phys_base = process_get_phys_base(pid);
 
-    int bytes_read = file_read(fd, (void*)phys_base, MAX_PROGRAM_SIZE);
-    if (bytes_read < 0) {
+    int bytes_read = fat16_read(&f, (void*)phys_base, MAX_PROGRAM_SIZE);
+    if (bytes_read <= 0) {
         uart_puts("Failed to read ");
         uart_puts(filename);
         uart_puts(" from disk!\n");
-        file_close(fd);
+        fat16_close(&f);
         return -1;
     }
 
-    extern void print_int(int val);
     uart_puts("Read ");
     print_int(bytes_read);
     uart_puts(" bytes for PID=");
     print_int(pid);
     uart_puts("\n");
 
-    file_close(fd);
+    fat16_close(&f);
 
-    // Set up the initial context for this process:
-    // ELR = USER_VIRT_BASE (virtual entry point, same for all processes)
-    // SP_EL0 = top of the 2MB virtual region
+    struct process *parent = current_process();
+    struct process *child = process_get_pcb(pid);
+    if (parent && child) {
+        child->num_open_fds = parent->num_open_fds;
+        for (int i = 0; i < MAX_OPEN_FDS; i++) {
+            child->open_fds[i] = parent->open_fds[i];
+            if (child->open_fds[i] != -1) {
+                fs_reopen(child->open_fds[i]);
+            }
+        }
+    }
+
     process_set_entry(pid, USER_VIRT_BASE, USER_VIRT_BASE + USER_REGION_SIZE);
-
     return pid;
 }

@@ -3,9 +3,9 @@
 
 #include "trap.h"
 #include <stdint.h>
+#include "lock.h"
 
 #define MAX_PROCESSES 32 // Maximum number of concurrent processes
-#define MAX_OPEN_FDS 4   // Maximum number of open file descriptors per process
 #define MAX_CPUS 4       // Maximum number of CPU cores supported
 
 // Process states for lifecycle management
@@ -14,6 +14,7 @@
 #define PROC_STATE_READY 2     // Process is ready to be scheduled
 #define PROC_STATE_RUNNING 3   // Process is currently executing on a CPU
 #define PROC_STATE_EXITED 4    // Process has finished execution
+#define PROC_STATE_BLOCKED 5   // Process is waiting for an event
 
 // Kernel memory region (0GB to 1GB)
 #define KERNEL_START 0x00000000
@@ -45,6 +46,8 @@
 // QEMU Virt machine GICv2 memory-mapped register addresses
 #define GICD_BASE 0x08000000 // Distributor base address
 #define GICC_BASE 0x08010000 // CPU Interface base address
+
+#define MAX_OPEN_FDS 32   // Increased per user request
 
 // Process control block (PCB) structure
 struct process {
@@ -102,5 +105,17 @@ uint64_t process_get_phys_base(int pid);
 
 // Initialize the entry point (ELR) and stack pointer (SP) for a process.
 void process_set_entry(int pid, uint64_t elr, uint64_t sp);
+
+// Put the current process to sleep (blocked).
+void process_sleep(void);
+
+// Wake up a specific process.
+void process_wakeup(int pid);
+
+// Get the PCB for a specific PID.
+struct process *process_get_pcb(int pid);
+
+extern spinlock_t proc_lock;
+extern int cpu_current_pids[];
 
 #endif // PROCESS_H
