@@ -89,6 +89,10 @@ static inline uint32_t reg_read32(uint32_t offset) {
     return *(volatile uint32_t*)(blk_mmio + offset);
 }
 
+/**
+ * Handles interrupts from the VirtIO block device.
+ * Acknowledges the interrupt in the device's status register.
+ */
 void virtio_blk_handle_irq(void) {
     uint64_t flags = spinlock_acquire_irqsave(&blk_lock);
     if (!blk_mmio) {
@@ -102,6 +106,13 @@ void virtio_blk_handle_irq(void) {
     spinlock_release_irqrestore(&blk_lock, flags);
 }
 
+/**
+ * Scans for and initializes the VirtIO block device.
+ * Performs the VirtIO legacy MMIO handshake, negotiates features, and sets up the virtqueue.
+ * 
+ * Returns:
+ *   0 on success, -1 if the device is not found or fails to initialize.
+ */
 int virtio_blk_init(void) {
     spinlock_init(&blk_lock);
     // Scan for virtio block device (ID 2)
@@ -164,6 +175,19 @@ int virtio_blk_init(void) {
 extern void uart_puts(const char* s);
 extern void print_int(int val);
 
+/**
+ * Internal helper to perform a single-sector block operation (Read or Write).
+ * Sets up the 3-descriptor chain (Header, Data, Status) and notifies the device.
+ * Uses WFI to sleep until the device completes the request.
+ * 
+ * Parameters:
+ *   sector - Target sector index on disk.
+ *   buf    - Data buffer in memory.
+ *   type   - VIRTIO_BLK_T_IN or VIRTIO_BLK_T_OUT.
+ * 
+ * Returns:
+ *   0 on success, -1 on failure.
+ */
 static int virtio_blk_do_op(uint64_t sector, void* buf, uint32_t type) {
     uint64_t flags = spinlock_acquire_irqsave(&blk_lock);
     if (!blk_mmio) {
@@ -230,6 +254,9 @@ static int virtio_blk_do_op(uint64_t sector, void* buf, uint32_t type) {
     return res;
 }
 
+/**
+ * Reads one or more sectors from the block device.
+ */
 int virtio_blk_read_sector(uint64_t sector, void* buf, uint32_t count) {
     for (uint32_t i = 0; i < count; i++) {
         if (virtio_blk_do_op(sector + i, (uint8_t*)buf + (i * 512), VIRTIO_BLK_T_IN) != 0) {
@@ -239,6 +266,9 @@ int virtio_blk_read_sector(uint64_t sector, void* buf, uint32_t count) {
     return 0;
 }
 
+/**
+ * Writes one or more sectors to the block device.
+ */
 int virtio_blk_write_sector(uint64_t sector, const void* buf, uint32_t count) {
     for (uint32_t i = 0; i < count; i++) {
         // Warning: virtio_blk_do_op incorrectly strips const mathematically, but it's okay for virtio output

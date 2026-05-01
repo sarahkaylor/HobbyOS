@@ -15,6 +15,9 @@ extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
 extern void timer_reload(void);
 
+/**
+ * Prints the state of a trap frame for debugging purposes.
+ */
 void debug_print_tf(struct trap_frame *tf) {
     if (tf->regs[8] == 3) { // SYS_FORK is 3
         uart_puts("[DEBUG] Before eret, tf->regs[0] = ");
@@ -165,6 +168,10 @@ static void sys_get_cpuid(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)get_cpuid();
 }
 
+/**
+ * High-level handler for synchronous exceptions occurring in the kernel (EL1).
+ * Typically handles fatal errors like alignment faults or kernel-level page faults.
+ */
 void sync_handler_c(struct trap_frame *tf) {
   uint64_t esr;
   __asm__ volatile("mrs %0, esr_el1" : "=r"(esr));
@@ -188,6 +195,11 @@ void sync_handler_c(struct trap_frame *tf) {
     ;
 }
 
+/**
+ * High-level handler for synchronous exceptions occurring in user space (EL0).
+ * This function dispatches system calls based on the SVC instruction's immediate value
+ * and the syscall number in x8.
+ */
 void sync_lower_handler_c(struct trap_frame *tf) {
   uint64_t esr;
   __asm__ volatile("mrs %0, esr_el1" : "=r"(esr));
@@ -264,6 +276,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
   }
 }
 
+/**
+ * High-level handler for hardware interrupts (IRQs) occurring in user space (EL0).
+ * Handles timer interrupts for preemption and VirtIO interrupts for I/O.
+ */
 void irq_lower_handler_c(struct trap_frame *tf) {
   uint32_t intid = gic_acknowledge_interrupt();
 

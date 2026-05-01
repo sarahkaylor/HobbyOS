@@ -12,6 +12,10 @@ static struct pipe pipes[MAX_GLOBAL_FILES / 2];
 static spinlock_t pipes_lock;
 extern spinlock_t proc_lock;
 
+/**
+ * Initializes the pipe subsystem.
+ * Sets up the static pool of pipe structures and their associated locks.
+ */
 void pipes_init(void) {
     spinlock_init(&pipes_lock);
     for (int i = 0; i < MAX_GLOBAL_FILES / 2; i++) {
@@ -21,6 +25,17 @@ void pipes_init(void) {
     }
 }
 
+/**
+ * Allocates a free pipe from the pool and initializes it.
+ * Associates the pipe with two file structures (one for reading, one for writing).
+ * 
+ * Parameters:
+ *   f0 - Pointer to the read-end file structure pointer.
+ *   f1 - Pointer to the write-end file structure pointer.
+ * 
+ * Returns:
+ *   0 on success, -1 if no pipes are available.
+ */
 int pipe_alloc(struct file **f0, struct file **f1) {
     uint64_t flags = spinlock_acquire_irqsave(&pipes_lock);
     for (int i = 0; i < MAX_GLOBAL_FILES / 2; i++) {
@@ -49,6 +64,10 @@ int pipe_alloc(struct file **f0, struct file **f1) {
     return -1;
 }
 
+/**
+ * Increments the reader or writer count for a pipe.
+ * Used during process fork to share the pipe end with a child process.
+ */
 void pipe_reopen(struct pipe *p, int end) {
     uint64_t flags = spinlock_acquire_irqsave(&p->lock);
     if (end == 0) p->reader_count++;
@@ -56,6 +75,10 @@ void pipe_reopen(struct pipe *p, int end) {
     spinlock_release_irqrestore(&p->lock, flags);
 }
 
+/**
+ * Decrements the reader or writer count for a pipe.
+ * If a count reaches zero, it wakes up any blocked processes on the other end.
+ */
 void pipe_close(struct pipe *p, int end) {
     uint64_t flags = spinlock_acquire_irqsave(&p->lock);
     if (end == 0) {
@@ -82,6 +105,18 @@ void pipe_close(struct pipe *p, int end) {
     spinlock_release_irqrestore(&p->lock, flags);
 }
 
+/**
+ * Reads data from a pipe. Blocks the calling process if the pipe is empty.
+ * 
+ * Parameters:
+ *   p   - Pointer to the pipe structure.
+ *   buf - Destination buffer in memory.
+ *   n   - Number of bytes to read.
+ *   tf  - Trap frame (used for blocking).
+ * 
+ * Returns:
+ *   Number of bytes read, or -2 if the process was blocked (calling for a retry).
+ */
 int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
     if (!p) return -1;
     uint8_t *d = (uint8_t *)buf;
@@ -133,6 +168,18 @@ int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
     return i;
 }
 
+/**
+ * Writes data to a pipe. Blocks the calling process if the pipe is full.
+ * 
+ * Parameters:
+ *   p   - Pointer to the pipe structure.
+ *   buf - Source buffer in memory.
+ *   n   - Number of bytes to write.
+ *   tf  - Trap frame (used for blocking).
+ * 
+ * Returns:
+ *   Number of bytes written, or -2 if the process was blocked (calling for a retry).
+ */
 int pipe_write(struct pipe *p, const void *buf, int n, struct trap_frame *tf) {
     if (!p) return -1;
     const uint8_t *d = (const uint8_t *)buf;

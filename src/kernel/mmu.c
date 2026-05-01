@@ -23,6 +23,11 @@ static spinlock_t mmu_lock;
 // Level 2 Block Descriptor (2MB) limits
 // 512 entries * 2MB = 1GB of mapped physical space
 
+/**
+ * Initializes the ARM64 page tables for the kernel and user space.
+ * Sets up a two-level translation scheme (L1 and L2) with 2MB block descriptors.
+ * Configures kernel identity mappings and initial user-space layout.
+ */
 void mmu_init_tables(void) {
     spinlock_init(&mmu_lock);
     // 2. Clear tables
@@ -81,6 +86,10 @@ void mmu_init_tables(void) {
     }
 }
 
+/**
+ * Configures the current CPU's MMU-related system registers (MAIR, TCR, TTBR0).
+ * Enables the MMU and sets memory attribute policies.
+ */
 void mmu_init_core(void) {
     // 1. Configure the MAIR_EL1 attributes
     uint64_t mair = (MAIR_DEVICE_nGnRnE << (8 * PT_MEM_DEVICE)) |
@@ -116,11 +125,24 @@ void mmu_init_core(void) {
     __asm__ volatile("isb");
 }
 
+/**
+ * Global MMU initialization. Sets up tables and enables the MMU for the primary CPU.
+ */
 void mmu_init(void) {
     mmu_init_tables();
     mmu_init_core();
 }
 
+/**
+ * Creates a 2MB block descriptor with user-space RW permissions.
+ * Used for mapping user code and data.
+ * 
+ * Parameters:
+ *   phys_addr - The physical address to map.
+ * 
+ * Returns:
+ *   A 64-bit page table entry (descriptor).
+ */
 uint64_t mmu_make_user_block_desc(uint64_t phys_addr) {
     // Build a 2MB block descriptor matching the user-space attributes
     // used in mmu_init() for the USER_VIRT_BASE range:
@@ -132,6 +154,14 @@ uint64_t mmu_make_user_block_desc(uint64_t phys_addr) {
     return phys_addr | attr;
 }
 
+/**
+ * Switches the user-space memory mapping for the current CPU.
+ * Re-maps the USER_VIRT_BASE range to a new physical base address.
+ * Invalidates the TLB to ensure the change takes effect immediately.
+ * 
+ * Parameters:
+ *   phys_base - The new physical base address for the user process.
+ */
 void mmu_switch_user_mapping(uint64_t phys_base) {
     uint64_t flags = spinlock_acquire_irqsave(&mmu_lock);
     // The user virtual address USER_VIRT_BASE falls in L1 index 1 (USER_START-USER_END),
@@ -155,6 +185,13 @@ void mmu_switch_user_mapping(uint64_t phys_base) {
     spinlock_release_irqrestore(&mmu_lock, flags);
 }
 
+/**
+ * Maps the physical framebuffer memory into the user-space address range.
+ * Specifically maps to virtual address 0x50000000 (L2 index 128).
+ * 
+ * Parameters:
+ *   phys_addr - The physical address of the framebuffer.
+ */
 void mmu_map_user_framebuffer(uint64_t phys_addr) {
     uint64_t flags = spinlock_acquire_irqsave(&mmu_lock);
     // Map to user virtual address 0x50000000

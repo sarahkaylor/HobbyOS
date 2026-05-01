@@ -1,9 +1,16 @@
 #include "lock.h"
 
+/**
+ * Initializes a spinlock structure to the unlocked state.
+ */
 void spinlock_init(spinlock_t *lock) {
     lock->locked = 0;
 }
 
+/**
+ * Acquires a spinlock. Uses ARM64 load-acquire/store-exclusive (LDAXR/STXR) 
+ * instructions to ensure atomic acquisition. Spins until the lock is available.
+ */
 void spinlock_acquire(spinlock_t *lock) {
     uint32_t tmp;
     __asm__ volatile(
@@ -17,6 +24,10 @@ void spinlock_acquire(spinlock_t *lock) {
     );
 }
 
+/**
+ * Releases a spinlock. Uses ARM64 store-release (STLR) to ensure all previous
+ * memory operations are visible before the lock is freed.
+ */
 void spinlock_release(spinlock_t *lock) {
     __asm__ volatile(
         "stlr wzr, [%0]\n"           // Store-Release 0
@@ -26,6 +37,12 @@ void spinlock_release(spinlock_t *lock) {
     );
 }
 
+/**
+ * Masks interrupts and then acquires the spinlock.
+ * 
+ * Returns:
+ *   The previous state of the PSTATE.DAIF register (flags) to be restored later.
+ */
 uint64_t spinlock_acquire_irqsave(spinlock_t *lock) {
     uint64_t flags;
     // Read PSTATE.DAIF and mask interrupts
@@ -41,6 +58,12 @@ uint64_t spinlock_acquire_irqsave(spinlock_t *lock) {
     return flags;
 }
 
+/**
+ * Releases the spinlock and restores the previous interrupt state.
+ * 
+ * Parameters:
+ *   flags - The PSTATE.DAIF value returned by spinlock_acquire_irqsave.
+ */
 void spinlock_release_irqrestore(spinlock_t *lock, uint64_t flags) {
     spinlock_release(lock);
     

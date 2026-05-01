@@ -25,29 +25,38 @@
 #define VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM      1 // 32-bit BGRA format
 
 // Rectangle definition for clipping and updates
+/**
+ * Rectangle definition for clipping and display updates.
+ */
 struct virtio_gpu_rect {
-    uint32_t x;
-    uint32_t y;
-    uint32_t width;
-    uint32_t height;
+    uint32_t x;         /**< X-coordinate of top-left corner */
+    uint32_t y;         /**< Y-coordinate of top-left corner */
+    uint32_t width;     /**< Width of the rectangle */
+    uint32_t height;    /**< Height of the rectangle */
 };
 
 // Standard header for all VirtIO GPU control commands
+/**
+ * Standard header for all VirtIO GPU control commands.
+ */
 struct virtio_gpu_ctrl_hdr {
-    uint32_t type;     // Command type (VIRTIO_GPU_CMD_*)
-    uint32_t flags;    // Command flags
-    uint64_t fence_id; // Fence ID for synchronization
-    uint32_t ctx_id;   // Context ID
+    uint32_t type;     /**< Command type (VIRTIO_GPU_CMD_*) */
+    uint32_t flags;    /**< Command flags */
+    uint64_t fence_id; /**< Fence ID for synchronization */
+    uint32_t ctx_id;   /**< Context ID */
     uint32_t padding;
 };
 
 // Command to create a 2D resource on the host
+/**
+ * Command to create a 2D resource on the host.
+ */
 struct virtio_gpu_resource_create_2d {
     struct virtio_gpu_ctrl_hdr hdr;
-    uint32_t resource_id; // Unique ID for the resource
-    uint32_t format;      // Color format (VIRTIO_GPU_FORMAT_*)
-    uint32_t width;       // Resource width in pixels
-    uint32_t height;      // Resource height in pixels
+    uint32_t resource_id; /**< Unique ID for the resource */
+    uint32_t format;      /**< Color format (VIRTIO_GPU_FORMAT_*) */
+    uint32_t width;       /**< Resource width in pixels */
+    uint32_t height;      /**< Resource height in pixels */
 };
 
 // Command to attach guest memory pages to a host resource
@@ -89,14 +98,22 @@ struct virtio_gpu_resource_flush {
     uint32_t padding;
 };
 
-// Initialize the VirtIO GPU device, setup display info, and create the primary framebuffer.
-// Returns 0 on success, -1 on failure.
+/**
+ * Initializes the VirtIO GPU device, setup display info, and create the primary framebuffer.
+ * 
+ * Returns:
+ *   0 on success, -1 on failure.
+ */
 int virtio_gpu_init(void);
 
-// Flush the kernel-side framebuffer contents to the host display device.
+/**
+ * Flushes the kernel-side framebuffer contents to the host display device.
+ */
 void virtio_gpu_flush(void);
 
-// Retrieve the base address of the kernel's memory-mapped framebuffer.
+/**
+ * Returns the base address of the kernel's memory-mapped framebuffer.
+ */
 uint32_t* virtio_gpu_get_framebuffer(void);
 
 #endif // VIRTIO_GPU_H

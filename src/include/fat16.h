@@ -3,14 +3,17 @@
 
 #include <stdint.h>
 
+/**
+ * Standard 32-byte FAT16 directory entry structure.
+ */
 struct fat16_dir_entry {
-    char name[11];
-    uint8_t attr;
-    uint8_t reserved[10];
-    uint16_t time;
-    uint16_t date;
-    uint16_t start_cluster;
-    uint32_t file_size;
+    char name[11];              /**< 8.3 filename format */
+    uint8_t attr;               /**< File attributes */
+    uint8_t reserved[10];       /**< Reserved for future use */
+    uint16_t time;              /**< Creation/Modification time */
+    uint16_t date;              /**< Creation/Modification date */
+    uint16_t start_cluster;     /**< First cluster of the file's data */
+    uint32_t file_size;         /**< File size in bytes */
 } __attribute__((packed));
 
 struct file; // Forward declaration

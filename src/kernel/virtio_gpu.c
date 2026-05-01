@@ -71,6 +71,13 @@ static inline uint32_t reg_read32(uint32_t offset) {
     return *(volatile uint32_t*)(gpu_mmio + offset);
 }
 
+/**
+ * Sends a command to the VirtIO GPU device via the control virtqueue.
+ * Uses a 2-descriptor chain (Request, Response).
+ * 
+ * Returns:
+ *   0 on success, -1 on failure.
+ */
 static int virtio_gpu_do_cmd(void* req, uint32_t req_size, void* resp, uint32_t resp_size) {
     uint64_t flags = spinlock_acquire_irqsave(&gpu_lock);
     if (!gpu_mmio) {
@@ -112,6 +119,10 @@ static int virtio_gpu_do_cmd(void* req, uint32_t req_size, void* resp, uint32_t 
     return res;
 }
 
+/**
+ * Sends a command with an additional data buffer to the VirtIO GPU device.
+ * Uses a 3-descriptor chain (Request, Data, Response).
+ */
 static int virtio_gpu_do_cmd_with_data(void* req, uint32_t req_size, void* data, uint32_t data_size, void* resp, uint32_t resp_size) {
     uint64_t flags = spinlock_acquire_irqsave(&gpu_lock);
     if (!gpu_mmio) {
@@ -152,6 +163,13 @@ static int virtio_gpu_do_cmd_with_data(void* req, uint32_t req_size, void* data,
     return 0;
 }
 
+/**
+ * Scans for and initializes the VirtIO GPU device.
+ * Configures the 2D resource, attaches the framebuffer backing memory, and sets up scanout.
+ * 
+ * Returns:
+ *   0 on success, -1 if the device is not found or fails to initialize.
+ */
 int virtio_gpu_init(void) {
     spinlock_init(&gpu_lock);
     for (int i = 0; i < 32; i++) {
@@ -228,6 +246,10 @@ int virtio_gpu_init(void) {
     return 0;
 }
 
+/**
+ * Flushes the current framebuffer contents to the host display.
+ * Performs a Transfer-to-Host-2D followed by a Resource-Flush.
+ */
 void virtio_gpu_flush(void) {
     if (!gpu_mmio) return;
 
@@ -249,6 +271,9 @@ void virtio_gpu_flush(void) {
     virtio_gpu_do_cmd(&flush, sizeof(flush), &resp, sizeof(resp));
 }
 
+/**
+ * Returns a pointer to the kernel's physical framebuffer memory.
+ */
 uint32_t* virtio_gpu_get_framebuffer(void) {
     return framebuffer;
 }

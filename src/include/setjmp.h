@@ -3,16 +3,23 @@
 
 #include <stdint.h>
 
-// Buffer to save the CPU context for non-local jumps.
-// Stores critical registers (x19-x29, sp, lr).
+/**
+ * Buffer to save the CPU context for non-local jumps.
+ * Stores callee-saved registers (x19-x29), SP, and LR.
+ */
 typedef uint64_t jmp_buf[16];
 
-// Save the current execution context into the provided buffer.
-// Returns 0 when the context is saved.
+/**
+ * Saves the current execution context.
+ * 
+ * Returns:
+ *   0 when the context is initially saved.
+ */
 int setjmp(jmp_buf env);
 
-// Restore a previously saved execution context from the buffer.
-// The program resumes as if setjmp returned 'val'.
+/**
+ * Restores a previously saved execution context.
+ */
 void longjmp(jmp_buf env, int val);
 
 #endif // SETJMP_H

@@ -50,27 +50,39 @@
 #define MAX_OPEN_FDS 32   // Increased per user request
 
 // Process control block (PCB) structure
+/**
+ * Process Control Block (PCB) structure.
+ * Maintains all per-process state including CPU context, memory mappings, and open files.
+ */
 struct process {
-  int pid;            // Process ID
-  int state;          // Current state (RUNNING, READY, etc.)
-  int parent_pid;     // PID of the parent process (for fork/wait)
+  int pid;            /**< Unique Process ID */
+  int state;          /**< Current execution state (PROC_STATE_*) */
+  int parent_pid;     /**< PID of the process that created this one */
 
-  // Saved CPU context used during context switching
-  // Includes x0–x29 (30 regs), lr (x30), elr, spsr, and sp_el0
+  /**
+   * Saved CPU context used during context switching.
+   * Format: x0–x29, lr (x30), elr_el1 (pc), spsr_el1, sp_el0.
+   */
   uint64_t context[34];
 
-  // Pointer to the per-process Level 2 page table for user virtual memory
-  // This is dynamically allocated and must be 4KB aligned
+  /**
+   * Pointer to the process's Level 2 page table.
+   * Maps user virtual addresses to physical memory blocks.
+   */
   uint64_t *user_l2_table;
 
-  // Physical base address of the 64MB block allocated for this process
+  /**
+   * Physical base address of the memory region allocated for this process.
+   */
   uint64_t user_phys_base;
 
-  // Array of open file descriptor indices into the global file table
+  /**
+   * Local file descriptor table.
+   * Maps local FDs to indices in the global file table.
+   */
   int open_fds[MAX_OPEN_FDS];
   
-  // Current count of open file descriptors for this process
-  int num_open_fds;
+  int num_open_fds;   /**< Number of currently open file descriptors */
 };
 
 // Initialize the process subsystem and zero out the process table.

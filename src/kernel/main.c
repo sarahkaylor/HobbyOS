@@ -19,6 +19,10 @@ extern uint32_t get_cpuid(void);
 
 static spinlock_t uart_lock;
 
+/**
+ * High-level handler for hardware interrupts (IRQs) occurring in the kernel (EL1).
+ * Specifically handles VirtIO block interrupts and timer ticks.
+ */
 void irq_handler_c(struct trap_frame *tf) {
   uint32_t intid = gic_acknowledge_interrupt();
 
@@ -46,6 +50,10 @@ volatile uint32_t *const UART0_DR = (uint32_t *)UART0_BASE;
 // Pointer to the flag register of the UART
 volatile uint32_t *const UART0_FR = (uint32_t *)(UART0_BASE + 0x18);
 
+/**
+ * Outputs a single character to the PL011 UART.
+ * Handles newline translation (\n -> \r\n).
+ */
 void uart_putc(char c) {
   if (c == '\n') {
     while (*UART0_FR & (1 << 5)) { } // Wait until TXFF is clear
@@ -55,6 +63,10 @@ void uart_putc(char c) {
   *UART0_DR = (uint32_t)(c);
 }
 
+/**
+ * Outputs a null-terminated string to the UART.
+ * Uses a spinlock to ensure atomic output from multiple CPUs.
+ */
 void uart_puts(const char *s) {
   uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
   while (*s != '\0') {
@@ -64,6 +76,9 @@ void uart_puts(const char *s) {
   spinlock_release_irqrestore(&uart_lock, flags);
 }
 
+/**
+ * Prints a signed integer to the UART in decimal format.
+ */
 void print_int(int val) {
   uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
   if (val < 0) {
@@ -86,6 +101,9 @@ void print_int(int val) {
   spinlock_release_irqrestore(&uart_lock, flags);
 }
 
+/**
+ * Prints a 64-bit value to the UART in hexadecimal format (e.g., 0xABC123).
+ */
 void uart_print_hex(uint64_t val) {
   uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
   char hex_chars[] = "0123456789ABCDEF";
@@ -97,6 +115,10 @@ void uart_print_hex(uint64_t val) {
   spinlock_release_irqrestore(&uart_lock, flags);
 }
 
+/**
+ * Primary kernel entry point for CPU 0.
+ * Initializes all hardware subsystems, filesystems, and the scheduler.
+ */
 void main(void) {
   spinlock_init(&uart_lock);
   uart_puts("Booting AArch64 OS...\n");
@@ -170,6 +192,10 @@ void main(void) {
   uart_puts("System halt.\n");
 }
 
+/**
+ * Entry point for secondary CPU cores.
+ * Sets up core-local MMU, GIC, and timer, then enters the scheduler.
+ */
 void secondary_main(void) {
   uint32_t cpu = get_cpuid();
 

@@ -9,6 +9,10 @@ static spinlock_t fs_lock;
 extern void uart_puts(const char *s);
 extern void print_int(int val);
 
+/**
+ * Initializes the virtual file system layer.
+ * Sets up the global file table and initializes the FS spinlock.
+ */
 void fs_init(void) {
     spinlock_init(&fs_lock);
     for (int i = 0; i < MAX_GLOBAL_FILES; i++) {
@@ -18,6 +22,12 @@ void fs_init(void) {
     }
 }
 
+/**
+ * Allocates a free file structure from the global file table.
+ * 
+ * Returns:
+ *   Pointer to the allocated struct file, or 0 if no slots are available.
+ */
 static struct file *file_alloc(void) {
     uint64_t flags = spinlock_acquire_irqsave(&fs_lock);
     for (int i = 0; i < MAX_GLOBAL_FILES; i++) {
@@ -32,11 +42,29 @@ static struct file *file_alloc(void) {
     return 0;
 }
 
+/**
+ * Calculates the global file descriptor index for a given file structure pointer.
+ * 
+ * Parameters:
+ *   f - Pointer to a file structure in the global table.
+ * 
+ * Returns:
+ *   Index in the global_file_table, or -1 if the pointer is null.
+ */
 static int get_global_fd(struct file *f) {
     if (!f) return -1;
     return (int)(f - global_file_table);
 }
 
+/**
+ * Opens a file by name and assigns a local file descriptor to the current process.
+ * 
+ * Parameters:
+ *   filename - Name of the file to open.
+ * 
+ * Returns:
+ *   Local file descriptor index on success, or -1 on failure.
+ */
 int file_open(const char *filename) {
     struct process *cur = current_process();
     if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -1;
@@ -69,6 +97,15 @@ int file_open(const char *filename) {
     return fd;
 }
 
+/**
+ * Closes a local file descriptor and releases its reference to the global file.
+ * 
+ * Parameters:
+ *   fd - Local file descriptor index.
+ * 
+ * Returns:
+ *   0 on success, -1 if the descriptor is invalid.
+ */
 int file_close(int fd) {
     struct process *cur = current_process();
     if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
@@ -95,6 +132,19 @@ int file_close(int fd) {
     return 0;
 }
 
+/**
+ * Reads data from a file descriptor into a buffer.
+ * Supports FAT16 files and Pipes.
+ * 
+ * Parameters:
+ *   fd   - Local file descriptor index.
+ *   buf  - Destination buffer in memory.
+ *   size - Number of bytes to read.
+ *   tf   - Trap frame (used for blocking reads in pipes).
+ * 
+ * Returns:
+ *   Number of bytes read, or -1 on failure.
+ */
 int file_read(int fd, void *buf, int size, struct trap_frame *tf) {
     struct process *cur = current_process();
     if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
@@ -112,6 +162,19 @@ int file_read(int fd, void *buf, int size, struct trap_frame *tf) {
     return -1;
 }
 
+/**
+ * Writes data from a buffer to a file descriptor.
+ * Supports FAT16 files and Pipes.
+ * 
+ * Parameters:
+ *   fd   - Local file descriptor index.
+ *   buf  - Source buffer in memory.
+ *   size - Number of bytes to write.
+ *   tf   - Trap frame (used for blocking writes in pipes).
+ * 
+ * Returns:
+ *   Number of bytes written, or -1 on failure.
+ */
 int file_write(int fd, const void *buf, int size, struct trap_frame *tf) {
     struct process *cur = current_process();
     if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
@@ -134,6 +197,15 @@ int file_write(int fd, const void *buf, int size, struct trap_frame *tf) {
     return -1;
 }
 
+/**
+ * Creates an anonymous pipe and assigns two file descriptors (read and write).
+ * 
+ * Parameters:
+ *   fds - Array to store the two local file descriptors (fds[0]=read, fds[1]=write).
+ * 
+ * Returns:
+ *   0 on success, -1 on failure.
+ */
 int file_pipe(int fds[2]) {
     struct process *cur = current_process();
     if (!cur || cur->num_open_fds + 2 > MAX_OPEN_FDS) return -1;
@@ -177,6 +249,13 @@ int file_pipe(int fds[2]) {
     return 0;
 }
 
+/**
+ * Increments the reference count of a global file descriptor.
+ * Used during process fork to share open file descriptors with the child.
+ * 
+ * Parameters:
+ *   global_fd - Index in the global_file_table.
+ */
 void fs_reopen(int global_fd) {
     if (global_fd < 0 || global_fd >= MAX_GLOBAL_FILES) return;
     struct file *f = &global_file_table[global_fd];

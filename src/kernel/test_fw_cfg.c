@@ -3,6 +3,10 @@
 extern void uart_puts(const char* s);
 extern void print_hex(uint64_t val);
 
+/**
+ * Tests the QEMU fw_cfg (Firmware Configuration) interface.
+ * Reads and prints the "QEMU" signature from the fw_cfg port.
+ */
 void test_fw_cfg() {
     volatile uint16_t* selector = (volatile uint16_t*)0x09020008;
     volatile uint8_t* data = (volatile uint8_t*)0x09020000;

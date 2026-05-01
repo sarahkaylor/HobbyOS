@@ -40,6 +40,13 @@ static int match_name(const char* fat_name, const char* query) {
     return 1;
 }
 
+/**
+ * Initializes the FAT16 filesystem.
+ * Reads the BIOS Parameter Block (BPB) from sector 0 to calculate filesystem layout.
+ * 
+ * Returns:
+ *   0 on success, -1 on failure.
+ */
 int fat16_init(void) {
     spinlock_init(&fat_lock);
     uint8_t buf[SECTOR_SIZE];
@@ -111,6 +118,16 @@ static uint16_t alloc_cluster(void) {
 
 extern void uart_puts(const char* s);
 
+/**
+ * Opens a file on the FAT16 filesystem by searching the root directory.
+ * 
+ * Parameters:
+ *   filename - The name of the file to open.
+ *   f        - Pointer to the file structure to populate.
+ * 
+ * Returns:
+ *   0 on success, -1 if the file is not found or an error occurs.
+ */
 int fat16_open(const char* filename, struct file* f) {
     uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
     uint8_t buf[SECTOR_SIZE];
@@ -143,6 +160,9 @@ int fat16_open(const char* filename, struct file* f) {
     return -1;
 }
 
+/**
+ * Closes a FAT16 file. Updates the directory entry on disk (e.g., file size).
+ */
 int fat16_close(struct file* f) {
     uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
     
@@ -171,12 +191,22 @@ static uint16_t get_cluster_for_offset(uint16_t start, uint32_t offset) {
     return current;
 }
 
+/**
+ * Updates the file cursor for seeking within a FAT16 file.
+ */
 int fat16_seek(struct file* f, int offset) {
     if (offset < 0 || (uint32_t)offset > f->fat16.entry.file_size) return -1;
     f->fat16.cursor = offset;
     return 0;
 }
 
+/**
+ * Reads data from a FAT16 file at the current cursor position.
+ * Traverses the FAT cluster chain to locate the data on disk.
+ * 
+ * Returns:
+ *   Number of bytes read.
+ */
 int fat16_read(struct file* f, void* buf, int size) {
     uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
     
@@ -218,6 +248,13 @@ int fat16_read(struct file* f, void* buf, int size) {
     return read_bytes;
 }
 
+/**
+ * Writes data to a FAT16 file at the current cursor position.
+ * Allocates new clusters if the file grows beyond its current capacity.
+ * 
+ * Returns:
+ *   Number of bytes written.
+ */
 int fat16_write(struct file* f, const void* buf, int size) {
     uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
     if (size == 0) {

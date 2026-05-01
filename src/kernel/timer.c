@@ -5,6 +5,10 @@
 // Computed at init time from CNTFRQ_EL0.
 static uint64_t timer_tick_value;
 
+/**
+ * Initializes the ARM Generic Physical Timer.
+ * Configures the timer for a 10ms periodic interrupt based on CNTFRQ_EL0.
+ */
 void timer_init(void) {
     // Read the timer frequency (typically 62.5 MHz on QEMU virt = 62500000)
     uint64_t freq;
@@ -25,6 +29,9 @@ void timer_init(void) {
     __asm__ volatile("msr cntp_ctl_el0, %0" : : "r"(ctl));
 }
 
+/**
+ * Reloads the timer's countdown register for the next periodic tick.
+ */
 void timer_reload(void) {
     // Reset the countdown for the next tick
     __asm__ volatile("msr cntp_tval_el0, %0" : : "r"(timer_tick_value));

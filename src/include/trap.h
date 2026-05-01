@@ -3,20 +3,27 @@
 
 #include <stdint.h>
 
-// Structure representing the CPU state saved on the stack during an exception.
+/**
+ * Structure representing the CPU state saved on the stack during an exception.
+ * Includes general-purpose registers, the link register, exception return address,
+ * and processor state.
+ */
 struct trap_frame {
-    uint64_t regs[30]; // General-purpose registers x0 to x29
-    uint64_t lr;       // Link Register (x30)
-    uint64_t elr;      // Exception Link Register (return address)
-    uint64_t spsr;     // Saved Processor State Register
+    uint64_t regs[30]; /**< General-purpose registers x0 to x29 */
+    uint64_t lr;       /**< Link Register (x30) */
+    uint64_t elr;      /**< Exception Link Register (PC at time of exception) */
+    uint64_t spsr;     /**< Saved Processor State Register */
 };
 
-// C handler for synchronous exceptions from user mode (e.g., SVC, MMU faults).
-// tf: Pointer to the saved trap frame on the kernel stack.
+/**
+ * Handler for synchronous exceptions originating from user mode (EL0).
+ * Dispatches system calls and handles memory faults.
+ */
 void sync_lower_handler_c(struct trap_frame *tf);
 
-// C handler for hardware interrupts (IRQ) from user mode.
-// tf: Pointer to the saved trap frame on the kernel stack.
+/**
+ * Handler for hardware interrupts (IRQ) originating from user mode (EL0).
+ */
 void irq_lower_handler_c(struct trap_frame *tf);
 
 #endif // TRAP_H

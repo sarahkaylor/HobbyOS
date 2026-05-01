@@ -55,6 +55,10 @@ static void kmemset(void *dst, uint8_t val, uint64_t n) {
 // ---------------------------------------------------------------------------
 // Process Init
 // ---------------------------------------------------------------------------
+/**
+ * Initializes the process subsystem.
+ * Sets up the process table, memory locks, and per-CPU current PID trackers.
+ */
 void process_init(void) {
     spinlock_init(&proc_lock);
     spinlock_init(&mem_lock);
@@ -77,6 +81,9 @@ void process_init(void) {
 // ---------------------------------------------------------------------------
 // Current process accessor
 // ---------------------------------------------------------------------------
+/**
+ * Returns a pointer to the process structure of the process currently running on this CPU.
+ */
 struct process *current_process(void) {
     uint32_t cpu = get_cpuid();
     if (cpu >= MAX_CPUS) return 0;
@@ -89,6 +96,9 @@ struct process *current_process(void) {
     return 0;
 }
 
+/**
+ * Gets the physical base address of a process's memory region.
+ */
 uint64_t process_get_phys_base(int pid) {
     if (pid < 0 || pid >= MAX_PROCESSES) return 0;
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
@@ -97,6 +107,9 @@ uint64_t process_get_phys_base(int pid) {
     return base;
 }
 
+/**
+ * Sets the entry point and stack pointer for a process, and marks it as READY.
+ */
 void process_set_entry(int pid, uint64_t elr, uint64_t sp) {
     if (pid < 0 || pid >= MAX_PROCESSES) return;
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
@@ -110,6 +123,12 @@ void process_set_entry(int pid, uint64_t elr, uint64_t sp) {
 // ---------------------------------------------------------------------------
 // Process Create — allocate a PID and a 2MB physical region
 // ---------------------------------------------------------------------------
+/**
+ * Allocates a new process entry from the process table and a 2MB physical memory region.
+ * 
+ * Returns:
+ *   New PID on success, -1 on failure.
+ */
 int process_create(void) {
     int pid = -1;
     uint64_t p_flags = spinlock_acquire_irqsave(&proc_lock);
@@ -175,6 +194,11 @@ static void restore_context(struct process *p, struct trap_frame *tf) {
     __asm__ volatile("msr sp_el0, %0" : : "r"(sp_el0));
 }
 
+/**
+ * The core scheduler. Implements round-robin scheduling across all CPUs.
+ * Saves the current process context, finds the next READY process, and restores its context.
+ * If no processes are ready, waits for an interrupt (WFI).
+ */
 void schedule(struct trap_frame *tf) {
     uint32_t cpu = get_cpuid();
     if (cpu >= MAX_CPUS) return;
@@ -242,6 +266,10 @@ void schedule(struct trap_frame *tf) {
     }
 }
 
+/**
+ * Handles process termination. Closes open files and marks the process as EXITED.
+ * Triggers a context switch to the next process.
+ */
 void process_exit(struct trap_frame *tf) {
     struct process *cur = current_process();
     if (!cur) return;
@@ -262,6 +290,13 @@ void process_exit(struct trap_frame *tf) {
     schedule(tf);
 }
 
+/**
+ * Implements the fork system call. Creates a child process as a copy of the parent.
+ * Copies memory, open file descriptors, and CPU context.
+ * 
+ * Returns:
+ *   Child PID in the parent, 0 in the child, or -1 on failure.
+ */
 int process_fork(struct trap_frame *tf) {
     struct process *parent = current_process();
     if (!parent) return -1;
@@ -294,6 +329,9 @@ int process_fork(struct trap_frame *tf) {
     return child_pid;
 }
 
+/**
+ * Puts the current process into a BLOCKED state and yields the CPU.
+ */
 void process_sleep(void) {
     uint32_t cpu = get_cpuid();
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
@@ -320,6 +358,9 @@ void process_sleep(void) {
     __asm__ volatile("svc #0xFF"); // Custom yield SVC
 }
 
+/**
+ * Wakes up a blocked process, marking it as READY.
+ */
 void process_wakeup(int pid) {
     if (pid < 0 || pid >= MAX_PROCESSES) return;
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
@@ -340,6 +381,10 @@ void scheduler_finished(void) {
     longjmp(scheduler_return_ctx, 1);
 }
 
+/**
+ * Entry point for the scheduler on each CPU.
+ * This starts the infinite scheduling loop.
+ */
 void start_scheduler(void) {
     uint32_t cpu = get_cpuid();
 

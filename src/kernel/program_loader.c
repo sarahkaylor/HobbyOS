@@ -11,6 +11,13 @@ jmp_buf user_exit_context;
 
 #define MAX_PROGRAM_SIZE  0x10000
 
+/**
+ * Loads a program from the FAT16 filesystem directly into user memory and executes it.
+ * This function bypasses the scheduler and is used for early boot testing.
+ * 
+ * Returns:
+ *   0 on successful completion (via longjmp), or -1 on failure.
+ */
 int load_and_run_program(const char* filename) {
     uart_puts("Loading program: ");
     uart_puts(filename);
@@ -57,6 +64,16 @@ int load_and_run_program(const char* filename) {
     return -1;
 }
 
+/**
+ * Loads a program from the FAT16 filesystem into a new process's memory and 
+ * registers it with the scheduler.
+ * 
+ * Parameters:
+ *   filename - The name of the binary to load.
+ * 
+ * Returns:
+ *   The PID of the new process, or -1 on failure.
+ */
 int load_and_run_program_in_scheduler(const char* filename) {
     uart_puts("Loading program for scheduler: ");
     uart_puts(filename);

@@ -6,16 +6,19 @@
 
 #define PIPE_SIZE 512
 
+/**
+ * Shared memory structure for a circular pipe buffer.
+ */
 struct pipe {
-    uint8_t data[PIPE_SIZE];
-    uint32_t head;
-    uint32_t tail;
-    uint32_t count;
-    spinlock_t lock;
-    uint32_t reader_count;
-    uint32_t writer_count;
-    uint32_t reader_pid_mask;
-    uint32_t writer_pid_mask;
+    uint8_t data[PIPE_SIZE];    /**< Circular buffer storage */
+    uint32_t head;              /**< Write pointer index */
+    uint32_t tail;              /**< Read pointer index */
+    uint32_t count;             /**< Number of bytes currently in the buffer */
+    spinlock_t lock;            /**< Lock for atomic buffer access */
+    uint32_t reader_count;      /**< Number of processes with read access */
+    uint32_t writer_count;      /**< Number of processes with write access */
+    uint32_t reader_pid_mask;   /**< Bitmask of PIDs waiting to read */
+    uint32_t writer_pid_mask;   /**< Bitmask of PIDs waiting to write */
 };
 
 struct file; // Forward declaration
