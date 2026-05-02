@@ -18,6 +18,9 @@ endif
 CFLAGS = -Wall -Wextra -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
 ifeq ($(MODE),test)
 CFLAGS += -DKERNEL_MODE_TEST
+else ifeq ($(MODE),desktop_test)
+CFLAGS += -DKERNEL_MODE_DESKTOP_TEST
+USER_CFLAGS += -DDESKTOP_TEST_AUTO_LAUNCH
 else
 CFLAGS += -DKERNEL_MODE_DESKTOP
 endif
@@ -41,7 +44,7 @@ C_OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(C_SRCS))
 ASM_OBJS = $(patsubst $(SRC_DIR)/%.s, $(OBJ_DIR)/%.o, $(ASM_SRCS))
 OBJS = $(ASM_OBJS) $(C_OBJS)
 
-USER_CFLAGS = -Wall -Wextra -Isrc/user_include -Isrc/user_include/graphics -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
+USER_CFLAGS += -Wall -Wextra -Isrc/user_include -Isrc/user_include/graphics -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
 USER_LIBC = src/user/libc.c
 MEM_TEST_BIN = memtest.bin
 FILE_IO_BIN = fileio_test.bin
@@ -212,4 +215,7 @@ tests: memtest fileio_test fork_test
 test:
 	$(MAKE) MODE=test run
 
-.PHONY: all clean run memtest fileio_test fork_test tests test
+desktop_test:
+	$(MAKE) MODE=desktop_test run
+
+.PHONY: all clean run memtest fileio_test fork_test tests test desktop_test

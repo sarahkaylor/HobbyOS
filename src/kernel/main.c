@@ -199,6 +199,9 @@ void main(void) {
   load_and_run_program_in_scheduler("SMPTEST.BIN");
   load_and_run_program_in_scheduler("PIPETEST.BIN");
   load_and_run_program_in_scheduler("GRAPHICS.BIN");
+#elif defined(KERNEL_MODE_DESKTOP_TEST)
+  uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
+  load_and_run_program_in_scheduler("DESKTOP.BIN");
 #else
   uart_puts("Mode: DESKTOP - Launching desktop...\n");
   load_and_run_program_in_scheduler("DESKTOP.BIN");

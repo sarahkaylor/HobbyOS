@@ -70,6 +70,23 @@ int main(void) {
   int focused_window = -1;
   struct virtio_input_event events[16];
 
+#ifdef DESKTOP_TEST_AUTO_LAUNCH
+  int in_pipe[2], out_pipe[2];
+  pipe(in_pipe);
+  pipe(out_pipe);
+  int pid = spawn2("CONSOLE.BIN", in_pipe[0], out_pipe[1]);
+  if (pid >= 0) {
+    focused_window = wm_create_window(COLOR(20, 20, 50), pid, out_pipe[0], in_pipe[1]);
+    close(in_pipe[0]);
+    close(out_pipe[1]);
+  } else {
+    close(in_pipe[0]);
+    close(in_pipe[1]);
+    close(out_pipe[0]);
+    close(out_pipe[1]);
+  }
+#endif
+
   while (1) {
     int num = get_events(events, 16);
     int needs_redraw = 0;

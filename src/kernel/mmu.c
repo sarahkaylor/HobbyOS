@@ -195,14 +195,15 @@ void mmu_switch_user_mapping(uint64_t phys_base) {
 void mmu_map_user_framebuffer(uint64_t phys_addr) {
     uint64_t flags = spinlock_acquire_irqsave(&mmu_lock);
     // Map to user virtual address 0x50000000
-    uint32_t cpu = get_cpuid();
-    l2_table_1[cpu][128] = mmu_make_user_block_desc(phys_addr);
-    l2_table_1[cpu][129] = mmu_make_user_block_desc(phys_addr + 0x200000);
+    for (int c = 0; c < MAX_CPUS; c++) {
+        l2_table_1[c][128] = mmu_make_user_block_desc(phys_addr);
+        l2_table_1[c][129] = mmu_make_user_block_desc(phys_addr + 0x200000);
+    }
 
-    // Invalidate TLB and synchronize
+    // Invalidate TLB and synchronize across all CPUs
     __asm__ volatile(
         "dsb sy\n"
-        "tlbi vmalle1\n"
+        "tlbi vmalle1is\n"
         "dsb sy\n"
         "isb\n"
     );
