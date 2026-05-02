@@ -42,5 +42,6 @@ void pipe_test_suite(void);
 void fs_test_suite(void);
 void mmu_test_suite(void);
 void process_test_suite(void);
+void program_loader_test_suite(void);
 
 #endif // UNIT_TEST_H
