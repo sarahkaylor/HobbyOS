@@ -16,6 +16,7 @@ void run_all_unit_tests(void) {
     locks_test_suite();
     pipe_test_suite();
     fs_test_suite();
+    mmu_test_suite();
 
     uart_puts("==================================\n");
     uart_puts("Tests run:    "); print_int(tests_run); uart_puts("\n");
