@@ -36,3 +36,10 @@ This document captures the major design decisions, architecture constraints, and
 ## 7. Execution Hand-Offs & Syscalls
 - **Trap Structures (SVC):** User mode programs compile dynamically into `.bin` containers triggering the `svc #0` hardware traps bypassing conventional external bindings. Utilizing `irq_lower_el` and `sync_lower_el`, the `boot.s` wrappers capture context frames and redirect them down to internal OS handlers.
 - **SPSR Protection:** Exiting EL1 to execute a User process restricts down hardware properties naturally via shifting the process register down to `EL0t` and relying securely on `eret` branching safely natively towards target instruction frames allocated via Virtual Memory dynamically.
+
+## 8. Build Modes & Testing Environment
+HobbyOS provides multiple distinct build and execution targets through its Makefile, designed to support both kernel-level validation and high-level user-space integration:
+- **Default / Desktop (`make run`)**: Compiles the OS defining `KERNEL_MODE_DESKTOP`. The kernel boots, initializes all drivers, and starts the window manager/desktop environment natively.
+- **Integration Tests (`make test`)**: Compiles with `KERNEL_MODE_TEST`. Instead of booting the desktop, the kernel's scheduler automatically spawns a predefined sequence of user-space test binaries (e.g., `fork_test.bin`, `smp_test.bin`, `pipe_test.bin`) to validate syscalls and parallel multi-core process execution.
+- **Kernel Unit Tests (`make unit_tests`)**: Compiles with `KERNEL_MODE_UNIT_TEST`. This isolates and tests kernel subsystems directly in EL1 (e.g., file system reads, lock behaviors, trap dispatchers, process control blocks) before the scheduler even starts. Upon test completion, QEMU forcefully halts.
+- **Automated Desktop Test (`make desktop_test`)**: Compiles with `KERNEL_MODE_DESKTOP_TEST`. Boots the desktop environment but immediately auto-launches an arbitrary UI application to validate the graphical framebuffer pipeline and event subsystems without requiring manual user input.
