@@ -15,7 +15,7 @@ This project requires the following tools, which can be installed via Homebrew:
 
 2. **Install LLVM** (for Clang compiler and LLD linker):
    ```bash
-   brew install llvm
+   brew install llvm lld
    ```
 
 3. **Install QEMU** (for running the OS):
