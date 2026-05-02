@@ -61,10 +61,72 @@ static void test_pipe_read_write(void) {
     pipe_close(p, 1);
 }
 
+static void test_pipe_reopen_and_close(void) {
+    uart_puts("  Running test_pipe_reopen_and_close...\n");
+    tests_run++;
+    
+    struct file f0_obj, f1_obj;
+    struct file *f0 = &f0_obj;
+    struct file *f1 = &f1_obj;
+    pipe_alloc(&f0, &f1);
+    struct pipe *p = f0->pipe.ptr;
+    
+    // Test reopen
+    pipe_reopen(p, 0); // reopen read end
+    EXPECT_EQ(p->reader_count, 2);
+    pipe_reopen(p, 1); // reopen write end
+    EXPECT_EQ(p->writer_count, 2);
+    
+    // Test close
+    pipe_close(p, 0);
+    EXPECT_EQ(p->reader_count, 1);
+    pipe_close(p, 1);
+    EXPECT_EQ(p->writer_count, 1);
+    
+    // Cleanup remaining
+    pipe_close(p, 0);
+    EXPECT_EQ(p->reader_count, 0);
+    pipe_close(p, 1);
+    EXPECT_EQ(p->writer_count, 0);
+}
+
+static void test_pipe_available(void) {
+    uart_puts("  Running test_pipe_available...\n");
+    tests_run++;
+    
+    struct file f0_obj, f1_obj;
+    struct file *f0 = &f0_obj;
+    struct file *f1 = &f1_obj;
+    pipe_alloc(&f0, &f1);
+    struct pipe *p = f0->pipe.ptr;
+    
+    EXPECT_EQ(pipe_available(p), 0);
+    
+    char msg[] = "abc";
+    pipe_write(p, msg, 3, 0);
+    
+    EXPECT_EQ(pipe_available(p), 3);
+    
+    // Close writer, pipe still has data
+    pipe_close(p, 1);
+    EXPECT_EQ(pipe_available(p), 3);
+    
+    // Read data
+    char buf[10];
+    pipe_read(p, buf, 3, 0);
+    
+    // Now pipe is empty and writer is closed -> EOF (-1)
+    EXPECT_EQ(pipe_available(p), -1);
+    
+    pipe_close(p, 0);
+}
+
 void pipe_test_suite(void) {
     uart_puts("pipe_test_suite:\n");
     test_pipe_alloc();
     test_pipe_read_write();
+    test_pipe_reopen_and_close();
+    test_pipe_available();
 }
 
 #endif // KERNEL_MODE_UNIT_TEST

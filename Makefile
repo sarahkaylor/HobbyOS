@@ -122,7 +122,7 @@ obj/smp_test.o: src/user/smp_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-obj/pipe_test.o: src/user/pipe_test.c $(USER_LIBC)
+obj/user_pipe_test.o: src/user/pipe_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
@@ -174,7 +174,7 @@ $(SMP_TEST_BIN): obj/smp_test.o obj/user_libc.o obj/user_malloc.o
 	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o smp_test.elf $^
 	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary smp_test.elf $(SMP_TEST_BIN)
 
-$(PIPETEST_BIN): obj/pipe_test.o obj/user_libc.o obj/user_malloc.o
+$(PIPETEST_BIN): obj/user_pipe_test.o obj/user_libc.o obj/user_malloc.o
 	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o pipe_test.elf $^
 	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary pipe_test.elf $(PIPETEST_BIN)
 
