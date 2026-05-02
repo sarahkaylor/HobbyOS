@@ -40,6 +40,9 @@ int load_and_run_program(const char* filename) {
         return -1;
     }
     
+    // Clean D-cache and invalidate I-cache so the loaded program executes correctly
+    __builtin___clear_cache((char*)USER_VIRT_BASE, (char*)USER_VIRT_BASE + bytes_read);
+
     fat16_close(&f);
 
     if (setjmp(user_exit_context) != 0) {
@@ -111,6 +114,9 @@ int load_and_run_program_in_scheduler(const char* filename) {
     uart_puts(" bytes for PID=");
     print_int(pid);
     uart_puts("\n");
+
+    // Clean D-cache and invalidate I-cache so the loaded program executes correctly
+    __builtin___clear_cache((char*)phys_base, (char*)phys_base + bytes_read);
 
     fat16_close(&f);
 

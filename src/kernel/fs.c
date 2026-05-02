@@ -132,6 +132,28 @@ int file_close(int fd) {
     return 0;
 }
 
+void fs_close_global(int g_fd) {
+    if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return;
+
+    struct file *f = &global_file_table[g_fd];
+    
+    uint64_t flags = spinlock_acquire_irqsave(&f->lock);
+    if (f->type == FILE_TYPE_EMPTY) {
+        spinlock_release_irqrestore(&f->lock, flags);
+        return;
+    }
+    f->ref_count--;
+    if (f->ref_count == 0) {
+        if (f->type == FILE_TYPE_FAT16) {
+            fat16_close(f);
+        } else if (f->type == FILE_TYPE_PIPE) {
+            pipe_close(f->pipe.ptr, f->pipe.end);
+        }
+        f->type = FILE_TYPE_EMPTY;
+    }
+    spinlock_release_irqrestore(&f->lock, flags);
+}
+
 /**
  * Reads data from a file descriptor into a buffer.
  * Supports FAT16 files and Pipes.
@@ -158,6 +180,30 @@ int file_read(int fd, void *buf, int size, struct trap_frame *tf) {
     } else if (f->type == FILE_TYPE_PIPE) {
         if (f->pipe.end != 0) return -1; // Read end only
         return pipe_read(f->pipe.ptr, buf, size, tf);
+    }
+    return -1;
+}
+
+/**
+ * Checks how many bytes are available to read from a file descriptor.
+ * 
+ * Returns:
+ *   Number of bytes available, or -1 if closed/EOF.
+ */
+int file_available(int fd) {
+    struct process *cur = current_process();
+    if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
+
+    int g_fd = cur->open_fds[fd];
+    if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
+
+    struct file *f = &global_file_table[g_fd];
+    if (f->type == FILE_TYPE_FAT16) {
+        // FAT16 files just return size minus cursor
+        return f->fat16.entry.file_size - f->fat16.cursor;
+    } else if (f->type == FILE_TYPE_PIPE) {
+        if (f->pipe.end != 0) return -1; // Read end only
+        return pipe_available(f->pipe.ptr);
     }
     return -1;
 }

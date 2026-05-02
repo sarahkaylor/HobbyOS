@@ -27,8 +27,8 @@
 // Standard 4KB page size
 #define PAGE_SIZE 0x1000
 
-// Size of the user memory region allocated per process (64MB)
-#define USER_REGION_SIZE    0x4000000
+// Size of the user memory region allocated per process (16MB)
+#define USER_REGION_SIZE    0x1000000
 
 // Number of 4KB pages in a 64MB user region
 #define PAGES_PER_REGION ((USER_REGION_SIZE) / (PAGE_SIZE))

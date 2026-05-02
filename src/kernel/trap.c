@@ -17,6 +17,9 @@ extern void timer_reload(void);
 
 /**
  * Prints the state of a trap frame for debugging purposes.
+ * Triggers specifically when a certain syscall (like SYS_FORK) is invoked to inspect register states before returning to user space.
+ * 
+ * @param tf Pointer to the trap frame to inspect and print.
  */
 void debug_print_tf(struct trap_frame *tf) {
     if (tf->regs[8] == 3) { // SYS_FORK is 3
@@ -47,6 +50,10 @@ extern uint32_t get_cpuid(void);
 #define SYS_FLUSH_FB      (10)
 #define SYS_GET_CPUID     (11)
 #define SYS_PIPE          (12)
+#define SYS_GET_EVENTS    (13)
+#define SYS_AVAILABLE     (14)
+#define SYS_READ_DIR      (15)
+#define SYS_KILL          (16)
 
 // Timer PPI interrupt ID on QEMU virt (non-secure physical timer)
 #define TIMER_PPI_INTID 30
@@ -120,11 +127,30 @@ static void sys_write(struct trap_frame *tf) {
 }
 
 extern int load_and_run_program_in_scheduler(const char* filename);
+extern struct process *process_get_pcb(int pid);
 
 static void sys_spawn(struct trap_frame *tf) {
   const char *filename = (const char *)tf->regs[0];
+  int stdin_fd = (int)tf->regs[1];
+  int stdout_fd = (int)tf->regs[2];
+  
   if ((uint64_t)filename >= USER_VIRT_BASE && (uint64_t)filename < (USER_VIRT_BASE + USER_REGION_SIZE)) {
     int child_pid = load_and_run_program_in_scheduler(filename);
+    if (child_pid >= 0) {
+        struct process *parent = current_process();
+        struct process *child = process_get_pcb(child_pid);
+        
+        if (parent && child) {
+            if (stdin_fd >= 0 && stdin_fd < MAX_OPEN_FDS && parent->open_fds[stdin_fd] != -1) {
+                child->open_fds[0] = parent->open_fds[stdin_fd];
+                fs_reopen(child->open_fds[0]);
+            }
+            if (stdout_fd >= 0 && stdout_fd < MAX_OPEN_FDS && parent->open_fds[stdout_fd] != -1) {
+                child->open_fds[1] = parent->open_fds[stdout_fd];
+                fs_reopen(child->open_fds[1]);
+            }
+        }
+    }
     tf->regs[0] = child_pid;
   } else {
     tf->regs[0] = -1;
@@ -164,13 +190,51 @@ static void sys_flush_fb(struct trap_frame *tf) {
   tf->regs[0] = 0;
 }
 
+extern int virtio_input_get_events(void *buf, int max_events);
+
+static void sys_get_events(struct trap_frame *tf) {
+  void *buf = (void *)tf->regs[0];
+  int max_events = (int)tf->regs[1];
+  if ((uint64_t)buf >= USER_VIRT_BASE && (uint64_t)buf + max_events * 8 <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+      tf->regs[0] = virtio_input_get_events(buf, max_events);
+  } else {
+      tf->regs[0] = -1;
+  }
+}
+
 static void sys_get_cpuid(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)get_cpuid();
+}
+
+extern int file_available(int fd);
+static void sys_available(struct trap_frame *tf) {
+    int fd = (int)tf->regs[0];
+    tf->regs[0] = file_available(fd);
+}
+
+extern int fat16_read_dir(int index, char *out_name);
+static void sys_read_dir(struct trap_frame *tf) {
+    int index = (int)tf->regs[0];
+    char *buf = (char *)tf->regs[1];
+    if ((uint64_t)buf >= USER_VIRT_BASE && (uint64_t)buf + 12 <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+        tf->regs[0] = fat16_read_dir(index, buf);
+    } else {
+        tf->regs[0] = -1;
+    }
+}
+
+extern int process_kill(int pid);
+static void sys_kill(struct trap_frame *tf) {
+    int pid = (int)tf->regs[0];
+    tf->regs[0] = process_kill(pid);
 }
 
 /**
  * High-level handler for synchronous exceptions occurring in the kernel (EL1).
  * Typically handles fatal errors like alignment faults or kernel-level page faults.
+ * If the exception is a specific yield SVC from EL1, it triggers a scheduler context switch.
+ * 
+ * @param tf Pointer to the trap frame representing the kernel state when the exception occurred.
  */
 void sync_handler_c(struct trap_frame *tf) {
   uint64_t esr;
@@ -198,7 +262,10 @@ void sync_handler_c(struct trap_frame *tf) {
 /**
  * High-level handler for synchronous exceptions occurring in user space (EL0).
  * This function dispatches system calls based on the SVC instruction's immediate value
- * and the syscall number in x8.
+ * and the syscall number in x8. It also catches memory protection violations (Data/Instruction Aborts)
+ * and safely terminates the offending process.
+ * 
+ * @param tf Pointer to the trap frame representing the user state when the exception occurred.
  */
 void sync_lower_handler_c(struct trap_frame *tf) {
   uint64_t esr;
@@ -241,6 +308,14 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_get_cpuid(tf);
     } else if (syscall_num == SYS_PIPE) {
       sys_pipe(tf);
+    } else if (syscall_num == SYS_GET_EVENTS) {
+      sys_get_events(tf);
+    } else if (syscall_num == SYS_AVAILABLE) {
+      sys_available(tf);
+    } else if (syscall_num == SYS_READ_DIR) {
+      sys_read_dir(tf);
+    } else if (syscall_num == SYS_KILL) {
+      sys_kill(tf);
     } else if (syscall_num == 0xFF) {
       schedule(tf);
     } else {
@@ -278,7 +353,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
 
 /**
  * High-level handler for hardware interrupts (IRQs) occurring in user space (EL0).
- * Handles timer interrupts for preemption and VirtIO interrupts for I/O.
+ * Handles timer interrupts for preemption (yielding to the scheduler) and routes
+ * hardware device interrupts (like VirtIO block and input devices) to their respective handlers.
+ * 
+ * @param tf Pointer to the trap frame representing the user state when the interrupt occurred.
  */
 void irq_lower_handler_c(struct trap_frame *tf) {
   uint32_t intid = gic_acknowledge_interrupt();
@@ -296,6 +374,9 @@ void irq_lower_handler_c(struct trap_frame *tf) {
     timer_reload();
   } else if (intid == virtio_blk_irq) {
     virtio_blk_handle_irq();
+  } else if (intid >= 48 && intid <= 79) {
+    extern void virtio_input_handle_irq(int irq);
+    virtio_input_handle_irq(intid);
   }
 
   gic_end_interrupt(intid);

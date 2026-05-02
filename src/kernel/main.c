@@ -1,4 +1,5 @@
 #include "fat16.h"
+#include "fs.h"
 #include "gic.h"
 #include "mmu.h"
 #include "process.h"
@@ -7,7 +8,7 @@
 #include "trap.h"
 #include "virtio_blk.h"
 #include "virtio_gpu.h"
-#include "fs.h"
+#include "virtio_input.h"
 #include <stdint.h>
 void virtio_blk_handle_irq(void);
 extern int virtio_blk_irq;
@@ -20,8 +21,8 @@ extern uint32_t get_cpuid(void);
 static spinlock_t uart_lock;
 
 /**
- * High-level handler for hardware interrupts (IRQs) occurring in the kernel (EL1).
- * Specifically handles VirtIO block interrupts and timer ticks.
+ * High-level handler for hardware interrupts (IRQs) occurring in the kernel
+ * (EL1). Specifically handles VirtIO block interrupts and timer ticks.
  */
 void irq_handler_c(struct trap_frame *tf) {
   uint32_t intid = gic_acknowledge_interrupt();
@@ -29,12 +30,15 @@ void irq_handler_c(struct trap_frame *tf) {
   // VirtIO Block IRQ for located slot on virt machine
   if (intid == (uint32_t)virtio_blk_irq) {
     virtio_blk_handle_irq();
+  } else if (intid >= 48 && intid <= 79) {
+    extern void virtio_input_handle_irq(int irq);
+    virtio_input_handle_irq(intid);
   } else if (intid == 30) {
     // Timer PPI
     timer_reload();
     struct process *cur = current_process();
     if (cur) {
-        schedule(tf);
+      schedule(tf);
     }
   }
 
@@ -56,10 +60,12 @@ volatile uint32_t *const UART0_FR = (uint32_t *)(UART0_BASE + 0x18);
  */
 void uart_putc(char c) {
   if (c == '\n') {
-    while (*UART0_FR & (1 << 5)) { } // Wait until TXFF is clear
+    while (*UART0_FR & (1 << 5)) {
+    } // Wait until TXFF is clear
     *UART0_DR = (uint32_t)('\r');
   }
-  while (*UART0_FR & (1 << 5)) { } // Wait until TXFF is clear
+  while (*UART0_FR & (1 << 5)) {
+  } // Wait until TXFF is clear
   *UART0_DR = (uint32_t)(c);
 }
 
@@ -133,6 +139,12 @@ void main(void) {
     uart_puts("VirtIO GPU initialization failed!\n");
   }
 
+  if (virtio_input_init() == 0) {
+    uart_puts("VirtIO Input devices successfully initialized.\n");
+  } else {
+    uart_puts("No VirtIO Input devices found.\n");
+  }
+
   gic_init();
 
   // Initialize multitasking and secondary cores early
@@ -176,15 +188,20 @@ void main(void) {
   // -----------------------------------------------------------------------
   uart_puts("\n--- Parallel Program Loading ---\n");
 
-  // load_and_run_program_in_scheduler("CONSOLE.BIN");
-  // load_and_run_program_in_scheduler("MEMTEST.BIN");
-  // load_and_run_program_in_scheduler("FILEIO.BIN");
-  // load_and_run_program_in_scheduler("HEAPTEST.BIN");
-  // load_and_run_program_in_scheduler("SPAWN.BIN");
-  // load_and_run_program_in_scheduler("FORKTEST.BIN");
-  // load_and_run_program_in_scheduler("GRAPHICS.BIN");
-  // load_and_run_program_in_scheduler("SMPTEST.BIN");
+  // these test programs should always exist and not be removed
+  // a part of the design of this kernel is that it is self testing
+  load_and_run_program_in_scheduler("CONSOLE.BIN");
+  load_and_run_program_in_scheduler("MEMTEST.BIN");
+  load_and_run_program_in_scheduler("FILEIO.BIN");
+  load_and_run_program_in_scheduler("HEAPTEST.BIN");
+  load_and_run_program_in_scheduler("SPAWN.BIN");
+  load_and_run_program_in_scheduler("FORKTEST.BIN");
+  load_and_run_program_in_scheduler("GRAPHICS.BIN");
+  load_and_run_program_in_scheduler("SMPTEST.BIN");
   load_and_run_program_in_scheduler("PIPETEST.BIN");
+
+  // the only optional test program:
+  // load_and_run_program_in_scheduler("DESKTOP.BIN");
 
   // Join the other cores in the scheduler
   start_scheduler();

@@ -1,6 +1,6 @@
 #include "libc.h"
 
-void _start() {
+__attribute__((section(".text._start"))) void _start() {
     int local_fds[2];
     print("Pipe Test Starting...\n");
     pipe(local_fds);

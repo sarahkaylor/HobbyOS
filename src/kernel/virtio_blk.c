@@ -80,6 +80,7 @@ static uint8_t* blk_mmio = 0;
 static uint16_t ack_used_idx = 0;
 int virtio_blk_irq = -1;
 static spinlock_t blk_lock;
+static spinlock_t blk_request_lock;
 
 static inline void reg_write32(uint32_t offset, uint32_t val) {
     *(volatile uint32_t*)(blk_mmio + offset) = val;
@@ -115,6 +116,7 @@ void virtio_blk_handle_irq(void) {
  */
 int virtio_blk_init(void) {
     spinlock_init(&blk_lock);
+    spinlock_init(&blk_request_lock);
     // Scan for virtio block device (ID 2)
     for (int i = 0; i < 32; i++) {
         uint8_t* mmio = MMIO_BASE(i);
@@ -258,11 +260,14 @@ static int virtio_blk_do_op(uint64_t sector, void* buf, uint32_t type) {
  * Reads one or more sectors from the block device.
  */
 int virtio_blk_read_sector(uint64_t sector, void* buf, uint32_t count) {
+    uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
     for (uint32_t i = 0; i < count; i++) {
         if (virtio_blk_do_op(sector + i, (uint8_t*)buf + (i * 512), VIRTIO_BLK_T_IN) != 0) {
+            spinlock_release_irqrestore(&blk_request_lock, flags);
             return -1;
         }
     }
+    spinlock_release_irqrestore(&blk_request_lock, flags);
     return 0;
 }
 
@@ -270,11 +275,14 @@ int virtio_blk_read_sector(uint64_t sector, void* buf, uint32_t count) {
  * Writes one or more sectors to the block device.
  */
 int virtio_blk_write_sector(uint64_t sector, const void* buf, uint32_t count) {
+    uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
     for (uint32_t i = 0; i < count; i++) {
         // Warning: virtio_blk_do_op incorrectly strips const mathematically, but it's okay for virtio output
         if (virtio_blk_do_op(sector + i, (void*)((uint8_t*)buf + (i * 512)), VIRTIO_BLK_T_OUT) != 0) {
+            spinlock_release_irqrestore(&blk_request_lock, flags);
             return -1;
         }
     }
+    spinlock_release_irqrestore(&blk_request_lock, flags);
     return 0;
 }

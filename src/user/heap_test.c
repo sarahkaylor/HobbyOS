@@ -1,6 +1,6 @@
 #include "libc.h"
 
-void _start(void) {
+__attribute__((section(".text._start"))) void _start(void) {
     print("\n--- Heap Test Started ---\n");
 
     print("Allocating 1MB...\n");

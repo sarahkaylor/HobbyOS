@@ -208,3 +208,20 @@ void mmu_map_user_framebuffer(uint64_t phys_addr) {
     );
     spinlock_release_irqrestore(&mmu_lock, flags);
 }
+
+void __clear_cache(void *begin, void *end) {
+    const int cache_line_size = 64;
+    uint64_t begin_addr = (uint64_t)begin & ~(cache_line_size - 1);
+    
+    // Clean Data Cache to Point of Unification (PoU)
+    for (uint64_t addr = begin_addr; addr < (uint64_t)end; addr += cache_line_size) {
+        __asm__ volatile("dc cvau, %0" : : "r" (addr) : "memory");
+    }
+    __asm__ volatile("dsb ish" : : : "memory");
+    
+    // Invalidate Entire Instruction Cache (Inner Shareable)
+    // We do this instead of by VA because the user VA is not mapped in the kernel
+    // when this function is called, and I-cache invalidation requires the execution VA.
+    __asm__ volatile("ic ialluis" : : : "memory");
+    __asm__ volatile("dsb ish\nisb" : : : "memory");
+}

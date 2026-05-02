@@ -45,6 +45,7 @@ int file_close(int fd);
 int file_read(int fd, void *buf, int size, struct trap_frame *tf);
 int file_write(int fd, const void *buf, int size, struct trap_frame *tf);
 int file_pipe(int fds[2]);
+int file_available(int fd);
 
 // Helpers for process management
 /**
@@ -56,5 +57,18 @@ void fs_reopen(int global_fd);
  * Duplicates a file descriptor (not currently used in the main logic).
  */
 int fs_duplicate_fd(int global_fd);
+
+/**
+ * Reads a directory entry by index from the FAT16 root directory.
+ * 
+ * Parameters:
+ *   index    - The 0-based index of the file in the directory.
+ *   out_name - Buffer to store the resulting filename (at least 12 bytes).
+ * 
+ * Returns:
+ *   0 on success, -1 if no more entries exist.
+ */
+int fat16_read_dir(int index, char *out_name);
+void fs_close_global(int g_fd);
 
 #endif // FS_H

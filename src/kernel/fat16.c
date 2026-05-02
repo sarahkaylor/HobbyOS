@@ -161,6 +161,58 @@ int fat16_open(const char* filename, struct file* f) {
 }
 
 /**
+ * Reads the filename of the N-th valid entry in the root directory.
+ */
+int fat16_read_dir(int index, char *out_name) {
+    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    uint8_t buf[SECTOR_SIZE];
+    int current_idx = 0;
+
+    for (uint32_t i = 0; i < root_dir_sectors; i++) {
+        spinlock_release_irqrestore(&fat_lock, flags);
+        if (virtio_blk_read_sector(root_dir_sector + i, buf, 1) != 0) {
+            return -1;
+        }
+        flags = spinlock_acquire_irqsave(&fat_lock);
+
+        struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
+        for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
+            if (entries[j].name[0] == 0x00) {
+                spinlock_release_irqrestore(&fat_lock, flags);
+                return -1; // End of directory
+            }
+            if (entries[j].name[0] == (char)0xE5) continue; // Deleted
+            
+            // It's a valid entry
+            if (current_idx == index) {
+                // Format name "XXXXXXXX.YYY"
+                int out_pos = 0;
+                for (int k = 0; k < 8; k++) {
+                    if (entries[j].name[k] != ' ') {
+                        out_name[out_pos++] = entries[j].name[k];
+                    }
+                }
+                if (entries[j].name[8] != ' ') {
+                    out_name[out_pos++] = '.';
+                    for (int k = 8; k < 11; k++) {
+                        if (entries[j].name[k] != ' ') {
+                            out_name[out_pos++] = entries[j].name[k];
+                        }
+                    }
+                }
+                out_name[out_pos] = '\0';
+                
+                spinlock_release_irqrestore(&fat_lock, flags);
+                return 0;
+            }
+            current_idx++;
+        }
+    }
+    spinlock_release_irqrestore(&fat_lock, flags);
+    return -1;
+}
+
+/**
  * Closes a FAT16 file. Updates the directory entry on disk (e.g., file size).
  */
 int fat16_close(struct file* f) {

@@ -291,6 +291,30 @@ void process_exit(struct trap_frame *tf) {
 }
 
 /**
+ * Force kills a process by its PID from another process.
+ */
+int process_kill(int pid) {
+    if (pid < 0 || pid >= MAX_PROCESSES) return -1;
+    uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    struct process *p = &proc_table[pid];
+    if (p->state == PROC_STATE_FREE || p->state == PROC_STATE_EXITED) {
+        spinlock_release_irqrestore(&proc_lock, flags);
+        return -1;
+    }
+    p->state = PROC_STATE_EXITED;
+    spinlock_release_irqrestore(&proc_lock, flags);
+    
+    // We close the global file descriptors directly to properly free resources
+    for (int i = 0; i < MAX_OPEN_FDS; i++) {
+        if (p->open_fds[i] != -1) {
+            fs_close_global(p->open_fds[i]);
+            p->open_fds[i] = -1;
+        }
+    }
+    return 0;
+}
+
+/**
  * Implements the fork system call. Creates a child process as a copy of the parent.
  * Copies memory, open file descriptors, and CPU context.
  * 

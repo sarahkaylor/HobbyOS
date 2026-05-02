@@ -6,20 +6,40 @@
 
 #include "malloc.h"
 
-void print(const char* str);
+void print(const char *str);
 void print_hex(long val);
 void exit(void);
 int fork(void);
 
-int open(const char* filename);
+int open(const char *filename);
 int close(int fd);
-int read(int fd, void* buf, int size);
-int write(int fd, const void* buf, int size);
-int spawn(const char* filename);
+int read(int fd, void *buf, int size);
+int write(int fd, const void *buf, int size);
+int kill(int pid);
+int spawn(const char *filename);
+int spawn2(const char *filename, int stdin_fd, int stdout_fd);
 int pipe(int fds[2]);
 
-void* map_fb(void);
+void *map_fb(void);
 void flush_fb(void);
 int get_cpuid(void);
+
+#define EV_SYN 0x00
+#define EV_KEY 0x01
+#define EV_REL 0x02
+#define EV_ABS 0x03
+
+#define ABS_X 0x00
+#define ABS_Y 0x01
+
+struct virtio_input_event {
+  uint16_t type;
+  uint16_t code;
+  uint32_t value;
+};
+
+int get_events(void *buf, int max_events);
+int available(int fd);
+int read_dir(int index, char *buf);
 
 #endif

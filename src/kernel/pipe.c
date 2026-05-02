@@ -226,3 +226,18 @@ int pipe_write(struct pipe *p, const void *buf, int n, struct trap_frame *tf) {
     }
     return i;
 }
+
+/**
+ * Checks how many bytes are available to read in the pipe.
+ * Returns -1 if the pipe is closed by all writers and empty.
+ */
+int pipe_available(struct pipe *p) {
+    if (!p) return -1;
+    uint64_t flags = spinlock_acquire_irqsave(&p->lock);
+    int avail = p->count;
+    if (avail == 0 && p->writer_count == 0) {
+        avail = -1; // EOF
+    }
+    spinlock_release_irqrestore(&p->lock, flags);
+    return avail;
+}

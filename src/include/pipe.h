@@ -29,5 +29,6 @@ int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf);
 int pipe_write(struct pipe *p, const void *buf, int n, struct trap_frame *tf);
 void pipe_reopen(struct pipe *p, int end);
 void pipe_close(struct pipe *p, int end);
+int pipe_available(struct pipe *p);
 
 #endif // PIPE_H

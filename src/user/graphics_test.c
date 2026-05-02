@@ -8,7 +8,7 @@ static unsigned int rand(void) {
     return seed;
 }
 
-void _start(void) {
+__attribute__((section(".text._start"))) void _start(void) {
     print("Graphics Test Program Started\n");
 
     if (graphics_init() != 0) {
