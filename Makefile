@@ -2,9 +2,25 @@
 CC = /opt/homebrew/opt/llvm/bin/clang
 QEMU = /opt/homebrew/bin/qemu-system-aarch64
 
+# Mode selection (desktop or test)
+MODE ?= desktop
+OBJ_DIR = obj
+MODE_FILE = $(OBJ_DIR)/.mode
+
+# Determine if the mode has changed and update the tracker file
+CURRENT_MODE := $(shell [ -f $(MODE_FILE) ] && cat $(MODE_FILE) || echo none)
+ifneq ($(CURRENT_MODE),$(MODE))
+$(shell mkdir -p $(OBJ_DIR) && echo $(MODE) > $(MODE_FILE))
+endif
+
 # Use --target=aarch64-none-elf to instruct clang to build for an AArch64 bare-metal target.
 # -ffreestanding confirms that we don't have a standard library underneath us.
 CFLAGS = -Wall -Wextra -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
+ifeq ($(MODE),test)
+CFLAGS += -DKERNEL_MODE_TEST
+else
+CFLAGS += -DKERNEL_MODE_DESKTOP
+endif
 
 # -nostdlib prevents linking against stdlib startup files and libc.
 # -T linker.ld points to our custom linker script.
@@ -54,7 +70,7 @@ $(TARGET): $(OBJS)
 	$(LD) $(LDFLAGS) -o $@ $^
 
 # Rule to compile .c files into .o files
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c src/include/*.h
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c src/include/*.h $(MODE_FILE)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -193,4 +209,7 @@ fork_test: $(FORK_TEST_BIN)
 tests: memtest fileio_test fork_test
 	@echo "All test programs compiled"
 
-.PHONY: all clean run memtest fileio_test fork_test tests
+test:
+	$(MAKE) MODE=test run
+
+.PHONY: all clean run memtest fileio_test fork_test tests test

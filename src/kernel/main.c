@@ -182,15 +182,15 @@ void main(void) {
   uart_puts("FAT-16 filesystem successfully initialized.\n");
 
   // -----------------------------------------------------------------------
-  // Parallel Boot: Load all programs into the scheduler.
+  // Parallel Boot: Load programs into the scheduler based on the mode.
   // Secondary cores are already spinning in start_scheduler() and will
   // pick these up as soon as they are marked READY.
   // -----------------------------------------------------------------------
   uart_puts("\n--- Parallel Program Loading ---\n");
 
-  // When writing code, activate these test programs to validate behavior
-  // in the kernel and to detect bugs, otherwise, keep these commented out
-  /*load_and_run_program_in_scheduler("CONSOLE.BIN");
+#ifdef KERNEL_MODE_TEST
+  uart_puts("Mode: TEST - Loading test suite...\n");
+  load_and_run_program_in_scheduler("CONSOLE.BIN");
   load_and_run_program_in_scheduler("MEMTEST.BIN");
   load_and_run_program_in_scheduler("FILEIO.BIN");
   load_and_run_program_in_scheduler("HEAPTEST.BIN");
@@ -198,10 +198,11 @@ void main(void) {
   load_and_run_program_in_scheduler("FORKTEST.BIN");
   load_and_run_program_in_scheduler("SMPTEST.BIN");
   load_and_run_program_in_scheduler("PIPETEST.BIN");
-  load_and_run_program_in_scheduler("GRAPHICS.BIN");*/
-
-  // after making changes and testing the code, make sure this is uncommented.
+  load_and_run_program_in_scheduler("GRAPHICS.BIN");
+#else
+  uart_puts("Mode: DESKTOP - Launching desktop...\n");
   load_and_run_program_in_scheduler("DESKTOP.BIN");
+#endif
 
   // Join the other cores in the scheduler
   start_scheduler();
