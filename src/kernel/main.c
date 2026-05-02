@@ -36,10 +36,12 @@ void irq_handler_c(struct trap_frame *tf) {
   } else if (intid == 30) {
     // Timer PPI
     timer_reload();
+#ifndef KERNEL_MODE_UNIT_TEST
     struct process *cur = current_process();
     if (cur) {
       schedule(tf);
     }
+#endif
   }
 
   gic_end_interrupt(intid);
