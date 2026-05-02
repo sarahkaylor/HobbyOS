@@ -13,7 +13,7 @@ __attribute__((section(".text._start"))) void _start(void) {
 
     if (graphics_init() != 0) {
         print("Failed to initialize graphics\n");
-        exit();
+        exit(0);
     }
 
     print("Graphics initialized. Drawing...\n");
@@ -47,5 +47,5 @@ __attribute__((section(".text._start"))) void _start(void) {
     }
 
     print("Graphics test drawn. Exiting.\n");
-    exit();
+    exit(0);
 }

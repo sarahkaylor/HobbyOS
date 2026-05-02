@@ -25,5 +25,5 @@ void _start(void) {
     
     print("Test complete. Returning to kernel with error code.\n");
 
-    exit(); // Explicitly call exit if we somehow continue after the fault
+    exit(0); // Explicitly call exit if we somehow continue after the fault
 }

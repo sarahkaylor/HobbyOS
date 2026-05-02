@@ -62,5 +62,5 @@ void _start(void) {
         print("[FORK TEST] ERROR: fork() returned negative!\n");
     }
 
-    exit();
+    exit(0);
 }

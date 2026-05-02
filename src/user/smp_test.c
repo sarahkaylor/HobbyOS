@@ -30,12 +30,12 @@ void _start(void) {
                 // Busy work to keep the core occupied
                 for(volatile int k = 0; k < 5000000; k++);
             }
-            exit();
+            exit(0);
         }
     }
     
     // Parent waits a bit
     for(volatile int k = 0; k < 50000000; k++);
     print("SMP Verification Test Complete.\n");
-    exit();
+    exit(0);
 }

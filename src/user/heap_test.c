@@ -44,5 +44,5 @@ __attribute__((section(".text._start"))) void _start(void) {
     }
 
     print("--- Heap Test Completed ---\n");
-    exit();
+    exit(0);
 }

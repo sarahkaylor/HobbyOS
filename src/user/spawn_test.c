@@ -34,5 +34,5 @@ __attribute__((section(".text._start"))) void _start(void) {
   }
 
   print("Spawn Test: Finished. Exiting.\n");
-  exit();
+  exit(0);
 }

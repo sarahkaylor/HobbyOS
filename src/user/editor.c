@@ -3,6 +3,7 @@
 #define MAX_FILE_SIZE 2000
 char text_buffer[MAX_FILE_SIZE];
 int text_len = 0;
+int cursor_idx = 0;
 
 int mode = 0; // 0 = NORMAL, 1 = COMMAND
 char cmd_buffer[64];
@@ -21,15 +22,32 @@ void my_strcpy(char *dest, const char *src) {
 
 void redraw() {
     print("\f"); // Clear screen
-    print(text_buffer);
+    
+    char out_buf[MAX_FILE_SIZE + 10];
+    int o = 0;
+    for (int i = 0; i < cursor_idx; i++) {
+        out_buf[o++] = text_buffer[i];
+    }
+    out_buf[o++] = (mode == 0) ? '_' : '=';
+    for (int i = cursor_idx; i < text_len; i++) {
+        out_buf[o++] = text_buffer[i];
+    }
+    out_buf[o] = '\0';
+    print(out_buf);
+    
     if (mode == 1) {
         print("\n\n--- COMMAND MODE (w=save, r=load, q=quit) ---\n:");
         print(cmd_buffer);
+        print("_");
     }
 }
 
+#ifndef HOST_TEST
 __attribute__((section(".text._start")))
 void _start(void) {
+#else
+int main(void) {
+#endif
     print("\fHobbyOS Editor\nPress ESC for Command Mode\n");
     for (volatile int i = 0; i < 2000000; i++) {} // brief delay
     
@@ -44,6 +62,7 @@ void _start(void) {
         text_buffer[0] = '\0';
         text_len = 0;
     }
+    cursor_idx = text_len;
     
     redraw();
     
@@ -51,9 +70,27 @@ void _start(void) {
         char c;
         if (read(0, &c, 1) > 0) {
             if (c == 27) { // ESC key
-                mode = !mode;
-                cmd_len = 0;
-                cmd_buffer[0] = '\0';
+                if (available(0) >= 2) {
+                    char seq[2];
+                    read(0, seq, 2);
+                    if (seq[0] == '[') {
+                        if (seq[1] == 'C' && cursor_idx < text_len) cursor_idx++;
+                        if (seq[1] == 'D' && cursor_idx > 0) cursor_idx--;
+                        // Simple UP/DOWN by moving 10 chars for now
+                        if (seq[1] == 'A') {
+                            cursor_idx -= 10;
+                            if (cursor_idx < 0) cursor_idx = 0;
+                        }
+                        if (seq[1] == 'B') {
+                            cursor_idx += 10;
+                            if (cursor_idx > text_len) cursor_idx = text_len;
+                        }
+                    }
+                } else {
+                    mode = !mode;
+                    cmd_len = 0;
+                    cmd_buffer[0] = '\0';
+                }
                 redraw();
                 continue;
             }
@@ -61,14 +98,23 @@ void _start(void) {
             if (mode == 0) {
                 // NORMAL MODE
                 if (c == '\b') {
-                    if (text_len > 0) {
+                    if (cursor_idx > 0) {
+                        for (int i = cursor_idx - 1; i < text_len - 1; i++) {
+                            text_buffer[i] = text_buffer[i + 1];
+                        }
                         text_len--;
+                        cursor_idx--;
                         text_buffer[text_len] = '\0';
                         redraw();
                     }
                 } else if (c == '\n' || (c >= 32 && c <= 126)) {
                     if (text_len < MAX_FILE_SIZE - 1) {
-                        text_buffer[text_len++] = c;
+                        for (int i = text_len; i > cursor_idx; i--) {
+                            text_buffer[i] = text_buffer[i - 1];
+                        }
+                        text_buffer[cursor_idx] = c;
+                        cursor_idx++;
+                        text_len++;
                         text_buffer[text_len] = '\0';
                         redraw();
                     }
@@ -118,7 +164,7 @@ void _start(void) {
                         redraw();
                     } else if (cmd_buffer[0] == 'q') {
                         // quit
-                        exit();
+                        exit(0);
                     } else {
                         // unknown, return to normal
                         mode = 0;

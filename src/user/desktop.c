@@ -51,16 +51,19 @@ extern int num_windows;
 
 int main(void);
 
-__attribute__((section(".text._start"))) void _start(void) {
+#ifndef HOST_TEST
+__attribute__((section(".text._start")))
+void _start(void) {
   main();
-  exit();
+  exit(0);
 }
+#endif
 
 int main(void) {
   print("Desktop starting...\n");
   if (graphics_init() < 0) {
     print("Failed to initialize graphics.\n");
-    exit();
+    exit(0);
   }
   wm_init();
   load_menu();
@@ -134,7 +137,7 @@ int main(void) {
                         mouse_y <= windows[w].y + 18 &&
                         mouse_x >= windows[w].x + windows[w].w - 18 &&
                         mouse_x <= windows[w].x + windows[w].w - 2) {
-                      kill(windows[w].pid);
+                      kill(windows[w].pid, 9);
                       wm_remove_window(win_id);
                       if (focused_window == win_id)
                         focused_window = -1;
@@ -169,6 +172,21 @@ int main(void) {
                 }
               }
               needs_redraw = 1;
+            }
+          } else if (ev->code >= 103 && ev->code <= 108) {
+            char seq[3] = {27, '[', 0};
+            if (ev->code == 103) seq[2] = 'A'; // UP
+            if (ev->code == 108) seq[2] = 'B'; // DOWN
+            if (ev->code == 106) seq[2] = 'C'; // RIGHT
+            if (ev->code == 105) seq[2] = 'D'; // LEFT
+            if (seq[2] != 0 && focused_window >= 0) {
+                for (int w = 0; w < num_windows; w++) {
+                  if (windows[w].id == focused_window) {
+                    write(windows[w].stdin_fd, seq, 3);
+                    break;
+                  }
+                }
+                needs_redraw = 1;
             }
           }
         }
@@ -230,6 +248,6 @@ int main(void) {
     }
   }
 
-  exit();
+  exit(0);
   return 0;
 }

@@ -12,7 +12,7 @@ void _start(void) {
     int fd = open(filename);
     if (fd < 0) {
         print("[FILEIO TEST] ERROR: Could not open TEST.TXT\n");
-        exit();
+        exit(0);
     }
     print("[FILEIO TEST] Opened TEST.TXT successfully.\n");
 
@@ -32,7 +32,7 @@ void _start(void) {
     fd = open(filename);
     if (fd < 0) {
         print("[FILEIO TEST] ERROR: Could not reopen TEST.TXT\n");
-        exit();
+        exit(0);
     }
     print("[FILEIO TEST] Reopened TEST.TXT for reading.\n");
 
@@ -51,5 +51,5 @@ void _start(void) {
     close(fd);
     print("[FILEIO TEST] File I/O Tests Complete. Exiting.\n");
 
-    exit();
+    exit(0);
 }

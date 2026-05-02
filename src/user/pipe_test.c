@@ -38,7 +38,7 @@ __attribute__((section(".text._start"))) void _start() {
         }
         close(local_fds[0]);
         print("Child exiting\n");
-        exit();
+        exit(0);
     } else {
         // Parent
         print("Parent: closing read end\n");
@@ -49,6 +49,6 @@ __attribute__((section(".text._start"))) void _start() {
         print("Parent: closing write end\n");
         close(local_fds[1]);
         print("Parent exiting\n");
-        exit();
+        exit(0);
     }
 }

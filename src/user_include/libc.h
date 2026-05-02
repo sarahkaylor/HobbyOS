@@ -6,16 +6,27 @@
 
 #include "malloc.h"
 
+#ifdef HOST_TEST
+#define open ho_open
+#define read ho_read
+#define write ho_write
+#define close ho_close
+#define exit ho_exit
+#define kill ho_kill
+#define fork ho_fork
+#define pipe ho_pipe
+#endif
+
 void print(const char *str);
 void print_hex(long val);
-void exit(void);
+void exit(int status);
 int fork(void);
 
 int open(const char *filename);
 int close(int fd);
 int read(int fd, void *buf, int size);
 int write(int fd, const void *buf, int size);
-int kill(int pid);
+int kill(int pid, int sig);
 int spawn(const char *filename);
 int spawn2(const char *filename, int stdin_fd, int stdout_fd);
 int pipe(int fds[2]);

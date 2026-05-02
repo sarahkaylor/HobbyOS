@@ -11,5 +11,5 @@ void _start(void) {
 
     print("Computation finished. Exiting.\n");
 
-    exit();
+    exit(0);
 }

@@ -55,13 +55,13 @@ void print_hex(long val) {
   print(buf);
 }
 
-void exit(void) {
-  syscall(SYS_EXIT, 0, 0, 0, 0);
+void exit(int status) {
+  syscall(SYS_EXIT, (long)status, 0, 0, 0);
   while (1)
     ; // Wait for the kernel to halt us safely
 }
 
-int kill(int pid) { return (int)syscall(SYS_KILL, (long)pid, 0, 0, 0); }
+int kill(int pid, int sig) { return (int)syscall(SYS_KILL, (long)pid, (long)sig, 0, 0); }
 
 int fork(void) { return (int)syscall(SYS_FORK, 0, 0, 0, 0); }
 

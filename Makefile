@@ -233,4 +233,36 @@ unit_tests:
 desktop_test:
 	$(MAKE) MODE=desktop_test run
 
-.PHONY: all clean run memtest fileio_test fork_test tests test unit_tests desktop_test
+# --- Host Compatibility Build Targets ---
+HOST_CC = clang
+HOST_CFLAGS = -Wall -Wextra -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST
+
+obj/host_%.o: src/host/%.c
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+
+obj/host_user_desktop.o: src/user/desktop.c
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -Dmain=desktop_main -c $< -o $@
+
+obj/host_user_%.o: src/user/%.c
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+
+obj/host_user_graphics_%.o: src/user/graphics/%.c
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+
+EDITOR_HOST = EDITOR.BIN_host
+
+$(EDITOR_HOST): obj/host_user_editor.o obj/host_compat.o
+	$(HOST_CC) -o $@ $^
+
+EDITOR_TEST_BIN = editor_test_host
+$(EDITOR_TEST_BIN): obj/host_editor_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o
+	$(HOST_CC) -o $@ $^
+
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN)
+	./$(EDITOR_TEST_BIN)
+
+.PHONY: all clean run memtest fileio_test fork_test tests test unit_tests desktop_test host_tests
