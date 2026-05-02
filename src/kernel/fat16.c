@@ -182,6 +182,8 @@ int fat16_read_dir(int index, char *out_name) {
                 return -1; // End of directory
             }
             if (entries[j].name[0] == (char)0xE5) continue; // Deleted
+            if (entries[j].attr == 0x0F) continue; // LFN entry
+            if (entries[j].attr & 0x08) continue; // Volume label
             
             // It's a valid entry
             if (current_idx == index) {

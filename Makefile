@@ -59,6 +59,7 @@ SMP_TEST_BIN = smp_test.bin
 
 PIPETEST_BIN = pipetest.bin
 DESKTOP_BIN = desktop.bin
+EDITOR_BIN = editor.bin
 
 # Default rule: build the target
 all: $(TARGET)
@@ -135,6 +136,10 @@ obj/desktop.o: src/user/desktop.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
+obj/editor.o: src/user/editor.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
 $(MEM_TEST_BIN): obj/mem_test.o obj/user_libc.o obj/user_malloc.o
 	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o memtest.elf $^
 	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary memtest.elf $(MEM_TEST_BIN)
@@ -175,7 +180,11 @@ $(DESKTOP_BIN): obj/desktop.o obj/user_libc.o obj/user_malloc.o obj/user_graphic
 	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o desktop_test.elf $^
 	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary desktop_test.elf $(DESKTOP_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(DESKTOP_BIN)
+$(EDITOR_BIN): obj/editor.o obj/user_libc.o obj/user_malloc.o
+	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o editor.elf $^
+	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary editor.elf $(EDITOR_BIN)
+
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN)
 	dd if=/dev/zero of=disk.img bs=1M count=512
 	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img 
 	/opt/homebrew/bin/mcopy -i disk.img $(MEM_TEST_BIN) ::/MEMTEST.BIN
@@ -188,6 +197,7 @@ disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TE
 	/opt/homebrew/bin/mcopy -i disk.img $(SMP_TEST_BIN) ::/SMPTEST.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(PIPETEST_BIN) ::/PIPETEST.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(DESKTOP_BIN) ::/DESKTOP.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(EDITOR_BIN) ::/EDITOR.BIN
 	touch TEST.TXT
 	/opt/homebrew/bin/mcopy -i disk.img TEST.TXT ::/TEST.TXT
 

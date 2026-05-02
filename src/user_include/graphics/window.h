@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #define MAX_WINDOWS 4
-#define MAX_TEXT 256
+#define MAX_TEXT 2048
 
 struct window {
     int id;

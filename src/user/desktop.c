@@ -10,7 +10,7 @@ char keymap[128] = {0,    27,  '1', '2',  '3',  '4',  '5', '6', '7',  '8',
                     '\'', '`', 0,   '\\', 'z',  'x',  'c', 'v', 'b',  'n',
                     'm',  ',', '.', '/',  0,    '*',  0,   ' ', 0};
 
-#define MAX_MENU_ITEMS 16
+#define MAX_MENU_ITEMS 32
 char menu_items[MAX_MENU_ITEMS][16];
 int num_menu_items = 0;
 
@@ -195,7 +195,15 @@ int main(void) {
         if (r > 0) {
           for (int k = 0; k < r; k++) {
             char c = buf[k];
-            if (windows[i].text_len < MAX_TEXT - 1) {
+            if (c == '\f') {
+              windows[i].text_len = 0;
+              windows[i].text[0] = '\0';
+            } else if (c == '\b') {
+              if (windows[i].text_len > 0) {
+                windows[i].text_len--;
+                windows[i].text[windows[i].text_len] = '\0';
+              }
+            } else if (windows[i].text_len < MAX_TEXT - 1) {
               windows[i].text[windows[i].text_len++] = c;
               windows[i].text[windows[i].text_len] = '\0';
             }
