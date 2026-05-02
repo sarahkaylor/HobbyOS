@@ -32,6 +32,7 @@ run_main:
     // Call the C main function
     bl      main
 
+.global halt
 halt:
     // Shut down QEMU using semihosting SYS_EXIT call.
     // On AArch64, the semihosting trap instruction is HLT #0xF000.

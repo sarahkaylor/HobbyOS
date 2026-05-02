@@ -188,7 +188,11 @@ void main(void) {
   // -----------------------------------------------------------------------
   uart_puts("\n--- Parallel Program Loading ---\n");
 
-#ifdef KERNEL_MODE_TEST
+#ifdef KERNEL_MODE_UNIT_TEST
+  uart_puts("Mode: UNIT_TEST - Running Kernel Unit Tests...\n");
+  extern void run_all_unit_tests(void);
+  run_all_unit_tests();
+#elif defined(KERNEL_MODE_TEST)
   uart_puts("Mode: TEST - Loading test suite...\n");
   load_and_run_program_in_scheduler("CONSOLE.BIN");
   load_and_run_program_in_scheduler("MEMTEST.BIN");

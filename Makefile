@@ -18,6 +18,8 @@ endif
 CFLAGS = -Wall -Wextra -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
 ifeq ($(MODE),test)
 CFLAGS += -DKERNEL_MODE_TEST
+else ifeq ($(MODE),unit_tests)
+CFLAGS += -DKERNEL_MODE_UNIT_TEST
 else ifeq ($(MODE),desktop_test)
 CFLAGS += -DKERNEL_MODE_DESKTOP_TEST
 USER_CFLAGS += -DDESKTOP_TEST_AUTO_LAUNCH
@@ -225,7 +227,10 @@ tests: memtest fileio_test fork_test
 test:
 	$(MAKE) MODE=test run
 
+unit_tests:
+	$(MAKE) MODE=unit_tests run
+
 desktop_test:
 	$(MAKE) MODE=desktop_test run
 
-.PHONY: all clean run memtest fileio_test fork_test tests test desktop_test
+.PHONY: all clean run memtest fileio_test fork_test tests test unit_tests desktop_test
