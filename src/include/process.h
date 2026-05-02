@@ -1,9 +1,9 @@
 #ifndef PROCESS_H
 #define PROCESS_H
 
+#include "lock.h"
 #include "trap.h"
 #include <stdint.h>
-#include "lock.h"
 
 #define MAX_PROCESSES 32 // Maximum number of concurrent processes
 #define MAX_CPUS 4       // Maximum number of CPU cores supported
@@ -28,7 +28,7 @@
 #define PAGE_SIZE 0x1000
 
 // Size of the user memory region allocated per process (16MB)
-#define USER_REGION_SIZE    0x1000000
+#define USER_REGION_SIZE 0x1000000
 
 // Number of 4KB pages in a 64MB user region
 #define PAGES_PER_REGION ((USER_REGION_SIZE) / (PAGE_SIZE))
@@ -36,7 +36,8 @@
 // Virtual address base where every user process starts its execution
 #define USER_VIRT_BASE 0x44000000
 
-// Initial stack pointer for user processes, located at the top of the virtual region
+// Initial stack pointer for user processes, located at the top of the virtual
+// region
 #define USER_VIRT_STACK ((USER_VIRT_BASE) + (USER_REGION_SIZE))
 
 // Physical address pool base for dynamically allocated process memory
@@ -47,17 +48,19 @@
 #define GICD_BASE 0x08000000 // Distributor base address
 #define GICC_BASE 0x08010000 // CPU Interface base address
 
-#define MAX_OPEN_FDS 32   // Increased per user request
+#define MAX_OPEN_FDS 32 // Increased per user request
 
 // Process control block (PCB) structure
 /**
  * Process Control Block (PCB) structure.
- * Maintains all per-process state including CPU context, memory mappings, and open files.
+ * Maintains all per-process state including CPU context, memory mappings, and
+ * open files.
  */
 struct process {
-  int pid;            /**< Unique Process ID */
-  int state;          /**< Current execution state (PROC_STATE_*) */
-  int parent_pid;     /**< PID of the process that created this one */
+  int pid;        /**< Unique Process ID */
+  int state;      /**< Current execution state (PROC_STATE_*) */
+  int parent_pid; /**< PID of the process that created this one */
+  char name[32];  /**< Name of the binary running in this process */
 
   /**
    * Saved CPU context used during context switching.
@@ -81,8 +84,8 @@ struct process {
    * Maps local FDs to indices in the global file table.
    */
   int open_fds[MAX_OPEN_FDS];
-  
-  int num_open_fds;   /**< Number of currently open file descriptors */
+
+  int num_open_fds; /**< Number of currently open file descriptors */
 };
 
 // Initialize the process subsystem and zero out the process table.

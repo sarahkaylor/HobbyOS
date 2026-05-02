@@ -188,20 +188,20 @@ void main(void) {
   // -----------------------------------------------------------------------
   uart_puts("\n--- Parallel Program Loading ---\n");
 
-  // these test programs should always exist and not be removed
-  // a part of the design of this kernel is that it is self testing
-  load_and_run_program_in_scheduler("CONSOLE.BIN");
+  // When writing code, activate these test programs to validate behavior
+  // in the kernel and to detect bugs, otherwise, keep these commented out
+  /*load_and_run_program_in_scheduler("CONSOLE.BIN");
   load_and_run_program_in_scheduler("MEMTEST.BIN");
   load_and_run_program_in_scheduler("FILEIO.BIN");
   load_and_run_program_in_scheduler("HEAPTEST.BIN");
   load_and_run_program_in_scheduler("SPAWN.BIN");
   load_and_run_program_in_scheduler("FORKTEST.BIN");
-  load_and_run_program_in_scheduler("GRAPHICS.BIN");
   load_and_run_program_in_scheduler("SMPTEST.BIN");
   load_and_run_program_in_scheduler("PIPETEST.BIN");
+  load_and_run_program_in_scheduler("GRAPHICS.BIN");*/
 
-  // the only optional test program:
-  // load_and_run_program_in_scheduler("DESKTOP.BIN");
+  // after making changes and testing the code, make sure this is uncommented.
+  load_and_run_program_in_scheduler("DESKTOP.BIN");
 
   // Join the other cores in the scheduler
   start_scheduler();

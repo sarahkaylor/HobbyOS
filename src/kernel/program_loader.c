@@ -90,6 +90,14 @@ int load_and_run_program_in_scheduler(const char* filename) {
         return -1;
     }
 
+    struct process *child = process_get_pcb(pid);
+    if (child) {
+        for (int i = 0; i < 31 && filename[i] != '\0'; i++) {
+            child->name[i] = filename[i];
+            child->name[i + 1] = '\0';
+        }
+    }
+
     struct file f;
     if (fat16_open(filename, &f) != 0) {
         uart_puts("Failed to locate ");
@@ -121,7 +129,7 @@ int load_and_run_program_in_scheduler(const char* filename) {
     fat16_close(&f);
 
     struct process *parent = current_process();
-    struct process *child = process_get_pcb(pid);
+    // child is already defined above
     if (parent && child) {
         child->num_open_fds = parent->num_open_fds;
         for (int i = 0; i < MAX_OPEN_FDS; i++) {
