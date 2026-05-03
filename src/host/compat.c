@@ -159,3 +159,70 @@ int read_dir(int index, char *buf) {
     }
     return -1;
 }
+
+int dump_screenshot(const char *filename) {
+    if (!mock_fb) return -1;
+    FILE *f = fopen(filename, "wb");
+    if (!f) return -1;
+    fprintf(f, "P6\n1024 768\n255\n");
+    for (int i = 0; i < 1024 * 768; i++) {
+        uint32_t color = mock_fb[i];
+        uint8_t r = (color >> 16) & 0xFF;
+        uint8_t g = (color >> 8) & 0xFF;
+        uint8_t b = color & 0xFF;
+        fwrite(&r, 1, 1, f);
+        fwrite(&g, 1, 1, f);
+        fwrite(&b, 1, 1, f);
+    }
+    fclose(f);
+    return 0;
+}
+
+int validate_screenshot(const char *expected_filename) {
+    if (!mock_fb) return -1;
+    FILE *f = fopen(expected_filename, "rb");
+    if (!f) {
+        printf("[TEST] Expected screenshot '%s' not found. You may need to create it first.\n", expected_filename);
+        return -1;
+    }
+    char header[16];
+    if (fgets(header, sizeof(header), f) == NULL || strncmp(header, "P6", 2) != 0) {
+        fclose(f); return -1;
+    }
+    // Skip comments
+    int c = getc(f);
+    while (c == '#') {
+        while (getc(f) != '\n');
+        c = getc(f);
+    }
+    ungetc(c, f);
+    int w, h, maxval;
+    if (fscanf(f, "%d %d\n%d\n", &w, &h, &maxval) != 3) {
+        fclose(f); return -1;
+    }
+    if (w != 1024 || h != 768) {
+        fclose(f); return -1;
+    }
+    
+    int mismatch = 0;
+    for (int i = 0; i < 1024 * 768; i++) {
+        uint8_t rgb[3];
+        if (fread(rgb, 1, 3, f) != 3) {
+            printf("[TEST] Unexpected EOF in expected image.\n");
+            mismatch = 1;
+            break;
+        }
+        uint32_t color = mock_fb[i];
+        uint8_t r = (color >> 16) & 0xFF;
+        uint8_t g = (color >> 8) & 0xFF;
+        uint8_t b = color & 0xFF;
+        if (r != rgb[0] || g != rgb[1] || b != rgb[2]) {
+            printf("[TEST] Pixel mismatch at (%d, %d). Expected (%d,%d,%d), Got (%d,%d,%d)\n", 
+                   i % 1024, i / 1024, rgb[0], rgb[1], rgb[2], r, g, b);
+            mismatch = 1;
+            break;
+        }
+    }
+    fclose(f);
+    return mismatch ? -1 : 0;
+}

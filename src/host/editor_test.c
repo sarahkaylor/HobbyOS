@@ -55,8 +55,19 @@ void on_flush(void) {
     
     if (flush_count >= 2) {
         if (strstr(windows[0].text, "hello")) {
-            printf("[TEST] Found 'hello' in window 0! Test completed successfully!\n");
-            exit(0);
+            printf("[TEST] Found 'hello' in window 0! Capturing screenshot...\n");
+            
+            extern int dump_screenshot(const char *filename);
+            extern int validate_screenshot(const char *expected_filename);
+            
+            dump_screenshot("src/host/actual.ppm");
+            if (validate_screenshot("src/host/expected.ppm") == 0) {
+                printf("[TEST] Screenshot validation passed!\n");
+                exit(0);
+            } else {
+                printf("[TEST] Screenshot validation failed!\n");
+                exit(1);
+            }
         }
     }
     

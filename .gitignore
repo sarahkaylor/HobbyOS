@@ -2,7 +2,9 @@
 obj/
 *.o
 *.bin
+*.BIN_host
 *.elf
+*_test_host
 
 # Compiled output
 hobbyos
