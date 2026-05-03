@@ -62,6 +62,7 @@ SMP_TEST_BIN = smp_test.bin
 PIPETEST_BIN = pipetest.bin
 DESKTOP_BIN = desktop.bin
 EDITOR_BIN = editor.bin
+EDITOR_T_BIN = EDITOR_T.BIN
 
 # Default rule: build the target
 all: $(TARGET)
@@ -142,6 +143,14 @@ obj/editor.o: src/user/editor.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
+obj/user_editor_test.o: src/user/editor_test.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+obj/user_desktop_test_wrapper.o: src/user/desktop.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -Dmain=desktop_main -DDESKTOP_TEST_WRAPPER -c $< -o $@
+
 $(MEM_TEST_BIN): obj/mem_test.o obj/user_libc.o obj/user_malloc.o
 	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o memtest.elf $^
 	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary memtest.elf $(MEM_TEST_BIN)
@@ -186,7 +195,11 @@ $(EDITOR_BIN): obj/editor.o obj/user_libc.o obj/user_malloc.o
 	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o editor.elf $^
 	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary editor.elf $(EDITOR_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN)
+$(EDITOR_T_BIN): obj/user_editor_test.o obj/user_desktop_test_wrapper.o obj/user_libc.o obj/user_malloc.o obj/user_graphics.o obj/user_window.o
+	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o editor_test.elf $^
+	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary editor_test.elf $(EDITOR_T_BIN)
+
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN)
 	dd if=/dev/zero of=disk.img bs=1M count=512
 	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img 
 	/opt/homebrew/bin/mcopy -i disk.img $(MEM_TEST_BIN) ::/MEMTEST.BIN
@@ -200,12 +213,13 @@ disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TE
 	/opt/homebrew/bin/mcopy -i disk.img $(PIPETEST_BIN) ::/PIPETEST.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(DESKTOP_BIN) ::/DESKTOP.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(EDITOR_BIN) ::/EDITOR.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(EDITOR_T_BIN) ::/EDITOR_T.BIN
 	touch TEST.TXT
 	/opt/homebrew/bin/mcopy -i disk.img TEST.TXT ::/TEST.TXT
 
 # Target to run the OS inside QEMU
 run: hobbyos.elf disk.img
-	qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 4 -m 4096M -kernel hobbyos.elf -display cocoa -serial stdio -append "console=ttyAMA0" -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -semihosting -action shutdown=poweroff
+	qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 4 -m 4096M -kernel hobbyos.elf -display cocoa -serial stdio -append "console=ttyAMA0" -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -semihosting -action shutdown=poweroff $(QEMU_ARGS)
 
 # Target to exit QEMU properly
 # Note: Ctrl+A, X exists QEMU nographic mode.
@@ -214,6 +228,7 @@ run: hobbyos.elf disk.img
 clean:
 	-pkill qemu-system-aarch64
 	rm -rf $(OBJ_DIR) $(TARGET) hobbyos disk.img *.bin *.elf *.log
+	rm -f actual_qemu.ppm
 
 memtest: $(MEM_TEST_BIN)
 
@@ -230,8 +245,11 @@ test:
 unit_tests:
 	$(MAKE) MODE=unit_tests run
 
-desktop_test:
+desktop_test_run:
 	$(MAKE) MODE=desktop_test run
+
+desktop_test:
+	python3 ./run_desktop_test.py
 
 # --- Host Compatibility Build Targets ---
 HOST_CC = clang

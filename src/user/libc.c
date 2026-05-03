@@ -31,15 +31,12 @@ static long syscall(long num, long a0, long a1, long a2, long a3) {
   return x0;
 }
 
-void print(const char *str) {
+void print(const char *s) {
   int len = 0;
-  while (str[len])
+  while (s[len])
     len++;
-
-  // Attempt to write to standard output (FD 1)
-  if (write(1, str, len) < 0) {
-    // Fallback to direct UART access if no standard output is mapped
-    syscall(SYS_WRITE_CONSOLE, (long)str, 0, 0, 0);
+  if (write(1, s, len) < 0) {
+    syscall(SYS_WRITE_CONSOLE, (long)s, len, 0, 0);
   }
 }
 
@@ -98,16 +95,16 @@ int pipe(int fds[2]) {
 
 void *map_fb(void) { return (void *)syscall(SYS_MAP_FB, 0, 0, 0, 0); }
 
-void flush_fb(void) { syscall(SYS_FLUSH_FB, 0, 0, 0, 0); }
+__attribute__((weak)) void flush_fb(void) { syscall(SYS_FLUSH_FB, 0, 0, 0, 0); }
 
 int get_cpuid(void) { return (int)syscall(SYS_GET_CPUID, 0, 0, 0, 0); }
 
-int get_events(void *buf, int max_events) {
+__attribute__((weak)) int get_events(void *buf, int max_events) {
   return (int)syscall(SYS_GET_EVENTS, (long)buf, (long)max_events, 0, 0);
 }
 
 int available(int fd) { return (int)syscall(SYS_AVAILABLE, (long)fd, 0, 0, 0); }
 
-int read_dir(int index, char *buf) {
+__attribute__((weak)) int read_dir(int index, char *buf) {
   return (int)syscall(SYS_READ_DIR, (long)index, (long)buf, 0, 0);
 }

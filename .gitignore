@@ -16,3 +16,10 @@ qemu.log
 
 # Disk images
 disk.img
+
+# Test output
+actual_qemu.ppm
+qmp-sock
+debug.log
+TEST.TXT
+
