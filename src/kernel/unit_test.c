@@ -20,6 +20,11 @@ void run_all_unit_tests(void) {
     process_test_suite();
     program_loader_test_suite();
     trap_test_suite();
+    virtio_blk_test_suite();
+    virtio_gpu_test_suite();
+    virtio_input_test_suite();
+    timer_test_suite();
+    smp_test_suite();
 
     uart_puts("==================================\n");
     uart_puts("Tests run:    "); print_int(tests_run); uart_puts("\n");

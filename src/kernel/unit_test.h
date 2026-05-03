@@ -44,5 +44,10 @@ void mmu_test_suite(void);
 void process_test_suite(void);
 void program_loader_test_suite(void);
 void trap_test_suite(void);
+void virtio_blk_test_suite(void);
+void virtio_gpu_test_suite(void);
+void virtio_input_test_suite(void);
+void timer_test_suite(void);
+void smp_test_suite(void);
 
 #endif // UNIT_TEST_H
