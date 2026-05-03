@@ -43,3 +43,12 @@ HobbyOS provides multiple distinct build and execution targets through its Makef
 - **Integration Tests (`make test`)**: Compiles with `KERNEL_MODE_TEST`. Instead of booting the desktop, the kernel's scheduler automatically spawns a predefined sequence of user-space test binaries (e.g., `fork_test.bin`, `smp_test.bin`, `pipe_test.bin`) to validate syscalls and parallel multi-core process execution.
 - **Kernel Unit Tests (`make unit_tests`)**: Compiles with `KERNEL_MODE_UNIT_TEST`. This isolates and tests kernel subsystems directly in EL1 (e.g., file system reads, lock behaviors, trap dispatchers, process control blocks) before the scheduler even starts. Upon test completion, QEMU forcefully halts.
 - **Automated Desktop Test (`make desktop_test`)**: Compiles with `KERNEL_MODE_DESKTOP_TEST`. Boots the desktop environment but immediately auto-launches an arbitrary UI application to validate the graphical framebuffer pipeline and event subsystems without requiring manual user input.
+- **Host Tests (`make host_tests`)**: Compiles and runs user-space "golden" test executables (e.g., `edit_host`) directly on the macOS host environment. These tests validate core functionalities like the file system and GUI components using standard Unix APIs, providing a fast, reliable baseline before deploying to the emulated kernel.
+- **General Knowledge**: If tests take more than 30 seconds to complete, stop the tests and consider that the tests took this long as a sign of a defect, likely a deadlock, a fault, or some other issue that should be investigated and fixed. These kinds of failures don't always provide a log or a clean indication of failure.
+
+## 9. Non Negotiable Requirements
+- **SMP**: This system must always support SMP and at least 4 cores or more. Do not decrease the number of cores below 4.
+- **ARM64**: This system is targeting ARM64 CPUs and no other CPUs
+- **Multi-Processing**: This sytem must always support multi-processing and inter-process communication (IPC).
+- **Memory Protection**: This system must always support memory protection and sandboxing.
+- **User Mode**: This system must always support user mode and kernel mode.
