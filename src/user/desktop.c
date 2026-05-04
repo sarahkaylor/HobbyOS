@@ -112,14 +112,11 @@ int main(void) {
                 pipe(out_pipe);
 
                 int pid = spawn2(menu_items[selected], in_pipe[0], out_pipe[1]);
-                print("[DEBUG] spawn2 returned\n");
                 if (pid >= 0) {
                   focused_window = wm_create_window(COLOR(20, 20, 50), pid,
                                                     out_pipe[0], in_pipe[1]);
-                  print("[DEBUG] wm_create_window done\n");
                   close(in_pipe[0]);
                   close(out_pipe[1]);
-                  print("[DEBUG] close done\n");
                 } else {
                   close(in_pipe[0]);
                   close(in_pipe[1]);
@@ -202,8 +199,6 @@ int main(void) {
       }
     }
 
-    print("[DEBUG] event loop done\n");
-
     // Poll windows for stdout
     for (int i = 0; i < num_windows; i++) {
       int fd = windows[i].stdout_fd;
@@ -232,7 +227,6 @@ int main(void) {
           needs_redraw = 1;
         }
       } else if (avail < 0) {
-        print("[DEBUG] removing window\n");
         // Process exited
         if (focused_window == windows[i].id) {
           focused_window = -1;
@@ -243,10 +237,7 @@ int main(void) {
       }
     }
 
-    print("[DEBUG] window poll done\n");
-
     if (num > 0 || needs_redraw) {
-      print("[DEBUG] desktop_main calling graphics_flush!\n");
       graphics_clear(COLOR(0, 0, 0));
       wm_draw_windows(focused_window);
       draw_menu();

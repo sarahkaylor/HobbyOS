@@ -35,8 +35,15 @@ void print(const char *s) {
   int len = 0;
   while (s[len])
     len++;
-  if (write(1, s, len) < 0) {
-    syscall(SYS_WRITE_CONSOLE, (long)s, len, 0, 0);
+  
+  int written = 0;
+  while (written < len) {
+    int res = write(1, s + written, len - written);
+    if (res < 0) {
+      syscall(SYS_WRITE_CONSOLE, (long)(s + written), len - written, 0, 0);
+      break;
+    }
+    written += res;
   }
 }
 
