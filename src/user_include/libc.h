@@ -27,9 +27,12 @@ int close(int fd);
 int read(int fd, void *buf, int size);
 int write(int fd, const void *buf, int size);
 int kill(int pid, int sig);
+void yield(void);
 int spawn(const char *filename);
 int spawn2(const char *filename, int stdin_fd, int stdout_fd);
 int pipe(int fds[2]);
+
+void gui_add_menu(int idx, const char* name, const char* items);
 
 void *map_fb(void);
 void flush_fb(void);

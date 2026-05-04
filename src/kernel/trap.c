@@ -55,6 +55,7 @@ extern uint32_t get_cpuid(void);
 #define SYS_AVAILABLE (14)
 #define SYS_READ_DIR (15)
 #define SYS_KILL (16)
+#define SYS_YIELD (17)
 
 // Timer PPI interrupt ID on QEMU virt (non-secure physical timer)
 #define TIMER_PPI_INTID 30
@@ -131,7 +132,7 @@ static void sys_write(struct trap_frame *tf) {
   }
 }
 
-extern int load_and_run_program_in_scheduler(const char *filename);
+extern int load_and_run_program_in_scheduler(const char *filename, int stdin_fd, int stdout_fd);
 extern struct process *process_get_pcb(int pid);
 
 static void sys_spawn(struct trap_frame *tf) {
@@ -141,24 +142,7 @@ static void sys_spawn(struct trap_frame *tf) {
 
   if ((uint64_t)filename >= USER_VIRT_BASE &&
       (uint64_t)filename < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-    int child_pid = load_and_run_program_in_scheduler(filename);
-    if (child_pid >= 0) {
-      struct process *parent = current_process();
-      struct process *child = process_get_pcb(child_pid);
-
-      if (parent && child) {
-        if (stdin_fd >= 0 && stdin_fd < MAX_OPEN_FDS &&
-            parent->open_fds[stdin_fd] != -1) {
-          child->open_fds[0] = parent->open_fds[stdin_fd];
-          fs_reopen(child->open_fds[0]);
-        }
-        if (stdout_fd >= 0 && stdout_fd < MAX_OPEN_FDS &&
-            parent->open_fds[stdout_fd] != -1) {
-          child->open_fds[1] = parent->open_fds[stdout_fd];
-          fs_reopen(child->open_fds[1]);
-        }
-      }
-    }
+    int child_pid = load_and_run_program_in_scheduler(filename, stdin_fd, stdout_fd);
     tf->regs[0] = child_pid;
   } else {
     tf->regs[0] = -1;
@@ -332,6 +316,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_read_dir(tf);
     } else if (syscall_num == SYS_KILL) {
       sys_kill(tf);
+    } else if (syscall_num == SYS_YIELD) {
+      schedule(tf);
     } else if (syscall_num == 0xFF) {
       schedule(tf);
     } else {

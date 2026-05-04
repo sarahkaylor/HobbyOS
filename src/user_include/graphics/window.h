@@ -6,6 +6,16 @@
 #define MAX_WINDOWS 4
 #define MAX_TEXT 2048
 
+#define MAX_WINDOW_MENUS 4
+#define MAX_MENU_SUBITEMS 8
+#define MENU_NAME_LEN 16
+
+struct window_menu {
+    char name[MENU_NAME_LEN];
+    char items[MAX_MENU_SUBITEMS][MENU_NAME_LEN];
+    int num_items;
+};
+
 struct window {
     int id;
     int x, y, w, h;
@@ -16,6 +26,13 @@ struct window {
     int pid;
     int stdout_fd;
     int stdin_fd;
+    
+    struct window_menu menus[MAX_WINDOW_MENUS];
+    int num_menus;
+    
+    int escape_state;
+    char escape_buf[128];
+    int escape_len;
 };
 
 void wm_init(void);

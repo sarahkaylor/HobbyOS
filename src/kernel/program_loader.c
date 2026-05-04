@@ -77,7 +77,8 @@ int load_and_run_program(const char* filename) {
  * Returns:
  *   The PID of the new process, or -1 on failure.
  */
-int load_and_run_program_in_scheduler(const char* filename) {
+int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int stdout_fd) {
+    if (!filename) return -1;
     uart_puts("Loading program for scheduler: ");
     uart_puts(filename);
     uart_puts("\n");
@@ -131,12 +132,15 @@ int load_and_run_program_in_scheduler(const char* filename) {
     struct process *parent = current_process();
     // child is already defined above
     if (parent && child) {
-        child->num_open_fds = parent->num_open_fds;
-        for (int i = 0; i < MAX_OPEN_FDS; i++) {
-            child->open_fds[i] = parent->open_fds[i];
-            if (child->open_fds[i] != -1) {
-                fs_reopen(child->open_fds[i]);
-            }
+        if (stdin_fd >= 0 && stdin_fd < MAX_OPEN_FDS && parent->open_fds[stdin_fd] != -1) {
+            child->open_fds[0] = parent->open_fds[stdin_fd];
+            fs_reopen(child->open_fds[0]);
+            child->num_open_fds++;
+        }
+        if (stdout_fd >= 0 && stdout_fd < MAX_OPEN_FDS && parent->open_fds[stdout_fd] != -1) {
+            child->open_fds[1] = parent->open_fds[stdout_fd];
+            fs_reopen(child->open_fds[1]);
+            child->num_open_fds++;
         }
     }
 

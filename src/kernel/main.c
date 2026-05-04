@@ -195,22 +195,22 @@ void main(void) {
   extern void run_all_unit_tests(void);
   run_all_unit_tests();
 #elif defined(KERNEL_MODE_TEST)
-  uart_puts("Mode: TEST - Loading test suite...\n");
-  load_and_run_program_in_scheduler("CONSOLE.BIN");
-  load_and_run_program_in_scheduler("MEMTEST.BIN");
-  load_and_run_program_in_scheduler("FILEIO.BIN");
-  load_and_run_program_in_scheduler("HEAPTEST.BIN");
-  load_and_run_program_in_scheduler("SPAWN.BIN");
-  load_and_run_program_in_scheduler("FORKTEST.BIN");
-  load_and_run_program_in_scheduler("SMPTEST.BIN");
-  load_and_run_program_in_scheduler("PIPETEST.BIN");
-  load_and_run_program_in_scheduler("GRAPHICS.BIN");
+  uart_puts("Mode: TEST - Running automated tests...\n");
+  load_and_run_program_in_scheduler("CONSOLE.BIN", -1, -1);
+  load_and_run_program_in_scheduler("MEMTEST.BIN", -1, -1);
+  load_and_run_program_in_scheduler("FILEIO.BIN", -1, -1);
+  load_and_run_program_in_scheduler("HEAPTEST.BIN", -1, -1);
+  load_and_run_program_in_scheduler("SPAWN.BIN", -1, -1);
+  load_and_run_program_in_scheduler("FORKTEST.BIN", -1, -1);
+  load_and_run_program_in_scheduler("SMPTEST.BIN", -1, -1);
+  load_and_run_program_in_scheduler("PIPETEST.BIN", -1, -1);
+  load_and_run_program_in_scheduler("GRAPHICS.BIN", -1, -1);
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
-  load_and_run_program_in_scheduler("EDITOR_T.BIN");
+  load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1);
 #else
   uart_puts("Mode: DESKTOP - Launching desktop...\n");
-  load_and_run_program_in_scheduler("DESKTOP.BIN");
+  load_and_run_program_in_scheduler("DESKTOP.BIN", -1, -1);
 #endif
 
   // Join the other cores in the scheduler

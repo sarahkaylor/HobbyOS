@@ -48,6 +48,7 @@ void _start(void) {
 #else
 int main(void) {
 #endif
+    gui_add_menu(0, "File", "Open,Save,Quit");
     print("\fHobbyOS Editor\nPress ESC for Command Mode\n");
     for (volatile int i = 0; i < 2000000; i++) {} // brief delay
     
@@ -69,21 +70,48 @@ int main(void) {
     while (1) {
         char c;
         if (read(0, &c, 1) > 0) {
+            
             if (c == 27) { // ESC key
+                
                 if (available(0) >= 2) {
-                    char seq[2];
+                    char seq[8];
                     read(0, seq, 2);
                     if (seq[0] == '[') {
-                        if (seq[1] == 'C' && cursor_idx < text_len) cursor_idx++;
-                        if (seq[1] == 'D' && cursor_idx > 0) cursor_idx--;
-                        // Simple UP/DOWN by moving 10 chars for now
-                        if (seq[1] == 'A') {
-                            cursor_idx -= 10;
-                            if (cursor_idx < 0) cursor_idx = 0;
-                        }
-                        if (seq[1] == 'B') {
-                            cursor_idx += 10;
-                            if (cursor_idx > text_len) cursor_idx = text_len;
+                        if (seq[1] == 'M') {
+                            
+                            read(0, seq + 2, 4);
+                            if (seq[2] == '0' && seq[3] == ';') {
+                                
+                                int item = seq[4] - '0';
+                                if (item == 0) { // Open
+                                    mode = 1;
+                                    cmd_buffer[0] = 'r';
+                                    cmd_buffer[1] = ' ';
+                                    cmd_buffer[2] = '\0';
+                                    cmd_len = 2;
+                                } else 
+                                if (item == 1) { // Save
+                                                                        mode = 1;
+
+                                    cmd_buffer[0] = 'w';
+                                    cmd_buffer[1] = ' ';
+                                    cmd_buffer[2] = '\0';
+                                    cmd_len = 2;
+                                } else if (item == 2) { // Quit
+                                    exit(0);
+                                }
+                            }
+                        } else {
+                            if (seq[1] == 'C' && cursor_idx < text_len) cursor_idx++;
+                            if (seq[1] == 'D' && cursor_idx > 0) cursor_idx--;
+                            if (seq[1] == 'A') {
+                                cursor_idx -= 10;
+                                if (cursor_idx < 0) cursor_idx = 0;
+                            }
+                            if (seq[1] == 'B') {
+                                cursor_idx += 10;
+                                if (cursor_idx > text_len) cursor_idx = text_len;
+                            }
                         }
                     }
                 } else {

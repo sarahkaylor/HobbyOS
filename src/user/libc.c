@@ -17,6 +17,7 @@
 #define SYS_AVAILABLE (14)
 #define SYS_READ_DIR (15)
 #define SYS_KILL (16)
+#define SYS_YIELD (17)
 
 static long syscall(long num, long a0, long a1, long a2, long a3) {
   register long x8 __asm__("x8") = num;
@@ -83,6 +84,10 @@ int write(int fd, const void *buf, int size) {
   return (int)syscall(SYS_WRITE, (long)fd, (long)buf, (long)size, 0);
 }
 
+void yield(void) {
+  syscall(SYS_YIELD, 0, 0, 0, 0);
+}
+
 int spawn2(const char *filename, int stdin_fd, int stdout_fd) {
   return (int)syscall(SYS_SPAWN, (long)filename, (long)stdin_fd,
                       (long)stdout_fd, 0);
@@ -114,4 +119,24 @@ int available(int fd) { return (int)syscall(SYS_AVAILABLE, (long)fd, 0, 0, 0); }
 
 __attribute__((weak)) int read_dir(int index, char *buf) {
   return (int)syscall(SYS_READ_DIR, (long)index, (long)buf, 0, 0);
+}
+
+void gui_add_menu(int idx, const char* name, const char* items) {
+    char buf[128];
+    int len = 0;
+    buf[len++] = '\033';
+    buf[len++] = ']';
+    buf[len++] = 'M';
+    buf[len++] = '0' + idx;
+    buf[len++] = ';';
+    
+    int i = 0;
+    while(name[i]) buf[len++] = name[i++];
+    buf[len++] = ';';
+    
+    i = 0;
+    while(items[i]) buf[len++] = items[i++];
+    buf[len++] = '\a';
+    
+    write(1, buf, len);
 }

@@ -73,6 +73,9 @@ int wm_create_window(uint32_t bg_color, int pid, int stdout_fd, int stdin_fd) {
     windows[id].pid = pid;
     windows[id].stdout_fd = stdout_fd;
     windows[id].stdin_fd = stdin_fd;
+    windows[id].num_menus = 0;
+    windows[id].escape_state = 0;
+    windows[id].escape_len = 0;
     
     num_windows++;
     update_layout();
@@ -96,11 +99,22 @@ void wm_draw_windows(int focused_id) {
         graphics_draw_rect(win->x + win->w - 18, win->y + 2, 16, 16, COLOR(200, 50, 50));
         wm_draw_char(win->x + win->w - 14, win->y + 6, 'X', COLOR(255, 255, 255));
         
+        // Draw menu bar
+        graphics_draw_rect(win->x + 2, win->y + 18, win->w - 4, 16, COLOR(180, 180, 180));
+        int menu_x = win->x + 10;
+        for (int m = 0; m < win->num_menus; m++) {
+            wm_draw_text(menu_x, win->y + 22, win->menus[m].name, COLOR(0, 0, 0));
+            // rough width estimation: length * 8 + 16
+            int len = 0;
+            while(win->menus[m].name[len]) len++;
+            menu_x += len * 8 + 16;
+        }
+        
         // Draw background
-        graphics_draw_rect(win->x + 2, win->y + 18, win->w - 4, win->h - 20, win->bg_color);
+        graphics_draw_rect(win->x + 2, win->y + 34, win->w - 4, win->h - 36, win->bg_color);
         
         // Draw text
-        wm_draw_text(win->x + 10, win->y + 28, win->text, COLOR(255, 255, 255));
+        wm_draw_text(win->x + 10, win->y + 44, win->text, COLOR(255, 255, 255));
     }
 }
 

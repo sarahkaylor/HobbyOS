@@ -108,22 +108,57 @@ void flush_fb(void) {
         send_key('o');
     }
     
+    if (flush_count == 3) {
+        print_console("[TEST] Moving mouse to File menu...\n");
+        inject_mock_event(EV_ABS, ABS_X, (20 * 0x7FFF) / 1024);
+        inject_mock_event(EV_ABS, ABS_Y, (26 * 0x7FFF) / 768);
+    }
+    if (flush_count == 4) {
+        print_console("[TEST] Clicking File menu...\n");
+        inject_mock_event(EV_KEY, 0x110, 1);
+        inject_mock_event(EV_KEY, 0x110, 0);
+    }
+    if (flush_count == 5) {
+        print_console("[TEST] Moving mouse to Save item...\n");
+        inject_mock_event(EV_ABS, ABS_X, (20 * 0x7FFF) / 1024);
+        inject_mock_event(EV_ABS, ABS_Y, (64 * 0x7FFF) / 768);
+    }
+    if (flush_count == 6) {
+        print_console("[TEST] Clicking Save item...\n");
+        inject_mock_event(EV_KEY, 0x110, 1);
+        inject_mock_event(EV_KEY, 0x110, 0);
+    }
+    
     if (flush_count >= 2) {
         int found = 0;
         extern int num_windows;
         for (int w = 0; w < num_windows; w++) {
             char *text = windows[w].text;
             for (int i = 0; text[i] != '\0'; i++) {
-                if (text[i] == 'h' && text[i+1] == 'e' && text[i+2] == 'l' && text[i+3] == 'l' && text[i+4] == 'o') {
-                    found = 1;
-                    break;
+                if (flush_count >= 7) {
+                    if (text[i] == 'w' && text[i+1] == ' ') {
+                        found = 1;
+                        break;
+                    }
+                } else {
+                    if (text[i] == 'h' && text[i+1] == 'e' && text[i+2] == 'l' && text[i+3] == 'l' && text[i+4] == 'o') {
+                        found = 1;
+                        break;
+                    }
                 }
             }
             if (found) break;
+
+        if (flush_count >= 7 && flush_count < 9) {
+            print_console("[TEST] current text: ");
+            print_console(windows[0].text);
+            print_console("\n");
+        }
+
         }
         
-        if (found) {
-            print_console("[TEST] Found 'hello' in window 0! SCREENSHOT_READY\n");
+        if (found && flush_count >= 7) {
+            print_console("[TEST] Found 'w ' in window 0! SCREENSHOT_READY\n");
             // Wait for host to kill QEMU
             while(1);
         }

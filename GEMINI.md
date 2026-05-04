@@ -45,6 +45,7 @@ HobbyOS provides multiple distinct build and execution targets through its Makef
 - **Automated Desktop Test (`make desktop_test`)**: Compiles with `KERNEL_MODE_DESKTOP_TEST`. Boots the desktop environment but immediately auto-launches an arbitrary UI application to validate the graphical framebuffer pipeline and event subsystems without requiring manual user input.
 - **Host Tests (`make host_tests`)**: Compiles and runs user-space "golden" test executables (e.g., `edit_host`) directly on the macOS host environment. These tests validate core functionalities like the file system and GUI components using standard Unix APIs, providing a fast, reliable baseline before deploying to the emulated kernel.
 - **General Knowledge**: If tests take more than 30 seconds to complete, stop the tests and consider that the tests took this long as a sign of a defect, likely a deadlock, a fault, or some other issue that should be investigated and fixed. These kinds of failures don't always provide a log or a clean indication of failure.
+- **Test Shutdowns**: Some tests launch a graphical environment, when it is the desktop, the default behavior of the desktop or user interface applications is to keep running. When tests reach a success or failure point, it is important that tests can shut down qemu upon success or failure when all tests have completed.
 
 ## 9. Non Negotiable Requirements
 - **SMP**: This system must always support SMP and at least 4 cores or more. Do not decrease the number of cores below 4.
