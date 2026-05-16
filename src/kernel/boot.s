@@ -51,11 +51,12 @@ halt:
     hlt     #0xF000                  // AArch64 semihosting trap
     
     // If semihosting is not enabled, fall back to PSCI SYSTEM_OFF
-    ldr     x0, =0xc4000008          // PSCI SYSTEM_OFF function ID (SMC64)
+    ldr     x0, =0x84000008          // PSCI SYSTEM_OFF function ID (SMC32)
     mov     x1, #0
     mov     x2, #0
     mov     x3, #0
-    smc     #0                       // Secure monitor call
+    hvc     #0                       // Hypervisor call
+    smc     #0                       // Secure monitor call (fallback)
     
     // Last resort: infinite loop
     wfi

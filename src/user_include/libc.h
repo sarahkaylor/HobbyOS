@@ -28,6 +28,7 @@ int read(int fd, void *buf, int size);
 int write(int fd, const void *buf, int size);
 int kill(int pid, int sig);
 void yield(void);
+int connect(uint32_t ip, uint16_t port, int protocol);
 int spawn(const char *filename);
 int spawn2(const char *filename, int stdin_fd, int stdout_fd);
 int pipe(int fds[2]);

@@ -264,7 +264,11 @@ void schedule(struct trap_frame *tf) {
         scheduler_finished();
       } else {
         while (1) {
+          // Enable IRQs, sleep, then disable. This allows idle cores to actually sleep
+          // and process interrupts rather than spinning endlessly if an interrupt is pending.
+          __asm__ volatile("msr daifclr, #2");
           __asm__ volatile("wfi");
+          __asm__ volatile("msr daifset, #2");
         }
       }
       return;
@@ -273,7 +277,12 @@ void schedule(struct trap_frame *tf) {
     // Blocked processes exist, wait for interrupt.
     cpu_current_pids[cpu] = -1;
     spinlock_release_irqrestore(&proc_lock, flags);
+    
+    // Enable IRQs, wait for interrupt, then disable again before re-acquiring the lock
+    __asm__ volatile("msr daifclr, #2");
     __asm__ volatile("wfi");
+    __asm__ volatile("msr daifset, #2");
+    
     // Re-acquire lock and try again
     flags = spinlock_acquire_irqsave(&proc_lock);
   }

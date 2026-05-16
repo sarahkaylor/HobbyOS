@@ -5,13 +5,16 @@
 #include "fat16.h"
 #include "lock.h"
 
+struct socket_pcb;
+
 /**
  * Types of files supported by the VFS layer.
  */
 typedef enum {
     FILE_TYPE_EMPTY,    /**< Unallocated file slot */
     FILE_TYPE_FAT16,    /**< Regular file on FAT16 filesystem */
-    FILE_TYPE_PIPE      /**< Anonymous pipe for IPC */
+    FILE_TYPE_PIPE,     /**< Anonymous pipe for IPC */
+    FILE_TYPE_SOCKET    /**< Network socket */
 } file_type_t;
 
 /**
@@ -33,6 +36,9 @@ struct file {
             struct pipe *ptr;            /**< Pointer to the pipe structure */
             int end;                     /**< 0 for read end, 1 for write end */
         } pipe;
+        struct {
+            struct socket_pcb *pcb;      /**< Pointer to the protocol control block */
+        } socket;
     };
 };
 
@@ -46,6 +52,7 @@ int file_read(int fd, void *buf, int size, struct trap_frame *tf);
 int file_write(int fd, const void *buf, int size, struct trap_frame *tf);
 int file_pipe(int fds[2]);
 int file_available(int fd);
+int file_connect(uint32_t ip, uint16_t port, int protocol);
 
 // Helpers for process management
 /**

@@ -18,6 +18,7 @@
 #define SYS_READ_DIR (15)
 #define SYS_KILL (16)
 #define SYS_YIELD (17)
+#define SYS_CONNECT (18)
 
 static long syscall(long num, long a0, long a1, long a2, long a3) {
   register long x8 __asm__("x8") = num;
@@ -86,6 +87,10 @@ int write(int fd, const void *buf, int size) {
 
 void yield(void) {
   syscall(SYS_YIELD, 0, 0, 0, 0);
+}
+
+int connect(uint32_t ip, uint16_t port, int protocol) {
+  return (int)syscall(SYS_CONNECT, (long)ip, (long)port, (long)protocol, 0);
 }
 
 int spawn2(const char *filename, int stdin_fd, int stdout_fd) {

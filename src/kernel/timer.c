@@ -36,3 +36,18 @@ void timer_reload(void) {
     // Reset the countdown for the next tick
     __asm__ volatile("msr cntp_tval_el0, %0" : : "r"(timer_tick_value));
 }
+
+/**
+ * Gets the current system uptime in milliseconds based on the ARM Generic Timer.
+ */
+uint64_t timer_get_ms(void) {
+    uint64_t count, freq;
+    // Read the physical count (cntpct_el0) and frequency (cntfrq_el0)
+    __asm__ volatile("mrs %0, cntpct_el0" : "=r"(count));
+    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(freq));
+    
+    // Prevent division by zero just in case
+    if (freq == 0) return 0;
+    
+    return (count * 1000) / freq;
+}

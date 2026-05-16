@@ -10,8 +10,13 @@
 #include "virtio_gpu.h"
 #include "virtio_input.h"
 #include <stdint.h>
+#include "net.h"
+#include "virtio_net.h"
+#include "dhcp.h"
+
 void virtio_blk_handle_irq(void);
 extern int virtio_blk_irq;
+extern int virtio_net_irq;
 extern void smp_init(void);
 extern void mmu_init_core(void);
 extern void gic_init_cpu(void);
@@ -30,18 +35,14 @@ void irq_handler_c(struct trap_frame *tf) {
   // VirtIO Block IRQ for located slot on virt machine
   if (intid == (uint32_t)virtio_blk_irq) {
     virtio_blk_handle_irq();
+  } else if (intid == (uint32_t)virtio_net_irq) {
+    virtio_net_handle_irq();
   } else if (intid >= 48 && intid <= 79) {
     extern void virtio_input_handle_irq(int irq);
     virtio_input_handle_irq(intid);
   } else if (intid == 30) {
     // Timer PPI
     timer_reload();
-#ifndef KERNEL_MODE_UNIT_TEST
-    struct process *cur = current_process();
-    if (cur) {
-      schedule(tf);
-    }
-#endif
   }
 
   gic_end_interrupt(intid);
@@ -183,6 +184,15 @@ void main(void) {
   }
   uart_puts("FAT-16 filesystem successfully initialized.\n");
 
+  net_init();
+  if (virtio_net_init() == 0) {
+    uart_puts("VirtIO Network successfully initialized.\n");
+    gic_enable_interrupt(virtio_net_irq);
+    dhcp_init();
+  } else {
+    uart_puts("VirtIO Network initialization failed!\n");
+  }
+
   // -----------------------------------------------------------------------
   // Parallel Boot: Load programs into the scheduler based on the mode.
   // Secondary cores are already spinning in start_scheduler() and will
@@ -205,6 +215,8 @@ void main(void) {
   load_and_run_program_in_scheduler("SMPTEST.BIN", -1, -1);
   load_and_run_program_in_scheduler("PIPETEST.BIN", -1, -1);
   load_and_run_program_in_scheduler("GRAPHICS.BIN", -1, -1);
+  load_and_run_program_in_scheduler("NETTEST.BIN", -1, -1);
+  load_and_run_program_in_scheduler("TIMEOUT.BIN", -1, -1);
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
   load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1);

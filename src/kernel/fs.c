@@ -2,6 +2,7 @@
 #include "process.h"
 #include "pipe.h"
 #include "lock.h"
+#include "net.h"
 
 static struct file global_file_table[MAX_GLOBAL_FILES];
 static spinlock_t fs_lock;
@@ -97,6 +98,49 @@ int file_open(const char *filename) {
     return fd;
 }
 
+int file_connect(uint32_t ip, uint16_t port, int protocol) {
+    struct process *cur = current_process();
+    if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -1;
+
+    struct file *f = file_alloc();
+    if (!f) return -1;
+
+    struct socket_pcb* pcb = net_socket_create(protocol);
+    if (!pcb) {
+        f->type = FILE_TYPE_EMPTY;
+        f->ref_count = 0;
+        return -1;
+    }
+
+    if (net_socket_connect(pcb, ip, port) != 0) {
+        net_socket_close(pcb);
+        f->type = FILE_TYPE_EMPTY;
+        f->ref_count = 0;
+        return -1;
+    }
+
+    f->type = FILE_TYPE_SOCKET;
+    f->socket.pcb = pcb;
+
+    int fd = -1;
+    for (int i = 0; i < MAX_OPEN_FDS; i++) {
+        if (cur->open_fds[i] == -1) {
+            cur->open_fds[i] = get_global_fd(f);
+            cur->num_open_fds++;
+            fd = i;
+            break;
+        }
+    }
+
+    if (fd == -1) {
+        net_socket_close(pcb);
+        f->type = FILE_TYPE_EMPTY;
+        f->ref_count = 0;
+    }
+
+    return fd;
+}
+
 /**
  * Closes a local file descriptor and releases its reference to the global file.
  * 
@@ -122,6 +166,8 @@ int file_close(int fd) {
             fat16_close(f);
         } else if (f->type == FILE_TYPE_PIPE) {
             pipe_close(f->pipe.ptr, f->pipe.end);
+        } else if (f->type == FILE_TYPE_SOCKET) {
+            net_socket_close(f->socket.pcb);
         }
         f->type = FILE_TYPE_EMPTY;
     }
@@ -148,6 +194,8 @@ void fs_close_global(int g_fd) {
             fat16_close(f);
         } else if (f->type == FILE_TYPE_PIPE) {
             pipe_close(f->pipe.ptr, f->pipe.end);
+        } else if (f->type == FILE_TYPE_SOCKET) {
+            net_socket_close(f->socket.pcb);
         }
         f->type = FILE_TYPE_EMPTY;
     }
@@ -180,6 +228,8 @@ int file_read(int fd, void *buf, int size, struct trap_frame *tf) {
     } else if (f->type == FILE_TYPE_PIPE) {
         if (f->pipe.end != 0) return -1; // Read end only
         return pipe_read(f->pipe.ptr, buf, size, tf);
+    } else if (f->type == FILE_TYPE_SOCKET) {
+        return net_socket_recv(f->socket.pcb, buf, size);
     }
     return -1;
 }
@@ -204,6 +254,9 @@ int file_available(int fd) {
     } else if (f->type == FILE_TYPE_PIPE) {
         if (f->pipe.end != 0) return -1; // Read end only
         return pipe_available(f->pipe.ptr);
+    } else if (f->type == FILE_TYPE_SOCKET) {
+        uint32_t avail = f->socket.pcb->rx_tail - f->socket.pcb->rx_head;
+        return avail;
     }
     return -1;
 }
@@ -239,6 +292,8 @@ int file_write(int fd, const void *buf, int size, struct trap_frame *tf) {
             return -1;
         }
         return pipe_write(f->pipe.ptr, buf, size, tf);
+    } else if (f->type == FILE_TYPE_SOCKET) {
+        return net_socket_send(f->socket.pcb, buf, size);
     }
     return -1;
 }
@@ -308,9 +363,6 @@ void fs_reopen(int global_fd) {
     uint64_t flags = spinlock_acquire_irqsave(&f->lock);
     if (f->type != FILE_TYPE_EMPTY) {
         f->ref_count++;
-        if (f->type == FILE_TYPE_PIPE) {
-            pipe_reopen(f->pipe.ptr, f->pipe.end);
-        }
     }
     spinlock_release_irqrestore(&f->lock, flags);
 }

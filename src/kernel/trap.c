@@ -56,6 +56,7 @@ extern uint32_t get_cpuid(void);
 #define SYS_READ_DIR (15)
 #define SYS_KILL (16)
 #define SYS_YIELD (17)
+#define SYS_CONNECT (18)
 
 // Timer PPI interrupt ID on QEMU virt (non-secure physical timer)
 #define TIMER_PPI_INTID 30
@@ -112,6 +113,15 @@ static void sys_read(struct trap_frame *tf) {
   } else {
     tf->regs[0] = -1;
   }
+}
+
+static void sys_connect(struct trap_frame *tf) {
+  uint32_t ip = (uint32_t)tf->regs[0];
+  uint16_t port = (uint16_t)tf->regs[1];
+  int protocol = (int)tf->regs[2];
+  
+  extern int file_connect(uint32_t ip, uint16_t port, int protocol);
+  tf->regs[0] = file_connect(ip, port, protocol);
 }
 
 static void sys_write(struct trap_frame *tf) {
@@ -278,7 +288,12 @@ void sync_lower_handler_c(struct trap_frame *tf) {
   if (ec == 0x15) {
     if (iss == 0xFF) {
       // Yield SVC
+      int prev_pid = current_process() ? current_process()->pid : -1;
       schedule(tf);
+      int next_pid = current_process() ? current_process()->pid : -1;
+      if (prev_pid == next_pid && prev_pid != -1) {
+          __asm__ volatile("wfi");
+      }
       return;
     }
 
@@ -317,9 +332,21 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     } else if (syscall_num == SYS_KILL) {
       sys_kill(tf);
     } else if (syscall_num == SYS_YIELD) {
+      int prev_pid = current_process() ? current_process()->pid : -1;
       schedule(tf);
+      int next_pid = current_process() ? current_process()->pid : -1;
+      if (prev_pid == next_pid && prev_pid != -1) {
+          __asm__ volatile("wfi");
+      }
+    } else if (syscall_num == SYS_CONNECT) {
+      sys_connect(tf);
     } else if (syscall_num == 0xFF) {
+      int prev_pid = current_process() ? current_process()->pid : -1;
       schedule(tf);
+      int next_pid = current_process() ? current_process()->pid : -1;
+      if (prev_pid == next_pid && prev_pid != -1) {
+          __asm__ volatile("wfi");
+      }
     } else {
       uart_puts("Unknown System Call Invoked!\n");
       tf->regs[0] = -1; // Return error
@@ -390,9 +417,15 @@ void irq_lower_handler_c(struct trap_frame *tf) {
     timer_reload();
   } else if (intid == virtio_blk_irq) {
     virtio_blk_handle_irq();
-  } else if (intid >= 48 && intid <= 79) {
-    extern void virtio_input_handle_irq(int irq);
-    virtio_input_handle_irq(intid);
+  } else {
+    extern int virtio_net_irq;
+    extern void virtio_net_handle_irq(void);
+    if (intid == (uint32_t)virtio_net_irq) {
+      virtio_net_handle_irq();
+    } else if (intid >= 48 && intid <= 79) {
+      extern void virtio_input_handle_irq(int irq);
+      virtio_input_handle_irq(intid);
+    }
   }
 
   gic_end_interrupt(intid);

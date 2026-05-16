@@ -60,6 +60,8 @@ GRAPHICS_TEST_BIN = graphics.bin
 SMP_TEST_BIN = smp_test.bin
 
 PIPETEST_BIN = pipetest.bin
+NETTEST_BIN = nettest.bin
+TIMEOUT_BIN = timeout.bin
 DESKTOP_BIN = desktop.bin
 EDITOR_BIN = editor.bin
 EDITOR_T_BIN = EDITOR_T.BIN
@@ -147,6 +149,10 @@ obj/user_editor_test.o: src/user/editor_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
+obj/user_net_test.o: src/user/net_test.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
 obj/user_desktop_test_wrapper.o: src/user/desktop.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -Dmain=desktop_main -DDESKTOP_TEST_WRAPPER -c $< -o $@
@@ -187,6 +193,19 @@ $(PIPETEST_BIN): obj/user_pipe_test.o obj/user_libc.o obj/user_malloc.o
 	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o pipe_test.elf $^
 	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary pipe_test.elf $(PIPETEST_BIN)
 
+$(NETTEST_BIN): obj/user_net_test.o obj/user_libc.o obj/user_malloc.o
+	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o net_test.elf $^
+	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary net_test.elf $(NETTEST_BIN)
+
+obj/user_net_timeout_test.o: src/user/net_timeout_test.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(TIMEOUT_BIN): obj/user_net_timeout_test.o obj/user_libc.o obj/user_malloc.o
+	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o net_timeout_test.elf $^
+	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary net_timeout_test.elf $(TIMEOUT_BIN)
+
+
 $(DESKTOP_BIN): obj/desktop.o obj/user_libc.o obj/user_malloc.o obj/user_graphics.o obj/user_window.o
 	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o desktop_test.elf $^
 	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary desktop_test.elf $(DESKTOP_BIN)
@@ -199,7 +218,7 @@ $(EDITOR_T_BIN): obj/user_editor_test.o obj/user_desktop_test_wrapper.o obj/user
 	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o editor_test.elf $^
 	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary editor_test.elf $(EDITOR_T_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN)
 	dd if=/dev/zero of=disk.img bs=1M count=512
 	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img 
 	/opt/homebrew/bin/mcopy -i disk.img $(MEM_TEST_BIN) ::/MEMTEST.BIN
@@ -211,6 +230,8 @@ disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TE
 	/opt/homebrew/bin/mcopy -i disk.img $(GRAPHICS_TEST_BIN) ::/GRAPHICS.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(SMP_TEST_BIN) ::/SMPTEST.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(PIPETEST_BIN) ::/PIPETEST.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(NETTEST_BIN) ::/NETTEST.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(TIMEOUT_BIN) ::/TIMEOUT.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(DESKTOP_BIN) ::/DESKTOP.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(EDITOR_BIN) ::/EDITOR.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(EDITOR_T_BIN) ::/EDITOR_T.BIN
@@ -219,7 +240,7 @@ disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TE
 
 # Target to run the OS inside QEMU
 run: hobbyos.elf disk.img
-	qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 4 -m 4096M -kernel hobbyos.elf -display cocoa -serial stdio -append "console=ttyAMA0" -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -semihosting -action shutdown=poweroff $(QEMU_ARGS)
+	qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 4 -m 4096M -kernel hobbyos.elf -display cocoa -serial stdio -append "console=ttyAMA0" -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
 
 # Target to exit QEMU properly
 # Note: Ctrl+A, X exists QEMU nographic mode.

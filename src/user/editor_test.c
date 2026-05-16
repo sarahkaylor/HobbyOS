@@ -45,7 +45,11 @@ int get_events(void *buf, int max_events) {
 
 int read_dir(int index, char *buf) {
     if (index == 0) {
-        // We copy manually because strcpy isn't in libc.h yet
+        buf[0] = 'N'; buf[1] = 'E'; buf[2] = 'T'; buf[3] = 'T';
+        buf[4] = 'E'; buf[5] = 'S'; buf[6] = 'T'; buf[7] = '.';
+        buf[8] = 'B'; buf[9] = 'I'; buf[10] = 'N'; buf[11] = '\0';
+        return 0;
+    } else if (index == 1) {
         buf[0] = 'E'; buf[1] = 'D'; buf[2] = 'I'; buf[3] = 'T';
         buf[4] = 'O'; buf[5] = 'R'; buf[6] = '.'; buf[7] = 'B';
         buf[8] = 'I'; buf[9] = 'N'; buf[10] = '\0';
@@ -86,87 +90,96 @@ void print_console(const char *s) {
 extern struct window windows[];
 static int flush_count = 0;
 
+extern struct window windows[];
+extern int num_windows;
+static int test_state = 0;
+
+#define STATE_WAIT_NETTEST_LAUNCH 1
+#define STATE_WAIT_NETTEST_EXIT 2
+#define STATE_WAIT_EDITOR_LAUNCH 3
+#define STATE_CLICK_FILE_MENU 4
+#define STATE_WAIT_FINISH 6
+
 void flush_fb(void) {
     // Actually call the real syscall
     syscall(10 /* SYS_FLUSH_FB */, 0, 0, 0, 0);
 
-    flush_count++;
-    
-    // DEBUG
-    print_console("[TEST] flush_fb called, count=");
-    char cbuf[2] = {'0' + (flush_count % 10), '\0'};
-    if (flush_count >= 10) { cbuf[0] = '0' + (flush_count/10); print_console(cbuf); cbuf[0] = '0' + (flush_count%10); }
-    print_console(cbuf);
-    print_console("\n");
-    
-    if (flush_count == 2) {
-        print_console("[TEST] Injecting 'h' 'e' 'l' 'l' 'o'...\n");
-        send_key('h');
-        send_key('e');
-        send_key('l');
-        send_key('l');
-        send_key('o');
-    }
-    
-    if (flush_count == 3) {
-        print_console("[TEST] Moving mouse to File menu...\n");
-        inject_mock_event(EV_ABS, ABS_X, (20 * 0x7FFF) / 1024);
-        inject_mock_event(EV_ABS, ABS_Y, (26 * 0x7FFF) / 768);
-    }
-    if (flush_count == 4) {
-        print_console("[TEST] Clicking File menu...\n");
+    if (test_state == 0) {
+        test_state = STATE_WAIT_NETTEST_LAUNCH;
+    } else if (test_state == STATE_WAIT_NETTEST_LAUNCH) {
+        if (num_windows == 1) {
+            print_console("[TEST] nettest launched.\n");
+            test_state = STATE_WAIT_NETTEST_EXIT;
+        }
+    } else if (test_state == STATE_WAIT_NETTEST_EXIT) {
+        if (num_windows == 0) {
+            print_console("[TEST] nettest exited.\n");
+            // Right click to open menu
+            inject_mock_event(EV_KEY, 0x111, 1);
+            inject_mock_event(EV_KEY, 0x111, 0);
+            
+            // Move mouse down by 30px (from 384 to 414) to hit the middle of the 2nd item
+            inject_mock_event(EV_ABS, ABS_Y, (414 * 0x7FFF) / 768);
+            
+            // Left click to select EDITOR.BIN
+            inject_mock_event(EV_KEY, 0x110, 1);
+            inject_mock_event(EV_KEY, 0x110, 0);
+            
+            test_state = STATE_WAIT_EDITOR_LAUNCH;
+        }
+    } else if (test_state == STATE_WAIT_EDITOR_LAUNCH) {
+        if (num_windows == 1) {
+            print_console("[TEST] editor launched.\n");
+            print_console("[TEST] Injecting 'h' 'e' 'l' 'l' 'o'...\n");
+            send_key('h');
+            send_key('e');
+            send_key('l');
+            send_key('l');
+            send_key('o');
+            test_state = STATE_CLICK_FILE_MENU;
+        }
+    } else if (test_state == STATE_CLICK_FILE_MENU) {
+        int found = 0;
+        char *text = windows[0].text;
+        for (int i = 0; text[i] != '\0'; i++) {
+            if (text[i] == 'h' && text[i+1] == 'e' && text[i+2] == 'l' && text[i+3] == 'l' && text[i+4] == 'o') {
+                found = 1;
+                break;
+            }
+        }
+        if (found) {
+            print_console("[TEST] Moving mouse to File menu...\n");
+            inject_mock_event(EV_ABS, ABS_X, (20 * 0x7FFF) / 1024);
+            inject_mock_event(EV_ABS, ABS_Y, (26 * 0x7FFF) / 768);
+            test_state = 100;
+        }
+    } else if (test_state == 100) {
         inject_mock_event(EV_KEY, 0x110, 1);
         inject_mock_event(EV_KEY, 0x110, 0);
-    }
-    if (flush_count == 5) {
+        test_state = 101;
+    } else if (test_state == 101) {
         print_console("[TEST] Moving mouse to Save item...\n");
         inject_mock_event(EV_ABS, ABS_X, (20 * 0x7FFF) / 1024);
         inject_mock_event(EV_ABS, ABS_Y, (64 * 0x7FFF) / 768);
-    }
-    if (flush_count == 6) {
+        test_state = 102;
+    } else if (test_state == 102) {
         print_console("[TEST] Clicking Save item...\n");
         inject_mock_event(EV_KEY, 0x110, 1);
         inject_mock_event(EV_KEY, 0x110, 0);
-    }
-    
-    if (flush_count >= 2) {
+        test_state = STATE_WAIT_FINISH;
+    } else if (test_state == STATE_WAIT_FINISH) {
         int found = 0;
-        extern int num_windows;
-        for (int w = 0; w < num_windows; w++) {
-            char *text = windows[w].text;
-            for (int i = 0; text[i] != '\0'; i++) {
-                if (flush_count >= 7) {
-                    if (text[i] == 'w' && text[i+1] == ' ') {
-                        found = 1;
-                        break;
-                    }
-                } else {
-                    if (text[i] == 'h' && text[i+1] == 'e' && text[i+2] == 'l' && text[i+3] == 'l' && text[i+4] == 'o') {
-                        found = 1;
-                        break;
-                    }
-                }
+        char *text = windows[0].text;
+        for (int i = 0; text[i] != '\0'; i++) {
+            if (text[i] == 'w' && text[i+1] == ' ') {
+                found = 1;
+                break;
             }
-            if (found) break;
-
-        if (flush_count >= 7 && flush_count < 9) {
-            print_console("[TEST] current text: ");
-            print_console(windows[0].text);
-            print_console("\n");
         }
-
-        }
-        
-        if (found && flush_count >= 7) {
+        if (found) {
             print_console("[TEST] Found 'w ' in window 0! SCREENSHOT_READY\n");
-            // Wait for host to kill QEMU
             while(1);
         }
-    }
-    
-    if (flush_count > 20) {
-        print_console("[TEST] Timeout waiting for text!\n");
-        exit(1);
     }
 }
 
