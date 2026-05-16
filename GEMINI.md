@@ -53,3 +53,9 @@ HobbyOS provides multiple distinct build and execution targets through its Makef
 - **Multi-Processing**: This sytem must always support multi-processing and inter-process communication (IPC).
 - **Memory Protection**: This system must always support memory protection and sandboxing.
 - **User Mode**: This system must always support user mode and kernel mode.
+
+## 10. Network Stack
+- **VirtIO Network Device:** Network communication is driven by the VirtIO MMIO Network device (`virtio-net-device`). It utilizes split TX and RX virtqueues for packet transmission and reception.
+- **Protocol Support:** The kernel implements a minimalistic IPv4 stack focusing exclusively on UDP. TCP is not supported. Incoming Ethernet frames are parsed by `net_rx_packet`, validated for IPv4 and UDP, and dispatched to the appropriate Protocol Control Block (PCB).
+- **Dynamic Configuration (DHCP):** During boot, the OS broadcasts a DHCP Discover packet to dynamically acquire an IPv4 address, subnet mask, and router IP from the QEMU slirp network backend.
+- **Socket Abstraction:** User-space networking is accessed via the `SYS_CONNECT` system call (for UDP outbound connections). The kernel allocates a `net_pcb` (Protocol Control Block) and maps it into the process's file descriptor table as a Socket (`f->type = 2`). File operations (like `sys_close`) manage the lifecycle of these sockets, ensuring resources are freed upon process termination.
