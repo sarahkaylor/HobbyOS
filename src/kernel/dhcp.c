@@ -2,6 +2,7 @@
 #include "net.h"
 #include "virtio_net.h"
 #include "timer.h"
+#include "lock.h"
 
 extern void uart_puts(const char* s);
 extern void print_int(int val);
@@ -189,7 +190,7 @@ void dhcp_init(void) {
             uart_puts("[DHCP] Error: Initialization timeout. No DHCP server found.\n");
             return;
         }
-        __asm__ volatile("wfi");
+        safe_wfi();
     }
     uart_puts("DHCP initialization complete.\n");
 }

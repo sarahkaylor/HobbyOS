@@ -2,6 +2,7 @@
 #include "virtio_net.h"
 #include "lock.h"
 #include "timer.h"
+#include "process.h"
 
 extern void uart_puts(const char* s);
 extern void uart_print_hex(uint64_t val);
@@ -455,7 +456,7 @@ int net_socket_connect(struct socket_pcb* pcb, uint32_t ip, uint16_t port) {
             pcb->state = SOCKET_CLOSED;
             return -1;
         }
-        __asm__ volatile("wfi"); // Requires interrupts enabled
+        safe_wfi();
     }
     
     if (pcb->state == SOCKET_ESTABLISHED) {
@@ -534,7 +535,7 @@ int net_socket_recv(struct socket_pcb* pcb, void* buf, uint32_t len) {
             uart_puts("[NET] Error: Recv timeout. No data received.\n");
             return -1;
         }
-        __asm__ volatile("wfi");
+        safe_wfi();
     }
     
     // Atomically read the available payload to prevent race conditions during interrupt delivery

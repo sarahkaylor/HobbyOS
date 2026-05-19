@@ -219,13 +219,15 @@ void main(void) {
   load_and_run_program_in_scheduler("TIMEOUT.BIN", -1, -1);
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
-  load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1);
+  load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1, -1);
 #else
   uart_puts("Mode: DESKTOP - Launching desktop...\n");
-  load_and_run_program_in_scheduler("DESKTOP.BIN", -1, -1);
+  load_and_run_program_in_scheduler("DESKTOP.BIN", -1, -1, -1);
 #endif
 
   // Join the other cores in the scheduler
+  extern volatile int scheduler_started;
+  scheduler_started = 1;
   start_scheduler();
 
   uart_puts("System halt.\n");

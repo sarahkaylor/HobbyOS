@@ -66,8 +66,7 @@ static int get_global_fd(struct file *f) {
  * Returns:
  *   Local file descriptor index on success, or -1 on failure.
  */
-int file_open(const char *filename) {
-    struct process *cur = current_process();
+int file_open(struct process *cur, const char *filename) {
     if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -1;
 
     struct file *f = file_alloc();
@@ -98,8 +97,7 @@ int file_open(const char *filename) {
     return fd;
 }
 
-int file_connect(uint32_t ip, uint16_t port, int protocol) {
-    struct process *cur = current_process();
+int file_connect(struct process *cur, uint32_t ip, uint16_t port, int protocol) {
     if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -1;
 
     struct file *f = file_alloc();
@@ -150,8 +148,7 @@ int file_connect(uint32_t ip, uint16_t port, int protocol) {
  * Returns:
  *   0 on success, -1 if the descriptor is invalid.
  */
-int file_close(int fd) {
-    struct process *cur = current_process();
+int file_close(struct process *cur, int fd) {
     if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
 
     int g_fd = cur->open_fds[fd];
@@ -160,12 +157,15 @@ int file_close(int fd) {
     struct file *f = &global_file_table[g_fd];
     
     uint64_t flags = spinlock_acquire_irqsave(&f->lock);
+    
+    if (f->type == FILE_TYPE_PIPE) {
+        pipe_close(f->pipe.ptr, f->pipe.end);
+    }
+    
     f->ref_count--;
     if (f->ref_count == 0) {
         if (f->type == FILE_TYPE_FAT16) {
             fat16_close(f);
-        } else if (f->type == FILE_TYPE_PIPE) {
-            pipe_close(f->pipe.ptr, f->pipe.end);
         } else if (f->type == FILE_TYPE_SOCKET) {
             net_socket_close(f->socket.pcb);
         }
@@ -188,12 +188,15 @@ void fs_close_global(int g_fd) {
         spinlock_release_irqrestore(&f->lock, flags);
         return;
     }
+
+    if (f->type == FILE_TYPE_PIPE) {
+        pipe_close(f->pipe.ptr, f->pipe.end);
+    }
+
     f->ref_count--;
     if (f->ref_count == 0) {
         if (f->type == FILE_TYPE_FAT16) {
             fat16_close(f);
-        } else if (f->type == FILE_TYPE_PIPE) {
-            pipe_close(f->pipe.ptr, f->pipe.end);
         } else if (f->type == FILE_TYPE_SOCKET) {
             net_socket_close(f->socket.pcb);
         }
@@ -215,8 +218,7 @@ void fs_close_global(int g_fd) {
  * Returns:
  *   Number of bytes read, or -1 on failure.
  */
-int file_read(int fd, void *buf, int size, struct trap_frame *tf) {
-    struct process *cur = current_process();
+int file_read(struct process *cur, int fd, void *buf, int size, struct trap_frame *tf) {
     if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
 
     int g_fd = cur->open_fds[fd];
@@ -240,8 +242,7 @@ int file_read(int fd, void *buf, int size, struct trap_frame *tf) {
  * Returns:
  *   Number of bytes available, or -1 if closed/EOF.
  */
-int file_available(int fd) {
-    struct process *cur = current_process();
+int file_available(struct process *cur, int fd) {
     if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
 
     int g_fd = cur->open_fds[fd];
@@ -274,8 +275,7 @@ int file_available(int fd) {
  * Returns:
  *   Number of bytes written, or -1 on failure.
  */
-int file_write(int fd, const void *buf, int size, struct trap_frame *tf) {
-    struct process *cur = current_process();
+int file_write(struct process *cur, int fd, const void *buf, int size, struct trap_frame *tf) {
     if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
 
     int g_fd = cur->open_fds[fd];
@@ -307,8 +307,7 @@ int file_write(int fd, const void *buf, int size, struct trap_frame *tf) {
  * Returns:
  *   0 on success, -1 on failure.
  */
-int file_pipe(int fds[2]) {
-    struct process *cur = current_process();
+int file_pipe(struct process *cur, int fds[2]) {
     if (!cur || cur->num_open_fds + 2 > MAX_OPEN_FDS) return -1;
 
     struct file *f0 = file_alloc();
@@ -363,6 +362,9 @@ void fs_reopen(int global_fd) {
     uint64_t flags = spinlock_acquire_irqsave(&f->lock);
     if (f->type != FILE_TYPE_EMPTY) {
         f->ref_count++;
+        if (f->type == FILE_TYPE_PIPE) {
+            pipe_reopen(f->pipe.ptr, f->pipe.end);
+        }
     }
     spinlock_release_irqrestore(&f->lock, flags);
 }

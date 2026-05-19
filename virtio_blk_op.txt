@@ -1,0 +1,109 @@
+000000004008ecf0 <virtio_blk_do_op>:
+4008ecf0: d10143ff     	sub	sp, sp, #0x50
+4008ecf4: a9047bfd     	stp	x29, x30, [sp, #0x40]
+4008ecf8: 910103fd     	add	x29, sp, #0x40
+4008ecfc: f81f03a0     	stur	x0, [x29, #-0x10]
+4008ed00: f81e83a1     	stur	x1, [x29, #-0x18]
+4008ed04: b81e43a2     	stur	w2, [x29, #-0x1c]
+4008ed08: b0000ca0     	adrp	x0, 0x40223000 <blk_lock>
+4008ed0c: 91000000     	add	x0, x0, #0x0
+4008ed10: 97ffd880     	bl	0x40084f10 <spinlock_acquire_irqsave>
+4008ed14: f9000fe0     	str	x0, [sp, #0x18]
+4008ed18: b0000ca8     	adrp	x8, 0x40223000 <blk_lock>
+4008ed1c: f9400508     	ldr	x8, [x8, #0x8]
+4008ed20: b5000128     	cbnz	x8, 0x4008ed44 <virtio_blk_do_op+0x54>
+4008ed24: 14000001     	b	0x4008ed28 <virtio_blk_do_op+0x38>
+4008ed28: f9400fe1     	ldr	x1, [sp, #0x18]
+4008ed2c: b0000ca0     	adrp	x0, 0x40223000 <blk_lock>
+4008ed30: 91000000     	add	x0, x0, #0x0
+4008ed34: 97ffd887     	bl	0x40084f50 <spinlock_release_irqrestore>
+4008ed38: 12800008     	mov	w8, #-0x1               // =-1
+4008ed3c: b81fc3a8     	stur	w8, [x29, #-0x4]
+4008ed40: 14000059     	b	0x4008eea4 <virtio_blk_do_op+0x1b4>
+4008ed44: b85e43a9     	ldur	w9, [x29, #-0x1c]
+4008ed48: 90000cc8     	adrp	x8, 0x40226000 <ack_used_idx>
+4008ed4c: 91002108     	add	x8, x8, #0x8
+4008ed50: b9000109     	str	w9, [x8]
+4008ed54: 2a1f03e1     	mov	w1, wzr
+4008ed58: b9000501     	str	w1, [x8, #0x4]
+4008ed5c: f85f03a9     	ldur	x9, [x29, #-0x10]
+4008ed60: f9000509     	str	x9, [x8, #0x8]
+4008ed64: d0000ca9     	adrp	x9, 0x40224000 <vq>
+4008ed68: 91000129     	add	x9, x9, #0x0
+4008ed6c: f90007e9     	str	x9, [sp, #0x8]
+4008ed70: f9000128     	str	x8, [x9]
+4008ed74: 52800208     	mov	w8, #0x10               // =16
+4008ed78: b9000928     	str	w8, [x9, #0x8]
+4008ed7c: 5280002a     	mov	w10, #0x1               // =1
+4008ed80: 7900192a     	strh	w10, [x9, #0xc]
+4008ed84: 79001d2a     	strh	w10, [x9, #0xe]
+4008ed88: f85e83a8     	ldur	x8, [x29, #-0x18]
+4008ed8c: f9000928     	str	x8, [x9, #0x10]
+4008ed90: 52804008     	mov	w8, #0x200              // =512
+4008ed94: b9001928     	str	w8, [x9, #0x18]
+4008ed98: b85e43a8     	ldur	w8, [x29, #-0x1c]
+4008ed9c: 71000108     	subs	w8, w8, #0x0
+4008eda0: 52800068     	mov	w8, #0x3                // =3
+4008eda4: 1a9f0508     	csinc	w8, w8, wzr, eq
+4008eda8: 79003928     	strh	w8, [x9, #0x1c]
+4008edac: 52800048     	mov	w8, #0x2                // =2
+4008edb0: 79003d28     	strh	w8, [x9, #0x1e]
+4008edb4: 90000ccb     	adrp	x11, 0x40226000 <ack_used_idx>
+4008edb8: 9100616b     	add	x11, x11, #0x18
+4008edbc: f900112b     	str	x11, [x9, #0x20]
+4008edc0: b900292a     	str	w10, [x9, #0x28]
+4008edc4: 79005928     	strh	w8, [x9, #0x2c]
+4008edc8: 79005d21     	strh	w1, [x9, #0x2e]
+4008edcc: 79410528     	ldrh	w8, [x9, #0x82]
+4008edd0: 79002fe8     	strh	w8, [sp, #0x16]
+4008edd4: 79402fe8     	ldrh	w8, [sp, #0x16]
+4008edd8: 12000908     	and	w8, w8, #0x7
+4008eddc: 8b284528     	add	x8, x9, w8, uxtw #1
+4008ede0: 79010901     	strh	w1, [x8, #0x84]
+4008ede4: d5033fbf     	dmb	sy
+4008ede8: 79410528     	ldrh	w8, [x9, #0x82]
+4008edec: 11000508     	add	w8, w8, #0x1
+4008edf0: 79010528     	strh	w8, [x9, #0x82]
+4008edf4: d5033fbf     	dmb	sy
+4008edf8: 52800a00     	mov	w0, #0x50               // =80
+4008edfc: 97fffee5     	bl	0x4008e990 <reg_write32>
+4008ee00: 14000001     	b	0x4008ee04 <virtio_blk_do_op+0x114>
+4008ee04: f0000ca8     	adrp	x8, 0x40225000 <vq+0x1000>
+4008ee08: 79400508     	ldrh	w8, [x8, #0x2]
+4008ee0c: 90000cc9     	adrp	x9, 0x40226000 <ack_used_idx>
+4008ee10: 79400129     	ldrh	w9, [x9]
+4008ee14: 6b090108     	subs	w8, w8, w9
+4008ee18: 54000241     	b.ne	0x4008ee60 <virtio_blk_do_op+0x170>
+4008ee1c: 14000001     	b	0x4008ee20 <virtio_blk_do_op+0x130>
+4008ee20: f9400fe1     	ldr	x1, [sp, #0x18]
+4008ee24: b0000ca0     	adrp	x0, 0x40223000 <blk_lock>
+4008ee28: 91000000     	add	x0, x0, #0x0
+4008ee2c: f90003e0     	str	x0, [sp]
+4008ee30: 97ffd848     	bl	0x40084f50 <spinlock_release_irqrestore>
+4008ee34: d503201f     	nop
+4008ee38: 1000ec20     	adr	x0, 0x40090bbc <UART0_FR+0x94>
+4008ee3c: 97ffd939     	bl	0x40085320 <uart_puts>
+4008ee40: 97fff138     	bl	0x4008b320 <process_sleep>
+4008ee44: 90000020     	adrp	x0, 0x40092000 <UART0_FR+0x14d8>
+4008ee48: 91144400     	add	x0, x0, #0x511
+4008ee4c: 97ffd935     	bl	0x40085320 <uart_puts>
+4008ee50: f94003e0     	ldr	x0, [sp]
+4008ee54: 97ffd82f     	bl	0x40084f10 <spinlock_acquire_irqsave>
+4008ee58: f9000fe0     	str	x0, [sp, #0x18]
+4008ee5c: 17ffffea     	b	0x4008ee04 <virtio_blk_do_op+0x114>
+4008ee60: f0000ca8     	adrp	x8, 0x40225000 <vq+0x1000>
+4008ee64: 79400508     	ldrh	w8, [x8, #0x2]
+4008ee68: 90000cc9     	adrp	x9, 0x40226000 <ack_used_idx>
+4008ee6c: 79000128     	strh	w8, [x9]
+4008ee70: d5033fbf     	dmb	sy
+4008ee74: 90000cc8     	adrp	x8, 0x40226000 <ack_used_idx>
+4008ee78: 39406108     	ldrb	w8, [x8, #0x18]
+4008ee7c: 71000108     	subs	w8, w8, #0x0
+4008ee80: 5a9f03e8     	csetm	w8, ne
+4008ee84: b90013e8     	str	w8, [sp, #0x10]
+4008ee88: f9400fe1     	ldr	x1, [sp, #0x18]
+4008ee8c: b0000ca0     	adrp	x0, 0x40223000 <blk_lock>
+4008ee90: 91000000     	add	x0, x0, #0x0
+4008ee94: 97ffd82f     	bl	0x40084f50 <spinlock_release_irqrestore>
+4008ee98: b94013e8     	ldr	w8, [sp, #0x10]
+4008ee9c: b81fc3a8     	stur	w8, [x29, #-0x4]

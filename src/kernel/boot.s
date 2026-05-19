@@ -90,13 +90,17 @@ secondary_halt:
 .align 11
 .global vectors
 vectors:
-    // Current EL with SP0
+    // Current EL with SP0 (used by kernel threads running in EL1t)
+    // Offset 0x000: Synchronous
+    .align 7
+    b kernel_sync_wrapper
+    // Offset 0x080: IRQ
+    .align 7
+    b irq_wrapper
+    // Offset 0x100: FIQ
     .align 7
     b .
-    .align 7
-    b .
-    .align 7
-    b .
+    // Offset 0x180: SError
     .align 7
     b .
 
@@ -208,6 +212,8 @@ sync_lower_wrapper:
     mrs x0, elr_el1
     mrs x1, spsr_el1
     stp x0, x1, [sp, #248]
+    mrs x2, sp_el0
+    str x2, [sp, #264]
 
     // Set Argument 0 (w0 / x0) to the top of Trap Frame structure securely mapped 
     mov x0, sp
@@ -263,6 +269,8 @@ irq_lower_wrapper:
     mrs x0, elr_el1
     mrs x1, spsr_el1
     stp x0, x1, [sp, #248]
+    mrs x2, sp_el0
+    str x2, [sp, #264]
 
     mov x0, sp
     bl irq_lower_handler_c
@@ -376,5 +384,54 @@ execute_trap_frame:
     ldp x4, x5, [sp, #32]
     ldp x2, x3, [sp, #16]
     ldp x0, x1, [sp, #0]
+    add sp, sp, #272
+    eret
+
+.global enter_user_space
+enter_user_space:
+    // x0 = pointer to local trap frame (source)
+    // x1 = target_sp (the top of the kernel stack, e.g. __stack_top)
+
+    // Calculate target_tf = target_sp - 272 (destination)
+    sub x2, x1, #272
+
+    // Copy 272 bytes from x0 to x2 BACKWARDS
+    // Because x2 (destination) is at a higher address than x0 (source)
+    // and they overlap, a forward copy corrupts the source.
+    mov x3, #272
+1:
+    cmp x3, #0
+    b.eq 2f
+    sub x3, x3, #8
+    ldr x4, [x0, x3]
+    str x4, [x2, x3]
+    b 1b
+2:
+    // Now switch SP to the new trap frame
+    mov sp, x2
+
+    // Restore context from the new trap frame
+    ldp x3, x4, [sp, #248]
+    msr elr_el1, x3
+    msr spsr_el1, x4
+
+    ldr x30, [sp, #240]
+    ldp x28, x29, [sp, #224]
+    ldp x26, x27, [sp, #208]
+    ldp x24, x25, [sp, #192]
+    ldp x22, x23, [sp, #176]
+    ldp x20, x21, [sp, #160]
+    ldp x18, x19, [sp, #144]
+    ldp x16, x17, [sp, #128]
+    ldp x14, x15, [sp, #112]
+    ldp x12, x13, [sp, #96]
+    ldp x10, x11, [sp, #80]
+    ldp x8, x9, [sp, #64]
+    ldp x6, x7, [sp, #48]
+    ldp x4, x5, [sp, #32]
+    ldp x2, x3, [sp, #16]
+    ldp x0, x1, [sp, #0]
+    
+    // Set SP_EL1 to the top of the stack
     add sp, sp, #272
     eret

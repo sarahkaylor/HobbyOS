@@ -4,6 +4,7 @@
 #include "process.h"
 #include "setjmp.h"
 #include "timer.h"
+#include "lock.h"
 #include <stdint.h>
 
 extern jmp_buf user_exit_context;
@@ -84,9 +85,10 @@ static void sys_fork(struct trap_frame *tf) {
 
 static void sys_open(struct trap_frame *tf) {
   const char *filename = (const char *)tf->regs[0];
+  struct process *caller = current_process();
   if ((uint64_t)filename >= USER_VIRT_BASE &&
       (uint64_t)filename < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-    tf->regs[0] = file_open(filename);
+    tf->regs[0] = file_open(caller, filename);
   } else {
     tf->regs[0] = -1;
   }
@@ -94,19 +96,21 @@ static void sys_open(struct trap_frame *tf) {
 
 static void sys_close(struct trap_frame *tf) {
   int fd = (int)tf->regs[0];
-  tf->regs[0] = file_close(fd);
+  struct process *caller = current_process();
+  tf->regs[0] = file_close(caller, fd);
 }
 
 static void sys_read(struct trap_frame *tf) {
   int fd = (int)tf->regs[0];
   void *buf = (void *)tf->regs[1];
   int size = (int)tf->regs[2];
+  struct process *caller = current_process();
   if ((uint64_t)buf >= USER_VIRT_BASE &&
       (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
-    int ret = file_read(fd, buf, size, tf);
+    int ret = file_read(caller, fd, buf, size, tf);
     if (ret == -2) {
       tf->elr -= 4; // Restart syscall
-      schedule(tf);
+      schedule(tf, 0);
     } else {
       tf->regs[0] = ret;
     }
@@ -119,21 +123,23 @@ static void sys_connect(struct trap_frame *tf) {
   uint32_t ip = (uint32_t)tf->regs[0];
   uint16_t port = (uint16_t)tf->regs[1];
   int protocol = (int)tf->regs[2];
+  struct process *caller = current_process();
   
-  extern int file_connect(uint32_t ip, uint16_t port, int protocol);
-  tf->regs[0] = file_connect(ip, port, protocol);
+  extern int file_connect(struct process *caller, uint32_t ip, uint16_t port, int protocol);
+  tf->regs[0] = file_connect(caller, ip, port, protocol);
 }
 
 static void sys_write(struct trap_frame *tf) {
   int fd = (int)tf->regs[0];
   const void *buf = (const void *)tf->regs[1];
   int size = (int)tf->regs[2];
+  struct process *caller = current_process();
   if ((uint64_t)buf >= USER_VIRT_BASE &&
       (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
-    int ret = file_write(fd, buf, size, tf);
+    int ret = file_write(caller, fd, buf, size, tf);
     if (ret == -2) {
       tf->elr -= 4; // Restart syscall
-      schedule(tf);
+      schedule(tf, 0);
     } else {
       tf->regs[0] = ret;
     }
@@ -142,18 +148,75 @@ static void sys_write(struct trap_frame *tf) {
   }
 }
 
-extern int load_and_run_program_in_scheduler(const char *filename, int stdin_fd, int stdout_fd);
+extern int load_and_run_program_in_scheduler(const char *filename, int stdin_fd, int stdout_fd, int caller_pid);
 extern struct process *process_get_pcb(int pid);
+
+struct sys_spawn_args {
+    char filename[32];
+    int stdin_fd;
+    int stdout_fd;
+    int caller_pid;
+};
+
+static struct sys_spawn_args spawn_args_pool[64];
+
+extern void kernel_exit(void);
+extern struct process *process_get_pcb(int pid);
+
+static void sys_spawn_worker(void *arg) {
+    struct sys_spawn_args *args = (struct sys_spawn_args *)arg;
+    
+    int child_pid = load_and_run_program_in_scheduler(args->filename, args->stdin_fd, args->stdout_fd, args->caller_pid);
+    
+    struct process *caller = process_get_pcb(args->caller_pid);
+    if (caller) {
+        caller->context[0] = child_pid; // return value in x0
+        
+        extern spinlock_t proc_lock;
+        uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+        caller->state = PROC_STATE_READY;
+        spinlock_release_irqrestore(&proc_lock, flags);
+    }
+    
+    kernel_exit();
+}
 
 static void sys_spawn(struct trap_frame *tf) {
   const char *filename = (const char *)tf->regs[0];
   int stdin_fd = (int)tf->regs[1];
   int stdout_fd = (int)tf->regs[2];
 
+  struct process *caller = current_process();
+  if (!caller) {
+      tf->regs[0] = -1;
+      return;
+  }
+
   if ((uint64_t)filename >= USER_VIRT_BASE &&
       (uint64_t)filename < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-    int child_pid = load_and_run_program_in_scheduler(filename, stdin_fd, stdout_fd);
-    tf->regs[0] = child_pid;
+      
+      struct sys_spawn_args *args = &spawn_args_pool[caller->pid];
+      
+      int i = 0;
+      while (filename[i] && i < 31) {
+          args->filename[i] = filename[i];
+          i++;
+      }
+      args->filename[i] = '\0';
+      
+      args->stdin_fd = stdin_fd;
+      args->stdout_fd = stdout_fd;
+      args->caller_pid = caller->pid;
+      
+      extern int process_create_kernel(void (*entry)(void*), void *arg);
+      process_create_kernel(sys_spawn_worker, args);
+      
+      extern spinlock_t proc_lock;
+      uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+      caller->state = PROC_STATE_WAIT_SPAWN;
+      spinlock_release_irqrestore(&proc_lock, flags);
+      
+      schedule(tf, 0);
   } else {
     tf->regs[0] = -1;
   }
@@ -161,11 +224,12 @@ static void sys_spawn(struct trap_frame *tf) {
 
 static void sys_pipe(struct trap_frame *tf) {
   int *fds = (int *)tf->regs[0];
+  struct process *caller = current_process();
   uint64_t fds_addr = (uint64_t)fds;
   if (fds_addr >= USER_VIRT_BASE &&
       fds_addr + 8 <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
     int kernel_fds[2];
-    int res = file_pipe(kernel_fds);
+    int res = file_pipe(caller, kernel_fds);
     if (res == 0) {
       fds[0] = kernel_fds[0];
       fds[1] = kernel_fds[1];
@@ -185,7 +249,7 @@ extern void mmu_map_user_framebuffer(uint64_t phys_addr);
 static void sys_map_fb(struct trap_frame *tf) {
   uint64_t phys_addr = (uint64_t)virtio_gpu_get_framebuffer();
   mmu_map_user_framebuffer(phys_addr);
-  tf->regs[0] = 0x50000000; // Return user virtual address
+  tf->regs[0] = 0x60000000; // Return user virtual address
 }
 
 static void sys_flush_fb(struct trap_frame *tf) {
@@ -210,10 +274,11 @@ static void sys_get_cpuid(struct trap_frame *tf) {
   tf->regs[0] = (uint64_t)get_cpuid();
 }
 
-extern int file_available(int fd);
+extern int file_available(struct process *caller, int fd);
 static void sys_available(struct trap_frame *tf) {
   int fd = (int)tf->regs[0];
-  tf->regs[0] = file_available(fd);
+  struct process *caller = current_process();
+  tf->regs[0] = file_available(caller, fd);
 }
 
 extern int fat16_read_dir(int index, char *out_name);
@@ -223,6 +288,17 @@ static void sys_read_dir(struct trap_frame *tf) {
   if ((uint64_t)buf >= USER_VIRT_BASE &&
       (uint64_t)buf + 12 <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
     tf->regs[0] = fat16_read_dir(index, buf);
+    extern void uart_puts(const char*);
+    extern void print_int(int);
+    uart_puts("[KERNEL] sys_read_dir(");
+    print_int(index);
+    uart_puts(") -> ");
+    if (tf->regs[0] == 0) {
+        uart_puts(buf);
+    } else {
+        uart_puts("FAILED");
+    }
+    uart_puts("\n");
   } else {
     tf->regs[0] = -1;
   }
@@ -251,16 +327,20 @@ void sync_handler_c(struct trap_frame *tf) {
 
   if (ec == 0x15 && iss == 0xFF) {
     // Yield SVC from EL1
-    schedule(tf);
+    schedule(tf, 0);
     return;
   }
 
-  uart_puts("[KERNEL] FATAL: Synchronous Exception in EL1! ESR: ");
+  uart_puts("[KERNEL] FATAL: CPU ");
+  uart_print_hex(get_cpuid());
+  uart_puts(" Synchronous Exception in EL1! ESR: ");
   uart_print_hex(esr);
   uint64_t far;
   __asm__ volatile("mrs %0, far_el1" : "=r"(far));
   uart_puts(", FAR: ");
   uart_print_hex(far);
+  uart_puts(", ELR: ");
+  uart_print_hex(tf->elr);
   uart_puts("\n");
   while (1)
     ;
@@ -289,10 +369,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     if (iss == 0xFF) {
       // Yield SVC
       int prev_pid = current_process() ? current_process()->pid : -1;
-      schedule(tf);
+      schedule(tf, 0);
       int next_pid = current_process() ? current_process()->pid : -1;
       if (prev_pid == next_pid && prev_pid != -1) {
-          __asm__ volatile("wfi");
+          safe_wfi();
       }
       return;
     }
@@ -332,32 +412,23 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     } else if (syscall_num == SYS_KILL) {
       sys_kill(tf);
     } else if (syscall_num == SYS_YIELD) {
-      int prev_pid = current_process() ? current_process()->pid : -1;
-      schedule(tf);
-      int next_pid = current_process() ? current_process()->pid : -1;
-      if (prev_pid == next_pid && prev_pid != -1) {
-          __asm__ volatile("wfi");
-      }
+      schedule(tf, 1);
     } else if (syscall_num == SYS_CONNECT) {
       sys_connect(tf);
     } else if (syscall_num == 0xFF) {
-      int prev_pid = current_process() ? current_process()->pid : -1;
-      schedule(tf);
-      int next_pid = current_process() ? current_process()->pid : -1;
-      if (prev_pid == next_pid && prev_pid != -1) {
-          __asm__ volatile("wfi");
-      }
+      schedule(tf, 1);
     } else {
       uart_puts("Unknown System Call Invoked!\n");
       tf->regs[0] = -1; // Return error
     }
-  } else if (ec == 0x20 || ec == 0x24) {
+  } else if (ec == 0x20 || ec == 0x24 || ec == 0x00) {
     // EC = 0x20: Instruction Abort from a lower Exception Level
     // EC = 0x24: Data Abort from a lower Exception Level
+    // EC = 0x00: Unknown Reason (e.g. executing zeroes)
 
     // Terminate the user program
     struct process *cur = current_process();
-    if (cur && cur->state == PROC_STATE_RUNNING) {
+    if (cur) {
       uart_puts("[KERNEL] User process ");
       print_int(cur->pid);
       if (cur->name[0] != '\0') {
@@ -371,11 +442,16 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       uart_print_hex(tf->elr);
       uart_puts("\n");
       process_exit(tf);
-      timer_reload();
     } else {
-      uart_puts("[KERNEL] Terminating user program due to memory protection "
-                "violation.\n");
-      longjmp(user_exit_context, 1);
+      uart_puts("\n[KERNEL] FATAL: EL0 Synchronous Exception with no running process!\n");
+      uart_puts("EC: ");
+      uart_print_hex(ec);
+      uart_puts("\nELR: ");
+      uart_print_hex(tf->elr);
+      uart_puts("\n");
+      while (1) {
+        safe_wfi();
+      }
     }
   } else {
     // Unhandled Synchronous exception from EL0
@@ -386,8 +462,13 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     uart_print_hex(tf->elr);
     uart_puts("\n");
 
-    while (1) {
-      __asm__ volatile("wfi");
+    struct process *cur = current_process();
+    if (cur) {
+      process_exit(tf);
+    } else {
+      while (1) {
+        safe_wfi();
+      }
     }
   }
 }
@@ -410,7 +491,7 @@ void irq_lower_handler_c(struct trap_frame *tf) {
     if (cur) {
       timer_reload();
       gic_end_interrupt(intid);
-      schedule(tf);
+      schedule(tf, 0);
       return;
     }
     // Not under scheduler — just reload and continue

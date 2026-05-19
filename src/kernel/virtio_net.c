@@ -1,5 +1,6 @@
 #include "virtio_net.h"
 #include "lock.h"
+#include "process.h"
 
 // VirtIO MMIO offsets
 #define VIRTIO_MAGIC        0x000
@@ -267,7 +268,7 @@ int virtio_net_send(const void *buf, uint32_t len) {
     // By using WFI (Wait For Interrupt), we avoid busy-polling and save CPU cycles.
     while (*(volatile uint16_t*)&tx_vq.used.idx == tx_ack_used_idx) {
         spinlock_release_irqrestore(&net_tx_lock, flags);
-        __asm__ volatile("wfi");
+        safe_wfi();
         flags = spinlock_acquire_irqsave(&net_tx_lock);
     }
     tx_ack_used_idx = tx_vq.used.idx;
@@ -302,7 +303,9 @@ void virtio_net_handle_irq(void) {
         // Push payload to network stack, skipping the virtio_net_hdr
         if (len > sizeof(struct virtio_net_hdr)) {
             uint32_t packet_len = len - sizeof(struct virtio_net_hdr);
+            spinlock_release_irqrestore(&net_lock, flags);
             net_rx_packet(rx_buffers[buffer_idx], packet_len);
+            flags = spinlock_acquire_irqsave(&net_lock);
         }
 
         // Re-queue the descriptor
@@ -320,4 +323,5 @@ void virtio_net_handle_irq(void) {
     }
 
     spinlock_release_irqrestore(&net_lock, flags);
+    process_wake_all();
 }

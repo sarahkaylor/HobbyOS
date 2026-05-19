@@ -77,7 +77,7 @@ int load_and_run_program(const char* filename) {
  * Returns:
  *   The PID of the new process, or -1 on failure.
  */
-int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int stdout_fd) {
+int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int stdout_fd, int caller_pid) {
     if (!filename) return -1;
     uart_puts("Loading program for scheduler: ");
     uart_puts(filename);
@@ -100,21 +100,26 @@ int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int st
     }
 
     struct file f;
+    uart_puts("Calling fat16_open...\n");
     if (fat16_open(filename, &f) != 0) {
-        uart_puts("Failed to locate ");
+        uart_puts("Failed to open file: ");
         uart_puts(filename);
-        uart_puts(" on disk image!\n");
+        uart_puts("\n");
+        process_free(pid);
         return -1;
     }
-
+    
     uint64_t phys_base = process_get_phys_base(pid);
 
+    uart_puts("Calling fat16_read...\n");
     int bytes_read = fat16_read(&f, (void*)phys_base, MAX_PROGRAM_SIZE);
+    uart_puts("fat16_read finished!\n");
     if (bytes_read <= 0) {
         uart_puts("Failed to read ");
         uart_puts(filename);
         uart_puts(" from disk!\n");
         fat16_close(&f);
+        process_free(pid);
         return -1;
     }
 
@@ -126,22 +131,32 @@ int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int st
 
     // Clean D-cache and invalidate I-cache so the loaded program executes correctly
     __builtin___clear_cache((char*)phys_base, (char*)phys_base + bytes_read);
+    uart_puts("Cache cleared.\n");
 
     fat16_close(&f);
+    uart_puts("fat16_close finished.\n");
 
-    struct process *parent = current_process();
+    struct process *parent = process_get_pcb(caller_pid);
     // child is already defined above
     if (parent && child) {
         if (stdin_fd >= 0 && stdin_fd < MAX_OPEN_FDS && parent->open_fds[stdin_fd] != -1) {
             child->open_fds[0] = parent->open_fds[stdin_fd];
             fs_reopen(child->open_fds[0]);
             child->num_open_fds++;
+            uart_puts("Inherited stdin_fd="); print_int(stdin_fd); uart_puts("\n");
+        } else {
+            uart_puts("Failed to inherit stdin_fd="); print_int(stdin_fd); uart_puts("\n");
         }
         if (stdout_fd >= 0 && stdout_fd < MAX_OPEN_FDS && parent->open_fds[stdout_fd] != -1) {
             child->open_fds[1] = parent->open_fds[stdout_fd];
             fs_reopen(child->open_fds[1]);
             child->num_open_fds++;
+            uart_puts("Inherited stdout_fd="); print_int(stdout_fd); uart_puts("\n");
+        } else {
+            uart_puts("Failed to inherit stdout_fd="); print_int(stdout_fd); uart_puts("\n");
         }
+    } else {
+        uart_puts("No parent or child for fd inheritance.\n");
     }
 
     process_set_entry(pid, USER_VIRT_BASE, USER_VIRT_BASE + USER_REGION_SIZE);

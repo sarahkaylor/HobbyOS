@@ -1,5 +1,6 @@
 #include "virtio_blk.h"
 #include "lock.h"
+#include "process.h"
 
 // VirtIO MMIO offsets
 #define VIRTIO_MAGIC        0x000
@@ -197,6 +198,8 @@ static int virtio_blk_do_op(uint64_t sector, void* buf, uint32_t type) {
         return -1;
     }
 
+    uint16_t desc_idx = 0;
+
     blk_req.type = type;
     blk_req.reserved = 0;
     blk_req.sector = sector;
@@ -233,23 +236,20 @@ static int virtio_blk_do_op(uint64_t sector, void* buf, uint32_t type) {
     // Notify device
     reg_write32(VIRTIO_QUEUE_NOTIFY, 0);
 
-    // Hardware WFI Mechanism:
-    // To strictly eliminate busy-polling queues which aggressively spin the CPU,
-    // the Wait For Interrupt (`wfi`) instruction is evoked. Because PSTATE.I is cleared
-    // down in EL1, the processor enters a genuine low-power sleep.
-    // It wakes autonomously only when the GIC validates the designated interrupt line 
-    // raised by the virtio device once IO completes and edits `used.idx`.
     while (*(volatile uint16_t*)&vq.used.idx == ack_used_idx) {
-        // Release lock while waiting to allow other CPUs to process interrupts
-        spinlock_release_irqrestore(&blk_lock, flags);
-        __asm__ volatile("wfi");
-        flags = spinlock_acquire_irqsave(&blk_lock);
+        // spin
     }
 
     ack_used_idx = vq.used.idx;
     
     // Memory barrier before reading status
     __asm__ volatile("dmb sy" ::: "memory");
+    
+    // Ack interrupt manually since we disabled IRQs
+    uint32_t int_status = reg_read32(VIRTIO_INTERRUPT_STATUS);
+    if (int_status) {
+        reg_write32(VIRTIO_INTERRUPT_ACK, int_status);
+    }
 
     int res = (blk_status == 0 ? 0 : -1);
     spinlock_release_irqrestore(&blk_lock, flags);
@@ -259,30 +259,60 @@ static int virtio_blk_do_op(uint64_t sector, void* buf, uint32_t type) {
 /**
  * Reads one or more sectors from the block device.
  */
+volatile int blk_in_use = 0;
+
 int virtio_blk_read_sector(uint64_t sector, void* buf, uint32_t count) {
-    uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
+    uint64_t flags;
+    while (1) {
+        flags = spinlock_acquire_irqsave(&blk_request_lock);
+        if (!blk_in_use) {
+            blk_in_use = 1;
+            spinlock_release_irqrestore(&blk_request_lock, flags);
+            break;
+        }
+        spinlock_release_irqrestore(&blk_request_lock, flags);
+        safe_wfi();
+    }
+
+    int res = 0;
     for (uint32_t i = 0; i < count; i++) {
         if (virtio_blk_do_op(sector + i, (uint8_t*)buf + (i * 512), VIRTIO_BLK_T_IN) != 0) {
-            spinlock_release_irqrestore(&blk_request_lock, flags);
-            return -1;
+            res = -1;
+            break;
         }
     }
+
+    flags = spinlock_acquire_irqsave(&blk_request_lock);
+    blk_in_use = 0;
     spinlock_release_irqrestore(&blk_request_lock, flags);
-    return 0;
+    process_wake_all();
+    return res;
 }
 
-/**
- * Writes one or more sectors to the block device.
- */
 int virtio_blk_write_sector(uint64_t sector, const void* buf, uint32_t count) {
-    uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
-    for (uint32_t i = 0; i < count; i++) {
-        // Warning: virtio_blk_do_op incorrectly strips const mathematically, but it's okay for virtio output
-        if (virtio_blk_do_op(sector + i, (void*)((uint8_t*)buf + (i * 512)), VIRTIO_BLK_T_OUT) != 0) {
+    uint64_t flags;
+    while (1) {
+        flags = spinlock_acquire_irqsave(&blk_request_lock);
+        if (!blk_in_use) {
+            blk_in_use = 1;
             spinlock_release_irqrestore(&blk_request_lock, flags);
-            return -1;
+            break;
+        }
+        spinlock_release_irqrestore(&blk_request_lock, flags);
+        safe_wfi();
+    }
+
+    int res = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        if (virtio_blk_do_op(sector + i, (void*)((uint8_t*)buf + (i * 512)), VIRTIO_BLK_T_OUT) != 0) {
+            res = -1;
+            break;
         }
     }
+
+    flags = spinlock_acquire_irqsave(&blk_request_lock);
+    blk_in_use = 0;
     spinlock_release_irqrestore(&blk_request_lock, flags);
-    return 0;
+    process_wake_all();
+    return res;
 }

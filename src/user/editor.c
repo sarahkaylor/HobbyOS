@@ -33,6 +33,14 @@ void redraw() {
         out_buf[o++] = text_buffer[i];
     }
     out_buf[o] = '\0';
+    
+    // Debug print
+    if (text_len > 0) {
+        print("[EDITOR] text: ");
+        print(text_buffer);
+        print("\n");
+    }
+    
     print(out_buf);
     
     if (mode == 1) {

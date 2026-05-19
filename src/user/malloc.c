@@ -30,8 +30,8 @@ void *malloc(size_t size) {
     }
     free_list = (struct block *)heap_ptr;
     
-    // Calculate heap limit: USER_VIRT_BASE + USER_REGION_SIZE - 4MB for stack
-    uintptr_t stack_reserve = 4 * 1024 * 1024;
+    // Calculate heap limit: USER_VIRT_BASE + USER_REGION_SIZE - 256KB for stack
+    uintptr_t stack_reserve = 256 * 1024;
     uintptr_t heap_limit = USER_VIRT_BASE + USER_REGION_SIZE - stack_reserve;
     
     if ((uintptr_t)heap_ptr >= heap_limit) return NULL;

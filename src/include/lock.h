@@ -44,4 +44,17 @@ uint64_t spinlock_acquire_irqsave(spinlock_t *lock);
  */
 void spinlock_release_irqrestore(spinlock_t *lock, uint64_t flags);
 
+/**
+ * Safely executes the Wait For Interrupt (WFI) instruction while ensuring
+ * that interrupts are unmasked during the wait. This prevents deadlocks
+ * when polling inside EL1 syscalls where interrupts are naturally masked.
+ */
+static inline void safe_wfi(void) {
+    uint64_t daif;
+    __asm__ volatile("mrs %0, daif" : "=r"(daif));
+    __asm__ volatile("msr daifclr, #2" ::: "memory");
+    __asm__ volatile("wfi");
+    __asm__ volatile("msr daif, %0" : : "r"(daif) : "memory");
+}
+
 #endif // LOCK_H

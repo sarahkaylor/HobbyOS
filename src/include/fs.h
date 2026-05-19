@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "fat16.h"
 #include "lock.h"
+#include "process.h"
 
 struct socket_pcb;
 
@@ -46,13 +47,13 @@ struct file {
 
 void fs_init(void);
 struct trap_frame;
-int file_open(const char *filename);
-int file_close(int fd);
-int file_read(int fd, void *buf, int size, struct trap_frame *tf);
-int file_write(int fd, const void *buf, int size, struct trap_frame *tf);
-int file_pipe(int fds[2]);
-int file_available(int fd);
-int file_connect(uint32_t ip, uint16_t port, int protocol);
+int file_open(struct process *p, const char *filename);
+int file_close(struct process *p, int fd);
+int file_read(struct process *p, int fd, void *buf, int size, struct trap_frame *tf);
+int file_write(struct process *p, int fd, const void *buf, int size, struct trap_frame *tf);
+int file_pipe(struct process *p, int fds[2]);
+int file_available(struct process *p, int fd);
+int file_connect(struct process *p, uint32_t ip, uint16_t port, int protocol);
 
 // Helpers for process management
 /**

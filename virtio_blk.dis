@@ -1,0 +1,448 @@
+
+obj/virtio_blk.o:	file format elf64-littleaarch64
+
+Disassembly of section .text:
+
+0000000000000000 <virtio_blk_handle_irq>:
+       0: d10083ff     	sub	sp, sp, #0x20
+       4: a9017bfd     	stp	x29, x30, [sp, #0x10]
+       8: 910043fd     	add	x29, sp, #0x10
+       c: 90000000     	adrp	x0, 0x0 <virtio_blk_handle_irq>
+      10: 91000000     	add	x0, x0, #0x0
+      14: 94000000     	bl	0x14 <virtio_blk_handle_irq+0x14>
+      18: f90007e0     	str	x0, [sp, #0x8]
+      1c: 90000008     	adrp	x8, 0x0 <virtio_blk_handle_irq>
+      20: f9400108     	ldr	x8, [x8]
+      24: b50000e8     	cbnz	x8, 0x40 <virtio_blk_handle_irq+0x40>
+      28: 14000001     	b	0x2c <virtio_blk_handle_irq+0x2c>
+      2c: f94007e1     	ldr	x1, [sp, #0x8]
+      30: 90000000     	adrp	x0, 0x0 <virtio_blk_handle_irq>
+      34: 91000000     	add	x0, x0, #0x0
+      38: 94000000     	bl	0x38 <virtio_blk_handle_irq+0x38>
+      3c: 14000010     	b	0x7c <virtio_blk_handle_irq+0x7c>
+      40: 52800c00     	mov	w0, #0x60               // =96
+      44: 94000013     	bl	0x90 <reg_read32>
+      48: b90007e0     	str	w0, [sp, #0x4]
+      4c: b94007e8     	ldr	w8, [sp, #0x4]
+      50: 340000c8     	cbz	w8, 0x68 <virtio_blk_handle_irq+0x68>
+      54: 14000001     	b	0x58 <virtio_blk_handle_irq+0x58>
+      58: b94007e1     	ldr	w1, [sp, #0x4]
+      5c: 52800c80     	mov	w0, #0x64               // =100
+      60: 94000014     	bl	0xb0 <reg_write32>
+      64: 14000001     	b	0x68 <virtio_blk_handle_irq+0x68>
+      68: f94007e1     	ldr	x1, [sp, #0x8]
+      6c: 90000000     	adrp	x0, 0x0 <virtio_blk_handle_irq>
+      70: 91000000     	add	x0, x0, #0x0
+      74: 94000000     	bl	0x74 <virtio_blk_handle_irq+0x74>
+      78: 14000001     	b	0x7c <virtio_blk_handle_irq+0x7c>
+      7c: a9417bfd     	ldp	x29, x30, [sp, #0x10]
+      80: 910083ff     	add	sp, sp, #0x20
+      84: d65f03c0     	ret
+      88: d503201f     	nop
+      8c: d503201f     	nop
+
+0000000000000090 <reg_read32>:
+      90: d10043ff     	sub	sp, sp, #0x10
+      94: b9000fe0     	str	w0, [sp, #0xc]
+      98: 90000008     	adrp	x8, 0x0 <virtio_blk_handle_irq>
+      9c: f9400108     	ldr	x8, [x8]
+      a0: b9400fe9     	ldr	w9, [sp, #0xc]
+      a4: b8696900     	ldr	w0, [x8, x9]
+      a8: 910043ff     	add	sp, sp, #0x10
+      ac: d65f03c0     	ret
+
+00000000000000b0 <reg_write32>:
+      b0: d10043ff     	sub	sp, sp, #0x10
+      b4: b9000fe0     	str	w0, [sp, #0xc]
+      b8: b9000be1     	str	w1, [sp, #0x8]
+      bc: b9400be8     	ldr	w8, [sp, #0x8]
+      c0: 90000009     	adrp	x9, 0x0 <virtio_blk_handle_irq>
+      c4: f9400129     	ldr	x9, [x9]
+      c8: b9400fea     	ldr	w10, [sp, #0xc]
+      cc: b82a6928     	str	w8, [x9, x10]
+      d0: 910043ff     	add	sp, sp, #0x10
+      d4: d65f03c0     	ret
+      d8: d503201f     	nop
+      dc: d503201f     	nop
+
+00000000000000e0 <virtio_blk_init>:
+      e0: d10143ff     	sub	sp, sp, #0x50
+      e4: a9047bfd     	stp	x29, x30, [sp, #0x40]
+      e8: 910103fd     	add	x29, sp, #0x40
+      ec: 90000000     	adrp	x0, 0x0 <virtio_blk_handle_irq>
+      f0: 91000000     	add	x0, x0, #0x0
+      f4: 94000000     	bl	0xf4 <virtio_blk_init+0x14>
+      f8: 90000000     	adrp	x0, 0x0 <virtio_blk_handle_irq>
+      fc: 91000000     	add	x0, x0, #0x0
+     100: 94000000     	bl	0x100 <virtio_blk_init+0x20>
+     104: 2a1f03e8     	mov	w8, wzr
+     108: b81f83a8     	stur	w8, [x29, #-0x8]
+     10c: 14000001     	b	0x110 <virtio_blk_init+0x30>
+     110: b85f83a8     	ldur	w8, [x29, #-0x8]
+     114: 71007d08     	subs	w8, w8, #0x1f
+     118: 5400048c     	b.gt	0x1a8 <virtio_blk_init+0xc8>
+     11c: 14000001     	b	0x120 <virtio_blk_init+0x40>
+     120: b85f83a8     	ldur	w8, [x29, #-0x8]
+     124: 53175909     	lsl	w9, w8, #9
+     128: 52a14008     	mov	w8, #0xa000000          // =167772160
+     12c: 8b29c108     	add	x8, x8, w9, sxtw
+     130: f81f03a8     	stur	x8, [x29, #-0x10]
+     134: f85f03a8     	ldur	x8, [x29, #-0x10]
+     138: b9400108     	ldr	w8, [x8]
+     13c: b81ec3a8     	stur	w8, [x29, #-0x14]
+     140: f85f03a8     	ldur	x8, [x29, #-0x10]
+     144: b9400908     	ldr	w8, [x8, #0x8]
+     148: b81e83a8     	stur	w8, [x29, #-0x18]
+     14c: b85ec3a8     	ldur	w8, [x29, #-0x14]
+     150: 528d2ec9     	mov	w9, #0x6976             // =26998
+     154: 72ae8e49     	movk	w9, #0x7472, lsl #16
+     158: 6b090108     	subs	w8, w8, w9
+     15c: 540001c1     	b.ne	0x194 <virtio_blk_init+0xb4>
+     160: 14000001     	b	0x164 <virtio_blk_init+0x84>
+     164: b85e83a8     	ldur	w8, [x29, #-0x18]
+     168: 71000908     	subs	w8, w8, #0x2
+     16c: 54000141     	b.ne	0x194 <virtio_blk_init+0xb4>
+     170: 14000001     	b	0x174 <virtio_blk_init+0x94>
+     174: f85f03a8     	ldur	x8, [x29, #-0x10]
+     178: 90000009     	adrp	x9, 0x0 <virtio_blk_handle_irq>
+     17c: f9000128     	str	x8, [x9]
+     180: b85f83a8     	ldur	w8, [x29, #-0x8]
+     184: 1100c108     	add	w8, w8, #0x30
+     188: 90000009     	adrp	x9, 0x0 <virtio_blk_handle_irq>
+     18c: b9000128     	str	w8, [x9]
+     190: 14000006     	b	0x1a8 <virtio_blk_init+0xc8>
+     194: 14000001     	b	0x198 <virtio_blk_init+0xb8>
+     198: b85f83a8     	ldur	w8, [x29, #-0x8]
+     19c: 11000508     	add	w8, w8, #0x1
+     1a0: b81f83a8     	stur	w8, [x29, #-0x8]
+     1a4: 17ffffdb     	b	0x110 <virtio_blk_init+0x30>
+     1a8: 90000008     	adrp	x8, 0x0 <virtio_blk_handle_irq>
+     1ac: f9400108     	ldr	x8, [x8]
+     1b0: b50000a8     	cbnz	x8, 0x1c4 <virtio_blk_init+0xe4>
+     1b4: 14000001     	b	0x1b8 <virtio_blk_init+0xd8>
+     1b8: 12800008     	mov	w8, #-0x1               // =-1
+     1bc: b81fc3a8     	stur	w8, [x29, #-0x4]
+     1c0: 14000057     	b	0x31c <virtio_blk_init+0x23c>
+     1c4: 2a1f03e8     	mov	w8, wzr
+     1c8: b90017e8     	str	w8, [sp, #0x14]
+     1cc: b81e43a8     	stur	w8, [x29, #-0x1c]
+     1d0: b85e43a1     	ldur	w1, [x29, #-0x1c]
+     1d4: 52800e00     	mov	w0, #0x70               // =112
+     1d8: b9001be0     	str	w0, [sp, #0x18]
+     1dc: 97ffffb5     	bl	0xb0 <reg_write32>
+     1e0: b9401be0     	ldr	w0, [sp, #0x18]
+     1e4: b85e43a8     	ldur	w8, [x29, #-0x1c]
+     1e8: 32000108     	orr	w8, w8, #0x1
+     1ec: b81e43a8     	stur	w8, [x29, #-0x1c]
+     1f0: b85e43a1     	ldur	w1, [x29, #-0x1c]
+     1f4: 97ffffaf     	bl	0xb0 <reg_write32>
+     1f8: b9401be0     	ldr	w0, [sp, #0x18]
+     1fc: b85e43a8     	ldur	w8, [x29, #-0x1c]
+     200: 321f0108     	orr	w8, w8, #0x2
+     204: b81e43a8     	stur	w8, [x29, #-0x1c]
+     208: b85e43a1     	ldur	w1, [x29, #-0x1c]
+     20c: 97ffffa9     	bl	0xb0 <reg_write32>
+     210: 52800480     	mov	w0, #0x24               // =36
+     214: b9000fe0     	str	w0, [sp, #0xc]
+     218: 52800021     	mov	w1, #0x1                // =1
+     21c: b9000be1     	str	w1, [sp, #0x8]
+     220: 97ffffa4     	bl	0xb0 <reg_write32>
+     224: b9400be1     	ldr	w1, [sp, #0x8]
+     228: 52800400     	mov	w0, #0x20               // =32
+     22c: b90013e0     	str	w0, [sp, #0x10]
+     230: 97ffffa0     	bl	0xb0 <reg_write32>
+     234: b9400fe0     	ldr	w0, [sp, #0xc]
+     238: b94017e1     	ldr	w1, [sp, #0x14]
+     23c: 97ffff9d     	bl	0xb0 <reg_write32>
+     240: b94013e0     	ldr	w0, [sp, #0x10]
+     244: b94017e1     	ldr	w1, [sp, #0x14]
+     248: 97ffff9a     	bl	0xb0 <reg_write32>
+     24c: b9401be0     	ldr	w0, [sp, #0x18]
+     250: b85e43a8     	ldur	w8, [x29, #-0x1c]
+     254: 321d0108     	orr	w8, w8, #0x8
+     258: b81e43a8     	stur	w8, [x29, #-0x1c]
+     25c: b85e43a1     	ldur	w1, [x29, #-0x1c]
+     260: 97ffff94     	bl	0xb0 <reg_write32>
+     264: b9401be0     	ldr	w0, [sp, #0x18]
+     268: 97ffff8a     	bl	0x90 <reg_read32>
+     26c: 371800a0     	tbnz	w0, #0x3, 0x280 <virtio_blk_init+0x1a0>
+     270: 14000001     	b	0x274 <virtio_blk_init+0x194>
+     274: 12800008     	mov	w8, #-0x1               // =-1
+     278: b81fc3a8     	stur	w8, [x29, #-0x4]
+     27c: 14000028     	b	0x31c <virtio_blk_init+0x23c>
+     280: 52800500     	mov	w0, #0x28               // =40
+     284: 52820001     	mov	w1, #0x1000             // =4096
+     288: 97ffff8a     	bl	0xb0 <reg_write32>
+     28c: 52800600     	mov	w0, #0x30               // =48
+     290: 2a1f03e1     	mov	w1, wzr
+     294: 97ffff87     	bl	0xb0 <reg_write32>
+     298: 52800680     	mov	w0, #0x34               // =52
+     29c: 97ffff7d     	bl	0x90 <reg_read32>
+     2a0: b90023e0     	str	w0, [sp, #0x20]
+     2a4: b94023e8     	ldr	w8, [sp, #0x20]
+     2a8: 350000a8     	cbnz	w8, 0x2bc <virtio_blk_init+0x1dc>
+     2ac: 14000001     	b	0x2b0 <virtio_blk_init+0x1d0>
+     2b0: 12800008     	mov	w8, #-0x1               // =-1
+     2b4: b81fc3a8     	stur	w8, [x29, #-0x4]
+     2b8: 14000019     	b	0x31c <virtio_blk_init+0x23c>
+     2bc: 52800700     	mov	w0, #0x38               // =56
+     2c0: 52800101     	mov	w1, #0x8                // =8
+     2c4: 97ffff7b     	bl	0xb0 <reg_write32>
+     2c8: 52800780     	mov	w0, #0x3c               // =60
+     2cc: 52820001     	mov	w1, #0x1000             // =4096
+     2d0: 97ffff78     	bl	0xb0 <reg_write32>
+     2d4: 90000008     	adrp	x8, 0x0 <virtio_blk_handle_irq>
+     2d8: 91000108     	add	x8, x8, #0x0
+     2dc: d34cfd08     	lsr	x8, x8, #12
+     2e0: b9001fe8     	str	w8, [sp, #0x1c]
+     2e4: b9401fe1     	ldr	w1, [sp, #0x1c]
+     2e8: 52800800     	mov	w0, #0x40               // =64
+     2ec: 97ffff71     	bl	0xb0 <reg_write32>
+     2f0: b85e43a8     	ldur	w8, [x29, #-0x1c]
+     2f4: 321e0108     	orr	w8, w8, #0x4
+     2f8: b81e43a8     	stur	w8, [x29, #-0x1c]
+     2fc: b85e43a1     	ldur	w1, [x29, #-0x1c]
+     300: 52800e00     	mov	w0, #0x70               // =112
+     304: 97ffff6b     	bl	0xb0 <reg_write32>
+     308: 90000009     	adrp	x9, 0x0 <virtio_blk_handle_irq>
+     30c: 2a1f03e8     	mov	w8, wzr
+     310: 79000128     	strh	w8, [x9]
+     314: b81fc3a8     	stur	w8, [x29, #-0x4]
+     318: 14000001     	b	0x31c <virtio_blk_init+0x23c>
+     31c: b85fc3a0     	ldur	w0, [x29, #-0x4]
+     320: a9447bfd     	ldp	x29, x30, [sp, #0x40]
+     324: 910143ff     	add	sp, sp, #0x50
+     328: d65f03c0     	ret
+     32c: d503201f     	nop
+
+0000000000000330 <virtio_blk_read_sector>:
+     330: d10103ff     	sub	sp, sp, #0x40
+     334: a9037bfd     	stp	x29, x30, [sp, #0x30]
+     338: 9100c3fd     	add	x29, sp, #0x30
+     33c: f81f03a0     	stur	x0, [x29, #-0x10]
+     340: f9000fe1     	str	x1, [sp, #0x18]
+     344: b90017e2     	str	w2, [sp, #0x14]
+     348: 90000000     	adrp	x0, 0x0 <virtio_blk_handle_irq>
+     34c: 91000000     	add	x0, x0, #0x0
+     350: 94000000     	bl	0x350 <virtio_blk_read_sector+0x20>
+     354: f90007e0     	str	x0, [sp, #0x8]
+     358: 2a1f03e8     	mov	w8, wzr
+     35c: b90007e8     	str	w8, [sp, #0x4]
+     360: 14000001     	b	0x364 <virtio_blk_read_sector+0x34>
+     364: b94007e8     	ldr	w8, [sp, #0x4]
+     368: b94017e9     	ldr	w9, [sp, #0x14]
+     36c: 6b090108     	subs	w8, w8, w9
+     370: 54000362     	b.hs	0x3dc <virtio_blk_read_sector+0xac>
+     374: 14000001     	b	0x378 <virtio_blk_read_sector+0x48>
+     378: f85f03a8     	ldur	x8, [x29, #-0x10]
+     37c: b94007e9     	ldr	w9, [sp, #0x4]
+     380: 2a0903ea     	mov	w10, w9
+     384: 2a0a03e9     	mov	w9, w10
+     388: 8b0a0100     	add	x0, x8, x10
+     38c: f9400fe8     	ldr	x8, [sp, #0x18]
+     390: 53175929     	lsl	w9, w9, #9
+     394: 2a0903e9     	mov	w9, w9
+     398: 8b090101     	add	x1, x8, x9
+     39c: 2a1f03e2     	mov	w2, wzr
+     3a0: 9400001c     	bl	0x410 <virtio_blk_do_op>
+     3a4: 34000120     	cbz	w0, 0x3c8 <virtio_blk_read_sector+0x98>
+     3a8: 14000001     	b	0x3ac <virtio_blk_read_sector+0x7c>
+     3ac: f94007e1     	ldr	x1, [sp, #0x8]
+     3b0: 90000000     	adrp	x0, 0x0 <virtio_blk_handle_irq>
+     3b4: 91000000     	add	x0, x0, #0x0
+     3b8: 94000000     	bl	0x3b8 <virtio_blk_read_sector+0x88>
+     3bc: 12800008     	mov	w8, #-0x1               // =-1
+     3c0: b81fc3a8     	stur	w8, [x29, #-0x4]
+     3c4: 1400000d     	b	0x3f8 <virtio_blk_read_sector+0xc8>
+     3c8: 14000001     	b	0x3cc <virtio_blk_read_sector+0x9c>
+     3cc: b94007e8     	ldr	w8, [sp, #0x4]
+     3d0: 11000508     	add	w8, w8, #0x1
+     3d4: b90007e8     	str	w8, [sp, #0x4]
+     3d8: 17ffffe3     	b	0x364 <virtio_blk_read_sector+0x34>
+     3dc: f94007e1     	ldr	x1, [sp, #0x8]
+     3e0: 90000000     	adrp	x0, 0x0 <virtio_blk_handle_irq>
+     3e4: 91000000     	add	x0, x0, #0x0
+     3e8: 94000000     	bl	0x3e8 <virtio_blk_read_sector+0xb8>
+     3ec: 2a1f03e8     	mov	w8, wzr
+     3f0: b81fc3a8     	stur	w8, [x29, #-0x4]
+     3f4: 14000001     	b	0x3f8 <virtio_blk_read_sector+0xc8>
+     3f8: b85fc3a0     	ldur	w0, [x29, #-0x4]
+     3fc: a9437bfd     	ldp	x29, x30, [sp, #0x30]
+     400: 910103ff     	add	sp, sp, #0x40
+     404: d65f03c0     	ret
+     408: d503201f     	nop
+     40c: d503201f     	nop
+
+0000000000000410 <virtio_blk_do_op>:
+     410: d10143ff     	sub	sp, sp, #0x50
+     414: a9047bfd     	stp	x29, x30, [sp, #0x40]
+     418: 910103fd     	add	x29, sp, #0x40
+     41c: f81f03a0     	stur	x0, [x29, #-0x10]
+     420: f81e83a1     	stur	x1, [x29, #-0x18]
+     424: b81e43a2     	stur	w2, [x29, #-0x1c]
+     428: 90000000     	adrp	x0, 0x0 <virtio_blk_handle_irq>
+     42c: 91000000     	add	x0, x0, #0x0
+     430: 94000000     	bl	0x430 <virtio_blk_do_op+0x20>
+     434: f9000fe0     	str	x0, [sp, #0x18]
+     438: 90000008     	adrp	x8, 0x0 <virtio_blk_handle_irq>
+     43c: f9400108     	ldr	x8, [x8]
+     440: b5000128     	cbnz	x8, 0x464 <virtio_blk_do_op+0x54>
+     444: 14000001     	b	0x448 <virtio_blk_do_op+0x38>
+     448: f9400fe1     	ldr	x1, [sp, #0x18]
+     44c: 90000000     	adrp	x0, 0x0 <virtio_blk_handle_irq>
+     450: 91000000     	add	x0, x0, #0x0
+     454: 94000000     	bl	0x454 <virtio_blk_do_op+0x44>
+     458: 12800008     	mov	w8, #-0x1               // =-1
+     45c: b81fc3a8     	stur	w8, [x29, #-0x4]
+     460: 14000059     	b	0x5c4 <virtio_blk_do_op+0x1b4>
+     464: b85e43a9     	ldur	w9, [x29, #-0x1c]
+     468: 90000008     	adrp	x8, 0x0 <virtio_blk_handle_irq>
+     46c: 91000108     	add	x8, x8, #0x0
+     470: b9000109     	str	w9, [x8]
+     474: 2a1f03e1     	mov	w1, wzr
+     478: b9000501     	str	w1, [x8, #0x4]
+     47c: f85f03a9     	ldur	x9, [x29, #-0x10]
+     480: f9000509     	str	x9, [x8, #0x8]
+     484: 90000009     	adrp	x9, 0x0 <virtio_blk_handle_irq>
+     488: 91000129     	add	x9, x9, #0x0
+     48c: f90007e9     	str	x9, [sp, #0x8]
+     490: f9000128     	str	x8, [x9]
+     494: 52800208     	mov	w8, #0x10               // =16
+     498: b9000928     	str	w8, [x9, #0x8]
+     49c: 5280002a     	mov	w10, #0x1               // =1
+     4a0: 7900192a     	strh	w10, [x9, #0xc]
+     4a4: 79001d2a     	strh	w10, [x9, #0xe]
+     4a8: f85e83a8     	ldur	x8, [x29, #-0x18]
+     4ac: f9000928     	str	x8, [x9, #0x10]
+     4b0: 52804008     	mov	w8, #0x200              // =512
+     4b4: b9001928     	str	w8, [x9, #0x18]
+     4b8: b85e43a8     	ldur	w8, [x29, #-0x1c]
+     4bc: 71000108     	subs	w8, w8, #0x0
+     4c0: 52800068     	mov	w8, #0x3                // =3
+     4c4: 1a9f0508     	csinc	w8, w8, wzr, eq
+     4c8: 79003928     	strh	w8, [x9, #0x1c]
+     4cc: 52800048     	mov	w8, #0x2                // =2
+     4d0: 79003d28     	strh	w8, [x9, #0x1e]
+     4d4: 9000000b     	adrp	x11, 0x0 <virtio_blk_handle_irq>
+     4d8: 9100016b     	add	x11, x11, #0x0
+     4dc: f900112b     	str	x11, [x9, #0x20]
+     4e0: b900292a     	str	w10, [x9, #0x28]
+     4e4: 79005928     	strh	w8, [x9, #0x2c]
+     4e8: 79005d21     	strh	w1, [x9, #0x2e]
+     4ec: 79410528     	ldrh	w8, [x9, #0x82]
+     4f0: 79002fe8     	strh	w8, [sp, #0x16]
+     4f4: 79402fe8     	ldrh	w8, [sp, #0x16]
+     4f8: 12000908     	and	w8, w8, #0x7
+     4fc: 8b284528     	add	x8, x9, w8, uxtw #1
+     500: 79010901     	strh	w1, [x8, #0x84]
+     504: d5033fbf     	dmb	sy
+     508: 79410528     	ldrh	w8, [x9, #0x82]
+     50c: 11000508     	add	w8, w8, #0x1
+     510: 79010528     	strh	w8, [x9, #0x82]
+     514: d5033fbf     	dmb	sy
+     518: 52800a00     	mov	w0, #0x50               // =80
+     51c: 97fffee5     	bl	0xb0 <reg_write32>
+     520: 14000001     	b	0x524 <virtio_blk_do_op+0x114>
+     524: 90000008     	adrp	x8, 0x0 <virtio_blk_handle_irq>
+     528: 79400108     	ldrh	w8, [x8]
+     52c: 90000009     	adrp	x9, 0x0 <virtio_blk_handle_irq>
+     530: 79400129     	ldrh	w9, [x9]
+     534: 6b090108     	subs	w8, w8, w9
+     538: 54000241     	b.ne	0x580 <virtio_blk_do_op+0x170>
+     53c: 14000001     	b	0x540 <virtio_blk_do_op+0x130>
+     540: f9400fe1     	ldr	x1, [sp, #0x18]
+     544: 90000000     	adrp	x0, 0x0 <virtio_blk_handle_irq>
+     548: 91000000     	add	x0, x0, #0x0
+     54c: f90003e0     	str	x0, [sp]
+     550: 94000000     	bl	0x550 <virtio_blk_do_op+0x140>
+     554: 90000000     	adrp	x0, 0x0 <virtio_blk_handle_irq>
+     558: 91000000     	add	x0, x0, #0x0
+     55c: 94000000     	bl	0x55c <virtio_blk_do_op+0x14c>
+     560: 94000000     	bl	0x560 <virtio_blk_do_op+0x150>
+     564: 90000000     	adrp	x0, 0x0 <virtio_blk_handle_irq>
+     568: 91000000     	add	x0, x0, #0x0
+     56c: 94000000     	bl	0x56c <virtio_blk_do_op+0x15c>
+     570: f94003e0     	ldr	x0, [sp]
+     574: 94000000     	bl	0x574 <virtio_blk_do_op+0x164>
+     578: f9000fe0     	str	x0, [sp, #0x18]
+     57c: 17ffffea     	b	0x524 <virtio_blk_do_op+0x114>
+     580: 90000008     	adrp	x8, 0x0 <virtio_blk_handle_irq>
+     584: 79400108     	ldrh	w8, [x8]
+     588: 90000009     	adrp	x9, 0x0 <virtio_blk_handle_irq>
+     58c: 79000128     	strh	w8, [x9]
+     590: d5033fbf     	dmb	sy
+     594: 90000008     	adrp	x8, 0x0 <virtio_blk_handle_irq>
+     598: 39400108     	ldrb	w8, [x8]
+     59c: 71000108     	subs	w8, w8, #0x0
+     5a0: 5a9f03e8     	csetm	w8, ne
+     5a4: b90013e8     	str	w8, [sp, #0x10]
+     5a8: f9400fe1     	ldr	x1, [sp, #0x18]
+     5ac: 90000000     	adrp	x0, 0x0 <virtio_blk_handle_irq>
+     5b0: 91000000     	add	x0, x0, #0x0
+     5b4: 94000000     	bl	0x5b4 <virtio_blk_do_op+0x1a4>
+     5b8: b94013e8     	ldr	w8, [sp, #0x10]
+     5bc: b81fc3a8     	stur	w8, [x29, #-0x4]
+     5c0: 14000001     	b	0x5c4 <virtio_blk_do_op+0x1b4>
+     5c4: b85fc3a0     	ldur	w0, [x29, #-0x4]
+     5c8: a9447bfd     	ldp	x29, x30, [sp, #0x40]
+     5cc: 910143ff     	add	sp, sp, #0x50
+     5d0: d65f03c0     	ret
+     5d4: d503201f     	nop
+     5d8: d503201f     	nop
+     5dc: d503201f     	nop
+
+00000000000005e0 <virtio_blk_write_sector>:
+     5e0: d10103ff     	sub	sp, sp, #0x40
+     5e4: a9037bfd     	stp	x29, x30, [sp, #0x30]
+     5e8: 9100c3fd     	add	x29, sp, #0x30
+     5ec: f81f03a0     	stur	x0, [x29, #-0x10]
+     5f0: f9000fe1     	str	x1, [sp, #0x18]
+     5f4: b90017e2     	str	w2, [sp, #0x14]
+     5f8: 90000000     	adrp	x0, 0x0 <virtio_blk_handle_irq>
+     5fc: 91000000     	add	x0, x0, #0x0
+     600: 94000000     	bl	0x600 <virtio_blk_write_sector+0x20>
+     604: f90007e0     	str	x0, [sp, #0x8]
+     608: 2a1f03e8     	mov	w8, wzr
+     60c: b90007e8     	str	w8, [sp, #0x4]
+     610: 14000001     	b	0x614 <virtio_blk_write_sector+0x34>
+     614: b94007e8     	ldr	w8, [sp, #0x4]
+     618: b94017e9     	ldr	w9, [sp, #0x14]
+     61c: 6b090108     	subs	w8, w8, w9
+     620: 54000362     	b.hs	0x68c <virtio_blk_write_sector+0xac>
+     624: 14000001     	b	0x628 <virtio_blk_write_sector+0x48>
+     628: f85f03a8     	ldur	x8, [x29, #-0x10]
+     62c: b94007e9     	ldr	w9, [sp, #0x4]
+     630: 2a0903ea     	mov	w10, w9
+     634: 2a0a03e9     	mov	w9, w10
+     638: 8b0a0100     	add	x0, x8, x10
+     63c: f9400fe8     	ldr	x8, [sp, #0x18]
+     640: 53175929     	lsl	w9, w9, #9
+     644: 2a0903e9     	mov	w9, w9
+     648: 8b090101     	add	x1, x8, x9
+     64c: 52800022     	mov	w2, #0x1                // =1
+     650: 97ffff70     	bl	0x410 <virtio_blk_do_op>
+     654: 34000120     	cbz	w0, 0x678 <virtio_blk_write_sector+0x98>
+     658: 14000001     	b	0x65c <virtio_blk_write_sector+0x7c>
+     65c: f94007e1     	ldr	x1, [sp, #0x8]
+     660: 90000000     	adrp	x0, 0x0 <virtio_blk_handle_irq>
+     664: 91000000     	add	x0, x0, #0x0
+     668: 94000000     	bl	0x668 <virtio_blk_write_sector+0x88>
+     66c: 12800008     	mov	w8, #-0x1               // =-1
+     670: b81fc3a8     	stur	w8, [x29, #-0x4]
+     674: 1400000d     	b	0x6a8 <virtio_blk_write_sector+0xc8>
+     678: 14000001     	b	0x67c <virtio_blk_write_sector+0x9c>
+     67c: b94007e8     	ldr	w8, [sp, #0x4]
+     680: 11000508     	add	w8, w8, #0x1
+     684: b90007e8     	str	w8, [sp, #0x4]
+     688: 17ffffe3     	b	0x614 <virtio_blk_write_sector+0x34>
+     68c: f94007e1     	ldr	x1, [sp, #0x8]
+     690: 90000000     	adrp	x0, 0x0 <virtio_blk_handle_irq>
+     694: 91000000     	add	x0, x0, #0x0
+     698: 94000000     	bl	0x698 <virtio_blk_write_sector+0xb8>
+     69c: 2a1f03e8     	mov	w8, wzr
+     6a0: b81fc3a8     	stur	w8, [x29, #-0x4]
+     6a4: 14000001     	b	0x6a8 <virtio_blk_write_sector+0xc8>
+     6a8: b85fc3a0     	ldur	w0, [x29, #-0x4]
+     6ac: a9437bfd     	ldp	x29, x30, [sp, #0x30]
+     6b0: 910103ff     	add	sp, sp, #0x40
+     6b4: d65f03c0     	ret

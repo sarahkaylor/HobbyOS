@@ -19,7 +19,27 @@ int num_menu_items = 0;
 int menu_open = 0;
 int menu_x = 0;
 int menu_y = 0;
+const char *menu_items_list[] = {"NETTEST.BIN", "EDITOR.BIN", "TIMEOUT.BIN"};
+const int num_menu_items_const = 3;
 
+static inline long my_syscall(long sysno, long arg0, long arg1, long arg2, long arg3) {
+  register long x8 asm("x8") = sysno;
+  register long x0 asm("x0") = arg0;
+  register long x1 asm("x1") = arg1;
+  register long x2 asm("x2") = arg2;
+  register long x3 asm("x3") = arg3;
+  asm volatile("svc #0"
+               : "=r"(x0)
+               : "r"(x8), "r"(x0), "r"(x1), "r"(x2), "r"(x3)
+               : "memory");
+  return x0;
+}
+
+__attribute__((weak)) void print_console(const char *s) {
+  int len = 0;
+  while (s[len]) len++;
+  my_syscall(1, (long)s, len, 0, 0);
+}
 
 extern struct window windows[MAX_WINDOWS];
 extern int num_windows;
@@ -132,10 +152,10 @@ int main(void) {
 
 #ifdef DESKTOP_TEST_AUTO_LAUNCH
 #endif
+  int needs_redraw = 1;
 
   while (1) {
     int num = get_events(events, 16);
-    int needs_redraw = 0;
 
     for (int i = 0; i < num; i++) {
       struct virtio_input_event *ev = &events[i];
@@ -245,13 +265,13 @@ int main(void) {
                 // Find window to get its stdin_fd
                 for (int w = 0; w < num_windows; w++) {
                   if (windows[w].id == focused_window) {
+                    // print_console("Writing key to child window...\n"); // removed to avoid noise if it works
                     int wr = write(windows[w].stdin_fd, &c, 1);
                     (void)wr; // Ignore error for now
                     break;
                   }
                 }
               }
-              needs_redraw = 1;
             }
           } else if (ev->code >= 103 && ev->code <= 108) {
             char seq[3] = {27, '[', 0};
@@ -338,6 +358,7 @@ int main(void) {
       draw_menu();
       graphics_draw_rect(mouse_x, mouse_y, 4, 4, COLOR(255, 255, 255));
       graphics_flush();
+      needs_redraw = 0;
     } else {
       yield();
     }

@@ -1,0 +1,14 @@
+--- src/kernel/process.c
++++ src/kernel/process.c
+@@ -293,2 +293,4 @@
+ void schedule(struct trap_frame *tf) {
++  // uart_puts("SCHED: enter\n");
+   if (!scheduler_started) return;
+@@ -325,2 +327,3 @@
+       spinlock_release_irqrestore(&proc_lock, flags);
++      // uart_puts("SCHED: switch to ready\n");
+       return;
+@@ -348,2 +351,3 @@
+     spinlock_release_irqrestore(&proc_lock, flags);
++    // uart_puts("SCHED: abandon\n");
+     

@@ -23,6 +23,8 @@ static struct virtio_input_event mock_events[MAX_MOCK_EVENTS];
 static int mock_events_head = 0;
 static int mock_events_tail = 0;
 
+void print_console(const char *s);
+
 void inject_mock_event(uint16_t type, uint16_t code, uint32_t value) {
     int next = (mock_events_head + 1) % MAX_MOCK_EVENTS;
     if (next != mock_events_tail) {
@@ -74,9 +76,9 @@ int char_to_keycode(char c) {
 
 void send_key(char c) {
     int code = char_to_keycode(c);
-    if (code) {
-        inject_mock_event(EV_KEY, code, 1); // Press
-        inject_mock_event(EV_KEY, code, 0); // Release
+    if (code > 0) {
+        inject_mock_event(EV_KEY, code, 1); // press
+        inject_mock_event(EV_KEY, code, 0); // release
     }
 }
 
@@ -104,21 +106,47 @@ void flush_fb(void) {
     // Actually call the real syscall
     syscall(10 /* SYS_FLUSH_FB */, 0, 0, 0, 0);
 
+    print_console("[TEST] flush_fb: test_state=");
+    char buf[16];
+    int st = test_state;
+    if (st == 0) print_console("0");
+    else if (st == 1) print_console("1");
+    else if (st == 2) print_console("2");
+    else if (st == 3) print_console("3");
+    else print_console("other");
+    print_console(" num_windows=");
+    if (num_windows == 0) print_console("0\n");
+    else if (num_windows == 1) print_console("1\n");
+    else print_console("other\n");
+
     if (test_state == 0) {
+        // Right click to open menu
+        inject_mock_event(EV_KEY, 0x111, 1);
+        inject_mock_event(EV_KEY, 0x111, 0);
+        
+        // Move mouse down to hit NETTEST.BIN (index 0 -> y = 384 + 0 * 20 + 10 = 394)
+        inject_mock_event(EV_ABS, ABS_Y, (394 * 0x7FFF) / 768);
+        
+        // Left click to select NETTEST.BIN
+        inject_mock_event(EV_KEY, 0x110, 1);
+        inject_mock_event(EV_KEY, 0x110, 0);
+
         test_state = STATE_WAIT_NETTEST_LAUNCH;
-    } else if (test_state == STATE_WAIT_NETTEST_LAUNCH) {
+    }
+    if (test_state == STATE_WAIT_NETTEST_LAUNCH) {
         if (num_windows == 1) {
             print_console("[TEST] nettest launched.\n");
             test_state = STATE_WAIT_NETTEST_EXIT;
         }
-    } else if (test_state == STATE_WAIT_NETTEST_EXIT) {
+    }
+    if (test_state == STATE_WAIT_NETTEST_EXIT) {
         if (num_windows == 0) {
             print_console("[TEST] nettest exited.\n");
             // Right click to open menu
             inject_mock_event(EV_KEY, 0x111, 1);
             inject_mock_event(EV_KEY, 0x111, 0);
             
-            // Move mouse down by 30px (from 384 to 414) to hit the middle of the 2nd item
+            // Move mouse down to hit EDITOR.BIN (index 1 -> y = 384 + 1 * 20 + 10 = 414)
             inject_mock_event(EV_ABS, ABS_Y, (414 * 0x7FFF) / 768);
             
             // Left click to select EDITOR.BIN
@@ -127,7 +155,8 @@ void flush_fb(void) {
             
             test_state = STATE_WAIT_EDITOR_LAUNCH;
         }
-    } else if (test_state == STATE_WAIT_EDITOR_LAUNCH) {
+    }
+    if (test_state == STATE_WAIT_EDITOR_LAUNCH) {
         if (num_windows == 1) {
             print_console("[TEST] editor launched.\n");
             print_console("[TEST] Injecting 'h' 'e' 'l' 'l' 'o'...\n");
@@ -138,7 +167,8 @@ void flush_fb(void) {
             send_key('o');
             test_state = STATE_CLICK_FILE_MENU;
         }
-    } else if (test_state == STATE_CLICK_FILE_MENU) {
+    }
+    if (test_state == STATE_CLICK_FILE_MENU) {
         int found = 0;
         char *text = windows[0].text;
         for (int i = 0; text[i] != '\0'; i++) {
@@ -153,21 +183,25 @@ void flush_fb(void) {
             inject_mock_event(EV_ABS, ABS_Y, (26 * 0x7FFF) / 768);
             test_state = 100;
         }
-    } else if (test_state == 100) {
+    }
+    if (test_state == 100) {
         inject_mock_event(EV_KEY, 0x110, 1);
         inject_mock_event(EV_KEY, 0x110, 0);
         test_state = 101;
-    } else if (test_state == 101) {
+    }
+    if (test_state == 101) {
         print_console("[TEST] Moving mouse to Save item...\n");
         inject_mock_event(EV_ABS, ABS_X, (20 * 0x7FFF) / 1024);
         inject_mock_event(EV_ABS, ABS_Y, (64 * 0x7FFF) / 768);
         test_state = 102;
-    } else if (test_state == 102) {
+    }
+    if (test_state == 102) {
         print_console("[TEST] Clicking Save item...\n");
         inject_mock_event(EV_KEY, 0x110, 1);
         inject_mock_event(EV_KEY, 0x110, 0);
         test_state = STATE_WAIT_FINISH;
-    } else if (test_state == STATE_WAIT_FINISH) {
+    }
+    if (test_state == STATE_WAIT_FINISH) {
         int found = 0;
         char *text = windows[0].text;
         for (int i = 0; text[i] != '\0'; i++) {
@@ -186,15 +220,6 @@ void flush_fb(void) {
 __attribute__((section(".text._start")))
 void _start(void) {
     print_console("[TEST] Starting editor integration test...\n");
-    
-    // Simulate right click to open menu (mouse starts at center screen)
-    inject_mock_event(EV_KEY, 0x111, 1);
-    inject_mock_event(EV_KEY, 0x111, 0);
-    
-    // Simulate left click immediately at the same position, which will hit the first menu item
-    inject_mock_event(EV_KEY, 0x110, 1);
-    inject_mock_event(EV_KEY, 0x110, 0);
-    
     desktop_main();
     exit(0);
 }

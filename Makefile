@@ -15,7 +15,7 @@ endif
 
 # Use --target=aarch64-none-elf to instruct clang to build for an AArch64 bare-metal target.
 # -ffreestanding confirms that we don't have a standard library underneath us.
-CFLAGS = -Wall -Wextra -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
+CFLAGS = -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
 ifeq ($(MODE),test)
 CFLAGS += -DKERNEL_MODE_TEST
 else ifeq ($(MODE),unit_tests)
@@ -46,7 +46,7 @@ C_OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(C_SRCS))
 ASM_OBJS = $(patsubst $(SRC_DIR)/%.s, $(OBJ_DIR)/%.o, $(ASM_SRCS))
 OBJS = $(ASM_OBJS) $(C_OBJS)
 
-USER_CFLAGS += -Wall -Wextra -Isrc/user_include -Isrc/user_include/graphics -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
+USER_CFLAGS += -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
 USER_LIBC = src/user/libc.c
 MEM_TEST_BIN = memtest.bin
 FILE_IO_BIN = fileio_test.bin
@@ -274,7 +274,7 @@ desktop_test:
 
 # --- Host Compatibility Build Targets ---
 HOST_CC = clang
-HOST_CFLAGS = -Wall -Wextra -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST
+HOST_CFLAGS = -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST
 
 obj/host_%.o: src/host/%.c
 	@mkdir -p obj

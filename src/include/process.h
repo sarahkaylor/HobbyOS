@@ -5,7 +5,7 @@
 #include "trap.h"
 #include <stdint.h>
 
-#define MAX_PROCESSES 32 // Maximum number of concurrent processes
+#define MAX_PROCESSES 64 // Maximum number of concurrent processes
 #define MAX_CPUS 4       // Maximum number of CPU cores supported
 
 // Process states for lifecycle management
@@ -15,6 +15,7 @@
 #define PROC_STATE_RUNNING 3   // Process is currently executing on a CPU
 #define PROC_STATE_EXITED 4    // Process has finished execution
 #define PROC_STATE_BLOCKED 5   // Process is waiting for an event
+#define PROC_STATE_WAIT_SPAWN 6 // Process is waiting for a spawn to complete
 
 // Kernel memory region (0GB to 1GB)
 #define KERNEL_START 0x00000000
@@ -28,9 +29,9 @@
 #define PAGE_SIZE 0x1000
 
 // Size of the user memory region allocated per process (16MB)
-#define USER_REGION_SIZE 0x1000000
+#define USER_REGION_SIZE 0x200000
 
-// Number of 4KB pages in a 64MB user region
+// Number of 4KB pages in a 2MB user region
 #define PAGES_PER_REGION ((USER_REGION_SIZE) / (PAGE_SIZE))
 
 // Virtual address base where every user process starts its execution
@@ -60,6 +61,7 @@ struct process {
   int pid;        /**< Unique Process ID */
   int state;      /**< Current execution state (PROC_STATE_*) */
   int parent_pid; /**< PID of the process that created this one */
+  int is_kernel_process; /**< Flag indicating if this is a kernel-only thread */
   char name[32];  /**< Name of the binary running in this process */
 
   /**
@@ -95,6 +97,12 @@ void process_init(void);
 // Returns the new PID or -1 on failure.
 int process_create(void);
 
+// Free a previously created process.
+void process_free(int pid);
+
+// Create a kernel thread running in EL1t.
+int process_create_kernel(void (*entry)(void*), void *arg);
+
 // Fork the current process to create a child process.
 // Returns child PID to parent, 0 to child.
 // tf: The trap frame containing the parent's CPU state.
@@ -102,7 +110,7 @@ int process_fork(struct trap_frame *tf);
 
 // Perform a round-robin context switch.
 // tf: The trap frame of the interrupted process to be saved.
-void schedule(struct trap_frame *tf);
+void schedule(struct trap_frame *tf, int is_yield);
 
 // Mark the current process as EXITED and cleanup resources.
 // tf: The trap frame of the process calling exit.
@@ -126,6 +134,9 @@ void process_sleep(void);
 
 // Wake up a specific process.
 void process_wakeup(int pid);
+
+// Wake up all kernel threads that are in the BLOCKED state.
+void process_wake_all(void);
 
 // Get the PCB for a specific PID.
 struct process *process_get_pcb(int pid);

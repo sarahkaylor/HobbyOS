@@ -70,8 +70,14 @@ int pipe_alloc(struct file **f0, struct file **f1) {
  */
 void pipe_reopen(struct pipe *p, int end) {
     uint64_t flags = spinlock_acquire_irqsave(&p->lock);
-    if (end == 0) p->reader_count++;
-    else p->writer_count++;
+    if (end == 0) {
+        p->reader_count++;
+    } else {
+        p->writer_count++;
+        uart_puts("pipe_reopen: writer_count is now ");
+        print_int(p->writer_count);
+        uart_puts("\n");
+    }
     spinlock_release_irqrestore(&p->lock, flags);
 }
 
@@ -93,6 +99,9 @@ void pipe_close(struct pipe *p, int end) {
         }
     } else {
         if (p->writer_count > 0) p->writer_count--;
+        uart_puts("pipe_close: writer_count is now ");
+        print_int(p->writer_count);
+        uart_puts("\n");
         if (p->writer_count == 0) {
             // Wake up readers (they will get 0 on read)
             for (int i = 0; i < 32; i++) {

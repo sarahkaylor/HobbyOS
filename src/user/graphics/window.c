@@ -64,22 +64,24 @@ static void update_layout(void) {
 int wm_create_window(uint32_t bg_color, int pid, int stdout_fd, int stdin_fd) {
     if (num_windows >= MAX_WINDOWS) return -1;
     
-    int id = num_windows;
-    windows[id].id = id;
-    windows[id].bg_color = bg_color;
-    windows[id].border_color = COLOR(50, 50, 50); // Inactive border
-    windows[id].text_len = 0;
-    windows[id].text[0] = '\0';
-    windows[id].pid = pid;
-    windows[id].stdout_fd = stdout_fd;
-    windows[id].stdin_fd = stdin_fd;
-    windows[id].num_menus = 0;
-    windows[id].escape_state = 0;
-    windows[id].escape_len = 0;
+    static int next_id = 0;
+    int idx = num_windows; // Use num_windows for array index
+    int win_id = next_id++;
+    windows[idx].id = win_id;
+    windows[idx].bg_color = bg_color;
+    windows[idx].border_color = COLOR(50, 50, 50); // Inactive border
+    windows[idx].text_len = 0;
+    windows[idx].text[0] = '\0';
+    windows[idx].pid = pid;
+    windows[idx].stdout_fd = stdout_fd;
+    windows[idx].stdin_fd = stdin_fd;
+    windows[idx].num_menus = 0;
+    windows[idx].escape_state = 0;
+    windows[idx].escape_len = 0;
     
     num_windows++;
     update_layout();
-    return id;
+    return win_id;
 }
 
 void wm_draw_windows(int focused_id) {
