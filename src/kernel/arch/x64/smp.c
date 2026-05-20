@@ -7,10 +7,13 @@
 #define LAPIC_ICR_HIGH ((volatile uint32_t*)(LAPIC_BASE + 0x310))
 
 extern uint64_t smp_temp_stack;
+extern uint64_t smp_temp_cpu;
 extern uint8_t __stack_top;
 
 extern void uart_puts(const char* s);
 extern void print_int(int val);
+
+volatile int smp_core_ready = 0;
 
 /**
  * Initializes and powers on secondary CPU cores using standard Local APIC IPIs.
@@ -32,8 +35,10 @@ void smp_init(void) {
     uart_puts("[KERNEL] smp_init: trampoline copied.\n");
     
     for (int i = 1; i < MAX_CPUS; i++) {
+        smp_core_ready = 0;
         // Set stack pointer for the target core: __stack_top - (i * 64KB)
         smp_temp_stack = (uint64_t)&__stack_top - (i * 65536);
+        smp_temp_cpu = i;
 
         uart_puts("[KERNEL] smp_init: Sending INIT IPI to core ");
         print_int(i);
@@ -52,12 +57,20 @@ void smp_init(void) {
         *LAPIC_ICR_HIGH = (i << 24);
         *LAPIC_ICR_LOW = 0x00004607; // Vector 0x07 -> 0x7000
         
-        uart_puts("[KERNEL] smp_init: Waiting after STARTUP IPI...\n");
-        // Wait ~1ms
-        for (volatile int d = 0; d < 500000; d++);
+        uart_puts("[KERNEL] smp_init: Waiting for core to acknowledge...\n");
+        // Wait until the secondary core has safely booted and copied parameters
+        volatile int timeout = 50000000;
+        while (!smp_core_ready && timeout > 0) {
+            timeout--;
+            __asm__ volatile("pause" ::: "memory");
+        }
         
         uart_puts("[KERNEL] Core ");
         print_int(i);
-        uart_puts(" power-on requested via LAPIC.\n");
+        if (smp_core_ready) {
+            uart_puts(" power-on acknowledged.\n");
+        } else {
+            uart_puts(" power-on timeout!\n");
+        }
     }
 }

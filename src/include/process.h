@@ -112,6 +112,9 @@ int process_fork(struct trap_frame *tf);
 // tf: The trap frame of the interrupted process to be saved.
 void schedule(struct trap_frame *tf, int is_yield);
 
+// Save CPU context into a process PCB.
+void save_context(struct process *p, struct trap_frame *tf);
+
 // Mark the current process as EXITED and cleanup resources.
 // tf: The trap frame of the process calling exit.
 void process_exit(struct trap_frame *tf);

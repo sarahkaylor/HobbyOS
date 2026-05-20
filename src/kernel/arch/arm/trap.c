@@ -167,11 +167,12 @@ static void sys_spawn_worker(void *arg) {
     
     struct process *caller = process_get_pcb(args->caller_pid);
     if (caller) {
-        caller->context[0] = child_pid; // return value in x0
-        
         extern spinlock_t proc_lock;
         uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-        caller->state = PROC_STATE_READY;
+        if (caller->state == PROC_STATE_WAIT_SPAWN) {
+            caller->context[0] = child_pid; // return value in x0
+            caller->state = PROC_STATE_READY;
+        }
         spinlock_release_irqrestore(&proc_lock, flags);
     }
     
@@ -205,13 +206,14 @@ static void sys_spawn(struct trap_frame *tf) {
       args->stdout_fd = stdout_fd;
       args->caller_pid = caller->pid;
       
-      extern int process_create_kernel(void (*entry)(void*), void *arg);
-      process_create_kernel(sys_spawn_worker, args);
-      
       extern spinlock_t proc_lock;
       uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+      save_context(caller, tf);
       caller->state = PROC_STATE_WAIT_SPAWN;
       spinlock_release_irqrestore(&proc_lock, flags);
+      
+      extern int process_create_kernel(void (*entry)(void*), void *arg);
+      process_create_kernel(sys_spawn_worker, args);
       
       schedule(tf, 0);
   } else {

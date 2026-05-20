@@ -5,17 +5,218 @@
 
 #ifdef __x86_64__
 
+extern void uart_puts(const char *s);
+extern void uart_print_hex(uint64_t val);
+
+#define EVENT_RING_SIZE 256
+static struct virtio_input_event event_ring[EVENT_RING_SIZE];
+static int ring_head = 0;
+static int ring_tail = 0;
 static spinlock_t input_lock;
 
+static inline void outb(uint16_t port, uint8_t val) {
+    __asm__ volatile("outb %0, %1" : : "a"(val), "Nd"(port));
+}
+
+static inline uint8_t inb(uint16_t port) {
+    uint8_t ret;
+    __asm__ volatile("inb %1, %0" : "=a"(ret) : "Nd"(port));
+    return ret;
+}
+
+static void push_event(uint16_t type, uint16_t code, uint32_t value) {
+    int next_head = (ring_head + 1) % EVENT_RING_SIZE;
+    if (next_head != ring_tail) {
+        event_ring[ring_head].type = type;
+        event_ring[ring_head].code = code;
+        event_ring[ring_head].value = value;
+        ring_head = next_head;
+    }
+}
+
+static int kbd_escaped = 0;
+
+static void handle_keyboard_byte(uint8_t data) {
+    if (data == 0xE0) {
+        kbd_escaped = 1;
+        return;
+    }
+    
+    uint16_t code = 0;
+    uint32_t value = 0;
+    
+    if (kbd_escaped) {
+        kbd_escaped = 0;
+        uint8_t base = data & 0x7F;
+        int is_release = (data & 0x80) != 0;
+        
+        if (base == 0x48) code = 103;      // KEY_UP
+        else if (base == 0x4B) code = 105; // KEY_LEFT
+        else if (base == 0x4D) code = 106; // KEY_RIGHT
+        else if (base == 0x50) code = 108; // KEY_DOWN
+        
+        if (code != 0) {
+            value = is_release ? 0 : 1;
+        }
+    } else {
+        int is_release = (data & 0x80) != 0;
+        code = data & 0x7F;
+        value = is_release ? 0 : 1;
+    }
+    
+    if (code != 0) {
+        push_event(EV_KEY, code, value);
+        push_event(EV_SYN, 0, 0);
+    }
+}
+
+static int mouse_cycle = 0;
+static uint8_t mouse_packet[3];
+static int mouse_x = 16384;
+static int mouse_y = 16384;
+static int prev_left = 0;
+static int prev_right = 0;
+
+static void handle_mouse_byte(uint8_t data) {
+    if (mouse_cycle == 0 && !(data & 0x08)) {
+        return;
+    }
+    
+    mouse_packet[mouse_cycle++] = data;
+    
+    if (mouse_cycle == 3) {
+        mouse_cycle = 0;
+        uint8_t flags = mouse_packet[0];
+        int dx = (int)mouse_packet[1];
+        int dy = (int)mouse_packet[2];
+        
+        if (flags & 0x10) dx -= 256;
+        if (flags & 0x20) dy -= 256;
+        
+        mouse_x += dx * 40;
+        mouse_y -= dy * 40;
+        
+        if (mouse_x < 0) mouse_x = 0;
+        if (mouse_x > 32767) mouse_x = 32767;
+        if (mouse_y < 0) mouse_y = 0;
+        if (mouse_y > 32767) mouse_y = 32767;
+        
+        push_event(EV_ABS, ABS_X, mouse_x);
+        push_event(EV_ABS, ABS_Y, mouse_y);
+        
+        int left = (flags & 0x01) != 0;
+        int right = (flags & 0x02) != 0;
+        
+        if (left != prev_left) {
+            push_event(EV_KEY, 0x110, left);
+            prev_left = left;
+        }
+        if (right != prev_right) {
+            push_event(EV_KEY, 0x111, right);
+            prev_right = right;
+        }
+        
+        push_event(EV_SYN, 0, 0);
+    }
+}
+
 void virtio_input_handle_irq(int irq) {
+    (void)irq;
+    uint64_t flags = spinlock_acquire_irqsave(&input_lock);
+    
+    while (1) {
+        uint8_t status = inb(0x64);
+        if (!(status & 1)) {
+            break;
+        }
+        uint8_t data = inb(0x60);
+        if (status & 0x20) {
+            handle_mouse_byte(data);
+        } else {
+            handle_keyboard_byte(data);
+        }
+    }
+    
+    spinlock_release_irqrestore(&input_lock, flags);
 }
 
 int virtio_input_get_events(struct virtio_input_event *buf, int max_events) {
-    return 0;
+    uint64_t flags = spinlock_acquire_irqsave(&input_lock);
+    int count = 0;
+    while (ring_tail != ring_head && count < max_events) {
+        buf[count] = event_ring[ring_tail];
+        ring_tail = (ring_tail + 1) % EVENT_RING_SIZE;
+        count++;
+    }
+    spinlock_release_irqrestore(&input_lock, flags);
+    return count;
+}
+
+static void ps2_wait_write(void) {
+    while (inb(0x64) & 2);
+}
+
+static void ps2_wait_read(void) {
+    while (!(inb(0x64) & 1));
+}
+
+static void ps2_write_cmd(uint8_t cmd) {
+    ps2_wait_write();
+    outb(0x64, cmd);
+}
+
+static void ps2_write_data(uint8_t data) {
+    ps2_wait_write();
+    outb(0x60, data);
+}
+
+static uint8_t ps2_read_data(void) {
+    ps2_wait_read();
+    return inb(0x60);
+}
+
+static void ps2_write_mouse(uint8_t data) {
+    ps2_write_cmd(0xD4);
+    ps2_write_data(data);
+    uint8_t ack = ps2_read_data();
+    (void)ack;
 }
 
 int virtio_input_init(void) {
     spinlock_init(&input_lock);
+    
+    // Enable mouse
+    ps2_write_cmd(0xA8);
+    // Enable keyboard
+    ps2_write_cmd(0xAE);
+    
+    // Read Controller Command Byte
+    ps2_write_cmd(0x20);
+    uint8_t ccb = ps2_read_data();
+    uart_puts("Original CCB: ");
+    uart_print_hex(ccb);
+    uart_puts("\n");
+    
+    // Enable interrupts for keyboard (bit 0) and mouse (bit 1)
+    ccb |= 0x03;
+    // Clear disable flags for keyboard (bit 4) and mouse (bit 5)
+    ccb &= ~0x30;
+    
+    uart_puts("Modified CCB: ");
+    uart_print_hex(ccb);
+    uart_puts("\n");
+    
+    ps2_write_cmd(0x60);
+    ps2_write_data(ccb);
+    
+    // Configure mouse
+    ps2_write_mouse(0xF6); // Set defaults
+    ps2_write_mouse(0xF4); // Enable data reporting
+    
+    extern void gic_enable_interrupt(uint32_t intid);
+    gic_enable_interrupt(33); // Keyboard IRQ 1
+    gic_enable_interrupt(44); // Mouse IRQ 12
+    
     return 0;
 }
 

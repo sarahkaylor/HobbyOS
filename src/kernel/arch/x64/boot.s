@@ -221,6 +221,9 @@ trampoline_lm:
     /* Get our stack pointer from the global variable */
     mov rsp, [smp_temp_stack]
 
+    /* Get our CPU ID from the global variable and pass it as the first argument (rdi) */
+    mov rdi, [smp_temp_cpu]
+
     /* Call secondary_main */
     call secondary_main
 
@@ -261,6 +264,10 @@ gdt_desc:
 
 .global smp_temp_stack
 smp_temp_stack:
+    .quad 0
+
+.global smp_temp_cpu
+smp_temp_cpu:
     .quad 0
 
 .align 4096

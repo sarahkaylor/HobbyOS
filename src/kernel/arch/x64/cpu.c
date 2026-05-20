@@ -40,7 +40,11 @@ uint32_t get_cpuid(void) {
  * Safely executes standard wait for interrupt (sti; hlt) in a thread-safe manner.
  */
 void safe_wfi(void) {
-    __asm__ volatile("sti; hlt" ::: "memory");
+    if (get_cpuid() == 0) {
+        __asm__ volatile("sti; hlt" ::: "memory");
+    } else {
+        __asm__ volatile("sti; pause" ::: "memory");
+    }
 }
 
 /**

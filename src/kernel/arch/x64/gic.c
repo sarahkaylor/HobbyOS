@@ -63,6 +63,21 @@ void gic_enable_interrupt(uint32_t intid) {
         uint8_t mask = inb(0x21);
         mask &= ~(1 << 0);
         outb(0x21, mask);
+    } else if (intid == 33) {
+        // Keyboard (IRQ 1 / Vector 33)
+        uint8_t mask = inb(0x21);
+        mask &= ~(1 << 1);
+        outb(0x21, mask);
+    } else if (intid == 44) {
+        // Mouse (IRQ 12 / Vector 44)
+        // Also ensure IRQ 2 (cascade) is unmasked on Master
+        uint8_t master_mask = inb(0x21);
+        master_mask &= ~(1 << 2);
+        outb(0x21, master_mask);
+        
+        uint8_t slave_mask = inb(0xA1);
+        slave_mask &= ~(1 << 4);
+        outb(0xA1, slave_mask);
     }
 }
 

@@ -110,13 +110,13 @@ void main(void) {
     uart_puts("VirtIO GPU initialization failed!\n");
   }
 
+  gic_init();
+
   if (virtio_input_init() == 0) {
     uart_puts("VirtIO Input devices successfully initialized.\n");
   } else {
     uart_puts("No VirtIO Input devices found.\n");
   }
-
-  gic_init();
 
   // Initialize multitasking and secondary cores early
   process_init();
@@ -205,9 +205,20 @@ void main(void) {
  * Entry point for secondary CPU cores.
  * Sets up core-local MMU, GIC, and timer, then enters the scheduler.
  */
+#ifdef __x86_64__
+void secondary_main(uint32_t cpu) {
+  // Acknowledge to boot core that we have started and read our parameters
+  extern volatile int smp_core_ready;
+  smp_core_ready = 1;
+
+  // 1. Initialize local MMU
+  extern void mmu_init_core_with_id(uint32_t cpu);
+  mmu_init_core_with_id(cpu);
+#else
 void secondary_main(void) {
   // 1. Initialize local MMU
   mmu_init_core();
+#endif
 
   // 2. Initialize local GIC CPU interface
   gic_init_cpu();

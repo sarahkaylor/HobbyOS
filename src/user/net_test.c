@@ -3,7 +3,7 @@
 
 #define IP_PROTO_TCP 6
 
-int main(void) {
+__attribute__((section(".text._start"))) void _start(void) {
     print("User net_test starting...\n");
     
     // Connect to 1.1.1.1 port 80 (HTTP)
@@ -55,5 +55,4 @@ int main(void) {
     // Wait to be shut down or exit properly
     // Let's shut down qemu by returning success
     exit(0);
-    return 0;
 }

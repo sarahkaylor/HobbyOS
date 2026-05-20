@@ -89,15 +89,18 @@ void mmu_init_tables(void) {
 /**
  * Configures the current CPU's CR3 register to point to its specific PML4 table.
  */
-void mmu_init_core(void) {
-    uint32_t cpu = get_cpuid();
+void mmu_init_core_with_id(uint32_t cpu) {
     uint64_t pml4_phys = (uint64_t)&cpu_pml4[cpu];
     
     __asm__ volatile("mov %0, %%cr3" : : "r"(pml4_phys) : "memory");
     
     // Set up core-local GS base for swapgs stack switching
-    extern void trap_init_core(void);
-    trap_init_core();
+    extern void trap_init_core_with_id(uint32_t cpu);
+    trap_init_core_with_id(cpu);
+}
+
+void mmu_init_core(void) {
+    mmu_init_core_with_id(get_cpuid());
 }
 
 /**

@@ -191,10 +191,12 @@ static void sys_spawn_worker(void *arg) {
     print_int(args->caller_pid);
     uart_puts("\n");
     if (caller) {
-        caller->context[0] = child_pid; // return value in rax / x0
         extern spinlock_t proc_lock;
         uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-        caller->state = PROC_STATE_READY;
+        if (caller->state == PROC_STATE_WAIT_SPAWN) {
+            caller->context[0] = child_pid; // return value in rax / x0
+            caller->state = PROC_STATE_READY;
+        }
         spinlock_release_irqrestore(&proc_lock, flags);
     }
     kernel_exit();
@@ -224,13 +226,14 @@ static void sys_spawn(struct trap_frame *tf) {
       args->stdout_fd = stdout_fd;
       args->caller_pid = caller->pid;
       
-      extern int process_create_kernel(void (*entry)(void*), void *arg);
-      process_create_kernel(sys_spawn_worker, args);
-      
       extern spinlock_t proc_lock;
       uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+      save_context(caller, tf);
       caller->state = PROC_STATE_WAIT_SPAWN;
       spinlock_release_irqrestore(&proc_lock, flags);
+      
+      extern int process_create_kernel(void (*entry)(void*), void *arg);
+      process_create_kernel(sys_spawn_worker, args);
       
       schedule(tf, 0);
   } else {
@@ -288,16 +291,10 @@ static void sys_get_cpuid(struct trap_frame *tf) {
   tf->regs[0] = (uint64_t)get_cpuid();
 }
 
-extern int file_available(struct process *caller, int fd);
 static void sys_available(struct trap_frame *tf) {
   int fd = (int)tf->regs[5]; // rdi
   struct process *caller = current_process();
   int ret = file_available(caller, fd);
-  uart_puts("[KERNEL Debug] sys_available: fd=");
-  print_int(fd);
-  uart_puts(", ret=");
-  print_int(ret);
-  uart_puts("\n");
   tf->regs[0] = ret;
 }
 
@@ -380,11 +377,16 @@ void general_interrupt_handler(struct trap_frame *tf) {
         timer_reload();
         
         struct process *cur = current_process();
-        if (cur) {
+        if (cur && (cur->is_kernel_process || (tf->cs & 3) == 3)) {
             gic_end_interrupt(intid);
             schedule(tf, 0);
             return;
         }
+        gic_end_interrupt(intid);
+    } else if (tf->vector == 33 || tf->vector == 44) {
+        uint32_t intid = gic_acknowledge_interrupt();
+        extern void virtio_input_handle_irq(int irq);
+        virtio_input_handle_irq(intid);
         gic_end_interrupt(intid);
     } else if (tf->vector == 0x80) {
         // Syscall software interrupt / instruction trap
@@ -395,7 +397,7 @@ void general_interrupt_handler(struct trap_frame *tf) {
     } else if (tf->vector < 32) {
         // Exception
         struct process *cur = current_process();
-        if (cur && !cur->is_kernel_process) {
+        if (cur && !cur->is_kernel_process && (tf->cs & 3) == 3) {
             uart_puts("[KERNEL] User process fault! Vector: ");
             print_int(tf->vector);
             uart_puts(" RIP: ");
@@ -461,8 +463,7 @@ struct tss_entry {
 struct tss_entry tss_entries[MAX_CPUS];
 extern uint64_t gdt_start[];
 
-void tss_init_core(void) {
-    uint32_t cpu = get_cpuid();
+void tss_init_core_with_id(uint32_t cpu) {
     if (cpu >= MAX_CPUS) return;
     
     // Clear the TSS entry
@@ -472,7 +473,7 @@ void tss_init_core(void) {
     
     // Set RSP0 to the kernel stack for this CPU
     extern uint64_t __stack_top;
-    uint64_t kstack = (uint64_t)&__stack_top - (cpu * 64 * 1024);
+    uint64_t kstack = (uint64_t)&__stack_top - (cpu * 64 * 1024) - 4096;
     tss_entries[cpu].rsp0 = kstack;
     tss_entries[cpu].io_map_base = sizeof(struct tss_entry);
     
@@ -503,14 +504,16 @@ void tss_init_core(void) {
     __asm__ volatile("ltr %0" : : "r"(selector));
 }
 
+void tss_init_core(void) {
+    tss_init_core_with_id(get_cpuid());
+}
+
 void syscall_init(void);
 
-void trap_init_core(void) {
-    uint32_t cpu = get_cpuid();
-    
+void trap_init_core_with_id(uint32_t cpu) {
     // Set up kernel stack for swapgs
     extern uint64_t __stack_top;
-    cpu_locals[cpu].kernel_stack = (uint64_t)&__stack_top - (cpu * 64 * 1024);
+    cpu_locals[cpu].kernel_stack = (uint64_t)&__stack_top - (cpu * 64 * 1024) - 4096;
     cpu_locals[cpu].cpu_id = cpu;
     cpu_locals[cpu].current_proc = 0;
     
@@ -530,10 +533,14 @@ void trap_init_core(void) {
     __asm__ volatile("lidt %0" : : "m"(ptr));
 
     // Initialize TSS for this core
-    tss_init_core();
+    tss_init_core_with_id(cpu);
 
     // Initialize syscall instruction extensions
     syscall_init();
+}
+
+void trap_init_core(void) {
+    trap_init_core_with_id(get_cpuid());
 }
 
 void syscall_init(void) {
@@ -594,6 +601,10 @@ EXCEPTION_NO_ERR(28);EXCEPTION_NO_ERR(29);EXCEPTION_NO_ERR(30);EXCEPTION_NO_ERR(
 
 // PIT timer
 EXCEPTION_NO_ERR(32);
+// Keyboard
+EXCEPTION_NO_ERR(33);
+// Mouse
+EXCEPTION_NO_ERR(44);
 // Yield
 EXCEPTION_NO_ERR(129); // 0x81
 
@@ -662,9 +673,15 @@ __asm__(
 "    mov qword ptr [rsp + 232], 0\n"
 "    mov qword ptr [rsp + 240], 0\n" /* lr */
 "    \n"
-"    /* Save User RSP to user_sp_temp */\n"
+"    /* Save User RSP to user_sp_temp only if coming from user mode (CS bottom 2 bits are 3) */\n"
+"    mov rax, [rsp + 288]\n"
+"    and rax, 3\n"
+"    cmp rax, 3\n"
+"    jne 1f\n"
 "    mov rax, [rsp + 304]\n"
 "    mov gs:[24], rax\n"
+"    call save_user_sp_helper\n"
+"1:\n"
 "    \n"
 "    /* Rearrange fields in trap_frame */\n"
 "    /* 1. RIP ([rsp + 280]) -> elr ([rsp + 248]) */\n"
@@ -683,13 +700,17 @@ __asm__(
 "    mov rax, [rsp + 312]\n"
 "    mov [rsp + 288], rax\n"
 "    \n"
-"    call save_user_sp_helper\n"
-"    \n"
 "    /* Call C Handler */\n"
 "    mov rdi, rsp\n"
 "    call general_interrupt_handler\n"
 "    \n"
+"    /* Restore user_sp only if we are returning to user mode */\n"
+"    mov rax, [rsp + 280]\n"
+"    and rax, 3\n"
+"    cmp rax, 3\n"
+"    jne 2f\n"
 "    call restore_user_sp_helper\n"
+"2:\n"
 "    \n"
 ".global common_trap_exit\n"
 "common_trap_exit:\n"
@@ -713,9 +734,14 @@ __asm__(
 "    mov rax, [rsp + 288]\n"
 "    mov [rsp + 312], rax\n"
 "    \n"
-"    /* 2. RSP (user_sp_temp) -> [rsp + 304] */\n"
+"    /* 2. RSP (user_sp_temp) -> [rsp + 304] only if returning to user mode */\n"
+"    mov rax, [rsp + 280]\n"
+"    and rax, 3\n"
+"    cmp rax, 3\n"
+"    jne 3f\n"
 "    mov rax, gs:[24]\n"
 "    mov [rsp + 304], rax\n"
+"3:\n"
 "    \n"
 "    /* 3. RFLAGS ([rsp + 256]) -> [rsp + 296] */\n"
 "    mov rax, [rsp + 256]\n"
@@ -784,6 +810,12 @@ void trap_init(void) {
     
     // Register PIT timer on vector 32
     idt_set_gate(32, (uint64_t)exception_32, 0x08, 0x8E);
+    
+    // Register Keyboard on vector 33
+    idt_set_gate(33, (uint64_t)exception_33, 0x08, 0x8E);
+    
+    // Register Mouse on vector 44
+    idt_set_gate(44, (uint64_t)exception_44, 0x08, 0x8E);
     
     // Register software yield interrupt on vector 0x81 (with Ring 3 permissions 0xEE)
     idt_set_gate(129, (uint64_t)exception_129, 0x08, 0xEE);

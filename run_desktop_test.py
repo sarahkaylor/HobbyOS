@@ -118,5 +118,24 @@ if not os.path.exists(EXPECTED_PPM):
     log(f"[TEST] Expected screenshot '{EXPECTED_PPM}' not found!")
     sys.exit(1)
 
+if not os.path.exists(ACTUAL_PPM):
+    log(f"[TEST] Actual screenshot '{ACTUAL_PPM}' not found!")
+    sys.exit(1)
+
+try:
+    with open(ACTUAL_PPM, "rb") as f:
+        ppm_data = f.read()
+    
+    # Check if there is any non-zero pixel byte after standard PPM headers (first 100 bytes)
+    pixel_data = ppm_data[100:]
+    if not any(pixel_data):
+        log("[TEST] Error: The captured QEMU screenshot is completely black! The desktop did not render.")
+        sys.exit(1)
+    
+    log("[TEST] Screenshot validation passed (non-blank image confirmed)!")
+except Exception as e:
+    log(f"[TEST] Failed to read or parse screen capture: {e}")
+    sys.exit(1)
+
 log("[TEST] OK")
 sys.exit(0)

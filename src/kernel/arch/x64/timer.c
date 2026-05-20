@@ -20,6 +20,10 @@ void timer_init(void) {
     // Send divisor
     outb(0x40, (uint8_t)(divisor & 0xFF));
     outb(0x40, (uint8_t)((divisor >> 8) & 0xFF));
+
+    // Unmask PIT timer interrupt locally
+    extern void gic_enable_interrupt(uint32_t intid);
+    gic_enable_interrupt(30);
 }
 
 /**

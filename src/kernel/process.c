@@ -229,7 +229,7 @@ int process_create_kernel(void (*entry)(void*), void *arg) {
   return pid;
 }
 
-static void save_context(struct process *p, struct trap_frame *tf) {
+void save_context(struct process *p, struct trap_frame *tf) {
   for (int i = 0; i < 30; i++) {
     p->context[i] = tf->regs[i];
   }
@@ -312,9 +312,6 @@ void schedule(struct trap_frame *tf, int is_yield) {
       mmu_switch_user_mapping(proc_table[next].user_phys_base);
       spinlock_release_irqrestore(&proc_lock, flags);
       
-      if (is_yield && next == current_pid) {
-          safe_wfi();
-      }
       
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
       enter_user_space(&local_tf, target_sp);

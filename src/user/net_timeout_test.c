@@ -3,7 +3,7 @@
 
 #define IP_PROTO_TCP 6
 
-int main(void) {
+__attribute__((section(".text._start"))) void _start(void) {
     print("User net_timeout_test starting...\n");
     
     // Connect to 10.0.2.16 port 80
