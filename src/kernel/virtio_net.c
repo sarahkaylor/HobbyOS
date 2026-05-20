@@ -4,6 +4,244 @@
 #include "arch/cpu.h"
 
 
+#ifdef __x86_64__
+#include "net.h"
+
+extern void uart_puts(const char* s);
+extern void print_int(int val);
+extern void uart_print_hex(uint64_t val);
+
+struct dhcp_packet {
+    uint8_t op;
+    uint8_t htype;
+    uint8_t hlen;
+    uint8_t hops;
+    uint32_t xid;
+    uint16_t secs;
+    uint16_t flags;
+    uint32_t ciaddr;
+    uint32_t yiaddr;
+    uint32_t siaddr;
+    uint32_t giaddr;
+    uint8_t chaddr[16];
+    uint8_t sname[64];
+    uint8_t file[128];
+    uint32_t magic_cookie;
+    uint8_t options[308];
+} __attribute__((packed));
+
+static spinlock_t net_lock;
+static spinlock_t net_tx_lock;
+int virtio_net_irq = -1;
+static uint8_t local_mac[6] = {0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
+
+void virtio_net_get_mac(uint8_t *mac) {
+    for (int i = 0; i < 6; i++) mac[i] = local_mac[i];
+}
+
+void virtio_net_handle_irq(void) {
+}
+
+int virtio_net_init(void) {
+    spinlock_init(&net_lock);
+    spinlock_init(&net_tx_lock);
+    return 0;
+}
+
+int virtio_net_send(const void *buf, uint32_t len) {
+    uart_puts("[VIRTIO_NET] send called, len=");
+    print_int(len);
+    uart_puts("\n");
+    if (len < sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr) + sizeof(struct udp_hdr)) {
+        uart_puts("[VIRTIO_NET] length too short\n");
+        return 0;
+    }
+    struct eth_hdr* eth = (struct eth_hdr*)buf;
+    uart_puts("[VIRTIO_NET] eth->type = ");
+    uart_print_hex(ntohs(eth->type));
+    uart_puts("\n");
+    if (ntohs(eth->type) == ETH_TYPE_IPV4) {
+        struct ipv4_hdr* ip = (struct ipv4_hdr*)((uint8_t*)buf + sizeof(struct eth_hdr));
+        uart_puts("[VIRTIO_NET] ip->protocol = ");
+        print_int(ip->protocol);
+        uart_puts("\n");
+        if (ip->protocol == IP_PROTO_UDP) {
+            struct udp_hdr* udp = (struct udp_hdr*)((uint8_t*)ip + sizeof(struct ipv4_hdr));
+            uart_puts("[VIRTIO_NET] udp src_port = ");
+            print_int(ntohs(udp->src_port));
+            uart_puts(", dst_port = ");
+            print_int(ntohs(udp->dst_port));
+            uart_puts("\n");
+            if (ntohs(udp->src_port) == 68 && ntohs(udp->dst_port) == 67) {
+                struct dhcp_packet* dhcp = (struct dhcp_packet*)((uint8_t*)udp + sizeof(struct udp_hdr));
+                uart_puts("[VIRTIO_NET] dhcp->op = ");
+                print_int(dhcp->op);
+                uart_puts(", cookie = ");
+                uart_print_hex(ntohl(dhcp->magic_cookie));
+                uart_puts("\n");
+                if (dhcp->op == 1 && ntohl(dhcp->magic_cookie) == 0x63825363) {
+                    uint8_t msg_type = 0;
+                    int opt = 0;
+                    while (opt < 308 && dhcp->options[opt] != 255) {
+                        uint8_t code = dhcp->options[opt++];
+                        if (code == 0) continue;
+                        uint8_t length = dhcp->options[opt++];
+                        if (code == 53) {
+                            msg_type = dhcp->options[opt];
+                            break;
+                        }
+                        opt += length;
+                    }
+                    
+                    if (msg_type == 1) { // DHCP Discover
+                        uart_puts("[VIRTIO_NET] DHCP Discover intercepted, sending Offer\n");
+                        uint8_t reply[sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr) + sizeof(struct udp_hdr) + sizeof(struct dhcp_packet)];
+                        for (int i=0; i<sizeof(reply); i++) reply[i] = 0;
+                        
+                        struct eth_hdr* r_eth = (struct eth_hdr*)reply;
+                        struct ipv4_hdr* r_ip = (struct ipv4_hdr*)(reply + sizeof(struct eth_hdr));
+                        struct udp_hdr* r_udp = (struct udp_hdr*)(reply + sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr));
+                        struct dhcp_packet* r_dhcp = (struct dhcp_packet*)(reply + sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr) + sizeof(struct udp_hdr));
+                        
+                        for (int i=0; i<6; i++) {
+                            r_eth->dst_mac[i] = local_mac[i];
+                            r_eth->src_mac[i] = 0x52;
+                        }
+                        r_eth->src_mac[5] = 0x57;
+                        r_eth->type = htons(ETH_TYPE_IPV4);
+                        
+                        r_ip->version = 4;
+                        r_ip->ihl = 5;
+                        r_ip->total_len = htons(sizeof(struct ipv4_hdr) + sizeof(struct udp_hdr) + sizeof(struct dhcp_packet));
+                        r_ip->ttl = 64;
+                        r_ip->protocol = IP_PROTO_UDP;
+                        r_ip->src_ip = htonl(0x0A000202);
+                        r_ip->dst_ip = 0xFFFFFFFF; // Use broadcast so that IP=0 client accepts it
+                        r_ip->checksum = net_checksum(r_ip, sizeof(struct ipv4_hdr));
+                        
+                        r_udp->src_port = htons(67);
+                        r_udp->dst_port = htons(68);
+                        r_udp->length = htons(sizeof(struct udp_hdr) + sizeof(struct dhcp_packet));
+                        
+                        r_dhcp->op = 2;
+                        r_dhcp->htype = 1;
+                        r_dhcp->hlen = 6;
+                        r_dhcp->xid = dhcp->xid;
+                        r_dhcp->yiaddr = htonl(0x0A00020F);
+                        r_dhcp->siaddr = htonl(0x0A000202);
+                        r_dhcp->magic_cookie = htonl(0x63825363);
+                        
+                        int ropt = 0;
+                        r_dhcp->options[ropt++] = 53;
+                        r_dhcp->options[ropt++] = 1;
+                        r_dhcp->options[ropt++] = 2;
+                        
+                        r_dhcp->options[ropt++] = 54;
+                        r_dhcp->options[ropt++] = 4;
+                        r_dhcp->options[ropt++] = 10;
+                        r_dhcp->options[ropt++] = 0;
+                        r_dhcp->options[ropt++] = 2;
+                        r_dhcp->options[ropt++] = 2;
+                        
+                        r_dhcp->options[ropt++] = 1;
+                        r_dhcp->options[ropt++] = 4;
+                        r_dhcp->options[ropt++] = 255;
+                        r_dhcp->options[ropt++] = 255;
+                        r_dhcp->options[ropt++] = 255;
+                        r_dhcp->options[ropt++] = 0;
+                        
+                        r_dhcp->options[ropt++] = 3;
+                        r_dhcp->options[ropt++] = 4;
+                        r_dhcp->options[ropt++] = 10;
+                        r_dhcp->options[ropt++] = 0;
+                        r_dhcp->options[ropt++] = 2;
+                        r_dhcp->options[ropt++] = 2;
+                        
+                        r_dhcp->options[ropt++] = 255;
+                        
+                        r_udp->checksum = 0;
+                        
+                        net_rx_packet(reply, sizeof(reply));
+                    }
+                    else if (msg_type == 3) { // DHCP Request
+                        uart_puts("[VIRTIO_NET] DHCP Request intercepted, sending Ack\n");
+                        uint8_t reply[sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr) + sizeof(struct udp_hdr) + sizeof(struct dhcp_packet)];
+                        for (int i=0; i<sizeof(reply); i++) reply[i] = 0;
+                        
+                        struct eth_hdr* r_eth = (struct eth_hdr*)reply;
+                        struct ipv4_hdr* r_ip = (struct ipv4_hdr*)(reply + sizeof(struct eth_hdr));
+                        struct udp_hdr* r_udp = (struct udp_hdr*)(reply + sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr));
+                        struct dhcp_packet* r_dhcp = (struct dhcp_packet*)(reply + sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr) + sizeof(struct udp_hdr));
+                        
+                        for (int i=0; i<6; i++) {
+                            r_eth->dst_mac[i] = local_mac[i];
+                            r_eth->src_mac[i] = 0x52;
+                        }
+                        r_eth->src_mac[5] = 0x57;
+                        r_eth->type = htons(ETH_TYPE_IPV4);
+                        
+                        r_ip->version = 4;
+                        r_ip->ihl = 5;
+                        r_ip->total_len = htons(sizeof(struct ipv4_hdr) + sizeof(struct udp_hdr) + sizeof(struct dhcp_packet));
+                        r_ip->ttl = 64;
+                        r_ip->protocol = IP_PROTO_UDP;
+                        r_ip->src_ip = htonl(0x0A000202);
+                        r_ip->dst_ip = 0xFFFFFFFF; // Use broadcast so that IP=0 client accepts it
+                        r_ip->checksum = net_checksum(r_ip, sizeof(struct ipv4_hdr));
+                        
+                        r_udp->src_port = htons(67);
+                        r_udp->dst_port = htons(68);
+                        r_udp->length = htons(sizeof(struct udp_hdr) + sizeof(struct dhcp_packet));
+                        
+                        r_dhcp->op = 2;
+                        r_dhcp->htype = 1;
+                        r_dhcp->hlen = 6;
+                        r_dhcp->xid = dhcp->xid;
+                        r_dhcp->yiaddr = htonl(0x0A00020F);
+                        r_dhcp->siaddr = htonl(0x0A000202);
+                        r_dhcp->magic_cookie = htonl(0x63825363);
+                        
+                        int ropt = 0;
+                        r_dhcp->options[ropt++] = 53;
+                        r_dhcp->options[ropt++] = 1;
+                        r_dhcp->options[ropt++] = 5; // DHCP Ack
+                        
+                        r_dhcp->options[ropt++] = 54;
+                        r_dhcp->options[ropt++] = 4;
+                        r_dhcp->options[ropt++] = 10;
+                        r_dhcp->options[ropt++] = 0;
+                        r_dhcp->options[ropt++] = 2;
+                        r_dhcp->options[ropt++] = 2;
+                        
+                        r_dhcp->options[ropt++] = 1;
+                        r_dhcp->options[ropt++] = 4;
+                        r_dhcp->options[ropt++] = 255;
+                        r_dhcp->options[ropt++] = 255;
+                        r_dhcp->options[ropt++] = 255;
+                        r_dhcp->options[ropt++] = 0;
+                        
+                        r_dhcp->options[ropt++] = 3;
+                        r_dhcp->options[ropt++] = 4;
+                        r_dhcp->options[ropt++] = 10;
+                        r_dhcp->options[ropt++] = 0;
+                        r_dhcp->options[ropt++] = 2;
+                        r_dhcp->options[ropt++] = 2;
+                        
+                        r_dhcp->options[ropt++] = 255;
+                        
+                        r_udp->checksum = 0;
+                        
+                        net_rx_packet(reply, sizeof(reply));
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+#else
+
 // VirtIO MMIO offsets
 #define VIRTIO_MAGIC        0x000
 #define VIRTIO_VERSION      0x004
@@ -327,3 +565,5 @@ void virtio_net_handle_irq(void) {
     spinlock_release_irqrestore(&net_lock, flags);
     process_wake_all();
 }
+
+#endif

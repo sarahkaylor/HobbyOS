@@ -3,6 +3,28 @@
 #include "arch/cpu.h"
 
 
+#ifdef __x86_64__
+
+static spinlock_t gpu_lock;
+static uint32_t framebuffer[1024 * 768] __attribute__((aligned(2097152)));
+static uint8_t* gpu_mmio = 0;
+
+int virtio_gpu_init(void) {
+    spinlock_init(&gpu_lock);
+    for (int i = 0; i < 1024 * 768; i++) framebuffer[i] = 0xFF000000;
+    gpu_mmio = (uint8_t*)1;
+    return 0;
+}
+
+void virtio_gpu_flush(void) {
+}
+
+uint32_t* virtio_gpu_get_framebuffer(void) {
+    return framebuffer;
+}
+
+#else
+
 // VirtIO MMIO offsets
 #define VIRTIO_MAGIC        0x000
 #define VIRTIO_VERSION      0x004
@@ -279,3 +301,6 @@ void virtio_gpu_flush(void) {
 uint32_t* virtio_gpu_get_framebuffer(void) {
     return framebuffer;
 }
+
+#endif
+

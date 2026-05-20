@@ -5,6 +5,18 @@
 extern int desktop_main(void);
 
 static long syscall(long num, long a0, long a1, long a2, long a3) {
+#ifdef __x86_64__
+  long ret;
+  register long rdi __asm__("rdi") = a0;
+  register long rsi __asm__("rsi") = a1;
+  register long rdx __asm__("rdx") = a2;
+  register long r10 __asm__("r10") = a3;
+  __asm__ volatile("syscall\n"
+                   : "=a"(ret)
+                   : "a"(num), "r"(rdi), "r"(rsi), "r"(rdx), "r"(r10)
+                   : "rcx", "r11", "memory");
+  return ret;
+#else
   register long x8 __asm__("x8") = num;
   register long x0 __asm__("x0") = a0;
   register long x1 __asm__("x1") = a1;
@@ -15,6 +27,7 @@ static long syscall(long num, long a0, long a1, long a2, long a3) {
                    : "r"(x8), "r"(x1), "r"(x2), "r"(x3)
                    : "memory");
   return x0;
+#endif
 }
 
 // Event queue for get_events

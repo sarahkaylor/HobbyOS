@@ -74,8 +74,27 @@ void process_init(void) {
     }
   }
   for (int i = 0; i < MAX_CPUS; i++) {
-    cpu_current_pids[i] = -1;
+    set_current_process_pid(i, -1);
   }
+}
+
+#ifdef __x86_64__
+struct cpu_local {
+    uint64_t kernel_stack;
+    uint64_t user_rsp;
+    uint64_t temp_rax;
+    uint64_t user_sp_temp;
+    uint64_t cpu_id;
+    struct process *current_proc;
+} __attribute__((packed));
+extern struct cpu_local cpu_locals[];
+#endif
+
+void set_current_process_pid(uint32_t cpu, int pid) {
+  cpu_current_pids[cpu] = pid;
+#ifdef __x86_64__
+  cpu_locals[cpu].current_proc = (pid >= 0 && pid < MAX_PROCESSES) ? &proc_table[pid] : 0;
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +105,11 @@ void process_init(void) {
  * on this CPU.
  */
 struct process *current_process(void) {
+#ifdef __x86_64__
+  struct process *proc;
+  __asm__ volatile("mov %%gs:40, %0" : "=r"(proc));
+  return proc;
+#else
   uint32_t cpu = get_cpuid();
   if (cpu >= MAX_CPUS)
     return 0;
@@ -96,6 +120,7 @@ struct process *current_process(void) {
     return &proc_table[pid];
   }
   return 0;
+#endif
 }
 
 /**
@@ -194,7 +219,11 @@ int process_create_kernel(void (*entry)(void*), void *arg) {
   p->context[31] = (uint64_t)entry;        // ELR (entry point)
   p->context[33] = p->user_phys_base + USER_REGION_SIZE; // SP_EL0 used for EL1t stack
   p->context[32] = 0x04;                   // SPSR = EL1t (Execution Level 1, use SP_EL0)
-  p->context[0] = (uint64_t)arg;           // x0 = argument
+#ifdef __x86_64__
+  p->context[5] = (uint64_t)arg;           // rdi = first argument on x86_64
+#else
+  p->context[0] = (uint64_t)arg;           // x0 = first argument on ARM64
+#endif
   p->state = PROC_STATE_READY;
   
   return pid;
@@ -218,6 +247,19 @@ static void restore_context(struct process *p, struct trap_frame *tf) {
   tf->elr = p->context[31];
   tf->spsr = p->context[32];
   arch_set_user_sp(p->context[33]);
+#ifdef __x86_64__
+  if (p->is_kernel_process) {
+    tf->cs = 0x08;
+    tf->ss = 0x10;
+  } else {
+    tf->cs = 0x1B;
+    tf->ss = 0x23;
+  }
+  // Ensure that user-space always has the Interrupt Flag (IF, 0x200) set in RFLAGS
+  if (!p->is_kernel_process) {
+    tf->spsr |= 0x200;
+  }
+#endif
 }
 
 volatile int scheduler_started = 0;
@@ -259,7 +301,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
     }
 
     if (next >= 0) {
-      cpu_current_pids[cpu] = next;
+      set_current_process_pid(cpu, next);
       proc_table[next].state = PROC_STATE_RUNNING;
       
       struct trap_frame local_tf;
@@ -291,7 +333,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
     }
 
     if (!any_alive) {
-      cpu_current_pids[cpu] = -1;
+      set_current_process_pid(cpu, -1);
       spinlock_release_irqrestore(&proc_lock, flags);
       if (cpu == 0) {
         extern void scheduler_finished(void);
@@ -315,7 +357,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
     // We CANNOT return, because the current process might be BLOCKED.
     // We must abandon this trap frame and return to the base start_scheduler()
     // loop so the CPU can sleep cleanly.
-    cpu_current_pids[cpu] = -1;
+    set_current_process_pid(cpu, -1);
     spinlock_release_irqrestore(&proc_lock, flags);
     
     extern void kernel_thread_exit_jump(void);
@@ -377,7 +419,7 @@ void kernel_exit(void) {
   if (cur) {
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     cur->state = PROC_STATE_FREE;
-    cpu_current_pids[get_cpuid()] = -1;
+    set_current_process_pid(get_cpuid(), -1);
     spinlock_release_irqrestore(&proc_lock, flags);
   }
   
@@ -568,7 +610,7 @@ void start_scheduler(void) {
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     for (int i = 0; i < MAX_PROCESSES; i++) {
       if (proc_table[i].state == PROC_STATE_READY) {
-        cpu_current_pids[cpu] = i;
+        set_current_process_pid(cpu, i);
         proc_table[i].state = PROC_STATE_RUNNING;
         mmu_switch_user_mapping(proc_table[i].user_phys_base);
 

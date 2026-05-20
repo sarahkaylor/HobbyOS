@@ -1,10 +1,14 @@
+# Default architecture
+ARCH ?= arm
+
 # Compiler and flags
 CC = /opt/homebrew/opt/llvm/bin/clang
-QEMU = /opt/homebrew/bin/qemu-system-aarch64
+LD = /opt/homebrew/bin/ld.lld
+OBJCOPY = /opt/homebrew/opt/llvm/bin/llvm-objcopy
 
 # Mode selection (desktop or test)
 MODE ?= desktop
-OBJ_DIR = obj
+OBJ_DIR = obj/$(ARCH)
 MODE_FILE = $(OBJ_DIR)/.mode
 
 # Determine if the mode has changed and update the tracker file
@@ -13,32 +17,43 @@ ifneq ($(CURRENT_MODE),$(MODE))
 $(shell mkdir -p $(OBJ_DIR) && echo $(MODE) > $(MODE_FILE))
 endif
 
-# Use --target=aarch64-none-elf to instruct clang to build for an AArch64 bare-metal target.
-# -ffreestanding confirms that we don't have a standard library underneath us.
-CFLAGS = -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
-ifeq ($(MODE),test)
-CFLAGS += -DKERNEL_MODE_TEST
-else ifeq ($(MODE),unit_tests)
-CFLAGS += -DKERNEL_MODE_UNIT_TEST
-else ifeq ($(MODE),desktop_test)
-CFLAGS += -DKERNEL_MODE_DESKTOP_TEST
-USER_CFLAGS += -DDESKTOP_TEST_AUTO_LAUNCH
+ifeq ($(ARCH),intel)
+  QEMU = /opt/homebrew/bin/qemu-system-x86_64
+  # Intel/AMD 64-bit compiler flags
+  # Using standard bare-metal flags, disabling red zone and SSE
+  CFLAGS = -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
+  USER_CFLAGS = -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
+  ARCH_DIR = src/kernel/arch/x64
+  LDFLAGS = -T linker_x64.ld
+  # QEMU parameters for x86_64: 4 cores, 4GB RAM, mounting disk.img as IDE
+  QEMU_CMD = $(QEMU) -smp 4 -m 4096M -kernel $(TARGET) -display cocoa -serial stdio -drive file=disk.img,format=raw,if=ide,index=0,media=disk -action shutdown=poweroff $(QEMU_ARGS)
 else
-CFLAGS += -DKERNEL_MODE_DESKTOP
+  # Default to ARM
+  QEMU = /opt/homebrew/bin/qemu-system-aarch64
+  CFLAGS = -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
+  USER_CFLAGS = -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
+  ARCH_DIR = src/kernel/arch/arm
+  LDFLAGS = -T linker.ld
+  # QEMU parameters for ARM: 4 cores, 4GB RAM
+  QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp 4 -m 4096M -kernel $(TARGET) -display cocoa -serial stdio -append "console=ttyAMA0" -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
 endif
 
-# -nostdlib prevents linking against stdlib startup files and libc.
-# -T linker.ld points to our custom linker script.
-# -fuse-ld=lld forces the use of the LLD linker installed alongside Clang.
-LDFLAGS = -fuse-ld=lld -T linker.ld -nostdlib
+ifeq ($(MODE),test)
+  CFLAGS += -DKERNEL_MODE_TEST
+else ifeq ($(MODE),unit_tests)
+  CFLAGS += -DKERNEL_MODE_UNIT_TEST
+else ifeq ($(MODE),desktop_test)
+  CFLAGS += -DKERNEL_MODE_DESKTOP_TEST
+  USER_CFLAGS += -DDESKTOP_TEST_AUTO_LAUNCH
+else
+  CFLAGS += -DKERNEL_MODE_DESKTOP
+endif
 
 # Target and objects
 TARGET = hobbyos.elf
 SRC_DIR = src/kernel
-ARCH_DIR = src/kernel/arch/arm
-OBJ_DIR = obj
 
-# Find all .c and .s files in both src/kernel and src/kernel/arch/arm
+# Find all .c and .s files in both src/kernel and the architecture directory
 C_SRCS = $(wildcard $(SRC_DIR)/*.c) $(wildcard $(ARCH_DIR)/*.c)
 ASM_SRCS = $(wildcard $(SRC_DIR)/*.s) $(wildcard $(ARCH_DIR)/*.s)
 
@@ -49,37 +64,33 @@ ASM_OBJS = $(patsubst $(SRC_DIR)/%.s, $(OBJ_DIR)/%.o, $(wildcard $(SRC_DIR)/*.s)
            $(patsubst $(ARCH_DIR)/%.s, $(OBJ_DIR)/%.o, $(wildcard $(ARCH_DIR)/*.s))
 OBJS = $(ASM_OBJS) $(C_OBJS)
 
-USER_CFLAGS += -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
 USER_LIBC = src/user/libc.c
-MEM_TEST_BIN = memtest.bin
-FILE_IO_BIN = fileio_test.bin
-CONSOLE_TEST_BIN = console_test.bin
-# Target and objects
-# Target and objects
-SPAWN_TEST_BIN = spawntest.bin
-FORK_TEST_BIN = fork_test.bin
-HEAP_TEST_BIN = heap_test.bin
-GRAPHICS_TEST_BIN = graphics.bin
-SMP_TEST_BIN = smp_test.bin
+MEM_TEST_BIN = $(OBJ_DIR)/memtest.bin
+FILE_IO_BIN = $(OBJ_DIR)/fileio_test.bin
+CONSOLE_TEST_BIN = $(OBJ_DIR)/console_test.bin
+SPAWN_TEST_BIN = $(OBJ_DIR)/spawntest.bin
+FORK_TEST_BIN = $(OBJ_DIR)/fork_test.bin
+HEAP_TEST_BIN = $(OBJ_DIR)/heap_test.bin
+GRAPHICS_TEST_BIN = $(OBJ_DIR)/graphics.bin
+SMP_TEST_BIN = $(OBJ_DIR)/smp_test.bin
 
-PIPETEST_BIN = pipetest.bin
-NETTEST_BIN = nettest.bin
-TIMEOUT_BIN = timeout.bin
-DESKTOP_BIN = desktop.bin
-EDITOR_BIN = editor.bin
-EDITOR_T_BIN = EDITOR_T.BIN
+PIPETEST_BIN = $(OBJ_DIR)/pipetest.bin
+NETTEST_BIN = $(OBJ_DIR)/nettest.bin
+TIMEOUT_BIN = $(OBJ_DIR)/timeout.bin
+DESKTOP_BIN = $(OBJ_DIR)/desktop.bin
+EDITOR_BIN = $(OBJ_DIR)/editor.bin
+EDITOR_T_BIN = $(OBJ_DIR)/EDITOR_T.BIN
 
 # Default rule: build the target
 all: $(TARGET)
-
-# Use explicit linker executable rather than via clang
-LD = /opt/homebrew/bin/ld.lld
-LDFLAGS = -T linker.ld
 
 # The final linking step
 # Combine the objects to create the ELF binary
 $(TARGET): $(OBJS)
 	$(LD) $(LDFLAGS) -o $@ $^
+ifeq ($(ARCH),intel)
+	$(OBJCOPY) -I elf64-x86-64 -O elf32-i386 $@
+endif
 
 # Rule to compile .c files into .o files
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c src/include/*.h $(MODE_FILE)
@@ -91,145 +102,144 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.s src/include/*.h
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Rule to compile .c files from arch/arm into .o files
+# Rule to compile .c files from arch into .o files
 $(OBJ_DIR)/%.o: $(ARCH_DIR)/%.c src/include/*.h src/include/arch/*.h $(MODE_FILE)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Rule to compile .s files from arch/arm into .o files
+# Rule to compile .s files from arch into .o files
 $(OBJ_DIR)/%.o: $(ARCH_DIR)/%.s src/include/*.h src/include/arch/*.h
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Rule to compile user objects
-obj/user_%.o: src/user/%.c src/user_include/*.h src/include/*.h
+$(OBJ_DIR)/user_%.o: src/user/%.c src/user_include/*.h src/include/*.h
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-obj/mem_test.o: src/user/mem_test.c $(USER_LIBC)
+$(OBJ_DIR)/mem_test.o: src/user/mem_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR) 
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-obj/file_io_test.o: src/user/file_io_test.c $(USER_LIBC)
+$(OBJ_DIR)/file_io_test.o: src/user/file_io_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR) 
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-obj/console_test.o: src/user/console_test.c $(USER_LIBC)
+$(OBJ_DIR)/console_test.o: src/user/console_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-obj/fork_test.o: src/user/fork_test.c $(USER_LIBC)
+$(OBJ_DIR)/fork_test.o: src/user/fork_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-obj/spawn_test.o: src/user/spawn_test.c $(USER_LIBC)
+$(OBJ_DIR)/spawn_test.o: src/user/spawn_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-obj/heap_test.o: src/user/heap_test.c $(USER_LIBC)
+$(OBJ_DIR)/heap_test.o: src/user/heap_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-obj/graphics_test.o: src/user/graphics_test.c $(USER_LIBC)
+$(OBJ_DIR)/graphics_test.o: src/user/graphics_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-obj/smp_test.o: src/user/smp_test.c $(USER_LIBC)
+$(OBJ_DIR)/smp_test.o: src/user/smp_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-obj/user_pipe_test.o: src/user/pipe_test.c $(USER_LIBC)
+$(OBJ_DIR)/user_pipe_test.o: src/user/pipe_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-obj/user_graphics.o: src/user/graphics/graphics.c
+$(OBJ_DIR)/user_graphics.o: src/user/graphics/graphics.c
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-obj/user_window.o: src/user/graphics/window.c
+$(OBJ_DIR)/user_window.o: src/user/graphics/window.c
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-obj/desktop.o: src/user/desktop.c $(USER_LIBC)
+$(OBJ_DIR)/desktop.o: src/user/desktop.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-obj/editor.o: src/user/editor.c $(USER_LIBC)
+$(OBJ_DIR)/editor.o: src/user/editor.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-obj/user_editor_test.o: src/user/editor_test.c $(USER_LIBC)
+$(OBJ_DIR)/user_editor_test.o: src/user/editor_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-obj/user_net_test.o: src/user/net_test.c $(USER_LIBC)
+$(OBJ_DIR)/user_net_test.o: src/user/net_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-obj/user_desktop_test_wrapper.o: src/user/desktop.c $(USER_LIBC)
+$(OBJ_DIR)/user_desktop_test_wrapper.o: src/user/desktop.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -Dmain=desktop_main -DDESKTOP_TEST_WRAPPER -c $< -o $@
 
-$(MEM_TEST_BIN): obj/mem_test.o obj/user_libc.o obj/user_malloc.o
-	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o memtest.elf $^
-	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary memtest.elf $(MEM_TEST_BIN)
+$(MEM_TEST_BIN): $(OBJ_DIR)/mem_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/memtest.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/memtest.elf $(MEM_TEST_BIN)
 
-$(FILE_IO_BIN): obj/file_io_test.o obj/user_libc.o obj/user_malloc.o
-	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o fileio_test.elf $^
-	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary fileio_test.elf $(FILE_IO_BIN)
+$(FILE_IO_BIN): $(OBJ_DIR)/file_io_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/fileio_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/fileio_test.elf $(FILE_IO_BIN)
 
-$(CONSOLE_TEST_BIN): obj/console_test.o obj/user_libc.o obj/user_malloc.o
-	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o console_test.elf $^
-	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary console_test.elf $(CONSOLE_TEST_BIN)
+$(CONSOLE_TEST_BIN): $(OBJ_DIR)/console_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/console_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/console_test.elf $(CONSOLE_TEST_BIN)
 
-$(FORK_TEST_BIN): obj/fork_test.o obj/user_libc.o obj/user_malloc.o
-	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o fork_test.elf $^
-	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary fork_test.elf $(FORK_TEST_BIN)
+$(FORK_TEST_BIN): $(OBJ_DIR)/fork_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/fork_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/fork_test.elf $(FORK_TEST_BIN)
 
-$(HEAP_TEST_BIN): obj/heap_test.o obj/user_libc.o obj/user_malloc.o
-	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o heap_test.elf $^
-	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary heap_test.elf $(HEAP_TEST_BIN)
+$(HEAP_TEST_BIN): $(OBJ_DIR)/heap_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/heap_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/heap_test.elf $(HEAP_TEST_BIN)
 
-$(SPAWN_TEST_BIN): obj/spawn_test.o obj/user_libc.o obj/user_malloc.o
-	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o spawn_test.elf $^
-	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary spawn_test.elf $(SPAWN_TEST_BIN)
+$(SPAWN_TEST_BIN): $(OBJ_DIR)/spawn_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/spawn_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/spawn_test.elf $(SPAWN_TEST_BIN)
 
-$(GRAPHICS_TEST_BIN): obj/graphics_test.o obj/user_libc.o obj/user_graphics.o
-	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o graphics_test.elf $^
-	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary graphics_test.elf $(GRAPHICS_TEST_BIN)
+$(GRAPHICS_TEST_BIN): $(OBJ_DIR)/graphics_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_graphics.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/graphics_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/graphics_test.elf $(GRAPHICS_TEST_BIN)
 
-$(SMP_TEST_BIN): obj/smp_test.o obj/user_libc.o obj/user_malloc.o
-	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o smp_test.elf $^
-	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary smp_test.elf $(SMP_TEST_BIN)
+$(SMP_TEST_BIN): $(OBJ_DIR)/smp_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/smp_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/smp_test.elf $(SMP_TEST_BIN)
 
-$(PIPETEST_BIN): obj/user_pipe_test.o obj/user_libc.o obj/user_malloc.o
-	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o pipe_test.elf $^
-	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary pipe_test.elf $(PIPETEST_BIN)
+$(PIPETEST_BIN): $(OBJ_DIR)/user_pipe_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/pipe_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/pipe_test.elf $(PIPETEST_BIN)
 
-$(NETTEST_BIN): obj/user_net_test.o obj/user_libc.o obj/user_malloc.o
-	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o net_test.elf $^
-	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary net_test.elf $(NETTEST_BIN)
+$(NETTEST_BIN): $(OBJ_DIR)/user_net_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/net_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/net_test.elf $(NETTEST_BIN)
 
-obj/user_net_timeout_test.o: src/user/net_timeout_test.c $(USER_LIBC)
+$(OBJ_DIR)/user_net_timeout_test.o: src/user/net_timeout_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(TIMEOUT_BIN): obj/user_net_timeout_test.o obj/user_libc.o obj/user_malloc.o
-	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o net_timeout_test.elf $^
-	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary net_timeout_test.elf $(TIMEOUT_BIN)
+$(TIMEOUT_BIN): $(OBJ_DIR)/user_net_timeout_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/net_timeout_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/net_timeout_test.elf $(TIMEOUT_BIN)
 
+$(DESKTOP_BIN): $(OBJ_DIR)/desktop.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/desktop_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/desktop_test.elf $(DESKTOP_BIN)
 
-$(DESKTOP_BIN): obj/desktop.o obj/user_libc.o obj/user_malloc.o obj/user_graphics.o obj/user_window.o
-	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o desktop_test.elf $^
-	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary desktop_test.elf $(DESKTOP_BIN)
+$(EDITOR_BIN): $(OBJ_DIR)/editor.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/editor.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/editor.elf $(EDITOR_BIN)
 
-$(EDITOR_BIN): obj/editor.o obj/user_libc.o obj/user_malloc.o
-	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o editor.elf $^
-	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary editor.elf $(EDITOR_BIN)
-
-$(EDITOR_T_BIN): obj/user_editor_test.o obj/user_desktop_test_wrapper.o obj/user_libc.o obj/user_malloc.o obj/user_graphics.o obj/user_window.o
-	/opt/homebrew/bin/ld.lld -T src/user/linker.ld -o editor_test.elf $^
-	/opt/homebrew/opt/llvm/bin/llvm-objcopy -O binary editor_test.elf $(EDITOR_T_BIN)
+$(EDITOR_T_BIN): $(OBJ_DIR)/user_editor_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/editor_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/editor_test.elf $(EDITOR_T_BIN)
 
 disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN)
 	dd if=/dev/zero of=disk.img bs=1M count=512
@@ -252,16 +262,13 @@ disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TE
 	/opt/homebrew/bin/mcopy -i disk.img TEST.TXT ::/TEST.TXT
 
 # Target to run the OS inside QEMU
-run: hobbyos.elf disk.img
-	qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 4 -m 4096M -kernel hobbyos.elf -display cocoa -serial stdio -append "console=ttyAMA0" -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
-
-# Target to exit QEMU properly
-# Note: Ctrl+A, X exists QEMU nographic mode.
+run: $(TARGET) disk.img
+	$(QEMU_CMD)
 
 # Clean rule to remove build artifacts
 clean:
-	-pkill qemu-system-aarch64
-	rm -rf $(OBJ_DIR) $(TARGET) hobbyos disk.img *.bin *.elf *.log *.BIN *_test_host *.BIN_host
+	-pkill -f qemu-system
+	rm -rf obj $(TARGET) hobbyos disk.img *.bin *.elf *.log *.BIN *_test_host *.BIN_host
 	rm -f actual_qemu.ppm
 
 memtest: $(MEM_TEST_BIN)
@@ -317,4 +324,30 @@ $(EDITOR_TEST_BIN): obj/host_editor_test.o obj/host_user_desktop.o obj/host_user
 host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN)
 	./$(EDITOR_TEST_BIN)
 
-.PHONY: all clean run memtest fileio_test fork_test tests test unit_tests desktop_test host_tests
+# --- Architecture Specific Targets ---
+
+run_arm:
+	$(MAKE) ARCH=arm run
+
+run_intel:
+	$(MAKE) ARCH=intel run
+
+test_arm:
+	$(MAKE) ARCH=arm MODE=test run
+
+test_intel:
+	$(MAKE) ARCH=intel MODE=test run
+
+unit_tests_arm:
+	$(MAKE) ARCH=arm MODE=unit_tests run
+
+unit_tests_intel:
+	$(MAKE) ARCH=intel MODE=unit_tests run
+
+desktop_test_arm:
+	ARCH=arm python3 ./run_desktop_test.py
+
+desktop_test_intel:
+	ARCH=intel python3 ./run_desktop_test.py
+
+.PHONY: all clean run memtest fileio_test fork_test tests test unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel

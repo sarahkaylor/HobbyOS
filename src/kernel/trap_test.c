@@ -11,11 +11,13 @@ extern jmp_buf user_exit_context;
 #define USER_VIRT_BASE 0x44000000
 #define USER_REGION_SIZE 0x1000000
 
+#ifndef __x86_64__
 void *memset(void *s, int c, unsigned long n) {
     char *p = s;
     while (n--) *p++ = c;
     return s;
 }
+#endif
 
 extern int cpu_current_pids[];
 extern uint32_t get_cpuid(void);
@@ -24,17 +26,22 @@ static int setup_mock_process(void) {
     process_init();
     int pid = process_create();
     process_get_pcb(pid)->is_kernel_process = 1;
-    cpu_current_pids[get_cpuid()] = pid;
+    set_current_process_pid(get_cpuid(), pid);
     return pid;
 }
 
 static void teardown_mock_process(void) {
-    cpu_current_pids[get_cpuid()] = -1;
+    set_current_process_pid(get_cpuid(), -1);
 }
 
 static void set_esr(uint64_t ec, uint32_t iss) {
+#ifdef __aarch64__
     uint64_t esr = (ec << 26) | iss;
     __asm__ volatile("msr esr_el1, %0" : : "r"(esr));
+#else
+    (void)ec;
+    (void)iss;
+#endif
 }
 
 static void test_trap_unknown_syscall(void) {
@@ -42,7 +49,11 @@ static void test_trap_unknown_syscall(void) {
     uart_puts("  Running test_trap_unknown_syscall...\n");
 
     struct trap_frame tf = {0};
+#ifdef __x86_64__
+    tf.regs[0] = 999; // Unknown
+#else
     tf.regs[8] = 999; // Unknown
+#endif
     set_esr(0x15, 0); // SVC
 
     sync_lower_handler_c(&tf);
@@ -55,13 +66,18 @@ static void test_trap_sys_get_cpuid(void) {
     uart_puts("  Running test_trap_sys_get_cpuid...\n");
 
     struct trap_frame tf = {0};
+#ifdef __x86_64__
+    tf.regs[0] = 11; // SYS_GET_CPUID
+#else
     tf.regs[8] = 11; // SYS_GET_CPUID
+#endif
     set_esr(0x15, 0); // SVC
 
     sync_lower_handler_c(&tf);
 
     EXPECT_EQ(tf.regs[0], 0);
 }
+
 
 static void test_trap_sys_open_invalid_ptr(void) {
     tests_run++;

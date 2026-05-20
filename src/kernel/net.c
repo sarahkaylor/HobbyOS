@@ -111,18 +111,50 @@ static void arp_cache_update(uint32_t ip, const uint8_t* mac) {
     }
 }
 
+void net_arp_request(uint32_t target_ip);
+
 static int arp_resolve(uint32_t ip, uint8_t* mac_out) {
     if (ip == 0xFFFFFFFF) {
         for (int i=0; i<6; i++) mac_out[i] = 0xFF;
         return 1;
     }
+    
+    // Route off-subnet traffic to the gateway
+    if (local_ip != 0 && local_netmask != 0 && local_gateway != 0) {
+        if ((ip & local_netmask) != (local_ip & local_netmask)) {
+            ip = local_gateway;
+        }
+    }
+    
+    // Fast path: check if already in cache
     for (int i = 0; i < ARP_CACHE_SIZE; i++) {
         if (arp_cache[i].valid && arp_cache[i].ip == ip) {
             for (int j=0; j<6; j++) mac_out[j] = arp_cache[i].mac[j];
             return 1;
         }
     }
-    // TODO: Send ARP request and block. For simple stack, we might just fail here if not cached.
+    
+    // Slow path: send ARP request and wait for reply
+    if (local_ip != 0) {
+        for (int retry = 0; retry < 50; retry++) {
+            net_arp_request(ip);
+            
+            // Wait up to 5ms for RX interrupt to process the reply
+            uint64_t start_wait = timer_get_ms();
+            while (timer_get_ms() - start_wait < 5) {
+                safe_wfi();
+            }
+            
+            // Check cache again
+            for (int i = 0; i < ARP_CACHE_SIZE; i++) {
+                if (arp_cache[i].valid && arp_cache[i].ip == ip) {
+                    for (int j=0; j<6; j++) mac_out[j] = arp_cache[i].mac[j];
+                    return 1;
+                }
+            }
+        }
+    }
+    
     return 0;
 }
 

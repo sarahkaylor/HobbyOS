@@ -20,6 +20,20 @@
 #define SYS_YIELD (17)
 #define SYS_CONNECT (18)
 
+#ifdef __x86_64__
+static long syscall(long num, long a0, long a1, long a2, long a3) {
+  long ret;
+  register long rdi __asm__("rdi") = a0;
+  register long rsi __asm__("rsi") = a1;
+  register long rdx __asm__("rdx") = a2;
+  register long r10 __asm__("r10") = a3;
+  __asm__ volatile("syscall\n"
+                   : "=a"(ret)
+                   : "a"(num), "r"(rdi), "r"(rsi), "r"(rdx), "r"(r10)
+                   : "rcx", "r11", "memory");
+  return ret;
+}
+#else
 static long syscall(long num, long a0, long a1, long a2, long a3) {
   register long x8 __asm__("x8") = num;
   register long x0 __asm__("x0") = a0;
@@ -32,6 +46,7 @@ static long syscall(long num, long a0, long a1, long a2, long a3) {
                    : "memory");
   return x0;
 }
+#endif
 
 void print(const char *s) {
   int len = 0;
@@ -144,4 +159,21 @@ void gui_add_menu(int idx, const char* name, const char* items) {
     buf[len++] = '\a';
     
     write(1, buf, len);
+}
+
+void *memcpy(void *dest, const void *src, size_t n) {
+  char *d = (char *)dest;
+  const char *s = (const char *)src;
+  for (size_t i = 0; i < n; i++) {
+    d[i] = s[i];
+  }
+  return dest;
+}
+
+void *memset(void *s, int c, size_t n) {
+  char *d = (char *)s;
+  for (size_t i = 0; i < n; i++) {
+    d[i] = (char)c;
+  }
+  return s;
 }

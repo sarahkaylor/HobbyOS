@@ -5,6 +5,7 @@ import json
 import time
 import sys
 import os
+import select
 
 with open("debug.log", "w") as f:
     f.write("Test started\n")
@@ -21,9 +22,14 @@ def log(msg):
     with open("debug.log", "a") as f:
         f.write(msg + "\n")
 
+def kill_qemu():
+    subprocess.run(["pkill", "-9", "-f", "qemu-system-aarch64"], stderr=subprocess.DEVNULL)
+    subprocess.run(["pkill", "-9", "-f", "qemu-system-x86_64"], stderr=subprocess.DEVNULL)
+
 log("Starting QEMU for desktop test...")
+arch = os.environ.get("ARCH", "arm")
 process = subprocess.Popen(
-    ["make", "desktop_test_run", "QEMU_ARGS=-qmp unix:./qmp-sock,server,nowait"],
+    ["make", "desktop_test_run", f"ARCH={arch}", "QEMU_ARGS=-display none -qmp unix:./qmp-sock,server,nowait"],
     stdout=subprocess.PIPE,
     stderr=subprocess.STDOUT,
     text=True
@@ -35,28 +41,42 @@ start_time = time.time()
 line_buf = ""
 
 while True:
-    if time.time() - start_time > timeout:
-        log("[TEST] Timeout waiting for SCREENSHOT_READY")
-        subprocess.run(["pkill", "qemu-system-aarch64"])
+    elapsed = time.time() - start_time
+    if elapsed > timeout:
+        log(f"[TEST] Timeout waiting for SCREENSHOT_READY (reached {timeout}s)")
+        kill_qemu()
         sys.exit(1)
         
-    c = process.stdout.read(1)
-    if not c:
-        break
-    
-    sys.stdout.write(c)
-    sys.stdout.flush()
-    
-    line_buf += c
-    if "SCREENSHOT_READY" in line_buf:
-        ready = True
-        log("\n[TEST] FOUND READY IN BUFFER!")
-        break
+    # Wait for up to 1 second for data to be ready to read
+    r, _, _ = select.select([process.stdout], [], [], 1.0)
+    if process.stdout in r:
+        try:
+            # Use os.read to bypass Python's TextIOWrapper buffering
+            data = os.read(process.stdout.fileno(), 1024)
+            if not data:
+                break
+            text = data.decode('utf-8', errors='ignore')
+            sys.stdout.write(text)
+            sys.stdout.flush()
+            
+            line_buf += text
+            if "SCREENSHOT_READY" in line_buf:
+                ready = True
+                log("\n[TEST] FOUND READY IN BUFFER!")
+                break
+        except Exception as e:
+            log(f"[TEST] Read error: {e}")
+            break
+    else:
+        # Check if the process exited prematurely
+        if process.poll() is not None:
+            break
 
 if not ready:
     log("[TEST] Process exited before ready.")
-    subprocess.run(["pkill", "qemu-system-aarch64"])
+    kill_qemu()
     sys.exit(1)
+
 
 log("[TEST] Taking screenshot via QMP...")
 try:
@@ -80,17 +100,17 @@ try:
     resp = s.recv(4096).decode('utf-8')
     if "return" not in resp:
         log(f"[TEST] Unexpected QMP response: {resp}")
-        subprocess.run(["pkill", "qemu-system-aarch64"])
+        kill_qemu()
         sys.exit(1)
         
     s.close()
 except Exception as e:
     log(f"[TEST] QMP Error: {e}")
-    subprocess.run(["pkill", "qemu-system-aarch64"])
+    kill_qemu()
     sys.exit(1)
 
 log("[TEST] Terminating QEMU...")
-subprocess.run(["pkill", "qemu-system-aarch64"])
+kill_qemu()
 process.wait()
 
 log("[TEST] Validating screenshot...")

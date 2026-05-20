@@ -197,6 +197,8 @@ void main(void) {
   start_scheduler();
 
   uart_puts("System halt.\n");
+  extern void halt(void);
+  halt();
 }
 
 /**

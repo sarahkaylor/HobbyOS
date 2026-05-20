@@ -17,7 +17,7 @@ static void test_fs_file_open_close(void) {
     
     // Manually set current cpu's pid to mock running process
     int old_pid = cpu_current_pids[0];
-    cpu_current_pids[0] = pid;
+    set_current_process_pid(0, pid);
     
     struct process *cur = current_process();
     // Open a known file
@@ -38,7 +38,7 @@ static void test_fs_file_open_close(void) {
     EXPECT_EQ(cur->num_open_fds, 0);
     
     // Cleanup
-    cpu_current_pids[0] = old_pid;
+    set_current_process_pid(0, old_pid);
     // We don't have a process_destroy, but process_kill marks it exited
     process_kill(pid);
 }

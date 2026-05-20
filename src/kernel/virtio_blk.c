@@ -4,6 +4,116 @@
 #include "arch/cpu.h"
 
 
+#ifdef __x86_64__
+
+static spinlock_t blk_lock;
+static spinlock_t blk_request_lock;
+int virtio_blk_irq = -1;
+
+static inline void outb(uint16_t port, uint8_t val) {
+    __asm__ volatile("outb %0, %1" : : "a"(val), "Nd"(port));
+}
+static inline uint8_t inb(uint16_t port) {
+    uint8_t ret;
+    __asm__ volatile("inb %1, %0" : "=a"(ret) : "Nd"(port));
+    return ret;
+}
+static inline void outw(uint16_t port, uint16_t val) {
+    __asm__ volatile("outw %0, %1" : : "a"(val), "Nd"(port));
+}
+static inline uint16_t inw(uint16_t port) {
+    uint16_t ret;
+    __asm__ volatile("inw %1, %0" : "=a"(ret) : "Nd"(port));
+    return ret;
+}
+
+static void ide_wait_ready(void) {
+    while ((inb(0x1F7) & 0x80)) {
+        // spin while BSY
+    }
+}
+
+static int ide_read_sector(uint64_t sector, void* buf) {
+    ide_wait_ready();
+    outb(0x1F6, 0xE0 | ((sector >> 24) & 0x0F));
+    outb(0x1F2, 1);
+    outb(0x1F3, sector & 0xFF);
+    outb(0x1F4, (sector >> 8) & 0xFF);
+    outb(0x1F5, (sector >> 16) & 0xFF);
+    outb(0x1F7, 0x20); // READ SECTORS
+    
+    ide_wait_ready();
+    while (!(inb(0x1F7) & 0x08)) {
+        // wait for DRQ
+    }
+    
+    uint16_t* ptr = (uint16_t*)buf;
+    for (int i = 0; i < 256; i++) {
+        ptr[i] = inw(0x1F0);
+    }
+    return 0;
+}
+
+static int ide_write_sector(uint64_t sector, const void* buf) {
+    ide_wait_ready();
+    outb(0x1F6, 0xE0 | ((sector >> 24) & 0x0F));
+    outb(0x1F2, 1);
+    outb(0x1F3, sector & 0xFF);
+    outb(0x1F4, (sector >> 8) & 0xFF);
+    outb(0x1F5, (sector >> 16) & 0xFF);
+    outb(0x1F7, 0x30); // WRITE SECTORS
+    
+    ide_wait_ready();
+    while (!(inb(0x1F7) & 0x08)) {
+        // wait for DRQ
+    }
+    
+    const uint16_t* ptr = (const uint16_t*)buf;
+    for (int i = 0; i < 256; i++) {
+        outw(0x1F0, ptr[i]);
+    }
+    
+    ide_wait_ready();
+    return 0;
+}
+
+void virtio_blk_handle_irq(void) {
+}
+
+int virtio_blk_init(void) {
+    spinlock_init(&blk_lock);
+    spinlock_init(&blk_request_lock);
+    return 0;
+}
+
+int virtio_blk_read_sector(uint64_t sector, void* buf, uint32_t count) {
+    uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
+    int res = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        if (ide_read_sector(sector + i, (uint8_t*)buf + (i * 512)) != 0) {
+            res = -1;
+            break;
+        }
+    }
+    spinlock_release_irqrestore(&blk_request_lock, flags);
+    return res;
+}
+
+int virtio_blk_write_sector(uint64_t sector, const void* buf, uint32_t count) {
+    uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
+    int res = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        if (ide_write_sector(sector + i, (const uint8_t*)buf + (i * 512)) != 0) {
+            res = -1;
+            break;
+        }
+    }
+    spinlock_release_irqrestore(&blk_request_lock, flags);
+    return res;
+}
+
+#else
+
 // VirtIO MMIO offsets
 #define VIRTIO_MAGIC        0x000
 #define VIRTIO_VERSION      0x004
@@ -318,3 +428,6 @@ int virtio_blk_write_sector(uint64_t sector, const void* buf, uint32_t count) {
     process_wake_all();
     return res;
 }
+
+#endif
+

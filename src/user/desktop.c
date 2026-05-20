@@ -23,6 +23,18 @@ const char *menu_items_list[] = {"NETTEST.BIN", "EDITOR.BIN", "TIMEOUT.BIN"};
 const int num_menu_items_const = 3;
 
 static inline long my_syscall(long sysno, long arg0, long arg1, long arg2, long arg3) {
+#ifdef __x86_64__
+  long ret;
+  register long rdi __asm__("rdi") = arg0;
+  register long rsi __asm__("rsi") = arg1;
+  register long rdx __asm__("rdx") = arg2;
+  register long r10 __asm__("r10") = arg3;
+  __asm__ volatile("syscall\n"
+                   : "=a"(ret)
+                   : "a"(sysno), "r"(rdi), "r"(rsi), "r"(rdx), "r"(r10)
+                   : "rcx", "r11", "memory");
+  return ret;
+#else
   register long x8 asm("x8") = sysno;
   register long x0 asm("x0") = arg0;
   register long x1 asm("x1") = arg1;
@@ -33,6 +45,7 @@ static inline long my_syscall(long sysno, long arg0, long arg1, long arg2, long 
                : "r"(x8), "r"(x0), "r"(x1), "r"(x2), "r"(x3)
                : "memory");
   return x0;
+#endif
 }
 
 __attribute__((weak)) void print_console(const char *s) {

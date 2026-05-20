@@ -8,7 +8,13 @@ extern void uart_puts(const char* s);
 extern uint32_t get_cpuid(void);
 
 // Expose the internal table from mmu.c for testing
+#ifdef __x86_64__
+extern uint64_t cpu_pd1[MAX_CPUS][512];
+#define L2_TABLE cpu_pd1
+#else
 extern uint64_t l2_table_1[MAX_CPUS][512];
+#define L2_TABLE l2_table_1
+#endif
 
 #define PT_MEM_NORMAL       1
 #define PT_USER_RW          (0b01 << 6)
@@ -20,7 +26,11 @@ static void test_mmu_make_user_block_desc(void) {
     uint64_t phys_addr = 0x40000000;
     uint64_t desc = mmu_make_user_block_desc(phys_addr);
 
-    // Verify address portion
+#ifdef __x86_64__
+    // Verify x86_64 block descriptor
+    EXPECT_EQ(desc, phys_addr | 0x87);
+#else
+    // Verify AArch64 block descriptor
     EXPECT_EQ((desc & 0x0000FFFFFFFFF000ULL) == phys_addr, 1);
 
     // Verify attributes
@@ -29,6 +39,7 @@ static void test_mmu_make_user_block_desc(void) {
     attr |= (1ULL << 53);
 
     EXPECT_EQ((desc & ~0x0000FFFFFFFFF000ULL), attr);
+#endif
 }
 
 static void test_mmu_switch_user_mapping(void) {
@@ -42,13 +53,13 @@ static void test_mmu_switch_user_mapping(void) {
     mmu_switch_user_mapping(phys_base);
 
     // Verify that the table was updated correctly
-    // The mapping starts at index 32 for USER_VIRT_BASE (0x40000000)
+    // The mapping starts at index 32 for USER_VIRT_BASE (0x44000000)
     int num_blocks = USER_REGION_SIZE / 0x200000;
     if (USER_REGION_SIZE % 0x200000) num_blocks++;
 
     for (int i = 0; i < num_blocks; i++) {
         uint64_t expected_desc = mmu_make_user_block_desc(phys_base + (uint64_t)i * 0x200000);
-        EXPECT_EQ(l2_table_1[cpu][32 + i], expected_desc);
+        EXPECT_EQ(L2_TABLE[cpu][32 + i], expected_desc);
     }
 }
 
@@ -63,8 +74,8 @@ static void test_mmu_map_user_framebuffer(void) {
 
     // Verify mapping for all CPUs
     for (int c = 0; c < MAX_CPUS; c++) {
-        EXPECT_EQ(l2_table_1[c][256], mmu_make_user_block_desc(phys_addr));
-        EXPECT_EQ(l2_table_1[c][257], mmu_make_user_block_desc(phys_addr + 0x200000));
+        EXPECT_EQ(L2_TABLE[c][256], mmu_make_user_block_desc(phys_addr));
+        EXPECT_EQ(L2_TABLE[c][257], mmu_make_user_block_desc(phys_addr + 0x200000));
     }
 }
 

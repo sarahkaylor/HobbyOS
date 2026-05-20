@@ -3,6 +3,24 @@
 #include "arch/cpu.h"
 
 
+#ifdef __x86_64__
+
+static spinlock_t input_lock;
+
+void virtio_input_handle_irq(int irq) {
+}
+
+int virtio_input_get_events(struct virtio_input_event *buf, int max_events) {
+    return 0;
+}
+
+int virtio_input_init(void) {
+    spinlock_init(&input_lock);
+    return 0;
+}
+
+#else
+
 // VirtIO MMIO offsets
 #define VIRTIO_MAGIC        0x000
 #define VIRTIO_VERSION      0x004
@@ -211,3 +229,6 @@ int virtio_input_init(void) {
     
     return num_input_devs > 0 ? 0 : -1;
 }
+
+#endif
+

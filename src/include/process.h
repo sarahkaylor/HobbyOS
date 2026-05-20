@@ -29,7 +29,7 @@
 #define PAGE_SIZE 0x1000
 
 // Size of the user memory region allocated per process (16MB)
-#define USER_REGION_SIZE 0x200000
+#define USER_REGION_SIZE 0x400000
 
 // Number of 4KB pages in a 2MB user region
 #define PAGES_PER_REGION ((USER_REGION_SIZE) / (PAGE_SIZE))
@@ -143,5 +143,6 @@ struct process *process_get_pcb(int pid);
 
 extern spinlock_t proc_lock;
 extern int cpu_current_pids[];
+void set_current_process_pid(uint32_t cpu, int pid);
 
 #endif // PROCESS_H
