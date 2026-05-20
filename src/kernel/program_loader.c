@@ -2,6 +2,8 @@
 #include "fs.h"
 #include "setjmp.h"
 #include "process.h"
+#include "arch/cpu.h"
+
 
 extern struct process *process_get_pcb(int pid);
 extern void uart_puts(const char* s);
@@ -46,23 +48,11 @@ int load_and_run_program(const char* filename) {
     fat16_close(&f);
 
     if (setjmp(user_exit_context) != 0) {
-        __asm__ volatile("msr daifclr, #2");
+        interrupts_enable();
         return 0;
     }
 
-    __asm__ volatile(
-        "msr daifset, #2\n"
-        "msr elr_el1, %[entry]\n"
-        "mov x2, #0\n"
-        "msr spsr_el1, x2\n"
-        "msr sp_el0, %[stack]\n"
-        "mov x0, #0\n"
-        "mov x1, #0\n"
-        "eret\n"
-        : : [entry] "r" ((long)USER_VIRT_BASE),
-            [stack] "r" ((long)(USER_VIRT_BASE + USER_REGION_SIZE))
-        : "x0", "x1", "x2", "memory"
-    );
+    arch_enter_user_mode((uint64_t)USER_VIRT_BASE, (uint64_t)(USER_VIRT_BASE + USER_REGION_SIZE));
 
     return -1;
 }

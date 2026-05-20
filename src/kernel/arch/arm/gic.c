@@ -71,6 +71,8 @@ void gic_init_cpu(void) {
  * Global GIC initialization. Configures both distributor and the primary CPU's interface.
  */
 void gic_init(void) {
+    gicd_write32(GICD_CTLR, 0); // Reset distributor
+
     gic_init_distributor();
     gic_init_cpu();
 }

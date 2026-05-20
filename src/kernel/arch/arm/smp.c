@@ -1,5 +1,6 @@
 #include "lock.h"
 #include "process.h"
+#include "arch/cpu.h"
 
 extern void secondary_entry(void);
 extern void uart_puts(const char* s);
@@ -31,16 +32,6 @@ static inline uint64_t psci_cpu_on(uint64_t target_cpu, uint64_t entry_point, ui
         : "memory"
     );
     return x0;
-}
-
-/**
- * Returns the logical ID of the current CPU core (0 to MAX_CPUS-1).
- * Extracts the affinity 0 field from the MPIDR_EL1 system register.
- */
-uint32_t get_cpuid(void) {
-    uint64_t mpidr;
-    __asm__ volatile("mrs %0, mpidr_el1" : "=r"(mpidr));
-    return (uint32_t)(mpidr & 0xFF);
 }
 
 /**

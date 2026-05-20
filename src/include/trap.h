@@ -3,17 +3,7 @@
 
 #include <stdint.h>
 
-/**
- * Structure representing the CPU state saved on the stack during an exception.
- * Includes general-purpose registers, the link register, exception return address,
- * and processor state.
- */
-struct trap_frame {
-    uint64_t regs[30]; /**< General-purpose registers x0 to x29 */
-    uint64_t lr;       /**< Link Register (x30) */
-    uint64_t elr;      /**< Exception Link Register (PC at time of exception) */
-    uint64_t spsr;     /**< Saved Processor State Register */
-};
+#include "arch/trap.h"
 
 /**
  * Handler for synchronous exceptions originating from user mode (EL0).

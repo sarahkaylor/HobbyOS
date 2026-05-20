@@ -1,6 +1,8 @@
 #include "virtio_net.h"
 #include "lock.h"
 #include "process.h"
+#include "arch/cpu.h"
+
 
 // VirtIO MMIO offsets
 #define VIRTIO_MAGIC        0x000
@@ -137,9 +139,9 @@ static void fill_rx_descriptors(void) {
         rx_vq.avail.ring[i] = i * 2;
     }
     
-    __asm__ volatile("dmb sy" ::: "memory");
+    arch_memory_barrier();
     rx_vq.avail.idx = NUM_RX_BUFFERS;
-    __asm__ volatile("dmb sy" ::: "memory");
+    arch_memory_barrier();
     
     // Notify queue 0 (RX)
     reg_write32(VIRTIO_QUEUE_SEL, 0);
@@ -256,9 +258,9 @@ int virtio_net_send(const void *buf, uint32_t len) {
 
     tx_vq.avail.ring[tx_vq.avail.idx % 16] = desc_idx;
 
-    __asm__ volatile("dmb sy" ::: "memory");
+    arch_memory_barrier();
     tx_vq.avail.idx++;
-    __asm__ volatile("dmb sy" ::: "memory");
+    arch_memory_barrier();
 
     // Dispatch TX queue notification to the device
     reg_write32(VIRTIO_QUEUE_SEL, 1);
@@ -273,7 +275,7 @@ int virtio_net_send(const void *buf, uint32_t len) {
     }
     tx_ack_used_idx = tx_vq.used.idx;
 
-    __asm__ volatile("dmb sy" ::: "memory");
+    arch_memory_barrier();
     spinlock_release_irqrestore(&net_tx_lock, flags);
     return 0;
 }
@@ -292,7 +294,7 @@ void virtio_net_handle_irq(void) {
 
     // Process all pending packets in the RX used ring
     while (rx_ack_used_idx != rx_vq.used.idx) {
-        __asm__ volatile("dmb sy" ::: "memory");
+        arch_memory_barrier();
         
         uint16_t used_idx = rx_ack_used_idx % 16;
         uint32_t id = rx_vq.used.ring[used_idx].id;
@@ -312,9 +314,9 @@ void virtio_net_handle_irq(void) {
         uint16_t avail_idx = rx_vq.avail.idx % 16;
         rx_vq.avail.ring[avail_idx] = id;
         
-        __asm__ volatile("dmb sy" ::: "memory");
+        arch_memory_barrier();
         rx_vq.avail.idx++;
-        __asm__ volatile("dmb sy" ::: "memory");
+        arch_memory_barrier();
         
         rx_ack_used_idx++;
         

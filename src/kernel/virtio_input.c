@@ -1,5 +1,7 @@
 #include "virtio_input.h"
 #include "lock.h"
+#include "arch/cpu.h"
+
 
 // VirtIO MMIO offsets
 #define VIRTIO_MAGIC        0x000
@@ -96,7 +98,7 @@ void virtio_input_handle_irq(int irq) {
                 
                 // Process the used ring
                 while (dev->ack_used_idx != *(volatile uint16_t*)&dev->vq.used.idx) {
-                    __asm__ volatile("dmb sy" ::: "memory");
+                    arch_memory_barrier();
                     
                     uint16_t idx = dev->ack_used_idx % 64;
                     uint32_t id = dev->vq.used.ring[idx].id;
@@ -116,9 +118,9 @@ void virtio_input_handle_irq(int irq) {
                     uint16_t avail_idx = dev->vq.avail.idx;
                     dev->vq.avail.ring[avail_idx % 64] = id;
                     
-                    __asm__ volatile("dmb sy" ::: "memory");
+                    arch_memory_barrier();
                     dev->vq.avail.idx++;
-                    __asm__ volatile("dmb sy" ::: "memory");
+                    arch_memory_barrier();
                     
                     dev->ack_used_idx++;
                 }
@@ -191,9 +193,9 @@ int virtio_input_init(void) {
                 
                 dev->vq.avail.ring[j] = j;
             }
-            __asm__ volatile("dmb sy" ::: "memory");
+            arch_memory_barrier();
             dev->vq.avail.idx = 64;
-            __asm__ volatile("dmb sy" ::: "memory");
+            arch_memory_barrier();
             
             status |= 4; reg_write32(mmio, VIRTIO_STATUS, status); // DRIVER_OK
             

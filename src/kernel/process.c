@@ -3,13 +3,12 @@
 #include "lock.h"
 #include "mmu.h"
 #include "setjmp.h"
+#include "arch/cpu.h"
 #include <stdint.h>
 
 extern void uart_puts(const char *s);
 extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
-
-extern uint32_t get_cpuid(void);
 
 // Process table
 static struct process proc_table[MAX_PROCESSES];
@@ -208,9 +207,7 @@ static void save_context(struct process *p, struct trap_frame *tf) {
   p->context[30] = tf->lr;
   p->context[31] = tf->elr;
   p->context[32] = tf->spsr;
-  uint64_t sp_el0;
-  __asm__ volatile("mrs %0, sp_el0" : "=r"(sp_el0));
-  p->context[33] = sp_el0;
+  p->context[33] = arch_get_user_sp();
 }
 
 static void restore_context(struct process *p, struct trap_frame *tf) {
@@ -220,8 +217,7 @@ static void restore_context(struct process *p, struct trap_frame *tf) {
   tf->lr = p->context[30];
   tf->elr = p->context[31];
   tf->spsr = p->context[32];
-  uint64_t sp_el0 = p->context[33];
-  __asm__ volatile("msr sp_el0, %0" : : "r"(sp_el0));
+  arch_set_user_sp(p->context[33]);
 }
 
 volatile int scheduler_started = 0;
@@ -275,9 +271,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
       spinlock_release_irqrestore(&proc_lock, flags);
       
       if (is_yield && next == current_pid) {
-          __asm__ volatile("msr daifclr, #2");
-          __asm__ volatile("wfi");
-          __asm__ volatile("msr daifset, #2");
+          safe_wfi();
       }
       
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
@@ -303,12 +297,15 @@ void schedule(struct trap_frame *tf, int is_yield) {
         extern void scheduler_finished(void);
         scheduler_finished();
       } else {
+        uart_puts("System halt from CPU ");
+        print_int(cpu);
+        uart_puts(".\n");
+        extern void halt(void);
+        halt();
         while (1) {
           // Enable IRQs, sleep, then disable. This allows idle cores to actually sleep
           // and process interrupts rather than spinning endlessly if an interrupt is pending.
-          __asm__ volatile("msr daifclr, #2");
-          __asm__ volatile("wfi");
-          __asm__ volatile("msr daifset, #2");
+          safe_wfi();
         }
       }
       return;
@@ -452,9 +449,7 @@ int process_fork(struct trap_frame *tf) {
   save_context(child, tf);
   child->context[0] = 0; // x0 = 0 for child
 
-  uint64_t sp_el0;
-  __asm__ volatile("mrs %0, sp_el0" : "=r"(sp_el0));
-  child->context[33] = sp_el0;
+  child->context[33] = arch_get_user_sp();
 
   child->num_open_fds = parent->num_open_fds;
   for (int i = 0; i < MAX_OPEN_FDS; i++) {
@@ -479,11 +474,11 @@ void process_sleep(void) {
   if (pid >= 0) {
     proc_table[pid].state = PROC_STATE_BLOCKED;
     spinlock_release_irqrestore(&proc_lock, flags);
-    __asm__ volatile("svc #0xFF"); // Custom yield SVC
+    arch_yield();
   } else {
     // If there is no current process (e.g. during early boot), just WFI
     spinlock_release_irqrestore(&proc_lock, flags);
-    __asm__ volatile("wfi");
+    safe_wfi();
   }
 }
 
@@ -540,14 +535,14 @@ void start_scheduler(void) {
   // Disable IRQs so we don't take an interrupt before setjmp is called.
   // If an interrupt fired right after scheduler_started=1 but before setjmp,
   // schedule() would longjmp to an uninitialized context and crash at 0x0.
-  __asm__ volatile("msr daifset, #2");
+  interrupts_disable();
 
   uart_puts("start_scheduler called on CPU ");
   print_int(get_cpuid());
   uart_puts("\n");
 
   while (!scheduler_started) {
-    __asm__ volatile("wfe");
+    arch_wfe();
   }
 
   uint32_t cpu = get_cpuid();
@@ -557,20 +552,16 @@ void start_scheduler(void) {
   print_int(jmp_val);
   uart_puts("\n");
   if (jmp_val == 1) {
-    __asm__ volatile("msr daifclr, #2");
+    interrupts_enable();
     // Exit scheduler (tests finished)
     if (cpu == 0) return;
-    else while(1) { __asm__ volatile("wfi"); }
+    else while(1) { safe_wfi(); }
   } else if (jmp_val == 2) {
     // A kernel thread exited on this CPU. The stack is now reset.
     // However, because the kernel thread was running in EL1t (using SP_EL0),
     // longjmp restored the stack pointer to SP_EL0.
     // We must switch back to EL1h (using SP_EL1) and copy the stack pointer over.
-    uint64_t sp_val;
-    __asm__ volatile("mov %0, sp" : "=r"(sp_val));
-    __asm__ volatile("msr spsel, #1");
-    __asm__ volatile("isb");
-    __asm__ volatile("mov sp, %0" : : "r"(sp_val));
+    arch_kernel_thread_exit_handler();
   }
 
   while (1) {
@@ -600,8 +591,6 @@ void start_scheduler(void) {
     
     // Enable IRQs, sleep, then disable. This allows idle cores to actually sleep
     // and process interrupts rather than spinning endlessly if an interrupt is pending.
-    __asm__ volatile("msr daifclr, #2");
-    __asm__ volatile("wfi");
-    __asm__ volatile("msr daifset, #2");
+    safe_wfi();
   }
 }

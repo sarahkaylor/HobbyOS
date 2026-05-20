@@ -63,8 +63,8 @@ static void test_mmu_map_user_framebuffer(void) {
 
     // Verify mapping for all CPUs
     for (int c = 0; c < MAX_CPUS; c++) {
-        EXPECT_EQ(l2_table_1[c][128], mmu_make_user_block_desc(phys_addr));
-        EXPECT_EQ(l2_table_1[c][129], mmu_make_user_block_desc(phys_addr + 0x200000));
+        EXPECT_EQ(l2_table_1[c][256], mmu_make_user_block_desc(phys_addr));
+        EXPECT_EQ(l2_table_1[c][257], mmu_make_user_block_desc(phys_addr + 0x200000));
     }
 }
 

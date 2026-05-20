@@ -35,15 +35,18 @@ LDFLAGS = -fuse-ld=lld -T linker.ld -nostdlib
 # Target and objects
 TARGET = hobbyos.elf
 SRC_DIR = src/kernel
+ARCH_DIR = src/kernel/arch/arm
 OBJ_DIR = obj
 
-# Find all .c and .s files in the src/ directory
-C_SRCS = $(wildcard $(SRC_DIR)/*.c)
-ASM_SRCS = $(wildcard $(SRC_DIR)/*.s)
+# Find all .c and .s files in both src/kernel and src/kernel/arch/arm
+C_SRCS = $(wildcard $(SRC_DIR)/*.c) $(wildcard $(ARCH_DIR)/*.c)
+ASM_SRCS = $(wildcard $(SRC_DIR)/*.s) $(wildcard $(ARCH_DIR)/*.s)
 
 # Object files corresponding to the source files
-C_OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(C_SRCS))
-ASM_OBJS = $(patsubst $(SRC_DIR)/%.s, $(OBJ_DIR)/%.o, $(ASM_SRCS))
+C_OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(wildcard $(SRC_DIR)/*.c)) \
+         $(patsubst $(ARCH_DIR)/%.c, $(OBJ_DIR)/%.o, $(wildcard $(ARCH_DIR)/*.c))
+ASM_OBJS = $(patsubst $(SRC_DIR)/%.s, $(OBJ_DIR)/%.o, $(wildcard $(SRC_DIR)/*.s)) \
+           $(patsubst $(ARCH_DIR)/%.s, $(OBJ_DIR)/%.o, $(wildcard $(ARCH_DIR)/*.s))
 OBJS = $(ASM_OBJS) $(C_OBJS)
 
 USER_CFLAGS += -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
@@ -85,6 +88,16 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c src/include/*.h $(MODE_FILE)
 
 # Rule to compile .s files into .o files
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.s src/include/*.h
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Rule to compile .c files from arch/arm into .o files
+$(OBJ_DIR)/%.o: $(ARCH_DIR)/%.c src/include/*.h src/include/arch/*.h $(MODE_FILE)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Rule to compile .s files from arch/arm into .o files
+$(OBJ_DIR)/%.o: $(ARCH_DIR)/%.s src/include/*.h src/include/arch/*.h
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 

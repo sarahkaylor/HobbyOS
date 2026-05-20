@@ -5,6 +5,8 @@
 #include "setjmp.h"
 #include "timer.h"
 #include "lock.h"
+#include "arch/cpu.h"
+#include "arch/timer.h"
 #include <stdint.h>
 
 extern jmp_buf user_exit_context;
@@ -14,7 +16,6 @@ extern void uart_puts(const char *s);
 extern void uart_putc(char c);
 extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
-extern void timer_reload(void);
 
 /**
  * Prints the state of a trap frame for debugging purposes.
@@ -38,7 +39,6 @@ extern uint32_t gic_acknowledge_interrupt(void);
 extern void gic_end_interrupt(uint32_t intid);
 extern void virtio_blk_handle_irq(void);
 extern uint32_t virtio_blk_irq;
-extern uint32_t get_cpuid(void);
 
 #define SYS_WRITE_CONSOLE (1)
 #define SYS_EXIT (2)
@@ -61,8 +61,6 @@ extern uint32_t get_cpuid(void);
 
 // Timer PPI interrupt ID on QEMU virt (non-secure physical timer)
 #define TIMER_PPI_INTID 30
-
-extern void uart_print_hex(uint64_t val);
 
 static void sys_write_console(struct trap_frame *tf) {
   uint64_t ptr = tf->regs[0];
@@ -161,7 +159,6 @@ struct sys_spawn_args {
 static struct sys_spawn_args spawn_args_pool[64];
 
 extern void kernel_exit(void);
-extern struct process *process_get_pcb(int pid);
 
 static void sys_spawn_worker(void *arg) {
     struct sys_spawn_args *args = (struct sys_spawn_args *)arg;

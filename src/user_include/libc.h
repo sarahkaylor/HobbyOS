@@ -15,6 +15,7 @@
 #define kill ho_kill
 #define fork ho_fork
 #define pipe ho_pipe
+#define connect ho_connect
 #endif
 
 void print(const char *str);

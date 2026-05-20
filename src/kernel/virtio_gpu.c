@@ -1,5 +1,7 @@
 #include "virtio_gpu.h"
 #include "lock.h"
+#include "arch/cpu.h"
+
 
 // VirtIO MMIO offsets
 #define VIRTIO_MAGIC        0x000
@@ -98,9 +100,9 @@ static int virtio_gpu_do_cmd(void* req, uint32_t req_size, void* resp, uint32_t 
     uint16_t head_idx = gpu_vq.avail.idx;
     gpu_vq.avail.ring[head_idx % 16] = 0;
     
-    __asm__ volatile("dmb sy" ::: "memory");
+    arch_memory_barrier();
     gpu_vq.avail.idx++;
-    __asm__ volatile("dmb sy" ::: "memory");
+    arch_memory_barrier();
 
     reg_write32(VIRTIO_QUEUE_NOTIFY, 0);
 
@@ -111,7 +113,7 @@ static int virtio_gpu_do_cmd(void* req, uint32_t req_size, void* resp, uint32_t 
     }
 
     gpu_ack_used_idx = gpu_vq.used.idx;
-    __asm__ volatile("dmb sy" ::: "memory");
+    arch_memory_barrier();
 
     struct virtio_gpu_ctrl_hdr* hdr = (struct virtio_gpu_ctrl_hdr*)resp;
     int res = (hdr->type >= 0x1200 ? -1 : 0);
@@ -148,16 +150,16 @@ static int virtio_gpu_do_cmd_with_data(void* req, uint32_t req_size, void* data,
     uint16_t head_idx = gpu_vq.avail.idx;
     gpu_vq.avail.ring[head_idx % 16] = 0;
     
-    __asm__ volatile("dmb sy" ::: "memory");
+    arch_memory_barrier();
     gpu_vq.avail.idx++;
-    __asm__ volatile("dmb sy" ::: "memory");
+    arch_memory_barrier();
 
     reg_write32(VIRTIO_QUEUE_NOTIFY, 0);
 
     while (*(volatile uint16_t*)&gpu_vq.used.idx == gpu_ack_used_idx) {}
 
     gpu_ack_used_idx = gpu_vq.used.idx;
-    __asm__ volatile("dmb sy" ::: "memory");
+    arch_memory_barrier();
 
     spinlock_release_irqrestore(&gpu_lock, flags);
     return 0;

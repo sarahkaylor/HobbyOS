@@ -1,6 +1,8 @@
 #include "virtio_blk.h"
 #include "lock.h"
 #include "process.h"
+#include "arch/cpu.h"
+
 
 // VirtIO MMIO offsets
 #define VIRTIO_MAGIC        0x000
@@ -227,11 +229,11 @@ static int virtio_blk_do_op(uint64_t sector, void* buf, uint32_t type) {
     vq.avail.ring[head_idx % 8] = 0; // head descriptor is 0
     
     // Memory barrier
-    __asm__ volatile("dmb sy" ::: "memory");
+    arch_memory_barrier();
     
     vq.avail.idx++;
     
-    __asm__ volatile("dmb sy" ::: "memory");
+    arch_memory_barrier();
 
     // Notify device
     reg_write32(VIRTIO_QUEUE_NOTIFY, 0);
@@ -243,7 +245,7 @@ static int virtio_blk_do_op(uint64_t sector, void* buf, uint32_t type) {
     ack_used_idx = vq.used.idx;
     
     // Memory barrier before reading status
-    __asm__ volatile("dmb sy" ::: "memory");
+    arch_memory_barrier();
     
     // Ack interrupt manually since we disabled IRQs
     uint32_t int_status = reg_read32(VIRTIO_INTERRUPT_STATUS);

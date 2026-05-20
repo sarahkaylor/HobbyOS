@@ -13,6 +13,8 @@
 #include "net.h"
 #include "virtio_net.h"
 #include "dhcp.h"
+#include "arch/cpu.h"
+#include "lock.h"
 
 void virtio_blk_handle_irq(void);
 extern int virtio_blk_irq;
@@ -20,10 +22,12 @@ extern int virtio_net_irq;
 extern void smp_init(void);
 extern void mmu_init_core(void);
 extern void gic_init_cpu(void);
-extern uint32_t get_cpuid(void);
-#include "lock.h"
 
-static spinlock_t uart_lock;
+extern void uart_init(void);
+extern void uart_putc(char c);
+extern void uart_puts(const char *s);
+
+static spinlock_t print_lock;
 
 /**
  * High-level handler for hardware interrupts (IRQs) occurring in the kernel
@@ -48,55 +52,18 @@ void irq_handler_c(struct trap_frame *tf) {
   gic_end_interrupt(intid);
 }
 
-// PL011 UART physical base address on QEMU's virt machine
-#define UART0_BASE 0x09000000
-
-// Pointer to the data register of the UART
-volatile uint32_t *const UART0_DR = (uint32_t *)UART0_BASE;
-
-// Pointer to the flag register of the UART
-volatile uint32_t *const UART0_FR = (uint32_t *)(UART0_BASE + 0x18);
-
-/**
- * Outputs a single character to the PL011 UART.
- * Handles newline translation (\n -> \r\n).
- */
-void uart_putc(char c) {
-  if (c == '\n') {
-    while (*UART0_FR & (1 << 5)) {
-    } // Wait until TXFF is clear
-    *UART0_DR = (uint32_t)('\r');
-  }
-  while (*UART0_FR & (1 << 5)) {
-  } // Wait until TXFF is clear
-  *UART0_DR = (uint32_t)(c);
-}
-
-/**
- * Outputs a null-terminated string to the UART.
- * Uses a spinlock to ensure atomic output from multiple CPUs.
- */
-void uart_puts(const char *s) {
-  uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
-  while (*s != '\0') {
-    uart_putc(*s);
-    s++;
-  }
-  spinlock_release_irqrestore(&uart_lock, flags);
-}
-
 /**
  * Prints a signed integer to the UART in decimal format.
  */
 void print_int(int val) {
-  uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
+  uint64_t flags = spinlock_acquire_irqsave(&print_lock);
   if (val < 0) {
     uart_putc('-');
     val = -val;
   }
   if (val == 0) {
     uart_putc('0');
-    spinlock_release_irqrestore(&uart_lock, flags);
+    spinlock_release_irqrestore(&print_lock, flags);
     return;
   }
   char buf[16];
@@ -107,21 +74,21 @@ void print_int(int val) {
   }
   while (idx > 0)
     uart_putc(buf[--idx]);
-  spinlock_release_irqrestore(&uart_lock, flags);
+  spinlock_release_irqrestore(&print_lock, flags);
 }
 
 /**
  * Prints a 64-bit value to the UART in hexadecimal format (e.g., 0xABC123).
  */
 void uart_print_hex(uint64_t val) {
-  uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
+  uint64_t flags = spinlock_acquire_irqsave(&print_lock);
   char hex_chars[] = "0123456789ABCDEF";
   uart_putc('0');
   uart_putc('x');
   for (int i = 60; i >= 0; i -= 4) {
     uart_putc(hex_chars[(val >> i) & 0xF]);
   }
-  spinlock_release_irqrestore(&uart_lock, flags);
+  spinlock_release_irqrestore(&print_lock, flags);
 }
 
 /**
@@ -129,7 +96,8 @@ void uart_print_hex(uint64_t val) {
  * Initializes all hardware subsystems, filesystems, and the scheduler.
  */
 void main(void) {
-  spinlock_init(&uart_lock);
+  uart_init();
+  spinlock_init(&print_lock);
   uart_puts("Booting AArch64 OS...\n");
 
   // Virtual Memory Protection
@@ -156,16 +124,14 @@ void main(void) {
   extern void pipes_init(void);
   pipes_init();
 
-  // Enable the timer PPI (INTID 30) for preemptive scheduling
-  gic_enable_interrupt(30);
+  // Initialize and enable the timer
   timer_init();
 
   // Wake up secondary cores via PSCI
   smp_init();
 
-  // Clears the standard I/F interrupt masking flags from the hardware PSTATE
-  // enabling the CPU interface to natively accept GIC triggers dynamically.
-  __asm__ volatile("msr daifclr, #2"); // Enable IRQ in PSTATE
+  // Enable interrupts on the boot core
+  interrupts_enable();
 
   if (virtio_blk_init() != 0) {
     uart_puts("VirtIO Block initialization failed!\n");
@@ -206,17 +172,17 @@ void main(void) {
   run_all_unit_tests();
 #elif defined(KERNEL_MODE_TEST)
   uart_puts("Mode: TEST - Running automated tests...\n");
-  load_and_run_program_in_scheduler("CONSOLE.BIN", -1, -1);
-  load_and_run_program_in_scheduler("MEMTEST.BIN", -1, -1);
-  load_and_run_program_in_scheduler("FILEIO.BIN", -1, -1);
-  load_and_run_program_in_scheduler("HEAPTEST.BIN", -1, -1);
-  load_and_run_program_in_scheduler("SPAWN.BIN", -1, -1);
-  load_and_run_program_in_scheduler("FORKTEST.BIN", -1, -1);
-  load_and_run_program_in_scheduler("SMPTEST.BIN", -1, -1);
-  load_and_run_program_in_scheduler("PIPETEST.BIN", -1, -1);
-  load_and_run_program_in_scheduler("GRAPHICS.BIN", -1, -1);
-  load_and_run_program_in_scheduler("NETTEST.BIN", -1, -1);
-  load_and_run_program_in_scheduler("TIMEOUT.BIN", -1, -1);
+  load_and_run_program_in_scheduler("CONSOLE.BIN", -1, -1, -1);
+  load_and_run_program_in_scheduler("MEMTEST.BIN", -1, -1, -1);
+  load_and_run_program_in_scheduler("FILEIO.BIN", -1, -1, -1);
+  load_and_run_program_in_scheduler("HEAPTEST.BIN", -1, -1, -1);
+  load_and_run_program_in_scheduler("SPAWN.BIN", -1, -1, -1);
+  load_and_run_program_in_scheduler("FORKTEST.BIN", -1, -1, -1);
+  load_and_run_program_in_scheduler("SMPTEST.BIN", -1, -1, -1);
+  load_and_run_program_in_scheduler("PIPETEST.BIN", -1, -1, -1);
+  load_and_run_program_in_scheduler("GRAPHICS.BIN", -1, -1, -1);
+  load_and_run_program_in_scheduler("NETTEST.BIN", -1, -1, -1);
+  load_and_run_program_in_scheduler("TIMEOUT.BIN", -1, -1, -1);
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
   load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1, -1);
@@ -238,8 +204,6 @@ void main(void) {
  * Sets up core-local MMU, GIC, and timer, then enters the scheduler.
  */
 void secondary_main(void) {
-  uint32_t cpu = get_cpuid();
-
   // 1. Initialize local MMU
   mmu_init_core();
 
@@ -248,10 +212,9 @@ void secondary_main(void) {
 
   // 3. Enable local timer
   timer_init();
-  gic_enable_interrupt(30);
 
-  // 4. Enable IRQ
-  __asm__ volatile("msr daifclr, #2");
+  // 4. Enable interrupts
+  interrupts_enable();
 
   // 5. Enter scheduler
   start_scheduler();

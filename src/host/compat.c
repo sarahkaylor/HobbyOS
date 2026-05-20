@@ -226,3 +226,33 @@ int validate_screenshot(const char *expected_filename) {
     fclose(f);
     return mismatch ? -1 : 0;
 }
+
+void yield(void) {
+    usleep(0);
+}
+
+int ho_connect(uint32_t ip, uint16_t port, int protocol) {
+    (void)ip; (void)port; (void)protocol;
+    return -1;
+}
+
+void gui_add_menu(int idx, const char* name, const char* items) {
+    char buf[128];
+    int len = 0;
+    buf[len++] = '\033';
+    buf[len++] = ']';
+    buf[len++] = 'M';
+    buf[len++] = '0' + idx;
+    buf[len++] = ';';
+    
+    int i = 0;
+    while(name[i] && len < 126) buf[len++] = name[i++];
+    buf[len++] = ';';
+    
+    i = 0;
+    while(items[i] && len < 126) buf[len++] = items[i++];
+    buf[len++] = '\a';
+    
+    write(1, buf, len);
+}
+
