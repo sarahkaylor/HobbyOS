@@ -17,8 +17,8 @@ struct pipe {
     spinlock_t lock;            /**< Lock for atomic buffer access */
     uint32_t reader_count;      /**< Number of processes with read access */
     uint32_t writer_count;      /**< Number of processes with write access */
-    uint32_t reader_pid_mask;   /**< Bitmask of PIDs waiting to read */
-    uint32_t writer_pid_mask;   /**< Bitmask of PIDs waiting to write */
+    uint64_t reader_pid_mask;   /**< Bitmask of PIDs waiting to read */
+    uint64_t writer_pid_mask;   /**< Bitmask of PIDs waiting to write */
 };
 
 struct file; // Forward declaration

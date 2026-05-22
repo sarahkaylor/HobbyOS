@@ -302,17 +302,6 @@ static void sys_read_dir(struct trap_frame *tf) {
   if ((uint64_t)buf >= USER_VIRT_BASE &&
       (uint64_t)buf + 12 <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
     tf->regs[0] = fat16_read_dir(index, buf);
-    extern void uart_puts(const char*);
-    extern void print_int(int);
-    uart_puts("[KERNEL] sys_read_dir(");
-    print_int(index);
-    uart_puts(") -> ");
-    if (tf->regs[0] == 0) {
-        uart_puts(buf);
-    } else {
-        uart_puts("FAILED");
-    }
-    uart_puts("\n");
   } else {
     tf->regs[0] = -1;
   }

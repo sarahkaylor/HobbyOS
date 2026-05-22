@@ -36,7 +36,7 @@ static struct virtio_input_event mock_events[MAX_MOCK_EVENTS];
 static int mock_events_head = 0;
 static int mock_events_tail = 0;
 
-void print_console(const char *s);
+
 
 void inject_mock_event(uint16_t type, uint16_t code, uint32_t value) {
     int next = (mock_events_head + 1) % MAX_MOCK_EVENTS;
@@ -95,12 +95,7 @@ void send_key(char c) {
     }
 }
 
-void print_console(const char *s) {
-  int len = 0;
-  while (s[len])
-    len++;
-  syscall(1 /* SYS_WRITE_CONSOLE */, (long)s, len, 0, 0);
-}
+
 
 extern struct window windows[];
 static int flush_count = 0;

@@ -20,6 +20,7 @@
 #endif
 
 void print(const char *str);
+void print_console(const char *str);
 void print_hex(long val);
 void exit(int status);
 int fork(void);

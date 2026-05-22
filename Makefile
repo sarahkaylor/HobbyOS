@@ -80,6 +80,7 @@ TIMEOUT_BIN = $(OBJ_DIR)/timeout.bin
 DESKTOP_BIN = $(OBJ_DIR)/desktop.bin
 EDITOR_BIN = $(OBJ_DIR)/editor.bin
 EDITOR_T_BIN = $(OBJ_DIR)/EDITOR_T.BIN
+STRESS_TEST_BIN = $(OBJ_DIR)/stress.bin
 
 # Default rule: build the target
 all: $(TARGET)
@@ -153,6 +154,10 @@ $(OBJ_DIR)/user_pipe_test.o: src/user/pipe_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
+$(OBJ_DIR)/stress_test.o: src/user/stress_test.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
 $(OBJ_DIR)/user_graphics.o: src/user/graphics/graphics.c
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
@@ -217,6 +222,10 @@ $(PIPETEST_BIN): $(OBJ_DIR)/user_pipe_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/u
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/pipe_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/pipe_test.elf $(PIPETEST_BIN)
 
+$(STRESS_TEST_BIN): $(OBJ_DIR)/stress_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/stress.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/stress.elf $(STRESS_TEST_BIN)
+
 $(NETTEST_BIN): $(OBJ_DIR)/user_net_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/net_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/net_test.elf $(NETTEST_BIN)
@@ -241,7 +250,7 @@ $(EDITOR_T_BIN): $(OBJ_DIR)/user_editor_test.o $(OBJ_DIR)/user_desktop_test_wrap
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/editor_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/editor_test.elf $(EDITOR_T_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(STRESS_TEST_BIN)
 	dd if=/dev/zero of=disk.img bs=1M count=512
 	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img 
 	/opt/homebrew/bin/mcopy -i disk.img $(MEM_TEST_BIN) ::/MEMTEST.BIN
@@ -258,8 +267,13 @@ disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TE
 	/opt/homebrew/bin/mcopy -i disk.img $(DESKTOP_BIN) ::/DESKTOP.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(EDITOR_BIN) ::/EDITOR.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(EDITOR_T_BIN) ::/EDITOR_T.BIN
-	touch TEST.TXT
+	/opt/homebrew/bin/mcopy -i disk.img $(STRESS_TEST_BIN) ::/STRESS.BIN
+	touch TEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT
 	/opt/homebrew/bin/mcopy -i disk.img TEST.TXT ::/TEST.TXT
+	/opt/homebrew/bin/mcopy -i disk.img TEST1.TXT ::/TEST1.TXT
+	/opt/homebrew/bin/mcopy -i disk.img TEST2.TXT ::/TEST2.TXT
+	/opt/homebrew/bin/mcopy -i disk.img TEST3.TXT ::/TEST3.TXT
+	/opt/homebrew/bin/mcopy -i disk.img TEST4.TXT ::/TEST4.TXT
 
 # Target to run the OS inside QEMU
 run: $(TARGET) disk.img

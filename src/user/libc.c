@@ -65,6 +65,13 @@ void print(const char *s) {
   }
 }
 
+void print_console(const char *s) {
+  int len = 0;
+  while (s[len])
+    len++;
+  syscall(SYS_WRITE_CONSOLE, (long)s, len, 0, 0);
+}
+
 void print_hex(long val) {
   char buf[19];
   buf[0] = '0';

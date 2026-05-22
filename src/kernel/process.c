@@ -604,9 +604,6 @@ void start_scheduler(void) {
   uint32_t cpu = get_cpuid();
 
   int jmp_val = setjmp(scheduler_return_ctx[cpu]);
-  uart_puts("setjmp returned ");
-  print_int(jmp_val);
-  uart_puts("\n");
   if (jmp_val == 1) {
     interrupts_enable();
     // Exit scheduler (tests finished)

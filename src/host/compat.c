@@ -60,6 +60,10 @@ void print(const char *str) {
     write(1, str, strlen(str));
 }
 
+void print_console(const char *str) {
+    write(1, str, strlen(str));
+}
+
 void print_hex(long val) {
     printf("0x%016lx", val);
 }
