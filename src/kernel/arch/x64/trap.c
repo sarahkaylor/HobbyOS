@@ -282,7 +282,7 @@ extern void virtio_gpu_flush(void);
 static void sys_map_fb(struct trap_frame *tf) {
   uint64_t phys_addr = (uint64_t)virtio_gpu_get_framebuffer();
   mmu_map_user_framebuffer(phys_addr);
-  tf->regs[0] = 0x60000000; // Return user virtual address
+  tf->regs[0] = USER_FB_VIRT_BASE; // Return user virtual address
 }
 
 static void sys_flush_fb(struct trap_frame *tf) {

@@ -28,14 +28,14 @@ static void test_process_set_entry(void) {
     int pid = process_create();
     EXPECT_EQ((pid >= 0 && pid < MAX_PROCESSES), 1);
 
-    process_set_entry(pid, 0x44000000, 0x45000000);
+    process_set_entry(pid, USER_VIRT_BASE, USER_VIRT_STACK);
 
     struct process *p = process_get_pcb(pid);
     EXPECT_EQ((p != 0), 1);
     EXPECT_EQ(p->state, PROC_STATE_READY);
     // x31 in trap_frame mapping context is elr, x33 is sp_el0
-    EXPECT_EQ(p->context[31], 0x44000000);
-    EXPECT_EQ(p->context[33], 0x45000000);
+    EXPECT_EQ(p->context[31], USER_VIRT_BASE);
+    EXPECT_EQ(p->context[33], USER_VIRT_STACK);
 }
 
 void process_test_suite(void) {

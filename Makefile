@@ -21,21 +21,21 @@ ifeq ($(ARCH),intel)
   QEMU = /opt/homebrew/bin/qemu-system-x86_64
   # Intel/AMD 64-bit compiler flags
   # Using standard bare-metal flags, disabling red zone and SSE
-  CFLAGS = -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
-  USER_CFLAGS = -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
+  CFLAGS = -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
+  USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
   ARCH_DIR = src/kernel/arch/x64
   LDFLAGS = -T linker_x64.ld
-  # QEMU parameters for x86_64: 4 cores, 4GB RAM, mounting disk.img as IDE
-  QEMU_CMD = $(QEMU) -smp 4 -m 4096M -kernel $(TARGET) -display cocoa -serial stdio -drive file=disk.img,format=raw,if=ide,index=0,media=disk -action shutdown=poweroff $(QEMU_ARGS)
+  # QEMU parameters for x86_64: 4 cores, 6GB RAM, mounting disk.img as IDE
+  QEMU_CMD = $(QEMU) -smp 4 -m 6144M -kernel $(TARGET) -display cocoa -serial stdio -drive file=disk.img,format=raw,if=ide,index=0,media=disk -action shutdown=poweroff $(QEMU_ARGS)
 else
   # Default to ARM
   QEMU = /opt/homebrew/bin/qemu-system-aarch64
-  CFLAGS = -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
-  USER_CFLAGS = -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
+  CFLAGS = -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
+  USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
   ARCH_DIR = src/kernel/arch/arm
   LDFLAGS = -T linker.ld
-  # QEMU parameters for ARM: 4 cores, 4GB RAM
-  QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp 4 -m 4096M -kernel $(TARGET) -display cocoa -serial stdio -append "console=ttyAMA0" -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
+  # QEMU parameters for ARM: 4 cores, 6GB RAM
+  QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp 4 -m 6144M -kernel $(TARGET) -display cocoa -serial stdio -append "console=ttyAMA0" -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
 endif
 
 ifeq ($(MODE),test)

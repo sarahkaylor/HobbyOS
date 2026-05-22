@@ -9,6 +9,13 @@ extern uint32_t get_cpuid(void);
 uint64_t l1_table[MAX_CPUS][512] __attribute__((aligned(4096)));
 static uint64_t l2_table_0[512] __attribute__((aligned(4096)));
 uint64_t l2_table_1[MAX_CPUS][512] __attribute__((aligned(4096)));
+static uint64_t l2_table_2[512] __attribute__((aligned(4096)));
+static uint64_t l2_table_3[512] __attribute__((aligned(4096)));
+static uint64_t l2_table_4[512] __attribute__((aligned(4096)));
+static uint64_t l2_table_5[512] __attribute__((aligned(4096)));
+static uint64_t l2_table_6[512] __attribute__((aligned(4096)));
+static uint64_t l2_table_7[512] __attribute__((aligned(4096)));
+static uint64_t l2_table_8[512] __attribute__((aligned(4096)));
 static spinlock_t mmu_lock;
 
 #define MAIR_DEVICE_nGnRnE  0x00
@@ -40,10 +47,24 @@ void mmu_init_tables(void) {
         // Descriptor type: 0b11 (Table)
         l1_table[c][0] = ((uint64_t)&l2_table_0) | 0b11;
         l1_table[c][1] = ((uint64_t)&l2_table_1[c]) | 0b11;
+        l1_table[c][2] = ((uint64_t)&l2_table_2) | 0b11;
+        l1_table[c][3] = ((uint64_t)&l2_table_3) | 0b11;
+        l1_table[c][4] = ((uint64_t)&l2_table_4) | 0b11;
+        l1_table[c][5] = ((uint64_t)&l2_table_5) | 0b11;
+        l1_table[c][6] = ((uint64_t)&l2_table_6) | 0b11;
+        l1_table[c][7] = ((uint64_t)&l2_table_7) | 0b11;
+        l1_table[c][8] = ((uint64_t)&l2_table_8) | 0b11;
     }
     
     for (int i = 0; i < 512; i++) {
         l2_table_0[i] = 0;
+        l2_table_2[i] = 0;
+        l2_table_3[i] = 0;
+        l2_table_4[i] = 0;
+        l2_table_5[i] = 0;
+        l2_table_6[i] = 0;
+        l2_table_7[i] = 0;
+        l2_table_8[i] = 0;
     }
 
     // 4. Populate L2 Tables
@@ -54,6 +75,62 @@ void mmu_init_tables(void) {
         uint64_t attr = (PT_MEM_DEVICE << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
         attr |= (1ULL << 54) | (1ULL << 53); // UXN and PXN
         l2_table_0[i] = addr | attr;
+    }
+
+    // Populate L2 Table 2 (2GB - 3GB)
+    for (int i = 0; i < 512; i++) {
+        uint64_t addr = PROC_PHYS_POOL_BASE + (uint64_t)i * 0x200000;
+        uint64_t attr = (PT_MEM_NORMAL << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
+        attr |= (1ULL << 54); // UXN=1
+        l2_table_2[i] = addr | attr;
+    }
+
+    // Populate L2 Table 3 (3GB - 4GB)
+    for (int i = 0; i < 512; i++) {
+        uint64_t addr = 0xC0000000ULL + (uint64_t)i * 0x200000;
+        uint64_t attr = (PT_MEM_NORMAL << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
+        attr |= (1ULL << 54); // UXN=1
+        l2_table_3[i] = addr | attr;
+    }
+
+    // Populate L2 Table 4 (4GB - 5GB)
+    for (int i = 0; i < 512; i++) {
+        uint64_t addr = 0x100000000ULL + (uint64_t)i * 0x200000;
+        uint64_t attr = (PT_MEM_NORMAL << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
+        attr |= (1ULL << 54); // UXN=1
+        l2_table_4[i] = addr | attr;
+    }
+
+    // Populate L2 Table 5 (5GB - 6GB)
+    for (int i = 0; i < 512; i++) {
+        uint64_t addr = 0x140000000ULL + (uint64_t)i * 0x200000;
+        uint64_t attr = (PT_MEM_NORMAL << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
+        attr |= (1ULL << 54); // UXN=1
+        l2_table_5[i] = addr | attr;
+    }
+
+    // Populate L2 Table 6 (6GB - 7GB)
+    for (int i = 0; i < 512; i++) {
+        uint64_t addr = 0x180000000ULL + (uint64_t)i * 0x200000;
+        uint64_t attr = (PT_MEM_NORMAL << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
+        attr |= (1ULL << 54); // UXN=1
+        l2_table_6[i] = addr | attr;
+    }
+
+    // Populate L2 Table 7 (7GB - 8GB)
+    for (int i = 0; i < 512; i++) {
+        uint64_t addr = 0x1C0000000ULL + (uint64_t)i * 0x200000;
+        uint64_t attr = (PT_MEM_NORMAL << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
+        attr |= (1ULL << 54); // UXN=1
+        l2_table_7[i] = addr | attr;
+    }
+
+    // Populate L2 Table 8 (8GB - 9GB)
+    for (int i = 0; i < 512; i++) {
+        uint64_t addr = 0x200000000ULL + (uint64_t)i * 0x200000;
+        uint64_t attr = (PT_MEM_NORMAL << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
+        attr |= (1ULL << 54); // UXN=1
+        l2_table_8[i] = addr | attr;
     }
 
     // L2 Table 1 covers USER_START - 0x7FFFFFFF (RAM, 1GB)
@@ -98,12 +175,14 @@ void mmu_init_core(void) {
 
     // 5. Setup TCR_EL1 (Translation Control Register) 
     // TxSZ=25 (39-bit VA), 4KB Granule, Inner/Outer Non-cacheable (matching our Normal NC policy)
+    // IPS = 2ULL << 32 (40-bit Intermediate Physical Address size to support >4GB physical RAM)
     uint64_t tcr = (25) |            // T0SZ 
                    (1 << 23) |       // EPD1 (Disable TTBR1)
                    (0b00 << 14) |    // TG0 = 4KB Granule
                    (0b01 << 12) |    // SH0 = Inner Shareable
                    (0b01 << 10) |    // ORGN0 = Normal memory, Outer Non-cacheable
-                   (0b01 << 8);      // IRGN0 = Normal memory, Inner Non-cacheable
+                   (0b01 << 8) |     // IRGN0 = Normal memory, Inner Non-cacheable
+                   (2ULL << 32);     // IPS = 40-bit IPA
 
     __asm__ volatile("msr tcr_el1, %0" : : "r"(tcr));
 
@@ -165,14 +244,14 @@ uint64_t mmu_make_user_block_desc(uint64_t phys_addr) {
 void mmu_switch_user_mapping(uint64_t phys_base) {
     uint64_t flags = spinlock_acquire_irqsave(&mmu_lock);
     // The user virtual address USER_VIRT_BASE falls in L1 index 1 (USER_START-USER_END),
-    // L2 index 32 (USER_VIRT_BASE / 2MB - USER_START / 2MB = 32).
+    // L2 index USER_VIRT_L2_INDEX.
     // Map multiple 2MB blocks based on USER_REGION_SIZE.
     int num_blocks = USER_REGION_SIZE / 0x200000;
     if (USER_REGION_SIZE % 0x200000) num_blocks++;
 
     uint32_t cpu = get_cpuid();
     for (int i = 0; i < num_blocks; i++) {
-        l2_table_1[cpu][32 + i] = mmu_make_user_block_desc(phys_base + (uint64_t)i * 0x200000);
+        l2_table_1[cpu][USER_VIRT_L2_INDEX + i] = mmu_make_user_block_desc(phys_base + (uint64_t)i * 0x200000);
     }
 
     // Invalidate TLB and synchronize
@@ -187,17 +266,17 @@ void mmu_switch_user_mapping(uint64_t phys_base) {
 
 /**
  * Maps the physical framebuffer memory into the user-space address range.
- * Specifically maps to virtual address 0x50000000 (L2 index 128).
+ * Specifically maps to virtual address USER_FB_VIRT_BASE (L2 index USER_FB_L2_INDEX).
  * 
  * Parameters:
  *   phys_addr - The physical address of the framebuffer.
  */
 void mmu_map_user_framebuffer(uint64_t phys_addr) {
     uint64_t flags = spinlock_acquire_irqsave(&mmu_lock);
-    // Map to user virtual address 0x60000000
+    // Map to user virtual address USER_FB_VIRT_BASE
     for (int c = 0; c < MAX_CPUS; c++) {
-        l2_table_1[c][256] = mmu_make_user_block_desc(phys_addr);
-        l2_table_1[c][257] = mmu_make_user_block_desc(phys_addr + 0x200000);
+        l2_table_1[c][USER_FB_L2_INDEX] = mmu_make_user_block_desc(phys_addr);
+        l2_table_1[c][USER_FB_L2_INDEX + 1] = mmu_make_user_block_desc(phys_addr + 0x200000);
     }
 
     // Invalidate TLB and synchronize across all CPUs

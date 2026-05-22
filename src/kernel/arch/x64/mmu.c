@@ -12,6 +12,10 @@ uint64_t cpu_pd0[512] __attribute__((aligned(4096)));
 uint64_t cpu_pd1[MAX_CPUS][512] __attribute__((aligned(4096)));
 uint64_t cpu_pd2[512] __attribute__((aligned(4096)));
 uint64_t cpu_pd3[512] __attribute__((aligned(4096)));
+uint64_t cpu_pd4[512] __attribute__((aligned(4096)));
+uint64_t cpu_pd5[512] __attribute__((aligned(4096)));
+uint64_t cpu_pd6[512] __attribute__((aligned(4096)));
+uint64_t cpu_pd7[512] __attribute__((aligned(4096)));
 
 static spinlock_t mmu_lock;
 
@@ -41,7 +45,7 @@ void mmu_init_tables(void) {
 
     // Clear and set up the shared kernel/device PD2 (2 to 3GB)
     for (int i = 0; i < 512; i++) {
-        uint64_t addr = 0x80000000 + (uint64_t)i * 0x200000;
+        uint64_t addr = PROC_PHYS_POOL_BASE + (uint64_t)i * 0x200000;
         // Present | Read/Write | Huge Page (0x83)
         cpu_pd2[i] = addr | 0x83;
     }
@@ -51,6 +55,34 @@ void mmu_init_tables(void) {
         uint64_t addr = 0xC0000000 + (uint64_t)i * 0x200000;
         // Present | Read/Write | Huge Page (0x83)
         cpu_pd3[i] = addr | 0x83;
+    }
+
+    // Clear and set up the shared kernel/device PD4 (4 to 5GB)
+    for (int i = 0; i < 512; i++) {
+        uint64_t addr = 0x100000000ULL + (uint64_t)i * 0x200000;
+        // Present | Read/Write | Huge Page (0x83)
+        cpu_pd4[i] = addr | 0x83;
+    }
+
+    // Clear and set up the shared kernel/device PD5 (5 to 6GB)
+    for (int i = 0; i < 512; i++) {
+        uint64_t addr = 0x140000000ULL + (uint64_t)i * 0x200000;
+        // Present | Read/Write | Huge Page (0x83)
+        cpu_pd5[i] = addr | 0x83;
+    }
+
+    // Clear and set up the shared kernel/device PD6 (6 to 7GB)
+    for (int i = 0; i < 512; i++) {
+        uint64_t addr = 0x180000000ULL + (uint64_t)i * 0x200000;
+        // Present | Read/Write | Huge Page (0x83)
+        cpu_pd6[i] = addr | 0x83;
+    }
+
+    // Clear and set up the shared kernel/device PD7 (7 to 8GB)
+    for (int i = 0; i < 512; i++) {
+        uint64_t addr = 0x1C0000000ULL + (uint64_t)i * 0x200000;
+        // Present | Read/Write | Huge Page (0x83)
+        cpu_pd7[i] = addr | 0x83;
     }
     
     // Set up per-CPU directories
@@ -76,6 +108,18 @@ void mmu_init_tables(void) {
 
         // Link PDPT[3] to PD3 (covers 3 - 4GB)
         cpu_pdpt[c][3] = ((uint64_t)&cpu_pd3) | 0x07;
+
+        // Link PDPT[4] to PD4 (covers 4 - 5GB)
+        cpu_pdpt[c][4] = ((uint64_t)&cpu_pd4) | 0x07;
+
+        // Link PDPT[5] to PD5 (covers 5 - 6GB)
+        cpu_pdpt[c][5] = ((uint64_t)&cpu_pd5) | 0x07;
+
+        // Link PDPT[6] to PD6 (covers 6 - 7GB)
+        cpu_pdpt[c][6] = ((uint64_t)&cpu_pd6) | 0x07;
+
+        // Link PDPT[7] to PD7 (covers 7 - 8GB)
+        cpu_pdpt[c][7] = ((uint64_t)&cpu_pd7) | 0x07;
         
         // Initialize PD1 with kernel/device permissions by default (1GB to 2GB)
         for (int i = 0; i < 512; i++) {
@@ -125,7 +169,7 @@ void mmu_switch_user_mapping(uint64_t phys_base) {
     
     uint32_t cpu = get_cpuid();
     for (int i = 0; i < num_blocks; i++) {
-        cpu_pd1[cpu][32 + i] = mmu_make_user_block_desc(phys_base + (uint64_t)i * 0x200000);
+        cpu_pd1[cpu][USER_VIRT_L2_INDEX + i] = mmu_make_user_block_desc(phys_base + (uint64_t)i * 0x200000);
     }
     
     // Invalidate TLB by reloading CR3
@@ -148,8 +192,8 @@ void mmu_map_user_framebuffer(uint64_t phys_addr) {
     uint64_t flags = spinlock_acquire_irqsave(&mmu_lock);
     
     for (int c = 0; c < MAX_CPUS; c++) {
-        cpu_pd1[c][256] = mmu_make_user_block_desc(phys_addr);
-        cpu_pd1[c][257] = mmu_make_user_block_desc(phys_addr + 0x200000);
+        cpu_pd1[c][USER_FB_L2_INDEX] = mmu_make_user_block_desc(phys_addr);
+        cpu_pd1[c][USER_FB_L2_INDEX + 1] = mmu_make_user_block_desc(phys_addr + 0x200000);
     }
     
     // Invalidate TLB across all cores (reloading CR3 locally on the current core is sufficient in QEMU virt)

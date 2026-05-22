@@ -8,9 +8,6 @@
 extern void sync_lower_handler_c(struct trap_frame *tf);
 extern jmp_buf user_exit_context;
 
-#define USER_VIRT_BASE 0x44000000
-#define USER_REGION_SIZE 0x1000000
-
 #ifndef __x86_64__
 void *memset(void *s, int c, unsigned long n) {
     char *p = s;

@@ -20,6 +20,13 @@ spinlock_t proc_lock;
 static uint64_t next_phys_alloc = PROC_PHYS_POOL_BASE;
 static spinlock_t mem_lock;
 
+#ifdef __x86_64__
+#define NUM_PHYS_BLOCKS 16
+#else
+#define NUM_PHYS_BLOCKS 20
+#endif
+static uint8_t phys_blocks_used[NUM_PHYS_BLOCKS];
+
 // ---------------------------------------------------------------------------
 // Helper: byte-by-byte memory copy (no libc available, avoids SIMD issues)
 // ---------------------------------------------------------------------------
@@ -63,12 +70,16 @@ static void kmemset(void *dst, uint8_t val, uint64_t n) {
 void process_init(void) {
   spinlock_init(&proc_lock);
   spinlock_init(&mem_lock);
+  for (int i = 0; i < NUM_PHYS_BLOCKS; i++) {
+    phys_blocks_used[i] = 0;
+  }
   for (int i = 0; i < MAX_PROCESSES; i++) {
     proc_table[i].pid = i;
     proc_table[i].state = PROC_STATE_FREE;
     proc_table[i].parent_pid = -1;
     proc_table[i].user_l2_table = 0;
-    proc_table[i].user_phys_base = PROC_PHYS_POOL_BASE + i * USER_REGION_SIZE;
+    proc_table[i].phys_block_idx = -1;
+    proc_table[i].user_phys_base = 0;
     proc_table[i].num_open_fds = 0;
     proc_table[i].wake_ms = 0;
     for (int j = 0; j < MAX_OPEN_FDS; j++) {
@@ -164,6 +175,7 @@ void process_set_entry(int pid, uint64_t elr, uint64_t sp) {
 int process_create(void) {
   uart_puts("Inside process_create: acquiring lock...\n");
   int pid = -1;
+  int block_idx = -1;
   uint64_t p_flags = spinlock_acquire_irqsave(&proc_lock);
   for (int i = 0; i < MAX_PROCESSES; i++) {
     if (proc_table[i].state == PROC_STATE_FREE) {
@@ -172,17 +184,40 @@ int process_create(void) {
       break;
     }
   }
-  spinlock_release_irqrestore(&proc_lock, p_flags);
-
-  uart_puts("Inside process_create: lock released. pid=");
-  print_int(pid);
 
   if (pid < 0) {
+    spinlock_release_irqrestore(&proc_lock, p_flags);
     uart_puts("[KERNEL] process_create: no free process slots!\n");
     return -1;
   }
 
+  // Allocate a physical block
+  for (int i = 0; i < NUM_PHYS_BLOCKS; i++) {
+    if (!phys_blocks_used[i]) {
+      phys_blocks_used[i] = 1;
+      block_idx = i;
+      break;
+    }
+  }
+
+  if (block_idx < 0) {
+    proc_table[pid].state = PROC_STATE_FREE;
+    spinlock_release_irqrestore(&proc_lock, p_flags);
+    uart_puts("[KERNEL] process_create: no free physical memory blocks!\n");
+    return -1;
+  }
+
   struct process *p = &proc_table[pid];
+  p->phys_block_idx = block_idx;
+  p->user_phys_base = PROC_PHYS_POOL_BASE + (uint64_t)block_idx * USER_REGION_SIZE;
+  spinlock_release_irqrestore(&proc_lock, p_flags);
+
+  uart_puts("Inside process_create: lock released. pid=");
+  print_int(pid);
+  uart_puts(" block_idx=");
+  print_int(block_idx);
+  uart_puts("\n");
+
   p->parent_pid = -1;
   p->is_kernel_process = 0;
   for (int i = 0; i < 32; i++) {
@@ -195,9 +230,10 @@ int process_create(void) {
   }
 
   uart_puts("Inside process_create: clearing memory at ");
-  print_int(p->user_phys_base);
+  uart_print_hex(p->user_phys_base);
   uart_puts("\n");
-  kmemset((void *)p->user_phys_base, 0, USER_REGION_SIZE);
+  kmemset((void *)p->user_phys_base, 0, USER_INITIAL_CLEAR_SIZE);
+  kmemset((void *)(p->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE), 0, USER_STACK_CLEAR_SIZE);
   uart_puts("Inside process_create: kmemset done.\n");
 
   for (int i = 0; i < 34; i++) {
@@ -423,6 +459,10 @@ void process_exit(struct trap_frame *tf) {
   } else {
     cur->state = PROC_STATE_EXITED;
   }
+  if (cur->phys_block_idx >= 0) {
+    phys_blocks_used[cur->phys_block_idx] = 0;
+    cur->phys_block_idx = -1;
+  }
   spinlock_release_irqrestore(&proc_lock, flags);
 
   schedule(tf, 0);
@@ -433,6 +473,10 @@ void kernel_exit(void) {
   if (cur) {
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     cur->state = PROC_STATE_FREE;
+    if (cur->phys_block_idx >= 0) {
+      phys_blocks_used[cur->phys_block_idx] = 0;
+      cur->phys_block_idx = -1;
+    }
     set_current_process_pid(get_cpuid(), -1);
     spinlock_release_irqrestore(&proc_lock, flags);
   }
@@ -450,6 +494,10 @@ void process_free(int pid) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   struct process *p = &proc_table[pid];
   p->state = PROC_STATE_FREE;
+  if (p->phys_block_idx >= 0) {
+    phys_blocks_used[p->phys_block_idx] = 0;
+    p->phys_block_idx = -1;
+  }
   spinlock_release_irqrestore(&proc_lock, flags);
 }
 
@@ -463,6 +511,10 @@ int process_kill(int pid) {
     return -1;
   }
   p->state = PROC_STATE_EXITED;
+  if (p->phys_block_idx >= 0) {
+    phys_blocks_used[p->phys_block_idx] = 0;
+    p->phys_block_idx = -1;
+  }
   spinlock_release_irqrestore(&proc_lock, flags);
 
   // We close the global file descriptors directly to properly free resources
@@ -501,7 +553,10 @@ int process_fork(struct trap_frame *tf) {
   }
 
   kmemcpy((void *)child->user_phys_base, (void *)parent->user_phys_base,
-          USER_REGION_SIZE);
+          USER_INITIAL_CLEAR_SIZE);
+  kmemcpy((void *)(child->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
+          (void *)(parent->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
+          USER_STACK_CLEAR_SIZE);
   save_context(child, tf);
   child->context[0] = 0; // x0 = 0 for child
 
