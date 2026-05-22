@@ -88,6 +88,8 @@ struct process {
   int open_fds[MAX_OPEN_FDS];
 
   int num_open_fds; /**< Number of currently open file descriptors */
+  
+  uint64_t wake_ms; /**< Timestamp in ms when this process should wake up */
 };
 
 // Initialize the process subsystem and zero out the process table.

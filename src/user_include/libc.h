@@ -16,12 +16,14 @@
 #define fork ho_fork
 #define pipe ho_pipe
 #define connect ho_connect
+#define sleep ho_sleep
 #endif
 
 void print(const char *str);
 void print_hex(long val);
 void exit(int status);
 int fork(void);
+void sleep(int ms);
 
 int open(const char *filename);
 int close(int fd);

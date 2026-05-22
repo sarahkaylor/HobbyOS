@@ -236,6 +236,10 @@ int ho_connect(uint32_t ip, uint16_t port, int protocol) {
     return -1;
 }
 
+void ho_sleep(int ms) {
+    usleep(ms * 1000);
+}
+
 void gui_add_menu(int idx, const char* name, const char* items) {
     char buf[128];
     int len = 0;

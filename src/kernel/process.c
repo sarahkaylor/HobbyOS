@@ -4,6 +4,7 @@
 #include "mmu.h"
 #include "setjmp.h"
 #include "arch/cpu.h"
+#include "timer.h"
 #include <stdint.h>
 
 extern void uart_puts(const char *s);
@@ -69,6 +70,7 @@ void process_init(void) {
     proc_table[i].user_l2_table = 0;
     proc_table[i].user_phys_base = PROC_PHYS_POOL_BASE + i * USER_REGION_SIZE;
     proc_table[i].num_open_fds = 0;
+    proc_table[i].wake_ms = 0;
     for (int j = 0; j < MAX_OPEN_FDS; j++) {
       proc_table[i].open_fds[j] = -1;
     }
@@ -187,6 +189,7 @@ int process_create(void) {
     p->name[i] = 0;
   }
   p->num_open_fds = 0;
+  p->wake_ms = 0;
   for (int i = 0; i < MAX_OPEN_FDS; i++) {
     p->open_fds[i] = -1;
   }
@@ -262,6 +265,18 @@ static void restore_context(struct process *p, struct trap_frame *tf) {
 #endif
 }
 
+static void process_check_sleeping(void) {
+  uint64_t current_time = timer_get_ms();
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    if (proc_table[i].state == PROC_STATE_BLOCKED && proc_table[i].wake_ms > 0) {
+      if (current_time >= proc_table[i].wake_ms) {
+        proc_table[i].state = PROC_STATE_READY;
+        proc_table[i].wake_ms = 0;
+      }
+    }
+  }
+}
+
 volatile int scheduler_started = 0;
 
 /**
@@ -288,6 +303,8 @@ void schedule(struct trap_frame *tf, int is_yield) {
       save_context(cur, tf);
     }
   }
+
+  process_check_sleeping();
 
   while (1) {
     int next = -1;
@@ -541,7 +558,7 @@ void process_wakeup(int pid) {
 void process_wake_all(void) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   for (int i = 0; i < MAX_PROCESSES; i++) {
-    if (proc_table[i].state == PROC_STATE_BLOCKED) {
+    if (proc_table[i].state == PROC_STATE_BLOCKED && proc_table[i].wake_ms == 0) {
       proc_table[i].state = PROC_STATE_READY;
     }
   }
@@ -605,6 +622,7 @@ void start_scheduler(void) {
 
   while (1) {
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    process_check_sleeping();
     for (int i = 0; i < MAX_PROCESSES; i++) {
       if (proc_table[i].state == PROC_STATE_READY) {
         set_current_process_pid(cpu, i);

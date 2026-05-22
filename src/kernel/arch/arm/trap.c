@@ -58,6 +58,7 @@ extern uint32_t virtio_blk_irq;
 #define SYS_KILL (16)
 #define SYS_YIELD (17)
 #define SYS_CONNECT (18)
+#define SYS_SLEEP (19)
 
 // Timer PPI interrupt ID on QEMU virt (non-secure physical timer)
 #define TIMER_PPI_INTID 30
@@ -125,6 +126,20 @@ static void sys_connect(struct trap_frame *tf) {
   
   extern int file_connect(struct process *caller, uint32_t ip, uint16_t port, int protocol);
   tf->regs[0] = file_connect(caller, ip, port, protocol);
+}
+
+static void sys_sleep(struct trap_frame *tf) {
+  int ms = (int)tf->regs[0];
+  struct process *cur = current_process();
+  if (cur && ms > 0) {
+    uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    cur->wake_ms = timer_get_ms() + ms;
+    cur->state = PROC_STATE_BLOCKED;
+    spinlock_release_irqrestore(&proc_lock, flags);
+    schedule(tf, 0);
+  } else {
+    tf->regs[0] = 0;
+  }
 }
 
 static void sys_write(struct trap_frame *tf) {
@@ -414,6 +429,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       schedule(tf, 1);
     } else if (syscall_num == SYS_CONNECT) {
       sys_connect(tf);
+    } else if (syscall_num == SYS_SLEEP) {
+      sys_sleep(tf);
     } else if (syscall_num == 0xFF) {
       schedule(tf, 1);
     } else {
