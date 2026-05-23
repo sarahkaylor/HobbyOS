@@ -51,5 +51,6 @@ void timer_test_suite(void);
 void smp_test_suite(void);
 void virtio_net_test_suite(void);
 void net_test_suite(void);
+void net_rdma_test_suite(void);
 
 #endif // UNIT_TEST_H

@@ -59,3 +59,35 @@ HobbyOS provides multiple distinct build and execution targets through its Makef
 - **Protocol Support:** The kernel implements a minimalistic IPv4 stack focusing exclusively on UDP. TCP is not supported. Incoming Ethernet frames are parsed by `net_rx_packet`, validated for IPv4 and UDP, and dispatched to the appropriate Protocol Control Block (PCB).
 - **Dynamic Configuration (DHCP):** During boot, the OS broadcasts a DHCP Discover packet to dynamically acquire an IPv4 address, subnet mask, and router IP from the QEMU slirp network backend.
 - **Socket Abstraction:** User-space networking is accessed via the `SYS_CONNECT` system call (for UDP outbound connections). The kernel allocates a `net_pcb` (Protocol Control Block) and maps it into the process's file descriptor table as a Socket (`f->type = 2`). File operations (like `sys_close`) manage the lifecycle of these sockets, ensuring resources are freed upon process termination.
+
+## 11. Remote PCIe Device Sharing over UDP/IP + RDMA (Intel/x86_64 Edition)
+HobbyOS contains a high-performance bare-metal subsystem to share physical PCIe Express devices over the network to other instances of the OS. This capability is specifically targeting x86_64 architecture deployments.
+
+### A. Design Details & Core Interface
+- **Unified Remote Bus Interface**: A kernel daemon emulates the registers of the remote PCIe device (BAR0 MMIO region) over the network. The guest kernel reads and writes to this virtual device transparently using the compile-time Virtual Consumer API (`v_edu_read32`, `v_edu_write32`, etc.).
+- **Role Selection**: The kernel designates instances dynamically as:
+  - **Host (Provider)**: The instance containing the physical PCIe card. It intercepts incoming RDMA requests, executes the physical register/memory reads and writes, and transmits responses back.
+  - **Receiver (Consumer/Guest)**: The instance utilizing the remote device. It has no physical PCIe device but runs virtual device APIs that route operations to the Host over the network.
+
+### B. Bootup Options & Addressing Configuration
+To ensure the capability is only activated when explicitly configured, the remote PCIe sharing subsystem utilizes QEMU's standard **Firmware Configuration (`fw_cfg`)** Port I/O interface. It is completely inactive by default.
+- **Port I/O Registers**: Queries `0x510` (Selector, 16-bit) and `0x511` (Data, 8-bit) to locate directory entries.
+- **Key Location**: Scans for the file `opt/pcishare`.
+- **String Format**: `role:vendor_id:device_id` (e.g. `host:0x1234:0x11e8` or `guest:0x1234:0x11e8`).
+- **Default Bypassing**: If the configuration parameter is not passed at startup, the stack marks `g_rdma_active = 0`. Standard unit tests automatically bypass remote sharing checks, preventing boot hangs or dependency timeouts.
+
+### C. Network Implementation (UDP/IP RDMA)
+- **Zero TCP Dependency**: To maximize throughput and guarantee predictable bare-metal latencies, data transfer runs strictly over a UDP/IP stack on Port `7777`, completely bypassing heavy-weight TCP state machines.
+- **Legacy PCI Network Driver**: The x86_64 stack uses a custom legacy `virtio-net-pci` driver with a 256-descriptor ring layout, direct polling, and 8192-byte used-ring physical alignment, enabling sub-millisecond network packets.
+- **RDMA Opcode Protocols**: Bypasses traditional interrupt-bound networking using a synchronous request-response protocol mapping:
+  - `RDMA_OP_READ_REQ` / `RDMA_OP_READ_RESP` (MMIO Register Reads)
+  - `RDMA_OP_WRITE_REQ` / `RDMA_OP_WRITE_RESP` (MMIO Register Writes)
+  - `RDMA_OP_REG_MR` (Memory Region Registrations)
+  - `RDMA_OP_DMA_SYNC_TO_HOST` / `RDMA_OP_DMA_SYNC_TO_GUEST` (DMA Buffer Synchronizations)
+
+### D. Memory Layout & Shadow DMA Buffer Syncing
+Since physical PCIe devices directly access physical host memory (DMA) without standard CPU page translation, the subsystem implements a custom **Memory Region (MR) Translation Table**:
+- **Address Mapping**: When the Guest allocates a buffer in its local memory space (`guest_phys`), it registers this memory region with the Host via `RDMA_OP_REG_MR`.
+- **Shadow Allocation**: The Host allocates a physically contiguous block of standard RAM on the provider node (`host_phys`) to serve as a shadow bounce buffer.
+- **Synchronous Syncing**: Before starting a device DMA transaction, the Guest flushes its local data over the network to the Host's shadow buffer (`RDMA_OP_DMA_SYNC_TO_HOST`). The physical PCIe device executes the DMA transfer using `host_phys`. Once complete, the Guest pulls the modified shadow buffer data back over the network into its local memory (`RDMA_OP_DMA_SYNC_TO_GUEST`), maintaining coherent virtual memory protection across machine boundaries.
+

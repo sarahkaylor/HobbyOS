@@ -20,6 +20,7 @@ struct virtio_net_config {
  * @return 0 on successful initialization, -1 if no device is found or configuration fails.
  */
 int virtio_net_init(void);
+int virtio_net_is_active(void);
 
 /**
  * Gets the locally assigned MAC address of the network interface.

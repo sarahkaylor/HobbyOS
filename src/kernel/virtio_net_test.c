@@ -26,6 +26,10 @@ void virtio_net_test(void) {
 
 void virtio_net_test_suite(void) {
     uart_puts("Running virtio_net tests...\n");
+    if (!virtio_net_is_active()) {
+        uart_puts("  VirtIO network device is not active/present - bypassing test.\n");
+        return;
+    }
     virtio_net_test();
 }
 

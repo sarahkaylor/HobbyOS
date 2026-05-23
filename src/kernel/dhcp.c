@@ -180,6 +180,10 @@ void dhcp_rx(uint8_t* packet, uint32_t len) {
 }
 
 void dhcp_init(void) {
+#ifdef __x86_64__
+    uart_puts("Skipping DHCP on x86_64 (using static IP configuration).\n");
+    return;
+#endif
     uart_puts("Initializing DHCP...\n");
     send_dhcp_discover();
     
