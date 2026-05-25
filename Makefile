@@ -251,7 +251,7 @@ $(EDITOR_T_BIN): $(OBJ_DIR)/user_editor_test.o $(OBJ_DIR)/user_desktop_test_wrap
 	$(OBJCOPY) -O binary $(OBJ_DIR)/editor_test.elf $(EDITOR_T_BIN)
 
 disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(STRESS_TEST_BIN) $(MODE_FILE)
-	dd if=/dev/zero of=disk.img bs=1M count=512
+	dd if=/dev/zero of=disk.img bs=1M count=64
 	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img 
 	/opt/homebrew/bin/mmd -i disk.img ::/EFI
 	/opt/homebrew/bin/mmd -i disk.img ::/EFI/BOOT
@@ -389,4 +389,19 @@ desktop_test_arm:
 desktop_test_intel:
 	ARCH=intel python3 ./run_desktop_test.py
 
-.PHONY: all clean run memtest fileio_test fork_test tests test unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel
+deploy_intel:
+	$(MAKE) ARCH=intel disk.img
+	@echo "Copying disk image to Proxmox server..."
+	scp -C -o StrictHostKeyChecking=no -i ~/.ssh/mac_to_r1 disk.img root@192.168.10.174:/root/disk_205.raw
+	@echo "Recreating VM 205 on Proxmox..."
+	ssh -o StrictHostKeyChecking=no -i ~/.ssh/mac_to_r1 root@192.168.10.174 "\
+		qm stop 205 || true; \
+		qm destroy 205 --purge || true; \
+		qm create 205 --name HobbyOSIntel --cores 4 --memory 4096 --net0 virtio,bridge=vmbr0; \
+		qm importdisk 205 /root/disk_205.raw local-lvm; \
+		qm set 205 --scsihw virtio-scsi-pci --scsi0 local-lvm:vm-205-disk-0 --bootdisk scsi0 --boot d; \
+		qm set 205 --bios ovmf --efidisk0 local-lvm:0; \
+		rm -f /root/disk_205.raw; \
+		qm start 205"
+
+.PHONY: all clean run memtest fileio_test fork_test tests test unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel deploy_intel
