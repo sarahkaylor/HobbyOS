@@ -91,3 +91,21 @@ Since physical PCIe devices directly access physical host memory (DMA) without s
 - **Shadow Allocation**: The Host allocates a physically contiguous block of standard RAM on the provider node (`host_phys`) to serve as a shadow bounce buffer.
 - **Synchronous Syncing**: Before starting a device DMA transaction, the Guest flushes its local data over the network to the Host's shadow buffer (`RDMA_OP_DMA_SYNC_TO_HOST`). The physical PCIe device executes the DMA transfer using `host_phys`. Once complete, the Guest pulls the modified shadow buffer data back over the network into its local memory (`RDMA_OP_DMA_SYNC_TO_GUEST`), maintaining coherent virtual memory protection across machine boundaries.
 
+## 11. Intel-only Testing Servers
+- Available at 192.168.10.174 is a Proxmox Server with a large number of CPU cores, and RAM. It can be connected to via ssh with a command: ```ssh -i ~/.ssh/mac_to_r1 root@192.168.10.174```
+- The server at 192.168.10.174 has an Nvidia RTX 4090 GPU at PCIE address 0000:01:00 which is available to be used in QEMU VMs that this proxmox system hosts
+- An example host OS that has this GPU connected, has a configuration file located at /etc/pve/nodes/r1/qemu-server/117.conf . This is an example file and should not be modified. see the line with 'hostpci0' for the example configuration line
+- Example commands for how to use the testing server (The VM ID number is 201 in each command):
+  - To create a new VM: ```qm create 201 --name HobbyOSHost1 --cores 4 --memory 4096 --net0 virtio,bridge=vmbr0 ```
+  - To add a 32GB disk to VM: ```qm set 201 --scsihw virtio-scsi-pci --scsi0 local-lvm:32,format=raw ``` 
+  - To start a VM: ```qm start 201```
+  - To check console output (Serial): ```qm terminal 201```
+  - To stop a VM: ```qm stop 201```
+  - To delete a VM: ```qm destory 201 --purge```
+- Example of how to import a disk into a new VM:
+  ```bash
+  qm create 100 --name ImportedVM && \
+  qm importdisk 100 /root/disk.raw local-lvm && \
+  qm set 100 --scsi0 local-lvm:100/vm-100-disk-0 --bootdisk scsi0 --boot d && \
+  qm start 100
+  ```
