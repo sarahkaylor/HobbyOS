@@ -393,6 +393,11 @@ void general_interrupt_handler(struct trap_frame *tf) {
         uint32_t intid = gic_acknowledge_interrupt();
         timer_reload();
         
+        // Broadcast rescheduling IPI (vector 0x81) to all other cores
+        if (get_cpuid() == 0) {
+            *(volatile uint32_t*)(0xFEE00300) = 0x000C4081;
+        }
+        
         struct process *cur = current_process();
         if (cur && (cur->is_kernel_process || (tf->cs & 3) == 3)) {
             gic_end_interrupt(intid);
