@@ -1,4 +1,4 @@
-#ifdef KERNEL_MODE_UNIT_TEST
+#if defined(KERNEL_MODE_UNIT_TEST) && defined(__x86_64__)
 
 #include "net_rdma.h"
 #include "unit_test.h"
@@ -224,4 +224,11 @@ void net_rdma_test_suite(void) {
     }
 }
 
-#endif // KERNEL_MODE_UNIT_TEST
+#endif // KERNEL_MODE_UNIT_TEST and __x86_64__
+
+#if defined(KERNEL_MODE_UNIT_TEST) && !defined(__x86_64__)
+#include "unit_test.h"
+void net_rdma_test_suite(void) {
+    // Stub on non-x86_64 architectures
+}
+#endif

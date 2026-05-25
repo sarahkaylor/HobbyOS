@@ -194,7 +194,8 @@ void dhcp_init(void) {
             uart_puts("[DHCP] Error: Initialization timeout. No DHCP server found.\n");
             return;
         }
-        safe_wfi();
+        extern void virtio_net_handle_irq(void);
+        virtio_net_handle_irq();
     }
     uart_puts("DHCP initialization complete.\n");
 }

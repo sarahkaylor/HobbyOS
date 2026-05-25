@@ -1,3 +1,5 @@
+#ifdef __x86_64__
+
 #include "net_rdma.h"
 #include "net.h"
 #include "lock.h"
@@ -614,3 +616,18 @@ int rdma_dma_sync(uint64_t guest_phys, uint32_t size, int to_device) {
     }
     return 0;
 }
+
+#else
+
+#include "net_rdma.h"
+void net_rdma_init(void) {}
+void net_rdma_poll(void) {}
+uint32_t v_edu_read32(uint32_t offset) { (void)offset; return 0xFFFFFFFF; }
+void v_edu_write32(uint32_t offset, uint32_t val) { (void)offset; (void)val; }
+uint64_t v_edu_read64(uint32_t offset) { (void)offset; return 0xFFFFFFFFFFFFFFFFULL; }
+void v_edu_write64(uint32_t offset, uint64_t val) { (void)offset; (void)val; }
+int rdma_register_mr(uint64_t guest_phys, uint32_t size) { (void)guest_phys; (void)size; return -1; }
+uint64_t guest_to_host_phys(uint64_t guest_phys) { return guest_phys; }
+int rdma_dma_sync(uint64_t guest_phys, uint32_t size, int to_device) { (void)guest_phys; (void)size; (void)to_device; return -1; }
+
+#endif

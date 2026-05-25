@@ -257,10 +257,11 @@ int process_create_kernel(void (*entry)(void*), void *arg) {
   // Set up EL1t execution context
   p->context[31] = (uint64_t)entry;        // ELR (entry point)
   p->context[33] = p->user_phys_base + USER_REGION_SIZE; // SP_EL0 used for EL1t stack
-  p->context[32] = 0x04;                   // SPSR = EL1t (Execution Level 1, use SP_EL0)
 #ifdef __x86_64__
+  p->context[32] = 0x202;                  // RFLAGS = IF (0x200) | Reserved (0x02)
   p->context[5] = (uint64_t)arg;           // rdi = first argument on x86_64
 #else
+  p->context[32] = 0x04;                   // SPSR = EL1t (Execution Level 1, use SP_EL0)
   p->context[0] = (uint64_t)arg;           // x0 = first argument on ARM64
 #endif
   p->state = PROC_STATE_READY;

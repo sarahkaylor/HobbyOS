@@ -803,11 +803,19 @@ __asm__(
 "    \n"
 "    mov rsp, r8\n"
 "    call restore_user_sp_helper\n"
+"    mov rax, gs:[24]\n"
+"    mov [rsp + 304], rax\n"
 "    jmp common_trap_exit\n"
 ".att_syntax prefix\n"
 );
 
 void trap_init(void) {
+    // Statically initialize cpu_id in cpu_locals for all cores so tests pass
+    // even when SMP secondary cores are not initialized in KERNEL_MODE_UNIT_TEST.
+    for (int i = 0; i < MAX_CPUS; i++) {
+        cpu_locals[i].cpu_id = i;
+    }
+
     // 1. Setup Exception vectors in IDT (using Ring 0 interrupt gate 0x8E)
     for (int i = 0; i < 32; i++) {
         idt_set_gate(i, 0, 0x08, 0x8E); // default null

@@ -2,6 +2,19 @@
 .global _start
 
 _start:
+    // Linux AArch64 kernel image header
+    b       real_start           // Executable instruction (branch to real code)
+    .long   0                    // Reserved
+    .quad   0x80000              // Image load offset from start of RAM (usually 0x80000)
+    .quad   0x100000             // Effective size of kernel image, little-endian (approx 1MB)
+    .quad   0                    // Flags (0 = little-endian, etc.)
+    .quad   0                    // Reserved
+    .quad   0                    // Reserved
+    .quad   0                    // Reserved
+    .ascii  "ARM\x64"            // Magic number
+    .long   0                    // Reserved (pe_header_offset if UEFI)
+
+real_start:
     // Read the CPU ID (MPIDR_EL1)
     mrs     x0, mpidr_el1
     and     x0, x0, #0xFF
@@ -9,19 +22,23 @@ _start:
     // Set stack pointer: __stack_top - (cpu_id * 64KB)
     mov     x1, #0x10000             // 64KB per CPU
     mul     x1, x0, x1
-    ldr     x2, =__stack_top
+    adrp    x2, __stack_top
+    add     x2, x2, :lo12:__stack_top
     sub     sp, x2, x1
 
     // Set Vector Base Address Register for EL1
-    ldr     x1, =vectors
+    adrp    x1, vectors
+    add     x1, x1, :lo12:vectors
     msr     vbar_el1, x1
 
     // If not CPU 0, branch to halt (secondary cores start here only if not using PSCI)
     cbnz    x0, halt
 
     // Clear the BSS section
-    ldr     x1, =__bss_start
-    ldr     x2, =__bss_end
+    adrp    x1, __bss_start
+    add     x1, x1, :lo12:__bss_start
+    adrp    x2, __bss_end
+    add     x2, x2, :lo12:__bss_end
 clear_bss:
     cmp     x1, x2
     b.ge    run_main
@@ -71,11 +88,13 @@ secondary_entry:
     // Set stack pointer: __stack_top - (cpu_id * 64KB)
     mov     x1, #0x10000             // 64KB per CPU
     mul     x1, x0, x1
-    ldr     x2, =__stack_top
+    adrp    x2, __stack_top
+    add     x2, x2, :lo12:__stack_top
     sub     sp, x2, x1
 
     // Set Vector Base Address Register for EL1
-    ldr     x1, =vectors
+    adrp    x1, vectors
+    add     x1, x1, :lo12:vectors
     msr     vbar_el1, x1
 
     // Call the C secondary_main function

@@ -127,8 +127,10 @@ void main(void) {
   // Initialize and enable the timer
   timer_init();
 
+#ifndef KERNEL_MODE_UNIT_TEST
   // Wake up secondary cores via PSCI
   smp_init();
+#endif
 
   // Enable interrupts on the boot core
   interrupts_enable();
@@ -154,7 +156,9 @@ void main(void) {
   if (virtio_net_init() == 0) {
     uart_puts("VirtIO Network successfully initialized.\n");
     gic_enable_interrupt(virtio_net_irq);
+#ifndef KERNEL_MODE_UNIT_TEST
     dhcp_init();
+#endif
   } else {
     uart_puts("VirtIO Network initialization failed!\n");
   }

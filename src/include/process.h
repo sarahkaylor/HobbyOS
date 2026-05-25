@@ -28,14 +28,14 @@
 // Standard 4KB page size
 #define PAGE_SIZE 0x1000
 
-// Size of the user memory region allocated per process (256MB)
-#define USER_REGION_SIZE 0x10000000
+// Size of the user memory region allocated per process (32MB)
+#define USER_REGION_SIZE 0x2000000
 
-// Size of the initial portion of memory to clear/copy (8MB)
-#define USER_INITIAL_CLEAR_SIZE 0x800000
+// Size of the initial portion of memory to clear/copy (256KB)
+#define USER_INITIAL_CLEAR_SIZE 0x40000
 
-// Size of the stack portion of memory to clear/copy (4MB)
-#define USER_STACK_CLEAR_SIZE 0x400000
+// Size of the stack portion of memory to clear/copy (256KB)
+#define USER_STACK_CLEAR_SIZE 0x40000
 
 // Number of 4KB pages in a 2MB user region
 #define PAGES_PER_REGION ((USER_REGION_SIZE) / (PAGE_SIZE))
@@ -58,8 +58,11 @@
 
 // Physical address pool base for dynamically allocated process memory
 // This ensures user memory does not overlap with kernel code
+#ifdef __x86_64__
+#define PROC_PHYS_POOL_BASE 0x20000000
+#else
 #define PROC_PHYS_POOL_BASE 0x80000000
-
+#endif
 // QEMU Virt machine GICv2 memory-mapped register addresses
 #define GICD_BASE 0x08000000 // Distributor base address
 #define GICC_BASE 0x08010000 // CPU Interface base address

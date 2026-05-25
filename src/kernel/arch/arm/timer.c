@@ -28,9 +28,11 @@ void timer_init(void) {
     uint64_t ctl = 1;
     __asm__ volatile("msr cntp_ctl_el0, %0" : : "r"(ctl));
 
+#ifndef KERNEL_MODE_UNIT_TEST
     // Unmask GIC timer interrupt PPI (INTID 30) locally
     extern void gic_enable_interrupt(uint32_t intid);
     gic_enable_interrupt(30);
+#endif
 }
 
 /**

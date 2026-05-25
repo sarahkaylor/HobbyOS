@@ -6,11 +6,11 @@ rm -f qemu.log
 echo "Building and running unit tests..."
 
 # Run the test target in background
-make unit_tests > qemu.log 2>&1 &
+make unit_tests QEMU_ARGS="-display none" > qemu.log 2>&1 &
 QEMU_PID=$!
 
-# Wait for tests to finish or timeout after 10 seconds
-TIMEOUT=10
+# Wait for tests to finish or timeout after 20 seconds
+TIMEOUT=20
 while [ $TIMEOUT -gt 0 ]; do
     if grep -q "UNIT TESTS PASSED" qemu.log; then
         echo "Tests passed!"

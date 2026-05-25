@@ -79,7 +79,7 @@ void mmu_init_tables(void) {
 
     // Populate L2 Table 2 (2GB - 3GB)
     for (int i = 0; i < 512; i++) {
-        uint64_t addr = PROC_PHYS_POOL_BASE + (uint64_t)i * 0x200000;
+        uint64_t addr = 0x80000000ULL + (uint64_t)i * 0x200000;
         uint64_t attr = (PT_MEM_NORMAL << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
         attr |= (1ULL << 54); // UXN=1
         l2_table_2[i] = addr | attr;
@@ -190,8 +190,13 @@ void mmu_init_core(void) {
     uint32_t cpu = get_cpuid();
     __asm__ volatile("msr ttbr0_el1, %0" : : "r"((uint64_t)&l1_table[cpu]));
 
-    // Instruction barrier to ensure writes are complete
-    __asm__ volatile("isb");
+    // Invalidate Stage 1 TLB to clear any stale entries from UEFI/early boot
+    __asm__ volatile(
+        "dsb sy\n"
+        "tlbi vmalle1\n"
+        "dsb sy\n"
+        "isb\n"
+    );
 
     // 7. Enable MMU in SCTLR_EL1 (M bit)
     uint64_t sctlr;
@@ -200,8 +205,13 @@ void mmu_init_core(void) {
     sctlr &= ~(1 << 1); // Ensure strict alignment checking 'A' is disabled (just in case!)
     __asm__ volatile("msr sctlr_el1, %0" : : "r"(sctlr));
     
-    // Sync
-    __asm__ volatile("isb");
+    // Sync and invalidate TLB once more with MMU enabled
+    __asm__ volatile(
+        "dsb sy\n"
+        "tlbi vmalle1\n"
+        "dsb sy\n"
+        "isb\n"
+    );
 }
 
 /**

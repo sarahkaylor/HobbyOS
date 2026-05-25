@@ -45,7 +45,7 @@ void mmu_init_tables(void) {
 
     // Clear and set up the shared kernel/device PD2 (2 to 3GB)
     for (int i = 0; i < 512; i++) {
-        uint64_t addr = PROC_PHYS_POOL_BASE + (uint64_t)i * 0x200000;
+        uint64_t addr = 0x80000000ULL + (uint64_t)i * 0x200000;
         // Present | Read/Write | Huge Page (0x83)
         cpu_pd2[i] = addr | 0x83;
     }

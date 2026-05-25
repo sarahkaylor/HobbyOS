@@ -25,8 +25,8 @@ ifeq ($(ARCH),intel)
   USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
   ARCH_DIR = src/kernel/arch/x64
   LDFLAGS = -T linker_x64.ld
-  # QEMU parameters for x86_64: 4 cores, 6GB RAM, mounting disk.img as IDE
-  QEMU_CMD = $(QEMU) -M q35 -smp 4 -m 6144M -kernel $(TARGET) -display cocoa -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -action shutdown=poweroff $(QEMU_ARGS)
+  # QEMU parameters for x86_64: 4 cores, 6GB RAM, mounting disk.img as NVMe, booting with UEFI
+  QEMU_CMD = $(QEMU) -M q35 -smp 4 -m 3072M -pflash /opt/homebrew/share/qemu/edk2-x86_64-code.fd -display cocoa -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -action shutdown=poweroff $(QEMU_ARGS)
 else
   # Default to ARM
   QEMU = /opt/homebrew/bin/qemu-system-aarch64
@@ -34,8 +34,8 @@ else
   USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
   ARCH_DIR = src/kernel/arch/arm
   LDFLAGS = -T linker.ld
-  # QEMU parameters for ARM: 4 cores, 6GB RAM
-  QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp 4 -m 6144M -kernel $(TARGET) -display cocoa -serial stdio -append "console=ttyAMA0" -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
+  # QEMU parameters for ARM: 4 cores, 2GB RAM, booting with UEFI
+  QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp 4 -m 2048M -bios /opt/homebrew/share/qemu/edk2-aarch64-code.fd -display cocoa -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
 endif
 
 ifeq ($(MODE),test)
@@ -250,9 +250,34 @@ $(EDITOR_T_BIN): $(OBJ_DIR)/user_editor_test.o $(OBJ_DIR)/user_desktop_test_wrap
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/editor_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/editor_test.elf $(EDITOR_T_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(STRESS_TEST_BIN)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(STRESS_TEST_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=512
 	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img 
+	/opt/homebrew/bin/mmd -i disk.img ::/EFI
+	/opt/homebrew/bin/mmd -i disk.img ::/EFI/BOOT
+	/opt/homebrew/bin/mmd -i disk.img ::/boot
+	/opt/homebrew/bin/mcopy -i disk.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+	/opt/homebrew/bin/mcopy -i disk.img bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
+ifeq ($(ARCH),arm)
+	@echo "timeout: 0" > obj/$(ARCH)/limine.conf
+	@echo "default_entry: 1" >> obj/$(ARCH)/limine.conf
+	@echo "" >> obj/$(ARCH)/limine.conf
+	@echo "/HobbyOS (ARM AArch64)" >> obj/$(ARCH)/limine.conf
+	@echo "protocol: linux" >> obj/$(ARCH)/limine.conf
+	@echo "path: boot():/boot/hobbyos.bin" >> obj/$(ARCH)/limine.conf
+	/opt/homebrew/bin/mcopy -i disk.img obj/$(ARCH)/limine.conf ::/boot/limine.conf
+	$(OBJCOPY) -O binary $(TARGET) hobbyos.bin
+	/opt/homebrew/bin/mcopy -i disk.img hobbyos.bin ::/boot/hobbyos.bin
+else
+	@echo "timeout: 0" > obj/$(ARCH)/limine.conf
+	@echo "default_entry: 1" >> obj/$(ARCH)/limine.conf
+	@echo "" >> obj/$(ARCH)/limine.conf
+	@echo "/HobbyOS (Intel x86_64)" >> obj/$(ARCH)/limine.conf
+	@echo "protocol: multiboot1" >> obj/$(ARCH)/limine.conf
+	@echo "path: boot():/boot/hobbyos.elf" >> obj/$(ARCH)/limine.conf
+	/opt/homebrew/bin/mcopy -i disk.img obj/$(ARCH)/limine.conf ::/boot/limine.conf
+	/opt/homebrew/bin/mcopy -i disk.img $(TARGET) ::/boot/hobbyos.elf
+endif
 	/opt/homebrew/bin/mcopy -i disk.img $(MEM_TEST_BIN) ::/MEMTEST.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(FILE_IO_BIN) ::/FILEIO.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(CONSOLE_TEST_BIN) ::/CONSOLE.BIN

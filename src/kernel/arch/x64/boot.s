@@ -5,8 +5,21 @@
 .align 4
 multiboot_header:
     .long 0x1BADB002             /* Magic number */
-    .long 0x00000003             /* Flags: ALIGN + MEMINFO */
-    .long -(0x1BADB002 + 0x00000003) /* Checksum */
+    .long 0x00000007             /* Flags: ALIGN + MEMINFO + GRAPHICS */
+    .long -(0x1BADB002 + 0x00000007) /* Checksum */
+    
+    /* AOUT kludge fields (padding required to reach graphics fields) */
+    .long 0
+    .long 0
+    .long 0
+    .long 0
+    .long 0
+    
+    /* Graphics fields */
+    .long 0                      /* mode_type: 0 = linear graphics */
+    .long 1024                   /* width */
+    .long 768                    /* height */
+    .long 32                     /* depth */
 
 .global _start
 _start:

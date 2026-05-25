@@ -361,6 +361,7 @@ int virtio_net_is_active(void) {
 #define VIRTIO_INTERRUPT_STATUS 0x060
 #define VIRTIO_INTERRUPT_ACK 0x064
 #define VIRTIO_STATUS       0x070
+#define VIRTIO_CONFIG       0x100
 
 #define MMIO_BASE(slot) ((uint8_t*)0x0A000000 + (slot) * 0x200)
 
@@ -564,6 +565,18 @@ int virtio_net_send(const void *buf, uint32_t len) {
     arch_memory_barrier();
     tx_vq.avail.idx++;
     arch_memory_barrier();
+
+    uart_puts("[VIRTIO_NET] TX: tx_vq=");
+    uart_print_hex((uint64_t)&tx_vq);
+    uart_puts(" tx_hdr=");
+    uart_print_hex((uint64_t)&tx_hdr);
+    uart_puts(" buf=");
+    uart_print_hex((uint64_t)buf);
+    uart_puts(" idx=");
+    print_int(tx_vq.avail.idx);
+    uart_puts(" ack=");
+    print_int(tx_ack_used_idx);
+    uart_puts("\n");
 
     reg_write32(VIRTIO_QUEUE_SEL, 1);
     reg_write32(VIRTIO_QUEUE_NOTIFY, 1);
