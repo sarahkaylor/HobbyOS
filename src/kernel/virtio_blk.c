@@ -215,27 +215,65 @@ int virtio_blk_init(void) {
     
     uart_puts("Found NVMe controller on PCI bus!\n");
     
-    // Read BAR0 (64-bit BAR)
-    uint32_t bar0_low = pci_read_config(nvme_bus, nvme_slot, 0, 0x10);
-    uint32_t bar0_high = pci_read_config(nvme_bus, nvme_slot, 0, 0x14);
-    uint64_t nvme_regs_phys = (bar0_low & 0xFFFFFFF0) | ((uint64_t)bar0_high << 32);
+    uart_puts("PCI Config Space of NVMe:\n");
+    for (int i = 0; i < 16; i++) {
+        uart_print_hex(pci_read_config(nvme_bus, nvme_slot, 0, i * 4));
+        uart_puts(" ");
+        if ((i + 1) % 4 == 0) uart_puts("\n");
+    }
+    
+    // Do NOT reprogram BAR0 to a safe 32-bit physical address. Keep the original high 64-bit BAR address assigned by UEFI/OVMF.
+    // pci_write_config(nvme_bus, nvme_slot, 0, 0x10, 0xE0000000);
+    // pci_write_config(nvme_bus, nvme_slot, 0, 0x14, 0x00000000); // Clear high 32-bits
     
     // Enable Memory Space and Bus Mastering
     uint32_t cmd = pci_read_config(nvme_bus, nvme_slot, 0, 0x04);
     pci_write_config(nvme_bus, nvme_slot, 0, 0x04, cmd | 0x06);
     
-    // Setup register pointer
-    nvme_regs = (volatile uint32_t*)(uint64_t)nvme_regs_phys;
+    // Read BAR0 back to verify
+    uint32_t bar0_low = pci_read_config(nvme_bus, nvme_slot, 0, 0x10);
+    uint32_t bar0_high = pci_read_config(nvme_bus, nvme_slot, 0, 0x14);
+    uint64_t nvme_regs_phys = (bar0_low & 0xFFFFFFF0) | ((uint64_t)bar0_high << 32);
+    
+    // Setup register pointer (dynamically map BAR using index 480 of cpu_pd7)
+    extern uint64_t cpu_pd7[512];
+    cpu_pd7[480] = (nvme_regs_phys & 0xFFFFFFFFFFE00000ULL) | 0x9B;
+    
+    // Flush TLB
+    uint64_t cr3_val;
+    __asm__ volatile(
+        "mov %%cr3, %0\n"
+        "mov %0, %%cr3\n"
+        : "=r"(cr3_val)
+        :
+        : "memory"
+    );
+    
+    nvme_regs = (volatile uint32_t*)(0x1FC000000ULL + (nvme_regs_phys & 0x1FFFFF));
     
     uart_puts("NVMe BAR0 Phys: ");
     uart_print_hex(nvme_regs_phys);
-    uart_puts("\n");
+    uart_puts(" (Mapped to Virtual: ");
+    uart_print_hex((uint64_t)nvme_regs);
+    uart_puts(")\n");
     
     // Reset/Disable Controller
-    nvme_regs[5] &= ~1; // CC.EN = 0
+    nvme_regs[5] = 0; // CC = 0 (disables controller)
+    uart_puts("Resetting controller, waiting for CSTS.RDY = 0...\n");
+    int wait_loops = 0;
     while (nvme_regs[7] & 1) { // Wait for CSTS.RDY = 0
         __asm__ volatile("pause");
+        wait_loops++;
+        if (wait_loops == 10000000) {
+            uart_puts("CSTS=");
+            uart_print_hex(nvme_regs[7]);
+            uart_puts(" CC=");
+            uart_print_hex(nvme_regs[5]);
+            uart_puts("\n");
+            wait_loops = 0;
+        }
     }
+    uart_puts("Controller reset complete!\n");
     
     // Configure Admin Queues
     // AQA: ASQS = 1 (2 entries), ACQS = 1 (2 entries)
@@ -248,17 +286,42 @@ int virtio_blk_init(void) {
     }
     
     // ASQ
-    *(volatile uint64_t*)&nvme_regs[10] = (uint64_t)&admin_sq;
+    uint64_t admin_sq_phys = (uint64_t)&admin_sq;
+    nvme_regs[10] = (uint32_t)admin_sq_phys;
+    nvme_regs[11] = (uint32_t)(admin_sq_phys >> 32);
+    (void)nvme_regs[11]; // Flush write
+ 
     // ACQ
-    *(volatile uint64_t*)&nvme_regs[12] = (uint64_t)&admin_cq;
+    uint64_t admin_cq_phys = (uint64_t)&admin_cq;
+    nvme_regs[12] = (uint32_t)admin_cq_phys;
+    nvme_regs[13] = (uint32_t)(admin_cq_phys >> 32);
+    (void)nvme_regs[13]; // Flush write
     
     // Configure CC: IOSQES=6 (64 bytes), IOCQES=4 (16 bytes), MPS=0, AMS=0, CSS=0, EN=1
     nvme_regs[5] = 0x00460001;
+    (void)nvme_regs[5]; // Flush write
     
     // Wait for CSTS.RDY = 1
+    uart_puts("Enabling controller... CC=");
+    uart_print_hex(nvme_regs[5]);
+    uart_puts(" CSTS=");
+    uart_print_hex(nvme_regs[7]);
+    uart_puts("\n");
+    
+    wait_loops = 0;
     while (!(nvme_regs[7] & 1)) {
         __asm__ volatile("pause");
+        wait_loops++;
+        if (wait_loops == 10000000) {
+            uart_puts("CSTS=");
+            uart_print_hex(nvme_regs[7]);
+            uart_puts(" CC=");
+            uart_print_hex(nvme_regs[5]);
+            uart_puts("\n");
+            wait_loops = 0;
+        }
     }
+    uart_puts("Controller enabled successfully!\n");
     
     // Determine Doorbell Stride
     uint32_t dstrd = (nvme_regs[1] >> 0) & 0xF;

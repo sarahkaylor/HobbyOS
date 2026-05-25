@@ -394,14 +394,21 @@ deploy_intel:
 	@echo "Copying disk image to Proxmox server..."
 	scp -C -o StrictHostKeyChecking=no -i ~/.ssh/mac_to_r1 disk.img root@192.168.10.174:/root/disk_205.raw
 	@echo "Recreating VM 205 on Proxmox..."
-	ssh -o StrictHostKeyChecking=no -i ~/.ssh/mac_to_r1 root@192.168.10.174 "\
+	ssh -o StrictHostKeyChecking=no -i ~/.ssh/mac_to_r1 root@192.168.10.174 '\
 		qm stop 205 || true; \
 		qm destroy 205 --purge || true; \
-		qm create 205 --name HobbyOSIntel --cores 4 --memory 4096 --net0 virtio,bridge=vmbr0; \
+		qm create 205 --name HobbyOSIntel --cores 4 --memory 4096 --net0 virtio,bridge=vmbr0 --machine q35; \
 		qm importdisk 205 /root/disk_205.raw local-lvm; \
-		qm set 205 --scsihw virtio-scsi-pci --scsi0 local-lvm:vm-205-disk-0 --bootdisk scsi0 --boot d; \
 		qm set 205 --bios ovmf --efidisk0 local-lvm:0; \
+		qm set 205 --serial0 socket; \
+		qm set 205 --cpu host,phys-bits=host; \
+		DISK_VOL=$$(grep "unused0:" /etc/pve/qemu-server/205.conf | grep -o "vm-205-disk-[0-9]\+"); \
+		sed -i "/unused0:/d" /etc/pve/qemu-server/205.conf; \
+		echo "args: -drive file=/dev/pve/$${DISK_VOL},if=none,id=disk0,format=raw -device nvme,drive=disk0,serial=1234,bootindex=1" >> /etc/pve/qemu-server/205.conf; \
 		rm -f /root/disk_205.raw; \
-		qm start 205"
+		qm start 205'
 
-.PHONY: all clean run memtest fileio_test fork_test tests test unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel deploy_intel
+deploy_run_intel: deploy_intel
+	ssh -tt -o StrictHostKeyChecking=no -i ~/.ssh/mac_to_r1 root@192.168.10.174 "qm terminal 205"
+
+.PHONY: all clean run memtest fileio_test fork_test tests test unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel deploy_intel deploy_run_intel
