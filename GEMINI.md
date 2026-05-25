@@ -58,6 +58,7 @@ HobbyOS provides multiple distinct build and execution targets through its Makef
 - **VirtIO Network Device:** Network communication is driven by the VirtIO MMIO Network device (`virtio-net-device`). It utilizes split TX and RX virtqueues for packet transmission and reception.
 - **Protocol Support:** The kernel implements a minimalistic IPv4 stack focusing exclusively on UDP. TCP is not supported. Incoming Ethernet frames are parsed by `net_rx_packet`, validated for IPv4 and UDP, and dispatched to the appropriate Protocol Control Block (PCB).
 - **Dynamic Configuration (DHCP):** During boot, the OS broadcasts a DHCP Discover packet to dynamically acquire an IPv4 address, subnet mask, and router IP from the QEMU slirp network backend.
+  - *Intel/x86_64 Architecture Parity:* DHCP dynamic configuration must also remain fully functional and enabled on the x86_64 architecture. Avoid shutting down, bypassing, or disabling core network features like DHCP in favor of hardcoded static IP configurations for x86_64.
 - **Socket Abstraction:** User-space networking is accessed via the `SYS_CONNECT` system call (for UDP outbound connections). The kernel allocates a `net_pcb` (Protocol Control Block) and maps it into the process's file descriptor table as a Socket (`f->type = 2`). File operations (like `sys_close`) manage the lifecycle of these sockets, ensuring resources are freed upon process termination.
 
 ## 11. Remote PCIe Device Sharing over UDP/IP + RDMA (Intel/x86_64 Edition)
@@ -91,7 +92,7 @@ Since physical PCIe devices directly access physical host memory (DMA) without s
 - **Shadow Allocation**: The Host allocates a physically contiguous block of standard RAM on the provider node (`host_phys`) to serve as a shadow bounce buffer.
 - **Synchronous Syncing**: Before starting a device DMA transaction, the Guest flushes its local data over the network to the Host's shadow buffer (`RDMA_OP_DMA_SYNC_TO_HOST`). The physical PCIe device executes the DMA transfer using `host_phys`. Once complete, the Guest pulls the modified shadow buffer data back over the network into its local memory (`RDMA_OP_DMA_SYNC_TO_GUEST`), maintaining coherent virtual memory protection across machine boundaries.
 
-## 11. Intel-only Testing Servers
+## 12. Intel-only Testing Servers
 - Available at 192.168.10.174 is a Proxmox Server with a large number of CPU cores, and RAM. It can be connected to via ssh with a command: ```ssh -i ~/.ssh/mac_to_r1 root@192.168.10.174```
 - The server at 192.168.10.174 has an Nvidia RTX 4090 GPU at PCIE address 0000:01:00 which is available to be used in QEMU VMs that this proxmox system hosts
 - An example host OS that has this GPU connected, has a configuration file located at /etc/pve/nodes/r1/qemu-server/117.conf . This is an example file and should not be modified. see the line with 'hostpci0' for the example configuration line

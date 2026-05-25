@@ -75,6 +75,10 @@ void net_init(void) {
     virtio_net_get_mac(local_mac);
 }
 
+void net_refresh_mac(void) {
+    virtio_net_get_mac(local_mac);
+}
+
 void net_set_ip(uint32_t ip, uint32_t netmask, uint32_t gateway) {
     local_ip = ip;
     local_netmask = netmask;

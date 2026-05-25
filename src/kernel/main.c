@@ -155,6 +155,7 @@ void main(void) {
   net_init();
   if (virtio_net_init() == 0) {
     uart_puts("VirtIO Network successfully initialized.\n");
+    net_refresh_mac();
     gic_enable_interrupt(virtio_net_irq);
 #ifndef KERNEL_MODE_UNIT_TEST
     dhcp_init();

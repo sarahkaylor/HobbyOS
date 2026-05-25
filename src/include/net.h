@@ -112,6 +112,7 @@ struct socket_pcb {
  * Sets up the internal PCB table and registers the socket subsystem.
  */
 void net_init(void);
+void net_refresh_mac(void);
 
 /**
  * Sets the local IP address, subnet mask, and default gateway.

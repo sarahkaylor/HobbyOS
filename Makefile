@@ -26,7 +26,7 @@ ifeq ($(ARCH),intel)
   ARCH_DIR = src/kernel/arch/x64
   LDFLAGS = -T linker_x64.ld
   # QEMU parameters for x86_64: 4 cores, 6GB RAM, mounting disk.img as NVMe, booting with UEFI
-  QEMU_CMD = $(QEMU) -M q35 -smp 4 -m 3072M -pflash /opt/homebrew/share/qemu/edk2-x86_64-code.fd -display cocoa -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -action shutdown=poweroff $(QEMU_ARGS)
+  QEMU_CMD = $(QEMU) -M q35 -smp 4 -m 3072M -pflash /opt/homebrew/share/qemu/edk2-x86_64-code.fd -display cocoa -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff $(QEMU_ARGS)
 else
   # Default to ARM
   QEMU = /opt/homebrew/bin/qemu-system-aarch64

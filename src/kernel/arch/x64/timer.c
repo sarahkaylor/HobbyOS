@@ -1,4 +1,5 @@
 #include "timer.h"
+#include "virtio_net.h"
 #include <stdint.h>
 
 static volatile uint64_t timer_ticks = 0;
@@ -32,6 +33,9 @@ void timer_init(void) {
  */
 void timer_reload(void) {
     timer_ticks++;
+    if (virtio_net_is_active()) {
+        virtio_net_handle_irq();
+    }
 }
 
 /**

@@ -59,6 +59,28 @@ struct virtq_pci {
     struct virtq_used_pci used;
 } __attribute__((aligned(4096)));
 
+// PCI specific VirtIO 1024-Descriptor rings for RX
+struct virtq_avail_pci_1024 {
+    uint16_t flags;
+    uint16_t idx;
+    uint16_t ring[1024];
+    uint16_t used_event;
+} __attribute__((packed));
+
+struct virtq_used_pci_1024 {
+    uint16_t flags;
+    uint16_t idx;
+    struct virtq_used_elem ring[1024];
+    uint16_t avail_event;
+} __attribute__((packed));
+
+struct virtq_pci_1024 {
+    struct virtq_desc desc[1024];
+    struct virtq_avail_pci_1024 avail;
+    uint8_t padding[20480 - (16384 + sizeof(struct virtq_avail_pci_1024))];
+    struct virtq_used_pci_1024 used;
+} __attribute__((aligned(4096)));
+
 struct virtio_net_hdr {
     uint8_t flags;
     uint8_t gso_type;
@@ -74,7 +96,7 @@ int virtio_net_irq = -1;
 static uint8_t local_mac[6];
 static uint16_t io_base = 0;
 
-static struct virtq_pci rx_vq __attribute__((aligned(4096)));
+static struct virtq_pci_1024 rx_vq __attribute__((aligned(4096)));
 static struct virtq_pci tx_vq __attribute__((aligned(4096)));
 
 static uint8_t rx_buffers[NUM_RX_BUFFERS][RX_BUFFER_SIZE] __attribute__((aligned(4096)));
@@ -200,12 +222,26 @@ int virtio_net_init(void) {
     outw(io_base + VIRTIO_PCI_QUEUE_SEL, 0);
     uint16_t rx_qsize = inw(io_base + VIRTIO_PCI_QUEUE_NUM);
     if (rx_qsize == 0) return -1;
+    uart_puts("[VIRTIO_NET] RX queue size: ");
+    print_int(rx_qsize);
+    uart_puts(" rx_vq address: ");
+    uart_print_hex((uint64_t)&rx_vq);
+    uart_puts(" PFN: ");
+    uart_print_hex((uint32_t)((uint64_t)&rx_vq / 4096));
+    uart_puts("\n");
     outl(io_base + VIRTIO_PCI_QUEUE_PFN, (uint32_t)((uint64_t)&rx_vq / 4096));
 
     // Setup TX queue (1)
     outw(io_base + VIRTIO_PCI_QUEUE_SEL, 1);
     uint16_t tx_qsize = inw(io_base + VIRTIO_PCI_QUEUE_NUM);
     if (tx_qsize == 0) return -1;
+    uart_puts("[VIRTIO_NET] TX queue size: ");
+    print_int(tx_qsize);
+    uart_puts(" tx_vq address: ");
+    uart_print_hex((uint64_t)&tx_vq);
+    uart_puts(" PFN: ");
+    uart_print_hex((uint32_t)((uint64_t)&tx_vq / 4096));
+    uart_puts("\n");
     outl(io_base + VIRTIO_PCI_QUEUE_PFN, (uint32_t)((uint64_t)&tx_vq / 4096));
 
     // Set DRIVER_OK status
@@ -296,9 +332,8 @@ int virtio_net_send(const void *buf, uint32_t len) {
 void virtio_net_handle_irq(void) {
     if (io_base == 0) return;
     
-    // Read and clear legacy ISR status
-    uint8_t isr = inb(io_base + VIRTIO_PCI_ISR);
-    if (!isr) return;
+    // Read and clear legacy ISR status to keep the device happy
+    (void)inb(io_base + VIRTIO_PCI_ISR);
     
     uint64_t flags = spinlock_acquire_irqsave(&net_lock);
     
@@ -306,7 +341,7 @@ void virtio_net_handle_irq(void) {
     while (rx_ack_used_idx != rx_vq.used.idx) {
         arch_memory_barrier();
         
-        uint16_t used_idx = rx_ack_used_idx % 256;
+        uint16_t used_idx = rx_ack_used_idx % 1024;
         uint32_t id = rx_vq.used.ring[used_idx].id;
         uint32_t len = rx_vq.used.ring[used_idx].len;
         
@@ -320,7 +355,7 @@ void virtio_net_handle_irq(void) {
         }
 
         // Re-queue the descriptor
-        uint16_t avail_idx = rx_vq.avail.idx % 256;
+        uint16_t avail_idx = rx_vq.avail.idx % 1024;
         rx_vq.avail.ring[avail_idx] = id;
         
         arch_memory_barrier();
