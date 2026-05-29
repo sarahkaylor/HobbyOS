@@ -226,6 +226,10 @@ static void handle_udp(struct ipv4_hdr* ip, uint8_t* packet, uint32_t len) {
     uint64_t flags = spinlock_acquire_irqsave(&net_lock);
     for (int i = 0; i < MAX_SOCKETS; i++) {
         if (sockets[i].in_use && sockets[i].protocol == IP_PROTO_UDP && sockets[i].local_port == ntohs(udp->dst_port)) {
+            // Update remote IP and port dynamically for UDP reply routing
+            sockets[i].remote_ip = ip->src_ip;
+            sockets[i].remote_port = ntohs(udp->src_port);
+
             // Append to socket rx buffer
             uint32_t data_len = ntohs(udp->length) - sizeof(struct udp_hdr);
             uint8_t* data = packet + sizeof(struct udp_hdr);

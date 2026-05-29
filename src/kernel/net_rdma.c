@@ -323,8 +323,6 @@ void net_rdma_poll(void) {
 
     // Save remote parameters for Host reply routing
     if (is_host) {
-        rdma_socket->remote_ip = htonl(RDMA_GUEST_IP);
-        rdma_socket->remote_port = 49152;
         handle_host_rdma(&pkt);
     } else {
         handle_guest_rdma(&pkt);
