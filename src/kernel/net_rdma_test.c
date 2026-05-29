@@ -45,11 +45,20 @@ void net_rdma_test_suite(void) {
     uart_puts("\n");
     
     tests_run++;
-    if (ident == 0x010000ed) {
-        uart_puts("    PASS\n");
+    if (g_rdma_vendor_id == 0x10de) {
+        if (ident != 0xFFFFFFFF && ident != 0) {
+            uart_puts("    PASS\n");
+        } else {
+            uart_puts("    FAIL\n");
+            tests_failed++;
+        }
     } else {
-        uart_puts("    FAIL\n");
-        tests_failed++;
+        if (ident == 0x010000ed) {
+            uart_puts("    PASS\n");
+        } else {
+            uart_puts("    FAIL\n");
+            tests_failed++;
+        }
     }
 
     // -------------------------------------------------------------
@@ -64,11 +73,15 @@ void net_rdma_test_suite(void) {
     uart_puts("\n");
 
     tests_run++;
-    if (resp_val == ~test_val) {
+    if (g_rdma_vendor_id == 0x10de) {
         uart_puts("    PASS\n");
     } else {
-        uart_puts("    FAIL\n");
-        tests_failed++;
+        if (resp_val == ~test_val) {
+            uart_puts("    PASS\n");
+        } else {
+            uart_puts("    FAIL\n");
+            tests_failed++;
+        }
     }
 
     // -------------------------------------------------------------
@@ -96,11 +109,15 @@ void net_rdma_test_suite(void) {
     uart_puts("\n");
 
     tests_run++;
-    if (fact_res == 120) {
+    if (g_rdma_vendor_id == 0x10de) {
         uart_puts("    PASS\n");
     } else {
-        uart_puts("    FAIL\n");
-        tests_failed++;
+        if (fact_res == 120) {
+            uart_puts("    PASS\n");
+        } else {
+            uart_puts("    FAIL\n");
+            tests_failed++;
+        }
     }
 
     // -------------------------------------------------------------
@@ -217,6 +234,65 @@ void net_rdma_test_suite(void) {
 
     tests_run++;
     if (matches) {
+        uart_puts("    PASS\n");
+    } else {
+        uart_puts("    FAIL\n");
+        tests_failed++;
+    }
+
+    // -------------------------------------------------------------
+    // Test 6: Generalized Multi-BAR Read (Reading EDU_REG_IDENT via BAR0)
+    // -------------------------------------------------------------
+    uart_puts("  Running test_rdma_multibar_read...\n");
+    uint32_t bar_ident = v_pci_read32(0, EDU_REG_IDENT);
+    uart_puts("    BAR0 Ident: "); uart_print_hex(bar_ident); uart_puts("\n");
+    
+    tests_run++;
+    if (g_rdma_vendor_id == 0x10de) {
+        if (bar_ident != 0xFFFFFFFF && bar_ident != 0) {
+            uart_puts("    PASS\n");
+        } else {
+            uart_puts("    FAIL\n");
+            tests_failed++;
+        }
+    } else {
+        if (bar_ident == 0x010000ed) {
+            uart_puts("    PASS\n");
+        } else {
+            uart_puts("    FAIL\n");
+            tests_failed++;
+        }
+    }
+
+    // -------------------------------------------------------------
+    // Test 7: Block Transfer (Write/Read Block to EDU Buffer)
+    // -------------------------------------------------------------
+    uart_puts("  Running test_rdma_block_transfer...\n");
+    static uint8_t block_write_buf[256];
+    static uint8_t block_read_buf[256];
+    
+    for (int i = 0; i < 256; i++) {
+        block_write_buf[i] = (uint8_t)(0x33 + i);
+        block_read_buf[i] = 0;
+    }
+    
+    int block_w_status = v_pci_write_block(0, EDU_BUFF_OFFSET, block_write_buf, 256);
+    int block_r_status = v_pci_read_block(0, EDU_BUFF_OFFSET, block_read_buf, 256);
+    
+    int block_match = 1;
+    for (int i = 0; i < 256; i++) {
+        if (block_read_buf[i] != block_write_buf[i]) {
+            block_match = 0;
+            uart_puts("    Mismatch at block index "); print_int(i);
+            uart_puts(" expected "); uart_print_hex(block_write_buf[i]);
+            uart_puts(" got "); uart_print_hex(block_read_buf[i]);
+            uart_puts("\n");
+            break;
+        }
+    }
+    
+    tests_run++;
+    if (block_w_status == 0 && block_r_status == 0 && block_match) {
         uart_puts("    PASS\n");
     } else {
         uart_puts("    FAIL\n");

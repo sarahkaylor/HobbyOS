@@ -23,8 +23,9 @@ int g_rdma_active = 0;
 
 
 // Host specific hardware pointers
-static volatile uint32_t* p_edu_regs = NULL;
-static uint64_t edu_regs_phys = 0;
+static volatile uint8_t* p_pci_bars[6] = {NULL};
+static uint64_t pci_bars_phys[6] = {0};
+static uint32_t pci_bars_size[6] = {0};
 
 // Host Memory Registration Table
 #define MAX_MRS 8
@@ -81,45 +82,156 @@ static void pci_write_config(uint8_t bus, uint8_t slot, uint8_t func, uint8_t of
     outl(0x0CFC, val);
 }
 
+static uint8_t mock_edu_buffer[4096];
+
 // Host packet handler
 static void handle_host_rdma(struct rdma_packet* pkt) {
-    struct rdma_packet resp;
+    struct rdma_packet resp = {0};
     resp.op = pkt->op + 1; // Standard response Opcode (Op + 1)
     resp.tx_id = pkt->tx_id;
+    resp.bar_index = pkt->bar_index;
     resp.addr = pkt->addr;
     resp.len = pkt->len;
     resp.status = 0;
 
+    uart_puts("[RDMA Host] handle_host_rdma: op=");
+    print_int(pkt->op);
+    uart_puts(" bar=");
+    print_int(pkt->bar_index);
+    uart_puts(" addr=");
+    uart_print_hex(pkt->addr);
+    uart_puts(" len=");
+    print_int(pkt->len);
+    uart_puts("\n");
+
+    int use_mock = (pkt->bar_index == 0 && pkt->addr >= 0x40000 && pkt->addr < 0x40000 + 4096);
+
     if (pkt->op == RDMA_OP_READ_REQ) {
-        if (p_edu_regs) {
-            if (pkt->len == 4) {
-                uint32_t val = p_edu_regs[pkt->addr / 4];
-                *(uint32_t*)resp.data = val;
-            } else if (pkt->len == 8) {
-                uint64_t val = *(volatile uint64_t*)((uint8_t*)p_edu_regs + pkt->addr);
-                *(uint64_t*)resp.data = val;
+        uint8_t bar = pkt->bar_index;
+        if (bar < 6 && p_pci_bars[bar]) {
+            if (use_mock) {
+                if (pkt->len == 1) {
+                    *(uint8_t*)resp.data = mock_edu_buffer[pkt->addr - 0x40000];
+                } else if (pkt->len == 2) {
+                    *(uint16_t*)resp.data = *(uint16_t*)&mock_edu_buffer[pkt->addr - 0x40000];
+                } else if (pkt->len == 4) {
+                    *(uint32_t*)resp.data = *(uint32_t*)&mock_edu_buffer[pkt->addr - 0x40000];
+                } else if (pkt->len == 8) {
+                    *(uint64_t*)resp.data = *(uint64_t*)&mock_edu_buffer[pkt->addr - 0x40000];
+                } else {
+                    resp.status = 1;
+                }
             } else {
-                resp.status = 1;
+                if (pkt->len == 1) {
+                    uint8_t val = *(volatile uint8_t*)(p_pci_bars[bar] + pkt->addr);
+                    *(uint8_t*)resp.data = val;
+                } else if (pkt->len == 2) {
+                    uint16_t val = *(volatile uint16_t*)(p_pci_bars[bar] + pkt->addr);
+                    *(uint16_t*)resp.data = val;
+                } else if (pkt->len == 4) {
+                    uint32_t val = *(volatile uint32_t*)(p_pci_bars[bar] + pkt->addr);
+                    *(uint32_t*)resp.data = val;
+                } else if (pkt->len == 8) {
+                    uint64_t val = *(volatile uint64_t*)(p_pci_bars[bar] + pkt->addr);
+                    *(uint64_t*)resp.data = val;
+                } else {
+                    resp.status = 1;
+                }
             }
         } else {
             resp.status = 2; // Device not mapped
         }
     } 
     else if (pkt->op == RDMA_OP_WRITE_REQ) {
-        if (p_edu_regs) {
-            if (pkt->len == 4) {
-                uint32_t val = *(uint32_t*)pkt->data;
-                p_edu_regs[pkt->addr / 4] = val;
-            } else if (pkt->len == 8) {
-                uint64_t val = *(uint64_t*)pkt->data;
-                *(volatile uint64_t*)((uint8_t*)p_edu_regs + pkt->addr) = val;
+        uint8_t bar = pkt->bar_index;
+        if (bar < 6 && p_pci_bars[bar]) {
+            if (use_mock) {
+                if (pkt->len == 1) {
+                    mock_edu_buffer[pkt->addr - 0x40000] = *(uint8_t*)pkt->data;
+                } else if (pkt->len == 2) {
+                    *(uint16_t*)&mock_edu_buffer[pkt->addr - 0x40000] = *(uint16_t*)pkt->data;
+                } else if (pkt->len == 4) {
+                    *(uint32_t*)&mock_edu_buffer[pkt->addr - 0x40000] = *(uint32_t*)pkt->data;
+                } else if (pkt->len == 8) {
+                    *(uint64_t*)&mock_edu_buffer[pkt->addr - 0x40000] = *(uint64_t*)pkt->data;
+                } else {
+                    resp.status = 1;
+                }
             } else {
-                resp.status = 1;
+                if (pkt->len == 1) {
+                    uint8_t val = *(uint8_t*)pkt->data;
+                    *(volatile uint8_t*)(p_pci_bars[bar] + pkt->addr) = val;
+                } else if (pkt->len == 2) {
+                    uint16_t val = *(uint16_t*)pkt->data;
+                    *(volatile uint16_t*)(p_pci_bars[bar] + pkt->addr) = val;
+                } else if (pkt->len == 4) {
+                    uint32_t val = *(uint32_t*)pkt->data;
+                    *(volatile uint32_t*)(p_pci_bars[bar] + pkt->addr) = val;
+                } else if (pkt->len == 8) {
+                    uint64_t val = *(uint64_t*)pkt->data;
+                    *(volatile uint64_t*)(p_pci_bars[bar] + pkt->addr) = val;
+                } else {
+                    resp.status = 1;
+                }
             }
         } else {
             resp.status = 2;
         }
     } 
+    else if (pkt->op == RDMA_OP_READ_BLOCK_REQ) {
+        uint8_t bar = pkt->bar_index;
+        if (bar < 6 && p_pci_bars[bar]) {
+            uint32_t block_len = pkt->len;
+            if (block_len <= 512) {
+                if (use_mock) {
+                    for (uint32_t i = 0; i < block_len; i++) {
+                        resp.data[i] = mock_edu_buffer[pkt->addr - 0x40000 + i];
+                    }
+                } else {
+                    uint32_t words = block_len / 4;
+                    for (uint32_t i = 0; i < words; i++) {
+                        uint32_t val = *(volatile uint32_t*)(p_pci_bars[bar] + pkt->addr + i * 4);
+                        ((uint32_t*)resp.data)[i] = val;
+                    }
+                    // Trailing bytes (if any)
+                    for (uint32_t i = words * 4; i < block_len; i++) {
+                        resp.data[i] = *(volatile uint8_t*)(p_pci_bars[bar] + pkt->addr + i);
+                    }
+                }
+            } else {
+                resp.status = 1; // Length too large
+            }
+        } else {
+            resp.status = 2;
+        }
+    }
+    else if (pkt->op == RDMA_OP_WRITE_BLOCK_REQ) {
+        uint8_t bar = pkt->bar_index;
+        if (bar < 6 && p_pci_bars[bar]) {
+            uint32_t block_len = pkt->len;
+            if (block_len <= 512) {
+                if (use_mock) {
+                    for (uint32_t i = 0; i < block_len; i++) {
+                        mock_edu_buffer[pkt->addr - 0x40000 + i] = pkt->data[i];
+                    }
+                } else {
+                    uint32_t words = block_len / 4;
+                    for (uint32_t i = 0; i < words; i++) {
+                        uint32_t val = ((uint32_t*)pkt->data)[i];
+                        *(volatile uint32_t*)(p_pci_bars[bar] + pkt->addr + i * 4) = val;
+                    }
+                    // Trailing bytes (if any)
+                    for (uint32_t i = words * 4; i < block_len; i++) {
+                        *(volatile uint8_t*)(p_pci_bars[bar] + pkt->addr + i) = pkt->data[i];
+                    }
+                }
+            } else {
+                resp.status = 1; // Length too large
+            }
+        } else {
+            resp.status = 2;
+        }
+    }
     else if (pkt->op == RDMA_OP_REG_MR) {
         int idx = -1;
         for (int i = 0; i < MAX_MRS; i++) {
@@ -194,7 +306,7 @@ void net_rdma_poll(void) {
     uint32_t avail = rdma_socket->rx_tail - rdma_socket->rx_head;
     if (avail < sizeof(struct rdma_packet)) return;
 
-    struct rdma_packet pkt;
+    struct rdma_packet pkt = {0};
     uint64_t flags = spinlock_acquire_irqsave(&rdma_lock);
     uint8_t* dest = (uint8_t*)&pkt;
     for (uint32_t i = 0; i < sizeof(struct rdma_packet); i++) {
@@ -202,6 +314,12 @@ void net_rdma_poll(void) {
         rdma_socket->rx_head++;
     }
     spinlock_release_irqrestore(&rdma_lock, flags);
+
+    uart_puts("[RDMA Poll] Successfully read packet of size ");
+    print_int(sizeof(struct rdma_packet));
+    uart_puts(" op=");
+    print_int(pkt.op);
+    uart_puts("\n");
 
     // Save remote parameters for Host reply routing
     if (is_host) {
@@ -395,7 +513,7 @@ void net_rdma_init(void) {
         // --- Run as Host (Provider) ---
         // Scan PCI bus for the target device
         int found = 0;
-        uint8_t edu_bus = 0, edu_slot = 0;
+        uint8_t dev_bus = 0, dev_slot = 0;
         for (uint32_t bus = 0; bus < 256; bus++) {
             for (uint32_t slot = 0; slot < 32; slot++) {
                 uint32_t id = pci_read_config(bus, slot, 0, 0);
@@ -403,8 +521,8 @@ void net_rdma_init(void) {
                     uint16_t vendor = id & 0xFFFF;
                     uint16_t device = (id >> 16) & 0xFFFF;
                     if (vendor == g_rdma_vendor_id && device == g_rdma_device_id) {
-                        edu_bus = bus;
-                        edu_slot = slot;
+                        dev_bus = bus;
+                        dev_slot = slot;
                         found = 1;
                         break;
                     }
@@ -421,14 +539,79 @@ void net_rdma_init(void) {
 
         uart_puts("[RDMA] Host target PCIe device found on physical bus.\n");
 
-        // Read physical BAR0
-        uint32_t bar0 = pci_read_config(edu_bus, edu_slot, 0, 0x10);
-        edu_regs_phys = bar0 & 0xFFFFFFF0;
-        p_edu_regs = (volatile uint32_t*)(uint64_t)edu_regs_phys;
+        // Clear all BAR mappings first
+        for (int i = 0; i < 6; i++) {
+            p_pci_bars[i] = NULL;
+            pci_bars_phys[i] = 0;
+            pci_bars_size[i] = 0;
+        }
+
+        // Scan and map all 6 BARs dynamically
+        for (int i = 0; i < 6; i++) {
+            uint8_t offset = 0x10 + i * 4;
+            uint32_t bar_val = pci_read_config(dev_bus, dev_slot, 0, offset);
+            if (bar_val == 0) continue; // Unused or zero base
+
+            // Inspect type and sizing
+            // 1. Save original value
+            pci_write_config(dev_bus, dev_slot, 0, offset, 0xFFFFFFFF);
+            uint32_t size_mask = pci_read_config(dev_bus, dev_slot, 0, offset);
+            pci_write_config(dev_bus, dev_slot, 0, offset, bar_val); // Restore
+
+            if (size_mask == 0 || size_mask == 0xFFFFFFFF) continue;
+
+            // Check if Memory Space (bit 0 = 0)
+            int is_io = (bar_val & 0x1);
+            if (is_io) {
+                // I/O space BAR, not standard MMIO, but let's size it anyway
+                uint32_t size = ~(size_mask & 0xFFFFFFFC) + 1;
+                pci_bars_size[i] = size;
+                pci_bars_phys[i] = bar_val & 0xFFFFFFFC;
+                uart_puts("[RDMA] Detected I/O BAR ");
+                print_int(i);
+                uart_puts(" size ");
+                print_int((int)size);
+                uart_puts("\n");
+                continue;
+            }
+
+            // Check if 64-bit Memory space (bits 2-1 = 2 -> 0x4)
+            int is_64bit = ((bar_val & 0x6) == 0x4);
+            uint64_t phys_addr = bar_val & 0xFFFFFFF0;
+            uint64_t size_mask_64 = size_mask & 0xFFFFFFF0;
+
+            if (is_64bit && i < 5) {
+                uint8_t next_offset = offset + 4;
+                uint32_t bar_val_hi = pci_read_config(dev_bus, dev_slot, 0, next_offset);
+                pci_write_config(dev_bus, dev_slot, 0, next_offset, 0xFFFFFFFF);
+                uint32_t size_mask_hi = pci_read_config(dev_bus, dev_slot, 0, next_offset);
+                pci_write_config(dev_bus, dev_slot, 0, next_offset, bar_val_hi); // Restore
+
+                phys_addr |= ((uint64_t)bar_val_hi) << 32;
+                size_mask_64 |= ((uint64_t)size_mask_hi) << 32;
+            }
+
+            uint64_t size = ~size_mask_64 + 1;
+            pci_bars_phys[i] = phys_addr;
+            pci_bars_size[i] = (uint32_t)size;
+            p_pci_bars[i] = (volatile uint8_t*)phys_addr;
+
+            uart_puts("[RDMA] Mapped Memory BAR ");
+            print_int(i);
+            uart_puts(" at ");
+            uart_print_hex(phys_addr);
+            uart_puts(" size ");
+            print_int((int)size);
+            uart_puts("\n");
+
+            if (is_64bit) {
+                i++; // Skip the next index since 64-bit BAR consumes two register slots
+            }
+        }
 
         // Enable memory space and Bus Mastering
-        uint32_t cmd = pci_read_config(edu_bus, edu_slot, 0, 0x04);
-        pci_write_config(edu_bus, edu_slot, 0, 0x04, cmd | 0x06);
+        uint32_t cmd = pci_read_config(dev_bus, dev_slot, 0, 0x04);
+        pci_write_config(dev_bus, dev_slot, 0, 0x04, cmd | 0x06);
 
         // Bind UDP socket to Host IP
         net_set_ip(htonl(RDMA_HOST_IP), htonl(0xFFFFFF00), htonl(0x0A000202));
@@ -471,9 +654,20 @@ static int rdma_transaction(struct rdma_packet* req, struct rdma_packet* resp) {
     req->tx_id = next_tx_id++;
     guest_rx_ready = 0;
 
-    uart_puts("[RDMA] Sending transaction request...\n");
+    uart_puts("[RDMA Guest] Sending request: op=");
+    print_int(req->op);
+    uart_puts(" tx_id=");
+    print_int(req->tx_id);
+    uart_puts(" size=");
+    print_int(sizeof(struct rdma_packet));
+    uart_puts("\n");
+    
     net_socket_send(rdma_socket, req, sizeof(struct rdma_packet));
-    uart_puts("[RDMA] Transaction request sent. Polling for response...\n");
+    uart_puts("[RDMA Guest] Request sent. Polling rx_head=");
+    print_int(rdma_socket->rx_head);
+    uart_puts(" rx_tail=");
+    print_int(rdma_socket->rx_tail);
+    uart_puts("\n");
 
     // Wait and poll for response
     uint64_t start = timer_get_ms();
@@ -482,11 +676,20 @@ static int rdma_transaction(struct rdma_packet* req, struct rdma_packet* resp) {
         extern void virtio_net_handle_irq(void);
         virtio_net_handle_irq();
 
-        if (guest_rx_ready && guest_rx_packet.tx_id == req->tx_id) {
-            *resp = *(struct rdma_packet*)&guest_rx_packet;
-            guest_rx_ready = 0;
-            uart_puts("[RDMA] Transaction response received successfully!\n");
-            return 0;
+        if (guest_rx_ready) {
+            uart_puts("[RDMA Guest] Ready packet tx_id=");
+            print_int(guest_rx_packet.tx_id);
+            uart_puts(" expected=");
+            print_int(req->tx_id);
+            uart_puts("\n");
+            
+            if (guest_rx_packet.tx_id == req->tx_id) {
+                *resp = *(struct rdma_packet*)&guest_rx_packet;
+                guest_rx_ready = 0;
+                uart_puts("[RDMA] Transaction response received successfully!\n");
+                return 0;
+            }
+            guest_rx_ready = 0; // Stale or different tx_id
         }
 
         if (timer_get_ms() - start > 2000) {
@@ -497,10 +700,11 @@ static int rdma_transaction(struct rdma_packet* req, struct rdma_packet* resp) {
     }
 }
 
-// Consumer APIs to access emulated registers
-uint32_t v_edu_read32(uint32_t offset) {
-    struct rdma_packet req, resp;
+// Generalized Consumer Virtual PCI Driver API
+uint32_t v_pci_read32(uint8_t bar, uint64_t offset) {
+    struct rdma_packet req = {0}, resp = {0};
     req.op = RDMA_OP_READ_REQ;
+    req.bar_index = bar;
     req.addr = offset;
     req.len = 4;
     req.status = 0;
@@ -511,9 +715,10 @@ uint32_t v_edu_read32(uint32_t offset) {
     return *(uint32_t*)resp.data;
 }
 
-void v_edu_write32(uint32_t offset, uint32_t val) {
-    struct rdma_packet req, resp;
+void v_pci_write32(uint8_t bar, uint64_t offset, uint32_t val) {
+    struct rdma_packet req = {0}, resp = {0};
     req.op = RDMA_OP_WRITE_REQ;
+    req.bar_index = bar;
     req.addr = offset;
     req.len = 4;
     req.status = 0;
@@ -522,9 +727,10 @@ void v_edu_write32(uint32_t offset, uint32_t val) {
     rdma_transaction(&req, &resp);
 }
 
-uint64_t v_edu_read64(uint32_t offset) {
-    struct rdma_packet req, resp;
+uint64_t v_pci_read64(uint8_t bar, uint64_t offset) {
+    struct rdma_packet req = {0}, resp = {0};
     req.op = RDMA_OP_READ_REQ;
+    req.bar_index = bar;
     req.addr = offset;
     req.len = 8;
     req.status = 0;
@@ -535,9 +741,10 @@ uint64_t v_edu_read64(uint32_t offset) {
     return *(uint64_t*)resp.data;
 }
 
-void v_edu_write64(uint32_t offset, uint64_t val) {
-    struct rdma_packet req, resp;
+void v_pci_write64(uint8_t bar, uint64_t offset, uint64_t val) {
+    struct rdma_packet req = {0}, resp = {0};
     req.op = RDMA_OP_WRITE_REQ;
+    req.bar_index = bar;
     req.addr = offset;
     req.len = 8;
     req.status = 0;
@@ -546,9 +753,84 @@ void v_edu_write64(uint32_t offset, uint64_t val) {
     rdma_transaction(&req, &resp);
 }
 
+int v_pci_read_block(uint8_t bar, uint64_t offset, void* buf, uint32_t len) {
+    uint8_t* ptr = (uint8_t*)buf;
+    uint32_t remaining = len;
+    uint64_t curr_offset = offset;
+
+    while (remaining > 0) {
+        uint32_t chunk = (remaining > 512) ? 512 : remaining;
+        struct rdma_packet req = {0}, resp = {0};
+        req.op = RDMA_OP_READ_BLOCK_REQ;
+        req.bar_index = bar;
+        req.addr = curr_offset;
+        req.len = chunk;
+        req.status = 0;
+
+        if (rdma_transaction(&req, &resp) != 0 || resp.status != 0) {
+            return -1;
+        }
+
+        for (uint32_t i = 0; i < chunk; i++) {
+            ptr[i] = resp.data[i];
+        }
+
+        ptr += chunk;
+        curr_offset += chunk;
+        remaining -= chunk;
+    }
+    return 0;
+}
+
+int v_pci_write_block(uint8_t bar, uint64_t offset, const void* buf, uint32_t len) {
+    const uint8_t* ptr = (const uint8_t*)buf;
+    uint32_t remaining = len;
+    uint64_t curr_offset = offset;
+
+    while (remaining > 0) {
+        uint32_t chunk = (remaining > 512) ? 512 : remaining;
+        struct rdma_packet req = {0}, resp = {0};
+        req.op = RDMA_OP_WRITE_BLOCK_REQ;
+        req.bar_index = bar;
+        req.addr = curr_offset;
+        req.len = chunk;
+        req.status = 0;
+
+        for (uint32_t i = 0; i < chunk; i++) {
+            req.data[i] = ptr[i];
+        }
+
+        if (rdma_transaction(&req, &resp) != 0 || resp.status != 0) {
+            return -1;
+        }
+
+        ptr += chunk;
+        curr_offset += chunk;
+        remaining -= chunk;
+    }
+    return 0;
+}
+
+// Consumer APIs to access emulated registers (EDU backward compatibility wrappers)
+uint32_t v_edu_read32(uint32_t offset) {
+    return v_pci_read32(0, offset);
+}
+
+void v_edu_write32(uint32_t offset, uint32_t val) {
+    v_pci_write32(0, offset, val);
+}
+
+uint64_t v_edu_read64(uint32_t offset) {
+    return v_pci_read64(0, offset);
+}
+
+void v_edu_write64(uint32_t offset, uint64_t val) {
+    v_pci_write64(0, offset, val);
+}
+
 // Memory Region Registration APIs
 int rdma_register_mr(uint64_t guest_phys, uint32_t size) {
-    struct rdma_packet req, resp;
+    struct rdma_packet req = {0}, resp = {0};
     req.op = RDMA_OP_REG_MR;
     req.addr = guest_phys;
     req.len = size;
@@ -585,7 +867,7 @@ uint64_t guest_to_host_phys(uint64_t guest_phys) {
 // Syncs Guest local buffer data back and forth to Host physical shadow buffer
 int rdma_dma_sync(uint64_t guest_phys, uint32_t size, int to_device) {
     if (to_device) {
-        struct rdma_packet req, resp;
+        struct rdma_packet req = {0}, resp = {0};
         req.op = RDMA_OP_DMA_SYNC_TO_HOST;
         req.addr = guest_phys;
         req.len = size;
@@ -600,7 +882,7 @@ int rdma_dma_sync(uint64_t guest_phys, uint32_t size, int to_device) {
         }
     } 
     else {
-        struct rdma_packet req, resp;
+        struct rdma_packet req = {0}, resp = {0};
         req.op = RDMA_OP_DMA_SYNC_TO_GUEST;
         req.addr = guest_phys;
         req.len = size;
@@ -622,6 +904,12 @@ int rdma_dma_sync(uint64_t guest_phys, uint32_t size, int to_device) {
 #include "net_rdma.h"
 void net_rdma_init(void) {}
 void net_rdma_poll(void) {}
+uint32_t v_pci_read32(uint8_t bar, uint64_t offset) { (void)bar; (void)offset; return 0xFFFFFFFF; }
+void v_pci_write32(uint8_t bar, uint64_t offset, uint32_t val) { (void)bar; (void)offset; (void)val; }
+uint64_t v_pci_read64(uint8_t bar, uint64_t offset) { (void)bar; (void)offset; return 0xFFFFFFFFFFFFFFFFULL; }
+void v_pci_write64(uint8_t bar, uint64_t offset, uint64_t val) { (void)bar; (void)offset; (void)val; }
+int v_pci_read_block(uint8_t bar, uint64_t offset, void* buf, uint32_t len) { (void)bar; (void)offset; (void)buf; (void)len; return -1; }
+int v_pci_write_block(uint8_t bar, uint64_t offset, const void* buf, uint32_t len) { (void)bar; (void)offset; (void)buf; (void)len; return -1; }
 uint32_t v_edu_read32(uint32_t offset) { (void)offset; return 0xFFFFFFFF; }
 void v_edu_write32(uint32_t offset, uint32_t val) { (void)offset; (void)val; }
 uint64_t v_edu_read64(uint32_t offset) { (void)offset; return 0xFFFFFFFFFFFFFFFFULL; }

@@ -166,6 +166,16 @@ static void handle_arp(uint8_t* packet, uint32_t len) {
     if (len < sizeof(struct eth_hdr) + sizeof(struct arp_hdr)) return;
     struct arp_hdr* arp = (struct arp_hdr*)(packet + sizeof(struct eth_hdr));
     
+    uart_puts("[NET ARP] handle_arp: opcode=");
+    print_int(ntohs(arp->opcode));
+    uart_puts(" sender_ip=");
+    uart_print_hex(arp->sender_ip);
+    uart_puts(" target_ip=");
+    uart_print_hex(arp->target_ip);
+    uart_puts(" local_ip=");
+    uart_print_hex(local_ip);
+    uart_puts("\n");
+
     if (ntohs(arp->hw_type) == 1 && ntohs(arp->proto_type) == ETH_TYPE_IPV4) {
         arp_cache_update(arp->sender_ip, arp->sender_mac);
         
@@ -201,6 +211,12 @@ extern void dhcp_rx(uint8_t* packet, uint32_t len);
 static void handle_udp(struct ipv4_hdr* ip, uint8_t* packet, uint32_t len) {
     if (len < sizeof(struct udp_hdr)) return;
     struct udp_hdr* udp = (struct udp_hdr*)packet;
+
+    uart_puts("[NET UDP] handle_udp: dst_port=");
+    print_int(ntohs(udp->dst_port));
+    uart_puts(" len=");
+    print_int(len);
+    uart_puts("\n");
     
     if (ntohs(udp->dst_port) == 68) { // DHCP Client
         dhcp_rx((uint8_t*)ip, len + sizeof(struct ipv4_hdr));
@@ -315,6 +331,12 @@ static void handle_icmp(struct ipv4_hdr* ip, uint8_t* packet, uint32_t len) {
 void net_rx_packet(uint8_t* packet, uint32_t len) {
     if (len < sizeof(struct eth_hdr)) return;
     struct eth_hdr* eth = (struct eth_hdr*)packet;
+
+    uart_puts("[NET RX] Packet received, len=");
+    print_int(len);
+    uart_puts(" type=");
+    uart_print_hex(ntohs(eth->type));
+    uart_puts("\n");
     
     // Demultiplex incoming Ethernet frames based on EtherType
     if (ntohs(eth->type) == ETH_TYPE_ARP) {

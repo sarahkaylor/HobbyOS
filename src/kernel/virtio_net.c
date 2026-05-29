@@ -96,8 +96,17 @@ int virtio_net_irq = -1;
 static uint8_t local_mac[6];
 static uint16_t io_base = 0;
 
-static struct virtq_pci_1024 rx_vq __attribute__((aligned(4096)));
+static struct virtq_pci rx_vq_256 __attribute__((aligned(4096)));
+static struct virtq_pci_1024 rx_vq_1024 __attribute__((aligned(4096)));
 static struct virtq_pci tx_vq __attribute__((aligned(4096)));
+
+static struct virtq_desc* rx_desc = 0;
+static volatile uint16_t* rx_avail_idx = 0;
+static volatile uint16_t* rx_avail_ring = 0;
+static volatile uint16_t* rx_used_idx = 0;
+static volatile struct virtq_used_elem* rx_used_ring = 0;
+static uint64_t rx_vq_phys = 0;
+static uint16_t rx_qsize = 256;
 
 static uint8_t rx_buffers[NUM_RX_BUFFERS][RX_BUFFER_SIZE] __attribute__((aligned(4096)));
 static struct virtio_net_hdr rx_hdrs[NUM_RX_BUFFERS] __attribute__((aligned(4096)));
@@ -220,16 +229,35 @@ int virtio_net_init(void) {
 
     // Setup RX queue (0)
     outw(io_base + VIRTIO_PCI_QUEUE_SEL, 0);
-    uint16_t rx_qsize = inw(io_base + VIRTIO_PCI_QUEUE_NUM);
-    if (rx_qsize == 0) return -1;
+    uint16_t qsize = inw(io_base + VIRTIO_PCI_QUEUE_NUM);
+    if (qsize == 0) return -1;
+    rx_qsize = qsize;
+    
+    if (rx_qsize == 1024) {
+        rx_vq_phys = (uint64_t)&rx_vq_1024;
+        rx_desc = rx_vq_1024.desc;
+        rx_avail_idx = &rx_vq_1024.avail.idx;
+        rx_avail_ring = rx_vq_1024.avail.ring;
+        rx_used_idx = &rx_vq_1024.used.idx;
+        rx_used_ring = rx_vq_1024.used.ring;
+    } else {
+        rx_qsize = 256;
+        rx_vq_phys = (uint64_t)&rx_vq_256;
+        rx_desc = rx_vq_256.desc;
+        rx_avail_idx = &rx_vq_256.avail.idx;
+        rx_avail_ring = rx_vq_256.avail.ring;
+        rx_used_idx = &rx_vq_256.used.idx;
+        rx_used_ring = rx_vq_256.used.ring;
+    }
+
     uart_puts("[VIRTIO_NET] RX queue size: ");
     print_int(rx_qsize);
     uart_puts(" rx_vq address: ");
-    uart_print_hex((uint64_t)&rx_vq);
+    uart_print_hex(rx_vq_phys);
     uart_puts(" PFN: ");
-    uart_print_hex((uint32_t)((uint64_t)&rx_vq / 4096));
+    uart_print_hex((uint32_t)(rx_vq_phys / 4096));
     uart_puts("\n");
-    outl(io_base + VIRTIO_PCI_QUEUE_PFN, (uint32_t)((uint64_t)&rx_vq / 4096));
+    outl(io_base + VIRTIO_PCI_QUEUE_PFN, (uint32_t)(rx_vq_phys / 4096));
 
     // Setup TX queue (1)
     outw(io_base + VIRTIO_PCI_QUEUE_SEL, 1);
@@ -250,22 +278,22 @@ int virtio_net_init(void) {
     // Populate RX descriptors
     for (int i = 0; i < NUM_RX_BUFFERS; i++) {
         // Descriptor 0: header
-        rx_vq.desc[i * 2].addr = (uint64_t)&rx_hdrs[i];
-        rx_vq.desc[i * 2].len = sizeof(struct virtio_net_hdr);
-        rx_vq.desc[i * 2].flags = 3; // NEXT | WRITE
-        rx_vq.desc[i * 2].next = i * 2 + 1;
+        rx_desc[i * 2].addr = (uint64_t)&rx_hdrs[i];
+        rx_desc[i * 2].len = sizeof(struct virtio_net_hdr);
+        rx_desc[i * 2].flags = 3; // NEXT | WRITE
+        rx_desc[i * 2].next = i * 2 + 1;
 
         // Descriptor 1: buffer
-        rx_vq.desc[i * 2 + 1].addr = (uint64_t)rx_buffers[i];
-        rx_vq.desc[i * 2 + 1].len = RX_BUFFER_SIZE;
-        rx_vq.desc[i * 2 + 1].flags = 2; // WRITE
-        rx_vq.desc[i * 2 + 1].next = 0;
+        rx_desc[i * 2 + 1].addr = (uint64_t)rx_buffers[i];
+        rx_desc[i * 2 + 1].len = RX_BUFFER_SIZE;
+        rx_desc[i * 2 + 1].flags = 2; // WRITE
+        rx_desc[i * 2 + 1].next = 0;
 
-        rx_vq.avail.ring[i] = i * 2;
+        rx_avail_ring[i] = i * 2;
     }
 
     arch_memory_barrier();
-    rx_vq.avail.idx = NUM_RX_BUFFERS;
+    *rx_avail_idx = NUM_RX_BUFFERS;
     arch_memory_barrier();
 
     // Notify queue 0 (RX)
@@ -332,18 +360,23 @@ int virtio_net_send(const void *buf, uint32_t len) {
 void virtio_net_handle_irq(void) {
     if (io_base == 0) return;
     
+    static volatile int handling_rx = 0;
+    if (__sync_lock_test_and_set(&handling_rx, 1)) {
+        return; // Re-entrancy guard: already processing packets
+    }
+    
     // Read and clear legacy ISR status to keep the device happy
     (void)inb(io_base + VIRTIO_PCI_ISR);
     
     uint64_t flags = spinlock_acquire_irqsave(&net_lock);
     
     // Process all pending packets in the RX used ring
-    while (rx_ack_used_idx != rx_vq.used.idx) {
+    while (rx_ack_used_idx != *rx_used_idx) {
         arch_memory_barrier();
         
-        uint16_t used_idx = rx_ack_used_idx % 1024;
-        uint32_t id = rx_vq.used.ring[used_idx].id;
-        uint32_t len = rx_vq.used.ring[used_idx].len;
+        uint16_t used_idx = rx_ack_used_idx % rx_qsize;
+        uint32_t id = rx_used_ring[used_idx].id;
+        uint32_t len = rx_used_ring[used_idx].len;
         
         uint32_t buffer_idx = id / 2;
         
@@ -355,11 +388,11 @@ void virtio_net_handle_irq(void) {
         }
 
         // Re-queue the descriptor
-        uint16_t avail_idx = rx_vq.avail.idx % 1024;
-        rx_vq.avail.ring[avail_idx] = id;
+        uint16_t avail_idx = (*rx_avail_idx) % rx_qsize;
+        rx_avail_ring[avail_idx] = id;
         
         arch_memory_barrier();
-        rx_vq.avail.idx++;
+        (*rx_avail_idx)++;
         arch_memory_barrier();
         
         rx_ack_used_idx++;
@@ -369,6 +402,7 @@ void virtio_net_handle_irq(void) {
     }
     
     spinlock_release_irqrestore(&net_lock, flags);
+    __sync_lock_release(&handling_rx);
 }
 
 int virtio_net_is_active(void) {
@@ -629,9 +663,15 @@ int virtio_net_send(const void *buf, uint32_t len) {
 }
 
 void virtio_net_handle_irq(void) {
+    static volatile int handling_rx = 0;
+    if (__sync_lock_test_and_set(&handling_rx, 1)) {
+        return; // Re-entrancy guard: already processing packets
+    }
+
     uint64_t flags = spinlock_acquire_irqsave(&net_lock);
     if (!net_mmio) {
         spinlock_release_irqrestore(&net_lock, flags);
+        __sync_lock_release(&handling_rx);
         return;
     }
 
@@ -670,6 +710,7 @@ void virtio_net_handle_irq(void) {
     }
 
     spinlock_release_irqrestore(&net_lock, flags);
+    __sync_lock_release(&handling_rx);
     process_wake_all();
 }
 
