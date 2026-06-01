@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 #define MAX_PROCESSES 64 // Maximum number of concurrent processes
-#define MAX_CPUS 4       // Maximum number of CPU cores supported
+#define MAX_CPUS 8       // Maximum number of CPU cores supported
 
 // Process states for lifecycle management
 #define PROC_STATE_FREE 0      // Slot is available for a new process

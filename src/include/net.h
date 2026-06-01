@@ -103,6 +103,11 @@ struct socket_pcb {
     uint32_t seq;
     uint32_t ack;
 
+    // Cached destination MAC — set after first successful ARP resolution.
+    // Eliminates per-packet ARP lookup for the RDMA hot path.
+    uint8_t cached_mac[6];
+    int mac_cached;  // 1 if cached_mac is valid
+
     // Receive buffer
     volatile uint8_t rx_buf[SOCKET_RX_BUF_SIZE];
     volatile uint32_t rx_head;

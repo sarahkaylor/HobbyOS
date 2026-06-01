@@ -4,6 +4,7 @@
 #include "timer.h"
 #include "process.h"
 #include "net_rdma.h"
+#include "arch/cpu.h"
 
 extern void uart_puts(const char* s);
 extern void uart_print_hex(uint64_t val);
@@ -152,7 +153,7 @@ static int arp_resolve(uint32_t ip, uint8_t* mac_out) {
             // the ARP reply and update the cache.
             uint64_t start_wait = timer_get_ms();
             while (timer_get_ms() - start_wait < 5) {
-                __asm__ volatile("pause");
+                cpu_relax();
             }
             
             // Check cache again
@@ -624,10 +625,18 @@ int net_socket_send(struct socket_pcb* pcb, const void* buf, uint32_t len) {
         uint8_t* payload = packet + sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr) + sizeof(struct udp_hdr);
         
         uint8_t dest_mac[6];
-        int arp_status = arp_resolve(pcb->remote_ip, dest_mac);
-
-        if (!arp_status) {
-            for(int i=0; i<6; i++) dest_mac[i] = 0xFF;
+        if (pcb->mac_cached) {
+            // Fast path: use cached MAC (no ARP lookup)
+            for (int i=0; i<6; i++) dest_mac[i] = pcb->cached_mac[i];
+        } else {
+            int arp_status = arp_resolve(pcb->remote_ip, dest_mac);
+            if (!arp_status) {
+                for(int i=0; i<6; i++) dest_mac[i] = 0xFF;
+            } else {
+                // Cache for future sends
+                for (int i=0; i<6; i++) pcb->cached_mac[i] = dest_mac[i];
+                pcb->mac_cached = 1;
+            }
         }
         
         for (int i=0; i<6; i++) {

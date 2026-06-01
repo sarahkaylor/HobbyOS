@@ -17,6 +17,15 @@ int is_host = 0;
 struct socket_pcb* rdma_socket = NULL;
 static spinlock_t rdma_lock;
 
+// Lock-free SPSC ring buffer for handing RDMA packets from CPU 0 → CPU 1.
+// CPU 0 (producer) enqueues via rdma_wq_head.
+// CPU 1 (consumer) dequeues via rdma_wq_tail.
+#define RDMA_WQ_SIZE 64
+static struct rdma_packet rdma_work_queue[RDMA_WQ_SIZE];
+static volatile uint32_t rdma_wq_head = 0;  // Written by producer (CPU 0)
+static volatile uint32_t rdma_wq_tail = 0;  // Written by consumer (CPU 1)
+static volatile int rdma_worker_running = 0;
+
 // Dynamic RDMA Configuration (Startup Parameters)
 uint16_t g_rdma_vendor_id = 0;
 uint16_t g_rdma_device_id = 0;
@@ -386,7 +395,25 @@ void net_rdma_poll(void) {
         spinlock_release_irqrestore(&rdma_lock, flags);
 
         if (is_host) {
-            handle_host_rdma(&pkt);
+            // DMA_SYNC_TO_HOST is fire-and-forget (no response) — handle inline
+            // to avoid adding latency via the work queue.
+            if (pkt.op == RDMA_OP_DMA_SYNC_TO_HOST) {
+                handle_host_rdma(&pkt);
+            } else if (rdma_worker_running) {
+                // Enqueue to the dedicated worker on CPU 1
+                uint32_t next_head = (rdma_wq_head + 1) % RDMA_WQ_SIZE;
+                if (next_head != rdma_wq_tail) {
+                    rdma_work_queue[rdma_wq_head] = pkt;
+                    arch_memory_barrier();
+                    rdma_wq_head = next_head;
+                } else {
+                    // Queue full — process inline as fallback
+                    handle_host_rdma(&pkt);
+                }
+            } else {
+                // No worker yet — process inline (during boot)
+                handle_host_rdma(&pkt);
+            }
         } else {
             handle_guest_rdma(&pkt);
         }
@@ -394,6 +421,30 @@ void net_rdma_poll(void) {
     }
 
     rdma_poll_active = 0;
+}
+
+// RDMA Worker thread — runs on a dedicated CPU core.
+// Dequeues RDMA requests from the SPSC ring buffer and processes them.
+// This decouples the slow PCI BAR read + TX response from the RX polling loop.
+static void rdma_worker_thread(void *arg) {
+    (void)arg;
+    uart_puts("[RDMA] Worker thread started on dedicated CPU core\n");
+    rdma_worker_running = 1;
+
+    while (1) {
+        // Spin-check the work queue
+        if (rdma_wq_tail != rdma_wq_head) {
+            extern void arch_memory_barrier(void);
+            arch_memory_barrier();
+            struct rdma_packet pkt = rdma_work_queue[rdma_wq_tail];
+            arch_memory_barrier();
+            rdma_wq_tail = (rdma_wq_tail + 1) % RDMA_WQ_SIZE;
+
+            handle_host_rdma(&pkt);
+        } else {
+            __asm__ volatile("pause");
+        }
+    }
 }
 
 // Host Provider Listening Loop
@@ -790,6 +841,19 @@ void net_rdma_init(void) {
         // Initialize Host Memory Registration Table
         for (int i = 0; i < MAX_MRS; i++) {
             host_mrs[i].in_use = 0;
+        }
+
+        // Spawn RDMA worker thread on a dedicated CPU core.
+        // This thread dequeues from the SPSC work queue and handles
+        // PCI BAR reads + TX responses independently of the RX poller.
+        extern int process_create_kernel(void (*entry)(void*), void *arg);
+        int worker_pid = process_create_kernel(rdma_worker_thread, NULL);
+        if (worker_pid >= 0) {
+            uart_puts("[RDMA] Spawned RDMA worker thread (PID ");
+            print_int(worker_pid);
+            uart_puts(")\n");
+        } else {
+            uart_puts("[RDMA] WARNING: Failed to spawn worker thread, running single-threaded\n");
         }
 
         // Enter the provider loop directly on CPU 0 to run synchronously during unit tests

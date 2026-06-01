@@ -60,6 +60,21 @@ void arch_enter_user_mode(uint64_t entry_point, uint64_t stack_pointer) __attrib
  */
 void arch_memory_barrier(void);
 
+/**
+ * Portable CPU spin-loop hint.
+ * On x86: PAUSE instruction (reduces power, improves HT performance)
+ * On ARM: YIELD instruction (similar purpose)
+ */
+static inline void cpu_relax(void) {
+#ifdef __x86_64__
+    __asm__ volatile("pause" ::: "memory");
+#elif defined(__aarch64__)
+    __asm__ volatile("yield" ::: "memory");
+#else
+    __asm__ volatile("" ::: "memory");
+#endif
+}
+
 #endif // ARCH_CPU_H
 
 

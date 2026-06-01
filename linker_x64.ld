@@ -36,6 +36,6 @@ SECTIONS
 
     /* Stack top */
     . = ALIGN(16);
-    . = . + 0x40000; /* Allocate 256KB stack */
+    . = . + 0x80000; /* Allocate 512KB stack (64KB per core for 8 cores) */
     __stack_top = .;
 }

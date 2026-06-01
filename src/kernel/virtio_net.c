@@ -119,6 +119,14 @@ static uint8_t rx_buffers[NUM_RX_BUFFERS][RX_BUFFER_SIZE] __attribute__((aligned
 static struct virtio_net_hdr rx_hdrs[NUM_RX_BUFFERS] __attribute__((aligned(4096)));
 static struct virtio_net_hdr tx_hdr __attribute__((aligned(4096)));
 
+// Async TX buffer pool — allows fire-and-forget packet sends.
+// Each slot has its own header and data buffer so the device can DMA
+// from them independently without the caller waiting.
+#define NUM_TX_SLOTS 16
+static struct virtio_net_hdr tx_hdrs[NUM_TX_SLOTS] __attribute__((aligned(64)));
+static uint8_t tx_buffers[NUM_TX_SLOTS][1500] __attribute__((aligned(64)));
+static uint16_t tx_submit_idx = 0;  // Next slot to submit (wraps at NUM_TX_SLOTS)
+
 static uint16_t rx_ack_used_idx = 0;
 static uint16_t tx_ack_used_idx = 0;
 
@@ -335,49 +343,69 @@ int virtio_net_send(const void *buf, uint32_t len) {
         return -1;
     }
 
-    // Format legacy TX header
-    for (int i = 0; i < (int)sizeof(struct virtio_net_hdr); i++) {
-        ((uint8_t*)&tx_hdr)[i] = 0;
+    // Reclaim completed TX slots: advance tx_ack_used_idx to match
+    // what the device has consumed, freeing slots for reuse.
+    tx_ack_used_idx = *(volatile uint16_t*)&tx_vq.used.idx;
+
+    // Check if we have a free TX slot.  With 16 slots and typical
+    // sub-ms device processing, this should almost never block.
+    uint16_t in_flight = tx_submit_idx - tx_ack_used_idx;
+    if (in_flight >= NUM_TX_SLOTS) {
+        // All slots in-flight — spin briefly for device to consume one.
+        int spin = 0;
+        while (*(volatile uint16_t*)&tx_vq.used.idx == tx_ack_used_idx) {
+            __asm__ volatile("pause");
+            if (++spin > 100000) {
+                // Timeout — drop the packet rather than hang.
+                spinlock_release_irqrestore(&net_tx_lock, flags);
+                return -1;
+            }
+        }
+        tx_ack_used_idx = *(volatile uint16_t*)&tx_vq.used.idx;
     }
 
-    // Wrap at 256 (TX queue capacity)
-    uint16_t desc_idx = (tx_vq.avail.idx % 128) * 2; 
+    // Pick our TX slot and copy data into the persistent buffer
+    uint16_t slot = tx_submit_idx % NUM_TX_SLOTS;
+
+    // Zero the TX header
+    for (int i = 0; i < (int)sizeof(struct virtio_net_hdr); i++) {
+        ((uint8_t*)&tx_hdrs[slot])[i] = 0;
+    }
+
+    // Copy payload into our persistent buffer so the caller's stack is safe
+    uint32_t copy_len = len > 1500 ? 1500 : len;
+    for (uint32_t i = 0; i < copy_len; i++) {
+        tx_buffers[slot][i] = ((const uint8_t*)buf)[i];
+    }
+
+    // Use descriptor pairs: slot*2 = header, slot*2+1 = data
+    uint16_t desc_idx = slot * 2;
 
     // Header descriptor
-    tx_vq.desc[desc_idx].addr = (uint64_t)&tx_hdr;
+    tx_vq.desc[desc_idx].addr = (uint64_t)&tx_hdrs[slot];
     tx_vq.desc[desc_idx].len = sizeof(struct virtio_net_hdr);
     tx_vq.desc[desc_idx].flags = 1; // NEXT
     tx_vq.desc[desc_idx].next = desc_idx + 1;
 
-    // Payload descriptor
-    tx_vq.desc[desc_idx + 1].addr = (uint64_t)buf;
-    tx_vq.desc[desc_idx + 1].len = len;
+    // Payload descriptor — points to our persistent buffer, not caller's stack
+    tx_vq.desc[desc_idx + 1].addr = (uint64_t)tx_buffers[slot];
+    tx_vq.desc[desc_idx + 1].len = copy_len;
     tx_vq.desc[desc_idx + 1].flags = 0; // End of chain
     tx_vq.desc[desc_idx + 1].next = 0;
 
-    tx_vq.avail.ring[tx_vq.avail.idx % 256] = desc_idx;
+    tx_vq.avail.ring[tx_submit_idx % 256] = desc_idx;
 
     arch_memory_barrier();
-    tx_vq.avail.idx++;
+    tx_vq.avail.idx = tx_submit_idx + 1;
     arch_memory_barrier();
 
-    /*
-    uart_puts("[VIRTIO_NET] Notifying device of TX...\n");
-    */
+    tx_submit_idx++;
+
     // Trigger Queue Notify for TX (Queue 1)
     outw(io_base + VIRTIO_PCI_QUEUE_NOTIFY, 1);
 
-    /*
-    uart_puts("[VIRTIO_NET] Waiting for TX ACK...\n");
-    */
-    // Poll synchronously for completion
-    while (*(volatile uint16_t*)&tx_vq.used.idx == tx_ack_used_idx) {
-        __asm__ volatile("pause");
-    }
-    tx_ack_used_idx = tx_vq.used.idx;
-    /*
-    uart_puts("[VIRTIO_NET] TX ACK received!\n");
-    */
+    // Fire-and-forget: do NOT wait for completion.
+    // The device will consume the descriptor asynchronously.
 
     arch_memory_barrier();
     spinlock_release_irqrestore(&net_tx_lock, flags);
