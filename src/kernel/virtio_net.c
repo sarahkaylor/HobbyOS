@@ -3,7 +3,7 @@
 #include "process.h"
 #include "arch/cpu.h"
 
-#define NUM_RX_BUFFERS 8
+#define NUM_RX_BUFFERS 128
 #define RX_BUFFER_SIZE 2048
 
 struct virtq_desc {
@@ -57,7 +57,7 @@ struct virtq_pci {
     struct virtq_avail_pci avail;
     uint8_t padding[8192 - (4096 + sizeof(struct virtq_avail_pci))];
     struct virtq_used_pci used;
-} __attribute__((aligned(4096)));
+} __attribute__((packed)) __attribute__((aligned(4096)));
 
 // PCI specific VirtIO 1024-Descriptor rings for RX
 struct virtq_avail_pci_1024 {
@@ -79,7 +79,7 @@ struct virtq_pci_1024 {
     struct virtq_avail_pci_1024 avail;
     uint8_t padding[20480 - (16384 + sizeof(struct virtq_avail_pci_1024))];
     struct virtq_used_pci_1024 used;
-} __attribute__((aligned(4096)));
+} __attribute__((packed)) __attribute__((aligned(4096)));
 
 struct virtio_net_hdr {
     uint8_t flags;
@@ -95,6 +95,13 @@ static spinlock_t net_tx_lock;
 int virtio_net_irq = -1;
 static uint8_t local_mac[6];
 static uint16_t io_base = 0;
+static volatile int net_rx_ready = 0;
+
+// Debug counters for diagnosing network issues
+volatile uint32_t dbg_handle_irq_calls = 0;
+volatile uint32_t dbg_handle_irq_isr_nonzero = 0;
+volatile uint32_t dbg_handle_irq_pkts = 0;
+volatile uint32_t dbg_poll_rx_pkts = 0;
 
 static struct virtq_pci rx_vq_256 __attribute__((aligned(4096)));
 static struct virtq_pci_1024 rx_vq_1024 __attribute__((aligned(4096)));
@@ -201,6 +208,17 @@ int virtio_net_init(void) {
     }
     io_base = bar0 & ~1;
 
+    // Read PCI Interrupt Line (offset 0x3C)
+    uint32_t intr = pci_read_config(net_bus, net_slot, 0, 0x3C);
+    uint8_t irq_line = intr & 0xFF;
+    virtio_net_irq = 32 + irq_line;
+
+    uart_puts("[VIRTIO_NET] PCI Interrupt Line: ");
+    print_int(irq_line);
+    uart_puts(" (Vector: ");
+    print_int(virtio_net_irq);
+    uart_puts(")\n");
+
     // Enable PCI Bus Mastering and I/O Space
     uint32_t cmd = pci_read_config(net_bus, net_slot, 0, 0x04);
     pci_write_config(net_bus, net_slot, 0, 0x04, cmd | 0x05); // Enable I/O Space (0x01) and Bus Master (0x04)
@@ -272,9 +290,6 @@ int virtio_net_init(void) {
     uart_puts("\n");
     outl(io_base + VIRTIO_PCI_QUEUE_PFN, (uint32_t)((uint64_t)&tx_vq / 4096));
 
-    // Set DRIVER_OK status
-    outb(io_base + VIRTIO_PCI_STATUS, 1 | 2 | 4);
-
     // Populate RX descriptors
     for (int i = 0; i < NUM_RX_BUFFERS; i++) {
         // Descriptor 0: header
@@ -296,16 +311,22 @@ int virtio_net_init(void) {
     *rx_avail_idx = NUM_RX_BUFFERS;
     arch_memory_barrier();
 
+    // Set DRIVER_OK status
+    outb(io_base + VIRTIO_PCI_STATUS, 1 | 2 | 4);
+
     // Notify queue 0 (RX)
     outw(io_base + VIRTIO_PCI_QUEUE_NOTIFY, 0);
 
+    net_rx_ready = 1;
     return 0;
 }
 
 int virtio_net_send(const void *buf, uint32_t len) {
+    /*
     uart_puts("[VIRTIO_NET] Sending packet, len=");
     print_int(len);
     uart_puts("...\n");
+    */
 
     uint64_t flags = spinlock_acquire_irqsave(&net_tx_lock);
     if (io_base == 0) {
@@ -340,37 +361,140 @@ int virtio_net_send(const void *buf, uint32_t len) {
     tx_vq.avail.idx++;
     arch_memory_barrier();
 
+    /*
     uart_puts("[VIRTIO_NET] Notifying device of TX...\n");
+    */
     // Trigger Queue Notify for TX (Queue 1)
     outw(io_base + VIRTIO_PCI_QUEUE_NOTIFY, 1);
 
+    /*
     uart_puts("[VIRTIO_NET] Waiting for TX ACK...\n");
+    */
     // Poll synchronously for completion
     while (*(volatile uint16_t*)&tx_vq.used.idx == tx_ack_used_idx) {
         __asm__ volatile("pause");
     }
     tx_ack_used_idx = tx_vq.used.idx;
+    /*
     uart_puts("[VIRTIO_NET] TX ACK received!\n");
+    */
 
     arch_memory_barrier();
     spinlock_release_irqrestore(&net_tx_lock, flags);
     return 0;
 }
 
+// When set, handle_irq only clears the ISR and returns immediately.
+// The provider_loop's poll_rx processes all packets without needing ISR.
+// This prevents a deadlock: poll_rx holds net_lock → ISR fires →
+// handle_irq tries to acquire net_lock → deadlock on single CPU.
+volatile int virtio_net_provider_active = 0;
+
 void virtio_net_handle_irq(void) {
-    if (io_base == 0) return;
+    if (io_base == 0 || !net_rx_ready) return;
+    dbg_handle_irq_calls++;
+    
+    // Read and clear legacy ISR status immediately to prevent interrupt storms
+    uint8_t isr = inb(io_base + VIRTIO_PCI_ISR);
+    if (isr == 0) return; // Not our interrupt or already cleared
+    dbg_handle_irq_isr_nonzero++;
+    
+    // When provider_loop is active, only clear ISR — don't process packets.
+    // poll_rx handles everything, and acquiring net_lock here would deadlock.
+    if (virtio_net_provider_active) return;
     
     static volatile int handling_rx = 0;
     if (__sync_lock_test_and_set(&handling_rx, 1)) {
         return; // Re-entrancy guard: already processing packets
     }
     
-    // Read and clear legacy ISR status to keep the device happy
-    (void)inb(io_base + VIRTIO_PCI_ISR);
-    
     uint64_t flags = spinlock_acquire_irqsave(&net_lock);
     
     // Process all pending packets in the RX used ring
+    int irq_processed = 0;
+    while (rx_ack_used_idx != *rx_used_idx) {
+        arch_memory_barrier();
+        
+        uint16_t used_idx = rx_ack_used_idx % rx_qsize;
+        uint32_t id = rx_used_ring[used_idx].id;
+        uint32_t len = rx_used_ring[used_idx].len;
+        
+        uint32_t buffer_idx = id / 2;
+        
+        if (buffer_idx >= NUM_RX_BUFFERS) {
+            uart_puts("[VIRTIO_NET] ERROR: invalid buffer_idx=");
+            print_int(buffer_idx);
+            uart_puts(" id=");
+            print_int(id);
+            uart_puts(" len=");
+            print_int(len);
+            uart_puts("\n");
+            rx_ack_used_idx++;
+            irq_processed++;
+            continue;
+        }
+        
+        if (len > sizeof(struct virtio_net_hdr)) {
+            uint32_t packet_len = len - sizeof(struct virtio_net_hdr);
+            
+            // Debug: log large packets to see if RDMA packets arrive with correct length
+            static int rdma_log_count = 0;
+            if (packet_len > 1000 && rdma_log_count < 5) {
+                uart_puts("[VIRTIO_NET] Large pkt: id=");
+                print_int(id);
+                uart_puts(" len=");
+                print_int(len);
+                uart_puts(" pktlen=");
+                print_int(packet_len);
+                uart_puts("\n");
+                rdma_log_count++;
+            }
+            
+            spinlock_release_irqrestore(&net_lock, flags);
+            net_rx_packet(rx_buffers[buffer_idx], packet_len);
+            flags = spinlock_acquire_irqsave(&net_lock);
+        }
+
+        // Re-queue the descriptor
+        uint16_t avail_idx = (*rx_avail_idx) % rx_qsize;
+        rx_avail_ring[avail_idx] = id;
+        
+        arch_memory_barrier();
+        (*rx_avail_idx)++;
+        arch_memory_barrier();
+        
+        rx_ack_used_idx++;
+        dbg_handle_irq_pkts++;
+        irq_processed++;
+    }
+    
+    // Batch-notify device after ALL packets processed (not per-packet).
+    // Each outw causes a KVM VM exit. With millions of broadcast packets,
+    // per-packet notification was consuming all CPU time.
+    if (irq_processed > 0) {
+        outw(io_base + VIRTIO_PCI_QUEUE_NOTIFY, 0);
+    }
+    
+    spinlock_release_irqrestore(&net_lock, flags);
+    __sync_lock_release(&handling_rx);
+}
+
+// Polling version for the RDMA provider_loop.
+// Bypasses the ISR check because the hardware IRQ handler may have already
+// cleared the ISR, causing virtio_net_handle_irq to return without processing
+// packets that are sitting in the used ring.
+void virtio_net_poll_rx(void) {
+    if (io_base == 0 || !net_rx_ready) return;
+    
+    // Directly check if there are pending packets in the used ring.
+    // Do NOT read the ISR register here — each inb() causes a VM exit,
+    // and in a tight polling loop this would cause millions of VM exits/sec.
+    arch_memory_barrier();
+    if (rx_ack_used_idx == *rx_used_idx) return;
+    
+    uint64_t flags = spinlock_acquire_irqsave(&net_lock);
+    
+    int poll_processed = 0;
     while (rx_ack_used_idx != *rx_used_idx) {
         arch_memory_barrier();
         
@@ -387,7 +511,6 @@ void virtio_net_handle_irq(void) {
             flags = spinlock_acquire_irqsave(&net_lock);
         }
 
-        // Re-queue the descriptor
         uint16_t avail_idx = (*rx_avail_idx) % rx_qsize;
         rx_avail_ring[avail_idx] = id;
         
@@ -396,13 +519,17 @@ void virtio_net_handle_irq(void) {
         arch_memory_barrier();
         
         rx_ack_used_idx++;
-        
-        // Notify device RX queue is filled
+        dbg_poll_rx_pkts++;
+        poll_processed++;
+    }
+    
+    // Batch-notify after processing all packets. Each outw triggers a VM exit,
+    // so batch-notify avoids pausing guest execution during the processing loop.
+    if (poll_processed > 0) {
         outw(io_base + VIRTIO_PCI_QUEUE_NOTIFY, 0);
     }
     
     spinlock_release_irqrestore(&net_lock, flags);
-    __sync_lock_release(&handling_rx);
 }
 
 int virtio_net_is_active(void) {
@@ -456,7 +583,7 @@ struct virtq {
     struct virtq_avail avail;
     uint8_t padding[4096 - (256 + sizeof(struct virtq_avail))];
     struct virtq_used used;
-} __attribute__((aligned(4096)));
+} __attribute__((packed)) __attribute__((aligned(4096)));
 
 struct virtio_net_hdr {
     uint8_t flags;
@@ -635,6 +762,7 @@ int virtio_net_send(const void *buf, uint32_t len) {
     tx_vq.avail.idx++;
     arch_memory_barrier();
 
+    /*
     uart_puts("[VIRTIO_NET] TX: tx_vq=");
     uart_print_hex((uint64_t)&tx_vq);
     uart_puts(" tx_hdr=");
@@ -646,6 +774,7 @@ int virtio_net_send(const void *buf, uint32_t len) {
     uart_puts(" ack=");
     print_int(tx_ack_used_idx);
     uart_puts("\n");
+    */
 
     reg_write32(VIRTIO_QUEUE_SEL, 1);
     reg_write32(VIRTIO_QUEUE_NOTIFY, 1);

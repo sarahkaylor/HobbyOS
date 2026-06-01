@@ -221,3 +221,119 @@ void __clear_cache(void *begin, void *end) {
     (void)begin;
     (void)end;
 }
+
+#define DYNAMIC_PDPT_COUNT 4
+#define DYNAMIC_PD_COUNT 64
+
+static uint64_t dynamic_pdpts[DYNAMIC_PDPT_COUNT][512] __attribute__((aligned(4096)));
+static uint64_t dynamic_pds[DYNAMIC_PD_COUNT][512] __attribute__((aligned(4096)));
+
+static int next_pdpt_idx = 0;
+static int next_pd_idx = 0;
+
+void mmu_map_mmio_range(uint64_t phys_addr, uint64_t size) {
+    uint64_t flags = spinlock_acquire_irqsave(&mmu_lock);
+    
+    uint64_t start = phys_addr;
+    uint64_t end = phys_addr + size;
+
+    // Align end up to 2MB
+    if (end % 0x200000) {
+        end += 0x200000 - (end % 0x200000);
+    }
+
+    uint64_t addr = start;
+    while (addr < end) {
+        // Check if we can map a 1GB huge page:
+        // 1. Current address is 1GB aligned
+        // 2. Remaining size to map is at least 1GB
+        if ((addr % 0x40000000 == 0) && (end - addr >= 0x40000000)) {
+            // Map 1GB huge page
+            uint32_t pml4_idx = (addr >> 39) & 0x1FF;
+            uint32_t pdpt_idx = (addr >> 30) & 0x1FF;
+
+            uint64_t* pdpt = 0;
+            if (cpu_pml4[0][pml4_idx] & 0x1) {
+                pdpt = (uint64_t*)(cpu_pml4[0][pml4_idx] & ~0xFFF);
+            } else {
+                if (next_pdpt_idx < DYNAMIC_PDPT_COUNT) {
+                    pdpt = dynamic_pdpts[next_pdpt_idx];
+                    for (int i = 0; i < 512; i++) pdpt[i] = 0;
+                    next_pdpt_idx++;
+                } else {
+                    spinlock_release_irqrestore(&mmu_lock, flags);
+                    return;
+                }
+            }
+
+            for (int c = 0; c < MAX_CPUS; c++) {
+                cpu_pml4[c][pml4_idx] = ((uint64_t)pdpt) | 0x07;
+            }
+
+            // Present | RW | PCD | PWT | Huge Page (0x9B)
+            pdpt[pdpt_idx] = addr | 0x9B;
+
+            addr += 0x40000000;
+        } else {
+            // Map 2MB huge page
+            uint32_t pml4_idx = (addr >> 39) & 0x1FF;
+            uint32_t pdpt_idx = (addr >> 30) & 0x1FF;
+            uint32_t pd_idx   = (addr >> 21) & 0x1FF;
+
+            uint64_t* pdpt = 0;
+            if (cpu_pml4[0][pml4_idx] & 0x1) {
+                pdpt = (uint64_t*)(cpu_pml4[0][pml4_idx] & ~0xFFF);
+            } else {
+                if (next_pdpt_idx < DYNAMIC_PDPT_COUNT) {
+                    pdpt = dynamic_pdpts[next_pdpt_idx];
+                    for (int i = 0; i < 512; i++) pdpt[i] = 0;
+                    next_pdpt_idx++;
+                } else {
+                    spinlock_release_irqrestore(&mmu_lock, flags);
+                    return;
+                }
+            }
+
+            for (int c = 0; c < MAX_CPUS; c++) {
+                cpu_pml4[c][pml4_idx] = ((uint64_t)pdpt) | 0x07;
+            }
+
+            uint64_t* pd = 0;
+            if (pdpt[pdpt_idx] & 0x1) {
+                // Ensure it's not a 1GB huge page (bit 7 must be 0)
+                if (pdpt[pdpt_idx] & 0x80) {
+                    spinlock_release_irqrestore(&mmu_lock, flags);
+                    return;
+                }
+                pd = (uint64_t*)(pdpt[pdpt_idx] & ~0xFFF);
+            } else {
+                if (next_pd_idx < DYNAMIC_PD_COUNT) {
+                    pd = dynamic_pds[next_pd_idx];
+                    for (int i = 0; i < 512; i++) pd[i] = 0;
+                    next_pd_idx++;
+                } else {
+                    spinlock_release_irqrestore(&mmu_lock, flags);
+                    return;
+                }
+                pdpt[pdpt_idx] = ((uint64_t)pd) | 0x07;
+            }
+
+            pd[pd_idx] = addr | 0x9B;
+
+            addr += 0x200000;
+        }
+    }
+
+    // Reload CR3 to invalidate TLB
+    uint64_t cr3_val;
+    __asm__ volatile(
+        "mov %%cr3, %0\n"
+        "mov %0, %%cr3\n"
+        : "=r"(cr3_val)
+        :
+        : "memory"
+    );
+
+    spinlock_release_irqrestore(&mmu_lock, flags);
+}
+

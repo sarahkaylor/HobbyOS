@@ -33,9 +33,11 @@ void timer_init(void) {
  */
 void timer_reload(void) {
     timer_ticks++;
-    if (virtio_net_is_active()) {
-        virtio_net_handle_irq();
-    }
+    // NOTE: We intentionally do NOT call virtio_net_handle_irq() here.
+    // The provider_loop on CPU 0 polls the RX used ring directly via poll_rx.
+    // Calling handle_irq from ANY CPU's timer ISR reads inb(ISR) which clears
+    // the ISR register, stealing the interrupt from CPU 0's hardware IRQ handler
+    // and preventing proper packet delivery via the PIC.
 }
 
 /**

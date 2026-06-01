@@ -27,5 +27,6 @@ void mmu_map_user_framebuffer(uint64_t phys_addr);
  * Standard data cache clean and instruction cache invalidation.
  */
 void mmu_clear_cache(void *begin, void *end);
+void mmu_map_mmio_range(uint64_t phys_addr, uint64_t size);
 
 #endif // ARCH_MMU_H

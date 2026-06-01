@@ -3,7 +3,7 @@ ENTRY(_start)
 SECTIONS
 {
     /* Multiboot expects the kernel to be loaded at 1MB or higher */
-    . = 0x100000;
+    . = 0x70000000;
 
     .text : ALIGN(4096)
     {

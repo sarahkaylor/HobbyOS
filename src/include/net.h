@@ -88,6 +88,8 @@ enum socket_state {
     SOCKET_FIN_WAIT
 };
 
+#define SOCKET_RX_BUF_SIZE (4 * 1048576)  // 4MB — absorbs burst fire-and-forget DMA sync
+
 struct socket_pcb {
     int in_use;
     int protocol; // IP_PROTO_TCP or IP_PROTO_UDP
@@ -102,9 +104,9 @@ struct socket_pcb {
     uint32_t ack;
 
     // Receive buffer
-    uint8_t rx_buf[2048];
-    uint32_t rx_head;
-    uint32_t rx_tail;
+    volatile uint8_t rx_buf[SOCKET_RX_BUF_SIZE];
+    volatile uint32_t rx_head;
+    volatile uint32_t rx_tail;
 };
 
 /**

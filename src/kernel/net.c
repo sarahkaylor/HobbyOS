@@ -3,6 +3,7 @@
 #include "lock.h"
 #include "timer.h"
 #include "process.h"
+#include "net_rdma.h"
 
 extern void uart_puts(const char* s);
 extern void uart_print_hex(uint64_t val);
@@ -98,7 +99,7 @@ uint32_t net_get_ip(void) {
     return local_ip;
 }
 
-static void arp_cache_update(uint32_t ip, const uint8_t* mac) {
+void arp_cache_update(uint32_t ip, const uint8_t* mac) {
     for (int i = 0; i < ARP_CACHE_SIZE; i++) {
         if (arp_cache[i].valid && arp_cache[i].ip == ip) {
             for (int j=0; j<6; j++) arp_cache[i].mac[j] = mac[j];
@@ -138,15 +139,20 @@ static int arp_resolve(uint32_t ip, uint8_t* mac_out) {
         }
     }
     
-    // Slow path: send ARP request and wait for reply
+    // Slow path: send ARP request and wait for reply.
+    // NOTE: We cannot call virtio_net_poll_rx() here because it would cause
+    // recursive re-entrancy (poll_rx → net_rx_packet → handle_icmp → arp_resolve
+    // → poll_rx → ...) which overflows the stack. Instead, we rely on the
+    // hardware IRQ handler or the provider_loop to process the ARP reply.
     if (local_ip != 0) {
         for (int retry = 0; retry < 50; retry++) {
             net_arp_request(ip);
             
-            // Wait up to 5ms for RX interrupt to process the reply
+            // Busy-wait with yield. The ISR or provider_loop will process
+            // the ARP reply and update the cache.
             uint64_t start_wait = timer_get_ms();
             while (timer_get_ms() - start_wait < 5) {
-                safe_wfi();
+                __asm__ volatile("pause");
             }
             
             // Check cache again
@@ -166,6 +172,7 @@ static void handle_arp(uint8_t* packet, uint32_t len) {
     if (len < sizeof(struct eth_hdr) + sizeof(struct arp_hdr)) return;
     struct arp_hdr* arp = (struct arp_hdr*)(packet + sizeof(struct eth_hdr));
     
+    /*
     uart_puts("[NET ARP] handle_arp: opcode=");
     print_int(ntohs(arp->opcode));
     uart_puts(" sender_ip=");
@@ -175,6 +182,7 @@ static void handle_arp(uint8_t* packet, uint32_t len) {
     uart_puts(" local_ip=");
     uart_print_hex(local_ip);
     uart_puts("\n");
+    */
 
     if (ntohs(arp->hw_type) == 1 && ntohs(arp->proto_type) == ETH_TYPE_IPV4) {
         arp_cache_update(arp->sender_ip, arp->sender_mac);
@@ -212,11 +220,16 @@ static void handle_udp(struct ipv4_hdr* ip, uint8_t* packet, uint32_t len) {
     if (len < sizeof(struct udp_hdr)) return;
     struct udp_hdr* udp = (struct udp_hdr*)packet;
 
-    uart_puts("[NET UDP] handle_udp: dst_port=");
-    print_int(ntohs(udp->dst_port));
-    uart_puts(" len=");
-    print_int(len);
-    uart_puts("\n");
+    /*
+    if (ntohs(udp->dst_port) == 7777) {
+        uint32_t data_len = ntohs(udp->length) - sizeof(struct udp_hdr);
+        uart_puts("[NET UDP] handle_udp: dst_port=7777 data_len=");
+        print_int(data_len);
+        uart_puts(" len=");
+        print_int(len);
+        uart_puts("\n");
+    }
+    */
     
     if (ntohs(udp->dst_port) == 68) { // DHCP Client
         dhcp_rx((uint8_t*)ip, len + sizeof(struct ipv4_hdr));
@@ -226,17 +239,23 @@ static void handle_udp(struct ipv4_hdr* ip, uint8_t* packet, uint32_t len) {
     uint64_t flags = spinlock_acquire_irqsave(&net_lock);
     for (int i = 0; i < MAX_SOCKETS; i++) {
         if (sockets[i].in_use && sockets[i].protocol == IP_PROTO_UDP && sockets[i].local_port == ntohs(udp->dst_port)) {
+            // Append to socket rx buffer
+            uint32_t data_len = ntohs(udp->length) - sizeof(struct udp_hdr);
+            if (sockets[i].local_port == 7777 && data_len != sizeof(struct rdma_packet)) {
+                break; // Ignore invalid / partial / non-RDMA packets WITHOUT updating routing
+            }
             // Update remote IP and port dynamically for UDP reply routing
+            // Only after validating the packet is a proper RDMA packet
             sockets[i].remote_ip = ip->src_ip;
             sockets[i].remote_port = ntohs(udp->src_port);
 
-            // Append to socket rx buffer
-            uint32_t data_len = ntohs(udp->length) - sizeof(struct udp_hdr);
             uint8_t* data = packet + sizeof(struct udp_hdr);
             for (uint32_t j = 0; j < data_len; j++) {
-                sockets[i].rx_buf[sockets[i].rx_tail % 2048] = data[j];
-                sockets[i].rx_tail++;
+                sockets[i].rx_buf[(sockets[i].rx_tail + j) % SOCKET_RX_BUF_SIZE] = data[j];
             }
+            extern void arch_memory_barrier(void);
+            arch_memory_barrier();
+            sockets[i].rx_tail += data_len;
             break;
         }
     }
@@ -268,9 +287,11 @@ static void handle_tcp(struct ipv4_hdr* ip, uint8_t* packet, uint32_t len) {
                     uint32_t data_len = len - data_offset;
                     uint8_t* data = packet + data_offset;
                     for (uint32_t j = 0; j < data_len; j++) {
-                        sockets[i].rx_buf[sockets[i].rx_tail % 2048] = data[j];
-                        sockets[i].rx_tail++;
+                        sockets[i].rx_buf[(sockets[i].rx_tail + j) % SOCKET_RX_BUF_SIZE] = data[j];
                     }
+                    extern void arch_memory_barrier(void);
+                    arch_memory_barrier();
+                    sockets[i].rx_tail += data_len;
                     sockets[i].ack += data_len;
                 }
                 
@@ -332,15 +353,45 @@ static void handle_icmp(struct ipv4_hdr* ip, uint8_t* packet, uint32_t len) {
     }
 }
 
+__attribute__((noinline)) static void safe_print_int(int val) {
+    extern void uart_putc(char c);
+    if (val < 0) {
+        uart_putc('-');
+        val = -val;
+    }
+    if (val == 0) {
+        uart_putc('0');
+        return;
+    }
+    char buf[16];
+    int idx = 0;
+    while (val > 0) {
+        buf[idx++] = (char)('0' + (val % 10));
+        val /= 10;
+    }
+    while (idx > 0)
+        uart_putc(buf[--idx]);
+}
+
 void net_rx_packet(uint8_t* packet, uint32_t len) {
     if (len < sizeof(struct eth_hdr)) return;
     struct eth_hdr* eth = (struct eth_hdr*)packet;
 
+    /*
+    if (ntohs(eth->type) == ETH_TYPE_ARP) {
+        uart_puts("[NET RX] ARP Packet received, len=");
+        safe_print_int(len);
+        uart_puts("\n");
+    }
+    */
+
+    /*
     uart_puts("[NET RX] Packet received, len=");
     print_int(len);
     uart_puts(" type=");
     uart_print_hex(ntohs(eth->type));
     uart_puts("\n");
+    */
     
     // Demultiplex incoming Ethernet frames based on EtherType
     if (ntohs(eth->type) == ETH_TYPE_ARP) {
@@ -348,6 +399,31 @@ void net_rx_packet(uint8_t* packet, uint32_t len) {
     } else if (ntohs(eth->type) == ETH_TYPE_IPV4) {
         if (len < sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr)) return;
         struct ipv4_hdr* ip = (struct ipv4_hdr*)(packet + sizeof(struct eth_hdr));
+        arp_cache_update(ip->src_ip, eth->src_mac);
+        
+        /*
+        if (ip->protocol == IP_PROTO_UDP || ip->protocol == IP_PROTO_ICMP) {
+            uart_puts("[NET RX] IP Packet: proto=");
+            safe_print_int(ip->protocol);
+            uart_puts(" src=");
+            uart_print_hex(ip->src_ip);
+            uart_puts(" dst=");
+            uart_print_hex(ip->dst_ip);
+            uart_puts(" len=");
+            safe_print_int(len);
+            uart_puts("\n");
+        }
+        */
+        
+        /*
+        uart_puts("  IPv4 packet: proto=");
+        print_int(ip->protocol);
+        uart_puts(" dst=");
+        uart_print_hex(ip->dst_ip);
+        uart_puts(" local=");
+        uart_print_hex(local_ip);
+        uart_puts("\n");
+        */
         
         // Discard packets not destined for us or broadcast
         if (ip->dst_ip != local_ip && ip->dst_ip != 0xFFFFFFFF) return;
@@ -531,6 +607,7 @@ int net_socket_connect(struct socket_pcb* pcb, uint32_t ip, uint16_t port) {
 
 int net_socket_send(struct socket_pcb* pcb, const void* buf, uint32_t len) {
     if (!pcb) return -1;
+    pcb->local_ip = local_ip;
     if (pcb->protocol == IP_PROTO_TCP) {
         if (pcb->state != SOCKET_ESTABLISHED) return -1;
         // Transmit TCP payload with PUSH and ACK flags set
@@ -547,7 +624,9 @@ int net_socket_send(struct socket_pcb* pcb, const void* buf, uint32_t len) {
         uint8_t* payload = packet + sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr) + sizeof(struct udp_hdr);
         
         uint8_t dest_mac[6];
-        if (!arp_resolve(pcb->remote_ip, dest_mac)) {
+        int arp_status = arp_resolve(pcb->remote_ip, dest_mac);
+
+        if (!arp_status) {
             for(int i=0; i<6; i++) dest_mac[i] = 0xFF;
         }
         
@@ -611,7 +690,7 @@ int net_socket_recv(struct socket_pcb* pcb, void* buf, uint32_t len) {
     uint32_t to_read = len < avail ? len : avail;
     uint8_t* out = (uint8_t*)buf;
     for (uint32_t i = 0; i < to_read; i++) {
-        out[i] = pcb->rx_buf[pcb->rx_head % 2048];
+        out[i] = pcb->rx_buf[pcb->rx_head % SOCKET_RX_BUF_SIZE];
         pcb->rx_head++;
     }
     spinlock_release_irqrestore(&net_lock, flags);

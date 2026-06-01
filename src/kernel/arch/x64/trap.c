@@ -380,10 +380,39 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     }
 }
 
+static void safe_print_int(int val) {
+    if (val < 0) {
+        uart_putc('-');
+        val = -val;
+    }
+    if (val == 0) {
+        uart_putc('0');
+        return;
+    }
+    char buf[16];
+    int idx = 0;
+    while (val > 0) {
+        buf[idx++] = (char)('0' + (val % 10));
+        val /= 10;
+    }
+    while (idx > 0)
+        uart_putc(buf[--idx]);
+}
+
+static void safe_print_hex(uint64_t val) {
+    char hex_chars[] = "0123456789ABCDEF";
+    uart_putc('0');
+    uart_putc('x');
+    for (int i = 60; i >= 0; i -= 4) {
+        uart_putc(hex_chars[(val >> i) & 0xF]);
+    }
+}
+
 void general_interrupt_handler(struct trap_frame *tf) {
     extern void gic_set_current_vector(uint32_t cpu, uint32_t vector);
     extern uint32_t gic_acknowledge_interrupt(void);
     extern void gic_end_interrupt(uint32_t intid);
+    extern int virtio_net_irq;
     
     uint32_t cpu = get_cpuid();
     gic_set_current_vector(cpu, tf->vector);
@@ -410,6 +439,14 @@ void general_interrupt_handler(struct trap_frame *tf) {
         extern void virtio_input_handle_irq(int irq);
         virtio_input_handle_irq(intid);
         gic_end_interrupt(intid);
+    } else if (virtio_net_irq != -1 && tf->vector == (uint32_t)virtio_net_irq) {
+        uint32_t intid = gic_acknowledge_interrupt();
+        extern void virtio_net_handle_irq(void);
+        virtio_net_handle_irq();
+        gic_end_interrupt(intid);
+    } else if (tf->vector >= 32 && tf->vector <= 47) {
+        uint32_t intid = gic_acknowledge_interrupt();
+        gic_end_interrupt(intid);
     } else if (tf->vector == 0x80) {
         // Syscall software interrupt / instruction trap
         sync_lower_handler_c(tf);
@@ -421,16 +458,44 @@ void general_interrupt_handler(struct trap_frame *tf) {
         struct process *cur = current_process();
         if (cur && !cur->is_kernel_process && (tf->cs & 3) == 3) {
             uart_puts("[KERNEL] User process fault! Vector: ");
-            print_int(tf->vector);
+            safe_print_int(tf->vector);
             uart_puts(" RIP: ");
-            uart_print_hex(tf->elr);
+            safe_print_hex(tf->elr);
             uart_puts("\n");
             process_exit(tf);
         } else {
             uart_puts("[KERNEL] FATAL: Exception in Kernel Mode! Vector: ");
-            print_int(tf->vector);
-            uart_puts(" RIP: ");
-            uart_print_hex(tf->elr);
+            safe_print_int(tf->vector);
+            uart_puts(" Error Code: ");
+            safe_print_hex(tf->error_code);
+            uart_puts("\n");
+            uart_puts("  RIP: ");
+            safe_print_hex(tf->elr);
+            uart_puts("  RSP: ");
+            safe_print_hex(((uint64_t*)tf)[38]);
+            uart_puts("\n");
+            uart_puts("  CS:  ");
+            safe_print_hex(tf->cs);
+            uart_puts("  SS:  ");
+            safe_print_hex(tf->ss);
+            uart_puts("  RFLAGS: ");
+            safe_print_hex(tf->spsr);
+            uart_puts("\n");
+            uart_puts("  RAX: ");
+            safe_print_hex(tf->regs[0]);
+            uart_puts("  RBX: ");
+            safe_print_hex(tf->regs[1]);
+            uart_puts("  RCX: ");
+            safe_print_hex(tf->regs[2]);
+            uart_puts("  RDX: ");
+            safe_print_hex(tf->regs[3]);
+            uart_puts("\n");
+            uart_puts("  RDI: ");
+            safe_print_hex(tf->regs[5]);
+            uart_puts("  RSI: ");
+            safe_print_hex(tf->regs[4]);
+            uart_puts("  RBP: ");
+            safe_print_hex(tf->regs[6]);
             uart_puts("\n");
             while (1);
         }
@@ -625,8 +690,21 @@ EXCEPTION_NO_ERR(28);EXCEPTION_NO_ERR(29);EXCEPTION_NO_ERR(30);EXCEPTION_NO_ERR(
 EXCEPTION_NO_ERR(32);
 // Keyboard
 EXCEPTION_NO_ERR(33);
+EXCEPTION_NO_ERR(34);
+EXCEPTION_NO_ERR(35);
+EXCEPTION_NO_ERR(36);
+EXCEPTION_NO_ERR(37);
+EXCEPTION_NO_ERR(38);
+EXCEPTION_NO_ERR(39);
+EXCEPTION_NO_ERR(40);
+EXCEPTION_NO_ERR(41);
+EXCEPTION_NO_ERR(42);
+EXCEPTION_NO_ERR(43);
 // Mouse
 EXCEPTION_NO_ERR(44);
+EXCEPTION_NO_ERR(45);
+EXCEPTION_NO_ERR(46);
+EXCEPTION_NO_ERR(47);
 // Yield
 EXCEPTION_NO_ERR(129); // 0x81
 
@@ -838,14 +916,23 @@ void trap_init(void) {
     SET_EXCEPTION(24); SET_EXCEPTION(25); SET_EXCEPTION(26); SET_EXCEPTION(27);
     SET_EXCEPTION(28); SET_EXCEPTION(29); SET_EXCEPTION(30); SET_EXCEPTION(31);
     
-    // Register PIT timer on vector 32
+    // Register PIC interrupts (vectors 32-47)
     idt_set_gate(32, (uint64_t)exception_32, 0x08, 0x8E);
-    
-    // Register Keyboard on vector 33
     idt_set_gate(33, (uint64_t)exception_33, 0x08, 0x8E);
-    
-    // Register Mouse on vector 44
+    idt_set_gate(34, (uint64_t)exception_34, 0x08, 0x8E);
+    idt_set_gate(35, (uint64_t)exception_35, 0x08, 0x8E);
+    idt_set_gate(36, (uint64_t)exception_36, 0x08, 0x8E);
+    idt_set_gate(37, (uint64_t)exception_37, 0x08, 0x8E);
+    idt_set_gate(38, (uint64_t)exception_38, 0x08, 0x8E);
+    idt_set_gate(39, (uint64_t)exception_39, 0x08, 0x8E);
+    idt_set_gate(40, (uint64_t)exception_40, 0x08, 0x8E);
+    idt_set_gate(41, (uint64_t)exception_41, 0x08, 0x8E);
+    idt_set_gate(42, (uint64_t)exception_42, 0x08, 0x8E);
+    idt_set_gate(43, (uint64_t)exception_43, 0x08, 0x8E);
     idt_set_gate(44, (uint64_t)exception_44, 0x08, 0x8E);
+    idt_set_gate(45, (uint64_t)exception_45, 0x08, 0x8E);
+    idt_set_gate(46, (uint64_t)exception_46, 0x08, 0x8E);
+    idt_set_gate(47, (uint64_t)exception_47, 0x08, 0x8E);
     
     // Register software yield interrupt on vector 0x81 (with Ring 3 permissions 0xEE)
     idt_set_gate(129, (uint64_t)exception_129, 0x08, 0xEE);

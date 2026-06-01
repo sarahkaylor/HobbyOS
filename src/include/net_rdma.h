@@ -48,6 +48,8 @@ enum rdma_op {
     RDMA_OP_WRITE_BLOCK_RESP = 13,
 };
 
+#define RDMA_DATA_LEN 1024
+
 // RDMA Packet Structure over UDP/IP (Generalized for Multi-BAR and dynamic routing)
 struct rdma_packet {
     uint32_t op;               // enum rdma_op
@@ -57,7 +59,7 @@ struct rdma_packet {
     uint32_t status;           // 0 on success, non-zero on failure
     uint8_t  bar_index;        // PCI BAR index (0-5) to target
     uint8_t  reserved[3];      // Alignment/padding
-    uint8_t  data[512];         // Data payload
+    uint8_t  data[RDMA_DATA_LEN]; // Data payload
 } __attribute__((packed));
 
 // Dynamic RDMA Configuration (Startup Parameters)

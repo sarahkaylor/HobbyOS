@@ -5,6 +5,7 @@
 #include "lock.h"
 #include "process.h"
 #include "timer.h"
+#include "mmu.h"
 #include "arch/cpu.h"
 
 extern void uart_puts(const char* s);
@@ -25,10 +26,14 @@ int g_rdma_active = 0;
 // Host specific hardware pointers
 static volatile uint8_t* p_pci_bars[6] = {NULL};
 static uint64_t pci_bars_phys[6] = {0};
-static uint32_t pci_bars_size[6] = {0};
+static uint64_t pci_bars_size[6] = {0};
+
+static volatile uint8_t* p_pci_rom = NULL;
+static uint64_t pci_rom_phys = 0;
+static uint64_t pci_rom_size = 0;
 
 // Host Memory Registration Table
-#define MAX_MRS 8
+#define MAX_MRS 64
 struct host_mr_entry {
     uint64_t guest_phys;
     uint64_t host_phys;
@@ -86,6 +91,9 @@ static uint8_t mock_edu_buffer[4096];
 
 // Host packet handler
 static void handle_host_rdma(struct rdma_packet* pkt) {
+    if (pkt->len > RDMA_DATA_LEN) {
+        pkt->len = RDMA_DATA_LEN;
+    }
     struct rdma_packet resp = {0};
     resp.op = pkt->op + 1; // Standard response Opcode (Op + 1)
     resp.tx_id = pkt->tx_id;
@@ -94,6 +102,7 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
     resp.len = pkt->len;
     resp.status = 0;
 
+    /*
     uart_puts("[RDMA Host] handle_host_rdma: op=");
     print_int(pkt->op);
     uart_puts(" bar=");
@@ -103,12 +112,30 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
     uart_puts(" len=");
     print_int(pkt->len);
     uart_puts("\n");
+    */
 
     int use_mock = (pkt->bar_index == 0 && pkt->addr >= 0x40000 && pkt->addr < 0x40000 + 4096);
 
     if (pkt->op == RDMA_OP_READ_REQ) {
         uint8_t bar = pkt->bar_index;
-        if (bar < 6 && p_pci_bars[bar]) {
+        if (bar == 6) {
+            if (p_pci_rom) {
+                if (pkt->len <= RDMA_DATA_LEN) {
+                    uint32_t words = pkt->len / 4;
+                    for (uint32_t i = 0; i < words; i++) {
+                        ((uint32_t*)resp.data)[i] = *(volatile uint32_t*)(p_pci_rom + pkt->addr + i * 4);
+                    }
+                    for (uint32_t i = words * 4; i < pkt->len; i++) {
+                        resp.data[i] = *(volatile uint8_t*)(p_pci_rom + pkt->addr + i);
+                    }
+                } else {
+                    resp.status = 1;
+                }
+            } else {
+                resp.status = 2; // ROM not mapped
+            }
+        }
+        else if (bar < 6 && p_pci_bars[bar]) {
             if (use_mock) {
                 if (pkt->len == 1) {
                     *(uint8_t*)resp.data = mock_edu_buffer[pkt->addr - 0x40000];
@@ -131,6 +158,7 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
                 } else if (pkt->len == 4) {
                     uint32_t val = *(volatile uint32_t*)(p_pci_bars[bar] + pkt->addr);
                     *(uint32_t*)resp.data = val;
+
                 } else if (pkt->len == 8) {
                     uint64_t val = *(volatile uint64_t*)(p_pci_bars[bar] + pkt->addr);
                     *(uint64_t*)resp.data = val;
@@ -167,12 +195,14 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
                 } else if (pkt->len == 4) {
                     uint32_t val = *(uint32_t*)pkt->data;
                     *(volatile uint32_t*)(p_pci_bars[bar] + pkt->addr) = val;
+
                 } else if (pkt->len == 8) {
                     uint64_t val = *(uint64_t*)pkt->data;
                     *(volatile uint64_t*)(p_pci_bars[bar] + pkt->addr) = val;
                 } else {
                     resp.status = 1;
                 }
+                arch_memory_barrier();
             }
         } else {
             resp.status = 2;
@@ -182,7 +212,7 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
         uint8_t bar = pkt->bar_index;
         if (bar < 6 && p_pci_bars[bar]) {
             uint32_t block_len = pkt->len;
-            if (block_len <= 512) {
+            if (block_len <= RDMA_DATA_LEN) {
                 if (use_mock) {
                     for (uint32_t i = 0; i < block_len; i++) {
                         resp.data[i] = mock_edu_buffer[pkt->addr - 0x40000 + i];
@@ -209,7 +239,7 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
         uint8_t bar = pkt->bar_index;
         if (bar < 6 && p_pci_bars[bar]) {
             uint32_t block_len = pkt->len;
-            if (block_len <= 512) {
+            if (block_len <= RDMA_DATA_LEN) {
                 if (use_mock) {
                     for (uint32_t i = 0; i < block_len; i++) {
                         mock_edu_buffer[pkt->addr - 0x40000 + i] = pkt->data[i];
@@ -219,10 +249,12 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
                     for (uint32_t i = 0; i < words; i++) {
                         uint32_t val = ((uint32_t*)pkt->data)[i];
                         *(volatile uint32_t*)(p_pci_bars[bar] + pkt->addr + i * 4) = val;
+                        arch_memory_barrier();
                     }
                     // Trailing bytes (if any)
                     for (uint32_t i = words * 4; i < block_len; i++) {
                         *(volatile uint8_t*)(p_pci_bars[bar] + pkt->addr + i) = pkt->data[i];
+                        arch_memory_barrier();
                     }
                 }
             } else {
@@ -261,6 +293,10 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
         }
     } 
     else if (pkt->op == RDMA_OP_DMA_SYNC_TO_HOST) {
+        // Fire-and-forget: write data to host memory, NO response sent.
+        // This eliminates the TX bottleneck (~50-100µs per virtio_net_send)
+        // and prevents remote_port from being overwritten if the daemon
+        // sends sync packets from a different source context.
         int found = 0;
         for (int i = 0; i < MAX_MRS; i++) {
             if (host_mrs[i].in_use && host_mrs[i].guest_phys == pkt->addr) {
@@ -271,8 +307,16 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
                 break;
             }
         }
-        resp.op = RDMA_OP_DMA_SYNC_RESP;
-        resp.status = found ? 0 : 4;
+        if (!found) {
+            // Direct write to Host RAM (identity mapped) - protected against low kernel memory corruption
+            if (pkt->addr < 0x70000000ULL || pkt->addr >= 0x71300000ULL) {
+                uint8_t* ptr = (uint8_t*)pkt->addr;
+                for (uint32_t j = 0; j < pkt->len; j++) {
+                    ptr[j] = pkt->data[j];
+                }
+            }
+        }
+        return; // No response — fire-and-forget
     } 
     else if (pkt->op == RDMA_OP_DMA_SYNC_TO_GUEST) {
         int found = 0;
@@ -283,6 +327,20 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
                 }
                 found = 1;
                 break;
+            }
+        }
+        if (!found) {
+            // Direct read from Host RAM (identity mapped) - protected against low kernel memory leakage
+            if (pkt->addr < 0x70000000ULL || pkt->addr >= 0x71300000ULL) {
+                uint8_t* ptr = (uint8_t*)pkt->addr;
+                for (uint32_t j = 0; j < pkt->len; j++) {
+                    resp.data[j] = ptr[j];
+                }
+                found = 1;
+            } else {
+                uart_puts("[RDMA Host] ERROR: Blocked low DMA Sync read from: ");
+                uart_print_hex(pkt->addr);
+                uart_puts("\n");
             }
         }
         resp.op = RDMA_OP_DMA_SYNC_RESP;
@@ -299,44 +357,101 @@ static void handle_guest_rdma(struct rdma_packet* pkt) {
 }
 
 // Shared network polling loop
+static volatile int rdma_poll_active = 0; // Re-entrancy guard for timer interrupt
+
 void net_rdma_poll(void) {
     if (!rdma_socket) return;
-    if (rdma_socket->rx_head == rdma_socket->rx_tail) return;
+    if (rdma_poll_active) return; // Prevent re-entrant calls from timer interrupt
+    rdma_poll_active = 1;
 
-    uint32_t avail = rdma_socket->rx_tail - rdma_socket->rx_head;
-    if (avail < sizeof(struct rdma_packet)) return;
+    // Process ALL available RDMA packets in the rx_buf, not just one.
+    // This is critical because DMA blast syncs can flood the buffer with
+    // thousands of packets, and BAR read/write requests need timely processing.
+    int processed = 0;
+    while (processed < 1024) {
+        if (rdma_socket->rx_head == rdma_socket->rx_tail) break;
 
-    struct rdma_packet pkt = {0};
-    uint64_t flags = spinlock_acquire_irqsave(&rdma_lock);
-    uint8_t* dest = (uint8_t*)&pkt;
-    for (uint32_t i = 0; i < sizeof(struct rdma_packet); i++) {
-        dest[i] = rdma_socket->rx_buf[rdma_socket->rx_head % 2048];
-        rdma_socket->rx_head++;
+        uint32_t avail = rdma_socket->rx_tail - rdma_socket->rx_head;
+        if (avail < sizeof(struct rdma_packet)) break;
+
+        struct rdma_packet pkt = {0};
+        uint64_t flags = spinlock_acquire_irqsave(&rdma_lock);
+        uint8_t* dest = (uint8_t*)&pkt;
+        extern void arch_memory_barrier(void);
+        arch_memory_barrier();
+        for (uint32_t i = 0; i < sizeof(struct rdma_packet); i++) {
+            dest[i] = rdma_socket->rx_buf[rdma_socket->rx_head % SOCKET_RX_BUF_SIZE];
+            rdma_socket->rx_head++;
+        }
+        spinlock_release_irqrestore(&rdma_lock, flags);
+
+        if (is_host) {
+            handle_host_rdma(&pkt);
+        } else {
+            handle_guest_rdma(&pkt);
+        }
+        processed++;
     }
-    spinlock_release_irqrestore(&rdma_lock, flags);
 
-    uart_puts("[RDMA Poll] Successfully read packet of size ");
-    print_int(sizeof(struct rdma_packet));
-    uart_puts(" op=");
-    print_int(pkt.op);
-    uart_puts("\n");
-
-    // Save remote parameters for Host reply routing
-    if (is_host) {
-        handle_host_rdma(&pkt);
-    } else {
-        handle_guest_rdma(&pkt);
-    }
+    rdma_poll_active = 0;
 }
 
 // Host Provider Listening Loop
+// Polls virtio_net and RDMA continuously on CPU 0.
+// Uses virtio_net_poll_rx instead of virtio_net_handle_irq to avoid the ISR
+// clearing race: the hardware IRQ handler clears the ISR, but the provider_loop's
+// call to virtio_net_handle_irq sees ISR=0 and returns without processing.
 static void provider_loop(void *arg) {
     (void)arg;
     uart_puts("[RDMA] Host Provider Thread started!\n");
+    
+    // Tell handle_irq to only clear ISR and not process packets.
+    // We handle all RX via poll_rx, which avoids the net_lock deadlock.
+    extern volatile int virtio_net_provider_active;
+    virtio_net_provider_active = 1;
+    
+    extern uint64_t timer_get_ms(void);
+    uint64_t last_report = timer_get_ms();
+    uint32_t rx_count = 0;
+    uint32_t rdma_count = 0;
     while (1) {
+        extern void virtio_net_poll_rx(void);
+        virtio_net_poll_rx();
+        
+        // Count RDMA packets processed
+        if (rdma_socket && rdma_socket->rx_head != rdma_socket->rx_tail) {
+            rdma_count++;
+        }
         net_rdma_poll();
-        extern void virtio_net_handle_irq(void);
-        virtio_net_handle_irq();
+        
+        // Periodic debug report
+        uint64_t now = timer_get_ms();
+        if (now - last_report >= 2000) {
+            extern volatile uint32_t dbg_handle_irq_calls;
+            extern volatile uint32_t dbg_handle_irq_isr_nonzero;
+            extern volatile uint32_t dbg_handle_irq_pkts;
+            extern volatile uint32_t dbg_poll_rx_pkts;
+            uart_puts("[RDMA STATS] rdma=");
+            extern void print_int(int val);
+            print_int(rdma_count);
+            uart_puts(" irq_calls=");
+            print_int(dbg_handle_irq_calls);
+            uart_puts(" isr_nz=");
+            print_int(dbg_handle_irq_isr_nonzero);
+            uart_puts(" irq_pkts=");
+            print_int(dbg_handle_irq_pkts);
+            uart_puts(" poll_pkts=");
+            print_int(dbg_poll_rx_pkts);
+            uart_puts(" rx_head=");
+            extern void uart_print_hex(uint64_t val);
+            uart_print_hex(rdma_socket ? rdma_socket->rx_head : 0);
+            uart_puts(" rx_tail=");
+            uart_print_hex(rdma_socket ? rdma_socket->rx_tail : 0);
+            uart_puts("\n");
+            rdma_count = 0;
+            last_report = now;
+        }
+        
         __asm__ volatile("pause");
     }
 }
@@ -509,6 +624,34 @@ void net_rdma_init(void) {
 
     if (is_host) {
         // --- Run as Host (Provider) ---
+        // Enable PCI decoding, Bus Mastering, and D0 power state on all devices and bridges on the bus
+        for (uint32_t bus = 0; bus < 256; bus++) {
+            for (uint32_t slot = 0; slot < 32; slot++) {
+                uint32_t id = pci_read_config(bus, slot, 0, 0);
+                if ((id & 0xFFFF) != 0xFFFF) {
+                    // Enable Memory Space, I/O Space, and Bus Mastering
+                    uint32_t cmd = pci_read_config(bus, slot, 0, 0x04);
+                    pci_write_config(bus, slot, 0, 0x04, cmd | 0x07);
+                    
+                    // Force D0 power state for any device with Power Management Capability
+                    // Check standard PCI capabilities list bit in Status register
+                    if (cmd & 0x00100000) {
+                        uint32_t cap_ptr = pci_read_config(bus, slot, 0, 0x34) & 0xFF;
+                        while (cap_ptr != 0) {
+                            uint32_t cap_header = pci_read_config(bus, slot, 0, cap_ptr);
+                            uint8_t cap_id = cap_header & 0xFF;
+                            if (cap_id == 0x01) { // Power Management Capability
+                                uint32_t pmcsr = pci_read_config(bus, slot, 0, cap_ptr + 4);
+                                pci_write_config(bus, slot, 0, cap_ptr + 4, pmcsr & ~0x3); // Set PowerState = D0
+                                break;
+                            }
+                            cap_ptr = (cap_header >> 8) & 0xFF;
+                        }
+                    }
+                }
+            }
+        }
+
         // Scan PCI bus for the target device
         int found = 0;
         uint8_t dev_bus = 0, dev_slot = 0;
@@ -568,7 +711,7 @@ void net_rdma_init(void) {
                 uart_puts("[RDMA] Detected I/O BAR ");
                 print_int(i);
                 uart_puts(" size ");
-                print_int((int)size);
+                uart_print_hex(size);
                 uart_puts("\n");
                 continue;
             }
@@ -589,9 +732,15 @@ void net_rdma_init(void) {
                 size_mask_64 |= ((uint64_t)size_mask_hi) << 32;
             }
 
-            uint64_t size = ~size_mask_64 + 1;
+            uint64_t size;
+            if (is_64bit) {
+                size = ~size_mask_64 + 1;
+            } else {
+                size = (uint32_t)(~((uint32_t)size_mask_64) + 1);
+            }
+            mmu_map_mmio_range(phys_addr, size);
             pci_bars_phys[i] = phys_addr;
-            pci_bars_size[i] = (uint32_t)size;
+            pci_bars_size[i] = size;
             p_pci_bars[i] = (volatile uint8_t*)phys_addr;
 
             uart_puts("[RDMA] Mapped Memory BAR ");
@@ -599,7 +748,7 @@ void net_rdma_init(void) {
             uart_puts(" at ");
             uart_print_hex(phys_addr);
             uart_puts(" size ");
-            print_int((int)size);
+            uart_print_hex(size);
             uart_puts("\n");
 
             if (is_64bit) {
@@ -611,11 +760,31 @@ void net_rdma_init(void) {
         uint32_t cmd = pci_read_config(dev_bus, dev_slot, 0, 0x04);
         pci_write_config(dev_bus, dev_slot, 0, 0x04, cmd | 0x06);
 
-        // Bind UDP socket to Host IP
-        net_set_ip(htonl(RDMA_HOST_IP), htonl(0xFFFFFF00), htonl(0x0A000202));
+        // Map and Enable physical expansion ROM BAR (offset 0x30)
+        uint32_t rom_val = pci_read_config(dev_bus, dev_slot, 0, 0x30);
+        if (rom_val != 0 && rom_val != 0xFFFFFFFF) {
+            uint64_t rom_phys = rom_val & 0xFFFFF800ULL; // 2KB or larger alignment
+            uint64_t rom_size = 1024 * 1024; // Standard 1MB size for GPU Expansion ROM
+            pci_write_config(dev_bus, dev_slot, 0, 0x30, rom_val | 0x1); // Enable ROM
+            
+            mmu_map_mmio_range(rom_phys, rom_size);
+            pci_rom_phys = rom_phys;
+            pci_rom_size = rom_size;
+            p_pci_rom = (volatile uint8_t*)rom_phys;
+            
+            uart_puts("[RDMA] Mapped and Enabled Physical Expansion ROM at ");
+            uart_print_hex(rom_phys);
+            uart_puts("\n");
+        }
+
+        // Bind UDP socket to Host IP dynamically using DHCP
+        extern void dhcp_init(void);
+        dhcp_init();
+        uint32_t my_ip = net_get_ip();
+
         rdma_socket = net_socket_create(IP_PROTO_UDP);
         rdma_socket->local_port = RDMA_PORT;
-        rdma_socket->local_ip = htonl(RDMA_HOST_IP);
+        rdma_socket->local_ip = my_ip;
         rdma_socket->state = SOCKET_ESTABLISHED;
 
         // Initialize Host Memory Registration Table
@@ -757,7 +926,7 @@ int v_pci_read_block(uint8_t bar, uint64_t offset, void* buf, uint32_t len) {
     uint64_t curr_offset = offset;
 
     while (remaining > 0) {
-        uint32_t chunk = (remaining > 512) ? 512 : remaining;
+        uint32_t chunk = (remaining > RDMA_DATA_LEN) ? RDMA_DATA_LEN : remaining;
         struct rdma_packet req = {0}, resp = {0};
         req.op = RDMA_OP_READ_BLOCK_REQ;
         req.bar_index = bar;
@@ -786,7 +955,7 @@ int v_pci_write_block(uint8_t bar, uint64_t offset, const void* buf, uint32_t le
     uint64_t curr_offset = offset;
 
     while (remaining > 0) {
-        uint32_t chunk = (remaining > 512) ? 512 : remaining;
+        uint32_t chunk = (remaining > RDMA_DATA_LEN) ? RDMA_DATA_LEN : remaining;
         struct rdma_packet req = {0}, resp = {0};
         req.op = RDMA_OP_WRITE_BLOCK_REQ;
         req.bar_index = bar;

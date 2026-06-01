@@ -78,6 +78,24 @@ void gic_enable_interrupt(uint32_t intid) {
         uint8_t slave_mask = inb(0xA1);
         slave_mask &= ~(1 << 4);
         outb(0xA1, slave_mask);
+    } else if (intid >= 32 && intid <= 47) {
+        // Generic PIC IRQ unmask
+        uint32_t irq_num = intid - 32;
+        if (irq_num < 8) {
+            uint8_t mask = inb(0x21);
+            mask &= ~(1 << irq_num);
+            outb(0x21, mask);
+        } else {
+            // Unmask cascade IRQ 2 on Master PIC
+            uint8_t master_mask = inb(0x21);
+            master_mask &= ~(1 << 2);
+            outb(0x21, master_mask);
+            
+            // Unmask on Slave PIC
+            uint8_t slave_mask = inb(0xA1);
+            slave_mask &= ~(1 << (irq_num - 8));
+            outb(0xA1, slave_mask);
+        }
     }
 }
 

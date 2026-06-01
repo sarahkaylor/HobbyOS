@@ -315,3 +315,9 @@ void __clear_cache(void *begin, void *end) {
     __asm__ volatile("ic ialluis" : : : "memory");
     __asm__ volatile("dsb ish\nisb" : : : "memory");
 }
+
+void mmu_map_mmio_range(uint64_t phys_addr, uint64_t size) {
+    (void)phys_addr;
+    (void)size;
+}
+
