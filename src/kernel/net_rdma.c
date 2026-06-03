@@ -20,7 +20,7 @@ static spinlock_t rdma_lock;
 // Lock-free SPSC ring buffer for handing RDMA packets from CPU 0 → CPU 1.
 // CPU 0 (producer) enqueues via rdma_wq_head.
 // CPU 1 (consumer) dequeues via rdma_wq_tail.
-#define RDMA_WQ_SIZE 64
+#define RDMA_WQ_SIZE 256
 static struct rdma_packet rdma_work_queue[RDMA_WQ_SIZE];
 static volatile uint32_t rdma_wq_head = 0;  // Written by producer (CPU 0)
 static volatile uint32_t rdma_wq_tail = 0;  // Written by consumer (CPU 1)
@@ -130,13 +130,16 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
         if (bar == 6) {
             if (p_pci_rom) {
                 if (pkt->len <= RDMA_DATA_LEN) {
-                    uint32_t words = pkt->len / 4;
-                    for (uint32_t i = 0; i < words; i++) {
-                        ((uint32_t*)resp.data)[i] = *(volatile uint32_t*)(p_pci_rom + pkt->addr + i * 4);
+                    if (pkt->addr + pkt->len <= pci_rom_size) {
+                        uint32_t words = pkt->len / 4;
+                        for (uint32_t i = 0; i < words; i++) {
+                            ((uint32_t*)resp.data)[i] = *(volatile uint32_t*)(p_pci_rom + pkt->addr + i * 4);
+                        }
+                        for (uint32_t i = words * 4; i < pkt->len; i++) {
+                            resp.data[i] = *(volatile uint8_t*)(p_pci_rom + pkt->addr + i);
+                        }
                     }
-                    for (uint32_t i = words * 4; i < pkt->len; i++) {
-                        resp.data[i] = *(volatile uint8_t*)(p_pci_rom + pkt->addr + i);
-                    }
+                    // Out of range: return zeros (safe default for probing)
                 } else {
                     resp.status = 1;
                 }
@@ -145,7 +148,11 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
             }
         }
         else if (bar < 6 && p_pci_bars[bar]) {
-            if (use_mock) {
+            // Bounds check: reject accesses beyond the physical BAR size
+            if (pkt->addr + pkt->len > pci_bars_size[bar]) {
+                // Return zeros — safe default for out-of-range probing
+                resp.status = 0;
+            } else if (use_mock) {
                 if (pkt->len == 1) {
                     *(uint8_t*)resp.data = mock_edu_buffer[pkt->addr - 0x40000];
                 } else if (pkt->len == 2) {
@@ -182,7 +189,10 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
     else if (pkt->op == RDMA_OP_WRITE_REQ) {
         uint8_t bar = pkt->bar_index;
         if (bar < 6 && p_pci_bars[bar]) {
-            if (use_mock) {
+            // Bounds check: silently ignore writes beyond the physical BAR size
+            if (pkt->addr + pkt->len > pci_bars_size[bar]) {
+                // Silently ignore — safe for out-of-range probing
+            } else if (use_mock) {
                 if (pkt->len == 1) {
                     mock_edu_buffer[pkt->addr - 0x40000] = *(uint8_t*)pkt->data;
                 } else if (pkt->len == 2) {
@@ -222,7 +232,11 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
         if (bar < 6 && p_pci_bars[bar]) {
             uint32_t block_len = pkt->len;
             if (block_len <= RDMA_DATA_LEN) {
-                if (use_mock) {
+                // Bounds check
+                if (pkt->addr + block_len > pci_bars_size[bar]) {
+                    // Return zeros — safe for out-of-range probing
+                    resp.status = 0;
+                } else if (use_mock) {
                     for (uint32_t i = 0; i < block_len; i++) {
                         resp.data[i] = mock_edu_buffer[pkt->addr - 0x40000 + i];
                     }
@@ -249,7 +263,10 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
         if (bar < 6 && p_pci_bars[bar]) {
             uint32_t block_len = pkt->len;
             if (block_len <= RDMA_DATA_LEN) {
-                if (use_mock) {
+                // Bounds check
+                if (pkt->addr + block_len > pci_bars_size[bar]) {
+                    // Silently ignore — safe for out-of-range probing
+                } else if (use_mock) {
                     for (uint32_t i = 0; i < block_len; i++) {
                         mock_edu_buffer[pkt->addr - 0x40000 + i] = pkt->data[i];
                     }
@@ -303,53 +320,51 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
     } 
     else if (pkt->op == RDMA_OP_DMA_SYNC_TO_HOST) {
         // Fire-and-forget: write data to host memory, NO response sent.
-        // This eliminates the TX bottleneck (~50-100µs per virtio_net_send)
-        // and prevents remote_port from being overwritten if the daemon
-        // sends sync packets from a different source context.
-        int found = 0;
+        // Write to BOTH shadow buffer (for RDMA readback) AND identity-mapped address (for GPU DMA).
+        // The GPU accesses physical memory directly via DMA, so data must be at the identity-mapped address.
         for (int i = 0; i < MAX_MRS; i++) {
-            if (host_mrs[i].in_use && host_mrs[i].guest_phys == pkt->addr) {
+            if (host_mrs[i].in_use &&
+                pkt->addr >= host_mrs[i].guest_phys &&
+                (pkt->addr + pkt->len) <= (host_mrs[i].guest_phys + host_mrs[i].size)) {
+                uint64_t mr_offset = pkt->addr - host_mrs[i].guest_phys;
                 for (uint32_t j = 0; j < pkt->len; j++) {
-                    host_mrs[i].host_virt[j] = pkt->data[j];
+                    host_mrs[i].host_virt[mr_offset + j] = pkt->data[j];
                 }
-                found = 1;
                 break;
             }
         }
-        if (!found) {
-            // Direct write to Host RAM (identity mapped) - protected against low kernel memory corruption
-            if (pkt->addr < 0x70000000ULL || pkt->addr >= 0x71300000ULL) {
-                uint8_t* ptr = (uint8_t*)pkt->addr;
-                for (uint32_t j = 0; j < pkt->len; j++) {
-                    ptr[j] = pkt->data[j];
-                }
+        // ALWAYS write to identity-mapped physical address for GPU DMA access
+        if (pkt->addr < 0x70000000ULL || pkt->addr >= 0x71300000ULL) {
+            uint8_t* ptr = (uint8_t*)pkt->addr;
+            for (uint32_t j = 0; j < pkt->len; j++) {
+                ptr[j] = pkt->data[j];
             }
         }
         return; // No response — fire-and-forget
     } 
     else if (pkt->op == RDMA_OP_DMA_SYNC_TO_GUEST) {
+        // Read from identity-mapped physical address (where GPU DMA writes responses),
+        // not just the shadow buffer. The GPU writes directly to physical memory.
         int found = 0;
-        for (int i = 0; i < MAX_MRS; i++) {
-            if (host_mrs[i].in_use && host_mrs[i].guest_phys == pkt->addr) {
-                for (uint32_t j = 0; j < pkt->len; j++) {
-                    resp.data[j] = host_mrs[i].host_virt[j];
-                }
-                found = 1;
-                break;
+        if (pkt->addr < 0x70000000ULL || pkt->addr >= 0x71300000ULL) {
+            uint8_t* ptr = (uint8_t*)pkt->addr;
+            for (uint32_t j = 0; j < pkt->len; j++) {
+                resp.data[j] = ptr[j];
             }
-        }
-        if (!found) {
-            // Direct read from Host RAM (identity mapped) - protected against low kernel memory leakage
-            if (pkt->addr < 0x70000000ULL || pkt->addr >= 0x71300000ULL) {
-                uint8_t* ptr = (uint8_t*)pkt->addr;
-                for (uint32_t j = 0; j < pkt->len; j++) {
-                    resp.data[j] = ptr[j];
+            found = 1;
+        } else {
+            // Blocked range — try shadow buffer as fallback
+            for (int i = 0; i < MAX_MRS; i++) {
+                if (host_mrs[i].in_use &&
+                    pkt->addr >= host_mrs[i].guest_phys &&
+                    (pkt->addr + pkt->len) <= (host_mrs[i].guest_phys + host_mrs[i].size)) {
+                    uint64_t mr_offset = pkt->addr - host_mrs[i].guest_phys;
+                    for (uint32_t j = 0; j < pkt->len; j++) {
+                        resp.data[j] = host_mrs[i].host_virt[mr_offset + j];
+                    }
+                    found = 1;
+                    break;
                 }
-                found = 1;
-            } else {
-                uart_puts("[RDMA Host] ERROR: Blocked low DMA Sync read from: ");
-                uart_print_hex(pkt->addr);
-                uart_puts("\n");
             }
         }
         resp.op = RDMA_OP_DMA_SYNC_RESP;
@@ -377,7 +392,7 @@ void net_rdma_poll(void) {
     // This is critical because DMA blast syncs can flood the buffer with
     // thousands of packets, and BAR read/write requests need timely processing.
     int processed = 0;
-    while (processed < 1024) {
+    while (processed < 4096) {
         if (rdma_socket->rx_head == rdma_socket->rx_tail) break;
 
         uint32_t avail = rdma_socket->rx_tail - rdma_socket->rx_head;

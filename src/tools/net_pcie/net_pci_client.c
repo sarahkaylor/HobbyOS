@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 /*
  * net_pci_client.c
  *
@@ -12,14 +13,14 @@
 #include <string.h>
 #include <signal.h>
 #include <errno.h>
+#include <pthread.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/select.h>
 #include <err.h>
 #include <sys/time.h>
-#include <pthread.h>
-#include <sys/mman.h>
 
 #include "libvfio-user.h"
 
@@ -75,10 +76,112 @@ struct blast_sync_request {
     uint64_t gpa;
     size_t len;
     uint8_t *data;       // Snapshot of firmware data to send
-    volatile bool done;
+    bool done;
+    vfu_ctx_t *vfu_ctx;
+    uint32_t write_val;
+    uint64_t bar_off;
+    struct blast_sync_request *next;
 };
+
 static pthread_t blast_thread;
 static volatile bool blast_thread_active = false;
+static struct blast_sync_request *blast_queue_head = NULL;
+static struct blast_sync_request *blast_queue_tail = NULL;
+static pthread_mutex_t blast_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t blast_queue_cond = PTHREAD_COND_INITIALIZER;
+
+static volatile int pending_blast_count = 0;
+static pthread_mutex_t blast_complete_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t blast_complete_cond = PTHREAD_COND_INITIALIZER;
+
+// Pending GPA registration queue — bar_access_cb queues GPAs here,
+// irq_thread processes them (registers MR, does blast sync).
+#define MAX_PENDING_GPA 16
+static struct {
+    uint64_t gpa;
+    size_t   len;
+    uint64_t bar_offset;   // Which BAR register triggered this (0x88080, 0x100cb8, etc)
+    bool     is_pfn;       // true=PFN format (val<<12), false=direct address
+    bool     pending;
+    bool     mr_registered;
+    uint64_t host_phys;
+} g_pending_gpa[MAX_PENDING_GPA];
+static pthread_mutex_t pending_gpa_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void queue_gpa_registration(uint64_t gpa, size_t len, uint64_t bar_offset, bool is_pfn) {
+    pthread_mutex_lock(&pending_gpa_mutex);
+    for (int i = 0; i < MAX_PENDING_GPA; i++) {
+        if (g_pending_gpa[i].pending && g_pending_gpa[i].gpa == gpa) {
+            pthread_mutex_unlock(&pending_gpa_mutex);
+            return; // Already queued
+        }
+    }
+    for (int i = 0; i < MAX_PENDING_GPA; i++) {
+        if (!g_pending_gpa[i].pending) {
+            g_pending_gpa[i].gpa = gpa;
+            g_pending_gpa[i].len = len;
+            g_pending_gpa[i].bar_offset = bar_offset;
+            g_pending_gpa[i].is_pfn = is_pfn;
+            g_pending_gpa[i].pending = true;
+            g_pending_gpa[i].mr_registered = false;
+            g_pending_gpa[i].host_phys = 0;
+            printf("QUEUED GPA REG: gpa=%#llx len=%zu bar_offset=%#llx is_pfn=%d\n",
+                   (unsigned long long)gpa, len, (unsigned long long)bar_offset, is_pfn);
+            pthread_mutex_unlock(&pending_gpa_mutex);
+            return;
+        }
+    }
+    pthread_mutex_unlock(&pending_gpa_mutex);
+    printf("WARNING: Pending GPA queue full, cannot queue gpa=%#llx\n", (unsigned long long)gpa);
+}
+
+// GPA-to-Host-Physical translation table
+// When the guest sets up GPU DMA addresses, we need to replace the guest's GPA
+// with the host's shadow buffer address so the GPU's DMA goes to the right place.
+#define MAX_GPA_XLAT 32
+static struct {
+    uint64_t guest_gpa;    // Guest physical address
+    uint64_t host_phys;    // Host shadow buffer physical address
+    size_t   size;
+    bool     in_use;
+} g_gpa_xlat[MAX_GPA_XLAT];
+static pthread_mutex_t gpa_xlat_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static uint64_t gpa_xlat_lookup(uint64_t guest_gpa) {
+    pthread_mutex_lock(&gpa_xlat_mutex);
+    for (int i = 0; i < MAX_GPA_XLAT; i++) {
+        if (g_gpa_xlat[i].in_use && g_gpa_xlat[i].guest_gpa == guest_gpa) {
+            uint64_t host = g_gpa_xlat[i].host_phys;
+            pthread_mutex_unlock(&gpa_xlat_mutex);
+            return host;
+        }
+    }
+    pthread_mutex_unlock(&gpa_xlat_mutex);
+    return 0;
+}
+
+static void gpa_xlat_register(uint64_t guest_gpa, uint64_t host_phys, size_t size) {
+    pthread_mutex_lock(&gpa_xlat_mutex);
+    for (int i = 0; i < MAX_GPA_XLAT; i++) {
+        if (g_gpa_xlat[i].in_use && g_gpa_xlat[i].guest_gpa == guest_gpa) {
+            g_gpa_xlat[i].host_phys = host_phys;
+            g_gpa_xlat[i].size = size;
+            pthread_mutex_unlock(&gpa_xlat_mutex);
+            return;
+        }
+    }
+    for (int i = 0; i < MAX_GPA_XLAT; i++) {
+        if (!g_gpa_xlat[i].in_use) {
+            g_gpa_xlat[i].guest_gpa = guest_gpa;
+            g_gpa_xlat[i].host_phys = host_phys;
+            g_gpa_xlat[i].size = size;
+            g_gpa_xlat[i].in_use = true;
+            pthread_mutex_unlock(&gpa_xlat_mutex);
+            return;
+        }
+    }
+    pthread_mutex_unlock(&gpa_xlat_mutex);
+}
 
 // -------------------------------------------------------------
 // Signal & Log Helpers
@@ -137,8 +240,8 @@ static void unmap_dma_region(vfu_ctx_t *vfu_ctx, dma_sg_t *sg, struct iovec *iov
 static void dma_register_cb(vfu_ctx_t *vfu_ctx, vfu_dma_info_t *info) {
     if (info == NULL) return;
     
-    // Ignore any small DMA regions below 1 MB (BIOS/ROM reserved space)
-    if ((uint64_t)info->iova.iov_base < 0x100000 && info->iova.iov_len < 128 * 1024 * 1024) {
+    // Ignore any small DMA regions below 4 KB (NULL pointer guard)
+    if ((uint64_t)info->iova.iov_base < 0x1000 && info->iova.iov_len < 128 * 1024 * 1024) {
         printf("DMA REGISTER: Ignore low BIOS/ROM mapping: iova=%p, len=%zu\n",
                info->iova.iov_base, info->iova.iov_len);
         return;
@@ -192,7 +295,7 @@ static void dma_register_cb(vfu_ctx_t *vfu_ctx, vfu_dma_info_t *info) {
 
 static void dma_unregister_cb(vfu_ctx_t *vfu_ctx, vfu_dma_info_t *info) {
     if (info == NULL) return;
-    if ((uint64_t)info->iova.iov_base < 0x100000 && info->iova.iov_len < 128 * 1024 * 1024) {
+    if ((uint64_t)info->iova.iov_base < 0x1000 && info->iova.iov_len < 128 * 1024 * 1024) {
         return;
     }
     if ((uint64_t)info->iova.iov_base >= 4096ULL * 1024 * 1024) {
@@ -302,53 +405,88 @@ static void register_active_dma(uint64_t gpa, size_t len, bool is_write) {
 // for DMA_SYNC_TO_HOST, so the main socket's receive path stays clean.
 // -------------------------------------------------------------------------
 static void *blast_sync_worker(void *arg) {
-    struct blast_sync_request *req = (struct blast_sync_request *)arg;
-    printf("BLAST SYNC START: gpa=%#llx len=%zu\n",
-           (unsigned long long)req->gpa, req->len);
-    
-    size_t remaining = req->len;
-    size_t offset = 0;
-    int pkt_count = 0;
+    (void)arg;
     uint32_t blast_tx_id = 1000000; // Separate tx_id range for blast
     
-    while (remaining > 0 && running) {
-        size_t chunk = (remaining > RDMA_DATA_LEN) ? RDMA_DATA_LEN : remaining;
-        struct rdma_packet pkt = {0};
-        pkt.op = RDMA_OP_DMA_SYNC_TO_HOST;
-        pkt.tx_id = blast_tx_id++;
-        pkt.addr = req->gpa + offset;
-        pkt.len = chunk;
-        memcpy(pkt.data, &req->data[offset], chunk);
-        
-        sendto(sock_fd, &pkt, sizeof(pkt), 0,
-               (struct sockaddr*)&host_addr, sizeof(host_addr));
-        pkt_count++;
-        
-        // Pace: every 256 packets, yield briefly to let host drain
-        if (pkt_count % 256 == 0) {
-            usleep(100);
+    while (running) {
+        pthread_mutex_lock(&blast_queue_mutex);
+        while (blast_queue_head == NULL && running) {
+            pthread_cond_wait(&blast_queue_cond, &blast_queue_mutex);
         }
-        offset += chunk;
-        remaining -= chunk;
+        if (!running) {
+            pthread_mutex_unlock(&blast_queue_mutex);
+            break;
+        }
+        struct blast_sync_request *req = blast_queue_head;
+        blast_queue_head = req->next;
+        if (blast_queue_head == NULL) blast_queue_tail = NULL;
+        pthread_mutex_unlock(&blast_queue_mutex);
+        
+        printf("BLAST SYNC START: gpa=%#llx len=%zu\n",
+               (unsigned long long)req->gpa, req->len);
+        
+        size_t remaining = req->len;
+        size_t offset = 0;
+        int pkt_count = 0;
+        
+        while (remaining > 0 && running) {
+            size_t chunk = (remaining > RDMA_DATA_LEN) ? RDMA_DATA_LEN : remaining;
+            struct rdma_packet pkt = {0};
+            pkt.op = RDMA_OP_DMA_SYNC_TO_HOST;
+            pkt.tx_id = blast_tx_id++;
+            pkt.addr = req->gpa + offset;
+            pkt.len = chunk;
+            memcpy(pkt.data, &req->data[offset], chunk);
+            
+            sendto(blast_sock_fd >= 0 ? blast_sock_fd : sock_fd, &pkt, sizeof(pkt), 0,
+                   (struct sockaddr*)&host_addr, sizeof(host_addr));
+            pkt_count++;
+            
+            // Pace: every 64 packets, yield to let host drain without starving BAR reads
+            if (pkt_count % 64 == 0) {
+                usleep(250);
+            }
+            offset += chunk;
+            remaining -= chunk;
+        }
+        
+        printf("BLAST SYNC DONE: gpa=%#llx sent %d packets (%zu bytes)\n",
+               (unsigned long long)req->gpa, pkt_count, req->len);
+        
+        // After blast, write the host address to the original GPU register
+        struct rdma_packet bar_req = {0}, bar_resp = {0};
+        bar_req.op = RDMA_OP_WRITE_REQ;
+        bar_req.tx_id = blast_tx_id++;
+        bar_req.addr = req->bar_off;
+        bar_req.len = 4;
+        bar_req.bar_index = 0;
+        memcpy(bar_req.data, &req->write_val, 4);
+        if (do_rdma_transaction(req->vfu_ctx, &bar_req, &bar_resp) == 0) {
+            printf("GPA XLAT [blast_sync_worker]: Wrote host_addr=%#x to BAR0 %#llx\n",
+                   req->write_val, (unsigned long long)req->bar_off);
+        }
+        
+        pthread_mutex_lock(&blast_complete_mutex);
+        pending_blast_count--;
+        pthread_cond_broadcast(&blast_complete_cond);
+        pthread_mutex_unlock(&blast_complete_mutex);
+        
+        free(req->data);
+        free(req);
     }
-    
-    printf("BLAST SYNC DONE: gpa=%#llx sent %d packets (%zu bytes)\n",
-           (unsigned long long)req->gpa, pkt_count, req->len);
-    
-    free(req->data);
-    req->done = true;
-    free(req);
     return NULL;
 }
 
-static void trigger_blast_sync(vfu_ctx_t *vfu_ctx, uint64_t gpa, size_t len) {
+static void trigger_blast_sync(vfu_ctx_t *vfu_ctx, uint64_t gpa, size_t len, uint32_t write_val, uint64_t bar_off) {
     if (sock_fd < 0) return;
     
-    // Snapshot the guest's DMA data
+    // Snapshot the guest's DMA data using pre-mapped vaddr only.
+    // We MUST NOT call map_dma_region() here because this runs inside bar_access_cb,
+    // and calling vfu_sgl_get/vfu_addr_to_sgl from within a callback deadlocks libvfio-user.
     uint8_t *snapshot = malloc(len);
     if (!snapshot) return;
     
-    // Map the guest memory and copy
+    bool found = false;
     for (int i = 0; i < MAX_DMA_REGIONS; i++) {
         if (g_dma_regions[i].in_use &&
             gpa >= g_dma_regions[i].iova &&
@@ -357,22 +495,21 @@ static void trigger_blast_sync(vfu_ctx_t *vfu_ctx, uint64_t gpa, size_t len) {
             uint8_t *vaddr = (uint8_t*)g_dma_regions[i].vaddr;
             
             if (vaddr == NULL) {
-                dma_sg_t *sg = NULL;
-                struct iovec iov;
-                vaddr = (uint8_t*)map_dma_region(vfu_ctx, g_dma_regions[i].iova,
-                                                  g_dma_regions[i].len, &sg, &iov);
-                if (vaddr) {
-                    memcpy(snapshot, vaddr + start_offset, len);
-                    unmap_dma_region(vfu_ctx, sg, &iov);
-                } else {
-                    free(snapshot);
-                    return;
-                }
-            } else {
-                memcpy(snapshot, vaddr + start_offset, len);
+                // Cannot safely map from within bar_access_cb — skip blast sync.
+                // The irq_thread's sync_dma_to_host will handle this safely.
+                printf("BLAST SYNC DEFERRED: gpa=%#llx vaddr=NULL (will sync via irq_thread)\n",
+                       (unsigned long long)gpa);
+                free(snapshot);
+                return;
             }
+            memcpy(snapshot, vaddr + start_offset, len);
+            found = true;
             break;
         }
+    }
+    if (!found) {
+        free(snapshot);
+        return;
     }
     
     struct blast_sync_request *req = malloc(sizeof(struct blast_sync_request));
@@ -381,10 +518,24 @@ static void trigger_blast_sync(vfu_ctx_t *vfu_ctx, uint64_t gpa, size_t len) {
     req->len = len;
     req->data = snapshot;
     req->done = false;
+    req->vfu_ctx = vfu_ctx;
+    req->write_val = write_val;
+    req->bar_off = bar_off;
+    req->next = NULL;
     
-    pthread_t t;
-    pthread_create(&t, NULL, blast_sync_worker, req);
-    pthread_detach(t);
+    pthread_mutex_lock(&blast_complete_mutex);
+    pending_blast_count++;
+    pthread_mutex_unlock(&blast_complete_mutex);
+    
+    pthread_mutex_lock(&blast_queue_mutex);
+    if (blast_queue_tail) {
+        blast_queue_tail->next = req;
+    } else {
+        blast_queue_head = req;
+    }
+    blast_queue_tail = req;
+    pthread_cond_signal(&blast_queue_cond);
+    pthread_mutex_unlock(&blast_queue_mutex);
 }
 
 static void sync_dma_to_host(vfu_ctx_t *vfu_ctx, bool sync_large) {
@@ -524,6 +675,21 @@ static void sync_dma_from_host(vfu_ctx_t *vfu_ctx, bool sync_large) {
             uint64_t iova = g_dma_regions[i].iova;
             size_t len = g_dma_regions[i].len;
             
+            // Only sync this cached region if it overlaps with an ACTIVE GPU DMA region.
+            // This prevents syncing read-only ROM regions (like 0xc0000) and segfaulting on memcpy.
+            bool is_active = false;
+            for (int k = 0; k < g_active_dmas_count; k++) {
+                uint64_t active_start = g_active_dmas[k].gpa;
+                uint64_t active_end = active_start + g_active_dmas[k].len;
+                if (iova < active_end && (iova + len) > active_start) {
+                    is_active = true;
+                    break;
+                }
+            }
+            if (!is_active) {
+                continue;
+            }
+            
             uint8_t *vaddr = (uint8_t*)g_dma_regions[i].vaddr;
             dma_sg_t *sg = NULL;
             struct iovec iov;
@@ -646,6 +812,50 @@ static void* irq_thread(void *arg) {
         }
         loop_counter++;
         
+        // 0. Process pending GPA registrations (deferred from bar_access_cb)
+        pthread_mutex_lock(&pending_gpa_mutex);
+        for (int i = 0; i < MAX_PENDING_GPA; i++) {
+            if (g_pending_gpa[i].pending && !g_pending_gpa[i].mr_registered) {
+                uint64_t gpa = g_pending_gpa[i].gpa;
+                size_t len = g_pending_gpa[i].len;
+                pthread_mutex_unlock(&pending_gpa_mutex);
+                
+                // Register MR with host
+                struct rdma_packet mr_req = {0}, mr_resp = {0};
+                mr_req.op = RDMA_OP_REG_MR;
+                mr_req.tx_id = next_tx_id++;
+                mr_req.addr = gpa;
+                mr_req.len = len;
+                if (do_rdma_transaction(vfu_ctx, &mr_req, &mr_resp) == 0 && mr_resp.status == 0) {
+                    uint64_t host_phys = mr_resp.addr;
+                    gpa_xlat_register(gpa, host_phys, len);
+                    printf("GPA XLAT [irq_thread]: guest=%#llx -> host=%#llx (size=%zu)\n",
+                           (unsigned long long)gpa, (unsigned long long)host_phys, len);
+                    
+                    pthread_mutex_lock(&pending_gpa_mutex);
+                    g_pending_gpa[i].mr_registered = true;
+                    g_pending_gpa[i].host_phys = host_phys;
+                    pthread_mutex_unlock(&pending_gpa_mutex);
+                    
+                    // Determine the value to write to the register
+                    uint64_t bar_off = g_pending_gpa[i].bar_offset;
+                    bool is_pfn = g_pending_gpa[i].is_pfn;
+                    uint32_t write_val = is_pfn ? (uint32_t)(host_phys >> 12) : (uint32_t)host_phys;
+
+                    // Blast sync firmware data to host (will execute the BAR0 write at the end)
+                    printf("GPA XLAT [irq_thread]: Triggering async blast sync gpa=%#llx len=%zu\n",
+                           (unsigned long long)gpa, len);
+                    trigger_blast_sync(vfu_ctx, gpa, len, write_val, bar_off);
+                } else {
+                    printf("GPA XLAT [irq_thread]: MR registration failed for gpa=%#llx\n",
+                           (unsigned long long)gpa);
+                }
+                
+                pthread_mutex_lock(&pending_gpa_mutex);
+            }
+        }
+        pthread_mutex_unlock(&pending_gpa_mutex);
+        
         // 1. Sync Guest DMA changes to Host
         sync_dma_to_host(vfu_ctx, true);
         
@@ -688,7 +898,7 @@ static struct bar_cache g_cache = { .is_valid = false };
 
 static int do_rdma_transaction(vfu_ctx_t *vfu_ctx, struct rdma_packet *req, struct rdma_packet *resp) {
     pthread_mutex_lock(&rdma_mutex);
-    int retries = 5;
+    int retries = 10;
     bool success = false;
     int final_ret = 0;
 
@@ -710,8 +920,8 @@ static int do_rdma_transaction(vfu_ctx_t *vfu_ctx, struct rdma_packet *req, stru
             goto out;
         }
 
-        struct timeval timeout = { .tv_sec = 0, .tv_usec = 20000 }; // 20ms per try
-        uint64_t total_timeout_us = 20000;
+        struct timeval timeout = { .tv_sec = 0, .tv_usec = 50000 }; // 50ms per try
+        uint64_t total_timeout_us = 50000;
         uint64_t start_us;
         struct timeval tv_now;
         gettimeofday(&tv_now, NULL);
@@ -840,6 +1050,7 @@ static ssize_t bar_access_cb(vfu_ctx_t *vfu_ctx, char * const buf,
     // Fallback: standard single read/write transaction
     struct rdma_packet req = {0};
     struct rdma_packet resp = {0};
+    bool skip_host_write = false;
 
     req.op = is_write ? RDMA_OP_WRITE_REQ : RDMA_OP_READ_REQ;
     req.tx_id = next_tx_id++;
@@ -853,13 +1064,13 @@ static ssize_t bar_access_cb(vfu_ctx_t *vfu_ctx, char * const buf,
             return -1;
         }
         memcpy(req.data, buf, count);
+
         if (bar_index == 0) {
             if (count == 4) {
                 uint32_t val = *(uint32_t*)buf;
-                if (offset == 0x88080 || offset == 0x88084 || offset == 0x100c10) {
+                if (offset == 0x88080 || offset == 0x88084) {
                     // Try two GPA interpretations:
                     // 1) PFN (page frame number): val << 12 — used by 0x88080/0x88084
-                    // 2) Direct byte address: val as-is — used by 0x100c10
                     uint64_t gpa_pfn = (uint64_t)val << 12;
                     uint64_t gpa_direct = (uint64_t)val;
                     // Also try page-aligned mask for large values
@@ -868,13 +1079,13 @@ static ssize_t bar_access_cb(vfu_ctx_t *vfu_ctx, char * const buf,
                     uint64_t true_gpa = 0;
                     const char *method = "none";
                     
-                    if (gpa_pfn >= 0x100000 && gpa_pfn < 0xC0000000ULL && is_valid_gpa(gpa_pfn)) {
+                    if (gpa_pfn >= 0x1000 && gpa_pfn < 0xC0000000ULL && is_valid_gpa(gpa_pfn)) {
                         true_gpa = gpa_pfn;
                         method = "pfn";
-                    } else if (gpa_direct >= 0x100000 && gpa_direct < 0xC0000000ULL && is_valid_gpa(gpa_direct)) {
+                    } else if (gpa_direct >= 0x1000 && gpa_direct < 0xC0000000ULL && is_valid_gpa(gpa_direct)) {
                         true_gpa = gpa_direct;
                         method = "direct";
-                    } else if (gpa_masked >= 0x100000 && gpa_masked < 0xC0000000ULL && is_valid_gpa(gpa_masked)) {
+                    } else if (gpa_masked >= 0x1000 && gpa_masked < 0xC0000000ULL && is_valid_gpa(gpa_masked)) {
                         true_gpa = gpa_masked;
                         method = "masked";
                     }
@@ -884,56 +1095,96 @@ static ssize_t bar_access_cb(vfu_ctx_t *vfu_ctx, char * const buf,
                            (unsigned long long)gpa_direct, method, (unsigned long long)true_gpa);
                     
                     if (true_gpa != 0) {
+                        static int blast_sync_count_32 = 0;
+                        size_t max_len = (blast_sync_count_32 == 0) ? (96 * 1024 * 1024) : (2 * 1024 * 1024);
+                        
                         size_t dma_len = get_dma_region_remaining_len(true_gpa);
-                        // Cap DMA size based on register type:
-                        // 0x100c10 = GSP boot arguments (small struct, cap to 1MB)
-                        // 0x88080/0x88084 = GSP firmware (large, use default 96MB cap)
-                        size_t max_len = (offset == 0x100c10) ? (1 * 1024 * 1024) : (96 * 1024 * 1024);
                         if (dma_len > max_len) dma_len = max_len;
-                        printf("GPA SNIFF: dma_len=%zu (capped) for gpa=%#llx\n", dma_len, (unsigned long long)true_gpa);
                         if (dma_len > 0) {
+                            if (offset == 0x88080 || offset == 0x88084) {
+                                blast_sync_count_32++;
+                            }
+                            printf("GPA SNIFF: dma_len=%zu (capped) for gpa=%#llx\n", dma_len, (unsigned long long)true_gpa);
                             register_active_dma(true_gpa, dma_len, true);
-                            // Immediately blast firmware data to host for GSP-critical registers
-                            if (offset == 0x88080 || offset == 0x88084 || offset == 0x100c10) {
-                                printf("GSP CRITICAL: Triggering blast sync for gpa=%#llx len=%zu\n",
+                            // Queue for deferred processing by irq_thread.
+                            // We MUST NOT call do_rdma_transaction here (inside bar_access_cb)
+                            // as it deadlocks the vfio-user event loop.
+                            if (offset == 0x88080 || offset == 0x88084) {
+                                printf("GSP CRITICAL: Queueing GPA registration for gpa=%#llx len=%zu\n",
                                        (unsigned long long)true_gpa, dma_len);
-                                trigger_blast_sync(vfu_ctx, true_gpa, dma_len);
+                                queue_gpa_registration(true_gpa, dma_len, offset, strcmp(method, "pfn") == 0);
+                            }
+                            // Check if we already have a translation from a previous cycle
+                            uint64_t host_phys = gpa_xlat_lookup(true_gpa);
+                            if (host_phys != 0) {
+                                if (strcmp(method, "pfn") == 0) {
+                                    uint32_t host_pfn = (uint32_t)(host_phys >> 12);
+                                    *(uint32_t*)buf = host_pfn;
+                                    memcpy(req.data, buf, count);
+                                    printf("GPA XLAT INLINE: offset=%#llx guest_pfn=%#x -> host_pfn=%#x\n",
+                                           (unsigned long long)offset, val, host_pfn);
+                                } else {
+                                    *(uint32_t*)buf = (uint32_t)host_phys;
+                                    memcpy(req.data, buf, count);
+                                    printf("GPA XLAT INLINE: offset=%#llx guest_addr=%#x -> host_addr=%#x\n",
+                                           (unsigned long long)offset, val, (uint32_t)host_phys);
+                                }
+                            } else {
+                                printf("GPA PENDING: Dropping host write for offset=%#llx until translation completes.\n", (unsigned long long)offset);
+                                skip_host_write = true;
                             }
                         }
                     }
                 }
             } else if (count == 8) {
                 uint64_t val = *(uint64_t*)buf;
-                if (offset == 0x88080 || offset == 0x88084 || offset == 0x100c10) {
+                if (offset == 0x88080 || offset == 0x88084) {
                     uint64_t gpa_pfn = val << 12;
                     uint64_t gpa_direct = val;
                     uint64_t gpa_masked = val & ~0xFFFULL;
                     
                     uint64_t true_gpa = 0;
-                    if (gpa_pfn >= 0x100000 && gpa_pfn < 0xC0000000ULL && is_valid_gpa(gpa_pfn)) {
+                    if (gpa_pfn >= 0x1000 && gpa_pfn < 0xC0000000ULL && is_valid_gpa(gpa_pfn)) {
                         true_gpa = gpa_pfn;
-                    } else if (gpa_direct >= 0x100000 && gpa_direct < 0xC0000000ULL && is_valid_gpa(gpa_direct)) {
+                    } else if (gpa_direct >= 0x1000 && gpa_direct < 0xC0000000ULL && is_valid_gpa(gpa_direct)) {
                         true_gpa = gpa_direct;
-                    } else if (gpa_masked >= 0x100000 && gpa_masked < 0xC0000000ULL && is_valid_gpa(gpa_masked)) {
+                    } else if (gpa_masked >= 0x1000 && gpa_masked < 0xC0000000ULL && is_valid_gpa(gpa_masked)) {
                         true_gpa = gpa_masked;
                     }
                     
                     if (true_gpa != 0) {
+                        static int blast_sync_count = 0;
+                        size_t max_len = (blast_sync_count == 0) ? (96 * 1024 * 1024) : (2 * 1024 * 1024);
+                        
                         size_t dma_len = get_dma_region_remaining_len(true_gpa);
-                        size_t max_len = (offset == 0x100c10) ? (1 * 1024 * 1024) : (96 * 1024 * 1024);
                         if (dma_len > max_len) dma_len = max_len;
                         if (dma_len > 0) {
+                            if (offset == 0x88080 || offset == 0x88084) {
+                                blast_sync_count++;
+                            }
                             register_active_dma(true_gpa, dma_len, true);
-                            if (offset == 0x88080 || offset == 0x88084 || offset == 0x100c10) {
-                                printf("GSP CRITICAL (64-bit): Triggering blast sync for gpa=%#llx len=%zu\n",
+                            if (offset == 0x88080 || offset == 0x88084) {
+                                printf("GSP CRITICAL (64-bit): Queueing GPA registration for gpa=%#llx len=%zu\n",
                                        (unsigned long long)true_gpa, dma_len);
-                                trigger_blast_sync(vfu_ctx, true_gpa, dma_len);
+                                queue_gpa_registration(true_gpa, dma_len, offset, false);
+                            }
+                            
+                            uint64_t host_phys = gpa_xlat_lookup(true_gpa);
+                            if (host_phys != 0) {
+                                *(uint64_t*)buf = host_phys;
+                                memcpy(req.data, buf, count);
+                            } else {
+                                skip_host_write = true;
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    if (skip_host_write) {
+        return count;
     }
 
     if (do_rdma_transaction(vfu_ctx, &req, &resp) != 0) {
@@ -1064,6 +1315,10 @@ int main(int argc, char *argv[]) {
     sigemptyset(&sa.sa_mask);
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
+
+    // Start background Blast Sync worker
+    pthread_create(&blast_thread, NULL, blast_sync_worker, NULL);
+    blast_thread_active = true;
 
     // ---------------------------------------------------------------
     // Pre-flight RDMA Connectivity Check
@@ -1198,19 +1453,23 @@ int main(int argc, char *argv[]) {
         err(EXIT_FAILURE, "failed to setup BAR0 region");
     }
 
-    // BAR 1: 32 GB Memory BAR (64-bit, prefetchable)
+    // BAR1 is 32GB. Use a sparse memfd to avoid KVM page faults and to allow local QEMU PCI probing.
+    int bar1_fd = memfd_create("bar1", 0);
+    ftruncate(bar1_fd, 32ULL * 1024 * 1024 * 1024);
+    struct iovec bar1_mmap[1] = {{ .iov_base = 0, .iov_len = 32ULL * 1024 * 1024 * 1024 }};
     ret = vfu_setup_region(vfu_ctx, VFU_PCI_DEV_BAR1_REGION_IDX, 32ULL * 1024 * 1024 * 1024,
-                           &bar1_access, VFU_REGION_FLAG_RW | VFU_REGION_FLAG_MEM | VFU_REGION_FLAG_64_BITS | VFU_REGION_FLAG_PREFETCH, NULL, 0, -1, 0);
+                           NULL, VFU_REGION_FLAG_RW | VFU_REGION_FLAG_MEM | VFU_REGION_FLAG_64_BITS | VFU_REGION_FLAG_PREFETCH, bar1_mmap, 1, bar1_fd, 0);
     if (ret < 0) {
-        err(EXIT_FAILURE, "failed to setup BAR1 region");
+        fprintf(stderr, "net_pci_client: failed to setup BAR1\n");
+        exit(EXIT_FAILURE);
     }
-
-    // BAR 3: 32 MB Memory BAR (64-bit, prefetchable)
+    
+    // BAR3 is 32MB. Use a sparse memfd as well.
+    int bar3_fd = memfd_create("bar3", 0);
+    ftruncate(bar3_fd, 32 * 1024 * 1024);
+    struct iovec bar3_mmap[1] = {{ .iov_base = 0, .iov_len = 32 * 1024 * 1024 }};
     ret = vfu_setup_region(vfu_ctx, VFU_PCI_DEV_BAR3_REGION_IDX, 32 * 1024 * 1024,
-                           &bar3_access, VFU_REGION_FLAG_RW | VFU_REGION_FLAG_MEM | VFU_REGION_FLAG_64_BITS | VFU_REGION_FLAG_PREFETCH, NULL, 0, -1, 0);
-    if (ret < 0) {
-        err(EXIT_FAILURE, "failed to setup BAR3 region");
-    }
+                           NULL, VFU_REGION_FLAG_RW | VFU_REGION_FLAG_MEM | VFU_REGION_FLAG_64_BITS | VFU_REGION_FLAG_PREFETCH, bar3_mmap, 1, bar3_fd, 0);
 
     // BAR 5: 128 Bytes I/O BAR
     ret = vfu_setup_region(vfu_ctx, VFU_PCI_DEV_BAR5_REGION_IDX, 128,
