@@ -110,3 +110,29 @@ Since physical PCIe devices directly access physical host memory (DMA) without s
   qm set 100 --scsi0 local-lvm:100/vm-100-disk-0 --bootdisk scsi0 --boot d && \
   qm start 100
   ```
+
+## 13. Virtual IOMMU (vIOMMU) Support for Remote PCIe Sharing
+HobbyOS supports a virtual Intel IOMMU (VT-d) emulated by QEMU to enable transparent DMA address translation for remote PCIe device sharing. This is critical for modern GPUs (e.g., NVIDIA RTX 4090 with GSP firmware) that embed I/O Virtual Addresses (IOVAs) in deeply nested DMA structures.
+
+### A. Architecture Overview
+- **Problem:** Modern GPU drivers (NVIDIA GSP firmware) embed hundreds of DMA addresses inside memory structures that the `net_pci_client` cannot intercept via MMIO register sniffing alone.
+- **Solution:** With a vIOMMU enabled in both guest and host VMs, the GPU driver uses IOVAs instead of raw Guest Physical Addresses (GPAs). The IOMMU hardware translates IOVAs to physical addresses transparently, solving the embedded-address problem.
+- **QEMU Configuration:** Both VMs use `-machine q35,accel=kvm,kernel-irqchip=split -device intel-iommu,intremap=on,caching-mode=on`.
+
+### B. Intel VT-d IOMMU Driver (`iommu_vtd.c`)
+- **x86_64 Only:** All code is guarded by `#ifdef __x86_64__`. The ARM build compiles an empty translation unit.
+- **ACPI Discovery:** The driver scans the BIOS area (0xE0000–0xFFFFF) for the RSDP signature, follows RSDP → XSDT → DMAR table, and extracts the DRHD register base address.
+- **3-Level Page Tables:** Uses 39-bit IOVA space (AGAW=1) with statically allocated root table, context tables (4 buses), L2 tables (64), and L1 tables (512).
+- **API:** `iommu_vtd_init()`, `iommu_vtd_map(bus, devfn, iova, phys, size)`, `iommu_vtd_unmap(bus, devfn, iova, size)`, `iommu_vtd_invalidate_iotlb()`.
+
+### C. RDMA Protocol Extensions
+- **`RDMA_OP_IOMMU_MAP` (14):** Guest → Host: "Map this IOVA to a shadow buffer and program your IOMMU." The host allocates a shadow buffer from a 32MB bump-allocator pool and programs its VT-d IOMMU.
+- **`RDMA_OP_IOMMU_MAP_RESP` (15):** Host → Guest: Returns the host physical address of the shadow buffer.
+- **`RDMA_OP_IOMMU_UNMAP` (16):** Guest → Host: "Tear down this IOVA mapping."
+- **`RDMA_OP_IOMMU_UNMAP_RESP` (17):** Host → Guest: Acknowledges unmapping.
+- **`RDMA_OP_DMA_SYNC_TO_HOST` (7):** Updated to check IOMMU shadow buffers first. Data addressed to an IOVA lands in the correct shadow buffer.
+
+### D. net_pci_client IOMMU Mode
+- **Activation:** Pass `--iommu` as a command-line flag: `./net_pci_client /tmp/sock 10.0.2.16 0x10de 0x2684 --iommu`.
+- **DMA Callback Behavior:** With `caching-mode=on`, QEMU sends fine-grained DMA MAP/UNMAP events for every IOMMU page table change. The `dma_register_cb` records each IOVA and the `irq_thread` asynchronously sends `RDMA_OP_IOMMU_MAP` + data sync to the host.
+- **Legacy GPA Sniffing:** The old GPA sniffing logic in `bar_access_cb` is bypassed when IOMMU mode is active. The vIOMMU handles all address translation transparently.

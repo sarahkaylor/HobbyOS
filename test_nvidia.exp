@@ -1,0 +1,22 @@
+#!/usr/bin/expect -f
+set timeout 20
+spawn ssh -t -o StrictHostKeyChecking=no -i /Users/sarah/.ssh/mac_to_r1 root@192.168.10.174 "qm terminal 225"
+expect {
+    "testvm login:" {
+        send "root\r"
+        expect "Password:"
+        send "root\r"
+        expect "root@testvm:~#"
+    }
+    "root@testvm:~#" {
+        send "\r"
+    }
+    timeout {
+        send "\r"
+        expect "root@testvm:~#"
+    }
+}
+send "nvidia-smi\r"
+expect "root@testvm:~#"
+send "\x0f"
+expect eof

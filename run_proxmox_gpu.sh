@@ -53,7 +53,8 @@ $SSH_CMD "qm create $HOST_VMID --name HobbyOSHostGPU --cores 4 --memory 4096 --m
 $SSH_CMD "qm set $HOST_VMID --hostpci0 0000:01:00,pcie=1,x-vga=0"
 
 # Configure Host Firmware Configuration (fw_cfg) role parameter, direct kernel boot, serial redirection, and NVMe disk
-$SSH_CMD "qm set $HOST_VMID --args \"-kernel /root/hobbyos/hobbyos.elf -fw_cfg name=opt/pcishare,string=host:$NVIDIA_VENDOR_ID:$NVIDIA_DEVICE_ID -serial file:/root/hobbyos/host.log -drive file=/root/hobbyos/disk_host.raw,format=raw,id=disk0,if=none -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -device nvme,drive=disk0,serial=1234,bus=pcie.1\""
+# Includes intel-iommu with caching-mode=on for vIOMMU DMA address translation
+$SSH_CMD "qm set $HOST_VMID --args \"-machine q35,accel=kvm,kernel-irqchip=split -device intel-iommu,intremap=on,caching-mode=on -kernel /root/hobbyos/hobbyos.elf -fw_cfg name=opt/pcishare,string=host:$NVIDIA_VENDOR_ID:$NVIDIA_DEVICE_ID -serial file:/root/hobbyos/host.log -drive file=/root/hobbyos/disk_host.raw,format=raw,id=disk0,if=none -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -device nvme,drive=disk0,serial=1234,bus=pcie.1\""
 
 echo "======================================================"
 echo " 4. Setting up Guest VM ($GUEST_VMID) on Proxmox"
@@ -63,7 +64,8 @@ $SSH_CMD "qm destroy $GUEST_VMID --purge 2>/dev/null || true"
 $SSH_CMD "qm create $GUEST_VMID --name HobbyOSGuestGPU --cores 4 --memory 4096 --machine q35 --net0 virtio=52:54:00:12:34:57,bridge=vmbr0,firewall=0"
 
 # Configure Guest Firmware Configuration (fw_cfg) role parameter, direct kernel boot, serial redirection, and NVMe disk
-$SSH_CMD "qm set $GUEST_VMID --args \"-kernel /root/hobbyos/hobbyos.elf -fw_cfg name=opt/pcishare,string=guest:$NVIDIA_VENDOR_ID:$NVIDIA_DEVICE_ID -serial file:/root/hobbyos/guest.log -drive file=/root/hobbyos/disk_guest.raw,format=raw,id=disk0,if=none -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -device nvme,drive=disk0,serial=1234,bus=pcie.1\""
+# Includes intel-iommu with caching-mode=on for vIOMMU DMA address translation
+$SSH_CMD "qm set $GUEST_VMID --args \"-machine q35,accel=kvm,kernel-irqchip=split -device intel-iommu,intremap=on,caching-mode=on -kernel /root/hobbyos/hobbyos.elf -fw_cfg name=opt/pcishare,string=guest:$NVIDIA_VENDOR_ID:$NVIDIA_DEVICE_ID -serial file:/root/hobbyos/guest.log -drive file=/root/hobbyos/disk_guest.raw,format=raw,id=disk0,if=none -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -device nvme,drive=disk0,serial=1234,bus=pcie.1\""
 
 echo "======================================================"
 echo " 5. Starting Host and Guest VMs on Proxmox"

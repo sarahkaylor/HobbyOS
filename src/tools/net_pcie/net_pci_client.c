@@ -19,6 +19,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/select.h>
+#include <poll.h>
 #include <err.h>
 #include <sys/time.h>
 
@@ -44,6 +45,12 @@ enum rdma_op {
     RDMA_OP_READ_BLOCK_RESP = 11,
     RDMA_OP_WRITE_BLOCK_REQ = 12,
     RDMA_OP_WRITE_BLOCK_RESP = 13,
+    RDMA_OP_IOMMU_MAP = 14,
+    RDMA_OP_IOMMU_MAP_RESP = 15,
+    RDMA_OP_IOMMU_UNMAP = 16,
+    RDMA_OP_IOMMU_UNMAP_RESP = 17,
+    RDMA_OP_DMA_SYNC_RELIABLE = 18,
+    RDMA_OP_DMA_SYNC_RELIABLE_RESP = 19,
 };
 
 #define RDMA_DATA_LEN 1024
@@ -65,6 +72,7 @@ struct rdma_packet {
 
 static int sock_fd = -1;
 static int blast_sock_fd = -1;  // Dedicated socket for fire-and-forget DMA blast sync
+static int rdma_rpc_sock_fd = -1; // Dedicated socket for request-response RDMA transactions
 static struct sockaddr_in host_addr;
 static uint32_t next_tx_id = 1;
 static volatile bool running = true;
@@ -183,7 +191,22 @@ static void gpa_xlat_register(uint64_t guest_gpa, uint64_t host_phys, size_t siz
     pthread_mutex_unlock(&gpa_xlat_mutex);
 }
 
-// -------------------------------------------------------------
+// IOMMU mode flag — when enabled, DMA callbacks forward IOVA mappings to host
+static bool g_iommu_mode = false;
+
+// IOVA Tracking Table: maps guest IOVAs to host shadow buffer addresses
+#define MAX_IOVA_MAPS 4096
+static struct {
+    uint64_t iova;       // Guest IOVA (from vIOMMU DMA MAP)
+    uint64_t host_phys;  // Host shadow buffer physical address (from RDMA response)
+    void    *vaddr;      // Guest-side virtual address for reading DMA data
+    size_t   size;
+    bool     active;
+    bool     synced;     // true if initial data has been synced to host
+} g_iova_maps[MAX_IOVA_MAPS];
+static pthread_mutex_t iova_maps_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+
 // Signal & Log Helpers
 // -------------------------------------------------------------
 
@@ -237,49 +260,99 @@ static void unmap_dma_region(vfu_ctx_t *vfu_ctx, dma_sg_t *sg, struct iovec *iov
     }
 }
 
+static void register_active_dma(uint64_t gpa, size_t len, bool is_write);
+
 static void dma_register_cb(vfu_ctx_t *vfu_ctx, vfu_dma_info_t *info) {
     if (info == NULL) return;
     
+    uint64_t iova = (uint64_t)info->iova.iov_base;
+    size_t len = info->iova.iov_len;
+
+    // In IOMMU mode, accept ALL DMA mappings (these are IOVA->GPA from the vIOMMU)
+    if (g_iommu_mode) {
+        printf("IOMMU DMA REGISTER: iova=%#llx, vaddr=%p, len=%zu\n",
+               (unsigned long long)iova, info->vaddr, len);
+
+        // Record in IOVA tracking table
+        pthread_mutex_lock(&iova_maps_mutex);
+        for (int i = 0; i < MAX_IOVA_MAPS; i++) {
+            if (!g_iova_maps[i].active) {
+                g_iova_maps[i].iova = iova;
+                g_iova_maps[i].host_phys = 0;  // Will be filled by RDMA response
+                g_iova_maps[i].vaddr = info->vaddr;
+                g_iova_maps[i].size = len;
+                g_iova_maps[i].active = true;
+                g_iova_maps[i].synced = false;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&iova_maps_mutex);
+
+        // Also add to legacy DMA regions table (for vfu_addr_to_sgl lookups)
+        pthread_mutex_lock(&dma_sync_mutex);
+        for (int i = 0; i < MAX_DMA_REGIONS; i++) {
+            if (!g_dma_regions[i].in_use) {
+                g_dma_regions[i].iova = iova;
+                g_dma_regions[i].vaddr = info->vaddr;
+                g_dma_regions[i].len = len;
+                g_dma_regions[i].cache = NULL;
+                g_dma_regions[i].in_use = true;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&dma_sync_mutex);
+
+        // Auto-register small/medium IOMMU regions as active DMAs for sync-back.
+        // These are typically GSP command/response queues, event buffers, etc.
+        // Skip very large regions (RAM, BAR space) — they're too big for continuous sync.
+        if (len > 0 && len <= 4 * 1024 * 1024 && info->vaddr != NULL) {
+            register_active_dma(iova, len, true);
+            printf("IOMMU AUTO-ACTIVE: iova=%#llx len=%zu (auto-registered for sync-back)\n",
+                   (unsigned long long)iova, len);
+        }
+        return;
+    }
+
+    // Legacy (non-IOMMU) path below:
     // Ignore any small DMA regions below 4 KB (NULL pointer guard)
-    if ((uint64_t)info->iova.iov_base < 0x1000 && info->iova.iov_len < 128 * 1024 * 1024) {
+    if (iova < 0x1000 && len < 128 * 1024 * 1024) {
         printf("DMA REGISTER: Ignore low BIOS/ROM mapping: iova=%p, len=%zu\n",
-               info->iova.iov_base, info->iova.iov_len);
+               info->iova.iov_base, len);
         return;
     }
     
     // Ignore any DMA regions starting at 4 GB and above (upper 64-bit RAM zone)
-    if ((uint64_t)info->iova.iov_base >= 4096ULL * 1024 * 1024) {
+    if (iova >= 4096ULL * 1024 * 1024) {
         printf("DMA REGISTER: Ignore 64-bit RAM mapping: iova=%p, len=%zu\n",
-               info->iova.iov_base, info->iova.iov_len);
+               info->iova.iov_base, len);
         return;
     }
     
-    size_t actual_len = info->iova.iov_len;
     printf("DMA REGISTER: iova=%p, vaddr=%p, len=%zu\n", 
-           info->iova.iov_base, info->vaddr, info->iova.iov_len);
+           info->iova.iov_base, info->vaddr, len);
            
     pthread_mutex_lock(&dma_sync_mutex);
     // Add to table
     for (int i = 0; i < MAX_DMA_REGIONS; i++) {
         if (!g_dma_regions[i].in_use) {
-            g_dma_regions[i].iova = (uint64_t)info->iova.iov_base;
+            g_dma_regions[i].iova = iova;
             g_dma_regions[i].vaddr = info->vaddr;
-            g_dma_regions[i].len = actual_len;
+            g_dma_regions[i].len = len;
             // Only allocate cache for small regions (<= 256KB) to save memory and avoid giant allocs
-            if (actual_len > 0 && actual_len <= 262144) {
-                g_dma_regions[i].cache = malloc(actual_len);
+            if (len > 0 && len <= 262144) {
+                g_dma_regions[i].cache = malloc(len);
                 if (g_dma_regions[i].cache != NULL) {
                     if (info->vaddr != NULL) {
-                        memcpy(g_dma_regions[i].cache, info->vaddr, actual_len);
+                        memcpy(g_dma_regions[i].cache, info->vaddr, len);
                     } else {
                         dma_sg_t *sg = NULL;
                         struct iovec iov;
-                        void *temp_vaddr = map_dma_region(vfu_ctx, (uint64_t)info->iova.iov_base, actual_len, &sg, &iov);
+                        void *temp_vaddr = map_dma_region(vfu_ctx, iova, len, &sg, &iov);
                         if (temp_vaddr != NULL) {
-                            memcpy(g_dma_regions[i].cache, temp_vaddr, actual_len);
+                            memcpy(g_dma_regions[i].cache, temp_vaddr, len);
                             unmap_dma_region(vfu_ctx, sg, &iov);
                         } else {
-                            memset(g_dma_regions[i].cache, 0, actual_len);
+                            memset(g_dma_regions[i].cache, 0, len);
                         }
                     }
                 }
@@ -293,22 +366,69 @@ static void dma_register_cb(vfu_ctx_t *vfu_ctx, vfu_dma_info_t *info) {
     pthread_mutex_unlock(&dma_sync_mutex);
 }
 
+// Forward declaration (do_rdma_transaction is defined later in the file)
+static int do_rdma_transaction(vfu_ctx_t *vfu_ctx, struct rdma_packet *req, struct rdma_packet *resp);
+
 static void dma_unregister_cb(vfu_ctx_t *vfu_ctx, vfu_dma_info_t *info) {
     if (info == NULL) return;
-    if ((uint64_t)info->iova.iov_base < 0x1000 && info->iova.iov_len < 128 * 1024 * 1024) {
+    
+    uint64_t iova = (uint64_t)info->iova.iov_base;
+    size_t len = info->iova.iov_len;
+
+    if (g_iommu_mode) {
+        printf("IOMMU DMA UNREGISTER: iova=%#llx, len=%zu\n",
+               (unsigned long long)iova, len);
+
+        // Fire-and-forget IOMMU UNMAP — don't block callback thread with rdma_mutex
+        struct rdma_packet req = {0};
+        req.op = RDMA_OP_IOMMU_UNMAP;
+        req.addr = iova;
+        req.len = (uint32_t)len;
+        sendto(blast_sock_fd >= 0 ? blast_sock_fd : sock_fd,
+               &req, sizeof(req), 0,
+               (struct sockaddr*)&host_addr, sizeof(host_addr));
+
+        // Remove from IOVA tracking table
+        pthread_mutex_lock(&iova_maps_mutex);
+        for (int i = 0; i < MAX_IOVA_MAPS; i++) {
+            if (g_iova_maps[i].active && g_iova_maps[i].iova == iova) {
+                g_iova_maps[i].active = false;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&iova_maps_mutex);
+
+        // Also remove from legacy DMA regions table
+        pthread_mutex_lock(&dma_sync_mutex);
+        for (int i = 0; i < MAX_DMA_REGIONS; i++) {
+            if (g_dma_regions[i].in_use && g_dma_regions[i].iova == iova) {
+                if (g_dma_regions[i].cache != NULL) {
+                    free(g_dma_regions[i].cache);
+                    g_dma_regions[i].cache = NULL;
+                }
+                g_dma_regions[i].in_use = false;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&dma_sync_mutex);
         return;
     }
-    if ((uint64_t)info->iova.iov_base >= 4096ULL * 1024 * 1024) {
+
+    // Legacy (non-IOMMU) path:
+    if (iova < 0x1000 && len < 128 * 1024 * 1024) {
+        return;
+    }
+    if (iova >= 4096ULL * 1024 * 1024) {
         return;
     }
     
     printf("DMA UNREGISTER: iova=%p, vaddr=%p, len=%zu\n", 
-           info->iova.iov_base, info->vaddr, info->iova.iov_len);
+           info->iova.iov_base, info->vaddr, len);
            
     pthread_mutex_lock(&dma_sync_mutex);
     // Remove from table
     for (int i = 0; i < MAX_DMA_REGIONS; i++) {
-        if (g_dma_regions[i].in_use && g_dma_regions[i].iova == (uint64_t)info->iova.iov_base) {
+        if (g_dma_regions[i].in_use && g_dma_regions[i].iova == iova) {
             if (g_dma_regions[i].cache != NULL) {
                 free(g_dma_regions[i].cache);
                 g_dma_regions[i].cache = NULL;
@@ -425,46 +545,115 @@ static void *blast_sync_worker(void *arg) {
         printf("BLAST SYNC START: gpa=%#llx len=%zu\n",
                (unsigned long long)req->gpa, req->len);
         
-        size_t remaining = req->len;
-        size_t offset = 0;
-        int pkt_count = 0;
+        int tx_fd = (blast_sock_fd >= 0) ? blast_sock_fd : sock_fd;
+        int verified = 0;
+        int attempt_num = 0;
         
-        while (remaining > 0 && running) {
-            size_t chunk = (remaining > RDMA_DATA_LEN) ? RDMA_DATA_LEN : remaining;
-            struct rdma_packet pkt = {0};
-            pkt.op = RDMA_OP_DMA_SYNC_TO_HOST;
-            pkt.tx_id = blast_tx_id++;
-            pkt.addr = req->gpa + offset;
-            pkt.len = chunk;
-            memcpy(pkt.data, &req->data[offset], chunk);
+        while (!verified && attempt_num < 3 && running) {
+            attempt_num++;
+            size_t remaining = req->len;
+            size_t offset = 0;
+            int pkt_count = 0;
+            // Per-packet delay: 200μs for first attempt (~20s for 98K pkts),
+            // 500μs for retries (~49s) to ensure zero packet loss.
+            int pkt_delay_us = (attempt_num > 1) ? 500 : 200;
             
-            sendto(blast_sock_fd >= 0 ? blast_sock_fd : sock_fd, &pkt, sizeof(pkt), 0,
-                   (struct sockaddr*)&host_addr, sizeof(host_addr));
-            pkt_count++;
-            
-            // Pace: every 64 packets, yield to let host drain without starving BAR reads
-            if (pkt_count % 64 == 0) {
-                usleep(250);
+            // Phase 1: Fire-and-forget blast with per-packet rate limiting
+            while (remaining > 0 && running) {
+                size_t chunk = (remaining > RDMA_DATA_LEN) ? RDMA_DATA_LEN : remaining;
+                struct rdma_packet pkt = {0};
+                pkt.op = RDMA_OP_DMA_SYNC_TO_HOST;
+                pkt.tx_id = blast_tx_id++;
+                pkt.addr = req->gpa + offset;
+                pkt.len = chunk;
+                memcpy(pkt.data, &req->data[offset], chunk);
+                
+                sendto(tx_fd, &pkt, sizeof(pkt), 0,
+                       (struct sockaddr*)&host_addr, sizeof(host_addr));
+                pkt_count++;
+                usleep(pkt_delay_us);
+                offset += chunk;
+                remaining -= chunk;
             }
-            offset += chunk;
-            remaining -= chunk;
+            
+            printf("BLAST SYNC SENT: attempt=%d gpa=%#llx sent %d packets (%zu bytes)\n",
+                   attempt_num, (unsigned long long)req->gpa, pkt_count, req->len);
+            
+            // Phase 2: Compute local CRC32 and send VERIFY request
+            // Simple CRC32 over the data we sent
+            uint32_t crc = 0xFFFFFFFF;
+            for (size_t i = 0; i < req->len; i++) {
+                crc ^= req->data[i];
+                for (int b = 0; b < 8; b++) {
+                    crc = (crc >> 1) ^ (0xEDB88320 & -(crc & 1));
+                }
+            }
+            crc ^= 0xFFFFFFFF;
+            
+            // Allow host time to process ALL remaining queued packets
+            // before computing CRC. The host rx_buf may still contain
+            // thousands of packets being drained by the provider loop.
+            usleep(3000000); // 3s drain time
+            
+            // Send verify request using the reliable opcode
+            // Pack: addr = target GPA, len = total size, data[0..3] = expected CRC32
+            struct rdma_packet verify = {0};
+            struct rdma_packet verify_resp = {0};
+            verify.op = RDMA_OP_DMA_SYNC_RELIABLE;
+            verify.tx_id = next_tx_id++;
+            verify.addr = req->gpa;
+            verify.len = req->len;
+            *(uint32_t*)verify.data = crc;
+            
+            // Use do_rdma_transaction for proper serialization with irq_thread.
+            // It handles rdma_mutex, tx_id matching, retries, and timeouts.
+            // NOTE: do_rdma_transaction returns -1 for non-zero status (CRC mismatch),
+            // so we check verify_resp.op to differentiate from real errors.
+            int verify_ret = do_rdma_transaction(req->vfu_ctx, &verify, &verify_resp);
+            if (verify_ret == 0) {
+                // status == 0 means CRC match
+                verified = 1;
+                printf("BLAST SYNC VERIFIED: gpa=%#llx CRC=%#x match!\n",
+                       (unsigned long long)req->gpa, crc);
+            } else if (verify_resp.op == RDMA_OP_DMA_SYNC_RELIABLE_RESP && verify_resp.status == 1) {
+                // CRC mismatch — host returned its computed CRC
+                printf("BLAST SYNC CRC MISMATCH: gpa=%#llx expected=%#x host=%#x — retrying\n",
+                       (unsigned long long)req->gpa, crc, *(uint32_t*)verify_resp.data);
+            } else {
+                printf("BLAST SYNC VERIFY TRANSACTION FAILED: gpa=%#llx ret=%d\n",
+                       (unsigned long long)req->gpa, verify_ret);
+            }
+            
+            if (!verified) {
+                printf("BLAST SYNC VERIFY TIMEOUT: attempt=%d — retrying full blast\n", attempt_num);
+            }
         }
         
-        printf("BLAST SYNC DONE: gpa=%#llx sent %d packets (%zu bytes)\n",
-               (unsigned long long)req->gpa, pkt_count, req->len);
-        
-        // After blast, write the host address to the original GPU register
-        struct rdma_packet bar_req = {0}, bar_resp = {0};
-        bar_req.op = RDMA_OP_WRITE_REQ;
-        bar_req.tx_id = blast_tx_id++;
-        bar_req.addr = req->bar_off;
-        bar_req.len = 4;
-        bar_req.bar_index = 0;
-        memcpy(bar_req.data, &req->write_val, 4);
-        if (do_rdma_transaction(req->vfu_ctx, &bar_req, &bar_resp) == 0) {
-            printf("GPA XLAT [blast_sync_worker]: Wrote host_addr=%#x to BAR0 %#llx\n",
-                   req->write_val, (unsigned long long)req->bar_off);
+        if (!verified) {
+            printf("BLAST SYNC FAILED: gpa=%#llx after %d attempts — sending doorbell anyway\n",
+                   (unsigned long long)req->gpa, attempt_num);
         }
+        
+        printf("BLAST SYNC DONE: gpa=%#llx (%s)\n",
+               (unsigned long long)req->gpa, verified ? "VERIFIED" : "UNVERIFIED");
+        
+        // Now that ALL DMA data is on the host, send the deferred BAR write
+        // (doorbell) to the GPU. This was suppressed in bar_access_cb to
+        // prevent the GPU from reading DMA data before it was transferred.
+        if (req->bar_off != 0) {
+            struct rdma_packet doorbell = {0};
+            doorbell.op = RDMA_OP_WRITE_REQ;
+            doorbell.bar_index = 0;
+            doorbell.addr = req->bar_off;
+            doorbell.len = 4;
+            *(uint32_t*)doorbell.data = req->write_val;
+            sendto(tx_fd, &doorbell, sizeof(doorbell), 0,
+                   (struct sockaddr*)&host_addr, sizeof(host_addr));
+            printf("BLAST SYNC: Sent deferred BAR write: offset=%#llx val=%#x\n",
+                   (unsigned long long)req->bar_off, req->write_val);
+        }
+        printf("BLAST SYNC COMPLETE: gpa=%#llx\n",
+               (unsigned long long)req->gpa);
         
         pthread_mutex_lock(&blast_complete_mutex);
         pending_blast_count--;
@@ -855,6 +1044,60 @@ static void* irq_thread(void *arg) {
             }
         }
         pthread_mutex_unlock(&pending_gpa_mutex);
+
+        // 0.5. Process pending IOVA mappings (IOMMU mode)
+        if (g_iommu_mode) {
+            pthread_mutex_lock(&iova_maps_mutex);
+            for (int i = 0; i < MAX_IOVA_MAPS; i++) {
+                if (g_iova_maps[i].active && !g_iova_maps[i].synced) {
+                    uint64_t iova = g_iova_maps[i].iova;
+                    size_t map_size = g_iova_maps[i].size;
+                    void *vaddr = g_iova_maps[i].vaddr;
+
+                    // Fire-and-forget IOMMU MAP — don't hold rdma_mutex here.
+                    // bar_access_cb needs rdma_mutex for BAR reads; blocking here
+                    // would starve the GPU driver's register accesses.
+                    // The host programs VT-d and sends a response; we'll pick it
+                    // up on the next poll iteration via the async receive path.
+                    struct rdma_packet map_req = {0};
+                    map_req.op = RDMA_OP_IOMMU_MAP;
+                    map_req.addr = iova;
+                    map_req.len = 8;
+                    *(uint64_t*)map_req.data = map_size;
+                    sendto(blast_sock_fd >= 0 ? blast_sock_fd : sock_fd,
+                           &map_req, sizeof(map_req), 0,
+                           (struct sockaddr*)&host_addr, sizeof(host_addr));
+
+                    // Mark synced optimistically; host will program VT-d async
+                    g_iova_maps[i].synced = true;
+                    printf("IOMMU MAP SENT (async): iova=%#llx size=%zu\n",
+                           (unsigned long long)iova, map_size);
+
+                    // NOTE: Do NOT sync initial data here. Sending up to 1GB of UDP packets
+                    // would overflow the network bridge and cause ARP to go INCOMPLETE.
+                    // Data sync is handled separately when the GPU actually performs DMA.
+                    if (vaddr != NULL && map_size > 0 && map_size <= 64*1024) {
+                        // Only sync very small regions (e.g., VGA BIOS at 0xa0000, 64KB)
+                        size_t sent = 0;
+                        while (sent < map_size) {
+                            size_t chunk = (map_size - sent > RDMA_DATA_LEN) ? RDMA_DATA_LEN : (map_size - sent);
+                            struct rdma_packet sync_pkt = {0};
+                            sync_pkt.op = RDMA_OP_DMA_SYNC_TO_HOST;
+                            sync_pkt.addr = iova + sent;
+                            sync_pkt.len = (uint32_t)chunk;
+                            memcpy(sync_pkt.data, (uint8_t*)vaddr + sent, chunk);
+                            sendto(blast_sock_fd >= 0 ? blast_sock_fd : sock_fd,
+                                   &sync_pkt, sizeof(sync_pkt), 0,
+                                   (struct sockaddr*)&host_addr, sizeof(host_addr));
+                            sent += chunk;
+                        }
+                        printf("IOMMU SYNC: iova=%#llx synced %zu bytes\n",
+                               (unsigned long long)iova, map_size);
+                    }
+                }
+            }
+            pthread_mutex_unlock(&iova_maps_mutex);
+        }
         
         // 1. Sync Guest DMA changes to Host
         sync_dma_to_host(vfu_ctx, true);
@@ -898,30 +1141,43 @@ static struct bar_cache g_cache = { .is_valid = false };
 
 static int do_rdma_transaction(vfu_ctx_t *vfu_ctx, struct rdma_packet *req, struct rdma_packet *resp) {
     pthread_mutex_lock(&rdma_mutex);
-    int retries = 10;
+    int retries = (pending_blast_count > 0) ? 5 : 3;
     bool success = false;
     int final_ret = 0;
 
     while (retries > 0) {
-        // Drain any stale packets first
-        struct rdma_packet junk;
-        struct sockaddr_in junk_addr;
-        socklen_t junk_len = sizeof(junk_addr);
-        while (recvfrom(sock_fd, &junk, sizeof(junk), MSG_DONTWAIT, 
-                        (struct sockaddr*)&junk_addr, &junk_len) >= 0) {
-            // Discard stale late packets from previous transactions
-        }
+        // Use blast_sock_fd for transactions — it's the first socket that contacts
+        // the host, so the host's remote_port is set to blast_sock_fd's ephemeral port.
+        // All responses from the host go to this port.
+        int tx_fd = (blast_sock_fd >= 0) ? blast_sock_fd : sock_fd;
 
-        ssize_t sent = sendto(sock_fd, req, sizeof(*req), 0,
+        ssize_t sent = sendto(tx_fd, req, sizeof(*req), 0,
                               (struct sockaddr*)&host_addr, sizeof(host_addr));
+        if (req->op == RDMA_OP_READ_REQ || req->op == RDMA_OP_READ_BLOCK_REQ) {
+            printf("[RDMA_TX] fd=%d op=%d tx_id=%u dst=%s:%d sent=%zd errno=%d\n",
+                   tx_fd, req->op, req->tx_id,
+                   inet_ntoa(host_addr.sin_addr), ntohs(host_addr.sin_port),
+                   sent, sent < 0 ? errno : 0);
+        }
         if (sent < 0) {
             vfu_log(vfu_ctx, LOG_ERR, "sendto failed: %s", strerror(errno));
             final_ret = -1;
             goto out;
         }
 
-        struct timeval timeout = { .tv_sec = 0, .tv_usec = 50000 }; // 50ms per try
-        uint64_t total_timeout_us = 50000;
+        // During blast sync the host is processing DMA packets and may be
+        // slower to respond to BAR reads. Use a longer timeout.
+        // CRC verify needs even more time (host computes CRC32 over 100MB).
+        uint64_t timeout_us;
+        if (req->op == RDMA_OP_DMA_SYNC_RELIABLE) {
+            timeout_us = 10000000; // 10s for CRC verify
+        } else if (pending_blast_count > 0) {
+            timeout_us = 2000000;  // 2s during blast
+        } else {
+            timeout_us = 500000;   // 500ms normal
+        }
+        struct timeval timeout = { .tv_sec = timeout_us / 1000000, .tv_usec = timeout_us % 1000000 };
+        uint64_t total_timeout_us = timeout_us;
         uint64_t start_us;
         struct timeval tv_now;
         gettimeofday(&tv_now, NULL);
@@ -931,7 +1187,7 @@ static int do_rdma_transaction(vfu_ctx_t *vfu_ctx, struct rdma_packet *req, stru
             // Try non-blocking receive first to completely bypass select() context switches
             struct sockaddr_in from_addr;
             socklen_t from_len = sizeof(from_addr);
-            ssize_t recvd = recvfrom(sock_fd, resp, sizeof(*resp), MSG_DONTWAIT,
+            ssize_t recvd = recvfrom(tx_fd, resp, sizeof(*resp), MSG_DONTWAIT,
                                      (struct sockaddr*)&from_addr, &from_len);
             if (recvd >= 0) {
                 if (resp->tx_id == req->tx_id) {
@@ -970,12 +1226,12 @@ static int do_rdma_transaction(vfu_ctx_t *vfu_ctx, struct rdma_packet *req, stru
             
             fd_set read_fds;
             FD_ZERO(&read_fds);
-            FD_SET(sock_fd, &read_fds);
+            FD_SET(tx_fd, &read_fds);
             struct timeval tv = {
                 .tv_sec = remaining_us / 1000000,
                 .tv_usec = remaining_us % 1000000
             };
-            int sel = select(sock_fd + 1, &read_fds, NULL, NULL, &tv);
+            int sel = select(tx_fd + 1, &read_fds, NULL, NULL, &tv);
             if (sel <= 0) {
                 break; // Timeout or error
             }
@@ -1005,6 +1261,12 @@ static ssize_t bar_access_cb(vfu_ctx_t *vfu_ctx, char * const buf,
                              size_t count, loff_t offset,
                              const bool is_write, uint8_t bar_index) {
     bool use_cache = (bar_index == 0 && offset >= 0x300000 && offset < 0x400000);
+
+    // NOTE: We intentionally do NOT suppress BAR0 reads during blast sync.
+    // Returning zeros causes the driver to think the GPU is dead (Xid 79).
+    // The blast thread uses raw sendto() without the RDMA mutex, so BAR reads
+    // via do_rdma_transaction() proceed concurrently. Reads may be slower 
+    // (~2s timeout) but return real hardware values.
 
     if (is_write) {
         if (use_cache) {
@@ -1109,29 +1371,42 @@ static ssize_t bar_access_cb(vfu_ctx_t *vfu_ctx, char * const buf,
                             // Queue for deferred processing by irq_thread.
                             // We MUST NOT call do_rdma_transaction here (inside bar_access_cb)
                             // as it deadlocks the vfio-user event loop.
-                            if (offset == 0x88080 || offset == 0x88084) {
-                                printf("GSP CRITICAL: Queueing GPA registration for gpa=%#llx len=%zu\n",
-                                       (unsigned long long)true_gpa, dma_len);
-                                queue_gpa_registration(true_gpa, dma_len, offset, strcmp(method, "pfn") == 0);
-                            }
-                            // Check if we already have a translation from a previous cycle
-                            uint64_t host_phys = gpa_xlat_lookup(true_gpa);
-                            if (host_phys != 0) {
-                                if (strcmp(method, "pfn") == 0) {
-                                    uint32_t host_pfn = (uint32_t)(host_phys >> 12);
-                                    *(uint32_t*)buf = host_pfn;
-                                    memcpy(req.data, buf, count);
-                                    printf("GPA XLAT INLINE: offset=%#llx guest_pfn=%#x -> host_pfn=%#x\n",
-                                           (unsigned long long)offset, val, host_pfn);
-                                } else {
-                                    *(uint32_t*)buf = (uint32_t)host_phys;
-                                    memcpy(req.data, buf, count);
-                                    printf("GPA XLAT INLINE: offset=%#llx guest_addr=%#x -> host_addr=%#x\n",
-                                           (unsigned long long)offset, val, (uint32_t)host_phys);
+                            if (g_iommu_mode) {
+                                if (offset == 0x88080 || offset == 0x88084) {
+                                    printf("GPA SNIFF (IOMMU): Queueing blast sync for IOVA=%#llx len=%zu\n",
+                                           (unsigned long long)true_gpa, dma_len);
+                                    trigger_blast_sync(vfu_ctx, true_gpa, dma_len, val, offset);
+                                    // Suppress the BAR write — blast thread will send it AFTER
+                                    // data sync completes (~10s). BAR reads still go through
+                                    // normally via do_rdma_transaction (no fast-path zeros).
+                                    // The 120s GSP timeout gives plenty of headroom.
+                                    skip_host_write = true;
                                 }
                             } else {
-                                printf("GPA PENDING: Dropping host write for offset=%#llx until translation completes.\n", (unsigned long long)offset);
-                                skip_host_write = true;
+                                if (offset == 0x88080 || offset == 0x88084) {
+                                    printf("GSP CRITICAL: Queueing GPA registration for gpa=%#llx len=%zu\n",
+                                           (unsigned long long)true_gpa, dma_len);
+                                    queue_gpa_registration(true_gpa, dma_len, offset, strcmp(method, "pfn") == 0);
+                                }
+                                // Check if we already have a translation from a previous cycle
+                                uint64_t host_phys = gpa_xlat_lookup(true_gpa);
+                                if (host_phys != 0) {
+                                    if (strcmp(method, "pfn") == 0) {
+                                        uint32_t host_pfn = (uint32_t)(host_phys >> 12);
+                                        *(uint32_t*)buf = host_pfn;
+                                        memcpy(req.data, buf, count);
+                                        printf("GPA XLAT INLINE: offset=%#llx guest_pfn=%#x -> host_pfn=%#x\n",
+                                               (unsigned long long)offset, val, host_pfn);
+                                    } else {
+                                        *(uint32_t*)buf = (uint32_t)host_phys;
+                                        memcpy(req.data, buf, count);
+                                        printf("GPA XLAT INLINE: offset=%#llx guest_addr=%#x -> host_addr=%#x\n",
+                                               (unsigned long long)offset, val, (uint32_t)host_phys);
+                                    }
+                                } else {
+                                    printf("GPA PENDING: Dropping host write for offset=%#llx until translation completes.\n", (unsigned long long)offset);
+                                    skip_host_write = true;
+                                }
                             }
                         }
                     }
@@ -1163,18 +1438,27 @@ static ssize_t bar_access_cb(vfu_ctx_t *vfu_ctx, char * const buf,
                                 blast_sync_count++;
                             }
                             register_active_dma(true_gpa, dma_len, true);
-                            if (offset == 0x88080 || offset == 0x88084) {
-                                printf("GSP CRITICAL (64-bit): Queueing GPA registration for gpa=%#llx len=%zu\n",
-                                       (unsigned long long)true_gpa, dma_len);
-                                queue_gpa_registration(true_gpa, dma_len, offset, false);
-                            }
-                            
-                            uint64_t host_phys = gpa_xlat_lookup(true_gpa);
-                            if (host_phys != 0) {
-                                *(uint64_t*)buf = host_phys;
-                                memcpy(req.data, buf, count);
+                            if (g_iommu_mode) {
+                                if (offset == 0x88080 || offset == 0x88084) {
+                                    printf("GPA SNIFF (IOMMU 64-bit): Queueing blast sync for IOVA=%#llx len=%zu\n",
+                                           (unsigned long long)true_gpa, dma_len);
+                                    trigger_blast_sync(vfu_ctx, true_gpa, dma_len, (uint32_t)val, offset);
+                                    skip_host_write = true;
+                                }
                             } else {
-                                skip_host_write = true;
+                                if (offset == 0x88080 || offset == 0x88084) {
+                                    printf("GSP CRITICAL (64-bit): Queueing GPA registration for gpa=%#llx len=%zu\n",
+                                           (unsigned long long)true_gpa, dma_len);
+                                    queue_gpa_registration(true_gpa, dma_len, offset, false);
+                                }
+                                
+                                uint64_t host_phys = gpa_xlat_lookup(true_gpa);
+                                if (host_phys != 0) {
+                                    *(uint64_t*)buf = host_phys;
+                                    memcpy(req.data, buf, count);
+                                } else {
+                                    skip_host_write = true;
+                                }
                             }
                         }
                     }
@@ -1187,30 +1471,37 @@ static ssize_t bar_access_cb(vfu_ctx_t *vfu_ctx, char * const buf,
         return count;
     }
 
-    if (do_rdma_transaction(vfu_ctx, &req, &resp) != 0) {
-        return -1;
+    if (is_write) {
+        // BAR writes must be reliable — use do_rdma_transaction for ACK.
+        // Fire-and-forget writes get dropped when competing with DMA sync
+        // packets on blast_sock_fd, causing the GPU to miss critical register
+        // writes (Falcon CPUCTL, DMEM programming, etc.).
+        // do_rdma_transaction has a 500ms timeout, well within QEMU's
+        // vfio-user protocol timeout (~10s).
+        struct rdma_packet write_resp = {0};
+        int write_ret = do_rdma_transaction(vfu_ctx, &req, &write_resp);
+        if (bar_index == 0) {
+            uint32_t val = (count == 4) ? *(uint32_t*)buf : 0;
+            printf("BAR0 WRITE: offset=%#llx count=%zu val=%#x (ret=%d)\n",
+                   (unsigned long long)offset, count, val, write_ret);
+        }
+        return count;
     }
 
-    if (is_write) {
-        if (bar_index == 0) {
-            uint32_t val = (count == 4) ? *(uint32_t*)buf : 0;
-            printf("BAR0 WRITE: offset=%#llx count=%zu val=%#x\n", (unsigned long long)offset, count, val);
-        }
-        // Sync small DMA regions to Host on BAR writes (e.g. doorbells).
-        // Large firmware syncs are handled by the irq_thread which releases dma_sync_mutex
-        // during network I/O so BAR reads can be served concurrently.
-        sync_dma_to_host(vfu_ctx, false);
-    } else {
-        memcpy(buf, resp.data, count);
-        uint32_t raw_val = (count == 4) ? *(uint32_t*)resp.data : 0;
-        
+    // BAR reads need a blocking round-trip to get the response value
+    if (do_rdma_transaction(vfu_ctx, &req, &resp) != 0) {
+        // On timeout, return all-ones (PCI convention for device errors)
+        memset(buf, 0xFF, count);
+        return count;
+    }
 
-        
-        if (bar_index == 0) {
-            uint32_t val = (count == 4) ? *(uint32_t*)buf : 0;
-            printf("BAR0 READ: offset=%#llx count=%zu val=%#x (raw=%#x)\n", 
-                   (unsigned long long)offset, count, val, raw_val);
-        }
+    memcpy(buf, resp.data, count);
+    uint32_t raw_val = (count == 4) ? *(uint32_t*)resp.data : 0;
+
+    if (bar_index == 0) {
+        uint32_t val = (count == 4) ? *(uint32_t*)buf : 0;
+        printf("BAR0 READ: offset=%#llx count=%zu val=%#x (raw=%#x)\n", 
+               (unsigned long long)offset, count, val, raw_val);
     }
 
     return count;
@@ -1255,6 +1546,17 @@ static ssize_t bar6_access(vfu_ctx_t *vfu_ctx, char * const buf,
 // Main Event Loop Entry Point
 // -------------------------------------------------------------
 
+ssize_t cfg_access_cb(vfu_ctx_t *vfu_ctx, char *buf, size_t count,
+                      loff_t offset, bool is_write) {
+    if (!is_write) {
+        memset(buf, 0, count);
+        return count;
+    }
+    printf("net_pci_client: ignoring write to config space offset 0x%lx size %ld\n", (unsigned long)offset, (long)count);
+    return count;
+}
+
+
 int main(int argc, char *argv[]) {
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
@@ -1273,6 +1575,14 @@ int main(int argc, char *argv[]) {
     uint16_t vendor_id = (uint16_t)strtol(argv[3], NULL, 16);
     uint16_t device_id = (uint16_t)strtol(argv[4], NULL, 16);
 
+    // Check for optional --iommu flag
+    for (int i = 5; i < argc; i++) {
+        if (strcmp(argv[i], "--iommu") == 0) {
+            g_iommu_mode = true;
+            printf("IOMMU mode ENABLED: DMA callbacks will forward IOVA mappings to host\n");
+        }
+    }
+
     printf("======================================================\n");
     printf(" Starting Remote PCIe Client Daemon (vfio-user Server)\n");
     printf("======================================================\n");
@@ -1280,6 +1590,7 @@ int main(int argc, char *argv[]) {
     printf(" Host IP:     %s\n", host_ip_str);
     printf(" Vendor ID:   %#06x\n", vendor_id);
     printf(" Device ID:   %#06x\n", device_id);
+    printf(" IOMMU Mode:  %s\n", g_iommu_mode ? "ENABLED" : "disabled");
     printf("======================================================\n");
 
     // Initialize UDP Socket for RDMA Network Protocol
@@ -1301,6 +1612,19 @@ int main(int argc, char *argv[]) {
         int blast_buf = 32 * 1024 * 1024; // 32MB send buffer for burst writes
         setsockopt(blast_sock_fd, SOL_SOCKET, SO_SNDBUF, &blast_buf, sizeof(blast_buf));
         printf("Blast sync socket initialized (fd=%d)\n", blast_sock_fd);
+    }
+
+    // Initialize dedicated RPC socket for request-response RDMA transactions
+    // This MUST be separate from blast_sock_fd to avoid response packets being
+    // lost amid the flood of fire-and-forget DMA sync packets.
+    rdma_rpc_sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (rdma_rpc_sock_fd < 0) {
+        warn("failed to create RDMA RPC socket");
+    } else {
+        int rpc_buf = 16 * 1024 * 1024;
+        setsockopt(rdma_rpc_sock_fd, SOL_SOCKET, SO_SNDBUF, &rpc_buf, sizeof(rpc_buf));
+        setsockopt(rdma_rpc_sock_fd, SOL_SOCKET, SO_RCVBUF, &rpc_buf, sizeof(rpc_buf));
+        printf("RDMA RPC socket initialized (fd=%d)\n", rdma_rpc_sock_fd);
     }
 
     memset(&host_addr, 0, sizeof(host_addr));
@@ -1337,7 +1661,8 @@ int main(int argc, char *argv[]) {
 
         bool host_alive = false;
         for (int attempt = 0; attempt < 30 && running; attempt++) {
-            ssize_t sent = sendto(sock_fd, &ping, sizeof(ping), 0,
+            int tx_fd = (blast_sock_fd >= 0) ? blast_sock_fd : sock_fd;
+            ssize_t sent = sendto(tx_fd, &ping, sizeof(ping), 0,
                                   (struct sockaddr*)&host_addr, sizeof(host_addr));
             if (sent < 0) {
                 printf("Pre-flight: sendto failed: %s\n", strerror(errno));
@@ -1349,13 +1674,13 @@ int main(int argc, char *argv[]) {
             struct timeval tv = { .tv_sec = 2, .tv_usec = 0 };
             fd_set fds;
             FD_ZERO(&fds);
-            FD_SET(sock_fd, &fds);
-            int sel = select(sock_fd + 1, &fds, NULL, NULL, &tv);
+            FD_SET(tx_fd, &fds);
+            int sel = select(tx_fd + 1, &fds, NULL, NULL, &tv);
             if (sel > 0) {
                 struct rdma_packet resp = {0};
                 struct sockaddr_in from;
                 socklen_t from_len = sizeof(from);
-                ssize_t recvd = recvfrom(sock_fd, &resp, sizeof(resp), 0,
+                ssize_t recvd = recvfrom(tx_fd, &resp, sizeof(resp), 0,
                                           (struct sockaddr*)&from, &from_len);
                 if (recvd > 0 && resp.tx_id == 0xFFFF && resp.op == RDMA_OP_READ_RESP) {
                     uint32_t val = *(uint32_t*)resp.data;
@@ -1371,6 +1696,7 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Pre-flight: FATAL - HobbyOS host is not responding. Aborting.\n");
             close(sock_fd);
             if (blast_sock_fd >= 0) close(blast_sock_fd);
+            if (rdma_rpc_sock_fd >= 0) close(rdma_rpc_sock_fd);
             return EXIT_FAILURE;
         }
     }
@@ -1485,6 +1811,13 @@ int main(int argc, char *argv[]) {
         err(EXIT_FAILURE, "failed to setup ROM region");
     }
 
+    // Config Space Callback
+    ret = vfu_setup_region(vfu_ctx, VFU_PCI_DEV_CFG_REGION_IDX, 4096,
+                           &cfg_access_cb, VFU_REGION_FLAG_RW, NULL, 0, -1, 0);
+    if (ret < 0) {
+        err(EXIT_FAILURE, "failed to setup config space callback");
+    }
+
     // Realize Context
     ret = vfu_realize_ctx(vfu_ctx);
     if (ret < 0) {
@@ -1584,6 +1917,7 @@ int main(int argc, char *argv[]) {
     vfu_destroy_ctx(vfu_ctx);
     close(sock_fd);
     if (blast_sock_fd >= 0) close(blast_sock_fd);
+    if (rdma_rpc_sock_fd >= 0) close(rdma_rpc_sock_fd);
     unlink(socket_path);
  
     return EXIT_SUCCESS;

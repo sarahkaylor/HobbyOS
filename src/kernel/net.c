@@ -16,6 +16,7 @@ static uint32_t local_gateway = 0;
 static uint8_t local_mac[6];
 
 static struct socket_pcb sockets[MAX_SOCKETS];
+volatile uint32_t rdma_ring_dbg = 0;
 static spinlock_t net_lock;
 
 // Simple ARP cache
@@ -237,18 +238,71 @@ static void handle_udp(struct ipv4_hdr* ip, uint8_t* packet, uint32_t len) {
         return;
     }
     
+    // DEBUG: Count port-7777 packets seen
+    if (ntohs(udp->dst_port) == 7777) {
+        static volatile uint32_t rdma_rx_seen = 0;
+        static volatile uint32_t rdma_rx_bad_size = 0;
+        rdma_rx_seen++;
+        uint32_t data_len_chk = ntohs(udp->length) - sizeof(struct udp_hdr);
+        if (data_len_chk != sizeof(struct rdma_packet)) {
+            rdma_rx_bad_size++;
+        }
+        // Log every 100 packets for diagnostics
+        if (rdma_rx_seen % 100 == 1) {
+            extern void uart_puts(const char* s);
+            extern void print_int(int val);
+            uart_puts("[NET DEBUG] rdma_rx_seen=");
+            print_int(rdma_rx_seen);
+            uart_puts(" bad_size=");
+            print_int(rdma_rx_bad_size);
+            uart_puts(" len=");
+            print_int(data_len_chk);
+            uart_puts("\n");
+        }
+    }
+
     uint64_t flags = spinlock_acquire_irqsave(&net_lock);
+    int rdma_socket_found = 0;
     for (int i = 0; i < MAX_SOCKETS; i++) {
         if (sockets[i].in_use && sockets[i].protocol == IP_PROTO_UDP && sockets[i].local_port == ntohs(udp->dst_port)) {
             // Append to socket rx buffer
             uint32_t data_len = ntohs(udp->length) - sizeof(struct udp_hdr);
-            if (sockets[i].local_port == 7777 && data_len != sizeof(struct rdma_packet)) {
-                break; // Ignore invalid / partial / non-RDMA packets WITHOUT updating routing
+            if (sockets[i].local_port == 7777) {
+                rdma_socket_found = 1;
+                extern volatile uint32_t rdma_ring_dbg;
+                rdma_ring_dbg++;
+                if (rdma_ring_dbg <= 5 || rdma_ring_dbg % 100 == 1) {
+                    extern void uart_puts(const char* s);
+                    extern void print_int(int val);
+                    extern void uart_print_hex(uint64_t val);
+                    uart_puts("[RDMA RX] pkt#");
+                    print_int(rdma_ring_dbg);
+                    uart_puts(" data_len=");
+                    print_int(data_len);
+                    uart_puts(" need=");
+                    print_int((int)sizeof(struct rdma_packet));
+                    uart_puts(" rport=");
+                    print_int(sockets[i].remote_port);
+                    uart_puts(" tail=");
+                    uart_print_hex(sockets[i].rx_tail);
+                    uart_puts("\n");
+                }
+                if (data_len != sizeof(struct rdma_packet)) {
+                    break; // Ignore invalid / partial / non-RDMA packets WITHOUT updating routing
+                }
             }
-            // Update remote IP and port dynamically for UDP reply routing
-            // Only after validating the packet is a proper RDMA packet
-            sockets[i].remote_ip = ip->src_ip;
-            sockets[i].remote_port = ntohs(udp->src_port);
+            // Update remote IP and port dynamically for UDP reply routing.
+            // ONLY update if:
+            //   (a) remote_port is not yet set (first packet from this peer), OR
+            //   (b) the packet comes from the SAME port as the established connection.
+            // This prevents fire-and-forget blast packets sent from a different
+            // ephemeral socket (e.g., blast_sock_fd with a different src port)
+            // from clobbering the remote_port that READ_RESP replies must use.
+            uint16_t pkt_src_port = ntohs(udp->src_port);
+            if (sockets[i].remote_port == 0 || sockets[i].remote_port == pkt_src_port) {
+                sockets[i].remote_ip = ip->src_ip;
+                sockets[i].remote_port = pkt_src_port;
+            }
 
             uint8_t* data = packet + sizeof(struct udp_hdr);
             for (uint32_t j = 0; j < data_len; j++) {
@@ -259,6 +313,10 @@ static void handle_udp(struct ipv4_hdr* ip, uint8_t* packet, uint32_t len) {
             sockets[i].rx_tail += data_len;
             break;
         }
+    }
+    if (ntohs(udp->dst_port) == 7777 && !rdma_socket_found) {
+        extern void uart_puts(const char* s);
+        uart_puts("[RDMA RX] WARN: no socket matched port 7777!\n");
     }
     spinlock_release_irqrestore(&net_lock, flags);
 }
@@ -458,6 +516,11 @@ struct socket_pcb* net_socket_create(int protocol) {
             sockets[i].rx_tail = 0;
             sockets[i].seq = 1000; // Random ISN
             sockets[i].ack = 0;
+            // CRITICAL: Clear remote address fields to prevent stale values
+            // from previously-closed sockets (e.g., DHCP) being inherited.
+            sockets[i].remote_ip = 0;
+            sockets[i].remote_port = 0;
+            sockets[i].mac_cached = 0;
             spinlock_release_irqrestore(&net_lock, flags);
             return &sockets[i];
         }

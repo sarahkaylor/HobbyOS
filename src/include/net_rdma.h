@@ -46,6 +46,12 @@ enum rdma_op {
     RDMA_OP_READ_BLOCK_RESP = 11,
     RDMA_OP_WRITE_BLOCK_REQ = 12,
     RDMA_OP_WRITE_BLOCK_RESP = 13,
+    RDMA_OP_IOMMU_MAP = 14,        // Guest→Host: Map IOVA to shadow buffer, program host IOMMU
+    RDMA_OP_IOMMU_MAP_RESP = 15,   // Host→Guest: IOVA mapped, returns host_phys of shadow buffer
+    RDMA_OP_IOMMU_UNMAP = 16,      // Guest→Host: Unmap IOVA from host IOMMU
+    RDMA_OP_IOMMU_UNMAP_RESP = 17, // Host→Guest: IOVA unmapped
+    RDMA_OP_DMA_SYNC_RELIABLE = 18, // Like DMA_SYNC_TO_HOST but host sends ACK
+    RDMA_OP_DMA_SYNC_RELIABLE_RESP = 19,
 };
 
 #define RDMA_DATA_LEN 1024

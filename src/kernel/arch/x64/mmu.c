@@ -318,7 +318,7 @@ void mmu_map_mmio_range(uint64_t phys_addr, uint64_t size) {
                 pdpt[pdpt_idx] = ((uint64_t)pd) | 0x07;
             }
 
-            pd[pd_idx] = addr | 0x9B;
+            pd[pd_idx] = (addr & ~((uint64_t)0x1FFFFF)) | 0x9B;
 
             addr += 0x200000;
         }

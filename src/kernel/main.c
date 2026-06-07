@@ -164,6 +164,17 @@ void main(void) {
     uart_puts("VirtIO Network initialization failed!\n");
   }
 
+#ifdef __x86_64__
+  // Start the Remote PCIe sharing subsystem (RDMA over UDP).
+  // Reads opt/pcishare from QEMU fw_cfg; if not present returns immediately.
+  // If configured as host, spawns the provider loop as a kernel process so
+  // the desktop (or other modes) continue loading without blocking.
+  {
+    extern void net_rdma_init(void);
+    net_rdma_init();
+  }
+#endif
+
   // -----------------------------------------------------------------------
   // Parallel Boot: Load programs into the scheduler based on the mode.
   // Secondary cores are already spinning in start_scheduler() and will

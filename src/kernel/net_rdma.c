@@ -53,6 +53,30 @@ struct host_mr_entry {
 static struct host_mr_entry host_mrs[MAX_MRS];
 static uint8_t host_dma_buffers[MAX_MRS][4096] __attribute__((aligned(4096)));
 
+// IOMMU Shadow Buffer Pool (bump allocator for IOVA-mapped DMA regions)
+// This pool provides physically contiguous shadow buffers that the host IOMMU
+// maps IOVAs to. When the GPU reads an IOVA from a descriptor, the IOMMU
+// translates it to a shadow buffer in this pool.
+#define IOMMU_SHADOW_POOL_SIZE (32 * 1024 * 1024)  // 32MB
+static uint8_t iommu_shadow_pool[IOMMU_SHADOW_POOL_SIZE] __attribute__((aligned(4096)));
+static uint64_t iommu_shadow_pool_offset = 0;
+
+// IOMMU Mapping Table: tracks IOVA → shadow buffer associations
+#define MAX_IOMMU_MAPS 1024
+struct iommu_map_entry {
+    uint64_t iova;        // Guest IOVA (I/O Virtual Address)
+    uint64_t host_phys;   // Host shadow buffer physical address
+    uint8_t* host_virt;   // Host shadow buffer virtual pointer
+    uint64_t size;        // Mapping size in bytes
+    int in_use;
+    int is_identity;      // 1 if identity-mapped (no VT-d programming needed)
+};
+static struct iommu_map_entry iommu_maps[MAX_IOMMU_MAPS];
+
+// GPU PCI bus/device/function (detected during init, used for IOMMU context)
+static uint8_t gpu_pci_bus = 0;
+static uint8_t gpu_pci_devfn = 0;
+
 // Guest specific state
 struct guest_mr_entry {
     uint64_t guest_phys;
@@ -98,9 +122,15 @@ static void pci_write_config(uint8_t bus, uint8_t slot, uint8_t func, uint8_t of
 
 static uint8_t mock_edu_buffer[4096];
 
+static volatile uint32_t dbg_read_req_count = 0;
+static volatile uint32_t dbg_read_resp_count = 0;
+static volatile uint32_t dbg_map_req_count = 0;
+
 // Host packet handler
 static void handle_host_rdma(struct rdma_packet* pkt) {
-    if (pkt->len > RDMA_DATA_LEN) {
+    // Clamp data payload length — but NOT for DMA_SYNC_RELIABLE which uses
+    // the len field to carry the total verify size (up to 100MB+).
+    if (pkt->op != RDMA_OP_DMA_SYNC_RELIABLE && pkt->len > RDMA_DATA_LEN) {
         pkt->len = RDMA_DATA_LEN;
     }
     struct rdma_packet resp = {0};
@@ -111,17 +141,27 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
     resp.len = pkt->len;
     resp.status = 0;
 
-    /*
-    uart_puts("[RDMA Host] handle_host_rdma: op=");
-    print_int(pkt->op);
-    uart_puts(" bar=");
-    print_int(pkt->bar_index);
-    uart_puts(" addr=");
-    uart_print_hex(pkt->addr);
-    uart_puts(" len=");
-    print_int(pkt->len);
-    uart_puts("\n");
-    */
+    if (pkt->op == RDMA_OP_READ_REQ) dbg_read_req_count++;
+    if (pkt->op == RDMA_OP_IOMMU_MAP) dbg_map_req_count++;
+
+    static volatile uint32_t op_dbg = 0;
+    op_dbg++;
+    if (op_dbg <= 10 || op_dbg % 100 == 1) {
+        uart_puts("[RDMA Host] op=");
+        print_int(pkt->op);
+        uart_puts(" bar=");
+        print_int(pkt->bar_index);
+        uart_puts(" addr=");
+        uart_print_hex(pkt->addr);
+        uart_puts(" len=");
+        print_int(pkt->len);
+        uart_puts(" site=");
+        print_int(pkt->status);  // Repurpose status as call_site tag before handler clears it
+        uart_puts(" #");
+        print_int(op_dbg);
+        uart_puts("\n");
+    }
+    pkt->status = 0;  // Reset status for handler use
 
     int use_mock = (pkt->bar_index == 0 && pkt->addr >= 0x40000 && pkt->addr < 0x40000 + 4096);
 
@@ -201,8 +241,6 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
                     *(uint32_t*)&mock_edu_buffer[pkt->addr - 0x40000] = *(uint32_t*)pkt->data;
                 } else if (pkt->len == 8) {
                     *(uint64_t*)&mock_edu_buffer[pkt->addr - 0x40000] = *(uint64_t*)pkt->data;
-                } else {
-                    resp.status = 1;
                 }
             } else {
                 if (pkt->len == 1) {
@@ -218,14 +256,13 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
                 } else if (pkt->len == 8) {
                     uint64_t val = *(uint64_t*)pkt->data;
                     *(volatile uint64_t*)(p_pci_bars[bar] + pkt->addr) = val;
-                } else {
-                    resp.status = 1;
                 }
                 arch_memory_barrier();
             }
-        } else {
-            resp.status = 2;
         }
+        // Fall through to send_resp — the client's do_rdma_transaction
+        // waits for an ACK to ensure critical BAR writes (Falcon CPUCTL,
+        // DMEM programming, etc.) are not silently dropped.
     } 
     else if (pkt->op == RDMA_OP_READ_BLOCK_REQ) {
         uint8_t bar = pkt->bar_index;
@@ -283,12 +320,9 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
                         arch_memory_barrier();
                     }
                 }
-            } else {
-                resp.status = 1; // Length too large
             }
-        } else {
-            resp.status = 2;
         }
+        // Fall through to send_resp for write ACK
     }
     else if (pkt->op == RDMA_OP_REG_MR) {
         int idx = -1;
@@ -319,21 +353,10 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
         }
     } 
     else if (pkt->op == RDMA_OP_DMA_SYNC_TO_HOST) {
-        // Fire-and-forget: write data to host memory, NO response sent.
-        // Write to BOTH shadow buffer (for RDMA readback) AND identity-mapped address (for GPU DMA).
-        // The GPU accesses physical memory directly via DMA, so data must be at the identity-mapped address.
-        for (int i = 0; i < MAX_MRS; i++) {
-            if (host_mrs[i].in_use &&
-                pkt->addr >= host_mrs[i].guest_phys &&
-                (pkt->addr + pkt->len) <= (host_mrs[i].guest_phys + host_mrs[i].size)) {
-                uint64_t mr_offset = pkt->addr - host_mrs[i].guest_phys;
-                for (uint32_t j = 0; j < pkt->len; j++) {
-                    host_mrs[i].host_virt[mr_offset + j] = pkt->data[j];
-                }
-                break;
-            }
-        }
-        // ALWAYS write to identity-mapped physical address for GPU DMA access
+        // Fire-and-forget: write data directly to host physical memory.
+        // The GPU's DMA engine reads from real physical memory. Shadow buffers
+        // (IOMMU/MR) are irrelevant for GPU DMA — they're only used for the
+        // client's SYNC_FROM_HOST path. Skip them for maximum throughput.
         if (pkt->addr < 0x70000000ULL || pkt->addr >= 0x71300000ULL) {
             uint8_t* ptr = (uint8_t*)pkt->addr;
             for (uint32_t j = 0; j < pkt->len; j++) {
@@ -342,35 +365,263 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
         }
         return; // No response — fire-and-forget
     } 
-    else if (pkt->op == RDMA_OP_DMA_SYNC_TO_GUEST) {
-        // Read from identity-mapped physical address (where GPU DMA writes responses),
-        // not just the shadow buffer. The GPU writes directly to physical memory.
-        int found = 0;
-        if (pkt->addr < 0x70000000ULL || pkt->addr >= 0x71300000ULL) {
-            uint8_t* ptr = (uint8_t*)pkt->addr;
-            for (uint32_t j = 0; j < pkt->len; j++) {
-                resp.data[j] = ptr[j];
+    else if (pkt->op == RDMA_OP_DMA_SYNC_RELIABLE) {
+        // CRC32 Verification: client sends expected CRC32 in data[0..3],
+        // addr = target GPA, len = total size of DMA region to verify.
+        // Host computes CRC32 over the memory at addr..addr+len and compares.
+        uint32_t expected_crc = *(uint32_t*)pkt->data;
+        uint64_t verify_addr = pkt->addr;
+        uint64_t verify_len = pkt->len;
+        
+        // Compute CRC32 over host memory
+        uint32_t crc = 0xFFFFFFFF;
+        if (verify_addr < 0x70000000ULL || verify_addr >= 0x71300000ULL) {
+            uint8_t* ptr = (uint8_t*)(uintptr_t)verify_addr;
+            for (uint64_t j = 0; j < verify_len; j++) {
+                crc ^= ptr[j];
+                for (int b = 0; b < 8; b++) {
+                    crc = (crc >> 1) ^ (0xEDB88320U & -(crc & 1));
+                }
             }
-            found = 1;
+        }
+        crc ^= 0xFFFFFFFF;
+        
+        resp.op = RDMA_OP_DMA_SYNC_RELIABLE_RESP;
+        if (crc == expected_crc) {
+            resp.status = 0; // Match!
+            uart_puts("[RDMA] DMA VERIFY OK: addr=");
+            uart_print_hex(verify_addr);
+            uart_puts(" len=");
+            uart_print_hex(verify_len);
+            uart_puts(" crc=");
+            uart_print_hex(crc);
+            uart_puts("\n");
         } else {
-            // Blocked range — try shadow buffer as fallback
-            for (int i = 0; i < MAX_MRS; i++) {
-                if (host_mrs[i].in_use &&
-                    pkt->addr >= host_mrs[i].guest_phys &&
-                    (pkt->addr + pkt->len) <= (host_mrs[i].guest_phys + host_mrs[i].size)) {
-                    uint64_t mr_offset = pkt->addr - host_mrs[i].guest_phys;
-                    for (uint32_t j = 0; j < pkt->len; j++) {
-                        resp.data[j] = host_mrs[i].host_virt[mr_offset + j];
+            resp.status = 1; // Mismatch
+            *(uint32_t*)resp.data = crc; // Return host's CRC for diagnostics
+            uart_puts("[RDMA] DMA VERIFY FAIL: addr=");
+            uart_print_hex(verify_addr);
+            uart_puts(" expected=");
+            uart_print_hex(expected_crc);
+            uart_puts(" got=");
+            uart_print_hex(crc);
+            uart_puts("\n");
+        }
+        // Fall through to send_resp to send the ACK
+    }
+    else if (pkt->op == RDMA_OP_DMA_SYNC_TO_GUEST) {
+        int found = 0;
+        
+        // 1. Check IOMMU shadow buffers first (IOVA-based mappings from vIOMMU).
+        for (int i = 0; i < MAX_IOMMU_MAPS; i++) {
+            if (iommu_maps[i].in_use &&
+                pkt->addr >= iommu_maps[i].iova &&
+                (pkt->addr + pkt->len) <= (iommu_maps[i].iova + iommu_maps[i].size)) {
+                uint64_t offset = pkt->addr - iommu_maps[i].iova;
+                for (uint32_t j = 0; j < pkt->len; j++) {
+                    resp.data[j] = iommu_maps[i].host_virt[offset + j];
+                }
+                found = 1;
+                break;
+            }
+        }
+        
+        if (!found) {
+            // Read from identity-mapped physical address (where GPU DMA writes responses),
+            // not just the shadow buffer. The GPU writes directly to physical memory.
+            if (pkt->addr < 0x70000000ULL || pkt->addr >= 0x71300000ULL) {
+                uint8_t* ptr = (uint8_t*)pkt->addr;
+                for (uint32_t j = 0; j < pkt->len; j++) {
+                    resp.data[j] = ptr[j];
+                }
+                found = 1;
+            } else {
+                // Blocked range — try shadow buffer as fallback
+                for (int i = 0; i < MAX_MRS; i++) {
+                    if (host_mrs[i].in_use &&
+                        pkt->addr >= host_mrs[i].guest_phys &&
+                        (pkt->addr + pkt->len) <= (host_mrs[i].guest_phys + host_mrs[i].size)) {
+                        uint64_t mr_offset = pkt->addr - host_mrs[i].guest_phys;
+                        for (uint32_t j = 0; j < pkt->len; j++) {
+                            resp.data[j] = host_mrs[i].host_virt[mr_offset + j];
+                        }
+                        found = 1;
+                        break;
                     }
-                    found = 1;
-                    break;
                 }
             }
         }
         resp.op = RDMA_OP_DMA_SYNC_RESP;
         resp.status = found ? 0 : 4;
     }
+    else if (pkt->op == RDMA_OP_IOMMU_MAP) {
+        // Map an IOVA to a shadow buffer on the host, program the IOMMU.
+        // pkt->addr = IOVA, pkt->data contains the 64-bit size
+        uint64_t iova = pkt->addr;
+        uint64_t map_size = *(uint64_t*)pkt->data;
 
+        // Handle zero-size mappings gracefully
+        if (map_size == 0) {
+            // Zero-size IOMMU_MAP is a no-op — fire-and-forget, no response needed
+            uart_puts("[IOMMU] MAP: iova=");
+            uart_print_hex(iova);
+            uart_puts(" size=0 (no-op)\n");
+            return; // Fire-and-forget: no response
+        }
+
+        // Page-align size
+        if (map_size & 0xFFF) {
+            map_size = (map_size + 0xFFF) & ~0xFFFULL;
+        }
+
+        // Check for existing mapping
+        int existing = -1;
+        for (int i = 0; i < MAX_IOMMU_MAPS; i++) {
+            if (iommu_maps[i].in_use && iommu_maps[i].iova == iova) {
+                existing = i;
+                break;
+            }
+        }
+
+        if (existing >= 0) {
+            // Already mapped — return existing mapping
+            resp.op = RDMA_OP_IOMMU_MAP_RESP;
+            resp.addr = iommu_maps[existing].host_phys;
+            resp.status = 0;
+            uart_puts("[IOMMU] MAP reuse: iova=");
+            uart_print_hex(iova);
+            uart_puts(" -> host=");
+            uart_print_hex(iommu_maps[existing].host_phys);
+            uart_puts("\n");
+        } else {
+            // ALL mappings use identity mode (iova == phys) to stay compatible
+            // with passthrough context entry. Shadow buffers would require
+            // transitioning to translated mode, which breaks all DMA for
+            // large identity-mapped regions (2GB RAM, 32GB BAR1) since our
+            // VT-d page table pool can't hold millions of 4KB PTEs.
+            int use_identity = 1;
+
+            uint64_t shadow_phys;
+            uint8_t* shadow_virt;
+
+            if (use_identity) {
+                // Identity: host_phys = iova (guest RAM is physically accessible on host)
+                shadow_phys = iova;
+                shadow_virt = (uint8_t*)(uintptr_t)iova;
+            } else {
+                // Allocate shadow buffer from pool (bump allocator)
+                uint64_t aligned_offset = (iommu_shadow_pool_offset + 0xFFF) & ~0xFFFULL;
+                if (aligned_offset + map_size > IOMMU_SHADOW_POOL_SIZE) {
+                    uart_puts("[IOMMU] ERROR: Shadow pool exhausted!\n");
+                    resp.op = RDMA_OP_IOMMU_MAP_RESP;
+                    resp.status = 3;
+                    goto send_resp;
+                }
+                shadow_virt = &iommu_shadow_pool[aligned_offset];
+                shadow_phys = (uint64_t)shadow_virt;
+                iommu_shadow_pool_offset = aligned_offset + map_size;
+
+                // Zero the shadow buffer
+                for (uint64_t j = 0; j < map_size; j++) {
+                    shadow_virt[j] = 0;
+                }
+            }
+
+            // Find free slot in mapping table
+            int slot = -1;
+            for (int i = 0; i < MAX_IOMMU_MAPS; i++) {
+                if (!iommu_maps[i].in_use) {
+                    slot = i;
+                    break;
+                }
+            }
+
+            if (slot < 0) {
+                uart_puts("[IOMMU] ERROR: Mapping table full!\n");
+                resp.op = RDMA_OP_IOMMU_MAP_RESP;
+                resp.status = 4;
+            } else {
+                iommu_maps[slot].iova = iova;
+                iommu_maps[slot].host_phys = shadow_phys;
+                iommu_maps[slot].host_virt = shadow_virt;
+                iommu_maps[slot].size = map_size;
+                iommu_maps[slot].in_use = 1;
+                iommu_maps[slot].is_identity = use_identity;
+
+                // Program the host IOMMU: IOVA → shadow buffer phys
+                // Identity mappings (iova == phys) rely on passthrough mode at the
+                // context entry level. Only shadow-buffered (non-identity) regions
+                // need individual page table entries.
+                //
+                // IMPORTANT: if this is the FIRST non-identity map, we must transition
+                // the context entry from passthrough to translated mode. But we ALSO
+                // need to pre-populate the page tables with identity maps for all
+                // existing identity-mapped regions, otherwise their DMA will break.
+                int rc = 0;
+                if (!use_identity) {
+                    extern int iommu_vtd_map(uint8_t bus, uint8_t devfn,
+                                             uint64_t iova, uint64_t phys, uint64_t size);
+                    rc = iommu_vtd_map(gpu_pci_bus, gpu_pci_devfn, iova, shadow_phys, map_size);
+                }
+
+                resp.op = RDMA_OP_IOMMU_MAP_RESP;
+                resp.addr = shadow_phys;
+                resp.status = (rc == 0) ? 0 : 5;
+
+                uart_puts("[IOMMU] MAP: iova=");
+                uart_print_hex(iova);
+                uart_puts(" -> host=");
+                uart_print_hex(shadow_phys);
+                uart_puts(" size=");
+                uart_print_hex(map_size);
+                uart_puts(use_identity ? " (identity)\n" : " (shadow)\n");
+            }
+        }
+        // IOMMU_MAP is fire-and-forget from the host side. The client marks
+        // mappings synced optimistically and never waits for a response.
+        // Sending IOMMU_MAP_RESP floods sock_fd and causes READ_REQ timeouts.
+        return;
+    }
+
+    else if (pkt->op == RDMA_OP_IOMMU_UNMAP) {
+        // Unmap an IOVA from the host IOMMU.
+        // pkt->addr = IOVA, pkt->len = size
+        uint64_t iova = pkt->addr;
+
+        int found_slot = -1;
+        for (int i = 0; i < MAX_IOMMU_MAPS; i++) {
+            if (iommu_maps[i].in_use && iommu_maps[i].iova == iova) {
+                found_slot = i;
+                break;
+            }
+        }
+
+        if (found_slot >= 0) {
+            // Only call VT-d unmap if this was a shadow-mapped (non-identity) region
+            if (!iommu_maps[found_slot].is_identity) {
+                extern int iommu_vtd_unmap(uint8_t bus, uint8_t devfn,
+                                           uint64_t iova, uint64_t size);
+                extern void iommu_vtd_invalidate_iotlb(void);
+                iommu_vtd_unmap(gpu_pci_bus, gpu_pci_devfn, iova, iommu_maps[found_slot].size);
+                iommu_vtd_invalidate_iotlb();
+            }
+
+            iommu_maps[found_slot].in_use = 0;
+
+            uart_puts("[IOMMU] UNMAP: iova=");
+            uart_print_hex(iova);
+            uart_puts("\n");
+        }
+
+        resp.op = RDMA_OP_IOMMU_UNMAP_RESP;
+        resp.status = 0;  // Always OK — guest drives unmap lifecycle
+        // IOMMU_UNMAP is fire-and-forget: no response sent.
+        // The client sends IOMMU_UNMAP via blast_sock_fd and never waits.
+        return;
+    }
+
+    send_resp:
+    dbg_read_resp_count++;
     net_socket_send(rdma_socket, &resp, sizeof(struct rdma_packet));
 }
 
@@ -410,23 +661,38 @@ void net_rdma_poll(void) {
         spinlock_release_irqrestore(&rdma_lock, flags);
 
         if (is_host) {
-            // DMA_SYNC_TO_HOST is fire-and-forget (no response) — handle inline
-            // to avoid adding latency via the work queue.
-            if (pkt.op == RDMA_OP_DMA_SYNC_TO_HOST) {
+            // READ_REQ and WRITE_REQ are the hot path (GPU BAR reads/writes).
+            // Handle them INLINE on CPU 0 for minimum latency — bypassing the
+            // worker queue entirely. The worker queue is only for heavy ops like
+            // IOMMU_MAP that can tolerate queuing without causing client timeouts.
+            int is_fast_path = (pkt.op == RDMA_OP_READ_REQ ||
+                                pkt.op == RDMA_OP_WRITE_REQ ||
+                                pkt.op == RDMA_OP_DMA_SYNC_TO_HOST ||
+                                pkt.op == RDMA_OP_DMA_SYNC_RELIABLE ||
+                                pkt.op == RDMA_OP_DMA_SYNC_TO_GUEST ||
+                                pkt.op == RDMA_OP_DMA_SYNC_RESP ||
+                                pkt.op == RDMA_OP_READ_BLOCK_REQ ||
+                                pkt.op == RDMA_OP_WRITE_BLOCK_REQ ||
+                                pkt.op == RDMA_OP_REG_MR);
+            if (is_fast_path) {
+                pkt.status = 6; // call site: fast path inline (READ/WRITE/DMA)
                 handle_host_rdma(&pkt);
             } else if (rdma_worker_running) {
-                // Enqueue to the dedicated worker on CPU 1
+                // Heavy ops (IOMMU_MAP, IOMMU_UNMAP): enqueue to worker on CPU 1
                 uint32_t next_head = (rdma_wq_head + 1) % RDMA_WQ_SIZE;
                 if (next_head != rdma_wq_tail) {
+                    pkt.status = 4; // call site: worker queue
                     rdma_work_queue[rdma_wq_head] = pkt;
                     arch_memory_barrier();
                     rdma_wq_head = next_head;
                 } else {
                     // Queue full — process inline as fallback
+                    pkt.status = 2; // call site: queue full inline
                     handle_host_rdma(&pkt);
                 }
             } else {
                 // No worker yet — process inline (during boot)
+                pkt.status = 3; // call site: no worker inline
                 handle_host_rdma(&pkt);
             }
         } else {
@@ -454,7 +720,7 @@ static void rdma_worker_thread(void *arg) {
             struct rdma_packet pkt = rdma_work_queue[rdma_wq_tail];
             arch_memory_barrier();
             rdma_wq_tail = (rdma_wq_tail + 1) % RDMA_WQ_SIZE;
-
+            pkt.status = 5; // call site: worker thread dequeue
             handle_host_rdma(&pkt);
         } else {
             __asm__ volatile("pause");
@@ -497,17 +763,26 @@ static void provider_loop(void *arg) {
             extern volatile uint32_t dbg_handle_irq_isr_nonzero;
             extern volatile uint32_t dbg_handle_irq_pkts;
             extern volatile uint32_t dbg_poll_rx_pkts;
+            extern volatile uint16_t dbg_rx_ack_used_idx;
+            extern volatile uint16_t dbg_rx_used_idx;
+            extern volatile uint32_t rdma_ring_dbg;
             uart_puts("[RDMA STATS] rdma=");
             extern void print_int(int val);
             print_int(rdma_count);
             uart_puts(" irq_calls=");
             print_int(dbg_handle_irq_calls);
-            uart_puts(" isr_nz=");
-            print_int(dbg_handle_irq_isr_nonzero);
-            uart_puts(" irq_pkts=");
-            print_int(dbg_handle_irq_pkts);
             uart_puts(" poll_pkts=");
             print_int(dbg_poll_rx_pkts);
+            uart_puts(" read_req=");
+            print_int(dbg_read_req_count);
+            uart_puts(" resp_sent=");
+            print_int(dbg_read_resp_count);
+            uart_puts(" rdma_rx_seen=");
+            print_int(rdma_ring_dbg);
+            uart_puts(" rx_ack=");
+            print_int(dbg_rx_ack_used_idx);
+            uart_puts(" rx_used=");
+            print_int(dbg_rx_used_idx);
             uart_puts(" rx_head=");
             extern void uart_print_hex(uint64_t val);
             uart_print_hex(rdma_socket ? rdma_socket->rx_head : 0);
@@ -858,6 +1133,47 @@ void net_rdma_init(void) {
             host_mrs[i].in_use = 0;
         }
 
+        // Initialize IOMMU mapping table
+        for (int i = 0; i < MAX_IOMMU_MAPS; i++) {
+            iommu_maps[i].in_use = 0;
+        }
+        iommu_shadow_pool_offset = 0;
+
+        // Store the GPU's PCI bus/devfn for IOMMU context programming
+        gpu_pci_bus = dev_bus;
+        gpu_pci_devfn = (dev_slot << 3);  // devfn = slot << 3 | func (func=0)
+        uart_puts("[RDMA] GPU PCI location: bus=");
+        print_int(gpu_pci_bus);
+        uart_puts(" devfn=");
+        uart_print_hex(gpu_pci_devfn);
+        uart_puts("\n");
+
+        // Initialize the Intel VT-d IOMMU driver
+        extern int iommu_vtd_init(void);
+        int iommu_rc = iommu_vtd_init();
+        if (iommu_rc == 0) {
+            uart_puts("[RDMA] IOMMU VT-d initialized successfully\n");
+
+            // Install passthrough context entry for the GPU so that if translation
+            // is ever enabled, GPU firmware DMA is not blocked.
+            // NOTE: We do NOT call iommu_vtd_enable_translation() here because
+            // enabling global translation on the HOST would block NVMe and VirtIO
+            // DMA (they have no context entries). The IOMMU is kept hardware-ready
+            // for future use but translation remains disabled on the HOST role.
+            extern int iommu_vtd_set_passthrough(uint8_t bus, uint8_t devfn);
+            int pt_rc = iommu_vtd_set_passthrough((uint8_t)gpu_pci_bus,
+                                                   (uint8_t)gpu_pci_devfn);
+            if (pt_rc == 0) {
+                uart_puts("[RDMA] GPU passthrough context entry installed (translation not enabled)\n");
+            } else {
+                uart_puts("[RDMA] WARNING: GPU passthrough install failed\n");
+            }
+        } else {
+            uart_puts("[RDMA] WARNING: IOMMU VT-d init failed (rc=");
+            print_int(iommu_rc);
+            uart_puts("), IOMMU-based DMA translation unavailable\n");
+        }
+
         // Spawn RDMA worker thread on a dedicated CPU core.
         // This thread dequeues from the SPSC work queue and handles
         // PCI BAR reads + TX responses independently of the RX poller.
@@ -871,8 +1187,19 @@ void net_rdma_init(void) {
             uart_puts("[RDMA] WARNING: Failed to spawn worker thread, running single-threaded\n");
         }
 
-        // Enter the provider loop directly on CPU 0 to run synchronously during unit tests
-        provider_loop(NULL);
+        // Spawn the provider loop as a kernel process so net_rdma_init() returns
+        // immediately and the desktop (or other kernel modes) can continue.
+        // The provider loop runs concurrently on a secondary core.
+        int prov_pid = process_create_kernel(provider_loop, NULL);
+        if (prov_pid >= 0) {
+            uart_puts("[RDMA] Host Provider Loop spawned (PID ");
+            print_int(prov_pid);
+            uart_puts(")\n");
+        } else {
+            uart_puts("[RDMA] WARNING: Failed to spawn provider loop, falling back to synchronous\n");
+            // Fallback: run synchronously (blocks — only reached if process creation fails)
+            provider_loop(NULL);
+        }
     } 
     else {
         // --- Run as Receiver (Consumer) ---
