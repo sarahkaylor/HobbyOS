@@ -39,10 +39,10 @@ extern void arch_memory_barrier(void);
  * ------------------------------------------------------------------------ */
 
 /* Root table: 256 entries × 2 qwords = 512 qwords */
-static uint64_t root_table[512] __attribute__((aligned(4096)));
+uint64_t root_table[512] __attribute__((aligned(4096)));
 
 /* Context tables: one per supported bus, 256 entries × 2 qwords each */
-static uint64_t context_tables[VTD_MAX_CONTEXT_TABLES][512]
+uint64_t context_tables[VTD_MAX_CONTEXT_TABLES][512]
     __attribute__((aligned(4096)));
 
 /* Level-2 page tables (PGD): each has 512 × 8-byte entries */
@@ -72,8 +72,8 @@ static uint32_t vtd_iotlb_offset = 0;  /* Calculated from ECAP.IRO */
 static int vtd_initialized = 0;
 
 /* Track which context table index is assigned to which bus */
-static int context_bus_map[VTD_MAX_CONTEXT_TABLES];
-static int context_bus_count = 0;
+int context_bus_map[VTD_MAX_CONTEXT_TABLES];
+int context_bus_count = 0;
 
 /* ---------------------------------------------------------------------------
  *  MMIO Register Access Helpers

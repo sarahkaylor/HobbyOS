@@ -40,6 +40,12 @@ void run_all_unit_tests(void) {
     }
     uart_puts("==================================\n");
 
+    extern int is_host;
+    if (is_host) {
+        uart_puts("[RDMA] Host mode detected - starting scheduler instead of halting.\n");
+        return;
+    }
+
     // Halt qemu
     halt();
 }

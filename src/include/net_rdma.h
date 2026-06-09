@@ -52,6 +52,8 @@ enum rdma_op {
     RDMA_OP_IOMMU_UNMAP_RESP = 17, // Host→Guest: IOVA unmapped
     RDMA_OP_DMA_SYNC_RELIABLE = 18, // Like DMA_SYNC_TO_HOST but host sends ACK
     RDMA_OP_DMA_SYNC_RELIABLE_RESP = 19,
+    RDMA_OP_IRQ_NOTIFY = 20,        // Host→Guest: GPU interrupt fired, data[0..3]=vector mask
+    RDMA_OP_IRQ_ACK = 21,           // Guest→Host: Interrupt acknowledged
 };
 
 #define RDMA_DATA_LEN 1024
@@ -76,6 +78,7 @@ extern int g_rdma_active;
 // API Declarations
 void net_rdma_init(void);
 void net_rdma_poll(void);
+void net_rdma_fast_write(const struct rdma_packet *pkt);  // ISR fast-path for BAR writes
 
 // Generalized Consumer Virtual PCI Driver API
 uint32_t v_pci_read32(uint8_t bar, uint64_t offset);
@@ -94,6 +97,12 @@ void v_edu_write64(uint32_t offset, uint64_t val);
 // Memory Registration APIs
 int rdma_register_mr(uint64_t guest_phys, uint32_t size);
 int rdma_dma_sync(uint64_t guest_phys, uint32_t size, int to_device);
+// Verify the host's copy of a DMA region matches the local buffer via host-side CRC32.
+// Returns 0 on match, 1 on CRC mismatch, -1 on transport error.
+int rdma_dma_verify(uint64_t guest_phys, uint32_t size);
+// Reflected CRC32 (poly 0xEDB88320). MUST stay identical to the host RDMA verify handler
+// and net_pci_client's crc32_buf() or DMA verification breaks silently.
+uint32_t net_rdma_crc32(const uint8_t* p, uint32_t n);
 
 // Unit Test Suite
 void net_rdma_test_suite(void);

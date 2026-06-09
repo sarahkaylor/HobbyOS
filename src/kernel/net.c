@@ -94,6 +94,11 @@ void net_set_ip(uint32_t ip, uint32_t netmask, uint32_t gateway) {
     print_int((nip >> 8) & 0xFF); uart_puts(".");
     print_int(nip & 0xFF);
     
+    uart_puts(" mask=");
+    extern void uart_print_hex(uint64_t val);
+    uart_print_hex(netmask);
+    uart_puts(" gw=");
+    uart_print_hex(gateway);
     uart_puts("\n");
 }
 
@@ -129,6 +134,21 @@ static int arp_resolve(uint32_t ip, uint8_t* mac_out) {
     // Route off-subnet traffic to the gateway
     if (local_ip != 0 && local_netmask != 0 && local_gateway != 0) {
         if ((ip & local_netmask) != (local_ip & local_netmask)) {
+            static int route_dbg_count = 0;
+            if (route_dbg_count < 10) {
+                extern void uart_puts(const char* s);
+                extern void uart_print_hex(uint64_t val);
+                uart_puts("[ARP] routing off-subnet: target=");
+                uart_print_hex(ip);
+                uart_puts(" local_ip=");
+                uart_print_hex(local_ip);
+                uart_puts(" mask=");
+                uart_print_hex(local_netmask);
+                uart_puts(" gateway=");
+                uart_print_hex(local_gateway);
+                uart_puts("\n");
+                route_dbg_count++;
+            }
             ip = local_gateway;
         }
     }
@@ -304,7 +324,20 @@ static void handle_udp(struct ipv4_hdr* ip, uint8_t* packet, uint32_t len) {
                 sockets[i].remote_port = pkt_src_port;
             }
 
+            // Fast-path: handle BAR WRITE_REQ packets inline in ISR context.
+            // The rx_buf (4MB) wraps ~25 times during a 100MB blast sync,
+            // silently overwriting any BAR write packets before net_rdma_poll()
+            // can consume them. By handling writes here, they execute on the
+            // physical hardware immediately and reliably.
             uint8_t* data = packet + sizeof(struct udp_hdr);
+            if (sockets[i].local_port == 7777 && data_len == sizeof(struct rdma_packet)) {
+                const struct rdma_packet *rdma_pkt = (const struct rdma_packet*)data;
+                if (rdma_pkt->op == RDMA_OP_WRITE_REQ) {
+                    net_rdma_fast_write(rdma_pkt);
+                    break;  // Handled — skip rx_buf entirely
+                }
+            }
+
             for (uint32_t j = 0; j < data_len; j++) {
                 sockets[i].rx_buf[(sockets[i].rx_tail + j) % SOCKET_RX_BUF_SIZE] = data[j];
             }

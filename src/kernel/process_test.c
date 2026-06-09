@@ -9,8 +9,6 @@ static void test_process_init_and_create(void) {
     tests_run++;
     uart_puts("  Running test_process_init_and_create...\n");
 
-    process_init();
-
     int pid1 = process_create();
     EXPECT_EQ((pid1 >= 0 && pid1 < MAX_PROCESSES), 1);
 
@@ -19,6 +17,8 @@ static void test_process_init_and_create(void) {
     EXPECT_EQ(p1->pid, pid1);
     EXPECT_EQ(p1->state, PROC_STATE_ALLOCATED);
     EXPECT_EQ(p1->parent_pid, -1);
+
+    process_free(pid1);
 }
 
 static void test_process_set_entry(void) {
@@ -36,6 +36,8 @@ static void test_process_set_entry(void) {
     // x31 in trap_frame mapping context is elr, x33 is sp_el0
     EXPECT_EQ(p->context[31], USER_VIRT_BASE);
     EXPECT_EQ(p->context[33], USER_VIRT_STACK);
+
+    process_free(pid);
 }
 
 void process_test_suite(void) {

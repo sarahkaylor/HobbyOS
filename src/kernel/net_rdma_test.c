@@ -1,3 +1,44 @@
+// ---------------------------------------------------------------------------
+// Shared, architecture-independent RDMA tests. Pure/deterministic (no network or
+// EDU device), so they run in EVERY unit-test build — including ARM, where the rest
+// of the RDMA suite is stubbed. Guards session gotchas that don't need the harness.
+// ---------------------------------------------------------------------------
+#if defined(KERNEL_MODE_UNIT_TEST)
+#include "net_rdma.h"
+#include "unit_test.h"
+extern void uart_puts(const char* s);
+extern void uart_print_hex(uint64_t val);
+
+// net_rdma_crc32() MUST be the standard reflected CRC32 (poly 0xEDB88320, zlib/PNG)
+// and byte-identical to the host RDMA verify handler and net_pci_client crc32_buf().
+// If any of the three diverges, RDMA_OP_DMA_SYNC_RELIABLE silently mis-verifies the
+// firmware mirror. These golden vectors pin the algorithm.
+static void test_rdma_crc32_golden(void) {
+    uart_puts("  Running test_rdma_crc32_golden...\n");
+    tests_run++;
+    int ok = 1;
+    struct { const char* s; uint32_t len; uint32_t expect; } v[] = {
+        { "123456789", 9, 0xCBF43926u },  // canonical CRC32 check value
+        { "",          0, 0x00000000u },
+        { "a",         1, 0xE8B7BE43u },
+    };
+    for (unsigned i = 0; i < sizeof(v) / sizeof(v[0]); i++) {
+        uint32_t got = net_rdma_crc32((const uint8_t*)v[i].s, v[i].len);
+        if (got != v[i].expect) {
+            ok = 0;
+            uart_puts("    CRC32 mismatch: expected "); uart_print_hex(v[i].expect);
+            uart_puts(" got "); uart_print_hex(got); uart_puts("\n");
+        }
+    }
+    if (ok) {
+        uart_puts("    PASS\n");
+    } else {
+        uart_puts("    FAIL\n");
+        tests_failed++;
+    }
+}
+#endif
+
 #if defined(KERNEL_MODE_UNIT_TEST) && defined(__x86_64__)
 
 #include "net_rdma.h"
@@ -13,6 +54,9 @@ static uint8_t test_dma_buf[128] __attribute__((aligned(4096)));
 
 void net_rdma_test_suite(void) {
     uart_puts("net_rdma_test_suite:\n");
+
+    // Pure CRC32 guard — runs regardless of whether remote sharing is configured.
+    test_rdma_crc32_golden();
 
     net_rdma_init();
 
@@ -298,6 +342,77 @@ void net_rdma_test_suite(void) {
         uart_puts("    FAIL\n");
         tests_failed++;
     }
+
+    // -------------------------------------------------------------
+    // Test 8: Reliable DMA Sync (host-side CRC32 verification)
+    // Guards the Phase D "entire firmware is loaded" check: after syncing a
+    // buffer to the host, the host's CRC32 must match; a deliberate 1-byte
+    // local change (without re-sync) must be detected as a mismatch.
+    // -------------------------------------------------------------
+    uart_puts("  Running test_rdma_dma_sync_reliable...\n");
+    for (int i = 0; i < 128; i++) {
+        test_dma_buf[i] = (uint8_t)(0x5A + i);
+    }
+    rdma_register_mr((uint64_t)&test_dma_buf[0], 128);
+    int rel_sync = rdma_dma_sync((uint64_t)&test_dma_buf[0], 128, 1);
+    int verify_match = rdma_dma_verify((uint64_t)&test_dma_buf[0], 128);
+    uart_puts("    sync="); print_int(rel_sync);
+    uart_puts(" verify(match)="); print_int(verify_match);
+    uart_puts("\n");
+
+    // Now corrupt one byte locally WITHOUT syncing — host must report a mismatch.
+    test_dma_buf[64] ^= 0xFF;
+    int verify_mismatch = rdma_dma_verify((uint64_t)&test_dma_buf[0], 128);
+    uart_puts("    verify(after local corruption)="); print_int(verify_mismatch);
+    uart_puts(" (expect 1)\n");
+    test_dma_buf[64] ^= 0xFF; // restore
+
+    tests_run++;
+    if (rel_sync == 0 && verify_match == 0 && verify_mismatch == 1) {
+        uart_puts("    PASS\n");
+    } else {
+        uart_puts("    FAIL\n");
+        tests_failed++;
+    }
+
+    // -------------------------------------------------------------
+    // Test 9: Multi-region independent sync
+    // Guards the Phase B multi-region mirror intent at the protocol level: two
+    // separately-registered regions sync and verify independently, and a change
+    // to one region does not affect verification of the other.
+    // -------------------------------------------------------------
+    uart_puts("  Running test_rdma_multi_region_sync...\n");
+    static uint8_t region_a[256] __attribute__((aligned(4096)));
+    static uint8_t region_b[256] __attribute__((aligned(4096)));
+    for (int i = 0; i < 256; i++) {
+        region_a[i] = (uint8_t)(0x11 + i);
+        region_b[i] = (uint8_t)(0xC0 - i);
+    }
+    rdma_register_mr((uint64_t)&region_a[0], 256);
+    rdma_register_mr((uint64_t)&region_b[0], 256);
+    int sa = rdma_dma_sync((uint64_t)&region_a[0], 256, 1);
+    int sb = rdma_dma_sync((uint64_t)&region_b[0], 256, 1);
+    int va = rdma_dma_verify((uint64_t)&region_a[0], 256);
+    int vb = rdma_dma_verify((uint64_t)&region_b[0], 256);
+
+    // Corrupt region A locally; B's verification must remain a match.
+    region_a[100] ^= 0xFF;
+    int va_bad = rdma_dma_verify((uint64_t)&region_a[0], 256);
+    int vb_still = rdma_dma_verify((uint64_t)&region_b[0], 256);
+    region_a[100] ^= 0xFF; // restore
+
+    uart_puts("    sa="); print_int(sa); uart_puts(" sb="); print_int(sb);
+    uart_puts(" va="); print_int(va); uart_puts(" vb="); print_int(vb);
+    uart_puts(" va_bad="); print_int(va_bad); uart_puts(" vb_still="); print_int(vb_still);
+    uart_puts("\n");
+
+    tests_run++;
+    if (sa == 0 && sb == 0 && va == 0 && vb == 0 && va_bad == 1 && vb_still == 0) {
+        uart_puts("    PASS\n");
+    } else {
+        uart_puts("    FAIL\n");
+        tests_failed++;
+    }
 }
 
 #endif // KERNEL_MODE_UNIT_TEST and __x86_64__
@@ -305,6 +420,9 @@ void net_rdma_test_suite(void) {
 #if defined(KERNEL_MODE_UNIT_TEST) && !defined(__x86_64__)
 #include "unit_test.h"
 void net_rdma_test_suite(void) {
-    // Stub on non-x86_64 architectures
+    uart_puts("net_rdma_test_suite (arch-independent subset):\n");
+    // The networked RDMA tests need the x86_64 EDU/host harness; only the pure
+    // CRC32 golden-vector guard is meaningful here.
+    test_rdma_crc32_golden();
 }
 #endif

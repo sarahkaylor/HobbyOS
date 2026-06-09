@@ -127,8 +127,8 @@ void main(void) {
   // Initialize and enable the timer
   timer_init();
 
-#ifndef KERNEL_MODE_UNIT_TEST
-  // Wake up secondary cores via PSCI
+  // Wake up secondary cores (PSCI/IPI)
+#if !defined(KERNEL_MODE_UNIT_TEST) || defined(__x86_64__)
   smp_init();
 #endif
 

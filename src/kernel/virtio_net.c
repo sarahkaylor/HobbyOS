@@ -3,7 +3,11 @@
 #include "process.h"
 #include "arch/cpu.h"
 
-#define NUM_RX_BUFFERS 128
+#ifdef __x86_64__
+#define NUM_RX_BUFFERS 512
+#else
+#define NUM_RX_BUFFERS 8
+#endif
 #define RX_BUFFER_SIZE 2048
 
 struct virtq_desc {
@@ -303,7 +307,9 @@ int virtio_net_init(void) {
     outl(io_base + VIRTIO_PCI_QUEUE_PFN, (uint32_t)((uint64_t)&tx_vq / 4096));
 
     // Populate RX descriptors
-    for (int i = 0; i < NUM_RX_BUFFERS; i++) {
+    int num_buffers = rx_qsize / 2;
+    if (num_buffers > NUM_RX_BUFFERS) num_buffers = NUM_RX_BUFFERS;
+    for (int i = 0; i < num_buffers; i++) {
         // Descriptor 0: header
         rx_desc[i * 2].addr = (uint64_t)&rx_hdrs[i];
         rx_desc[i * 2].len = sizeof(struct virtio_net_hdr);
@@ -320,7 +326,7 @@ int virtio_net_init(void) {
     }
 
     arch_memory_barrier();
-    *rx_avail_idx = NUM_RX_BUFFERS;
+    *rx_avail_idx = num_buffers;
     arch_memory_barrier();
 
     // Set DRIVER_OK status

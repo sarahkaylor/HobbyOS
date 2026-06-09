@@ -15,6 +15,7 @@ extern void uart_print_hex(uint64_t val);
 // Global State
 int is_host = 0;
 struct socket_pcb* rdma_socket = NULL;
+static struct socket_pcb* irq_notify_socket = NULL;  // Dedicated socket for IRQ notifications
 static spinlock_t rdma_lock;
 
 // Lock-free SPSC ring buffer for handing RDMA packets from CPU 0 → CPU 1.
@@ -144,6 +145,17 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
     if (pkt->op == RDMA_OP_READ_REQ) dbg_read_req_count++;
     if (pkt->op == RDMA_OP_IOMMU_MAP) dbg_map_req_count++;
 
+    // Copy client's IP to the IRQ notification socket on first contact.
+    // The main rdma_socket learns the client's IP via handle_udp() routing,
+    // so we mirror it to irq_notify_socket to enable IRQ forwarding.
+    if (irq_notify_socket && irq_notify_socket->remote_ip == 0 && rdma_socket && rdma_socket->remote_ip != 0) {
+        irq_notify_socket->remote_ip = rdma_socket->remote_ip;
+        irq_notify_socket->mac_cached = 0;  // Force ARP for the new IP
+        uart_puts("[RDMA] IRQ notify socket: client IP set to ");
+        uart_print_hex(rdma_socket->remote_ip);
+        uart_puts("\n");
+    }
+
     static volatile uint32_t op_dbg = 0;
     op_dbg++;
     if (op_dbg <= 10 || op_dbg % 100 == 1) {
@@ -260,9 +272,7 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
                 arch_memory_barrier();
             }
         }
-        // Fall through to send_resp — the client's do_rdma_transaction
-        // waits for an ACK to ensure critical BAR writes (Falcon CPUCTL,
-        // DMEM programming, etc.) are not silently dropped.
+        return; // Fire-and-forget: BAR writes don't need a response
     } 
     else if (pkt->op == RDMA_OP_READ_BLOCK_REQ) {
         uint8_t bar = pkt->bar_index;
@@ -322,7 +332,7 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
                 }
             }
         }
-        // Fall through to send_resp for write ACK
+        return; // Fire-and-forget: block writes don't need a response
     }
     else if (pkt->op == RDMA_OP_REG_MR) {
         int idx = -1;
@@ -631,6 +641,33 @@ static void handle_guest_rdma(struct rdma_packet* pkt) {
     guest_rx_ready = 1;
 }
 
+// Fast-path BAR write handler: called directly from handle_udp() in ISR context.
+// BAR writes are fire-and-forget MMIO operations that MUST NOT go through the
+// rx_buf ring buffer. The blast sync floods the 4MB buffer with 100MB of data,
+// wrapping it ~25 times and silently overwriting any BAR write packets before
+// net_rdma_poll() can consume them. By handling writes inline in the UDP handler,
+// every write reaches the physical hardware reliably.
+void net_rdma_fast_write(const struct rdma_packet *pkt) {
+    if (!is_host) return;
+    if (pkt->op != RDMA_OP_WRITE_REQ) return;
+
+    uint8_t bar = pkt->bar_index;
+    if (bar >= 6 || !p_pci_bars[bar]) return;
+    if (pkt->addr + pkt->len > pci_bars_size[bar]) return;
+
+    if (pkt->len == 1) {
+        *(volatile uint8_t*)(p_pci_bars[bar] + pkt->addr) = *(uint8_t*)pkt->data;
+    } else if (pkt->len == 2) {
+        *(volatile uint16_t*)(p_pci_bars[bar] + pkt->addr) = *(uint16_t*)pkt->data;
+    } else if (pkt->len == 4) {
+        *(volatile uint32_t*)(p_pci_bars[bar] + pkt->addr) = *(uint32_t*)pkt->data;
+    } else if (pkt->len == 8) {
+        *(volatile uint64_t*)(p_pci_bars[bar] + pkt->addr) = *(uint64_t*)pkt->data;
+    }
+    extern void arch_memory_barrier(void);
+    arch_memory_barrier();
+}
+
 // Shared network polling loop
 static volatile int rdma_poll_active = 0; // Re-entrancy guard for timer interrupt
 
@@ -746,6 +783,9 @@ static void provider_loop(void *arg) {
     uint64_t last_report = timer_get_ms();
     uint32_t rx_count = 0;
     uint32_t rdma_count = 0;
+    uint32_t irq_fwd_count = 0;
+    uint32_t last_intr_val = 0;
+    uint64_t last_irq_ms = 0;
     while (1) {
         extern void virtio_net_poll_rx(void);
         virtio_net_poll_rx();
@@ -755,6 +795,34 @@ static void provider_loop(void *arg) {
             rdma_count++;
         }
         net_rdma_poll();
+
+        // GPU Interrupt Polling & Forwarding:
+        // Read the GPU's PMC INTR register (BAR0 + 0x100) to detect pending interrupts.
+        // Only forward when the status CHANGES (edge-triggered) to avoid flooding
+        // the network with 100K+ packets/sec that drown out BAR read responses.
+        // Rate-limited to max 100 notifications/sec (10ms minimum gap).
+        // NOTE: Do NOT clear/acknowledge interrupts here — the guest driver reads
+        // the same register via BAR0 MMIO and needs to see the pending bits.
+        if (p_pci_bars[0] && irq_notify_socket && irq_notify_socket->remote_port != 0) {
+            uint32_t intr = *(volatile uint32_t*)(p_pci_bars[0] + 0x100);
+            uint64_t now_irq = timer_get_ms();
+            uint32_t new_bits = intr & ~last_intr_val;
+            if (new_bits != 0 && intr != 0xFFFFFFFF && (now_irq - last_irq_ms >= 10)) {
+                uint32_t vector_mask = 0x1;
+
+                struct rdma_packet irq_pkt = {0};
+                irq_pkt.op = RDMA_OP_IRQ_NOTIFY;
+                irq_pkt.tx_id = 0;
+                irq_pkt.addr = intr;
+                irq_pkt.len = 4;
+                *(uint32_t*)irq_pkt.data = vector_mask;
+
+                net_socket_send(irq_notify_socket, &irq_pkt, sizeof(struct rdma_packet));
+                irq_fwd_count++;
+                last_irq_ms = now_irq;
+            }
+            last_intr_val = intr;
+        }
         
         // Periodic debug report
         uint64_t now = timer_get_ms();
@@ -783,6 +851,8 @@ static void provider_loop(void *arg) {
             print_int(dbg_rx_ack_used_idx);
             uart_puts(" rx_used=");
             print_int(dbg_rx_used_idx);
+            uart_puts(" irq_fwd=");
+            print_int(irq_fwd_count);
             uart_puts(" rx_head=");
             extern void uart_print_hex(uint64_t val);
             uart_print_hex(rdma_socket ? rdma_socket->rx_head : 0);
@@ -929,6 +999,12 @@ static int parse_rdma_config(const char* str) {
 
 // Core Subsystem Initialization
 void net_rdma_init(void) {
+    static int initialized = 0;
+    if (initialized) {
+        return;
+    }
+    initialized = 1;
+
     spinlock_init(&rdma_lock);
     is_host = 0;
 
@@ -1128,6 +1204,23 @@ void net_rdma_init(void) {
         rdma_socket->local_ip = my_ip;
         rdma_socket->state = SOCKET_ESTABLISHED;
 
+        // Create a dedicated socket for sending IRQ notifications to the client.
+        // The client listens on RDMA_PORT+1 (7778) for these fire-and-forget packets.
+        // Using a separate socket prevents IRQ traffic from interfering with the
+        // main RDMA request-response channel.
+        irq_notify_socket = net_socket_create(IP_PROTO_UDP);
+        if (irq_notify_socket) {
+            irq_notify_socket->local_port = RDMA_PORT + 1;
+            irq_notify_socket->local_ip = my_ip;
+            irq_notify_socket->remote_port = RDMA_PORT + 1;  // Client listens on 7778
+            irq_notify_socket->state = SOCKET_ESTABLISHED;
+            uart_puts("[RDMA] IRQ notification socket created (port ");
+            print_int(RDMA_PORT + 1);
+            uart_puts(")\n");
+        } else {
+            uart_puts("[RDMA] WARNING: Failed to create IRQ notification socket\n");
+        }
+
         // Initialize Host Memory Registration Table
         for (int i = 0; i < MAX_MRS; i++) {
             host_mrs[i].in_use = 0;
@@ -1158,8 +1251,9 @@ void net_rdma_init(void) {
             // is ever enabled, GPU firmware DMA is not blocked.
             // NOTE: We do NOT call iommu_vtd_enable_translation() here because
             // enabling global translation on the HOST would block NVMe and VirtIO
-            // DMA (they have no context entries). The IOMMU is kept hardware-ready
-            // for future use but translation remains disabled on the HOST role.
+            // DMA. With VFIO passthrough and translation disabled, QEMU allows
+            // all GPU DMA to guest memory (caching-mode only restricts when
+            // translation IS enabled).
             extern int iommu_vtd_set_passthrough(uint8_t bus, uint8_t devfn);
             int pt_rc = iommu_vtd_set_passthrough((uint8_t)gpu_pci_bus,
                                                    (uint8_t)gpu_pci_devfn);
@@ -1472,6 +1566,37 @@ int rdma_dma_sync(uint64_t guest_phys, uint32_t size, int to_device) {
     return 0;
 }
 
+// Reflected CRC32 (poly 0xEDB88320, init/final 0xFFFFFFFF) — matches the host's
+// RDMA_OP_DMA_SYNC_RELIABLE handler and the net_pci_client crc32_buf(). All three
+// implementations MUST stay byte-identical or DMA verification breaks silently; the
+// golden-vector unit test (net_rdma_test.c) guards this.
+uint32_t net_rdma_crc32(const uint8_t* p, uint32_t n) {
+    uint32_t crc = 0xFFFFFFFF;
+    for (uint32_t i = 0; i < n; i++) {
+        crc ^= p[i];
+        for (int b = 0; b < 8; b++)
+            crc = (crc >> 1) ^ (0xEDB88320U & -(crc & 1));
+    }
+    return crc ^ 0xFFFFFFFF;
+}
+
+// Verify that the host's copy of a DMA region matches the local buffer byte-for-byte,
+// using the host's CRC32 (RDMA_OP_DMA_SYNC_RELIABLE). The host stores DMA_SYNC_TO_HOST
+// data at physical address == guest_phys (identity), so we verify the same address.
+// Returns 0 if the host matches, 1 on CRC mismatch, -1 on transport error.
+int rdma_dma_verify(uint64_t guest_phys, uint32_t size) {
+    uint32_t want = net_rdma_crc32((const uint8_t*)guest_phys, size);
+    struct rdma_packet req = {0}, resp = {0};
+    req.op = RDMA_OP_DMA_SYNC_RELIABLE;
+    req.addr = guest_phys;
+    req.len = size;
+    *(uint32_t*)req.data = want;
+    if (rdma_transaction(&req, &resp) != 0) {
+        return -1;
+    }
+    return (resp.status == 0) ? 0 : 1;
+}
+
 #else
 
 #include "net_rdma.h"
@@ -1490,5 +1615,15 @@ void v_edu_write64(uint32_t offset, uint64_t val) { (void)offset; (void)val; }
 int rdma_register_mr(uint64_t guest_phys, uint32_t size) { (void)guest_phys; (void)size; return -1; }
 uint64_t guest_to_host_phys(uint64_t guest_phys) { return guest_phys; }
 int rdma_dma_sync(uint64_t guest_phys, uint32_t size, int to_device) { (void)guest_phys; (void)size; (void)to_device; return -1; }
+int rdma_dma_verify(uint64_t guest_phys, uint32_t size) { (void)guest_phys; (void)size; return -1; }
+uint32_t net_rdma_crc32(const uint8_t* p, uint32_t n) {
+    uint32_t crc = 0xFFFFFFFF;
+    for (uint32_t i = 0; i < n; i++) {
+        crc ^= p[i];
+        for (int b = 0; b < 8; b++)
+            crc = (crc >> 1) ^ (0xEDB88320U & -(crc & 1));
+    }
+    return crc ^ 0xFFFFFFFF;
+}
 
 #endif
