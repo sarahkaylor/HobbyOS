@@ -784,7 +784,6 @@ static void provider_loop(void *arg) {
     uint32_t rx_count = 0;
     uint32_t rdma_count = 0;
     uint32_t irq_fwd_count = 0;
-    uint32_t last_intr_val = 0;
     uint64_t last_irq_ms = 0;
     while (1) {
         extern void virtio_net_poll_rx(void);
@@ -803,25 +802,34 @@ static void provider_loop(void *arg) {
         // Rate-limited to max 100 notifications/sec (10ms minimum gap).
         // NOTE: Do NOT clear/acknowledge interrupts here — the guest driver reads
         // the same register via BAR0 MMIO and needs to see the pending bits.
+        // CRITICAL (task #8): only poll the GPU interrupt register at most every 50ms.
+        // On this Ada/GSP GPU, reading PMC_INTR (BAR0+0x100) after GSP locks it returns
+        // NVIDIA's PRI poison (0xbadfXXXX) AFTER a slow PRI timeout. Reading it EVERY
+        // provider-loop iteration (thousands/sec) throttled this single-threaded loop, so
+        // RDMA read responses were delayed past the client's 500ms timeout → ~785ms/read,
+        // ~59% retries, and the guest soft-locked. Polling it rarely frees the loop to
+        // service RDMA reads fast. (0x100 yields no usable interrupts here anyway — real
+        // GSP interrupts are MSI-X; see task notes.)
         if (p_pci_bars[0] && irq_notify_socket && irq_notify_socket->remote_port != 0) {
-            uint32_t intr = *(volatile uint32_t*)(p_pci_bars[0] + 0x100);
             uint64_t now_irq = timer_get_ms();
-            uint32_t new_bits = intr & ~last_intr_val;
-            if (new_bits != 0 && intr != 0xFFFFFFFF && (now_irq - last_irq_ms >= 10)) {
-                uint32_t vector_mask = 0x1;
-
-                struct rdma_packet irq_pkt = {0};
-                irq_pkt.op = RDMA_OP_IRQ_NOTIFY;
-                irq_pkt.tx_id = 0;
-                irq_pkt.addr = intr;
-                irq_pkt.len = 4;
-                *(uint32_t*)irq_pkt.data = vector_mask;
-
-                net_socket_send(irq_notify_socket, &irq_pkt, sizeof(struct rdma_packet));
-                irq_fwd_count++;
+            if (now_irq - last_irq_ms >= 50) {
                 last_irq_ms = now_irq;
+                uint32_t intr = *(volatile uint32_t*)(p_pci_bars[0] + 0x100);
+                // Poison filter: drop 0xbadfXXXX (GSP-locked PRI poison) so we don't spam
+                // the guest with fake IRQs.
+                int is_poison = ((intr & 0xFFFF0000U) == 0xBADF0000U);
+                if (intr != 0 && intr != 0xFFFFFFFF && !is_poison) {
+                    uint32_t vector_mask = 0x1;
+                    struct rdma_packet irq_pkt = {0};
+                    irq_pkt.op = RDMA_OP_IRQ_NOTIFY;
+                    irq_pkt.tx_id = 0;
+                    irq_pkt.addr = intr;
+                    irq_pkt.len = 4;
+                    *(uint32_t*)irq_pkt.data = vector_mask;
+                    net_socket_send(irq_notify_socket, &irq_pkt, sizeof(struct rdma_packet));
+                    irq_fwd_count++;
+                }
             }
-            last_intr_val = intr;
         }
         
         // Periodic debug report

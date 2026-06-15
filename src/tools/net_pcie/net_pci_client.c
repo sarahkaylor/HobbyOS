@@ -380,6 +380,25 @@ static void ram_region_register(uint64_t iova, void *vaddr, size_t len) {
     // Cap each region's mmap as a safety bound; the low and high regions each get
     // their own mmap so both are fully covered.
     size_t map_size = (len > MAIN_RAM_SNAPSHOT_SIZE) ? MAIN_RAM_SNAPSHOT_SIZE : len;
+
+    // Dedup by BACKING-FILE RANGE: the guest often registers the SAME backing memfd at
+    // several IOVAs/offsets (e.g. 0, 0xf0000, 0x100000, 0xc0000 all cover the low ~2GB).
+    // Mirroring each separately multiplied the blast write (~5×2GB = ~9GB in 2.9s), which
+    // lengthens the FAKE-BUSY falcon-poll window and eats into the driver's GSP boot
+    // timeout. Skip a new region whose file range overlaps one we already mirror.
+    for (int i = 0; i < g_ram_regions_count; i++) {
+        if (!g_ram_regions[i].valid) continue;
+        off_t a0 = file_off, a1 = file_off + (off_t)map_size;
+        off_t b0 = g_ram_regions[i].file_off, b1 = b0 + (off_t)g_ram_regions[i].map_len;
+        if (a0 < b1 && b0 < a1) { // ranges intersect → redundant
+            close(fd);
+            pthread_mutex_unlock(&ram_regions_mutex);
+            printf("RAM REGION: skip iova=%#llx file_off=%ld (overlaps region[%d] — redundant)\n",
+                   (unsigned long long)iova, (long)file_off, i);
+            return;
+        }
+    }
+
     void *pmap = mmap(NULL, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, file_off);
     if (pmap == MAP_FAILED) {
         close(fd);
@@ -1219,30 +1238,53 @@ static void *blast_sync_worker(void *arg) {
                         // irq_thread from also pulling over UDP (op=8), which would flood the link.
                         g_bidi_direct_active = true;
 
+                        // Task #8: adaptive hot-set sync. The bulk firmware regions are
+                        // write-once, so re-scanning all 2GB every pass (~370ms) needlessly
+                        // throttled coherence of the small, hot GSP RPC/heap regions — and the
+                        // GSP boot handshake is POLLED, so it starved on that ~390ms floor and
+                        // RmInitAdapter timed out by ~14s. We mark 2MB chunks that changed
+                        // recently as "hot" and sync ONLY those on fast passes (sub-10ms),
+                        // doing a full discovery scan every FULL_EVERY passes as a correctness
+                        // backstop (so any hot-set miss self-heals within one full cycle).
+                        int nchunks = (int)((mmap_len + rchunk - 1) / rchunk);
+                        uint8_t *hot_ttl = calloc(nchunks > 0 ? nchunks : 1, 1);
+                        const uint8_t HOT_TTL = 64;
+                        const int FULL_EVERY = 16;
+
                         for (int pass = 0; running; pass++) {
                             struct timespec rt0, rt1;
                             clock_gettime(CLOCK_MONOTONIC, &rt0);
-                            
-                            int fwd_chunks = 0, rev_chunks = 0;
+                            bool full_scan = (hot_ttl == NULL) || (pass % FULL_EVERY == 0);
+
+                            int fwd_chunks = 0, rev_chunks = 0, hot_scanned = 0;
                             size_t fwd_bytes = 0, rev_bytes = 0;
-                            
-                            for (size_t off = 0; off < mmap_len; off += rchunk) {
+                            // clobber = 4KB pages where BOTH sides changed → guest write
+                            // overwritten by host data (RPC command potentially lost).
+                            int clobber = 0;
+                            long long first_fwd_off = -1, first_clobber_off = -1;
+
+                            for (int ci = 0; ci < nchunks; ci++) {
+                                if (!full_scan && hot_ttl && hot_ttl[ci] == 0) continue; // fast pass: hot only
+                                hot_scanned++;
+                                size_t off = (size_t)ci * rchunk;
                                 size_t len = rchunk;
                                 if (off + len > mmap_len) len = mmap_len - off;
-                                
+
                                 uint8_t *guest_ptr = mmap_base + off;
                                 uint8_t *snap_ptr = snapshot + off;
                                 off_t host_off = ram_base + file_off + off;
-                                
-                                // Read current host RAM
+
                                 ssize_t n = pread(rmem_fd, host_buf, len, host_off);
                                 if (n != (ssize_t)len) continue;
-                                
+
                                 bool host_changed = (memcmp(host_buf, snap_ptr, len) != 0);
                                 bool guest_changed = (memcmp(guest_ptr, snap_ptr, len) != 0);
-                                
+                                // Any activity keeps this chunk hot so it stays on the fast path.
+                                if ((host_changed || guest_changed) && hot_ttl) hot_ttl[ci] = HOT_TTL;
+
                                 if (guest_changed && !host_changed) {
                                     // FORWARD: driver wrote to guest RAM → push to host
+                                    if (first_fwd_off < 0) first_fwd_off = (long long)(file_off + off);
                                     pwrite(rmem_fd, guest_ptr, len, host_off);
                                     memcpy(snap_ptr, guest_ptr, len);
                                     fwd_chunks++;
@@ -1254,28 +1296,28 @@ static void *blast_sync_worker(void *arg) {
                                     rev_chunks++;
                                     rev_bytes += len;
                                 } else if (host_changed && guest_changed) {
-                                    // CONFLICT: both sides changed same 2MB chunk.
-                                    // Do PAGE-LEVEL (4KB) diff to avoid overwriting
-                                    // GPU DMA pages with stale guest data.
+                                    // CONFLICT: page-level diff to avoid overwriting GPU DMA
+                                    // pages with stale guest data.
                                     size_t pg = 4096;
                                     int pg_fwd = 0, pg_rev = 0;
                                     for (size_t p = 0; p < len; p += pg) {
                                         size_t plen = (p + pg > len) ? (len - p) : pg;
                                         bool pg_host = (memcmp(host_buf + p, snap_ptr + p, plen) != 0);
                                         bool pg_guest = (memcmp(guest_ptr + p, snap_ptr + p, plen) != 0);
-                                        
+
                                         if (pg_guest && !pg_host) {
-                                            // Guest page changed → forward
+                                            if (first_fwd_off < 0) first_fwd_off = (long long)(file_off + off + p);
                                             pwrite(rmem_fd, guest_ptr + p, plen, host_off + p);
                                             memcpy(snap_ptr + p, guest_ptr + p, plen);
                                             pg_fwd++;
                                         } else if (pg_host && !pg_guest) {
-                                            // Host page changed → reverse
                                             memcpy(guest_ptr + p, host_buf + p, plen);
                                             memcpy(snap_ptr + p, host_buf + p, plen);
                                             pg_rev++;
                                         } else if (pg_host && pg_guest) {
-                                            // Both changed same page: host wins (GPU DMA priority)
+                                            // Both changed same page: host wins (GPU DMA priority).
+                                            if (first_clobber_off < 0) first_clobber_off = (long long)(file_off + off + p);
+                                            clobber++;
                                             memcpy(guest_ptr + p, host_buf + p, plen);
                                             memcpy(snap_ptr + p, host_buf + p, plen);
                                             pg_rev++;
@@ -1284,20 +1326,40 @@ static void *blast_sync_worker(void *arg) {
                                     if (pg_fwd > 0) { fwd_chunks++; fwd_bytes += pg_fwd * pg; }
                                     if (pg_rev > 0) { rev_chunks++; rev_bytes += pg_rev * pg; }
                                 }
-                                // else: neither changed, skip
                             }
-                            
+
+                            // Decay hot TTLs so regions that go quiet leave the fast path.
+                            if (hot_ttl) for (int ci = 0; ci < nchunks; ci++) if (hot_ttl[ci]) hot_ttl[ci]--;
+
+                            // Task #8: SYNTHESIZE a guest interrupt from GPU DMA activity.
+                            // The host can't read real GSP interrupt status (PMC_INTR returns
+                            // poison 0xbadfXXXX; Ada GSP uses MSI-X the host can't capture), so
+                            // the guest driver never gets the "GSP posted a message" signal and
+                            // RmInitAdapter waits → Xid 79. A GPU write to host RAM (rev) IS GSP
+                            // activity, so raise the guest's IRQ; its ISR then drains the (now
+                            // ~12ms-coherent) RPC message queue. The irq_thread does the actual
+                            // vfu_irq_trigger within its 10ms loop. Spurious IRQs are harmless —
+                            // the driver checks queue state and returns if there's nothing to do.
+                            if (rev_chunks > 0) {
+                                __atomic_fetch_or(&g_pending_irq_mask, 0x1u, __ATOMIC_RELAXED);
+                            }
+
                             clock_gettime(CLOCK_MONOTONIC, &rt1);
                             double rms = (rt1.tv_sec - rt0.tv_sec) * 1000.0 +
                                         (rt1.tv_nsec - rt0.tv_nsec) / 1e6;
-                            
-                            if (pass < 10 || pass % 30 == 0 || fwd_chunks > 0)
-                                printf("BIDI SYNC pass %d: fwd=%d(%zuKB) rev=%d(%zuKB) in %.0fms\n",
-                                       pass, fwd_chunks, fwd_bytes / 1024,
-                                       rev_chunks, rev_bytes / 1024, rms);
-                            
-                            usleep(1000000); // 1 second between passes
+
+                            if (pass < 20 || (full_scan && pass % (FULL_EVERY * 8) == 0) ||
+                                fwd_chunks > 0 || clobber > 0)
+                                printf("BIDI SYNC pass %d%s: scan=%d fwd=%d(%zuKB) rev=%d(%zuKB) "
+                                       "clobber=%d fwd_off=%#llx clobber_off=%#llx in %.1fms\n",
+                                       pass, full_scan ? " FULL" : "", hot_scanned,
+                                       fwd_chunks, fwd_bytes / 1024, rev_chunks, rev_bytes / 1024,
+                                       clobber, (unsigned long long)first_fwd_off,
+                                       (unsigned long long)first_clobber_off, rms);
+
+                            usleep(2000); // 2ms; hot passes are sub-10ms → ~ms coherence for RPC regions
                         }
+                        free(hot_ttl);
                         g_bidi_direct_active = false;
                     } else {
                         printf("BIDI SYNC: No snapshot buffer or host_buf, skipping\n");
@@ -2094,6 +2156,114 @@ out:
     return final_ret;
 }
 
+// ---------------------------------------------------------------------------
+// Hot-polled register cache (task #8).
+// The NVIDIA driver polls some BAR0 status registers (e.g. falcon CPUCTL
+// 0x840100) in TIGHT loops — tens of thousands of reads. At ~0.2ms per proxied
+// read (vs ~1ns native MMIO), such a loop runs for many SECONDS with preemption
+// disabled → monopolizes a guest vCPU → soft-lockup watchdog → the whole guest
+// freezes (can't even process console input). Fix: once an offset is polled
+// frequently, serve its reads from a local cache that a background thread
+// refreshes every few ms. The driver's tight loop then completes at memory speed
+// and never stalls; we issue ~1 real read per refresh interval instead of tens
+// of thousands. Only frequently-polled (=status/handshake) registers are cached,
+// which have no read side effects; writes invalidate the entry until refresh.
+// ---------------------------------------------------------------------------
+#define MAX_HOT_REGS 24
+#define HOT_PROMOTE_HITS 64
+#define HOT_REFRESH_US 2000
+struct hot_reg {
+    uint64_t offset;
+    volatile uint32_t value;
+    volatile uint32_t hits;
+    volatile bool active;   // promoted: serve reads from cache
+    volatile bool valid;    // value populated by a real read
+    bool in_use;
+};
+static struct hot_reg g_hot_regs[MAX_HOT_REGS];
+static pthread_mutex_t hot_regs_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// Lock-free fast path: if offset is an active+valid cached reg, return its value.
+// (value is a naturally-aligned uint32_t → atomic load on x86; `active` is set
+// last during promotion so a reader never sees a half-initialized slot.)
+static inline int hot_reg_get(uint64_t offset, uint32_t *out) {
+    for (int i = 0; i < MAX_HOT_REGS; i++) {
+        if (g_hot_regs[i].active && g_hot_regs[i].offset == offset) {
+            if (g_hot_regs[i].valid) { *out = g_hot_regs[i].value; return 1; }
+            return 0;
+        }
+    }
+    return 0;
+}
+
+// Slow path (cache miss): count the read; promote to cached once it's clearly hot,
+// seeding the value with the real read result so the first cached serve is correct.
+static void hot_reg_track(uint64_t offset, uint32_t seed_val) {
+    pthread_mutex_lock(&hot_regs_mutex);
+    int slot = -1, free_slot = -1;
+    for (int i = 0; i < MAX_HOT_REGS; i++) {
+        if (g_hot_regs[i].in_use && g_hot_regs[i].offset == offset) { slot = i; break; }
+        if (free_slot < 0 && !g_hot_regs[i].in_use) free_slot = i;
+    }
+    if (slot < 0) {
+        if (free_slot < 0) { pthread_mutex_unlock(&hot_regs_mutex); return; } // table full
+        slot = free_slot;
+        g_hot_regs[slot].offset = offset;
+        g_hot_regs[slot].hits = 0;
+        g_hot_regs[slot].active = false;
+        g_hot_regs[slot].valid = false;
+        g_hot_regs[slot].in_use = true;
+    }
+    if (!g_hot_regs[slot].active) {
+        g_hot_regs[slot].hits++;
+        if (g_hot_regs[slot].hits >= HOT_PROMOTE_HITS) {
+            g_hot_regs[slot].value = seed_val;
+            g_hot_regs[slot].valid = true;
+            g_hot_regs[slot].active = true;  // set LAST (publishes the slot)
+            printf("HOT REG: caching BAR0 offset=%#llx (polled %u times) — "
+                   "serving locally + bg refresh\n",
+                   (unsigned long long)offset, g_hot_regs[slot].hits);
+        }
+    }
+    pthread_mutex_unlock(&hot_regs_mutex);
+}
+
+// On a write to a cached reg the value changed → invalidate until next refresh.
+static void hot_reg_invalidate(uint64_t offset) {
+    for (int i = 0; i < MAX_HOT_REGS; i++) {
+        if (g_hot_regs[i].in_use && g_hot_regs[i].offset == offset) {
+            g_hot_regs[i].valid = false;
+            return;
+        }
+    }
+}
+
+// Background thread: keep active cached regs fresh with a real read each interval.
+static void *hot_reg_thread(void *arg) {
+    vfu_ctx_t *vfu_ctx = (vfu_ctx_t*)arg;
+    while (running) {
+        // During blast, 0x840100 is intentionally faked BUSY — don't refresh
+        // (a real read would race the fake-busy contract and the host is busy).
+        if (!blast_in_progress) {
+            for (int i = 0; i < MAX_HOT_REGS; i++) {
+                if (!g_hot_regs[i].active) continue;
+                struct rdma_packet req = {0}, resp = {0};
+                req.op = RDMA_OP_READ_REQ;
+                req.tx_id = next_tx_id++;
+                req.addr = g_hot_regs[i].offset;
+                req.len = 4;
+                req.bar_index = 0;
+                if (do_rdma_transaction(vfu_ctx, &req, &resp) == 0) {
+                    g_hot_regs[i].value = *(uint32_t*)resp.data;
+                    g_hot_regs[i].valid = true;
+                }
+            }
+        }
+        usleep(HOT_REFRESH_US);
+    }
+    return NULL;
+}
+
 static ssize_t bar_access_cb(vfu_ctx_t *vfu_ctx, char * const buf,
                              size_t count, loff_t offset,
                              const bool is_write, uint8_t bar_index) {
@@ -2182,7 +2352,10 @@ static ssize_t bar_access_cb(vfu_ctx_t *vfu_ctx, char * const buf,
                 uint32_t val = *(uint32_t*)buf;
                 printf("BAR0 WRITE: offset=%#llx count=%zu val=%#x\n",
                        (unsigned long long)offset, count, val);
-                
+                // If this register is hot-cached, the write changed it — invalidate
+                // so reads don't serve a stale value until the next bg refresh.
+                hot_reg_invalidate(offset);
+
                 // CRITICAL: Defer writes to 0x88080/0x88084 (instance block PFN).
                 // The GPU already has this value from FLR (VRAM survives reset).
                 // We skip sending it now and trigger a full guest RAM blast sync.
@@ -2267,6 +2440,18 @@ static ssize_t bar_access_cb(vfu_ctx_t *vfu_ctx, char * const buf,
         printf("BAR0 READ: offset=0x840100 FAKED as BUSY (blast in progress)\n");
         return count;
     }
+
+    // Hot-polled register cache: serve frequently-polled 32-bit BAR0 status reads
+    // locally (memory speed) so the driver's tight poll loops don't stall a vCPU.
+    // Placed AFTER the out-of-range / fake-busy checks so those keep priority.
+    if (!is_write && bar_index == 0 && count == 4) {
+        uint32_t cached;
+        if (hot_reg_get(offset, &cached)) {
+            *(uint32_t*)buf = cached;
+            return count;  // instant local serve — no network round-trip
+        }
+    }
+
     if (do_rdma_transaction(vfu_ctx, &req, &resp) != 0) {
         // On timeout, return all-ones (PCI convention for device errors)
         memset(buf, 0xFF, count);
@@ -2275,6 +2460,13 @@ static ssize_t bar_access_cb(vfu_ctx_t *vfu_ctx, char * const buf,
 
     memcpy(buf, resp.data, count);
     uint32_t raw_val = (count == 4) ? *(uint32_t*)resp.data : 0;
+
+    // Count this read toward hot-register promotion (seed the cache with the
+    // real value so the first cached serve is correct). Only 32-bit reads —
+    // those are the register polls; bulk/8-byte reads aren't tight-looped.
+    if (!is_write && bar_index == 0 && count == 4) {
+        hot_reg_track(offset, *(uint32_t*)resp.data);
+    }
 
     if (bar_index == 0) {
         uint32_t val = (count == 4) ? *(uint32_t*)buf : 0;
@@ -2687,7 +2879,9 @@ int main(int argc, char *argv[]) {
  
     pthread_t thread_id = 0;
     bool thread_active = false;
- 
+    pthread_t hot_tid = 0;
+    bool hot_active = false;
+
     // Processing Loop
     while (running) {
         if (g_connected && !thread_active) {
@@ -2697,6 +2891,14 @@ int main(int argc, char *argv[]) {
                 printf("IRQ polling thread started.\n");
             } else {
                 vfu_log(vfu_ctx, LOG_ERR, "failed to create IRQ polling thread");
+            }
+        }
+        // Task #8: background thread that refreshes hot-polled BAR0 registers so
+        // the driver's tight poll loops are served from cache (no vCPU stall).
+        if (g_connected && !hot_active) {
+            if (pthread_create(&hot_tid, NULL, hot_reg_thread, vfu_ctx) == 0) {
+                hot_active = true;
+                printf("Hot-register refresh thread started.\n");
             }
         }
 
