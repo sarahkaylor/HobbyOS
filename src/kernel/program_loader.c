@@ -129,6 +129,16 @@ int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int st
     struct process *parent = process_get_pcb(caller_pid);
     // child is already defined above
     if (parent && child) {
+        uart_puts("[FD_DBG] parent PID="); print_int(parent->pid);
+        uart_puts(" name="); uart_puts(parent->name);
+        uart_puts(" stdin_fd="); print_int(stdin_fd);
+        uart_puts(" stdout_fd="); print_int(stdout_fd);
+        uart_puts("\n[FD_DBG] parent fds: ");
+        for (int i = 0; i < 8; i++) {
+            print_int(parent->open_fds[i]); uart_puts(" ");
+        }
+        uart_puts("\n");
+
         if (stdin_fd >= 0 && stdin_fd < MAX_OPEN_FDS && parent->open_fds[stdin_fd] != -1) {
             child->open_fds[0] = parent->open_fds[stdin_fd];
             fs_reopen(child->open_fds[0]);

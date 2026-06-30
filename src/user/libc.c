@@ -189,3 +189,33 @@ void *memset(void *s, int c, size_t n) {
   }
   return s;
 }
+
+int parse_args(char *arg_str, char *argv[], int max_args) {
+  int argc = 0;
+  char *p = arg_str;
+  while (*p && argc < max_args) {
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') {
+      *p = '\0';
+      p++;
+    }
+    if (*p == '\0') break;
+    argv[argc++] = p;
+    while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+      p++;
+    }
+  }
+  return argc;
+}
+
+int read_arg_file(const char *arg_file, char *buf, int max_len) {
+  int fd = open(arg_file);
+  if (fd < 0) {
+    buf[0] = '\0';
+    return 0;
+  }
+  int n = read(fd, buf, max_len - 1);
+  if (n < 0) n = 0;
+  buf[n] = '\0';
+  close(fd);
+  return n;
+}

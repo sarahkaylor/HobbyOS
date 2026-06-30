@@ -23,7 +23,7 @@ static spinlock_t mem_lock;
 #ifdef __x86_64__
 #define NUM_PHYS_BLOCKS 16
 #else
-#define NUM_PHYS_BLOCKS 20
+#define NUM_PHYS_BLOCKS 30
 #endif
 static uint8_t phys_blocks_used[NUM_PHYS_BLOCKS];
 
@@ -680,6 +680,7 @@ void start_scheduler(void) {
       if (proc_table[i].state == PROC_STATE_READY) {
         set_current_process_pid(cpu, i);
         proc_table[i].state = PROC_STATE_RUNNING;
+        
         mmu_switch_user_mapping(proc_table[i].user_phys_base);
 
         extern char __stack_top;

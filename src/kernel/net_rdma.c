@@ -1608,6 +1608,8 @@ int rdma_dma_verify(uint64_t guest_phys, uint32_t size) {
 #else
 
 #include "net_rdma.h"
+int is_host = 0;
+void net_rdma_fast_write(const struct rdma_packet *pkt) { (void)pkt; }
 void net_rdma_init(void) {}
 void net_rdma_poll(void) {}
 uint32_t v_pci_read32(uint8_t bar, uint64_t offset) { (void)bar; (void)offset; return 0xFFFFFFFF; }

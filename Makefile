@@ -35,7 +35,7 @@ else
   ARCH_DIR = src/kernel/arch/arm
   LDFLAGS = -T linker.ld
   # QEMU parameters for ARM: 8 cores, 2GB RAM, booting with UEFI
-  QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp 8 -m 2048M -bios /opt/homebrew/share/qemu/edk2-aarch64-code.fd -display cocoa -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
+  QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp 4 -m 2048M -bios /opt/homebrew/share/qemu/edk2-aarch64-code.fd -display cocoa -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
 endif
 
 ifeq ($(MODE),test)
@@ -47,6 +47,10 @@ else ifeq ($(MODE),desktop_test)
   USER_CFLAGS += -DDESKTOP_TEST_AUTO_LAUNCH
 else
   CFLAGS += -DKERNEL_MODE_DESKTOP
+endif
+
+ifneq ($(MODE),desktop)
+  QEMU_ARGS += -display none
 endif
 
 # Target and objects
@@ -81,6 +85,15 @@ DESKTOP_BIN = $(OBJ_DIR)/desktop.bin
 EDITOR_BIN = $(OBJ_DIR)/editor.bin
 EDITOR_T_BIN = $(OBJ_DIR)/EDITOR_T.BIN
 STRESS_TEST_BIN = $(OBJ_DIR)/stress.bin
+
+SH_BIN = $(OBJ_DIR)/sh.bin
+LS_BIN = $(OBJ_DIR)/ls.bin
+CAT_BIN = $(OBJ_DIR)/cat.bin
+GREP_BIN = $(OBJ_DIR)/grep.bin
+LESS_BIN = $(OBJ_DIR)/less.bin
+TAIL_BIN = $(OBJ_DIR)/tail.bin
+HEAD_BIN = $(OBJ_DIR)/head.bin
+SHELL_TEST_BIN = $(OBJ_DIR)/shtest.bin
 
 # Default rule: build the target
 all: $(TARGET)
@@ -250,7 +263,72 @@ $(EDITOR_T_BIN): $(OBJ_DIR)/user_editor_test.o $(OBJ_DIR)/user_desktop_test_wrap
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/editor_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/editor_test.elf $(EDITOR_T_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(STRESS_TEST_BIN) $(MODE_FILE)
+$(OBJ_DIR)/sh.o: src/user/sh.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/ls.o: src/user/ls.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/cat.o: src/user/cat.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/grep.o: src/user/grep.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/less.o: src/user/less.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/tail.o: src/user/tail.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/head.o: src/user/head.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(SH_BIN): $(OBJ_DIR)/sh.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/sh.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/sh.elf $(SH_BIN)
+
+$(LS_BIN): $(OBJ_DIR)/ls.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/ls.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/ls.elf $(LS_BIN)
+
+$(CAT_BIN): $(OBJ_DIR)/cat.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/cat.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/cat.elf $(CAT_BIN)
+
+$(GREP_BIN): $(OBJ_DIR)/grep.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/grep.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/grep.elf $(GREP_BIN)
+
+$(LESS_BIN): $(OBJ_DIR)/less.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/less.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/less.elf $(LESS_BIN)
+
+$(TAIL_BIN): $(OBJ_DIR)/tail.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/tail.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/tail.elf $(TAIL_BIN)
+
+$(HEAD_BIN): $(OBJ_DIR)/head.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/head.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/head.elf $(HEAD_BIN)
+
+$(OBJ_DIR)/shell_test.o: src/user/shell_test.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(SHELL_TEST_BIN): $(OBJ_DIR)/shell_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/shtest.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/shtest.elf $(SHELL_TEST_BIN)
+
+
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(STRESS_TEST_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img 
 	/opt/homebrew/bin/mmd -i disk.img ::/EFI
@@ -293,12 +371,34 @@ endif
 	/opt/homebrew/bin/mcopy -i disk.img $(EDITOR_BIN) ::/EDITOR.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(EDITOR_T_BIN) ::/EDITOR_T.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(STRESS_TEST_BIN) ::/STRESS.BIN
-	touch TEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT
-	/opt/homebrew/bin/mcopy -i disk.img TEST.TXT ::/TEST.TXT
+	/opt/homebrew/bin/mcopy -i disk.img $(SH_BIN) ::/SH.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(LS_BIN) ::/LS.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(CAT_BIN) ::/CAT.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(GREP_BIN) ::/GREP.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(LESS_BIN) ::/LESS.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(TAIL_BIN) ::/TAIL.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(HEAD_BIN) ::/HEAD.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(SHELL_TEST_BIN) ::/SHTEST.BIN
+	touch SH.ARG CAT.ARG GREP.ARG LESS.ARG TAIL.ARG HEAD.ARG
+	/opt/homebrew/bin/mcopy -i disk.img SH.ARG ::/SH.ARG
+	/opt/homebrew/bin/mcopy -i disk.img CAT.ARG ::/CAT.ARG
+	/opt/homebrew/bin/mcopy -i disk.img GREP.ARG ::/GREP.ARG
+	/opt/homebrew/bin/mcopy -i disk.img LESS.ARG ::/LESS.ARG
+	/opt/homebrew/bin/mcopy -i disk.img TAIL.ARG ::/TAIL.ARG
+	/opt/homebrew/bin/mcopy -i disk.img HEAD.ARG ::/HEAD.ARG
+	rm -f SH.ARG CAT.ARG GREP.ARG LESS.ARG TAIL.ARG HEAD.ARG
+	echo "HobbyOS Terminal Test File" > SHTEST.TXT
+	echo "This is line number two." >> SHTEST.TXT
+	echo "Line three is right here." >> SHTEST.TXT
+	echo "Fourth line has some interesting keywords like hello world." >> SHTEST.TXT
+	echo "Line five is the last line of this small test document." >> SHTEST.TXT
+	touch TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT
+	/opt/homebrew/bin/mcopy -i disk.img SHTEST.TXT ::/SHTEST.TXT
 	/opt/homebrew/bin/mcopy -i disk.img TEST1.TXT ::/TEST1.TXT
 	/opt/homebrew/bin/mcopy -i disk.img TEST2.TXT ::/TEST2.TXT
 	/opt/homebrew/bin/mcopy -i disk.img TEST3.TXT ::/TEST3.TXT
 	/opt/homebrew/bin/mcopy -i disk.img TEST4.TXT ::/TEST4.TXT
+	rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT
 
 # Target to run the OS inside QEMU
 run: $(TARGET) disk.img

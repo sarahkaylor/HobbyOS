@@ -202,6 +202,11 @@ int pipe_write(struct pipe *p, const void *buf, int n, struct trap_frame *tf) {
     uint64_t flags = spinlock_acquire_irqsave(&p->lock);
     if (p->reader_count == 0) {
         // No readers left
+        uart_puts("[PIPE_WRITE_ERR] PID ");
+        if (cur) print_int(cur->pid);
+        uart_puts(" pipe ");
+        uart_print_hex((uint64_t)p);
+        uart_puts(" reader_count is 0!\n");
         spinlock_release_irqrestore(&p->lock, flags);
         return -1;
     }

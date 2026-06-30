@@ -107,6 +107,7 @@ static void sys_read(struct trap_frame *tf) {
   if ((uint64_t)buf >= USER_VIRT_BASE &&
       (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
     int ret = file_read(caller, fd, buf, size, tf);
+
     if (ret == -2) {
       tf->elr -= 4; // Restart syscall
       schedule(tf, 0);
@@ -150,6 +151,7 @@ static void sys_write(struct trap_frame *tf) {
   if ((uint64_t)buf >= USER_VIRT_BASE &&
       (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
     int ret = file_write(caller, fd, buf, size, tf);
+
     if (ret == -2) {
       tf->elr -= 4; // Restart syscall
       schedule(tf, 0);
@@ -308,9 +310,20 @@ static void sys_read_dir(struct trap_frame *tf) {
 }
 
 extern int process_kill(int pid);
+extern struct process *process_get_pcb(int pid);
 static void sys_kill(struct trap_frame *tf) {
   int pid = (int)tf->regs[0];
-  tf->regs[0] = process_kill(pid);
+  int sig = (int)tf->regs[1];
+  if (sig == 0) {
+    struct process *p = process_get_pcb(pid);
+    if (p && p->state != PROC_STATE_FREE && p->state != PROC_STATE_EXITED) {
+      tf->regs[0] = 0;
+    } else {
+      tf->regs[0] = -1;
+    }
+  } else {
+    tf->regs[0] = process_kill(pid);
+  }
 }
 
 /**
@@ -381,6 +394,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     }
 
     uint64_t syscall_num = tf->regs[8]; // x8 standard
+
+
 
     if (syscall_num == SYS_WRITE_CONSOLE) {
       sys_write_console(tf);

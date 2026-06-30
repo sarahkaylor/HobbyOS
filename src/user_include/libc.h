@@ -61,4 +61,7 @@ int get_events(void *buf, int max_events);
 int available(int fd);
 int read_dir(int index, char *buf);
 
+int parse_args(char *arg_str, char *argv[], int max_args);
+int read_arg_file(const char *arg_file, char *buf, int max_len);
+
 #endif

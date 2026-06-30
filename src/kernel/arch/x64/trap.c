@@ -326,9 +326,20 @@ static void sys_read_dir(struct trap_frame *tf) {
 }
 
 extern int process_kill(int pid);
+extern struct process *process_get_pcb(int pid);
 static void sys_kill(struct trap_frame *tf) {
   int pid = (int)tf->regs[5]; // rdi
-  tf->regs[0] = process_kill(pid);
+  int sig = (int)tf->regs[4]; // rsi
+  if (sig == 0) {
+    struct process *p = process_get_pcb(pid);
+    if (p && p->state != PROC_STATE_FREE && p->state != PROC_STATE_EXITED) {
+      tf->regs[0] = 0; // rax
+    } else {
+      tf->regs[0] = -1;
+    }
+  } else {
+    tf->regs[0] = process_kill(pid);
+  }
 }
 
 void sync_lower_handler_c(struct trap_frame *tf) {
