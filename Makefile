@@ -95,6 +95,22 @@ TAIL_BIN = $(OBJ_DIR)/tail.bin
 HEAD_BIN = $(OBJ_DIR)/head.bin
 SHELL_TEST_BIN = $(OBJ_DIR)/shtest.bin
 
+PS_BIN = $(OBJ_DIR)/ps.bin
+FREE_BIN = $(OBJ_DIR)/free.bin
+UPTIME_BIN = $(OBJ_DIR)/uptime.bin
+KILL_BIN = $(OBJ_DIR)/kill.bin
+CP_BIN = $(OBJ_DIR)/cp.bin
+RM_BIN = $(OBJ_DIR)/rm.bin
+MV_BIN = $(OBJ_DIR)/mv.bin
+TOUCH_BIN = $(OBJ_DIR)/touch.bin
+WC_BIN = $(OBJ_DIR)/wc.bin
+SORT_BIN = $(OBJ_DIR)/sort.bin
+UNIQ_BIN = $(OBJ_DIR)/uniq.bin
+PING_BIN = $(OBJ_DIR)/ping.bin
+NC_BIN = $(OBJ_DIR)/nc.bin
+IFCONFIG_BIN = $(OBJ_DIR)/ifconfig.bin
+SHELL_TEST2_BIN = $(OBJ_DIR)/shtest2.bin
+
 # Default rule: build the target
 all: $(TARGET)
 
@@ -327,8 +343,128 @@ $(SHELL_TEST_BIN): $(OBJ_DIR)/shell_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/use
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/shtest.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/shtest.elf $(SHELL_TEST_BIN)
 
+$(OBJ_DIR)/ps.o: src/user/ps.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(STRESS_TEST_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(MODE_FILE)
+$(PS_BIN): $(OBJ_DIR)/ps.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/ps.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/ps.elf $(PS_BIN)
+
+$(OBJ_DIR)/free.o: src/user/free.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(FREE_BIN): $(OBJ_DIR)/free.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/free.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/free.elf $(FREE_BIN)
+
+$(OBJ_DIR)/uptime.o: src/user/uptime.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(UPTIME_BIN): $(OBJ_DIR)/uptime.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/uptime.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/uptime.elf $(UPTIME_BIN)
+
+$(OBJ_DIR)/kill.o: src/user/kill.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(KILL_BIN): $(OBJ_DIR)/kill.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/kill.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/kill.elf $(KILL_BIN)
+
+$(OBJ_DIR)/cp.o: src/user/cp.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(CP_BIN): $(OBJ_DIR)/cp.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/cp.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/cp.elf $(CP_BIN)
+
+$(OBJ_DIR)/rm.o: src/user/rm.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(RM_BIN): $(OBJ_DIR)/rm.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/rm.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/rm.elf $(RM_BIN)
+
+$(OBJ_DIR)/mv.o: src/user/mv.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(MV_BIN): $(OBJ_DIR)/mv.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/mv.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/mv.elf $(MV_BIN)
+
+$(OBJ_DIR)/touch.o: src/user/touch.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(TOUCH_BIN): $(OBJ_DIR)/touch.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/touch.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/touch.elf $(TOUCH_BIN)
+
+$(OBJ_DIR)/wc.o: src/user/wc.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(WC_BIN): $(OBJ_DIR)/wc.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/wc.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/wc.elf $(WC_BIN)
+
+$(OBJ_DIR)/sort.o: src/user/sort.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(SORT_BIN): $(OBJ_DIR)/sort.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/sort.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/sort.elf $(SORT_BIN)
+
+$(OBJ_DIR)/uniq.o: src/user/uniq.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(UNIQ_BIN): $(OBJ_DIR)/uniq.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/uniq.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/uniq.elf $(UNIQ_BIN)
+
+$(OBJ_DIR)/ping.o: src/user/ping.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(PING_BIN): $(OBJ_DIR)/ping.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/ping.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/ping.elf $(PING_BIN)
+
+$(OBJ_DIR)/nc.o: src/user/nc.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(NC_BIN): $(OBJ_DIR)/nc.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/nc.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/nc.elf $(NC_BIN)
+
+$(OBJ_DIR)/ifconfig.o: src/user/ifconfig.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(IFCONFIG_BIN): $(OBJ_DIR)/ifconfig.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/ifconfig.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/ifconfig.elf $(IFCONFIG_BIN)
+
+$(OBJ_DIR)/shell_test2.o: src/user/shell_test2.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(SHELL_TEST2_BIN): $(OBJ_DIR)/shell_test2.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/shtest2.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/shtest2.elf $(SHELL_TEST2_BIN)
+
+
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(STRESS_TEST_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img 
 	/opt/homebrew/bin/mmd -i disk.img ::/EFI
@@ -379,18 +515,37 @@ endif
 	/opt/homebrew/bin/mcopy -i disk.img $(TAIL_BIN) ::/TAIL.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(HEAD_BIN) ::/HEAD.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(SHELL_TEST_BIN) ::/SHTEST.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(PS_BIN) ::/PS.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(FREE_BIN) ::/FREE.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(UPTIME_BIN) ::/UPTIME.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(KILL_BIN) ::/KILL.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(CP_BIN) ::/CP.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(RM_BIN) ::/RM.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(MV_BIN) ::/MV.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(TOUCH_BIN) ::/TOUCH.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(WC_BIN) ::/WC.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(SORT_BIN) ::/SORT.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(UNIQ_BIN) ::/UNIQ.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(PING_BIN) ::/PING.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(NC_BIN) ::/NC.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(IFCONFIG_BIN) ::/IFCONFIG.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(SHELL_TEST2_BIN) ::/SHTEST2.BIN
 	echo "HobbyOS Terminal Test File" > SHTEST.TXT
 	echo "This is line number two." >> SHTEST.TXT
 	echo "Line three is right here." >> SHTEST.TXT
 	echo "Fourth line has some interesting keywords like hello world." >> SHTEST.TXT
 	echo "Line five is the last line of this small test document." >> SHTEST.TXT
 	touch TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT
+	echo "orange" > SORT.TXT
+	echo "apple" >> SORT.TXT
+	echo "orange" >> SORT.TXT
 	/opt/homebrew/bin/mcopy -i disk.img SHTEST.TXT ::/SHTEST.TXT
 	/opt/homebrew/bin/mcopy -i disk.img TEST1.TXT ::/TEST1.TXT
 	/opt/homebrew/bin/mcopy -i disk.img TEST2.TXT ::/TEST2.TXT
 	/opt/homebrew/bin/mcopy -i disk.img TEST3.TXT ::/TEST3.TXT
 	/opt/homebrew/bin/mcopy -i disk.img TEST4.TXT ::/TEST4.TXT
-	rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT
+	/opt/homebrew/bin/mcopy -i disk.img SORT.TXT ::/SORT.TXT
+	rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT
 
 # Target to run the OS inside QEMU
 run: $(TARGET) disk.img

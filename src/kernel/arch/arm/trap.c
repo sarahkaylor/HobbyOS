@@ -60,6 +60,11 @@ extern uint32_t virtio_blk_irq;
 #define SYS_CONNECT (18)
 #define SYS_SLEEP (19)
 #define SYS_GET_ARGS (20)
+#define SYS_SYSINFO (21)
+#define SYS_UNLINK (22)
+#define SYS_RENAME (23)
+
+#include "fat16.h"
 
 // Timer PPI interrupt ID on QEMU virt (non-secure physical timer)
 #define TIMER_PPI_INTID 30
@@ -133,6 +138,91 @@ static void sys_get_args(struct trap_frame *tf) {
     }
     buf[i] = '\0';
     tf->regs[0] = 0;
+  } else {
+    tf->regs[0] = -1;
+  }
+}
+
+struct sys_meminfo {
+    uint64_t total_bytes;
+    uint64_t free_bytes;
+};
+
+struct sys_netinfo {
+    uint32_t ip;
+    uint32_t subnet_mask;
+    uint32_t gateway;
+    uint8_t mac[6];
+};
+
+static void sys_sysinfo(struct trap_frame *tf) {
+  int cmd = (int)tf->regs[0];
+  void *buf = (void *)tf->regs[1];
+  int size = (int)tf->regs[2];
+
+  if (cmd == 1) { // Uptime
+    extern uint64_t timer_get_ms(void);
+    tf->regs[0] = timer_get_ms();
+    return;
+  }
+
+  if ((uint64_t)buf >= USER_VIRT_BASE &&
+      (uint64_t)buf < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+    if (cmd == 2) { // Memory usage
+      if (size >= (int)sizeof(struct sys_meminfo)) {
+        struct sys_meminfo *info = (struct sys_meminfo *)buf;
+        int total_blocks = process_get_total_blocks();
+        int used_blocks = process_get_used_blocks();
+        info->total_bytes = (uint64_t)total_blocks * USER_REGION_SIZE;
+        info->free_bytes = (uint64_t)(total_blocks - used_blocks) * USER_REGION_SIZE;
+        tf->regs[0] = 0;
+      } else {
+        tf->regs[0] = -1;
+      }
+    } else if (cmd == 3) { // Process list
+      int count = size / sizeof(struct sys_procinfo);
+      tf->regs[0] = process_get_info_list((struct sys_procinfo *)buf, count);
+    } else if (cmd == 4) { // Network interface config
+      if (size >= (int)sizeof(struct sys_netinfo)) {
+        struct sys_netinfo *info = (struct sys_netinfo *)buf;
+        extern uint32_t net_get_ip(void);
+        extern uint32_t net_get_netmask(void);
+        extern uint32_t net_get_gateway(void);
+        extern void net_get_mac(uint8_t mac[6]);
+        info->ip = net_get_ip();
+        info->subnet_mask = net_get_netmask();
+        info->gateway = net_get_gateway();
+        net_get_mac(info->mac);
+        tf->regs[0] = 0;
+      } else {
+        tf->regs[0] = -1;
+      }
+    } else {
+      tf->regs[0] = -1;
+    }
+  } else {
+    tf->regs[0] = -1;
+  }
+}
+
+static void sys_unlink(struct trap_frame *tf) {
+  const char *filename = (const char *)tf->regs[0];
+  if ((uint64_t)filename >= USER_VIRT_BASE &&
+      (uint64_t)filename < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+    tf->regs[0] = fat16_unlink(filename);
+  } else {
+    tf->regs[0] = -1;
+  }
+}
+
+static void sys_rename(struct trap_frame *tf) {
+  const char *oldname = (const char *)tf->regs[0];
+  const char *newname = (const char *)tf->regs[1];
+  if ((uint64_t)oldname >= USER_VIRT_BASE &&
+      (uint64_t)oldname < (USER_VIRT_BASE + USER_REGION_SIZE) &&
+      (uint64_t)newname >= USER_VIRT_BASE &&
+      (uint64_t)newname < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+    tf->regs[0] = fat16_rename(oldname, newname);
   } else {
     tf->regs[0] = -1;
   }
@@ -483,6 +573,12 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_sleep(tf);
     } else if (syscall_num == SYS_GET_ARGS) {
       sys_get_args(tf);
+    } else if (syscall_num == SYS_SYSINFO) {
+      sys_sysinfo(tf);
+    } else if (syscall_num == SYS_UNLINK) {
+      sys_unlink(tf);
+    } else if (syscall_num == SYS_RENAME) {
+      sys_rename(tf);
     } else if (syscall_num == 0xFF) {
       schedule(tf, 1);
     } else {

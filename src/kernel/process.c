@@ -708,3 +708,38 @@ void start_scheduler(void) {
     safe_wfi();
   }
 }
+
+int process_get_used_blocks(void) {
+    int count = 0;
+    uint64_t flags = spinlock_acquire_irqsave(&mem_lock);
+    for (int i = 0; i < NUM_PHYS_BLOCKS; i++) {
+        if (phys_blocks_used[i]) count++;
+    }
+    spinlock_release_irqrestore(&mem_lock, flags);
+    return count;
+}
+
+int process_get_total_blocks(void) {
+    return NUM_PHYS_BLOCKS;
+}
+
+int process_get_info_list(struct sys_procinfo* list, int max_procs) {
+    int count = 0;
+    uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    for (int i = 0; i < MAX_PROCESSES && count < max_procs; i++) {
+        if (proc_table[i].state != PROC_STATE_FREE) {
+            list[count].pid = proc_table[i].pid;
+            list[count].parent_pid = proc_table[i].parent_pid;
+            list[count].state = proc_table[i].state;
+            int k = 0;
+            while (proc_table[i].name[k] && k < 31) {
+                list[count].name[k] = proc_table[i].name[k];
+                k++;
+            }
+            list[count].name[k] = '\0';
+            count++;
+        }
+    }
+    spinlock_release_irqrestore(&proc_lock, flags);
+    return count;
+}

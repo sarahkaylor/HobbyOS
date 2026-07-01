@@ -22,6 +22,7 @@
 void print(const char *str);
 void print_console(const char *str);
 void print_hex(long val);
+void print_dec(long val);
 void exit(int status);
 int fork(void);
 void sleep(int ms);
@@ -63,5 +64,28 @@ int available(int fd);
 int read_dir(int index, char *buf);
 
 int parse_args(char *arg_str, char *argv[], int max_args);
+
+struct sys_meminfo {
+    uint64_t total_bytes;
+    uint64_t free_bytes;
+};
+
+struct sys_procinfo {
+    int pid;
+    int parent_pid;
+    int state;
+    char name[32];
+};
+
+struct sys_netinfo {
+    uint32_t ip;
+    uint32_t subnet_mask;
+    uint32_t gateway;
+    uint8_t mac[6];
+};
+
+int sysinfo(int cmd, void *buf, int size);
+int unlink(const char *filename);
+int rename(const char *oldname, const char *newname);
 
 #endif

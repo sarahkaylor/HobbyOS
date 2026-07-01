@@ -189,6 +189,7 @@ void main(void) {
 #elif defined(KERNEL_MODE_TEST)
   uart_puts("Mode: TEST - Running automated tests...\n");
   load_and_run_program_in_scheduler("SHTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("SHTEST2.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("CONSOLE.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("MEMTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("FILEIO.BIN", -1, -1, -1, -1);

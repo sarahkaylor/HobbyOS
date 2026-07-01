@@ -668,7 +668,14 @@ static void send_tcp_segment(struct socket_pcb* pcb, uint8_t flags, const void* 
 }
 
 int net_socket_connect(struct socket_pcb* pcb, uint32_t ip, uint16_t port) {
-    if (!pcb || pcb->protocol != IP_PROTO_TCP) return -1;
+    if (!pcb) return -1;
+    if (pcb->protocol == IP_PROTO_UDP) {
+        pcb->remote_ip = ip;
+        pcb->remote_port = port;
+        pcb->state = SOCKET_ESTABLISHED;
+        return 0;
+    }
+    if (pcb->protocol != IP_PROTO_TCP) return -1;
     pcb->remote_ip = ip;
     pcb->remote_port = port;
     pcb->state = SOCKET_SYN_SENT;
@@ -840,4 +847,18 @@ void net_arp_request(uint32_t target_ip) {
     arp->target_ip = target_ip;
     
     virtio_net_send(packet, sizeof(packet));
+}
+
+uint32_t net_get_netmask(void) {
+    return local_netmask;
+}
+
+uint32_t net_get_gateway(void) {
+    return local_gateway;
+}
+
+void net_get_mac(uint8_t mac[6]) {
+    for (int i = 0; i < 6; i++) {
+        mac[i] = local_mac[i];
+    }
 }

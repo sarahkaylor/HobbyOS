@@ -223,4 +223,8 @@ int net_socket_recv(struct socket_pcb* pcb, void* buf, uint32_t len);
  */
 void net_socket_close(struct socket_pcb* pcb);
 
+uint32_t net_get_netmask(void);
+uint32_t net_get_gateway(void);
+void net_get_mac(uint8_t mac[6]);
+
 #endif // NET_H

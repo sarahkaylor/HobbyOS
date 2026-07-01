@@ -436,3 +436,74 @@ int fat16_write(struct file* f, const void* buf, int size) {
     spinlock_release_irqrestore(&fat_lock, flags);
     return written_bytes;
 }
+
+int fat16_unlink(const char* filename) {
+    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    uint8_t buf[SECTOR_SIZE];
+
+    for (uint32_t i = 0; i < root_dir_sectors; i++) {
+        spinlock_release_irqrestore(&fat_lock, flags);
+        if (virtio_blk_read_sector(root_dir_sector + i, buf, 1) != 0) {
+            return -1;
+        }
+        flags = spinlock_acquire_irqsave(&fat_lock);
+
+        struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
+        for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
+            if (entries[j].name[0] == 0x00) break;
+            if (entries[j].name[0] == (char)0xE5) continue;
+            
+            if (match_name(entries[j].name, filename)) {
+                uint16_t cluster = entries[j].start_cluster;
+                while (cluster != 0 && cluster < 0xFFF0) {
+                    uint16_t next = read_fat(cluster);
+                    write_fat(cluster, 0x0000);
+                    cluster = next;
+                }
+                entries[j].name[0] = (char)0xE5;
+                
+                spinlock_release_irqrestore(&fat_lock, flags);
+                if (virtio_blk_write_sector(root_dir_sector + i, buf, 1) != 0) {
+                    return -1;
+                }
+                return 0;
+            }
+        }
+    }
+    spinlock_release_irqrestore(&fat_lock, flags);
+    return -1;
+}
+
+int fat16_rename(const char* oldname, const char* newname) {
+    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    uint8_t buf[SECTOR_SIZE];
+
+    for (uint32_t i = 0; i < root_dir_sectors; i++) {
+        spinlock_release_irqrestore(&fat_lock, flags);
+        if (virtio_blk_read_sector(root_dir_sector + i, buf, 1) != 0) {
+            return -1;
+        }
+        flags = spinlock_acquire_irqsave(&fat_lock);
+
+        struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
+        for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
+            if (entries[j].name[0] == 0x00) break;
+            if (entries[j].name[0] == (char)0xE5) continue;
+            
+            if (match_name(entries[j].name, oldname)) {
+                char formatted_name[11];
+                format_83(newname, formatted_name);
+                for (int k = 0; k < 11; k++) {
+                    entries[j].name[k] = formatted_name[k];
+                }
+                spinlock_release_irqrestore(&fat_lock, flags);
+                if (virtio_blk_write_sector(root_dir_sector + i, buf, 1) != 0) {
+                    return -1;
+                }
+                return 0;
+            }
+        }
+    }
+    spinlock_release_irqrestore(&fat_lock, flags);
+    return -1;
+}

@@ -37,4 +37,10 @@ int fat16_close(struct file* f);
 // Seeks a FAT16 file.
 int fat16_seek(struct file* f, int offset);
 
+// Deletes a file.
+int fat16_unlink(const char* filename);
+
+// Renames a file.
+int fat16_rename(const char* oldname, const char* newname);
+
 #endif // FAT16_H

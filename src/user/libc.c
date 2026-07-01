@@ -21,6 +21,9 @@
 #define SYS_CONNECT (18)
 #define SYS_SLEEP (19)
 #define SYS_GET_ARGS (20)
+#define SYS_SYSINFO (21)
+#define SYS_UNLINK (22)
+#define SYS_RENAME (23)
 
 #ifdef __x86_64__
 static long syscall(long num, long a0, long a1, long a2, long a3) {
@@ -109,6 +112,33 @@ void print_hex(long val) {
   }
   buf[18] = '\0';
   print(buf);
+}
+
+void print_dec(long val) {
+  char buf[32];
+  int i = 0;
+  if (val == 0) {
+    print("0");
+    return;
+  }
+  int neg = 0;
+  if (val < 0) {
+    neg = 1;
+    val = -val;
+  }
+  while (val > 0) {
+    buf[i++] = (val % 10) + '0';
+    val /= 10;
+  }
+  if (neg) {
+    buf[i++] = '-';
+  }
+  char reversed[32];
+  for (int j = 0; j < i; j++) {
+    reversed[j] = buf[i - 1 - j];
+  }
+  reversed[i] = '\0';
+  print(reversed);
 }
 
 void exit(int status) {
@@ -236,6 +266,18 @@ int parse_args(char *arg_str, char *argv[], int max_args) {
     }
   }
   return argc;
+}
+
+int sysinfo(int cmd, void *buf, int size) {
+  return (int)syscall(SYS_SYSINFO, (long)cmd, (long)buf, (long)size, 0);
+}
+
+int unlink(const char *filename) {
+  return (int)syscall(SYS_UNLINK, (long)filename, 0, 0, 0);
+}
+
+int rename(const char *oldname, const char *newname) {
+  return (int)syscall(SYS_RENAME, (long)oldname, (long)newname, 0, 0);
 }
 
 

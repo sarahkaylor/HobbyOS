@@ -174,4 +174,15 @@ extern spinlock_t proc_lock;
 extern int cpu_current_pids[];
 void set_current_process_pid(uint32_t cpu, int pid);
 
+struct sys_procinfo {
+    int pid;
+    int parent_pid;
+    int state;
+    char name[32];
+};
+
+int process_get_used_blocks(void);
+int process_get_total_blocks(void);
+int process_get_info_list(struct sys_procinfo* list, int max_procs);
+
 #endif // PROCESS_H
