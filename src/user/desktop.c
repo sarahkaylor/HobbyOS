@@ -107,9 +107,16 @@ void wm_handle_app_escape(int win_id, char* seq) {
 void load_menu(void) {
   num_menu_items = 0;
   while (num_menu_items < MAX_MENU_ITEMS) {
-    if (read_dir(num_menu_items, menu_items[num_menu_items]) < 0) {
+    struct sys_dirent ent;
+    if (read_dir("/", num_menu_items, &ent) < 0) {
       break;
     }
+    int k = 0;
+    while (ent.name[k] && k < 15) {
+        menu_items[num_menu_items][k] = ent.name[k];
+        k++;
+    }
+    menu_items[num_menu_items][k] = '\0';
     num_menu_items++;
   }
 }
@@ -340,7 +347,27 @@ int main(void) {
         if (r > 0) {
           for (int k = 0; k < r; k++) {
             char c = buf[k];
-                        if (windows[i].escape_state > 0) {
+                        if (windows[i].escape_state == 1) {
+              windows[i].escape_buf[windows[i].escape_len++] = c;
+              if (c == '[') {
+                windows[i].escape_state = 2; // CSI sequence
+              } else if (c == ']') {
+                windows[i].escape_state = 3; // OSC sequence
+              } else {
+                windows[i].escape_state = 0;
+                windows[i].escape_len = 0;
+              }
+            } else if (windows[i].escape_state == 2) {
+              windows[i].escape_buf[windows[i].escape_len++] = c;
+              if ((c >= 0x40 && c <= 0x7E) || windows[i].escape_len >= 127) {
+                if (c == 'J') {
+                  windows[i].text_len = 0;
+                  windows[i].text[0] = '\0';
+                }
+                windows[i].escape_state = 0;
+                windows[i].escape_len = 0;
+              }
+            } else if (windows[i].escape_state == 3) {
               if (c == '\a' || c == '~' || windows[i].escape_len >= 127) {
                 windows[i].escape_buf[windows[i].escape_len] = '\0';
                 wm_handle_app_escape(windows[i].id, windows[i].escape_buf);

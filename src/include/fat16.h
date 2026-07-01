@@ -22,7 +22,7 @@ struct file; // Forward declaration
 // Returns 0 on success, or -1 on failure.
 int fat16_init(void);
 
-// Opens a file from the root directory into a generic file structure.
+// Opens a file from the filesystem into a generic file structure.
 int fat16_open(const char* filename, struct file* f);
 
 // Reads bytes from a FAT16 file.
@@ -42,5 +42,17 @@ int fat16_unlink(const char* filename);
 
 // Renames a file.
 int fat16_rename(const char* oldname, const char* newname);
+
+// Creates a directory.
+int fat16_mkdir(const char* path);
+
+// Reads a directory entry at the specified index.
+int fat16_read_dir(const char* path, int index, char* out_name, uint8_t* out_attr, uint32_t* out_size);
+
+// Resolves a path to its directory entry, sector, and offset.
+int fat16_resolve_path(const char* path, struct fat16_dir_entry* out_entry, uint32_t* out_sector, uint32_t* out_offset);
+
+// Resolves the parent directory and last component name.
+int fat16_resolve_parent(const char* path, struct fat16_dir_entry* out_parent_entry, char* out_last_component);
 
 #endif // FAT16_H

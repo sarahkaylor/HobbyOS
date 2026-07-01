@@ -61,7 +61,16 @@ struct virtio_input_event {
 
 int get_events(void *buf, int max_events);
 int available(int fd);
-int read_dir(int index, char *buf);
+struct sys_dirent {
+    char name[32];
+    uint8_t attr;
+    uint32_t size;
+} __attribute__((packed));
+
+int read_dir(const char *path, int index, struct sys_dirent *ent);
+int mkdir(const char *path);
+char *getcwd(char *buf, size_t size);
+int chdir(const char *path);
 
 int parse_args(char *arg_str, char *argv[], int max_args);
 

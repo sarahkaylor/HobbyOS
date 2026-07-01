@@ -226,6 +226,8 @@ int process_create(void) {
   for (int i = 0; i < 256; i++) {
     p->args[i] = 0;
   }
+  p->cwd[0] = '/';
+  p->cwd[1] = '\0';
   p->num_open_fds = 0;
   p->wake_ms = 0;
   for (int i = 0; i < MAX_OPEN_FDS; i++) {
@@ -554,6 +556,9 @@ int process_fork(struct trap_frame *tf) {
 
   for (int i = 0; i < 32; i++) {
     child->name[i] = parent->name[i];
+  }
+  for (int i = 0; i < 128; i++) {
+    child->cwd[i] = parent->cwd[i];
   }
 
   kmemcpy((void *)child->user_phys_base, (void *)parent->user_phys_base,

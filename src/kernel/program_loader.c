@@ -87,6 +87,15 @@ int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int st
             child->name[i] = filename[i];
             child->name[i + 1] = '\0';
         }
+        struct process *parent = process_get_pcb(caller_pid);
+        if (parent) {
+            for (int i = 0; i < 128; i++) {
+                child->cwd[i] = parent->cwd[i];
+            }
+        } else {
+            child->cwd[0] = '/';
+            child->cwd[1] = '\0';
+        }
     }
 
     struct file f;

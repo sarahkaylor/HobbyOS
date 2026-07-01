@@ -82,6 +82,7 @@ struct process {
   int is_kernel_process; /**< Flag indicating if this is a kernel-only thread */
   char name[32];  /**< Name of the binary running in this process */
   char args[256]; /**< Command line arguments passed to the process */
+  char cwd[128];  /**< Current working directory */
 
   /**
    * Saved CPU context used during context switching.

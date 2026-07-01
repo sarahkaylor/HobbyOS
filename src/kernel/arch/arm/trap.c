@@ -63,6 +63,9 @@ extern uint32_t virtio_blk_irq;
 #define SYS_SYSINFO (21)
 #define SYS_UNLINK (22)
 #define SYS_RENAME (23)
+#define SYS_MKDIR (24)
+#define SYS_GETCWD (25)
+#define SYS_CHDIR (26)
 
 #include "fat16.h"
 
@@ -433,15 +436,100 @@ static void sys_available(struct trap_frame *tf) {
   tf->regs[0] = file_available(caller, fd);
 }
 
-extern int fat16_read_dir(int index, char *out_name);
+extern int fat16_read_dir(const char* path, int index, char* out_name, uint8_t* out_attr, uint32_t* out_size);
 static void sys_read_dir(struct trap_frame *tf) {
-  int index = (int)tf->regs[0];
-  char *buf = (char *)tf->regs[1];
-  if ((uint64_t)buf >= USER_VIRT_BASE &&
-      (uint64_t)buf + 12 <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
-    tf->regs[0] = fat16_read_dir(index, buf);
+  const char *path = (const char *)tf->regs[0];
+  int index = (int)tf->regs[1];
+  
+  struct local_dirent {
+      char name[32];
+      uint8_t attr;
+      uint32_t size;
+  } __attribute__((packed));
+  
+  struct local_dirent *ud = (struct local_dirent *)tf->regs[2];
+  
+  if ((uint64_t)path >= USER_VIRT_BASE &&
+      (uint64_t)path < (USER_VIRT_BASE + USER_REGION_SIZE) &&
+      (uint64_t)ud >= USER_VIRT_BASE &&
+      (uint64_t)ud + sizeof(struct local_dirent) <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+      
+      char name_buf[32];
+      uint8_t attr_val = 0;
+      uint32_t size_val = 0;
+      
+      int ret = fat16_read_dir(path, index, name_buf, &attr_val, &size_val);
+      if (ret == 0) {
+          int k = 0;
+          while (name_buf[k] && k < 31) {
+              ud->name[k] = name_buf[k];
+              k++;
+          }
+          ud->name[k] = '\0';
+          ud->attr = attr_val;
+          ud->size = size_val;
+          tf->regs[0] = 0;
+      } else {
+          tf->regs[0] = -1;
+      }
   } else {
-    tf->regs[0] = -1;
+      tf->regs[0] = -1;
+  }
+}
+
+static void sys_mkdir(struct trap_frame *tf) {
+  const char *path = (const char *)tf->regs[0];
+  struct process *caller = current_process();
+  if ((uint64_t)path >= USER_VIRT_BASE &&
+      (uint64_t)path < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+      extern int file_mkdir(struct process *cur, const char *path);
+      tf->regs[0] = file_mkdir(caller, path);
+  } else {
+      tf->regs[0] = -1;
+  }
+}
+
+static void sys_getcwd(struct trap_frame *tf) {
+  char *buf = (char *)tf->regs[0];
+  int size = (int)tf->regs[1];
+  struct process *caller = current_process();
+  if (caller && (uint64_t)buf >= USER_VIRT_BASE &&
+      (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+      int len = 0;
+      while (caller->cwd[len]) len++;
+      if (len + 1 > size) {
+          tf->regs[0] = 0; // return NULL on error/overflow
+          return;
+      }
+      for (int i = 0; i <= len; i++) {
+          buf[i] = caller->cwd[i];
+      }
+      tf->regs[0] = (long)buf;
+  } else {
+      tf->regs[0] = 0;
+  }
+}
+
+static void sys_chdir(struct trap_frame *tf) {
+  const char *path = (const char *)tf->regs[0];
+  struct process *caller = current_process();
+  if (caller && (uint64_t)path >= USER_VIRT_BASE &&
+      (uint64_t)path < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+      extern int fat16_chdir(const char *path, char *out_new_cwd);
+      char new_cwd[128];
+      if (fat16_chdir(path, new_cwd) == 0) {
+          int k = 0;
+          while (new_cwd[k] && k < 127) {
+              caller->cwd[k] = new_cwd[k];
+              k++;
+          }
+          caller->cwd[k] = '\0';
+          tf->regs[0] = 0;
+      } else {
+          tf->regs[0] = -1;
+      }
+  } else {
+      tf->regs[0] = -1;
   }
 }
 
@@ -579,6 +667,12 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_unlink(tf);
     } else if (syscall_num == SYS_RENAME) {
       sys_rename(tf);
+    } else if (syscall_num == SYS_MKDIR) {
+      sys_mkdir(tf);
+    } else if (syscall_num == SYS_GETCWD) {
+      sys_getcwd(tf);
+    } else if (syscall_num == SYS_CHDIR) {
+      sys_chdir(tf);
     } else if (syscall_num == 0xFF) {
       schedule(tf, 1);
     } else {

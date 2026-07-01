@@ -190,6 +190,7 @@ void main(void) {
   uart_puts("Mode: TEST - Running automated tests...\n");
   load_and_run_program_in_scheduler("SHTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("SHTEST2.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("SHTEST3.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("CONSOLE.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("MEMTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("FILEIO.BIN", -1, -1, -1, -1);

@@ -111,8 +111,8 @@ static void run_worker(int id, int p2c[2], int c2p[2], const char *filename) {
         close(fd);
 
         // 3. Directory listing read operations to verify other files
-        char dir_buf[16];
-        int dir_res = read_dir(0, dir_buf);
+        struct sys_dirent ent;
+        int dir_res = read_dir("/", 0, &ent);
         if (dir_res != 0) {
             print_console("[WORKER "); print_num(id); print_console("] ERROR: failed to read root directory.\n");
             exit(1);

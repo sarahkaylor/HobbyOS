@@ -67,91 +67,13 @@ void sanitize_command(const char *cmd, char *bin_out, char *arg_out) {
 }
 
 void handle_cd(const char *path, char *current_dir) {
-    if (!path || path[0] == '\0') {
-        current_dir[0] = '/';
-        current_dir[1] = '\0';
-        return;
-    }
-    if (path[0] == '/') {
-        int i = 0;
-        while (path[i] && i < 127) {
-            current_dir[i] = path[i];
-            i++;
-        }
-        current_dir[i] = '\0';
+    if (chdir(path) == 0) {
+        getcwd(current_dir, 128);
     } else {
-        int cur_len = 0;
-        while (current_dir[cur_len]) cur_len++;
-        if (cur_len > 1) {
-            current_dir[cur_len++] = '/';
-        }
-        int i = 0;
-        while (path[i] && (cur_len + i) < 127) {
-            current_dir[cur_len++] = path[i];
-            i++;
-        }
-        current_dir[cur_len] = '\0';
+        print("cd: no such file or directory: ");
+        print(path);
+        print("\n");
     }
-
-    char cleaned[128];
-    int c_len = 0;
-    cleaned[c_len++] = '/';
-
-    char *parts[16];
-    char temp_dir[128];
-    int t_len = 0;
-    while (current_dir[t_len]) {
-        temp_dir[t_len] = current_dir[t_len];
-        t_len++;
-    }
-    temp_dir[t_len] = '\0';
-
-    int part_count = 0;
-    char *p = temp_dir;
-    while (*p) {
-        while (*p == '/') {
-            *p = '\0';
-            p++;
-        }
-        if (*p == '\0') break;
-        parts[part_count++] = p;
-        while (*p && *p != '/') {
-            p++;
-        }
-    }
-
-    char *stack[16];
-    int stack_top = 0;
-    for (int i = 0; i < part_count; i++) {
-        if (parts[i][0] == '.' && parts[i][1] == '\0') {
-            continue;
-        }
-        if (parts[i][0] == '.' && parts[i][1] == '.' && parts[i][2] == '\0') {
-            if (stack_top > 0) stack_top--;
-        } else {
-            if (stack_top < 16) {
-                stack[stack_top++] = parts[i];
-            }
-        }
-    }
-
-    for (int i = 0; i < stack_top; i++) {
-        if (i > 0) {
-            cleaned[c_len++] = '/';
-        }
-        int j = 0;
-        while (stack[i][j]) {
-            cleaned[c_len++] = stack[i][j++];
-        }
-    }
-    cleaned[c_len] = '\0';
-
-    int i = 0;
-    while (cleaned[i]) {
-        current_dir[i] = cleaned[i];
-        i++;
-    }
-    current_dir[i] = '\0';
 }
 
 static void write_str(int fd, const char* str) {

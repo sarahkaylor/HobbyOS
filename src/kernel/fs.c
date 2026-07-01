@@ -368,3 +368,8 @@ void fs_reopen(int global_fd) {
     }
     spinlock_release_irqrestore(&f->lock, flags);
 }
+
+int file_mkdir(struct process *cur, const char *path) {
+    if (!cur || !path) return -1;
+    return fat16_mkdir(path);
+}

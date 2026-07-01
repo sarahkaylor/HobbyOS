@@ -58,16 +58,21 @@ int get_events(void *buf, int max_events) {
     return count;
 }
 
-int read_dir(int index, char *buf) {
+int read_dir(const char *path, int index, struct sys_dirent *ent) {
+    (void)path;
     if (index == 0) {
-        buf[0] = 'N'; buf[1] = 'E'; buf[2] = 'T'; buf[3] = 'T';
-        buf[4] = 'E'; buf[5] = 'S'; buf[6] = 'T'; buf[7] = '.';
-        buf[8] = 'B'; buf[9] = 'I'; buf[10] = 'N'; buf[11] = '\0';
+        ent->name[0] = 'N'; ent->name[1] = 'E'; ent->name[2] = 'T'; ent->name[3] = 'T';
+        ent->name[4] = 'E'; ent->name[5] = 'S'; ent->name[6] = 'T'; ent->name[7] = '.';
+        ent->name[8] = 'B'; ent->name[9] = 'I'; ent->name[10] = 'N'; ent->name[11] = '\0';
+        ent->attr = 0;
+        ent->size = 0;
         return 0;
     } else if (index == 1) {
-        buf[0] = 'E'; buf[1] = 'D'; buf[2] = 'I'; buf[3] = 'T';
-        buf[4] = 'O'; buf[5] = 'R'; buf[6] = '.'; buf[7] = 'B';
-        buf[8] = 'I'; buf[9] = 'N'; buf[10] = '\0';
+        ent->name[0] = 'E'; ent->name[1] = 'D'; ent->name[2] = 'I'; ent->name[3] = 'T';
+        ent->name[4] = 'O'; ent->name[5] = 'R'; ent->name[6] = '.'; ent->name[7] = 'B';
+        ent->name[8] = 'I'; ent->name[9] = 'N'; ent->name[10] = '\0';
+        ent->attr = 0;
+        ent->size = 0;
         return 0;
     }
     return -1;

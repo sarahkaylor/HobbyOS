@@ -24,6 +24,9 @@
 #define SYS_SYSINFO (21)
 #define SYS_UNLINK (22)
 #define SYS_RENAME (23)
+#define SYS_MKDIR (24)
+#define SYS_GETCWD (25)
+#define SYS_CHDIR (26)
 
 #ifdef __x86_64__
 static long syscall(long num, long a0, long a1, long a2, long a3) {
@@ -210,8 +213,12 @@ __attribute__((weak)) int get_events(void *buf, int max_events) {
 
 int available(int fd) { return (int)syscall(SYS_AVAILABLE, (long)fd, 0, 0, 0); }
 
-__attribute__((weak)) int read_dir(int index, char *buf) {
-  return (int)syscall(SYS_READ_DIR, (long)index, (long)buf, 0, 0);
+__attribute__((weak)) int read_dir(const char *path, int index, struct sys_dirent *ent) {
+  return (int)syscall(SYS_READ_DIR, (long)path, (long)index, (long)ent, 0);
+}
+
+int mkdir(const char *path) {
+  return (int)syscall(SYS_MKDIR, (long)path, 0, 0, 0);
 }
 
 void gui_add_menu(int idx, const char* name, const char* items) {
@@ -278,6 +285,14 @@ int unlink(const char *filename) {
 
 int rename(const char *oldname, const char *newname) {
   return (int)syscall(SYS_RENAME, (long)oldname, (long)newname, 0, 0);
+}
+
+char *getcwd(char *buf, size_t size) {
+  return (char *)syscall(SYS_GETCWD, (long)buf, (long)size, 0, 0);
+}
+
+int chdir(const char *path) {
+  return (int)syscall(SYS_CHDIR, (long)path, 0, 0, 0);
 }
 
 

@@ -54,6 +54,7 @@ int file_write(struct process *p, int fd, const void *buf, int size, struct trap
 int file_pipe(struct process *p, int fds[2]);
 int file_available(struct process *p, int fd);
 int file_connect(struct process *p, uint32_t ip, uint16_t port, int protocol);
+int file_mkdir(struct process *p, const char *path);
 
 // Helpers for process management
 /**
@@ -76,7 +77,6 @@ int fs_duplicate_fd(int global_fd);
  * Returns:
  *   0 on success, -1 if no more entries exist.
  */
-int fat16_read_dir(int index, char *out_name);
 void fs_close_global(int g_fd);
 
 #endif // FS_H
