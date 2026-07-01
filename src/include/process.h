@@ -81,6 +81,7 @@ struct process {
   int parent_pid; /**< PID of the process that created this one */
   int is_kernel_process; /**< Flag indicating if this is a kernel-only thread */
   char name[32];  /**< Name of the binary running in this process */
+  char args[256]; /**< Command line arguments passed to the process */
 
   /**
    * Saved CPU context used during context switching.

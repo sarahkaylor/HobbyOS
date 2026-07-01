@@ -73,7 +73,7 @@ void tail_fd(int fd, int want_lines) {
 
 int main(void) {
     char arg_buf[256];
-    read_arg_file("TAIL.ARG", arg_buf, sizeof(arg_buf));
+    get_args(arg_buf, sizeof(arg_buf));
 
     char *argv[16];
     int argc = parse_args(arg_buf, argv, 16);

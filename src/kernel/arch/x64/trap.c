@@ -32,6 +32,7 @@ extern void print_int(int val);
 #define SYS_YIELD (17)
 #define SYS_CONNECT (18)
 #define SYS_SLEEP (19)
+#define SYS_GET_ARGS (20)
 
 struct cpu_local {
     uint64_t kernel_stack;
@@ -140,6 +141,24 @@ static void sys_read(struct trap_frame *tf) {
   }
 }
 
+static void sys_get_args(struct trap_frame *tf) {
+  char *buf = (char *)tf->regs[5]; // rdi
+  int size = (int)tf->regs[4]; // rsi
+  struct process *cur = current_process();
+  if (cur && buf && (uint64_t)buf >= USER_VIRT_BASE &&
+      (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+    int i = 0;
+    while (cur->args[i] && i < size - 1) {
+      buf[i] = cur->args[i];
+      i++;
+    }
+    buf[i] = '\0';
+    tf->regs[0] = 0;
+  } else {
+    tf->regs[0] = -1;
+  }
+}
+
 static void sys_connect(struct trap_frame *tf) {
   uint32_t ip = (uint32_t)tf->regs[5]; // rdi
   uint16_t port = (uint16_t)tf->regs[4]; // rsi
@@ -183,14 +202,16 @@ static void sys_write(struct trap_frame *tf) {
   }
 }
 
-extern int load_and_run_program_in_scheduler(const char *filename, int stdin_fd, int stdout_fd, int caller_pid);
+extern int load_and_run_program_in_scheduler(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid);
 extern struct process *process_get_pcb(int pid);
 
 struct sys_spawn_args {
     char filename[32];
     int stdin_fd;
     int stdout_fd;
+    int stderr_fd;
     int caller_pid;
+    char args[256];
 };
 
 static struct sys_spawn_args spawn_args_pool[64];
@@ -198,7 +219,18 @@ extern void kernel_exit(void);
 
 static void sys_spawn_worker(void *arg) {
     struct sys_spawn_args *args = (struct sys_spawn_args *)arg;
-    int child_pid = load_and_run_program_in_scheduler(args->filename, args->stdin_fd, args->stdout_fd, args->caller_pid);
+    int child_pid = load_and_run_program_in_scheduler(args->filename, args->stdin_fd, args->stdout_fd, args->stderr_fd, args->caller_pid);
+    
+    struct process *child = process_get_pcb(child_pid);
+    if (child) {
+        int k = 0;
+        while (args->args[k] && k < 255) {
+            child->args[k] = args->args[k];
+            k++;
+        }
+        child->args[k] = '\0';
+    }
+
     struct process *caller = process_get_pcb(args->caller_pid);
     uart_puts("[KERNEL Debug] sys_spawn_worker: child_pid=");
     print_int(child_pid);
@@ -221,6 +253,8 @@ static void sys_spawn(struct trap_frame *tf) {
   const char *filename = (const char *)tf->regs[5]; // rdi
   int stdin_fd = (int)tf->regs[4]; // rsi
   int stdout_fd = (int)tf->regs[3]; // rdx
+  int stderr_fd = (int)tf->regs[2]; // rcx
+  const char *args_ptr = (const char *)tf->regs[7]; // r8
 
   struct process *caller = current_process();
   if (!caller) {
@@ -239,7 +273,20 @@ static void sys_spawn(struct trap_frame *tf) {
       args->filename[i] = '\0';
       args->stdin_fd = stdin_fd;
       args->stdout_fd = stdout_fd;
+      args->stderr_fd = stderr_fd;
       args->caller_pid = caller->pid;
+
+      if (args_ptr && (uint64_t)args_ptr >= USER_VIRT_BASE &&
+          (uint64_t)args_ptr < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+          int k = 0;
+          while (args_ptr[k] && k < 255) {
+              args->args[k] = args_ptr[k];
+              k++;
+          }
+          args->args[k] = '\0';
+      } else {
+          args->args[0] = '\0';
+      }
       
       extern spinlock_t proc_lock;
       uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
@@ -383,6 +430,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_connect(tf);
     } else if (syscall_num == SYS_SLEEP) {
       sys_sleep(tf);
+    } else if (syscall_num == SYS_GET_ARGS) {
+      sys_get_args(tf);
     } else if (syscall_num == 0xFF) {
       schedule(tf, 1);
     } else {

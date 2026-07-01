@@ -33,9 +33,10 @@ int write(int fd, const void *buf, int size);
 int kill(int pid, int sig);
 void yield(void);
 int connect(uint32_t ip, uint16_t port, int protocol);
-int spawn(const char *filename);
-int spawn2(const char *filename, int stdin_fd, int stdout_fd);
+int spawn(const char *filename, const char *args);
+int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args);
 int pipe(int fds[2]);
+int get_args(char *buf, int size);
 
 void gui_add_menu(int idx, const char* name, const char* items);
 
@@ -62,6 +63,5 @@ int available(int fd);
 int read_dir(int index, char *buf);
 
 int parse_args(char *arg_str, char *argv[], int max_args);
-int read_arg_file(const char *arg_file, char *buf, int max_len);
 
 #endif

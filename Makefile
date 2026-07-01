@@ -379,14 +379,6 @@ endif
 	/opt/homebrew/bin/mcopy -i disk.img $(TAIL_BIN) ::/TAIL.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(HEAD_BIN) ::/HEAD.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(SHELL_TEST_BIN) ::/SHTEST.BIN
-	touch SH.ARG CAT.ARG GREP.ARG LESS.ARG TAIL.ARG HEAD.ARG
-	/opt/homebrew/bin/mcopy -i disk.img SH.ARG ::/SH.ARG
-	/opt/homebrew/bin/mcopy -i disk.img CAT.ARG ::/CAT.ARG
-	/opt/homebrew/bin/mcopy -i disk.img GREP.ARG ::/GREP.ARG
-	/opt/homebrew/bin/mcopy -i disk.img LESS.ARG ::/LESS.ARG
-	/opt/homebrew/bin/mcopy -i disk.img TAIL.ARG ::/TAIL.ARG
-	/opt/homebrew/bin/mcopy -i disk.img HEAD.ARG ::/HEAD.ARG
-	rm -f SH.ARG CAT.ARG GREP.ARG LESS.ARG TAIL.ARG HEAD.ARG
 	echo "HobbyOS Terminal Test File" > SHTEST.TXT
 	echo "This is line number two." >> SHTEST.TXT
 	echo "Line three is right here." >> SHTEST.TXT

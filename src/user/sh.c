@@ -154,13 +154,73 @@ void handle_cd(const char *path, char *current_dir) {
     current_dir[i] = '\0';
 }
 
-void write_args(const char *arg_file, const char *args) {
-    int fd = open(arg_file);
-    if (fd >= 0) {
-        int len = 0;
-        while (args[len]) len++;
-        write(fd, args, len + 1);
-        close(fd);
+static void write_str(int fd, const char* str) {
+    int len = 0;
+    while (str[len]) len++;
+    write(fd, str, len);
+}
+
+static void parse_redirection(char* cmd_line, char* out_file, char* err_file) {
+    out_file[0] = '\0';
+    err_file[0] = '\0';
+    
+    int i = 0;
+    while (cmd_line[i]) {
+        if ((cmd_line[i] == '1' || cmd_line[i] == '2') && cmd_line[i+1] == '>') {
+            int is_err = (cmd_line[i] == '2');
+            int op_start = i;
+            i += 2;
+            while (cmd_line[i] == ' ' || cmd_line[i] == '\t') i++;
+            int file_start = i;
+            while (cmd_line[i] && cmd_line[i] != ' ' && cmd_line[i] != '\t' && cmd_line[i] != '>' && cmd_line[i] != '|') i++;
+            int file_len = i - file_start;
+            if (file_len > 0) {
+                char* target = is_err ? err_file : out_file;
+                int k = 0;
+                while (k < file_len && k < 63) {
+                    target[k] = cmd_line[file_start + k];
+                    k++;
+                }
+                target[k] = '\0';
+                
+                int shift_len = i - op_start;
+                int m = op_start;
+                while (cmd_line[m + shift_len]) {
+                    cmd_line[m] = cmd_line[m + shift_len];
+                    m++;
+                }
+                cmd_line[m] = '\0';
+                i = 0;
+                continue;
+            }
+        }
+        else if (cmd_line[i] == '>') {
+            int op_start = i;
+            i += 1;
+            while (cmd_line[i] == ' ' || cmd_line[i] == '\t') i++;
+            int file_start = i;
+            while (cmd_line[i] && cmd_line[i] != ' ' && cmd_line[i] != '\t' && cmd_line[i] != '>' && cmd_line[i] != '|') i++;
+            int file_len = i - file_start;
+            if (file_len > 0) {
+                int k = 0;
+                while (k < file_len && k < 63) {
+                    out_file[k] = cmd_line[file_start + k];
+                    k++;
+                }
+                out_file[k] = '\0';
+                
+                int shift_len = i - op_start;
+                int m = op_start;
+                while (cmd_line[m + shift_len]) {
+                    cmd_line[m] = cmd_line[m + shift_len];
+                    m++;
+                }
+                cmd_line[m] = '\0';
+                i = 0;
+                continue;
+            }
+        }
+        i++;
     }
 }
 
@@ -169,13 +229,47 @@ void execute_command(const char *cmd_line) {
     trim_spaces(trimmed, cmd_line);
     if (trimmed[0] == '\0') return;
 
+    char out_file[64];
+    char err_file[64];
+    parse_redirection(trimmed, out_file, err_file);
+
+    char cleaned_cmd[256];
+    trim_spaces(cleaned_cmd, trimmed);
+    int m = 0;
+    while (cleaned_cmd[m]) {
+        trimmed[m] = cleaned_cmd[m];
+        m++;
+    }
+    trimmed[m] = '\0';
+    if (trimmed[0] == '\0') return;
+
+    int out_fd = -1;
+    int err_fd = -1;
+    if (out_file[0] != '\0') {
+        out_fd = open(out_file);
+        if (out_fd < 0) {
+            print("sh: failed to open stdout redirect file\n");
+            return;
+        }
+    }
+    if (err_file[0] != '\0') {
+        err_fd = open(err_file);
+        if (err_fd < 0) {
+            if (out_fd >= 0) close(out_fd);
+            print("sh: failed to open stderr redirect file\n");
+            return;
+        }
+    }
+
+    int stdout_param = (out_fd >= 0) ? out_fd : 1;
+    int stderr_param = (err_fd >= 0) ? err_fd : 2;
+
     int is_bg = 0;
     int len = 0;
     while (trimmed[len]) len++;
     if (len > 0 && trimmed[len - 1] == '&') {
         is_bg = 1;
         trimmed[len - 1] = '\0';
-        // trim spaces again
         char temp[256];
         trim_spaces(temp, trimmed);
         int i = 0;
@@ -202,7 +296,6 @@ void execute_command(const char *cmd_line) {
         trim_spaces(left, trimmed);
         trim_spaces(right, trimmed + pipe_idx + 1);
 
-        // Parse left command name and args
         char left_cmd[32];
         char left_args[128];
         int i = 0;
@@ -218,7 +311,6 @@ void execute_command(const char *cmd_line) {
         }
         left_args[j] = '\0';
 
-        // Parse right command name and args
         char right_cmd[32];
         char right_args[128];
         i = 0;
@@ -234,23 +326,22 @@ void execute_command(const char *cmd_line) {
         }
         right_args[j] = '\0';
 
-        // Create pipe
         int p[2];
         if (pipe(p) != 0) {
             print("sh: failed to create pipe\n");
+            if (out_fd >= 0) close(out_fd);
+            if (err_fd >= 0) close(err_fd);
             return;
         }
 
         char left_bin[32], left_arg_file[32];
         sanitize_command(left_cmd, left_bin, left_arg_file);
-        write_args(left_arg_file, left_args);
 
         char right_bin[32], right_arg_file[32];
         sanitize_command(right_cmd, right_bin, right_arg_file);
-        write_args(right_arg_file, right_args);
 
-        int pid_left = spawn2(left_bin, 0, p[1]);
-        int pid_right = spawn2(right_bin, p[0], 1);
+        int pid_left = spawn2(left_bin, 0, p[1], stderr_param, left_args);
+        int pid_right = spawn2(right_bin, p[0], stdout_param, stderr_param, right_args);
 
         close(p[0]);
         close(p[1]);
@@ -262,10 +353,12 @@ void execute_command(const char *cmd_line) {
         } else {
             print("sh: failed to spawn piped commands\n");
         }
+
+        if (out_fd >= 0) close(out_fd);
+        if (err_fd >= 0) close(err_fd);
         return;
     }
 
-    // Normal command (non-piped)
     char cmd_name[32];
     char args[128];
     int i = 0;
@@ -284,24 +377,30 @@ void execute_command(const char *cmd_line) {
 
     if (cmd_name[0] == 'c' && cmd_name[1] == 'd' && cmd_name[2] == '\0') {
         handle_cd(args, current_dir);
+    } else if (cmd_name[0] == 'c' && cmd_name[1] == 'l' && cmd_name[2] == 'e' && cmd_name[3] == 'a' && cmd_name[4] == 'r' && cmd_name[5] == '\0') {
+        write_str(stdout_param, "\033[2J\033[H\f");
+    } else if (cmd_name[0] == 'e' && cmd_name[1] == 'c' && cmd_name[2] == 'h' && cmd_name[3] == 'o' && cmd_name[4] == '\0') {
+        write_str(stdout_param, args);
+        write_str(stdout_param, "\n");
     } else if (cmd_name[0] == 'h' && cmd_name[1] == 'e' && cmd_name[2] == 'l' && cmd_name[3] == 'p' && cmd_name[4] == '\0') {
-        print("HobbyOS Bash-like Shell\n");
-        print("Available Built-ins:\n");
-        print("  cd [dir]   - Change directory (simulated)\n");
-        print("  help       - Display this help message\n");
-        print("Available External Commands:\n");
-        print("  ls         - List files in current directory\n");
-        print("  cat        - Concat and display files\n");
-        print("  grep       - Search for pattern in files or stdin\n");
-        print("  less       - File pager\n");
-        print("  tail       - Display last lines of a file\n");
-        print("  head       - Display first lines of a file\n");
+        write_str(stdout_param, "HobbyOS Bash-like Shell\n");
+        write_str(stdout_param, "Available Built-ins:\n");
+        write_str(stdout_param, "  cd [dir]   - Change directory (simulated)\n");
+        write_str(stdout_param, "  help       - Display this help message\n");
+        write_str(stdout_param, "  clear      - Clear terminal screen\n");
+        write_str(stdout_param, "  echo [msg] - Print message\n");
+        write_str(stdout_param, "Available External Commands:\n");
+        write_str(stdout_param, "  ls         - List files in current directory\n");
+        write_str(stdout_param, "  cat        - Concat and display files\n");
+        write_str(stdout_param, "  grep       - Search for pattern in files or stdin\n");
+        write_str(stdout_param, "  less       - File pager\n");
+        write_str(stdout_param, "  tail       - Display last lines of a file\n");
+        write_str(stdout_param, "  head       - Display first lines of a file\n");
     } else {
         char bin_file[32], arg_file[32];
         sanitize_command(cmd_name, bin_file, arg_file);
-        write_args(arg_file, args);
 
-        int pid = spawn2(bin_file, 0, 1);
+        int pid = spawn2(bin_file, 0, stdout_param, stderr_param, args);
         if (pid < 0) {
             print("sh: command not found: ");
             print(cmd_name);
@@ -320,6 +419,9 @@ void execute_command(const char *cmd_line) {
             }
         }
     }
+
+    if (out_fd >= 0) close(out_fd);
+    if (err_fd >= 0) close(err_fd);
 }
 
 int main(void) {

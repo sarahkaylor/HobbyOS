@@ -67,7 +67,7 @@ int load_and_run_program(const char* filename) {
  * Returns:
  *   The PID of the new process, or -1 on failure.
  */
-int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int stdout_fd, int caller_pid) {
+int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid) {
     if (!filename) return -1;
     uart_puts("Loading program for scheduler: ");
     uart_puts(filename);
@@ -133,6 +133,7 @@ int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int st
         uart_puts(" name="); uart_puts(parent->name);
         uart_puts(" stdin_fd="); print_int(stdin_fd);
         uart_puts(" stdout_fd="); print_int(stdout_fd);
+        uart_puts(" stderr_fd="); print_int(stderr_fd);
         uart_puts("\n[FD_DBG] parent fds: ");
         for (int i = 0; i < 8; i++) {
             print_int(parent->open_fds[i]); uart_puts(" ");
@@ -154,6 +155,22 @@ int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int st
             uart_puts("Inherited stdout_fd="); print_int(stdout_fd); uart_puts("\n");
         } else {
             uart_puts("Failed to inherit stdout_fd="); print_int(stdout_fd); uart_puts("\n");
+        }
+        if (stderr_fd >= 0 && stderr_fd < MAX_OPEN_FDS && parent->open_fds[stderr_fd] != -1) {
+            child->open_fds[2] = parent->open_fds[stderr_fd];
+            fs_reopen(child->open_fds[2]);
+            child->num_open_fds++;
+            uart_puts("Inherited stderr_fd="); print_int(stderr_fd); uart_puts("\n");
+        } else {
+            // Default: inherit parent's fd 2 if not explicitly specified / redirected
+            if (parent->open_fds[2] != -1) {
+                child->open_fds[2] = parent->open_fds[2];
+                fs_reopen(child->open_fds[2]);
+                child->num_open_fds++;
+                uart_puts("Inherited default stderr_fd=2\n");
+            } else {
+                uart_puts("Failed to inherit stderr_fd\n");
+            }
         }
     } else {
         uart_puts("No parent or child for fd inheritance.\n");

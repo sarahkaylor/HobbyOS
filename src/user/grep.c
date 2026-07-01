@@ -56,7 +56,7 @@ void grep_fd(int fd, const char *pattern) {
 
 int main(void) {
     char arg_buf[256];
-    read_arg_file("GREP.ARG", arg_buf, sizeof(arg_buf));
+    get_args(arg_buf, sizeof(arg_buf));
 
     char *argv[16];
     int argc = parse_args(arg_buf, argv, 16);

@@ -12,6 +12,15 @@ char keymap[128] = {0,    27,  '1', '2',  '3',  '4',  '5', '6', '7',  '8',
                     '\'', '`', 0,   '\\', 'z',  'x',  'c', 'v', 'b',  'n',
                     'm',  ',', '.', '/',  0,    '*',  0,   ' ', 0};
 
+char shift_keymap[128] = {0,    27,  '!', '@',  '#',  '$',  '%', '^', '&',  '*',
+                          '(',  ')', '_', '+',  '\b', '\t', 'Q', 'W', 'E',  'R',
+                          'T',  'Y', 'U', 'I',  'O',  'P',  '{', '}', '\n', 0,
+                          'A',  'S', 'D', 'F',  'G',  'H',  'J', 'K', 'L',  ':',
+                          '"',  '~', 0,   '|',  'Z',  'X',  'C', 'V', 'B',  'N',
+                          'M',  '<', '>', '?',  0,    '*',  0,   ' ', 0};
+
+static int shift_pressed = 0;
+
 #define MAX_MENU_ITEMS 32
 char menu_items[MAX_MENU_ITEMS][16];
 int num_menu_items = 0;
@@ -174,6 +183,10 @@ int main(void) {
       struct virtio_input_event *ev = &events[i];
 
       if (ev->type == EV_KEY) {
+        if (ev->code == 42 || ev->code == 54) {
+            shift_pressed = ev->value;
+            continue;
+        }
         if (ev->code == 0x110) { // BTN_LEFT (mouse click)
           
             if (ev->value == 1) {  // press
@@ -205,7 +218,7 @@ int main(void) {
                 pipe(in_pipe);
                 pipe(out_pipe);
 
-                int pid = spawn2(menu_items[selected], in_pipe[0], out_pipe[1]);
+                int pid = spawn2(menu_items[selected], in_pipe[0], out_pipe[1], -1, 0);
                 if (pid >= 0) {
                   focused_window = wm_create_window(COLOR(20, 20, 50), pid,
                                                     out_pipe[0], in_pipe[1]);
@@ -272,7 +285,7 @@ int main(void) {
           }
         } else if (ev->value == 1) { // Key press
           if (ev->code < 128) {
-            char c = keymap[ev->code];
+            char c = shift_pressed ? shift_keymap[ev->code] : keymap[ev->code];
             if (c) {
               if (focused_window >= 0) {
                 // Find window to get its stdin_fd

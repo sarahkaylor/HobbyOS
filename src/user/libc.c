@@ -20,6 +20,7 @@
 #define SYS_YIELD (17)
 #define SYS_CONNECT (18)
 #define SYS_SLEEP (19)
+#define SYS_GET_ARGS (20)
 
 #ifdef __x86_64__
 static long syscall(long num, long a0, long a1, long a2, long a3) {
@@ -34,6 +35,19 @@ static long syscall(long num, long a0, long a1, long a2, long a3) {
                    : "rcx", "r11", "memory");
   return ret;
 }
+static long syscall5(long num, long a0, long a1, long a2, long a3, long a4) {
+  long ret;
+  register long rdi __asm__("rdi") = a0;
+  register long rsi __asm__("rsi") = a1;
+  register long rdx __asm__("rdx") = a2;
+  register long r10 __asm__("r10") = a3;
+  register long r8  __asm__("r8")  = a4;
+  __asm__ volatile("syscall\n"
+                   : "=a"(ret)
+                   : "a"(num), "r"(rdi), "r"(rsi), "r"(rdx), "r"(r10), "r"(r8)
+                   : "rcx", "r11", "memory");
+  return ret;
+}
 #else
 static long syscall(long num, long a0, long a1, long a2, long a3) {
   register long x8 __asm__("x8") = num;
@@ -44,6 +58,19 @@ static long syscall(long num, long a0, long a1, long a2, long a3) {
   __asm__ volatile("svc #0\n"
                    : "+r"(x0)
                    : "r"(x8), "r"(x1), "r"(x2), "r"(x3)
+                   : "memory");
+  return x0;
+}
+static long syscall5(long num, long a0, long a1, long a2, long a3, long a4) {
+  register long x8 __asm__("x8") = num;
+  register long x0 __asm__("x0") = a0;
+  register long x1 __asm__("x1") = a1;
+  register long x2 __asm__("x2") = a2;
+  register long x3 __asm__("x3") = a3;
+  register long x4 __asm__("x4") = a4;
+  __asm__ volatile("svc #0\n"
+                   : "+r"(x0)
+                   : "r"(x8), "r"(x1), "r"(x2), "r"(x3), "r"(x4)
                    : "memory");
   return x0;
 }
@@ -120,14 +147,18 @@ void sleep(int ms) {
   syscall(SYS_SLEEP, (long)ms, 0, 0, 0);
 }
 
-int spawn2(const char *filename, int stdin_fd, int stdout_fd) {
-  return (int)syscall(SYS_SPAWN, (long)filename, (long)stdin_fd,
-                      (long)stdout_fd, 0);
+int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args) {
+  return (int)syscall5(SYS_SPAWN, (long)filename, (long)stdin_fd,
+                       (long)stdout_fd, (long)stderr_fd, (long)args);
 }
 
-int spawn(const char *filename) {
+int spawn(const char *filename, const char *args) {
   int fd = -1;
-  return spawn2(filename, fd, fd);
+  return spawn2(filename, fd, fd, fd, args);
+}
+
+int get_args(char *buf, int size) {
+  return (int)syscall(SYS_GET_ARGS, (long)buf, (long)size, 0, 0);
 }
 
 int pipe(int fds[2]) {
@@ -207,15 +238,4 @@ int parse_args(char *arg_str, char *argv[], int max_args) {
   return argc;
 }
 
-int read_arg_file(const char *arg_file, char *buf, int max_len) {
-  int fd = open(arg_file);
-  if (fd < 0) {
-    buf[0] = '\0';
-    return 0;
-  }
-  int n = read(fd, buf, max_len - 1);
-  if (n < 0) n = 0;
-  buf[n] = '\0';
-  close(fd);
-  return n;
-}
+

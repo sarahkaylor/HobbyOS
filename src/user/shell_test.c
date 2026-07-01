@@ -62,7 +62,7 @@ int main(void) {
         return 1;
     }
     
-    int pid = spawn2("SH.BIN", in_p[0], out_p[1]);
+    int pid = spawn2("SH.BIN", in_p[0], out_p[1], -1, 0);
     if (pid < 0) {
         print_console("shell_test: failed to spawn SH.BIN\n");
         return 1;
@@ -119,6 +119,44 @@ int main(void) {
         return 1;
     }
     print_console("[TEST] Piped command output validated successfully.\n");
+    
+    // 5a. Send 'echo hello'
+    print_console("[TEST] Sending 'echo hello' command...\n");
+    write(in_p[1], "echo hello\n", 11);
+    read_until(out_p[0], buf, sizeof(buf), "$ ");
+    if (!my_strstr(buf, "hello")) {
+        print_console("shell_test: FAILED echo validation\n");
+        return 1;
+    }
+    print_console("[TEST] 'echo' command validated successfully.\n");
+
+    // 5b. Send 'clear'
+    print_console("[TEST] Sending 'clear' command...\n");
+    write(in_p[1], "clear\n", 6);
+    read_until(out_p[0], buf, sizeof(buf), "$ ");
+    if (!my_strstr(buf, "\f")) {
+        print_console("shell_test: FAILED clear validation\n");
+        return 1;
+    }
+    print_console("[TEST] 'clear' command validated successfully.\n");
+
+    // 5c. Send 'echo redirected > OUT.TXT'
+    print_console("[TEST] Sending 'echo redirected > OUT.TXT' command...\n");
+    write(in_p[1], "echo redirected > OUT.TXT\n", 26);
+    read_until(out_p[0], buf, sizeof(buf), "$ ");
+    print_console("[TEST] Redirection command sent.\n");
+
+    // 5d. Send 'cat OUT.TXT'
+    print_console("[TEST] Sending 'cat OUT.TXT' command...\n");
+    write(in_p[1], "cat OUT.TXT\n", 12);
+    read_until(out_p[0], buf, sizeof(buf), "$ ");
+    if (!my_strstr(buf, "redirected")) {
+        print_console("shell_test: FAILED redirection content validation. Buffer: ");
+        print_console(buf);
+        print_console("\n");
+        return 1;
+    }
+    print_console("[TEST] Redirection content validated successfully.\n");
     
     // 6. Close input pipe (EOF)
     print_console("[TEST] Closing input pipe (sending EOF)...\n");

@@ -128,6 +128,25 @@ extern void uart_puts(const char* s);
  * Returns:
  *   0 on success, -1 if the file is not found or an error occurs.
  */
+static void format_83(const char* query, char* formatted) {
+    for (int i = 0; i < 11; i++) formatted[i] = ' ';
+    int i = 0, j = 0;
+    while (query[i] && query[i] != '.' && j < 8) {
+        char c = query[i++];
+        if (c >= 'a' && c <= 'z') c -= 32;
+        formatted[j++] = c;
+    }
+    while (query[i] && query[i] != '.') i++;
+    if (query[i] == '.') {
+        i++; j = 8;
+        while (query[i] && j < 11) {
+            char c = query[i++];
+            if (c >= 'a' && c <= 'z') c -= 32;
+            formatted[j++] = c;
+        }
+    }
+}
+
 int fat16_open(const char* filename, struct file* f) {
     uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
     uint8_t buf[SECTOR_SIZE];
@@ -156,6 +175,54 @@ int fat16_open(const char* filename, struct file* f) {
             }
         }
     }
+
+    // Auto-create file if not found
+    for (uint32_t i = 0; i < root_dir_sectors; i++) {
+        spinlock_release_irqrestore(&fat_lock, flags);
+        if (virtio_blk_read_sector(root_dir_sector + i, buf, 1) != 0) {
+            return -1;
+        }
+        flags = spinlock_acquire_irqsave(&fat_lock);
+
+        struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
+        for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
+            if (entries[j].name[0] == 0x00 || entries[j].name[0] == (char)0xE5) {
+                // Initialize entry
+                struct fat16_dir_entry new_entry;
+                char formatted_name[11];
+                format_83(filename, formatted_name);
+                for (int k = 0; k < 11; k++) {
+                    new_entry.name[k] = formatted_name[k];
+                }
+                new_entry.attr = 0;
+                for (int k = 0; k < 10; k++) {
+                    new_entry.reserved[k] = 0;
+                }
+                new_entry.time = 0;
+                new_entry.date = 0;
+                new_entry.start_cluster = 0;
+                new_entry.file_size = 0;
+
+                entries[j] = new_entry;
+
+                spinlock_release_irqrestore(&fat_lock, flags);
+                if (virtio_blk_write_sector(root_dir_sector + i, buf, 1) != 0) {
+                    return -1;
+                }
+                flags = spinlock_acquire_irqsave(&fat_lock);
+
+                f->type = FILE_TYPE_FAT16;
+                f->fat16.entry = new_entry;
+                f->fat16.dir_sector = root_dir_sector + i;
+                f->fat16.dir_offset = j;
+                f->fat16.cursor = 0;
+
+                spinlock_release_irqrestore(&fat_lock, flags);
+                return 0;
+            }
+        }
+    }
+
     spinlock_release_irqrestore(&fat_lock, flags);
     return -1;
 }

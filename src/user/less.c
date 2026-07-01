@@ -39,7 +39,7 @@ void draw_page(int current_line) {
 
 int main(void) {
     char arg_buf[256];
-    read_arg_file("LESS.ARG", arg_buf, sizeof(arg_buf));
+    get_args(arg_buf, sizeof(arg_buf));
 
     char *argv[16];
     int argc = parse_args(arg_buf, argv, 16);
