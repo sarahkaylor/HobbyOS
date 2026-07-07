@@ -112,6 +112,7 @@ IFCONFIG_BIN = $(OBJ_DIR)/ifconfig.bin
 SHELL_TEST2_BIN = $(OBJ_DIR)/shtest2.bin
 MKDIR_BIN = $(OBJ_DIR)/mkdir.bin
 SHELL_TEST3_BIN = $(OBJ_DIR)/shtest3.bin
+PONG_BIN = $(OBJ_DIR)/pong.bin
 
 # Default rule: build the target
 all: $(TARGET)
@@ -481,8 +482,15 @@ $(SHELL_TEST3_BIN): $(OBJ_DIR)/shell_test3.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/u
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/shtest3.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/shtest3.elf $(SHELL_TEST3_BIN)
 
+$(OBJ_DIR)/pong.o: src/user/pong.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(STRESS_TEST_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(MODE_FILE)
+$(PONG_BIN): $(OBJ_DIR)/pong.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_graphics.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/pong.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/pong.elf $(PONG_BIN)
+
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(STRESS_TEST_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img 
 	/opt/homebrew/bin/mmd -i disk.img ::/EFI
@@ -551,6 +559,7 @@ endif
 	/opt/homebrew/bin/mcopy -i disk.img $(SHELL_TEST2_BIN) ::/SHTEST2.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(MKDIR_BIN) ::/MKDIR.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(SHELL_TEST3_BIN) ::/SHTEST3.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(PONG_BIN) ::/PONG.BIN
 	echo "HobbyOS Terminal Test File" > SHTEST.TXT
 	echo "This is line number two." >> SHTEST.TXT
 	echo "Line three is right here." >> SHTEST.TXT
@@ -629,8 +638,13 @@ EDITOR_TEST_BIN = editor_test_host
 $(EDITOR_TEST_BIN): obj/host_editor_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o
 	$(HOST_CC) -o $@ $^
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN)
+PONG_TEST_BIN = pong_test_host
+$(PONG_TEST_BIN): obj/host_pong_test.o obj/host_user_graphics_graphics.o obj/host_compat.o
+	$(HOST_CC) -o $@ $^
+
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(PONG_TEST_BIN)
 	./$(EDITOR_TEST_BIN)
+	./$(PONG_TEST_BIN)
 
 # --- Architecture Specific Targets ---
 
