@@ -274,7 +274,7 @@ static void handle_input(void) {
 
 /* --- Main entry point --- */
 
-#ifndef HOST_TEST
+#if !defined(HOST_TEST) && !defined(PONG_TEST_WRAPPER)
 __attribute__((section(".text._start")))
 #endif
 void _start(void) {
