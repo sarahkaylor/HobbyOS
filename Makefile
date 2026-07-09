@@ -45,6 +45,9 @@ else ifeq ($(MODE),unit_tests)
 else ifeq ($(MODE),desktop_test)
   CFLAGS += -DKERNEL_MODE_DESKTOP_TEST
   USER_CFLAGS += -DDESKTOP_TEST_AUTO_LAUNCH
+else ifeq ($(MODE),pong_test)
+  CFLAGS += -DKERNEL_MODE_PONG_TEST
+  USER_CFLAGS += -DDESKTOP_TEST_AUTO_LAUNCH
 else
   CFLAGS += -DKERNEL_MODE_DESKTOP
 endif
@@ -84,6 +87,7 @@ TIMEOUT_BIN = $(OBJ_DIR)/timeout.bin
 DESKTOP_BIN = $(OBJ_DIR)/desktop.bin
 EDITOR_BIN = $(OBJ_DIR)/editor.bin
 EDITOR_T_BIN = $(OBJ_DIR)/EDITOR_T.BIN
+PONG_T_BIN = $(OBJ_DIR)/PONG_T.BIN
 STRESS_TEST_BIN = $(OBJ_DIR)/stress.bin
 
 SH_BIN = $(OBJ_DIR)/sh.bin
@@ -281,6 +285,14 @@ $(EDITOR_BIN): $(OBJ_DIR)/editor.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc
 $(EDITOR_T_BIN): $(OBJ_DIR)/user_editor_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/editor_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/editor_test.elf $(EDITOR_T_BIN)
+
+$(OBJ_DIR)/user_pong_test.o: src/user/pong_test.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(PONG_T_BIN): $(OBJ_DIR)/user_pong_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/pong_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/pong_test.elf $(PONG_T_BIN)
 
 $(OBJ_DIR)/sh.o: src/user/sh.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
@@ -490,7 +502,7 @@ $(PONG_BIN): $(OBJ_DIR)/pong.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/pong.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/pong.elf $(PONG_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(STRESS_TEST_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img 
 	/opt/homebrew/bin/mmd -i disk.img ::/EFI
@@ -533,6 +545,7 @@ endif
 	/opt/homebrew/bin/mcopy -i disk.img $(DESKTOP_BIN) ::/DESKTOP.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(EDITOR_BIN) ::/EDITOR.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(EDITOR_T_BIN) ::/EDITOR_T.BIN
+	/opt/homebrew/bin/mcopy -i disk.img $(PONG_T_BIN) ::/PONG_T.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(STRESS_TEST_BIN) ::/STRESS.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(SH_BIN) ::/SH.BIN
 	/opt/homebrew/bin/mcopy -i disk.img $(LS_BIN) ::/LS.BIN
@@ -605,6 +618,9 @@ unit_tests:
 
 desktop_test_run:
 	$(MAKE) MODE=desktop_test run
+
+pong_test_run:
+	$(MAKE) MODE=pong_test run
 
 desktop_test:
 	python3 ./run_desktop_test.py
