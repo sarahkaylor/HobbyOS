@@ -68,7 +68,7 @@ void print_hex(long val) {
     printf("0x%016lx", val);
 }
 
-int spawn2(const char *filename, int stdin_fd, int stdout_fd) {
+int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args) {
     pid_t pid = fork();
     if (pid < 0) return -1;
     if (pid == 0) {
@@ -80,21 +80,26 @@ int spawn2(const char *filename, int stdin_fd, int stdout_fd) {
             dup2(stdout_fd, 1);
             close(stdout_fd);
         }
+        if (stderr_fd >= 0 && stderr_fd != 2) {
+            dup2(stderr_fd, 2);
+            close(stderr_fd);
+        }
         
         // Append _host to filename to execute the host version
         char host_filename[256];
         snprintf(host_filename, sizeof(host_filename), "./%s_host", filename);
         
-        char *args[] = {host_filename, NULL};
-        execv(host_filename, args);
+        char *argv[] = {host_filename, NULL};
+        execv(host_filename, argv);
         perror("execv failed");
         exit(1);
     }
     return pid;
 }
 
-int spawn(const char *filename) {
-    return spawn2(filename, -1, -1);
+int spawn(const char *filename, const char *args) {
+    (void)args;
+    return spawn2(filename, -1, -1, -1, NULL);
 }
 
 void *map_fb(void) {
@@ -156,9 +161,12 @@ int available(int fd) {
 }
 
 // Read host current directory for mock read_dir
-int read_dir(int index, char *buf) {
+int read_dir(const char *path, int index, struct sys_dirent *ent) {
+    (void)path;
     if (index == 0) {
-        strcpy(buf, "EDITOR.BIN");
+        memset(ent, 0, sizeof(*ent));
+        strcpy(ent->name, "EDITOR.BIN");
+        ent->size = 0;
         return 0;
     }
     return -1;
