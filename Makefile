@@ -1,10 +1,38 @@
 # Default architecture
 ARCH ?= arm
 
-# Compiler and flags
-CC = /opt/homebrew/opt/llvm/bin/clang
-LD = /opt/homebrew/bin/ld.lld
-OBJCOPY = /opt/homebrew/opt/llvm/bin/llvm-objcopy
+# --- OS Detection ---
+# Detect whether we are on macOS (Homebrew) or Linux (system packages)
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+  OS := macos
+else
+  OS := linux
+endif
+
+# --- Tool paths ---
+# On macOS, tools are in /opt/homebrew; on Linux, use system PATH
+ifeq ($(OS),macos)
+  CC = /opt/homebrew/opt/llvm/bin/clang
+  LD = /opt/homebrew/bin/ld.lld
+  OBJCOPY = /opt/homebrew/opt/llvm/bin/llvm-objcopy
+  MMD = /opt/homebrew/bin/mmd
+  MCOPY = /opt/homebrew/bin/mcopy
+  MKFS_FAT = /opt/homebrew/sbin/mkfs.fat
+  EDK2_X86_64 = /opt/homebrew/share/qemu/edk2-x86_64-code.fd
+  EDK2_AARCH64 = /opt/homebrew/share/qemu/edk2-aarch64-code.fd
+  QEMU_DISPLAY = cocoa
+else
+  CC = clang
+  LD = ld.lld
+  OBJCOPY = llvm-objcopy
+  MMD = mmd
+  MCOPY = mcopy
+  MKFS_FAT = mkfs.fat
+  EDK2_X86_64 = $(HOME)/.local/share/OVMF/OVMF_CODE_4M.fd
+  EDK2_AARCH64 = $(HOME)/.local/share/AAVMF/AAVMF_CODE.fd
+  QEMU_DISPLAY = gtk
+endif
 
 # Mode selection (desktop or test)
 MODE ?= desktop
@@ -18,7 +46,7 @@ $(shell mkdir -p $(OBJ_DIR) && echo $(MODE) > $(MODE_FILE))
 endif
 
 ifeq ($(ARCH),intel)
-  QEMU = /opt/homebrew/bin/qemu-system-x86_64
+  QEMU = qemu-system-x86_64
   # Intel/AMD 64-bit compiler flags
   # Using standard bare-metal flags, disabling red zone and SSE
   CFLAGS = -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
@@ -26,16 +54,16 @@ ifeq ($(ARCH),intel)
   ARCH_DIR = src/kernel/arch/x64
   LDFLAGS = -T linker_x64.ld
   # QEMU parameters for x86_64: 8 cores, 3GB RAM, mounting disk.img as NVMe, booting with UEFI
-  QEMU_CMD = $(QEMU) -M q35 -smp 8 -m 3072M -pflash /opt/homebrew/share/qemu/edk2-x86_64-code.fd -display cocoa -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff $(QEMU_ARGS)
+  QEMU_CMD = $(QEMU) -M q35 -smp 8 -m 3072M -pflash $(EDK2_X86_64) -display $(QEMU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff $(QEMU_ARGS)
 else
   # Default to ARM
-  QEMU = /opt/homebrew/bin/qemu-system-aarch64
+  QEMU = qemu-system-aarch64
   CFLAGS = -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
   USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
   ARCH_DIR = src/kernel/arch/arm
   LDFLAGS = -T linker.ld
   # QEMU parameters for ARM: 8 cores, 2GB RAM, booting with UEFI
-  QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp 4 -m 2048M -bios /opt/homebrew/share/qemu/edk2-aarch64-code.fd -display cocoa -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
+  QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp 4 -m 2048M -bios $(EDK2_AARCH64) -display $(QEMU_DISPLAY) -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
 endif
 
 ifeq ($(MODE),test)
@@ -504,13 +532,13 @@ $(PONG_BIN): $(OBJ_DIR)/pong.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $
 
 disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
-	/opt/homebrew/sbin/mkfs.fat -F 16 disk.img 
-	/opt/homebrew/bin/mmd -i disk.img ::/EFI
-	/opt/homebrew/bin/mmd -i disk.img ::/EFI/BOOT
-	/opt/homebrew/bin/mmd -i disk.img ::/boot
-	/opt/homebrew/bin/mmd -i disk.img ::/home
-	/opt/homebrew/bin/mcopy -i disk.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
-	/opt/homebrew/bin/mcopy -i disk.img bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
+	$(MKFS_FAT) -F 16 disk.img 
+	$(MMD) -i disk.img ::/EFI
+	$(MMD) -i disk.img ::/EFI/BOOT
+	$(MMD) -i disk.img ::/boot
+	$(MMD) -i disk.img ::/home
+	$(MCOPY) -i disk.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+	$(MCOPY) -i disk.img bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
 ifeq ($(ARCH),arm)
 	@echo "timeout: 0" > obj/$(ARCH)/limine.conf
 	@echo "default_entry: 1" >> obj/$(ARCH)/limine.conf
@@ -518,9 +546,9 @@ ifeq ($(ARCH),arm)
 	@echo "/HobbyOS (ARM AArch64)" >> obj/$(ARCH)/limine.conf
 	@echo "protocol: linux" >> obj/$(ARCH)/limine.conf
 	@echo "path: boot():/boot/hobbyos.bin" >> obj/$(ARCH)/limine.conf
-	/opt/homebrew/bin/mcopy -i disk.img obj/$(ARCH)/limine.conf ::/boot/limine.conf
+	$(MCOPY) -i disk.img obj/$(ARCH)/limine.conf ::/boot/limine.conf
 	$(OBJCOPY) -O binary $(TARGET) hobbyos.bin
-	/opt/homebrew/bin/mcopy -i disk.img hobbyos.bin ::/boot/hobbyos.bin
+	$(MCOPY) -i disk.img hobbyos.bin ::/boot/hobbyos.bin
 else
 	@echo "timeout: 0" > obj/$(ARCH)/limine.conf
 	@echo "default_entry: 1" >> obj/$(ARCH)/limine.conf
@@ -528,51 +556,51 @@ else
 	@echo "/HobbyOS (Intel x86_64)" >> obj/$(ARCH)/limine.conf
 	@echo "protocol: multiboot1" >> obj/$(ARCH)/limine.conf
 	@echo "path: boot():/boot/hobbyos.elf" >> obj/$(ARCH)/limine.conf
-	/opt/homebrew/bin/mcopy -i disk.img obj/$(ARCH)/limine.conf ::/boot/limine.conf
-	/opt/homebrew/bin/mcopy -i disk.img $(TARGET) ::/boot/hobbyos.elf
+	$(MCOPY) -i disk.img obj/$(ARCH)/limine.conf ::/boot/limine.conf
+	$(MCOPY) -i disk.img $(TARGET) ::/boot/hobbyos.elf
 endif
-	/opt/homebrew/bin/mcopy -i disk.img $(MEM_TEST_BIN) ::/MEMTEST.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(FILE_IO_BIN) ::/FILEIO.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(CONSOLE_TEST_BIN) ::/CONSOLE.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(FORK_TEST_BIN) ::/FORKTEST.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(HEAP_TEST_BIN) ::/HEAPTEST.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(SPAWN_TEST_BIN) ::/SPAWN.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(GRAPHICS_TEST_BIN) ::/GRAPHICS.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(SMP_TEST_BIN) ::/SMPTEST.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(PIPETEST_BIN) ::/PIPETEST.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(NETTEST_BIN) ::/NETTEST.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(TIMEOUT_BIN) ::/TIMEOUT.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(DESKTOP_BIN) ::/DESKTOP.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(EDITOR_BIN) ::/EDITOR.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(EDITOR_T_BIN) ::/EDITOR_T.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(PONG_T_BIN) ::/PONG_T.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(STRESS_TEST_BIN) ::/STRESS.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(SH_BIN) ::/SH.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(LS_BIN) ::/LS.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(CAT_BIN) ::/CAT.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(GREP_BIN) ::/GREP.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(LESS_BIN) ::/LESS.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(TAIL_BIN) ::/TAIL.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(HEAD_BIN) ::/HEAD.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(SHELL_TEST_BIN) ::/SHTEST.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(PS_BIN) ::/PS.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(FREE_BIN) ::/FREE.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(UPTIME_BIN) ::/UPTIME.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(KILL_BIN) ::/KILL.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(CP_BIN) ::/CP.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(RM_BIN) ::/RM.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(MV_BIN) ::/MV.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(TOUCH_BIN) ::/TOUCH.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(WC_BIN) ::/WC.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(SORT_BIN) ::/SORT.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(UNIQ_BIN) ::/UNIQ.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(PING_BIN) ::/PING.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(NC_BIN) ::/NC.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(IFCONFIG_BIN) ::/IFCONFIG.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(SHELL_TEST2_BIN) ::/SHTEST2.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(MKDIR_BIN) ::/MKDIR.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(SHELL_TEST3_BIN) ::/SHTEST3.BIN
-	/opt/homebrew/bin/mcopy -i disk.img $(PONG_BIN) ::/PONG.BIN
+	$(MCOPY) -i disk.img $(MEM_TEST_BIN) ::/MEMTEST.BIN
+	$(MCOPY) -i disk.img $(FILE_IO_BIN) ::/FILEIO.BIN
+	$(MCOPY) -i disk.img $(CONSOLE_TEST_BIN) ::/CONSOLE.BIN
+	$(MCOPY) -i disk.img $(FORK_TEST_BIN) ::/FORKTEST.BIN
+	$(MCOPY) -i disk.img $(HEAP_TEST_BIN) ::/HEAPTEST.BIN
+	$(MCOPY) -i disk.img $(SPAWN_TEST_BIN) ::/SPAWN.BIN
+	$(MCOPY) -i disk.img $(GRAPHICS_TEST_BIN) ::/GRAPHICS.BIN
+	$(MCOPY) -i disk.img $(SMP_TEST_BIN) ::/SMPTEST.BIN
+	$(MCOPY) -i disk.img $(PIPETEST_BIN) ::/PIPETEST.BIN
+	$(MCOPY) -i disk.img $(NETTEST_BIN) ::/NETTEST.BIN
+	$(MCOPY) -i disk.img $(TIMEOUT_BIN) ::/TIMEOUT.BIN
+	$(MCOPY) -i disk.img $(DESKTOP_BIN) ::/DESKTOP.BIN
+	$(MCOPY) -i disk.img $(EDITOR_BIN) ::/EDITOR.BIN
+	$(MCOPY) -i disk.img $(EDITOR_T_BIN) ::/EDITOR_T.BIN
+	$(MCOPY) -i disk.img $(PONG_T_BIN) ::/PONG_T.BIN
+	$(MCOPY) -i disk.img $(STRESS_TEST_BIN) ::/STRESS.BIN
+	$(MCOPY) -i disk.img $(SH_BIN) ::/SH.BIN
+	$(MCOPY) -i disk.img $(LS_BIN) ::/LS.BIN
+	$(MCOPY) -i disk.img $(CAT_BIN) ::/CAT.BIN
+	$(MCOPY) -i disk.img $(GREP_BIN) ::/GREP.BIN
+	$(MCOPY) -i disk.img $(LESS_BIN) ::/LESS.BIN
+	$(MCOPY) -i disk.img $(TAIL_BIN) ::/TAIL.BIN
+	$(MCOPY) -i disk.img $(HEAD_BIN) ::/HEAD.BIN
+	$(MCOPY) -i disk.img $(SHELL_TEST_BIN) ::/SHTEST.BIN
+	$(MCOPY) -i disk.img $(PS_BIN) ::/PS.BIN
+	$(MCOPY) -i disk.img $(FREE_BIN) ::/FREE.BIN
+	$(MCOPY) -i disk.img $(UPTIME_BIN) ::/UPTIME.BIN
+	$(MCOPY) -i disk.img $(KILL_BIN) ::/KILL.BIN
+	$(MCOPY) -i disk.img $(CP_BIN) ::/CP.BIN
+	$(MCOPY) -i disk.img $(RM_BIN) ::/RM.BIN
+	$(MCOPY) -i disk.img $(MV_BIN) ::/MV.BIN
+	$(MCOPY) -i disk.img $(TOUCH_BIN) ::/TOUCH.BIN
+	$(MCOPY) -i disk.img $(WC_BIN) ::/WC.BIN
+	$(MCOPY) -i disk.img $(SORT_BIN) ::/SORT.BIN
+	$(MCOPY) -i disk.img $(UNIQ_BIN) ::/UNIQ.BIN
+	$(MCOPY) -i disk.img $(PING_BIN) ::/PING.BIN
+	$(MCOPY) -i disk.img $(NC_BIN) ::/NC.BIN
+	$(MCOPY) -i disk.img $(IFCONFIG_BIN) ::/IFCONFIG.BIN
+	$(MCOPY) -i disk.img $(SHELL_TEST2_BIN) ::/SHTEST2.BIN
+	$(MCOPY) -i disk.img $(MKDIR_BIN) ::/MKDIR.BIN
+	$(MCOPY) -i disk.img $(SHELL_TEST3_BIN) ::/SHTEST3.BIN
+	$(MCOPY) -i disk.img $(PONG_BIN) ::/PONG.BIN
 	echo "HobbyOS Terminal Test File" > SHTEST.TXT
 	echo "This is line number two." >> SHTEST.TXT
 	echo "Line three is right here." >> SHTEST.TXT
@@ -582,13 +610,13 @@ endif
 	echo "orange" > SORT.TXT
 	echo "apple" >> SORT.TXT
 	echo "orange" >> SORT.TXT
-	/opt/homebrew/bin/mcopy -i disk.img SHTEST.TXT ::/SHTEST.TXT
-	/opt/homebrew/bin/mcopy -i disk.img SHTEST.TXT ::/home/SHTEST.TXT
-	/opt/homebrew/bin/mcopy -i disk.img TEST1.TXT ::/TEST1.TXT
-	/opt/homebrew/bin/mcopy -i disk.img TEST2.TXT ::/TEST2.TXT
-	/opt/homebrew/bin/mcopy -i disk.img TEST3.TXT ::/TEST3.TXT
-	/opt/homebrew/bin/mcopy -i disk.img TEST4.TXT ::/TEST4.TXT
-	/opt/homebrew/bin/mcopy -i disk.img SORT.TXT ::/SORT.TXT
+	$(MCOPY) -i disk.img SHTEST.TXT ::/SHTEST.TXT
+	$(MCOPY) -i disk.img SHTEST.TXT ::/home/SHTEST.TXT
+	$(MCOPY) -i disk.img TEST1.TXT ::/TEST1.TXT
+	$(MCOPY) -i disk.img TEST2.TXT ::/TEST2.TXT
+	$(MCOPY) -i disk.img TEST3.TXT ::/TEST3.TXT
+	$(MCOPY) -i disk.img TEST4.TXT ::/TEST4.TXT
+	$(MCOPY) -i disk.img SORT.TXT ::/SORT.TXT
 	rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT
 
 # Target to run the OS inside QEMU
