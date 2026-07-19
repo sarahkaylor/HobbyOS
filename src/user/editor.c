@@ -22,6 +22,8 @@
  */
 
 #include "libc.h"
+#include "dialog.h"
+#include "filedialog.h"
 
 /* ---- Constants ---- */
 
@@ -366,9 +368,7 @@ static void file_new(void) {
 static void file_open(const char *fname) {
     int fd = open(fname);
     if (fd < 0) {
-        print("\nCannot open: ");
-        print(fname);
-        print("\n");
+        dialog_message("Error", "Cannot open file.");
         return;
     }
     save_undo();
@@ -385,9 +385,7 @@ static void file_open(const char *fname) {
 static void file_save(const char *fname) {
     int fd = open(fname);
     if (fd < 0) {
-        print("\nCannot create: ");
-        print(fname);
-        print("\n");
+        dialog_message("Error", "Cannot create file.");
         return;
     }
     write(fd, text, text_len);
@@ -420,37 +418,17 @@ static int find_from(int start) {
 }
 
 static void do_find(void) {
-    /* Prompt for search string */
-    print("\nFind: ");
+    /* Prompt for search string using dialog library */
+    if (!dialog_prompt("Find", "Search text", search_str, MAX_SEARCH)) return;
     search_len = 0;
-    search_str[0] = '\0';
-    while (1) {
-        char c;
-        if (read(0, &c, 1) > 0) {
-            if (c == 27) {  /* ESC = cancel */
-                return;
-            } else if (c == '\n') {
-                break;
-            } else if (c == '\b') {
-                if (search_len > 0) {
-                    search_len--;
-                    search_str[search_len] = '\0';
-                }
-            } else if (c >= 32 && c <= 126) {
-                if (search_len < MAX_SEARCH - 1) {
-                    search_str[search_len++] = c;
-                    search_str[search_len] = '\0';
-                }
-            }
-        }
-    }
+    while (search_str[search_len]) search_len++;
     if (search_len <= 0) return;
     int pos = find_from(cursor_pos);
     if (pos >= 0) {
         cursor_pos = pos;
         last_found = pos;
     } else {
-        print("\nNot found.\n");
+        dialog_message("Find", "Not found.");
     }
 }
 
@@ -465,7 +443,7 @@ static void find_next(void) {
         cursor_pos = pos;
         last_found = pos;
     } else {
-        print("\nNo more matches.\n");
+        dialog_message("Find", "No more matches.");
     }
 }
 
@@ -473,40 +451,17 @@ static void do_replace(void) {
     char replace_str[MAX_SEARCH];
     int replace_len = 0;
 
-    /* Prompt for search string */
-    print("\nFind: ");
+    /* Prompt for search string using dialog library */
+    if (!dialog_prompt("Replace", "Find what", search_str, MAX_SEARCH)) return;
     search_len = 0;
-    search_str[0] = '\0';
-    while (1) {
-        char c;
-        if (read(0, &c, 1) > 0) {
-            if (c == 27) return;
-            if (c == '\n') break;
-            if (c == '\b') {
-                if (search_len > 0) { search_len--; search_str[search_len] = '\0'; }
-            } else if (c >= 32 && c <= 126) {
-                if (search_len < MAX_SEARCH - 1) { search_str[search_len++] = c; search_str[search_len] = '\0'; }
-            }
-        }
-    }
+    while (search_str[search_len]) search_len++;
     if (search_len <= 0) return;
 
-    /* Prompt for replacement string */
-    print("Replace with: ");
-    replace_len = 0;
+    /* Prompt for replacement string using dialog library */
     replace_str[0] = '\0';
-    while (1) {
-        char c;
-        if (read(0, &c, 1) > 0) {
-            if (c == 27) return;
-            if (c == '\n') break;
-            if (c == '\b') {
-                if (replace_len > 0) { replace_len--; replace_str[replace_len] = '\0'; }
-            } else if (c >= 32 && c <= 126) {
-                if (replace_len < MAX_SEARCH - 1) { replace_str[replace_len++] = c; replace_str[replace_len] = '\0'; }
-            }
-        }
-    }
+    if (!dialog_prompt("Replace", "Replace with", replace_str, MAX_SEARCH)) return;
+    replace_len = 0;
+    while (replace_str[replace_len]) replace_len++;
 
     /* Replace all occurrences */
     int count = 0;
@@ -547,9 +502,22 @@ static void do_replace(void) {
     if (count > 0) modified = 1;
     char nbuf[16];
     int_to_str(count, nbuf);
-    print("\nReplaced ");
-    print(nbuf);
-    print(" occurrence(s).\n");
+    char msg[40];
+    /* Build "Replaced N occurrence(s)." message */
+    my_strcpy(msg, "Replaced ");
+    /* Append count */
+    int ml = 9;
+    /* Append number */
+    if (count == 0) { msg[ml++] = '0'; }
+    else {
+        char tmp[16];
+        int tl = 0;
+        int v = count;
+        while (v > 0) { tmp[tl++] = '0' + (v % 10); v /= 10; }
+        while (tl > 0) msg[ml++] = tmp[--tl];
+    }
+    msg[ml] = '\0';
+    dialog_message("Replace", msg);
 }
 
 /* ---- Date/Time ---- */
@@ -585,33 +553,11 @@ static void insert_datetime(void) {
 /* ---- Prompt Dialog ---- */
 
 /* Show a prompt and read a string. Returns 1 on OK, 0 on cancel (ESC) */
-static int prompt_string(const char *msg, char *buf, int max) {
-    print("\n");
-    print(msg);
-    print(": ");
-    int len = 0;
-    buf[0] = '\0';
-    while (1) {
-        char c;
-        if (read(0, &c, 1) > 0) {
-            if (c == 27) {  /* ESC = cancel */
-                return 0;
-            } else if (c == '\n') {
-                return 1;
-            } else if (c == '\b') {
-                if (len > 0) { len--; buf[len] = '\0'; }
-            } else if (c >= 32 && c <= 126) {
-                if (len < max - 1) { buf[len++] = c; buf[len] = '\0'; }
-            }
-        }
-    }
-}
-
 /* ---- Go To Line ---- */
 
 static void do_goto(void) {
     char buf[16];
-    if (!prompt_string("Go to line", buf, sizeof(buf))) return;
+    if (!dialog_prompt("Go To Line", "Line number", buf, sizeof(buf))) return;
     /* Parse line number */
     int line = 0;
     int i = 0;
@@ -691,7 +637,7 @@ int main(void) {
                                                 }
                                                 case 1: { /* Open */
                                                     char fname[MAX_FILENAME];
-                                                    if (prompt_string("Open file", fname, sizeof(fname))) {
+                                                    if (file_open_dialog(fname, sizeof(fname))) {
                                                         file_open(fname);
                                                     }
                                                     break;
@@ -702,7 +648,7 @@ int main(void) {
                                                 }
                                                 case 3: { /* Save As */
                                                     char fname[MAX_FILENAME];
-                                                    if (prompt_string("Save as", fname, sizeof(fname))) {
+                                                    if (file_save_dialog(fname, sizeof(fname))) {
                                                         file_save(fname);
                                                     }
                                                     break;
@@ -768,7 +714,7 @@ int main(void) {
                                 break;
                             case 'o': case 'O': { /* Open */
                                 char fname[MAX_FILENAME];
-                                if (prompt_string("Open file", fname, sizeof(fname))) {
+                                if (file_open_dialog(fname, sizeof(fname))) {
                                     file_open(fname);
                                 }
                                 break;
@@ -778,7 +724,7 @@ int main(void) {
                                 break;
                             case 'S': { /* Save As */
                                 char fname[MAX_FILENAME];
-                                if (prompt_string("Save as", fname, sizeof(fname))) {
+                                if (file_save_dialog(fname, sizeof(fname))) {
                                     file_save(fname);
                                 }
                                 break;

@@ -4,7 +4,7 @@ description: "Use when writing or reviewing HobbyOS kernel/bare-metal code, or w
 version: 1.0.0
 author: Sarah Kaylor
 license: GPL-2.0
-platforms: [macos]
+platforms: [macos, linux]
 metadata:
   hermes:
     tags: [hobbyos, arm64, aarch64, el1, baremetal, alignment, mmu, constraints]

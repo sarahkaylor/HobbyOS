@@ -4,7 +4,7 @@ description: "Use when you need to SEE HobbyOS's screen — capture the QEMU fra
 version: 1.0.0
 author: Sarah Kaylor
 license: GPL-2.0
-platforms: [macos]
+platforms: [macos, linux]
 metadata:
   hermes:
     tags: [hobbyos, qemu, screenshot, qmp, screendump, framebuffer, proxmox]

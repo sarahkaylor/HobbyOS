@@ -4,7 +4,7 @@ description: "Use when building, booting, or choosing a QEMU target for HobbyOS.
 version: 1.0.0
 author: Sarah Kaylor
 license: GPL-2.0
-platforms: [macos]
+platforms: [macos, linux]
 metadata:
   hermes:
     tags: [hobbyos, osdev, qemu, make, build, arm64, x86_64]

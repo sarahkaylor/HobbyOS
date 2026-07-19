@@ -4,7 +4,7 @@ description: "Use when deploying or debugging HobbyOS's x86_64 remote-PCIe / RTX
 version: 1.0.0
 author: Sarah Kaylor
 license: GPL-2.0
-platforms: [macos]
+platforms: [macos, linux]
 metadata:
   hermes:
     tags: [hobbyos, proxmox, gpu, rdma, pcie, nvidia, x86_64, iommu, remote]

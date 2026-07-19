@@ -161,15 +161,24 @@ int available(int fd) {
 }
 
 // Read host current directory for mock read_dir
+// Returns a few mock files so the file dialog has content to show
 int read_dir(const char *path, int index, struct sys_dirent *ent) {
     (void)path;
-    if (index == 0) {
-        memset(ent, 0, sizeof(*ent));
-        strcpy(ent->name, "EDITOR.BIN");
-        ent->size = 0;
-        return 0;
-    }
-    return -1;
+    static const char *mock_files[] = {
+        "EDITOR.BIN",
+        "DESKTOP.BIN",
+        "SH.BIN",
+        "LS.BIN",
+        "CAT.BIN",
+        "TEST.TXT",
+        "NOTES.TXT"
+    };
+    static const int num_mock = 7;
+    if (index < 0 || index >= num_mock) return -1;
+    memset(ent, 0, sizeof(*ent));
+    strcpy(ent->name, mock_files[index]);
+    ent->size = 0;
+    return 0;
 }
 
 int dump_screenshot(const char *filename) {

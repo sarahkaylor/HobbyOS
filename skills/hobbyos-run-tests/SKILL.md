@@ -4,7 +4,7 @@ description: "Use when running or interpreting HobbyOS tests. Covers the three t
 version: 1.0.0
 author: Sarah Kaylor
 license: GPL-2.0
-platforms: [macos]
+platforms: [macos, linux]
 metadata:
   hermes:
     tags: [hobbyos, testing, unit-tests, integration, host-tests, qemu, rdma]

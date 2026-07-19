@@ -209,6 +209,9 @@ void main(void) {
 #elif defined(KERNEL_MODE_PONG_TEST)
   uart_puts("Mode: PONG_TEST - Launching Pong test wrapper...\n");
   load_and_run_program_in_scheduler("PONG_T.BIN", -1, -1, -1, -1);
+#elif defined(KERNEL_MODE_FILEDIALOG_TEST)
+  uart_puts("Mode: FILEDIALOG_TEST - Launching file dialog arrow key test...\n");
+  load_and_run_program_in_scheduler("FILEDIAL.BIN", -1, -1, -1, -1);
 #else
   uart_puts("Mode: DESKTOP - Launching desktop...\n");
   load_and_run_program_in_scheduler("DESKTOP.BIN", -1, -1, -1, -1);

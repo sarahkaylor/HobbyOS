@@ -4,7 +4,7 @@ description: "Use when adding a new user-space program (shell command or GUI app
 version: 1.0.0
 author: Sarah Kaylor
 license: GPL-2.0
-platforms: [macos]
+platforms: [macos, linux]
 metadata:
   hermes:
     tags: [hobbyos, userland, makefile, syscalls, fat16, program]

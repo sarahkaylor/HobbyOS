@@ -291,7 +291,27 @@ int main(void) {
             needs_redraw = 1;
           }
         } else if (ev->value == 1) { // Key press
-          if (ev->code < 128) {
+          // TEMPORARILY DISABLED: arrow key handling to verify test catches bug
+          if (0 && ev->code >= 103 && ev->code <= 108) {
+            char seq[3] = {27, '[', 0};
+            if (ev->code == 103) seq[2] = 'A'; // UP
+            if (ev->code == 108) seq[2] = 'B'; // DOWN
+            if (ev->code == 106) seq[2] = 'C'; // RIGHT
+            if (ev->code == 105) seq[2] = 'D'; // LEFT
+            if (seq[2] != 0 && focused_window >= 0) {
+                for (int w = 0; w < num_windows; w++) {
+                  if (windows[w].id == focused_window) {
+                    /* Forward the full 3-byte ESC sequence to the focused
+                     * window's stdin. write() delivers all 3 atomically here
+                     * (the pipe has ample room for a single keypress). */
+                    int wr = write(windows[w].stdin_fd, seq, 3);
+                    (void)wr;
+                    break;
+                  }
+                }
+                needs_redraw = 1;
+            }
+          } else if (ev->code < 128) {
             char c = shift_pressed ? shift_keymap[ev->code] : keymap[ev->code];
             if (c) {
               if (focused_window >= 0) {
@@ -305,22 +325,6 @@ int main(void) {
                   }
                 }
               }
-            }
-          } else if (ev->code >= 103 && ev->code <= 108) {
-            char seq[3] = {27, '[', 0};
-            if (ev->code == 103) seq[2] = 'A'; // UP
-            if (ev->code == 108) seq[2] = 'B'; // DOWN
-            if (ev->code == 106) seq[2] = 'C'; // RIGHT
-            if (ev->code == 105) seq[2] = 'D'; // LEFT
-            if (seq[2] != 0 && focused_window >= 0) {
-                for (int w = 0; w < num_windows; w++) {
-                  if (windows[w].id == focused_window) {
-                    int wr = write(windows[w].stdin_fd, seq, 3);
-                    (void)wr;
-                    break;
-                  }
-                }
-                needs_redraw = 1;
             }
           }
         }

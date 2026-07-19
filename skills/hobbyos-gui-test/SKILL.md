@@ -4,7 +4,7 @@ description: "Use when testing HobbyOS's desktop/GUI: inject synthetic mouse and
 version: 1.0.0
 author: Sarah Kaylor
 license: GPL-2.0
-platforms: [macos]
+platforms: [macos, linux]
 metadata:
   hermes:
     tags: [hobbyos, qemu, gui, qmp, input, desktop, framebuffer, testing]

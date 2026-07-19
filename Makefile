@@ -76,6 +76,9 @@ else ifeq ($(MODE),desktop_test)
 else ifeq ($(MODE),pong_test)
   CFLAGS += -DKERNEL_MODE_PONG_TEST
   USER_CFLAGS += -DDESKTOP_TEST_AUTO_LAUNCH
+else ifeq ($(MODE),filedialog_test)
+  CFLAGS += -DKERNEL_MODE_FILEDIALOG_TEST
+  USER_CFLAGS += -DDESKTOP_TEST_AUTO_LAUNCH
 else
   CFLAGS += -DKERNEL_MODE_DESKTOP
 endif
@@ -238,6 +241,14 @@ $(OBJ_DIR)/editor.o: src/user/editor.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
+$(OBJ_DIR)/user_dialog.o: src/user/dialog.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/user_filedialog.o: src/user/filedialog.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
 $(OBJ_DIR)/user_editor_test.o: src/user/editor_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
@@ -306,13 +317,26 @@ $(DESKTOP_BIN): $(OBJ_DIR)/desktop.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_mall
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/desktop_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/desktop_test.elf $(DESKTOP_BIN)
 
-$(EDITOR_BIN): $(OBJ_DIR)/editor.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(EDITOR_BIN): $(OBJ_DIR)/editor.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_dialog.o $(OBJ_DIR)/user_filedialog.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/editor.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/editor.elf $(EDITOR_BIN)
 
 $(EDITOR_T_BIN): $(OBJ_DIR)/user_editor_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/editor_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/editor_test.elf $(EDITOR_T_BIN)
+
+FILEDIALOG_ARROW_T_BIN = $(OBJ_DIR)/FILEDIAL.BIN
+$(OBJ_DIR)/user_filedialog_arrow_test.o: src/user/filedialog_arrow_test.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+$(FILEDIALOG_ARROW_T_BIN): $(OBJ_DIR)/user_filedialog_arrow_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/filedialog_arrow_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/filedialog_arrow_test.elf $(FILEDIALOG_ARROW_T_BIN)
+
+DIALOG_TEST_BIN = $(OBJ_DIR)/DIALOG_T.BIN
+$(DIALOG_TEST_BIN): $(OBJ_DIR)/user_dialog_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_dialog.o $(OBJ_DIR)/user_filedialog.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/dialog_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/dialog_test.elf $(DIALOG_TEST_BIN)
 
 $(OBJ_DIR)/user_pong_test.o: src/user/pong_test.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
@@ -530,7 +554,7 @@ $(PONG_BIN): $(OBJ_DIR)/pong.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/pong.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/pong.elf $(PONG_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -573,6 +597,8 @@ endif
 	$(MCOPY) -i disk.img $(DESKTOP_BIN) ::/DESKTOP.BIN
 	$(MCOPY) -i disk.img $(EDITOR_BIN) ::/EDITOR.BIN
 	$(MCOPY) -i disk.img $(EDITOR_T_BIN) ::/EDITOR_T.BIN
+	$(MCOPY) -i disk.img $(FILEDIALOG_ARROW_T_BIN) ::/FILEDIAL.BIN
+	$(MCOPY) -i disk.img $(DIALOG_TEST_BIN) ::/DIALOG_T.BIN
 	$(MCOPY) -i disk.img $(PONG_T_BIN) ::/PONG_T.BIN
 	$(MCOPY) -i disk.img $(STRESS_TEST_BIN) ::/STRESS.BIN
 	$(MCOPY) -i disk.img $(SH_BIN) ::/SH.BIN
@@ -650,6 +676,12 @@ desktop_test_run:
 pong_test_run:
 	$(MAKE) MODE=pong_test run
 
+filedialog_test_run:
+	$(MAKE) MODE=filedialog_test run
+
+filedialog_test:
+	python3 ./run_filedialog_test.py
+
 desktop_test:
 	python3 ./run_desktop_test.py
 
@@ -675,20 +707,24 @@ obj/host_user_graphics_%.o: src/user/graphics/%.c
 
 EDITOR_HOST = EDITOR.BIN_host
 
-$(EDITOR_HOST): obj/host_user_editor.o obj/host_compat.o
+$(EDITOR_HOST): obj/host_user_editor.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
 	$(HOST_CC) -o $@ $^
 
 EDITOR_TEST_BIN = editor_test_host
-$(EDITOR_TEST_BIN): obj/host_editor_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o
+$(EDITOR_TEST_BIN): obj/host_editor_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
 	$(HOST_CC) -o $@ $^
 
 PONG_TEST_BIN = pong_test_host
 $(PONG_TEST_BIN): obj/host_pong_test.o obj/host_user_graphics_graphics.o obj/host_compat.o
 	$(HOST_CC) -o $@ $^
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(PONG_TEST_BIN)
+DIALOG_ARROW_TEST = dialog_arrow_test_host
+$(DIALOG_ARROW_TEST): obj/host_dialog_arrow_test.o obj/host_user_dialog.o obj/host_user_filedialog.o obj/host_compat.o
+	$(HOST_CC) -o $@ $^
+
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST)
 	./$(EDITOR_TEST_BIN)
-	./$(PONG_TEST_BIN)
+	./$(DIALOG_ARROW_TEST)
 
 # --- Architecture Specific Targets ---
 
