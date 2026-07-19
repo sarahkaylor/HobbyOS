@@ -19,9 +19,14 @@ static void test_fat16_open_existing(void) {
 static void test_fat16_open_nonexistent(void) {
     uart_puts("  Running test_fat16_open_nonexistent...\n");
     tests_run++;
-    
+
+    /* fat16_open() has create-on-open semantics: opening a file that does not
+     * exist creates it and returns 0 (the editor's Save flow relies on this).
+     * So a missing file in an existing directory is NOT an error. It fails
+     * only when the file cannot be created — e.g. its parent directory does
+     * not exist. */
     struct file f;
-    int res = fat16_open("MISSING.TXT", &f);
+    int res = fat16_open("/NOSUCHDIR/MISSING.TXT", &f);
     EXPECT_EQ(res, -1);
 }
 

@@ -11,7 +11,7 @@ static void test_load_nonexistent_program(void) {
     tests_run++;
     uart_puts("  Running test_load_and_run_missing_file...\n");
 
-    int pid = load_and_run_program_in_scheduler("MISSING.BIN", -1, -1, -1);
+    int pid = load_and_run_program_in_scheduler("MISSING.BIN", -1, -1, -1, -1);
     EXPECT_EQ(pid, -1);
 }
 
@@ -19,7 +19,7 @@ static void test_load_existing_program(void) {
     tests_run++;
     uart_puts("  Running test_load_and_run_success...\n");
 
-    int pid = load_and_run_program_in_scheduler("CONSOLE.BIN", -1, -1, -1);
+    int pid = load_and_run_program_in_scheduler("CONSOLE.BIN", -1, -1, -1, -1);
     EXPECT_EQ((pid >= 0 && pid < MAX_PROCESSES), 1);
 
     struct process *p = process_get_pcb(pid);
