@@ -291,8 +291,9 @@ int main(void) {
             needs_redraw = 1;
           }
         } else if (ev->value == 1) { // Key press
-          // TEMPORARILY DISABLED: arrow key handling to verify test catches bug
-          if (0 && ev->code >= 103 && ev->code <= 108) {
+          // Arrow keys (evdev codes 103-108): forward to the focused window as
+          // 3-byte ESC sequences (ESC [ A/B/C/D) so dialogs can navigate.
+          if (ev->code >= 103 && ev->code <= 108) {
             char seq[3] = {27, '[', 0};
             if (ev->code == 103) seq[2] = 'A'; // UP
             if (ev->code == 108) seq[2] = 'B'; // DOWN

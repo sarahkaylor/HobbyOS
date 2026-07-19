@@ -331,11 +331,12 @@ void flush_fb(void) {
             inject_mock_event(EV_KEY, 103, 0);  /* UP release */
             settle = 0;
             test_state = STATE_CHECK_UP;
-        } else if (++settle > 40) {
-            /* Defensive safety net: the render should reflect the move well
-             * within 40 flushes. If not, re-nudge ONCE (still one key at a
-             * time, not a flood), up to a few tries, then give up. */
-            if (arrow_down_count < 5) {
+        } else if (++settle > 25) {
+            /* With the heartbeat below keeping flush_fb() ticking, a working
+             * DOWN reflects in the render within a few flushes. Give it 25 to
+             * absorb scheduling jitter, then re-nudge ONCE (one key, not a
+             * flood), up to a couple of tries, before declaring failure. */
+            if (arrow_down_count < 2) {
                 inject_mock_event(EV_KEY, 108, 1);
                 inject_mock_event(EV_KEY, 108, 0);
                 arrow_down_count++;
@@ -357,8 +358,8 @@ void flush_fb(void) {
             print_console("[TEST] UP arrow: selection marker moved up. PASS\n");
             test_result = 1;
             test_state = STATE_DONE;
-        } else if (++settle > 40) {
-            if (arrow_up_count < 5) {
+        } else if (++settle > 25) {
+            if (arrow_up_count < 2) {
                 inject_mock_event(EV_KEY, 103, 1);
                 inject_mock_event(EV_KEY, 103, 0);
                 arrow_up_count++;
@@ -369,6 +370,26 @@ void flush_fb(void) {
                 test_state = STATE_DONE;
             }
         }
+    }
+
+    /* ---- Heartbeat ----
+     * CRITICAL for reproducing the bug cleanly. When an arrow key is dropped
+     * (the desktop fails to forward it), the editor never reads a key, never
+     * redraws, and writes nothing to its stdout. The desktop then sees no
+     * events and no redraw, takes its idle yield() branch, and STOPS calling
+     * graphics_flush()/flush_fb() -- which freezes this state machine. The
+     * result is a silent 60s harness timeout instead of a clean FAIL.
+     *
+     * To keep the desktop's event loop alive while we wait for the dialog to
+     * react, inject a tiny mouse jiggle each tick. A mouse MOVE (never a click)
+     * sets needs_redraw and guarantees flush_fb() is called again next loop, so
+     * the settle counters advance and the FAIL verdict is reached in well under
+     * a second. It is harmless: it changes nothing in the dialog, so it can
+     * neither cause nor mask a real arrow-key movement. */
+    if (test_state == STATE_CHECK_DOWN || test_state == STATE_CHECK_UP) {
+        static int hb = 0;
+        hb ^= 1;
+        inject_mock_event(EV_ABS, ABS_X, ((500 + hb) * 0x7FFF) / 1024);
     }
 
     if (test_state == STATE_DONE) {
