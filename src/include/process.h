@@ -185,5 +185,7 @@ struct sys_procinfo {
 int process_get_used_blocks(void);
 int process_get_total_blocks(void);
 int process_get_info_list(struct sys_procinfo* list, int max_procs);
+int process_get_num_cpus(void);
+uint64_t process_get_total_idle_ms(void);
 
 #endif // PROCESS_H

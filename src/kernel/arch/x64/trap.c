@@ -179,6 +179,12 @@ struct sys_netinfo {
     uint8_t mac[6];
 };
 
+struct sys_cpuinfo {
+    uint64_t uptime_ms;
+    uint64_t total_idle_ms;
+    int num_cpus;
+};
+
 static void sys_sysinfo(struct trap_frame *tf) {
   int cmd = (int)tf->regs[5]; // rdi
   void *buf = (void *)tf->regs[4]; // rsi
@@ -217,6 +223,16 @@ static void sys_sysinfo(struct trap_frame *tf) {
         info->subnet_mask = net_get_netmask();
         info->gateway = net_get_gateway();
         net_get_mac(info->mac);
+        tf->regs[0] = 0;
+      } else {
+        tf->regs[0] = -1;
+      }
+    } else if (cmd == 5) { // CPU usage info
+      if (size >= (int)sizeof(struct sys_cpuinfo)) {
+        struct sys_cpuinfo *info = (struct sys_cpuinfo *)buf;
+        info->uptime_ms = timer_get_ms();
+        info->total_idle_ms = process_get_total_idle_ms();
+        info->num_cpus = process_get_num_cpus();
         tf->regs[0] = 0;
       } else {
         tf->regs[0] = -1;

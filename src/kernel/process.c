@@ -16,6 +16,9 @@ static struct process proc_table[MAX_PROCESSES];
 int cpu_current_pids[MAX_CPUS];
 spinlock_t proc_lock;
 
+// Per-CPU idle time tracking (aggregated in ms)
+static uint64_t cpu_idle_time[MAX_CPUS];
+
 // Simple bump allocator for 2MB-aligned process memory regions
 static uint64_t next_phys_alloc = PROC_PHYS_POOL_BASE;
 static spinlock_t mem_lock;
@@ -708,9 +711,16 @@ void start_scheduler(void) {
     }
     spinlock_release_irqrestore(&proc_lock, flags);
     
-    // Enable IRQs, sleep, then disable. This allows idle cores to actually sleep
-    // and process interrupts rather than spinning endlessly if an interrupt is pending.
+    // Track idle time: record entry, WFI, accumulate on wake
+    uint64_t idle_start = timer_get_ms();
     safe_wfi();
+    uint64_t idle_end = timer_get_ms();
+    if (idle_end > idle_start) {
+        uint32_t cpu = get_cpuid();
+        if (cpu < MAX_CPUS) {
+            cpu_idle_time[cpu] += (idle_end - idle_start);
+        }
+    }
   }
 }
 
@@ -747,4 +757,18 @@ int process_get_info_list(struct sys_procinfo* list, int max_procs) {
     }
     spinlock_release_irqrestore(&proc_lock, flags);
     return count;
+}
+
+int process_get_num_cpus(void) {
+    return MAX_CPUS;
+}
+
+uint64_t process_get_total_idle_ms(void) {
+    uint64_t total = 0;
+    uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    for (int i = 0; i < MAX_CPUS; i++) {
+        total += cpu_idle_time[i];
+    }
+    spinlock_release_irqrestore(&proc_lock, flags);
+    return total;
 }

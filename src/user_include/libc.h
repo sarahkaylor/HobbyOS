@@ -93,6 +93,12 @@ struct sys_netinfo {
     uint8_t mac[6];
 };
 
+struct sys_cpuinfo {
+    uint64_t uptime_ms;
+    uint64_t total_idle_ms;
+    int num_cpus;
+};
+
 int sysinfo(int cmd, void *buf, int size);
 int unlink(const char *filename);
 int rename(const char *oldname, const char *newname);

@@ -144,6 +144,8 @@ UNIQ_BIN = $(OBJ_DIR)/uniq.bin
 PING_BIN = $(OBJ_DIR)/ping.bin
 NC_BIN = $(OBJ_DIR)/nc.bin
 IFCONFIG_BIN = $(OBJ_DIR)/ifconfig.bin
+MONITOR_BIN = $(OBJ_DIR)/monitor.bin
+MONITOR_TEST_BIN = $(OBJ_DIR)/monitort.bin
 SHELL_TEST2_BIN = $(OBJ_DIR)/shtest2.bin
 MKDIR_BIN = $(OBJ_DIR)/mkdir.bin
 SHELL_TEST3_BIN = $(OBJ_DIR)/shtest3.bin
@@ -522,6 +524,22 @@ $(IFCONFIG_BIN): $(OBJ_DIR)/ifconfig.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_ma
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/ifconfig.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/ifconfig.elf $(IFCONFIG_BIN)
 
+$(OBJ_DIR)/monitor.o: src/user/monitor.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(MONITOR_BIN): $(OBJ_DIR)/monitor.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/monitor.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/monitor.elf $(MONITOR_BIN)
+
+$(OBJ_DIR)/monitor_test.o: src/user/monitor_test.c $(USER_LIBC)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(MONITOR_TEST_BIN): $(OBJ_DIR)/monitor_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/monitor_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/monitor_test.elf $(MONITOR_TEST_BIN)
+
 $(OBJ_DIR)/shell_test2.o: src/user/shell_test2.c $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
@@ -554,7 +572,7 @@ $(PONG_BIN): $(OBJ_DIR)/pong.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/pong.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/pong.elf $(PONG_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -627,6 +645,8 @@ endif
 	$(MCOPY) -i disk.img $(MKDIR_BIN) ::/MKDIR.BIN
 	$(MCOPY) -i disk.img $(SHELL_TEST3_BIN) ::/SHTEST3.BIN
 	$(MCOPY) -i disk.img $(PONG_BIN) ::/PONG.BIN
+	$(MCOPY) -i disk.img $(MONITOR_BIN) ::/MONITOR.BIN
+	$(MCOPY) -i disk.img $(MONITOR_TEST_BIN) ::/MONITORT.BIN
 	echo "HobbyOS Terminal Test File" > SHTEST.TXT
 	echo "This is line number two." >> SHTEST.TXT
 	echo "Line three is right here." >> SHTEST.TXT
