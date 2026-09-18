@@ -28,6 +28,7 @@ void run_all_unit_tests(void) {
     net_rdma_test_suite();
     timer_test_suite();
     smp_test_suite();
+    time_test_suite();
 
     uart_puts("==================================\n");
     uart_puts("Tests run:    "); print_int(tests_run); uart_puts("\n");

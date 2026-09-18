@@ -185,6 +185,22 @@ struct sys_cpuinfo {
     int num_cpus;
 };
 
+struct sys_time {
+    uint64_t epoch;
+    int year;
+    int month;
+    int day;
+    int hour;
+    int minute;
+    int second;
+    int weekday;
+};
+
+struct sys_fsinfo {
+    uint64_t total_bytes;
+    uint64_t free_bytes;
+};
+
 static void sys_sysinfo(struct trap_frame *tf) {
   int cmd = (int)tf->regs[5]; // rdi
   void *buf = (void *)tf->regs[4]; // rsi
@@ -234,6 +250,33 @@ static void sys_sysinfo(struct trap_frame *tf) {
         info->total_idle_ms = process_get_total_idle_ms();
         info->num_cpus = process_get_num_cpus();
         tf->regs[0] = 0;
+      } else {
+        tf->regs[0] = -1;
+      }
+    } else if (cmd == 6) { // Wall-clock time (CMOS RTC)
+      if (size >= (int)sizeof(struct sys_time)) {
+        extern uint64_t rtc_read_epoch(void);
+        extern void rtc_epoch_to_time(uint64_t epoch, int *year, int *month,
+                                      int *day, int *hour, int *minute,
+                                      int *second, int *weekday);
+        struct sys_time *info = (struct sys_time *)buf;
+        uint64_t epoch = rtc_read_epoch();
+        if (epoch == 0) {
+          tf->regs[0] = -1;
+        } else {
+          rtc_epoch_to_time(epoch, &info->year, &info->month, &info->day,
+                            &info->hour, &info->minute, &info->second,
+                            &info->weekday);
+          info->epoch = epoch;
+          tf->regs[0] = 0;
+        }
+      } else {
+        tf->regs[0] = -1;
+      }
+    } else if (cmd == 7) { // Filesystem (FAT-16 volume) statistics
+      if (size >= (int)sizeof(struct sys_fsinfo)) {
+        struct sys_fsinfo *info = (struct sys_fsinfo *)buf;
+        tf->regs[0] = fat16_stats(&info->total_bytes, &info->free_bytes);
       } else {
         tf->regs[0] = -1;
       }

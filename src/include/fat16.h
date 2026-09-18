@@ -49,6 +49,11 @@ int fat16_mkdir(const char* path);
 // Reads a directory entry at the specified index.
 int fat16_read_dir(const char* path, int index, char* out_name, uint8_t* out_attr, uint32_t* out_size);
 
+// Computes volume statistics for the data area.
+// total_bytes = total data cluster bytes; free_bytes = free cluster bytes.
+// Returns 0 on success, -1 on error.
+int fat16_stats(uint64_t* out_total, uint64_t* out_free);
+
 // Resolves a path to its directory entry, sector, and offset.
 int fat16_resolve_path(const char* path, struct fat16_dir_entry* out_entry, uint32_t* out_sector, uint32_t* out_offset);
 
