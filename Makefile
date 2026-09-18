@@ -152,6 +152,22 @@ SHELL_TEST3_BIN = $(OBJ_DIR)/shtest3.bin
 PONG_BIN = $(OBJ_DIR)/pong.bin
 MILLIPEDE_BIN = $(OBJ_DIR)/millipede.bin
 
+# --- New desktop applications (10 GUI apps) ---
+FILES_BIN = $(OBJ_DIR)/files.bin
+CALC_BIN = $(OBJ_DIR)/calc.bin
+CLOCK_BIN = $(OBJ_DIR)/clock.bin
+SYSMON_BIN = $(OBJ_DIR)/sysmon.bin
+HEX_BIN = $(OBJ_DIR)/hex.bin
+TASKS_BIN = $(OBJ_DIR)/tasks.bin
+FIND_BIN = $(OBJ_DIR)/find.bin
+DIFF_BIN = $(OBJ_DIR)/diff.bin
+NOTES_BIN = $(OBJ_DIR)/notes.bin
+UNIT_BIN = $(OBJ_DIR)/unit.bin
+DESKTOP_APP_NAMES = files calc clock sysmon hex tasks find diff notes unit
+DESKTOP_APP_BINS = $(FILES_BIN) $(CALC_BIN) $(CLOCK_BIN) $(SYSMON_BIN) $(HEX_BIN) $(TASKS_BIN) $(FIND_BIN) $(DIFF_BIN) $(NOTES_BIN) $(UNIT_BIN)
+# Common link objects for GUI applications (libc + allocator + toolkit + dialogs)
+GUI_APP_OBJS = $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_gui.o $(OBJ_DIR)/user_dialog.o $(OBJ_DIR)/user_filedialog.o
+
 # Default rule: build the target
 all: $(TARGET)
 
@@ -581,7 +597,22 @@ $(MILLIPEDE_BIN): $(OBJ_DIR)/millipede.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/millipede.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/millipede.elf $(MILLIPEDE_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(MODE_FILE)
+# --- New desktop applications: compile + link (see DESKTOP_APP_NAMES) ---
+# Each app links the GUI toolkit and dialog libraries in addition to the
+# standard libc + malloc. Binary lands on disk as /<NAME>.BIN (8.3).
+define DESKTOP_APP_RULE
+$(OBJ_DIR)/$(1).o: src/user/$(1).c src/user_include/gui.h $(USER_LIBC)
+	@mkdir -p $$(OBJ_DIR)
+	$$(CC) $$(USER_CFLAGS) -c $$< -o $$@
+
+$(OBJ_DIR)/$(1).bin: $(OBJ_DIR)/$(1).o $$(GUI_APP_OBJS)
+	$$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/$(1).elf $$^
+	$$(OBJCOPY) -O binary $(OBJ_DIR)/$(1).elf $(OBJ_DIR)/$(1).bin
+endef
+
+$(foreach app,$(DESKTOP_APP_NAMES),$(eval $(call DESKTOP_APP_RULE,$(app))))
+
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -655,6 +686,16 @@ endif
 	$(MCOPY) -i disk.img $(SHELL_TEST3_BIN) ::/SHTEST3.BIN
 	$(MCOPY) -i disk.img $(PONG_BIN) ::/PONG.BIN
 	$(MCOPY) -i disk.img $(MILLIPEDE_BIN) ::/MILLIPED.BIN
+	$(MCOPY) -i disk.img $(FILES_BIN) ::/FILES.BIN
+	$(MCOPY) -i disk.img $(CALC_BIN) ::/CALC.BIN
+	$(MCOPY) -i disk.img $(CLOCK_BIN) ::/CLOCK.BIN
+	$(MCOPY) -i disk.img $(SYSMON_BIN) ::/SYSMON.BIN
+	$(MCOPY) -i disk.img $(HEX_BIN) ::/HEX.BIN
+	$(MCOPY) -i disk.img $(TASKS_BIN) ::/TASKS.BIN
+	$(MCOPY) -i disk.img $(FIND_BIN) ::/FIND.BIN
+	$(MCOPY) -i disk.img $(DIFF_BIN) ::/DIFF.BIN
+	$(MCOPY) -i disk.img $(NOTES_BIN) ::/NOTES.BIN
+	$(MCOPY) -i disk.img $(UNIT_BIN) ::/UNIT.BIN
 	$(MCOPY) -i disk.img $(MONITOR_BIN) ::/MONITOR.BIN
 	$(MCOPY) -i disk.img $(MONITOR_TEST_BIN) ::/MONITORT.BIN
 	echo "HobbyOS Terminal Test File" > SHTEST.TXT
@@ -752,9 +793,41 @@ DIALOG_ARROW_TEST = dialog_arrow_test_host
 $(DIALOG_ARROW_TEST): obj/host_dialog_arrow_test.o obj/host_user_dialog.o obj/host_user_filedialog.o obj/host_compat.o
 	$(HOST_CC) -o $@ $^
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST)
-	./$(EDITOR_TEST_BIN)
-	./$(DIALOG_ARROW_TEST)
+# --- GUI toolkit + new desktop app host tests ---
+GUI_TEST = gui_test_host
+$(GUI_TEST): obj/host_gui_test.o obj/host_compat.o
+	$(HOST_CC) -o $@ $^
+
+# Each app host test includes its app's .c directly and links the toolkit,
+# dialogs and host compatibility layer.
+define HOST_APP_TEST_RULE
+$(1)_test_host: obj/host_$(1)_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+	$$(HOST_CC) -o $$@ $$^
+endef
+
+$(foreach app,$(DESKTOP_APP_NAMES),$(eval $(call HOST_APP_TEST_RULE,$(app))))
+
+HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
+
+# Wrap host test execution so a hung test fails the build instead of hanging
+# it. On macOS without coreutils this falls back to an unwrapped run.
+HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
+
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(HOST_APP_TEST_BINS)
+	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
+	$(HOST_RUN) ./$(DIALOG_ARROW_TEST)
+	$(HOST_RUN) ./$(PONG_TEST_BIN)
+	$(HOST_RUN) ./$(GUI_TEST)
+	$(HOST_RUN) ./files_test_host
+	$(HOST_RUN) ./calc_test_host
+	$(HOST_RUN) ./clock_test_host
+	$(HOST_RUN) ./sysmon_test_host
+	$(HOST_RUN) ./hex_test_host
+	$(HOST_RUN) ./tasks_test_host
+	$(HOST_RUN) ./find_test_host
+	$(HOST_RUN) ./diff_test_host
+	$(HOST_RUN) ./notes_test_host
+	$(HOST_RUN) ./unit_test_host
 
 # --- Architecture Specific Targets ---
 

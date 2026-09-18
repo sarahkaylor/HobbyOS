@@ -99,6 +99,26 @@ struct sys_cpuinfo {
     int num_cpus;
 };
 
+/* cmd 6: wall-clock time (RTC). epoch = seconds since 1970-01-01 UTC;
+ * weekday: 0=Sunday .. 6=Saturday. If the platform has no RTC the kernel
+ * returns -1 (callers should fall back to uptime via cmd 1). */
+struct sys_time {
+    uint64_t epoch;
+    int year;    /* e.g. 2026 */
+    int month;   /* 1-12 */
+    int day;     /* 1-31 */
+    int hour;    /* 0-23 */
+    int minute;  /* 0-59 */
+    int second;  /* 0-59 */
+    int weekday; /* 0=Sunday .. 6=Saturday */
+};
+
+/* cmd 7: filesystem statistics for the FAT-16 volume (data area). */
+struct sys_fsinfo {
+    uint64_t total_bytes;
+    uint64_t free_bytes;
+};
+
 int sysinfo(int cmd, void *buf, int size);
 int unlink(const char *filename);
 int rename(const char *oldname, const char *newname);

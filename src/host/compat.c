@@ -281,3 +281,115 @@ void gui_add_menu(int idx, const char* name, const char* items) {
     write(1, buf, len);
 }
 
+/* ============================================================== */
+/* Additional mocks for desktop app host tests                     */
+/* ============================================================== */
+
+void print_dec(long val) {
+    printf("%ld", val);
+}
+
+/* --- Filesystem mocks -------------------------------------------------
+ * Apps under HOST_TEST get inert filesystem calls so tests never touch
+ * the real host filesystem. Tests can flip the *_result globals to
+ * exercise failure paths. */
+int mock_mkdir_result = 0;
+int mock_unlink_result = 0;
+int mock_rename_result = 0;
+
+int mkdir(const char *path) {
+    (void)path;
+    return mock_mkdir_result;
+}
+
+int unlink(const char *filename) {
+    (void)filename;
+    return mock_unlink_result;
+}
+
+int rename(const char *oldname, const char *newname) {
+    (void)oldname; (void)newname;
+    return mock_rename_result;
+}
+
+/* --- cwd mocks: a simple in-memory current directory --- */
+static char mock_cwd[128] = "/home";
+
+int chdir(const char *path) {
+    snprintf(mock_cwd, sizeof(mock_cwd), "%s", path);
+    return 0;
+}
+
+char *getcwd(char *buf, size_t size) {
+    if (!buf) return mock_cwd;
+    snprintf(buf, size, "%s", mock_cwd);
+    return buf;
+}
+
+/* --- sysinfo mock ------------------------------------------------------
+ * Canned values so GUI apps (clock, sysmon, files) compile and render on
+ * the host. Tests should prefer passing data as function parameters when
+ * they need specific values. */
+#define MOCK_EPOCH 1789646400ULL   /* 2026-09-17 12:00:00 UTC (Thursday) */
+
+int sysinfo(int cmd, void *buf, int size) {
+    if (cmd == 1) {
+        return 12345; /* uptime ms, returned by value like the kernel */
+    }
+    if (cmd == 2) {
+        struct sys_meminfo *m = (struct sys_meminfo *)buf;
+        if (size < (int)sizeof(*m)) return -1;
+        m->total_bytes = 64ULL * 1024 * 1024;
+        m->free_bytes = 40ULL * 1024 * 1024;
+        return 0;
+    }
+    if (cmd == 3) {
+        struct sys_procinfo *p = (struct sys_procinfo *)buf;
+        int max = size / (int)sizeof(*p);
+        if (max < 3) return 0;
+        memset(p, 0, sizeof(p[0]) * 3);
+        p[0].pid = 1; p[0].parent_pid = 0; p[0].state = 1;
+        strcpy(p[0].name, "DESKTOP.BIN");
+        p[1].pid = 2; p[1].parent_pid = 1; p[1].state = 0;
+        strcpy(p[1].name, "EDITOR.BIN");
+        p[2].pid = 3; p[2].parent_pid = 1; p[2].state = 0;
+        strcpy(p[2].name, "SHELL");
+        return 3;
+    }
+    if (cmd == 4) {
+        struct sys_netinfo *n = (struct sys_netinfo *)buf;
+        if (size < (int)sizeof(*n)) return -1;
+        n->ip = 0x0A00020F; /* 10.0.2.15 */
+        n->subnet_mask = 0xFFFFFF00;
+        n->gateway = 0x0A000202;
+        n->mac[0] = 0x52; n->mac[1] = 0x54; n->mac[2] = 0x00;
+        n->mac[3] = 0x12; n->mac[4] = 0x34; n->mac[5] = 0x56;
+        return 0;
+    }
+    if (cmd == 5) {
+        struct sys_cpuinfo *c = (struct sys_cpuinfo *)buf;
+        if (size < (int)sizeof(*c)) return -1;
+        c->uptime_ms = 12345;
+        c->total_idle_ms = 4000;
+        c->num_cpus = 4;
+        return 0;
+    }
+    if (cmd == 6) {
+        struct sys_time *t = (struct sys_time *)buf;
+        if (size < (int)sizeof(*t)) return -1;
+        t->epoch = MOCK_EPOCH;
+        t->year = 2026; t->month = 9; t->day = 17;
+        t->hour = 12; t->minute = 0; t->second = 0;
+        t->weekday = 4; /* Thursday */
+        return 0;
+    }
+    if (cmd == 7) {
+        struct sys_fsinfo *f = (struct sys_fsinfo *)buf;
+        if (size < (int)sizeof(*f)) return -1;
+        f->total_bytes = 64ULL * 1024 * 1024;
+        f->free_bytes = 40ULL * 1024 * 1024;
+        return 0;
+    }
+    return -1;
+}
+
