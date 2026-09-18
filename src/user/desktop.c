@@ -146,6 +146,17 @@ void load_menu(void) {
     menu_items[num_menu_items][k] = '\0';
     num_menu_items++;
   }
+  /* Test-support: dump the exact menu index -> name mapping once at load. */
+  for (int i = 0; i < num_menu_items; i++) {
+    print_console("[MENU] ");
+    print_dec(i);
+    print_console("=");
+    print_console(menu_items[i]);
+    print_console("\n");
+  }
+  print_console("[MENU] count=");
+  print_dec(num_menu_items);
+  print_console("\n");
 }
 
 /* Strip a trailing ".BIN" (and any extension) from a program name. */
@@ -166,6 +177,9 @@ static void launch_menu_item(int idx) {
   pipe(in_pipe);
   pipe(out_pipe);
 
+  print_console("[LAUNCH] ");
+  print_console(menu_items[idx]);
+  print_console("\n");
   int pid = spawn2(menu_items[idx], in_pipe[0], out_pipe[1], -1, 0);
   if (pid >= 0) {
     int win_id = wm_create_window(COLOR(16, 18, 30), pid, out_pipe[0], in_pipe[1]);
@@ -519,6 +533,51 @@ int main(void) {
             needs_redraw = 1;
           }
         } else if (ev->value == 1) { // Key press
+          if (ev->code == 62) { // F4: close the focused window (keyboard X button)
+            if (focused_window >= 0) {
+              for (int w = 0; w < num_windows; w++) {
+                if (windows[w].id == focused_window) {
+                  kill(windows[w].pid, 9);
+                  break;
+                }
+              }
+              wm_remove_window(focused_window);
+              focused_window = -1;
+              needs_redraw = 1;
+            }
+          } else if (ev->code == 102 || ev->code == 104 ||
+                     ev->code == 107 || ev->code == 109) {
+            // Home / PgUp / End / PgDn
+            if (start_menu_open) {
+              int visible = START_MENU_VISIBLE;
+              if (num_menu_items < visible) visible = num_menu_items;
+              if (ev->code == 102) start_sel = 0;                  // Home
+              if (ev->code == 107) start_sel = num_menu_items - 1; // End
+              if (ev->code == 104) start_sel -= visible;           // PgUp
+              if (ev->code == 109) start_sel += visible;           // PgDn
+              if (start_sel < 0) start_sel = 0;
+              if (start_sel > num_menu_items - 1) start_sel = num_menu_items - 1;
+              start_menu_ensure_visible();
+              needs_redraw = 1;
+            } else if (focused_window >= 0) {
+              // Forward as standard terminal escape sequences.
+              char seq[4];
+              int sl = 3;
+              seq[0] = 27; seq[1] = '[';
+              if (ev->code == 102) seq[2] = 'H';
+              if (ev->code == 107) seq[2] = 'F';
+              if (ev->code == 104) { seq[2] = '5'; seq[3] = '~'; sl = 4; }
+              if (ev->code == 109) { seq[2] = '6'; seq[3] = '~'; sl = 4; }
+              for (int w = 0; w < num_windows; w++) {
+                if (windows[w].id == focused_window) {
+                  int wr = write(windows[w].stdin_fd, seq, sl);
+                  (void)wr;
+                  break;
+                }
+              }
+              needs_redraw = 1;
+            }
+          } else
           // Arrow keys (evdev codes 103-108): forward to the focused window as
           // 3-byte ESC sequences (ESC [ A/B/C/D) so dialogs can navigate.
           if (ev->code >= 103 && ev->code <= 108) {

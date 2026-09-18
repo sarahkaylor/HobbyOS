@@ -160,7 +160,25 @@ int available(int fd) {
     return bytes_available;
 }
 
-// Read host current directory for mock read_dir
+/* --- Configurable directory listing ------------------------------------
+ * The default listing above is a fixed 7-file set.  Cross-application host
+ * tests that need a longer directory (scrolling) or directory entries
+ * (Enter-on-dir) install an override here.  mock_read_dir_count < 0 means
+ * "empty directory" (every index fails). */
+#define MOCK_READ_DIR_MAX 40
+int mock_read_dir_count = 0;                     /* 0 = default 7 files */
+char mock_read_dir_names[MOCK_READ_DIR_MAX][32];
+uint8_t mock_read_dir_attr = 0;                  /* attr for every entry */
+uint32_t mock_read_dir_size = 0;                 /* size for every entry */
+
+void mock_read_dir_reset(void) {
+    mock_read_dir_count = 0;
+    mock_read_dir_attr = 0;
+    mock_read_dir_size = 0;
+    for (int i = 0; i < MOCK_READ_DIR_MAX; i++) mock_read_dir_names[i][0] = '\0';
+}
+
+/* Read host current directory for mock read_dir
 // Returns a few mock files so the file dialog has content to show
 int read_dir(const char *path, int index, struct sys_dirent *ent) {
     (void)path;
@@ -174,6 +192,15 @@ int read_dir(const char *path, int index, struct sys_dirent *ent) {
         "NOTES.TXT"
     };
     static const int num_mock = 7;
+    if (mock_read_dir_count != 0) {
+        if (mock_read_dir_count < 0) return -1;
+        if (index < 0 || index >= mock_read_dir_count) return -1;
+        memset(ent, 0, sizeof(*ent));
+        snprintf(ent->name, sizeof(ent->name), "%s", mock_read_dir_names[index]);
+        ent->attr = mock_read_dir_attr;
+        ent->size = mock_read_dir_size;
+        return 0;
+    }
     if (index < 0 || index >= num_mock) return -1;
     memset(ent, 0, sizeof(*ent));
     strcpy(ent->name, mock_files[index]);
@@ -297,18 +324,31 @@ int mock_mkdir_result = 0;
 int mock_unlink_result = 0;
 int mock_rename_result = 0;
 
+/* Call recorders: cross-app host tests assert what the app asked for. */
+int  mock_mkdir_calls = 0;
+char mock_mkdir_last[64] = "";
+int  mock_unlink_calls = 0;
+char mock_unlink_last[64] = "";
+int  mock_rename_calls = 0;
+char mock_rename_last_old[64] = "";
+char mock_rename_last_new[64] = "";
+
 int mkdir(const char *path) {
-    (void)path;
+    mock_mkdir_calls++;
+    snprintf(mock_mkdir_last, sizeof(mock_mkdir_last), "%s", path ? path : "");
     return mock_mkdir_result;
 }
 
 int unlink(const char *filename) {
-    (void)filename;
+    mock_unlink_calls++;
+    snprintf(mock_unlink_last, sizeof(mock_unlink_last), "%s", filename ? filename : "");
     return mock_unlink_result;
 }
 
 int rename(const char *oldname, const char *newname) {
-    (void)oldname; (void)newname;
+    mock_rename_calls++;
+    snprintf(mock_rename_last_old, sizeof(mock_rename_last_old), "%s", oldname ? oldname : "");
+    snprintf(mock_rename_last_new, sizeof(mock_rename_last_new), "%s", newname ? newname : "");
     return mock_rename_result;
 }
 
@@ -332,13 +372,49 @@ char *getcwd(char *buf, size_t size) {
  * they need specific values. */
 #define MOCK_EPOCH 1789646400ULL   /* 2026-09-17 12:00:00 UTC (Thursday) */
 
+/* --- sysinfo overrides -------------------------------------------------
+ * Every command can be overridden so cross-app tests can inject specific
+ * memory / CPU / time / process-list / filesystem values.  Disabled (0)
+ * by default: the canned values below are used. */
+int mock_sysinfo_mem_enabled = 0;
+unsigned long long mock_sysinfo_mem_total = 0, mock_sysinfo_mem_free = 0;
+int mock_sysinfo_cpu_enabled = 0;
+unsigned long long mock_sysinfo_cpu_uptime = 0, mock_sysinfo_cpu_idle = 0;
+int mock_sysinfo_num_cpus = 4;
+int mock_sysinfo_uptime_enabled = 0;
+int mock_sysinfo_uptime_ms = 0;
+int mock_sysinfo_time_enabled = 0;
+struct sys_time mock_sysinfo_time;
+int mock_sysinfo_fs_enabled = 0;
+unsigned long long mock_sysinfo_fs_total = 0, mock_sysinfo_fs_free = 0;
+int mock_sysinfo_procs_enabled = 0;
+struct sys_procinfo mock_sysinfo_procs[8];
+int mock_sysinfo_proc_count = 0;
+
+void mock_sysinfo_override_reset(void) {
+    mock_sysinfo_mem_enabled = 0;
+    mock_sysinfo_cpu_enabled = 0;
+    mock_sysinfo_uptime_enabled = 0;
+    mock_sysinfo_time_enabled = 0;
+    mock_sysinfo_fs_enabled = 0;
+    mock_sysinfo_procs_enabled = 0;
+    mock_sysinfo_num_cpus = 4;
+    mock_sysinfo_proc_count = 0;
+}
+
 int sysinfo(int cmd, void *buf, int size) {
     if (cmd == 1) {
+        if (mock_sysinfo_uptime_enabled) return mock_sysinfo_uptime_ms;
         return 12345; /* uptime ms, returned by value like the kernel */
     }
     if (cmd == 2) {
         struct sys_meminfo *m = (struct sys_meminfo *)buf;
         if (size < (int)sizeof(*m)) return -1;
+        if (mock_sysinfo_mem_enabled) {
+            m->total_bytes = mock_sysinfo_mem_total;
+            m->free_bytes = mock_sysinfo_mem_free;
+            return 0;
+        }
         m->total_bytes = 64ULL * 1024 * 1024;
         m->free_bytes = 40ULL * 1024 * 1024;
         return 0;
@@ -346,6 +422,14 @@ int sysinfo(int cmd, void *buf, int size) {
     if (cmd == 3) {
         struct sys_procinfo *p = (struct sys_procinfo *)buf;
         int max = size / (int)sizeof(*p);
+        if (mock_sysinfo_procs_enabled) {
+            int n = mock_sysinfo_proc_count;
+            if (n > 8) n = 8;
+            if (n > max) n = max;
+            if (n < 0) n = 0;
+            for (int i = 0; i < n; i++) p[i] = mock_sysinfo_procs[i];
+            return n;
+        }
         if (max < 3) return 0;
         memset(p, 0, sizeof(p[0]) * 3);
         p[0].pid = 1; p[0].parent_pid = 0; p[0].state = 1;
@@ -369,6 +453,12 @@ int sysinfo(int cmd, void *buf, int size) {
     if (cmd == 5) {
         struct sys_cpuinfo *c = (struct sys_cpuinfo *)buf;
         if (size < (int)sizeof(*c)) return -1;
+        if (mock_sysinfo_cpu_enabled) {
+            c->uptime_ms = mock_sysinfo_cpu_uptime;
+            c->total_idle_ms = mock_sysinfo_cpu_idle;
+            c->num_cpus = mock_sysinfo_num_cpus;
+            return 0;
+        }
         c->uptime_ms = 12345;
         c->total_idle_ms = 4000;
         c->num_cpus = 4;
@@ -377,6 +467,10 @@ int sysinfo(int cmd, void *buf, int size) {
     if (cmd == 6) {
         struct sys_time *t = (struct sys_time *)buf;
         if (size < (int)sizeof(*t)) return -1;
+        if (mock_sysinfo_time_enabled) {
+            *t = mock_sysinfo_time;
+            return 0;
+        }
         t->epoch = MOCK_EPOCH;
         t->year = 2026; t->month = 9; t->day = 17;
         t->hour = 12; t->minute = 0; t->second = 0;
@@ -386,6 +480,11 @@ int sysinfo(int cmd, void *buf, int size) {
     if (cmd == 7) {
         struct sys_fsinfo *f = (struct sys_fsinfo *)buf;
         if (size < (int)sizeof(*f)) return -1;
+        if (mock_sysinfo_fs_enabled) {
+            f->total_bytes = mock_sysinfo_fs_total;
+            f->free_bytes = mock_sysinfo_fs_free;
+            return 0;
+        }
         f->total_bytes = 64ULL * 1024 * 1024;
         f->free_bytes = 40ULL * 1024 * 1024;
         return 0;

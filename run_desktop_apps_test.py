@@ -123,12 +123,12 @@ class Qmp:
         self.cmd("input-send-event", {"events": [{"type": "btn", "data": {"button": button, "down": False}}]})
         time.sleep(0.25)
 
-    def key(self, qcode):
+    def key(self, qcode, pause=0.3):
         self.cmd("send-key", {"keys": [{"type": "qcode", "data": qcode}]})
-        time.sleep(0.04)
+        time.sleep(pause)
 
     def shot(self, path):
-        r = self.cmd("screendump", {"arguments": {"filename": path}})
+        r = self.cmd("screendump", {"filename": path})
         return "return" in r
 
 
@@ -162,7 +162,7 @@ def main():
     log("[INFO] booting desktop...")
     serial = open(SERIAL_LOG, "w")
     proc = subprocess.Popen(
-        ["make", "run", "ARCH=arm",
+        ["stdbuf", "-oL", "-eL", "make", "run", "ARCH=arm",
          f"QEMU_ARGS=-display none -qmp unix:{QMP_SOCK},server,nowait"],
         stdout=serial, stderr=subprocess.STDOUT)
 
@@ -189,30 +189,68 @@ def main():
         qmp.shot(os.path.join(SHOT_DIR, "00_desktop.ppm"))
         log(f"[INFO] desktop screenshot: {'ok' if ppm_has_content(os.path.join(SHOT_DIR, '00_desktop.ppm')) else 'BLANK!'}")
 
+        # Ground truth: the desktop dumps its exact start-menu mapping once at
+        # startup ("[MENU] <idx>=<NAME>"). Wait for it, then compute real ups.
+        menu_map = {}
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            text = open(SERIAL_LOG, errors="ignore").read()
+            menu_map = {}
+            for line in text.splitlines():
+                if "[MENU]" in line and "=" in line:
+                    seg = line.split("[MENU]", 1)[1].replace("[CONSOLE]", " ").strip()
+                    if seg.startswith("count="):
+                        continue
+                    try:
+                        k, v = seg.split("=", 1)
+                        menu_map[int(k)] = v.strip()
+                    except ValueError:
+                        pass
+            if menu_map:
+                break
+            time.sleep(0.5)
+        if not menu_map:
+            log("[FAIL] desktop never reported its menu mapping")
+            return 1
+        last_idx = max(menu_map.keys())
+        log(f"[INFO] desktop menu: {len(menu_map)} entries, last idx {last_idx}")
         for name, binname in APPS:
-            idx = idx_of[name]
-            # Open start menu (Apps button on the taskbar)
-            qmp.click(38, TASKBAR_Y + 13)
-            time.sleep(0.4)
-            # Move selection to the app's row
-            for _ in range(idx):
-                qmp.key("down")
-            qmp.key("ret")
-
-            # Wait for the app's serial marker
+            idx = None
+            for k, v in menu_map.items():
+                if v == binname:
+                    idx = k
+            if idx is None:
+                log(f"[ERR] {binname} missing from desktop menu!")
+                return 1
+            idx_of[name] = idx
+            ups = last_idx - idx
             marker = f"[APP] {name} started"
             ok_marker = False
-            deadline = time.time() + 10
-            while time.time() < deadline:
-                text = open(SERIAL_LOG, errors="ignore").read()
-                if marker in text:
-                    ok_marker = True
-                    break
-                if "Unknown System Call" in text:
-                    break
+            for attempt in (1, 2):
+                # Ensure no start menu is lingering, then open it fresh.
+                qmp.click(5, 5)
                 time.sleep(0.3)
+                qmp.click(38, TASKBAR_Y + 13)
+                time.sleep(0.5)
+                qmp.key("end")            # selection -> last item
+                for _ in range(ups):      # then up to the target row
+                    qmp.key("up")
+                qmp.key("ret")
 
-            time.sleep(1.5)
+                deadline = time.time() + 15
+                while time.time() < deadline:
+                    text = open(SERIAL_LOG, errors="ignore").read()
+                    if marker in text:
+                        ok_marker = True
+                        break
+                    if "Unknown System Call" in text:
+                        break
+                    time.sleep(0.3)
+                if ok_marker:
+                    break
+                log(f"[WARN] {name}: launch attempt {attempt} did not start; retrying")
+
+            time.sleep(1.0)
             shot_path = os.path.join(SHOT_DIR, f"{idx:02d}_{name}.ppm")
             qmp.shot(shot_path)
             has_pixels = ppm_has_content(shot_path)
@@ -220,9 +258,9 @@ def main():
                 f"screen={'ok' if has_pixels else 'BLANK'} (menu idx {idx})")
             results.append((name, ok_marker, has_pixels))
 
-            # Close the window (X button of the fullscreen tile)
-            qmp.click(W - 12, 8)
-            time.sleep(1.0)
+            # Close the focused window (F4) and let the WM settle.
+            qmp.key("f4")
+            time.sleep(1.5)
     finally:
         kill_qemu()
         proc.terminate()
