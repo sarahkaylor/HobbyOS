@@ -21,8 +21,10 @@ static uint64_t cpu_idle_time[MAX_CPUS];
 
 // CPUs observed running (idling) at least once, so sysinfo(5)/SysMon can
 // report the real core count instead of the static MAX_CPUS ceiling.
-static volatile uint8_t cpu_seen[MAX_CPUS];
-static volatile int cpus_seen_count;
+// Mutated lock-free: each index is written only by its own CPU and the
+// count uses an atomic add, so the idle path never takes a lock.
+static uint8_t cpu_seen[MAX_CPUS];
+static int cpus_seen_count;
 
 // Simple bump allocator for 2MB-aligned process memory regions
 static uint64_t next_phys_alloc = PROC_PHYS_POOL_BASE;
@@ -722,15 +724,11 @@ void start_scheduler(void) {
     uint64_t idle_end = timer_get_ms();
     uint32_t cpu = get_cpuid();
     if (cpu < MAX_CPUS) {
-        if (!cpu_seen[cpu]) {
-            // First time this CPU is seen: record it under the lock so the
-            // count can't lose an update when cores come up simultaneously.
-            uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-            if (!cpu_seen[cpu]) {
-                cpu_seen[cpu] = 1;
-                cpus_seen_count++;
-            }
-            spinlock_release_irqrestore(&proc_lock, flags);
+        if (!__atomic_load_n(&cpu_seen[cpu], __ATOMIC_RELAXED)) {
+            // First time this CPU is seen: record it lock-free so the idle
+            // path adds no lock contention to the scheduler/interrupt paths.
+            __atomic_store_n(&cpu_seen[cpu], 1, __ATOMIC_RELAXED);
+            __atomic_fetch_add(&cpus_seen_count, 1, __ATOMIC_RELAXED);
         }
         if (idle_end > idle_start) {
             cpu_idle_time[cpu] += (idle_end - idle_start);
@@ -775,7 +773,7 @@ int process_get_info_list(struct sys_procinfo* list, int max_procs) {
 }
 
 int process_get_num_cpus(void) {
-    int n = cpus_seen_count;
+    int n = __atomic_load_n(&cpus_seen_count, __ATOMIC_RELAXED);
     // Fall back to the static ceiling until at least one CPU has been seen
     // (e.g. very early boot, before the first idle).
     return (n > 0) ? n : MAX_CPUS;

@@ -5,6 +5,11 @@ Run the in-OS desktop application harness (MODE=apps_test -> APPS_T.BIN).
 The harness boots the desktop with mock input and drives every desktop
 application through a full launch/verify/close cycle, printing
 "APPS TEST PASSED" or "APPS TEST FAILED (...)" on the serial console.
+
+The harness itself exits 0 on success / 1 with a reason on failure; when its
+process exits the kernel halts QEMU (no processes left). This driver also
+kills QEMU explicitly after the verdict (or on timeout) so a stuck run can
+never leave a hanging qemu behind.
 """
 import os
 import subprocess
@@ -15,6 +20,7 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 os.chdir(REPO)
 
 SERIAL_LOG = "/tmp/apps_test_serial.log"
+TIMEOUT_S = 240
 
 
 def log(msg):
@@ -24,6 +30,13 @@ def log(msg):
 def kill_qemu():
     subprocess.run(["pkill", "-9", "-f", "qemu-system-aarch64"], stderr=subprocess.DEVNULL)
     subprocess.run(["pkill", "-9", "-f", "qemu-system-x86_64"], stderr=subprocess.DEVNULL)
+
+
+def read_log():
+    try:
+        return open(SERIAL_LOG, errors="ignore").read()
+    except OSError:
+        return ""
 
 
 def main():
@@ -37,17 +50,13 @@ def main():
         ["make", "apps_test_run", "ARCH=arm", "QEMU_ARGS=-display none"],
         stdout=logf, stderr=subprocess.STDOUT)
 
-    timeout_s = 120
     start = time.time()
     verdict = None
-    while time.time() - start < timeout_s:
+    while time.time() - start < TIMEOUT_S:
         if proc.poll() is not None and verdict is None:
-            # Kernel self-halted; give the log a moment to flush.
+            # Kernel self-halted (or make failed); give the log a moment to flush.
             time.sleep(1)
-        try:
-            text = open(SERIAL_LOG, errors="ignore").read()
-        except OSError:
-            text = ""
+        text = read_log()
         if "APPS TEST PASSED" in text:
             verdict = "pass"
             break
@@ -56,23 +65,30 @@ def main():
             break
         time.sleep(0.5)
 
+    # Always terminate qemu + the make wrapper, then flush the log.
     kill_qemu()
     proc.terminate()
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
         proc.kill()
+    logf.close()
+
+    text = read_log()
+    n_pass = text.count("[APPS_T] PASS ")
+    tail = text[-4000:]
 
     if verdict == "pass":
-        log("[TEST] APPS TEST PASSED")
+        log(f"[TEST] APPS TEST PASSED ({n_pass}/10 per-app PASS lines)")
+        log(tail)
         return 0
     if verdict == "fail":
         log("[TEST] APPS TEST FAILED - last serial output:")
-        tail = open(SERIAL_LOG, errors="ignore").read()[-3000:]
         log(tail)
         return 1
-    log(f"[TEST] Timeout after {timeout_s}s waiting for APPS TEST verdict "
+    log(f"[TEST] Timeout after {TIMEOUT_S}s waiting for APPS TEST verdict "
         "- treating as deadlock/failure (see /tmp/apps_test_serial.log)")
+    log(tail)
     return 1
 
 
