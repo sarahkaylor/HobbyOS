@@ -274,10 +274,14 @@ static void handle_input(void) {
 
 /* --- Main entry point --- */
 
-#if !defined(HOST_TEST) && !defined(PONG_TEST_WRAPPER)
+#if defined(HOST_TEST)
+int main(void) {
+#else
+#if !defined(PONG_TEST_WRAPPER)
 __attribute__((section(".text._start")))
 #endif
 void _start(void) {
+#endif
     print("Pong: Starting...\n");
 
     if (graphics_init() != 0) {

@@ -203,28 +203,37 @@ void flush_fb(void) {
         test_state = 101;
     }
     if (test_state == 101) {
-        print_console("[TEST] Moving mouse to Save item...\n");
+        print_console("[TEST] Moving mouse to Open item...\n");
         inject_mock_event(EV_ABS, ABS_X, (20 * 0x7FFF) / 1024);
         inject_mock_event(EV_ABS, ABS_Y, (64 * 0x7FFF) / 768);
         test_state = 102;
     }
     if (test_state == 102) {
-        print_console("[TEST] Clicking Save item...\n");
+        print_console("[TEST] Clicking Open item...\n");
         inject_mock_event(EV_KEY, 0x110, 1);
         inject_mock_event(EV_KEY, 0x110, 0);
         test_state = STATE_WAIT_FINISH;
     }
     if (test_state == STATE_WAIT_FINISH) {
-        int found = 0;
+        /* Clicking File->Open must make the editor render its file open
+         * dialog, listing real entries read from the FAT-16 disk. Verify
+         * the dialog title and at least one real file name appear in the
+         * window text. */
+        int found_title = 0;
+        int found_entry = 0;
         char *text = windows[0].text;
         for (int i = 0; text[i] != '\0'; i++) {
-            if (text[i] == 'w' && text[i+1] == ' ') {
-                found = 1;
-                break;
+            if (text[i] == 'O' && text[i+1] == 'p' && text[i+2] == 'e' &&
+                text[i+3] == 'n' && text[i+4] == ' ' && text[i+5] == 'F') {
+                found_title = 1;
+            }
+            if (text[i] == 'M' && text[i+1] == 'E' && text[i+2] == 'M' &&
+                text[i+3] == 'T' && text[i+4] == 'E' && text[i+5] == 'S') {
+                found_entry = 1;
             }
         }
-        if (found) {
-            print_console("[TEST] Found 'w ' in window 0! SCREENSHOT_READY\n");
+        if (found_title && found_entry) {
+            print_console("[TEST] Open File dialog rendered with disk entries! SCREENSHOT_READY\n");
             while(1);
         }
     }
