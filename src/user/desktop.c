@@ -21,7 +21,7 @@ char shift_keymap[128] = {0,    27,  '!', '@',  '#',  '$',  '%', '^', '&',  '*',
 
 static int shift_pressed = 0;
 
-#define MAX_MENU_ITEMS 64
+#define MAX_MENU_ITEMS 80
 char menu_items[MAX_MENU_ITEMS][16];
 int num_menu_items = 0;
 
