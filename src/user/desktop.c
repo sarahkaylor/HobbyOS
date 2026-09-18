@@ -131,6 +131,62 @@ void wm_handle_app_escape(int win_id, char* seq) {
     }
 }
 
+/* GUI app binaries surfaced at the top of the Apps menu. The partition is
+ * stable: pinned entries keep their read_dir order and move ahead of
+ * everything else, which keeps its own order. Editing this list is the only
+ * change needed to alter what gets pinned. */
+static const char *const pinned_apps[] = {
+  "FILES.BIN", "CALC.BIN", "CLOCK.BIN", "SYSMON.BIN", "HEX.BIN",
+  "TASKS.BIN", "FIND.BIN",  "DIFF.BIN",  "NOTES.BIN",  "UNIT.BIN",
+};
+#define NUM_PINNED_APPS ((int)(sizeof(pinned_apps) / sizeof(pinned_apps[0])))
+
+/* Exact string equality (desktop.c has no libc strcmp). */
+static int name_is(const char *a, const char *b) {
+  int i = 0;
+  while (a[i] && b[i] && a[i] == b[i]) i++;
+  return a[i] == b[i];
+}
+
+static int is_pinned_app(const char *name) {
+  for (int i = 0; i < NUM_PINNED_APPS; i++) {
+    if (name_is(name, pinned_apps[i])) return 1;
+  }
+  return 0;
+}
+
+static void copy_name(char *dst, const char *src, int max) {
+  int k = 0;
+  while (src[k] && k < max - 1) { dst[k] = src[k]; k++; }
+  dst[k] = '\0';
+}
+
+/* Move the pinned GUI apps to the front of menu_items (stable partition).
+ * Non-static: exercised directly by the host test (desktop_menu_test.c). */
+void menu_apps_first(void) {
+  char tmp[MAX_MENU_ITEMS][16];
+  int w = 0;
+  for (int i = 0; i < num_menu_items; i++) {
+    if (is_pinned_app(menu_items[i])) copy_name(tmp[w++], menu_items[i], 16);
+  }
+  for (int i = 0; i < num_menu_items; i++) {
+    if (!is_pinned_app(menu_items[i])) copy_name(tmp[w++], menu_items[i], 16);
+  }
+  for (int i = 0; i < num_menu_items; i++) {
+    copy_name(menu_items[i], tmp[i], 16);
+  }
+}
+
+/* Display label for a menu entry: the file name minus a trailing ".BIN"
+ * (launcher entries read "FILES", not "FILES.BIN"); other names unchanged.
+ * Non-static: exercised directly by the host test. */
+void menu_display_name(const char *raw, char *out, int max) {
+  copy_name(out, raw, max);
+  int i = 0;
+  while (out[i] && i < max - 1) i++;
+  if (i >= 4 && name_is(out + i - 4, ".BIN")) out[i - 4] = '\0';
+}
+
 void load_menu(void) {
   num_menu_items = 0;
   while (num_menu_items < MAX_MENU_ITEMS) {
@@ -146,6 +202,8 @@ void load_menu(void) {
     menu_items[num_menu_items][k] = '\0';
     num_menu_items++;
   }
+  /* Surface the GUI apps at the top of the Apps menu. */
+  menu_apps_first();
   /* Test-support: dump the exact menu index -> name mapping once at load. */
   for (int i = 0; i < num_menu_items; i++) {
     print_console("[MENU] ");
@@ -218,7 +276,9 @@ void draw_menu(void) {
   int h = num_menu_items * 20;
   graphics_draw_rect(menu_x, menu_y, w, h, COLOR(200, 200, 200));
   for (int i = 0; i < num_menu_items; i++) {
-    wm_draw_text(menu_x + 5, menu_y + i * 20 + 5, menu_items[i],
+    char label[16];
+    menu_display_name(menu_items[i], label, sizeof(label));
+    wm_draw_text(menu_x + 5, menu_y + i * 20 + 5, label,
                  COLOR(0, 0, 0));
   }
 }
@@ -319,11 +379,13 @@ static void draw_start_menu(void) {
     int idx = start_scroll + i;
     if (idx >= num_menu_items) break;
     int row_y = y + 4 + i * 20;
+    char label[16];
+    menu_display_name(menu_items[idx], label, sizeof(label));
     if (idx == start_sel) {
       graphics_draw_rect(x + 2, row_y, w - 4, 20, COLOR(96, 166, 255));
-      wm_draw_text(x + 8, row_y + 5, menu_items[idx], COLOR(255, 255, 255));
+      wm_draw_text(x + 8, row_y + 5, label, COLOR(255, 255, 255));
     } else {
-      wm_draw_text(x + 8, row_y + 5, menu_items[idx], COLOR(20, 20, 24));
+      wm_draw_text(x + 8, row_y + 5, label, COLOR(20, 20, 24));
     }
   }
 }

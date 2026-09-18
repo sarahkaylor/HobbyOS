@@ -808,6 +808,11 @@ EDITOR_TEST_BIN = editor_test_host
 $(EDITOR_TEST_BIN): obj/host_editor_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
 	$(HOST_CC) -o $@ $^
 
+# Menu ordering + display-label unit tests (link desktop.c like editor_test).
+DESKTOP_MENU_TEST = desktop_menu_test_host
+$(DESKTOP_MENU_TEST): obj/host_desktop_menu_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+	$(HOST_CC) -o $@ $^
+
 PONG_TEST_BIN = pong_test_host
 $(PONG_TEST_BIN): obj/host_pong_test.o obj/host_user_graphics_graphics.o obj/host_compat.o
 	$(HOST_CC) -o $@ $^
@@ -840,8 +845,9 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(GRAPHICS_LIB_TEST) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(GRAPHICS_LIB_TEST) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
+	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DIALOG_ARROW_TEST)
 	$(HOST_RUN) ./$(PONG_TEST_BIN)
 	$(HOST_RUN) ./$(GUI_TEST)
