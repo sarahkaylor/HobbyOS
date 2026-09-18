@@ -178,8 +178,8 @@ void mock_read_dir_reset(void) {
     for (int i = 0; i < MOCK_READ_DIR_MAX; i++) mock_read_dir_names[i][0] = '\0';
 }
 
-/* Read host current directory for mock read_dir
-// Returns a few mock files so the file dialog has content to show
+/* Read host current directory for mock read_dir.
+ * Returns a few mock files so the file dialog has content to show. */
 int read_dir(const char *path, int index, struct sys_dirent *ent) {
     (void)path;
     static const char *mock_files[] = {
@@ -335,20 +335,20 @@ char mock_rename_last_new[64] = "";
 
 int mkdir(const char *path) {
     mock_mkdir_calls++;
-    snprintf(mock_mkdir_last, sizeof(mock_mkdir_last), "%s", path ? path : "");
+    snprintf(mock_mkdir_last, sizeof(mock_mkdir_last), "%s", path);
     return mock_mkdir_result;
 }
 
 int unlink(const char *filename) {
     mock_unlink_calls++;
-    snprintf(mock_unlink_last, sizeof(mock_unlink_last), "%s", filename ? filename : "");
+    snprintf(mock_unlink_last, sizeof(mock_unlink_last), "%s", filename);
     return mock_unlink_result;
 }
 
 int rename(const char *oldname, const char *newname) {
     mock_rename_calls++;
-    snprintf(mock_rename_last_old, sizeof(mock_rename_last_old), "%s", oldname ? oldname : "");
-    snprintf(mock_rename_last_new, sizeof(mock_rename_last_new), "%s", newname ? newname : "");
+    snprintf(mock_rename_last_old, sizeof(mock_rename_last_old), "%s", oldname);
+    snprintf(mock_rename_last_new, sizeof(mock_rename_last_new), "%s", newname);
     return mock_rename_result;
 }
 

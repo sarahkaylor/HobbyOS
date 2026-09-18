@@ -19,6 +19,11 @@ spinlock_t proc_lock;
 // Per-CPU idle time tracking (aggregated in ms)
 static uint64_t cpu_idle_time[MAX_CPUS];
 
+// CPUs observed running (idling) at least once, so sysinfo(5)/SysMon can
+// report the real core count instead of the static MAX_CPUS ceiling.
+static volatile uint8_t cpu_seen[MAX_CPUS];
+static volatile int cpus_seen_count;
+
 // Simple bump allocator for 2MB-aligned process memory regions
 static uint64_t next_phys_alloc = PROC_PHYS_POOL_BASE;
 static spinlock_t mem_lock;
@@ -715,9 +720,19 @@ void start_scheduler(void) {
     uint64_t idle_start = timer_get_ms();
     safe_wfi();
     uint64_t idle_end = timer_get_ms();
-    if (idle_end > idle_start) {
-        uint32_t cpu = get_cpuid();
-        if (cpu < MAX_CPUS) {
+    uint32_t cpu = get_cpuid();
+    if (cpu < MAX_CPUS) {
+        if (!cpu_seen[cpu]) {
+            // First time this CPU is seen: record it under the lock so the
+            // count can't lose an update when cores come up simultaneously.
+            uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+            if (!cpu_seen[cpu]) {
+                cpu_seen[cpu] = 1;
+                cpus_seen_count++;
+            }
+            spinlock_release_irqrestore(&proc_lock, flags);
+        }
+        if (idle_end > idle_start) {
             cpu_idle_time[cpu] += (idle_end - idle_start);
         }
     }
@@ -760,7 +775,10 @@ int process_get_info_list(struct sys_procinfo* list, int max_procs) {
 }
 
 int process_get_num_cpus(void) {
-    return MAX_CPUS;
+    int n = cpus_seen_count;
+    // Fall back to the static ceiling until at least one CPU has been seen
+    // (e.g. very early boot, before the first idle).
+    return (n > 0) ? n : MAX_CPUS;
 }
 
 uint64_t process_get_total_idle_ms(void) {

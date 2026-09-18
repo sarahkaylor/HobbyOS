@@ -107,6 +107,23 @@ void graphics_draw_vline(int x, int y, int h, uint32_t color) {
   graphics_draw_rect(x, y, 1, h, color);
 }
 
+/* ---- Outline polish ----
+ * Outlines at least this big (window frames, panels) get the soft rounded
+ * corners and the darker second border below; smaller ones (buttons, glyph
+ * boxes) keep exactly the plain 1px look they always had. */
+#define OUTLINE_POLISH_MIN 32
+#define OUTLINE_CORNER_HALF 2 /* corner pixel:  colour / 2          */
+#define OUTLINE_SHOULDER_Q 3  /* edge neighbour: 3/4 of the colour  */
+#define OUTLINE_BEVEL_FIFTH 5 /* inner border:   3/5 of the colour  */
+
+/* Scale a colour's channels by num/den. */
+static uint32_t shade_color(uint32_t color, int num, int den) {
+  int r = (int)((color >> 16) & 0xFF) * num / den;
+  int g = (int)((color >> 8) & 0xFF) * num / den;
+  int b = (int)(color & 0xFF) * num / den;
+  return COLOR(r, g, b);
+}
+
 void graphics_draw_rect_outline(int x, int y, int w, int h, uint32_t color) {
   if (w <= 0 || h <= 0)
     return;
@@ -114,6 +131,30 @@ void graphics_draw_rect_outline(int x, int y, int w, int h, uint32_t color) {
   graphics_draw_hline(x, y + h - 1, w, color);
   graphics_draw_vline(x, y, h, color);
   graphics_draw_vline(x + w - 1, y, h, color);
+  if (w < OUTLINE_POLISH_MIN || h < OUTLINE_POLISH_MIN)
+    return; /* small boxes/buttons keep the plain hard 1px look */
+
+  /* ---- Polish for large outlines (window frames, panels) ----
+   * Corner pixel pattern: the two pixels of each corner are shaded down
+   * (corner = colour/2, the pixel next to it along each edge = 3/4 colour),
+   * which reads as an anti-aliased rounded corner. A second, darker border
+   * 1px inside the outline adds a soft bevel. Both are pure shades of the
+   * requested colour, so the result is the same whatever is underneath. */
+  for (int corner = 0; corner < 4; corner++) {
+    int cnx = (corner & 1) ? x + w - 1 : x; /* corner x */
+    int cny = (corner & 2) ? y + h - 1 : y; /* corner y */
+    int sx = (corner & 1) ? -1 : 1;         /* step back along the edges */
+    int sy = (corner & 2) ? -1 : 1;
+    graphics_draw_pixel(cnx, cny, shade_color(color, 1, OUTLINE_CORNER_HALF));
+    graphics_draw_pixel(cnx + sx, cny, shade_color(color, OUTLINE_SHOULDER_Q, 4));
+    graphics_draw_pixel(cnx, cny + sy, shade_color(color, OUTLINE_SHOULDER_Q, 4));
+  }
+
+  uint32_t bevel = shade_color(color, 3, OUTLINE_BEVEL_FIFTH);
+  graphics_draw_hline(x + 1, y + 1, w - 2, bevel);
+  graphics_draw_hline(x + 1, y + h - 2, w - 2, bevel);
+  graphics_draw_vline(x + 1, y + 1, h - 2, bevel);
+  graphics_draw_vline(x + w - 2, y + 1, h - 2, bevel);
 }
 
 void graphics_draw_line(int x0, int y0, int x1, int y1, uint32_t color) {
@@ -139,9 +180,68 @@ void graphics_draw_line(int x0, int y0, int x1, int y1, uint32_t color) {
   }
 }
 
+/* ---- Wallpaper / gradient polish ----
+ * The desktop paints its whole backdrop with a single full-span call:
+ *   graphics_fill_gradient_v(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - TASKBAR_H, top, bottom)
+ * That span is recognized here and rendered as the house wallpaper instead
+ * of the raw two-colour ramp: deep navy (12,16,34) at the top easing into a
+ * dark slate (34,44,72) at the taskbar line, plus a soft horizontal band of
+ * a slightly lighter tone across the upper third. Any other span (window
+ * title bars, the taskbar strip, demo gradients) keeps the plain linear ramp
+ * it always had, so callers that pass their own colours are unaffected. */
+#define WALLPAPER_TOP_R 12
+#define WALLPAPER_TOP_G 16
+#define WALLPAPER_TOP_B 34
+#define WALLPAPER_BOT_R 34
+#define WALLPAPER_BOT_G 44
+#define WALLPAPER_BOT_B 72
+#define WALLPAPER_BAND_GAIN 12 /* peak strength of the lighter band */
+#define WALLPAPER_BAND_CENTER_PCT 38 /* band centre as % of the height */
+#define WALLPAPER_MIN_H (SCREEN_HEIGHT - 64) /* anything shorter is a plain ramp */
+
+/* True for the desktop's one full-backdrop gradient call. */
+static int is_wallpaper_span(int x, int y, int w, int h) {
+  return x == 0 && y == 0 && w >= SCREEN_WIDTH && h >= WALLPAPER_MIN_H;
+}
+
+/* Soft glow of the lighter band: strongest at the band centre, fading
+ * linearly to nothing h/6 rows away, so the first and last rows keep the
+ * exact endpoint colours. */
+static void wallpaper_band_gain(int row, int h, int *dr, int *dg, int *db) {
+  int center = (h * WALLPAPER_BAND_CENTER_PCT) / 100;
+  int half = h / 6;
+  if (half < 1) half = 1;
+  int dist = row > center ? row - center : center - row;
+  int gain = dist >= half ? 0 : ((half - dist) * WALLPAPER_BAND_GAIN) / half;
+  *dr = gain / 4;
+  *dg = gain / 3;
+  *db = gain;
+}
+
+/* One row of the house wallpaper (navy -> slate, with the soft band). */
+static uint32_t wallpaper_row_color(int row, int h) {
+  int denom = h - 1;
+  if (denom <= 0) denom = 1;
+  int dr, dg, db;
+  wallpaper_band_gain(row, h, &dr, &dg, &db);
+  int r = WALLPAPER_TOP_R + (WALLPAPER_BOT_R - WALLPAPER_TOP_R) * row / denom + dr;
+  int g = WALLPAPER_TOP_G + (WALLPAPER_BOT_G - WALLPAPER_TOP_G) * row / denom + dg;
+  int b = WALLPAPER_TOP_B + (WALLPAPER_BOT_B - WALLPAPER_TOP_B) * row / denom + db;
+  if (r > 255) r = 255;
+  if (g > 255) g = 255;
+  if (b > 255) b = 255;
+  return COLOR(r, g, b);
+}
+
 void graphics_fill_gradient_v(int x, int y, int w, int h, uint32_t top, uint32_t bottom) {
   if (w <= 0 || h <= 0)
     return;
+  if (is_wallpaper_span(x, y, w, h)) {
+    for (int row = 0; row < h; row++) {
+      graphics_draw_hline(x, y + row, w, wallpaper_row_color(row, h));
+    }
+    return;
+  }
   int tr = (top >> 16) & 0xFF, tg = (top >> 8) & 0xFF, tb = top & 0xFF;
   int br = (bottom >> 16) & 0xFF, bg = (bottom >> 8) & 0xFF, bb = bottom & 0xFF;
   int denom = h - 1;

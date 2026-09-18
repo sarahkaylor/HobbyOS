@@ -123,10 +123,23 @@ void wm_draw_windows(int focused_id) {
         graphics_draw_rect(win->x, win->y, win->w, win->h, border);
         graphics_draw_rect_outline(win->x, win->y, win->w, win->h, border);
 
-        // Title bar (subtle vertical gradient, brighter when focused)
-        uint32_t t_top = focused ? COLOR(64, 78, 110) : COLOR(52, 54, 66);
-        uint32_t t_bot = focused ? COLOR(38, 46, 70) : COLOR(36, 37, 46);
-        graphics_fill_gradient_v(win->x + 2, win->y + 2, win->w - 4, 16, t_top, t_bot);
+        /* Drop shadow: a 1px dark band hugging the right and bottom edges of
+         * the frame (the sides away from the "light"), plus the same band
+         * just outside the frame so the shadow also shows in the 1px gaps
+         * the tiling leaves between windows. The left/top edges stay bright,
+         * which gives every window a raised look. */
+        uint32_t shadow = COLOR(8, 10, 16);
+        graphics_draw_vline(win->x + win->w - 1, win->y, win->h, shadow);
+        graphics_draw_hline(win->x, win->y + win->h - 1, win->w, shadow);
+        graphics_draw_vline(win->x + win->w, win->y, win->h, shadow);
+        graphics_draw_hline(win->x, win->y + win->h, win->w, shadow);
+
+        /* Title bar: bright blue for the focused window, muted gray-blue for
+         * the others, with a darker fold along the bottom edge for depth. */
+        uint32_t t_face = focused ? COLOR(96, 166, 255) : COLOR(72, 86, 120);
+        uint32_t t_fold = focused ? COLOR(58, 108, 188) : COLOR(44, 54, 80);
+        graphics_draw_rect(win->x + 2, win->y + 2, win->w - 4, 14, t_face);
+        graphics_draw_rect(win->x + 2, win->y + 16, win->w - 4, 2, t_fold);
 
         // Title text (clipped so it never runs under the close button)
         if (win->title[0]) {
