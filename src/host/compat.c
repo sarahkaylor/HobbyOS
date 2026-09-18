@@ -68,7 +68,23 @@ void print_hex(long val) {
     printf("0x%016lx", val);
 }
 
+// Test hook: when set, spawn2() only records the request and returns
+// mock_spawn2_result, so tests can assert spawn calls without executing.
+int mock_spawn2_intercept = 0;
+int mock_spawn2_result = 4242;
+char mock_spawn2_last_file[64] = {0};
+int mock_spawn2_last_stdin = -1;
+int mock_spawn2_last_stdout = -1;
+int mock_spawn2_last_stderr = -1;
+
 int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args) {
+    if (mock_spawn2_intercept) {
+        snprintf(mock_spawn2_last_file, sizeof(mock_spawn2_last_file), "%s", filename);
+        mock_spawn2_last_stdin = stdin_fd;
+        mock_spawn2_last_stdout = stdout_fd;
+        mock_spawn2_last_stderr = stderr_fd;
+        return mock_spawn2_result;
+    }
     pid_t pid = fork();
     if (pid < 0) return -1;
     if (pid == 0) {

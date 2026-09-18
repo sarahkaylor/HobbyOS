@@ -68,6 +68,9 @@ endif
 
 ifeq ($(MODE),test)
   CFLAGS += -DKERNEL_MODE_TEST
+  # Userland sees the same fact: CONSOLE.BIN ships as the boot smoke in
+  # test mode and as the interactive console in every other mode.
+  USER_CFLAGS += -DKERNEL_MODE_TEST
 else ifeq ($(MODE),unit_tests)
   CFLAGS += -DKERNEL_MODE_UNIT_TEST
 else ifeq ($(MODE),desktop_test)
@@ -109,7 +112,7 @@ USER_LIBC = src/user/libc.c
 USER_HDRS = src/user_include/*.h src/user_include/graphics/*.h
 MEM_TEST_BIN = $(OBJ_DIR)/memtest.bin
 FILE_IO_BIN = $(OBJ_DIR)/fileio_test.bin
-CONSOLE_TEST_BIN = $(OBJ_DIR)/console_test.bin
+CONSOLE_BIN = $(OBJ_DIR)/console.bin
 SPAWN_TEST_BIN = $(OBJ_DIR)/spawntest.bin
 FORK_TEST_BIN = $(OBJ_DIR)/fork_test.bin
 HEAP_TEST_BIN = $(OBJ_DIR)/heap_test.bin
@@ -217,7 +220,7 @@ $(OBJ_DIR)/file_io_test.o: src/user/file_io_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR) 
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/console_test.o: src/user/console_test.c $(USER_LIBC) $(USER_HDRS)
+$(OBJ_DIR)/console.o: src/user/console.c $(USER_LIBC) $(USER_HDRS) $(MODE_FILE)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
@@ -293,9 +296,9 @@ $(FILE_IO_BIN): $(OBJ_DIR)/file_io_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/fileio_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/fileio_test.elf $(FILE_IO_BIN)
 
-$(CONSOLE_TEST_BIN): $(OBJ_DIR)/console_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
-	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/console_test.elf $^
-	$(OBJCOPY) -O binary $(OBJ_DIR)/console_test.elf $(CONSOLE_TEST_BIN)
+$(CONSOLE_BIN): $(OBJ_DIR)/console.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/console.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/console.elf $(CONSOLE_BIN)
 
 $(FORK_TEST_BIN): $(OBJ_DIR)/fork_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/fork_test.elf $^
@@ -625,7 +628,7 @@ endef
 
 $(foreach app,$(DESKTOP_APP_NAMES),$(eval $(call DESKTOP_APP_RULE,$(app))))
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -656,7 +659,7 @@ else
 endif
 	$(MCOPY) -i disk.img $(MEM_TEST_BIN) ::/MEMTEST.BIN
 	$(MCOPY) -i disk.img $(FILE_IO_BIN) ::/FILEIO.BIN
-	$(MCOPY) -i disk.img $(CONSOLE_TEST_BIN) ::/CONSOLE.BIN
+	$(MCOPY) -i disk.img $(CONSOLE_BIN) ::/CONSOLE.BIN
 	$(MCOPY) -i disk.img $(FORK_TEST_BIN) ::/FORKTEST.BIN
 	$(MCOPY) -i disk.img $(HEAP_TEST_BIN) ::/HEAPTEST.BIN
 	$(MCOPY) -i disk.img $(SPAWN_TEST_BIN) ::/SPAWN.BIN
@@ -813,6 +816,11 @@ DESKTOP_MENU_TEST = desktop_menu_test_host
 $(DESKTOP_MENU_TEST): obj/host_desktop_menu_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
 	$(HOST_CC) -o $@ $^
 
+# Console app host tests: both roles (interactive shell handoff + smoke).
+CONSOLE_APP_TEST = console_test_host
+$(CONSOLE_APP_TEST): obj/host_console_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+	$(HOST_CC) -o $@ $^
+
 PONG_TEST_BIN = pong_test_host
 $(PONG_TEST_BIN): obj/host_pong_test.o obj/host_user_graphics_graphics.o obj/host_compat.o
 	$(HOST_CC) -o $@ $^
@@ -845,9 +853,10 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(GRAPHICS_LIB_TEST) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(GRAPHICS_LIB_TEST) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
+	$(HOST_RUN) ./$(CONSOLE_APP_TEST)
 	$(HOST_RUN) ./$(DIALOG_ARROW_TEST)
 	$(HOST_RUN) ./$(PONG_TEST_BIN)
 	$(HOST_RUN) ./$(GUI_TEST)
