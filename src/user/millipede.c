@@ -505,6 +505,40 @@ static void handle_input(void) {
     if (player_y + PLAYER_H > SCREEN_HEIGHT - 5) player_y = SCREEN_HEIGHT - 5 - PLAYER_H;
 }
 
+/* The desktop forwards our window's keystrokes to stdin: plain keys as
+ * bytes, arrows as ANSI sequences ("\033[A/B/C/D" = up/down/right/left).
+ * The desktop's event loop usually wins the raw virtio queue, so in a
+ * window this is the path that actually delivers input. */
+static void handle_stdin_input(void) {
+    static int esc = 0;
+    char buf[32];
+    while (available(0) > 0) {
+        int n = read(0, buf, sizeof(buf));
+        if (n <= 0) break;
+        for (int i = 0; i < n; i++) {
+            char c = buf[i];
+            if (esc == 1) { esc = (c == '[') ? 2 : 0; continue; }
+            if (esc == 2) {
+                esc = 0;
+                if (c == 'A') player_y -= PLAYER_SPEED;        /* Up */
+                else if (c == 'B') player_y += PLAYER_SPEED;   /* Down */
+                else if (c == 'C') player_x += PLAYER_HSPEED;  /* Right */
+                else if (c == 'D') player_x -= PLAYER_HSPEED;  /* Left */
+                continue;
+            }
+            if (c == '\033') { esc = 1; continue; }
+            if (c == 'q' || c == 'Q') { print("Millipede: Quitting.\n"); exit(0); }
+            if (c == 'r' || c == 'R') { if (game_over) reset_game(); continue; }
+            if (c == ' ') fire_bullet();
+        }
+    }
+    /* Clamp player (same bounds as the raw path) */
+    if (player_x < 5) player_x = 5;
+    if (player_x + PLAYER_W > SCREEN_WIDTH - 5) player_x = SCREEN_WIDTH - 5 - PLAYER_W;
+    if (player_y < SCREEN_HEIGHT - 150) player_y = SCREEN_HEIGHT - 150;
+    if (player_y + PLAYER_H > SCREEN_HEIGHT - 5) player_y = SCREEN_HEIGHT - 5 - PLAYER_H;
+}
+
 /* Continuous auto-fire for classic arcade feel */
 static void auto_fire(void) {
     if (game_over || game_paused > 0) return;
@@ -599,6 +633,7 @@ void _start(void) {
         }
 
         handle_input();
+        handle_stdin_input();
         auto_fire();
 
         if (!game_over && game_paused == 0) {

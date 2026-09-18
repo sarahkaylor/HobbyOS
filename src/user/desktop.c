@@ -131,15 +131,21 @@ void wm_handle_app_escape(int win_id, char* seq) {
     }
 }
 
-/* GUI app binaries surfaced at the top of the Apps menu. The partition is
- * stable: pinned entries keep their read_dir order and move ahead of
- * everything else, which keeps its own order. Editing this list is the only
- * change needed to alter what gets pinned. */
+/* GUI app binaries surfaced at the top of the Apps menu, then the games.
+ * Each tier is a stable partition: pinned entries keep their read_dir order
+ * and move ahead of everything else, which keeps its own order. Editing
+ * these lists is the only change needed to alter what gets pinned. */
 static const char *const pinned_apps[] = {
   "FILES.BIN", "CALC.BIN", "CLOCK.BIN", "SYSMON.BIN", "HEX.BIN",
   "TASKS.BIN", "FIND.BIN",  "DIFF.BIN",  "NOTES.BIN",  "UNIT.BIN",
 };
 #define NUM_PINNED_APPS ((int)(sizeof(pinned_apps) / sizeof(pinned_apps[0])))
+
+/* The games, pinned right below the apps so all twelve fit on screen. */
+static const char *const pinned_games[] = {
+  "PONG.BIN", "MILLIPED.BIN",
+};
+#define NUM_PINNED_GAMES ((int)(sizeof(pinned_games) / sizeof(pinned_games[0])))
 
 /* Exact string equality (desktop.c has no libc strcmp). */
 static int name_is(const char *a, const char *b) {
@@ -155,13 +161,21 @@ static int is_pinned_app(const char *name) {
   return 0;
 }
 
+static int is_pinned_game(const char *name) {
+  for (int i = 0; i < NUM_PINNED_GAMES; i++) {
+    if (name_is(name, pinned_games[i])) return 1;
+  }
+  return 0;
+}
+
 static void copy_name(char *dst, const char *src, int max) {
   int k = 0;
   while (src[k] && k < max - 1) { dst[k] = src[k]; k++; }
   dst[k] = '\0';
 }
 
-/* Move the pinned GUI apps to the front of menu_items (stable partition).
+/* Move the pinned GUI apps, then the games, to the front of menu_items
+ * (tier 1: apps, tier 2: games, tier 3: everything else; each stable).
  * Non-static: exercised directly by the host test (desktop_menu_test.c). */
 void menu_apps_first(void) {
   char tmp[MAX_MENU_ITEMS][16];
@@ -170,7 +184,11 @@ void menu_apps_first(void) {
     if (is_pinned_app(menu_items[i])) copy_name(tmp[w++], menu_items[i], 16);
   }
   for (int i = 0; i < num_menu_items; i++) {
-    if (!is_pinned_app(menu_items[i])) copy_name(tmp[w++], menu_items[i], 16);
+    if (is_pinned_game(menu_items[i])) copy_name(tmp[w++], menu_items[i], 16);
+  }
+  for (int i = 0; i < num_menu_items; i++) {
+    if (!is_pinned_app(menu_items[i]) && !is_pinned_game(menu_items[i]))
+      copy_name(tmp[w++], menu_items[i], 16);
   }
   for (int i = 0; i < num_menu_items; i++) {
     copy_name(menu_items[i], tmp[i], 16);

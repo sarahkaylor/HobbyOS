@@ -272,6 +272,38 @@ static void handle_input(void) {
         player_y = SCREEN_HEIGHT - PADDLE_HEIGHT;
 }
 
+/* The desktop forwards our window's keystrokes to stdin: plain keys as
+ * bytes, arrows as ANSI sequences ("\033[A/B/C/D" = up/down/right/left).
+ * The desktop's event loop usually wins the raw virtio queue, so in a
+ * window this is the path that actually delivers input. */
+static void handle_stdin_input(void) {
+    static int esc = 0;
+    char buf[32];
+    while (available(0) > 0) {
+        int n = read(0, buf, sizeof(buf));
+        if (n <= 0) break;
+        for (int i = 0; i < n; i++) {
+            char c = buf[i];
+            if (esc == 1) { esc = (c == '[') ? 2 : 0; continue; }
+            if (esc == 2) {
+                esc = 0;
+                if (c == 'A') player_y -= PADDLE_SPEED;      /* Up */
+                else if (c == 'B') player_y += PADDLE_SPEED; /* Down */
+                continue;
+            }
+            if (c == '\033') { esc = 1; continue; }
+            if (c == 'q' || c == 'Q') { print("Pong: Quitting.\n"); exit(0); }
+            if (c == 'r' || c == 'R') { reset_game(); continue; }
+            if (c == 'w' || c == 'W') player_y -= PADDLE_SPEED;
+            if (c == 's' || c == 'S') player_y += PADDLE_SPEED;
+        }
+    }
+    /* Clamp player paddle (same bounds as the raw path) */
+    if (player_y < 0) player_y = 0;
+    if (player_y + PADDLE_HEIGHT > SCREEN_HEIGHT)
+        player_y = SCREEN_HEIGHT - PADDLE_HEIGHT;
+}
+
 /* --- Main entry point --- */
 
 #if defined(HOST_TEST)
@@ -296,6 +328,7 @@ void _start(void) {
 
     while (1) {
         handle_input();
+        handle_stdin_input();
         if (!game_over) {
             update_ai();
             update_ball();

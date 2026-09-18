@@ -48,23 +48,33 @@ static int menu_is(const char *const *names, int n) {
 int main(void) {
   printf("[TEST] desktop menu ordering (Apps pinned first)\n");
 
-  /* 1) Mixed list: apps scattered among other files -> apps first; both
-   *    groups keep their relative read_dir order. */
+  /* 1) Mixed list: apps and games scattered among other files -> apps
+   *    first, then the games; every tier keeps its relative read_dir order. */
   {
     const char *in[] = {
-      "SHTEST.BIN", "CALC.BIN", "EDITOR.BIN", "FILES.BIN", "CLOCK.BIN",
-      "TEST.TXT", "SYSMON.BIN", "HEX.BIN", "TASKS.BIN", "FIND.BIN",
-      "NOTES.TXT", "DIFF.BIN", "NOTES.BIN", "UNIT.BIN", "PONG.BIN",
+      "SHTEST.BIN", "CALC.BIN", "EDITOR.BIN", "MILLIPED.BIN", "FILES.BIN",
+      "CLOCK.BIN", "TEST.TXT", "SYSMON.BIN", "HEX.BIN", "TASKS.BIN",
+      "PONG.BIN", "FIND.BIN", "NOTES.TXT", "DIFF.BIN", "NOTES.BIN", "UNIT.BIN",
     };
     const char *want[] = {
       "CALC.BIN", "FILES.BIN", "CLOCK.BIN", "SYSMON.BIN", "HEX.BIN",
       "TASKS.BIN", "FIND.BIN", "DIFF.BIN", "NOTES.BIN", "UNIT.BIN",
-      "SHTEST.BIN", "EDITOR.BIN", "TEST.TXT", "NOTES.TXT", "PONG.BIN",
+      "MILLIPED.BIN", "PONG.BIN",
+      "SHTEST.BIN", "EDITOR.BIN", "TEST.TXT", "NOTES.TXT",
     };
-    set_menu(in, 15);
+    set_menu(in, 16);
     menu_apps_first();
-    check(menu_is(want, 15),
-          "scattered apps pinned first; relative order preserved");
+    check(menu_is(want, 16),
+          "apps then games pinned; tier relative order preserved");
+  }
+
+  /* 1b) Games with no apps present: still surface to the front (stable). */
+  {
+    const char *in[] = { "SHTEST.BIN", "PONG.BIN", "EDITOR.BIN", "MILLIPED.BIN" };
+    const char *want[] = { "PONG.BIN", "MILLIPED.BIN", "SHTEST.BIN", "EDITOR.BIN" };
+    set_menu(in, 4);
+    menu_apps_first();
+    check(menu_is(want, 4), "games alone pin to the front when no apps present");
   }
 
   /* 2) No pinned apps present (desktop_test's two-file menu): unchanged. */
@@ -80,10 +90,11 @@ int main(void) {
     const char *in[] = {
       "FILES.BIN", "CALC.BIN", "CLOCK.BIN", "SYSMON.BIN", "HEX.BIN",
       "TASKS.BIN", "FIND.BIN", "DIFF.BIN", "NOTES.BIN", "UNIT.BIN",
+      "PONG.BIN", "MILLIPED.BIN",
     };
-    set_menu(in, 10);
+    set_menu(in, 12);
     menu_apps_first();
-    check(menu_is(in, 10), "all pinned -> order untouched");
+    check(menu_is(in, 12), "all pinned (apps + games) -> order untouched");
   }
 
   /* 4) Display labels strip a trailing ".BIN" only. */
@@ -97,6 +108,10 @@ int main(void) {
     check(strcmp(out, "TEST.TXT") == 0, "non-\".BIN\" name unchanged");
     menu_display_name("SH.BIN", out, sizeof(out));
     check(strcmp(out, "SH") == 0, "\"SH.BIN\" displays as \"SH\"");
+    menu_display_name("PONG.BIN", out, sizeof(out));
+    check(strcmp(out, "PONG") == 0, "\"PONG.BIN\" displays as \"PONG\"");
+    menu_display_name("MILLIPED.BIN", out, sizeof(out));
+    check(strcmp(out, "MILLIPED") == 0, "\"MILLIPED.BIN\" displays as \"MILLIPED\"");
   }
 
   /* 5) load_menu() end-to-end through the mock read_dir override. */
