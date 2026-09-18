@@ -4,7 +4,10 @@
 #include <stdint.h>
 
 // Standard 8x8 basic ASCII font (chars 32 to 127)
-const uint8_t font8x8[96][8] = {
+// `static` so every TU including this header gets its own copy (avoids
+// duplicate-symbol link errors when both graphics.c and window.c use it,
+// while keeping pong/millipede links self-contained).
+static const uint8_t font8x8[96][8] = {
     {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},   // U+0020 (space)
     {0x18, 0x3C, 0x3C, 0x18, 0x18, 0x00, 0x18, 0x00},   // U+0021 (!)
     {0x66, 0x66, 0x24, 0x00, 0x00, 0x00, 0x00, 0x00},   // U+0022 (")

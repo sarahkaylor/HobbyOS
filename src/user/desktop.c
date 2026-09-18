@@ -21,15 +21,27 @@ char shift_keymap[128] = {0,    27,  '!', '@',  '#',  '$',  '%', '^', '&',  '*',
 
 static int shift_pressed = 0;
 
-#define MAX_MENU_ITEMS 32
+#define MAX_MENU_ITEMS 64
 char menu_items[MAX_MENU_ITEMS][16];
 int num_menu_items = 0;
 
 int menu_open = 0;
 int menu_x = 0;
 int menu_y = 0;
-const char *menu_items_list[] = {"NETTEST.BIN", "EDITOR.BIN", "TIMEOUT.BIN"};
-const int num_menu_items_const = 3;
+
+/* ---- Start menu (taskbar) state ---- */
+static int start_menu_open = 0;
+static int start_sel = 0;      /* selected item index */
+static int start_scroll = 0;   /* first visible item */
+#define START_MENU_VISIBLE 16
+
+/* ---- Taskbar geometry ---- */
+#define TASKBAR_Y (SCREEN_HEIGHT - TASKBAR_H)
+#define APPS_BTN_X 6
+#define APPS_BTN_W 64
+#define TASKBAR_BTN_X 76
+#define TASKBAR_BTN_W_MAX 150
+#define CLOCK_W 96
 
 static inline long my_syscall(long sysno, long arg0, long arg1, long arg2, long arg3) {
 #ifdef __x86_64__
@@ -72,6 +84,10 @@ int app_menu_idx = -1;
 int app_menu_x = 0;
 int app_menu_y = 0;
 
+/* Currently focused window id (-1 = none). File scope so launch helpers and
+ * the taskbar can use it. */
+static int focused_window = -1;
+
 void wm_handle_app_escape(int win_id, char* seq) {
     if (seq[0] == ']' && seq[1] == 'M') {
         int idx = seq[2] - '0';
@@ -101,6 +117,17 @@ void wm_handle_app_escape(int win_id, char* seq) {
                 if(*ptr == ',') ptr++;
             }
         }
+    } else if (seq[0] == ']' && seq[1] == 'T') {
+        /* Window title: ESC ] T <title> ~ */
+        wm_set_window_title(win_id, seq + 2);
+    } else if (seq[0] == ']' && seq[1] == 'P') {
+        /* Pointer events opt-in: ESC ] P 1 ~ (1 = enable, 0 = disable) */
+        for (int i = 0; i < num_windows; i++) {
+            if (windows[i].id == win_id) {
+                windows[i].mouse_events = (seq[2] == '1') ? 1 : 0;
+                break;
+            }
+        }
     }
 }
 
@@ -120,6 +147,43 @@ void load_menu(void) {
     num_menu_items++;
   }
 }
+
+/* Strip a trailing ".BIN" (and any extension) from a program name. */
+static void app_name_from_bin(const char *bin, char *out, int max) {
+  int i = 0;
+  while (bin[i] && bin[i] != '.' && i < max - 1) {
+    out[i] = bin[i];
+    i++;
+  }
+  out[i] = '\0';
+}
+
+/* Launch menu item `idx` into a new tiled window. */
+static void launch_menu_item(int idx) {
+  if (idx < 0 || idx >= num_menu_items) return;
+
+  int in_pipe[2], out_pipe[2];
+  pipe(in_pipe);
+  pipe(out_pipe);
+
+  int pid = spawn2(menu_items[idx], in_pipe[0], out_pipe[1], -1, 0);
+  if (pid >= 0) {
+    int win_id = wm_create_window(COLOR(16, 18, 30), pid, out_pipe[0], in_pipe[1]);
+    char name[24];
+    app_name_from_bin(menu_items[idx], name, sizeof(name));
+    wm_set_window_title(win_id, name);
+    focused_window = win_id;
+    close(in_pipe[0]);
+    close(out_pipe[1]);
+  } else {
+    close(in_pipe[0]);
+    close(in_pipe[1]);
+    close(out_pipe[0]);
+    close(out_pipe[1]);
+  }
+}
+
+/* ---- Right-click application menu (unchanged geometry; tests depend) ---- */
 
 void draw_menu(void) {
   if (app_menu_open) {
@@ -145,13 +209,121 @@ void draw_menu(void) {
   }
 }
 
+/* ---- Taskbar ---- */
 
-// Actually I need an accessor. Wait, we can modify window.h to expose a window
-// getter, or just add wm_poll_io() to window.c. Let's implement reading output
-// inside desktop.c if we expose the array, or just use wm_get_window_at to get
-// focused. Better: Add wm_poll_io() to window.c. Wait, desktop.c handles
-// syscalls. I will just declare externs for windows and num_windows for
-// simplicity.
+static void get_clock_string(char *buf) {
+  struct sys_time t;
+  if (sysinfo(6, &t, sizeof(t)) == 0) {
+    int j = 0;
+    buf[j++] = '0' + (t.hour / 10); buf[j++] = '0' + (t.hour % 10);
+    buf[j++] = ':';
+    buf[j++] = '0' + (t.minute / 10); buf[j++] = '0' + (t.minute % 10);
+    buf[j++] = ':';
+    buf[j++] = '0' + (t.second / 10); buf[j++] = '0' + (t.second % 10);
+    buf[j] = '\0';
+    return;
+  }
+  /* Fallback: uptime */
+  int ms = sysinfo(1, 0, 0);
+  if (ms < 0) ms = 0;
+  int sec = ms / 1000;
+  int j = 0;
+  buf[j++] = '0' + ((sec / 3600) % 24) / 10; buf[j++] = '0' + ((sec / 3600) % 24) % 10;
+  buf[j++] = ':';
+  buf[j++] = '0' + ((sec / 60) % 60) / 10; buf[j++] = '0' + ((sec / 60) % 60) % 10;
+  buf[j++] = ':';
+  buf[j++] = '0' + (sec % 60) / 10; buf[j++] = '0' + (sec % 60) % 10;
+  buf[j] = '\0';
+}
+
+static void taskbar_button_geometry(int *btn_w) {
+  int avail = SCREEN_WIDTH - TASKBAR_BTN_X - CLOCK_W - 8;
+  int bw = TASKBAR_BTN_W_MAX;
+  if (num_windows > 0 && bw * num_windows > avail) bw = avail / num_windows;
+  if (bw < 40) bw = 40;
+  *btn_w = bw;
+}
+
+static void draw_taskbar(void) {
+  /* Background */
+  graphics_fill_gradient_v(0, TASKBAR_Y, SCREEN_WIDTH, TASKBAR_H,
+                           COLOR(48, 54, 74), COLOR(30, 33, 46));
+  graphics_draw_hline(0, TASKBAR_Y, SCREEN_WIDTH, COLOR(96, 166, 255));
+
+  /* Apps button */
+  graphics_draw_rect(APPS_BTN_X, TASKBAR_Y + 3, APPS_BTN_W, TASKBAR_H - 6,
+                     start_menu_open ? COLOR(96, 166, 255) : COLOR(64, 74, 100));
+  graphics_draw_rect_outline(APPS_BTN_X, TASKBAR_Y + 3, APPS_BTN_W, TASKBAR_H - 6,
+                             COLOR(140, 150, 180));
+  wm_draw_text(APPS_BTN_X + 10, TASKBAR_Y + 9, "Apps", COLOR(240, 242, 248));
+
+  /* Window buttons */
+  int bw;
+  taskbar_button_geometry(&bw);
+  int bx = TASKBAR_BTN_X;
+  for (int i = 0; i < num_windows; i++) {
+    graphics_draw_rect(bx, TASKBAR_Y + 3, bw - 2, TASKBAR_H - 6, COLOR(52, 58, 78));
+    graphics_draw_rect_outline(bx, TASKBAR_Y + 3, bw - 2, TASKBAR_H - 6,
+                               (windows[i].id == focused_window) ? COLOR(96, 166, 255)
+                                                                 : COLOR(90, 96, 116));
+    graphics_set_clip(bx + 4, TASKBAR_Y + 3, bw - 10, TASKBAR_H - 6);
+    wm_draw_text(bx + 6, TASKBAR_Y + 9,
+                 windows[i].title[0] ? windows[i].title : "app",
+                 COLOR(226, 230, 240));
+    graphics_reset_clip();
+    bx += bw;
+  }
+
+  /* Clock */
+  char clk[12];
+  get_clock_string(clk);
+  wm_draw_text(SCREEN_WIDTH - CLOCK_W + 8, TASKBAR_Y + 9, clk, COLOR(220, 226, 240));
+}
+
+static void draw_start_menu(void) {
+  if (!start_menu_open)
+    return;
+
+  int visible = START_MENU_VISIBLE;
+  if (num_menu_items < visible) visible = num_menu_items;
+  int w = 220;
+  int h = visible * 20 + 8;
+  int x = 4;
+  int y = TASKBAR_Y - h;
+
+  graphics_draw_rect(x, y, w, h, COLOR(232, 234, 240));
+  graphics_draw_rect_outline(x, y, w, h, COLOR(96, 166, 255));
+
+  if (start_scroll > 0) {
+    wm_draw_text(x + w - 40, y - 8, "more ^", COLOR(220, 226, 240));
+  }
+  if (start_scroll + visible < num_menu_items) {
+    wm_draw_text(x + w - 40, y + h, "more v", COLOR(220, 226, 240));
+  }
+
+  for (int i = 0; i < visible; i++) {
+    int idx = start_scroll + i;
+    if (idx >= num_menu_items) break;
+    int row_y = y + 4 + i * 20;
+    if (idx == start_sel) {
+      graphics_draw_rect(x + 2, row_y, w - 4, 20, COLOR(96, 166, 255));
+      wm_draw_text(x + 8, row_y + 5, menu_items[idx], COLOR(255, 255, 255));
+    } else {
+      wm_draw_text(x + 8, row_y + 5, menu_items[idx], COLOR(20, 20, 24));
+    }
+  }
+}
+
+static void start_menu_ensure_visible(void) {
+  int visible = START_MENU_VISIBLE;
+  if (num_menu_items < visible) visible = num_menu_items;
+  if (start_sel < start_scroll) start_scroll = start_sel;
+  if (start_sel >= start_scroll + visible) start_scroll = start_sel - visible + 1;
+  if (start_scroll < 0) start_scroll = 0;
+  int max_scroll = num_menu_items - visible;
+  if (max_scroll < 0) max_scroll = 0;
+  if (start_scroll > max_scroll) start_scroll = max_scroll;
+}
 
 int main(void);
 
@@ -176,14 +348,22 @@ int main(void) {
 
   int mouse_x = SCREEN_WIDTH / 2;
   int mouse_y = SCREEN_HEIGHT / 2;
-  int focused_window = -1;
+  focused_window = -1;
   struct virtio_input_event events[16];
 
 #ifdef DESKTOP_TEST_AUTO_LAUNCH
 #endif
   int needs_redraw = 1;
+  int last_clock_ms = -1000;
 
   while (1) {
+    /* Periodic redraw so the taskbar clock ticks (>= 1s). */
+    int now_ms = sysinfo(1, 0, 0);
+    if (now_ms - last_clock_ms >= 1000) {
+      last_clock_ms = now_ms;
+      needs_redraw = 1;
+    }
+
     int num = get_events(events, 16);
 
     for (int i = 0; i < num; i++) {
@@ -216,29 +396,56 @@ int main(void) {
                 }
                 app_menu_open = 0;
                 needs_redraw = 1;
+            } else if (start_menu_open) {
+                /* Start menu click: item, Apps button toggle, or dismiss. */
+                int visible = START_MENU_VISIBLE;
+                if (num_menu_items < visible) visible = num_menu_items;
+                int w = 220;
+                int h = visible * 20 + 8;
+                int sx = 4;
+                int sy = TASKBAR_Y - h;
+                if (mouse_x >= APPS_BTN_X && mouse_x < APPS_BTN_X + APPS_BTN_W &&
+                    mouse_y >= TASKBAR_Y) {
+                    start_menu_open = 0;
+                } else if (mouse_x >= sx && mouse_x < sx + w &&
+                           mouse_y >= sy + 4 && mouse_y < sy + 4 + visible * 20) {
+                    int idx = start_scroll + (mouse_y - (sy + 4)) / 20;
+                    if (idx >= 0 && idx < num_menu_items) {
+                        start_menu_open = 0;
+                        launch_menu_item(idx);
+                    }
+                } else {
+                    start_menu_open = 0;
+                }
+                needs_redraw = 1;
             } else if (menu_open) {
               if (mouse_x >= menu_x && mouse_x < menu_x + 120 &&
                   mouse_y >= menu_y && mouse_y < menu_y + num_menu_items * 20) {
                 int selected = (mouse_y - menu_y) / 20;
-
-                int in_pipe[2], out_pipe[2];
-                pipe(in_pipe);
-                pipe(out_pipe);
-
-                int pid = spawn2(menu_items[selected], in_pipe[0], out_pipe[1], -1, 0);
-                if (pid >= 0) {
-                  focused_window = wm_create_window(COLOR(20, 20, 50), pid,
-                                                    out_pipe[0], in_pipe[1]);
-                  close(in_pipe[0]);
-                  close(out_pipe[1]);
-                } else {
-                  close(in_pipe[0]);
-                  close(in_pipe[1]);
-                  close(out_pipe[0]);
-                  close(out_pipe[1]);
-                }
+                launch_menu_item(selected);
               }
               menu_open = 0;
+              needs_redraw = 1;
+            } else if (mouse_y >= TASKBAR_Y) {
+              /* Taskbar clicks */
+              if (mouse_x >= APPS_BTN_X && mouse_x < APPS_BTN_X + APPS_BTN_W) {
+                start_menu_open = !start_menu_open;
+                if (start_menu_open) {
+                  start_sel = 0;
+                  start_scroll = 0;
+                }
+              } else {
+                int bw;
+                taskbar_button_geometry(&bw);
+                int bx = TASKBAR_BTN_X;
+                for (int w = 0; w < num_windows; w++) {
+                  if (mouse_x >= bx && mouse_x < bx + bw - 2) {
+                    focused_window = windows[w].id;
+                    break;
+                  }
+                  bx += bw;
+                }
+              }
               needs_redraw = 1;
             } else {
               int win_id = wm_get_window_at(mouse_x, mouse_y);
@@ -275,6 +482,27 @@ int main(void) {
                         }
                     } else {
                       focused_window = win_id;
+                      /* Forward content-area clicks to apps that opted in. */
+                      if (windows[w].mouse_events && mouse_y >= windows[w].y + 34) {
+                        int col = (mouse_x - (windows[w].x + 10)) / 8;
+                        int row = (mouse_y - (windows[w].y + 44)) / 10;
+                        if (col < 0) col = 0;
+                        if (row < 0) row = 0;
+                        char seq[24];
+                        int j = 0;
+                        seq[j++] = '\033'; seq[j++] = '['; seq[j++] = 'P';
+                        if (col >= 100) seq[j++] = '0' + col / 100;
+                        if (col >= 10) seq[j++] = '0' + (col / 10) % 10;
+                        seq[j++] = '0' + col % 10;
+                        seq[j++] = ';';
+                        if (row >= 100) seq[j++] = '0' + row / 100;
+                        if (row >= 10) seq[j++] = '0' + (row / 10) % 10;
+                        seq[j++] = '0' + row % 10;
+                        seq[j++] = ';';
+                        seq[j++] = '1';
+                        seq[j++] = '~';
+                        write(windows[w].stdin_fd, seq, j);
+                      }
                     }
                     needs_redraw = 1;
                     break;
@@ -299,7 +527,17 @@ int main(void) {
             if (ev->code == 108) seq[2] = 'B'; // DOWN
             if (ev->code == 106) seq[2] = 'C'; // RIGHT
             if (ev->code == 105) seq[2] = 'D'; // LEFT
-            if (seq[2] != 0 && focused_window >= 0) {
+            if (seq[2] != 0) {
+              if (start_menu_open) {
+                /* Navigate the start menu. */
+                if (ev->code == 103) start_sel--;
+                if (ev->code == 108) start_sel++;
+                if (start_sel < 0) start_sel = 0;
+                if (start_sel > num_menu_items - 1) start_sel = num_menu_items - 1;
+                if (start_sel < 0) start_sel = 0;
+                start_menu_ensure_visible();
+                needs_redraw = 1;
+              } else if (focused_window >= 0) {
                 for (int w = 0; w < num_windows; w++) {
                   if (windows[w].id == focused_window) {
                     /* Forward the full 3-byte ESC sequence to the focused
@@ -311,7 +549,13 @@ int main(void) {
                   }
                 }
                 needs_redraw = 1;
+              }
             }
+          } else if (ev->code == 28 && start_menu_open) { // Enter launches selection
+            int idx = start_sel;
+            start_menu_open = 0;
+            launch_menu_item(idx);
+            needs_redraw = 1;
           } else if (ev->code < 128) {
             char c = shift_pressed ? shift_keymap[ev->code] : keymap[ev->code];
             if (c) {
@@ -411,10 +655,14 @@ int main(void) {
     }
 
     if (num > 0 || needs_redraw) {
-      graphics_clear(COLOR(0, 0, 0));
+      /* Wallpaper: vertical gradient behind the tiled windows. */
+      graphics_fill_gradient_v(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - TASKBAR_H,
+                               COLOR(16, 20, 38), COLOR(44, 56, 96));
       wm_draw_windows(focused_window);
       draw_menu();
-      graphics_draw_rect(mouse_x, mouse_y, 4, 4, COLOR(255, 255, 255));
+      draw_start_menu();
+      draw_taskbar();
+      wm_draw_cursor(mouse_x, mouse_y);
       graphics_flush();
       needs_redraw = 0;
     } else {

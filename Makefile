@@ -252,7 +252,7 @@ $(OBJ_DIR)/user_window.o: src/user/graphics/window.c
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/desktop.o: src/user/desktop.c $(USER_LIBC)
+$(OBJ_DIR)/desktop.o: src/user/desktop.c $(USER_LIBC) src/user_include/*.h src/user_include/graphics/*.h
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
@@ -760,19 +760,19 @@ desktop_test:
 HOST_CC = clang
 HOST_CFLAGS = -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST
 
-obj/host_%.o: src/host/%.c
+obj/host_%.o: src/host/%.c src/user_include/*.h src/user_include/graphics/*.h
 	@mkdir -p obj
 	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
 
-obj/host_user_desktop.o: src/user/desktop.c
+obj/host_user_desktop.o: src/user/desktop.c src/user_include/*.h src/user_include/graphics/*.h
 	@mkdir -p obj
 	$(HOST_CC) $(HOST_CFLAGS) -Dmain=desktop_main -c $< -o $@
 
-obj/host_user_%.o: src/user/%.c
+obj/host_user_%.o: src/user/%.c src/user_include/*.h src/user_include/graphics/*.h
 	@mkdir -p obj
 	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
 
-obj/host_user_graphics_%.o: src/user/graphics/%.c
+obj/host_user_graphics_%.o: src/user/graphics/%.c src/user_include/graphics/*.h
 	@mkdir -p obj
 	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
 
@@ -798,6 +798,10 @@ GUI_TEST = gui_test_host
 $(GUI_TEST): obj/host_gui_test.o obj/host_compat.o
 	$(HOST_CC) -o $@ $^
 
+GRAPHICS_LIB_TEST = graphics_lib_test_host
+$(GRAPHICS_LIB_TEST): obj/host_graphics_lib_test.o obj/host_compat.o
+	$(HOST_CC) -o $@ $^
+
 # Each app host test includes its app's .c directly and links the toolkit,
 # dialogs and host compatibility layer.
 define HOST_APP_TEST_RULE
@@ -813,11 +817,12 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(GRAPHICS_LIB_TEST) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DIALOG_ARROW_TEST)
 	$(HOST_RUN) ./$(PONG_TEST_BIN)
 	$(HOST_RUN) ./$(GUI_TEST)
+	$(HOST_RUN) ./$(GRAPHICS_LIB_TEST)
 	$(HOST_RUN) ./files_test_host
 	$(HOST_RUN) ./calc_test_host
 	$(HOST_RUN) ./clock_test_host
