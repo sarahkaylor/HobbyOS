@@ -1,6 +1,17 @@
 # HobbyOS
 
-A simple C language project created as a starting point for an OS.
+A from-scratch 64-bit hobby operating system in C — ARM64 primary, x86_64 secondary — booting bare-metal in QEMU to a graphical desktop with a tiling window manager, ten GUI apps, two arcade games, a shell and a small libc.
+
+## Screenshots
+
+| | |
+|---|---|
+| ![The tiling window manager running four apps](docs/screenshots/tiling-windows.png) | ![The Apps menu](docs/screenshots/apps-menu.png) |
+| **Tiling window manager** — FILES, CLOCK, CALC and SYSMON, each launched into a tile from the Apps menu | **The Apps menu** — the ten GUI apps and both arcade games pinned at the top |
+| ![PONG running full-screen](docs/screenshots/pong.png) | ![MILLIPED running full-screen](docs/screenshots/millipede.png) |
+| **PONG** — full-screen arcade game running as a user-space program | **MILLIPED** — ship, mushrooms and score, drawn straight to the framebuffer |
+
+*Captured from a live QEMU boot — [`capture_screenshots.py`](capture_screenshots.py) reproduces them.*
 
 ## Setup
 
