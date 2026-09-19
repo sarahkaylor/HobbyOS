@@ -15,8 +15,22 @@
 
 static uint32_t *fb = 0;
 
+/* Test-only paint work counter (compiled in with -DPAINT_STATS, which the
+ * APPS_T harness uses to measure how many framebuffer pixels a keypress
+ * actually repaints).  Not defined in production builds. */
+#ifdef PAINT_STATS
+unsigned long graphics_paint_pixels = 0;
+#define PAINT_COUNT(n) (graphics_paint_pixels += (unsigned long)(n))
+#else
+#define PAINT_COUNT(n) ((void)0)
+#endif
+
 /* Clip rectangle (half-open: x in [cx0, cx1), y in [cy0, cy1)). */
 static int cx0 = 0, cy0 = 0, cx1 = SCREEN_WIDTH, cy1 = SCREEN_HEIGHT;
+
+/* Base (damage) clip rectangle - see graphics.h. Every clip is intersected
+ * with it. */
+static int bx0 = 0, by0 = 0, bx1 = SCREEN_WIDTH, by1 = SCREEN_HEIGHT;
 
 int graphics_init(void) {
   fb = (uint32_t *)map_fb();
@@ -24,16 +38,42 @@ int graphics_init(void) {
     return -1;
   }
   cx0 = 0; cy0 = 0; cx1 = SCREEN_WIDTH; cy1 = SCREEN_HEIGHT;
+  bx0 = 0; by0 = 0; bx1 = SCREEN_WIDTH; by1 = SCREEN_HEIGHT;
   return 0;
+}
+
+void graphics_set_base_clip(int x, int y, int w, int h) {
+  if (w < 0) w = 0;
+  if (h < 0) h = 0;
+  bx0 = x < 0 ? 0 : x;
+  by0 = y < 0 ? 0 : y;
+  bx1 = x + w;
+  by1 = y + h;
+  if (bx0 > SCREEN_WIDTH) bx0 = SCREEN_WIDTH;
+  if (by0 > SCREEN_HEIGHT) by0 = SCREEN_HEIGHT;
+  if (bx1 > SCREEN_WIDTH) bx1 = SCREEN_WIDTH;
+  if (by1 > SCREEN_HEIGHT) by1 = SCREEN_HEIGHT;
+  if (bx1 < bx0) bx1 = bx0;
+  if (by1 < by0) by1 = by0;
+  /* The current clip follows the base until set_clip narrows it again. */
+  cx0 = bx0; cy0 = by0; cx1 = bx1; cy1 = by1;
+}
+
+void graphics_reset_base_clip(void) {
+  bx0 = 0; by0 = 0; bx1 = SCREEN_WIDTH; by1 = SCREEN_HEIGHT;
+  cx0 = 0; cy0 = 0; cx1 = SCREEN_WIDTH; cy1 = SCREEN_HEIGHT;
 }
 
 void graphics_set_clip(int x, int y, int w, int h) {
   if (w < 0) w = 0;
   if (h < 0) h = 0;
-  cx0 = x < 0 ? 0 : x;
-  cy0 = y < 0 ? 0 : y;
+  /* Intersect the requested rectangle with the base (damage) clip. */
+  cx0 = x < bx0 ? bx0 : x;
+  cy0 = y < by0 ? by0 : y;
   cx1 = x + w;
   cy1 = y + h;
+  if (cx1 > bx1) cx1 = bx1;
+  if (cy1 > by1) cy1 = by1;
   if (cx0 > SCREEN_WIDTH) cx0 = SCREEN_WIDTH;
   if (cy0 > SCREEN_HEIGHT) cy0 = SCREEN_HEIGHT;
   if (cx1 < cx0) cx1 = cx0;
@@ -41,7 +81,7 @@ void graphics_set_clip(int x, int y, int w, int h) {
 }
 
 void graphics_reset_clip(void) {
-  cx0 = 0; cy0 = 0; cx1 = SCREEN_WIDTH; cy1 = SCREEN_HEIGHT;
+  cx0 = bx0; cy0 = by0; cx1 = bx1; cy1 = by1;
 }
 
 void graphics_draw_pixel(int x, int y, uint32_t color) {
@@ -54,6 +94,7 @@ void graphics_draw_pixel(int x, int y, uint32_t color) {
 
   // VirtIO GPU format B8G8R8A8_UNORM
   fb[y * SCREEN_WIDTH + x] = color;
+  PAINT_COUNT(1);
 }
 
 uint32_t graphics_get_pixel(int x, int y) {
@@ -85,6 +126,7 @@ void graphics_draw_rect(int x, int y, int w, int h, uint32_t color) {
     for (int col = x0; col < x1; col++) {
       *p++ = color;
     }
+    PAINT_COUNT(x1 - x0);
   }
 }
 

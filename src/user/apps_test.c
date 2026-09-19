@@ -54,6 +54,18 @@
  * when the harness exits, the kernel scheduler halts QEMU (no processes
  * left), so the driver usually sees QEMU terminate by itself.
  *
+ * Responsiveness measurement: before FILES' drag stages the harness settles
+ * the listing, sends exactly one Down arrow and counts the desktop frames
+ * that carried a visible change until the response has settled (the
+ * selected line moved and two frames looked unchanged), printing
+ *   [APPS_T] FILES down-arrow: N painting frames (first at frame F),
+ *            M desktop frames, T ms to settle, P fb pixels painted
+ * The pixel count comes from the APPS_T build of the graphics library
+ * (-DPAINT_STATS, see graphics.c) and is the regression number for the
+ * desktop's damage-driven repaint: one line move must stay in the low tens
+ * of thousands of pixels, not millions (it was ~70M before the compositor
+ * repaired windows at line granularity).
+ *
  * Only this binary is mocked: the apps are real processes loaded from the
  * FAT volume and use the real read_dir()/syscalls.
  */
@@ -516,13 +528,43 @@ static int fb_window_rendered(const struct window *w) {
 #define ST_DRAG_DROP 9   /* FILES: verify the move happened on the disk     */
 #define ST_TXT_CLICK 10  /* FILES: click the .TXT row and press Enter       */
 #define ST_TXT_WAIT  11  /* FILES: the editor window must open with it      */
+#define ST_NAV_SETTLE  12 /* FILES: wait for the screen to settle, then     */
+#define ST_NAV_MEASURE 13 /* FILES: measure one Down arrow's repaint cost   */
 #define ST_QUIT   4
 #define ST_CLOSE  5
 #define ST_DONE   6
 
 #define LAUNCH_TIMEOUT_MS 6000
 #define FUNC_TIMEOUT_MS   8000
+#define MEASURE_TIMEOUT_MS 30000
 #define CLOSE_TIMEOUT_MS  5000
+
+/* FILES key-responsiveness measurement: one Down arrow on a settled screen,
+ * then count how many frames the WM took to finish painting the response,
+ * how long that took in ms, and - with -DPAINT_STATS (the APPS_T graphics
+ * library, see graphics.c) - how many framebuffer pixels it painted.  The
+ * report line is "[APPS_T] FILES down-arrow: ..." on the serial console. */
+static char nav_prev[MAX_TEXT]; /* last observed window text            */
+static int  nav_stable = 0;     /* consecutive frames with no text delta */
+static int  nav_frames_changed = 0;
+static int  nav_frames_total = 0;
+static int  nav_first_frame = 0; /* frame index of the first visible change */
+static char nav_sel_before[64];  /* selected listing line before the key   */
+static long nav_t0 = 0;
+static long nav_ms = 0;
+#ifdef PAINT_STATS
+extern unsigned long graphics_paint_pixels;
+static unsigned long nav_px0 = 0;
+static unsigned long nav_px = 0;
+#endif
+
+/* Has the selected ("> ...") listing line moved since the key was sent? */
+static int nav_sel_changed(void) {
+  char cur[64];
+  if (!nav_sel_before[0]) return 0;
+  if (!grab_selected_line(windows[0].text, cur, (int)sizeof cur)) return 0;
+  return !same_str(cur, nav_sel_before);
+}
 
 static int st_app = 0;
 static int st_stage = ST_OPEN;
@@ -686,9 +728,14 @@ void flush_fb(void) {
     }
     if (APPS[st_app].funcheck(snap, windows[0].text)) {
       if (st_app == 0) {
-        arm_timeout(FUNC_TIMEOUT_MS);   /* the drag stage may need to wait
-                                           for a full re-render first */
-        st_stage = ST_DRAG_ARM;
+        /* Settle, then measure one Down arrow's repaint cost before the
+         * drag stages (see the responsiveness report line). */
+        nav_stable = 0;
+        nav_frames_changed = 0;
+        nav_frames_total = 0;
+        copy_str(nav_prev, (int)sizeof nav_prev, windows[0].text);
+        arm_timeout(MEASURE_TIMEOUT_MS);
+        st_stage = ST_NAV_SETTLE;
       } else {
         st_stage = ST_QUIT;
       }
@@ -790,6 +837,85 @@ void flush_fb(void) {
       }
     } else if (timed_out()) {
       fail("open", "no editor window after Enter on a .TXT row");
+    } else {
+      keepalive_tick();
+    }
+    break;
+
+  case ST_NAV_SETTLE: {
+    /* Wait until two consecutive frames show the same window text and the
+     * listing has a selected row, then inject exactly one Down arrow and
+     * start measuring. */
+    if (num_windows != 1) fail("measure", "window vanished before the measurement");
+    if (same_str(windows[0].text, nav_prev)) {
+      nav_stable++;
+    } else {
+      nav_stable = 0;
+      copy_str(nav_prev, (int)sizeof nav_prev, windows[0].text);
+    }
+    if (nav_stable >= 2) {
+      nav_sel_before[0] = '\0';
+      grab_selected_line(windows[0].text, nav_sel_before,
+                         (int)sizeof nav_sel_before);
+    }
+    if (nav_stable >= 2 && nav_sel_before[0]) {
+      nav_frames_changed = 0;
+      nav_frames_total = 0;
+      nav_stable = 0;
+#ifdef PAINT_STATS
+      nav_px0 = graphics_paint_pixels;
+      nav_px = 0;
+#endif
+      nav_t0 = now_ms();
+      inject_key(KEY_DOWN);
+      st_stage = ST_NAV_MEASURE;
+    } else if (timed_out()) {
+      fail("measure", "FILES screen never settled");
+    } else {
+      keepalive_tick();
+    }
+    break;
+  }
+
+  case ST_NAV_MEASURE:
+    /* Count the frames that carried a visible change.  The measurement only
+     * ends once the app's response is actually on screen (the selected
+     * listing line differs from the pre-key one) AND two consecutive frames
+     * looked the same; before that we keep pumping frames so the app gets
+     * scheduled and its output drained. */
+    nav_frames_total++;
+    if (!same_str(windows[0].text, nav_prev)) {
+      copy_str(nav_prev, (int)sizeof nav_prev, windows[0].text);
+      nav_frames_changed++;
+      if (nav_frames_changed == 1) nav_first_frame = nav_frames_total;
+      nav_ms = now_ms() - nav_t0;
+      nav_stable = 0;
+    } else if (nav_frames_changed > 0) {
+      nav_stable++;
+    }
+    if (nav_stable >= 2 && nav_sel_changed()) {
+#ifdef PAINT_STATS
+      nav_px = graphics_paint_pixels - nav_px0;
+#endif
+      print_console("[APPS_T] FILES down-arrow: ");
+      cprint_digits(nav_frames_changed);
+      print_console(" painting frames (first at frame ");
+      cprint_digits(nav_first_frame);
+      print_console("), ");
+      cprint_digits(nav_frames_total);
+      print_console(" desktop frames, ");
+      cprint_digits((int)nav_ms);
+      print_console(" ms to settle");
+#ifdef PAINT_STATS
+      print_console(", ");
+      cprint_digits((int)nav_px);
+      print_console(" fb pixels painted");
+#endif
+      print_console("\n");
+      arm_timeout(FUNC_TIMEOUT_MS); /* the drag stage may need a re-render */
+      st_stage = ST_DRAG_ARM;
+    } else if (timed_out()) {
+      fail("measure", "down-arrow response never settled");
     } else {
       keepalive_tick();
     }

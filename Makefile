@@ -363,9 +363,15 @@ $(EDITOR_T_BIN): $(OBJ_DIR)/user_editor_test.o $(OBJ_DIR)/user_desktop_test_wrap
 
 $(OBJ_DIR)/user_apps_test.o: src/user/apps_test.c $(USER_HDRS) $(USER_LIBC)
 	@mkdir -p $(OBJ_DIR)
-	$(CC) $(USER_CFLAGS) -c $< -o $@
+	$(CC) $(USER_CFLAGS) -DPAINT_STATS -c $< -o $@
 
-$(APPS_T_BIN): $(OBJ_DIR)/user_apps_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
+# Same graphics library, built with the test-only paint counter the APPS_T
+# harness reads (see graphics.c).  Production binaries link user_graphics.o.
+$(OBJ_DIR)/user_graphics_stats.o: src/user/graphics/graphics.c $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -DPAINT_STATS -c $< -o $@
+
+$(APPS_T_BIN): $(OBJ_DIR)/user_apps_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_graphics_stats.o $(OBJ_DIR)/user_window.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/apps_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/apps_test.elf $(APPS_T_BIN)
 
@@ -791,6 +797,9 @@ desktop_test:
 desktop_apps_test:
 	python3 ./run_desktop_apps_test.py
 
+files_nav_test:
+	python3 ./run_files_nav_test.py
+
 apps_test_run:
 	$(MAKE) MODE=apps_test run
 
@@ -869,6 +878,18 @@ GUI_TEST = gui_test_host
 $(GUI_TEST): obj/host_gui_test.o obj/host_compat.o
 	$(HOST_CC) -o $@ $^
 
+# WM damage bookkeeping: line-level window repair + the base (damage) clip
+# (window.c + graphics.c are included into the test's single TU).
+WINDOW_DAMAGE_TEST = window_damage_test_host
+$(WINDOW_DAMAGE_TEST): obj/host_window_damage_test.o obj/host_compat.o
+	$(HOST_CC) -o $@ $^
+
+# The desktop's chrome diff (desktop_damage()), linked against the real
+# desktop.c like desktop_menu_test/desktop_drag_test.
+DESKTOP_DAMAGE_TEST = desktop_damage_test_host
+$(DESKTOP_DAMAGE_TEST): obj/host_desktop_damage_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+	$(HOST_CC) -o $@ $^
+
 GRAPHICS_LIB_TEST = graphics_lib_test_host
 $(GRAPHICS_LIB_TEST): obj/host_graphics_lib_test.o obj/host_compat.o
 	$(HOST_CC) -o $@ $^
@@ -888,16 +909,18 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(GRAPHICS_LIB_TEST) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
+	$(HOST_RUN) ./$(DESKTOP_DAMAGE_TEST)
 	$(HOST_RUN) ./$(NFS_PROTO_TEST)
 	$(HOST_RUN) ./$(CONSOLE_APP_TEST)
 	$(HOST_RUN) ./$(DIALOG_ARROW_TEST)
 	$(HOST_RUN) ./$(PONG_TEST_BIN)
 	$(HOST_RUN) ./$(GUI_TEST)
 	$(HOST_RUN) ./$(GRAPHICS_LIB_TEST)
+	$(HOST_RUN) ./$(WINDOW_DAMAGE_TEST)
 	$(HOST_RUN) ./files_test_host
 	$(HOST_RUN) ./calc_test_host
 	$(HOST_RUN) ./clock_test_host
@@ -959,4 +982,4 @@ deploy_intel:
 deploy_run_intel: deploy_intel
 	ssh -tt -o StrictHostKeyChecking=no -i ~/.ssh/mac_to_r1 root@192.168.10.174 "qm terminal 205"
 
-.PHONY: all clean run memtest fileio_test fork_test tests test unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel deploy_intel deploy_run_intel
+.PHONY: all clean run memtest fileio_test fork_test tests test unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel

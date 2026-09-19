@@ -68,6 +68,13 @@ When touching shared subsystems, keep the x86_64 port working too: DHCP/networki
 3. **Lowering `-smp` below 4** to dodge an SMP race — forbidden; fix the race.
 4. **Adding cacheable mappings** and then chasing DMA coherence bugs — the design is Normal-NC on purpose.
 5. **Trimming exception-handler register saves** — corrupts `eret`.
+6. **A user program image past the loader cap.** `program_loader.c` copies at
+   most `MAX_PROGRAM_SIZE` (= `USER_INITIAL_CLEAR_SIZE`, 256 KB) into the
+   process region and refuses larger files. It used to be 64 KB and to
+   *truncate silently*: the tail of `.text`/`.rodata` never arrived (a
+   `const char *const[]` table at the end of the image became NULLs) and the
+   process died with a mystery `Data Abort` in innocent code. When a user
+   binary grows, check `llvm-size obj/<arch>/*.elf`.
 
 ## Verification Checklist
 

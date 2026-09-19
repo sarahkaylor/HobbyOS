@@ -1,6 +1,7 @@
 #include "graphics.h"
 #include "libc.h"
 #include "window.h"
+#include "desktop_damage.h"
 
 
 
@@ -87,6 +88,11 @@ int app_menu_y = 0;
 /* Currently focused window id (-1 = none). File scope so launch helpers and
  * the taskbar can use it. */
 static int focused_window = -1;
+
+/* Pointer position. File scope: the frame painter and the damage
+ * bookkeeping need it too, not just the event loop. */
+static int mouse_x = SCREEN_WIDTH / 2;
+static int mouse_y = SCREEN_HEIGHT / 2;
 
 /* ---- Pointer drag support (drag & drop) ------------------------------
  * A press in the content area of a window that opted into mouse events
@@ -259,6 +265,8 @@ void wm_handle_app_escape(int win_id, char* seq) {
                 win->menus[idx].num_items++;
                 if(*ptr == ',') ptr++;
             }
+            /* The menu bar changed: repaint this window's chrome. */
+            win->chrome_dirty = 1;
         }
     } else if (seq[0] == ']' && seq[1] == 'T') {
         /* Window title: ESC ] T <title> ~ */
@@ -583,6 +591,222 @@ static void start_menu_ensure_visible(void) {
   if (start_scroll > max_scroll) start_scroll = max_scroll;
 }
 
+/* ====================================================================== */
+/* Damage-driven compositing                                              */
+/* ====================================================================== */
+/* A frame repaints only what changed since the last one:
+ *
+ *   - windows created or removed -> the tiling moved every window, so the
+ *     whole scene repaints (as before);
+ *   - a window's captured text changed -> wm_draw_window_rows() repairs
+ *     just the content rows that differ (an arrow key in FILES normally
+ *     touches two listing rows, not the screen);
+ *   - anything else that moved (pointer, menus, focus highlight, taskbar
+ *     clock, window titles/menus) -> the scene repaints inside a small
+ *     damage rectangle (see desktop_damage()).
+ *
+ * Contract with window.c: a window whose text changed is repaired by
+ * wm_draw_window_rows() BEFORE the rectangle passes run, so its
+ * framebuffer bookkeeping stays exact no matter how those passes clip. */
+
+/* One full scene paint into the current clip: wallpaper, every window, the
+ * menus, the taskbar and the pointer (which must stay on top). */
+static void paint_scene(void) {
+  /* Wallpaper: vertical gradient behind the tiled windows. */
+  graphics_fill_gradient_v(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - TASKBAR_H,
+                           COLOR(16, 20, 38), COLOR(44, 56, 96));
+  wm_draw_windows(focused_window);
+  draw_menu();
+  draw_start_menu();
+  draw_taskbar();
+  wm_draw_cursor(mouse_x, mouse_y);
+}
+
+/* Snapshot the chrome state the next frame diffs against. */
+static void chrome_capture(struct desktop_chrome *c) {
+  c->win_count = num_windows;
+  c->focus = focused_window;
+  c->cursor_x = mouse_x;
+  c->cursor_y = mouse_y;
+  get_clock_string(c->clock);
+
+  /* Apps menu: the panel plus the "more ^/v" labels just outside it. */
+  c->start_menu.x = 0; c->start_menu.y = 0;
+  c->start_menu.w = 0; c->start_menu.h = 0;
+  c->start_sel = 0; c->start_scroll = 0;
+  if (start_menu_open) {
+    int visible = START_MENU_VISIBLE;
+    if (num_menu_items < visible) visible = num_menu_items;
+    int h = visible * 20 + 8;
+    c->start_menu.x = 4;
+    c->start_menu.y = TASKBAR_Y - h - 12;
+    c->start_menu.w = 220;
+    c->start_menu.h = h + 24;
+    c->start_sel = start_sel;
+    c->start_scroll = start_scroll;
+  }
+
+  /* Right-click menu (draw_menu()). */
+  c->rc_menu.x = 0; c->rc_menu.y = 0; c->rc_menu.w = 0; c->rc_menu.h = 0;
+  if (menu_open) {
+    c->rc_menu.x = menu_x;
+    c->rc_menu.y = menu_y;
+    c->rc_menu.w = 120;
+    c->rc_menu.h = num_menu_items * 20;
+  }
+
+  /* Per-window menu dropdown (draw_menu()). */
+  c->app_menu.x = 0; c->app_menu.y = 0; c->app_menu.w = 0; c->app_menu.h = 0;
+  if (app_menu_open) {
+    struct window *w = find_window(app_menu_win_id);
+    int items = 0;
+    if (w && app_menu_idx >= 0 && app_menu_idx < w->num_menus)
+      items = w->menus[app_menu_idx].num_items;
+    if (items > 0) {
+      c->app_menu.x = app_menu_x;
+      c->app_menu.y = app_menu_y;
+      c->app_menu.w = 100;
+      c->app_menu.h = items * 20;
+    }
+  }
+
+  for (int i = 0; i < MAX_WINDOWS; i++) {
+    c->chrome_dirty[i] = (i < num_windows) ? windows[i].chrome_dirty : 0;
+  }
+}
+
+static int rect_equal(const struct desktop_rect *a, const struct desktop_rect *b) {
+  return a->x == b->x && a->y == b->y && a->w == b->w && a->h == b->h;
+}
+
+static void rect_add(struct desktop_rect *out, int *n, int max,
+                     int x, int y, int w, int h) {
+  if (w <= 0 || h <= 0) return;
+  for (int i = 0; i < *n; i++) {
+    /* Already covered (e.g. a menu that did not move): keep the list tight. */
+    if (out[i].x == x && out[i].y == y && out[i].w == w && out[i].h == h) return;
+  }
+  if (*n >= max) return;
+  out[*n].x = x; out[*n].y = y; out[*n].w = w; out[*n].h = h;
+  (*n)++;
+}
+
+/* A whole window including the 1px drop shadow just outside the frame
+ * (see wm_draw_windows). */
+static void rect_add_window(struct desktop_rect *out, int *n, int max, int win_id) {
+  struct window *w = find_window(win_id);
+  if (!w) return;
+  rect_add(out, n, max, w->x, w->y, w->w + 2, w->h + 2);
+}
+
+/* Pointer sprite bounds for the hotspot at (x,y): the 8x12 arrow plus its
+ * 1px outline in every direction. */
+static void rect_add_cursor(struct desktop_rect *out, int *n, int max, int x, int y) {
+  rect_add(out, n, max, x - 1, y - 1, 10, 14);
+}
+
+int desktop_damage(const struct desktop_chrome *prev,
+                   const struct desktop_chrome *cur,
+                   struct desktop_rect *out, int max) {
+  int n = 0;
+
+  /* Windows created/removed: the tiling moved every window. */
+  if (prev->win_count != cur->win_count) return -1;
+
+  /* Focus changed: both windows' chrome (title/menu colours) repaints,
+   * plus the taskbar's focus highlight. */
+  if (prev->focus != cur->focus) {
+    rect_add_window(out, &n, max, prev->focus);
+    rect_add_window(out, &n, max, cur->focus);
+    rect_add(out, &n, max, 0, TASKBAR_Y, SCREEN_WIDTH, TASKBAR_H);
+  }
+
+  /* Pointer moved: restore the old sprite, draw the new one. */
+  if (prev->cursor_x != cur->cursor_x || prev->cursor_y != cur->cursor_y) {
+    rect_add_cursor(out, &n, max, prev->cursor_x, prev->cursor_y);
+    rect_add_cursor(out, &n, max, cur->cursor_x, cur->cursor_y);
+  }
+
+  /* Window titles/menus changed (ESC ] T / ESC ] M): the window's chrome,
+   * its taskbar button label and - when open - its menu dropdown. */
+  for (int i = 0; i < cur->win_count && i < MAX_WINDOWS; i++) {
+    if (!cur->chrome_dirty[i]) continue;
+    rect_add_window(out, &n, max, windows[i].id);
+    rect_add(out, &n, max, 0, TASKBAR_Y, SCREEN_WIDTH, TASKBAR_H);
+    if (cur->app_menu.w > 0)
+      rect_add(out, &n, max, cur->app_menu.x, cur->app_menu.y,
+               cur->app_menu.w, cur->app_menu.h);
+  }
+
+  /* Menus: opened, closed, moved or re-selected inside. */
+  if (!rect_equal(&prev->start_menu, &cur->start_menu) ||
+      (cur->start_menu.w > 0 &&
+       (prev->start_sel != cur->start_sel ||
+        prev->start_scroll != cur->start_scroll))) {
+    rect_add(out, &n, max, prev->start_menu.x, prev->start_menu.y,
+             prev->start_menu.w, prev->start_menu.h);
+    rect_add(out, &n, max, cur->start_menu.x, cur->start_menu.y,
+             cur->start_menu.w, cur->start_menu.h);
+    /* The Apps button toggles its highlight with the menu. */
+    if ((prev->start_menu.w > 0) != (cur->start_menu.w > 0))
+      rect_add(out, &n, max, 0, TASKBAR_Y, SCREEN_WIDTH, TASKBAR_H);
+  }
+  if (!rect_equal(&prev->rc_menu, &cur->rc_menu)) {
+    rect_add(out, &n, max, prev->rc_menu.x, prev->rc_menu.y,
+             prev->rc_menu.w, prev->rc_menu.h);
+    rect_add(out, &n, max, cur->rc_menu.x, cur->rc_menu.y,
+             cur->rc_menu.w, cur->rc_menu.h);
+  }
+  if (!rect_equal(&prev->app_menu, &cur->app_menu)) {
+    rect_add(out, &n, max, prev->app_menu.x, prev->app_menu.y,
+             prev->app_menu.w, prev->app_menu.h);
+    rect_add(out, &n, max, cur->app_menu.x, cur->app_menu.y,
+             cur->app_menu.w, cur->app_menu.h);
+  }
+
+  /* Taskbar clock. */
+  if (!name_is(prev->clock, cur->clock))
+    rect_add(out, &n, max, SCREEN_WIDTH - CLOCK_W, TASKBAR_Y, CLOCK_W, TASKBAR_H);
+
+  return n;
+}
+
+/* Composite one frame and push it to the display. */
+static void paint_frame(void) {
+  static struct desktop_chrome last;
+  static int have_last = 0;
+  struct desktop_chrome cur;
+  struct desktop_rect dmg[DMG_MAX];
+
+  chrome_capture(&cur);
+
+  int count = desktop_damage(&last, &cur, dmg, DMG_MAX);
+  int full = !have_last || count < 0 || count >= DMG_MAX;
+
+  if (full) {
+    graphics_reset_base_clip();
+    paint_scene();
+  } else {
+    /* 1. Window text damage first (see the contract above). */
+    int rows_painted = 0;
+    for (int i = 0; i < num_windows; i++) {
+      if (wm_draw_window_rows(&windows[i])) rows_painted = 1;
+    }
+    /* 2. Everything else that moved, one clipped scene pass per rect. */
+    for (int i = 0; i < count; i++) {
+      graphics_set_base_clip(dmg[i].x, dmg[i].y, dmg[i].w, dmg[i].h);
+      paint_scene();
+    }
+    graphics_reset_base_clip();
+    /* Repainted rows may have covered the pointer. */
+    if (rows_painted) wm_draw_cursor(mouse_x, mouse_y);
+  }
+
+  last = cur;
+  have_last = 1;
+  for (int i = 0; i < num_windows; i++) windows[i].chrome_dirty = 0;
+}
+
 int main(void);
 
 #ifndef HOST_TEST
@@ -604,8 +828,8 @@ int main(void) {
   wm_init();
   load_menu();
 
-  int mouse_x = SCREEN_WIDTH / 2;
-  int mouse_y = SCREEN_HEIGHT / 2;
+  mouse_x = SCREEN_WIDTH / 2;
+  mouse_y = SCREEN_HEIGHT / 2;
   focused_window = -1;
   struct virtio_input_event events[16];
 
@@ -818,7 +1042,7 @@ int main(void) {
                   break;
                 }
               }
-              needs_redraw = 1;
+              /* No repaint: forwarding does not change the desktop. */
             }
           } else
           // Arrow keys (evdev codes 103-108): forward to the focused window as
@@ -850,7 +1074,9 @@ int main(void) {
                     break;
                   }
                 }
-                needs_redraw = 1;
+                /* No repaint here: forwarding a key does not change
+                 * anything on screen.  If the app reacts, its output
+                 * triggers the frame that shows the change. */
               }
             }
           } else if (ev->code == 28 && start_menu_open) { // Enter launches selection
@@ -888,88 +1114,104 @@ int main(void) {
       }
     }
 
-    // Poll windows for stdout
+    // Poll windows for stdout.  Drain a window's whole pending output in a
+    // single iteration (bounded), instead of one 63-byte chunk per frame:
+    // a full-screen app update then costs one frame with one repaint
+    // instead of one full repaint per chunk.
     for (int i = 0; i < num_windows; i++) {
       int fd = windows[i].stdout_fd;
-      int avail = available(fd);
-      if (avail > 0) {
-        char buf[64];
-        if (avail > 63)
-          avail = 63;
-        int r = read(fd, buf, avail);
-        if (r > 0) {
-          for (int k = 0; k < r; k++) {
-            char c = buf[k];
-                        if (windows[i].escape_state == 1) {
-              windows[i].escape_buf[windows[i].escape_len++] = c;
-              if (c == '[') {
-                windows[i].escape_state = 2; // CSI sequence
-              } else if (c == ']') {
-                windows[i].escape_state = 3; // OSC sequence
-              } else {
-                windows[i].escape_state = 0;
-                windows[i].escape_len = 0;
-              }
-            } else if (windows[i].escape_state == 2) {
-              windows[i].escape_buf[windows[i].escape_len++] = c;
-              if ((c >= 0x40 && c <= 0x7E) || windows[i].escape_len >= 127) {
-                if (c == 'J') {
-                  windows[i].text_len = 0;
-                  windows[i].text[0] = '\0';
-                }
-                windows[i].escape_state = 0;
-                windows[i].escape_len = 0;
-              }
-            } else if (windows[i].escape_state == 3) {
-              if (c == '\a' || c == '~' || windows[i].escape_len >= 127) {
-                windows[i].escape_buf[windows[i].escape_len] = '\0';
-                wm_handle_app_escape(windows[i].id, windows[i].escape_buf);
-                windows[i].escape_state = 0;
-                windows[i].escape_len = 0;
-              } else {
-                windows[i].escape_buf[windows[i].escape_len++] = c;
-              }
-            } else if (c == '\033') {
-              windows[i].escape_state = 1;
+      int drained = 0;
+      int idle_rounds = 0;
+      for (;;) {
+        int avail = available(fd);
+        if (avail < 0) {
+          // Process exited (every writer closed and the pipe is empty).
+          // When this iteration already read output, let the frame below
+          // paint it and close the window on the next one instead.
+          if (drained > 0) break;
+          if (focused_window == windows[i].id) {
+            focused_window = -1;
+          }
+          if (drag_win_id == windows[i].id) {
+            desktop_drag_cancel();
+          }
+          wm_remove_window(windows[i].id);
+          i--; // Adjust index after removal
+          needs_redraw = 1;
+          drained = -1; // nothing left to paint for this window
+          break;
+        }
+        if (avail == 0) {
+          // Pipe empty right now.  A writer between two writes (e.g. one
+          // print("\f") followed by the screen) refills as soon as it is
+          // scheduled again, so wait a bounded number of rounds before
+          // painting: that is what makes one "\f + screen" update land in
+          // one frame instead of one frame per pipe-full.
+          if (drained <= 0 || drained >= 4096) break;
+          if (idle_rounds++ >= 6) break;
+          yield();
+          continue;
+        }
+        char buf[512];
+        int want = avail > (int)sizeof buf ? (int)sizeof buf : avail;
+        int r = read(fd, buf, want);
+        if (r <= 0) break;
+        drained += r;
+        idle_rounds = 0;
+        for (int k = 0; k < r; k++) {
+          char c = buf[k];
+          if (windows[i].escape_state == 1) {
+            windows[i].escape_buf[windows[i].escape_len++] = c;
+            if (c == '[') {
+              windows[i].escape_state = 2; // CSI sequence
+            } else if (c == ']') {
+              windows[i].escape_state = 3; // OSC sequence
+            } else {
+              windows[i].escape_state = 0;
               windows[i].escape_len = 0;
-            } else if (c == '\f') {
-              windows[i].text_len = 0;
-              windows[i].text[0] = '\0';
-            } else if (c == '\b') {
-              if (windows[i].text_len > 0) {
-                windows[i].text_len--;
-                windows[i].text[windows[i].text_len] = '\0';
+            }
+          } else if (windows[i].escape_state == 2) {
+            windows[i].escape_buf[windows[i].escape_len++] = c;
+            if ((c >= 0x40 && c <= 0x7E) || windows[i].escape_len >= 127) {
+              if (c == 'J') {
+                windows[i].text_len = 0;
+                windows[i].text[0] = '\0';
               }
-            } else if (windows[i].text_len < MAX_TEXT - 1) {
-              windows[i].text[windows[i].text_len++] = c;
+              windows[i].escape_state = 0;
+              windows[i].escape_len = 0;
+            }
+          } else if (windows[i].escape_state == 3) {
+            if (c == '\a' || c == '~' || windows[i].escape_len >= 127) {
+              windows[i].escape_buf[windows[i].escape_len] = '\0';
+              wm_handle_app_escape(windows[i].id, windows[i].escape_buf);
+              windows[i].escape_state = 0;
+              windows[i].escape_len = 0;
+            } else {
+              windows[i].escape_buf[windows[i].escape_len++] = c;
+            }
+          } else if (c == '\033') {
+            windows[i].escape_state = 1;
+            windows[i].escape_len = 0;
+          } else if (c == '\f') {
+            windows[i].text_len = 0;
+            windows[i].text[0] = '\0';
+          } else if (c == '\b') {
+            if (windows[i].text_len > 0) {
+              windows[i].text_len--;
               windows[i].text[windows[i].text_len] = '\0';
             }
+          } else if (windows[i].text_len < MAX_TEXT - 1) {
+            windows[i].text[windows[i].text_len++] = c;
+            windows[i].text[windows[i].text_len] = '\0';
           }
-          needs_redraw = 1;
         }
-      } else if (avail < 0) {
-        // Process exited
-        if (focused_window == windows[i].id) {
-          focused_window = -1;
-        }
-        if (drag_win_id == windows[i].id) {
-          desktop_drag_cancel();
-        }
-        wm_remove_window(windows[i].id);
-        i--; // Adjust index after removal
-        needs_redraw = 1;
+        if (drained >= 4096) break; // stay fair with a streaming writer
       }
+      if (drained > 0) needs_redraw = 1;
     }
 
     if (num > 0 || needs_redraw) {
-      /* Wallpaper: vertical gradient behind the tiled windows. */
-      graphics_fill_gradient_v(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - TASKBAR_H,
-                               COLOR(16, 20, 38), COLOR(44, 56, 96));
-      wm_draw_windows(focused_window);
-      draw_menu();
-      draw_start_menu();
-      draw_taskbar();
-      wm_draw_cursor(mouse_x, mouse_y);
+      paint_frame();
       graphics_flush();
       needs_redraw = 0;
     } else {

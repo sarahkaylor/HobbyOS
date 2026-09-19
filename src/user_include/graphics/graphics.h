@@ -48,10 +48,21 @@ int graphics_draw_text(int x, int y, const char *str, uint32_t color, int scale)
 /* ---- Clipping ---- */
 
 /* Constrain all subsequent drawing to the given rectangle (intersected with
- * the screen). w <= 0 or h <= 0 yields an empty clip (nothing draws). */
+ * the screen and the base clip below). w <= 0 or h <= 0 yields an empty clip
+ * (nothing draws). */
 void graphics_set_clip(int x, int y, int w, int h);
 
-/* Restore the full-screen clip. */
+/* Restore the current clip to the base clip. */
 void graphics_reset_clip(void);
+
+/* ---- Damage / base clip ----
+ * A second, outer clip every drawing operation is intersected with, on top
+ * of the current clip.  The desktop sets it to the region it is repainting
+ * so a partial repaint can never touch pixels outside that region; the
+ * current clip (set_clip/reset_clip) is then intersected with it as well,
+ * and reset_clip restores the base clip instead of the full screen.
+ * Default: the whole screen. */
+void graphics_set_base_clip(int x, int y, int w, int h);
+void graphics_reset_base_clip(void);
 
 #endif

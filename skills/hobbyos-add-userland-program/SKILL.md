@@ -100,6 +100,17 @@ Fast native validation without QEMU, following `src/host/pong_test.c`:
 3. **GUI app missing `user_graphics.o`** (or `user_window.o`) in the link rule → undefined graphics symbols at link time.
 4. **Editing only one place.** The four edits live in four different Makefile regions; a single-spot edit silently half-works. Re-scan all four.
 5. **Assuming a shell registration step exists.** There isn't one — but the binary *must* physically be on the disk under the right 8.3 name.
+6. **The binary outgrew the loader cap.** The kernel copies at most
+   `MAX_PROGRAM_SIZE` (= `USER_INITIAL_CLEAR_SIZE`, 256 KB) and refuses
+   bigger images ("Program too large"), and it used to *silently truncate*
+   them - a program just past the limit dies with a mystery data abort
+   inside code that "cannot be wrong" (APPS_T.BIN hit this at 64 KB in Sept
+   2026). Check `llvm-size obj/arm/<prog>.elf` when a binary grows a lot.
+7. **Full-screen redraws are fine.** The windowed convention is `gui_clear()`
+   (`"\f"`) + one `print()` of the whole screen; the desktop compositor
+   repairs only the text rows that actually changed, so rewriting the whole
+   screen per keypress costs a couple of rows. Don't invent a partial-update
+   protocol (see [[hobbyos-desktop-compositor]]).
 
 ## Verification Checklist
 

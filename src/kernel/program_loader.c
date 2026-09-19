@@ -11,7 +11,20 @@ extern void print_int(int val);
 
 jmp_buf user_exit_context;
 
-#define MAX_PROGRAM_SIZE  0x10000
+/* Cap on the program image the loader copies into user memory.  A process
+ * region is 32MB with its first USER_INITIAL_CLEAR_SIZE (256KB) bytes zeroed
+ * at creation, so sizing the cap to match keeps "zeroed" and "loadable" the
+ * same 256KB.  This was 0x10000 (64KB) until APPS_T.BIN crossed it: the
+ * loader silently truncated the image, the tail of .text/.rodata never
+ * arrived and the process died with a mystery data abort.  Oversized
+ * programs are now refused with an explicit error instead. */
+#define MAX_PROGRAM_SIZE  USER_INITIAL_CLEAR_SIZE
+
+/* Is the opened program too big for MAX_PROGRAM_SIZE?  (Call after
+ * fat16_open, before reading.) */
+static int program_too_large(const struct file *f) {
+    return f->fat16.entry.file_size > (uint32_t)MAX_PROGRAM_SIZE;
+}
 
 /**
  * Loads a program from the FAT16 filesystem directly into user memory and executes it.
@@ -30,6 +43,18 @@ int load_and_run_program(const char* filename) {
         uart_puts("Failed to locate ");
         uart_puts(filename);
         uart_puts(" on disk image!\n");
+        return -1;
+    }
+
+    if (program_too_large(&f)) {
+        uart_puts("Program too large (");
+        print_int((int)f.fat16.entry.file_size);
+        uart_puts(" bytes > ");
+        print_int((int)MAX_PROGRAM_SIZE);
+        uart_puts("): ");
+        uart_puts(filename);
+        uart_puts("\n");
+        fat16_close(&f);
         return -1;
     }
 
@@ -107,7 +132,20 @@ int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int st
         process_free(pid);
         return -1;
     }
-    
+
+    if (program_too_large(&f)) {
+        uart_puts("Program too large (");
+        print_int((int)f.fat16.entry.file_size);
+        uart_puts(" bytes > ");
+        print_int((int)MAX_PROGRAM_SIZE);
+        uart_puts("): ");
+        uart_puts(filename);
+        uart_puts("\n");
+        fat16_close(&f);
+        process_free(pid);
+        return -1;
+    }
+
     uint64_t phys_base = process_get_phys_base(pid);
 
     uart_puts("Calling fat16_read...\n");

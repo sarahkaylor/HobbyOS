@@ -73,6 +73,11 @@ int wm_create_window(uint32_t bg_color, int pid, int stdout_fd, int stdin_fd) {
     windows[idx].mouse_events = 0;
     windows[idx].escape_state = 0;
     windows[idx].escape_len = 0;
+    windows[idx].rendered_valid = 0;   /* nothing painted yet */
+    windows[idx].rendered_rows = 0;
+    windows[idx].rendered_skip = 0;
+    windows[idx].rendered_text[0] = '\0';
+    windows[idx].chrome_dirty = 0;     /* a new window is painted whole */
 
     num_windows++;
     update_layout();
@@ -88,6 +93,8 @@ void wm_set_window_title(int id, const char *title) {
                 k++;
             }
             windows[i].title[k] = '\0';
+            /* The title bar and this window's taskbar button must repaint. */
+            windows[i].chrome_dirty = 1;
             return;
         }
     }
@@ -110,6 +117,124 @@ static const char *skip_lines(const char *text, int n) {
         p++;
     }
     return p;
+}
+
+/* ====================================================================== */
+/* Damage helpers: track what a window's framebuffer region shows so a     */
+/* repaint can be limited to the rows that actually changed.               */
+/* ====================================================================== */
+
+/* Top y of the first text row and how many rows fit in the window. */
+static void window_content_geom(const struct window *win, int *top, int *rows) {
+    int text_top = win->y + 44;
+    int text_bottom = win->y + win->h - 4;
+    int max_rows = (text_bottom - text_top) / 10;
+    if (max_rows < 1) max_rows = 1;
+    *top = text_top;
+    *rows = max_rows;
+}
+
+/* First visible line (the newest lines win when the text does not fit). */
+static int window_visible_skip(const char *text, int rows) {
+    int lines = count_lines(text);
+    return lines > rows ? lines - rows : 0;
+}
+
+/* Remember what this window's framebuffer region shows now. */
+static void window_snapshot_save(struct window *win, int rows, int skip) {
+    win->rendered_valid = 1;
+    win->rendered_rows = rows;
+    win->rendered_skip = skip;
+    int i = 0;
+    while (win->text[i] && i < MAX_TEXT - 1) {
+        win->rendered_text[i] = win->text[i];
+        i++;
+    }
+    win->rendered_text[i] = '\0';
+}
+
+void wm_window_invalidate(struct window *win) {
+    win->rendered_valid = 0;
+}
+
+void wm_windows_invalidate_all(void) {
+    for (int i = 0; i < num_windows; i++) windows[i].rendered_valid = 0;
+}
+
+/* Do the lines starting at a and b differ (comparing up to '\n' / NUL)? */
+static int line_differs(const char *a, const char *b) {
+    int i = 0;
+    while (a[i] && a[i] != '\n' && b[i] && b[i] != '\n') {
+        if (a[i] != b[i]) return 1;
+        i++;
+    }
+    int a_end = (a[i] == '\0' || a[i] == '\n');
+    int b_end = (b[i] == '\0' || b[i] == '\n');
+    return !(a_end && b_end);
+}
+
+/* Advance both pointers past their current line. */
+static void line_advance(const char **a, const char **b) {
+    while (**a && **a != '\n') (*a)++;
+    if (**a == '\n') (*a)++;
+    while (**b && **b != '\n') (*b)++;
+    if (**b == '\n') (*b)++;
+}
+
+/* Repaint content rows [r0..r1] (visible rows, 0-based) from the window's
+ * current text, starting at visible line `skip`.  One row = the 10px band
+ * the full painter would use: background fill + the line's glyphs. */
+static void window_paint_rows(struct window *win, int top, int skip, int r0, int r1) {
+    graphics_set_clip(win->x + 2, win->y + 34, win->w - 4, win->h - 36);
+    for (int r = r0; r <= r1; r++) {
+        int y = top + r * 10;
+        graphics_draw_rect(win->x + 2, y, win->w - 4, 10, win->bg_color);
+        const char *line = skip_lines(win->text, skip + r);
+        int cx = win->x + 10;
+        for (int i = 0; line[i] && line[i] != '\n'; i++) {
+            wm_draw_char(cx, y, line[i], COLOR(255, 255, 255));
+            cx += 8;
+        }
+    }
+    graphics_reset_clip();
+}
+
+/* Repair a window's captured text at line granularity: repaint only the
+ * content rows whose text changed since the last paint.  Returns 1 when
+ * anything was painted, 0 when the screen already matches the text.
+ *
+ * This is what makes the full-screen "\f + print()" convention cheap: the
+ * app still hands the WM a whole screen, but the WM only touches the rows
+ * that differ.  Falls back to a full content repaint when the visible
+ * window moved (scrolling) or the bookkeeping is invalid. */
+int wm_draw_window_rows(struct window *win) {
+    int top, rows;
+    window_content_geom(win, &top, &rows);
+    int skip = window_visible_skip(win->text, rows);
+
+    if (!win->rendered_valid || rows != win->rendered_rows ||
+        skip != win->rendered_skip) {
+        window_paint_rows(win, top, skip, 0, rows - 1);
+        window_snapshot_save(win, rows, skip);
+        return 1;
+    }
+
+    const char *a = skip_lines(win->rendered_text, win->rendered_skip);
+    const char *b = skip_lines(win->text, skip);
+    int first = -1, last = -1;
+    for (int r = 0; r < rows; r++) {
+        if (!a[0] && !b[0]) break;          /* both texts ended */
+        if (line_differs(a, b)) {
+            if (first < 0) first = r;
+            last = r;
+        }
+        line_advance(&a, &b);
+    }
+    if (first < 0) return 0;                /* nothing visible changed */
+
+    window_paint_rows(win, top, skip, first, last);
+    window_snapshot_save(win, rows, skip);
+    return 1;
 }
 
 void wm_draw_windows(int focused_id) {
@@ -169,20 +294,18 @@ void wm_draw_windows(int focused_id) {
         graphics_draw_rect(win->x + 2, win->y + 34, win->w - 4, win->h - 36, win->bg_color);
 
         // Content text with clipping and auto-scroll to the newest lines.
-        int text_top = win->y + 44;
-        int text_bottom = win->y + win->h - 4;
-        int max_rows = (text_bottom - text_top) / 10;
-        if (max_rows < 1) max_rows = 1;
-
-        int lines = count_lines(win->text);
-        const char *start = win->text;
-        if (lines > max_rows) {
-            start = skip_lines(win->text, lines - max_rows);
-        }
+        int text_top, max_rows;
+        window_content_geom(win, &text_top, &max_rows);
+        int skip = window_visible_skip(win->text, max_rows);
+        const char *start = skip_lines(win->text, skip);
 
         graphics_set_clip(win->x + 2, win->y + 34, win->w - 4, win->h - 36);
         wm_draw_text(win->x + 10, text_top, start, COLOR(255, 255, 255));
         graphics_reset_clip();
+
+        /* Painted in full: the framebuffer now matches the captured text
+         * (see wm_draw_window_rows - it relies on this bookkeeping). */
+        window_snapshot_save(win, max_rows, skip);
     }
 }
 
