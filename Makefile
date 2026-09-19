@@ -122,6 +122,7 @@ SMP_TEST_BIN = $(OBJ_DIR)/smp_test.bin
 PIPETEST_BIN = $(OBJ_DIR)/pipetest.bin
 NETTEST_BIN = $(OBJ_DIR)/nettest.bin
 TIMEOUT_BIN = $(OBJ_DIR)/timeout.bin
+NFSTEST_BIN = $(OBJ_DIR)/nfstest.bin
 DESKTOP_BIN = $(OBJ_DIR)/desktop.bin
 EDITOR_BIN = $(OBJ_DIR)/editor.bin
 EDITOR_T_BIN = $(OBJ_DIR)/EDITOR_T.BIN
@@ -339,6 +340,14 @@ $(OBJ_DIR)/user_net_timeout_test.o: src/user/net_timeout_test.c $(USER_LIBC) $(U
 $(TIMEOUT_BIN): $(OBJ_DIR)/user_net_timeout_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/net_timeout_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/net_timeout_test.elf $(TIMEOUT_BIN)
+
+$(OBJ_DIR)/user_nfs_test.o: src/user/nfs_test.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(NFSTEST_BIN): $(OBJ_DIR)/user_nfs_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/nfs_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/nfs_test.elf $(NFSTEST_BIN)
 
 $(DESKTOP_BIN): $(OBJ_DIR)/desktop.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/desktop_test.elf $^
@@ -628,13 +637,18 @@ endef
 
 $(foreach app,$(DESKTOP_APP_NAMES),$(eval $(call DESKTOP_APP_RULE,$(app))))
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
 	$(MMD) -i disk.img ::/EFI/BOOT
 	$(MMD) -i disk.img ::/boot
 	$(MMD) -i disk.img ::/home
+	$(MMD) -i disk.img ::/nfs
+	$(MMD) -i disk.img ::/mnt
+	$(MMD) -i disk.img ::/TESTDIR
+	$(MCOPY) -i disk.img tests/fixtures/E2E.TXT ::/E2E.TXT
+	$(MCOPY) -i disk.img tests/fixtures/DRAGME.TXT ::/DRAGME.TXT
 	$(MCOPY) -i disk.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
 	$(MCOPY) -i disk.img bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
 ifeq ($(ARCH),arm)
@@ -668,6 +682,7 @@ endif
 	$(MCOPY) -i disk.img $(PIPETEST_BIN) ::/PIPETEST.BIN
 	$(MCOPY) -i disk.img $(NETTEST_BIN) ::/NETTEST.BIN
 	$(MCOPY) -i disk.img $(TIMEOUT_BIN) ::/TIMEOUT.BIN
+	$(MCOPY) -i disk.img $(NFSTEST_BIN) ::/NFSTEST.BIN
 	$(MCOPY) -i disk.img $(DESKTOP_BIN) ::/DESKTOP.BIN
 	$(MCOPY) -i disk.img $(EDITOR_BIN) ::/EDITOR.BIN
 	$(MCOPY) -i disk.img $(EDITOR_T_BIN) ::/EDITOR_T.BIN
@@ -816,6 +831,26 @@ DESKTOP_MENU_TEST = desktop_menu_test_host
 $(DESKTOP_MENU_TEST): obj/host_desktop_menu_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
 	$(HOST_CC) -o $@ $^
 
+# Desktop drag & drop plumbing + ESC ] R run-in-window helpers (desktop.c).
+DESKTOP_DRAG_TEST = desktop_drag_test_host
+$(DESKTOP_DRAG_TEST): obj/host_desktop_drag_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+	$(HOST_CC) -o $@ $^
+
+# Cross-application host suite: every desktop app in one binary, in-process
+# checks plus forked end-to-end runs on pipes. Single TU (includes the app
+# sources), so it is built directly from src/host/apps_suite_test.c.
+# Run from a scratch cwd: tasks/notes persist TODO.TXT / NOTES.TXT there.
+APPS_SUITE_TEST = apps_suite_test_host
+$(APPS_SUITE_TEST): src/host/apps_suite_test.c src/host/compat.c src/user/gui.c src/user/dialog.c src/user/filedialog.c
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/host/apps_suite_test.c src/host/compat.c src/user/gui.c src/user/dialog.c src/user/filedialog.c -o $@
+
+# NFS protocol codecs against real nfsd fixtures (src/host/nfs_fixtures.h,
+# regenerated with tools/capture_nfs_fixtures.py).  Single TU with the kernel
+# codec source: no kernel dependencies.
+NFS_PROTO_TEST = nfs_proto_test_host
+$(NFS_PROTO_TEST): src/host/nfs_proto_test.c src/kernel/nfs_proto.c src/host/nfs_fixtures.h
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/nfs_proto.c src/host/nfs_proto_test.c -o $@
+
 # Console app host tests: both roles (interactive shell handoff + smoke).
 CONSOLE_APP_TEST = console_test_host
 $(CONSOLE_APP_TEST): obj/host_console_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
@@ -853,9 +888,11 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(GRAPHICS_LIB_TEST) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(GRAPHICS_LIB_TEST) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
+	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
+	$(HOST_RUN) ./$(NFS_PROTO_TEST)
 	$(HOST_RUN) ./$(CONSOLE_APP_TEST)
 	$(HOST_RUN) ./$(DIALOG_ARROW_TEST)
 	$(HOST_RUN) ./$(PONG_TEST_BIN)
@@ -871,6 +908,8 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(CONSOLE_APP
 	$(HOST_RUN) ./diff_test_host
 	$(HOST_RUN) ./notes_test_host
 	$(HOST_RUN) ./unit_test_host
+	@mkdir -p obj/host_scratch
+	@cd obj/host_scratch && sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 120 "../../$(APPS_SUITE_TEST)"; else exec "../../$(APPS_SUITE_TEST)"; fi'
 
 # --- Architecture Specific Targets ---
 

@@ -27,6 +27,8 @@
 #define SYS_MKDIR (24)
 #define SYS_GETCWD (25)
 #define SYS_CHDIR (26)
+#define SYS_MOUNT (27)
+#define SYS_UMOUNT (28)
 
 #ifdef __x86_64__
 static long syscall(long num, long a0, long a1, long a2, long a3) {
@@ -285,6 +287,14 @@ int unlink(const char *filename) {
 
 int rename(const char *oldname, const char *newname) {
   return (int)syscall(SYS_RENAME, (long)oldname, (long)newname, 0, 0);
+}
+
+int mount(const char *source, const char *target) {
+  return (int)syscall(SYS_MOUNT, (long)source, (long)target, 0, 0);
+}
+
+int umount(const char *target) {
+  return (int)syscall(SYS_UMOUNT, (long)target, 0, 0, 0);
 }
 
 char *getcwd(char *buf, size_t size) {

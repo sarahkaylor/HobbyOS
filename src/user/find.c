@@ -462,7 +462,7 @@ static int find_handle_event(struct find_state *st, const struct gui_event *ev) 
         return 1;
 
     case GUI_EV_MOUSE:
-        if (ev->button == 1) {
+        if (ev->button == 1 && ev->state == GUI_MOUSE_PRESS) {
             int idx = gui_list_click_row(&st->list, ev->y, FIND_RESULTS_ROW);
             if (idx >= 0 && idx != st->list.selected) {
                 st->list.selected = idx;

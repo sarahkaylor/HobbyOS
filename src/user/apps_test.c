@@ -132,7 +132,12 @@ int get_events(void *buf, int max_events) {
 /* ====================================================================== */
 
 #define APP_COUNT 10
-static const char *const MENU_LIST[APP_COUNT] = {
+/* Two extra entries exist only so the FILES app has a real drag & drop
+ * target and a real text file to open: a directory and a .TXT.  They are
+ * not launchable, and non-pinned menu items sort after the apps, so start
+ * menu navigation for the ten apps is unchanged. */
+#define MENU_EXTRA 2
+static const char *const MENU_LIST[APP_COUNT + MENU_EXTRA] = {
   "FILES.BIN",  /* 0 */
   "CALC.BIN",   /* 1 */
   "CLOCK.BIN",  /* 2 */
@@ -143,11 +148,13 @@ static const char *const MENU_LIST[APP_COUNT] = {
   "DIFF.BIN",   /* 7 */
   "NOTES.BIN",  /* 8 */
   "UNIT.BIN",   /* 9 */
+  "TESTDIR",    /* 10: directory on the real disk (drag & drop target) */
+  "E2E.TXT",    /* 11: text file on the real disk (open-in-editor target) */
 };
 
 int read_dir(const char *path, int index, struct sys_dirent *ent) {
   (void)path;
-  if (index < 0 || index >= APP_COUNT)
+  if (index < 0 || index >= APP_COUNT + MENU_EXTRA)
     return -1;
   const char *name = MENU_LIST[index];
   int i = 0;
@@ -156,8 +163,8 @@ int read_dir(const char *path, int index, struct sys_dirent *ent) {
     i++;
   }
   ent->name[i] = '\0';
-  ent->attr = 0;
-  ent->size = 0;
+  ent->attr = (index == 10) ? 0x10 : 0;             /* TESTDIR is a dir */
+  ent->size = (index == 11) ? 44 : 0;               /* E2E.TXT is 44 bytes */
   return 0;
 }
 
@@ -229,6 +236,49 @@ static void inject_mouse(int x, int y) {
   inject_mock_event(EV_ABS, ABS_Y, (uint32_t)((y * 0x7FFF) / SCREEN_HEIGHT));
 }
 static void inject_left_click(void) { inject_key(0x110); }
+
+/* Full press/motion/release, what the WM forwards as ESC [ P / G / R.
+ * (inject_key sends only the press; drag & drop needs the release too.) */
+static void inject_left_press(int x, int y) {
+  inject_mouse(x, y);
+  inject_mock_event(EV_KEY, 0x110, 1);
+}
+static void inject_left_release(void) {
+  inject_mock_event(EV_KEY, 0x110, 0);
+}
+
+/* Absolute pixel at the centre of content cell (col,row) of window `w`.
+ * Cells start at (w->x + 10, w->y + 44), 8px wide, 10px tall (see the WM's
+ * wm_mouse_cell). */
+static int cell_x(const struct window *w, int col) { return w->x + 10 + col * 8 + 4; }
+static int cell_y(const struct window *w, int row) { return w->y + 44 + row * 10 + 5; }
+/* FILES lays its first listing row on content row 3 (FS_ROW_ENTRY0). */
+#define FILES_ROW0 3
+
+/* Content row of the first window-text line containing `needle` (-1 when
+ * absent). The WM stores one screen line per content row and FILES renders
+ * from the top, so line index == content row. The listing a *child* process
+ * sees is the real FAT root (the desktop-side read_dir mock only affects
+ * the WM's own menu load), so rows must be located by name, not assumed. */
+static int find_row_of(const char *text, const char *needle) {
+  int row = 0;
+  for (int i = 0; text[i]; i++) {
+    if (text[i] == '\n') {
+      row++;
+      continue;
+    }
+    if (i == 0 || text[i - 1] == '\n') {
+      int line_end = i;
+      while (text[line_end] && text[line_end] != '\n') line_end++;
+      for (int s = i; s < line_end; s++) {
+        int j = 0;
+        while (needle[j] && (s + j) < line_end && text[s + j] == needle[j]) j++;
+        if (!needle[j]) return row;
+      }
+    }
+  }
+  return -1;
+}
 
 /* Keep the desktop's frame loop ticking while a condition is awaited: an
  * absolute mouse move to the (inert) Apps button sets needs_redraw, so the
@@ -390,8 +440,9 @@ struct app_case {
 
 static const struct app_case APPS[APP_COUNT] = {
   /* 0 */ { "FILES.BIN",   "Files",
-            {"=== Files ===", "Path: ", "Enter=open"},
-            "\x01", files_check, "down-arrow moves the listing selection", 'q' },
+            {"Path: ", "m=mounts", "Free: "},
+            "\x01", files_check,
+            "down-arrow selection, drag & drop move, Enter opens a .TXT", 0 },
   /* 1 */ { "CALC.BIN",    "Calculator",
             {"=== Calculator ===", "Memory: "},
             "2\x04" "3=", calc_check, "2+3= shows \"> 5\"", 0 },
@@ -460,6 +511,11 @@ static int fb_window_rendered(const struct window *w) {
 #define ST_NAV    1
 #define ST_LAUNCH 2
 #define ST_FUNC   3
+#define ST_DRAG_ARM  7   /* FILES: press on a file row, drag to the folder */
+#define ST_DRAG_HOLD 8   /* FILES: wait for the [drop] highlight, release   */
+#define ST_DRAG_DROP 9   /* FILES: verify the move happened on the disk     */
+#define ST_TXT_CLICK 10  /* FILES: click the .TXT row and press Enter       */
+#define ST_TXT_WAIT  11  /* FILES: the editor window must open with it      */
 #define ST_QUIT   4
 #define ST_CLOSE  5
 #define ST_DONE   6
@@ -472,6 +528,8 @@ static int st_app = 0;
 static int st_stage = ST_OPEN;
 static long st_deadline = 0;
 static char snap[512]; /* window text captured before the scripted keys */
+static int st_drag_tx = 0;  /* pixel the drag hovers before release */
+static int st_drag_ty = 0;
 
 static long now_ms(void) { return sysinfo(1, 0, 0); }
 static void arm_timeout(int ms) { st_deadline = now_ms() + ms; }
@@ -627,7 +685,13 @@ void flush_fb(void) {
       fail("interact", "window vanished during the functional check");
     }
     if (APPS[st_app].funcheck(snap, windows[0].text)) {
-      st_stage = ST_QUIT;
+      if (st_app == 0) {
+        arm_timeout(FUNC_TIMEOUT_MS);   /* the drag stage may need to wait
+                                           for a full re-render first */
+        st_stage = ST_DRAG_ARM;
+      } else {
+        st_stage = ST_QUIT;
+      }
     } else if (timed_out()) {
       fail("interact", APPS[st_app].what ? APPS[st_app].what
                                           : "functional check did not pass");
@@ -636,6 +700,100 @@ void flush_fb(void) {
     }
     break;
   }
+
+  case ST_DRAG_ARM: {
+    /* FILES drag & drop: press on the DRAGME.TXT row, then move the pointer
+     * to the TESTDIR row with the button held. The WM forwards the press as
+     * ESC [ P and the motion as ESC [ G; the app must highlight the drop
+     * target ([drop]) and mark the dragged row ([moving]). Rows are looked
+     * up by name because the app lists the real FAT root, and the listing
+     * may still be arriving from the pipe when this stage starts. */
+    const struct window *w = &windows[0];
+    int src_row = find_row_of(w->text, "DRAGME.TXT");
+    int dst_row = find_row_of(w->text, "TESTDIR");
+    if (src_row < 0 || dst_row < 0) {
+      if (timed_out()) fail("drag", "listing never showed DRAGME.TXT and TESTDIR");
+      keepalive_tick();
+      break;
+    }
+    if (!w->mouse_events) fail("drag", "FILES did not opt into mouse events");
+    st_drag_tx = cell_x(w, 10);
+    st_drag_ty = cell_y(w, dst_row);
+    inject_left_press(cell_x(w, 10), cell_y(w, src_row));
+    inject_mouse(st_drag_tx, st_drag_ty);
+    arm_timeout(FUNC_TIMEOUT_MS);
+    st_stage = ST_DRAG_HOLD;
+    break;
+  }
+
+  case ST_DRAG_HOLD:
+    if (timed_out()) fail("drag", "drop target was never highlighted");
+    if (contains(windows[0].text, "[drop]") &&
+        contains(windows[0].text, "[moving]")) {
+      inject_mouse(st_drag_tx, st_drag_ty);   /* same cell: keeps the loop ticking */
+      inject_left_release();
+      arm_timeout(FUNC_TIMEOUT_MS);
+      st_stage = ST_DRAG_DROP;
+    } else {
+      inject_mouse(st_drag_tx, st_drag_ty);
+    }
+    break;
+
+  case ST_DRAG_DROP:
+    if (timed_out()) fail("drag", "release was never processed");
+    if (!contains(windows[0].text, "[drop]")) {
+      /* The app re-rendered without the drag markers: it must have issued a
+       * real move. Verify on the real FAT volume that DRAGME.TXT left the
+       * root and now sits inside TESTDIR (both are real syscalls). */
+      if (contains(windows[0].text, "Cannot move"))
+        fail("drag", "the app reported a failed move");
+      int gone = unlink("/DRAGME.TXT");
+      int there = unlink("/TESTDIR/DRAGME.TXT");
+      if (gone != -1) fail("drag", "/DRAGME.TXT still exists after the drop");
+      if (there != 0) fail("drag", "/TESTDIR/DRAGME.TXT is missing after the drop");
+      st_stage = ST_TXT_CLICK;
+    } else {
+      inject_mouse(st_drag_tx, st_drag_ty);
+    }
+    break;
+
+  case ST_TXT_CLICK: {
+    /* Click the E2E.TXT row and press Enter: the type handler must ask the
+     * WM (ESC ] R) to open the file in EDITOR.BIN. Waits for the listing to
+     * finish arriving after the drop's re-render. */
+    const struct window *w = &windows[0];
+    int row = find_row_of(w->text, "E2E.TXT");
+    if (row < 0) {
+      if (timed_out()) fail("open", "listing never showed E2E.TXT");
+      keepalive_tick();
+      break;
+    }
+    inject_left_press(cell_x(w, 10), cell_y(w, row));
+    inject_left_release();
+    inject_key(KEY_ENTER);
+    arm_timeout(FUNC_TIMEOUT_MS);
+    st_stage = ST_TXT_WAIT;
+    break;
+  }
+
+  case ST_TXT_WAIT:
+    if (num_windows == 2) {
+      const struct window *ed = &windows[1];
+      if (same_str(ed->title, "EDITOR") &&
+          contains(ed->text, "E2E.TXT") &&
+          contains(ed->text, "Line one of the e2e note.")) {
+        st_stage = ST_QUIT;      /* F4 closes the editor, then FILES */
+      } else if (timed_out()) {
+        fail("open", "editor window opened but did not load the file");
+      } else {
+        keepalive_tick();
+      }
+    } else if (timed_out()) {
+      fail("open", "no editor window after Enter on a .TXT row");
+    } else {
+      keepalive_tick();
+    }
+    break;
 
   case ST_QUIT:
     /* Quit with the app's own key when it has one; otherwise F4 (the WM's
@@ -654,7 +812,19 @@ void flush_fb(void) {
       break;
     }
     if (timed_out()) fail("close", "window did not close");
-    keepalive_tick();
+    if (!APPS[st_app].quit) {
+      /* F4 closes the *focused* window. FILES ends with a second window open
+       * (the editor it launched), so once that one is gone, focus must be
+       * brought back before F4 can close FILES: a press+release inside the
+       * first window is a plain click that focuses it (row 1 is the path
+       * line - not a listing row, so the selection does not change). */
+      const struct window *w = &windows[0];
+      inject_left_press(cell_x(w, 10), cell_y(w, 1));
+      inject_left_release();
+      inject_key(KEY_F4);
+    } else {
+      keepalive_tick();
+    }
     break;
 
   default:

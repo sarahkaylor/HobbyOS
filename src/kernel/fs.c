@@ -3,6 +3,8 @@
 #include "pipe.h"
 #include "lock.h"
 #include "net.h"
+#include "nfs.h"
+#include "vfs.h"
 
 static struct file global_file_table[MAX_GLOBAL_FILES];
 static spinlock_t fs_lock;
@@ -72,7 +74,15 @@ int file_open(struct process *cur, const char *filename) {
     struct file *f = file_alloc();
     if (!f) return -1;
 
-    if (fat16_open(filename, f) != 0) {
+    /* Paths under an NFS mount are opened by the NFS client; everything
+     * else falls through to FAT-16. */
+    int routed = vfs_open_routed(filename, f);
+    if (routed < 0) {
+        f->type = FILE_TYPE_EMPTY;
+        f->ref_count = 0;
+        return -1;
+    }
+    if (routed == 0 && fat16_open(filename, f) != 0) {
         f->type = FILE_TYPE_EMPTY;
         f->ref_count = 0;
         return -1;
@@ -89,7 +99,7 @@ int file_open(struct process *cur, const char *filename) {
     }
 
     if (fd == -1) {
-        fat16_close(f);
+        if (f->type == FILE_TYPE_FAT16) fat16_close(f);
         f->type = FILE_TYPE_EMPTY;
         f->ref_count = 0;
     }
@@ -169,6 +179,7 @@ int file_close(struct process *cur, int fd) {
         } else if (f->type == FILE_TYPE_SOCKET) {
             net_socket_close(f->socket.pcb);
         }
+        /* FILE_TYPE_NFS keeps no backend state: nothing to release. */
         f->type = FILE_TYPE_EMPTY;
     }
     spinlock_release_irqrestore(&f->lock, flags);
@@ -227,6 +238,19 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
     struct file *f = &global_file_table[g_fd];
     if (f->type == FILE_TYPE_FAT16) {
         return fat16_read(f, buf, size);
+    } else if (f->type == FILE_TYPE_NFS) {
+        if (f->nfs.is_dir) return -1;               /* use read_dir for dirs */
+        if (size <= 0) return 0;
+        const struct nfs_mount *m = nfs_mount_at(f->nfs.mount_idx);
+        if (!m) return -1;
+        uint64_t left = f->nfs.size > f->nfs.cursor
+                            ? f->nfs.size - f->nfs.cursor : 0;
+        uint32_t want = (uint32_t)size;
+        if ((uint64_t)want > left) want = (uint32_t)left;
+        if (want == 0) return 0;
+        int got = nfs_read_file(m, &f->nfs.fh, f->nfs.cursor, buf, want);
+        if (got > 0) f->nfs.cursor += (uint32_t)got;
+        return got;
     } else if (f->type == FILE_TYPE_PIPE) {
         if (f->pipe.end != 0) return -1; // Read end only
         return pipe_read(f->pipe.ptr, buf, size, tf);
@@ -252,6 +276,11 @@ int file_available(struct process *cur, int fd) {
     if (f->type == FILE_TYPE_FAT16) {
         // FAT16 files just return size minus cursor
         return f->fat16.entry.file_size - f->fat16.cursor;
+    } else if (f->type == FILE_TYPE_NFS) {
+        if (f->nfs.is_dir) return -1;
+        if (f->nfs.size <= f->nfs.cursor) return 0;
+        uint64_t left = f->nfs.size - f->nfs.cursor;
+        return left > 0x7FFFFFFF ? 0x7FFFFFFF : (int)left;
     } else if (f->type == FILE_TYPE_PIPE) {
         if (f->pipe.end != 0) return -1; // Read end only
         return pipe_available(f->pipe.ptr);
@@ -284,6 +313,8 @@ int file_write(struct process *cur, int fd, const void *buf, int size, struct tr
     struct file *f = &global_file_table[g_fd];
     if (f->type == FILE_TYPE_FAT16) {
         return fat16_write(f, buf, size);
+    } else if (f->type == FILE_TYPE_NFS) {
+        return -1;      /* NFS mounts are read-only */
     } else if (f->type == FILE_TYPE_PIPE) {
         if (f->pipe.end != 1) {
             uart_puts("file_write: wrong pipe end: ");
@@ -371,5 +402,5 @@ void fs_reopen(int global_fd) {
 
 int file_mkdir(struct process *cur, const char *path) {
     if (!cur || !path) return -1;
-    return fat16_mkdir(path);
+    return vfs_mkdir(path);
 }

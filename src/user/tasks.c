@@ -400,8 +400,9 @@ int tasks_handle_event(struct task_state *st, struct gui_list *l,
         }
     case GUI_EV_MOUSE:
         /* Left click on an item row selects it (rows are 0-based content
-         * cells; a click on the already selected row just re-selects it). */
-        if (ev->button == 1) {
+         * cells; a click on the already selected row just re-selects it).
+         * Only presses select - the release half of the click is ignored. */
+        if (ev->button == 1 && ev->state == GUI_MOUSE_PRESS) {
             int idx = gui_list_click_row(l, ev->y, tasks_first_item_row(st));
             if (idx >= 0) l->selected = idx;
         }

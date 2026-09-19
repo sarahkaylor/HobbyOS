@@ -30,11 +30,12 @@ static int cpus_seen_count;
 static uint64_t next_phys_alloc = PROC_PHYS_POOL_BASE;
 static spinlock_t mem_lock;
 
-#ifdef __x86_64__
-#define NUM_PHYS_BLOCKS 16
-#else
+// Number of 32MB physical blocks available for user processes. x86_64 shares
+// its 3GB of RAM with the kernel direct map (0-2GB), so the pool grows from
+// 0x20000000; 30 blocks (960MB) is what the test-mode workload actually needs
+// (17+ programs plus forks and the RDMA provider loop) - the previous 16 on
+// x86_64 left the last-loaded test without a process.
 #define NUM_PHYS_BLOCKS 30
-#endif
 static uint8_t phys_blocks_used[NUM_PHYS_BLOCKS];
 
 // ---------------------------------------------------------------------------

@@ -489,13 +489,13 @@ static void diff_script_setup(void) {
 static const struct app_ops APPS[] = {
     {   /* 0: files */
         "files", "Files", "[APP] FILES started\n",
-        "=== Files ===\n",
-        "Enter=open  d=del  r=rename  n=new  Bksp=up  q=quit",
+        "\200 Files",
+        FS_LEGEND_LIST,
         suite_files_main, send_files, reset_files, rend_files, files_script_setup,
         MODE_BITS, 'z',
         "\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B"
         "\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[B\033[Bq",
-        "FILE19.DAT", "Enter=open",
+        "FILE18.DAT", "Enter=open",
         20, 1, 1, 1
     },
     {   /* 1: calc */
@@ -596,7 +596,7 @@ static const struct app_ops APPS[] = {
 /* layer B: forked end-to-end runs                                        */
 /* ====================================================================== */
 
-#define OUT_MAX 32768
+#define OUT_MAX 65536
 #define RUN_FIRST_MS 2000   /* nothing at all within this -> give up     */
 #define RUN_QUIET_MS 250    /* silence for this long -> the run is done  */
 
@@ -891,24 +891,32 @@ static void suite_files_interaction(void) {
     chdir("/home");
     fs_init(&FS);
     fs_render(out, (int)sizeof out, &FS);
-    CHECK(FS.count == 7, "files: loads the 7-entry mock directory");
+    CHECK(FS.count == 8, "files: 7-entry mock directory + synthesized ..");
     CHECK(has(out, "Path: /home"), "files: the path line shows the mocked cwd");
     CHECK(has(out, "Free: 40.0M"), "files: the free cell comes from sysinfo(7)");
     CHECK(has(out, "EDITOR.BIN") && has(out, " 0B"),
           "files: a row shows the name and the 0-byte size cell");
-    CHECK(has(out, "> EDITOR.BIN"), "files: the first row is marked as selected");
+    char want_row[64];
+    snprintf(want_row, sizeof want_row, "> %c ..", (char)ICON_UP);
+    CHECK(has(out, want_row) && FS.count > 0 &&
+          (FS.entries[0].flags & FS_F_DOTDOT) != 0,
+          "files: the selected .. row leads with the up-arrow icon");
+    snprintf(want_row, sizeof want_row, "  %c EDITOR.BIN", (char)ICON_PROG);
+    CHECK(has(out, want_row), "files: a .BIN row carries the program icon");
+    CHECK(has(out, "[DIR]") == 0, "files: no directory tag on plain files");
 
     /* A long directory: scrolling must change the visible subset. */
     install_long_listing();
     fs_refresh(&FS);
     fs_render(out, (int)sizeof out, &FS);
-    CHECK(FS.count == 24 && has(out, "FILE00.DAT"),
-          "files: a 24-entry directory loads and shows the first rows");
+    CHECK(FS.count == 25 && has(out, "FILE00.DAT"),
+          "files: a 24-entry directory loads (with ..) and shows the first rows");
     for (int i = 0; i < 19; i++) fs_handle_event(&FS, &EV_TYPE(GUI_EV_DOWN));
     fs_render(before, (int)sizeof before, &FS);
     CHECK(FS.list.selected == 19 && FS.list.top == 2,
           "files: 19 downs move the 18-row window to top=2");
-    CHECK(has(before, "FILE19.DAT") && !has(before, "FILE00.DAT"),
+    /* Visible rows are entries 2..19 = FILE01.DAT..FILE18.DAT (".." is 0). */
+    CHECK(has(before, "FILE18.DAT") && !has(before, "FILE00.DAT"),
           "files: scrolling changes the visible subset (FILE00 scrolled off)");
 
     /* Delete: confirm first, then unlink. */
@@ -919,7 +927,7 @@ static void suite_files_interaction(void) {
     mock_dlg_confirm_calls = 0;
     mock_unlink_calls = 0;
     mock_unlink_last[0] = '\0';
-    FS.list.selected = 0;
+    FS.list.selected = 1;                       /* FILE00.DAT (0 is ..) */
     fs_handle_event(&FS, &EV_CHAR('d'));
     CHECK(mock_dlg_confirm_calls == 1 && mock_unlink_calls == 0,
           "files: 'd' asks for confirmation first");
@@ -930,7 +938,7 @@ static void suite_files_interaction(void) {
 
     /* Enter on a file: the info dialog carries name and size. */
     mock_dlg_msg_calls = 0;
-    FS.list.selected = 1;
+    FS.list.selected = 2;                       /* FILE01.DAT */
     fs_handle_event(&FS, &EV_CHAR('\n'));
     CHECK(mock_dlg_msg_calls == 1 && strcmp(mock_dlg_msg_title, "File") == 0 &&
           has(mock_dlg_msg_body, "FILE01.DAT") &&
@@ -940,7 +948,7 @@ static void suite_files_interaction(void) {
     /* Enter on a directory: chdir into it. */
     mock_read_dir_attr = 0x10;      /* every entry is a directory */
     fs_refresh(&FS);
-    FS.list.selected = 0;
+    FS.list.selected = 1;                       /* FILE00.DAT (0 is ..) */
     fs_handle_event(&FS, &EV_CHAR('\n'));
     getcwd(cwd, sizeof cwd);
     CHECK(strcmp(cwd, "FILE00.DAT") == 0,
@@ -970,7 +978,9 @@ static void suite_files_interaction(void) {
     mock_dlg_prompt_ret = 1;
     snprintf(mock_dlg_prompt_text, sizeof mock_dlg_prompt_text, "RENAMED.DAT");
     mock_rename_calls = 0;
-    FS.list.selected = 0;
+    chdir("/home");
+    fs_refresh(&FS);
+    FS.list.selected = 1;                       /* FILE00.DAT (0 is ..) */
     fs_handle_event(&FS, &EV_CHAR('r'));
     CHECK(mock_rename_calls == 1 && strcmp(mock_rename_last_old, "FILE00.DAT") == 0 &&
           strcmp(mock_rename_last_new, "RENAMED.DAT") == 0,
@@ -978,13 +988,15 @@ static void suite_files_interaction(void) {
 
     /* Mouse click selects a row; an empty directory renders its marker. */
     fs_refresh(&FS);
+    FS.list.top = 0;                            /* click coordinates are view-relative */
     fs_handle_event(&FS, &EV_MOUSE(0, FS_ROW_ENTRY0 + 2, 1));
     CHECK(FS.list.selected == 2, "files: a left click selects the clicked row");
     mock_read_dir_count = -1;       /* empty directory */
     fs_refresh(&FS);
     fs_render(out, (int)sizeof out, &FS);
-    CHECK(FS.count == 0 && has(out, "  (empty)"),
-          "files: an empty directory renders the (empty) marker");
+    CHECK(FS.count == 1 && (FS.entries[0].flags & FS_F_DOTDOT) != 0 &&
+          has(out, "  (empty)"),
+          "files: an empty directory renders .. plus the (empty) marker");
     CHECK(has(out, "Free: 40.0M"),
           "files: the free cell survives an empty directory");
     CHECK(fs_handle_event(&FS, &EV_CHAR('q')) == FS_ACT_QUIT,

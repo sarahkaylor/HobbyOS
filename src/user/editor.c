@@ -590,6 +590,20 @@ int main(void) {
     print("ESC for commands, arrows to move\n");
     for (volatile int i = 0; i < 2000000; i++) {} /* brief delay */
 
+    /* A filename argument (spawned by the file manager's open handler, or
+     * a shell) overrides the default document name before the load. */
+    {
+        char args[MAX_FILENAME];
+        if (get_args(args, sizeof args) == 0 && args[0]) {
+            int i = 0;
+            while (args[i] && i < MAX_FILENAME - 1) {
+                filename[i] = args[i];
+                i++;
+            }
+            filename[i] = '\0';
+        }
+    }
+
     /* Try to load existing file */
     int fd = open(filename);
     if (fd >= 0) {

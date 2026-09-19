@@ -569,7 +569,6 @@ int fat16_read_dir(const char* path, int index, char* out_name, uint8_t* out_att
     fat16_absolute_path(path, abs_path);
 
     struct fat16_dir_entry dir_entry;
-    uart_puts("[fat16_read_dir] path='"); uart_puts(path); uart_puts("' abs_path='"); uart_puts(abs_path); uart_puts("'\n");
     if (fat16_resolve_path(abs_path, &dir_entry, 0, 0) != 0) {
         uart_puts("[fat16_read_dir] resolve failed\n");
         return -1;
@@ -721,6 +720,68 @@ int fat16_unlink(const char* filename) {
     return 0;
 }
 
+/* --- rename/move support --------------------------------------------- */
+
+static int name11_equal(const char *a, const char *b) {
+    for (int i = 0; i < 11; i++)
+        if (a[i] != b[i]) return 0;
+    return 1;
+}
+
+/* Does directory `cluster` (0 = root) already hold an entry named `comp`? */
+static int dir_contains_name(uint16_t cluster, const char *comp,
+                             struct fat16_dir_entry *out) {
+    if (cluster == 0)
+        return find_entry_in_root(comp, out, 0, 0) == 0;
+    return find_entry_in_subdir(cluster, comp, out, 0, 0) == 0;
+}
+
+/* Is `ancestor_cluster` (the potential target parent) inside the directory
+ * starting at `child_cluster` — i.e. would moving child into it create a
+ * cycle?  Walks the ".." chain upward with a depth guard. */
+static int dir_is_inside(uint16_t ancestor_cluster, uint16_t child_cluster) {
+    if (child_cluster == 0 || ancestor_cluster == 0) return 0;
+    uint16_t c = ancestor_cluster;
+    for (int depth = 0; depth < 32; depth++) {
+        if (c == child_cluster) return 1;
+        if (c < 2) return 0;
+        uint32_t sector = data_sector + (uint32_t)(c - 2) * bpb_sectors_per_cluster;
+        uint8_t buf[SECTOR_SIZE];
+        if (virtio_blk_read_sector(sector, buf, 1) != 0) return 0;
+        struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
+        uint16_t parent = 0;
+        for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
+            if (entries[j].name[0] == 0x00) return 0;
+            if (entries[j].name[0] == (char)0xE5) continue;
+            if (entries[j].name[0] == '.' && entries[j].name[1] == '.' &&
+                entries[j].name[2] == ' ') {
+                parent = entries[j].start_cluster;
+                break;
+            }
+        }
+        c = parent;
+    }
+    return 0;
+}
+
+/* After moving a directory, its ".." entry must point at the new parent
+ * cluster (0 for the root). */
+static int update_dotdot(uint16_t dir_cluster, uint16_t new_parent_cluster) {
+    if (dir_cluster < 2) return -1;
+    uint32_t sector = data_sector + (uint32_t)(dir_cluster - 2) * bpb_sectors_per_cluster;
+    uint8_t buf[SECTOR_SIZE];
+    if (virtio_blk_read_sector(sector, buf, 1) != 0) return -1;
+    struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
+    for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
+        if (entries[j].name[0] == 0x00) return -1;
+        if (entries[j].name[0] != '.') continue;
+        if (!(entries[j].name[1] == '.' && entries[j].name[2] == ' ')) continue;
+        entries[j].start_cluster = new_parent_cluster;
+        return virtio_blk_write_sector(sector, buf, 1) == 0 ? 0 : -1;
+    }
+    return -1;
+}
+
 int fat16_rename(const char* oldname, const char* newname) {
     char abs_old[256];
     char abs_new[256];
@@ -730,34 +791,92 @@ int fat16_rename(const char* oldname, const char* newname) {
     struct fat16_dir_entry entry;
     uint32_t sector = 0;
     uint32_t offset = 0;
-    
+
     if (fat16_resolve_path(abs_old, &entry, &sector, &offset) != 0) {
         return -1;
     }
-    
-    struct fat16_dir_entry temp_parent;
+
+    struct fat16_dir_entry new_parent;
     char last_comp[64];
-    if (fat16_resolve_parent(abs_new, &temp_parent, last_comp) != 0) {
+    if (fat16_resolve_parent(abs_new, &new_parent, last_comp) != 0) {
         return -1;
     }
-    
+
+    struct fat16_dir_entry old_parent;
+    if (fat16_resolve_parent(abs_old, &old_parent, 0) != 0) {
+        return -1;
+    }
+
     char formatted_name[11];
     format_83(last_comp, formatted_name);
-    
+
+    int is_dir = (entry.attr & 0x10) != 0;
+    int same_dir = (old_parent.start_cluster == new_parent.start_cluster) &&
+                   ((old_parent.attr & 0x10) == (new_parent.attr & 0x10));
+
+    if (same_dir) {
+        /* In-place rename.  Refuse to clobber a different existing entry. */
+        if (!name11_equal(entry.name, formatted_name) &&
+            dir_contains_name(new_parent.start_cluster, last_comp, 0)) {
+            return -1;
+        }
+        uint8_t buf[SECTOR_SIZE];
+        if (virtio_blk_read_sector(sector, buf, 1) != 0) {
+            return -1;
+        }
+        uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+        struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
+        for (int k = 0; k < 11; k++) {
+            entries[offset].name[k] = formatted_name[k];
+        }
+        spinlock_release_irqrestore(&fat_lock, flags);
+        if (virtio_blk_write_sector(sector, buf, 1) != 0) {
+            return -1;
+        }
+        return 0;
+    }
+
+    /* Cross-directory move.  Refuse to clobber, refuse moving a directory
+     * into its own subtree, then place a copy in the target directory and
+     * mark the old slot deleted. */
+    if (dir_contains_name(new_parent.start_cluster, last_comp, 0)) {
+        return -1;
+    }
+    if (is_dir && dir_is_inside(new_parent.start_cluster, entry.start_cluster)) {
+        return -1;
+    }
+
+    struct fat16_dir_entry moved = entry;
+    for (int k = 0; k < 11; k++) moved.name[k] = formatted_name[k];
+
+    uint32_t new_sector = 0;
+    uint32_t new_offset = 0;
+    if (alloc_entry_in_dir(new_parent.start_cluster, &moved,
+                           &new_sector, &new_offset) != 0) {
+        return -1;
+    }
+
     uint8_t buf[SECTOR_SIZE];
     if (virtio_blk_read_sector(sector, buf, 1) != 0) {
+        /* Roll the new entry back so no duplicate is left behind. */
+        uint8_t nbuf[SECTOR_SIZE];
+        if (virtio_blk_read_sector(new_sector, nbuf, 1) == 0) {
+            struct fat16_dir_entry *es = (struct fat16_dir_entry *)nbuf;
+            es[new_offset].name[0] = (char)0xE5;
+            (void)virtio_blk_write_sector(new_sector, nbuf, 1);
+        }
         return -1;
     }
     uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
-    
     struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
-    for (int k = 0; k < 11; k++) {
-        entries[offset].name[k] = formatted_name[k];
-    }
-    
+    entries[offset].name[0] = (char)0xE5;
     spinlock_release_irqrestore(&fat_lock, flags);
     if (virtio_blk_write_sector(sector, buf, 1) != 0) {
         return -1;
+    }
+
+    if (is_dir) {
+        (void)update_dotdot(entry.start_cluster, new_parent.start_cluster);
     }
     return 0;
 }

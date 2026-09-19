@@ -88,6 +88,149 @@ int app_menu_y = 0;
  * the taskbar can use it. */
 static int focused_window = -1;
 
+/* ---- Pointer drag support (drag & drop) ------------------------------
+ * A press in the content area of a window that opted into mouse events
+ * (ESC ] P 1 ~) opens a "drag session" for that window. While the button is
+ * held, pointer motion is forwarded as ESC [ G <col>;<row>;<btn> ~ and the
+ * button release as ESC [ R <col>;<row>;<btn> ~, both clamped to the
+ * window's content cell grid. Press, drag and release all go through
+ * desktop_send_hook so host tests can capture them instead of writing to
+ * the app's pipe. Windows that never see a press never get G/R events.
+ *
+ * The helper functions below are non-static so src/host/desktop_drag_test.c
+ * can drive them directly. */
+
+static int drag_win_id = -1;   /* window that received the press (-1 = none) */
+static int drag_last_col = -1; /* last cell reported to that window         */
+static int drag_last_row = -1;
+
+static void launch_app_named(const char *bin, const char *args);
+
+static void window_write_default(int win_id, const char *buf, int len) {
+    for (int i = 0; i < num_windows; i++) {
+        if (windows[i].id == win_id) {
+            int wr = write(windows[i].stdin_fd, buf, len);
+            (void)wr;
+            return;
+        }
+    }
+}
+
+/* Where forwarded mouse events go. Host tests swap this for a capture. */
+void (*desktop_send_hook)(int win_id, const char *buf, int len) = window_write_default;
+
+static struct window *find_window(int id) {
+    for (int i = 0; i < num_windows; i++) {
+        if (windows[i].id == id) return &windows[i];
+    }
+    return 0;
+}
+
+/* Build one mouse escape sequence: ESC [ <kind> <col> ; <row> ; <btn> ~
+ * kind: 'P' press, 'G' drag, 'R' release. col/row/btn must be >= 0.
+ * Returns the number of bytes written (excluding the NUL terminator). */
+int wm_build_mouse_seq(char *out, int cap, char kind, int col, int row, int btn) {
+    char body[24];
+    int j = 0;
+    body[j++] = 27; body[j++] = '[';
+    body[j++] = kind;
+    if (col >= 100) body[j++] = (char)('0' + (col / 100) % 10);
+    if (col >= 10)  body[j++] = (char)('0' + (col / 10) % 10);
+    body[j++] = (char)('0' + col % 10);
+    body[j++] = ';';
+    if (row >= 100) body[j++] = (char)('0' + (row / 100) % 10);
+    if (row >= 10)  body[j++] = (char)('0' + (row / 10) % 10);
+    body[j++] = (char)('0' + row % 10);
+    body[j++] = ';';
+    body[j++] = (char)('0' + btn);
+    body[j++] = '~';
+    if (j > cap - 1) j = cap - 1;
+    for (int i = 0; i < j; i++) out[i] = body[i];
+    out[j] = '\0';
+    return j;
+}
+
+/* Map absolute pointer coordinates to the content cell (col,row) of window
+ * w, clamped to its content grid. Cell (0,0) is the first print() cell at
+ * (w->x + 10, w->y + 44); cells advance 8px right and 10px down. */
+void wm_mouse_cell(const struct window *w, int mx, int my, int *col, int *row) {
+    int c = (mx - (w->x + 10)) / 8;
+    int r = (my - (w->y + 44)) / 10;
+    int maxc = (w->w - 12) / 8 - 1;
+    int maxr = (w->h - 48) / 10 - 1;
+    if (c < 0) c = 0;
+    if (r < 0) r = 0;
+    if (maxc < 0) maxc = 0;
+    if (maxr < 0) maxr = 0;
+    if (c > maxc) c = maxc;
+    if (r > maxr) r = maxr;
+    *col = c; *row = r;
+}
+
+/* Start a drag session after a press was delivered at (col,row). */
+void desktop_drag_begin(int win_id, int col, int row) {
+    drag_win_id = win_id;
+    drag_last_col = col;
+    drag_last_row = row;
+}
+
+/* End a drag session without sending anything (window closed, etc). */
+void desktop_drag_cancel(void) {
+    drag_win_id = -1;
+    drag_last_col = -1;
+    drag_last_row = -1;
+}
+
+/* Window currently holding the drag session (-1 = none). */
+int desktop_drag_window(void) { return drag_win_id; }
+
+/* Forward pointer motion while the button is held. Only a cell change is
+ * reported (motion inside one text cell produces no event). */
+void desktop_drag_move(int mx, int my) {
+    if (drag_win_id < 0) return;
+    struct window *w = find_window(drag_win_id);
+    if (!w) { desktop_drag_cancel(); return; }
+    int col, row;
+    wm_mouse_cell(w, mx, my, &col, &row);
+    if (col == drag_last_col && row == drag_last_row) return;
+    drag_last_col = col;
+    drag_last_row = row;
+    char seq[24];
+    int n = wm_build_mouse_seq(seq, sizeof seq, 'G', col, row, 1);
+    desktop_send_hook(drag_win_id, seq, n);
+}
+
+/* Deliver the button release at the (clamped) cell and end the session. */
+void desktop_drag_end(int mx, int my) {
+    if (drag_win_id < 0) return;
+    struct window *w = find_window(drag_win_id);
+    if (w) {
+        int col, row;
+        wm_mouse_cell(w, mx, my, &col, &row);
+        char seq[24];
+        int n = wm_build_mouse_seq(seq, sizeof seq, 'R', col, row, 1);
+        desktop_send_hook(drag_win_id, seq, n);
+    }
+    desktop_drag_cancel();
+}
+
+/* Parse an OSC "run in new window" request: seq[0]==']', seq[1]=='R',
+ * then <bin>[;<args>] (the desktop's OSC collector hands the sequence over
+ * with the leading ']' included). Fills bin and args and returns 1 when a
+ * non-empty program name was found. */
+int wm_parse_run_request(const char *seq, char *bin, int bincap, char *args, int argcap) {
+    if (!seq || seq[0] != ']' || seq[1] != 'R') return 0;
+    int i = 2, j = 0;
+    while (seq[i] && seq[i] != ';' && j < bincap - 1) bin[j++] = seq[i++];
+    bin[j] = '\0';
+    while (seq[i] && seq[i] != ';') i++;     /* skip a truncated bin name */
+    if (seq[i] == ';') i++;
+    j = 0;
+    while (seq[i] && j < argcap - 1) args[j++] = seq[i++];
+    args[j] = '\0';
+    return bin[0] != '\0';
+}
+
 void wm_handle_app_escape(int win_id, char* seq) {
     if (seq[0] == ']' && seq[1] == 'M') {
         int idx = seq[2] - '0';
@@ -127,6 +270,15 @@ void wm_handle_app_escape(int win_id, char* seq) {
                 windows[i].mouse_events = (seq[2] == '1') ? 1 : 0;
                 break;
             }
+        }
+    } else if (seq[0] == ']' && seq[1] == 'R') {
+        /* Run a program in a new window: ESC ] R <bin>[;<args>] ~
+         * Used by FILES to open documents in EDITOR.BIN and to launch .BIN
+         * programs. */
+        char bin[32];
+        char rargs[160];
+        if (wm_parse_run_request(seq, bin, sizeof bin, rargs, sizeof rargs)) {
+            launch_app_named(bin, rargs);
         }
     }
 }
@@ -235,32 +387,38 @@ void load_menu(void) {
   print_console("\n");
 }
 
-/* Strip a trailing ".BIN" (and any extension) from a program name. */
+/* Window title for a launched binary: the base name without directory or
+ * extension ("EDITOR.BIN" -> "EDITOR", "/SUB/FOO.BIN" -> "FOO"). */
 static void app_name_from_bin(const char *bin, char *out, int max) {
+  const char *base = bin;
+  for (int i = 0; bin[i]; i++) {
+    if (bin[i] == '/') base = bin + i + 1;
+  }
   int i = 0;
-  while (bin[i] && bin[i] != '.' && i < max - 1) {
-    out[i] = bin[i];
+  while (base[i] && base[i] != '.' && i < max - 1) {
+    out[i] = base[i];
     i++;
   }
   out[i] = '\0';
 }
 
-/* Launch menu item `idx` into a new tiled window. */
-static void launch_menu_item(int idx) {
-  if (idx < 0 || idx >= num_menu_items) return;
+/* Launch `bin` into a new tiled window (pipe pair + spawn2 + window).
+ * `args` (or 0) is handed to the child, readable via get_args(). */
+static void launch_app_named(const char *bin, const char *args) {
+  if (!bin || !bin[0]) return;
 
   int in_pipe[2], out_pipe[2];
   pipe(in_pipe);
   pipe(out_pipe);
 
   print_console("[LAUNCH] ");
-  print_console(menu_items[idx]);
+  print_console(bin);
   print_console("\n");
-  int pid = spawn2(menu_items[idx], in_pipe[0], out_pipe[1], -1, 0);
+  int pid = spawn2(bin, in_pipe[0], out_pipe[1], -1, args);
   if (pid >= 0) {
     int win_id = wm_create_window(COLOR(16, 18, 30), pid, out_pipe[0], in_pipe[1]);
     char name[24];
-    app_name_from_bin(menu_items[idx], name, sizeof(name));
+    app_name_from_bin(bin, name, sizeof(name));
     wm_set_window_title(win_id, name);
     focused_window = win_id;
     close(in_pipe[0]);
@@ -271,6 +429,12 @@ static void launch_menu_item(int idx) {
     close(out_pipe[0]);
     close(out_pipe[1]);
   }
+}
+
+/* Launch menu item `idx` into a new tiled window. */
+static void launch_menu_item(int idx) {
+  if (idx < 0 || idx >= num_menu_items) return;
+  launch_app_named(menu_items[idx], 0);
 }
 
 /* ---- Right-click application menu (unchanged geometry; tests depend) ---- */
@@ -470,6 +634,12 @@ int main(void) {
         }
         if (ev->code == 0x110) { // BTN_LEFT (mouse click)
           
+            if (ev->value == 0) {  // release: close any drag session
+                desktop_drag_end(mouse_x, mouse_y);
+                needs_redraw = 1;
+                continue;
+            }
+
             if (ev->value == 1) {  // press
                 
                 
@@ -554,6 +724,8 @@ int main(void) {
                       wm_remove_window(win_id);
                       if (focused_window == win_id)
                         focused_window = -1;
+                      if (drag_win_id == win_id)
+                        desktop_drag_cancel();
                     } else if (mouse_y >= windows[w].y + 18 && mouse_y <= windows[w].y + 34) {
                         int m_x = windows[w].x + 10;
                         for (int m = 0; m < windows[w].num_menus; m++) {
@@ -576,26 +748,15 @@ int main(void) {
                         }
                     } else {
                       focused_window = win_id;
-                      /* Forward content-area clicks to apps that opted in. */
+                      /* Forward content-area presses to apps that opted in
+                       * and open a drag session for the window. */
                       if (windows[w].mouse_events && mouse_y >= windows[w].y + 34) {
-                        int col = (mouse_x - (windows[w].x + 10)) / 8;
-                        int row = (mouse_y - (windows[w].y + 44)) / 10;
-                        if (col < 0) col = 0;
-                        if (row < 0) row = 0;
+                        int col, row;
                         char seq[24];
-                        int j = 0;
-                        seq[j++] = '\033'; seq[j++] = '['; seq[j++] = 'P';
-                        if (col >= 100) seq[j++] = '0' + col / 100;
-                        if (col >= 10) seq[j++] = '0' + (col / 10) % 10;
-                        seq[j++] = '0' + col % 10;
-                        seq[j++] = ';';
-                        if (row >= 100) seq[j++] = '0' + row / 100;
-                        if (row >= 10) seq[j++] = '0' + (row / 10) % 10;
-                        seq[j++] = '0' + row % 10;
-                        seq[j++] = ';';
-                        seq[j++] = '1';
-                        seq[j++] = '~';
-                        write(windows[w].stdin_fd, seq, j);
+                        wm_mouse_cell(&windows[w], mouse_x, mouse_y, &col, &row);
+                        int n = wm_build_mouse_seq(seq, sizeof seq, 'P', col, row, 1);
+                        desktop_send_hook(win_id, seq, n);
+                        desktop_drag_begin(win_id, col, row);
                       }
                     }
                     needs_redraw = 1;
@@ -622,6 +783,8 @@ int main(void) {
                 }
               }
               wm_remove_window(focused_window);
+              if (drag_win_id == focused_window)
+                desktop_drag_cancel();
               focused_window = -1;
               needs_redraw = 1;
             }
@@ -720,6 +883,8 @@ int main(void) {
           mouse_y = (ev->value * SCREEN_HEIGHT) / 0x7FFF;
           needs_redraw = 1;
         }
+        /* Pointer motion during a drag session is forwarded to the window. */
+        if (drag_win_id >= 0) desktop_drag_move(mouse_x, mouse_y);
       }
     }
 
@@ -786,6 +951,9 @@ int main(void) {
         // Process exited
         if (focused_window == windows[i].id) {
           focused_window = -1;
+        }
+        if (drag_win_id == windows[i].id) {
+          desktop_drag_cancel();
         }
         wm_remove_window(windows[i].id);
         i--; // Adjust index after removal

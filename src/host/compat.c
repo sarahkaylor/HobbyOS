@@ -77,6 +77,25 @@ int mock_spawn2_last_stdin = -1;
 int mock_spawn2_last_stdout = -1;
 int mock_spawn2_last_stderr = -1;
 
+/* get_args(): the kernel hands each process its spawn-time argument string
+ * (used by the file manager's "open in editor" / run-in-window launches).
+ * The host mock returns a settable buffer so tests can simulate one. */
+char mock_get_args_buf[128] = "";
+int mock_get_args_result = 0;      /* 0 = success, -1 = error */
+
+int get_args(char *buf, int size) {
+    if (mock_get_args_result != 0) return mock_get_args_result;
+    if (buf && size > 0) {
+        int i = 0;
+        while (mock_get_args_buf[i] && i < size - 1) {
+            buf[i] = mock_get_args_buf[i];
+            i++;
+        }
+        buf[i] = '\0';
+    }
+    return 0;
+}
+
 int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args) {
     if (mock_spawn2_intercept) {
         snprintf(mock_spawn2_last_file, sizeof(mock_spawn2_last_file), "%s", filename);
@@ -177,21 +196,31 @@ int available(int fd) {
 }
 
 /* --- Configurable directory listing ------------------------------------
- * The default listing above is a fixed 7-file set.  Cross-application host
+ * The default listing below is a fixed 7-file set.  Cross-application host
  * tests that need a longer directory (scrolling) or directory entries
  * (Enter-on-dir) install an override here.  mock_read_dir_count < 0 means
- * "empty directory" (every index fails). */
+ * "empty directory" (every index fails).
+ * Attr/size resolution for overridden listings: the entry's attr is
+ * mock_read_dir_attr OR mock_read_dir_attrs[index] (so a test can make a
+ * single entry a directory by setting one slot to 0x10); the size is
+ * mock_read_dir_size when non-zero, else mock_read_dir_sizes[index]. */
 #define MOCK_READ_DIR_MAX 40
 int mock_read_dir_count = 0;                     /* 0 = default 7 files */
 char mock_read_dir_names[MOCK_READ_DIR_MAX][32];
-uint8_t mock_read_dir_attr = 0;                  /* attr for every entry */
-uint32_t mock_read_dir_size = 0;                 /* size for every entry */
+uint8_t mock_read_dir_attr = 0;                  /* attr shared by all entries */
+uint32_t mock_read_dir_size = 0;                 /* size shared by all entries */
+uint8_t mock_read_dir_attrs[MOCK_READ_DIR_MAX];  /* per-entry attr bits      */
+uint32_t mock_read_dir_sizes[MOCK_READ_DIR_MAX]; /* per-entry sizes          */
 
 void mock_read_dir_reset(void) {
     mock_read_dir_count = 0;
     mock_read_dir_attr = 0;
     mock_read_dir_size = 0;
-    for (int i = 0; i < MOCK_READ_DIR_MAX; i++) mock_read_dir_names[i][0] = '\0';
+    for (int i = 0; i < MOCK_READ_DIR_MAX; i++) {
+        mock_read_dir_names[i][0] = '\0';
+        mock_read_dir_attrs[i] = 0;
+        mock_read_dir_sizes[i] = 0;
+    }
 }
 
 /* Read host current directory for mock read_dir.
@@ -213,8 +242,9 @@ int read_dir(const char *path, int index, struct sys_dirent *ent) {
         if (index < 0 || index >= mock_read_dir_count) return -1;
         memset(ent, 0, sizeof(*ent));
         snprintf(ent->name, sizeof(ent->name), "%s", mock_read_dir_names[index]);
-        ent->attr = mock_read_dir_attr;
-        ent->size = mock_read_dir_size;
+        ent->attr = mock_read_dir_attr | mock_read_dir_attrs[index];
+        ent->size = mock_read_dir_size ? mock_read_dir_size
+                                       : mock_read_dir_sizes[index];
         return 0;
     }
     if (index < 0 || index >= num_mock) return -1;
@@ -368,6 +398,30 @@ int rename(const char *oldname, const char *newname) {
     return mock_rename_result;
 }
 
+/* --- mount()/umount() mocks (NFS) ---
+ * Inert by default; tests flip the result globals for failure paths and
+ * read the recorder globals to assert what the app asked for. */
+int mock_mount_result = 0;
+int mock_umount_result = 0;
+int mock_mount_calls = 0;
+char mock_mount_last_src[64] = "";
+char mock_mount_last_tgt[64] = "";
+int mock_umount_calls = 0;
+char mock_umount_last[64] = "";
+
+int mount(const char *source, const char *target) {
+    mock_mount_calls++;
+    snprintf(mock_mount_last_src, sizeof(mock_mount_last_src), "%s", source);
+    snprintf(mock_mount_last_tgt, sizeof(mock_mount_last_tgt), "%s", target);
+    return mock_mount_result;
+}
+
+int umount(const char *target) {
+    mock_umount_calls++;
+    snprintf(mock_umount_last, sizeof(mock_umount_last), "%s", target);
+    return mock_umount_result;
+}
+
 /* --- cwd mocks: a simple in-memory current directory --- */
 static char mock_cwd[128] = "/home";
 
@@ -406,6 +460,9 @@ unsigned long long mock_sysinfo_fs_total = 0, mock_sysinfo_fs_free = 0;
 int mock_sysinfo_procs_enabled = 0;
 struct sys_procinfo mock_sysinfo_procs[8];
 int mock_sysinfo_proc_count = 0;
+int mock_sysinfo_mounts_enabled = 0;
+struct sys_mountinfo mock_sysinfo_mounts[8];
+int mock_sysinfo_mount_count = 0;
 
 void mock_sysinfo_override_reset(void) {
     mock_sysinfo_mem_enabled = 0;
@@ -416,6 +473,8 @@ void mock_sysinfo_override_reset(void) {
     mock_sysinfo_procs_enabled = 0;
     mock_sysinfo_num_cpus = 4;
     mock_sysinfo_proc_count = 0;
+    mock_sysinfo_mounts_enabled = 0;
+    mock_sysinfo_mount_count = 0;
 }
 
 int sysinfo(int cmd, void *buf, int size) {
@@ -504,6 +563,19 @@ int sysinfo(int cmd, void *buf, int size) {
         f->total_bytes = 64ULL * 1024 * 1024;
         f->free_bytes = 40ULL * 1024 * 1024;
         return 0;
+    }
+    if (cmd == 8) {
+        /* Mount table snapshot: empty unless a test installs one. */
+        struct sys_mountinfo *m = (struct sys_mountinfo *)buf;
+        int max = size / (int)sizeof(*m);
+        int n = 0;
+        if (!mock_sysinfo_mounts_enabled) return 0;
+        n = mock_sysinfo_mount_count;
+        if (n > 8) n = 8;
+        if (n > max) n = max;
+        if (n < 0) n = 0;
+        for (int i = 0; i < n; i++) m[i] = mock_sysinfo_mounts[i];
+        return n;
     }
     return -1;
 }

@@ -39,8 +39,11 @@ extern void print_int(int val);
 #define SYS_MKDIR (24)
 #define SYS_GETCWD (25)
 #define SYS_CHDIR (26)
+#define SYS_MOUNT (27)
+#define SYS_UMOUNT (28)
 
 #include "fat16.h"
+#include "vfs.h"
 
 struct cpu_local {
     uint64_t kernel_stack;
@@ -273,13 +276,25 @@ static void sys_sysinfo(struct trap_frame *tf) {
       } else {
         tf->regs[0] = -1;
       }
-    } else if (cmd == 7) { // Filesystem (FAT-16 volume) statistics
+    } else if (cmd == 7) { // Filesystem statistics for the cwd's filesystem
       if (size >= (int)sizeof(struct sys_fsinfo)) {
         struct sys_fsinfo *info = (struct sys_fsinfo *)buf;
-        tf->regs[0] = fat16_stats(&info->total_bytes, &info->free_bytes);
+        extern int vfs_stats(uint64_t *total, uint64_t *free_bytes);
+        tf->regs[0] = vfs_stats(&info->total_bytes, &info->free_bytes);
       } else {
         tf->regs[0] = -1;
       }
+    } else if (cmd == 8) { // Mount table snapshot (NFS mounts)
+      int max = size / (int)sizeof(struct vfs_mountinfo);
+      if (max < 0) max = 0;
+      int count = vfs_mount_count();
+      int n = count < max ? count : max;
+      struct vfs_mountinfo *out = (struct vfs_mountinfo *)buf;
+      int written = 0;
+      for (int i = 0; i < count && written < n; i++) {
+        if (vfs_mount_info(i, &out[written]) == 0) written++;
+      }
+      tf->regs[0] = written;
     } else {
       tf->regs[0] = -1;
     }
@@ -292,7 +307,8 @@ static void sys_unlink(struct trap_frame *tf) {
   const char *filename = (const char *)tf->regs[5]; // rdi
   if ((uint64_t)filename >= USER_VIRT_BASE &&
       (uint64_t)filename < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-    tf->regs[0] = fat16_unlink(filename);
+    extern int vfs_unlink(const char *path);
+    tf->regs[0] = vfs_unlink(filename);
   } else {
     tf->regs[0] = -1;
   }
@@ -305,7 +321,8 @@ static void sys_rename(struct trap_frame *tf) {
       (uint64_t)oldname < (USER_VIRT_BASE + USER_REGION_SIZE) &&
       (uint64_t)newname >= USER_VIRT_BASE &&
       (uint64_t)newname < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-    tf->regs[0] = fat16_rename(oldname, newname);
+    extern int vfs_rename(const char *oldp, const char *newp);
+    tf->regs[0] = vfs_rename(oldname, newname);
   } else {
     tf->regs[0] = -1;
   }
@@ -512,7 +529,7 @@ static void sys_available(struct trap_frame *tf) {
   tf->regs[0] = ret;
 }
 
-extern int fat16_read_dir(const char* path, int index, char* out_name, uint8_t* out_attr, uint32_t* out_size);
+extern int vfs_read_dir(const char *path, int index, char *name, int ncap, uint8_t *attr, uint32_t *size);
 static void sys_read_dir(struct trap_frame *tf) {
   const char *path = (const char *)tf->regs[5]; // rdi
   int index = (int)tf->regs[4]; // rsi
@@ -534,7 +551,7 @@ static void sys_read_dir(struct trap_frame *tf) {
       uint8_t attr_val = 0;
       uint32_t size_val = 0;
       
-      int ret = fat16_read_dir(path, index, name_buf, &attr_val, &size_val);
+      int ret = vfs_read_dir(path, index, name_buf, sizeof name_buf, &attr_val, &size_val);
       if (ret == 0) {
           int k = 0;
           while (name_buf[k] && k < 31) {
@@ -560,6 +577,34 @@ static void sys_mkdir(struct trap_frame *tf) {
       (uint64_t)path < (USER_VIRT_BASE + USER_REGION_SIZE)) {
       extern int file_mkdir(struct process *cur, const char *path);
       tf->regs[0] = file_mkdir(caller, path);
+  } else {
+      tf->regs[0] = -1;
+  }
+}
+
+/* mount(source, target): mount an NFS export ("A.B.C.D:/export") at a
+ * directory of the FAT volume.  The mount point is created when missing. */
+static void sys_mount(struct trap_frame *tf) {
+  const char *source = (const char *)tf->regs[5]; // rdi
+  const char *target = (const char *)tf->regs[4]; // rsi
+  if ((uint64_t)source >= USER_VIRT_BASE &&
+      (uint64_t)source < (USER_VIRT_BASE + USER_REGION_SIZE) &&
+      (uint64_t)target >= USER_VIRT_BASE &&
+      (uint64_t)target < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+      extern int vfs_mount(const char *source, const char *target);
+      tf->regs[0] = vfs_mount(source, target);
+  } else {
+      tf->regs[0] = -1;
+  }
+}
+
+/* umount(target): unmount the NFS export mounted exactly at `target`. */
+static void sys_umount(struct trap_frame *tf) {
+  const char *target = (const char *)tf->regs[5]; // rdi
+  if ((uint64_t)target >= USER_VIRT_BASE &&
+      (uint64_t)target < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+      extern int vfs_umount(const char *target);
+      tf->regs[0] = vfs_umount(target);
   } else {
       tf->regs[0] = -1;
   }
@@ -591,9 +636,9 @@ static void sys_chdir(struct trap_frame *tf) {
   struct process *caller = current_process();
   if (caller && (uint64_t)path >= USER_VIRT_BASE &&
       (uint64_t)path < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-      extern int fat16_chdir(const char *path, char *out_new_cwd);
+      extern int vfs_chdir(const char *path, char *out_new_cwd, int cap);
       char new_cwd[128];
-      if (fat16_chdir(path, new_cwd) == 0) {
+      if (vfs_chdir(path, new_cwd, sizeof new_cwd) == 0) {
           int k = 0;
           while (new_cwd[k] && k < 127) {
               caller->cwd[k] = new_cwd[k];
@@ -681,6 +726,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_getcwd(tf);
     } else if (syscall_num == SYS_CHDIR) {
       sys_chdir(tf);
+    } else if (syscall_num == SYS_MOUNT) {
+      sys_mount(tf);
+    } else if (syscall_num == SYS_UMOUNT) {
+      sys_umount(tf);
     } else if (syscall_num == 0xFF) {
       schedule(tf, 1);
     } else {

@@ -69,9 +69,38 @@ static void test_decode_mouse(void) {
     CHECK(n == 10, "mouse sequence length");
     CHECK(ev.type == GUI_EV_MOUSE, "mouse type");
     CHECK(ev.x == 12 && ev.y == 5 && ev.button == 1, "mouse coords");
+    CHECK(ev.state == GUI_MOUSE_PRESS, "press state");
     CHECK(gui_decode("\033[P0;0;2~", 9, &ev) == 9 && ev.x == 0 && ev.y == 0 && ev.button == 2,
           "mouse corner");
     CHECK(gui_decode("\033[P12;5;1", 9, &ev) == 0, "mouse incomplete");
+}
+
+static void test_decode_mouse_drag_release(void) {
+    struct gui_event ev;
+    int n;
+
+    /* Drag (button held, pointer moved). */
+    n = gui_decode("\033[G7;3;1~", 9, &ev);
+    CHECK(n == 9, "drag sequence length");
+    CHECK(ev.type == GUI_EV_MOUSE && ev.state == GUI_MOUSE_DRAG, "drag type/state");
+    CHECK(ev.x == 7 && ev.y == 3 && ev.button == 1, "drag coords");
+
+    /* Release. */
+    n = gui_decode("\033[R7;3;1~", 9, &ev);
+    CHECK(n == 9 && ev.state == GUI_MOUSE_RELEASE, "release state");
+
+    /* Three-digit / two-digit coordinates parse on drag and release too. */
+    n = gui_decode("\033[G123;45;1~", 12, &ev);
+    CHECK(n == 12 && ev.x == 123 && ev.y == 45 && ev.state == GUI_MOUSE_DRAG,
+          "drag big coords");
+    n = gui_decode("\033[R123;45;1~", 12, &ev);
+    CHECK(n == 12 && ev.x == 123 && ev.y == 45 && ev.state == GUI_MOUSE_RELEASE,
+          "release big coords");
+
+    /* Malformed / incomplete G/R still behave like P. */
+    CHECK(gui_decode("\033[G7;3;", 7, &ev) == 0, "drag incomplete");
+    CHECK(gui_decode("\033[Rx;3;1~", 9, &ev) == -1, "drag bad digits invalid");
+    CHECK(gui_decode("\033[R7;3", 6, &ev) == 0, "release incomplete");
 }
 
 /* ---- numbers ---- */
@@ -202,6 +231,7 @@ int main(void) {
     RUN(test_decode_arrows);
     RUN(test_decode_menu);
     RUN(test_decode_mouse);
+    RUN(test_decode_mouse_drag_release);
     RUN(test_itoa);
     RUN(test_size_str);
     RUN(test_rule_and_box);

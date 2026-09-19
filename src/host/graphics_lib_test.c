@@ -566,6 +566,129 @@ static void test_window_tiled_pair(void) {
     CHECK(px_w(a, a->w, 40) == C(64, 68, 82), "shared edge shows the neighbour border, not the shadow");
 }
 
+/* --- icons (icons.h glyph bytes) --- */
+
+static int icon_lit_pixels(int k) {
+    int n = 0;
+    for (int r = 0; r < 8; r++) {
+        uint8_t bits = icon8x8[k][r];
+        for (int c = 0; c < 8; c++) if (bits & (1 << (7 - c))) n++;
+    }
+    return n;
+}
+
+static void test_icon_table(void) {
+    CHECK(ICON_BASE == 0x80 && ICON_COUNT == 10, "icon code range is 0x80..0x89");
+    CHECK(ICON_FOLDER == 0x80 && ICON_NET == 0x84 && ICON_UP == 0x86 &&
+          ICON_WARN == 0x89, "icon constants map to their codes");
+    int all_substantial = 1;
+    for (int k = 0; k < ICON_COUNT; k++) {
+        if (icon_lit_pixels(k) < 8) all_substantial = 0;
+    }
+    CHECK(all_substantial, "every icon has at least 8 lit pixels");
+    int distinct = 1;
+    for (int a = 0; a < ICON_COUNT && distinct; a++) {
+        for (int b = a + 1; b < ICON_COUNT; b++) {
+            int same = 1;
+            for (int r = 0; r < 8; r++) {
+                if (icon8x8[a][r] != icon8x8[b][r]) { same = 0; break; }
+            }
+            if (same) { distinct = 0; break; }
+        }
+    }
+    CHECK(distinct, "all icon bitmaps are distinct");
+}
+
+static void test_icon_glyphs(void) {
+    /* Each icon byte rasterizes exactly its bitmap at the cell. */
+    for (int k = 0; k < ICON_COUNT; k++) {
+        reset();
+        int x = 300 + (k % 8) * 10;
+        int y = 300 + (k / 8) * 10;
+        graphics_draw_glyph(x, y, (char)(ICON_BASE + k), C(200, 210, 220), 1);
+        int ok = 1;
+        for (int r = 0; r < 8 && ok; r++) {
+            for (int c = 0; c < 8; c++) {
+                uint32_t want = (icon8x8[k][r] & (1 << (7 - c)))
+                                    ? (uint32_t)C(200, 210, 220) : (uint32_t)0;
+                if (graphics_get_pixel(x + c, y + r) != want) { ok = 0; break; }
+            }
+        }
+        CHECK(ok, "icon bitmap rasterizes exactly");
+    }
+
+    /* Icon bytes are not ASCII: the ICON_FOLDER cell differs from 'F'. */
+    reset();
+    graphics_draw_glyph(10, 10, (char)ICON_FOLDER, C(1, 1, 1), 1);
+    uint32_t icon_cell[64];
+    for (int r = 0; r < 8; r++) {
+        for (int c = 0; c < 8; c++) {
+            icon_cell[r * 8 + c] = graphics_get_pixel(10 + c, 10 + r);
+        }
+    }
+    reset();
+    graphics_draw_glyph(10, 10, 'F', C(1, 1, 1), 1);
+    int differs = 0;
+    for (int i = 0; i < 64; i++) {
+        if (icon_cell[i] != graphics_get_pixel(10 + (i % 8), 10 + (i / 8))) {
+            differs = 1;
+            break;
+        }
+    }
+    CHECK(differs, "icon cell differs from the same-position ASCII glyph");
+
+    /* Unmapped high bytes fall back to '?' exactly. */
+    reset();
+    graphics_draw_glyph(20, 20, (char)(ICON_BASE + ICON_COUNT + 5), C(5, 5, 5), 1);
+    graphics_draw_glyph(40, 20, '?', C(5, 5, 5), 1);
+    int same = 1;
+    for (int r = 0; r < 8 && same; r++) {
+        for (int c = 0; c < 8; c++) {
+            if (graphics_get_pixel(20 + c, 20 + r) != graphics_get_pixel(40 + c, 20 + r)) {
+                same = 0;
+                break;
+            }
+        }
+    }
+    CHECK(same, "unmapped high byte renders as ?");
+
+    /* Scale 2 doubles the cell (UP row1 col3 lit -> 2x2 block). */
+    reset();
+    graphics_draw_glyph(60, 60, (char)ICON_UP, C(9, 9, 9), 2);
+    CHECK(graphics_get_pixel(60 + 3 * 2, 60 + 1 * 2) == C(9, 9, 9) &&
+          graphics_get_pixel(60 + 3 * 2 + 1, 60 + 1 * 2 + 1) == C(9, 9, 9),
+          "scaled icon reproduces the bitmap at 2x");
+    CHECK(graphics_get_pixel(60 + 15, 60 + 15) == 0,
+          "scaled icon leaves the rest of the cell empty");
+
+    /* Clipping applies to icons like any glyph (NET's equator row is
+     * fully lit, so clip edges are observable). */
+    reset();
+    graphics_set_clip(200, 200, 4, 4);
+    graphics_draw_glyph(200, 200, (char)ICON_NET, C(3, 3, 3), 1);
+    CHECK(graphics_get_pixel(200, 203) == C(3, 3, 3), "icon pixel under clip draws inside");
+    CHECK(graphics_get_pixel(203, 203) == C(3, 3, 3), "icon draws up to the last clip column");
+    CHECK(graphics_get_pixel(204, 203) == 0, "icon is clipped at the clip edge");
+    graphics_reset_clip();
+}
+
+static void test_icon_in_window_text(void) {
+    /* wm_draw_text (window.c) renders through graphics_draw_glyph, so an
+     * icon byte in window text lands as icon pixels and the following
+     * letter starts one 8px cell later.  This is the exact path a file
+     * manager row takes from print() to pixels. */
+    reset();
+    char buf[4];
+    buf[0] = (char)ICON_NET;  /* globe: equator row (row 3) = 0xFF */
+    buf[1] = 'N';             /* font row0 0x66 -> cols 1,2,5,6 at x+8.. */
+    buf[2] = '\0';
+    wm_draw_text(50, 50, buf, C(255, 255, 255));
+    CHECK(graphics_get_pixel(50, 53) == C(255, 255, 255), "icon pixel in window text");
+    CHECK(graphics_get_pixel(50, 50) == 0, "blank icon row stays blank");
+    CHECK(graphics_get_pixel(58 + 1, 50) == C(255, 255, 255),
+          "letter after the icon starts at +8px");
+}
+
 int main(void) {
     printf("=== graphics library unit tests ===\n");
     if (graphics_init() != 0) {
@@ -600,6 +723,9 @@ int main(void) {
     RUN(test_window_drop_shadow);
     RUN(test_window_close_button);
     RUN(test_window_tiled_pair);
+    RUN(test_icon_table);
+    RUN(test_icon_glyphs);
+    RUN(test_icon_in_window_text);
 
     printf("=== Results: %d run, %d failed ===\n", tests_run, tests_failed);
     printf("=== Checks: %d individual pixel/logic checks ===\n", checks_run);

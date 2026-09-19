@@ -113,14 +113,35 @@ struct sys_time {
     int weekday; /* 0=Sunday .. 6=Saturday */
 };
 
-/* cmd 7: filesystem statistics for the FAT-16 volume (data area). */
+/* cmd 7: filesystem statistics for the filesystem containing the process
+ * cwd (the FAT-16 volume, or the NFS server's FSSTAT when cwd is inside an
+ * NFS mount). */
 struct sys_fsinfo {
     uint64_t total_bytes;
     uint64_t free_bytes;
 };
 
+/* cmd 8: snapshot of the kernel mount table. The kernel fills up to
+ * size / sizeof(struct sys_mountinfo) entries and returns the number it
+ * filled (0 = no mounts, -1 = error). type: 0 = FAT16 (local), 1 = NFS. */
+struct sys_mountinfo {
+    char point[64];     /* mount point path, e.g. "/nfs"                    */
+    char source[64];    /* "local" or "server:/export"                      */
+    int  type;          /* 0 = FAT16, 1 = NFS                               */
+};
+
 int sysinfo(int cmd, void *buf, int size);
 int unlink(const char *filename);
 int rename(const char *oldname, const char *newname);
+
+/* Mount an NFS export at `target` (created if missing). `source` has the
+ * form "server:/export/path" where server is a dotted-quad IPv4 address
+ * and the export path may be omitted ("server:/" or "server"). Returns 0
+ * on success, -1 on failure (bad source, unreachable server, bad target,
+ * target inside another mount, target "/", ...). */
+int mount(const char *source, const char *target);
+
+/* Unmount the NFS export mounted exactly at `target`. 0 on success. */
+int umount(const char *target);
 
 #endif

@@ -152,6 +152,10 @@ void main(void) {
   }
   uart_puts("FAT-16 filesystem successfully initialized.\n");
 
+  /* VFS routing table: NFS mounts live on top of the FAT volume. */
+  extern void vfs_init(void);
+  vfs_init();
+
   net_init();
   if (virtio_net_init() == 0) {
     uart_puts("VirtIO Network successfully initialized.\n");
@@ -204,6 +208,7 @@ void main(void) {
   load_and_run_program_in_scheduler("TIMEOUT.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("STRESS.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("MONITORT.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("NFSTEST.BIN", -1, -1, -1, -1);
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
   load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1, -1, -1);

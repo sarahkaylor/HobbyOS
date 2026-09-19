@@ -269,6 +269,18 @@ gdt_start:
     /* Core 3 TSS (16 bytes, index 11, 12) */
     .quad 0x0000000000000000
     .quad 0x0000000000000000
+    /* Core 4 TSS (16 bytes, index 13, 14) */
+    .quad 0x0000000000000000
+    .quad 0x0000000000000000
+    /* Core 5 TSS (16 bytes, index 15, 16) */
+    .quad 0x0000000000000000
+    .quad 0x0000000000000000
+    /* Core 6 TSS (16 bytes, index 17, 18) */
+    .quad 0x0000000000000000
+    .quad 0x0000000000000000
+    /* Core 7 TSS (16 bytes, index 19, 20) */
+    .quad 0x0000000000000000
+    .quad 0x0000000000000000
 gdt_end:
 
 gdt_desc:

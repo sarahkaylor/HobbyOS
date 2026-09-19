@@ -46,6 +46,11 @@ int fat16_rename(const char* oldname, const char* newname);
 // Creates a directory.
 int fat16_mkdir(const char* path);
 
+// Changes directory: validates `path` (absolute or cwd-relative) and writes
+// the canonical absolute path of the resulting directory into out_new_cwd.
+// Returns 0 on success, -1 when the path does not name a directory.
+int fat16_chdir(const char *path, char *out_new_cwd);
+
 // Reads a directory entry at the specified index.
 int fat16_read_dir(const char* path, int index, char* out_name, uint8_t* out_attr, uint32_t* out_size);
 

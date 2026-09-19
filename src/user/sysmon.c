@@ -496,7 +496,7 @@ static int sm_handle_event(const struct gui_event *ev) {
         return 0;
     }
     if (ev->type == GUI_EV_MOUSE) {
-        if (ev->button != 1) return 0;                /* left click only */
+        if (ev->button != 1 || ev->state != GUI_MOUSE_PRESS) return 0; /* left press only */
         int idx = gui_list_click_row(&g_list, ev->y, SYSMON_LIST_TOP_ROW);
         if (idx < 0) return 0;                        /* outside the list */
         g_list.selected = idx;

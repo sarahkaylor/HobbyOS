@@ -11,6 +11,7 @@
 #include "graphics.h"
 #include "libc.h"
 #include "font.h"
+#include "icons.h"
 
 static uint32_t *fb = 0;
 
@@ -298,11 +299,19 @@ void graphics_draw_circle(int cx, int cy, int r, uint32_t color) {
 
 /* ---- Text ---- */
 
+/* Draw one glyph cell. Bytes in [ICON_BASE, ICON_BASE+ICON_COUNT) select an
+ * icon bitmap from icons.h; every other byte uses the ASCII font (unknown
+ * control bytes degrade to '?'). */
 void graphics_draw_glyph(int x, int y, char ch, uint32_t color, int scale) {
   if (scale < 1) scale = 1;
   unsigned char c = (unsigned char)ch;
-  if (c < 32 || c > 127) c = '?';
-  const uint8_t *rows = font8x8[c - 32];
+  const uint8_t *rows;
+  if (c >= ICON_BASE && c < ICON_BASE + ICON_COUNT) {
+    rows = icon8x8[c - ICON_BASE];
+  } else {
+    if (c < 32 || c > 127) c = '?';
+    rows = font8x8[c - 32];
+  }
   for (int row = 0; row < 8; row++) {
     uint8_t bits = rows[row];
     if (!bits)

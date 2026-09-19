@@ -22,9 +22,16 @@
  *   - Menu registration (existing): gui_add_menu(idx, name, items) from libc.h
  *   - Window title:    ESC ] T <title> ~        (gui_set_title)
  *   - Mouse enable:    ESC ] P 1 ~              (gui_enable_mouse)
- *   - Mouse clicks arrive as:  ESC [ P <col> ; <row> ; <btn> ~
+ *   - Mouse press arrives as:    ESC [ P <col> ; <row> ; <btn> ~
  *     where col/row are 0-based text-cell coordinates of the window content
  *     area (same grid print() draws into), btn: 1=left, 2=right.
+ *   - Mouse drag (button held, pointer moved) arrives as:
+ *     ESC [ G <col> ; <row> ; <btn> ~     (ev.state = GUI_MOUSE_DRAG)
+ *   - Mouse release arrives as:
+ *     ESC [ R <col> ; <row> ; <btn> ~     (ev.state = GUI_MOUSE_RELEASE)
+ *     Coordinates are clamped to the window content area, so a release
+ *     outside the window is delivered at the nearest content cell. Apps
+ *     that never press get no G/R events.
  *   - Arrow keys arrive as: ESC [ A/B/C/D
  *   - Menu choices arrive as: ESC [ M <menuIdx> ; <itemIdx> ~
  */
@@ -40,7 +47,12 @@
 #define GUI_EV_RIGHT  5
 #define GUI_EV_ESC    6  /* ESC pressed alone (command mode toggle) */
 #define GUI_EV_MENU   7  /* menu selection: ev.menu, ev.item */
-#define GUI_EV_MOUSE  8  /* mouse click: ev.x (col), ev.y (row), ev.button */
+#define GUI_EV_MOUSE  8  /* mouse press/drag/release: ev.x, ev.y, ev.button, ev.state */
+
+/* ev.state values for GUI_EV_MOUSE: which half of a click this is. */
+#define GUI_MOUSE_PRESS   0  /* button went down on this cell          */
+#define GUI_MOUSE_DRAG    1  /* button held, pointer moved to this cell */
+#define GUI_MOUSE_RELEASE 2  /* button went up on this cell             */
 
 struct gui_event {
     int type;
@@ -50,6 +62,7 @@ struct gui_event {
     int x;       /* GUI_EV_MOUSE: column (text cells, window-relative) */
     int y;       /* GUI_EV_MOUSE: row (text cells, window-relative) */
     int button;  /* GUI_EV_MOUSE: 1=left, 2=right */
+    int state;   /* GUI_EV_MOUSE: GUI_MOUSE_PRESS / _DRAG / _RELEASE */
 };
 
 /* ---- Window integration ---- */

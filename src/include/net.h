@@ -218,6 +218,15 @@ int net_socket_send(struct socket_pcb* pcb, const void* buf, uint32_t len);
 int net_socket_recv(struct socket_pcb* pcb, void* buf, uint32_t len);
 
 /**
+ * @brief Receive data with a caller-provided timeout in milliseconds.
+ *
+ * Returns bytes received, 0 when the socket closed with no data pending,
+ * or -1 on timeout.  Used by the NFS RPC client so a missing server cannot
+ * stall a syscall for the fixed 5s of net_socket_recv().
+ */
+int net_socket_recv_timeout(struct socket_pcb* pcb, void* buf, uint32_t len, int timeout_ms);
+
+/**
  * Closes a socket connection and frees the PCB.
  * @param pcb Pointer to the socket PCB to close.
  */

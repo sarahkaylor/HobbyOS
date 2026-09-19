@@ -19,8 +19,11 @@ import time
 REPO = os.path.dirname(os.path.abspath(__file__))
 os.chdir(REPO)
 
-SERIAL_LOG = "/tmp/apps_test_serial.log"
-TIMEOUT_S = 240
+# ARCH=arm (default) or ARCH=intel, overridable from the environment like
+# run_desktop_test.py does.
+ARCH = os.environ.get("ARCH", "arm")
+SERIAL_LOG = f"/tmp/apps_test_serial_{ARCH}.log"
+TIMEOUT_S = 300
 
 
 def log(msg):
@@ -44,10 +47,10 @@ def main():
     if os.path.exists(SERIAL_LOG):
         os.remove(SERIAL_LOG)
 
-    log("[INFO] booting APPS_TEST harness...")
+    log(f"[INFO] booting APPS_TEST harness (ARCH={ARCH})...")
     logf = open(SERIAL_LOG, "w")
     proc = subprocess.Popen(
-        ["make", "apps_test_run", "ARCH=arm", "QEMU_ARGS=-display none"],
+        ["make", "apps_test_run", f"ARCH={ARCH}", "QEMU_ARGS=-display none"],
         stdout=logf, stderr=subprocess.STDOUT)
 
     start = time.time()
@@ -87,7 +90,7 @@ def main():
         log(tail)
         return 1
     log(f"[TEST] Timeout after {TIMEOUT_S}s waiting for APPS TEST verdict "
-        "- treating as deadlock/failure (see /tmp/apps_test_serial.log)")
+        f"- treating as deadlock/failure (see {SERIAL_LOG})")
     log(tail)
     return 1
 

@@ -809,6 +809,34 @@ int net_socket_recv(struct socket_pcb* pcb, void* buf, uint32_t len) {
     return to_read;
 }
 
+int net_socket_recv_timeout(struct socket_pcb* pcb, void* buf, uint32_t len, int timeout_ms) {
+    if (!pcb) return -1;
+
+    /* Like net_socket_recv() but with a caller-provided timeout: the NFS RPC
+     * client must not wait the fixed 5s per attempt.  Returns bytes received,
+     * 0 when the socket closed with no data, -1 on timeout. */
+    uint64_t start = timer_get_ms();
+    while (pcb->rx_head == pcb->rx_tail && pcb->state != SOCKET_CLOSED) {
+        if ((int)(timer_get_ms() - start) > timeout_ms) return -1;
+        safe_wfi();
+    }
+
+    uint64_t flags = spinlock_acquire_irqsave(&net_lock);
+    uint32_t avail = pcb->rx_tail - pcb->rx_head;
+    if (avail == 0) {
+        spinlock_release_irqrestore(&net_lock, flags);
+        return 0; // EOF
+    }
+    uint32_t to_read = len < avail ? len : avail;
+    uint8_t* out = (uint8_t*)buf;
+    for (uint32_t i = 0; i < to_read; i++) {
+        out[i] = pcb->rx_buf[pcb->rx_head % SOCKET_RX_BUF_SIZE];
+        pcb->rx_head++;
+    }
+    spinlock_release_irqrestore(&net_lock, flags);
+    return (int)to_read;
+}
+
 void net_socket_close(struct socket_pcb* pcb) {
     if (!pcb) return;
     if (pcb->protocol == IP_PROTO_TCP && pcb->state == SOCKET_ESTABLISHED) {

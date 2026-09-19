@@ -318,6 +318,74 @@ void execute_command(const char *cmd_line) {
         write_str(stdout_param, "  less       - File pager\n");
         write_str(stdout_param, "  tail       - Display last lines of a file\n");
         write_str(stdout_param, "  head       - Display first lines of a file\n");
+        write_str(stdout_param, "Mount built-ins:\n");
+        write_str(stdout_param, "  mount      - List active NFS mounts\n");
+        write_str(stdout_param, "  mount <server>:/export <dir> - Mount an NFS export\n");
+        write_str(stdout_param, "  umount <dir> - Unmount the NFS export mounted at <dir>\n");
+    } else if (cmd_name[0] == 'm' && cmd_name[1] == 'o' && cmd_name[2] == 'u' &&
+               cmd_name[3] == 'n' && cmd_name[4] == 't' && cmd_name[5] == '\0') {
+        /* mount                     -> list the mount table
+         * mount <server>:/export <dir> -> mount an NFS export */
+        char a1[96];
+        char a2[64];
+        int k = 0;
+        while (args[k] == ' ' || args[k] == '\t') k++;
+        int n1 = 0;
+        while (args[k] && args[k] != ' ' && args[k] != '\t' && n1 < 95) {
+            a1[n1++] = args[k++];
+        }
+        a1[n1] = '\0';
+        while (args[k] == ' ' || args[k] == '\t') k++;
+        int n2 = 0;
+        while (args[k] && args[k] != ' ' && args[k] != '\t' && n2 < 63) {
+            a2[n2++] = args[k++];
+        }
+        a2[n2] = '\0';
+
+        if (a1[0] == '\0') {
+            struct sys_mountinfo mi[4];
+            int n = sysinfo(8, mi, sizeof mi);
+            if (n <= 0) {
+                write_str(stdout_param, "No NFS mounts.\n");
+            } else {
+                for (int mi_i = 0; mi_i < n && mi_i < 4; mi_i++) {
+                    write_str(stdout_param, mi[mi_i].source);
+                    write_str(stdout_param, " on ");
+                    write_str(stdout_param, mi[mi_i].point);
+                    write_str(stdout_param, " type nfs\n");
+                }
+            }
+        } else if (a2[0] == '\0') {
+            write_str(stdout_param, "usage: mount <server>:/export <dir>\n");
+        } else if (mount(a1, a2) == 0) {
+            write_str(stdout_param, "mounted ");
+            write_str(stdout_param, a1);
+            write_str(stdout_param, " at ");
+            write_str(stdout_param, a2);
+            write_str(stdout_param, "\n");
+        } else {
+            write_str(stdout_param, "mount: failed (server unreachable, bad export, or bad mount point)\n");
+        }
+    } else if (cmd_name[0] == 'u' && cmd_name[1] == 'm' && cmd_name[2] == 'o' &&
+               cmd_name[3] == 'u' && cmd_name[4] == 'n' && cmd_name[5] == 't' &&
+               cmd_name[6] == '\0') {
+        char tgt[64];
+        int k = 0;
+        while (args[k] == ' ' || args[k] == '\t') k++;
+        int n1 = 0;
+        while (args[k] && args[k] != ' ' && args[k] != '\t' && n1 < 63) {
+            tgt[n1++] = args[k++];
+        }
+        tgt[n1] = '\0';
+        if (tgt[0] == '\0') {
+            write_str(stdout_param, "usage: umount <dir>\n");
+        } else if (umount(tgt) == 0) {
+            write_str(stdout_param, "unmounted ");
+            write_str(stdout_param, tgt);
+            write_str(stdout_param, "\n");
+        } else {
+            write_str(stdout_param, "umount: no NFS mount at that directory\n");
+        }
     } else {
         char bin_file[32], arg_file[32];
         sanitize_command(cmd_name, bin_file, arg_file);

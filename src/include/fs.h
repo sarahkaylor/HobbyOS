@@ -5,6 +5,7 @@
 #include "fat16.h"
 #include "lock.h"
 #include "process.h"
+#include "nfs.h"
 
 struct socket_pcb;
 
@@ -15,7 +16,8 @@ typedef enum {
     FILE_TYPE_EMPTY,    /**< Unallocated file slot */
     FILE_TYPE_FAT16,    /**< Regular file on FAT16 filesystem */
     FILE_TYPE_PIPE,     /**< Anonymous pipe for IPC */
-    FILE_TYPE_SOCKET    /**< Network socket */
+    FILE_TYPE_SOCKET,   /**< Network socket */
+    FILE_TYPE_NFS       /**< Regular file on a mounted NFS export (read-only) */
 } file_type_t;
 
 /**
@@ -40,6 +42,13 @@ struct file {
         struct {
             struct socket_pcb *pcb;      /**< Pointer to the protocol control block */
         } socket;
+        struct {
+            struct nfs_fh fh;            /**< NFSv3 file handle */
+            uint64_t size;               /**< Size from the open attributes */
+            uint32_t cursor;             /**< Current read position */
+            int is_dir;                  /**< Opened entry is a directory */
+            int mount_idx;               /**< Index of the mount serving it */
+        } nfs;
     };
 };
 

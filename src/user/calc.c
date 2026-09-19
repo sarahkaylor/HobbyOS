@@ -375,7 +375,7 @@ static int calc_handle_event(const struct gui_event *ev) {
     if (ev == 0) return 0;
     if (ev->type == GUI_EV_CHAR) return calc_press((char)ev->ch);
     if (ev->type == GUI_EV_MENU) return calc_menu(ev->menu, ev->item);
-    if (ev->type == GUI_EV_MOUSE && ev->button == 1) {
+    if (ev->type == GUI_EV_MOUSE && ev->button == 1 && ev->state == GUI_MOUSE_PRESS) {
         char k = key_at_click(ev->x, ev->y);
         if (k != 0) return calc_press(k);
     }

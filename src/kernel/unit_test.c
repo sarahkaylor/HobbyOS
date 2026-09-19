@@ -26,6 +26,7 @@ void run_all_unit_tests(void) {
     virtio_net_test_suite();
     net_test_suite();
     net_rdma_test_suite();
+    nfs_test_suite();
     timer_test_suite();
     smp_test_suite();
     time_test_suite();

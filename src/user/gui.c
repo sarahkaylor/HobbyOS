@@ -326,8 +326,10 @@ int gui_decode(const char *buf, int len, struct gui_event *ev) {
         return 3;
     }
 
-    /* Menu selection: ESC [ M <menu> ; <item> ~  (payload digits, then '~') */
-    if (k == 'M' || k == 'P') {
+    /* Menu selection: ESC [ M <menu> ; <item> ~  (payload digits, then '~')
+     * Mouse events:   ESC [ P/G/R <col> ; <row> ; <btn> ~
+     *   P = press, G = drag (button held), R = release. */
+    if (k == 'M' || k == 'P' || k == 'G' || k == 'R') {
         int p[3] = {0, 0, 0};
         int np = (k == 'M') ? 2 : 3;
         int i = 3; /* index into buf */
@@ -358,6 +360,9 @@ int gui_decode(const char *buf, int len, struct gui_event *ev) {
             ev->x = p[0];
             ev->y = p[1];
             ev->button = p[2];
+            ev->state = (k == 'P') ? GUI_MOUSE_PRESS
+                      : (k == 'G') ? GUI_MOUSE_DRAG
+                      :              GUI_MOUSE_RELEASE;
         }
         return i;
     }

@@ -8,8 +8,10 @@ A from-scratch 64-bit hobby operating system in C — ARM64 primary, x86_64 seco
 |---|---|
 | ![The tiling window manager running four apps](docs/screenshots/tiling-windows.png) | ![The Apps menu](docs/screenshots/apps-menu.png) |
 | **Tiling window manager** — FILES, CLOCK, CALC and SYSMON, each launched into a tile from the Apps menu | **The Apps menu** — the ten GUI apps and both arcade games pinned at the top |
-| ![PONG running full-screen](docs/screenshots/pong.png) | ![MILLIPED running full-screen](docs/screenshots/millipede.png) |
-| **PONG** — full-screen arcade game running as a user-space program | **MILLIPED** — ship, mushrooms and score, drawn straight to the framebuffer |
+| ![The Files app](docs/screenshots/files-icons.png) | ![PONG running full-screen](docs/screenshots/pong.png) |
+| **Files** — 8×8 icon font glyphs, `[DIR]`/`[TXT]`/`[EXE]` type tags, sizes, FAT/NFS badge, and drag & drop of files onto folders | **PONG** — full-screen arcade game running as a user-space program |
+| ![MILLIPED running full-screen](docs/screenshots/millipede.png) | |
+| **MILLIPED** — ship, mushrooms and score, drawn straight to the framebuffer | |
 
 *Captured from a live QEMU boot — [`capture_screenshots.py`](capture_screenshots.py) reproduces them.*
 
@@ -102,6 +104,66 @@ This launches QEMU with:
 
 When running in nographic mode:
 - Press `Ctrl+A`, then `X` to exit QEMU
+
+## NFS (read-only NFSv3 client)
+
+The kernel can mount NFSv3 exports over UDP and route path-based syscalls
+into them. The client is deliberately read-only — `GETATTR`, `LOOKUP`,
+`READ`, `READDIRPLUS`, `FSSTAT` plus `MOUNT`/`UMNT` and portmapper
+`GETPORT` — so mounts are presented read-only and mutation syscalls
+(`unlink`, `rename`, `mkdir`, writes) fail on them.
+
+Under QEMU's user-mode networking the guest reaches the host at `10.0.2.2`,
+so a Linux `nfs-kernel-server` on the host is directly mountable:
+
+```bash
+# Host: export a directory (UDP/NFSv3, insecure source ports)
+sudo apt-get install -y nfs-kernel-server
+sudo mkdir -p /srv/nfs/export && echo "hello" | sudo tee /srv/nfs/export/HELLO.TXT
+echo '/srv/nfs/export *(rw,sync,no_subtree_check,insecure,no_root_squash)' \
+    | sudo tee /etc/exports
+sudo exportfs -ra && sudo systemctl restart nfs-server
+```
+
+```
+# In the HobbyOS shell (SH.BIN / the Console app):
+mount                              # list active NFS mounts
+mount 10.0.2.2:/srv/nfs/export /nfs   # mount an export (point auto-created)
+ls /nfs                            # listings, reads, cd work through the VFS
+umount /nfs                        # unmount (open handles fail cleanly after)
+```
+
+The Files app integrates the same syscalls: its **Mount** menu mounts and
+unmounts exports, a Mounts view lists them, and browsing into a mount shows
+the `[NFS]` badge with the server's free space (`FSSTAT`).
+
+New syscalls (both architectures): `SYS_MOUNT` (27) and `SYS_UMOUNT` (28);
+`sysinfo(8, ...)` returns a snapshot of the mount table and `sysinfo(7, ...)`
+reports the statistics of the filesystem holding the cwd (NFS `FSSTAT` when
+inside a mount).
+
+Where it lives:
+
+- `src/kernel/nfs_proto.c` — pure XDR/RPC/NFSv3 codecs (no I/O; compiled
+  into the kernel *and* the host test suite)
+- `src/kernel/nfs.c` — RPC transport over UDP sockets, mount table,
+  directory cache, read operations
+- `src/kernel/vfs.c` — path canonicalisation and FAT16/NFS routing
+- `src/user/nfs_test.c` — in-OS integration test (`MODE=test`)
+
+Tests:
+
+- `make host_tests` — includes `nfs_proto_test_host`, which replays real
+  nfsd datagrams captured by `tools/capture_nfs_fixtures.py` into
+  `src/host/nfs_fixtures.h` (catches protocol misunderstandings that
+  hand-written fixtures would codify)
+- `./run_unit_tests.sh` / `./run_unit_tests_intel.sh` — EL1 unit tests for
+  the codecs, mount-table API and VFS dispatch on both architectures
+- `make test` — boots `MODE=test`; `NFSTEST.BIN` mounts the host export and
+  checks listings, byte-exact reads (including a 10 000-byte chunked file
+  and a 20-entry multi-batch directory), FSSTAT, read-only enforcement and
+  unmount behaviour. Run the host NFS server first or the e2e tier reports
+  `SKIP e2e` and the run still passes.
 
 ## Project Structure
 

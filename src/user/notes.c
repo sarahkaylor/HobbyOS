@@ -491,7 +491,7 @@ int notes_handle_event(const struct gui_event *ev) {
         }
         return 0;
     case GUI_EV_MOUSE:
-        if (ev->button == 1) return notes_click(ev->y) >= 0;
+        if (ev->button == 1 && ev->state == GUI_MOUSE_PRESS) return notes_click(ev->y) >= 0;
         return 0;
     }
     return 0;
