@@ -13,9 +13,9 @@
  *   - human_readable() collapses to a decimal number printer (block
  *     size 1 == no scaling, which is what wc requests)
  *   - error() comes from the Phase-2 sysroot (error.h/error.c)
- *   - fstat/lseek (the "-c only" size fast path) are stubs returning
- *     -1/ENOSYS today, so that path falls through to the read loop; the
- *     reported byte counts are identical either way.
+ *   - fstat/lseek (the "-c only" size fast path) are backed by real
+ *     syscalls since Phase 3, so regular files take the size fast path;
+ *     the reported byte counts are identical either way.
  *
  * The host build of this file (see Makefile wc_host) links against
  * glibc except for our getopt_long (hb_* renames via getopt.h), and is
@@ -201,8 +201,8 @@ wc (int fd, const char *file)
   count_complicated = print_words + print_linelength;
 
   /* When counting only bytes, use the size fast path when available
-     (fstat/lseek).  On HobbyOS they are stubs (ENOSYS), so this falls
-     through to the read loop — identical counts. */
+     (fstat/lseek).  Phase 3 implemented these: regular files resolve
+     their size directly, pipes degrade to the read loop below. */
   if (count_bytes && !count_chars && !print_lines && !count_complicated)
     {
       off_t current_pos, end_pos;

@@ -622,6 +622,58 @@ static void sys_getcwd(struct trap_frame *tf) {
   }
 }
 
+static void sys_lseek(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  int fd = (int)tf->regs[5];     // rdi
+  int64_t offset = (int64_t)tf->regs[4];  // rsi
+  int whence = (int)tf->regs[3]; // rdx
+  int err = 0;
+  extern int64_t file_seek(struct process *p, int fd, int64_t offset,
+                           int whence, int *errp);
+  int64_t r = file_seek(caller, fd, offset, whence, &err);
+  tf->regs[0] = r < 0 ? (uint64_t)(-err) : (uint64_t)r;
+}
+
+static void sys_stat(struct trap_frame *tf) {
+  const char *path = (const char *)tf->regs[5];  // rdi
+  struct k_stat *st = (struct k_stat *)tf->regs[4];  // rsi
+  if ((uint64_t)path >= USER_VIRT_BASE &&
+      (uint64_t)path < (USER_VIRT_BASE + USER_REGION_SIZE) &&
+      (uint64_t)st >= USER_VIRT_BASE &&
+      (uint64_t)st + sizeof(struct k_stat) <=
+          (USER_VIRT_BASE + USER_REGION_SIZE)) {
+    struct process *caller = current_process();
+    int err = 0;
+    extern int file_stat_path(struct process *p, const char *path,
+                              struct k_stat *st, int *errp);
+    if (file_stat_path(caller, path, st, &err) == 0)
+      tf->regs[0] = 0;
+    else
+      tf->regs[0] = (uint64_t)(-err);
+  } else {
+    tf->regs[0] = -EFAULT;
+  }
+}
+
+static void sys_fstat(struct trap_frame *tf) {
+  int fd = (int)tf->regs[5];     // rdi
+  struct k_stat *st = (struct k_stat *)tf->regs[4];  // rsi
+  if ((uint64_t)st >= USER_VIRT_BASE &&
+      (uint64_t)st + sizeof(struct k_stat) <=
+          (USER_VIRT_BASE + USER_REGION_SIZE)) {
+    struct process *caller = current_process();
+    int err = 0;
+    extern int file_stat_fd(struct process *p, int fd, struct k_stat *st,
+                            int *errp);
+    if (file_stat_fd(caller, fd, st, &err) == 0)
+      tf->regs[0] = 0;
+    else
+      tf->regs[0] = (uint64_t)(-err);
+  } else {
+    tf->regs[0] = -EFAULT;
+  }
+}
+
 static void sys_chdir(struct trap_frame *tf) {
   const char *path = (const char *)tf->regs[5]; // rdi
   struct process *caller = current_process();
@@ -755,6 +807,12 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_getcwd(tf);
     } else if (syscall_num == SYS_CHDIR) {
       sys_chdir(tf);
+    } else if (syscall_num == SYS_LSEEK) {
+      sys_lseek(tf);
+    } else if (syscall_num == SYS_STAT) {
+      sys_stat(tf);
+    } else if (syscall_num == SYS_FSTAT) {
+      sys_fstat(tf);
     } else if (syscall_num == SYS_MOUNT) {
       sys_mount(tf);
     } else if (syscall_num == SYS_UMOUNT) {

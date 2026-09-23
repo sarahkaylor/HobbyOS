@@ -958,21 +958,22 @@ int fat16_mkdir(const char *path) {
 /**
  * Closes a FAT16 file. Updates the directory entry on disk (e.g., file size).
  */
-int fat16_close(struct file* f) {
-    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
-    
-    // Update directory entry dynamically on disk
+/* Persist the in-memory directory entry (size, start cluster, ...) back
+ * to the on-disk directory — mirrors what close() must do, kept in one
+ * place so write-time sync and close-time sync can share it.  Call with
+ * the fat_lock RELEASED (does virtio sector I/O). */
+static void fat16_sync_entry(struct file* f) {
     uint8_t buf[SECTOR_SIZE];
-    uint32_t dir_sector = f->fat16.dir_sector;
-    uint32_t dir_offset = f->fat16.dir_offset;
     struct fat16_dir_entry entry = *(struct fat16_dir_entry*)&f->fat16.entry;
-    
-    spinlock_release_irqrestore(&fat_lock, flags);
-    virtio_blk_read_sector(dir_sector, buf, 1);
+    if (virtio_blk_read_sector(f->fat16.dir_sector, buf, 1) != 0) return;
     struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
-    entries[dir_offset] = entry;
-    virtio_blk_write_sector(dir_sector, buf, 1);
-    
+    entries[f->fat16.dir_offset] = entry;
+    virtio_blk_write_sector(f->fat16.dir_sector, buf, 1);
+}
+
+int fat16_close(struct file* f) {
+    // Update directory entry dynamically on disk
+    fat16_sync_entry(f);
     return 0;
 }
 
@@ -1005,6 +1006,12 @@ int fat16_seek(struct file* f, int offset) {
 int fat16_read(struct file* f, void* buf, int size) {
     uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
     
+    if (f->fat16.cursor >= f->fat16.entry.file_size) {
+        /* past EOF: return 0, not wrapped-around-garbage (the offset
+           clamp below underflows in uint32 when cursor > size) */
+        spinlock_release_irqrestore(&fat_lock, flags);
+        return 0;
+    }
     uint32_t remaining = f->fat16.entry.file_size - f->fat16.cursor;
     if ((uint32_t)size > remaining) size = remaining;
     if (size == 0) {
@@ -1108,6 +1115,9 @@ int fat16_write(struct file* f, const void* buf, int size) {
         size -= chunk;
     }
     spinlock_release_irqrestore(&fat_lock, flags);
+    if (written_bytes > 0)
+        fat16_sync_entry(f);   /* keep the on-disk dir entry (size/clusters)
+                                  current so stat-by-path sees it immediately */
     return written_bytes;
 }
 

@@ -5,6 +5,7 @@
 #include "net.h"
 #include "nfs.h"
 #include "vfs.h"
+#include "errno.h"
 
 static struct file global_file_table[MAX_GLOBAL_FILES];
 static spinlock_t fs_lock;
@@ -147,6 +148,105 @@ int file_connect(struct process *cur, uint32_t ip, uint16_t port, int protocol) 
     }
 
     return fd;
+}
+
+/* --- Phase 3: lseek/stat --------------------------------------------- */
+
+int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
+                  int *errp)
+{
+    if (!p || fd < 0 || fd >= MAX_OPEN_FDS) { *errp = EBADF; return -1; }
+    int g_fd = p->open_fds[fd];
+    if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) { *errp = EBADF; return -1; }
+    struct file *f = &global_file_table[g_fd];
+
+    int64_t base, size;
+    if (f->type == FILE_TYPE_FAT16) {
+        base = f->fat16.cursor;
+        size = f->fat16.entry.file_size;
+    } else if (f->type == FILE_TYPE_NFS) {
+        base = f->nfs.cursor;
+        size = f->nfs.size;
+    } else {
+        *errp = (f->type == FILE_TYPE_PIPE) ? ESPIPE : EINVAL;
+        return -1;
+    }
+
+    int64_t newpos;
+    switch (whence) {
+    case 0: newpos = offset;          break;  /* SEEK_SET */
+    case 1: newpos = base + offset;   break;  /* SEEK_CUR */
+    case 2: newpos = size + offset;   break;  /* SEEK_END */
+    default: *errp = EINVAL; return -1;
+    }
+    if (newpos < 0) { *errp = EINVAL; return -1; }
+
+    uint64_t flags = spinlock_acquire_irqsave(&f->lock);
+    if (f->type == FILE_TYPE_FAT16) f->fat16.cursor = (uint32_t)newpos;
+    else                            f->nfs.cursor  = (uint32_t)newpos;
+    spinlock_release_irqrestore(&f->lock, flags);
+    *errp = 0;
+    return newpos;
+}
+
+static void k_stat_fill(struct k_stat *st, unsigned long mode, long size)
+{
+    st->st_dev = 0;
+    st->st_ino = 0;
+    st->st_mode = mode;
+    st->st_nlink = 1;
+    st->st_uid = 0;
+    st->st_gid = 0;
+    st->st_rdev = 0;
+    st->st_size = size;
+    st->st_blksize = 512;
+    st->st_blocks = (size + 511) / 512;
+    st->st_atime = st->st_mtime = st->st_ctime = 0;
+}
+
+int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp)
+{
+    if (!p || fd < 0 || fd >= MAX_OPEN_FDS) { *errp = EBADF; return -1; }
+    int g_fd = p->open_fds[fd];
+    if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) { *errp = EBADF; return -1; }
+    struct file *f = &global_file_table[g_fd];
+    switch (f->type) {
+    case FILE_TYPE_FAT16:
+        k_stat_fill(st,
+                    (f->fat16.entry.attr & 0x10)
+                        ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
+                    f->fat16.entry.file_size);
+        return 0;
+    case FILE_TYPE_NFS:
+        k_stat_fill(st, f->nfs.is_dir ? (K_S_IFDIR | 0755)
+                                      : (K_S_IFREG | 0644),
+                    f->nfs.size);
+        return 0;
+    case FILE_TYPE_PIPE:
+        k_stat_fill(st, K_S_IFIFO | 0600, 0);
+        return 0;
+    case FILE_TYPE_SOCKET:
+        k_stat_fill(st, K_S_IFSOCK | 0600, 0);
+        return 0;
+    default:
+        *errp = EBADF;
+        return -1;
+    }
+}
+
+int file_stat_path(struct process *p, const char *path, struct k_stat *st,
+                   int *errp)
+{
+    (void)p;
+    if (!path) { *errp = EINVAL; return -1; }
+    char abs[256];
+    if (vfs_abs_path(path, abs, sizeof abs) != 0) { *errp = EINVAL; return -1; }
+    struct fat16_dir_entry entry;
+    if (fat16_resolve_path(abs, &entry, 0, 0) != 0) { *errp = ENOENT; return -1; }
+    k_stat_fill(st,
+                (entry.attr & 0x10) ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
+                entry.file_size);
+    return 0;
 }
 
 /**

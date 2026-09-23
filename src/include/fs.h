@@ -70,7 +70,6 @@ int file_mkdir(struct process *p, const char *path);
  * Increments the reference count of a global file.
  */
 void fs_reopen(int global_fd);
-
 /**
  * Duplicates a file descriptor (not currently used in the main logic).
  */
@@ -87,5 +86,41 @@ int fs_duplicate_fd(int global_fd);
  *   0 on success, -1 if no more entries exist.
  */
 void fs_close_global(int g_fd);
+
+/* --- Phase 3: lseek/stat support ------------------------------------- */
+
+/* ABI mirror of the sysroot's struct stat (LP64: sys/types.h typedefs a
+ * dev_t/ino_t/off_t as long and mode_t/uid_t/gid_t as unsigned int).
+ * Member-for-member identical layout; the kernel fills one of these
+ * directly into user memory (validated at the trap layer). */
+struct k_stat {
+    unsigned long st_dev;
+    unsigned long st_ino;
+    unsigned int  st_mode;
+    long          st_nlink;
+    unsigned int  st_uid;
+    unsigned int  st_gid;
+    unsigned long st_rdev;
+    long          st_size;
+    long          st_blksize;
+    long          st_blocks;
+    long          st_atime, st_mtime, st_ctime;
+};
+
+#define K_S_IFMT  0170000
+#define K_S_IFDIR 0040000
+#define K_S_IFREG 0100000
+#define K_S_IFIFO 0010000
+#define K_S_IFSOCK 0140000
+
+/* Reposition the read cursor of an open file (FAT16/NFS).  Pipes report
+ * ESPIPE via *errp.  Returns the new absolute position, or -1 on error. */
+int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
+                  int *errp);
+/* Fill *st for an open fd or a path.  Return 0 on success, -1 with *errp
+ * set (EBADF/ENOENT/EINVAL). */
+int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp);
+int file_stat_path(struct process *p, const char *path, struct k_stat *st,
+                   int *errp);
 
 #endif // FS_H

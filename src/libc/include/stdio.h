@@ -1,6 +1,10 @@
 #ifndef HOBBYOS_STDIO_H
 #define HOBBYOS_STDIO_H
 
+#include <sys/types.h>
+#include <stdarg.h>
+#include <stddef.h>
+
 /* HobbyOS Phase-2 sysroot: stdio.h — printf family + FILE layer.
  * No float support (userland builds with -mgeneral-regs-only; the plan
  * defers strtod/FPU), so %f/%e/%g/%a and long double are intentionally
@@ -50,6 +54,15 @@ int fflush(FILE *stream);
 int feof(FILE *stream);
 int ferror(FILE *stream);
 int fileno(FILE *stream);
+int fseek(FILE *stream, off_t offset, int whence);
+long ftell(FILE *stream);
+void rewind(FILE *stream);
+int ungetc(int c, FILE *stream);
+int setvbuf(FILE *stream, char *buf, int mode, size_t size);
+void setbuf(FILE *stream, char *buf);
+#define _IOFBF 0
+#define _IOLBF 1
+#define _IONBF 2
 
 /* --- constants --- */
 #ifndef SEEK_SET

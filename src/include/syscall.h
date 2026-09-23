@@ -56,6 +56,9 @@
 #define SYS_CHDIR         (26)
 #define SYS_MOUNT         (27)
 #define SYS_UMOUNT        (28)
+#define SYS_LSEEK         (29)
+#define SYS_STAT          (30)
+#define SYS_FSTAT         (31)
 
 /* 29..59 reserved for the posix.md Phase 2+ sequence (lseek, stat, ...). */
 #define SYS_GETPROGNAME   (60)

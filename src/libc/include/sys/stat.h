@@ -1,9 +1,10 @@
 /*
- * HobbyOS Phase-2 sysroot: sys/stat.h — struct stat and file-status
- * predicates.  The kernel has no stat() yet (Phase-2.2); stat/fstat
- * return -1/ENOSYS so portable code (e.g. GNU wc) gracefully falls back
- * to read-based paths.  Under HOST_TEST we let the host's sys/stat.h
- * supply the real layout (so host ports get glibc's struct stat).
+ * HobbyOS Phase-3 sysroot: sys/stat.h — struct stat and file-status
+ * predicates.  The kernel implements stat/fstat/lseek (SYS_STAT/SYS_FSTAT/
+ * SYS_LSEEK) and fills this exact layout via the k_stat ABI mirror in
+ * fs.h — keep the two in sync.  Under HOST_TEST we let the host's
+ * sys/stat.h supply the real layout (so host ports get glibc's
+ * struct stat).
  */
 #ifndef __HB_SYS_STAT_H
 #define __HB_SYS_STAT_H

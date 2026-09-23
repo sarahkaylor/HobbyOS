@@ -23,6 +23,8 @@ struct __hb_FILE {
     int mode;                  /* 0 unused, 'r', 'w', 'a' */
     unsigned char *rbuf;       /* read buffer or NULL */
     size_t rsize, rpos, rlen;  /* capacity, cursor, valid bytes */
+    off_t fdpos;               /* absolute offset of the fd read cursor */
+    int pushback;              /* -1 = none, else one pushed-back char */
     int eof;
     int err;
 };
@@ -44,6 +46,8 @@ static void hb_file_init(FILE *f, int fd)
     f->rsize = 0;
     f->rpos = 0;
     f->rlen = 0;
+    f->fdpos = 0;
+    f->pushback = -1;
     f->eof = 0;
     f->err = 0;
 }
@@ -78,14 +82,20 @@ static ssize_t hb_file_fill(FILE *f)
         f->rpos = 0;
         f->rlen = rem;
         n = read(f->fd, f->rbuf + rem, f->rsize - rem);
-        if (n > 0) f->rlen += (size_t)n;
+        if (n > 0) {
+            f->rlen += (size_t)n;
+            f->fdpos += n;
+        }
         if (n <= 0) f->eof = (n == 0);
         return n;
     }
     f->rpos = 0;
     f->rlen = 0;
     n = read(f->fd, f->rbuf, f->rsize);
-    if (n > 0) f->rlen = (size_t)n;
+    if (n > 0) {
+        f->rlen = (size_t)n;
+        f->fdpos += n;   /* fd cursor moved past the freshly-buffered data */
+    }
     else if (n == 0) f->eof = 1;
     else if (n < 0) f->err = 1;
     return n;
@@ -173,6 +183,13 @@ size_t fread(void *ptr, size_t size, size_t nmemb, FILE *f)
         return 0;
     }
 
+    if (f->pushback != -1) {
+        p[0] = (unsigned char)f->pushback;  /* one byte, not one item */
+        f->pushback = -1;
+        got++;
+        p++;
+        total--;
+    }
     if (f->rpos < f->rlen) {
         size_t avail = f->rlen - f->rpos;
         size_t take = avail < total ? avail : total;
@@ -200,6 +217,11 @@ size_t fread(void *ptr, size_t size, size_t nmemb, FILE *f)
 int fgetc(FILE *f)
 {
     unsigned char c;
+    if (f->pushback != -1) {
+        c = (unsigned char)f->pushback;
+        f->pushback = -1;
+        return c;
+    }
     if (f->rpos >= f->rlen) {
         ssize_t n;
         if (f->eof)
@@ -282,6 +304,66 @@ int fflush(FILE *f)
 {
     (void)f;                   /* unbuffered writes: nothing pending */
     return 0;
+}
+
+/* --- seek / ungetc / buffering-mode --- */
+
+int fseek(FILE *f, off_t offset, int whence)
+{
+    off_t r;
+    /* The fd cursor already sits at fdpos (ahead of unread buffered data).
+       Reposition it so the user-visible position lands at the target. */
+    if (whence == SEEK_CUR) {
+        /* user position = fdpos - slack; move by -(slack) first */
+        off_t slack = (off_t)(f->rlen - f->rpos)
+                      + (f->pushback != -1 ? 1 : 0);
+        r = lseek(f->fd, offset - slack, SEEK_CUR);
+    } else {
+        r = lseek(f->fd, offset, whence);
+    }
+    if (r < 0)
+        return -1;
+    f->fdpos = r;
+    f->rpos = f->rlen = 0;
+    f->pushback = -1;
+    f->eof = 0;
+    f->err = 0;
+    return 0;
+}
+
+long ftell(FILE *f)
+{
+    /* user position = fd cursor - buffered-but-unconsumed bytes */
+    long pos = (long)(f->fdpos - (off_t)(f->rlen - f->rpos));
+    if (f->pushback != -1)
+        pos--;
+    return pos;
+}
+
+void rewind(FILE *f)
+{
+    (void)fseek(f, 0, SEEK_SET);
+}
+
+int ungetc(int c, FILE *f)
+{
+    if (c == EOF || f->pushback != -1)
+        return EOF;
+    f->pushback = (unsigned char)c;
+    return c;
+}
+
+/* Buffering is deliberately immediate (unbuffered writes); accept the
+   mode markers and return success without changing behavior. */
+int setvbuf(FILE *f, char *buf, int mode, size_t size)
+{
+    (void)f; (void)buf; (void)mode; (void)size;
+    return 0;
+}
+
+void setbuf(FILE *f, char *buf)
+{
+    (void)f; (void)buf;
 }
 
 int feof(FILE *f)   { return f->eof; }
