@@ -940,6 +940,10 @@ $(STDLIB_TEST): obj/host_libc_stdlib_test.o obj/host_hb_stdlib.o
 
 # malloc.c's realloc compiled natively (hb_* names): free-list allocator
 # logic is pure, so it runs against a fake heap on the host.
+PRINTF_TEST = libc_printf_test_host
+$(PRINTF_TEST): obj/host_libc_printf_test.o obj/host_hb_stdio.o
+	$(HOST_CC) -o $@ $^
+
 REALLOC_TEST = libc_realloc_test_host
 obj/host_malloc_hb.o: src/user/malloc.c src/user_include/malloc.h
 	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
@@ -985,7 +989,7 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(HEADERS_TEST) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
@@ -1002,6 +1006,7 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	$(HOST_RUN) ./$(CTYPE_TEST)
 	$(HOST_RUN) ./$(STDLIB_TEST)
 	$(HOST_RUN) ./$(REALLOC_TEST)
+	$(HOST_RUN) ./$(PRINTF_TEST)
 	$(HOST_RUN) ./$(HEADERS_TEST)
 	$(HOST_RUN) ./files_test_host
 	$(HOST_RUN) ./calc_test_host
