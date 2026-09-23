@@ -9,7 +9,7 @@ void _start(void) {
 }
 #endif
 
-static int strcmp(const char *s1, const char *s2) {
+static int srt_strcmp(const char *s1, const char *s2) {
     while (*s1 && *s1 == *s2) {
         s1++;
         s2++;
@@ -65,7 +65,7 @@ int main(void) {
     
     for (int i = 0; i < line_count - 1; i++) {
         for (int j = i + 1; j < line_count; j++) {
-            if (strcmp(lines[i], lines[j]) > 0) {
+            if (srt_strcmp(lines[i], lines[j]) > 0) {
                 char temp[MAX_LINE_LEN];
                 int k = 0;
                 while (lines[i][k]) { temp[k] = lines[i][k]; k++; }

@@ -9,7 +9,7 @@ void _start(void) {
 }
 #endif
 
-static int atoi(const char *s) {
+static int kill_atoi(const char *s) {
     int res = 0;
     int sign = 1;
     if (*s == '-') {
@@ -35,14 +35,14 @@ int main(void) {
     int sig = 9;
     int pid_idx = 0;
     if (argv[0][0] == '-') {
-        sig = atoi(argv[0] + 1);
+        sig = kill_atoi(argv[0] + 1);
         pid_idx = 1;
         if (argc < 2) {
             print("Usage: kill [-sig] pid\n");
             return 1;
         }
     }
-    int pid = atoi(argv[pid_idx]);
+    int pid = kill_atoi(argv[pid_idx]);
     if (kill(pid, sig) < 0) {
         print("kill: failed to send signal\n");
         return 1;

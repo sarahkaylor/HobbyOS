@@ -9,7 +9,7 @@ void _start(void) {
 }
 #endif
 
-static int strcmp(const char *s1, const char *s2) {
+static int u_strcmp(const char *s1, const char *s2) {
     while (*s1 && *s1 == *s2) {
         s1++;
         s2++;
@@ -29,7 +29,7 @@ static void uniq_fd(int fd) {
     while (read(fd, &c, 1) > 0) {
         if (c == '\n') {
             current[col] = '\0';
-            if (first || strcmp(last, current) != 0) {
+            if (first || u_strcmp(last, current) != 0) {
                 print(current);
                 print("\n");
                 int k = 0;
@@ -46,7 +46,7 @@ static void uniq_fd(int fd) {
     }
     if (col > 0) {
         current[col] = '\0';
-        if (first || strcmp(last, current) != 0) {
+        if (first || u_strcmp(last, current) != 0) {
             print(current);
             print("\n");
         }

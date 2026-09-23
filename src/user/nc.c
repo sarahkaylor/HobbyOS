@@ -26,7 +26,7 @@ static uint32_t parse_ip(const char *s) {
            ((ip & 0xFF000000) >> 24);
 }
 
-static int atoi(const char *s) {
+static int nc_atoi(const char *s) {
     int res = 0;
     while (*s >= '0' && *s <= '9') {
         res = res * 10 + (*s - '0');
@@ -45,7 +45,7 @@ int main(void) {
         return 1;
     }
     uint32_t ip = parse_ip(argv[0]);
-    int port = atoi(argv[1]);
+    int port = nc_atoi(argv[1]);
     
     int fd = connect(ip, port, 17);
     if (fd < 0) {

@@ -43,6 +43,48 @@ __attribute__((section(".text._start"))) void _start(void) {
         print("Failed to allocate 2MB!\n");
     }
 
+    print("--- Realloc Section ---\n");
+    {
+        int ok = 1;
+        char *ra = (char *)malloc(100);
+        if (!ra) { print("REALLOC: malloc(100) failed!\n"); ok = 0; }
+        else {
+            int i;
+            for (i = 0; i < 100; i++) ra[i] = (char)(i % 128);
+            char *rb = (char *)realloc(ra, 5000);
+            if (!rb) { print("REALLOC: grow failed!\n"); ok = 0; }
+            else {
+                for (i = 0; i < 100; i++) {
+                    if (rb[i] != (char)(i % 128)) {
+                        print("REALLOC: grow lost prefix!\n");
+                        ok = 0;
+                        break;
+                    }
+                }
+                char *rc = (char *)realloc(rb, 20);
+                if (!rc) { print("REALLOC: shrink failed!\n"); ok = 0; }
+                else {
+                    if (rc != rb) { print("REALLOC: shrink moved pointer!\n"); ok = 0; }
+                    for (i = 0; i < 20; i++) {
+                        if (rc[i] != (char)(i % 128)) {
+                            print("REALLOC: shrink lost prefix!\n");
+                            ok = 0;
+                            break;
+                        }
+                    }
+                    if (realloc(rc, 0) != NULL) {
+                        print("REALLOC: realloc(p,0) != NULL!\n");
+                        ok = 0;
+                    }
+                }
+            }
+        }
+        if (ok) print("REALLOC: all checks PASSED\n");
+        else print("REALLOC: FAILED\n");
+    }
+
+    free(p2);
+    free(p3);
     print("--- Heap Test Completed ---\n");
     exit(0);
 }

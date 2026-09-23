@@ -1,9 +1,9 @@
 #include "libc.h"
 #include "graphics/graphics.h"
 
-// Simple pseudorandom number generator for demo
+// Simple pseudorandom number generator for demo (not the libc rand)
 static unsigned int seed = 12345;
-static unsigned int rand(void) {
+static unsigned int gr_rand(void) {
     seed = (seed * 1103515245 + 12345) & 0x7fffffff;
     return seed;
 }
@@ -36,11 +36,11 @@ __attribute__((section(".text._start"))) void _start(void) {
 
     // Draw some rectangles
     for (int i = 0; i < 50; i++) {
-        int w = 50 + (rand() % 100);
-        int h = 50 + (rand() % 100);
-        int x = rand() % (SCREEN_WIDTH - w);
-        int y = rand() % (SCREEN_HEIGHT - h);
-        uint32_t color = COLOR(rand() % 256, rand() % 256, rand() % 256);
+        int w = 50 + (gr_rand() % 100);
+        int h = 50 + (gr_rand() % 100);
+        int x = gr_rand() % (SCREEN_WIDTH - w);
+        int y = gr_rand() % (SCREEN_HEIGHT - h);
+        uint32_t color = COLOR(gr_rand() % 256, gr_rand() % 256, gr_rand() % 256);
         graphics_draw_rect(x, y, w, h, color);
     }
 
