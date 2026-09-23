@@ -946,6 +946,14 @@ obj/host_malloc_hb.o: src/user/malloc.c src/user_include/malloc.h
 $(REALLOC_TEST): obj/host_libc_realloc_test.o obj/host_malloc_hb.o
 	$(HOST_CC) -o $@ $^
 
+# Header-only sysroot set (stdarg/limits/stdbool/inttypes): compiled with
+# -Isrc/libc/include FIRST so the HobbyOS headers (not glibc's) resolve.
+HEADERS_TEST = libc_headers_test_host
+obj/host_libc_headers_test.o: src/host/libc_headers_test.c src/libc/include/stdarg.h src/libc/include/limits.h src/libc/include/stdbool.h src/libc/include/inttypes.h
+	$(HOST_CC) -Isrc/libc/include $(HOST_CFLAGS) -c $< -o $@
+$(HEADERS_TEST): obj/host_libc_headers_test.o
+	$(HOST_CC) -o $@ $^
+
 # WM damage bookkeeping: line-level window repair + the base (damage) clip
 # (window.c + graphics.c are included into the test's single TU).
 WINDOW_DAMAGE_TEST = window_damage_test_host
@@ -977,7 +985,7 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(HEADERS_TEST) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
@@ -994,6 +1002,7 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	$(HOST_RUN) ./$(CTYPE_TEST)
 	$(HOST_RUN) ./$(STDLIB_TEST)
 	$(HOST_RUN) ./$(REALLOC_TEST)
+	$(HOST_RUN) ./$(HEADERS_TEST)
 	$(HOST_RUN) ./files_test_host
 	$(HOST_RUN) ./calc_test_host
 	$(HOST_RUN) ./clock_test_host
