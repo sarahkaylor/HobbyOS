@@ -152,7 +152,9 @@ RM_BIN = $(OBJ_DIR)/rm.bin
 MV_BIN = $(OBJ_DIR)/mv.bin
 TOUCH_BIN = $(OBJ_DIR)/touch.bin
 WC_BIN = $(OBJ_DIR)/wc.bin
+HEDGNU_BIN = $(OBJ_DIR)/hedgnu.bin
 WCTEST_BIN = $(OBJ_DIR)/wc_test.bin
+HEDTEST_BIN = $(OBJ_DIR)/head_test.bin
 LKSTEST_BIN = $(OBJ_DIR)/lseek_test.bin
 SORT_BIN = $(OBJ_DIR)/sort.bin
 UNIQ_BIN = $(OBJ_DIR)/uniq.bin
@@ -571,6 +573,16 @@ $(WC_BIN): $(OBJ_DIR)/wc.o $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/wc.elf $(OBJ_DIR)/wc.o $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/wc.elf $(WC_BIN)
 
+$(OBJ_DIR)/head_gnu.o: src/user/head_gnu.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+# The GNU head port links against the Phase-2/3 sysroot assembly, named
+# HEDGNU.BIN so it does not collide with the shell's legacy HEAD.BIN.
+$(HEDGNU_BIN): $(OBJ_DIR)/head_gnu.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/hedgnu.elf $(OBJ_DIR)/head_gnu.o $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/hedgnu.elf $(HEDGNU_BIN)
+
 $(OBJ_DIR)/wc_test.o: src/user/wc_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
@@ -578,6 +590,13 @@ $(OBJ_DIR)/wc_test.o: src/user/wc_test.c $(USER_LIBC) $(USER_HDRS)
 $(WCTEST_BIN): $(OBJ_DIR)/wc_test.o $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/wc_test.elf $(OBJ_DIR)/wc_test.o $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/wc_test.elf $(WCTEST_BIN)
+
+$(OBJ_DIR)/head_test.o: src/user/head_test.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+$(HEDTEST_BIN): $(OBJ_DIR)/head_test.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/head_test.elf $(OBJ_DIR)/head_test.o $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/head_test.elf $(HEDTEST_BIN)
 
 $(OBJ_DIR)/lseek_test.o: src/user/lseek_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
@@ -697,7 +716,7 @@ endef
 
 $(foreach app,$(DESKTOP_APP_NAMES),$(eval $(call DESKTOP_APP_RULE,$(app))))
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(WCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(HEDTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -770,6 +789,8 @@ endif
 	$(MCOPY) -i disk.img $(MV_BIN) ::/MV.BIN
 	$(MCOPY) -i disk.img $(TOUCH_BIN) ::/TOUCH.BIN
 	$(MCOPY) -i disk.img $(WC_BIN) ::/WC.BIN
+	$(MCOPY) -i disk.img $(HEDGNU_BIN) ::/HEDGNU.BIN
+	$(MCOPY) -i disk.img $(HEDTEST_BIN) ::/HEDTEST.BIN
 	$(MCOPY) -i disk.img $(WCTEST_BIN) ::/WCTEST.BIN
 	$(MCOPY) -i disk.img $(LKSTEST_BIN) ::/LKSTEST.BIN
 	$(MCOPY) -i disk.img $(SORT_BIN) ::/SORT.BIN
@@ -996,6 +1017,25 @@ WC_PARITY_STRICT = wc_parity_strict
 $(WC_PARITY_STRICT): $(WC_HOST)
 	@bash src/host/build_tu21_wc_ref.sh $(OBJ_DIR)/tu21_wc_ref
 	@bash src/host/wc_parity.sh $(WC_HOST) $(OBJ_DIR)/tu21_wc_ref
+
+# The ported head built for the host (head_host): ours except getopt_long
+# (hb_* via our getopt.h) and error() (host_hb_error.o).  head_host is
+# raced byte-for-byte against GNU head in src/host/head_parity.sh.
+HEAD_HOST = obj/head_host
+obj/host_head.o: src/user/head_gnu.c $(USER_HDRS) src/libc/include/*.h
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/libc/include -c $< -o $@
+$(HEAD_HOST): obj/host_head.o obj/host_hb_getopt.o obj/host_hb_error.o
+	$(HOST_CC) -o $@ $^
+
+HEAD_PARITY = head_parity_run
+$(HEAD_PARITY): $(HEAD_HOST)
+	@bash src/host/head_parity.sh $(HEAD_HOST)
+
+# Strict byte-exact parity against textutils-2.1's original head.
+HEAD_PARITY_STRICT = head_parity_strict
+$(HEAD_PARITY_STRICT): $(HEAD_HOST)
+	@bash src/host/build_tu21_head_ref.sh $(OBJ_DIR)/tu21_head_ref
+	@bash src/host/head_parity.sh $(HEAD_HOST) $(OBJ_DIR)/tu21_head_ref
 
 # Header-only sysroot set (stdarg/limits/stdbool/inttypes): compiled with
 # -Isrc/libc/include FIRST so the HobbyOS headers (not glibc's) resolve.

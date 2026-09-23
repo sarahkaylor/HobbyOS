@@ -233,7 +233,9 @@ int pipe_write(struct pipe *p, const void *buf, int n, struct trap_frame *tf) {
         }
     }
 
-    if (i == 0) {
+    if (i == 0 && n > 0) {
+        // Nothing was written either because the pipe is full or (n==0, in
+        // which case we must return immediately, not block).
         // Full pipe, block until space available
         if (cur) {
             p->writer_pid_mask |= (1ULL << cur->pid);

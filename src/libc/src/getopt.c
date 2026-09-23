@@ -224,9 +224,18 @@ static int getopt_impl(int argc, char *const argv[], const char *optstring,
     if (*os == ':')
         os++;                  /* leading ':' -> ':' on missing arg */
 
-    for (; *os && *os != c; os++) {
+    /* Scan the optstring for the letter, skipping each letter's ':' or
+       '::' argument markers (a full-letter advance, so a letter that
+       follows a marked letter is not accidentally skipped). */
+    while (*os) {
+        if (*os == c) {
+            break;
+        }
+        os++;
         if (*os == ':')
-            os++;
+            os++;              /* required-arg marker */
+        if (*os == ':')
+            os++;              /* optional-arg second marker */
     }
 
     if (!*os) {

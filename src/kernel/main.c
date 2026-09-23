@@ -213,9 +213,11 @@ void main(void) {
   load_and_run_program_in_scheduler("HELLO.BIN", -1, -1, -1, -1);
   /* Phase 3: lseek/stat/fstat exercise the new syscalls directly. */
   load_and_run_program_in_scheduler("LKSTEST.BIN", -1, -1, -1, -1);
-  /* WCTEST spawns WC.BIN through the real spawn2/pipe path; run it last so
-     earlier processes have exited and freed process-table slots (the pid
-     masks are 64-bit, so MAX_PROCESSES must stay <= 64). */
+  /* WCTEST/HEDTEST spawn WC.BIN/HEDGNU.BIN through the real spawn2/pipe
+     path; both run at the END so earlier processes have exited and freed
+     process-table slots (the pid masks are 64-bit, so MAX_PROCESSES
+     must stay <= 64). */
+  load_and_run_program_in_scheduler("HEDTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("WCTEST.BIN", -1, -1, -1, -1);
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
