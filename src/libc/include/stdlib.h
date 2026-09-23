@@ -14,6 +14,12 @@ extern "C" {
 #define EXIT_FAILURE 1
 #define RAND_MAX 2147483647 /* 2^31-1, same as glibc */
 
+/* Heap (implementations in src/user/malloc.c, linked as user_malloc.o) */
+void *malloc(size_t size);
+void *calloc(size_t nmemb, size_t size);
+void *realloc(void *ptr, size_t size);
+void free(void *ptr);
+
 /* Numeric conversions (strtol family: full base handling, endptr, ERANGE
  * clamping; underscores between digits accepted as a glibc extension). */
 int atoi(const char *nptr);
@@ -46,6 +52,7 @@ int putenv(char *string); /* gnu-style "NAME=VALUE", takes ownership */
 int unsetenv(const char *name);
 
 void abort(void);
+void exit(int status) __attribute__((noreturn));
 
 #ifdef __cplusplus
 }

@@ -35,6 +35,18 @@
 #define pipe ho_pipe
 #define connect ho_connect
 #define sleep ho_sleep
+/* Host-side mocks live in src/host/compat.c; these declarations make the
+ * renamed symbols callable from legacy apps compiled under HOST_TEST. */
+int ho_open(const char *filename, int flags, ...);
+int ho_close(int fd);
+ssize_t ho_read(int fd, void *buf, size_t size);
+ssize_t ho_write(int fd, const void *buf, size_t size);
+void ho_exit(int status);
+int ho_kill(int pid, int sig);
+int ho_fork(void);
+int ho_pipe(int fds[2]);
+int ho_connect(uint32_t ip, uint16_t port, int protocol);
+void ho_sleep(int ms);
 #endif
 
 void print(const char *str);

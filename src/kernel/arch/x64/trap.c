@@ -443,7 +443,16 @@ static void sys_spawn(struct trap_frame *tf) {
       spinlock_release_irqrestore(&proc_lock, flags);
       
       extern int process_create_kernel(void (*entry)(void*), void *arg);
-      process_create_kernel(sys_spawn_worker, args);
+      int wpid = process_create_kernel(sys_spawn_worker, args);
+      if (wpid < 0) {
+          /* no free process slot for the spawn worker: the caller must not
+             sit in WAIT_SPAWN forever waiting for a worker that can never
+             run — release it with a failure return instead. */
+          flags = spinlock_acquire_irqsave(&proc_lock);
+          caller->state = PROC_STATE_READY;
+          spinlock_release_irqrestore(&proc_lock, flags);
+          tf->regs[0] = -1;
+      }
       
       schedule(tf, 0);
   } else {

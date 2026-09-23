@@ -80,7 +80,7 @@ void mock_read_dir_reset(void);
 void mock_sysinfo_override_reset(void);
 
 /* compat.c fd wrappers, used by the fd-1 capture helper below */
-int ho_read(int fd, void *buf, int size);
+ssize_t ho_read(int fd, void *buf, size_t size);
 int ho_close(int fd);
 int ho_pipe(int fds[2]);
 

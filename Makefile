@@ -152,6 +152,7 @@ RM_BIN = $(OBJ_DIR)/rm.bin
 MV_BIN = $(OBJ_DIR)/mv.bin
 TOUCH_BIN = $(OBJ_DIR)/touch.bin
 WC_BIN = $(OBJ_DIR)/wc.bin
+WCTEST_BIN = $(OBJ_DIR)/wc_test.bin
 SORT_BIN = $(OBJ_DIR)/sort.bin
 UNIQ_BIN = $(OBJ_DIR)/uniq.bin
 PING_BIN = $(OBJ_DIR)/ping.bin
@@ -179,7 +180,7 @@ UNIT_BIN = $(OBJ_DIR)/unit.bin
 DESKTOP_APP_NAMES = files calc clock sysmon hex tasks find diff notes unit
 DESKTOP_APP_BINS = $(FILES_BIN) $(CALC_BIN) $(CLOCK_BIN) $(SYSMON_BIN) $(HEX_BIN) $(TASKS_BIN) $(FIND_BIN) $(DIFF_BIN) $(NOTES_BIN) $(UNIT_BIN)
 # Common link objects for GUI applications (libc + allocator + toolkit + dialogs)
-GUI_APP_OBJS = $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_gui.o $(OBJ_DIR)/user_dialog.o $(OBJ_DIR)/user_filedialog.o
+GUI_APP_OBJS = $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/user_gui.o $(OBJ_DIR)/user_dialog.o $(OBJ_DIR)/user_filedialog.o
 
 # Default rule: build the target
 all: $(TARGET)
@@ -293,27 +294,27 @@ $(OBJ_DIR)/user_desktop_test_wrapper.o: src/user/desktop.c $(USER_LIBC) $(USER_H
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -Dmain=desktop_main -DDESKTOP_TEST_WRAPPER -c $< -o $@
 
-$(MEM_TEST_BIN): $(OBJ_DIR)/mem_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(MEM_TEST_BIN): $(OBJ_DIR)/mem_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/memtest.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/memtest.elf $(MEM_TEST_BIN)
 
-$(FILE_IO_BIN): $(OBJ_DIR)/file_io_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(FILE_IO_BIN): $(OBJ_DIR)/file_io_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/fileio_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/fileio_test.elf $(FILE_IO_BIN)
 
-$(CONSOLE_BIN): $(OBJ_DIR)/console.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(CONSOLE_BIN): $(OBJ_DIR)/console.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/console.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/console.elf $(CONSOLE_BIN)
 
-$(FORK_TEST_BIN): $(OBJ_DIR)/fork_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(FORK_TEST_BIN): $(OBJ_DIR)/fork_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/fork_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/fork_test.elf $(FORK_TEST_BIN)
 
-$(HEAP_TEST_BIN): $(OBJ_DIR)/heap_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(HEAP_TEST_BIN): $(OBJ_DIR)/heap_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/heap_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/heap_test.elf $(HEAP_TEST_BIN)
 
-$(SPAWN_TEST_BIN): $(OBJ_DIR)/spawn_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(SPAWN_TEST_BIN): $(OBJ_DIR)/spawn_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/spawn_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/spawn_test.elf $(SPAWN_TEST_BIN)
 
@@ -321,19 +322,19 @@ $(GRAPHICS_TEST_BIN): $(OBJ_DIR)/graphics_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DI
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/graphics_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/graphics_test.elf $(GRAPHICS_TEST_BIN)
 
-$(SMP_TEST_BIN): $(OBJ_DIR)/smp_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(SMP_TEST_BIN): $(OBJ_DIR)/smp_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/smp_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/smp_test.elf $(SMP_TEST_BIN)
 
-$(PIPETEST_BIN): $(OBJ_DIR)/user_pipe_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(PIPETEST_BIN): $(OBJ_DIR)/user_pipe_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/pipe_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/pipe_test.elf $(PIPETEST_BIN)
 
-$(STRESS_TEST_BIN): $(OBJ_DIR)/stress_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(STRESS_TEST_BIN): $(OBJ_DIR)/stress_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/stress.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/stress.elf $(STRESS_TEST_BIN)
 
-$(ERRNO_TEST_BIN): $(OBJ_DIR)/user_errno_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(ERRNO_TEST_BIN): $(OBJ_DIR)/user_errno_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/errno_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/errno_test.elf $(ERRNO_TEST_BIN)
 
@@ -350,7 +351,7 @@ $(OBJ_DIR)/libc_%.o: src/libc/src/%.c $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o
+$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o
 	$(AR) rcs $@ $^
 
 # --- HELLO demo (Phase 0 gate): a main(argc, argv) program built against
@@ -364,7 +365,7 @@ $(OBJ_DIR)/hello.o: src/user/hello.c $(USER_LIBC) $(USER_HDRS) src/libc/crt0.c
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(NETTEST_BIN): $(OBJ_DIR)/user_net_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(NETTEST_BIN): $(OBJ_DIR)/user_net_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/net_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/net_test.elf $(NETTEST_BIN)
 
@@ -372,7 +373,7 @@ $(OBJ_DIR)/user_net_timeout_test.o: src/user/net_timeout_test.c $(USER_LIBC) $(U
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(TIMEOUT_BIN): $(OBJ_DIR)/user_net_timeout_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(TIMEOUT_BIN): $(OBJ_DIR)/user_net_timeout_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/net_timeout_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/net_timeout_test.elf $(TIMEOUT_BIN)
 
@@ -380,19 +381,19 @@ $(OBJ_DIR)/user_nfs_test.o: src/user/nfs_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(NFSTEST_BIN): $(OBJ_DIR)/user_nfs_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(NFSTEST_BIN): $(OBJ_DIR)/user_nfs_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/nfs_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/nfs_test.elf $(NFSTEST_BIN)
 
-$(DESKTOP_BIN): $(OBJ_DIR)/desktop.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
+$(DESKTOP_BIN): $(OBJ_DIR)/desktop.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/desktop_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/desktop_test.elf $(DESKTOP_BIN)
 
-$(EDITOR_BIN): $(OBJ_DIR)/editor.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_dialog.o $(OBJ_DIR)/user_filedialog.o
+$(EDITOR_BIN): $(OBJ_DIR)/editor.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/user_dialog.o $(OBJ_DIR)/user_filedialog.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/editor.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/editor.elf $(EDITOR_BIN)
 
-$(EDITOR_T_BIN): $(OBJ_DIR)/user_editor_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
+$(EDITOR_T_BIN): $(OBJ_DIR)/user_editor_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/editor_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/editor_test.elf $(EDITOR_T_BIN)
 
@@ -406,7 +407,7 @@ $(OBJ_DIR)/user_graphics_stats.o: src/user/graphics/graphics.c $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -DPAINT_STATS -c $< -o $@
 
-$(APPS_T_BIN): $(OBJ_DIR)/user_apps_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_graphics_stats.o $(OBJ_DIR)/user_window.o
+$(APPS_T_BIN): $(OBJ_DIR)/user_apps_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/user_graphics_stats.o $(OBJ_DIR)/user_window.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/apps_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/apps_test.elf $(APPS_T_BIN)
 
@@ -414,12 +415,12 @@ FILEDIALOG_ARROW_T_BIN = $(OBJ_DIR)/FILEDIAL.BIN
 $(OBJ_DIR)/user_filedialog_arrow_test.o: src/user/filedialog_arrow_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
-$(FILEDIALOG_ARROW_T_BIN): $(OBJ_DIR)/user_filedialog_arrow_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
+$(FILEDIALOG_ARROW_T_BIN): $(OBJ_DIR)/user_filedialog_arrow_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/filedialog_arrow_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/filedialog_arrow_test.elf $(FILEDIALOG_ARROW_T_BIN)
 
 DIALOG_TEST_BIN = $(OBJ_DIR)/DIALOG_T.BIN
-$(DIALOG_TEST_BIN): $(OBJ_DIR)/user_dialog_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_dialog.o $(OBJ_DIR)/user_filedialog.o
+$(DIALOG_TEST_BIN): $(OBJ_DIR)/user_dialog_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/user_dialog.o $(OBJ_DIR)/user_filedialog.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/dialog_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/dialog_test.elf $(DIALOG_TEST_BIN)
 
@@ -427,7 +428,7 @@ $(OBJ_DIR)/user_pong_test.o: src/user/pong_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -DPONG_TEST_WRAPPER -c $< -o $@
 
-$(PONG_T_BIN): $(OBJ_DIR)/user_pong_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
+$(PONG_T_BIN): $(OBJ_DIR)/user_pong_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/pong_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/pong_test.elf $(PONG_T_BIN)
 
@@ -459,31 +460,31 @@ $(OBJ_DIR)/head.o: src/user/head.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(SH_BIN): $(OBJ_DIR)/sh.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(SH_BIN): $(OBJ_DIR)/sh.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/sh.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/sh.elf $(SH_BIN)
 
-$(LS_BIN): $(OBJ_DIR)/ls.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(LS_BIN): $(OBJ_DIR)/ls.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/ls.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/ls.elf $(LS_BIN)
 
-$(CAT_BIN): $(OBJ_DIR)/cat.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(CAT_BIN): $(OBJ_DIR)/cat.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/cat.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/cat.elf $(CAT_BIN)
 
-$(GREP_BIN): $(OBJ_DIR)/grep.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(GREP_BIN): $(OBJ_DIR)/grep.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/grep.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/grep.elf $(GREP_BIN)
 
-$(LESS_BIN): $(OBJ_DIR)/less.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(LESS_BIN): $(OBJ_DIR)/less.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/less.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/less.elf $(LESS_BIN)
 
-$(TAIL_BIN): $(OBJ_DIR)/tail.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(TAIL_BIN): $(OBJ_DIR)/tail.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/tail.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/tail.elf $(TAIL_BIN)
 
-$(HEAD_BIN): $(OBJ_DIR)/head.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(HEAD_BIN): $(OBJ_DIR)/head.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/head.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/head.elf $(HEAD_BIN)
 
@@ -491,7 +492,7 @@ $(OBJ_DIR)/shell_test.o: src/user/shell_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(SHELL_TEST_BIN): $(OBJ_DIR)/shell_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(SHELL_TEST_BIN): $(OBJ_DIR)/shell_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/shtest.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/shtest.elf $(SHELL_TEST_BIN)
 
@@ -499,7 +500,7 @@ $(OBJ_DIR)/ps.o: src/user/ps.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(PS_BIN): $(OBJ_DIR)/ps.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(PS_BIN): $(OBJ_DIR)/ps.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/ps.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/ps.elf $(PS_BIN)
 
@@ -507,7 +508,7 @@ $(OBJ_DIR)/free.o: src/user/free.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(FREE_BIN): $(OBJ_DIR)/free.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(FREE_BIN): $(OBJ_DIR)/free.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/free.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/free.elf $(FREE_BIN)
 
@@ -515,7 +516,7 @@ $(OBJ_DIR)/uptime.o: src/user/uptime.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(UPTIME_BIN): $(OBJ_DIR)/uptime.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(UPTIME_BIN): $(OBJ_DIR)/uptime.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/uptime.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/uptime.elf $(UPTIME_BIN)
 
@@ -523,7 +524,7 @@ $(OBJ_DIR)/kill.o: src/user/kill.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(KILL_BIN): $(OBJ_DIR)/kill.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(KILL_BIN): $(OBJ_DIR)/kill.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/kill.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/kill.elf $(KILL_BIN)
 
@@ -531,7 +532,7 @@ $(OBJ_DIR)/cp.o: src/user/cp.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(CP_BIN): $(OBJ_DIR)/cp.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(CP_BIN): $(OBJ_DIR)/cp.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/cp.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/cp.elf $(CP_BIN)
 
@@ -539,7 +540,7 @@ $(OBJ_DIR)/rm.o: src/user/rm.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(RM_BIN): $(OBJ_DIR)/rm.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(RM_BIN): $(OBJ_DIR)/rm.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/rm.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/rm.elf $(RM_BIN)
 
@@ -547,7 +548,7 @@ $(OBJ_DIR)/mv.o: src/user/mv.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(MV_BIN): $(OBJ_DIR)/mv.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(MV_BIN): $(OBJ_DIR)/mv.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/mv.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/mv.elf $(MV_BIN)
 
@@ -555,7 +556,7 @@ $(OBJ_DIR)/touch.o: src/user/touch.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(TOUCH_BIN): $(OBJ_DIR)/touch.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(TOUCH_BIN): $(OBJ_DIR)/touch.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/touch.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/touch.elf $(TOUCH_BIN)
 
@@ -563,15 +564,25 @@ $(OBJ_DIR)/wc.o: src/user/wc.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(WC_BIN): $(OBJ_DIR)/wc.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
-	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/wc.elf $^
+# wc links against the Phase-2 sysroot assembly (crt0 + libc.a): stdio,
+# getopt_long, error, stat stubs all resolve from the archive.
+$(WC_BIN): $(OBJ_DIR)/wc.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/wc.elf $(OBJ_DIR)/wc.o $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/wc.elf $(WC_BIN)
+
+$(OBJ_DIR)/wc_test.o: src/user/wc_test.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(WCTEST_BIN): $(OBJ_DIR)/wc_test.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/wc_test.elf $(OBJ_DIR)/wc_test.o $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/wc_test.elf $(WCTEST_BIN)
 
 $(OBJ_DIR)/sort.o: src/user/sort.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(SORT_BIN): $(OBJ_DIR)/sort.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(SORT_BIN): $(OBJ_DIR)/sort.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/sort.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/sort.elf $(SORT_BIN)
 
@@ -579,7 +590,7 @@ $(OBJ_DIR)/uniq.o: src/user/uniq.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(UNIQ_BIN): $(OBJ_DIR)/uniq.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(UNIQ_BIN): $(OBJ_DIR)/uniq.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/uniq.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/uniq.elf $(UNIQ_BIN)
 
@@ -587,7 +598,7 @@ $(OBJ_DIR)/ping.o: src/user/ping.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(PING_BIN): $(OBJ_DIR)/ping.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(PING_BIN): $(OBJ_DIR)/ping.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/ping.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/ping.elf $(PING_BIN)
 
@@ -595,7 +606,7 @@ $(OBJ_DIR)/nc.o: src/user/nc.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(NC_BIN): $(OBJ_DIR)/nc.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(NC_BIN): $(OBJ_DIR)/nc.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/nc.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/nc.elf $(NC_BIN)
 
@@ -603,7 +614,7 @@ $(OBJ_DIR)/ifconfig.o: src/user/ifconfig.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(IFCONFIG_BIN): $(OBJ_DIR)/ifconfig.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(IFCONFIG_BIN): $(OBJ_DIR)/ifconfig.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/ifconfig.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/ifconfig.elf $(IFCONFIG_BIN)
 
@@ -611,7 +622,7 @@ $(OBJ_DIR)/monitor.o: src/user/monitor.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(MONITOR_BIN): $(OBJ_DIR)/monitor.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(MONITOR_BIN): $(OBJ_DIR)/monitor.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/monitor.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/monitor.elf $(MONITOR_BIN)
 
@@ -619,7 +630,7 @@ $(OBJ_DIR)/monitor_test.o: src/user/monitor_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(MONITOR_TEST_BIN): $(OBJ_DIR)/monitor_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(MONITOR_TEST_BIN): $(OBJ_DIR)/monitor_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/monitor_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/monitor_test.elf $(MONITOR_TEST_BIN)
 
@@ -627,7 +638,7 @@ $(OBJ_DIR)/shell_test2.o: src/user/shell_test2.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(SHELL_TEST2_BIN): $(OBJ_DIR)/shell_test2.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(SHELL_TEST2_BIN): $(OBJ_DIR)/shell_test2.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/shtest2.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/shtest2.elf $(SHELL_TEST2_BIN)
 
@@ -635,7 +646,7 @@ $(OBJ_DIR)/mkdir.o: src/user/mkdir.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(MKDIR_BIN): $(OBJ_DIR)/mkdir.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(MKDIR_BIN): $(OBJ_DIR)/mkdir.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/mkdir.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/mkdir.elf $(MKDIR_BIN)
 
@@ -643,7 +654,7 @@ $(OBJ_DIR)/shell_test3.o: src/user/shell_test3.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(SHELL_TEST3_BIN): $(OBJ_DIR)/shell_test3.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+$(SHELL_TEST3_BIN): $(OBJ_DIR)/shell_test3.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/shtest3.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/shtest3.elf $(SHELL_TEST3_BIN)
 
@@ -651,7 +662,7 @@ $(OBJ_DIR)/pong.o: src/user/pong.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(PONG_BIN): $(OBJ_DIR)/pong.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_graphics.o
+$(PONG_BIN): $(OBJ_DIR)/pong.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/user_graphics.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/pong.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/pong.elf $(PONG_BIN)
 
@@ -659,7 +670,7 @@ $(OBJ_DIR)/millipede.o: src/user/millipede.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(MILLIPEDE_BIN): $(OBJ_DIR)/millipede.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/user_graphics.o
+$(MILLIPEDE_BIN): $(OBJ_DIR)/millipede.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/user_graphics.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/millipede.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/millipede.elf $(MILLIPEDE_BIN)
 
@@ -678,7 +689,7 @@ endef
 
 $(foreach app,$(DESKTOP_APP_NAMES),$(eval $(call DESKTOP_APP_RULE,$(app))))
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(WCTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -751,6 +762,7 @@ endif
 	$(MCOPY) -i disk.img $(MV_BIN) ::/MV.BIN
 	$(MCOPY) -i disk.img $(TOUCH_BIN) ::/TOUCH.BIN
 	$(MCOPY) -i disk.img $(WC_BIN) ::/WC.BIN
+	$(MCOPY) -i disk.img $(WCTEST_BIN) ::/WCTEST.BIN
 	$(MCOPY) -i disk.img $(SORT_BIN) ::/SORT.BIN
 	$(MCOPY) -i disk.img $(UNIQ_BIN) ::/UNIQ.BIN
 	$(MCOPY) -i disk.img $(PING_BIN) ::/PING.BIN
@@ -950,6 +962,32 @@ obj/host_malloc_hb.o: src/user/malloc.c src/user_include/malloc.h
 $(REALLOC_TEST): obj/host_libc_realloc_test.o obj/host_malloc_hb.o
 	$(HOST_CC) -o $@ $^
 
+# getopt_long raced against glibc (hb_ impl from src/libc/src/getopt.c).
+GETOPT_TEST = libc_getopt_test_host
+$(GETOPT_TEST): obj/host_libc_getopt_test.o obj/host_hb_getopt.o
+	$(HOST_CC) -o $@ $^
+
+# The ported wc built for the host: ours except getopt_long (hb_* via our
+# getopt.h) and error() (host_hb_error.o); everything else resolves to
+# glibc.  wc_host is raced byte-for-byte against coreutils in
+# src/host/wc_parity.sh.
+WC_HOST = obj/wc_host
+obj/host_wc.o: src/user/wc.c $(USER_HDRS) src/libc/include/*.h
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/libc/include -c $< -o $@
+$(WC_HOST): obj/host_wc.o obj/host_hb_getopt.o obj/host_hb_error.o
+	$(HOST_CC) -o $@ $^
+
+WC_PARITY = wc_parity_run
+$(WC_PARITY): $(WC_HOST)
+	@bash src/host/wc_parity.sh $(WC_HOST)
+
+# Strict byte-exact parity against the original GNU textutils-2.1 wc
+# (same lineage as the port). Builds the reference, then compares.
+WC_PARITY_STRICT = wc_parity_strict
+$(WC_PARITY_STRICT): $(WC_HOST)
+	@bash src/host/build_tu21_wc_ref.sh $(OBJ_DIR)/tu21_wc_ref
+	@bash src/host/wc_parity.sh $(WC_HOST) $(OBJ_DIR)/tu21_wc_ref
+
 # Header-only sysroot set (stdarg/limits/stdbool/inttypes): compiled with
 # -Isrc/libc/include FIRST so the HobbyOS headers (not glibc's) resolve.
 HEADERS_TEST = libc_headers_test_host
@@ -989,7 +1027,7 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(GETOPT_TEST) $(WC_PARITY) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)

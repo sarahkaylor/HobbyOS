@@ -139,6 +139,12 @@ void print_dec(long val) {
 }
 
 void exit(int status) {
+  /* flush buffered stdio before dying (weak ref: binaries that never link
+     the FILE layer keep linking fine; stdout would otherwise lose <=512B
+     of buffered output on programs that exit without a full flush) */
+  extern int fflush(FILE *) __attribute__((weak));
+  if (fflush)
+    fflush(0);
   syscall(SYS_EXIT, (long)status, 0, 0, 0);
   while (1)
     ; // Wait for the kernel to halt us safely
@@ -251,22 +257,6 @@ void gui_add_menu(int idx, const char* name, const char* items) {
     write(1, buf, len);
 }
 
-void *memcpy(void *dest, const void *src, size_t n) {
-  char *d = (char *)dest;
-  const char *s = (const char *)src;
-  for (size_t i = 0; i < n; i++) {
-    d[i] = s[i];
-  }
-  return dest;
-}
-
-void *memset(void *s, int c, size_t n) {
-  char *d = (char *)s;
-  for (size_t i = 0; i < n; i++) {
-    d[i] = (char)c;
-  }
-  return s;
-}
 
 int parse_args(char *arg_str, char *argv[], int max_args) {
   int argc = 0;

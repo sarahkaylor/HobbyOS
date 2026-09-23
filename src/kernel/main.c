@@ -211,6 +211,10 @@ void main(void) {
   load_and_run_program_in_scheduler("NFSTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("ERRTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("HELLO.BIN", -1, -1, -1, -1);
+  /* WCTEST spawns WC.BIN through the real spawn2/pipe path; run it last so
+     earlier processes have exited and freed process-table slots (the pid
+     masks are 64-bit, so MAX_PROCESSES must stay <= 64). */
+  load_and_run_program_in_scheduler("WCTEST.BIN", -1, -1, -1, -1);
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
   load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1, -1, -1);

@@ -25,7 +25,8 @@
  * the ho_* mocks inherit it from the Linux C library, so no definition is
  * needed here. The in-OS build gets `int errno` from src/user/libc.c. */
 
-int ho_open(const char *filename) {
+int ho_open(const char *filename, int flags, ...) {
+    (void)flags; /* mock keeps its create-on-demand semantics */
     return open(filename, O_RDWR | O_CREAT, 0666);
 }
 
@@ -33,12 +34,12 @@ int ho_close(int fd) {
     return close(fd);
 }
 
-int ho_read(int fd, void *buf, int size) {
-    return (int)read(fd, buf, size);
+ssize_t ho_read(int fd, void *buf, size_t size) {
+    return read(fd, buf, size);
 }
 
-int ho_write(int fd, const void *buf, int size) {
-    return (int)write(fd, buf, size);
+ssize_t ho_write(int fd, const void *buf, size_t size) {
+    return write(fd, buf, size);
 }
 
 void ho_exit(int status) {

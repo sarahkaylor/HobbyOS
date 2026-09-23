@@ -1,7 +1,13 @@
 #ifndef HOBBYOS_SYS_TYPES_H
 #define HOBBYOS_SYS_TYPES_H
 
-/* HobbyOS Phase-2 sysroot: sys/types.h — the base integer typedefs. */
+/* HobbyOS Phase-2 sysroot: sys/types.h — the base integer typedefs.
+ * Under HOST_TEST defer to the host's header (layout must match the
+ * host libc for shared structs like struct stat). */
+
+#ifdef HOST_TEST
+#include_next <sys/types.h>
+#else
 
 #include <stddef.h>
 #include <stdint.h>
@@ -30,5 +36,7 @@ typedef long blkcnt_t;
 #ifdef __cplusplus
 }
 #endif
+
+#endif /* !HOST_TEST */
 
 #endif /* HOBBYOS_SYS_TYPES_H */

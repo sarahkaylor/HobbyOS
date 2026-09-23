@@ -164,20 +164,19 @@ static void ops_save(void)    { saved_ops = tasks_store; }
 static void ops_restore(void) { tasks_store = saved_ops; }
 
 static int fake_open_calls = 0;
-static int fake_open_fail(const char *name) {
-    (void)name;
+static int fake_open_fail(const char *name, int flags, ...) {
+    (void)name; (void)flags;
     fake_open_calls++;
     return -1;
 }
 
-static int fake_write_fail(int fd, const void *buf, int size) {
+static ssize_t fake_write_fail(int fd, const void *buf, size_t size) {
     (void)fd; (void)buf; (void)size;
     return -1;
 }
-
-static int fake_write_short(int fd, const void *buf, int size) {
+static ssize_t fake_write_short(int fd, const void *buf, size_t size) {
     (void)fd; (void)buf;
-    return size > 0 ? size - 1 : 0;
+    return size > 0 ? (ssize_t)size - 1 : 0;
 }
 
 static int unlink_calls = 0;

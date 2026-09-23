@@ -4,8 +4,8 @@
  * Design: reads are buffered (512 B) so fgetc/fgets are cheap; writes are
  * unbuffered (the console/file write path is already row-buffered and
  * immediate errors are easier to surface).  stdin/stdout/stderr are static
- * FILEs bound to fds 0/1/2, lazily initialized so no constructor ordering
- * issues.  fseek/ftell land with the Phase-2 lseek syscall.
+ * FILEs whose fd fields are fixed at definition time (0/1/2) — a zeroed
+ * bss FILE would make stdout write to fd 0 and lose all output.
  *
  * Everything here calls the fd wrappers (read/write/open/close) from
  * user/libc.c, which resolves at link time from libc.a.
@@ -29,7 +29,12 @@ struct __hb_FILE {
 
 #define HB_FBUF_SIZE 512
 
-static FILE stdio_files[3]; /* stdin, stdout, stderr (fd 0,1,2) */
+static FILE stdio_files[3] = {
+    { .fd = 0 },        /* stdin */
+    { .fd = 1 },        /* stdout */
+    { .fd = 2 },        /* stderr */
+};                      /* NOTE: must bear the real fd from birth — a
+                           zeroed bss FILE would make stdout write to fd 0 */
 
 static void hb_file_init(FILE *f, int fd)
 {
