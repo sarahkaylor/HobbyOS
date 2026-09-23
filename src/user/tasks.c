@@ -62,11 +62,11 @@ struct task_state {
 
 /* Storage indirection: host tests replace these with failing fakes to
  * exercise the error paths (a missing file cannot be simulated otherwise,
- * because open() creates files on demand). */
+ * because open(, 0) creates files on demand). */
 struct tasks_store_ops {
-    int (*open)(const char *name);
-    int (*read)(int fd, void *buf, int size);
-    int (*write)(int fd, const void *buf, int size);
+    int (*open)(const char *name, int flags, ...);
+    ssize_t (*read)(int fd, void *buf, size_t size);
+    ssize_t (*write)(int fd, const void *buf, size_t size);
     int (*close)(int fd);
     int (*unlink)(const char *name);
 };
@@ -179,7 +179,7 @@ int tasks_load(struct task_state *st) {
     st->count = 0;
     st->status[0] = '\0';
 
-    int fd = tasks_store.open(TASKS_FILE);
+    int fd = tasks_store.open(TASKS_FILE, 0);
     if (fd < 0) {
         st->load_error = 1;
         return -1;
@@ -204,7 +204,7 @@ int tasks_save(const struct task_state *st) {
     /* Recreate the file so a shorter list cannot leave a stale tail behind
      * (see the persistence note at the top of this file). */
     tasks_store.unlink(TASKS_FILE);
-    int fd = tasks_store.open(TASKS_FILE);
+    int fd = tasks_store.open(TASKS_FILE, 0);
     if (fd < 0) return -1;
 
     int w = 0;

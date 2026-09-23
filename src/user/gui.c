@@ -414,7 +414,7 @@ static int gui_read_internal(struct gui_event *ev, int block_ms) {
             /* A lone ESC: give the desktop a grace period in case the rest
              * of a sequence is still in flight. */
             int grace = 0;
-            while (available(0) <= 0 && grace < 40) { sleep(1); grace++; }
+            while (available(0) <= 0 && grace < 40) { usleep(1000); grace++; }
             if (available(0) <= 0) {
                 rxlen = 0;
                 ev->type = GUI_EV_ESC;
@@ -425,7 +425,7 @@ static int gui_read_internal(struct gui_event *ev, int block_ms) {
         if (rxlen > 0 && (unsigned char)rxbuf[0] == 27) {
             /* Partial CSI still short: wait a little longer for the rest. */
             int grace = 0;
-            while (available(0) <= 0 && grace < 40) { sleep(1); grace++; }
+            while (available(0) <= 0 && grace < 40) { usleep(1000); grace++; }
             if (available(0) <= 0) { rxlen = 0; continue; }
             continue;
         }
@@ -434,7 +434,7 @@ static int gui_read_internal(struct gui_event *ev, int block_ms) {
         /* Nothing buffered: honour blocking semantics. */
         if (block_ms == 0) return 0;
         if (block_ms > 0 && waited >= block_ms) return 0;
-        sleep(2);
+        usleep(2000);
         waited += 2;
         if (block_ms > 0 && waited >= block_ms) {
             return 0;

@@ -148,18 +148,21 @@ int kill(int pid, int sig) { return (int)errno_ret(syscall(SYS_KILL, (long)pid, 
 
 int fork(void) { return (int)errno_ret(syscall(SYS_FORK, 0, 0, 0, 0)); }
 
-int open(const char *filename) {
-  return (int)errno_ret(syscall(SYS_OPEN, (long)filename, 0, 0, 0));
+/* Phase-2 ABI: open takes flags and an optional mode (POSIX). The kernel
+ * only reads the path today; the flags argument is forwarded so the
+ * Phase-2 kernel flag handling needs no user-side ABI churn. */
+int open(const char *path, int flags, ...) {
+  return (int)errno_ret(syscall(SYS_OPEN, (long)path, flags, 0, 0));
 }
 
 int close(int fd) { return (int)errno_ret(syscall(SYS_CLOSE, (long)fd, 0, 0, 0)); }
 
-int read(int fd, void *buf, int size) {
-  return (int)errno_ret(syscall(SYS_READ, (long)fd, (long)buf, (long)size, 0));
+ssize_t read(int fd, void *buf, size_t size) {
+  return (ssize_t)errno_ret(syscall(SYS_READ, (long)fd, (long)buf, (long)size, 0));
 }
 
-int write(int fd, const void *buf, int size) {
-  return (int)errno_ret(syscall(SYS_WRITE, (long)fd, (long)buf, (long)size, 0));
+ssize_t write(int fd, const void *buf, size_t size) {
+  return (ssize_t)errno_ret(syscall(SYS_WRITE, (long)fd, (long)buf, (long)size, 0));
 }
 
 void yield(void) {
@@ -170,10 +173,20 @@ int connect(uint32_t ip, uint16_t port, int protocol) {
   return (int)errno_ret(syscall(SYS_CONNECT, (long)ip, (long)port, (long)protocol, 0));
 }
 
-void sleep(int ms) {
-  syscall(SYS_SLEEP, (long)ms, 0, 0, 0);
+/* POSIX sleep: seconds. Legacy HobbyOS callers used milliseconds and are
+ * migrated to usleep() (phase-2 sweep); SYS_SLEEP is millisecond-based. */
+unsigned int sleep(unsigned int seconds) {
+  syscall(SYS_SLEEP, (long)seconds * 1000, 0, 0, 0);
+  return 0;
 }
 
+int usleep(unsigned int usec) {
+  unsigned long ms = (usec + 999) / 1000;
+  if (ms == 0 && usec > 0)
+    ms = 1;
+  syscall(SYS_SLEEP, (long)ms, 0, 0, 0);
+  return 0;
+}
 int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args) {
   return (int)syscall5(SYS_SPAWN, (long)filename, (long)stdin_fd,
                        (long)stdout_fd, (long)stderr_fd, (long)args);

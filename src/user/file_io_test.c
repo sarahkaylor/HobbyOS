@@ -9,7 +9,7 @@ void _start(void) {
     char buffer[64];
 
     // 1. Open
-    int fd = open(filename);
+    int fd = open(filename, 0);
     if (fd < 0) {
         print("[FILEIO TEST] ERROR: Could not open TEST.TXT\n");
         exit(0);
@@ -29,7 +29,7 @@ void _start(void) {
     print("[FILEIO TEST] Closed file.\n");
 
     // 4. Open again for reading
-    fd = open(filename);
+    fd = open(filename, 0);
     if (fd < 0) {
         print("[FILEIO TEST] ERROR: Could not reopen TEST.TXT\n");
         exit(0);

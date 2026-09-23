@@ -46,7 +46,7 @@ int main(void) {
 
     int fd = 0; // default stdin
     if (argc >= 1) {
-        fd = open(argv[0]);
+        fd = open(argv[0], 0);
         if (fd < 0) {
             print("less: ");
             print(argv[0]);

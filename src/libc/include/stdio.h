@@ -8,6 +8,7 @@
 
 #include <stddef.h>
 #include <stdarg.h>
+#include <sys/types.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -62,6 +63,10 @@ int fileno(FILE *stream);
 
 /* --- helpers --- */
 void perror(const char *s); /* prints "s: <strerror(errno)>" to stderr */
+
+/* --- line reading --- */
+ssize_t getline(char **lineptr, size_t *n, FILE *stream);
+ssize_t getdelim(char **lineptr, size_t *n, int delim, FILE *stream);
 
 #ifdef __cplusplus
 }

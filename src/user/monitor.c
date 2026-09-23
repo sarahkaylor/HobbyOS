@@ -86,7 +86,7 @@ int main(void) {
         print("---\n");
 
         // Sleep 1 second before next sample
-        sleep(1000);
+        sleep(1);
     }
 
     print("monitor: finished\n");

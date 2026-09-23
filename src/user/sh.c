@@ -168,14 +168,14 @@ void execute_command(const char *cmd_line) {
     int out_fd = -1;
     int err_fd = -1;
     if (out_file[0] != '\0') {
-        out_fd = open(out_file);
+        out_fd = open(out_file, 0);
         if (out_fd < 0) {
             print("sh: failed to open stdout redirect file\n");
             return;
         }
     }
     if (err_file[0] != '\0') {
-        err_fd = open(err_file);
+        err_fd = open(err_file, 0);
         if (err_fd < 0) {
             if (out_fd >= 0) close(out_fd);
             print("sh: failed to open stderr redirect file\n");

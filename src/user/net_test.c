@@ -17,7 +17,7 @@ __attribute__((section(".text._start"))) void _start(void) {
     int fd = connect(target_ip, target_port, IP_PROTO_TCP);
     if (fd < 0) {
         print("net_test failed: connect returned error\n");
-        sleep(3000);
+        sleep(3);
         exit(-1);
     }
     
@@ -28,7 +28,7 @@ __attribute__((section(".text._start"))) void _start(void) {
     
     if (write(fd, request, req_len) < 0) {
         print("net_test failed: write error\n");
-        sleep(3000);
+        sleep(3);
         exit(-1);
     }
     
@@ -38,13 +38,13 @@ __attribute__((section(".text._start"))) void _start(void) {
     
     if (read_bytes < 0) {
         print("net_test failed: read error\n");
-        sleep(3000);
+        sleep(3);
         exit(-1);
     }
     
     if (read_bytes == 0) {
         print("net_test failed: no data received\n");
-        sleep(3000);
+        sleep(3);
         exit(-1);
     }
     
@@ -58,6 +58,6 @@ __attribute__((section(".text._start"))) void _start(void) {
     
     // Wait to be shut down or exit properly
     // Let's shut down qemu by returning success
-    sleep(3000);
+    sleep(3);
     exit(0);
 }

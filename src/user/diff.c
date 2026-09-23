@@ -215,7 +215,7 @@ static int diff_read_file(const char *name, int *size_cap) {
     int fd, total = 0, n;
     *size_cap = 0;
 
-    fd = open(name);
+    fd = open(name, 0);
     if (fd < 0) return -1;
     while (total < DIFF_MAX_FILESIZE) {
         n = read(fd, file_buf + total, DIFF_MAX_FILESIZE - total);

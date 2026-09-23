@@ -47,7 +47,7 @@ int main(void) {
         print("\n");
     } else {
         for (int i = 0; i < argc; i++) {
-            int fd = open(argv[i]);
+            int fd = open(argv[i], 0);
             if (fd < 0) {
                 print("wc: ");
                 print(argv[i]);

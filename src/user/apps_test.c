@@ -402,7 +402,7 @@ static int clock_check(const char *before, const char *after) {
 static int tasks_check(const char *before, const char *after) {
   /* TASKS: 'd' (delete) on the empty list must report the documented
    * status. Proves the key was handled and the status line re-rendered.
-   * (Note: open() creates files on demand in this kernel, so TODO.TXT is
+   * (Note: open(, 0) creates files on demand in this kernel, so TODO.TXT is
    * created empty by the app's startup load - there is no warning line.) */
   (void)before;
   return contains(after, "Nothing to delete.");

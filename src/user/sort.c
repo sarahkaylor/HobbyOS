@@ -52,7 +52,7 @@ int main(void) {
     if (argc == 0) {
         read_lines(0);
     } else {
-        int fd = open(argv[0]);
+        int fd = open(argv[0], 0);
         if (fd < 0) {
             print("sort: ");
             print(argv[0]);

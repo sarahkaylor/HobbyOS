@@ -19,7 +19,7 @@ int main(void) {
         return 1;
     }
     for (int i = 0; i < argc; i++) {
-        int fd = open(argv[i]);
+        int fd = open(argv[i], 0);
         if (fd < 0) {
             print("touch: cannot touch ");
             print(argv[i]);

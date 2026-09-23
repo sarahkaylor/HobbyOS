@@ -18,14 +18,14 @@ int main(void) {
         print("Usage: cp source_file dest_file\n");
         return 1;
     }
-    int src_fd = open(argv[0]);
+    int src_fd = open(argv[0], 0);
     if (src_fd < 0) {
         print("cp: cannot open ");
         print(argv[0]);
         print("\n");
         return 1;
     }
-    int dest_fd = open(argv[1]);
+    int dest_fd = open(argv[1], 0);
     if (dest_fd < 0) {
         print("cp: cannot open/create ");
         print(argv[1]);

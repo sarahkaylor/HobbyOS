@@ -73,7 +73,7 @@ static void run_worker(int id, int p2c[2], int c2p[2], const char *filename) {
         }
 
         // 2. Perform File I/O
-        int fd = open(filename);
+        int fd = open(filename, 0);
         if (fd < 0) {
             print_console("[WORKER "); print_num(id); print_console("] ERROR: failed to open "); print_console(filename); print_console("\n");
             exit(1);
@@ -88,7 +88,7 @@ static void run_worker(int id, int p2c[2], int c2p[2], const char *filename) {
         close(fd);
 
         // Reopen for reading
-        fd = open(filename);
+        fd = open(filename, 0);
         if (fd < 0) {
             print_console("[WORKER "); print_num(id); print_console("] ERROR: failed to reopen "); print_console(filename); print_console("\n");
             exit(1);
@@ -236,7 +236,7 @@ void _start(void) {
 
         // Periodically yield or sleep to allow dynamic interleaving
         if (step % 5 == 0) {
-            sleep(5);
+            usleep(5000);
         } else {
             yield();
         }

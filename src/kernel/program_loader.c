@@ -12,12 +12,12 @@ extern void print_int(int val);
 jmp_buf user_exit_context;
 
 /* Cap on the program image the loader copies into user memory.  A process
- * region is 32MB with its first USER_INITIAL_CLEAR_SIZE (256KB) bytes zeroed
+ * region is 32MB with its first USER_INITIAL_CLEAR_SIZE (1MB) bytes zeroed
  * at creation, so sizing the cap to match keeps "zeroed" and "loadable" the
- * same 256KB.  This was 0x10000 (64KB) until APPS_T.BIN crossed it: the
- * loader silently truncated the image, the tail of .text/.rodata never
- * arrived and the process died with a mystery data abort.  Oversized
- * programs are now refused with an explicit error instead. */
+ * same 1MB.  This used to be 64KB and the loader silently truncated the
+ * image: the tail of .text/.rodata never arrived and the process died with
+ * a mystery data abort.  Oversized programs are now refused with an
+ * explicit error instead. */
 #define MAX_PROGRAM_SIZE  USER_INITIAL_CLEAR_SIZE
 
 /* Is the opened program too big for MAX_PROGRAM_SIZE?  (Call after

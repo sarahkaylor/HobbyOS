@@ -81,7 +81,7 @@ int main(void) {
             }
         }
         
-        sleep(10);
+        usleep(10000);
     }
     
     close(fd);

@@ -43,16 +43,16 @@ void _start(void) {
   errno = 0;
   check(errno == 0, "errno starts at 0");
 
-  /* open() — HobbyOS has no O_CREAT/O_EXCL yet: open() is *open-or-create*
+  /* open(, 0) — HobbyOS has no O_CREAT/O_EXCL yet: open(, 0) is *open-or-create*
    * (the `touch` and `touch-like` tools rely on it). A missing file is
    * created and a valid fd returned, with errno untouched (POSIX open
    * without O_CREAT would fail ENOENT; that gap is tracked in posix.md
    * Phase 1). Assert the real contract now, and clean up after. */
   errno = 0;
-  int fd = open("ERRNO9.TXT");
-  check(fd >= 0 && errno == 0, "open(create) succeeds, errno untouched");
+  int fd = open("ERRNO9.TXT", 0);
+  check(fd >= 0 && errno == 0, "open(create, 0) succeeds, errno untouched");
   errno = 0;
-  int fd2 = open("ERRNO9.TXT");
+  int fd2 = open("ERRNO9.TXT", 0);
   check(fd2 >= 0 && errno == 0, "re-open of created file works");
   if (fd >= 0) close(fd);
   if (fd2 >= 0) close(fd2);

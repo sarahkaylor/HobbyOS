@@ -119,7 +119,7 @@ static int wait_for_ip(void) {
     struct sys_netinfo ni;
     for (int i = 0; i < 80; i++) {
         if (sysinfo(4, &ni, sizeof ni) == 0 && ni.ip != 0) return 0;
-        sleep(100);
+        usleep(100000);
     }
     return -1;
 }
@@ -133,7 +133,7 @@ static char rbuf[1400];
  * pattern used by PATTERN.BIN. Returns bytes read, or -1. */
 static int read_expect(const char *path, const char *expect, int pattern,
                        int max_len) {
-    int fd = open(path);
+    int fd = open(path, 0);
     if (fd < 0) return -1;
     int total = 0;
     for (;;) {
@@ -290,7 +290,7 @@ __attribute__((section(".text._start"))) void _start(void) {
 
         /* Multi-chunk read: 10000 bytes at 1024 per RPC. */
         {
-            int fd = open(NFS_TEST_MOUNT "/PATTERN.BIN");
+            int fd = open(NFS_TEST_MOUNT "/PATTERN.BIN", 0);
             int ok = 1;
             int total = 0;
             int first = 1;
@@ -354,7 +354,7 @@ __attribute__((section(".text._start"))) void _start(void) {
               "rename on the mount is refused");
         check(mkdir(NFS_TEST_MOUNT "/NEWDIR") != 0,
               "mkdir on the mount is refused");
-        check(open(NFS_TEST_MOUNT "/NO-SUCH-FILE.TXT") < 0,
+        check(open(NFS_TEST_MOUNT "/NO-SUCH-FILE.TXT", 0) < 0,
               "open of a missing NFS file fails");
 
         /* Duplicate / nested mounts. */
@@ -372,7 +372,7 @@ __attribute__((section(".text._start"))) void _start(void) {
         /* Reads through a handle opened before the unmount must fail
          * cleanly, not crash, once the mount is gone. */
         {
-            int fd = open(NFS_TEST_MOUNT "/HELLO.TXT");
+            int fd = open(NFS_TEST_MOUNT "/HELLO.TXT", 0);
             int r1 = fd >= 0 ? read(fd, rbuf, 5) : -1;
             check(r1 == 5, "short read before unmount");
             check(umount(NFS_TEST_MOUNT) == 0, "umount the mount");
@@ -399,7 +399,7 @@ __attribute__((section(".text._start"))) void _start(void) {
 
     check(chdir("/") == 0, "chdir /");
     if (list_dir("/") > 0 && list_index("SH.BIN") >= 0) {
-        int fd = open("/SH.BIN");
+        int fd = open("/SH.BIN", 0);
         int r = fd >= 0 ? read(fd, rbuf, 64) : -1;
         if (fd >= 0) close(fd);
         check(r == 64, "FAT file reads still work after NFS activity");

@@ -9,6 +9,8 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -41,12 +43,7 @@ void print_hex(long val);
 void print_dec(long val);
 void exit(int status);
 int fork(void);
-void sleep(int ms);
 
-int open(const char *filename);
-int close(int fd);
-int read(int fd, void *buf, int size);
-int write(int fd, const void *buf, int size);
 int kill(int pid, int sig);
 void yield(void);
 int connect(uint32_t ip, uint16_t port, int protocol);

@@ -101,7 +101,7 @@ int main(void) {
     if (file_arg_idx == -1) {
         tail_fd(0, want_lines);
     } else {
-        int fd = open(argv[file_arg_idx]);
+        int fd = open(argv[file_arg_idx], 0);
         if (fd < 0) {
             print("tail: ");
             print(argv[file_arg_idx]);

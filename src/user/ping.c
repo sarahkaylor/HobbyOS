@@ -69,7 +69,7 @@ int main(void) {
                 break;
             }
         }
-        sleep(10);
+        usleep(10000);
     }
     
     if (!received) {

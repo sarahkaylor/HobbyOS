@@ -61,7 +61,7 @@ int main(void) {
     if (argc == 0) {
         uniq_fd(0);
     } else {
-        int fd = open(argv[0]);
+        int fd = open(argv[0], 0);
         if (fd < 0) {
             print("uniq: ");
             print(argv[0]);

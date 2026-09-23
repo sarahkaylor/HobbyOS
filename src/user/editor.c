@@ -366,7 +366,7 @@ static void file_new(void) {
 }
 
 static void file_open(const char *fname) {
-    int fd = open(fname);
+    int fd = open(fname, 0);
     if (fd < 0) {
         dialog_message("Error", "Cannot open file.");
         return;
@@ -383,7 +383,7 @@ static void file_open(const char *fname) {
 }
 
 static void file_save(const char *fname) {
-    int fd = open(fname);
+    int fd = open(fname, 0);
     if (fd < 0) {
         dialog_message("Error", "Cannot create file.");
         return;
@@ -605,7 +605,7 @@ int main(void) {
     }
 
     /* Try to load existing file */
-    int fd = open(filename);
+    int fd = open(filename, 0);
     if (fd >= 0) {
         text_len = read(fd, text, MAX_TEXT - 1);
         if (text_len < 0) text_len = 0;

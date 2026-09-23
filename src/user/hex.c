@@ -270,7 +270,7 @@ static void hex_redraw(void) {
 static int hex_load(const char *name) {
     if (!name || !name[0]) return 0;
 
-    int fd = open(name);
+    int fd = open(name, 0);
     if (fd < 0) return 0;
 
     int n = read(fd, hex_data, HEX_MAX_BYTES);

@@ -38,6 +38,8 @@
 #define strerror hb_strerror
 #define memcmp hb_memcmp
 #define memmove hb_memmove
+#define memcpy hb_memcpy
+#define memset hb_memset
 #define memchr hb_memchr
 #else
 #include "string.h"
@@ -304,6 +306,24 @@ int memcmp(const void *s1, const void *s2, size_t n)
         b++;
     }
     return 0;
+}
+
+void *memcpy(void *dest, const void *src, size_t n)
+{
+    unsigned char *d = (unsigned char *)dest;
+    const unsigned char *s = (const unsigned char *)src;
+    while (n-- > 0)
+        *d++ = *s++;
+    return dest;
+}
+
+void *memset(void *s, int c, size_t n)
+{
+    unsigned char *p = (unsigned char *)s;
+    unsigned char v = (unsigned char)c;
+    while (n-- > 0)
+        *p++ = v;
+    return s;
 }
 
 void *memmove(void *dst, const void *src, size_t n)

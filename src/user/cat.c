@@ -32,7 +32,7 @@ int main(void) {
             if (argv[i][0] == '-' && argv[i][1] == '\0') {
                 cat_fd(0);
             } else {
-                int fd = open(argv[i]);
+                int fd = open(argv[i], 0);
                 if (fd < 0) {
                     print("cat: ");
                     print(argv[i]);

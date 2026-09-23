@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 #include <sys/wait.h>
 #include <sys/ioctl.h>
 #include <dirent.h>
@@ -19,6 +20,10 @@
 #undef kill
 #undef fork
 #undef pipe
+
+/* errno on the host is glibc's macro-backed per-thread state (see libc.h);
+ * the ho_* mocks inherit it from the Linux C library, so no definition is
+ * needed here. The in-OS build gets `int errno` from src/user/libc.c. */
 
 int ho_open(const char *filename) {
     return open(filename, O_RDWR | O_CREAT, 0666);
@@ -432,7 +437,12 @@ int chdir(const char *path) {
 
 char *getcwd(char *buf, size_t size) {
     if (!buf) return mock_cwd;
-    snprintf(buf, size, "%s", mock_cwd);
+    int need = snprintf(buf, size, "%s", mock_cwd);
+    if (need < 0) return NULL;
+    if ((size_t)need >= size) {
+        errno = ERANGE;   /* mirror the kernel: SYS_GETCWD returns -ERANGE */
+        return NULL;
+    }
     return buf;
 }
 
