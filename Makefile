@@ -16,6 +16,7 @@ ifeq ($(OS),macos)
   CC = /opt/homebrew/opt/llvm/bin/clang
   LD = /opt/homebrew/bin/ld.lld
   OBJCOPY = /opt/homebrew/opt/llvm/bin/llvm-objcopy
+  AR = /opt/homebrew/opt/llvm/bin/llvm-ar
   MMD = /opt/homebrew/bin/mmd
   MCOPY = /opt/homebrew/bin/mcopy
   MKFS_FAT = /opt/homebrew/sbin/mkfs.fat
@@ -26,6 +27,7 @@ else
   CC = clang
   LD = ld.lld
   OBJCOPY = llvm-objcopy
+  AR = ar
   MMD = mmd
   MCOPY = mcopy
   MKFS_FAT = mkfs.fat
@@ -50,7 +52,7 @@ ifeq ($(ARCH),intel)
   # Intel/AMD 64-bit compiler flags
   # Using standard bare-metal flags, disabling red zone and SSE
   CFLAGS = -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
-  USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
+  USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
   ARCH_DIR = src/kernel/arch/x64
   LDFLAGS = -T linker_x64.ld
   # QEMU parameters for x86_64: 8 cores, 3GB RAM, mounting disk.img as NVMe, booting with UEFI
@@ -59,7 +61,7 @@ else
   # Default to ARM
   QEMU = qemu-system-aarch64
   CFLAGS = -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
-  USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
+  USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
   ARCH_DIR = src/kernel/arch/arm
   LDFLAGS = -T linker.ld
   # QEMU parameters for ARM: 8 cores, 2GB RAM, booting with UEFI
@@ -109,7 +111,7 @@ OBJS = $(ASM_OBJS) $(C_OBJS)
 
 USER_LIBC = src/user/libc.c
 # All user-visible headers (a change to any of these must rebuild user objects)
-USER_HDRS = src/user_include/*.h src/user_include/graphics/*.h
+USER_HDRS = src/user_include/*.h src/user_include/graphics/*.h src/libc/include/*.h
 MEM_TEST_BIN = $(OBJ_DIR)/memtest.bin
 FILE_IO_BIN = $(OBJ_DIR)/fileio_test.bin
 CONSOLE_BIN = $(OBJ_DIR)/console.bin
@@ -129,6 +131,8 @@ EDITOR_T_BIN = $(OBJ_DIR)/EDITOR_T.BIN
 APPS_T_BIN = $(OBJ_DIR)/APPS_T.BIN
 PONG_T_BIN = $(OBJ_DIR)/PONG_T.BIN
 STRESS_TEST_BIN = $(OBJ_DIR)/stress.bin
+ERRNO_TEST_BIN = $(OBJ_DIR)/errtest.bin
+HELLO_BIN = $(OBJ_DIR)/hello.bin
 
 SH_BIN = $(OBJ_DIR)/sh.bin
 LS_BIN = $(OBJ_DIR)/ls.bin
@@ -328,6 +332,37 @@ $(PIPETEST_BIN): $(OBJ_DIR)/user_pipe_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/u
 $(STRESS_TEST_BIN): $(OBJ_DIR)/stress_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/stress.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/stress.elf $(STRESS_TEST_BIN)
+
+$(ERRNO_TEST_BIN): $(OBJ_DIR)/user_errno_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/errno_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/errno_test.elf $(ERRNO_TEST_BIN)
+
+# --- libc sysroot (Phase 0, posix.md §2.3) ------------------------------
+# crt0.o provides the main(argc, argv) entry convention; libc.a is the
+# archive new POSIX-style ports link against (crt0 + libc + malloc).
+$(OBJ_DIR)/crt0.o: src/libc/crt0.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+# Phase 1: src/libc/src/*.c are archived into libc.a (pattern rule, both
+# arches since OBJ_DIR varies).
+$(OBJ_DIR)/libc_%.o: src/libc/src/%.c $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libc_string.o
+	$(AR) rcs $@ $^
+
+# --- HELLO demo (Phase 0 gate): a main(argc, argv) program built against
+# crt0.o + libc.a, proving the sysroot link path end to end. -e _start is
+# redundant with linker.ld's ENTRY(_start) but pins the archive pull. ---
+$(HELLO_BIN): $(OBJ_DIR)/hello.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/hello.elf $(OBJ_DIR)/hello.o $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/hello.elf $(HELLO_BIN)
+
+$(OBJ_DIR)/hello.o: src/user/hello.c $(USER_LIBC) $(USER_HDRS) src/libc/crt0.c
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
 
 $(NETTEST_BIN): $(OBJ_DIR)/user_net_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/net_test.elf $^
@@ -643,7 +678,7 @@ endef
 
 $(foreach app,$(DESKTOP_APP_NAMES),$(eval $(call DESKTOP_APP_RULE,$(app))))
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -697,6 +732,8 @@ endif
 	$(MCOPY) -i disk.img $(DIALOG_TEST_BIN) ::/DIALOG_T.BIN
 	$(MCOPY) -i disk.img $(PONG_T_BIN) ::/PONG_T.BIN
 	$(MCOPY) -i disk.img $(STRESS_TEST_BIN) ::/STRESS.BIN
+	$(MCOPY) -i disk.img $(ERRNO_TEST_BIN) ::/ERRTEST.BIN
+	$(MCOPY) -i disk.img $(HELLO_BIN) ::/HELLO.BIN
 	$(MCOPY) -i disk.img $(SH_BIN) ::/SH.BIN
 	$(MCOPY) -i disk.img $(LS_BIN) ::/LS.BIN
 	$(MCOPY) -i disk.img $(CAT_BIN) ::/CAT.BIN
@@ -878,6 +915,21 @@ GUI_TEST = gui_test_host
 $(GUI_TEST): obj/host_gui_test.o obj/host_compat.o
 	$(HOST_CC) -o $@ $^
 
+# Phase 0: POSIX errno convention — the ho_* mocks + Linux errno must match
+# the kernel's negative-errno contract (errno.h uses Linux numbering).
+ERRNO_TEST = errno_test_host
+$(ERRNO_TEST): obj/host_errno_test.o obj/host_compat.o
+	$(HOST_CC) -o $@ $^
+
+# Phase 1: HobbyOS string.h subset compiled for the host (as hb_*) and
+# property-tested byte-exact against glibc on literal + randomized inputs.
+obj/host_hb_string.o: src/libc/src/string.c src/libc/include/*.h
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+
+STRING_TEST = libc_string_test_host
+$(STRING_TEST): obj/host_libc_string_test.o obj/host_hb_string.o
+	$(HOST_CC) -o $@ $^
+
 # WM damage bookkeeping: line-level window repair + the base (damage) clip
 # (window.c + graphics.c are included into the test's single TU).
 WINDOW_DAMAGE_TEST = window_damage_test_host
@@ -909,7 +961,7 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
@@ -919,8 +971,10 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	$(HOST_RUN) ./$(DIALOG_ARROW_TEST)
 	$(HOST_RUN) ./$(PONG_TEST_BIN)
 	$(HOST_RUN) ./$(GUI_TEST)
+	$(HOST_RUN) ./$(ERRNO_TEST)
 	$(HOST_RUN) ./$(GRAPHICS_LIB_TEST)
 	$(HOST_RUN) ./$(WINDOW_DAMAGE_TEST)
+	$(HOST_RUN) ./$(STRING_TEST)
 	$(HOST_RUN) ./files_test_host
 	$(HOST_RUN) ./calc_test_host
 	$(HOST_RUN) ./clock_test_host

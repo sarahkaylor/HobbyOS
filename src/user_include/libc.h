@@ -1,10 +1,24 @@
 #ifndef LIBC_H
 #define LIBC_H
 
+/* Phase 1 sysroot umbrella: legacy apps include only libc.h, so pull in the
+ * standard sysroot headers here. Under HOST_TEST these resolve to glibc's
+ * (no -Isrc/libc/include on the host path); on the bare-metal targets they
+ * resolve to src/libc/include/. The declarations do not collide with the
+ * hand-rolled per-app helpers in existing programs. */
+#include <string.h>
+
 #include <stddef.h>
 #include <stdint.h>
 
 #include "malloc.h"
+/* errno.h (in-tree, src/include) is the errno source on the bare-metal
+ * targets. Under HOST_TEST the compiler resolves "errno.h" to glibc's, whose
+ * `errno` is a macro, so let the host keep glibc's (values are identical —
+ * the in-tree header uses Linux numbering). */
+#ifndef HOST_TEST
+#include "errno.h"
+#endif
 
 #ifdef HOST_TEST
 #define open ho_open
@@ -38,6 +52,10 @@ int spawn(const char *filename, const char *args);
 int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args);
 int pipe(int fds[2]);
 int get_args(char *buf, int size);
+
+/* Native extension: copy the process's binary name into buf (for crt0
+ * argv[0]). Returns 0 on success, -1 on failure (no errno set). */
+int get_progname(char *buf, int size);
 
 void gui_add_menu(int idx, const char* name, const char* items);
 
