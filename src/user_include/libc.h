@@ -8,6 +8,7 @@
  * hand-rolled per-app helpers in existing programs. */
 #include <string.h>
 #include <ctype.h>
+#include <stdlib.h>
 
 #include <stddef.h>
 #include <stdint.h>

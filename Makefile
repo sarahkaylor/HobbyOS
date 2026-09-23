@@ -350,7 +350,7 @@ $(OBJ_DIR)/libc_%.o: src/libc/src/%.c $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o
+$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o
 	$(AR) rcs $@ $^
 
 # --- HELLO demo (Phase 0 gate): a main(argc, argv) program built against
@@ -934,6 +934,10 @@ CTYPE_TEST = libc_ctype_test_host
 $(CTYPE_TEST): obj/host_libc_ctype_test.o obj/host_hb_ctype.o
 	$(HOST_CC) -o $@ $^
 
+STDLIB_TEST = libc_stdlib_test_host
+$(STDLIB_TEST): obj/host_libc_stdlib_test.o obj/host_hb_stdlib.o
+	$(HOST_CC) -o $@ $^
+
 # WM damage bookkeeping: line-level window repair + the base (damage) clip
 # (window.c + graphics.c are included into the test's single TU).
 WINDOW_DAMAGE_TEST = window_damage_test_host
@@ -965,7 +969,7 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(CTYPE_TEST) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
@@ -980,6 +984,7 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	$(HOST_RUN) ./$(WINDOW_DAMAGE_TEST)
 	$(HOST_RUN) ./$(STRING_TEST)
 	$(HOST_RUN) ./$(CTYPE_TEST)
+	$(HOST_RUN) ./$(STDLIB_TEST)
 	$(HOST_RUN) ./files_test_host
 	$(HOST_RUN) ./calc_test_host
 	$(HOST_RUN) ./clock_test_host
