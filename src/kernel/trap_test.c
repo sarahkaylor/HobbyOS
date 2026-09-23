@@ -4,6 +4,7 @@
 #include "trap.h"
 #include "setjmp.h"
 #include "process.h"
+#include "errno.h"
 
 extern void sync_lower_handler_c(struct trap_frame *tf);
 extern jmp_buf user_exit_context;
@@ -55,7 +56,7 @@ static void test_trap_unknown_syscall(void) {
 
     sync_lower_handler_c(&tf);
 
-    EXPECT_EQ(tf.regs[0], -1);
+    EXPECT_EQ(tf.regs[0], (uint64_t)-ENOSYS); /* negative-errno convention */
 }
 
 static void test_trap_sys_get_cpuid(void) {
@@ -87,7 +88,7 @@ static void test_trap_sys_open_invalid_ptr(void) {
 
     sync_lower_handler_c(&tf);
 
-    EXPECT_EQ(tf.regs[0], -1);
+    EXPECT_EQ(tf.regs[0], (uint64_t)-EFAULT); /* invalid user ptr -> -EFAULT */
 }
 
 static void test_trap_sys_open_valid_ptr(void) {

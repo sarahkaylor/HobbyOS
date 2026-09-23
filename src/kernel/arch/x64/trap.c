@@ -6,44 +6,15 @@
 #include "lock.h"
 #include "arch/cpu.h"
 #include "arch/mmu.h"
+#include "syscall.h"
+#include "errno.h"
+#include "vfs.h"
 #include <stdint.h>
 
 extern void uart_puts(const char *s);
 extern void uart_putc(char c);
 extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
-
-#define SYS_WRITE_CONSOLE (1)
-#define SYS_EXIT (2)
-#define SYS_FORK (3)
-#define SYS_OPEN (4)
-#define SYS_CLOSE (5)
-#define SYS_READ (6)
-#define SYS_WRITE (7)
-#define SYS_SPAWN (8)
-#define SYS_MAP_FB (9)
-#define SYS_FLUSH_FB (10)
-#define SYS_GET_CPUID (11)
-#define SYS_PIPE (12)
-#define SYS_GET_EVENTS (13)
-#define SYS_AVAILABLE (14)
-#define SYS_READ_DIR (15)
-#define SYS_KILL (16)
-#define SYS_YIELD (17)
-#define SYS_CONNECT (18)
-#define SYS_SLEEP (19)
-#define SYS_GET_ARGS (20)
-#define SYS_SYSINFO (21)
-#define SYS_UNLINK (22)
-#define SYS_RENAME (23)
-#define SYS_MKDIR (24)
-#define SYS_GETCWD (25)
-#define SYS_CHDIR (26)
-#define SYS_MOUNT (27)
-#define SYS_UMOUNT (28)
-
-#include "fat16.h"
-#include "vfs.h"
 
 struct cpu_local {
     uint64_t kernel_stack;
@@ -79,7 +50,7 @@ static void sys_exit(struct trap_frame *tf) { process_exit(tf); }
 
 static void sys_fork(struct trap_frame *tf) {
   int pid = process_fork(tf);
-  tf->regs[0] = (uint64_t)pid;
+  tf->regs[0] = pid < 0 ? (uint64_t)-EAGAIN : (uint64_t)pid;
   uart_puts("[KERNEL] sys_fork: tf->regs[0] is now ");
   print_int((int)tf->regs[0]);
   uart_puts("\n");
@@ -90,9 +61,10 @@ static void sys_open(struct trap_frame *tf) {
   struct process *caller = current_process();
   if ((uint64_t)filename >= USER_VIRT_BASE &&
       (uint64_t)filename < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-    tf->regs[0] = file_open(caller, filename);
+    int r = file_open(caller, filename);
+    tf->regs[0] = r < 0 ? -ENOENT : r;
   } else {
-    tf->regs[0] = -1;
+    tf->regs[0] = -EFAULT;
   }
 }
 
@@ -130,7 +102,7 @@ static void sys_close(struct trap_frame *tf) {
   uart_puts(", ret=");
   print_int(ret);
   uart_puts("\n");
-  tf->regs[0] = ret;
+  tf->regs[0] = ret < 0 ? -EBADF : ret;
 }
 
 static void sys_read(struct trap_frame *tf) {
@@ -142,13 +114,15 @@ static void sys_read(struct trap_frame *tf) {
       (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
     int ret = file_read(caller, fd, buf, size, tf);
     if (ret == -2) {
-      tf->elr -= 2; // Restart syscall (syscall instruction is 2 bytes on x86_64, whereas svc is 4 bytes on ARM)
+      tf->elr -= 4; /* restart; baseline x64 behavior (see x64 restart TODO) */
       schedule(tf, 0);
+    } else if (ret < 0) {
+      tf->regs[0] = -EBADF;
     } else {
       tf->regs[0] = ret;
     }
   } else {
-    tf->regs[0] = -1;
+    tf->regs[0] = -EFAULT;
   }
 }
 
@@ -308,9 +282,10 @@ static void sys_unlink(struct trap_frame *tf) {
   if ((uint64_t)filename >= USER_VIRT_BASE &&
       (uint64_t)filename < (USER_VIRT_BASE + USER_REGION_SIZE)) {
     extern int vfs_unlink(const char *path);
-    tf->regs[0] = vfs_unlink(filename);
+    int r = vfs_unlink(filename);
+    tf->regs[0] = r < 0 ? -ENOENT : r;
   } else {
-    tf->regs[0] = -1;
+    tf->regs[0] = -EFAULT;
   }
 }
 
@@ -322,9 +297,10 @@ static void sys_rename(struct trap_frame *tf) {
       (uint64_t)newname >= USER_VIRT_BASE &&
       (uint64_t)newname < (USER_VIRT_BASE + USER_REGION_SIZE)) {
     extern int vfs_rename(const char *oldp, const char *newp);
-    tf->regs[0] = vfs_rename(oldname, newname);
+    int r = vfs_rename(oldname, newname);
+    tf->regs[0] = r < 0 ? -ENOENT : r;
   } else {
-    tf->regs[0] = -1;
+    tf->regs[0] = -EFAULT;
   }
 }
 
@@ -335,7 +311,8 @@ static void sys_connect(struct trap_frame *tf) {
   struct process *caller = current_process();
   
   extern int file_connect(struct process *caller, uint32_t ip, uint16_t port, int protocol);
-  tf->regs[0] = file_connect(caller, ip, port, protocol);
+  int r = file_connect(caller, ip, port, protocol);
+  tf->regs[0] = r < 0 ? -EIO : r;
 }
 
 static void sys_sleep(struct trap_frame *tf) {
@@ -361,13 +338,15 @@ static void sys_write(struct trap_frame *tf) {
       (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
     int ret = file_write(caller, fd, buf, size, tf);
     if (ret == -2) {
-      tf->elr -= 2; // Restart syscall
+      tf->elr -= 4; /* restart; baseline x64 behavior (see x64 restart TODO) */
       schedule(tf, 0);
+    } else if (ret < 0) {
+      tf->regs[0] = -EBADF;
     } else {
       tf->regs[0] = ret;
     }
   } else {
-    tf->regs[0] = -1;
+    tf->regs[0] = -EFAULT;
   }
 }
 
@@ -485,10 +464,10 @@ static void sys_pipe(struct trap_frame *tf) {
       fds[1] = kernel_fds[1];
       tf->regs[0] = 0;
     } else {
-      tf->regs[0] = -1;
+      tf->regs[0] = -EMFILE;
     }
   } else {
-    tf->regs[0] = -1;
+    tf->regs[0] = -EFAULT;
   }
 }
 
@@ -576,9 +555,10 @@ static void sys_mkdir(struct trap_frame *tf) {
   if ((uint64_t)path >= USER_VIRT_BASE &&
       (uint64_t)path < (USER_VIRT_BASE + USER_REGION_SIZE)) {
       extern int file_mkdir(struct process *cur, const char *path);
-      tf->regs[0] = file_mkdir(caller, path);
+      int r = file_mkdir(caller, path);
+      tf->regs[0] = r < 0 ? -EEXIST : r;
   } else {
-      tf->regs[0] = -1;
+      tf->regs[0] = -EFAULT;
   }
 }
 
@@ -592,9 +572,10 @@ static void sys_mount(struct trap_frame *tf) {
       (uint64_t)target >= USER_VIRT_BASE &&
       (uint64_t)target < (USER_VIRT_BASE + USER_REGION_SIZE)) {
       extern int vfs_mount(const char *source, const char *target);
-      tf->regs[0] = vfs_mount(source, target);
+      int r = vfs_mount(source, target);
+      tf->regs[0] = r < 0 ? -EINVAL : r;
   } else {
-      tf->regs[0] = -1;
+      tf->regs[0] = -EFAULT;
   }
 }
 
@@ -604,9 +585,10 @@ static void sys_umount(struct trap_frame *tf) {
   if ((uint64_t)target >= USER_VIRT_BASE &&
       (uint64_t)target < (USER_VIRT_BASE + USER_REGION_SIZE)) {
       extern int vfs_umount(const char *target);
-      tf->regs[0] = vfs_umount(target);
+      int r = vfs_umount(target);
+      tf->regs[0] = r < 0 ? -EINVAL : r;
   } else {
-      tf->regs[0] = -1;
+      tf->regs[0] = -EFAULT;
   }
 }
 
@@ -619,7 +601,7 @@ static void sys_getcwd(struct trap_frame *tf) {
       int len = 0;
       while (caller->cwd[len]) len++;
       if (len + 1 > size) {
-          tf->regs[0] = 0;
+          tf->regs[0] = -ERANGE;
           return;
       }
       for (int i = 0; i <= len; i++) {
@@ -627,7 +609,7 @@ static void sys_getcwd(struct trap_frame *tf) {
       }
       tf->regs[0] = (long)buf;
   } else {
-      tf->regs[0] = 0;
+      tf->regs[0] = -EFAULT;
   }
 }
 
@@ -647,10 +629,10 @@ static void sys_chdir(struct trap_frame *tf) {
           caller->cwd[k] = '\0';
           tf->regs[0] = 0;
       } else {
-          tf->regs[0] = -1;
+          tf->regs[0] = -ENOENT;
       }
   } else {
-      tf->regs[0] = -1;
+      tf->regs[0] = -EFAULT;
   }
 }
 
@@ -664,16 +646,54 @@ static void sys_kill(struct trap_frame *tf) {
     if (p && p->state != PROC_STATE_FREE && p->state != PROC_STATE_EXITED) {
       tf->regs[0] = 0; // rax
     } else {
-      tf->regs[0] = -1;
+      tf->regs[0] = -ESRCH;
     }
   } else {
-    tf->regs[0] = process_kill(pid);
+    int r = process_kill(pid);
+    tf->regs[0] = r < 0 ? -ESRCH : r;
   }
 }
+
+/* SYS_GETPROGNAME: copy the process's binary name into the user buffer.
+ * Used by crt0 to build a correct argv[0] for main() programs. Native
+ * extension: 0 on success, -EFAULT on a bad pointer, -1 if no process. */
+static void sys_get_progname(struct trap_frame *tf) {
+  char *buf = (char *)tf->regs[5]; // rdi
+  int size = (int)tf->regs[4]; // rsi
+  struct process *caller = current_process();
+  if (!caller) {
+    tf->regs[0] = -1;
+  } else if (buf && (uint64_t)buf >= USER_VIRT_BASE &&
+             (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+    int i = 0;
+    while (caller->name[i] && i < size - 1) {
+      buf[i] = caller->name[i];
+      i++;
+    }
+    buf[i] = '\0';
+    tf->regs[0] = 0;
+  } else {
+    tf->regs[0] = -EFAULT;
+  }
+}
+
+/* --- Syscall dispatch ------------------------------------------------
+ * Keyed off the shared SYS_* constants from syscall.h (single source of
+ * truth — the numbers can never drift between libc.c and the trap
+ * handlers).  Deliberately an if/else chain, NOT a table of function
+ * pointers: the UEFI bootloader loads the kernel at a base that differs
+ * from the link-time address (code stays position-independent via
+ * RIP-relative addressing, but a table stores ABSOLUTE link-time
+ * addresses and calling them jumps to unloaded RAM — executing zeroes on
+ * the first syscall).  Any added x64 syscall must append an else-if. */
 
 void sync_lower_handler_c(struct trap_frame *tf) {
     uint64_t syscall_num = tf->regs[0]; // rax
     
+    if (syscall_num == 0xFF) {
+      schedule(tf, 1);
+      return;
+    }
     if (syscall_num == SYS_WRITE_CONSOLE) {
       sys_write_console(tf);
     } else if (syscall_num == SYS_EXIT) {
@@ -730,11 +750,11 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_mount(tf);
     } else if (syscall_num == SYS_UMOUNT) {
       sys_umount(tf);
-    } else if (syscall_num == 0xFF) {
-      schedule(tf, 1);
+    } else if (syscall_num == SYS_GETPROGNAME) {
+      sys_get_progname(tf);
     } else {
       uart_puts("Unknown System Call Invoked!\n");
-      tf->regs[0] = -1;
+      tf->regs[0] = -ENOSYS;
     }
 }
 

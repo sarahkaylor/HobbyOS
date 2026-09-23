@@ -209,6 +209,8 @@ void main(void) {
   load_and_run_program_in_scheduler("STRESS.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("MONITORT.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("NFSTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("ERRTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("HELLO.BIN", -1, -1, -1, -1);
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
   load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1, -1, -1);

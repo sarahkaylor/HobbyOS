@@ -1,34 +1,26 @@
 #include "libc.h"
 #include <stdint.h>
+#include "syscall.h"
+#include "errno.h"
 
-#define SYS_WRITE_CONSOLE (1)
-#define SYS_EXIT (2)
-#define SYS_FORK (3)
-#define SYS_OPEN (4)
-#define SYS_CLOSE (5)
-#define SYS_READ (6)
-#define SYS_WRITE (7)
-#define SYS_SPAWN (8)
-#define SYS_MAP_FB (9)
-#define SYS_FLUSH_FB (10)
-#define SYS_GET_CPUID (11)
-#define SYS_PIPE (12)
-#define SYS_GET_EVENTS (13)
-#define SYS_AVAILABLE (14)
-#define SYS_READ_DIR (15)
-#define SYS_KILL (16)
-#define SYS_YIELD (17)
-#define SYS_CONNECT (18)
-#define SYS_SLEEP (19)
-#define SYS_GET_ARGS (20)
-#define SYS_SYSINFO (21)
-#define SYS_UNLINK (22)
-#define SYS_RENAME (23)
-#define SYS_MKDIR (24)
-#define SYS_GETCWD (25)
-#define SYS_CHDIR (26)
-#define SYS_MOUNT (27)
-#define SYS_UMOUNT (28)
+/* Per-process errno. Single-threaded processes: a plain global is correct
+ * (each process has its own address space). See errno.h.
+ * On the host, errno is glibc's TLS macro (there is no plain `int errno`),
+ * so the in-OS storage must NOT be defined there. */
+#ifndef HOST_TEST
+int errno = 0;
+#endif
+
+/* Normalize a raw syscall result to the POSIX convention: on a negative
+ * return, set errno to the magnitude and return -1. Native-extension
+ * syscalls (read_dir, available, sysinfo, ...) do NOT go through this. */
+static long errno_ret(long r) {
+    if (r < 0) {
+        errno = (int)(-r);
+        return -1;
+    }
+    return r;
+}
 
 #ifdef __x86_64__
 static long syscall(long num, long a0, long a1, long a2, long a3) {
@@ -152,22 +144,22 @@ void exit(int status) {
     ; // Wait for the kernel to halt us safely
 }
 
-int kill(int pid, int sig) { return (int)syscall(SYS_KILL, (long)pid, (long)sig, 0, 0); }
+int kill(int pid, int sig) { return (int)errno_ret(syscall(SYS_KILL, (long)pid, (long)sig, 0, 0)); }
 
-int fork(void) { return (int)syscall(SYS_FORK, 0, 0, 0, 0); }
+int fork(void) { return (int)errno_ret(syscall(SYS_FORK, 0, 0, 0, 0)); }
 
 int open(const char *filename) {
-  return (int)syscall(SYS_OPEN, (long)filename, 0, 0, 0);
+  return (int)errno_ret(syscall(SYS_OPEN, (long)filename, 0, 0, 0));
 }
 
-int close(int fd) { return (int)syscall(SYS_CLOSE, (long)fd, 0, 0, 0); }
+int close(int fd) { return (int)errno_ret(syscall(SYS_CLOSE, (long)fd, 0, 0, 0)); }
 
 int read(int fd, void *buf, int size) {
-  return (int)syscall(SYS_READ, (long)fd, (long)buf, (long)size, 0);
+  return (int)errno_ret(syscall(SYS_READ, (long)fd, (long)buf, (long)size, 0));
 }
 
 int write(int fd, const void *buf, int size) {
-  return (int)syscall(SYS_WRITE, (long)fd, (long)buf, (long)size, 0);
+  return (int)errno_ret(syscall(SYS_WRITE, (long)fd, (long)buf, (long)size, 0));
 }
 
 void yield(void) {
@@ -175,7 +167,7 @@ void yield(void) {
 }
 
 int connect(uint32_t ip, uint16_t port, int protocol) {
-  return (int)syscall(SYS_CONNECT, (long)ip, (long)port, (long)protocol, 0);
+  return (int)errno_ret(syscall(SYS_CONNECT, (long)ip, (long)port, (long)protocol, 0));
 }
 
 void sleep(int ms) {
@@ -196,11 +188,14 @@ int get_args(char *buf, int size) {
   return (int)syscall(SYS_GET_ARGS, (long)buf, (long)size, 0, 0);
 }
 
+int get_progname(char *buf, int size) {
+  long r = syscall(SYS_GETPROGNAME, (long)buf, (long)size, 0, 0);
+  if (r < 0) return -1;
+  return 0;
+}
+
 int pipe(int fds[2]) {
-  long res = syscall(SYS_PIPE, (long)fds, 0, 0, 0);
-  if (res == 0)
-    return 0;
-  return -1;
+  return (int)errno_ret(syscall(SYS_PIPE, (long)fds, 0, 0, 0));
 }
 
 void *map_fb(void) { return (void *)syscall(SYS_MAP_FB, 0, 0, 0, 0); }
@@ -220,7 +215,7 @@ __attribute__((weak)) int read_dir(const char *path, int index, struct sys_diren
 }
 
 int mkdir(const char *path) {
-  return (int)syscall(SYS_MKDIR, (long)path, 0, 0, 0);
+  return (int)errno_ret(syscall(SYS_MKDIR, (long)path, 0, 0, 0));
 }
 
 void gui_add_menu(int idx, const char* name, const char* items) {
@@ -282,27 +277,32 @@ int sysinfo(int cmd, void *buf, int size) {
 }
 
 int unlink(const char *filename) {
-  return (int)syscall(SYS_UNLINK, (long)filename, 0, 0, 0);
+  return (int)errno_ret(syscall(SYS_UNLINK, (long)filename, 0, 0, 0));
 }
 
 int rename(const char *oldname, const char *newname) {
-  return (int)syscall(SYS_RENAME, (long)oldname, (long)newname, 0, 0);
+  return (int)errno_ret(syscall(SYS_RENAME, (long)oldname, (long)newname, 0, 0));
 }
 
 int mount(const char *source, const char *target) {
-  return (int)syscall(SYS_MOUNT, (long)source, (long)target, 0, 0);
+  return (int)errno_ret(syscall(SYS_MOUNT, (long)source, (long)target, 0, 0));
 }
 
 int umount(const char *target) {
-  return (int)syscall(SYS_UMOUNT, (long)target, 0, 0, 0);
+  return (int)errno_ret(syscall(SYS_UMOUNT, (long)target, 0, 0, 0));
 }
 
 char *getcwd(char *buf, size_t size) {
-  return (char *)syscall(SYS_GETCWD, (long)buf, (long)size, 0, 0);
+  long r = syscall(SYS_GETCWD, (long)buf, (long)size, 0, 0);
+  if (r < 0) {
+    errno = (int)(-r);
+    return NULL;
+  }
+  return (char *)r;
 }
 
 int chdir(const char *path) {
-  return (int)syscall(SYS_CHDIR, (long)path, 0, 0, 0);
+  return (int)errno_ret(syscall(SYS_CHDIR, (long)path, 0, 0, 0));
 }
 
 

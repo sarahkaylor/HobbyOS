@@ -31,8 +31,10 @@
 // Size of the user memory region allocated per process (32MB)
 #define USER_REGION_SIZE 0x2000000
 
-// Size of the initial portion of memory to clear/copy (256KB)
-#define USER_INITIAL_CLEAR_SIZE 0x40000
+// Size of the initial portion of memory to clear/copy (1MB; raised from
+// 256KB in Phase 0 so user binaries can exceed 256KB — MAX_PROGRAM_SIZE
+// == USER_INITIAL_CLEAR_SIZE)
+#define USER_INITIAL_CLEAR_SIZE 0x100000
 
 // Size of the stack portion of memory to clear/copy (256KB)
 #define USER_STACK_CLEAR_SIZE 0x40000

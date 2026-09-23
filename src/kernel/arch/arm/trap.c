@@ -7,6 +7,9 @@
 #include "lock.h"
 #include "arch/cpu.h"
 #include "arch/timer.h"
+#include "syscall.h"
+#include "errno.h"
+#include "vfs.h"
 #include <stdint.h>
 
 extern jmp_buf user_exit_context;
@@ -40,39 +43,6 @@ extern void gic_end_interrupt(uint32_t intid);
 extern void virtio_blk_handle_irq(void);
 extern uint32_t virtio_blk_irq;
 
-#define SYS_WRITE_CONSOLE (1)
-#define SYS_EXIT (2)
-#define SYS_FORK (3)
-#define SYS_OPEN (4)
-#define SYS_CLOSE (5)
-#define SYS_READ (6)
-#define SYS_WRITE (7)
-#define SYS_SPAWN (8)
-#define SYS_MAP_FB (9)
-#define SYS_FLUSH_FB (10)
-#define SYS_GET_CPUID (11)
-#define SYS_PIPE (12)
-#define SYS_GET_EVENTS (13)
-#define SYS_AVAILABLE (14)
-#define SYS_READ_DIR (15)
-#define SYS_KILL (16)
-#define SYS_YIELD (17)
-#define SYS_CONNECT (18)
-#define SYS_SLEEP (19)
-#define SYS_GET_ARGS (20)
-#define SYS_SYSINFO (21)
-#define SYS_UNLINK (22)
-#define SYS_RENAME (23)
-#define SYS_MKDIR (24)
-#define SYS_GETCWD (25)
-#define SYS_CHDIR (26)
-#define SYS_MOUNT (27)
-#define SYS_UMOUNT (28)
-
-#include "fat16.h"
-#include "vfs.h"
-
-// Timer PPI interrupt ID on QEMU virt (non-secure physical timer)
 #define TIMER_PPI_INTID 30
 
 static void sys_write_console(struct trap_frame *tf) {
@@ -88,7 +58,7 @@ static void sys_exit(struct trap_frame *tf) { process_exit(tf); }
 
 static void sys_fork(struct trap_frame *tf) {
   int pid = process_fork(tf);
-  tf->regs[0] = (uint64_t)pid;
+  tf->regs[0] = pid < 0 ? (uint64_t)-EAGAIN : (uint64_t)pid;
   uart_puts("[KERNEL] sys_fork: tf->regs[0] is now ");
   print_int((int)tf->regs[0]);
   uart_puts("\n");
@@ -99,16 +69,18 @@ static void sys_open(struct trap_frame *tf) {
   struct process *caller = current_process();
   if ((uint64_t)filename >= USER_VIRT_BASE &&
       (uint64_t)filename < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-    tf->regs[0] = file_open(caller, filename);
+    int r = file_open(caller, filename);
+    tf->regs[0] = r < 0 ? -ENOENT : r;
   } else {
-    tf->regs[0] = -1;
+    tf->regs[0] = -EFAULT;
   }
 }
 
 static void sys_close(struct trap_frame *tf) {
   int fd = (int)tf->regs[0];
   struct process *caller = current_process();
-  tf->regs[0] = file_close(caller, fd);
+  int r = file_close(caller, fd);
+  tf->regs[0] = r < 0 ? -EBADF : r;
 }
 
 static void sys_read(struct trap_frame *tf) {
@@ -123,11 +95,13 @@ static void sys_read(struct trap_frame *tf) {
     if (ret == -2) {
       tf->elr -= 4; // Restart syscall
       schedule(tf, 0);
+    } else if (ret < 0) {
+      tf->regs[0] = -EBADF;
     } else {
       tf->regs[0] = ret;
     }
   } else {
-    tf->regs[0] = -1;
+    tf->regs[0] = -EFAULT;
   }
 }
 
@@ -287,9 +261,10 @@ static void sys_unlink(struct trap_frame *tf) {
   if ((uint64_t)filename >= USER_VIRT_BASE &&
       (uint64_t)filename < (USER_VIRT_BASE + USER_REGION_SIZE)) {
     extern int vfs_unlink(const char *path);
-    tf->regs[0] = vfs_unlink(filename);
+    int r = vfs_unlink(filename);
+    tf->regs[0] = r < 0 ? -ENOENT : r;
   } else {
-    tf->regs[0] = -1;
+    tf->regs[0] = -EFAULT;
   }
 }
 
@@ -301,9 +276,10 @@ static void sys_rename(struct trap_frame *tf) {
       (uint64_t)newname >= USER_VIRT_BASE &&
       (uint64_t)newname < (USER_VIRT_BASE + USER_REGION_SIZE)) {
     extern int vfs_rename(const char *oldp, const char *newp);
-    tf->regs[0] = vfs_rename(oldname, newname);
+    int r = vfs_rename(oldname, newname);
+    tf->regs[0] = r < 0 ? -ENOENT : r;
   } else {
-    tf->regs[0] = -1;
+    tf->regs[0] = -EFAULT;
   }
 }
 
@@ -314,7 +290,8 @@ static void sys_connect(struct trap_frame *tf) {
   struct process *caller = current_process();
   
   extern int file_connect(struct process *caller, uint32_t ip, uint16_t port, int protocol);
-  tf->regs[0] = file_connect(caller, ip, port, protocol);
+  int r = file_connect(caller, ip, port, protocol);
+  tf->regs[0] = r < 0 ? -EIO : r;
 }
 
 static void sys_sleep(struct trap_frame *tf) {
@@ -343,11 +320,13 @@ static void sys_write(struct trap_frame *tf) {
     if (ret == -2) {
       tf->elr -= 4; // Restart syscall
       schedule(tf, 0);
+    } else if (ret < 0) {
+      tf->regs[0] = -EBADF;
     } else {
       tf->regs[0] = ret;
     }
   } else {
-    tf->regs[0] = -1;
+    tf->regs[0] = -EFAULT;
   }
 }
 
@@ -466,7 +445,7 @@ static void sys_pipe(struct trap_frame *tf) {
       fds[1] = kernel_fds[1];
       tf->regs[0] = 0;
     } else {
-      tf->regs[0] = -1;
+      tf->regs[0] = -EMFILE;
     }
   } else {
     tf->regs[0] = -1;
@@ -559,9 +538,10 @@ static void sys_mkdir(struct trap_frame *tf) {
   if ((uint64_t)path >= USER_VIRT_BASE &&
       (uint64_t)path < (USER_VIRT_BASE + USER_REGION_SIZE)) {
       extern int file_mkdir(struct process *cur, const char *path);
-      tf->regs[0] = file_mkdir(caller, path);
+      int r = file_mkdir(caller, path);
+      tf->regs[0] = r < 0 ? -EEXIST : r;
   } else {
-      tf->regs[0] = -1;
+      tf->regs[0] = -EFAULT;
   }
 }
 
@@ -575,9 +555,10 @@ static void sys_mount(struct trap_frame *tf) {
       (uint64_t)target >= USER_VIRT_BASE &&
       (uint64_t)target < (USER_VIRT_BASE + USER_REGION_SIZE)) {
       extern int vfs_mount(const char *source, const char *target);
-      tf->regs[0] = vfs_mount(source, target);
+      int r = vfs_mount(source, target);
+      tf->regs[0] = r < 0 ? -EINVAL : r;
   } else {
-      tf->regs[0] = -1;
+      tf->regs[0] = -EFAULT;
   }
 }
 
@@ -587,9 +568,10 @@ static void sys_umount(struct trap_frame *tf) {
   if ((uint64_t)target >= USER_VIRT_BASE &&
       (uint64_t)target < (USER_VIRT_BASE + USER_REGION_SIZE)) {
       extern int vfs_umount(const char *target);
-      tf->regs[0] = vfs_umount(target);
+      int r = vfs_umount(target);
+      tf->regs[0] = r < 0 ? -EINVAL : r;
   } else {
-      tf->regs[0] = -1;
+      tf->regs[0] = -EFAULT;
   }
 }
 
@@ -602,7 +584,7 @@ static void sys_getcwd(struct trap_frame *tf) {
       int len = 0;
       while (caller->cwd[len]) len++;
       if (len + 1 > size) {
-          tf->regs[0] = 0; // return NULL on error/overflow
+          tf->regs[0] = -ERANGE;   /* buffer too small */
           return;
       }
       for (int i = 0; i <= len; i++) {
@@ -610,7 +592,7 @@ static void sys_getcwd(struct trap_frame *tf) {
       }
       tf->regs[0] = (long)buf;
   } else {
-      tf->regs[0] = 0;
+      tf->regs[0] = -EFAULT;
   }
 }
 
@@ -630,10 +612,10 @@ static void sys_chdir(struct trap_frame *tf) {
           caller->cwd[k] = '\0';
           tf->regs[0] = 0;
       } else {
-          tf->regs[0] = -1;
+          tf->regs[0] = -ENOENT;
       }
   } else {
-      tf->regs[0] = -1;
+      tf->regs[0] = -EFAULT;
   }
 }
 
@@ -647,10 +629,34 @@ static void sys_kill(struct trap_frame *tf) {
     if (p && p->state != PROC_STATE_FREE && p->state != PROC_STATE_EXITED) {
       tf->regs[0] = 0;
     } else {
-      tf->regs[0] = -1;
+      tf->regs[0] = -ESRCH;
     }
   } else {
-    tf->regs[0] = process_kill(pid);
+    int r = process_kill(pid);
+    tf->regs[0] = r < 0 ? -ESRCH : r;
+  }
+}
+
+/* SYS_GETPROGNAME: copy the process's binary name into the user buffer.
+ * Used by crt0 to build a correct argv[0] for main() programs. Native
+ * extension: 0 on success, -EFAULT on a bad pointer, -1 if no process. */
+static void sys_get_progname(struct trap_frame *tf) {
+  char *buf = (char *)tf->regs[0];
+  int size = (int)tf->regs[1];
+  struct process *caller = current_process();
+  if (!caller) {
+    tf->regs[0] = -1;
+  } else if (buf && (uint64_t)buf >= USER_VIRT_BASE &&
+             (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+    int i = 0;
+    while (caller->name[i] && i < size - 1) {
+      buf[i] = caller->name[i];
+      i++;
+    }
+    buf[i] = '\0';
+    tf->regs[0] = 0;
+  } else {
+    tf->regs[0] = -EFAULT;
   }
 }
 
@@ -675,17 +681,84 @@ void sync_handler_c(struct trap_frame *tf) {
     return;
   }
 
-  uart_puts("[KERNEL] FATAL: CPU ");
+  // Serialize multi-core fault dumps so one CPU at a time prints a clean
+  // line (otherwise 4 CPUs interleave the FATAL text char-by-char).
+  static spinlock_t fatal_lock = {0};
+  uint64_t flags = spinlock_acquire_irqsave(&fatal_lock);
+  uart_puts("\n[KERNEL] FATAL: CPU ");
   uart_print_hex(get_cpuid());
   uart_puts(" Synchronous Exception in EL1! ESR: ");
   uart_print_hex(esr);
+  uart_puts(" EC: ");
+  uart_print_hex(ec);
+  uart_puts(" ISS: ");
+  uart_print_hex(iss);
   uint64_t far;
   __asm__ volatile("mrs %0, far_el1" : "=r"(far));
   uart_puts(", FAR: ");
   uart_print_hex(far);
   uart_puts(", ELR: ");
   uart_print_hex(tf->elr);
-  uart_puts("\n");
+  {
+    struct process *fp = current_process();
+    if (fp) {
+      uart_puts(", PROC pid=");
+      print_int(fp->pid);
+      uart_puts(" name=");
+      uart_puts(fp->name);
+    } else {
+      uart_puts(", PROC= (none)");
+    }
+    /* EL1 SP from the trap frame's saved SP */
+    uart_puts(", SPSR: ");
+    __asm__ volatile("mrs %0, spsr_el1" : "=r"(esr) : :); // reuse esr as scratch
+    uart_print_hex(esr);
+    uart_puts(", LR: ");
+    uart_print_hex(tf ? tf->lr : 0);
+    uart_puts(", TFP: ");
+    uart_print_hex((uint64_t)tf);
+    /* Dump 4 words at ELR to see whether the fetched bytes match the ELF */
+    uart_puts("\n[KERNEL] bytes@ELR:");
+    if ((uint64_t)tf->elr >= 0x40000000ULL) {
+      volatile uint32_t *wp = (volatile uint32_t *)tf->elr;
+      for (int i = 0; i < 16; i++) {
+        uart_puts(" ");
+        uart_print_hex(wp[i]);
+      }
+      /* Dump the live L2 descriptors around the fault address + the user block */
+      extern uint64_t l2_table_1[][512];
+      uint32_t l2idx = ((uint64_t)tf->elr >> 21) & 0x1FF;
+      uint32_t cp = (uint32_t)get_cpuid();
+      uart_puts("\n[KERNEL] L2[");
+      print_int(cp);
+      uart_puts("][0x200] (kernel text block)=");
+      uart_print_hex(l2_table_1[cp][0x200]);
+      uart_puts("  L2[0x220]=");
+      uart_print_hex(l2_table_1[cp][0x220]);
+      uart_puts("\n[KERNEL] &sys_write=");
+      uart_print_hex((uint64_t)&sys_write);
+      uart_puts(" &sys_write_console=");
+      uart_print_hex((uint64_t)&sys_write_console);
+      uart_puts(" &uart_puts=");
+      uart_print_hex((uint64_t)&uart_puts);
+      /* Compare bytes at uart_puts (known-good, very early) vs ELR */
+      uint32_t *up = (uint32_t *)&uart_puts;
+      uart_puts("\n[KERNEL] bytes@uart_puts:");
+      for (int i = 0; i < 4; i++) {
+        uart_puts(" ");
+        uart_print_hex(up[i]);
+      }
+      /* elr really in kernel text? dump L2 block phys of fault addr properly */
+      uint64_t fa = (uint64_t)tf->elr;
+      uint32_t fal2 = (uint32_t)(fa >> 21);
+      uart_puts("\n[KERNEL] L2[");
+      print_int((int)fal2);
+      uart_puts("]=");
+      uart_print_hex(l2_table_1[cp][fal2]);
+    }
+    uart_puts("\n");
+  }
+  spinlock_release_irqrestore(&fatal_lock, flags);
   while (1)
     ;
 }
@@ -700,6 +773,18 @@ void sync_handler_c(struct trap_frame *tf) {
  * @param tf Pointer to the trap frame representing the user state when the
  * exception occurred.
  */
+
+/* --- Syscall dispatch ------------------------------------------------
+ * Keyed off the shared SYS_* constants from syscall.h (single source of
+ * truth — the numbers can never drift between libc.c and the trap
+ * handlers).  Deliberately an if/else chain, NOT a table of function
+ * pointers: the UEFI bootloader loads the kernel at a base that differs
+ * from the link-time 0x4008.... address (AArch64 code is naturally
+ * position-independent, so this normally doesn't matter), but a table
+ * stores ABSOLUTE link-time addresses and calling them jumps to physical
+ * RAM that was never loaded — executing zeroes (ESR EC=0) on the first
+ * syscall.  Any added arm/x64 syscall must append an else-if here. */
+
 void sync_lower_handler_c(struct trap_frame *tf) {
   uint64_t esr;
   __asm__ volatile("mrs %0, esr_el1" : "=r"(esr));
@@ -723,8 +808,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
 
     uint64_t syscall_num = tf->regs[8]; // x8 standard
 
-
-
+    if (syscall_num == 0xFF) {
+      schedule(tf, 1);
+      return;
+    }
     if (syscall_num == SYS_WRITE_CONSOLE) {
       sys_write_console(tf);
     } else if (syscall_num == SYS_EXIT) {
@@ -781,11 +868,11 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_mount(tf);
     } else if (syscall_num == SYS_UMOUNT) {
       sys_umount(tf);
-    } else if (syscall_num == 0xFF) {
-      schedule(tf, 1);
+    } else if (syscall_num == SYS_GETPROGNAME) {
+      sys_get_progname(tf);
     } else {
       uart_puts("Unknown System Call Invoked!\n");
-      tf->regs[0] = -1; // Return error
+      tf->regs[0] = -ENOSYS;
     }
   } else if (ec == 0x20 || ec == 0x24 || ec == 0x00) {
     // EC = 0x20: Instruction Abort from a lower Exception Level
