@@ -1,0 +1,188 @@
+#!/bin/bash
+# build_tu21_tail_ref.sh — build GNU textutils-2.1's ORIGINAL tail as a
+# strict byte-exact reference for the HobbyOS tail port
+# (src/host/tail_parity.sh).
+#
+# Mirrors build_tu21_head_ref.sh: minimal config.h, the gnulib pieces tail
+# actually needs (extra: argmatch.c + human.c, since tail uses XARGMATCH
+# for --follow modes and human_readable in a seek-error diagnostic), the
+# generated xstrtoumax TU, and host stubs for symbols glibc provides
+# differently (version_etc, __fpending, strerror_r, etc.).
+set -e
+
+WD_ARG="${1:-/tmp}"
+BASE="$(cd "$(dirname "$0")/../../third_party/textutils-2.1" && pwd)"
+OUT="${1:-/tmp/tu21_tail_ref}"
+WD="$(mktemp -d /tmp/tu21tailref.XXXXXX)"
+
+cat > "$WD/config.h" <<'EOF'
+#define VERSION "2.1"
+#define PACKAGE "textutils"
+#define PACKAGE_BUGREPORT "BUG-TEXTUTILS@gnu.org"
+#define LOCALEDIR "/usr/share/locale"
+#define HAVE_UNISTD_H 1
+#define HAVE_STDLIB_H 1
+#define HAVE_MALLOC 1
+#define HAVE_REALLOC 1
+#define HAVE_STRING_H 1
+#define HAVE_ERRNO_H 1
+#define HAVE_FCNTL_H 1
+#define HAVE_GETOPT_H 1
+#define HAVE_GETOPT_LONG 1
+#define HAVE_SYS_TYPES_H 1
+#define HAVE_SYS_STAT_H 1
+#define HAVE_LIMITS_H 1
+#define HAVE_STDINT_H 1
+#define HAVE_MEMCHR 1
+#define STDC_HEADERS 1
+#define HAVE_LONG_LONG 1
+#define HAVE_LONG_LONG_INT 1
+#define HAVE_UNSIGNED_LONG_LONG_INT 1
+#define HAVE_INTTYPES_H 0
+#define HAVE_DECL_STRTOUMAX 1
+#define HAVE_DECL_STRTOIMAX 1
+#define HAVE_DECL_STRTOL 1
+#define HAVE_DECL_STRTOUL 1
+#define HAVE_DECL_STRTOLL 1
+#define HAVE_DECL_STRTOULL 1
+#define HAVE_DECL_STRCHR 1
+#define HAVE_DECL_STRCMP 1
+#define HAVE_DECL_STRDUP 1
+#define HAVE_DECL_STRNCPY 1
+#define HAVE_DECL_FREE 1
+#define HAVE_DECL_GETENV 1
+#define HAVE_DECL_STRCPY 1
+#define HAVE_DECL_MALLOC 1
+#define HAVE_DECL_STRCAT 1
+#define HAVE_DECL_REALLOC 1
+#define HAVE_DECL_MEMCMP 1
+#define HAVE_DECL_STRRCHR 1
+#define HAVE_DECL_STRSTR 1
+#define HAVE_DECL_STRNCMP 1
+#define HAVE_DECL_STRERROR_R 1
+#define HAVE_DECL___FPENDING 0
+#define HAVE_DECL_MEMCHR 1
+#define ENABLE_NLS 0
+#define HAVE_GETPAGESIZE 1
+#define HAVE_SLEEP 1
+#define HAVE_USLEEP 1
+#define PROTOTYPES 1
+#define __PROTOTYPES 1
+#define HAVE_UNSIGNED_LONG_LONG 1
+#define HAVE_LSTAT 1
+#define HAVE_STRTOULL 1
+#define HAVE_STRTOUMAX 1
+#define HAVE_SYS_IOCTL_H 1
+#define HAVE_SYS_PARAM_H 1
+#define HAVE_SYS_TIME_H 1
+#define HAVE_SYS_RESOURCE_H 1
+#define HAVE_SYS_SELECT_H 1
+#define HAVE_SIGACTION 1
+#define RETSIGTYPE void
+#define HAVE_LOCALTIME_R 1
+#define HAVE_DECL_LOCALTIME_R 1
+#define HAVE_DECL_NANOSLEEP 1
+#define HAVE_FSEEKO 1
+#define HAVE_FTELLO 1
+EOF
+
+cat > "$WD/unlocked-io.h" <<'EOF'
+/* stubs: modern glibc stdio needs no unlocked variants here */
+#define clearerr_unlocked clearerr
+#define feof_unlocked feof
+#define ferror_unlocked ferror
+#define fflush_unlocked fflush
+#define fgetc_unlocked fgetc
+#define fgets_unlocked fgets
+#define fputc_unlocked fputc
+#define fputs_unlocked fputs
+#define fread_unlocked fread
+#define fwrite_unlocked fwrite
+#define getc_unlocked getc
+#define getchar_unlocked getchar
+#define getline_unlocked getline
+#define putc_unlocked putc
+#define putchar_unlocked putchar
+#define puts_unlocked puts
+#define fseek_unlocked fseek
+#define ftell_unlocked ftell
+EOF
+
+cat > "$WD/stubs.c" <<'EOF'
+/* Host build stubs: replace gnulib bits that glibc provides differently. */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+extern char *program_name;
+void version_etc(FILE *stream, const char *command_name, const char *package,
+                 const char *version, const char *authors0, ...) { (void)stream; (void)command_name; (void)package; (void)version; (void)authors0; }
+void set_program_name(const char *n) { program_name = (char *)n; }
+char *quotearg_colon(const char *s) { return (char *)s; }
+const char *quote(const char *s) { return s; }
+size_t __fpending (FILE *fp) { (void)fp; return 0; }
+int fseeko(FILE *s, long off, int w) { return fseeko(s, off, w); }
+const char *quotearg_n_style(int n, int style, const char *s) { (void)n; (void)style; return s; }
+const char *quote_n(int n, const char *s) { (void)n; return s; }
+const int sys_nerr = 1;
+const char *const sys_errlist[1] = { "Unknown error" };
+EOF
+
+CFLAGS="-O1 -w -DHAVE_CONFIG_H"
+for i in "$WD" "$BASE/lib" "$BASE/src"; do
+    CFLAGS="$CFLAGS -I$i"
+done
+CFLAGS="$CFLAGS -DVA_START(args,lastarg)=va_start(args,lastarg)"
+CFLAGS="$CFLAGS -DVA_END(args)=va_end(args) -DHAVE_VPRINTF=1"
+CFLAGS="$CFLAGS -include string.h -include stdlib.h -include stdint.h"
+
+FILES=(
+    "$BASE/src/tail.c"
+    "$BASE/lib/getopt.c"
+    "$BASE/lib/getopt1.c"
+    "$BASE/lib/error.c"
+    "$BASE/lib/xstrtol.c"
+    "$BASE/lib/xmalloc.c"
+    "$BASE/lib/safe-read.c"
+    "$BASE/lib/posixver.c"
+    "$BASE/lib/closeout.c"
+    "$BASE/lib/argmatch.c"
+    "$BASE/lib/human.c"
+    "$WD/stubs.c"
+)
+
+mkdir -p "$(dirname "$OUT")"
+OBJS=()
+i=0
+for f in "${FILES[@]}"; do
+    o="$WD/ref_$i.o"
+    clang $CFLAGS -c "$f" -o "$o"
+    OBJS+=("$o")
+    i=$((i+1))
+done
+# xstrtoumax.c was generated by old gnulib's autoconf (sed-templated from
+# xstrtol.c); reproduce it: same TU, alternate macro bindings.  glibc's
+# inttypes.h typedefs clash with config.h's old-style uintmax_t, so we
+# declare strtoumax ourselves instead of including inttypes.h.
+cat > "$WD/strmax.h" <<'EOF'
+uintmax_t strtoumax (const char *nptr, char **endptr, int base);
+intmax_t strtoimax (const char *nptr, char **endptr, int base);
+EOF
+clang $CFLAGS -include "$WD/strmax.h" \
+    -D__strtol=strtoumax \
+    '-D__strtol_t=unsigned long' \
+    -D__xstrtol=xstrtoumax \
+    -c "$BASE/lib/xstrtol.c" -o "$WD/ref_xsm.o"
+OBJS+=("$WD/ref_xsm.o")
+cat > "$WD/strul.h" <<'EOF'
+unsigned long strtoul (const char *nptr, char **endptr, int base);
+EOF
+clang $CFLAGS -include "$WD/strul.h" \
+    -D__strtol=strtoul \
+    '-D__strtol_t=unsigned long' \
+    -D__xstrtol=xstrtoul \
+    -c "$BASE/lib/xstrtol.c" -o "$WD/ref_xul.o"
+OBJS+=("$WD/ref_xul.o")
+clang -o "$OUT" "${OBJS[@]}"
+echo "built $OUT"
+"$OUT" --version 2>/dev/null | head -1 || true

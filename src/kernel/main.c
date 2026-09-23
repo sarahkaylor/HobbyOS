@@ -218,6 +218,7 @@ void main(void) {
      process-table slots (the pid masks are 64-bit, so MAX_PROCESSES
      must stay <= 64). */
   load_and_run_program_in_scheduler("HEDTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("TAILTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("WCTEST.BIN", -1, -1, -1, -1);
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");

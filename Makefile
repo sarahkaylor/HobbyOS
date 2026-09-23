@@ -155,6 +155,8 @@ WC_BIN = $(OBJ_DIR)/wc.bin
 HEDGNU_BIN = $(OBJ_DIR)/hedgnu.bin
 WCTEST_BIN = $(OBJ_DIR)/wc_test.bin
 HEDTEST_BIN = $(OBJ_DIR)/head_test.bin
+TAILGN_BIN = $(OBJ_DIR)/tailgnu.bin
+TAILTEST_BIN = $(OBJ_DIR)/tail_test.bin
 LKSTEST_BIN = $(OBJ_DIR)/lseek_test.bin
 SORT_BIN = $(OBJ_DIR)/sort.bin
 UNIQ_BIN = $(OBJ_DIR)/uniq.bin
@@ -354,7 +356,7 @@ $(OBJ_DIR)/libc_%.o: src/libc/src/%.c $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o
+$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o
 	$(AR) rcs $@ $^
 
 # --- HELLO demo (Phase 0 gate): a main(argc, argv) program built against
@@ -598,6 +600,23 @@ $(HEDTEST_BIN): $(OBJ_DIR)/head_test.o $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/head_test.elf $(OBJ_DIR)/head_test.o $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/head_test.elf $(HEDTEST_BIN)
 
+$(OBJ_DIR)/tail_gnu.o: src/user/tail_gnu.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+# The GNU tail port links against the Phase-2/3 sysroot assembly, named
+# TAILGN.BIN to stay clear of the shell's legacy TAIL.BIN.
+$(TAILGN_BIN): $(OBJ_DIR)/tail_gnu.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/tail_gnu.elf $(OBJ_DIR)/tail_gnu.o $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/tail_gnu.elf $(TAILGN_BIN)
+
+$(OBJ_DIR)/tail_test.o: src/user/tail_test.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+$(TAILTEST_BIN): $(OBJ_DIR)/tail_test.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/tail_test.elf $(OBJ_DIR)/tail_test.o $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/tail_test.elf $(TAILTEST_BIN)
+
 $(OBJ_DIR)/lseek_test.o: src/user/lseek_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
@@ -716,7 +735,7 @@ endef
 
 $(foreach app,$(DESKTOP_APP_NAMES),$(eval $(call DESKTOP_APP_RULE,$(app))))
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(HEDTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(TAILTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -790,7 +809,9 @@ endif
 	$(MCOPY) -i disk.img $(TOUCH_BIN) ::/TOUCH.BIN
 	$(MCOPY) -i disk.img $(WC_BIN) ::/WC.BIN
 	$(MCOPY) -i disk.img $(HEDGNU_BIN) ::/HEDGNU.BIN
+	$(MCOPY) -i disk.img $(TAILGN_BIN) ::/TAILGN.BIN
 	$(MCOPY) -i disk.img $(HEDTEST_BIN) ::/HEDTEST.BIN
+	$(MCOPY) -i disk.img $(TAILTEST_BIN) ::/TAILTEST.BIN
 	$(MCOPY) -i disk.img $(WCTEST_BIN) ::/WCTEST.BIN
 	$(MCOPY) -i disk.img $(LKSTEST_BIN) ::/LKSTEST.BIN
 	$(MCOPY) -i disk.img $(SORT_BIN) ::/SORT.BIN
@@ -1036,6 +1057,26 @@ HEAD_PARITY_STRICT = head_parity_strict
 $(HEAD_PARITY_STRICT): $(HEAD_HOST)
 	@bash src/host/build_tu21_head_ref.sh $(OBJ_DIR)/tu21_head_ref
 	@bash src/host/head_parity.sh $(HEAD_HOST) $(OBJ_DIR)/tu21_head_ref
+
+# The ported tail built for the host (tail_host): ours except getopt_long
+# (hb_* via our getopt.h) and error() (host_hb_error.o).  tail_host is
+# raced byte-for-byte against GNU tail in src/host/tail_parity.sh.
+TAIL_HOST = obj/tail_host
+obj/host_tail.o: src/user/tail_gnu.c $(USER_HDRS) src/libc/include/*.h
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/libc/include -c $< -o $@
+$(TAIL_HOST): obj/host_tail.o obj/host_hb_getopt.o obj/host_hb_error.o
+	$(HOST_CC) -o $@ $^
+
+TAIL_PARITY = tail_parity_run
+$(TAIL_PARITY): $(TAIL_HOST)
+	@bash src/host/tail_parity.sh $(TAIL_HOST)
+
+# Strict byte-exact parity against textutils-2.1's original tail
+# (extra gnulib surface: argmatch.c + human.c, so its own build recipe).
+TAIL_PARITY_STRICT = tail_parity_strict
+$(TAIL_PARITY_STRICT): $(TAIL_HOST)
+	@bash src/host/build_tu21_tail_ref.sh $(OBJ_DIR)/tu21_tail_ref
+	@bash src/host/tail_parity.sh $(TAIL_HOST) $(OBJ_DIR)/tu21_tail_ref
 
 # Header-only sysroot set (stdarg/limits/stdbool/inttypes): compiled with
 # -Isrc/libc/include FIRST so the HobbyOS headers (not glibc's) resolve.

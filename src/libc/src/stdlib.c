@@ -518,6 +518,47 @@ int unsetenv(const char *name)
     return 0;
 }
 
+/* ---------------- assert support (_assert_fail) ---------------- */
+
+void abort(void);   /* defined below; forward decl so _assert_fail can call it */
+
+void _assert_fail(const char *file, int line, const char *func, const char *expr)
+{
+    extern long write(int fd, const void *buf, unsigned long n);
+    static const char pre[] = "assertion failed: ";
+    static const char in[] = " in ";
+    static const char op[] = " (";
+    static const char cl[] = "):";
+    static const char nl[] = "\n";
+    char num[24];
+    int i, len;
+
+    write(2, pre, sizeof pre - 1);
+    for (len = 0; expr && expr[len]; len++) ;
+    write(2, expr, (unsigned long)len);
+    write(2, in, sizeof in - 1);
+    for (len = 0; func && func[len]; len++) ;
+    write(2, func, (unsigned long)len);
+    write(2, op, sizeof op - 1);
+    for (len = 0; file && file[len]; len++) ;
+    write(2, file, (unsigned long)len);
+    write(2, cl, sizeof cl - 1);
+    /* decimal line number, into num */
+    i = 23;
+    num[i] = '\0';
+    if (line <= 0) {
+        num[--i] = '0';
+    } else {
+        for (; line > 0 && i > 0; i--) {
+            num[i - 1] = (char)('0' + line % 10);
+            line /= 10;
+        }
+    }
+    write(2, num + i, (unsigned long)(23 - i));
+    write(2, nl, 1);
+    abort();
+}
+
 /* ---------------- abort ---------------- */
 
 void abort(void)
