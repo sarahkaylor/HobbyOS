@@ -350,7 +350,7 @@ $(OBJ_DIR)/libc_%.o: src/libc/src/%.c $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libc_string.o
+$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o
 	$(AR) rcs $@ $^
 
 # --- HELLO demo (Phase 0 gate): a main(argc, argv) program built against
@@ -921,13 +921,17 @@ ERRNO_TEST = errno_test_host
 $(ERRNO_TEST): obj/host_errno_test.o obj/host_compat.o
 	$(HOST_CC) -o $@ $^
 
-# Phase 1: HobbyOS string.h subset compiled for the host (as hb_*) and
+# Phase 1: HobbyOS sysroot subset compiled for the host (as hb_*) and
 # property-tested byte-exact against glibc on literal + randomized inputs.
-obj/host_hb_string.o: src/libc/src/string.c src/libc/include/*.h
+obj/host_hb_%.o: src/libc/src/%.c src/libc/include/*.h
 	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
 
 STRING_TEST = libc_string_test_host
 $(STRING_TEST): obj/host_libc_string_test.o obj/host_hb_string.o
+	$(HOST_CC) -o $@ $^
+
+CTYPE_TEST = libc_ctype_test_host
+$(CTYPE_TEST): obj/host_libc_ctype_test.o obj/host_hb_ctype.o
 	$(HOST_CC) -o $@ $^
 
 # WM damage bookkeeping: line-level window repair + the base (damage) clip
@@ -961,7 +965,7 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(CTYPE_TEST) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
@@ -975,6 +979,7 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	$(HOST_RUN) ./$(GRAPHICS_LIB_TEST)
 	$(HOST_RUN) ./$(WINDOW_DAMAGE_TEST)
 	$(HOST_RUN) ./$(STRING_TEST)
+	$(HOST_RUN) ./$(CTYPE_TEST)
 	$(HOST_RUN) ./files_test_host
 	$(HOST_RUN) ./calc_test_host
 	$(HOST_RUN) ./clock_test_host

@@ -7,6 +7,7 @@
  * resolve to src/libc/include/. The declarations do not collide with the
  * hand-rolled per-app helpers in existing programs. */
 #include <string.h>
+#include <ctype.h>
 
 #include <stddef.h>
 #include <stdint.h>
