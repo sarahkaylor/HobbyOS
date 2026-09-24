@@ -1217,4 +1217,19 @@ deploy_intel:
 deploy_run_intel: deploy_intel
 	ssh -tt -o StrictHostKeyChecking=no -i ~/.ssh/mac_to_r1 root@192.168.10.174 "qm terminal 205"
 
-.PHONY: all clean run memtest fileio_test fork_test tests test unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel
+# --- C style (see STYLE.md; enforced by tools/cstyle.py) ---
+CSTYLE = python3 tools/cstyle.py
+
+format:
+	$(CSTYLE) format src
+
+check-format:
+	$(CSTYLE) check src
+
+style-diff:
+	$(CSTYLE) diff src
+
+style-test:
+	python3 tools/test_cstyle.py
+
+.PHONY: all clean run memtest fileio_test fork_test tests test unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test
