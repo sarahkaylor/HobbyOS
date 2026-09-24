@@ -1597,7 +1597,12 @@
 #define _REGEX_INCLUDE_LIMITS_H 1
 
 /* Define if you want regoff_t to be at least as wide POSIX requires. */
-#define _REGEX_LARGE_OFFSETS 1
+/* HobbyOS port: keep this undefined.  The regex engine linked into sed
+   from libc.a is built small-offset, so regoff_t must stay int on both
+   sides of the register arrays or struct re_registers/regmatch_t layouts
+   disagree and match offsets come back as garbage.  See the guard in
+   src/libc/include/regex.h.  */
+/* #undef _REGEX_LARGE_OFFSETS */
 
 /* For standard stat data types on VMS. */
 #define _USE_STD_STAT 1

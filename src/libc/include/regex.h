@@ -33,6 +33,21 @@ extern "C" {
 # define __USE_GNU 1
 #endif
 
+/* HobbyOS: the in-tree regex implementation (src/libc/src/regex.c and
+   friends) is always compiled without _REGEX_LARGE_OFFSETS, so regoff_t
+   is int and the register arrays hold int-sized elements.  A translation
+   unit that defines _REGEX_LARGE_OFFSETS would disagree with the engine
+   about regoff_t, struct re_registers and regmatch_t layouts, and the
+   engine would then write 4-byte register slots that the caller reads as
+   8-byte ones (or vice versa), corrupting match offsets in ways that
+   surface far away as "garbage" lengths.  Fail at compile time instead.
+   Ports whose generated config.h defines this macro (gnulib programs such
+   as sed and grep) must comment the define out; see the ported sed's
+   src/user/sed/config.h for the pattern.  */
+#ifdef _REGEX_LARGE_OFFSETS
+#error "_REGEX_LARGE_OFFSETS must not be defined: HobbyOS libc regex is built small-offset (see comment above)."
+#endif
+
 #ifdef _REGEX_LARGE_OFFSETS
 
 /* Use types and values that are wide enough to represent signed and
