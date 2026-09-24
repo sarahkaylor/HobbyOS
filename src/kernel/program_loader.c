@@ -285,7 +285,6 @@ int process_exec_current(struct trap_frame *tf, const char *path,
     fat16_close(&f);
     if (n <= 0)
         return -ENOENT;
-
     __builtin___clear_cache((char *)base, (char *)base + n);
 
     int i;
@@ -295,6 +294,15 @@ int process_exec_current(struct trap_frame *tf, const char *path,
     for (i = 0; args && args[i] && i < 255; i++)
         cur->args[i] = args[i];
     cur->args[i] = '\0';
+
+    /* Exec resets the address-space state: fresh heap top, no anonymous
+       mappings (the new image's data/bss start at the load cap). */
+    cur->heap_brk = USER_HEAP_BASE;
+    cur->anon_map_count = 0;
+    for (int i = 0; i < USER_ANON_MAX_REGS; i++) {
+        cur->anon_maps[i].addr = 0;
+        cur->anon_maps[i].len = 0;
+    }
 
     /* Redirect the running process into the fresh image. regs[0]=0 is the
        exec() success return that the new program never actually reads. */

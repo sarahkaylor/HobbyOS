@@ -43,6 +43,10 @@ int getppid(void);
 int execv(const char *path, char *const argv[]);
 int execve(const char *path, char *const argv[], char *const envp[]);
 
+/* Phase 4 (posix.md): heap break control. */
+int brk(void *addr);         /* 0 on success, -1 (ENOMEM) if out of range */
+void *sbrk(intptr_t delta);  /* old break on success, (void *)-1 on error */
+
 #define F_OK 0
 #define R_OK 4
 #define W_OK 2

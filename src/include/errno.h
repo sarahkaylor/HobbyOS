@@ -38,6 +38,7 @@
 #define EISDIR      21
 #define EINVAL      22
 #define ENFILE      23
+#define ENOTSUP     95
 #define EMFILE      24
 #define ENOTTY      25
 #define ETXTBSY     26

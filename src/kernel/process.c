@@ -36,7 +36,7 @@ static spinlock_t mem_lock;
 // 0x20000000; 30 blocks (960MB) is what the test-mode workload actually needs
 // (17+ programs plus forks and the RDMA provider loop) - the previous 16 on
 // x86_64 left the last-loaded test without a process.
-#define NUM_PHYS_BLOCKS 30
+#define NUM_PHYS_BLOCKS 32
 static uint8_t phys_blocks_used[NUM_PHYS_BLOCKS];
 
 // ---------------------------------------------------------------------------
@@ -198,9 +198,32 @@ int process_create(void) {
   }
 
   if (pid < 0) {
-    spinlock_release_irqrestore(&proc_lock, p_flags);
-    uart_puts("[KERNEL] process_create: no free process slots!\n");
-    return -1;
+    /* No free slots: reclaim zombies that can never be reaped —
+       processes whose parent no longer exists or never did (kernel
+       spawns set parent_pid = -1, so nearly every boot-loaded program
+       is in this class once it exits).  Zombies of a LIVE parent are
+       left alone: the parent may still waitpid() them. */
+    for (int i = 0; i < MAX_PROCESSES && pid < 0; i++) {
+      struct process *q = &proc_table[i];
+      if (q->state != PROC_STATE_EXITED)
+        continue;
+      struct process *par =
+        (q->parent_pid >= 0 && q->parent_pid < MAX_PROCESSES)
+          ? &proc_table[q->parent_pid] : 0;
+      if (par && par->state != PROC_STATE_FREE)
+        continue; /* live parent: keep its zombie */
+      if (q->phys_block_idx >= 0)
+        phys_blocks_used[q->phys_block_idx] = 0;
+      q->phys_block_idx = -1;
+      q->state = PROC_STATE_FREE;
+      pid = i;
+      proc_table[i].state = PROC_STATE_ALLOCATED;
+    }
+    if (pid < 0) {
+      spinlock_release_irqrestore(&proc_lock, p_flags);
+      uart_puts("[KERNEL] process_create: no free process slots!\n");
+      return -1;
+    }
   }
 
   // Allocate a physical block
@@ -210,6 +233,33 @@ int process_create(void) {
       block_idx = i;
       break;
     }
+  }
+
+  if (block_idx < 0) {
+    /* Physical pool exhausted: first reclaim unreapable zombies (dead or
+       missing parent — the boot test suite's ~40 parentless programs),
+       which is safe: no live parent can ever waitpid() them.  Zombies of
+       a LIVE parent are left for the parent to reap. */
+    for (int i = 0; i < MAX_PROCESSES && block_idx < 0; i++) {
+      struct process *q = &proc_table[i];
+      if (q->state != PROC_STATE_EXITED || i == pid)
+        continue;
+      struct process *par =
+        (q->parent_pid >= 0 && q->parent_pid < MAX_PROCESSES)
+          ? &proc_table[q->parent_pid] : 0;
+      if (par && par->state != PROC_STATE_FREE)
+        continue; /* live parent: keep its zombie */
+      /* Reclaim: release the zombie's physical block, then take it. */
+      if (q->phys_block_idx >= 0) {
+        phys_blocks_used[q->phys_block_idx] = 0;
+        block_idx = q->phys_block_idx;
+      }
+      q->phys_block_idx = -1;
+      q->state = PROC_STATE_FREE;
+      /* fds were already closed by process_exit; nothing else to free. */
+    }
+    if (block_idx >= 0)
+      phys_blocks_used[block_idx] = 1;
   }
 
   if (block_idx < 0) {
@@ -242,6 +292,12 @@ int process_create(void) {
   p->cwd[1] = '\0';
   p->num_open_fds = 0;
   p->wake_ms = 0;
+  p->heap_brk = USER_HEAP_BASE;
+  p->anon_map_count = 0;
+  for (int i = 0; i < USER_ANON_MAX_REGS; i++) {
+    p->anon_maps[i].addr = 0;
+    p->anon_maps[i].len = 0;
+  }
   for (int i = 0; i < MAX_OPEN_FDS; i++) {
     p->open_fds[i] = -1;
   }
@@ -733,6 +789,17 @@ int process_fork(struct trap_frame *tf) {
     }
   }
 
+  /* Child inherits the parent's heap top and anonymous mappings (like the
+     data segment: fork shares the address-space layout, exec re-sets it). */
+  child->heap_brk = parent->heap_brk;
+  child->anon_map_count = parent->anon_map_count;
+  if (child->anon_map_count > USER_ANON_MAX_REGS)
+    child->anon_map_count = USER_ANON_MAX_REGS;
+  for (int i = 0; i < child->anon_map_count; i++) {
+    child->anon_maps[i].addr = parent->anon_maps[i].addr;
+    child->anon_maps[i].len = parent->anon_maps[i].len;
+  }
+
   child->state = PROC_STATE_READY;
   spinlock_release_irqrestore(&proc_lock, flags);
   return child_pid;
@@ -931,4 +998,120 @@ uint64_t process_get_total_idle_ms(void) {
     }
     spinlock_release_irqrestore(&proc_lock, flags);
     return total;
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 4 (memory): per-process heap break and anonymous mmap.        */
+/*                                                                    */
+/* The whole 32MB user region is already mapped (2MB blocks), so      */
+/* brk/mmap/munmap are pure region-carving bookkeeping: no page-table */
+/* changes are needed. See the layout constants in process.h.         */
+/* ------------------------------------------------------------------ */
+
+/* brk(addr): set the heap break to addr if it is inside the heap
+ * region, else leave it unchanged and return -1 (ENOMEM).
+ * brk(0): return the current break.
+ * Returns 0 on success (or, for brk(0), the current break). */
+int64_t sys_brk(uint64_t addr)
+{
+    struct process *cur = current_process();
+    if (!cur)
+        return -EINVAL;
+
+    if (addr == 0)
+        return (int64_t)cur->heap_brk;
+
+    if (addr < USER_HEAP_BASE || addr > USER_HEAP_TOP)
+        return -ENOMEM;
+
+    cur->heap_brk = addr;
+    return 0;
+}
+
+/* First-fit carve of `len` bytes from the anonymous area. Returns the
+ * mapped VA (>= USER_MMAP_BASE) or a negative errno. addr: hint, only
+ * honored when non-zero; len is rounded up to a page cache line. */
+int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags)
+{
+    struct process *cur = current_process();
+    if (!cur)
+        return -EINVAL;
+    if (len == 0)
+        return -EINVAL;
+    /* Only anonymous private mappings are supported so far.  The flag
+       bits are the conventional glibc numbers (MAP_SHARED 1, MAP_PRIVATE
+       2, MAP_FIXED 0x10, MAP_ANONYMOUS 0x20) so sys/mman.h in the sysroot
+       can expose the standard values unchanged. */
+    if (!(flags & 0x20)) /* MAP_ANONYMOUS */
+        return -ENOTSUP;
+    if (flags & 0x10) /* MAP_FIXED: hint must be honored; not supported */
+        return -ENOTSUP;
+
+    /* Round length up to 16 bytes (conservative page-cache granularity). */
+    uint64_t rlen = (len + 15) & ~(uint64_t)15;
+    if (rlen < len)
+        return -ENOMEM; /* overflow */
+
+    uint64_t probe = USER_MMAP_BASE;
+    if (addr >= USER_MMAP_BASE && addr < USER_MMAP_LIMIT)
+        probe = addr;
+
+    uint64_t flags_local = spinlock_acquire_irqsave(&proc_lock);
+
+    /* First fit: walk the committed entries; find the first free span. */
+    while (probe + rlen <= USER_MMAP_LIMIT) {
+        int ok = 1;
+        for (int i = 0; i < cur->anon_map_count; i++) {
+            uint64_t s1 = cur->anon_maps[i].addr;
+            uint64_t e1 = s1 + cur->anon_maps[i].len;
+            uint64_t s2 = probe;
+            uint64_t e2 = probe + rlen;
+            if (s1 < e2 && s2 < e1) { /* overlap */
+                ok = 0;
+                probe = e1; /* skip past this committed region and retry */
+                break;
+            }
+        }
+        if (ok)
+            break;
+    }
+    if (probe + rlen > USER_MMAP_LIMIT) {
+        spinlock_release_irqrestore(&proc_lock, flags_local);
+        return -ENOMEM;
+    }
+    if (cur->anon_map_count >= USER_ANON_MAX_REGS) {
+        spinlock_release_irqrestore(&proc_lock, flags_local);
+        return -ENOMEM;
+    }
+
+    cur->anon_maps[cur->anon_map_count].addr = probe;
+    cur->anon_maps[cur->anon_map_count].len = rlen;
+    cur->anon_map_count++;
+    spinlock_release_irqrestore(&proc_lock, flags_local);
+
+    return (int64_t)probe;
+}
+
+/* munmap(addr, len): remove a committed anonymous region. */
+int sys_munmap(uint64_t addr, uint64_t len)
+{
+    struct process *cur = current_process();
+    if (!cur)
+        return -EINVAL;
+    if (addr < USER_MMAP_BASE || addr >= USER_MMAP_LIMIT)
+        return -EINVAL;
+
+    uint64_t flags_local = spinlock_acquire_irqsave(&proc_lock);
+    for (int i = 0; i < cur->anon_map_count; i++) {
+        if (cur->anon_maps[i].addr == addr) {
+            /* Compact the table. */
+            for (int j = i; j < cur->anon_map_count - 1; j++)
+                cur->anon_maps[j] = cur->anon_maps[j + 1];
+            cur->anon_map_count--;
+            spinlock_release_irqrestore(&proc_lock, flags_local);
+            return 0;
+        }
+    }
+    spinlock_release_irqrestore(&proc_lock, flags_local);
+    return -EINVAL;
 }

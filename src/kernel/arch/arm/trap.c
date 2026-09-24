@@ -1036,6 +1036,13 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_exec(tf);
     } else if (syscall_num == SYS_GETPROGNAME) {
       sys_get_progname(tf);
+    } else if (syscall_num == SYS_BRK) {
+      tf->regs[0] = sys_brk(tf->regs[0]);
+    } else if (syscall_num == SYS_MMAP) {
+      tf->regs[0] = sys_mmap(tf->regs[0], tf->regs[1], tf->regs[2],
+                            tf->regs[3]);
+    } else if (syscall_num == SYS_MUNMAP) {
+      tf->regs[0] = sys_munmap(tf->regs[0], tf->regs[1]);
     } else {
       uart_puts("Unknown System Call Invoked!\n");
       tf->regs[0] = -ENOSYS;

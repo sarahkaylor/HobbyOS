@@ -72,7 +72,12 @@
 /* 29..59 reserved for the posix.md Phase 2+ sequence (lseek, stat, ...). */
 #define SYS_GETPROGNAME   (60)
 
+/* Phase 4 (memory): per-process heap break + anonymous mmap. */
+#define SYS_BRK           (61)
+#define SYS_MMAP          (62)
+#define SYS_MUNMAP        (63)
+
 /* Highest defined syscall number. Dispatch tables are sized SYS_MAX + 1. */
-#define SYS_MAX           (60)
+#define SYS_MAX           (63)
 
 #endif /* SYSCALL_H */

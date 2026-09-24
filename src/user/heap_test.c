@@ -1,4 +1,5 @@
 #include "libc.h"
+#include <sys/mman.h>
 
 __attribute__((section(".text._start"))) void _start(void) {
     print("\n--- Heap Test Started ---\n");
@@ -85,6 +86,68 @@ __attribute__((section(".text._start"))) void _start(void) {
 
     free(p2);
     free(p3);
+
+    /* ============ Phase 4: brk/sbrk + anonymous mmap/munmap ============ */
+    print("--- Phase 4: memory syscalls ---\n");
+    {
+        int ph = 1;
+        void *brk0 = sbrk(0);
+        if ((intptr_t)brk0 == -1) { print("sbrk(0) FAILED!\n"); ph = 0; }
+        else {
+            void *b1 = sbrk(4096);
+            void *brk1 = sbrk(0);
+            if (b1 == (void *)-1 || (char *)brk1 != (char *)brk0 + 4096) {
+                print("sbrk(4096) FAILED!\n");
+                ph = 0;
+            } else {
+                print("sbrk growth verified\n");
+                sbrk(-4096); /* restore the break */
+            }
+        }
+
+        void *m1 = mmap(NULL, 1024 * 1024, PROT_READ | PROT_WRITE,
+                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (m1 == MAP_FAILED) {
+            print("mmap 1MB FAILED!\n");
+            ph = 0;
+        } else {
+            volatile char *m = (volatile char *)m1;
+            m[0] = 'A';
+            m[1024 * 1024 - 1] = 'Z';
+            if (m[0] == 'A' && m[1024 * 1024 - 1] == 'Z') {
+                print("mmap 1MB write/readback verified\n");
+            } else {
+                print("mmap 1MB readback FAILED!\n");
+                ph = 0;
+            }
+        }
+
+        void *m2 = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
+                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (m2 == MAP_FAILED) {
+            print("second mmap FAILED!\n");
+            ph = 0;
+        } else if (m1 != MAP_FAILED && m2 == m1) {
+            /* must not overlap the 1MB region */
+            print("mmap overlap FAILED!\n");
+            ph = 0;
+        } else {
+            print("mmap non-overlap verified\n");
+        }
+
+        if (m1 != MAP_FAILED) {
+            if (munmap(m1, 1024 * 1024) != 0) {
+                print("munmap FAILED!\n");
+                ph = 0;
+            } else {
+                print("munmap OK\n");
+            }
+        }
+
+        if (ph) print("PHASE4 MEM: all checks PASSED\n");
+        else print("PHASE4 MEM: FAILED\n");
+    }
+
     print("--- Heap Test Completed ---\n");
     exit(0);
 }

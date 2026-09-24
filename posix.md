@@ -204,9 +204,9 @@ Directory API stays on `SYS_READ_DIR` (index-based); `dirent.h` wraps it (Phase 
 
 | # | Syscall | Kernel work |
 |---|---|---|
-| 41 | `SYS_BRK` | per-process heap break in PCB; validate within 32 MB region before user stack reserve; `brk(0)` returns current. Migration path: keep the `_end` bump allocator for legacy apps; new libc `malloc` uses `brk` |
-| 42 | `SYS_MMAP` | `MAP_ANONYMOUS` only (prot R/W/X, addr hint honored-or-ignored). Implementation: carve from the region's unmapped pages — the L2 table already supports 4 KB pages, so this is region carving, **not** full VM. File-backed mmap **deferred** (needs FAT16 page-in; revisit with musl). Enforce `MAP_FAILED` = `(void*)-1` |
-| 43 | `SYS_MUNMAP` | un-carve; must not split kernel-managed stacks |
+| 61 | `SYS_BRK` | per-process heap break in PCB; validate within 32 MB region before user stack reserve; `brk(0)` returns current. Migration path: keep the `_end` bump allocator for legacy apps; new libc `malloc` uses `brk` |
+| 62 | `SYS_MMAP` | `MAP_ANONYMOUS` only (prot R/W/X, addr hint honored-or-ignored). Implementation: carve from the region's unmapped pages — the L2 table already supports 4 KB pages, so this is region carving, **not** full VM. File-backed mmap **deferred** (needs FAT16 page-in; revisit with musl). Enforce `MAP_FAILED` = `(void*)-1` |
+| 63 | `SYS_MUNMAP` | un-carve; must not split kernel-managed stacks |
 
 - `sys/mman.h`: `mmap, munmap, PROT_*, MAP_ANONYMOUS|MAP_PRIVATE` (MAP_SHARED deferred).
 - `stdlib.h`: `realloc` now real (Phase 1) on brk heap.

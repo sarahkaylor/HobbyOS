@@ -406,6 +406,12 @@ void execute_command(const char *cmd_line) {
                 while (kill(pid, 0) == 0) {
                     yield();
                 }
+                /* Reap the command's zombie: without this every shell
+                   command leaks a process-table slot until the shell
+                   itself exits, and after ~40 commands the table fills
+                   and later spawns fail ("Failed to create process"). */
+                int wstatus = 0;
+                waitpid(pid, &wstatus, 0);
             }
         }
     }

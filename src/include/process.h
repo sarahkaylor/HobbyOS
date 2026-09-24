@@ -59,6 +59,18 @@
 // region
 #define USER_VIRT_STACK ((USER_VIRT_BASE) + (USER_REGION_SIZE))
 
+/* Phase 4 memory layout inside the pre-mapped 32MB user region:
+     [ base, base+1MB )   loaded image (loader caps new images at 1MB)
+     [ base+1MB, base+24MB )  heap  (brk grows toward USER_HEAP_TOP)
+     [ base+24MB, base+28MB )  anonymous mmap area (first-fit carving)
+     [ base+28MB, base+32MB )   stack reserve
+   The whole region is pre-mapped, so brk/mmap are bookkeeping only. */
+#define USER_HEAP_BASE     (USER_VIRT_BASE + 0x00100000)
+#define USER_HEAP_TOP      (USER_VIRT_BASE + 0x01800000)
+#define USER_MMAP_BASE     (USER_VIRT_BASE + 0x01800000)
+#define USER_MMAP_LIMIT    (USER_VIRT_BASE + USER_REGION_SIZE - 0x00400000)
+#define USER_ANON_MAX_REGS 8
+
 // Physical address pool base for dynamically allocated process memory
 // This ensures user memory does not overlap with kernel code
 #ifdef __x86_64__
@@ -119,6 +131,15 @@ struct process {
   
   uint64_t wake_ms; /**< Timestamp in ms when this process should wake up */
 
+  /** Phase 4 (memory): current heap break (USER_VIRT_BASE + 0x100000 at
+   *  exec, grows toward heap_top; the region is pre-mapped, so this is
+   *  pure bookkeeping). */
+  uint64_t heap_brk;
+  /** Phase 4 (memory): anonymous mmap regions (first-fit carving from the
+   *  pre-mapped region; entries are VAs into the anon area). */
+  struct anon_region { uint64_t addr; uint64_t len; } anon_maps[8];
+  int anon_map_count;
+
   /**
    * Exit status in waitpid() layout: (exit_code & 0xff) << 8 for a normal
    * exit(), or the terminating signal number in the low byte for a
@@ -141,6 +162,12 @@ void process_free(int pid);
 // Blocking waitpid: reaps an exited child (returns its pid + status),
 // returns 0 with WNOHANG when children are running, -ECHILD when none.
 int process_waitpid(struct trap_frame *tf);
+/* Phase 4 (memory): per-process brk + anonymous mmap/munmap (region
+ * carving over the pre-mapped 32MB user region; see process.h layout).
+ * Return a VA or a negative errno (munmap: 0 or negative errno). */
+int64_t sys_brk(uint64_t addr);
+int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags);
+int sys_munmap(uint64_t addr, uint64_t len);
 
 // In-place exec (SYS_EXEC): replace the current image, keep pid/fds/cwd.
 int process_exec_current(struct trap_frame *tf, const char *path,
