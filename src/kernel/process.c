@@ -5,6 +5,7 @@
 #include "setjmp.h"
 #include "arch/cpu.h"
 #include "timer.h"
+#include "errno.h"
 #include <stdint.h>
 
 extern void uart_puts(const char *s);
@@ -352,7 +353,8 @@ void schedule(struct trap_frame *tf, int is_yield) {
     if (cur->state == PROC_STATE_RUNNING) {
       save_context(cur, tf);
       cur->state = PROC_STATE_READY;
-    } else if (cur->state == PROC_STATE_BLOCKED || cur->state == PROC_STATE_WAIT_SPAWN) {
+    } else if (cur->state == PROC_STATE_BLOCKED || cur->state == PROC_STATE_WAIT_SPAWN
+               || cur->state == PROC_STATE_WAIT_CHILD) {
       save_context(cur, tf);
     }
   }
@@ -463,6 +465,13 @@ void process_exit(struct trap_frame *tf) {
   
   uart_puts(buf);
 
+  // Record the exit status in waitpid() layout BEFORE the process becomes
+  // unreachable: SYS_EXIT passes the raw code in regs[0], so a normal
+  // exit(42) is delivered to the parent as (42 << 8).  The status lives
+  // in the PCB, which stays in PROC_STATE_EXITED until the parent reaps.
+  int code = (int)tf->regs[0];
+  cur->exit_status = (code & 0xff) << 8;
+
   // Close all open file descriptors
   for (int i = 0; i < MAX_OPEN_FDS; i++) {
     if (cur->open_fds[i] != -1) {
@@ -479,6 +488,50 @@ void process_exit(struct trap_frame *tf) {
   if (cur->phys_block_idx >= 0) {
     phys_blocks_used[cur->phys_block_idx] = 0;
     cur->phys_block_idx = -1;
+  }
+
+  /* Reap orphaned children: any EXITED child whose parent just died will
+     never be waitpid()ed (its parent is gone), so its PCB slot leaks
+     forever and eventually fills the process table ("Failed to create
+     process").  Free those slots here, like init reaping zombies. */
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *ch = &proc_table[i];
+    if (ch->parent_pid == cur->pid && ch->state == PROC_STATE_EXITED) {
+      ch->state = PROC_STATE_FREE;
+      ch->exit_status = 0;
+    }
+  }
+
+  // Wake a parent blocked in waitpid() and deliver the reap result.  The
+  // parent's saved context still holds the syscall args (context[0] = the
+  // requested pid, context[1] = the status pointer), so we can match a
+  // pid-specific wait and fill the user status in place, exactly like the
+  // spawn worker fills context[0] with the child pid.
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *parent = &proc_table[i];
+    if (parent->state != PROC_STATE_WAIT_CHILD ||
+        parent->pid != cur->parent_pid)
+      continue;
+    int want = (int)parent->context[0];
+    if (want > 0 && want != cur->pid)
+      continue; /* waiting on a different child */
+    parent->context[0] = cur->pid;         /* waitpid return value */
+    int *stp = (int *)parent->context[1];  /* saved arg1: status ptr */
+    /* Write the status through the PARENT'S physical region: this code
+       runs on the exiting CHILD's context (its user mapping is active),
+       so a user-virtual write would land in the child's freed memory.
+       The kernel addresses user memory by phys base (the loader does the
+       same), so translate VMA -> parent's phys. */
+    if (stp && (uint64_t)stp >= USER_VIRT_BASE) {
+      uint64_t off = (uint64_t)stp - USER_VIRT_BASE;
+      if (off + 4 <= USER_REGION_SIZE && parent->user_phys_base) {
+        *(int *)(parent->user_phys_base + off) = cur->exit_status;
+      }
+    }
+    parent->state = PROC_STATE_READY;
+    /* Deliver the reap: this child's PCB slot is now reusable. */
+    cur->state = PROC_STATE_FREE;
+    cur->exit_status = 0;
   }
   spinlock_release_irqrestore(&proc_lock, flags);
 
@@ -528,6 +581,9 @@ int process_kill(int pid) {
     return -1;
   }
   p->state = PROC_STATE_EXITED;
+  /* Deliver the terminating-signal status (low byte) so a waiting
+     parent can reap a kill with a signal-shaped status. */
+  p->exit_status = 9; /* SIGKILL */
   if (p->phys_block_idx >= 0) {
     phys_blocks_used[p->phys_block_idx] = 0;
     p->phys_block_idx = -1;
@@ -542,6 +598,93 @@ int process_kill(int pid) {
     }
   }
   process_wake_all();
+  return 0;
+}
+
+/**
+ * Implements the waitpid system call (SYS_WAITPID, 39).
+ *
+ * arg0: pid — > 0: that specific child; 0 or -1: any child of the caller
+ *        (process-group forms pid < -1 are treated as "any child": no
+ *        process groups exist yet).
+ * arg1: int *status — filled with the child's exit status in waitpid()
+ *        layout: (exit_code & 0xff) << 8 for a normal exit, or the
+ *        terminating signal number in the low byte for a killed child.
+ * arg2: options — WNOHANG (1) returns 0 immediately when children are
+ *        still running instead of blocking.
+ *
+ * Returns the reaped child's pid, 0 (WNOHANG, children alive),
+ * -ECHILD (no children), or blocks the caller in PROC_STATE_WAIT_CHILD
+ * until a matching child exits.
+ *
+ * Blocking delivery: the parent's saved context (context[0] = pid return,
+ * context[1] = the still-saved status pointer) is filled by process_exit()
+ * when the child dies, exactly like the spawn worker fills context[0].
+ */
+int process_waitpid(struct trap_frame *tf)
+{
+  int want_pid = (int)tf->regs[0];
+  int *status = (int *)tf->regs[1];
+  int options = (int)tf->regs[2];
+  struct process *caller = current_process();
+
+  if (!caller)
+    return -EINVAL;
+
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *p = &proc_table[i];
+    if (p->state != PROC_STATE_EXITED)
+      continue;
+    if (p->parent_pid != caller->pid)
+      continue;
+    if (want_pid > 0 && p->pid != want_pid)
+      continue;
+
+    /* Found an exited child: reap it. The PCB slot is reused as FREE
+       (the physical block was already freed at exit). */
+    int child_pid = p->pid;
+    int st = p->exit_status;
+    p->state = PROC_STATE_FREE;
+    p->exit_status = 0;
+    spinlock_release_irqrestore(&proc_lock, flags);
+
+    if (status && (uint64_t)status >= USER_VIRT_BASE &&
+        (uint64_t)status + 4 <= USER_VIRT_BASE + USER_REGION_SIZE) {
+      *status = st;
+    }
+    return child_pid;
+  }
+
+  /* No exited child matches. Any children still around (running or
+     blocked)? */
+  int has_child = 0;
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *p = &proc_table[i];
+    if (p->state != PROC_STATE_FREE && p->parent_pid == caller->pid) {
+      has_child = 1;
+      break;
+    }
+  }
+  if (!has_child) {
+    spinlock_release_irqrestore(&proc_lock, flags);
+    return -ECHILD;
+  }
+  if (options & 1) { /* WNOHANG */
+    spinlock_release_irqrestore(&proc_lock, flags);
+    return 0;
+  }
+
+  /* Block until a matching child exits. process_exit() delivers the
+     result into this saved context and flips us to READY; the syscall
+     then resumes in user mode with context[0] as the return value. */
+  save_context(caller, tf);
+  caller->state = PROC_STATE_WAIT_CHILD;
+  spinlock_release_irqrestore(&proc_lock, flags);
+  schedule(tf, 0);
+
+  /* Unreachable while blocked: the wake path re-enters user space
+     directly, it never returns through this handler. */
   return 0;
 }
 

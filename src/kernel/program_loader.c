@@ -3,6 +3,7 @@
 #include "setjmp.h"
 #include "process.h"
 #include "arch/cpu.h"
+#include "errno.h"
 
 
 extern struct process *process_get_pcb(int pid);
@@ -148,9 +149,7 @@ int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int st
 
     uint64_t phys_base = process_get_phys_base(pid);
 
-    uart_puts("Calling fat16_read...\n");
     int bytes_read = fat16_read(&f, (void*)phys_base, MAX_PROGRAM_SIZE);
-    uart_puts("fat16_read finished!\n");
     if (bytes_read <= 0) {
         uart_puts("Failed to read ");
         uart_puts(filename);
@@ -225,4 +224,81 @@ int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int st
 
     process_set_entry(pid, USER_VIRT_BASE, USER_VIRT_BASE + USER_REGION_SIZE);
     return pid;
+}
+
+/**
+ * SYS_EXEC: replace the CURRENT process's image with a program loaded from
+ * disk, preserving its pid, fd table, cwd and stack (POSIX exec semantics).
+ *
+ * The process is running when this runs, so the new image is read over the
+ * old one IN PLACE in the process's existing physical region (nothing needs
+ * re-mapping); the trap frame's ELR is redirected to USER_VIRT_BASE so the
+ * syscall return enters the new program. On success this never returns to
+ * the caller; on failure the caller continues running with errno set.
+ *
+ * Returns 0 on success (i.e. the new image was installed and the saved
+ * frame now points at it), or a negative errno (-ENOENT, -ENOEXEC) leaving
+ * the current program intact.
+ */
+int process_exec_current(struct trap_frame *tf, const char *path,
+                         const char *args, const char *new_name)
+{
+    struct process *cur = current_process();
+    if (!cur)
+        return -EINVAL;
+    if (!path)
+        return -EINVAL;
+
+    /* Resolve a relative path against the process cwd (which the shell
+       keeps as e.g. "/" or "/subdir" — no trailing slash). */
+    char abs[128];
+    int al = 0;
+    if (path[0] == '/') {
+        for (al = 0; path[al] && al < 126; al++) abs[al] = path[al];
+    } else {
+        int cl = 0;
+        for (; cur->cwd[cl] && cl < 96; cl++) abs[cl] = cur->cwd[cl];
+        if (cl > 0 && abs[cl - 1] != '/') abs[cl++] = '/';
+        for (int pi = 0; path[pi] && cl < 126; pi++, cl++) abs[cl] = path[pi];
+        al = cl;
+    }
+    abs[al] = '\0';
+
+    struct file f;
+    if (fat16_open(abs, &f) != 0)
+        return -ENOENT;
+    if (program_too_large(&f)) {
+        fat16_close(&f);
+        return -ENOEXEC;
+    }
+
+    uint64_t base = cur->user_phys_base;
+
+    /* Zero image + bss [0, MAX_PROGRAM_SIZE) so the new program starts
+       with clean bss (spawn gets a freshly-allocated region; exec reuses).
+       The stack lives near the TOP of the 32MB region, untouched here. */
+    volatile uint8_t *zp = (volatile uint8_t *)base;
+    for (uint32_t z = 0; z < MAX_PROGRAM_SIZE; z++)
+        zp[z] = 0;
+
+    int n = fat16_read(&f, (void *)base, MAX_PROGRAM_SIZE);
+    fat16_close(&f);
+    if (n <= 0)
+        return -ENOENT;
+
+    __builtin___clear_cache((char *)base, (char *)base + n);
+
+    int i;
+    for (i = 0; new_name && new_name[i] && i < 31; i++)
+        cur->name[i] = new_name[i];
+    cur->name[i] = '\0';
+    for (i = 0; args && args[i] && i < 255; i++)
+        cur->args[i] = args[i];
+    cur->args[i] = '\0';
+
+    /* Redirect the running process into the fresh image. regs[0]=0 is the
+       exec() success return that the new program never actually reads. */
+    tf->elr = USER_VIRT_BASE;
+    tf->regs[0] = 0;
+    return 0;
 }

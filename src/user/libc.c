@@ -308,4 +308,35 @@ int chdir(const char *path) {
   return (int)errno_ret(syscall(SYS_CHDIR, (long)path, 0, 0, 0));
 }
 
+#ifndef HOST_TEST
+/* Phase 3 (posix.md): process identity, waitpid, exec.  These are
+ * device-only — host tests use glibc's own versions. */
+
+int getpid(void) {
+  return (int)syscall(SYS_GETPID, 0, 0, 0, 0);
+}
+
+int getppid(void) {
+  return (int)syscall(SYS_GETPPID, 0, 0, 0, 0);
+}
+
+int waitpid(int pid, int *status, int options) {
+  return (int)errno_ret(syscall(SYS_WAITPID, (long)pid, (long)status,
+                                (long)options, 0));
+}
+
+int wait(int *status) {
+  return waitpid(-1, status, 0);
+}
+
+int execv(const char *path, char *const argv[]) {
+  return (int)errno_ret(syscall(SYS_EXEC, (long)path, (long)argv, 0, 0));
+}
+
+int execve(const char *path, char *const argv[], char *const envp[]) {
+  (void)envp; /* a fixed empty environment; POSIX exec keeps env semantics */
+  return execv(path, argv);
+}
+#endif
+
 

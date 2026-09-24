@@ -83,7 +83,21 @@ static void run_head(const char *args, const char *stdin_data, char *out,
         return;
     }
     close(in_p[0]);
-    write(in_p[1], stdin_data, strlen(stdin_data));
+    /* feed stdin, then let the child see EOF.  Retry the write briefly:
+       under full-suite process-table pressure a spawn can race the pipe
+       reader accounting, and an EAGAIN/PIPE error here must not turn
+       into an empty-output failure. */
+    {
+        size_t off = 0, len = strlen(stdin_data);
+        int tries = 0;
+        while (off < len && tries < 50) {
+            ssize_t w = write(in_p[1], stdin_data + off, len - off);
+            if (w > 0) { off += (size_t)w; tries = 0; continue; }
+            if (w == 0) break;
+            usleep(2000); /* 2 ms; wait for the reader to attach */
+            tries++;
+        }
+    }
     close(in_p[1]);
 
     close(out_p[1]);
@@ -95,6 +109,14 @@ static void run_head(const char *args, const char *stdin_data, char *out,
     }
     close(out_p[0]);
     out[n] = '\0';
+    /* Reap the child so its process slot is recycled for the next spawn
+       (the child has exited by now: EOF on the stdout pipe).  Without
+       this, every spawned child stays EXITED and piles up until the
+       parent exits, starving later spawns of process-table slots. */
+    if (pid > 0) {
+        int ws = 0;
+        waitpid(pid, &ws, 0);
+    }
 }
 
 static void write_file(const char *path, const char *content)

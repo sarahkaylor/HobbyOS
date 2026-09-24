@@ -738,6 +738,91 @@ static void sys_get_progname(struct trap_frame *tf) {
   }
 }
 
+/* SYS_GETPID / SYS_GETPPID: trivial process-identity queries. */
+static void sys_getpid(struct trap_frame *tf) {
+  struct process *cur = current_process();
+  tf->regs[0] = cur ? (uint64_t)cur->pid : (uint64_t)-1;
+}
+static void sys_getppid(struct trap_frame *tf) {
+  struct process *cur = current_process();
+  tf->regs[0] = cur ? (uint64_t)cur->parent_pid : (uint64_t)-1;
+}
+
+/* SYS_WAITPID: shared implementation in process.c (blocks in
+ * PROC_STATE_WAIT_CHILD; result delivered into the saved context). */
+static void sys_waitpid(struct trap_frame *tf) {
+  tf->regs[0] = process_waitpid(tf);
+}
+
+/* SYS_EXEC: replace the current image. Shared loader helper in
+ * program_loader.c; here we only marshal the user path/argv. */
+static int u_strcpy(const char *src, char *dst, int cap)
+{
+  uint64_t base = (uint64_t)src;
+  if (!src || base < USER_VIRT_BASE ||
+      base >= USER_VIRT_BASE + USER_REGION_SIZE)
+    return 0;
+  if (base + cap - 1 >= USER_VIRT_BASE + USER_REGION_SIZE)
+    return 0;
+  int i = 0;
+  for (; i < cap - 1 && src[i]; i++)
+    dst[i] = src[i];
+  dst[i] = '\0';
+  return 1;
+}
+
+static void sys_exec(struct trap_frame *tf) {
+  const char *path = (const char *)tf->regs[5]; // rdi
+  char *const *argv = (char *const *)tf->regs[4]; // rsi
+  struct process *cur = current_process();
+  if (!cur) {
+    tf->regs[0] = -EINVAL;
+    return;
+  }
+
+  char pathbuf[32];
+  if (!u_strcpy(path, pathbuf, sizeof pathbuf)) {
+    tf->regs[0] = -EFAULT;
+    return;
+  }
+
+  char namebuf[32];
+  int named = 0;
+  if (argv && u_strcpy((const char *)argv[0], namebuf, sizeof namebuf)
+      && namebuf[0])
+    named = 1;
+  if (!named) {
+    const char *b = pathbuf;
+    for (int i = 0; pathbuf[i]; i++)
+      if (pathbuf[i] == '/')
+        b = &pathbuf[i + 1];
+    int i = 0;
+    for (; b[i] && i < 31; i++)
+      namebuf[i] = b[i];
+    namebuf[i] = '\0';
+  }
+
+  char argbuf[256];
+  int alen = 0;
+  argbuf[0] = '\0';
+  if (argv) {
+    for (int ai = 1; argv[ai] != 0 && alen < 251; ai++) {
+      char one[64];
+      if (!u_strcpy((const char *)argv[ai], one, sizeof one))
+        break;
+      if (alen)
+        argbuf[alen++] = ' ';
+      for (int k = 0; one[k] && alen < 255; k++)
+        argbuf[alen++] = one[k];
+    }
+  }
+  argbuf[alen] = '\0';
+
+  int r = process_exec_current(tf, pathbuf, argbuf, namebuf);
+  if (r < 0)
+    tf->regs[0] = (uint64_t)r; /* success redirects elr + sets regs[0]=0 */
+}
+
 /* --- Syscall dispatch ------------------------------------------------
  * Keyed off the shared SYS_* constants from syscall.h (single source of
  * truth — the numbers can never drift between libc.c and the trap
@@ -817,6 +902,14 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_mount(tf);
     } else if (syscall_num == SYS_UMOUNT) {
       sys_umount(tf);
+    } else if (syscall_num == SYS_GETPID) {
+      sys_getpid(tf);
+    } else if (syscall_num == SYS_GETPPID) {
+      sys_getppid(tf);
+    } else if (syscall_num == SYS_WAITPID) {
+      sys_waitpid(tf);
+    } else if (syscall_num == SYS_EXEC) {
+      sys_exec(tf);
     } else if (syscall_num == SYS_GETPROGNAME) {
       sys_get_progname(tf);
     } else {

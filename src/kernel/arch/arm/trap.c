@@ -556,6 +556,97 @@ static void sys_mkdir(struct trap_frame *tf) {
 
 /* mount(source, target): mount an NFS export ("A.B.C.D:/export") at a
  * directory of the FAT volume.  The mount point is created when missing. */
+
+/* Copy a NUL-terminated user string into kernel memory with full bounds
+ * checking. Returns 1 on success (dst NUL-terminated), 0 on bad ptr. */
+static int u_strcpy(const char *src, char *dst, int cap)
+{
+  uint64_t base = (uint64_t)src;
+  if (!src || base < USER_VIRT_BASE ||
+      base >= USER_VIRT_BASE + USER_REGION_SIZE)
+    return 0;
+  if (base + cap - 1 >= USER_VIRT_BASE + USER_REGION_SIZE)
+    return 0;
+  int i = 0;
+  for (; i < cap - 1 && src[i]; i++)
+    dst[i] = src[i];
+  dst[i] = '\0';
+  return 1;
+}
+
+static void sys_getpid(struct trap_frame *tf)
+{
+  struct process *cur = current_process();
+  tf->regs[0] = cur ? (uint64_t)cur->pid : (uint64_t)-1;
+}
+
+static void sys_getppid(struct trap_frame *tf)
+{
+  struct process *cur = current_process();
+  tf->regs[0] = cur ? (uint64_t)cur->parent_pid : (uint64_t)-1;
+}
+
+static void sys_waitpid(struct trap_frame *tf)
+{
+  tf->regs[0] = process_waitpid(tf);
+}
+
+static void sys_exec(struct trap_frame *tf)
+{
+  const char *path = (const char *)tf->regs[0];
+  char *const *argv = (char *const *)tf->regs[1];
+  struct process *cur = current_process();
+  if (!cur) {
+    tf->regs[0] = -EINVAL;
+    return;
+  }
+
+  char pathbuf[32];
+  if (!u_strcpy(path, pathbuf, sizeof pathbuf)) {
+    tf->regs[0] = -EFAULT;
+    return;
+  }
+
+  /* argv[0] names the new program (POSIX: may differ from the path). */
+  char namebuf[32];
+  int named = 0;
+  if (argv && u_strcpy((const char *)argv[0], namebuf, sizeof namebuf)
+      && namebuf[0])
+    named = 1;
+  if (!named) {
+    /* fall back to the basename of the path */
+    const char *b = pathbuf;
+    for (int i = 0; pathbuf[i]; i++)
+      if (pathbuf[i] == '/')
+        b = &pathbuf[i + 1];
+    int i = 0;
+    for (; b[i] && i < 31; i++)
+      namebuf[i] = b[i];
+    namebuf[i] = '\0';
+  }
+
+  /* argv[1..] become the args string (space-joined, like spawn). */
+  char argbuf[256];
+  int alen = 0;
+  argbuf[0] = '\0';
+  if (argv) {
+    for (int ai = 1; argv[ai] != 0 && alen < 251; ai++) {
+      char one[64];
+      if (!u_strcpy((const char *)argv[ai], one, sizeof one))
+        break;
+      if (alen)
+        argbuf[alen++] = ' ';
+      for (int k = 0; one[k] && alen < 255; k++)
+        argbuf[alen++] = one[k];
+    }
+  }
+  argbuf[alen] = '\0';
+
+  int r = process_exec_current(tf, pathbuf, argbuf, namebuf);
+  if (r < 0)
+    tf->regs[0] = (uint64_t)r;  /* success redirects elr + sets regs[0]=0 */
+}
+
 static void sys_mount(struct trap_frame *tf) {
   const char *source = (const char *)tf->regs[0];
   const char *target = (const char *)tf->regs[1];
@@ -935,6 +1026,14 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_mount(tf);
     } else if (syscall_num == SYS_UMOUNT) {
       sys_umount(tf);
+    } else if (syscall_num == SYS_GETPID) {
+      sys_getpid(tf);
+    } else if (syscall_num == SYS_GETPPID) {
+      sys_getppid(tf);
+    } else if (syscall_num == SYS_WAITPID) {
+      sys_waitpid(tf);
+    } else if (syscall_num == SYS_EXEC) {
+      sys_exec(tf);
     } else if (syscall_num == SYS_GETPROGNAME) {
       sys_get_progname(tf);
     } else {

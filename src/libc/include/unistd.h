@@ -37,6 +37,12 @@ int isatty(int fd);
 unsigned int sleep(unsigned int seconds);
 int usleep(unsigned int useconds);
 
+/* Phase 3 (posix.md): process identity + exec. */
+int getpid(void);
+int getppid(void);
+int execv(const char *path, char *const argv[]);
+int execve(const char *path, char *const argv[], char *const envp[]);
+
 #define F_OK 0
 #define R_OK 4
 #define W_OK 2

@@ -519,7 +519,7 @@ int fat16_open(const char* filename, struct file* f) {
     struct fat16_dir_entry entry;
     uint32_t sector = 0;
     uint32_t offset = 0;
-    
+
     if (fat16_resolve_path(abs_path, &entry, &sector, &offset) == 0) {
         f->type = FILE_TYPE_FAT16;
         f->fat16.entry = entry;

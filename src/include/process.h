@@ -16,6 +16,7 @@
 #define PROC_STATE_EXITED 4    // Process has finished execution
 #define PROC_STATE_BLOCKED 5   // Process is waiting for an event
 #define PROC_STATE_WAIT_SPAWN 6 // Process is waiting for a spawn to complete
+#define PROC_STATE_WAIT_CHILD 7 // Process is blocked in waitpid() until a child exits
 
 // Kernel memory region (0GB to 1GB)
 #define KERNEL_START 0x00000000
@@ -117,6 +118,14 @@ struct process {
   int num_open_fds; /**< Number of currently open file descriptors */
   
   uint64_t wake_ms; /**< Timestamp in ms when this process should wake up */
+
+  /**
+   * Exit status in waitpid() layout: (exit_code & 0xff) << 8 for a normal
+   * exit(), or the terminating signal number in the low byte for a
+   * killed process. Set by process_exit/process_kill; read and cleared
+   * by process_waitpid().
+   */
+  int exit_status;
 };
 
 // Initialize the process subsystem and zero out the process table.
@@ -128,6 +137,14 @@ int process_create(void);
 
 // Free a previously created process.
 void process_free(int pid);
+
+// Blocking waitpid: reaps an exited child (returns its pid + status),
+// returns 0 with WNOHANG when children are running, -ECHILD when none.
+int process_waitpid(struct trap_frame *tf);
+
+// In-place exec (SYS_EXEC): replace the current image, keep pid/fds/cwd.
+int process_exec_current(struct trap_frame *tf, const char *path,
+                         const char *args, const char *new_name);
 
 // Create a kernel thread running in EL1t.
 int process_create_kernel(void (*entry)(void*), void *arg);

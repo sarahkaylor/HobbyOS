@@ -64,6 +64,15 @@ int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, con
 int pipe(int fds[2]);
 int get_args(char *buf, int size);
 
+/* Phase 3 (posix.md): process identity + waitpid/exec. Implemented in
+ * src/user/libc.c (device only — the host has real glibc ones). */
+int getpid(void);
+int getppid(void);
+int waitpid(int pid, int *status, int options);
+int wait(int *status);
+int execv(const char *path, char *const argv[]);
+int execve(const char *path, char *const argv[], char *const envp[]);
+
 /* Native extension: copy the process's binary name into buf (for crt0
  * argv[0]). Returns 0 on success, -1 on failure (no errno set). */
 int get_progname(char *buf, int size);

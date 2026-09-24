@@ -157,6 +157,8 @@ WCTEST_BIN = $(OBJ_DIR)/wc_test.bin
 HEDTEST_BIN = $(OBJ_DIR)/head_test.bin
 TAILGN_BIN = $(OBJ_DIR)/tailgnu.bin
 TAILTEST_BIN = $(OBJ_DIR)/tail_test.bin
+PROCCHLD_BIN = $(OBJ_DIR)/proc_child.bin
+PROCTEST_BIN = $(OBJ_DIR)/proc_test.bin
 LKSTEST_BIN = $(OBJ_DIR)/lseek_test.bin
 SORT_BIN = $(OBJ_DIR)/sort.bin
 UNIQ_BIN = $(OBJ_DIR)/uniq.bin
@@ -617,6 +619,22 @@ $(TAILTEST_BIN): $(OBJ_DIR)/tail_test.o $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/tail_test.elf $(OBJ_DIR)/tail_test.o $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/tail_test.elf $(TAILTEST_BIN)
 
+# Phase 3 (processes): PROCCHLD.BIN is the exec target, PROCTEST.BIN the
+# fork/exec/waitpid acceptance test.
+$(OBJ_DIR)/proc_child.o: src/user/proc_child.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+$(PROCCHLD_BIN): $(OBJ_DIR)/proc_child.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/proc_child.elf $(OBJ_DIR)/proc_child.o $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/proc_child.elf $(PROCCHLD_BIN)
+
+$(OBJ_DIR)/proc_test.o: src/user/proc_test.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+$(PROCTEST_BIN): $(OBJ_DIR)/proc_test.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/proc_test.elf $(OBJ_DIR)/proc_test.o $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/proc_test.elf $(PROCTEST_BIN)
+
 $(OBJ_DIR)/lseek_test.o: src/user/lseek_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
@@ -735,7 +753,7 @@ endef
 
 $(foreach app,$(DESKTOP_APP_NAMES),$(eval $(call DESKTOP_APP_RULE,$(app))))
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(TAILTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -810,8 +828,10 @@ endif
 	$(MCOPY) -i disk.img $(WC_BIN) ::/WC.BIN
 	$(MCOPY) -i disk.img $(HEDGNU_BIN) ::/HEDGNU.BIN
 	$(MCOPY) -i disk.img $(TAILGN_BIN) ::/TAILGN.BIN
+	$(MCOPY) -i disk.img $(PROCCHLD_BIN) ::/PROCCHLD.BIN
 	$(MCOPY) -i disk.img $(HEDTEST_BIN) ::/HEDTEST.BIN
 	$(MCOPY) -i disk.img $(TAILTEST_BIN) ::/TAILTEST.BIN
+	$(MCOPY) -i disk.img $(PROCTEST_BIN) ::/PROCTEST.BIN
 	$(MCOPY) -i disk.img $(WCTEST_BIN) ::/WCTEST.BIN
 	$(MCOPY) -i disk.img $(LKSTEST_BIN) ::/LKSTEST.BIN
 	$(MCOPY) -i disk.img $(SORT_BIN) ::/SORT.BIN

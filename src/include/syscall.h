@@ -59,6 +59,15 @@
 #define SYS_LSEEK         (29)
 #define SYS_STAT          (30)
 #define SYS_FSTAT         (31)
+#define SYS_TRUNCATE      (32)
+#define SYS_FTRUNCATE     (33)
+#define SYS_DUP           (34)
+#define SYS_DUP2          (35)
+#define SYS_ACCESS        (36)
+#define SYS_GETPID        (37)
+#define SYS_GETPPID       (38)
+#define SYS_WAITPID       (39)
+#define SYS_EXEC          (40)
 
 /* 29..59 reserved for the posix.md Phase 2+ sequence (lseek, stat, ...). */
 #define SYS_GETPROGNAME   (60)
