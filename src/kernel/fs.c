@@ -18,489 +18,485 @@ extern void print_int(int val);
  * Sets up the global file table and initializes the FS spinlock.
  */
 void fs_init(void) {
-    spinlock_init(&fs_lock);
-    for (int i = 0; i < MAX_GLOBAL_FILES; i++) {
-        global_file_table[i].type = FILE_TYPE_EMPTY;
-        global_file_table[i].ref_count = 0;
-        spinlock_init(&global_file_table[i].lock);
-    }
+  spinlock_init(&fs_lock);
+  for (int i = 0; i < MAX_GLOBAL_FILES; i++) {
+    global_file_table[i].type = FILE_TYPE_EMPTY;
+    global_file_table[i].ref_count = 0;
+    spinlock_init(&global_file_table[i].lock);
+  }
 }
 
 /**
  * Allocates a free file structure from the global file table.
- * 
+ *
  * Returns:
  *   Pointer to the allocated struct file, or 0 if no slots are available.
  */
 static struct file *file_alloc(void) {
-    uint64_t flags = spinlock_acquire_irqsave(&fs_lock);
-    for (int i = 0; i < MAX_GLOBAL_FILES; i++) {
-        if (global_file_table[i].type == FILE_TYPE_EMPTY) {
-            global_file_table[i].ref_count = 1;
-            global_file_table[i].type = FILE_TYPE_FAT16; // Default to something non-empty
-            spinlock_release_irqrestore(&fs_lock, flags);
-            return &global_file_table[i];
-        }
+  uint64_t flags = spinlock_acquire_irqsave(&fs_lock);
+  for (int i = 0; i < MAX_GLOBAL_FILES; i++) {
+    if (global_file_table[i].type == FILE_TYPE_EMPTY) {
+      global_file_table[i].ref_count = 1;
+      global_file_table[i].type = FILE_TYPE_FAT16; // Default to something non-empty
+      spinlock_release_irqrestore(&fs_lock, flags);
+      return &global_file_table[i];
     }
-    spinlock_release_irqrestore(&fs_lock, flags);
-    return 0;
+  }
+  spinlock_release_irqrestore(&fs_lock, flags);
+  return 0;
 }
 
 /**
  * Calculates the global file descriptor index for a given file structure pointer.
- * 
+ *
  * Parameters:
  *   f - Pointer to a file structure in the global table.
- * 
+ *
  * Returns:
  *   Index in the global_file_table, or -1 if the pointer is null.
  */
 static int get_global_fd(struct file *f) {
-    if (!f) return -1;
-    return (int)(f - global_file_table);
+  if (!f) return -1;
+  return (int)(f - global_file_table);
 }
 
 /**
  * Opens a file by name and assigns a local file descriptor to the current process.
- * 
+ *
  * Parameters:
  *   filename - Name of the file to open.
- * 
+ *
  * Returns:
  *   Local file descriptor index on success, or -1 on failure.
  */
 int file_open(struct process *cur, const char *filename) {
-    if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -1;
+  if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -1;
 
-    struct file *f = file_alloc();
-    if (!f) return -1;
+  struct file *f = file_alloc();
+  if (!f) return -1;
 
-    /* Paths under an NFS mount are opened by the NFS client; everything
-     * else falls through to FAT-16. */
-    int routed = vfs_open_routed(filename, f);
-    if (routed < 0) {
-        f->type = FILE_TYPE_EMPTY;
-        f->ref_count = 0;
-        return -1;
+  /* Paths under an NFS mount are opened by the NFS client; everything
+   * else falls through to FAT-16. */
+  int routed = vfs_open_routed(filename, f);
+  if (routed < 0) {
+    f->type = FILE_TYPE_EMPTY;
+    f->ref_count = 0;
+    return -1;
+  }
+  if (routed == 0 && fat16_open(filename, f) != 0) {
+    f->type = FILE_TYPE_EMPTY;
+    f->ref_count = 0;
+    return -1;
+  }
+
+  int fd = -1;
+  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+    if (cur->open_fds[i] == -1) {
+      cur->open_fds[i] = get_global_fd(f);
+      cur->num_open_fds++;
+      fd = i;
+      break;
     }
-    if (routed == 0 && fat16_open(filename, f) != 0) {
-        f->type = FILE_TYPE_EMPTY;
-        f->ref_count = 0;
-        return -1;
-    }
+  }
 
-    int fd = -1;
-    for (int i = 0; i < MAX_OPEN_FDS; i++) {
-        if (cur->open_fds[i] == -1) {
-            cur->open_fds[i] = get_global_fd(f);
-            cur->num_open_fds++;
-            fd = i;
-            break;
-        }
-    }
+  if (fd == -1) {
+    if (f->type == FILE_TYPE_FAT16) fat16_close(f);
+    f->type = FILE_TYPE_EMPTY;
+    f->ref_count = 0;
+  }
 
-    if (fd == -1) {
-        if (f->type == FILE_TYPE_FAT16) fat16_close(f);
-        f->type = FILE_TYPE_EMPTY;
-        f->ref_count = 0;
-    }
-
-    return fd;
+  return fd;
 }
 
 int file_connect(struct process *cur, uint32_t ip, uint16_t port, int protocol) {
-    if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -1;
+  if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -1;
 
-    struct file *f = file_alloc();
-    if (!f) return -1;
+  struct file *f = file_alloc();
+  if (!f) return -1;
 
-    struct socket_pcb* pcb = net_socket_create(protocol);
-    if (!pcb) {
-        f->type = FILE_TYPE_EMPTY;
-        f->ref_count = 0;
-        return -1;
+  struct socket_pcb* pcb = net_socket_create(protocol);
+  if (!pcb) {
+    f->type = FILE_TYPE_EMPTY;
+    f->ref_count = 0;
+    return -1;
+  }
+
+  if (net_socket_connect(pcb, ip, port) != 0) {
+    net_socket_close(pcb);
+    f->type = FILE_TYPE_EMPTY;
+    f->ref_count = 0;
+    return -1;
+  }
+
+  f->type = FILE_TYPE_SOCKET;
+  f->socket.pcb = pcb;
+
+  int fd = -1;
+  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+    if (cur->open_fds[i] == -1) {
+      cur->open_fds[i] = get_global_fd(f);
+      cur->num_open_fds++;
+      fd = i;
+      break;
     }
+  }
 
-    if (net_socket_connect(pcb, ip, port) != 0) {
-        net_socket_close(pcb);
-        f->type = FILE_TYPE_EMPTY;
-        f->ref_count = 0;
-        return -1;
-    }
+  if (fd == -1) {
+    net_socket_close(pcb);
+    f->type = FILE_TYPE_EMPTY;
+    f->ref_count = 0;
+  }
 
-    f->type = FILE_TYPE_SOCKET;
-    f->socket.pcb = pcb;
-
-    int fd = -1;
-    for (int i = 0; i < MAX_OPEN_FDS; i++) {
-        if (cur->open_fds[i] == -1) {
-            cur->open_fds[i] = get_global_fd(f);
-            cur->num_open_fds++;
-            fd = i;
-            break;
-        }
-    }
-
-    if (fd == -1) {
-        net_socket_close(pcb);
-        f->type = FILE_TYPE_EMPTY;
-        f->ref_count = 0;
-    }
-
-    return fd;
+  return fd;
 }
 
 /* --- Phase 3: lseek/stat --------------------------------------------- */
 
 int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
-                  int *errp)
-{
-    if (!p || fd < 0 || fd >= MAX_OPEN_FDS) { *errp = EBADF; return -1; }
-    int g_fd = p->open_fds[fd];
-    if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) { *errp = EBADF; return -1; }
-    struct file *f = &global_file_table[g_fd];
+                  int *errp) {
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) { *errp = EBADF; return -1; }
+  int g_fd = p->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) { *errp = EBADF; return -1; }
+  struct file *f = &global_file_table[g_fd];
 
-    int64_t base, size;
-    if (f->type == FILE_TYPE_FAT16) {
-        base = f->fat16.cursor;
-        size = f->fat16.entry.file_size;
-    } else if (f->type == FILE_TYPE_NFS) {
-        base = f->nfs.cursor;
-        size = f->nfs.size;
-    } else {
-        *errp = (f->type == FILE_TYPE_PIPE) ? ESPIPE : EINVAL;
-        return -1;
-    }
+  int64_t base, size;
+  if (f->type == FILE_TYPE_FAT16) {
+    base = f->fat16.cursor;
+    size = f->fat16.entry.file_size;
+  } else if (f->type == FILE_TYPE_NFS) {
+    base = f->nfs.cursor;
+    size = f->nfs.size;
+  } else {
+    *errp = (f->type == FILE_TYPE_PIPE) ? ESPIPE : EINVAL;
+    return -1;
+  }
 
-    int64_t newpos;
-    switch (whence) {
-    case 0: newpos = offset;          break;  /* SEEK_SET */
-    case 1: newpos = base + offset;   break;  /* SEEK_CUR */
-    case 2: newpos = size + offset;   break;  /* SEEK_END */
-    default: *errp = EINVAL; return -1;
-    }
-    if (newpos < 0) { *errp = EINVAL; return -1; }
+  int64_t newpos;
+  switch (whence) {
+  case 0: newpos = offset;          break;  /* SEEK_SET */
+  case 1: newpos = base + offset;   break;  /* SEEK_CUR */
+  case 2: newpos = size + offset;   break;  /* SEEK_END */
+  default: *errp = EINVAL; return -1;
+  }
+  if (newpos < 0) { *errp = EINVAL; return -1; }
 
-    uint64_t flags = spinlock_acquire_irqsave(&f->lock);
-    if (f->type == FILE_TYPE_FAT16) f->fat16.cursor = (uint32_t)newpos;
-    else                            f->nfs.cursor  = (uint32_t)newpos;
-    spinlock_release_irqrestore(&f->lock, flags);
-    *errp = 0;
-    return newpos;
+  uint64_t flags = spinlock_acquire_irqsave(&f->lock);
+  if (f->type == FILE_TYPE_FAT16) f->fat16.cursor = (uint32_t)newpos;
+  else                            f->nfs.cursor  = (uint32_t)newpos;
+  spinlock_release_irqrestore(&f->lock, flags);
+  *errp = 0;
+  return newpos;
 }
 
-static void k_stat_fill(struct k_stat *st, unsigned long mode, long size)
-{
-    st->st_dev = 0;
-    st->st_ino = 0;
-    st->st_mode = mode;
-    st->st_nlink = 1;
-    st->st_uid = 0;
-    st->st_gid = 0;
-    st->st_rdev = 0;
-    st->st_size = size;
-    st->st_blksize = 512;
-    st->st_blocks = (size + 511) / 512;
-    st->st_atime = st->st_mtime = st->st_ctime = 0;
+static void k_stat_fill(struct k_stat *st, unsigned long mode, long size) {
+  st->st_dev = 0;
+  st->st_ino = 0;
+  st->st_mode = mode;
+  st->st_nlink = 1;
+  st->st_uid = 0;
+  st->st_gid = 0;
+  st->st_rdev = 0;
+  st->st_size = size;
+  st->st_blksize = 512;
+  st->st_blocks = (size + 511) / 512;
+  st->st_atime = st->st_mtime = st->st_ctime = 0;
 }
 
-int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp)
-{
-    if (!p || fd < 0 || fd >= MAX_OPEN_FDS) { *errp = EBADF; return -1; }
-    int g_fd = p->open_fds[fd];
-    if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) { *errp = EBADF; return -1; }
-    struct file *f = &global_file_table[g_fd];
-    switch (f->type) {
-    case FILE_TYPE_FAT16:
-        k_stat_fill(st,
-                    (f->fat16.entry.attr & 0x10)
-                        ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
-                    f->fat16.entry.file_size);
-        return 0;
-    case FILE_TYPE_NFS:
-        k_stat_fill(st, f->nfs.is_dir ? (K_S_IFDIR | 0755)
-                                      : (K_S_IFREG | 0644),
-                    f->nfs.size);
-        return 0;
-    case FILE_TYPE_PIPE:
-        k_stat_fill(st, K_S_IFIFO | 0600, 0);
-        return 0;
-    case FILE_TYPE_SOCKET:
-        k_stat_fill(st, K_S_IFSOCK | 0600, 0);
-        return 0;
-    default:
-        *errp = EBADF;
-        return -1;
-    }
+int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) { *errp = EBADF; return -1; }
+  int g_fd = p->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) { *errp = EBADF; return -1; }
+  struct file *f = &global_file_table[g_fd];
+  switch (f->type) {
+  case FILE_TYPE_FAT16:
+    k_stat_fill(st,
+                (f->fat16.entry.attr & 0x10)
+                    ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
+                f->fat16.entry.file_size);
+    return 0;
+  case FILE_TYPE_NFS:
+    k_stat_fill(st, f->nfs.is_dir ? (K_S_IFDIR | 0755)
+                                  : (K_S_IFREG | 0644),
+                f->nfs.size);
+    return 0;
+  case FILE_TYPE_PIPE:
+    k_stat_fill(st, K_S_IFIFO | 0600, 0);
+    return 0;
+  case FILE_TYPE_SOCKET:
+    k_stat_fill(st, K_S_IFSOCK | 0600, 0);
+    return 0;
+  default:
+    *errp = EBADF;
+    return -1;
+  }
 }
 
 int file_stat_path(struct process *p, const char *path, struct k_stat *st,
-                   int *errp)
-{
-    (void)p;
-    if (!path) { *errp = EINVAL; return -1; }
-    char abs[256];
-    if (vfs_abs_path(path, abs, sizeof abs) != 0) { *errp = EINVAL; return -1; }
-    struct fat16_dir_entry entry;
-    if (fat16_resolve_path(abs, &entry, 0, 0) != 0) { *errp = ENOENT; return -1; }
-    k_stat_fill(st,
-                (entry.attr & 0x10) ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
-                entry.file_size);
-    return 0;
+                   int *errp) {
+  (void)p;
+  if (!path) { *errp = EINVAL; return -1; }
+  char abs[256];
+  if (vfs_abs_path(path, abs, sizeof abs) != 0) { *errp = EINVAL; return -1; }
+  struct fat16_dir_entry entry;
+  if (fat16_resolve_path(abs, &entry, 0, 0) != 0) { *errp = ENOENT; return -1; }
+  k_stat_fill(st,
+              (entry.attr & 0x10) ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
+              entry.file_size);
+  return 0;
 }
 
 /**
  * Closes a local file descriptor and releases its reference to the global file.
- * 
+ *
  * Parameters:
  *   fd - Local file descriptor index.
- * 
+ *
  * Returns:
  *   0 on success, -1 if the descriptor is invalid.
  */
 int file_close(struct process *cur, int fd) {
-    if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
+  if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
 
-    int g_fd = cur->open_fds[fd];
-    if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
+  int g_fd = cur->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
 
-    struct file *f = &global_file_table[g_fd];
-    
-    uint64_t flags = spinlock_acquire_irqsave(&f->lock);
-    
-    if (f->type == FILE_TYPE_PIPE) {
-        pipe_close(f->pipe.ptr, f->pipe.end);
+  struct file *f = &global_file_table[g_fd];
+
+  uint64_t flags = spinlock_acquire_irqsave(&f->lock);
+
+  if (f->type == FILE_TYPE_PIPE) {
+    pipe_close(f->pipe.ptr, f->pipe.end);
+  }
+
+  f->ref_count--;
+  if (f->ref_count == 0) {
+    if (f->type == FILE_TYPE_FAT16) {
+      fat16_close(f);
+    } else if (f->type == FILE_TYPE_SOCKET) {
+      net_socket_close(f->socket.pcb);
     }
-    
-    f->ref_count--;
-    if (f->ref_count == 0) {
-        if (f->type == FILE_TYPE_FAT16) {
-            fat16_close(f);
-        } else if (f->type == FILE_TYPE_SOCKET) {
-            net_socket_close(f->socket.pcb);
-        }
-        /* FILE_TYPE_NFS keeps no backend state: nothing to release. */
-        f->type = FILE_TYPE_EMPTY;
-    }
-    spinlock_release_irqrestore(&f->lock, flags);
+    /* FILE_TYPE_NFS keeps no backend state: nothing to release. */
+    f->type = FILE_TYPE_EMPTY;
+  }
+  spinlock_release_irqrestore(&f->lock, flags);
 
-    cur->open_fds[fd] = -1;
-    cur->num_open_fds--;
-    return 0;
+  cur->open_fds[fd] = -1;
+  cur->num_open_fds--;
+  return 0;
 }
 
 void fs_close_global(int g_fd) {
-    if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return;
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return;
 
-    struct file *f = &global_file_table[g_fd];
-    
-    uint64_t flags = spinlock_acquire_irqsave(&f->lock);
-    if (f->type == FILE_TYPE_EMPTY) {
-        spinlock_release_irqrestore(&f->lock, flags);
-        return;
-    }
+  struct file *f = &global_file_table[g_fd];
 
-    if (f->type == FILE_TYPE_PIPE) {
-        pipe_close(f->pipe.ptr, f->pipe.end);
-    }
-
-    f->ref_count--;
-    if (f->ref_count == 0) {
-        if (f->type == FILE_TYPE_FAT16) {
-            fat16_close(f);
-        } else if (f->type == FILE_TYPE_SOCKET) {
-            net_socket_close(f->socket.pcb);
-        }
-        f->type = FILE_TYPE_EMPTY;
-    }
+  uint64_t flags = spinlock_acquire_irqsave(&f->lock);
+  if (f->type == FILE_TYPE_EMPTY) {
     spinlock_release_irqrestore(&f->lock, flags);
+    return;
+  }
+
+  if (f->type == FILE_TYPE_PIPE) {
+    pipe_close(f->pipe.ptr, f->pipe.end);
+  }
+
+  f->ref_count--;
+  if (f->ref_count == 0) {
+    if (f->type == FILE_TYPE_FAT16) {
+      fat16_close(f);
+    } else if (f->type == FILE_TYPE_SOCKET) {
+      net_socket_close(f->socket.pcb);
+    }
+    f->type = FILE_TYPE_EMPTY;
+  }
+  spinlock_release_irqrestore(&f->lock, flags);
 }
 
 /**
  * Reads data from a file descriptor into a buffer.
  * Supports FAT16 files and Pipes.
- * 
+ *
  * Parameters:
  *   fd   - Local file descriptor index.
  *   buf  - Destination buffer in memory.
  *   size - Number of bytes to read.
  *   tf   - Trap frame (used for blocking reads in pipes).
- * 
+ *
  * Returns:
  *   Number of bytes read, or -1 on failure.
  */
 int file_read(struct process *cur, int fd, void *buf, int size, struct trap_frame *tf) {
-    if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
+  if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
 
-    int g_fd = cur->open_fds[fd];
-    if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
+  int g_fd = cur->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
 
-    struct file *f = &global_file_table[g_fd];
-    if (f->type == FILE_TYPE_FAT16) {
-        return fat16_read(f, buf, size);
-    } else if (f->type == FILE_TYPE_NFS) {
-        if (f->nfs.is_dir) return -1;               /* use read_dir for dirs */
-        if (size <= 0) return 0;
-        const struct nfs_mount *m = nfs_mount_at(f->nfs.mount_idx);
-        if (!m) return -1;
-        uint64_t left = f->nfs.size > f->nfs.cursor
-                            ? f->nfs.size - f->nfs.cursor : 0;
-        uint32_t want = (uint32_t)size;
-        if ((uint64_t)want > left) want = (uint32_t)left;
-        if (want == 0) return 0;
-        int got = nfs_read_file(m, &f->nfs.fh, f->nfs.cursor, buf, want);
-        if (got > 0) f->nfs.cursor += (uint32_t)got;
-        return got;
-    } else if (f->type == FILE_TYPE_PIPE) {
-        if (f->pipe.end != 0) return -1; // Read end only
-        return pipe_read(f->pipe.ptr, buf, size, tf);
-    } else if (f->type == FILE_TYPE_SOCKET) {
-        return net_socket_recv(f->socket.pcb, buf, size);
-    }
-    return -1;
+  struct file *f = &global_file_table[g_fd];
+  if (f->type == FILE_TYPE_FAT16) {
+    return fat16_read(f, buf, size);
+  } else if (f->type == FILE_TYPE_NFS) {
+    if (f->nfs.is_dir) return -1;               /* use read_dir for dirs */
+    if (size <= 0) return 0;
+    const struct nfs_mount *m = nfs_mount_at(f->nfs.mount_idx);
+    if (!m) return -1;
+    uint64_t left = f->nfs.size > f->nfs.cursor
+                        ? f->nfs.size - f->nfs.cursor : 0;
+    uint32_t want = (uint32_t)size;
+    if ((uint64_t)want > left) want = (uint32_t)left;
+    if (want == 0) return 0;
+    int got = nfs_read_file(m, &f->nfs.fh, f->nfs.cursor, buf, want);
+    if (got > 0) f->nfs.cursor += (uint32_t)got;
+    return got;
+  } else if (f->type == FILE_TYPE_PIPE) {
+    if (f->pipe.end != 0) return -1; // Read end only
+    return pipe_read(f->pipe.ptr, buf, size, tf);
+  } else if (f->type == FILE_TYPE_SOCKET) {
+    return net_socket_recv(f->socket.pcb, buf, size);
+  }
+  return -1;
 }
 
 /**
  * Checks how many bytes are available to read from a file descriptor.
- * 
+ *
  * Returns:
  *   Number of bytes available, or -1 if closed/EOF.
  */
 int file_available(struct process *cur, int fd) {
-    if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
+  if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
 
-    int g_fd = cur->open_fds[fd];
-    if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
+  int g_fd = cur->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
 
-    struct file *f = &global_file_table[g_fd];
-    if (f->type == FILE_TYPE_FAT16) {
-        // FAT16 files just return size minus cursor
-        return f->fat16.entry.file_size - f->fat16.cursor;
-    } else if (f->type == FILE_TYPE_NFS) {
-        if (f->nfs.is_dir) return -1;
-        if (f->nfs.size <= f->nfs.cursor) return 0;
-        uint64_t left = f->nfs.size - f->nfs.cursor;
-        return left > 0x7FFFFFFF ? 0x7FFFFFFF : (int)left;
-    } else if (f->type == FILE_TYPE_PIPE) {
-        if (f->pipe.end != 0) return -1; // Read end only
-        return pipe_available(f->pipe.ptr);
-    } else if (f->type == FILE_TYPE_SOCKET) {
-        uint32_t avail = f->socket.pcb->rx_tail - f->socket.pcb->rx_head;
-        return avail;
-    }
-    return -1;
+  struct file *f = &global_file_table[g_fd];
+  if (f->type == FILE_TYPE_FAT16) {
+    // FAT16 files just return size minus cursor
+    return f->fat16.entry.file_size - f->fat16.cursor;
+  } else if (f->type == FILE_TYPE_NFS) {
+    if (f->nfs.is_dir) return -1;
+    if (f->nfs.size <= f->nfs.cursor) return 0;
+    uint64_t left = f->nfs.size - f->nfs.cursor;
+    return left > 0x7FFFFFFF ? 0x7FFFFFFF : (int)left;
+  } else if (f->type == FILE_TYPE_PIPE) {
+    if (f->pipe.end != 0) return -1; // Read end only
+    return pipe_available(f->pipe.ptr);
+  } else if (f->type == FILE_TYPE_SOCKET) {
+    uint32_t avail = f->socket.pcb->rx_tail - f->socket.pcb->rx_head;
+    return avail;
+  }
+  return -1;
 }
 
 /**
  * Writes data from a buffer to a file descriptor.
  * Supports FAT16 files and Pipes.
- * 
+ *
  * Parameters:
  *   fd   - Local file descriptor index.
  *   buf  - Source buffer in memory.
  *   size - Number of bytes to write.
  *   tf   - Trap frame (used for blocking writes in pipes).
- * 
+ *
  * Returns:
  *   Number of bytes written, or -1 on failure.
  */
 int file_write(struct process *cur, int fd, const void *buf, int size, struct trap_frame *tf) {
-    if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
+  if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
 
-    int g_fd = cur->open_fds[fd];
-    if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
+  int g_fd = cur->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
 
-    struct file *f = &global_file_table[g_fd];
-    if (f->type == FILE_TYPE_FAT16) {
-        return fat16_write(f, buf, size);
-    } else if (f->type == FILE_TYPE_NFS) {
-        return -1;      /* NFS mounts are read-only */
-    } else if (f->type == FILE_TYPE_PIPE) {
-        if (f->pipe.end != 1) {
-            uart_puts("file_write: wrong pipe end: ");
-            print_int(f->pipe.end);
-            uart_puts("\n");
-            return -1;
-        }
-        return pipe_write(f->pipe.ptr, buf, size, tf);
-    } else if (f->type == FILE_TYPE_SOCKET) {
-        return net_socket_send(f->socket.pcb, buf, size);
+  struct file *f = &global_file_table[g_fd];
+  if (f->type == FILE_TYPE_FAT16) {
+    return fat16_write(f, buf, size);
+  } else if (f->type == FILE_TYPE_NFS) {
+    return -1;      /* NFS mounts are read-only */
+  } else if (f->type == FILE_TYPE_PIPE) {
+    if (f->pipe.end != 1) {
+      uart_puts("file_write: wrong pipe end: ");
+      print_int(f->pipe.end);
+      uart_puts("\n");
+      return -1;
     }
-    return -1;
+    return pipe_write(f->pipe.ptr, buf, size, tf);
+  } else if (f->type == FILE_TYPE_SOCKET) {
+    return net_socket_send(f->socket.pcb, buf, size);
+  }
+  return -1;
 }
 
 /**
  * Creates an anonymous pipe and assigns two file descriptors (read and write).
- * 
+ *
  * Parameters:
  *   fds - Array to store the two local file descriptors (fds[0]=read, fds[1]=write).
- * 
+ *
  * Returns:
  *   0 on success, -1 on failure.
  */
 int file_pipe(struct process *cur, int fds[2]) {
-    if (!cur || cur->num_open_fds + 2 > MAX_OPEN_FDS) return -1;
+  if (!cur || cur->num_open_fds + 2 > MAX_OPEN_FDS) return -1;
 
-    struct file *f0 = file_alloc();
-    struct file *f1 = file_alloc();
-    if (!f0 || !f1) {
-        if (f0) f0->type = FILE_TYPE_EMPTY;
-        if (f1) f1->type = FILE_TYPE_EMPTY;
-        return -1;
+  struct file *f0 = file_alloc();
+  struct file *f1 = file_alloc();
+  if (!f0 || !f1) {
+    if (f0) f0->type = FILE_TYPE_EMPTY;
+    if (f1) f1->type = FILE_TYPE_EMPTY;
+    return -1;
+  }
+
+  if (pipe_alloc(&f0, &f1) != 0) {
+    f0->type = FILE_TYPE_EMPTY;
+    f1->type = FILE_TYPE_EMPTY;
+    return -1;
+  }
+
+  int user_fd0 = -1, user_fd1 = -1;
+  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+    if (cur->open_fds[i] == -1) {
+      if (user_fd0 == -1) user_fd0 = i;
+      else if (user_fd1 == -1) {
+        user_fd1 = i;
+        break;
+      }
     }
+  }
 
-    if (pipe_alloc(&f0, &f1) != 0) {
-        f0->type = FILE_TYPE_EMPTY;
-        f1->type = FILE_TYPE_EMPTY;
-        return -1;
-    }
+  if (user_fd0 == -1 || user_fd1 == -1) {
+    // This should have been caught by the num_open_fds check, but just in case
+    return -1;
+  }
 
-    int user_fd0 = -1, user_fd1 = -1;
-    for (int i = 0; i < MAX_OPEN_FDS; i++) {
-        if (cur->open_fds[i] == -1) {
-            if (user_fd0 == -1) user_fd0 = i;
-            else if (user_fd1 == -1) {
-                user_fd1 = i;
-                break;
-            }
-        }
-    }
+  cur->open_fds[user_fd0] = get_global_fd(f0);
+  cur->open_fds[user_fd1] = get_global_fd(f1);
+  cur->num_open_fds += 2;
 
-    if (user_fd0 == -1 || user_fd1 == -1) {
-        // This should have been caught by the num_open_fds check, but just in case
-        return -1;
-    }
-
-    cur->open_fds[user_fd0] = get_global_fd(f0);
-    cur->open_fds[user_fd1] = get_global_fd(f1);
-    cur->num_open_fds += 2;
-
-    fds[0] = user_fd0;
-    fds[1] = user_fd1;
-    return 0;
+  fds[0] = user_fd0;
+  fds[1] = user_fd1;
+  return 0;
 }
 
 /**
  * Increments the reference count of a global file descriptor.
  * Used during process fork to share open file descriptors with the child.
- * 
+ *
  * Parameters:
  *   global_fd - Index in the global_file_table.
  */
 void fs_reopen(int global_fd) {
-    if (global_fd < 0 || global_fd >= MAX_GLOBAL_FILES) return;
-    struct file *f = &global_file_table[global_fd];
-    uint64_t flags = spinlock_acquire_irqsave(&f->lock);
-    if (f->type != FILE_TYPE_EMPTY) {
-        f->ref_count++;
-        if (f->type == FILE_TYPE_PIPE) {
-            pipe_reopen(f->pipe.ptr, f->pipe.end);
-        }
+  if (global_fd < 0 || global_fd >= MAX_GLOBAL_FILES) return;
+  struct file *f = &global_file_table[global_fd];
+  uint64_t flags = spinlock_acquire_irqsave(&f->lock);
+  if (f->type != FILE_TYPE_EMPTY) {
+    f->ref_count++;
+    if (f->type == FILE_TYPE_PIPE) {
+      pipe_reopen(f->pipe.ptr, f->pipe.end);
     }
-    spinlock_release_irqrestore(&f->lock, flags);
+  }
+  spinlock_release_irqrestore(&f->lock, flags);
 }
 
 int file_mkdir(struct process *cur, const char *path) {
-    if (!cur || !path) return -1;
-    return vfs_mkdir(path);
+  if (!cur || !path) return -1;
+  return vfs_mkdir(path);
 }

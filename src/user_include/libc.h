@@ -100,9 +100,9 @@ struct virtio_input_event {
 int get_events(void *buf, int max_events);
 int available(int fd);
 struct sys_dirent {
-    char name[32];
-    uint8_t attr;
-    uint32_t size;
+  char name[32];
+  uint8_t attr;
+  uint32_t size;
 } __attribute__((packed));
 
 int read_dir(const char *path, int index, struct sys_dirent *ent);
@@ -113,59 +113,59 @@ int chdir(const char *path);
 int parse_args(char *arg_str, char *argv[], int max_args);
 
 struct sys_meminfo {
-    uint64_t total_bytes;
-    uint64_t free_bytes;
+  uint64_t total_bytes;
+  uint64_t free_bytes;
 };
 
 struct sys_procinfo {
-    int pid;
-    int parent_pid;
-    int state;
-    char name[32];
+  int pid;
+  int parent_pid;
+  int state;
+  char name[32];
 };
 
 struct sys_netinfo {
-    uint32_t ip;
-    uint32_t subnet_mask;
-    uint32_t gateway;
-    uint8_t mac[6];
+  uint32_t ip;
+  uint32_t subnet_mask;
+  uint32_t gateway;
+  uint8_t mac[6];
 };
 
 struct sys_cpuinfo {
-    uint64_t uptime_ms;
-    uint64_t total_idle_ms;
-    int num_cpus;
+  uint64_t uptime_ms;
+  uint64_t total_idle_ms;
+  int num_cpus;
 };
 
 /* cmd 6: wall-clock time (RTC). epoch = seconds since 1970-01-01 UTC;
  * weekday: 0=Sunday .. 6=Saturday. If the platform has no RTC the kernel
  * returns -1 (callers should fall back to uptime via cmd 1). */
 struct sys_time {
-    uint64_t epoch;
-    int year;    /* e.g. 2026 */
-    int month;   /* 1-12 */
-    int day;     /* 1-31 */
-    int hour;    /* 0-23 */
-    int minute;  /* 0-59 */
-    int second;  /* 0-59 */
-    int weekday; /* 0=Sunday .. 6=Saturday */
+  uint64_t epoch;
+  int year;    /* e.g. 2026 */
+  int month;   /* 1-12 */
+  int day;     /* 1-31 */
+  int hour;    /* 0-23 */
+  int minute;  /* 0-59 */
+  int second;  /* 0-59 */
+  int weekday; /* 0=Sunday .. 6=Saturday */
 };
 
 /* cmd 7: filesystem statistics for the filesystem containing the process
  * cwd (the FAT-16 volume, or the NFS server's FSSTAT when cwd is inside an
  * NFS mount). */
 struct sys_fsinfo {
-    uint64_t total_bytes;
-    uint64_t free_bytes;
+  uint64_t total_bytes;
+  uint64_t free_bytes;
 };
 
 /* cmd 8: snapshot of the kernel mount table. The kernel fills up to
  * size / sizeof(struct sys_mountinfo) entries and returns the number it
  * filled (0 = no mounts, -1 = error). type: 0 = FAT16 (local), 1 = NFS. */
 struct sys_mountinfo {
-    char point[64];     /* mount point path, e.g. "/nfs"                    */
-    char source[64];    /* "local" or "server:/export"                      */
-    int  type;          /* 0 = FAT16, 1 = NFS                               */
+  char point[64];     /* mount point path, e.g. "/nfs"                    */
+  char source[64];    /* "local" or "server:/export"                      */
+  int  type;          /* 0 = FAT16, 1 = NFS                               */
 };
 
 int sysinfo(int cmd, void *buf, int size);

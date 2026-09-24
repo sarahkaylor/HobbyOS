@@ -8,17 +8,17 @@
 #include "libc.h"
 
 int main(int argc, char **argv) {
-    print("[HELLO] entering main\n");
-    print("[HELLO] argc=");
-    print_dec(argc);
-    print("\n");
-    for (int i = 0; i < argc; i++) {
-        print("[HELLO] argv[");
-        print_dec(i);
-        print("]=\"");
-        print(argv[i]);
-        print("\"\n");
-    }
-    print("[HELLO] main returned 0\n");
-    return 0;
+  print("[HELLO] entering main\n");
+  print("[HELLO] argc=");
+  print_dec(argc);
+  print("\n");
+  for (int i = 0; i < argc; i++) {
+    print("[HELLO] argv[");
+    print_dec(i);
+    print("]=\"");
+    print(argv[i]);
+    print("\"\n");
+  }
+  print("[HELLO] main returned 0\n");
+  return 0;
 }

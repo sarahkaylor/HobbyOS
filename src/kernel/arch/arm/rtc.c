@@ -13,5 +13,5 @@
 
 /* Returns seconds since 1970-01-01 (0 if the RTC is not available). */
 uint64_t rtc_read_epoch(void) {
-    return (uint64_t)PL031_DR;
+  return (uint64_t)PL031_DR;
 }

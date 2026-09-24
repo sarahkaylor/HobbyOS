@@ -19,15 +19,15 @@ struct desktop_rect { int x, y, w, h; };
 /* Everything that decides where chrome pixels go, captured once per frame.
  * A zero-size menu rectangle means "closed". */
 struct desktop_chrome {
-    int win_count;                     /* number of open windows          */
-    int focus;                         /* focused window id (-1 = none)   */
-    int cursor_x, cursor_y;            /* pointer position                */
-    struct desktop_rect start_menu;    /* Apps menu panel (open: w/h > 0) */
-    int start_sel, start_scroll;       /* highlight inside the panel      */
-    struct desktop_rect rc_menu;       /* right-click menu                */
-    struct desktop_rect app_menu;      /* per-window menu dropdown        */
-    char clock[12];                    /* taskbar clock text              */
-    int chrome_dirty[MAX_WINDOWS];     /* per window: title/menus changed */
+  int win_count;                     /* number of open windows          */
+  int focus;                         /* focused window id (-1 = none)   */
+  int cursor_x, cursor_y;            /* pointer position                */
+  struct desktop_rect start_menu;    /* Apps menu panel (open: w/h > 0) */
+  int start_sel, start_scroll;       /* highlight inside the panel      */
+  struct desktop_rect rc_menu;       /* right-click menu                */
+  struct desktop_rect app_menu;      /* per-window menu dropdown        */
+  char clock[12];                    /* taskbar clock text              */
+  int chrome_dirty[MAX_WINDOWS];     /* per window: title/menus changed */
 };
 
 /* Diff two chrome snapshots into repaint rectangles.

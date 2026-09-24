@@ -12,9 +12,9 @@
 extern "C" {
 #endif
 
-/* --- format macros (C99 7.8.1), host and bare-metal --- */
-/* int64_t is `long` on LP64 (all four project targets) and `long long` on
- * 32-bit; the glibc-style conditionals keep the macros correct for both. */
+  /* --- format macros (C99 7.8.1), host and bare-metal --- */
+  /* int64_t is `long` on LP64 (all four project targets) and `long long` on
+   * 32-bit; the glibc-style conditionals keep the macros correct for both. */
 #ifdef __LP64__
 #define PRId64 "ld"
 #define PRIi64 "li"
@@ -111,18 +111,18 @@ extern "C" {
 #define SCNuPTR "lu"
 #define SCNxPTR "lx"
 
-/* --- imax functions (implementations land with a later libc phase;
- * declarations are provided so ported code that merely calls them gets an
- * honest link error for now). --- */
-typedef struct {
+  /* --- imax functions (implementations land with a later libc phase;
+   * declarations are provided so ported code that merely calls them gets an
+   * honest link error for now). --- */
+  typedef struct {
     intmax_t quot;
     intmax_t rem;
-} imaxdiv_t;
+  } imaxdiv_t;
 
-intmax_t strtoimax(const char *nptr, char **endptr, int base);
-uintmax_t strtoumax(const char *nptr, char **endptr, int base);
-intmax_t imaxabs(intmax_t j);
-imaxdiv_t imaxdiv(intmax_t numer, intmax_t denom);
+  intmax_t strtoimax(const char *nptr, char **endptr, int base);
+  uintmax_t strtoumax(const char *nptr, char **endptr, int base);
+  intmax_t imaxabs(intmax_t j);
+  imaxdiv_t imaxdiv(intmax_t numer, intmax_t denom);
 
 #ifdef __cplusplus
 }

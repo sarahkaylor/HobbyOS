@@ -5,26 +5,26 @@
 static volatile uint64_t timer_ticks = 0;
 
 static inline void outb(uint16_t port, uint8_t val) {
-    __asm__ volatile("outb %0, %1" : : "a"(val), "Nd"(port));
+  __asm__ volatile("outb %0, %1" : : "a"(val), "Nd"(port));
 }
 
 /**
  * Initializes the x86 8254 PIT (Programmable Interval Timer) for 100Hz periodic ticks.
  */
 void timer_init(void) {
-    // 100Hz frequency: divisor = 1193182 / 100 = 11931 (0x2E9B)
-    uint32_t divisor = 1193182 / 100;
-    
-    // Command byte: Channel 0, Access mode lobyte/hibyte, Operating mode 3 (square wave), binary
-    outb(0x43, 0x36);
-    
-    // Send divisor
-    outb(0x40, (uint8_t)(divisor & 0xFF));
-    outb(0x40, (uint8_t)((divisor >> 8) & 0xFF));
+  // 100Hz frequency: divisor = 1193182 / 100 = 11931 (0x2E9B)
+  uint32_t divisor = 1193182 / 100;
 
-    // Unmask PIT timer interrupt locally
-    extern void gic_enable_interrupt(uint32_t intid);
-    gic_enable_interrupt(30);
+  // Command byte: Channel 0, Access mode lobyte/hibyte, Operating mode 3 (square wave), binary
+  outb(0x43, 0x36);
+
+  // Send divisor
+  outb(0x40, (uint8_t)(divisor & 0xFF));
+  outb(0x40, (uint8_t)((divisor >> 8) & 0xFF));
+
+  // Unmask PIT timer interrupt locally
+  extern void gic_enable_interrupt(uint32_t intid);
+  gic_enable_interrupt(30);
 }
 
 /**
@@ -32,17 +32,17 @@ void timer_init(void) {
  * On PIT, the timer automatically reloads in Mode 3, so we just increment our ticks.
  */
 void timer_reload(void) {
-    timer_ticks++;
-    // NOTE: We intentionally do NOT call virtio_net_handle_irq() here.
-    // The provider_loop on CPU 0 polls the RX used ring directly via poll_rx.
-    // Calling handle_irq from ANY CPU's timer ISR reads inb(ISR) which clears
-    // the ISR register, stealing the interrupt from CPU 0's hardware IRQ handler
-    // and preventing proper packet delivery via the PIC.
+  timer_ticks++;
+  // NOTE: We intentionally do NOT call virtio_net_handle_irq() here.
+  // The provider_loop on CPU 0 polls the RX used ring directly via poll_rx.
+  // Calling handle_irq from ANY CPU's timer ISR reads inb(ISR) which clears
+  // the ISR register, stealing the interrupt from CPU 0's hardware IRQ handler
+  // and preventing proper packet delivery via the PIC.
 }
 
 /**
  * Gets the current system uptime in milliseconds based on ticks.
  */
 uint64_t timer_get_ms(void) {
-    return timer_ticks * 10;
+  return timer_ticks * 10;
 }

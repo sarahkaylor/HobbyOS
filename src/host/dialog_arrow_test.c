@@ -34,12 +34,12 @@ static int tests_failed = 0;
 
 /* ---- Test 1: DKEY constants ---- */
 static void test_dkey_constants(void) {
-    printf("[TEST] DKEY constants...\n");
-    ASSERT(DKEY_UP == 0x100, "DKEY_UP == 0x100");
-    ASSERT(DKEY_DOWN == 0x101, "DKEY_DOWN == 0x101");
-    ASSERT(DKEY_LEFT == 0x102, "DKEY_LEFT == 0x102");
-    ASSERT(DKEY_RIGHT == 0x103, "DKEY_RIGHT == 0x103");
-    ASSERT(DKEY_ESC == 0x1B, "DKEY_ESC == 0x1B");
+  printf("[TEST] DKEY constants...\n");
+  ASSERT(DKEY_UP == 0x100, "DKEY_UP == 0x100");
+  ASSERT(DKEY_DOWN == 0x101, "DKEY_DOWN == 0x101");
+  ASSERT(DKEY_LEFT == 0x102, "DKEY_LEFT == 0x102");
+  ASSERT(DKEY_RIGHT == 0x103, "DKEY_RIGHT == 0x103");
+  ASSERT(DKEY_ESC == 0x1B, "DKEY_ESC == 0x1B");
 }
 
 /* ---- Test 2: dialog_read_key with arrow key sequences ---- */
@@ -53,84 +53,84 @@ static void test_dkey_constants(void) {
 static int test_pipe_fd[2];
 
 static void setup_stdin_pipe(void) {
-    if (pipe(test_pipe_fd) < 0) {
-        perror("pipe");
-        exit(1);
-    }
-    /* Redirect fd 0 (stdin) to read end of pipe */
-    dup2(test_pipe_fd[0], 0);
-    close(test_pipe_fd[0]);
+  if (pipe(test_pipe_fd) < 0) {
+    perror("pipe");
+    exit(1);
+  }
+  /* Redirect fd 0 (stdin) to read end of pipe */
+  dup2(test_pipe_fd[0], 0);
+  close(test_pipe_fd[0]);
 }
 
 static void write_to_stdin(const char *data, int len) {
-    write(test_pipe_fd[1], data, len);
+  write(test_pipe_fd[1], data, len);
 }
 
 static void test_arrow_keys(void) {
-    printf("[TEST] Arrow key ESC sequence parsing...\n");
+  printf("[TEST] Arrow key ESC sequence parsing...\n");
 
-    setup_stdin_pipe();
+  setup_stdin_pipe();
 
-    /* Test DOWN arrow: ESC [ B */
-    {
-        char seq[] = { 27, '[', 'B' };
-        write_to_stdin(seq, 3);
-        int key = dialog_read_key();
-        ASSERT(key == DKEY_DOWN, "DOWN arrow (ESC [ B) -> DKEY_DOWN");
-    }
+  /* Test DOWN arrow: ESC [ B */
+  {
+    char seq[] = { 27, '[', 'B' };
+    write_to_stdin(seq, 3);
+    int key = dialog_read_key();
+    ASSERT(key == DKEY_DOWN, "DOWN arrow (ESC [ B) -> DKEY_DOWN");
+  }
 
-    /* Test UP arrow: ESC [ A */
-    {
-        char seq[] = { 27, '[', 'A' };
-        write_to_stdin(seq, 3);
-        int key = dialog_read_key();
-        ASSERT(key == DKEY_UP, "UP arrow (ESC [ A) -> DKEY_UP");
-    }
+  /* Test UP arrow: ESC [ A */
+  {
+    char seq[] = { 27, '[', 'A' };
+    write_to_stdin(seq, 3);
+    int key = dialog_read_key();
+    ASSERT(key == DKEY_UP, "UP arrow (ESC [ A) -> DKEY_UP");
+  }
 
-    /* Test RIGHT arrow: ESC [ C */
-    {
-        char seq[] = { 27, '[', 'C' };
-        write_to_stdin(seq, 3);
-        int key = dialog_read_key();
-        ASSERT(key == DKEY_RIGHT, "RIGHT arrow (ESC [ C) -> DKEY_RIGHT");
-    }
+  /* Test RIGHT arrow: ESC [ C */
+  {
+    char seq[] = { 27, '[', 'C' };
+    write_to_stdin(seq, 3);
+    int key = dialog_read_key();
+    ASSERT(key == DKEY_RIGHT, "RIGHT arrow (ESC [ C) -> DKEY_RIGHT");
+  }
 
-    /* Test LEFT arrow: ESC [ D */
-    {
-        char seq[] = { 27, '[', 'D' };
-        write_to_stdin(seq, 3);
-        int key = dialog_read_key();
-        ASSERT(key == DKEY_LEFT, "LEFT arrow (ESC [ D) -> DKEY_LEFT");
-    }
+  /* Test LEFT arrow: ESC [ D */
+  {
+    char seq[] = { 27, '[', 'D' };
+    write_to_stdin(seq, 3);
+    int key = dialog_read_key();
+    ASSERT(key == DKEY_LEFT, "LEFT arrow (ESC [ D) -> DKEY_LEFT");
+  }
 
-    /* Test ESC alone (cancel) */
-    {
-        char seq[] = { 27 };
-        write_to_stdin(seq, 1);
-        int key = dialog_read_key();
-        ASSERT(key == DKEY_ESC, "ESC alone -> DKEY_ESC (cancel)");
-    }
+  /* Test ESC alone (cancel) */
+  {
+    char seq[] = { 27 };
+    write_to_stdin(seq, 1);
+    int key = dialog_read_key();
+    ASSERT(key == DKEY_ESC, "ESC alone -> DKEY_ESC (cancel)");
+  }
 
-    /* Test regular character */
-    {
-        char c = 'x';
-        write_to_stdin(&c, 1);
-        int key = dialog_read_key();
-        ASSERT(key == 'x', "Regular char 'x' -> 'x'");
-    }
+  /* Test regular character */
+  {
+    char c = 'x';
+    write_to_stdin(&c, 1);
+    int key = dialog_read_key();
+    ASSERT(key == 'x', "Regular char 'x' -> 'x'");
+  }
 
-    /* Test multiple arrows in sequence */
-    {
-        char seq[] = { 27, '[', 'B', 27, '[', 'B', 27, '[', 'A' };
-        write_to_stdin(seq, 9);
-        int k1 = dialog_read_key();
-        int k2 = dialog_read_key();
-        int k3 = dialog_read_key();
-        ASSERT(k1 == DKEY_DOWN && k2 == DKEY_DOWN && k3 == DKEY_UP,
-               "Multiple arrows: DOWN, DOWN, UP");
-    }
+  /* Test multiple arrows in sequence */
+  {
+    char seq[] = { 27, '[', 'B', 27, '[', 'B', 27, '[', 'A' };
+    write_to_stdin(seq, 9);
+    int k1 = dialog_read_key();
+    int k2 = dialog_read_key();
+    int k3 = dialog_read_key();
+    ASSERT(k1 == DKEY_DOWN && k2 == DKEY_DOWN && k3 == DKEY_UP,
+           "Multiple arrows: DOWN, DOWN, UP");
+  }
 
-    close(test_pipe_fd[1]);
+  close(test_pipe_fd[1]);
 }
 
 /* ---- Test 3: File open dialog with arrow navigation ---- */
@@ -143,118 +143,118 @@ static void test_arrow_keys(void) {
  */
 
 static void test_file_open_dialog_arrows(void) {
-    printf("[TEST] File open dialog arrow navigation...\n");
+  printf("[TEST] File open dialog arrow navigation...\n");
 
-    /* Create a new pipe for this test */
-    if (pipe(test_pipe_fd) < 0) {
-        perror("pipe");
-        return;
-    }
-    dup2(test_pipe_fd[0], 0);
-    close(test_pipe_fd[0]);
+  /* Create a new pipe for this test */
+  if (pipe(test_pipe_fd) < 0) {
+    perror("pipe");
+    return;
+  }
+  dup2(test_pipe_fd[0], 0);
+  close(test_pipe_fd[0]);
 
-    /* Write: DOWN, DOWN, ENTER (select 3rd file)
-     * The mock read_dir in compat.c returns:
-     *   0: EDITOR.BIN, 1: DESKTOP.BIN, 2: SH.BIN, ...
-     * So after 2 DOWNs, selected = 2 (SH.BIN), then ENTER selects it.
-     */
-    {
-        char seq[] = {
-            27, '[', 'B',  /* DOWN */
-            27, '[', 'B',  /* DOWN */
-            '\n'            /* ENTER */
-        };
-        write_to_stdin(seq, sizeof(seq));
-    }
+  /* Write: DOWN, DOWN, ENTER (select 3rd file)
+   * The mock read_dir in compat.c returns:
+   *   0: EDITOR.BIN, 1: DESKTOP.BIN, 2: SH.BIN, ...
+   * So after 2 DOWNs, selected = 2 (SH.BIN), then ENTER selects it.
+   */
+  {
+    char seq[] = {
+      27, '[', 'B',  /* DOWN */
+      27, '[', 'B',  /* DOWN */
+      '\n'            /* ENTER */
+    };
+    write_to_stdin(seq, sizeof(seq));
+  }
 
-    char buf[64] = {0};
-    int result = file_open_dialog(buf, sizeof(buf));
+  char buf[64] = {0};
+  int result = file_open_dialog(buf, sizeof(buf));
 
-    /* The dialog should return 1 (selected) and buf should contain a filename */
-    ASSERT(result == 1, "file_open_dialog returns 1 after ENTER");
-    ASSERT(buf[0] != '\0', "Selected filename is non-empty");
+  /* The dialog should return 1 (selected) and buf should contain a filename */
+  ASSERT(result == 1, "file_open_dialog returns 1 after ENTER");
+  ASSERT(buf[0] != '\0', "Selected filename is non-empty");
 
-    /* The 3rd file (index 2) in the mock is SH.BIN */
-    if (strstr(buf, "SH.BIN") || strstr(buf, "SH")) {
-        tests_passed++;
-        printf("  PASS: Selected 3rd file (SH.BIN) after 2 DOWNs\n");
-    } else {
-        tests_failed++;
-        printf("  FAIL: Expected SH.BIN, got '%s'\n", buf);
-    }
+  /* The 3rd file (index 2) in the mock is SH.BIN */
+  if (strstr(buf, "SH.BIN") || strstr(buf, "SH")) {
+    tests_passed++;
+    printf("  PASS: Selected 3rd file (SH.BIN) after 2 DOWNs\n");
+  } else {
+    tests_failed++;
+    printf("  FAIL: Expected SH.BIN, got '%s'\n", buf);
+  }
 
-    close(test_pipe_fd[1]);
+  close(test_pipe_fd[1]);
 }
 
 /* ---- Test 4: File open dialog UP navigation ---- */
 /* Test that UP arrow moves selection up */
 
 static void test_file_open_dialog_up(void) {
-    printf("[TEST] File open dialog UP navigation...\n");
+  printf("[TEST] File open dialog UP navigation...\n");
 
-    if (pipe(test_pipe_fd) < 0) {
-        perror("pipe");
-        return;
-    }
-    dup2(test_pipe_fd[0], 0);
-    close(test_pipe_fd[0]);
+  if (pipe(test_pipe_fd) < 0) {
+    perror("pipe");
+    return;
+  }
+  dup2(test_pipe_fd[0], 0);
+  close(test_pipe_fd[0]);
 
-    /* Write: DOWN, DOWN, DOWN, UP, ENTER
-     * After 3 DOWNs: selected = 3 (LS.BIN)
-     * After 1 UP: selected = 2 (SH.BIN)
-     * ENTER selects SH.BIN
-     */
-    {
-        char seq[] = {
-            27, '[', 'B',  /* DOWN */
-            27, '[', 'B',  /* DOWN */
-            27, '[', 'B',  /* DOWN */
-            27, '[', 'A',  /* UP */
-            '\n'            /* ENTER */
-        };
-        write_to_stdin(seq, sizeof(seq));
-    }
+  /* Write: DOWN, DOWN, DOWN, UP, ENTER
+   * After 3 DOWNs: selected = 3 (LS.BIN)
+   * After 1 UP: selected = 2 (SH.BIN)
+   * ENTER selects SH.BIN
+   */
+  {
+    char seq[] = {
+      27, '[', 'B',  /* DOWN */
+      27, '[', 'B',  /* DOWN */
+      27, '[', 'B',  /* DOWN */
+      27, '[', 'A',  /* UP */
+      '\n'            /* ENTER */
+    };
+    write_to_stdin(seq, sizeof(seq));
+  }
 
-    char buf[64] = {0};
-    int result = file_open_dialog(buf, sizeof(buf));
+  char buf[64] = {0};
+  int result = file_open_dialog(buf, sizeof(buf));
 
-    ASSERT(result == 1, "file_open_dialog returns 1 after UP+ENTER");
+  ASSERT(result == 1, "file_open_dialog returns 1 after UP+ENTER");
 
-    /* After 3 DOWNs and 1 UP, selected = 2 (SH.BIN) */
-    if (strstr(buf, "SH.BIN") || strstr(buf, "SH")) {
-        tests_passed++;
-        printf("  PASS: UP navigation moved selection to SH.BIN\n");
-    } else {
-        tests_failed++;
-        printf("  FAIL: Expected SH.BIN after UP, got '%s'\n", buf);
-    }
+  /* After 3 DOWNs and 1 UP, selected = 2 (SH.BIN) */
+  if (strstr(buf, "SH.BIN") || strstr(buf, "SH")) {
+    tests_passed++;
+    printf("  PASS: UP navigation moved selection to SH.BIN\n");
+  } else {
+    tests_failed++;
+    printf("  FAIL: Expected SH.BIN after UP, got '%s'\n", buf);
+  }
 
-    close(test_pipe_fd[1]);
+  close(test_pipe_fd[1]);
 }
 
 /* ---- Test 5: ESC cancels file open dialog ---- */
 
 static void test_file_open_dialog_cancel(void) {
-    printf("[TEST] File open dialog ESC cancel...\n");
+  printf("[TEST] File open dialog ESC cancel...\n");
 
-    if (pipe(test_pipe_fd) < 0) {
-        perror("pipe");
-        return;
-    }
-    dup2(test_pipe_fd[0], 0);
-    close(test_pipe_fd[0]);
+  if (pipe(test_pipe_fd) < 0) {
+    perror("pipe");
+    return;
+  }
+  dup2(test_pipe_fd[0], 0);
+  close(test_pipe_fd[0]);
 
-    /* Write just ESC (cancel) */
-    char esc = 27;
-    write_to_stdin(&esc, 1);
+  /* Write just ESC (cancel) */
+  char esc = 27;
+  write_to_stdin(&esc, 1);
 
-    char buf[64] = {0};
-    int result = file_open_dialog(buf, sizeof(buf));
+  char buf[64] = {0};
+  int result = file_open_dialog(buf, sizeof(buf));
 
-    ASSERT(result == 0, "file_open_dialog returns 0 on ESC cancel");
-    ASSERT(buf[0] == '\0', "Buffer empty on cancel");
+  ASSERT(result == 0, "file_open_dialog returns 0 on ESC cancel");
+  ASSERT(buf[0] == '\0', "Buffer empty on cancel");
 
-    close(test_pipe_fd[1]);
+  close(test_pipe_fd[1]);
 }
 
 /* ---- Test 6: Regression — the dialog must list ALL files, not just 2 ---- */
@@ -273,63 +273,63 @@ static void test_file_open_dialog_cancel(void) {
  * (index 1), and this test FAILS — exactly reproducing the reported symptom.
  */
 static void test_file_open_dialog_lists_all_files(void) {
-    printf("[TEST] File open dialog lists ALL files, not just 2...\n");
+  printf("[TEST] File open dialog lists ALL files, not just 2...\n");
 
-    if (pipe(test_pipe_fd) < 0) {
-        perror("pipe");
-        return;
+  if (pipe(test_pipe_fd) < 0) {
+    perror("pipe");
+    return;
+  }
+  dup2(test_pipe_fd[0], 0);
+  close(test_pipe_fd[0]);
+
+  /* Press DOWN 12 times (more than the 7 mock files) so selection clamps on
+   * the last file, then ENTER to select it. */
+  {
+    char seq[3 * 12 + 1];
+    int p = 0;
+    for (int i = 0; i < 12; i++) {
+      seq[p++] = 27; seq[p++] = '['; seq[p++] = 'B';  /* DOWN */
     }
-    dup2(test_pipe_fd[0], 0);
-    close(test_pipe_fd[0]);
+    seq[p++] = '\n';                                    /* ENTER */
+    write_to_stdin(seq, p);
+  }
 
-    /* Press DOWN 12 times (more than the 7 mock files) so selection clamps on
-     * the last file, then ENTER to select it. */
-    {
-        char seq[3 * 12 + 1];
-        int p = 0;
-        for (int i = 0; i < 12; i++) {
-            seq[p++] = 27; seq[p++] = '['; seq[p++] = 'B';  /* DOWN */
-        }
-        seq[p++] = '\n';                                    /* ENTER */
-        write_to_stdin(seq, p);
-    }
+  char buf[64] = {0};
+  int result = file_open_dialog(buf, sizeof(buf));
 
-    char buf[64] = {0};
-    int result = file_open_dialog(buf, sizeof(buf));
+  ASSERT(result == 1, "file_open_dialog returns 1 after navigating to last file");
+  /* The last of the 7 mock files (index 6) is NOTES.TXT. Reaching it proves
+   * every entry past the first two was enumerated and listed. */
+  if (strstr(buf, "NOTES.TXT")) {
+    tests_passed++;
+    printf("  PASS: reached last file NOTES.TXT (all 7 entries listed, not just 2)\n");
+  } else {
+    tests_failed++;
+    printf("  FAIL: expected NOTES.TXT (index 6); got '%s' -- list truncated\n", buf);
+  }
 
-    ASSERT(result == 1, "file_open_dialog returns 1 after navigating to last file");
-    /* The last of the 7 mock files (index 6) is NOTES.TXT. Reaching it proves
-     * every entry past the first two was enumerated and listed. */
-    if (strstr(buf, "NOTES.TXT")) {
-        tests_passed++;
-        printf("  PASS: reached last file NOTES.TXT (all 7 entries listed, not just 2)\n");
-    } else {
-        tests_failed++;
-        printf("  FAIL: expected NOTES.TXT (index 6); got '%s' -- list truncated\n", buf);
-    }
-
-    close(test_pipe_fd[1]);
+  close(test_pipe_fd[1]);
 }
 
 int main(void) {
-    printf("=== Dialog Arrow Key Test Suite ===\n\n");
+  printf("=== Dialog Arrow Key Test Suite ===\n\n");
 
-    test_dkey_constants();
-    test_arrow_keys();
-    test_file_open_dialog_arrows();
-    test_file_open_dialog_up();
-    test_file_open_dialog_cancel();
-    test_file_open_dialog_lists_all_files();
+  test_dkey_constants();
+  test_arrow_keys();
+  test_file_open_dialog_arrows();
+  test_file_open_dialog_up();
+  test_file_open_dialog_cancel();
+  test_file_open_dialog_lists_all_files();
 
-    printf("\n=== Results ===\n");
-    printf("Passed: %d\n", tests_passed);
-    printf("Failed: %d\n", tests_failed);
+  printf("\n=== Results ===\n");
+  printf("Passed: %d\n", tests_passed);
+  printf("Failed: %d\n", tests_failed);
 
-    if (tests_failed == 0) {
-        printf("\nALL TESTS PASSED\n");
-        return 0;
-    } else {
-        printf("\nSOME TESTS FAILED\n");
-        return 1;
-    }
+  if (tests_failed == 0) {
+    printf("\nALL TESTS PASSED\n");
+    return 0;
+  } else {
+    printf("\nSOME TESTS FAILED\n");
+    return 1;
+  }
 }

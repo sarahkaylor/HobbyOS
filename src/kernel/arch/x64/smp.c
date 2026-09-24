@@ -19,58 +19,58 @@ volatile int smp_core_ready = 0;
  * Initializes and powers on secondary CPU cores using standard Local APIC IPIs.
  */
 void smp_init(void) {
-    uart_puts("[KERNEL] Activating secondary cores via LAPIC IPIs...\n");
-    
-    // Copy trampoline code to physical address 0x7000
-    extern uint8_t trampoline_start[];
-    extern uint8_t trampoline_end[];
-    uint8_t *dest = (uint8_t*)0x7000;
-    uint8_t *src = trampoline_start;
-    uint32_t len = (uint32_t)(trampoline_end - trampoline_start);
-    
-    uart_puts("[KERNEL] smp_init: copying trampoline code...\n");
-    for (uint32_t i = 0; i < len; i++) {
-        dest[i] = src[i];
-    }
-    uart_puts("[KERNEL] smp_init: trampoline copied.\n");
-    
-    for (int i = 1; i < MAX_CPUS; i++) {
-        smp_core_ready = 0;
-        // Set stack pointer for the target core: __stack_top - (i * 64KB)
-        smp_temp_stack = (uint64_t)&__stack_top - (i * 65536);
-        smp_temp_cpu = i;
+  uart_puts("[KERNEL] Activating secondary cores via LAPIC IPIs...\n");
 
-        uart_puts("[KERNEL] smp_init: Sending INIT IPI to core ");
-        print_int(i);
-        uart_puts("...\n");
+  // Copy trampoline code to physical address 0x7000
+  extern uint8_t trampoline_start[];
+  extern uint8_t trampoline_end[];
+  uint8_t *dest = (uint8_t*)0x7000;
+  uint8_t *src = trampoline_start;
+  uint32_t len = (uint32_t)(trampoline_end - trampoline_start);
 
-        // Send INIT IPI to target CPU core i
-        *LAPIC_ICR_HIGH = (i << 24);
-        *LAPIC_ICR_LOW = 0x00004500; // Trigger INIT, Level Assert
-        
-        uart_puts("[KERNEL] smp_init: Waiting after INIT IPI...\n");
-        // Wait ~10ms for core to receive INIT
-        for (volatile int d = 0; d < 5000000; d++);
-        
-        uart_puts("[KERNEL] smp_init: Sending STARTUP IPI...\n");
-        // Send STARTUP IPI with vector 0x07 (targeting physical 0x7000)
-        *LAPIC_ICR_HIGH = (i << 24);
-        *LAPIC_ICR_LOW = 0x00004607; // Vector 0x07 -> 0x7000
-        
-        uart_puts("[KERNEL] smp_init: Waiting for core to acknowledge...\n");
-        // Wait until the secondary core has safely booted and copied parameters
-        volatile int timeout = 50000000;
-        while (!smp_core_ready && timeout > 0) {
-            timeout--;
-            __asm__ volatile("pause" ::: "memory");
-        }
-        
-        uart_puts("[KERNEL] Core ");
-        print_int(i);
-        if (smp_core_ready) {
-            uart_puts(" power-on acknowledged.\n");
-        } else {
-            uart_puts(" power-on timeout!\n");
-        }
+  uart_puts("[KERNEL] smp_init: copying trampoline code...\n");
+  for (uint32_t i = 0; i < len; i++) {
+    dest[i] = src[i];
+  }
+  uart_puts("[KERNEL] smp_init: trampoline copied.\n");
+
+  for (int i = 1; i < MAX_CPUS; i++) {
+    smp_core_ready = 0;
+    // Set stack pointer for the target core: __stack_top - (i * 64KB)
+    smp_temp_stack = (uint64_t)&__stack_top - (i * 65536);
+    smp_temp_cpu = i;
+
+    uart_puts("[KERNEL] smp_init: Sending INIT IPI to core ");
+    print_int(i);
+    uart_puts("...\n");
+
+    // Send INIT IPI to target CPU core i
+    *LAPIC_ICR_HIGH = (i << 24);
+    *LAPIC_ICR_LOW = 0x00004500; // Trigger INIT, Level Assert
+
+    uart_puts("[KERNEL] smp_init: Waiting after INIT IPI...\n");
+    // Wait ~10ms for core to receive INIT
+    for (volatile int d = 0; d < 5000000; d++);
+
+    uart_puts("[KERNEL] smp_init: Sending STARTUP IPI...\n");
+    // Send STARTUP IPI with vector 0x07 (targeting physical 0x7000)
+    *LAPIC_ICR_HIGH = (i << 24);
+    *LAPIC_ICR_LOW = 0x00004607; // Vector 0x07 -> 0x7000
+
+    uart_puts("[KERNEL] smp_init: Waiting for core to acknowledge...\n");
+    // Wait until the secondary core has safely booted and copied parameters
+    volatile int timeout = 50000000;
+    while (!smp_core_ready && timeout > 0) {
+      timeout--;
+      __asm__ volatile("pause" ::: "memory");
     }
+
+    uart_puts("[KERNEL] Core ");
+    print_int(i);
+    if (smp_core_ready) {
+      uart_puts(" power-on acknowledged.\n");
+    } else {
+      uart_puts(" power-on timeout!\n");
+    }
+  }
 }

@@ -20,8 +20,7 @@ extern int errno;
 
 /* Dual-arch syscall helper (aarch64 svc #0 / x86_64 syscall), matching
  * user/libc.c's ABI: args in x0-x4 / rdi,rsi,rdx,r10,r8. */
-static long hb_syscall5(long num, long a0, long a1, long a2, long a3, long a4)
-{
+static long hb_syscall5(long num, long a0, long a1, long a2, long a3, long a4) {
 #ifdef __x86_64__
   long ret;
   register long rdi __asm__("rdi") = a0;
@@ -49,66 +48,59 @@ static long hb_syscall5(long num, long a0, long a1, long a2, long a3, long a4)
 #endif
 }
 
-static long hb_errno_ret(long r)
-{
-    if (r < 0) {
-        errno = (int)(-r);
-        return -1;
-    }
-    return r;
+static long hb_errno_ret(long r) {
+  if (r < 0) {
+    errno = (int)(-r);
+    return -1;
+  }
+  return r;
 }
 
-int stat(const char *path, struct stat *buf)
-{
-    if (!path || !buf) {
-        errno = EINVAL;
-        return -1;
-    }
-    long r = hb_syscall5(SYS_STAT, (long)path, (long)buf, 0, 0, 0);
-    return (int)hb_errno_ret(r);
+int stat(const char *path, struct stat *buf) {
+  if (!path || !buf) {
+    errno = EINVAL;
+    return -1;
+  }
+  long r = hb_syscall5(SYS_STAT, (long)path, (long)buf, 0, 0, 0);
+  return (int)hb_errno_ret(r);
 }
 
-int fstat(int fd, struct stat *buf)
-{
-    if (!buf) {
-        errno = EINVAL;
-        return -1;
-    }
-    long r = hb_syscall5(SYS_FSTAT, fd, (long)buf, 0, 0, 0);
-    return (int)hb_errno_ret(r);
+int fstat(int fd, struct stat *buf) {
+  if (!buf) {
+    errno = EINVAL;
+    return -1;
+  }
+  long r = hb_syscall5(SYS_FSTAT, fd, (long)buf, 0, 0, 0);
+  return (int)hb_errno_ret(r);
 }
 
-off_t lseek(int fd, off_t offset, int whence)
-{
-    long r = hb_syscall5(SYS_LSEEK, fd, (long)offset, whence, 0, 0);
-    return (off_t)hb_errno_ret(r);
+off_t lseek(int fd, off_t offset, int whence) {
+  long r = hb_syscall5(SYS_LSEEK, fd, (long)offset, whence, 0, 0);
+  return (off_t)hb_errno_ret(r);
 }
 
 #else /* HOST_TEST */
 
-int stat(const char *path, struct stat *buf)
-{
-    (void)path;
-    (void)buf;
-    errno = ENOSYS;
-    return -1;
+int stat(const char *path, struct stat *buf) {
+  (void)path;
+  (void)buf;
+  errno = ENOSYS;
+  return -1;
 }
 
-int fstat(int fd, struct stat *buf)
-{
-    (void)fd;
-    (void)buf;
-    errno = ENOSYS;
-    return -1;
+int fstat(int fd, struct stat *buf) {
+  (void)fd;
+  (void)buf;
+  errno = ENOSYS;
+  return -1;
 }
 
-off_t lseek(int fd, off_t offset, int whence)
-{
-    (void)fd;
-    (void)offset;
-    (void)whence;
-    errno = ENOSYS;
-    return -1;
+off_t lseek(int fd, off_t offset, int whence) {
+  (void)fd;
+  (void)offset;
+  (void)whence;
+  errno = ENOSYS;
+  return -1;
 }
 
 #endif

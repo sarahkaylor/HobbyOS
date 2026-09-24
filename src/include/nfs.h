@@ -88,35 +88,35 @@
 #define RPC_E_DENIED        (-3)   /* MSG_DENIED or accept_stat != SUCCESS */
 
 struct nfs_attr {
-    uint32_t type;      /* ftype3 */
-    uint32_t mode;
-    uint64_t size;
-    uint32_t mtime;
+  uint32_t type;      /* ftype3 */
+  uint32_t mode;
+  uint64_t size;
+  uint32_t mtime;
 };
 
 struct nfs_fh {
-    uint32_t len;
-    uint8_t  data[NFS_FH_MAX];
+  uint32_t len;
+  uint8_t  data[NFS_FH_MAX];
 };
 
 struct nfs_mount {
-    int      in_use;
-    char     point[NFS_PATH_MAX];       /* mount point, e.g. "/nfs" */
-    char     source[NFS_SRC_MAX];       /* canonical "ip:/export" */
-    uint32_t server_ip;                 /* host byte order */
-    uint16_t nfs_port;
-    uint16_t mount_port;
-    uint8_t  root_fh[NFS_FH_MAX];
-    uint32_t root_fh_len;
-    uint32_t read_size;
+  int      in_use;
+  char     point[NFS_PATH_MAX];       /* mount point, e.g. "/nfs" */
+  char     source[NFS_SRC_MAX];       /* canonical "ip:/export" */
+  uint32_t server_ip;                 /* host byte order */
+  uint16_t nfs_port;
+  uint16_t mount_port;
+  uint8_t  root_fh[NFS_FH_MAX];
+  uint32_t root_fh_len;
+  uint32_t read_size;
 };
 
 /* ---- XDR writer (nfs_proto.c) ---------------------------------------- */
 struct xdr_w {
-    uint8_t *buf;
-    int cap;
-    int len;
-    int err;            /* 1 once a write did not fit */
+  uint8_t *buf;
+  int cap;
+  int len;
+  int err;            /* 1 once a write did not fit */
 };
 void xdr_w_init(struct xdr_w *w, uint8_t *buf, int cap);
 void xdr_w_u32(struct xdr_w *w, uint32_t v);
@@ -128,10 +128,10 @@ void xdr_w_fh(struct xdr_w *w, const uint8_t *fh, uint32_t len);
 
 /* ---- XDR reader (nfs_proto.c) ---------------------------------------- */
 struct xdr_r {
-    const uint8_t *buf;
-    int len;
-    int pos;
-    int err;            /* 1 once a read ran past the end */
+  const uint8_t *buf;
+  int len;
+  int pos;
+  int err;            /* 1 once a read ran past the end */
 };
 void xdr_r_init(struct xdr_r *r, const uint8_t *buf, int len);
 uint32_t xdr_r_u32(struct xdr_r *r);

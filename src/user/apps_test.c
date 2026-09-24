@@ -452,37 +452,37 @@ struct app_case {
 
 static const struct app_case APPS[APP_COUNT] = {
   /* 0 */ { "FILES.BIN",   "Files",
-            {"Path: ", "m=mounts", "Free: "},
-            "\x01", files_check,
-            "down-arrow selection, drag & drop move, Enter opens a .TXT", 0 },
+    {"Path: ", "m=mounts", "Free: "},
+    "\x01", files_check,
+    "down-arrow selection, drag & drop move, Enter opens a .TXT", 0 },
   /* 1 */ { "CALC.BIN",    "Calculator",
-            {"=== Calculator ===", "Memory: "},
-            "2\x04" "3=", calc_check, "2+3= shows \"> 5\"", 0 },
+    {"=== Calculator ===", "Memory: "},
+    "2\x04" "3=", calc_check, "2+3= shows \"> 5\"", 0 },
   /* 2 */ { "CLOCK.BIN",   "Clock",
-            {"=== Clock ==="},
-            "", clock_check, "time string HH:MM:SS is rendered", 0 },
+    {"=== Clock ==="},
+    "", clock_check, "time string HH:MM:SS is rendered", 0 },
   /* 3 */ { "SYSMON.BIN",  "SysMon",
-            {"=== System Monitor ===", "Uptime:", "APPS_T.BIN"},
-            "", 0, 0, 0 },
+    {"=== System Monitor ===", "Uptime:", "APPS_T.BIN"},
+    "", 0, 0, 0 },
   /* 4 */ { "HEX.BIN",     "Hex Viewer",
-            {"=== Hex Viewer ===", "No file open"},
-            "", 0, 0, 'q' },
+    {"=== Hex Viewer ===", "No file open"},
+    "", 0, 0, 'q' },
   /* 5 */ { "TASKS.BIN",   "Tasks",
-            {"=== Tasks ===", "(no tasks yet - press a to add one)"},
-            "d", tasks_check, "'d' on the empty list shows the status line", 'q' },
+    {"=== Tasks ===", "(no tasks yet - press a to add one)"},
+    "d", tasks_check, "'d' on the empty list shows the status line", 'q' },
   /* 6 */ { "FIND.BIN",    "Find",
-            {"=== Find ===", "Search: _", "Results: none yet"},
-            "unit\n", find_check, "typing \"unit\" + Enter finds UNIT.BIN", 0 },
+    {"=== Find ===", "Search: _", "Results: none yet"},
+    "unit\n", find_check, "typing \"unit\" + Enter finds UNIT.BIN", 0 },
   /* 7 */ { "DIFF.BIN",    "Diff",
-            {"=== Diff ===", "Press Compare to diff"},
-            "c", diff_check, "'c' compare shows the +0/-0 summary", 0 },
+    {"=== Diff ===", "Press Compare to diff"},
+    "c", diff_check, "'c' compare shows the +0/-0 summary", 0 },
   /* 8 */ { "NOTES.BIN",   "Notes",
-            {"=== Notes ===", "(no notes - press n to create one)",
-             "n=new  e=edit body"},
-            "", 0, 0, 0 },
+    {"=== Notes ===", "(no notes - press n to create one)",
+    "n=new  e=edit body"},
+   "", 0, 0, 0 },
   /* 9 */ { "UNIT.BIN",    "Unit Converter",
-            {"=== Unit Converter ===", "From: 1 [m]      To: [ft]"},
-            "s", unit_check, "'s' swaps FROM/TO units", 0 },
+    {"=== Unit Converter ===", "From: 1 [m]      To: [ft]"},
+    "s", unit_check, "'s' swaps FROM/TO units", 0 },
 };
 
 /* ====================================================================== */
@@ -678,100 +678,100 @@ void flush_fb(void) {
     break;
 
   case ST_LAUNCH: {
-    if (num_windows > 1) {
-      fail("launch", "more than one window exists");
-    } else if (num_windows == 1) {
-      const struct window *w = &windows[0];
-      const char *text = w->text;
-      int missing = -1;
-      if (!same_str(w->title, APPS[st_app].title)) {
-        if (timed_out()) fail("launch", "window title never matched the app's title");
-        keepalive_tick();
-        break;
-      }
-      for (int i = 0; i < 3; i++) {
-        if (APPS[st_app].content[i] && !contains(text, APPS[st_app].content[i])) {
-          missing = i;
+      if (num_windows > 1) {
+        fail("launch", "more than one window exists");
+      } else if (num_windows == 1) {
+        const struct window *w = &windows[0];
+        const char *text = w->text;
+        int missing = -1;
+        if (!same_str(w->title, APPS[st_app].title)) {
+          if (timed_out()) fail("launch", "window title never matched the app's title");
+          keepalive_tick();
           break;
         }
-      }
-      if (missing >= 0) {
-        if (timed_out()) fail("launch", "expected app content never appeared");
+        for (int i = 0; i < 3; i++) {
+          if (APPS[st_app].content[i] && !contains(text, APPS[st_app].content[i])) {
+            missing = i;
+            break;
+          }
+        }
+        if (missing >= 0) {
+          if (timed_out()) fail("launch", "expected app content never appeared");
+          keepalive_tick();
+          break;
+        }
+        if (!fb_window_rendered(w)) {
+          if (timed_out()) fail("render", "window pixels not found in the framebuffer");
+          keepalive_tick();
+          break;
+        }
+        /* Window exists, has the app's title, shows the expected text and is
+         * composited. Snapshot the text, then script the optional keys. */
+        copy_str(snap, (int)sizeof snap, text);
+        if (APPS[st_app].keys[0]) inject_keys(APPS[st_app].keys);
+        if (APPS[st_app].funcheck) {
+          arm_timeout(FUNC_TIMEOUT_MS);
+          st_stage = ST_FUNC;
+        } else {
+          st_stage = ST_QUIT;
+        }
+      } else { /* no window yet */
+        if (timed_out()) fail("launch", "app window never appeared");
         keepalive_tick();
-        break;
       }
-      if (!fb_window_rendered(w)) {
-        if (timed_out()) fail("render", "window pixels not found in the framebuffer");
-        keepalive_tick();
-        break;
-      }
-      /* Window exists, has the app's title, shows the expected text and is
-       * composited. Snapshot the text, then script the optional keys. */
-      copy_str(snap, (int)sizeof snap, text);
-      if (APPS[st_app].keys[0]) inject_keys(APPS[st_app].keys);
-      if (APPS[st_app].funcheck) {
-        arm_timeout(FUNC_TIMEOUT_MS);
-        st_stage = ST_FUNC;
-      } else {
-        st_stage = ST_QUIT;
-      }
-    } else { /* no window yet */
-      if (timed_out()) fail("launch", "app window never appeared");
-      keepalive_tick();
-    }
-    break;
-  }
-
-  case ST_FUNC: {
-    if (num_windows != 1) {
-      fail("interact", "window vanished during the functional check");
-    }
-    if (APPS[st_app].funcheck(snap, windows[0].text)) {
-      if (st_app == 0) {
-        /* Settle, then measure one Down arrow's repaint cost before the
-         * drag stages (see the responsiveness report line). */
-        nav_stable = 0;
-        nav_frames_changed = 0;
-        nav_frames_total = 0;
-        copy_str(nav_prev, (int)sizeof nav_prev, windows[0].text);
-        arm_timeout(MEASURE_TIMEOUT_MS);
-        st_stage = ST_NAV_SETTLE;
-      } else {
-        st_stage = ST_QUIT;
-      }
-    } else if (timed_out()) {
-      fail("interact", APPS[st_app].what ? APPS[st_app].what
-                                          : "functional check did not pass");
-    } else {
-      keepalive_tick();
-    }
-    break;
-  }
-
-  case ST_DRAG_ARM: {
-    /* FILES drag & drop: press on the DRAGME.TXT row, then move the pointer
-     * to the TESTDIR row with the button held. The WM forwards the press as
-     * ESC [ P and the motion as ESC [ G; the app must highlight the drop
-     * target ([drop]) and mark the dragged row ([moving]). Rows are looked
-     * up by name because the app lists the real FAT root, and the listing
-     * may still be arriving from the pipe when this stage starts. */
-    const struct window *w = &windows[0];
-    int src_row = find_row_of(w->text, "DRAGME.TXT");
-    int dst_row = find_row_of(w->text, "TESTDIR");
-    if (src_row < 0 || dst_row < 0) {
-      if (timed_out()) fail("drag", "listing never showed DRAGME.TXT and TESTDIR");
-      keepalive_tick();
       break;
     }
-    if (!w->mouse_events) fail("drag", "FILES did not opt into mouse events");
-    st_drag_tx = cell_x(w, 10);
-    st_drag_ty = cell_y(w, dst_row);
-    inject_left_press(cell_x(w, 10), cell_y(w, src_row));
-    inject_mouse(st_drag_tx, st_drag_ty);
-    arm_timeout(FUNC_TIMEOUT_MS);
-    st_stage = ST_DRAG_HOLD;
-    break;
-  }
+
+  case ST_FUNC: {
+      if (num_windows != 1) {
+        fail("interact", "window vanished during the functional check");
+      }
+      if (APPS[st_app].funcheck(snap, windows[0].text)) {
+        if (st_app == 0) {
+          /* Settle, then measure one Down arrow's repaint cost before the
+           * drag stages (see the responsiveness report line). */
+          nav_stable = 0;
+          nav_frames_changed = 0;
+          nav_frames_total = 0;
+          copy_str(nav_prev, (int)sizeof nav_prev, windows[0].text);
+          arm_timeout(MEASURE_TIMEOUT_MS);
+          st_stage = ST_NAV_SETTLE;
+        } else {
+          st_stage = ST_QUIT;
+        }
+      } else if (timed_out()) {
+        fail("interact", APPS[st_app].what ? APPS[st_app].what
+                                            : "functional check did not pass");
+      } else {
+        keepalive_tick();
+      }
+      break;
+    }
+
+  case ST_DRAG_ARM: {
+      /* FILES drag & drop: press on the DRAGME.TXT row, then move the pointer
+       * to the TESTDIR row with the button held. The WM forwards the press as
+       * ESC [ P and the motion as ESC [ G; the app must highlight the drop
+       * target ([drop]) and mark the dragged row ([moving]). Rows are looked
+       * up by name because the app lists the real FAT root, and the listing
+       * may still be arriving from the pipe when this stage starts. */
+      const struct window *w = &windows[0];
+      int src_row = find_row_of(w->text, "DRAGME.TXT");
+      int dst_row = find_row_of(w->text, "TESTDIR");
+      if (src_row < 0 || dst_row < 0) {
+        if (timed_out()) fail("drag", "listing never showed DRAGME.TXT and TESTDIR");
+        keepalive_tick();
+        break;
+      }
+      if (!w->mouse_events) fail("drag", "FILES did not opt into mouse events");
+      st_drag_tx = cell_x(w, 10);
+      st_drag_ty = cell_y(w, dst_row);
+      inject_left_press(cell_x(w, 10), cell_y(w, src_row));
+      inject_mouse(st_drag_tx, st_drag_ty);
+      arm_timeout(FUNC_TIMEOUT_MS);
+      st_stage = ST_DRAG_HOLD;
+      break;
+    }
 
   case ST_DRAG_HOLD:
     if (timed_out()) fail("drag", "drop target was never highlighted");
@@ -805,23 +805,23 @@ void flush_fb(void) {
     break;
 
   case ST_TXT_CLICK: {
-    /* Click the E2E.TXT row and press Enter: the type handler must ask the
-     * WM (ESC ] R) to open the file in EDITOR.BIN. Waits for the listing to
-     * finish arriving after the drop's re-render. */
-    const struct window *w = &windows[0];
-    int row = find_row_of(w->text, "E2E.TXT");
-    if (row < 0) {
-      if (timed_out()) fail("open", "listing never showed E2E.TXT");
-      keepalive_tick();
+      /* Click the E2E.TXT row and press Enter: the type handler must ask the
+       * WM (ESC ] R) to open the file in EDITOR.BIN. Waits for the listing to
+       * finish arriving after the drop's re-render. */
+      const struct window *w = &windows[0];
+      int row = find_row_of(w->text, "E2E.TXT");
+      if (row < 0) {
+        if (timed_out()) fail("open", "listing never showed E2E.TXT");
+        keepalive_tick();
+        break;
+      }
+      inject_left_press(cell_x(w, 10), cell_y(w, row));
+      inject_left_release();
+      inject_key(KEY_ENTER);
+      arm_timeout(FUNC_TIMEOUT_MS);
+      st_stage = ST_TXT_WAIT;
       break;
     }
-    inject_left_press(cell_x(w, 10), cell_y(w, row));
-    inject_left_release();
-    inject_key(KEY_ENTER);
-    arm_timeout(FUNC_TIMEOUT_MS);
-    st_stage = ST_TXT_WAIT;
-    break;
-  }
 
   case ST_TXT_WAIT:
     if (num_windows == 2) {
@@ -843,39 +843,39 @@ void flush_fb(void) {
     break;
 
   case ST_NAV_SETTLE: {
-    /* Wait until two consecutive frames show the same window text and the
-     * listing has a selected row, then inject exactly one Down arrow and
-     * start measuring. */
-    if (num_windows != 1) fail("measure", "window vanished before the measurement");
-    if (same_str(windows[0].text, nav_prev)) {
-      nav_stable++;
-    } else {
-      nav_stable = 0;
-      copy_str(nav_prev, (int)sizeof nav_prev, windows[0].text);
-    }
-    if (nav_stable >= 2) {
-      nav_sel_before[0] = '\0';
-      grab_selected_line(windows[0].text, nav_sel_before,
-                         (int)sizeof nav_sel_before);
-    }
-    if (nav_stable >= 2 && nav_sel_before[0]) {
-      nav_frames_changed = 0;
-      nav_frames_total = 0;
-      nav_stable = 0;
+      /* Wait until two consecutive frames show the same window text and the
+       * listing has a selected row, then inject exactly one Down arrow and
+       * start measuring. */
+      if (num_windows != 1) fail("measure", "window vanished before the measurement");
+      if (same_str(windows[0].text, nav_prev)) {
+        nav_stable++;
+      } else {
+        nav_stable = 0;
+        copy_str(nav_prev, (int)sizeof nav_prev, windows[0].text);
+      }
+      if (nav_stable >= 2) {
+        nav_sel_before[0] = '\0';
+        grab_selected_line(windows[0].text, nav_sel_before,
+                           (int)sizeof nav_sel_before);
+      }
+      if (nav_stable >= 2 && nav_sel_before[0]) {
+        nav_frames_changed = 0;
+        nav_frames_total = 0;
+        nav_stable = 0;
 #ifdef PAINT_STATS
-      nav_px0 = graphics_paint_pixels;
-      nav_px = 0;
+        nav_px0 = graphics_paint_pixels;
+        nav_px = 0;
 #endif
-      nav_t0 = now_ms();
-      inject_key(KEY_DOWN);
-      st_stage = ST_NAV_MEASURE;
-    } else if (timed_out()) {
-      fail("measure", "FILES screen never settled");
-    } else {
-      keepalive_tick();
+        nav_t0 = now_ms();
+        inject_key(KEY_DOWN);
+        st_stage = ST_NAV_MEASURE;
+      } else if (timed_out()) {
+        fail("measure", "FILES screen never settled");
+      } else {
+        keepalive_tick();
+      }
+      break;
     }
-    break;
-  }
 
   case ST_NAV_MEASURE:
     /* Count the frames that carried a visible change.  The measurement only

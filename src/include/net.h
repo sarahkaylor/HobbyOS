@@ -14,104 +14,104 @@
 #define MAX_SOCKETS 16
 
 struct eth_hdr {
-    uint8_t dst_mac[6];
-    uint8_t src_mac[6];
-    uint16_t type;
+  uint8_t dst_mac[6];
+  uint8_t src_mac[6];
+  uint16_t type;
 } __attribute__((packed));
 
 struct arp_hdr {
-    uint16_t hw_type;
-    uint16_t proto_type;
-    uint8_t hw_len;
-    uint8_t proto_len;
-    uint16_t opcode;
-    uint8_t sender_mac[6];
-    uint32_t sender_ip;
-    uint8_t target_mac[6];
-    uint32_t target_ip;
+  uint16_t hw_type;
+  uint16_t proto_type;
+  uint8_t hw_len;
+  uint8_t proto_len;
+  uint16_t opcode;
+  uint8_t sender_mac[6];
+  uint32_t sender_ip;
+  uint8_t target_mac[6];
+  uint32_t target_ip;
 } __attribute__((packed));
 
 struct ipv4_hdr {
-    uint8_t ihl : 4;
-    uint8_t version : 4;
-    uint8_t tos;
-    uint16_t total_len;
-    uint16_t id;
-    uint16_t frag_off;
-    uint8_t ttl;
-    uint8_t protocol;
-    uint16_t checksum;
-    uint32_t src_ip;
-    uint32_t dst_ip;
+  uint8_t ihl : 4;
+  uint8_t version : 4;
+  uint8_t tos;
+  uint16_t total_len;
+  uint16_t id;
+  uint16_t frag_off;
+  uint8_t ttl;
+  uint8_t protocol;
+  uint16_t checksum;
+  uint32_t src_ip;
+  uint32_t dst_ip;
 } __attribute__((packed));
 
 struct icmp_hdr {
-    uint8_t type;
-    uint8_t code;
-    uint16_t checksum;
-    uint16_t id;
-    uint16_t seq;
+  uint8_t type;
+  uint8_t code;
+  uint16_t checksum;
+  uint16_t id;
+  uint16_t seq;
 } __attribute__((packed));
 
 struct udp_hdr {
-    uint16_t src_port;
-    uint16_t dst_port;
-    uint16_t length;
-    uint16_t checksum;
+  uint16_t src_port;
+  uint16_t dst_port;
+  uint16_t length;
+  uint16_t checksum;
 } __attribute__((packed));
 
 struct tcp_hdr {
-    uint16_t src_port;
-    uint16_t dst_port;
-    uint32_t seq;
-    uint32_t ack;
-    uint8_t ns : 1;
-    uint8_t reserved : 3;
-    uint8_t data_offset : 4;
-    uint8_t fin : 1;
-    uint8_t syn : 1;
-    uint8_t rst : 1;
-    uint8_t psh : 1;
-    uint8_t ack_flag : 1;
-    uint8_t urg : 1;
-    uint8_t ece : 1;
-    uint8_t cwr : 1;
-    uint16_t window_size;
-    uint16_t checksum;
-    uint16_t urgent_ptr;
+  uint16_t src_port;
+  uint16_t dst_port;
+  uint32_t seq;
+  uint32_t ack;
+  uint8_t ns : 1;
+  uint8_t reserved : 3;
+  uint8_t data_offset : 4;
+  uint8_t fin : 1;
+  uint8_t syn : 1;
+  uint8_t rst : 1;
+  uint8_t psh : 1;
+  uint8_t ack_flag : 1;
+  uint8_t urg : 1;
+  uint8_t ece : 1;
+  uint8_t cwr : 1;
+  uint16_t window_size;
+  uint16_t checksum;
+  uint16_t urgent_ptr;
 } __attribute__((packed));
 
 enum socket_state {
-    SOCKET_CLOSED,
-    SOCKET_SYN_SENT,
-    SOCKET_ESTABLISHED,
-    SOCKET_FIN_WAIT
+  SOCKET_CLOSED,
+  SOCKET_SYN_SENT,
+  SOCKET_ESTABLISHED,
+  SOCKET_FIN_WAIT
 };
 
 #define SOCKET_RX_BUF_SIZE (4 * 1048576)  // 4MB — absorbs burst fire-and-forget DMA sync
 
 struct socket_pcb {
-    int in_use;
-    int protocol; // IP_PROTO_TCP or IP_PROTO_UDP
-    uint32_t local_ip;
-    uint16_t local_port;
-    uint32_t remote_ip;
-    uint16_t remote_port;
-    enum socket_state state;
-    
-    // TCP State
-    uint32_t seq;
-    uint32_t ack;
+  int in_use;
+  int protocol; // IP_PROTO_TCP or IP_PROTO_UDP
+  uint32_t local_ip;
+  uint16_t local_port;
+  uint32_t remote_ip;
+  uint16_t remote_port;
+  enum socket_state state;
 
-    // Cached destination MAC — set after first successful ARP resolution.
-    // Eliminates per-packet ARP lookup for the RDMA hot path.
-    uint8_t cached_mac[6];
-    int mac_cached;  // 1 if cached_mac is valid
+  // TCP State
+  uint32_t seq;
+  uint32_t ack;
 
-    // Receive buffer
-    volatile uint8_t rx_buf[SOCKET_RX_BUF_SIZE];
-    volatile uint32_t rx_head;
-    volatile uint32_t rx_tail;
+  // Cached destination MAC — set after first successful ARP resolution.
+  // Eliminates per-packet ARP lookup for the RDMA hot path.
+  uint8_t cached_mac[6];
+  int mac_cached;  // 1 if cached_mac is valid
+
+  // Receive buffer
+  volatile uint8_t rx_buf[SOCKET_RX_BUF_SIZE];
+  volatile uint32_t rx_head;
+  volatile uint32_t rx_tail;
 };
 
 /**

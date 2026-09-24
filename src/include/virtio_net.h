@@ -7,10 +7,10 @@
 #define MAC_ADDR_LEN 6
 
 struct virtio_net_config {
-    uint8_t mac[MAC_ADDR_LEN];
-    uint16_t status;
-    uint16_t max_virtqueue_pairs;
-    uint16_t mtu;
+  uint8_t mac[MAC_ADDR_LEN];
+  uint16_t status;
+  uint16_t max_virtqueue_pairs;
+  uint16_t mtu;
 } __attribute__((packed));
 
 /**

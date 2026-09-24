@@ -19,22 +19,22 @@ extern int main(int argc, char **argv);
 
 __attribute__((section(".text._start")))
 void _start(void) {
-    static char namebuf[32];
-    static char argbuf[256];
-    static char *argv[CRT0_MAX_ARGS];
+  static char namebuf[32];
+  static char argbuf[256];
+  static char *argv[CRT0_MAX_ARGS];
 
-    int argc = 0;
-    if (get_progname(namebuf, sizeof namebuf) == 0 && namebuf[0] != '\0') {
-        argv[argc++] = namebuf;
-    }
-    if (get_args(argbuf, sizeof argbuf) == 0) {
-        argc += parse_args(argbuf, &argv[argc], CRT0_MAX_ARGS - 1 - argc);
-    }
-    if (argc == 0) {
-        argv[argc++] = "HobbyOS"; /* no name and no args: still need argv[0] */
-    }
-    argv[argc] = 0;
+  int argc = 0;
+  if (get_progname(namebuf, sizeof namebuf) == 0 && namebuf[0] != '\0') {
+    argv[argc++] = namebuf;
+  }
+  if (get_args(argbuf, sizeof argbuf) == 0) {
+    argc += parse_args(argbuf, &argv[argc], CRT0_MAX_ARGS - 1 - argc);
+  }
+  if (argc == 0) {
+    argv[argc++] = "HobbyOS"; /* no name and no args: still need argv[0] */
+  }
+  argv[argc] = 0;
 
-    int rc = main(argc, argv);
-    exit(rc);
+  int rc = main(argc, argv);
+  exit(rc);
 }

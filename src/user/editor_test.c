@@ -39,65 +39,65 @@ static int mock_events_tail = 0;
 
 
 void inject_mock_event(uint16_t type, uint16_t code, uint32_t value) {
-    int next = (mock_events_head + 1) % MAX_MOCK_EVENTS;
-    if (next != mock_events_tail) {
-        mock_events[mock_events_head].type = type;
-        mock_events[mock_events_head].code = code;
-        mock_events[mock_events_head].value = value;
-        mock_events_head = next;
-    }
+  int next = (mock_events_head + 1) % MAX_MOCK_EVENTS;
+  if (next != mock_events_tail) {
+    mock_events[mock_events_head].type = type;
+    mock_events[mock_events_head].code = code;
+    mock_events[mock_events_head].value = value;
+    mock_events_head = next;
+  }
 }
 
 int get_events(void *buf, int max_events) {
-    struct virtio_input_event *events = (struct virtio_input_event *)buf;
-    int count = 0;
-    while (mock_events_tail != mock_events_head && count < max_events) {
-        events[count++] = mock_events[mock_events_tail];
-        mock_events_tail = (mock_events_tail + 1) % MAX_MOCK_EVENTS;
-    }
-    return count;
+  struct virtio_input_event *events = (struct virtio_input_event *)buf;
+  int count = 0;
+  while (mock_events_tail != mock_events_head && count < max_events) {
+    events[count++] = mock_events[mock_events_tail];
+    mock_events_tail = (mock_events_tail + 1) % MAX_MOCK_EVENTS;
+  }
+  return count;
 }
 
 int read_dir(const char *path, int index, struct sys_dirent *ent) {
-    (void)path;
-    if (index == 0) {
-        ent->name[0] = 'N'; ent->name[1] = 'E'; ent->name[2] = 'T'; ent->name[3] = 'T';
-        ent->name[4] = 'E'; ent->name[5] = 'S'; ent->name[6] = 'T'; ent->name[7] = '.';
-        ent->name[8] = 'B'; ent->name[9] = 'I'; ent->name[10] = 'N'; ent->name[11] = '\0';
-        ent->attr = 0;
-        ent->size = 0;
-        return 0;
-    } else if (index == 1) {
-        ent->name[0] = 'E'; ent->name[1] = 'D'; ent->name[2] = 'I'; ent->name[3] = 'T';
-        ent->name[4] = 'O'; ent->name[5] = 'R'; ent->name[6] = '.'; ent->name[7] = 'B';
-        ent->name[8] = 'I'; ent->name[9] = 'N'; ent->name[10] = '\0';
-        ent->attr = 0;
-        ent->size = 0;
-        return 0;
-    }
-    return -1;
+  (void)path;
+  if (index == 0) {
+    ent->name[0] = 'N'; ent->name[1] = 'E'; ent->name[2] = 'T'; ent->name[3] = 'T';
+    ent->name[4] = 'E'; ent->name[5] = 'S'; ent->name[6] = 'T'; ent->name[7] = '.';
+    ent->name[8] = 'B'; ent->name[9] = 'I'; ent->name[10] = 'N'; ent->name[11] = '\0';
+    ent->attr = 0;
+    ent->size = 0;
+    return 0;
+  } else if (index == 1) {
+    ent->name[0] = 'E'; ent->name[1] = 'D'; ent->name[2] = 'I'; ent->name[3] = 'T';
+    ent->name[4] = 'O'; ent->name[5] = 'R'; ent->name[6] = '.'; ent->name[7] = 'B';
+    ent->name[8] = 'I'; ent->name[9] = 'N'; ent->name[10] = '\0';
+    ent->attr = 0;
+    ent->size = 0;
+    return 0;
+  }
+  return -1;
 }
 
 // Basic key mapping for US keyboard reverse lookup
 int char_to_keycode(char c) {
-    char keymap[128] = {0,    27,  '1', '2',  '3',  '4',  '5', '6', '7',  '8',
-                        '9',  '0', '-', '=',  '\b', '\t', 'q', 'w', 'e',  'r',
-                        't',  'y', 'u', 'i',  'o',  'p',  '[', ']', '\n', 0,
-                        'a',  's', 'd', 'f',  'g',  'h',  'j', 'k', 'l',  ';',
-                        '\'', '`', 0,   '\\', 'z',  'x',  'c', 'v', 'b',  'n',
-                        'm',  ',', '.', '/',  0,    '*',  0,   ' ', 0};
-    for (int i = 0; i < 128; i++) {
-        if (keymap[i] == c) return i;
-    }
-    return 0;
+  char keymap[128] = {0,    27,  '1', '2',  '3',  '4',  '5', '6', '7',  '8',
+                      '9',  '0', '-', '=',  '\b', '\t', 'q', 'w', 'e',  'r',
+                      't',  'y', 'u', 'i',  'o',  'p',  '[', ']', '\n', 0,
+                      'a',  's', 'd', 'f',  'g',  'h',  'j', 'k', 'l',  ';',
+                      '\'', '`', 0,   '\\', 'z',  'x',  'c', 'v', 'b',  'n',
+                      'm',  ',', '.', '/',  0,    '*',  0,   ' ', 0};
+  for (int i = 0; i < 128; i++) {
+    if (keymap[i] == c) return i;
+  }
+  return 0;
 }
 
 void send_key(char c) {
-    int code = char_to_keycode(c);
-    if (code > 0) {
-        inject_mock_event(EV_KEY, code, 1); // press
-        inject_mock_event(EV_KEY, code, 0); // release
-    }
+  int code = char_to_keycode(c);
+  if (code > 0) {
+    inject_mock_event(EV_KEY, code, 1); // press
+    inject_mock_event(EV_KEY, code, 0); // release
+  }
 }
 
 
@@ -116,132 +116,132 @@ static int test_state = 0;
 #define STATE_WAIT_FINISH 6
 
 void flush_fb(void) {
-    // Actually call the real syscall
-    syscall(10 /* SYS_FLUSH_FB */, 0, 0, 0, 0);
+  // Actually call the real syscall
+  syscall(10 /* SYS_FLUSH_FB */, 0, 0, 0, 0);
 
-    print_console("[TEST] flush_fb: test_state=");
-    char buf[16];
-    int st = test_state;
-    if (st == 0) print_console("0");
-    else if (st == 1) print_console("1");
-    else if (st == 2) print_console("2");
-    else if (st == 3) print_console("3");
-    else print_console("other");
-    print_console(" num_windows=");
-    if (num_windows == 0) print_console("0\n");
-    else if (num_windows == 1) print_console("1\n");
-    else print_console("other\n");
+  print_console("[TEST] flush_fb: test_state=");
+  char buf[16];
+  int st = test_state;
+  if (st == 0) print_console("0");
+  else if (st == 1) print_console("1");
+  else if (st == 2) print_console("2");
+  else if (st == 3) print_console("3");
+  else print_console("other");
+  print_console(" num_windows=");
+  if (num_windows == 0) print_console("0\n");
+  else if (num_windows == 1) print_console("1\n");
+  else print_console("other\n");
 
-    if (test_state == 0) {
-        // Right click to open menu
-        inject_mock_event(EV_KEY, 0x111, 1);
-        inject_mock_event(EV_KEY, 0x111, 0);
-        
-        // Move mouse down to hit NETTEST.BIN (index 0 -> y = 384 + 0 * 20 + 10 = 394)
-        inject_mock_event(EV_ABS, ABS_Y, (394 * 0x7FFF) / 768);
-        
-        // Left click to select NETTEST.BIN
-        inject_mock_event(EV_KEY, 0x110, 1);
-        inject_mock_event(EV_KEY, 0x110, 0);
+  if (test_state == 0) {
+    // Right click to open menu
+    inject_mock_event(EV_KEY, 0x111, 1);
+    inject_mock_event(EV_KEY, 0x111, 0);
 
-        test_state = STATE_WAIT_NETTEST_LAUNCH;
+    // Move mouse down to hit NETTEST.BIN (index 0 -> y = 384 + 0 * 20 + 10 = 394)
+    inject_mock_event(EV_ABS, ABS_Y, (394 * 0x7FFF) / 768);
+
+    // Left click to select NETTEST.BIN
+    inject_mock_event(EV_KEY, 0x110, 1);
+    inject_mock_event(EV_KEY, 0x110, 0);
+
+    test_state = STATE_WAIT_NETTEST_LAUNCH;
+  }
+  if (test_state == STATE_WAIT_NETTEST_LAUNCH) {
+    if (num_windows == 1) {
+      print_console("[TEST] nettest launched.\n");
+      test_state = STATE_WAIT_NETTEST_EXIT;
     }
-    if (test_state == STATE_WAIT_NETTEST_LAUNCH) {
-        if (num_windows == 1) {
-            print_console("[TEST] nettest launched.\n");
-            test_state = STATE_WAIT_NETTEST_EXIT;
-        }
+  }
+  if (test_state == STATE_WAIT_NETTEST_EXIT) {
+    if (num_windows == 0) {
+      print_console("[TEST] nettest exited.\n");
+      // Right click to open menu
+      inject_mock_event(EV_KEY, 0x111, 1);
+      inject_mock_event(EV_KEY, 0x111, 0);
+
+      // Move mouse down to hit EDITOR.BIN (index 1 -> y = 384 + 1 * 20 + 10 = 414)
+      inject_mock_event(EV_ABS, ABS_Y, (414 * 0x7FFF) / 768);
+
+      // Left click to select EDITOR.BIN
+      inject_mock_event(EV_KEY, 0x110, 1);
+      inject_mock_event(EV_KEY, 0x110, 0);
+
+      test_state = STATE_WAIT_EDITOR_LAUNCH;
     }
-    if (test_state == STATE_WAIT_NETTEST_EXIT) {
-        if (num_windows == 0) {
-            print_console("[TEST] nettest exited.\n");
-            // Right click to open menu
-            inject_mock_event(EV_KEY, 0x111, 1);
-            inject_mock_event(EV_KEY, 0x111, 0);
-            
-            // Move mouse down to hit EDITOR.BIN (index 1 -> y = 384 + 1 * 20 + 10 = 414)
-            inject_mock_event(EV_ABS, ABS_Y, (414 * 0x7FFF) / 768);
-            
-            // Left click to select EDITOR.BIN
-            inject_mock_event(EV_KEY, 0x110, 1);
-            inject_mock_event(EV_KEY, 0x110, 0);
-            
-            test_state = STATE_WAIT_EDITOR_LAUNCH;
-        }
+  }
+  if (test_state == STATE_WAIT_EDITOR_LAUNCH) {
+    if (num_windows == 1) {
+      print_console("[TEST] editor launched.\n");
+      print_console("[TEST] Injecting 'h' 'e' 'l' 'l' 'o'...\n");
+      send_key('h');
+      send_key('e');
+      send_key('l');
+      send_key('l');
+      send_key('o');
+      test_state = STATE_CLICK_FILE_MENU;
     }
-    if (test_state == STATE_WAIT_EDITOR_LAUNCH) {
-        if (num_windows == 1) {
-            print_console("[TEST] editor launched.\n");
-            print_console("[TEST] Injecting 'h' 'e' 'l' 'l' 'o'...\n");
-            send_key('h');
-            send_key('e');
-            send_key('l');
-            send_key('l');
-            send_key('o');
-            test_state = STATE_CLICK_FILE_MENU;
-        }
+  }
+  if (test_state == STATE_CLICK_FILE_MENU) {
+    int found = 0;
+    char *text = windows[0].text;
+    for (int i = 0; text[i] != '\0'; i++) {
+      if (text[i] == 'h' && text[i+1] == 'e' && text[i+2] == 'l' && text[i+3] == 'l' && text[i+4] == 'o') {
+        found = 1;
+        break;
+      }
     }
-    if (test_state == STATE_CLICK_FILE_MENU) {
-        int found = 0;
-        char *text = windows[0].text;
-        for (int i = 0; text[i] != '\0'; i++) {
-            if (text[i] == 'h' && text[i+1] == 'e' && text[i+2] == 'l' && text[i+3] == 'l' && text[i+4] == 'o') {
-                found = 1;
-                break;
-            }
-        }
-        if (found) {
-            print_console("[TEST] Moving mouse to File menu...\n");
-            inject_mock_event(EV_ABS, ABS_X, (20 * 0x7FFF) / 1024);
-            inject_mock_event(EV_ABS, ABS_Y, (26 * 0x7FFF) / 768);
-            test_state = 100;
-        }
+    if (found) {
+      print_console("[TEST] Moving mouse to File menu...\n");
+      inject_mock_event(EV_ABS, ABS_X, (20 * 0x7FFF) / 1024);
+      inject_mock_event(EV_ABS, ABS_Y, (26 * 0x7FFF) / 768);
+      test_state = 100;
     }
-    if (test_state == 100) {
-        inject_mock_event(EV_KEY, 0x110, 1);
-        inject_mock_event(EV_KEY, 0x110, 0);
-        test_state = 101;
+  }
+  if (test_state == 100) {
+    inject_mock_event(EV_KEY, 0x110, 1);
+    inject_mock_event(EV_KEY, 0x110, 0);
+    test_state = 101;
+  }
+  if (test_state == 101) {
+    print_console("[TEST] Moving mouse to Open item...\n");
+    inject_mock_event(EV_ABS, ABS_X, (20 * 0x7FFF) / 1024);
+    inject_mock_event(EV_ABS, ABS_Y, (64 * 0x7FFF) / 768);
+    test_state = 102;
+  }
+  if (test_state == 102) {
+    print_console("[TEST] Clicking Open item...\n");
+    inject_mock_event(EV_KEY, 0x110, 1);
+    inject_mock_event(EV_KEY, 0x110, 0);
+    test_state = STATE_WAIT_FINISH;
+  }
+  if (test_state == STATE_WAIT_FINISH) {
+    /* Clicking File->Open must make the editor render its file open
+     * dialog, listing real entries read from the FAT-16 disk. Verify
+     * the dialog title and at least one real file name appear in the
+     * window text. */
+    int found_title = 0;
+    int found_entry = 0;
+    char *text = windows[0].text;
+    for (int i = 0; text[i] != '\0'; i++) {
+      if (text[i] == 'O' && text[i+1] == 'p' && text[i+2] == 'e' &&
+          text[i+3] == 'n' && text[i+4] == ' ' && text[i+5] == 'F') {
+        found_title = 1;
+      }
+      if (text[i] == 'M' && text[i+1] == 'E' && text[i+2] == 'M' &&
+          text[i+3] == 'T' && text[i+4] == 'E' && text[i+5] == 'S') {
+        found_entry = 1;
+      }
     }
-    if (test_state == 101) {
-        print_console("[TEST] Moving mouse to Open item...\n");
-        inject_mock_event(EV_ABS, ABS_X, (20 * 0x7FFF) / 1024);
-        inject_mock_event(EV_ABS, ABS_Y, (64 * 0x7FFF) / 768);
-        test_state = 102;
+    if (found_title && found_entry) {
+      print_console("[TEST] Open File dialog rendered with disk entries! SCREENSHOT_READY\n");
+      while(1);
     }
-    if (test_state == 102) {
-        print_console("[TEST] Clicking Open item...\n");
-        inject_mock_event(EV_KEY, 0x110, 1);
-        inject_mock_event(EV_KEY, 0x110, 0);
-        test_state = STATE_WAIT_FINISH;
-    }
-    if (test_state == STATE_WAIT_FINISH) {
-        /* Clicking File->Open must make the editor render its file open
-         * dialog, listing real entries read from the FAT-16 disk. Verify
-         * the dialog title and at least one real file name appear in the
-         * window text. */
-        int found_title = 0;
-        int found_entry = 0;
-        char *text = windows[0].text;
-        for (int i = 0; text[i] != '\0'; i++) {
-            if (text[i] == 'O' && text[i+1] == 'p' && text[i+2] == 'e' &&
-                text[i+3] == 'n' && text[i+4] == ' ' && text[i+5] == 'F') {
-                found_title = 1;
-            }
-            if (text[i] == 'M' && text[i+1] == 'E' && text[i+2] == 'M' &&
-                text[i+3] == 'T' && text[i+4] == 'E' && text[i+5] == 'S') {
-                found_entry = 1;
-            }
-        }
-        if (found_title && found_entry) {
-            print_console("[TEST] Open File dialog rendered with disk entries! SCREENSHOT_READY\n");
-            while(1);
-        }
-    }
+  }
 }
 
 __attribute__((section(".text._start")))
 void _start(void) {
-    print_console("[TEST] Starting editor integration test...\n");
-    desktop_main();
-    exit(0);
+  print_console("[TEST] Starting editor integration test...\n");
+  desktop_main();
+  exit(0);
 }

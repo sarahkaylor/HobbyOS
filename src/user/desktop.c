@@ -113,78 +113,78 @@ static int drag_last_row = -1;
 static void launch_app_named(const char *bin, const char *args);
 
 static void window_write_default(int win_id, const char *buf, int len) {
-    for (int i = 0; i < num_windows; i++) {
-        if (windows[i].id == win_id) {
-            int wr = write(windows[i].stdin_fd, buf, len);
-            (void)wr;
-            return;
-        }
+  for (int i = 0; i < num_windows; i++) {
+    if (windows[i].id == win_id) {
+      int wr = write(windows[i].stdin_fd, buf, len);
+      (void)wr;
+      return;
     }
+  }
 }
 
 /* Where forwarded mouse events go. Host tests swap this for a capture. */
 void (*desktop_send_hook)(int win_id, const char *buf, int len) = window_write_default;
 
 static struct window *find_window(int id) {
-    for (int i = 0; i < num_windows; i++) {
-        if (windows[i].id == id) return &windows[i];
-    }
-    return 0;
+  for (int i = 0; i < num_windows; i++) {
+    if (windows[i].id == id) return &windows[i];
+  }
+  return 0;
 }
 
 /* Build one mouse escape sequence: ESC [ <kind> <col> ; <row> ; <btn> ~
  * kind: 'P' press, 'G' drag, 'R' release. col/row/btn must be >= 0.
  * Returns the number of bytes written (excluding the NUL terminator). */
 int wm_build_mouse_seq(char *out, int cap, char kind, int col, int row, int btn) {
-    char body[24];
-    int j = 0;
-    body[j++] = 27; body[j++] = '[';
-    body[j++] = kind;
-    if (col >= 100) body[j++] = (char)('0' + (col / 100) % 10);
-    if (col >= 10)  body[j++] = (char)('0' + (col / 10) % 10);
-    body[j++] = (char)('0' + col % 10);
-    body[j++] = ';';
-    if (row >= 100) body[j++] = (char)('0' + (row / 100) % 10);
-    if (row >= 10)  body[j++] = (char)('0' + (row / 10) % 10);
-    body[j++] = (char)('0' + row % 10);
-    body[j++] = ';';
-    body[j++] = (char)('0' + btn);
-    body[j++] = '~';
-    if (j > cap - 1) j = cap - 1;
-    for (int i = 0; i < j; i++) out[i] = body[i];
-    out[j] = '\0';
-    return j;
+  char body[24];
+  int j = 0;
+  body[j++] = 27; body[j++] = '[';
+  body[j++] = kind;
+  if (col >= 100) body[j++] = (char)('0' + (col / 100) % 10);
+  if (col >= 10)  body[j++] = (char)('0' + (col / 10) % 10);
+  body[j++] = (char)('0' + col % 10);
+  body[j++] = ';';
+  if (row >= 100) body[j++] = (char)('0' + (row / 100) % 10);
+  if (row >= 10)  body[j++] = (char)('0' + (row / 10) % 10);
+  body[j++] = (char)('0' + row % 10);
+  body[j++] = ';';
+  body[j++] = (char)('0' + btn);
+  body[j++] = '~';
+  if (j > cap - 1) j = cap - 1;
+  for (int i = 0; i < j; i++) out[i] = body[i];
+  out[j] = '\0';
+  return j;
 }
 
 /* Map absolute pointer coordinates to the content cell (col,row) of window
  * w, clamped to its content grid. Cell (0,0) is the first print() cell at
  * (w->x + 10, w->y + 44); cells advance 8px right and 10px down. */
 void wm_mouse_cell(const struct window *w, int mx, int my, int *col, int *row) {
-    int c = (mx - (w->x + 10)) / 8;
-    int r = (my - (w->y + 44)) / 10;
-    int maxc = (w->w - 12) / 8 - 1;
-    int maxr = (w->h - 48) / 10 - 1;
-    if (c < 0) c = 0;
-    if (r < 0) r = 0;
-    if (maxc < 0) maxc = 0;
-    if (maxr < 0) maxr = 0;
-    if (c > maxc) c = maxc;
-    if (r > maxr) r = maxr;
-    *col = c; *row = r;
+  int c = (mx - (w->x + 10)) / 8;
+  int r = (my - (w->y + 44)) / 10;
+  int maxc = (w->w - 12) / 8 - 1;
+  int maxr = (w->h - 48) / 10 - 1;
+  if (c < 0) c = 0;
+  if (r < 0) r = 0;
+  if (maxc < 0) maxc = 0;
+  if (maxr < 0) maxr = 0;
+  if (c > maxc) c = maxc;
+  if (r > maxr) r = maxr;
+  *col = c; *row = r;
 }
 
 /* Start a drag session after a press was delivered at (col,row). */
 void desktop_drag_begin(int win_id, int col, int row) {
-    drag_win_id = win_id;
-    drag_last_col = col;
-    drag_last_row = row;
+  drag_win_id = win_id;
+  drag_last_col = col;
+  drag_last_row = row;
 }
 
 /* End a drag session without sending anything (window closed, etc). */
 void desktop_drag_cancel(void) {
-    drag_win_id = -1;
-    drag_last_col = -1;
-    drag_last_row = -1;
+  drag_win_id = -1;
+  drag_last_col = -1;
+  drag_last_row = -1;
 }
 
 /* Window currently holding the drag session (-1 = none). */
@@ -193,31 +193,31 @@ int desktop_drag_window(void) { return drag_win_id; }
 /* Forward pointer motion while the button is held. Only a cell change is
  * reported (motion inside one text cell produces no event). */
 void desktop_drag_move(int mx, int my) {
-    if (drag_win_id < 0) return;
-    struct window *w = find_window(drag_win_id);
-    if (!w) { desktop_drag_cancel(); return; }
-    int col, row;
-    wm_mouse_cell(w, mx, my, &col, &row);
-    if (col == drag_last_col && row == drag_last_row) return;
-    drag_last_col = col;
-    drag_last_row = row;
-    char seq[24];
-    int n = wm_build_mouse_seq(seq, sizeof seq, 'G', col, row, 1);
-    desktop_send_hook(drag_win_id, seq, n);
+  if (drag_win_id < 0) return;
+  struct window *w = find_window(drag_win_id);
+  if (!w) { desktop_drag_cancel(); return; }
+  int col, row;
+  wm_mouse_cell(w, mx, my, &col, &row);
+  if (col == drag_last_col && row == drag_last_row) return;
+  drag_last_col = col;
+  drag_last_row = row;
+  char seq[24];
+  int n = wm_build_mouse_seq(seq, sizeof seq, 'G', col, row, 1);
+  desktop_send_hook(drag_win_id, seq, n);
 }
 
 /* Deliver the button release at the (clamped) cell and end the session. */
 void desktop_drag_end(int mx, int my) {
-    if (drag_win_id < 0) return;
-    struct window *w = find_window(drag_win_id);
-    if (w) {
-        int col, row;
-        wm_mouse_cell(w, mx, my, &col, &row);
-        char seq[24];
-        int n = wm_build_mouse_seq(seq, sizeof seq, 'R', col, row, 1);
-        desktop_send_hook(drag_win_id, seq, n);
-    }
-    desktop_drag_cancel();
+  if (drag_win_id < 0) return;
+  struct window *w = find_window(drag_win_id);
+  if (w) {
+    int col, row;
+    wm_mouse_cell(w, mx, my, &col, &row);
+    char seq[24];
+    int n = wm_build_mouse_seq(seq, sizeof seq, 'R', col, row, 1);
+    desktop_send_hook(drag_win_id, seq, n);
+  }
+  desktop_drag_cancel();
 }
 
 /* Parse an OSC "run in new window" request: seq[0]==']', seq[1]=='R',
@@ -225,70 +225,70 @@ void desktop_drag_end(int mx, int my) {
  * with the leading ']' included). Fills bin and args and returns 1 when a
  * non-empty program name was found. */
 int wm_parse_run_request(const char *seq, char *bin, int bincap, char *args, int argcap) {
-    if (!seq || seq[0] != ']' || seq[1] != 'R') return 0;
-    int i = 2, j = 0;
-    while (seq[i] && seq[i] != ';' && j < bincap - 1) bin[j++] = seq[i++];
-    bin[j] = '\0';
-    while (seq[i] && seq[i] != ';') i++;     /* skip a truncated bin name */
-    if (seq[i] == ';') i++;
-    j = 0;
-    while (seq[i] && j < argcap - 1) args[j++] = seq[i++];
-    args[j] = '\0';
-    return bin[0] != '\0';
+  if (!seq || seq[0] != ']' || seq[1] != 'R') return 0;
+  int i = 2, j = 0;
+  while (seq[i] && seq[i] != ';' && j < bincap - 1) bin[j++] = seq[i++];
+  bin[j] = '\0';
+  while (seq[i] && seq[i] != ';') i++;     /* skip a truncated bin name */
+  if (seq[i] == ';') i++;
+  j = 0;
+  while (seq[i] && j < argcap - 1) args[j++] = seq[i++];
+  args[j] = '\0';
+  return bin[0] != '\0';
 }
 
 void wm_handle_app_escape(int win_id, char* seq) {
-    if (seq[0] == ']' && seq[1] == 'M') {
-        int idx = seq[2] - '0';
-        if (idx >= 0 && idx < 10) {
-            char* ptr = seq + 4;
-            struct window* win = 0;
-            for(int i=0; i<num_windows; i++) if(windows[i].id == win_id) { win = &windows[i]; break; }
-            if(!win) return;
-            
-            if (idx >= win->num_menus) win->num_menus = idx + 1;
-            
-            int n_len = 0;
-            while(*ptr && *ptr != ';') {
-                win->menus[idx].name[n_len++] = *ptr++;
-            }
-            win->menus[idx].name[n_len] = 0;
-            if(*ptr == ';') ptr++;
-            
-            win->menus[idx].num_items = 0;
-            while(*ptr) {
-                int i_len = 0;
-                while(*ptr && *ptr != ',') {
-                    win->menus[idx].items[win->menus[idx].num_items][i_len++] = *ptr++;
-                }
-                win->menus[idx].items[win->menus[idx].num_items][i_len] = 0;
-                win->menus[idx].num_items++;
-                if(*ptr == ',') ptr++;
-            }
-            /* The menu bar changed: repaint this window's chrome. */
-            win->chrome_dirty = 1;
+  if (seq[0] == ']' && seq[1] == 'M') {
+    int idx = seq[2] - '0';
+    if (idx >= 0 && idx < 10) {
+      char* ptr = seq + 4;
+      struct window* win = 0;
+      for(int i=0; i<num_windows; i++) if(windows[i].id == win_id) { win = &windows[i]; break; }
+      if(!win) return;
+
+      if (idx >= win->num_menus) win->num_menus = idx + 1;
+
+      int n_len = 0;
+      while(*ptr && *ptr != ';') {
+        win->menus[idx].name[n_len++] = *ptr++;
+      }
+      win->menus[idx].name[n_len] = 0;
+      if(*ptr == ';') ptr++;
+
+      win->menus[idx].num_items = 0;
+      while(*ptr) {
+        int i_len = 0;
+        while(*ptr && *ptr != ',') {
+          win->menus[idx].items[win->menus[idx].num_items][i_len++] = *ptr++;
         }
-    } else if (seq[0] == ']' && seq[1] == 'T') {
-        /* Window title: ESC ] T <title> ~ */
-        wm_set_window_title(win_id, seq + 2);
-    } else if (seq[0] == ']' && seq[1] == 'P') {
-        /* Pointer events opt-in: ESC ] P 1 ~ (1 = enable, 0 = disable) */
-        for (int i = 0; i < num_windows; i++) {
-            if (windows[i].id == win_id) {
-                windows[i].mouse_events = (seq[2] == '1') ? 1 : 0;
-                break;
-            }
-        }
-    } else if (seq[0] == ']' && seq[1] == 'R') {
-        /* Run a program in a new window: ESC ] R <bin>[;<args>] ~
-         * Used by FILES to open documents in EDITOR.BIN and to launch .BIN
-         * programs. */
-        char bin[32];
-        char rargs[160];
-        if (wm_parse_run_request(seq, bin, sizeof bin, rargs, sizeof rargs)) {
-            launch_app_named(bin, rargs);
-        }
+        win->menus[idx].items[win->menus[idx].num_items][i_len] = 0;
+        win->menus[idx].num_items++;
+        if(*ptr == ',') ptr++;
+      }
+      /* The menu bar changed: repaint this window's chrome. */
+      win->chrome_dirty = 1;
     }
+  } else if (seq[0] == ']' && seq[1] == 'T') {
+    /* Window title: ESC ] T <title> ~ */
+    wm_set_window_title(win_id, seq + 2);
+  } else if (seq[0] == ']' && seq[1] == 'P') {
+    /* Pointer events opt-in: ESC ] P 1 ~ (1 = enable, 0 = disable) */
+    for (int i = 0; i < num_windows; i++) {
+      if (windows[i].id == win_id) {
+        windows[i].mouse_events = (seq[2] == '1') ? 1 : 0;
+        break;
+      }
+    }
+  } else if (seq[0] == ']' && seq[1] == 'R') {
+    /* Run a program in a new window: ESC ] R <bin>[;<args>] ~
+     * Used by FILES to open documents in EDITOR.BIN and to launch .BIN
+     * programs. */
+    char bin[32];
+    char rargs[160];
+    if (wm_parse_run_request(seq, bin, sizeof bin, rargs, sizeof rargs)) {
+      launch_app_named(bin, rargs);
+    }
+  }
 }
 
 /* GUI app binaries surfaced at the top of the Apps menu, then the games.
@@ -375,8 +375,8 @@ void load_menu(void) {
     }
     int k = 0;
     while (ent.name[k] && k < 15) {
-        menu_items[num_menu_items][k] = ent.name[k];
-        k++;
+      menu_items[num_menu_items][k] = ent.name[k];
+      k++;
     }
     menu_items[num_menu_items][k] = '\0';
     num_menu_items++;
@@ -450,15 +450,15 @@ static void launch_menu_item(int idx) {
 
 void draw_menu(void) {
   if (app_menu_open) {
-      struct window* win = 0;
-      for(int i=0; i<num_windows; i++) if(windows[i].id == app_menu_win_id) { win = &windows[i]; break; }
-      if (win && app_menu_idx >= 0 && app_menu_idx < win->num_menus) {
-          int n_items = win->menus[app_menu_idx].num_items;
-          graphics_draw_rect(app_menu_x, app_menu_y, 100, n_items * 20, COLOR(200, 200, 200));
-          for(int i=0; i<n_items; i++) {
-              wm_draw_text(app_menu_x + 5, app_menu_y + i * 20 + 5, win->menus[app_menu_idx].items[i], COLOR(0, 0, 0));
-          }
+    struct window* win = 0;
+    for(int i=0; i<num_windows; i++) if(windows[i].id == app_menu_win_id) { win = &windows[i]; break; }
+    if (win && app_menu_idx >= 0 && app_menu_idx < win->num_menus) {
+      int n_items = win->menus[app_menu_idx].num_items;
+      graphics_draw_rect(app_menu_x, app_menu_y, 100, n_items * 20, COLOR(200, 200, 200));
+      for(int i=0; i<n_items; i++) {
+        wm_draw_text(app_menu_x + 5, app_menu_y + i * 20 + 5, win->menus[app_menu_idx].items[i], COLOR(0, 0, 0));
       }
+    }
   }
 
   if (!menu_open)
@@ -854,59 +854,59 @@ int main(void) {
 
       if (ev->type == EV_KEY) {
         if (ev->code == 42 || ev->code == 54) {
-            shift_pressed = ev->value;
-            continue;
+          shift_pressed = ev->value;
+          continue;
         }
         if (ev->code == 0x110) { // BTN_LEFT (mouse click)
-          
-            if (ev->value == 0) {  // release: close any drag session
-                desktop_drag_end(mouse_x, mouse_y);
-                needs_redraw = 1;
-                continue;
-            }
 
-            if (ev->value == 1) {  // press
-                
-                
+          if (ev->value == 0) {  // release: close any drag session
+            desktop_drag_end(mouse_x, mouse_y);
+            needs_redraw = 1;
+            continue;
+          }
 
-                        if (app_menu_open) {
-                struct window* win = 0;
-                for(int w=0; w<num_windows; w++) if (windows[w].id == app_menu_win_id) { win = &windows[w]; break; }
-                if (win && app_menu_idx >= 0 && app_menu_idx < win->num_menus) {
-                    int num_items = win->menus[app_menu_idx].num_items;
-                    if (mouse_x >= app_menu_x && mouse_x < app_menu_x + 100 &&
-                        mouse_y >= app_menu_y && mouse_y < app_menu_y + num_items * 20) {
-                        int selected = (mouse_y - app_menu_y) / 20;
-                        char seq[16] = "\033[M0;0~";
-                        seq[3] = '0' + app_menu_idx;
-                        seq[5] = '0' + selected;
-                        write(win->stdin_fd, seq, 7);
-                    }
+          if (ev->value == 1) {  // press
+
+
+
+            if (app_menu_open) {
+              struct window* win = 0;
+              for(int w=0; w<num_windows; w++) if (windows[w].id == app_menu_win_id) { win = &windows[w]; break; }
+              if (win && app_menu_idx >= 0 && app_menu_idx < win->num_menus) {
+                int num_items = win->menus[app_menu_idx].num_items;
+                if (mouse_x >= app_menu_x && mouse_x < app_menu_x + 100 &&
+                    mouse_y >= app_menu_y && mouse_y < app_menu_y + num_items * 20) {
+                  int selected = (mouse_y - app_menu_y) / 20;
+                  char seq[16] = "\033[M0;0~";
+                  seq[3] = '0' + app_menu_idx;
+                  seq[5] = '0' + selected;
+                  write(win->stdin_fd, seq, 7);
                 }
-                app_menu_open = 0;
-                needs_redraw = 1;
+              }
+              app_menu_open = 0;
+              needs_redraw = 1;
             } else if (start_menu_open) {
-                /* Start menu click: item, Apps button toggle, or dismiss. */
-                int visible = START_MENU_VISIBLE;
-                if (num_menu_items < visible) visible = num_menu_items;
-                int w = 220;
-                int h = visible * 20 + 8;
-                int sx = 4;
-                int sy = TASKBAR_Y - h;
-                if (mouse_x >= APPS_BTN_X && mouse_x < APPS_BTN_X + APPS_BTN_W &&
-                    mouse_y >= TASKBAR_Y) {
-                    start_menu_open = 0;
-                } else if (mouse_x >= sx && mouse_x < sx + w &&
-                           mouse_y >= sy + 4 && mouse_y < sy + 4 + visible * 20) {
-                    int idx = start_scroll + (mouse_y - (sy + 4)) / 20;
-                    if (idx >= 0 && idx < num_menu_items) {
-                        start_menu_open = 0;
-                        launch_menu_item(idx);
-                    }
-                } else {
-                    start_menu_open = 0;
+              /* Start menu click: item, Apps button toggle, or dismiss. */
+              int visible = START_MENU_VISIBLE;
+              if (num_menu_items < visible) visible = num_menu_items;
+              int w = 220;
+              int h = visible * 20 + 8;
+              int sx = 4;
+              int sy = TASKBAR_Y - h;
+              if (mouse_x >= APPS_BTN_X && mouse_x < APPS_BTN_X + APPS_BTN_W &&
+                  mouse_y >= TASKBAR_Y) {
+                start_menu_open = 0;
+              } else if (mouse_x >= sx && mouse_x < sx + w &&
+                         mouse_y >= sy + 4 && mouse_y < sy + 4 + visible * 20) {
+                int idx = start_scroll + (mouse_y - (sy + 4)) / 20;
+                if (idx >= 0 && idx < num_menu_items) {
+                  start_menu_open = 0;
+                  launch_menu_item(idx);
                 }
-                needs_redraw = 1;
+              } else {
+                start_menu_open = 0;
+              }
+              needs_redraw = 1;
             } else if (menu_open) {
               if (mouse_x >= menu_x && mouse_x < menu_x + 120 &&
                   mouse_y >= menu_y && mouse_y < menu_y + num_menu_items * 20) {
@@ -945,32 +945,32 @@ int main(void) {
                         mouse_y <= windows[w].y + 18 &&
                         mouse_x >= windows[w].x + windows[w].w - 18 &&
                         mouse_x <= windows[w].x + windows[w].w - 2) {
-                                            kill(windows[w].pid, 9);
+                      kill(windows[w].pid, 9);
                       wm_remove_window(win_id);
                       if (focused_window == win_id)
                         focused_window = -1;
                       if (drag_win_id == win_id)
                         desktop_drag_cancel();
                     } else if (mouse_y >= windows[w].y + 18 && mouse_y <= windows[w].y + 34) {
-                        int m_x = windows[w].x + 10;
-                        for (int m = 0; m < windows[w].num_menus; m++) {
-                            int len = 0;
-                            while(windows[w].menus[m].name[len]) len++;
-                            int width = len * 8 + 16;
-                            if (mouse_x >= m_x && mouse_x < m_x + width) {
-                                
-                                app_menu_open = 1;
-                                
+                      int m_x = windows[w].x + 10;
+                      for (int m = 0; m < windows[w].num_menus; m++) {
+                        int len = 0;
+                        while(windows[w].menus[m].name[len]) len++;
+                        int width = len * 8 + 16;
+                        if (mouse_x >= m_x && mouse_x < m_x + width) {
 
-                                app_menu_win_id = win_id;
-                                app_menu_idx = m;
-                                app_menu_x = m_x;
-                                app_menu_y = windows[w].y + 34;
-                                needs_redraw = 1;
-                                break;
-                            }
-                            m_x += width;
+                          app_menu_open = 1;
+
+
+                          app_menu_win_id = win_id;
+                          app_menu_idx = m;
+                          app_menu_x = m_x;
+                          app_menu_y = windows[w].y + 34;
+                          needs_redraw = 1;
+                          break;
                         }
+                        m_x += width;
+                      }
                     } else {
                       focused_window = win_id;
                       /* Forward content-area presses to apps that opted in
@@ -1046,61 +1046,61 @@ int main(void) {
               /* No repaint: forwarding does not change the desktop. */
             }
           } else
-          // Arrow keys (evdev codes 103-108): forward to the focused window as
-          // 3-byte ESC sequences (ESC [ A/B/C/D) so dialogs can navigate.
-          if (ev->code >= 103 && ev->code <= 108) {
-            char seq[3] = {27, '[', 0};
-            if (ev->code == 103) seq[2] = 'A'; // UP
-            if (ev->code == 108) seq[2] = 'B'; // DOWN
-            if (ev->code == 106) seq[2] = 'C'; // RIGHT
-            if (ev->code == 105) seq[2] = 'D'; // LEFT
-            if (seq[2] != 0) {
-              if (start_menu_open) {
-                /* Navigate the start menu. */
-                if (ev->code == 103) start_sel--;
-                if (ev->code == 108) start_sel++;
-                if (start_sel < 0) start_sel = 0;
-                if (start_sel > num_menu_items - 1) start_sel = num_menu_items - 1;
-                if (start_sel < 0) start_sel = 0;
-                start_menu_ensure_visible();
-                needs_redraw = 1;
-              } else if (focused_window >= 0) {
-                for (int w = 0; w < num_windows; w++) {
-                  if (windows[w].id == focused_window) {
-                    /* Forward the full 3-byte ESC sequence to the focused
-                     * window's stdin. write() delivers all 3 atomically here
-                     * (the pipe has ample room for a single keypress). */
-                    int wr = write(windows[w].stdin_fd, seq, 3);
-                    (void)wr;
-                    break;
+            // Arrow keys (evdev codes 103-108): forward to the focused window as
+            // 3-byte ESC sequences (ESC [ A/B/C/D) so dialogs can navigate.
+            if (ev->code >= 103 && ev->code <= 108) {
+              char seq[3] = {27, '[', 0};
+              if (ev->code == 103) seq[2] = 'A'; // UP
+              if (ev->code == 108) seq[2] = 'B'; // DOWN
+              if (ev->code == 106) seq[2] = 'C'; // RIGHT
+              if (ev->code == 105) seq[2] = 'D'; // LEFT
+              if (seq[2] != 0) {
+                if (start_menu_open) {
+                  /* Navigate the start menu. */
+                  if (ev->code == 103) start_sel--;
+                  if (ev->code == 108) start_sel++;
+                  if (start_sel < 0) start_sel = 0;
+                  if (start_sel > num_menu_items - 1) start_sel = num_menu_items - 1;
+                  if (start_sel < 0) start_sel = 0;
+                  start_menu_ensure_visible();
+                  needs_redraw = 1;
+                } else if (focused_window >= 0) {
+                  for (int w = 0; w < num_windows; w++) {
+                    if (windows[w].id == focused_window) {
+                      /* Forward the full 3-byte ESC sequence to the focused
+                       * window's stdin. write() delivers all 3 atomically here
+                       * (the pipe has ample room for a single keypress). */
+                      int wr = write(windows[w].stdin_fd, seq, 3);
+                      (void)wr;
+                      break;
+                    }
                   }
-                }
-                /* No repaint here: forwarding a key does not change
-                 * anything on screen.  If the app reacts, its output
-                 * triggers the frame that shows the change. */
-              }
-            }
-          } else if (ev->code == 28 && start_menu_open) { // Enter launches selection
-            int idx = start_sel;
-            start_menu_open = 0;
-            launch_menu_item(idx);
-            needs_redraw = 1;
-          } else if (ev->code < 128) {
-            char c = shift_pressed ? shift_keymap[ev->code] : keymap[ev->code];
-            if (c) {
-              if (focused_window >= 0) {
-                // Find window to get its stdin_fd
-                for (int w = 0; w < num_windows; w++) {
-                  if (windows[w].id == focused_window) {
-                    // print_console("Writing key to child window...\n"); // removed to avoid noise if it works
-                    int wr = write(windows[w].stdin_fd, &c, 1);
-                    (void)wr; // Ignore error for now
-                    break;
-                  }
+                  /* No repaint here: forwarding a key does not change
+                   * anything on screen.  If the app reacts, its output
+                   * triggers the frame that shows the change. */
                 }
               }
+            } else if (ev->code == 28 && start_menu_open) { // Enter launches selection
+              int idx = start_sel;
+              start_menu_open = 0;
+              launch_menu_item(idx);
+              needs_redraw = 1;
+            } else if (ev->code < 128) {
+              char c = shift_pressed ? shift_keymap[ev->code] : keymap[ev->code];
+              if (c) {
+                if (focused_window >= 0) {
+                  // Find window to get its stdin_fd
+                  for (int w = 0; w < num_windows; w++) {
+                    if (windows[w].id == focused_window) {
+                      // print_console("Writing key to child window...\n"); // removed to avoid noise if it works
+                      int wr = write(windows[w].stdin_fd, &c, 1);
+                      (void)wr; // Ignore error for now
+                      break;
+                    }
+                  }
+                }
+              }
             }
-          }
         }
       } else if (ev->type == EV_ABS) {
         if (ev->code == ABS_X) {

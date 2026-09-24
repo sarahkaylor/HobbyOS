@@ -11,7 +11,7 @@ typedef uint64_t jmp_buf[16];
 
 /**
  * Saves the current execution context.
- * 
+ *
  * Returns:
  *   0 when the context is initially saved.
  */

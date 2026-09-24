@@ -20,14 +20,14 @@ extern "C" {
 #include <stdbool.h>
 #endif
 
-struct option {
+  struct option {
     const char *name;
     /* has_arg can also be ':' or ';' to indicate an option argument
        that is optional. */
     int has_arg;
     int *flag;
     int val;
-};
+  };
 
 #define no_argument 0
 #define required_argument 1
@@ -43,12 +43,12 @@ struct option {
 #define optreset hb_optreset
 #endif
 
-extern char *optarg;
-extern int optind, opterr, optopt, optreset;
+  extern char *optarg;
+  extern int optind, opterr, optopt, optreset;
 
-int getopt(int argc, char *const argv[], const char *optstring);
-int getopt_long(int argc, char *const argv[], const char *optstring,
-                const struct option *longopts, int *longindex);
+  int getopt(int argc, char *const argv[], const char *optstring);
+  int getopt_long(int argc, char *const argv[], const char *optstring,
+                  const struct option *longopts, int *longindex);
 
 #ifdef __cplusplus
 }

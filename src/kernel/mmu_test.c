@@ -20,70 +20,70 @@ extern uint64_t l2_table_1[MAX_CPUS][512];
 #define PT_USER_RW          (0b01 << 6)
 
 static void test_mmu_make_user_block_desc(void) {
-    tests_run++;
-    uart_puts("  Running test_mmu_make_user_block_desc...\n");
+  tests_run++;
+  uart_puts("  Running test_mmu_make_user_block_desc...\n");
 
-    uint64_t phys_addr = 0x40000000;
-    uint64_t desc = mmu_make_user_block_desc(phys_addr);
+  uint64_t phys_addr = 0x40000000;
+  uint64_t desc = mmu_make_user_block_desc(phys_addr);
 
 #ifdef __x86_64__
-    // Verify x86_64 block descriptor
-    EXPECT_EQ(desc, phys_addr | 0x87);
+  // Verify x86_64 block descriptor
+  EXPECT_EQ(desc, phys_addr | 0x87);
 #else
-    // Verify AArch64 block descriptor
-    EXPECT_EQ((desc & 0x0000FFFFFFFFF000ULL) == phys_addr, 1);
+  // Verify AArch64 block descriptor
+  EXPECT_EQ((desc & 0x0000FFFFFFFFF000ULL) == phys_addr, 1);
 
-    // Verify attributes
-    uint64_t attr = (PT_MEM_NORMAL << 2) | (1 << 10) | 0b01;
-    attr |= PT_USER_RW;
-    attr |= (1ULL << 53);
+  // Verify attributes
+  uint64_t attr = (PT_MEM_NORMAL << 2) | (1 << 10) | 0b01;
+  attr |= PT_USER_RW;
+  attr |= (1ULL << 53);
 
-    EXPECT_EQ((desc & ~0x0000FFFFFFFFF000ULL), attr);
+  EXPECT_EQ((desc & ~0x0000FFFFFFFFF000ULL), attr);
 #endif
 }
 
 static void test_mmu_switch_user_mapping(void) {
-    tests_run++;
-    uart_puts("  Running test_mmu_switch_user_mapping...\n");
+  tests_run++;
+  uart_puts("  Running test_mmu_switch_user_mapping...\n");
 
-    uint32_t cpu = get_cpuid();
-    uint64_t phys_base = 0x60000000;
+  uint32_t cpu = get_cpuid();
+  uint64_t phys_base = 0x60000000;
 
-    // Call the function
-    mmu_switch_user_mapping(phys_base);
+  // Call the function
+  mmu_switch_user_mapping(phys_base);
 
-    // Verify that the table was updated correctly
-    // The mapping starts at index USER_VIRT_L2_INDEX for USER_VIRT_BASE (0x44000000)
-    int num_blocks = USER_REGION_SIZE / 0x200000;
-    if (USER_REGION_SIZE % 0x200000) num_blocks++;
+  // Verify that the table was updated correctly
+  // The mapping starts at index USER_VIRT_L2_INDEX for USER_VIRT_BASE (0x44000000)
+  int num_blocks = USER_REGION_SIZE / 0x200000;
+  if (USER_REGION_SIZE % 0x200000) num_blocks++;
 
-    for (int i = 0; i < num_blocks; i++) {
-        uint64_t expected_desc = mmu_make_user_block_desc(phys_base + (uint64_t)i * 0x200000);
-        EXPECT_EQ(L2_TABLE[cpu][USER_VIRT_L2_INDEX + i], expected_desc);
-    }
+  for (int i = 0; i < num_blocks; i++) {
+    uint64_t expected_desc = mmu_make_user_block_desc(phys_base + (uint64_t)i * 0x200000);
+    EXPECT_EQ(L2_TABLE[cpu][USER_VIRT_L2_INDEX + i], expected_desc);
+  }
 }
 
 static void test_mmu_map_user_framebuffer(void) {
-    tests_run++;
-    uart_puts("  Running test_mmu_map_user_framebuffer...\n");
+  tests_run++;
+  uart_puts("  Running test_mmu_map_user_framebuffer...\n");
 
-    uint64_t phys_addr = PROC_PHYS_POOL_BASE;
-    
-    // Call the function
-    mmu_map_user_framebuffer(phys_addr);
+  uint64_t phys_addr = PROC_PHYS_POOL_BASE;
 
-    // Verify mapping for all CPUs
-    for (int c = 0; c < MAX_CPUS; c++) {
-        EXPECT_EQ(L2_TABLE[c][USER_FB_L2_INDEX], mmu_make_user_block_desc(phys_addr));
-        EXPECT_EQ(L2_TABLE[c][USER_FB_L2_INDEX + 1], mmu_make_user_block_desc(phys_addr + 0x200000));
-    }
+  // Call the function
+  mmu_map_user_framebuffer(phys_addr);
+
+  // Verify mapping for all CPUs
+  for (int c = 0; c < MAX_CPUS; c++) {
+    EXPECT_EQ(L2_TABLE[c][USER_FB_L2_INDEX], mmu_make_user_block_desc(phys_addr));
+    EXPECT_EQ(L2_TABLE[c][USER_FB_L2_INDEX + 1], mmu_make_user_block_desc(phys_addr + 0x200000));
+  }
 }
 
 void mmu_test_suite(void) {
-    uart_puts("mmu_test_suite:\n");
-    test_mmu_make_user_block_desc();
-    test_mmu_switch_user_mapping();
-    test_mmu_map_user_framebuffer();
+  uart_puts("mmu_test_suite:\n");
+  test_mmu_make_user_block_desc();
+  test_mmu_switch_user_mapping();
+  test_mmu_map_user_framebuffer();
 }
 
 #endif // KERNEL_MODE_UNIT_TEST

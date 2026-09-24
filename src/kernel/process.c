@@ -105,12 +105,12 @@ void process_init(void) {
 
 #ifdef __x86_64__
 struct cpu_local {
-    uint64_t kernel_stack;
-    uint64_t user_rsp;
-    uint64_t temp_rax;
-    uint64_t user_sp_temp;
-    uint64_t cpu_id;
-    struct process *current_proc;
+  uint64_t kernel_stack;
+  uint64_t user_rsp;
+  uint64_t temp_rax;
+  uint64_t user_sp_temp;
+  uint64_t cpu_id;
+  struct process *current_proc;
 } __attribute__((packed));
 extern struct cpu_local cpu_locals[];
 #endif
@@ -323,10 +323,10 @@ int process_create(void) {
 int process_create_kernel(void (*entry)(void*), void *arg) {
   int pid = process_create();
   if (pid < 0) return -1;
-  
+
   struct process *p = &proc_table[pid];
   p->is_kernel_process = 1;
-  
+
   // Set up EL1t execution context
   p->context[31] = (uint64_t)entry;        // ELR (entry point)
   p->context[33] = p->user_phys_base + USER_REGION_SIZE; // SP_EL0 used for EL1t stack
@@ -338,7 +338,7 @@ int process_create_kernel(void (*entry)(void*), void *arg) {
   p->context[0] = (uint64_t)arg;           // x0 = first argument on ARM64
 #endif
   p->state = PROC_STATE_READY;
-  
+
   return pid;
 }
 
@@ -431,16 +431,16 @@ void schedule(struct trap_frame *tf, int is_yield) {
     if (next >= 0) {
       set_current_process_pid(cpu, next);
       proc_table[next].state = PROC_STATE_RUNNING;
-      
+
       struct trap_frame local_tf;
       restore_context(&proc_table[next], &local_tf);
-      
+
       extern char __stack_top;
       uint64_t target_sp = (uint64_t)&__stack_top - cpu * 0x10000 - 4096;
       mmu_switch_user_mapping(proc_table[next].user_phys_base);
       spinlock_release_irqrestore(&proc_lock, flags);
-      
-      
+
+
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
       enter_user_space(&local_tf, target_sp);
       while(1);
@@ -484,7 +484,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
     // loop so the CPU can sleep cleanly.
     set_current_process_pid(cpu, -1);
     spinlock_release_irqrestore(&proc_lock, flags);
-    
+
     extern void kernel_thread_exit_jump(void);
     kernel_thread_exit_jump();
   }
@@ -503,22 +503,22 @@ void process_exit(struct trap_frame *tf) {
   int len = 0;
   const char *prefix = "[KERNEL] Process ";
   for (int i = 0; prefix[i]; i++) buf[len++] = prefix[i];
-  
+
   int val = cur->pid;
   if (val == 0) buf[len++] = '0';
   else {
-      char num[10]; int n = 0;
-      while (val > 0) { num[n++] = '0' + (val % 10); val /= 10; }
-      while (n > 0) buf[len++] = num[--n];
+    char num[10]; int n = 0;
+    while (val > 0) { num[n++] = '0' + (val % 10); val /= 10; }
+    while (n > 0) buf[len++] = num[--n];
   }
-  
+
   buf[len++] = ':'; buf[len++] = ' ';
   for (int i = 0; cur->name[i] && i < 32; i++) buf[len++] = cur->name[i];
-  
+
   const char *suffix = " exited unexpectedly or gracefully.\n";
   for (int i = 0; suffix[i]; i++) buf[len++] = suffix[i];
   buf[len] = '\0';
-  
+
   uart_puts(buf);
 
   // Record the exit status in waitpid() layout BEFORE the process becomes
@@ -606,7 +606,7 @@ void kernel_exit(void) {
     set_current_process_pid(get_cpuid(), -1);
     spinlock_release_irqrestore(&proc_lock, flags);
   }
-  
+
   extern void kernel_thread_exit_jump(void);
   kernel_thread_exit_jump();
 }
@@ -677,8 +677,7 @@ int process_kill(int pid) {
  * context[1] = the still-saved status pointer) is filled by process_exit()
  * when the child dies, exactly like the spawn worker fills context[0].
  */
-int process_waitpid(struct trap_frame *tf)
-{
+int process_waitpid(struct trap_frame *tf) {
   int want_pid = (int)tf->regs[0];
   int *status = (int *)tf->regs[1];
   int options = (int)tf->regs[2];
@@ -858,9 +857,9 @@ struct process *process_get_pcb(int pid) {
 
 static jmp_buf scheduler_return_ctx[MAX_CPUS];
 
-void scheduler_finished(void) { 
+void scheduler_finished(void) {
   uint32_t cpu = get_cpuid();
-  longjmp(scheduler_return_ctx[cpu], 1); 
+  longjmp(scheduler_return_ctx[cpu], 1);
 }
 
 void kernel_thread_exit_jump(void) {
@@ -909,12 +908,12 @@ void start_scheduler(void) {
       if (proc_table[i].state == PROC_STATE_READY) {
         set_current_process_pid(cpu, i);
         proc_table[i].state = PROC_STATE_RUNNING;
-        
+
         mmu_switch_user_mapping(proc_table[i].user_phys_base);
 
         extern char __stack_top;
         uint64_t target_sp = (uint64_t)&__stack_top - cpu * 0x10000 - 4096;
-        
+
         struct trap_frame local_tf;
         restore_context(&proc_table[i], &local_tf);
 
@@ -928,76 +927,76 @@ void start_scheduler(void) {
       }
     }
     spinlock_release_irqrestore(&proc_lock, flags);
-    
+
     // Track idle time: record entry, WFI, accumulate on wake
     uint64_t idle_start = timer_get_ms();
     safe_wfi();
     uint64_t idle_end = timer_get_ms();
     uint32_t cpu = get_cpuid();
     if (cpu < MAX_CPUS) {
-        if (!__atomic_load_n(&cpu_seen[cpu], __ATOMIC_RELAXED)) {
-            // First time this CPU is seen: record it lock-free so the idle
-            // path adds no lock contention to the scheduler/interrupt paths.
-            __atomic_store_n(&cpu_seen[cpu], 1, __ATOMIC_RELAXED);
-            __atomic_fetch_add(&cpus_seen_count, 1, __ATOMIC_RELAXED);
-        }
-        if (idle_end > idle_start) {
-            cpu_idle_time[cpu] += (idle_end - idle_start);
-        }
+      if (!__atomic_load_n(&cpu_seen[cpu], __ATOMIC_RELAXED)) {
+        // First time this CPU is seen: record it lock-free so the idle
+        // path adds no lock contention to the scheduler/interrupt paths.
+        __atomic_store_n(&cpu_seen[cpu], 1, __ATOMIC_RELAXED);
+        __atomic_fetch_add(&cpus_seen_count, 1, __ATOMIC_RELAXED);
+      }
+      if (idle_end > idle_start) {
+        cpu_idle_time[cpu] += (idle_end - idle_start);
+      }
     }
   }
 }
 
 int process_get_used_blocks(void) {
-    int count = 0;
-    uint64_t flags = spinlock_acquire_irqsave(&mem_lock);
-    for (int i = 0; i < NUM_PHYS_BLOCKS; i++) {
-        if (phys_blocks_used[i]) count++;
-    }
-    spinlock_release_irqrestore(&mem_lock, flags);
-    return count;
+  int count = 0;
+  uint64_t flags = spinlock_acquire_irqsave(&mem_lock);
+  for (int i = 0; i < NUM_PHYS_BLOCKS; i++) {
+    if (phys_blocks_used[i]) count++;
+  }
+  spinlock_release_irqrestore(&mem_lock, flags);
+  return count;
 }
 
 int process_get_total_blocks(void) {
-    return NUM_PHYS_BLOCKS;
+  return NUM_PHYS_BLOCKS;
 }
 
 int process_get_info_list(struct sys_procinfo* list, int max_procs) {
-    int count = 0;
-    uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-    for (int i = 0; i < MAX_PROCESSES && count < max_procs; i++) {
-        if (proc_table[i].state != PROC_STATE_FREE) {
-            list[count].pid = proc_table[i].pid;
-            list[count].parent_pid = proc_table[i].parent_pid;
-            list[count].state = proc_table[i].state;
-            int k = 0;
-            while (proc_table[i].name[k] && k < 31) {
-                list[count].name[k] = proc_table[i].name[k];
-                k++;
-            }
-            list[count].name[k] = '\0';
-            count++;
-        }
+  int count = 0;
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  for (int i = 0; i < MAX_PROCESSES && count < max_procs; i++) {
+    if (proc_table[i].state != PROC_STATE_FREE) {
+      list[count].pid = proc_table[i].pid;
+      list[count].parent_pid = proc_table[i].parent_pid;
+      list[count].state = proc_table[i].state;
+      int k = 0;
+      while (proc_table[i].name[k] && k < 31) {
+        list[count].name[k] = proc_table[i].name[k];
+        k++;
+      }
+      list[count].name[k] = '\0';
+      count++;
     }
-    spinlock_release_irqrestore(&proc_lock, flags);
-    return count;
+  }
+  spinlock_release_irqrestore(&proc_lock, flags);
+  return count;
 }
 
 int process_get_num_cpus(void) {
-    int n = __atomic_load_n(&cpus_seen_count, __ATOMIC_RELAXED);
-    // Fall back to the static ceiling until at least one CPU has been seen
-    // (e.g. very early boot, before the first idle).
-    return (n > 0) ? n : MAX_CPUS;
+  int n = __atomic_load_n(&cpus_seen_count, __ATOMIC_RELAXED);
+  // Fall back to the static ceiling until at least one CPU has been seen
+  // (e.g. very early boot, before the first idle).
+  return (n > 0) ? n : MAX_CPUS;
 }
 
 uint64_t process_get_total_idle_ms(void) {
-    uint64_t total = 0;
-    uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-    for (int i = 0; i < MAX_CPUS; i++) {
-        total += cpu_idle_time[i];
-    }
-    spinlock_release_irqrestore(&proc_lock, flags);
-    return total;
+  uint64_t total = 0;
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  for (int i = 0; i < MAX_CPUS; i++) {
+    total += cpu_idle_time[i];
+  }
+  spinlock_release_irqrestore(&proc_lock, flags);
+  return total;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1012,106 +1011,103 @@ uint64_t process_get_total_idle_ms(void) {
  * region, else leave it unchanged and return -1 (ENOMEM).
  * brk(0): return the current break.
  * Returns 0 on success (or, for brk(0), the current break). */
-int64_t sys_brk(uint64_t addr)
-{
-    struct process *cur = current_process();
-    if (!cur)
-        return -EINVAL;
+int64_t sys_brk(uint64_t addr) {
+  struct process *cur = current_process();
+  if (!cur)
+    return -EINVAL;
 
-    if (addr == 0)
-        return (int64_t)cur->heap_brk;
+  if (addr == 0)
+    return (int64_t)cur->heap_brk;
 
-    if (addr < USER_HEAP_BASE || addr > USER_HEAP_TOP)
-        return -ENOMEM;
+  if (addr < USER_HEAP_BASE || addr > USER_HEAP_TOP)
+    return -ENOMEM;
 
-    cur->heap_brk = addr;
-    return 0;
+  cur->heap_brk = addr;
+  return 0;
 }
 
 /* First-fit carve of `len` bytes from the anonymous area. Returns the
  * mapped VA (>= USER_MMAP_BASE) or a negative errno. addr: hint, only
  * honored when non-zero; len is rounded up to a page cache line. */
-int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags)
-{
-    struct process *cur = current_process();
-    if (!cur)
-        return -EINVAL;
-    if (len == 0)
-        return -EINVAL;
-    /* Only anonymous private mappings are supported so far.  The flag
-       bits are the conventional glibc numbers (MAP_SHARED 1, MAP_PRIVATE
-       2, MAP_FIXED 0x10, MAP_ANONYMOUS 0x20) so sys/mman.h in the sysroot
-       can expose the standard values unchanged. */
-    if (!(flags & 0x20)) /* MAP_ANONYMOUS */
-        return -ENOTSUP;
-    if (flags & 0x10) /* MAP_FIXED: hint must be honored; not supported */
-        return -ENOTSUP;
+int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags) {
+  struct process *cur = current_process();
+  if (!cur)
+    return -EINVAL;
+  if (len == 0)
+    return -EINVAL;
+  /* Only anonymous private mappings are supported so far.  The flag
+     bits are the conventional glibc numbers (MAP_SHARED 1, MAP_PRIVATE
+     2, MAP_FIXED 0x10, MAP_ANONYMOUS 0x20) so sys/mman.h in the sysroot
+     can expose the standard values unchanged. */
+  if (!(flags & 0x20)) /* MAP_ANONYMOUS */
+    return -ENOTSUP;
+  if (flags & 0x10) /* MAP_FIXED: hint must be honored; not supported */
+    return -ENOTSUP;
 
-    /* Round length up to 16 bytes (conservative page-cache granularity). */
-    uint64_t rlen = (len + 15) & ~(uint64_t)15;
-    if (rlen < len)
-        return -ENOMEM; /* overflow */
+  /* Round length up to 16 bytes (conservative page-cache granularity). */
+  uint64_t rlen = (len + 15) & ~(uint64_t)15;
+  if (rlen < len)
+    return -ENOMEM; /* overflow */
 
-    uint64_t probe = USER_MMAP_BASE;
-    if (addr >= USER_MMAP_BASE && addr < USER_MMAP_LIMIT)
-        probe = addr;
+  uint64_t probe = USER_MMAP_BASE;
+  if (addr >= USER_MMAP_BASE && addr < USER_MMAP_LIMIT)
+    probe = addr;
 
-    uint64_t flags_local = spinlock_acquire_irqsave(&proc_lock);
+  uint64_t flags_local = spinlock_acquire_irqsave(&proc_lock);
 
-    /* First fit: walk the committed entries; find the first free span. */
-    while (probe + rlen <= USER_MMAP_LIMIT) {
-        int ok = 1;
-        for (int i = 0; i < cur->anon_map_count; i++) {
-            uint64_t s1 = cur->anon_maps[i].addr;
-            uint64_t e1 = s1 + cur->anon_maps[i].len;
-            uint64_t s2 = probe;
-            uint64_t e2 = probe + rlen;
-            if (s1 < e2 && s2 < e1) { /* overlap */
-                ok = 0;
-                probe = e1; /* skip past this committed region and retry */
-                break;
-            }
-        }
-        if (ok)
-            break;
+  /* First fit: walk the committed entries; find the first free span. */
+  while (probe + rlen <= USER_MMAP_LIMIT) {
+    int ok = 1;
+    for (int i = 0; i < cur->anon_map_count; i++) {
+      uint64_t s1 = cur->anon_maps[i].addr;
+      uint64_t e1 = s1 + cur->anon_maps[i].len;
+      uint64_t s2 = probe;
+      uint64_t e2 = probe + rlen;
+      if (s1 < e2 && s2 < e1) { /* overlap */
+        ok = 0;
+        probe = e1; /* skip past this committed region and retry */
+        break;
+      }
     }
-    if (probe + rlen > USER_MMAP_LIMIT) {
-        spinlock_release_irqrestore(&proc_lock, flags_local);
-        return -ENOMEM;
-    }
-    if (cur->anon_map_count >= USER_ANON_MAX_REGS) {
-        spinlock_release_irqrestore(&proc_lock, flags_local);
-        return -ENOMEM;
-    }
-
-    cur->anon_maps[cur->anon_map_count].addr = probe;
-    cur->anon_maps[cur->anon_map_count].len = rlen;
-    cur->anon_map_count++;
+    if (ok)
+      break;
+  }
+  if (probe + rlen > USER_MMAP_LIMIT) {
     spinlock_release_irqrestore(&proc_lock, flags_local);
+    return -ENOMEM;
+  }
+  if (cur->anon_map_count >= USER_ANON_MAX_REGS) {
+    spinlock_release_irqrestore(&proc_lock, flags_local);
+    return -ENOMEM;
+  }
 
-    return (int64_t)probe;
+  cur->anon_maps[cur->anon_map_count].addr = probe;
+  cur->anon_maps[cur->anon_map_count].len = rlen;
+  cur->anon_map_count++;
+  spinlock_release_irqrestore(&proc_lock, flags_local);
+
+  return (int64_t)probe;
 }
 
 /* munmap(addr, len): remove a committed anonymous region. */
-int sys_munmap(uint64_t addr, uint64_t len)
-{
-    struct process *cur = current_process();
-    if (!cur)
-        return -EINVAL;
-    if (addr < USER_MMAP_BASE || addr >= USER_MMAP_LIMIT)
-        return -EINVAL;
-
-    uint64_t flags_local = spinlock_acquire_irqsave(&proc_lock);
-    for (int i = 0; i < cur->anon_map_count; i++) {
-        if (cur->anon_maps[i].addr == addr) {
-            /* Compact the table. */
-            for (int j = i; j < cur->anon_map_count - 1; j++)
-                cur->anon_maps[j] = cur->anon_maps[j + 1];
-            cur->anon_map_count--;
-            spinlock_release_irqrestore(&proc_lock, flags_local);
-            return 0;
-        }
-    }
-    spinlock_release_irqrestore(&proc_lock, flags_local);
+int sys_munmap(uint64_t addr, uint64_t len) {
+  struct process *cur = current_process();
+  if (!cur)
     return -EINVAL;
+  if (addr < USER_MMAP_BASE || addr >= USER_MMAP_LIMIT)
+    return -EINVAL;
+
+  uint64_t flags_local = spinlock_acquire_irqsave(&proc_lock);
+  for (int i = 0; i < cur->anon_map_count; i++) {
+    if (cur->anon_maps[i].addr == addr) {
+      /* Compact the table. */
+      for (int j = i; j < cur->anon_map_count - 1; j++)
+        cur->anon_maps[j] = cur->anon_maps[j + 1];
+      cur->anon_map_count--;
+      spinlock_release_irqrestore(&proc_lock, flags_local);
+      return 0;
+    }
+  }
+  spinlock_release_irqrestore(&proc_lock, flags_local);
+  return -EINVAL;
 }

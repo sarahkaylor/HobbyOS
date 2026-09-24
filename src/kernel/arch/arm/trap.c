@@ -124,37 +124,37 @@ static void sys_get_args(struct trap_frame *tf) {
 }
 
 struct sys_meminfo {
-    uint64_t total_bytes;
-    uint64_t free_bytes;
+  uint64_t total_bytes;
+  uint64_t free_bytes;
 };
 
 struct sys_netinfo {
-    uint32_t ip;
-    uint32_t subnet_mask;
-    uint32_t gateway;
-    uint8_t mac[6];
+  uint32_t ip;
+  uint32_t subnet_mask;
+  uint32_t gateway;
+  uint8_t mac[6];
 };
 
 struct sys_cpuinfo {
-    uint64_t uptime_ms;
-    uint64_t total_idle_ms;
-    int num_cpus;
+  uint64_t uptime_ms;
+  uint64_t total_idle_ms;
+  int num_cpus;
 };
 
 struct sys_time {
-    uint64_t epoch;
-    int year;
-    int month;
-    int day;
-    int hour;
-    int minute;
-    int second;
-    int weekday;
+  uint64_t epoch;
+  int year;
+  int month;
+  int day;
+  int hour;
+  int minute;
+  int second;
+  int weekday;
 };
 
 struct sys_fsinfo {
-    uint64_t total_bytes;
-    uint64_t free_bytes;
+  uint64_t total_bytes;
+  uint64_t free_bytes;
 };
 
 static void sys_sysinfo(struct trap_frame *tf) {
@@ -288,7 +288,7 @@ static void sys_connect(struct trap_frame *tf) {
   uint16_t port = (uint16_t)tf->regs[1];
   int protocol = (int)tf->regs[2];
   struct process *caller = current_process();
-  
+
   extern int file_connect(struct process *caller, uint32_t ip, uint16_t port, int protocol);
   int r = file_connect(caller, ip, port, protocol);
   tf->regs[0] = r < 0 ? -EIO : r;
@@ -334,12 +334,12 @@ extern int load_and_run_program_in_scheduler(const char *filename, int stdin_fd,
 extern struct process *process_get_pcb(int pid);
 
 struct sys_spawn_args {
-    char filename[32];
-    int stdin_fd;
-    int stdout_fd;
-    int stderr_fd;
-    int caller_pid;
-    char args[256];
+  char filename[32];
+  int stdin_fd;
+  int stdout_fd;
+  int stderr_fd;
+  int caller_pid;
+  char args[256];
 };
 
 static struct sys_spawn_args spawn_args_pool[64];
@@ -347,32 +347,32 @@ static struct sys_spawn_args spawn_args_pool[64];
 extern void kernel_exit(void);
 
 static void sys_spawn_worker(void *arg) {
-    struct sys_spawn_args *args = (struct sys_spawn_args *)arg;
-    
-    int child_pid = load_and_run_program_in_scheduler(args->filename, args->stdin_fd, args->stdout_fd, args->stderr_fd, args->caller_pid);
-    
-    struct process *child = process_get_pcb(child_pid);
-    if (child) {
-        int k = 0;
-        while (args->args[k] && k < 255) {
-            child->args[k] = args->args[k];
-            k++;
-        }
-        child->args[k] = '\0';
-    }
+  struct sys_spawn_args *args = (struct sys_spawn_args *)arg;
 
-    struct process *caller = process_get_pcb(args->caller_pid);
-    if (caller) {
-        extern spinlock_t proc_lock;
-        uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-        if (caller->state == PROC_STATE_WAIT_SPAWN) {
-            caller->context[0] = child_pid; // return value in x0
-            caller->state = PROC_STATE_READY;
-        }
-        spinlock_release_irqrestore(&proc_lock, flags);
+  int child_pid = load_and_run_program_in_scheduler(args->filename, args->stdin_fd, args->stdout_fd, args->stderr_fd, args->caller_pid);
+
+  struct process *child = process_get_pcb(child_pid);
+  if (child) {
+    int k = 0;
+    while (args->args[k] && k < 255) {
+      child->args[k] = args->args[k];
+      k++;
     }
-    
-    kernel_exit();
+    child->args[k] = '\0';
+  }
+
+  struct process *caller = process_get_pcb(args->caller_pid);
+  if (caller) {
+    extern spinlock_t proc_lock;
+    uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    if (caller->state == PROC_STATE_WAIT_SPAWN) {
+      caller->context[0] = child_pid; // return value in x0
+      caller->state = PROC_STATE_READY;
+    }
+    spinlock_release_irqrestore(&proc_lock, flags);
+  }
+
+  kernel_exit();
 }
 
 static void sys_spawn(struct trap_frame *tf) {
@@ -384,58 +384,58 @@ static void sys_spawn(struct trap_frame *tf) {
 
   struct process *caller = current_process();
   if (!caller) {
-      tf->regs[0] = -1;
-      return;
+    tf->regs[0] = -1;
+    return;
   }
 
   if ((uint64_t)filename >= USER_VIRT_BASE &&
       (uint64_t)filename < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-      
-      struct sys_spawn_args *args = &spawn_args_pool[caller->pid];
-      
-      int i = 0;
-      while (filename[i] && i < 31) {
-          args->filename[i] = filename[i];
-          i++;
-      }
-      args->filename[i] = '\0';
-      
-      args->stdin_fd = stdin_fd;
-      args->stdout_fd = stdout_fd;
-      args->stderr_fd = stderr_fd;
-      args->caller_pid = caller->pid;
 
-      if (args_ptr && (uint64_t)args_ptr >= USER_VIRT_BASE &&
-          (uint64_t)args_ptr < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-          int k = 0;
-          while (args_ptr[k] && k < 255) {
-              args->args[k] = args_ptr[k];
-              k++;
-          }
-          args->args[k] = '\0';
-      } else {
-          args->args[0] = '\0';
+    struct sys_spawn_args *args = &spawn_args_pool[caller->pid];
+
+    int i = 0;
+    while (filename[i] && i < 31) {
+      args->filename[i] = filename[i];
+      i++;
+    }
+    args->filename[i] = '\0';
+
+    args->stdin_fd = stdin_fd;
+    args->stdout_fd = stdout_fd;
+    args->stderr_fd = stderr_fd;
+    args->caller_pid = caller->pid;
+
+    if (args_ptr && (uint64_t)args_ptr >= USER_VIRT_BASE &&
+        (uint64_t)args_ptr < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+      int k = 0;
+      while (args_ptr[k] && k < 255) {
+        args->args[k] = args_ptr[k];
+        k++;
       }
-      
-      extern spinlock_t proc_lock;
-      uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-      save_context(caller, tf);
-      caller->state = PROC_STATE_WAIT_SPAWN;
+      args->args[k] = '\0';
+    } else {
+      args->args[0] = '\0';
+    }
+
+    extern spinlock_t proc_lock;
+    uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    save_context(caller, tf);
+    caller->state = PROC_STATE_WAIT_SPAWN;
+    spinlock_release_irqrestore(&proc_lock, flags);
+
+    extern int process_create_kernel(void (*entry)(void*), void *arg);
+    int wpid = process_create_kernel(sys_spawn_worker, args);
+    if (wpid < 0) {
+      /* no free process slot for the spawn worker: the caller must not
+         sit in WAIT_SPAWN forever waiting for a worker that can never
+         run — release it with a failure return instead. */
+      flags = spinlock_acquire_irqsave(&proc_lock);
+      caller->state = PROC_STATE_READY;
       spinlock_release_irqrestore(&proc_lock, flags);
-      
-      extern int process_create_kernel(void (*entry)(void*), void *arg);
-      int wpid = process_create_kernel(sys_spawn_worker, args);
-      if (wpid < 0) {
-          /* no free process slot for the spawn worker: the caller must not
-             sit in WAIT_SPAWN forever waiting for a worker that can never
-             run — release it with a failure return instead. */
-          flags = spinlock_acquire_irqsave(&proc_lock);
-          caller->state = PROC_STATE_READY;
-          spinlock_release_irqrestore(&proc_lock, flags);
-          tf->regs[0] = -1;
-      }
-      
-      schedule(tf, 0);
+      tf->regs[0] = -1;
+    }
+
+    schedule(tf, 0);
   } else {
     tf->regs[0] = -1;
   }
@@ -504,40 +504,40 @@ extern int vfs_read_dir(const char *path, int index, char *name, int ncap, uint8
 static void sys_read_dir(struct trap_frame *tf) {
   const char *path = (const char *)tf->regs[0];
   int index = (int)tf->regs[1];
-  
+
   struct local_dirent {
-      char name[32];
-      uint8_t attr;
-      uint32_t size;
+    char name[32];
+    uint8_t attr;
+    uint32_t size;
   } __attribute__((packed));
-  
+
   struct local_dirent *ud = (struct local_dirent *)tf->regs[2];
-  
+
   if ((uint64_t)path >= USER_VIRT_BASE &&
       (uint64_t)path < (USER_VIRT_BASE + USER_REGION_SIZE) &&
       (uint64_t)ud >= USER_VIRT_BASE &&
       (uint64_t)ud + sizeof(struct local_dirent) <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
-      
-      char name_buf[32];
-      uint8_t attr_val = 0;
-      uint32_t size_val = 0;
-      
-      int ret = vfs_read_dir(path, index, name_buf, sizeof name_buf, &attr_val, &size_val);
-      if (ret == 0) {
-          int k = 0;
-          while (name_buf[k] && k < 31) {
-              ud->name[k] = name_buf[k];
-              k++;
-          }
-          ud->name[k] = '\0';
-          ud->attr = attr_val;
-          ud->size = size_val;
-          tf->regs[0] = 0;
-      } else {
-          tf->regs[0] = -1;
+
+    char name_buf[32];
+    uint8_t attr_val = 0;
+    uint32_t size_val = 0;
+
+    int ret = vfs_read_dir(path, index, name_buf, sizeof name_buf, &attr_val, &size_val);
+    if (ret == 0) {
+      int k = 0;
+      while (name_buf[k] && k < 31) {
+        ud->name[k] = name_buf[k];
+        k++;
       }
-  } else {
+      ud->name[k] = '\0';
+      ud->attr = attr_val;
+      ud->size = size_val;
+      tf->regs[0] = 0;
+    } else {
       tf->regs[0] = -1;
+    }
+  } else {
+    tf->regs[0] = -1;
   }
 }
 
@@ -546,11 +546,11 @@ static void sys_mkdir(struct trap_frame *tf) {
   struct process *caller = current_process();
   if ((uint64_t)path >= USER_VIRT_BASE &&
       (uint64_t)path < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-      extern int file_mkdir(struct process *cur, const char *path);
-      int r = file_mkdir(caller, path);
-      tf->regs[0] = r < 0 ? -EEXIST : r;
+    extern int file_mkdir(struct process *cur, const char *path);
+    int r = file_mkdir(caller, path);
+    tf->regs[0] = r < 0 ? -EEXIST : r;
   } else {
-      tf->regs[0] = -EFAULT;
+    tf->regs[0] = -EFAULT;
   }
 }
 
@@ -559,8 +559,7 @@ static void sys_mkdir(struct trap_frame *tf) {
 
 /* Copy a NUL-terminated user string into kernel memory with full bounds
  * checking. Returns 1 on success (dst NUL-terminated), 0 on bad ptr. */
-static int u_strcpy(const char *src, char *dst, int cap)
-{
+static int u_strcpy(const char *src, char *dst, int cap) {
   uint64_t base = (uint64_t)src;
   if (!src || base < USER_VIRT_BASE ||
       base >= USER_VIRT_BASE + USER_REGION_SIZE)
@@ -574,25 +573,21 @@ static int u_strcpy(const char *src, char *dst, int cap)
   return 1;
 }
 
-static void sys_getpid(struct trap_frame *tf)
-{
+static void sys_getpid(struct trap_frame *tf) {
   struct process *cur = current_process();
   tf->regs[0] = cur ? (uint64_t)cur->pid : (uint64_t)-1;
 }
 
-static void sys_getppid(struct trap_frame *tf)
-{
+static void sys_getppid(struct trap_frame *tf) {
   struct process *cur = current_process();
   tf->regs[0] = cur ? (uint64_t)cur->parent_pid : (uint64_t)-1;
 }
 
-static void sys_waitpid(struct trap_frame *tf)
-{
+static void sys_waitpid(struct trap_frame *tf) {
   tf->regs[0] = process_waitpid(tf);
 }
 
-static void sys_exec(struct trap_frame *tf)
-{
+static void sys_exec(struct trap_frame *tf) {
   const char *path = (const char *)tf->regs[0];
   char *const *argv = (char *const *)tf->regs[1];
   struct process *cur = current_process();
@@ -654,11 +649,11 @@ static void sys_mount(struct trap_frame *tf) {
       (uint64_t)source < (USER_VIRT_BASE + USER_REGION_SIZE) &&
       (uint64_t)target >= USER_VIRT_BASE &&
       (uint64_t)target < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-      extern int vfs_mount(const char *source, const char *target);
-      int r = vfs_mount(source, target);
-      tf->regs[0] = r < 0 ? -EINVAL : r;
+    extern int vfs_mount(const char *source, const char *target);
+    int r = vfs_mount(source, target);
+    tf->regs[0] = r < 0 ? -EINVAL : r;
   } else {
-      tf->regs[0] = -EFAULT;
+    tf->regs[0] = -EFAULT;
   }
 }
 
@@ -667,11 +662,11 @@ static void sys_umount(struct trap_frame *tf) {
   const char *target = (const char *)tf->regs[0];
   if ((uint64_t)target >= USER_VIRT_BASE &&
       (uint64_t)target < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-      extern int vfs_umount(const char *target);
-      int r = vfs_umount(target);
-      tf->regs[0] = r < 0 ? -EINVAL : r;
+    extern int vfs_umount(const char *target);
+    int r = vfs_umount(target);
+    tf->regs[0] = r < 0 ? -EINVAL : r;
   } else {
-      tf->regs[0] = -EFAULT;
+    tf->regs[0] = -EFAULT;
   }
 }
 
@@ -681,18 +676,18 @@ static void sys_getcwd(struct trap_frame *tf) {
   struct process *caller = current_process();
   if (caller && (uint64_t)buf >= USER_VIRT_BASE &&
       (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
-      int len = 0;
-      while (caller->cwd[len]) len++;
-      if (len + 1 > size) {
-          tf->regs[0] = -ERANGE;   /* buffer too small */
-          return;
-      }
-      for (int i = 0; i <= len; i++) {
-          buf[i] = caller->cwd[i];
-      }
-      tf->regs[0] = (long)buf;
+    int len = 0;
+    while (caller->cwd[len]) len++;
+    if (len + 1 > size) {
+      tf->regs[0] = -ERANGE;   /* buffer too small */
+      return;
+    }
+    for (int i = 0; i <= len; i++) {
+      buf[i] = caller->cwd[i];
+    }
+    tf->regs[0] = (long)buf;
   } else {
-      tf->regs[0] = -EFAULT;
+    tf->regs[0] = -EFAULT;
   }
 }
 
@@ -753,21 +748,21 @@ static void sys_chdir(struct trap_frame *tf) {
   struct process *caller = current_process();
   if (caller && (uint64_t)path >= USER_VIRT_BASE &&
       (uint64_t)path < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-      extern int vfs_chdir(const char *path, char *out_new_cwd, int cap);
-      char new_cwd[128];
-      if (vfs_chdir(path, new_cwd, sizeof new_cwd) == 0) {
-          int k = 0;
-          while (new_cwd[k] && k < 127) {
-              caller->cwd[k] = new_cwd[k];
-              k++;
-          }
-          caller->cwd[k] = '\0';
-          tf->regs[0] = 0;
-      } else {
-          tf->regs[0] = -ENOENT;
+    extern int vfs_chdir(const char *path, char *out_new_cwd, int cap);
+    char new_cwd[128];
+    if (vfs_chdir(path, new_cwd, sizeof new_cwd) == 0) {
+      int k = 0;
+      while (new_cwd[k] && k < 127) {
+        caller->cwd[k] = new_cwd[k];
+        k++;
       }
+      caller->cwd[k] = '\0';
+      tf->regs[0] = 0;
+    } else {
+      tf->regs[0] = -ENOENT;
+    }
   } else {
-      tf->regs[0] = -EFAULT;
+    tf->regs[0] = -EFAULT;
   }
 }
 
@@ -953,7 +948,7 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       schedule(tf, 0);
       int next_pid = current_process() ? current_process()->pid : -1;
       if (prev_pid == next_pid && prev_pid != -1) {
-          safe_wfi();
+        safe_wfi();
       }
       return;
     }

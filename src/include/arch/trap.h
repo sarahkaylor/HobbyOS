@@ -9,23 +9,23 @@
  */
 #ifdef __x86_64__
 struct trap_frame {
-    uint64_t regs[30]; // General-purpose registers
-    uint64_t lr;       // Dummy Link Register
-    uint64_t elr;      // Instruction pointer (rip)
-    uint64_t spsr;     // Processor flags (rflags)
-    
-    // x86 hardware frame fields
-    uint64_t vector;
-    uint64_t error_code;
-    uint64_t cs;
-    uint64_t ss;
+  uint64_t regs[30]; // General-purpose registers
+  uint64_t lr;       // Dummy Link Register
+  uint64_t elr;      // Instruction pointer (rip)
+  uint64_t spsr;     // Processor flags (rflags)
+
+  // x86 hardware frame fields
+  uint64_t vector;
+  uint64_t error_code;
+  uint64_t cs;
+  uint64_t ss;
 };
 #else
 struct trap_frame {
-    uint64_t regs[30]; /**< General-purpose registers x0 to x29 */
-    uint64_t lr;       /**< Link Register (x30) */
-    uint64_t elr;      /**< Exception Link Register (PC at time of exception) */
-    uint64_t spsr;     /**< Saved Processor State Register */
+  uint64_t regs[30]; /**< General-purpose registers x0 to x29 */
+  uint64_t lr;       /**< Link Register (x30) */
+  uint64_t elr;      /**< Exception Link Register (PC at time of exception) */
+  uint64_t spsr;     /**< Saved Processor State Register */
 };
 #endif
 

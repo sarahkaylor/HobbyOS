@@ -23,9 +23,9 @@
 
 /* Kernel-facing mount info for sysinfo(8). */
 struct vfs_mountinfo {
-    char point[64];
-    char source[64];
-    int  type;          /* 1 = NFS */
+  char point[64];
+  char source[64];
+  int  type;          /* 1 = NFS */
 };
 
 void vfs_init(void);

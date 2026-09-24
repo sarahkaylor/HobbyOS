@@ -21,7 +21,7 @@ extern "C" {
 
 #define st_mtime st_mtime_s     /* userland needs nothing beyond size now */
 
-struct stat {
+  struct stat {
     dev_t st_dev;               /* device (0; kernel has one FS namespace) */
     ino_t st_ino;               /* 0 */
     mode_t st_mode;             /* S_IF* bits only (no numeric perms yet) */
@@ -33,7 +33,7 @@ struct stat {
     long st_blksize;
     long st_blocks;
     long st_atime, st_mtime_s, st_ctime;
-};
+  };
 
 #define S_IFMT   0170000
 #define S_IFDIR  0040000
@@ -42,8 +42,8 @@ struct stat {
 #define S_ISDIR(m)  (((m) & S_IFMT) == S_IFDIR)
 #define S_ISREG(m)  (((m) & S_IFMT) == S_IFREG)
 
-int stat(const char *path, struct stat *buf);
-int fstat(int fd, struct stat *buf);
+  int stat(const char *path, struct stat *buf);
+  int fstat(int fd, struct stat *buf);
 
 #ifdef __cplusplus
 }

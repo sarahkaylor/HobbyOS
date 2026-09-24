@@ -128,7 +128,7 @@ struct process {
   int open_fds[MAX_OPEN_FDS];
 
   int num_open_fds; /**< Number of currently open file descriptors */
-  
+
   uint64_t wake_ms; /**< Timestamp in ms when this process should wake up */
 
   /** Phase 4 (memory): current heap break (USER_VIRT_BASE + 0x100000 at
@@ -222,10 +222,10 @@ extern int cpu_current_pids[];
 void set_current_process_pid(uint32_t cpu, int pid);
 
 struct sys_procinfo {
-    int pid;
-    int parent_pid;
-    int state;
-    char name[32];
+  int pid;
+  int parent_pid;
+  int state;
+  char name[32];
 };
 
 int process_get_used_blocks(void);

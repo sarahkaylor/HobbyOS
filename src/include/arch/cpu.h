@@ -67,14 +67,12 @@ void arch_memory_barrier(void);
  */
 static inline void cpu_relax(void) {
 #ifdef __x86_64__
-    __asm__ volatile("pause" ::: "memory");
+  __asm__ volatile("pause" ::: "memory");
 #elif defined(__aarch64__)
-    __asm__ volatile("yield" ::: "memory");
+  __asm__ volatile("yield" ::: "memory");
 #else
-    __asm__ volatile("" ::: "memory");
+  __asm__ volatile("" ::: "memory");
 #endif
 }
 
 #endif // ARCH_CPU_H
-
-

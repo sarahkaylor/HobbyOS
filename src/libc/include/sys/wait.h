@@ -15,11 +15,11 @@ extern "C" {
 #define WNOHANG   1   /* do not block if no child has exited */
 #define WUNTRACED 2   /* accepted but ignored (no stop support yet) */
 
-int waitpid(int pid, int *status, int options);
-int wait(int *status);
+  int waitpid(int pid, int *status, int options);
+  int wait(int *status);
 
-/* A normal exit (WIFEXITED) has all low 7 bits clear; otherwise the low
- * 7 bits hold the terminating signal number. */
+  /* A normal exit (WIFEXITED) has all low 7 bits clear; otherwise the low
+   * 7 bits hold the terminating signal number. */
 #define WIFEXITED(status)   (((status) & 0x7f) == 0)
 #define WIFSIGNALED(status) (!WIFEXITED(status))
 #define WEXITSTATUS(status) (((status) >> 8) & 0xff)

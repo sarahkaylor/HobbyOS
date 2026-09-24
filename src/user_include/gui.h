@@ -55,14 +55,14 @@
 #define GUI_MOUSE_RELEASE 2  /* button went up on this cell             */
 
 struct gui_event {
-    int type;
-    int ch;      /* GUI_EV_CHAR: the character */
-    int menu;    /* GUI_EV_MENU: menu index (0-based) */
-    int item;    /* GUI_EV_MENU: item index (0-based) */
-    int x;       /* GUI_EV_MOUSE: column (text cells, window-relative) */
-    int y;       /* GUI_EV_MOUSE: row (text cells, window-relative) */
-    int button;  /* GUI_EV_MOUSE: 1=left, 2=right */
-    int state;   /* GUI_EV_MOUSE: GUI_MOUSE_PRESS / _DRAG / _RELEASE */
+  int type;
+  int ch;      /* GUI_EV_CHAR: the character */
+  int menu;    /* GUI_EV_MENU: menu index (0-based) */
+  int item;    /* GUI_EV_MENU: item index (0-based) */
+  int x;       /* GUI_EV_MOUSE: column (text cells, window-relative) */
+  int y;       /* GUI_EV_MOUSE: row (text cells, window-relative) */
+  int button;  /* GUI_EV_MOUSE: 1=left, 2=right */
+  int state;   /* GUI_EV_MOUSE: GUI_MOUSE_PRESS / _DRAG / _RELEASE */
 };
 
 /* ---- Window integration ---- */
@@ -132,10 +132,10 @@ void gui_center(char *out, int width, const char *text);
 /* ---- Scrollable list state ---- */
 
 struct gui_list {
-    int selected; /* current selection index, 0-based */
-    int top;      /* first visible index */
-    int count;    /* total items */
-    int visible;  /* visible rows */
+  int selected; /* current selection index, 0-based */
+  int top;      /* first visible index */
+  int count;    /* total items */
+  int visible;  /* visible rows */
 };
 
 /* Fix l->top so that l->selected is inside [top, top+visible). */

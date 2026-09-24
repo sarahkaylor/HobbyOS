@@ -16,7 +16,7 @@ void gic_enable_interrupt(uint32_t intid);
 
 /**
  * Acknowledges the highest priority pending interrupt.
- * 
+ *
  * Returns:
  *   The Interrupt ID (INTID).
  */

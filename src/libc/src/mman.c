@@ -20,8 +20,7 @@ extern int errno;
 
 /* Dual-arch 4-arg syscall helper, matching user/libc.c's ABI:
  * aarch64: x8=num, x0..x3 args; x86_64: rax=num, rdi,rsi,rdx,r10. */
-static long hb_syscall4(long num, long a0, long a1, long a2, long a3)
-{
+static long hb_syscall4(long num, long a0, long a1, long a2, long a3) {
 #ifdef __x86_64__
   long ret;
   register long rdi __asm__("rdi") = a0;
@@ -47,8 +46,7 @@ static long hb_syscall4(long num, long a0, long a1, long a2, long a3)
 #endif
 }
 
-static long hb_errno_ret(long r)
-{
+static long hb_errno_ret(long r) {
   if (r < 0) {
     errno = (int)(-r);
     return -1;
@@ -56,8 +54,7 @@ static long hb_errno_ret(long r)
   return r;
 }
 
-int brk(void *addr)
-{
+int brk(void *addr) {
   long r = hb_syscall4(SYS_BRK, (long)addr, 0, 0, 0);
   if (r < 0) {
     errno = (int)(-r);
@@ -66,8 +63,7 @@ int brk(void *addr)
   return 0;
 }
 
-void *sbrk(intptr_t delta)
-{
+void *sbrk(intptr_t delta) {
   long old = hb_syscall4(SYS_BRK, 0, 0, 0, 0);
   if (old < 0) {
     errno = (int)(-old);
@@ -84,8 +80,7 @@ void *sbrk(intptr_t delta)
   return (void *)old;
 }
 
-void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
-{
+void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
   /* Anonymous only; file-backed mappings are not implemented yet. */
   if (fd >= 0 && !(flags & MAP_ANONYMOUS)) {
     errno = ENOTSUP;
@@ -99,8 +94,7 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
   return (void *)r;
 }
 
-int munmap(void *addr, size_t length)
-{
+int munmap(void *addr, size_t length) {
   long r = hb_syscall4(SYS_MUNMAP, (long)addr, (long)length, 0, 0);
   return (int)hb_errno_ret(r);
 }

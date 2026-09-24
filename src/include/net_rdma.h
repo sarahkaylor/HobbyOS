@@ -33,41 +33,41 @@
 
 // Custom RDMA OPCodes
 enum rdma_op {
-    RDMA_OP_REG_MR = 1,
-    RDMA_OP_UNREG_MR = 2,
-    RDMA_OP_READ_REQ = 3,
-    RDMA_OP_READ_RESP = 4,
-    RDMA_OP_WRITE_REQ = 5,
-    RDMA_OP_WRITE_RESP = 6,
-    RDMA_OP_DMA_SYNC_TO_HOST = 7,  // Copy Consumer RAM -> Host Shadow Contiguous RAM
-    RDMA_OP_DMA_SYNC_TO_GUEST = 8, // Copy Host Shadow Contiguous RAM -> Consumer RAM
-    RDMA_OP_DMA_SYNC_RESP = 9,
-    RDMA_OP_READ_BLOCK_REQ = 10,
-    RDMA_OP_READ_BLOCK_RESP = 11,
-    RDMA_OP_WRITE_BLOCK_REQ = 12,
-    RDMA_OP_WRITE_BLOCK_RESP = 13,
-    RDMA_OP_IOMMU_MAP = 14,        // Guest→Host: Map IOVA to shadow buffer, program host IOMMU
-    RDMA_OP_IOMMU_MAP_RESP = 15,   // Host→Guest: IOVA mapped, returns host_phys of shadow buffer
-    RDMA_OP_IOMMU_UNMAP = 16,      // Guest→Host: Unmap IOVA from host IOMMU
-    RDMA_OP_IOMMU_UNMAP_RESP = 17, // Host→Guest: IOVA unmapped
-    RDMA_OP_DMA_SYNC_RELIABLE = 18, // Like DMA_SYNC_TO_HOST but host sends ACK
-    RDMA_OP_DMA_SYNC_RELIABLE_RESP = 19,
-    RDMA_OP_IRQ_NOTIFY = 20,        // Host→Guest: GPU interrupt fired, data[0..3]=vector mask
-    RDMA_OP_IRQ_ACK = 21,           // Guest→Host: Interrupt acknowledged
+  RDMA_OP_REG_MR = 1,
+  RDMA_OP_UNREG_MR = 2,
+  RDMA_OP_READ_REQ = 3,
+  RDMA_OP_READ_RESP = 4,
+  RDMA_OP_WRITE_REQ = 5,
+  RDMA_OP_WRITE_RESP = 6,
+  RDMA_OP_DMA_SYNC_TO_HOST = 7,  // Copy Consumer RAM -> Host Shadow Contiguous RAM
+  RDMA_OP_DMA_SYNC_TO_GUEST = 8, // Copy Host Shadow Contiguous RAM -> Consumer RAM
+  RDMA_OP_DMA_SYNC_RESP = 9,
+  RDMA_OP_READ_BLOCK_REQ = 10,
+  RDMA_OP_READ_BLOCK_RESP = 11,
+  RDMA_OP_WRITE_BLOCK_REQ = 12,
+  RDMA_OP_WRITE_BLOCK_RESP = 13,
+  RDMA_OP_IOMMU_MAP = 14,        // Guest→Host: Map IOVA to shadow buffer, program host IOMMU
+  RDMA_OP_IOMMU_MAP_RESP = 15,   // Host→Guest: IOVA mapped, returns host_phys of shadow buffer
+  RDMA_OP_IOMMU_UNMAP = 16,      // Guest→Host: Unmap IOVA from host IOMMU
+  RDMA_OP_IOMMU_UNMAP_RESP = 17, // Host→Guest: IOVA unmapped
+  RDMA_OP_DMA_SYNC_RELIABLE = 18, // Like DMA_SYNC_TO_HOST but host sends ACK
+  RDMA_OP_DMA_SYNC_RELIABLE_RESP = 19,
+  RDMA_OP_IRQ_NOTIFY = 20,        // Host→Guest: GPU interrupt fired, data[0..3]=vector mask
+  RDMA_OP_IRQ_ACK = 21,           // Guest→Host: Interrupt acknowledged
 };
 
 #define RDMA_DATA_LEN 1024
 
 // RDMA Packet Structure over UDP/IP (Generalized for Multi-BAR and dynamic routing)
 struct rdma_packet {
-    uint32_t op;               // enum rdma_op
-    uint32_t tx_id;            // Transaction ID to match req/resp
-    uint64_t addr;             // Target offset / physical address
-    uint32_t len;              // Data length
-    uint32_t status;           // 0 on success, non-zero on failure
-    uint8_t  bar_index;        // PCI BAR index (0-5) to target
-    uint8_t  reserved[3];      // Alignment/padding
-    uint8_t  data[RDMA_DATA_LEN]; // Data payload
+  uint32_t op;               // enum rdma_op
+  uint32_t tx_id;            // Transaction ID to match req/resp
+  uint64_t addr;             // Target offset / physical address
+  uint32_t len;              // Data length
+  uint32_t status;           // 0 on success, non-zero on failure
+  uint8_t  bar_index;        // PCI BAR index (0-5) to target
+  uint8_t  reserved[3];      // Alignment/padding
+  uint8_t  data[RDMA_DATA_LEN]; // Data payload
 } __attribute__((packed));
 
 // Dynamic RDMA Configuration (Startup Parameters)

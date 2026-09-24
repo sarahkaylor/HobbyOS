@@ -169,54 +169,54 @@
 
 /* ACPI RSDP (revision 2.0, XSDT variant) */
 struct acpi_rsdp {
-    char     signature[8];      /* "RSD PTR "                                */
-    uint8_t  checksum;          /* Checksum over first 20 bytes              */
-    char     oem_id[6];         /* OEM identification string                 */
-    uint8_t  revision;          /* 0 = ACPI 1.0, 2 = ACPI 2.0+              */
-    uint32_t rsdt_address;      /* 32-bit physical address of RSDT           */
-    uint32_t length;            /* Length of this table (revision 2+)        */
-    uint64_t xsdt_address;      /* 64-bit physical address of XSDT           */
-    uint8_t  extended_checksum; /* Checksum over entire table                */
-    uint8_t  reserved[3];
+  char     signature[8];      /* "RSD PTR "                                */
+  uint8_t  checksum;          /* Checksum over first 20 bytes              */
+  char     oem_id[6];         /* OEM identification string                 */
+  uint8_t  revision;          /* 0 = ACPI 1.0, 2 = ACPI 2.0+              */
+  uint32_t rsdt_address;      /* 32-bit physical address of RSDT           */
+  uint32_t length;            /* Length of this table (revision 2+)        */
+  uint64_t xsdt_address;      /* 64-bit physical address of XSDT           */
+  uint8_t  extended_checksum; /* Checksum over entire table                */
+  uint8_t  reserved[3];
 } __attribute__((packed));
 
 /* Standard ACPI SDT header (shared by RSDT, XSDT, DMAR, etc.) */
 struct acpi_sdt_header {
-    char     signature[4];      /* Table signature (e.g. "DMAR")             */
-    uint32_t length;            /* Total table length including header       */
-    uint8_t  revision;
-    uint8_t  checksum;
-    char     oem_id[6];
-    char     oem_table_id[8];
-    uint32_t oem_revision;
-    uint32_t creator_id;
-    uint32_t creator_revision;
+  char     signature[4];      /* Table signature (e.g. "DMAR")             */
+  uint32_t length;            /* Total table length including header       */
+  uint8_t  revision;
+  uint8_t  checksum;
+  char     oem_id[6];
+  char     oem_table_id[8];
+  uint32_t oem_revision;
+  uint32_t creator_id;
+  uint32_t creator_revision;
 } __attribute__((packed));
 
 /* ACPI DMAR table header (DMA Remapping Reporting) */
 struct acpi_dmar_header {
-    struct acpi_sdt_header header;
-    uint8_t  host_address_width; /* Max DMA physical address width - 1       */
-    uint8_t  flags;              /* Bit 0: INTR_REMAP, Bit 1: X2APIC_OPT_OUT*/
-    uint8_t  reserved[10];
-    /* Followed by variable-length remapping structures                      */
+  struct acpi_sdt_header header;
+  uint8_t  host_address_width; /* Max DMA physical address width - 1       */
+  uint8_t  flags;              /* Bit 0: INTR_REMAP, Bit 1: X2APIC_OPT_OUT*/
+  uint8_t  reserved[10];
+  /* Followed by variable-length remapping structures                      */
 } __attribute__((packed));
 
 /* DMAR Remapping Structure Header (shared prefix for DRHD, RMRR, etc.) */
 struct dmar_remap_header {
-    uint16_t type;               /* 0=DRHD, 1=RMRR, 2=ATSR, etc.            */
-    uint16_t length;             /* Length of this structure                  */
+  uint16_t type;               /* 0=DRHD, 1=RMRR, 2=ATSR, etc.            */
+  uint16_t length;             /* Length of this structure                  */
 } __attribute__((packed));
 
 /* DRHD (DMA Remapping Hardware Unit Definition) */
 #define DMAR_DRHD_TYPE       0
 struct dmar_drhd {
-    struct dmar_remap_header header;
-    uint8_t  flags;              /* Bit 0: INCLUDE_PCI_ALL                    */
-    uint8_t  reserved;
-    uint16_t segment;            /* PCI segment number                        */
-    uint64_t register_base;      /* Base address of DMAR MMIO registers       */
-    /* Followed by Device Scope structures                                    */
+  struct dmar_remap_header header;
+  uint8_t  flags;              /* Bit 0: INCLUDE_PCI_ALL                    */
+  uint8_t  reserved;
+  uint16_t segment;            /* PCI segment number                        */
+  uint64_t register_base;      /* Base address of DMAR MMIO registers       */
+  /* Followed by Device Scope structures                                    */
 } __attribute__((packed));
 
 /* ---------------------------------------------------------------------------

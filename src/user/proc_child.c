@@ -7,11 +7,10 @@
  */
 #include <stdlib.h>
 
-int main(int argc, char **argv)
-{
-    extern void print_console(const char *s);
-    print_console("[PROCCHLD] running\n");
-    if (argc >= 2)
-        return atoi(argv[1]);
-    return 7;
+int main(int argc, char **argv) {
+  extern void print_console(const char *s);
+  print_console("[PROCCHLD] running\n");
+  if (argc >= 2)
+    return atoi(argv[1]);
+  return 7;
 }

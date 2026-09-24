@@ -17,9 +17,9 @@ extern "C" {
 #define O_TRUNC  0x200  /* 01000 octal POSIX value */
 #define O_EXCL   0x80   /* 0200 octal POSIX value */
 
-/* HobbyOS does not track permissions yet: access modes beyond these are
- * accepted and ignored, so ported code that passes O_BINARY or similar
- * still compiles and runs. */
+  /* HobbyOS does not track permissions yet: access modes beyond these are
+   * accepted and ignored, so ported code that passes O_BINARY or similar
+   * still compiles and runs. */
 
 #ifdef __cplusplus
 }

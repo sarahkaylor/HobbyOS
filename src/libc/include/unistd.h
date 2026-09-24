@@ -17,35 +17,35 @@ extern "C" {
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
 
-/* POSIX seek whence values (also in stdio.h) */
+  /* POSIX seek whence values (also in stdio.h) */
 #ifndef SEEK_SET
 #define SEEK_SET 0
 #define SEEK_CUR 1
 #define SEEK_END 2
 #endif
 
-ssize_t read(int fd, void *buf, size_t count);
-ssize_t write(int fd, const void *buf, size_t count);
-int close(int fd);
-int open(const char *path, int flags, ...); /* mode is unused today */
-off_t lseek(int fd, off_t offset, int whence);
-int dup(int oldfd);
-int dup2(int oldfd, int newfd);
-int access(const char *path, int mode);
-int unlink(const char *path);
-int isatty(int fd);
-unsigned int sleep(unsigned int seconds);
-int usleep(unsigned int useconds);
+  ssize_t read(int fd, void *buf, size_t count);
+  ssize_t write(int fd, const void *buf, size_t count);
+  int close(int fd);
+  int open(const char *path, int flags, ...); /* mode is unused today */
+  off_t lseek(int fd, off_t offset, int whence);
+  int dup(int oldfd);
+  int dup2(int oldfd, int newfd);
+  int access(const char *path, int mode);
+  int unlink(const char *path);
+  int isatty(int fd);
+  unsigned int sleep(unsigned int seconds);
+  int usleep(unsigned int useconds);
 
-/* Phase 3 (posix.md): process identity + exec. */
-int getpid(void);
-int getppid(void);
-int execv(const char *path, char *const argv[]);
-int execve(const char *path, char *const argv[], char *const envp[]);
+  /* Phase 3 (posix.md): process identity + exec. */
+  int getpid(void);
+  int getppid(void);
+  int execv(const char *path, char *const argv[]);
+  int execve(const char *path, char *const argv[], char *const envp[]);
 
-/* Phase 4 (posix.md): heap break control. */
-int brk(void *addr);         /* 0 on success, -1 (ENOMEM) if out of range */
-void *sbrk(intptr_t delta);  /* old break on success, (void *)-1 on error */
+  /* Phase 4 (posix.md): heap break control. */
+  int brk(void *addr);         /* 0 on success, -1 (ENOMEM) if out of range */
+  void *sbrk(intptr_t delta);  /* old break on success, (void *)-1 on error */
 
 #define F_OK 0
 #define R_OK 4

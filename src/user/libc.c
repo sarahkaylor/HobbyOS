@@ -15,11 +15,11 @@ int errno = 0;
  * return, set errno to the magnitude and return -1. Native-extension
  * syscalls (read_dir, available, sysinfo, ...) do NOT go through this. */
 static long errno_ret(long r) {
-    if (r < 0) {
-        errno = (int)(-r);
-        return -1;
-    }
-    return r;
+  if (r < 0) {
+    errno = (int)(-r);
+    return -1;
+  }
+  return r;
 }
 
 #ifdef __x86_64__
@@ -80,7 +80,7 @@ void print(const char *s) {
   int len = 0;
   while (s[len])
     len++;
-  
+
   int written = 0;
   while (written < len) {
     int res = write(1, s + written, len - written);
@@ -238,23 +238,23 @@ int mkdir(const char *path) {
 }
 
 void gui_add_menu(int idx, const char* name, const char* items) {
-    char buf[128];
-    int len = 0;
-    buf[len++] = '\033';
-    buf[len++] = ']';
-    buf[len++] = 'M';
-    buf[len++] = '0' + idx;
-    buf[len++] = ';';
-    
-    int i = 0;
-    while(name[i]) buf[len++] = name[i++];
-    buf[len++] = ';';
-    
-    i = 0;
-    while(items[i]) buf[len++] = items[i++];
-    buf[len++] = '\a';
-    
-    write(1, buf, len);
+  char buf[128];
+  int len = 0;
+  buf[len++] = '\033';
+  buf[len++] = ']';
+  buf[len++] = 'M';
+  buf[len++] = '0' + idx;
+  buf[len++] = ';';
+
+  int i = 0;
+  while(name[i]) buf[len++] = name[i++];
+  buf[len++] = ';';
+
+  i = 0;
+  while(items[i]) buf[len++] = items[i++];
+  buf[len++] = '\a';
+
+  write(1, buf, len);
 }
 
 
@@ -338,5 +338,3 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
   return execv(path, argv);
 }
 #endif
-
-

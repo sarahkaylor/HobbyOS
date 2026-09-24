@@ -14,10 +14,10 @@
 extern "C" {
 #endif
 
-/* Program name used by error() (set it from argv[0] in main). */
-extern char *program_name;
+  /* Program name used by error() (set it from argv[0] in main). */
+  extern char *program_name;
 
-void error(int status, int errnum, const char *fmt, ...);
+  void error(int status, int errnum, const char *fmt, ...);
 
 #ifdef __cplusplus
 }

@@ -24,157 +24,152 @@
 static int failures = 0;
 
 /* tiny signed-int console printer (no libc/sysroot dependency) */
-static void con_int(int v)
-{
-    char b[16];
-    int i = 15, neg = 0;
-    if (v < 0) { neg = 1; v = (v == -2147483648) ? 2147483647 : -v; }
-    b[i--] = 0;
-    if (v == 0) b[i--] = '0';
-    while (v > 0) { b[i--] = (char)('0' + v % 10); v /= 10; }
-    if (neg) b[i--] = '-';
-    print_console(&b[i + 1]);
+static void con_int(int v) {
+  char b[16];
+  int i = 15, neg = 0;
+  if (v < 0) { neg = 1; v = (v == -2147483648) ? 2147483647 : -v; }
+  b[i--] = 0;
+  if (v == 0) b[i--] = '0';
+  while (v > 0) { b[i--] = (char)('0' + v % 10); v /= 10; }
+  if (neg) b[i--] = '-';
+  print_console(&b[i + 1]);
 }
 
-static void check(const char *what, const char *got, const char *want)
-{
-    if (strcmp(got, want) == 0) {
-        print_console("[WCTEST] PASS ");
-        print_console(what);
-        print_console("\n");
-    } else {
-        print_console("[WCTEST] FAIL ");
-        print_console(what);
-        print_console("\n  got:  [");
-        print_console(got);
-        print_console("]\n  want: [");
-        print_console(want);
-        print_console("]\n");
-        failures++;
-    }
+static void check(const char *what, const char *got, const char *want) {
+  if (strcmp(got, want) == 0) {
+    print_console("[WCTEST] PASS ");
+    print_console(what);
+    print_console("\n");
+  } else {
+    print_console("[WCTEST] FAIL ");
+    print_console(what);
+    print_console("\n  got:  [");
+    print_console(got);
+    print_console("]\n  want: [");
+    print_console(want);
+    print_console("]\n");
+    failures++;
+  }
 }
 
 /* Run "wc <args>" with the given stdin content; returns the captured
    stdout in out (NUL-terminated, outsize bytes max). */
 static void run_wc(const char *args, const char *stdin_data, char *out,
-                   size_t outsize)
-{
-    int in_p[2], out_p[2];
-    int pid;
-    size_t n = 0;
+                   size_t outsize) {
+  int in_p[2], out_p[2];
+  int pid;
+  size_t n = 0;
 
-    if (pipe(in_p) != 0 || pipe(out_p) != 0) {
-        print_console("[WCTEST] pipe failed\n");
-        failures++;
-        return;
+  if (pipe(in_p) != 0 || pipe(out_p) != 0) {
+    print_console("[WCTEST] pipe failed\n");
+    failures++;
+    return;
+  }
+  pid = spawn2("WC.BIN", in_p[0], out_p[1], -1, args);
+  if (pid <= 0) {
+    /* process-table pressure from concurrently-running tests can make
+       the first spawn fail (-1); retry briefly before giving up */
+    int tries = 0;
+    while (pid <= 0 && tries < 25) {
+      usleep(20000); /* 20 ms */
+      pid = spawn2("WC.BIN", in_p[0], out_p[1], -1, args);
+      tries++;
     }
-    pid = spawn2("WC.BIN", in_p[0], out_p[1], -1, args);
-    if (pid <= 0) {
-        /* process-table pressure from concurrently-running tests can make
-           the first spawn fail (-1); retry briefly before giving up */
-        int tries = 0;
-        while (pid <= 0 && tries < 25) {
-            usleep(20000); /* 20 ms */
-            pid = spawn2("WC.BIN", in_p[0], out_p[1], -1, args);
-            tries++;
-        }
+  }
+  if (pid <= 0) {
+    print_console("[WCTEST] spawn WC.BIN failed\n");
+    failures++;
+    return;
+  }
+  /* feed stdin, then let the child see EOF.  Retry the write briefly:
+     under full-suite process-table pressure a spawn can race the pipe
+     reader accounting, and an EAGAIN/PIPE error here must not turn
+     into an empty-output failure. */
+  close(in_p[0]);
+  {
+    size_t off = 0, len = strlen(stdin_data);
+    int tries = 0;
+    while (off < len && tries < 50) {
+      ssize_t w = write(in_p[1], stdin_data + off, len - off);
+      if (w > 0) { off += (size_t)w; tries = 0; continue; }
+      if (w == 0) break;
+      usleep(2000); /* 2 ms; wait for the reader to attach */
+      tries++;
     }
-    if (pid <= 0) {
-        print_console("[WCTEST] spawn WC.BIN failed\n");
-        failures++;
-        return;
-    }
-    /* feed stdin, then let the child see EOF.  Retry the write briefly:
-       under full-suite process-table pressure a spawn can race the pipe
-       reader accounting, and an EAGAIN/PIPE error here must not turn
-       into an empty-output failure. */
-    close(in_p[0]);
-    {
-        size_t off = 0, len = strlen(stdin_data);
-        int tries = 0;
-        while (off < len && tries < 50) {
-            ssize_t w = write(in_p[1], stdin_data + off, len - off);
-            if (w > 0) { off += (size_t)w; tries = 0; continue; }
-            if (w == 0) break;
-            usleep(2000); /* 2 ms; wait for the reader to attach */
-            tries++;
-        }
-    }
-    close(in_p[1]);
+  }
+  close(in_p[1]);
 
-    close(out_p[1]);
-    while (n + 1 < outsize) {
-        int r = read(out_p[0], out + n, outsize - n - 1);
-        if (r <= 0)
-            break; /* EOF once the child exits and its pipe fd closes */
-        n += (size_t)r;
-    }
-    close(out_p[0]);
-    out[n] = '\0';
-    /* Reap the child so its process slot is recycled for the next spawn
-       (the child has exited by now: EOF on the stdout pipe).  Without
-       this, every spawned child stays EXITED and piles up until the
-       parent exits, starving later spawns of process-table slots. */
-    if (pid > 0) {
-        int ws = 0;
-        waitpid(pid, &ws, 0);
-    }
+  close(out_p[1]);
+  while (n + 1 < outsize) {
+    int r = read(out_p[0], out + n, outsize - n - 1);
+    if (r <= 0)
+      break; /* EOF once the child exits and its pipe fd closes */
+    n += (size_t)r;
+  }
+  close(out_p[0]);
+  out[n] = '\0';
+  /* Reap the child so its process slot is recycled for the next spawn
+     (the child has exited by now: EOF on the stdout pipe).  Without
+     this, every spawned child stays EXITED and piles up until the
+     parent exits, starving later spawns of process-table slots. */
+  if (pid > 0) {
+    int ws = 0;
+    waitpid(pid, &ws, 0);
+  }
 }
 
-static void write_file(const char *path, const char *content)
-{
-    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC);
-    if (fd < 0) {
-        print_console("[WCTEST] cannot create ");
-        print_console(path);
-        print_console("\n");
-        failures++;
-        return;
-    }
-    write(fd, content, strlen(content));
-    close(fd);
-}
-
-int main(void)
-{
-    char out[512];
-
-    print_console("[WCTEST] starting\n");
-
-    /* /WCTEST.TXT : lines=4 words=7 bytes=36 */
-    write_file("/WCTEST.TXT",
-               "line one\nline two word\n\nhello world\n");
-    /* /WCTEST2.TXT : lines=2 words=3 bytes=6 */
-    write_file("/WCTEST2.TXT", "x y\nz\n");
-
-    run_wc("-l -w -c /WCTEST.TXT", "", out, sizeof out);
-    check("-l -w -c file", out, "      4       7      36 /WCTEST.TXT\n");
-
-    run_wc("-c /WCTEST.TXT", "", out, sizeof out);
-    check("-c file", out, "     36 /WCTEST.TXT\n");
-
-    run_wc("-wcL /WCTEST.TXT", "a b\nc d e\nf\n", out, sizeof out);
-    check("-wcL file", out, "      7      36      13 /WCTEST.TXT\n");
-
-    run_wc("-", "a b\nc\n", out, sizeof out);
-    check("stdin '-'", out, "      2       3       6 -\n");
-
-    run_wc("-l -w -c /WCTEST.TXT /WCTEST2.TXT", "", out, sizeof out);
-    check("multi-file total",
-          out,
-          "      4       7      36 /WCTEST.TXT\n"
-          "      2       3       6 /WCTEST2.TXT\n"
-          "      6      10      42 total\n");
-
-    run_wc("--words --bytes /WCTEST2.TXT", "", out, sizeof out);
-    check("long opts", out, "      3       6 /WCTEST2.TXT\n");
-
-    if (failures == 0) {
-        print_console("[WCTEST] ALL PASSED (6 checks)\n");
-        exit(0);
-    }
-    print_console("[WCTEST] FAILURES: ");
-    con_int(failures);
+static void write_file(const char *path, const char *content) {
+  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC);
+  if (fd < 0) {
+    print_console("[WCTEST] cannot create ");
+    print_console(path);
     print_console("\n");
-    exit(1);
+    failures++;
+    return;
+  }
+  write(fd, content, strlen(content));
+  close(fd);
+}
+
+int main(void) {
+  char out[512];
+
+  print_console("[WCTEST] starting\n");
+
+  /* /WCTEST.TXT : lines=4 words=7 bytes=36 */
+  write_file("/WCTEST.TXT",
+             "line one\nline two word\n\nhello world\n");
+  /* /WCTEST2.TXT : lines=2 words=3 bytes=6 */
+  write_file("/WCTEST2.TXT", "x y\nz\n");
+
+  run_wc("-l -w -c /WCTEST.TXT", "", out, sizeof out);
+  check("-l -w -c file", out, "      4       7      36 /WCTEST.TXT\n");
+
+  run_wc("-c /WCTEST.TXT", "", out, sizeof out);
+  check("-c file", out, "     36 /WCTEST.TXT\n");
+
+  run_wc("-wcL /WCTEST.TXT", "a b\nc d e\nf\n", out, sizeof out);
+  check("-wcL file", out, "      7      36      13 /WCTEST.TXT\n");
+
+  run_wc("-", "a b\nc\n", out, sizeof out);
+  check("stdin '-'", out, "      2       3       6 -\n");
+
+  run_wc("-l -w -c /WCTEST.TXT /WCTEST2.TXT", "", out, sizeof out);
+  check("multi-file total",
+        out,
+        "      4       7      36 /WCTEST.TXT\n"
+        "      2       3       6 /WCTEST2.TXT\n"
+        "      6      10      42 total\n");
+
+  run_wc("--words --bytes /WCTEST2.TXT", "", out, sizeof out);
+  check("long opts", out, "      3       6 /WCTEST2.TXT\n");
+
+  if (failures == 0) {
+    print_console("[WCTEST] ALL PASSED (6 checks)\n");
+    exit(0);
+  }
+  print_console("[WCTEST] FAILURES: ");
+  con_int(failures);
+  print_console("\n");
+  exit(1);
 }

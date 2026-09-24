@@ -12,9 +12,9 @@
 #define ABS_Y 0x01
 
 struct virtio_input_event {
-    uint16_t type;
-    uint16_t code;
-    uint32_t value;
+  uint16_t type;
+  uint16_t code;
+  uint32_t value;
 };
 
 int virtio_input_init(void);
