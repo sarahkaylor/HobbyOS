@@ -296,8 +296,9 @@ void wm_handle_app_escape(int win_id, char* seq) {
  * and move ahead of everything else, which keeps its own order. Editing
  * these lists is the only change needed to alter what gets pinned. */
 static const char *const pinned_apps[] = {
-  "FILES.BIN", "CALC.BIN", "CLOCK.BIN", "SYSMON.BIN", "HEX.BIN",
-  "TASKS.BIN", "FIND.BIN",  "DIFF.BIN",  "NOTES.BIN",  "UNIT.BIN",
+  "CONSOLE.BIN", "FILES.BIN", "CALC.BIN", "CLOCK.BIN", "SYSMON.BIN",
+  "HEX.BIN", "TASKS.BIN", "FIND.BIN", "DIFF.BIN", "NOTES.BIN",
+  "UNIT.BIN",
 };
 #define NUM_PINNED_APPS ((int)(sizeof(pinned_apps) / sizeof(pinned_apps[0])))
 

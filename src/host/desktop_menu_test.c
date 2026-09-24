@@ -49,23 +49,25 @@ int main(void) {
   printf("[TEST] desktop menu ordering (Apps pinned first)\n");
 
   /* 1) Mixed list: apps and games scattered among other files -> apps
-   *    first, then the games; every tier keeps its relative read_dir order. */
+   *    first, then the games; every tier keeps its relative read_dir order.
+   *    CONSOLE.BIN (the terminal) is pinned first, ahead of the other apps. */
   {
     const char *in[] = {
       "SHTEST.BIN", "CALC.BIN", "EDITOR.BIN", "MILLIPED.BIN", "FILES.BIN",
-      "CLOCK.BIN", "TEST.TXT", "SYSMON.BIN", "HEX.BIN", "TASKS.BIN",
-      "PONG.BIN", "FIND.BIN", "NOTES.TXT", "DIFF.BIN", "NOTES.BIN", "UNIT.BIN",
+      "CLOCK.BIN", "TEST.TXT", "SYSMON.BIN", "CONSOLE.BIN", "HEX.BIN",
+      "TASKS.BIN", "PONG.BIN", "FIND.BIN", "NOTES.TXT", "DIFF.BIN",
+      "NOTES.BIN", "UNIT.BIN",
     };
     const char *want[] = {
-      "CALC.BIN", "FILES.BIN", "CLOCK.BIN", "SYSMON.BIN", "HEX.BIN",
-      "TASKS.BIN", "FIND.BIN", "DIFF.BIN", "NOTES.BIN", "UNIT.BIN",
-      "MILLIPED.BIN", "PONG.BIN",
+      "CALC.BIN", "FILES.BIN", "CLOCK.BIN", "SYSMON.BIN", "CONSOLE.BIN",
+      "HEX.BIN", "TASKS.BIN", "FIND.BIN", "DIFF.BIN", "NOTES.BIN",
+      "UNIT.BIN", "MILLIPED.BIN", "PONG.BIN",
       "SHTEST.BIN", "EDITOR.BIN", "TEST.TXT", "NOTES.TXT",
     };
-    set_menu(in, 16);
+    set_menu(in, 17);
     menu_apps_first();
-    check(menu_is(want, 16),
-          "apps then games pinned; tier relative order preserved");
+    check(menu_is(want, 17),
+          "apps then games pinned; CONSOLE terminal first; tier order kept");
   }
 
   /* 1b) Games with no apps present: still surface to the front (stable). */
