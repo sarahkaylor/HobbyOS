@@ -28,3 +28,6 @@ TEST.TXT
 __pycache__/
 *.pyc
 
+# Staging area for evaluating/vendoring third-party sources (never committed)
+third_party/_staging/
+
