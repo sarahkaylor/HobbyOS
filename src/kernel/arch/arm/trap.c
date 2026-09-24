@@ -331,6 +331,7 @@ static void sys_write(struct trap_frame *tf) {
 }
 
 extern int load_and_run_program_in_scheduler(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid);
+extern int load_and_run_program_in_scheduler_args(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid, const char *args);
 extern struct process *process_get_pcb(int pid);
 
 struct sys_spawn_args {
@@ -349,23 +350,14 @@ extern void kernel_exit(void);
 static void sys_spawn_worker(void *arg) {
   struct sys_spawn_args *args = (struct sys_spawn_args *)arg;
 
-  int child_pid = load_and_run_program_in_scheduler(args->filename, args->stdin_fd, args->stdout_fd, args->stderr_fd, args->caller_pid);
-
-  struct process *child = process_get_pcb(child_pid);
-  if (child) {
-    int k = 0;
-    while (args->args[k] && k < 255) {
-      child->args[k] = args->args[k];
-      k++;
-    }
-    child->args[k] = '\0';
-  }
+  int child_pid = load_and_run_program_in_scheduler_args(args->filename, args->stdin_fd, args->stdout_fd, args->stderr_fd, args->caller_pid, args->args);
 
   struct process *caller = process_get_pcb(args->caller_pid);
   if (caller) {
     extern spinlock_t proc_lock;
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     if (caller->state == PROC_STATE_WAIT_SPAWN) {
+      caller->spawn_retval = child_pid;
       caller->context[0] = child_pid; // return value in x0
       caller->state = PROC_STATE_READY;
     }
@@ -420,6 +412,7 @@ static void sys_spawn(struct trap_frame *tf) {
     extern spinlock_t proc_lock;
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     save_context(caller, tf);
+    caller->spawn_retval = -1;  /* failure default until the worker reports */
     caller->state = PROC_STATE_WAIT_SPAWN;
     spinlock_release_irqrestore(&proc_lock, flags);
 
@@ -428,14 +421,27 @@ static void sys_spawn(struct trap_frame *tf) {
     if (wpid < 0) {
       /* no free process slot for the spawn worker: the caller must not
          sit in WAIT_SPAWN forever waiting for a worker that can never
-         run — release it with a failure return instead. */
+         run — release it with a failure return instead.  The resume path
+         restores x0 from context[0], so the failure value must be stored
+         there (the saved context still holds the spawn arguments, not a
+         return value). */
       flags = spinlock_acquire_irqsave(&proc_lock);
+      caller->spawn_retval = -1;
+      caller->context[0] = (uint64_t)-1;
       caller->state = PROC_STATE_READY;
       spinlock_release_irqrestore(&proc_lock, flags);
-      tf->regs[0] = -1;
+      tf->regs[0] = (uint64_t)-1;
     }
 
     schedule(tf, 0);
+
+    /* Deliver the child pid (or -1) once the caller is running again —
+       possibly on another core.  The worker may have finished before this
+       core even reached schedule(), so read the value from its dedicated
+       field and write it into both the live trap frame and the saved
+       context: either resume path then returns the right value. */
+    caller->context[0] = (uint64_t)caller->spawn_retval;
+    tf->regs[0] = (uint64_t)caller->spawn_retval;
   } else {
     tf->regs[0] = -1;
   }

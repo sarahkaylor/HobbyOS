@@ -181,15 +181,21 @@ void process_set_entry(int pid, uint64_t elr, uint64_t sp) {
  * Allocates a new process entry from the process table and a 2MB physical
  * memory region.
  *
+ * Slot 0 is reserved and never allocated: user-visible process IDs start at
+ * 1 so that pid 0 can never be confused with "no process".  Callers test
+ * spawn() results with pid <= 0, waitpid(0) means "wait for any child", and
+ * PROCTEST asserts getpid() != 0 — all of which rely on a live child never
+ * being pid 0.
+ *
  * Returns:
- *   New PID on success, -1 on failure.
+ *   New PID (>= 1) on success, -1 on failure.
  */
 int process_create(void) {
   uart_puts("Inside process_create: acquiring lock...\n");
   int pid = -1;
   int block_idx = -1;
   uint64_t p_flags = spinlock_acquire_irqsave(&proc_lock);
-  for (int i = 0; i < MAX_PROCESSES; i++) {
+  for (int i = 1; i < MAX_PROCESSES; i++) {
     if (proc_table[i].state == PROC_STATE_FREE) {
       pid = i;
       proc_table[i].state = PROC_STATE_ALLOCATED;
@@ -202,8 +208,9 @@ int process_create(void) {
        processes whose parent no longer exists or never did (kernel
        spawns set parent_pid = -1, so nearly every boot-loaded program
        is in this class once it exits).  Zombies of a LIVE parent are
-       left alone: the parent may still waitpid() them. */
-    for (int i = 0; i < MAX_PROCESSES && pid < 0; i++) {
+       left alone: the parent may still waitpid() them.  Slot 0 is
+       reserved and never handed out here either. */
+    for (int i = 1; i < MAX_PROCESSES && pid < 0; i++) {
       struct process *q = &proc_table[i];
       if (q->state != PROC_STATE_EXITED)
         continue;
@@ -239,8 +246,9 @@ int process_create(void) {
     /* Physical pool exhausted: first reclaim unreapable zombies (dead or
        missing parent — the boot test suite's ~40 parentless programs),
        which is safe: no live parent can ever waitpid() them.  Zombies of
-       a LIVE parent are left for the parent to reap. */
-    for (int i = 0; i < MAX_PROCESSES && block_idx < 0; i++) {
+       a LIVE parent are left for the parent to reap.  Slot 0 is reserved
+       and can never be an EXITED zombie. */
+    for (int i = 1; i < MAX_PROCESSES && block_idx < 0; i++) {
       struct process *q = &proc_table[i];
       if (q->state != PROC_STATE_EXITED || i == pid)
         continue;
@@ -292,6 +300,7 @@ int process_create(void) {
   p->cwd[1] = '\0';
   p->num_open_fds = 0;
   p->wake_ms = 0;
+  p->spawn_retval = -1;
   p->heap_brk = USER_HEAP_BASE;
   p->anon_map_count = 0;
   for (int i = 0; i < USER_ANON_MAX_REGS; i++) {

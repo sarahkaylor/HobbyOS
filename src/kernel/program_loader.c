@@ -93,7 +93,7 @@ int load_and_run_program(const char* filename) {
  * Returns:
  *   The PID of the new process, or -1 on failure.
  */
-int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid) {
+int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid, const char *args) {
   if (!filename) return -1;
   uart_puts("Loading program for scheduler: ");
   uart_puts(filename);
@@ -122,6 +122,18 @@ int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int st
       child->cwd[0] = '/';
       child->cwd[1] = '\0';
     }
+    /* Store the command line BEFORE process_set_entry() makes the child
+       runnable: on multicore the child can start on another CPU the moment
+       it is scheduled, and crt0 reads its args through its very first
+       syscall, so a post-hoc copy from the spawn worker is too late. */
+    int ai = 0;
+    if (args) {
+      while (args[ai] && ai < 255) {
+        child->args[ai] = args[ai];
+        ai++;
+      }
+    }
+    child->args[ai] = '\0';
   }
 
   struct file f;
@@ -224,6 +236,10 @@ int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int st
 
   process_set_entry(pid, USER_VIRT_BASE, USER_VIRT_BASE + USER_REGION_SIZE);
   return pid;
+}
+
+int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid) {
+  return load_and_run_program_in_scheduler_args(filename, stdin_fd, stdout_fd, stderr_fd, caller_pid, 0);
 }
 
 /**

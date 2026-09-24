@@ -147,6 +147,14 @@ struct process {
    * by process_waitpid().
    */
   int exit_status;
+
+  /**
+   * Return value for a caller parked in SYS_SPAWN: the child pid the spawn
+   * worker produced (or -1 when no worker could be created).  sys_spawn
+   * reads this back after schedule() resumes the caller, so the return
+   * value survives regardless of how the caller got rescheduled.
+   */
+  int spawn_retval;
 };
 
 // Initialize the process subsystem and zero out the process table.

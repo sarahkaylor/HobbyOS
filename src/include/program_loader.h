@@ -30,5 +30,6 @@ int load_program_to_memory(const char* filename, void** buffer);
  *   The PID of the new process, or -1 on failure.
  */
 int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid);
+int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid, const char *args);
 
 #endif // PROGRAM_LOADER_H
