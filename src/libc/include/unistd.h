@@ -44,8 +44,14 @@ extern "C" {
   int execve(const char *path, char *const argv[], char *const envp[]);
 
   /* Phase 4 (posix.md): heap break control. */
+  void _exit(int status) __attribute__((noreturn)); /* POSIX: exit w/o atexit */
+
   int brk(void *addr);         /* 0 on success, -1 (ENOMEM) if out of range */
   void *sbrk(intptr_t delta);  /* old break on success, (void *)-1 on error */
+
+  /* Path target of a symbolic link (no symlinks exist here, so this
+   * always fails with EINVAL, like Linux on a non-link path). */
+  long readlink(const char *path, char *buf, unsigned long bufsiz);
 
 #define F_OK 0
 #define R_OK 4

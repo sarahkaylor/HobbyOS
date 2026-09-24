@@ -19,6 +19,7 @@
 #define strlen hb_strlen
 #define strnlen hb_strnlen
 #define strcmp hb_strcmp
+#define strcoll hb_strcoll
 #define strncmp hb_strncmp
 #define strcasecmp hb_strcasecmp
 #define strncasecmp hb_strncasecmp
@@ -41,6 +42,7 @@
 #define memcpy hb_memcpy
 #define memset hb_memset
 #define memchr hb_memchr
+#define memrchr hb_memrchr
 #else
 #include "string.h"
 #endif
@@ -400,4 +402,21 @@ char *strerror(int errnum) {
     *d = '\0';
   }
   return out;
+}
+
+/* C-locale collation: byte order, identical to strcmp (glibc's own
+ * C-locale strcoll behaves this way). */
+int strcoll(const char *s1, const char *s2) {
+  return strcmp(s1, s2);
+}
+
+/* GNU extension: locate the last occurrence of C in the first N bytes. */
+void *memrchr(const void *s, int c, size_t n) {
+  const unsigned char *p = (const unsigned char *)s;
+  unsigned char uc = (unsigned char)c;
+  while (n > 0) {
+    n--;
+    if (p[n] == uc) return (void *)(p + n);
+  }
+  return 0;
 }

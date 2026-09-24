@@ -38,12 +38,28 @@ extern "C" {
 #define S_IFMT   0170000
 #define S_IFDIR  0040000
 #define S_IFREG  0100000
+#define S_IFLNK  0120000
 
 #define S_ISDIR(m)  (((m) & S_IFMT) == S_IFDIR)
 #define S_ISREG(m)  (((m) & S_IFMT) == S_IFREG)
+#define S_ISLNK(m)  (((m) & S_IFMT) == S_IFLNK)
 
   int stat(const char *path, struct stat *buf);
   int fstat(int fd, struct stat *buf);
+
+  /* No symlinks on this VFS: lstat is stat. */
+  int lstat(const char *path, struct stat *buf);
+
+  /* No permission bits on fat16: chmod()/fchmod() succeed as no-ops
+   * (like many FAT implementations) so permission-preserving tools run
+   * unchanged. */
+  int chmod(const char *path, mode_t mode);
+  int fchmod(int fd, mode_t mode);
+
+  /* No permission bits on fat16: umask() records the mask (so callers
+   * like GNU sed's temp-file path see POSIX behavior) but files are
+   * created wide open regardless. */
+  mode_t umask(mode_t mask);
 
 #ifdef __cplusplus
 }

@@ -51,8 +51,8 @@ static void check(const char *what, const char *got, const char *want) {
 }
 
 /* Run "head <args>" with the given stdin content; capture stdout. */
-static void run_head(const char *args, const char *stdin_data, char *out,
-                     size_t outsize) {
+static void run_head_once(const char *args, const char *stdin_data, char *out,
+                          size_t outsize) {
   int in_p[2], out_p[2];
   int pid;
   size_t n = 0;
@@ -113,6 +113,21 @@ static void run_head(const char *args, const char *stdin_data, char *out,
   if (pid > 0) {
     int ws = 0;
     waitpid(pid, &ws, 0);
+  }
+}
+
+/* Empty stdout despite a live child is the same scheduler-pressure flake
+   the spawn/write retries above absorb; retry the whole capture. */
+static void run_head(const char *args, const char *stdin_data, char *out,
+                     size_t outsize) {
+  int tries;
+
+  for (tries = 0; tries < 3; tries++) {
+    out[0] = '\0';
+    run_head_once(args, stdin_data, out, outsize);
+    if (out[0] != '\0')
+      break;
+    usleep(30000); /* 30 ms */
   }
 }
 

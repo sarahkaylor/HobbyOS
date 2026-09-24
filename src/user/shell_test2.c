@@ -53,6 +53,65 @@ static int read_until(int fd, char *buf, int max_len, const char *pattern) {
   return len;
 }
 
+/* Stall watchdog: fork a helper that fails this test loudly instead of
+   letting a shell-protocol deadlock wedge the whole boot suite (seen
+   under memory pressure when a shell's answer to a command never
+   arrives).  The child drops its copies of the protocol pipes first:
+   fork() copies the fd table, and the extra references would otherwise
+   keep the pipe ends alive after this process dies.  On stall it dumps
+   the process table, kills the stuck pair, and lets the suite move on. */
+static void start_watchdog(int in_w, int out_r, const char *test_name) {
+  int wd = fork();
+  if (wd != 0)
+    return;
+
+  close(in_w);
+  close(out_r);
+
+  for (int i = 0; i < 250; i++) {
+    usleep(100000); /* 100 ms; total patience 25 s */
+    if (kill(getppid(), 0) != 0)
+      exit(0); /* the test finished normally */
+  }
+
+  struct sys_procinfo procs[64];
+  int n = sysinfo(3, procs, sizeof(procs));
+  int pp = getppid();
+
+  /* The parent pid may have been recycled to a stranger: stand down
+     unless the pid is still our test. */
+  int found = 0;
+  for (int i = 0; i < n; i++) {
+    if (procs[i].pid == pp && my_strstr(procs[i].name, test_name))
+      found = 1;
+  }
+  if (!found)
+    exit(0);
+
+  print_console("SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST. "
+                "Process table:\n");
+  for (int i = 0; i < n; i++) {
+    print_console("  pid=");
+    print_dec(procs[i].pid);
+    print_console(" ppid=");
+    print_dec(procs[i].parent_pid);
+    print_console(" state=");
+    print_dec(procs[i].state);
+    print_console(" ");
+    print_console(procs[i].name);
+    print_console("\n");
+  }
+
+  /* Take down the stuck pair so the boot suite can complete: the shells
+     this test spawned are children of the parent; then the parent. */
+  for (int i = 0; i < n; i++) {
+    if (procs[i].parent_pid == pp && procs[i].pid != getpid())
+      kill(procs[i].pid, 9);
+  }
+  kill(pp, 9);
+  exit(0);
+}
+
 int main(void) {
   print_console("Shell Advanced Utilities Integration Test Starting...\n");
 
@@ -62,13 +121,27 @@ int main(void) {
     return 1;
   }
 
-  int pid = spawn2("SH.BIN", in_p[0], out_p[1], -1, 0);
+  int pid = -1;
+
+  /* The boot test suite can transiently exhaust the kernel's physical
+     block pool (32 blocks) while ~40 programs start in a burst; retry so a
+     scheduling wave can't silently kill the test (bounded at 20 s). */
+  for (int attempt = 0; attempt < 200 && pid < 0; attempt++) {
+    pid = spawn2("SH.BIN", in_p[0], out_p[1], -1, 0);
+    if (pid < 0) {
+      if (attempt == 0)
+        print_console("shell_test2: spawn failed (memory wave), retrying...\n");
+      usleep(100000); /* 100 ms */
+    }
+  }
   if (pid < 0) {
-    print_console("shell_test2: failed to spawn SH.BIN\n");
+    print_console("shell_test2: FATAL: failed to spawn SH.BIN\n");
     return 1;
   }
   close(in_p[0]);
   close(out_p[1]);
+
+  start_watchdog(in_p[1], out_p[0], "SHTEST2.BIN");
 
   char buf[2048];
 

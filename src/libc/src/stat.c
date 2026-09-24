@@ -79,6 +79,34 @@ off_t lseek(int fd, off_t offset, int whence) {
   return (off_t)hb_errno_ret(r);
 }
 
+/* umask record only: fat16 has no permission bits, so the mask is stored
+ * (callers observe POSIX get/set behavior) but does not gate creation. */
+mode_t umask(mode_t mask) {
+  static mode_t current = 022;
+  mode_t old = current;
+  current = mask & 0777;
+  return old;
+}
+
+/* No permission bits on fat16: report success without changing anything
+ * (the common behavior for permissionless filesystems). */
+int chmod(const char *path, mode_t mode) {
+  (void)path;
+  (void)mode;
+  return 0;
+}
+
+int fchmod(int fd, mode_t mode) {
+  (void)fd;
+  (void)mode;
+  return 0;
+}
+
+/* No symlinks on this VFS: lstat is stat. */
+int lstat(const char *path, struct stat *buf) {
+  return stat(path, buf);
+}
+
 #else /* HOST_TEST */
 
 int stat(const char *path, struct stat *buf) {

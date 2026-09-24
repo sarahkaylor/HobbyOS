@@ -62,6 +62,10 @@ int main(void) {
      argv plumbing, the kernel's exit-status capture, and the reap
      all work. */
   int child = fork();
+  for (int attempt = 0; child < 0 && attempt < 200; attempt++) {
+    usleep(50000); /* 50 ms; the boot suite can transiently exhaust slots */
+    child = fork();
+  }
   if (child == 0) {
     print_console("[PROCTEST] child pre-exec pid=");
     con_int(getpid());
@@ -96,6 +100,10 @@ int main(void) {
   /* 2) WNOHANG: a child that lives a while must make waitpid(WNOHANG)
      return 0, then blocking waitpid must reap it (status 1). */
   child = fork();
+  for (int attempt = 0; child < 0 && attempt < 200; attempt++) {
+    usleep(50000); /* 50 ms; the boot suite can transiently exhaust slots */
+    child = fork();
+  }
   if (child == 0) {
     usleep(500000); /* 500 ms alive for the WNOHANG probe */
     exit(1);

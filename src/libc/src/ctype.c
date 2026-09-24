@@ -9,6 +9,7 @@
 #ifdef HOST_TEST
 #define isalnum hb_isalnum
 #define isalpha hb_isalpha
+#define isascii hb_isascii
 #define isblank hb_isblank
 #define iscntrl hb_iscntrl
 #define isdigit hb_isdigit
@@ -164,4 +165,9 @@ int toupper(int c) {
   u = (unsigned char)c;
   if (u >= 'a' && u <= 'z') return (int)(u - ('a' - 'A'));
   return (int)u;
+}
+
+/* glibc's C-locale contract: true for 0..127, false otherwise. */
+int isascii(int c) {
+  return (c & ~0x7f) == 0;
 }

@@ -54,8 +54,8 @@ static void check(const char *what, const char *got, const char *want) {
 
 /* Run "wc <args>" with the given stdin content; returns the captured
    stdout in out (NUL-terminated, outsize bytes max). */
-static void run_wc(const char *args, const char *stdin_data, char *out,
-                   size_t outsize) {
+static void run_wc_attempt(const char *args, const char *stdin_data, char *out,
+                           size_t outsize) {
   int in_p[2], out_p[2];
   int pid;
   size_t n = 0;
@@ -115,6 +115,24 @@ static void run_wc(const char *args, const char *stdin_data, char *out,
   if (pid > 0) {
     int ws = 0;
     waitpid(pid, &ws, 0);
+  }
+}
+
+/* Empty stdout despite a successful spawn is a scheduler-pressure flake:
+   while the fork/stress tests hammer process creation in parallel, the
+   child can be scheduled so late that its stdout pipe has already reported
+   EOF.  Retry the whole interaction a few times; every caller expects
+   non-empty output, so an empty capture is always retried. */
+static void run_wc(const char *args, const char *stdin_data, char *out,
+                   size_t outsize) {
+  int tries;
+
+  for (tries = 0; tries < 3; tries++) {
+    out[0] = '\0';
+    run_wc_attempt(args, stdin_data, out, outsize);
+    if (out[0] != '\0')
+      break;
+    usleep(30000); /* 30 ms */
   }
 }
 

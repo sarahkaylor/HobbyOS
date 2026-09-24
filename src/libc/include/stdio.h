@@ -53,6 +53,8 @@ extern "C" {
   size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream);
   int fgetc(FILE *stream);
   int fputc(int c, FILE *stream);
+  int getc(FILE *stream);  /* == fgetc */
+  int putc(int c, FILE *stream); /* == fputc */
   char *fgets(char *s, int size, FILE *stream);
   int fputs(const char *s, FILE *stream);
   int putchar(int c);
@@ -61,6 +63,7 @@ extern "C" {
   int fflush(FILE *stream);
   int feof(FILE *stream);
   int ferror(FILE *stream);
+  void clearerr(FILE *stream);
   int fileno(FILE *stream);
   int fseek(FILE *stream, off_t offset, int whence);
   long ftell(FILE *stream);
@@ -88,6 +91,8 @@ extern "C" {
   /* --- line reading --- */
   ssize_t getline(char **lineptr, size_t *n, FILE *stream);
   ssize_t getdelim(char **lineptr, size_t *n, int delim, FILE *stream);
+
+  int rename(const char *oldpath, const char *newpath);
 
 #ifdef __cplusplus
 }

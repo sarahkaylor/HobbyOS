@@ -11,7 +11,9 @@
 #include <string.h>
 #include <errno.h>
 
-char *program_name = NULL;
+/* Weak: GNU ports bring their own (gnulib progname.c) definition of
+ * program_name; ours only serves programs that link error() alone. */
+__attribute__((weak)) char *program_name = NULL;
 
 void error(int status, int errnum, const char *fmt, ...) {
   va_list ap;

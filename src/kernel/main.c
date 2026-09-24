@@ -221,6 +221,10 @@ void main(void) {
   load_and_run_program_in_scheduler("TAILTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("PROCTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("WCTEST.BIN", -1, -1, -1, -1);
+  /* REGTEST.BIN asserts the sysroot GNU regex in-OS against the same
+     expectation table the host suite verifies against glibc.  It spawns
+     nothing, so it can run alongside the pipe tests. */
+  load_and_run_program_in_scheduler("REGTEST.BIN", -1, -1, -1, -1);
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
   load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1, -1, -1);

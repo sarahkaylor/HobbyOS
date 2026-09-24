@@ -14,6 +14,11 @@ extern "C" {
 #define EXIT_FAILURE 1
 #define RAND_MAX 2147483647 /* 2^31-1, same as glibc */
 
+  /* The only locale is "C", so a multibyte character is always exactly one
+   * byte (C99 7.20.7.1). GNU sources transcribed into the sysroot read this
+   * to pick their single-byte code paths. */
+#define MB_CUR_MAX 1
+
   /* Heap (implementations in src/user/malloc.c, linked as user_malloc.o) */
   void *malloc(size_t size);
   void *calloc(size_t nmemb, size_t size);
@@ -51,8 +56,18 @@ extern "C" {
   int putenv(char *string); /* gnu-style "NAME=VALUE", takes ownership */
   int unsetenv(const char *name);
 
-  void abort(void);
+  void abort(void) __attribute__((noreturn));
   void exit(int status) __attribute__((noreturn));
+
+  /* atexit: handlers run LIFO inside exit() (libc.c calls back into the
+   * stdlib.c registry via __hb_atexit_run).  Returns 0, or -1 if the
+   * table is full. */
+  int atexit(void (*function)(void));
+
+  /* POSIX/GNU temp-file creation: replace the "XXXXXX" trailer of
+   * template with unique letters and open O_CREAT|O_EXCL|O_RDWR. */
+  int mkstemp(char *template);
+  int mkostemp(char *template, int flags);
 
 #ifdef __cplusplus
 }

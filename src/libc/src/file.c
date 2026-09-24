@@ -32,9 +32,9 @@ struct __hb_FILE {
 #define HB_FBUF_SIZE 512
 
 static FILE stdio_files[3] = {
-  { .fd = 0 },        /* stdin */
-  { .fd = 1 },        /* stdout */
-  { .fd = 2 },        /* stderr */
+  { .fd = 0, .mode = 'r' }, /* stdin */
+  { .fd = 1, .mode = 'w' }, /* stdout */
+  { .fd = 2, .mode = 'w' }, /* stderr */
 };                      /* NOTE: must bear the real fd from birth — a
                            zeroed bss FILE would make stdout write to fd 0 */
 
@@ -277,6 +277,8 @@ int fputs(const char *s, FILE *f) {
 
 int putchar(int c) { return fputc(c, stdout); }
 int getchar(void)  { return fgetc(stdin); }
+int getc(FILE *f)  { return fgetc(f); }
+int putc(int c, FILE *f) { return fputc(c, f); }
 
 int puts(const char *s) {
   if (fputs(s, stdout) == EOF)
@@ -325,6 +327,28 @@ long ftell(FILE *f) {
 
 void rewind(FILE *f) {
   (void)fseek(f, 0, SEEK_SET);
+}
+
+/* True when the stream was opened for writing ('w'/'a'): mirrors
+ * glibc's __fwriting, which gnulib's fwriting() maps onto (see the
+ * fwriting.h shim in src/user/sed). */
+int hb_fp_is_writing(FILE *f) {
+  return f != 0 && (f->mode == 'w' || f->mode == 'a');
+}
+
+/* Bytes buffered and not yet written out.  Writes here are unbuffered
+ * (fwrite goes straight to the fd), so nothing is ever pending. */
+size_t __fpending(FILE *f) {
+  (void)f;
+  return 0;
+}
+
+/* Clear end-of-file and error flags (sed calls this when rewinding the
+ * hold space stream across lines). */
+void clearerr(FILE *f) {
+  if (f == 0) return;
+  f->eof = 0;
+  f->err = 0;
 }
 
 int ungetc(int c, FILE *f) {

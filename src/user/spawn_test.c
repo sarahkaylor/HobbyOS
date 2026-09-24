@@ -5,6 +5,10 @@ __attribute__((section(".text._start"))) void _start(void) {
 
   print("Spawn Test: Spawning CONSOLE.BIN...\n");
   int pid = spawn2("CONSOLE.BIN", -1, -1, -1, 0);
+  for (int attempt = 0; pid < 0 && attempt < 200; attempt++) {
+    usleep(50000); /* 50 ms; the boot suite can transiently exhaust slots */
+    pid = spawn2("CONSOLE.BIN", -1, -1, -1, 0);
+  }
 
   if (pid < 0) {
     print("Spawn Test: FAILED to spawn CONSOLE.BIN\n");

@@ -48,6 +48,26 @@ stdlib (strtol family, qsort/bsearch, rand, env), ctype, getopt(+long),
 error.h, fcntl/open/read/write/lseek/stat/fstat/pipe/spawn2, malloc/realloc,
 assert.h, signal.h stubs, mman.
 
+### Phase B (complete): sysroot GNU regex
+
+`src/libc` now carries the GNU regex engine transcribed from gnulib (the
+copy vendored with sed-4.8): `include/regex.h` plus `src/regex.c`,
+`regcomp.c`, `regexec.c`, `regex_internal.{c,h}` compiled into `libc.a` in
+**byte mode** (`RE_ENABLE_I18N` off, `MB_CUR_MAX == 1`, `nl_langinfo(CODESET)`
+returns `"ANSI_X3.4-1968"` for the C locale, matching glibc). Stub headers
+(`wchar.h`, `wctype.h`, `locale.h`, `alloca.h`) and `nl_langinfo` back the
+byte-only locale model. The engine is verified **byte-for-byte against
+glibc** (rc codes, match offsets, `re_nsub`, `regerror` texts) by
+`libc_regex_test_host` — 24,503 races, 0 divergences — and in-OS by
+`REGTEST.BIN` (§5). The GNU `re_*` API is exposed when `_GNU_SOURCE` is
+defined before `<regex.h>`, mirroring glibc.
+
+Policy: the vendored engine files are excluded from `cstyle` (STYLE.md,
+`tools/cstyle.py` `EXCLUDE_FILES`) exactly like `third_party/` trees, so a
+future gnulib refresh stays a verbatim copy; the adaptation seam
+(`src/libc/src/regex.c`, `src/libc/src/gnu_compat.h`) is first-party and
+format-clean.
+
 ## 3. Candidate inventory
 
 Legend — Effort: S (days-scale port + tests), M, L. Deps: new libc/OS support
@@ -127,7 +147,7 @@ Deferred sequence (own project-sized chunk, after sed/grep land):
 | # | Phase | Deliverable | Gate |
 |---|---|---|---|
 | A | Survey + vendoring | this document; sed-4.8 + grep-2.5.4 trees under third_party/ with checksums | — |
-| B | Sysroot regex | `regex.h` + regcomp/regexec/regex_internal in libc; host test **byte-exact vs. glibc** | host suite + unit tests both arches |
+| B | Sysroot regex | `regex.h` + regcomp/regexec/regex_internal in libc; host test **byte-exact vs. glibc** | host suite + unit tests both arches — **done** (regex race 24,503/0; `REGTEST.BIN` in-OS) |
 | C | GNU sed 4.8 | `SED.BIN` transcribed port; strict ref build; `sed_parity.sh`; `sed_test_host`; `SEDTEST.BIN` in-OS | parity + host + `make test` ARM/Intel |
 | D | GNU grep 2.5.4 | `GGREP.BIN`; ref build; `grep_parity.sh`; in-OS test | same |
 | E | textutils batch 1 | cut, tr, paste, fold, nl (+ parity + in-OS each, shared fixture harness) | same |
@@ -157,6 +177,12 @@ a per-program parity script skeleton, and an in-OS spawn-harness pattern
    (ARM default) **and** `make test_intel` for x86_64 parity.
 5. Both architectures build the same sources; x86_64 gets the identical
    in-OS test list.
+6. **Expectation tables** (the `src/user/regex_test_cases.h` pattern): one
+   shared C table holds the expected results, the host test re-runs every
+   row against glibc **and** against the sysroot implementation, and the
+   in-OS test asserts the same rows. In-OS assertions therefore assert
+   certified GNU behavior, never hand-written guesses. Reuse this shape for
+   the sed/grep in-OS tests.
 
 ## 6. Source provenance (sha256)
 

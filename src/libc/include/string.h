@@ -17,6 +17,7 @@ extern "C" {
   size_t strnlen(const char *s, size_t maxlen);
 
   int strcmp(const char *s1, const char *s2);
+  int strcoll(const char *s1, const char *s2); /* C locale: == strcmp */
   int strncmp(const char *s1, const char *s2, size_t n);
   int strcasecmp(const char *s1, const char *s2);
   int strncasecmp(const char *s1, const char *s2, size_t n);
@@ -45,6 +46,7 @@ extern "C" {
   void *memcpy(void *dest, const void *src, size_t n);
   void *memset(void *s, int c, size_t n);
   void *memchr(const void *s, int c, size_t n);
+  void *memrchr(const void *s, int c, size_t n); /* GNU: last occurrence */
 
 #ifdef __cplusplus
 }

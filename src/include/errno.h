@@ -54,6 +54,8 @@
 #define ENOSYS      38
 #define ENOTEMPTY   39
 #define ELOOP       40
+#define EILSEQ      84
+#define EOPNOTSUPP  95 /* Linux value; acl-errno-valid.c */ /* Linux value; used by the byte-mode wide-char layer */
 
 #ifndef HOST_TEST
 extern int errno;

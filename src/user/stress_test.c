@@ -171,6 +171,10 @@ void _start(void) {
 
   for (int i = 0; i < 4; i++) {
     int pid = fork();
+    for (int attempt = 0; pid < 0 && attempt < 200; attempt++) {
+      usleep(50000); /* 50 ms; the boot suite can transiently exhaust slots */
+      pid = fork();
+    }
     if (pid < 0) {
       print_console("[STRESS TEST] ERROR: Failed to fork child ");
       print_num(i);

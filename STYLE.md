@@ -2,8 +2,10 @@
 
 This is the C formatting standard for the HobbyOS code base. It applies to
 every first-party `.c` and `.h` file under `src/`. Vendored third-party code
-(`third_party/`, `bootloader/`) is out of scope and keeps its upstream
-formatting.
+(`third_party/`, `bootloader/`, the verbatim gnulib regex engine files
+listed under `EXCLUDE_FILES` in `tools/cstyle.py`, and the vendored GNU sed
+tree under `src/user/sed/` listed under `EXCLUDE_PREFIXES`) is out of scope
+and keeps its upstream formatting.
 
 The rules are enforced mechanically by [`tools/cstyle.py`](tools/cstyle.py) —
 run `make format` to auto-format, `make check-format` to verify. Do not

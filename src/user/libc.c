@@ -139,6 +139,12 @@ void print_dec(long val) {
 }
 
 void exit(int status) {
+  /* atexit handlers first (weak ref: binaries that never register any
+     libc stdlib objects keep linking; handler output still lands before
+     the flush below) */
+  extern void __hb_atexit_run(void) __attribute__((weak));
+  if (__hb_atexit_run)
+    __hb_atexit_run();
   /* flush buffered stdio before dying (weak ref: binaries that never link
      the FILE layer keep linking fine; stdout would otherwise lose <=512B
      of buffered output on programs that exit without a full flush) */
@@ -281,6 +287,27 @@ int sysinfo(int cmd, void *buf, int size) {
 
 int unlink(const char *filename) {
   return (int)errno_ret(syscall(SYS_UNLINK, (long)filename, 0, 0, 0));
+}
+
+int isatty(int fd) {
+  (void)fd;
+  return 0; /* no tty layer yet; see unistd.h */
+}
+
+long readlink(const char *path, char *buf, unsigned long bufsiz) {
+  (void)path;
+  (void)buf;
+  (void)bufsiz;
+  /* The VFS has no symbolic links; POSIX says EINVAL when the path is
+   * not a link, which is always the case here. */
+  errno = EINVAL;
+  return -1;
+}
+
+void _exit(int status) {
+  syscall(SYS_EXIT, (long)status, 0, 0, 0);
+  while (1)
+    ; /* the kernel stops us */
 }
 
 int rename(const char *oldname, const char *newname) {

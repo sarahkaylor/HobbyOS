@@ -636,6 +636,57 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(r2.returncode, 0)
 
 
+class TestVendoredExclusions(unittest.TestCase):
+    """The vendored gnulib regex engine stays out of scope (see
+    EXCLUDE_FILES): it is refreshed verbatim from upstream, so the formatter
+    must not rewrite it — and find_files must not hand it to the corpus
+    sweep, which would otherwise fail token preservation."""
+
+    VENDORED = (
+        "src/libc/include/intprops.h",
+        "src/libc/include/regex.h",
+        "src/libc/include/verify.h",
+        "src/libc/src/regcomp.c",
+        "src/libc/src/regex_internal.c",
+        "src/libc/src/regex_internal.h",
+        "src/libc/src/regexec.c",
+    )
+
+    def test_tree_walk_skips_vendored_files(self):
+        src_dir = os.path.join(REPO, "src")
+        if not os.path.isdir(src_dir):
+            self.skipTest("no src/ tree next to tools/")
+        found = {os.path.relpath(p, REPO).replace(os.sep, "/")
+                 for p in cstyle.find_files([src_dir])}
+        for rel in self.VENDORED:
+            self.assertNotIn(rel, found)
+        # The adaptation shim and the tests around it stay in scope.
+        self.assertIn("src/libc/src/regex.c", found)
+        self.assertIn("src/user/regex_test.c", found)
+
+    def test_explicit_vendored_path_is_skipped(self):
+        path = os.path.join(REPO, "src/libc/src/regcomp.c")
+        if not os.path.isfile(path):
+            self.skipTest("vendored file absent")
+        self.assertEqual(cstyle.find_files([path]), [])
+
+    def test_tree_walk_skips_vendored_sed_tree(self):
+        """EXCLUDE_PREFIXES: the whole vendored GNU sed tree (sources,
+        gnulib copies, generated config.h) stays out of scope."""
+        sed_dir = os.path.join(REPO, "src/user/sed")
+        if not os.path.isdir(sed_dir):
+            self.skipTest("no src/user/sed tree next to tools/")
+        found = {os.path.relpath(p, REPO).replace(os.sep, "/")
+                 for p in cstyle.find_files([sed_dir])}
+        self.assertEqual(found, set())
+
+    def test_explicit_sed_path_is_skipped(self):
+        path = os.path.join(REPO, "src/user/sed/sed.c")
+        if not os.path.isfile(path):
+            self.skipTest("vendored sed source absent")
+        self.assertEqual(cstyle.find_files([path]), [])
+
+
 class TestCorpusSweep(unittest.TestCase):
     """Format every file in the real src/ tree: tokens preserved, idempotent."""
 

@@ -152,8 +152,15 @@ RM_BIN = $(OBJ_DIR)/rm.bin
 MV_BIN = $(OBJ_DIR)/mv.bin
 TOUCH_BIN = $(OBJ_DIR)/touch.bin
 WC_BIN = $(OBJ_DIR)/wc.bin
+SED_BIN = $(OBJ_DIR)/sed.bin
+# GNU sed 4.8 port: seven core sources + the vendored gnulib subset they
+# pull in (src/user/sed/config.h is the port's generated config header).
+SED_CORE_NAMES = sed compile debug execute mbcs regexp utils
+SED_GNULIB_NAMES = acl-errno-valid acl-internal basename-lgpl c-ctype c-strcasecmp c-strncasecmp close-stream closeout copy-acl dfa dirname-lgpl exitfail get-permissions localcharset localeinfo obstack progname qcopy-acl qset-acl quotearg set-acl set-permissions strverscmp version-etc version-etc-fsf xalloc-die xmalloc
+SED_OBJS = $(addprefix $(OBJ_DIR)/sed_,$(addsuffix .o,$(SED_CORE_NAMES))) $(addprefix $(OBJ_DIR)/sedg_,$(addsuffix .o,$(SED_GNULIB_NAMES)))
 HEDGNU_BIN = $(OBJ_DIR)/hedgnu.bin
 WCTEST_BIN = $(OBJ_DIR)/wc_test.bin
+REGTEST_BIN = $(OBJ_DIR)/regex_test.bin
 HEDTEST_BIN = $(OBJ_DIR)/head_test.bin
 TAILGN_BIN = $(OBJ_DIR)/tailgnu.bin
 TAILTEST_BIN = $(OBJ_DIR)/tail_test.bin
@@ -353,12 +360,13 @@ $(OBJ_DIR)/crt0.o: src/libc/crt0.c $(USER_LIBC) $(USER_HDRS)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
 # Phase 1: src/libc/src/*.c are archived into libc.a (pattern rule, both
-# arches since OBJ_DIR varies).
-$(OBJ_DIR)/libc_%.o: src/libc/src/%.c $(USER_HDRS)
+# arches since OBJ_DIR varies). Private headers (src/libc/src/*.h) are
+# included in the dependencies so internal changes rebuild the objects.
+$(OBJ_DIR)/libc_%.o: src/libc/src/%.c $(USER_HDRS) src/libc/src/*.h
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o $(OBJ_DIR)/libc_mman.o
+$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o $(OBJ_DIR)/libc_mman.o $(OBJ_DIR)/libc_regex.o $(OBJ_DIR)/libc_langinfo.o $(OBJ_DIR)/libc_wchar.o $(OBJ_DIR)/libc_wctype.o $(OBJ_DIR)/libc_locale.o $(OBJ_DIR)/libc_selinux.o
 	$(AR) rcs $@ $^
 
 # --- HELLO demo (Phase 0 gate): a main(argc, argv) program built against
@@ -587,6 +595,19 @@ $(HEDGNU_BIN): $(OBJ_DIR)/head_gnu.o $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/hedgnu.elf $(OBJ_DIR)/head_gnu.o $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/hedgnu.elf $(HEDGNU_BIN)
 
+# --- GNU sed 4.8 (multi-object GNU port; objects named sed_/sedg_) ------
+$(OBJ_DIR)/sed_%.o: src/user/sed/%.c src/user/sed/config.h src/user/sed/*.h src/user/sed/gnulib/*.h $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -Isrc/user/sed -Isrc/user/sed/gnulib -c $< -o $@
+
+$(OBJ_DIR)/sedg_%.o: src/user/sed/gnulib/%.c src/user/sed/config.h src/user/sed/*.h src/user/sed/gnulib/*.h $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -Isrc/user/sed -Isrc/user/sed/gnulib -c $< -o $@
+
+$(SED_BIN): $(SED_OBJS) $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/sed.elf $(SED_OBJS) $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/sed.elf $(SED_BIN)
+
 $(OBJ_DIR)/wc_test.o: src/user/wc_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
@@ -594,6 +615,17 @@ $(OBJ_DIR)/wc_test.o: src/user/wc_test.c $(USER_LIBC) $(USER_HDRS)
 $(WCTEST_BIN): $(OBJ_DIR)/wc_test.o $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/wc_test.elf $(OBJ_DIR)/wc_test.o $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/wc_test.elf $(WCTEST_BIN)
+
+$(OBJ_DIR)/regex_test.o: src/user/regex_test.c src/user/regex_test_cases.h $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+# In-OS acceptance test for the sysroot GNU regex.  Its expectation table
+# (src/user/regex_test_cases.h) is re-verified against glibc by the host
+# suite, so a pass on both sides means GNU-identical behavior.
+$(REGTEST_BIN): $(OBJ_DIR)/regex_test.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/regex_test.elf $(OBJ_DIR)/regex_test.o $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/regex_test.elf $(REGTEST_BIN)
 
 $(OBJ_DIR)/head_test.o: src/user/head_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
@@ -753,7 +785,7 @@ endef
 
 $(foreach app,$(DESKTOP_APP_NAMES),$(eval $(call DESKTOP_APP_RULE,$(app))))
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(REGTEST_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -826,6 +858,7 @@ endif
 	$(MCOPY) -i disk.img $(MV_BIN) ::/MV.BIN
 	$(MCOPY) -i disk.img $(TOUCH_BIN) ::/TOUCH.BIN
 	$(MCOPY) -i disk.img $(WC_BIN) ::/WC.BIN
+	$(MCOPY) -i disk.img $(SED_BIN) ::/SED.BIN
 	$(MCOPY) -i disk.img $(HEDGNU_BIN) ::/HEDGNU.BIN
 	$(MCOPY) -i disk.img $(TAILGN_BIN) ::/TAILGN.BIN
 	$(MCOPY) -i disk.img $(PROCCHLD_BIN) ::/PROCCHLD.BIN
@@ -833,6 +866,7 @@ endif
 	$(MCOPY) -i disk.img $(TAILTEST_BIN) ::/TAILTEST.BIN
 	$(MCOPY) -i disk.img $(PROCTEST_BIN) ::/PROCTEST.BIN
 	$(MCOPY) -i disk.img $(WCTEST_BIN) ::/WCTEST.BIN
+	$(MCOPY) -i disk.img $(REGTEST_BIN) ::/REGTEST.BIN
 	$(MCOPY) -i disk.img $(LKSTEST_BIN) ::/LKSTEST.BIN
 	$(MCOPY) -i disk.img $(SORT_BIN) ::/SORT.BIN
 	$(MCOPY) -i disk.img $(UNIQ_BIN) ::/UNIQ.BIN
@@ -1038,6 +1072,34 @@ GETOPT_TEST = libc_getopt_test_host
 $(GETOPT_TEST): obj/host_libc_getopt_test.o obj/host_hb_getopt.o
 	$(HOST_CC) -o $@ $^
 
+# GNU regex ported into the sysroot (src/libc/src/regex.c, which includes
+# the regcomp/regexec/regex_internal parts): compiled for the host renamed
+# to hb_* and raced byte-exact against glibc's regex in the C locale
+# (see src/host/libc_regex_test.c).  Needs -Isrc/libc/include so the
+# sysroot's regex.h/intprops.h/verify.h win over system copies.
+REGEX_TEST = libc_regex_test_host
+obj/host_hb_regex.o: src/libc/src/regex.c src/libc/include/*.h src/libc/src/*.h
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/libc/include -c $< -o $@
+obj/host_libc_regex_test.o: src/host/libc_regex_test.c src/user/regex_test_cases.h src/libc/include/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/libc/include -c $< -o $@
+obj/glibc_regex_layout.o: src/host/glibc_regex_layout.c
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+$(REGEX_TEST): obj/host_libc_regex_test.o obj/host_hb_regex.o obj/glibc_regex_layout.o
+	$(HOST_CC) -o $@ $^
+
+# langinfo: the two C-locale facts the GNU ports rely on (CODESET is
+# "ANSI_X3.4-1968", MB_CUR_MAX is 1) checked against glibc.
+LANGINFO_TEST = libc_langinfo_test_host
+obj/host_hb_langinfo.o: src/libc/src/langinfo.c src/libc/include/*.h
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/libc/include -c $< -o $@
+obj/host_libc_langinfo_test.o: src/host/libc_langinfo_test.c src/libc/include/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/libc/include -c $< -o $@
+$(LANGINFO_TEST): obj/host_libc_langinfo_test.o obj/host_hb_langinfo.o
+	$(HOST_CC) -o $@ $^
+
 # The ported wc built for the host: ours except getopt_long (hb_* via our
 # getopt.h) and error() (host_hb_error.o); everything else resolves to
 # glibc.  wc_host is raced byte-for-byte against coreutils in
@@ -1137,7 +1199,7 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(GETOPT_TEST) $(WC_PARITY) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(WC_PARITY) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
@@ -1156,6 +1218,9 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	$(HOST_RUN) ./$(REALLOC_TEST)
 	$(HOST_RUN) ./$(PRINTF_TEST)
 	$(HOST_RUN) ./$(HEADERS_TEST)
+	$(HOST_RUN) ./$(GETOPT_TEST)
+	$(HOST_RUN) ./$(REGEX_TEST)
+	$(HOST_RUN) ./$(LANGINFO_TEST)
 	$(HOST_RUN) ./files_test_host
 	$(HOST_RUN) ./calc_test_host
 	$(HOST_RUN) ./clock_test_host

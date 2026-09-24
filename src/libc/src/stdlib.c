@@ -16,10 +16,15 @@
 #include <errno.h>
 #include <signal.h>
 #include <unistd.h>
+#include <string.h>
+#include <fcntl.h>
 #else
 #include "ctype.h"
 #include "errno.h"
 #include "malloc.h"
+#include "string.h"
+#include "fcntl.h"
+#include "unistd.h"
 #endif
 
 #ifdef HOST_TEST
@@ -43,6 +48,9 @@
 #define unsetenv hb_unsetenv
 #define abort hb_abort
 #define environ hb_environ
+#define atexit hb_atexit
+#define mkstemp hb_mkstemp
+#define mkostemp hb_mkostemp
 #else
 #include "stdlib.h"
 #endif
@@ -543,4 +551,76 @@ void abort(void) {
   extern void exit(int status);
   exit(6);
 #endif
+}
+
+/* ---------------- atexit ---------------- */
+
+#define HB_ATEXIT_MAX 32
+
+static void (*hb_atexit_fns[HB_ATEXIT_MAX])(void);
+static int hb_atexit_count;
+
+int atexit(void (*function)(void)) {
+  if (function == 0 || hb_atexit_count >= HB_ATEXIT_MAX)
+    return -1;
+  hb_atexit_fns[hb_atexit_count++] = function;
+  return 0;
+}
+
+#ifndef HOST_TEST
+/* Called from user_libc.c's exit(): run handlers LIFO, like glibc. */
+void __hb_atexit_run(void) {
+  while (hb_atexit_count > 0) {
+    void (*fn)(void) = hb_atexit_fns[--hb_atexit_count];
+    fn();
+  }
+}
+#endif
+
+/* ---------------- mkstemp / mkostemp ---------------- */
+
+static int hb_mkstemp_common(char *template, int flags) {
+  static unsigned long hb_tmp_counter;
+  static const char letters[] =
+      "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  size_t len = strlen(template);
+  unsigned long base;
+  int attempt;
+
+  if (len < 6 || strcmp(template + len - 6, "XXXXXX") != 0) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  base = (unsigned long)getpid() * 2654435761UL + hb_tmp_counter;
+  for (attempt = 0; attempt < 64; attempt++) {
+    unsigned long w = base + (unsigned long)attempt;
+    char *x = template + len - 6;
+    int i, fd;
+
+    for (i = 0; i < 6; i++) {
+      x[i] = letters[w % 62];
+      w /= 62;
+    }
+
+    fd = open(template, O_RDWR | O_CREAT | O_EXCL | flags, 0600);
+    if (fd >= 0) {
+      hb_tmp_counter++;
+      return fd;
+    }
+    if (errno != EEXIST)
+      return -1;
+  }
+
+  errno = EEXIST;
+  return -1;
+}
+
+int mkstemp(char *template) {
+  return hb_mkstemp_common(template, 0);
+}
+
+int mkostemp(char *template, int flags) {
+  /* Only creation-compatible flags pass through: O_APPEND. */
+  return hb_mkstemp_common(template, flags & O_APPEND);
 }

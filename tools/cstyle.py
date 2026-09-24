@@ -29,7 +29,9 @@ Usage:
     python3 tools/cstyle.py diff   [paths...]   # show unified diffs
 
 Paths default to 'src'.  Directories are searched recursively for *.c and
-*.h files; vendored trees (third_party/, bootloader/) are skipped.
+*.h files; vendored trees (third_party/, bootloader/), the vendored gnulib
+regex engine files (see EXCLUDE_FILES), and the vendored GNU sed tree
+(src/user/sed/, see EXCLUDE_PREFIXES) are skipped.
 """
 
 from __future__ import annotations
@@ -51,6 +53,35 @@ EXCLUDE_DIRS = {
 }
 
 DEFAULT_PATHS = ["src"]
+
+# Individual vendored files the formatter must leave byte-exact.  The gnulib
+# regex engine lives under src/libc (it is compiled into libc.a), but it is
+# refreshed verbatim from gnulib, so it is out of scope exactly like
+# third_party/ trees.  Keys are repo-root-relative, slash-separated paths.
+EXCLUDE_FILES = {
+    "src/libc/include/intprops.h",
+    "src/libc/include/regex.h",
+    "src/libc/include/verify.h",
+    "src/libc/src/regcomp.c",
+    "src/libc/src/regex_internal.c",
+    "src/libc/src/regex_internal.h",
+    "src/libc/src/regexec.c",
+}
+
+# Repo-relative directory prefixes kept byte-exact (upstream GNU sources and
+# their generated config live under src/user/sed/; only the two hand-written
+# support headers follow this guide, and they are reviewed with it in mind).
+EXCLUDE_PREFIXES = {
+    "src/user/sed/",
+}
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _repo_rel(path):
+    """Repo-root-relative, slash-normalized key for the exclusion lists."""
+    rel = os.path.relpath(os.path.abspath(path), _REPO_ROOT)
+    return rel.replace(os.sep, "/")
 
 # When one of these tokens ends a line, the next line continues the same
 # logical line and keeps its relative alignment (shifted with its anchor).
@@ -1015,6 +1046,9 @@ def find_files(paths):
             for f in sorted(files):
                 if f.endswith((".c", ".h")):
                     out.append(os.path.join(root, f))
+    out = [p for p in out if _repo_rel(p) not in EXCLUDE_FILES]
+    out = [p for p in out
+           if not any(_repo_rel(p).startswith(pre) for pre in EXCLUDE_PREFIXES)]
     return sorted(set(out))
 
 
