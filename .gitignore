@@ -24,3 +24,7 @@ qmp-sock
 debug.log
 TEST.TXT
 
+# Python bytecode (cstyle tooling)
+__pycache__/
+*.pyc
+
