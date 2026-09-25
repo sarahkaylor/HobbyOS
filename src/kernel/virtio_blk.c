@@ -60,6 +60,10 @@ static uint16_t admin_sq_tail = 0;
 static uint16_t admin_cq_head = 0;
 static uint16_t io_sq_tail = 0;
 static uint16_t io_cq_head = 0;
+/* Completion-queue slots use 0xFFFF as their free marker; a live command id
+   must never collide with it, or the poll in submit_io_cmd() exits early on
+   a stale slot and desynchronizes the completion queues.  next_io_cid()
+   maintains that invariant. */
 static uint16_t io_cid = 100;
 
 static inline void outl(uint16_t port, uint32_t val) {
@@ -119,6 +123,7 @@ static uint16_t submit_admin_cmd(struct nvme_cmd* cmd) {
     __asm__ volatile("pause");
   }
 
+  __asm__ volatile("" : : : "memory");
   uint16_t status = admin_cq[admin_cq_head].status;
   admin_cq[admin_cq_head].cid = 0xFFFF;
   admin_cq_head = (admin_cq_head + 1) % 2;
@@ -129,6 +134,14 @@ static uint16_t submit_admin_cmd(struct nvme_cmd* cmd) {
 
 extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
+
+static uint16_t next_io_cid(void) {
+  if (io_cid == 0xFFFF) {
+    /* Skip the free marker so ids stay distinct from it. */
+    io_cid = 0;
+  }
+  return io_cid++;
+}
 
 static uint16_t submit_io_cmd(struct nvme_cmd* cmd) {
   uint16_t cid = cmd->cid;
@@ -172,6 +185,7 @@ static uint16_t submit_io_cmd(struct nvme_cmd* cmd) {
     }
   }
 
+  __asm__ volatile("" : : : "memory");
   uint16_t status = io_cq[io_cq_head].status;
   io_cq[io_cq_head].cid = 0xFFFF;
   io_cq_head = (io_cq_head + 1) % 2;
@@ -367,7 +381,7 @@ int virtio_blk_read_sector(uint64_t sector, void* buf, uint32_t count) {
     struct nvme_cmd cmd = {0};
     cmd.opcode = 0x02; // Read
     cmd.nsid = 1;      // Namespace 1
-    cmd.cid = io_cid++;
+    cmd.cid = next_io_cid();
     cmd.prp1 = (uint64_t)&bounce_buf[0];
     cmd.cdw10 = (uint32_t)(sector + i);
     cmd.cdw11 = (uint32_t)((sector + i) >> 32);
@@ -392,7 +406,7 @@ int virtio_blk_write_sector(uint64_t sector, const void* buf, uint32_t count) {
     struct nvme_cmd cmd = {0};
     cmd.opcode = 0x01; // Write
     cmd.nsid = 1;      // Namespace 1
-    cmd.cid = io_cid++;
+    cmd.cid = next_io_cid();
     cmd.prp1 = (uint64_t)&bounce_buf[0];
     cmd.cdw10 = (uint32_t)(sector + i);
     cmd.cdw11 = (uint32_t)((sector + i) >> 32);
