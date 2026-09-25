@@ -441,7 +441,20 @@ static void sys_spawn(struct trap_frame *tf) {
     spinlock_release_irqrestore(&proc_lock, flags);
 
     extern int process_create_kernel_nowait(void (*entry)(void*), void *arg);
+    extern uint64_t timer_get_ms(void);
     int wpid = process_create_kernel_nowait(sys_spawn_worker, args);
+    /* The physical pool can be momentarily full (the boot wave, sibling
+       spawns).  The caller is parked in WAIT_SPAWN and shells/tests block
+       on the spawn result, so wait (bounded, ~30 min; the same poll the
+       loader uses) for the worker slot instead of failing the spawn —
+       a failed spawn deadlocks the caller's protocol. */
+    for (int attempt = 0; attempt < 18000 && wpid < 0; attempt++) {
+      uint64_t t0 = timer_get_ms();
+      for (volatile int spin = 0; spin < 4000000; spin++) {
+        if (timer_get_ms() - t0 >= 100u) break;
+      }
+      wpid = process_create_kernel_nowait(sys_spawn_worker, args);
+    }
     if (wpid < 0) {
       /* no free process slot for the spawn worker: the caller must not
          sit in WAIT_SPAWN forever waiting for a worker that can never

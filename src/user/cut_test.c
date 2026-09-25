@@ -218,7 +218,7 @@ int main(void) {
   run_cut("-d : -s -f 2 /CUTCOL.TXT", "", out, sizeof out);
   check("-d : -s -f 2 file", out, "two\nfive\n");
 
-  run_cut("-d : -f 2- --output-delimiter='|' /CUTCOL.TXT", "", out, sizeof out);
+  run_cut("-d : -f 2- --output-delimiter=| /CUTCOL.TXT", "", out, sizeof out);
   check("--output-delimiter file", out, "two|three\nfive\nnosep\n");
 
   run_cut("--bytes=1-2 /CUTTEST.TXT", "", out, sizeof out);

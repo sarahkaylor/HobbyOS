@@ -37,10 +37,17 @@ static spinlock_t mem_lock;
 // (17+ programs plus forks and the RDMA provider loop) - the previous 16 on
 // x86_64 left the last-loaded test without a process.
 /* Physical blocks, each USER_REGION_SIZE (32MB) of contiguous RAM backing one
-   process's entire pre-mapped user region.  x64: 0x20000000..0x70000000
-   (exactly up to the kernel's 0x70000000 load address).  The parallel test
-   wave alone launches ~33 concurrent processes, so the old 32 exhausted the
-   pool and starved child spawns. */
+   process's entire pre-mapped user region.
+
+   x64: 0x20000000..0x70000000 (exactly up to the kernel's 0x70000000 load
+   address).  The parallel test wave alone launches ~33 concurrent processes,
+   so the old 32 exhausted the pool and starved child spawns.
+
+   AArch64: 0x70000000..0xC0000000 — the kernel occupies the bottom of RAM
+   (its image/bss/stack end well below 0x70000000) and QEMU RAM (-m 2048M)
+   ends at 0xC0000000, so exactly 40 blocks fit — same wave headroom as x64.
+   (The earlier 0x80000000 base capped ARM at 32 blocks and the boot wave's
+   tail loads starved for minutes while the long tests drained.) */
 #define NUM_PHYS_BLOCKS 40
 static uint8_t phys_blocks_used[NUM_PHYS_BLOCKS];
 
@@ -402,7 +409,12 @@ static int process_create_kernel_internal(void (*entry)(void*), void *arg) {
 
   // Set up EL1t execution context
   p->context[31] = (uint64_t)entry;        // ELR (entry point)
-  p->context[33] = p->user_phys_base + USER_REGION_SIZE; // SP_EL0 used for EL1t stack
+  /* SP_EL0 used for EL1t stack.  Keep one page of headroom below the
+     region end: a stack top exactly at user_phys_base + USER_REGION_SIZE
+     leaves no slack, so any frame that reaches just past the top lands
+     outside RAM on the last block (watched: enter_user_space's frame
+     copy faulting at FAR=0xC0000030 with a block-31 thread). */
+  p->context[33] = p->user_phys_base + USER_REGION_SIZE - 0x1000;
 #ifdef __x86_64__
   p->context[32] = 0x202;                  // RFLAGS = IF (0x200) | Reserved (0x02)
   p->context[5] = (uint64_t)arg;           // rdi = first argument on x86_64

@@ -76,7 +76,10 @@
 #ifdef __x86_64__
 #define PROC_PHYS_POOL_BASE 0x20000000
 #else
-#define PROC_PHYS_POOL_BASE 0x80000000
+/* AArch64: RAM runs [0x40000000, 0xC0000000); the kernel loads and lives at
+   the bottom (image + bss + stack top = link 0x45A00000).  The pool sits
+   just above that, with 40 * 32MB = 1.25GB ending exactly at RAM top. */
+#define PROC_PHYS_POOL_BASE 0x70000000
 #endif
 // QEMU Virt machine GICv2 memory-mapped register addresses
 #define GICD_BASE 0x08000000 // Distributor base address

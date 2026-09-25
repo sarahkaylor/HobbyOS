@@ -4,6 +4,7 @@
 #include "process.h"
 #include "arch/cpu.h"
 #include "errno.h"
+#include "timer.h"
 
 
 extern struct process *process_get_pcb(int pid);
@@ -100,7 +101,27 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
   uart_puts("\n");
 
   int pid = process_create();
+  /* The physical pool can be momentarily exhausted: the later boot loads
+     run while heavy tests (STRESS's ping-pong workers, SEDTEST's per-case
+     SED.BIN spawns, the WCTEST/GREPTEST engines) still hold blocks.  The
+     other cores free them as those processes exit, so wait and retry
+     instead of silently dropping the program.  Observed on ARM (32 blocks)
+     the tail of the boot wave can stall for several minutes while ~30
+     long-running tests drain, so the bound is generous (~30 min); this CPU
+     is pre-scheduler and cannot sleep, so the wait is a bounded read of
+     the free-running counter (~100 ms per attempt) also capped by an
+     iteration count so it terminates even if the counter is uncalibrated. */
+  for (int attempt = 0; attempt < 18000 && pid < 0; attempt++) {
+    uint64_t t0 = timer_get_ms();
+    for (volatile int spin = 0; spin < 4000000; spin++) {
+      if (timer_get_ms() - t0 >= 100u) break;
+    }
+    pid = process_create();
+  }
   if (pid < 0) {
+    uart_puts("Loader starved: ");
+    uart_puts(filename);
+    uart_puts(" never got a physical block.\n");
     uart_puts("Failed to create process for ");
     uart_puts(filename);
     uart_puts("!\n");

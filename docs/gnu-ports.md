@@ -214,6 +214,26 @@ a per-program parity script skeleton, and an in-OS spawn-harness pattern
 
 ## 7. Fix log
 
+- **2026-09-25 — ARM pool could only hold 32 blocks; the boot wave's tail
+  loads starved.** With the pool at 0x80000000 (32 × 32MB to RAM top
+  0xC0000000), the ~56-program boot wave's last loads waited minutes for the
+  long tests (STRESS, SEDTEST's 59 per-case spawns, the pipe engines) to
+  drain. `NUM_PHYS_BLOCKS` is now 40 on both arches: the AArch64 pool base
+  moved down to 0x70000000 — the kernel image/bss/stack live at the bottom
+  of RAM (well below it) and the [0x40000000,0x80000000) gigabyte is mapped
+  RAM — giving [0x70000000,0xC0000000), 1.25GB, exactly 40 blocks.
+  `load_and_run_program_in_scheduler_args()` additionally waits (bounded,
+  ~10 min, polling `timer_get_ms()`) for a block instead of dropping a
+  program, and prints `Loader starved: <name>` if the bound expires.
+- **2026-09-25 — kernel threads' EL1t stack top sat exactly on the region
+  boundary.** `context[33] = user_phys_base + USER_REGION_SIZE` put the SP of
+  a last-block kernel thread at the first byte past RAM; a frame touching just
+  above the top aborted at EL1 inside `enter_user_space`'s frame copy
+  (FAR=0xC0000030, pid SH.BIN). Now `- 0x1000` of headroom.
+- **2026-09-25 — cut_test.c passed shell quoting into spawn2 args.**
+  `--output-delimiter='|'` went through the args path verbatim (no shell to
+  strip quotes), so the delimiter became the 3-char string `'|'`. The in-OS
+  test now passes `--output-delimiter=|`.
 - **2026-09-25 — braced `GETOPT_HELP_OPTION_DECL` silently disabled
   `--help`/`--version`** in cut/nl/head/tail (the macro must be brace-less,
   sys2.h form: a braced define makes the call site's `{...}` initialize the
