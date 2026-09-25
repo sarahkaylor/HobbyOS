@@ -323,18 +323,22 @@ static int alloc_entry_in_dir(uint16_t dir_cluster, const struct fat16_dir_entry
 
   if (dir_cluster == 0) {
     for (uint32_t i = 0; i < root_dir_sectors; i++) {
+      /* The whole scan-and-claim is one critical section: two creates
+         picking the same free slot would otherwise lose one entry. */
+      uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
       if (virtio_blk_read_sector(root_dir_sector + i, buf, 1) != 0) {
+        spinlock_release_irqrestore(&fat_lock, flags);
         return -1;
       }
-      uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
       struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
       for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
         if (entries[j].name[0] == 0x00 || entries[j].name[0] == (char)0xE5) {
           entries[j] = *new_entry;
-          spinlock_release_irqrestore(&fat_lock, flags);
           if (virtio_blk_write_sector(root_dir_sector + i, buf, 1) != 0) {
+            spinlock_release_irqrestore(&fat_lock, flags);
             return -1;
           }
+          spinlock_release_irqrestore(&fat_lock, flags);
           if (out_sector) *out_sector = root_dir_sector + i;
           if (out_offset) *out_offset = j;
           return 0;
@@ -350,18 +354,20 @@ static int alloc_entry_in_dir(uint16_t dir_cluster, const struct fat16_dir_entry
     while (cluster != 0 && cluster < 0xFFF0) {
       for (uint32_t s = 0; s < bpb_sectors_per_cluster; s++) {
         uint32_t sector_num = data_sector + (cluster - 2) * bpb_sectors_per_cluster + s;
+        uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
         if (virtio_blk_read_sector(sector_num, buf, 1) != 0) {
+          spinlock_release_irqrestore(&fat_lock, flags);
           return -1;
         }
-        uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
         struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
         for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
           if (entries[j].name[0] == 0x00 || entries[j].name[0] == (char)0xE5) {
             entries[j] = *new_entry;
-            spinlock_release_irqrestore(&fat_lock, flags);
             if (virtio_blk_write_sector(sector_num, buf, 1) != 0) {
+              spinlock_release_irqrestore(&fat_lock, flags);
               return -1;
             }
+            spinlock_release_irqrestore(&fat_lock, flags);
             if (out_sector) *out_sector = sector_num;
             if (out_offset) *out_offset = j;
             return 0;
@@ -707,18 +713,18 @@ int fat16_unlink(const char* filename) {
 
   uint8_t buf[SECTOR_SIZE];
   spinlock_release_irqrestore(&fat_lock, flags);
+  flags = spinlock_acquire_irqsave(&fat_lock);
   if (virtio_blk_read_sector(sector, buf, 1) != 0) {
+    spinlock_release_irqrestore(&fat_lock, flags);
     return -1;
   }
-  flags = spinlock_acquire_irqsave(&fat_lock);
-
   struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
   entries[offset].name[0] = (char)0xE5;
-
-  spinlock_release_irqrestore(&fat_lock, flags);
   if (virtio_blk_write_sector(sector, buf, 1) != 0) {
+    spinlock_release_irqrestore(&fat_lock, flags);
     return -1;
   }
+  spinlock_release_irqrestore(&fat_lock, flags);
   return 0;
 }
 
@@ -772,15 +778,28 @@ static int update_dotdot(uint16_t dir_cluster, uint16_t new_parent_cluster) {
   if (dir_cluster < 2) return -1;
   uint32_t sector = data_sector + (uint32_t)(dir_cluster - 2) * bpb_sectors_per_cluster;
   uint8_t buf[SECTOR_SIZE];
-  if (virtio_blk_read_sector(sector, buf, 1) != 0) return -1;
+  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  if (virtio_blk_read_sector(sector, buf, 1) != 0) {
+    spinlock_release_irqrestore(&fat_lock, flags);
+    return -1;
+  }
   struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
   for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
-    if (entries[j].name[0] == 0x00) return -1;
+    if (entries[j].name[0] == 0x00) {
+      spinlock_release_irqrestore(&fat_lock, flags);
+      return -1;
+    }
     if (entries[j].name[0] != '.') continue;
     if (!(entries[j].name[1] == '.' && entries[j].name[2] == ' ')) continue;
     entries[j].start_cluster = new_parent_cluster;
-    return virtio_blk_write_sector(sector, buf, 1) == 0 ? 0 : -1;
+    if (virtio_blk_write_sector(sector, buf, 1) != 0) {
+      spinlock_release_irqrestore(&fat_lock, flags);
+      return -1;
+    }
+    spinlock_release_irqrestore(&fat_lock, flags);
+    return 0;
   }
+  spinlock_release_irqrestore(&fat_lock, flags);
   return -1;
 }
 
@@ -828,18 +847,20 @@ int fat16_rename(const char* oldname, const char* newname) {
       }
     }
     uint8_t buf[SECTOR_SIZE];
+    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
     if (virtio_blk_read_sector(sector, buf, 1) != 0) {
+      spinlock_release_irqrestore(&fat_lock, flags);
       return -1;
     }
-    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
     struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
     for (int k = 0; k < 11; k++) {
       entries[offset].name[k] = formatted_name[k];
     }
-    spinlock_release_irqrestore(&fat_lock, flags);
     if (virtio_blk_write_sector(sector, buf, 1) != 0) {
+      spinlock_release_irqrestore(&fat_lock, flags);
       return -1;
     }
+    spinlock_release_irqrestore(&fat_lock, flags);
     return 0;
   }
 
@@ -866,6 +887,7 @@ int fat16_rename(const char* oldname, const char* newname) {
   }
 
   uint8_t buf[SECTOR_SIZE];
+  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
   if (virtio_blk_read_sector(sector, buf, 1) != 0) {
     /* Roll the new entry back so no duplicate is left behind. */
     uint8_t nbuf[SECTOR_SIZE];
@@ -874,15 +896,16 @@ int fat16_rename(const char* oldname, const char* newname) {
       es[new_offset].name[0] = (char)0xE5;
       (void)virtio_blk_write_sector(new_sector, nbuf, 1);
     }
+    spinlock_release_irqrestore(&fat_lock, flags);
     return -1;
   }
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
   struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
   entries[offset].name[0] = (char)0xE5;
-  spinlock_release_irqrestore(&fat_lock, flags);
   if (virtio_blk_write_sector(sector, buf, 1) != 0) {
+    spinlock_release_irqrestore(&fat_lock, flags);
     return -1;
   }
+  spinlock_release_irqrestore(&fat_lock, flags);
 
   if (is_dir) {
     (void)update_dotdot(entry.start_cluster, new_parent.start_cluster);
@@ -985,23 +1008,28 @@ static int fat16_entry_eq(const struct fat16_dir_entry* a,
 }
 
 /**
- * Writes one 32-byte directory entry with a read-modify-write that is safe
- * against concurrent writers: after the write, the sector is re-read and our
- * entry re-checked; a parallel writer that interleaved its own RMW (we cannot
- * hold a spinlock across the IRQ-driven virtio transfer) would have clobbered
- * it, so retry until our bytes stick.
+ * Writes one 32-byte directory entry as a single read-modify-write that is
+ * atomic against concurrent writers: fat_lock is held across the sector
+ * read, the entry splice, and the write-back.  (The lock is safe to hold
+ * across virtio transfers; the truncate path already relies on that.)  A
+ * bounded verify pass follows as a belt-and-braces check; with the lock in
+ * place it always succeeds on the first try.
  */
 static void fat16_dir_entry_write(uint32_t dir_sector, uint32_t dir_offset,
                                   const struct fat16_dir_entry* entry) {
   uint8_t buf[SECTOR_SIZE];
-  for (int attempt = 0; attempt < 16; attempt++) {
+  for (int attempt = 0; attempt < 4; attempt++) {
+    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
     if (virtio_blk_read_sector(dir_sector, buf, 1) != 0) {
+      spinlock_release_irqrestore(&fat_lock, flags);
       return;
     }
     ((struct fat16_dir_entry*)buf)[dir_offset] = *entry;
     if (virtio_blk_write_sector(dir_sector, buf, 1) != 0) {
+      spinlock_release_irqrestore(&fat_lock, flags);
       return;
     }
+    spinlock_release_irqrestore(&fat_lock, flags);
     if (virtio_blk_read_sector(dir_sector, buf, 1) != 0) {
       return;
     }

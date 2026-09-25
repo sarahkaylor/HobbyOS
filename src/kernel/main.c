@@ -192,6 +192,9 @@ void main(void) {
   run_all_unit_tests();
 #elif defined(KERNEL_MODE_TEST)
   uart_puts("Mode: TEST - Running automated tests...\n");
+  /* Diagnostic probe for the subdirectory create/spawn/cat flow that
+     shell_test3 exercises.  Runs first so its console output is intact. */
+  load_and_run_program_in_scheduler("SUBPRB.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("SHTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("SHTEST2.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("SHTEST3.BIN", -1, -1, -1, -1);
@@ -233,6 +236,11 @@ void main(void) {
      59 golden cases (tools/gen_sed_tests.py).  It spawns SED.BIN once per
      case, so it also runs at the END. */
   load_and_run_program_in_scheduler("SEDTEST.BIN", -1, -1, -1, -1);
+
+  /* GREPTEST.BIN likewise demands byte-exact GNU grep 2.5.4 parity from
+     GREP.BIN across its golden cases (tools/gen_grep_tests.py), spawning
+     GREP.BIN once per case. */
+  load_and_run_program_in_scheduler("GREPTEST.BIN", -1, -1, -1, -1);
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
   load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1, -1, -1);

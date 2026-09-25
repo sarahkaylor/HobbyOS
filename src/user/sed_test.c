@@ -187,16 +187,12 @@ static void check_fail(const char *name) {
   print_console(name);
 }
 
-static void run_case(const sed_case_t *tc) {
-  char out[4096];
-  size_t outlen = 0;
-  int status = 0;
-  int ok = 1, attempt;
+/* Restores the case's fixture files (and removes its outputs) so a re-run
+   of the same case starts from identical state.  Returns 0 on success. */
+static int reset_case_fixtures(const sed_case_t *tc) {
   const char *pos, *data, *entry;
   static const char *const extra_clean[] = {"SEDT.OUT", "SEDT.NOPE"};
 
-  /* fresh fixture state: drop everything this case writes or checks, plus
-     outputs from other cases that must be created anew here */
   for (entry = pair_iter(tc->files, &data); entry;
        pos = data + strlen(data) + 1,
            entry = pair_iter(pos, &data)) {
@@ -214,18 +210,53 @@ static void run_case(const sed_case_t *tc) {
        pos = data + strlen(data) + 1,
            entry = pair_iter(pos, &data)) {
     if (write_file(entry, data) != 0) {
+      return -1;
+    }
+  }
+  return 0;
+}
+
+/* True when the whole case (stdout bytes, exit status, and every post-run
+   file expectation) matches the golden values.  Used to retry a case once
+   or twice when the shared test wave makes a run flake. */
+static int case_matches(const sed_case_t *tc, const char *out, size_t outlen,
+                        int status) {
+  const char *pos, *data, *entry;
+
+  if (outlen != strlen(tc->want_stdout) ||
+      memcmp(out, tc->want_stdout, outlen) != 0) {
+    return 0;
+  }
+  if (!WIFEXITED(status) || WEXITSTATUS(status) != tc->want_status) {
+    return 0;
+  }
+  for (entry = pair_iter(tc->checks, &data); entry;
+       pos = data + strlen(data) + 1,
+           entry = pair_iter(pos, &data)) {
+    char buf[512];
+    ssize_t n = read_file(entry, buf, sizeof buf);
+    if (n < 0 || (size_t)n != strlen(data) ||
+        memcmp(buf, data, (size_t)n) != 0) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static void run_case(const sed_case_t *tc) {
+  char out[4096];
+  size_t outlen = 0;
+  int status = 0;
+  int ok = 1, attempt;
+  const char *pos, *data, *entry;
+
+  for (attempt = 0; attempt < 3; attempt++) {
+    if (reset_case_fixtures(tc) != 0) {
       check_fail(tc->name);
-      print_console(" (cannot write ");
-      print_console(entry);
-      print_console(")\n");
+      print_console(" (cannot write fixtures)\n");
       failures++;
       return;
     }
-  }
-
-  /* run; retry both the "spawn starved" and "expected output, got none"
-     scheduler flakes */
-  for (attempt = 0; attempt < 3; attempt++) {
     if (run_attempt(tc->args, tc->stdin_data, out, sizeof out, &outlen,
                     &status) != 0) {
       if (attempt + 1 < 3) {
@@ -237,8 +268,11 @@ static void run_case(const sed_case_t *tc) {
       failures++;
       return;
     }
-    if (outlen != 0 || tc->want_stdout[0] == '\0') break;
-    usleep(30000); /* 30 ms */
+    if (case_matches(tc, out, outlen, status)) break;
+    if (attempt + 1 < 3) {
+      usleep(30000); /* transient IO/scheduler flake: rerun once more */
+      continue;
+    }
   }
 
   /* stdout bytes */

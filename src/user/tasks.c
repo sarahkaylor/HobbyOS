@@ -63,7 +63,7 @@ struct task_state {
 
 /* Storage indirection: host tests replace these with failing fakes to
  * exercise the error paths (a missing file cannot be simulated otherwise,
- * because open(, 0) creates files on demand). */
+ * because the startup load opens with O_CREAT). */
 struct tasks_store_ops {
   int (*open)(const char *name, int flags, ...);
   ssize_t (*read)(int fd, void *buf, size_t size);
@@ -180,7 +180,7 @@ int tasks_load(struct task_state *st) {
   st->count = 0;
   st->status[0] = '\0';
 
-  int fd = tasks_store.open(TASKS_FILE, 0);
+  int fd = tasks_store.open(TASKS_FILE, O_RDONLY | O_CREAT);
   if (fd < 0) {
     st->load_error = 1;
     return -1;

@@ -217,7 +217,7 @@ int notes_serialize(char *out, int cap) {
 /* Load NOTES.TXT into memory. Returns 1 on success, 0 when the file could
  * not be read (warning line shown, previous in-memory notes kept). */
 int notes_load(void) {
-  int fd = open(NOTES_FILE, 0);
+  int fd = open(NOTES_FILE, O_RDONLY | O_CREAT);
   int n;
 
   if (fd < 0) {
@@ -256,7 +256,7 @@ int notes_save(void) {
   }
 
   /* Probe the length of the file we are about to replace. */
-  fd = open(NOTES_FILE, 0);
+  fd = open(NOTES_FILE, O_RDONLY | O_CREAT);
   if (fd < 0) {
     notes_warn = 1;
     return 0;

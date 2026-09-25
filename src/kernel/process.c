@@ -190,7 +190,69 @@ void process_set_entry(int pid, uint64_t elr, uint64_t sp) {
  * Returns:
  *   New PID (>= 1) on success, -1 on failure.
  */
-int process_create(void) {
+static int process_create_internal(void);
+
+/* Create a process.  Never waits for memory: a full physical pool makes
+ * this fail so the caller can retry.  (A bounded sleep here was tried
+ * and removed: the yield parks a kernel-mode context — boot thread or
+ * spawn worker — in WFE, and preemption of those contexts corrupted
+ * their saved state, producing instruction aborts at ELR=0.  Callers
+ * that can wait do so by retrying the whole spawn.) */
+int process_create(void) { return process_create_internal(); }
+
+/* Alias kept for syscall-context callers; identical semantics. */
+int process_create_nowait(void) { return process_create_internal(); }
+
+/* True while any core is still executing this pid: a process that has
+ * just set its own state to EXITED keeps running its exit path until the
+ * context switch completes, so its slot and physical block must not be
+ * handed to a new process yet. */
+static int process_still_running(int pid) {
+  for (int c = 0; c < MAX_CPUS; c++) {
+    if (cpu_current_pids[c] == pid)
+      return 1;
+  }
+  return 0;
+}
+
+/* Claim a free physical block for a new process, reclaiming the blocks
+ * of unreapable zombies first (dead or missing parent — nearly every
+ * boot-loaded program is in this class once it exits).  Zombies of a
+ * LIVE parent are left alone: the parent may still waitpid() them.
+ * Caller holds proc_lock.  Returns the block index, or -1 when the pool
+ * is genuinely empty. */
+static int phys_block_alloc_locked(void) {
+  for (int i = 0; i < NUM_PHYS_BLOCKS; i++) {
+    if (!phys_blocks_used[i]) {
+      phys_blocks_used[i] = 1;
+      return i;
+    }
+  }
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    struct process *q = &proc_table[i];
+    if (q->state != PROC_STATE_EXITED || process_still_running(i))
+      continue;
+    struct process *par =
+      (q->parent_pid >= 0 && q->parent_pid < MAX_PROCESSES)
+        ? &proc_table[q->parent_pid] : 0;
+    if (par && par->state != PROC_STATE_FREE &&
+        par->state != PROC_STATE_EXITED)
+      continue; /* live parent: keep its zombie */
+    if (q->phys_block_idx >= 0) {
+      int idx = q->phys_block_idx;
+      phys_blocks_used[idx] = 1;
+      q->phys_block_idx = -1;
+      q->state = PROC_STATE_FREE;
+      return idx;
+    }
+    q->state = PROC_STATE_FREE;
+  }
+  return -1;
+}
+
+/* Shared process-creation body.  Never waits for memory; see
+ * process_create() for why. */
+static int process_create_internal(void) {
   uart_puts("Inside process_create: acquiring lock...\n");
   int pid = -1;
   int block_idx = -1;
@@ -212,7 +274,7 @@ int process_create(void) {
        reserved and never handed out here either. */
     for (int i = 1; i < MAX_PROCESSES && pid < 0; i++) {
       struct process *q = &proc_table[i];
-      if (q->state != PROC_STATE_EXITED)
+      if (q->state != PROC_STATE_EXITED || process_still_running(i))
         continue;
       struct process *par =
         (q->parent_pid >= 0 && q->parent_pid < MAX_PROCESSES)
@@ -235,42 +297,7 @@ int process_create(void) {
   }
 
   // Allocate a physical block
-  for (int i = 0; i < NUM_PHYS_BLOCKS; i++) {
-    if (!phys_blocks_used[i]) {
-      phys_blocks_used[i] = 1;
-      block_idx = i;
-      break;
-    }
-  }
-
-  if (block_idx < 0) {
-    /* Physical pool exhausted: first reclaim unreapable zombies (dead or
-       missing parent — the boot test suite's ~40 parentless programs),
-       which is safe: no live parent can ever waitpid() them.  Zombies of
-       a LIVE parent are left for the parent to reap.  Slot 0 is reserved
-       and can never be an EXITED zombie. */
-    for (int i = 1; i < MAX_PROCESSES && block_idx < 0; i++) {
-      struct process *q = &proc_table[i];
-      if (q->state != PROC_STATE_EXITED || i == pid)
-        continue;
-      struct process *par =
-        (q->parent_pid >= 0 && q->parent_pid < MAX_PROCESSES)
-          ? &proc_table[q->parent_pid] : 0;
-      if (par && par->state != PROC_STATE_FREE &&
-          par->state != PROC_STATE_EXITED)
-        continue; /* live parent: keep its zombie */
-      /* Reclaim: release the zombie's physical block, then take it. */
-      if (q->phys_block_idx >= 0) {
-        phys_blocks_used[q->phys_block_idx] = 0;
-        block_idx = q->phys_block_idx;
-      }
-      q->phys_block_idx = -1;
-      q->state = PROC_STATE_FREE;
-      /* fds were already closed by process_exit; nothing else to free. */
-    }
-    if (block_idx >= 0)
-      phys_blocks_used[block_idx] = 1;
-  }
+  block_idx = phys_block_alloc_locked();
 
   if (block_idx < 0) {
     proc_table[pid].state = PROC_STATE_FREE;
@@ -331,7 +358,7 @@ int process_create(void) {
  * Creates a new kernel thread.
  * The thread will run in EL1t and use its dynamically allocated user memory as its stack.
  */
-int process_create_kernel(void (*entry)(void*), void *arg) {
+static int process_create_kernel_internal(void (*entry)(void*), void *arg) {
   int pid = process_create();
   if (pid < 0) return -1;
 
@@ -351,6 +378,15 @@ int process_create_kernel(void (*entry)(void*), void *arg) {
   p->state = PROC_STATE_READY;
 
   return pid;
+}
+
+int process_create_kernel(void (*entry)(void*), void *arg) {
+  return process_create_kernel_internal(entry, arg);
+}
+
+/* Alias kept for syscall-context callers (see process_create). */
+int process_create_kernel_nowait(void (*entry)(void*), void *arg) {
+  return process_create_kernel_internal(entry, arg);
 }
 
 void save_context(struct process *p, struct trap_frame *tf) {

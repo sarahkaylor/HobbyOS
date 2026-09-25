@@ -92,9 +92,18 @@ int file_open(struct process *cur, const char *filename, int flags) {
   }
   if (routed == 0) {
     /* POSIX open(): a missing file only comes into existence with
-       O_CREAT; O_CREAT|O_EXCL refuses to touch an existing one. */
+       O_CREAT; O_CREAT|O_EXCL refuses to touch an existing one.
+       The existence probe must honour the process cwd: fat16_open
+       below resolves relative paths itself, so comparing result
+       codes against a root-relative lookup made every relative
+       open of an existing file in a subdirectory fail with
+       ENOENT. */
     struct fat16_dir_entry probe_entry;
-    int exists = (fat16_resolve_path(filename, &probe_entry, 0, 0) == 0);
+    char abs[256];
+    int exists = 0;
+    if (vfs_abs_path(filename, abs, sizeof abs) == 0) {
+      exists = (fat16_resolve_path(abs, &probe_entry, 0, 0) == 0);
+    }
 
     if (!exists && !(flags & O_CREAT)) {
       f->type = FILE_TYPE_EMPTY;

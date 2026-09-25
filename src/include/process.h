@@ -163,6 +163,7 @@ void process_init(void);
 // Create a new process, allocate memory, and initialize its PCB.
 // Returns the new PID or -1 on failure.
 int process_create(void);
+int process_create_nowait(void);
 
 // Free a previously created process.
 void process_free(int pid);
@@ -183,6 +184,7 @@ int process_exec_current(struct trap_frame *tf, const char *path,
 
 // Create a kernel thread running in EL1t.
 int process_create_kernel(void (*entry)(void*), void *arg);
+int process_create_kernel_nowait(void (*entry)(void*), void *arg);
 
 // Fork the current process to create a child process.
 // Returns child PID to parent, 0 to child.

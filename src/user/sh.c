@@ -83,6 +83,38 @@ static void write_str(int fd, const char* str) {
   write(fd, str, len);
 }
 
+/* Programs live in the root directory, but a bare name only resolves
+   against the shell's cwd: after `cd /home` every utility would vanish.
+   Try the bare name first, then /NAME.  Returns 1 with the usable path
+   filled in on success, 0 when the program exists in neither place. */
+static int pick_binary(const char *bin_file, char *resolved, size_t cap) {
+  int fd = open(bin_file, O_RDONLY);
+  if (fd >= 0) {
+    close(fd);
+    size_t i = 0;
+    while (bin_file[i] && i + 1 < cap) {
+      resolved[i] = bin_file[i];
+      i++;
+    }
+    resolved[i] = '\0';
+    return 1;
+  }
+  if (cap < 2) return 0;
+  resolved[0] = '/';
+  size_t i = 0;
+  while (bin_file[i] && i + 2 < cap) {
+    resolved[i + 1] = bin_file[i];
+    i++;
+  }
+  resolved[i + 1] = '\0';
+  fd = open(resolved, O_RDONLY);
+  if (fd >= 0) {
+    close(fd);
+    return 1;
+  }
+  return 0;
+}
+
 static void parse_redirection(char* cmd_line, char* out_file, char* err_file) {
   out_file[0] = '\0';
   err_file[0] = '\0';
@@ -262,8 +294,38 @@ void execute_command(const char *cmd_line) {
     char right_bin[32], right_arg_file[32];
     sanitize_command(right_cmd, right_bin, right_arg_file);
 
-    int pid_left = spawn2(left_bin, 0, p[1], stderr_param, left_args);
-    int pid_right = spawn2(right_bin, p[0], stdout_param, stderr_param, right_args);
+    int pid_left = -1;
+    int pid_right = -1;
+    {
+      /* Both halves must spawn; a half-started pair is killed and the
+         whole pair retried, because the boot test wave can transiently
+         exhaust the kernel's process pool (see the single-command path
+         below).  Only worth retrying when both binaries exist. */
+      char left_path[40];
+      char right_path[40];
+      int both_exist = (pick_binary(left_bin, left_path, sizeof left_path) &&
+                        pick_binary(right_bin, right_path, sizeof right_path));
+      for (int attempt = 0; attempt < 100 && both_exist; attempt++) {
+        pid_left = spawn2(left_path, 0, p[1], stderr_param, left_args);
+        pid_right = spawn2(right_path, p[0], stdout_param, stderr_param,
+                           right_args);
+        if (pid_left >= 0 && pid_right >= 0) {
+          break;
+        }
+        int wst2 = 0;
+        if (pid_left >= 0) {
+          kill(pid_left, 9);
+          waitpid(pid_left, &wst2, 0);
+        }
+        if (pid_right >= 0) {
+          kill(pid_right, 9);
+          waitpid(pid_right, &wst2, 0);
+        }
+        pid_left = -1;
+        pid_right = -1;
+        usleep(25000); /* 25 ms */
+      }
+    }
 
     close(p[0]);
     close(p[1]);
@@ -272,6 +334,12 @@ void execute_command(const char *cmd_line) {
       while (kill(pid_left, 0) == 0 || kill(pid_right, 0) == 0) {
         yield();
       }
+      /* Reap both pipe children: without this every pipeline leaks two
+         process-table slots plus their physical blocks until the shell
+         exits, and later spawns fail once the pools fill. */
+      int wst = 0;
+      waitpid(pid_left, &wst, 0);
+      waitpid(pid_right, &wst, 0);
     } else {
       print("sh: failed to spawn piped commands\n");
     }
@@ -390,7 +458,21 @@ void execute_command(const char *cmd_line) {
     char bin_file[32], arg_file[32];
     sanitize_command(cmd_name, bin_file, arg_file);
 
-    int pid = spawn2(bin_file, 0, stdout_param, stderr_param, args);
+    /* Resolve the program against cwd and root.  Only a real program is
+       worth retrying: the boot test wave oversubscribes the kernel's
+       process pool, so an existing binary can fail to spawn for a
+       moment, while a missing one never will. */
+    char bin_path[40];
+    int pid = -1;
+    if (pick_binary(bin_file, bin_path, sizeof bin_path)) {
+      pid = spawn2(bin_path, 0, stdout_param, stderr_param, args);
+      int tries = 0;
+      while (pid < 0 && tries < 100) {
+        usleep(25000); /* 25 ms; let other programs exit and free blocks */
+        pid = spawn2(bin_path, 0, stdout_param, stderr_param, args);
+        tries++;
+      }
+    }
     if (pid < 0) {
       print("sh: command not found: ");
       print(cmd_name);

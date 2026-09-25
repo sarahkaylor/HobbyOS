@@ -58,11 +58,13 @@ static void sys_fork(struct trap_frame *tf) {
 
 static void sys_open(struct trap_frame *tf) {
   const char *filename = (const char *)tf->regs[5]; // rdi
+  int flags = (int)tf->regs[4];                     // rsi (syscall arg 2)
   struct process *caller = current_process();
   if ((uint64_t)filename >= USER_VIRT_BASE &&
       (uint64_t)filename < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-    int r = file_open(caller, filename);
-    tf->regs[0] = r < 0 ? -ENOENT : r;
+    /* file_open returns >= 0 (fd) or a negative errno it picked itself
+       (ENOENT/EEXIST/EMFILE), which errno_ret decodes in libc. */
+    tf->regs[0] = file_open(caller, filename, flags);
   } else {
     tf->regs[0] = -EFAULT;
   }
@@ -430,8 +432,8 @@ static void sys_spawn(struct trap_frame *tf) {
     caller->state = PROC_STATE_WAIT_SPAWN;
     spinlock_release_irqrestore(&proc_lock, flags);
 
-    extern int process_create_kernel(void (*entry)(void*), void *arg);
-    int wpid = process_create_kernel(sys_spawn_worker, args);
+    extern int process_create_kernel_nowait(void (*entry)(void*), void *arg);
+    int wpid = process_create_kernel_nowait(sys_spawn_worker, args);
     if (wpid < 0) {
       /* no free process slot for the spawn worker: the caller must not
          sit in WAIT_SPAWN forever waiting for a worker that can never

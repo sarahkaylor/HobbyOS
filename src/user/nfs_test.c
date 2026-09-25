@@ -73,7 +73,7 @@ static void note(const char *s) {
 
 /* ---- directory listing collector ------------------------------------ */
 
-#define MAX_LIST 96
+#define MAX_LIST 512
 static char l_name[MAX_LIST][32];
 static uint8_t l_attr[MAX_LIST];
 static uint32_t l_size[MAX_LIST];

@@ -418,8 +418,8 @@ static void sys_spawn(struct trap_frame *tf) {
     caller->state = PROC_STATE_WAIT_SPAWN;
     spinlock_release_irqrestore(&proc_lock, flags);
 
-    extern int process_create_kernel(void (*entry)(void*), void *arg);
-    int wpid = process_create_kernel(sys_spawn_worker, args);
+    extern int process_create_kernel_nowait(void (*entry)(void*), void *arg);
+    int wpid = process_create_kernel_nowait(sys_spawn_worker, args);
     if (wpid < 0) {
       /* no free process slot for the spawn worker: the caller must not
          sit in WAIT_SPAWN forever waiting for a worker that can never
