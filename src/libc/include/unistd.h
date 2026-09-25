@@ -34,6 +34,7 @@ extern "C" {
   int access(const char *path, int mode);
   int unlink(const char *path);
   int isatty(int fd);
+  int getpagesize(void);
   unsigned int sleep(unsigned int seconds);
   int usleep(unsigned int useconds);
 

@@ -169,6 +169,10 @@ int open(const char *path, int flags, ...) {
 
 int close(int fd) { return (int)errno_ret(syscall(SYS_CLOSE, (long)fd, 0, 0, 0)); }
 
+/* Both supported architectures run 4K pages (PAGE_SIZE in process.h); this
+   spares ported GNU code a sysconf maze it cannot satisfy. */
+int getpagesize(void) { return 4096; }
+
 ssize_t read(int fd, void *buf, size_t size) {
   return (ssize_t)errno_ret(syscall(SYS_READ, (long)fd, (long)buf, (long)size, 0));
 }

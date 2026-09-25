@@ -216,6 +216,16 @@ unsigned long long strtoull(const char *nptr, char **endptr, int base) {
   return r;
 }
 
+/* inttypes.h promises these; intmax_t is 64-bit on both supported targets,
+   exactly matching long long / unsigned long long. */
+long long strtoimax(const char *nptr, char **endptr, int base) {
+  return strtoll(nptr, endptr, base);
+}
+
+unsigned long long strtoumax(const char *nptr, char **endptr, int base) {
+  return strtoull(nptr, endptr, base);
+}
+
 int atoi(const char *nptr) {
   return (int)strtol(nptr, (char **)0, 10);
 }

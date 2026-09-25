@@ -117,6 +117,14 @@ static int getopt_impl(int argc, char *const argv[], const char *optstring,
       optind++;
       return 1;
     }
+    /* "--" may have been rotated to optind by permutation (it is
+       option-like); it still terminates option parsing.  Without this
+       check the short-option path would read '-' as an option letter. */
+    if (argv[optind][0] == '-' && argv[optind][1] == '-' &&
+        argv[optind][2] == '\0') {
+      optind++;
+      return -1;
+    }
     nextchar = argv[optind] + 1;
   }
 
