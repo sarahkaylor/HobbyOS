@@ -38,6 +38,28 @@ void interrupts_disable(void) {
 }
 
 /**
+ * Saves the interrupt-enable state (PSTATE.DAIF) and enables interrupts.
+ */
+uint64_t interrupts_save_enable(void) {
+  uint64_t daif;
+  __asm__ volatile(
+      "mrs %0, daif\n"
+      "msr daifclr, #2\n"
+      : "=r"(daif)
+      :
+      : "memory"
+  );
+  return daif;
+}
+
+/**
+ * Restores the interrupt-enable state returned by interrupts_save_enable().
+ */
+void interrupts_restore(uint64_t state) {
+  __asm__ volatile("msr daif, %0" : : "r"(state) : "memory");
+}
+
+/**
  * Retrieves the user-space stack pointer (SP_EL0 on ARM64).
  */
 uint64_t arch_get_user_sp(void) {

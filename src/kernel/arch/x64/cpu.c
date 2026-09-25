@@ -58,6 +58,35 @@ void interrupts_disable(void) {
 }
 
 /**
+ * Saves the interrupt-enable state (RFLAGS.IF) and enables interrupts.
+ */
+uint64_t interrupts_save_enable(void) {
+  uint64_t flags;
+  __asm__ volatile(
+      "pushfq\n"
+      "pop %0\n"
+      "sti\n"
+      : "=r"(flags)
+      :
+      : "memory"
+  );
+  return flags;
+}
+
+/**
+ * Restores the interrupt-enable state returned by interrupts_save_enable().
+ */
+void interrupts_restore(uint64_t state) {
+  __asm__ volatile(
+      "push %0\n"
+      "popfq\n"
+      :
+      : "r"(state)
+      : "memory"
+  );
+}
+
+/**
  * Retrieves the thread-local user-space stack pointer.
  */
 uint64_t arch_get_user_sp(void) {

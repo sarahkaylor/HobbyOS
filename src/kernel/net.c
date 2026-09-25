@@ -170,8 +170,14 @@ static int arp_resolve(uint32_t ip, uint8_t* mac_out) {
     for (int retry = 0; retry < 50; retry++) {
       net_arp_request(ip);
 
-      // Busy-wait with yield. The ISR or provider_loop will process
-      // the ARP reply and update the cache.
+      // Busy-wait on the hardware clock.  timer_get_ms() is TSC/counter
+      // derived, so it advances even with interrupts disabled; that
+      // matters because this path runs during a syscall, which enters
+      // through an interrupt gate with IF=0.  The reply is processed by
+      // the NIC IRQ handler or the RDMA provider loop (test mode: the
+      // IRQ path on the boot core).  Do NOT re-enable interrupts here:
+      // lock-up due to IRQ re-entry into an irqsave lock held by the
+      // interrupted syscall context.
       uint64_t start_wait = timer_get_ms();
       while (timer_get_ms() - start_wait < 5) {
         cpu_relax();

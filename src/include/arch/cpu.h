@@ -25,6 +25,20 @@ void interrupts_enable(void);
 void interrupts_disable(void);
 
 /**
+ * Saves the interrupt-enable state and enables interrupts on the current
+ * CPU core.  Returns the previous state, to pass to interrupts_restore().
+ * For bounded waits that need IRQ handlers on this core to make progress;
+ * e.g. ARP resolution may run during a syscall, which enters with
+ * interrupts off (interrupt-gate entry).
+ */
+uint64_t interrupts_save_enable(void);
+
+/**
+ * Restores the interrupt-enable state returned by interrupts_save_enable().
+ */
+void interrupts_restore(uint64_t state);
+
+/**
  * Retrieves the user-space stack pointer (e.g. SP_EL0 on ARM64).
  */
 uint64_t arch_get_user_sp(void);
