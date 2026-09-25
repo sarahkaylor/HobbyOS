@@ -32,11 +32,13 @@ struct __hb_FILE {
 #define HB_FBUF_SIZE 512
 
 static FILE stdio_files[3] = {
-  { .fd = 0, .mode = 'r' }, /* stdin */
-  { .fd = 1, .mode = 'w' }, /* stdout */
-  { .fd = 2, .mode = 'w' }, /* stderr */
+  { .fd = 0, .mode = 'r', .pushback = -1 }, /* stdin */
+  { .fd = 1, .mode = 'w', .pushback = -1 }, /* stdout */
+  { .fd = 2, .mode = 'w', .pushback = -1 }, /* stderr */
 };                      /* NOTE: must bear the real fd from birth — a
-                           zeroed bss FILE would make stdout write to fd 0 */
+                           zeroed bss FILE would make stdout write to fd 0.
+                           pushback must start at -1 too: 0 would be served
+                           as a phantom NUL byte by the first fgetc/fread. */
 
 static void hb_file_init(FILE *f, int fd) {
   f->fd = fd;
@@ -88,6 +90,13 @@ static ssize_t hb_file_fill(FILE *f) {
   }
   f->rpos = 0;
   f->rlen = 0;
+  /* The statically initialized stdin/stdout/stderr FILEs go through this
+     path without ever visiting fdopen/fopen, so their rbuf is still NULL
+     here.  Reading into NULL would fail the kernel's user-window check
+     (-EFAULT, "Bad address") — establish the buffer lazily just like
+     fdopen does. */
+  if (hb_file_ensure_buf(f) != 0)
+    return -1;
   n = read(f->fd, f->rbuf, f->rsize);
   if (n > 0) {
     f->rlen = (size_t)n;
@@ -246,16 +255,21 @@ char *fgets(char *s, int size, FILE *f) {
 
 size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *f) {
   size_t total = size * nmemb;
-  ssize_t n;
+  size_t done = 0;
 
   if (total == 0)
     return 0;
-  n = write(f->fd, ptr, total);
-  if (n < 0) {
-    f->err = 1;
-    return 0;
+  /* Kernel writes (notably pipes) may accept less than the full request;
+     keep going so a partial write never silently drops the tail. */
+  while (done < total) {
+    ssize_t n = write(f->fd, (const char *)ptr + done, total - done);
+    if (n <= 0) {
+      f->err = 1;
+      break;
+    }
+    done += (size_t)n;
   }
-  return size ? (size_t)n / size : 0;
+  return size ? done / size : 0;
 }
 
 int fputc(int c, FILE *f) {

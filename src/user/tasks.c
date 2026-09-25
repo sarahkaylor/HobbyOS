@@ -29,6 +29,7 @@
  *   - Text is truncated to 60 characters; the list holds at most 100 items.
  */
 
+#include <fcntl.h>
 #include "libc.h"
 #include "gui.h"
 #include "dialog.h"
@@ -204,7 +205,7 @@ int tasks_save(const struct task_state *st) {
   /* Recreate the file so a shorter list cannot leave a stale tail behind
    * (see the persistence note at the top of this file). */
   tasks_store.unlink(TASKS_FILE);
-  int fd = tasks_store.open(TASKS_FILE, 0);
+  int fd = tasks_store.open(TASKS_FILE, O_WRONLY | O_CREAT | O_TRUNC);
   if (fd < 0) return -1;
 
   int w = 0;

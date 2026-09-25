@@ -33,6 +33,7 @@ int fat16_write(struct file* f, const void* buf, int size);
 
 // Closes a FAT16 file (syncs to disk).
 int fat16_close(struct file* f);
+int fat16_truncate(struct file* f);
 
 // Seeks a FAT16 file.
 int fat16_seek(struct file* f, int offset);

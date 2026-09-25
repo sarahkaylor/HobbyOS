@@ -1,3 +1,4 @@
+#include <fcntl.h>
 #include "libc.h"
 
 int main(void);
@@ -19,7 +20,7 @@ int main(void) {
     return 1;
   }
   for (int i = 0; i < argc; i++) {
-    int fd = open(argv[i], 0);
+    int fd = open(argv[i], O_WRONLY | O_CREAT);
     if (fd < 0) {
       print("touch: cannot touch ");
       print(argv[i]);

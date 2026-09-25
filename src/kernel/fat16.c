@@ -526,6 +526,7 @@ int fat16_open(const char* filename, struct file* f) {
     f->fat16.dir_sector = sector;
     f->fat16.dir_offset = offset;
     f->fat16.cursor = 0;
+    f->fat16.dirty = 0;
     return 0;
   }
 
@@ -561,6 +562,7 @@ int fat16_open(const char* filename, struct file* f) {
   f->fat16.dir_sector = sector;
   f->fat16.dir_offset = offset;
   f->fat16.cursor = 0;
+  f->fat16.dirty = 0;
   return 0;
 }
 
@@ -815,10 +817,15 @@ int fat16_rename(const char* oldname, const char* newname) {
                  ((old_parent.attr & 0x10) == (new_parent.attr & 0x10));
 
   if (same_dir) {
-    /* In-place rename.  Refuse to clobber a different existing entry. */
+    /* In-place rename.  POSIX rename(2) replaces an existing destination:
+       when the new name belongs to a different, existing entry, unlink
+       that entry first (freeing its clusters) so the name rewrite below
+       performs the replacement.  sed -i's temp-file rename needs this. */
     if (!name11_equal(entry.name, formatted_name) &&
         dir_contains_name(new_parent.start_cluster, last_comp, 0)) {
-      return -1;
+      if (fat16_unlink(abs_new) != 0) {
+        return -1;
+      }
     }
     uint8_t buf[SECTOR_SIZE];
     if (virtio_blk_read_sector(sector, buf, 1) != 0) {
@@ -836,11 +843,13 @@ int fat16_rename(const char* oldname, const char* newname) {
     return 0;
   }
 
-  /* Cross-directory move.  Refuse to clobber, refuse moving a directory
-   * into its own subtree, then place a copy in the target directory and
-   * mark the old slot deleted. */
+  /* Cross-directory move.  Replace an existing destination (POSIX rename
+   * semantics), refuse moving a directory into its own subtree, then place
+   * a copy in the target directory and mark the old slot deleted. */
   if (dir_contains_name(new_parent.start_cluster, last_comp, 0)) {
-    return -1;
+    if (fat16_unlink(abs_new) != 0) {
+      return -1;
+    }
   }
   if (is_dir && dir_is_inside(new_parent.start_cluster, entry.start_cluster)) {
     return -1;
@@ -962,17 +971,86 @@ int fat16_mkdir(const char *path) {
  * to the on-disk directory — mirrors what close() must do, kept in one
  * place so write-time sync and close-time sync can share it.  Call with
  * the fat_lock RELEASED (does virtio sector I/O). */
+/* Byte-wise equality for on-disk entries (no libc memcmp in the kernel). */
+static int fat16_entry_eq(const struct fat16_dir_entry* a,
+                          const struct fat16_dir_entry* b) {
+  const uint8_t* pa = (const uint8_t*)a;
+  const uint8_t* pb = (const uint8_t*)b;
+  for (unsigned i = 0; i < sizeof(*a); i++) {
+    if (pa[i] != pb[i]) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+/**
+ * Writes one 32-byte directory entry with a read-modify-write that is safe
+ * against concurrent writers: after the write, the sector is re-read and our
+ * entry re-checked; a parallel writer that interleaved its own RMW (we cannot
+ * hold a spinlock across the IRQ-driven virtio transfer) would have clobbered
+ * it, so retry until our bytes stick.
+ */
+static void fat16_dir_entry_write(uint32_t dir_sector, uint32_t dir_offset,
+                                  const struct fat16_dir_entry* entry) {
+  uint8_t buf[SECTOR_SIZE];
+  for (int attempt = 0; attempt < 16; attempt++) {
+    if (virtio_blk_read_sector(dir_sector, buf, 1) != 0) {
+      return;
+    }
+    ((struct fat16_dir_entry*)buf)[dir_offset] = *entry;
+    if (virtio_blk_write_sector(dir_sector, buf, 1) != 0) {
+      return;
+    }
+    if (virtio_blk_read_sector(dir_sector, buf, 1) != 0) {
+      return;
+    }
+    if (fat16_entry_eq(&((struct fat16_dir_entry*)buf)[dir_offset], entry)) {
+      return; /* our entry is on disk */
+    }
+  }
+}
+
 static void fat16_sync_entry(struct file* f) {
   uint8_t buf[SECTOR_SIZE];
+  /* Only entries this handle actually changed may be written back: a
+     long-lived read descriptor (e.g. sed's input) must not clobber a
+     directory entry that was recreated/renamed under it by writing its
+     stale cached copy at close. */
+  if (!f->fat16.dirty) {
+    return;
+  }
   struct fat16_dir_entry entry = *(struct fat16_dir_entry*)&f->fat16.entry;
-  if (virtio_blk_read_sector(f->fat16.dir_sector, buf, 1) != 0) return;
-  struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
-  entries[f->fat16.dir_offset] = entry;
-  virtio_blk_write_sector(f->fat16.dir_sector, buf, 1);
+  fat16_dir_entry_write(f->fat16.dir_sector, f->fat16.dir_offset, &entry);
 }
 
 int fat16_close(struct file* f) {
   // Update directory entry dynamically on disk
+  fat16_sync_entry(f);
+  return 0;
+}
+
+/**
+ * Empties an existing file (open with O_TRUNC): frees its whole cluster
+ * chain and resets the directory entry to zero length, so a subsequent
+ * write starts from an empty file.  POSIX fopen("w") semantics.
+ */
+int fat16_truncate(struct file* f) {
+  if (!f) return -1;
+
+  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  uint16_t c = f->fat16.entry.start_cluster;
+  while (c >= 2 && c < 0xFFF8) {
+    uint16_t next = read_fat(c);
+    write_fat(c, 0);
+    c = next;
+  }
+  f->fat16.entry.start_cluster = 0;
+  f->fat16.entry.file_size = 0;
+  f->fat16.cursor = 0;
+  spinlock_release_irqrestore(&fat_lock, flags);
+  f->fat16.dirty = 1;
+
   fat16_sync_entry(f);
   return 0;
 }
@@ -1115,9 +1193,11 @@ int fat16_write(struct file* f, const void* buf, int size) {
     size -= chunk;
   }
   spinlock_release_irqrestore(&fat_lock, flags);
-  if (written_bytes > 0)
+  if (written_bytes > 0) {
+    f->fat16.dirty = 1;
     fat16_sync_entry(f);   /* keep the on-disk dir entry (size/clusters)
                               current so stat-by-path sees it immediately */
+  }
   return written_bytes;
 }
 

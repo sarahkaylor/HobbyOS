@@ -32,6 +32,7 @@
  * this file with `#define main notes_app_main`.
  */
 
+#include <fcntl.h>
 #include "libc.h"
 #include "gui.h"
 #include "dialog.h"
@@ -264,7 +265,7 @@ int notes_save(void) {
   close(fd);
   if (got > 0) old_len = got;
 
-  fd = open(NOTES_FILE, 0);
+  fd = open(NOTES_FILE, O_WRONLY | O_CREAT | O_TRUNC);
   if (fd < 0) {
     notes_warn = 1;
     return 0;

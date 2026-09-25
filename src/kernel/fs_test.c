@@ -21,7 +21,7 @@ static void test_fs_file_open_close(void) {
 
   struct process *cur = current_process();
   // Open a known file
-  int fd = file_open(cur, "TEST.TXT");
+  int fd = file_open(cur, "TEST.TXT", 0);
   EXPECT_EQ((fd >= 0), 1); // Should successfully assign a local FD
   EXPECT_EQ((cur->open_fds[fd] >= 0), 1); // Should have a global fd
   EXPECT_EQ(cur->num_open_fds, 1);

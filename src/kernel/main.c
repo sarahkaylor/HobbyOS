@@ -225,6 +225,10 @@ void main(void) {
      expectation table the host suite verifies against glibc.  It spawns
      nothing, so it can run alongside the pipe tests. */
   load_and_run_program_in_scheduler("REGTEST.BIN", -1, -1, -1, -1);
+  /* NOTE: PIPEPRB.BIN / SEDPROBE.BIN remain staged on the image as manual
+     diagnostics only - they must NOT run here, because their SEDT.IN
+     fixture writes race SEDTEST.BIN and corrupt its golden cases. */
+
   /* SEDTEST.BIN demands byte-exact GNU sed 4.8 parity from SED.BIN across
      59 golden cases (tools/gen_sed_tests.py).  It spawns SED.BIN once per
      case, so it also runs at the END. */

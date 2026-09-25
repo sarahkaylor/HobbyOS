@@ -70,14 +70,52 @@ static void test_fat16_move_across_dirs(void) {
   ASSERT(fat16_resolve_path("/MOVEDIR/MOVE.TXT", &e, 0, 0) != 0);
   EXPECT_EQ(fat16_resolve_path("/MOVEDIR/RENAMED.TXT", &e, 0, 0), 0);
 
-  /* A move must not clobber an existing entry. */
+  /* POSIX rename semantics: an existing destination is replaced, not a
+   * rename failure (sed -i and mv both depend on this). */
   EXPECT_EQ(fat16_open("/CLOB1.TXT", &f), 0);
   fat16_close(&f);
   EXPECT_EQ(fat16_open("/MOVEDIR/CLOB2.TXT", &f), 0);
   fat16_close(&f);
-  EXPECT_EQ(fat16_rename("/CLOB1.TXT", "/MOVEDIR/CLOB2.TXT"), -1);
-  EXPECT_EQ(fat16_resolve_path("/CLOB1.TXT", &e, 0, 0), 0);
+  EXPECT_EQ(fat16_rename("/CLOB1.TXT", "/MOVEDIR/CLOB2.TXT"), 0);
+  ASSERT(fat16_resolve_path("/CLOB1.TXT", &e, 0, 0) != 0);
   EXPECT_EQ(fat16_resolve_path("/MOVEDIR/CLOB2.TXT", &e, 0, 0), 0);
+
+  /* Same-directory replace: the exact shape sed -i performs (temp file
+   * renamed over the original in the same directory). */
+  EXPECT_EQ(fat16_open("/SAME1.TXT", &f), 0);
+  fat16_close(&f);
+  EXPECT_EQ(fat16_open("/SAME2.TXT", &f), 0);
+  fat16_close(&f);
+  EXPECT_EQ(fat16_rename("/SAME1.TXT", "/SAME2.TXT"), 0);
+  ASSERT(fat16_resolve_path("/SAME1.TXT", &e, 0, 0) != 0);
+  EXPECT_EQ(fat16_resolve_path("/SAME2.TXT", &e, 0, 0), 0);
+
+  /* fat16_truncate empties a file: old content gone, new writes land at 0. */
+  {
+    struct file wf;
+    EXPECT_EQ(fat16_open("/TRUNC.TXT", &wf), 0);
+    const char *seed = "PLENTY OF OLD CONTENT";
+    EXPECT_EQ(fat16_write(&wf, seed, 21), 21);
+    fat16_close(&wf);
+
+    EXPECT_EQ(fat16_open("/TRUNC.TXT", &wf), 0);
+    EXPECT_EQ(fat16_truncate(&wf), 0);
+    const char *fresh = "new";
+    EXPECT_EQ(fat16_write(&wf, fresh, 3), 3);
+    fat16_close(&wf);
+
+    EXPECT_EQ(fat16_open("/TRUNC.TXT", &wf), 0);
+    ASSERT(fat16_seek(&wf, 0) == 0);
+    char rbuf[8] = {0};
+    int rn = fat16_read(&wf, rbuf, 8);
+    fat16_close(&wf);
+    EXPECT_EQ(rn, 3);
+    if (rn == 3) {
+      EXPECT_EQ(rbuf[0], 'n');
+      EXPECT_EQ(rbuf[1], 'e');
+      EXPECT_EQ(rbuf[2], 'w');
+    }
+  }
 
   /* Move a directory, then keep using it. */
   EXPECT_EQ(fat16_mkdir("/MOVESUB"), 0);

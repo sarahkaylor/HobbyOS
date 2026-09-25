@@ -69,11 +69,18 @@ static int get_global_fd(struct file *f) {
  * Returns:
  *   Local file descriptor index on success, or -1 on failure.
  */
-int file_open(struct process *cur, const char *filename) {
-  if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -1;
+/* Open flags, matching the sysroot's fcntl.h values. */
+#ifndef O_CREAT
+#define O_CREAT 0x40
+#define O_EXCL  0x80
+#define O_TRUNC 0x200
+#endif
+
+int file_open(struct process *cur, const char *filename, int flags) {
+  if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
 
   struct file *f = file_alloc();
-  if (!f) return -1;
+  if (!f) return -EMFILE;
 
   /* Paths under an NFS mount are opened by the NFS client; everything
    * else falls through to FAT-16. */
@@ -81,12 +88,32 @@ int file_open(struct process *cur, const char *filename) {
   if (routed < 0) {
     f->type = FILE_TYPE_EMPTY;
     f->ref_count = 0;
-    return -1;
+    return -ENOENT;
   }
-  if (routed == 0 && fat16_open(filename, f) != 0) {
-    f->type = FILE_TYPE_EMPTY;
-    f->ref_count = 0;
-    return -1;
+  if (routed == 0) {
+    /* POSIX open(): a missing file only comes into existence with
+       O_CREAT; O_CREAT|O_EXCL refuses to touch an existing one. */
+    struct fat16_dir_entry probe_entry;
+    int exists = (fat16_resolve_path(filename, &probe_entry, 0, 0) == 0);
+
+    if (!exists && !(flags & O_CREAT)) {
+      f->type = FILE_TYPE_EMPTY;
+      f->ref_count = 0;
+      return -ENOENT;
+    }
+    if (exists && (flags & O_CREAT) && (flags & O_EXCL)) {
+      f->type = FILE_TYPE_EMPTY;
+      f->ref_count = 0;
+      return -EEXIST;
+    }
+    if (fat16_open(filename, f) != 0) {
+      f->type = FILE_TYPE_EMPTY;
+      f->ref_count = 0;
+      return -ENOENT;
+    }
+    if (exists && (flags & O_TRUNC)) {
+      (void)fat16_truncate(f);
+    }
   }
 
   int fd = -1;

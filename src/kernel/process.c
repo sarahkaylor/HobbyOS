@@ -206,8 +206,8 @@ int process_create(void) {
   if (pid < 0) {
     /* No free slots: reclaim zombies that can never be reaped —
        processes whose parent no longer exists or never did (kernel
-       spawns set parent_pid = -1, so nearly every boot-loaded program
-       is in this class once it exits).  Zombies of a LIVE parent are
+       kernel-loaded programs have parent_pid = -1, so nearly every
+       boot-loaded program is in this class once it exits).  Zombies of a LIVE parent are
        left alone: the parent may still waitpid() them.  Slot 0 is
        reserved and never handed out here either. */
     for (int i = 1; i < MAX_PROCESSES && pid < 0; i++) {
@@ -217,7 +217,8 @@ int process_create(void) {
       struct process *par =
         (q->parent_pid >= 0 && q->parent_pid < MAX_PROCESSES)
           ? &proc_table[q->parent_pid] : 0;
-      if (par && par->state != PROC_STATE_FREE)
+      if (par && par->state != PROC_STATE_FREE &&
+          par->state != PROC_STATE_EXITED)
         continue; /* live parent: keep its zombie */
       if (q->phys_block_idx >= 0)
         phys_blocks_used[q->phys_block_idx] = 0;
@@ -255,7 +256,8 @@ int process_create(void) {
       struct process *par =
         (q->parent_pid >= 0 && q->parent_pid < MAX_PROCESSES)
           ? &proc_table[q->parent_pid] : 0;
-      if (par && par->state != PROC_STATE_FREE)
+      if (par && par->state != PROC_STATE_FREE &&
+          par->state != PROC_STATE_EXITED)
         continue; /* live parent: keep its zombie */
       /* Reclaim: release the zombie's physical block, then take it. */
       if (q->phys_block_idx >= 0) {
@@ -731,6 +733,25 @@ int process_waitpid(struct trap_frame *tf) {
     }
   }
   if (!has_child) {
+    /* Diagnostic: no reapable child at all.  Show what the wanted pid's
+       slot (if any) currently looks like, then report ECHILD. */
+    uart_puts("[WAITPID] ECHILD caller=");
+    print_int(caller->pid);
+    uart_puts(" want=");
+    print_int(want_pid);
+    if (want_pid > 0) {
+      for (int i = 0; i < MAX_PROCESSES; i++) {
+        if (proc_table[i].pid == want_pid) {
+          uart_puts(" slotstate=");
+          print_int((int)proc_table[i].state);
+          uart_puts(" slotparent=");
+          print_int(proc_table[i].parent_pid);
+          uart_puts(" slotexit=");
+          print_int(proc_table[i].exit_status);
+        }
+      }
+    }
+    uart_puts("\n");
     spinlock_release_irqrestore(&proc_lock, flags);
     return -ECHILD;
   }

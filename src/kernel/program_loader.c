@@ -115,6 +115,9 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
     }
     struct process *parent = process_get_pcb(caller_pid);
     if (parent) {
+      /* Record the parent so waitpid() can reap this child and so the
+         zombie reclaimers never free it while the parent is alive. */
+      child->parent_pid = parent->pid;
       for (int i = 0; i < 128; i++) {
         child->cwd[i] = parent->cwd[i];
       }

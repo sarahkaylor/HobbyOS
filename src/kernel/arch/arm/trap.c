@@ -66,11 +66,13 @@ static void sys_fork(struct trap_frame *tf) {
 
 static void sys_open(struct trap_frame *tf) {
   const char *filename = (const char *)tf->regs[0];
+  int flags = (int)tf->regs[1];
   struct process *caller = current_process();
   if ((uint64_t)filename >= USER_VIRT_BASE &&
       (uint64_t)filename < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-    int r = file_open(caller, filename);
-    tf->regs[0] = r < 0 ? -ENOENT : r;
+    /* file_open returns >= 0 (fd) or a negative errno it picked itself
+       (ENOENT/EEXIST/EMFILE), which errno_ret decodes in libc. */
+    tf->regs[0] = file_open(caller, filename, flags);
   } else {
     tf->regs[0] = -EFAULT;
   }

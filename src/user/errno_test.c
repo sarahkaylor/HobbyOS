@@ -5,6 +5,7 @@
  * libc wrappers: failures return -1 and set errno to the matching constant,
  * successes leave errno untouched, and an out-of-range syscall number
  * returns -ENOSYS. */
+#include <fcntl.h>
 #include "libc.h"
 
 /* Raw syscall for the "unknown syscall -> ENOSYS" case, which has no libc
@@ -43,19 +44,25 @@ void _start(void) {
   errno = 0;
   check(errno == 0, "errno starts at 0");
 
-  /* open(, 0) — HobbyOS has no O_CREAT/O_EXCL yet: open(, 0) is *open-or-create*
-   * (the `touch` and `touch-like` tools rely on it). A missing file is
-   * created and a valid fd returned, with errno untouched (POSIX open
-   * without O_CREAT would fail ENOENT; that gap is tracked in posix.md
-   * Phase 1). Assert the real contract now, and clean up after. */
+  /* POSIX open() semantics: SYS_OPEN now honors O_CREAT/O_EXCL. A missing
+   * file without O_CREAT fails ENOENT; O_CREAT|O_EXCL creates it and a
+   * second exclusive attempt fails EEXIST; a plain open of an existing
+   * file succeeds. */
   errno = 0;
   int fd = open("ERRNO9.TXT", 0);
-  check(fd >= 0 && errno == 0, "open(create, 0) succeeds, errno untouched");
+  check(fd < 0 && errno == ENOENT, "open(missing, 0) -> ENOENT");
   errno = 0;
-  int fd2 = open("ERRNO9.TXT", 0);
-  check(fd2 >= 0 && errno == 0, "re-open of created file works");
+  fd = open("ERRNO9.TXT", O_CREAT | O_EXCL, 0600);
+  check(fd >= 0 && errno == 0, "open(O_CREAT|O_EXCL) creates");
+  errno = 0;
+  int fd2 = open("ERRNO9.TXT", O_CREAT | O_EXCL, 0600);
+  check(fd2 < 0 && errno == EEXIST, "second O_CREAT|O_EXCL -> EEXIST");
+  errno = 0;
+  int fd3 = open("ERRNO9.TXT", 0);
+  check(fd3 >= 0 && errno == 0, "re-open of created file works");
   if (fd >= 0) close(fd);
   if (fd2 >= 0) close(fd2);
+  if (fd3 >= 0) close(fd3);
   unlink("ERRNO9.TXT"); /* best-effort cleanup */
 
   /* close/read/write on a bad fd -> -1 + EBADF */

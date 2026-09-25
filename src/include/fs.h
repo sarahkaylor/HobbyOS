@@ -34,6 +34,7 @@ struct file {
       uint32_t dir_sector;         /**< Sector on disk containing the entry */
       uint32_t dir_offset;         /**< Offset within the sector */
       uint32_t cursor;             /**< Current read/write position */
+      int dirty;                   /**< Entry changed since open; close must sync */
     } fat16;
     struct {
       struct pipe *ptr;            /**< Pointer to the pipe structure */
@@ -56,7 +57,7 @@ struct file {
 
 void fs_init(void);
 struct trap_frame;
-int file_open(struct process *p, const char *filename);
+int file_open(struct process *p, const char *filename, int flags);
 int file_close(struct process *p, int fd);
 int file_read(struct process *p, int fd, void *buf, int size, struct trap_frame *tf);
 int file_write(struct process *p, int fd, const void *buf, int size, struct trap_frame *tf);

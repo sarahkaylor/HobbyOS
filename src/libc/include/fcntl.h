@@ -2,8 +2,9 @@
 #define HOBBYOS_FCNTL_H
 
 /* HobbyOS Phase-2 sysroot: fcntl.h — O_* open flags.
- * O_RDONLY=0 keeps the legacy SYS_OPEN behavior; the kernel's flag
- * handling (O_TRUNC/O_APPEND/O_CREAT wiring) lands with Phase-2 syscalls. */
+ * The kernel honors O_CREAT, O_EXCL and O_TRUNC in SYS_OPEN (missing
+ * files without O_CREAT fail ENOENT, POSIX-style); O_APPEND is still
+ * accepted but treated as plain write. */
 
 #ifdef __cplusplus
 extern "C" {
