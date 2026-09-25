@@ -95,6 +95,98 @@ void uart_print_hex(uint64_t val) {
  * Primary kernel entry point for CPU 0.
  * Initializes all hardware subsystems, filesystems, and the scheduler.
  */
+#ifdef KERNEL_MODE_TEST
+/* Boot-wave test loader.  Runs as a kernel thread so the boot core can
+ * start the scheduler immediately; see the KERNEL_MODE_TEST branch below.
+ * Load order is preserved: entries that rely on earlier programs having
+ * exited to free process-table slots (WCTEST/HEDTEST/SEDTEST and the
+ * spawn-heavy acceptance tests) still come last.  Every load keeps
+ * WAVE_LOAD_RESERVE physical blocks free for child spawns; when the pool
+ * is tighter than that, the load waits (this thread is preemptible, so
+ * waiting cannot wedge the suite the way the old inline loop did). */
+static void test_wave_loader(void *arg) {
+  (void)arg;
+  /* Diagnostic probe for the subdirectory create/spawn/cat flow that
+     shell_test3 exercises.  Runs first so its console output is intact. */
+  load_and_run_program_in_scheduler("SUBPRB.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("SHTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("SHTEST2.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("SHTEST3.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("CONSOLE.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("MEMTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("FILEIO.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("HEAPTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("SPAWN.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("FORKTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("SMPTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("PIPETEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("GRAPHICS.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("NETTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("TIMEOUT.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("STRESS.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("MONITORT.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("NFSTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("ERRTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("HELLO.BIN", -1, -1, -1, -1);
+  /* Phase 3: lseek/stat/fstat exercise the new syscalls directly. */
+  load_and_run_program_in_scheduler("LKSTEST.BIN", -1, -1, -1, -1);
+  /* WCTEST/HEDTEST spawn WC.BIN/HEDGNU.BIN through the real spawn2/pipe
+     path; both run at the END so earlier processes have exited and freed
+     process-table slots (the pid masks are 64-bit, so MAX_PROCESSES
+     must stay <= 64). */
+  load_and_run_program_in_scheduler("HEDTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("TAILTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("PROCTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("WCTEST.BIN", -1, -1, -1, -1);
+  /* REGTEST.BIN asserts the sysroot GNU regex in-OS against the same
+     expectation table the host suite verifies against glibc.  It spawns
+     nothing, so it can run alongside the pipe tests. */
+  load_and_run_program_in_scheduler("REGTEST.BIN", -1, -1, -1, -1);
+  /* NOTE: PIPEPRB.BIN / SEDPROBE.BIN remain staged on the image as manual
+     diagnostics only - they must NOT run here, because their SEDT.IN
+     fixture writes race SEDTEST.BIN and corrupt its golden cases. */
+
+  /* SEDTEST.BIN demands byte-exact GNU sed 4.8 parity from SED.BIN across
+     59 golden cases (tools/gen_sed_tests.py).  It spawns SED.BIN once per
+     case, so it also runs at the END. */
+  load_and_run_program_in_scheduler("SEDTEST.BIN", -1, -1, -1, -1);
+
+  /* GREPTEST.BIN likewise demands byte-exact GNU grep 2.5.4 parity from
+     GREP.BIN across its golden cases (tools/gen_grep_tests.py), spawning
+     GREP.BIN once per case. */
+  load_and_run_program_in_scheduler("GREPTEST.BIN", -1, -1, -1, -1);
+
+  /* CUTTEST.BIN exercises the ported GNU cut (CUT.BIN) end-to-end:
+     byte/field modes, delimiters, -s, --output-delimiter, stdin,
+     multi-file and error exit codes. */
+  load_and_run_program_in_scheduler("CUTTEST.BIN", -1, -1, -1, -1);
+
+  /* Batch-1 textutils ports: tr, paste, fold, nl — each <TOOL>TEST.BIN
+     spawns its <TOOL>.BIN through the spawn2/pipe path and checks
+     byte-exact behavior in-OS. */
+  load_and_run_program_in_scheduler("TRTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("PASTE_T.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("FOLDTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("NLTEST.BIN", -1, -1, -1, -1);
+
+  /* Batch-2 textutils ports: comm, tsort, expand, unexpand, cksum,
+     md5sum — same spawn2/pipe in-OS acceptance pattern. */
+  load_and_run_program_in_scheduler("COMMTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("TSORT_T.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("EXPAND_T.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("UNEXPAND_T.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("CKSUM_T.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("MD5SUM_T.BIN", -1, -1, -1, -1);
+
+  /* Batch 3: tac — last-line-first reversal acceptance (seeked path,
+     /tmp temp-file path, -b/-s/-r) via the same spawn2/pipe pattern. */
+  load_and_run_program_in_scheduler("TACTEST.BIN", -1, -1, -1, -1);
+
+  extern void kernel_exit(void);
+  kernel_exit();
+}
+#endif
+
 void main(void) {
   uart_init();
   spinlock_init(&print_lock);
@@ -192,77 +284,14 @@ void main(void) {
   run_all_unit_tests();
 #elif defined(KERNEL_MODE_TEST)
   uart_puts("Mode: TEST - Running automated tests...\n");
-  /* Diagnostic probe for the subdirectory create/spawn/cat flow that
-     shell_test3 exercises.  Runs first so its console output is intact. */
-  load_and_run_program_in_scheduler("SUBPRB.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("SHTEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("SHTEST2.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("SHTEST3.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("CONSOLE.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("MEMTEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("FILEIO.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("HEAPTEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("SPAWN.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("FORKTEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("SMPTEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("PIPETEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("GRAPHICS.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("NETTEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("TIMEOUT.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("STRESS.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("MONITORT.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("NFSTEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("ERRTEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("HELLO.BIN", -1, -1, -1, -1);
-  /* Phase 3: lseek/stat/fstat exercise the new syscalls directly. */
-  load_and_run_program_in_scheduler("LKSTEST.BIN", -1, -1, -1, -1);
-  /* WCTEST/HEDTEST spawn WC.BIN/HEDGNU.BIN through the real spawn2/pipe
-     path; both run at the END so earlier processes have exited and freed
-     process-table slots (the pid masks are 64-bit, so MAX_PROCESSES
-     must stay <= 64). */
-  load_and_run_program_in_scheduler("HEDTEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("TAILTEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("PROCTEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("WCTEST.BIN", -1, -1, -1, -1);
-  /* REGTEST.BIN asserts the sysroot GNU regex in-OS against the same
-     expectation table the host suite verifies against glibc.  It spawns
-     nothing, so it can run alongside the pipe tests. */
-  load_and_run_program_in_scheduler("REGTEST.BIN", -1, -1, -1, -1);
-  /* NOTE: PIPEPRB.BIN / SEDPROBE.BIN remain staged on the image as manual
-     diagnostics only - they must NOT run here, because their SEDT.IN
-     fixture writes race SEDTEST.BIN and corrupt its golden cases. */
-
-  /* SEDTEST.BIN demands byte-exact GNU sed 4.8 parity from SED.BIN across
-     59 golden cases (tools/gen_sed_tests.py).  It spawns SED.BIN once per
-     case, so it also runs at the END. */
-  load_and_run_program_in_scheduler("SEDTEST.BIN", -1, -1, -1, -1);
-
-  /* GREPTEST.BIN likewise demands byte-exact GNU grep 2.5.4 parity from
-     GREP.BIN across its golden cases (tools/gen_grep_tests.py), spawning
-     GREP.BIN once per case. */
-  load_and_run_program_in_scheduler("GREPTEST.BIN", -1, -1, -1, -1);
-
-  /* CUTTEST.BIN exercises the ported GNU cut (CUT.BIN) end-to-end:
-     byte/field modes, delimiters, -s, --output-delimiter, stdin,
-     multi-file and error exit codes. */
-  load_and_run_program_in_scheduler("CUTTEST.BIN", -1, -1, -1, -1);
-
-  /* Batch-1 textutils ports: tr, paste, fold, nl — each <TOOL>TEST.BIN
-     spawns its <TOOL>.BIN through the spawn2/pipe path and checks
-     byte-exact behavior in-OS. */
-  load_and_run_program_in_scheduler("TRTEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("PASTETEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("FOLDTEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("NLTEST.BIN", -1, -1, -1, -1);
-
-  /* Batch-2 textutils ports: comm, tsort, expand, unexpand, cksum,
-     md5sum — same spawn2/pipe in-OS acceptance pattern. */
-  load_and_run_program_in_scheduler("COMMTEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("TSORTTEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("EXPANDTEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("UNEXPANDTEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("CKSUMTEST.BIN", -1, -1, -1, -1);
-  load_and_run_program_in_scheduler("MD5SUMTEST.BIN", -1, -1, -1, -1);
+  /* The test wave loads in a kernel thread (test_wave_loader).  Loading
+     inline would deadlock: a load waits for a physical block when the
+     pool is full (and always keeps WAVE_LOAD_RESERVE blocks free for
+     child spawns), but blocks are only freed by tests exiting, and tests
+     only run once the scheduler is started — which used to happen after
+     the inline loads.  As a thread, the loader waits while the rest of
+     the suite runs. */
+  process_create_kernel_nowait(test_wave_loader, 0);
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
   load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1, -1, -1);

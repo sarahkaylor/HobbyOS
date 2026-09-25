@@ -22,6 +22,14 @@ jmp_buf user_exit_context;
  * explicit error instead. */
 #define MAX_PROGRAM_SIZE  USER_INITIAL_CLEAR_SIZE
 
+/* Blocks the boot-wave loader keeps free so child processes can spawn
+ * while the wave is loaded.  Every test that spawns a tool (SHTEST's
+ * shells, SEDTEST's per-case runs, TACTEST's tool runs, ...) needs a
+ * block of its own; without headroom the fully-loaded wave pins the pool
+ * and those tests wait forever.  Six covers the deepest concurrent
+ * child demand seen in the suite. */
+#define WAVE_LOAD_RESERVE  6
+
 /* Is the opened program too big for MAX_PROGRAM_SIZE?  (Call after
  * fat16_open, before reading.) */
 static int program_too_large(const struct file *f) {
@@ -100,23 +108,31 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
   uart_puts(filename);
   uart_puts("\n");
 
-  int pid = process_create();
-  /* The physical pool can be momentarily exhausted: the later boot loads
-     run while heavy tests (STRESS's ping-pong workers, SEDTEST's per-case
-     SED.BIN spawns, the WCTEST/GREPTEST engines) still hold blocks.  The
-     other cores free them as those processes exit, so wait and retry
-     instead of silently dropping the program.  Observed on ARM (32 blocks)
-     the tail of the boot wave can stall for several minutes while ~30
-     long-running tests drain, so the bound is generous (~30 min); this CPU
-     is pre-scheduler and cannot sleep, so the wait is a bounded read of
-     the free-running counter (~100 ms per attempt) also capped by an
-     iteration count so it terminates even if the counter is uncalibrated. */
-  for (int attempt = 0; attempt < 18000 && pid < 0; attempt++) {
+  /* Boot-wave loads (caller_pid < 0) must leave headroom: with ~40 wave
+     programs and 40 physical blocks the wave itself can pin the whole
+     pool, and every test that spawns a child (SHTEST's shells, SEDTEST's
+     per-case spawns, TACTEST's 17 tool runs) then waits forever for a
+     block.  Wave loads therefore only take a block while more than
+     WAVE_LOAD_RESERVE blocks stay free; child spawns (called from the
+     spawn worker with a real caller_pid) take any block.  The physical
+     pool can also be momentarily exhausted by heavy tests; in both cases
+     wait and retry instead of silently dropping the program.  This CPU is
+     pre-scheduler and cannot sleep, so the wait is a bounded read of the
+     free-running counter (~100 ms per attempt) also capped by an
+     iteration count so it terminates even if the counter is
+     uncalibrated. */
+  extern int phys_block_free_count(void);
+  int pid = -1;
+  for (int attempt = 0; attempt < 18000; attempt++) {
     uint64_t t0 = timer_get_ms();
     for (volatile int spin = 0; spin < 4000000; spin++) {
       if (timer_get_ms() - t0 >= 100u) break;
     }
+    if (caller_pid < 0 && phys_block_free_count() <= WAVE_LOAD_RESERVE)
+      continue; /* keep headroom for child spawns */
     pid = process_create();
+    if (pid >= 0)
+      break;
   }
   if (pid < 0) {
     uart_puts("Loader starved: ");

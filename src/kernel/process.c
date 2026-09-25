@@ -227,6 +227,19 @@ static int process_still_running(int pid) {
   return 0;
 }
 
+/* Number of free physical blocks.  Advisory: used by the boot-wave
+ * loader to keep headroom for child processes (see program_loader.c). */
+int phys_block_free_count(void) {
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  int n = 0;
+  for (int i = 0; i < NUM_PHYS_BLOCKS; i++) {
+    if (!phys_blocks_used[i])
+      n++;
+  }
+  spinlock_release_irqrestore(&proc_lock, flags);
+  return n;
+}
+
 /* Claim a free physical block for a new process, reclaiming the blocks
  * of unreapable zombies first (dead or missing parent — nearly every
  * boot-loaded program is in this class once it exits).  Zombies of a

@@ -168,6 +168,10 @@ void process_init(void);
 int process_create(void);
 int process_create_nowait(void);
 
+// Number of free physical blocks (advisory; see program_loader.c's
+// boot-wave headroom reserve).
+int phys_block_free_count(void);
+
 // Free a previously created process.
 void process_free(int pid);
 
