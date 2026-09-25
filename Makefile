@@ -196,6 +196,8 @@ MD5SUM_BIN = $(OBJ_DIR)/md5sum.bin
 MD5SUM_T_BIN = $(OBJ_DIR)/md5sum_test.bin
 TAC_BIN = $(OBJ_DIR)/tac.bin
 TACTEST_BIN = $(OBJ_DIR)/tac_test.bin
+CMP_BIN = $(OBJ_DIR)/cmp.bin
+CMPTEST_BIN = $(OBJ_DIR)/cmp_test.bin
 TAILTEST_BIN = $(OBJ_DIR)/tail_test.bin
 PROCCHLD_BIN = $(OBJ_DIR)/proc_child.bin
 PROCTEST_BIN = $(OBJ_DIR)/proc_test.bin
@@ -652,6 +654,7 @@ $(eval $(call TU21_PORT_RULE,unexpand,$(UNEXPAND_BIN)))
 $(eval $(call TU21_PORT_RULE,cksum,$(CKSUM_BIN)))
 $(eval $(call TU21_PORT_RULE,md5sum,$(MD5SUM_BIN)))
 $(eval $(call TU21_PORT_RULE,tac,$(TAC_BIN)))
+$(eval $(call TU21_PORT_RULE,cmp,$(CMP_BIN)))
 
 # --- GNU sed 4.8 (multi-object GNU port; objects named sed_/sedg_) ------
 $(OBJ_DIR)/sed_%.o: src/user/sed/%.c src/user/sed/config.h src/user/sed/*.h src/user/sed/gnulib/*.h $(USER_HDRS)
@@ -704,6 +707,7 @@ $(eval $(call TU21_TEST_RULE,unexpand,$(UNEXPAND_T_BIN)))
 $(eval $(call TU21_TEST_RULE,cksum,$(CKSUM_T_BIN)))
 $(eval $(call TU21_TEST_RULE,md5sum,$(MD5SUM_T_BIN)))
 $(eval $(call TU21_TEST_RULE,tac,$(TACTEST_BIN)))
+$(eval $(call TU21_TEST_RULE,cmp,$(CMPTEST_BIN)))
 
 $(OBJ_DIR)/regex_test.o: src/user/regex_test.c src/user/regex_test_cases.h $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
@@ -926,7 +930,7 @@ endef
 
 $(foreach app,$(DESKTOP_APP_NAMES),$(eval $(call DESKTOP_APP_RULE,$(app))))
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -1032,6 +1036,8 @@ endif
 	$(MCOPY) -i disk.img $(MD5SUM_T_BIN) ::/MD5SUM_T.BIN
 	$(MCOPY) -i disk.img $(TAC_BIN) ::/TAC.BIN
 	$(MCOPY) -i disk.img $(TACTEST_BIN) ::/TACTEST.BIN
+	$(MCOPY) -i disk.img $(CMP_BIN) ::/CMP.BIN
+	$(MCOPY) -i disk.img $(CMPTEST_BIN) ::/CMPTEST.BIN
 	$(MCOPY) -i disk.img $(REGTEST_BIN) ::/REGTEST.BIN
 	$(MCOPY) -i disk.img $(SEDTEST_BIN) ::/SEDTEST.BIN
 	$(MCOPY) -i disk.img $(GREPTEST_BIN) ::/GREPTEST.BIN
@@ -1384,6 +1390,29 @@ $(eval $(call TU21_PARITY_RULES,cksum,cksum,CKSUM))
 $(eval $(call TU21_PARITY_RULES,md5sum,md5sum,MD5SUM))
 $(eval $(call TU21_PARITY_RULES,tac,tac,TAC))
 
+# --- GNU diffutils 2.8.1 (cmp).  Same shape as the textutils family,
+# but the reference build comes from the diffutils tarball.  -----------
+define DIFFUTILS_PARITY_RULES
+$(3)_HOST = obj/$(1)_host
+obj/host_$(1).o: src/user/$(1)_gnu.c $(USER_HDRS) src/libc/include/*.h
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/libc/include -c $$< -o $$@
+$$($(3)_HOST): obj/host_$(1).o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+	$(HOST_CC) -o $$@ $$^
+
+$(3)_PARITY = $(1)_parity_run
+$$($(3)_PARITY): $$($(3)_HOST)
+	@bash src/host/$(1)_parity.sh $$($(3)_HOST)
+
+$(OBJ_DIR)/diffutils_$(1)_ref:
+	@bash src/host/build_diffutils_$(1)_ref.sh $$@
+
+$(3)_PARITY_STRICT = $(1)_parity_strict
+$$($(3)_PARITY_STRICT): $$($(3)_HOST) $(OBJ_DIR)/diffutils_$(1)_ref
+	@bash src/host/$(1)_parity.sh $$($(3)_HOST) $(OBJ_DIR)/diffutils_$(1)_ref
+endef
+
+$(eval $(call DIFFUTILS_PARITY_RULES,cmp,cmp,CMP))
+
 # Header-only sysroot set (stdarg/limits/stdbool/inttypes): compiled with
 # -Isrc/libc/include FIRST so the HobbyOS headers (not glibc's) resolve.
 HEADERS_TEST = libc_headers_test_host
@@ -1423,7 +1452,7 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
