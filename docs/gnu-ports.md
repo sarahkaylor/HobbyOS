@@ -43,15 +43,16 @@ acceptance test `<TOOL>TEST.BIN` that spawns the real binary through
 | `tail` | `TAILGN.BIN` | 224 cases + --help/--version | TAILTEST.BIN | strict ref pulls argmatch/human gnulib |
 | `cut` | `CUT.BIN` | 93 cases + --help/--version | CUTTEST.BIN | bytes/chars/fields, -d/-s/--output-delimiter/-n |
 | `tr` | `TR.BIN` | 130 cases | TRTEST.BIN | sets, ranges, -c/-d/-s/-t, [:class:] |
-| `paste` | `PASTE.BIN` | 101 cases | PASTETEST.BIN | serial + parallel, -d/-s |
+| `paste` | `PASTE.BIN` | 101 cases | PASTE_T.BIN | serial + parallel, -d/-s |
 | `fold` | `FOLD.BIN` | 143 cases | FOLDTEST.BIN | -b/-s/-w |
 | `nl` | `NL.BIN` | 106 cases | NLTEST.BIN | styles, -b/-n/-w/-s/-v, sections |
 | `comm` | `COMM.BIN` | 55 cases | COMMTEST.BIN | -1/-2/-3, column ordering |
-| `tsort` | `TSORT.BIN` | 75 cases | TSORTTEST.BIN | topological sort, cycle diagnostics |
-| `expand` | `EXPAND.BIN` | 173 cases | EXPANDTEST.BIN | -t tab lists, -i |
-| `unexpand` | `UNEXPAND.BIN` | 77 cases | UNEXPANDTEST.BIN | -a/-t/-first-only |
-| `cksum` | `CKSUM.BIN` | 40 cases | CKSUMTEST.BIN | CRC + length, POSIX mode |
-| `md5sum` | `MD5SUM.BIN` | 97 cases | MD5SUMTEST.BIN | md5 + --check; sha1 dropped (documented) |
+| `tsort` | `TSORT.BIN` | 75 cases | TSORT_T.BIN | topological sort, cycle diagnostics |
+| `expand` | `EXPAND.BIN` | 173 cases | EXPAND_T.BIN | -t tab lists, -i |
+| `unexpand` | `UNEXPAND.BIN` | 77 cases | UNEXPAND_T.BIN | -a/-t/-first-only |
+| `cksum` | `CKSUM.BIN` | 40 cases | CKSUM_T.BIN | CRC + length, POSIX mode |
+| `md5sum` | `MD5SUM.BIN` | 97 cases | MD5SUM_T.BIN | md5 + --check; sha1 dropped (documented) |
+| `tac` | `TAC.BIN` | 70 cases | TACTEST.BIN | last-line-first reversal; -b/-s/-r incl. regex separators; seeked + /tmp temp-file stdin paths |
 
 ### Legacy hand-written tools (kept; not GNU, much smaller surface)
 
@@ -115,7 +116,7 @@ tool is small. Ordered by value:
 | Batch | Programs | Notes |
 |---|---|---|
 | 1 | `cut`, `tr`, `paste`, `fold`, `nl` | **done** — each with `<tool>_parity.sh` + `<tool>_test.c` + `<TOOL>TEST.BIN`; cut = 93-case strict parity, tr 130, paste 101, fold 143, nl 106 |
-| 2 | `comm`, `tsort`, `expand`, `unexpand`, `cksum`, `md5sum` | **done** — 55/75/173/77/40/97 strict cases + in-OS tests. `tac` and `sum` remain (small; next batch). `sha1sum` dropped: 2.1's is a wrapper whose sha1 tables we did not transcribe (documented in md5sum_gnu.c) |
+| 2 | `comm`, `tsort`, `expand`, `unexpand`, `cksum`, `md5sum` | **done** — 55/75/173/77/40/97 strict cases + in-OS tests. `tac` **done** (70 strict cases; `sum` next). `sha1sum` dropped: 2.1's is a wrapper whose sha1 tables we did not transcribe (documented in md5sum_gnu.c) |
 | 3 | `join`, `split`, `od` | next batch after the current one commits |
 
 (`pr`, `fmt`, `ptx`, `csplit` are large and lower-value — deferred.)
@@ -169,7 +170,7 @@ Deferred sequence (own project-sized chunk, after sed/grep land):
 | D | GNU grep 2.5.4 | `GGREP.BIN`; ref build; `grep_parity.sh`; in-OS test | same |
 | E | textutils batch 1 | cut, tr, paste, fold, nl (+ parity + in-OS each, shared fixture harness) | **done** — `make host_tests` + `make test` ARM/Intel green |
 | F | Terminal/keyboard | Ctrl key end-to-end (desktop → window stdin) + shell/tests; groundwork for nano | host+GUI tests, `make test` both arches |
-| G | textutils batches 2+3 + diffutils (`cmp`, then `diff`) | batch 2 (comm/tsort/expand/unexpand/cksum/md5sum) **done**; tac/sum + join/split/od next; diffutils as budget allows | same |
+| G | textutils batches 2+3 + diffutils (`cmp`, then `diff`) | batch 2 (comm/tsort/expand/unexpand/cksum/md5sum) **done**; tac **done**; sum + join/split/od next; diffutils as budget allows | same |
 
 Shared infrastructure to build once and reuse: a `gnulib_support` set for the
 transcribed helpers (quotearg, xalloc, xstrtol where the program needs them),
@@ -213,6 +214,31 @@ a per-program parity script skeleton, and an in-OS spawn-harness pattern
 (`diffutils-2.8.1` and `nano-8.7` are staged for later phases.)
 
 ## 7. Fix log
+
+- **2026-09-25 — on-disk test binaries with names over FAT16 8.3 never
+  loaded.** `expand_test`/`tsort_test`/`cksum_test`/`md5sum_test`/
+  `paste_test` were copied to the disk as `EXPANDTEST.BIN` etc. — 9 to 12
+  characters. mtools accepts the long names by writing VFAT long-file-name
+  entries, but the kernel's FAT16 reader matches the plain 8.3 name only,
+  so the loader printed `Failed to read <NAME>.BIN from disk!` and those
+  tests silently never ran (and the suite, which only halts when every
+  process has drained, then hung — it was misread as memory starvation).
+  The on-disk names are now `EXPAND_T.BIN`, `TSORT_T.BIN`, `PASTE_T.BIN`,
+  `CKSUM_T.BIN`, `MD5SUM_T.BIN`, `UNEXP_T.BIN` (the EDITOR_T.BIN
+  convention); build paths and host-side binaries are unchanged.
+- **2026-09-25 — tac needs /tmp for non-seekable stdin.** When stdin is a
+  pipe (every spawn2-backed in-OS test), 2.1's `tac_stdin()` copies it to
+  `mkstemp("/tmp/tacXXXXXX")` and then uses the seeked path; nothing had
+  created `/tmp` on the disk image, so that mkstemp failed and tac exited
+  with the `EXIT_FAILURE` diagnostic. The disk recipe now makes `::/tmp`,
+  and the TACTEST stdin/`-` cases exercise exactly this path in-OS.
+- **2026-09-25 — host reference for tac parity is a Rust/clap build.**
+  `/usr/bin/tac` on this host is not classic GNU coreutils: it rejects
+  dash-leading separator values (`-s -----`), refuses `--` as a value,
+  rejects a leading `+` in regexes and accepts an empty separator. Those
+  four shapes are tagged `modern` in tac_parity.sh (skipped loose), while
+  `make tac_parity_strict` races the real textutils-2.1 tac: 70/70 cases
+  byte-exact on stdout, stderr and exit codes.
 
 - **2026-09-25 — ARM pool could only hold 32 blocks; the boot wave's tail
   loads starved.** With the pool at 0x80000000 (32 × 32MB to RAM top

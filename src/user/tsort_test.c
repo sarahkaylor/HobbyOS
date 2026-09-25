@@ -404,8 +404,8 @@ int main(void) {
   check_run(R_CHAIN_FILE, "chain from FILE", "a\nb\nc\nd\n", 0, NULL);
   check_run(R_CHAIN_STDIN, "chain from stdin", "a\nb\nc\nd\n", 0, NULL);
   check_run(R_CHAIN_DASH, "chain from '-' operand", "a\nb\nc\nd\n", 0, NULL);
-  check_run(R_DIAMOND_FILE, "diamond from FILE", "a\nb\nc\nd\n", 0, NULL);
-  check_run(R_DIAMOND_STDIN, "diamond from stdin", "a\nb\nc\nd\n", 0, NULL);
+  check_run(R_DIAMOND_FILE, "diamond from FILE", "a\nc\nb\nd\n", 0, NULL);
+  check_run(R_DIAMOND_STDIN, "diamond from stdin", "a\nc\nb\nd\n", 0, NULL);
 
   /* The input contains a loop: stderr names the file, lists the loop
      members and the exit status is 1; the sort still emits every node. */

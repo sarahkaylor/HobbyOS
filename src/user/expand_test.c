@@ -232,7 +232,7 @@ int main(void) {
   check("-t 4 blank lines, no final EOL", out, "\n\nab  c");
 
   run_expand("-t 4 /EXPTAB.TXT /EXPLIST.TXT", "", out, sizeof out);
-  check("multi-file", out, "a   b\na   b   c d e\n");
+  check("multi-file", out, "a   b\na   b   c   d   e\n");
 
   run_expand("", "a\tb\n", out, sizeof out);
   check("stdin default tabs", out, "a       b\n");

@@ -177,7 +177,7 @@ CUTTEST_BIN = $(OBJ_DIR)/cut_test.bin
 TR_BIN = $(OBJ_DIR)/tr.bin
 TRTEST_BIN = $(OBJ_DIR)/tr_test.bin
 PASTE_BIN = $(OBJ_DIR)/paste.bin
-PASTETEST_BIN = $(OBJ_DIR)/paste_test.bin
+PASTE_T_BIN = $(OBJ_DIR)/paste_test.bin
 FOLD_BIN = $(OBJ_DIR)/fold.bin
 FOLDTEST_BIN = $(OBJ_DIR)/fold_test.bin
 NL_BIN = $(OBJ_DIR)/nl.bin
@@ -185,15 +185,17 @@ NLTEST_BIN = $(OBJ_DIR)/nl_test.bin
 COMM_BIN = $(OBJ_DIR)/comm.bin
 COMMTEST_BIN = $(OBJ_DIR)/comm_test.bin
 TSORT_BIN = $(OBJ_DIR)/tsort.bin
-TSORTTEST_BIN = $(OBJ_DIR)/tsort_test.bin
+TSORT_T_BIN = $(OBJ_DIR)/tsort_test.bin
 EXPAND_BIN = $(OBJ_DIR)/expand.bin
-EXPANDTEST_BIN = $(OBJ_DIR)/expand_test.bin
+EXPAND_T_BIN = $(OBJ_DIR)/expand_test.bin
 UNEXPAND_BIN = $(OBJ_DIR)/unexpand.bin
-UNEXPANDTEST_BIN = $(OBJ_DIR)/unexpand_test.bin
+UNEXPAND_T_BIN = $(OBJ_DIR)/unexpand_test.bin
 CKSUM_BIN = $(OBJ_DIR)/cksum.bin
-CKSUMTEST_BIN = $(OBJ_DIR)/cksum_test.bin
+CKSUM_T_BIN = $(OBJ_DIR)/cksum_test.bin
 MD5SUM_BIN = $(OBJ_DIR)/md5sum.bin
-MD5SUMTEST_BIN = $(OBJ_DIR)/md5sum_test.bin
+MD5SUM_T_BIN = $(OBJ_DIR)/md5sum_test.bin
+TAC_BIN = $(OBJ_DIR)/tac.bin
+TACTEST_BIN = $(OBJ_DIR)/tac_test.bin
 TAILTEST_BIN = $(OBJ_DIR)/tail_test.bin
 PROCCHLD_BIN = $(OBJ_DIR)/proc_child.bin
 PROCTEST_BIN = $(OBJ_DIR)/proc_test.bin
@@ -649,6 +651,7 @@ $(eval $(call TU21_PORT_RULE,expand,$(EXPAND_BIN)))
 $(eval $(call TU21_PORT_RULE,unexpand,$(UNEXPAND_BIN)))
 $(eval $(call TU21_PORT_RULE,cksum,$(CKSUM_BIN)))
 $(eval $(call TU21_PORT_RULE,md5sum,$(MD5SUM_BIN)))
+$(eval $(call TU21_PORT_RULE,tac,$(TAC_BIN)))
 
 # --- GNU sed 4.8 (multi-object GNU port; objects named sed_/sedg_) ------
 $(OBJ_DIR)/sed_%.o: src/user/sed/%.c src/user/sed/config.h src/user/sed/*.h src/user/sed/gnulib/*.h $(USER_HDRS)
@@ -691,15 +694,16 @@ $(2): $(OBJ_DIR)/$(1)_test.o $(OBJ_DIR)/libc.a
 endef
 
 $(eval $(call TU21_TEST_RULE,tr,$(TRTEST_BIN)))
-$(eval $(call TU21_TEST_RULE,paste,$(PASTETEST_BIN)))
+$(eval $(call TU21_TEST_RULE,paste,$(PASTE_T_BIN)))
 $(eval $(call TU21_TEST_RULE,fold,$(FOLDTEST_BIN)))
 $(eval $(call TU21_TEST_RULE,nl,$(NLTEST_BIN)))
 $(eval $(call TU21_TEST_RULE,comm,$(COMMTEST_BIN)))
-$(eval $(call TU21_TEST_RULE,tsort,$(TSORTTEST_BIN)))
-$(eval $(call TU21_TEST_RULE,expand,$(EXPANDTEST_BIN)))
-$(eval $(call TU21_TEST_RULE,unexpand,$(UNEXPANDTEST_BIN)))
-$(eval $(call TU21_TEST_RULE,cksum,$(CKSUMTEST_BIN)))
-$(eval $(call TU21_TEST_RULE,md5sum,$(MD5SUMTEST_BIN)))
+$(eval $(call TU21_TEST_RULE,tsort,$(TSORT_T_BIN)))
+$(eval $(call TU21_TEST_RULE,expand,$(EXPAND_T_BIN)))
+$(eval $(call TU21_TEST_RULE,unexpand,$(UNEXPAND_T_BIN)))
+$(eval $(call TU21_TEST_RULE,cksum,$(CKSUM_T_BIN)))
+$(eval $(call TU21_TEST_RULE,md5sum,$(MD5SUM_T_BIN)))
+$(eval $(call TU21_TEST_RULE,tac,$(TACTEST_BIN)))
 
 $(OBJ_DIR)/regex_test.o: src/user/regex_test.c src/user/regex_test_cases.h $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
@@ -922,7 +926,7 @@ endef
 
 $(foreach app,$(DESKTOP_APP_NAMES),$(eval $(call DESKTOP_APP_RULE,$(app))))
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTETEST_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORTTEST_BIN) $(EXPAND_BIN) $(EXPANDTEST_BIN) $(UNEXPAND_BIN) $(UNEXPANDTEST_BIN) $(CKSUM_BIN) $(CKSUMTEST_BIN) $(MD5SUM_BIN) $(MD5SUMTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -932,6 +936,7 @@ disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BI
 	$(MMD) -i disk.img ::/nfs
 	$(MMD) -i disk.img ::/mnt
 	$(MMD) -i disk.img ::/TESTDIR
+	$(MMD) -i disk.img ::/tmp
 	$(MCOPY) -i disk.img tests/fixtures/E2E.TXT ::/E2E.TXT
 	$(MCOPY) -i disk.img tests/fixtures/DRAGME.TXT ::/DRAGME.TXT
 	$(MCOPY) -i disk.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
@@ -1016,15 +1021,17 @@ endif
 	$(MCOPY) -i disk.img $(WCTEST_BIN) ::/WCTEST.BIN
 	$(MCOPY) -i disk.img $(CUTTEST_BIN) ::/CUTTEST.BIN
 	$(MCOPY) -i disk.img $(TRTEST_BIN) ::/TRTEST.BIN
-	$(MCOPY) -i disk.img $(PASTETEST_BIN) ::/PASTETEST.BIN
+	$(MCOPY) -i disk.img $(PASTE_T_BIN) ::/PASTE_T.BIN
 	$(MCOPY) -i disk.img $(FOLDTEST_BIN) ::/FOLDTEST.BIN
 	$(MCOPY) -i disk.img $(NLTEST_BIN) ::/NLTEST.BIN
 	$(MCOPY) -i disk.img $(COMMTEST_BIN) ::/COMMTEST.BIN
-	$(MCOPY) -i disk.img $(TSORTTEST_BIN) ::/TSORTTEST.BIN
-	$(MCOPY) -i disk.img $(EXPANDTEST_BIN) ::/EXPANDTEST.BIN
-	$(MCOPY) -i disk.img $(UNEXPANDTEST_BIN) ::/UNEXPANDTEST.BIN
-	$(MCOPY) -i disk.img $(CKSUMTEST_BIN) ::/CKSUMTEST.BIN
-	$(MCOPY) -i disk.img $(MD5SUMTEST_BIN) ::/MD5SUMTEST.BIN
+	$(MCOPY) -i disk.img $(TSORT_T_BIN) ::/TSORT_T.BIN
+	$(MCOPY) -i disk.img $(EXPAND_T_BIN) ::/EXPAND_T.BIN
+	$(MCOPY) -i disk.img $(UNEXPAND_T_BIN) ::/UNEXPAND_T.BIN
+	$(MCOPY) -i disk.img $(CKSUM_T_BIN) ::/CKSUM_T.BIN
+	$(MCOPY) -i disk.img $(MD5SUM_T_BIN) ::/MD5SUM_T.BIN
+	$(MCOPY) -i disk.img $(TAC_BIN) ::/TAC.BIN
+	$(MCOPY) -i disk.img $(TACTEST_BIN) ::/TACTEST.BIN
 	$(MCOPY) -i disk.img $(REGTEST_BIN) ::/REGTEST.BIN
 	$(MCOPY) -i disk.img $(SEDTEST_BIN) ::/SEDTEST.BIN
 	$(MCOPY) -i disk.img $(GREPTEST_BIN) ::/GREPTEST.BIN
@@ -1375,6 +1382,7 @@ $(eval $(call TU21_PARITY_RULES,expand,expand,EXPAND))
 $(eval $(call TU21_PARITY_RULES,unexpand,unexpand,UNEXPAND))
 $(eval $(call TU21_PARITY_RULES,cksum,cksum,CKSUM))
 $(eval $(call TU21_PARITY_RULES,md5sum,md5sum,MD5SUM))
+$(eval $(call TU21_PARITY_RULES,tac,tac,TAC))
 
 # Header-only sysroot set (stdarg/limits/stdbool/inttypes): compiled with
 # -Isrc/libc/include FIRST so the HobbyOS headers (not glibc's) resolve.
@@ -1415,7 +1423,7 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
