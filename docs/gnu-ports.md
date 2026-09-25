@@ -53,6 +53,7 @@ acceptance test `<TOOL>TEST.BIN` that spawns the real binary through
 | `cksum` | `CKSUM.BIN` | 40 cases | CKSUM_T.BIN | CRC + length, POSIX mode |
 | `md5sum` | `MD5SUM.BIN` | 97 cases | MD5SUM_T.BIN | md5 + --check; sha1 dropped (documented) |
 | `tac` | `TAC.BIN` | 70 cases | TACTEST.BIN | last-line-first reversal; -b/-s/-r incl. regex separators; seeked + /tmp temp-file stdin paths |
+| `cmp` | `CMP.BIN` | 55 cases | CMPTEST.BIN | first diffutils tool; byte/line diff report, -b/-c/-l/-s, EOF, --ignore-initial, --bytes, stdin `-` and SKIP operands |
 
 ### Legacy hand-written tools (kept; not GNU, much smaller surface)
 
@@ -170,7 +171,7 @@ Deferred sequence (own project-sized chunk, after sed/grep land):
 | D | GNU grep 2.5.4 | `GGREP.BIN`; ref build; `grep_parity.sh`; in-OS test | same |
 | E | textutils batch 1 | cut, tr, paste, fold, nl (+ parity + in-OS each, shared fixture harness) | **done** — `make host_tests` + `make test` ARM/Intel green |
 | F | Terminal/keyboard | Ctrl key end-to-end (desktop → window stdin) + shell/tests; groundwork for nano | host+GUI tests, `make test` both arches |
-| G | textutils batches 2+3 + diffutils (`cmp`, then `diff`) | batch 2 (comm/tsort/expand/unexpand/cksum/md5sum) **done**; tac **done**; sum + join/split/od next; diffutils as budget allows | same |
+| G | textutils batches 2+3 + diffutils (`cmp`, then `diff`) | batch 2 (comm/tsort/expand/unexpand/cksum/md5sum) **done**; tac **done**; diffutils **started** (cmp done); sum + join/split/od next | same |
 
 Shared infrastructure to build once and reuse: a `gnulib_support` set for the
 transcribed helpers (quotearg, xalloc, xstrtol where the program needs them),
@@ -232,6 +233,27 @@ a per-program parity script skeleton, and an in-OS spawn-harness pattern
   created `/tmp` on the disk image, so that mkstemp failed and tac exited
   with the `EXIT_FAILURE` diagnostic. The disk recipe now makes `::/tmp`,
   and the TACTEST stdin/`-` cases exercise exactly this path in-OS.
+- **2026-09-25 — cmp's reference build is the 2.8.1 source, not /usr/bin/cmp.**
+  The host's `cmp` is diffutils 3.12: its EOF diagnostic gained a byte/line
+  suffix and its option handling moved on. `build_diffutils_cmp_ref.sh`
+  therefore compiles the vendored 2.8.1 `src/cmp.c` + `version.c` and the
+  lib pieces it calls (error, exitfail, xstrtol+xstrtoumax, cmpbuf,
+  offtostr, getopt, freesoft) against a hand-rolled config.h, with
+  setmode/c-stack/xmalloc stubbed — the same trick the textutils-2.1 refs
+  use. First attempt at the parity bar.
+- **2026-09-25 — cmp parity was honestly strict on the first race.**
+  `cmp_parity.sh` (55 cases) passed byte-exact stdout+stderr+exit on the
+  first run once the runner used `( exec -a cmp ... )` — without the
+  subshell, the first case's exec replaced the harness shell and the suite
+  silently exited.  A `case_` regression like that would otherwise time out
+  as "empty output, rc=0".
+- **2026-09-25 — cmp is the first diffutils program wired into the wave.**
+  CMPTEST.BIN spawns CMP.BIN through spawn2/pipe with fixtures written
+  8.3-clean (CAPA/CAPB/CAPC/CAPE/CAPN/CAPS); the stdin case passes a
+  closed-empty stdin pipe so `-` sees immediate EOF (a plain `-1` stdin fd
+  would leave `cmp -` reading `CMP.BIN`'s own console).  cmp waits for
+  sed's regex work?  No: block compare only, so no new libc surface.
+
 - **2026-09-25 — host reference for tac parity is a Rust/clap build.**
   `/usr/bin/tac` on this host is not classic GNU coreutils: it rejects
   dash-leading separator values (`-s -----`), refuses `--` as a value,
