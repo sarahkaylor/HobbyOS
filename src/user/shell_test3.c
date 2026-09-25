@@ -28,20 +28,32 @@ static int my_strstr(const char *haystack, const char *needle) {
   return 0;
 }
 
+/* Read until `pattern` (e.g. the shell prompt "$ ") shows up, or the
+   stream ends.  The stream can exceed the caller's window: `ls -l /`
+   over a full test wave on disk is ~3.8 KB.  When the buffer fills,
+   drop the oldest half and keep scanning — the newest lines (where
+   names a test just created appear, in FAT append order) and the
+   trailing prompt survive in the window. */
 static int read_until(int fd, char *buf, int max_len, const char *pattern) {
   int len = 0;
-  while (len < max_len - 1) {
+  int pat_len = 0;
+  while (pattern[pat_len]) pat_len++;
+  for (;;) {
     char c;
     int r = read(fd, &c, 1);
     if (r <= 0) {
       print_console("[read_until] read returned <= 0\n");
       break;
     }
+    if (len >= max_len - 1) {
+      int keep = (max_len - 1) / 2;
+      for (int i = 0; i < keep; i++)
+        buf[i] = buf[len - keep + i];
+      len = keep;
+    }
     buf[len++] = c;
     buf[len] = '\0';
 
-    int pat_len = 0;
-    while (pattern[pat_len]) pat_len++;
     if (len >= pat_len) {
       int match = 1;
       for (int i = 0; i < pat_len; i++) {
