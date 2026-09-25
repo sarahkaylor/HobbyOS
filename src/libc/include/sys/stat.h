@@ -23,7 +23,8 @@ extern "C" {
 
   struct stat {
     dev_t st_dev;               /* device (0; kernel has one FS namespace) */
-    ino_t st_ino;               /* 0 */
+    ino_t st_ino;               /* synthesized file identity (FAT16 dir-entry
+                                   location / NFS file-handle fold; 0 pipes) */
     mode_t st_mode;             /* S_IF* bits only (no numeric perms yet) */
     nlink_t st_nlink;           /* 1 */
     uid_t st_uid;               /* 0 */

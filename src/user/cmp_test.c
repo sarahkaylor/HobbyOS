@@ -28,7 +28,8 @@ enum {
   R_EMPTY_VS,
   R_MISSING,
   R_N_LIMIT,
-  R_N_NONE,
+  R_N_BEFORE,
+  R_N_HIT,
   R_IGNORE,
   R_STDIN,
   R_VERSION,
@@ -141,9 +142,14 @@ static int run_attempt(const char *args, char *out, size_t outsize, char *err,
     return -1;
   pid = spawn2("CMP.BIN", in_p[0], out_p[1], err_p[1], args);
   if (pid <= 0) {
+    /* Process-table / block-pool pressure from the concurrently running
+       suite can make the first spawn fail (-1 and a kernel
+       "no free physical memory blocks" line); wait for the pool to
+       drain.  The loader retries internally, so be patient here —
+       20 s total before giving up. */
     int tries = 0;
-    while (pid <= 0 && tries < 100) {
-      usleep(25000); /* 25 ms: the concurrent suite can fill the table */
+    while (pid <= 0 && tries < 800) {
+      usleep(25000); /* 25 ms */
       pid = spawn2("CMP.BIN", in_p[0], out_p[1], err_p[1], args);
       tries++;
     }
@@ -213,13 +219,18 @@ static void run_slot(int slot, const char *args) {
   for (attempt = 0; attempt < 3; attempt++) {
     run_out[slot][0] = '\0';
     run_err[slot][0] = '\0';
-    run_ok[slot] = run_attempt(args, run_out[slot], sizeof run_out[slot],
-                               run_err[slot], sizeof run_err[slot],
-                               &run_rc[slot]);
-    if (run_ok[slot] == 0)
+    if (run_attempt(args, run_out[slot], sizeof run_out[slot],
+                    run_err[slot], sizeof run_err[slot],
+                    &run_rc[slot]) == 0) {
+      run_ok[slot] = 1;
       return;
+    }
     usleep(50000);
   }
+  /* Every attempt failed to spawn; the check functions report it via
+     run_ok == 0 (same convention as tac_test). */
+  run_ok[slot] = 0;
+  run_rc[slot] = -1;
 }
 
 static void check_run(int slot, const char *what, const char *want_out,
@@ -330,7 +341,8 @@ int main(void) {
   run_slot(R_EMPTY_VS, "/CAPE.TXT /CAPA.TXT");
   run_slot(R_MISSING, "/NOPE.TXT /CAPA.TXT");
   run_slot(R_N_LIMIT, "-n 5 /CAPA.TXT /CAPB.TXT");
-  run_slot(R_N_NONE, "-n 4 /CAPA.TXT /CAPB.TXT");
+  run_slot(R_N_BEFORE, "-n 9 /CAPA.TXT /CAPB.TXT");
+  run_slot(R_N_HIT, "-n 10 /CAPA.TXT /CAPB.TXT");
   run_slot(R_IGNORE, "-i 4:0 /CAPS.TXT /CAPA.TXT");
   run_slot(R_STDIN, "- /CAPA.TXT");
   run_slot(R_VERSION, "--version");
@@ -350,11 +362,22 @@ int main(void) {
   check_run_err_has(R_MISSING, "missing file diagnostic",
                     "No such file or directory", 2);
   check_run(R_N_LIMIT, "-n 5 within identical prefix", "", 0);
-  check_run(R_N_NONE, "-n 4 hits difference", "", 1);
+  check_run(R_N_BEFORE, "-n 9 stops before difference", "", 0);
+  check_run_has(R_N_HIT, "-n 10 hits difference", "differ: char 10, line 2", 1);
   check_run(R_IGNORE, "-i 4:0 skips prefix", "", 0);
   check_run(R_STDIN, "- operand reads empty stdin", "", 1);
   check_run_err_has(R_STDIN, "- stdin EOF diagnostic", "cmp: EOF on -", 1);
-  check_run(R_VERSION, "--version", "cmp (GNU diffutils) 2.8.1\n", 0);
+  check_run(R_VERSION, "--version full banner",
+            "cmp (GNU diffutils) 2.8.1\n"
+            "Copyright (C) 2002 Free Software Foundation, Inc.\n"
+            "\n"
+            "This program comes with NO WARRANTY, to the extent permitted by law.\n"
+            "You may redistribute copies of this program\n"
+            "under the terms of the GNU General Public License.\n"
+            "For more information about these matters, see the file named COPYING.\n"
+            "\n"
+            "Written by Torbjorn Granlund and David MacKenzie.\n",
+            0);
   check_run_has(R_HELP, "--help usage text",
                 "Usage: CMP.BIN [OPTION]... FILE1 [FILE2 [SKIP1 [SKIP2]]]",
                 0);

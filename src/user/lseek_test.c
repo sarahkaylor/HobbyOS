@@ -76,6 +76,29 @@ int main(void) {
   CHECK("stat ok", stat("/LKSTEST.TXT", &st) == 0);
   CHECK("stat size", st.st_size == FIXLEN);
   CHECK("stat S_ISREG", S_ISREG(st.st_mode));
+
+  /* --- st_ino identity: synthesized from the FAT16 directory entry --- */
+  unsigned long ino_self = st.st_ino;   /* st holds stat("/LKSTEST.TXT") */
+  CHECK("st_ino nonzero", ino_self != 0);
+  memset(&st, 0, sizeof st);
+  CHECK("fstat identity ok", fstat(fd, &st) == 0);
+  CHECK("fstat st_ino == stat st_ino", st.st_ino == ino_self);
+  memset(&st, 0, sizeof st);
+  CHECK("stat repeat ok", stat("/LKSTEST.TXT", &st) == 0);
+  CHECK("st_ino stable across stats", st.st_ino == ino_self);
+  {
+    int fd2 = open("/LKSTEST2.TXT", O_WRONLY | O_CREAT | O_TRUNC);
+    CHECK("open second fixture", fd2 >= 0);
+    if (fd2 >= 0) {
+      struct stat st2;
+      if (write(fd2, "x", 1) != 1) failures++;
+      memset(&st2, 0, sizeof st2);
+      CHECK("fstat second file", fstat(fd2, &st2) == 0);
+      CHECK("distinct files -> distinct st_ino", st2.st_ino != ino_self);
+      close(fd2);
+    }
+  }
+
   memset(&st, 0, sizeof st);
   CHECK("stat missing -> ENOENT",
         stat("/LKSTEST.NOPE", &st) == -1 && errno == ENOENT);
@@ -126,6 +149,7 @@ int main(void) {
   }
 
   /* cleanup */
+  unlink("/LKSTEST2.TXT");
   unlink("/LKSTEST.TXT");
 
   if (failures == 0) {

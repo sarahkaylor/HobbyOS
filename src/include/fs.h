@@ -93,7 +93,9 @@ void fs_close_global(int g_fd);
 /* ABI mirror of the sysroot's struct stat (LP64: sys/types.h typedefs a
  * dev_t/ino_t/off_t as long and mode_t/uid_t/gid_t as unsigned int).
  * Member-for-member identical layout; the kernel fills one of these
- * directly into user memory (validated at the trap layer). */
+ * directly into user memory (validated at the trap layer).  st_ino is
+ * synthesized per backend: FAT16 directory-entry location, NFS file-handle
+ * fold, 0 for pipes/sockets. */
 struct k_stat {
   unsigned long st_dev;
   unsigned long st_ino;

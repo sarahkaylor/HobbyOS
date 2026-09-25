@@ -224,9 +224,33 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
   return newpos;
 }
 
-static void k_stat_fill(struct k_stat *st, unsigned long mode, long size) {
+/* FAT16 has no on-disk inode numbers: a file's identity is its directory
+ * entry.  Like Linux's vfat driver, synthesize a stable number from the
+ * location of that entry (the sector holding it plus the entry's index
+ * within the 512-byte sector, 16 entries per sector).  Distinct live files
+ * always report distinct st_ino values, and repeated opens of one file
+ * report the same value, which is what tools such as diffutils' cmp rely
+ * on to tell "same file" from "same contents". */
+static unsigned long fat16_synth_ino(uint32_t dir_sector, uint32_t dir_offset) {
+  return ((unsigned long)dir_sector << 4) | (dir_offset & 0xF);
+}
+
+/* NFSv3 file handles are the server-side identity of a file; fold one into
+ * a 64-bit number for st_ino (BKDR hash).  Distinct handles collide only
+ * with negligible probability. */
+static unsigned long nfs_synth_ino(const struct nfs_fh *fh) {
+  unsigned long h = 0;
+  uint32_t i;
+  for (i = 0; i < fh->len && i < sizeof fh->data; i++) {
+    h = (h << 5) - h + fh->data[i];
+  }
+  return h;
+}
+
+static void k_stat_fill(struct k_stat *st, unsigned long ino,
+                        unsigned long mode, long size) {
   st->st_dev = 0;
-  st->st_ino = 0;
+  st->st_ino = ino;
   st->st_mode = mode;
   st->st_nlink = 1;
   st->st_uid = 0;
@@ -246,20 +270,22 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
   switch (f->type) {
   case FILE_TYPE_FAT16:
     k_stat_fill(st,
+                fat16_synth_ino(f->fat16.dir_sector, f->fat16.dir_offset),
                 (f->fat16.entry.attr & 0x10)
                     ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
                 f->fat16.entry.file_size);
     return 0;
   case FILE_TYPE_NFS:
-    k_stat_fill(st, f->nfs.is_dir ? (K_S_IFDIR | 0755)
-                                  : (K_S_IFREG | 0644),
+    k_stat_fill(st, nfs_synth_ino(&f->nfs.fh),
+                f->nfs.is_dir ? (K_S_IFDIR | 0755)
+                              : (K_S_IFREG | 0644),
                 f->nfs.size);
     return 0;
   case FILE_TYPE_PIPE:
-    k_stat_fill(st, K_S_IFIFO | 0600, 0);
+    k_stat_fill(st, 0, K_S_IFIFO | 0600, 0);
     return 0;
   case FILE_TYPE_SOCKET:
-    k_stat_fill(st, K_S_IFSOCK | 0600, 0);
+    k_stat_fill(st, 0, K_S_IFSOCK | 0600, 0);
     return 0;
   default:
     *errp = EBADF;
@@ -274,8 +300,12 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
   char abs[256];
   if (vfs_abs_path(path, abs, sizeof abs) != 0) { *errp = EINVAL; return -1; }
   struct fat16_dir_entry entry;
-  if (fat16_resolve_path(abs, &entry, 0, 0) != 0) { *errp = ENOENT; return -1; }
-  k_stat_fill(st,
+  uint32_t sector = 0, offset = 0;
+  if (fat16_resolve_path(abs, &entry, &sector, &offset) != 0) {
+    *errp = ENOENT;
+    return -1;
+  }
+  k_stat_fill(st, fat16_synth_ino(sector, offset),
               (entry.attr & 0x10) ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
               entry.file_size);
   return 0;
