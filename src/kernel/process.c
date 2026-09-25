@@ -36,7 +36,12 @@ static spinlock_t mem_lock;
 // 0x20000000; 30 blocks (960MB) is what the test-mode workload actually needs
 // (17+ programs plus forks and the RDMA provider loop) - the previous 16 on
 // x86_64 left the last-loaded test without a process.
-#define NUM_PHYS_BLOCKS 32
+/* Physical blocks, each USER_REGION_SIZE (32MB) of contiguous RAM backing one
+   process's entire pre-mapped user region.  x64: 0x20000000..0x70000000
+   (exactly up to the kernel's 0x70000000 load address).  The parallel test
+   wave alone launches ~33 concurrent processes, so the old 32 exhausted the
+   pool and starved child spawns. */
+#define NUM_PHYS_BLOCKS 40
 static uint8_t phys_blocks_used[NUM_PHYS_BLOCKS];
 
 // ---------------------------------------------------------------------------
@@ -301,8 +306,38 @@ static int process_create_internal(void) {
 
   if (block_idx < 0) {
     proc_table[pid].state = PROC_STATE_FREE;
-    spinlock_release_irqrestore(&proc_lock, p_flags);
     uart_puts("[KERNEL] process_create: no free physical memory blocks!\n");
+    /* Diagnostic: who is pinning the pool?  Rate-limited to the first few
+       exhaustion events so a sustained leak does not flood the console. */
+    static int dump_count = 0;
+    if (dump_count < 3) {
+      dump_count++;
+      int used = 0;
+      for (int i = 0; i < NUM_PHYS_BLOCKS; i++) if (phys_blocks_used[i]) used++;
+      uart_puts("[BLOCKS] used=");
+      print_int(used);
+      uart_puts("/");
+      print_int(NUM_PHYS_BLOCKS);
+      uart_puts(" holders:");
+      for (int i = 1; i < MAX_PROCESSES; i++) {
+        struct process *h = &proc_table[i];
+        if (h->state == PROC_STATE_FREE && h->phys_block_idx < 0) continue;
+        uart_puts(" pid=");
+        print_int(i);
+        uart_puts(" st=");
+        print_int((int)h->state);
+        uart_puts(" par=");
+        print_int(h->parent_pid);
+        uart_puts(" blk=");
+        print_int(h->phys_block_idx);
+        uart_puts(" run=");
+        print_int(process_still_running(i));
+        uart_puts(" nm=");
+        uart_puts(h->name[0] ? h->name : "?");
+      }
+      uart_puts("\n");
+    }
+    spinlock_release_irqrestore(&proc_lock, p_flags);
     return -1;
   }
 

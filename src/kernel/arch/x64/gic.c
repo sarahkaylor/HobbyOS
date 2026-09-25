@@ -40,17 +40,27 @@ void pic_init(void) {
 }
 
 /**
- * Initializes the interrupt controller mapping interface.
+ * CPU-local interrupt initialization.
+ * The legacy PIC handles global IRQ delivery, but each core must also
+ * software-enable its own LAPIC: the reschedule IPI (vector 0x81) and the
+ * per-core LVT timer are LAPIC-delivered, and a disabled LAPIC records
+ * them as pending in IRR forever without ever injecting them.
  */
-void gic_init(void) {
-  pic_init();
+void gic_init_cpu(void) {
+  volatile uint32_t *svr = (volatile uint32_t *)0xFEE000F0;
+  // Keep the spurious-interrupt vector at 0xFF and set the APIC software
+  // enable bit so IPI and LVT-timer delivery actually reaches this core.
+  *svr = (*svr & ~0xFFu) | 0xFFu | 0x100u;
 }
 
 /**
- * CPU-local interrupt initialization (no-op on PIC, which is global).
+ * Initializes the interrupt controller mapping interface.
+ * Mirrors the ARM layout: the distributor init also brings up the
+ * local (BSP) CPU interface so the boot core can receive LAPIC vectors.
  */
-void gic_init_cpu(void) {
-  // PIC is global, so no-op
+void gic_init(void) {
+  pic_init();
+  gic_init_cpu();
 }
 
 /**

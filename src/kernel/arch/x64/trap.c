@@ -116,7 +116,13 @@ static void sys_read(struct trap_frame *tf) {
       (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
     int ret = file_read(caller, fd, buf, size, tf);
     if (ret == -2) {
-      tf->elr -= 4; /* restart; baseline x64 behavior (see x64 restart TODO) */
+      /* Restart the syscall on wake: rewind elr over the 2-byte `syscall`
+         instruction, and save our own resume frame BEFORE switching out —
+         a writer on another CPU can wake us in the window between the pipe
+         marking us BLOCKED and this schedule() call, and schedule() does
+         not re-save a process that is already READY. */
+      tf->elr -= 2;
+      save_context(caller, tf);
       schedule(tf, 0);
     } else if (ret < 0) {
       tf->regs[0] = -EBADF;
@@ -340,7 +346,9 @@ static void sys_write(struct trap_frame *tf) {
       (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
     int ret = file_write(caller, fd, buf, size, tf);
     if (ret == -2) {
-      tf->elr -= 4; /* restart; baseline x64 behavior (see x64 restart TODO) */
+      /* See sys_read: 2-byte `syscall` rewind + own-frame save. */
+      tf->elr -= 2;
+      save_context(caller, tf);
       schedule(tf, 0);
     } else if (ret < 0) {
       tf->regs[0] = -EBADF;
@@ -835,8 +843,13 @@ static void sys_exec(struct trap_frame *tf) {
  * addresses and calling them jumps to unloaded RAM — executing zeroes on
  * the first syscall).  Any added x64 syscall must append an else-if. */
 
+/* Last syscall each core entered; 0 = not in a syscall.  A core wedged
+   inside a syscall leaves this set, which the stall watchdog prints. */
+static volatile int core_in_syscall[MAX_CPUS];
+
 void sync_lower_handler_c(struct trap_frame *tf) {
   uint64_t syscall_num = tf->regs[0]; // rax
+  core_in_syscall[get_cpuid()] = (int)syscall_num;
 
   if (syscall_num == 0xFF) {
     schedule(tf, 1);
@@ -928,6 +941,7 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     uart_puts("Unknown System Call Invoked!\n");
     tf->regs[0] = -ENOSYS;
   }
+  core_in_syscall[get_cpuid()] = 0;
 }
 
 static void safe_print_int(int val) {
@@ -958,6 +972,105 @@ static void safe_print_hex(uint64_t val) {
   }
 }
 
+/* Stall watchdog: records each core's last-seen context on every interrupt
+   and complains when the console has been silent for a long time while work
+   should be running.  A silent hang otherwise leaves no trace; each core's
+   last-seen RIP tells where it was when the lights went out. */
+#define WATCHDOG_SILENCE_MS 20000
+#define WATCHDOG_COOLDOWN_MS 30000
+
+static volatile uint64_t wd_last_seen_ms[MAX_CPUS];
+static volatile uint64_t wd_last_seen_rip[MAX_CPUS];
+static volatile int wd_last_seen_pid[MAX_CPUS];
+static volatile uint64_t wd_next_report_ms = 0;
+
+static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
+  extern volatile uint64_t uart_last_activity_ms;
+  extern volatile uint64_t lock_wait_addr[MAX_CPUS];
+  extern volatile uint64_t lock_wait_caller[MAX_CPUS];
+  struct process *cur = current_process();
+  uint64_t now = timer_get_ms();
+
+  wd_last_seen_ms[cpu] = now;
+  wd_last_seen_rip[cpu] = tf->elr;
+  wd_last_seen_pid[cpu] = cur ? cur->pid : -1;
+
+  if (now < wd_next_report_ms) {
+    return;
+  }
+  if (now - uart_last_activity_ms < WATCHDOG_SILENCE_MS) {
+    return;
+  }
+  wd_next_report_ms = now + WATCHDOG_COOLDOWN_MS;
+  uart_puts("[WATCHDOG] console silent for more than 20s\n");
+  for (uint32_t c = 0; c < MAX_CPUS; c++) {
+    uart_puts("  CPU");
+    print_int((int)c);
+    uart_puts(" rip=");
+    uart_print_hex(wd_last_seen_rip[c]);
+    uart_puts(" pid=");
+    print_int(wd_last_seen_pid[c]);
+    uart_puts(" age_ms=");
+    print_int((int)(now - wd_last_seen_ms[c]));
+    if (core_in_syscall[c] != 0) {
+      uart_puts(" syscall=");
+      print_int(core_in_syscall[c]);
+    }
+    if (lock_wait_addr[c] != 0) {
+      uart_puts(" wait_lock=");
+      uart_print_hex(lock_wait_addr[c]);
+      uart_puts(" caller=");
+      uart_print_hex(lock_wait_caller[c]);
+    }
+    uart_puts("\n");
+  }
+
+  /* Deep-freeze forensics: for any core silent >60s, scan its kernel stack for
+     return addresses into .text ([0x70000000,0x7001c000)).  The lowest hit
+     approximates the deepest (newest) frame = where the core sits right now. */
+  for (uint32_t c = 1; c < MAX_CPUS; c++) {
+    if (now - wd_last_seen_ms[c] < 60000) continue;
+    uint64_t top = cpu_locals[c].kernel_stack;
+    uint64_t last_hit = 0;
+    int hits = 0;
+    uart_puts("  CSTK cpu");
+    print_int((int)c);
+    uart_puts(":");
+    for (uint64_t a = top - 8; a > (top - 24576) && hits < 16; a -= 8) {
+      uint64_t v = *(volatile uint64_t *)a;
+      if (v >= 0x70000000ULL && v < 0x7001c000ULL) {
+        uart_puts(" ");
+        uart_print_hex(v);
+        last_hit = a;
+        hits++;
+      }
+    }
+    uart_puts("\n");
+    if (last_hit) {
+      uart_puts("  CDATA cpu");
+      print_int((int)c);
+      uart_puts(" cur~=");
+      uart_print_hex(last_hit);
+      uart_puts(":");
+      for (int q = 0; q < 12; q++) {
+        uart_puts(" ");
+        uart_print_hex(*(volatile uint64_t *)(last_hit + 8 * q));
+      }
+      uart_puts("\n");
+    }
+  }
+}
+
+/**
+ * Sends End of Interrupt (EOI) to this core's LAPIC.
+ * Required for LAPIC-delivered vectors (reschedule IPI 0x81, LVT timer):
+ * without it the APIC keeps the in-service bit set and silently blocks
+ * every further interrupt of that priority class.
+ */
+void lapic_send_eoi(void) {
+  *(volatile uint32_t *)0xFEE000B0 = 0;
+}
+
 void general_interrupt_handler(struct trap_frame *tf) {
   extern void gic_set_current_vector(uint32_t cpu, uint32_t vector);
   extern uint32_t gic_acknowledge_interrupt(void);
@@ -966,24 +1079,37 @@ void general_interrupt_handler(struct trap_frame *tf) {
 
   uint32_t cpu = get_cpuid();
   gic_set_current_vector(cpu, tf->vector);
+  watchdog_tick(cpu, tf);
 
   if (tf->vector == 32) {
-    // PIT timer interrupt
+    // PIT/LAPIC timer interrupt
     uint32_t intid = gic_acknowledge_interrupt();
-    timer_reload();
 
-    // Broadcast rescheduling IPI (vector 0x81) to all other cores
-    if (get_cpuid() == 0) {
-      *(volatile uint32_t*)(0xFEE00300) = 0x000C4081;
+    if (cpu == 0) {
+      // The PIT is the global time base and is wired to the boot core only.
+      timer_reload();
+
+      // Broadcast rescheduling IPI (vector 0x81) to all other cores.
+      // Bit 14 stays clear: it is defined for level-triggered delivery only.
+      *(volatile uint32_t*)(0xFEE00300) = 0x000C0081;
     }
+
+    // Per-core LVT-timer ticks arrive here too; always release the LAPIC.
+    // The PIC EOI is the boot core's job alone: a stray EOI from another
+    // core could clear an unrelated in-service PIC interrupt.
+    lapic_send_eoi();
 
     struct process *cur = current_process();
     if (cur && (cur->is_kernel_process || (tf->cs & 3) == 3)) {
-      gic_end_interrupt(intid);
+      if (cpu == 0) {
+        gic_end_interrupt(intid);
+      }
       schedule(tf, 0);
       return;
     }
-    gic_end_interrupt(intid);
+    if (cpu == 0) {
+      gic_end_interrupt(intid);
+    }
   } else if (tf->vector == 33 || tf->vector == 44) {
     uint32_t intid = gic_acknowledge_interrupt();
     extern void virtio_input_handle_irq(int irq);
@@ -1001,7 +1127,9 @@ void general_interrupt_handler(struct trap_frame *tf) {
     // Syscall software interrupt / instruction trap
     sync_lower_handler_c(tf);
   } else if (tf->vector == 0x81) {
-    // Yield software interrupt
+    // Reschedule/yield IPI. Release the LAPIC first: this vector is
+    // LAPIC-delivered and would wedge at this priority without an EOI.
+    lapic_send_eoi();
     schedule(tf, 1);
   } else if (tf->vector < 32) {
     // Exception
@@ -1047,6 +1175,22 @@ void general_interrupt_handler(struct trap_frame *tf) {
       uart_puts("  RBP: ");
       safe_print_hex(tf->regs[6]);
       uart_puts("\n");
+      uart_puts("  CPU: ");
+      safe_print_int(get_cpuid());
+      struct process *curproc = current_process();
+      uart_puts("  pid: ");
+      safe_print_int(curproc ? curproc->pid : -1);
+      uart_puts("\n");
+      /* Raw stack window: even when RIP is garbage, the return addresses
+         on the stack tell where the fault came from. */
+      uint64_t *fsp = (uint64_t*)((uint64_t*)tf)[38];
+      for (int si = 0; si < 16; si++) {
+        uart_puts("  STACK[");
+        safe_print_int(si);
+        uart_puts("]: ");
+        safe_print_hex(fsp[si]);
+        uart_puts("\n");
+      }
       while (1);
     }
   }
