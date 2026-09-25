@@ -64,7 +64,11 @@ static int exit_status;
    a single space (POSIX mode). */
 static int posixly_correct;
 
-static struct option const longopts[] = { {"bytes", no_argument, NULL, 'c'}, {"chars", no_argument, NULL, 'm'}, {"lines", no_argument, NULL, 'l'}, {"words", no_argument, NULL, 'w'}, {"max-line-length", no_argument, NULL, 'L'}, {"help", no_argument, NULL, 'h'}, {"version", no_argument, NULL, 'V'}, {NULL, 0, NULL, 0}
+/* glibc getopt.h's long-only option chars; 2.1's wc has no -h/-V shorts. */
+#define GETOPT_HELP_CHAR -2
+#define GETOPT_VERSION_CHAR -3
+
+static struct option const longopts[] = { {"bytes", no_argument, NULL, 'c'}, {"chars", no_argument, NULL, 'm'}, {"lines", no_argument, NULL, 'l'}, {"words", no_argument, NULL, 'w'}, {"max-line-length", no_argument, NULL, 'L'}, {"help", no_argument, NULL, GETOPT_HELP_CHAR}, {"version", no_argument, NULL, GETOPT_VERSION_CHAR}, {NULL, 0, NULL, 0}
 };
 
 static void usage (int status) {
@@ -88,8 +92,10 @@ read standard input.\n\
   -w, --words            print the word counts\n\
 "), stdout);
     fputs (_("\
-  -h, --help             display this help and exit\n\
-  -V, --version          output version information and exit\n\
+      --help     display this help and exit\n\
+      --version  output version information and exit\n\
+\n\
+Report bugs to <bug-textutils@gnu.org>.\n\
 "), stdout);
   }
   exit (status == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
@@ -332,11 +338,11 @@ int main (int argc, char **argv) {
       print_linelength = 1;
       break;
 
-    case 'h':
+    case GETOPT_HELP_CHAR:
       usage (0);
 
-    case 'V':
-      printf ("%s (HobbyOS textutils) 2.1\n", PROGRAM_NAME);
+    case GETOPT_VERSION_CHAR:
+      printf ("%s (textutils) 2.1\n", PROGRAM_NAME);
       exit (EXIT_SUCCESS);
 
     default:

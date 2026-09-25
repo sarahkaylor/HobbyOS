@@ -39,12 +39,17 @@
 #include <error.h>
 
 #define _(s) (s)
+/* glibc getopt.h's long-only option chars.  These decl macros are
+   BRACE-LESS (as textutils' sys2.h defines them): call sites wrap them
+   as {GETOPT_HELP_OPTION_DECL}.  A braced definition would make the
+   call site double-brace the struct, leaving has_arg/flag/val zero and
+   silently disabling --help/--version.  */
 #define GETOPT_HELP_CHAR -2
 #define GETOPT_VERSION_CHAR -3
 #define GETOPT_HELP_OPTION_DECL \
-  {"help", no_argument, NULL, GETOPT_HELP_CHAR}, {0, 0, 0, 0}
+  "help", no_argument, NULL, GETOPT_HELP_CHAR
 #define GETOPT_VERSION_OPTION_DECL \
-  {"version", no_argument, NULL, GETOPT_VERSION_CHAR}, {0, 0, 0, 0}
+  "version", no_argument, NULL, GETOPT_VERSION_CHAR
 #define DIE(p, e) do { if (p) { print_console("\n[TAILGN] DIE: "); print_console(e); print_console("\n"); exit(1); } } while (0)
 #define STREQ(a, b) (strcmp ((a), (b)) == 0)
 #define ISDIGIT(c) ((c) >= '0' && (c) <= '9')
@@ -63,10 +68,10 @@
 #define OFF_T_MAX INT64_MAX
 #define EXIT_FAILURE 1
 #ifndef PACKAGE
-#define PACKAGE "HobbyOS"
+#define PACKAGE "textutils"
 #endif
-#define PACKAGE_VERSION "0.1"
-#define PACKAGE_BUGREPORT "DEV@hobbyos"
+#define PACKAGE_VERSION "2.1"
+#define PACKAGE_BUGREPORT "bug-textutils@gnu.org"
 #define PID_T_MAX INT_MAX
 #ifndef CHAR_BIT
 #define CHAR_BIT 8

@@ -2,15 +2,18 @@
  * signal.h — standard <signal.h> for the HobbyOS sysroot.
  *
  * Host (HOST_TEST): the real <signal.h> is pulled in via include_next so
- * host parity builds behave exactly like glibc.
+ * host parity builds behave exactly like glibc.  NOTE: the guard below is
+ * deliberately HOBBYOS_SIGNAL_H, not glibc's _SIGNAL_H — pre-defining
+ * _SIGNAL_H would make the include_next'ed glibc header self-disable and
+ * leave kill()/raise() undeclared for host builds (this bit tail_host).
  *
  * Device: signals do not exist yet (Phase 6).  We provide the standard
  * names and prototypes; the implementations (src/libc/src/signal.c) are
  * low-fidelity placeholders so GNU ported code compiles and links.  Any
  * program that actually depends on signal delivery must wait for Phase 6.
  */
-#ifndef _SIGNAL_H
-#define _SIGNAL_H
+#ifndef HOBBYOS_SIGNAL_H
+#define HOBBYOS_SIGNAL_H
 
 #ifdef HOST_TEST
 #include_next <signal.h>
@@ -53,4 +56,4 @@ int kill(pid_t pid, int sig);
 int raise(int sig);
 
 #endif /* !HOST_TEST */
-#endif /* _SIGNAL_H */
+#endif /* HOBBYOS_SIGNAL_H */

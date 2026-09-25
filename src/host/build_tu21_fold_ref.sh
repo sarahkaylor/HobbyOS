@@ -1,22 +1,36 @@
 #!/bin/bash
-# build_tu21_wc_ref.sh — build GNU textutils-2.1's ORIGINAL wc as a strict
-# byte-exact reference for the HobbyOS wc port (src/host/wc_parity.sh).
+# build_tu21_fold_ref.sh — build GNU textutils-2.1's ORIGINAL fold as a strict
+# byte-exact reference for the HobbyOS fold port (src/host/fold_parity.sh).
 #
 # The textutils-2.1 sources are vendored at third_party/textutils-2.1
-# (GPL v2, the same lineage our port was transcribed from). It predates
-# modern glibc, so this script hands it a minimal config.h and compiles
-# the small set of .c files wc needs. Output: $OUT (default
-# /tmp/tu21_wc, formally /tmp/gnuwc-ref/tu21_wc).
+# (GPL v2, the same lineage our port was transcribed from).  It predates
+# modern glibc, so this script hands it a minimal config.h and compiles the
+# small set of .c files fold needs.  Output: $OUT (default
+# /tmp/gnufold-ref/tu21_fold).
 #
-# Usage: bash src/host/build_tu21_wc_ref.sh [output-path]
+# Files (vs. build_tu21_cut_ref.sh, fold's extra gnulib surface):
+#   src/fold.c        the program
+#   lib/xstrtol.c     xstrtol(), the -w width parser
+#   lib/posixver.c    posix2_version(), the obsolete `-N' syntax gate
+#   lib/{getopt,getopt1,error,closeout}.c, plus stubs.c
+#
+# Note on posix2_version(): 2.1's lib/posixver.c takes its default from the
+# compile-time _POSIX2_VERSION of <unistd.h>.  Modern glibc says 200809L, so
+# this reference would hard-error on `fold -10' ("`-10' option is obsolete;
+# use `-w10'").  The port's sysroot publishes no POSIX version (default 0 ->
+# accept silently), which is what this release did on the systems it shipped
+# for, so fold_parity.sh runs BOTH binaries with _POSIX2_VERSION=199901
+# (< 200112) set, exactly as src/host/head_parity.sh does for head.
+#
+# Usage: bash src/host/build_tu21_fold_ref.sh [output-path]
 set -e
 BASE="$(cd "$(dirname "$0")/../../third_party/textutils-2.1" && pwd)"
-OUT="${1:-/tmp/gnuwc-ref/tu21_wc}"
-WD="$(mktemp -d /tmp/tu21ref.XXXXXX)"
+OUT="${1:-/tmp/gnufold-ref/tu21_fold}"
+WD="$(mktemp -d /tmp/tu21fref.XXXXXX)"
 trap 'rm -rf "$WD"' EXIT
 
 cat > "$WD/config.h" <<'EOF'
-/* minimal config for host-compiling textutils-2.1 src/wc.c against
+/* minimal config for host-compiling textutils-2.1 src/fold.c against
    modern glibc (hand-rolled; avoids running 1999-era autoconf) */
 #define HAVE_CONFIG_H 1
 #define PACKAGE "textutils"
@@ -25,11 +39,14 @@ cat > "$WD/config.h" <<'EOF'
 #define VERSION "2.1"
 #define HAVE_UNISTD_H 1
 #define HAVE_STDLIB_H 1
+#define HAVE_MALLOC 1
+#define HAVE_REALLOC 1
 #define HAVE_STRING_H 1
 #define HAVE_ERRNO_H 1
 #define HAVE_FCNTL_H 1
 #define HAVE_SYS_STAT_H 1
 #define HAVE_SYS_TYPES_H 1
+#define HAVE_LIMITS_H 1
 #define HAVE_INTTYPES_H 0
 #define HAVE_WCHAR_H 0
 #define HAVE_MBRTOWC 0
@@ -41,8 +58,9 @@ cat > "$WD/config.h" <<'EOF'
 #define HAVE_DECL_GETENV 1
 #define HAVE_DECL_FREE 1
 #define HAVE_DECL_MALLOC 1
-#define HAVE_DECL_STPCPY 0
+#define HAVE_DECL_REALLOC 1
 #define HAVE_DECL_STRDUP 1
+#define HAVE_DECL_STRTOL 1
 #define HAVE_DECL_STRTOUL 1
 #define HAVE_DECL_STRTOULL 1
 #define HAVE_DECL_STRTOUMAX 1
@@ -60,8 +78,8 @@ cat > "$WD/config.h" <<'EOF'
 #define ENABLE_NLS 0
 #define LOCALEDIR "/tmp/share/locale"
 #define HAVE_DECL_MEMCHR 1
-#define HAVE_DECL_REALLOC 1
 #define HAVE_DECL_MEMCMP 1
+#define HAVE_DECL_MEMMOVE 1
 #define HAVE_DECL_STRCHR 1
 #define HAVE_DECL_STRRCHR 1
 #define HAVE_DECL_STRSTR 1
@@ -102,13 +120,11 @@ cat > "$WD/unlocked-io.h" <<'EOF'
 #define ftell_unlocked ftell
 EOF
 
-# pthread_kill is glibc-only; map it away (error.c's c-stack refs)
+# sys_errlist/sys_nerr + other vanished glibc bits (see build_tu21_cut_ref.sh)
 cat > "$WD/stubs.c" <<'EOF'
 #include <stdio.h>
 #include <stdarg.h>
 #include <stddef.h>
-/* sys_errlist/sys_nerr vanished from modern glibc; provide faithful
-   tables so the reference's error messages match GNU textutils exactly */
 int sys_nerr = 134;
 char *sys_errlist[134] = {
   "Success", "Operation not permitted", "No such file or directory",
@@ -160,15 +176,23 @@ char *sys_errlist[134] = {
   "Key has been revoked", "Key was rejected by service", "Owner died",
   "State not recoverable", "Operation not possible due to RF-kill", "Memory page has hardware error",
 };
-/* never actually invoked for wc's fixed 1,1 block size, but must link */
+/* fold (2.1) prints its --version through version_etc; the port prints the
+   same line from case_GETOPT_VERSION_CHAR, so keep the exact 2.1 wording. */
 void version_etc(FILE *stream, const char *command_name, const char *package,
                  const char *version, const char *authors0, ...)
 { fprintf (stream, "%s (%s) %s\n", command_name, package, version); (void)authors0; }
 char *quotearg_colon(const char *s) { return (char *)s; }
 const char *argmatch(const char *arg, const char *const *arglist,
                      const char *vallist, size_t valsize) { (void)arg; (void)arglist; (void)vallist; (void)valsize; return NULL; }
-unsigned long long xstrtoul(const char *arg, char **e, int b, unsigned long long lo, unsigned long long hi) { (void)arg; (void)e; (void)b; (void)lo; (void)hi; return 0; }
 size_t __fpending (FILE *fp) { (void)fp; return 0; }
+/* lib/xmalloc.c needs 1999-era autoconf malloc probes; provide the four
+   entry points fold.c actually calls, with 2.1-faithful OOM behavior. */
+#include <stdlib.h>
+#include <string.h>
+void xalloc_die (void) { fputs ("memory exhausted\n", stderr); exit (1); }
+void *xmalloc (size_t n) { void *p = malloc (n); if (!p) xalloc_die (); return p; }
+void *xrealloc (void *p, size_t n) { void *q = realloc (p, n); if (!q) xalloc_die (); return q; }
+char *xstrdup (const char *s) { size_t n = strlen (s) + 1; char *p = xmalloc (n); memcpy (p, s, n); return p; }
 EOF
 
 CFLAGS="-O1 -w -DHAVE_CONFIG_H"
@@ -180,12 +204,12 @@ CFLAGS="$CFLAGS -DVA_END(args)=va_end(args) -DHAVE_VPRINTF=1"
 CFLAGS="$CFLAGS -include string.h -include stdlib.h"
 
 FILES=(
-    "$BASE/src/wc.c"
+    "$BASE/src/fold.c"
+    "$BASE/lib/xstrtol.c"
+    "$BASE/lib/posixver.c"
     "$BASE/lib/getopt.c"
     "$BASE/lib/getopt1.c"
     "$BASE/lib/error.c"
-    "$BASE/lib/human.c"
-    "$BASE/lib/safe-read.c"
     "$BASE/lib/closeout.c"
     "$WD/stubs.c"
 )

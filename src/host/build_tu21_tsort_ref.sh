@@ -1,22 +1,25 @@
 #!/bin/bash
-# build_tu21_wc_ref.sh — build GNU textutils-2.1's ORIGINAL wc as a strict
-# byte-exact reference for the HobbyOS wc port (src/host/wc_parity.sh).
+# build_tu21_tsort_ref.sh — build GNU textutils-2.1's ORIGINAL tsort as a
+# strict byte-exact reference for the HobbyOS tsort port
+# (src/host/tsort_parity.sh).
 #
-# The textutils-2.1 sources are vendored at third_party/textutils-2.1
-# (GPL v2, the same lineage our port was transcribed from). It predates
-# modern glibc, so this script hands it a minimal config.h and compiles
-# the small set of .c files wc needs. Output: $OUT (default
-# /tmp/tu21_wc, formally /tmp/gnuwc-ref/tu21_wc).
+# Same approach as build_tu21_cut_ref.sh: the vendored textutils-2.1
+# sources (GPL v2, the lineage the port was transcribed from) are compiled
+# against a minimal hand-rolled config.h.  tsort's gnulib surface:
+# readtokens.c (init_tokenbuffer/readtoken), getopt+getopt1 (getopt_long
+# for parse_long_options and the option loop), error.c, closeout.c
+# (atexit(close_stdout)) and long-options.c (--help/--version).  Output:
+# $OUT (default /tmp/gnutsort-ref/tu21_tsort).
 #
-# Usage: bash src/host/build_tu21_wc_ref.sh [output-path]
+# Usage: bash src/host/build_tu21_tsort_ref.sh [output-path]
 set -e
 BASE="$(cd "$(dirname "$0")/../../third_party/textutils-2.1" && pwd)"
-OUT="${1:-/tmp/gnuwc-ref/tu21_wc}"
-WD="$(mktemp -d /tmp/tu21ref.XXXXXX)"
+OUT="${1:-/tmp/gnutsort-ref/tu21_tsort}"
+WD="$(mktemp -d /tmp/tu21tsref.XXXXXX)"
 trap 'rm -rf "$WD"' EXIT
 
 cat > "$WD/config.h" <<'EOF'
-/* minimal config for host-compiling textutils-2.1 src/wc.c against
+/* minimal config for host-compiling textutils-2.1 src/tsort.c against
    modern glibc (hand-rolled; avoids running 1999-era autoconf) */
 #define HAVE_CONFIG_H 1
 #define PACKAGE "textutils"
@@ -25,6 +28,7 @@ cat > "$WD/config.h" <<'EOF'
 #define VERSION "2.1"
 #define HAVE_UNISTD_H 1
 #define HAVE_STDLIB_H 1
+#define STDC_HEADERS 1
 #define HAVE_STRING_H 1
 #define HAVE_ERRNO_H 1
 #define HAVE_FCNTL_H 1
@@ -41,7 +45,7 @@ cat > "$WD/config.h" <<'EOF'
 #define HAVE_DECL_GETENV 1
 #define HAVE_DECL_FREE 1
 #define HAVE_DECL_MALLOC 1
-#define HAVE_DECL_STPCPY 0
+#define HAVE_DECL_REALLOC 1
 #define HAVE_DECL_STRDUP 1
 #define HAVE_DECL_STRTOUL 1
 #define HAVE_DECL_STRTOULL 1
@@ -60,7 +64,6 @@ cat > "$WD/config.h" <<'EOF'
 #define ENABLE_NLS 0
 #define LOCALEDIR "/tmp/share/locale"
 #define HAVE_DECL_MEMCHR 1
-#define HAVE_DECL_REALLOC 1
 #define HAVE_DECL_MEMCMP 1
 #define HAVE_DECL_STRCHR 1
 #define HAVE_DECL_STRRCHR 1
@@ -102,13 +105,12 @@ cat > "$WD/unlocked-io.h" <<'EOF'
 #define ftell_unlocked ftell
 EOF
 
-# pthread_kill is glibc-only; map it away (error.c's c-stack refs)
 cat > "$WD/stubs.c" <<'EOF'
 #include <stdio.h>
 #include <stdarg.h>
 #include <stddef.h>
-/* sys_errlist/sys_nerr vanished from modern glibc; provide faithful
-   tables so the reference's error messages match GNU textutils exactly */
+#include <stdlib.h>
+#include <string.h>
 int sys_nerr = 134;
 char *sys_errlist[134] = {
   "Success", "Operation not permitted", "No such file or directory",
@@ -160,15 +162,22 @@ char *sys_errlist[134] = {
   "Key has been revoked", "Key was rejected by service", "Owner died",
   "State not recoverable", "Operation not possible due to RF-kill", "Memory page has hardware error",
 };
-/* never actually invoked for wc's fixed 1,1 block size, but must link */
+/* version_etc lives in lib/version-etc.c, which drags in the full
+   copyright/authors banner; tsort's --version only needs this one line,
+   printed exactly as the ported tsort prints it. */
 void version_etc(FILE *stream, const char *command_name, const char *package,
                  const char *version, const char *authors0, ...)
 { fprintf (stream, "%s (%s) %s\n", command_name, package, version); (void)authors0; }
-char *quotearg_colon(const char *s) { return (char *)s; }
-const char *argmatch(const char *arg, const char *const *arglist,
-                     const char *vallist, size_t valsize) { (void)arg; (void)arglist; (void)vallist; (void)valsize; return NULL; }
-unsigned long long xstrtoul(const char *arg, char **e, int b, unsigned long long lo, unsigned long long hi) { (void)arg; (void)e; (void)b; (void)lo; (void)hi; return 0; }
 size_t __fpending (FILE *fp) { (void)fp; return 0; }
+/* closeout.c quotes the output name on a write error; tsort's error paths
+   never get there, so pass the name through unquoted. */
+char *quotearg_colon(const char *s) { return (char *)s; }
+/* lib/xmalloc.c's autoconf probes are not worth running; provide the
+   entry points tsort.c/readtokens.c call, with 2.1-faithful OOM behavior. */
+void xalloc_die (void) { fputs ("memory exhausted\n", stderr); exit (1); }
+void *xmalloc (size_t n) { void *p = malloc (n); if (!p) xalloc_die (); return p; }
+void *xrealloc (void *p, size_t n) { void *q = realloc (p, n); if (!q) xalloc_die (); return q; }
+char *xstrdup (const char *s) { size_t n = strlen (s) + 1; char *p = xmalloc (n); memcpy (p, s, n); return p; }
 EOF
 
 CFLAGS="-O1 -w -DHAVE_CONFIG_H"
@@ -180,12 +189,12 @@ CFLAGS="$CFLAGS -DVA_END(args)=va_end(args) -DHAVE_VPRINTF=1"
 CFLAGS="$CFLAGS -include string.h -include stdlib.h"
 
 FILES=(
-    "$BASE/src/wc.c"
+    "$BASE/src/tsort.c"
+    "$BASE/lib/readtokens.c"
+    "$BASE/lib/long-options.c"
     "$BASE/lib/getopt.c"
     "$BASE/lib/getopt1.c"
     "$BASE/lib/error.c"
-    "$BASE/lib/human.c"
-    "$BASE/lib/safe-read.c"
     "$BASE/lib/closeout.c"
     "$WD/stubs.c"
 )

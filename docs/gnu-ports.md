@@ -29,11 +29,29 @@ upstream tree is vendored under `third_party/` and is used to build a
 
 ### GNU textutils-2.1 ports (complete, byte-exact parity vs. reference build)
 
-| Program | Binary | Notes |
-|---|---|---|
-| `wc` | `WC.BIN` | full option set incl. long options; wc_parity.sh + WCTEST.BIN |
-| `head` | `HEDGNU.BIN` | head_parity.sh; legacy HEAD.BIN stays for the shell |
-| `tail` | `TAILGN.BIN` | strict ref build pulls argmatch/human gnulib too |
+All ports share the same shape: transcribed source in `src/user/<tool>_gnu.c`
+(GPL header, gnulib scaffolding replaced by the sysroot), a host reference
+build (`src/host/build_tu21_<tool>_ref.sh`), a race harness
+(`src/host/<tool>_parity.sh`, joined to `make host_tests`), and an in-OS
+acceptance test `<TOOL>TEST.BIN` that spawns the real binary through
+`spawn2` + pipes.
+
+| Program | Binary | Strict parity | In-OS test | Notes |
+|---|---|---|---|---|
+| `wc` | `WC.BIN` | 103 cases + --help/--version | WCTEST.BIN | full option set incl. long options |
+| `head` | `HEDGNU.BIN` | 133 cases + --help/--version | HEDTEST.BIN | legacy HEAD.BIN stays for the shell |
+| `tail` | `TAILGN.BIN` | 224 cases + --help/--version | TAILTEST.BIN | strict ref pulls argmatch/human gnulib |
+| `cut` | `CUT.BIN` | 93 cases + --help/--version | CUTTEST.BIN | bytes/chars/fields, -d/-s/--output-delimiter/-n |
+| `tr` | `TR.BIN` | 130 cases | TRTEST.BIN | sets, ranges, -c/-d/-s/-t, [:class:] |
+| `paste` | `PASTE.BIN` | 101 cases | PASTETEST.BIN | serial + parallel, -d/-s |
+| `fold` | `FOLD.BIN` | 143 cases | FOLDTEST.BIN | -b/-s/-w |
+| `nl` | `NL.BIN` | 106 cases | NLTEST.BIN | styles, -b/-n/-w/-s/-v, sections |
+| `comm` | `COMM.BIN` | 55 cases | COMMTEST.BIN | -1/-2/-3, column ordering |
+| `tsort` | `TSORT.BIN` | 75 cases | TSORTTEST.BIN | topological sort, cycle diagnostics |
+| `expand` | `EXPAND.BIN` | 173 cases | EXPANDTEST.BIN | -t tab lists, -i |
+| `unexpand` | `UNEXPAND.BIN` | 77 cases | UNEXPANDTEST.BIN | -a/-t/-first-only |
+| `cksum` | `CKSUM.BIN` | 40 cases | CKSUMTEST.BIN | CRC + length, POSIX mode |
+| `md5sum` | `MD5SUM.BIN` | 97 cases | MD5SUMTEST.BIN | md5 + --check; sha1 dropped (documented) |
 
 ### Legacy hand-written tools (kept; not GNU, much smaller surface)
 
@@ -96,12 +114,11 @@ tool is small. Ordered by value:
 
 | Batch | Programs | Notes |
 |---|---|---|
-| 1 | `cut`, `tr`, `paste`, `fold`, `nl` | everyday text slicing/joining |
-| 2 | `comm`, `tac`, `tsort`, `expand`, `unexpand`, `sum`, `cksum`, `md5sum` | set ops, checksums (md5/sha1 vendored tables) |
-| 3 | `join`, `split`, `od` | joins, chunking, hex/oct dumps |
+| 1 | `cut`, `tr`, `paste`, `fold`, `nl` | **done** — each with `<tool>_parity.sh` + `<tool>_test.c` + `<TOOL>TEST.BIN`; cut = 93-case strict parity, tr 130, paste 101, fold 143, nl 106 |
+| 2 | `comm`, `tsort`, `expand`, `unexpand`, `cksum`, `md5sum` | **done** — 55/75/173/77/40/97 strict cases + in-OS tests. `tac` and `sum` remain (small; next batch). `sha1sum` dropped: 2.1's is a wrapper whose sha1 tables we did not transcribe (documented in md5sum_gnu.c) |
+| 3 | `join`, `split`, `od` | next batch after the current one commits |
 
-(`sha1sum` in textutils-2.1 is a wrapper; `pr`, `fmt`, `ptx`, `csplit` are
-large and lower-value — deferred.)
+(`pr`, `fmt`, `ptx`, `csplit` are large and lower-value — deferred.)
 
 ### 3.3 Other FSF packages considered
 
@@ -150,9 +167,9 @@ Deferred sequence (own project-sized chunk, after sed/grep land):
 | B | Sysroot regex | `regex.h` + regcomp/regexec/regex_internal in libc; host test **byte-exact vs. glibc** | host suite + unit tests both arches — **done** (regex race 24,503/0; `REGTEST.BIN` in-OS) |
 | C | GNU sed 4.8 | `SED.BIN` transcribed port; strict ref build; `sed_parity.sh`; `sed_test_host`; `SEDTEST.BIN` in-OS | parity + host + `make test` ARM/Intel |
 | D | GNU grep 2.5.4 | `GGREP.BIN`; ref build; `grep_parity.sh`; in-OS test | same |
-| E | textutils batch 1 | cut, tr, paste, fold, nl (+ parity + in-OS each, shared fixture harness) | same |
+| E | textutils batch 1 | cut, tr, paste, fold, nl (+ parity + in-OS each, shared fixture harness) | **done** — `make host_tests` + `make test` ARM/Intel green |
 | F | Terminal/keyboard | Ctrl key end-to-end (desktop → window stdin) + shell/tests; groundwork for nano | host+GUI tests, `make test` both arches |
-| G | textutils batch 2 + diffutils (`cmp`, then `diff`) | as budget allows; commit per sub-batch | same |
+| G | textutils batches 2+3 + diffutils (`cmp`, then `diff`) | batch 2 (comm/tsort/expand/unexpand/cksum/md5sum) **done**; tac/sum + join/split/od next; diffutils as budget allows | same |
 
 Shared infrastructure to build once and reuse: a `gnulib_support` set for the
 transcribed helpers (quotearg, xalloc, xstrtol where the program needs them),
@@ -194,3 +211,28 @@ a per-program parity script skeleton, and an in-OS spawn-harness pattern
 | diffutils-2.8.1.tar.gz | https://ftp.gnu.org/gnu/diffutils/diffutils-2.8.1.tar.gz | `c5001748b069224dd98bf1bb9ee877321c7de8b332c8aad5af3e2a7372d23f5a` |
 
 (`diffutils-2.8.1` and `nano-8.7` are staged for later phases.)
+
+## 7. Fix log
+
+- **2026-09-25 — braced `GETOPT_HELP_OPTION_DECL` silently disabled
+  `--help`/`--version`** in cut/nl/head/tail (the macro must be brace-less,
+  sys2.h form: a braced define makes the call site's `{...}` initialize the
+  scalar `name` member, zeroing `has_arg/flag/val`; only two clang warnings
+  flag it). Found by batch-2 subagents whose stricter harnesses raced
+  `--help`/`--version`; fixed in all four ports, and all four parity scripts
+  now race both options byte-exact against the 2.1 reference.
+- **2026-09-25 — `signal.h` guard collision broke HOST_TEST builds**:
+  `src/libc/include/signal.h` defined glibc's own guard (`_SIGNAL_H`) before
+  `include_next`, so glibc's signal.h self-disabled and `kill()` was
+  undeclared in every host build that used it (tail_host stopped linking).
+  Guard renamed to `HOBBYOS_SIGNAL_H`; the other deferred headers
+  (`limits.h`, `stdarg.h`, `stdbool.h`) already followed that convention.
+- **2026-09-25 — version banner alignment**: every port's `--version` now
+  prints `<name> (textutils) 2.1` and every reference build's `version_etc`
+  stub prints the same (tail and wc still had the older
+  `HobbyOS`-branded/silent-stub pair). Reference `config.h`s must also keep
+  `PACKAGE_BUGREPORT` lowercase — tail's ref had `BUG-TEXTUTILS@gnu.org`,
+  which the new `--help` race caught.
+- **2026-09-25 — `head`/`tail` parity joined `make host_tests`**: they were
+  the two ports whose harnesses were not in the default host gate, which is
+  how the tail link breakage above went unnoticed.

@@ -161,7 +161,8 @@ char *sys_errlist[134] = {
 };
 /* never truly invoked by the parity corpus's head invocations, but must link */
 void version_etc(FILE *stream, const char *command_name, const char *package,
-                 const char *version, const char *authors0, ...) { (void)stream; (void)command_name; (void)package; (void)version; (void)authors0; }
+                 const char *version, const char *authors0, ...)
+{ fprintf (stream, "%s (%s) %s\n", command_name, package, version); (void)authors0; }
 char *quotearg_colon(const char *s) { return (char *)s; }
 const char *argmatch(const char *arg, const char *const *arglist,
                      const char *vallist, size_t valsize) { (void)arg; (void)arglist; (void)vallist; (void)valsize; return NULL; }

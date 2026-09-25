@@ -66,13 +66,17 @@
 #define STREQ(a, b) (strcmp ((a), (b)) == 0)
 #define ISDIGIT(c) ((c) >= '0' && (c) <= '9')
 
-/* glibc getopt.h's long-only option chars.  */
+/* glibc getopt.h's long-only option chars.  These decl macros are
+   BRACE-LESS (as textutils' sys2.h defines them): call sites wrap them
+   as {GETOPT_HELP_OPTION_DECL}.  A braced definition would make the
+   call site double-brace the struct, leaving has_arg/flag/val zero and
+   silently disabling --help/--version.  */
 #define GETOPT_HELP_CHAR -2
 #define GETOPT_VERSION_CHAR -3
 #define GETOPT_HELP_OPTION_DECL \
-  {"help", no_argument, NULL, GETOPT_HELP_CHAR}
+  "help", no_argument, NULL, GETOPT_HELP_CHAR
 #define GETOPT_VERSION_OPTION_DECL \
-  {"version", no_argument, NULL, GETOPT_VERSION_CHAR}
+  "version", no_argument, NULL, GETOPT_VERSION_CHAR
 #define HELP_OPTION_DESCRIPTION _("      --help     display this help and exit\n")
 #define VERSION_OPTION_DESCRIPTION _("      --version  output version information and exit\n")
 #define case_GETOPT_HELP_CHAR \

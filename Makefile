@@ -172,6 +172,28 @@ PIPEPROBE_BIN = $(OBJ_DIR)/pipeprobe.bin
 SUBPRB_BIN = $(OBJ_DIR)/subprobe.bin
 HEDTEST_BIN = $(OBJ_DIR)/head_test.bin
 TAILGN_BIN = $(OBJ_DIR)/tailgnu.bin
+CUT_BIN = $(OBJ_DIR)/cut.bin
+CUTTEST_BIN = $(OBJ_DIR)/cut_test.bin
+TR_BIN = $(OBJ_DIR)/tr.bin
+TRTEST_BIN = $(OBJ_DIR)/tr_test.bin
+PASTE_BIN = $(OBJ_DIR)/paste.bin
+PASTETEST_BIN = $(OBJ_DIR)/paste_test.bin
+FOLD_BIN = $(OBJ_DIR)/fold.bin
+FOLDTEST_BIN = $(OBJ_DIR)/fold_test.bin
+NL_BIN = $(OBJ_DIR)/nl.bin
+NLTEST_BIN = $(OBJ_DIR)/nl_test.bin
+COMM_BIN = $(OBJ_DIR)/comm.bin
+COMMTEST_BIN = $(OBJ_DIR)/comm_test.bin
+TSORT_BIN = $(OBJ_DIR)/tsort.bin
+TSORTTEST_BIN = $(OBJ_DIR)/tsort_test.bin
+EXPAND_BIN = $(OBJ_DIR)/expand.bin
+EXPANDTEST_BIN = $(OBJ_DIR)/expand_test.bin
+UNEXPAND_BIN = $(OBJ_DIR)/unexpand.bin
+UNEXPANDTEST_BIN = $(OBJ_DIR)/unexpand_test.bin
+CKSUM_BIN = $(OBJ_DIR)/cksum.bin
+CKSUMTEST_BIN = $(OBJ_DIR)/cksum_test.bin
+MD5SUM_BIN = $(OBJ_DIR)/md5sum.bin
+MD5SUMTEST_BIN = $(OBJ_DIR)/md5sum_test.bin
 TAILTEST_BIN = $(OBJ_DIR)/tail_test.bin
 PROCCHLD_BIN = $(OBJ_DIR)/proc_child.bin
 PROCTEST_BIN = $(OBJ_DIR)/proc_test.bin
@@ -596,6 +618,38 @@ $(HEDGNU_BIN): $(OBJ_DIR)/head_gnu.o $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/hedgnu.elf $(OBJ_DIR)/head_gnu.o $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/hedgnu.elf $(HEDGNU_BIN)
 
+$(OBJ_DIR)/cut_gnu.o: src/user/cut_gnu.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+# The GNU cut port links against the Phase-2/3 sysroot assembly (crt0 +
+# libc.a: stdio, getopt_long, error all resolve from the archive).
+$(CUT_BIN): $(OBJ_DIR)/cut_gnu.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/cut.elf $(OBJ_DIR)/cut_gnu.o $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/cut.elf $(CUT_BIN)
+
+# The textutils batch-1 ports (tr, paste, fold, nl) link the same way.
+define TU21_PORT_RULE
+$(OBJ_DIR)/$(1)_gnu.o: src/user/$(1)_gnu.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $$< -o $$@
+
+$(2): $(OBJ_DIR)/$(1)_gnu.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/$(1).elf $(OBJ_DIR)/$(1)_gnu.o $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/$(1).elf $(2)
+endef
+
+$(eval $(call TU21_PORT_RULE,tr,$(TR_BIN)))
+$(eval $(call TU21_PORT_RULE,paste,$(PASTE_BIN)))
+$(eval $(call TU21_PORT_RULE,fold,$(FOLD_BIN)))
+$(eval $(call TU21_PORT_RULE,nl,$(NL_BIN)))
+$(eval $(call TU21_PORT_RULE,comm,$(COMM_BIN)))
+$(eval $(call TU21_PORT_RULE,tsort,$(TSORT_BIN)))
+$(eval $(call TU21_PORT_RULE,expand,$(EXPAND_BIN)))
+$(eval $(call TU21_PORT_RULE,unexpand,$(UNEXPAND_BIN)))
+$(eval $(call TU21_PORT_RULE,cksum,$(CKSUM_BIN)))
+$(eval $(call TU21_PORT_RULE,md5sum,$(MD5SUM_BIN)))
+
 # --- GNU sed 4.8 (multi-object GNU port; objects named sed_/sedg_) ------
 $(OBJ_DIR)/sed_%.o: src/user/sed/%.c src/user/sed/config.h src/user/sed/*.h src/user/sed/gnulib/*.h $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
@@ -616,6 +670,36 @@ $(OBJ_DIR)/wc_test.o: src/user/wc_test.c $(USER_LIBC) $(USER_HDRS)
 $(WCTEST_BIN): $(OBJ_DIR)/wc_test.o $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/wc_test.elf $(OBJ_DIR)/wc_test.o $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/wc_test.elf $(WCTEST_BIN)
+
+$(OBJ_DIR)/cut_test.o: src/user/cut_test.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(CUTTEST_BIN): $(OBJ_DIR)/cut_test.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/cut_test.elf $(OBJ_DIR)/cut_test.o $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/cut_test.elf $(CUTTEST_BIN)
+
+# In-OS acceptance tests for the batch-1 ports.
+define TU21_TEST_RULE
+$(OBJ_DIR)/$(1)_test.o: src/user/$(1)_test.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $$< -o $$@
+
+$(2): $(OBJ_DIR)/$(1)_test.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/$(1)_test.elf $(OBJ_DIR)/$(1)_test.o $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/$(1)_test.elf $(2)
+endef
+
+$(eval $(call TU21_TEST_RULE,tr,$(TRTEST_BIN)))
+$(eval $(call TU21_TEST_RULE,paste,$(PASTETEST_BIN)))
+$(eval $(call TU21_TEST_RULE,fold,$(FOLDTEST_BIN)))
+$(eval $(call TU21_TEST_RULE,nl,$(NLTEST_BIN)))
+$(eval $(call TU21_TEST_RULE,comm,$(COMMTEST_BIN)))
+$(eval $(call TU21_TEST_RULE,tsort,$(TSORTTEST_BIN)))
+$(eval $(call TU21_TEST_RULE,expand,$(EXPANDTEST_BIN)))
+$(eval $(call TU21_TEST_RULE,unexpand,$(UNEXPANDTEST_BIN)))
+$(eval $(call TU21_TEST_RULE,cksum,$(CKSUMTEST_BIN)))
+$(eval $(call TU21_TEST_RULE,md5sum,$(MD5SUMTEST_BIN)))
 
 $(OBJ_DIR)/regex_test.o: src/user/regex_test.c src/user/regex_test_cases.h $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
@@ -838,7 +922,7 @@ endef
 
 $(foreach app,$(DESKTOP_APP_NAMES),$(eval $(call DESKTOP_APP_RULE,$(app))))
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTETEST_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORTTEST_BIN) $(EXPAND_BIN) $(EXPANDTEST_BIN) $(UNEXPAND_BIN) $(UNEXPANDTEST_BIN) $(CKSUM_BIN) $(CKSUMTEST_BIN) $(MD5SUM_BIN) $(MD5SUMTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -914,11 +998,33 @@ endif
 	$(MCOPY) -i disk.img $(SED_BIN) ::/SED.BIN
 	$(MCOPY) -i disk.img $(HEDGNU_BIN) ::/HEDGNU.BIN
 	$(MCOPY) -i disk.img $(TAILGN_BIN) ::/TAILGN.BIN
+	$(MCOPY) -i disk.img $(CUT_BIN) ::/CUT.BIN
+	$(MCOPY) -i disk.img $(TR_BIN) ::/TR.BIN
+	$(MCOPY) -i disk.img $(PASTE_BIN) ::/PASTE.BIN
+	$(MCOPY) -i disk.img $(FOLD_BIN) ::/FOLD.BIN
+	$(MCOPY) -i disk.img $(NL_BIN) ::/NL.BIN
+	$(MCOPY) -i disk.img $(COMM_BIN) ::/COMM.BIN
+	$(MCOPY) -i disk.img $(TSORT_BIN) ::/TSORT.BIN
+	$(MCOPY) -i disk.img $(EXPAND_BIN) ::/EXPAND.BIN
+	$(MCOPY) -i disk.img $(UNEXPAND_BIN) ::/UNEXPAND.BIN
+	$(MCOPY) -i disk.img $(CKSUM_BIN) ::/CKSUM.BIN
+	$(MCOPY) -i disk.img $(MD5SUM_BIN) ::/MD5SUM.BIN
 	$(MCOPY) -i disk.img $(PROCCHLD_BIN) ::/PROCCHLD.BIN
 	$(MCOPY) -i disk.img $(HEDTEST_BIN) ::/HEDTEST.BIN
 	$(MCOPY) -i disk.img $(TAILTEST_BIN) ::/TAILTEST.BIN
 	$(MCOPY) -i disk.img $(PROCTEST_BIN) ::/PROCTEST.BIN
 	$(MCOPY) -i disk.img $(WCTEST_BIN) ::/WCTEST.BIN
+	$(MCOPY) -i disk.img $(CUTTEST_BIN) ::/CUTTEST.BIN
+	$(MCOPY) -i disk.img $(TRTEST_BIN) ::/TRTEST.BIN
+	$(MCOPY) -i disk.img $(PASTETEST_BIN) ::/PASTETEST.BIN
+	$(MCOPY) -i disk.img $(FOLDTEST_BIN) ::/FOLDTEST.BIN
+	$(MCOPY) -i disk.img $(NLTEST_BIN) ::/NLTEST.BIN
+	$(MCOPY) -i disk.img $(COMMTEST_BIN) ::/COMMTEST.BIN
+	$(MCOPY) -i disk.img $(TSORTTEST_BIN) ::/TSORTTEST.BIN
+	$(MCOPY) -i disk.img $(EXPANDTEST_BIN) ::/EXPANDTEST.BIN
+	$(MCOPY) -i disk.img $(UNEXPANDTEST_BIN) ::/UNEXPANDTEST.BIN
+	$(MCOPY) -i disk.img $(CKSUMTEST_BIN) ::/CKSUMTEST.BIN
+	$(MCOPY) -i disk.img $(MD5SUMTEST_BIN) ::/MD5SUMTEST.BIN
 	$(MCOPY) -i disk.img $(REGTEST_BIN) ::/REGTEST.BIN
 	$(MCOPY) -i disk.img $(SEDTEST_BIN) ::/SEDTEST.BIN
 	$(MCOPY) -i disk.img $(GREPTEST_BIN) ::/GREPTEST.BIN
@@ -1203,7 +1309,7 @@ $(HEAD_PARITY_STRICT): $(HEAD_HOST)
 TAIL_HOST = obj/tail_host
 obj/host_tail.o: src/user/tail_gnu.c $(USER_HDRS) src/libc/include/*.h
 	$(HOST_CC) $(HOST_CFLAGS) -Isrc/libc/include -c $< -o $@
-$(TAIL_HOST): obj/host_tail.o obj/host_hb_getopt.o obj/host_hb_error.o
+$(TAIL_HOST): obj/host_tail.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
 	$(HOST_CC) -o $@ $^
 
 TAIL_PARITY = tail_parity_run
@@ -1216,6 +1322,59 @@ TAIL_PARITY_STRICT = tail_parity_strict
 $(TAIL_PARITY_STRICT): $(TAIL_HOST)
 	@bash src/host/build_tu21_tail_ref.sh $(OBJ_DIR)/tu21_tail_ref
 	@bash src/host/tail_parity.sh $(TAIL_HOST) $(OBJ_DIR)/tu21_tail_ref
+
+# The ported cut built for the host (cut_host): ours except getopt_long
+# (hb_* via our getopt.h) and error() (host_hb_error.o).  cut_host is
+# raced byte-for-byte against GNU cut in src/host/cut_parity.sh.
+CUT_HOST = obj/cut_host
+obj/host_cut.o: src/user/cut_gnu.c $(USER_HDRS) src/libc/include/*.h
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/libc/include -c $< -o $@
+obj/host_hb_assert.o: src/host/hb_assert.c
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+$(CUT_HOST): obj/host_cut.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+	$(HOST_CC) -o $@ $^
+
+CUT_PARITY = cut_parity_run
+$(CUT_PARITY): $(CUT_HOST)
+	@bash src/host/cut_parity.sh $(CUT_HOST)
+
+# Strict byte-exact parity against textutils-2.1's original cut
+# (getstr.c is vendored, so its own reference build recipe).
+CUT_PARITY_STRICT = cut_parity_strict
+$(CUT_PARITY_STRICT): $(CUT_HOST)
+	@bash src/host/build_tu21_cut_ref.sh $(OBJ_DIR)/tu21_cut_ref
+	@bash src/host/cut_parity.sh $(CUT_HOST) $(OBJ_DIR)/tu21_cut_ref
+
+# The batch-1 textutils ports follow the identical host pattern: a
+# host build racing GNU on the same inputs (loose vs modern GNU, strict
+# vs the textutils-2.1 reference this source came from).
+define TU21_PARITY_RULES
+$(3)_HOST = obj/$(1)_host
+obj/host_$(1).o: src/user/$(1)_gnu.c $(USER_HDRS) src/libc/include/*.h
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/libc/include -c $$< -o $$@
+$$($(3)_HOST): obj/host_$(1).o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+	$(HOST_CC) -o $$@ $$^
+
+$(3)_PARITY = $(1)_parity_run
+$$($(3)_PARITY): $$($(3)_HOST)
+	@bash src/host/$(1)_parity.sh $$($(3)_HOST)
+
+$(3)_PARITY_STRICT = $(1)_parity_strict
+$$($(3)_PARITY_STRICT): $$($(3)_HOST)
+	@bash src/host/build_tu21_$(1)_ref.sh $(OBJ_DIR)/tu21_$(1)_ref
+	@bash src/host/$(1)_parity.sh $$($(3)_HOST) $(OBJ_DIR)/tu21_$(1)_ref
+endef
+
+$(eval $(call TU21_PARITY_RULES,tr,tr,TR))
+$(eval $(call TU21_PARITY_RULES,paste,paste,PASTE))
+$(eval $(call TU21_PARITY_RULES,fold,fold,FOLD))
+$(eval $(call TU21_PARITY_RULES,nl,nl,NL))
+$(eval $(call TU21_PARITY_RULES,comm,comm,COMM))
+$(eval $(call TU21_PARITY_RULES,tsort,tsort,TSORT))
+$(eval $(call TU21_PARITY_RULES,expand,expand,EXPAND))
+$(eval $(call TU21_PARITY_RULES,unexpand,unexpand,UNEXPAND))
+$(eval $(call TU21_PARITY_RULES,cksum,cksum,CKSUM))
+$(eval $(call TU21_PARITY_RULES,md5sum,md5sum,MD5SUM))
 
 # Header-only sysroot set (stdarg/limits/stdbool/inttypes): compiled with
 # -Isrc/libc/include FIRST so the HobbyOS headers (not glibc's) resolve.
@@ -1256,7 +1415,7 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(WC_PARITY) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)

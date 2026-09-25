@@ -120,6 +120,25 @@ for mf in "small.txt,tabs.txt" "small.txt,tabs.txt,empty.txt"; do
     done
 done
 
+# --- --help / --version: raced byte-exact only against the textutils-2.1
+#     reference (modern coreutils rewrote both texts) ---
+if "$REF" --version 2>/dev/null | grep -qi "textutils"; then
+    for opt in --help --version; do
+        N=$((N+1))
+        bash -c 'exec -a tail "$0" "$@"' "$TAIL_HOST" "$opt" \
+            >"$TMP/hb_out" 2>"$TMP/hb_err"; rc_hb=$?
+        bash -c 'exec -a tail "$0" "$@"' "$REF" "$opt" \
+            >"$TMP/oh" 2>"$TMP/err"; rc_ref=$?
+        if [ "$rc_hb" != "$rc_ref" ] || ! diff -q "$TMP/hb_out" "$TMP/oh" >/dev/null; then
+            echo "FAIL: $opt differs (exit $rc_hb vs $rc_ref)"
+            diff "$TMP/hb_out" "$TMP/oh" | head -4
+            FAIL=1
+        fi
+    done
+else
+    echo "note: skipping --help/--version cases (2.1-lineage texts; run tail_parity_strict)"
+fi
+
 if [ "$FAIL" = 0 ]; then
     echo "tail parity: PASS ($N cases byte-exact vs $REF)"
     exit 0

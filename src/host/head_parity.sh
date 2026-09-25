@@ -196,6 +196,25 @@ if [ "$rc_hb" != "$rc_ref" ]; then
     echo "FAIL: invalid-number exit $rc_hb vs $rc_ref"; fail=1
 fi
 
+# --- --help / --version: raced byte-exact only against the textutils-2.1
+#     reference (modern coreutils rewrote both texts) ---
+if "$REF" --version 2>/dev/null | grep -qi "textutils"; then
+    for opt in --help --version; do
+        N=$((N+1))
+        bash -c 'exec -a head "$0" "$@"' "$HEAD_HOST" "$opt" \
+            >"$TMP/oh" 2>"$TMP/eh"; rc_hb=$?
+        bash -c 'exec -a head "$0" "$@"' "$REF" "$opt" \
+            >"$TMP/out" 2>"$TMP/err"; rc_ref=$?
+        if ! diff -q "$TMP/oh" "$TMP/out" >/dev/null || [ "$rc_hb" != "$rc_ref" ]; then
+            echo "FAIL: $opt differs (rc $rc_hb vs $rc_ref)"
+            diff "$TMP/oh" "$TMP/out" | head -4
+            fail=1
+        fi
+    done
+else
+    echo "note: skipping --help/--version cases (2.1-lineage texts; run head_parity_strict)"
+fi
+
 if [ "$fail" = 0 ]; then
     echo "head parity: PASS ($N cases byte-exact vs $REF)"
     exit 0

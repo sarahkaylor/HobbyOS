@@ -1,23 +1,40 @@
 #!/bin/bash
-# build_tu21_wc_ref.sh — build GNU textutils-2.1's ORIGINAL wc as a strict
-# byte-exact reference for the HobbyOS wc port (src/host/wc_parity.sh).
+# build_tu21_md5sum_ref.sh — build GNU textutils-2.1's ORIGINAL md5sum as a
+# strict byte-exact reference for the HobbyOS md5sum port
+# (src/host/md5sum_parity.sh).
 #
 # The textutils-2.1 sources are vendored at third_party/textutils-2.1
 # (GPL v2, the same lineage our port was transcribed from). It predates
 # modern glibc, so this script hands it a minimal config.h and compiles
-# the small set of .c files wc needs. Output: $OUT (default
-# /tmp/tu21_wc, formally /tmp/gnuwc-ref/tu21_wc).
+# the small set of .c files md5sum needs: the program (src/md5sum.c), the
+# algorithm selector (src/md5.c: `int algorithm = ALG_MD5;`), the MD5
+# engine (lib/md5.c + lib/md5.h), the SHA1 engine (lib/sha.c — referenced
+# by the MD5/SHA1 dispatch even though this build always runs as md5sum)
+# and the usual gnulib helpers (getopt, error, closeout).  Output: $OUT
+# (default /tmp/tu21_md5sum_ref, formally /tmp/gnumd5sum-ref/tu21_md5sum).
 #
-# Usage: bash src/host/build_tu21_wc_ref.sh [output-path]
+# md5sum.c's getline() is deliberately left to the platform: gnulib only
+# compiles its lib/getline.c fallback (getstr-based) on systems that lack
+# getline, and building the vendored copy against modern glibc conflicts
+# with <stdio.h>'s prototype — so the reference uses glibc's getline,
+# exactly as a 2001 textutils build on glibc did.  The HobbyOS port
+# transcribes lib/getline.c + lib/getstr.c instead (the in-OS sysroot's
+# getline semantics are not what is being certified here).
+#
+# Like build_tu21_cut_ref.sh, the version_etc stub prints the one-line
+# textutils banner "<name> (textutils) 2.1" so the reference's --version
+# is comparable to the port's.
+#
+# Usage: bash src/host/build_tu21_md5sum_ref.sh [output-path]
 set -e
 BASE="$(cd "$(dirname "$0")/../../third_party/textutils-2.1" && pwd)"
-OUT="${1:-/tmp/gnuwc-ref/tu21_wc}"
+OUT="${1:-/tmp/gnumd5sum-ref/tu21_md5sum}"
 WD="$(mktemp -d /tmp/tu21ref.XXXXXX)"
 trap 'rm -rf "$WD"' EXIT
 
 cat > "$WD/config.h" <<'EOF'
-/* minimal config for host-compiling textutils-2.1 src/wc.c against
-   modern glibc (hand-rolled; avoids running 1999-era autoconf) */
+/* minimal config for host-compiling textutils-2.1 src/md5sum.c against
+   modern glibc (hand-rolled; avoids running 2001-era autoconf) */
 #define HAVE_CONFIG_H 1
 #define PACKAGE "textutils"
 #define PACKAGE_BUGREPORT "bug-textutils@gnu.org"
@@ -25,11 +42,13 @@ cat > "$WD/config.h" <<'EOF'
 #define VERSION "2.1"
 #define HAVE_UNISTD_H 1
 #define HAVE_STDLIB_H 1
+#define STDC_HEADERS 1
 #define HAVE_STRING_H 1
 #define HAVE_ERRNO_H 1
 #define HAVE_FCNTL_H 1
 #define HAVE_SYS_STAT_H 1
 #define HAVE_SYS_TYPES_H 1
+#define HAVE_LIMITS_H 1
 #define HAVE_INTTYPES_H 0
 #define HAVE_WCHAR_H 0
 #define HAVE_MBRTOWC 0
@@ -41,7 +60,7 @@ cat > "$WD/config.h" <<'EOF'
 #define HAVE_DECL_GETENV 1
 #define HAVE_DECL_FREE 1
 #define HAVE_DECL_MALLOC 1
-#define HAVE_DECL_STPCPY 0
+#define HAVE_DECL_REALLOC 1
 #define HAVE_DECL_STRDUP 1
 #define HAVE_DECL_STRTOUL 1
 #define HAVE_DECL_STRTOULL 1
@@ -60,7 +79,6 @@ cat > "$WD/config.h" <<'EOF'
 #define ENABLE_NLS 0
 #define LOCALEDIR "/tmp/share/locale"
 #define HAVE_DECL_MEMCHR 1
-#define HAVE_DECL_REALLOC 1
 #define HAVE_DECL_MEMCMP 1
 #define HAVE_DECL_STRCHR 1
 #define HAVE_DECL_STRRCHR 1
@@ -102,11 +120,13 @@ cat > "$WD/unlocked-io.h" <<'EOF'
 #define ftell_unlocked ftell
 EOF
 
-# pthread_kill is glibc-only; map it away (error.c's c-stack refs)
+# sys_errlist/sys_nerr + the gnulib bits md5sum's helpers reference.
 cat > "$WD/stubs.c" <<'EOF'
 #include <stdio.h>
 #include <stdarg.h>
 #include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
 /* sys_errlist/sys_nerr vanished from modern glibc; provide faithful
    tables so the reference's error messages match GNU textutils exactly */
 int sys_nerr = 134;
@@ -160,15 +180,18 @@ char *sys_errlist[134] = {
   "Key has been revoked", "Key was rejected by service", "Owner died",
   "State not recoverable", "Operation not possible due to RF-kill", "Memory page has hardware error",
 };
-/* never actually invoked for wc's fixed 1,1 block size, but must link */
+/* version-etc.c's banner, one line (see the header comment) */
 void version_etc(FILE *stream, const char *command_name, const char *package,
                  const char *version, const char *authors0, ...)
 { fprintf (stream, "%s (%s) %s\n", command_name, package, version); (void)authors0; }
 char *quotearg_colon(const char *s) { return (char *)s; }
-const char *argmatch(const char *arg, const char *const *arglist,
-                     const char *vallist, size_t valsize) { (void)arg; (void)arglist; (void)vallist; (void)valsize; return NULL; }
-unsigned long long xstrtoul(const char *arg, char **e, int b, unsigned long long lo, unsigned long long hi) { (void)arg; (void)e; (void)b; (void)lo; (void)hi; return 0; }
 size_t __fpending (FILE *fp) { (void)fp; return 0; }
+/* lib/xmalloc.c needs 2001-era autoconf malloc probes; provide the entry
+   points md5sum.c actually calls, with 2.1-faithful OOM behavior. */
+void xalloc_die (void) { fputs ("memory exhausted\n", stderr); exit (1); }
+void *xmalloc (size_t n) { void *p = malloc (n); if (!p) xalloc_die (); return p; }
+void *xrealloc (void *p, size_t n) { void *q = realloc (p, n); if (!q) xalloc_die (); return q; }
+char *xstrdup (const char *s) { size_t n = strlen (s) + 1; char *p = xmalloc (n); memcpy (p, s, n); return p; }
 EOF
 
 CFLAGS="-O1 -w -DHAVE_CONFIG_H"
@@ -180,12 +203,13 @@ CFLAGS="$CFLAGS -DVA_END(args)=va_end(args) -DHAVE_VPRINTF=1"
 CFLAGS="$CFLAGS -include string.h -include stdlib.h"
 
 FILES=(
-    "$BASE/src/wc.c"
+    "$BASE/src/md5sum.c"
+    "$BASE/src/md5.c"
+    "$BASE/lib/md5.c"
+    "$BASE/lib/sha.c"
     "$BASE/lib/getopt.c"
     "$BASE/lib/getopt1.c"
     "$BASE/lib/error.c"
-    "$BASE/lib/human.c"
-    "$BASE/lib/safe-read.c"
     "$BASE/lib/closeout.c"
     "$WD/stubs.c"
 )

@@ -241,6 +241,28 @@ void main(void) {
      GREP.BIN across its golden cases (tools/gen_grep_tests.py), spawning
      GREP.BIN once per case. */
   load_and_run_program_in_scheduler("GREPTEST.BIN", -1, -1, -1, -1);
+
+  /* CUTTEST.BIN exercises the ported GNU cut (CUT.BIN) end-to-end:
+     byte/field modes, delimiters, -s, --output-delimiter, stdin,
+     multi-file and error exit codes. */
+  load_and_run_program_in_scheduler("CUTTEST.BIN", -1, -1, -1, -1);
+
+  /* Batch-1 textutils ports: tr, paste, fold, nl — each <TOOL>TEST.BIN
+     spawns its <TOOL>.BIN through the spawn2/pipe path and checks
+     byte-exact behavior in-OS. */
+  load_and_run_program_in_scheduler("TRTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("PASTETEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("FOLDTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("NLTEST.BIN", -1, -1, -1, -1);
+
+  /* Batch-2 textutils ports: comm, tsort, expand, unexpand, cksum,
+     md5sum — same spawn2/pipe in-OS acceptance pattern. */
+  load_and_run_program_in_scheduler("COMMTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("TSORTTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("EXPANDTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("UNEXPANDTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("CKSUMTEST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("MD5SUMTEST.BIN", -1, -1, -1, -1);
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
   load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1, -1, -1);

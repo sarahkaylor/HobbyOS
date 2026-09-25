@@ -18,7 +18,7 @@ WD="$(mktemp -d /tmp/tu21tailref.XXXXXX)"
 cat > "$WD/config.h" <<'EOF'
 #define VERSION "2.1"
 #define PACKAGE "textutils"
-#define PACKAGE_BUGREPORT "BUG-TEXTUTILS@gnu.org"
+#define PACKAGE_BUGREPORT "bug-textutils@gnu.org"
 #define LOCALEDIR "/usr/share/locale"
 #define HAVE_UNISTD_H 1
 #define HAVE_STDLIB_H 1
@@ -116,7 +116,8 @@ cat > "$WD/stubs.c" <<'EOF'
 #include <errno.h>
 extern char *program_name;
 void version_etc(FILE *stream, const char *command_name, const char *package,
-                 const char *version, const char *authors0, ...) { (void)stream; (void)command_name; (void)package; (void)version; (void)authors0; }
+                 const char *version, const char *authors0, ...)
+{ fprintf (stream, "%s (%s) %s\n", command_name, package, version); (void)authors0; }
 void set_program_name(const char *n) { program_name = (char *)n; }
 char *quotearg_colon(const char *s) { return (char *)s; }
 const char *quote(const char *s) { return s; }
