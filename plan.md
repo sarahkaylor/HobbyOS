@@ -115,6 +115,14 @@ Remaining (this thrust):
   Captured live via HMP + guest-memory process-table dumps.  Code supports
   MAX_CPUS 16 (1MB stack region); reintroduce only after slot-liveness work
   (spawn backoff, faster reap) — the 8-core path is the fast, verified one.
+- **x64 status (checked 2026-09-26):** the x64 wave does not run — boot
+  reaches the wave start and triple-fault-reboot-loops (184 boot cycles in
+  one capture; a fault dump precedes it).  Verified NOT a regression from
+  this work: the same reboot loop reproduces on ad80463 (pre-io-changes)
+  and the crash happens before any of the changed code paths execute (the
+  first loader print never appears).  The reboot loop matches the long
+  known x64 flakiness (see the #GP item above); x64 remains deprioritized
+  until the ARM path is fully hardened.
 - **Lost-owner watchdog (NEW):** the scheduler idle loop now reclaims a
   process stuck in RUNNING with no CPU owner (a leaked wake — the wedged
   network tests' signature) back to READY after ~500 idle rounds and logs
