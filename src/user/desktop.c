@@ -1175,8 +1175,7 @@ int main(void) {
             windows[i].escape_buf[windows[i].escape_len++] = c;
             if ((c >= 0x40 && c <= 0x7E) || windows[i].escape_len >= 127) {
               if (c == 'J') {
-                windows[i].text_len = 0;
-                windows[i].text[0] = '\0';
+                wm_text_clear(&windows[i]);
               }
               windows[i].escape_state = 0;
               windows[i].escape_len = 0;
@@ -1194,16 +1193,11 @@ int main(void) {
             windows[i].escape_state = 1;
             windows[i].escape_len = 0;
           } else if (c == '\f') {
-            windows[i].text_len = 0;
-            windows[i].text[0] = '\0';
+            wm_text_clear(&windows[i]);
           } else if (c == '\b') {
-            if (windows[i].text_len > 0) {
-              windows[i].text_len--;
-              windows[i].text[windows[i].text_len] = '\0';
-            }
-          } else if (windows[i].text_len < MAX_TEXT - 1) {
-            windows[i].text[windows[i].text_len++] = c;
-            windows[i].text[windows[i].text_len] = '\0';
+            wm_text_backspace(&windows[i]);
+          } else {
+            wm_text_putc(&windows[i], c);
           }
         }
         if (drained >= 4096) break; // stay fair with a streaming writer

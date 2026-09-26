@@ -4,7 +4,11 @@
 #include <stdint.h>
 
 #define MAX_WINDOWS 12
-#define MAX_TEXT 2048
+/* Captured output per window.  Sized so a console window can show a whole
+ * typical command output at once (grep --help is ~4 KB) plus some
+ * scrollback; the capture slides (wm_text_putc) once the buffer is full,
+ * so nothing is ever silently dropped mid-word. */
+#define MAX_TEXT 8192
 
 #define MAX_WINDOW_MENUS 4
 #define MAX_MENU_SUBITEMS 8
@@ -67,6 +71,16 @@ void wm_remove_window(int id);
 void wm_draw_text(int x, int y, const char* str, uint32_t color);
 void wm_draw_char(int x, int y, char c, uint32_t color);
 void wm_set_window_title(int id, const char *title);
+
+/* ---- Captured-text mutators (window.c) ----
+ * The desktop feeds every captured output byte through wm_text_putc, clears
+ * on \f / CSI J and backspaces on \b.  A window is a terminal tail: when
+ * the buffer is full the oldest lines slide off to make room, so the newest
+ * output always lands and a long output never freezes mid-word (the plain
+ * "drop when full" this replaces cut `grep --help` off at "  -I ... equi"). */
+void wm_text_putc(struct window *win, char c);
+void wm_text_backspace(struct window *win);
+void wm_text_clear(struct window *win);
 
 /* ---- Damage helpers (window.c) ----
  * wm_draw_window_rows() repairs a window's captured text at line

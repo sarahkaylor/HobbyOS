@@ -321,20 +321,56 @@ int wm_get_window_at(int x, int y) {
   return -1;
 }
 
+/* ---- Captured-text mutators ---- */
+
+/* Drop the older half of the buffer, cutting at a line boundary when one
+ * exists (a lone over-long line falls back to a plain byte cut). */
+static void wm_text_drop_oldest_half(struct window *win) {
+  int cut = win->text_len / 2;
+  int at = cut;
+  while (at < win->text_len && win->text[at] != '\n') at++;
+  if (at < win->text_len) cut = at + 1;
+  if (cut < 1) cut = 1;
+  for (int k = 0; k + cut <= win->text_len; k++) {
+    win->text[k] = win->text[k + cut];
+  }
+  win->text_len -= cut;
+  win->text[win->text_len] = '\0';
+}
+
+/* Append one captured byte.  The window is a terminal tail: when the
+ * buffer is full the oldest lines slide off to make room, so the newest
+ * output always lands (dropping bytes once full froze a long output
+ * mid-word, e.g. `grep --help` in the console window). */
+void wm_text_putc(struct window *win, char c) {
+  if (win->text_len >= MAX_TEXT - 1) {
+    wm_text_drop_oldest_half(win);
+  }
+  win->text[win->text_len++] = c;
+  win->text[win->text_len] = '\0';
+}
+
+void wm_text_backspace(struct window *win) {
+  if (win->text_len > 0) {
+    win->text_len--;
+    win->text[win->text_len] = '\0';
+  }
+}
+
+void wm_text_clear(struct window *win) {
+  win->text_len = 0;
+  win->text[0] = '\0';
+}
+
 void wm_handle_key(int window_id, char c) {
   if (window_id < 0 || window_id >= num_windows) return;
 
   struct window* win = &windows[window_id];
 
   if (c == '\b') { // Backspace
-    if (win->text_len > 0) {
-      win->text_len--;
-      win->text[win->text_len] = '\0';
-    }
-  } else if (win->text_len < MAX_TEXT - 1) {
-    win->text[win->text_len] = c;
-    win->text_len++;
-    win->text[win->text_len] = '\0';
+    wm_text_backspace(win);
+  } else {
+    wm_text_putc(win, c);
   }
 }
 

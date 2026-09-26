@@ -1427,6 +1427,18 @@ WINDOW_DAMAGE_TEST = window_damage_test_host
 $(WINDOW_DAMAGE_TEST): obj/host_window_damage_test.o obj/host_compat.o
 	$(HOST_CC) -o $@ $^
 
+# Window text capture: the sliding terminal-tail helpers (window.c included
+# into the test's single TU, same as window_damage_test).
+WINDOW_TEXT_TEST = window_text_test_host
+$(WINDOW_TEXT_TEST): obj/host_window_text_test.o obj/host_compat.o
+	$(HOST_CC) -o $@ $^
+
+# Both of the above include window.c/graphics.c directly, so their objects
+# must rebuild when those sources change (the generic pattern rule cannot
+# see inside the includes).
+obj/host_window_damage_test.o: src/user/graphics/window.c src/user/graphics/graphics.c
+obj/host_window_text_test.o: src/user/graphics/window.c src/user/graphics/graphics.c
+
 # The desktop's chrome diff (desktop_damage()), linked against the real
 # desktop.c like desktop_menu_test/desktop_drag_test.
 DESKTOP_DAMAGE_TEST = desktop_damage_test_host
@@ -1452,7 +1464,7 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
@@ -1465,6 +1477,7 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	$(HOST_RUN) ./$(ERRNO_TEST)
 	$(HOST_RUN) ./$(GRAPHICS_LIB_TEST)
 	$(HOST_RUN) ./$(WINDOW_DAMAGE_TEST)
+	$(HOST_RUN) ./$(WINDOW_TEXT_TEST)
 	$(HOST_RUN) ./$(STRING_TEST)
 	$(HOST_RUN) ./$(CTYPE_TEST)
 	$(HOST_RUN) ./$(STDLIB_TEST)
