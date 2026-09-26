@@ -134,12 +134,74 @@ static void test_fat16_move_across_dirs(void) {
   EXPECT_EQ(fat16_rename("/CLOB1.TXT", "/NO-SUCH-DIR/X.TXT"), -1);
 }
 
+static void test_fat16_lfn_names(void) {
+  uart_puts("  Running test_fat16_lfn_names...\n");
+  tests_run++;
+
+  struct fat16_dir_entry e;
+
+  /* 1. A mtools-created long name (0x0F records on disk) must open by its
+     long name, not by truncation onto some other entry.  This is exactly
+     the bug that made the UNEXPAND_T.BIN wave test load UNEXPAND.BIN. */
+  {
+    struct file f;
+    EXPECT_EQ(fat16_open("/UNEXPAND_T.BIN", &f), 0);
+    EXPECT_EQ(f.fat16.entry.file_size, 12592); /* the on-device test binary */
+    fat16_close(&f);
+  }
+
+  /* 2. A created long name round-trips: write, reopen by long name, read
+     the content back, and resolve it through the path walker. */
+  {
+    struct file f;
+    const char *seed = "long file body\n";
+    EXPECT_EQ(fat16_open("/LONG_FILENAME_TEST.TXT", &f), 0);
+    EXPECT_EQ(fat16_write(&f, seed, 15), 15);
+    fat16_close(&f);
+
+    EXPECT_EQ(fat16_open("/LONG_FILENAME_TEST.TXT", &f), 0);
+    ASSERT(fat16_seek(&f, 0) == 0);
+    {
+      char rbuf[32] = {0};
+      int rn = fat16_read(&f, rbuf, sizeof(rbuf) - 1);
+      fat16_close(&f);
+      EXPECT_EQ(rn, 15);
+      if (rn == 15) {
+        EXPECT_EQ(rbuf[0], 'l');
+        EXPECT_EQ(rbuf[13], 'y');
+        EXPECT_EQ(rbuf[14], '\n');
+      }
+    }
+    EXPECT_EQ(fat16_resolve_path("/LONG_FILENAME_TEST.TXT", &e, 0, 0), 0);
+    EXPECT_EQ(e.file_size, 15);
+  }
+
+  /* 3. A query that looks like a truncated version of an EXISTING 8.3
+     name must not resolve to that file: 'ABCDEFGH_LONG.TXT' must not open
+     'ABCDEFGH.TXT'.  A fresh file is created instead (create-on-open), so
+     the result carries the new, empty entry rather than the old content. */
+  {
+    struct file f;
+    const char *seed = "0123456789";
+    EXPECT_EQ(fat16_open("/ABCDEFGH.TXT", &f), 0);
+    EXPECT_EQ(fat16_write(&f, seed, 10), 10);
+    fat16_close(&f);
+
+    EXPECT_EQ(fat16_open("/ABCDEFGH_LONG.TXT", &f), 0);
+    EXPECT_EQ(f.fat16.entry.file_size, 0); /* new entry, not 'ABCDEFGH.TXT' */
+    fat16_close(&f);
+    EXPECT_EQ(fat16_resolve_path("/ABCDEFGH.TXT", &e, 0, 0), 0);
+    EXPECT_EQ(e.file_size, 10);
+  }
+}
+
 void fat16_test_suite(void) {
   uart_puts("fat16_test_suite:\n");
   test_fat16_open_existing();
   test_fat16_open_nonexistent();
   test_fat16_read_file();
   test_fat16_move_across_dirs();
+  test_fat16_lfn_names();
 }
 
 #endif // KERNEL_MODE_UNIT_TEST

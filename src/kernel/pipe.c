@@ -74,9 +74,6 @@ void pipe_reopen(struct pipe *p, int end) {
     p->reader_count++;
   } else {
     p->writer_count++;
-    uart_puts("pipe_reopen: writer_count is now ");
-    print_int(p->writer_count);
-    uart_puts("\n");
   }
   spinlock_release_irqrestore(&p->lock, flags);
 }
@@ -85,33 +82,42 @@ void pipe_reopen(struct pipe *p, int end) {
  * Decrements the reader or writer count for a pipe.
  * If a count reaches zero, it wakes up any blocked processes on the other end.
  */
+/* Wakes every pid in the mask.  MUST be called with no spinlock held:
+ * process_wakeup() takes proc_lock, and the global lock order is
+ * proc_lock -> f->lock -> p->lock (fork holds proc_lock while taking
+ * file and pipe locks via fs_reopen).  A wakeup performed under p->lock
+ * would add the p->lock -> proc_lock edge that closes the deadlock
+ * cycle (observed live: 7 CPUs spinning on proc_lock, 1 on a pipe lock). */
+static void drain_wakeup_mask(uint64_t mask) {
+  while (mask) {
+    int pid = __builtin_ctzll(mask);
+    mask &= mask - 1;
+    process_wakeup(pid);
+  }
+}
+
 void pipe_close(struct pipe *p, int end) {
   uint64_t flags = spinlock_acquire_irqsave(&p->lock);
+  uint64_t wake_mask = 0;
   if (end == 0) {
     if (p->reader_count > 0) p->reader_count--;
     if (p->reader_count == 0) {
-      // Wake up writers (they will get -1 on write)
-      for (int i = 0; i < MAX_PROCESSES; i++) {
-        if (p->writer_pid_mask & (1ULL << i)) {
-          process_wakeup(i);
-        }
-      }
+      // Wake up writers (they will get -1 on write).  Clear the mask as
+      // we collect it: a stale bit left behind would make later closes
+      // re-wake (or appear to hold) pids that are no longer waiting.
+      wake_mask = p->writer_pid_mask;
+      p->writer_pid_mask = 0;
     }
   } else {
     if (p->writer_count > 0) p->writer_count--;
-    uart_puts("pipe_close: writer_count is now ");
-    print_int(p->writer_count);
-    uart_puts("\n");
     if (p->writer_count == 0) {
       // Wake up readers (they will get 0 on read)
-      for (int i = 0; i < MAX_PROCESSES; i++) {
-        if (p->reader_pid_mask & (1ULL << i)) {
-          process_wakeup(i);
-        }
-      }
+      wake_mask = p->reader_pid_mask;
+      p->reader_pid_mask = 0;
     }
   }
   spinlock_release_irqrestore(&p->lock, flags);
+  drain_wakeup_mask(wake_mask);
 }
 
 /**
@@ -132,53 +138,63 @@ int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
   int i = 0;
   struct process *cur = current_process();
 
-  uint64_t flags = spinlock_acquire_irqsave(&p->lock);
+  while (1) {
+    int i = 0;
+    uint64_t wake_mask = 0;
 
-  int woke_writers = 0;
-  while (i < n && p->count > 0) {
-    d[i] = p->data[p->tail];
-    p->tail = (p->tail + 1) % PIPE_SIZE;
-    i++;
-    p->count--;
+    uint64_t flags = spinlock_acquire_irqsave(&p->lock);
 
-    // If we were full and now have space, wake up writers
-    if (p->count == PIPE_SIZE - 1) {
-      woke_writers = 1;
-    }
-  }
+    int woke_writers = 0;
+    while (i < n && p->count > 0) {
+      d[i] = p->data[p->tail];
+      p->tail = (p->tail + 1) % PIPE_SIZE;
+      i++;
+      p->count--;
 
-  if (woke_writers) {
-    for (int pid = 0; pid < MAX_PROCESSES; pid++) {
-      if (p->writer_pid_mask & (1ULL << pid)) {
-        process_wakeup(pid);
-        p->writer_pid_mask &= ~(1ULL << pid);
+      // If we were full and now have space, wake up writers
+      if (p->count == PIPE_SIZE - 1) {
+        woke_writers = 1;
       }
     }
-  }
 
-  if (i == 0) {
-    // Empty pipe
-    if (p->writer_count == 0) {
-      // No writers left, EOF
+    if (woke_writers) {
+      wake_mask = p->writer_pid_mask;
+      p->writer_pid_mask = 0;
+    }
+
+    if (i == 0) {
+      // Empty pipe
+      if (p->writer_count == 0) {
+        // No writers left, EOF
+        spinlock_release_irqrestore(&p->lock, flags);
+        return 0;
+      }
+      // Block until data available.  Lock order is proc_lock BEFORE the
+      // pipe lock (fork holds proc_lock while taking file/pipe locks via
+      // fs_reopen), so drop p->lock, retake both in order, and re-check.
+      if (cur) {
+        spinlock_release_irqrestore(&p->lock, flags);
+        uint64_t proc_flags = spinlock_acquire_irqsave(&proc_lock);
+        uint64_t pflags = spinlock_acquire_irqsave(&p->lock);
+        if (p->count == 0 && p->writer_count > 0) {
+          p->reader_pid_mask |= (1ULL << cur->pid);
+          cur->state = PROC_STATE_BLOCKED;
+          spinlock_release_irqrestore(&p->lock, pflags);
+          spinlock_release_irqrestore(&proc_lock, proc_flags);
+          return -2; // EAGAIN, handled by trap.c
+        }
+        spinlock_release_irqrestore(&p->lock, pflags);
+        spinlock_release_irqrestore(&proc_lock, proc_flags);
+        continue; // state changed while locking; re-evaluate
+      }
       spinlock_release_irqrestore(&p->lock, flags);
       return 0;
     }
-    // Block until data available
-    if (cur) {
-      p->reader_pid_mask |= (1ULL << cur->pid);
-      uint64_t proc_flags = spinlock_acquire_irqsave(&proc_lock);
-      cur->state = PROC_STATE_BLOCKED;
-      spinlock_release_irqrestore(&proc_lock, proc_flags);
-      spinlock_release_irqrestore(&p->lock, flags);
-      return -2; // EAGAIN, handled by trap.c
-    } else {
-      spinlock_release_irqrestore(&p->lock, flags);
-      return 0;
-    }
-  }
 
-  spinlock_release_irqrestore(&p->lock, flags);
-  return i;
+    spinlock_release_irqrestore(&p->lock, flags);
+    drain_wakeup_mask(wake_mask);
+    return i;
+  }
 }
 
 /**
@@ -199,59 +215,69 @@ int pipe_write(struct pipe *p, const void *buf, int n, struct trap_frame *tf) {
   int i = 0;
   struct process *cur = current_process();
 
-  uint64_t flags = spinlock_acquire_irqsave(&p->lock);
-  if (p->reader_count == 0) {
-    // No readers left
-    uart_puts("[PIPE_WRITE_ERR] PID ");
-    if (cur) print_int(cur->pid);
-    uart_puts(" pipe ");
-    uart_print_hex((uint64_t)p);
-    uart_puts(" reader_count is 0!\n");
-    spinlock_release_irqrestore(&p->lock, flags);
-    return -1;
-  }
+  while (1) {
+    int i = 0;
+    uint64_t wake_mask = 0;
 
-  int woke_readers = 0;
-  while (i < n && p->count < PIPE_SIZE) {
-    p->data[p->head] = d[i];
-    p->head = (p->head + 1) % PIPE_SIZE;
-    i++;
-    p->count++;
-
-    // If we were empty and now have data, wake up readers
-    if (p->count == 1) {
-      woke_readers = 1;
+    uint64_t flags = spinlock_acquire_irqsave(&p->lock);
+    if (p->reader_count == 0) {
+      // No readers left
+      uart_puts("[PIPE_WRITE_ERR] PID ");
+      if (cur) print_int(cur->pid);
+      uart_puts(" pipe ");
+      uart_print_hex((uint64_t)p);
+      uart_puts(" reader_count is 0!\n");
+      spinlock_release_irqrestore(&p->lock, flags);
+      return -1;
     }
-  }
 
-  if (woke_readers) {
-    for (int pid = 0; pid < MAX_PROCESSES; pid++) {
-      if (p->reader_pid_mask & (1ULL << pid)) {
-        process_wakeup(pid);
-        p->reader_pid_mask &= ~(1ULL << pid);
+    int woke_readers = 0;
+    while (i < n && p->count < PIPE_SIZE) {
+      p->data[p->head] = d[i];
+      p->head = (p->head + 1) % PIPE_SIZE;
+      i++;
+      p->count++;
+
+      // If we were empty and now have data, wake up readers
+      if (p->count == 1) {
+        woke_readers = 1;
       }
     }
-  }
 
-  if (i == 0 && n > 0) {
-    // Nothing was written either because the pipe is full or (n==0, in
-    // which case we must return immediately, not block).
-    // Full pipe, block until space available
-    if (cur) {
-      p->writer_pid_mask |= (1ULL << cur->pid);
-      uint64_t proc_flags = spinlock_acquire_irqsave(&proc_lock);
-      cur->state = PROC_STATE_BLOCKED;
-      spinlock_release_irqrestore(&proc_lock, proc_flags);
-      spinlock_release_irqrestore(&p->lock, flags);
-      return -2; // EAGAIN, handled by trap.c
-    } else {
-      spinlock_release_irqrestore(&p->lock, flags);
-      return 0;
+    if (woke_readers) {
+      wake_mask = p->reader_pid_mask;
+      p->reader_pid_mask = 0;
     }
-  }
 
-  spinlock_release_irqrestore(&p->lock, flags);
-  return i;
+    if (i == 0 && n > 0) {
+      // Nothing was written either because the pipe is full or (n==0, in
+      // which case we must return immediately, not block).
+      // Full pipe, block until space available.  Lock order: proc_lock
+      // BEFORE the pipe lock (see pipe_read).
+      if (cur) {
+        spinlock_release_irqrestore(&p->lock, flags);
+        uint64_t proc_flags = spinlock_acquire_irqsave(&proc_lock);
+        uint64_t pflags = spinlock_acquire_irqsave(&p->lock);
+        if (p->count >= PIPE_SIZE && p->reader_count > 0) {
+          p->writer_pid_mask |= (1ULL << cur->pid);
+          cur->state = PROC_STATE_BLOCKED;
+          spinlock_release_irqrestore(&p->lock, pflags);
+          spinlock_release_irqrestore(&proc_lock, proc_flags);
+          return -2; // EAGAIN, handled by trap.c
+        }
+        spinlock_release_irqrestore(&p->lock, pflags);
+        spinlock_release_irqrestore(&proc_lock, proc_flags);
+        continue; // state changed while locking; re-evaluate
+      } else {
+        spinlock_release_irqrestore(&p->lock, flags);
+        return 0;
+      }
+    }
+
+    spinlock_release_irqrestore(&p->lock, flags);
+    drain_wakeup_mask(wake_mask);
+    return i;
+  }
 }
 
 /**

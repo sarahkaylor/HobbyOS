@@ -598,7 +598,9 @@ int virtio_blk_init(void) {
 }
 
 extern void uart_puts(const char* s);
-extern void print_int(int val);
+extern void uart_print_hex(uint64_t val);
+extern void safe_wfi(void);
+extern int print_int(int val);
 
 /**
  * Internal helper to perform a single-sector block operation (Read or Write).
@@ -658,9 +660,30 @@ static int virtio_blk_do_op(uint64_t sector, void* buf, uint32_t type) {
   // Notify device
   reg_write32(VIRTIO_QUEUE_NOTIFY, 0);
 
+  /* Wait for completion.  blk_lock is NOT held here: the caller already
+     holds the blk_in_use token (single in-flight request), so releasing
+     blk_lock across the wait cannot admit a second device op, and it
+     stops a system-wide freeze when the device is slow - a bare
+     IRQ-masked spin here let waiters pile up on blk_lock while IRQ
+     handlers blocked on blk_request_lock.  A tight poll is used (wfi in
+     the loop measurably throttled the loader's disk I/O); each iteration
+     re-checks the ring through a memory barrier so MTTCG sees the
+     device's update. */
+  spinlock_release_irqrestore(&blk_lock, flags);
+
+  uint64_t wait_guard = 0;
   while (*(volatile uint16_t*)&vq.used.idx == ack_used_idx) {
-    // spin
+    arch_memory_barrier();
+    if ((++wait_guard & 0xFFFFFFF) == 0) {
+      uart_puts("[BLKDIAG] waiting used.idx=");
+      uart_print_hex(vq.used.idx);
+      uart_puts(" ack=");
+      uart_print_hex(ack_used_idx);
+      uart_puts("\n");
+    }
   }
+
+  uint64_t relock_flags = spinlock_acquire_irqsave(&blk_lock);
 
   ack_used_idx = vq.used.idx;
 
@@ -674,7 +697,7 @@ static int virtio_blk_do_op(uint64_t sector, void* buf, uint32_t type) {
   }
 
   int res = (blk_status == 0 ? 0 : -1);
-  spinlock_release_irqrestore(&blk_lock, flags);
+  spinlock_release_irqrestore(&blk_lock, relock_flags);
   return res;
 }
 

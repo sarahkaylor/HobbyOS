@@ -75,15 +75,24 @@
 // This ensures user memory does not overlap with kernel code
 #ifdef __x86_64__
 #define PROC_PHYS_POOL_BASE 0x20000000
+/* x86_64: the pool ends just below the kernel's 0x70000000 load address
+   (which is fixed by the linker / Limine entry), so x64 tops out at 40
+   blocks even with more RAM installed. */
+#define PROC_PHYS_POOL_TOP 0x70000000
 #else
-/* AArch64: RAM runs [0x40000000, 0xC0000000); the kernel loads and lives at
-   the bottom (image + bss + stack top = link 0x45A00000).  The pool sits
-   just above that, with 40 * 32MB = 1.25GB ending exactly at RAM top. */
+/* AArch64: RAM runs [0x40000000, 0x240000000) with QEMU -m 8192M; the
+   kernel loads and lives at the bottom (image + bss + stack top = link
+   0x45A00000).  The pool sits just above that and extends to RAM top,
+   so 232 * 32MB = 7.25GB of process backing stores. */
 #define PROC_PHYS_POOL_BASE 0x70000000
+#define PROC_PHYS_POOL_TOP 0x240000000ULL
 #endif
-// QEMU Virt machine GICv2 memory-mapped register addresses
+// Number of 32MB process-region blocks inside [BASE, TOP).
+#define NUM_PHYS_BLOCKS ((PROC_PHYS_POOL_TOP - PROC_PHYS_POOL_BASE) / USER_REGION_SIZE)
+// QEMU Virt machine GIC memory-mapped register addresses (v2 + v3)
 #define GICD_BASE 0x08000000 // Distributor base address
-#define GICC_BASE 0x08010000 // CPU Interface base address
+#define GICC_BASE 0x08010000 // CPU Interface base address (v2)
+#define GICR_BASE 0x080A0000 // Redistributor base address (v3)
 
 #define MAX_OPEN_FDS 32 // Increased per user request
 

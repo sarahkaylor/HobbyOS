@@ -492,6 +492,18 @@ int file_write(struct process *cur, int fd, const void *buf, int size, struct tr
 }
 
 /**
+ * Returns 1 if the global file slot holds a pipe, 0 otherwise (or if the
+ * index is out of range).  Used by fd inheritance: a pipe end must not be
+ * handed to a child by *default* (stderr), since a duplicated end keeps
+ * the pipe's reader/writer counts alive and can self-deadlock a full
+ * pipe whose only remaining drainer is the child's own inherited fd.
+ */
+int file_gfd_is_pipe(int gfd) {
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return 0;
+  return global_file_table[gfd].type == FILE_TYPE_PIPE;
+}
+
+/**
  * Creates an anonymous pipe and assigns two file descriptors (read and write).
  *
  * Parameters:

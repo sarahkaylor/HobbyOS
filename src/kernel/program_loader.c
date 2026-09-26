@@ -227,51 +227,36 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
   struct process *parent = process_get_pcb(caller_pid);
   // child is already defined above
   if (parent && child) {
-    uart_puts("[FD_DBG] parent PID="); print_int(parent->pid);
-    uart_puts(" name="); uart_puts(parent->name);
-    uart_puts(" stdin_fd="); print_int(stdin_fd);
-    uart_puts(" stdout_fd="); print_int(stdout_fd);
-    uart_puts(" stderr_fd="); print_int(stderr_fd);
-    uart_puts("\n[FD_DBG] parent fds: ");
-    for (int i = 0; i < 8; i++) {
-      print_int(parent->open_fds[i]); uart_puts(" ");
-    }
-    uart_puts("\n");
-
     if (stdin_fd >= 0 && stdin_fd < MAX_OPEN_FDS && parent->open_fds[stdin_fd] != -1) {
       child->open_fds[0] = parent->open_fds[stdin_fd];
       fs_reopen(child->open_fds[0]);
       child->num_open_fds++;
-      uart_puts("Inherited stdin_fd="); print_int(stdin_fd); uart_puts("\n");
-    } else {
-      uart_puts("Failed to inherit stdin_fd="); print_int(stdin_fd); uart_puts("\n");
     }
     if (stdout_fd >= 0 && stdout_fd < MAX_OPEN_FDS && parent->open_fds[stdout_fd] != -1) {
       child->open_fds[1] = parent->open_fds[stdout_fd];
       fs_reopen(child->open_fds[1]);
       child->num_open_fds++;
-      uart_puts("Inherited stdout_fd="); print_int(stdout_fd); uart_puts("\n");
-    } else {
-      uart_puts("Failed to inherit stdout_fd="); print_int(stdout_fd); uart_puts("\n");
     }
     if (stderr_fd >= 0 && stderr_fd < MAX_OPEN_FDS && parent->open_fds[stderr_fd] != -1) {
       child->open_fds[2] = parent->open_fds[stderr_fd];
       fs_reopen(child->open_fds[2]);
       child->num_open_fds++;
-      uart_puts("Inherited stderr_fd="); print_int(stderr_fd); uart_puts("\n");
     } else {
-      // Default: inherit parent's fd 2 if not explicitly specified / redirected
-      if (parent->open_fds[2] != -1) {
-        child->open_fds[2] = parent->open_fds[2];
-        fs_reopen(child->open_fds[2]);
+      /* Default: inherit the parent's fd 2 only when it is NOT a pipe.
+         Handing a child a duplicate pipe end here is how it used to go
+         wrong: the duplicate keeps the end's reader/writer count alive
+         forever (e.g. a leaked read end of the pipe the child itself
+         writes to), so after the real drainer exits no writer ever sees
+         EPIPE/EOF and a full pipe self-deadlocks (observed: SH.BIN
+         wedged on a full stdout pipe whose only remaining reader was
+         its own inherited fd 2). */
+      int gf = parent->open_fds[2];
+      if (gf != -1 && !file_gfd_is_pipe(gf)) {
+        child->open_fds[2] = gf;
+        fs_reopen(gf);
         child->num_open_fds++;
-        uart_puts("Inherited default stderr_fd=2\n");
-      } else {
-        uart_puts("Failed to inherit stderr_fd\n");
       }
     }
-  } else {
-    uart_puts("No parent or child for fd inheritance.\n");
   }
 
   process_set_entry(pid, USER_VIRT_BASE, USER_VIRT_BASE + USER_REGION_SIZE);

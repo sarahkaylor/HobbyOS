@@ -21,23 +21,121 @@ static uint32_t bpb_total_sectors;
 
 static spinlock_t fat_lock;
 
-// Helper: match 8.3 filename
+/* Helper: match an 8.3 filename.  A query that cannot be represented in
+   8.3 (a base longer than 8 chars or an extension longer than 3) never
+   matches a short entry: truncating it onto one would let a name like
+   'UNEXPAND_T.BIN' silently open 'UNEXPAND.BIN' — executing the wrong
+   file.  Non-8.3 names are resolved through their VFAT long-name records
+   (the lookup loops below) instead. */
 static int match_name(const char* fat_name, const char* query) {
   char formatted[11];
-  for (int i = 0; i < 11; i++) formatted[i] = ' ';
   int i = 0, j = 0;
+  for (int k = 0; k < 11; k++) formatted[k] = ' ';
   while (query[i] && query[i] != '.' && j < 8) formatted[j++] = query[i++];
-  // Skip any characters in the query name that exceed the 8-character limit
-  while (query[i] && query[i] != '.') i++;
+  if (query[i] && query[i] != '.') return 0; /* base longer than 8 chars */
   if (query[i] == '.') {
-    i++; j = 8;
+    i++;
+    j = 8;
     while (query[i] && j < 11) formatted[j++] = query[i++];
+    if (query[i]) return 0; /* extension longer than 3 chars */
   }
   for (int k = 0; k < 11; k++) {
-    char a = fat_name[k]; char b = formatted[k];
+    char a = fat_name[k];
+    char b = formatted[k];
     if (a >= 'a' && a <= 'z') a -= 32; // Uppercase
     if (b >= 'a' && b <= 'z') b -= 32;
     if (a != b) return 0;
+  }
+  return 1;
+}
+
+/* --- VFAT long-file-name support ----------------------------------- */
+/* A name that does not fit 8.3 is stored as a run of attribute-0x0F
+   records written in reverse order (the final 13-character chunk first),
+   followed by the 8.3 short entry.  Every record carries a checksum of
+   that short entry.  mtools, Windows and GNU tools all produce these
+   records. */
+
+struct lfn_state {
+  char name[256];    /* reconstructed long name */
+  int len;           /* bytes used in name[] */
+  int have;          /* at least one record of a sequence seen */
+  int next_ord;      /* ordinal expected from the next record */
+  unsigned char sum; /* checksum carried by the records */
+};
+
+static unsigned char lfn_checksum(const char *name) {
+  unsigned char sum = 0;
+  for (int i = 0; i < 11; i++) {
+    sum = ((sum & 1) ? 0x80 : 0) + (sum >> 1) + (unsigned char)name[i];
+  }
+  return sum;
+}
+
+static void lfn_reset(struct lfn_state *st) {
+  st->len = 0;
+  st->have = 0;
+  st->next_ord = 0;
+}
+
+static void lfn_add_chunk(struct lfn_state *st, const unsigned char *ent) {
+  int ord = ent[0] & 0x1F;
+  int n = 0;
+  char chunk[13];
+  if (ord == 0) return;
+  if ((ent[0] & 0x40) || !st->have || ord != st->next_ord) {
+    /* Start (or restart) a sequence: this record is the name's tail. */
+    st->len = 0;
+    st->have = 1;
+  }
+  st->sum = ent[13];
+  /* The 13 UTF-16LE characters sit at these byte offsets in the record. */
+  static const int offs[13] = { 1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30 };
+  for (int i = 0; i < 13; i++) {
+    unsigned int c = ent[offs[i]] | ((unsigned int)ent[offs[i] + 1] << 8);
+    if (c == 0 || c == 0xFFFF) break; /* padding / terminator */
+    if (c > 0x7F) { /* non-ASCII names are not matchable: drop the chain */
+      st->len = 0;
+      st->have = 0;
+      return;
+    }
+    chunk[n++] = (char)c;
+  }
+  /* Records are stored tail-first, each chunk in forward order, so the
+     whole chunk is prepended (not char-by-char, which would reverse it). */
+  if (st->len + n > (int)sizeof(st->name) - 1) n = (int)sizeof(st->name) - 1 - st->len;
+  if (n <= 0) return;
+  for (int k = st->len - 1; k >= 0; k--) st->name[k + n] = st->name[k];
+  for (int i = 0; i < n; i++) st->name[i] = chunk[i];
+  st->len += n;
+  st->next_ord = ord - 1;
+}
+
+static int lfn_matches(const struct lfn_state *st, const char *query) {
+  int i = 0;
+  if (!st->have) return 0;
+  while (i < st->len && query[i]) {
+    char a = st->name[i];
+    char b = query[i];
+    if (a >= 'a' && a <= 'z') a -= 32;
+    if (b >= 'a' && b <= 'z') b -= 32;
+    if (a != b) return 0;
+    i++;
+  }
+  return i == st->len && query[i] == '\0';
+}
+
+/* True if `name` is representable as an exact 8.3 name (the same test
+   match_name() applies), so a long name is never truncated into one. */
+static int name_is_83(const char *name) {
+  int base = 0;
+  while (name[base] && name[base] != '.' && base < 8) base++;
+  if (name[base] && name[base] != '.') return 0;
+  if (name[base] == '.') {
+    base++;
+    int ext = 0;
+    while (name[base + ext] && ext < 3) ext++;
+    if (name[base + ext]) return 0;
   }
   return 1;
 }
@@ -254,6 +352,8 @@ int fat16_chdir(const char *path, char *out_new_cwd) {
 
 static int find_entry_in_root(const char *name, struct fat16_dir_entry *out_entry, uint32_t *out_sector, uint32_t *out_offset) {
   uint8_t buf[SECTOR_SIZE];
+  struct lfn_state st;
+  lfn_reset(&st);
   for (uint32_t i = 0; i < root_dir_sectors; i++) {
     if (virtio_blk_read_sector(root_dir_sector + i, buf, 1) != 0) {
       return -1;
@@ -265,16 +365,23 @@ static int find_entry_in_root(const char *name, struct fat16_dir_entry *out_entr
         spinlock_release_irqrestore(&fat_lock, flags);
         return -1;
       }
-      if (entries[j].name[0] == (char)0xE5) continue;
-      if (entries[j].attr == 0x0F) continue; // LFN
-
-      if (match_name(entries[j].name, name)) {
+      if (entries[j].name[0] == (char)0xE5) {
+        lfn_reset(&st);
+        continue;
+      }
+      if (entries[j].attr == 0x0F) {
+        lfn_add_chunk(&st, (const unsigned char *)&entries[j]);
+        continue;
+      }
+      if (match_name(entries[j].name, name) ||
+          (lfn_matches(&st, name) && lfn_checksum(entries[j].name) == st.sum)) {
         if (out_entry) *out_entry = entries[j];
         if (out_sector) *out_sector = root_dir_sector + i;
         if (out_offset) *out_offset = j;
         spinlock_release_irqrestore(&fat_lock, flags);
         return 0;
       }
+      lfn_reset(&st);
     }
     spinlock_release_irqrestore(&fat_lock, flags);
   }
@@ -284,6 +391,8 @@ static int find_entry_in_root(const char *name, struct fat16_dir_entry *out_entr
 static int find_entry_in_subdir(uint16_t dir_cluster, const char *name, struct fat16_dir_entry *out_entry, uint32_t *out_sector, uint32_t *out_offset) {
   uint16_t cluster = dir_cluster;
   uint8_t buf[SECTOR_SIZE];
+  struct lfn_state st;
+  lfn_reset(&st);
 
   while (cluster != 0 && cluster < 0xFFF0) {
     for (uint32_t s = 0; s < bpb_sectors_per_cluster; s++) {
@@ -298,16 +407,23 @@ static int find_entry_in_subdir(uint16_t dir_cluster, const char *name, struct f
           spinlock_release_irqrestore(&fat_lock, flags);
           return -1;
         }
-        if (entries[j].name[0] == (char)0xE5) continue;
-        if (entries[j].attr == 0x0F) continue; // LFN
-
-        if (match_name(entries[j].name, name)) {
+        if (entries[j].name[0] == (char)0xE5) {
+          lfn_reset(&st);
+          continue;
+        }
+        if (entries[j].attr == 0x0F) {
+          lfn_add_chunk(&st, (const unsigned char *)&entries[j]);
+          continue;
+        }
+        if (match_name(entries[j].name, name) ||
+            (lfn_matches(&st, name) && lfn_checksum(entries[j].name) == st.sum)) {
           if (out_entry) *out_entry = entries[j];
           if (out_sector) *out_sector = sector_num;
           if (out_offset) *out_offset = j;
           spinlock_release_irqrestore(&fat_lock, flags);
           return 0;
         }
+        lfn_reset(&st);
       }
       spinlock_release_irqrestore(&fat_lock, flags);
     }
@@ -408,6 +524,148 @@ static int alloc_entry_in_dir(uint16_t dir_cluster, const struct fat16_dir_entry
     }
     return -1;
   }
+}
+
+/* Fill `slots` with nchunks VFAT 0x0F records followed by the 8.3 entry.
+   The chain is stored tail-first: slot 0 holds the final 13-character
+   chunk and carries the 0x40 last-flag. */
+static void lfn_fill_run(struct fat16_dir_entry *slots, const char *longname,
+                         int nchunks, const char *short83) {
+  static const int offs[13] = { 1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30 };
+  int ln = 0;
+  unsigned char sum = lfn_checksum(short83);
+  while (longname[ln]) ln++;
+  for (int s = 0; s < nchunks; s++) {
+    int part = nchunks - 1 - s; /* 0 = head of the name */
+    unsigned char *e = (unsigned char *)&slots[s];
+    for (int k = 0; k < 32; k++) e[k] = 0;
+    e[0] = (unsigned char)((s == 0 ? 0x40 : 0) | (nchunks - s));
+    e[11] = 0x0F;
+    e[13] = sum;
+    int nchar = 0;
+    for (int i = 0; i < 13; i++) {
+      int idx = part * 13 + i;
+      unsigned int v = 0xFFFF;
+      if (idx < ln) {
+        v = (unsigned char)longname[idx];
+        nchar = i + 1;
+      } else if (i == nchar) {
+        v = 0x0000; /* terminator at the end of a partial chunk */
+      }
+      e[offs[i]] = (unsigned char)v;
+      e[offs[i] + 1] = (unsigned char)(v >> 8);
+    }
+  }
+}
+
+/* Allocate a run of (nchunks + 1) free entries in one sector: the long
+   name's 0x0F records immediately followed by `short_entry`.  Returns the
+   location of the short entry, or -1.  Runs must fit a single sector
+   (16 entries); longer names are rejected, never truncated. */
+static int alloc_lfn_run(uint16_t dir_cluster, const char *longname,
+                         const char *short83, int nchunks,
+                         const struct fat16_dir_entry *short_entry,
+                         uint32_t *out_sector, uint32_t *out_offset) {
+  uint8_t buf[SECTOR_SIZE];
+  int need = nchunks + 1;
+
+  if (dir_cluster == 0) {
+    for (uint32_t i = 0; i < root_dir_sectors; i++) {
+      uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+      if (virtio_blk_read_sector(root_dir_sector + i, buf, 1) != 0) {
+        spinlock_release_irqrestore(&fat_lock, flags);
+        return -1;
+      }
+      struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
+      for (unsigned int j = 0; j + need <= SECTOR_SIZE / 32; j++) {
+        int run = 0;
+        for (int k = 0; k < need; k++) {
+          if (entries[j + k].name[0] == 0x00 ||
+              entries[j + k].name[0] == (char)0xE5)
+            run++;
+        }
+        if (run == need) {
+          lfn_fill_run(entries + j, longname, nchunks, short83);
+          entries[j + nchunks] = *short_entry;
+          if (virtio_blk_write_sector(root_dir_sector + i, buf, 1) != 0) {
+            spinlock_release_irqrestore(&fat_lock, flags);
+            return -1;
+          }
+          spinlock_release_irqrestore(&fat_lock, flags);
+          if (out_sector) *out_sector = root_dir_sector + i;
+          if (out_offset) *out_offset = j + nchunks;
+          return 0;
+        }
+      }
+      spinlock_release_irqrestore(&fat_lock, flags);
+    }
+    return -1;
+  }
+
+  uint16_t cluster = dir_cluster;
+  uint16_t prev_cluster = 0;
+  while (cluster != 0 && cluster < 0xFFF0) {
+    for (uint32_t s = 0; s < bpb_sectors_per_cluster; s++) {
+      uint32_t sector_num = data_sector + (cluster - 2) * bpb_sectors_per_cluster + s;
+      uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+      if (virtio_blk_read_sector(sector_num, buf, 1) != 0) {
+        spinlock_release_irqrestore(&fat_lock, flags);
+        return -1;
+      }
+      struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
+      for (unsigned int j = 0; j + need <= SECTOR_SIZE / 32; j++) {
+        int run = 0;
+        for (int k = 0; k < need; k++) {
+          if (entries[j + k].name[0] == 0x00 ||
+              entries[j + k].name[0] == (char)0xE5)
+            run++;
+        }
+        if (run == need) {
+          lfn_fill_run(entries + j, longname, nchunks, short83);
+          entries[j + nchunks] = *short_entry;
+          if (virtio_blk_write_sector(sector_num, buf, 1) != 0) {
+            spinlock_release_irqrestore(&fat_lock, flags);
+            return -1;
+          }
+          spinlock_release_irqrestore(&fat_lock, flags);
+          if (out_sector) *out_sector = sector_num;
+          if (out_offset) *out_offset = j + nchunks;
+          return 0;
+        }
+      }
+      spinlock_release_irqrestore(&fat_lock, flags);
+    }
+    prev_cluster = cluster;
+    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    cluster = read_fat(cluster);
+    spinlock_release_irqrestore(&fat_lock, flags);
+  }
+
+  /* No run of free slots: extend the directory with a fresh cluster and
+     place the run at its start, mirroring alloc_entry_in_dir(). */
+  if (prev_cluster != 0) {
+    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    uint16_t new_c = alloc_cluster();
+    spinlock_release_irqrestore(&fat_lock, flags);
+    if (new_c == 0) return -1;
+
+    flags = spinlock_acquire_irqsave(&fat_lock);
+    write_fat(prev_cluster, new_c);
+    spinlock_release_irqrestore(&fat_lock, flags);
+
+    uint32_t sector_num = data_sector + (new_c - 2) * bpb_sectors_per_cluster;
+    if (virtio_blk_read_sector(sector_num, buf, 1) != 0) return -1;
+    flags = spinlock_acquire_irqsave(&fat_lock);
+    struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
+    lfn_fill_run(entries, longname, nchunks, short83);
+    entries[nchunks] = *short_entry;
+    spinlock_release_irqrestore(&fat_lock, flags);
+    if (virtio_blk_write_sector(sector_num, buf, 1) != 0) return -1;
+    if (out_sector) *out_sector = sector_num;
+    if (out_offset) *out_offset = nchunks;
+    return 0;
+  }
+  return -1;
 }
 
 int fat16_resolve_path(const char *path, struct fat16_dir_entry *out_entry, uint32_t *out_sector, uint32_t *out_offset) {
@@ -559,8 +817,21 @@ int fat16_open(const char* filename, struct file* f) {
   new_entry.start_cluster = 0;
   new_entry.file_size = 0;
 
-  if (alloc_entry_in_dir(parent_entry.start_cluster, &new_entry, &sector, &offset) != 0) {
-    return -1;
+  if (name_is_83(last_comp)) {
+    if (alloc_entry_in_dir(parent_entry.start_cluster, &new_entry, &sector, &offset) != 0) {
+      return -1;
+    }
+  } else {
+    /* Long name: write the 0x0F records plus the 8.3 entry as one run so
+       later opens match by the long name (and by the short name). */
+    int ln = 0;
+    while (last_comp[ln]) ln++;
+    int nchunks = (ln + 12) / 13;
+    if (nchunks < 1) nchunks = 1;
+    if (alloc_lfn_run(parent_entry.start_cluster, last_comp, formatted_name,
+                      nchunks, &new_entry, &sector, &offset) != 0) {
+      return -1;
+    }
   }
 
   f->type = FILE_TYPE_FAT16;
@@ -719,6 +990,12 @@ int fat16_unlink(const char* filename) {
     return -1;
   }
   struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
+  /* Free the 0x0F long-name records that precede this entry in the same
+     sector too: they belong to it and would otherwise leak slots. */
+  for (int k = (int)offset - 1; k >= 0; k--) {
+    if (entries[k].attr != 0x0F) break;
+    entries[k].name[0] = (char)0xE5;
+  }
   entries[offset].name[0] = (char)0xE5;
   if (virtio_blk_write_sector(sector, buf, 1) != 0) {
     spinlock_release_irqrestore(&fat_lock, flags);

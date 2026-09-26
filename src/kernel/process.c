@@ -8,6 +8,23 @@
 #include "errno.h"
 #include <stdint.h>
 
+/* --- debugcon (0xE9) parking diagnostic: IRQ-safe port writes only --- */
+#ifdef __x86_64__
+static void poke8(uint16_t port, uint8_t val) {
+  __asm__ volatile("outb %0, %1" : : "a"(val), "Nd"(port) : "memory");
+}
+static void dbgxc(char c) { poke8(0xe9, (uint8_t)c); }
+static void dbgxh(uint64_t v, int nibs) {
+  for (int i = nibs - 1; i >= 0; i--) {
+    int d = (int)((v >> (4 * i)) & 0xf);
+    dbgxc(d < 10 ? (char)('0' + d) : (char)('a' + d - 10));
+  }
+}
+static void dbgpark(uint64_t sp) {
+  dbgxc('P'); dbgxc('0'); dbgxc('x'); dbgxh(sp, 16); dbgxc('\n');
+}
+#endif
+
 extern void uart_puts(const char *s);
 extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
@@ -31,24 +48,8 @@ static int cpus_seen_count;
 static uint64_t next_phys_alloc = PROC_PHYS_POOL_BASE;
 static spinlock_t mem_lock;
 
-// Number of 32MB physical blocks available for user processes. x86_64 shares
-// its 3GB of RAM with the kernel direct map (0-2GB), so the pool grows from
-// 0x20000000; 30 blocks (960MB) is what the test-mode workload actually needs
-// (17+ programs plus forks and the RDMA provider loop) - the previous 16 on
-// x86_64 left the last-loaded test without a process.
-/* Physical blocks, each USER_REGION_SIZE (32MB) of contiguous RAM backing one
-   process's entire pre-mapped user region.
-
-   x64: 0x20000000..0x70000000 (exactly up to the kernel's 0x70000000 load
-   address).  The parallel test wave alone launches ~33 concurrent processes,
-   so the old 32 exhausted the pool and starved child spawns.
-
-   AArch64: 0x70000000..0xC0000000 — the kernel occupies the bottom of RAM
-   (its image/bss/stack end well below 0x70000000) and QEMU RAM (-m 2048M)
-   ends at 0xC0000000, so exactly 40 blocks fit — same wave headroom as x64.
-   (The earlier 0x80000000 base capped ARM at 32 blocks and the boot wave's
-   tail loads starved for minutes while the long tests drained.) */
-#define NUM_PHYS_BLOCKS 40
+/* NUM_PHYS_BLOCKS (and the pool extent it derives from) lives in
+   process.h: it grows with the RAM configured for the platform. */
 static uint8_t phys_blocks_used[NUM_PHYS_BLOCKS];
 
 // ---------------------------------------------------------------------------
@@ -456,7 +457,26 @@ void save_context(struct process *p, struct trap_frame *tf) {
   p->context[30] = tf->lr;
   p->context[31] = tf->elr;
   p->context[32] = tf->spsr;
+#ifdef __x86_64__
+  /* Same-privilege (kernel-mode) interrupts push no RSP, and the trap
+     entry only refreshes the per-CPU user SP for user-mode traps.  So
+     for a kernel task preempted while running in kernel mode,
+     arch_get_user_sp() is stale: it still holds the value planted by
+     the task's last resume.  Saving that value makes the resume path
+     restart the task at the stale stack pointer, abandoning every
+     live frame (observed: the test-wave thread resumed at its initial
+     stack top, its next `ret` popped a zero and jumped to 0x0).  The
+     interrupted RSP is recoverable from the frame layout: the CPU
+     pushed 24 bytes, the stub 16, and the wrapper subbed 264, so
+     rsp_at_interrupt = tf + 304. */
+  if (p->is_kernel_process && (tf->cs & 3) == 0) {
+    p->context[33] = (uint64_t)((char *)tf + 304);
+  } else {
+    p->context[33] = arch_get_user_sp();
+  }
+#else
   p->context[33] = arch_get_user_sp();
+#endif
 }
 
 static void restore_context(struct process *p, struct trap_frame *tf) {
@@ -513,12 +533,36 @@ void schedule(struct trap_frame *tf, int is_yield) {
 
   if (current_pid >= 0) {
     struct process *cur = &proc_table[current_pid];
-    if (cur->state == PROC_STATE_RUNNING) {
-      save_context(cur, tf);
-      cur->state = PROC_STATE_READY;
-    } else if (cur->state == PROC_STATE_BLOCKED || cur->state == PROC_STATE_WAIT_SPAWN
-               || cur->state == PROC_STATE_WAIT_CHILD) {
-      save_context(cur, tf);
+    /* If another CPU has already claimed this process (it was set READY
+       by a waker and picked elsewhere while we were still executing the
+       block-to-schedule gap), it is no longer ours: do not touch its
+       state or context, or two CPUs would run and save over each
+       other's frames.  The scan below re-homes this CPU. */
+    int taken_elsewhere = 0;
+    for (uint32_t c2 = 0; c2 < MAX_CPUS; c2++) {
+      if (c2 != cpu && cpu_current_pids[c2] == current_pid) {
+        taken_elsewhere = 1;
+        break;
+      }
+    }
+    if (!taken_elsewhere) {
+      if (cur->state == PROC_STATE_RUNNING) {
+        save_context(cur, tf);
+        cur->state = PROC_STATE_READY;
+      } else if (cur->state == PROC_STATE_READY) {
+        /* A wake raced the caller's block-to-schedule gap (the -2/EAGAIN
+           retry path sets BLOCKED, returns to the trap, which then calls
+           schedule(); a concurrent process_wakeup can flip BLOCKED back to
+           READY in that window).  The process is still executing here, so
+           its LIVE trap frame is authoritative: save it, or a resume would
+           restore a stale context and silently replay/skip syscalls
+           (observed: stress ping-pong protocol drift and shell-test
+           validation failures). */
+        save_context(cur, tf);
+      } else if (cur->state == PROC_STATE_BLOCKED || cur->state == PROC_STATE_WAIT_SPAWN
+                 || cur->state == PROC_STATE_WAIT_CHILD) {
+        save_context(cur, tf);
+      }
     }
   }
 
@@ -538,12 +582,25 @@ void schedule(struct trap_frame *tf, int is_yield) {
     if (next >= 0) {
       set_current_process_pid(cpu, next);
       proc_table[next].state = PROC_STATE_RUNNING;
-
       struct trap_frame local_tf;
       restore_context(&proc_table[next], &local_tf);
 
       extern char __stack_top;
       uint64_t target_sp = (uint64_t)&__stack_top - cpu * 0x10000 - 4096;
+#ifdef __x86_64__
+      /* Every kernel-task resume parks on this CPU's per-CPU kernel
+         stack.  The create-time context[33] is a physical address that
+         is not a usable x64 stack, and a preempted kernel task's
+         context[33] can hold a bogus value (save_context stores
+         tf+304, which for same-privilege interrupts is the CS field,
+         not the interrupted RSP).  This task's live frames live on the
+         very stack we are about to park it on, so restarting it there
+         is correct in both cases. */
+      if (proc_table[next].is_kernel_process) {
+        arch_set_user_sp(target_sp);
+        dbgpark(target_sp);
+      }
+#endif
       mmu_switch_user_mapping(proc_table[next].user_phys_base);
       spinlock_release_irqrestore(&proc_lock, flags);
 
@@ -983,6 +1040,10 @@ struct process *process_get_pcb(int pid) {
 
 static jmp_buf scheduler_return_ctx[MAX_CPUS];
 
+/* Consecutive scheduler idle rounds with no READY process.  Reset when a
+ * process runs; drives the [IDLESTUCK] diagnostic in the idle loop. */
+static int sched_idle_rounds;
+
 void scheduler_finished(void) {
   uint32_t cpu = get_cpuid();
   longjmp(scheduler_return_ctx[cpu], 1);
@@ -1034,6 +1095,7 @@ void start_scheduler(void) {
       if (proc_table[i].state == PROC_STATE_READY) {
         set_current_process_pid(cpu, i);
         proc_table[i].state = PROC_STATE_RUNNING;
+        sched_idle_rounds = 0;
 
         mmu_switch_user_mapping(proc_table[i].user_phys_base);
 
@@ -1042,6 +1104,15 @@ void start_scheduler(void) {
 
         struct trap_frame local_tf;
         restore_context(&proc_table[i], &local_tf);
+
+#ifdef __x86_64__
+        /* Same parking rule as in schedule(): kernel tasks always use
+           this CPU's per-CPU kernel stack (see schedule() for why). */
+        if (proc_table[i].is_kernel_process) {
+          arch_set_user_sp(target_sp);
+          dbgpark(target_sp);
+        }
+#endif
 
         spinlock_release_irqrestore(&proc_lock, flags);
 
@@ -1053,6 +1124,38 @@ void start_scheduler(void) {
       }
     }
     spinlock_release_irqrestore(&proc_lock, flags);
+
+    /* Idle-stuck detector: if no READY process was found for many
+       consecutive rounds, dump the stuck process table every ~1000
+       rounds so a wedged suite names its stuck process in the boot log
+       (a missed wakeup otherwise idles every CPU forever). */
+    sched_idle_rounds++;
+    if (sched_idle_rounds >= 500 && (sched_idle_rounds % 1000) == 0) {
+      uart_puts("[IDLESTUCK] cpu=");
+      print_int((int)get_cpuid());
+      uart_puts(" rounds=");
+      print_int(sched_idle_rounds);
+      uart_puts(" t=");
+      print_int((int)timer_get_ms());
+      uart_puts("\n");
+      uint64_t dflags = spinlock_acquire_irqsave(&proc_lock);
+      for (int k = 0; k < MAX_PROCESSES; k++) {
+        if (proc_table[k].state != PROC_STATE_FREE) {
+          uart_puts("[IDLESTUCK] slot=");
+          print_int(k);
+          uart_puts(" pid=");
+          print_int(proc_table[k].pid);
+          uart_puts(" st=");
+          print_int(proc_table[k].state);
+          uart_puts(" parent=");
+          print_int(proc_table[k].parent_pid);
+          uart_puts(" ");
+          uart_puts(proc_table[k].name);
+          uart_puts("\n");
+        }
+      }
+      spinlock_release_irqrestore(&proc_lock, dflags);
+    }
 
     // Track idle time: record entry, WFI, accumulate on wake
     uint64_t idle_start = timer_get_ms();

@@ -32,9 +32,27 @@ void save_user_sp_helper(void) {
   arch_set_user_sp(cpu_locals[cpu].user_sp_temp);
 }
 
+/* --- raw debugcon (0xE9) diagnostics: IRQ-safe, no uart/spinlock --- */
+static void dbg_putc(char c) {
+  __asm__ volatile("outb %0, %1" : : "a"(c), "Nd"((uint16_t)0xe9) : "memory");
+}
+static void dbg_hex(uint64_t v, int nibs) {
+  for (int i = nibs - 1; i >= 0; i--) {
+    int d = (int)((v >> (4 * i)) & 0xf);
+    dbg_putc(d < 10 ? (char)('0' + d) : (char)('a' + d - 10));
+  }
+}
+static void dbg_resume(const char *tag, uint64_t v) {
+  dbg_putc('['); while (*tag) dbg_putc(*tag++); dbg_putc(']');
+  dbg_putc('0'); dbg_putc('x'); dbg_hex(v, 16); dbg_putc('\n');
+}
+
 void restore_user_sp_helper(void) {
   uint32_t cpu = get_cpuid();
-  cpu_locals[cpu].user_sp_temp = arch_get_user_sp();
+  uint64_t v = arch_get_user_sp();
+  cpu_locals[cpu].user_sp_temp = v;
+  dbg_resume("R", v); /* cpu friendly: print the cpu too */
+  dbg_putc('c'); dbg_hex(cpu, 2); dbg_putc('\n');
 }
 
 static void sys_write_console(struct trap_frame *tf) {
@@ -1593,9 +1611,75 @@ __asm__(
 "    \n"
 "    mov rsp, r8\n"
 "    call restore_user_sp_helper\n"
+"    /* Same-privilege (kernel-mode) resume: common_trap_exit's iretq\n"
+"       would pop only three words and leave RSP on this per-CPU scratch\n"
+"       buffer, severing the task from its live stack frames.  Relocate\n"
+"       RIP/CS/RFLAGS onto the task's own stack (gs:[24] is context[33],\n"
+"       the interrupted RSP saved by save_context) and iretq from there. */\n"
+"    mov rax, [rsp + 280]\n"
+"    and rax, 3\n"
+"    cmp rax, 3\n"
+"    je 7f\n"
+"    /* Kernel-mode resume: relocate the whole register frame onto the\n"
+"       task's own stack (gs:[24] = context[33]: the interrupted RSP for\n"
+"       preempted tasks, this CPU's per-CPU kernel stack for fresh ones)\n"
+"       so the tail below restores every register and leaves RSP inside\n"
+"       the task's stack, not on this per-CPU scratch buffer. */\n"
+"    mov rax, gs:[24]\n"
+"    lea rsi, [rax - 296]\n"
+"    mov rdi, rsi\n"
+"    mov rsi, rsp\n"
+"    mov rcx, 37\n"
+"    rep movsq\n"
+"    lea rsp, [rdi - 296]\n"
+"    jmp 9f\n"
+"7:\n"
+"    /* User-mode resume: keep the frame in place, plant the user RSP. */\n"
 "    mov rax, gs:[24]\n"
 "    mov [rsp + 304], rax\n"
-"    jmp common_trap_exit\n"
+"9:\n"
+"    /* Inline copy of the common_trap_exit tail (the assembler resolves\n"
+"       `jmp common_trap_exit` to a wrong offset inside the function, so\n"
+"       we keep the resume path self-contained). */\n"
+"    mov rbx, [rsp + 8]\n"
+"    mov rcx, [rsp + 16]\n"
+"    mov rdx, [rsp + 24]\n"
+"    mov rsi, [rsp + 32]\n"
+"    mov rdi, [rsp + 40]\n"
+"    mov rbp, [rsp + 48]\n"
+"    mov r8,  [rsp + 56]\n"
+"    mov r9,  [rsp + 64]\n"
+"    mov r10, [rsp + 72]\n"
+"    mov r11, [rsp + 80]\n"
+"    mov r12, [rsp + 88]\n"
+"    mov r13, [rsp + 96]\n"
+"    mov r14, [rsp + 104]\n"
+"    mov r15, [rsp + 112]\n"
+"    /* 1. SS -> [rsp + 312] */\n"
+"    mov rax, [rsp + 288]\n"
+"    mov [rsp + 312], rax\n"
+"    /* 2. user RSP -> [rsp + 304] (user mode only) */\n"
+"    mov rax, [rsp + 280]\n"
+"    and rax, 3\n"
+"    cmp rax, 3\n"
+"    jne 3f\n"
+"    mov rax, gs:[24]\n"
+"    mov [rsp + 304], rax\n"
+"3:\n"
+"    /* 3. RFLAGS -> [rsp + 296] */\n"
+"    mov rax, [rsp + 256]\n"
+"    mov [rsp + 296], rax\n"
+"    /* 4. CS -> [rsp + 288] */\n"
+"    mov rax, [rsp + 280]\n"
+"    mov [rsp + 288], rax\n"
+"    /* 5. RIP -> [rsp + 280] */\n"
+"    mov rax, [rsp + 248]\n"
+"    mov [rsp + 280], rax\n"
+"    /* Restore the original rax */\n"
+"    mov rax, [rsp]\n"
+"    add rsp, 264\n"
+"    add rsp, 16\n"
+"    iretq\n"
 ".att_syntax prefix\n"
 );
 

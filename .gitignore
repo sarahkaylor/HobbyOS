@@ -31,3 +31,5 @@ __pycache__/
 # Staging area for evaluating/vendoring third-party sources (never committed)
 third_party/_staging/
 
+disk-arm-test.img
+disk-intel-test.img
