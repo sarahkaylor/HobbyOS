@@ -21,6 +21,18 @@ static uint32_t bpb_total_sectors;
 
 static spinlock_t fat_lock;
 
+/* One-sector cache for FAT table reads.  The read path walks cluster
+   chains sequentially, so 256 consecutive clusters share one FAT sector;
+   without this cache every chain step cost a full device round trip
+   (O(n^2) block operations per file read - the dominant cost of the
+   test wave's program loads).  Guarded by its own small lock so it is
+   safe on every call path (including pre-scheduler boot). */
+static spinlock_t fat_cache_lock;
+static uint8_t fat_cache[SECTOR_SIZE];
+static uint8_t fat_cache_fill[SECTOR_SIZE];
+static uint32_t fat_cache_sector;
+static int fat_cache_valid;
+
 /* Helper: match an 8.3 filename.  A query that cannot be represented in
    8.3 (a base longer than 8 chars or an extension longer than 3) never
    matches a short entry: truncating it onto one would let a name like
@@ -149,6 +161,8 @@ static int name_is_83(const char *name) {
  */
 int fat16_init(void) {
   spinlock_init(&fat_lock);
+  spinlock_init(&fat_cache_lock);
+  fat_cache_valid = 0;
   uint8_t buf[SECTOR_SIZE];
   if (virtio_blk_read_sector(0, buf, 1) != 0) {
     return -1;
@@ -180,19 +194,38 @@ int fat16_init(void) {
 }
 
 static uint16_t read_fat(uint16_t cluster) {
-  uint8_t buf[SECTOR_SIZE];
   uint32_t offset = cluster * 2;
   uint32_t sector = fat_sector + (offset / SECTOR_SIZE);
-  virtio_blk_read_sector(sector, buf, 1);
-  uint8_t* p = buf + (offset % SECTOR_SIZE);
-  return (uint16_t)(p[0] | (p[1] << 8));
+  spinlock_acquire(&fat_cache_lock);
+  if (!fat_cache_valid || fat_cache_sector != sector) {
+    spinlock_release(&fat_cache_lock);
+    virtio_blk_read_sector(sector, fat_cache_fill, 1);
+    spinlock_acquire(&fat_cache_lock);
+    for (int i = 0; i < SECTOR_SIZE; i++) fat_cache[i] = fat_cache_fill[i];
+    fat_cache_sector = sector;
+    fat_cache_valid = 1;
+  }
+  uint8_t* p = fat_cache + (offset % SECTOR_SIZE);
+  uint16_t v = (uint16_t)(p[0] | (p[1] << 8));
+  spinlock_release(&fat_cache_lock);
+  return v;
 }
 
 static void write_fat(uint16_t cluster, uint16_t val) {
   uint8_t buf[SECTOR_SIZE];
   uint32_t offset = cluster * 2;
   uint32_t sector = fat_sector + (offset / SECTOR_SIZE);
-  virtio_blk_read_sector(sector, buf, 1);
+
+  /* Reuse the cache when it holds this sector; otherwise fetch it. */
+  spinlock_acquire(&fat_cache_lock);
+  int cached = (fat_cache_valid && fat_cache_sector == sector);
+  if (cached) {
+    for (int i = 0; i < SECTOR_SIZE; i++) buf[i] = fat_cache[i];
+  }
+  spinlock_release(&fat_cache_lock);
+  if (!cached) {
+    virtio_blk_read_sector(sector, buf, 1);
+  }
 
   uint8_t* p = buf + (offset % SECTOR_SIZE);
   p[0] = val & 0xFF;
@@ -202,6 +235,13 @@ static void write_fat(uint16_t cluster, uint16_t val) {
   if (bpb_fat_count > 1) {
     virtio_blk_write_sector(sector + bpb_sectors_per_fat, buf, 1);
   }
+
+  /* Refresh/install the cache with the modified sector. */
+  spinlock_acquire(&fat_cache_lock);
+  for (int i = 0; i < SECTOR_SIZE; i++) fat_cache[i] = buf[i];
+  fat_cache_sector = sector;
+  fat_cache_valid = 1;
+  spinlock_release(&fat_cache_lock);
 }
 
 static uint16_t alloc_cluster(void) {
@@ -1405,8 +1445,11 @@ int fat16_read(struct file* f, void* buf, int size) {
   uint8_t* out = (uint8_t*)buf;
   int read_bytes = 0;
 
+  /* Walk the cluster chain forward instead of re-walking it from the
+     start for every single sector: the old per-iteration
+     get_cluster_for_offset() made reads O(n^2) in chain steps. */
+  uint16_t c = get_cluster_for_offset(f->fat16.entry.start_cluster, f->fat16.cursor);
   while (size > 0) {
-    uint16_t c = get_cluster_for_offset(f->fat16.entry.start_cluster, f->fat16.cursor);
     if (c == 0 || c >= 0xFFF8) break;
 
     uint32_t offset_in_cluster = f->fat16.cursor % cluster_size;
@@ -1428,6 +1471,96 @@ int fat16_read(struct file* f, void* buf, int size) {
 
     f->fat16.cursor += chunk;
     size -= chunk;
+    if ((f->fat16.cursor % cluster_size) == 0) {
+      c = read_fat(c); /* crossing into the next cluster of the chain */
+    }
+  }
+  spinlock_release_irqrestore(&fat_lock, flags);
+  return read_bytes;
+}
+
+/**
+ * Reads `size` bytes at the file cursor straight into an identity-mapped
+ * physical destination, coalescing contiguous cluster runs into single
+ * multi-sector device requests.  Used by the program loader (destination
+ * = the child's physical block): a ~150 KiB program that used to cost
+ * hundreds of single-sector round trips now needs a handful of requests.
+ * A sub-sector tail (or an unaligned edge) is completed with a one-sector
+ * bounce read.
+ *
+ * Returns the number of bytes read.
+ */
+int fat16_read_direct(struct file* f, uint64_t dest, int size) {
+  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+
+  if (f->fat16.cursor >= f->fat16.entry.file_size) {
+    spinlock_release_irqrestore(&fat_lock, flags);
+    return 0;
+  }
+  uint32_t remaining = f->fat16.entry.file_size - f->fat16.cursor;
+  if ((uint32_t)size > remaining) size = remaining;
+  if (size == 0) {
+    spinlock_release_irqrestore(&fat_lock, flags);
+    return 0;
+  }
+
+  uint64_t out = dest;
+  int read_bytes = 0;
+
+  while (size > 0) {
+    uint16_t c = get_cluster_for_offset(f->fat16.entry.start_cluster, f->fat16.cursor);
+    if (c == 0 || c >= 0xFFF8) break;
+
+    uint32_t offset_in_cluster = f->fat16.cursor % cluster_size;
+    uint32_t offset_in_sector = offset_in_cluster % SECTOR_SIZE;
+    uint32_t max_sectors = (uint32_t)size / SECTOR_SIZE;
+
+    if (offset_in_sector != 0 || (out % SECTOR_SIZE) != 0 || max_sectors == 0) {
+      /* Unaligned edge or sub-sector tail: one sector through a bounce. */
+      uint32_t sector_num = data_sector + (c - 2) * bpb_sectors_per_cluster
+                            + (offset_in_cluster / SECTOR_SIZE);
+      uint8_t sec_buf[SECTOR_SIZE];
+      spinlock_release_irqrestore(&fat_lock, flags);
+      int res = virtio_blk_read_sector(sector_num, sec_buf, 1);
+      flags = spinlock_acquire_irqsave(&fat_lock);
+      if (res != 0) break;
+
+      uint32_t chunk = SECTOR_SIZE - offset_in_sector;
+      if (chunk > (uint32_t)size) chunk = size;
+      uint8_t* o = (uint8_t*)out;
+      for (uint32_t i = 0; i < chunk; i++) o[i] = sec_buf[offset_in_sector + i];
+      out += chunk;
+      read_bytes += chunk;
+      f->fat16.cursor += chunk;
+      size -= chunk;
+      continue;
+    }
+
+    /* Whole sectors available in the current cluster, extended across
+       chain-contiguous successors ((c, c+1, c+2, ...) = adjacent LBAs). */
+    uint32_t sectors = (cluster_size - offset_in_cluster) / SECTOR_SIZE;
+    uint16_t last = c;
+    while (sectors < max_sectors) {
+      uint16_t nxt = read_fat(last);
+      if (nxt != (uint16_t)(last + 1)) break;
+      last = nxt;
+      sectors += bpb_sectors_per_cluster;
+    }
+    if (sectors > max_sectors) sectors = max_sectors;
+    if (sectors > 1024) sectors = 1024; /* device request cap */
+
+    uint32_t lba = data_sector + (c - 2) * bpb_sectors_per_cluster
+                   + (offset_in_cluster / SECTOR_SIZE);
+    spinlock_release_irqrestore(&fat_lock, flags);
+    int res = virtio_blk_read_sector(lba, (void*)out, sectors);
+    flags = spinlock_acquire_irqsave(&fat_lock);
+    if (res != 0) break;
+
+    uint32_t bytes = sectors * SECTOR_SIZE;
+    out += bytes;
+    read_bytes += bytes;
+    f->fat16.cursor += bytes;
+    size -= bytes;
   }
   spinlock_release_irqrestore(&fat_lock, flags);
   return read_bytes;

@@ -27,6 +27,7 @@ int fat16_open(const char* filename, struct file* f);
 
 // Reads bytes from a FAT16 file.
 int fat16_read(struct file* f, void* buf, int size);
+int fat16_read_direct(struct file* f, uint64_t dest, int size);
 
 // Writes bytes to a FAT16 file.
 int fat16_write(struct file* f, const void* buf, int size);

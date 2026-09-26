@@ -823,16 +823,31 @@ int virtio_net_send(const void *buf, uint32_t len) {
   reg_write32(VIRTIO_QUEUE_SEL, 1);
   reg_write32(VIRTIO_QUEUE_NOTIFY, 1);
 
+  /* Bounded poll: spin directly on the used ring instead of wfi.  The
+     device updates used.idx in memory asynchronously, so polling needs
+     no interrupt to progress, whereas the old wfi loop could park
+     forever when the waking IRQ never arrived (observed as NFSTEST and
+     PING left "RUNNING" with no CPU on them, blocking system halt ~1
+     run in 3).  The clock bound also covers a genuinely-lost request
+     without wedging the caller.  Normally the completion is visible
+     within microseconds. */
+  extern uint64_t timer_get_ms(void);
+  uint64_t tx_t0 = timer_get_ms();
+  int tx_timeout = 0;
   while (*(volatile uint16_t*)&tx_vq.used.idx == tx_ack_used_idx) {
-    spinlock_release_irqrestore(&net_tx_lock, flags);
-    safe_wfi();
-    flags = spinlock_acquire_irqsave(&net_tx_lock);
+    if (timer_get_ms() - tx_t0 >= 500) {
+      tx_timeout = 1;
+      break;
+    }
   }
+  /* Sync either way: on timeout this resyncs past the lost request so
+     the next send waits for its own completion rather than reading a
+     stale one. */
   tx_ack_used_idx = tx_vq.used.idx;
 
   arch_memory_barrier();
   spinlock_release_irqrestore(&net_tx_lock, flags);
-  return 0;
+  return tx_timeout ? -1 : 0;
 }
 
 void virtio_net_handle_irq(void) {

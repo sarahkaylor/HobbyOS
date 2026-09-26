@@ -201,7 +201,7 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
 
   uint64_t phys_base = process_get_phys_base(pid);
 
-  int bytes_read = fat16_read(&f, (void*)phys_base, MAX_PROGRAM_SIZE);
+  int bytes_read = fat16_read_direct(&f, phys_base, MAX_PROGRAM_SIZE);
   if (bytes_read <= 0) {
     uart_puts("Failed to read ");
     uart_puts(filename);

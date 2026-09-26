@@ -603,24 +603,31 @@ extern void safe_wfi(void);
 extern int print_int(int val);
 
 /**
- * Internal helper to perform a single-sector block operation (Read or Write).
- * Sets up the 3-descriptor chain (Header, Data, Status) and notifies the device.
- * Uses WFI to sleep until the device completes the request.
+ * Internal helper to perform a block operation (Read or Write) over
+ * `count` consecutive sectors in ONE device request.  Sets up the
+ * 3-descriptor chain (Header, Data, Status) and notifies the device.
+ * The virtio-blk data descriptor length covers count * 512 bytes; the
+ * device reads/writes `count` sectors starting at `sector`.  buf must be
+ * physically contiguous (all callers use identity-mapped kernel or
+ * physical-block memory).
  *
  * Parameters:
- *   sector - Target sector index on disk.
+ *   sector - First target sector index on disk.
  *   buf    - Data buffer in memory.
  *   type   - VIRTIO_BLK_T_IN or VIRTIO_BLK_T_OUT.
+ *   count  - Number of consecutive sectors (>= 1).
  *
  * Returns:
  *   0 on success, -1 on failure.
  */
-static int virtio_blk_do_op(uint64_t sector, void* buf, uint32_t type) {
+static int virtio_blk_do_op(uint64_t sector, void* buf, uint32_t type, uint32_t count) {
   uint64_t flags = spinlock_acquire_irqsave(&blk_lock);
   if (!blk_mmio) {
     spinlock_release_irqrestore(&blk_lock, flags);
     return -1;
   }
+  if (count == 0) count = 1;
+  if (count > 1024) count = 1024; /* 512 KiB cap per request */
 
   uint16_t desc_idx = 0;
 
@@ -634,9 +641,9 @@ static int virtio_blk_do_op(uint64_t sector, void* buf, uint32_t type) {
   vq.desc[0].flags = 1; // VIRTQ_DESC_F_NEXT
   vq.desc[0].next = 1;
 
-  // Descriptor 1: The data buffer
+  // Descriptor 1: The data buffer (count sectors)
   vq.desc[1].addr = (uint64_t)buf;
-  vq.desc[1].len = 512;
+  vq.desc[1].len = 512 * count;
   vq.desc[1].flags = 1 | (type == VIRTIO_BLK_T_IN ? 2 : 0); // VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE
   vq.desc[1].next = 2;
 
@@ -720,11 +727,12 @@ int virtio_blk_read_sector(uint64_t sector, void* buf, uint32_t count) {
   }
 
   int res = 0;
-  for (uint32_t i = 0; i < count; i++) {
-    if (virtio_blk_do_op(sector + i, (uint8_t*)buf + (i * 512), VIRTIO_BLK_T_IN) != 0) {
-      res = -1;
-      break;
-    }
+  if (count == 0) count = 1;
+  /* One multi-sector request (the device walks count sectors from
+     `sector`); this is what collapses the loader's hundreds of
+     single-sector round trips per program into a handful. */
+  if (virtio_blk_do_op(sector, buf, VIRTIO_BLK_T_IN, count) != 0) {
+    res = -1;
   }
 
   flags = spinlock_acquire_irqsave(&blk_request_lock);
@@ -748,11 +756,9 @@ int virtio_blk_write_sector(uint64_t sector, const void* buf, uint32_t count) {
   }
 
   int res = 0;
-  for (uint32_t i = 0; i < count; i++) {
-    if (virtio_blk_do_op(sector + i, (void*)((uint8_t*)buf + (i * 512)), VIRTIO_BLK_T_OUT) != 0) {
-      res = -1;
-      break;
-    }
+  if (count == 0) count = 1;
+  if (virtio_blk_do_op(sector, (void*)buf, VIRTIO_BLK_T_OUT, count) != 0) {
+    res = -1;
   }
 
   flags = spinlock_acquire_irqsave(&blk_request_lock);

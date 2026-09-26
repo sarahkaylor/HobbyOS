@@ -86,19 +86,31 @@ Landed (uncommitted):
 - `virtio_blk` no longer holds `blk_lock` across the device wait.
 
 Remaining (this thrust):
+- **Load-path collapse (DONE, verified):** the wave spent ~all of its wall
+  time in program loads because each load cost ~3000 block-device round
+  trips: fat16_read walked the cluster chain from the start for *every
+  sector* (O(n^2) FAT reads, uncached) and every sector was its own
+  virtio request.  Fixes: one multi-sector device request per contiguous
+  cluster run (`virtio_blk_do_op` count), a one-sector FAT cache, a
+  forward cluster walk, and `fat16_read_direct()` (loader reads straight
+  into the child's physical block).  Result: **full wave 19/19 verdicts +
+  System halt in ~40 s** (was 480 s / best-ever 6:39).
+- **Net TX wait bounded (DONE):** `virtio_net_send` waited on the TX used
+  ring with an unbounded wfi loop; a lost/coalesced completion left
+  NFSTEST "RUNNING" with no CPU on it, blocking system halt ~1 run in 3.
+  Now capped at 500 ms (returns -1, resyncs the ack).
 - **Atomic block-to-deschedule refactor**: make [set BLOCKED+mask] and
   [save+deschedule] one proc_lock critical section (schedule variant that
-  assumes the lock). The current fix makes same-CPU resumes exact and
+  assumes the lock).  The current fix makes same-CPU resumes exact and
   cross-CPU takeovers corruption-free; a cross-CPU takeover can still replay
-  from the previous save point. Low occurrence; do before calling recovery
+  from the previous save point.  Low occurrence; do before calling recovery
   airtight.
-- **16-core stability**: boots, but the wave crawls + stalls mid-wave;
-  `MAX_CPUS=16` regressed even at 8 vCPUs. Needs scheduler/per-CPU-loop work.
-- **≤5-min reliable waves**: re-measure the fixed tree (5 parallel instances);
-  if clean, strip remaining diagnostics ([IDLESTUCK] detector is bounded but
-  floods on wedges; lock-graph probe; [PIPE_WRITE_ERR]) for a final timed run.
-- Uncommitted deliverables to commit after verification: this file,
-  `tools/run_waves.sh`, all kernel fixes above (one combined local commit).
+- **16-core stability**: boots; retry with the fixed tree before further
+  scheduler work (`MAX_CPUS 16`, `-smp 16`).
+- **≤5-min reliable waves**: ACHIEVED (0.7 min clean runs); verify stability
+  across a 5x parallel battery, then re-commit.
+- Uncommitted deliverables to commit after verification: net fix, load-path
+  fixes, plan.md updates.
 
 Lessons:
 - `make test_arm` returns 0 even when the guest is killed — always grep the
