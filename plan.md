@@ -105,8 +105,22 @@ Remaining (this thrust):
   cross-CPU takeovers corruption-free; a cross-CPU takeover can still replay
   from the previous save point.  Low occurrence; do before calling recovery
   airtight.
-- **16-core stability**: boots; retry with the fixed tree before further
-  scheduler work (`MAX_CPUS 16`, `-smp 16`).
+- **16-core stability (retried 2026-09-26 with the fixed tree; still open):**
+  boots and runs; the failure is now understood as scale pressure, not the old
+  lock bugs: (a) the 64 process slots (capped by 64-bit pipe pid masks) fill
+  under 16-way concurrency — SHTEST-family children + spawn workers + unreaped
+  EXITED slots starve new creates ("no free process slots"); (b) `sys_spawn`
+  retries creation in a hot loop while the table is full, livelocking its CPU;
+  (c) a lost-owner RUNNING process (no CPU on it) can stop the wave driver.
+  Captured live via HMP + guest-memory process-table dumps.  Code supports
+  MAX_CPUS 16 (1MB stack region); reintroduce only after slot-liveness work
+  (spawn backoff, faster reap) — the 8-core path is the fast, verified one.
+- **Lost-owner watchdog (NEW):** the scheduler idle loop now reclaims a
+  process stuck in RUNNING with no CPU owner (a leaked wake — the wedged
+  network tests' signature) back to READY after ~500 idle rounds and logs
+  `[LOSTWAKE]` so the underlying race stays diagnosable.  Also fixes the
+  [IDLESTUCK] dump trigger (monotone counter guard; the old modulo could be
+  skipped when CPUs raced the shared counter).
 - **≤5-min reliable waves**: ACHIEVED (0.7 min clean runs); verify stability
   across a 5x parallel battery, then re-commit.
 - Uncommitted deliverables to commit after verification: net fix, load-path

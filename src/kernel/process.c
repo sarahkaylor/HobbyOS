@@ -1043,6 +1043,7 @@ static jmp_buf scheduler_return_ctx[MAX_CPUS];
 /* Consecutive scheduler idle rounds with no READY process.  Reset when a
  * process runs; drives the [IDLESTUCK] diagnostic in the idle loop. */
 static int sched_idle_rounds;
+static int last_idlestuck_div;
 
 void scheduler_finished(void) {
   uint32_t cpu = get_cpuid();
@@ -1125,12 +1126,48 @@ void start_scheduler(void) {
     }
     spinlock_release_irqrestore(&proc_lock, flags);
 
-    /* Idle-stuck detector: if no READY process was found for many
-       consecutive rounds, dump the stuck process table every ~1000
-       rounds so a wedged suite names its stuck process in the boot log
-       (a missed wakeup otherwise idles every CPU forever). */
+    /* Idle-stuck detector + lost-owner watchdog: a process left in
+       RUNNING state with no CPU actually on it (cpu_current_pids[c]
+       never matches its index) can never be picked again, so every CPU
+       idles forever.  The state sticks when a wake is consumed by the
+       switch machinery but the body never runs — the same signature as
+       wedged network tests, and at 16 cores it can hit the boot-wave
+       driver itself, stopping all further program loads.  After ~500
+       idle rounds (≈0.5 s) reclaim it to READY and log the event; real
+       ownership windows are microseconds, so the grace period is safe.
+       (pid == slot index in this kernel.) */
     sched_idle_rounds++;
-    if (sched_idle_rounds >= 500 && (sched_idle_rounds % 1000) == 0) {
+    if (sched_idle_rounds >= 500) {
+      uint64_t wflags = spinlock_acquire_irqsave(&proc_lock);
+      for (int k = 1; k < MAX_PROCESSES; k++) {
+        if (proc_table[k].state == PROC_STATE_RUNNING) {
+          int owned = 0;
+          for (int c = 0; c < MAX_CPUS; c++) {
+            if (cpu_current_pids[c] == k) {
+              owned = 1;
+              break;
+            }
+          }
+          if (!owned) {
+            uart_puts("[LOSTWAKE] reclaiming pid=");
+            print_int(proc_table[k].pid);
+            uart_puts(" ");
+            uart_puts(proc_table[k].name);
+            uart_puts(" from RUNNING with no CPU owner\n");
+            proc_table[k].state = PROC_STATE_READY;
+          }
+        }
+      }
+      spinlock_release_irqrestore(&proc_lock, wflags);
+    }
+
+    /* Diagnostic dump (monotone trigger so concurrent CPUs racing the
+       shared counter cannot skip the exact modulo value): dump the
+       stuck process table every ~1000 idle rounds so a wedged suite
+       names its stuck process in the boot log. */
+    if (sched_idle_rounds >= 500 &&
+        (sched_idle_rounds / 1000) != last_idlestuck_div) {
+      last_idlestuck_div = sched_idle_rounds / 1000;
       uart_puts("[IDLESTUCK] cpu=");
       print_int((int)get_cpuid());
       uart_puts(" rounds=");
