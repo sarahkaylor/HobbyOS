@@ -30,6 +30,17 @@ All work is committed locally **only** — never pushed to GitHub.
   `nano_term_test`), E2E harness `run_nano_test.py` + `fat16img.py`.
   **Validated end-to-end on ARM and x86_64** (menu launch, typing, `^O` save,
   HELLO.TXT byte-exact readback from the FAT image).
+- **nano interactive-rendering fix** — typed text now paints **per keystroke**
+  (user's "I don't see the text I am typing" bug). Root cause: nano's
+  `place_the_cursor()` wraps its `wnoutrefresh(midwin)` in `#ifdef _CURSES_H_`
+  (ncurses' header guard), but our `curses.h` guarded with `HB_CURSES_H` — the
+  refresh was compiled out, so under nano 8.7's deferred-refresh design typed
+  characters never reached the virtual screen until a full refresh (menu
+  commands/^L/Enter). Fix: `curses.h` also defines `_CURSES_H_`; `wgetch` now
+  flushes pending screen updates before waiting (real-ncurses behavior). The
+  E2E harness gained **on-screen assertions** (per-keystroke pixel-diff checks,
+  `^O` write-prompt row check, FAT byte readback) and now runs **10 checks on
+  both ARM and x86_64**.
 - **x64 kernel-task resume fix — LANDED** — `src/kernel/process.c` +
   `src/kernel/arch/x64/trap.c`: kernel tasks run on their own region stack;
   `save_context` stores the frame's RSP-at-interrupt field (`[tf+304]`); the
@@ -38,6 +49,12 @@ All work is committed locally **only** — never pushed to GitHub.
 
 ### Test status
 - Host unit tests: PASS (482 checks, 0 failed). Host strict parity: 16/16 PASS.
+- nano host integration (`nano_term_test`): PASS (33 checks, 0 failed) —
+  includes per-keystroke delta rendering (`test_typing_deltas`) on stdscr+newwin.
+- nano E2E (`run_nano_test.py`, now with on-screen assertions): **10/10 PASS on
+  both ARM and x86_64** — per-keystroke painting (pixel deltas), the `^O`
+  "Write to File:" prompt row, save + FAT byte-exact readback
+  (`hello from nano\nsecond linexyz\n`), root-dir listing, clean ^X exit.
 - ARM (`make test`): **green end-to-end** — `System halt`, 616 PASS, 0 LOCKFOREVER;
   the UNEXPAND_T suite (was **silently running the wrong binary** — FAT16 8.3
   truncation bug) is fixed by LFN support and now **`[UNEXPTEST] PASS`** on a fresh run.

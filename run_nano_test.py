@@ -48,6 +48,58 @@ def check(ok, what):
     print(f"  {'PASS' if ok else 'FAIL'}: {what}", flush=True)
 
 
+# ------------------------------------------------------- screen-content diffs
+# The E2E used to verify only the bytes nano saved.  The rendering regressions
+# ("typed text doesn't show up", menu prompts never appearing) were invisible
+# to that: they need assertions on WHAT IS ON SCREEN.  These helpers compare
+# pixel regions between screendumps so the harness can require that typed text
+# and menu prompts actually paint.
+#
+# ED_BOX = the first two content rows of the editor window (below the title
+# bar); PROMPT_BOX = the status/prompt band at the VERY BOTTOM of the nano
+# window (the write-out prompt is the last grid row, just above the taskbar,
+# around y 700-742 on the 1024x768 desktop).
+ED_BOX = (6, 40, 1018, 116)
+PROMPT_BOX = (6, 700, 1018, 741)
+
+
+def ppm_pixels(path):
+    """Return (w, h, rgb-bytes) for a P6 PPM."""
+    with open(path, "rb") as f:
+        data = f.read()
+    fields = []
+    i = 0
+    while len(fields) < 4:
+        while i < len(data) and data[i:i + 1].isspace():
+            i += 1
+        if data[i:i + 1] == b"#":
+            while i < len(data) and data[i:i + 1] != b"\n":
+                i += 1
+            continue
+        j = i
+        while j < len(data) and not data[j:j + 1].isspace():
+            j += 1
+        fields.append(data[i:j])
+        i = j
+    w, h = int(fields[1]), int(fields[2])
+    return w, h, data[i + 1:i + 1 + w * h * 3]
+
+
+def region_diff(a_path, b_path, box):
+    """Count pixels differing between two PPMs inside box (x0,y0,x1,y1)."""
+    x0, y0, x1, y1 = box
+    wa, ha, a = ppm_pixels(a_path)
+    _, _, b = ppm_pixels(b_path)
+    n = 0
+    for y in range(y0, min(y1, ha)):
+        base = y * wa * 3
+        for x in range(x0, min(x1, wa)):
+            o = base + x * 3
+            if a[o] != b[o] or a[o + 1] != b[o + 1] or a[o + 2] != b[o + 2]:
+                n += 1
+    return n
+
+
 # ---------------------------------------------------------------- screenshots
 def ppm_to_png(ppm_path, png_path):
     with open(ppm_path, "rb") as f:
@@ -338,9 +390,32 @@ def main():
         time.sleep(1.0)
         screenshot(qmp, "03-typed")
 
+        # --- on-screen regression: the typed text must actually PAINT ------
+        # (guards the "_CURSES_H_ / wgetch-flush" rendering bug where every
+        # keystroke stayed invisible until a full refresh)
+        d = region_diff(f"{RUN_DIR}/02-nano-open.ppm",
+                        f"{RUN_DIR}/03-typed.ppm", ED_BOX)
+        check(d > 300,
+              f"the typed lines are visible in the edit area (pixel delta {d})")
+
+        # per-keystroke burst: each fast char must still land on screen
+        for ch in "xyz":
+            qmp.keys(ch, settle=0.1)
+        time.sleep(1.0)
+        screenshot(qmp, "03b-perkey")
+        d = region_diff(f"{RUN_DIR}/02-nano-open.ppm",
+                        f"{RUN_DIR}/03b-perkey.ppm", ED_BOX)
+        check(d > 150,
+              f"fast-typed characters paint too (pixel delta {d})")
+
         # --- save with Ctrl+O --------------------------------------------
         qmp.keys("ctrl", "o", settle=1.0)
         screenshot(qmp, "04-write-prompt")
+        # on-screen regression: the write-out prompt row must render
+        d = region_diff(f"{RUN_DIR}/03b-perkey.ppm",
+                        f"{RUN_DIR}/04-write-prompt.ppm", PROMPT_BOX)
+        check(d > 15,
+              f"the Write-Out prompt row appears after ^O (pixel delta {d})")
         qmp.type_text(FILE_NAME, delay=0.3)
         qmp.keys("ret", settle=2.0)
         screenshot(qmp, "05-saved")

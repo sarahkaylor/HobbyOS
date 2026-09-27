@@ -153,12 +153,25 @@ compose/auto-repeat in `desktop.c`; libc gained time.h (wall clock via sysinfo
 command 6), libgen, mkstemp family, realpath, access, strings.h, term.h,
 sigaction (remembered, never delivered) and a dup2 honest-failure stub.
 
-Validation, all green: `nano_term_test_host`, `desktop_term_test`,
-`desktop_input_test` (host suites), `make host_tests` (482 checks), and the
-scripted end-to-end harness `run_nano_test.py` on **both** architectures:
-boot → Apps menu → launch NANO.BIN → type → `^O` save as `HELLO.TXT` → read
-the file back off the FAT image byte-exact (`hello from nano\nsecond line\n`).
+Validation, all green: `nano_term_test_host` (33 checks incl. per-keystroke
+delta render tests), `desktop_term_test`, `desktop_input_test` (host suites),
+`make host_tests` (482 checks), and the scripted end-to-end harness
+`run_nano_test.py` on **both** architectures: boot → Apps menu → launch
+NANO.BIN → type → check each character paints **per keystroke** (pixel-diff
+assertions on the editor grid) → `^O` → assert the "Write to File:" prompt
+row renders → save as `HELLO.TXT` → read the file back off the FAT image
+byte-exact → clean `^X` exit. 10 checks, 10/10 on ARM and x86_64.
 The x64 run rides on the kernel spawn/resume fix (plan.md §2).
+
+Interactive-rendering fix (2026-09-26): typed text was not visible because
+nano's `place_the_cursor()` wraps its `wnoutrefresh(midwin)` in
+`#ifdef _CURSES_H_` (the ncurses header guard), which our `curses.h`
+(`HB_CURSES_H` guard) left undefined — so per-keystroke refreshes were
+compiled out and nano 8.7's deferred-refresh design only repainted on full
+refreshes (Enter, `^O`, `^L`). Fix: `curses.h` also defines `_CURSES_H_`, and
+`wgetch` flushes pending screen updates before waiting (real-ncurses
+semantics). Both menu-command breakdowns and invisible typing are gone;
+`run_nano_test.py` now asserts on-screen content, not just saved bytes.
 
 ## 4. This program's roadmap (each phase = one local commit)
 

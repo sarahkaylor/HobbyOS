@@ -224,7 +224,57 @@ static void test_resize(void) {
   check(COLS == 126, "back to 126 columns");
 }
 
-/* ---- 5. The caret is really hidden/shown through the wire ---- */
+/* ---- 5. Typing: the nano per-keystroke flow (waddch a fresh window row
+ *         then refresh, twice in a row) lands EVERY delta on the grid ---- */
+
+static void test_typing_deltas(void) {
+  /* nano's edit window: created once, drawn into per keystroke via
+   * wmove+waddnstr, then edit_refresh() = wnoutrefresh+doupdate. The
+   * regression this guards: only the FIRST delta painted and later
+   * keystrokes never appeared again (the "typed text doesn't show up"
+   * report). */
+  WINDOW *edit = newwin(63, 126, 1, 0);
+  check(edit != 0, "the edit window is created (63 rows below the title bar)");
+
+  wmove(edit, 0, 0);
+  waddch(edit, 'a');
+  wnoutrefresh(edit);
+  doupdate();
+  check(cell(1, 0) == 'a', "first keystroke paints into the grid");
+
+  wmove(edit, 0, 1);
+  waddch(edit, 'b');
+  wnoutrefresh(edit);
+  doupdate();
+  check(cell(1, 1) == 'b', "second keystroke paints into the grid (delta after delta)");
+
+  waddnstr(edit, "cde", 3);
+  wnoutrefresh(edit);
+  doupdate();
+  check(cell(1, 2) == 'c' && cell(1, 3) == 'd' && cell(1, 4) == 'e',
+        "a waddnstr burst after previous deltas paints all of it");
+
+  /* The status bar (bottomwin analog) updates alongside. */
+  WINDOW *bottom = newwin(3, 126, 66, 0);
+  mvwaddstr(bottom, 0, 0, "File: test");
+  wnoutrefresh(bottom);
+  doupdate();
+  check(cell(66, 0) == 'F' && cell(66, 6) == 't',
+        "the bottom status window paints in the same doupdate pass");
+
+  /* And a fresh char on the SECOND line uses the right row. */
+  wmove(edit, 1, 0);
+  waddstr(edit, "XYZ");
+  wnoutrefresh(edit);
+  doupdate();
+  check(cell(2, 0) == 'X' && cell(2, 2) == 'Z',
+        "line 2 of the edit window paints at grid row 2");
+
+  delwin(bottom);
+  delwin(edit);
+}
+
+/* ---- 6. The caret is really hidden/shown through the wire ---- */
 
 static void test_caret(void) {
   curs_set(0);
@@ -252,6 +302,7 @@ int main(void) {
   test_drawing();
   test_keys();
   test_resize();
+  test_typing_deltas();
   test_caret();
 
   printf("\n=== %d checks, %d failed ===\n", checks, fails);

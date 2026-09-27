@@ -1,6 +1,14 @@
 #ifndef HB_CURSES_H
 #define HB_CURSES_H
 
+/* Define the classic ncurses header guard too: real nano sources test
+ * #ifdef _CURSES_H_ (e.g. place_the_cursor()'s wnoutrefresh(midwin)) to
+ * decide whether certain refreshes are compiled in.  With it undefined
+ * those paths vanish and per-keystroke screen updates never happen. */
+#ifndef _CURSES_H_
+#define _CURSES_H_
+#endif
+
 /* curses.h — the HobbyOS curses shim for ported ncurses programs.
  *
  * The sysroot has no ncurses (and no terminfo); this header + hb_curses.c

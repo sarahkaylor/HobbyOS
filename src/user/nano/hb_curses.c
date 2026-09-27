@@ -941,6 +941,14 @@ int wgetch(WINDOW *win) {
       return k;
     }
 
+    /* Flush pending screen updates before waiting for input, exactly like
+     * ncurses' wgetch(): nano defers its repaints (refresh_needed) and
+     * relies on the NEXT wgetch to actually push the changed cells to the
+     * physical screen.  Without this flush here, per-keystroke edits stay
+     * in the virtual screen and the user sees nothing until a full
+     * refresh (^L, Enter, save) eventually happens. */
+    doupdate();
+
     int k = parse_key();
     if (k > 0) return k;
     if (k == HB_SWALLOWED) continue;
