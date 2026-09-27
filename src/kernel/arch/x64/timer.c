@@ -121,14 +121,18 @@ void timer_init(void) {
     extern void gic_enable_interrupt(uint32_t intid);
     gic_enable_interrupt(30);
   } else {
-    // Per-core LAPIC timer (parity with ARM's per-core timers).  A core
-    // with no timer has no preemption and cannot wake out of a device
-    // wait (virtio IRQs go to CPU0), so a process blocked in a safe_wfi
-    // busy-wait on an AP froze it forever — the rare single-CPU stall
-    // that previously let the lost-owner reaper double-run it.  The
-    // original deferral ("proc_lock pileup") predates the lock fixes;
-    // arm vector 32 periodic on every AP now.
-    lapic_timer_start_periodic();
+    /* Per-core LAPIC timer: NOT armed.  Arming the AP LVT produced, in
+       every configuration tried, a machine that loads programs but has
+       every AP-stop processing interrupts after a tick or two (10–34s
+       stale last-seen frames, user processes pinned at their entry, the
+       block-waiting loader silently starving).  The pre-AP-timer design
+       — CPU0's PIT tick + the broadcast 0x81 reschedule IPI (also 100 Hz)
+       — wakes APs from WFI waits and preempts user processes, and with
+       the safe reaper / idle-claim / interrupt-atomic resume fixes it is
+       the only configuration that has ever completed the wave.  Keep the
+       diagnosis implicit: a core that runs with no per-core timer still
+       receives the broadcast IPI on cpu0's tick. */
+    (void)lapic_timer_start_periodic;
   }
 }
 

@@ -8,6 +8,7 @@
 spinlock_t uart_lock;
 
 #define COM1_PORT 0x3F8
+#define COM2_PORT 0x2F8
 
 static inline void outb(uint16_t port, uint8_t val) {
   __asm__ volatile("outb %0, %1" : : "a"(val), "Nd"(port));
@@ -18,6 +19,8 @@ static inline uint8_t inb(uint16_t port) {
   __asm__ volatile("inb %1, %0" : "=a"(ret) : "Nd"(port));
   return ret;
 }
+
+void com2_init(void);
 
 /**
  * Initializes the PC COM1 serial port.
@@ -32,6 +35,7 @@ void uart_init(void) {
   outb(COM1_PORT + 3, 0x03);    // 8 bits, no parity, one stop bit
   outb(COM1_PORT + 2, 0xC7);    // Enable FIFO, clear them, with 14-byte threshold
   outb(COM1_PORT + 4, 0x0B);    // IRQs enabled, RTS/DSR set
+  com2_init();
 
   /* Print the lock's address once (raw MMIO — uart_puts itself needs the
      lock and isn't available this early): [LOCKFOREVER] screams report raw
@@ -89,6 +93,77 @@ static void uart_putc_body(char c) {
 /** Raw single character — lock-free, for deadlock diagnostics only. */
 void uart_putc_raw(char c) {
   uart_putc_body(c);
+}
+
+/* ---- COM2: a second, uncontaminated diagnostic stream (x64 only).
+   The console (COM1) interleaves every core's writes even though each
+   logical write is atomic, so a 20s-stall watchdog dump gets shredded by
+   the loader's console noise.  QEMU maps COM2 at 0x2F8; `-serial file:`
+   captures it to its own log, byte-exact.  All writers here are lock-free
+   by construction (nothing else uses COM2). */
+
+static void com2_outb(uint16_t port, uint8_t val) {
+  __asm__ volatile("outb %0, %1" : : "a"(val), "Nd"(port));
+}
+static uint8_t com2_inb(uint16_t port) {
+  uint8_t ret;
+  __asm__ volatile("inb %1, %0" : "=a"(ret) : "Nd"(port));
+  return ret;
+}
+static int com2_tx_empty(void) { return com2_inb(COM2_PORT + 5) & 0x20; }
+
+void com2_init(void) {
+  com2_outb(COM2_PORT + 1, 0x00);
+  com2_outb(COM2_PORT + 3, 0x80);
+  com2_outb(COM2_PORT + 0, 0x03);
+  com2_outb(COM2_PORT + 1, 0x00);
+  com2_outb(COM2_PORT + 3, 0x03);
+  com2_outb(COM2_PORT + 2, 0xC7);
+  com2_outb(COM2_PORT + 4, 0x0B);
+}
+
+void uart_putc_raw2(char c) {
+  if (c == '\n') {
+    while (!com2_tx_empty()) {}
+    com2_outb(COM2_PORT, '\r');
+  }
+  while (!com2_tx_empty()) {}
+  com2_outb(COM2_PORT, c);
+}
+
+void uart_puts_raw2(const char *s) {
+  while (*s != '\0') {
+    uart_putc_raw2(*s);
+    s++;
+  }
+}
+
+void uart_print_hex_raw2(uint64_t val) {
+  static const char hex_chars[] = "0123456789ABCDEF";
+  uart_putc_raw2('0');
+  uart_putc_raw2('x');
+  for (int i = 60; i >= 0; i -= 4) {
+    uart_putc_raw2(hex_chars[(val >> i) & 0xF]);
+  }
+}
+
+void print_int_raw2(int val) {
+  if (val < 0) {
+    uart_putc_raw2('-');
+    val = -val;
+  }
+  if (val == 0) {
+    uart_putc_raw2('0');
+    return;
+  }
+  char buf[16];
+  int idx = 0;
+  while (val > 0) {
+    buf[idx++] = (char)('0' + (val % 10));
+    val /= 10;
+  }
+  while (idx > 0)
+    uart_putc_raw2(buf[--idx]);
 }
 
 /** Raw string — lock-free, for deadlock diagnostics only. */

@@ -51,8 +51,6 @@ void restore_user_sp_helper(void) {
   uint32_t cpu = get_cpuid();
   uint64_t v = arch_get_user_sp();
   cpu_locals[cpu].user_sp_temp = v;
-  dbg_resume("R", v); /* cpu friendly: print the cpu too */
-  dbg_putc('c'); dbg_hex(cpu, 2); dbg_putc('\n');
 }
 
 static void sys_write_console(struct trap_frame *tf) {
@@ -1022,6 +1020,14 @@ static volatile uint64_t wd_last_seen_ms[MAX_CPUS];
 static volatile uint64_t wd_last_seen_rip[MAX_CPUS];
 static volatile int wd_last_seen_pid[MAX_CPUS];
 static volatile uint64_t wd_next_report_ms = 0;
+/* Full last frame per core (copied at every tick) so the stall dump can
+   show the register state + live stack pointer of every core, not just the
+   interrupted RIP.  Key offsets (see save_context / the asm wrapper): the
+   frame mirrors the push order of the interrupt wrapper — for x64 the
+   generic layout is signed-off in trap.S; we record the whole struct. */
+static struct trap_frame wd_last_frame[MAX_CPUS];
+static volatile uint64_t wd_last_tfp[MAX_CPUS]; /* stack addr of that frame */
+static volatile uint64_t wd_ticks[MAX_CPUS];     /* interrupt count per core */
 
 static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
   extern volatile uint64_t uart_last_activity_ms;
@@ -1047,6 +1053,9 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
   wd_last_seen_ms[cpu] = now;
   wd_last_seen_rip[cpu] = tf->elr;
   wd_last_seen_pid[cpu] = cur ? cur->pid : -1;
+  wd_last_frame[cpu] = *tf;
+  wd_last_tfp[cpu] = (uint64_t)tf;
+  wd_ticks[cpu]++;
 
   if (now < wd_next_report_ms) {
     return;
@@ -1080,6 +1089,79 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
       }
     }
     uart_puts_raw("\n");
+  }
+
+  /* Same dump on COM2 — a side-channel that never interleaves with the
+     console, so the stall forensics come out byte-exact. */
+  extern void uart_puts_raw2(const char *s);
+  extern void uart_print_hex_raw2(uint64_t v);
+  extern void print_int_raw2(int val);
+  extern void wd_dump_proc_table(void);
+  uart_puts_raw2("[WD2] stall dump\n");
+  wd_dump_proc_table();
+  for (uint32_t c = 0; c < MAX_CPUS; c++) {
+    uart_puts_raw2(" CPU");
+    print_int_raw2((int)c);
+    uart_puts_raw2(" rip=");
+    uart_print_hex_raw2(wd_last_seen_rip[c]);
+    uart_puts_raw2(" pid=");
+    print_int_raw2(wd_last_seen_pid[c]);
+    uart_puts_raw2(" tks=");
+    print_int_raw2((int)wd_ticks[c]);
+    uart_puts_raw2(" cs=");
+    uart_print_hex_raw2(wd_last_frame[c].cs);
+    uart_puts_raw2(" fl=");
+    uart_print_hex_raw2(wd_last_frame[c].spsr);
+    uart_puts_raw2(" age=");
+    print_int_raw2((int)(now - wd_last_seen_ms[c]));
+    uart_puts_raw2(" vec=");
+    print_int_raw2((int)wd_last_frame[c].vector);
+    if (lock_wait_addr[c] != 0) {
+      uart_puts_raw2(" wl=");
+      uart_print_hex_raw2(lock_wait_addr[c]);
+      uart_puts_raw2(" cl=");
+      uart_print_hex_raw2(lock_wait_caller[c]);
+      if (lock_wait_caller2[c] != 0) {
+        uart_puts_raw2(" c2=");
+        uart_print_hex_raw2(lock_wait_caller2[c]);
+      }
+    }
+    uart_puts_raw2("\n");
+    /* Full frame regs from the stored last frame (the mapping of
+       regs[0..9] := rax..r9 as pushed by the trap wrapper). */
+    uart_puts_raw2("   fr:");
+    for (int r = 0; r < 10; r++) {
+      uart_puts_raw2(" ");
+      uart_print_hex_raw2(wd_last_frame[c].regs[r]);
+    }
+    uart_puts_raw2("\n");
+    /* The last interrupt's kernel stack region (below the frame) — the
+       caller chain of what the core was actually executing. */
+    uint64_t frp = wd_last_tfp[c];
+    uart_puts_raw2("  deep:");
+    if (frp >= 0x70000000ULL && frp < 0x75000000ULL) {
+      for (uint64_t a = frp + 8; a < frp + 8 + 96; a += 8) {
+        uint64_t v = *(volatile uint64_t *)a;
+        uart_puts_raw2(" ");
+        uart_print_hex_raw2(v);
+      }
+    }
+    uart_puts_raw2("\n");
+    /* Full stack chain: every .text return address, deepest first. */
+    uint64_t top = cpu_locals[c].kernel_stack;
+    int hits = 0;
+    uart_puts_raw2("  stk");
+    print_int_raw2((int)c);
+    uart_puts_raw2(":");
+    for (uint64_t a = top - 8; a > (top - 24576) && hits < 20; a -= 8) {
+      uint64_t v = *(volatile uint64_t *)a;
+      if (v >= 0x70000000ULL && v < 0x7001c000ULL) {
+        uart_puts_raw2(" ");
+        uart_print_hex_raw2(v);
+        hits++;
+      }
+    }
+    uart_puts_raw2("\n");
   }
 
   /* Deep-freeze forensics: for any core silent >60s, scan its kernel stack for
@@ -1157,18 +1239,17 @@ void general_interrupt_handler(struct trap_frame *tf) {
     lapic_send_eoi();
 
     struct process *cur = current_process();
-    /* Only timer-preempt USER-mode contexts.  Kernel-mode contexts — a
-       kernel task, or a user process inside a syscall — are left to run:
-       a kernel task's continuation lives on this core's stack and was
-       historically preempted only by yield/broadcast-IPI (never by a
-       per-core tick; APs had no timer at all).  When the per-core LVT
-       was armed, a tick landing in a kernel task's just-picked resume
-       window (release of proc_lock -> enter_user_space) re-entered the
-       pick path and wedged the very first loader resume on the AP (its
-       stack spun in the vector stubs, pid 1 left RUNNING with a live
-       claim, IDLESTUCK everywhere).  The LVT still wakes hlt busy-waits
-       and feeds the liveness heartbeat on every core. */
-    if (cur && (tf->cs & 3) == 3) {
+    /* Only the boot core's tick preempts USER-mode contexts.  The AP LVT
+       timers exist to wake stuck WFI waits and feed the liveness heartbeat,
+       NOT to preempt: a per-core tick preempts a freshly-resumed user
+       process at its very first instruction every single time (the count
+       expires during the IRQ-off resume window, so the pending tick fires
+       the instant iretq restores IF), pinning the process at 0x44000000
+       forever — it never executes, never exits, pins its physical block,
+       and the wave's block-waiting loader then stalls silently.  CPU0's
+       PIT tick + the broadcast 0x81 IPI (also 100 Hz) are what actually
+       schedule user processes around. */
+    if (cur && (tf->cs & 3) == 3 && cpu == 0) {
       if (cpu == 0) {
         gic_end_interrupt(intid);
       }
@@ -1725,6 +1806,12 @@ __asm__(
 "    lea rsp, [rdi - 296]\n"
 "    mov rax, [r12 + 240]\n"
 "    mov [rsp + 304], rax\n"
+"    /* User iretq is USER by definition: stamp CS=0x1B and SS=0x23 into\n"
+"       the frame slots so a frame saved carrying a stale kernel CS can\n"
+"       never resume into user pages at CPL0 (the 0x440XXXXX/CS=0x08\n"
+"       runaway).  The 3: tail copies [rsp+288]->SS and [rsp+280]->CS. */\n"
+"    mov qword ptr [rsp + 280], 0x1B\n"
+"    mov qword ptr [rsp + 288], 0x23\n"
 "9:\n"
 "    /* Inline copy of the common_trap_exit tail (the assembler resolves\n"
 "       `jmp common_trap_exit` to a wrong offset inside the function, so\n"

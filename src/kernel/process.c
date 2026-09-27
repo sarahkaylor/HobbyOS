@@ -523,6 +523,51 @@ void save_context(struct process *p, struct trap_frame *tf) {
 #endif
 }
 
+void wd_dump_proc_table(void) {
+  extern void uart_puts_raw2(const char *s);
+  extern void uart_print_hex_raw2(uint64_t v);
+  extern void print_int_raw2(int val);
+  /* Snapshot under proc_lock: the state values and the per-CPU claims are
+     both written under it, so reading both inside the lock gives a
+     consistent picture of stranded processes. */
+  spinlock_acquire(&proc_lock);
+  extern int cpu_current_pids[MAX_CPUS];
+  uart_puts_raw2("   claim:");
+  for (int c = 0; c < MAX_CPUS; c++) {
+    uart_puts_raw2(" c");
+    print_int_raw2(c);
+    uart_puts_raw2("=");
+    print_int_raw2(cpu_current_pids[c]);
+  }
+  uart_puts_raw2("\n");
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    if (proc_table[i].state == PROC_STATE_FREE)
+      continue;
+    uart_puts_raw2("   p");
+    print_int_raw2(i);
+    uart_puts_raw2(" st=");
+    print_int_raw2(proc_table[i].state);
+    uart_puts_raw2(" w=");
+    print_int_raw2((int)proc_table[i].wake_ms);
+    if (proc_table[i].name[0]) {
+      uart_puts_raw2(" ");
+      uart_puts_raw2(proc_table[i].name);
+    }
+    /* For every process, show the first words of its loaded image so a
+       'stuck at user entry' process can be checked against real code
+       (zeros / 0x90 NOP sled / garbage => image never landed). */
+    if (!proc_table[i].is_kernel_process && proc_table[i].user_phys_base) {
+      uint64_t pb = proc_table[i].user_phys_base;
+      uart_puts_raw2(" img=");
+      uart_print_hex_raw2(*(volatile uint64_t *)pb);
+      uart_puts_raw2("/");
+      uart_print_hex_raw2(*(volatile uint64_t *)(pb + 8));
+    }
+    uart_puts_raw2("\n");
+  }
+  spinlock_release(&proc_lock);
+}
+
 static void restore_context(struct process *p, struct trap_frame *tf) {
   for (int i = 0; i < 30; i++) {
     tf->regs[i] = p->context[i];
