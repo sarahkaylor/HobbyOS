@@ -867,7 +867,9 @@ static void sys_exec(struct trap_frame *tf) {
 
   int r = process_exec_current(tf, pathbuf, argbuf, namebuf);
   if (r < 0)
-    tf->regs[0] = (uint64_t)r; /* success redirects elr + sets regs[0]=0 */
+    tf->regs[0] = (uint64_t)r;  /* success redirects elr + sets regs[0]=0 */
+  else
+    proc_set_argv_array(cur, argv);
 }
 
 /* --- Syscall dispatch ------------------------------------------------
@@ -964,6 +966,11 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_exec(tf);
   } else if (syscall_num == SYS_GETPROGNAME) {
     sys_get_progname(tf);
+  } else if (syscall_num == SYS_GETARGV) {
+    tf->regs[0] = (uint64_t)sys_readargv(current_process(),
+                                         (int)tf->regs[5], /* rdi: idx */
+                                         (char *)tf->regs[4], /* rsi: buf */
+                                         (int)tf->regs[3]);  /* rdx: size */
   } else if (syscall_num == SYS_BRK) {
     tf->regs[0] = (uint64_t)sys_brk(tf->regs[5]); /* rdi */
   } else if (syscall_num == SYS_MMAP) {

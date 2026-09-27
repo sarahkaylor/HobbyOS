@@ -174,6 +174,20 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
       }
     }
     child->args[ai] = '\0';
+    /* Positional-parameter blob: argv[0] is the binary name (matching
+       crt0's get_progname fallback), then the flat args, space-split. */
+    {
+      char flat[320];
+      int fi = 0;
+      for (int i = 0; child->name[i] && fi < 63; i++)
+        flat[fi++] = child->name[i];
+      if (fi)
+        flat[fi++] = ' ';
+      for (int i = 0; child->args[i] && fi < 315; i++)
+        flat[fi++] = child->args[i];
+      flat[fi] = '\0';
+      proc_split_argv(child, flat);
+    }
   }
 
   struct file f;
@@ -349,4 +363,113 @@ int process_exec_current(struct trap_frame *tf, const char *path,
   tf->elr = USER_VIRT_BASE;
   tf->regs[0] = 0;
   return 0;
+}
+
+/* --- SYS_GETARGV plumbing (see process.h struct process.eargv) --- */
+
+/* Split a flat, space-separated args string into the process's argv blob,
+ * with the same whitespace semantics as user-space parse_args().  Used at
+ * spawn time so every spawned program exposes a positional-parameter
+ * array (argv[0] is prepended by the caller: the binary name). */
+void proc_split_argv(struct process *p, const char *args) {
+  int narg = 0;
+  int pos = 0;
+  p->eargc = 0;
+  p->eargv[0] = '\0';
+  const char *s = args ? args : "";
+  while (*s && narg < HO_EXEC_MAX_ARGS) {
+    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r')
+      s++;
+    if (!*s)
+      break;
+    while (*s && *s != ' ' && *s != '\t' && *s != '\n' && *s != '\r'
+           && pos < HO_EXEC_ARGV_LEN - 1) {
+      p->eargv[pos++] = *s++;
+    }
+    if (pos < HO_EXEC_ARGV_LEN)
+      p->eargv[pos++] = '\0';
+    narg++;
+  }
+  if (pos < HO_EXEC_ARGV_LEN)
+    p->eargv[pos] = '\0';
+  p->eargc = narg;
+}
+
+/* Copy a NUL-terminated user string into kernel memory with full bounds
+ * checking (mirrors the static u_strcpy in each trap.c). Returns 1 on
+ * success (dst NUL-terminated), 0 on bad/out-of-range pointer. */
+static int pl_strcpy(const char *src, char *dst, int cap) {
+  uint64_t base = (uint64_t)src;
+  if (!src || base < USER_VIRT_BASE ||
+      base >= USER_VIRT_BASE + USER_REGION_SIZE)
+    return 0;
+  if (base + cap - 1 >= USER_VIRT_BASE + USER_REGION_SIZE)
+    return 0;
+  int i = 0;
+  for (; i < cap - 1 && src[i]; i++)
+    dst[i] = src[i];
+  dst[i] = '\0';
+  return 1;
+}
+
+/* Copy a caller-space argv[] array into the process's argv blob at exec
+ * time.  Unlike the space-joined flat args string, each element keeps its
+ * own length, so quoted words that contain spaces round-trip exactly.
+ * argv may be NULL (leaves eargc == 0 so crt0 falls back to name+args).
+ * Elements are truncated at 63 chars (matching the flat-args path). */
+int proc_set_argv_array(struct process *p, char *const *argv) {
+  p->eargc = 0;
+  p->eargv[0] = '\0';
+  if (!argv)
+    return 0;
+  int pos = 0;
+  for (int ai = 0; ai < HO_EXEC_MAX_ARGS; ai++) {
+    if (argv[ai] == 0)
+      break;
+    char one[64];
+    if (!pl_strcpy((const char *)argv[ai], one, sizeof one))
+      break;
+    if (pos >= HO_EXEC_ARGV_LEN)
+      break;
+    for (int k = 0; one[k] && pos < HO_EXEC_ARGV_LEN - 1; k++)
+      p->eargv[pos++] = one[k];
+    if (pos < HO_EXEC_ARGV_LEN)
+      p->eargv[pos++] = '\0';
+    p->eargc++;
+  }
+  return 0;
+}
+
+/* Syscall 64 (SYS_GETARGV): read the process's positional parameters.
+ * idx == -1 returns the argument count (>= 0).  idx >= 0 copies the
+ * idx-th argument (NUL-terminated) into buf (size bytes) and returns the
+ * number of bytes copied (excluding the NUL), or -1 when idx is out of
+ * range. */
+int sys_readargv(struct process *p, int idx, char *buf, int size) {
+  if (!p)
+    return -1;
+  if (idx == -1)
+    return p->eargc;
+  if (idx < 0 || idx >= p->eargc)
+    return -1;
+  int pos = 0;
+  for (int ai = 0; ai < idx; ai++) {
+    while (pos < HO_EXEC_ARGV_LEN && p->eargv[pos])
+      pos++;
+    if (pos < HO_EXEC_ARGV_LEN)
+      pos++; /* skip the NUL */
+  }
+  int len = 0;
+  while (pos + len < HO_EXEC_ARGV_LEN && p->eargv[pos + len])
+    len++;
+  if (len == 0)
+    return -1;
+  if (size <= 0)
+    return len;
+  int n = len < size - 1 ? len : size - 1;
+  for (int i = 0; i < n; i++)
+    buf[i] = p->eargv[pos + i];
+  if (n > 0)
+    buf[n] = '\0';
+  return n;
 }

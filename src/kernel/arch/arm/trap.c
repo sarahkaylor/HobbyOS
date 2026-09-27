@@ -661,6 +661,8 @@ static void sys_exec(struct trap_frame *tf) {
   int r = process_exec_current(tf, pathbuf, argbuf, namebuf);
   if (r < 0)
     tf->regs[0] = (uint64_t)r;  /* success redirects elr + sets regs[0]=0 */
+  else
+    proc_set_argv_array(cur, argv);
 }
 
 static void sys_mount(struct trap_frame *tf) {
@@ -1052,6 +1054,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_exec(tf);
     } else if (syscall_num == SYS_GETPROGNAME) {
       sys_get_progname(tf);
+    } else if (syscall_num == SYS_GETARGV) {
+      struct process *gp = current_process();
+      tf->regs[0] = sys_readargv(gp, (int)tf->regs[0], (char *)tf->regs[1],
+                                 (int)tf->regs[2]);
     } else if (syscall_num == SYS_BRK) {
       tf->regs[0] = sys_brk(tf->regs[0]);
     } else if (syscall_num == SYS_MMAP) {

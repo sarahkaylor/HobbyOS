@@ -77,6 +77,14 @@ int execve(const char *path, char *const argv[], char *const envp[]);
  * argv[0]). Returns 0 on success, -1 on failure (no errno set). */
 int get_progname(char *buf, int size);
 
+/* Native extension: read the process's positional parameters (argv),
+ * stored by the kernel at spawn/exec time (SYS_GETARGV). idx == -1
+ * returns the argument count; idx >= 0 copies that argument (NUL-
+ * terminated) into buf (size bytes) and returns its length, or -1 when
+ * out of range. Unlike the flat args string, elements keep their own
+ * length, so quoted words with spaces round-trip via fork+execv. */
+int get_argv(int idx, char *buf, int size);
+
 void gui_add_menu(int idx, const char* name, const char* items);
 
 void *map_fb(void);

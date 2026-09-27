@@ -223,6 +223,10 @@ int get_progname(char *buf, int size) {
   return 0;
 }
 
+int get_argv(int idx, char *buf, int size) {
+  return (int)syscall(SYS_GETARGV, (long)idx, (long)buf, (long)size, 0);
+}
+
 int pipe(int fds[2]) {
   return (int)errno_ret(syscall(SYS_PIPE, (long)fds, 0, 0, 0));
 }

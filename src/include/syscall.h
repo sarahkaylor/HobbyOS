@@ -77,7 +77,13 @@
 #define SYS_MMAP          (62)
 #define SYS_MUNMAP        (63)
 
+/* Positional-parameter readback (crt0 argv). Arguments are stored in the
+ * PCB at spawn (flat string, space-split) or exec (caller's argv array, so
+ * quoted words with spaces round-trip). idx == -1 returns the argument
+ * count; idx >= 0 copies that argument into buf and returns its length. */
+#define SYS_GETARGV       (64)
+
 /* Highest defined syscall number. Dispatch tables are sized SYS_MAX + 1. */
-#define SYS_MAX           (63)
+#define SYS_MAX           (64)
 
 #endif /* SYSCALL_H */

@@ -21,15 +21,39 @@ __attribute__((section(".text._start")))
 void _start(void) {
   static char namebuf[32];
   static char argbuf[256];
+  static char avbuf[256];
   static char *argv[CRT0_MAX_ARGS];
 
   int argc = 0;
-  if (get_progname(namebuf, sizeof namebuf) == 0 && namebuf[0] != '\0') {
-    argv[argc++] = namebuf;
+
+  /* Preferred: the kernel's positional-parameter blob (SYS_GETARGV).
+   * It is populated at exec time from the caller's argv[] array, so
+   * arguments containing spaces survive verbatim. Spawned programs get
+   * argv[0] = binary name, then the flat args split on whitespace. */
+  int cnt = get_argv(-1, NULL, 0);
+  if (cnt > 0 && cnt < CRT0_MAX_ARGS) {
+    int pos = 0;
+    for (int i = 0; i < cnt && pos < (int)sizeof avbuf - 1; i++) {
+      int n = get_argv(i, avbuf + pos, (int)sizeof avbuf - pos);
+      if (n < 0)
+        break;
+      argv[argc++] = avbuf + pos;
+      pos += n + 1;
+    }
   }
-  if (get_args(argbuf, sizeof argbuf) == 0) {
-    argc += parse_args(argbuf, &argv[argc], CRT0_MAX_ARGS - 1 - argc);
+
+  /* Legacy fallback: name + flat args string (space-split). Used when the
+     kernel predates SYS_GETARGV (kernel tasks, -ENOSYS) or left the blob
+     empty (argv == NULL exec). */
+  if (argc == 0) {
+    if (get_progname(namebuf, sizeof namebuf) == 0 && namebuf[0] != '\0') {
+      argv[argc++] = namebuf;
+    }
+    if (get_args(argbuf, sizeof argbuf) == 0) {
+      argc += parse_args(argbuf, &argv[argc], CRT0_MAX_ARGS - 1 - argc);
+    }
   }
+
   if (argc == 0) {
     argv[argc++] = "HobbyOS"; /* no name and no args: still need argv[0] */
   }

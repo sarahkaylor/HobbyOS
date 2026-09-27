@@ -49,6 +49,48 @@ void uart_puts_raw(const char *s) {
   }
 }
 
+/* *_raw2 family: the deadlock-diagnostic console surface that
+ * wd_dump_proc_table() (process.c) calls on BOTH architectures. Lock-free
+ * and exception-safe (raw MMIO only), like the x64 uart_putc_raw2 path. */
+static void uart_putc_raw2(char c) {
+  uart_putc_body(c);
+}
+
+void uart_puts_raw2(const char *s) {
+  while (*s != '\0') {
+    uart_putc_raw2(*s);
+    s++;
+  }
+}
+
+void uart_print_hex_raw2(uint64_t val) {
+  static const char hex_chars[] = "0123456789ABCDEF";
+  uart_putc_raw2('0');
+  uart_putc_raw2('x');
+  for (int i = 60; i >= 0; i -= 4) {
+    uart_putc_raw2(hex_chars[(val >> i) & 0xF]);
+  }
+}
+
+void print_int_raw2(int val) {
+  if (val < 0) {
+    uart_putc_raw2('-');
+    val = -val;
+  }
+  if (val == 0) {
+    uart_putc_raw2('0');
+    return;
+  }
+  char buf[16];
+  int idx = 0;
+  while (val > 0) {
+    buf[idx++] = (char)('0' + (val % 10));
+    val /= 10;
+  }
+  while (idx > 0)
+    uart_putc_raw2(buf[--idx]);
+}
+
 /** Single character, serialized against all other console output. */
 void uart_putc(char c) {
   uint64_t flags = spinlock_acquire_irqsave(&uart_lock);

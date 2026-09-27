@@ -96,6 +96,10 @@
 
 #define MAX_OPEN_FDS 32 // Increased per user request
 
+/* SYS_GETARGV blob limits (see struct process.eargv). */
+#define HO_EXEC_MAX_ARGS 32
+#define HO_EXEC_ARGV_LEN 256
+
 // Process control block (PCB) structure
 /**
  * Process Control Block (PCB) structure.
@@ -110,6 +114,17 @@ struct process {
   char name[32];  /**< Name of the binary running in this process */
   char args[256]; /**< Command line arguments passed to the process */
   char cwd[128];  /**< Current working directory */
+
+  /**
+   * Positional-parameter blob (SYS_GETARGV).  eargv holds argv[0..eargc-1]
+   * NUL-separated, copied at spawn (from the flat args string) or exec
+   * (from the caller's argv[] array).  Unlike the space-joined `args`
+   * string, this preserves arguments that contain spaces, which the shell
+   * needs to pass quoted words faithfully.  eargc == 0 means "no argv
+   * stored; crt0 should fall back to name + args".
+   */
+  int eargc;
+  char eargv[HO_EXEC_ARGV_LEN];
 
   /**
    * Saved CPU context used during context switching.
@@ -197,6 +212,15 @@ int sys_munmap(uint64_t addr, uint64_t len);
 // In-place exec (SYS_EXEC): replace the current image, keep pid/fds/cwd.
 int process_exec_current(struct trap_frame *tf, const char *path,
                          const char *args, const char *new_name);
+
+// SYS_GETARGV plumbing: split a flat space-separated args string into the
+// process's argv blob (spawn path), or copy a caller argv[] array into it
+// (exec path, preserving quoted words that contain spaces).
+void proc_split_argv(struct process *p, const char *args);
+int proc_set_argv_array(struct process *p, char *const *argv);
+// idx == -1: return eargc; else copy the idx-th argument into buf (size
+// bytes) and return its length, or -1 when out of range.
+int sys_readargv(struct process *p, int idx, char *buf, int size);
 
 // Create a kernel thread running in EL1t.
 int process_create_kernel(void (*entry)(void*), void *arg);

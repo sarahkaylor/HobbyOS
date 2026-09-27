@@ -389,6 +389,8 @@ static int process_create_internal(void) {
   for (int i = 0; i < 256; i++) {
     p->args[i] = 0;
   }
+  p->eargc = 0;
+  p->eargv[0] = 0;
   p->cwd[0] = '/';
   p->cwd[1] = '\0';
   p->num_open_fds = 0;
