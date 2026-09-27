@@ -115,7 +115,7 @@ struct process {
    * Saved CPU context used during context switching.
    * Format: x0–x29, lr (x30), elr_el1 (pc), spsr_el1, sp_el0.
    */
-  uint64_t context[34];
+  uint64_t context[36];
 
   /**
    * Pointer to the process's Level 2 page table.

@@ -138,8 +138,13 @@ static void sys_read(struct trap_frame *tf) {
          instruction, and save our own resume frame BEFORE switching out —
          a writer on another CPU can wake us in the window between the pipe
          marking us BLOCKED and this schedule() call, and schedule() does
-         not re-save a process that is already READY. */
-      tf->elr -= 2;
+         not re-save a process that is already READY.  Only rewind when the
+         frame returns to USER mode: rewinding a kernel-mode frame's elr
+         would make the kernel execute the user `syscall` instruction at
+         CPL0, which is a #GP (silent triple-fault -> reboot loop). */
+      if ((tf->cs & 3) == 3) {
+        tf->elr -= 2;
+      }
       save_context(caller, tf);
       schedule(tf, 0);
     } else if (ret < 0) {
@@ -364,8 +369,11 @@ static void sys_write(struct trap_frame *tf) {
       (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
     int ret = file_write(caller, fd, buf, size, tf);
     if (ret == -2) {
-      /* See sys_read: 2-byte `syscall` rewind + own-frame save. */
-      tf->elr -= 2;
+      /* See sys_read: 2-byte `syscall` rewind + own-frame save.  Rewind
+         only for a user-mode return (kernel-mode CPL0 `syscall` = #GP). */
+      if ((tf->cs & 3) == 3) {
+        tf->elr -= 2;
+      }
       save_context(caller, tf);
       schedule(tf, 0);
     } else if (ret < 0) {
@@ -1019,8 +1027,22 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
   extern volatile uint64_t uart_last_activity_ms;
   extern volatile uint64_t lock_wait_addr[MAX_CPUS];
   extern volatile uint64_t lock_wait_caller[MAX_CPUS];
+  extern volatile uint64_t lock_wait_caller2[MAX_CPUS];
+  /* Stall-watchdog prints must be able to diagnose a wedge in uart_lock
+     itself, so they go out through the lock-free raw sink. */
+  extern void uart_puts_raw(const char *s);
+  extern void uart_print_hex_raw(uint64_t v);
+  extern void print_int_raw(int val);
+  extern volatile uint64_t cpu_heartbeat_ms[];
   struct process *cur = current_process();
   uint64_t now = timer_get_ms();
+
+  /* Per-CPU liveness heartbeat for the lost-owner reaper in process.c: a
+     running CPU passes through here on every timer interrupt, so a stale
+     heartbeat means the CPU is either dead (triple-fault reset) or frozen
+     in an IRQ-off spin for the grace period — both count as 'dead' for
+     reclaiming the RUNNING process it owns. */
+  cpu_heartbeat_ms[cpu] = now;
 
   wd_last_seen_ms[cpu] = now;
   wd_last_seen_rip[cpu] = tf->elr;
@@ -1033,27 +1055,31 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
     return;
   }
   wd_next_report_ms = now + WATCHDOG_COOLDOWN_MS;
-  uart_puts("[WATCHDOG] console silent for more than 20s\n");
+  uart_puts_raw("[WATCHDOG] console silent for more than 20s\n");
   for (uint32_t c = 0; c < MAX_CPUS; c++) {
-    uart_puts("  CPU");
-    print_int((int)c);
-    uart_puts(" rip=");
-    uart_print_hex(wd_last_seen_rip[c]);
-    uart_puts(" pid=");
-    print_int(wd_last_seen_pid[c]);
-    uart_puts(" age_ms=");
-    print_int((int)(now - wd_last_seen_ms[c]));
+    uart_puts_raw("  CPU");
+    print_int_raw((int)c);
+    uart_puts_raw(" rip=");
+    uart_print_hex_raw(wd_last_seen_rip[c]);
+    uart_puts_raw(" pid=");
+    print_int_raw(wd_last_seen_pid[c]);
+    uart_puts_raw(" age_ms=");
+    print_int_raw((int)(now - wd_last_seen_ms[c]));
     if (core_in_syscall[c] != 0) {
-      uart_puts(" syscall=");
-      print_int(core_in_syscall[c]);
+      uart_puts_raw(" syscall=");
+      print_int_raw(core_in_syscall[c]);
     }
     if (lock_wait_addr[c] != 0) {
-      uart_puts(" wait_lock=");
-      uart_print_hex(lock_wait_addr[c]);
-      uart_puts(" caller=");
-      uart_print_hex(lock_wait_caller[c]);
+      uart_puts_raw(" wait_lock=");
+      uart_print_hex_raw(lock_wait_addr[c]);
+      uart_puts_raw(" caller=");
+      uart_print_hex_raw(lock_wait_caller[c]);
+      if (lock_wait_caller2[c] != 0) {
+        uart_puts_raw(" caller2=");
+        uart_print_hex_raw(lock_wait_caller2[c]);
+      }
     }
-    uart_puts("\n");
+    uart_puts_raw("\n");
   }
 
   /* Deep-freeze forensics: for any core silent >60s, scan its kernel stack for
@@ -1064,30 +1090,30 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
     uint64_t top = cpu_locals[c].kernel_stack;
     uint64_t last_hit = 0;
     int hits = 0;
-    uart_puts("  CSTK cpu");
-    print_int((int)c);
-    uart_puts(":");
+    uart_puts_raw("  CSTK cpu");
+    print_int_raw((int)c);
+    uart_puts_raw(":");
     for (uint64_t a = top - 8; a > (top - 24576) && hits < 16; a -= 8) {
       uint64_t v = *(volatile uint64_t *)a;
       if (v >= 0x70000000ULL && v < 0x7001c000ULL) {
-        uart_puts(" ");
-        uart_print_hex(v);
+        uart_puts_raw(" ");
+        uart_print_hex_raw(v);
         last_hit = a;
         hits++;
       }
     }
-    uart_puts("\n");
+    uart_puts_raw("\n");
     if (last_hit) {
-      uart_puts("  CDATA cpu");
-      print_int((int)c);
-      uart_puts(" cur~=");
-      uart_print_hex(last_hit);
-      uart_puts(":");
+      uart_puts_raw("  CDATA cpu");
+      print_int_raw((int)c);
+      uart_puts_raw(" cur~=");
+      uart_print_hex_raw(last_hit);
+      uart_puts_raw(":");
       for (int q = 0; q < 12; q++) {
-        uart_puts(" ");
-        uart_print_hex(*(volatile uint64_t *)(last_hit + 8 * q));
+        uart_puts_raw(" ");
+        uart_print_hex_raw(*(volatile uint64_t *)(last_hit + 8 * q));
       }
-      uart_puts("\n");
+      uart_puts_raw("\n");
     }
   }
 }
@@ -1161,6 +1187,18 @@ void general_interrupt_handler(struct trap_frame *tf) {
     // Reschedule/yield IPI. Release the LAPIC first: this vector is
     // LAPIC-delivered and would wedge at this priority without an EOI.
     lapic_send_eoi();
+    /* Never preempt a USER process while it is inside its syscall
+       (kernel mode, CS&3==0).  Its live kernel-mode continuation — the
+       syscall handler's frames on THIS CPU's kernel stack — cannot be
+       resumed on another CPU once that stack is reused (observed: #UD
+       executing .bss and RIP=0x7009, common_trap_exit #GPs).  The timer
+       handler already applies this guard; the broadcast IPI reaches
+       kernel-mode windows too, so guard it the same way — the IPI just
+       becomes a no-op for that window and the syscall finishes. */
+    struct process *ipicur = current_process();
+    if (ipicur && !ipicur->is_kernel_process && (tf->cs & 3) != 3) {
+      return;
+    }
     schedule(tf, 1);
   } else if (tf->vector < 32) {
     // Exception
@@ -1173,54 +1211,68 @@ void general_interrupt_handler(struct trap_frame *tf) {
       uart_puts("\n");
       process_exit(tf);
     } else {
-      uart_puts("[KERNEL] FATAL: Exception in Kernel Mode! Vector: ");
-      safe_print_int(tf->vector);
-      uart_puts(" Error Code: ");
-      safe_print_hex(tf->error_code);
-      uart_puts("\n");
-      uart_puts("  RIP: ");
-      safe_print_hex(tf->elr);
-      uart_puts("  RSP: ");
-      safe_print_hex(((uint64_t*)tf)[38]);
-      uart_puts("\n");
-      uart_puts("  CS:  ");
-      safe_print_hex(tf->cs);
-      uart_puts("  SS:  ");
-      safe_print_hex(tf->ss);
-      uart_puts("  RFLAGS: ");
-      safe_print_hex(tf->spsr);
-      uart_puts("\n");
-      uart_puts("  RAX: ");
-      safe_print_hex(tf->regs[0]);
-      uart_puts("  RBX: ");
-      safe_print_hex(tf->regs[1]);
-      uart_puts("  RCX: ");
-      safe_print_hex(tf->regs[2]);
-      uart_puts("  RDX: ");
-      safe_print_hex(tf->regs[3]);
-      uart_puts("\n");
-      uart_puts("  RDI: ");
-      safe_print_hex(tf->regs[5]);
-      uart_puts("  RSI: ");
-      safe_print_hex(tf->regs[4]);
-      uart_puts("  RBP: ");
-      safe_print_hex(tf->regs[6]);
-      uart_puts("\n");
-      uart_puts("  CPU: ");
-      safe_print_int(get_cpuid());
+      /* Kernel-mode fault.  ALL of this dump goes to COM1 via the
+         lock-free raw sink (NOT the 0xE9 debugcon, which QEMU usually
+         never maps — the pre-fix handler's output was invisible and the
+         death looked like a silent triple fault).  In a #GP/#PF the frame
+         may be garbage, so the stack window below is range-guarded: an
+         unchecked dereference of tf[38] was itself faulting (#PF -> #DF
+         -> CPU reset) before the dump could finish. */
+      extern void uart_puts_raw(const char *s);
+      extern void uart_print_hex_raw(uint64_t v);
+      extern void print_int_raw(int val);
+      uart_puts_raw("[KERNEL] FATAL: Exception in Kernel Mode! Vector: ");
+      print_int_raw((int)tf->vector);
+      uart_puts_raw(" Error Code: ");
+      uart_print_hex_raw(tf->error_code);
+      uart_puts_raw("\n");
+      uart_puts_raw("  RIP: ");
+      uart_print_hex_raw(tf->elr);
+      uart_puts_raw("  RSP: ");
+      uart_print_hex_raw(((uint64_t*)tf)[38]);
+      uart_puts_raw("\n");
+      uart_puts_raw("  CS:  ");
+      uart_print_hex_raw(tf->cs);
+      uart_puts_raw("  SS:  ");
+      uart_print_hex_raw(tf->ss);
+      uart_puts_raw("  RFLAGS: ");
+      uart_print_hex_raw(tf->spsr);
+      uart_puts_raw("\n");
+      uart_puts_raw("  RAX: ");
+      uart_print_hex_raw(tf->regs[0]);
+      uart_puts_raw("  RBX: ");
+      uart_print_hex_raw(tf->regs[1]);
+      uart_puts_raw("  RCX: ");
+      uart_print_hex_raw(tf->regs[2]);
+      uart_puts_raw("  RDX: ");
+      uart_print_hex_raw(tf->regs[3]);
+      uart_puts_raw("\n");
+      uart_puts_raw("  RDI: ");
+      uart_print_hex_raw(tf->regs[5]);
+      uart_puts_raw("  RSI: ");
+      uart_print_hex_raw(tf->regs[4]);
+      uart_puts_raw("  RBP: ");
+      uart_print_hex_raw(tf->regs[6]);
+      uart_puts_raw("\n");
+      uart_puts_raw("  CPU: ");
+      print_int_raw((int)get_cpuid());
       struct process *curproc = current_process();
-      uart_puts("  pid: ");
-      safe_print_int(curproc ? curproc->pid : -1);
-      uart_puts("\n");
+      uart_puts_raw("  pid: ");
+      print_int_raw(curproc ? curproc->pid : -1);
+      uart_puts_raw("\n");
       /* Raw stack window: even when RIP is garbage, the return addresses
          on the stack tell where the fault came from. */
-      uint64_t *fsp = (uint64_t*)((uint64_t*)tf)[38];
-      for (int si = 0; si < 16; si++) {
-        uart_puts("  STACK[");
-        safe_print_int(si);
-        uart_puts("]: ");
-        safe_print_hex(fsp[si]);
-        uart_puts("\n");
+      uint64_t fsp = ((uint64_t*)tf)[38];
+      if (fsp >= 0x00000000ULL && fsp < 0x80000000ULL) {
+        for (int si = 0; si < 16; si++) {
+          uart_puts_raw("  STACK[");
+          print_int_raw(si);
+          uart_puts_raw("]: ");
+          uart_print_hex_raw(((volatile uint64_t *)fsp)[si]);
+          uart_puts_raw("\n");
+        }
+      } else {
+        uart_puts_raw("  STACK: skipped (RSP outside identity-mapped RAM)\n");
       }
       while (1);
     }
@@ -1498,15 +1550,29 @@ __asm__(
 "    mov qword ptr [rsp + 232], 0\n"
 "    mov qword ptr [rsp + 240], 0\n" /* lr */
 "    \n"
-"    /* Save User RSP to user_sp_temp only if coming from user mode (CS bottom 2 bits are 3) */\n"
+"    /* Carry the user RSP inside the trap frame (the dummy `lr` slot,\n"
+"       [rsp + 240]) on EVERY entry, so it survives a process switch during\n"
+"       a -2 syscall restart.  From user mode the hardware-pushed RSP\n"
+"       ([rsp + 304]) is authoritative; a kernel-mode trap (timer interrupt\n"
+"       inside a syscall handler) inherits the live gs:[24], which is the\n"
+"       current process's user RSP from its outermost entry.  The old code\n"
+"       only mirrored gs:[24] and relied on the per-CPU roundtrip to still\n"
+"       hold OUR value at exit time — it does not when another process\n"
+"       entered on this CPU in between, which restored a stale RSP and\n"
+"       wedged the resumed task in kernel mode (the \"tarpit\" signature). */\n"
 "    mov rax, [rsp + 288]\n"
 "    and rax, 3\n"
 "    cmp rax, 3\n"
 "    jne 1f\n"
 "    mov rax, [rsp + 304]\n"
+"    mov [rsp + 240], rax\n"
 "    mov gs:[24], rax\n"
 "    call save_user_sp_helper\n"
+"    jmp 2f\n"
 "1:\n"
+"    mov rax, gs:[24]\n"
+"    mov [rsp + 240], rax\n"
+"2:\n"
 "    \n"
 "    /* Rearrange fields in trap_frame */\n"
 "    /* 1. RIP ([rsp + 280]) -> elr ([rsp + 248]) */\n"
@@ -1559,12 +1625,15 @@ __asm__(
 "    mov rax, [rsp + 288]\n"
 "    mov [rsp + 312], rax\n"
 "    \n"
-"    /* 2. RSP (user_sp_temp) -> [rsp + 304] only if returning to user mode */\n"
+"    /* 2. RSP -> [rsp + 304] only if returning to user mode.  Read the\n"
+"       user RSP from the frame's own lr slot ([rsp + 240]), NOT from\n"
+"       gs:[24]: the frame's copy belongs to THIS trap and is immune to\n"
+"       whichever process last entered or resumed on this CPU. */\n"
 "    mov rax, [rsp + 280]\n"
 "    and rax, 3\n"
 "    cmp rax, 3\n"
 "    jne 3f\n"
-"    mov rax, gs:[24]\n"
+"    mov rax, [rsp + 240]\n"
 "    mov [rsp + 304], rax\n"
 "3:\n"
 "    \n"
@@ -1634,13 +1703,16 @@ __asm__(
 "    jmp 9f\n"
 "7:\n"
 "    /* User-mode resume: land the frame on this CPU's scratch buffer\n"
-"       [target_sp-296, target_sp) and plant the user RSP. */\n"
+"       [target_sp-296, target_sp) and plant the user RSP from the RESTORED\n"
+"       frame (tf->lr = the process's own saved RSP, rode context[30]/\n"
+"       context[33] through the switch) — never from gs:[24], which this\n"
+"       CPU may have overwritten while running other processes. */\n"
 "    lea rdi, [r13 - 296]\n"
 "    mov rsi, r12\n"
 "    mov rcx, 37\n"
 "    rep movsq\n"
 "    lea rsp, [rdi - 296]\n"
-"    mov rax, gs:[24]\n"
+"    mov rax, [r12 + 240]\n"
 "    mov [rsp + 304], rax\n"
 "9:\n"
 "    /* Inline copy of the common_trap_exit tail (the assembler resolves\n"
@@ -1664,7 +1736,13 @@ __asm__(
 "       observed iretq behavior in this environment consumes all five\n"
 "       words even for a ring-0 return, so leaving the SS slot holding a\n"
 "       leftover stack value makes the selector load #GP.  SS comes from\n"
-"       the frame (0x10 kernel / 0x23 user), RSP from gs:[24]. */\n"
+"       the frame (0x10 kernel / 0x23 user).  RSP comes from gs:[24]:\n"
+"       restore_context() just ran arch_set_user_sp(p->context[33]), so\n"
+"       this is the resumed process's OWN saved RSP (a user-mode trap's\n"
+"       frame RSP, a fresh process's entry stack) — NOT another\n"
+"       process's; gs:[24] is only stale if read before a restore.\n"
+"       tf->lr (context[30]) is NOT a safe source here: fresh processes\n"
+"       never set it, so resuming from lr hands the process RSP=0. */\n"
 "    mov rax, [rsp + 288]\n"
 "    mov [rsp + 312], rax\n"
 "    mov rax, gs:[24]\n"

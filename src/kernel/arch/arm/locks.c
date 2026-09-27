@@ -1,7 +1,7 @@
 #include "lock.h"
 
-extern void uart_puts(const char *s);
-extern void uart_print_hex(uint64_t v);
+extern void uart_puts_raw(const char *s);
+extern void uart_print_hex_raw(uint64_t v);
 extern uint32_t get_cpuid(void);
 
 /**
@@ -46,15 +46,15 @@ __attribute__((noinline)) static void spin_slow(spinlock_t *lock, uint64_t ra) {
       uint64_t addr = (uint64_t)(uintptr_t)lock;
       if (cpu < 64 && ld_reported[cpu] != addr) {
         ld_reported[cpu] = addr;
-        uart_puts("[LOCKDIAG] cpu=");
-        uart_print_hex(cpu);
-        uart_puts(" lock=");
-        uart_print_hex(addr);
-        uart_puts(" val=");
-        uart_print_hex(lock->locked);
-        uart_puts(" caller=");
-        uart_print_hex(ra);
-        uart_puts("\n");
+        uart_puts_raw("[LOCKDIAG] cpu=");
+        uart_print_hex_raw(cpu);
+        uart_puts_raw(" lock=");
+        uart_print_hex_raw(addr);
+        uart_puts_raw(" val=");
+        uart_print_hex_raw(lock->locked);
+        uart_puts_raw(" caller=");
+        uart_print_hex_raw(ra);
+        uart_puts_raw("\n");
       }
     }
   }

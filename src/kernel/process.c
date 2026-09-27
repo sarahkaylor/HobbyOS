@@ -32,6 +32,12 @@ extern void print_int(int val);
 // Process table
 static struct process proc_table[MAX_PROCESSES];
 int cpu_current_pids[MAX_CPUS];
+/* Per-CPU liveness heartbeat (ms), bumped by watchdog_tick on every timer
+   IRQ and by the idle loop.  The lost-owner reaper treats a stale
+   heartbeat as a dead owner (triple-fault reset or an IRQ-off frozen
+   spin), so its RUNNING process becomes reclaimable instead of wedging
+   every CPU in an [IDLESTUCK] storm forever. */
+volatile uint64_t cpu_heartbeat_ms[MAX_CPUS];
 spinlock_t proc_lock;
 
 // Per-CPU idle time tracking (aggregated in ms)
@@ -183,6 +189,8 @@ void process_set_entry(int pid, uint64_t elr, uint64_t sp) {
   proc_table[pid].context[31] = elr;        // ELR (entry point)
   proc_table[pid].context[33] = sp;         // SP_EL0 (stack pointer)
   proc_table[pid].context[32] = 0;          // SPSR = EL0t
+  proc_table[pid].context[34] = 0;          // x64: force is_kernel_process classification
+  proc_table[pid].context[35] = 0;          //      (a fresh user program resumes as 0x1B/0x23)
   proc_table[pid].state = PROC_STATE_READY; // Mark as runnable!
   spinlock_release_irqrestore(&proc_lock, flags);
 }
@@ -403,7 +411,7 @@ static int process_create_internal(void) {
   kmemset((void *)(p->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE), 0, USER_STACK_CLEAR_SIZE);
   uart_puts("Inside process_create: kmemset done.\n");
 
-  for (int i = 0; i < 34; i++) {
+  for (int i = 0; i < 36; i++) {
     p->context[i] = 0;
   }
 
@@ -476,11 +484,40 @@ void save_context(struct process *p, struct trap_frame *tf) {
      at tf+320" arithmetic came out 8 low for some traps (the task
      resumed eight bytes low; its next `ret` popped live stack data and
      it executed .bss garbage). */
-  if (p->is_kernel_process && (tf->cs & 3) == 0) {
+  if ((tf->cs & 3) == 0) {
+    /* Preempted in KERNEL mode (any process — a user process inside a
+       blocking syscall's busy-wait traps with CS=0x08 too): the resume
+       stack is the interrupted KERNEL stack, [tf+304], the field the
+       wrapper stores the RSP-at-interrupt into and the resume tail
+       reloads the park from.  Measured against the QEMU -d int delivery
+       log, [tf+304] matched the true interrupted RSP in every observed
+       trap, while the old "frame ends at tf+320" arithmetic came out
+       8 low for some traps (the task resumed eight bytes low; its next
+       `ret` popped live stack data and it executed .bss garbage). */
     p->context[33] = ((uint64_t *)tf)[38];
   } else {
-    p->context[33] = arch_get_user_sp();
+    /* Frame-carried user RSP.  The x64 trap wrapper stores the user RSP
+       into tf->lr for BOTH user-mode and kernel-mode entries (a timer
+       interrupt inside a syscall inherits the live gs:[24]), so a save
+       that happens inside a restarted/blocking syscall carries the
+       process's OWN RSP — unlike arch_get_user_sp(), which reads the
+       per-CPU user_sp[] slot that a concurrent switch on this CPU may
+       have overwritten.  This is what makes -2 syscall restarts survive
+       a process switch (context[30] already rides tf->lr too). */
+    p->context[33] = tf->lr;
   }
+  /* Carry the interrupt selectors through the switch.  A USER process
+     preempted while its syscall sits in a kernel-mode busy-wait (e.g.
+     virtio_blk's safe_wfi() hlt loop) traps with CS=0x08, and resuming
+     it with the user selectors stamps a kernel RIP with CS=0x1B — a
+     user-mode iretq into kernel text that triple-faults the CPU
+     (observed: user #PF at safe_wfi()+6 -> kernel #GP -> #DF -> reset).
+     Resuming with the SAVED selectors (0x08) lets the interrupted
+     kernel-mode code finish; the process's own trap exit then iretq's
+     back to user normally.  Fresh contexts are zeroed, so 0 there means
+     'classify by is_kernel_process'. */
+  p->context[34] = tf->cs;
+  p->context[35] = tf->ss;
 #else
   p->context[33] = arch_get_user_sp();
 #endif
@@ -495,7 +532,14 @@ static void restore_context(struct process *p, struct trap_frame *tf) {
   tf->spsr = p->context[32];
   arch_set_user_sp(p->context[33]);
 #ifdef __x86_64__
-  if (p->is_kernel_process) {
+  if (p->context[34] != 0 && p->context[35] != 0) {
+    /* Preempted with the selectors captured by save_context — the process
+       resumes in whatever mode it was interrupted in (a user process
+       preempted inside a kernel-mode busy-wait resumes as kernel, CS=0x08,
+       and its own trap exit later returns it to user). */
+    tf->cs = p->context[34];
+    tf->ss = p->context[35];
+  } else if (p->is_kernel_process) {
     tf->cs = 0x08;
     tf->ss = 0x10;
   } else {
@@ -534,6 +578,17 @@ void schedule(struct trap_frame *tf, int is_yield) {
   uint32_t cpu = get_cpuid();
   if (cpu >= MAX_CPUS)
     return;
+
+  /* Run the WHOLE switch with interrupts disabled.  The -2/blocking-syscall
+     and yield paths enter via `syscall` (IF stays SET), so a timer
+     interrupt landing while enter_user_space is copying the resume frame
+     onto the target's stack re-enters the scheduler on top of the live
+     copy and can smash it (observed: iretq #GP with a garbage
+     RIP/CS/RFLAGS/RSP/SS frame -> silent triple fault, exactly the
+     x64 reboot-loop signature).  IRETQ restores IF from the resumed
+     frame, and every non-switch exit restores flags via irqrestore, so
+     IF=0 through the switch body is safe on all paths. */
+  interrupts_disable();
 
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   int current_pid = cpu_current_pids[cpu];
@@ -967,7 +1022,13 @@ int process_fork(struct trap_frame *tf) {
   save_context(child, tf);
   child->context[0] = 0; // x0 = 0 for child
 
+#ifdef __x86_64__
+  /* Frame-carried RSP (see save_context): the child inherits the parent's
+     user RSP from THIS trap frame, not from the per-CPU slot. */
+  child->context[33] = tf->lr;
+#else
   child->context[33] = arch_get_user_sp();
+#endif
 
   child->num_open_fds = parent->num_open_fds;
   for (int i = 0; i < MAX_OPEN_FDS; i++) {
@@ -1050,6 +1111,11 @@ static jmp_buf scheduler_return_ctx[MAX_CPUS];
  * process runs; drives the [IDLESTUCK] diagnostic in the idle loop. */
 static int sched_idle_rounds;
 static int last_idlestuck_div;
+/* Owner-liveness grace, ms: the heartbeat bumps on every timer IRQ and
+   every idle pass, so 2s with no bump means the owner CPU is dead or in a
+   >2s IRQ-off spin — either way the RUNNING process is unrecoverable in
+   place and must be reclaimed so the suite can continue. */
+#define LOSTWAKE_DEAD_OWNER_MS 2000
 
 void scheduler_finished(void) {
   uint32_t cpu = get_cpuid();
@@ -1080,6 +1146,19 @@ void start_scheduler(void) {
   }
 
   uint32_t cpu = get_cpuid();
+
+  /* Seed the ownership heartbeats so the lost-owner reaper never sees a
+     fresh bank (all zeroes) as 'stale' in the first idle rounds. */
+  {
+    static volatile int hb_seeded = 0;
+    if (!hb_seeded) {
+      hb_seeded = 1;
+      uint64_t t0 = timer_get_ms();
+      for (int i = 0; i < MAX_CPUS; i++) {
+        cpu_heartbeat_ms[i] = t0;
+      }
+    }
+  }
 
   int jmp_val = setjmp(scheduler_return_ctx[cpu]);
   if (jmp_val == 1) {
@@ -1133,6 +1212,9 @@ void start_scheduler(void) {
     }
     spinlock_release_irqrestore(&proc_lock, flags);
 
+    /* Liveness heartbeat: this CPU is alive and idling. */
+    cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+
     /* Idle-stuck detector + lost-owner watchdog: a process left in
        RUNNING state with no CPU actually on it (cpu_current_pids[c]
        never matches its index) can never be picked again, so every CPU
@@ -1142,16 +1224,24 @@ void start_scheduler(void) {
        driver itself, stopping all further program loads.  After ~500
        idle rounds (≈0.5 s) reclaim it to READY and log the event; real
        ownership windows are microseconds, so the grace period is safe.
-       (pid == slot index in this kernel.) */
+       (pid == slot index in this kernel.)
+       An owner whose heartbeat has gone stale is ALSO considered
+       ownerless: a CPU that triple-fault-reset or froze in an IRQ-off
+       spin for LOSTWAKE_DEAD_OWNER_MS keeps cpu_current_pids[c] set
+       forever, so without the heartbeat the reaper would never reclaim
+       its RUNNING process and every CPU would IDLESTUCK-cycle forever. */
     sched_idle_rounds++;
     if (sched_idle_rounds >= 500) {
       uint64_t wflags = spinlock_acquire_irqsave(&proc_lock);
       for (int k = 1; k < MAX_PROCESSES; k++) {
         if (proc_table[k].state == PROC_STATE_RUNNING) {
           int owned = 0;
+          uint64_t now2 = timer_get_ms();
           for (int c = 0; c < MAX_CPUS; c++) {
             if (cpu_current_pids[c] == k) {
-              owned = 1;
+              if (now2 - cpu_heartbeat_ms[c] < LOSTWAKE_DEAD_OWNER_MS) {
+                owned = 1;
+              }
               break;
             }
           }
@@ -1160,7 +1250,7 @@ void start_scheduler(void) {
             print_int(proc_table[k].pid);
             uart_puts(" ");
             uart_puts(proc_table[k].name);
-            uart_puts(" from RUNNING with no CPU owner\n");
+            uart_puts(" from RUNNING with no live CPU owner\n");
             proc_table[k].state = PROC_STATE_READY;
           }
         }

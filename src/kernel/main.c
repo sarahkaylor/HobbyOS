@@ -27,7 +27,14 @@ extern void uart_init(void);
 extern void uart_putc(char c);
 extern void uart_puts(const char *s);
 
-static spinlock_t print_lock;
+/* The single console lock lives in the per-arch uart.c; the print helpers
+   serialize against uart_puts/uart_putc with it so UART output has exactly
+   one lock (previously uart_puts used uart_lock while print_int used a
+   second, print_lock — bytes interleaved under real SMP). */
+extern spinlock_t uart_lock;
+extern void uart_putc_raw(char c);
+void print_int_raw(int val);
+void uart_print_hex_raw(uint64_t val);
 
 /**
  * High-level handler for hardware interrupts (IRQs) occurring in the kernel
@@ -54,16 +61,26 @@ void irq_handler_c(struct trap_frame *tf) {
 
 /**
  * Prints a signed integer to the UART in decimal format.
+ *
+ * Takes the ONE console lock (uart_lock, shared with uart_puts/uart_putc)
+ * for the whole write so multi-char output cannot interleave with other
+ * console writers.  The per-char writes go through the lock-free
+ * uart_putc_raw because we already hold the lock.
  */
 void print_int(int val) {
-  uint64_t flags = spinlock_acquire_irqsave(&print_lock);
+  uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
+  print_int_raw(val);
+  spinlock_release_irqrestore(&uart_lock, flags);
+}
+
+/** Lock-free decimal print — deadlock diagnostics only. */
+void print_int_raw(int val) {
   if (val < 0) {
-    uart_putc('-');
+    uart_putc_raw('-');
     val = -val;
   }
   if (val == 0) {
-    uart_putc('0');
-    spinlock_release_irqrestore(&print_lock, flags);
+    uart_putc_raw('0');
     return;
   }
   char buf[16];
@@ -73,22 +90,26 @@ void print_int(int val) {
     val /= 10;
   }
   while (idx > 0)
-    uart_putc(buf[--idx]);
-  spinlock_release_irqrestore(&print_lock, flags);
+    uart_putc_raw(buf[--idx]);
 }
 
 /**
  * Prints a 64-bit value to the UART in hexadecimal format (e.g., 0xABC123).
  */
 void uart_print_hex(uint64_t val) {
-  uint64_t flags = spinlock_acquire_irqsave(&print_lock);
-  char hex_chars[] = "0123456789ABCDEF";
-  uart_putc('0');
-  uart_putc('x');
+  uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
+  uart_print_hex_raw(val);
+  spinlock_release_irqrestore(&uart_lock, flags);
+}
+
+/** Lock-free hex print — deadlock diagnostics only. */
+void uart_print_hex_raw(uint64_t val) {
+  static const char hex_chars[] = "0123456789ABCDEF";
+  uart_putc_raw('0');
+  uart_putc_raw('x');
   for (int i = 60; i >= 0; i -= 4) {
-    uart_putc(hex_chars[(val >> i) & 0xF]);
+    uart_putc_raw(hex_chars[(val >> i) & 0xF]);
   }
-  spinlock_release_irqrestore(&print_lock, flags);
 }
 
 /**
@@ -190,7 +211,6 @@ static void test_wave_loader(void *arg) {
 
 void main(void) {
   uart_init();
-  spinlock_init(&print_lock);
   uart_puts("Booting AArch64 OS...\n");
 
   // Virtual Memory Protection

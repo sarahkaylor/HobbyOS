@@ -1,7 +1,11 @@
 #include "lock.h"
 #include <stdint.h>
 
-static spinlock_t uart_lock;
+/** The single console lock, shared with the arch-independent print
+    helpers in main.c (they serialize against uart_puts/uart_putc so the
+    whole UART has exactly one lock — previously uart_puts used this lock
+    while print_int used a second one, which let bytes interleave). */
+spinlock_t uart_lock;
 
 #define COM1_PORT 0x3F8
 
@@ -57,10 +61,18 @@ extern uint64_t timer_get_ms(void);
 volatile uint64_t uart_last_activity_ms = 0;
 
 /**
- * Outputs a single character to the COM1 serial port.
- * Translates newline to carriage return + newline.
+ * Lock-free UART write body.  This is the ONLY function that touches the
+ * COM1 registers.  It deliberately takes no lock: deadlock diagnostics
+ * (spinlock screams, stall watchdog) run while the console lock itself may
+ * be wedged and MUST still reach the wire.
+ *
+ * uart_putc / uart_puts serialize with uart_lock around this body, which
+ * gives the whole console ONE lock.  (Previously uart_puts took uart_lock
+ * while print_int/uart_print_hex took a separate print_lock, so two cores
+ * could interleave bytes inside one logical write — the byte-soup
+ * "[CONSOLE] " / "I0nsi0de" interleaves seen under SMP.)
  */
-void uart_putc(char c) {
+static void uart_putc_body(char c) {
   uart_last_activity_ms = timer_get_ms();
   if (c == '\n') {
     while (!is_transmit_empty()) {
@@ -74,6 +86,29 @@ void uart_putc(char c) {
   outb(COM1_PORT, c);
 }
 
+/** Raw single character — lock-free, for deadlock diagnostics only. */
+void uart_putc_raw(char c) {
+  uart_putc_body(c);
+}
+
+/** Raw string — lock-free, for deadlock diagnostics only. */
+void uart_puts_raw(const char *s) {
+  while (*s != '\0') {
+    uart_putc_body(*s);
+    s++;
+  }
+}
+
+/**
+ * Outputs a single character to the COM1 serial port, serialized against
+ * all other console output.
+ */
+void uart_putc(char c) {
+  uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
+  uart_putc_body(c);
+  spinlock_release_irqrestore(&uart_lock, flags);
+}
+
 /**
  * Outputs a null-terminated string to the serial port.
  * Uses a spinlock to ensure atomic serial printing from multiple cores.
@@ -81,7 +116,7 @@ void uart_putc(char c) {
 void uart_puts(const char *s) {
   uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
   while (*s != '\0') {
-    uart_putc(*s);
+    uart_putc_body(*s);
     s++;
   }
   spinlock_release_irqrestore(&uart_lock, flags);
