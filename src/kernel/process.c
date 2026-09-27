@@ -663,7 +663,15 @@ void schedule(struct trap_frame *tf, int is_yield) {
       }
 #endif
       mmu_switch_user_mapping(proc_table[next].user_phys_base);
-      spinlock_release_irqrestore(&proc_lock, flags);
+      /* The resume must be interrupt-atomic: the frame window
+         [target_sp-296, target_sp) is copied and iretq'd right here, and a
+         timer tick landing in that window pushes a frame onto the same
+         stack, clobbering the copied window -> the iretq pops garbage (the
+         rare kernel-mode #GP/#PF at the resume tail, exaggerated by the
+         per-core 100 Hz LVT timers).  Release the lock with IF=0 and let
+         the iretq restore the target's own RFLAGS. */
+      interrupts_disable();
+      spinlock_release(&proc_lock);
 
 
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
@@ -1201,7 +1209,13 @@ void start_scheduler(void) {
         }
 #endif
 
-        spinlock_release_irqrestore(&proc_lock, flags);
+        /* Same interrupt-atomic resume rule as schedule(): the frame
+           window below target_sp is copied and iretq'd here; a timer tick
+           landing in that window clobbers it (garbage iretq).  Release
+           with IF=0; iretq restores the target's RFLAGS. */
+        interrupts_disable();
+        spinlock_release(&proc_lock);
+        (void)flags;
 
         extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
         enter_user_space(&local_tf, target_sp);
