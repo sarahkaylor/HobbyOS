@@ -423,11 +423,19 @@ static int process_create_kernel_internal(void (*entry)(void*), void *arg) {
 
   // Set up EL1t execution context
   p->context[31] = (uint64_t)entry;        // ELR (entry point)
-  /* SP_EL0 used for EL1t stack.  Keep one page of headroom below the
-     region end: a stack top exactly at user_phys_base + USER_REGION_SIZE
-     leaves no slack, so any frame that reaches just past the top lands
-     outside RAM on the last block (watched: enter_user_space's frame
-     copy faulting at FAR=0xC0000030 with a block-31 thread). */
+  /* The task's own stack: SP_EL0 for the ARM EL1t kernel tasks, and on
+     x86_64 the stack every kernel task must run on -- a kernel task
+     parked on the shared per-CPU kernel stack has its live frames
+     overwritten by the next context descending that stack (and by
+     enter_user_space's frame copies), which resumes it on a clobbered
+     return chain.  Keep one page of headroom below the region end: a
+     stack top exactly at user_phys_base + USER_REGION_SIZE leaves no
+     slack, so any frame that reaches just past the top lands outside
+     RAM on the last block (watched: enter_user_space's frame copy
+     faulting at FAR=0xC0000030 with a block-31 thread).  The physical
+     address is directly usable from the kernel: PD0/PD2..PD7
+     identity-map all RAM at supervisor level (and the block is also
+     mapped at USER_VIRT_BASE while the task is current). */
   p->context[33] = p->user_phys_base + USER_REGION_SIZE - 0x1000;
 #ifdef __x86_64__
   p->context[32] = 0x202;                  // RFLAGS = IF (0x200) | Reserved (0x02)
@@ -458,19 +466,18 @@ void save_context(struct process *p, struct trap_frame *tf) {
   p->context[31] = tf->elr;
   p->context[32] = tf->spsr;
 #ifdef __x86_64__
-  /* Same-privilege (kernel-mode) interrupts push no RSP, and the trap
-     entry only refreshes the per-CPU user SP for user-mode traps.  So
-     for a kernel task preempted while running in kernel mode,
-     arch_get_user_sp() is stale: it still holds the value planted by
-     the task's last resume.  Saving that value makes the resume path
-     restart the task at the stale stack pointer, abandoning every
-     live frame (observed: the test-wave thread resumed at its initial
-     stack top, its next `ret` popped a zero and jumped to 0x0).  The
-     interrupted RSP is recoverable from the frame layout: the CPU
-     pushed 24 bytes, the stub 16, and the wrapper subbed 264, so
-     rsp_at_interrupt = tf + 304. */
+  /* In IA-32e mode an interrupt always pushes SS:RSP, even with no
+     privilege change (Intel SDM 5.14.3), so the frame carries an
+     RSP-at-interrupt field: [tf+304], the same field the wrapper stores
+     the user RSP from and the resume tail reloads the park into.  Resume
+     a kernel task at the RSP the hardware saved there -- measured
+     against the QEMU -d int delivery log, [tf+304] matched the true
+     interrupted RSP in every observed trap, while the old "frame ends
+     at tf+320" arithmetic came out 8 low for some traps (the task
+     resumed eight bytes low; its next `ret` popped live stack data and
+     it executed .bss garbage). */
   if (p->is_kernel_process && (tf->cs & 3) == 0) {
-    p->context[33] = (uint64_t)((char *)tf + 304);
+    p->context[33] = ((uint64_t *)tf)[38];
   } else {
     p->context[33] = arch_get_user_sp();
   }
@@ -588,17 +595,16 @@ void schedule(struct trap_frame *tf, int is_yield) {
       extern char __stack_top;
       uint64_t target_sp = (uint64_t)&__stack_top - cpu * 0x10000 - 4096;
 #ifdef __x86_64__
-      /* Every kernel-task resume parks on this CPU's per-CPU kernel
-         stack.  The create-time context[33] is a physical address that
-         is not a usable x64 stack, and a preempted kernel task's
-         context[33] can hold a bogus value (save_context stores
-         tf+304, which for same-privilege interrupts is the CS field,
-         not the interrupted RSP).  This task's live frames live on the
-         very stack we are about to park it on, so restarting it there
-         is correct in both cases. */
+      /* Every kernel task resumes on its OWN stack: context[33] is the
+         interrupted RSP for a preempted task (the frame's RSP slot,
+         saved by save_context) and user_phys_base + USER_REGION_SIZE -
+         0x1000 for a fresh one.  Never park a kernel task on this CPU's
+         per-CPU kernel stack: the next context descending it would
+         overwrite the parked task's live frames. */
       if (proc_table[next].is_kernel_process) {
-        arch_set_user_sp(target_sp);
-        dbgpark(target_sp);
+        uint64_t park = proc_table[next].context[33];
+        arch_set_user_sp(park);
+        dbgpark(park);
       }
 #endif
       mmu_switch_user_mapping(proc_table[next].user_phys_base);
@@ -1107,11 +1113,12 @@ void start_scheduler(void) {
         restore_context(&proc_table[i], &local_tf);
 
 #ifdef __x86_64__
-        /* Same parking rule as in schedule(): kernel tasks always use
-           this CPU's per-CPU kernel stack (see schedule() for why). */
+        /* Same parking rule as in schedule(): every kernel task resumes
+           on its own stack (see there). */
         if (proc_table[i].is_kernel_process) {
-          arch_set_user_sp(target_sp);
-          dbgpark(target_sp);
+          uint64_t park = proc_table[i].context[33];
+          arch_set_user_sp(park);
+          dbgpark(park);
         }
 #endif
 
