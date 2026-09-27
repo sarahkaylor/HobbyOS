@@ -1212,6 +1212,15 @@ void start_scheduler(void) {
     }
     spinlock_release_irqrestore(&proc_lock, flags);
 
+    /* This core is going idle: it no longer runs any process.  Clear the
+       claim so a stale cpu_current_pids can't make a later timer tick on
+       an idle core preempt (and double-run) the last process it ran.
+       The preemption guard in the x64 timer handler keyed on
+       cur->is_kernel_process; with the per-core LAPIC timers armed every
+       idle AP hit that guard with a stale kernel-task claim and
+       re-scheduled the wave loader → proc_lock wedge right after boot. */
+    set_current_process_pid(get_cpuid(), -1);
+
     /* Liveness heartbeat: this CPU is alive and idling. */
     cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
 
@@ -1235,22 +1244,34 @@ void start_scheduler(void) {
       uint64_t wflags = spinlock_acquire_irqsave(&proc_lock);
       for (int k = 1; k < MAX_PROCESSES; k++) {
         if (proc_table[k].state == PROC_STATE_RUNNING) {
-          int owned = 0;
-          uint64_t now2 = timer_get_ms();
+          /* Only reclaim when NO core has this pid in cpu_current_pids at
+             all: the wake was consumed but the body never ran, so it
+             executes NOWHERE and resuming it is safe (this is what revived
+             the wedged-network-test wave).
+             A pid that IS claimed by a core is left alone even if that
+             core's timer heartbeat looks stale.  Reclaiming it (the old
+             'no live CPU owner' path) DOUBLE-RAN a genuinely-running
+             process and corrupted the table (observed: pid 1 torn into
+             user-mode resumes at 0x4400xxxx/.bss).  And the heartbeat is
+             unreliable for distinguishing a wedged core from a healthy one
+             throttled on a contended console lock (uart_puts holds
+             uart_lock IRQ-off per char; a print storm can stall a core
+             IRQ-off >2s, making the freeze look real) — halting on it
+             false-positived every print-heavy boot.  A truly frozen owner
+             surfaces via the 20s console-silence watchdog instead. */
+          int claimers = 0;
           for (int c = 0; c < MAX_CPUS; c++) {
             if (cpu_current_pids[c] == k) {
-              if (now2 - cpu_heartbeat_ms[c] < LOSTWAKE_DEAD_OWNER_MS) {
-                owned = 1;
-              }
+              claimers = 1;
               break;
             }
           }
-          if (!owned) {
+          if (!claimers) {
             uart_puts("[LOSTWAKE] reclaiming pid=");
             print_int(proc_table[k].pid);
             uart_puts(" ");
             uart_puts(proc_table[k].name);
-            uart_puts(" from RUNNING with no live CPU owner\n");
+            uart_puts(" from RUNNING with no claiming CPU\n");
             proc_table[k].state = PROC_STATE_READY;
           }
         }

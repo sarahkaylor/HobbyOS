@@ -121,10 +121,14 @@ void timer_init(void) {
     extern void gic_enable_interrupt(uint32_t intid);
     gic_enable_interrupt(30);
   } else {
-    // Per-core LAPIC timer (parity with ARM's per-core timers) is armed
-    // via lapic_timer_start_periodic() once the proc_lock pileup seen in
-    // the net_test region is root-caused; the reschedule IPI already
-    // wakes secondary cores.
+    // Per-core LAPIC timer (parity with ARM's per-core timers).  A core
+    // with no timer has no preemption and cannot wake out of a device
+    // wait (virtio IRQs go to CPU0), so a process blocked in a safe_wfi
+    // busy-wait on an AP froze it forever — the rare single-CPU stall
+    // that previously let the lost-owner reaper double-run it.  The
+    // original deferral ("proc_lock pileup") predates the lock fixes;
+    // arm vector 32 periodic on every AP now.
+    lapic_timer_start_periodic();
   }
 }
 

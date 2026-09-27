@@ -1157,7 +1157,18 @@ void general_interrupt_handler(struct trap_frame *tf) {
     lapic_send_eoi();
 
     struct process *cur = current_process();
-    if (cur && (cur->is_kernel_process || (tf->cs & 3) == 3)) {
+    /* Only timer-preempt USER-mode contexts.  Kernel-mode contexts — a
+       kernel task, or a user process inside a syscall — are left to run:
+       a kernel task's continuation lives on this core's stack and was
+       historically preempted only by yield/broadcast-IPI (never by a
+       per-core tick; APs had no timer at all).  When the per-core LVT
+       was armed, a tick landing in a kernel task's just-picked resume
+       window (release of proc_lock -> enter_user_space) re-entered the
+       pick path and wedged the very first loader resume on the AP (its
+       stack spun in the vector stubs, pid 1 left RUNNING with a live
+       claim, IDLESTUCK everywhere).  The LVT still wakes hlt busy-waits
+       and feeds the liveness heartbeat on every core. */
+    if (cur && (tf->cs & 3) == 3) {
       if (cpu == 0) {
         gic_end_interrupt(intid);
       }
