@@ -130,36 +130,35 @@ tool is small. Ordered by value:
 | `ed` | GNU ed 1.20 (GPL-3+) | tiny line editor, regex-based; good "editor" win without curses. **Stretch.** |
 | `xargs` | findutils 4.x (GPL-3+) | needs fork/exec/waitpid (have) + getopt; small. **Stretch.** |
 | `bc`/`dc` | bc 1.x (GPL-3+) | arbitrary precision; moderate. Deferred. |
-| `nano` | nano-8.7 (GPL-3+) | **See 3.4.** Desired but curses-dependent. |
+| `nano` | nano-8.7 (GPL-3+) | **PORTED — see 3.4.** `NANO.BIN`, both arches validated. |
 | `make` | GNU make 4.x | L; also needs process/FS maturity. Deferred. |
 | `gawk` | gawk 5.x | L+ (locale, dynamic loading, dfa); deferred. |
 | `emacs` | — | Explicitly out of scope. |
 
-### 3.4 nano feasibility (investigated, deferred with a concrete plan)
+### 3.4 nano 8.7 — PORTED (ARM + x86_64)
 
-nano-8.7 is 22.7k lines of `src/*.c` and **hard-depends on ncursesw**: it
-links `-lncursesw` and uses the full curses screen model (termios raw mode,
-terminfo capability strings, `wget_wch` wide input, SIGWINCH, color pairs,
-soft label keys). Porting nano therefore means porting (a subset of) ncurses
-plus a terminfo reader, i.e. a real terminal emulator inside the OS:
+Landed in `src/user/nano/`, built as `NANO.BIN`:
+- nano-8.7's 18 `src/*.c` files vendored byte-identical apart from two marked
+  surgical patches (nano.c `hb_term_is_terminal` for the OS's no-isatty world;
+  winio.c resize), plus `revision.h` pinned to 8.7.
+- `hb_curses.c` — the curses subset nano needs (~50 entry points) over the
+  console window's terminal surface: screen grid with cursor addressing, SGR
+  attributes, keypad/CSI input decode, `get_wch`, `wnoutrefresh`/`doupdate`.
+- `curses.h` / `term.h` / `config.h` — hand-pinned to the configure.ac probe.
 
-- the console window today is a *line-oriented text buffer* fed by `print()`
-  with a few OSC/CSI extensions (title, menu, run-in-window). It has no
-  cursor-addressing surface, no attribute model, no alt-screen, and the
-  desktop key path has no Ctrl key.
-- Baseline for coexistence: `EDITOR.BIN` is the GUI editor; `less` covers
-  paging.
+OS-side support that landed with it: the console window gained a cell grid
+(`wm_term_*` in `graphics/window.c`) with ANSI/CSI escape processing, an OSC
+handshake (`ESC ] V 1~` opt-in → `ESC ] S <rows>;<cols>~`), and Ctrl-key
+compose/auto-repeat in `desktop.c`; libc gained time.h (wall clock via sysinfo
+command 6), libgen, mkstemp family, realpath, access, strings.h, term.h,
+sigaction (remembered, never delivered) and a dup2 honest-failure stub.
 
-Deferred sequence (own project-sized chunk, after sed/grep land):
-1. OS-side: Ctrl-key support end-to-end + an ANSI/curses-capable terminal
-   surface in the console window (screen grid, cursor addressing, SGR
-   attributes, raw mode push/restore, resize events).
-2. libc-side: termios stub API, `ioctl(TIOCGWINSZ)`, `[[nano]]`'s POSIX
-   surface (move/delete/rename, getcwd already present), and a
-   curses-subset (or full ncurses port) with a built-in `xterm`/`ansi`
-   fallback terminfo.
-3. Then nano itself, vendored + transcribed like the other ports, with a
-   scripted-injection test harness (no interactive babysitting).
+Validation, all green: `nano_term_test_host`, `desktop_term_test`,
+`desktop_input_test` (host suites), `make host_tests` (482 checks), and the
+scripted end-to-end harness `run_nano_test.py` on **both** architectures:
+boot → Apps menu → launch NANO.BIN → type → `^O` save as `HELLO.TXT` → read
+the file back off the FAT image byte-exact (`hello from nano\nsecond line\n`).
+The x64 run rides on the kernel spawn/resume fix (plan.md §2).
 
 ## 4. This program's roadmap (each phase = one local commit)
 

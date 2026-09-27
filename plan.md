@@ -22,19 +22,33 @@ All work is committed locally **only** — never pushed to GitHub.
 ### In flight (uncommitted)
 - **FAT16 long-file-name (LFN) support** — `src/kernel/fat16.c` + `fat16_test.c`
   (see §2).
-- **x64 kernel-task resume fix** — `src/kernel/process.c` (save `context[33]` as the
-  interrupted RSP for kernel-mode traps) + `src/kernel/arch/x64/trap.c` (in
-  `enter_user_space`: a kernel-mode resume currently lands RSP on the per-CPU scratch
-  stack instead of the task's own stack; fix relocates the return frame to the task's
-  stack and iretq's from there). See §2.
+- **GNU nano 8.7 ported to user space** — `src/user/nano/` (18 pristine sources +
+  `hb_curses.c` curses subset + `config.h`/`curses.h`/`term.h`), console-window
+  terminal surface (`graphics/window.c` `wm_term_*`, ANSI/CSI processing +
+  Ctrl-key compose in `desktop.c`), libc fills (time/libgen/strings/realpath/
+  mkstemp/access/term), host suites (`desktop_term_test`, `desktop_input_test`,
+  `nano_term_test`), E2E harness `run_nano_test.py` + `fat16img.py`.
+  **Validated end-to-end on ARM and x86_64** (menu launch, typing, `^O` save,
+  HELLO.TXT byte-exact readback from the FAT image).
+- **x64 kernel-task resume fix — LANDED** — `src/kernel/process.c` +
+  `src/kernel/arch/x64/trap.c`: kernel tasks run on their own region stack;
+  `save_context` stores the frame's RSP-at-interrupt field (`[tf+304]`); the
+  kernel-mode resume copies the register frame straight onto the task's own
+  stack (no per-CPU scratch bounce). See §2.
 
 ### Test status
-- Host unit tests: PASS. Host strict parity: 16/16 PASS.
-- ARM (`make test`): green; UNEXPAND_T suite was **silently running the wrong binary**
-  (FAT16 8.3 truncation bug — `UNEXPAND_T.BIN` resolved to `UNEXPAND.BIN`); now fixed
-  by LFN support, needs a fresh green run to confirm `[UNEXPTEST]`.
-- x64 (`make test_intel`): **BROKEN** — the kernel-task resume bug (§2). Blocking all
-  x64 work, including the second-arch verification of the remaining ports.
+- Host unit tests: PASS (482 checks, 0 failed). Host strict parity: 16/16 PASS.
+- ARM (`make test`): **green end-to-end** — `System halt`, 616 PASS, 0 LOCKFOREVER;
+  the UNEXPAND_T suite (was **silently running the wrong binary** — FAT16 8.3
+  truncation bug) is fixed by LFN support and now **`[UNEXPTEST] PASS`** on a fresh run.
+- x64 (`make test_intel`): the kernel-task resume bug (§2) is **fixed** — the wave
+  now boots and runs (13 suite verdicts, 1848 checks; nano's x64 E2E green
+  end-to-end with HELLO.TXT byte-exact). It then wedges in a **proc_lock
+  lost-owner**: 7 cores spinning in `spinlock_acquire_irqsave` on `proc_lock`,
+  the 8th silent, onset during the net-timeout test's exit/fd-close churn.
+  ARM runs the identical wave clean, so the wedge is x64-specific (or the new
+  resume path under churn). Next: live forensics (HMP regs + `lock_wait_addr`/
+  `lock_wait_caller`) or the pending block-to-deschedule refactor (§2b).
 
 ## 2. Immediate steps (M0 — unblock both architectures)
 
@@ -47,10 +61,12 @@ All work is committed locally **only** — never pushed to GitHub.
      `make test` full wave with **`[UNEXPTEST] PASS`** on ARM.
    - Commit: `fat16: VFAT long-file-name support + strict 8.3 matching (fixes
      UNEXPAND_T silently loading the wrong binary)`.
-2. **Fix x64 kernel-task resume** (root-caused, §1): implement in
-   `enter_user_space` + commit together with the `process.c` save_context patch.
-   - Verify: `make test_intel` full wave on x64 (currently watchdog-freezes);
-     no `WATCHDOG` messages, `EXIT=0`.
+2. ~~Fix x64 kernel-task resume~~ **DONE** — kernel tasks now run on their own
+   region stack; `save_context` saves the frame's RSP-at-interrupt field
+   (`[tf+304]`); `enter_user_space`'s kernel-mode resume copies the frame
+   straight onto the task's own stack (no per-CPU scratch bounce). Verified by
+   the nano x64 E2E end-to-end; see §1 test status for the wave re-run.
+   - Verify: `make test_intel` full wave on x64; no `WATCHDOG` messages, `EXIT=0`.
 3. Optional follow-up (defer unless cheap): LFN-aware `rename` (long→long) and
    `DIR`-entry iteration (`ls -l` long names still show 8.3 aliases).
 
