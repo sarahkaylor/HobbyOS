@@ -146,7 +146,7 @@ static void test_fat16_lfn_names(void) {
   {
     struct file f;
     EXPECT_EQ(fat16_open("/UNEXPAND_T.BIN", &f), 0);
-    EXPECT_EQ(f.fat16.entry.file_size, 12592); /* the on-device test binary */
+    EXPECT_EQ(f.fat16.entry.file_size, 12896); /* the on-device test binary */
     fat16_close(&f);
   }
 
