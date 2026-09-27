@@ -68,6 +68,12 @@ extern "C" {
    * template with unique letters and open O_CREAT|O_EXCL|O_RDWR. */
   int mkstemp(char *template);
   int mkostemp(char *template, int flags);
+  int mkstemps(char *template, int suffixlen); /* GNU: XXXXXX before a suffix */
+
+  /* POSIX pathname canonicalization: resolve to an absolute path with no
+   * "." / ".." components.  This VFS has no symlinks, so the resolution is
+   * purely textual; resolved==NULL allocates (free() it). */
+  char *realpath(const char *path, char *resolved);
 
 #ifdef __cplusplus
 }

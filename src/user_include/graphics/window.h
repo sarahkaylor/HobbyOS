@@ -17,6 +17,30 @@
 /* Height of the desktop taskbar at the bottom of the screen. */
 #define TASKBAR_H 26
 
+/* ---- Terminal mode (ESC ] V 1 ~) --------------------------------------
+ * A window is a line-oriented text tail by default.  An app that wants a
+ * character-addressed surface -- a full-screen "curses" program such as
+ * the ported nano -- opts in by printing the OSC message ESC ] V 1 ~ (see
+ * src/user/nano/curses.h for the whole protocol).  The desktop then
+ * interprets that window's output as ANSI (cursor addressing, SGR
+ * attributes, erases) and paints a character grid instead of the tail,
+ * and answers with ESC ] S <rows>;<cols> ~ so the program learns the
+ * surface it got; a later reflow sends a fresh ESC ] S.
+ *
+ * The grid covers what a window can actually show at the desktop's
+ * 8x10-pixel cell pitch; the caps below match the curses shim's
+ * (HBC_MAX_ROWS/COLS in hb_curses.c) so a size the shim is told is always
+ * one it can hold. */
+#define TERM_MAX_ROWS 72
+#define TERM_MAX_COLS 128
+#define TERM_CELLS (TERM_MAX_ROWS * TERM_MAX_COLS)
+
+/* SGR bits kept per cell -- exactly the subset the curses shim emits
+ * (emit_sgr in hb_curses.c: 0m, 1m, 4m, 7m). */
+#define TERM_AT_REVERSE   0x01
+#define TERM_AT_BOLD      0x02
+#define TERM_AT_UNDERLINE 0x04
+
 struct window_menu {
   char name[MENU_NAME_LEN];
   char items[MAX_MENU_SUBITEMS][MENU_NAME_LEN];
@@ -41,6 +65,18 @@ struct window {
   /* Set when the app opts into mouse events (ESC ] P 1 ~). The desktop
    * then forwards content-area clicks as ESC [ P <col>;<row>;<btn> ~ */
   int mouse_events;
+
+  /* ---- Terminal mode (ESC ] V 1 ~); see wm_term_* below ---- */
+  int term_mode;
+  int term_rows, term_cols;        /* grid size in cells (what the app got) */
+  int term_cur_row, term_cur_col;  /* cursor cell, 0-based */
+  int term_cursor_visible;         /* DEC cursor visibility (ESC [ ?25h/l) */
+  unsigned char term_attr;         /* current SGR attribute bits */
+  unsigned char term_dirty[TERM_MAX_ROWS];  /* rows needing a repaint */
+  int term_caret_row, term_caret_col;       /* where the caret bar is painted
+                                               (-1 = none) */
+  char term_ch[TERM_CELLS];        /* cell text */
+  unsigned char term_at[TERM_CELLS]; /* cell attributes */
 
   int escape_state;
   char escape_buf[128];
@@ -81,6 +117,31 @@ void wm_set_window_title(int id, const char *title);
 void wm_text_putc(struct window *win, char c);
 void wm_text_backspace(struct window *win);
 void wm_text_clear(struct window *win);
+
+/* ---- Terminal-mode surface (window.c) ----
+ * The desktop feeds a terminal-mode window's output through these: plain
+ * bytes via wm_term_putc/wm_term_newline/wm_term_cr/wm_term_bs/
+ * wm_term_tab, parsed ANSI via wm_term_cup/wm_term_erase_display/
+ * wm_term_erase_line/wm_term_sgr/wm_term_set_cursor_visible.  Row/column
+ * arguments are 1-based ANSI coordinates (0 and omitted mean 1).
+ *
+ * wm_term_begin() switches a window into terminal mode: it sizes the grid
+ * to the window, clears it, and sends the app its size (ESC ] S <r>;<c> ~).
+ * wm_term_resize() re-sizes + re-notifies after a reflow.  Both return 1
+ * when the size changed. */
+int  wm_term_begin(struct window *win);
+int  wm_term_resize(struct window *win);
+void wm_term_send_size(struct window *win);
+void wm_term_putc(struct window *win, char c);
+void wm_term_newline(struct window *win);
+void wm_term_cr(struct window *win);
+void wm_term_bs(struct window *win);
+void wm_term_tab(struct window *win);
+void wm_term_cup(struct window *win, int row1, int col1);
+void wm_term_erase_display(struct window *win, int mode);
+void wm_term_erase_line(struct window *win, int mode);
+void wm_term_sgr(struct window *win, int which);
+void wm_term_set_cursor_visible(struct window *win, int on);
 
 /* ---- Damage helpers (window.c) ----
  * wm_draw_window_rows() repairs a window's captured text at line

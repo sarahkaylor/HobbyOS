@@ -30,6 +30,7 @@
 #define strchr hb_strchr
 #define strrchr hb_strrchr
 #define strstr hb_strstr
+#define strcasestr hb_strcasestr
 #define strpbrk hb_strpbrk
 #define strspn hb_strspn
 #define strcspn hb_strcspn
@@ -43,6 +44,9 @@
 #define memset hb_memset
 #define memchr hb_memchr
 #define memrchr hb_memrchr
+#define ffs hb_ffs
+#define ffsl hb_ffsl
+#define ffsll hb_ffsll
 #else
 #include "string.h"
 #endif
@@ -105,6 +109,24 @@ int strncasecmp(const char *s1, const char *s2, size_t n) {
   }
   return 0;
 }
+
+/* GNU extension: strstr() without case significance. */
+char *strcasestr(const char *haystack, const char *needle) {
+  size_t nlen;
+  if (!*needle) return (char *)haystack;
+  nlen = strlen(needle);
+  for (; *haystack; haystack++) {
+    if (hb_lower((unsigned char)*haystack) == hb_lower((unsigned char)*needle) &&
+        strncasecmp(haystack, needle, nlen) == 0)
+      return (char *)haystack;
+  }
+  return 0;
+}
+
+/* Bit-scan, 1-based (POSIX <strings.h>): 0 for zero input. */
+int ffs(int i) { return __builtin_ffs(i); }
+int ffsl(long i) { return __builtin_ffsl(i); }
+int ffsll(long long i) { return __builtin_ffsll(i); }
 
 char *strcpy(char *dst, const char *src) {
   char *d = dst;

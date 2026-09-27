@@ -7,6 +7,9 @@
 struct window windows[MAX_WINDOWS];
 int num_windows = 0;
 
+/* Defined in the terminal-mode section below; used by the content painter. */
+static int term_paint_dirty(struct window *win);
+
 /* ---- Text drawing (8x8 font, 8px cells, 10px line height) ---- */
 
 void wm_draw_char(int x, int y, char c, uint32_t color) {
@@ -52,6 +55,12 @@ static void update_layout(void) {
     windows[i].w = w;
     windows[i].h = h;
   }
+
+  /* A reflow changes the content area: terminal-mode apps must be told
+   * their new surface (the shim turns ESC ] S into KEY_RESIZE). */
+  for (int i = 0; i < num_windows; i++) {
+    if (windows[i].term_mode) wm_term_resize(&windows[i]);
+  }
 }
 
 int wm_create_window(uint32_t bg_color, int pid, int stdout_fd, int stdin_fd) {
@@ -71,6 +80,15 @@ int wm_create_window(uint32_t bg_color, int pid, int stdout_fd, int stdin_fd) {
   windows[idx].stdin_fd = stdin_fd;
   windows[idx].num_menus = 0;
   windows[idx].mouse_events = 0;
+  windows[idx].term_mode = 0;
+  windows[idx].term_rows = 0;
+  windows[idx].term_cols = 0;
+  windows[idx].term_cur_row = 0;
+  windows[idx].term_cur_col = 0;
+  windows[idx].term_cursor_visible = 1;
+  windows[idx].term_attr = 0;
+  windows[idx].term_caret_row = -1;
+  windows[idx].term_caret_col = -1;
   windows[idx].escape_state = 0;
   windows[idx].escape_len = 0;
   windows[idx].rendered_valid = 0;   /* nothing painted yet */
@@ -210,6 +228,10 @@ static void window_paint_rows(struct window *win, int top, int skip, int r0, int
 int wm_draw_window_rows(struct window *win) {
   int top, rows;
   window_content_geom(win, &top, &rows);
+
+  /* Terminal mode paints from the cell grid, not the text tail. */
+  if (win->term_mode) return term_paint_dirty(win);
+
   int skip = window_visible_skip(win->text, rows);
 
   if (!win->rendered_valid || rows != win->rendered_rows ||
@@ -292,6 +314,16 @@ void wm_draw_windows(int focused_id) {
 
     // Content background
     graphics_draw_rect(win->x + 2, win->y + 34, win->w - 4, win->h - 36, win->bg_color);
+
+    if (win->term_mode) {
+      /* Terminal mode: repaint every grid row from the cell grid (plus the
+       * caret).  No snapshot bookkeeping: the grid is its own model. */
+      for (int r = 0; r < TERM_MAX_ROWS; r++) win->term_dirty[r] = 1;
+      win->term_caret_row = -1;
+      win->term_caret_col = -1;
+      term_paint_dirty(win);
+      continue;
+    }
 
     // Content text with clipping and auto-scroll to the newest lines.
     int text_top, max_rows;
@@ -398,6 +430,304 @@ void wm_remove_window(int id) {
   }
   num_windows--;
   update_layout();
+}
+
+/* ====================================================================== */
+/* Terminal mode                                                          */
+/*                                                                        */
+/* A terminal-mode window (an app opted in with ESC ] V 1 ~) holds a       */
+/* character grid the size of its content area.  All of it lives here;     */
+/* the byte/CSI dispatch lives in desktop.c, which turns the app's ANSI    */
+/* output into calls into this section.                                    */
+/* ====================================================================== */
+
+/* Grid size that fits a window at the 8x10 cell pitch (see the text
+ * painter: content x = win->x + 10, pitch 8; content top = win->y + 44,
+ * pitch 10), capped at the shim's limits. */
+static int term_fit_rows(const struct window *win) {
+  int rows = (win->h - 48) / 10;
+  if (rows < 1) rows = 1;
+  if (rows > TERM_MAX_ROWS) rows = TERM_MAX_ROWS;
+  return rows;
+}
+
+static int term_fit_cols(const struct window *win) {
+  int cols = (win->w - 12) / 8;
+  if (cols < 1) cols = 1;
+  if (cols > TERM_MAX_COLS) cols = TERM_MAX_COLS;
+  return cols;
+}
+
+/* Tell the app the surface it has: ESC ] S <rows>;<cols> ~ (the same
+ * message a reflow sends; the shim turns it into KEY_RESIZE). */
+void wm_term_send_size(struct window *win) {
+  if (win->stdin_fd < 0) return;       /* host tests: no pipe to write to */
+  char buf[48];
+  int j = 0;
+  int vals[2];
+  vals[0] = win->term_rows;
+  vals[1] = win->term_cols;
+  buf[j++] = 27;
+  buf[j++] = ']';
+  buf[j++] = 'S';
+  buf[j++] = ' ';
+  for (int v = 0; v < 2; v++) {
+    int n = vals[v];
+    char digits[8];
+    int d = 0;
+    if (n <= 0) digits[d++] = '0';
+    while (n > 0) { digits[d++] = (char)('0' + n % 10); n /= 10; }
+    while (d > 0) buf[j++] = digits[--d];
+    if (v == 0) buf[j++] = ';';
+  }
+  buf[j++] = '~';
+  int wr = write(win->stdin_fd, buf, j);
+  (void)wr;
+}
+
+/* Blank the grid and mark every row for repaint. */
+static void term_clear_grid(struct window *win) {
+  int cells = win->term_rows * win->term_cols;
+  for (int i = 0; i < cells; i++) {
+    win->term_ch[i] = ' ';
+    win->term_at[i] = 0;
+  }
+  for (int r = 0; r < win->term_rows; r++) win->term_dirty[r] = 1;
+}
+
+static void term_clamp_cursor(struct window *win) {
+  if (win->term_cur_row >= win->term_rows) win->term_cur_row = win->term_rows - 1;
+  if (win->term_cur_row < 0) win->term_cur_row = 0;
+  if (win->term_cur_col >= win->term_cols) win->term_cur_col = win->term_cols - 1;
+  if (win->term_cur_col < 0) win->term_cur_col = 0;
+}
+
+/* The caret bar is not part of the cell model, so a moved (or hidden)
+ * caret leaves a stale bar behind unless the row it was painted in is
+ * repainted too.  Every operation that can move the cursor calls this
+ * before changing it.  wm_term_paint_dirty() records where the bar went. */
+static void term_caret_vacate(struct window *win) {
+  if (win->term_caret_row >= 0 && win->term_caret_row < win->term_rows) {
+    win->term_dirty[win->term_caret_row] = 1;
+    win->term_caret_row = -1;
+  }
+}
+
+int wm_term_begin(struct window *win) {
+  win->term_mode = 1;
+  win->term_rows = term_fit_rows(win);
+  win->term_cols = term_fit_cols(win);
+  win->term_cur_row = 0;
+  win->term_cur_col = 0;
+  win->term_cursor_visible = 1;
+  win->term_attr = 0;
+  win->term_caret_row = -1;
+  win->term_caret_col = -1;
+  term_clear_grid(win);
+  /* The text tail is meaningless now; drop it so a resize back to text
+   * (a future feature) does not resurrect stale output. */
+  win->text_len = 0;
+  win->text[0] = '\0';
+  win->rendered_valid = 0;
+  wm_term_send_size(win);
+  return 1;
+}
+
+int wm_term_resize(struct window *win) {
+  int rows = term_fit_rows(win);
+  int cols = term_fit_cols(win);
+  if (rows == win->term_rows && cols == win->term_cols) return 0;
+  win->term_rows = rows;
+  win->term_cols = cols;
+  win->term_caret_row = -1;
+  win->term_caret_col = -1;
+  term_clamp_cursor(win);
+  term_clear_grid(win);
+  win->rendered_valid = 0;
+  wm_term_send_size(win);
+  return 1;
+}
+
+static void term_set_cell(struct window *win, int r, int c, char ch,
+                          unsigned char at) {
+  if (r < 0 || r >= win->term_rows || c < 0 || c >= win->term_cols) return;
+  win->term_ch[r * win->term_cols + c] = ch;
+  win->term_at[r * win->term_cols + c] = at;
+  win->term_dirty[r] = 1;
+}
+
+static void term_scroll_up(struct window *win) {
+  int cols = win->term_cols;
+  for (int r = 0; r + 1 < win->term_rows; r++) {
+    char *dstc = &win->term_ch[r * cols];
+    char *srcc = &win->term_ch[(r + 1) * cols];
+    unsigned char *dsta = &win->term_at[r * cols];
+    unsigned char *srca = &win->term_at[(r + 1) * cols];
+    for (int c = 0; c < cols; c++) {
+      dstc[c] = srcc[c];
+      dsta[c] = srca[c];
+    }
+  }
+  int last = (win->term_rows - 1) * cols;
+  for (int c = 0; c < cols; c++) {
+    win->term_ch[last + c] = ' ';
+    win->term_at[last + c] = 0;
+  }
+  for (int r = 0; r < win->term_rows; r++) win->term_dirty[r] = 1;
+}
+
+/* A printable byte lands at the cursor; at the right edge the cursor wraps
+ * (deferred: the wrap happens when the *next* byte arrives, like a real
+ * terminal). */
+void wm_term_putc(struct window *win, char c) {
+  term_caret_vacate(win);
+  if (win->term_cur_col >= win->term_cols) {
+    win->term_cur_col = 0;
+    if (win->term_cur_row + 1 >= win->term_rows) term_scroll_up(win);
+    else win->term_cur_row++;
+  }
+  term_set_cell(win, win->term_cur_row, win->term_cur_col, c, win->term_attr);
+  win->term_cur_col++;
+}
+
+/* Line feed.  The desktop's terminal is CRLF-flavoured (an LF also returns
+ * the cursor to column 0): ported programs either emit explicit cursor
+ * addressing (a full-screen app always does) or "\r\n", and both behave
+ * identically here -- while a bare "\n" lands where a user reading the
+ * window expects it. */
+void wm_term_newline(struct window *win) {
+  term_caret_vacate(win);
+  win->term_cur_col = 0;
+  if (win->term_cur_row + 1 >= win->term_rows) term_scroll_up(win);
+  else win->term_cur_row++;
+}
+
+void wm_term_cr(struct window *win) {
+  term_caret_vacate(win);
+  win->term_cur_col = 0;
+}
+
+void wm_term_bs(struct window *win) {
+  term_caret_vacate(win);
+  if (win->term_cur_col > 0) win->term_cur_col--;
+}
+
+void wm_term_tab(struct window *win) {
+  term_caret_vacate(win);
+  int next = (win->term_cur_col / 8 + 1) * 8;
+  if (next >= win->term_cols) next = win->term_cols - 1;
+  win->term_cur_col = next < win->term_cur_col ? win->term_cur_col : next;
+}
+
+void wm_term_cup(struct window *win, int row1, int col1) {
+  term_caret_vacate(win);
+  win->term_cur_row = row1 > 0 ? row1 - 1 : 0;
+  win->term_cur_col = col1 > 0 ? col1 - 1 : 0;
+  term_clamp_cursor(win);
+}
+
+static void term_blank_range(struct window *win, int r, int c0, int c1) {
+  for (int c = c0; c <= c1; c++) term_set_cell(win, r, c, ' ', 0);
+}
+
+/* CSI J: 0 = cursor to end, 1 = start to cursor, 2 = whole screen. */
+void wm_term_erase_display(struct window *win, int mode) {
+  term_caret_vacate(win);
+  if (mode == 2) {
+    term_clear_grid(win);
+    win->term_cur_row = 0;
+    win->term_cur_col = 0;
+    return;
+  }
+  if (mode == 1) {
+    for (int r = 0; r < win->term_cur_row; r++) term_blank_range(win, r, 0, win->term_cols - 1);
+    term_blank_range(win, win->term_cur_row, 0, win->term_cur_col);
+    return;
+  }
+  /* mode 0 */
+  term_blank_range(win, win->term_cur_row, win->term_cur_col, win->term_cols - 1);
+  for (int r = win->term_cur_row + 1; r < win->term_rows; r++)
+    term_blank_range(win, r, 0, win->term_cols - 1);
+}
+
+/* CSI K: 0 = cursor to end of line, 1 = start to cursor, 2 = whole line. */
+void wm_term_erase_line(struct window *win, int mode) {
+  if (mode == 2) {
+    term_blank_range(win, win->term_cur_row, 0, win->term_cols - 1);
+  } else if (mode == 1) {
+    term_blank_range(win, win->term_cur_row, 0, win->term_cur_col);
+  } else {
+    term_blank_range(win, win->term_cur_row, win->term_cur_col, win->term_cols - 1);
+  }
+}
+
+/* SGR (the subset the shim emits, plus the obvious off-switches). */
+void wm_term_sgr(struct window *win, int which) {
+  switch (which) {
+    case 0: win->term_attr = 0; break;
+    case 1: win->term_attr |= TERM_AT_BOLD; break;
+    case 4: win->term_attr |= TERM_AT_UNDERLINE; break;
+    case 7: win->term_attr |= TERM_AT_REVERSE; break;
+    case 22: win->term_attr &= (unsigned char)~TERM_AT_BOLD; break;
+    case 24: win->term_attr &= (unsigned char)~TERM_AT_UNDERLINE; break;
+    case 27: win->term_attr &= (unsigned char)~TERM_AT_REVERSE; break;
+    default: break;   /* colors: this display is monochrome, ignore */
+  }
+}
+
+void wm_term_set_cursor_visible(struct window *win, int on) {
+  term_caret_vacate(win);
+  win->term_cursor_visible = on ? 1 : 0;
+}
+
+/* Paint the rows marked dirty (background + cells) and the caret bar.
+ * Returns 1 when anything was painted. */
+static int term_paint_dirty(struct window *win) {
+  int top, rows;
+  window_content_geom(win, &top, &rows);
+  if (rows > win->term_rows) rows = win->term_rows;
+  int painted = 0;
+
+  graphics_set_clip(win->x + 2, win->y + 34, win->w - 4, win->h - 36);
+  for (int r = 0; r < rows; r++) {
+    if (!win->term_dirty[r]) continue;
+    int y = top + r * 10;
+    graphics_draw_rect(win->x + 2, y, win->w - 4, 10, win->bg_color);
+    int cx = win->x + 10;
+    for (int c = 0; c < win->term_cols; c++) {
+      char ch = win->term_ch[r * win->term_cols + c];
+      unsigned char at = win->term_at[r * win->term_cols + c];
+      if (ch == ' ' && !(at & TERM_AT_REVERSE)) { cx += 8; continue; }
+      uint32_t ink = COLOR(255, 255, 255);
+      if (at & TERM_AT_REVERSE) {
+        /* Reverse: swap the default pair (white field, window ink). */
+        graphics_draw_rect(cx, y, 8, 10, COLOR(235, 238, 245));
+        ink = win->bg_color;
+      }
+      if (ch != ' ') wm_draw_char(cx, y, ch, ink);
+      if (at & TERM_AT_UNDERLINE) graphics_draw_hline(cx, y + 8, 8, ink);
+      cx += 8;
+    }
+    win->term_dirty[r] = 0;
+    painted = 1;
+  }
+
+  /* Caret: an underline bar in the window-focus blue (visible on both the
+   * dark background and a reverse-video white cell). */
+  if (win->term_cursor_visible) {
+    int cr = win->term_cur_row, cc = win->term_cur_col;
+    if (cr >= 0 && cr < rows && cc >= 0 && cc < win->term_cols) {
+      graphics_draw_rect(win->x + 10 + cc * 8, top + cr * 10 + 8, 8, 2,
+                         COLOR(96, 166, 255));
+      win->term_caret_row = cr;
+      win->term_caret_col = cc;
+    }
+  } else {
+    win->term_caret_row = -1;
+    win->term_caret_col = -1;
+  }
+  graphics_reset_clip();
+  return painted;
 }
 
 /* ---- Mouse cursor sprite ----

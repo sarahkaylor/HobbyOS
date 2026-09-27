@@ -22,7 +22,7 @@ char shift_keymap[128] = {0,    27,  '!', '@',  '#',  '$',  '%', '^', '&',  '*',
 
 static int shift_pressed = 0;
 
-#define MAX_MENU_ITEMS 80
+#define MAX_MENU_ITEMS 128
 char menu_items[MAX_MENU_ITEMS][16];
 int num_menu_items = 0;
 
@@ -124,6 +124,125 @@ static void window_write_default(int win_id, const char *buf, int len) {
 
 /* Where forwarded mouse events go. Host tests swap this for a capture. */
 void (*desktop_send_hook)(int win_id, const char *buf, int len) = window_write_default;
+
+/* ====================================================================== */
+/* Keyboard input: modifiers, key payloads, software auto-repeat          */
+/*                                                                        */
+/* The desktop forwards the focused window's keys as the byte stream a     */
+/* terminal would send: printable bytes (Shift picks the legend, Ctrl      */
+/* turns a letter into its classic control byte), ESC sequences for the    */
+/* special keys.  A held key keeps firing (auto-repeat) after a delay,     */
+/* which also lets a held arrow scroll a list without the device having    */
+/* to send repeat events.                                                  */
+/*                                                                        */
+/* src/host/desktop_input_test.c is the spec for this behavior:            */
+/* map_key_char() / key_may_repeat() / key_repeat_tick() and the state     */
+/* they read (ctrl_pressed, held_key_*) are exercised there directly.      */
+/* ====================================================================== */
+
+static int ctrl_pressed = 0;
+
+/* Auto-repeat timing: wait KEY_REPEAT_DELAY_MS before the first repeat,
+ * then fire every KEY_REPEAT_PERIOD_MS.  held_key_last_ms == 0 means "no
+ * repeat fired yet for this press". */
+#define KEY_REPEAT_DELAY_MS 400
+#define KEY_REPEAT_PERIOD_MS 50
+static int held_key_code = -1;
+static int held_key_since_ms = 0;
+static int held_key_last_ms = 0;
+
+/* Byte for a key press.  Shift selects the shifted legend; Ctrl turns a
+ * letter into its control byte (Ctrl+C = 0x03, Ctrl+Q = 0x11) -- digits
+ * and punctuation keep their plain legend, which is what nano binds them
+ * to anyway (Ctrl+digit has no classic meaning). */
+static char map_key_char(int code) {
+  if (code < 0 || code >= 128) return 0;
+  char c = shift_pressed ? shift_keymap[code] : keymap[code];
+  if (ctrl_pressed && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')))
+    c = (char)(c & 0x1f);
+  return c;
+}
+
+/* Keys that may auto-repeat while held: the arrows and ordinary printable
+ * keys.  Enter/Tab/Backspace do not repeat, the function keys do not, and
+ * nothing repeats while Ctrl is held -- a held Ctrl+C must fire once. */
+static int key_may_repeat(int code) {
+  if (ctrl_pressed) return 0;
+  if (code >= 103 && code <= 108) return 1;          /* arrows */
+  char c = map_key_char(code);
+  return c >= 0x20 && c != 0x7f;
+}
+
+/* Bytes to forward for a key press.  `out` must hold 8 bytes; returns the
+ * length, or 0 when there is nothing to forward (unknown key, or one the
+ * desktop consumes itself such as F4). */
+static int key_payload(int code, char *out) {
+  if (code >= 103 && code <= 108) {                  /* arrows */
+    out[0] = 27; out[1] = '[';
+    if (code == 103) out[2] = 'A';                   /* Up */
+    if (code == 108) out[2] = 'B';                   /* Down */
+    if (code == 106) out[2] = 'C';                   /* Right */
+    if (code == 105) out[2] = 'D';                   /* Left */
+    return 3;
+  }
+  if (code == 102) { out[0] = 27; out[1] = '['; out[2] = 'H'; return 3; }   /* Home */
+  if (code == 107) { out[0] = 27; out[1] = '['; out[2] = 'F'; return 3; }   /* End */
+  if (code == 104) { out[0]=27; out[1]='['; out[2]='5'; out[3]='~'; return 4; }/* PgUp */
+  if (code == 109) { out[0]=27; out[1]='['; out[2]='6'; out[3]='~'; return 4; }/* PgDn */
+  if (code == 110) { out[0]=27; out[1]='['; out[2]='2'; out[3]='~'; return 4; }/* Insert */
+  if (code == 111) { out[0]=27; out[1]='['; out[2]='3'; out[3]='~'; return 4; }/* Delete */
+  if (code == 15 && shift_pressed) {                                            /* Shift+Tab */
+    out[0]=27; out[1]='['; out[2]='Z'; return 3;
+  }
+  if (code >= 59 && code <= 68) {                    /* F1-F10, xterm numbers */
+    int n = (code <= 63) ? 11 + (code - 59) : 17 + (code - 64);
+    out[0]=27; out[1]='['; out[2]=(char)('0'+n/10); out[3]=(char)('0'+n%10); out[4]='~';
+    return 5;
+  }
+  if (code == 87 || code == 88) {                    /* F11/F12 */
+    out[0]=27; out[1]='['; out[2]='2'; out[3]=(code == 87) ? '3' : '4'; out[4]='~';
+    return 5;
+  }
+  char c = map_key_char(code);
+  if (c) { out[0] = c; return 1; }
+  return 0;
+}
+
+/* Forward one key press to the focused window and arm auto-repeat (a fresh
+ * press always re-arms; a non-repeatable key disarms a previous one). */
+static void forward_key_to_focused(int code, int now_ms) {
+  if (focused_window < 0) return;
+  char seq[8];
+  int n = key_payload(code, seq);
+  if (n <= 0) return;
+  window_write_default(focused_window, seq, n);
+  if (key_may_repeat(code)) {
+    held_key_code = code;
+    held_key_since_ms = now_ms;
+    held_key_last_ms = 0;
+  } else {
+    held_key_code = -1;
+  }
+}
+
+/* One auto-repeat turn: a key held past the delay keeps firing the same
+ * payload through the focused window.  Quiet while any menu is open or
+ * nothing is focused. */
+static void key_repeat_tick(int now_ms) {
+  if (held_key_code < 0) return;
+  if (!key_may_repeat(held_key_code)) return;
+  if (start_menu_open || menu_open || app_menu_open) return;
+  if (focused_window < 0) return;
+  if (now_ms - held_key_since_ms < KEY_REPEAT_DELAY_MS) return;
+  if (held_key_last_ms != 0 && now_ms - held_key_last_ms < KEY_REPEAT_PERIOD_MS)
+    return;
+
+  char seq[8];
+  int n = key_payload(held_key_code, seq);
+  if (n <= 0) return;
+  window_write_default(focused_window, seq, n);
+  held_key_last_ms = now_ms;
+}
 
 static struct window *find_window(int id) {
   for (int i = 0; i < num_windows; i++) {
@@ -279,6 +398,24 @@ void wm_handle_app_escape(int win_id, char* seq) {
         break;
       }
     }
+  } else if (seq[0] == ']' && seq[1] == 'V') {
+    /* Terminal mode opt-in: ESC ] V 1 ~ (spaces allowed after the V -- the
+     * curses shim prints "ESC ] V 1~").  The window becomes a character
+     * grid (see wm_term_* in window.c) and the app is answered with its
+     * size, ESC ] S <rows>;<cols> ~.  This is what full-screen "curses"
+     * programs -- the ported nano -- use. */
+    const char *p = seq + 2;
+    while (*p == ' ') p++;
+    if (*p == '1') {
+      for (int i = 0; i < num_windows; i++) {
+        if (windows[i].id == win_id) {
+          /* The window's output drove us here, so the frame below will
+           * repaint it: wm_term_begin marked the whole grid dirty. */
+          wm_term_begin(&windows[i]);
+          break;
+        }
+      }
+    }
   } else if (seq[0] == ']' && seq[1] == 'R') {
     /* Run a program in a new window: ESC ] R <bin>[;<args>] ~
      * Used by FILES to open documents in EDITOR.BIN and to launch .BIN
@@ -298,7 +435,7 @@ void wm_handle_app_escape(int win_id, char* seq) {
 static const char *const pinned_apps[] = {
   "CONSOLE.BIN", "FILES.BIN", "CALC.BIN", "CLOCK.BIN", "SYSMON.BIN",
   "HEX.BIN", "TASKS.BIN", "FIND.BIN", "DIFF.BIN", "NOTES.BIN",
-  "UNIT.BIN",
+  "NANO.BIN", "UNIT.BIN",
 };
 #define NUM_PINNED_APPS ((int)(sizeof(pinned_apps) / sizeof(pinned_apps[0])))
 
@@ -808,6 +945,166 @@ static void paint_frame(void) {
   for (int i = 0; i < num_windows; i++) windows[i].chrome_dirty = 0;
 }
 
+/* ====================================================================== */
+/* Window output: escape state machine and terminal-mode dispatch         */
+/*                                                                        */
+/* Every captured output byte of a window goes through                    */
+/* desktop_process_output_byte(): escape sequences are collected (CSI /   */
+/* OSC) and handed to the handlers, plain bytes go to the text tail ---   */
+/* or, for a terminal-mode window, to the character grid.  Non-static so  */
+/* host tests can feed a window's byte stream directly                    */
+/* (src/host/desktop_term_test.c).                                        */
+/* ====================================================================== */
+
+/* Plain byte for a terminal-mode window. */
+static void term_put_byte(struct window *win, char c) {
+  if (c >= 0x20 && c != 0x7f) wm_term_putc(win, c);
+  else if (c == '\n') wm_term_newline(win);
+  else if (c == '\r') wm_term_cr(win);
+  else if (c == '\b') wm_term_bs(win);
+  else if (c == '\t') wm_term_tab(win);
+  else if (c == '\f') wm_term_erase_display(win, 2);   /* form feed = clear */
+  /* other control bytes (BEL and friends) are dropped */
+}
+
+/* Read one decimal parameter; advances *i; -1 when there is none. */
+static int csi_param(const char *s, int *i) {
+  int v = -1;
+  while (s[*i] >= '0' && s[*i] <= '9') {
+    if (v < 0) v = 0;
+    v = v * 10 + (s[*i] - '0');
+    (*i)++;
+  }
+  return v;
+}
+
+/* CSI sequence for a terminal-mode window.  The collected buffer starts at
+ * '[' and ends with the final byte.  The curses shim emits exactly:
+ *   ESC [ <row> ; <col> H    cursor position
+ *   ESC [ 2J                 clear
+ *   ESC [ <n>m               SGR (0, 1, 4, 7)
+ *   ESC [ ?25h / ?25l        caret on / off
+ * Anything else is parsed leniently and ignored, so a future app's extra
+ * sequences cannot corrupt the grid. */
+static void term_handle_csi(struct window *win, const char *seq) {
+  const char *p = seq;
+  if (*p != '[') return;
+  p++;
+  int len = 0;
+  while (p[len]) len++;
+  if (len == 0) return;
+  char final = p[len - 1];
+  int i = 0;
+  int priv = 0;
+  if (p[0] == '?') { priv = 1; i = 1; }
+
+  switch (final) {
+    case 'H': case 'f': {                    /* cursor position (1-based) */
+      int row = csi_param(p, &i);
+      if (p[i] == ';') i++;
+      int col = csi_param(p, &i);
+      wm_term_cup(win, row < 0 ? 1 : row, col < 0 ? 1 : col);
+      break;
+    }
+    case 'A': case 'B': case 'C': case 'D': { /* relative cursor moves */
+      int n = csi_param(p, &i);
+      if (n < 1) n = 1;
+      int row = win->term_cur_row, col = win->term_cur_col;
+      if (final == 'A') row -= n;
+      if (final == 'B') row += n;
+      if (final == 'C') col += n;
+      if (final == 'D') col -= n;
+      wm_term_cup(win, row + 1, col + 1);
+      break;
+    }
+    case 'J': {
+      int mode = csi_param(p, &i);
+      wm_term_erase_display(win, mode < 0 ? 0 : mode);
+      break;
+    }
+    case 'K': {
+      int mode = csi_param(p, &i);
+      wm_term_erase_line(win, mode < 0 ? 0 : mode);
+      break;
+    }
+    case 'h': case 'l': {                    /* DEC private modes */
+      if (priv) {
+        int m = csi_param(p, &i);
+        if (m == 25) wm_term_set_cursor_visible(win, final == 'h');
+      }
+      break;
+    }
+    case 'm': {                              /* SGR: apply each parameter */
+      for (;;) {
+        int v = csi_param(p, &i);
+        if (v >= 0) wm_term_sgr(win, v);
+        if (p[i] != ';') break;
+        i++;
+      }
+      break;
+    }
+    default: break;
+  }
+}
+
+/* Feed one output byte of a window: escape state machine + dispatch.
+ * Non-static (host tests drive a window's byte stream through this). */
+void desktop_process_output_byte(struct window *win, char c) {
+  if (win->escape_state == 1) {
+    if (win->escape_len < (int)sizeof(win->escape_buf) - 1)
+      win->escape_buf[win->escape_len++] = c;
+    if (c == '[') win->escape_state = 2;       // CSI sequence
+    else if (c == ']') win->escape_state = 3;  // OSC sequence
+    else {
+      win->escape_state = 0;
+      win->escape_len = 0;
+    }
+    return;
+  }
+
+  if (win->escape_state == 2) {
+    if (win->escape_len < (int)sizeof(win->escape_buf) - 1)
+      win->escape_buf[win->escape_len++] = c;
+    if ((c >= 0x40 && c <= 0x7E) ||
+        win->escape_len >= (int)sizeof(win->escape_buf) - 1) {
+      win->escape_buf[win->escape_len] = '\0';
+      if (win->term_mode) term_handle_csi(win, win->escape_buf);
+      else if (c == 'J') wm_text_clear(win);
+      win->escape_state = 0;
+      win->escape_len = 0;
+    }
+    return;
+  }
+
+  if (win->escape_state == 3) {
+    if (c == '\a' || c == '~' ||
+        win->escape_len >= (int)sizeof(win->escape_buf) - 1) {
+      win->escape_buf[win->escape_len] = '\0';
+      wm_handle_app_escape(win->id, win->escape_buf);
+      win->escape_state = 0;
+      win->escape_len = 0;
+    } else {
+      win->escape_buf[win->escape_len++] = c;
+    }
+    return;
+  }
+
+  if (c == '\033') {
+    win->escape_state = 1;
+    win->escape_len = 0;
+    return;
+  }
+
+  if (win->term_mode) {
+    term_put_byte(win, c);
+    return;
+  }
+
+  if (c == '\f') wm_text_clear(win);
+  else if (c == '\b') wm_text_backspace(win);
+  else wm_text_putc(win, c);
+}
+
 int main(void);
 
 #ifndef HOST_TEST
@@ -855,6 +1152,16 @@ int main(void) {
       if (ev->type == EV_KEY) {
         if (ev->code == 42 || ev->code == 54) {
           shift_pressed = ev->value;
+          continue;
+        }
+        if (ev->code == 29 || ev->code == 97) {   /* Ctrl (left / right) */
+          ctrl_pressed = ev->value;
+          continue;
+        }
+        if (ev->value == 0 && ev->code != 0x110) {
+          /* Key release: a released key must never auto-repeat.  (The
+           * mouse button release is handled by the BTN_LEFT block.) */
+          if (ev->code == held_key_code) held_key_code = -1;
           continue;
         }
         if (ev->code == 0x110) { // BTN_LEFT (mouse click)
@@ -1029,77 +1336,40 @@ int main(void) {
               needs_redraw = 1;
             } else if (focused_window >= 0) {
               // Forward as standard terminal escape sequences.
-              char seq[4];
-              int sl = 3;
-              seq[0] = 27; seq[1] = '[';
-              if (ev->code == 102) seq[2] = 'H';
-              if (ev->code == 107) seq[2] = 'F';
-              if (ev->code == 104) { seq[2] = '5'; seq[3] = '~'; sl = 4; }
-              if (ev->code == 109) { seq[2] = '6'; seq[3] = '~'; sl = 4; }
-              for (int w = 0; w < num_windows; w++) {
-                if (windows[w].id == focused_window) {
-                  int wr = write(windows[w].stdin_fd, seq, sl);
-                  (void)wr;
-                  break;
-                }
-              }
+              forward_key_to_focused(ev->code, now_ms);
               /* No repaint: forwarding does not change the desktop. */
             }
           } else
             // Arrow keys (evdev codes 103-108): forward to the focused window as
             // 3-byte ESC sequences (ESC [ A/B/C/D) so dialogs can navigate.
             if (ev->code >= 103 && ev->code <= 108) {
-              char seq[3] = {27, '[', 0};
-              if (ev->code == 103) seq[2] = 'A'; // UP
-              if (ev->code == 108) seq[2] = 'B'; // DOWN
-              if (ev->code == 106) seq[2] = 'C'; // RIGHT
-              if (ev->code == 105) seq[2] = 'D'; // LEFT
-              if (seq[2] != 0) {
-                if (start_menu_open) {
-                  /* Navigate the start menu. */
-                  if (ev->code == 103) start_sel--;
-                  if (ev->code == 108) start_sel++;
-                  if (start_sel < 0) start_sel = 0;
-                  if (start_sel > num_menu_items - 1) start_sel = num_menu_items - 1;
-                  if (start_sel < 0) start_sel = 0;
-                  start_menu_ensure_visible();
-                  needs_redraw = 1;
-                } else if (focused_window >= 0) {
-                  for (int w = 0; w < num_windows; w++) {
-                    if (windows[w].id == focused_window) {
-                      /* Forward the full 3-byte ESC sequence to the focused
-                       * window's stdin. write() delivers all 3 atomically here
-                       * (the pipe has ample room for a single keypress). */
-                      int wr = write(windows[w].stdin_fd, seq, 3);
-                      (void)wr;
-                      break;
-                    }
-                  }
-                  /* No repaint here: forwarding a key does not change
-                   * anything on screen.  If the app reacts, its output
-                   * triggers the frame that shows the change. */
-                }
+              if (start_menu_open) {
+                /* Navigate the start menu. */
+                if (ev->code == 103) start_sel--;
+                if (ev->code == 108) start_sel++;
+                if (start_sel < 0) start_sel = 0;
+                if (start_sel > num_menu_items - 1) start_sel = num_menu_items - 1;
+                if (start_sel < 0) start_sel = 0;
+                start_menu_ensure_visible();
+                needs_redraw = 1;
+              } else if (focused_window >= 0) {
+                /* Forward the ESC sequence (write() delivers it atomically
+                 * here: the pipe has ample room for a single keypress) and
+                 * arm auto-repeat, so a held arrow keeps moving. */
+                forward_key_to_focused(ev->code, now_ms);
+                /* No repaint here: forwarding a key does not change
+                 * anything on screen.  If the app reacts, its output
+                 * triggers the frame that shows the change. */
               }
             } else if (ev->code == 28 && start_menu_open) { // Enter launches selection
               int idx = start_sel;
               start_menu_open = 0;
               launch_menu_item(idx);
               needs_redraw = 1;
-            } else if (ev->code < 128) {
-              char c = shift_pressed ? shift_keymap[ev->code] : keymap[ev->code];
-              if (c) {
-                if (focused_window >= 0) {
-                  // Find window to get its stdin_fd
-                  for (int w = 0; w < num_windows; w++) {
-                    if (windows[w].id == focused_window) {
-                      // print_console("Writing key to child window...\n"); // removed to avoid noise if it works
-                      int wr = write(windows[w].stdin_fd, &c, 1);
-                      (void)wr; // Ignore error for now
-                      break;
-                    }
-                  }
-                }
-              }
+            } else if (ev->code != 62) {
+              /* Everything else: the mapped byte (Shift/Ctrl applied) or a
+               * special-key sequence, straight to the focused window. */
+              forward_key_to_focused(ev->code, now_ms);
             }
         }
       } else if (ev->type == EV_ABS) {
@@ -1114,6 +1384,10 @@ int main(void) {
         if (drag_win_id >= 0) desktop_drag_move(mouse_x, mouse_y);
       }
     }
+
+    /* A key held on the keyboard keeps firing through the focused window
+     * (software auto-repeat; see key_repeat_tick). */
+    key_repeat_tick(now_ms);
 
     // Poll windows for stdout.  Drain a window's whole pending output in a
     // single iteration (bounded), instead of one 63-byte chunk per frame:
@@ -1160,45 +1434,7 @@ int main(void) {
         drained += r;
         idle_rounds = 0;
         for (int k = 0; k < r; k++) {
-          char c = buf[k];
-          if (windows[i].escape_state == 1) {
-            windows[i].escape_buf[windows[i].escape_len++] = c;
-            if (c == '[') {
-              windows[i].escape_state = 2; // CSI sequence
-            } else if (c == ']') {
-              windows[i].escape_state = 3; // OSC sequence
-            } else {
-              windows[i].escape_state = 0;
-              windows[i].escape_len = 0;
-            }
-          } else if (windows[i].escape_state == 2) {
-            windows[i].escape_buf[windows[i].escape_len++] = c;
-            if ((c >= 0x40 && c <= 0x7E) || windows[i].escape_len >= 127) {
-              if (c == 'J') {
-                wm_text_clear(&windows[i]);
-              }
-              windows[i].escape_state = 0;
-              windows[i].escape_len = 0;
-            }
-          } else if (windows[i].escape_state == 3) {
-            if (c == '\a' || c == '~' || windows[i].escape_len >= 127) {
-              windows[i].escape_buf[windows[i].escape_len] = '\0';
-              wm_handle_app_escape(windows[i].id, windows[i].escape_buf);
-              windows[i].escape_state = 0;
-              windows[i].escape_len = 0;
-            } else {
-              windows[i].escape_buf[windows[i].escape_len++] = c;
-            }
-          } else if (c == '\033') {
-            windows[i].escape_state = 1;
-            windows[i].escape_len = 0;
-          } else if (c == '\f') {
-            wm_text_clear(&windows[i]);
-          } else if (c == '\b') {
-            wm_text_backspace(&windows[i]);
-          } else {
-            wm_text_putc(&windows[i], c);
-          }
+          desktop_process_output_byte(&windows[i], buf[k]);
         }
         if (drained >= 4096) break; // stay fair with a streaming writer
       }

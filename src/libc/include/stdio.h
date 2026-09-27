@@ -94,6 +94,15 @@ extern "C" {
 
   int rename(const char *oldpath, const char *newpath);
 
+/* Standard I/O buffer size.  glibc uses 8192; on this 256 KB user stack a
+   * smaller default is kinder to ported programs that keep FILE buffers or
+   * BUFSIZ-sized locals on the stack. */
+#define BUFSIZ 2048
+
+/* Default temporary directory (POSIX).  Programs should honour $TMPDIR
+   * first; whether this path exists depends on the volume. */
+#define P_tmpdir "/tmp"
+
 #ifdef __cplusplus
 }
 #endif

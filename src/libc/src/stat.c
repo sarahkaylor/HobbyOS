@@ -107,6 +107,30 @@ int lstat(const char *path, struct stat *buf) {
   return stat(path, buf);
 }
 
+/* access() — over stat(), since SYS_ACCESS has no kernel handler yet.
+ *
+ * There are no permission bits on this VFS: every path that exists is
+ * readable and writable, directories are searchable.  Ported tools use
+ * access() to probe existence and writability (nano decides whether a file
+ * is "read-only", whether a backup directory works, whether an rcfile can
+ * be loaded), so existence is the only distinction that matters:
+ * ENOENT/EACCES failures to stat() become access() failures.
+ */
+int access(const char *path, int mode) {
+  struct stat st;
+
+  (void)mode;                       /* no permission bits to check */
+  return stat(path, &st);
+}
+
+/* No mtime setting on the VFS yet (nano shrugs at the failure). */
+int futimens(int fd, const struct timespec times[2]) {
+  (void)fd;
+  (void)times;
+  errno = ENOSYS;
+  return -1;
+}
+
 #else /* HOST_TEST */
 
 int stat(const char *path, struct stat *buf) {

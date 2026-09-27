@@ -54,6 +54,11 @@ extern "C" {
    * always fails with EINVAL, like Linux on a non-link path). */
   long readlink(const char *path, char *buf, unsigned long bufsiz);
 
+  /* Working directory (implemented in user/libc.c over SYS_GETCWD/SYS_CHDIR;
+   * declared here so sysroot-built programs can use them). */
+  char *getcwd(char *buf, size_t size);
+  int chdir(const char *path);
+
 #define F_OK 0
 #define R_OK 4
 #define W_OK 2

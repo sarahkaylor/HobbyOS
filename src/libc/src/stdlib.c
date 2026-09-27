@@ -51,6 +51,7 @@
 #define atexit hb_atexit
 #define mkstemp hb_mkstemp
 #define mkostemp hb_mkostemp
+#define mkstemps hb_mkstemps
 #else
 #include "stdlib.h"
 #endif
@@ -633,4 +634,46 @@ int mkstemp(char *template) {
 int mkostemp(char *template, int flags) {
   /* Only creation-compatible flags pass through: O_APPEND. */
   return hb_mkstemp_common(template, flags & O_APPEND);
+}
+
+/* GNU variant: the "XXXXXX" sits `suffixlen` bytes before the end. */
+int mkstemps(char *template, int suffixlen) {
+  static const char letters[] =
+      "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  static unsigned long hb_tmp_counter2;
+  size_t len = strlen(template);
+  unsigned long base;
+  int attempt;
+
+  if (suffixlen < 0 || len < (size_t)suffixlen + 6) {
+    errno = EINVAL;
+    return -1;
+  }
+  char *x = template + len - suffixlen - 6;
+  if (strncmp(x, "XXXXXX", 6) != 0) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  base = (unsigned long)getpid() * 2654435761UL + hb_tmp_counter2;
+  for (attempt = 0; attempt < 64; attempt++) {
+    unsigned long w = base + (unsigned long)attempt;
+    int i, fd;
+
+    for (i = 0; i < 6; i++) {
+      x[i] = letters[w % 62];
+      w /= 62;
+    }
+
+    fd = open(template, O_RDWR | O_CREAT | O_EXCL, 0600);
+    if (fd >= 0) {
+      hb_tmp_counter2++;
+      return fd;
+    }
+    if (errno != EEXIST)
+      return -1;
+  }
+
+  errno = EEXIST;
+  return -1;
 }

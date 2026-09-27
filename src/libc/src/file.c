@@ -491,3 +491,17 @@ ssize_t getdelim(char **lineptr, size_t *n, int delim, FILE *f) {
 ssize_t getline(char **lineptr, size_t *n, FILE *f) {
   return getdelim(lineptr, n, '\n', f);
 }
+
+/* dup2() — no kernel support yet (SYS_DUP2 has no handler).
+ *
+ * Failing honestly beats pretending: the two nano paths that call it are
+ * the post-suspend "/dev/tty" reconnect (no suspension on HobbyOS) and
+ * redirection of an external command's stdio (external command execution
+ * is out of scope for this port).  Both degrade to a clean error message
+ * instead of misbehaving. */
+int dup2(int oldfd, int newfd) {
+  (void)oldfd;
+  (void)newfd;
+  errno = ENOSYS;
+  return -1;
+}

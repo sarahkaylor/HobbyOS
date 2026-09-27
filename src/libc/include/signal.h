@@ -55,5 +55,36 @@ sighandler_t signal(int signum, sighandler_t handler);
 int kill(pid_t pid, int sig);
 int raise(int sig);
 
+/* POSIX sigaction surface.  Like signal() above, handlers are only
+ * remembered, never delivered (Phase 6); enough for ported programs that
+ * install handlers defensively (nano masks SIGINT/SIGWINCH to keep the
+ * terminal sane).  The flags below exist so code compiles; they have no
+ * effect. */
+typedef struct {
+  unsigned long __bits[2];
+} sigset_t;
+
+struct sigaction {
+  void (*sa_handler)(int);
+  sigset_t sa_mask;
+  int sa_flags;
+};
+
+/* No-op flag values (delivery does not exist yet). */
+#define SA_RESTART   0x1
+#define SA_RESETHAND 0x2
+#define SA_SIGINFO   0x4
+
+#define SIG_BLOCK   0
+#define SIG_UNBLOCK 1
+#define SIG_SETMASK 2
+
+int sigaction(int signum, const struct sigaction *act, struct sigaction *oldact);
+int sigemptyset(sigset_t *set);
+int sigfillset(sigset_t *set);
+int sigaddset(sigset_t *set, int signum);
+int sigdelset(sigset_t *set, int signum);
+int sigprocmask(int how, const sigset_t *set, sigset_t *oldset);
+
 #endif /* !HOST_TEST */
 #endif /* HOBBYOS_SIGNAL_H */

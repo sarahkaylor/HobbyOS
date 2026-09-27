@@ -163,6 +163,13 @@ SED_BIN = $(OBJ_DIR)/sed.bin
 SED_CORE_NAMES = sed compile debug execute mbcs regexp utils
 SED_GNULIB_NAMES = acl-errno-valid acl-internal basename-lgpl c-ctype c-strcasecmp c-strncasecmp close-stream closeout copy-acl dfa dirname-lgpl exitfail get-permissions localcharset localeinfo obstack progname qcopy-acl qset-acl quotearg set-acl set-permissions strverscmp version-etc version-etc-fsf xalloc-die xmalloc
 SED_OBJS = $(addprefix $(OBJ_DIR)/sed_,$(addsuffix .o,$(SED_CORE_NAMES))) $(addprefix $(OBJ_DIR)/sedg_,$(addsuffix .o,$(SED_GNULIB_NAMES)))
+# GNU nano 8.7 port: the editor's own sources (byte-identical to upstream
+# except two HobbyOS-marked touch points) plus the curses shim that renders
+# it into a desktop terminal window.  src/user/nano/curses.h documents the
+# wire protocol; src/user/nano/config.h pins the port's feature set.
+NANO_SRC_NAMES = browser chars color cut files global help history move nano prompt rcfile search text utils winio
+NANO_OBJS = $(addprefix $(OBJ_DIR)/nano_,$(addsuffix .o,$(NANO_SRC_NAMES))) $(OBJ_DIR)/nano_hb_curses.o
+NANO_BIN = $(OBJ_DIR)/nano.bin
 HEDGNU_BIN = $(OBJ_DIR)/hedgnu.bin
 WCTEST_BIN = $(OBJ_DIR)/wc_test.bin
 REGTEST_BIN = $(OBJ_DIR)/regex_test.bin
@@ -401,7 +408,7 @@ $(OBJ_DIR)/libc_%.o: src/libc/src/%.c $(USER_HDRS) src/libc/src/*.h
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o $(OBJ_DIR)/libc_mman.o $(OBJ_DIR)/libc_regex.o $(OBJ_DIR)/libc_langinfo.o $(OBJ_DIR)/libc_wchar.o $(OBJ_DIR)/libc_wctype.o $(OBJ_DIR)/libc_locale.o $(OBJ_DIR)/libc_selinux.o $(OBJ_DIR)/libc_dirent.o
+$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o $(OBJ_DIR)/libc_mman.o $(OBJ_DIR)/libc_regex.o $(OBJ_DIR)/libc_langinfo.o $(OBJ_DIR)/libc_wchar.o $(OBJ_DIR)/libc_wctype.o $(OBJ_DIR)/libc_locale.o $(OBJ_DIR)/libc_selinux.o $(OBJ_DIR)/libc_dirent.o $(OBJ_DIR)/libc_time.o $(OBJ_DIR)/libc_libgen.o $(OBJ_DIR)/libc_realpath.o
 	$(AR) rcs $@ $^
 
 # --- HELLO demo (Phase 0 gate): a main(argc, argv) program built against
@@ -655,6 +662,17 @@ $(eval $(call TU21_PORT_RULE,cksum,$(CKSUM_BIN)))
 $(eval $(call TU21_PORT_RULE,md5sum,$(MD5SUM_BIN)))
 $(eval $(call TU21_PORT_RULE,tac,$(TAC_BIN)))
 $(eval $(call TU21_PORT_RULE,cmp,$(CMP_BIN)))
+
+# --- GNU nano 8.7 (multi-object port; objects named nano_*) -------------
+# -DHAVE_CONFIG_H + -Isrc/user/nano make the port's pinned config.h the one
+# weirdness: nano's definitions.h includes <config.h> only when told to.
+$(OBJ_DIR)/nano_%.o: src/user/nano/%.c src/user/nano/config.h src/user/nano/revision.h src/user/nano/curses.h src/user/nano/*.h $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -Isrc/user/nano -DHAVE_CONFIG_H -c $< -o $@
+
+$(NANO_BIN): $(NANO_OBJS) $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/nano.elf $(NANO_OBJS) $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/nano.elf $(NANO_BIN)
 
 # --- GNU sed 4.8 (multi-object GNU port; objects named sed_/sedg_) ------
 $(OBJ_DIR)/sed_%.o: src/user/sed/%.c src/user/sed/config.h src/user/sed/*.h src/user/sed/gnulib/*.h $(USER_HDRS)
@@ -930,7 +948,7 @@ endef
 
 $(foreach app,$(DESKTOP_APP_NAMES),$(eval $(call DESKTOP_APP_RULE,$(app))))
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(APPS_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(NANO_BIN) $(APPS_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -1064,6 +1082,7 @@ endif
 	$(MCOPY) -i disk.img $(DIFF_BIN) ::/DIFF.BIN
 	$(MCOPY) -i disk.img $(NOTES_BIN) ::/NOTES.BIN
 	$(MCOPY) -i disk.img $(UNIT_BIN) ::/UNIT.BIN
+	$(MCOPY) -i disk.img $(NANO_BIN) ::/NANO.BIN
 	$(MCOPY) -i disk.img $(MONITOR_BIN) ::/MONITOR.BIN
 	$(MCOPY) -i disk.img $(MONITOR_TEST_BIN) ::/MONITORT.BIN
 	echo "HobbyOS Terminal Test File" > SHTEST.TXT
@@ -1174,6 +1193,37 @@ $(DESKTOP_MENU_TEST): obj/host_desktop_menu_test.o obj/host_user_desktop.o obj/h
 DESKTOP_DRAG_TEST = desktop_drag_test_host
 $(DESKTOP_DRAG_TEST): obj/host_desktop_drag_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
 	$(HOST_CC) -o $@ $^
+
+# Desktop keyboard input: Ctrl+letter control bytes and the software key
+# auto-repeat (map_key_char/key_may_repeat/key_repeat_tick in desktop.c).
+# The test includes src/user/desktop.c directly (file-scope state), so it
+# must NOT link host_user_desktop.o (that would duplicate every symbol).
+DESKTOP_INPUT_TEST = desktop_input_test_host
+$(DESKTOP_INPUT_TEST): obj/host_desktop_input_test.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+	$(HOST_CC) -o $@ $^
+
+# Desktop terminal surface: the ESC ] V / ] S handshake and the character
+# grid a curses program (nano) draws on (window.c wm_term_* + the CSI
+# dispatch in desktop.c).  Also includes desktop.c directly, same reason.
+DESKTOP_TERM_TEST = desktop_term_test_host
+$(DESKTOP_TERM_TEST): obj/host_desktop_term_test.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+	$(HOST_CC) -o $@ $^
+
+# nano <-> desktop integration: the curses shim (a separate host object,
+# linked like a program would) driven against the real desktop terminal
+# surface, over the wire protocol (hb_set_io transport).
+NANO_TERM_TEST = nano_term_test_host
+$(NANO_TERM_TEST): obj/host_nano_term_test.o obj/nano_hb_curses_host.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+	$(HOST_CC) -o $@ $^
+
+# The shim compiled for the host (the port's own file, host build).
+obj/nano_hb_curses_host.o: src/user/nano/hb_curses.c src/user/nano/curses.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/user/nano -c $< -o $@
+
+# The two desktop tests that #include src/user/desktop.c directly must
+# rebuild when it (or the window layer) changes.
+obj/host_desktop_input_test.o obj/host_desktop_term_test.o obj/host_nano_term_test.o: src/user/desktop.c src/user/graphics/window.c
 
 # Cross-application host suite: every desktop app in one binary, in-process
 # checks plus forked end-to-end runs on pipes. Single TU (includes the app
@@ -1464,11 +1514,14 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DAMAGE_TEST)
+	$(HOST_RUN) ./$(DESKTOP_INPUT_TEST)
+	$(HOST_RUN) ./$(DESKTOP_TERM_TEST)
+	$(HOST_RUN) ./$(NANO_TERM_TEST)
 	$(HOST_RUN) ./$(NFS_PROTO_TEST)
 	$(HOST_RUN) ./$(CONSOLE_APP_TEST)
 	$(HOST_RUN) ./$(DIALOG_ARROW_TEST)

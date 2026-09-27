@@ -65,6 +65,34 @@ extern "C" {
   int chmod(const char *path, mode_t mode);
   int fchmod(int fd, mode_t mode);
 
+  /* No mtime setting on the VFS yet: futimens() fails with ENOSYS, which
+   * callers treat as a shrug (nano ignores it when restoring a backup's
+   * timestamps). */
+#ifndef __hb_timespec_defined
+#define __hb_timespec_defined
+  struct timespec {
+    time_t tv_sec;
+    long tv_nsec;
+  };
+#endif
+  int futimens(int fd, const struct timespec times[2]);
+
+  /* No permission bits are enforced; the standard names exist so code that
+   * builds masks (nano's RW_FOR_ALL) compiles.  Values are the POSIX
+   * octal bits. */
+#define S_IRWXU 00700
+#define S_IRUSR 00400
+#define S_IWUSR 00200
+#define S_IXUSR 00100
+#define S_IRWXG 00070
+#define S_IRGRP 00040
+#define S_IWGRP 00020
+#define S_IXGRP 00010
+#define S_IRWXO 00007
+#define S_IROTH 00004
+#define S_IWOTH 00002
+#define S_IXOTH 00001
+
   /* No permission bits on fat16: umask() records the mask (so callers
    * like GNU sed's temp-file path see POSIX behavior) but files are
    * created wide open regardless. */

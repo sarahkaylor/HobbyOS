@@ -30,6 +30,7 @@ extern "C" {
   char *strchr(const char *s, int c);
   char *strrchr(const char *s, int c);
   char *strstr(const char *haystack, const char *needle);
+  char *strcasestr(const char *haystack, const char *needle); /* GNU */
   char *strpbrk(const char *s, const char *accept);
   size_t strspn(const char *s, const char *accept);
   size_t strcspn(const char *s, const char *reject);
