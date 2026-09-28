@@ -59,6 +59,8 @@ void fs_init(void);
 struct trap_frame;
 int file_open(struct process *p, const char *filename, int flags);
 int file_close(struct process *p, int fd);
+int file_dup(struct process *p, int fd);
+int file_dup2(struct process *p, int oldfd, int newfd);
 int file_gfd_is_pipe(int gfd);
 int file_read(struct process *p, int fd, void *buf, int size, struct trap_frame *tf);
 int file_write(struct process *p, int fd, const void *buf, int size, struct trap_frame *tf);

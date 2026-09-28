@@ -492,13 +492,14 @@ ssize_t getline(char **lineptr, size_t *n, FILE *f) {
   return getdelim(lineptr, n, '\n', f);
 }
 
-/* dup2() — no kernel support yet (SYS_DUP2 has no handler).
+/* dup2() — intentionally left as a stub at the libc.a level.
  *
- * Failing honestly beats pretending: the two nano paths that call it are
- * the post-suspend "/dev/tty" reconnect (no suspension on HobbyOS) and
- * redirection of an external command's stdio (external command execution
- * is out of scope for this port).  Both degrade to a clean error message
- * instead of misbehaving. */
+ * The kernel has real SYS_DUP/SYS_DUP2 handlers; the shell's dup2 comes
+ * from src/user/sh_aux.c (an old-trio link that is never archived into
+ * libc.a).  Members of libc.a that call dup2 are the post-suspend
+ * "/dev/tty" reconnect (no suspension on HobbyOS) and redirection of an
+ * external command's stdio (out of scope for this port): both degrade to
+ * a clean error instead of misbehaving — the honest-halt policy. */
 int dup2(int oldfd, int newfd) {
   (void)oldfd;
   (void)newfd;

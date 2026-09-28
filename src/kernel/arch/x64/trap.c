@@ -123,6 +123,17 @@ static void sys_close(struct trap_frame *tf) {
   tf->regs[0] = ret < 0 ? -EBADF : ret;
 }
 
+static void sys_dup(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  tf->regs[0] = (uint64_t)file_dup(caller, (int)tf->regs[5]);
+}
+
+static void sys_dup2(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  int r = file_dup2(caller, (int)tf->regs[5], (int)tf->regs[4]);
+  tf->regs[0] = (uint64_t)(r < 0 ? -EBADF : r);
+}
+
 static void sys_read(struct trap_frame *tf) {
   int fd = (int)tf->regs[5]; // rdi
   void *buf = (void *)tf->regs[4]; // rsi
@@ -904,6 +915,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_open(tf);
   } else if (syscall_num == SYS_CLOSE) {
     sys_close(tf);
+  } else if (syscall_num == SYS_DUP) {
+    sys_dup(tf);
+  } else if (syscall_num == SYS_DUP2) {
+    sys_dup2(tf);
   } else if (syscall_num == SYS_READ) {
     sys_read(tf);
   } else if (syscall_num == SYS_WRITE) {

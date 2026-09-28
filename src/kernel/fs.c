@@ -351,6 +351,59 @@ int file_close(struct process *cur, int fd) {
   return 0;
 }
 
+/* dup(fd): the lowest unused user fd now refers to the same open file. */
+int file_dup(struct process *cur, int fd) {
+  if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
+  int g_fd = cur->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
+  struct file *f = &global_file_table[g_fd];
+  if (f->type == FILE_TYPE_EMPTY) return -EBADF;
+  if (cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
+  int newfd = -1;
+  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+    if (cur->open_fds[i] == -1) {
+      newfd = i;
+      break;
+    }
+  }
+  if (newfd < 0) return -EMFILE;
+  uint64_t flags = spinlock_acquire_irqsave(&f->lock);
+  f->ref_count++;
+  if (f->type == FILE_TYPE_PIPE)
+    pipe_reopen(f->pipe.ptr, f->pipe.end); /* keep the pipe end's fd count
+        in sync: file_close calls pipe_close per fd, so every dup must too,
+        or closing the duplicate makes readers see EOF while refs remain */
+  spinlock_release_irqrestore(&f->lock, flags);
+  cur->open_fds[newfd] = g_fd;
+  cur->num_open_fds++;
+  return newfd;
+}
+
+/* dup2(oldfd, newfd): newfd refers to the same open file (closing whatever
+ * is there now, per POSIX).  oldfd == newfd is a no-op success. */
+int file_dup2(struct process *cur, int oldfd, int newfd) {
+  if (!cur || oldfd < 0 || oldfd >= MAX_OPEN_FDS) return -EBADF;
+  int g_fd = cur->open_fds[oldfd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
+  struct file *f = &global_file_table[g_fd];
+  if (f->type == FILE_TYPE_EMPTY) return -EBADF;
+  if (oldfd == newfd) return newfd;
+  if (newfd < 0 || newfd >= MAX_OPEN_FDS) return -EINVAL;
+  if (cur->open_fds[newfd] != -1) {
+    int r = file_close(cur, newfd);
+    if (r != 0) return -EBADF;
+  }
+  uint64_t flags = spinlock_acquire_irqsave(&f->lock);
+  f->ref_count++;
+  if (f->type == FILE_TYPE_PIPE)
+    pipe_reopen(f->pipe.ptr, f->pipe.end); /* see file_dup: keep the pipe
+        end's per-fd count aligned with ref_count */
+  spinlock_release_irqrestore(&f->lock, flags);
+  cur->open_fds[newfd] = g_fd;
+  cur->num_open_fds++;
+  return newfd;
+}
+
 void fs_close_global(int g_fd) {
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return;
 

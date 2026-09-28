@@ -3,6 +3,7 @@ obj/
 *.o
 *.bin
 *.BIN_host
+*.BIN
 *.elf
 *_test_host
 

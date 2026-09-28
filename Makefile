@@ -152,6 +152,11 @@ PS_BIN = $(OBJ_DIR)/ps.bin
 FREE_BIN = $(OBJ_DIR)/free.bin
 UPTIME_BIN = $(OBJ_DIR)/uptime.bin
 KILL_BIN = $(OBJ_DIR)/kill.bin
+BASENAME_BIN = $(OBJ_DIR)/basename.bin
+DIRNAME_BIN = $(OBJ_DIR)/dirname.bin
+SEQ_BIN = $(OBJ_DIR)/seq.bin
+EXPR_BIN = $(OBJ_DIR)/expr.bin
+TESTGNU_BIN = $(OBJ_DIR)/testgnu.bin
 CP_BIN = $(OBJ_DIR)/cp.bin
 RM_BIN = $(OBJ_DIR)/rm.bin
 MV_BIN = $(OBJ_DIR)/mv.bin
@@ -422,6 +427,24 @@ $(OBJ_DIR)/hello.o: src/user/hello.c $(USER_LIBC) $(USER_HDRS) src/libc/crt0.c
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
+# Fresh coreutils-parity utilities: basename, dirname, seq, expr, test.
+# These are hand-written POSIX programs (not vendored GNU sources); they
+# link crt0 + libc.a like the hello smoke test.
+define parity_bin
+$(1)_BIN = $$(OBJ_DIR)/$(2).bin
+$$(OBJ_DIR)/$(2).o: src/user/$(2).c $$(USER_LIBC) $$(USER_HDRS) src/libc/crt0.c
+	@mkdir -p $$(OBJ_DIR)
+	$$(CC) $$(USER_CFLAGS) -c $$< -o $$@
+$$(OBJ_DIR)/$(2).bin: $$(OBJ_DIR)/$(2).o $$(OBJ_DIR)/libc.a
+	$$(LD) -T src/user/linker.ld -e _start -o $$(OBJ_DIR)/$(2).elf $$(OBJ_DIR)/$(2).o $$(OBJ_DIR)/libc.a
+	$$(OBJCOPY) -O binary $$(OBJ_DIR)/$(2).elf $$@
+endef
+$(eval $(call parity_bin,BASENAME,basename))
+$(eval $(call parity_bin,DIRNAME,dirname))
+$(eval $(call parity_bin,SEQ,seq))
+$(eval $(call parity_bin,EXPR,expr))
+$(eval $(call parity_bin,TESTGNU,testgnu))
+
 $(NETTEST_BIN): $(OBJ_DIR)/user_net_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/net_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/net_test.elf $(NETTEST_BIN)
@@ -513,7 +536,11 @@ $(OBJ_DIR)/head.o: src/user/head.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(SH_BIN): $(OBJ_DIR)/sh.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
+$(OBJ_DIR)/sh_aux.o: src/user/sh_aux.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(SH_BIN): $(OBJ_DIR)/sh.o $(OBJ_DIR)/sh_aux.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/sh.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/sh.elf $(SH_BIN)
 
@@ -948,7 +975,7 @@ endef
 
 $(foreach app,$(DESKTOP_APP_NAMES),$(eval $(call DESKTOP_APP_RULE,$(app))))
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(NANO_BIN) $(APPS_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(NANO_BIN) $(APPS_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -1017,6 +1044,11 @@ endif
 	$(MCOPY) -i disk.img $(FREE_BIN) ::/FREE.BIN
 	$(MCOPY) -i disk.img $(UPTIME_BIN) ::/UPTIME.BIN
 	$(MCOPY) -i disk.img $(KILL_BIN) ::/KILL.BIN
+	$(MCOPY) -i disk.img $(BASENAME_BIN) ::/BASENAME.BIN
+	$(MCOPY) -i disk.img $(DIRNAME_BIN) ::/DIRNAME.BIN
+	$(MCOPY) -i disk.img $(SEQ_BIN) ::/SEQ.BIN
+	$(MCOPY) -i disk.img $(EXPR_BIN) ::/EXPR.BIN
+	$(MCOPY) -i disk.img $(TESTGNU_BIN) ::/TEST.BIN
 	$(MCOPY) -i disk.img $(CP_BIN) ::/CP.BIN
 	$(MCOPY) -i disk.img $(RM_BIN) ::/RM.BIN
 	$(MCOPY) -i disk.img $(MV_BIN) ::/MV.BIN

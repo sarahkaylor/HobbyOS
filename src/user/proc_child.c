@@ -7,10 +7,18 @@
  */
 #include <stdlib.h>
 
+/* The old-trio libc has no atoi; every tool keeps its own tiny parser. */
+static int p_atoi(const char *s) {
+  int v = 0;
+  if (*s == '-') s++;
+  while (*s >= '0' && *s <= '9') v = v * 10 + (*s++ - '0');
+  return v;
+}
+
 int main(int argc, char **argv) {
   extern void print_console(const char *s);
   print_console("[PROCCHLD] running\n");
   if (argc >= 2)
-    return atoi(argv[1]);
+    return p_atoi(argv[1]);
   return 7;
 }

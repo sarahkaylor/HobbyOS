@@ -59,6 +59,8 @@ int fork(void);
 int kill(int pid, int sig);
 void yield(void);
 int connect(uint32_t ip, uint16_t port, int protocol);
+int dup(int fd);
+int dup2(int oldfd, int newfd);
 int spawn(const char *filename, const char *args);
 int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args);
 int pipe(int fds[2]);

@@ -26,8 +26,22 @@
  * needed here. The in-OS build gets `int errno` from src/user/libc.c. */
 
 int ho_open(const char *filename, int flags, ...) {
-  (void)flags; /* mock keeps its create-on-demand semantics */
-  return open(filename, O_RDWR | O_CREAT, 0666);
+  /* Keep the mock's create-on-demand semantics, but honor the flags the
+     shell needs for redirections: O_TRUNC replaces content, O_APPEND
+     appends (the original mock opened O_RDWR|O_CREAT with no truncation,
+     which broke `> file` parity against real shells). */
+  int host = O_RDWR | O_CREAT;
+  if (flags & O_TRUNC) host |= O_TRUNC;
+  if (flags & O_APPEND) host |= O_APPEND;
+  return open(filename, host, 0666);
+}
+
+int ho_dup(int fd) {
+  return dup(fd);
+}
+
+int ho_dup2(int oldfd, int newfd) {
+  return dup2(oldfd, newfd);
 }
 
 int ho_close(int fd) {
