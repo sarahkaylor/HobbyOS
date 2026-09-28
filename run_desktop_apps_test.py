@@ -26,6 +26,7 @@ QEMU_BIN = "qemu-system-aarch64"
 APPS = [
     ("FILES", "FILES.BIN"),
     ("CALC", "CALC.BIN"),
+    ("XCALC", "XCALC.BIN"),
     ("CLOCK", "CLOCK.BIN"),
     ("SYSMON", "SYSMON.BIN"),
     ("HEX", "HEX.BIN"),

@@ -261,8 +261,11 @@ static void wallpaper_band_gain(int row, int h, int *dr, int *dg, int *db) {
   *db = gain;
 }
 
-/* One row of the house wallpaper (navy -> slate, with the soft band). */
-static uint32_t wallpaper_row_color(int row, int h) {
+/* One row of the house wallpaper (navy -> slate, with the soft band).
+ * Exposed for the desktop: pixel-mode app content carves the wallpaper
+ * apart, and the WM repaints the remaining bands row by row with exactly
+ * these colours (see window.h). */
+uint32_t graphics_wallpaper_row_color(int row, int h) {
   int denom = h - 1;
   if (denom <= 0) denom = 1;
   int dr, dg, db;
@@ -281,7 +284,7 @@ void graphics_fill_gradient_v(int x, int y, int w, int h, uint32_t top, uint32_t
     return;
   if (is_wallpaper_span(x, y, w, h)) {
     for (int row = 0; row < h; row++) {
-      graphics_draw_hline(x, y + row, w, wallpaper_row_color(row, h));
+      graphics_draw_hline(x, y + row, w, graphics_wallpaper_row_color(row, h));
     }
     return;
   }

@@ -98,8 +98,9 @@ static int mouse_y = SCREEN_HEIGHT / 2;
  * A press in the content area of a window that opted into mouse events
  * (ESC ] P 1 ~) opens a "drag session" for that window. While the button is
  * held, pointer motion is forwarded as ESC [ G <col>;<row>;<btn> ~ and the
- * button release as ESC [ R <col>;<row>;<btn> ~, both clamped to the
- * window's content cell grid. Press, drag and release all go through
+ * button release as ESC [ R <x>;<y>;<btn> ~, both clamped to the
+ * window's content area (cells for text windows, pixels for pixel-mode
+ * windows). Press, drag and release all go through
  * desktop_send_hook so host tests can capture them instead of writing to
  * the app's pipe. Windows that never see a press never get G/R events.
  *
@@ -107,8 +108,8 @@ static int mouse_y = SCREEN_HEIGHT / 2;
  * can drive them directly. */
 
 static int drag_win_id = -1;   /* window that received the press (-1 = none) */
-static int drag_last_col = -1; /* last cell reported to that window         */
-static int drag_last_row = -1;
+static int drag_last_x = -1;   /* last cell/pixel reported to that window   */
+static int drag_last_y = -1;
 
 static void launch_app_named(const char *bin, const char *args);
 
@@ -251,23 +252,35 @@ static struct window *find_window(int id) {
   return 0;
 }
 
-/* Build one mouse escape sequence: ESC [ <kind> <col> ; <row> ; <btn> ~
- * kind: 'P' press, 'G' drag, 'R' release. col/row/btn must be >= 0.
+/* Append the decimal digits of a non-negative value (no padding) and
+ * return the new fill position.  Values are capped at 4 digits: the
+ * desktop's coordinates (content cells or pixels) fit comfortably. */
+static int seq_append_int(char *out, int j, int v) {
+  if (v < 0) v = 0;
+  if (v > 9999) v = 9999;
+  char digits[8];
+  int d = 0;
+  if (v == 0) digits[d++] = '0';
+  while (v > 0) { digits[d++] = (char)('0' + v % 10); v /= 10; }
+  while (d > 0) out[j++] = digits[--d];
+  return j;
+}
+
+/* Build one mouse escape sequence: ESC [ <kind> <x> ; <y> ; <btn> ~
+ * kind: 'P' press, 'G' drag, 'R' release. x/y are content cells for a
+ * text window and content pixels for a pixel-mode window (see window.h);
+ * all parameters must be >= 0.
  * Returns the number of bytes written (excluding the NUL terminator). */
 int wm_build_mouse_seq(char *out, int cap, char kind, int col, int row, int btn) {
   char body[24];
   int j = 0;
   body[j++] = 27; body[j++] = '[';
   body[j++] = kind;
-  if (col >= 100) body[j++] = (char)('0' + (col / 100) % 10);
-  if (col >= 10)  body[j++] = (char)('0' + (col / 10) % 10);
-  body[j++] = (char)('0' + col % 10);
+  j = seq_append_int(body, j, col);
   body[j++] = ';';
-  if (row >= 100) body[j++] = (char)('0' + (row / 100) % 10);
-  if (row >= 10)  body[j++] = (char)('0' + (row / 10) % 10);
-  body[j++] = (char)('0' + row % 10);
+  j = seq_append_int(body, j, row);
   body[j++] = ';';
-  body[j++] = (char)('0' + btn);
+  j = seq_append_int(body, j, btn);
   body[j++] = '~';
   if (j > cap - 1) j = cap - 1;
   for (int i = 0; i < j; i++) out[i] = body[i];
@@ -292,48 +305,75 @@ void wm_mouse_cell(const struct window *w, int mx, int my, int *col, int *row) {
   *col = c; *row = r;
 }
 
-/* Start a drag session after a press was delivered at (col,row). */
-void desktop_drag_begin(int win_id, int col, int row) {
+/* Map absolute pointer coordinates to the content PIXEL (x,y) of a
+ * pixel-mode window w, clamped to its content rectangle.  Pixel (0,0) is
+ * the content corner (w->x + 2, w->y + 34); cells differ only in their
+ * origin (x+10, y+44) and 8x10 step. */
+void wm_mouse_pixel(const struct window *w, int mx, int my, int *px, int *py) {
+  int x = mx - (w->x + 2);
+  int y = my - (w->y + 34);
+  int maxx = w->w - 5;      /* content is w-4 wide: 0 .. w-5 */
+  int maxy = w->h - 37;     /* content is h-36 tall: 0 .. h-37 */
+  if (maxx < 0) maxx = 0;
+  if (maxy < 0) maxy = 0;
+  if (x < 0) x = 0;
+  if (y < 0) y = 0;
+  if (x > maxx) x = maxx;
+  if (y > maxy) y = maxy;
+  *px = x; *py = y;
+}
+
+/* Pointer position inside a window's content area: a text cell for a text
+ * window, a content pixel for a pixel-mode window. */
+void wm_mouse_local(const struct window *w, int mx, int my, int *x, int *y) {
+  if (w->pixel_mode) wm_mouse_pixel(w, mx, my, x, y);
+  else wm_mouse_cell(w, mx, my, x, y);
+}
+
+/* Start a drag session after a press was delivered at (x,y) -- a content
+ * cell for a text window, content pixels for a pixel-mode window. */
+void desktop_drag_begin(int win_id, int x, int y) {
   drag_win_id = win_id;
-  drag_last_col = col;
-  drag_last_row = row;
+  drag_last_x = x;
+  drag_last_y = y;
 }
 
 /* End a drag session without sending anything (window closed, etc). */
 void desktop_drag_cancel(void) {
   drag_win_id = -1;
-  drag_last_col = -1;
-  drag_last_row = -1;
+  drag_last_x = -1;
+  drag_last_y = -1;
 }
 
 /* Window currently holding the drag session (-1 = none). */
 int desktop_drag_window(void) { return drag_win_id; }
 
-/* Forward pointer motion while the button is held. Only a cell change is
- * reported (motion inside one text cell produces no event). */
+/* Forward pointer motion while the button is held. Only a change of cell
+ * (text window) or pixel (pixel-mode window) is reported. */
 void desktop_drag_move(int mx, int my) {
   if (drag_win_id < 0) return;
   struct window *w = find_window(drag_win_id);
   if (!w) { desktop_drag_cancel(); return; }
-  int col, row;
-  wm_mouse_cell(w, mx, my, &col, &row);
-  if (col == drag_last_col && row == drag_last_row) return;
-  drag_last_col = col;
-  drag_last_row = row;
+  int x, y;
+  wm_mouse_local(w, mx, my, &x, &y);
+  if (x == drag_last_x && y == drag_last_y) return;
+  drag_last_x = x;
+  drag_last_y = y;
   char seq[24];
-  int n = wm_build_mouse_seq(seq, sizeof seq, 'G', col, row, 1);
+  int n = wm_build_mouse_seq(seq, sizeof seq, 'G', x, y, 1);
   desktop_send_hook(drag_win_id, seq, n);
 }
 
-/* Deliver the button release at the (clamped) cell and end the session. */
+/* Deliver the button release at the (clamped) position and end the
+ * session. */
 void desktop_drag_end(int mx, int my) {
   if (drag_win_id < 0) return;
   struct window *w = find_window(drag_win_id);
   if (w) {
-    int col, row;
-    wm_mouse_cell(w, mx, my, &col, &row);
+    int x, y;
+    wm_mouse_local(w, mx, my, &x, &y);
     char seq[24];
-    int n = wm_build_mouse_seq(seq, sizeof seq, 'R', col, row, 1);
+    int n = wm_build_mouse_seq(seq, sizeof seq, 'R', x, y, 1);
     desktop_send_hook(drag_win_id, seq, n);
   }
   desktop_drag_cancel();
@@ -355,6 +395,8 @@ int wm_parse_run_request(const char *seq, char *bin, int bincap, char *args, int
   args[j] = '\0';
   return bin[0] != '\0';
 }
+
+static int csi_param(const char *s, int *i);   /* defined below */
 
 void wm_handle_app_escape(int win_id, char* seq) {
   if (seq[0] == ']' && seq[1] == 'M') {
@@ -388,13 +430,23 @@ void wm_handle_app_escape(int win_id, char* seq) {
       win->chrome_dirty = 1;
     }
   } else if (seq[0] == ']' && seq[1] == 'T') {
-    /* Window title: ESC ] T <title> ~ */
-    wm_set_window_title(win_id, seq + 2);
+    /* Window title: ESC ] T <title> ~.  Spaces after the T are separators
+     * (gui.c prints "ESC ] T Title~", the X11 library "ESC ] T Title~"
+     * with a space); the title itself may contain spaces. */
+    const char *p = seq + 2;
+    while (*p == ' ') p++;
+    wm_set_window_title(win_id, p);
   } else if (seq[0] == ']' && seq[1] == 'P') {
-    /* Pointer events opt-in: ESC ] P 1 ~ (1 = enable, 0 = disable) */
+    /* Pointer events opt-in: ESC ] P 1 ~ (1 = enable, 0 = disable).  The
+     * space is optional: gui.c prints "]P1~", the X11 library "]P 1~"
+     * (window.h documents the spaced form), so skip separators like the
+     * ]V and ]X handlers do -- reading seq[2] directly silently dropped
+     * the X11 library's opt-in and its mouse clicks never arrived. */
+    const char *p = seq + 2;
+    while (*p == ' ') p++;
     for (int i = 0; i < num_windows; i++) {
       if (windows[i].id == win_id) {
-        windows[i].mouse_events = (seq[2] == '1') ? 1 : 0;
+        windows[i].mouse_events = (*p == '1') ? 1 : 0;
         break;
       }
     }
@@ -416,6 +468,38 @@ void wm_handle_app_escape(int win_id, char* seq) {
         }
       }
     }
+  } else if (seq[0] == ']' && seq[1] == 'X') {
+    /* Pixel-mode opt-in: ESC ] X <w>;<h> ~ -- the app wants to own its
+     * content pixels (an X11 client; see window.h).  It is answered with
+     * the content rectangle (ESC ] G) and a full repair request; the
+     * window output that carried this message already drives the frame
+     * that flushes them. */
+    const char *p = seq + 2;
+    while (*p == ' ') p++;
+    int i = 0;
+    int pw = csi_param(p, &i);
+    if (p[i] == ';') i++;
+    int ph = csi_param(p, &i);
+    for (int j = 0; j < num_windows; j++) {
+      if (windows[j].id == win_id) {
+        windows[j].pixel_mode = 1;
+        windows[j].pix_pref_w = pw < 0 ? 0 : pw;
+        windows[j].pix_pref_h = ph < 0 ? 0 : ph;
+        windows[j].rendered_valid = 0;  /* the WM no longer paints it */
+        wm_pixel_send_geometry(&windows[j]);
+        wm_pixel_queue_expose_all(&windows[j]);
+        break;
+      }
+    }
+  } else if (seq[0] == ']' && seq[1] == 'F') {
+    /* "Frame flushed": the app just painted framebuffer pixels; the
+     * pointer sprite may need re-stamping (see window.h). */
+    for (int j = 0; j < num_windows; j++) {
+      if (windows[j].id == win_id) {
+        windows[j].pix_restamp = 1;
+        break;
+      }
+    }
   } else if (seq[0] == ']' && seq[1] == 'R') {
     /* Run a program in a new window: ESC ] R <bin>[;<args>] ~
      * Used by FILES to open documents in EDITOR.BIN and to launch .BIN
@@ -433,7 +517,7 @@ void wm_handle_app_escape(int win_id, char* seq) {
  * and move ahead of everything else, which keeps its own order. Editing
  * these lists is the only change needed to alter what gets pinned. */
 static const char *const pinned_apps[] = {
-  "CONSOLE.BIN", "FILES.BIN", "CALC.BIN", "CLOCK.BIN", "SYSMON.BIN",
+  "CONSOLE.BIN", "FILES.BIN", "CALC.BIN", "XCALC.BIN", "CLOCK.BIN", "SYSMON.BIN",
   "HEX.BIN", "TASKS.BIN", "FIND.BIN", "DIFF.BIN", "NOTES.BIN",
   "NANO.BIN", "UNIT.BIN",
 };
@@ -747,12 +831,89 @@ static void start_menu_ensure_visible(void) {
  * wm_draw_window_rows() BEFORE the rectangle passes run, so its
  * framebuffer bookkeeping stays exact no matter how those passes clip. */
 
+/* The wallpaper gradient, carved around pixel-mode window content: the WM
+ * must never paint over app pixels (see window.h).  With no pixel windows
+ * this is the single full-span call it always was; otherwise the span is
+ * filled band by band with the exact per-row colours the full gradient
+ * would show, stepping over the content rectangles. */
+
+/* One wallpaper rectangle, filled with the exact row colours. */
+static void paint_wallpaper_rows(int x, int y, int w, int h) {
+  int span_h = SCREEN_HEIGHT - TASKBAR_H;
+  for (int r = 0; r < h; r++) {
+    graphics_draw_hline(x, y + r, w, graphics_wallpaper_row_color(y + r, span_h));
+  }
+}
+
+static void paint_wallpaper(void) {
+  int span_h = SCREEN_HEIGHT - TASKBAR_H;
+
+  /* The rectangles this pass must step around. */
+  struct wm_rect cut[MAX_WINDOWS];
+  int ncut = 0;
+  for (int i = 0; i < num_windows; i++) {
+    if (!windows[i].pixel_mode) continue;
+    int x, y, w, h;
+    wm_pixel_content_rect(&windows[i], &x, &y, &w, &h);
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > SCREEN_WIDTH) w = SCREEN_WIDTH - x;
+    if (y + h > span_h) h = span_h - y;
+    if (w <= 0 || h <= 0) continue;
+    cut[ncut].x = x; cut[ncut].y = y; cut[ncut].w = w; cut[ncut].h = h;
+    ncut++;
+  }
+  if (ncut == 0) {
+    graphics_fill_gradient_v(0, 0, SCREEN_WIDTH, span_h,
+                             COLOR(16, 20, 38), COLOR(44, 56, 96));
+    return;
+  }
+
+  /* Scan bands between the rectangles' y edges: inside one band every cut
+   * rectangle either spans it or not at all, so the free part of a band
+   * is a set of x-intervals. */
+  int ys[2 * MAX_WINDOWS + 2];
+  int ny = 0;
+  ys[ny++] = 0;
+  ys[ny++] = span_h;
+  for (int i = 0; i < ncut; i++) {
+    ys[ny++] = cut[i].y;
+    ys[ny++] = cut[i].y + cut[i].h;
+  }
+  for (int a = 1; a < ny; a++) {              /* insertion sort */
+    int v = ys[a], b = a - 1;
+    while (b >= 0 && ys[b] > v) { ys[b + 1] = ys[b]; b--; }
+    ys[b + 1] = v;
+  }
+  for (int k = 0; k + 1 < ny; k++) {
+    int y0 = ys[k], y1 = ys[k + 1];
+    if (y1 <= y0) continue;
+
+    struct wm_rect iv[MAX_WINDOWS];
+    int ni = 0;
+    for (int i = 0; i < ncut; i++) {
+      if (cut[i].y <= y0 && cut[i].y + cut[i].h >= y1) iv[ni++] = cut[i];
+    }
+    for (int a = 1; a < ni; a++) {            /* insertion sort by x */
+      struct wm_rect v = iv[a];
+      int b = a - 1;
+      while (b >= 0 && iv[b].x > v.x) { iv[b + 1] = iv[b]; b--; }
+      iv[b + 1] = v;
+    }
+    int cur = 0;
+    for (int i = 0; i < ni; i++) {
+      if (iv[i].x > cur) paint_wallpaper_rows(cur, y0, iv[i].x - cur, y1 - y0);
+      if (iv[i].x + iv[i].w > cur) cur = iv[i].x + iv[i].w;
+    }
+    if (cur < SCREEN_WIDTH) paint_wallpaper_rows(cur, y0, SCREEN_WIDTH - cur, y1 - y0);
+  }
+}
+
 /* One full scene paint into the current clip: wallpaper, every window, the
  * menus, the taskbar and the pointer (which must stay on top). */
 static void paint_scene(void) {
   /* Wallpaper: vertical gradient behind the tiled windows. */
-  graphics_fill_gradient_v(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - TASKBAR_H,
-                           COLOR(16, 20, 38), COLOR(44, 56, 96));
+  paint_wallpaper();
   wm_draw_windows(focused_window);
   draw_menu();
   draw_start_menu();
@@ -924,6 +1085,11 @@ static void paint_frame(void) {
   if (full) {
     graphics_reset_base_clip();
     paint_scene();
+    /* The scene pass repainted every window: pixel-mode content must be
+     * blitted back by its app (see window.h). */
+    for (int i = 0; i < num_windows; i++) {
+      if (windows[i].pixel_mode) wm_pixel_queue_expose_all(&windows[i]);
+    }
   } else {
     /* 1. Window text damage first (see the contract above). */
     int rows_painted = 0;
@@ -936,6 +1102,13 @@ static void paint_frame(void) {
       paint_scene();
     }
     graphics_reset_base_clip();
+    /* 3. Scene passes may have painted over pixel-mode content. */
+    for (int i = 0; i < count; i++) {
+      for (int w = 0; w < num_windows; w++) {
+        if (windows[w].pixel_mode)
+          wm_pixel_queue_expose(&windows[w], dmg[i].x, dmg[i].y, dmg[i].w, dmg[i].h);
+      }
+    }
     /* Repainted rows may have covered the pointer. */
     if (rows_painted) wm_draw_cursor(mouse_x, mouse_y);
   }
@@ -943,6 +1116,28 @@ static void paint_frame(void) {
   last = cur;
   have_last = 1;
   for (int i = 0; i < num_windows; i++) windows[i].chrome_dirty = 0;
+}
+
+/* Post-frame service for pixel-mode windows: re-stamp the pointer for apps
+ * that just painted the framebuffer (ESC ] F), then deliver queued repair
+ * requests.  Runs right after the frame's graphics_flush(), so a repair
+ * the frame queued reaches the app in the same iteration. */
+static void wm_pixel_service_frame(void) {
+  for (int i = 0; i < num_windows; i++) {
+    struct window *win = &windows[i];
+    if (!win->pixel_mode) continue;
+    if (win->pix_restamp) {
+      win->pix_restamp = 0;
+      int cx, cy, cw, ch;
+      wm_pixel_content_rect(win, &cx, &cy, &cw, &ch);
+      if (mouse_x >= cx && mouse_x < cx + cw &&
+          mouse_y >= cy && mouse_y < cy + ch) {
+        wm_draw_cursor(mouse_x, mouse_y);
+        graphics_flush();
+      }
+    }
+    wm_pixel_flush_exposes(win);
+  }
 }
 
 /* ====================================================================== */
@@ -999,14 +1194,14 @@ static void term_handle_csi(struct window *win, const char *seq) {
   if (p[0] == '?') { priv = 1; i = 1; }
 
   switch (final) {
-    case 'H': case 'f': {                    /* cursor position (1-based) */
+  case 'H': case 'f': {                    /* cursor position (1-based) */
       int row = csi_param(p, &i);
       if (p[i] == ';') i++;
       int col = csi_param(p, &i);
       wm_term_cup(win, row < 0 ? 1 : row, col < 0 ? 1 : col);
       break;
     }
-    case 'A': case 'B': case 'C': case 'D': { /* relative cursor moves */
+  case 'A': case 'B': case 'C': case 'D': { /* relative cursor moves */
       int n = csi_param(p, &i);
       if (n < 1) n = 1;
       int row = win->term_cur_row, col = win->term_cur_col;
@@ -1017,24 +1212,24 @@ static void term_handle_csi(struct window *win, const char *seq) {
       wm_term_cup(win, row + 1, col + 1);
       break;
     }
-    case 'J': {
+  case 'J': {
       int mode = csi_param(p, &i);
       wm_term_erase_display(win, mode < 0 ? 0 : mode);
       break;
     }
-    case 'K': {
+  case 'K': {
       int mode = csi_param(p, &i);
       wm_term_erase_line(win, mode < 0 ? 0 : mode);
       break;
     }
-    case 'h': case 'l': {                    /* DEC private modes */
+  case 'h': case 'l': {                    /* DEC private modes */
       if (priv) {
         int m = csi_param(p, &i);
         if (m == 25) wm_term_set_cursor_visible(win, final == 'h');
       }
       break;
     }
-    case 'm': {                              /* SGR: apply each parameter */
+  case 'm': {                              /* SGR: apply each parameter */
       for (;;) {
         int v = csi_param(p, &i);
         if (v >= 0) wm_term_sgr(win, v);
@@ -1043,7 +1238,7 @@ static void term_handle_csi(struct window *win, const char *seq) {
       }
       break;
     }
-    default: break;
+  default: break;
   }
 }
 
@@ -1283,12 +1478,12 @@ int main(void) {
                       /* Forward content-area presses to apps that opted in
                        * and open a drag session for the window. */
                       if (windows[w].mouse_events && mouse_y >= windows[w].y + 34) {
-                        int col, row;
+                        int x, y;
                         char seq[24];
-                        wm_mouse_cell(&windows[w], mouse_x, mouse_y, &col, &row);
-                        int n = wm_build_mouse_seq(seq, sizeof seq, 'P', col, row, 1);
+                        wm_mouse_local(&windows[w], mouse_x, mouse_y, &x, &y);
+                        int n = wm_build_mouse_seq(seq, sizeof seq, 'P', x, y, 1);
                         desktop_send_hook(win_id, seq, n);
-                        desktop_drag_begin(win_id, col, row);
+                        desktop_drag_begin(win_id, x, y);
                       }
                     }
                     needs_redraw = 1;
@@ -1444,6 +1639,7 @@ int main(void) {
     if (num > 0 || needs_redraw) {
       paint_frame();
       graphics_flush();
+      wm_pixel_service_frame();
       needs_redraw = 0;
     } else {
       yield();

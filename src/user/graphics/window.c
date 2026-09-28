@@ -57,9 +57,11 @@ static void update_layout(void) {
   }
 
   /* A reflow changes the content area: terminal-mode apps must be told
-   * their new surface (the shim turns ESC ] S into KEY_RESIZE). */
+   * their new surface (the shim turns ESC ] S into KEY_RESIZE) and
+   * pixel-mode apps their new rectangle (ESC ] G + a full repair). */
   for (int i = 0; i < num_windows; i++) {
     if (windows[i].term_mode) wm_term_resize(&windows[i]);
+    if (windows[i].pixel_mode) wm_pixel_resize(&windows[i]);
   }
 }
 
@@ -89,6 +91,12 @@ int wm_create_window(uint32_t bg_color, int pid, int stdout_fd, int stdin_fd) {
   windows[idx].term_attr = 0;
   windows[idx].term_caret_row = -1;
   windows[idx].term_caret_col = -1;
+  windows[idx].pixel_mode = 0;
+  windows[idx].pix_pref_w = 0;
+  windows[idx].pix_pref_h = 0;
+  windows[idx].pix_expose_full = 0;
+  windows[idx].pix_expose_n = 0;
+  windows[idx].pix_restamp = 0;
   windows[idx].escape_state = 0;
   windows[idx].escape_len = 0;
   windows[idx].rendered_valid = 0;   /* nothing painted yet */
@@ -226,6 +234,10 @@ static void window_paint_rows(struct window *win, int top, int skip, int r0, int
  * that differ.  Falls back to a full content repaint when the visible
  * window moved (scrolling) or the bookkeeping is invalid. */
 int wm_draw_window_rows(struct window *win) {
+  /* Pixel mode: the app owns its content pixels; the WM never repaints
+   * them (see window.h). */
+  if (win->pixel_mode) return 0;
+
   int top, rows;
   window_content_geom(win, &top, &rows);
 
@@ -267,7 +279,17 @@ void wm_draw_windows(int focused_id) {
 
     // Frame border (bright when focused)
     uint32_t border = focused ? COLOR(96, 166, 255) : win->border_color;
-    graphics_draw_rect(win->x, win->y, win->w, win->h, border);
+    if (win->pixel_mode) {
+      /* The app owns the content pixels: fill the frame as a ring around
+       * the content rectangle instead of the whole window, so the frame
+       * paint cannot destroy them (see window.h). */
+      graphics_draw_rect(win->x, win->y, win->w, 34, border);                       /* title + menu bars */
+      graphics_draw_rect(win->x, win->y + 34, 2, win->h - 36, border);              /* left edge */
+      graphics_draw_rect(win->x + win->w - 2, win->y + 34, 2, win->h - 36, border); /* right edge */
+      graphics_draw_rect(win->x, win->y + win->h - 2, win->w, 2, border);           /* bottom edge */
+    } else {
+      graphics_draw_rect(win->x, win->y, win->w, win->h, border);
+    }
     graphics_draw_rect_outline(win->x, win->y, win->w, win->h, border);
 
     /* Drop shadow: a 1px dark band hugging the right and bottom edges of
@@ -310,6 +332,15 @@ void wm_draw_windows(int focused_id) {
       int len = 0;
       while(win->menus[m].name[len]) len++;
       menu_x += len * 8 + 16;
+    }
+
+    /* Pixel mode: the app owns the content pixels -- it paints the
+     * framebuffer itself, so the WM painting here would destroy them.
+     * The content is repaired on request via the expose queue instead
+     * (see window.h). */
+    if (win->pixel_mode) {
+      win->rendered_valid = 0;   /* the WM paints none of this content */
+      continue;
     }
 
     // Content background
@@ -664,14 +695,14 @@ void wm_term_erase_line(struct window *win, int mode) {
 /* SGR (the subset the shim emits, plus the obvious off-switches). */
 void wm_term_sgr(struct window *win, int which) {
   switch (which) {
-    case 0: win->term_attr = 0; break;
-    case 1: win->term_attr |= TERM_AT_BOLD; break;
-    case 4: win->term_attr |= TERM_AT_UNDERLINE; break;
-    case 7: win->term_attr |= TERM_AT_REVERSE; break;
-    case 22: win->term_attr &= (unsigned char)~TERM_AT_BOLD; break;
-    case 24: win->term_attr &= (unsigned char)~TERM_AT_UNDERLINE; break;
-    case 27: win->term_attr &= (unsigned char)~TERM_AT_REVERSE; break;
-    default: break;   /* colors: this display is monochrome, ignore */
+  case 0: win->term_attr = 0; break;
+  case 1: win->term_attr |= TERM_AT_BOLD; break;
+  case 4: win->term_attr |= TERM_AT_UNDERLINE; break;
+  case 7: win->term_attr |= TERM_AT_REVERSE; break;
+  case 22: win->term_attr &= (unsigned char)~TERM_AT_BOLD; break;
+  case 24: win->term_attr &= (unsigned char)~TERM_AT_UNDERLINE; break;
+  case 27: win->term_attr &= (unsigned char)~TERM_AT_REVERSE; break;
+  default: break;   /* colors: this display is monochrome, ignore */
   }
 }
 
@@ -758,4 +789,144 @@ void wm_draw_cursor(int x, int y) {
     }
   }
   draw_cursor_shape(x, y, COLOR(250, 250, 252));
+}
+
+/* ====================================================================== */
+/* Pixel mode (X11 apps): the app owns its content pixels -- see window.h */
+/* for the protocol.  These helpers compute the content rectangle, notify */
+/* the app of it, and carry the repair requests the desktop queues while  */
+/* it paints.                                                             */
+/* ====================================================================== */
+
+/* The content area: what is left of a window after its 2px frame, 16px
+ * title, 16px menu bar and the 2px inner bevel.  Clamped so the rectangle
+ * is always at least 1x1, even for a degenerate window. */
+void wm_pixel_content_rect(const struct window *win, int *x, int *y, int *w, int *h) {
+  *x = win->x + 2;
+  *y = win->y + 34;
+  *w = win->w - 4;
+  *h = win->h - 36;
+  if (*w < 1) *w = 1;
+  if (*h < 1) *h = 1;
+}
+
+/* Append the decimal digits of a value (no padding); returns the new fill
+ * position. */
+static int pix_append_int(char *buf, int j, int v) {
+  if (v < 0) v = 0;
+  char digits[8];
+  int d = 0;
+  if (v == 0) digits[d++] = '0';
+  while (v > 0) { digits[d++] = (char)('0' + v % 10); v /= 10; }
+  while (d > 0) buf[j++] = digits[--d];
+  return j;
+}
+
+/* Queue a repair request for the part of `rect` (SCREEN coordinates) that
+ * lies over the window's content.  Coalesces: a request covering the whole
+ * content -- or a queue overflow -- collapses into a full repaint. */
+void wm_pixel_queue_expose_all(struct window *win) {
+  win->pix_expose_full = 1;
+  win->pix_expose_n = 0;
+}
+
+void wm_pixel_queue_expose(struct window *win, int x, int y, int w, int h) {
+  if (win->pix_expose_full) return;
+  int cx, cy, cw, ch;
+  wm_pixel_content_rect(win, &cx, &cy, &cw, &ch);
+  int x0 = x - cx, y0 = y - cy;
+  int x1 = x0 + w, y1 = y0 + h;
+  if (x0 < 0) x0 = 0;
+  if (y0 < 0) y0 = 0;
+  if (x1 > cw) x1 = cw;
+  if (y1 > ch) y1 = ch;
+  if (x0 >= x1 || y0 >= y1) return;     /* no overlap with the content */
+  if (x0 == 0 && y0 == 0 && x1 == cw && y1 == ch) {
+    wm_pixel_queue_expose_all(win);
+    return;
+  }
+  for (int i = 0; i < win->pix_expose_n; i++) {
+    struct wm_rect *q = &win->pix_expose[i];
+    if (q->x <= x0 && q->y <= y0 && q->x + q->w >= x1 && q->y + q->h >= y1)
+      return;                           /* already covered */
+  }
+  if (win->pix_expose_n >= PIX_MAX_EXPOSE) {
+    wm_pixel_queue_expose_all(win);
+    return;
+  }
+  win->pix_expose[win->pix_expose_n].x = x0;
+  win->pix_expose[win->pix_expose_n].y = y0;
+  win->pix_expose[win->pix_expose_n].w = x1 - x0;
+  win->pix_expose[win->pix_expose_n].h = y1 - y0;
+  win->pix_expose_n++;
+}
+
+/* Tell the app the rectangle its content area got:
+ * ESC ] G <x>;<y>;<w>;<h> ~ */
+void wm_pixel_send_geometry(struct window *win) {
+  if (win->stdin_fd < 0) return;       /* host tests: no pipe to write to */
+  int x, y, w, h;
+  wm_pixel_content_rect(win, &x, &y, &w, &h);
+  char buf[64];
+  int j = 0;
+  buf[j++] = 27;
+  buf[j++] = ']';
+  buf[j++] = 'G';
+  buf[j++] = ' ';
+  j = pix_append_int(buf, j, x);
+  buf[j++] = ';';
+  j = pix_append_int(buf, j, y);
+  buf[j++] = ';';
+  j = pix_append_int(buf, j, w);
+  buf[j++] = ';';
+  j = pix_append_int(buf, j, h);
+  buf[j++] = '~';
+  int wr = write(win->stdin_fd, buf, j);
+  (void)wr;
+}
+
+/* Reflow: re-send the geometry and ask for a full content repaint. */
+int wm_pixel_resize(struct window *win) {
+  wm_pixel_send_geometry(win);
+  wm_pixel_queue_expose_all(win);
+  return 1;
+}
+
+/* Deliver queued repair requests: ESC [ E ~ (everything) or
+ * ESC [ E <x>;<y>;<w>;<h> ~ (content-relative).  Clears the queue. */
+void wm_pixel_flush_exposes(struct window *win) {
+  if (win->stdin_fd < 0) {
+    win->pix_expose_full = 0;
+    win->pix_expose_n = 0;
+    return;
+  }
+  if (win->pix_expose_full) {
+    win->pix_expose_full = 0;
+    const char msg[] = { 27, '[', 'E', ' ', '~' };
+    int wr = write(win->stdin_fd, msg, sizeof msg);
+    (void)wr;
+    return;
+  }
+  while (win->pix_expose_n > 0) {
+    struct wm_rect r = win->pix_expose[0];
+    for (int i = 1; i < win->pix_expose_n; i++)
+      win->pix_expose[i - 1] = win->pix_expose[i];
+    win->pix_expose_n--;
+    char buf[64];
+    int j = 0;
+    buf[j++] = 27;
+    buf[j++] = '[';
+    buf[j++] = 'E';
+    buf[j++] = ' ';
+    j = pix_append_int(buf, j, r.x);
+    buf[j++] = ';';
+    j = pix_append_int(buf, j, r.y);
+    buf[j++] = ';';
+    j = pix_append_int(buf, j, r.w);
+    buf[j++] = ';';
+    j = pix_append_int(buf, j, r.h);
+    buf[j++] = '~';
+    int wr = write(win->stdin_fd, buf, j);
+    (void)wr;
+  }
 }

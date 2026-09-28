@@ -33,6 +33,12 @@ void graphics_draw_rect_outline(int x, int y, int w, int h, uint32_t color);
 /* Vertical gradient fill: row 0 uses `top`, the last row uses `bottom`. */
 void graphics_fill_gradient_v(int x, int y, int w, int h, uint32_t top, uint32_t bottom);
 
+/* One row of the house wallpaper (what the full-backdrop gradient the
+ * desktop draws shows at `row` of a span `span_h` tall).  The desktop
+ * repaints the wallpaper in bands around pixel-mode window content with
+ * these exact colours (see window.h). */
+uint32_t graphics_wallpaper_row_color(int row, int span_h);
+
 /* Midpoint circles (r >= 0; outline is 1px). */
 void graphics_draw_circle(int cx, int cy, int r, uint32_t color);
 void graphics_fill_circle(int cx, int cy, int r, uint32_t color);

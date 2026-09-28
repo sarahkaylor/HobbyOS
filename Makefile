@@ -41,6 +41,11 @@ MODE ?= desktop
 OBJ_DIR = obj/$(ARCH)
 MODE_FILE = $(OBJ_DIR)/.mode
 
+# Include path for the X11 support library headers (src/user/x11/include),
+# added only to the rules that need it: the library and X11 apps.  Defined
+# here so arm, intel and host builds all see it.
+X11_INC = -Isrc/user/x11/include
+
 # Determine if the mode has changed and update the tracker file
 CURRENT_MODE := $(shell [ -f $(MODE_FILE) ] && cat $(MODE_FILE) || echo none)
 ifneq ($(CURRENT_MODE),$(MODE))
@@ -230,6 +235,7 @@ MILLIPEDE_BIN = $(OBJ_DIR)/millipede.bin
 # --- New desktop applications (10 GUI apps) ---
 FILES_BIN = $(OBJ_DIR)/files.bin
 CALC_BIN = $(OBJ_DIR)/calc.bin
+XCALC_BIN = $(OBJ_DIR)/xcalc.bin
 CLOCK_BIN = $(OBJ_DIR)/clock.bin
 SYSMON_BIN = $(OBJ_DIR)/sysmon.bin
 HEX_BIN = $(OBJ_DIR)/hex.bin
@@ -326,6 +332,12 @@ $(OBJ_DIR)/user_graphics.o: src/user/graphics/graphics.c $(USER_HDRS)
 $(OBJ_DIR)/user_window.o: src/user/graphics/window.c $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+# X11 support library (src/user/x11/): shared by XCALC.BIN and future
+# X11 apps.  The library's own headers live under src/user/x11/include.
+$(OBJ_DIR)/x11_%.o: src/user/x11/%.c src/user/x11/*.h src/user/x11/include/X11/*.h $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(X11_INC) -c $< -o $@
 
 $(OBJ_DIR)/desktop.o: src/user/desktop.c $(USER_LIBC) src/user_include/*.h src/user_include/graphics/*.h
 	@mkdir -p $(OBJ_DIR)
@@ -975,7 +987,20 @@ endef
 
 $(foreach app,$(DESKTOP_APP_NAMES),$(eval $(call DESKTOP_APP_RULE,$(app))))
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(NANO_BIN) $(APPS_T_BIN) $(MODE_FILE)
+# --- xcalc: the X11 support library's reference application -------------
+# Links the library (x11_xlib_*.o, see the rule above) instead of the GUI
+# toolkit; binary lands on disk as /XCALC.BIN (8.3).
+X11_LIB_OBJS = $(OBJ_DIR)/x11_xlib_display.o $(OBJ_DIR)/x11_xlib_window.o $(OBJ_DIR)/x11_xlib_draw.o $(OBJ_DIR)/x11_xlib_event.o
+
+$(OBJ_DIR)/xcalc_main.o: src/user/x11/apps/xcalc/main.c src/user/x11/*.h src/user/x11/include/X11/*.h $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(X11_INC) -c $< -o $@
+
+$(XCALC_BIN): $(OBJ_DIR)/xcalc_main.o $(X11_LIB_OBJS) $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/xcalc.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/xcalc.elf $(XCALC_BIN)
+
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(NANO_BIN) $(APPS_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -1106,6 +1131,7 @@ endif
 	$(MCOPY) -i disk.img $(MILLIPEDE_BIN) ::/MILLIPED.BIN
 	$(MCOPY) -i disk.img $(FILES_BIN) ::/FILES.BIN
 	$(MCOPY) -i disk.img $(CALC_BIN) ::/CALC.BIN
+	$(MCOPY) -i disk.img $(XCALC_BIN) ::/XCALC.BIN
 	$(MCOPY) -i disk.img $(CLOCK_BIN) ::/CLOCK.BIN
 	$(MCOPY) -i disk.img $(SYSMON_BIN) ::/SYSMON.BIN
 	$(MCOPY) -i disk.img $(HEX_BIN) ::/HEX.BIN
@@ -1178,6 +1204,9 @@ desktop_test:
 desktop_apps_test:
 	python3 ./run_desktop_apps_test.py
 
+xcalc_test:
+	python3 ./run_xcalc_test.py
+
 files_nav_test:
 	python3 ./run_files_nav_test.py
 
@@ -1206,6 +1235,31 @@ obj/host_user_%.o: src/user/%.c src/user_include/*.h src/user_include/graphics/*
 obj/host_user_graphics_%.o: src/user/graphics/%.c src/user_include/graphics/*.h
 	@mkdir -p obj
 	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+
+# X11 support library, host build (tests run it against the mock fb).
+obj/host_user_x11_%.o: src/user/x11/%.c src/user/x11/*.h src/user/x11/include/X11/*.h src/user_include/*.h src/user_include/graphics/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) $(X11_INC) -c $< -o $@
+
+# xcalc: the ported X11 calculator -- core, layout, real pixels and the
+# real entry point (fork + pipes into xcalc_main).
+XCALC_TEST = xcalc_test_host
+obj/host_xcalc_test.o: src/host/xcalc_test.c src/user/x11/apps/xcalc/main.c src/user/x11/*.h src/user/x11/include/X11/*.h src/user_include/*.h src/user_include/graphics/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) $(X11_INC) -Isrc/user/x11 -c $< -o $@
+$(XCALC_TEST): obj/host_xcalc_test.o obj/host_user_x11_xlib_display.o obj/host_user_x11_xlib_window.o obj/host_user_x11_xlib_draw.o obj/host_user_x11_xlib_event.o obj/host_user_graphics_graphics.o obj/host_compat.o
+	$(HOST_CC) -o $@ $^
+
+obj/host_x11_lib_test.o: src/host/x11_lib_test.c src/user/x11/*.h src/user/x11/include/X11/*.h src/user_include/*.h src/user_include/graphics/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) $(X11_INC) -Isrc/user/x11 -c $< -o $@
+
+# X11 support library: the desktop protocol in both directions, the
+# shadow/backing store and event decoding (src/user/x11/), plus the
+# outbound byte capture and mock-fb pixel checks.
+X11_LIB_TEST = x11_lib_test_host
+$(X11_LIB_TEST): obj/host_x11_lib_test.o obj/host_user_x11_xlib_display.o obj/host_user_x11_xlib_window.o obj/host_user_x11_xlib_draw.o obj/host_user_x11_xlib_event.o obj/host_user_graphics_graphics.o obj/host_compat.o
+	$(HOST_CC) -o $@ $^
 
 EDITOR_HOST = EDITOR.BIN_host
 
@@ -1241,6 +1295,14 @@ DESKTOP_TERM_TEST = desktop_term_test_host
 $(DESKTOP_TERM_TEST): obj/host_desktop_term_test.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
 	$(HOST_CC) -o $@ $^
 
+# Desktop pixel-mode surface: the ESC ] X / ] G handshake, repair requests
+# (ESC [ E), the wallpaper carve and pixel input -- what the X11 support
+# library (src/user/x11/) rides on.  Includes desktop.c directly, same
+# reason as the term test.
+DESKTOP_PIXEL_TEST = desktop_pixel_test_host
+$(DESKTOP_PIXEL_TEST): obj/host_desktop_pixel_test.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+	$(HOST_CC) -o $@ $^
+
 # nano <-> desktop integration: the curses shim (a separate host object,
 # linked like a program would) driven against the real desktop terminal
 # surface, over the wire protocol (hb_set_io transport).
@@ -1255,7 +1317,7 @@ obj/nano_hb_curses_host.o: src/user/nano/hb_curses.c src/user/nano/curses.h
 
 # The two desktop tests that #include src/user/desktop.c directly must
 # rebuild when it (or the window layer) changes.
-obj/host_desktop_input_test.o obj/host_desktop_term_test.o obj/host_nano_term_test.o: src/user/desktop.c src/user/graphics/window.c
+obj/host_desktop_input_test.o obj/host_desktop_term_test.o obj/host_nano_term_test.o obj/host_desktop_pixel_test.o: src/user/desktop.c src/user/graphics/window.c
 
 # Cross-application host suite: every desktop app in one binary, in-process
 # checks plus forked end-to-end runs on pipes. Single TU (includes the app
@@ -1546,13 +1608,16 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DAMAGE_TEST)
 	$(HOST_RUN) ./$(DESKTOP_INPUT_TEST)
 	$(HOST_RUN) ./$(DESKTOP_TERM_TEST)
+	$(HOST_RUN) ./$(DESKTOP_PIXEL_TEST)
+	$(HOST_RUN) ./$(X11_LIB_TEST)
+	$(HOST_RUN) ./$(XCALC_TEST)
 	$(HOST_RUN) ./$(NANO_TERM_TEST)
 	$(HOST_RUN) ./$(NFS_PROTO_TEST)
 	$(HOST_RUN) ./$(CONSOLE_APP_TEST)

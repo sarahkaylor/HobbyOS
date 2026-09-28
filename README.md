@@ -1,13 +1,13 @@
 # HobbyOS
 
-A from-scratch 64-bit hobby operating system in C — ARM64 primary, x86_64 secondary — booting bare-metal in QEMU to a graphical desktop with a tiling window manager, ten GUI apps, two arcade games, a shell and a small libc.
+A from-scratch 64-bit hobby operating system in C — ARM64 primary, x86_64 secondary — booting bare-metal in QEMU to a graphical desktop with a tiling window manager, ten GUI apps, an X11 calculator (`XCALC`, powered by the Xlib-for-HobbyOS support library in `src/user/x11/`), two arcade games, a shell and a small libc.
 
 ## Screenshots
 
 | | |
 |---|---|
 | ![The tiling window manager running four apps](docs/screenshots/tiling-windows.png) | ![The Apps menu](docs/screenshots/apps-menu.png) |
-| **Tiling window manager** — FILES, CLOCK, CALC and SYSMON, each launched into a tile from the Apps menu | **The Apps menu** — the ten GUI apps and both arcade games pinned at the top |
+| **Tiling window manager** — FILES, CLOCK, CALC and SYSMON, each launched into a tile from the Apps menu | **The Apps menu** — the pinned apps (including the ported X11 calculator) and both arcade games at the top |
 | ![The Files app](docs/screenshots/files-icons.png) | ![PONG running full-screen](docs/screenshots/pong.png) |
 | **Files** — 8×8 icon font glyphs, `[DIR]`/`[TXT]`/`[EXE]` type tags, sizes, FAT/NFS badge, and drag & drop of files onto folders | **PONG** — full-screen arcade game running as a user-space program |
 | ![MILLIPED running full-screen](docs/screenshots/millipede.png) | |
@@ -176,6 +176,8 @@ HobbyOS/
 │   │   └── ...          # Other kernel components
 │   └── include/         # Kernel headers
 ├── user/                # User-space test programs
+│   ├── x11/             # Xlib-on-HobbyOS support library (see x11/README.md)
+│   │   └── apps/xcalc/  # XCALC: Skalculator running on that library
 │   ├── mem_test.c       # Memory allocation tests
 │   ├── file_io_test.c   # File I/O tests
 │   └── ...              # Other test programs

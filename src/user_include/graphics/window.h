@@ -41,6 +41,42 @@
 #define TERM_AT_BOLD      0x02
 #define TERM_AT_UNDERLINE 0x04
 
+/* ---- Pixel mode (ESC ] X <w>;<h> ~) -----------------------------------
+ * An app that wants a pixel-addressed surface -- the first is XCALC.BIN
+ * running on the X11 support library (src/user/x11/) -- opts in by
+ * printing the OSC message ESC ] X <w>;<h> ~ (a preferred content size in
+ * pixels; 0 means "any").  The desktop then stops maintaining the
+ * window's content area: the app owns those pixels and paints them
+ * straight into the framebuffer through its own mapped view, and the
+ * desktop answers with the rectangle the content area got:
+ *
+ *     ESC ] G <x>;<y>;<w>;<h> ~      (screen pixels, re-sent after reflow)
+ *
+ * Because the app's pixels live in the shared framebuffer, the WM keeps
+ * two contracts with it:
+ *
+ *   - it never paints over content pixels itself: the wallpaper pass
+ *     carves the content rectangles out and the chrome pass skips them;
+ *   - whenever something the WM *does* paint may have covered them (a
+ *     menu, the pointer, a full repaint) it sends a repair request:
+ *
+ *         ESC [ E ~                     repaint everything
+ *         ESC [ E <x>;<y>;<w>;<h> ~     repaint that content-relative rect
+ *
+ * The X11 library answers by blitting the affected rectangle back from
+ * its client-side shadow (its drawing never reaches the display until a
+ * flush, exactly like Xlib's output buffer).
+ *
+ * Mouse input for a pixel window arrives as ESC [ P/G/R <x>;<y>;<btn> ~
+ * with x;y in content-relative pixels (cell coordinates for text
+ * windows).  After painting, the app prints ESC ] F ~ ("frame flushed")
+ * so the desktop can re-stamp the mouse pointer, which app drawing may
+ * have overwritten. */
+#define PIX_MAX_EXPOSE 8
+
+/* A rectangle in screen (or content-relative) pixels. */
+struct wm_rect { int x, y, w, h; };
+
 struct window_menu {
   char name[MENU_NAME_LEN];
   char items[MAX_MENU_SUBITEMS][MENU_NAME_LEN];
@@ -77,6 +113,14 @@ struct window {
                                                (-1 = none) */
   char term_ch[TERM_CELLS];        /* cell text */
   unsigned char term_at[TERM_CELLS]; /* cell attributes */
+
+  /* ---- Pixel mode (ESC ] X); see the protocol block above ---- */
+  int pixel_mode;
+  int pix_pref_w, pix_pref_h;      /* preferred content size from ]X */
+  int pix_expose_full;             /* queued repair: repaint everything */
+  int pix_expose_n;                /* queued partial repairs */
+  struct wm_rect pix_expose[PIX_MAX_EXPOSE];
+  int pix_restamp;                 /* app painted: re-stamp the pointer */
 
   int escape_state;
   char escape_buf[128];
@@ -142,6 +186,19 @@ void wm_term_erase_display(struct window *win, int mode);
 void wm_term_erase_line(struct window *win, int mode);
 void wm_term_sgr(struct window *win, int which);
 void wm_term_set_cursor_visible(struct window *win, int on);
+
+/* ---- Pixel-mode surface (window.c) ----
+ * wm_pixel_content_rect() reports the content area (the pixels the app
+ * owns) for a window.  wm_pixel_resize() re-notifies a pixel window after
+ * a reflow.  Repair requests are queued by the desktop while it paints
+ * (wm_pixel_queue_expose* take SCREEN coordinates and clamp) and written
+ * to the app after the frame's flush (wm_pixel_flush_exposes). */
+void wm_pixel_content_rect(const struct window *win, int *x, int *y, int *w, int *h);
+int  wm_pixel_resize(struct window *win);
+void wm_pixel_send_geometry(struct window *win);
+void wm_pixel_queue_expose(struct window *win, int x, int y, int w, int h);
+void wm_pixel_queue_expose_all(struct window *win);
+void wm_pixel_flush_exposes(struct window *win);
 
 /* ---- Damage helpers (window.c) ----
  * wm_draw_window_rows() repairs a window's captured text at line
