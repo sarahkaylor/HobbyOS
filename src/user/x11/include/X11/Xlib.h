@@ -28,6 +28,16 @@
  *     corner of the API defined here is exactly what programs should use.
  *   - "client.c" apps must not write to stdout themselves: the library
  *     owns it (use print_console() for debugging).
+ *   - Pixmaps: 1-bit XBM data (XCreateBitmapFromData), optionally with
+ *     two colors baked in (XCreatePixmapFromBitmapData).  XSetFillStyle
+ *     (FillSolid/FillTiled) + XSetTile stamp a pattern; XSetClipMask +
+ *     XSetClipOrigin clip drawing to a 1-bit mask.  Tiles and clip masks
+ *     are anchored at the drawable's origin.
+ *   - Pointer tracking: selecting PointerMotionMask subscribes to the
+ *     pointer's SCREEN position (ESC [ T reports, see window.h); the
+ *     library turns them into MotionNotify events and answers
+ *     XQueryPointer from the latest report, so cursor-followers work
+ *     while the pointer is outside the window.
  */
 #ifndef HOBBYOS_X11_XLIB_H
 #define HOBBYOS_X11_XLIB_H
@@ -41,6 +51,7 @@ typedef int Bool;
 typedef unsigned long XID;
 typedef XID Window;
 typedef XID Drawable;
+typedef XID Pixmap;
 typedef unsigned long XKeycode;
 typedef unsigned long KeySym;
 typedef unsigned long Atom;
@@ -52,6 +63,12 @@ typedef struct _XGC *GC;
 #define False 0
 
 #define None 0L
+
+/* A rectangle (X11's own layout: signed origin, unsigned extent). */
+typedef struct {
+  short x, y;
+  unsigned short width, height;
+} XRectangle;
 
 /* Event types (values match X11 so ported code's switches keep working). */
 #define KeyPress         2
@@ -80,6 +97,10 @@ typedef struct _XGC *GC;
 #define GCForeground          (1L << 2)
 #define GCBackground          (1L << 3)
 
+/* Fill styles (values match X11; only these two are implemented). */
+#define FillSolid             0L
+#define FillTiled             1L
+
 /* ---- Event structures (the subset applications read) ----------------- */
 
 typedef struct {
@@ -103,6 +124,22 @@ typedef struct {
   unsigned int button;
   Bool same_screen;
 } XButtonEvent;
+
+/* MotionNotify.  The library fills the event through XButtonEvent's
+ * fields (the layouts share their prefix); reading ev.xmotion is the
+ * Xlib-faithful spelling and sees the same values. */
+typedef struct {
+  int type;
+  unsigned long serial;
+  Window window;
+  Window root;
+  Window subwindow;
+  unsigned long time;
+  int x, y, x_root, y_root;
+  unsigned int state;
+  char is_hint;
+  Bool same_screen;
+} XMotionEvent;
 
 typedef struct {
   int type;
@@ -132,6 +169,7 @@ typedef union _XEvent {
   int type;                     /* every event starts with the type */
   XExposeEvent xexpose;
   XButtonEvent xbutton;
+  XMotionEvent xmotion;
   XKeyEvent xkey;
   XConfigureEvent xconfigure;
   long pad[24];
@@ -183,7 +221,14 @@ GC XCreateGC(Display *display, Drawable d, unsigned long valuemask,
              XGCValues *values);
 int XFreeGC(Display *display, GC gc);
 int XSetForeground(Display *display, GC gc, unsigned long pixel);
+int XSetBackground(Display *display, GC gc, unsigned long pixel);
+int XSetFillStyle(Display *display, GC gc, int style);
+int XSetTile(Display *display, GC gc, Pixmap tile);
+int XSetClipMask(Display *display, GC gc, Pixmap mask);
+int XSetClipOrigin(Display *display, GC gc, int x, int y);
 int XClearWindow(Display *display, Window w);
+int XClearArea(Display *display, Window w, int x, int y,
+               unsigned int width, unsigned int height, Bool exposures);
 
 int XDrawPoint(Display *display, Drawable d, GC gc, int x, int y);
 int XDrawLine(Display *display, Drawable d, GC gc, int x1, int y1, int x2, int y2);
@@ -194,10 +239,34 @@ int XFillRectangle(Display *display, Drawable d, GC gc, int x, int y,
 int XDrawString(Display *display, Drawable d, GC gc, int x, int y,
                 const char *string, int length);
 
+/* ---- Pixmaps ---------------------------------------------------------
+ * 1-bit images, the XBM data layout: rows padded to whole bytes, the
+ * leftmost pixel is the LEAST significant bit.  The data is copied, like
+ * a real client would have it on the wire.  Use a bitmap as a GC's clip
+ * mask (parts with a set bit draw), or a colored pixmap as a tile. */
+
+Pixmap XCreateBitmapFromData(Display *display, Drawable d, const char *data,
+                             unsigned int width, unsigned int height);
+Pixmap XCreatePixmapFromBitmapData(Display *display, Drawable d,
+                                   const char *data,
+                                   unsigned int width, unsigned int height,
+                                   unsigned long fg, unsigned long bg,
+                                   unsigned int depth);
+int XFreePixmap(Display *display, Pixmap pixmap);
+
 /* ---- Events ---------------------------------------------------------- */
 
 int XNextEvent(Display *display, XEvent *event_return);
 int XLookupString(XKeyEvent *event, char *buffer_return, int bytes_buffer,
                   KeySym *keysym_return, void *status_placeholder);
+
+/* The pointer's last reported screen position (a tracking report, see
+ * window.h; select PointerMotionMask to subscribe).  Before the first
+ * report both coordinates read 0.  win_x/win_y are relative to the
+ * window origin and may fall outside the window. */
+Bool XQueryPointer(Display *display, Window w, Window *root_return,
+                   Window *child_return, int *root_x_return,
+                   int *root_y_return, int *win_x_return, int *win_y_return,
+                   unsigned int *mask_return);
 
 #endif

@@ -20,6 +20,10 @@
  *     ESC [ E ~                        repair everything (blit shadow)
  *     ESC [ E <x>;<y>;<w>;<h> ~        repair one content rect
  *     ESC [ P/G/R <x>;<y>;<btn> ~      mouse press/drag/release
+ *     ESC [ T <x_root>;<y_root> ~      pointer tracking ("hover"): the
+ *                                      pointer moved, SCREEN coordinates;
+ *                                      delivered while PointerMotionMask
+ *                                      is selected, button or no button
  *     (plain bytes)                    keys; escape sequences for arrows
  *                                      and friends (see xlib_event.c)
  */
@@ -31,6 +35,7 @@
 
 #define X11_MAX_QUEUE 64
 #define X11_MAX_GCS 8
+#define X11_MAX_PIXMAPS 48
 #define X11_TITLE_MAX 40
 #define X11_SEQ_MAX 48
 
@@ -57,6 +62,23 @@
 struct _XGC {
   int used;
   unsigned long fg;
+  unsigned long bg;
+  int fill_style;               /* FillSolid or FillTiled */
+  int tile;                     /* pixmap slot, -1 = none */
+  int clip_mask;                /* pixmap slot, -1 = none */
+  int clip_x, clip_y;           /* mask origin in content pixels */
+};
+
+/* One 1-bit pixmap: `bits` is a copy of XBM-form data (LSB = leftmost,
+ * rows padded to whole bytes).  `colored` pixmaps (created from bitmap
+ * data plus two colors) carry the colors a tiled fill stamps. */
+struct x11_pixmap {
+  int used;
+  int w, h;
+  int stride;                   /* bytes per row in `bits` */
+  unsigned char *bits;
+  int colored;
+  unsigned long fg, bg;
 };
 
 struct x11_win {
@@ -83,7 +105,11 @@ struct _XDisplay {
   struct x11_win win;
   int have_window;
   struct _XGC gcs[X11_MAX_GCS];
+  struct x11_pixmap pixmaps[X11_MAX_PIXMAPS];
   unsigned long default_fg;
+  /* Pointer tracking: the last position reported by the desktop. */
+  int pointer_valid;
+  int pointer_x_root, pointer_y_root;
   /* Event queue. */
   XEvent queue[X11_MAX_QUEUE];
   int q_head, q_tail;
@@ -138,7 +164,7 @@ int x11_wait_event(Display *d);
 
 /* Rasterize text directly into the shadow (used by XDrawString; exposed
  * for the host tests). */
-void x11_draw_text_shadow(Display *d, int x, int base_y, const char *s,
+void x11_draw_text_shadow(Display *d, GC gc, int x, int base_y, const char *s,
                           int n, uint32_t color);
 
 #endif

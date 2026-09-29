@@ -19,7 +19,11 @@ and implements it on the desktop's *pixel-mode* window protocol (the
   store enabled.
 - Input (keys and mouse in content-relative pixels) arrives on stdin and
   is decoded back into `XEvent`s: `Expose`, `ConfigureNotify`, `MapNotify`,
-  `KeyPress`, `ButtonPress/Release`, `MotionNotify`.
+  `KeyPress`, `ButtonPress/Release`, `MotionNotify`.  Once a pointer mask
+  is selected the desktop also sends throttled pointer-tracking reports
+  (`ESC [ T <x_root>;<y_root> ~`, screen coordinates) while the pointer
+  moves over the window — so hover-only programs (poke-the-ants
+  `ANTFARM.BIN`-style) work with no button held.
 
 ## Using it from an application
 
@@ -48,11 +52,22 @@ and implements it on the desktop's *pixel-mode* window protocol (the
 |----------|-------|
 | Display  | `XOpenDisplay`, `XCloseDisplay`, `DefaultScreen`, `DefaultRootWindow`, `RootWindow`, `WhitePixel`, `BlackPixel` |
 | Windows  | `XCreateSimpleWindow`, `XDestroyWindow`, `XMapWindow`, `XUnmapWindow`, `XSelectInput`, `XStoreName`, `XGetWindowAttributes` |
-| Drawing  | `XCreateGC`, `XFreeGC`, `XSetForeground`, `XClearWindow`, `XDrawPoint`, `XDrawLine`, `XDrawRectangle`, `XFillRectangle`, `XDrawString` |
+| Drawing  | `XCreateGC`, `XFreeGC`, `XSetForeground`, `XSetBackground`, `XClearWindow`, `XClearArea`, `XDrawPoint`, `XDrawLine`, `XDrawRectangle`, `XFillRectangle`, `XDrawString` |
+| GC state | `XSetFillStyle`, `XSetTile`, `XSetClipMask`, `XSetClipOrigin` (`FillSolid` and `FillTiled` only) |
+| Pixmaps  | `XCreateBitmapFromData`, `XCreatePixmapFromBitmapData`, `XFreePixmap` |
+| Pointer  | `XQueryPointer` |
 | Events   | `XNextEvent`, `XPending`, `XLookupString`, `XFlush`, `XSync` |
 
 Colors are 24-bit RGB values (`0xRRGGBB`), same as the framebuffer.
 `XDrawString()` uses the system 8x8 font; `y` is the text baseline.
+
+XBM bitmaps (depth-1 `char` arrays, row stride `(w + 7) / 8`) come in two
+flavours: `XCreateBitmapFromData()` makes an uncolored mask for
+`XSetClipMask()` — X11's sprite idiom, stamping the bitmap's shape in the
+GC foreground — and `XCreatePixmapFromBitmapData()` bakes its two colors
+in, so it can serve as a two-tone `XSetTile()` for dithered fills
+(classic sand).  Tiled fills anchor at the drawable origin, like X11's
+default `XSetTSOrigin`.
 
 ## Behaviour notes (differences from a real server)
 
@@ -74,6 +89,22 @@ Colors are 24-bit RGB values (`0xRRGGBB`), same as the framebuffer.
   `XNextEvent()` exits the process cleanly.
 - The event queue holds 64 events; nothing else is buffered by the
   library.
+- **Clip masks and tiled fills.**  `XSetClipMask()` gates every drawing
+  call with the mask's set bits; `XSetClipOrigin()` places mask (0,0) at a
+  drawable point.  `XSetClipMask(display, gc, None)` clears the clip;
+  freeing the mask pixmap does too.  Only these two fill styles exist —
+  `FillStippled`, `FillOpaqueStippled` etc. fall back to solid.
+- **`XClearArea()`** fills the rectangle with the window's `background`
+  color (the `XCreateSimpleWindow()` background argument); a zero width or
+  height means "to the window edge"; with `exposures` true it also queues
+  an `Expose` for the cleared rectangle.
+- **`XQueryPointer()`** answers from the last tracking report:
+  `root_x`/`root_y` are screen coordinates and `win_x`/`win_y`
+  content-relative; before the first report it answers the origin.
+  Tracking `MotionNotify` events carry the same split — `x`,`y` are
+  content-relative (possibly outside the window) and `x_root`,`y_root`
+  the screen position.  The desktop throttles reports to roughly one per
+  30 ms and only while the pointer actually moves.
 
 ## Files
 
@@ -83,10 +114,11 @@ include/X11/keysym.h     keysym constants (XK_*)
 xlib_internal.h          shared state + the wire protocol summary
 xlib_display.c           display, shadow/backing store, blit, flushing
 xlib_window.c            window lifecycle + outbound protocol messages
-xlib_draw.c              GCs, rasterizer, 8x8 text
-xlib_event.c             the byte decoder, event queue, pump
+xlib_draw.c              GCs, pixmaps, tiles/clips, rasterizer, 8x8 text
+xlib_event.c             the byte decoder, event queue, pump, tracking
 ```
 
 Host tests: `src/host/x11_lib_test.c` (`make x11_lib_test_host`) checks the
-protocol both ways, the shadow/flush/repair pixel behaviour and the event
-decoding against canned byte streams.
+protocol both ways, the shadow/flush/repair pixel behaviour, bitmap/tile/
+clip pixel goldens, `XClearArea`, the tracking decode and `XQueryPointer`,
+and the event decoding against canned byte streams.

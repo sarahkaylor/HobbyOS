@@ -27,6 +27,7 @@ APPS = [
     ("FILES", "FILES.BIN"),
     ("CALC", "CALC.BIN"),
     ("XCALC", "XCALC.BIN"),
+    ("XANTFARM", "ANTFARM.BIN"),
     ("CLOCK", "CLOCK.BIN"),
     ("SYSMON", "SYSMON.BIN"),
     ("HEX", "HEX.BIN"),

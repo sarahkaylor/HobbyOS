@@ -71,7 +71,16 @@
  * with x;y in content-relative pixels (cell coordinates for text
  * windows).  After painting, the app prints ESC ] F ~ ("frame flushed")
  * so the desktop can re-stamp the mouse pointer, which app drawing may
- * have overwritten. */
+ * have overwritten.
+ *
+ * Pointer tracking: a pixel window that opted into pointer events also
+ * receives ESC [ T <x_root>;<y_root> ~ -- "the pointer moved", in SCREEN
+ * coordinates, sent while the pointer moves whether or not a button is
+ * held (throttled to ~30 Hz; the drag 'G' above only fires for a window
+ * inside a press-drag-release it began).  This is the desktop's
+ * XQueryPointer-on-the-root equivalent: apps can follow the cursor
+ * anywhere on screen, like xeyes -- or the XANTFARM port, whose ants
+ * scatter away from the pointer. */
 #define PIX_MAX_EXPOSE 8
 
 /* A rectangle in screen (or content-relative) pixels. */

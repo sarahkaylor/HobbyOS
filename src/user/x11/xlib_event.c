@@ -75,7 +75,8 @@ static void key_event(Display *d, unsigned keycode) {
   x11_queue_event(d, &ev);
 }
 
-static void mouse_event(Display *d, int type, int x, int y, int btn) {
+static void mouse_event(Display *d, int type, int x, int y, int btn,
+                        unsigned state) {
   struct x11_win *w = &d->win;
   if (!d->have_window || w->destroyed) return;
   long need = (type == ButtonPress) ? ButtonPressMask
@@ -91,7 +92,7 @@ static void mouse_event(Display *d, int type, int x, int y, int btn) {
   ev.xbutton.y = y;
   ev.xbutton.x_root = w->gx + x;
   ev.xbutton.y_root = w->gy + y;
-  ev.xbutton.state = (type == MotionNotify) ? Button1Mask : 0;
+  ev.xbutton.state = state;
   ev.xbutton.button = (unsigned)btn;
   ev.xbutton.same_screen = True;
   x11_queue_event(d, &ev);
@@ -153,7 +154,9 @@ static void handle_repair(Display *d, const unsigned char *seq, int len) {
   x11_send(d, msg, sizeof msg);
 }
 
-/* ESC [ P/G/R <x>;<y>;<btn> ~ : mouse press / motion / release. */
+/* ESC [ P/G/R <x>;<y>;<btn> ~ : mouse press / motion / release.  Motion
+ * inside a drag session carries the button state; the coordinates are
+ * content-relative. */
 static void handle_mouse(Display *d, unsigned char kind,
                          const unsigned char *seq, int len) {
   (void)len;
@@ -169,7 +172,29 @@ static void handle_mouse(Display *d, unsigned char kind,
   int type = (kind == 'P') ? ButtonPress
            : (kind == 'R') ? ButtonRelease
            : MotionNotify;
-  mouse_event(d, type, x, y, btn);
+  mouse_event(d, type, x, y, btn,
+              (type == MotionNotify) ? Button1Mask : 0);
+}
+
+/* ESC [ T <x_root>;<y_root> ~ : the pointer moved (tracking).  The
+ * coordinates are SCREEN pixels -- the pointer is followed across the
+ * whole screen, like a client querying the root window -- so the
+ * content-relative x/y of the MotionNotify delivered here may fall
+ * outside the window.  Keeping the report current does not depend on
+ * any event mask (XQueryPointer() answers from it either way); the
+ * event itself only flows when PointerMotionMask is selected. */
+static void handle_track(Display *d, const unsigned char *seq, int len) {
+  (void)len;
+  int i = 1;                            /* skip 'T' */
+  int x = next_int(seq, &i);
+  if (x < 0) return;
+  if (seq[i] == ';') i++;
+  int y = next_int(seq, &i);
+  if (y < 0) return;
+  d->pointer_valid = 1;
+  d->pointer_x_root = x;
+  d->pointer_y_root = y;
+  mouse_event(d, MotionNotify, x - d->win.gx, y - d->win.gy, 0, 0);
 }
 
 /* ESC [ <letter> : keys with a one-letter final. */
@@ -215,6 +240,7 @@ static void csi_dispatch(Display *d, const unsigned char *seq, int len) {
   unsigned char k = seq[0];
   if (k == 'E') { handle_repair(d, seq, len); return; }
   if (k == 'P' || k == 'G' || k == 'R') { handle_mouse(d, k, seq, len); return; }
+  if (k == 'T') { handle_track(d, seq, len); return; }
   int i = 0;
   int n = next_int(seq, &i);
   if (n >= 0) csi_number(d, n);
@@ -389,4 +415,27 @@ int XLookupString(XKeyEvent *event, char *buffer_return, int bytes_buffer,
     n = 1;
   }
   return n;
+}
+
+/* The pointer's last reported position (from the desktop's tracking
+ * reports).  The "current" answer is the latest report -- there is no
+ * round trip to a server; before the first report both coordinates are 0.
+ * win_x/win_y are relative to the window's content origin and can fall
+ * outside the window (the pointer is tracked screen-wide). */
+Bool XQueryPointer(Display *display, Window w, Window *root_return,
+                   Window *child_return, int *root_x_return,
+                   int *root_y_return, int *win_x_return, int *win_y_return,
+                   unsigned int *mask_return) {
+  if (!display || !display->have_window || w != display->win.id) return False;
+  struct x11_win *win = &display->win;
+  int rx = display->pointer_valid ? display->pointer_x_root : 0;
+  int ry = display->pointer_valid ? display->pointer_y_root : 0;
+  if (root_return) *root_return = display->root;
+  if (child_return) *child_return = None;
+  if (root_x_return) *root_x_return = rx;
+  if (root_y_return) *root_y_return = ry;
+  if (win_x_return) *win_x_return = rx - win->gx;
+  if (win_y_return) *win_y_return = ry - win->gy;
+  if (mask_return) *mask_return = 0;
+  return True;
 }

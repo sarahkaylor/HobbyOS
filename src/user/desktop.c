@@ -103,6 +103,8 @@ static int mouse_y = SCREEN_HEIGHT / 2;
  * windows). Press, drag and release all go through
  * desktop_send_hook so host tests can capture them instead of writing to
  * the app's pipe. Windows that never see a press never get G/R events.
+ * (Motion WITHOUT a press -- cursor tracking -- is the separate
+ * ESC [ T report built and sent further down; see wm_hover_service.)
  *
  * The helper functions below are non-static so src/host/desktop_drag_test.c
  * can drive them directly. */
@@ -286,6 +288,65 @@ int wm_build_mouse_seq(char *out, int cap, char kind, int col, int row, int btn)
   for (int i = 0; i < j; i++) out[i] = body[i];
   out[j] = '\0';
   return j;
+}
+
+/* Build a pointer-tracking report: ESC [ T <x_root>;<y_root> ~
+ * x/y are SCREEN coordinates (unlike the content-relative mouse trio
+ * above).  Returns the byte count (excluding the NUL), like
+ * wm_build_mouse_seq. */
+int wm_build_hover_seq(char *out, int cap, int x, int y) {
+  char body[24];
+  int j = 0;
+  body[j++] = 27; body[j++] = '[';
+  body[j++] = 'T';
+  j = seq_append_int(body, j, x);
+  body[j++] = ';';
+  j = seq_append_int(body, j, y);
+  body[j++] = '~';
+  if (j > cap - 1) j = cap - 1;
+  for (int i = 0; i < j; i++) out[i] = body[i];
+  out[j] = '\0';
+  return j;
+}
+
+/* ---- Pointer tracking (hover) for pixel windows ----------------------
+ * A pixel window that opted into pointer events (ESC ] P 1 ~) receives
+ * the pointer's SCREEN position as ESC [ T <x_root>;<y_root> ~ while the
+ * pointer moves, button held or not -- the desktop equivalent of a client
+ * polling XQueryPointer against the root window, which is what
+ * cursor-following apps (the XANTFARM port's "poke the ants") need.  The
+ * press/drag/release trio above only fires for the window the button went
+ * down in; tracking fires for whoever asked, pointer anywhere on screen.
+ *
+ * Reports are throttled to one per HOVER_MIN_MS of movement: the app's
+ * stdin pipe is small and a blocked pipe write would freeze the desktop,
+ * and a cursor-follower needs no more than ~30 Hz anyway.  Because this
+ * runs every pass of the main loop, the latest position is delivered as
+ * soon as the interval has passed -- a fast flick can be coalesced but
+ * never lost.  A window holding a drag session is skipped: its motion
+ * already arrives as the content-relative drag 'G' message.
+ *
+ * Non-static (like the drag helpers above) so desktop_pixel_test.c can
+ * drive it directly and capture reports through desktop_send_hook. */
+
+#define HOVER_MIN_MS 30
+static int hover_sent_x = -1, hover_sent_y = -1;  /* pos the app has seen */
+static int hover_sent_ms = 0;                     /* when sent (0 = never) */
+
+void wm_hover_service(int mx, int my, int now_ms) {
+  if (mx == hover_sent_x && my == hover_sent_y) return;   /* still */
+  if (hover_sent_ms != 0 && now_ms - hover_sent_ms < HOVER_MIN_MS) return;
+  hover_sent_ms = now_ms;
+  hover_sent_x = mx;
+  hover_sent_y = my;
+  char seq[24];
+  int n = wm_build_hover_seq(seq, sizeof seq, mx, my);
+  for (int i = 0; i < num_windows; i++) {
+    struct window *w = &windows[i];
+    if (!w->pixel_mode || !w->mouse_events) continue;
+    if (w->id == drag_win_id) continue;
+    desktop_send_hook(w->id, seq, n);
+  }
 }
 
 /* Map absolute pointer coordinates to the content cell (col,row) of window
@@ -517,7 +578,7 @@ void wm_handle_app_escape(int win_id, char* seq) {
  * and move ahead of everything else, which keeps its own order. Editing
  * these lists is the only change needed to alter what gets pinned. */
 static const char *const pinned_apps[] = {
-  "CONSOLE.BIN", "FILES.BIN", "CALC.BIN", "XCALC.BIN", "CLOCK.BIN", "SYSMON.BIN",
+  "CONSOLE.BIN", "FILES.BIN", "CALC.BIN", "XCALC.BIN", "ANTFARM.BIN", "CLOCK.BIN", "SYSMON.BIN",
   "HEX.BIN", "TASKS.BIN", "FIND.BIN", "DIFF.BIN", "NOTES.BIN",
   "NANO.BIN", "UNIT.BIN",
 };
@@ -1579,6 +1640,12 @@ int main(void) {
         if (drag_win_id >= 0) desktop_drag_move(mouse_x, mouse_y);
       }
     }
+
+    /* Pointer tracking: hand the (possibly just moved) position to every
+     * pixel window that opted into pointer events.  Runs every pass (not
+     * only on motion) so a throttled position is delivered once its
+     * interval has passed; see wm_hover_service. */
+    wm_hover_service(mouse_x, mouse_y, now_ms);
 
     /* A key held on the keyboard keeps firing through the focused window
      * (software auto-repeat; see key_repeat_tick). */

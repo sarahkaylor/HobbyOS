@@ -17,6 +17,10 @@
  *      pixels and clamp to the content rectangle; text windows keep cells.
  *   6. A reflow (another window appearing) re-sends the geometry and asks
  *      for a full repair.
+ *   7. Pointer tracking (hover): opted-in pixel windows receive throttled
+ *      ESC [ T <x_root>;<y_root> ~ reports (SCREEN coordinates) while the
+ *      pointer moves without a button; text and non-opted windows receive
+ *      none, and the window holding a drag session is skipped.
  *
  * desktop.c is included directly (desktop_term_test-style) so the byte
  * dispatch and file-scope state under test are reachable; the test binary
@@ -56,17 +60,32 @@ static void check(int cond, const char *msg) {
 static char cap[CAP_MAX];
 static int cap_len;
 static int cap_calls;
+static int cap_first_win, cap_last_win;   /* recipients, in delivery order */
 
-static void cap_reset(void) { cap_len = 0; cap[0] = '\0'; cap_calls = 0; }
+static void cap_reset(void) {
+  cap_len = 0;
+  cap[0] = '\0';
+  cap_calls = 0;
+  cap_first_win = cap_last_win = -1;
+}
 
 static void cap_hook(int win_id, const char *buf, int len) {
-  (void)win_id;
+  if (cap_calls == 0) cap_first_win = win_id;
+  cap_last_win = win_id;
   cap_calls++;
   for (int i = 0; i < len && cap_len < CAP_MAX - 1; i++) cap[cap_len++] = buf[i];
   cap[cap_len] = '\0';
 }
 
 static int cap_is(const char *want) { return strcmp(cap, want) == 0; }
+
+/* How many times `needle` appears in the captured bytes (a report to two
+ * windows lands as the same bytes twice). */
+static int cap_occurrences(const char *needle) {
+  int n = 0, len = (int)strlen(needle);
+  for (const char *p = cap; (p = strstr(p, needle)) != NULL; p += len) n++;
+  return n;
+}
 
 /* Create a window whose stdin is the write end of a fresh pipe; the read
  * end (non-blocking) is returned so the test can read what the desktop
@@ -87,6 +106,17 @@ static struct window *win_by_id(int id) {
   for (int i = 0; i < num_windows; i++)
     if (windows[i].id == id) return &windows[i];
   return 0;
+}
+
+/* Like make_window_with_pipe but without the state reset: for tests that
+ * need several windows at once. */
+static int add_window_with_pipe(int *rd) {
+  int p[2];
+  ho_pipe(p);
+  fcntl(p[0], F_SETFL, O_NONBLOCK);
+  int id = wm_create_window(0, 1, -1, p[1]);
+  *rd = p[0];
+  return id;
 }
 
 static int drain(int rd, char *buf, int cap_) {
@@ -453,6 +483,63 @@ static void test_pixel_input(void) {
   wm_remove_window(id);
 }
 
+/* 7. Pointer tracking (hover): opted-in pixel windows receive throttled
+ * ESC [ T <x_root>;<y_root> ~ reports in SCREEN coordinates while the
+ * pointer moves; text and non-opted windows receive none. */
+static void test_hover_tracking(void) {
+  desktop_send_hook = cap_hook;
+
+  wm_init();
+  num_windows = 0;
+  int rd_p1, rd_p2, rd_t, rd_no;
+  int wp1 = add_window_with_pipe(&rd_p1);      /* pixel + pointer opt-in */
+  int wp2 = add_window_with_pipe(&rd_p2);      /* pixel + pointer opt-in */
+  int wt  = add_window_with_pipe(&rd_t);       /* TEXT + pointer opt-in  */
+  int wno = add_window_with_pipe(&rd_no);      /* pixel, no opt-in       */
+
+  feed(win_by_id(wp1), "\033]X 400;300~");
+  feed(win_by_id(wp2), "\033]X 300;200~");
+  feed(win_by_id(wno), "\033]X 200;100~");
+  feed(win_by_id(wp1), "\033]P 1~");
+  feed(win_by_id(wp2), "\033]P 1~");
+  feed(win_by_id(wt), "\033]P 1~");
+
+  /* A move is reported to both opted-in pixel windows, as screen
+   * coordinates, and to nobody else (one report per window). */
+  cap_reset();
+  wm_hover_service(100, 200, 1000);
+  check(cap_calls == 2 &&
+        cap_occurrences("\033[T100;200~") == 2 &&
+        cap_first_win == wp1 && cap_last_win == wp2,
+        "a move reports T x;y~ to each opted-in pixel window");
+
+  cap_reset();
+  wm_hover_service(100, 200, 1010);
+  check(cap_calls == 0, "a still pointer stays silent");
+
+  cap_reset();
+  wm_hover_service(140, 260, 1020);
+  check(cap_calls == 0, "reports are throttled (20ms after the last send)");
+
+  cap_reset();
+  wm_hover_service(140, 260, 1050);
+  check(cap_calls == 2 && cap_occurrences("\033[T140;260~") == 2,
+        "the throttled position lands on a later pass (never lost)");
+
+  /* The window holding a drag session is skipped: its motion already
+   * arrives as the content-relative drag 'G' message. */
+  cap_reset();
+  desktop_drag_begin(wp1, 0, 0);
+  wm_hover_service(300, 400, 1100);
+  check(cap_calls == 1 && cap_last_win == wp2 && cap_is("\033[T300;400~"),
+        "the drag window is skipped, the others still track");
+  desktop_drag_cancel();
+
+  desktop_send_hook = 0;
+  wm_init();
+  num_windows = 0;
+}
+
 /* 6. A reflow re-sends the geometry and asks for a full repair. */
 static void test_reflow_renotify(void) {
   char buf[256], want[128];
@@ -487,6 +574,7 @@ int main(void) {
   test_wallpaper_carve();
   test_restamp();
   test_pixel_input();
+  test_hover_tracking();
   test_reflow_renotify();
 
   printf("[TEST] %d checks, %d failed\n", checks, fails);

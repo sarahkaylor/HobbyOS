@@ -54,6 +54,15 @@ static int cap_end(char *out, int cap) {
   return n;
 }
 
+/* Flush without polluting the test's own stdout: the library writes ] F
+ * to fd 1 on flush, so capture and drop the bytes. */
+static void flush_quiet(Display *d) {
+  char junk[16];
+  cap_begin();
+  XFlush(d);
+  cap_end(junk, sizeof junk);
+}
+
 /* ---- helpers --------------------------------------------------------- */
 
 static void feed(Display *d, const char *s) {
@@ -339,8 +348,219 @@ static void test_no_surface_yet(Display *d) {
   /* And geometry completes normally afterwards. */
   feed(fresh, "\033]G0;0;100;80~");
   check(fresh->win.shadow != NULL && fresh->win.cw == 100, "later geometry works");
+  /* The pointer default before any tracking report: the origin. */
+  Window root, child;
+  int rx, ry, wx, wy;
+  unsigned pmask;
+  check(XQueryPointer(fresh, w, &root, &child, &rx, &ry, &wx, &wy, &pmask) == True &&
+        rx == 0 && ry == 0 && wx == 0 && wy == 0,
+        "XQueryPointer defaults to the origin before any report");
   XCloseDisplay(fresh);
   (void)d;
+}
+
+/* ---- pixmaps, tiles, cliplets (XANTFARM-era additions) --------------- */
+
+/* 4x4 checkerboard XBM: row 0 = 0b1010 LSB-first -> bg,fg,bg,fg. */
+static const unsigned char checker4[] = { 0x0a, 0x05, 0x0a, 0x05 };
+
+/* 8x8 diamond, packed one byte per row (LSB = leftmost). */
+static const unsigned char diamond8[] = {
+  0x00, 0x18, 0x3c, 0x7e, 0x7e, 0x3c, 0x18, 0x00
+};
+
+static void test_pointer_tracking(Display *d, Window w) {
+  XEvent ev;
+  Window root, child;
+  int rx, ry, wx, wy;
+  unsigned mask;
+
+  XSelectInput(d, w, ExposureMask | PointerMotionMask);
+  feed(d, "\033[T 120;260~");
+  check(qlen(d) == 1, "tracking report queues MotionNotify with the mask set");
+  pop(d, &ev);
+  check(ev.type == MotionNotify && ev.xbutton.x == 118 && ev.xbutton.y == 226 &&
+        ev.xbutton.x_root == 120 && ev.xbutton.y_root == 260 &&
+        ev.xbutton.state == 0,
+        "tracking motion is content-relative but anchored to the screen");
+
+  check(XQueryPointer(d, w, &root, &child, &rx, &ry, &wx, &wy, &mask) == True &&
+        rx == 120 && ry == 260 && wx == 118 && wy == 226,
+        "XQueryPointer reports the tracked position");
+
+  /* Without the mask the position still updates (query-only apps). */
+  XSelectInput(d, w, ExposureMask);
+  feed(d, "\033[T 200;300~");
+  check(qlen(d) == 0, "no MotionNotify without the mask");
+  XQueryPointer(d, w, &root, &child, &rx, &ry, &wx, &wy, &mask);
+  check(rx == 200 && ry == 300 && wx == 198 && wy == 266,
+        "query tracks even without the mask");
+
+  /* Restore the mask set the following tests expect. */
+  XSelectInput(d, w, ExposureMask | ButtonPressMask | ButtonReleaseMask);
+}
+
+static void test_pixmaps_tiles(Display *d, Window w) {
+  GC gc = XCreateGC(d, w, 0, NULL);
+
+  Pixmap tile = XCreateBitmapFromData(d, w, (const char *)checker4, 4, 4);
+  check(tile != 0, "XCreateBitmapFromData returns a pixmap");
+
+  XClearArea(d, w, 0, 0, 0, 0, False);
+  XSetForeground(d, gc, 0x00FFFFFF);
+  XSetBackground(d, gc, 0x00FF0000);
+  XSetFillStyle(d, gc, FillTiled);
+  XSetTile(d, gc, tile);
+  XFillRectangle(d, w, gc, 0, 0, 8, 8);
+  flush_quiet(d);
+
+  int tiled_ok = 1;
+  for (int y = 0; y < 8; y++) {
+    for (int x = 0; x < 8; x++) {
+      uint32_t want = ((checker4[y % 4] >> (x % 4)) & 1)
+                          ? 0x00FFFFFFu : 0x00FF0000u;
+      if (graphics_get_pixel(2 + x, 34 + y) != want) tiled_ok = 0;
+    }
+  }
+  check(tiled_ok, "plain tile stamps fg/bg bits, anchored at the origin");
+
+  /* The pattern anchors at the drawable origin: a fill further in shows
+   * the same phase. */
+  XFillRectangle(d, w, gc, 8, 8, 4, 4);
+  flush_quiet(d);
+  check(graphics_get_pixel(2 + 8, 34 + 8) == 0x00FF0000u &&
+        graphics_get_pixel(2 + 9, 34 + 8) == 0x00FFFFFFu,
+        "tile phase repeats with the origin anchor");
+
+  /* A colored pixmap carries its own two colors; the GC colors are moot. */
+  Pixmap sprite = XCreatePixmapFromBitmapData(d, w, (const char *)checker4,
+                                              4, 4, 0x0000FF00, 0x000000FF, 1);
+  check(sprite != 0, "XCreatePixmapFromBitmapData returns a pixmap");
+  XSetTile(d, gc, sprite);
+  XFillRectangle(d, w, gc, 20, 0, 4, 4);
+  flush_quiet(d);
+  check(graphics_get_pixel(2 + 20, 34 + 0) == 0x000000FFu &&
+        graphics_get_pixel(2 + 21, 34 + 0) == 0x0000FF00u,
+        "colored tile stamps its baked colors");
+
+  /* Freeing the tile falls back to a plain fill. */
+  XFreePixmap(d, sprite);
+  XSetForeground(d, gc, 0x00ABCDEF);
+  XFillRectangle(d, w, gc, 24, 0, 4, 4);
+  flush_quiet(d);
+  check(graphics_get_pixel(2 + 24, 34 + 0) == 0x00ABCDEFu &&
+        graphics_get_pixel(2 + 26, 34 + 1) == 0x00ABCDEFu,
+        "a freed tile reverts to a solid fill");
+
+  XSetFillStyle(d, gc, FillSolid);
+  XFreePixmap(d, tile);
+  XFreeGC(d, gc);
+}
+
+static void test_clip_mask(Display *d, Window w) {
+  GC gc = XCreateGC(d, w, 0, NULL);
+  Pixmap mask = XCreateBitmapFromData(d, w, (const char *)diamond8, 8, 8);
+  check(mask != 0, "mask bitmap created");
+
+  XClearArea(d, w, 0, 0, 0, 0, False);
+  XSetForeground(d, gc, 0x0000FFFF);
+  XSetClipMask(d, gc, mask);
+  XSetClipOrigin(d, gc, 0, 0);
+  XFillRectangle(d, w, gc, 0, 0, 8, 8);
+  flush_quiet(d);
+
+  int clip_ok = 1;
+  for (int y = 0; y < 8; y++) {
+    for (int x = 0; x < 8; x++) {
+      int bit = (diamond8[y] >> x) & 1;
+      uint32_t want = bit ? 0x0000FFFFu : 0x00000000u;
+      if (graphics_get_pixel(2 + x, 34 + y) != want) clip_ok = 0;
+    }
+  }
+  check(clip_ok, "clip mask gates every pixel");
+
+  /* Origin moves the mask with it. */
+  XClearArea(d, w, 0, 0, 0, 0, False);
+  XSetClipOrigin(d, gc, 2, 1);
+  XFillRectangle(d, w, gc, 0, 0, 8, 8);
+  flush_quiet(d);
+  int origin_ok = 1;
+  for (int y = 0; y < 8; y++) {
+    for (int x = 0; x < 8; x++) {
+      int mx = x - 2, my = y - 1;
+      int bit = (mx >= 0 && my >= 0 && my < 8) ? ((diamond8[my] >> mx) & 1) : 0;
+      uint32_t want = bit ? 0x0000FFFFu : 0x00000000u;
+      if (graphics_get_pixel(2 + x, 34 + y) != want) origin_ok = 0;
+    }
+  }
+  check(origin_ok, "clip origin shifts the mask");
+
+  /* The sprite combo: a colored tile stamps while the mask gates -- the
+   * exact pair XANTFARM uses to stamp its ants. */
+  Pixmap sprite = XCreatePixmapFromBitmapData(d, w, (const char *)diamond8,
+                                              8, 8, 0x00FF00FF, 0x0000FF00, 1);
+  XClearArea(d, w, 0, 0, 0, 0, False);
+  XSetClipOrigin(d, gc, 0, 0);
+  XSetFillStyle(d, gc, FillTiled);
+  XSetTile(d, gc, sprite);
+  XFillRectangle(d, w, gc, 0, 0, 8, 8);
+  flush_quiet(d);
+  check(graphics_get_pixel(2 + 3, 34 + 1) == 0x00FF00FFu &&
+        graphics_get_pixel(2 + 0, 34 + 0) == 0x00000000u,
+        "clip + colored tile stamps sprite pixels only under the mask");
+
+  /* Clearing the mask (None) restores full coverage. */
+  XSetClipMask(d, gc, None);
+  XSetFillStyle(d, gc, FillSolid);
+  XSetForeground(d, gc, 0x00C0C0C0);
+  XFillRectangle(d, w, gc, 0, 0, 4, 4);
+  flush_quiet(d);
+  check(graphics_get_pixel(2 + 0, 34 + 0) == 0x00C0C0C0u,
+        "None clears the clip mask");
+
+  /* Freeing the mask is graceful too: drawing behaves as unclipped. */
+  XSetClipMask(d, gc, mask);
+  XFreePixmap(d, mask);
+  XFillRectangle(d, w, gc, 8, 0, 4, 4);
+  flush_quiet(d);
+  check(graphics_get_pixel(2 + 8, 34 + 0) == 0x00C0C0C0u,
+        "freeing a clip mask stops it from clipping");
+
+  XFreeGC(d, gc);
+}
+
+static void test_clear_area(Display *d, Window w) {
+  XEvent ev;
+  GC gc = XCreateGC(d, w, 0, NULL);
+
+  XClearArea(d, w, 0, 0, 0, 0, False);
+  XSetForeground(d, gc, 0x00123456);
+  XFillRectangle(d, w, gc, 0, 0, 40, 40);
+  XClearArea(d, w, 10, 10, 10, 10, False);
+  flush_quiet(d);
+  check(graphics_get_pixel(2 + 10, 34 + 10) == 0x000000u &&
+        graphics_get_pixel(2 + 19, 34 + 19) == 0x000000u &&
+        graphics_get_pixel(2 + 20, 34 + 20) == 0x00123456u &&
+        graphics_get_pixel(2 + 9, 34 + 9) == 0x00123456u,
+        "XClearArea clears exactly its rectangle to the background");
+
+  /* Zero size means "to the right/bottom edge", like Xlib. */
+  XClearArea(d, w, 30, 30, 0, 0, False);
+  flush_quiet(d);
+  check(graphics_get_pixel(2 + 30, 34 + 30) == 0x000000u &&
+        graphics_get_pixel(2 + 29, 34 + 29) == 0x00123456u &&
+        graphics_get_pixel(2 + 40, 34 + 100) == 0x000000u,
+        "zero width/height clears to the edges");
+
+  /* exposures=True queues an Expose for the cleared rectangle. */
+  XClearArea(d, w, 1, 2, 3, 4, True);
+  check(qlen(d) == 1, "exposures=True queues an Expose");
+  pop(d, &ev);
+  check(ev.type == Expose && ev.xexpose.x == 1 && ev.xexpose.y == 2 &&
+        ev.xexpose.width == 3 && ev.xexpose.height == 4,
+        "the Expose carries the cleared rectangle");
+
+  XFreeGC(d, gc);
 }
 
 int main(void) {
@@ -359,6 +579,10 @@ int main(void) {
   test_draw_and_flush(d, w);
   test_repair(d);
   test_mouse(d, w);
+  test_pointer_tracking(d, w);
+  test_pixmaps_tiles(d, w);
+  test_clip_mask(d, w);
+  test_clear_area(d, w);
   test_keys(d, w);
   test_geometry_reflow(d);
   test_no_surface_yet(d);
