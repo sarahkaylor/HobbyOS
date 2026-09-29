@@ -19,6 +19,12 @@ qemu.log
 disk.img
 guest.img
 
+# Vendored upstream source trees extracted from pinned tarballs.  The pinned
+# tarball + .sums (+ patches/ + README once ports land) are committed; the
+# extraction is rebuilt from the tarball — WebKit is ~1 GB of sources and
+# tracks in its own fork repo (browser.md AD-11/Appendix C).
+third_party/wpewebkit-2.54.0/
+
 # Test output
 actual_qemu.ppm
 qmp-sock
