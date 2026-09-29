@@ -1,7 +1,8 @@
 # Browser Plan — a JavaScript-capable browser for HobbyOS (v2)
 
-Status: **v2 — proposed plan for review, supersedes the v1 "Dillo 3.2.0 + FLTK
-1.3.11" plan written earlier the same day.** v2 was produced after the
+Status: **v2 — reviewed: Track B (WebKit) endorsed as the primary/approved
+track (maintainer review 2026-09-29, §0.2); supersedes the v1 "Dillo 3.2.0 +
+FLTK 1.3.11" plan written earlier the same day.** v2 was produced after the
 requirement was raised to: *"a browser with JavaScript support so that pages
 like Google Search or CNN realistically work."* Planning document only — it
 changes no code; it is the execution plan for the work.
@@ -26,12 +27,13 @@ engine, and the only eligible one is WebKit.** (This is the same engine family
 that runs those exact sites on iPhones: the risk in this program is entirely in
 *bringing the engine up on a new OS*, not in web capability.)
 
-**The plan has two tracks:**
+**The plan is Track B-first; Track A is retained only as an optional
+contingency:**
 
 | Track | What | Role | Scale |
 |---|---|---|---|
-| **B — WebKit** (target) | WebKit **2.54.0**, WPE-flavored sources, a custom *HobbyOS* platform port (no GTK/GLib/X11; WebKit2 multi-process; Skia CPU raster; libcurl+mbedTLS networking; JSC with no JIT) | **Meets the Google/CNN bar.** The largest program in the repo's history — staged so usable value lands early: a `jsc` JS shell → headless page render → browser shell with JS → networked → acceptance | Years of agent-session work; gates at every stage |
-| **A — NetSurf** (interim, optional-recommended) | NetSurf **3.11** + Duktape JS, framebuffer (no-X) frontend, our pixel-window protocol | A genuinely better browser than v1's Dillo, months-scale; **partial JS — does not meet the Google bar alone**; acts as OS-plumbing validator and as the fallback if Track B stalls late | Months; reuses the same libcurl/mbedTLS/font stack |
+| **B — WebKit** (target) | WebKit **2.54.0**, WPE-flavored sources, a custom *HobbyOS* platform port (no GTK/GLib/X11; WebKit2 multi-process; Skia CPU raster; libcurl+mbedTLS networking; JSC with no JIT) | **Meets the Google/CNN bar. Endorsed as the primary/approved track** (maintainer review 2026-09-29, §0.2). Staged so usable value lands early: a `jsc` JS shell → headless page render → browser shell with JS → networked → acceptance | Years of agent-session work; gates at every stage |
+| **A — NetSurf** (optional contingency — dormant by default) | NetSurf **3.11** + Duktape JS, framebuffer (no-X) frontend, our pixel-window protocol | **Not scheduled by default.** Retained as a late fallback if Track B hits a hard wall, or an early-win option only if explicitly requested. Partial JS — does not meet the Google bar alone. Reuses the same libcurl/mbedTLS/font stack | Months (if invoked) |
 
 **What carries over from v1 unchanged** (the bulk of the *near-term* OS work):
 
@@ -97,8 +99,11 @@ valid they are kept, marked *(v1: Tx.y)*.
   §9 includes hard checkpoints where the program can be paused/re-scoped with
   whatever has landed (each milestone is independently valuable: jsc shell,
   headless renderer, networked browser).
-- If you must cut one: cut Track A. If you must cut the other: you have
-  redefined the requirement back to "a nice small browser" — update this doc.
+- **Maintainer review (2026-09-29): Track B is the best track — it is the
+  primary and approved path.** Consequence: Track A is re-scoped to *optional
+  contingency* — dormant by default; invoked only on explicit request or as a
+  late fallback if Track B hits a wall. The default schedule is Track B only:
+  §6 NS milestones and §7 lane L7 stay documented but do not start.
 
 ---
 
@@ -488,7 +493,7 @@ not tick a gate it did not run.
 scheduled); §10 open questions closed or converted to tasks; spike plan in
 place; `git status` clean of unintended edits.
 
-### F1 — OS foundations (v1 M1 carried; **critical path for Track A**)
+### F1 — OS foundations (v1 M1 carried; foundation for both tracks — first in sequence)
 
 Goal: the OS can run a `select()`-driven, socket-using, floating-point C/C++
 program of several MiB.
@@ -668,7 +673,7 @@ HobbyOS arches as far as the current P-stage allows (this gate is *incremental*
 **Gate P8:** green both arches; §11 updated with the numbers. *This is the
 "OS is ready for WebKit" evidence.*
 
-### NS — NetSurf track  *(Track A; can run early and stop at NS-5)*
+### NS — NetSurf track  *(Track A — optional contingency, **dormant by default**; start only if invoked. Track B does not depend on it.)*
 
 - [ ] **NS-1 Host build** — pristine NetSurf 3.11 + libs on the workstation;
       framebuffer target built and smoked (W0.6 continues); two-build rule
@@ -769,7 +774,7 @@ owned paths unless the brief says otherwise.
 | **L4 — desktop** | F1.8 | `desktop.c`, `window.h`, `desktop_*_test.c` | F0 | small; finishes early |
 | **L5 — fonts/images** | font stack (FreeType+harfbuzz+backend) | `third_party/freetype*`, harfbuzz vendored, font assets, backend files | F0; needs P2 for WebKit scale only later | host-first |
 | **L6 — libs-3p (host-first)** | libcurl, SQLite, ICU, Skia spike, zlib/png/jpeg/webp, NetSurf libs | `third_party/**` (build scripts), `src/user/<glue>` config | F0 — **no HobbyOS build needed** | parallelization engine |
-| **L7 — NetSurf (Track A)** | NS-1…NS-6 (host-side early) | `src/user/browser/netsurf/**`, `src/user/browser/tools/**` | F0 pins; on-OS parts need F1/F2 | |
+| **L7 — NetSurf (Track A)** | NS-1…NS-6 (host-side early) | `src/user/browser/netsurf/**`, `src/user/browser/tools/**` | F0 pins; on-OS parts need F1/F2 | **dormant by default (§0.2)** |
 | **L8 — WebKit port (Track B)** | P7, WK-0…WK-7 | fork clone (own repo, worktrees), `src/user/browser/webkit/**` on-OS glue | P-stages landing; JSC needs P1–P3 min | split sub-lanes when ≥3 sessions: **L8a build/port**, **L8b JSC**, **L8c render/text**, **L8d network/UI** — single-writer map stays on the fork files |
 | **L9 — test/QA** | suites in §8.2, fixtures, harnesses | `src/user/*_test.c`, `tests/fixtures/**`, `run_*.py` | each milestone | |
 | **I — Integrator** | all gates | `Makefile`, disk recipe, test-wave lists, merges, §11 | — | single writer |
@@ -782,24 +787,28 @@ owned paths unless the brief says otherwise.
   unblocks the most), L3 (F2 headers/wrappers — compileable against frozen
   numbers before syscalls exist), L4 (F1.8), L5 (FreeType host build + font
   assets), L6 (NetSurf libs + libcurl + SQLite host builds; Skia spike),
-  L7 (NS-1/NS-2 host-only), L8 (P7.1 fork stand-up + port scaffolding; WK-0).
-  → **up to 8 concurrent sessions** in this wave.
+  L7 (Track A host-only — dormant by default; skip unless invoked), L8 (P7.1
+  fork stand-up + port scaffolding; WK-0).
+  → **up to 8 concurrent sessions** in this wave (7 if Track A stays dormant).
 - **Wave 2:** L1 finishes; L2 continues P2 (VM — the long pole) then P4/P5;
-  L3 starts P3 when P1 minimum lands; L7 NS-3…NS-5 as F1/F2 gate; L8 builds
-  what it can (WK-2 stubs); L9 grows with each gate;
-  **checkpoint CP-1 after F1+F2:** Track A should have a rendering-in-OS
-  target; Track B should have WTF compiling.
+  L3 starts P3 when P1 minimum lands; L7 NS-3…NS-5 as F1/F2 gate (only if
+  Track A is active); L8 builds what it can (WK-2 stubs); L9 grows with each
+  gate; **checkpoint CP-1 after F1+F2:** Track B should have WTF compiling
+  (Track A, if invoked, a rendering-in-OS target).
 - **Wave 3:** L2 P5/P8; L3 P6 (SQLite); L8 WK-1 (`jsc`) as P1–P3 minimums
   land → **checkpoint CP-2 at WK-1 gate: go/no-go review (cost-so-far vs
   remaining; the architecture decision WK-1.5 is made here).**
 - **Wave 4:** L2 tail; L8 WK-2 → WK-3 (headless) — **checkpoint CP-3: does a
-  page render? (this is the "engine actually works" moment)**; L7 wraps.
+  page render? (this is the "engine actually works" moment)**; L7 wraps (if
+  active).
 - **Wave 5:** L8 WK-4/WK-5 (network, UI shell); L9 E2E.
 - **Wave 6:** WK-6 acceptance, WK-7 hardening; docs; final gates.
 
 Rule (from v1): a lane never starts its in-OS tests before its dependency
 milestone's gate passed on the merged tree; host-side work has no such
 constraint — host builds/tests are the parallelization engine of early waves.
+Track A note: L7 is dormant by default (§0.2) — if the contingency is
+invoked, run its NS tasks alongside Waves 2–4 as written.
 
 ### 7.3 Frozen interfaces (binding)
 
@@ -846,8 +855,9 @@ constraint — host builds/tests are the parallelization engine of early waves.
 - **L6:** host builds: NetSurf libs → libcurl (+mbedTLS) → SQLite → ICU →
   Skia spike (timeboxed; write result to §11); produce build scripts that
   the target builds will reuse.
-- **L7:** NS-1/NS-2 host-only until F1/F2 gates; keep every patch inside the
-  two-build rule; fixtures land early for both tracks (shared in
+- **L7 (dormant by default — start only if the Track A contingency is
+  invoked):** NS-1/NS-2 host-only until F1/F2 gates; keep every patch inside
+  the two-build rule; fixtures land early for both tracks (shared in
   `tests/fixtures/browser/`).
 - **L8:** P7.1 fork stand-up immediately (no OS deps); port scaffolding with
   `USE_SYSTEM_MALLOC` + trimmed flags; WK-1 attempt as soon as P1–P3 minimums
@@ -1161,6 +1171,10 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-09-29 — **Maintainer review of v2: Track B endorsed as the best /
+  primary track.** Consequences: Track A re-scoped to optional contingency
+  (dormant by default — §0.2, §6 NS, §7 lanes/waves/briefs); status line,
+  Track table and wave notes updated accordingly. No other changes; no code.
 - 2026-09-29 — **browser.md v2 (this document).** Requirement raised to
   "JavaScript so Google Search / CNN realistically work"; v1 Dillo+FLTK plan
   superseded before execution. Verified field evidence: Google serves a
