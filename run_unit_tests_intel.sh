@@ -1,12 +1,32 @@
 #!/bin/bash
 
-# Clear old log
-rm -f qemu.log
+# Unit-test tier (x86_64): build first, run second.
+#
+# Same two-phase structure as run_unit_tests.sh (see its comments for why:
+# the 20s budget covers the run, not the cold build, and the cleanup kills
+# this run's own process tree only).
+#
+# EXTRA_QEMU_ARGS lets CI add acceleration (e.g. "-enable-kvm"); default is
+# a plain headless TCG run.
 
-echo "Building and running unit tests..."
+rm -f qemu.log build.log
+EXTRA_QEMU_ARGS="${EXTRA_QEMU_ARGS:-}"
 
-# Run the test target in background
-make ARCH=intel MODE=unit_tests QEMU_ARGS="-display none" run > qemu.log 2>&1 &
+echo "Building unit test image..."
+if ! make ARCH=intel MODE=unit_tests hobbyos.elf disk.img > build.log 2>&1; then
+    echo "Build failed!"
+    tail -60 build.log
+    exit 1
+fi
+
+cleanup() {
+    pkill -P "$QEMU_PID" 2>/dev/null
+    kill "$QEMU_PID" 2>/dev/null
+    wait "$QEMU_PID" 2>/dev/null
+}
+
+echo "Running unit tests..."
+make ARCH=intel MODE=unit_tests run QEMU_ARGS="-display none $EXTRA_QEMU_ARGS" > qemu.log 2>&1 &
 QEMU_PID=$!
 
 # Wait for tests to finish or timeout after 20 seconds
@@ -15,12 +35,12 @@ while [ $TIMEOUT -gt 0 ]; do
     if grep -q "UNIT TESTS PASSED" qemu.log; then
         echo "Tests passed!"
         cat qemu.log
-        kill $QEMU_PID 2>/dev/null || true
+        cleanup
         exit 0
     elif grep -q "UNIT TESTS FAILED" qemu.log; then
         echo "Tests failed!"
         cat qemu.log
-        kill $QEMU_PID 2>/dev/null || true
+        cleanup
         exit 1
     fi
     sleep 1
@@ -29,5 +49,5 @@ done
 
 echo "Tests timed out!"
 cat qemu.log
-kill $QEMU_PID 2>/dev/null || true
+cleanup
 exit 1
