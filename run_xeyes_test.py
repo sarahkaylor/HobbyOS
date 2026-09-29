@@ -13,7 +13,11 @@ What it verifies:
   3. tracking - move the pointer to the left / right / top / bottom of
                 the window; the pupils' centroid inside each eye must
                 move the same way (and by a real distance), on screen
-  4. F4       - closes the window and the desktop comes back
+  4. menu     - with XEYES up, the Apps menu stays visible above the
+                window (the app must not blit over it), survives pointer
+                motion, and its items are still clickable; once it closes
+                the window repaints what the menu had covered
+  5. F4       - closes the window and the desktop comes back
 
 Usage:  python3 run_xeyes_test.py   (or: make xeyes_test)
 Result: exit 0 on success; screenshots in /tmp/hobbyos_xeyes/.
@@ -45,6 +49,10 @@ CONTENT_W, CONTENT_H = W - 4, (H - 26) - 36
 # Palette of src/user/x11/apps/xeyes/main.c.
 PAPER = (0xF2, 0xEF, 0xE9)
 INK = (0x26, 0x2B, 0x33)
+
+# The Apps menu (draw_start_menu): a 220px panel of this fill, 16 rows.
+MENU_PANEL = (232, 234, 240)
+MENU_VISIBLE_ROWS = 16
 
 # The port's eye geometry (thousandths of an eye unit): centers at 0 and
 # 2000, the window spanning x in [-900, 2900]; BALL_DIST and the pupil
@@ -389,10 +397,95 @@ def main():
                     failures.append(f"tracking: eye {eye} pupil barely left the "
                                     f"center with the mouse far left ({off:.1f}px)")
 
+        # --- Menu over the window ------------------------------------------
+        # With XEYES up, the Apps menu must stay visible above the app's
+        # pixels: the app blits its shadow over the region the menu
+        # occupies as soon as the menu opens unless the desktop holds the
+        # repair requests back.  And a menu item must still be clickable.
+        log("[STEP] menu over the window")
+        menu_h = MENU_VISIBLE_ROWS * 20 + 8
+        menu_y = TASKBAR_Y - menu_h
+        mr_y0 = menu_y - 14
+
+        def menu_region(px):
+            return crop(px, 0, mr_y0, 240, TASKBAR_Y - mr_y0)
+
+        qmp.click(38, TASKBAR_Y + 13)          # open the Apps menu
+        time.sleep(0.8)
+        shot5 = os.path.join(SHOT_DIR, "05_menu_open.ppm")
+        qmp.shot(shot5)
+        n_menu1 = count_color(menu_region(ppm_pixels(shot5)), MENU_PANEL)
+        if n_menu1 < 20000:
+            failures.append(f"menu: the Apps menu is covered with XEYES up "
+                            f"(panel pixels={n_menu1})")
+        else:
+            log(f"[TEST] menu: the Apps menu stays above the window "
+                f"(panel={n_menu1})")
+
+        # Move across the menu and the window: the menu must stay put.
+        for (mx, my) in ((110, menu_y + 30), (110, menu_y + 150),
+                         (110, menu_y + 300), (700, 300), (300, 500),
+                         (110, menu_y + 80)):
+            qmp.move(mx, my)
+            time.sleep(0.2)
         time.sleep(0.5)
-        shot_last = os.path.join(SHOT_DIR, "03_track_bottom.ppm")
-        px_last = crop(ppm_pixels(shot_last), CONTENT_ORIGIN[0], CONTENT_ORIGIN[1],
+        shot6 = os.path.join(SHOT_DIR, "06_menu_held.ppm")
+        qmp.shot(shot6)
+        n_menu2 = count_color(menu_region(ppm_pixels(shot6)), MENU_PANEL)
+        if n_menu2 < int(n_menu1 * 0.9):
+            failures.append(f"menu: the Apps menu decayed under pointer motion "
+                            f"({n_menu1} -> {n_menu2})")
+        else:
+            log(f"[TEST] menu: held under pointer motion (panel={n_menu2})")
+
+        # Click the FILES row: the menu routes the click and launches it.
+        files_idx = next((k for k, v in menu_map.items() if v == "FILES.BIN"),
+                         None)
+        if files_idx is None or files_idx >= MENU_VISIBLE_ROWS:
+            failures.append("menu: FILES.BIN not on the first page of the menu")
+        else:
+            _, mark_before = serial_contains("", 0.1)
+            qmp.click(100, menu_y + 4 + files_idx * 20 + 10)
+            ok, _ = serial_contains("[APP] FILES started", 20, since=mark_before)
+            if ok:
+                log("[TEST] menu: the item click launched FILES")
+            else:
+                failures.append("menu: clicking the FILES item did nothing")
+            time.sleep(0.8)
+            shot7 = os.path.join(SHOT_DIR, "07_menu_clicked.ppm")
+            qmp.shot(shot7)
+            n_menu3 = count_color(menu_region(ppm_pixels(shot7)), MENU_PANEL)
+            if n_menu3 > 2000:
+                failures.append(f"menu: menu still on screen after the click "
+                                f"({n_menu3})")
+
+            # Close FILES (F4); XEYES retiles to the full tile.
+            qmp.key("f4")
+            time.sleep(1.5)
+
+        # Focus XEYES through its taskbar button; its content must be back
+        # where the menu and FILES had covered it.
+        qmp.click(100, TASKBAR_Y + 13)
+        time.sleep(1.2)
+        shot8 = os.path.join(SHOT_DIR, "08_restored.ppm")
+        qmp.shot(shot8)
+        px8 = ppm_pixels(shot8)
+        px_last = crop(px8, CONTENT_ORIGIN[0], CONTENT_ORIGIN[1],
                        CONTENT_W, CONTENT_H)
+        n_ink8 = count_color(px_last, INK)
+        if n_ink8 < 20000:
+            failures.append(f"menu: window content not restored after the menu "
+                            f"closed (ink={n_ink8})")
+        else:
+            log("[TEST] menu: window content restored after the menu closed")
+        n_restore = (count_color(menu_region(px8), PAPER) +
+                     count_color(menu_region(px8), INK))
+        if n_restore < 20000:
+            failures.append(f"menu: the area the menu covered is not repainted "
+                            f"({n_restore} content pixels)")
+        else:
+            log(f"[TEST] menu: the covered area is repainted "
+                f"({n_restore} content pixels)")
 
         # F4 closes the focused window; the desktop must survive.
         qmp.key("f4")
@@ -414,7 +507,8 @@ def main():
             log("[TEST] F4: window closed, desktop alive")
 
         # Sanity: every shot exists and is non-blank.
-        for label in (["01_launched", "02_idle", "04_closed"] +
+        for label in (["01_launched", "02_idle", "04_closed", "05_menu_open",
+                       "06_menu_held", "07_menu_clicked", "08_restored"] +
                       [f"03_track_{name}" for name in positions]):
             path = os.path.join(SHOT_DIR, f"{label}.ppm")
             if not os.path.exists(path) or not ppm_has_content(path):

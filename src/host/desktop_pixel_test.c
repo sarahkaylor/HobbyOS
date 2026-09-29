@@ -563,6 +563,95 @@ static void test_reflow_renotify(void) {
   num_windows = 0;
 }
 
+/* 8. Open menus are opaque: repair requests never reach under a menu, an
+ * app flush (ESC ] F) re-stamps the menu over the app's pixels, and
+ * pointer tracking pauses while a menu is open.  These are the rules
+ * that stop a repainting X11 app (XEYES) from erasing the Apps menu. */
+static void test_menu_overlay_protection(void) {
+  char buf[512];
+  int rd, id = make_window_with_pipe(&rd);
+  struct window *w = win_by_id(id);
+  feed(w, "\033]X 0;0~");
+  feed(w, "\033]P 1~");
+  wm_pixel_flush_exposes(w);
+  drain(rd, buf, sizeof buf);
+
+  /* A three-item Apps menu: the overlay rect is the same padded
+   * rectangle chrome_capture() diffs -- (4, TASKBAR_Y-80, 220, 92). */
+  num_menu_items = 3;
+  for (int i = 0; i < 3; i++)
+    snprintf(menu_items[i], sizeof menu_items[i], "ITEM%d.BIN", i + 1);
+  start_menu_open = 1;
+  int mv_top = TASKBAR_Y - (3 * 20 + 8) - 12;
+  int mv_left = 4, mv_right = 224;
+
+  /* A repair fully under the menu is held back. */
+  wm_pixel_queue_expose(w, mv_left + 6, mv_top + 10, 100, 60);
+  wm_pixel_service_frame();
+  drain(rd, buf, sizeof buf);
+  check(buf[0] == '\0', "repair under an open menu is held back");
+  check(w->pix_expose_n == 0, "held-back repair leaves the queue");
+
+  /* A repair straddling the menu's right edge keeps only the visible
+   * part (screen 200..300 -> content 198..298; the menu ends at 222). */
+  wm_pixel_queue_expose(w, mv_right - 24, mv_top + 10, 100, 40);
+  wm_pixel_service_frame();
+  drain(rd, buf, sizeof buf);
+  check(strcmp(buf, "\033[E 222;638;76;40~") == 0,
+        "repair is clipped to the part outside the menu");
+
+  /* A full repair while the menu is open splits around it (content is
+   * 1020x706; the menu covers content x 2..222, y 628..706). */
+  wm_pixel_queue_expose_all(w);
+  wm_pixel_service_frame();
+  drain(rd, buf, sizeof buf);
+  check(strcmp(buf,
+               "\033[E 0;0;1020;628~\033[E 0;628;2;78~\033[E 222;628;798;78~") == 0,
+        "full repair splits around the open menu");
+
+  /* An app flush re-stamps the menu over the app's pixels, while the
+   * pointer (above everything) still re-stamps over the content. */
+  if (graphics_init() != 0) { check(0, "graphics_init"); return; }
+  graphics_reset_base_clip();
+  set_flush_callback(count_flush);
+  restamp_flushes = 0;
+  graphics_draw_rect(mv_left, mv_top, 220, 92, MARKER);  /* "the app painted" */
+  graphics_draw_pixel(10, 300, MARKER);                  /* outside the menu */
+  mouse_x = 500; mouse_y = 300;                          /* inside the content */
+  w->pix_restamp = 1;
+  wm_pixel_service_frame();
+  check(restamp_flushes >= 1, "an app flush pushes a re-stamp flush");
+  check(graphics_get_pixel(200, mv_top + 60) == C(232, 234, 240),
+        "the menu is re-stamped over the app's pixels");
+  check(graphics_get_pixel(10, 300) == MARKER,
+        "the re-stamp is clipped to the menu rectangle");
+  check(graphics_get_pixel(mouse_x, mouse_y) == C(250, 250, 252),
+        "the pointer still re-stamps over the content");
+
+  /* Pointer tracking: silent while a menu is open, and the live position
+   * is reported once the menu closes. */
+  desktop_send_hook = cap_hook;
+  cap_reset();
+  wm_hover_service(100, 200, 7000);
+  check(cap_calls == 0, "no tracking while a menu is open");
+  cap_reset();
+  wm_hover_service(140, 260, 7100);
+  check(cap_calls == 0, "the pointer moving under a menu stays silent");
+  start_menu_open = 0;
+  cap_reset();
+  wm_hover_service(140, 260, 7200);
+  check(cap_calls == 1 && cap_is("\033[T140;260~"),
+        "closing the menu reports the live position");
+  cap_reset();
+  wm_hover_service(140, 260, 7300);
+  check(cap_calls == 0, "then a still pointer stays silent again");
+  desktop_send_hook = 0;
+
+  set_flush_callback(0);
+  wm_init();
+  num_windows = 0;
+}
+
 int main(void) {
   printf("[TEST] desktop pixel-mode surface (X11 support)\n");
 
@@ -576,6 +665,7 @@ int main(void) {
   test_pixel_input();
   test_hover_tracking();
   test_reflow_renotify();
+  test_menu_overlay_protection();
 
   printf("[TEST] %d checks, %d failed\n", checks, fails);
   if (fails) {

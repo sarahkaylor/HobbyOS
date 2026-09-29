@@ -57,11 +57,19 @@
  *
  *   - it never paints over content pixels itself: the wallpaper pass
  *     carves the content rectangles out and the chrome pass skips them;
- *   - whenever something the WM *does* paint may have covered them (a
- *     menu, the pointer, a full repaint) it sends a repair request:
+ *   - whenever something the WM *does* paint may have covered them (the
+ *     pointer, a full repaint) it sends a repair request:
  *
  *         ESC [ E ~                     repaint everything
  *         ESC [ E <x>;<y>;<w>;<h> ~     repaint that content-relative rect
+ *
+ * Open menus are the exception: they stay above the app, so their
+ * rectangle is never part of a repair request while they are open (a
+ * request that overlaps one is delivered clipped to the rest), no
+ * pointer tracking is forwarded while a menu is open, and a flush under
+ * a menu re-stamps the menu as well as the pointer.  When the menu
+ * closes its rectangle is repainted by the WM and re-exposed as an
+ * ordinary repair request, so the app's content comes back underneath.
  *
  * The X11 library answers by blitting the affected rectangle back from
  * its client-side shadow (its drawing never reaches the display until a
@@ -80,7 +88,9 @@
  * inside a press-drag-release it began).  This is the desktop's
  * XQueryPointer-on-the-root equivalent: apps can follow the cursor
  * anywhere on screen, like xeyes -- or the XANTFARM port, whose ants
- * scatter away from the pointer. */
+ * scatter away from the pointer.  Tracking pauses while a menu is open
+ * (the pointer is a menu pointer then); when the menu closes the live
+ * position is reported once so the app resumes on the actual pointer. */
 #define PIX_MAX_EXPOSE 8
 
 /* A rectangle in screen (or content-relative) pixels. */
@@ -201,12 +211,16 @@ void wm_term_set_cursor_visible(struct window *win, int on);
  * owns) for a window.  wm_pixel_resize() re-notifies a pixel window after
  * a reflow.  Repair requests are queued by the desktop while it paints
  * (wm_pixel_queue_expose* take SCREEN coordinates and clamp) and written
- * to the app after the frame's flush (wm_pixel_flush_exposes). */
+ * to the app after the frame's flush (wm_pixel_flush_exposes); while a
+ * menu is open the desktop delivers them clipped to the part outside the
+ * menu, one piece at a time through wm_pixel_send_expose, because the
+ * menus must stay above the app's pixels. */
 void wm_pixel_content_rect(const struct window *win, int *x, int *y, int *w, int *h);
 int  wm_pixel_resize(struct window *win);
 void wm_pixel_send_geometry(struct window *win);
 void wm_pixel_queue_expose(struct window *win, int x, int y, int w, int h);
 void wm_pixel_queue_expose_all(struct window *win);
+void wm_pixel_send_expose(struct window *win, int x, int y, int w, int h);
 void wm_pixel_flush_exposes(struct window *win);
 
 /* ---- Damage helpers (window.c) ----

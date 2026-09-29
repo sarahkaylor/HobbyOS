@@ -12,11 +12,18 @@ and implements it on the desktop's *pixel-mode* window protocol (the
   `XFlush()` / `XSync()` — and blocking inside `XNextEvent()` — blit the
   dirty rectangle to the real framebuffer and send `ESC ] F ~` so the WM
   re-stamps the mouse pointer.
-- When the WM has to paint over the content (a menu, the pointer, a full
-  repaint) it sends a **repair request** (`ESC [ E ... ~`); the library
-  answers by blitting the affected rectangle back from the shadow.  Window
-  content survives everything the desktop does, like X11 with backing
-  store enabled.
+- When the WM has to paint over the content (the pointer, a full repaint)
+  it sends a **repair request** (`ESC [ E ... ~`); the library answers by
+  blitting the affected rectangle back from the shadow.  Window content
+  survives everything the desktop does, like X11 with backing store
+  enabled.
+- Menus are the one thing that stays *above* the app: while a menu is
+  open the desktop holds repair requests back from the menu's rectangle
+  (delivering them clipped to the rest), pauses pointer tracking (the
+  pointer is a menu pointer then), and re-stamps the menu over the app's
+  pixels after every `ESC ] F ~`.  When the menu closes, its rectangle
+  comes back as an ordinary repair request and the app repaints under it.
+  A port needs nothing special for this — it is the same repair flow.
 - Input (keys and mouse in content-relative pixels) arrives on stdin and
   is decoded back into `XEvent`s: `Expose`, `ConfigureNotify`, `MapNotify`,
   `KeyPress`, `ButtonPress/Release`, `MotionNotify`.  Once a pointer mask

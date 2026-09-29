@@ -892,6 +892,31 @@ int wm_pixel_resize(struct window *win) {
   return 1;
 }
 
+/* One repair request for a content-relative rectangle:
+ * ESC [ E <x>;<y>;<w>;<h> ~  (a no-op for a window without a pipe).
+ * The desktop's frame service delivers clipped pieces through this when
+ * an open menu must stay above the app's pixels (see desktop.c); plain
+ * wm_pixel_flush_exposes() delivers the queue verbatim. */
+void wm_pixel_send_expose(struct window *win, int x, int y, int w, int h) {
+  if (win->stdin_fd < 0) return;
+  char buf[64];
+  int j = 0;
+  buf[j++] = 27;
+  buf[j++] = '[';
+  buf[j++] = 'E';
+  buf[j++] = ' ';
+  j = pix_append_int(buf, j, x);
+  buf[j++] = ';';
+  j = pix_append_int(buf, j, y);
+  buf[j++] = ';';
+  j = pix_append_int(buf, j, w);
+  buf[j++] = ';';
+  j = pix_append_int(buf, j, h);
+  buf[j++] = '~';
+  int wr = write(win->stdin_fd, buf, j);
+  (void)wr;
+}
+
 /* Deliver queued repair requests: ESC [ E ~ (everything) or
  * ESC [ E <x>;<y>;<w>;<h> ~ (content-relative).  Clears the queue. */
 void wm_pixel_flush_exposes(struct window *win) {
@@ -912,21 +937,6 @@ void wm_pixel_flush_exposes(struct window *win) {
     for (int i = 1; i < win->pix_expose_n; i++)
       win->pix_expose[i - 1] = win->pix_expose[i];
     win->pix_expose_n--;
-    char buf[64];
-    int j = 0;
-    buf[j++] = 27;
-    buf[j++] = '[';
-    buf[j++] = 'E';
-    buf[j++] = ' ';
-    j = pix_append_int(buf, j, r.x);
-    buf[j++] = ';';
-    j = pix_append_int(buf, j, r.y);
-    buf[j++] = ';';
-    j = pix_append_int(buf, j, r.w);
-    buf[j++] = ';';
-    j = pix_append_int(buf, j, r.h);
-    buf[j++] = '~';
-    int wr = write(win->stdin_fd, buf, j);
-    (void)wr;
+    wm_pixel_send_expose(win, r.x, r.y, r.w, r.h);
   }
 }

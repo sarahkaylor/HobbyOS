@@ -332,8 +332,23 @@ int wm_build_hover_seq(char *out, int cap, int x, int y) {
 #define HOVER_MIN_MS 30
 static int hover_sent_x = -1, hover_sent_y = -1;  /* pos the app has seen */
 static int hover_sent_ms = 0;                     /* when sent (0 = never) */
+static int hover_paused = 0;   /* a menu was open on the last service pass */
 
 void wm_hover_service(int mx, int my, int now_ms) {
+  /* While a menu is open the pointer drives the menu, not the apps: no
+   * tracking goes out.  When the menu closes, the live position is
+   * reported once (however far the pointer wandered) so the app resumes
+   * on the actual pointer instead of a stale one. */
+  if (start_menu_open || menu_open || app_menu_open) {
+    hover_paused = 1;
+    return;
+  }
+  if (hover_paused) {
+    hover_paused = 0;
+    hover_sent_x = -1;
+    hover_sent_y = -1;
+    hover_sent_ms = 0;
+  }
   if (mx == hover_sent_x && my == hover_sent_y) return;   /* still */
   if (hover_sent_ms != 0 && now_ms - hover_sent_ms < HOVER_MIN_MS) return;
   hover_sent_ms = now_ms;
@@ -982,6 +997,158 @@ static void paint_scene(void) {
   wm_draw_cursor(mouse_x, mouse_y);
 }
 
+/* ---- Open menus vs pixel windows --------------------------------------
+ *
+ * The menus are painted last: like the pointer sprite they sit above
+ * every window.  A pixel-mode app, though, blits its own pixels straight
+ * into the framebuffer, so the desktop keeps the overlays above it:
+ *
+ *   1. no repair request is delivered over an open menu -- otherwise the
+ *      app repaints exactly the rectangle the menu was just painted into
+ *      and erases it (the XEYES "menu vanishes" bug: the menu-open
+ *      frame's own repair expose did exactly that);
+ *   2. an app's ESC ] F flush re-stamps any menu over its content, like
+ *      the pointer (wm_pixel_service_frame);
+ *   3. no pointer tracking is forwarded while a menu is open -- the
+ *      pointer is a menu pointer then (wm_hover_service).
+ *
+ * The rectangles are exactly the ones chrome_capture() diffs, so the
+ * close frame's damage repaints (and re-exposes) the region the menu
+ * covered.  out[] holds 3 entries -- Apps menu, right-click menu, app
+ * dropdown -- zero-size when closed (at most one is ever open). */
+
+static void overlay_rects(struct desktop_rect out[3]) {
+  for (int i = 0; i < 3; i++) {
+    out[i].x = 0;
+    out[i].y = 0;
+    out[i].w = 0;
+    out[i].h = 0;
+  }
+  if (start_menu_open) {
+    int visible = START_MENU_VISIBLE;
+    if (num_menu_items < visible) visible = num_menu_items;
+    int h = visible * 20 + 8;
+    out[0].x = 4;
+    out[0].y = TASKBAR_Y - h - 12;
+    out[0].w = 220;
+    out[0].h = h + 24;
+  }
+  if (menu_open) {
+    out[1].x = menu_x;
+    out[1].y = menu_y;
+    out[1].w = 120;
+    out[1].h = num_menu_items * 20;
+  }
+  if (app_menu_open) {
+    struct window *w = find_window(app_menu_win_id);
+    int items = 0;
+    if (w && app_menu_idx >= 0 && app_menu_idx < w->num_menus)
+      items = w->menus[app_menu_idx].num_items;
+    if (items > 0) {
+      out[2].x = app_menu_x;
+      out[2].y = app_menu_y;
+      out[2].w = 100;
+      out[2].h = items * 20;
+    }
+  }
+}
+
+/* Intersect a screen rect with (x,y,w,h); 0 when disjoint. */
+static int overlay_intersect(const struct desktop_rect *r, int x, int y, int w,
+                             int h, int *ox, int *oy, int *ow, int *oh) {
+  int x0 = r->x > x ? r->x : x;
+  int y0 = r->y > y ? r->y : y;
+  int x1 = (r->x + r->w < x + w) ? r->x + r->w : x + w;
+  int y1 = (r->y + r->h < y + h) ? r->y + r->h : y + h;
+  if (x1 <= x0 || y1 <= y0) return 0;
+  *ox = x0;
+  *oy = y0;
+  *ow = x1 - x0;
+  *oh = y1 - y0;
+  return 1;
+}
+
+/* Subtract one content-relative `cut` rect from every piece in ps[0..n);
+ * the result replaces the list.  Returns the new count (0 when fully
+ * covered).  One cut splits a rect 4 ways and only one menu is ever open,
+ * so ps[16] has room to spare; pieces that somehow do not fit are simply
+ * not delivered (the menu-close damage repairs their region). */
+static int rect_subtract(struct wm_rect *ps, int n, int max,
+                         const struct wm_rect *cut) {
+  struct wm_rect out[16];
+  int m = 0;
+  for (int i = 0; i < n && m < max; i++) {
+    struct wm_rect p = ps[i];
+    int x0 = cut->x > p.x ? cut->x : p.x;
+    int y0 = cut->y > p.y ? cut->y : p.y;
+    int x1 = (cut->x + cut->w < p.x + p.w) ? cut->x + cut->w : p.x + p.w;
+    int y1 = (cut->y + cut->h < p.y + p.h) ? cut->y + cut->h : p.y + p.h;
+    if (x1 <= x0 || y1 <= y0) {          /* no overlap: keep the whole */
+      if (m < max) out[m++] = p;
+      continue;
+    }
+    /* Above, below, left and right of the overlap, keeping the pieces
+     * that have area. */
+    struct wm_rect cand[4];
+    cand[0].x = p.x; cand[0].y = p.y; cand[0].w = p.w; cand[0].h = y0 - p.y;
+    cand[1].x = p.x; cand[1].y = y1; cand[1].w = p.w; cand[1].h = p.y + p.h - y1;
+    cand[2].x = p.x; cand[2].y = y0; cand[2].w = x0 - p.x; cand[2].h = y1 - y0;
+    cand[3].x = x1; cand[3].y = y0; cand[3].w = p.x + p.w - x1; cand[3].h = y1 - y0;
+    for (int k = 0; k < 4 && m < max; k++) {
+      if (cand[k].w > 0 && cand[k].h > 0) out[m++] = cand[k];
+    }
+  }
+  for (int i = 0; i < m; i++) ps[i] = out[i];
+  return m;
+}
+
+/* Send one repair piece with every open overlay cut out of it. */
+static void overlay_send_piece(struct window *win, int x, int y, int w, int h,
+                               const struct desktop_rect ov[3], int cx, int cy) {
+  struct wm_rect ps[16];
+  int n = 1;
+  ps[0].x = x;
+  ps[0].y = y;
+  ps[0].w = w;
+  ps[0].h = h;
+  for (int i = 0; i < 3; i++) {
+    if (ov[i].w <= 0 || ov[i].h <= 0) continue;
+    struct wm_rect cut;
+    cut.x = ov[i].x - cx;
+    cut.y = ov[i].y - cy;
+    cut.w = ov[i].w;
+    cut.h = ov[i].h;
+    n = rect_subtract(ps, n, 16, &cut);
+    if (n == 0) return;
+  }
+  for (int i = 0; i < n; i++)
+    wm_pixel_send_expose(win, ps[i].x, ps[i].y, ps[i].w, ps[i].h);
+}
+
+/* Deliver a pixel window's queued repairs, holding back anything under
+ * an open menu (see the overlay note above).  Without an open menu this
+ * is exactly wm_pixel_flush_exposes(). */
+static void overlay_flush_exposes(struct window *win) {
+  struct desktop_rect ov[3];
+  overlay_rects(ov);
+  if (ov[0].w <= 0 && ov[1].w <= 0 && ov[2].w <= 0) {
+    wm_pixel_flush_exposes(win);
+    return;
+  }
+  int cx, cy, cw, ch;
+  wm_pixel_content_rect(win, &cx, &cy, &cw, &ch);
+  if (win->pix_expose_full) {
+    win->pix_expose_full = 0;
+    overlay_send_piece(win, 0, 0, cw, ch, ov, cx, cy);
+    return;
+  }
+  for (int i = 0; i < win->pix_expose_n; i++) {
+    struct wm_rect r = win->pix_expose[i];
+    overlay_send_piece(win, r.x, r.y, r.w, r.h, ov, cx, cy);
+  }
+  win->pix_expose_n = 0;
+}
+
 /* Snapshot the chrome state the next frame diffs against. */
 static void chrome_capture(struct desktop_chrome *c) {
   c->win_count = num_windows;
@@ -990,45 +1157,17 @@ static void chrome_capture(struct desktop_chrome *c) {
   c->cursor_y = mouse_y;
   get_clock_string(c->clock);
 
-  /* Apps menu: the panel plus the "more ^/v" labels just outside it. */
-  c->start_menu.x = 0; c->start_menu.y = 0;
-  c->start_menu.w = 0; c->start_menu.h = 0;
-  c->start_sel = 0; c->start_scroll = 0;
-  if (start_menu_open) {
-    int visible = START_MENU_VISIBLE;
-    if (num_menu_items < visible) visible = num_menu_items;
-    int h = visible * 20 + 8;
-    c->start_menu.x = 4;
-    c->start_menu.y = TASKBAR_Y - h - 12;
-    c->start_menu.w = 220;
-    c->start_menu.h = h + 24;
-    c->start_sel = start_sel;
-    c->start_scroll = start_scroll;
+  /* Menu overlays: one source of truth with the compositor's overlay
+   * handling (overlay_rects) and the pixel-window repair filter. */
+  {
+    struct desktop_rect ov[3];
+    overlay_rects(ov);
+    c->start_menu = ov[0];
+    c->rc_menu = ov[1];
+    c->app_menu = ov[2];
   }
-
-  /* Right-click menu (draw_menu()). */
-  c->rc_menu.x = 0; c->rc_menu.y = 0; c->rc_menu.w = 0; c->rc_menu.h = 0;
-  if (menu_open) {
-    c->rc_menu.x = menu_x;
-    c->rc_menu.y = menu_y;
-    c->rc_menu.w = 120;
-    c->rc_menu.h = num_menu_items * 20;
-  }
-
-  /* Per-window menu dropdown (draw_menu()). */
-  c->app_menu.x = 0; c->app_menu.y = 0; c->app_menu.w = 0; c->app_menu.h = 0;
-  if (app_menu_open) {
-    struct window *w = find_window(app_menu_win_id);
-    int items = 0;
-    if (w && app_menu_idx >= 0 && app_menu_idx < w->num_menus)
-      items = w->menus[app_menu_idx].num_items;
-    if (items > 0) {
-      c->app_menu.x = app_menu_x;
-      c->app_menu.y = app_menu_y;
-      c->app_menu.w = 100;
-      c->app_menu.h = items * 20;
-    }
-  }
+  c->start_sel = start_menu_open ? start_sel : 0;
+  c->start_scroll = start_menu_open ? start_scroll : 0;
 
   for (int i = 0; i < MAX_WINDOWS; i++) {
     c->chrome_dirty[i] = (i < num_windows) ? windows[i].chrome_dirty : 0;
@@ -1179,11 +1318,14 @@ static void paint_frame(void) {
   for (int i = 0; i < num_windows; i++) windows[i].chrome_dirty = 0;
 }
 
-/* Post-frame service for pixel-mode windows: re-stamp the pointer for apps
- * that just painted the framebuffer (ESC ] F), then deliver queued repair
- * requests.  Runs right after the frame's graphics_flush(), so a repair
- * the frame queued reaches the app in the same iteration. */
+/* Post-frame service for pixel-mode windows: re-stamp the pointer -- and
+ * any open menu -- for apps that just painted the framebuffer (ESC ] F),
+ * then deliver queued repair requests (clipped around open menus).  Runs
+ * right after the frame's graphics_flush(), so a repair the frame queued
+ * reaches the app in the same iteration. */
 static void wm_pixel_service_frame(void) {
+  struct desktop_rect ov[3];
+  overlay_rects(ov);
   for (int i = 0; i < num_windows; i++) {
     struct window *win = &windows[i];
     if (!win->pixel_mode) continue;
@@ -1191,13 +1333,27 @@ static void wm_pixel_service_frame(void) {
       win->pix_restamp = 0;
       int cx, cy, cw, ch;
       wm_pixel_content_rect(win, &cx, &cy, &cw, &ch);
+      int redraw = 0;
+      /* Menus sit above the app's pixels: re-stamp the part of each open
+       * menu that overlaps the content this flush may have painted. */
+      for (int k = 0; k < 3; k++) {
+        int ox, oy, ow, oh;
+        if (ov[k].w <= 0 || ov[k].h <= 0) continue;
+        if (!overlay_intersect(&ov[k], cx, cy, cw, ch, &ox, &oy, &ow, &oh)) continue;
+        graphics_set_clip(ox, oy, ow, oh);
+        draw_menu();
+        draw_start_menu();
+        graphics_reset_clip();
+        redraw = 1;
+      }
       if (mouse_x >= cx && mouse_x < cx + cw &&
           mouse_y >= cy && mouse_y < cy + ch) {
         wm_draw_cursor(mouse_x, mouse_y);
-        graphics_flush();
+        redraw = 1;
       }
+      if (redraw) graphics_flush();
     }
-    wm_pixel_flush_exposes(win);
+    overlay_flush_exposes(win);
   }
 }
 
