@@ -40,7 +40,8 @@ and implements it on the desktop's *pixel-mode* window protocol (the
    `$(LD) -T src/user/linker.ld -o app.elf ...` plus those objects.
 
 2. Program against `<X11/Xlib.h>` and `<X11/keysym.h>` as usual.  See
-   `apps/xcalc/main.c` for a complete ported program.
+   `apps/xcalc/main.c`, `apps/antfarm/main.c` or `apps/xeyes/main.c` for
+   complete ported programs.
 
 3. Do **not** write to stdout from the application: the library owns it
    (`print_console()` goes to the serial log instead).  Read stdin only
@@ -52,7 +53,7 @@ and implements it on the desktop's *pixel-mode* window protocol (the
 |----------|-------|
 | Display  | `XOpenDisplay`, `XCloseDisplay`, `DefaultScreen`, `DefaultRootWindow`, `RootWindow`, `WhitePixel`, `BlackPixel` |
 | Windows  | `XCreateSimpleWindow`, `XDestroyWindow`, `XMapWindow`, `XUnmapWindow`, `XSelectInput`, `XStoreName`, `XGetWindowAttributes` |
-| Drawing  | `XCreateGC`, `XFreeGC`, `XSetForeground`, `XSetBackground`, `XClearWindow`, `XClearArea`, `XDrawPoint`, `XDrawLine`, `XDrawRectangle`, `XFillRectangle`, `XDrawString` |
+| Drawing  | `XCreateGC`, `XFreeGC`, `XSetForeground`, `XSetBackground`, `XClearWindow`, `XClearArea`, `XDrawPoint`, `XDrawLine`, `XDrawRectangle`, `XFillRectangle`, `XFillArc`, `XDrawString` |
 | GC state | `XSetFillStyle`, `XSetTile`, `XSetClipMask`, `XSetClipOrigin` (`FillSolid` and `FillTiled` only) |
 | Pixmaps  | `XCreateBitmapFromData`, `XCreatePixmapFromBitmapData`, `XFreePixmap` |
 | Pointer  | `XQueryPointer` |
@@ -94,6 +95,14 @@ default `XSetTSOrigin`.
   drawable point.  `XSetClipMask(display, gc, None)` clears the clip;
   freeing the mask pixmap does too.  Only these two fill styles exist —
   `FillStippled`, `FillOpaqueStippled` etc. fall back to solid.
+- **`XFillArc()`** fills the ellipse inside the bounding box — or, when
+  the angle extent is under 360 degrees, the pie wedge between the two
+  radii.  Angles are X11's: 64ths of a degree, zero at 3 o'clock,
+  increasing counterclockwise on screen (a negative extent sweeps
+  clockwise).  The rasterizer is fixed point — no floating point in user
+  space — and a pixel is in when its exact center satisfies the ellipse
+  inequality, so circles are symmetric.  `XDrawArc()` (the outline) does
+  not exist yet.
 - **`XClearArea()`** fills the rectangle with the window's `background`
   color (the `XCreateSimpleWindow()` background argument); a zero width or
   height means "to the window edge"; with `exposures` true it also queues
@@ -114,11 +123,11 @@ include/X11/keysym.h     keysym constants (XK_*)
 xlib_internal.h          shared state + the wire protocol summary
 xlib_display.c           display, shadow/backing store, blit, flushing
 xlib_window.c            window lifecycle + outbound protocol messages
-xlib_draw.c              GCs, pixmaps, tiles/clips, rasterizer, 8x8 text
+xlib_draw.c              GCs, pixmaps, tiles/clips, rect/arc rasterizer, 8x8 text
 xlib_event.c             the byte decoder, event queue, pump, tracking
 ```
 
 Host tests: `src/host/x11_lib_test.c` (`make x11_lib_test_host`) checks the
 protocol both ways, the shadow/flush/repair pixel behaviour, bitmap/tile/
-clip pixel goldens, `XClearArea`, the tracking decode and `XQueryPointer`,
-and the event decoding against canned byte streams.
+clip pixel goldens, `XClearArea`, arc fill goldens, the tracking decode
+and `XQueryPointer`, and the event decoding against canned byte streams.

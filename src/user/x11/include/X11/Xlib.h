@@ -236,6 +236,11 @@ int XDrawRectangle(Display *display, Drawable d, GC gc, int x, int y,
                    unsigned int width, unsigned int height);
 int XFillRectangle(Display *display, Drawable d, GC gc, int x, int y,
                    unsigned int width, unsigned int height);
+/* Filled ellipse, or -- when the extent is under 360 degrees -- the pie
+ * wedge between the two radii.  Angles are in 64ths of a degree, zero at
+ * 3 o'clock, increasing counterclockwise on screen (X11 convention). */
+int XFillArc(Display *display, Drawable d, GC gc, int x, int y,
+             unsigned int width, unsigned int height, int angle1, int angle2);
 int XDrawString(Display *display, Drawable d, GC gc, int x, int y,
                 const char *string, int length);
 

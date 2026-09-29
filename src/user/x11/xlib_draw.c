@@ -372,6 +372,103 @@ int XFillRectangle(Display *display, Drawable d, GC gc, int x, int y,
   return 0;
 }
 
+/* ---- arcs ------------------------------------------------------------ */
+
+/* Sine and cosine in 16.16 fixed point of an angle given in 64ths of a
+ * degree.  Quadrant folding plus a short Taylor series -- no floats, so
+ * the ARM build (mgeneral-regs-only, no FP registers) links fine.  Only
+ * the wedge boundaries need this, where ~1e-4 radians of error is far
+ * below one pixel. */
+static void fx_sincos(long a, long *sin_out, long *cos_out) {
+  const long quarter = 90L * 64;
+  a %= 4 * quarter;
+  if (a < 0) a += 4 * quarter;
+  int q = (int)(a / quarter);
+  long r = a % quarter;
+  int swap = 0;
+  if (r > 45L * 64) {
+    r = quarter - r;
+    swap = 1;
+  }
+  long t = (r * 1171483L) >> 16; /* radians, 16.16 */
+  long t2 = (t * t) >> 16;
+  long t4 = (t2 * t2) >> 16;
+  long sn = t - (((t2 * t) >> 16) / 6) + (((t4 * t) >> 16) / 120);
+  long cs = 65536L - (t2 / 2) + (t4 / 24);
+  long sin_r = swap ? cs : sn;
+  long cos_r = swap ? sn : cs;
+  switch (q) {
+  case 0: *sin_out = sin_r; *cos_out = cos_r; break;
+  case 1: *sin_out = cos_r; *cos_out = -sin_r; break;
+  case 2: *sin_out = -sin_r; *cos_out = -cos_r; break;
+  default: *sin_out = -cos_r; *cos_out = sin_r; break;
+  }
+}
+
+/* Is the direction (dx,dy) -- math orientation, +y up -- inside the
+ * counterclockwise sweep from angle a1 (64ths) covering |ext|? */
+static int angle_in_sweep(long dx, long dy, long a1, long ext) {
+  if (ext <= 0) return 0;
+  if (ext >= 360L * 64) return 1;
+  long s1, c1, s2, c2;
+  fx_sincos(a1, &s1, &c1);
+  fx_sincos(a1 + ext, &s2, &c2);
+  /* cross(a,b) = a.x*b.y - a.y*b.x */
+  if (ext <= 180L * 64)
+    return c1 * dy - s1 * dx >= 0 && dx * s2 - dy * c2 >= 0;
+  /* Sweeps past half a turn: exclude the (under-180) complement instead. */
+  return !(c2 * dy - s2 * dx >= 0 && dx * s1 - dy * c1 >= 0);
+}
+
+/* The doubled-coordinate ellipse predicate: the pixel whose center
+ * doubles to (px2,py2) is inside the box (x,y,width,height) when
+ * (px2-cx2)^2*h^2 + (py2-cy2)^2*w^2 <= w^2*h^2. */
+static int arc_inside(long px2, long py2, long cx2, long cy2, long w, long h) {
+  long dx = px2 - cx2;
+  long dy = py2 - cy2;
+  return dx * dx * h * h + dy * dy * w * w <= w * w * h * h;
+}
+
+int XFillArc(Display *display, Drawable d, GC gc, int x, int y,
+             unsigned int width, unsigned int height, int angle1, int angle2) {
+  (void)d;
+  struct x11_win *win = win_of(display);
+  if (!gc || !win->shadow || width == 0 || height == 0) return 0;
+  long ext = angle2;
+  long a1 = angle1;
+  if (ext < 0) {
+    a1 += ext;
+    ext = -ext;
+  }
+  a1 %= 360L * 64;
+  if (a1 < 0) a1 += 360L * 64;
+  if (ext == 0) return 0;
+  int full = ext >= 360L * 64;
+  int x0 = x, y0 = y;
+  int x1 = x + (int)width, y1 = y + (int)height;
+  if (x0 < 0) x0 = 0;
+  if (y0 < 0) y0 = 0;
+  if (x1 > win->cw) x1 = win->cw;
+  if (y1 > win->ch) y1 = win->ch;
+  if (x0 >= x1 || y0 >= y1) return 0;
+  long cx2 = 2L * x + (long)width;
+  long cy2 = 2L * y + (long)height;
+  long ww = (long)width, hh = (long)height;
+  uint32_t color = (uint32_t)gc->fg;
+  for (int py = y0; py < y1; py++) {
+    uint32_t *row = win->shadow + (long)py * win->cw;
+    for (int px = x0; px < x1; px++) {
+      long px2 = 2L * px + 1, py2 = 2L * py + 1;
+      if (!arc_inside(px2, py2, cx2, cy2, ww, hh)) continue;
+      if (!full && !angle_in_sweep(px2 - cx2, cy2 - py2, a1, ext)) continue;
+      if (!clip_ok(display, gc, px, py)) continue;
+      row[px] = fill_color(display, gc, px, py, color);
+    }
+  }
+  x11_mark_dirty(display, x0, y0, x1, y1);
+  return 0;
+}
+
 void x11_draw_text_shadow(Display *d, GC gc, int x, int base_y, const char *s,
                           int n, uint32_t color) {
   struct x11_win *w = win_of(d);

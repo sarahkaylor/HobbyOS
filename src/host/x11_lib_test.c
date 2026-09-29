@@ -529,6 +529,68 @@ static void test_clip_mask(Display *d, Window w) {
   XFreeGC(d, gc);
 }
 
+/* Hand-derived pixel goldens for the ellipse predicate: a pixel is inside
+ * when (2px+1-cx2)^2 * h^2 + (2py+1-cy2)^2 * w^2 <= w^2 * h^2, where the
+ * doubled center is (2x+w, 2y+h).  Angles for the wedges are X11's: 64ths
+ * of a degree, zero at 3 o'clock, increasing counterclockwise on screen. */
+static void test_fill_arcs(Display *d, Window w) {
+  GC gc = XCreateGC(d, w, 0, NULL);
+
+  /* A full circle: extent 360 fills the whole ellipse.  Center pixel and
+   * axis points in; corner areas out; nothing outside the box. */
+  XClearArea(d, w, 0, 0, 0, 0, False);
+  XSetForeground(d, gc, 0x00336699);
+  XFillArc(d, w, gc, 0, 0, 10, 10, 90 * 64, 360 * 64);
+  flush_quiet(d);
+  check(graphics_get_pixel(2 + 5, 34 + 5) == 0x00336699u &&
+        graphics_get_pixel(2 + 0, 34 + 4) == 0x00336699u &&
+        graphics_get_pixel(2 + 4, 34 + 4) == 0x00336699u &&
+        graphics_get_pixel(2 + 0, 34 + 1) == 0x000000u &&
+        graphics_get_pixel(2 + 0, 34 + 0) == 0x000000u &&
+        graphics_get_pixel(2 + 10, 34 + 10) == 0x000000u,
+        "XFillArc 360 fills the circle inside its bounding box");
+
+  /* A wedge: 0-90 degrees covers the upper-right quadrant only. */
+  XClearArea(d, w, 0, 0, 0, 0, False);
+  XFillArc(d, w, gc, 20, 0, 20, 20, 0, 90 * 64);
+  flush_quiet(d);
+  check(graphics_get_pixel(2 + 35, 34 + 5) == 0x00336699u &&
+        graphics_get_pixel(2 + 34, 34 + 6) == 0x00336699u &&
+        graphics_get_pixel(2 + 35, 34 + 15) == 0x000000u &&
+        graphics_get_pixel(2 + 25, 34 + 5) == 0x000000u,
+        "XFillArc wedge covers just the 0-90 quadrant");
+
+  /* Extent past 180 degrees flips to the complement test: 180-270 covers
+   * everything except the upper-left quadrant. */
+  XClearArea(d, w, 0, 0, 0, 0, False);
+  XFillArc(d, w, gc, 0, 20, 20, 20, 180 * 64, 270 * 64);
+  flush_quiet(d);
+  check(graphics_get_pixel(2 + 5, 34 + 35) == 0x00336699u &&
+        graphics_get_pixel(2 + 15, 34 + 35) == 0x00336699u &&
+        graphics_get_pixel(2 + 8, 34 + 28) == 0x000000u &&
+        graphics_get_pixel(2 + 5, 34 + 25) == 0x000000u,
+        "XFillArc extent over 180 leaves only the far quadrant empty");
+
+  /* A negative extent sweeps clockwise: 90 with -90 is the same 0-90
+   * wedge as above. */
+  XClearArea(d, w, 0, 0, 0, 0, False);
+  XFillArc(d, w, gc, 20, 0, 20, 20, 90 * 64, -90 * 64);
+  flush_quiet(d);
+  check(graphics_get_pixel(2 + 35, 34 + 5) == 0x00336699u &&
+        graphics_get_pixel(2 + 35, 34 + 15) == 0x000000u,
+        "negative extent sweeps clockwise");
+
+  /* Extent zero draws nothing. */
+  XClearArea(d, w, 0, 0, 0, 0, False);
+  XFillArc(d, w, gc, 20, 0, 20, 20, 0, 0);
+  flush_quiet(d);
+  check(graphics_get_pixel(2 + 30, 34 + 10) == 0x000000u &&
+        graphics_get_pixel(2 + 35, 34 + 5) == 0x000000u,
+        "zero extent draws nothing");
+
+  XFreeGC(d, gc);
+}
+
 static void test_clear_area(Display *d, Window w) {
   XEvent ev;
   GC gc = XCreateGC(d, w, 0, NULL);
@@ -582,6 +644,7 @@ int main(void) {
   test_pointer_tracking(d, w);
   test_pixmaps_tiles(d, w);
   test_clip_mask(d, w);
+  test_fill_arcs(d, w);
   test_clear_area(d, w);
   test_keys(d, w);
   test_geometry_reflow(d);

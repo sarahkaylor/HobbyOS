@@ -237,6 +237,7 @@ FILES_BIN = $(OBJ_DIR)/files.bin
 CALC_BIN = $(OBJ_DIR)/calc.bin
 XCALC_BIN = $(OBJ_DIR)/xcalc.bin
 ANTFARM_BIN = $(OBJ_DIR)/antfarm.bin
+XEYES_BIN = $(OBJ_DIR)/xeyes.bin
 CLOCK_BIN = $(OBJ_DIR)/clock.bin
 SYSMON_BIN = $(OBJ_DIR)/sysmon.bin
 HEX_BIN = $(OBJ_DIR)/hex.bin
@@ -1012,7 +1013,18 @@ $(ANTFARM_BIN): $(OBJ_DIR)/antfarm_main.o $(X11_LIB_OBJS) $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/antfarm.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/antfarm.elf $(ANTFARM_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(NANO_BIN) $(APPS_T_BIN) $(MODE_FILE)
+# --- xeyes: the X11 support library's third application -----------------
+# The xeyes port (ellipse fills, pointer-paced pupil tracking); binary
+# lands on disk as /XEYES.BIN (8.3).
+$(OBJ_DIR)/xeyes_main.o: src/user/x11/apps/xeyes/main.c src/user/x11/*.h src/user/x11/include/X11/*.h $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(X11_INC) -c $< -o $@
+
+$(XEYES_BIN): $(OBJ_DIR)/xeyes_main.o $(X11_LIB_OBJS) $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/xeyes.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/xeyes.elf $(XEYES_BIN)
+
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -1145,6 +1157,7 @@ endif
 	$(MCOPY) -i disk.img $(CALC_BIN) ::/CALC.BIN
 	$(MCOPY) -i disk.img $(XCALC_BIN) ::/XCALC.BIN
 	$(MCOPY) -i disk.img $(ANTFARM_BIN) ::/ANTFARM.BIN
+	$(MCOPY) -i disk.img $(XEYES_BIN) ::/XEYES.BIN
 	$(MCOPY) -i disk.img $(CLOCK_BIN) ::/CLOCK.BIN
 	$(MCOPY) -i disk.img $(SYSMON_BIN) ::/SYSMON.BIN
 	$(MCOPY) -i disk.img $(HEX_BIN) ::/HEX.BIN
@@ -1223,6 +1236,9 @@ xcalc_test:
 antfarm_test:
 	python3 ./run_antfarm_test.py
 
+xeyes_test:
+	python3 ./run_xeyes_test.py
+
 files_nav_test:
 	python3 ./run_files_nav_test.py
 
@@ -1274,6 +1290,15 @@ obj/host_antfarm_test.o: src/host/antfarm_test.c src/user/x11/apps/antfarm/main.
 	@mkdir -p obj
 	$(HOST_CC) $(HOST_CFLAGS) $(X11_INC) -Isrc/user/x11 -c $< -o $@
 $(ANTFARM_TEST): obj/host_antfarm_test.o obj/host_user_x11_xlib_display.o obj/host_user_x11_xlib_window.o obj/host_user_x11_xlib_draw.o obj/host_user_x11_xlib_event.o obj/host_user_graphics_graphics.o obj/host_compat.o
+	$(HOST_CC) -o $@ $^
+
+# xeyes: the xeyes port -- the transform, the pupil math, real arc
+# pixels and the real entry point (fork + pipes into xeyes_main).
+XEYES_TEST = xeyes_test_host
+obj/host_xeyes_test.o: src/host/xeyes_test.c src/user/x11/apps/xeyes/main.c src/user/x11/*.h src/user/x11/include/X11/*.h src/user_include/*.h src/user_include/graphics/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) $(X11_INC) -Isrc/user/x11 -c $< -o $@
+$(XEYES_TEST): obj/host_xeyes_test.o obj/host_user_x11_xlib_display.o obj/host_user_x11_xlib_window.o obj/host_user_x11_xlib_draw.o obj/host_user_x11_xlib_event.o obj/host_user_graphics_graphics.o obj/host_compat.o
 	$(HOST_CC) -o $@ $^
 
 obj/host_x11_lib_test.o: src/host/x11_lib_test.c src/user/x11/*.h src/user/x11/include/X11/*.h src/user_include/*.h src/user_include/graphics/*.h
@@ -1634,7 +1659,7 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
@@ -1645,6 +1670,7 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	$(HOST_RUN) ./$(X11_LIB_TEST)
 	$(HOST_RUN) ./$(XCALC_TEST)
 	$(HOST_RUN) ./$(ANTFARM_TEST)
+	$(HOST_RUN) ./$(XEYES_TEST)
 	$(HOST_RUN) ./$(NANO_TERM_TEST)
 	$(HOST_RUN) ./$(NFS_PROTO_TEST)
 	$(HOST_RUN) ./$(CONSOLE_APP_TEST)

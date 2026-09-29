@@ -1,6 +1,6 @@
 # HobbyOS
 
-A from-scratch 64-bit hobby operating system in C — ARM64 primary, x86_64 secondary — booting bare-metal in QEMU to a graphical desktop with a tiling window manager, ten GUI apps, two ported X11 applications (the `XCALC` calculator and `XANTFARM`, powered by the Xlib-for-HobbyOS support library in `src/user/x11/`), two arcade games, a shell and a small libc.
+A from-scratch 64-bit hobby operating system in C — ARM64 primary, x86_64 secondary — booting bare-metal in QEMU to a graphical desktop with a tiling window manager, ten GUI apps, three ported X11 applications (the `XCALC` calculator, `XANTFARM` and `XEYES`, powered by the Xlib-for-HobbyOS support library in `src/user/x11/`), two arcade games, a shell and a small libc.
 
 ## Screenshots
 
@@ -179,7 +179,8 @@ HobbyOS/
 │   ├── x11/             # Xlib-on-HobbyOS support library (see x11/README.md)
 │   │   └── apps/
 │   │       ├── xcalc/   # XCALC: Skalculator running on that library
-│   │       └── antfarm/ # XANTFARM: xantfarm ant-hill simulation
+│   │       ├── antfarm/ # XANTFARM: xantfarm ant-hill simulation
+│   │       └── xeyes/   # XEYES: xeyes, the eyes that follow the mouse
 │   ├── mem_test.c       # Memory allocation tests
 │   ├── file_io_test.c   # File I/O tests
 │   └── ...              # Other test programs
