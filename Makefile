@@ -267,6 +267,19 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c src/include/*.h $(MODE_FILE)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# Generated constant: the on-image size of the UNEXPAND_T.BIN fixture.
+# fat16_test asserts this size to prove a long 8.3-truncating name resolves to
+# the REAL test binary and not to the shorter UNEXPAND.BIN.  The size moves
+# with the toolchain and the architecture, so it is generated from the actual
+# artifact at build time — the hardcoded constant rotted this way three times
+# (each userland change that shifted the binary turned one or both arches red).
+UNEXPAND_SIZE_HDR = $(OBJ_DIR)/unexpand_size_gen.h
+$(UNEXPAND_SIZE_HDR): $(UNEXPAND_T_BIN)
+	@mkdir -p $(OBJ_DIR)
+	@printf '#define UNEXPAND_T_BIN_SIZE %s\n' "$$(wc -c < $< | tr -d ' ')" > $@
+$(OBJ_DIR)/fat16_test.o: $(UNEXPAND_SIZE_HDR)
+$(OBJ_DIR)/fat16_test.o: CFLAGS += -I$(OBJ_DIR)
+
 # Rule to compile .s files into .o files
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.s src/include/*.h
 	@mkdir -p $(OBJ_DIR)
