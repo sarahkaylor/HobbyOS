@@ -57,6 +57,18 @@
 #define EILSEQ      84
 #define EOPNOTSUPP  95 /* Linux value; acl-errno-valid.c */ /* Linux value; used by the byte-mode wide-char layer */
 
+/* Networking / socket errnos (Linux values; Phase F1, browser.md A.1a). */
+#define EADDRINUSE    98
+#define ENETUNREACH  101
+#define ECONNRESET   104
+#define ETIMEDOUT    110
+#define ECONNREFUSED 111
+#define EHOSTUNREACH 113
+#define EINPROGRESS  115
+#define EPROTONOSUPPORT 93
+#define EAFNOSUPPORT    97
+#define EWOULDBLOCK  EAGAIN
+
 #ifndef HOST_TEST
 extern int errno;
 #else

@@ -192,4 +192,51 @@ int mount(const char *source, const char *target);
 /* Unmount the NFS export mounted exactly at `target`. 0 on success. */
 int umount(const char *target);
 
+/* ---- Phase F1 (browser.md A.1a — frozen): sockets + select -------------
+ * Device-only: these are declarations over syscalls 65-71; HOST_TEST builds
+ * use glibc's own socket/select surface instead, so the block is excluded
+ * there (avoids clashing with glibc's prototypes and fd_set).
+ * Every call returns -1 and sets errno on failure (POSIX-shaped wrappers). */
+#ifndef HOST_TEST
+
+#define AF_INET      2
+#define AF_UNIX      1   /* reserved for P4 (socketpair) */
+#define SOCK_STREAM  1
+#define SOCK_DGRAM   2
+#define IPPROTO_TCP  6
+#define IPPROTO_UDP  17
+
+/* setsockopt/getsockopt levels + options (Linux numbering). */
+#define SOL_SOCKET   1
+#define SO_REUSEADDR 2
+#define SO_TYPE      3
+#define SO_ERROR     4
+
+/* fcntl() commands (Linux numbering; the flag values live in <fcntl.h>, and
+ * F_GETFL returns the open status flags incl. O_NONBLOCK for sockets). */
+#define F_GETFL      3
+#define F_SETFL      4
+#define O_NONBLOCK   0x800
+
+int socket(int domain, int type, int protocol);
+int connect_fd(int fd, uint32_t ip_be, uint16_t port_be);
+int fcntl(int fd, int cmd, int arg);
+int getsockopt(int fd, int level, int optname, void *val, int *len);
+int setsockopt(int fd, int level, int optname, const void *val, int len);
+int getrandom(void *buf, size_t len, unsigned int flags);
+
+/* select() over the frozen syscall: masks are FD_SETSIZE (256) wide —
+ * eight 32-bit words.  timeout_ms < 0 waits forever, 0 polls.  Returns the
+ * number of ready descriptors, 0 on timeout, -1/errno on error. */
+#define FD_SETSIZE 256
+typedef struct { unsigned int bits[FD_SETSIZE / 32]; } fd_set;
+#define FD_ZERO(set)       memset((set), 0, sizeof(fd_set))
+#define FD_SET(fd, set)    ((set)->bits[(fd) / 32] |= (1u << ((fd) % 32)))
+#define FD_CLR(fd, set)    ((set)->bits[(fd) / 32] &= ~(1u << ((fd) % 32)))
+#define FD_ISSET(fd, set)  (((set)->bits[(fd) / 32] & (1u << ((fd) % 32))) != 0)
+int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
+           int timeout_ms);
+
+#endif /* !HOST_TEST */
+
 #endif

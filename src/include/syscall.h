@@ -83,7 +83,19 @@
  * count; idx >= 0 copies that argument into buf and returns its length. */
 #define SYS_GETARGV       (64)
 
+/* Phase F1 (browser.md Appendix A.1a — FROZEN): the socket/select surface.
+ * See the plan for full semantics and the errno list.  select() masks are
+ * FD_SETSIZE 256 wide (8 x 32-bit words); select's timeout is milliseconds
+ * (< 0 = wait forever, 0 = poll). */
+#define SYS_SOCKET        (65)  /* (domain, type, protocol)            -> fd | -errno */
+#define SYS_CONNECT_FD    (66)  /* (fd, ip_be, port_be) -> 0 | -EINPROGRESS | -errno */
+#define SYS_SELECT        (67)  /* (nfds, rd*, wr*, ex*, timeout_ms)   -> count | -errno */
+#define SYS_FCNTL         (68)  /* (fd, cmd, arg)                      -> value | -errno */
+#define SYS_GETSOCKOPT    (69)  /* (fd, level, optname, val*, len*)    -> 0 | -errno */
+#define SYS_SETSOCKOPT    (70)  /* (fd, level, optname, val, len)      -> 0 | -errno */
+#define SYS_GETRANDOM     (71)  /* (buf, len, flags)                   -> written | -errno */
+
 /* Highest defined syscall number. Dispatch tables are sized SYS_MAX + 1. */
-#define SYS_MAX           (64)
+#define SYS_MAX           (71)
 
 #endif /* SYSCALL_H */

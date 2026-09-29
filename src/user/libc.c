@@ -189,6 +189,40 @@ int connect(uint32_t ip, uint16_t port, int protocol) {
   return (int)errno_ret(syscall(SYS_CONNECT, (long)ip, (long)port, (long)protocol, 0));
 }
 
+/* Phase F1 (browser.md A.1a — frozen): sockets + select over syscalls
+ * 65-71.  Device-only (host builds take glibc's surface, see libc.h). */
+int socket(int domain, int type, int protocol) {
+  return (int)errno_ret(syscall(SYS_SOCKET, (long)domain, (long)type, (long)protocol, 0));
+}
+
+int connect_fd(int fd, uint32_t ip_be, uint16_t port_be) {
+  return (int)errno_ret(syscall(SYS_CONNECT_FD, (long)fd, (long)ip_be, (long)port_be, 0));
+}
+
+int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
+           int timeout_ms) {
+  return (int)errno_ret(syscall5(SYS_SELECT, (long)nfds, (long)readfds,
+                                 (long)writefds, (long)exceptfds, (long)timeout_ms));
+}
+
+int fcntl(int fd, int cmd, int arg) {
+  return (int)errno_ret(syscall(SYS_FCNTL, (long)fd, (long)cmd, (long)arg, 0));
+}
+
+int getsockopt(int fd, int level, int optname, void *val, int *len) {
+  return (int)errno_ret(syscall5(SYS_GETSOCKOPT, (long)fd, (long)level,
+                                 (long)optname, (long)val, (long)len));
+}
+
+int setsockopt(int fd, int level, int optname, const void *val, int len) {
+  return (int)errno_ret(syscall5(SYS_SETSOCKOPT, (long)fd, (long)level,
+                                 (long)optname, (long)val, (long)len));
+}
+
+int getrandom(void *buf, size_t len, unsigned int flags) {
+  return (int)errno_ret(syscall(SYS_GETRANDOM, (long)buf, (long)len, (long)flags, 0));
+}
+
 /* POSIX sleep: seconds. Legacy HobbyOS callers used milliseconds and are
  * migrated to usleep() (phase-2 sweep); SYS_SLEEP is millisecond-based. */
 unsigned int sleep(unsigned int seconds) {
