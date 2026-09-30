@@ -1,30 +1,9 @@
 /*
  * DNSTST.BIN — real-network DNS resolution via the DHCP-learned server
- * (browser.md F2.2/F2.3).  NOT WIRED YET — committed as source only, per
- * the lane brief; the parent wires it at integration.
- *
- * Why unwired: resolv_lookup() needs the net lane's kernel side — syscalls
- * 65/66 (socket/connect_fd), the write/read paths and SYS_GETRANDOM's
- * sibling plumbing — plus sysinfo(4).dns from the F1.7 DHCP hand-off.
- * Until those land this program can only SKIP, and a boot-wave entry that
- * can never pass would mask real failures.
- *
- * Wiring steps for the parent (all in this repo, one change):
- *   Makefile: the object rules already exist (object-only, no .bin wiring):
- *     obj/$(ARCH)/user_resolv.o    (src/user/resolv.c)
- *     obj/$(ARCH)/user_dns_test.o  (src/user/dns_test.c)
- *   add the build/link rule:
- *     DNSTST_BIN = $(OBJ_DIR)/dns_test.bin
- *     $(DNSTST_BIN): $(OBJ_DIR)/user_dns_test.o $(OBJ_DIR)/user_resolv.o \
- *                    $(OBJ_DIR)/libc.a
- *      $(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/dns_test.elf $^
- *      $(OBJCOPY) -O binary $(OBJ_DIR)/dns_test.elf $(DNSTST_BIN)
- *   add $(DNSTST_BIN) to the disk.img dependency list, and
- *     $(MCOPY) -i disk.img $(DNSTST_BIN) ::/DNSTST.BIN
- *   src/kernel/main.c: at the END of test_wave_loader() (it spawns
- *   nothing, so no process-slot pressure):
- *     load_and_run_program_in_scheduler("DNSTST.BIN", -1, -1, -1, -1);
- *
+ * (browser.md F2.2/F2.3).  Wired at integration: the net lane's syscalls
+ * 65/66, the F1.7 DHCP→DNS hand-off (sysinfo(4).dns) and the F1.2 select()
+ * read-timeout all landed, so the lookup is bounded (3s) and a boot-wave
+ * entry cannot hang on a lost UDP reply.
  * What it does: resolves "example.com" through the real network stack.
  * Path 1 — resolv_lookup(): sysinfo(4).dns (the F1.7 field; 0 until the
  * kernel lane lands) drives resolv_lookup_server().  Path 2 — when that

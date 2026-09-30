@@ -274,16 +274,39 @@ int resolv_lookup_server(const char *name, uint32_t dns_ip_be,
       return -1;
     }
   }
-  rlen = read(fd, reply, sizeof reply);
-  if (rlen < 0) {
-    /* No read timeout yet: a *reported* error (ICMP unreachable, closed
-     * socket) is retried once, then given up on.  A silently lost reply
-     * blocks in read() until the net lane lands select(). */
-    rlen = read(fd, reply, sizeof reply);
-    if (rlen < 0) {
+  /* Bounded wait: select() for readability (F1.2, merged at integration)
+     instead of a blocking read() — a silently lost UDP reply must not hang
+     the boot wave.  3s is generous for QEMU slirp's resolver; a timeout
+     ends the call with ETIMEDOUT so callers can SKIP. */
+  fd_set rd;
+  int ready;
+  FD_ZERO(&rd);
+  FD_SET(fd, &rd);
+  ready = select(fd + 1, &rd, 0, 0, 3000);
+  if (ready == 0) {
+    close(fd);
+    errno = ETIMEDOUT;
+    return -1;
+  }
+  if (ready < 0) {
+    /* A *reported* error (ICMP unreachable, closed socket): one retry. */
+    FD_ZERO(&rd);
+    FD_SET(fd, &rd);
+    ready = select(fd + 1, &rd, 0, 0, 3000);
+    if (ready == 0) {
+      close(fd);
+      errno = ETIMEDOUT;
+      return -1;
+    }
+    if (ready < 0) {
       close(fd);
       return -1;
     }
+  }
+  rlen = read(fd, reply, sizeof reply);
+  if (rlen < 0) {
+    close(fd);
+    return -1;
   }
   int rc = resolv_parse_response(reply, rlen, id, ip_be);
   close(fd);

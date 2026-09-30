@@ -218,6 +218,11 @@ static void test_wave_loader(void *arg) {
      released by the time it runs. */
   load_and_run_program_in_scheduler("FPU_T.BIN", -1, -1, -1, -1);
 
+  /* F2.2/F2.3: real-network DNS resolution via the DHCP-learned server;
+     exits 0 (SKIP) when the network path is unavailable.  Spawns nothing,
+     so it needs no free process slots after FPU_T's fork torture. */
+  load_and_run_program_in_scheduler("DNSTST.BIN", -1, -1, -1, -1);
+
   extern void kernel_exit(void);
   kernel_exit();
 }
