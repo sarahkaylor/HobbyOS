@@ -11,6 +11,14 @@
 #ifndef HOBBYOS_LOCALE_H
 #define HOBBYOS_LOCALE_H 1
 
+/* Host (HOST_TEST): defer to the real <locale.h> via include_next (same
+ * rule as <time.h>/<signal.h>/<strings.h>).  Without this the opaque
+ * hobby locale_t below collides with glibc's when a host TU also reaches
+ * bits/types/locale_t.h through the include_next'ed <strings.h>. */
+#ifdef HOST_TEST
+#include_next <locale.h>
+#else
+
 #define LC_CTYPE 0
 #define LC_NUMERIC 1
 #define LC_TIME 2
@@ -83,5 +91,7 @@ extern "C" {
 #ifdef __cplusplus
 }
 #endif
+
+#endif /* !HOST_TEST */
 
 #endif /* HOBBYOS_LOCALE_H */
