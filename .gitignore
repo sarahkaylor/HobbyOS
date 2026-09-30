@@ -90,3 +90,22 @@ third_party/icu-78.3/icu4c-78.3-sources.tgz
 third_party/icu-78.3/icu4c-78.3-data.zip
 third_party/icu-78.3/src/
 third_party/icu-78.3/build-host/
+
+# L6 GLib host-first trio (browser/l6-glib — GLib 2.88.3 + pcre2 10.49 +
+# libffi 3.4.8; browser.md §1.4 W0.4 note: "GLib (+deps) is added to the L6
+# host-first build list").  Committed = fetch.sh + .sha256 (+ pcre2 .sig) +
+# README + build-host.sh + smoke/ (+ cross-notes.md for the trio); the
+# downloaded tarballs, extracted upstream trees and host build trees are
+# rebuilt by fetch.sh / build-host.sh.
+third_party/glib-2.88.3/glib-2.88.3.tar.xz
+third_party/glib-2.88.3/src/
+third_party/glib-2.88.3/build-host/
+third_party/glib-2.88.3/.fetched-ok
+third_party/pcre2-10.49/pcre2-10.49.tar.bz2
+third_party/pcre2-10.49/src/
+third_party/pcre2-10.49/build-host/
+third_party/pcre2-10.49/.fetched-ok
+third_party/libffi-3.4.8/libffi-3.4.8.tar.gz
+third_party/libffi-3.4.8/src/
+third_party/libffi-3.4.8/build-host/
+third_party/libffi-3.4.8/.fetched-ok
