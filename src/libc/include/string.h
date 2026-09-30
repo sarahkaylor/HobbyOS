@@ -19,8 +19,19 @@ extern "C" {
   int strcmp(const char *s1, const char *s2);
   int strcoll(const char *s1, const char *s2); /* C locale: == strcmp */
   int strncmp(const char *s1, const char *s2, size_t n);
+  /* Also declared by glibc's <strings.h>, which the HOST_TEST build pulls
+   * in via include_next.  glibc marks these __THROW (= noexcept(true) in
+   * C++), so the C++ declarations here must carry the same exception
+   * specification or a host C++ TU sees "exception specification in
+   * declaration does not match previous declaration".  On the device the
+   * spec is equally true: the C++ runtime is built with -fno-exceptions. */
+#ifdef __cplusplus
+  int strcasecmp(const char *s1, const char *s2) noexcept;
+  int strncasecmp(const char *s1, const char *s2, size_t n) noexcept;
+#else
   int strcasecmp(const char *s1, const char *s2);
   int strncasecmp(const char *s1, const char *s2, size_t n);
+#endif
 
   char *strcpy(char *dst, const char *src);
   char *strncpy(char *dst, const char *src, size_t n);

@@ -19,8 +19,15 @@
 extern "C" {
 #endif
 
+  /* Must match <string.h>'s C++ declarations (and glibc's __THROW =
+   * noexcept(true) when the host path pulls the real <strings.h>). */
+#ifdef __cplusplus
+  int strcasecmp(const char *s1, const char *s2) noexcept;
+  int strncasecmp(const char *s1, const char *s2, size_t n) noexcept;
+#else
   int strcasecmp(const char *s1, const char *s2);
   int strncasecmp(const char *s1, const char *s2, size_t n);
+#endif
 
   /* Bit-scan (POSIX). */
   int ffs(int i);

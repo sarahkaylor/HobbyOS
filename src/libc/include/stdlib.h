@@ -65,10 +65,14 @@ extern "C" {
   int atexit(void (*function)(void));
 
   /* POSIX/GNU temp-file creation: replace the "XXXXXX" trailer of
-   * template with unique letters and open O_CREAT|O_EXCL|O_RDWR. */
-  int mkstemp(char *template);
-  int mkostemp(char *template, int flags);
-  int mkstemps(char *template, int suffixlen); /* GNU: XXXXXX before a suffix */
+   * the name buffer with unique letters and open O_CREAT|O_EXCL|O_RDWR.
+   * (The parameter is named tmpl, not template: 'template' is a C++
+   * keyword and these declarations are inside an extern "C" block that
+   * C++ translation units compile.  Parameter names are not part of the
+   * ABI, so the rename is source-compatible for C callers.) */
+  int mkstemp(char *tmpl);
+  int mkostemp(char *tmpl, int flags);
+  int mkstemps(char *tmpl, int suffixlen); /* GNU: XXXXXX before a suffix */
 
   /* POSIX pathname canonicalization: resolve to an absolute path with no
    * "." / ".." components.  This VFS has no symlinks, so the resolution is

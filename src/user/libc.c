@@ -145,6 +145,13 @@ void exit(int status) {
   extern void __hb_atexit_run(void) __attribute__((weak));
   if (__hb_atexit_run)
     __hb_atexit_run();
+  /* C++ static destructors (F2.4): clang registers them through
+     __cxa_atexit; run them after the C atexit handlers and before the
+     flush so their output is not lost (weak ref: C-only binaries never
+     link the C++ runtime). */
+  extern void __cxa_finalize(void *) __attribute__((weak));
+  if (__cxa_finalize)
+    __cxa_finalize(0);
   /* flush buffered stdio before dying (weak ref: binaries that never link
      the FILE layer keep linking fine; stdout would otherwise lose <=512B
      of buffered output on programs that exit without a full flush) */

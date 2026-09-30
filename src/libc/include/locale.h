@@ -15,6 +15,14 @@
 #define LC_MESSAGES 5
 #define LC_ALL 6
 
-char *setlocale(int category, const char *locale);
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+  char *setlocale(int category, const char *locale);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* HOBBYOS_LOCALE_H */

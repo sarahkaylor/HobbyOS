@@ -14,6 +14,7 @@ endif
 # On macOS, tools are in /opt/homebrew; on Linux, use system PATH
 ifeq ($(OS),macos)
   CC = /opt/homebrew/opt/llvm/bin/clang
+  CXX = /opt/homebrew/opt/llvm/bin/clang
   LD = /opt/homebrew/bin/ld.lld
   OBJCOPY = /opt/homebrew/opt/llvm/bin/llvm-objcopy
   AR = /opt/homebrew/opt/llvm/bin/llvm-ar
@@ -25,6 +26,7 @@ ifeq ($(OS),macos)
   QEMU_DISPLAY = cocoa
 else
   CC = clang
+  CXX = clang
   LD = ld.lld
   OBJCOPY = llvm-objcopy
   AR = ar
@@ -81,6 +83,23 @@ else
   # QEMU parameters for ARM: 8 cores, 8GB RAM, booting with UEFI
   QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp 8 -m 8192M -accel tcg,thread=multi -bios $(EDK2_AARCH64) -display $(QEMU_DISPLAY) -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
 endif
+
+# --- F2.4 (browser.md §6): userland C++ build policy ---------------------
+# The minimal C++ runtime (src/libc/src/cxxrt.cpp) and C++ user programs
+# build with the SAME per-arch flags as C (USER_CFLAGS) plus the language
+# and the two policy switches the runtime is designed for:
+#   -fno-exceptions / -fno-rtti  (no unwinder and no typeinfo runtime
+#                                 exists; src/libc/include/cxxrt.h #errors
+#                                 if either is missing)
+#   -std=c++17                   (sized delete, static-init guards,
+#                                 Itanium C++ ABI — the F2.4 baseline;
+#                                 P3 revisits with libc++)
+#   -nostdinc++                  (there is no C++ standard library yet:
+#                                 includes must resolve to the sysroot)
+# Compiled with $(CXX) (= clang, not clang++ — this workstation has no
+# clang++ binary; the driver picks the C++ frontend from the .cpp
+# extension).
+CXX_USER_FLAGS = $(USER_CFLAGS) -std=c++17 -fno-exceptions -fno-rtti -nostdinc++
 
 ifeq ($(MODE),test)
   CFLAGS += -DKERNEL_MODE_TEST
@@ -151,6 +170,9 @@ STRESS_TEST_BIN = $(OBJ_DIR)/stress.bin
 FPU_T_BIN = $(OBJ_DIR)/fpu_test.bin
 # F2.2/F2.3: DNS resolver acceptance over the real network stack.
 DNSTST_BIN = $(OBJ_DIR)/dns_test.bin
+# F2.4 (browser.md): minimal C++ runtime acceptance.  CXXSMOKE.BIN is
+# 8.3-safe (8-char base name) and built as C++ per CXX_USER_FLAGS above.
+CXXSMOKE_BIN = $(OBJ_DIR)/cxx_smoke.bin
 ERRNO_TEST_BIN = $(OBJ_DIR)/errtest.bin
 # Phase F1 (browser.md): socket/select acceptance + deterministic select
 # checks + SYS_GETRANDOM entropy (see main.c's KERNEL_MODE_TEST wave).
@@ -511,6 +533,24 @@ $(DNSTST_BIN): $(OBJ_DIR)/user_dns_test.o $(OBJ_DIR)/user_resolv.o $(OBJ_DIR)/us
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/dns_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/dns_test.elf $(DNSTST_BIN)
 
+# --- F2.4 (browser.md §6): minimal C++ runtime + smoke -------------------
+# cxxrt.cpp is the runtime (operator new/delete, __cxa_guard_*, __cxa_atexit
+# /__cxa_finalize, __cxa_pure_virtual, __dso_handle); it is archived into
+# libc.a below, so crt0-style C++ programs pick it up on demand.  The smoke
+# test proves the whole path (crt0 walks .init_array, static ctors run,
+# guards fire, delete goes through the runtime) on both arches.
+$(OBJ_DIR)/cxxrt.o: src/libc/src/cxxrt.cpp src/libc/include/cxxrt.h $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CXX) $(CXX_USER_FLAGS) -c $< -o $@
+
+$(OBJ_DIR)/cxx_smoke.o: src/user/cxx_smoke.cpp $(USER_LIBC) $(USER_HDRS) src/libc/include/cxxrt.h
+	@mkdir -p $(OBJ_DIR)
+	$(CXX) $(CXX_USER_FLAGS) -c $< -o $@
+
+$(CXXSMOKE_BIN): $(OBJ_DIR)/cxx_smoke.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/cxx_smoke.elf $(OBJ_DIR)/cxx_smoke.o $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/cxx_smoke.elf $(CXXSMOKE_BIN)
+
 $(ERRNO_TEST_BIN): $(OBJ_DIR)/user_errno_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/errno_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/errno_test.elf $(ERRNO_TEST_BIN)
@@ -529,7 +569,7 @@ $(OBJ_DIR)/libc_%.o: src/libc/src/%.c $(USER_HDRS) src/libc/src/*.h
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o $(OBJ_DIR)/libc_mman.o $(OBJ_DIR)/libc_regex.o $(OBJ_DIR)/libc_langinfo.o $(OBJ_DIR)/libc_wchar.o $(OBJ_DIR)/libc_wctype.o $(OBJ_DIR)/libc_locale.o $(OBJ_DIR)/libc_selinux.o $(OBJ_DIR)/libc_dirent.o $(OBJ_DIR)/libc_time.o $(OBJ_DIR)/libc_time_math.o $(OBJ_DIR)/libc_libgen.o $(OBJ_DIR)/libc_realpath.o
+$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/cxxrt.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o $(OBJ_DIR)/libc_mman.o $(OBJ_DIR)/libc_regex.o $(OBJ_DIR)/libc_langinfo.o $(OBJ_DIR)/libc_wchar.o $(OBJ_DIR)/libc_wctype.o $(OBJ_DIR)/libc_locale.o $(OBJ_DIR)/libc_selinux.o $(OBJ_DIR)/libc_dirent.o $(OBJ_DIR)/libc_time.o $(OBJ_DIR)/libc_time_math.o $(OBJ_DIR)/libc_libgen.o $(OBJ_DIR)/libc_realpath.o
 	$(AR) rcs $@ $^
 
 # --- HELLO demo (Phase 0 gate): a main(argc, argv) program built against
@@ -1126,7 +1166,7 @@ $(XEYES_BIN): $(OBJ_DIR)/xeyes_main.o $(X11_LIB_OBJS) $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/xeyes.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/xeyes.elf $(XEYES_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -1187,6 +1227,7 @@ endif
 	$(MCOPY) -i disk.img $(POLLTST_BIN) ::/POLLTST.BIN
 	$(MCOPY) -i disk.img $(RANDTST_BIN) ::/RANDTST.BIN
 	$(MCOPY) -i disk.img $(DNSTST_BIN) ::/DNSTST.BIN
+	$(MCOPY) -i disk.img $(CXXSMOKE_BIN) ::/CXXSMOKE.BIN
 	$(MCOPY) -i disk.img $(HELLO_BIN) ::/HELLO.BIN
 	$(MCOPY) -i disk.img $(SH_BIN) ::/SH.BIN
 	$(MCOPY) -i disk.img $(LS_BIN) ::/LS.BIN
@@ -1747,6 +1788,35 @@ obj/host_libc_headers_test.o: src/host/libc_headers_test.c src/libc/include/stda
 $(HEADERS_TEST): obj/host_libc_headers_test.o
 	$(HOST_CC) -o $@ $^
 
+# --- F2.4/F2.5 (browser.md §6): C++ runtime + C++-clean sysroot ----------
+# cxxrt_test drives the real runtime object (src/libc/src/cxxrt.cpp built
+# for the host) through the Itanium entry points a C++ compiler emits.
+# Both compile as C++17 with the shipped policy flags.  cxxrt.cpp keeps
+# -Isrc/libc/include so its "cxxrt.h" and <stdlib.h> resolve to the
+# sysroot exactly as they do on-device; the test TU deliberately omits it
+# so <stdio.h>/<sys/wait.h> stay glibc's and cxxrt.h is reached by
+# relative include.
+CXX_TEST_FLAGS = -std=c++17 -fno-exceptions -fno-rtti
+CXXRT_TEST = cxxrt_test_host
+obj/host_cxxrt_test.o: src/host/cxxrt_test.cpp src/libc/include/cxxrt.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) $(CXX_TEST_FLAGS) -c $< -o $@
+obj/host_cxxrt.o: src/libc/src/cxxrt.cpp src/libc/include/cxxrt.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) $(CXX_TEST_FLAGS) -Isrc/libc/include -c $< -o $@
+$(CXXRT_TEST): obj/host_cxxrt_test.o obj/host_cxxrt.o obj/host_compat.o
+	$(HOST_CC) -o $@ $^
+
+# cxx_headers_test: every public sysroot header in one C++ TU, compiled
+# with the sysroot include path FIRST so the HobbyOS headers are what get
+# tested — the F2.5 regression gate (see the test's header comment).
+CXX_HEADERS_TEST = cxx_headers_test_host
+obj/host_cxx_headers_test.o: src/host/cxx_headers_test.cpp src/libc/include/*.h src/libc/include/sys/*.h $(USER_HDRS)
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) $(CXX_TEST_FLAGS) -Isrc/libc/include -Isrc/include -c $< -o $@
+$(CXX_HEADERS_TEST): obj/host_cxx_headers_test.o
+	$(HOST_CC) -o $@ $^
+
 # WM damage bookkeeping: line-level window repair + the base (damage) clip
 # (window.c + graphics.c are included into the test's single TU).
 WINDOW_DAMAGE_TEST = window_damage_test_host
@@ -1790,7 +1860,7 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
@@ -1820,6 +1890,8 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	$(HOST_RUN) ./$(REALLOC_TEST)
 	$(HOST_RUN) ./$(PRINTF_TEST)
 	$(HOST_RUN) ./$(HEADERS_TEST)
+	$(HOST_RUN) ./$(CXXRT_TEST)
+	$(HOST_RUN) ./$(CXX_HEADERS_TEST)
 	$(HOST_RUN) ./$(GETOPT_TEST)
 	$(HOST_RUN) ./$(REGEX_TEST)
 	$(HOST_RUN) ./$(LANGINFO_TEST)

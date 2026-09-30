@@ -14,23 +14,31 @@
 
 #include <stddef.h>
 
-typedef unsigned int wint_t;
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+  typedef unsigned int wint_t;
 
 #define WEOF ((wint_t)-1)
 
-/* Opaque conversion state; C-locale conversions never leave the initial
- * (all-zero) state. */
-typedef struct {
-  int __count;
-  unsigned int __value;
-} mbstate_t;
+  /* Opaque conversion state; C-locale conversions never leave the initial
+   * (all-zero) state. */
+  typedef struct {
+    int __count;
+    unsigned int __value;
+  } mbstate_t;
 
-size_t mbrtowc(wchar_t *pwc, const char *s, size_t n, mbstate_t *ps);
-size_t mbrlen(const char *s, size_t n, mbstate_t *ps);
-size_t wcrtomb(char *s, wchar_t wc, mbstate_t *ps);
-int mbsinit(const mbstate_t *ps);
-wint_t btowc(int c);
-int wctob(wint_t c);
-int wcwidth(wchar_t wc);
+  size_t mbrtowc(wchar_t *pwc, const char *s, size_t n, mbstate_t *ps);
+  size_t mbrlen(const char *s, size_t n, mbstate_t *ps);
+  size_t wcrtomb(char *s, wchar_t wc, mbstate_t *ps);
+  int mbsinit(const mbstate_t *ps);
+  wint_t btowc(int c);
+  int wctob(wint_t c);
+  int wcwidth(wchar_t wc);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* HOBBYOS_WCHAR_H */
