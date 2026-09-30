@@ -1292,6 +1292,20 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-09-30 — **Wave 1c batteries GREEN on `e5188de` (both machines); Gate P1 stands closed.**
+  Local (workstation): host `TEST EXIT: 0` (482 checks / 0 failed; CXX suites
+  included), unit-arm 53/53, unit-x64 55/55 (KVM), ARM wave rc=0 — 0 FAIL,
+  `System halt`, THRD_T (20 checks, all PASS) + TLS_T 6/6, 9× "ALL TESTS
+  PASSED SUCCESSFULLY!", CXXSMOKE ran in-wave. VM (`w1c-*` tiers): host 57 s
+  rc=0 (0 failed), unit-arm 51 s 53/53, unit-x64 45 s 55/55 (KVM), test-arm
+  94 s rc=0 — 0 FAIL, `System halt.`, 9× verdicts, THRD_T (all checks PASS) +
+  TLS_T 6/6 in-wave, TACTEST PASS, DNSTST live (`10.0.2.3` → `example.com A =
+  172.66.147.243`), CXXSMOKE ran. THRD_T covers: create/join/retval, distinct
+  stacks, mutex counter + recursive, cond turnstile, barrier rounds, rwlock
+  exclusion, once, keys + dtor-at-exit, detach, thread exit retval, concurrent
+  malloc, fresh-thread FP state, slot recycle, futex timeout/eagain/wake/bounds,
+  exit-group-from-any-thread.
+
 - 2026-09-30 — **Wave 1c landed: P1 (threads/futex/pthreads) + Skia spike + WK-0 scaffold +
   refs-vendor — merged at `e5188de`** (base `00fce5d`; all three HobbyOS-repo merges clean,
   Skia a fast-forward).
@@ -1320,7 +1334,7 @@ curl -sI https://lite.cnn.com | grep -i content-length
     1–7 + dependency ledger), CMake bootstrap (OptionsHobbyOS + PlatformHobbyOS glue +
     WTF stubs), WK-1 feasibility memo (H-1..H-12, OQ-1..OQ-11). Nothing configure-tested
     by design; §6 WK-0 ticked with the null-build caveat.
-  - Merged-tip batteries (local + VM `w1c-*`) are running against `e5188de`.
+  - Merged-tip batteries (local + VM `w1c-*`): **GREEN** — see the next entry.
 
 - 2026-09-30 — **F1 carried item #3 CLOSED: the diffutils cmp ref-build story is
   vendored in-repo.** `third_party/diffutils-2.8.1.tar.gz` (780,086 B; sha256
