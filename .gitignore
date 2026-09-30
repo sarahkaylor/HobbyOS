@@ -26,6 +26,12 @@ guest.img
 # extraction is rebuilt from the tarball — WebKit is ~525 MiB extracted and
 # tracks in its own fork repo (browser.md AD-11/Appendix C).
 third_party/wpewebkit-2.54.0/
+# L5 font stack (browser.md §2/Appendix C): tarball + .sha256 + README
+# committed per pin; extractions rebuilt from the tarballs, build trees under
+# the already-ignored obj/third_party/.
+third_party/freetype-2.14.3/
+third_party/harfbuzz-14.5.0/
+third_party/fonts/dejavu-2.37/
 
 # Test output
 actual_qemu.ppm
