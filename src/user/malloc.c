@@ -38,7 +38,28 @@ struct block {
 
 static struct block *free_list = NULL;
 
-void *malloc(size_t size) {
+/* P1 (p1-threads-design.md section 6): the allocator is shared by every
+ * thread of a process, so the free list must be serialized.  A plain
+ * test-and-set spinlock is enough: the critical sections are short and
+ * never block (no allocation inside an I/O wait), and threads preempt
+ * freely at the tick, so a spinning waiter cannot starve the holder.
+ * Host builds (single-threaded harness, hb_* names) compile it out. */
+#ifndef HOST_TEST
+static char malloc_lock_byte;
+static void malloc_lock(void) {
+  while (__atomic_test_and_set(&malloc_lock_byte, __ATOMIC_ACQUIRE)) {
+    /* spin; preemption at the timer tick keeps this fair */
+  }
+}
+static void malloc_unlock(void) {
+  __atomic_clear(&malloc_lock_byte, __ATOMIC_RELEASE);
+}
+#else
+#define malloc_lock() ((void)0)
+#define malloc_unlock() ((void)0)
+#endif
+
+static void *malloc_locked(size_t size) {
   if (size == 0) return NULL;
 
   // Alignment: 16 bytes
@@ -93,7 +114,14 @@ void *malloc(size_t size) {
   return NULL; // Out of memory
 }
 
-void free(void *ptr) {
+void *malloc(size_t size) {
+  malloc_lock();
+  void *p = malloc_locked(size);
+  malloc_unlock();
+  return p;
+}
+
+static void free_locked(void *ptr) {
   if (!ptr) return;
 
   struct block *curr = (struct block *)((char *)ptr - BLOCK_SIZE);
@@ -111,25 +139,33 @@ void free(void *ptr) {
   }
 }
 
+void free(void *ptr) {
+  malloc_lock();
+  free_locked(ptr);
+  malloc_unlock();
+}
+
 void *calloc(size_t nmemb, size_t size) {
   size_t total = nmemb * size;
-  void *ptr = malloc(total);
+  malloc_lock();
+  void *ptr = malloc_locked(total);
   if (ptr) {
     char *cptr = (char *)ptr;
     for (size_t i = 0; i < total; i++) {
       cptr[i] = 0;
     }
   }
+  malloc_unlock();
   return ptr;
 }
 
-void *realloc(void *ptr, size_t size) {
+static void *realloc_locked(void *ptr, size_t size) {
   struct block *curr, *next;
   size_t aligned;
 
-  if (!ptr) return malloc(size);
+  if (!ptr) return malloc_locked(size);
   if (size == 0) {
-    free(ptr);
+    free_locked(ptr);
     return NULL;
   }
 
@@ -180,7 +216,7 @@ void *realloc(void *ptr, size_t size) {
 
   /* General case: new block, copy, free old. */
   {
-    void *newptr = malloc(size);
+    void *newptr = malloc_locked(size);
     size_t copy;
     size_t i;
     if (!newptr) return NULL;
@@ -189,9 +225,16 @@ void *realloc(void *ptr, size_t size) {
       char *d = (char *)newptr, *s = (char *)ptr;
       for (i = 0; i < copy; i++) d[i] = s[i];
     }
-    free(ptr);
+    free_locked(ptr);
     return newptr;
   }
+}
+
+void *realloc(void *ptr, size_t size) {
+  malloc_lock();
+  void *p = realloc_locked(ptr, size);
+  malloc_unlock();
+  return p;
 }
 
 #ifdef HOST_TEST

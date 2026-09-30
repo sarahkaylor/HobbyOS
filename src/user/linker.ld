@@ -38,7 +38,38 @@ SECTIONS
     .data : {
         *(.data*)
     }
-    
+
+    /* P1 (p1-threads-design.md section 4): TLS image.  .tdata/.tbss are
+     * placed contiguously AFTER .data (so alignment slack and the 16-byte
+     * variant-I TCB head live in writable memory) and BEFORE .bss (so the
+     * x86_64 self-pointer at FS:[0] = align_up(__tls_end, __tls_align) has
+     * writable slack below .bss too).
+     *
+     * Probe-verified layout (llvm 21 + ld.lld):
+     *   aarch64 (variant I):  TPIDR_EL0 = &__tls_start - 16;
+     *                         TPREL(v) = offset(v) + 0x10 (lld bakes the head).
+     *   x86_64  (variant II): FS base = align_up(&__tls_end, __tls_align);
+     *                         TPREL(v) = offset(v) - align_up(size, align).
+     * Constraint: __thread variables with alignment > 16 are out of contract
+     * for P1 -- the lld TPREL bias moves with the image alignment. */
+    . = ALIGN(16);
+    __tls_tcb_head = .;              /* variant-I head: [TP, TP+16) */
+    . += 16;
+    .tdata : ALIGN(16) {
+        __tls_start = .;
+        *(.tdata .tdata.* .gnu.linkonce.td.*)
+        __tls_data_end = .;
+    }
+    .tbss : {
+        *(.tbss .tbss.* .gnu.linkonce.tb.*)
+        *(.tcommon)
+        . = ALIGN(16);
+        __tls_end = .;
+    }
+    __tls_size = __tls_end - __tls_start;
+    __tls_align = ALIGNOF(.tdata) > ALIGNOF(.tbss) ? ALIGNOF(.tdata) : ALIGNOF(.tbss);
+    . += 16;                         /* x86_64 self-pointer slack */
+
     .bss : {
         *(.bss*)
         *(COMMON)

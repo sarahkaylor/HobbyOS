@@ -10,9 +10,13 @@
  * against glibc directly. The kernel includes this header for the constants
  * only; the `extern int errno` declaration is inert there.
  *
- * Userland storage is a plain global. Processes are single-threaded today,
- * which makes `int errno` correct; it must move to per-thread storage
- * (TLS) if pthreads are ever introduced.
+ * Userland storage is per-thread (P1, design section 6), served through
+ * __errno_location() (the glibc/musl model): errno is a macro over a
+ * __thread int in libc.c.  The macro form keeps every existing source
+ * compiling unchanged -- including `extern int errno;` declarations in
+ * vendored code, where the macro text is a valid function declaration.
+ * The accessor also performs the lazy TLS install for crt0-less programs,
+ * so no errno access ever touches an unset TP.
  */
 
 #define EPERM        1
@@ -72,7 +76,8 @@
 #define EWOULDBLOCK  EAGAIN
 
 #ifndef HOST_TEST
-extern int errno;
+int *__errno_location(void);
+#define errno (*__errno_location())
 #else
 /* Host tests link against glibc, where `errno` is a TLS macro, not a
  * variable. Some host rules compile with -Isrc/include, which shadows
