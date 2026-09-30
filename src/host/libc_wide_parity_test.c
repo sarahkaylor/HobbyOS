@@ -22,6 +22,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <locale.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,6 +74,17 @@ extern wchar_t *hb_wmemchr(const wchar_t *, wchar_t, size_t);
 extern double hb_wcstod(const wchar_t *, wchar_t **);
 extern float hb_wcstof(const wchar_t *, wchar_t **);
 extern long double hb_wcstold(const wchar_t *, wchar_t **);
+
+/* Long doubles carry 6 undefined padding bytes in their 16-byte x86-64
+ * object; a raw memcmp would compare stack garbage and flake run-to-run.
+ * Compare by class and value instead (exact ==, NaN class, zero sign). */
+static int ld_equal(long double a, long double b) {
+  if (isnan(a) || isnan(b))
+    return isnan(a) && isnan(b);
+  if (a != b)
+    return 0;
+  return a != 0.0L || signbit(a) == signbit(b);
+}
 
 extern int hb_iswalnum(wint_t);
 extern int hb_iswalpha(wint_t);
@@ -704,7 +716,7 @@ static void test_wide_strings(void) {
       errno = 0;
       lb = wcstold(nums[k], &eb);
       errb = errno;
-      CHECKV(memcmp(&la, &lb, sizeof la) == 0 && (ea - nums[k]) == (eb - nums[k]) &&
+      CHECKV(ld_equal(la, lb) && (ea - nums[k]) == (eb - nums[k]) &&
                  erra == errb,
              "wcstold", detail);
     }
@@ -1183,6 +1195,9 @@ int main(void) {
    * a UTC clock (ctime/strftime %Z/%z are UTC in this port). */
   setenv("TZ", "UTC", 1);
   tzset();
+  /* newlocale("") resolves through the environment on the glibc side; pin it
+   * so the comparison cannot depend on the host's installed locales. */
+  setenv("LC_ALL", "C", 1);
   setlocale(LC_ALL, "C");
 
   test_mb_conversions();

@@ -77,6 +77,8 @@ static struct __hb_locale c_locale_object = {LC_ALL_MASK};
 static locale_t current_locale;
 
 static int locale_name_ok(const char *name) {
+  /* "" asks for the environment locale; the C-only model resolves it to its
+   * one locale (the host parity test pins LC_ALL=C so both sides agree). */
   return name != NULL &&
          (name[0] == '\0' || strcmp(name, "C") == 0 ||
           strcmp(name, "POSIX") == 0);
