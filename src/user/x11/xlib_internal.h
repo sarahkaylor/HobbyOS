@@ -24,9 +24,25 @@
  *                                      pointer moved, SCREEN coordinates;
  *                                      delivered while PointerMotionMask
  *                                      is selected, button or no button
+ *     ESC [ K <mods> ~                 modifier state stamped before a
+ *                                      key press (F1.8 input v2; 1=Shift,
+ *                                      2=Ctrl, 4=Alt).  Parsed and
+ *                                      ignored: the key bytes keep the
+ *                                      classic mapping (Ctrl+A arrives as
+ *                                      0x01), so XKeyEvent.state stays 0
+ *                                      -- the README documents this
+ *     ESC [ D ~                        the WM is closing the window
+ *                                      ("WM_DELETE_WINDOW"): the next
+ *                                      XNextEvent() exits the process
+ *                                      cleanly, the same path a lost
+ *                                      desktop connection takes
  *     (plain bytes)                    keys; escape sequences for arrows
  *                                      and friends (see xlib_event.c)
- */
+ *
+ * The wire bytes carry no spaces -- the spacing above is notation (see
+ * window.h): a real K message is ESC [ K2~ and the close is ESC [ D~.
+ * The decoder skips an optional space before a parameter or the final
+ * '~', so both notations parse. */
 #ifndef HOBBYOS_X11_INTERNAL_H
 #define HOBBYOS_X11_INTERNAL_H
 
@@ -114,10 +130,14 @@ struct _XDisplay {
   XEvent queue[X11_MAX_QUEUE];
   int q_head, q_tail;
   /* Input decoder state (bytes -> messages). */
-  int st;                       /* 0 idle, 1 after ESC, 2 CSI, 3 OSC */
+  int st;                       /* 0 idle, 1 after ESC, 2 CSI, 3 OSC,
+                                   4 after ESC [ D (close vs Left arrow) */
   unsigned char seq[X11_SEQ_MAX];
   int seq_len;
   unsigned serial;
+  /* ESC [ D ~ seen: the WM is closing the window (F1.8).  The next
+   * XNextEvent() exits the process, like a lost desktop connection. */
+  int desktop_closed;
 };
 
 /* ---- display.c ------------------------------------------------------- */
@@ -147,9 +167,10 @@ void x11_queue_event(Display *d, const XEvent *ev);
  * point -- no I/O happens here). */
 void x11_input_bytes(Display *d, const unsigned char *buf, int len);
 
-/* Resolve a dangling lone-ESC when the input source has no more bytes
- * buffered right now (the pump passes available(fd) > 0; host tests pass
- * what they mean). */
+/* Resolve a dangling lone-ESC -- or a dangling ESC [ D, which is the Left
+ * arrow or the first bytes of the close message -- when the input source
+ * has no more bytes buffered right now (the pump passes available(fd) > 0;
+ * host tests pass what they mean). */
 void x11_input_settle(Display *d, int more_bytes_pending);
 
 /* Drain whatever is buffered without blocking (used by XPending and
