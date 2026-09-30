@@ -1100,19 +1100,28 @@ Numbers contiguous from 72; keep this table updated as gates freeze them
 ```
 SYS_THREAD_CREATE 72  (entry, arg, stack, flags)        -> tid | -errno     [P1]
 SYS_FUTEX         73  (uaddr, op{WAIT,WAKE}, val, timeout_ms) -> 0 | -errno [P1]
-SYS_POLL          74  (fds*, nfds, timeout_ms)          -> count | -errno   [P4]
-SYS_SOCKETPAIR    75  (domain, type, proto, fds[2])     -> 0 | -errno       [P4]
-SYS_SENDMSG       76  (fd, msghdr*, flags)   SCM_RIGHTS: 1 fd minimum      [P4]
-SYS_RECVMSG       77  (fd, msghdr*, flags)                                 [P4]
-SYS_MEMFD_CREATE  78  (name*, flags)                    -> fd | -errno      [P2]
-SYS_MPROTECT      79  (addr, len, prot)                 -> 0 | -errno       [P2]
-SYS_MADVISE       80  (addr, len, advice)               -> 0 | -errno (adv.)[P2]
-SYS_EXECVE        81  (path, argv*, envp*)              -> noreturn | -errno[P5]
-SYS_WAITPID       82  (pid, status*, options)           -> pid | -errno     [P5]
-SYS_SIGACTION     83  (signum, act*, oldact*)           -> 0 | -errno       [P5]
-SYS_KILL          84  (pid, signum)                     -> 0 | -errno       [P5]
+SYS_THREAD_EXIT   74  (retval)                          -> noreturn         [P1]
+SYS_SET_TLS       75  (tls)                             -> 0 | -errno       [P1]
+SYS_POLL          76  (fds*, nfds, timeout_ms)          -> count | -errno   [P4]
+SYS_SOCKETPAIR    77  (domain, type, proto, fds[2])     -> 0 | -errno       [P4]
+SYS_SENDMSG       78  (fd, msghdr*, flags)   SCM_RIGHTS: 1 fd minimum      [P4]
+SYS_RECVMSG       79  (fd, msghdr*, flags)                                 [P4]
+SYS_MEMFD_CREATE  80  (name*, flags)                    -> fd | -errno      [P2]
+SYS_MPROTECT      81  (addr, len, prot)                 -> 0 | -errno       [P2]
+SYS_MADVISE       82  (addr, len, advice)               -> 0 | -errno (adv.)[P2]
+SYS_EXECVE        83  (path, argv*, envp*)              -> noreturn | -errno[P5]
+SYS_WAITPID       84  (pid, status*, options)           -> pid | -errno     [P5]
+SYS_SIGACTION     85  (signum, act*, oldact*)           -> 0 | -errno       [P5]
+SYS_KILL          86  (pid, signum)                     -> 0 | -errno       [P5]
 SYS_SIGRETURN?    —    (only if handlers need it; default-kill-only scope may avoid it) [P5, verify]
 ```
+
+**P1 renumber (consented, §9 OQ1; applied 2026-09-30 with the P1 lane):**
+THREAD_EXIT and SET_TLS were inserted at 74/75 (the pthread/TLS layer needs
+them; splitting them across numbers would leave a P1-dependency hole), so
+every provisional row from the old 74 up shifted **+2** (POLL 74->76 through
+KILL 84->86; SIGRETURN stays unnumbered).  `SYS_MAX` is 75 in
+`src/include/syscall.h`; the P4+ rows remain provisional until their gates.
 Existing `SYS_MMAP/MUNMAP` (62/63-class) get **semantic extensions** (flags for
 MAP_SHARED/fd-backed) rather than new numbers — record exact ABI at P2.
 
