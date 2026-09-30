@@ -69,3 +69,13 @@ disk-intel-test.img
 third_party/mbedtls-3.6.7/
 third_party/curl-8.22.0/
 third_party/sqlite-amalgamation-3490200/
+
+# L6 Skia host spike (browser/l6-skia; browser.md §2 Skia pin): committed =
+# fetch script + pinned revision + checksums + WebKit recipe files + build &
+# smoke sources; the 80 MB archive (googlesource container sha is NOT
+# reproducible), the extracted upstream tree and the host build tree are
+# rebuilt by fetch.sh / build.sh.
+third_party/skia-588b550/skia-*.tar.gz
+third_party/skia-588b550/src/
+third_party/skia-588b550/build-host/
+third_party/skia-588b550/.fetched-ok
