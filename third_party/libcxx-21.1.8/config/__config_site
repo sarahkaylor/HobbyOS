@@ -1,0 +1,86 @@
+//===----------------------------------------------------------------------===//
+// HobbyOS libc++ site configuration (committed; overlaid into the extracted
+// libc++ include/ dir by fetch.sh as <libcxx/include/__config_site>).
+//
+// This is the file the official build generates with CMake from
+// include/__config_site.in.  HobbyOS is a freestanding bare-metal target
+// (--target=aarch64-none-elf / x86_64-none-elf) with its own libc
+// (src/libc), pthreads+futex (P1) and no dynamic linking, so the site
+// values are chosen to match exactly what src/libc provides.  Every value
+// here is load-bearing; rationale for each is in
+// third_party/libcxx-21.1.8/README.md ("__config_site rationale").
+//
+// Keep the macro set in sync with include/__config_site.in (LLVM 21).
+//===----------------------------------------------------------------------===//
+
+#ifndef _LIBCPP___CONFIG_SITE
+#define _LIBCPP___CONFIG_SITE
+
+// ABI: the default ("version 1") Itanium ABI, as every non-Apple/Android
+// libc++ build uses.  No ABI-breaking options.
+#define _LIBCPP_ABI_VERSION 1
+#define _LIBCPP_ABI_FORCE_ITANIUM 1
+#define _LIBCPP_ABI_FORCE_MICROSOFT 0
+
+// Threads: P1 pthreads (docs/browser/p1-threads-design.md) are the backend.
+#define _LIBCPP_HAS_THREADS 1
+#define _LIBCPP_HAS_THREAD_API_PTHREAD 1
+#define _LIBCPP_HAS_THREAD_API_EXTERNAL 0
+#define _LIBCPP_HAS_THREAD_API_WIN32 0
+
+// clock_gettime(CLOCK_MONOTONIC) exists (F2.3, SYS sysinfo 1).
+#define _LIBCPP_HAS_MONOTONIC_CLOCK 1
+
+// No terminal concept (no isatty/termios) — <print> writes raw.
+#define _LIBCPP_HAS_TERMINAL 0
+
+// Not musl; libc++ takes its generic (BSD-fallbacks) locale path and the
+// C-only locale shims HobbyOS adds (src/libc/src/xlocale.c).
+#define _LIBCPP_HAS_MUSL_LIBC 0
+
+// Rune table: HobbyOS's libc has no <ctype.h> rune table (glibc's _ISbit
+// macros / bionic tables don't exist here).  This makes std::ctype<char>
+// use libc++'s built-in C-locale table (src/locale.cpp classic_table()),
+// which is exactly the byte-only C locale HobbyOS implements.
+#define _LIBCPP_PROVIDES_DEFAULT_RUNE_TABLE 1
+
+// PSTL: serial backend (no parallelism; std::execution::par falls back to
+// the serial policy — libc++ 21 errors out without one of these defines).
+#define _LIBCPP_PSTL_BACKEND_SERIAL 1
+
+// No vendor availability annotations outside Apple/Android/Fuchsia.
+#define _LIBCPP_HAS_VENDOR_AVAILABILITY_ANNOTATIONS 0
+
+// No <filesystem>: FAT16-only VFS, no directory fd/stat surface the
+// filesystem library needs.  libc++ headers gate accordingly.
+#define _LIBCPP_HAS_FILESYSTEM 0
+
+// random_device: provided by libc getentropy() (SYS_GETRANDOM).  Defining
+// the user option here selects the getentropy backend in <random>; the
+// device token must be "/dev/urandom" (libc++ 21 requirement), which is the
+// default.
+#define _LIBCPP_HAS_RANDOM_DEVICE 1
+#define _LIBCPP_USING_GETENTROPY 1
+
+// Localization ON, C locale only ("C"/"POSIX"): required for the stream
+// classes — with 0, LLVM 21's <sstream>/<iostream>/basic_ostream are
+// compiled out entirely (see __ostream/basic_ostream.h, sstream).  The
+// C-only xlocale shims make every std::locale observe the C locale.
+#define _LIBCPP_HAS_LOCALIZATION 1
+
+// No ICU: no Unicode-aware <format>/<print> paths.
+#define _LIBCPP_HAS_UNICODE 0
+
+// wchar_t exists (src/libc/src/wchar.c, C-locale byte mode).
+#define _LIBCPP_HAS_WIDE_CHARACTERS 1
+
+// No timezone database; UTC-only time (src/libc time.c).
+#define _LIBCPP_HAS_TIME_ZONE_DATABASE 0
+
+// No hardening: this is the bring-up config (revisit with the W2 QA pass).
+#define _LIBCPP_HARDENING_MODE_DEFAULT _LIBCPP_HARDENING_MODE_NONE
+
+// Static-only target: visibility annotations are meaningless.
+#define _LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS
+
+#endif // _LIBCPP___CONFIG_SITE

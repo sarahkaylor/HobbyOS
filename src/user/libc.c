@@ -359,6 +359,26 @@ int getrandom(void *buf, size_t len, unsigned int flags) {
   return (int)errno_ret(syscall(SYS_GETRANDOM, (long)buf, (long)len, (long)flags, 0));
 }
 
+/* P3.2: getentropy() (glibc 2.25+), used by libc++'s std::random_device.
+ * glibc semantics: length <= 256 (EIO otherwise), returns 0 on success,
+ * -1/errno on failure. */
+int getentropy(void *buf, size_t length) {
+  int n;
+
+  if (length > 256) {
+    errno = EIO;
+    return -1;
+  }
+  n = getrandom(buf, length, 0);
+  if (n < 0)
+    return -1; /* errno already set by getrandom() */
+  if ((size_t)n != length) {
+    errno = EIO;
+    return -1;
+  }
+  return 0;
+}
+
 /* POSIX sleep: seconds. Legacy HobbyOS callers used milliseconds and are
  * migrated to usleep() (phase-2 sweep); SYS_SLEEP is millisecond-based. */
 unsigned int sleep(unsigned int seconds) {
@@ -371,6 +391,29 @@ int usleep(unsigned int usec) {
   if (ms == 0 && usec > 0)
     ms = 1;
   syscall(SYS_SLEEP, (long)ms, 0, 0, 0);
+  return 0;
+}
+
+/* P3.2: POSIX nanosleep over the millisecond SYS_SLEEP (libc++
+ * this_thread::sleep_for + condition_variable use it).  The kernel sleep
+ * runs to completion (no EINTR source), so `rem` is always zero. */
+int nanosleep(const struct timespec *req, struct timespec *rem) {
+  unsigned long ms;
+
+  if (req == NULL || req->tv_sec < 0 || req->tv_nsec < 0 ||
+      req->tv_nsec >= 1000000000L) {
+    errno = EINVAL;
+    return -1;
+  }
+  ms = (unsigned long)req->tv_sec * 1000UL +
+       ((unsigned long)req->tv_nsec + 999999UL) / 1000000UL;
+  if (ms == 0)
+    ms = 1; /* ensure forward progress for sub-millisecond sleeps */
+  syscall(SYS_SLEEP, (long)ms, 0, 0, 0);
+  if (rem != NULL) {
+    rem->tv_sec = 0;
+    rem->tv_nsec = 0;
+  }
   return 0;
 }
 int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args) {

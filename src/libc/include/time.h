@@ -22,6 +22,7 @@
 #else
 
 #include <sys/types.h>   /* time_t */
+#include <locale.h>      /* locale_t for strftime_l */
 
 #ifdef __cplusplus
 extern "C" {
@@ -79,7 +80,42 @@ extern "C" {
    * fails with -1/EINVAL. */
   int clock_gettime(clockid_t clk_id, struct timespec *tp);
 
-  /* difftime() is omitted on purpose: no floating-point ABI in this libc. */
+  /* ---- P3.2 (browser.md §6): names <ctime>/libc++ need ---- */
+
+  /* difftime: (time1 - time0) as double (userland may use FP since F1.5;
+   * the old "no floating-point ABI" note no longer applies). */
+  double difftime(time_t time1, time_t time0);
+
+  /* Processor-time clock approximation: HobbyOS has no CPU-time counters,
+   * so clock() reports monotonic uptime scaled to CLOCKS_PER_SEC. */
+  typedef long clock_t;
+#define CLOCKS_PER_SEC 1000000L
+  clock_t clock(void);
+
+  /* C-locale strftime (glibc-parity subset: the format directives ported
+   * GNU sources use; see src/libc/src/strftime.c). */
+  size_t strftime(char *s, size_t max, const char *format,
+                  const struct tm *tm);
+
+  /* Locale variant (P3.2 xlocale): the locale argument is ignored (C only). */
+  size_t strftime_l(char *s, size_t max, const char *format,
+                    const struct tm *tm, locale_t loc);
+
+  /* asctime/ctime: fixed 26-char form, UTC (no tzdb); the static buffer is
+   * shared like glibc's. */
+  char *asctime(const struct tm *tm);
+  char *asctime_r(const struct tm *tm, char *buf);
+  char *ctime(const time_t *timep);
+  char *ctime_r(const time_t *timep, char *buf);
+
+  /* C11 timespec_get: TIME_UTC == CLOCK_REALTIME. */
+#define TIME_UTC 1
+  int timespec_get(struct timespec *ts, int base);
+
+  /* POSIX nanosleep over the kernel's millisecond sleep.  Milliseconds
+   * round up; the remainder is always zero (the kernel sleep is not
+   * interruptible), so rem is cleared.  Returns 0. */
+  int nanosleep(const struct timespec *req, struct timespec *rem);
 
 #ifdef __cplusplus
 }

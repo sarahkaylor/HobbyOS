@@ -6,6 +6,8 @@ obj/
 *.BIN
 *.elf
 *_test_host
+# Host parity harness run binaries (built in the repo root by host_tests)
+*_parity_run
 
 # Compiled output
 hobbyos
@@ -109,3 +111,10 @@ third_party/libffi-3.4.8/libffi-3.4.8.tar.gz
 third_party/libffi-3.4.8/src/
 third_party/libffi-3.4.8/build-host/
 third_party/libffi-3.4.8/.fetched-ok
+
+# P3 libc++ vendor (browser/l3-libcxx; browser.md §6 P3.1): committed =
+# fetch.sh, README.md, anchors.sha256, container.sha256, sources.txt,
+# build-target.sh, config/; fetched/extracted below is gitignored.
+third_party/libcxx-21.1.8/llvm-*.tar.xz
+third_party/libcxx-21.1.8/src/
+third_party/libcxx-21.1.8/.fetched-ok

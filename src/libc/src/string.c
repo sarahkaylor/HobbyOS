@@ -12,6 +12,12 @@
 #ifndef HOST_TEST
 #include "string.h"
 #include "malloc.h"
+#include "errno.h"
+#else
+/* strerror_r returns ERANGE/EINVAL; those constants come from the host's
+   errno.h in the HOST_TEST flavour (the device build includes the sysroot
+   one above). */
+#include <errno.h>
 #endif
 
 /* Recursion guard for our own use below (non-host only). */
@@ -20,6 +26,8 @@
 #define strnlen hb_strnlen
 #define strcmp hb_strcmp
 #define strcoll hb_strcoll
+#define strxfrm hb_strxfrm
+#define strerror_r hb_strerror_r
 #define strncmp hb_strncmp
 #define strcasecmp hb_strcasecmp
 #define strncasecmp hb_strncasecmp
@@ -431,6 +439,47 @@ char *strerror(int errnum) {
 int strcoll(const char *s1, const char *s2) {
   return strcmp(s1, s2);
 }
+
+/* strxfrm: identity transform (C locale).  Copy semantics match glibc:
+ * min(n, len) bytes are written, and the NUL is only stored when it fits;
+ * the full needed length is always returned.  (Verified against glibc in
+ * the host test.) */
+size_t strxfrm(char *dst, const char *src, size_t n) {
+  size_t len = strlen(src);
+  if (n > 0) {
+    size_t copy = len < n ? len : n;
+    memcpy(dst, src, copy);
+    if (n > len)
+      dst[len] = '\0';
+  }
+  return len;
+}
+
+/* XSI-style strerror_r (glibc __xpg_strerror_r semantics): 0 on success,
+ * ERANGE when the buffer is too small, EINVAL for an unknown errnum (the
+ * buffer still receives "Unknown error N" text, as glibc fills it). */
+int strerror_r(int errnum, char *buf, size_t buflen) {
+  const char *msg = strerror(errnum);
+
+  if (msg != hb_strerror_buf) {
+    size_t n = strlen(msg) + 1;
+    if (n > buflen)
+      return ERANGE;
+    memcpy(buf, msg, n);
+    return 0;
+  }
+
+  /* Unknown number: "Unknown error N" is in the static buffer; the copy
+   * is the same either way. */
+  {
+    size_t n = strlen(hb_strerror_buf) + 1;
+    if (n > buflen)
+      return ERANGE;
+    memcpy(buf, hb_strerror_buf, n);
+  }
+  return EINVAL;
+}
+
 
 /* GNU extension: locate the last occurrence of C in the first N bytes. */
 void *memrchr(const void *s, int c, size_t n) {

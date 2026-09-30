@@ -29,6 +29,12 @@
 
 #ifdef HOST_TEST
 #define atoi hb_atoi
+#define div hb_div
+#define ldiv hb_ldiv
+#define lldiv hb_lldiv
+#define at_quick_exit hb_at_quick_exit
+#define quick_exit hb_quick_exit
+#define _Exit hb__Exit
 #define atol hb_atol
 #define atoll hb_atoll
 #define strtol hb_strtol
@@ -240,6 +246,29 @@ long long atoll(const char *nptr) {
 }
 
 /* ---------------- abs/labs/llabs ---------------- */
+
+/* ---- C99 integer division (P3.2: names <cstdlib> re-exports) ---- */
+
+div_t div(int numer, int denom) {
+  div_t r;
+  r.quot = numer / denom;
+  r.rem = numer % denom;
+  return r;
+}
+
+ldiv_t ldiv(long numer, long denom) {
+  ldiv_t r;
+  r.quot = numer / denom;
+  r.rem = numer % denom;
+  return r;
+}
+
+lldiv_t lldiv(long long numer, long long denom) {
+  lldiv_t r;
+  r.quot = numer / denom;
+  r.rem = numer % denom;
+  return r;
+}
 
 int abs(int j) {
   unsigned int u = (unsigned int)j;
@@ -589,6 +618,29 @@ void __hb_atexit_run(void) {
 #endif
 
 /* ---------------- mkstemp / mkostemp ---------------- */
+
+/* ---- C11 quick exit (P3.2) -------------------------------------------- */
+
+#define HB_QUICKEXIT_MAX 32
+
+static void (*hb_quick_exit_fns[HB_QUICKEXIT_MAX])(void);
+static int hb_quick_exit_count;
+
+int at_quick_exit(void (*function)(void)) {
+  if (function == NULL || hb_quick_exit_count >= HB_QUICKEXIT_MAX)
+    return -1;
+  hb_quick_exit_fns[hb_quick_exit_count++] = function;
+  return 0;
+}
+
+/* C99 _Exit: terminate without running atexit/quick-exit handlers. */
+void _Exit(int status) { _exit(status); }
+
+void quick_exit(int status) {
+  while (hb_quick_exit_count > 0)
+    hb_quick_exit_fns[--hb_quick_exit_count]();
+  _Exit(status);
+}
 
 static int hb_mkstemp_common(char *tmpl, int flags) {
   static unsigned long hb_tmp_counter;

@@ -63,7 +63,18 @@ ifeq ($(ARCH),intel)
   # enables CR0.EM/MP/TS + CR4.OSFXSR/OSXMMEXCPT per core and carries each
   # process's 512-byte FXSAVE64 image across context switches (F1.5).
   CFLAGS = -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
-  USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone
+  # Hermetic userland include path (P3).  clang's driver for x86_64-none-elf
+  # appends the WORKSTATION's glibc dirs (/usr/include) because the target
+  # arch matches the host's; the aarch64 target never gets aarch64 host
+  # dirs, which is why only intel leaked.  Concretely: libc++'s
+  # __mbstate_t.h tests __has_include(<bits/types/mbstate_t.h>), finds
+  # glibc's on intel only, and its typedef collides with the sysroot's
+  # ('typedef redefinition ... mbstate_t').  -nostdinc + an explicit
+  # resource-dir -isystem reproduces the arm (hermetic) search path:
+  # compiler freestanding headers reachable, host glibc not.
+  # Keep in sync with third_party/libcxx-21.1.8/build-target.sh (STDINC).
+  CLANG_RESOURCE_INCLUDE := $(shell $(CC) -print-resource-dir 2>/dev/null)/include
+  USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem $(CLANG_RESOURCE_INCLUDE)
   ARCH_DIR = src/kernel/arch/x64
   LDFLAGS = -T linker_x64.ld
   # QEMU parameters for x86_64: 8 cores, 6GB RAM, mounting disk.img as NVMe, booting with UEFI
@@ -100,6 +111,17 @@ endif
 # clang++ binary; the driver picks the C++ frontend from the .cpp
 # extension).
 CXX_USER_FLAGS = $(USER_CFLAGS) -std=c++17 -fno-exceptions -fno-rtti -nostdinc++
+
+# P3 (browser.md §6): the vendored libc++ + libc++abi.  Programs that use
+# the standard library compile with the vendored headers (-nostdinc++ keeps
+# every other C++ header out) and link $(OBJ_DIR)/libcxx.a ahead of libc.a.
+LIBCXX_VENDOR = third_party/libcxx-21.1.8
+LIBCXX_ROOT = $(LIBCXX_VENDOR)/src/llvm-project-21.1.8.src
+LIBCXX_INCLUDE = $(LIBCXX_ROOT)/libcxx/include
+# The vendored include dir must precede the sysroot: libc++'s ctype.h/
+# wchar.h/... wrappers are found first and pull the C headers with
+# #include_next (the upstream "C++ headers before C headers" rule).
+CXX_LIBCXX_USER_FLAGS = -I$(LIBCXX_INCLUDE) $(USER_CFLAGS) -std=c++23 -fno-exceptions -fno-rtti -nostdinc++
 
 ifeq ($(MODE),test)
   CFLAGS += -DKERNEL_MODE_TEST
@@ -182,6 +204,8 @@ DNSTST_BIN = $(OBJ_DIR)/dns_test.bin
 # F2.4 (browser.md): minimal C++ runtime acceptance.  CXXSMOKE.BIN is
 # 8.3-safe (8-char base name) and built as C++ per CXX_USER_FLAGS above.
 CXXSMOKE_BIN = $(OBJ_DIR)/cxx_smoke.bin
+# P3 (browser.md §6): libc++ acceptance (8.3-safe).
+CXX_T_BIN = $(OBJ_DIR)/cxx_t.bin
 ERRNO_TEST_BIN = $(OBJ_DIR)/errtest.bin
 # Phase F1 (browser.md): socket/select acceptance + deterministic select
 # checks + SYS_GETRANDOM entropy (see main.c's KERNEL_MODE_TEST wave).
@@ -560,6 +584,27 @@ $(CXXSMOKE_BIN): $(OBJ_DIR)/cxx_smoke.o $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/cxx_smoke.elf $(OBJ_DIR)/cxx_smoke.o $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/cxx_smoke.elf $(CXXSMOKE_BIN)
 
+# --- P3 (browser.md §6): libc++ acceptance -------------------------------
+# cxx_t.cpp uses <vector> <string> <map> <unordered_map> <algorithm>
+# <memory> <atomic> <thread> <mutex> <condition_variable> <chrono>
+# <sstream> from the vendored libc++, threads/mutex/cond from libc.a's
+# pthread.c, and prints "name : PASS" lines per check.
+$(OBJ_DIR)/cxx_t.o: src/user/cxx_t.cpp $(USER_LIBC) $(USER_HDRS) $(LIBCXX_INCLUDE)/vector $(LIBCXX_VENDOR)/sources.txt
+	@mkdir -p $(OBJ_DIR)
+	$(CXX) $(CXX_LIBCXX_USER_FLAGS) -c $< -o $@
+
+$(CXX_T_BIN): $(OBJ_DIR)/cxx_t.o $(OBJ_DIR)/libcxx.a $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/cxx_t.elf $(OBJ_DIR)/cxx_t.o $(OBJ_DIR)/libcxx.a $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/cxx_t.elf $(CXX_T_BIN)
+
+# The vendored libc++ + libc++abi static archive (one per arch).  Built by
+# third_party/libcxx-21.1.8/build-target.sh from sources.txt with the
+# committed __config_site; the extracted upstream tree is fetched by
+# fetch.sh (Skia vendor recipe) and is gitignored.
+$(OBJ_DIR)/libcxx.a: $(LIBCXX_VENDOR)/build-target.sh $(LIBCXX_VENDOR)/sources.txt $(LIBCXX_VENDOR)/config/__config_site
+	@mkdir -p $(OBJ_DIR)
+	bash $(LIBCXX_VENDOR)/build-target.sh --arch $(ARCH) --objdir $(OBJ_DIR)/libcxx --out $@
+
 $(ERRNO_TEST_BIN): $(OBJ_DIR)/user_errno_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/errno_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/errno_test.elf $(ERRNO_TEST_BIN)
@@ -578,7 +623,23 @@ $(OBJ_DIR)/libc_%.o: src/libc/src/%.c $(USER_HDRS) src/libc/src/*.h
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/cxxrt.o $(OBJ_DIR)/libc_pthread.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o $(OBJ_DIR)/libc_mman.o $(OBJ_DIR)/libc_regex.o $(OBJ_DIR)/libc_langinfo.o $(OBJ_DIR)/libc_wchar.o $(OBJ_DIR)/libc_wctype.o $(OBJ_DIR)/libc_locale.o $(OBJ_DIR)/libc_selinux.o $(OBJ_DIR)/libc_dirent.o $(OBJ_DIR)/libc_time.o $(OBJ_DIR)/libc_time_math.o $(OBJ_DIR)/libc_libgen.o $(OBJ_DIR)/libc_realpath.o
+# The P3.2 gap-fills use long double (strtold/strtof's widening casts, the
+# %Lf scanner path): on aarch64 clang lowers those to the binary128
+# compiler-rt builtins.  libc.a carries exactly the three that its members
+# reference so plain C programs (basename, sed, ...) link; libcxx.a carries
+# the full set for the C++ side.  x86_64 lowers long double to x87 and the
+# objects are simply unreferenced there.  Sources come from the pinned
+# vendor tree (fetch.sh self-heals if it is missing).
+LIBC_BUILTIN_SRCS = extenddftf2.c trunctfdf2.c trunctfsf2.c
+LIBC_BUILTIN_OBJS = $(addprefix $(OBJ_DIR)/builtins/,$(LIBC_BUILTIN_SRCS:.c=.o))
+$(LIBCXX_VENDOR)/.fetched-ok: $(LIBCXX_VENDOR)/fetch.sh $(LIBCXX_VENDOR)/anchors.sha256
+	@bash $(LIBCXX_VENDOR)/fetch.sh
+
+$(OBJ_DIR)/builtins/%.o: $(LIBCXX_ROOT)/compiler-rt/lib/builtins/%.c $(LIBCXX_VENDOR)/.fetched-ok
+	@mkdir -p $(OBJ_DIR)/builtins
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/cxxrt.o $(OBJ_DIR)/libc_pthread.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o $(OBJ_DIR)/libc_mman.o $(OBJ_DIR)/libc_regex.o $(OBJ_DIR)/libc_langinfo.o $(OBJ_DIR)/libc_wchar.o $(OBJ_DIR)/libc_wctype.o $(OBJ_DIR)/libc_locale.o $(OBJ_DIR)/libc_selinux.o $(OBJ_DIR)/libc_dirent.o $(OBJ_DIR)/libc_time.o $(OBJ_DIR)/libc_time_math.o $(OBJ_DIR)/libc_libgen.o $(OBJ_DIR)/libc_realpath.o $(OBJ_DIR)/libc_xlocale.o $(OBJ_DIR)/libc_strtod.o $(OBJ_DIR)/libc_strftime.o $(OBJ_DIR)/libc_math.o $(LIBC_BUILTIN_OBJS)
 	$(AR) rcs $@ $^
 
 # --- HELLO demo (Phase 0 gate): a main(argc, argv) program built against
@@ -1190,7 +1251,7 @@ $(XEYES_BIN): $(OBJ_DIR)/xeyes_main.o $(X11_LIB_OBJS) $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/xeyes.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/xeyes.elf $(XEYES_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(CXX_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -1254,6 +1315,7 @@ endif
 	$(MCOPY) -i disk.img $(CXXSMOKE_BIN) ::/CXXSMOKE.BIN
 	$(MCOPY) -i disk.img $(THRD_T_BIN) ::/THRD_T.BIN
 	$(MCOPY) -i disk.img $(TLS_T_BIN) ::/TLS_T.BIN
+	$(MCOPY) -i disk.img $(CXX_T_BIN) ::/CXX_T.BIN
 	$(MCOPY) -i disk.img $(HELLO_BIN) ::/HELLO.BIN
 	$(MCOPY) -i disk.img $(SH_BIN) ::/SH.BIN
 	$(MCOPY) -i disk.img $(LS_BIN) ::/LS.BIN
@@ -1686,6 +1748,61 @@ obj/host_libc_langinfo_test.o: src/host/libc_langinfo_test.c src/libc/include/*.
 $(LANGINFO_TEST): obj/host_libc_langinfo_test.o obj/host_hb_langinfo.o
 	$(HOST_CC) -o $@ $^
 
+# P3.2 gap-fills: the scanner + wide formatter, compiled from the bare-metal
+# sources with -DHOST_TEST (colliding symbols are hb_* there) and raced
+# byte-for-byte against glibc (src/host/libc_scanf_wprintf_test.c).
+SCANFW_PARITY = libc_scanf_wprintf_parity_run
+obj/host_hb_stdio_sp.o: src/libc/src/stdio.c src/libc/include/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+obj/host_hb_wchar_sp.o: src/libc/src/wchar.c src/libc/include/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+obj/host_libc_scanf_wprintf_test.o: src/host/libc_scanf_wprintf_test.c
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+$(SCANFW_PARITY): obj/host_libc_scanf_wprintf_test.o obj/host_hb_stdio_sp.o obj/host_hb_wchar_sp.o
+	$(HOST_CC) -o $@ $^
+
+# P3.1 numeric parity: strtod / strtol / strtold and the math front-ends
+# compiled from the bare-metal sources with -DHOST_TEST, raced against glibc
+# (src/host/libc_num_parity_test.c; the acceptance window is the ulp bound
+# documented in src/libc/src/strtod.c).
+NUM_PARITY = libc_num_parity_run
+obj/host_hb_math_np.o: src/libc/src/math.c src/libc/include/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+obj/host_hb_strtod_np.o: src/libc/src/strtod.c src/libc/include/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+obj/host_libc_num_parity_test.o: src/host/libc_num_parity_test.c
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+$(NUM_PARITY): obj/host_libc_num_parity_test.o obj/host_hb_math_np.o obj/host_hb_strtod_np.o
+	$(HOST_CC) -o $@ $^ -lm
+
+# P3.2/P3.3 wide parity: wchar / wctype / strftime / xlocale compiled from
+# the bare-metal sources with -DHOST_TEST (colliding symbols are hb_* there)
+# and raced against glibc (src/host/libc_wide_parity_test.c).
+WIDE_PARITY = libc_wide_parity_run
+obj/host_hb_wchar_wp.o: src/libc/src/wchar.c src/libc/include/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+obj/host_hb_wctype_wp.o: src/libc/src/wctype.c src/libc/include/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+obj/host_hb_strftime_wp.o: src/libc/src/strftime.c src/libc/include/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+obj/host_hb_xlocale_wp.o: src/libc/src/xlocale.c src/libc/include/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+obj/host_libc_wide_parity_test.o: src/host/libc_wide_parity_test.c
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+$(WIDE_PARITY): obj/host_libc_wide_parity_test.o obj/host_hb_wchar_wp.o obj/host_hb_wctype_wp.o obj/host_hb_strftime_wp.o obj/host_hb_xlocale_wp.o
+	$(HOST_CC) -o $@ $^
+
 # The ported wc built for the host: ours except getopt_long (hb_* via our
 # getopt.h) and error() (host_hb_error.o); everything else resolves to
 # glibc.  wc_host is raced byte-for-byte against coreutils in
@@ -1903,7 +2020,7 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
@@ -1940,6 +2057,9 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	$(HOST_RUN) ./$(GETOPT_TEST)
 	$(HOST_RUN) ./$(REGEX_TEST)
 	$(HOST_RUN) ./$(LANGINFO_TEST)
+	$(HOST_RUN) ./$(SCANFW_PARITY)
+	$(HOST_RUN) ./$(NUM_PARITY)
+	$(HOST_RUN) ./$(WIDE_PARITY)
 	$(HOST_RUN) ./files_test_host
 	$(HOST_RUN) ./calc_test_host
 	$(HOST_RUN) ./clock_test_host

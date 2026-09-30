@@ -1,6 +1,8 @@
 #ifndef HOBBYOS_CTYPE_H
 #define HOBBYOS_CTYPE_H
 
+#include <locale.h> /* locale_t for the *_l variants */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -27,6 +29,24 @@ extern "C" {
   int isxdigit(int c);
   int tolower(int c);
   int toupper(int c);
+
+  /* xlocale/P3.2 variants (C locale: the locale argument is ignored; see
+   * src/libc/src/xlocale.c).  libc++'s <ctype.h> layer requires
+   * isdigit_l/isxdigit_l at header-parse time. */
+  int isalnum_l(int c, locale_t loc);
+  int isalpha_l(int c, locale_t loc);
+  int isblank_l(int c, locale_t loc);
+  int iscntrl_l(int c, locale_t loc);
+  int isdigit_l(int c, locale_t loc);
+  int isgraph_l(int c, locale_t loc);
+  int islower_l(int c, locale_t loc);
+  int isprint_l(int c, locale_t loc);
+  int ispunct_l(int c, locale_t loc);
+  int isspace_l(int c, locale_t loc);
+  int isupper_l(int c, locale_t loc);
+  int isxdigit_l(int c, locale_t loc);
+  int tolower_l(int c, locale_t loc);
+  int toupper_l(int c, locale_t loc);
 
 #ifdef __cplusplus
 }

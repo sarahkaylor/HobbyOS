@@ -1394,7 +1394,8 @@
 #define STDC_HEADERS 1
 
 /* Define to 1 if strerror_r returns char *. */
-#define STRERROR_R_CHAR_P 1
+#define STRERROR_R_CHAR_P 0 /* P3.2: the sysroot strerror_r is the XSI
+                               int-returning one. */
 
 /* Define to 1 if the type of the st_atim member of a struct stat is struct
    timespec. */

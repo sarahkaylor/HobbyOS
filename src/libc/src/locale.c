@@ -12,10 +12,12 @@
  */
 #ifdef HOST_TEST
 #include <errno.h>
+#include <limits.h>
 #include <string.h>
 #else
 #include "locale.h"
 #include "errno.h"
+#include "limits.h"
 #include "string.h"
 #endif
 
@@ -36,3 +38,14 @@ char *setlocale(int category, const char *locale) {
   errno = ENOENT;
   return NULL;
 }
+
+/* lconv for the C locale.  Field-for-field glibc's values (host test
+ * races localeconv against glibc's): only decimal_point is non-empty and
+ * the numeric singles are CHAR_MAX ("not available"). */
+static struct lconv c_lconv = {
+  ".", "", "", "", "", "", "", "", "", "",
+  CHAR_MAX, CHAR_MAX, CHAR_MAX, CHAR_MAX, CHAR_MAX, CHAR_MAX, CHAR_MAX,
+  CHAR_MAX, CHAR_MAX, CHAR_MAX, CHAR_MAX, CHAR_MAX, CHAR_MAX, CHAR_MAX,
+};
+
+struct lconv *localeconv(void) { return &c_lconv; }

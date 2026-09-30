@@ -47,6 +47,7 @@ extern "C" {
 
   /* --- FILE layer --- */
   FILE *fopen(const char *path, const char *mode);
+  FILE *freopen(const char *path, const char *mode, FILE *stream);
   FILE *fdopen(int fd, const char *mode);
   int fclose(FILE *stream);
   size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream);
@@ -71,6 +72,23 @@ extern "C" {
   int ungetc(int c, FILE *stream);
   int setvbuf(FILE *stream, char *buf, int mode, size_t size);
   void setbuf(FILE *stream, char *buf);
+
+  /* --- file positioning (P3.2: names required by libc++'s <cstdio>) --- */
+  typedef long fpos_t;
+  int fgetpos(FILE *stream, fpos_t *pos);
+  int fsetpos(FILE *stream, const fpos_t *pos);
+
+  /* --- misc names required by libc++'s <cstdio> (declarations only;
+     gets/tmpfile/tmpnam are not implemented — referencing them faults at
+     link time like any missing symbol, see the vendor README) --- */
+  char *gets(char *s);
+  FILE *tmpfile(void);
+  char *tmpnam(char *s);
+  int remove(const char *path);
+
+  /* --- POSIX/GNU allocation printf (P3.2: used by libc++ verbose_abort) --- */
+  int asprintf(char **strp, const char *format, ...);
+  int vasprintf(char **strp, const char *format, va_list ap);
 #define _IOFBF 0
 #define _IOLBF 1
 #define _IONBF 2
@@ -94,13 +112,13 @@ extern "C" {
 
   int rename(const char *oldpath, const char *newpath);
 
-/* Standard I/O buffer size.  glibc uses 8192; on this 256 KB user stack a
-   * smaller default is kinder to ported programs that keep FILE buffers or
-   * BUFSIZ-sized locals on the stack. */
+  /* Standard I/O buffer size.  glibc uses 8192; on this 256 KB user stack a
+     * smaller default is kinder to ported programs that keep FILE buffers or
+     * BUFSIZ-sized locals on the stack. */
 #define BUFSIZ 2048
 
-/* Default temporary directory (POSIX).  Programs should honour $TMPDIR
-   * first; whether this path exists depends on the volume. */
+  /* Default temporary directory (POSIX).  Programs should honour $TMPDIR
+     * first; whether this path exists depends on the volume. */
 #define P_tmpdir "/tmp"
 
 #ifdef __cplusplus

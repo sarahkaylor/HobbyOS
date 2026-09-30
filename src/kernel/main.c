@@ -238,6 +238,13 @@ static void test_wave_loader(void *arg) {
   load_and_run_program_in_scheduler("THRD_T.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("TLS_T.BIN", -1, -1, -1, -1);
 
+  /* P3 (browser.md §6): libc++ acceptance — CXX_T.BIN exercises the
+     ported <vector>/<string>/<map>/<unordered_map>/<algorithm>/<memory>/
+     <atomic>/<thread>/<mutex>/<condition_variable>/<chrono>/<sstream>
+     over libcxx.a + libc.a.  It creates threads and waits on condition
+     variables, so it runs after THRD_T/TLS_T (last in the wave). */
+  load_and_run_program_in_scheduler("CXX_T.BIN", -1, -1, -1, -1);
+
   extern void kernel_exit(void);
   kernel_exit();
 }
