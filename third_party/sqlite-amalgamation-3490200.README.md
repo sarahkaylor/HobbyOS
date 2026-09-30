@@ -11,9 +11,9 @@ the OS with a custom VFS). Host build + smoke:
   **Recorded here: 3.49.2 — the newest release of the documented 3.4x
   series** (released 2025-05-07). Note for the integrator: upstream has
   since moved on — 3.50.x … 3.53.x exist and **current is 3.53.4**
-  (2026-09-11). If a newer pin is wanted, it is a one-line change (URL +
-  `.sums` + the sha3 constant in the build script); this lane kept the
-  documented series rather than silently upgrading past it.
+  (sourceid 2026-07-24). If a newer pin is wanted, it is a one-line change
+  (URL + `.sums` + the sha3 constant in the build script); this lane kept
+  the documented series rather than silently upgrading past it.
 - URL: https://sqlite.org/2025/sqlite-amalgamation-3490200.zip
 - sha256 (computed; SQLite publishes SHA3-256, not SHA-256):
   `921fc725517a694df7df38a2a3dfede6684024b5788d9de464187c612afb5918`
@@ -45,6 +45,14 @@ the OS with a custom VFS). Host build + smoke:
 sqlite3.c sha3-256: 17f4857fc6a0def2749d248d5365c59282c044270533c6c2b21287295f01eb23
 sqlite3.c sha3-256 matches the official 3.49.2 release log
 ```
+
+Cross-check (ad-hoc, **not** vendored): current upstream 3.53.4 was also
+built + smoked green with this exact recipe — its zip SHA3-256 matches the
+download page (`628a44cf…`) and the smoke passes
+(`obj/third_party/logs/sqlite-3.53.4-crosscheck.log`; zip sha256
+`1e71ddf93849c6a6ecf58b827c0692073d2dd7ee40196158068f7b29f422e87d`). Only the
+pinned 3.49.2 is vendored — the remaining item is the integrator's §2
+pin-table choice.
 
 ## Host build recipe
 
