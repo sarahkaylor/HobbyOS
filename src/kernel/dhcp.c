@@ -140,6 +140,8 @@ void dhcp_rx(uint8_t* packet, uint32_t len) {
     uint8_t msg_type = 0;
     uint32_t netmask = 0;
     uint32_t router = 0;
+    /* F1.7: primary DNS server (option 6, first address of the list). */
+    uint32_t dns = 0;
 
     // Parse DHCP options payload securely
     int opt = 0;
@@ -154,6 +156,10 @@ void dhcp_rx(uint8_t* packet, uint32_t len) {
         netmask = dhcp->options[opt] | (dhcp->options[opt+1] << 8) | (dhcp->options[opt+2] << 16) | (dhcp->options[opt+3] << 24);
       } else if (code == 3) { // Option 3: Router
         router = dhcp->options[opt] | (dhcp->options[opt+1] << 8) | (dhcp->options[opt+2] << 16) | (dhcp->options[opt+3] << 24);
+      } else if (code == 6) { // Option 6: DNS Servers (first one wins)
+        if (length >= 4) {
+          dns = dhcp->options[opt] | (dhcp->options[opt+1] << 8) | (dhcp->options[opt+2] << 16) | (dhcp->options[opt+3] << 24);
+        }
       } else if (code == 54) { // Option 54: Server Identifier
         server_ip = dhcp->options[opt] | (dhcp->options[opt+1] << 8) | (dhcp->options[opt+2] << 16) | (dhcp->options[opt+3] << 24);
       }
@@ -174,6 +180,21 @@ void dhcp_rx(uint8_t* packet, uint32_t len) {
       // Finalize network configuration properties and prime the ARP cache
       net_set_ip(dhcp->yiaddr, netmask, router);
       net_arp_request(router); // ARPing the router proactively
+
+      /* F1.7 DHCP -> DNS hand-off: keep the primary DNS server for the
+         resolver (exposed to userland through sysinfo cmd 4).  Some
+         servers omit option 6; then the field stays 0 ("unknown"). */
+      if (dns != 0) {
+        net_set_dns(dns);
+        uart_puts("DHCP DNS server: ");
+        uint32_t nd = ntohl(dns);
+        print_int((nd >> 24) & 0xFF); uart_puts(".");
+        print_int((nd >> 16) & 0xFF); uart_puts(".");
+        print_int((nd >> 8) & 0xFF); uart_puts(".");
+        print_int(nd & 0xFF); uart_puts("\n");
+      } else {
+        uart_puts("[DHCP] no DNS option (6) in Ack\n");
+      }
       dhcp_state = 2;
     }
   }

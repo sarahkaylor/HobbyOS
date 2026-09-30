@@ -5,6 +5,7 @@
 #include "process.h"
 #include "net_rdma.h"
 #include "arch/cpu.h"
+#include "errno.h"
 
 extern void uart_puts(const char* s);
 extern void uart_print_hex(uint64_t val);
@@ -14,6 +15,19 @@ static uint32_t local_ip = 0;
 static uint32_t local_netmask = 0;
 static uint32_t local_gateway = 0;
 static uint8_t local_mac[6];
+
+/* F1.7: primary DNS server learned from DHCP (network byte order). */
+static uint32_t dns_server = 0;
+
+/* F1.4 entropy pool backing SYS_GETRANDOM.  There is no virtio-rng device
+ * on either machine (grep src/kernel/virtio_ finds blk/gpu/input/net only),
+ * so the source is a mixed one: a xorshift64* generator reseeded on every
+ * call from the arch cycle counter (CNTPCT_EL0 / TSC), loop-timing jitter,
+ * the RTC and a startup seed, with the counter folded into every output
+ * word.  Not crypto-grade, but the v1 bar: consecutive draws differ and no
+ * all-zero pages. */
+static uint64_t entropy_state = 0;
+static uint32_t entropy_draws = 0;
 
 static struct socket_pcb sockets[MAX_SOCKETS];
 volatile uint32_t rdma_ring_dbg = 0;
@@ -60,6 +74,90 @@ uint16_t net_checksum(const void *buf, uint32_t len) {
   return ~sum;
 }
 
+/* --- F1.4: entropy (SYS_GETRANDOM backing) --------------------------- */
+
+/* Arch cycle counter: free-running, high resolution, and — crucially —
+   readable with interrupts disabled (it is a counter, not an interrupt). */
+static uint64_t entropy_hw_counter(void) {
+#ifdef __x86_64__
+  uint32_t lo, hi;
+  __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+  return ((uint64_t)hi << 32) | lo;
+#else
+  uint64_t c;
+  __asm__ volatile("mrs %0, cntpct_el0" : "=r"(c));
+  return c;
+#endif
+}
+
+/* Loop-timing jitter: the spread between back-to-back counter reads is
+   noise that a deterministic simulator cannot reproduce bit-for-bit. */
+static uint64_t entropy_jitter(void) {
+  uint64_t acc = 0x243F6A8885A308D3ULL;
+  for (int i = 0; i < 8; i++) {
+    uint64_t t1 = entropy_hw_counter();
+    for (volatile int spin = 0; spin < 16; spin++) {
+    }
+    uint64_t t2 = entropy_hw_counter();
+    acc = acc * 1099511628211ULL + (t2 - t1);
+  }
+  return acc;
+}
+
+/* Startup seed: uptime, counter, jitter, MAC, IP, CPU and the RTC.  Called
+   from net_init(), before DHCP has a lease (IP is still 0 there), which is
+   fine: every draw reseeds from the live sources anyway. */
+static void entropy_seed(void) {
+  uint64_t seed = 0x9E3779B97F4A7C15ULL;
+  seed ^= timer_get_ms() * 0x2545F4914F6CDD1DULL;
+  seed ^= entropy_hw_counter();
+  seed ^= entropy_jitter();
+  for (int i = 0; i < 6; i++) {
+    seed = seed * 131 + local_mac[i];
+  }
+  seed ^= (uint64_t)local_ip << 32;
+  seed ^= (uint64_t)get_cpuid() << 24;
+  extern uint64_t rtc_read_epoch(void);
+  seed ^= rtc_read_epoch() << 17;
+  entropy_state = seed ? seed : 0x853C49E6748FEA9BULL;
+  entropy_draws = 0;
+}
+
+void net_set_dns(uint32_t dns) {
+  dns_server = dns;
+}
+
+uint32_t net_get_dns(void) {
+  return dns_server;
+}
+
+int net_get_random_bytes(void* buf, uint32_t len) {
+  uint8_t* out = (uint8_t*)buf;
+  /* Reseed per call: fresh counter + jitter + uptime, so two consecutive
+     calls can never return the same stream even if entropy_state was
+     never advanced. */
+  uint64_t x = entropy_state ^ entropy_hw_counter() ^ entropy_jitter();
+  x ^= timer_get_ms() * 0x2545F4914F6CDD1DULL;
+  x ^= (uint64_t)get_cpuid() << 56;
+  x += 0x9E3779B97F4A7C15ULL * (uint64_t)(++entropy_draws);
+  if (x == 0) x = 0x9E3779B97F4A7C15ULL;
+
+  uint32_t i = 0;
+  while (i < len) {
+    /* xorshift64* */
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    uint64_t v = x * 2685821657736338717ULL;
+    v += entropy_hw_counter() + (uint64_t)i;
+    for (int b = 0; b < 8 && i < len; b++) {
+      out[i++] = (uint8_t)(v >> (8 * b));
+    }
+  }
+  entropy_state = x;
+  return (int)len;
+}
+
 void net_init(void) {
   // Initialize global network spinlock to serialize accesses to the socket table
   spinlock_init(&net_lock);
@@ -76,6 +174,9 @@ void net_init(void) {
 
   // Cache the device's hardware MAC address
   virtio_net_get_mac(local_mac);
+
+  // F1.4: seed the entropy pool while we have a fresh boot environment.
+  entropy_seed();
 }
 
 void net_refresh_mac(void) {
@@ -373,11 +474,22 @@ static void handle_tcp(struct ipv4_hdr* ip, uint8_t* packet, uint32_t len) {
         sockets[i].remote_ip == ip->src_ip) {
 
       // Advance TCP state machine
-      if (sockets[i].state == SOCKET_SYN_SENT && tcp->syn && tcp->ack_flag) {
+      if (tcp->rst) {
+        /* RST: the peer refused the port or tore the connection down.
+           During a handshake that is ECONNREFUSED (a closed port); after
+           it, ECONNRESET.  Either way the socket ends CLOSED so readers
+           see EOF and select() reports writable+error (F1.3). */
+        sockets[i].connect_err =
+            (sockets[i].state == SOCKET_SYN_SENT) ? ECONNREFUSED : ECONNRESET;
+        sockets[i].state = SOCKET_CLOSED;
+        sockets[i].connect_started = 0;
+      } else if (sockets[i].state == SOCKET_SYN_SENT && tcp->syn && tcp->ack_flag) {
         // Connection established, acknowledge the server's SYN
         sockets[i].state = SOCKET_ESTABLISHED;
         sockets[i].ack = ntohl(tcp->seq) + 1;
         sockets[i].seq = ntohl(tcp->ack);
+        sockets[i].connect_err = 0;
+        sockets[i].connect_started = 1;
       } else if (sockets[i].state == SOCKET_ESTABLISHED) {
         // Process incoming payload and push to socket's ring buffer
         uint32_t data_offset = tcp->data_offset * 4;
@@ -397,6 +509,7 @@ static void handle_tcp(struct ipv4_hdr* ip, uint8_t* packet, uint32_t len) {
         if (tcp->fin) {
           sockets[i].ack++;
           sockets[i].state = SOCKET_CLOSED;
+          sockets[i].connect_err = 0; // clean EOF, not an error
         }
       }
       break;
@@ -560,6 +673,13 @@ struct socket_pcb* net_socket_create(int protocol) {
       sockets[i].remote_ip = 0;
       sockets[i].remote_port = 0;
       sockets[i].mac_cached = 0;
+      // F1 state: a fresh socket is not connected, has no error, and is
+      // (like every HobbyOS fd today) blocking until fcntl says otherwise.
+      sockets[i].nonblock = 0;
+      sockets[i].connect_err = 0;
+      sockets[i].connect_started = 0;
+      sockets[i].syn_retries = 0;
+      sockets[i].syn_last_ms = 0;
       spinlock_release_irqrestore(&net_lock, flags);
       return &sockets[i];
     }
@@ -615,11 +735,20 @@ static void send_tcp_segment(struct socket_pcb* pcb, uint8_t flags, const void* 
   uint8_t* payload = packet + sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr) + sizeof(struct tcp_hdr);
 
   uint8_t dest_mac[6];
-  if (!arp_resolve(pcb->remote_ip, dest_mac)) {
+  if (pcb->mac_cached) {
+    /* Reuse the resolved destination MAC.  A SYN retransmit (or any later
+       segment) must not pay another up-to-250ms ARP wait inside a poll
+       path; the cache is keyed to remote_ip, which connect() fixes before
+       the first segment is built. */
+    for (int i = 0; i < 6; i++) dest_mac[i] = pcb->cached_mac[i];
+  } else if (!arp_resolve(pcb->remote_ip, dest_mac)) {
     // Here we could send an ARP request and wait, but for simple stack:
     // Let's assume gateway MAC if outside subnet, or send broadcast ARP and fail this packet.
     // For simplicity, we just broadcast if unknown, or rely on a ping first.
     for(int i=0; i<6; i++) dest_mac[i] = 0xFF; // Broadcast fallback
+  } else {
+    for (int i = 0; i < 6; i++) pcb->cached_mac[i] = dest_mac[i];
+    pcb->mac_cached = 1;
   }
 
   for (int i=0; i<6; i++) {
@@ -673,26 +802,79 @@ static void send_tcp_segment(struct socket_pcb* pcb, uint8_t flags, const void* 
   pcb->seq += data_len;
 }
 
-int net_socket_connect(struct socket_pcb* pcb, uint32_t ip, uint16_t port) {
+/* F1.3 TCP hardening: SYN retransmission schedule.  A lost SYN (or a lost
+ * SYN-ACK) must not hang a non-blocking connect: the handshake is retried
+ * with exponential backoff and, once the budget is spent, failed with
+ * ETIMEDOUT.  Total worst case for the default budget: 500+1000+2000+4000
+ * ms after the first SYN. */
+#define TCP_SYN_MAX_RETRIES 4
+
+static uint32_t syn_backoff_ms(int retry) {
+  /* retry = number of SYNs already sent (1 for the initial one). */
+  uint32_t ms = 500;
+  for (int i = 1; i < retry && ms < 4000; i++) {
+    ms *= 2;
+  }
+  return ms;
+}
+
+void net_socket_tick(struct socket_pcb* pcb) {
+  if (!pcb || pcb->protocol != IP_PROTO_TCP) return;
+  if (pcb->state != SOCKET_SYN_SENT || !pcb->connect_started) return;
+
+  uint64_t now = timer_get_ms();
+  if (pcb->syn_retries >= TCP_SYN_MAX_RETRIES) {
+    /* Every retry has been sent: after one more backoff interval the
+       handshake has no chance left. */
+    if (now - pcb->syn_last_ms >= syn_backoff_ms(TCP_SYN_MAX_RETRIES)) {
+      pcb->state = SOCKET_CLOSED;
+      pcb->connect_err = ETIMEDOUT;
+      pcb->connect_started = 0;
+    }
+    return;
+  }
+
+  if (now - pcb->syn_last_ms >= syn_backoff_ms(pcb->syn_retries)) {
+    send_tcp_segment(pcb, 0x02, NULL, 0);
+    pcb->syn_retries++;
+    pcb->syn_last_ms = now;
+  }
+}
+
+int net_socket_connect_start(struct socket_pcb* pcb, uint32_t ip, uint16_t port) {
   if (!pcb) return -1;
+  pcb->remote_ip = ip;
+  pcb->remote_port = port;
+  pcb->connect_err = 0;
+  pcb->connect_started = 1;
+
   if (pcb->protocol == IP_PROTO_UDP) {
-    pcb->remote_ip = ip;
-    pcb->remote_port = port;
+    /* A UDP "connect" just records the peer and completes immediately. */
     pcb->state = SOCKET_ESTABLISHED;
     return 0;
   }
   if (pcb->protocol != IP_PROTO_TCP) return -1;
-  pcb->remote_ip = ip;
-  pcb->remote_port = port;
+
   pcb->state = SOCKET_SYN_SENT;
-
-  // Initiate TCP three-way handshake by sending a SYN segment
+  pcb->syn_retries = 0;
+  pcb->syn_last_ms = timer_get_ms();
   send_tcp_segment(pcb, 0x02, NULL, 0);
+  pcb->syn_retries = 1;
+  return 0;
+}
 
-  // Block the calling process until the server acknowledges with SYN-ACK
+int net_socket_connect(struct socket_pcb* pcb, uint32_t ip, uint16_t port) {
+  if (!pcb) return -1;
+  if (net_socket_connect_start(pcb, ip, port) != 0) return -1;
+  if (pcb->protocol == IP_PROTO_UDP) return 0;
+
+  /* Block the calling process until the server acknowledges with SYN-ACK.
+     net_socket_tick() retransmits the SYN with bounded backoff and records
+     ETIMEDOUT when the retry budget runs out; a RST handled by handle_tcp
+     records ECONNREFUSED.  Either ends the wait without a full timeout. */
   uint64_t start = timer_get_ms();
-  while (pcb->state == SOCKET_SYN_SENT) {
-    if (timer_get_ms() - start > 5000) {
+  while (pcb->state == SOCKET_SYN_SENT && pcb->connect_err == 0) {
+    if (timer_get_ms() - start > 10000) {
       uart_puts("[NET] Error: Connection timeout to IP ");
       uint32_t nip = ntohl(ip);
       print_int((nip >> 24) & 0xFF); uart_puts(".");
@@ -702,8 +884,11 @@ int net_socket_connect(struct socket_pcb* pcb, uint32_t ip, uint16_t port) {
       uart_puts(" port "); print_int(port); uart_puts("\n");
 
       pcb->state = SOCKET_CLOSED;
+      pcb->connect_err = ETIMEDOUT;
+      pcb->connect_started = 0;
       return -1;
     }
+    net_socket_tick(pcb);
     safe_wfi();
   }
 
@@ -713,6 +898,50 @@ int net_socket_connect(struct socket_pcb* pcb, uint32_t ip, uint16_t port) {
     return 0;
   }
   return -1;
+}
+
+int net_socket_ready(struct socket_pcb* pcb, int for_write) {
+  if (!pcb) return 0;
+  if (pcb->protocol == IP_PROTO_TCP) {
+    /* Poll paths drive the handshake: a program sitting in select() waiting
+       for writability is what keeps a non-blocking connect's SYNs alive. */
+    net_socket_tick(pcb);
+    if (for_write) {
+      /* POLLOUT semantics (F1.3): ESTABLISHED is writable; a FAILED
+         handshake also reports writable so the waiter observes the error
+         through getsockopt(SO_ERROR).  The v1 stack has no send queue, so
+         "writable" never promises that a large write cannot stall. */
+      if (pcb->state == SOCKET_ESTABLISHED) return 1;
+      if (pcb->connect_err != 0) return 1;
+      return 0;
+    }
+    if (pcb->rx_head != pcb->rx_tail) return 1;             /* data pending */
+    if (pcb->state == SOCKET_CLOSED || pcb->connect_err != 0) return 1;
+    return 0;
+  }
+  /* UDP: a socket with a peer recorded is always writable; readable when a
+     datagram is queued. */
+  if (for_write) return pcb->remote_port != 0 ? 1 : 0;
+  return pcb->rx_head != pcb->rx_tail;
+}
+
+int net_socket_error(struct socket_pcb* pcb) {
+  if (!pcb) return EBADF;
+  net_socket_tick(pcb);
+  return pcb->connect_err;
+}
+
+void net_socket_set_nonblock(struct socket_pcb* pcb, int on) {
+  if (pcb) pcb->nonblock = on ? 1 : 0;
+}
+
+int net_socket_get_nonblock(struct socket_pcb* pcb) {
+  return pcb ? pcb->nonblock : 0;
+}
+
+int net_socket_available(struct socket_pcb* pcb) {
+  if (!pcb) return 0;
+  return (int)(pcb->rx_tail - pcb->rx_head);
 }
 
 int net_socket_send(struct socket_pcb* pcb, const void* buf, uint32_t len) {
