@@ -62,3 +62,10 @@ third_party/_staging/
 
 disk-arm-test.img
 disk-intel-test.img
+
+# L6 host-first library builds (browser/l6-libs2 — mbedTLS / libcurl /
+# SQLite, browser.md §2 carried pins): committed tarball + sums + README;
+# extractions rebuilt from the tarballs.
+third_party/mbedtls-3.6.7/
+third_party/curl-8.22.0/
+third_party/sqlite-amalgamation-3490200/
