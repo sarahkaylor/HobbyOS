@@ -509,6 +509,48 @@ owners (OQ6).
   /`ps.bin` consumers accept, and whether the wave's gate log should include the accounting line
   (we propose yes, as P2.2 evidence).
 
-## 12. Integrator review — pending
-(To be appended by the integrator per the P1 pattern: resolutions binding for the implementation lane,
-carrying the numbered OQ outcomes above.)
+## 12. Integrator review — resolutions (2026-09-30; binding for the P2 implementation lane)
+
+Reviewed against the merged tree and the P1-precedent protocol.
+
+- **OQ1 — CONSENTED.** (a) MEMFD_CREATE 80 / MPROTECT 81 / MADVISE 82 freeze in place at the P2
+  gate; the `SYS_MAX` 75 → 82 edit is a gate-time single-writer change by the integrator. (b) The
+  6-arg `SYS_MMAP` extension on row 62 is approved — Linux-shaped (ARM x0..x5; x64
+  rdi/rsi/rdx/r10/r8/r9 = `regs[5]/[4]/[3]/[9]/[7]/[8]`; r9 already in the trap frame, no asm
+  change). The `SYS_MMAP2` fallback is declined. mremap stays unnumbered (append-only if a later
+  gate needs it). The lane may arm 80–82 + the 6-arg path in its branch exactly as P1 did; the
+  freeze record lands at the gate.
+- **OQ2 — APPROVED, single new base.** v2 processes live at `USER_VA_BASE` (64 GiB) only; no
+  permanent 0x44000000 compat window and no S2/S3 crutch window — v1 keeps today's layout
+  bit-identical through S4, so the two modes coexist without a shared second layout. The S5 flip
+  commit set must include the full hardcoded-0x44… sweep (linker.ld, crt0, malloc.c host constant,
+  mem_test literals, graphics/desktop) with a grep-clean proof in the evidence.
+- **OQ3 — ACCEPTED (COW deferred).** Resident-copy fork is the P2 contract (bounded by touched
+  pages; holes stay holes). Revisit only at the WK-2 launch-cost measurement; P5 execve/waitpid
+  does not by itself force COW.
+- **OQ4 — ACCEPTED (zap+free).** PROT_NONE zaps resident pages and frees frames; re-protect
+  re-commits zero-fill. MMTEST pins the divergence as a named check. Fallback trigger recorded: if
+  any ported component (JSC/GLib) is found to rely on data surviving a PROT_NONE round-trip,
+  revisit with the keep-pages variant.
+- **OQ5 — APPROVED.** Shootdown IPI vector 0x82 (next to 0x81). Binding: the handler never
+  schedules, never preempts kernel-mode windows, reads only snapshots; the send path fires only
+  when the target AS is claimed on another CPU (`cpu_current_pids` scan). MMTEST's cross-process
+  shm cases must exercise it on x64 and report the counters; any new x64 wave class is a stop
+  signal (standing classes recorded in browser.md §11).
+- **OQ6 — APPROVED (P1 precedent).** The P2 lane applies the L3-file diffs it needs (pthread.c
+  stack mmap+guard at S4; mman.c/sysroot wrappers; crt0/linker.ld base at S5); integrator resolves
+  merges. Keep each staged file-set inside its stage's commit set (§8).
+- **OQ7 — APPROVED (minimal seals).** SHRINK/GROW enforced at ftruncate; WRITE recorded advisory.
+  Implementation-time check: grep the WebKit host copy (`~/webkit-hobbyos`, WTF SharedMemory) for
+  F_*SEAL usage and record the result here; if unused, flags-only is acceptable — keep the
+  recorded stance until that evidence exists.
+- **OQ8 — APPROVED.** sysinfo(2) frame-based totals + appended size-gated fields; verify
+  free.bin/ps.bin host-test mocks still pass; include the end-of-wave frame-accounting line in the
+  gate log (P2.2 evidence).
+
+Cross-cutting notes: (a) budgets (§9) are accepted as gate numbers; if S5 measurements exceed the
+unit-tier budget while suites stay green, the budget is renegotiated with evidence at the gate —
+never silently relaxed. (b) x64 wave evidence follows the standing baseline treatment: unit-x64 is
+the hard gate; the wave is judged against the recorded classes (no new class = pass). (c) Protocol
+unchanged from P1: staged S1→S5, each stage green on all tiers before the next; evidence = raw
+logs, zero FAIL tokens, boot delta by the Gate F1 method, the frame-accounting line.
