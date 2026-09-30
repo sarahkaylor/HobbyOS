@@ -1165,13 +1165,25 @@ void sync_lower_handler_c(struct trap_frame *tf) {
   } else if (syscall_num == SYS_BRK) {
     tf->regs[0] = (uint64_t)sys_brk(tf->regs[5]); /* rdi */
   } else if (syscall_num == SYS_MMAP) {
-    tf->regs[0] = (uint64_t)sys_mmap(tf->regs[5], /* rdi: addr */
-                                     tf->regs[4], /* rsi: len */
-                                     tf->regs[3], /* rdx: prot */
-                                     tf->regs[9]); /* r10: flags */
+    /* P2.3 (S3, design section 4.2): 6-arg Linux shape.
+       rdi=r5, rsi=r4, rdx=r3, r10=r9, r8=r7, r9=r8 (the x64 reg map). */
+    tf->regs[0] = (uint64_t)sys_mmap6(tf->regs[5],  /* rdi: addr */
+                                      tf->regs[4],  /* rsi: len */
+                                      (int64_t)tf->regs[3],  /* rdx: prot */
+                                      (int64_t)tf->regs[9],  /* r10: flags */
+                                      (int64_t)tf->regs[7],  /* r8: fd */
+                                      tf->regs[8]);          /* r9: offset */
   } else if (syscall_num == SYS_MUNMAP) {
     tf->regs[0] = (uint64_t)sys_munmap(tf->regs[5], /* rdi: addr */
                                        tf->regs[4]); /* rsi: len */
+  } else if (syscall_num == SYS_MPROTECT) {
+    tf->regs[0] = (uint64_t)sys_mprotect(tf->regs[5],  /* rdi: addr */
+                                         tf->regs[4],  /* rsi: len */
+                                         (int64_t)tf->regs[3]); /* rdx: prot */
+  } else if (syscall_num == SYS_MADVISE) {
+    tf->regs[0] = (uint64_t)sys_madvise(tf->regs[5],  /* rdi: addr */
+                                        tf->regs[4],  /* rsi: len */
+                                        (int64_t)tf->regs[3]); /* rdx: advice */
   } else if (syscall_num == SYS_SOCKET) {
     sys_socket(tf);
   } else if (syscall_num == SYS_CONNECT_FD) {
@@ -1522,6 +1534,37 @@ void general_interrupt_handler(struct trap_frame *tf) {
   } else if (tf->vector < 32) {
     // Exception
     struct process *cur = current_process();
+    /* P2.3 (S3, design section 5.2): a v2 process's user #PF is either a
+       demand fault (materialize + retry) or a kill with an exact reason.
+       Error code: bit0 P (0 = not-present), bit1 W/R, bit4 I/D. */
+    if (tf->vector == 14 && cur && cur->as && (tf->cs & 3) == 3) {
+      uint64_t cr2;
+      __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
+      int pf_w = (int)(tf->error_code & 2);
+      int pf_x = (int)((tf->error_code >> 4) & 1);
+      int pf_present = (int)(tf->error_code & 1);
+      const char *why = "PROT";
+      if (!pf_present &&
+          vm_handle_fault(process_group(cur), cr2, pf_w, pf_x, &why) == 0) {
+        return; /* mapping is live; iretq re-executes the instruction */
+      }
+      uart_puts("[KERNEL] pid=");
+      print_int(cur->pid);
+      uart_puts(" (");
+      uart_puts(cur->name);
+      uart_puts(") memory fault VA=");
+      uart_print_hex(cr2);
+      uart_puts(" PC=");
+      uart_print_hex(tf->elr);
+      uart_puts(" rw=");
+      uart_puts(pf_w ? "w" : "r");
+      uart_puts(pf_x ? "x" : " ");
+      uart_puts(" in=");
+      uart_puts(why);
+      uart_puts(" -> killed\n");
+      process_fault_exit(tf, 11); /* SIGSEGV status byte */
+      return;
+    }
     if (cur && !cur->is_kernel_process && (tf->cs & 3) == 3) {
       uart_puts("[KERNEL] User process fault! Vector: ");
       safe_print_int(tf->vector);

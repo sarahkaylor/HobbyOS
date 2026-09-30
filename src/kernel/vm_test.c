@@ -1,6 +1,7 @@
 #ifdef KERNEL_MODE_UNIT_TEST
 
 #include "unit_test.h"
+#include "errno.h"
 #include "frame.h"
 #include "vm.h"
 #include "process.h"
@@ -296,6 +297,141 @@ static void test_vm_hole_find(void) {
   EXPECT_EQ(frame_free_count(), free0);
 }
 
+/* P2.3 (S3, design sections 3/5.1-5.5): demand + the fault classifier. */
+static void test_vm_demand_fault(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_demand_fault...\n");
+
+  int free0 = frame_free_count();
+  struct addr_space *as = vm_as_create(VM_TEST_TAG);
+  EXPECT_EQ((as != 0), 1);
+  if (!as)
+    return;
+
+  EXPECT_EQ(vm_region_insert(as, USER_MMAP_BASE_V2, 0x2000,
+                             VM_PROT_READ | VM_PROT_WRITE, VMK_ANON,
+                             VM_MAP_PRIVATE, 0, 0),
+            0);
+  struct process fake;
+  for (unsigned i = 0; i < sizeof(fake); i++)
+    ((unsigned char *)&fake)[i] = 0;
+  fake.as = as;
+  int f1 = frame_free_count();
+
+  /* S3 change: the range check now materializes (demand) instead of
+     failing on non-residency. */
+  EXPECT_EQ(vm_range_ok(&fake, USER_MMAP_BASE_V2, 0x1000, 0), 0);
+  EXPECT_EQ(as->resident_frames, 1);
+  EXPECT_EQ((frame_free_count() < f1), 1);
+  /* ... and the second page too. */
+  EXPECT_EQ(vm_touch(&fake, USER_MMAP_BASE_V2 + 0x1000, 1, 1), 0);
+  EXPECT_EQ(as->resident_frames, 2);
+
+  /* Holes fail: below the region, and the inter-slot gap. */
+  EXPECT_EQ(vm_touch(&fake, USER_MMAP_BASE_V2 - 0x1000, 1, 0), -1);
+  EXPECT_EQ(vm_range_ok(&fake, USER_MMAP_BASE_V2 + 0x2000, 0x1000, 0), -1);
+
+  /* The fault classifier: hole -> HOLE (kill); present -> PROT (kill);
+     absent in-region -> demand. */
+  const char *why = 0;
+  EXPECT_EQ(vm_handle_fault(&fake, USER_MMAP_BASE_V2 + 0x2000, 0, 0, &why), 1);
+  EXPECT_EQ((why && why[0] == 'H'), 1); /* "HOLE" */
+  EXPECT_EQ(vm_handle_fault(&fake, USER_MMAP_BASE_V2, 0, 0, &why), 1);
+  EXPECT_EQ((why && why[0] == 'P'), 1); /* "PROT" (page is live) */
+
+  /* A fresh page faults in as zero-fill: the walk must now succeed (the
+     zero-content half of demand-zero is proven end to end by MMTEST,
+     which reads back pages under its own AS). */
+  struct vm_region *r = vm_region_find(as, USER_MMAP_BASE_V2);
+  EXPECT_EQ((r != 0), 1);
+  uint64_t leaf = 0;
+  EXPECT_EQ(vm_arch_walk(as, USER_MMAP_BASE_V2, &leaf), 0);
+  EXPECT_EQ((leaf & 1), 1);
+
+  /* Write-protect the whole span: a read-only region kills a write. */
+  EXPECT_EQ(vm_mprotect(&fake, USER_MMAP_BASE_V2, 0x2000, VM_PROT_READ), 0);
+  EXPECT_EQ(vm_handle_fault(&fake, USER_MMAP_BASE_V2 + 0x1000, 1, 0, &why), 1);
+  EXPECT_EQ((why && why[0] == 'P'), 1);
+  /* And the pages were re-encoded, not zapped, by the RW->RO change. */
+  EXPECT_EQ(as->resident_frames, 2);
+
+  /* PROT_NONE zaps the resident leaves (design 4.4 divergence). */
+  EXPECT_EQ(vm_mprotect(&fake, USER_MMAP_BASE_V2, 0x2000, 0), 0);
+  EXPECT_EQ(as->resident_frames, 0);
+  EXPECT_EQ(vm_arch_walk(as, USER_MMAP_BASE_V2, 0), -1);
+
+  vm_as_teardown(as);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* P2.3 (S3, design section 4.1): the v2 mmap family at the vm layer. */
+static void test_vm_mmap_family(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_mmap_family...\n");
+
+  int free0 = frame_free_count();
+  struct addr_space *as = vm_as_create(VM_TEST_TAG);
+  EXPECT_EQ((as != 0), 1);
+  if (!as)
+    return;
+  struct process fake;
+  for (unsigned i = 0; i < sizeof(fake); i++)
+    ((unsigned char *)&fake)[i] = 0;
+  fake.as = as;
+
+  /* First anonymous mapping lands at the arena base. */
+  int64_t b1 = vm_mmap(&fake, 0, 0x2000, VM_PROT_READ | VM_PROT_WRITE,
+                       VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+  EXPECT_EQ((b1 == (int64_t)USER_MMAP_BASE_V2), 1);
+  /* The second keeps the hook gap. */
+  int64_t b2 = vm_mmap(&fake, 0, 0x1000, VM_PROT_READ,
+                       VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+  EXPECT_EQ((b2 >= (int64_t)USER_MMAP_BASE_V2 + 0x2000), 1);
+  EXPECT_EQ((b2 > b1), 1);
+
+  /* fd-backed and MAP_SHARED are S4: rejected, and a bad len too. */
+  EXPECT_EQ(vm_mmap(&fake, 0, 0x1000, VM_PROT_READ, VM_MAP_PRIVATE, 3, 0),
+            -ENOTSUP);
+  EXPECT_EQ(vm_mmap(&fake, 0, 0, VM_PROT_READ, VM_MAP_PRIVATE, -1, 0), -EINVAL);
+
+  /* MAP_FIXED places exactly. */
+  uint64_t fix = USER_MMAP_BASE_V2 + 0x100000;
+  int64_t b3 = vm_mmap(&fake, fix, 0x1000, VM_PROT_READ | VM_PROT_WRITE,
+                       VM_MAP_PRIVATE | VM_MAP_ANONYMOUS | VM_MAP_FIXED, -1, 0);
+  EXPECT_EQ((b3 == (int64_t)fix), 1);
+
+  /* mprotect: hole -> -ENOMEM; covered -> ok and visible in the list. */
+  EXPECT_EQ(vm_mprotect(&fake, USER_MMAP_BASE_V2 + 0x200000, 0x1000,
+                        VM_PROT_READ),
+            -ENOMEM);
+  EXPECT_EQ(vm_mprotect(&fake, fix, 0x1000, VM_PROT_READ), 0);
+  struct vm_region *r = vm_region_find(as, fix);
+  EXPECT_EQ((r && r->prot == VM_PROT_READ), 1);
+
+  /* Demand one page of the fixed mapping, then madvise it away. */
+  EXPECT_EQ(vm_touch(&fake, fix, 1, 0), 0);
+  EXPECT_EQ(as->resident_frames, 1);
+  EXPECT_EQ(vm_madvise(&fake, fix, 0x1000, VM_MADV_DONTNEED), 0);
+  EXPECT_EQ(as->resident_frames, 0);
+  EXPECT_EQ(vm_arch_walk(as, fix, 0), -1);
+  /* The mapping itself survives DONTNEED. */
+  EXPECT_EQ((vm_region_find(as, fix) != 0), 1);
+  /* Unknown advice is a no-op; an unmapped address is -EINVAL. */
+  EXPECT_EQ(vm_madvise(&fake, fix, 0x1000, 99), 0);
+  EXPECT_EQ(vm_madvise(&fake, USER_MMAP_BASE_V2 + 0x300000, 0x1000,
+                       VM_MADV_DONTNEED),
+            -EINVAL);
+
+  /* munmap drops the mapping (and its resident pages). */
+  EXPECT_EQ(vm_touch(&fake, fix, 1, 0), 0);
+  EXPECT_EQ(vm_munmap_range(&fake, fix, 0x1000), 0);
+  EXPECT_EQ((vm_region_find(as, fix) == 0), 1);
+  EXPECT_EQ(vm_munmap_range(&fake, fix, 0x1000), -EINVAL);
+
+  vm_as_teardown(as);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
 void vm_test_suite(void) {
   uart_puts("vm_test_suite:\n");
   test_vm_as_lifecycle();
@@ -303,6 +439,8 @@ void vm_test_suite(void) {
   test_vm_map_grow_commit();
   test_vm_windows_distinct();
   test_vm_hole_find();
+  test_vm_demand_fault();
+  test_vm_mmap_family();
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */

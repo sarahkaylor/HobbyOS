@@ -268,6 +268,20 @@ int64_t sys_brk(uint64_t addr);
 int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags);
 int sys_munmap(uint64_t addr, uint64_t len);
 
+/* P2.3 (S3, design section 4.2): the 6-arg Linux-shaped extensions.
+ * v2 processes go through the AS region machinery (src/kernel/vm.c);
+ * v1 processes keep the legacy anon_maps behavior (fd/offset rejected). */
+int64_t sys_mmap6(uint64_t addr, uint64_t len, int64_t prot, int64_t flags,
+                  int64_t fd, uint64_t offset);
+int64_t sys_mprotect(uint64_t addr, uint64_t len, int64_t prot);
+int64_t sys_madvise(uint64_t addr, uint64_t len, int64_t advice);
+
+/* P2.3 (design section 5.4): terminate the CURRENT (faulting) process
+ * with a signal-shaped waitpid status (low byte = signo).  SIGSEGV = 11.
+ * Everything else is the ordinary exit machinery; only this process dies. */
+#define PROCESS_STATUS_SIGNAL 0x40000000 /* int-safe marker, group_teardown */
+void process_fault_exit(struct trap_frame *tf, int signo);
+
 // In-place exec (SYS_EXEC): replace the current image, keep pid/fds/cwd.
 int process_exec_current(struct trap_frame *tf, const char *path,
                          const char *args, const char *new_name);

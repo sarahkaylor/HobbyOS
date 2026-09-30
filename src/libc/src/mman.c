@@ -54,6 +54,43 @@ static long hb_errno_ret(long r) {
   return r;
 }
 
+/* P2.3 (S3): 6-arg helper for the Linux-shaped SYS_MMAP row 62
+ * (aarch64 x0..x5; x86_64 rdi,rsi,rdx,r10,r8,r9).  The kernel reads all
+ * six registers, so the fd/offset slots MUST be set explicitly -- the old
+ * 4-arg call left r8/r9 (x4/x5) as stale register garbage. */
+static long hb_syscall6(long num, long a0, long a1, long a2, long a3, long a4,
+                        long a5) {
+#ifdef __x86_64__
+  long ret;
+  register long rdi __asm__("rdi") = a0;
+  register long rsi __asm__("rsi") = a1;
+  register long rdx __asm__("rdx") = a2;
+  register long r10 __asm__("r10") = a3;
+  register long r8 __asm__("r8") = a4;
+  register long r9 __asm__("r9") = a5;
+  __asm__ volatile("syscall\n"
+                   : "=a"(ret)
+                   : "a"(num), "r"(rdi), "r"(rsi), "r"(rdx), "r"(r10), "r"(r8),
+                     "r"(r9)
+                   : "rcx", "r11", "memory");
+  return ret;
+#else
+  register long x8 __asm__("x8") = num;
+  register long x0 __asm__("x0") = a0;
+  register long x1 __asm__("x1") = a1;
+  register long x2 __asm__("x2") = a2;
+  register long x3 __asm__("x3") = a3;
+  register long x4 __asm__("x4") = a4;
+  register long x5 __asm__("x5") = a5;
+  __asm__ volatile("svc #0\n"
+                   : "=r"(x0)
+                   : "r"(x8), "r"(x0), "r"(x1), "r"(x2), "r"(x3), "r"(x4),
+                     "r"(x5)
+                   : "memory");
+  return x0;
+#endif
+}
+
 int brk(void *addr) {
   long r = hb_syscall4(SYS_BRK, (long)addr, 0, 0, 0);
   if (r < 0) {
@@ -86,7 +123,11 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
     errno = ENOTSUP;
     return MAP_FAILED;
   }
-  long r = hb_syscall4(SYS_MMAP, (long)addr, (long)length, prot, flags);
+  /* P2.3 (S3): fd/offset slots are explicit now (row 62 grew to 6 args).
+     fd < 0 with MAP_ANONYMOUS stays the only accepted shape; the kernel
+     rejects fd >= 0 with ENOTSUP. */
+  long r = hb_syscall6(SYS_MMAP, (long)addr, (long)length, prot, flags,
+                       (long)((fd < 0) ? -1 : fd), (long)offset);
   if (r < 0) {
     errno = (int)(-r);
     return MAP_FAILED;

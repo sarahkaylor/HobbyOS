@@ -14,6 +14,7 @@
 
 #include <stdint.h>
 
+#include "errno.h"
 #include "frame.h"
 #include "lock.h"
 #include "process.h"
@@ -166,18 +167,21 @@ static int region_insert_at(struct addr_space *as, int idx,
   return 0;
 }
 
-int vm_region_insert(struct addr_space *as, uint64_t base, uint64_t len,
-                     uint16_t prot, uint16_t kind, uint32_t flags,
-                     struct vm_object *obj, uint64_t obj_off) {
+/* Locked-inner region ops: callers that already hold vm_lock use these
+ * (the mprotect / munmap zap-and-rewrite paths); the public wrappers
+ * below bracket them with the lock.  vm_region_find and vm_hole_find are
+ * lock-free by the same convention. */
+static int vm_region_insert_locked(struct addr_space *as, uint64_t base,
+                                   uint64_t len, uint16_t prot, uint16_t kind,
+                                   uint32_t flags, struct vm_object *obj,
+                                   uint64_t obj_off) {
   if (!as || as->ver != AS_V2 || len == 0)
     return -1;
   if ((base & 0xFFF) || (len & 0xFFF))
     return -1;
   if (base < USER_VA_BASE || base + len > USER_VA_TOP)
     return -1;
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
   if (region_overlaps(as, base, len)) {
-    spinlock_release_irqrestore(&vm_lock, fl);
     return -1;
   }
   /* find the sorted insert index */
@@ -200,7 +204,6 @@ int vm_region_insert(struct addr_space *as, uint64_t base, uint64_t len,
           as->regions[j] = as->regions[j + 1];
         as->nr--;
       }
-      spinlock_release_irqrestore(&vm_lock, fl);
       return 0;
     }
   }
@@ -225,6 +228,15 @@ int vm_region_insert(struct addr_space *as, uint64_t base, uint64_t len,
       as->nr--;
     }
   }
+  return rc;
+}
+
+int vm_region_insert(struct addr_space *as, uint64_t base, uint64_t len,
+                     uint16_t prot, uint16_t kind, uint32_t flags,
+                     struct vm_object *obj, uint64_t obj_off) {
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  int rc = vm_region_insert_locked(as, base, len, prot, kind, flags, obj,
+                                   obj_off);
   spinlock_release_irqrestore(&vm_lock, fl);
   return rc;
 }
@@ -247,11 +259,11 @@ struct vm_region *vm_region_find(struct addr_space *as, uint64_t va) {
   return 0;
 }
 
-int vm_region_remove(struct addr_space *as, uint64_t base, uint64_t len) {
+static int vm_region_remove_locked(struct addr_space *as, uint64_t base,
+                                   uint64_t len) {
   if (!as || as->ver != AS_V2 || len == 0)
     return -1;
   uint64_t end = base + len;
-  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
   for (int i = 0; i < as->nr;) {
     struct vm_region *r = &as->regions[i];
     uint64_t rend = r->base + r->len;
@@ -276,7 +288,6 @@ int vm_region_remove(struct addr_space *as, uint64_t base, uint64_t len) {
       if (region_insert_at(as, i + 1, &right) != 0) {
         /* out of memory: give the tail back rather than losing it */
         r->len = rend - r->base;
-        spinlock_release_irqrestore(&vm_lock, fl);
         return -1;
       }
       i += 2;
@@ -294,8 +305,14 @@ int vm_region_remove(struct addr_space *as, uint64_t base, uint64_t len) {
     r->base = end;
     i++;
   }
-  spinlock_release_irqrestore(&vm_lock, fl);
   return 0;
+}
+
+int vm_region_remove(struct addr_space *as, uint64_t base, uint64_t len) {
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  int rc = vm_region_remove_locked(as, base, len);
+  spinlock_release_irqrestore(&vm_lock, fl);
+  return rc;
 }
 
 uint64_t vm_hole_find(struct addr_space *as, uint64_t start, uint64_t limit,
@@ -365,7 +382,7 @@ int vm_prot_page(struct addr_space *as, uint64_t va, uint16_t prot) {
   return 0;
 }
 
-int vm_range_ok(struct process *p, uint64_t va, uint64_t len, int write) {
+int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
   if (!p || !p->as)
     return -1;
   struct addr_space *as = p->as;
@@ -375,16 +392,277 @@ int vm_range_ok(struct process *p, uint64_t va, uint64_t len, int write) {
     return -1;
   uint64_t end = va + len - 1;
   for (uint64_t a = va & ~0xFFFULL; a <= end; a += FRAME_SIZE) {
+    uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
     struct vm_region *r = vm_region_find(as, a);
-    if (!r || a + FRAME_SIZE > r->base + r->len)
+    if (!r || a + FRAME_SIZE > r->base + r->len) {
+      spinlock_release_irqrestore(&vm_lock, fl);
+      return -1; /* -EFAULT: hole / region crossed mid-page */
+    }
+    if (write && !(r->prot & VM_PROT_WRITE)) {
+      spinlock_release_irqrestore(&vm_lock, fl);
+      return -1; /* -EFAULT */
+    }
+    if (!write && !(r->prot & VM_PROT_READ)) {
+      spinlock_release_irqrestore(&vm_lock, fl);
       return -1;
-    if (write && !(r->prot & VM_PROT_WRITE))
-      return -1;
-    /* S2: the page must already be resident (no demand yet; S3 replaces
-       this arm with demand materialization under proc_lock). */
-    if (vm_arch_walk(as, a, 0) != 0)
-      return -1;
+    }
+    /* S3 (design section 3): demand-materialize an absent page.  Kinds
+       HEAP/ANON/STACK are anonymous zero-fill; SHARED/FB objects land in
+       S4 (no such region exists yet). */
+    if (vm_arch_walk(as, a, 0) != 0) {
+      uint64_t fr = frame_alloc_zeroed();
+      if (!fr) {
+        spinlock_release_irqrestore(&vm_lock, fl);
+        return -2; /* -ENOMEM */
+      }
+      int rc = vm_arch_map(as, a, fr, r->prot, r->kind);
+      if (rc != 0) {
+        frame_free(fr);
+        spinlock_release_irqrestore(&vm_lock, fl);
+        return -2;
+      }
+      as->resident_frames++;
+      if (as->resident_frames > as->peak_frames)
+        as->peak_frames = as->resident_frames;
+    }
+    spinlock_release_irqrestore(&vm_lock, fl);
   }
+  return 0;
+}
+
+int vm_range_ok(struct process *p, uint64_t va, uint64_t len, int write) {
+  return vm_touch(p, va, len, write) == 0 ? 0 : -1;
+}
+
+/* ---------------------------------------------------------------------
+ * P2.3 (S3, design sections 5.1-5.5): demand faults
+ * ------------------------------------------------------------------- */
+
+int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
+                    const char **why) {
+  if (why)
+    *why = "V1";
+  if (!grp || !grp->as)
+    return 1; /* v1 process: the caller keeps the legacy print+exit path */
+  struct addr_space *as = grp->as;
+  uint64_t a = va & ~0xFFFULL;
+  if (write && exec && why)
+    *why = "PROT";
+
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  struct vm_region *r = vm_region_find(as, a);
+  if (!r || a < r->base || a + FRAME_SIZE > r->base + r->len) {
+    spinlock_release_irqrestore(&vm_lock, fl);
+    if (why)
+      *why = "HOLE";
+    return 1; /* guard page / inter-region hole: clean kill */
+  }
+  if ((write && !(r->prot & VM_PROT_WRITE)) ||
+      (exec && !(r->prot & VM_PROT_EXEC)) ||
+      (!write && !exec && !(r->prot & VM_PROT_READ))) {
+    spinlock_release_irqrestore(&vm_lock, fl);
+    if (why)
+      *why = "PROT";
+    return 1;
+  }
+  if (vm_arch_walk(as, a, 0) == 0) {
+    /* Present but the hardware said fault: a protection violation on a
+       live leaf (or a stale negative entry) -- kill, never re-map. */
+    spinlock_release_irqrestore(&vm_lock, fl);
+    if (why)
+      *why = "PROT";
+    return 1;
+  }
+  uint64_t fr = frame_alloc_zeroed();
+  if (!fr) {
+    spinlock_release_irqrestore(&vm_lock, fl);
+    if (why)
+      *why = "OOM";
+    return 1; /* design section 3: OOM kills the faulting process */
+  }
+  int rc = vm_arch_map(as, a, fr, r->prot, r->kind);
+  if (rc != 0) {
+    frame_free(fr);
+    spinlock_release_irqrestore(&vm_lock, fl);
+    if (why)
+      *why = "OOM";
+    return 1;
+  }
+  as->resident_frames++;
+  if (as->resident_frames > as->peak_frames)
+    as->peak_frames = as->resident_frames;
+  spinlock_release_irqrestore(&vm_lock, fl);
+  return 0; /* the instruction retries (ELR/CR2 untouched) */
+}
+
+/* ---------------------------------------------------------------------
+ * P2.3 (S3, design section 4.1): mmap family v2
+ * ------------------------------------------------------------------- */
+
+/* PROT bits are the VM_PROT_* values (design section 1.3); cap the
+ * incoming set so a caller cannot invent bits. */
+static uint16_t mmap_prot_sanitize(uint16_t prot) {
+  return (uint16_t)(prot & (VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC));
+}
+
+int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
+                uint32_t flags, int fd, uint64_t offset) {
+  if (!grp || !grp->as)
+    return -1; /* v1 falls back in the caller */
+  struct addr_space *as = grp->as;
+  if (len == 0)
+    return -EINVAL;
+  if (fd >= 0)
+    return -ENOTSUP; /* memfd-only, S4 */
+  if (offset != 0)
+    return -EINVAL;
+  if ((flags & VM_MAP_SHARED) && (flags & VM_MAP_PRIVATE))
+    return -EINVAL;
+  len = (len + 0xFFF) & ~0xFFFULL;
+  uint16_t p = mmap_prot_sanitize(prot);
+  uint32_t fl2 = flags & (VM_MAP_SHARED | VM_MAP_PRIVATE | VM_MAP_FIXED |
+                          VM_MAP_ANONYMOUS | VM_MAP_NORESERVE);
+
+  uint64_t base;
+  if (fl2 & VM_MAP_FIXED) {
+    if ((addr & 0xFFF) || addr < USER_VA_BASE ||
+        addr + len > USER_VA_BASE + USER_MMAP_SIZE + USER_MMAP_OFF)
+      return -EINVAL;
+    /* MAP_FIXED replaces whatever was mapped in range. */
+    base = addr;
+    if (vm_region_remove(as, base, len) != 0)
+      return -EINVAL;
+  } else {
+    /* First-fit bottom-up from USER_MMAP_BASE; the hint is honored when
+       free and inside the arena. */
+    uint64_t start = USER_MMAP_BASE_V2;
+    if (addr && addr >= USER_MMAP_BASE_V2 && addr + len <= USER_MMAP_LIMIT_V2) {
+      uint64_t hf = vm_hole_find(as, addr, USER_MMAP_LIMIT_V2, len);
+      if (hf == addr) {
+        base = hf;
+        goto have_base;
+      }
+    }
+    base = vm_hole_find(as, start, USER_MMAP_LIMIT_V2, len);
+    if (!base)
+      return -ENOMEM;
+  }
+have_base:
+  if (vm_region_insert(as, base, len, p, VMK_ANON, fl2, 0, 0) != 0)
+    return -ENOMEM;
+  return (int64_t)base;
+}
+
+/* Free every resident private leaf in [base, base+len) and forget the
+ * region span.  Shared pages are dropped without freeing (S4). */
+static void vm_zap_range(struct addr_space *as, uint64_t base, uint64_t len) {
+  for (uint64_t a = base; a < base + len; a += FRAME_SIZE) {
+    if (vm_arch_walk(as, a, 0) == 0) {
+      vm_arch_unmap(as, a); /* frees the frame unless SHARED-marked */
+      as->resident_frames--;
+    }
+  }
+}
+
+int vm_munmap_range(struct process *grp, uint64_t addr, uint64_t len) {
+  if (!grp || !grp->as)
+    return -1;
+  struct addr_space *as = grp->as;
+  if (len == 0 || (addr & 0xFFF))
+    return -EINVAL;
+  len = (len + 0xFFF) & ~0xFFFULL;
+  if (addr < USER_VA_BASE || addr + len > USER_VA_TOP)
+    return -EINVAL;
+  if (!vm_region_find(as, addr))
+    return -EINVAL; /* nothing mapped at addr */
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  /* zap the resident pages first (the region list still describes them) */
+  vm_zap_range(as, addr, len);
+  int rc = vm_region_remove_locked(as, addr, len);
+  spinlock_release_irqrestore(&vm_lock, fl);
+  return rc == 0 ? 0 : -EINVAL;
+}
+
+/* Set the protection of exactly [addr, addr+len) to `p`, splitting and
+ * re-merging the region list as needed (kind/flags/obj preserved per
+ * region).  Caller holds vm_lock.  Returns 0 / -1. */
+static int vm_prot_set_span(struct addr_space *as, uint64_t addr, uint64_t len,
+                            uint16_t p) {
+  uint64_t cur = addr;
+  uint64_t end = addr + len;
+  while (cur < end) {
+    struct vm_region *r = vm_region_find(as, cur);
+    if (!r || cur + FRAME_SIZE > r->base + r->len)
+      return -1;
+    uint64_t lo = cur;
+    uint64_t hi = (r->base + r->len < end) ? r->base + r->len : end;
+    if (r->prot != p || r->base != lo || r->base + r->len != hi) {
+      uint16_t kind = r->kind;
+      uint32_t flags = r->flags;
+      struct vm_object *obj = r->obj;
+      uint64_t oo = obj ? r->obj_off + (lo - r->base) : 0;
+      if (vm_region_remove_locked(as, lo, hi - lo) != 0)
+        return -1;
+      if (vm_region_insert_locked(as, lo, hi - lo, p, kind, flags, obj, oo) != 0)
+        return -1;
+    }
+    cur = hi;
+  }
+  return 0;
+}
+
+int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot) {
+  if (!grp || !grp->as)
+    return -1;
+  struct addr_space *as = grp->as;
+  if (len == 0 || (addr & 0xFFF))
+    return -EINVAL;
+  len = (len + 0xFFF) & ~0xFFFULL;
+  if (addr < USER_VA_BASE || addr + len > USER_VA_TOP)
+    return -EINVAL;
+  uint16_t p = mmap_prot_sanitize(prot);
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  /* The range must be fully mapped (design 4.1: else -ENOMEM). */
+  for (uint64_t a = addr; a < addr + len; a += FRAME_SIZE) {
+    struct vm_region *r = vm_region_find(as, a);
+    if (!r || a + FRAME_SIZE > r->base + r->len) {
+      spinlock_release_irqrestore(&vm_lock, fl);
+      return -ENOMEM;
+    }
+  }
+  /* Resident pages: re-encode in place, or ZAP for PROT_NONE (design
+     section 4.4: documented divergence from Linux). */
+  for (uint64_t a = addr; a < addr + len; a += FRAME_SIZE) {
+    if (vm_arch_walk(as, a, 0) != 0)
+      continue;
+    if (p == 0) {
+      vm_arch_unmap(as, a);
+      as->resident_frames--;
+    } else {
+      vm_arch_prot(as, a, p);
+    }
+  }
+  int rc = vm_prot_set_span(as, addr, len, p);
+  spinlock_release_irqrestore(&vm_lock, fl);
+  return rc == 0 ? 0 : -ENOMEM;
+}
+
+int vm_madvise(struct process *grp, uint64_t addr, uint64_t len, int advice) {
+  if (!grp || !grp->as)
+    return -1;
+  struct addr_space *as = grp->as;
+  if (len == 0 || (addr & 0xFFF))
+    return -EINVAL;
+  len = (len + 0xFFF) & ~0xFFFULL;
+  if (addr < USER_VA_BASE || addr + len > USER_VA_TOP)
+    return -EINVAL;
+  if (advice != VM_MADV_DONTNEED && advice != VM_MADV_FREE)
+    return 0; /* advisory: everything else is ignored (design 4.1) */
+  if (!vm_region_find(as, addr))
+    return -EINVAL;
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  vm_zap_range(as, addr, len);
+  spinlock_release_irqrestore(&vm_lock, fl);
   return 0;
 }
 

@@ -159,10 +159,53 @@ int vm_prot_page(struct addr_space *as, uint64_t va, uint16_t prot);
 
 /* Is [va, va+len) covered by regions of the process and resident with at
  * least the requested access?  v1 processes keep the legacy range check
- * (this helper is only valid for `p->as != NULL`).  S2: residency is
- * required (no demand yet); S3 replaces the residency arm with demand. */
+ * (this helper is only valid for `p->as != NULL`).  S3 (design sections
+ * 3/4.1): the old residency arm is now DEMAND -- a covered page that is
+ * not resident is materialized zero-fill (or from its object kind, S4)
+ * before returning, so after a successful call the kernel may read/write
+ * the user VA directly.  Returns 0, -EFAULT (hole/prot) or -ENOMEM. */
 struct process;
+int vm_touch(struct process *p, uint64_t va, uint64_t len, int write);
+
+/* 0/-1 view of vm_touch for the legacy boolean call sites. */
 int vm_range_ok(struct process *p, uint64_t va, uint64_t len, int write);
+
+/* P2.3 (design sections 5.1-5.5): the demand-fault face.  Called from
+ * the arch fault handlers with the CURRENT process (`grp` = its group).
+ * Never yields, never blocks; installs one zeroed 4 KiB frame when the
+ * fault is a demand case.  Returns 0 when the faulting instruction may
+ * be retried, 1 when the caller must kill the process; *why receives
+ * "HOLE" | "PROT" | "OOM" | "V1" (v1 process: legacy path) for the
+ * report line. */
+int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
+                    const char **why);
+
+/* --- mmap family v2 (S3; design section 4.1) ------------------------- */
+
+/* mmap(addr, len, prot, flags, fd, offset) for a v2 group.  fd == -1 is
+ * the anonymous path (S3); fd >= 0 is memfd-only and lands in S4 with
+ * SYS_MEMFD_CREATE (returns -ENOTSUP until then).  Returns the VA or a
+ * negative errno. */
+int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
+                uint32_t flags, int fd, uint64_t offset);
+
+/* munmap(addr, len): full or partial (region split); resident private
+ * pages are freed.  Unaligned / outside a region -> -EINVAL. */
+int vm_munmap_range(struct process *grp, uint64_t addr, uint64_t len);
+
+/* mprotect(addr, len, prot): the whole range must be mapped (else
+ * -ENOMEM); updates each region, re-encodes resident PTEs, and ZAPS
+ * resident pages for PROT_NONE (design section 4.4, divergence). */
+int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot);
+
+/* madvise(addr, len, advice): MADV_DONTNEED (4) / MADV_FREE (8) zap
+ * resident private pages; anything else returns 0.  Bad advice or range
+ * -> -EINVAL. */
+int vm_madvise(struct process *grp, uint64_t addr, uint64_t len, int advice);
+
+/* madvise advice values (design section 4.1; Linux numbers). */
+#define VM_MADV_DONTNEED 4
+#define VM_MADV_FREE 8
 
 /* Cross-CPU invalidation for a just-changed AS (section 7.2). */
 void vm_shootdown(struct addr_space *as);

@@ -450,24 +450,16 @@ int load_and_run_program_v2(const char* filename, int stdin_fd,
   print_int((int)(off / FRAME_SIZE));
   uart_puts("\n");
 
-  /* Main-stack region (the 64 KiB guard below stays a hole).  No demand
-     in S2: commit the top 64 KiB eagerly; S3 grows the rest on fault. */
+  /* Main-stack region (the 64 KiB guard below stays a hole).  S3: demand
+     materializes every stack page on first touch, so the loader only
+     creates the region -- the old eager top-64-KiB commit is gone (the
+     design's "committed on load: IMAGE only"). */
   if (vm_region_insert(as, USER_MAIN_STK_LIMIT_V2, USER_MAIN_STK_SIZE,
                        VM_PROT_READ | VM_PROT_WRITE, VMK_STACK,
                        VM_MAP_PRIVATE, 0, 0) != 0) {
     uart_puts("v2 loader: stack region insert failed\n");
     process_free(pid);
     return -1;
-  }
-  for (uint64_t a = USER_MAIN_STK_TOP_V2 - 64 * 1024; a < USER_MAIN_STK_TOP_V2;
-       a += FRAME_SIZE) {
-    uint64_t fr = frame_alloc_zeroed();
-    if (!fr)
-      goto fail;
-    if (vm_map_page(as, a, fr, VM_PROT_READ | VM_PROT_WRITE, VMK_STACK) != 0) {
-      frame_free(fr);
-      goto fail;
-    }
   }
 
 #ifdef __x86_64__

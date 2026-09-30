@@ -363,7 +363,13 @@ static void group_teardown(struct process *grp, uint64_t code) {
     vm_as_teardown(as); /* P2.2: the v2 group's AS goes with the block */
   grp->state = PROC_STATE_EXITED;
   grp->thread_ret = code;
-  grp->exit_status = ((int)code & 0xff) << 8;
+  /* P2.3 (design section 5.4): a fault kill passes PROCESS_STATUS_SIGNAL
+     with the signal number; it lands in the waitpid SIGNAL byte (low
+     byte, Linux layout).  A normal exit code rides the high byte. */
+  if ((int)code & PROCESS_STATUS_SIGNAL)
+    grp->exit_status = (int)((int)code & 0x7f);
+  else
+    grp->exit_status = ((int)code & 0xff) << 8;
 
   /* Reap orphaned children: any EXITED child whose parent (this group) just
      died will never be waitpid()ed, so free its slot. */
@@ -1830,6 +1836,26 @@ int64_t sys_brk(uint64_t addr) {
   if (addr == 0)
     return (int64_t)cur->heap_brk;
 
+  if (cur->as) {
+    /* P2.3 (S3, design section 4.1): the v2 heap range.  Extending the
+       break only grows the HEAP region; pages materialize on touch.  A
+       shrink does NOT unmap (Linux-like; madvise(DONTNEED) reclaims). */
+    if (addr < USER_HEAP_BASE_V2 || addr > USER_HEAP_LIMIT_V2)
+      return -ENOMEM;
+    uint64_t old = cur->heap_brk;
+    if (addr > old) {
+      uint64_t base = (old + 0xFFF) & ~0xFFFULL;
+      uint64_t end = (addr + 0xFFF) & ~0xFFFULL;
+      if (end > base &&
+          vm_region_insert(cur->as, base, end - base,
+                           VM_PROT_READ | VM_PROT_WRITE, VMK_HEAP,
+                           VM_MAP_PRIVATE, 0, 0) != 0)
+        return -ENOMEM;
+    }
+    cur->heap_brk = addr;
+    return 0;
+  }
+
   if (addr < USER_HEAP_BASE || addr > USER_HEAP_TOP)
     return -ENOMEM;
 
@@ -1907,6 +1933,8 @@ int sys_munmap(uint64_t addr, uint64_t len) {
   if (!cur)
     return -EINVAL;
   cur = process_group(cur); /* P1 (D7): anon maps are group state */
+  if (cur->as)
+    return vm_munmap_range(cur, addr, len); /* P2.3 (S3): v2 path */
   if (addr < USER_MMAP_BASE || addr >= USER_MMAP_LIMIT)
     return -EINVAL;
 
@@ -1923,6 +1951,84 @@ int sys_munmap(uint64_t addr, uint64_t len) {
   }
   spinlock_release_irqrestore(&proc_lock, flags_local);
   return -EINVAL;
+}
+
+/* --------------------------------------------------------------------------
+ * P2.3 (S3; design sections 4.1/4.2/5.4): mmap family v2 + fault exit.
+ * Trap.c dispatches here; v2 processes (p->as != NULL) take the AS region
+ * machinery in vm.c, v1 processes keep the legacy anon_maps behavior.
+ * ------------------------------------------------------------------------ */
+
+/* SYS_MMAP (62), 6-arg Linux shape.  v1: fd/offset (and the prot field)
+ * were not honored before, and still are not -- reject fd >= 0 with
+ * -ENOTSUP rather than silently ignoring it. */
+int64_t sys_mmap6(uint64_t addr, uint64_t len, int64_t prot, int64_t flags,
+                  int64_t fd, uint64_t offset) {
+  struct process *cur = current_process();
+  if (!cur)
+    return -EINVAL;
+  cur = process_group(cur); /* anon maps are group state (P1 D7) */
+  if (cur->as) {
+    if (fd >= 0 && fd >= MAX_OPEN_FDS)
+      return -EBADF;
+    if (offset & 0xFFF)
+      return -EINVAL;
+    return vm_mmap(cur, addr, len, (uint16_t)prot, (uint32_t)flags, (int)fd,
+                   offset);
+  }
+  if (fd >= 0)
+    return -ENOTSUP; /* v1 has no fd-backed mappings */
+  if (offset != 0)
+    return -EINVAL;
+  if (prot != 0 && (prot & ~(int64_t)(VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC)))
+    return -EINVAL;
+  return sys_mmap((int64_t)addr, len, (int)prot, (int)flags);
+}
+
+/* SYS_MPROTECT (81): v2 only; v1's whole region is already mapped and
+ * uniformly RWX, so a same-set request is a no-op and anything else is
+ * -ENOTSUP (invented here rather than silently lying). */
+int64_t sys_mprotect(uint64_t addr, uint64_t len, int64_t prot) {
+  struct process *cur = current_process();
+  if (!cur)
+    return -EINVAL;
+  cur = process_group(cur);
+  if (cur->as)
+    return vm_mprotect(cur, addr, len, (uint16_t)prot);
+  if ((addr & 0xFFF) || len == 0)
+    return -EINVAL;
+  if (addr < USER_VIRT_BASE || addr + len > USER_VIRT_BASE + USER_REGION_SIZE)
+    return -ENOMEM;
+  if ((prot & ~(int64_t)(VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC)) != 0)
+    return -EINVAL;
+  return 0;
+}
+
+/* SYS_MADVISE (82): advisory; v2 zaps on DONTNEED/FREE, v1 has nothing
+ * to reclaim (its pages are pre-mapped) so it is a pure no-op. */
+int64_t sys_madvise(uint64_t addr, uint64_t len, int64_t advice) {
+  struct process *cur = current_process();
+  if (!cur)
+    return -EINVAL;
+  cur = process_group(cur);
+  if (cur->as)
+    return vm_madvise(cur, addr, len, (int)advice);
+  if ((addr & 0xFFF) || len == 0)
+    return -EINVAL;
+  if (addr < USER_VIRT_BASE || addr + len > USER_VIRT_BASE + USER_REGION_SIZE)
+    return -EINVAL;
+  (void)advice;
+  return 0;
+}
+
+/* Design section 5.4: the fault paths (ARM EL0 abort / x64 #PF) call
+ * this once they have decided the process must die.  Status is
+ * signal-shaped (SIGSEGV = 11) via the group_teardown marker; the
+ * ordinary exit machinery drains the group and reaps it. */
+void process_fault_exit(struct trap_frame *tf, int signo) {
+  if (tf)
+    tf->regs[0] = (uint64_t)(PROCESS_STATUS_SIGNAL | (signo & 0x7f));
+  process_exit(tf);
 }
 
 /* ---------------------------------------------------------------------------
