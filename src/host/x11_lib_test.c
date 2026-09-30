@@ -280,6 +280,9 @@ static void test_keys(Display *d, Window w) {
   };
   for (unsigned long i = 0; i < sizeof specials / sizeof specials[0]; i++) {
     feed(d, specials[i].seq);
+    /* ESC [ D defers one byte (it may be the close message ESC [ D ~,
+     * F1.8); settling says "that was all" and delivers the Left arrow. */
+    x11_input_settle(d, 0);
     if (qlen(d) != 1) { check(0, specials[i].seq); continue; }
     pop(d, &ev);
     XLookupString(&ev.xkey, buf, sizeof buf, &ks, NULL);
@@ -625,6 +628,94 @@ static void test_clear_area(Display *d, Window w) {
   XFreeGC(d, gc);
 }
 
+/* ---- F1.8 input v2: the K stamp and the ESC [ D ~ close -------------- */
+
+/* The desktop (browser.md A.2) stamps every key to a pixel window with
+ * ESC [ K <mods> ~ and asks the window to quit with ESC [ D ~ -- which
+ * is also the first three bytes of the Left-arrow sequence.  The decoder
+ * must skip the former without dropping the key that follows it, and
+ * resolve the latter with one byte of lookahead (a '~' closes anything
+ * else is a Left arrow).  Runs on a fresh display: the close flag is
+ * sticky by design. */
+static void test_input_v2(void) {
+  Display *d = XOpenDisplay(NULL);
+  check(d != NULL, "input v2: display");
+  Window w = XCreateSimpleWindow(d, DefaultRootWindow(d), 0, 0, 200, 120, 0,
+                                 0, 0);
+  XSelectInput(d, w, ExposureMask | KeyPressMask | ButtonPressMask |
+                   ButtonReleaseMask);
+  feed(d, "\033]G0;0;200;120~");
+  XEvent ev;
+  KeySym ks;
+  char buf[8];
+  while (qlen(d) > 0) pop(d, &ev);          /* drop the geometry events */
+
+  /* Ctrl+5 arrives as the K stamp + the digit: the stamp is skipped, the
+   * key byte is not. */
+  feed(d, "\033[K 2~5");
+  x11_input_settle(d, 0);
+  check(qlen(d) == 1, "K stamp skipped, the key after it delivered");
+  pop(d, &ev);
+  XLookupString(&ev.xkey, buf, sizeof buf, &ks, NULL);
+  check(ks == XK_5 && buf[0] == '5', "the byte after a K stamp is the key");
+
+  /* A stamp with no modifiers (a plain key) is skipped the same way. */
+  feed(d, "\033[K 0~");
+  feed(d, "+");
+  check(qlen(d) == 1, "K 0 skipped");
+  pop(d, &ev);
+  XLookupString(&ev.xkey, buf, sizeof buf, &ks, NULL);
+  check(ks == XK_plus, "and does not eat the following key");
+
+  /* ESC [ D alone defers: Left arrow, resolved by the next byte. */
+  feed(d, "\033[D");
+  check(qlen(d) == 0, "ESC [ D waits for one more byte");
+  x11_input_settle(d, 1);
+  check(qlen(d) == 0, "still waiting while more bytes may come");
+  feed(d, "x");
+  check(qlen(d) == 2, "Left arrow + the byte after it");
+  pop(d, &ev);
+  XLookupString(&ev.xkey, buf, sizeof buf, &ks, NULL);
+  check(ks == XK_Left, "the deferred ESC [ D became Left");
+  pop(d, &ev);
+  XLookupString(&ev.xkey, buf, sizeof buf, &ks, NULL);
+  check(ks == 'x' && buf[0] == 'x', "and did not swallow the next byte");
+
+  /* With nothing following, the settle delivers Left. */
+  feed(d, "\033[D");
+  x11_input_settle(d, 0);
+  check(qlen(d) == 1, "settled ESC [ D is Left");
+  pop(d, &ev);
+  XLookupString(&ev.xkey, buf, sizeof buf, &ks, NULL);
+  check(ks == XK_Left, "Left keysym after settle");
+
+  /* The wheel arrives as ordinary press/release pairs with btn 4/5. */
+  feed(d, "\033[P10;20;4~\033[R10;20;4~\033[P10;20;5~\033[R10;20;5~");
+  check(qlen(d) == 4, "a wheel tick is a press/release pair");
+  pop(d, &ev);
+  check(ev.type == ButtonPress && ev.xbutton.button == 4,
+        "wheel up = ButtonPress 4");
+  pop(d, &ev);
+  check(ev.type == ButtonRelease && ev.xbutton.button == 4,
+        "wheel up = ButtonRelease 4");
+  pop(d, &ev);
+  check(ev.type == ButtonPress && ev.xbutton.button == 5,
+        "wheel down = ButtonPress 5");
+  pop(d, &ev);
+  check(ev.type == ButtonRelease && ev.xbutton.button == 5,
+        "wheel down = ButtonRelease 5");
+
+  /* ESC [ D ~ closes: no stray Left/space/'~' events, and the next event
+   * wait exits exactly like a lost desktop connection. */
+  feed(d, "\033[D~");
+  x11_input_settle(d, 0);
+  check(qlen(d) == 0, "the close message queues no key events");
+  check(d->desktop_closed == 1, "the close message marks the display closed");
+  check(x11_wait_event(d) == -1, "the next event wait exits (like EOF)");
+
+  XCloseDisplay(d);
+}
+
 int main(void) {
   graphics_init();
 
@@ -649,6 +740,7 @@ int main(void) {
   test_keys(d, w);
   test_geometry_reflow(d);
   test_no_surface_yet(d);
+  test_input_v2();
 
   XCloseDisplay(d);
 
