@@ -204,6 +204,13 @@ static void test_wave_loader(void *arg) {
   load_and_run_program_in_scheduler("TACTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("CMPTEST.BIN", -1, -1, -1, -1);
 
+  /* F1.5 (FPU): floating-point bring-up — exact-value asserts across
+     preemption, a two-process fork torture over pipes, and fork FP
+     isolation (src/user/fpu_test.c).  Last in the list: its fork/pipe
+     round trips need free process-table slots, which earlier tests have
+     released by the time it runs. */
+  load_and_run_program_in_scheduler("FPU_T.BIN", -1, -1, -1, -1);
+
   extern void kernel_exit(void);
   kernel_exit();
 }
