@@ -1,5 +1,6 @@
 #include "process.h"
 #include "frame.h"
+#include "vm.h"
 #include "fs.h"
 #include "lock.h"
 #include "mmu.h"
@@ -149,6 +150,33 @@ void set_current_process_pid(uint32_t cpu, int pid) {
 #endif
 }
 
+/* P2.2 (S2): which slot claims `cpu` (-1 = none); the x64 shootdown
+ * send path scans these (design section 7.2). */
+int current_pid_of_cpu(uint32_t cpu) {
+  if (cpu >= MAX_CPUS)
+    return -1;
+  return cpu_current_pids[cpu];
+}
+
+/* P2.2 (S2): release whatever memory backing a slot holds -- the v1
+ * 32 MiB block and/or the v2 address space.  Caller holds proc_lock;
+ * returns 1 when something was released (the exactly-once token for the
+ * group teardown).  Lock order proc_lock -> vm_lock -> frame_lock
+ * (design section 5.5). */
+static int proc_release_mem_locked(struct process *q) {
+  int block = q->phys_block_idx;
+  struct addr_space *as = q->as;
+  if (block < 0 && !as)
+    return 0;
+  q->phys_block_idx = -1;
+  q->as = 0;
+  if (block >= 0)
+    frame_block_free(block);
+  if (as)
+    vm_as_teardown(as);
+  return 1;
+}
+
 // ---------------------------------------------------------------------------
 // Current process accessor
 // ---------------------------------------------------------------------------
@@ -219,7 +247,6 @@ void process_set_entry(int pid, uint64_t elr, uint64_t sp) {
  * Returns:
  *   New PID (>= 1) on success, -1 on failure.
  */
-static int process_create_internal(void);
 
 /* Create a process.  Never waits for memory: a full physical pool makes
  * this fail so the caller can retry.  (A bounded sleep here was tried
@@ -227,10 +254,8 @@ static int process_create_internal(void);
  * spawn worker — in WFE, and preemption of those contexts corrupted
  * their saved state, producing instruction aborts at ELR=0.  Callers
  * that can wait do so by retrying the whole spawn.) */
-int process_create(void) { return process_create_internal(); }
-
-/* Alias kept for syscall-context callers; identical semantics. */
-int process_create_nowait(void) { return process_create_internal(); }
+/* (The v1/v2 bodies live in process_create_internal_ver below; these
+ * thin wrappers keep the historical entry points.) */
 
 /* True while any core is still executing this pid: a process that has
  * just set its own state to EXITED keeps running its exit path until the
@@ -309,17 +334,19 @@ static int group_claims_pending(struct process *grp, struct process *self) {
  * once -- close the group fd table, free the physical block, turn the anchor
  * into a reapable zombie (EXITED; straight to FREE when a parent was already
  * waiting) and deliver the waitpid result.  Runs on the last member's
- * context after the claim wait.  The phys_block_idx >= 0 -> -1 transition is
- * the exactly-once token: a racing member that also reaches here returns
- * immediately. */
+ * context after the claim wait.  The phys_block_idx >= 0 -> -1 transition
+ * (plus the P2.2 as != NULL -> NULL transition) is the exactly-once
+ * token: a racing member that also reaches here returns immediately. */
 static void group_teardown(struct process *grp, uint64_t code) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   int block = grp->phys_block_idx;
-  if (block < 0) {
+  struct addr_space *as = grp->as;
+  if (block < 0 && !as) {
     spinlock_release_irqrestore(&proc_lock, flags);
     return;
   }
   grp->phys_block_idx = -1;
+  grp->as = 0;
   spinlock_release_irqrestore(&proc_lock, flags);
 
   /* Close the group's descriptors once.  file_close() re-checks each slot
@@ -330,7 +357,10 @@ static void group_teardown(struct process *grp, uint64_t code) {
   }
 
   flags = spinlock_acquire_irqsave(&proc_lock);
-  frame_block_free(block);
+  if (block >= 0)
+    frame_block_free(block);
+  if (as)
+    vm_as_teardown(as); /* P2.2: the v2 group's AS goes with the block */
   grp->state = PROC_STATE_EXITED;
   grp->thread_ret = code;
   grp->exit_status = ((int)code & 0xff) << 8;
@@ -391,10 +421,9 @@ static int thread_alloc_slot_locked(void) {
       continue;
     if (!q->is_thread && q->live_threads != 0)
       continue;
-    if (!q->is_thread && q->phys_block_idx >= 0) {
-      /* Defensive: a leader tombstone must not leak its block. */
-      frame_block_free(q->phys_block_idx);
-      q->phys_block_idx = -1;
+    if (!q->is_thread && (q->phys_block_idx >= 0 || q->as)) {
+      /* Defensive: a leader tombstone must not leak its block/AS. */
+      proc_release_mem_locked(q);
     }
     q->state = PROC_STATE_FREE;
     return i;
@@ -432,6 +461,14 @@ static int phys_block_alloc_locked(void) {
     if (par && par->state != PROC_STATE_FREE &&
         par->state != PROC_STATE_EXITED)
       continue; /* live parent: keep its zombie */
+    /* P2.2 (design section 2.3): a reclaimable v2 zombie's AS frames +
+       tables come back here, lazily (allocator pressure or slot reuse),
+       exactly mirroring the v1 block behavior. */
+    if (q->as) {
+      struct addr_space *zas = q->as;
+      q->as = 0;
+      vm_as_teardown(zas);
+    }
     if (q->phys_block_idx >= 0) {
       /* The zombie still holds its (marked) block: hand it over as-is,
          exactly like the v1 phys_blocks_used[] path did. */
@@ -446,8 +483,10 @@ static int phys_block_alloc_locked(void) {
 }
 
 /* Shared process-creation body.  Never waits for memory; see
- * process_create() for why. */
-static int process_create_internal(void) {
+ * process_create() for why.  P2.2 (S2): `ver` selects the backing --
+ * AS_V1 takes a 32 MiB block (today's semantics), AS_V2 takes an
+ * address space and no block. */
+static int process_create_internal_ver(int ver) {
   uart_puts("Inside process_create: acquiring lock...\n");
   int pid = -1;
   int block_idx = -1;
@@ -477,9 +516,7 @@ static int process_create_internal(void) {
       if (par && par->state != PROC_STATE_FREE &&
           par->state != PROC_STATE_EXITED)
         continue; /* live parent: keep its zombie */
-      if (q->phys_block_idx >= 0)
-        frame_block_free(q->phys_block_idx);
-      q->phys_block_idx = -1;
+      proc_release_mem_locked(q);
       q->state = PROC_STATE_FREE;
       pid = i;
       proc_table[i].state = PROC_STATE_ALLOCATED;
@@ -493,10 +530,8 @@ static int process_create_internal(void) {
         continue;
       if (!q->is_thread && q->live_threads != 0)
         continue;
-      if (!q->is_thread && q->phys_block_idx >= 0) {
-        frame_block_free(q->phys_block_idx);
-        q->phys_block_idx = -1;
-      }
+      if (!q->is_thread && (q->phys_block_idx >= 0 || q->as))
+        proc_release_mem_locked(q);
       q->state = PROC_STATE_FREE;
       pid = i;
       proc_table[i].state = PROC_STATE_ALLOCATED;
@@ -508,10 +543,12 @@ static int process_create_internal(void) {
     }
   }
 
-  // Allocate a physical block
-  block_idx = phys_block_alloc_locked();
+  // Allocate a physical block (v1) — a v2 process takes an address
+  // space instead and never holds a 32 MiB block (design section 2.2).
+  if (ver == AS_V1)
+    block_idx = phys_block_alloc_locked();
 
-  if (block_idx < 0) {
+  if (ver == AS_V1 && block_idx < 0) {
     proc_table[pid].state = PROC_STATE_FREE;
     uart_puts("[KERNEL] process_create: no free physical memory blocks!\n");
     /* Diagnostic: who is pinning the pool?  Rate-limited to the first few
@@ -549,7 +586,7 @@ static int process_create_internal(void) {
 
   struct process *p = &proc_table[pid];
   p->phys_block_idx = block_idx;
-  p->user_phys_base = frame_block_base_phys(block_idx);
+  p->user_phys_base = (block_idx >= 0) ? frame_block_base_phys(block_idx) : 0;
   spinlock_release_irqrestore(&proc_lock, p_flags);
 
   uart_puts("Inside process_create: lock released. pid=");
@@ -580,7 +617,8 @@ static int process_create_internal(void) {
   p->tls_base = 0;
   p->futex_uaddr = 0;
   p->thread_ret = 0;
-  p->heap_brk = USER_HEAP_BASE;
+  p->as = 0;
+  p->heap_brk = (ver == AS_V2) ? USER_HEAP_BASE_V2 : USER_HEAP_BASE;
   p->anon_map_count = 0;
   for (int i = 0; i < USER_ANON_MAX_REGS; i++) {
     p->anon_maps[i].addr = 0;
@@ -590,12 +628,16 @@ static int process_create_internal(void) {
     p->open_fds[i] = -1;
   }
 
-  uart_puts("Inside process_create: clearing memory at ");
-  uart_print_hex(p->user_phys_base);
-  uart_puts("\n");
-  kmemset((void *)p->user_phys_base, 0, USER_INITIAL_CLEAR_SIZE);
-  kmemset((void *)(p->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE), 0, USER_STACK_CLEAR_SIZE);
-  uart_puts("Inside process_create: kmemset done.\n");
+  /* P2.2 (S2): v2 processes demand-commit (S3) and never touch a block;
+     the eager 1 MiB + 256 KiB zeroing is the v1 contract only. */
+  if (ver == AS_V1) {
+    uart_puts("Inside process_create: clearing memory at ");
+    uart_print_hex(p->user_phys_base);
+    uart_puts("\n");
+    kmemset((void *)p->user_phys_base, 0, USER_INITIAL_CLEAR_SIZE);
+    kmemset((void *)(p->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE), 0, USER_STACK_CLEAR_SIZE);
+    uart_puts("Inside process_create: kmemset done.\n");
+  }
 
   for (int i = 0; i < 36; i++) {
     p->context[i] = 0;
@@ -617,8 +659,28 @@ static int process_create_internal(void) {
   }
 #endif
 
+  /* P2.2 (S2): give the v2 slot its address space (root + region array).
+     Failure frees the slot; the caller (loader v2) treats it as OOM. */
+  if (ver == AS_V2) {
+    struct addr_space *as = vm_as_create((uint64_t)pid);
+    if (!as) {
+      uint64_t f2 = spinlock_acquire_irqsave(&proc_lock);
+      p->state = PROC_STATE_FREE;
+      spinlock_release_irqrestore(&proc_lock, f2);
+      uart_puts("[KERNEL] process_create_v2: no address space!\n");
+      return -1;
+    }
+    p->as = as;
+  }
+
   return pid;
 }
+
+int process_create(void) { return process_create_internal_ver(AS_V1); }
+int process_create_nowait(void) { return process_create_internal_ver(AS_V1); }
+
+/* P2.2 (S2): the v2 variant (loader v2 / MMTEST opt-in). */
+int process_create_v2(void) { return process_create_internal_ver(AS_V2); }
 
 /**
  * Creates a new kernel thread.
@@ -959,7 +1021,12 @@ void schedule(struct trap_frame *tf, int is_yield) {
         dbgpark(park);
       }
 #endif
-      mmu_switch_user_mapping(proc_table[next].user_phys_base);
+      /* P2.2 (S2): a v2 slot switches by AS (TTBR0/CR3 + mode-change
+         flush); a v1 slot keeps the legacy overlay rewrite path. */
+      if (proc_table[next].as)
+        vm_arch_switch(proc_table[next].as);
+      else
+        mmu_switch_user_mapping(proc_table[next].user_phys_base);
       /* The resume must be interrupt-atomic: the frame window
          [target_sp-296, target_sp) is copied and iretq'd right here, and a
          timer tick landing in that window pushes a frame onto the same
@@ -990,6 +1057,9 @@ void schedule(struct trap_frame *tf, int is_yield) {
 
     if (!any_alive) {
       set_current_process_pid(cpu, -1);
+      /* P2.2 (S2): no user context will run here; never keep an AS (whose
+         tables are about to be freed) as this CPU's translation. */
+      vm_arch_restore_kernel();
       spinlock_release_irqrestore(&proc_lock, flags);
       if (cpu == 0) {
         extern void scheduler_finished(void);
@@ -1014,6 +1084,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
     // We must abandon this trap frame and return to the base start_scheduler()
     // loop so the CPU can sleep cleanly.
     set_current_process_pid(cpu, -1);
+    vm_arch_restore_kernel(); /* P2.2 (S2): back to the kernel table */
     spinlock_release_irqrestore(&proc_lock, flags);
 
     extern void kernel_thread_exit_jump(void);
@@ -1058,10 +1129,7 @@ void process_exit(struct trap_frame *tf) {
     /* Kernel tasks keep the legacy path: FREE + block release, no groups. */
     uint64_t kflags = spinlock_acquire_irqsave(&proc_lock);
     cur->state = PROC_STATE_FREE;
-    if (cur->phys_block_idx >= 0) {
-      frame_block_free(cur->phys_block_idx);
-      cur->phys_block_idx = -1;
-    }
+    proc_release_mem_locked(cur);
     spinlock_release_irqrestore(&proc_lock, kflags);
     schedule(tf, 0);
     return;
@@ -1134,11 +1202,9 @@ void kernel_exit(void) {
   if (cur) {
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     cur->state = PROC_STATE_FREE;
-    if (cur->phys_block_idx >= 0) {
-      frame_block_free(cur->phys_block_idx);
-      cur->phys_block_idx = -1;
-    }
+    proc_release_mem_locked(cur);
     set_current_process_pid(get_cpuid(), -1);
+    vm_arch_restore_kernel(); /* P2.2 (S2): kernel thread ran to exit */
     spinlock_release_irqrestore(&proc_lock, flags);
   }
 
@@ -1155,10 +1221,7 @@ void process_free(int pid) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   struct process *p = &proc_table[pid];
   p->state = PROC_STATE_FREE;
-  if (p->phys_block_idx >= 0) {
-    frame_block_free(p->phys_block_idx);
-    p->phys_block_idx = -1;
-  }
+  proc_release_mem_locked(p);
   spinlock_release_irqrestore(&proc_lock, flags);
 }
 
@@ -1197,10 +1260,7 @@ int process_kill(int pid) {
   /* Deliver the terminating-signal status (low byte) so a waiting
      parent can reap a kill with a signal-shaped status. */
   p->exit_status = 9; /* SIGKILL */
-  if (p->phys_block_idx >= 0) {
-    frame_block_free(p->phys_block_idx);
-    p->phys_block_idx = -1;
-  }
+  proc_release_mem_locked(p);
   /* P1: killing a group leader kills the whole group. */
   for (int i = 0; i < MAX_PROCESSES; i++) {
     struct process *m = &proc_table[i];
@@ -1542,7 +1602,10 @@ void start_scheduler(void) {
         proc_table[i].state = PROC_STATE_RUNNING;
         sched_idle_rounds = 0;
 
-        mmu_switch_user_mapping(proc_table[i].user_phys_base);
+        if (proc_table[i].as)
+          vm_arch_switch(proc_table[i].as);
+        else
+          mmu_switch_user_mapping(proc_table[i].user_phys_base);
 
         extern char __stack_top;
         uint64_t target_sp = (uint64_t)&__stack_top - cpu * 0x10000 - 4096;
@@ -1585,6 +1648,10 @@ void start_scheduler(void) {
        idle AP hit that guard with a stale kernel-task claim and
        re-scheduled the wave loader → proc_lock wedge right after boot. */
     set_current_process_pid(get_cpuid(), -1);
+
+    /* P2.2 (S2): this core no longer runs any process; do not keep a
+       (possibly torn-down) AS as its translation. */
+    vm_arch_restore_kernel();
 
     /* Liveness heartbeat: this CPU is alive and idling. */
     cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
@@ -2003,8 +2070,14 @@ int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
 int process_set_tls(struct process *caller, uint64_t tls) {
   if (!caller || caller->is_kernel_process)
     return -EINVAL;
-  if (tls < USER_VIRT_BASE || tls >= USER_VIRT_BASE + USER_REGION_SIZE)
+  if (caller->as) {
+    /* P2.2 (S2): v2 TLS lives inside the image region; require a mapped,
+       writable page (the TLS block is touched immediately after). */
+    if (vm_range_ok(caller, tls, 16, 1) != 0)
+      return -EINVAL;
+  } else if (tls < USER_VIRT_BASE || tls >= USER_VIRT_BASE + USER_REGION_SIZE) {
     return -EINVAL;
+  }
   caller->tls_base = tls;
   tls_write_live(tls);
   return 0;

@@ -10,12 +10,17 @@
 #include "syscall.h"
 #include "errno.h"
 #include "vfs.h"
+#include "vm.h"
 #include <stdint.h>
 
 extern void uart_puts(const char *s);
 extern void uart_putc(char c);
 extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
+
+/* Defined below (line ~380); declared here for the early syscall helpers
+   that are v2-aware since P2.2 S2. */
+static int sys_user_range_ok(uint64_t ptr, uint64_t len);
 
 struct cpu_local {
   uint64_t kernel_stack;
@@ -56,7 +61,13 @@ void restore_user_sp_helper(void) {
 
 static void sys_write_console(struct trap_frame *tf) {
   uint64_t ptr = tf->regs[5]; // rdi
-  if (ptr >= USER_VIRT_BASE && ptr < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  struct process *p = current_process();
+  int ok;
+  if (p && p->as)
+    ok = (vm_range_ok(p, ptr, 1, 0) == 0); /* P2.2 (S2): v2 pointer */
+  else
+    ok = (ptr >= USER_VIRT_BASE && ptr < (USER_VIRT_BASE + USER_REGION_SIZE));
+  if (ok) {
     uart_puts("[CONSOLE] ");
     uart_puts((const char *)ptr);
   }
@@ -171,8 +182,7 @@ static void sys_get_args(struct trap_frame *tf) {
   char *buf = (char *)tf->regs[5]; // rdi
   int size = (int)tf->regs[4]; // rsi
   struct process *cur = process_group(current_process()); /* P1 (D7) */
-  if (cur && buf && (uint64_t)buf >= USER_VIRT_BASE &&
-      (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (cur && buf && sys_user_range_ok((uint64_t)buf, (uint64_t)size)) {
     int i = 0;
     while (cur->args[i] && i < size - 1) {
       buf[i] = cur->args[i];
@@ -378,6 +388,13 @@ static void sys_connect(struct trap_frame *tf) {
 
 /* True when [ptr, ptr+len) lies inside the caller's user region. */
 static int sys_user_range_ok(uint64_t ptr, uint64_t len) {
+  struct process *p = current_process();
+  if (p && p->as) {
+    /* P2.2 (S2): a v2 process answers to the address-space walk instead
+       of the legacy 32 MiB range.  Residency-only until S3's vm_touch
+       (no demand paging yet). */
+    return vm_range_ok(p, ptr, len, 0) == 0;
+  }
   if (ptr < USER_VIRT_BASE) return 0;
   if (len > USER_REGION_SIZE) return 0;
   return ptr - USER_VIRT_BASE <= USER_REGION_SIZE - len;
@@ -943,8 +960,7 @@ static void sys_get_progname(struct trap_frame *tf) {
   struct process *caller = current_process();
   if (!caller) {
     tf->regs[0] = -1;
-  } else if (buf && (uint64_t)buf >= USER_VIRT_BASE &&
-             (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  } else if (buf && sys_user_range_ok((uint64_t)buf, (uint64_t)size)) {
     int i = 0;
     while (caller->name[i] && i < size - 1) {
       buf[i] = caller->name[i];
@@ -1496,6 +1512,13 @@ void general_interrupt_handler(struct trap_frame *tf) {
       return;
     }
     schedule(tf, 1);
+  } else if (tf->vector == 0x82) {
+    // P2.2 (S2/OQ5) TLB shootdown IPI: LAPIC-delivered, so EOI first.
+    // The handler never schedules and never preempts anything: it may
+    // only reload CR3 when this CPU runs the target AS (snapshot read).
+    lapic_send_eoi();
+    extern void vm_x64_shootdown_handler(void);
+    vm_x64_shootdown_handler();
   } else if (tf->vector < 32) {
     // Exception
     struct process *cur = current_process();
@@ -1787,6 +1810,8 @@ EXCEPTION_NO_ERR(46);
 EXCEPTION_NO_ERR(47);
 // Yield
 EXCEPTION_NO_ERR(129); // 0x81
+// P2.2 (S2/OQ5): TLB shootdown IPI
+EXCEPTION_NO_ERR(130); // 0x82
 
 __asm__(
 ".intel_syntax noprefix\n"
@@ -2117,4 +2142,6 @@ void trap_init(void) {
 
   // Register software yield interrupt on vector 0x81 (with Ring 3 permissions 0xEE)
   idt_set_gate(129, (uint64_t)exception_129, 0x08, 0xEE);
+  // P2.2 (S2): TLB shootdown IPI on vector 0x82 (kernel-only gate, 0x8E).
+  idt_set_gate(130, (uint64_t)exception_130, 0x08, 0x8E);
 }

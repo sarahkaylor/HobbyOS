@@ -21,6 +21,7 @@ void run_all_unit_tests(void) {
   pipe_test_suite();
   fs_test_suite();
   mmu_test_suite();
+  vm_test_suite();
   process_test_suite();
   program_loader_test_suite();
   trap_test_suite();

@@ -245,6 +245,14 @@ static void test_wave_loader(void *arg) {
      variables, so it runs after THRD_T/TLS_T (last in the wave). */
   load_and_run_program_in_scheduler("CXX_T.BIN", -1, -1, -1, -1);
 
+  /* P2.2 (S2): v2 address-space acceptance.  MMTEST.BIN is the first
+     AS_V2 program in the wave: loader v2 maps its image into fresh 4 KiB
+     frames at USER_IMG_BASE (64 GiB) and commits the top of the v2 main
+     stack; the syscall/teardown paths it exercises are the v2-aware ones.
+     It spawns nothing and takes one slot, so a late position before the
+     thread-torture suites is cheapest. */
+  load_and_run_program_v2("MMTEST.BIN", -1, -1, -1, -1, 0);
+
   extern void kernel_exit(void);
   kernel_exit();
 }

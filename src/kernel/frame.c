@@ -145,6 +145,49 @@ void frame_free(uint64_t phys) {
   spinlock_release_irqrestore(&frame_lock, flags);
 }
 
+uint64_t frame_alloc_contig(int n) {
+  if (n <= 0 || (uint64_t)n > FRAME_TOTAL_FRAMES)
+    return 0;
+  uint64_t flags = spinlock_acquire_irqsave(&frame_lock);
+  uint32_t total = (uint32_t)FRAME_TOTAL_FRAMES;
+  uint32_t run_start = 0;
+  uint32_t run = 0;
+  uint64_t res = 0;
+
+  /* Two passes: [hint, end) then [0, hint).  Bit-by-bit with a running
+     counter; n is small (<= a few hundred) so the worst-case cost is
+     bounded by the pool size once, same class as the exhaustion scan. */
+  for (int pass = 0; pass < 2 && !res; pass++) {
+    uint32_t b = (pass == 0) ? frame_hint * 64 : 0;
+    uint32_t e = (pass == 0) ? total : frame_hint * 64;
+    if (b >= e)
+      continue;
+    run = 0;
+    for (uint32_t i = b; i < e; i++) {
+      if (frame_bits[i / 64] & (1ULL << (i % 64))) {
+        run = 0;
+        continue;
+      }
+      if (run == 0)
+        run_start = i;
+      if (++run == (uint32_t)n) {
+        for (uint32_t j = run_start; j < run_start + (uint32_t)n; j++)
+          frame_bits[j / 64] |= (1ULL << (j % 64));
+        frame_hint = (run_start + (uint32_t)n) / 64;
+        if (frame_hint >= FRAME_WORDS)
+          frame_hint = 0;
+        frame_used += (uint32_t)n;
+        if (frame_used > frame_high)
+          frame_high = frame_used;
+        res = frame_phys_of((int)run_start);
+        break;
+      }
+    }
+  }
+  spinlock_release_irqrestore(&frame_lock, flags);
+  return res;
+}
+
 int frame_total_count(void) { return (int)FRAME_TOTAL_FRAMES; }
 
 int frame_used_count(void) {

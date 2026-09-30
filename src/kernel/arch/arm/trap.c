@@ -11,6 +11,7 @@
 #include "syscall.h"
 #include "errno.h"
 #include "vfs.h"
+#include "vm.h"
 #include <stdint.h>
 
 extern jmp_buf user_exit_context;
@@ -20,6 +21,10 @@ extern void uart_puts(const char *s);
 extern void uart_putc(char c);
 extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
+
+/* Defined below (line ~330); declared here for the early syscall helpers
+   that are v2-aware since P2.2 S2. */
+static int sys_user_range_ok(uint64_t ptr, uint64_t len);
 
 /**
  * Prints the state of a trap frame for debugging purposes.
@@ -48,7 +53,13 @@ extern uint32_t virtio_blk_irq;
 
 static void sys_write_console(struct trap_frame *tf) {
   uint64_t ptr = tf->regs[0];
-  if (ptr >= USER_VIRT_BASE && ptr < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  struct process *p = current_process();
+  int ok;
+  if (p && p->as)
+    ok = (vm_range_ok(p, ptr, 1, 0) == 0); /* P2.2 (S2): v2 pointer */
+  else
+    ok = (ptr >= USER_VIRT_BASE && ptr < (USER_VIRT_BASE + USER_REGION_SIZE));
+  if (ok) {
     uart_puts("[CONSOLE] ");
     uart_puts((const char *)ptr);
   }
@@ -123,8 +134,7 @@ static void sys_get_args(struct trap_frame *tf) {
   char *buf = (char *)tf->regs[0];
   int size = (int)tf->regs[1];
   struct process *cur = process_group(current_process()); /* P1 (D7) */
-  if (cur && buf && (uint64_t)buf >= USER_VIRT_BASE &&
-      (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (cur && buf && sys_user_range_ok((uint64_t)buf, (uint64_t)size)) {
     int i = 0;
     while (cur->args[i] && i < size - 1) {
       buf[i] = cur->args[i];
@@ -325,6 +335,13 @@ static void sys_connect(struct trap_frame *tf) {
 
 /* True when [ptr, ptr+len) lies inside the caller's user region. */
 static int sys_user_range_ok(uint64_t ptr, uint64_t len) {
+  struct process *p = current_process();
+  if (p && p->as) {
+    /* P2.2 (S2): a v2 process answers to the address-space walk instead
+       of the legacy 32 MiB range.  Residency-only until S3's vm_touch
+       (no demand paging yet). */
+    return vm_range_ok(p, ptr, len, 0) == 0;
+  }
   if (ptr < USER_VIRT_BASE) return 0;
   if (len > USER_REGION_SIZE) return 0;
   return ptr - USER_VIRT_BASE <= USER_REGION_SIZE - len;
@@ -979,8 +996,7 @@ static void sys_get_progname(struct trap_frame *tf) {
   struct process *caller = current_process();
   if (!caller) {
     tf->regs[0] = -1;
-  } else if (buf && (uint64_t)buf >= USER_VIRT_BASE &&
-             (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  } else if (buf && sys_user_range_ok((uint64_t)buf, (uint64_t)size)) {
     int i = 0;
     while (caller->name[i] && i < size - 1) {
       buf[i] = caller->name[i];

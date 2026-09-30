@@ -47,6 +47,13 @@ uint64_t frame_alloc_zeroed(void);
  * in-pool address: clearing an already-clear bit is a no-op. */
 void frame_free(uint64_t phys);
 
+/* Allocate `n` contiguous frames (n >= 1); returns the physical base
+ * address, or 0 on failure/exhaustion.  First-fit from the rotating
+ * hint; used for multi-frame kernel structures (region-array growth,
+ * contiguous table runs) and by the loader for multi-page images.
+ * The whole search + mark happens under one frame_lock hold. */
+uint64_t frame_alloc_contig(int n);
+
 int frame_total_count(void);
 int frame_free_count(void);
 int frame_used_count(void);

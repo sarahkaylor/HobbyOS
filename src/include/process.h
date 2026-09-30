@@ -100,6 +100,10 @@
 
 #define MAX_OPEN_FDS 32 // Increased per user request
 
+/* P2.2: the address-space object (src/include/vm.h) — only ever a pointer
+   here, so the kernel headers don't grow a hard include chain. */
+struct addr_space;
+
 /* SYS_GETARGV blob limits (see struct process.eargv). */
 #define HO_EXEC_MAX_ARGS 32
 #define HO_EXEC_ARGV_LEN 256
@@ -220,6 +224,14 @@ struct process {
   uint64_t tls_base;     /**< opaque TLS register value (TPIDR_EL0 / IA32_FS_BASE) */
   uint64_t futex_uaddr;  /**< P1.2: non-zero while parked in FUTEX WAIT */
   uint64_t thread_ret;   /**< SYS_THREAD_EXIT argument (diagnostics only) */
+
+  /* --- P2 (docs/browser/p2-vm-design.md section 1.3): address space ---- *
+   * NULL for AS_V1 processes (kernel tasks, every program through S4's
+   * loader default): user_phys_base/phys_block_idx remain the truth for
+   * those.  v2 processes (loader v2 opt-in from S2, MMTEST) point at
+   * their group-charged addr_space; the mmap/mprotect/fault paths are
+   * v2-only.  Appended at the END so parallel lanes merge additively. */
+  struct addr_space *as; /**< P2.2: AS_V2 address space, else NULL */
 };
 
 // Initialize the process subsystem and zero out the process table.
@@ -229,6 +241,15 @@ void process_init(void);
 // Returns the new PID or -1 on failure.
 int process_create(void);
 int process_create_nowait(void);
+
+/* P2.2 (S2): create an AS_V2 process slot (no 32 MiB block, no eager
+ * zeroing; the caller populates the AS through the v2 loader).  Returns
+ * the pid or -1 when no slot / no address space is available. */
+int process_create_v2(void);
+
+/* P2.2 (S2): which slot currently claims `cpu` (-1 = none); the x64
+ * shootdown send path scans it (design section 7.2). */
+int current_pid_of_cpu(uint32_t cpu);
 
 // Number of free physical blocks (advisory; see program_loader.c's
 // boot-wave headroom reserve).
