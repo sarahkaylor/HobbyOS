@@ -122,6 +122,13 @@ void process_init(void) {
     proc_table[i].user_phys_base = 0;
     proc_table[i].num_open_fds = 0;
     proc_table[i].wake_ms = 0;
+    /* P1: group/thread/futex state (design section 1). */
+    proc_table[i].tgid = i;
+    proc_table[i].is_thread = 0;
+    proc_table[i].live_threads = 0;
+    proc_table[i].tls_base = 0;
+    proc_table[i].futex_uaddr = 0;
+    proc_table[i].thread_ret = 0;
     for (int j = 0; j < MAX_OPEN_FDS; j++) {
       proc_table[i].open_fds[j] = -1;
     }
@@ -245,6 +252,164 @@ static int process_still_running(int pid) {
   return 0;
 }
 
+/* ---------------------------------------------------------------------------
+ * P1 (docs/browser/p1-threads-design.md sections 1/3/5/6): threads & groups.
+ * A thread IS a PCB slot sharing its leader's address space; the leader PCB
+ * is the group anchor and owns all shared state.
+ * ------------------------------------------------------------------------- */
+
+/* Shared-state routing (D7): map any member to its group anchor; a leader
+ * (or plain process) maps to itself; NULL passes through so existing null
+ * checks keep their meaning. */
+struct process *process_group(struct process *p) {
+  if (!p)
+    return p;
+  if (p->is_thread && p->tgid > 0 && p->tgid < MAX_PROCESSES)
+    return &proc_table[p->tgid];
+  return p;
+}
+
+/* TLS register access (design section 4).  mrs/msr tpidr_el0 and rdmsr/wrmsr
+ * are legal under -mgeneral-regs-only (design section 0).  IA32_FS_BASE is
+ * MSR 0xC0000100. */
+static uint64_t tls_read_live(void) {
+#ifdef __x86_64__
+  uint32_t lo, hi;
+  __asm__ volatile("rdmsr" : "=a"(lo), "=d"(hi) : "c"(0xC0000100));
+  return ((uint64_t)hi << 32) | (uint64_t)lo;
+#else
+  uint64_t v;
+  __asm__ volatile("mrs %0, tpidr_el0" : "=r"(v));
+  return v;
+#endif
+}
+
+static void tls_write_live(uint64_t v) {
+#ifdef __x86_64__
+  __asm__ volatile("wrmsr" : : "a"((uint32_t)v), "d"((uint32_t)(v >> 32)),
+                   "c"(0xC0000100));
+#else
+  __asm__ volatile("msr tpidr_el0, %0" : : "r"(v));
+#endif
+}
+
+/* True while any OTHER dead member of `grp` is still claimed by a CPU.  The
+ * exit_group wait is tick-granular (design section 1): each RUNNING member is
+ * preempted once by its own timer tick; parked members hold no claim and are
+ * gone already. */
+static int group_claims_pending(struct process *grp, struct process *self) {
+  int pending = 0;
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *m = &proc_table[i];
+    if (m == self || m->tgid != grp->pid || m->state != PROC_STATE_THREAD_DONE)
+      continue;
+    if (process_still_running(m->pid)) {
+      pending = 1;
+      break;
+    }
+  }
+  spinlock_release_irqrestore(&proc_lock, flags);
+  return pending;
+}
+
+/* Group teardown (design section 1): release the shared resources exactly
+ * once -- close the group fd table, free the physical block, turn the anchor
+ * into a reapable zombie (EXITED; straight to FREE when a parent was already
+ * waiting) and deliver the waitpid result.  Runs on the last member's
+ * context after the claim wait.  The phys_block_idx >= 0 -> -1 transition is
+ * the exactly-once token: a racing member that also reaches here returns
+ * immediately. */
+static void group_teardown(struct process *grp, uint64_t code) {
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  int block = grp->phys_block_idx;
+  if (block < 0) {
+    spinlock_release_irqrestore(&proc_lock, flags);
+    return;
+  }
+  grp->phys_block_idx = -1;
+  spinlock_release_irqrestore(&proc_lock, flags);
+
+  /* Close the group's descriptors once.  file_close() re-checks each slot
+     under its own file lock, so even a racing path stays consistent. */
+  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+    if (grp->open_fds[i] != -1)
+      file_close(grp, i);
+  }
+
+  flags = spinlock_acquire_irqsave(&proc_lock);
+  phys_blocks_used[block] = 0;
+  grp->state = PROC_STATE_EXITED;
+  grp->thread_ret = code;
+  grp->exit_status = ((int)code & 0xff) << 8;
+
+  /* Reap orphaned children: any EXITED child whose parent (this group) just
+     died will never be waitpid()ed, so free its slot. */
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *ch = &proc_table[i];
+    if (!ch->is_thread && ch->parent_pid == grp->pid &&
+        ch->state == PROC_STATE_EXITED) {
+      ch->state = PROC_STATE_FREE;
+      ch->exit_status = 0;
+    }
+  }
+
+  /* Wake a parent blocked in waitpid() and deliver the reap result.  The
+     parent's saved context still holds the syscall args (context[0] = the
+     requested pid, context[1] = the status pointer), so a pid-specific wait
+     is matched and the user status is filled in place -- through the
+     PARENT'S physical region (this runs on the dying group's context, so a
+     user-virtual write would land in the wrong block). */
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *parent = &proc_table[i];
+    if (parent->state != PROC_STATE_WAIT_CHILD ||
+        process_group(parent)->pid != grp->parent_pid)
+      continue;
+    int want = (int)parent->context[0];
+    if (want > 0 && want != grp->pid)
+      continue;
+    parent->context[0] = grp->pid;         /* waitpid return value */
+    int *stp = (int *)parent->context[1];  /* saved arg1: status ptr */
+    if (stp && (uint64_t)stp >= USER_VIRT_BASE) {
+      uint64_t off = (uint64_t)stp - USER_VIRT_BASE;
+      if (off + 4 <= USER_REGION_SIZE && parent->user_phys_base) {
+        *(int *)(parent->user_phys_base + off) = grp->exit_status;
+      }
+    }
+    parent->state = PROC_STATE_READY;
+    /* Deliver the reap: the anchor's PCB slot is now reusable. */
+    grp->state = PROC_STATE_FREE;
+    grp->exit_status = 0;
+  }
+  spinlock_release_irqrestore(&proc_lock, flags);
+}
+
+/* SYS_THREAD_CREATE slot search (design section 1): a FREE slot, else a
+ * THREAD_DONE slot under the reclamation gate -- reusable only when
+ * !process_still_running; a leader tombstone additionally requires every
+ * member dead.  Caller holds proc_lock.  Returns a slot index or -1. */
+static int thread_alloc_slot_locked(void) {
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    if (proc_table[i].state == PROC_STATE_FREE)
+      return i;
+  }
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    struct process *q = &proc_table[i];
+    if (q->state != PROC_STATE_THREAD_DONE || process_still_running(i))
+      continue;
+    if (!q->is_thread && q->live_threads != 0)
+      continue;
+    if (!q->is_thread && q->phys_block_idx >= 0) {
+      /* Defensive: a leader tombstone must not leak its block. */
+      phys_blocks_used[q->phys_block_idx] = 0;
+      q->phys_block_idx = -1;
+    }
+    q->state = PROC_STATE_FREE;
+    return i;
+  }
+  return -1;
+}
+
 /* Number of free physical blocks.  Advisory: used by the boot-wave
  * loader to keep headroom for child processes (see program_loader.c). */
 int phys_block_free_count(void) {
@@ -332,6 +497,23 @@ static int process_create_internal(void) {
       pid = i;
       proc_table[i].state = PROC_STATE_ALLOCATED;
     }
+    /* P1 (design section 1): THREAD_DONE slots are reusable only once the
+       thread is off every CPU; a leader's slot additionally requires every
+       group member dead (live_threads == 0). */
+    for (int i = 1; i < MAX_PROCESSES && pid < 0; i++) {
+      struct process *q = &proc_table[i];
+      if (q->state != PROC_STATE_THREAD_DONE || process_still_running(i))
+        continue;
+      if (!q->is_thread && q->live_threads != 0)
+        continue;
+      if (!q->is_thread && q->phys_block_idx >= 0) {
+        phys_blocks_used[q->phys_block_idx] = 0;
+        q->phys_block_idx = -1;
+      }
+      q->state = PROC_STATE_FREE;
+      pid = i;
+      proc_table[i].state = PROC_STATE_ALLOCATED;
+    }
     if (pid < 0) {
       spinlock_release_irqrestore(&proc_lock, p_flags);
       uart_puts("[KERNEL] process_create: no free process slots!\n");
@@ -405,6 +587,13 @@ static int process_create_internal(void) {
   p->num_open_fds = 0;
   p->wake_ms = 0;
   p->spawn_retval = -1;
+  /* P1 (design section 1): a fresh process is its own group's only member. */
+  p->tgid = pid;
+  p->is_thread = 0;
+  p->live_threads = 1;
+  p->tls_base = 0;
+  p->futex_uaddr = 0;
+  p->thread_ret = 0;
   p->heap_brk = USER_HEAP_BASE;
   p->anon_map_count = 0;
   for (int i = 0; i < USER_ANON_MAX_REGS; i++) {
@@ -455,6 +644,7 @@ static int process_create_kernel_internal(void (*entry)(void*), void *arg) {
 
   struct process *p = &proc_table[pid];
   p->is_kernel_process = 1;
+  p->live_threads = 0; /* P1: kernel tasks have no group ("0 elsewhere") */
 
   // Set up EL1t execution context
   p->context[31] = (uint64_t)entry;        // ELR (entry point)
@@ -566,6 +756,9 @@ void save_context(struct process *p, struct trap_frame *tf) {
      one deliberately SIMD-capable TU, src/kernel/arch/arm/fpu.s. */
   fpu_save(p->fpu_state);
 #endif
+  /* P1 (design section 4): the TLS register joins the switch as one per-PCB
+     word -- read the live value here, write it back in restore_context(). */
+  p->tls_base = tls_read_live();
 }
 
 void wd_dump_proc_table(void) {
@@ -654,6 +847,9 @@ static void restore_context(struct process *p, struct trap_frame *tf) {
      when the process runs again. */
   fpu_restore(p->fpu_state);
 #endif
+  /* P1 (design section 4): install the target's TLS register.  Kernel tasks
+     keep tls_base = 0. */
+  tls_write_live(p->tls_base);
 }
 
 static void process_check_sleeping(void) {
@@ -664,6 +860,17 @@ static void process_check_sleeping(void) {
         proc_table[i].state = PROC_STATE_READY;
         proc_table[i].wake_ms = 0;
       }
+    }
+    /* P1.2 (design section 5): FUTEX waiters time out at the tick.  The
+       resume value rides the parked context (context[0], the waitpid
+       pattern): -ETIMEDOUT.  A wake/timeout race goes to whoever holds
+       proc_lock first. */
+    if (proc_table[i].state == PROC_STATE_FUTEX && proc_table[i].wake_ms > 0 &&
+        current_time >= proc_table[i].wake_ms) {
+      proc_table[i].context[0] = (uint64_t)(int64_t)-ETIMEDOUT;
+      proc_table[i].futex_uaddr = 0;
+      proc_table[i].wake_ms = 0;
+      proc_table[i].state = PROC_STATE_READY;
     }
   }
 }
@@ -725,7 +932,8 @@ void schedule(struct trap_frame *tf, int is_yield) {
            validation failures). */
         save_context(cur, tf);
       } else if (cur->state == PROC_STATE_BLOCKED || cur->state == PROC_STATE_WAIT_SPAWN
-                 || cur->state == PROC_STATE_WAIT_CHILD) {
+                 || cur->state == PROC_STATE_WAIT_CHILD
+                 || cur->state == PROC_STATE_FUTEX) {
         save_context(cur, tf);
       }
     }
@@ -787,7 +995,8 @@ void schedule(struct trap_frame *tf, int is_yield) {
     for (int i = 0; i < MAX_PROCESSES; i++) {
       if (proc_table[i].state != PROC_STATE_FREE &&
           proc_table[i].state != PROC_STATE_EXITED &&
-          proc_table[i].state != PROC_STATE_ALLOCATED) {
+          proc_table[i].state != PROC_STATE_ALLOCATED &&
+          proc_table[i].state != PROC_STATE_THREAD_DONE) {
         any_alive = 1;
         break;
       }
@@ -857,75 +1066,79 @@ void process_exit(struct trap_frame *tf) {
 
   uart_puts(buf);
 
-  // Record the exit status in waitpid() layout BEFORE the process becomes
-  // unreachable: SYS_EXIT passes the raw code in regs[0], so a normal
-  // exit(42) is delivered to the parent as (42 << 8).  The status lives
-  // in the PCB, which stays in PROC_STATE_EXITED until the parent reaps.
   int code = (int)tf->regs[0];
+
+  if (cur->is_kernel_process) {
+    /* Kernel tasks keep the legacy path: FREE + block release, no groups. */
+    uint64_t kflags = spinlock_acquire_irqsave(&proc_lock);
+    cur->state = PROC_STATE_FREE;
+    if (cur->phys_block_idx >= 0) {
+      phys_blocks_used[cur->phys_block_idx] = 0;
+      cur->phys_block_idx = -1;
+    }
+    spinlock_release_irqrestore(&proc_lock, kflags);
+    schedule(tf, 0);
+    return;
+  }
+
+  struct process *grp = process_group(cur);
+  /* Record the exit status in waitpid() layout BEFORE the group becomes
+     unreachable: SYS_EXIT passes the raw code in regs[0], so a normal
+     exit(42) is delivered to the parent as (42 << 8).  The status lives on
+     the anchor PCB, which stays in PROC_STATE_EXITED until the parent
+     reaps. */
+  cur->thread_ret = (uint64_t)code;
   cur->exit_status = (code & 0xff) << 8;
 
-  // Close all open file descriptors
-  for (int i = 0; i < MAX_OPEN_FDS; i++) {
-    if (cur->open_fds[i] != -1) {
-      file_close(cur, i);
-    }
-  }
-
+  /* P1 (design section 1): SYS_EXIT keeps exit_group meaning from ANY
+     thread.  Mark every other live member THREAD_DONE (clear their
+     futex/select records), then wait -- tick-granular and bounded -- for
+     their CPU claims to drain: each RUNNING member is preempted once by its
+     own tick, parked members hold no claim and die at once.  [Wedged
+     siblings: OQ3 -- bounded wait; the existing watchdogs/LOSTWAKE
+     machinery stays the safety net.] */
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-  if (cur->is_kernel_process) {
-    cur->state = PROC_STATE_FREE;
-  } else {
-    cur->state = PROC_STATE_EXITED;
-  }
-  if (cur->phys_block_idx >= 0) {
-    phys_blocks_used[cur->phys_block_idx] = 0;
-    cur->phys_block_idx = -1;
-  }
-
-  /* Reap orphaned children: any EXITED child whose parent just died will
-     never be waitpid()ed (its parent is gone), so its PCB slot leaks
-     forever and eventually fills the process table ("Failed to create
-     process").  Free those slots here, like init reaping zombies. */
   for (int i = 0; i < MAX_PROCESSES; i++) {
-    struct process *ch = &proc_table[i];
-    if (ch->parent_pid == cur->pid && ch->state == PROC_STATE_EXITED) {
-      ch->state = PROC_STATE_FREE;
-      ch->exit_status = 0;
-    }
-  }
-
-  // Wake a parent blocked in waitpid() and deliver the reap result.  The
-  // parent's saved context still holds the syscall args (context[0] = the
-  // requested pid, context[1] = the status pointer), so we can match a
-  // pid-specific wait and fill the user status in place, exactly like the
-  // spawn worker fills context[0] with the child pid.
-  for (int i = 0; i < MAX_PROCESSES; i++) {
-    struct process *parent = &proc_table[i];
-    if (parent->state != PROC_STATE_WAIT_CHILD ||
-        parent->pid != cur->parent_pid)
+    struct process *m = &proc_table[i];
+    if (m == cur || m->state == PROC_STATE_FREE ||
+        m->state == PROC_STATE_EXITED || m->state == PROC_STATE_THREAD_DONE)
       continue;
-    int want = (int)parent->context[0];
-    if (want > 0 && want != cur->pid)
-      continue; /* waiting on a different child */
-    parent->context[0] = cur->pid;         /* waitpid return value */
-    int *stp = (int *)parent->context[1];  /* saved arg1: status ptr */
-    /* Write the status through the PARENT'S physical region: this code
-       runs on the exiting CHILD's context (its user mapping is active),
-       so a user-virtual write would land in the child's freed memory.
-       The kernel addresses user memory by phys base (the loader does the
-       same), so translate VMA -> parent's phys. */
-    if (stp && (uint64_t)stp >= USER_VIRT_BASE) {
-      uint64_t off = (uint64_t)stp - USER_VIRT_BASE;
-      if (off + 4 <= USER_REGION_SIZE && parent->user_phys_base) {
-        *(int *)(parent->user_phys_base + off) = cur->exit_status;
-      }
-    }
-    parent->state = PROC_STATE_READY;
-    /* Deliver the reap: this child's PCB slot is now reusable. */
-    cur->state = PROC_STATE_FREE;
-    cur->exit_status = 0;
+    if (m->tgid != grp->pid)
+      continue;
+    m->state = PROC_STATE_THREAD_DONE;
+    m->futex_uaddr = 0;
+    m->wake_ms = 0;
+    file_select_forget(m->pid);
   }
+  grp->live_threads = 0; /* this caller included: the whole group is dead */
   spinlock_release_irqrestore(&proc_lock, flags);
+
+  for (int waited = 0; group_claims_pending(grp, cur);) {
+    if (++waited > 32) {
+      uart_puts("[THREADS] exit_group claim drain timeout, group ");
+      print_int(grp->pid);
+      uart_puts("\n");
+      break;
+    }
+    safe_wfi();
+  }
+
+  group_teardown(grp, (uint64_t)code);
+
+  /* The caller is dead but must NOT free its own slot while still running
+     (a concurrent process_create could re-init a PCB whose context
+     save_context may still write -- the hazard process_exit avoids with
+     EXITED).  If it is not the anchor, it becomes a THREAD_DONE tombstone;
+     the anchor's final state was set by the teardown. */
+  if (cur != grp) {
+    uint64_t dflags = spinlock_acquire_irqsave(&proc_lock);
+    cur->futex_uaddr = 0;
+    cur->wake_ms = 0;
+    if (cur->state != PROC_STATE_THREAD_DONE && cur->state != PROC_STATE_FREE &&
+        cur->state != PROC_STATE_EXITED)
+      cur->state = PROC_STATE_THREAD_DONE;
+    spinlock_release_irqrestore(&proc_lock, dflags);
+  }
 
   schedule(tf, 0);
 }
@@ -968,9 +1181,31 @@ int process_kill(int pid) {
     return -1;
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   struct process *p = &proc_table[pid];
-  if (p->state == PROC_STATE_FREE || p->state == PROC_STATE_EXITED) {
+  if (p->state == PROC_STATE_FREE || p->state == PROC_STATE_EXITED ||
+      p->state == PROC_STATE_THREAD_DONE) {
     spinlock_release_irqrestore(&proc_lock, flags);
     return -1;
+  }
+  if (p->is_thread) {
+    /* P1 (design section 1): kill(thread) ends JUST that thread.  No fd
+       close -- the fd table is the group's.  If it was the last member the
+       group teardown runs here; unlike the exit paths there is no claim
+       wait (kill must not block on its target, and a THREAD_DONE target is
+       never saved again -- OQ3's accepted class). */
+    struct process *grp = process_group(p);
+    p->state = PROC_STATE_THREAD_DONE;
+    p->futex_uaddr = 0;
+    p->wake_ms = 0;
+    file_select_forget(p->pid);
+    if (grp->live_threads > 0)
+      grp->live_threads--;
+    int last = (grp->live_threads == 0);
+    uint64_t tret = p->thread_ret;
+    spinlock_release_irqrestore(&proc_lock, flags);
+    if (last)
+      group_teardown(grp, tret);
+    process_wake_all();
+    return 0;
   }
   p->state = PROC_STATE_EXITED;
   /* Deliver the terminating-signal status (low byte) so a waiting
@@ -980,6 +1215,20 @@ int process_kill(int pid) {
     phys_blocks_used[p->phys_block_idx] = 0;
     p->phys_block_idx = -1;
   }
+  /* P1: killing a group leader kills the whole group. */
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *m = &proc_table[i];
+    if (m == p || m->tgid != p->pid)
+      continue;
+    if (m->state == PROC_STATE_FREE || m->state == PROC_STATE_EXITED ||
+        m->state == PROC_STATE_THREAD_DONE)
+      continue;
+    m->state = PROC_STATE_THREAD_DONE;
+    m->futex_uaddr = 0;
+    m->wake_ms = 0;
+    file_select_forget(m->pid);
+  }
+  p->live_threads = 0;
   spinlock_release_irqrestore(&proc_lock, flags);
 
   // We close the global file descriptors directly to properly free resources
@@ -1022,12 +1271,17 @@ int process_waitpid(struct trap_frame *tf) {
   if (!caller)
     return -EINVAL;
 
+  /* P1 (D7): children are parented to the group ANCHOR, so match against
+     the caller's group pid -- a thread blocked in waitpid() must see the
+     group's children. */
+  struct process *grp = process_group(caller);
+
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   for (int i = 0; i < MAX_PROCESSES; i++) {
     struct process *p = &proc_table[i];
-    if (p->state != PROC_STATE_EXITED)
+    if (p->state != PROC_STATE_EXITED || p->is_thread)
       continue;
-    if (p->parent_pid != caller->pid)
+    if (p->parent_pid != grp->pid)
       continue;
     if (want_pid > 0 && p->pid != want_pid)
       continue;
@@ -1052,7 +1306,8 @@ int process_waitpid(struct trap_frame *tf) {
   int has_child = 0;
   for (int i = 0; i < MAX_PROCESSES; i++) {
     struct process *p = &proc_table[i];
-    if (p->state != PROC_STATE_FREE && p->parent_pid == caller->pid) {
+    if (p->state != PROC_STATE_FREE && !p->is_thread &&
+        p->parent_pid == grp->pid) {
       has_child = 1;
       break;
     }
@@ -1110,25 +1365,32 @@ int process_fork(struct trap_frame *tf) {
   if (!parent)
     return -1;
 
+  /* P1 (OQ5, binding): the child is a single-threaded copy of the CALLER.
+     A fork from a secondary thread copies the shared group block (identical
+     for every member) and keeps the caller's TLS register value, but heap
+     past the copied window and other threads' TLS blocks are NOT carried:
+     children exec or use leader TLS.  atfork is deferred (P2+). */
+  struct process *group = process_group(parent);
+
   int child_pid = process_create();
   if (child_pid < 0)
     return -1;
 
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   struct process *child = &proc_table[child_pid];
-  child->parent_pid = parent->pid;
+  child->parent_pid = group->pid;
 
   for (int i = 0; i < 32; i++) {
     child->name[i] = parent->name[i];
   }
   for (int i = 0; i < 128; i++) {
-    child->cwd[i] = parent->cwd[i];
+    child->cwd[i] = group->cwd[i];
   }
 
-  kmemcpy((void *)child->user_phys_base, (void *)parent->user_phys_base,
+  kmemcpy((void *)child->user_phys_base, (void *)group->user_phys_base,
           USER_INITIAL_CLEAR_SIZE);
   kmemcpy((void *)(child->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
-          (void *)(parent->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
+          (void *)(group->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
           USER_STACK_CLEAR_SIZE);
   save_context(child, tf);
   child->context[0] = 0; // x0 = 0 for child
@@ -1141,9 +1403,9 @@ int process_fork(struct trap_frame *tf) {
   child->context[33] = arch_get_user_sp();
 #endif
 
-  child->num_open_fds = parent->num_open_fds;
+  child->num_open_fds = group->num_open_fds;
   for (int i = 0; i < MAX_OPEN_FDS; i++) {
-    child->open_fds[i] = parent->open_fds[i];
+    child->open_fds[i] = group->open_fds[i];
     if (child->open_fds[i] != -1) {
       fs_reopen(child->open_fds[i]);
     }
@@ -1151,13 +1413,13 @@ int process_fork(struct trap_frame *tf) {
 
   /* Child inherits the parent's heap top and anonymous mappings (like the
      data segment: fork shares the address-space layout, exec re-sets it). */
-  child->heap_brk = parent->heap_brk;
-  child->anon_map_count = parent->anon_map_count;
+  child->heap_brk = group->heap_brk;
+  child->anon_map_count = group->anon_map_count;
   if (child->anon_map_count > USER_ANON_MAX_REGS)
     child->anon_map_count = USER_ANON_MAX_REGS;
   for (int i = 0; i < child->anon_map_count; i++) {
-    child->anon_maps[i].addr = parent->anon_maps[i].addr;
-    child->anon_maps[i].len = parent->anon_maps[i].len;
+    child->anon_maps[i].addr = group->anon_maps[i].addr;
+    child->anon_maps[i].len = group->anon_maps[i].len;
   }
 
   child->state = PROC_STATE_READY;
@@ -1466,7 +1728,7 @@ int process_get_info_list(struct sys_procinfo* list, int max_procs) {
   int count = 0;
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   for (int i = 0; i < MAX_PROCESSES && count < max_procs; i++) {
-    if (proc_table[i].state != PROC_STATE_FREE) {
+    if (proc_table[i].state != PROC_STATE_FREE && !proc_table[i].is_thread) {
       list[count].pid = proc_table[i].pid;
       list[count].parent_pid = proc_table[i].parent_pid;
       list[count].state = proc_table[i].state;
@@ -1516,6 +1778,7 @@ int64_t sys_brk(uint64_t addr) {
   struct process *cur = current_process();
   if (!cur)
     return -EINVAL;
+  cur = process_group(cur); /* P1 (D7): the heap break is group state */
 
   if (addr == 0)
     return (int64_t)cur->heap_brk;
@@ -1534,6 +1797,7 @@ int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags) {
   struct process *cur = current_process();
   if (!cur)
     return -EINVAL;
+  cur = process_group(cur); /* P1 (D7): anon maps are group state */
   if (len == 0)
     return -EINVAL;
   /* Only anonymous private mappings are supported so far.  The flag
@@ -1595,6 +1859,7 @@ int sys_munmap(uint64_t addr, uint64_t len) {
   struct process *cur = current_process();
   if (!cur)
     return -EINVAL;
+  cur = process_group(cur); /* P1 (D7): anon maps are group state */
   if (addr < USER_MMAP_BASE || addr >= USER_MMAP_LIMIT)
     return -EINVAL;
 
@@ -1611,4 +1876,257 @@ int sys_munmap(uint64_t addr, uint64_t len) {
   }
   spinlock_release_irqrestore(&proc_lock, flags_local);
   return -EINVAL;
+}
+
+/* ---------------------------------------------------------------------------
+ * P1 syscalls 72-75 (dispatch in arch/{arm,x64}/trap.c; never a table).
+ * ------------------------------------------------------------------------- */
+
+/* SYS_THREAD_CREATE (72) (design sections 1/2): allocate ONLY a PCB slot --
+ * the thread shares the caller's address space (same user_phys_base and
+ * user_l2_table), so there is no physical block, no image copy, no zeroing.
+ * No per-thread kernel stack either: user threads trap onto the per-CPU
+ * kernel stacks (design section 1). */
+int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
+                          uint64_t stack, uint64_t flags) {
+  if (!caller || caller->is_kernel_process)
+    return -EINVAL;
+  if (flags != 0)
+    return -EINVAL;
+  /* entry and [stack-16, stack) inside the caller's own region; stack
+     16-aligned (both ABIs enter with a 16-aligned SP). */
+  if (entry < USER_VIRT_BASE || entry >= USER_VIRT_BASE + USER_REGION_SIZE)
+    return -EINVAL;
+  if (stack < USER_VIRT_BASE + 16 ||
+      stack > USER_VIRT_BASE + USER_REGION_SIZE)
+    return -EINVAL;
+  if (stack & 15)
+    return -EINVAL;
+
+  struct process *grp = process_group(caller);
+
+  uint64_t p_flags = spinlock_acquire_irqsave(&proc_lock);
+  /* A group under teardown (anchor gone, block released) takes no new
+     threads. */
+  if (grp->phys_block_idx < 0 || grp->state == PROC_STATE_FREE ||
+      grp->state == PROC_STATE_EXITED ||
+      grp->state == PROC_STATE_THREAD_DONE) {
+    spinlock_release_irqrestore(&proc_lock, p_flags);
+    return -EINVAL;
+  }
+  int pid = thread_alloc_slot_locked();
+  if (pid < 0) {
+    spinlock_release_irqrestore(&proc_lock, p_flags);
+    return -EAGAIN;
+  }
+  struct process *t = &proc_table[pid];
+  t->state = PROC_STATE_ALLOCATED;
+  t->tgid = grp->pid;
+  t->is_thread = 1;
+  t->live_threads = 0; /* "0 elsewhere" (design section 1) */
+  t->parent_pid = -1;  /* threads are never waitpid()ed */
+  grp->live_threads++;
+  spinlock_release_irqrestore(&proc_lock, p_flags);
+
+  t->is_kernel_process = 0;
+  for (int i = 0; i < 32; i++)
+    t->name[i] = 0;
+  for (int i = 0; i < 31 && grp->name[i]; i++)
+    t->name[i] = grp->name[i];
+  for (int i = 0; i < 256; i++)
+    t->args[i] = 0;
+  t->eargc = 0;
+  t->eargv[0] = 0;
+  /* Group-shared values, mirrored read-only for diagnostics: authoritative
+     copies stay on the anchor and every writer routes through
+     process_group().  open_fds[] is deliberately NOT mirrored (kept all
+     -1): a missed call site then fails closed with EBADF instead of
+     double-closing the group's table. */
+  for (int i = 0; i < 128; i++)
+    t->cwd[i] = grp->cwd[i];
+  t->heap_brk = grp->heap_brk;
+  t->user_phys_base = grp->user_phys_base;
+  t->user_l2_table = grp->user_l2_table;
+  t->phys_block_idx = -1; /* threads never own a block */
+  t->num_open_fds = 0;
+  for (int i = 0; i < MAX_OPEN_FDS; i++)
+    t->open_fds[i] = -1;
+  t->wake_ms = 0;
+  t->futex_uaddr = 0;
+  t->spawn_retval = -1;
+  t->anon_map_count = 0;
+  for (int i = 0; i < USER_ANON_MAX_REGS; i++) {
+    t->anon_maps[i].addr = 0;
+    t->anon_maps[i].len = 0;
+  }
+  t->exit_status = 0;
+  t->thread_ret = 0;
+  for (int i = 0; i < 36; i++)
+    t->context[i] = 0;
+  /* Fresh FP state at create (F1.5 per-thread contract): never the
+     creator's -- a recycled slot must not leak a dead thread's x87/SSE or
+     FPSIMD file. */
+#ifdef __x86_64__
+  arch_fpu_reset(t);
+#else
+  for (int i = 0; i < 66; i++)
+    t->fpu_state[i] = 0;
+#endif
+  /* Placeholder TLS (design section 1): the creator's live value until the
+     trampoline's SYS_SET_TLS installs the thread's own image -- never a
+     fault either way. */
+  t->tls_base = tls_read_live();
+
+  /* Fresh user context: entry(arg) on this thread's stack. */
+  t->context[31] = entry;
+#ifdef __x86_64__
+  t->context[5] = arg; /* rdi */
+#else
+  t->context[0] = arg; /* x0 */
+#endif
+  t->context[33] = stack;
+  t->context[32] = 0; /* SPSR=EL0t / RFLAGS as a fresh user */
+  t->context[34] = 0; /* x64: classify fresh -> user selectors on resume */
+  t->context[35] = 0;
+  t->state = PROC_STATE_READY;
+
+  return pid;
+}
+
+/* SYS_SET_TLS (75) (design sections 2/4): validate `tls` inside the caller's
+ * region, store it in the calling PCB AND the live register (a save before
+ * the next switch sees it).  Used once by crt0 and by every thread
+ * trampoline. */
+int process_set_tls(struct process *caller, uint64_t tls) {
+  if (!caller || caller->is_kernel_process)
+    return -EINVAL;
+  if (tls < USER_VIRT_BASE || tls >= USER_VIRT_BASE + USER_REGION_SIZE)
+    return -EINVAL;
+  caller->tls_base = tls;
+  tls_write_live(tls);
+  return 0;
+}
+
+/* SYS_THREAD_EXIT (74) (design sections 1/2): exit only the calling thread.
+ * retval is recorded in the PCB for diagnostics (the authoritative value
+ * travels via the user TCB); when the LAST member leaves, the full group
+ * exit runs.  Never returns to the caller. */
+void process_thread_exit(struct trap_frame *tf, uint64_t retval) {
+  struct process *cur = current_process();
+  if (!cur)
+    return;
+  if (cur->is_kernel_process) {
+    kernel_exit();
+    return;
+  }
+  struct process *grp = process_group(cur);
+  cur->thread_ret = retval;
+  cur->exit_status = ((int)retval & 0xff) << 8;
+
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  cur->futex_uaddr = 0;
+  cur->wake_ms = 0;
+  if (grp->live_threads > 0)
+    grp->live_threads--;
+  int last = (grp->live_threads == 0);
+  /* Keep the caller schedulable until the teardown (if any) is done: a
+     timer tick preempting this path must be able to save and later resume
+     it (a THREAD_DONE state would abandon the exit path mid-teardown). */
+  if (!last)
+    cur->state = PROC_STATE_THREAD_DONE;
+  spinlock_release_irqrestore(&proc_lock, flags);
+
+  if (last) {
+    for (int waited = 0; group_claims_pending(grp, cur);) {
+      if (++waited > 32)
+        break;
+      safe_wfi();
+    }
+    group_teardown(grp, retval);
+    if (cur != grp) {
+      uint64_t dflags = spinlock_acquire_irqsave(&proc_lock);
+      if (cur->state != PROC_STATE_FREE && cur->state != PROC_STATE_EXITED)
+        cur->state = PROC_STATE_THREAD_DONE;
+      spinlock_release_irqrestore(&proc_lock, dflags);
+    }
+  }
+
+  /* THREAD_DONE / EXITED / FREE all fall outside schedule()'s save set, so
+     nothing writes this PCB again. */
+  schedule(tf, 0);
+}
+
+/* SYS_FUTEX (73) (design section 5): futex-lite WAIT (op 0) / WAKE (op 1),
+ * Linux op numbering; other ops -ENOSYS.  Process-private (match includes
+ * tgid).  The WAIT compare is the kernel's only user-word read: 4-byte
+ * aligned, in-region, and loaded through the caller's PHYSICAL translation
+ * of its region -- the same bytes its live per-CPU mapping carries, without
+ * depending on which mapping is currently active on this CPU. */
+int process_futex(struct process *caller, struct trap_frame *tf, uint64_t uaddr,
+                  int op, int64_t val, int64_t timeout_ms) {
+  if (!caller)
+    return -EINVAL;
+  struct process *grp = process_group(caller);
+  /* (1) validate: 4-byte aligned, [uaddr, uaddr+4) inside the caller's own
+     region (misaligned -> -EINVAL, outside -> -EFAULT). */
+  if (uaddr & 3)
+    return -EINVAL;
+  if (uaddr < USER_VIRT_BASE || uaddr + 4 > USER_VIRT_BASE + USER_REGION_SIZE)
+    return -EFAULT;
+  if (!grp->user_phys_base)
+    return -EFAULT;
+
+  if (op == 0) {
+    volatile uint32_t *word =
+      (volatile uint32_t *)(grp->user_phys_base + (uaddr - USER_VIRT_BASE));
+    uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    /* (2) compare under proc_lock: no lost wakeups (see process.h). */
+    uint32_t word_now = *word;
+    if (word_now != (uint32_t)val) {
+      spinlock_release_irqrestore(&proc_lock, flags);
+      return -EAGAIN;
+    }
+    /* (3) match: timeout_ms == 0 -> immediate -ETIMEDOUT (compare-only). */
+    if (timeout_ms == 0) {
+      spinlock_release_irqrestore(&proc_lock, flags);
+      return -ETIMEDOUT;
+    }
+    caller->futex_uaddr = uaddr;
+    caller->wake_ms =
+      (timeout_ms < 0) ? 0 : timer_get_ms() + (uint64_t)timeout_ms;
+    caller->context[0] = 0;   /* resume value: 0 on wake */
+    tf->regs[0] = 0;
+    caller->state = PROC_STATE_FUTEX; /* save-set member: context is saved */
+    spinlock_release_irqrestore(&proc_lock, flags);
+    schedule(tf, 0);
+    /* Not reached: the resume re-enters user space with context[0]. */
+    return 0;
+  }
+
+  if (op == 1) {
+    /* (1) validate as above; val < 0 -> -EINVAL; val == 0 -> 0.  Never
+       dereferences uaddr. */
+    if (val < 0)
+      return -EINVAL;
+    if (val == 0)
+      return 0;
+    /* (2) wake up to `val` matching waiters (INT_MAX = all). */
+    int woke = 0;
+    uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    for (int i = 0; i < MAX_PROCESSES && woke < val; i++) {
+      struct process *m = &proc_table[i];
+      if (m->state != PROC_STATE_FUTEX || m->tgid != grp->pid ||
+          m->futex_uaddr != uaddr)
+        continue;
+      m->futex_uaddr = 0;
+      m->wake_ms = 0;
+      m->context[0] = 0; /* resume value: 0 on wake */
+      m->state = PROC_STATE_READY;
+      woke++;
+    }
+    spinlock_release_irqrestore(&proc_lock, flags);
+    return woke;
+  }
+
+  return -ENOSYS;
 }
