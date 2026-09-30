@@ -101,6 +101,17 @@ endif
 # extension).
 CXX_USER_FLAGS = $(USER_CFLAGS) -std=c++17 -fno-exceptions -fno-rtti -nostdinc++
 
+# P3 (browser.md §6): the vendored libc++ + libc++abi.  Programs that use
+# the standard library compile with the vendored headers (-nostdinc++ keeps
+# every other C++ header out) and link $(OBJ_DIR)/libcxx.a ahead of libc.a.
+LIBCXX_VENDOR = third_party/libcxx-21.1.8
+LIBCXX_ROOT = $(LIBCXX_VENDOR)/src/llvm-project-21.1.8.src
+LIBCXX_INCLUDE = $(LIBCXX_ROOT)/libcxx/include
+# The vendored include dir must precede the sysroot: libc++'s ctype.h/
+# wchar.h/... wrappers are found first and pull the C headers with
+# #include_next (the upstream "C++ headers before C headers" rule).
+CXX_LIBCXX_USER_FLAGS = -I$(LIBCXX_INCLUDE) $(USER_CFLAGS) -std=c++23 -fno-exceptions -fno-rtti -nostdinc++
+
 ifeq ($(MODE),test)
   CFLAGS += -DKERNEL_MODE_TEST
   # Userland sees the same fact: CONSOLE.BIN ships as the boot smoke in
@@ -182,6 +193,8 @@ DNSTST_BIN = $(OBJ_DIR)/dns_test.bin
 # F2.4 (browser.md): minimal C++ runtime acceptance.  CXXSMOKE.BIN is
 # 8.3-safe (8-char base name) and built as C++ per CXX_USER_FLAGS above.
 CXXSMOKE_BIN = $(OBJ_DIR)/cxx_smoke.bin
+# P3 (browser.md §6): libc++ acceptance (8.3-safe).
+CXX_T_BIN = $(OBJ_DIR)/cxx_t.bin
 ERRNO_TEST_BIN = $(OBJ_DIR)/errtest.bin
 # Phase F1 (browser.md): socket/select acceptance + deterministic select
 # checks + SYS_GETRANDOM entropy (see main.c's KERNEL_MODE_TEST wave).
@@ -559,6 +572,27 @@ $(OBJ_DIR)/cxx_smoke.o: src/user/cxx_smoke.cpp $(USER_LIBC) $(USER_HDRS) src/lib
 $(CXXSMOKE_BIN): $(OBJ_DIR)/cxx_smoke.o $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/cxx_smoke.elf $(OBJ_DIR)/cxx_smoke.o $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/cxx_smoke.elf $(CXXSMOKE_BIN)
+
+# --- P3 (browser.md §6): libc++ acceptance -------------------------------
+# cxx_t.cpp uses <vector> <string> <map> <unordered_map> <algorithm>
+# <memory> <atomic> <thread> <mutex> <condition_variable> <chrono>
+# <sstream> from the vendored libc++, threads/mutex/cond from libc.a's
+# pthread.c, and prints "name : PASS" lines per check.
+$(OBJ_DIR)/cxx_t.o: src/user/cxx_t.cpp $(USER_LIBC) $(USER_HDRS) $(LIBCXX_INCLUDE)/vector $(LIBCXX_VENDOR)/sources.txt
+	@mkdir -p $(OBJ_DIR)
+	$(CXX) $(CXX_LIBCXX_USER_FLAGS) -c $< -o $@
+
+$(CXX_T_BIN): $(OBJ_DIR)/cxx_t.o $(OBJ_DIR)/libcxx.a $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/cxx_t.elf $(OBJ_DIR)/cxx_t.o $(OBJ_DIR)/libcxx.a $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/cxx_t.elf $(CXX_T_BIN)
+
+# The vendored libc++ + libc++abi static archive (one per arch).  Built by
+# third_party/libcxx-21.1.8/build-target.sh from sources.txt with the
+# committed __config_site; the extracted upstream tree is fetched by
+# fetch.sh (Skia vendor recipe) and is gitignored.
+$(OBJ_DIR)/libcxx.a: $(LIBCXX_VENDOR)/build-target.sh $(LIBCXX_VENDOR)/sources.txt $(LIBCXX_VENDOR)/config/__config_site
+	@mkdir -p $(OBJ_DIR)
+	bash $(LIBCXX_VENDOR)/build-target.sh --arch $(ARCH) --objdir $(OBJ_DIR)/libcxx --out $@
 
 $(ERRNO_TEST_BIN): $(OBJ_DIR)/user_errno_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/errno_test.elf $^
@@ -1190,7 +1224,7 @@ $(XEYES_BIN): $(OBJ_DIR)/xeyes_main.o $(X11_LIB_OBJS) $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/xeyes.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/xeyes.elf $(XEYES_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(CXX_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -1254,6 +1288,7 @@ endif
 	$(MCOPY) -i disk.img $(CXXSMOKE_BIN) ::/CXXSMOKE.BIN
 	$(MCOPY) -i disk.img $(THRD_T_BIN) ::/THRD_T.BIN
 	$(MCOPY) -i disk.img $(TLS_T_BIN) ::/TLS_T.BIN
+	$(MCOPY) -i disk.img $(CXX_T_BIN) ::/CXX_T.BIN
 	$(MCOPY) -i disk.img $(HELLO_BIN) ::/HELLO.BIN
 	$(MCOPY) -i disk.img $(SH_BIN) ::/SH.BIN
 	$(MCOPY) -i disk.img $(LS_BIN) ::/LS.BIN
