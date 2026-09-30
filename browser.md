@@ -320,6 +320,28 @@ own `Source/ThirdParty/skia/README.WebKit`:
   WPE's Skia `CMakeLists` omits `src/core/SkStrikeRef.cpp` (upstream `gn`
   includes it) — confirm dead-strip harmlessness or apply the one-line patch.
 
+**W1d vendor records (2026-09-30, merged `3b83823`)** — libc++, ICU4C, GLib
+trio (recipe-form per AD-11; full sums + recipes in each `third_party/*/README.md`):
+- libc++ + libc++abi **21.1.8** (LLVM release matching the clang 21 toolchain)
+  — `third_party/libcxx-21.1.8/`: `fetch.sh` + `container.sha256` (`4633a236…`
+  artifact-container pin) + `anchors.sha256` content gate (googlesource
+  containers are not byte-reproducible) + `sources.txt` + `config/` overlay +
+  `build-target.sh`; hermetic target build, static archives both arches.
+- ICU4C **78.3** — sha256 `3a2e7a47…` (cross-verified vs GitHub digest +
+  official md5/sha512). Host static build; data = `--with-data-packaging=static`
+  + `ICU_DATA_FILTER_FILE` trim (requires the `icu4c-78.3-data.zip` overlay +
+  parking prebuilt `icudt78l.dat`, handled idempotently by
+  `build-host-trimmed.sh`); trimmed `libicudata.a` **10.2 MB (−69 %** of the
+  33.1 MB full); smoke deterministic with static data. Cross memo: `configure`
+  exit 0 on `aarch64-none-elf` + `x86_64-none-elf` via the documented clang
+  wrapper (lld, `-Wl,-no-pie`); next layers = mh-* stub + target libc++
+  (the latter now satisfied by the libc++ record above).
+- GLib **2.88.3** (sha256 `ab24d24e…` = GNOME sum) + pcre2 **10.49**
+  (`53c156e1…`, GPG Good) + libffi **3.4.8** (`bc9842a1…`, Gentoo/Debian
+  cross-checked); static host builds; smokes 46/46 + 12/12 + 8/8;
+  clean-room rebuild byte-identical; cross notes (gspawn/gmodule decisions)
+  in `third_party/glib-2.88.3/cross-notes.md`.
+
 Retired pins (v1; kept here for the record only): dillo-3.2.0
 (`ed685168…` tar.gz / `1066ed42…` tar.bz2), fltk-1.3.11 (`92805abc…` /
 `ca2e144e…`).
@@ -678,17 +700,34 @@ recorded budget.
 
 ### P3 — libc++ & C++ runtime  *(new; Track B)*
 
-- [ ] **P3.1 Port libc++ + libc++abi** — static; **no exceptions, no RTTI**
+- [x] **P3.1 Port libc++ + libc++abi** — static; **no exceptions, no RTTI**
       initially (matches WebKit's own compile configs; **verify** the exact
       needs per-component later); freestanding-ish config; threading backend
       = P1 pthreads; locale C-only (ICU arrives separately).
-- [ ] **P3.2 Gap-fill surfaced by libc++** — `<chrono>` clocks, `<filesystem>`
+      **Done:** merged `3b83823` — vendored libc++/libc++abi **21.1.8**
+      (recipe-form) static archives both arches (arm 8.9 MB / intel 8.6 MB);
+      libc++abi owns new/delete/`__cxa_*`, cxxrt.cpp trimmed to the
+      type_info/`__dynamic_cast` surface; exceptions/RTTI OFF, localization
+      C-only, filesystem OFF, threads ON; §11.
+- [x] **P3.2 Gap-fill surfaced by libc++** — `<chrono>` clocks, `<filesystem>`
       subset (or disable), `snprintf` family completeness, wide-char basics.
-- [ ] **P3.3 Tests** — host parity tests (locale-independent subset);
+      **Done:** merged — wchar/wctype/strftime/xlocale/strtod/math/stdio
+      families (~4 k lines across 15 libc files + tf2 builtins); host parity
+      tests A/B/C (85/3314/1511 checks, 0 failures) wired into the host gate;
+      §11.
+- [x] **P3.3 Tests** — host parity tests (locale-independent subset);
       in-OS `CPP_T.BIN`: iostreams smoke, `<vector>/<string>/<map>`, atomics,
       thread join through `std::thread`; sizes measured.
+      **Done:** merged — shipped as `CXX_T.BIN` (name consistent with
+      CXXSMOKE); 20 checks incl. vector/string/map/unordered_map/algorithm/
+      memory/atomic/thread/mutex/condvar/chrono/sstream, all PASS in the ARM
+      wave; sizes: arm 586,888 B / intel 551,240 B; §11.
 
 **Gate P3:** `CPP_T.BIN` + host tests green both arches; `.bin` sizes recorded.
+      **Gate P3 CLOSED 2026-09-30** — lane gate green (host `TEST EXIT: 0`;
+      unit-arm 53/0; unit-x64 55/0 KVM; ARM wave 0 FAIL + `System halt`);
+      x64 acceptance = build+link + unit-x64 (standing x64 baseline — the
+      full x64 wave remains incomplete at tip); merged-tip batteries: §11.
 
 ### P4 — IPC primitives  *(new; Track B)*
 
@@ -1291,6 +1330,35 @@ curl -sI https://lite.cnn.com | grep -i content-length
 ---
 
 ## 11. Fix log (append-only; see also per-lane reports)
+
+- 2026-09-30 — **Wave 1d landed: P2 design note + P3 libc++ + ICU + GLib —
+  merged at `3b83823`** (base `77b872e`; icu fast-forward; glib and libcxx
+  merges each resolved as a `.gitignore` union).
+  - **l2-p2-design `0089560`** (docs; 514 lines): `p2-vm-design.md` —
+    decision-complete (D1–D12, OQ1–OQ8); integrator review §12 appended
+    (`c3c693e`): rows 80–82 freeze at the P2 gate; 6-arg `SYS_MMAP` (row 62)
+    approved; COW defer + PROT_NONE zap+free divergence accepted; shootdown
+    IPI 0x82 approved; L3 diffs by the lane; minimal memfd seals; sysinfo(2)
+    append approved. Findings en route: **EFER.NXE is not enabled today**
+    (needed for PROT_NONE/NX — enable in P2); x64 r9 already in the trap
+    frame (no asm change for 6-arg mmap); ARM kernel runs relocated
+    (0x23A680000) — user-VA separation becomes structural at 64 GiB.
+  - **l3-libcxx** (tip `66100a8`, 7 commits `0cb92f3`..`66100a8`; 47 files,
+    +7434/−29): libc++/libc++abi 21.1.8 static both arches; `CXX_T.BIN`
+    acceptance (20 checks) in the ARM wave; libc gap-fills (~4 k lines:
+    wchar/wctype/strftime/xlocale/strtod/math/stdio + tf2 builtins) with
+    host parity tests A/B/C (85/3314/1511 checks, 0 failures) wired into the
+    host gate; intel hermetic include path; host-only fixes (string.c errno,
+    locale.h `include_next`). Lane gate `LANE GATE OK` (host `TEST EXIT: 0`,
+    unit-arm 53/0, unit-x64 55/0 KVM, wave 0 FAIL + `System halt`). The five
+    predecessor wave FAILs were root-caused: three CXX_T test-expectation
+    bugs (fixed in `cxx_t.cpp`), the `CXX_T FAILURES` summary line, and one
+    **transient `shell_test3` read-lag under boot-wave memory pressure**
+    (unreproduced in two clean runs — watch item, noted as a risk).
+  - **l6-icu `c3be6c6`** + **l6-glib `479b509`**: host-first vendor+build
+    records — see §2 W1d; smokes re-verified first-hand by the integrator.
+  - Merged-tip batteries (local + VM `w1d-*`) against `3b83823`; verdicts
+    in the next entry.
 
 - 2026-09-30 — **Wave 1c batteries GREEN on `e5188de` (both machines); Gate P1 stands closed.**
   Local (workstation): host `TEST EXIT: 0` (482 checks / 0 failed; CXX suites
