@@ -99,7 +99,12 @@ static long syscall5(long num, long a0, long a1, long a2, long a3, long a4) {
  * p1-threads-design.md section 4). */
 extern char __tls_start[];
 extern char __tls_end[];
-extern unsigned long __tls_align;
+/* Linker-script symbols (linker.ld) are ABSOLUTE: the symbol's value IS the
+ * number, and there is no storage behind it.  Declaring it as an array and
+ * using the decayed pointer reads that value; declaring it as a variable
+ * (or reading an array element) would dereference address `value` instead
+ * -- observed as a data abort at 0x10 from crt0's setup call. */
+extern char __tls_align[];
 
 /* Is the calling thread's TLS register installed?  aarch64: read TPIDR_EL0
  * (per-thread truth).  x86_64: the flag every installer sets (the FS base
@@ -116,24 +121,61 @@ int ho_tls_installed(void) {
 
 void ho_tls_mark_installed(void) { ho_tls_ready_flag = 1; }
 
-/* Install the initial thread's TLS register from the linker-placed image.
- * Called by crt0 before main() and lazily by errno_ret() for crt0-less
- * programs.  Thread trampolines install their own per-thread blocks by
- * calling SYS_SET_TLS directly (src/libc/src/pthread.c). */
+/* Static block holding the main thread's TLS image.  crt0 runs before any
+ * heap exists (and minimal programs link neither malloc nor memcpy), so
+ * this file must not call into them.  4 KiB covers every module in tree;
+ * past that the code falls back to using the linker-placed image itself. */
+#define HO_TLS_MAIN_BLOCK 4096
+static char main_tls_block[HO_TLS_MAIN_BLOCK] __attribute__((aligned(16)));
+
+/* Install the initial thread's TLS register from a COPY of the image.
+ * Like musl's __init_tls, the main thread gets its own block: .tdata/.tbss
+ * must stay pristine because every later thread's block is built by copying
+ * them -- a main thread writing into the template directly would leak its
+ * values into every thread created afterwards.  Called by crt0 before
+ * main() and lazily via __errno_location() for crt0-less programs.  Thread
+ * trampolines install their own blocks via SYS_SET_TLS (src/libc/src/
+ * pthread.c). */
 void ho_tls_setup_initial(void) {
-  unsigned long align = __tls_align ? __tls_align : 8;
+  extern char __tls_start[], __tls_end[], __tls_data_end[];
+  unsigned long align = (unsigned long)__tls_align ? (unsigned long)__tls_align : 8;
+  unsigned long tls_data = (unsigned long)(__tls_data_end - __tls_start);
+  unsigned long tls_size = (unsigned long)(__tls_end - __tls_start);
+  unsigned long image = (tls_size + align - 1) & ~(align - 1);
+  long tls;
 #ifdef __x86_64__
-  /* Variant II: FS base = align_up(&__tls_end, __tls_align); TLS code reads
+  /* Variant II: image at the block base, FS = base + image; TLS code reads
      the self-pointer at %fs:0 and offsets negatively from it. */
-  long tls = (long)(((unsigned long)__tls_end + align - 1) & ~(align - 1));
-  syscall(SYS_SET_TLS, tls, 0, 0, 0);
+  if (image + 16 <= sizeof main_tls_block) {
+    volatile char *b = main_tls_block;
+    const volatile char *t = __tls_start;
+    for (unsigned long i = 0; i < image + 16; i++)
+      b[i] = 0;
+    for (unsigned long i = 0; i < tls_data; i++)
+      b[i] = t[i];
+    tls = (long)main_tls_block + (long)image;
+  } else {
+    /* Fallback (TLS image larger than the static block): the image itself
+       becomes the storage.  Values still start correct. */
+    tls = (long)(((unsigned long)__tls_end + align - 1) & ~(align - 1));
+  }
   *(volatile long *)tls = tls; /* self-pointer at FS:[0] */
 #else
-  /* Variant I: TPIDR_EL0 = &__tls_start - 16 (lld bakes the 16-byte head;
-     the general form also covers an image aligned above 16). */
-  long tls = ((long)__tls_start - 16) & ~(long)(align - 1);
-  syscall(SYS_SET_TLS, tls, 0, 0, 0);
+  /* Variant I: 16-byte head at [tls, tls+16), image at tls+16; compiled TLS
+     accesses land at TP + 16 + (var - __tls_start). */
+  if (16 + image + 16 <= sizeof main_tls_block) {
+    volatile char *b = main_tls_block; /* 16-aligned by declaration */
+    const volatile char *t = __tls_start;
+    for (unsigned long i = 0; i < 16 + image + 16; i++)
+      b[i] = 0;
+    tls = (long)main_tls_block;
+    for (unsigned long i = 0; i < tls_data; i++)
+      b[16 + i] = t[i];
+  } else {
+    tls = ((long)__tls_start - 16) & ~(long)(align - 1);
+  }
 #endif
+  syscall(SYS_SET_TLS, tls, 0, 0, 0);
   ho_tls_mark_installed();
 }
 

@@ -204,7 +204,10 @@ static void test_cond_turnstile(void) {
   for (int i = 0; i < 3; i++)
     if (create_retry(&th[i], turn_fn, 0) != 0)
       ok = 0;
-  usleep(60000); /* let all three park on the cond */
+  /* Let all three park on the cond: bounded wait for the counter (a fixed
+     sleep races under load; the join below still proves the wakeup path). */
+  for (int spin = 0; spin < 4000 && turn_ready < 3; spin++)
+    sched_yield();
   pthread_mutex_lock(&turn_mu);
   ok = ok && turn_ready == 3;
   turn_go = 1;

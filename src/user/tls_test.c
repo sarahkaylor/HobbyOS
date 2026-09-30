@@ -96,8 +96,10 @@ static void *iso_fn(void *arg) {
   for (int r = 0; r < 40; r++) {
     sched_yield(); /* preemption must not leak another thread's block */
     if (t_int != (int)(1000 + id) || t_long != -1000 - id ||
-        t_dbl != 10.0 + (double)id || t_buf[0] != (char)id)
+        t_dbl != 10.0 + (double)id || t_buf[0] != (char)id) {
       __atomic_store_n(&iso_bad, 1, __ATOMIC_RELAXED);
+      break;
+    }
   }
   return (void *)(long)t_int;
 }

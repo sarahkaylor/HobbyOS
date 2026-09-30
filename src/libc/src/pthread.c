@@ -159,10 +159,11 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
    *   x86_64  variant II: image at the block base, FS = base +
    *                       align_up(size, align), self-pointer at FS:[0]. */
   extern char __tls_start[], __tls_end[], __tls_data_end[];
-  extern unsigned long __tls_align;
+  /* Absolute linker symbol (value = alignment), see libc.c. */
+  extern char __tls_align[];
   size_t tls_data = (size_t)(__tls_data_end - __tls_start);
   size_t tls_size = (size_t)(__tls_end - __tls_start);
-  unsigned long align = __tls_align ? __tls_align : 8;
+  unsigned long align = (unsigned long)__tls_align ? (unsigned long)__tls_align : 8;
   size_t image_aligned = (tls_size + align - 1) & ~(align - 1);
 
 #ifdef __x86_64__
