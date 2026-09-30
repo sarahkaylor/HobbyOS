@@ -251,11 +251,11 @@ static int add_pixel_window(int *rd) {
 
 static void test_mods_seq_bytes(void) {
   char b[16];
-  check(wm_build_mods_seq(b, sizeof b, 0) == 6 && strcmp(b, "\033[K 0~") == 0,
+  check(wm_build_mods_seq(b, sizeof b, 0) == 5 && strcmp(b, "\033[K0~") == 0,
         "K 0 ~ built exactly");
-  check(wm_build_mods_seq(b, sizeof b, 2) == 6 && strcmp(b, "\033[K 2~") == 0,
+  check(wm_build_mods_seq(b, sizeof b, 2) == 5 && strcmp(b, "\033[K2~") == 0,
         "K 2 ~ built exactly");
-  check(wm_build_mods_seq(b, sizeof b, 7) == 6 && strcmp(b, "\033[K 7~") == 0,
+  check(wm_build_mods_seq(b, sizeof b, 7) == 5 && strcmp(b, "\033[K7~") == 0,
         "K 7 ~ (all three mods) built exactly");
 }
 
@@ -267,33 +267,33 @@ static void test_mods_stamp_keys(void) {
   cap_reset();
 
   forward_key_to_focused(46, 0);            /* 'c' */
-  check(cap_calls == 2 && strcmp(cap, "\033[K 0~c") == 0,
+  check(cap_calls == 2 && strcmp(cap, "\033[K0~c") == 0,
         "pixel key: K 0 then the byte, one write each");
 
   set_mods(1, 0, 0);
   cap_reset();
   forward_key_to_focused(46, 0);
-  check(strcmp(cap, "\033[K 1~C") == 0, "Shift sets bit 1 and picks the legend");
+  check(strcmp(cap, "\033[K1~C") == 0, "Shift sets bit 1 and picks the legend");
 
   set_mods(0, 1, 0);
   cap_reset();
   forward_key_to_focused(46, 0);
-  check(strcmp(cap, "\033[K 2~\003") == 0, "Ctrl sets bit 2, byte stays 0x03");
+  check(strcmp(cap, "\033[K2~\003") == 0, "Ctrl sets bit 2, byte stays 0x03");
 
   set_mods(0, 0, 1);
   cap_reset();
   forward_key_to_focused(46, 0);
-  check(strcmp(cap, "\033[K 4~c") == 0, "Alt sets bit 4, byte unchanged");
+  check(strcmp(cap, "\033[K4~c") == 0, "Alt sets bit 4, byte unchanged");
 
   set_mods(1, 1, 1);
   cap_reset();
   forward_key_to_focused(46, 0);
-  check(strcmp(cap, "\033[K 7~\003") == 0, "all three mods OR to 7");
+  check(strcmp(cap, "\033[K7~\003") == 0, "all three mods OR to 7");
 
   set_mods(0, 0, 0);
   cap_reset();
   forward_key_to_focused(106, 0);           /* Right arrow */
-  check(strcmp(cap, "\033[K 0~\033[C") == 0, "arrows are stamped too");
+  check(strcmp(cap, "\033[K0~\033[C") == 0, "arrows are stamped too");
 
   /* Released modifiers: the next key is stamped 0 again (live state). */
   set_mods(0, 1, 0);
@@ -301,7 +301,7 @@ static void test_mods_stamp_keys(void) {
   forward_key_to_focused(46, 0);
   set_mods(0, 0, 0);
   forward_key_to_focused(46, 0);
-  check(strcmp(cap, "\033[K 2~\003\033[K 0~c") == 0,
+  check(strcmp(cap, "\033[K2~\003\033[K0~c") == 0,
         "the stamp follows the live state, not the previous key");
 
   /* A key with no payload forwards nothing and gets no stamp. */
@@ -334,13 +334,13 @@ static void test_mods_stamp_repeat(void) {
 
   arm(31, 0, 0);                            /* 's' held */
   key_repeat_tick(500);
-  check(cap_calls == 2 && strcmp(cap, "\033[K 0~s") == 0,
+  check(cap_calls == 2 && strcmp(cap, "\033[K0~s") == 0,
         "a repeat tick is stamped like the press");
 
   set_mods(1, 0, 0);                        /* Shift pressed mid-hold */
   cap_reset();
   key_repeat_tick(600);
-  check(strcmp(cap, "\033[K 1~S") == 0, "the repeat carries the current mods");
+  check(strcmp(cap, "\033[K1~S") == 0, "the repeat carries the current mods");
 
   held_key_code = -1;
   set_mods(0, 0, 0);
@@ -443,7 +443,7 @@ static void test_wheel_forwarding(void) {
 
 static void test_close_seq_bytes(void) {
   char b[16];
-  check(wm_build_close_seq(b, sizeof b) == 5 && strcmp(b, "\033[D ~") == 0,
+  check(wm_build_close_seq(b, sizeof b) == 4 && strcmp(b, "\033[D~") == 0,
         "close message is ESC [ D ~");
   char small[4];
   check(wm_build_close_seq(small, sizeof small) == 3 && small[3] == '\0',
@@ -465,7 +465,7 @@ static void test_close_grace_and_fallback(void) {
   windows[0].pid = 1234567;
   cap_reset();
   check(desktop_request_close(id, 0) == 1, "pixel window starts the grace");
-  check(cap_calls == 1 && strcmp(cap, "\033[D ~") == 0,
+  check(cap_calls == 1 && strcmp(cap, "\033[D~") == 0,
         "close request sends ESC [ D ~ (one write)");
   check(num_windows == 1 && desktop_drag_window() == -1,
         "window is still there during the grace");

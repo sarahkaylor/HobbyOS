@@ -230,14 +230,16 @@ static int key_payload(int code, char *out) {
 
 /* Build the modifier report for a pixel-mode keypress: ESC [ K <mods> ~.
  * mods is the OR of the MOD_* bits above (0..7, always one digit).
- * Returns the byte count (excluding the NUL terminator).  Non-static so
- * the host test asserts on it directly. */
+ * Wire bytes carry NO spaces -- the spaces in the protocol comments are
+ * notation, exactly like ESC [ P <col>;<row>;<btn> ~ above (the mouse
+ * builder writes none either).  Returns the byte count (excluding NUL).
+ * Non-static so the host test asserts on it directly. */
 int wm_build_mods_seq(char *out, int cap, int mods) {
   if (mods < 0) mods = 0;
   if (mods > 7) mods = 7;
   char body[8];
   int j = 0;
-  body[j++] = 27; body[j++] = '['; body[j++] = 'K'; body[j++] = ' ';
+  body[j++] = 27; body[j++] = '['; body[j++] = 'K';
   body[j++] = (char)('0' + mods);
   body[j++] = '~';
   if (j > cap - 1) j = cap - 1;
@@ -569,9 +571,11 @@ void desktop_wheel(int mx, int my, int delta) {
 static int close_pending_win = -1;   /* pixel window asked to quit (-1 none) */
 static int close_pending_ms = 0;     /* when ESC [ D was sent */
 
-/* Build the graceful-close message: ESC [ D ~.  Returns the byte count. */
+/* Build the graceful-close message: ESC [ D ~ (four bytes, no spaces --
+ * the comments' spacing is notation; this is what the decoder's one-byte
+ * lookahead after 'D' expects).  Returns the byte count. */
 int wm_build_close_seq(char *out, int cap) {
-  static const char msg[] = { 27, '[', 'D', ' ', '~' };
+  static const char msg[] = { 27, '[', 'D', '~' };
   int j = (int)sizeof msg;
   if (j > cap - 1) j = cap - 1;
   for (int i = 0; i < j; i++) out[i] = msg[i];
@@ -589,6 +593,30 @@ static void close_window_now(int win_id) {
   if (focused_window == win_id) focused_window = -1;
   if (drag_win_id == win_id) desktop_drag_cancel();
   if (close_pending_win == win_id) close_pending_win = -1;
+}
+
+/* Test-support: report a close transition as ONE console write, so the
+ * serial line lands intact (print_dec() writes through fd 1, which does
+ * not reach the console from the desktop, and per-fragment writes get an
+ * interleaved "[CONSOLE]" prefix from the kernel's console). */
+static void close_note(int win_id, const char *what) {
+  char line[72];
+  int i = 0;
+  const char *pre = "[CLOSE] win=";
+  for (int j = 0; pre[j] && i < 60; j++) line[i++] = pre[j];
+  char digits[12];
+  int d = 0;
+  if (win_id == 0) {
+    digits[d++] = '0';
+  } else {
+    int v = win_id < 0 ? -win_id : win_id;
+    while (v > 0 && d < 10) { digits[d++] = (char)('0' + v % 10); v /= 10; }
+  }
+  while (d > 0 && i < 60) line[i++] = digits[--d];
+  for (int j = 0; what[j] && i < 68; j++) line[i++] = what[j];
+  line[i++] = '\n';
+  line[i] = '\0';
+  print_console(line);
 }
 
 /* Ask a window to close.  A pixel-mode window gets ESC [ D ~ and the
@@ -609,9 +637,7 @@ int desktop_request_close(int win_id, int now_ms) {
   desktop_send_hook(win_id, seq, n);
   close_pending_win = win_id;
   close_pending_ms = now_ms;
-  print_console("[CLOSE] win=");
-  print_dec(win_id);
-  print_console(": ESC [ D sent\n");
+  close_note(win_id, ": ESC [ D sent");
   return 1;
 }
 
@@ -622,9 +648,7 @@ int desktop_close_tick(int now_ms) {
   if (now_ms - close_pending_ms < CLOSE_GRACE_MS) return 0;
   int win_id = close_pending_win;
   close_pending_win = -1;
-  print_console("[CLOSE] win=");
-  print_dec(win_id);
-  print_console(": grace expired, killing\n");
+  close_note(win_id, ": grace expired, killing");
   close_window_now(win_id);
   return 1;
 }
@@ -633,9 +657,7 @@ int desktop_close_tick(int now_ms) {
 void desktop_close_note_gone(int win_id) {
   if (close_pending_win != win_id) return;
   close_pending_win = -1;
-  print_console("[CLOSE] win=");
-  print_dec(win_id);
-  print_console(": exited within grace\n");
+  close_note(win_id, ": exited within grace");
 }
 
 /* Parse an OSC "run in new window" request: seq[0]==']', seq[1]=='R',

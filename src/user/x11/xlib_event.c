@@ -40,16 +40,31 @@
  * The F1.8 additions are observable in the serial log so an E2E harness
  * can assert that a pixel window decoded what the desktop sent (the
  * router for print_console is serial, never the protocol pipe on fd 1).
- * Host builds stay quiet: the print would land in the test output. */
+ * One console write per line, so the kernel's per-write "[CONSOLE]"
+ * prefix cannot interleave into the middle of the marker.  Host builds
+ * stay quiet: the print would land in the test output. */
 #ifndef HOST_TEST
 static void x11_note(const char *what, int n) {
-  print_console("[X11] ");
-  print_console(what);
+  char line[72];
+  int i = 0;
+  const char *pre = "[X11] ";
+  for (int j = 0; pre[j] && i < 56; j++) line[i++] = pre[j];
+  for (int j = 0; what[j] && i < 64; j++) line[i++] = what[j];
   if (n >= 0) {
-    print_console("=");
-    print_dec(n);
+    line[i++] = '=';
+    char digits[12];
+    int d = 0;
+    if (n == 0) {
+      digits[d++] = '0';
+    } else {
+      int v = n;
+      while (v > 0 && d < 10) { digits[d++] = (char)('0' + v % 10); v /= 10; }
+    }
+    while (d > 0 && i < 68) line[i++] = digits[--d];
   }
-  print_console("\n");
+  line[i++] = '\n';
+  line[i] = '\0';
+  print_console(line);
 }
 #else
 static void x11_note(const char *what, int n) {
@@ -358,6 +373,7 @@ void x11_input_bytes(Display *d, const unsigned char *buf, int len) {
         d->st = 0;                        /* overlong: drop the sequence */
       }
     } else if (d->st == 4) {
+      if (c == ' ') continue;             /* notation space: keep deciding */
       if (c == '~') {
         /* ESC [ D ~ : the WM is closing this window (WM_DELETE_WINDOW).
          * The desktop sends it as one write and waits ~250 ms before it

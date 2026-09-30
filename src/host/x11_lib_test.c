@@ -659,6 +659,14 @@ static void test_input_v2(void) {
   XLookupString(&ev.xkey, buf, sizeof buf, &ks, NULL);
   check(ks == XK_5 && buf[0] == '5', "the byte after a K stamp is the key");
 
+  /* The canonical wire form carries no spaces: ESC [ K2~ + the digit. */
+  feed(d, "\033[K4~7");
+  x11_input_settle(d, 0);
+  check(qlen(d) == 1, "no-space K stamp skipped, the key delivered");
+  pop(d, &ev);
+  XLookupString(&ev.xkey, buf, sizeof buf, &ks, NULL);
+  check(ks == XK_7 && buf[0] == '7', "the byte after ESC [ K4~ is the key");
+
   /* A stamp with no modifiers (a plain key) is skipped the same way. */
   feed(d, "\033[K 0~");
   feed(d, "+");
@@ -712,6 +720,18 @@ static void test_input_v2(void) {
   check(qlen(d) == 0, "the close message queues no key events");
   check(d->desktop_closed == 1, "the close message marks the display closed");
   check(x11_wait_event(d) == -1, "the next event wait exits (like EOF)");
+
+  /* The spaced notation form (ESC [ D SPACE ~) closes as well: the
+   * decoder skips the space and keeps deciding.  Fresh display, the
+   * close flag is sticky by design. */
+  Display *d2 = XOpenDisplay(NULL);
+  check(d2 != NULL, "input v2: second display");
+  feed(d2, "\033[D ");
+  check(qlen(d2) == 0, "spaced ESC [ D is still deciding");
+  feed(d2, "~");
+  x11_input_settle(d2, 0);
+  check(d2->desktop_closed == 1, "spaced ESC [ D ~ closes too");
+  XCloseDisplay(d2);
 
   XCloseDisplay(d);
 }

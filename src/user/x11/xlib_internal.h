@@ -38,7 +38,11 @@
  *                                      desktop connection takes
  *     (plain bytes)                    keys; escape sequences for arrows
  *                                      and friends (see xlib_event.c)
- */
+ *
+ * The wire bytes carry no spaces -- the spacing above is notation (see
+ * window.h): a real K message is ESC [ K2~ and the close is ESC [ D~.
+ * The decoder skips an optional space before a parameter or the final
+ * '~', so both notations parse. */
 #ifndef HOBBYOS_X11_INTERNAL_H
 #define HOBBYOS_X11_INTERNAL_H
 

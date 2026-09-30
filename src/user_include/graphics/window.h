@@ -122,6 +122,13 @@
  *     its own; a window still alive when the grace expires is killed
  *     exactly as before.  Text windows are killed without the message.
  *
+ * Wire bytes carry no spaces: the spacing above is notation, the same
+ * convention as ESC [ P <col>;<row>;<btn> ~ earlier in this file -- the
+ * builders emit none (so the wire is ESC [ K2~ and ESC [ D~), and the
+ * app-side decoder skips an optional space before a parameter or the
+ * terminating '~' so both notations decode.  Send what the builders
+ * send; paranoia about spaces belongs to the decoder only.
+ *
  * Every message above is one write() to the app's stdin -- the atomicity
  * rule the wire protocol has always followed. */
 #define PIX_MAX_EXPOSE 8
