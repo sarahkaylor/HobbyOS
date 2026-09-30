@@ -11,6 +11,8 @@ obj/
 hobbyos
 hobbyos.elf
 qemu.log
+build.log
+*.log
 
 # Dependencies / System files
 .DS_Store
