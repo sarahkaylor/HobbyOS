@@ -6,6 +6,8 @@ obj/
 *.BIN
 *.elf
 *_test_host
+# Host parity harness run binaries (built in the repo root by host_tests)
+*_parity_run
 
 # Compiled output
 hobbyos

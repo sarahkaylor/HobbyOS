@@ -1737,6 +1737,61 @@ obj/host_libc_langinfo_test.o: src/host/libc_langinfo_test.c src/libc/include/*.
 $(LANGINFO_TEST): obj/host_libc_langinfo_test.o obj/host_hb_langinfo.o
 	$(HOST_CC) -o $@ $^
 
+# P3.2 gap-fills: the scanner + wide formatter, compiled from the bare-metal
+# sources with -DHOST_TEST (colliding symbols are hb_* there) and raced
+# byte-for-byte against glibc (src/host/libc_scanf_wprintf_test.c).
+SCANFW_PARITY = libc_scanf_wprintf_parity_run
+obj/host_hb_stdio_sp.o: src/libc/src/stdio.c src/libc/include/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+obj/host_hb_wchar_sp.o: src/libc/src/wchar.c src/libc/include/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+obj/host_libc_scanf_wprintf_test.o: src/host/libc_scanf_wprintf_test.c
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+$(SCANFW_PARITY): obj/host_libc_scanf_wprintf_test.o obj/host_hb_stdio_sp.o obj/host_hb_wchar_sp.o
+	$(HOST_CC) -o $@ $^
+
+# P3.1 numeric parity: strtod / strtol / strtold and the math front-ends
+# compiled from the bare-metal sources with -DHOST_TEST, raced against glibc
+# (src/host/libc_num_parity_test.c; the acceptance window is the ulp bound
+# documented in src/libc/src/strtod.c).
+NUM_PARITY = libc_num_parity_run
+obj/host_hb_math_np.o: src/libc/src/math.c src/libc/include/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+obj/host_hb_strtod_np.o: src/libc/src/strtod.c src/libc/include/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+obj/host_libc_num_parity_test.o: src/host/libc_num_parity_test.c
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+$(NUM_PARITY): obj/host_libc_num_parity_test.o obj/host_hb_math_np.o obj/host_hb_strtod_np.o
+	$(HOST_CC) -o $@ $^ -lm
+
+# P3.2/P3.3 wide parity: wchar / wctype / strftime / xlocale compiled from
+# the bare-metal sources with -DHOST_TEST (colliding symbols are hb_* there)
+# and raced against glibc (src/host/libc_wide_parity_test.c).
+WIDE_PARITY = libc_wide_parity_run
+obj/host_hb_wchar_wp.o: src/libc/src/wchar.c src/libc/include/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+obj/host_hb_wctype_wp.o: src/libc/src/wctype.c src/libc/include/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+obj/host_hb_strftime_wp.o: src/libc/src/strftime.c src/libc/include/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+obj/host_hb_xlocale_wp.o: src/libc/src/xlocale.c src/libc/include/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+obj/host_libc_wide_parity_test.o: src/host/libc_wide_parity_test.c
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+$(WIDE_PARITY): obj/host_libc_wide_parity_test.o obj/host_hb_wchar_wp.o obj/host_hb_wctype_wp.o obj/host_hb_strftime_wp.o obj/host_hb_xlocale_wp.o
+	$(HOST_CC) -o $@ $^
+
 # The ported wc built for the host: ours except getopt_long (hb_* via our
 # getopt.h) and error() (host_hb_error.o); everything else resolves to
 # glibc.  wc_host is raced byte-for-byte against coreutils in
@@ -1954,7 +2009,7 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
@@ -1991,6 +2046,9 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	$(HOST_RUN) ./$(GETOPT_TEST)
 	$(HOST_RUN) ./$(REGEX_TEST)
 	$(HOST_RUN) ./$(LANGINFO_TEST)
+	$(HOST_RUN) ./$(SCANFW_PARITY)
+	$(HOST_RUN) ./$(NUM_PARITY)
+	$(HOST_RUN) ./$(WIDE_PARITY)
 	$(HOST_RUN) ./files_test_host
 	$(HOST_RUN) ./calc_test_host
 	$(HOST_RUN) ./clock_test_host
