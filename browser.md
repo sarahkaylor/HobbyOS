@@ -727,7 +727,10 @@ recorded budget.
       **Gate P3 CLOSED 2026-09-30** — lane gate green (host `TEST EXIT: 0`;
       unit-arm 53/0; unit-x64 55/0 KVM; ARM wave 0 FAIL + `System halt`);
       x64 acceptance = build+link + unit-x64 (standing x64 baseline — the
-      full x64 wave remains incomplete at tip); merged-tip batteries: §11.
+      full x64 wave remains incomplete at tip); merged-tip batteries: **GREEN
+      both machines at `9104be5`** — attempt #1 (at `3b83823`) was RED and
+      surfaced three integration defects, all fixed and re-verified (bootstrap
+      `944fbda`, wide-parity `1a5277d`, silent CXX_T truncation `9104be5`; §11).
 
 ### P4 — IPC primitives  *(new; Track B)*
 
@@ -1330,6 +1333,52 @@ curl -sI https://lite.cnn.com | grep -i content-length
 ---
 
 ## 11. Fix log (append-only; see also per-lane reports)
+
+- 2026-09-30 — **Wave 1d — batteries: GREEN both machines** at `9104be5`
+  (first merged-tip attempt at `3b83823` was RED; the failures were three real
+  integration defects, all fixed and re-verified).
+  - **Local `w1f`**: host 482/0 + `TEST EXIT: 0` (scanf/wprintf + num + **wide**
+    parity PASSED); unit-arm PASSED; unit-x64 PASSED (KVM); wave `System halt`,
+    **0 FAIL tokens**, all 10 suite markers, CXX_T full suite (thread-region
+    check names all present; DNSTST live).
+  - **VM `w1f-*`** at the same tip: host rc=0 53 s (wide parity PASSED, 6 clean
+    suites); unit-arm rc=0 65 s; unit-x64 rc=0 58 s (KVM); test-arm rc=0 110 s —
+    `System halt`, **0 FAIL**, all 10 suite markers, CXX_T full.
+  - **Battery #1 (RED at `3b83823`) → three defects:**
+    1. *Pristine-tree bootstrap* (`944fbda`): the libc++ builtins rules required
+       the fetched vendor tree as make prerequisites — on trees without the
+       extraction (the VM; fresh clones) make rejected the implicit rule
+       ("No rule to make target 'obj/<arch>/builtins/<x>.o'").  Fix: guard-recipe
+       source pattern (a recipe-less pattern is rejected during implicit-rule
+       search), `.fetched-ok` invalidation before re-fetching (fetch.sh
+       early-exits on marker+anchors, so one missing file would never return),
+       trailing `test -f`, `.SECONDARY` against intermediate deletion; `cxx_t.o`
+       gated on the marker instead of an extracted path.  Pristine-tree builds
+       verified from genuinely empty states, both arches.
+    2. *Wide-parity test flake* (`1a5277d`): `wcstold` byte-compared 16-byte
+       long doubles incl. 6 padding bytes of stack garbage (flaky run-to-run;
+       red on the VM, green locally, same clang/glibc); now `ld_equal` by
+       class+value.  `newlocale("")` resolved through the host environment on
+       glibc — the test now pins `LC_ALL=C` (its stated intent).
+    3. *CXX_T silent truncation* (`9104be5`) — the deepest one: the wave can
+       momentarily hold **every** PCB slot (forensic: `used=63/63 done=0`);
+       `SYS_THREAD_CREATE` then returns `-EAGAIN`, and libc++ `std::thread`
+       (`-fno-exceptions`) **aborts the process** instead of retrying like C
+       callers — CXX_T died mid-suite in ~half of the runs on BOTH machines
+       with **zero FAIL tokens** (only the distinct-check-name count exposed it:
+       9/20 vs 20/20, all-suite `ALL TESTS PASSED SUCCESSFULLY` count 9 vs 10).
+       Diagnosed with marker-instrumented copies + a kernel EAGAIN print in a
+       disposable workdir (deaths localized to the first `std::thread`
+       creations; 6/13 pre-fix runs affected).  Fix: bounded ≈2 s EAGAIN retry
+       inside `pthread_create` (yields first, then 10 ms sleeps; sustained
+       exhaustion still surfaces EAGAIN); the kernel no-slot path gains a
+       rate-limited `[KERNEL] thread_create: no free slot (used=N/63 done=M)
+       for pid=P` forensic.  Verified: 12 consecutive wave runs (8 local, 4 VM)
+       all complete, and both `w1f` battery waves absorbed live pressure events
+       and still finished with every suite.  P1 §6 amended.
+  - Wave 1d is closed with this entry: all four lanes merged (`c3be6c6`,
+    `f1cf1dc`, `0985f28`, libc++ ladder via `3b83823`) and the merged tip
+    carries a verified green battery on both machines.
 
 - 2026-09-30 — **Wave 1d landed: P2 design note + P3 libc++ + ICU + GLib —
   merged at `3b83823`** (base `77b872e`; icu fast-forward; glib and libcxx
