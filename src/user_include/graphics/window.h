@@ -90,7 +90,40 @@
  * anywhere on screen, like xeyes -- or the XANTFARM port, whose ants
  * scatter away from the pointer.  Tracking pauses while a menu is open
  * (the pointer is a menu pointer then); when the menu closes the live
- * position is reported once so the app resumes on the actual pointer. */
+ * position is reported once so the app resumes on the actual pointer.
+ *
+ * Input v2 (F1.8; browser.md Appendix A.2) -- pixel windows only:
+ *
+ *   - KeyPress carries the live modifier state.  Every key forwarded to a
+ *     pixel window is preceded by one message
+ *
+ *         ESC [ K <mods> ~      mods: 1=Shift, 2=Ctrl, 4=Alt, OR-ed
+ *
+ *     stamped on every forwarded KeyPress (auto-repeat included), sent
+ *     immediately before the key byte(s), so the state stays live -- a
+ *     key pressed after the modifier is released carries mods 0.  The key
+ *     bytes themselves keep the classic terminal mapping (Shift picks the
+ *     legend, Ctrl folds a letter to its control byte); the K message is
+ *     additive and is what carries Alt, which has no byte.  Text windows
+ *     receive no K message.
+ *
+ *   - The mouse wheel is forwarded as the existing mouse press/release
+ *     pair with btn=4 (up) / 5 (down), one pair per tick, to the pixel
+ *     window under the pointer that opted into pointer events
+ *     (ESC ] P 1 ~), with the coordinates clamped like every other mouse
+ *     message.  Ticks outside such a window are dropped.
+ *
+ *   - Closing is announced first: before the desktop kills a pixel window
+ *     (the F4 key or the title-bar X button) it sends
+ *
+ *         ESC [ D ~             "please quit" (WM_DELETE_WINDOW)
+ *
+ *     and waits up to ~250 ms of desktop ticks for the process to exit on
+ *     its own; a window still alive when the grace expires is killed
+ *     exactly as before.  Text windows are killed without the message.
+ *
+ * Every message above is one write() to the app's stdin -- the atomicity
+ * rule the wire protocol has always followed. */
 #define PIX_MAX_EXPOSE 8
 
 /* A rectangle in screen (or content-relative) pixels. */

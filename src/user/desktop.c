@@ -143,7 +143,24 @@ void (*desktop_send_hook)(int win_id, const char *buf, int len) = window_write_d
 /* they read (ctrl_pressed, held_key_*) are exercised there directly.      */
 /* ====================================================================== */
 
+static struct window *find_window(int id);   /* window lookup, defined below */
+
 static int ctrl_pressed = 0;
+static int alt_pressed = 0;
+
+/* Modifier bits reported to pixel-mode windows (ESC [ K <mods> ~, the
+ * F1.8 input-v2 addition -- see window.h): 1=Shift 2=Ctrl 4=Alt, OR-ed.
+ * Shift and Ctrl also keep their classic byte mapping (map_key_char
+ * above); the K message is additive and is what carries Alt, which has
+ * no byte of its own. */
+#define MOD_SHIFT 1
+#define MOD_CTRL  2
+#define MOD_ALT   4
+
+static int current_mods(void) {
+  return (shift_pressed ? MOD_SHIFT : 0) | (ctrl_pressed ? MOD_CTRL : 0) |
+         (alt_pressed ? MOD_ALT : 0);
+}
 
 /* Auto-repeat timing: wait KEY_REPEAT_DELAY_MS before the first repeat,
  * then fire every KEY_REPEAT_PERIOD_MS.  held_key_last_ms == 0 means "no
@@ -211,6 +228,39 @@ static int key_payload(int code, char *out) {
   return 0;
 }
 
+/* Build the modifier report for a pixel-mode keypress: ESC [ K <mods> ~.
+ * mods is the OR of the MOD_* bits above (0..7, always one digit).
+ * Returns the byte count (excluding the NUL terminator).  Non-static so
+ * the host test asserts on it directly. */
+int wm_build_mods_seq(char *out, int cap, int mods) {
+  if (mods < 0) mods = 0;
+  if (mods > 7) mods = 7;
+  char body[8];
+  int j = 0;
+  body[j++] = 27; body[j++] = '['; body[j++] = 'K'; body[j++] = ' ';
+  body[j++] = (char)('0' + mods);
+  body[j++] = '~';
+  if (j > cap - 1) j = cap - 1;
+  for (int i = 0; i < j; i++) out[i] = body[i];
+  out[j] = '\0';
+  return j;
+}
+
+/* Forward one key message stream to a window.  A pixel-mode window is
+ * told the live modifier state first (ESC [ K <mods> ~, one write), then
+ * the key payload (a second write) -- one write() per message, the wire
+ * protocol's atomicity rule (window.h).  Every other window gets exactly
+ * the payload it always got, byte for byte. */
+static void forward_payload_to_window(int win_id, const char *seq, int n) {
+  struct window *w = find_window(win_id);
+  if (w && w->pixel_mode) {
+    char mods_seq[8];
+    int mn = wm_build_mods_seq(mods_seq, sizeof mods_seq, current_mods());
+    desktop_send_hook(win_id, mods_seq, mn);
+  }
+  desktop_send_hook(win_id, seq, n);
+}
+
 /* Forward one key press to the focused window and arm auto-repeat (a fresh
  * press always re-arms; a non-repeatable key disarms a previous one). */
 static void forward_key_to_focused(int code, int now_ms) {
@@ -218,7 +268,7 @@ static void forward_key_to_focused(int code, int now_ms) {
   char seq[8];
   int n = key_payload(code, seq);
   if (n <= 0) return;
-  window_write_default(focused_window, seq, n);
+  forward_payload_to_window(focused_window, seq, n);
   if (key_may_repeat(code)) {
     held_key_code = code;
     held_key_since_ms = now_ms;
@@ -243,7 +293,7 @@ static void key_repeat_tick(int now_ms) {
   char seq[8];
   int n = key_payload(held_key_code, seq);
   if (n <= 0) return;
-  window_write_default(focused_window, seq, n);
+  forward_payload_to_window(focused_window, seq, n);
   held_key_last_ms = now_ms;
 }
 
@@ -453,6 +503,139 @@ void desktop_drag_end(int mx, int my) {
     desktop_send_hook(drag_win_id, seq, n);
   }
   desktop_drag_cancel();
+}
+
+/* ---- Mouse wheel (pixel windows only, F1.8 input v2) -----------------
+ * A wheel tick is forwarded as the existing press/release pair with btn=4
+ * (up) / 5 (down) -- the X11 convention the protocol reuses (browser.md
+ * A.2).  It goes to the pixel-mode window under the pointer that opted
+ * into pointer events, exactly like a button press goes to the window it
+ * landed in: the position is localised and clamped like every other mouse
+ * message (wm_mouse_pixel) and ticks elsewhere on screen are dropped.
+ * Each tick is its own pair of writes (P then R); |delta| ticks are
+ * delivered, capped so a rogue axis value cannot flood the app's pipe.
+ * QEMU's virtio input reports the wheel as EV_REL/REL_WHEEL (+1 per
+ * detent up, -1 down); the ARM kernel passes EV_REL through untouched. */
+#ifndef REL_WHEEL
+#define REL_WHEEL 0x08
+#endif
+
+#define WHEEL_MAX_TICKS 8
+
+void desktop_wheel(int mx, int my, int delta) {
+  if (delta == 0) return;
+  int ticks = delta > 0 ? delta : -delta;
+  if (ticks > WHEEL_MAX_TICKS) ticks = WHEEL_MAX_TICKS;
+  int btn = delta > 0 ? 4 : 5;
+
+  int win_id = wm_get_window_at(mx, my);
+  if (win_id < 0) return;
+  struct window *w = find_window(win_id);
+  if (!w || !w->pixel_mode || !w->mouse_events) return;
+
+  /* The pointer must be over the content area, like a content press. */
+  int cx, cy, cw, ch;
+  wm_pixel_content_rect(w, &cx, &cy, &cw, &ch);
+  if (mx < cx || mx >= cx + cw || my < cy || my >= cy + ch) return;
+
+  int x, y;
+  wm_mouse_pixel(w, mx, my, &x, &y);
+  char pseq[24], rseq[24];
+  int pn = wm_build_mouse_seq(pseq, sizeof pseq, 'P', x, y, btn);
+  int rn = wm_build_mouse_seq(rseq, sizeof rseq, 'R', x, y, btn);
+  for (int i = 0; i < ticks; i++) {
+    desktop_send_hook(win_id, pseq, pn);
+    desktop_send_hook(win_id, rseq, rn);
+  }
+}
+
+/* ---- Graceful close for pixel-mode windows (F1.8 input v2) -----------
+ * When the desktop closes a pixel-mode window (the F4 key or the
+ * title-bar X button) it first asks the app to quit:
+ *
+ *     ESC [ D ~        one write; the X11 library's WM_DELETE_WINDOW
+ *
+ * The window then stays alive for up to CLOSE_GRACE_MS of desktop ticks
+ * while the app exits on its own (its process exit closes the stdout pipe
+ * and the frame loop -- which already treats that as "window gone" --
+ * removes the window); if it is still there when the grace expires the
+ * desktop falls back to today's behavior: kill(pid) + remove.  A text
+ * window has no in-band close message and keeps the immediate kill.
+ * Only one close is ever in flight: a second request forces the first
+ * one's fallback.  The helpers are non-static so desktop_input_test.c
+ * can drive them with a fake clock. */
+#define CLOSE_GRACE_MS 250
+
+static int close_pending_win = -1;   /* pixel window asked to quit (-1 none) */
+static int close_pending_ms = 0;     /* when ESC [ D was sent */
+
+/* Build the graceful-close message: ESC [ D ~.  Returns the byte count. */
+int wm_build_close_seq(char *out, int cap) {
+  static const char msg[] = { 27, '[', 'D', ' ', '~' };
+  int j = (int)sizeof msg;
+  if (j > cap - 1) j = cap - 1;
+  for (int i = 0; i < j; i++) out[i] = msg[i];
+  out[j] = '\0';
+  return j;
+}
+
+/* Close a window now -- the pre-F1.8 path: kill the process, drop the
+ * window, forget any focus/drag/close bookkeeping for it. */
+static void close_window_now(int win_id) {
+  struct window *w = find_window(win_id);
+  if (!w) return;
+  kill(w->pid, 9);
+  wm_remove_window(win_id);
+  if (focused_window == win_id) focused_window = -1;
+  if (drag_win_id == win_id) desktop_drag_cancel();
+  if (close_pending_win == win_id) close_pending_win = -1;
+}
+
+/* Ask a window to close.  A pixel-mode window gets ESC [ D ~ and the
+ * grace period (returns 1); anything else closes immediately (returns 0).
+ * The caller repaints when the window actually goes away. */
+int desktop_request_close(int win_id, int now_ms) {
+  struct window *w = find_window(win_id);
+  if (!w) return 0;
+  if (!w->pixel_mode) {
+    close_window_now(win_id);
+    return 0;
+  }
+  if (close_pending_win >= 0 && close_pending_win != win_id)
+    close_window_now(close_pending_win);   /* one close in flight */
+  if (drag_win_id == win_id) desktop_drag_cancel();
+  char seq[8];
+  int n = wm_build_close_seq(seq, sizeof seq);
+  desktop_send_hook(win_id, seq, n);
+  close_pending_win = win_id;
+  close_pending_ms = now_ms;
+  print_console("[CLOSE] win=");
+  print_dec(win_id);
+  print_console(": ESC [ D sent\n");
+  return 1;
+}
+
+/* One tick of the close grace timer: fires the kill fallback when the app
+ * has not exited in time.  Returns 1 when it closed a window. */
+int desktop_close_tick(int now_ms) {
+  if (close_pending_win < 0) return 0;
+  if (now_ms - close_pending_ms < CLOSE_GRACE_MS) return 0;
+  int win_id = close_pending_win;
+  close_pending_win = -1;
+  print_console("[CLOSE] win=");
+  print_dec(win_id);
+  print_console(": grace expired, killing\n");
+  close_window_now(win_id);
+  return 1;
+}
+
+/* The app exited while its close was pending -- nothing left to kill. */
+void desktop_close_note_gone(int win_id) {
+  if (close_pending_win != win_id) return;
+  close_pending_win = -1;
+  print_console("[CLOSE] win=");
+  print_dec(win_id);
+  print_console(": exited within grace\n");
 }
 
 /* Parse an OSC "run in new window" request: seq[0]==']', seq[1]=='R',
@@ -1570,6 +1753,10 @@ int main(void) {
           ctrl_pressed = ev->value;
           continue;
         }
+        if (ev->code == 56 || ev->code == 100) {  /* Alt (left / right) */
+          alt_pressed = ev->value;
+          continue;
+        }
         if (ev->value == 0 && ev->code != 0x110) {
           /* Key release: a released key must never auto-repeat.  (The
            * mouse button release is handled by the BTN_LEFT block.) */
@@ -1664,12 +1851,9 @@ int main(void) {
                         mouse_y <= windows[w].y + 18 &&
                         mouse_x >= windows[w].x + windows[w].w - 18 &&
                         mouse_x <= windows[w].x + windows[w].w - 2) {
-                      kill(windows[w].pid, 9);
-                      wm_remove_window(win_id);
+                      desktop_request_close(win_id, now_ms);
                       if (focused_window == win_id)
                         focused_window = -1;
-                      if (drag_win_id == win_id)
-                        desktop_drag_cancel();
                     } else if (mouse_y >= windows[w].y + 18 && mouse_y <= windows[w].y + 34) {
                       int m_x = windows[w].x + 10;
                       for (int m = 0; m < windows[w].num_menus; m++) {
@@ -1720,16 +1904,10 @@ int main(void) {
         } else if (ev->value == 1) { // Key press
           if (ev->code == 62) { // F4: close the focused window (keyboard X button)
             if (focused_window >= 0) {
-              for (int w = 0; w < num_windows; w++) {
-                if (windows[w].id == focused_window) {
-                  kill(windows[w].pid, 9);
-                  break;
-                }
-              }
-              wm_remove_window(focused_window);
-              if (drag_win_id == focused_window)
-                desktop_drag_cancel();
-              focused_window = -1;
+              int closing = focused_window;
+              desktop_request_close(closing, now_ms);
+              if (focused_window == closing)
+                focused_window = -1;
               needs_redraw = 1;
             }
           } else if (ev->code == 102 || ev->code == 104 ||
@@ -1794,6 +1972,13 @@ int main(void) {
         }
         /* Pointer motion during a drag session is forwarded to the window. */
         if (drag_win_id >= 0) desktop_drag_move(mouse_x, mouse_y);
+      } else if (ev->type == EV_REL) {
+        /* Mouse wheel: EV_REL/REL_WHEEL, +1 per detent up / -1 down (what
+         * QEMU's virtio input emits for wheel-button events; see
+         * desktop_wheel above).  Forwarded to the pixel window under the
+         * pointer as btn 4/5 press+release pairs. */
+        if (ev->code == REL_WHEEL && ev->value != 0)
+          desktop_wheel(mouse_x, mouse_y, (int)ev->value);
       }
     }
 
@@ -1806,6 +1991,11 @@ int main(void) {
     /* A key held on the keyboard keeps firing through the focused window
      * (software auto-repeat; see key_repeat_tick). */
     key_repeat_tick(now_ms);
+
+    /* A close asked of a pixel window (ESC [ D ~) falls back to the kill
+     * once the grace has passed; a window the app already exited clears
+     * the timer in the drain loop below. */
+    if (desktop_close_tick(now_ms)) needs_redraw = 1;
 
     // Poll windows for stdout.  Drain a window's whole pending output in a
     // single iteration (bounded), instead of one 63-byte chunk per frame:
@@ -1828,6 +2018,9 @@ int main(void) {
           if (drag_win_id == windows[i].id) {
             desktop_drag_cancel();
           }
+          /* The app exited during a pending close grace: note it so the
+           * fallback timer does not fire a kill at a dead pid. */
+          desktop_close_note_gone(windows[i].id);
           wm_remove_window(windows[i].id);
           i--; // Adjust index after removal
           needs_redraw = 1;
