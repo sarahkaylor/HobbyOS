@@ -27,6 +27,7 @@ guest.img
 # tracks in its own fork repo (browser.md AD-11/Appendix C).
 third_party/wpewebkit-2.54.0/
 third_party/mbedtls-3.6.7/
+third_party/curl-8.22.0/
 
 # Test output
 actual_qemu.ppm
