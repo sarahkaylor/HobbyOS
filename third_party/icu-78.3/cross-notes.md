@@ -129,30 +129,37 @@ intel differs only in the triple/flags: `--target=x86_64-none-elf
 
 | arch | archive | bytes | members | sha256 |
 |---|---|---|---|---|
-| arm | libicuuc.a | 18,930,074 | 202 | `dc90aaa5c6681a727896232629a1d1dd2f821b4a4278011189453e11495498e8` |
-| arm | libicui18n.a | 32,115,574 | 254 | `9aa0a46db0bbb374bd51bbae6bfed8d0be4a21cb53e55fc38f833f88c06f59a9` |
+| arm | libicuuc.a | 18,715,802 | 202 | `540757e4836502d88428885c4434d62361288584ed55badf8b3733aed3c8d4ae` |
+| arm | libicui18n.a | 31,803,870 | 254 | `53b998c27941665625afaa1b8c8d5eeee4bd7a50de28a5f3b494dc3b5dd48618` |
 | arm | libicudata.a | 10,195,700 | 1 | `d1eab185757d4e392e90fc5809f7a16e60f9c62845bffebbb18bab6ddfc84667` |
-| intel | libicuuc.a | 18,897,126 | 202 | `907c7426381f74075140811abb3ef7436e963727fc359c8485a40484775870d3` |
-| intel | libicui18n.a | 32,207,642 | 254 | `5f4401bc3393936678db26d5f894612c5ab59b288272f5c932df41855d477b38` |
+| intel | libicuuc.a | 18,682,646 | 202 | `9287253fe93479613078156cd1b342b02c5acecd7e40decd90bfb846c0ed7924` |
+| intel | libicui18n.a | 31,895,506 | 254 | `84fe571fcf06990c6f530d1db84cca0f136071739ed40ac71293f39f1459a2c2` |
 | intel | libicudata.a | 10,195,700 | 1 | `60f887b3f1d68994a508d34973f2d9aee92ebc7565c3b564aad249486862b0c8` |
 
-- These were produced by the final cold runs (`--objdir
-  ~/.hermes/cache/scratch/icu-final-<arch> --outdir obj/<arch>/icu`); each
-  MANIFEST records the exact configure line, times, member counts, sample
-  member ELF type and probe status of *those* runs.
+- These are the delivered bytes in `obj/<arch>/icu/` from the default-path
+  invocation, verified to match the `sha256` lines in the adjacent
+  `MANIFEST.txt` (which also carries the exact configure line, member
+  counts, sample-member ELF type, spot-check summary and probe status of the
+  run that produced them). The `times:` line of a re-run manifest reads
+  `configure cached make 0-1s` — expected: `cp -f` re-stages the archives and
+  the manifest is regenerated, it does not imply a rebuild.
 - Spot checks (`llvm-nm-21 --defined-only`, **13 symbols PASS on both
   arches**, versioned `_78` names because ICU renaming is on by default):
   `libicuuc.a` → `u_init_78 u_charType_78 u_strToUpper_78 u_strToLower_78
   u_strFromUTF8_78 u_strToUTF8_78 ubrk_open_78`; `libicui18n.a` →
   `ucol_open_78 ucal_open_78 udat_open_78 unum_formatDouble_78
   ucsdet_open_78`; `libicudata.a` → `icudt78_dat`.
-- Member ELF check: `uinit.ao` = `ELF 64-bit LSB relocatable, ARM aarch64` /
-  `... x86-64` respectively.
+- Member ELF check (on the delivered archives): `uinit.ao` =
+  `ELF 64-bit LSB relocatable, ARM aarch64` / `... x86-64` respectively; the
+  MANIFEST `sample:` line shows the same for `appendable.ao`.
 - **Reproducibility caveat**: `libicudata.a` is byte-identical across builds
-  and build dirs (same sha256 from three separate runs). `libicuuc.a` /
-  `libicui18n.a` are *content*-identical but not byte-identical: `-g` embeds
-  the build-dir path in DWARF and GNU `ar` records member mtimes. Do not gate
-  CI on archive sha256 — compare `nm` symbol sets / sizes.
+  and build dirs (three independent runs, same sha256). `libicuuc.a` /
+  `libicui18n.a` are *content*-identical across runs but not byte-identical:
+  `-g` embeds the build-dir path in DWARF and GNU `ar` records member mtimes
+  (observed hashes for the same archive from different objdirs:
+  `540757e4…` / `dc90aaa5…` / `78af5260…` arm, `9287253f…` / `000de0a2…`
+  intel). Do not gate CI on archive sha256 — compare `nm` symbol sets,
+  member counts and sizes.
 
 ## Build times (this box: 32-thread dev host)
 
