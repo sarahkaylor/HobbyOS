@@ -21,6 +21,8 @@
 
 #include "pthread.h"
 #include "libc.h"
+#include "errno.h"
+#include "time.h"
 
 #define HO_PTHREAD_KEYS 128
 #define HO_PTHREAD_STACK_DEFAULT (256u * 1024u)
@@ -427,6 +429,31 @@ int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex) {
   pthread_mutex_unlock(mutex);
   ho_futex_wait(&cond->__seq, seq, -1);
   pthread_mutex_lock(mutex);
+  return 0;
+}
+int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
+                           const struct timespec *abstime) {
+  struct timespec now;
+  int seq, r;
+  long ms_left;
+
+  if (abstime == NULL)
+    return EINVAL;
+  if (clock_gettime(CLOCK_REALTIME, &now) != 0)
+    return EINVAL;
+
+  ms_left = (long)(abstime->tv_sec - now.tv_sec) * 1000 +
+            (long)(abstime->tv_nsec - now.tv_nsec) / 1000000;
+  if (ms_left < 0)
+    ms_left = 0;
+
+  seq = __atomic_load_n(&cond->__seq, __ATOMIC_RELAXED);
+  pthread_mutex_unlock(mutex);
+  /* futex timeout returns -ETIMEDOUT as the resume value (P1 design). */
+  r = ho_futex_wait(&cond->__seq, seq, (int)ms_left);
+  pthread_mutex_lock(mutex);
+  if (r == -ETIMEDOUT)
+    return ETIMEDOUT;
   return 0;
 }
 int pthread_cond_signal(pthread_cond_t *cond) {

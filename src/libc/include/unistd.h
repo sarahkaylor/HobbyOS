@@ -17,6 +17,13 @@ extern "C" {
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
 
+  /* POSIX.1-2008 realtime timers are provided (clock_gettime, nanosleep,
+   * CLOCK_MONOTONIC; see time.h), so advertise them like glibc does.
+   * libc++'s <chrono> selects its CLOCK_MONOTONIC steady_clock branch via
+   * "#if _POSIX_TIMERS > 0" (see libcxx/src/chrono.cpp). */
+#define _POSIX_TIMERS 200809L
+#define _POSIX_MONOTONIC_CLOCK 200809L
+
   /* POSIX seek whence values (also in stdio.h) */
 #ifndef SEEK_SET
 #define SEEK_SET 0

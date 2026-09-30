@@ -7,7 +7,8 @@
  * space on top of futex-lite.  Implementation: src/libc/src/pthread.c.
  *
  * Supported: create/join/detach/exit/self/equal; mutex (normal, recursive,
- * static initializers); cond (signal/broadcast; no timedwait in P1);
+ * static initializers); cond (signal/broadcast/timedwait — P3.2 added
+ * timedwait for libc++'s condition_variable::wait_for);
  * once; rwlock; barrier; keys (with destructors run at thread exit);
  * attr (detachstate + stacksize; everything else reports ENOTSUP).
  *
@@ -139,6 +140,10 @@ extern "C" {
   int pthread_cond_init(pthread_cond_t *cond, const pthread_condattr_t *attr);
   int pthread_cond_destroy(pthread_cond_t *cond);
   int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex);
+  /* P3.2: absolute CLOCK_REALTIME deadline (POSIX), ETIMEDOUT on expiry. */
+  struct timespec;
+  int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
+                             const struct timespec *abstime);
   int pthread_cond_signal(pthread_cond_t *cond);
   int pthread_cond_broadcast(pthread_cond_t *cond);
   int pthread_condattr_init(pthread_condattr_t *attr);

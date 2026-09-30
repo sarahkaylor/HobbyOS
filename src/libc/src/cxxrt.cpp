@@ -11,6 +11,17 @@
  * -DHOST_TEST, natively for the host unit tests (src/host/cxxrt_test.cpp);
  * the only external dependencies are malloc/free, print_console and
  * abort(), all of which exist in every one of those configurations.
+ *
+ * P3.1 integration with libc++abi (third_party/libcxx-21.1.8/):
+ * programs that link libcxx.a get the canonical libc++abi implementations
+ * of the static-init guards and __cxa_pure_virtual.  This file keeps its
+ * own copies so that CXXSMOKE.BIN and the F2.4 host tests still link
+ * against libc.a alone, which is why those four definitions are weak:
+ * a strong libc++abi definition (T) then wins cleanly and a libc.a-only
+ * link still resolves.  New/delete here stay strong and libc++'s are weak
+ * (W) by upstream design, so the HobbyOS allocator remains the single
+ * backing for both worlds; __cxa_atexit/__cxa_finalize/__dso_handle stay
+ * here because libc++abi's cxa_atexit.cpp is deliberately not built.
  */
 #include "cxxrt.h"
 
@@ -85,7 +96,10 @@ void operator delete(void *, void *) noexcept { }
  * Atomic ops keep it correct if threads arrive (P1); no spinning is
  * possible today because HobbyOS processes are single-threaded.
  */
-int __cxa_guard_acquire(uint64_t *guard) {
+/* Weak: libc++abi's cxa_guard.cpp supplies the strong definition when
+ * libcxx.a is linked (see the integration note at the top of this file);
+ * this copy is the fallback for CXXSMOKE-style libc.a-only programs. */
+__attribute__((weak)) int __cxa_guard_acquire(uint64_t *guard) {
   unsigned char *bytes = (unsigned char *)guard;
   for (;;) {
     unsigned char v = __atomic_load_n(bytes, __ATOMIC_ACQUIRE);
@@ -105,11 +119,11 @@ int __cxa_guard_acquire(uint64_t *guard) {
   }
 }
 
-void __cxa_guard_release(uint64_t *guard) {
+__attribute__((weak)) void __cxa_guard_release(uint64_t *guard) {
   __atomic_store_n((unsigned char *)guard, 1, __ATOMIC_RELEASE);
 }
 
-void __cxa_guard_abort(uint64_t *guard) {
+__attribute__((weak)) void __cxa_guard_abort(uint64_t *guard) {
   __atomic_store_n((unsigned char *)guard, 0, __ATOMIC_RELEASE);
 }
 
@@ -161,7 +175,9 @@ void __cxa_finalize(void *dso) {
  * Reached only through the vtable stub of an abstract class whose
  * constructor never ran (or similar UB).  There is no recovery.
  */
-void __cxa_pure_virtual(void) {
+/* Weak for the same reason as the guards: libc++abi's cxa_virtual.cpp
+ * provides the strong version in libc++-linked programs. */
+__attribute__((weak)) void __cxa_pure_virtual(void) {
   print_console("C++ runtime: pure virtual function call\n");
   abort();
 }

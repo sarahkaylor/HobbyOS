@@ -48,7 +48,28 @@ struct tm *gmtime(const time_t *timep) {
 /* No timezone database: local time is what the RTC says (UTC). */
 struct tm *localtime(const time_t *timep) { return gmtime(timep); }
 
-/* difftime() is intentionally absent: this is a freestanding C library
- * with no floating-point ABI, and no ported program has needed it. */
+/* difftime: userland may use the FPU since F1.5, and libc++'s <chrono>
+ * compares time_points in double. */
+double difftime(time_t time1, time_t time0) {
+  return (double)time1 - (double)time0;
+}
+
+/* clock(): monotonic CPU-time stand-in.  The kernel reports uptime in
+ * milliseconds (sysinfo 1); scale to CLOCKS_PER_SEC (1e6, glibc's value). */
+clock_t clock(void) {
+  int ms = sysinfo(1, 0, 0);
+  if (ms < 0)
+    ms = 0;
+  return (clock_t)ms * (CLOCKS_PER_SEC / 1000);
+}
+
+/* C11 timespec_get: TIME_UTC maps to CLOCK_REALTIME. */
+int timespec_get(struct timespec *ts, int base) {
+  if (base != TIME_UTC || ts == NULL)
+    return 0;
+  if (clock_gettime(CLOCK_REALTIME, ts) != 0)
+    return 0;
+  return TIME_UTC;
+}
 
 #endif /* !HOST_TEST */

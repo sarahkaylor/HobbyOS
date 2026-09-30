@@ -3,9 +3,11 @@
 
 #ifndef HOST_TEST
 #include "process.h"
+#include "errno.h"
 #else
 /* Host stand-in: the allocator is pure free-list logic on a fake heap, so
  * compile it natively (hb_* names) and test against glibc behavior. */
+#include <errno.h>
 #define USER_VIRT_BASE 0x44000000UL
 #define USER_REGION_SIZE 0x2000000UL
 #endif
@@ -15,6 +17,7 @@
 #define free hb_free
 #define calloc hb_calloc
 #define realloc hb_realloc
+#define aligned_alloc hb_aligned_alloc
 #endif
 
 // --- Memory Allocator ---
@@ -32,9 +35,12 @@ struct block {
   size_t size;
   int free;
   struct block *next;
+  unsigned long magic; /* BLOCK_MAGIC: distinguishes real blocks from the
+                        * word before an aligned_alloc() payload */
 };
 
 #define BLOCK_SIZE sizeof(struct block)
+#define BLOCK_MAGIC 0x48424F424C4B4D47UL /* "HBOBLKMG" */
 
 static struct block *free_list = NULL;
 
@@ -90,6 +96,7 @@ static void *malloc_locked(size_t size) {
     free_list->size = heap_limit - (uintptr_t)heap_ptr - BLOCK_SIZE;
     free_list->free = 1;
     free_list->next = NULL;
+    free_list->magic = BLOCK_MAGIC;
   }
 
   struct block *curr = free_list;
@@ -101,11 +108,13 @@ static void *malloc_locked(size_t size) {
         new_block->size = curr->size - size - BLOCK_SIZE;
         new_block->free = 1;
         new_block->next = curr->next;
+        new_block->magic = BLOCK_MAGIC;
 
         curr->size = size;
         curr->next = new_block;
       }
       curr->free = 0;
+      curr->magic = BLOCK_MAGIC;
       return (void *)((char *)curr + BLOCK_SIZE);
     }
     curr = curr->next;
@@ -122,9 +131,19 @@ void *malloc(size_t size) {
 }
 
 static void free_locked(void *ptr) {
+  struct block *curr;
+
   if (!ptr) return;
 
-  struct block *curr = (struct block *)((char *)ptr - BLOCK_SIZE);
+  curr = (struct block *)((char *)ptr - BLOCK_SIZE);
+  if (curr->magic != BLOCK_MAGIC) {
+    /* Possibly an aligned_alloc() payload: its raw block payload pointer is
+     * stashed in the word directly before it.  Recompute the real block. */
+    char *raw = ((char **)ptr)[-1];
+    curr = (struct block *)(raw - BLOCK_SIZE);
+    if (curr->magic != BLOCK_MAGIC)
+      return; /* not a HobbyOS heap pointer (UB input): ignore */
+  }
   curr->free = 1;
 
   // Coalesce adjacent free blocks
@@ -171,6 +190,27 @@ static void *realloc_locked(void *ptr, size_t size) {
 
   aligned = (size + 15) & ~15;
   curr = (struct block *)((char *)ptr - BLOCK_SIZE);
+  if (curr->magic != BLOCK_MAGIC) {
+    /* Aligned allocation: relocate through an ordinary block. */
+    char *raw = ((char **)ptr)[-1];
+    struct block *rb = (struct block *)(raw - BLOCK_SIZE);
+    void *newptr;
+    size_t copy, i;
+    char *d, *s2;
+
+    if (rb->magic != BLOCK_MAGIC)
+      return NULL;
+    newptr = malloc_locked(size);
+    if (!newptr)
+      return NULL;
+    copy = rb->size < size ? rb->size : size;
+    d = (char *)newptr;
+    s2 = (char *)ptr;
+    for (i = 0; i < copy; i++)
+      d[i] = s2[i];
+    free_locked(ptr);
+    return newptr;
+  }
   next = curr->next;
 
   /* Shrink in place: split the current block. */
@@ -181,6 +221,7 @@ static void *realloc_locked(void *ptr, size_t size) {
       rest->size = curr->size - aligned - BLOCK_SIZE;
       rest->free = 1;
       rest->next = curr->next;
+      rest->magic = BLOCK_MAGIC;
       curr->size = aligned;
       curr->next = rest;
     }
@@ -205,6 +246,7 @@ static void *realloc_locked(void *ptr, size_t size) {
       rest->size = leftover - BLOCK_SIZE;
       rest->free = 1;
       rest->next = nnext;
+      rest->magic = BLOCK_MAGIC;
       curr->size = total;
       curr->next = rest;
     } else {
@@ -235,6 +277,35 @@ void *realloc(void *ptr, size_t size) {
   void *p = realloc_locked(ptr, size);
   malloc_unlock();
   return p;
+}
+
+/* C11 7.22.3.1 aligned_alloc (P3.2: libc++'s C++17 aligned operator new
+ * calls this).  The payload is aligned inside a raw block with the raw
+ * payload pointer stashed in the word right before it, so free() and
+ * realloc() can recover the block (see free_locked). */
+void *aligned_alloc(size_t alignment, size_t size) {
+  char *raw;
+  uintptr_t u;
+
+  if (alignment == 0 || (alignment & (alignment - 1)) != 0) {
+    errno = EINVAL;
+    return NULL;
+  }
+  if (alignment < 16)
+    alignment = 16; /* the allocator's natural granularity */
+
+  malloc_lock();
+  raw = (char *)malloc_locked(size + alignment);
+  if (!raw) {
+    malloc_unlock();
+    errno = ENOMEM;
+    return NULL;
+  }
+  u = ((uintptr_t)raw + alignment - 1) & ~(uintptr_t)(alignment - 1);
+  if ((char *)u != raw)
+    ((char **)u)[-1] = raw;
+  malloc_unlock();
+  return (void *)u;
 }
 
 #ifdef HOST_TEST

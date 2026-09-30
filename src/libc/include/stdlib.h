@@ -2,6 +2,7 @@
 #define HOBBYOS_STDLIB_H
 
 #include <stddef.h>
+#include <locale.h> /* locale_t for the *_l variants */
 
 #ifdef __cplusplus
 extern "C" {
@@ -39,6 +40,62 @@ extern "C" {
   int abs(int j);
   long labs(long j);
   long long llabs(long long j);
+
+  /* ---- C99 integer division (P3.2: names <cstdlib> needs) ---- */
+  typedef struct {
+    int quot;
+    int rem;
+  } div_t;
+  typedef struct {
+    long quot;
+    long rem;
+  } ldiv_t;
+  typedef struct {
+    long long quot;
+    long long rem;
+  } lldiv_t;
+  div_t div(int numer, int denom);
+  ldiv_t ldiv(long numer, long denom);
+  lldiv_t lldiv(long long numer, long long denom);
+
+  /* ---- C99 float conversion (P3.2; src/libc/src/strtod.c) ---- */
+  double atof(const char *nptr);
+  double strtod(const char *nptr, char **endptr);
+  float strtof(const char *nptr, char **endptr);
+  long double strtold(const char *nptr, char **endptr);
+
+  /* xlocale/P3.2 variants (C locale: the locale argument is ignored). */
+  long strtol_l(const char *nptr, char **endptr, int base, locale_t loc);
+  long long strtoll_l(const char *nptr, char **endptr, int base, locale_t loc);
+  unsigned long strtoul_l(const char *nptr, char **endptr, int base,
+                          locale_t loc);
+  unsigned long long strtoull_l(const char *nptr, char **endptr, int base,
+                                locale_t loc);
+  double strtod_l(const char *nptr, char **endptr, locale_t loc);
+  float strtof_l(const char *nptr, char **endptr, locale_t loc);
+  long double strtold_l(const char *nptr, char **endptr, locale_t loc);
+
+  /* ---- C11 aligned allocation (P3.2: libc++ operator new over-aligned
+   * path / std::aligned_alloc).  Alignment must be a power of two and a
+   * multiple of sizeof(void*); size need not be a multiple of alignment
+   * (unlike C11's strict reading — the HobbyOS allocator handles any size,
+   * matching glibc's extension). */
+  void *aligned_alloc(size_t alignment, size_t size);
+
+  /* ---- C11 quick exit (P3.2) ---- */
+  int at_quick_exit(void (*function)(void));
+  void quick_exit(int status) __attribute__((noreturn));
+
+  /* ---- byte-string conversions (C99; declared here per C99 7.20) ---- */
+  int mblen(const char *s, size_t n);
+  int mbtowc(wchar_t *pwc, const char *s, size_t n);
+  size_t mbstowcs(wchar_t *dst, const char *src, size_t n);
+  int wctomb(char *s, wchar_t wc);
+  size_t wcstombs(char *dst, const wchar_t *src, size_t n);
+
+  /* system(): declared for source compatibility (libc++ <cstdlib> needs
+   * the name); not implemented on HobbyOS — no shell contract. */
+  int system(const char *command);
 
   void qsort(void *base, size_t nmemb, size_t size,
              int (*compar)(const void *, const void *));

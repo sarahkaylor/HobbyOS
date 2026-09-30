@@ -2,6 +2,7 @@
 #define HOBBYOS_STRING_H
 
 #include <stddef.h>
+#include <locale.h> /* locale_t for the *_l variants */
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,6 +20,13 @@ extern "C" {
   int strcmp(const char *s1, const char *s2);
   int strcoll(const char *s1, const char *s2); /* C locale: == strcmp */
   int strncmp(const char *s1, const char *s2, size_t n);
+  /* P3.2: strxfrm completes the <cstring> surface libc++'s headers
+   * re-export (C locale: identity transform, like glibc). */
+  size_t strxfrm(char *dst, const char *src, size_t n);
+
+  /* xlocale/P3.2 variants (C locale: the locale argument is ignored). */
+  int strcoll_l(const char *s1, const char *s2, locale_t loc);
+  size_t strxfrm_l(char *dst, const char *src, size_t n, locale_t loc);
   /* Also declared by glibc's <strings.h>, which the HOST_TEST build pulls
    * in via include_next.  glibc marks these __THROW (= noexcept(true) in
    * C++), so the C++ declarations here must carry the same exception
@@ -52,6 +60,11 @@ extern "C" {
   char *strdup(const char *s);
 
   char *strerror(int errnum);
+
+  /* XSI strerror_r (P3.2: libc++ system_error.cpp uses it).  Returns 0 on
+   * success, or the error number when the buffer is too small (ERANGE) or
+   * errnum is unknown (EINVAL), glibc-XSI semantics. */
+  int strerror_r(int errnum, char *buf, size_t buflen);
 
   int memcmp(const void *s1, const void *s2, size_t n);
   void *memmove(void *dest, const void *src, size_t n);

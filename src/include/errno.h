@@ -76,7 +76,13 @@
 #define EWOULDBLOCK  EAGAIN
 
 #ifndef HOST_TEST
-int *__errno_location(void);
+#ifdef __cplusplus
+extern "C" {
+#endif
+  int *__errno_location(void);
+#ifdef __cplusplus
+}
+#endif
 #define errno (*__errno_location())
 #else
 /* Host tests link against glibc, where `errno` is a TLS macro, not a

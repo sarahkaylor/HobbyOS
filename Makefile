@@ -612,7 +612,23 @@ $(OBJ_DIR)/libc_%.o: src/libc/src/%.c $(USER_HDRS) src/libc/src/*.h
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/cxxrt.o $(OBJ_DIR)/libc_pthread.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o $(OBJ_DIR)/libc_mman.o $(OBJ_DIR)/libc_regex.o $(OBJ_DIR)/libc_langinfo.o $(OBJ_DIR)/libc_wchar.o $(OBJ_DIR)/libc_wctype.o $(OBJ_DIR)/libc_locale.o $(OBJ_DIR)/libc_selinux.o $(OBJ_DIR)/libc_dirent.o $(OBJ_DIR)/libc_time.o $(OBJ_DIR)/libc_time_math.o $(OBJ_DIR)/libc_libgen.o $(OBJ_DIR)/libc_realpath.o
+# The P3.2 gap-fills use long double (strtold/strtof's widening casts, the
+# %Lf scanner path): on aarch64 clang lowers those to the binary128
+# compiler-rt builtins.  libc.a carries exactly the three that its members
+# reference so plain C programs (basename, sed, ...) link; libcxx.a carries
+# the full set for the C++ side.  x86_64 lowers long double to x87 and the
+# objects are simply unreferenced there.  Sources come from the pinned
+# vendor tree (fetch.sh self-heals if it is missing).
+LIBC_BUILTIN_SRCS = extenddftf2.c trunctfdf2.c trunctfsf2.c
+LIBC_BUILTIN_OBJS = $(addprefix $(OBJ_DIR)/builtins/,$(LIBC_BUILTIN_SRCS:.c=.o))
+$(LIBCXX_VENDOR)/.fetched-ok: $(LIBCXX_VENDOR)/fetch.sh $(LIBCXX_VENDOR)/anchors.sha256
+	@bash $(LIBCXX_VENDOR)/fetch.sh
+
+$(OBJ_DIR)/builtins/%.o: $(LIBCXX_ROOT)/compiler-rt/lib/builtins/%.c $(LIBCXX_VENDOR)/.fetched-ok
+	@mkdir -p $(OBJ_DIR)/builtins
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/cxxrt.o $(OBJ_DIR)/libc_pthread.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o $(OBJ_DIR)/libc_mman.o $(OBJ_DIR)/libc_regex.o $(OBJ_DIR)/libc_langinfo.o $(OBJ_DIR)/libc_wchar.o $(OBJ_DIR)/libc_wctype.o $(OBJ_DIR)/libc_locale.o $(OBJ_DIR)/libc_selinux.o $(OBJ_DIR)/libc_dirent.o $(OBJ_DIR)/libc_time.o $(OBJ_DIR)/libc_time_math.o $(OBJ_DIR)/libc_libgen.o $(OBJ_DIR)/libc_realpath.o $(OBJ_DIR)/libc_xlocale.o $(OBJ_DIR)/libc_strtod.o $(OBJ_DIR)/libc_strftime.o $(OBJ_DIR)/libc_math.o $(LIBC_BUILTIN_OBJS)
 	$(AR) rcs $@ $^
 
 # --- HELLO demo (Phase 0 gate): a main(argc, argv) program built against

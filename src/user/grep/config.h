@@ -40,7 +40,9 @@
 
 /* Define to 1 if you have the declaration of `strerror_r', and to 0 if you
    don't. */
-#define HAVE_DECL_STRERROR_R 0 /* sysroot ships strerror() only. */
+/* P3.2: the sysroot now declares the XSI strerror_r() in <string.h>; the
+   old GNU-style local declaration in gnulib/error.c must not be emitted. */
+#define HAVE_DECL_STRERROR_R 1
 
 /* Define if <stdlib.h> declares strtoul. */
 #define HAVE_DECL_STRTOUL 1
@@ -269,7 +271,7 @@
 #define HAVE___ARGZ_STRINGIFY 1
 
 /* Define as const if the declaration of iconv() needs const. */
-#define ICONV_CONST 
+#define ICONV_CONST
 
 /* Name of package */
 #define PACKAGE "grep"
@@ -295,9 +297,9 @@
 /* If using the C implementation of alloca, define if you know the
    direction of stack growth for your system; otherwise it will be
    automatically deduced at runtime.
-	STACK_DIRECTION > 0 => grows toward higher addresses
-	STACK_DIRECTION < 0 => grows toward lower addresses
-	STACK_DIRECTION = 0 => direction of growth unknown */
+        STACK_DIRECTION > 0 => grows toward higher addresses
+        STACK_DIRECTION < 0 => grows toward lower addresses
+        STACK_DIRECTION = 0 => direction of growth unknown */
 /* #undef STACK_DIRECTION */
 
 /* Define to 1 if the `S_IS*' macros in <sys/stat.h> do not work properly. */
