@@ -27,6 +27,20 @@ guest.img
 # tracks in its own fork repo (browser.md AD-11/Appendix C).
 third_party/wpewebkit-2.54.0/
 
+# L6 host-first library builds (browser/l6-libs1 — zlib / libpng /
+# libjpeg-turbo / libwebp, browser.md §2 carried pins + §7.1 L6): the pinned
+# tarball + .sha256/.sig + README + build.sh + smoke/ are committed; the
+# extracted upstream tree and the host build tree are rebuilt from the
+# tarball by each library's build.sh.
+third_party/zlib-1.3.1/src/
+third_party/zlib-1.3.1/build-host/
+third_party/libpng-1.6.44/src/
+third_party/libpng-1.6.44/build-host/
+third_party/libjpeg-turbo-3.1.0/src/
+third_party/libjpeg-turbo-3.1.0/build-host/
+third_party/libwebp-1.6.0/src/
+third_party/libwebp-1.6.0/build-host/
+
 # Test output
 actual_qemu.ppm
 qmp-sock
