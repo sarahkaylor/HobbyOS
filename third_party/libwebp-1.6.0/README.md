@@ -16,19 +16,28 @@ Makefile; `build.sh` is the recipe the WPE/port cross builds reuse.
 | Upstream | https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0.tar.gz |
 | sha256 | `e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564` |
 | Checksum file | `libwebp-1.6.0.tar.gz.sha256` (committed) |
+| GPG signature | `libwebp-1.6.0.tar.gz.asc` (committed) — **verified GOOD** |
 | License | BSD-3-Clause — `COPYING` + `PATENTS` copied from the tarball |
 | Vendored | 2026-09-30, downloaded from the URL above |
 
-**sha256 provenance:** the webmproject releases publish GPG `.asc` signatures
-only, no sha256 files — so this is the recorded computed value. It is
-corroborated by independent packaging records for the same file:
-FreeBSD ports `graphics/webp` distinfo and Buildroot's `webp.hash`
-(both `e4ab7009…` for `libwebp-1.6.0.tar.gz`).
+**Verification provenance:** the webmproject releases publish GPG `.asc`
+signatures (no sha256 files), so the signature was verified against the WebP
+release signing key (fetched from `keyserver.ubuntu.com`; fingerprint
+`6B0E 6B70 976D E303 EDF2  F601 F9C3 D6BD B823 2B5D`):
+
+    gpg --verify libwebp-1.6.0.tar.gz.asc libwebp-1.6.0.tar.gz
+    → Good signature from "WebP release signing key <webp-discuss@webmproject.org>"
+
+The computed sha256 above is recorded for tooling that wants a hash, and is
+corroborated by independent packaging records for the same file: FreeBSD
+ports `graphics/webp` distinfo and Buildroot's `webp.hash` (both `e4ab7009…`
+for `libwebp-1.6.0.tar.gz`).
 
 ## Layout
 
     libwebp-1.6.0.tar.gz          pinned tarball (committed)
     libwebp-1.6.0.tar.gz.sha256   checksum (committed)
+    libwebp-1.6.0.tar.gz.asc      upstream GPG signature (committed)
     README.md                     this file
     build.sh                      host build + smoke recipe (committed)
     smoke/webp_smoke.c            lossless roundtrip smoke (committed)
