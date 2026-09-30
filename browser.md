@@ -1254,6 +1254,16 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-09-30 — **Wave 1b gate batteries GREEN on both machines (`0f194bd`).**
+  VM (runner v3, fresh dir per tier): host rc=0 (all suites `0 failed`, incl. the new
+  `CXXRT TEST PASSED` + `CXX HEADERS TEST PASSED`; `TEST EXIT: 0`), unit-arm rc=0
+  (`UNIT TESTS PASSED`, 0 FAIL lines), unit-x64 rc=0 KVM (`UNIT TESTS PASSED`, 0 FAIL),
+  test-arm rc=0 86s (`System halt.`, 0 FAIL lines; in-wave CXX_SMOKE PASS lines incl.
+  global-object-constructed + cxa_finalize-runs-dtors; DNSTST live: DHCP 10.0.2.3 →
+  example.com A = 172.66.147.243). Workstation mirror: host suites 0 failed + both C++
+  suites PASSED, both unit tiers PASSED, ARM full wave 0 FAIL (`System halt from CPU 2.`).
+  (Batteries ran on the code tip; the docs-only delta `411f7a0` is the record itself.)
+
 - 2026-09-30 — **Wave 1b landed: F2.4/F2.5 + L5/L6 vendoring + P1 design note — all
   five 1b branches merged at `0f194bd` (base `9660552`).**
   - **l3-cxxrt `bd8b7e8`** (F2.4/F2.5): minimal C++ runtime — `src/libc/src/cxxrt.cpp` +
