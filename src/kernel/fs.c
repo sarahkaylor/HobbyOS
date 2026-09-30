@@ -6,6 +6,7 @@
 #include "nfs.h"
 #include "vfs.h"
 #include "errno.h"
+#include "timer.h"
 
 static struct file global_file_table[MAX_GLOBAL_FILES];
 static spinlock_t fs_lock;
@@ -184,6 +185,354 @@ int file_connect(struct process *cur, uint32_t ip, uint16_t port, int protocol) 
   }
 
   return fd;
+}
+
+/* --- Phase F1 (browser.md A.1a): socket/select syscall support ---------- */
+
+extern spinlock_t proc_lock;
+
+/* A socket fd's global file slot, or NULL with *errp set: EBADF for an fd
+ * outside the table, ENOTSOCK when the fd is open but is not a socket. */
+static struct file *f1_socket_file(struct process *p, int fd, int *errp) {
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) {
+    *errp = EBADF;
+    return 0;
+  }
+  int g_fd = p->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) {
+    *errp = EBADF;
+    return 0;
+  }
+  struct file *f = &global_file_table[g_fd];
+  if (f->type != FILE_TYPE_SOCKET || !f->socket.pcb) {
+    *errp = ENOTSOCK;
+    return 0;
+  }
+  return f;
+}
+
+int file_socket(struct process *p, int domain, int type, int protocol) {
+  if (!p) return -EINVAL;
+  if (domain != K_AF_INET) return -EAFNOSUPPORT;
+
+  int proto;
+  if (type == K_SOCK_STREAM) {
+    if (protocol != 0 && protocol != K_IPPROTO_TCP) return -EPROTONOSUPPORT;
+    proto = IP_PROTO_TCP;
+  } else if (type == K_SOCK_DGRAM) {
+    if (protocol != 0 && protocol != K_IPPROTO_UDP) return -EPROTONOSUPPORT;
+    proto = IP_PROTO_UDP;
+  } else {
+    /* No ESOCKTNOSUPPORT in the frozen errno set; documented v1 choice. */
+    return -EPROTONOSUPPORT;
+  }
+
+  if (p->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
+
+  struct file *f = file_alloc();
+  if (!f) return -EMFILE;
+
+  struct socket_pcb *pcb = net_socket_create(proto);
+  if (!pcb) {
+    f->type = FILE_TYPE_EMPTY;
+    f->ref_count = 0;
+    return -ENFILE;
+  }
+
+  f->type = FILE_TYPE_SOCKET;
+  f->socket.pcb = pcb;
+
+  int fd = -1;
+  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+    if (p->open_fds[i] == -1) {
+      p->open_fds[i] = get_global_fd(f);
+      p->num_open_fds++;
+      fd = i;
+      break;
+    }
+  }
+
+  if (fd == -1) {
+    net_socket_close(pcb);
+    f->type = FILE_TYPE_EMPTY;
+    f->ref_count = 0;
+    return -EMFILE;
+  }
+  return fd;
+}
+
+int file_socket_connect(struct process *p, int fd, uint32_t ip_be,
+                        uint16_t port_be) {
+  int err = 0;
+  struct file *f = f1_socket_file(p, fd, &err);
+  if (!f) return -err;
+
+  struct socket_pcb *pcb = f->socket.pcb;
+  uint16_t port = ntohs(port_be); /* the stack keeps ports host-order */
+
+  if (pcb->state == SOCKET_ESTABLISHED && pcb->connect_started &&
+      pcb->connect_err == 0) {
+    /* Already connected.  Linux says EISCONN; that errno is not in the
+     * frozen set, so v1 reports EINVAL (documented in the report). */
+    return -EINVAL;
+  }
+
+  if (pcb->nonblock) {
+    if (net_socket_connect_start(pcb, ip_be, port) != 0) return -EIO;
+    /* TCP: handshake in flight.  Completion is observed through select()
+     * writability (F1.2/F1.3) and getsockopt(SO_ERROR). */
+    return (pcb->protocol == IP_PROTO_TCP) ? -EINPROGRESS : 0;
+  }
+
+  if (net_socket_connect(pcb, ip_be, port) != 0) {
+    return -(pcb->connect_err ? pcb->connect_err : ETIMEDOUT);
+  }
+  return 0;
+}
+
+int file_fcntl(struct process *p, int fd, int cmd, int arg) {
+  int err = 0;
+  struct file *f = f1_socket_file(p, fd, &err);
+  if (!f) return -err;
+  struct socket_pcb *pcb = f->socket.pcb;
+
+  switch (cmd) {
+  case K_F_GETFL:
+    return net_socket_get_nonblock(pcb) ? K_O_NONBLOCK : 0;
+  case K_F_SETFL:
+    net_socket_set_nonblock(pcb, (arg & K_O_NONBLOCK) != 0);
+    return 0;
+  default:
+    return -EINVAL;
+  }
+}
+
+/* Readiness probe for one fd, setting *r/*w/*e.  Returns 0, or -1 when the
+ * fd is not open (select then fails the whole call with EBADF, like Linux). */
+static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e) {
+  *r = 0;
+  *w = 0;
+  *e = 0;
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
+  int g_fd = p->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
+  struct file *f = &global_file_table[g_fd];
+
+  if (f->type == FILE_TYPE_PIPE) {
+    struct pipe *pp = f->pipe.ptr;
+    if (!pp) return -1;
+    uint64_t flags = spinlock_acquire_irqsave(&pp->lock);
+    uint32_t count = pp->count;
+    uint32_t readers = pp->reader_count;
+    uint32_t writers = pp->writer_count;
+    spinlock_release_irqrestore(&pp->lock, flags);
+
+    if (f->pipe.end == 0) {
+      /* Read end: data ready; EOF (last writer closed) also reports
+       * readable so the reader observes the close, plus the exception
+       * flag (an fd_set has no separate POLLHUP channel). */
+      if (count > 0) *r = 1;
+      if (writers == 0) {
+        *r = 1;
+        *e = 1;
+      }
+    } else {
+      /* Write end: space available; with no readers left a write fails
+       * (EPIPE), reported as writable + exception, i.e. POLLOUT|POLLERR. */
+      if (readers == 0) {
+        *w = 1;
+        *e = 1;
+      } else if (count < PIPE_SIZE) {
+        *w = 1;
+      }
+    }
+    return 0;
+  }
+
+  if (f->type == FILE_TYPE_SOCKET) {
+    struct socket_pcb *pcb = f->socket.pcb;
+    if (!pcb) return -1;
+    /* These fields are written by the RX IRQ handler; peeking without the
+     * net lock is deliberate — a racy peek can only report stale readiness
+     * and the caller re-polls.  net_socket_ready() also drives handshake
+     * retransmission for a socket parked in connect. */
+    if (net_socket_ready(pcb, 0)) *r = 1;
+    if (net_socket_ready(pcb, 1)) *w = 1;
+    if (pcb->connect_err != 0) *e = 1;
+    if (pcb->protocol == IP_PROTO_TCP && pcb->state == SOCKET_CLOSED &&
+        !pcb->connect_started && pcb->connect_err == 0) {
+      *e = 1; /* HUP: closed without an error (already readable as EOF) */
+    }
+    return 0;
+  }
+
+  if (f->type == FILE_TYPE_FAT16 || f->type == FILE_TYPE_NFS) {
+    /* Regular files are always readable (a read may return 0 at EOF). */
+    *r = 1;
+    return 0;
+  }
+  return -1;
+}
+
+/* select() wake strategy (F1.2): never busy-spin.  A select with nothing
+ * ready parks the process through the scheduler exactly like sys_sleep()
+ * (PROC_STATE_BLOCKED + a short wake_ms slice) and the syscall restarts on
+ * wake (-2 convention), re-polling all fds.  The caller's timeout is made
+ * exact by remembering the absolute deadline per pid across the restarts.
+ * A stale entry (a process that died inside select) can cost the slot's
+ * next occupant one early wake, never a longer-than-requested wait, and it
+ * is cleared by the next select's completion. */
+static struct {
+  uint64_t deadline_ms; /* absolute; 0 = wait forever */
+  int valid;
+} select_wait[MAX_PROCESSES];
+
+#define SELECT_POLL_SLICE_MS 10
+
+int file_select(struct process *p, int nfds, struct fd_set_k *rd,
+                struct fd_set_k *wr, struct fd_set_k *ex, int timeout_ms) {
+  if (!p) return -EINVAL;
+  if (nfds < 0 || nfds > K_FD_SETSIZE) return -EINVAL;
+
+  uint64_t now = timer_get_ms();
+  if (!select_wait[p->pid].valid) {
+    select_wait[p->pid].valid = 1;
+    select_wait[p->pid].deadline_ms =
+        (timeout_ms < 0) ? 0 : now + (uint64_t)timeout_ms;
+  } else if (timeout_ms >= 0) {
+    uint64_t cap = now + (uint64_t)timeout_ms;
+    if (select_wait[p->pid].deadline_ms == 0 ||
+        select_wait[p->pid].deadline_ms > cap) {
+      /* Only reachable through a stale entry (pid reuse): never wait past
+       * what this caller asked for. */
+      select_wait[p->pid].deadline_ms = cap;
+    }
+  }
+
+  struct fd_set_k out_rd, out_wr, out_ex;
+  for (int i = 0; i < K_FD_SET_WORDS; i++) {
+    out_rd.bits[i] = 0;
+    out_wr.bits[i] = 0;
+    out_ex.bits[i] = 0;
+  }
+
+  int ready = 0;
+  for (int word = 0; word < K_FD_SET_WORDS; word++) {
+    uint32_t bits = 0;
+    if (rd) bits |= rd->bits[word];
+    if (wr) bits |= wr->bits[word];
+    if (ex) bits |= ex->bits[word];
+    while (bits) {
+      int bit = __builtin_ctz(bits);
+      bits &= bits - 1;
+      int fd = word * 32 + bit;
+      if (fd >= nfds) continue; /* POSIX: only fds < nfds are examined */
+
+      int r = 0, w = 0, e = 0;
+      if (f1_probe_fd(p, fd, &r, &w, &e) != 0) {
+        select_wait[p->pid].valid = 0;
+        return -EBADF;
+      }
+      uint32_t m = 1u << bit;
+      if (rd && (rd->bits[word] & m) && r) {
+        out_rd.bits[word] |= m;
+        ready++;
+      }
+      if (wr && (wr->bits[word] & m) && w) {
+        out_wr.bits[word] |= m;
+        ready++;
+      }
+      if (ex && (ex->bits[word] & m) && e) {
+        out_ex.bits[word] |= m;
+        ready++;
+      }
+    }
+  }
+
+  if (ready > 0) {
+    select_wait[p->pid].valid = 0;
+    for (int i = 0; i < K_FD_SET_WORDS; i++) {
+      if (rd) rd->bits[i] = out_rd.bits[i];
+      if (wr) wr->bits[i] = out_wr.bits[i];
+      if (ex) ex->bits[i] = out_ex.bits[i];
+    }
+    return ready;
+  }
+
+  int expired = (timeout_ms == 0) ||
+                (select_wait[p->pid].deadline_ms != 0 &&
+                 now >= select_wait[p->pid].deadline_ms);
+  if (expired) {
+    select_wait[p->pid].valid = 0;
+    for (int i = 0; i < K_FD_SET_WORDS; i++) {
+      if (rd) rd->bits[i] = 0;
+      if (wr) wr->bits[i] = 0;
+      if (ex) ex->bits[i] = 0;
+    }
+    return 0;
+  }
+
+  uint64_t wake = now + SELECT_POLL_SLICE_MS;
+  if (select_wait[p->pid].deadline_ms != 0 &&
+      select_wait[p->pid].deadline_ms < wake) {
+    wake = select_wait[p->pid].deadline_ms;
+  }
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  p->wake_ms = wake;
+  p->state = PROC_STATE_BLOCKED;
+  spinlock_release_irqrestore(&proc_lock, flags);
+  return -2;
+}
+
+struct socket_pcb *file_socket_pcb(struct process *p, int fd) {
+  int err = 0;
+  struct file *f = f1_socket_file(p, fd, &err);
+  return f ? f->socket.pcb : 0;
+}
+
+int file_socket_getopt(struct process *p, int fd, int level, int optname,
+                       void *val, int *len) {
+  int err = 0;
+  struct file *f = f1_socket_file(p, fd, &err);
+  if (!f) return -err;
+  struct socket_pcb *pcb = f->socket.pcb;
+
+  if (level != K_SOL_SOCKET) return -ENOPROTOOPT;
+  if (!val || !len) return -EINVAL;
+  if (*len < (int)sizeof(int)) return -EINVAL;
+
+  int value;
+  switch (optname) {
+  case K_SO_ERROR:
+    value = net_socket_error(pcb);
+    break;
+  case K_SO_TYPE:
+    value = (pcb->protocol == IP_PROTO_TCP) ? K_SOCK_STREAM : K_SOCK_DGRAM;
+    break;
+  case K_SO_REUSEADDR:
+    value = 0; /* we never "reuse" an address: every socket has its own port */
+    break;
+  default:
+    return -ENOPROTOOPT;
+  }
+  *(int *)val = value;
+  *len = (int)sizeof(int);
+  return 0;
+}
+
+int file_socket_setopt(struct process *p, int fd, int level, int optname,
+                       const void *val, int len) {
+  (void)val;
+  (void)len;
+  int err = 0;
+  struct file *f = f1_socket_file(p, fd, &err);
+  if (!f) return -err;
+
+  if (level != K_SOL_SOCKET) return -ENOPROTOOPT;
+  if (optname == K_SO_REUSEADDR) {
+    return 0; /* accepted no-op (each socket owns a unique ephemeral port) */
+  }
+  return -ENOPROTOOPT;
 }
 
 /* --- Phase 3: lseek/stat --------------------------------------------- */

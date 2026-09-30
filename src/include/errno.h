@@ -58,6 +58,8 @@
 #define EOPNOTSUPP  95 /* Linux value; acl-errno-valid.c */ /* Linux value; used by the byte-mode wide-char layer */
 
 /* Networking / socket errnos (Linux values; Phase F1, browser.md A.1a). */
+#define ENOTSOCK      88
+#define ENOPROTOOPT   92
 #define EADDRINUSE    98
 #define ENETUNREACH  101
 #define ECONNRESET   104
