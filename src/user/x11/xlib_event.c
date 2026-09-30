@@ -11,9 +11,20 @@
  *     ESC [ E <x>;<y>;<w>;<h> ~      repair one rectangle (then ] F so the
  *                                    pointer gets re-stamped)
  *     ESC [ P/G/R <x>;<y>;<btn> ~    mouse press / motion / release
+ *                                    (the wheel arrives as btn 4/5)
+ *     ESC [ K <mods> ~               modifier stamp before a key press
+ *                                    (F1.8; parsed and skipped -- the key
+ *                                    bytes keep their classic mapping)
+ *     ESC [ D ~                      the WM is closing the window: the
+ *                                    next XNextEvent() exits cleanly
  *     ESC [ A/B/C/D/H/F/Z            arrow/Home/End/Shift-Tab keys
  *     ESC [ <n> ~                    Insert/Delete/PgUp/PgDn/F1..F12
  *     any other byte                 a key; Escape is a lone ESC
+ *
+ * ESC [ D is special: it is the Left arrow AND the first three bytes of
+ * the close message, so the decoder defers the decision by one byte (a
+ * '~' closes, anything else makes it Left) -- see the st == 4 handling in
+ * x11_input_bytes().
  *
  * The decoder is a pure byte-state machine (x11_input_bytes) so the host
  * tests can feed it canned streams; the pump around it does the actual
@@ -24,6 +35,28 @@
 #include "xlib_internal.h"
 
 #include "libc.h"
+
+/* ---- test-support marker --------------------------------------------- *
+ * The F1.8 additions are observable in the serial log so an E2E harness
+ * can assert that a pixel window decoded what the desktop sent (the
+ * router for print_console is serial, never the protocol pipe on fd 1).
+ * Host builds stay quiet: the print would land in the test output. */
+#ifndef HOST_TEST
+static void x11_note(const char *what, int n) {
+  print_console("[X11] ");
+  print_console(what);
+  if (n >= 0) {
+    print_console("=");
+    print_dec(n);
+  }
+  print_console("\n");
+}
+#else
+static void x11_note(const char *what, int n) {
+  (void)what;
+  (void)n;
+}
+#endif
 
 /* ---- event queue ----------------------------------------------------- */
 
@@ -169,6 +202,8 @@ static void handle_mouse(Display *d, unsigned char kind,
   if (seq[i] == ';') i++;
   int btn = next_int(seq, &i);
   if (btn < 0) btn = 1;
+  if (kind == 'P' && (btn == 4 || btn == 5))
+    x11_note(btn == 4 ? "wheel up" : "wheel down", -1);
   int type = (kind == 'P') ? ButtonPress
            : (kind == 'R') ? ButtonRelease
            : MotionNotify;
@@ -241,6 +276,17 @@ static void csi_dispatch(Display *d, const unsigned char *seq, int len) {
   if (k == 'E') { handle_repair(d, seq, len); return; }
   if (k == 'P' || k == 'G' || k == 'R') { handle_mouse(d, k, seq, len); return; }
   if (k == 'T') { handle_track(d, seq, len); return; }
+  if (k == 'K') {
+    /* F1.8 modifier stamp: ESC [ K <mods> ~.  Parsed and skipped -- the
+     * key bytes keep the classic mapping (Shift legend, Ctrl control
+     * bytes), so the value is not consumed here (XKeyEvent.state stays
+     * 0, per the README).  Skipping it explicitly keeps it out of the
+     * numeric key decoder below. */
+    int i = 1;
+    int mods = next_int(seq, &i);
+    if (mods > 0) x11_note("K mods", mods);
+    return;
+  }
   int i = 0;
   int n = next_int(seq, &i);
   if (n >= 0) csi_number(d, n);
@@ -292,8 +338,13 @@ void x11_input_bytes(Display *d, const unsigned char *buf, int len) {
         i--;                              /* this byte starts fresh */
       }
     } else if (d->st == 2) {
-      if (d->seq_len == 0 &&
-          (c == 'A' || c == 'B' || c == 'C' || c == 'D' ||
+      if (d->seq_len == 0 && c == 'D') {
+        /* ESC [ D: the Left arrow AND the first three bytes of the WM's
+         * close message ESC [ D ~ (F1.8).  Defer by one byte; st == 4
+         * decides between them. */
+        d->st = 4;
+      } else if (d->seq_len == 0 &&
+          (c == 'A' || c == 'B' || c == 'C' ||
            c == 'H' || c == 'F' || c == 'Z')) {
         csi_key(d, c);
         d->st = 0;
@@ -305,6 +356,23 @@ void x11_input_bytes(Display *d, const unsigned char *buf, int len) {
         d->seq[d->seq_len++] = c;
       } else {
         d->st = 0;                        /* overlong: drop the sequence */
+      }
+    } else if (d->st == 4) {
+      if (c == '~') {
+        /* ESC [ D ~ : the WM is closing this window (WM_DELETE_WINDOW).
+         * The desktop sends it as one write and waits ~250 ms before it
+         * kills the process; marking the display closed makes the next
+         * XNextEvent() exit(0) -- the clean-exit path a dropped desktop
+         * connection has always used. */
+        d->desktop_closed = 1;
+        d->st = 0;
+        x11_note("WM close requested", -1);
+      } else {
+        /* Not a close: it was a real Left arrow. Deliver it and let this
+         * byte start fresh. */
+        d->st = 0;
+        csi_key(d, 'D');
+        i--;
       }
     } else {                              /* st == 3: OSC */
       if (c == '~') {
@@ -321,9 +389,16 @@ void x11_input_bytes(Display *d, const unsigned char *buf, int len) {
 }
 
 void x11_input_settle(Display *d, int more_bytes_pending) {
-  if (d->st == 1 && !more_bytes_pending) {
+  if (more_bytes_pending) return;
+  if (d->st == 1) {
     key_event(d, X11_KC_ESCAPE);
     d->st = 0;
+  } else if (d->st == 4) {
+    /* ESC [ D with nothing following is the Left arrow, not a close: the
+     * WM sends ESC [ D ~ as a single write, so a read that ends at the
+     * 'D' while more bytes are queued keeps waiting (see the pump). */
+    d->st = 0;
+    csi_key(d, 'D');
   }
 }
 
@@ -345,8 +420,10 @@ void x11_pump_nonblock(Display *d) {
 int x11_wait_event(Display *d) {
   for (;;) {
     if (d->q_head != d->q_tail) return 0;
+    if (d->desktop_closed) return -1;   /* ESC [ D ~: quit cleanly */
     x11_pump_nonblock(d);
     if (d->q_head != d->q_tail) return 0;
+    if (d->desktop_closed) return -1;
     x11_shadow_flush(d);                  /* pending drawing lands first */
     unsigned char buf[256];
     int r = read(0, buf, sizeof buf);

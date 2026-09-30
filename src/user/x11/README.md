@@ -87,7 +87,20 @@ default `XSetTSOrigin`.
 - **No key-release events** and no modifier state in `XKeyEvent.state`
   (the desktop pre-maps modifiers into the byte: Shift+`=` arrives as
   `+`, Ctrl+A as `0x01`).  `XLookupString()` turns the delivered keycode
-  back into a keysym and a character.
+  back into a keysym and a character.  The desktop's F1.8 modifier stamp
+  (`ESC [ K <mods> ~`, sent before a key press to pixel windows) is
+  parsed and skipped by the decoder -- the key bytes keep their classic
+  mapping, so nothing changes here.
+- **The mouse wheel** arrives as the desktop's ordinary mouse messages
+  with `btn` 4 (up) / 5 (down), so a program that selected
+  `ButtonPressMask` gets them as `ButtonPress`/`ButtonRelease` with
+  `xbutton.button` 4 or 5, X11-style.
+- **The WM can ask the window to close** (`ESC [ D ~`, sent before the
+  desktop falls back to killing the process).  The decoder notes it and
+  the next `XNextEvent()` exits the process cleanly -- the same path a
+  dropped desktop connection takes.  A program that blocks for a long
+  time between events may still be killed by the WM after its short
+  grace (~250 ms); the port needs nothing special.
 - **Printables arrive as their byte** in `XKeyEvent.keycode` (so an app
   can see the character directly); named keys use synthetic keycodes
   (internal header).
