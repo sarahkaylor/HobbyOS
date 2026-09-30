@@ -63,7 +63,18 @@ ifeq ($(ARCH),intel)
   # enables CR0.EM/MP/TS + CR4.OSFXSR/OSXMMEXCPT per core and carries each
   # process's 512-byte FXSAVE64 image across context switches (F1.5).
   CFLAGS = -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
-  USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone
+  # Hermetic userland include path (P3).  clang's driver for x86_64-none-elf
+  # appends the WORKSTATION's glibc dirs (/usr/include) because the target
+  # arch matches the host's; the aarch64 target never gets aarch64 host
+  # dirs, which is why only intel leaked.  Concretely: libc++'s
+  # __mbstate_t.h tests __has_include(<bits/types/mbstate_t.h>), finds
+  # glibc's on intel only, and its typedef collides with the sysroot's
+  # ('typedef redefinition ... mbstate_t').  -nostdinc + an explicit
+  # resource-dir -isystem reproduces the arm (hermetic) search path:
+  # compiler freestanding headers reachable, host glibc not.
+  # Keep in sync with third_party/libcxx-21.1.8/build-target.sh (STDINC).
+  CLANG_RESOURCE_INCLUDE := $(shell $(CC) -print-resource-dir 2>/dev/null)/include
+  USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem $(CLANG_RESOURCE_INCLUDE)
   ARCH_DIR = src/kernel/arch/x64
   LDFLAGS = -T linker_x64.ld
   # QEMU parameters for x86_64: 8 cores, 6GB RAM, mounting disk.img as NVMe, booting with UEFI
