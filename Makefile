@@ -1204,6 +1204,16 @@ endif
 run: $(TARGET) disk.img
 	$(QEMU_CMD)
 
+# Rebuild the boot disk image from scratch (fresh mkfs + full mcopy).
+# Unit-test suites WRITE to the disk (fat16 tests create/move files), so a
+# re-run in the same tree needs a fresh image or stateful failures appear
+# (fat16 move-across-dirs).  Touch the kernel so the image recipe re-runs —
+# the recipe itself does dd+mkfs, so no deletions are involved.
+.PHONY: fresh_disk
+fresh_disk: $(TARGET)
+	touch $(TARGET)
+	$(MAKE) disk.img
+
 # Clean rule to remove build artifacts
 clean:
 	-pkill -f qemu-system

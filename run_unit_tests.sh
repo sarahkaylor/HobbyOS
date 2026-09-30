@@ -17,6 +17,15 @@ if ! make MODE=unit_tests hobbyos.elf disk.img > build.log 2>&1; then
     exit 1
 fi
 
+# The unit suites write to disk.img (fat16 create/move); a re-run in the
+# same tree must start from a fresh image or stateful failures appear.
+echo "Refreshing disk image..."
+if ! make MODE=unit_tests fresh_disk >> build.log 2>&1; then
+    echo "Disk refresh failed!"
+    tail -40 build.log
+    exit 1
+fi
+
 # Kill exactly this run's process tree: make spawns qemu as its child, and
 # killing only make leaves qemu holding disk.img (the next run then dies on
 # the QEMU write lock).  pkill -P is scoped to our own child, never the
