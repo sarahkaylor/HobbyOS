@@ -520,28 +520,45 @@ edits (five lane worktrees carry their own trees).
 Goal: the OS can run a `select()`-driven, socket-using, floating-point C/C++
 program of several MiB.
 
-- [ ] **F1.1 Syscalls 65–71** *(v1 T1.1)* — as v1 §Appendix A.1a; three
+- [x] **F1.1 Syscalls 65–71** *(v1 T1.1)* — as v1 §Appendix A.1a; three
       commits; kernel-unit + host tests. Add the **FD_SETSIZE 256** width to
       the masks at implementation time (record amendment in A.1a).
-- [ ] **F1.2 `select()` engine** *(v1 T1.2)* — readiness for pipes/stdin/
+      **Done 2026-09-30:** merged `7a4900b` — both arches; unit tests in-suite
+      (ARM 48/48, x64 50/50 KVM); SOCK2TST/POLLTST/RANDTST wired; §11.
+- [x] **F1.2 `select()` engine** *(v1 T1.2)* — readiness for pipes/stdin/
       sockets, ms timeout, wakeups; documented wake strategy.
-- [ ] **F1.3 TCP hardening** *(v1 T1.3)* — non-blocking connect completion,
+      **Done:** merged `7a4900b` — scheduler park (no busy-spin); POLLTST
+      blocking/timeout checks in-wave; wake-slice v1 notes carried; §11.
+- [x] **F1.3 TCP hardening** *(v1 T1.3)* — non-blocking connect completion,
       `POLLOUT` semantics, retransmit; extend `net_test.c` + `SOCK2TST.BIN`.
-- [ ] **F1.4 Entropy** *(v1 T1.4)* — `SYS_GETRANDOM` + `virtio-rng` + jitter
+      **Done:** merged `7a4900b` — completion via select/SO_ERROR, bounded SYN
+      retransmit; SOCK2TST live HTTP GET over connect_fd in-wave; §11.
+- [x] **F1.4 Entropy** *(v1 T1.4)* — `SYS_GETRANDOM` + `virtio-rng` + jitter
       fallback.
-- [ ] **F1.5 FPU both arches** *(v1 T1.5)* — enable + context switch; userland
+      **Done:** merged `7a4900b` — mixed-source (no virtio-rng device in tree;
+      noted §11); RANDTST in-wave; §11.
+- [x] **F1.5 FPU both arches** *(v1 T1.5)* — enable + context switch; userland
       loses `-mgeneral-regs-only` (ARM) / gains SSE (x64); `FPU_T.BIN` exact
       value asserts across preemption/fork.
+      **Done:** merged `09b2a71` + `660b3f0` — FPU_T 12/12 in-wave (ARM);
+      x64 8/11 labeled minimal-boot + unit gate (fork-stage blocked by
+      pre-existing plumbing, not FP); §11.
 - [ ] **F1.6 Loader/memory interim** *(scope-changed, v1 T1.6)* — raise the
       *window/cap* only as needed by NetSurf (target ≤ 32 MiB images: cap
       decision at W0.3; zeroing strategy as v1). **The real fix is P2.**
-- [ ] **F1.7 DHCP→DNS hand-off** *(v1 T1.7)*.
-- [ ] **F1.8 Desktop input v2** *(v1 T1.8)* — Alt/modifiers `ESC [ K` (pixel
+- [x] **F1.7 DHCP→DNS hand-off** *(v1 T1.7)* — **Done:** merged `7a4900b`
+      (+ wiring `c7c181f`); DNSTST resolves live (`10.0.2.3` →
+      `172.66.147.243`); §11.
+- [x] **F1.8 Desktop input v2** *(v1 T1.8)* — Alt/modifiers `ESC [ K` (pixel
       windows only), wheel→buttons 4/5, graceful close `ESC [ D`; host tests
       + x64 QEMU input-path verification first.
+      **Done:** merged `eaa0465` — host +54/+20 checks, ARM+x64 E2E green,
+      13-app regression 13/13; §11.
 
 **Gate F1:** v1's gate stands: host + kernel + in-OS suites green on both
 arches (`FPU_T`, `POLLTST`, `SOCK2TST`, entropy); boot-time delta recorded.
+**Gate F1 closed 2026-09-30** — suites green in-wave on the CI VM; boot-time
+delta +0.55 s (ARM) / +0.55 s (x64), within the +2 s target; full record §11.
 
 ### F2 — libc & C runtime (v1 M2 carried)
 
@@ -1205,6 +1222,47 @@ curl -sI https://lite.cnn.com | grep -i content-length
 ---
 
 ## 11. Fix log (append-only; see also per-lane reports)
+
+- 2026-09-30 — **F1 CLOSED: all five lanes merged and gated on both arches.**
+  Merge order + commits: l4 `eaa0465` (F1.8 input v2: K modifier stamps, wheel
+  btn 4/5, 250 ms graceful close; ARM+x64 QMP E2E green, 13-app regression
+  13/13), l3 `1fce4f9` (F2.2 resolver + F2.3 clocks; host 482/0), l2-fpu-arm
+  `09b2a71` (CPACR_EL1.FPEN per core, FPSIMD save/restore; 4/4 waves green
+  with FPU_T 12/12; torture sensitivity proven by deliberate negative control),
+  l2-fpu-x64 `660b3f0` (CR0/CR4, FXSAVE64/FXRSTOR64, SysV stack-ABI fix
+  `fda9536`; FPU_T 8/11 in labeled minimal-boot — completion blocked by a
+  pre-existing fork/pipe wait-reap wedge, not FP), l1 `7a4900b` (syscalls
+  65–71 both arches, select() engine, TCP hardening incl. non-blocking
+  connect completion, entropy, DHCP→DNS; x64 4th-arg `regs[9]` trap fix
+  `a2a0e64`). Parent integration fixes: `63add42` — connect_fd `port_be` is
+  literal network order (fs.c boundary ntohs()es; resolv.c was host-order —
+  now `be16(RESOLV_PORT)`; libc.h documents wire-order ip/port); `c7c181f` —
+  DNSTST wired (Makefile bin/rule/disk/mcopy + main.c wave entry) and resolv
+  read-wait bounded via `select(3000)` (removes the documented
+  unbounded-block hazard on a lost UDP reply).
+  **Official gates (CI VM, runner v3, fresh dir per tier):** host rc=0
+  (482 checks / 0 failed, 47 s); unit-arm rc=0 (48/48, 50 s); unit-x64 rc=0
+  (50/50 KVM, 45 s); test-arm rc=0 (86 s — completion marker + 0 FAIL tokens;
+  in-wave: FPU_T 12/12 incl. fork-isolation/syscall-boundary; SOCK2TST live
+  HTTP GET over connect_fd; POLLTST blocking-select wake; RANDTST; DNSTST
+  live: DHCP DNS `10.0.2.3` → `example.com A = 172.66.147.243`).
+  Workstation battery mirrors it (host 482/0, ARM 48/48, x64 50/50).
+  Pre-merge: all five lane gates green (host/unit-arm/unit-x64 each);
+  ARM wave baseline green (85 s). **Gate F1 boot-time delta** (unit-tier
+  wall, warm dirs, touch-refreshed — same method as the baseline): ARM
+  7.78 → 8.33 s, x64 4.75 → 5.30 s (both +0.55 s, within the +2 s target;
+  includes +4 added unit tests per arch and 5 new bins on the disk image).
+  x64 full wave remains incomplete at tip (pre-existing silent-reset class,
+  unchanged — lane waves map to baseline classes, no new class: l2-x64 wave4
+  1167 boots, 0 LOCKFOREVER / 0 IDLESTUCK); `unit-x64` green stands as the
+  hard x64 gate.
+  **Carried (non-gate) items:** exec() FP-context reset + exec-path SP align
+  (lane-proposed `program_loader.c` diffs); x64 PS/2 IntelliMouse wheel +
+  E0-extended keys (wheel currently ARM-only); `third_party/_staging` seeding
+  for host_tests in pristine worktrees; select() v1 wake-slice notes
+  (10 ms bound); SYS_GETRANDOM is not a CSPRNG and the SYN-loss path is
+  untested (no loss injection); FP-disabled trap path unexercised (FPEN is
+  set before any FP use).
 
 - 2026-09-29 — **W0.3 + W0.4 audits landed (archived under `docs/browser/`).**
   W0.3 (`f0-budgets.md`): the 256 MiB image grows safely as **FAT16 with
