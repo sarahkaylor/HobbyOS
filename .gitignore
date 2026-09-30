@@ -79,3 +79,14 @@ third_party/skia-588b550/skia-*.tar.gz
 third_party/skia-588b550/src/
 third_party/skia-588b550/build-host/
 third_party/skia-588b550/.fetched-ok
+
+# L6 ICU host-first vendoring (browser/l6-icu; browser.md §2 ICU pin): the
+# committed set = fetch.sh + digest records (.sha256/.md5/SHASUM512.txt) +
+# README + build-host.sh + build-host-trimmed.sh + data-filter-en.json +
+# smoke/; the 27 MB sources tarball, the 20 MB data-sources zip, the
+# extracted upstream tree and the host build tree are rebuilt by fetch.sh /
+# the build scripts.
+third_party/icu-78.3/icu4c-78.3-sources.tgz
+third_party/icu-78.3/icu4c-78.3-data.zip
+third_party/icu-78.3/src/
+third_party/icu-78.3/build-host/

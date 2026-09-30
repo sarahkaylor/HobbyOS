@@ -1,0 +1,9 @@
+{
+  "featureFilters": {
+    "brkitr_dictionaries": "exclude"
+  },
+  "localeFilter": {
+    "filterType": "language",
+    "whitelist": ["en"]
+  }
+}
