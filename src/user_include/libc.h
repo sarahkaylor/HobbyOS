@@ -241,6 +241,11 @@ typedef struct { unsigned int bits[FD_SETSIZE / 32]; } fd_set;
 int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
            int timeout_ms);
 
+/* ---- F2.2/F2.3 (browser.md §6): resolver + IPv4 conversion -------------
+ * Full contract in resolv.h; legacy libc.h-only programs see the surface
+ * here (device-only, like the socket block above — the host has glibc's). */
+#include "resolv.h"
+
 #endif /* !HOST_TEST */
 
 #endif
