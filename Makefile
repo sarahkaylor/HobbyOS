@@ -55,9 +55,13 @@ endif
 ifeq ($(ARCH),intel)
   QEMU = qemu-system-x86_64
   # Intel/AMD 64-bit compiler flags
-  # Using standard bare-metal flags, disabling red zone and SSE
+  # Kernel stays off x87/SIMD: -mno-sse/-mno-mmx keep every kernel TU free of
+  # FP/SSE codegen (the FPU state is moved only by arch/x64/fpu.c's inline
+  # fxsave64/fxrstor64).  Userland, however, may use the FPU/SSE: the kernel
+  # enables CR0.EM/MP/TS + CR4.OSFXSR/OSXMMEXCPT per core and carries each
+  # process's 512-byte FXSAVE64 image across context switches (F1.5).
   CFLAGS = -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
-  USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
+  USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone
   ARCH_DIR = src/kernel/arch/x64
   LDFLAGS = -T linker_x64.ld
   # QEMU parameters for x86_64: 8 cores, 3GB RAM, mounting disk.img as NVMe, booting with UEFI
@@ -136,6 +140,10 @@ EDITOR_T_BIN = $(OBJ_DIR)/EDITOR_T.BIN
 APPS_T_BIN = $(OBJ_DIR)/APPS_T.BIN
 PONG_T_BIN = $(OBJ_DIR)/PONG_T.BIN
 STRESS_TEST_BIN = $(OBJ_DIR)/stress.bin
+# F1.5 (browser.md): floating-point bring-up test.  FPU_T.BIN is 8.3-safe
+# (the FAT16 reader only resolves 8-char base names, see the run-tests
+# skill's pitfall #1).
+FPU_T_BIN = $(OBJ_DIR)/fpu_test.bin
 ERRNO_TEST_BIN = $(OBJ_DIR)/errtest.bin
 HELLO_BIN = $(OBJ_DIR)/hello.bin
 
@@ -340,6 +348,13 @@ $(OBJ_DIR)/stress_test.o: src/user/stress_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
+# F1.5: floating-point bring-up test (src/user/fpu_test.c).  Needs the FPU
+# userland flags (ARCH=intel USER_CFLAGS no longer carry -mno-sse) and links
+# libc+malloc+libc_string like the other multi-purpose test binaries.
+$(OBJ_DIR)/fpu_test.o: src/user/fpu_test.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
 $(OBJ_DIR)/user_graphics.o: src/user/graphics/graphics.c $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
@@ -421,6 +436,10 @@ $(PIPETEST_BIN): $(OBJ_DIR)/user_pipe_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/u
 $(STRESS_TEST_BIN): $(OBJ_DIR)/stress_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/stress.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/stress.elf $(STRESS_TEST_BIN)
+
+$(FPU_T_BIN): $(OBJ_DIR)/fpu_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/fpu_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/fpu_test.elf $(FPU_T_BIN)
 
 $(ERRNO_TEST_BIN): $(OBJ_DIR)/user_errno_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/errno_test.elf $^
@@ -1037,7 +1056,7 @@ $(XEYES_BIN): $(OBJ_DIR)/xeyes_main.o $(X11_LIB_OBJS) $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/xeyes.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/xeyes.elf $(XEYES_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -1092,6 +1111,7 @@ endif
 	$(MCOPY) -i disk.img $(DIALOG_TEST_BIN) ::/DIALOG_T.BIN
 	$(MCOPY) -i disk.img $(PONG_T_BIN) ::/PONG_T.BIN
 	$(MCOPY) -i disk.img $(STRESS_TEST_BIN) ::/STRESS.BIN
+	$(MCOPY) -i disk.img $(FPU_T_BIN) ::/FPU_T.BIN
 	$(MCOPY) -i disk.img $(ERRNO_TEST_BIN) ::/ERRTEST.BIN
 	$(MCOPY) -i disk.img $(HELLO_BIN) ::/HELLO.BIN
 	$(MCOPY) -i disk.img $(SH_BIN) ::/SH.BIN

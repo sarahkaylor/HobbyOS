@@ -204,6 +204,11 @@ static void test_wave_loader(void *arg) {
   load_and_run_program_in_scheduler("TACTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("CMPTEST.BIN", -1, -1, -1, -1);
 
+  /* F1.5 (browser.md): floating-point bring-up (FPU_T.BIN).  Runs LAST:
+     it forks/waits and self-terminates, so it wants process slots that the
+     earlier wave entries free as they exit. */
+  load_and_run_program_in_scheduler("FPU_T.BIN", -1, -1, -1, -1);
+
   extern void kernel_exit(void);
   kernel_exit();
 }

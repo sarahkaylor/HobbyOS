@@ -71,10 +71,22 @@ map_pd1:
     lea eax, boot_pml4
     mov cr3, eax
 
-    /* Enable PAE */
+    /* Enable PAE + FP/SSE (CR4.OSFXSR bit 9, CR4.OSXMMEXCPT bit 10).
+       CR4 is per-core, so the boot core sets these here and the AP
+       trampoline below sets them again for every secondary core.
+       OSFXSR: FXSAVE/FXRSTOR + SSE instructions are OS-managed;
+       OSXMMEXCPT: unmasked SIMD FP exceptions arrive as #XM, not #UD. */
     mov eax, cr4
-    or eax, 1 << 5
+    or eax, (1 << 5) | (1 << 9) | (1 << 10)
     mov cr4, eax
+
+    /* CR0: EM=0 (no x87 emulation trap), MP=1, TS=0 (no lazy FPU
+       switching — the kernel saves the whole FXSAVE64 image per switch).
+       The kernel C code stays -mno-sse/-mno-mmx; see arch/x64/fpu.c. */
+    mov eax, cr0
+    and eax, 0xFFFFFFF3 /* clear EM (bit 2) and TS (bit 3) */
+    or eax, 0x2         /* set MP (bit 1) */
+    mov cr0, eax
 
     /* Enable Long Mode (EFER.LME) */
     mov ecx, 0xC0000080
@@ -194,10 +206,17 @@ trampoline_pm:
     lea eax, boot_pml4
     mov cr3, eax
 
-    /* Enable PAE */
+    /* Enable PAE + FP/SSE (see _start above: CR4 is per-core, and every AP
+       must have OSFXSR/OSXMMEXCPT set before user code runs on it). */
     mov eax, cr4
-    or eax, 1 << 5
+    or eax, (1 << 5) | (1 << 9) | (1 << 10)
     mov cr4, eax
+
+    /* CR0: EM=0, MP=1, TS=0 — enable x87/SSE execution on this core. */
+    mov eax, cr0
+    and eax, 0xFFFFFFF3
+    or eax, 0x2
+    mov cr0, eax
 
     /* Enable Long Mode */
     mov ecx, 0xC0000080

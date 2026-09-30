@@ -1495,6 +1495,13 @@ void trap_init_core_with_id(uint32_t cpu) {
   cpu_locals[cpu].cpu_id = cpu;
   cpu_locals[cpu].current_proc = 0;
 
+  /* F1.5: x87/SSE enable is per-core (CR0/CR4).  This runs on the boot core
+     from mmu_init() and on every AP from secondary_main(), always before
+     start_scheduler() can run any user code on the core; the early boot
+     paths set the same bits in boot.s, so this is belt-and-braces. */
+  extern void arch_fpu_enable_core(void);
+  arch_fpu_enable_core();
+
   // Write &cpu_locals[cpu] to Kernel GS base MSR (0xC0000102)
   uint64_t gs_base = (uint64_t)&cpu_locals[cpu];
   uint32_t low = (uint32_t)gs_base;

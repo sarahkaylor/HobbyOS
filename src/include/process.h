@@ -182,6 +182,19 @@ struct process {
    * value survives regardless of how the caller got rescheduled.
    */
   int spawn_retval;
+
+#ifdef __x86_64__
+  /**
+   * x86_64 FPU/SSE state (F1.5): a 512-byte FXSAVE64 image, additive at the
+   * end of the PCB so no existing field moves.  16-byte aligned because
+   * FXSAVE64/FXRSTOR64 fault on a misaligned operand.  Held and moved by
+   * src/kernel/arch/x64/fpu.c: initialized to the architectural defaults at
+   * process_create, FXSAVE64'd on switch-out (save_context), FXRSTOR64'd on
+   * resume (restore_context), so x87+SSE follows the process across
+   * preemption and cross-CPU migration.
+   */
+  uint8_t fpu_state[512] __attribute__((aligned(16)));
+#endif
 };
 
 // Initialize the process subsystem and zero out the process table.
