@@ -28,6 +28,7 @@ guest.img
 third_party/wpewebkit-2.54.0/
 third_party/mbedtls-3.6.7/
 third_party/curl-8.22.0/
+third_party/sqlite-amalgamation-3490200/
 
 # Test output
 actual_qemu.ppm
