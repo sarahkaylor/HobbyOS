@@ -66,7 +66,12 @@ else
   # Default to ARM
   QEMU = qemu-system-aarch64
   CFLAGS = -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
-  USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
+  # F1.5 (FPU): userland is free to use FP/SIMD — CPACR_EL1.FPEN=0b11 is
+  # set per core in boot.s and the kernel saves/restores the FPSIMD
+  # register file per process (src/kernel/arch/arm/fpu.s).  ONLY this user
+  # flag set drops -mgeneral-regs-only; the kernel CFLAGS above keep it
+  # (no compiler-emitted SIMD at EL1).
+  USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53
   ARCH_DIR = src/kernel/arch/arm
   LDFLAGS = -T linker.ld
   # QEMU parameters for ARM: 8 cores, 2GB RAM, booting with UEFI
@@ -136,6 +141,7 @@ EDITOR_T_BIN = $(OBJ_DIR)/EDITOR_T.BIN
 APPS_T_BIN = $(OBJ_DIR)/APPS_T.BIN
 PONG_T_BIN = $(OBJ_DIR)/PONG_T.BIN
 STRESS_TEST_BIN = $(OBJ_DIR)/stress.bin
+FPU_T_BIN = $(OBJ_DIR)/fpu_test.bin
 ERRNO_TEST_BIN = $(OBJ_DIR)/errtest.bin
 HELLO_BIN = $(OBJ_DIR)/hello.bin
 
@@ -295,6 +301,22 @@ $(OBJ_DIR)/%.o: $(ARCH_DIR)/%.s src/include/*.h src/include/arch/*.h
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# --- F1.5 (FPU): the deliberate -mgeneral-regs-only exception -----------
+# arch/arm/fpu.s is the ONE kernel translation unit allowed to touch the
+# FP/SIMD register file: saving/restoring q0-q31 + FPCR + FPSR is not
+# expressible without it, and clang's assembler rejects those instructions
+# outright when the restriction is in effect ("instruction requires:
+# fp-armv8").  The file is lowercase .s, so the ASM_OBJS wildcard compiles
+# and links it into the kernel like boot.s/setjmp.s; this explicit target
+# (which GNU make prefers over the pattern rule above) is the ONLY build
+# path that drops the flag — and it drops it for hand-written assembly
+# only, so no kernel C codegen gains FP/SIMD access.
+ifeq ($(ARCH),arm)
+$(OBJ_DIR)/fpu.o: $(ARCH_DIR)/fpu.s src/include/*.h src/include/arch/*.h
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(filter-out -mgeneral-regs-only,$(CFLAGS)) -c $< -o $@
+endif
+
 # Rule to compile user objects
 $(OBJ_DIR)/user_%.o: src/user/%.c src/user_include/*.h src/user_include/graphics/*.h src/include/*.h
 	@mkdir -p $(OBJ_DIR)
@@ -337,6 +359,13 @@ $(OBJ_DIR)/user_pipe_test.o: src/user/pipe_test.c $(USER_LIBC) $(USER_HDRS)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/stress_test.o: src/user/stress_test.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+# F1.5 (FPU): the floating-point bring-up test (src/user/fpu_test.c) —
+# built like the other *_test binaries; USER_CFLAGS no longer restricts
+# user FP/SIMD on ARM, so float/double ops compile to real FP instructions.
+$(OBJ_DIR)/fpu_test.o: src/user/fpu_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
@@ -421,6 +450,10 @@ $(PIPETEST_BIN): $(OBJ_DIR)/user_pipe_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/u
 $(STRESS_TEST_BIN): $(OBJ_DIR)/stress_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/stress.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/stress.elf $(STRESS_TEST_BIN)
+
+$(FPU_T_BIN): $(OBJ_DIR)/fpu_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/fpu_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/fpu_test.elf $(FPU_T_BIN)
 
 $(ERRNO_TEST_BIN): $(OBJ_DIR)/user_errno_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/errno_test.elf $^
@@ -1037,7 +1070,7 @@ $(XEYES_BIN): $(OBJ_DIR)/xeyes_main.o $(X11_LIB_OBJS) $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/xeyes.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/xeyes.elf $(XEYES_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(ERRNO_TEST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -1092,6 +1125,7 @@ endif
 	$(MCOPY) -i disk.img $(DIALOG_TEST_BIN) ::/DIALOG_T.BIN
 	$(MCOPY) -i disk.img $(PONG_T_BIN) ::/PONG_T.BIN
 	$(MCOPY) -i disk.img $(STRESS_TEST_BIN) ::/STRESS.BIN
+	$(MCOPY) -i disk.img $(FPU_T_BIN) ::/FPU_T.BIN
 	$(MCOPY) -i disk.img $(ERRNO_TEST_BIN) ::/ERRTEST.BIN
 	$(MCOPY) -i disk.img $(HELLO_BIN) ::/HELLO.BIN
 	$(MCOPY) -i disk.img $(SH_BIN) ::/SH.BIN

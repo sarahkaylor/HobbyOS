@@ -416,6 +416,14 @@ static int process_create_internal(void) {
   for (int i = 0; i < 36; i++) {
     p->context[i] = 0;
   }
+  /* F1.5 (FPU): a fresh process starts with a zeroed FPSIMD file.  The
+     slot can be a reuse of an exited process whose saved FP state must
+     not leak into the new one — the first resume restores BEFORE any
+     save has run for the new process, so zeroing here is what "fresh
+     registers, default FPCR/FPSR" means. */
+  for (int i = 0; i < 66; i++) {
+    p->fpu_state[i] = 0;
+  }
 
   return pid;
 }
@@ -523,6 +531,17 @@ void save_context(struct process *p, struct trap_frame *tf) {
 #else
   p->context[33] = arch_get_user_sp();
 #endif
+
+#ifndef __x86_64__
+  /* F1.5 (FPU): the process's FPSIMD register file follows it across the
+     switch.  Called with the process's FP state still live in the
+     hardware register file — kernel C is compiled -mgeneral-regs-only,
+     so nothing between the trap and this save has touched q0-q31 (a
+     user process preempted inside a syscall is safe for the same reason:
+     the kernel handlers never modify FP state).  fpu_save lives in the
+     one deliberately SIMD-capable TU, src/kernel/arch/arm/fpu.s. */
+  fpu_save(p->fpu_state);
+#endif
 }
 
 void wd_dump_proc_table(void) {
@@ -597,6 +616,13 @@ static void restore_context(struct process *p, struct trap_frame *tf) {
   if (!p->is_kernel_process) {
     tf->spsr |= 0x200;
   }
+#else
+  /* F1.5 (FPU): load the process's FPSIMD register file (saved by
+     save_context) before it resumes.  The remaining switch tail
+     (proc_lock release, enter_user_space's frame copy) is kernel C/asm
+     that never touches FP state, so what lands here is what executes
+     when the process runs again. */
+  fpu_restore(p->fpu_state);
 #endif
 }
 

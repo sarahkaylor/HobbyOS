@@ -182,6 +182,20 @@ struct process {
    * value survives regardless of how the caller got rescheduled.
    */
   int spawn_retval;
+
+  /**
+   * F1.5 (FPU, ARM64): per-process FPSIMD register file, saved on every
+   * context switch so live q0-q31 values survive preemption and cross-CPU
+   * migration.  Layout, read/written by src/kernel/arch/arm/fpu.s:
+   *   [   0, 512 )  q0-q31 as 32 x 128-bit registers (64 x uint64_t)
+   *   [ 512, 520 )  FPCR
+   *   [ 520, 528 )  FPSR
+   * The 16-byte alignment is required by the stp/ldp q accesses; a zeroed
+   * entry (fresh process) restores as all-zero registers plus default
+   * control/status words.  Appended at the END of the struct so parallel
+   * lanes merge additively.
+   */
+  uint64_t fpu_state[66] __attribute__((aligned(16)));
 };
 
 // Initialize the process subsystem and zero out the process table.
@@ -283,5 +297,15 @@ int process_get_total_blocks(void);
 int process_get_info_list(struct sys_procinfo* list, int max_procs);
 int process_get_num_cpus(void);
 uint64_t process_get_total_idle_ms(void);
+
+/* F1.5 (FPU, ARM64): per-process FPSIMD context (src/kernel/arch/arm/fpu.s).
+ * fpu_save captures q0-q31 + FPCR + FPSR into a 528-byte area;
+ * fpu_restore loads it back.  Called by save_context/restore_context
+ * (process.c) with &process->fpu_state.  x86_64 builds use their own SSE
+ * state (owned by the x64 lane), so the symbols exist on ARM only. */
+#ifndef __x86_64__
+void fpu_save(uint64_t *area);
+void fpu_restore(const uint64_t *area);
+#endif
 
 #endif // PROCESS_H

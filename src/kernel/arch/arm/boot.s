@@ -34,6 +34,14 @@ real_start:
     // If not CPU 0, branch to halt (secondary cores start here only if not using PSCI)
     cbnz    x0, halt
 
+    // F1.5 (FPU): enable FP/SIMD at EL1 and EL0 on this core
+    // (CPACR_EL1.FPEN = 0b11).  cpacr_el1 is PER-CORE: the scheduler's
+    // FPSIMD save/restore (arch/arm/fpu.s) runs at EL1 and user programs
+    // use FP at EL0, so every core must set it before either can happen
+    // there.  See fpu_enable_core in arch/arm/fpu.s for why that file is
+    // the .s exception to -mgeneral-regs-only.
+    bl      fpu_enable_core
+
     // Clear the BSS section
     adrp    x1, __bss_start
     add     x1, x1, :lo12:__bss_start
@@ -96,6 +104,12 @@ secondary_entry:
     adrp    x1, vectors
     add     x1, x1, :lo12:vectors
     msr     vbar_el1, x1
+
+    // F1.5 (FPU): same per-core CPACR_EL1.FPEN=0b11 enable as the boot
+    // core — must happen before this core's first context switch or user
+    // program (the scheduler restores FPSIMD state at EL1; users use it
+    // at EL0).
+    bl      fpu_enable_core
 
     // Call the C secondary_main function
     bl      secondary_main
