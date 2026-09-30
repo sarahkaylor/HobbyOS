@@ -367,10 +367,14 @@ static void sys_connect(struct trap_frame *tf) {
 }
 
 /* ---- Phase F1 (browser.md A.1a, frozen): sockets + select (65-71) ------
- * x86_64 argument mapping (see syscall5 in user libc.c): rdi, rsi, rdx,
- * rcx, r8 -> regs[5], regs[4], regs[3], regs[2], regs[7].  The select
- * restart follows the pipe_read -2 convention (rewind ELR over the 2-byte
- * `syscall` instruction, save our own frame, schedule away). */
+ * x86_64 argument mapping (see syscall5 in user libc.c): a0..a4 live in
+ * rdi, rsi, rdx, r10, r8.  The ISR saves [rsp+40]=rdi -> regs[5],
+ * [rsp+32]=rsi -> regs[4], [rsp+24]=rdx -> regs[3], [rsp+72]=r10 ->
+ * regs[9], [rsp+56]=r8 -> regs[7] (regs[2] holds rcx, the clobbered
+ * return address — never an argument).  SYS_MMAP reads its r10 flags from
+ * regs[9] the same way.  The select restart follows the pipe_read -2
+ * convention (rewind ELR over the 2-byte `syscall` instruction, save our
+ * own frame, schedule away). */
 
 /* True when [ptr, ptr+len) lies inside the caller's user region. */
 static int sys_user_range_ok(uint64_t ptr, uint64_t len) {
@@ -402,7 +406,7 @@ static void sys_select(struct trap_frame *tf) {
   int nfds = (int)tf->regs[5]; // rdi
   struct fd_set_k *rd = (struct fd_set_k *)tf->regs[4]; // rsi
   struct fd_set_k *wr = (struct fd_set_k *)tf->regs[3]; // rdx
-  struct fd_set_k *ex = (struct fd_set_k *)tf->regs[2]; // rcx
+  struct fd_set_k *ex = (struct fd_set_k *)tf->regs[9]; // r10
   int timeout_ms = (int)tf->regs[7]; // r8
   struct process *caller = current_process();
 
@@ -426,7 +430,7 @@ static void sys_select(struct trap_frame *tf) {
 }
 
 static void sys_getsockopt(struct trap_frame *tf) {
-  void *val = (void *)tf->regs[2]; // rcx
+  void *val = (void *)tf->regs[9]; // r10
   int *len = (int *)tf->regs[7]; // r8
   struct process *caller = current_process();
 
@@ -441,7 +445,7 @@ static void sys_getsockopt(struct trap_frame *tf) {
 }
 
 static void sys_setsockopt(struct trap_frame *tf) {
-  const void *val = (const void *)tf->regs[2]; // rcx
+  const void *val = (const void *)tf->regs[9]; // r10
   int len = (int)tf->regs[7]; // r8
   struct process *caller = current_process();
 
