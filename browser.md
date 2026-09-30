@@ -289,6 +289,23 @@ upstream-compatible choices): **libcurl** (8.x, mbedTLS backend), **ICU**
 WebKit's Skia integration docs/CMake), **harfbuzz** (WebKit min), **SQLite**
 (3.4x), **libwebp** (1.x).
 
+**W1b vendor records (2026-09-30, merged `0f194bd`)** — pinned + vendored per
+AD-11 with host builds + smokes green (branches `browser/l5-fonts`,
+`browser/l6-libs1`, `browser/l6-libs2`; URLs + full sums + recipes in each
+`third_party/*.README.md`):
+- libcurl **8.22.0**, mbedTLS backend — sha256 `f7ef3ae8…` (PGP Good: Stenberg
+  key `27ED EAF2 2F3A BCEB 50DB 9A12 5CC9 08FD B71E 12C2`; live HTTPS HEAD smoke
+  → 200; curl.se publishes no sha256).
+- harfbuzz **14.5.0** (≥ WebKit floor 2.7.4) — sha256 `b7132e14…`; built
+  `+hb-ft +hb-icu` against ICU 78.2 (host).
+- SQLite **3.49.2** amalgamation (newest of the documented 3.4x series) — zip
+  sha256 `921fc725…`; `sqlite3.c` sha3-256 matches the official release log;
+  **3.53.4 cross-checked green** with the same recipe (bump candidate).
+- libwebp **1.6.0** (was "1.x" — now exact) — sha256 `e4ab7009…` (GPG Good).
+- Flags: zlib 1.3.2 released (7ASecurity audit fixes; pin stays 1.3.1 — bump
+  candidate); mbedTLS 3.6.7 / FreeType 2.14.3 / DejaVu 2.37 confirmed as pinned
+  (all vendored + smoke-verified).
+
 Retired pins (v1; kept here for the record only): dillo-3.2.0
 (`ed685168…` tar.gz / `1066ed42…` tar.bz2), fltk-1.3.11 (`92805abc…` /
 `ca2e144e…`).
@@ -562,20 +579,34 @@ delta +0.55 s (ARM) / +0.55 s (x64), within the +2 s target; full record §11.
 
 ### F2 — libc & C runtime (v1 M2 carried)
 
-- [ ] **F2.1 Socket/select surface** *(v1 T2.1; FD_SETSIZE 256)*.
-- [ ] **F2.2 Resolver** *(v1 T2.2)* — `resolv.c` + `inet_pton/ntop`; host
-      codec tests + `DNSTST.BIN`.
-- [ ] **F2.3 Time** *(v1 T2.3)* — `clock_gettime`/`gettimeofday` + calendar
-      math; host tests. (JSC/ICU will need more time surface later; track
-      gaps found by the P-stage.)
-- [ ] **F2.4 Minimal C++ runtime** *(v1 T2.4)* — new/delete, guards,
+- [x] **F2.1 Socket/select surface** *(v1 T2.1; FD_SETSIZE 256)* — **Done:**
+      merged `7a4900b` (libc wrappers over syscalls 65–71; select engine, FD_SETSIZE 256 §A.1a).
+- [x] **F2.2 Resolver** *(v1 T2.2)* — `resolv.c` + `inet_pton/ntop`; host
+      codec tests + `DNSTST.BIN`. **Done:** merged `1fce4f9` (+wiring `c7c181f`);
+      DNSTST resolves live in-wave (DHCP DNS 10.0.2.3 → example.com A = 172.66.147.243).
+- [x] **F2.3 Time** *(v1 T2.3)* — `clock_gettime`/`gettimeofday` + calendar
+      math; host tests. **Done:** merged `1fce4f9` — calendar-math host parity
+      (314 checks); further time surface tracked for P3.
+- [x] **F2.4 Minimal C++ runtime** *(v1 T2.4)* — new/delete, guards,
       `.init_array`, `-fno-exceptions` policy; smoke both arches. *(libc++
       proper is P3; this unblocks early C++ smoke and Track A's small needs.)*
-- [ ] **F2.5 stdio/string audit for C++ builds** *(v1 T2.5)*.
+      **Done:** merged `0f194bd` (`bd8b7e8`) — `cxxrt.cpp`/`cxxrt.h`, crt0 walks
+      `.init_array`; CXXSMOKE 29/29 (ARM full wave + x64 labeled minimal-boot);
+      host-parity suites 25+19; F2.5 audit folded in; see §11.
+- [x] **F2.5 stdio/string audit for C++ builds** *(v1 T2.5)* — **Done:** merged
+      `0f194bd` — 13 headers `extern "C"`-guarded; mangled `_assert_fail`, stdlib
+      `template`, host `ho_mkdir` fixes; census 43/45 + 2 documented artifacts; §11.
 
 **Gate F2:** host tests + `CXX_SMOKE`, `SOCK2TST`, `DNSTST` green both arches.
+**Gate F2 CLOSED 2026-09-30** — ARM: full-wave green (CXX_SMOKE 29/29, zero FAIL
+ tokens; SOCK2TST/POLLTST/DNSTST green); x64: unit tier green + labeled
+ minimal-boot evidence (CXX_SMOKE 29/29, DNSTST resolved) under the standing
+ x64 policy; host tests green incl. the new C++ parity suites. See §11.
 
 ### P1 — Threads & pthreads  *(new; Track B)*
+
+*(Design `docs/browser/p1-threads-design.md` — integrator-reviewed 2026-09-30,
+OQ1–OQ6 resolved; implementation is the next wave.)*
 
 - [ ] **P1.1 Kernel threads** — thread object sharing the address space;
       create/exit/join primitives; scheduler integration (timeslice across
@@ -1222,6 +1253,42 @@ curl -sI https://lite.cnn.com | grep -i content-length
 ---
 
 ## 11. Fix log (append-only; see also per-lane reports)
+
+- 2026-09-30 — **Wave 1b landed: F2.4/F2.5 + L5/L6 vendoring + P1 design note — all
+  five 1b branches merged at `0f194bd` (base `9660552`).**
+  - **l3-cxxrt `bd8b7e8`** (F2.4/F2.5): minimal C++ runtime — `src/libc/src/cxxrt.cpp` +
+    `src/libc/include/cxxrt.h` (over-aligned new/delete over malloc, `__cxa_guard_*`,
+    `__cxa_atexit` LIFO 64-slot + `__cxa_finalize`, `__cxa_pure_virtual`, weak
+    `__dso_handle`; `-fno-exceptions`/`-fno-rtti` enforced by #error). `.init_array`
+    (SORT_BY_INIT_PRIORITY) collected in linker.ld, walked by crt0 before main; loader
+    unchanged. **CXXSMOKE.BIN** wired to Makefile/disk/wave: 29 checks incl. exact
+    static-ctor order `E0AB`, 16-byte new alignment, virtual dispatch, guards, atexit —
+    ARM full wave 29/29 zero FAIL; x64 labeled minimal-boot 29/29 (same evidence policy
+    as FPU_T; the x64 full wave remains the known FORKTEST-stall baseline). F2.5 audit:
+    13 headers gained `extern "C"` guards; fixed mangled `_assert_fail` (assert.h),
+    stdlib `template` param, host `ho_mkdir` conflict; host-parity `cxxrt_test.cpp`
+    (25 checks) + `cxx_headers_test.cpp` (19) in host_tests; cstyle clean.
+  - **l5-fonts `eb5088b`** (L5): FreeType 2.14.3 + HarfBuzz 14.5.0 (`+hb-ft +hb-icu`,
+    ICU 78.2 host) + DejaVu 2.37 vendored per AD-11; memory-face render smoke
+    (`FT-TOTAL renders=12 hash=4e88e851d05bd62e`) and shaping smoke (OT/FT glyph-id
+    parity `HB-MATCH`) — byte-identical across 4 executions incl. a cold rebuild;
+    recipes under `src/user/browser/fonts/`.
+  - **l6-libs1 `9dfd203`** (L6a): zlib 1.3.1 / libpng 1.6.44 / libjpeg-turbo 3.1.0 /
+    libwebp 1.6.0 vendored + host-built + smoked (jpeg + webp tarballs GPG-Good);
+    `--clean` double-run checksum stability; committed gate script.
+  - **l6-libs2 `e34045f`** (L6b): mbedTLS 3.6.7 / libcurl 8.22.0 (mbedTLS backend;
+    live HTTPS HEAD 200) / SQLite 3.49.2 (3.53.4 cross-checked green; PRAGMA options
+    recorded incl. `THREADSAFE=1`) vendored + host-built + smoked.
+  - **l2-p1-design `a383f4c`** (L2): `docs/browser/p1-threads-design.md` —
+    decision-complete P1.1/P1.2 design (threads as PCB slots sharing the leader AS;
+    syscalls 72–75; `tls_base` joined to the context switch; futex-lite semantics +
+    bounds; pthread mapping; THRD_T/TLS_T plan); **integrator review §9 resolves
+    OQ1–OQ6** (OQ1: +2 renumber consented pre-first-ship; OQ2: implementation lane
+    applies routing edits directly; OQ3–OQ6 accepted with bounds).
+  - Integration notes: `.gitignore` union conflict (l6a vs l6b blocks) resolved by
+    hand; worktree `_staging` gap root-caused and fixed in-env (lane-gate seeds from
+    main; vendoring the ref-build story remains queued). Gate batteries (local + VM
+    `w1b-*`) are running against `0f194bd`.
 
 - 2026-09-30 — **F1 CLOSED: all five lanes merged and gated on both arches.**
   Merge order + commits: l4 `eaa0465` (F1.8 input v2: K modifier stamps, wheel

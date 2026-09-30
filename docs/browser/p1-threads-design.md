@@ -246,3 +246,38 @@ Makefile/disk/wave diffs: lane proposes, integrator applies (§7.3 F6).
 - **OQ5** fork+threads: child is a single-threaded copy of the CALLER (heap past the copied window
   and heap TLS blocks not carried) — confirm documenting the divergence; atfork later. **OQ6** Guard
   pages/overflow deferred to P2 (P1 stacks are heap blocks; overflow faults the process).
+
+## 9. Integrator review — resolutions (2026-09-30; on main `0f194bd`)
+
+D1–D9 accepted as written; all six open questions resolved. Treat this section as
+binding for the implementation lane.
+
+- **OQ1 — §A.1b renumber: CONSENTED.** Insert 74 THREAD_EXIT / 75 SET_TLS and
+  shift P4+ provisional rows +2; `syscall.h` to `SYS_MAX 75` at the P1 gate.
+  Nothing ≥72 is implemented, so the renumber lands before first ship —
+  renumber before ship, never after. Record rows in §A.1b in the same commit.
+- **OQ2 — routing edits: DIRECT.** The implementation lane applies the fs.c /
+  vfs.c / fat16.c thread-routing edits itself (single writer per file this wave);
+  the integrator resolves later merge interactions. Keep the call-site audit in
+  the lane report so re-audits stay cheap.
+- **OQ3 — wedged-sibling exit_group: ACCEPT for P1.** The wait is tick-granular
+  (one preemption per RUNNING member; parked members die at once); wedged-claim
+  handling stays with the existing watchdogs/LOSTWAKE machinery. No speculative
+  reclamation — if THRD_T or the stress wave demonstrates a wedge, fix it with
+  evidence in hand.
+- **OQ4 — THRD_T ≤8, late position: ACCEPT.** The 64-slot ceiling stays for P1
+  (`pid`-as-index + pipe masks are load-bearing); revisit with real WebKit
+  thread counts at P4/P5.
+- **OQ5 — fork+threads divergence: ACCEPT, document explicitly** (design + a
+  code comment at the fork path): the child is a single-threaded copy of the
+  CALLER; secondary-thread TLS blocks / heap past the copied window are not
+  carried; children exec or use leader TLS; atfork deferred.
+- **OQ6 — guard pages deferred to P2: ACCEPT** (P1 thread stacks are heap
+  blocks; overflow faults the process — unchanged from today).
+
+Conditions for the implementer: (1) re-verify the TLS probe (llvm/lld pin)
+before the first `__thread` test — the layouts are load-bearing for crt0 and the
+trampoline; (2) evidence standard unchanged (§8.4: raw logs, zero FAIL tokens,
+boot-time delta re-read like Gate F1); (3) exercise fresh-thread FP init
+(mini-FPU_T inside a thread) to guard the F1.5 per-thread contract.
+
