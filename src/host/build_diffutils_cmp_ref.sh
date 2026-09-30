@@ -13,10 +13,72 @@
 # build_tu21_tac_ref.sh for the same trick).  Output: $OUT
 # (default /tmp/gnudiffutils-cmp-ref/diffutils_cmp).
 #
+# Source-tree resolution, so pristine worktrees/clones (no gitignored
+# third_party/_staging) build too — F1 carried item #3:
+#   1. third_party/_staging/diffutils-2.8.1/ if present — legacy path, kept
+#      working unchanged;
+#   2. otherwise the committed vendored tarball third_party/diffutils-2.8.1.tar.gz
+#      (pin README + .sha256 alongside it): checksum-verified, extracted into
+#      the gitignored build area obj/third_party/refs/diffutils-2.8.1/, and
+#      compiled from there.
+# Both trees hold identical bytes (same tarball), so flags/sources/behavior
+# of the reference build are unchanged either way.
+#
 # Usage: bash src/host/build_diffutils_cmp_ref.sh [output-path]
 set -e
-BASE="$(cd "$(dirname "$0")/../../third_party/_staging/diffutils-2.8.1" && pwd)"
+
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="${1:-/tmp/gnudiffutils-cmp-ref/diffutils_cmp}"
+
+LEGACY_SRC="$REPO_ROOT/third_party/_staging/diffutils-2.8.1"
+TARBALL="$REPO_ROOT/third_party/diffutils-2.8.1.tar.gz"
+TARBALL_SUMS="$TARBALL.sha256"
+REF_EXTRACT_ROOT="$REPO_ROOT/obj/third_party/refs"
+REF_EXTRACT="$REF_EXTRACT_ROOT/diffutils-2.8.1"
+
+if [ -f "$LEGACY_SRC/src/cmp.c" ]; then
+    BASE="$LEGACY_SRC"
+else
+    if [ -d "$LEGACY_SRC" ]; then
+        echo "build_diffutils_cmp_ref: WARNING: $LEGACY_SRC present but incomplete; using the vendored tarball" >&2
+    fi
+    if [ ! -f "$TARBALL" ]; then
+        echo "build_diffutils_cmp_ref: no diffutils-2.8.1 sources found." >&2
+        echo "  legacy staging extraction (absent or incomplete): $LEGACY_SRC" >&2
+        echo "  vendored tarball (absent):                        $TARBALL" >&2
+        echo "  fix: the tarball + checksum are committed in-repo; restore them with" >&2
+        echo "    git checkout -- third_party/diffutils-2.8.1.tar.gz third_party/diffutils-2.8.1.tar.gz.sha256" >&2
+        echo "  (or re-fetch https://ftp.gnu.org/gnu/diffutils/diffutils-2.8.1.tar.gz" >&2
+        echo "   and verify its sha256 against third_party/diffutils-2.8.1.tar.gz.sha256)." >&2
+        exit 1
+    fi
+    # Verify the vendored pin before trusting (or reusing) the extraction.
+    if [ -f "$TARBALL_SUMS" ]; then
+        if ! (cd "$(dirname "$TARBALL")" && sha256sum -c "$(basename "$TARBALL_SUMS")" >/dev/null 2>&1); then
+            echo "build_diffutils_cmp_ref: sha256 check FAILED for $TARBALL" >&2
+            echo "  expected checksum: $TARBALL_SUMS" >&2
+            echo "  fix: re-fetch https://ftp.gnu.org/gnu/diffutils/diffutils-2.8.1.tar.gz" >&2
+            echo "       or restore the vendored copy:  git checkout -- third_party/diffutils-2.8.1.tar.gz" >&2
+            exit 1
+        fi
+    else
+        echo "build_diffutils_cmp_ref: WARNING: $TARBALL_SUMS missing; cannot verify the vendored tarball" >&2
+    fi
+    STAMP="$REF_EXTRACT_ROOT/.diffutils-2.8.1.extract-ok"
+    if [ ! -f "$STAMP" ]; then
+        mkdir -p "$REF_EXTRACT_ROOT"
+        tar -xzf "$TARBALL" -C "$REF_EXTRACT_ROOT"
+        touch "$STAMP"
+    fi
+    if [ ! -f "$REF_EXTRACT/src/cmp.c" ]; then
+        echo "build_diffutils_cmp_ref: $TARBALL did not yield $REF_EXTRACT/src/cmp.c" >&2
+        echo "  fix: remove \"$REF_EXTRACT\" and re-run to re-extract" >&2
+        exit 1
+    fi
+    BASE="$REF_EXTRACT"
+fi
+
+echo "build_diffutils_cmp_ref: ref sources: $BASE" >&2
 WD="$(mktemp -d /tmp/diffutilscmpref.XXXXXX)"
 trap 'rm -rf "$WD"' EXIT
 
