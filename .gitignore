@@ -79,3 +79,10 @@ third_party/skia-588b550/skia-*.tar.gz
 third_party/skia-588b550/src/
 third_party/skia-588b550/build-host/
 third_party/skia-588b550/.fetched-ok
+
+# P3 libc++ vendor (browser/l3-libcxx; browser.md §6 P3.1): committed =
+# fetch.sh, README.md, anchors.sha256, container.sha256, sources.txt,
+# build-target.sh, config/; fetched/extracted below is gitignored.
+third_party/libcxx-21.1.8/llvm-*.tar.xz
+third_party/libcxx-21.1.8/src/
+third_party/libcxx-21.1.8/.fetched-ok

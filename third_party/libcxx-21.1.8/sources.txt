@@ -1,0 +1,131 @@
+# HobbyOS libc++/libc++abi source list for the bare-metal static build.
+#
+# One line per translation unit, relative to the extracted tree:
+#   L  = <vendor>/src/llvm-project-<ver>.src/libcxx
+#   A  = <vendor>/src/llvm-project-<ver>.src/libcxxabi
+#
+# Derived from libcxx/src/CMakeLists.txt + libcxxabi/src/CMakeLists.txt at
+# llvmorg-21.1.8 with this option set (see README.md "Build configuration"):
+#
+#   LIBCXX_ENABLE_THREADS=ON          (P1 pthreads backend)
+#   LIBCXX_ENABLE_LOCALIZATION=ON     (C-only; <sstream>/<iostream> need it)
+#   LIBCXX_ENABLE_RANDOM_DEVICE=ON    (libc getentropy() -> SYS_GETRANDOM)
+#   LIBCXX_ENABLE_FILESYSTEM=OFF      (no <filesystem>: FAT16-only VFS)
+#   LIBCXX_ENABLE_NEW_DELETE_DEFINITIONS=ON   (libcxx/src/new.cpp)
+#   LIBCXX_ENABLE_EXCEPTIONS=OFF / LIBCXX_ENABLE_RTTI=OFF  (browser.md §6 P3.1)
+#   LIBCXX_INCLUDE_WIN32/ZOS/sanitizers=OFF
+#   LIBCXXABI_ENABLE_EXCEPTIONS=OFF   (cxa_noexception.cpp, not cxa_exception.cpp
+#                                      /cxa_personality.cpp)
+#   LIBCXXABI_ENABLE_THREADS=ON       (cxa_thread_atexit.cpp)
+#   LIBCXXABI_ENABLE_NEW_DELETE_DEFINITIONS=OFF — stdlib_new_delete.cpp is
+#     deliberately NOT built: libcxx/src/new.cpp provides the same weak
+#     operator new/delete in this combined archive (one definition set).
+#
+# libcxxabi C++ABI files:
+A src/cxa_aux_runtime.cpp
+A src/cxa_default_handlers.cpp
+A src/cxa_demangle.cpp
+A src/cxa_exception_storage.cpp
+A src/cxa_guard.cpp
+A src/cxa_handlers.cpp
+A src/cxa_vector.cpp
+A src/cxa_virtual.cpp
+# libcxxabi no-exceptions support (LIBCXXABI_ENABLE_EXCEPTIONS=OFF):
+A src/cxa_noexception.cpp
+# libcxxabi thread support (TLS destructors):
+A src/cxa_thread_atexit.cpp
+# libcxxabi STL files:
+A src/stdlib_exception.cpp
+A src/stdlib_stdexcept.cpp
+A src/stdlib_typeinfo.cpp
+# libcxxabi internal:
+A src/abort_message.cpp
+A src/fallback_malloc.cpp
+# A src/private_typeinfo.cpp -- EXCLUDED: implements __dynamic_cast and the
+# __*_type_info cast machinery, which requires -frtti to compile.  The
+# milestone policy is "no exceptions, no RTTI" (browser.md section 6 P3.1),
+# so the cast machinery is out of scope; user code doing dynamic_cast /<typeid>
+# gets a link-time gap by design.  Revisit if a later milestone needs it
+# (would need -frtti for this TU only, or RTTI=ON for the archive).
+# libcxx always-on:
+L src/algorithm.cpp
+L src/any.cpp
+L src/bind.cpp
+L src/call_once.cpp
+# L src/charconv.cpp -- EXCLUDED (see README.md "Build configuration"):
+# its floating-point from_chars impl pulls llvm-libc headers
+# (libc/shared/fp_bits.h -> libc/src/__support/FPUtil/FPBits.h) that
+# are outside the vendored subtrees.  Integral to_chars/from_chars are
+# header-only and unaffected; float charconv is a documented gap.
+L src/chrono.cpp
+L src/error_category.cpp
+L src/exception.cpp
+L src/expected.cpp
+L src/functional.cpp
+L src/hash.cpp
+L src/memory.cpp
+L src/memory_resource.cpp
+L src/new_handler.cpp
+L src/new_helpers.cpp
+L src/optional.cpp
+L src/print.cpp
+L src/random_shuffle.cpp
+L src/ryu/d2fixed.cpp
+L src/ryu/d2s.cpp
+L src/ryu/f2s.cpp
+L src/stdexcept.cpp
+L src/string.cpp
+L src/system_error.cpp
+L src/typeinfo.cpp
+L src/valarray.cpp
+L src/variant.cpp
+L src/vector.cpp
+L src/verbose_abort.cpp
+# libcxx threads (LIBCXX_ENABLE_THREADS=ON):
+L src/atomic.cpp
+L src/barrier.cpp
+L src/condition_variable_destructor.cpp
+L src/condition_variable.cpp
+L src/future.cpp
+L src/mutex_destructor.cpp
+L src/mutex.cpp
+L src/shared_mutex.cpp
+L src/thread.cpp
+# libcxx random device (LIBCXX_ENABLE_RANDOM_DEVICE=ON):
+L src/random.cpp
+# libcxx localization (LIBCXX_ENABLE_LOCALIZATION=ON):
+L src/fstream.cpp
+L src/ios.cpp
+L src/ios.instantiations.cpp
+L src/iostream.cpp
+L src/locale.cpp
+L src/ostream.cpp
+L src/regex.cpp
+L src/strstream.cpp
+# libcxx new/delete definitions (LIBCXX_ENABLE_NEW_DELETE_DEFINITIONS=ON):
+L src/new.cpp
+
+# -- compiler-rt builtins (llvmorg-21.1.8, compiler-rt/lib/builtins) --------
+# IEEE binary128 (long double on aarch64) helpers that clang emits for
+# long-double arithmetic, comparisons and conversions.  libc++'s own objects
+# instantiate algorithm templates over long double, so the archive must
+# carry them.  Built for both arches; on x86_64 long double is x87 and the
+# set is simply unreferenced.
+R addtf3.c
+R subtf3.c
+R multf3.c
+R divtf3.c
+R comparetf2.c
+R extenddftf2.c
+R extendsftf2.c
+R trunctfdf2.c
+R trunctfsf2.c
+R floatsitf.c
+R floatunsitf.c
+R floatditf.c
+R floatunditf.c
+R fixtfsi.c
+R fixtfdi.c
+R fixunstfsi.c
+R fixunstfdi.c
+R int_util.c
