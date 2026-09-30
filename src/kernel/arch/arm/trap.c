@@ -122,7 +122,7 @@ static void sys_read(struct trap_frame *tf) {
 static void sys_get_args(struct trap_frame *tf) {
   char *buf = (char *)tf->regs[0];
   int size = (int)tf->regs[1];
-  struct process *cur = current_process();
+  struct process *cur = process_group(current_process()); /* P1 (D7) */
   if (cur && buf && (uint64_t)buf >= USER_VIRT_BASE &&
       (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
     int i = 0;
@@ -371,6 +371,38 @@ static void sys_select(struct trap_frame *tf) {
   } else {
     tf->regs[0] = (uint64_t)r;
   }
+}
+
+/* --- P1 (browser.md A.1b): threads, futex-lite, TLS (72-75) -------------
+ * One else-if per syscall in the dispatch chain above (never a table).
+ * Args: x0..x3 = regs[0..3]. */
+
+/* SYS_THREAD_CREATE (72): (entry, arg, stack, flags) -> tid | -errno. */
+static void sys_thread_create(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  tf->regs[0] = (uint64_t)(int64_t)process_thread_create(
+      caller, tf->regs[0], tf->regs[1], tf->regs[2], tf->regs[3]);
+}
+
+/* SYS_FUTEX (73): (uaddr, op, val, timeout_ms) -> 0/count | -errno.  A WAIT
+ * park never returns here: the resume re-enters user space with
+ * context[0]. */
+static void sys_futex(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  tf->regs[0] = (uint64_t)(int64_t)process_futex(
+      caller, tf, tf->regs[0], (int)tf->regs[1], (int64_t)tf->regs[2],
+      (int64_t)tf->regs[3]);
+}
+
+/* SYS_THREAD_EXIT (74): noreturn -- exits only the calling thread. */
+static void sys_thread_exit(struct trap_frame *tf) {
+  process_thread_exit(tf, tf->regs[0]);
+}
+
+/* SYS_SET_TLS (75): (tls) -> 0 | -EINVAL. */
+static void sys_set_tls(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  tf->regs[0] = (uint64_t)(int64_t)process_set_tls(caller, tf->regs[0]);
 }
 
 static void sys_getsockopt(struct trap_frame *tf) {
@@ -827,7 +859,7 @@ static void sys_umount(struct trap_frame *tf) {
 static void sys_getcwd(struct trap_frame *tf) {
   char *buf = (char *)tf->regs[0];
   int size = (int)tf->regs[1];
-  struct process *caller = current_process();
+  struct process *caller = process_group(current_process()); /* P1 (D7) */
   if (caller && (uint64_t)buf >= USER_VIRT_BASE &&
       (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
     int len = 0;
@@ -899,7 +931,7 @@ static void sys_fstat(struct trap_frame *tf) {
 
 static void sys_chdir(struct trap_frame *tf) {
   const char *path = (const char *)tf->regs[0];
-  struct process *caller = current_process();
+  struct process *caller = process_group(current_process()); /* P1 (D7) */
   if (caller && (uint64_t)path >= USER_VIRT_BASE &&
       (uint64_t)path < (USER_VIRT_BASE + USER_REGION_SIZE)) {
     extern int vfs_chdir(const char *path, char *out_new_cwd, int cap);
@@ -1214,6 +1246,14 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_setsockopt(tf);
     } else if (syscall_num == SYS_GETRANDOM) {
       sys_getrandom(tf);
+    } else if (syscall_num == SYS_THREAD_CREATE) {
+      sys_thread_create(tf);
+    } else if (syscall_num == SYS_FUTEX) {
+      sys_futex(tf);
+    } else if (syscall_num == SYS_THREAD_EXIT) {
+      sys_thread_exit(tf);
+    } else if (syscall_num == SYS_SET_TLS) {
+      sys_set_tls(tf);
     } else {
       uart_puts("Unknown System Call Invoked!\n");
       tf->regs[0] = -ENOSYS;
