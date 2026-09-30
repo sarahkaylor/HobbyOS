@@ -406,4 +406,77 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
   (void)envp; /* a fixed empty environment; POSIX exec keeps env semantics */
   return execv(path, argv);
 }
+
+/* Phase F2.3 (browser.md §6 — append-only region): wall + monotonic
+ * clocks over the frozen sysinfo surface.  Device-only, like the block
+ * above; the declarations live in the sysroot <time.h>/<sys/time.h>.
+ *
+ *   CLOCK_REALTIME  — RTC epoch seconds (sysinfo 6).  The RTC reports
+ *                     whole seconds: tv_nsec = 0.  Without an RTC the
+ *                     kernel answers -1, so fall back to uptime (the doc
+ *                     on <time.h> promises a usable clock either way).
+ *   CLOCK_MONOTONIC — uptime milliseconds (sysinfo 1), ms resolution.
+ *
+ * gettimeofday() mirrors CLOCK_REALTIME into a struct timeval (tz is
+ * ignored: there is no timezone database). */
+int clock_gettime(clockid_t clk_id, struct timespec *tp) {
+  struct sys_time t;
+  int ms;
+
+  if (!tp) {
+    errno = EFAULT;
+    return -1;
+  }
+  if (clk_id == CLOCK_REALTIME) {
+    if (sysinfo(6, &t, (int)sizeof t) == 0) {
+      tp->tv_sec = (time_t)t.epoch;
+      tp->tv_nsec = 0;
+      return 0;
+    }
+    ms = sysinfo(1, 0, 0); /* no RTC: uptime keeps the clock usable */
+    if (ms < 0) {
+      errno = EINVAL;
+      return -1;
+    }
+    tp->tv_sec = (time_t)(ms / 1000);
+    tp->tv_nsec = (long)(ms % 1000) * 1000000L;
+    return 0;
+  }
+  if (clk_id == CLOCK_MONOTONIC) {
+    ms = sysinfo(1, 0, 0);
+    if (ms < 0) {
+      errno = EINVAL;
+      return -1;
+    }
+    tp->tv_sec = (time_t)(ms / 1000);
+    tp->tv_nsec = (long)(ms % 1000) * 1000000L;
+    return 0;
+  }
+  errno = EINVAL;
+  return -1;
+}
+
+int gettimeofday(struct timeval *tv, void *tz) {
+  struct sys_time t;
+  int ms;
+
+  (void)tz; /* no timezone database */
+  if (!tv) {
+    errno = EFAULT;
+    return -1;
+  }
+  if (sysinfo(6, &t, (int)sizeof t) == 0) {
+    tv->tv_sec = (time_t)t.epoch;
+    tv->tv_usec = 0; /* the RTC reports whole seconds */
+    return 0;
+  }
+  ms = sysinfo(1, 0, 0);
+  if (ms < 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  tv->tv_sec = (time_t)(ms / 1000);
+  tv->tv_usec = (long)(ms % 1000) * 1000L;
+  return 0;
+}
 #endif

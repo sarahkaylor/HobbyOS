@@ -246,6 +246,14 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
  * here (device-only, like the socket block above — the host has glibc's). */
 #include "resolv.h"
 
+/* ---- F2.3: wall/monotonic clocks + calendar time ----------------------
+ * The sysroot <time.h>/<sys/time.h> carry the declarations (clock_gettime,
+ * gettimeofday, mktime/timegm/gmtime_r/localtime_r — implemented in
+ * libc.c and src/libc/src/time_math.c).  Device-only, like the blocks
+ * above: HOST_TEST builds use glibc's time surface. */
+#include <time.h>
+#include <sys/time.h>
+
 #endif /* !HOST_TEST */
 
 #endif
