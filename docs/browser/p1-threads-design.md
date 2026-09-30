@@ -171,7 +171,11 @@ lock.
   register; `pthread_equal` compares pointers.
 - **create**: drain dead list; alloc TCB + TLS + stack (default 256 KiB, attr overrides; guard pages
   deferred to P2 — overflow faults the process); init; publish; `SYS_THREAD_CREATE(trampoline, tcb,
-  stack_top16, 0)`; store tid (failure → EAGAIN/ENOMEM). **trampoline** (asm shim):
+  stack_top16, 0)`; store tid (failure → EAGAIN/ENOMEM; **amendment 2026-09-30**: EAGAIN is retried
+  inside the shim — bounded ≈2 s, yields then 10 ms sleeps — because a busy wave can momentarily
+  hold every PCB slot (observed `used=63/63`) and libc++ `std::thread` (no exceptions) aborts on
+  EAGAIN instead of retrying like C callers; sustained exhaustion still returns EAGAIN).
+  **trampoline** (asm shim):
   `SYS_SET_TLS(tcb->tls)`; `start(arg)`; `pthread_exit(retval)`.
 - **exit**: store retval; release-store `tid = 0`; `futex_wake`; `SYS_THREAD_EXIT`; if detached →
   push to dead list (the deferred reaper avoids freeing one's own stack in place). **join**: self →

@@ -23,6 +23,7 @@
 #include "libc.h"
 #include "errno.h"
 #include "time.h"
+#include "unistd.h"
 
 #define HO_PTHREAD_KEYS 128
 #define HO_PTHREAD_STACK_DEFAULT (256u * 1024u)
@@ -205,7 +206,24 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
   *thread = t;     /* publish before the call (design: init; publish; create) */
 
   uint64_t stack_top = ((uint64_t)stack + stack_size) & ~(uint64_t)15;
-  int rc = ho_thread_create((void *)ho_thread_entry, t, (void *)stack_top, 0);
+  /* Absorb transient slot pressure.  A just-exited thread's PCB slot drains
+   * within a tick, and a busy wave can momentarily hold every slot while its
+   * programs exit -- the same condition C callers retry via their own
+   * create_retry (P1 section 1).  libc++ std::thread cannot retry: with
+   * exceptions off, an EAGAIN from here aborts the process (observed as a
+   * silently truncated CXX_T run).  So retry briefly in the shim itself:
+   * yields first (covers the tick-drain case), then bounded 10 ms sleeps.
+   * Sustained exhaustion still surfaces as EAGAIN after ~2 s. */
+  int rc = -11;
+  for (int attempt = 0; attempt < 800; attempt++) {
+    rc = ho_thread_create((void *)ho_thread_entry, t, (void *)stack_top, 0);
+    if (rc >= 0 || rc != -11)
+      break;
+    if (attempt >= 64 && (attempt & 3) == 3)
+      usleep(10000);
+    else
+      sched_yield();
+  }
   if (rc < 0) {
     *thread = 0;
     free(tls_mem);

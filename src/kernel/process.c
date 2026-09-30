@@ -1916,6 +1916,29 @@ int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
   }
   int pid = thread_alloc_slot_locked();
   if (pid < 0) {
+    /* Forensic, rate-limited to the first three events (the libc-side retry
+       can hit many attempts inside a single pressure window): how full is
+       the PCB table, and how much is reclaimable? */
+    static int tdump_count = 0;
+    if (tdump_count < 3) {
+      tdump_count++;
+      int used = 0, done = 0;
+      for (int i = 1; i < MAX_PROCESSES; i++) {
+        if (proc_table[i].state == PROC_STATE_THREAD_DONE)
+          done++;
+        else if (proc_table[i].state != PROC_STATE_FREE)
+          used++;
+      }
+      uart_puts("[KERNEL] thread_create: no free slot (used=");
+      print_int(used);
+      uart_puts("/");
+      print_int(MAX_PROCESSES - 1);
+      uart_puts(" done=");
+      print_int(done);
+      uart_puts(") for pid=");
+      print_int(caller->pid);
+      uart_puts("\n");
+    }
     spinlock_release_irqrestore(&proc_lock, p_flags);
     return -EAGAIN;
   }
