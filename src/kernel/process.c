@@ -1,4 +1,5 @@
 #include "process.h"
+#include "frame.h"
 #include "fs.h"
 #include "lock.h"
 #include "mmu.h"
@@ -59,14 +60,6 @@ static uint64_t cpu_idle_time[MAX_CPUS];
 static uint8_t cpu_seen[MAX_CPUS];
 static int cpus_seen_count;
 
-// Simple bump allocator for 2MB-aligned process memory regions
-static uint64_t next_phys_alloc = PROC_PHYS_POOL_BASE;
-static spinlock_t mem_lock;
-
-/* NUM_PHYS_BLOCKS (and the pool extent it derives from) lives in
-   process.h: it grows with the RAM configured for the platform. */
-static uint8_t phys_blocks_used[NUM_PHYS_BLOCKS];
-
 // ---------------------------------------------------------------------------
 // Helper: byte-by-byte memory copy (no libc available, avoids SIMD issues)
 // ---------------------------------------------------------------------------
@@ -109,10 +102,9 @@ static void kmemset(void *dst, uint8_t val, uint64_t n) {
  */
 void process_init(void) {
   spinlock_init(&proc_lock);
-  spinlock_init(&mem_lock);
-  for (int i = 0; i < NUM_PHYS_BLOCKS; i++) {
-    phys_blocks_used[i] = 0;
-  }
+  /* P2.2 (design section 2): the frame bitmap is the single source of
+     truth for pool state; the 32 MiB block layer is layered on it. */
+  frame_init();
   for (int i = 0; i < MAX_PROCESSES; i++) {
     proc_table[i].pid = i;
     proc_table[i].state = PROC_STATE_FREE;
@@ -338,7 +330,7 @@ static void group_teardown(struct process *grp, uint64_t code) {
   }
 
   flags = spinlock_acquire_irqsave(&proc_lock);
-  phys_blocks_used[block] = 0;
+  frame_block_free(block);
   grp->state = PROC_STATE_EXITED;
   grp->thread_ret = code;
   grp->exit_status = ((int)code & 0xff) << 8;
@@ -401,7 +393,7 @@ static int thread_alloc_slot_locked(void) {
       continue;
     if (!q->is_thread && q->phys_block_idx >= 0) {
       /* Defensive: a leader tombstone must not leak its block. */
-      phys_blocks_used[q->phys_block_idx] = 0;
+      frame_block_free(q->phys_block_idx);
       q->phys_block_idx = -1;
     }
     q->state = PROC_STATE_FREE;
@@ -411,31 +403,25 @@ static int thread_alloc_slot_locked(void) {
 }
 
 /* Number of free physical blocks.  Advisory: used by the boot-wave
- * loader to keep headroom for child processes (see program_loader.c). */
+ * loader to keep headroom for child processes (see program_loader.c).
+ * P2.2: derived from the frame bitmap (a block is free when all 8192 of
+ * its frames are). */
 int phys_block_free_count(void) {
-  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-  int n = 0;
-  for (int i = 0; i < NUM_PHYS_BLOCKS; i++) {
-    if (!phys_blocks_used[i])
-      n++;
-  }
-  spinlock_release_irqrestore(&proc_lock, flags);
-  return n;
+  return frame_phys_block_free_count();
 }
 
 /* Claim a free physical block for a new process, reclaiming the blocks
  * of unreapable zombies first (dead or missing parent — nearly every
  * boot-loaded program is in this class once it exits).  Zombies of a
  * LIVE parent are left alone: the parent may still waitpid() them.
- * Caller holds proc_lock.  Returns the block index, or -1 when the pool
- * is genuinely empty. */
+ * The block layer lives on the frame bitmap now (P2.2/D3); the
+ * first-fit order, the zombie reclamation and the re-hand semantics
+ * are unchanged.  Caller holds proc_lock.  Returns the block index, or
+ * -1 when the pool is genuinely empty. */
 static int phys_block_alloc_locked(void) {
-  for (int i = 0; i < NUM_PHYS_BLOCKS; i++) {
-    if (!phys_blocks_used[i]) {
-      phys_blocks_used[i] = 1;
-      return i;
-    }
-  }
+  int idx = frame_block_alloc_first_free();
+  if (idx >= 0)
+    return idx;
   for (int i = 1; i < MAX_PROCESSES; i++) {
     struct process *q = &proc_table[i];
     if (q->state != PROC_STATE_EXITED || process_still_running(i))
@@ -447,11 +433,12 @@ static int phys_block_alloc_locked(void) {
         par->state != PROC_STATE_EXITED)
       continue; /* live parent: keep its zombie */
     if (q->phys_block_idx >= 0) {
-      int idx = q->phys_block_idx;
-      phys_blocks_used[idx] = 1;
+      /* The zombie still holds its (marked) block: hand it over as-is,
+         exactly like the v1 phys_blocks_used[] path did. */
+      int idx2 = q->phys_block_idx;
       q->phys_block_idx = -1;
       q->state = PROC_STATE_FREE;
-      return idx;
+      return idx2;
     }
     q->state = PROC_STATE_FREE;
   }
@@ -491,7 +478,7 @@ static int process_create_internal(void) {
           par->state != PROC_STATE_EXITED)
         continue; /* live parent: keep its zombie */
       if (q->phys_block_idx >= 0)
-        phys_blocks_used[q->phys_block_idx] = 0;
+        frame_block_free(q->phys_block_idx);
       q->phys_block_idx = -1;
       q->state = PROC_STATE_FREE;
       pid = i;
@@ -507,7 +494,7 @@ static int process_create_internal(void) {
       if (!q->is_thread && q->live_threads != 0)
         continue;
       if (!q->is_thread && q->phys_block_idx >= 0) {
-        phys_blocks_used[q->phys_block_idx] = 0;
+        frame_block_free(q->phys_block_idx);
         q->phys_block_idx = -1;
       }
       q->state = PROC_STATE_FREE;
@@ -532,12 +519,11 @@ static int process_create_internal(void) {
     static int dump_count = 0;
     if (dump_count < 3) {
       dump_count++;
-      int used = 0;
-      for (int i = 0; i < NUM_PHYS_BLOCKS; i++) if (phys_blocks_used[i]) used++;
+      int used = frame_blocks_used_count();
       uart_puts("[BLOCKS] used=");
       print_int(used);
       uart_puts("/");
-      print_int(NUM_PHYS_BLOCKS);
+      print_int(frame_block_count());
       uart_puts(" holders:");
       for (int i = 1; i < MAX_PROCESSES; i++) {
         struct process *h = &proc_table[i];
@@ -563,7 +549,7 @@ static int process_create_internal(void) {
 
   struct process *p = &proc_table[pid];
   p->phys_block_idx = block_idx;
-  p->user_phys_base = PROC_PHYS_POOL_BASE + (uint64_t)block_idx * USER_REGION_SIZE;
+  p->user_phys_base = frame_block_base_phys(block_idx);
   spinlock_release_irqrestore(&proc_lock, p_flags);
 
   uart_puts("Inside process_create: lock released. pid=");
@@ -1073,7 +1059,7 @@ void process_exit(struct trap_frame *tf) {
     uint64_t kflags = spinlock_acquire_irqsave(&proc_lock);
     cur->state = PROC_STATE_FREE;
     if (cur->phys_block_idx >= 0) {
-      phys_blocks_used[cur->phys_block_idx] = 0;
+      frame_block_free(cur->phys_block_idx);
       cur->phys_block_idx = -1;
     }
     spinlock_release_irqrestore(&proc_lock, kflags);
@@ -1149,7 +1135,7 @@ void kernel_exit(void) {
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     cur->state = PROC_STATE_FREE;
     if (cur->phys_block_idx >= 0) {
-      phys_blocks_used[cur->phys_block_idx] = 0;
+      frame_block_free(cur->phys_block_idx);
       cur->phys_block_idx = -1;
     }
     set_current_process_pid(get_cpuid(), -1);
@@ -1170,7 +1156,7 @@ void process_free(int pid) {
   struct process *p = &proc_table[pid];
   p->state = PROC_STATE_FREE;
   if (p->phys_block_idx >= 0) {
-    phys_blocks_used[p->phys_block_idx] = 0;
+    frame_block_free(p->phys_block_idx);
     p->phys_block_idx = -1;
   }
   spinlock_release_irqrestore(&proc_lock, flags);
@@ -1212,7 +1198,7 @@ int process_kill(int pid) {
      parent can reap a kill with a signal-shaped status. */
   p->exit_status = 9; /* SIGKILL */
   if (p->phys_block_idx >= 0) {
-    phys_blocks_used[p->phys_block_idx] = 0;
+    frame_block_free(p->phys_block_idx);
     p->phys_block_idx = -1;
   }
   /* P1: killing a group leader kills the whole group. */
@@ -1711,17 +1697,11 @@ void start_scheduler(void) {
 }
 
 int process_get_used_blocks(void) {
-  int count = 0;
-  uint64_t flags = spinlock_acquire_irqsave(&mem_lock);
-  for (int i = 0; i < NUM_PHYS_BLOCKS; i++) {
-    if (phys_blocks_used[i]) count++;
-  }
-  spinlock_release_irqrestore(&mem_lock, flags);
-  return count;
+  return frame_blocks_used_count();
 }
 
 int process_get_total_blocks(void) {
-  return NUM_PHYS_BLOCKS;
+  return frame_block_count();
 }
 
 int process_get_info_list(struct sys_procinfo* list, int max_procs) {

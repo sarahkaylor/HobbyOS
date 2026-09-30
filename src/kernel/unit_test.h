@@ -36,6 +36,7 @@ extern int tests_failed;
 #define TEST(name) void name(void)
 
 void run_all_unit_tests(void);
+void frame_test_suite(void);
 void fat16_test_suite(void);
 void locks_test_suite(void);
 void pipe_test_suite(void);

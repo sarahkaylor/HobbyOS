@@ -76,23 +76,23 @@
 #define USER_ANON_MAX_REGS 8
 
 // Physical address pool base for dynamically allocated process memory
-// This ensures user memory does not overlap with kernel code
+// This ensures user memory does not overlap with kernel code.
+// P2.2 (docs/browser/p2-vm-design.md section 2.1): the pool extents and
+// the 32 MiB block layer now live in frame.h/frame.c (the frame bitmap
+// is the single source of truth).  See frame.h for the x64 growth
+// extent [0x80000000, 0x180000000) added with the frame allocator.
 #ifdef __x86_64__
 #define PROC_PHYS_POOL_BASE 0x20000000
-/* x86_64: the pool ends just below the kernel's 0x70000000 load address
-   (which is fixed by the linker / Limine entry), so x64 tops out at 40
-   blocks even with more RAM installed. */
+/* x86_64: the low pool ends just below the kernel's 0x70000000 load
+   address (fixed by the linker / Limine entry). */
 #define PROC_PHYS_POOL_TOP 0x70000000
 #else
 /* AArch64: RAM runs [0x40000000, 0x240000000) with QEMU -m 8192M; the
-   kernel loads and lives at the bottom (image + bss + stack top = link
-   0x45A00000).  The pool sits just above that and extends to RAM top,
-   so 232 * 32MB = 7.25GB of process backing stores. */
+   kernel loads and lives near RAM top (Limine load base ~0x23A680000).
+   The pool sits above the low kernel residue and extends to RAM top. */
 #define PROC_PHYS_POOL_BASE 0x70000000
 #define PROC_PHYS_POOL_TOP 0x240000000ULL
 #endif
-// Number of 32MB process-region blocks inside [BASE, TOP).
-#define NUM_PHYS_BLOCKS ((PROC_PHYS_POOL_TOP - PROC_PHYS_POOL_BASE) / USER_REGION_SIZE)
 // QEMU Virt machine GIC memory-mapped register addresses (v2 + v3)
 #define GICD_BASE 0x08000000 // Distributor base address
 #define GICC_BASE 0x08010000 // CPU Interface base address (v2)

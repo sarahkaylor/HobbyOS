@@ -12,6 +12,10 @@ void run_all_unit_tests(void) {
   uart_puts("    RUNNING KERNEL UNIT TESTS     \n");
   uart_puts("==================================\n");
 
+  /* Frame allocator first: it asserts against a pristine pool (no
+     process has taken a block yet), and its reuse checks rely on the
+     rotating hint starting from zero. */
+  frame_test_suite();
   fat16_test_suite();
   locks_test_suite();
   pipe_test_suite();
