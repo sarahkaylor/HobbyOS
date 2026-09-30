@@ -151,6 +151,10 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
       child->name[i + 1] = '\0';
     }
     struct process *parent = process_get_pcb(caller_pid);
+    /* P1 (D7): children are parented to the group ANCHOR, so a spawn from a
+       thread stays reapable through the group's waitpid(). */
+    if (parent)
+      parent = process_group(parent);
     if (parent) {
       /* Record the parent so waitpid() can reap this child and so the
          zombie reclaimers never free it while the parent is alive. */
@@ -239,6 +243,8 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
   uart_puts("fat16_close finished.\n");
 
   struct process *parent = process_get_pcb(caller_pid);
+  if (parent)
+    parent = process_group(parent); /* P1 (D7): fd table + cwd are group state */
   // child is already defined above
   if (parent && child) {
     if (stdin_fd >= 0 && stdin_fd < MAX_OPEN_FDS && parent->open_fds[stdin_fd] != -1) {
@@ -317,6 +323,11 @@ int process_exec_current(struct trap_frame *tf, const char *path,
   if (!path)
     return -EINVAL;
 
+  /* P1 (D7): cwd and address space are group state; exec replaces the
+     group's image.  (Exec from a secondary thread is a documented P1
+     divergence: siblings would keep running the old image.) */
+  struct process *grp = process_group(cur);
+
   /* Resolve a relative path against the process cwd (which the shell
      keeps as e.g. "/" or "/subdir" — no trailing slash). */
   char abs[128];
@@ -325,7 +336,7 @@ int process_exec_current(struct trap_frame *tf, const char *path,
     for (al = 0; path[al] && al < 126; al++) abs[al] = path[al];
   } else {
     int cl = 0;
-    for (; cur->cwd[cl] && cl < 96; cl++) abs[cl] = cur->cwd[cl];
+    for (; grp->cwd[cl] && cl < 96; cl++) abs[cl] = grp->cwd[cl];
     if (cl > 0 && abs[cl - 1] != '/') abs[cl++] = '/';
     for (int pi = 0; path[pi] && cl < 126; pi++, cl++) abs[cl] = path[pi];
     al = cl;
@@ -340,7 +351,7 @@ int process_exec_current(struct trap_frame *tf, const char *path,
     return -ENOEXEC;
   }
 
-  uint64_t base = cur->user_phys_base;
+  uint64_t base = grp->user_phys_base;
 
   /* Zero image + bss [0, MAX_PROGRAM_SIZE) so the new program starts
      with clean bss (spawn gets a freshly-allocated region; exec reuses).
@@ -365,11 +376,11 @@ int process_exec_current(struct trap_frame *tf, const char *path,
 
   /* Exec resets the address-space state: fresh heap top, no anonymous
      mappings (the new image's data/bss start at the load cap). */
-  cur->heap_brk = USER_HEAP_BASE;
-  cur->anon_map_count = 0;
+  grp->heap_brk = USER_HEAP_BASE;
+  grp->anon_map_count = 0;
   for (int i = 0; i < USER_ANON_MAX_REGS; i++) {
-    cur->anon_maps[i].addr = 0;
-    cur->anon_maps[i].len = 0;
+    grp->anon_maps[i].addr = 0;
+    grp->anon_maps[i].len = 0;
   }
 
   /* Redirect the running process into the fresh image. regs[0]=0 is the
@@ -386,6 +397,7 @@ int process_exec_current(struct trap_frame *tf, const char *path,
  * spawn time so every spawned program exposes a positional-parameter
  * array (argv[0] is prepended by the caller: the binary name). */
 void proc_split_argv(struct process *p, const char *args) {
+  p = process_group(p); /* P1 (D7): the argv blob is group state */
   int narg = 0;
   int pos = 0;
   p->eargc = 0;
@@ -432,6 +444,7 @@ static int pl_strcpy(const char *src, char *dst, int cap) {
  * argv may be NULL (leaves eargc == 0 so crt0 falls back to name+args).
  * Elements are truncated at 63 chars (matching the flat-args path). */
 int proc_set_argv_array(struct process *p, char *const *argv) {
+  p = process_group(p); /* P1 (D7): the argv blob is group state */
   p->eargc = 0;
   p->eargv[0] = '\0';
   if (!argv)
@@ -460,6 +473,7 @@ int proc_set_argv_array(struct process *p, char *const *argv) {
  * number of bytes copied (excluding the NUL), or -1 when idx is out of
  * range. */
 int sys_readargv(struct process *p, int idx, char *buf, int size) {
+  p = process_group(p); /* P1 (D7): the argv blob is group state */
   if (!p)
     return -1;
   if (idx == -1)

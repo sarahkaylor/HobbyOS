@@ -345,7 +345,7 @@ static void fat16_absolute_path(const char *path, char *abs_path) {
   if (path[0] == '/') {
     clean_path(path, abs_path);
   } else {
-    struct process *cur = current_process();
+    struct process *cur = process_group(current_process()); /* P1 (D7) */
     char raw[256];
     int pos = 0;
 
@@ -598,10 +598,27 @@ static void lfn_fill_run(struct fat16_dir_entry *slots, const char *longname,
   }
 }
 
-/* Allocate a run of (nchunks + 1) free entries in one sector: the long
-   name's 0x0F records immediately followed by `short_entry`.  Returns the
-   location of the short entry, or -1.  Runs must fit a single sector
-   (16 entries); longer names are rejected, never truncated. */
+/* Store a run of `need` entries that begins at slot `term` of `e1` and,
+   when it does not all fit, continues at the start of `e2` (the following
+   sector).  `first` = min(16 - term, need) entries go to `e1`. */
+static void lfn_place_run(struct fat16_dir_entry *e1, struct fat16_dir_entry *e2,
+                          int term, int first, int need, const char *longname,
+                          int nchunks, const char *short83,
+                          const struct fat16_dir_entry *short_entry) {
+  struct fat16_dir_entry run[SECTOR_SIZE / 32];
+  lfn_fill_run(run, longname, nchunks, short83);
+  run[nchunks] = *short_entry;
+  for (int k = 0; k < first; k++) e1[term + k] = run[k];
+  for (int k = first; k < need; k++) e2[k - first] = run[k];
+}
+
+/* Allocate a run of (nchunks + 1) entries: the long name's 0x0F records
+   immediately followed by `short_entry`.  A run starts at or before the
+   directory's first 0x00 slot, because every lookup stops at that slot --
+   entries placed past it would be invisible.  When the room left at the
+   first 0x00 slot is too small for the whole run, the run continues in the
+   next sector instead of skipping ahead.  Returns the location of the
+   short entry, or -1. */
 static int alloc_lfn_run(uint16_t dir_cluster, const char *longname,
                          const char *short83, int nchunks,
                          const struct fat16_dir_entry *short_entry,
@@ -617,7 +634,13 @@ static int alloc_lfn_run(uint16_t dir_cluster, const char *longname,
         return -1;
       }
       struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
-      for (unsigned int j = 0; j + need <= SECTOR_SIZE / 32; j++) {
+      int term = -1;
+      for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
+        if (entries[j].name[0] == 0x00) { term = (int)j; break; }
+      }
+      unsigned int jmax = (term >= 0) ? (unsigned int)term
+                                      : (SECTOR_SIZE / 32 - need);
+      for (unsigned int j = 0; j + need <= SECTOR_SIZE / 32 && j <= jmax; j++) {
         int run = 0;
         for (int k = 0; k < need; k++) {
           if (entries[j + k].name[0] == 0x00 ||
@@ -637,6 +660,35 @@ static int alloc_lfn_run(uint16_t dir_cluster, const char *longname,
           return 0;
         }
       }
+      if (term >= 0 && (SECTOR_SIZE / 32 - (unsigned int)term) < (unsigned int)need &&
+          i + 1 < root_dir_sectors) {
+        uint8_t buf2[SECTOR_SIZE];
+        if (virtio_blk_read_sector(root_dir_sector + i + 1, buf2, 1) != 0) {
+          spinlock_release_irqrestore(&fat_lock, flags);
+          return -1;
+        }
+        int first = SECTOR_SIZE / 32 - term;
+        struct fat16_dir_entry *e2 = (struct fat16_dir_entry *)buf2;
+        int fits = 1;
+        for (int k = 0; k < need - first; k++) {
+          if (e2[k].name[0] != 0x00 && e2[k].name[0] != (char)0xE5) fits = 0;
+        }
+        if (fits) {
+          lfn_place_run(entries, e2, term, first, need, longname, nchunks,
+                        short83, short_entry);
+          if (virtio_blk_write_sector(root_dir_sector + i, buf, 1) != 0 ||
+              virtio_blk_write_sector(root_dir_sector + i + 1, buf2, 1) != 0) {
+            spinlock_release_irqrestore(&fat_lock, flags);
+            return -1;
+          }
+          spinlock_release_irqrestore(&fat_lock, flags);
+          if (out_sector) *out_sector = (nchunks < first)
+              ? (root_dir_sector + i) : (root_dir_sector + i + 1);
+          if (out_offset) *out_offset = (nchunks < first)
+              ? (uint32_t)(term + nchunks) : (uint32_t)(nchunks - first);
+          return 0;
+        }
+      }
       spinlock_release_irqrestore(&fat_lock, flags);
     }
     return -1;
@@ -653,7 +705,13 @@ static int alloc_lfn_run(uint16_t dir_cluster, const char *longname,
         return -1;
       }
       struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
-      for (unsigned int j = 0; j + need <= SECTOR_SIZE / 32; j++) {
+      int term = -1;
+      for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
+        if (entries[j].name[0] == 0x00) { term = (int)j; break; }
+      }
+      unsigned int jmax = (term >= 0) ? (unsigned int)term
+                                      : (SECTOR_SIZE / 32 - need);
+      for (unsigned int j = 0; j + need <= SECTOR_SIZE / 32 && j <= jmax; j++) {
         int run = 0;
         for (int k = 0; k < need; k++) {
           if (entries[j + k].name[0] == 0x00 ||
@@ -670,6 +728,35 @@ static int alloc_lfn_run(uint16_t dir_cluster, const char *longname,
           spinlock_release_irqrestore(&fat_lock, flags);
           if (out_sector) *out_sector = sector_num;
           if (out_offset) *out_offset = j + nchunks;
+          return 0;
+        }
+      }
+      if (term >= 0 && (SECTOR_SIZE / 32 - (unsigned int)term) < (unsigned int)need &&
+          s + 1 < bpb_sectors_per_cluster) {
+        uint32_t next_sector = sector_num + 1;
+        uint8_t buf2[SECTOR_SIZE];
+        if (virtio_blk_read_sector(next_sector, buf2, 1) != 0) {
+          spinlock_release_irqrestore(&fat_lock, flags);
+          return -1;
+        }
+        int first = SECTOR_SIZE / 32 - term;
+        struct fat16_dir_entry *e2 = (struct fat16_dir_entry *)buf2;
+        int fits = 1;
+        for (int k = 0; k < need - first; k++) {
+          if (e2[k].name[0] != 0x00 && e2[k].name[0] != (char)0xE5) fits = 0;
+        }
+        if (fits) {
+          lfn_place_run(entries, e2, term, first, need, longname, nchunks,
+                        short83, short_entry);
+          if (virtio_blk_write_sector(sector_num, buf, 1) != 0 ||
+              virtio_blk_write_sector(next_sector, buf2, 1) != 0) {
+            spinlock_release_irqrestore(&fat_lock, flags);
+            return -1;
+          }
+          spinlock_release_irqrestore(&fat_lock, flags);
+          if (out_sector) *out_sector = (nchunks < first) ? sector_num : next_sector;
+          if (out_offset) *out_offset = (nchunks < first)
+              ? (uint32_t)(term + nchunks) : (uint32_t)(nchunks - first);
           return 0;
         }
       }
@@ -1518,7 +1605,7 @@ int fat16_read_direct(struct file* f, uint64_t dest, int size) {
     if (offset_in_sector != 0 || (out % SECTOR_SIZE) != 0 || max_sectors == 0) {
       /* Unaligned edge or sub-sector tail: one sector through a bounce. */
       uint32_t sector_num = data_sector + (c - 2) * bpb_sectors_per_cluster
-                            + (offset_in_cluster / SECTOR_SIZE);
+      + (offset_in_cluster / SECTOR_SIZE);
       uint8_t sec_buf[SECTOR_SIZE];
       spinlock_release_irqrestore(&fat_lock, flags);
       int res = virtio_blk_read_sector(sector_num, sec_buf, 1);
@@ -1550,7 +1637,7 @@ int fat16_read_direct(struct file* f, uint64_t dest, int size) {
     if (sectors > 1024) sectors = 1024; /* device request cap */
 
     uint32_t lba = data_sector + (c - 2) * bpb_sectors_per_cluster
-                   + (offset_in_cluster / SECTOR_SIZE);
+    + (offset_in_cluster / SECTOR_SIZE);
     spinlock_release_irqrestore(&fat_lock, flags);
     int res = virtio_blk_read_sector(lba, (void*)out, sectors);
     flags = spinlock_acquire_irqsave(&fat_lock);
