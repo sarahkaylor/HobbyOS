@@ -43,7 +43,10 @@ exec > >(tee -a "$BUILD_ROOT/build.log") 2>&1
 echo "== icu-78.3 build-host.sh: JOBS=$JOBS CC=$CC CXX=$CXX =="
 echo "== host build start: $(date -u '+%Y-%m-%dT%H:%M:%SZ') =="
 
-"$VENDOR_DIR/fetch.sh"
+# Committed vendored scripts are mode 644 (the repo convention is to invoke
+# them via `bash script.sh` — see the Makefile's libcxx rules), so call
+# fetch.sh through bash rather than relying on the executable bit.
+bash "$VENDOR_DIR/fetch.sh"
 
 if [ ! -f "$SRC/source/data/in/icudt78l.dat" ] && [ -f "$SRC/source/data/locales/root.txt" ]; then
   echo "== NOTE: prebuilt data/in/icudt78l.dat is absent while data sources are"
@@ -76,6 +79,6 @@ for f in "$PREFIX"/lib/libicu*.a; do
   printf '%-56s %10s bytes\n' "${f#"$PREFIX"/}" "$(stat -c%s "$f")"
 done
 
-"$VENDOR_DIR/smoke/run-smoke.sh"
+bash "$VENDOR_DIR/smoke/run-smoke.sh"
 
 echo "== host build done: $(date -u '+%Y-%m-%dT%H:%M:%SZ') =="

@@ -47,7 +47,7 @@ exec > >(tee -a "$BUILD_ROOT/trimmed.log") 2>&1
 echo "== icu-78.3 build-host-trimmed.sh: JOBS=$JOBS CC=$CC CXX=$CXX =="
 echo "== trimmed host build start: $(date -u '+%Y-%m-%dT%H:%M:%SZ') =="
 
-"$VENDOR_DIR/fetch.sh" --data-src
+bash "$VENDOR_DIR/fetch.sh" --data-src
 
 if [ -f "$SRC/source/data/in/icudt78l.dat" ]; then
   echo "== parking prebuilt data/in/icudt78l.dat -> icudt78l.dat.parked-prebuilt"
@@ -82,6 +82,6 @@ for f in "$PREFIX"/lib/libicu*.a; do
   printf '%-56s %10s bytes\n' "${f#"$PREFIX"/}" "$(stat -c%s "$f")"
 done
 
-SMOKE_TAG=trim-src ICU_PREFIX="$PREFIX" "$VENDOR_DIR/smoke/run-smoke.sh"
+SMOKE_TAG=trim-src ICU_PREFIX="$PREFIX" bash "$VENDOR_DIR/smoke/run-smoke.sh"
 
 echo "== trimmed host build done: $(date -u '+%Y-%m-%dT%H:%M:%SZ') =="
