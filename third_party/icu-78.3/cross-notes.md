@@ -191,6 +191,21 @@ libicudata.a libcxx.a libc.a`) closes down to **9** symbols: the four RTTI
 ones + `pow log modf expf tanhf` — i.e. all the trig is `i18n/astro.cpp`
 only. Log: `obj/third_party/icu-78.3/<arch>/probe/icu_probe.link.log`.
 
+**Whole-archive closure (upper bound, both arches): exactly these 16.**
+Taking the union of every undefined symbol in the three archives (4,119
+names) minus everything defined by {the three archives ∪ `libcxx.a` ∪
+`libc.a`, 20,377/21,035 names} leaves exactly the 16 symbols above and
+nothing else — i.e. no object anywhere in the ICU archives hides a gap the
+probe did not already name:
+
+```
+$ llvm-nm-21 --undefined-only obj/<arch>/icu/*.a | awk '{print $NF}' | sort -u > U
+$ llvm-nm-21 --defined-only  obj/<arch>/icu/*.a obj/<arch>/libcxx.a obj/<arch>/libc.a \
+      | awk '{print $NF}' | sort -u > D
+$ comm -23 U D        # -> _ZTVN10__cxxabiv1{17,20,21}__*_class_type_infoE, __dynamic_cast,
+                      #    asin atan atan2 cos expf log modf pow sin sqrt tan tanhf
+```
+
 Two sysroot/policy gaps to close upstream (not in this lane's scope):
 
 1. **libm transcendentals** — the HobbyOS `<math.h>` slice (P3.2) declares but
