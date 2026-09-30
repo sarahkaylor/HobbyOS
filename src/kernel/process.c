@@ -29,6 +29,15 @@ extern void uart_puts(const char *s);
 extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
 
+#ifdef __x86_64__
+/* x86_64 FPU/SSE state (src/kernel/arch/x64/fpu.c).  The context switch
+   carries the x87+SSE register file through these hooks so state follows
+   the process across preemption and cross-CPU migration (F1.5). */
+extern void arch_fpu_save(struct process *p);
+extern void arch_fpu_restore(struct process *p);
+extern void arch_fpu_reset(struct process *p);
+#endif
+
 // Process table
 static struct process proc_table[MAX_PROCESSES];
 int cpu_current_pids[MAX_CPUS];
@@ -416,6 +425,13 @@ static int process_create_internal(void) {
   for (int i = 0; i < 36; i++) {
     p->context[i] = 0;
   }
+#ifdef __x86_64__
+  /* F1.5: fresh FPU image (zeroed + architectural defaults).  A PCB slot
+     reused from a dead process must not leak its x87/SSE state into the new
+     one, and the first SSE op must not fault: an all-zero MXCSR has every
+     SIMD exception unmasked (#XM on the first inexact result). */
+  arch_fpu_reset(p);
+#else
   /* F1.5 (FPU): a fresh process starts with a zeroed FPSIMD file.  The
      slot can be a reuse of an exited process whose saved FP state must
      not leak into the new one — the first resume restores BEFORE any
@@ -424,6 +440,7 @@ static int process_create_internal(void) {
   for (int i = 0; i < 66; i++) {
     p->fpu_state[i] = 0;
   }
+#endif
 
   return pid;
 }
@@ -531,8 +548,15 @@ void save_context(struct process *p, struct trap_frame *tf) {
 #else
   p->context[33] = arch_get_user_sp();
 #endif
-
-#ifndef __x86_64__
+#ifdef __x86_64__
+  /* F1.5: mover of the process's x87+SSE file.  FXSAVE64 the LIVE registers
+     into p's 512-byte image.  The kernel is compiled -mno-sse/-mno-x87 and
+     never executes FP, so the register file still holds exactly the state
+     the preempted process had.  For process_fork()'s save_context(child, tf)
+     this is also what gives the child the parent's FP context (the parent is
+     executing here, so its live registers ARE the inherited state). */
+  arch_fpu_save(p);
+#else
   /* F1.5 (FPU): the process's FPSIMD register file follows it across the
      switch.  Called with the process's FP state still live in the
      hardware register file — kernel C is compiled -mgeneral-regs-only,
@@ -616,6 +640,12 @@ static void restore_context(struct process *p, struct trap_frame *tf) {
   if (!p->is_kernel_process) {
     tf->spsr |= 0x200;
   }
+  /* F1.5: load the target's x87+SSE registers from its FXSAVE64 image.  Every
+     resume path goes through here (schedule() and start_scheduler()'s idle
+     loop), and nothing between this point and the iretq executes FP, so the
+     state reaches the process intact — including a process saved on another
+     CPU (cross-CPU migration). */
+  arch_fpu_restore(p);
 #else
   /* F1.5 (FPU): load the process's FPSIMD register file (saved by
      save_context) before it resumes.  The remaining switch tail

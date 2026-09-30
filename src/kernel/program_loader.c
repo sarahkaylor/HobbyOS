@@ -273,7 +273,21 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
     }
   }
 
+  /* SysV AMD64 ABI (browser.md F1.5): at the first instruction of a
+     function RSP must be 16n+8 — the caller's return address occupies the
+     8 bytes at 16n.  The user entry (_start) is compiled C whose prologue
+     makes the standard `push %rbp` / 16-byte-aligned-local assumption, so
+     hand the process the ABI-shaped stack: one phantom "return address"
+     slot below the stack top.  With SSE enabled for user code, an entry
+     RSP of exactly USER_VIRT_STACK (16-aligned, ≡0) makes every aligned
+     spill of a -N(%rbp) slot take #GP — observed as the x64 wave's
+     Vector:13 storm and FPU_T dying at its first movaps (0x440001c9,
+     -0x90(%rbp)).  ARM64 has no such requirement. */
+#ifdef __x86_64__
+  process_set_entry(pid, USER_VIRT_BASE, USER_VIRT_BASE + USER_REGION_SIZE - 8);
+#else
   process_set_entry(pid, USER_VIRT_BASE, USER_VIRT_BASE + USER_REGION_SIZE);
+#endif
   return pid;
 }
 

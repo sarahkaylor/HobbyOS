@@ -184,16 +184,23 @@ struct process {
   int spawn_retval;
 
   /**
-   * F1.5 (FPU, ARM64): per-process FPSIMD register file, saved on every
-   * context switch so live q0-q31 values survive preemption and cross-CPU
-   * migration.  Layout, read/written by src/kernel/arch/arm/fpu.s:
+   * F1.5 (FPU): per-process floating-point register image, saved on every
+   * context switch (save_context/restore_context) so live FP state follows
+   * the process across preemption and cross-CPU migration.  Appended at the
+   * END of the struct so parallel lanes merge additively; 16-byte aligned
+   * for the ARM stp/ldp q accesses and the x86_64 FXSAVE64/FXRSTOR64 memory
+   * operand (both fault on misalignment).
+   *
+   * ARM64 (src/kernel/arch/arm/fpu.s):
    *   [   0, 512 )  q0-q31 as 32 x 128-bit registers (64 x uint64_t)
    *   [ 512, 520 )  FPCR
    *   [ 520, 528 )  FPSR
-   * The 16-byte alignment is required by the stp/ldp q accesses; a zeroed
-   * entry (fresh process) restores as all-zero registers plus default
-   * control/status words.  Appended at the END of the struct so parallel
-   * lanes merge additively.
+   * A zeroed entry (fresh process) restores as all-zero registers plus
+   * default control/status words.
+   *
+   * x86_64 (src/kernel/arch/x64/fpu.c): the first 512 bytes hold the
+   * FXSAVE64 image; arch_fpu_reset() fills the architectural defaults
+   * (FCW/FTW/MXCSR) for fresh processes; offsets 512+ are unused there.
    */
   uint64_t fpu_state[66] __attribute__((aligned(16)));
 };

@@ -55,9 +55,13 @@ endif
 ifeq ($(ARCH),intel)
   QEMU = qemu-system-x86_64
   # Intel/AMD 64-bit compiler flags
-  # Using standard bare-metal flags, disabling red zone and SSE
+  # Kernel stays off x87/SIMD: -mno-sse/-mno-mmx keep every kernel TU free of
+  # FP/SSE codegen (the FPU state is moved only by arch/x64/fpu.c's inline
+  # fxsave64/fxrstor64).  Userland, however, may use the FPU/SSE: the kernel
+  # enables CR0.EM/MP/TS + CR4.OSFXSR/OSXMMEXCPT per core and carries each
+  # process's 512-byte FXSAVE64 image across context switches (F1.5).
   CFLAGS = -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
-  USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
+  USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone
   ARCH_DIR = src/kernel/arch/x64
   LDFLAGS = -T linker_x64.ld
   # QEMU parameters for x86_64: 8 cores, 6GB RAM, mounting disk.img as NVMe, booting with UEFI
@@ -141,6 +145,9 @@ EDITOR_T_BIN = $(OBJ_DIR)/EDITOR_T.BIN
 APPS_T_BIN = $(OBJ_DIR)/APPS_T.BIN
 PONG_T_BIN = $(OBJ_DIR)/PONG_T.BIN
 STRESS_TEST_BIN = $(OBJ_DIR)/stress.bin
+# F1.5 (browser.md): floating-point bring-up test.  FPU_T.BIN is 8.3-safe
+# (the FAT16 reader only resolves 8-char base names, see the run-tests
+# skill's pitfall #1).
 FPU_T_BIN = $(OBJ_DIR)/fpu_test.bin
 ERRNO_TEST_BIN = $(OBJ_DIR)/errtest.bin
 HELLO_BIN = $(OBJ_DIR)/hello.bin
@@ -362,9 +369,10 @@ $(OBJ_DIR)/stress_test.o: src/user/stress_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-# F1.5 (FPU): the floating-point bring-up test (src/user/fpu_test.c) —
-# built like the other *_test binaries; USER_CFLAGS no longer restricts
-# user FP/SIMD on ARM, so float/double ops compile to real FP instructions.
+# F1.5: floating-point bring-up test (src/user/fpu_test.c) — built like the
+# other *_test binaries; USER_CFLAGS no longer restrict user FP/SIMD on
+# either arch (ARM drops -mgeneral-regs-only; intel drops the -mno-sse
+# family), so float/double ops compile to real FP instructions.
 $(OBJ_DIR)/fpu_test.o: src/user/fpu_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
