@@ -208,10 +208,18 @@ static void test_reader_closed(void) {
 
 /* The blocking path: select(timeout_ms < 0) must park the process and be
  * woken by the FD becoming ready, with the elapsed time proving it really
- * waited.  A forked child writes after 100ms; the parent waits forever. */
+ * waited.  A forked child writes after 100ms; the parent waits forever.
+ *
+ * Handshake note: the child only starts its 100ms sleep once the parent
+ * releases it (a second "go" pipe written just before select()).  Without
+ * that, a loaded machine can delay the parent past the child's whole sleep,
+ * so the byte is already queued when select() is finally called; the
+ * correct implementation then returns immediately and the elapsed>=80
+ * assertion fails spuriously.  Observed on the x64 guest under KVM. */
 static void test_blocking_wait(void) {
   int pfd[2] = {-1, -1};
-  if (pipe(pfd) != 0) {
+  int go[2] = {-1, -1};
+  if (pipe(pfd) != 0 || pipe(go) != 0) {
     check("pipe() for the blocking check", 0);
     return;
   }
@@ -221,22 +229,32 @@ static void test_blocking_wait(void) {
     check("fork() for the blocking check", 0);
     close(pfd[0]);
     close(pfd[1]);
+    close(go[0]);
+    close(go[1]);
     return;
   }
   if (pid == 0) {
-    /* Child: give the parent time to block, then make the pipe readable. */
+    /* Child: block until the parent is about to wait, then make the pipe
+     * readable 100ms later. */
+    char c = 0;
     close(pfd[0]);
+    close(go[1]);
+    if (read(go[0], &c, 1) != 1)
+      exit(0);
+    close(go[0]);
     usleep(100000); /* 100 ms */
-    char c = 'A';
-    write(pfd[1], &c, 1);
+    write(pfd[1], "A", 1);
     close(pfd[1]);
     exit(0);
   }
 
   close(pfd[1]); /* parent keeps only the read end */
+  close(go[0]);
   fd_set rd;
   FD_ZERO(&rd);
   FD_SET(pfd[0], &rd);
+  write(go[1], "!", 1); /* release the child's 100ms sleep */
+  close(go[1]);
   uint64_t t0 = now_ms();
   int r = select(pfd[0] + 1, &rd, 0, 0, -1); /* wait forever */
   uint64_t elapsed = now_ms() - t0;
