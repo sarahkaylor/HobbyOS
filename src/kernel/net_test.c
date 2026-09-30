@@ -136,6 +136,17 @@ static void test_net_connect_state(void) {
   struct socket_pcb *pcb = file_socket_pcb(cur, fd);
   ASSERT(pcb != 0);
 
+  /* A fresh, never-connected TCP socket must not claim readiness: nothing
+   * queued, no error, and no EOF lie (F1 readiness semantics). */
+  int fresh = file_socket(cur, K_AF_INET, K_SOCK_STREAM, 0);
+  ASSERT(fresh >= 0);
+  struct socket_pcb *fpcb = file_socket_pcb(cur, fresh);
+  ASSERT(fpcb != 0);
+  EXPECT_EQ(net_socket_ready(fpcb, 0), 0);
+  EXPECT_EQ(net_socket_ready(fpcb, 1), 0);
+  EXPECT_EQ(net_socket_error(fpcb), 0);
+  file_close(cur, fresh);
+
   /* Non-blocking TCP connect to TEST-NET-1 (192.0.2.1, never routed):
    * the handshake must start and stay pending, not fail. */
   net_socket_set_nonblock(pcb, 1);

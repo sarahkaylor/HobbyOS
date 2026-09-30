@@ -916,7 +916,10 @@ int net_socket_ready(struct socket_pcb* pcb, int for_write) {
       return 0;
     }
     if (pcb->rx_head != pcb->rx_tail) return 1;             /* data pending */
-    if (pcb->state == SOCKET_CLOSED || pcb->connect_err != 0) return 1;
+    if (pcb->connect_err != 0) return 1;                    /* error pending */
+    /* EOF: a socket that was connected and has since been closed reads as
+       readable (read() then returns 0), but a fresh socket does not. */
+    if (pcb->connect_started && pcb->state == SOCKET_CLOSED) return 1;
     return 0;
   }
   /* UDP: a socket with a peer recorded is always writable; readable when a

@@ -359,9 +359,9 @@ static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e) {
     if (net_socket_ready(pcb, 0)) *r = 1;
     if (net_socket_ready(pcb, 1)) *w = 1;
     if (pcb->connect_err != 0) *e = 1;
-    if (pcb->protocol == IP_PROTO_TCP && pcb->state == SOCKET_CLOSED &&
-        !pcb->connect_started && pcb->connect_err == 0) {
-      *e = 1; /* HUP: closed without an error (already readable as EOF) */
+    if (pcb->protocol == IP_PROTO_TCP && pcb->connect_started &&
+        pcb->state == SOCKET_CLOSED && pcb->connect_err == 0) {
+      *e = 1; /* HUP: a connected socket closed cleanly (also readable) */
     }
     return 0;
   }
