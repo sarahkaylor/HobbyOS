@@ -307,8 +307,9 @@ int file_fcntl(struct process *p, int fd, int cmd, int arg) {
   }
 }
 
-/* Readiness probe for one fd, setting *r/*w/*e.  Returns 0, or -1 when the
- * fd is not open (select then fails the whole call with EBADF, like Linux). */
+/* Readiness probe for one fd, setting the r/w/e out-parameters.  Returns 0,
+ * or -1 when the fd is not open (select then fails the whole call with
+ * EBADF, like Linux). */
 static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e) {
   *r = 0;
   *w = 0;

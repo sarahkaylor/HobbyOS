@@ -162,6 +162,32 @@ static void hard_select_args(void) {
   check("select(0, NULL, NULL, NULL, 0) == 0", r == 0);
 }
 
+/* F1.7: sysinfo cmd 4 hands the DHCP-learned DNS server to userland.  The
+ * dns field is appended to struct sys_netinfo, so a caller using the
+ * pre-extension buffer size must still succeed and see the old fields. */
+static void hard_sys_netinfo_dns(void) {
+  struct {
+    uint32_t ip;
+    uint32_t mask;
+    uint32_t gw;
+    uint8_t mac[6];
+  } old;
+  int r = sysinfo(4, &old, (int)sizeof(old));
+  check("sysinfo(4) with the pre-dns buffer size still succeeds", r == 0);
+
+  struct sys_netinfo info;
+  info.ip = 0;
+  r = sysinfo(4, &info, (int)sizeof(info));
+  check("sysinfo(4) extended: ip/mask match the old-size call",
+        r == 0 && info.ip == old.ip && info.subnet_mask == old.mask);
+
+  print_console("  SOCK2TST iface ip=0x");
+  print_hex((long)info.ip);
+  print_console(" dns=0x");
+  print_hex((long)info.dns);
+  print_console(info.dns ? " (DHCP option 6 stored)\n" : " (none in this lease)\n");
+}
+
 /* ---- net section (live, SKIP-able) ------------------------------------ */
 
 /* Poll for writability with select() in 250ms steps for up to
@@ -282,6 +308,7 @@ __attribute__((section(".text._start"))) void _start(void) {
   hard_socket_error_paths();
   hard_fd_set_macros();
   hard_select_args();
+  hard_sys_netinfo_dns();
   net_section();
 
   if (fails == 0) {
