@@ -13,6 +13,11 @@
 #include "string.h"
 #include "malloc.h"
 #include "errno.h"
+#else
+/* strerror_r returns ERANGE/EINVAL; those constants come from the host's
+   errno.h in the HOST_TEST flavour (the device build includes the sysroot
+   one above). */
+#include <errno.h>
 #endif
 
 /* Recursion guard for our own use below (non-host only). */
