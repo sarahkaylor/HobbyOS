@@ -306,6 +306,20 @@ AD-11 with host builds + smokes green (branches `browser/l5-fonts`,
   candidate); mbedTLS 3.6.7 / FreeType 2.14.3 / DejaVu 2.37 confirmed as pinned
   (all vendored + smoke-verified).
 
+**W1c vendor record (2026-09-30, merged `e5188de`)** — Skia, per WebKit 2.54's
+own `Source/ThirdParty/skia/README.WebKit`:
+- Skia @ **`588b550a4dd8af90dbe71c0554852806bd8f0b21`** — recipe vendored
+  (`third_party/skia-588b550/`: `fetch.sh` + 12395-entry content manifest
+  `c27786ca…` (the gate — googlesource `+archive` containers are not
+  byte-reproducible) + `gen_sources.py` derived from WebKit's own file list +
+  overlay CMake + smoke; 156 KB committed, 216 MiB tree gitignored).
+  Provenance: content-identical vs the fork clone (12389 files) and vs the WPE
+  tarball Skia subset (3059 files; `tools/compare-with-webkit.py` reproduces).
+  Host build: `libSkia.a` 15,079,504 B / 595 objects; deterministic smoke
+  sha256(pixels)=`eee5d809…`, fnv1a64 `0xb2e29142c06f8b86`. WK-3 finding:
+  WPE's Skia `CMakeLists` omits `src/core/SkStrikeRef.cpp` (upstream `gn`
+  includes it) — confirm dead-strip harmlessness or apply the one-line patch.
+
 Retired pins (v1; kept here for the record only): dillo-3.2.0
 (`ed685168…` tar.gz / `1066ed42…` tar.bz2), fltk-1.3.11 (`92805abc…` /
 `ca2e144e…`).
@@ -606,26 +620,37 @@ delta +0.55 s (ARM) / +0.55 s (x64), within the +2 s target; full record §11.
 ### P1 — Threads & pthreads  *(new; Track B)*
 
 *(Design `docs/browser/p1-threads-design.md` — integrator-reviewed 2026-09-30,
-OQ1–OQ6 resolved; implementation is the next wave.)*
+OQ1–OQ6 resolved; implemented 2026-09-30, merged `e5188de`.)*
 
-- [ ] **P1.1 Kernel threads** — thread object sharing the address space;
+- [x] **P1.1 Kernel threads** — thread object sharing the address space;
       create/exit/join primitives; scheduler integration (timeslice across
       threads); per-thread kernel stacks; TLS register management on switch.
-- [ ] **P1.2 Futex-lite** — WAIT/WAKE on user addresses (word compare + park,
+      **Done:** merged `e5188de` (lane `2404db2`..`1b70868`) — PCB-slot threads
+      sharing the leader AS; `process_group()` routing; THREAD_DONE reclamation;
+      exit_group from any thread; `tls_base` on the context switch; §11.
+- [x] **P1.2 Futex-lite** — WAIT/WAKE on user addresses (word compare + park,
       timeout) — the primitive under mutexes/conds. Keep the surface minimal,
-      document semantics precisely.
-- [ ] **P1.3 pthreads library** (`src/libc/pthread.c`) — `pthread_create/
+      document semantics precisely. **Done:** merged — WAIT/WAKE + timeout
+      machine in `process_check_sleeping`; process-private, proc_lock-only; §11.
+- [x] **P1.3 pthreads library** (`src/libc/pthread.c`) — `pthread_create/
       join/detach/self/equal/exit`, mutex (normal+recursive), condvar,
       once, rwlock (read-mostly correctness over fairness), barriers, keys
       (`pthread_key_*`), `pthread_attr_*` subset; `sched_yield`.
-- [ ] **P1.4 TLS verification** — 2 threads × distinct TLS values under
-      preemption; `tls_test.c` in the wave.
-- [ ] **P1.5 Test** — `THRD_T.BIN`: N threads, mutex/cond ping-pong, atomic
+      **Done:** merged — musl-model TCB + crt0/`linker.ld` TLS; §11.
+- [x] **P1.4 TLS verification** — 2 threads × distinct TLS values under
+      preemption; `tls_test.c` in the wave. **Done:** TLS_T 6/6 in-wave
+      (device) + glibc host variant; three device-only TLS bugs found and fixed
+      pre-gate; §11.
+- [x] **P1.5 Test** — `THRD_T.BIN`: N threads, mutex/cond ping-pong, atomic
       ops (`__atomic_*` builtins) under contention, join correctness; runs
-      both arches.
+      both arches. **Done:** THRD_T 20/20 in-wave; kernel unit additions
+      (thread_group / thread_validation / slot_reclaim / futex_machine /
+      set_tls + fresh-FP assertion); §11.
 
 **Gate P1:** `THRD_T.BIN` + kernel suite green both arches; no scheduler
-regressions in existing wave.
+regressions in existing wave. **Gate P1 CLOSED 2026-09-30** — lane gate
+(host 482/0, unit-arm 53/0, unit-x64 55/0 KVM, ARM wave 0 FAIL, THRD_T 20/20,
+TLS_T 6/6); boot delta ARM +0.09 s / x64 ~0; merged-tip batteries: see §11.
 
 ### P2 — VM & memory overhaul  *(new; Track B, the deepest kernel item)*
 
@@ -771,9 +796,13 @@ HobbyOS arches as far as the current P-stage allows (this gate is *incremental*
 
 ### WK — WebKit track  *(Track B; the bar)*
 
-- [ ] **WK-0 Scaffolding (with P7.1–.2)** — fork + null build as far as
+- [x] **WK-0 Scaffolding (with P7.1–.2)** — fork + null build as far as
       possible; port README (goals, constraints, rebase policy); decision log
-      opened in the fork.
+      opened in the fork. **Done (scaffold):** `hobbyos/wk0-scaffold` in
+      `~/webkit-hobbyos` (`d055b25768`; 19 files, 1220 insertions, zero upstream
+      edits) — PORT_STATE + PORT_PLAN + Options/PlatformHobbyOS CMake bootstrap
+      + WTF stubs + WK-1 feasibility memo (H-1..H-12, OQ-1..OQ-11). Null build
+      deferred to WK-1 (gated on register row 1 + cross toolchain; §11).
 - [ ] **WK-1 `jsc` shell on HobbyOS** *(first deliverable!)* — JSCOnly target
       for HobbyOS: platform files needed by JSC; static link; `jsc` runs:
       arithmetic/strings/regex/JSON/Date; **test262 language-subset run**
@@ -1262,6 +1291,36 @@ curl -sI https://lite.cnn.com | grep -i content-length
 ---
 
 ## 11. Fix log (append-only; see also per-lane reports)
+
+- 2026-09-30 — **Wave 1c landed: P1 (threads/futex/pthreads) + Skia spike + WK-0 scaffold +
+  refs-vendor — merged at `e5188de`** (base `00fce5d`; all three HobbyOS-repo merges clean,
+  Skia a fast-forward).
+  - **l2-p1 `e5188de`** (7 commits `2404db2`..`1b70868`; 24 files, +3293/−135): the full P1 —
+    PCB-slot threads sharing the leader address space (process.c +666); process_group()
+    routing through fs.c/vfs.c/fat16.c/program_loader.c; THREAD_DONE reclamation; exit_group
+    from any thread; `tls_base` on save/restore_context; futex-lite (WAIT/WAKE + timeout
+    machine, proc_lock-only); syscalls 72–75 on both arches + libc wrappers; libpthread
+    (musl TCB) + crt0/`linker.ld` TLS; THRD_T.BIN / TLS_T.BIN wired into the wave; kernel
+    unit additions; glibc host variant. Three device-only bugs found by the wave and fixed
+    pre-gate: absolute-linker-symbol TLS read (data abort at crt0 for every program);
+    main-thread TLS storage mutating the `.tdata` template (thread-isolation failure);
+    and a **latent pre-existing fat16 LFN bug** exposed by the +2 disk entries
+    (`alloc_lfn_run` placing runs past the 0x00 terminator → invisible files; intel unit
+    tier red) — fixed. Lane gate: host 482/0, unit-arm 53/0, unit-x64 55/0 KVM, ARM wave
+    0 FAIL with THRD_T 20/20 + TLS_T 6/6. Boot delta (Gate F1 method): ARM 8.89 → 8.98 s
+    (+0.09 s), x64 ~0 (1.309 s both). cstyle clean (24 files). §A.1b rows 72–75 + the
+    consented +2 renumber recorded by the lane in `9bf91a0`.
+  - **l6-skia `c0c6a3d`** (Skia host spike): pin + recipe + host build + deterministic
+    smoke — see the §2 W1c vendor record; GN/depot_tools path probed to a documented
+    boundary (memo); the two-build-rule reuse recipe for the target leg is in the lane's
+    note (`docs/browser/l6-skia-host-spike.md`).
+  - **WK-0 `d055b25768`** (in `~/webkit-hobbyos`, branch `hobbyos/wk0-scaffold`; 4 commits,
+    19 files, 1220 insertions, zero upstream edits): PORT_STATE (shallow single-commit
+    clone, no private remote yet), PORT_PLAN (every seam + upstream-edit register rows
+    1–7 + dependency ledger), CMake bootstrap (OptionsHobbyOS + PlatformHobbyOS glue +
+    WTF stubs), WK-1 feasibility memo (H-1..H-12, OQ-1..OQ-11). Nothing configure-tested
+    by design; §6 WK-0 ticked with the null-build caveat.
+  - Merged-tip batteries (local + VM `w1c-*`) are running against `e5188de`.
 
 - 2026-09-30 — **F1 carried item #3 CLOSED: the diffutils cmp ref-build story is
   vendored in-repo.** `third_party/diffutils-2.8.1.tar.gz` (780,086 B; sha256
