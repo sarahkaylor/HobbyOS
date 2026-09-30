@@ -3,12 +3,28 @@
 #include "syscall.h"
 #include "errno.h"
 
-/* Per-process errno. Single-threaded processes: a plain global is correct
- * (each process has its own address space). See errno.h.
- * On the host, errno is glibc's TLS macro (there is no plain `int errno`),
- * so the in-OS storage must NOT be defined there. */
+/* Per-thread errno (P1, p1-threads-design.md sections 4/6), served through
+ * __errno_location() -- errno.h defines `errno` as (*__errno_location()),
+ * the glibc/musl model, so every existing source (including vendored
+ * `extern int errno;` declarations) compiles unchanged.
+ * On the host, errno is glibc's own TLS macro, so none of this is defined
+ * there. */
 #ifndef HOST_TEST
-int errno = 0;
+static __thread int errno_storage = 0;
+
+/* Flag set by every TLS installer (crt0 / trampoline / lazy fallback).  On
+ * x86_64 there is no unprivileged way to read the FS base back, so this is
+ * the "TLS installed" signal there; aarch64 reads TPIDR_EL0 instead. */
+int ho_tls_ready_flag;
+
+/* The single choke point for every errno access, and therefore where the
+ * lazy TLS install for crt0-less programs lives (the accessor is called
+ * before the very first errno read or write). */
+int *__errno_location(void) {
+  if (!ho_tls_installed())
+    ho_tls_setup_initial();
+  return &errno_storage;
+}
 #endif
 
 /* Normalize a raw syscall result to the POSIX convention: on a negative
@@ -16,7 +32,7 @@ int errno = 0;
  * syscalls (read_dir, available, sysinfo, ...) do NOT go through this. */
 static long errno_ret(long r) {
   if (r < 0) {
-    errno = (int)(-r);
+    errno = (int)(-r); /* accessor ensures TLS before the store */
     return -1;
   }
   return r;
@@ -75,6 +91,119 @@ static long syscall5(long num, long a0, long a1, long a2, long a3, long a4) {
   return x0;
 }
 #endif
+
+/* --- P1 (browser.md A.1b): threads, futex-lite, TLS (72-75) ------------ */
+
+#ifndef HOST_TEST
+/* TLS image symbols come from src/user/linker.ld (probe-verified layout,
+ * p1-threads-design.md section 4). */
+extern char __tls_start[];
+extern char __tls_end[];
+/* Linker-script symbols (linker.ld) are ABSOLUTE: the symbol's value IS the
+ * number, and there is no storage behind it.  Declaring it as an array and
+ * using the decayed pointer reads that value; declaring it as a variable
+ * (or reading an array element) would dereference address `value` instead
+ * -- observed as a data abort at 0x10 from crt0's setup call. */
+extern char __tls_align[];
+
+/* Is the calling thread's TLS register installed?  aarch64: read TPIDR_EL0
+ * (per-thread truth).  x86_64: the flag every installer sets (the FS base
+ * is not readable from user mode without FSGSBASE). */
+int ho_tls_installed(void) {
+#ifdef __x86_64__
+  return ho_tls_ready_flag;
+#else
+  unsigned long tp;
+  __asm__ volatile("mrs %0, tpidr_el0" : "=r"(tp));
+  return tp != 0;
+#endif
+}
+
+void ho_tls_mark_installed(void) { ho_tls_ready_flag = 1; }
+
+/* Static block holding the main thread's TLS image.  crt0 runs before any
+ * heap exists (and minimal programs link neither malloc nor memcpy), so
+ * this file must not call into them.  4 KiB covers every module in tree;
+ * past that the code falls back to using the linker-placed image itself. */
+#define HO_TLS_MAIN_BLOCK 4096
+static char main_tls_block[HO_TLS_MAIN_BLOCK] __attribute__((aligned(16)));
+
+/* Install the initial thread's TLS register from a COPY of the image.
+ * Like musl's __init_tls, the main thread gets its own block: .tdata/.tbss
+ * must stay pristine because every later thread's block is built by copying
+ * them -- a main thread writing into the template directly would leak its
+ * values into every thread created afterwards.  Called by crt0 before
+ * main() and lazily via __errno_location() for crt0-less programs.  Thread
+ * trampolines install their own blocks via SYS_SET_TLS (src/libc/src/
+ * pthread.c). */
+void ho_tls_setup_initial(void) {
+  extern char __tls_start[], __tls_end[], __tls_data_end[];
+  unsigned long align = (unsigned long)__tls_align ? (unsigned long)__tls_align : 8;
+  unsigned long tls_data = (unsigned long)(__tls_data_end - __tls_start);
+  unsigned long tls_size = (unsigned long)(__tls_end - __tls_start);
+  unsigned long image = (tls_size + align - 1) & ~(align - 1);
+  long tls;
+#ifdef __x86_64__
+  /* Variant II: image at the block base, FS = base + image; TLS code reads
+     the self-pointer at %fs:0 and offsets negatively from it. */
+  if (image + 16 <= sizeof main_tls_block) {
+    volatile char *b = main_tls_block;
+    const volatile char *t = __tls_start;
+    for (unsigned long i = 0; i < image + 16; i++)
+      b[i] = 0;
+    for (unsigned long i = 0; i < tls_data; i++)
+      b[i] = t[i];
+    tls = (long)main_tls_block + (long)image;
+  } else {
+    /* Fallback (TLS image larger than the static block): the image itself
+       becomes the storage.  Values still start correct. */
+    tls = (long)(((unsigned long)__tls_end + align - 1) & ~(align - 1));
+  }
+  *(volatile long *)tls = tls; /* self-pointer at FS:[0] */
+#else
+  /* Variant I: 16-byte head at [tls, tls+16), image at tls+16; compiled TLS
+     accesses land at TP + 16 + (var - __tls_start). */
+  if (16 + image + 16 <= sizeof main_tls_block) {
+    volatile char *b = main_tls_block; /* 16-aligned by declaration */
+    const volatile char *t = __tls_start;
+    for (unsigned long i = 0; i < 16 + image + 16; i++)
+      b[i] = 0;
+    tls = (long)main_tls_block;
+    for (unsigned long i = 0; i < tls_data; i++)
+      b[16 + i] = t[i];
+  } else {
+    tls = ((long)__tls_start - 16) & ~(long)(align - 1);
+  }
+#endif
+  syscall(SYS_SET_TLS, tls, 0, 0, 0);
+  ho_tls_mark_installed();
+}
+
+/* Raw kernel-thread wrappers for libpthread (native extensions: the raw
+ * result is returned, errno is never set). */
+int ho_thread_create(void *entry, void *arg, void *stack_top, int flags) {
+  return (int)syscall(SYS_THREAD_CREATE, (long)entry, (long)arg,
+                      (long)stack_top, (long)flags);
+}
+int ho_futex_wait(volatile int *uaddr, int val, int timeout_ms) {
+  return (int)syscall(SYS_FUTEX, (long)uaddr, 0, (long)val,
+                      (long)timeout_ms);
+}
+int ho_futex_wake(volatile int *uaddr, int count) {
+  return (int)syscall(SYS_FUTEX, (long)uaddr, 1, (long)count, 0);
+}
+void ho_futex_wake_all(volatile int *uaddr) {
+  syscall(SYS_FUTEX, (long)uaddr, 1, 0x7fffffffL, 0);
+}
+int ho_set_tls_raw(long tls) { return (int)syscall(SYS_SET_TLS, tls, 0, 0, 0); }
+int ho_yield_raw(void) { return (int)syscall(SYS_YIELD, 0, 0, 0, 0); }
+void ho_thread_exit_raw(int retval) {
+  syscall(SYS_THREAD_EXIT, (long)retval, 0, 0, 0);
+  /* noreturn contract: SYS_THREAD_EXIT never returns.  If a kernel bug ever
+     let it, ending the process is the only sane fallback. */
+  exit(0);
+}
+#endif /* !HOST_TEST */
 
 void print(const char *s) {
   int len = 0;

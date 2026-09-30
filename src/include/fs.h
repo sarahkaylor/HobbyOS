@@ -176,6 +176,10 @@ int file_fcntl(struct process *p, int fd, int cmd, int arg);
 int file_select(struct process *p, int nfds, struct fd_set_k *rd,
                 struct fd_set_k *wr, struct fd_set_k *ex, int timeout_ms);
 
+/* P1: drop a pid's remembered select deadline (group teardown / thread
+ * death: a parked select must not resurrect a dead thread's slice). */
+void file_select_forget(int pid);
+
 /* Socket PCB behind an fd, or NULL when the fd is not an open socket.
  * Kernel-internal (slice barriers/tests): the returned pointer must not
  * outlive the fd. */

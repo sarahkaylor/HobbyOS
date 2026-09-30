@@ -95,7 +95,17 @@
 #define SYS_SETSOCKOPT    (70)  /* (fd, level, optname, val, len)      -> 0 | -errno */
 #define SYS_GETRANDOM     (71)  /* (buf, len, flags)                   -> written | -errno */
 
+/* P1 (browser.md A.1b, design D2/OQ1 consented): kernel threads,
+ * futex-lite and the TLS register.  72/73 are the planned P1 rows; 74/75
+ * were INSERTED, so the P4+ provisional rows shift +2 (SYS_POLL 74 -> 76,
+ * et seq. -- nothing >= 72 was implemented before this renumber). */
+#define SYS_THREAD_CREATE (72)  /* (entry, arg, stack, flags) -> tid | -EINVAL | -EAGAIN */
+#define SYS_FUTEX         (73)  /* (uaddr, op, val, timeout_ms) -> 0/count | -EAGAIN
+*  | -ETIMEDOUT | -EINVAL | -EFAULT | -ENOSYS */
+#define SYS_THREAD_EXIT   (74)  /* (retval) -> noreturn (exits this thread) */
+#define SYS_SET_TLS       (75)  /* (tls) -> 0 | -EINVAL */
+
 /* Highest defined syscall number. Dispatch tables are sized SYS_MAX + 1. */
-#define SYS_MAX           (71)
+#define SYS_MAX           (75)
 
 #endif /* SYSCALL_H */

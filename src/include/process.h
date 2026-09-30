@@ -17,6 +17,10 @@
 #define PROC_STATE_BLOCKED 5   // Process is waiting for an event
 #define PROC_STATE_WAIT_SPAWN 6 // Process is waiting for a spawn to complete
 #define PROC_STATE_WAIT_CHILD 7 // Process is blocked in waitpid() until a child exits
+/* P1 (docs/browser/p1-threads-design.md D5): separate states so the
+   existing wake/sleep/reap paths stay precise. */
+#define PROC_STATE_FUTEX 8      // P1.2: parked in FUTEX WAIT (schedule() save-set member)
+#define PROC_STATE_THREAD_DONE 9 // P1.1: exited thread; reclaimable once off every CPU
 
 // Kernel memory region (0GB to 1GB)
 #define KERNEL_START 0x00000000
@@ -203,6 +207,19 @@ struct process {
    * (FCW/FTW/MXCSR) for fresh processes; offsets 512+ are unused there.
    */
   uint64_t fpu_state[66] __attribute__((aligned(16)));
+
+  /* --- P1 (p1-threads-design.md section 1): thread / group / futex ------
+   * Appended at the END of the struct so parallel lanes merge additively.
+   * A "thread" is just another PCB slot sharing its leader's address space;
+   * process_group(p) maps any member to the group ANCHOR (the leader PCB),
+   * where all shared state lives.  live_threads counts members not yet dead
+   * (incl. self) on leaders and is 0 elsewhere. */
+  int tgid;              /**< leader pid; == own pid for a leader (always valid) */
+  int is_thread;         /**< 1 = secondary thread */
+  int live_threads;      /**< leaders: members not yet dead incl. self; 0 elsewhere */
+  uint64_t tls_base;     /**< opaque TLS register value (TPIDR_EL0 / IA32_FS_BASE) */
+  uint64_t futex_uaddr;  /**< P1.2: non-zero while parked in FUTEX WAIT */
+  uint64_t thread_ret;   /**< SYS_THREAD_EXIT argument (diagnostics only) */
 };
 
 // Initialize the process subsystem and zero out the process table.
@@ -246,6 +263,52 @@ int sys_readargv(struct process *p, int idx, char *buf, int size);
 // Create a kernel thread running in EL1t.
 int process_create_kernel(void (*entry)(void*), void *arg);
 int process_create_kernel_nowait(void (*entry)(void*), void *arg);
+
+/* --- P1 (p1-threads-design.md): threads, futex-lite, TLS register ------ */
+
+/* Group routing (D7): shared state (fd table, cwd, heap/mmap bookkeeping,
+ * argv blob, address space) lives on the group ANCHOR -- the leader PCB.
+ * Maps any member to its anchor; leaders/plain processes map to themselves;
+ * NULL passes through. */
+struct process *process_group(struct process *p);
+
+/* SYS_THREAD_CREATE (72): allocate a PCB-slot thread sharing `caller`'s
+ * address space (no physical block, no page table, no zeroing).  entry and
+ * [stack-16, stack) must be inside the caller's own region, stack
+ * 16-aligned; flags must be 0.  Returns the tid (>= 1), -EINVAL or
+ * -EAGAIN. */
+int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
+                          uint64_t stack, uint64_t flags);
+
+/* SYS_FUTEX (73): futex-lite WAIT (op 0) / WAKE (op 1); other ops -ENOSYS.
+ * On the WAIT park, tf is the caller's trap frame; the resume value rides
+ * the parked context (waitpid context[0] pattern): wake -> 0, timeout ->
+ * -ETIMEDOUT.  Bounds (p1-threads-design.md section 5, kept verbatim):
+ * **Process-private**: match includes `tgid`; two processes futexing the
+ * same VA never interact (shared futexes arrive with P2, memfd/MAP_SHARED).
+ * **No lost wakeups** for "release-store the word, then WAKE": compare+
+ * enqueue and scan+deliver both sit under `proc_lock`; a WAKE scan that
+ * precedes the enqueue means the WAIT compare runs after the lock chain,
+ * sees the store, and returns `-EAGAIN` (never parks); WAKE-before-store,
+ * timeout-vs-WAKE races and a dying thread's wake are no-wakeup outcomes,
+ * not losses. **No spurious success**: only `futex_wake` (and group
+ * teardown, which kills) changes FUTEX waiters; `process_wake_all()` skips
+ * the state. **Timeout granularity**: 10 ms tick, overshoot < 1 tick, never
+ * early (`process_check_sleeping` gains: FUTEX + expired -> `-ETIMEDOUT`,
+ * clear, READY; a wake/timeout race goes to whoever holds `proc_lock`
+ * first). Fixed per-PCB state, O(64) scans; no allocation, no new lock. */
+int process_futex(struct process *caller, struct trap_frame *tf, uint64_t uaddr,
+                  int op, int64_t val, int64_t timeout_ms);
+
+/* SYS_THREAD_EXIT (74): exit only the calling thread; retval recorded in
+ * the PCB for diagnostics (the authoritative value travels via the user
+ * TCB).  Last member leaving -> full group exit (section 1).  Never returns. */
+void process_thread_exit(struct trap_frame *tf, uint64_t retval);
+
+/* SYS_SET_TLS (75): validate `tls` inside the caller's region, store it in
+ * the calling PCB AND the live register (a save before the next switch sees
+ * it).  Returns 0 or -EINVAL. */
+int process_set_tls(struct process *caller, uint64_t tls);
 
 // Fork the current process to create a child process.
 // Returns child PID to parent, 0 to child.

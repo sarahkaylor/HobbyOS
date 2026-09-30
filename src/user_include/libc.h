@@ -272,6 +272,22 @@ extern "C" {
 #include <time.h>
 #include <sys/time.h>
 
+  /* ---- P1 (browser.md A.1b): threads, futex-lite, TLS -------------------
+   * Kernel-thread wrappers + the TLS bootstrap shared by crt0 and
+   * src/libc/src/pthread.c.  Device-only: the host validates the pthread
+   * layer's *tests* against glibc, not this implementation. */
+  int ho_thread_create(void *entry, void *arg, void *stack_top, int flags);
+  int ho_futex_wait(volatile int *uaddr, int val, int timeout_ms);
+  int ho_futex_wake(volatile int *uaddr, int count);
+  void ho_futex_wake_all(volatile int *uaddr);
+  int ho_set_tls_raw(long tls);
+  int ho_yield_raw(void);
+  void ho_thread_exit_raw(int retval);
+  void ho_tls_setup_initial(void);
+  void ho_tls_mark_installed(void);
+  int ho_tls_installed(void);
+  extern int ho_tls_ready_flag;
+
 #endif /* !HOST_TEST */
 
 #ifdef __cplusplus

@@ -69,7 +69,7 @@ int vfs_abs_path(const char *path, char *out, int cap) {
     return 0;
   }
 
-  struct process *cur = current_process();
+  struct process *cur = process_group(current_process()); /* P1 (D7) */
   const char *cwd = (cur && cur->cwd[0]) ? cur->cwd : "/";
   char raw[256];
   int pos = 0;
@@ -127,7 +127,7 @@ int vfs_umount(const char *target) {
 
   /* A process whose cwd lived inside the unmounted tree falls back to the
    * root: its old cwd no longer has a filesystem behind it. */
-  struct process *cur = current_process();
+  struct process *cur = process_group(current_process()); /* P1 (D7) */
   if (cur && cur->cwd[0] == '/') {
     const char *cwd = cur->cwd;
     int i = 0;
@@ -244,7 +244,7 @@ int vfs_mkdir(const char *path) {
 }
 
 int vfs_cwd_writable(void) {
-  struct process *cur = current_process();
+  struct process *cur = process_group(current_process()); /* P1 (D7) */
   const char *cwd = (cur && cur->cwd[0]) ? cur->cwd : "/";
   int midx = -1;
   const char *rel = 0;
@@ -252,7 +252,7 @@ int vfs_cwd_writable(void) {
 }
 
 int vfs_stats(uint64_t *total, uint64_t *free_bytes) {
-  struct process *cur = current_process();
+  struct process *cur = process_group(current_process()); /* P1 (D7) */
   const char *cwd = (cur && cur->cwd[0]) ? cur->cwd : "/";
 
   int midx = -1;

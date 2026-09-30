@@ -230,6 +230,14 @@ static void test_wave_loader(void *arg) {
      so it needs no free process slots after FPU_T's fork torture. */
   load_and_run_program_in_scheduler("DNSTST.BIN", -1, -1, -1, -1);
 
+  /* P1 (docs/browser/p1-threads-design.md section 7): kernel threads +
+     futex-lite + libpthread acceptance, then per-thread TLS + errno
+     isolation.  Late positions: both fork children (exit_group cases) and
+     THRD_T's 72 create/join cycles need process-table churn, which is
+     cheapest once the earlier tests have exited. */
+  load_and_run_program_in_scheduler("THRD_T.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("TLS_T.BIN", -1, -1, -1, -1);
+
   extern void kernel_exit(void);
   kernel_exit();
 }

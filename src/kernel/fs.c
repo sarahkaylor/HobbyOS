@@ -78,6 +78,7 @@ static int get_global_fd(struct file *f) {
 #endif
 
 int file_open(struct process *cur, const char *filename, int flags) {
+  cur = process_group(cur); /* P1 (D7): fd table + cwd are group state */
   if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
 
   struct file *f = file_alloc();
@@ -146,6 +147,7 @@ int file_open(struct process *cur, const char *filename, int flags) {
 }
 
 int file_connect(struct process *cur, uint32_t ip, uint16_t port, int protocol) {
+  cur = process_group(cur); /* P1 (D7): fd table is group state */
   if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -1;
 
   struct file *f = file_alloc();
@@ -194,6 +196,7 @@ extern spinlock_t proc_lock;
 /* A socket fd's global file slot, or NULL with *errp set: EBADF for an fd
  * outside the table, ENOTSOCK when the fd is open but is not a socket. */
 static struct file *f1_socket_file(struct process *p, int fd, int *errp) {
+  p = process_group(p); /* P1 (D7): the fd table is group state */
   if (!p || fd < 0 || fd >= MAX_OPEN_FDS) {
     *errp = EBADF;
     return 0;
@@ -212,6 +215,7 @@ static struct file *f1_socket_file(struct process *p, int fd, int *errp) {
 }
 
 int file_socket(struct process *p, int domain, int type, int protocol) {
+  p = process_group(p); /* P1 (D7): fd table is group state */
   if (!p) return -EINVAL;
   if (domain != K_AF_INET) return -EAFNOSUPPORT;
 
@@ -311,6 +315,7 @@ int file_fcntl(struct process *p, int fd, int cmd, int arg) {
  * or -1 when the fd is not open (select then fails the whole call with
  * EBADF, like Linux). */
 static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e) {
+  p = process_group(p); /* P1 (D7): the fd table is group state */
   *r = 0;
   *w = 0;
   *e = 0;
@@ -387,6 +392,16 @@ static struct {
   uint64_t deadline_ms; /* absolute; 0 = wait forever */
   int valid;
 } select_wait[MAX_PROCESSES];
+
+/* P1: forget a pid's remembered select deadline (group teardown / thread
+ * death).  Callers hold proc_lock; never takes it itself so the exit paths
+ * can call this while already holding it. */
+void file_select_forget(int pid) {
+  if (pid < 0 || pid >= MAX_PROCESSES)
+    return;
+  select_wait[pid].valid = 0;
+  select_wait[pid].deadline_ms = 0;
+}
 
 #define SELECT_POLL_SLICE_MS 10
 
@@ -540,6 +555,7 @@ int file_socket_setopt(struct process *p, int fd, int level, int optname,
 
 int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
                   int *errp) {
+  p = process_group(p); /* P1 (D7): the fd table is group state */
   if (!p || fd < 0 || fd >= MAX_OPEN_FDS) { *errp = EBADF; return -1; }
   int g_fd = p->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) { *errp = EBADF; return -1; }
@@ -613,6 +629,7 @@ static void k_stat_fill(struct k_stat *st, unsigned long ino,
 }
 
 int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
+  p = process_group(p); /* P1 (D7): the fd table is group state */
   if (!p || fd < 0 || fd >= MAX_OPEN_FDS) { *errp = EBADF; return -1; }
   int g_fd = p->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) { *errp = EBADF; return -1; }
@@ -671,6 +688,7 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
  *   0 on success, -1 if the descriptor is invalid.
  */
 int file_close(struct process *cur, int fd) {
+  cur = process_group(cur); /* P1 (D7): the fd table is group state */
   if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
 
   int g_fd = cur->open_fds[fd];
@@ -703,6 +721,7 @@ int file_close(struct process *cur, int fd) {
 
 /* dup(fd): the lowest unused user fd now refers to the same open file. */
 int file_dup(struct process *cur, int fd) {
+  cur = process_group(cur); /* P1 (D7): the fd table is group state */
   if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
   int g_fd = cur->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
@@ -732,6 +751,7 @@ int file_dup(struct process *cur, int fd) {
 /* dup2(oldfd, newfd): newfd refers to the same open file (closing whatever
  * is there now, per POSIX).  oldfd == newfd is a no-op success. */
 int file_dup2(struct process *cur, int oldfd, int newfd) {
+  cur = process_group(cur); /* P1 (D7): the fd table is group state */
   if (!cur || oldfd < 0 || oldfd >= MAX_OPEN_FDS) return -EBADF;
   int g_fd = cur->open_fds[oldfd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
@@ -795,6 +815,7 @@ void fs_close_global(int g_fd) {
  *   Number of bytes read, or -1 on failure.
  */
 int file_read(struct process *cur, int fd, void *buf, int size, struct trap_frame *tf) {
+  cur = process_group(cur); /* P1 (D7): the fd table is group state */
   if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
 
   int g_fd = cur->open_fds[fd];
@@ -832,6 +853,7 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
  *   Number of bytes available, or -1 if closed/EOF.
  */
 int file_available(struct process *cur, int fd) {
+  cur = process_group(cur); /* P1 (D7): the fd table is group state */
   if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
 
   int g_fd = cur->open_fds[fd];
@@ -870,6 +892,7 @@ int file_available(struct process *cur, int fd) {
  *   Number of bytes written, or -1 on failure.
  */
 int file_write(struct process *cur, int fd, const void *buf, int size, struct trap_frame *tf) {
+  cur = process_group(cur); /* P1 (D7): the fd table is group state */
   if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
 
   int g_fd = cur->open_fds[fd];
@@ -916,6 +939,7 @@ int file_gfd_is_pipe(int gfd) {
  *   0 on success, -1 on failure.
  */
 int file_pipe(struct process *cur, int fds[2]) {
+  cur = process_group(cur); /* P1 (D7): the fd table is group state */
   if (!cur || cur->num_open_fds + 2 > MAX_OPEN_FDS) return -1;
 
   struct file *f0 = file_alloc();
@@ -978,6 +1002,7 @@ void fs_reopen(int global_fd) {
 }
 
 int file_mkdir(struct process *cur, const char *path) {
+  cur = process_group(cur); /* P1 (D7): cwd is group state */
   if (!cur || !path) return -1;
   return vfs_mkdir(path);
 }

@@ -24,6 +24,17 @@ void _start(void) {
   static char avbuf[256];
   static char *argv[CRT0_MAX_ARGS];
 
+  /* P1 (p1-threads-design.md sections 4/6): install this thread's TLS
+   * register BEFORE any C code that could touch __thread storage (errno,
+   * pthread_self).  The layout is probe-verified against llvm 21 + ld.lld
+   * and lives in src/user/linker.ld:
+   *   aarch64 (variant I):  TPIDR_EL0 = &__tls_start - 16
+   *   x86_64  (variant II): FS base = align_up(&__tls_end, __tls_align),
+   *                         with the self-pointer *(void **)FS = FS.
+   * ho_tls_setup_initial() (libc.c) does the work and is also the lazy
+   * fallback for programs that do not link crt0. */
+  ho_tls_setup_initial();
+
   int argc = 0;
 
   /* Preferred: the kernel's positional-parameter blob (SYS_GETARGV).
