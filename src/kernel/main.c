@@ -204,6 +204,13 @@ static void test_wave_loader(void *arg) {
   load_and_run_program_in_scheduler("TACTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("CMPTEST.BIN", -1, -1, -1, -1);
 
+  /* Phase F1 (browser.md): socket/select/entropy acceptance.  POLLTST and
+     RANDTST are deterministic and offline; SOCK2TST's network section is
+     SKIP-able, its offline section is not. */
+  load_and_run_program_in_scheduler("POLLTST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("RANDTST.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("SOCK2TST.BIN", -1, -1, -1, -1);
+
   /* F1.5 (FPU): floating-point bring-up — exact-value asserts across
      preemption, a two-process fork torture over pipes, and fork FP
      isolation (src/user/fpu_test.c).  Last in the list: its fork/pipe

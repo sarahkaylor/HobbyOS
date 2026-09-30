@@ -1,5 +1,6 @@
 #include "trap.h"
 #include "fs.h"
+#include "net.h"
 #include "process.h"
 #include "setjmp.h"
 #include "timer.h"
@@ -194,6 +195,9 @@ struct sys_netinfo {
   uint32_t subnet_mask;
   uint32_t gateway;
   uint8_t mac[6];
+  /* F1.7 (DHCP → DNS hand-off): appended; only written when the caller's
+   * buffer covers the extended size, so pre-extension callers still work. */
+  uint32_t dns;
 };
 
 struct sys_cpuinfo {
@@ -246,7 +250,10 @@ static void sys_sysinfo(struct trap_frame *tf) {
       int count = size / sizeof(struct sys_procinfo);
       tf->regs[0] = process_get_info_list((struct sys_procinfo *)buf, count);
     } else if (cmd == 4) { // Network interface config
-      if (size >= (int)sizeof(struct sys_netinfo)) {
+      /* The dns field (F1.7) extends the F0 layout: a caller whose buffer
+         covers only the old size still gets ip/mask/gw/mac and succeeds. */
+      int base_size = (int)(sizeof(struct sys_netinfo) - sizeof(uint32_t));
+      if (size >= base_size) {
         struct sys_netinfo *info = (struct sys_netinfo *)buf;
         extern uint32_t net_get_ip(void);
         extern uint32_t net_get_netmask(void);
@@ -256,6 +263,10 @@ static void sys_sysinfo(struct trap_frame *tf) {
         info->subnet_mask = net_get_netmask();
         info->gateway = net_get_gateway();
         net_get_mac(info->mac);
+        if (size >= (int)sizeof(struct sys_netinfo)) {
+          extern uint32_t net_get_dns(void);
+          info->dns = net_get_dns();
+        }
         tf->regs[0] = 0;
       } else {
         tf->regs[0] = -1;
@@ -353,6 +364,123 @@ static void sys_connect(struct trap_frame *tf) {
   extern int file_connect(struct process *caller, uint32_t ip, uint16_t port, int protocol);
   int r = file_connect(caller, ip, port, protocol);
   tf->regs[0] = r < 0 ? -EIO : r;
+}
+
+/* ---- Phase F1 (browser.md A.1a, frozen): sockets + select (65-71) ------
+ * x86_64 argument mapping (see syscall5 in user libc.c): a0..a4 live in
+ * rdi, rsi, rdx, r10, r8.  The ISR saves [rsp+40]=rdi -> regs[5],
+ * [rsp+32]=rsi -> regs[4], [rsp+24]=rdx -> regs[3], [rsp+72]=r10 ->
+ * regs[9], [rsp+56]=r8 -> regs[7] (regs[2] holds rcx, the clobbered
+ * return address — never an argument).  SYS_MMAP reads its r10 flags from
+ * regs[9] the same way.  The select restart follows the pipe_read -2
+ * convention (rewind ELR over the 2-byte `syscall` instruction, save our
+ * own frame, schedule away). */
+
+/* True when [ptr, ptr+len) lies inside the caller's user region. */
+static int sys_user_range_ok(uint64_t ptr, uint64_t len) {
+  if (ptr < USER_VIRT_BASE) return 0;
+  if (len > USER_REGION_SIZE) return 0;
+  return ptr - USER_VIRT_BASE <= USER_REGION_SIZE - len;
+}
+
+static void sys_socket(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  tf->regs[0] = (uint64_t)file_socket(caller, (int)tf->regs[5],
+                                      (int)tf->regs[4], (int)tf->regs[3]);
+}
+
+static void sys_connect_fd(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  tf->regs[0] = (uint64_t)file_socket_connect(caller, (int)tf->regs[5],
+                                              (uint32_t)tf->regs[4],
+                                              (uint16_t)tf->regs[3]);
+}
+
+static void sys_fcntl(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  tf->regs[0] = (uint64_t)file_fcntl(caller, (int)tf->regs[5],
+                                     (int)tf->regs[4], (int)tf->regs[3]);
+}
+
+static void sys_select(struct trap_frame *tf) {
+  int nfds = (int)tf->regs[5]; // rdi
+  struct fd_set_k *rd = (struct fd_set_k *)tf->regs[4]; // rsi
+  struct fd_set_k *wr = (struct fd_set_k *)tf->regs[3]; // rdx
+  struct fd_set_k *ex = (struct fd_set_k *)tf->regs[9]; // r10
+  int timeout_ms = (int)tf->regs[7]; // r8
+  struct process *caller = current_process();
+
+  if ((rd && !sys_user_range_ok((uint64_t)rd, sizeof(struct fd_set_k))) ||
+      (wr && !sys_user_range_ok((uint64_t)wr, sizeof(struct fd_set_k))) ||
+      (ex && !sys_user_range_ok((uint64_t)ex, sizeof(struct fd_set_k)))) {
+    tf->regs[0] = -EFAULT;
+    return;
+  }
+
+  int r = file_select(caller, nfds, rd, wr, ex, timeout_ms);
+  if (r == -2) {
+    if ((tf->cs & 3) == 3) {
+      tf->elr -= 2; // rewind over the `syscall` instruction
+    }
+    save_context(caller, tf);
+    schedule(tf, 0);
+  } else {
+    tf->regs[0] = (uint64_t)r;
+  }
+}
+
+static void sys_getsockopt(struct trap_frame *tf) {
+  void *val = (void *)tf->regs[9]; // r10
+  int *len = (int *)tf->regs[7]; // r8
+  struct process *caller = current_process();
+
+  if (!val || !len || !sys_user_range_ok((uint64_t)val, sizeof(int)) ||
+      !sys_user_range_ok((uint64_t)len, sizeof(int))) {
+    tf->regs[0] = -EFAULT;
+    return;
+  }
+  tf->regs[0] = (uint64_t)file_socket_getopt(caller, (int)tf->regs[5],
+                                             (int)tf->regs[4],
+                                             (int)tf->regs[3], val, len);
+}
+
+static void sys_setsockopt(struct trap_frame *tf) {
+  const void *val = (const void *)tf->regs[9]; // r10
+  int len = (int)tf->regs[7]; // r8
+  struct process *caller = current_process();
+
+  if (len < 0) {
+    tf->regs[0] = -EINVAL;
+    return;
+  }
+  if (val && len > 0 && !sys_user_range_ok((uint64_t)val, (uint64_t)len)) {
+    tf->regs[0] = -EFAULT;
+    return;
+  }
+  tf->regs[0] = (uint64_t)file_socket_setopt(caller, (int)tf->regs[5],
+                                             (int)tf->regs[4],
+                                             (int)tf->regs[3], val, len);
+}
+
+/* SYS_GETRANDOM (F1.4): mixed kernel entropy, see net.c's entropy pool. */
+static void sys_getrandom(struct trap_frame *tf) {
+  void *buf = (void *)tf->regs[5]; // rdi
+  uint32_t len = (uint32_t)tf->regs[4]; // rsi
+  unsigned int flags = (unsigned int)tf->regs[3]; // rdx
+
+  if (flags != 0 || len > (1u << 20)) { // GRND_* unsupported / v1 cap
+    tf->regs[0] = -EINVAL;
+    return;
+  }
+  if (len == 0) {
+    tf->regs[0] = 0;
+    return;
+  }
+  if (!sys_user_range_ok((uint64_t)buf, len)) {
+    tf->regs[0] = -EFAULT;
+    return;
+  }
+  tf->regs[0] = (uint64_t)net_get_random_bytes(buf, len);
 }
 
 static void sys_sleep(struct trap_frame *tf) {
@@ -996,6 +1124,20 @@ void sync_lower_handler_c(struct trap_frame *tf) {
   } else if (syscall_num == SYS_MUNMAP) {
     tf->regs[0] = (uint64_t)sys_munmap(tf->regs[5], /* rdi: addr */
                                        tf->regs[4]); /* rsi: len */
+  } else if (syscall_num == SYS_SOCKET) {
+    sys_socket(tf);
+  } else if (syscall_num == SYS_CONNECT_FD) {
+    sys_connect_fd(tf);
+  } else if (syscall_num == SYS_SELECT) {
+    sys_select(tf);
+  } else if (syscall_num == SYS_FCNTL) {
+    sys_fcntl(tf);
+  } else if (syscall_num == SYS_GETSOCKOPT) {
+    sys_getsockopt(tf);
+  } else if (syscall_num == SYS_SETSOCKOPT) {
+    sys_setsockopt(tf);
+  } else if (syscall_num == SYS_GETRANDOM) {
+    sys_getrandom(tf);
   } else {
     uart_puts("Unknown System Call Invoked!\n");
     tf->regs[0] = -ENOSYS;

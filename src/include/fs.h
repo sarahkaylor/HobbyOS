@@ -119,6 +119,76 @@ struct k_stat {
 #define K_S_IFIFO 0010000
 #define K_S_IFSOCK 0140000
 
+/* --- Phase F1 (browser.md A.1a — frozen): socket/select syscall support -- */
+
+/* select() mask width is frozen at FD_SETSIZE 256 (the A.1a amendment):
+ * eight 32-bit words per set, same layout as the userland fd_set. */
+#define K_FD_SETSIZE 256
+#define K_FD_SET_WORDS (K_FD_SETSIZE / 32)
+
+struct fd_set_k {
+  uint32_t bits[K_FD_SET_WORDS];
+};
+
+/* Values mirroring the userland ABI (libc.h): AF_INET, SOCK_STREAM/DGRAM,
+ * IPPROTO_TCP/UDP, SOL_SOCKET, SO_ERROR/TYPE/REUSEADDR, fcntl cmds/flags. */
+#define K_AF_INET      2
+#define K_SOCK_STREAM  1
+#define K_SOCK_DGRAM   2
+#define K_IPPROTO_TCP  6
+#define K_IPPROTO_UDP  17
+#define K_SOL_SOCKET   1
+#define K_SO_REUSEADDR 2
+#define K_SO_TYPE      3
+#define K_SO_ERROR     4
+#define K_F_GETFL      3
+#define K_F_SETFL      4
+#define K_O_NONBLOCK   0x800
+
+/* SYS_SOCKET: create a socket and install it in the process fd table.
+ * Returns the user fd (>= 0) or -errno (EAFNOSUPPORT, EPROTONOSUPPORT,
+ * EMFILE, ENFILE). */
+int file_socket(struct process *p, int domain, int type, int protocol);
+
+/* SYS_CONNECT_FD on an existing socket fd (ip/port in network byte order).
+ * Returns 0 (connected — or handshake started for UDP), -EINPROGRESS when a
+ * non-blocking TCP handshake is under way, or -errno (EBADF, ENOTSOCK,
+ * ECONNREFUSED, ETIMEDOUT, ...). */
+int file_socket_connect(struct process *p, int fd, uint32_t ip_be,
+                        uint16_t port_be);
+
+/* SYS_FCNTL: F_GETFL / F_SETFL over a socket fd (O_NONBLOCK stored on the
+ * PCB); any other command, or a non-socket fd, is -EINVAL. */
+int file_fcntl(struct process *p, int fd, int cmd, int arg);
+
+/* SYS_SELECT engine (F1.2).  Returns the number of ready descriptors with
+ * the masks rewritten to hold only the ready fds; 0 on timeout; -2 when the
+ * caller must restart the syscall after the process was parked (the caller
+ * rewinds its ELR and schedules, like pipe_read's -2); -errno on error
+ * (EBADF for an fd outside the table, EINVAL for nfds out of range).
+ *
+ * Wake-up strategy: no busy-spin.  A select with nothing ready parks the
+ * process through the scheduler exactly like sys_sleep (PROC_STATE_BLOCKED
+ * + wake_ms) for a short 10ms slice and the syscall restarts on wake; the
+ * deadline is remembered per pid so the caller's timeout is exact.  Each
+ * restart also polls the sockets, which is what drives non-blocking connect
+ * SYN retransmission while a program waits in select(). */
+int file_select(struct process *p, int nfds, struct fd_set_k *rd,
+                struct fd_set_k *wr, struct fd_set_k *ex, int timeout_ms);
+
+/* Socket PCB behind an fd, or NULL when the fd is not an open socket.
+ * Kernel-internal (slice barriers/tests): the returned pointer must not
+ * outlive the fd. */
+struct socket_pcb *file_socket_pcb(struct process *p, int fd);
+
+/* SYS_GETSOCKOPT / SYS_SETSOCKOPT (SOL_SOCKET only).  SO_ERROR and SO_TYPE
+ * are real; SO_REUSEADDR is accepted as a no-op.  Unknown option or level:
+ * -ENOPROTOOPT. */
+int file_socket_getopt(struct process *p, int fd, int level, int optname,
+                       void *val, int *len);
+int file_socket_setopt(struct process *p, int fd, int level, int optname,
+                       const void *val, int len);
+
 /* Reposition the read cursor of an open file (FAT16/NFS).  Pipes report
  * ESPIPE via *errp.  Returns the new absolute position, or -1 on error. */
 int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
