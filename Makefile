@@ -589,7 +589,7 @@ $(CXXSMOKE_BIN): $(OBJ_DIR)/cxx_smoke.o $(OBJ_DIR)/libc.a
 # <memory> <atomic> <thread> <mutex> <condition_variable> <chrono>
 # <sstream> from the vendored libc++, threads/mutex/cond from libc.a's
 # pthread.c, and prints "name : PASS" lines per check.
-$(OBJ_DIR)/cxx_t.o: src/user/cxx_t.cpp $(USER_LIBC) $(USER_HDRS) $(LIBCXX_INCLUDE)/vector $(LIBCXX_VENDOR)/sources.txt
+$(OBJ_DIR)/cxx_t.o: src/user/cxx_t.cpp $(USER_LIBC) $(USER_HDRS) $(LIBCXX_VENDOR)/.fetched-ok $(LIBCXX_VENDOR)/sources.txt
 	@mkdir -p $(OBJ_DIR)
 	$(CXX) $(CXX_LIBCXX_USER_FLAGS) -c $< -o $@
 
@@ -634,6 +634,23 @@ LIBC_BUILTIN_SRCS = extenddftf2.c trunctfdf2.c trunctfsf2.c
 LIBC_BUILTIN_OBJS = $(addprefix $(OBJ_DIR)/builtins/,$(LIBC_BUILTIN_SRCS:.c=.o))
 $(LIBCXX_VENDOR)/.fetched-ok: $(LIBCXX_VENDOR)/fetch.sh $(LIBCXX_VENDOR)/anchors.sha256
 	@bash $(LIBCXX_VENDOR)/fetch.sh
+
+# On a fresh checkout the source does not exist yet.  make only accepts a
+# pattern rule as "makeable" when it has a recipe (an empty-recipe pattern is
+# rejected during the implicit-rule search, before fetch.sh could run -- it
+# reports "No rule to make target 'obj/<arch>/builtins/<x>.o', needed by
+# libc.a").  So the source pattern carries a guard recipe.  The marker is
+# invalidated first: fetch.sh early-exits when the marker + tree verify, so a
+# tree that is merely missing one file would otherwise never be restored (and
+# the recipe would succeed silently without creating it).  The trailing
+# test -f turns that into a loud failure.
+$(LIBCXX_ROOT)/compiler-rt/lib/builtins/%.c: $(LIBCXX_VENDOR)/.fetched-ok
+	@test -f $@ || { rm -f $(LIBCXX_VENDOR)/.fetched-ok; bash $(LIBCXX_VENDOR)/fetch.sh; test -f $@; }
+
+# The fetched sources are built via the pattern above, so make classifies them
+# as intermediate files and deletes them after use; .SECONDARY keeps them in
+# place so a later rebuild does not re-extract the tree.
+.SECONDARY: $(addprefix $(LIBCXX_ROOT)/compiler-rt/lib/builtins/,$(LIBC_BUILTIN_SRCS))
 
 $(OBJ_DIR)/builtins/%.o: $(LIBCXX_ROOT)/compiler-rt/lib/builtins/%.c $(LIBCXX_VENDOR)/.fetched-ok
 	@mkdir -p $(OBJ_DIR)/builtins
