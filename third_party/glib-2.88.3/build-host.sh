@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # build-host.sh -- host static build + smoke of the pinned GLib 2.88.3
 #                 (L6 lane browser/l6-glib; see README.md and cross-notes.md).
 #
@@ -19,7 +19,7 @@
 #
 # Env knobs: JOBS (default 8), CC, PCRE2_DIR, LIBFFI_DIR, ZLIB_PREFIX.
 # Cross reuse: meson cross file + CC/toolchain (see cross-notes.md).
-set -euo pipefail
+set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 TP=$(CDPATH= cd -- "$HERE/.." && pwd)
 SRC="$HERE/src"
@@ -38,8 +38,8 @@ log "build-host.sh: CC=$CC JOBS=$JOBS prefix=$PREFIX"
 log "deps: PCRE2_DIR=$PCRE2_DIR LIBFFI_DIR=$LIBFFI_DIR ZLIB_PREFIX=$ZLIB_PREFIX"
 
 # --- 0. hard deps, built by their own recipes (idempotent) -------------------
-[ -f "$PCRE2_DIR/build-host/prefix/lib/libpcre2-8.a" ] || "$PCRE2_DIR/build-host.sh"
-[ -f "$LIBFFI_DIR/build-host/prefix/lib/libffi.a" ]   || "$LIBFFI_DIR/build-host.sh"
+[ -f "$PCRE2_DIR/build-host/prefix/lib/libpcre2-8.a" ] || sh "$PCRE2_DIR/build-host.sh"
+[ -f "$LIBFFI_DIR/build-host/prefix/lib/libffi.a" ]   || sh "$LIBFFI_DIR/build-host.sh"
 if [ ! -f "$ZLIB_PREFIX/include/zlib.h" ]; then
   log "zlib prefix missing -> building the vendored zlib-1.3.1 (l6-libs1 recipe)"
   [ -f "$TP/zlib-1.3.1/build.sh" ] || die "no zlib at $ZLIB_PREFIX and no $TP/zlib-1.3.1/build.sh to build it"
@@ -47,7 +47,7 @@ if [ ! -f "$ZLIB_PREFIX/include/zlib.h" ]; then
 fi
 [ -f "$ZLIB_PREFIX/include/zlib.h" ] || die "zlib still missing at $ZLIB_PREFIX"
 
-[ -d "$SRC" ] || "$HERE/fetch.sh"
+[ -d "$SRC" ] || sh "$HERE/fetch.sh"
 
 # Prefixes first in PKG_CONFIG_PATH so GLib resolves pcre2/libffi/zlib to the
 # vendored static builds, never the system copies.
@@ -97,5 +97,6 @@ GLIB_PCS="glib-2.0 gobject-2.0 gio-2.0 gmodule-2.0"
   "$HERE/smoke/glib_smoke.c" \
   $(pkg-config --static --libs $GLIB_PCS) \
   -o "$SMOKE_DIR/glib_smoke"
-"$SMOKE_DIR/glib_smoke" | tee "$HERE/build-host/SMOKE.RESULT"
+"$SMOKE_DIR/glib_smoke" > "$HERE/build-host/SMOKE.RESULT"
+cat "$HERE/build-host/SMOKE.RESULT"
 log "smoke result -> $HERE/build-host/SMOKE.RESULT"

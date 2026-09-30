@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # build-host.sh -- host static build + smoke of the pinned pcre2 10.49
 #                 (L6 lane browser/l6-glib; see README.md).
 #
@@ -14,7 +14,7 @@
 # Env knobs: JOBS (default 4), CC (default cc).
 # Cross reuse: set CC + CFLAGS/--host as needed; keep --disable-shared
 # --enable-static (see cross-notes.md).
-set -euo pipefail
+set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 SRC="$HERE/src"
 PREFIX="$HERE/build-host/prefix"
@@ -26,7 +26,7 @@ log() { printf '[pcre2] %s\n' "$*"; }
 
 log "build-host.sh: CC=$CC JOBS=$JOBS prefix=$PREFIX"
 
-[ -d "$SRC" ] || "$HERE/fetch.sh"
+[ -d "$SRC" ] || sh "$HERE/fetch.sh"
 mkdir -p "$BUILD" "$PREFIX"
 
 cd "$BUILD"
@@ -50,5 +50,6 @@ mkdir -p "$SMOKE_DIR"
 "$CC" -O2 -Wall -Wextra -I"$PREFIX/include" \
   "$HERE/smoke/pcre2_smoke.c" "$PREFIX/lib/libpcre2-8.a" \
   -o "$SMOKE_DIR/pcre2_smoke"
-"$SMOKE_DIR/pcre2_smoke" | tee "$HERE/build-host/SMOKE.RESULT"
+"$SMOKE_DIR/pcre2_smoke" > "$HERE/build-host/SMOKE.RESULT"
+cat "$HERE/build-host/SMOKE.RESULT"
 log "smoke result -> $HERE/build-host/SMOKE.RESULT"

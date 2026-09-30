@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # fetch.sh -- reconstruct the pinned GLib source tree for the L6 host recipe.
 #
 # Pin: GLib 2.88.3 (newest stable of the 2.8x line as of 2026-09-30; released
@@ -21,10 +21,10 @@
 #              glib-2.88.3.sha256sum file; the local download was recomputed and
 #              matches it byte-for-byte.
 #
-# Usage: ./fetch.sh   (idempotent; downloads + verifies + extracts into src/)
-set -euo pipefail
+# Usage: sh fetch.sh   (idempotent; downloads + verifies + extracts into src/)
+set -eu
 
-VENDOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENDOR_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 TARBALL="${VENDOR_DIR}/glib-2.88.3.tar.xz"
 SUMS="$(basename "${VENDOR_DIR}/glib-2.88.3.tar.xz.sha256")"
 SRC="${VENDOR_DIR}/src"

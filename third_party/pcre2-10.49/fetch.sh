@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # fetch.sh -- reconstruct the pinned pcre2 source tree for the L6 host recipe.
 #
 # Pin: pcre2 10.49 (PCRE2 10.4x line, newest stable).  2026-09-28 security-only
@@ -26,10 +26,10 @@
 #              Nicholas Wilson <nicholas@nicholaswilson.me.uk>" (RSA subkey
 #              BACF 71F1 0404 D576 1C09 D392 021D E40B FB63 B406).
 #
-# Usage: ./fetch.sh   (idempotent; downloads + verifies + extracts into src/)
-set -euo pipefail
+# Usage: sh fetch.sh   (idempotent; downloads + verifies + extracts into src/)
+set -eu
 
-VENDOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENDOR_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 TARBALL="${VENDOR_DIR}/pcre2-10.49.tar.bz2"
 SUMS="$(basename "${VENDOR_DIR}/pcre2-10.49.tar.bz2.sha256")"
 SRC="${VENDOR_DIR}/src"

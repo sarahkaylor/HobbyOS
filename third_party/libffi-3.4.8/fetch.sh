@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # fetch.sh -- reconstruct the pinned libffi source tree for the L6 host recipe.
 #
 # Pin: libffi 3.4.8 (final release of the long-stable 3.4 series, 2025-04-10;
@@ -25,10 +25,10 @@
 #              size 1397992 -- both match) and the Debian trixie source package
 #              (`libffi 3.4.8-2`, sources.debian.org).
 #
-# Usage: ./fetch.sh   (idempotent; downloads + verifies + extracts into src/)
-set -euo pipefail
+# Usage: sh fetch.sh   (idempotent; downloads + verifies + extracts into src/)
+set -eu
 
-VENDOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENDOR_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 TARBALL="${VENDOR_DIR}/libffi-3.4.8.tar.gz"
 SUMS="$(basename "${VENDOR_DIR}/libffi-3.4.8.tar.gz.sha256")"
 SRC="${VENDOR_DIR}/src"
