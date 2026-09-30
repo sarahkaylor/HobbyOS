@@ -299,6 +299,16 @@ Notes:
   rendering") — hence the Skia default and the 2.52.6+Cairo fallback pin.
 - The planning session downloaded + hashed the carry-over tarballs; the WPE
   sums above are from the official `.sums` files (no download needed).
+- **W0.4 audit correction (2026-09-29):** the *embedding C API* stays
+  glib-free (§1.3), but the **WPE port build hard-requires GLib 2.70.0 and
+  libsoup3 3.0.0** (`OptionsWPE.cmake:12-26`, quoted in `f0-deps-audit.md`
+  §1.1).  The **curl network backend is present** in the tree
+  (`Source/WebCore/platform/network/curl/`; `USE_CURL` is set by the
+  PlayStation/Win ports) — moving our port onto curl is **fork-patch work**
+  (L8), not a configure flag on the stock WPE port.  GLib (+deps) is added to
+  the L6 host-first build list; libsoup3 drops out when/if the curl port
+  patch lands.
+
 
 ---
 
@@ -465,33 +475,45 @@ not tick a gate it did not run.
 
 ### F0 — Groundwork, pins, freezes (no OS code; v1 M0 + v2 additions)
 
-- [ ] **W0.1 Vendor sources** — v1 carry-over tarballs + §2 new pins: WPE
-      2.54.0 tarball (verify sha against the official `.sums`), NetSurf 3.11 +
-      its libs, libcurl, ICU, harfbuzz, SQLite, libwebp; clone `HobbyOS/WebKit`
-      fork clone (pin tag `webkitgtk-2.54.0`, dereference commit — record in §2).
-- [ ] **W0.2 Freeze ABI v2** — confirm current `SYS_MAX` in tree; carry
-      65–71 freeze; mark P-stage provisional numbers (§A.1b) as *not frozen
-      until their gates*; note the select FD_SETSIZE amendment (32→**256**).
-- [ ] **W0.3 Budgets** — disk image growth decision (default: 64 → **256 MiB**,
-      format FAT16→FAT32 if the DOS layer allows >64 MiB comfortably —
-      **verify** with existing FAT code); RAM envelopes for 3 browser
-      processes; sizes table started in §11.
-- [ ] **W0.4 Skia-vs-Cairo spike plan + deps audit** — read WebKit 2.54's
-      CMake for the exact Skia/ICU/harfbuzz minimums; produce the initial
-      **feature-trim list** (Appendix B.1 seed) and dependency-off list from
-      the `Find*.cmake`/`Options*.cmake` inventory.
-- [ ] **W0.5 Toolchain check** — clang version vs WebKit's C++20 requirement;
-      cross flags for `aarch64`/`x86_64` bare-metal with our libc; Ruby/GPerf/
-      Python host-tool availability check (WebKit build).
-- [ ] **W0.6 Track A pins** — NetSurf lib set versions + sha; framebuffer
-      frontend build confirmation on host (plain `make TARGET=framebuffer`
-      smoke on the workstation) before touching HobbyOS.
-- [ ] **W0.7 Refresh inventories** (Appendix D) and re-verify §3; fix drift in
-      this file first.
+- [x] **W0.1 Vendor sources** — WPE 2.54.0: tarball sha-verified against the
+      official `.sums` + this document's pin table; tarball+`.sums` committed
+      (extraction gitignored per AD-11).  Fork clone `webkitgtk-2.54.0` →
+      commit `5220e80b97…` (deref recorded in §2), relocated to
+      `~/webkit-hobbyos` (outside the NAS-synced tree).  **Deferred
+      (just-in-time):** NetSurf + its libs (Track A dormant) and the L6
+      library tarballs (libcurl/ICU/harfbuzz/SQLite/libwebp) — vendor when
+      the L6 host builds start.
+- [x] **W0.2 Freeze ABI v2** — `SYS_MAX` 71 confirmed in tree; 65–71 freeze
+      committed (`syscall.h` + net errnos + libc socket/select surface);
+      FD_SETSIZE 256 amendment recorded in §A.1a; §A.1b still marked
+      provisional (not frozen until its gates).
+- [x] **W0.3 Budgets** — decision: **256 MiB / FAT16 / 8 KiB clusters
+      pinned** (`mkfs.fat -F 16 -s 16`), **no `fat16.c` change required**
+      (TotSec32 parsing already live in production); RAM is not a constraint
+      (3×32 MiB blocks vs 40 x64 / 232 arm64 pool blocks).  Full memo:
+      `docs/browser/f0-budgets.md`.  The Makefile flip (one line + `-s 16`)
+      is deferred per the memo — land it with the first browser-sized blob.
+- [x] **W0.4 Skia-vs-Cairo spike plan + deps audit** — Skia is the default
+      in-tree compositor (bundled @`588b550a…`, built from source); minimum
+      versions, feature-trim list and dependency-off list produced:
+      `docs/browser/f0-deps-audit.md` (§4/§5 fold into Appendix B.1).
+- [x] **W0.5 Toolchain check** — requirements extracted (audit §6): C++23,
+      CMake ≥3.20, Ninja generator required for WPE/GTK ports, GCC ≥12.2 /
+      Clang (no explicit min; accommodations below 19), Perl ≥5.10 + English/
+      FindBin/JSON::PP modules, Python3, **Ruby ≥2.5**, **GPerf ≥3.0.1**
+      (ENABLE_WEBCORE only), unifdef + pkg-config.  Workstation: clang
+      21.1.8 OK; **local gaps: `ruby` and `gperf` absent** — install before
+      the L6/WebKit host builds.
+- [ ] **W0.6 Track A pins** — deferred: Track A is dormant by default (§0.2).
+- [x] **W0.7 Refresh inventories** (Appendix D) — regenerated 2026-09-29:
+      `SYS_MAX`/`FD_SETSIZE`/`USER_INITIAL_CLEAR_SIZE` verified as §3
+      describes; desktop.c symbol grep verified pre-lane-merge; full re-pass
+      after F1 integration.
 
-**Gate F0:** §2 complete (all pins recorded, "verify" items resolved or
-scheduled); §10 open questions closed or converted to tasks; spike plan in
-place; `git status` clean of unintended edits.
+**Gate F0 (status 2026-09-29): closed.**  §2 pins recorded (WPE verified;
+L6/NetSurf vendoring deferred by design); §10 questions 1/2/4 closed,
+3 partial (L6); trim+deps audit archived; `git status` clean of unintended
+edits (five lane worktrees carry their own trees).
 
 ### F1 — OS foundations (v1 M1 carried; foundation for both tracks — first in sequence)
 
@@ -977,13 +999,20 @@ diagnosis, not just patches.
 
 ## 10. Open questions (close at W0)
 
-1. Skia version/commit required by WebKit 2.54 (from its CMake/docs) — and
-   the spike verdict process (W0.4/W2).
-2. Exact JSC build flag set for interpreter-only on our port (names/values
-   from `OptionsJSCOnly.cmake` + `WebKitFeatures.cmake`).
-3. ICU minimum version + data trimming approach (how small can the data get
-   for en-only).
-4. FAT16→FAT32 switch feasibility for a ≥256 MiB image (DOS-layer **verify**).
+1. **CLOSED (W0.4).** Skia is bundled in-tree — `Source/ThirdParty/skia/`
+   at commit `588b550a4dd8af90dbe71c0554852806bd8f0b21` (recorded in its
+   `README.WebKit`; no system dependency; built when `USE_SKIA`, ON for WPE).
+   Detail: `docs/browser/f0-deps-audit.md` §2.
+2. **CLOSED (W0.4).** Interpreter-only recipe (all four together, conflict-
+   checked in `WebKitFeatures.cmake`): `-DPORT=JSCOnly -DENABLE_JIT=OFF
+   -DENABLE_C_LOOP=ON -DENABLE_WEBASSEMBLY=OFF -DENABLE_SAMPLING_PROFILER=OFF`.
+   Detail: `f0-deps-audit.md` §3.
+3. **PARTIAL.** Minimum ICU is 70.1 (hard `find_package` for both WPE and
+   JSCOnly). Data-trimming approach still open — resolve at the L6 ICU build.
+4. **CLOSED (W0.3).** FAT16 stays sufficient at 256 MiB (8 KiB clusters,
+   pinned); `fat16.c` needs NO change (the `BPB_TotSec32` path is already
+   live). FAT32 deferred until images >≈512 MiB are actually needed.
+   Detail: `docs/browser/f0-budgets.md`.
 5. Program-load path for 30–60 MiB blobs: read-load timing acceptable? (P2.5
    measures; file-backed paging if not.)
 6. Error-reporting channel for signals/aborts on-device (needed to debug
@@ -1072,6 +1101,10 @@ Atomicity: one write() per desktop→app message.
 - Feature-trim candidate list (decide W0.4): Media/WebRTC/WebGL/WebAudio/
   WebCrypto(external crypto—off)/PDF/Gamepad/Speech/Plugins off; SVG, WebP,
   XSLT(off), WOFF2(off), AVIF/JPEGXL(off); sandbox off; JIT off; GPU off.
+- **W0.4 outcome (2026-09-29):** the concrete keep-ON (~22) / turn-OFF (~60)
+  flag tables and the dependency-off list live in
+  `docs/browser/f0-deps-audit.md` §4–§5 — treat them as the seed for this
+  appendix (regenerate/verify per Appendix D at WK-0).
 
 ### B.2 Third-party lib layer (L6 host-first builds)
 
@@ -1172,6 +1205,25 @@ curl -sI https://lite.cnn.com | grep -i content-length
 ---
 
 ## 11. Fix log (append-only; see also per-lane reports)
+
+- 2026-09-29 — **W0.3 + W0.4 audits landed (archived under `docs/browser/`).**
+  W0.3 (`f0-budgets.md`): the 256 MiB image grows safely as **FAT16 with
+  8 KiB clusters pinned** (`mkfs.fat -F 16 -s 16`); **no `fat16.c` change** —
+  `BPB_TotSec32` parsing is already live (the shipping 64 MiB image has
+  `TotSec16 == 0` and boots today), all layout math stays in 32-bit range
+  with ≥51 clusters of margin; FAT32 deferred until >≈512 MiB; tooling
+  verified with real mtools runs + fsck (a 6 MiB file copied in/out of a
+  256 MiB image); RAM envelope fine.  W0.4 (`f0-deps-audit.md`): full
+  min-version table (ICU 70.1, HarfBuzz 2.7.4+ICU, GLib 2.70.0, FreeType
+  2.9.0, libsoup3 3.0.0, Epoxy 1.5.4, libgcrypt 1.7.0, xkbcommon 0.4.0,
+  libxml2 2.9.13, libtasn1; libjpeg/png/webp/sqlite/zlib versionless for the
+  WPE port), Skia bundled @`588b550a…`, the JSC interpreter-only recipe
+  (§10.2 closed), keep-ON/turn-OFF feature tables (Appendix B.1 seed) and the
+  dependency-off list.  Key plan correction recorded in §2: the WPE port
+  **hard-requires GLib + libsoup3**; the curl backend exists but is
+  fork-port work (PlayStation/Win precedent).  Also: Makefile RAM comments
+  corrected (said 3GB/2GB; flags are 6144M/8192M); §10 questions 1/2/4
+  closed, 3 partial.
 
 - 2026-09-29 — **CI hygiene round 2 (found while rehearsing re-runs).** Two
   failure classes surfaced and were fixed engine-side, not by re-running:

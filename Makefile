@@ -60,7 +60,7 @@ ifeq ($(ARCH),intel)
   USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
   ARCH_DIR = src/kernel/arch/x64
   LDFLAGS = -T linker_x64.ld
-  # QEMU parameters for x86_64: 8 cores, 3GB RAM, mounting disk.img as NVMe, booting with UEFI
+  # QEMU parameters for x86_64: 8 cores, 6GB RAM, mounting disk.img as NVMe, booting with UEFI
   QEMU_CMD = $(QEMU) -M q35 -smp 8 -m 6144M -pflash $(EDK2_X86_64) -display $(QEMU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff $(QEMU_ARGS)
 else
   # Default to ARM
@@ -69,7 +69,7 @@ else
   USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
   ARCH_DIR = src/kernel/arch/arm
   LDFLAGS = -T linker.ld
-  # QEMU parameters for ARM: 8 cores, 2GB RAM, booting with UEFI
+  # QEMU parameters for ARM: 8 cores, 8GB RAM, booting with UEFI
   QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp 8 -m 8192M -accel tcg,thread=multi -bios $(EDK2_AARCH64) -display $(QEMU_DISPLAY) -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
 endif
 
