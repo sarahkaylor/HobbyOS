@@ -1254,6 +1254,25 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-09-30 — **F1 carried item #3 CLOSED: the diffutils cmp ref-build story is
+  vendored in-repo.** `third_party/diffutils-2.8.1.tar.gz` (780,086 B; sha256
+  `c5001748…d23f5a` — matches the `docs/gnu-ports.md` §6 pin) + `.sha256` + AD-11
+  README committed; the extraction stays gitignored (build area
+  `obj/third_party/refs/`, already covered by the `obj/` ignore). `src/host/build_diffutils_cmp_ref.sh`
+  resolves sources (a) legacy `third_party/_staging/diffutils-2.8.1/` when present,
+  else (b) the sha256-verified vendored tarball extracted once into
+  `obj/third_party/refs/diffutils-2.8.1/`; every failure path names the fix. Ref build
+  inputs unchanged: CFLAGS/FILES untouched, the extraction is `diff -r`-identical to
+  `_staging`, and the pre-change script vs the new one on the same legacy path build a
+  byte-identical ref (`9ab2a624…ce42`); tarball-path vs legacy-path refs are behaviorally
+  identical (ref-vs-ref 55/55 byte-exact — binary deltas are only the embedded
+  `xstrtol.c` assert() path + derived build-id, a checkout-location artifact predating
+  this change). Proof: pristine worktree (no `_staging`) `make host_tests` — ref built
+  from the vendored tarball, 482 checks / 0 failed, `ALL APPS SUITE TESTS PASSED` /
+  `TEST EXIT: 0`; `_staging`-seeded worktree still prefers the legacy path and is green
+  likewise. The workstation lane-gate's `_staging` seeding is retained as
+  belt-and-braces.
+
 - 2026-09-30 — **Wave 1b gate batteries GREEN on both machines (`0f194bd`).**
   VM (runner v3, fresh dir per tier): host rc=0 (all suites `0 failed`, incl. the new
   `CXXRT TEST PASSED` + `CXX HEADERS TEST PASSED`; `TEST EXIT: 0`), unit-arm rc=0
@@ -1336,7 +1355,8 @@ curl -sI https://lite.cnn.com | grep -i content-length
   **Carried (non-gate) items:** exec() FP-context reset + exec-path SP align
   (lane-proposed `program_loader.c` diffs); x64 PS/2 IntelliMouse wheel +
   E0-extended keys (wheel currently ARM-only); `third_party/_staging` seeding
-  for host_tests in pristine worktrees; select() v1 wake-slice notes
+  for host_tests in pristine worktrees (**closed 2026-09-30** — ref story vendored;
+  lane-gate seeding kept as belt-and-braces); select() v1 wake-slice notes
   (10 ms bound); SYS_GETRANDOM is not a CSPRNG and the SYN-loss path is
   untested (no loss injection); FP-disabled trap path unexercised (FPEN is
   set before any FP use).
