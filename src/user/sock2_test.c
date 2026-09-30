@@ -46,14 +46,9 @@ static void skip(const char *name) {
  * libc; the value is what the frozen connect_fd ABI expects). */
 static uint16_t be16(uint16_t v) { return (uint16_t)((v >> 8) | (v << 8)); }
 
-static uint64_t now_ms(void) {
-  struct sys_cpuinfo ci;
-  ci.uptime_ms = 0;
-  ci.total_idle_ms = 0;
-  ci.num_cpus = 0;
-  sysinfo(1, &ci, sizeof(ci));
-  return ci.uptime_ms;
-}
+/* Uptime in milliseconds: sysinfo cmd 1 returns timer_get_ms() as the
+ * syscall result (not through the buffer). */
+static uint64_t now_ms(void) { return (uint64_t)sysinfo(1, 0, 0); }
 
 /* ---- hard section (offline) ------------------------------------------- */
 
