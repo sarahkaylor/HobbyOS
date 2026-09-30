@@ -1173,6 +1173,23 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-09-29 — **CI hygiene round 2 (found while rehearsing re-runs).** Two
+  failure classes surfaced and were fixed engine-side, not by re-running:
+  (a) *stateful disk*: kernel unit tests write to disk.img (fat16
+  create/move), so a second tier run in the same tree false-failed
+  `fat16_rename("/MOVESUB", "/MOVEDIR2/MOVESUB")` at fat16_test.c:126; the
+  unit scripts now rebuild the image via a new `make fresh_disk` target
+  (touch-driven — the image recipe re-runs dd+mkfs, no file deletions) —
+  verified by two consecutive local runs, 44/44 both.  (b) *completed wave
+  ≠ suites passed*: `System halt.` can coexist with a failed suite; a green
+  ARM wave carries **zero** uppercase `FAIL` tokens (checked against the b2
+  baseline), so `hobbyos-ci.sh` v3 fails any test wave with FAIL tokens and
+  the workstation lane-gate does the same.  Also recorded for the F1 gate:
+  x64 KVM wave baseline = 3/3 fresh runs did NOT reach `System halt.` (three
+  classes: late IDLESTUCK at STRESS.BIN with ~60 suites passed; mid-boot
+  IDLESTUCK; early LOCKFOREVER storm) — so the x64 F1 gate is
+  **unit-x64 green + no NEW wave signature**, not wave completion, until
+  the pre-existing x64 instability is addressed on its own schedule.
 - 2026-09-29 — **F0 execution start: CI hardened, ABI frozen, vendoring
   verified, lanes launched.** (a) CI harness defects fixed before any gate
   use: the unit scripts started the 20 s pass/fail clock at build time
