@@ -59,6 +59,21 @@ void _start(void) {
   }
   argv[argc] = 0;
 
+  /* C++ static constructors (F2.4, browser.md §6): the compiler deposits
+   * each TU's static-init thunk (_GLOBAL__sub_I_*) and every
+   * __attribute__((constructor)) handler in .init_array; linker.ld
+   * brackets that section with __init_array_start/__init_array_end and
+   * the kernel loader copies the whole image, so walking the array here
+   * runs every constructor after argv is ready and before main().
+   * See src/libc/include/cxxrt.h for the full mechanism. */
+  {
+    extern void (*__init_array_start[])(void);
+    extern void (*__init_array_end[])(void);
+    for (void (**ctor)(void) = __init_array_start; ctor < __init_array_end;
+         ctor++)
+      (*ctor)();
+  }
+
   int rc = main(argc, argv);
   exit(rc);
 }

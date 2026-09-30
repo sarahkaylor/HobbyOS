@@ -24,74 +24,89 @@
 #include "errno.h"
 #endif
 
+/* C++ translation units see C linkage for everything below (the HOST_TEST
+ * ho_* declarations included): every function in this header is a C-ABI
+ * syscall wrapper.  The device-only blocks further down (sockets/select,
+ * resolv.h, time.h) are the same kind of surface, so the block stays open
+ * to the end of the file. */
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #ifdef HOST_TEST
 #define open ho_open
 #define read ho_read
 #define write ho_write
 #define close ho_close
+  /* mkdir: glibc's <sys/stat.h> (reachable whenever a host TU includes it)
+   * declares (const char *, mode_t); the mock in compat.c is the 1-arg
+   * HobbyOS shape, so the two conflict in a shared TU in C and C++ alike.
+   * The macro renames both the declaration below and every call site, and
+   * stops the mock from interposing the real mkdir symbol at static link. */
+#define mkdir ho_mkdir
 #define exit ho_exit
 #define kill ho_kill
 #define fork ho_fork
 #define pipe ho_pipe
 #define connect ho_connect
 #define sleep ho_sleep
-/* Host-side mocks live in src/host/compat.c; these declarations make the
- * renamed symbols callable from legacy apps compiled under HOST_TEST. */
-int ho_open(const char *filename, int flags, ...);
-int ho_close(int fd);
-ssize_t ho_read(int fd, void *buf, size_t size);
-ssize_t ho_write(int fd, const void *buf, size_t size);
-void ho_exit(int status);
-int ho_kill(int pid, int sig);
-int ho_fork(void);
-int ho_pipe(int fds[2]);
-int ho_connect(uint32_t ip, uint16_t port, int protocol);
-void ho_sleep(int ms);
+  /* Host-side mocks live in src/host/compat.c; these declarations make the
+   * renamed symbols callable from legacy apps compiled under HOST_TEST. */
+  int ho_open(const char *filename, int flags, ...);
+  int ho_close(int fd);
+  ssize_t ho_read(int fd, void *buf, size_t size);
+  ssize_t ho_write(int fd, const void *buf, size_t size);
+  void ho_exit(int status);
+  int ho_kill(int pid, int sig);
+  int ho_fork(void);
+  int ho_pipe(int fds[2]);
+  int ho_connect(uint32_t ip, uint16_t port, int protocol);
+  void ho_sleep(int ms);
 #endif
 
-void print(const char *str);
-void print_console(const char *str);
-void print_hex(long val);
-void print_dec(long val);
-void exit(int status);
-int fork(void);
+  void print(const char *str);
+  void print_console(const char *str);
+  void print_hex(long val);
+  void print_dec(long val);
+  void exit(int status);
+  int fork(void);
 
-int kill(int pid, int sig);
-void yield(void);
-int connect(uint32_t ip, uint16_t port, int protocol);
-int dup(int fd);
-int dup2(int oldfd, int newfd);
-int spawn(const char *filename, const char *args);
-int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args);
-int pipe(int fds[2]);
-int get_args(char *buf, int size);
+  int kill(int pid, int sig);
+  void yield(void);
+  int connect(uint32_t ip, uint16_t port, int protocol);
+  int dup(int fd);
+  int dup2(int oldfd, int newfd);
+  int spawn(const char *filename, const char *args);
+  int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args);
+  int pipe(int fds[2]);
+  int get_args(char *buf, int size);
 
-/* Phase 3 (posix.md): process identity + waitpid/exec. Implemented in
- * src/user/libc.c (device only — the host has real glibc ones). */
-int getpid(void);
-int getppid(void);
-int waitpid(int pid, int *status, int options);
-int wait(int *status);
-int execv(const char *path, char *const argv[]);
-int execve(const char *path, char *const argv[], char *const envp[]);
+  /* Phase 3 (posix.md): process identity + waitpid/exec. Implemented in
+   * src/user/libc.c (device only — the host has real glibc ones). */
+  int getpid(void);
+  int getppid(void);
+  int waitpid(int pid, int *status, int options);
+  int wait(int *status);
+  int execv(const char *path, char *const argv[]);
+  int execve(const char *path, char *const argv[], char *const envp[]);
 
-/* Native extension: copy the process's binary name into buf (for crt0
- * argv[0]). Returns 0 on success, -1 on failure (no errno set). */
-int get_progname(char *buf, int size);
+  /* Native extension: copy the process's binary name into buf (for crt0
+   * argv[0]). Returns 0 on success, -1 on failure (no errno set). */
+  int get_progname(char *buf, int size);
 
-/* Native extension: read the process's positional parameters (argv),
- * stored by the kernel at spawn/exec time (SYS_GETARGV). idx == -1
- * returns the argument count; idx >= 0 copies that argument (NUL-
- * terminated) into buf (size bytes) and returns its length, or -1 when
- * out of range. Unlike the flat args string, elements keep their own
- * length, so quoted words with spaces round-trip via fork+execv. */
-int get_argv(int idx, char *buf, int size);
+  /* Native extension: read the process's positional parameters (argv),
+   * stored by the kernel at spawn/exec time (SYS_GETARGV). idx == -1
+   * returns the argument count; idx >= 0 copies that argument (NUL-
+   * terminated) into buf (size bytes) and returns its length, or -1 when
+   * out of range. Unlike the flat args string, elements keep their own
+   * length, so quoted words with spaces round-trip via fork+execv. */
+  int get_argv(int idx, char *buf, int size);
 
-void gui_add_menu(int idx, const char* name, const char* items);
+  void gui_add_menu(int idx, const char* name, const char* items);
 
-void *map_fb(void);
-void flush_fb(void);
-int get_cpuid(void);
+  void *map_fb(void);
+  void flush_fb(void);
+  int get_cpuid(void);
 
 #define EV_SYN 0x00
 #define EV_KEY 0x01
@@ -101,106 +116,106 @@ int get_cpuid(void);
 #define ABS_X 0x00
 #define ABS_Y 0x01
 
-struct virtio_input_event {
-  uint16_t type;
-  uint16_t code;
-  uint32_t value;
-};
+  struct virtio_input_event {
+    uint16_t type;
+    uint16_t code;
+    uint32_t value;
+  };
 
-int get_events(void *buf, int max_events);
-int available(int fd);
-struct sys_dirent {
-  char name[32];
-  uint8_t attr;
-  uint32_t size;
-} __attribute__((packed));
+  int get_events(void *buf, int max_events);
+  int available(int fd);
+  struct sys_dirent {
+    char name[32];
+    uint8_t attr;
+    uint32_t size;
+  } __attribute__((packed));
 
-int read_dir(const char *path, int index, struct sys_dirent *ent);
-int mkdir(const char *path);
-char *getcwd(char *buf, size_t size);
-int chdir(const char *path);
+  int read_dir(const char *path, int index, struct sys_dirent *ent);
+  int mkdir(const char *path);
+  char *getcwd(char *buf, size_t size);
+  int chdir(const char *path);
 
-int parse_args(char *arg_str, char *argv[], int max_args);
+  int parse_args(char *arg_str, char *argv[], int max_args);
 
-struct sys_meminfo {
-  uint64_t total_bytes;
-  uint64_t free_bytes;
-};
+  struct sys_meminfo {
+    uint64_t total_bytes;
+    uint64_t free_bytes;
+  };
 
-struct sys_procinfo {
-  int pid;
-  int parent_pid;
-  int state;
-  char name[32];
-};
+  struct sys_procinfo {
+    int pid;
+    int parent_pid;
+    int state;
+    char name[32];
+  };
 
-struct sys_netinfo {
-  uint32_t ip;
-  uint32_t subnet_mask;
-  uint32_t gateway;
-  uint8_t mac[6];
-  /* F1.7 (DHCP → DNS hand-off): DNS server learned from DHCP, network byte
-   * order; 0 when unknown.  Appended to the F0 layout — callers passing a
-   * buffer of the pre-extension size still get the original fields. */
-  uint32_t dns;
-};
+  struct sys_netinfo {
+    uint32_t ip;
+    uint32_t subnet_mask;
+    uint32_t gateway;
+    uint8_t mac[6];
+    /* F1.7 (DHCP → DNS hand-off): DNS server learned from DHCP, network byte
+     * order; 0 when unknown.  Appended to the F0 layout — callers passing a
+     * buffer of the pre-extension size still get the original fields. */
+    uint32_t dns;
+  };
 
-struct sys_cpuinfo {
-  uint64_t uptime_ms;
-  uint64_t total_idle_ms;
-  int num_cpus;
-};
+  struct sys_cpuinfo {
+    uint64_t uptime_ms;
+    uint64_t total_idle_ms;
+    int num_cpus;
+  };
 
-/* cmd 6: wall-clock time (RTC). epoch = seconds since 1970-01-01 UTC;
- * weekday: 0=Sunday .. 6=Saturday. If the platform has no RTC the kernel
- * returns -1 (callers should fall back to uptime via cmd 1). */
-struct sys_time {
-  uint64_t epoch;
-  int year;    /* e.g. 2026 */
-  int month;   /* 1-12 */
-  int day;     /* 1-31 */
-  int hour;    /* 0-23 */
-  int minute;  /* 0-59 */
-  int second;  /* 0-59 */
-  int weekday; /* 0=Sunday .. 6=Saturday */
-};
+  /* cmd 6: wall-clock time (RTC). epoch = seconds since 1970-01-01 UTC;
+   * weekday: 0=Sunday .. 6=Saturday. If the platform has no RTC the kernel
+   * returns -1 (callers should fall back to uptime via cmd 1). */
+  struct sys_time {
+    uint64_t epoch;
+    int year;    /* e.g. 2026 */
+    int month;   /* 1-12 */
+    int day;     /* 1-31 */
+    int hour;    /* 0-23 */
+    int minute;  /* 0-59 */
+    int second;  /* 0-59 */
+    int weekday; /* 0=Sunday .. 6=Saturday */
+  };
 
-/* cmd 7: filesystem statistics for the filesystem containing the process
- * cwd (the FAT-16 volume, or the NFS server's FSSTAT when cwd is inside an
- * NFS mount). */
-struct sys_fsinfo {
-  uint64_t total_bytes;
-  uint64_t free_bytes;
-};
+  /* cmd 7: filesystem statistics for the filesystem containing the process
+   * cwd (the FAT-16 volume, or the NFS server's FSSTAT when cwd is inside an
+   * NFS mount). */
+  struct sys_fsinfo {
+    uint64_t total_bytes;
+    uint64_t free_bytes;
+  };
 
-/* cmd 8: snapshot of the kernel mount table. The kernel fills up to
- * size / sizeof(struct sys_mountinfo) entries and returns the number it
- * filled (0 = no mounts, -1 = error). type: 0 = FAT16 (local), 1 = NFS. */
-struct sys_mountinfo {
-  char point[64];     /* mount point path, e.g. "/nfs"                    */
-  char source[64];    /* "local" or "server:/export"                      */
-  int  type;          /* 0 = FAT16, 1 = NFS                               */
-};
+  /* cmd 8: snapshot of the kernel mount table. The kernel fills up to
+   * size / sizeof(struct sys_mountinfo) entries and returns the number it
+   * filled (0 = no mounts, -1 = error). type: 0 = FAT16 (local), 1 = NFS. */
+  struct sys_mountinfo {
+    char point[64];     /* mount point path, e.g. "/nfs"                    */
+    char source[64];    /* "local" or "server:/export"                      */
+    int  type;          /* 0 = FAT16, 1 = NFS                               */
+  };
 
-int sysinfo(int cmd, void *buf, int size);
-int unlink(const char *filename);
-int rename(const char *oldname, const char *newname);
+  int sysinfo(int cmd, void *buf, int size);
+  int unlink(const char *filename);
+  int rename(const char *oldname, const char *newname);
 
-/* Mount an NFS export at `target` (created if missing). `source` has the
- * form "server:/export/path" where server is a dotted-quad IPv4 address
- * and the export path may be omitted ("server:/" or "server"). Returns 0
- * on success, -1 on failure (bad source, unreachable server, bad target,
- * target inside another mount, target "/", ...). */
-int mount(const char *source, const char *target);
+  /* Mount an NFS export at `target` (created if missing). `source` has the
+   * form "server:/export/path" where server is a dotted-quad IPv4 address
+   * and the export path may be omitted ("server:/" or "server"). Returns 0
+   * on success, -1 on failure (bad source, unreachable server, bad target,
+   * target inside another mount, target "/", ...). */
+  int mount(const char *source, const char *target);
 
-/* Unmount the NFS export mounted exactly at `target`. 0 on success. */
-int umount(const char *target);
+  /* Unmount the NFS export mounted exactly at `target`. 0 on success. */
+  int umount(const char *target);
 
-/* ---- Phase F1 (browser.md A.1a — frozen): sockets + select -------------
- * Device-only: these are declarations over syscalls 65-71; HOST_TEST builds
- * use glibc's own socket/select surface instead, so the block is excluded
- * there (avoids clashing with glibc's prototypes and fd_set).
- * Every call returns -1 and sets errno on failure (POSIX-shaped wrappers). */
+  /* ---- Phase F1 (browser.md A.1a — frozen): sockets + select -------------
+   * Device-only: these are declarations over syscalls 65-71; HOST_TEST builds
+   * use glibc's own socket/select surface instead, so the block is excluded
+   * there (avoids clashing with glibc's prototypes and fd_set).
+   * Every call returns -1 and sets errno on failure (POSIX-shaped wrappers). */
 #ifndef HOST_TEST
 
 #define AF_INET      2
@@ -210,53 +225,57 @@ int umount(const char *target);
 #define IPPROTO_TCP  6
 #define IPPROTO_UDP  17
 
-/* setsockopt/getsockopt levels + options (Linux numbering). */
+  /* setsockopt/getsockopt levels + options (Linux numbering). */
 #define SOL_SOCKET   1
 #define SO_REUSEADDR 2
 #define SO_TYPE      3
 #define SO_ERROR     4
 
-/* fcntl() commands (Linux numbering; the flag values live in <fcntl.h>, and
- * F_GETFL returns the open status flags incl. O_NONBLOCK for sockets). */
+  /* fcntl() commands (Linux numbering; the flag values live in <fcntl.h>, and
+   * F_GETFL returns the open status flags incl. O_NONBLOCK for sockets). */
 #define F_GETFL      3
 #define F_SETFL      4
 #define O_NONBLOCK   0x800
 
-int socket(int domain, int type, int protocol);
-/* connect_fd: ip and port are both in NETWORK byte order (the wire form,
- * as in struct sockaddr_in) — the syscall boundary converts to the host
- * order the network stack uses internally.  htons() the port. */
-int connect_fd(int fd, uint32_t ip_be, uint16_t port_be);
-int fcntl(int fd, int cmd, int arg);
-int getsockopt(int fd, int level, int optname, void *val, int *len);
-int setsockopt(int fd, int level, int optname, const void *val, int len);
-int getrandom(void *buf, size_t len, unsigned int flags);
+  int socket(int domain, int type, int protocol);
+  /* connect_fd: ip and port are both in NETWORK byte order (the wire form,
+   * as in struct sockaddr_in) — the syscall boundary converts to the host
+   * order the network stack uses internally.  htons() the port. */
+  int connect_fd(int fd, uint32_t ip_be, uint16_t port_be);
+  int fcntl(int fd, int cmd, int arg);
+  int getsockopt(int fd, int level, int optname, void *val, int *len);
+  int setsockopt(int fd, int level, int optname, const void *val, int len);
+  int getrandom(void *buf, size_t len, unsigned int flags);
 
-/* select() over the frozen syscall: masks are FD_SETSIZE (256) wide —
- * eight 32-bit words.  timeout_ms < 0 waits forever, 0 polls.  Returns the
- * number of ready descriptors, 0 on timeout, -1/errno on error. */
+  /* select() over the frozen syscall: masks are FD_SETSIZE (256) wide —
+   * eight 32-bit words.  timeout_ms < 0 waits forever, 0 polls.  Returns the
+   * number of ready descriptors, 0 on timeout, -1/errno on error. */
 #define FD_SETSIZE 256
-typedef struct { unsigned int bits[FD_SETSIZE / 32]; } fd_set;
+  typedef struct { unsigned int bits[FD_SETSIZE / 32]; } fd_set;
 #define FD_ZERO(set)       memset((set), 0, sizeof(fd_set))
 #define FD_SET(fd, set)    ((set)->bits[(fd) / 32] |= (1u << ((fd) % 32)))
 #define FD_CLR(fd, set)    ((set)->bits[(fd) / 32] &= ~(1u << ((fd) % 32)))
 #define FD_ISSET(fd, set)  (((set)->bits[(fd) / 32] & (1u << ((fd) % 32))) != 0)
-int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
-           int timeout_ms);
+  int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
+             int timeout_ms);
 
-/* ---- F2.2/F2.3 (browser.md §6): resolver + IPv4 conversion -------------
- * Full contract in resolv.h; legacy libc.h-only programs see the surface
- * here (device-only, like the socket block above — the host has glibc's). */
+  /* ---- F2.2/F2.3 (browser.md §6): resolver + IPv4 conversion -------------
+   * Full contract in resolv.h; legacy libc.h-only programs see the surface
+   * here (device-only, like the socket block above — the host has glibc's). */
 #include "resolv.h"
 
-/* ---- F2.3: wall/monotonic clocks + calendar time ----------------------
- * The sysroot <time.h>/<sys/time.h> carry the declarations (clock_gettime,
- * gettimeofday, mktime/timegm/gmtime_r/localtime_r — implemented in
- * libc.c and src/libc/src/time_math.c).  Device-only, like the blocks
- * above: HOST_TEST builds use glibc's time surface. */
+  /* ---- F2.3: wall/monotonic clocks + calendar time ----------------------
+   * The sysroot <time.h>/<sys/time.h> carry the declarations (clock_gettime,
+   * gettimeofday, mktime/timegm/gmtime_r/localtime_r — implemented in
+   * libc.c and src/libc/src/time_math.c).  Device-only, like the blocks
+   * above: HOST_TEST builds use glibc's time surface. */
 #include <time.h>
 #include <sys/time.h>
 
 #endif /* !HOST_TEST */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

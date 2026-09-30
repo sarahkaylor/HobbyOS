@@ -14,11 +14,19 @@
 
 #include <wchar.h>
 
-typedef unsigned long int wctype_t;
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-int iswprint(wint_t c);
-int iswblank(wint_t c);
-wint_t towlower(wint_t c);
-wint_t towupper(wint_t c);
+  typedef unsigned long int wctype_t;
+
+  int iswprint(wint_t c);
+  int iswblank(wint_t c);
+  wint_t towlower(wint_t c);
+  wint_t towupper(wint_t c);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* HOBBYOS_WCTYPE_H */

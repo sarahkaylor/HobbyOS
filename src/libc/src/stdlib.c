@@ -590,15 +590,15 @@ void __hb_atexit_run(void) {
 
 /* ---------------- mkstemp / mkostemp ---------------- */
 
-static int hb_mkstemp_common(char *template, int flags) {
+static int hb_mkstemp_common(char *tmpl, int flags) {
   static unsigned long hb_tmp_counter;
   static const char letters[] =
       "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  size_t len = strlen(template);
+  size_t len = strlen(tmpl);
   unsigned long base;
   int attempt;
 
-  if (len < 6 || strcmp(template + len - 6, "XXXXXX") != 0) {
+  if (len < 6 || strcmp(tmpl + len - 6, "XXXXXX") != 0) {
     errno = EINVAL;
     return -1;
   }
@@ -606,7 +606,7 @@ static int hb_mkstemp_common(char *template, int flags) {
   base = (unsigned long)getpid() * 2654435761UL + hb_tmp_counter;
   for (attempt = 0; attempt < 64; attempt++) {
     unsigned long w = base + (unsigned long)attempt;
-    char *x = template + len - 6;
+    char *x = tmpl + len - 6;
     int i, fd;
 
     for (i = 0; i < 6; i++) {
@@ -614,7 +614,7 @@ static int hb_mkstemp_common(char *template, int flags) {
       w /= 62;
     }
 
-    fd = open(template, O_RDWR | O_CREAT | O_EXCL | flags, 0600);
+    fd = open(tmpl, O_RDWR | O_CREAT | O_EXCL | flags, 0600);
     if (fd >= 0) {
       hb_tmp_counter++;
       return fd;
@@ -627,21 +627,21 @@ static int hb_mkstemp_common(char *template, int flags) {
   return -1;
 }
 
-int mkstemp(char *template) {
-  return hb_mkstemp_common(template, 0);
+int mkstemp(char *tmpl) {
+  return hb_mkstemp_common(tmpl, 0);
 }
 
-int mkostemp(char *template, int flags) {
+int mkostemp(char *tmpl, int flags) {
   /* Only creation-compatible flags pass through: O_APPEND. */
-  return hb_mkstemp_common(template, flags & O_APPEND);
+  return hb_mkstemp_common(tmpl, flags & O_APPEND);
 }
 
 /* GNU variant: the "XXXXXX" sits `suffixlen` bytes before the end. */
-int mkstemps(char *template, int suffixlen) {
+int mkstemps(char *tmpl, int suffixlen) {
   static const char letters[] =
       "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   static unsigned long hb_tmp_counter2;
-  size_t len = strlen(template);
+  size_t len = strlen(tmpl);
   unsigned long base;
   int attempt;
 
@@ -649,7 +649,7 @@ int mkstemps(char *template, int suffixlen) {
     errno = EINVAL;
     return -1;
   }
-  char *x = template + len - suffixlen - 6;
+  char *x = tmpl + len - suffixlen - 6;
   if (strncmp(x, "XXXXXX", 6) != 0) {
     errno = EINVAL;
     return -1;
@@ -665,7 +665,7 @@ int mkstemps(char *template, int suffixlen) {
       w /= 62;
     }
 
-    fd = open(template, O_RDWR | O_CREAT | O_EXCL, 0600);
+    fd = open(tmpl, O_RDWR | O_CREAT | O_EXCL, 0600);
     if (fd >= 0) {
       hb_tmp_counter2++;
       return fd;

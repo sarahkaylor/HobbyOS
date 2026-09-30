@@ -10,6 +10,14 @@
 
 #define CODESET 14 /* glibc's nl_item value for CODESET */
 
-char *nl_langinfo(int item);
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+  char *nl_langinfo(int item);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* HOBBYOS_LANGINFO_H */
