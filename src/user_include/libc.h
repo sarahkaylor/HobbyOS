@@ -223,6 +223,9 @@ int umount(const char *target);
 #define O_NONBLOCK   0x800
 
 int socket(int domain, int type, int protocol);
+/* connect_fd: ip and port are both in NETWORK byte order (the wire form,
+ * as in struct sockaddr_in) — the syscall boundary converts to the host
+ * order the network stack uses internally.  htons() the port. */
 int connect_fd(int fd, uint32_t ip_be, uint16_t port_be);
 int fcntl(int fd, int cmd, int arg);
 int getsockopt(int fd, int level, int optname, void *val, int *len);

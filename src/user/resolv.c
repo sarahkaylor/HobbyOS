@@ -8,7 +8,7 @@
  * The lookups are device-only and ride the frozen F1 socket surface:
  *
  *   fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
- *   connect_fd(fd, dns_ip, RESOLV_PORT);   ip: wire order in memory
+ *   connect_fd(fd, dns_ip, be16(RESOLV_PORT));  both wire order
  *   write(fd, query, qlen);
  *   read(fd, reply, sizeof reply);
  *
@@ -18,12 +18,12 @@
  * loops.  A lost reply blocks in read() until the net lane adds timeouts;
  * this is documented, not hidden.
  *
- * Port byte order: connect_fd()'s frozen signature names its arguments
- * `ip_be`/`port_be`, but the established socket convention (connect() as
- * used by ping.c/nc.c, and SYS_CONNECT's kernel side, which htons()es the
- * port when building the header) passes PORT IN HOST ORDER.  RESOLV_PORT is
- * that value; if the L1 implementation wants a wire-order port instead,
- * this is the single constant to change.
+ * Port byte order (ratified at integration): the frozen A.1a signature's
+ * `port_be` is literal — connect_fd()'s syscall boundary
+ * (fs.c file_socket_connect()) ntohs()es the port, and the stack keeps
+ * ports host order internally.  RESOLV_PORT is the host-order constant;
+ * the call site passes it through be16().  (The legacy connect() syscall,
+ * as used by ping.c/nc.c, takes a host-order port — separate call.)
  */
 #include "resolv.h"
 
@@ -235,6 +235,10 @@ int resolv_parse_response(const uint8_t *buf, int len, uint16_t id,
  * Device-only: UDP lookups over the frozen F1 socket surface.
  * --------------------------------------------------------------------- */
 
+/* Host -> network byte order (the kernel libc has no htons(); the frozen
+ * connect_fd ABI takes the port in network order). */
+static uint16_t be16(uint16_t v) { return (uint16_t)((v >> 8) | (v << 8)); }
+
 int resolv_lookup_server(const char *name, uint32_t dns_ip_be,
                          uint32_t *ip_be) {
   uint8_t query[RESOLV_QUERY_MAX];
@@ -259,7 +263,7 @@ int resolv_lookup_server(const char *name, uint32_t dns_ip_be,
   fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
   if (fd < 0)
     return -1;
-  if (connect_fd(fd, dns_ip_be, RESOLV_PORT) < 0) {
+  if (connect_fd(fd, dns_ip_be, be16(RESOLV_PORT)) < 0) {
     close(fd);
     return -1;
   }
