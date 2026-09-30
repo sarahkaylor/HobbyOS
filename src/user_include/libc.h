@@ -139,6 +139,10 @@ struct sys_netinfo {
   uint32_t subnet_mask;
   uint32_t gateway;
   uint8_t mac[6];
+  /* F1.7 (DHCP → DNS hand-off): DNS server learned from DHCP, network byte
+   * order; 0 when unknown.  Appended to the F0 layout — callers passing a
+   * buffer of the pre-extension size still get the original fields. */
+  uint32_t dns;
 };
 
 struct sys_cpuinfo {
