@@ -412,9 +412,9 @@ static void sys_poll(struct trap_frame *tf) {
     return;
   }
   if (nfds > 0 &&
-      (!fds || ((uint64_t)fds & 7) != 0 ||
+      (!fds || ((uint64_t)fds & 3) != 0 ||
        !sys_user_range_ok((uint64_t)fds, (uint64_t)nfds * sizeof(struct k_pollfd)))) {
-    tf->regs[0] = -EFAULT; /* range + 8-byte alignment, §6.5 */
+    tf->regs[0] = -EFAULT; /* range + natural (4-byte) alignment, §6.5 */
     return;
   }
 
