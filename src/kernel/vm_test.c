@@ -13,9 +13,10 @@ extern void print_int(int v);
  * real frame allocator and the real arch page-table code (the same paths
  * the loader and the scheduler use), then restores the pool exactly.
  *
- * AS tags 60..79 are reserved for this suite: MAX_PROCESSES is far above,
- * no process holds them, and each test tears its AS down before the next
- * one starts, so a leaked table frame shows up as a count mismatch. */
+ * AS tags 60..63 are reserved for this suite (MAX_PROCESSES is 64, so
+ * 60..63 is the free top range; no process holds them, and each test tears
+ * its AS down before the next one starts, so a leaked table frame shows up
+ * as a count mismatch). */
 
 #define VM_TEST_TAG 60
 
@@ -432,6 +433,213 @@ static void test_vm_mmap_family(void) {
   EXPECT_EQ(frame_free_count(), free0);
 }
 
+/* P2.4 (S4, design section 10 item 5): shared objects -- the memfd-object
+ * / MAP_SHARED core at the vm layer.  Object create/ftruncate/seals; two
+ * independent address spaces mapping one object materialize the SAME
+ * frame; refcounts unwind back to the exact baseline frame count. */
+static void test_vm_shared_objects(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_shared_objects...\n");
+
+  int free0 = frame_free_count();
+  struct vm_object *o = vm_object_create(VM_OBJ_MEMFD, 0);
+  EXPECT_EQ((o != 0), 1);
+  if (!o)
+    return;
+
+  /* ftruncate sets the capacity; pages stay sparse until touched. */
+  EXPECT_EQ(vm_object_size(o), 0);
+  EXPECT_EQ(vm_object_truncate(o, 0x3000), 0);
+  EXPECT_EQ(vm_object_size(o), 0x3000);
+
+  /* Seals (design 4.3, OQ7 minimal set): SHRINK blocks shrink, GROW
+     blocks grow, SEAL latches against any further seal. */
+  EXPECT_EQ(vm_object_add_seals(o, VM_SEAL_SHRINK), 0);
+  EXPECT_EQ(vm_object_truncate(o, 0x1000), -EPERM);
+  EXPECT_EQ(vm_object_truncate(o, 0x4000), 0);
+  EXPECT_EQ(vm_object_add_seals(o, VM_SEAL_GROW | VM_SEAL_WRITE), 0);
+  EXPECT_EQ(vm_object_get_seals(o),
+            VM_SEAL_SHRINK | VM_SEAL_GROW | VM_SEAL_WRITE);
+  EXPECT_EQ(vm_object_truncate(o, 0x8000), -EPERM);
+  EXPECT_EQ(vm_object_add_seals(o, VM_SEAL_SEAL), 0);
+  EXPECT_EQ(vm_object_add_seals(o, VM_SEAL_SHRINK), -EPERM);
+
+  /* Two fake groups map the same object span. */
+  struct process f1, f2;
+  for (unsigned i = 0; i < sizeof(f1); i++)
+    ((unsigned char *)&f1)[i] = 0;
+  for (unsigned i = 0; i < sizeof(f2); i++)
+    ((unsigned char *)&f2)[i] = 0;
+  f1.as = vm_as_create(VM_TEST_TAG + 1);
+  f2.as = vm_as_create(VM_TEST_TAG + 2);
+  EXPECT_EQ((f1.as != 0 && f2.as != 0), 1);
+  if (!f1.as || !f2.as) {
+    if (f1.as)
+      vm_as_teardown(f1.as);
+    if (f2.as)
+      vm_as_teardown(f2.as);
+    vm_object_unref(o);
+    return;
+  }
+  EXPECT_EQ(vm_region_insert(f1.as, USER_MMAP_BASE_V2, 0x2000,
+                             VM_PROT_READ | VM_PROT_WRITE, VMK_SHARED,
+                             VM_MAP_SHARED, o, 0),
+            0);
+  EXPECT_EQ(vm_region_insert(f2.as, USER_MMAP_BASE_V2, 0x2000,
+                             VM_PROT_READ | VM_PROT_WRITE, VMK_SHARED,
+                             VM_MAP_SHARED, o, 0),
+            0);
+
+  /* First touch in each AS: the same backing frame must come back. */
+  EXPECT_EQ(vm_touch(&f1, USER_MMAP_BASE_V2, 8, 1), 0);
+  EXPECT_EQ(vm_touch(&f2, USER_MMAP_BASE_V2, 8, 1), 0);
+  uint64_t l1 = 0, l2 = 0;
+  EXPECT_EQ(vm_arch_walk(f1.as, USER_MMAP_BASE_V2, &l1), 0);
+  EXPECT_EQ(vm_arch_walk(f2.as, USER_MMAP_BASE_V2, &l2), 0);
+  l1 = vm_arch_leaf_phys(l1); /* walk returns the full leaf: mask attrs */
+  l2 = vm_arch_leaf_phys(l2);
+  EXPECT_EQ((l1 != 0 && l1 == l2), 1);
+  EXPECT_EQ(vm_object_page_locked(o, 0), l1);
+
+  /* Write visibility both ways (one physical frame). */
+  *(volatile uint64_t *)l1 = 0x5A5A1234ULL;
+  EXPECT_EQ(*(volatile uint64_t *)l2, 0x5A5A1234ULL);
+  *(volatile uint64_t *)l2 = 0x0BADF00DULL;
+  EXPECT_EQ(*(volatile uint64_t *)l1, 0x0BADF00DULL);
+
+  /* Page 1 is sparse and independent (fresh zero frame). */
+  EXPECT_EQ(vm_touch(&f1, USER_MMAP_BASE_V2 + 0x1000, 8, 1), 0);
+  uint64_t l1b = 0;
+  EXPECT_EQ(vm_arch_walk(f1.as, USER_MMAP_BASE_V2 + 0x1000, &l1b), 0);
+  l1b = vm_arch_leaf_phys(l1b);
+  EXPECT_EQ((l1b != 0 && l1b != l1), 1);
+  EXPECT_EQ(*(volatile uint64_t *)l1b, 0);
+
+  /* Teardown drops the region record refs; the create ref keeps the
+     object (and its pages) alive until the final unref. */
+  vm_as_teardown(f2.as);
+  vm_as_teardown(f1.as);
+  EXPECT_EQ((frame_free_count() < free0), 1);
+  EXPECT_EQ(vm_object_page_locked(o, 0), l1);
+  vm_object_unref(o);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* P2.4 (S4, design section 10 item 6): v2 fork clone at the vm layer.
+ * Resident private pages are copied frame-by-frame (distinct frames, same
+ * content, isolated); untouched pages stay holes; object pages re-map the
+ * same shared frame; teardown returns the pool to the baseline. */
+static void test_vm_as_clone_fork(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_as_clone_fork...\n");
+
+  int free0 = frame_free_count();
+  struct addr_space *as = vm_as_create(VM_TEST_TAG + 3);
+  EXPECT_EQ((as != 0), 1);
+  if (!as)
+    return;
+  struct process p;
+  for (unsigned i = 0; i < sizeof(p); i++)
+    ((unsigned char *)&p)[i] = 0;
+  p.as = as;
+
+  int64_t b = vm_mmap(&p, 0, 0x4000, VM_PROT_READ | VM_PROT_WRITE,
+                      VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+  EXPECT_EQ((b > 0), 1);
+  if (b <= 0) {
+    vm_as_teardown(as);
+    return;
+  }
+  /* Touch page 0 only; write a pattern. */
+  EXPECT_EQ(vm_touch(&p, (uint64_t)b, 8, 1), 0);
+  uint64_t lp = 0;
+  EXPECT_EQ(vm_arch_walk(as, (uint64_t)b, &lp), 0);
+  lp = vm_arch_leaf_phys(lp); /* mask the leaf's attribute bits */
+  *(volatile uint64_t *)lp = 0xA1B2C3D4ULL;
+
+  /* An object-backed (memfd-style) region as well. */
+  struct vm_object *o = vm_object_create(VM_OBJ_MEMFD, 0x1000);
+  EXPECT_EQ((o != 0), 1);
+  uint64_t ob = USER_MMAP_LIMIT_V2 - 0x2000;
+  EXPECT_EQ(vm_region_insert(as, ob, 0x1000, VM_PROT_READ | VM_PROT_WRITE,
+                             VMK_SHARED, VM_MAP_SHARED, o, 0),
+            0);
+  EXPECT_EQ(vm_touch(&p, ob, 8, 1), 0);
+  uint64_t lo = 0;
+  EXPECT_EQ(vm_arch_walk(as, ob, &lo), 0);
+  lo = vm_arch_leaf_phys(lo);
+  *(volatile uint64_t *)lo = 0x1111222233334444ULL;
+
+  struct addr_space *c = vm_as_clone(as, VM_TEST_TAG); /* tag 60, free again */
+  EXPECT_EQ((c != 0), 1);
+  if (!c) {
+    vm_as_teardown(as);
+    vm_object_unref(o);
+    return;
+  }
+
+  /* Private page: present in the clone, DIFFERENT frame, same content. */
+  uint64_t lc = 0;
+  EXPECT_EQ(vm_arch_walk(c, (uint64_t)b, &lc), 0);
+  lc = vm_arch_leaf_phys(lc);
+  EXPECT_EQ((lc != 0 && lc != lp), 1);
+  EXPECT_EQ(*(volatile uint64_t *)lc, 0xA1B2C3D4ULL);
+  /* ...and the copies are isolated. */
+  *(volatile uint64_t *)lc = 0xDEADULL;
+  EXPECT_EQ(*(volatile uint64_t *)lp, 0xA1B2C3D4ULL);
+  /* The untouched page of the same region stays a hole in the clone. */
+  EXPECT_EQ(vm_arch_walk(c, (uint64_t)b + 0x1000, 0), -1);
+  /* Object page: the SAME shared frame, not a copy. */
+  uint64_t lo2 = 0;
+  EXPECT_EQ(vm_arch_walk(c, ob, &lo2), 0);
+  lo2 = vm_arch_leaf_phys(lo2);
+  EXPECT_EQ((lo2 == lo), 1);
+  EXPECT_EQ(*(volatile uint64_t *)lo2, 0x1111222233334444ULL);
+
+  /* Teardowns return every private frame; the object survives on the
+     create ref (both records dropped the child/parent refs). */
+  vm_as_teardown(c);
+  vm_as_teardown(as);
+  EXPECT_EQ(vm_object_page_locked(o, 0), lo);
+  vm_object_unref(o);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* P2.4 (S4, design section 10 item 7): repeated create/map/touch/teardown
+ * cycles leave the used-frame count exactly unchanged (leak check). */
+static void test_vm_teardown_leak_cycles(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_teardown_leak_cycles...\n");
+
+  int free0 = frame_free_count();
+  for (int i = 0; i < 4; i++) {
+    struct addr_space *as = vm_as_create(VM_TEST_TAG + 1); /* tag 61 */
+    EXPECT_EQ((as != 0), 1);
+    if (!as)
+      return;
+    struct process p;
+    for (unsigned j = 0; j < sizeof(p); j++)
+      ((unsigned char *)&p)[j] = 0;
+    p.as = as;
+    int64_t b = vm_mmap(&p, 0, 0x8000, VM_PROT_READ | VM_PROT_WRITE,
+                        VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+    EXPECT_EQ((b > 0), 1);
+    if (b <= 0) {
+      vm_as_teardown(as);
+      return;
+    }
+    EXPECT_EQ(vm_touch(&p, (uint64_t)b, 8, 1), 0);
+    EXPECT_EQ(vm_touch(&p, (uint64_t)b + 0x4000, 8, 1), 0);
+    /* churn: partial unmap, then a second mapping */
+    EXPECT_EQ(vm_munmap_range(&p, (uint64_t)b + 0x4000, 0x1000), 0);
+    int64_t b2 = vm_mmap(&p, 0, 0x1000, VM_PROT_READ | VM_PROT_WRITE,
+                         VM_MAP_PRIVATE | VM_MAP_ANONYMOUS, -1, 0);
+    EXPECT_EQ((b2 > 0), 1);
+    vm_as_teardown(as);
+  }
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
 void vm_test_suite(void) {
   uart_puts("vm_test_suite:\n");
   test_vm_as_lifecycle();
@@ -441,6 +649,9 @@ void vm_test_suite(void) {
   test_vm_hole_find();
   test_vm_demand_fault();
   test_vm_mmap_family();
+  test_vm_shared_objects();
+  test_vm_as_clone_fork();
+  test_vm_teardown_leak_cycles();
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */
