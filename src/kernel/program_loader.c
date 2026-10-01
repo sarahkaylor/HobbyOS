@@ -730,26 +730,29 @@ void proc_split_argv(struct process *p, const char *args) {
   p->eargc = narg;
 }
 
+/* P2.5 (S5): is [addr, addr+len) readable (write=0) / writable (write=1)
+ * caller user space?  A v2 process answers to the address-space walk --
+ * vm_range_ok demand-commits the pages (S2 semantics), so a raw access
+ * after this check is safe; v1 keeps the flat-window test. */
+static int pl_user_ok(struct process *p, uint64_t addr, uint64_t len,
+                      int write) {
+  if (len == 0)
+    len = 1;
+  if (p && p->as)
+    return vm_range_ok(p, addr, len, write) == 0;
+  if (addr < USER_VIRT_BASE || addr + len - 1 >= USER_VIRT_BASE + USER_REGION_SIZE)
+    return 0;
+  return 1;
+}
+
 /* Copy a NUL-terminated user string into kernel memory with full bounds
  * checking (mirrors the static u_strcpy in each trap.c). Returns 1 on
  * success (dst NUL-terminated), 0 on bad/out-of-range pointer. */
-static int pl_strcpy(const char *src, char *dst, int cap) {
+static int pl_strcpy(struct process *p, const char *src, char *dst, int cap) {
   if (!src || cap <= 1)
     return 0;
-  /* P2.5 (S5 flip): v2-aware -- exec's path/argv strings live in the v2
-     window (64 GiB); the window test below only matches v1/kernel
-     callers.  vm_range_ok demand-commits v2 pages (S2 semantics). */
-  struct process *p = current_process();
-  uint64_t base = (uint64_t)src;
-  if (p && p->as) {
-    if (vm_range_ok(p, base, (uint64_t)cap, 0) != 0)
-      return 0;
-  } else {
-    if (base < USER_VIRT_BASE || base >= USER_VIRT_BASE + USER_REGION_SIZE)
-      return 0;
-    if (base + cap - 1 >= USER_VIRT_BASE + USER_REGION_SIZE)
-      return 0;
-  }
+  if (!pl_user_ok(p, (uint64_t)src, (uint64_t)cap, 0))
+    return 0;
   int i = 0;
   for (; i < cap - 1 && src[i]; i++)
     dst[i] = src[i];
@@ -761,7 +764,15 @@ static int pl_strcpy(const char *src, char *dst, int cap) {
  * time.  Unlike the space-joined flat args string, each element keeps its
  * own length, so quoted words that contain spaces round-trip exactly.
  * argv may be NULL (leaves eargc == 0 so crt0 falls back to name+args).
- * Elements are truncated at 63 chars (matching the flat-args path). */
+ * Elements are truncated at 63 chars (matching the flat-args path).
+ *
+ * P2.5 (S5): every caller user pointer is validated before it is read
+ * (pl_user_ok: v2 AS walk demand-commits the page / v1 window test), so
+ * a bogus argv can never fault the kernel.  The v2 exec path tears the
+ * caller's AS down, so sys_exec MUST call this while the caller's AS is
+ * still live -- i.e. BEFORE process_exec_current; reading the old user
+ * array afterwards aborted in EL1 (translation fault on the new AS's
+ * uncommitted demand pages) and parked the CPU. */
 int proc_set_argv_array(struct process *p, char *const *argv) {
   p = process_group(p); /* P1 (D7): the argv blob is group state */
   p->eargc = 0;
@@ -770,10 +781,13 @@ int proc_set_argv_array(struct process *p, char *const *argv) {
     return 0;
   int pos = 0;
   for (int ai = 0; ai < HO_EXEC_MAX_ARGS; ai++) {
+    /* Validate the array slot itself before the raw load below. */
+    if (!pl_user_ok(p, (uint64_t)(argv + ai), sizeof(char *), 0))
+      break;
     if (argv[ai] == 0)
       break;
     char one[64];
-    if (!pl_strcpy((const char *)argv[ai], one, sizeof one))
+    if (!pl_strcpy(p, (const char *)argv[ai], one, sizeof one))
       break;
     if (pos >= HO_EXEC_ARGV_LEN)
       break;
