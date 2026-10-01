@@ -763,7 +763,9 @@ static int process_create_internal_ver(int ver) {
   /* P2.2 (S2): give the v2 slot its address space (root + region array).
      Failure frees the slot; the caller (loader v2) treats it as OOM. */
   if (ver == AS_V2) {
-    struct addr_space *as = vm_as_create((uint64_t)pid);
+    struct addr_space *as;
+    uart_puts("[VMD] as create...\n");
+    as = vm_as_create((uint64_t)pid);
     if (!as) {
       uint64_t f2 = spinlock_acquire_irqsave(&proc_lock);
       p->state = PROC_STATE_FREE;
@@ -772,6 +774,7 @@ static int process_create_internal_ver(int ver) {
       return -1;
     }
     p->as = as;
+    uart_puts("[VMD] as ok\n");
   }
 
   return pid;
@@ -1900,6 +1903,10 @@ int process_fork(struct trap_frame *tf) {
   int child_pid = group->as ? process_create_v2() : process_create();
   if (child_pid < 0)
     return -1;
+  /* P8 soak debug: localize a reported fork-path stall (see §11). */
+  uart_puts("[VMF] created pid=");
+  print_int(child_pid);
+  uart_puts("\n");
 
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   struct process *child = &proc_table[child_pid];
@@ -1926,6 +1933,7 @@ int process_fork(struct trap_frame *tf) {
       uart_puts("[KERNEL] fork: AS clone failed\n");
       return -1;
     }
+    uart_puts("[VMF] cloned\n");
   } else {
     kmemcpy((void *)child->user_phys_base, (void *)group->user_phys_base,
             USER_INITIAL_CLEAR_SIZE);
@@ -1965,6 +1973,7 @@ int process_fork(struct trap_frame *tf) {
 
   child->state = PROC_STATE_READY;
   spinlock_release_irqrestore(&proc_lock, flags);
+  uart_puts("[VMF] ready\n");
   return child_pid;
 }
 

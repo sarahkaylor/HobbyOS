@@ -1046,6 +1046,15 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
     return -1;
   if (dst->nr != 0)
     return -1; /* only into a fresh AS */
+  /* P8 soak debug: localize a reported fork-path stall (see §11). */
+  uart_puts("[VMC] start nr=");
+  print_int(src->nr);
+  uart_puts(" res=");
+  print_int((int)src->resident_frames);
+  uart_puts(" tbl=");
+  print_int((int)src->table_frames);
+  uart_puts("\n");
+  uint64_t pages = 0;
 
   /* Copy the regions in list order; each insert takes vm_lock itself.
      Sibling threads of the parent could in principle mutate the list
@@ -1118,9 +1127,20 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
         uart_puts("\n");
         goto fail;
       }
+      pages++;
+    }
+    if ((i & 63) == 0) {
+      uart_puts("[VMC] i=");
+      print_int(i);
+      uart_puts(" pages=");
+      print_int((int)pages);
+      uart_puts("\n");
     }
     i++;
   }
+  uart_puts("[VMC] done pages=");
+  print_int((int)pages);
+  uart_puts("\n");
   return 0;
 
 fail:
