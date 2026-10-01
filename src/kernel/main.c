@@ -295,6 +295,21 @@ static void test_wave_loader(void *arg) {
      runs late, next to the other churn suites. */
   load_and_run_program_in_scheduler("SIG_T.BIN", -1, -1, -1, -1);
 
+  /* P8.1 (browser.md §6): POSIX torture acceptance — 64-thread
+     mutex/condvar churn, socketpair fd-pass loops, mmap/fault/free
+     storms, exec/wait cycles, poll on many fds and memory high-water.
+     LAST in the wave: its 64-wide churn wants the process-table churn of
+     the earlier suites to have drained first (it tolerates and notes
+     slot-pressure launch rejections).  Under MODE=soak
+     (KERNEL_SOAK_WAVE) the same binary runs its bounded soak loop and
+     prints the [SOAK] numbers (P8.2). */
+#ifdef KERNEL_SOAK_WAVE
+  load_and_run_program_in_scheduler_args("TORTURE.BIN", -1, -1, -1, -1,
+                                         "soak");
+#else
+  load_and_run_program_in_scheduler("TORTURE.BIN", -1, -1, -1, -1);
+#endif
+
   extern void kernel_exit(void);
   kernel_exit();
 }
