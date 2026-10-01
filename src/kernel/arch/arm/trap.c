@@ -812,10 +812,19 @@ static void sys_exec(struct trap_frame *tf) {
     return;
   }
 
+  /* P2.5 (S5): every argv access below is validated (v2 AS walk
+     demand-commits / v1 window test) so a bogus array degrades instead
+     of faulting the kernel.  The eargv blob MUST be captured before
+     process_exec_current: the v2 exec tears the caller's AS down and the
+     old array pages are dead afterwards (raw reads aborted in EL1 and
+     parked the CPU). */
+  proc_set_argv_array(cur, argv);
+
   /* argv[0] names the new program (POSIX: may differ from the path). */
   char namebuf[32];
   int named = 0;
-  if (argv && u_strcpy((const char *)argv[0], namebuf, sizeof namebuf)
+  if (argv && sys_user_range_ok((uint64_t)argv, sizeof(char *)) &&
+      u_strcpy((const char *)argv[0], namebuf, sizeof namebuf)
       && namebuf[0])
     named = 1;
   if (!named) {
@@ -835,7 +844,9 @@ static void sys_exec(struct trap_frame *tf) {
   int alen = 0;
   argbuf[0] = '\0';
   if (argv) {
-    for (int ai = 1; argv[ai] != 0 && alen < 251; ai++) {
+    for (int ai = 1; alen < 251 &&
+                     sys_user_range_ok((uint64_t)(argv + ai), sizeof(char *)) &&
+                     argv[ai] != 0; ai++) {
       char one[64];
       if (!u_strcpy((const char *)argv[ai], one, sizeof one))
         break;
@@ -850,8 +861,6 @@ static void sys_exec(struct trap_frame *tf) {
   int r = process_exec_current(tf, pathbuf, argbuf, namebuf);
   if (r < 0)
     tf->regs[0] = (uint64_t)r;  /* success redirects elr + sets regs[0]=0 */
-  else
-    proc_set_argv_array(cur, argv);
 }
 
 static void sys_mount(struct trap_frame *tf) {
@@ -1319,6 +1328,37 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       uart_puts(is_exec ? "x" : " ");
       uart_puts(" in=");
       uart_puts(why);
+      /* TEMP S5 triage: register dump for killed faults (remove me). */
+      {
+        uint64_t tp;
+        __asm__ volatile("mrs %0, tpidr_el0" : "=r"(tp));
+        uart_puts(" R x0=");
+        uart_print_hex(tf->regs[0]);
+        uart_puts(" x1=");
+        uart_print_hex(tf->regs[1]);
+        uart_puts(" x2=");
+        uart_print_hex(tf->regs[2]);
+        uart_puts(" x8=");
+        uart_print_hex(tf->regs[8]);
+        uart_puts(" x9=");
+        uart_print_hex(tf->regs[9]);
+        uart_puts(" x10=");
+        uart_print_hex(tf->regs[10]);
+        uart_puts(" x11=");
+        uart_print_hex(tf->regs[11]);
+        uart_puts(" x12=");
+        uart_print_hex(tf->regs[12]);
+        uart_puts(" x13=");
+        uart_print_hex(tf->regs[13]);
+        uart_puts(" x29=");
+        uart_print_hex(tf->regs[29]);
+        uart_puts(" lr=");
+        uart_print_hex(tf->lr);
+        uart_puts(" tp=");
+        uart_print_hex(tp);
+        uart_puts(" tlsb=");
+        uart_print_hex(gcur->tls_base);
+      }
       uart_puts(" -> killed\n");
       process_fault_exit(tf, 11); /* SIGSEGV status byte */
       return;
