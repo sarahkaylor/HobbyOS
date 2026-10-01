@@ -89,8 +89,13 @@ static void test_net_socket_fd_table(void) {
   EXPECT_EQ(type, K_SOCK_DGRAM);
 
   /* Error paths: bad domain, mismatched protocol/type, unknown option. */
-  EXPECT_EQ(file_socket(cur, 1 /* AF_UNIX (unsupported in v1) */, K_SOCK_STREAM, 0),
-            -EAFNOSUPPORT);
+  /* P4 §6.6 (consented 2026-09-30): AF_UNIX is real now — the old "AF_UNIX
+   * unsupported in v1 -> EAFNOSUPPORT" expectation flips to success; an
+   * unsupported type (SOCK_RAW) is the remaining rejection. */
+  int afu = file_socket(cur, K_AF_UNIX, K_SOCK_STREAM, 0);
+  EXPECT_EQ((afu >= 0), 1);
+  if (afu >= 0) EXPECT_EQ(file_close(cur, afu), 0);
+  EXPECT_EQ(file_socket(cur, K_AF_UNIX, K_SOCK_RAW, 0), -EPROTONOSUPPORT);
   EXPECT_EQ(file_socket(cur, K_AF_INET, K_SOCK_STREAM, K_IPPROTO_UDP),
             -EPROTONOSUPPORT);
   len = (int)sizeof(type);
