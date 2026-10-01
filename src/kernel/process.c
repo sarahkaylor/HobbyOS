@@ -1020,10 +1020,30 @@ void schedule(struct trap_frame *tf, int is_yield) {
     int current_search_pid = (current_pid >= 0) ? current_pid : 0;
     for (int i = 1; i <= MAX_PROCESSES; i++) {
       int idx = (current_search_pid + i) % MAX_PROCESSES;
-      if (proc_table[idx].state == PROC_STATE_READY) {
-        next = idx;
-        break;
+      if (proc_table[idx].state != PROC_STATE_READY)
+        continue;
+      /* Claim guard (the picking half of `taken_elsewhere` above): a
+         READY process may still be EXECUTING on another CPU -- a waker
+         flipped its parked state back to READY while its owner was still
+         in the block-to-schedule gap and its LIVE trap frame has not been
+         saved yet.  Picking it here would resume a stale context (the
+         owner's older save) while the owner still runs it: that window
+         produced the observed torn cross-process register frames, replayed
+         syscalls with garbage args (e.g. set_tls x0 = small constants) and
+         TPIDR_EL0 = 0 resumes.  Leave such a process to its owner, whose
+         schedule() saves the live frame and re-homes the claim; pick only
+         processes no other CPU currently claims. */
+      int claimed_elsewhere = 0;
+      for (uint32_t c2 = 0; c2 < MAX_CPUS; c2++) {
+        if (c2 != cpu && cpu_current_pids[c2] == idx) {
+          claimed_elsewhere = 1;
+          break;
+        }
       }
+      if (claimed_elsewhere)
+        continue;
+      next = idx;
+      break;
     }
 
     if (next >= 0) {
@@ -1644,7 +1664,21 @@ void start_scheduler(void) {
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     process_check_sleeping();
     for (int i = 0; i < MAX_PROCESSES; i++) {
-      if (proc_table[i].state == PROC_STATE_READY) {
+      if (proc_table[i].state != PROC_STATE_READY)
+        continue;
+      /* Same claim guard as in schedule(): never pick a READY process
+         another CPU still claims (wake raced its block-to-schedule gap;
+         its live frame is not saved yet).  See the long comment there. */
+      int claimed_elsewhere = 0;
+      for (uint32_t c2 = 0; c2 < MAX_CPUS; c2++) {
+        if (c2 != cpu && cpu_current_pids[c2] == i) {
+          claimed_elsewhere = 1;
+          break;
+        }
+      }
+      if (claimed_elsewhere)
+        continue;
+      {
         set_current_process_pid(cpu, i);
         proc_table[i].state = PROC_STATE_RUNNING;
         sched_idle_rounds = 0;
