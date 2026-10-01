@@ -311,6 +311,160 @@ static void test_process_set_tls(void) {
   process_free(lid);
 }
 
+/* ---------------------------------------------------------------------
+ * P5 (docs/browser/p5-exec-signals-design.md): signals, kill, SIGPIPE.
+ * ------------------------------------------------------------------- */
+
+/* Row-83 storage side: validation, storage, query-back. */
+static void test_p5_sigaction_storage(void) {
+  tests_run++;
+  uart_puts("  Running test_p5_sigaction_storage...\n");
+
+  int pid = process_create();
+  EXPECT_EQ((pid >= 0 && pid < MAX_PROCESSES), 1);
+  int old_pid = cpu_current_pids[0];
+  set_current_process_pid(0, pid);
+  struct process *p = process_group(process_get_pcb(pid));
+
+  struct ho_sigaction act = {0}, old = {0};
+
+  /* range + reserved-signal rejections (D6/D7) */
+  EXPECT_EQ(process_sigaction(0, 0, 0), -EINVAL);
+  EXPECT_EQ(process_sigaction(HO_SIG_MAX, 0, 0), -EINVAL);
+  EXPECT_EQ(process_sigaction(HO_SIGKILL, 0, 0), -EINVAL);
+  EXPECT_EQ(process_sigaction(HO_SIGSTOP, 0, 0), -EINVAL);
+
+  /* a real handler needs a valid in-region restorer */
+  act.sa_handler = USER_VIRT_BASE + 0x1000;
+  act.sa_restorer = 0;
+  EXPECT_EQ(process_sigaction(HO_SIGPIPE, &act, 0), -EINVAL);
+  act.sa_restorer = USER_VIRT_BASE + 0x2000;
+  EXPECT_EQ(process_sigaction(HO_SIGPIPE, &act, 0), 0);
+  EXPECT_EQ((p->sig_handler[HO_SIGPIPE] == USER_VIRT_BASE + 0x1000), 1);
+  EXPECT_EQ((p->sig_restorer == USER_VIRT_BASE + 0x2000), 1);
+
+  /* query form returns what was stored */
+  EXPECT_EQ(process_sigaction(HO_SIGPIPE, 0, &old), 0);
+  EXPECT_EQ((old.sa_handler == USER_VIRT_BASE + 0x1000), 1);
+  EXPECT_EQ((old.sa_restorer == USER_VIRT_BASE + 0x2000), 1);
+  EXPECT_EQ(old.sa_flags, 0);
+
+  /* SIG_IGN needs no restorer; SIG_DFL clears */
+  act.sa_handler = HO_SIG_IGN;
+  act.sa_restorer = 0;
+  EXPECT_EQ(process_sigaction(HO_SIGPIPE, &act, 0), 0);
+  EXPECT_EQ((p->sig_handler[HO_SIGPIPE] == HO_SIG_IGN), 1);
+  act.sa_handler = HO_SIG_DFL;
+  EXPECT_EQ(process_sigaction(HO_SIGPIPE, &act, 0), 0);
+  EXPECT_EQ(p->sig_handler[HO_SIGPIPE], 0);
+
+  set_current_process_pid(0, old_pid);
+  process_free(pid);
+}
+
+/* Row-16 semantics (D9): validation, ESRCH, disposition outcomes. */
+static void test_p5_kill_semantics(void) {
+  tests_run++;
+  uart_puts("  Running test_p5_kill_semantics...\n");
+
+  int pid = process_create();
+  struct process *p = process_get_pcb(pid);
+  EXPECT_EQ((p != 0), 1);
+
+  /* unknown numbers -> -EINVAL (D6); missing target -> -ESRCH */
+  EXPECT_EQ(process_signal(pid, 3), -EINVAL); /* SIGQUIT is not in the set */
+  EXPECT_EQ(process_signal(pid, 40), -EINVAL);
+  EXPECT_EQ(process_signal(999999, HO_SIGTERM), -ESRCH);
+  EXPECT_EQ(process_signal(pid, 0), -EINVAL); /* sig 0 is the trap-layer check */
+
+  /* handler disposition: accepted-and-recorded, group survives */
+  p->sig_handler[HO_SIGTERM] = USER_VIRT_BASE + 0x4000;
+  EXPECT_EQ(process_signal(pid, HO_SIGTERM), 0);
+  EXPECT_EQ((p->sig_pending & (1u << (HO_SIGTERM - 1))) != 0, 1);
+  EXPECT_EQ((p->state != PROC_STATE_EXITED), 1);
+
+  /* SIG_IGN: no-op, no pending */
+  p->sig_pending = 0;
+  p->sig_handler[HO_SIGTERM] = HO_SIG_IGN;
+  EXPECT_EQ(process_signal(pid, HO_SIGTERM), 0);
+  EXPECT_EQ(p->sig_pending, 0);
+
+  /* default: immediate group kill with a signal-shaped status byte */
+  p->sig_handler[HO_SIGTERM] = HO_SIG_DFL;
+  EXPECT_EQ(process_signal(pid, HO_SIGTERM), 0);
+  EXPECT_EQ(p->state, PROC_STATE_EXITED);
+  EXPECT_EQ(p->exit_status, HO_SIGTERM);
+
+  process_free(pid);
+}
+
+/* D10: the write-side SIGPIPE disposition matrix. */
+static void test_p5_sigpipe_semantics(void) {
+  tests_run++;
+  uart_puts("  Running test_p5_sigpipe_semantics...\n");
+
+  int pid = process_create();
+  struct process *p = process_group(process_get_pcb(pid));
+
+  /* SIG_IGN (the WebKit child): -EPIPE keeps flowing, group survives */
+  p->sig_handler[HO_SIGPIPE] = HO_SIG_IGN;
+  EXPECT_EQ(signal_epipe(p), 0);
+  EXPECT_EQ(p->sig_pending, 0);
+  EXPECT_EQ((p->state != PROC_STATE_EXITED), 1);
+
+  /* real handler: pending bit set, survives */
+  p->sig_handler[HO_SIGPIPE] = USER_VIRT_BASE + 0x3000;
+  EXPECT_EQ(signal_epipe(p), 0);
+  EXPECT_EQ((p->sig_pending & (1u << (HO_SIGPIPE - 1))) != 0, 1);
+
+  /* default: the writer's group dies immediately, WTERMSIG = SIGPIPE */
+  p->sig_handler[HO_SIGPIPE] = HO_SIG_DFL;
+  p->sig_pending = 0;
+  EXPECT_EQ(signal_epipe(p), 1);
+  EXPECT_EQ(p->state, PROC_STATE_EXITED);
+  EXPECT_EQ(p->exit_status, HO_SIGPIPE);
+
+  process_free(pid);
+}
+
+/* Row-85 storage side: env blob readback + truncation contract. */
+static void test_p5_env_readback(void) {
+  tests_run++;
+  uart_puts("  Running test_p5_env_readback...\n");
+
+  int pid = process_create();
+  struct process *p = process_group(process_get_pcb(pid));
+
+  EXPECT_EQ(sys_readenv(p, -1, 0, 0), 0); /* empty set */
+  EXPECT_EQ(sys_readenv(p, 0, 0, 0), -EINVAL);
+
+  const char blob[] = "A=1\0B=22";
+  for (unsigned i = 0; i < sizeof(blob); i++)
+    p->env[i] = blob[i];
+  p->envc = 2;
+
+  EXPECT_EQ(sys_readenv(p, -1, 0, 0), 2);
+
+  char buf[16];
+  int len = sys_readenv(p, 0, buf, sizeof(buf));
+  EXPECT_EQ(len, 3);
+  EXPECT_EQ(buf[0], 'A');
+  EXPECT_EQ(buf[2], '1');
+  EXPECT_EQ(buf[3], '\0');
+  len = sys_readenv(p, 1, buf, sizeof(buf));
+  EXPECT_EQ(len, 4);
+  EXPECT_EQ(buf[1], '=');
+  EXPECT_EQ(buf[3], '2');
+  EXPECT_EQ(sys_readenv(p, 2, buf, sizeof(buf)), -EINVAL);
+
+  /* truncation: size clamps and still NUL-terminates */
+  len = sys_readenv(p, 1, buf, 3);
+  EXPECT_EQ(len, 2);
+  EXPECT_EQ(buf[2], '\0');
+
+  process_free(pid);
+}
+
 void process_test_suite(void) {
   uart_puts("process_test_suite:\n");
   test_process_init_and_create();
@@ -321,6 +475,10 @@ void process_test_suite(void) {
   test_process_thread_slot_reclaim();
   test_process_futex_machine();
   test_process_set_tls();
+  test_p5_sigaction_storage();
+  test_p5_kill_semantics();
+  test_p5_sigpipe_semantics();
+  test_p5_env_readback();
 }
 
 #endif // KERNEL_MODE_UNIT_TEST

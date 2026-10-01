@@ -108,6 +108,33 @@ struct addr_space;
 #define HO_EXEC_MAX_ARGS 32
 #define HO_EXEC_ARGV_LEN 256
 
+/* P5 (docs/browser/p5-exec-signals-design.md D7): env blob + signal
+ * table sizes.  Numbers 1..HO_SIG_MAX-1 are the valid disposition range;
+ * the signal set itself is frozen by the note's D6. */
+#define HO_ENV_LEN 512
+#define HO_SIG_MAX 32
+
+/* P5 (D6): the frozen signal numbers (the Linux set the sysroot shares).
+ * Kernel shorthand so process.c/pipe.c never leak magic numbers. */
+#define HO_SIGHUP  1
+#define HO_SIGINT  2
+#define HO_SIGILL  4
+#define HO_SIGABRT 6
+#define HO_SIGBUS  7
+#define HO_SIGKILL 9
+#define HO_SIGUSR1 10
+#define HO_SIGSEGV 11
+#define HO_SIGUSR2 12
+#define HO_SIGPIPE 13
+#define HO_SIGTERM 15
+#define HO_SIGCHLD 17
+#define HO_SIGSTOP 19
+
+/* Disposition sentinels stored in sig_handler[]: everything else is a user
+ * handler address. */
+#define HO_SIG_DFL 0
+#define HO_SIG_IGN 1
+
 // Process control block (PCB) structure
 /**
  * Process Control Block (PCB) structure.
@@ -240,6 +267,21 @@ struct process {
    * spawn2's 0/1/2 grants clear the bit on the new fd; P5's execve runs
    * the sweep.  Appended at the END so parallel lanes merge additively. */
   uint32_t fd_cloexec;
+
+  /* --- P5 (docs/browser/p5-exec-signals-design.md D7): exec + signals --- *
+   * Appended at the END so parallel lanes merge additively.  All of this
+   * is group ANCHOR state (threads read the anchor via process_group()).
+   *  env: NUL-separated "NAME=VALUE" entries, "" = empty set (execve /
+   *  spawn_ex populate it; envp == NULL means empty, D3.1).
+   *  sig_handler[signum]: 0 = SIG_DFL, 1 = SIG_IGN, else a user VA.
+   *  sig_pending: bit (signum - 1); delivery state is the leader's (D8). */
+  char env[HO_ENV_LEN];
+  int envc;
+  uint32_t sig_pending;
+  uint64_t sig_handler[HO_SIG_MAX];
+  uint64_t sig_restorer;
+  int sig_in_handler;
+  uint64_t sig_frame;
 };
 
 // Initialize the process subsystem and zero out the process table.
@@ -420,5 +462,65 @@ uint64_t process_get_total_idle_ms(void);
 void fpu_save(uint64_t *area);
 void fpu_restore(const uint64_t *area);
 #endif
+
+/* --- P5 (docs/browser/p5-exec-signals-design.md): signals/kill/env ----
+ * Rows: 16 kill (semantics completed, D9), 83 sigaction (D7), 84 sigreturn
+ * (D8.6), 85 getenv (D2), 86 spawn_ex (D4).  40/39 are extended in place.
+ * All user-pointer traffic routes through P2's frozen helpers (OQ5). */
+
+/* Kernel mirror of the sysroot's struct sigaction (P5 OQ4 layout: handler
+ * union at 0, sigset_t sa_mask at 8, sa_flags at 24, sa_restorer at 32;
+ * size 40).  The trap layer marshals it field-wise; process.c never reads
+ * the user struct directly. */
+struct ho_sigaction {
+  uint64_t sa_handler; /* union { sa_handler; sa_sigaction; } */
+  uint64_t sa_mask[2];
+  int sa_flags;
+  uint64_t sa_restorer;
+};
+
+/* OQ5 shared user-range check: v2 processes go through vm_touch (demand +
+ * prot), v1 through the legacy 32 MiB range.  `write` nonzero checks write
+ * access.  Returns 0 or -1. */
+int process_user_ok(struct process *p, uint64_t va, uint64_t len, int write);
+
+/* Row 16 completion (D9): process-directed signal.  pid > 0 names any
+ * group member (leader or thread; the signal targets that member's
+ * group), pid == 0 the caller's group, pid < 0 the group leader -pid.
+ * SIG_IGN = no-op; a real handler sets the pending bit; SIG_DFL (and
+ * uncatchable SIGKILL) kills the target group immediately with the signal
+ * byte in the waitpid status.  Returns 0 or -errno (-ESRCH, -EINVAL). */
+int process_signal(int pid, int sig);
+
+/* Row 83 (D7): validate + store dispositions on the caller's group anchor.
+ * act/oldact are kernel mirrors marshalled by the trap layer (NULL =
+ * query/absent).  -EINVAL for bad signum, SIGKILL/SIGSTOP, or a real
+ * handler without a valid in-region sa_restorer. */
+int process_sigaction(int signum, const struct ho_sigaction *act,
+                      struct ho_sigaction *oldact);
+
+/* Row 84 (D8.6): restore the interrupted context from the active signal
+ * frame.  The frame engine lands in S3; until then every call is the
+ * documented defensive -EINVAL (no frame can exist). */
+int process_sigreturn(struct trap_frame *tf);
+
+/* Row 85 (D2): read the process's environment blob.  idx == -1 returns
+ * the entry count; idx >= 0 copies the idx-th "NAME=VALUE" entry into buf
+ * (size bytes) and returns its length, or -EINVAL out of range.  The trap
+ * layer validates buf; this helper does no user-memory checks (kernel unit
+ * tests call it with kernel buffers). */
+int sys_readenv(struct process *p, int idx, char *buf, int size);
+
+/* D10: the SIGPIPE helper for a write to a closed peer.  Applies the
+ * writer group's SIGPIPE disposition: SIG_IGN -> 0 (writer survives, the
+ * caller returns -EPIPE); handler -> pending set + 0; default -> the group
+ * is killed NOW with WTERMSIG = SIGPIPE and 1 is returned (the caller must
+ * not return to user space). */
+int signal_epipe(struct process *grp);
+
+/* The immediate group-kill body (kill's default action / SIGKILL): anchor
+ * EXITED with the signal byte, memory released, sibling threads ended, fds
+ * closed, unified reap delivery run (D5.3/D9.4).  Never blocks on claims. */
+void process_kill_group_sig(struct process *grp, int sig);
 
 #endif // PROCESS_H

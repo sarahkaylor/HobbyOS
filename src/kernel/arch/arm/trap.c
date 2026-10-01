@@ -502,8 +502,13 @@ static void sys_write(struct trap_frame *tf) {
     if (ret == -2) {
       tf->elr -= 4; // Restart syscall
       schedule(tf, 0);
-    } else if (ret < 0) {
+    } else if (ret == -1) {
       tf->regs[0] = -EBADF;
+    } else if (ret < 0) {
+      /* P4/P5 carve-out: a backend's rich negative errno (e.g. -EPIPE
+         from a closed pipe peer) passes through; only the legacy -1
+         means EBADF. */
+      tf->regs[0] = (uint64_t)(int64_t)ret;
     } else {
       tf->regs[0] = ret;
     }
@@ -845,6 +850,92 @@ static void sys_exec(struct trap_frame *tf) {
     proc_set_argv_array(cur, argv);
 }
 
+/* --- P5 (docs/browser/p5-exec-signals-design.md): rows 83-85 ---------- */
+
+/* Byte-wise marshal helpers for the sysroot's struct sigaction (P5 OQ4
+ * layout).  Never a whole-struct cast: the kernel parses binary layouts
+ * byte-by-byte (house rule), so a misaligned user pointer can never fault
+ * the kernel with a wide load. */
+static uint32_t p5_ld32(const uint8_t *p) {
+  return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
+         ((uint32_t)p[3] << 24);
+}
+static uint64_t p5_ld64(const uint8_t *p) {
+  uint64_t v = 0;
+  for (int i = 0; i < 8; i++)
+    v |= ((uint64_t)p[i]) << (8 * i);
+  return v;
+}
+static void p5_st32(uint8_t *p, uint32_t v) {
+  for (int i = 0; i < 4; i++)
+    p[i] = (uint8_t)(v >> (8 * i));
+}
+static void p5_st64(uint8_t *p, uint64_t v) {
+  for (int i = 0; i < 8; i++)
+    p[i] = (uint8_t)(v >> (8 * i));
+}
+
+/* SYS_SIGACTION (83): marshal the user struct field-wise; process.c
+ * validates + stores (D7). */
+#define P5_SIGACTION_SIZE 40
+static void sys_sigaction(struct trap_frame *tf) {
+  int signum = (int)tf->regs[0];
+  const uint8_t *uact = (const uint8_t *)tf->regs[1];
+  uint8_t *uold = (uint8_t *)tf->regs[2];
+  struct process *cur = current_process();
+  if (!cur) {
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return;
+  }
+  struct ho_sigaction actk, oldk;
+  const struct ho_sigaction *actp = 0;
+  struct ho_sigaction *oldp = 0;
+  if (uact) {
+    if (process_user_ok(cur, (uint64_t)uact, P5_SIGACTION_SIZE, 0) != 0) {
+      tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+      return;
+    }
+    actk.sa_handler = p5_ld64(uact + 0);
+    actk.sa_mask[0] = p5_ld64(uact + 8);
+    actk.sa_mask[1] = p5_ld64(uact + 16);
+    actk.sa_flags = (int)p5_ld32(uact + 24);
+    actk.sa_restorer = p5_ld64(uact + 32);
+    actp = &actk;
+  }
+  if (uold) {
+    if (process_user_ok(cur, (uint64_t)uold, P5_SIGACTION_SIZE, 1) != 0) {
+      tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+      return;
+    }
+    oldp = &oldk;
+  }
+  int r = process_sigaction(signum, actp, oldp);
+  if (r == 0 && oldp) {
+    p5_st64(uold + 0, oldk.sa_handler);
+    p5_st64(uold + 8, oldk.sa_mask[0]);
+    p5_st64(uold + 16, oldk.sa_mask[1]);
+    p5_st32(uold + 24, (uint32_t)oldk.sa_flags);
+    p5_st64(uold + 32, oldk.sa_restorer);
+  }
+  tf->regs[0] = (uint64_t)(int64_t)r;
+}
+
+/* SYS_GETENV (85): mirror of SYS_GETARGV's marshalling; buf validated for
+ * write when the call will copy into it. */
+static void sys_getenv(struct trap_frame *tf) {
+  struct process *cur = current_process();
+  int idx = (int)tf->regs[0];
+  char *buf = (char *)tf->regs[1];
+  int size = (int)tf->regs[2];
+  if (idx >= 0 && size > 0) {
+    if (!cur || process_user_ok(cur, (uint64_t)buf, (uint64_t)size, 1) != 0) {
+      tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+      return;
+    }
+  }
+  tf->regs[0] = (uint64_t)(int64_t)sys_readenv(cur, idx, buf, size);
+}
+
 static void sys_mount(struct trap_frame *tf) {
   const char *source = (const char *)tf->regs[0];
   const char *target = (const char *)tf->regs[1];
@@ -982,8 +1073,14 @@ static void sys_kill(struct trap_frame *tf) {
       tf->regs[0] = -ESRCH;
     }
   } else {
-    int r = process_kill(pid);
-    tf->regs[0] = r < 0 ? -ESRCH : r;
+    /* P5 (D9): signal semantics — dispositions decide; default kills. */
+    int r = process_signal(pid, sig);
+    tf->regs[0] = (uint64_t)(int64_t)r;
+    /* If the default action just killed the CALLER's own group, do not
+       return to a released image: schedule away now (never returns). */
+    struct process *cur = current_process();
+    if (cur && process_group(cur)->state == PROC_STATE_EXITED)
+      schedule(tf, 0);
   }
 }
 
@@ -1276,6 +1373,12 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_thread_exit(tf);
     } else if (syscall_num == SYS_SET_TLS) {
       sys_set_tls(tf);
+    } else if (syscall_num == SYS_SIGACTION) {
+      sys_sigaction(tf);
+    } else if (syscall_num == SYS_SIGRETURN) {
+      tf->regs[0] = (uint64_t)(int64_t)process_sigreturn(tf);
+    } else if (syscall_num == SYS_GETENV) {
+      sys_getenv(tf);
     } else {
       uart_puts("Unknown System Call Invoked!\n");
       tf->regs[0] = -ENOSYS;

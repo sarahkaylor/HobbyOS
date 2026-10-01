@@ -64,25 +64,49 @@ extern "C" {
   int kill(int pid, int sig);
   int raise(int sig);
 
-  /* POSIX sigaction surface.  Like signal() above, handlers are only
-   * remembered, never delivered (Phase 6); enough for ported programs that
-   * install handlers defensively (nano masks SIGINT/SIGWINCH to keep the
-   * terminal sane).  The flags below exist so code compiles; they have no
-   * effect. */
+  /* POSIX sigaction surface.  P5 upgrade (OQ4): Linux-compatible layout —
+   * the handler/sigaction union at offset 0, sa_mask, sa_flags, and
+   * sa_restorer at offset 32 (struct size 40; the kernel marshals these
+   * fields by offset).  Delivery: dispositions live in the kernel (row
+   * 83); SIGCHLD/SIGPIPE/SIGTERM handlers actually run (P5 engine), while
+   * fault-class (SEGV/BUS/ILL/ABRT) and SIGUSR1/SIGUSR2 handlers are
+   * accepted-and-recorded but never invoked (documented divergence, the
+   * fault's default action still kills + reports).  sigprocmask and
+   * pthread_sigmask are no-ops returning 0 (no per-thread masks yet). */
   typedef struct {
     unsigned long __bits[2];
   } sigset_t;
 
+  /* Minimal siginfo_t (glibc-sized: 128 bytes).  Only si_signo, si_code,
+   * si_pid and si_status are meaningful today (a one-argument handler sees
+   * none of it; SA_SIGINFO handlers are not invoked). */
+  typedef struct {
+    int si_signo;
+    int si_errno;
+    int si_code;
+    int __pad0;
+    int si_pid;   /* SIGCHLD: the child that died */
+    unsigned int si_uid;
+    int si_status; /* SIGCHLD: the child's exit status */
+    int __pad1;
+    long __pad2[12];
+  } siginfo_t;
+
   struct sigaction {
-    void (*sa_handler)(int);
+    union {
+      void (*sa_handler)(int);
+      void (*sa_sigaction)(int, siginfo_t *, void *);
+    };
     sigset_t sa_mask;
     int sa_flags;
+    void (*sa_restorer)(void);
   };
 
-  /* No-op flag values (delivery does not exist yet). */
+  /* Flag values (delivery honours the disposition, not the flags). */
 #define SA_RESTART   0x1
 #define SA_RESETHAND 0x2
 #define SA_SIGINFO   0x4
+#define SA_RESTORER  0x04000000 /* libc always fills sa_restorer anyway */
 
 #define SIG_BLOCK   0
 #define SIG_UNBLOCK 1
