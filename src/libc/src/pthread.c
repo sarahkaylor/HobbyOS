@@ -24,6 +24,7 @@
 #include "errno.h"
 #include "time.h"
 #include "unistd.h"
+#include <sys/mman.h>
 
 #define HO_PTHREAD_KEYS 128
 #define HO_PTHREAD_STACK_DEFAULT (256u * 1024u)
@@ -38,6 +39,7 @@ struct __ho_tcb {
   struct __ho_tcb *dead_next;
   void *stack_base;
   size_t stack_size;
+  int stack_mmap;         /* P2.4 (S4): stack_base came from mmap+guard  */
   void *keys[HO_PTHREAD_KEYS];
 };
 
@@ -48,6 +50,37 @@ static __thread struct __ho_tcb *tp_self;
 
 /* Static TCB for the main thread (never freed). */
 static struct __ho_tcb main_tcb;
+
+/* ---- thread stacks (P2.4/S4, design section 6.2) ------------------------ *
+ * A thread stack is mmap(STACK_SIZE + 4 KiB) with the LOW page protected
+ * PROT_NONE: the stack grows down into the guard, and an overflow faults
+ * (`in=PROT` in the kernel report, v2 processes) killing only the faulting
+ * process.  When the mmap path is unavailable (v1 anon-map table full), a
+ * malloc'd stack is the fallback (no guard; the pre-S4 behavior). */
+#define HO_PTHREAD_GUARD 4096
+
+static void *ho_stack_alloc(size_t stack_size, int *is_mmap) {
+  *is_mmap = 0;
+  void *st = mmap(0, stack_size + HO_PTHREAD_GUARD, PROT_READ | PROT_WRITE,
+                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (st != MAP_FAILED) {
+    if (mprotect(st, HO_PTHREAD_GUARD, PROT_NONE) == 0) {
+      *is_mmap = 1; /* usable stack: [st+GUARD, st+GUARD+stack_size) */
+      return st;
+    }
+    munmap(st, stack_size + HO_PTHREAD_GUARD);
+  }
+  return malloc(stack_size);
+}
+
+static void ho_stack_free(void *base, size_t stack_size, int is_mmap) {
+  if (!base)
+    return;
+  if (is_mmap)
+    munmap(base, stack_size + HO_PTHREAD_GUARD);
+  else
+    free(base);
+}
 
 /* ---- detached-thread reaper --------------------------------------------- */
 
@@ -76,7 +109,7 @@ static void ho_pthread_reap(void) {
   while (list) {
     struct __ho_tcb *n = list->dead_next;
     if (list->stack_base)
-      free(list->stack_base);
+      ho_stack_free(list->stack_base, list->stack_size, list->stack_mmap);
     free(list);
     list = n;
   }
@@ -150,7 +183,8 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
   struct __ho_tcb *t = (struct __ho_tcb *)calloc(1, sizeof(*t));
   if (!t)
     return 12; /* ENOMEM */
-  void *stack = malloc(stack_size);
+  int stack_is_mmap = 0;
+  void *stack = ho_stack_alloc(stack_size, &stack_is_mmap);
   if (!stack) {
     free(t);
     return 12; /* ENOMEM */
@@ -202,10 +236,13 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
   t->detach = detached;
   t->stack_base = stack;
   t->stack_size = stack_size;
+  t->stack_mmap = stack_is_mmap;
   t->tid = 1;      /* sentinel: not-yet-published (joiners park on it) */
   *thread = t;     /* publish before the call (design: init; publish; create) */
 
-  uint64_t stack_top = ((uint64_t)stack + stack_size) & ~(uint64_t)15;
+  uint64_t stack_top = ((uint64_t)stack +
+                        (stack_is_mmap ? HO_PTHREAD_GUARD : 0) + stack_size) &
+                       ~(uint64_t)15;
   /* Absorb transient slot pressure.  A just-exited thread's PCB slot drains
    * within a tick, and a busy wave can momentarily hold every slot while its
    * programs exit -- the same condition C callers retry via their own
@@ -227,7 +264,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
   if (rc < 0) {
     *thread = 0;
     free(tls_mem);
-    free(stack);
+    ho_stack_free(stack, stack_size, stack_is_mmap);
     free(t);
     return (rc == -11 /* -EAGAIN */) ? 11 : 12;
   }
@@ -309,7 +346,7 @@ int pthread_join(pthread_t thread, void **retval) {
   if (retval)
     *retval = t->retval;
   if (t->stack_base)
-    free(t->stack_base);
+    ho_stack_free(t->stack_base, t->stack_size, t->stack_mmap);
   free(t);
   return 0;
 }

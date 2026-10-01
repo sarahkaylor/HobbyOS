@@ -27,6 +27,19 @@
 
 #define MAP_FAILED ((void *)-1)
 
+/* P2.4 (S4): memfd_create(2) flags (Linux values; MFD_CLOEXEC is
+ * recorded, MFD_ALLOW_SEALING arms fcntl(F_ADD_SEALS)). */
+#define MFD_CLOEXEC       0x0001U
+#define MFD_ALLOW_SEALING 0x0002U
+
+/* madvise advice (MADV_DONTNEED/MADV_FREE zap; the rest is ignored). */
+#define MADV_NORMAL     0
+#define MADV_RANDOM     1
+#define MADV_SEQUENTIAL 2
+#define MADV_WILLNEED   3
+#define MADV_DONTNEED   4
+#define MADV_FREE       8
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -34,6 +47,9 @@ extern "C" {
   void *mmap(void *addr, size_t length, int prot, int flags, int fd,
              off_t offset);
   int munmap(void *addr, size_t length);
+  int mprotect(void *addr, size_t len, int prot);
+  int madvise(void *addr, size_t len, int advice);
+  int memfd_create(const char *name, unsigned int flags);
 
 #ifdef __cplusplus
 }
