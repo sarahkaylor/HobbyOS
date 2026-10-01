@@ -141,8 +141,11 @@ struct fd_set_k {
 #define K_SO_REUSEADDR 2
 #define K_SO_TYPE      3
 #define K_SO_ERROR     4
+#define K_F_GETFD      1
+#define K_F_SETFD      2
 #define K_F_GETFL      3
 #define K_F_SETFL      4
+#define K_FD_CLOEXEC   1
 #define K_O_NONBLOCK   0x800
 
 /* SYS_SOCKET: create a socket and install it in the process fd table.

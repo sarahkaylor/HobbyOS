@@ -295,6 +295,25 @@ int file_socket_connect(struct process *p, int fd, uint32_t ip_be,
 }
 
 int file_fcntl(struct process *p, int fd, int cmd, int arg) {
+  /* P5 (D3.2; the consented fd_cloexec block): F_GETFD/F_SETFD operate on
+     ANY open fd and read/write bit 0 of the group's fd_cloexec mask
+     (bit i = fd i is closed at exec).  Every fd slot this module hands
+     out or frees (open/dup/dup2/close) keeps the mask bit clear, so a
+     freshly returned fd is never accidentally CLOEXEC. */
+  if (cmd == K_F_GETFD || cmd == K_F_SETFD) {
+    struct process *g = process_group(p);
+    if (!g || fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
+    int g_fd = g->open_fds[fd];
+    if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
+    if (cmd == K_F_GETFD)
+      return (int)((g->fd_cloexec >> fd) & 1u);
+    if (arg & K_FD_CLOEXEC)
+      g->fd_cloexec |= (1u << fd);
+    else
+      g->fd_cloexec &= ~(1u << fd);
+    return 0;
+  }
+
   int err = 0;
   struct file *f = f1_socket_file(p, fd, &err);
   if (!f) return -err;
@@ -715,6 +734,7 @@ int file_close(struct process *cur, int fd) {
   spinlock_release_irqrestore(&f->lock, flags);
 
   cur->open_fds[fd] = -1;
+  cur->fd_cloexec &= ~(1u << fd); /* P5 (D3.2): closing discards fd flags */
   cur->num_open_fds--;
   return 0;
 }
@@ -744,6 +764,7 @@ int file_dup(struct process *cur, int fd) {
         or closing the duplicate makes readers see EOF while refs remain */
   spinlock_release_irqrestore(&f->lock, flags);
   cur->open_fds[newfd] = g_fd;
+  cur->fd_cloexec &= ~(1u << newfd); /* P5 (D3.2): dup clears CLOEXEC */
   cur->num_open_fds++;
   return newfd;
 }
@@ -770,6 +791,7 @@ int file_dup2(struct process *cur, int oldfd, int newfd) {
         end's per-fd count aligned with ref_count */
   spinlock_release_irqrestore(&f->lock, flags);
   cur->open_fds[newfd] = g_fd;
+  cur->fd_cloexec &= ~(1u << newfd); /* P5 (D3.2): dup2 clears CLOEXEC */
   cur->num_open_fds++;
   return newfd;
 }

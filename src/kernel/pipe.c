@@ -1,6 +1,7 @@
 #include "pipe.h"
 #include "process.h"
 #include "lock.h"
+#include "errno.h"
 
 extern void print_int(int val);
 #include "fs.h"
@@ -221,14 +222,30 @@ int pipe_write(struct pipe *p, const void *buf, int n, struct trap_frame *tf) {
 
     uint64_t flags = spinlock_acquire_irqsave(&p->lock);
     if (p->reader_count == 0) {
-      // No readers left
-      uart_puts("[PIPE_WRITE_ERR] PID ");
-      if (cur) print_int(cur->pid);
-      uart_puts(" pipe ");
-      uart_print_hex((uint64_t)p);
-      uart_puts(" reader_count is 0!\n");
+      // No readers left.  P5 (D10): the write fails -EPIPE and SIGPIPE is
+      // raised against the writer's group -- SIG_IGN survives (the WebKit
+      // child's disposition), a handler records pending, and the default
+      // action kills the writing group with WTERMSIG 13.  The diagnostic
+      // is rate-limited: the ignore case is legitimate and the old
+      // once-per-write print was noisy.
       spinlock_release_irqrestore(&p->lock, flags);
-      return -1;
+      static int epipe_reports = 0;
+      if (epipe_reports < 5) {
+        epipe_reports++;
+        uart_puts("[PIPE_WRITE_EPIPE] PID ");
+        if (cur) print_int(cur->pid);
+        uart_puts(" pipe ");
+        uart_print_hex((uint64_t)p);
+        uart_puts(" reader_count is 0\n");
+      }
+      if (signal_epipe(cur ? process_group(cur) : 0)) {
+        /* Default disposition: the writer's group was just killed and its
+           memory released.  Never return to a released image -- yield the
+           CPU now; the process does not come back. */
+        if (tf)
+          schedule(tf, 0);
+      }
+      return -EPIPE;
     }
 
     int woke_readers = 0;

@@ -3,6 +3,7 @@
 #include "unit_test.h"
 #include "process.h"
 #include "errno.h"
+#include "fs.h"
 
 extern void uart_puts(const char* s);
 
@@ -311,6 +312,306 @@ static void test_process_set_tls(void) {
   process_free(lid);
 }
 
+/* ---------------------------------------------------------------------
+ * P5 (docs/browser/p5-exec-signals-design.md): signals, kill, SIGPIPE.
+ * ------------------------------------------------------------------- */
+
+/* Row-83 storage side: validation, storage, query-back. */
+static void test_p5_sigaction_storage(void) {
+  tests_run++;
+  uart_puts("  Running test_p5_sigaction_storage...\n");
+
+  int pid = process_create();
+  EXPECT_EQ((pid >= 0 && pid < MAX_PROCESSES), 1);
+  int old_pid = cpu_current_pids[0];
+  set_current_process_pid(0, pid);
+  struct process *p = process_group(process_get_pcb(pid));
+
+  struct ho_sigaction act = {0}, old = {0};
+
+  /* range + reserved-signal rejections (D6/D7) */
+  EXPECT_EQ(process_sigaction(0, 0, 0), -EINVAL);
+  EXPECT_EQ(process_sigaction(HO_SIG_MAX, 0, 0), -EINVAL);
+  EXPECT_EQ(process_sigaction(HO_SIGKILL, 0, 0), -EINVAL);
+  EXPECT_EQ(process_sigaction(HO_SIGSTOP, 0, 0), -EINVAL);
+
+  /* a real handler needs a valid in-region restorer */
+  act.sa_handler = USER_VIRT_BASE + 0x1000;
+  act.sa_restorer = 0;
+  EXPECT_EQ(process_sigaction(HO_SIGPIPE, &act, 0), -EINVAL);
+  act.sa_restorer = USER_VIRT_BASE + 0x2000;
+  EXPECT_EQ(process_sigaction(HO_SIGPIPE, &act, 0), 0);
+  EXPECT_EQ((p->sig_handler[HO_SIGPIPE] == USER_VIRT_BASE + 0x1000), 1);
+  EXPECT_EQ((p->sig_restorer == USER_VIRT_BASE + 0x2000), 1);
+
+  /* query form returns what was stored */
+  EXPECT_EQ(process_sigaction(HO_SIGPIPE, 0, &old), 0);
+  EXPECT_EQ((old.sa_handler == USER_VIRT_BASE + 0x1000), 1);
+  EXPECT_EQ((old.sa_restorer == USER_VIRT_BASE + 0x2000), 1);
+  EXPECT_EQ(old.sa_flags, 0);
+
+  /* SIG_IGN needs no restorer; SIG_DFL clears */
+  act.sa_handler = HO_SIG_IGN;
+  act.sa_restorer = 0;
+  EXPECT_EQ(process_sigaction(HO_SIGPIPE, &act, 0), 0);
+  EXPECT_EQ((p->sig_handler[HO_SIGPIPE] == HO_SIG_IGN), 1);
+  act.sa_handler = HO_SIG_DFL;
+  EXPECT_EQ(process_sigaction(HO_SIGPIPE, &act, 0), 0);
+  EXPECT_EQ(p->sig_handler[HO_SIGPIPE], 0);
+
+  set_current_process_pid(0, old_pid);
+  process_free(pid);
+}
+
+/* Row-16 semantics (D9): validation, ESRCH, disposition outcomes. */
+static void test_p5_kill_semantics(void) {
+  tests_run++;
+  uart_puts("  Running test_p5_kill_semantics...\n");
+
+  int pid = process_create();
+  struct process *p = process_get_pcb(pid);
+  EXPECT_EQ((p != 0), 1);
+
+  /* unknown numbers -> -EINVAL (D6); missing target -> -ESRCH */
+  EXPECT_EQ(process_signal(pid, 3), -EINVAL); /* SIGQUIT is not in the set */
+  EXPECT_EQ(process_signal(pid, 40), -EINVAL);
+  EXPECT_EQ(process_signal(999999, HO_SIGTERM), -ESRCH);
+  EXPECT_EQ(process_signal(pid, 0), -EINVAL); /* sig 0 is the trap-layer check */
+
+  /* handler disposition: accepted-and-recorded, group survives */
+  p->sig_handler[HO_SIGTERM] = USER_VIRT_BASE + 0x4000;
+  EXPECT_EQ(process_signal(pid, HO_SIGTERM), 0);
+  EXPECT_EQ((p->sig_pending & (1u << (HO_SIGTERM - 1))) != 0, 1);
+  EXPECT_EQ((p->state != PROC_STATE_EXITED), 1);
+
+  /* SIG_IGN: no-op, no pending */
+  p->sig_pending = 0;
+  p->sig_handler[HO_SIGTERM] = HO_SIG_IGN;
+  EXPECT_EQ(process_signal(pid, HO_SIGTERM), 0);
+  EXPECT_EQ(p->sig_pending, 0);
+
+  /* default: immediate group kill with a signal-shaped status byte */
+  p->sig_handler[HO_SIGTERM] = HO_SIG_DFL;
+  EXPECT_EQ(process_signal(pid, HO_SIGTERM), 0);
+  EXPECT_EQ(p->state, PROC_STATE_EXITED);
+  EXPECT_EQ(p->exit_status, HO_SIGTERM);
+
+  process_free(pid);
+}
+
+/* D10: the write-side SIGPIPE disposition matrix. */
+static void test_p5_sigpipe_semantics(void) {
+  tests_run++;
+  uart_puts("  Running test_p5_sigpipe_semantics...\n");
+
+  int pid = process_create();
+  struct process *p = process_group(process_get_pcb(pid));
+
+  /* SIG_IGN (the WebKit child): -EPIPE keeps flowing, group survives */
+  p->sig_handler[HO_SIGPIPE] = HO_SIG_IGN;
+  EXPECT_EQ(signal_epipe(p), 0);
+  EXPECT_EQ(p->sig_pending, 0);
+  EXPECT_EQ((p->state != PROC_STATE_EXITED), 1);
+
+  /* real handler: pending bit set, survives */
+  p->sig_handler[HO_SIGPIPE] = USER_VIRT_BASE + 0x3000;
+  EXPECT_EQ(signal_epipe(p), 0);
+  EXPECT_EQ((p->sig_pending & (1u << (HO_SIGPIPE - 1))) != 0, 1);
+
+  /* default: the writer's group dies immediately, WTERMSIG = SIGPIPE */
+  p->sig_handler[HO_SIGPIPE] = HO_SIG_DFL;
+  p->sig_pending = 0;
+  EXPECT_EQ(signal_epipe(p), 1);
+  EXPECT_EQ(p->state, PROC_STATE_EXITED);
+  EXPECT_EQ(p->exit_status, HO_SIGPIPE);
+
+  process_free(pid);
+}
+
+/* Row-85 storage side: env blob readback + truncation contract. */
+static void test_p5_env_readback(void) {
+  tests_run++;
+  uart_puts("  Running test_p5_env_readback...\n");
+
+  int pid = process_create();
+  struct process *p = process_group(process_get_pcb(pid));
+
+  EXPECT_EQ(sys_readenv(p, -1, 0, 0), 0); /* empty set */
+  EXPECT_EQ(sys_readenv(p, 0, 0, 0), -EINVAL);
+
+  const char blob[] = "A=1\0B=22";
+  for (unsigned i = 0; i < sizeof(blob); i++)
+    p->env[i] = blob[i];
+  p->envc = 2;
+
+  EXPECT_EQ(sys_readenv(p, -1, 0, 0), 2);
+
+  char buf[16];
+  int len = sys_readenv(p, 0, buf, sizeof(buf));
+  EXPECT_EQ(len, 3);
+  EXPECT_EQ(buf[0], 'A');
+  EXPECT_EQ(buf[2], '1');
+  EXPECT_EQ(buf[3], '\0');
+  len = sys_readenv(p, 1, buf, sizeof(buf));
+  EXPECT_EQ(len, 4);
+  EXPECT_EQ(buf[1], '=');
+  EXPECT_EQ(buf[3], '2');
+  EXPECT_EQ(sys_readenv(p, 2, buf, sizeof(buf)), -EINVAL);
+
+  /* truncation: size clamps and still NUL-terminates */
+  len = sys_readenv(p, 1, buf, 3);
+  EXPECT_EQ(len, 2);
+  EXPECT_EQ(buf[2], '\0');
+
+  process_free(pid);
+}
+
+/* D5.3/D5.4: unified reap delivery on the KILL path -- a parent parked in
+ * WAIT_CHILD wakes with the status when a third party kills the child
+ * (the confirmed wakeup gap), and SIGCHLD goes pending. */
+static void test_p5_reap_delivery_on_kill(void) {
+  tests_run++;
+  uart_puts("  Running test_p5_reap_delivery_on_kill...\n");
+
+  int ppid = process_create();
+  int ppid2 = process_create();
+  int cpid = process_create();
+  EXPECT_EQ((ppid >= 0 && ppid2 >= 0 && cpid >= 0), 1);
+  struct process *parent = process_get_pcb(ppid);
+  struct process *parent2 = process_get_pcb(ppid2);
+  struct process *child = process_get_pcb(cpid);
+
+  child->parent_pid = ppid;
+  /* Park both parents; #1 wants exactly this child, #2 wants another pid. */
+  parent->state = PROC_STATE_WAIT_CHILD;
+  parent->context[0] = cpid;
+  parent->context[1] = USER_VIRT_BASE + 0x120;
+  parent2->state = PROC_STATE_WAIT_CHILD;
+  parent2->context[0] = 9999;
+
+  /* Third-party default kill (SIGTERM without a handler). */
+  EXPECT_EQ(process_signal(cpid, HO_SIGTERM), 0);
+
+  /* Parent #1 woke with the reap result; the status word landed in its
+     region; the zombie slot was delivered (FREE). */
+  EXPECT_EQ(parent->state, PROC_STATE_READY);
+  EXPECT_EQ((int)parent->context[0], cpid);
+  EXPECT_EQ(child->state, PROC_STATE_FREE);
+  EXPECT_EQ(*(int *)(parent->user_phys_base + 0x120), HO_SIGTERM);
+  EXPECT_EQ((parent->sig_pending & (1u << (HO_SIGCHLD - 1))) != 0, 1);
+
+  /* Parent #2 was waiting for a different pid: still parked. */
+  EXPECT_EQ(parent2->state, PROC_STATE_WAIT_CHILD);
+
+  process_free(ppid2);
+  process_free(ppid);
+  process_free(cpid);
+}
+
+/* D5.1/D5.7: waitpid option validation, EFAULT, and the WNOHANG reap. */
+static void test_p5_waitpid_validation(void) {
+  tests_run++;
+  uart_puts("  Running test_p5_waitpid_validation...\n");
+
+  int ppid = process_create();
+  int old_pid = cpu_current_pids[0];
+  set_current_process_pid(0, ppid);
+
+  struct trap_frame tf;
+  for (unsigned i = 0; i < sizeof(tf) / sizeof(uint64_t); i++)
+    ((uint64_t *)&tf)[i] = 0;
+
+  /* unknown option bits -> -EINVAL (before any child scan) */
+  tf.regs[0] = -1;
+  tf.regs[1] = USER_VIRT_BASE + 0x200;
+  tf.regs[2] = 4;
+  EXPECT_EQ(process_waitpid(&tf), -EINVAL);
+
+  /* out-of-region status pointer -> -EFAULT */
+  tf.regs[2] = 0;
+  tf.regs[1] = 0x1000;
+  EXPECT_EQ(process_waitpid(&tf), -EFAULT);
+
+  /* no children at all -> -ECHILD; WUNTRACED is accepted (ignored) */
+  tf.regs[1] = USER_VIRT_BASE + 0x200;
+  tf.regs[2] = 1;
+  EXPECT_EQ(process_waitpid(&tf), -ECHILD);
+  tf.regs[2] = 1 | 2;
+  EXPECT_EQ(process_waitpid(&tf), -ECHILD);
+
+  /* an EXITED child reaps via WNOHANG (status ptr NULL: the write itself
+     is covered by the kill-path test above and by PROC_T on device) */
+  int cpid = process_create();
+  struct process *ch = process_get_pcb(cpid);
+  ch->parent_pid = ppid;
+  ch->state = PROC_STATE_EXITED;
+  ch->exit_status = 42 << 8;
+  tf.regs[0] = -1;
+  tf.regs[1] = 0;
+  tf.regs[2] = 1;
+  EXPECT_EQ(process_waitpid(&tf), cpid);
+  EXPECT_EQ(ch->state, PROC_STATE_FREE);
+
+  set_current_process_pid(0, old_pid);
+  process_free(ppid);
+}
+
+/* S4 (D3): envp pointer validation (the full round-trip needs real user
+ * VAs and lives in PROC_T), the exec apply (env reset, dispositions,
+ * FD_CLOEXEC sweep) and the fcntl FD bits. */
+static void test_p5_exec_env_and_apply(void) {
+  tests_run++;
+  uart_puts("  Running test_p5_exec_env_and_apply...\n");
+
+  int pid = process_create();
+  EXPECT_EQ((pid >= 0 && pid < MAX_PROCESSES), 1);
+  struct process *p = process_group(process_get_pcb(pid));
+
+  /* envp == NULL -> empty blob, count 0; bad array pointer -> -1 */
+  char blob[HO_ENV_LEN];
+  int cnt = -1;
+  EXPECT_EQ(process_read_envp(p, 0, blob, HO_ENV_LEN, &cnt), 0);
+  EXPECT_EQ(cnt, 0);
+  EXPECT_EQ(blob[0], '\0');
+  EXPECT_EQ(process_read_envp(p, (const char *const *)0x1000, blob,
+                               HO_ENV_LEN, &cnt), -1);
+
+  /* Two open fds, first CLOEXEC via fcntl(F_SETFD). */
+  int old_pid = cpu_current_pids[0];
+  set_current_process_pid(0, pid);
+  int fd1 = file_open(p, "TEST.TXT", 0);
+  int fd2 = file_open(p, "TEST.TXT", 0);
+  EXPECT_EQ((fd1 >= 0 && fd2 >= 0), 1);
+  EXPECT_EQ(file_fcntl(p, fd1, K_F_GETFD, 0), 0);
+  EXPECT_EQ(file_fcntl(p, fd1, K_F_SETFD, K_FD_CLOEXEC), 0);
+  EXPECT_EQ(file_fcntl(p, fd1, K_F_GETFD, 0), 1);
+  EXPECT_EQ(file_fcntl(p, fd2, K_F_GETFD, 0), 0);
+
+  /* Dispositions: caught -> DFL, ignored stays ignored, pending cleared. */
+  p->sig_handler[HO_SIGTERM] = USER_VIRT_BASE + 0x5000;
+  p->sig_handler[HO_SIGINT] = HO_SIG_IGN;
+  p->sig_pending = 0xFFFFFFFFu;
+
+  const char envblob[] = "A=1\0B=22\0";
+  process_exec_apply(p, envblob, 2);
+
+  EXPECT_EQ((p->fd_cloexec & (1u << fd1)) != 0, 0); /* bit cleared */
+  EXPECT_EQ(p->open_fds[fd1], -1);                  /* sweep closed it */
+  EXPECT_EQ((p->open_fds[fd2] != -1), 1);           /* others survive */
+  EXPECT_EQ(p->envc, 2);
+  EXPECT_EQ(p->env[0], 'A');
+  EXPECT_EQ(p->env[2], '1');
+  EXPECT_EQ(p->env[4], 'B');
+  EXPECT_EQ(p->sig_handler[HO_SIGTERM], 0);           /* caught -> DFL */
+  EXPECT_EQ(p->sig_handler[HO_SIGINT], HO_SIG_IGN);   /* ignored stays */
+  EXPECT_EQ(p->sig_pending, 0);
+  EXPECT_EQ(sys_readenv(p, -1, 0, 0), 2);
+
+  file_close(p, fd2);
+  set_current_process_pid(0, old_pid);
+  process_free(pid);
+}
+
 void process_test_suite(void) {
   uart_puts("process_test_suite:\n");
   test_process_init_and_create();
@@ -321,6 +622,13 @@ void process_test_suite(void) {
   test_process_thread_slot_reclaim();
   test_process_futex_machine();
   test_process_set_tls();
+  test_p5_sigaction_storage();
+  test_p5_kill_semantics();
+  test_p5_sigpipe_semantics();
+  test_p5_env_readback();
+  test_p5_reap_delivery_on_kill();
+  test_p5_waitpid_validation();
+  test_p5_exec_env_and_apply();
 }
 
 #endif // KERNEL_MODE_UNIT_TEST

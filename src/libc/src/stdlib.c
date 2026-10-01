@@ -25,6 +25,36 @@
 #include "string.h"
 #include "fcntl.h"
 #include "unistd.h"
+#include "syscall.h"
+
+/* Dual-arch 4-arg syscall helper, matching user/libc.c's ABI
+ * (aarch64: x8=num, x0..x3; x86_64: rax=num, rdi,rsi,rdx,r10).  Device
+ * builds only -- used by the P5 getenv row-85 bridge below. */
+static long hb_syscall4(long num, long a0, long a1, long a2, long a3) {
+#ifdef __x86_64__
+  long ret;
+  register long rdi __asm__("rdi") = a0;
+  register long rsi __asm__("rsi") = a1;
+  register long rdx __asm__("rdx") = a2;
+  register long r10 __asm__("r10") = a3;
+  __asm__ volatile("syscall\n"
+                   : "=a"(ret)
+                   : "a"(num), "r"(rdi), "r"(rsi), "r"(rdx), "r"(r10)
+                   : "rcx", "r11", "memory");
+  return ret;
+#else
+  register long x8 __asm__("x8") = num;
+  register long x0 __asm__("x0") = a0;
+  register long x1 __asm__("x1") = a1;
+  register long x2 __asm__("x2") = a2;
+  register long x3 __asm__("x3") = a3;
+  __asm__ volatile("svc #0\n"
+                   : "=r"(x0)
+                   : "r"(x8), "r"(x0), "r"(x1), "r"(x2), "r"(x3)
+                   : "memory");
+  return x0;
+#endif
+}
 #endif
 
 #ifdef HOST_TEST
@@ -420,6 +450,27 @@ static int hb_name_has_eq(const char *name) {
 }
 
 char *getenv(const char *name) {
+#ifndef HOST_TEST
+  /* P5 S4 minimal device bridge: with no environ table yet (the L3
+     environ build-out owns that), read the kernel env blob through
+     SYS_GETENV (row 85) and return a pointer into a static scratch
+     buffer.  Single-value lifetime, like many embedded getenvs. */
+  if (!environ && name && name[0]) {
+    static char gbuf[128];
+    long count = hb_syscall4(SYS_GETENV, -1, 0, 0, 0);
+    size_t nlen = hb_strlen(name);
+    for (long i = 0; i < count; i++) {
+      long len = hb_syscall4(SYS_GETENV, i, (long)gbuf, (long)sizeof(gbuf), 0);
+      if (len <= 0) continue;
+      const char *e = gbuf;
+      const char *n = name;
+      while (*n && *e == *n) { e++; n++; }
+      if (*n == '\0' && *e == '=')
+        return gbuf + nlen + 1;
+    }
+    return 0;
+  }
+#endif
   int i = hb_env_find(name);
   if (i < 0 || !environ) return 0;
   return environ[i] + (hb_strlen(name) + 1);

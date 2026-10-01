@@ -122,6 +122,17 @@ void process_init(void) {
     proc_table[i].tls_base = 0;
     proc_table[i].futex_uaddr = 0;
     proc_table[i].thread_ret = 0;
+    /* P5 (D7): signal/env state on every slot ("" env = empty set, no
+       pending, all dispositions default). */
+    proc_table[i].env[0] = '\0';
+    proc_table[i].envc = 0;
+    proc_table[i].sig_pending = 0;
+    proc_table[i].sig_restorer = 0;
+    proc_table[i].sig_in_handler = 0;
+    proc_table[i].sig_frame = 0;
+    for (int j = 0; j < HO_SIG_MAX; j++) {
+      proc_table[i].sig_handler[j] = 0;
+    }
     for (int j = 0; j < MAX_OPEN_FDS; j++) {
       proc_table[i].open_fds[j] = -1;
     }
@@ -330,6 +341,82 @@ static int group_claims_pending(struct process *grp, struct process *self) {
   return pending;
 }
 
+/* ---------------------------------------------------------------------------
+ * P5 (D5.3/D5.4/D5.6): unified reap delivery + slot forensics.
+ * ------------------------------------------------------------------------- */
+
+/* D5.6: zombie accounting for the pressure forensics.  "zombie" = an
+ * EXITED leader still waiting to be reaped by a live parent ("UI process
+ * stopped reaping" is this number climbing).  Diagnostic only: unlocked
+ * reads, called on exhaustion paths. */
+static int zombie_slots_count(int *exited_out) {
+  int z = 0, e = 0;
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    if (proc_table[i].state != PROC_STATE_EXITED)
+      continue;
+    e++;
+    int par = proc_table[i].parent_pid;
+    if (par > 0 && par < MAX_PROCESSES)
+      z++;
+  }
+  if (exited_out)
+    *exited_out = e;
+  return z;
+}
+
+/* D5.7: the reap status word goes into the PARENT's memory while this
+ * runs on the dying child's context.  v1: translation via user_phys_base
+ * (same shape as before); v2: the page was materialized by
+ * process_user_ok() above, bytes land through vm_kwrite. */
+static void reap_status_write(struct process *parent, uint64_t va, int st) {
+  if (parent->as) {
+    vm_kwrite(parent, va, &st, 4);
+    return;
+  }
+  uint64_t off = va - USER_VIRT_BASE;
+  if (off + 4 <= USER_REGION_SIZE && parent->user_phys_base)
+    *(int *)(parent->user_phys_base + off) = st;
+}
+
+/* D5.3/D5.4: THE unified child-death delivery -- called from every death
+ * path (group_teardown for normal exit/exit_group, process_kill_group_sig
+ * for kill/fatal signals).  Wakes a parent parked in WAIT_CHILD (matched
+ * on the pid its saved context requested), writes the status word, flips
+ * the zombie to FREE on delivery, and sets SIGCHLD pending on the parent
+ * group.  Caller holds proc_lock; never blocks, O(slots). */
+static void reap_deliver_locked(struct process *grp) {
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *parent = &proc_table[i];
+    if (parent->state != PROC_STATE_WAIT_CHILD ||
+        process_group(parent)->pid != grp->parent_pid)
+      continue;
+    int want = (int)parent->context[0];
+    if (want > 0 && want != grp->pid)
+      continue;
+    parent->context[0] = grp->pid;         /* waitpid return value */
+    uint64_t stp = (uint64_t)parent->context[1]; /* saved arg1 */
+    if (stp) {
+      /* D5.7/OQ5: route the user-range check through P2's helper
+         (materializes for v2), then write cross-context. */
+      if (process_user_ok(parent, stp, 4, 1) == 0)
+        reap_status_write(parent, stp, grp->exit_status);
+    }
+    parent->state = PROC_STATE_READY;
+    /* Deliver the reap: the anchor's PCB slot is now reusable. */
+    grp->state = PROC_STATE_FREE;
+    grp->exit_status = 0;
+  }
+  /* D5.4/D8.3: SIGCHLD pending on the parent group so both routes (GLib
+     handler, own reaper) observe the death promptly.  Delivery (handler
+     invocation) is S3; the bit is recorded either way. */
+  int pp = grp->parent_pid;
+  if (pp > 0 && pp < MAX_PROCESSES) {
+    struct process *pgp = process_group(&proc_table[pp]);
+    if (pgp->state != PROC_STATE_FREE)
+      pgp->sig_pending |= (1u << (HO_SIGCHLD - 1));
+  }
+}
+
 /* Group teardown (design section 1): release the shared resources exactly
  * once -- close the group fd table, free the physical block, turn the anchor
  * into a reapable zombie (EXITED; straight to FREE when a parent was already
@@ -386,29 +473,11 @@ static void group_teardown(struct process *grp, uint64_t code) {
      parent's saved context still holds the syscall args (context[0] = the
      requested pid, context[1] = the status pointer), so a pid-specific wait
      is matched and the user status is filled in place -- through the
-     PARENT'S physical region (this runs on the dying group's context, so a
-     user-virtual write would land in the wrong block). */
-  for (int i = 0; i < MAX_PROCESSES; i++) {
-    struct process *parent = &proc_table[i];
-    if (parent->state != PROC_STATE_WAIT_CHILD ||
-        process_group(parent)->pid != grp->parent_pid)
-      continue;
-    int want = (int)parent->context[0];
-    if (want > 0 && want != grp->pid)
-      continue;
-    parent->context[0] = grp->pid;         /* waitpid return value */
-    int *stp = (int *)parent->context[1];  /* saved arg1: status ptr */
-    if (stp && (uint64_t)stp >= USER_VIRT_BASE) {
-      uint64_t off = (uint64_t)stp - USER_VIRT_BASE;
-      if (off + 4 <= USER_REGION_SIZE && parent->user_phys_base) {
-        *(int *)(parent->user_phys_base + off) = grp->exit_status;
-      }
-    }
-    parent->state = PROC_STATE_READY;
-    /* Deliver the reap: the anchor's PCB slot is now reusable. */
-    grp->state = PROC_STATE_FREE;
-    grp->exit_status = 0;
-  }
+     PARENT'S mapping (this runs on the dying group's context, so a
+     user-virtual write would land in the wrong block).  P5 (D5.3/D5.4):
+     this is now the shared reap_deliver_locked helper, also called from
+     the kill path -- the confirmed third-party-kill wakeup gap. */
+  reap_deliver_locked(grp);
   spinlock_release_irqrestore(&proc_lock, flags);
 }
 
@@ -544,7 +613,15 @@ static int process_create_internal_ver(int ver) {
     }
     if (pid < 0) {
       spinlock_release_irqrestore(&proc_lock, p_flags);
-      uart_puts("[KERNEL] process_create: no free process slots!\n");
+      /* D5.6 slot forensics: how many slots are zombies (EXITED with a
+         live parent: "UI process stopped reaping") vs all EXITED. */
+      int exited = 0;
+      int zombies = zombie_slots_count(&exited);
+      uart_puts("[KERNEL] process_create: no free process slots! zombies=");
+      print_int(zombies);
+      uart_puts(" exited=");
+      print_int(exited);
+      uart_puts("\n");
       return -1;
     }
   }
@@ -563,10 +640,16 @@ static int process_create_internal_ver(int ver) {
     if (dump_count < 3) {
       dump_count++;
       int used = frame_blocks_used_count();
+      int zexited = 0;
+      int zzombies = zombie_slots_count(&zexited);
       uart_puts("[BLOCKS] used=");
       print_int(used);
       uart_puts("/");
       print_int(frame_block_count());
+      uart_puts(" zmb=");
+      print_int(zzombies);
+      uart_puts(" exd=");
+      print_int(zexited);
       uart_puts(" holders:");
       for (int i = 1; i < MAX_PROCESSES; i++) {
         struct process *h = &proc_table[i];
@@ -624,6 +707,18 @@ static int process_create_internal_ver(int ver) {
   p->futex_uaddr = 0;
   p->thread_ret = 0;
   p->as = 0;
+  p->fd_cloexec = 0;
+  /* P5 (D7/D3.1): fresh signal/env state — a recycled slot must never
+     leak the previous occupant's dispositions, pending bits or env. */
+  p->env[0] = '\0';
+  p->envc = 0;
+  p->sig_pending = 0;
+  p->sig_restorer = 0;
+  p->sig_in_handler = 0;
+  p->sig_frame = 0;
+  for (int i = 0; i < HO_SIG_MAX; i++) {
+    p->sig_handler[i] = 0;
+  }
   p->heap_brk = (ver == AS_V2) ? USER_HEAP_BASE_V2 : USER_HEAP_BASE;
   p->anon_map_count = 0;
   for (int i = 0; i < USER_ANON_MAX_REGS; i++) {
@@ -1231,41 +1326,64 @@ void process_free(int pid) {
   spinlock_release_irqrestore(&proc_lock, flags);
 }
 
-int process_kill(int pid) {
-  if (pid < 0 || pid >= MAX_PROCESSES)
+/* ---------------------------------------------------------------------------
+ * P5 (docs/browser/p5-exec-signals-design.md): signals, kill, env, SIGPIPE.
+ * User-pointer discipline (OQ5): every user range routes through
+ * process_user_ok() -> P2's vm_touch for v2 processes, the legacy 32 MiB
+ * range check for v1.
+ * ------------------------------------------------------------------------- */
+
+/* OQ5 shared user-range check.  Returns 0 or -1. */
+int process_user_ok(struct process *p, uint64_t va, uint64_t len, int write) {
+  if (!p)
     return -1;
+  p = process_group(p);
+  if (p->as)
+    return vm_touch(p, va, len, write) == 0 ? 0 : -1;
+  if (len == 0)
+    return 0;
+  if (va < USER_VIRT_BASE || len > USER_REGION_SIZE)
+    return -1;
+  return (va - USER_VIRT_BASE <= USER_REGION_SIZE - len) ? 0 : -1;
+}
+
+/* D6: kill's frozen signal set — anything else is -EINVAL. */
+static int sig_known(int sig) {
+  switch (sig) {
+  case HO_SIGHUP:
+  case HO_SIGINT:
+  case HO_SIGILL:
+  case HO_SIGABRT:
+  case HO_SIGBUS:
+  case HO_SIGKILL:
+  case HO_SIGUSR1:
+  case HO_SIGSEGV:
+  case HO_SIGUSR2:
+  case HO_SIGPIPE:
+  case HO_SIGTERM:
+  case HO_SIGCHLD:
+    return 1;
+  default:
+    return 0;
+  }
+}
+
+/* The immediate group-kill body (D9's default action / SIGKILL): anchor
+ * EXITED with the signal byte in the waitpid status, memory released,
+ * sibling threads ended, fds closed.  Never blocks on claims (P1's
+ * accepted class: a RUNNING victim is preempted by its own next tick and
+ * then falls out of the save set). */
+void process_kill_group_sig(struct process *p, int sig) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-  struct process *p = &proc_table[pid];
   if (p->state == PROC_STATE_FREE || p->state == PROC_STATE_EXITED ||
       p->state == PROC_STATE_THREAD_DONE) {
     spinlock_release_irqrestore(&proc_lock, flags);
-    return -1;
-  }
-  if (p->is_thread) {
-    /* P1 (design section 1): kill(thread) ends JUST that thread.  No fd
-       close -- the fd table is the group's.  If it was the last member the
-       group teardown runs here; unlike the exit paths there is no claim
-       wait (kill must not block on its target, and a THREAD_DONE target is
-       never saved again -- OQ3's accepted class). */
-    struct process *grp = process_group(p);
-    p->state = PROC_STATE_THREAD_DONE;
-    p->futex_uaddr = 0;
-    p->wake_ms = 0;
-    file_select_forget(p->pid);
-    if (grp->live_threads > 0)
-      grp->live_threads--;
-    int last = (grp->live_threads == 0);
-    uint64_t tret = p->thread_ret;
-    spinlock_release_irqrestore(&proc_lock, flags);
-    if (last)
-      group_teardown(grp, tret);
-    process_wake_all();
-    return 0;
+    return;
   }
   p->state = PROC_STATE_EXITED;
-  /* Deliver the terminating-signal status (low byte) so a waiting
-     parent can reap a kill with a signal-shaped status. */
-  p->exit_status = 9; /* SIGKILL */
+  /* Deliver the terminating-signal status (low byte) so a waiting parent
+     can reap a kill with a signal-shaped status. */
+  p->exit_status = sig & 0x7f;
   proc_release_mem_locked(p);
   /* P1: killing a group leader kills the whole group. */
   for (int i = 0; i < MAX_PROCESSES; i++) {
@@ -1281,6 +1399,10 @@ int process_kill(int pid) {
     file_select_forget(m->pid);
   }
   p->live_threads = 0;
+  /* P5 (D9.4/D5.3): run the unified reap delivery so a parent blocked in
+     WAIT_CHILD learns of the death immediately -- the confirmed
+     third-party-kill wakeup gap this design closes. */
+  reap_deliver_locked(p);
   spinlock_release_irqrestore(&proc_lock, flags);
 
   // We close the global file descriptors directly to properly free resources
@@ -1291,28 +1413,345 @@ int process_kill(int pid) {
     }
   }
   process_wake_all();
+}
+
+/* Legacy entry point (existing callers: unit-test cleanup, sysmon/desktop
+ * use the kill syscall now): default policy == SIGKILL semantics against
+ * the group owning `pid`. */
+int process_kill(int pid) {
+  if (pid <= 0 || pid >= MAX_PROCESSES)
+    return -1;
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  struct process *p = &proc_table[pid];
+  if (p->state == PROC_STATE_FREE || p->state == PROC_STATE_EXITED ||
+      p->state == PROC_STATE_THREAD_DONE) {
+    spinlock_release_irqrestore(&proc_lock, flags);
+    return -1;
+  }
+  struct process *grp = process_group(p);
+  spinlock_release_irqrestore(&proc_lock, flags);
+  process_kill_group_sig(grp, HO_SIGKILL);
   return 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * P5 S4 (docs/browser/p5-exec-signals-design.md D3): execve marshalling,
+ * success-path apply, and the from-thread sibling exit.
+ * ------------------------------------------------------------------------- */
+
+/* Byte-wise bounded read of one user NUL-terminated string; every byte
+ * range-checked through process_user_ok (constraints: no wide user reads;
+ * OQ5 routing).  Writes at most cap-1 bytes + NUL.  Returns the length
+ * written (excluding NUL), or -1 on a bad pointer. */
+static int exec_read_str(struct process *p, uint64_t va, char *dst, int cap) {
+  if (!va || cap < 2)
+    return -1;
+  int n = 0;
+  for (;;) {
+    if (n >= cap - 1) {
+      dst[cap - 1] = '\0';
+      return n; /* truncated */
+    }
+    if (process_user_ok(p, va + (uint64_t)n, 1, 0) != 0)
+      return -1;
+    char c = (char)(*(volatile uint8_t *)(va + (uint64_t)n));
+    dst[n++] = c;
+    if (c == 0)
+      return n - 1;
+  }
+}
+
+int process_read_envp(struct process *p, const char *const *envp, char *dst,
+                      int cap, int *count_out) {
+  p = process_group(p);
+  if (!p || !dst || !count_out || cap <= 0)
+    return -1;
+  *count_out = 0;
+  dst[0] = '\0';
+  if (!envp)
+    return 0; /* D3.1: envp == NULL = empty environment */
+  int pos = 0;
+  for (int i = 0; i < HO_EXEC_MAX_ARGS; i++) {
+    uint64_t slot = (uint64_t)envp + (uint64_t)i * 8;
+    if (process_user_ok(p, slot, 8, 0) != 0)
+      return -1; /* bad envp array pointer -> EFAULT */
+    uint64_t sp = 0;
+    for (int k = 0; k < 8; k++)
+      sp |= ((uint64_t)(*(volatile uint8_t *)(slot + (uint64_t)k))) << (8 * k);
+    if (sp == 0)
+      return 0; /* end of envp */
+    int room = cap - pos;
+    if (room < 2)
+      return 0; /* blob full: truncate the rest (mirrors argv, D3.1) */
+    int len = exec_read_str(p, sp, dst + pos, room);
+    if (len < 0)
+      return -1;
+    (*count_out)++;
+    if (len >= room - 1)
+      return 0; /* entry consumed the remaining room */
+    pos += len + 1; /* keep the NUL separator */
+  }
+  return 0; /* count cap reached: truncate the rest */
+}
+
+void process_exec_apply(struct process *grp, const char *env, int envc) {
+  if (!grp)
+    return;
+  /* D3.3: caught dispositions -> SIG_DFL, ignored stay ignored; pending
+     and delivery state cleared (exec is a fresh program). */
+  for (int s = 1; s < HO_SIG_MAX; s++) {
+    if (grp->sig_handler[s] != HO_SIG_IGN)
+      grp->sig_handler[s] = HO_SIG_DFL;
+  }
+  grp->sig_pending = 0;
+  grp->sig_in_handler = 0;
+  grp->sig_frame = 0;
+  grp->sig_restorer = 0;
+
+  /* D3.1: the new environment.  `env` is a zero-padded kernel buffer of
+     `envc` NUL-separated entries (see process_read_envp + the trap-layer
+     zero-fill), so the scan cannot run past a real entry. */
+  grp->env[0] = '\0';
+  grp->envc = 0;
+  if (env && envc > 0) {
+    int used = 0;
+    for (int k = 0; k < envc && used < HO_ENV_LEN - 1; k++) {
+      while (used < HO_ENV_LEN - 1 && env[used]) {
+        grp->env[used] = env[used];
+        used++;
+      }
+      if (used < HO_ENV_LEN - 1) {
+        grp->env[used] = '\0';
+        used++;
+      }
+    }
+    grp->env[used] = '\0';
+    grp->envc = envc;
+  }
+
+  /* D3.2: the FD_CLOEXEC sweep -- close every fd whose mask bit is set,
+     keeping the numbers of all others.  No proc_lock held (file_close
+     takes the file locks itself). */
+  if (grp->fd_cloexec) {
+    for (int fd = 0; fd < MAX_OPEN_FDS; fd++) {
+      if ((grp->fd_cloexec >> fd) & 1u) {
+        file_close(grp, fd); /* no-op -1 when the slot was already empty */
+        grp->fd_cloexec &= ~(1u << fd);
+      }
+    }
+  }
+}
+
+void process_exec_terminate_siblings(struct process *grp,
+                                     struct process *caller) {
+  /* D3.4: the P1 exit_group pattern, minus the teardown -- mark every
+     other member THREAD_DONE, then drain their CPU claims (tick-granular,
+     bounded; parked members die at once).  The caller survives as the
+     new image; the anchor (and the pid the parent knows) is unchanged. */
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *m = &proc_table[i];
+    if (m == caller || m->tgid != grp->pid)
+      continue;
+    if (m->state == PROC_STATE_FREE || m->state == PROC_STATE_EXITED ||
+        m->state == PROC_STATE_THREAD_DONE)
+      continue;
+    m->state = PROC_STATE_THREAD_DONE;
+    m->futex_uaddr = 0;
+    m->wake_ms = 0;
+    file_select_forget(m->pid);
+  }
+  grp->live_threads = 1; /* just the caller (the new single image) */
+  spinlock_release_irqrestore(&proc_lock, flags);
+
+  for (int waited = 0; group_claims_pending(grp, caller);) {
+    if (++waited > 32) {
+      uart_puts("[P5] exec sibling claim drain timeout, group ");
+      print_int(grp->pid);
+      uart_puts("\n");
+      break;
+    }
+    safe_wfi();
+  }
+}
+
+/* Row 16 completion (D9): process-directed targeting + disposition-based
+ * action.  See process.h for the contract. */
+int process_signal(int pid, int sig) {
+  if (!sig_known(sig))
+    return -EINVAL;
+  struct process *target = 0;
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  if (pid > 0 && pid < MAX_PROCESSES) {
+    struct process *p = &proc_table[pid];
+    if (p->state != PROC_STATE_FREE && p->state != PROC_STATE_EXITED &&
+        p->state != PROC_STATE_THREAD_DONE)
+      target = process_group(p);
+  } else if (pid == 0) {
+    struct process *cur = current_process();
+    if (cur)
+      target = process_group(cur);
+  } else if (pid < -1 && -pid > 0 && -pid < MAX_PROCESSES) {
+    /* Group leader -pid (D9.1; kill(-1) keeps "any process" meaning only
+       in the existence-check path and is -ESRCH here). */
+    struct process *p = &proc_table[-pid];
+    if (p->state != PROC_STATE_FREE && p->state != PROC_STATE_EXITED &&
+        p->state != PROC_STATE_THREAD_DONE)
+      target = process_group(p);
+  }
+  if (!target) {
+    spinlock_release_irqrestore(&proc_lock, flags);
+    return -ESRCH;
+  }
+  uint64_t h = target->sig_handler[sig];
+  if (sig == HO_SIGKILL || h == 0 /* SIG_DFL */) {
+    spinlock_release_irqrestore(&proc_lock, flags);
+    process_kill_group_sig(target, sig);
+    return 0;
+  }
+  if (h == 1 /* SIG_IGN */) {
+    spinlock_release_irqrestore(&proc_lock, flags);
+    return 0;
+  }
+  /* Real handler: record pending.  Delivery happens at the leader's next
+     return-to-user boundary (D8; the frame engine lands in S3 — until then
+     the bit accumulates, which is the documented S1/S2 state). */
+  target->sig_pending |= (1u << (sig - 1));
+  spinlock_release_irqrestore(&proc_lock, flags);
+  return 0;
+}
+
+/* D10: SIGPIPE for a write to a closed peer.  Returns 1 when the writer's
+ * group was killed by the default action (the caller must not return to
+ * user space), 0 when the writer survives (ignore/handler; the write still
+ * fails -EPIPE). */
+int signal_epipe(struct process *grp) {
+  if (!grp)
+    return 0;
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  if (grp->state == PROC_STATE_FREE || grp->state == PROC_STATE_EXITED ||
+      grp->state == PROC_STATE_THREAD_DONE) {
+    spinlock_release_irqrestore(&proc_lock, flags);
+    return 1; /* already gone; nothing left to write to */
+  }
+  uint64_t h = grp->sig_handler[HO_SIGPIPE];
+  if (h == 0) {
+    spinlock_release_irqrestore(&proc_lock, flags);
+    process_kill_group_sig(grp, HO_SIGPIPE);
+    return 1;
+  }
+  if (h != 1)
+    grp->sig_pending |= (1u << (HO_SIGPIPE - 1));
+  spinlock_release_irqrestore(&proc_lock, flags);
+  return 0;
+}
+
+/* Row 83 (D7): validate + store dispositions on the caller's group anchor.
+ * act/oldact are kernel mirrors marshalled by the trap layer. */
+int process_sigaction(int signum, const struct ho_sigaction *act,
+                      struct ho_sigaction *oldact) {
+  struct process *cur = current_process();
+  if (!cur)
+    return -EINVAL;
+  struct process *grp = process_group(cur);
+  if (signum <= 0 || signum >= HO_SIG_MAX)
+    return -EINVAL;
+  if (signum == HO_SIGKILL || signum == HO_SIGSTOP)
+    return -EINVAL; /* uncatchable / unstoppable (D6) */
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  if (oldact) {
+    oldact->sa_handler = grp->sig_handler[signum];
+    oldact->sa_mask[0] = 0;
+    oldact->sa_mask[1] = 0;
+    oldact->sa_flags = 0;
+    oldact->sa_restorer = grp->sig_restorer;
+  }
+  if (act) {
+    uint64_t h = act->sa_handler;
+    if (h != 0 && h != 1) {
+      /* A real handler needs a valid in-region sigreturn trampoline (D7;
+         libc's sigaction fills sa_restorer by default). */
+      if (act->sa_restorer == 0 ||
+          process_user_ok(grp, act->sa_restorer, 4, 0) != 0) {
+        spinlock_release_irqrestore(&proc_lock, flags);
+        return -EINVAL;
+      }
+      grp->sig_restorer = act->sa_restorer;
+    }
+    grp->sig_handler[signum] = h;
+  }
+  spinlock_release_irqrestore(&proc_lock, flags);
+  return 0;
+}
+
+/* Row 84 (D8.6): a stale/no-frame call is the documented defensive
+ * -EINVAL.  No frame can exist before the S3 engine lands, so this is
+ * always the defensive path today. */
+int process_sigreturn(struct trap_frame *tf) {
+  (void)tf;
+  struct process *cur = current_process();
+  if (!cur)
+    return -EINVAL;
+  struct process *grp = process_group(cur);
+  if (!grp->sig_in_handler || grp->sig_frame == 0)
+    return -EINVAL;
+  /* S3 (frame engine): restore registers + FP + interrupted PC/SP/flags
+     from the frame, clear sig_in_handler, re-check pending delivery. */
+  return -EINVAL;
+}
+
+/* Row 85 (D2): read the environment blob (mirror of sys_readargv; the
+ * trap layer validates the user buffer, this does not). */
+int sys_readenv(struct process *p, int idx, char *buf, int size) {
+  p = process_group(p);
+  if (!p)
+    return -EINVAL;
+  if (idx == -1)
+    return p->envc;
+  if (idx < 0 || idx >= p->envc)
+    return -EINVAL;
+  int pos = 0;
+  for (int ai = 0; ai < idx; ai++) {
+    while (pos < HO_ENV_LEN && p->env[pos])
+      pos++;
+    if (pos < HO_ENV_LEN)
+      pos++; /* skip the NUL */
+  }
+  int len = 0;
+  while (pos + len < HO_ENV_LEN && p->env[pos + len])
+    len++;
+  if (size <= 0)
+    return len;
+  int n = len < size - 1 ? len : size - 1;
+  for (int i = 0; i < n; i++)
+    buf[i] = p->env[pos + i];
+  if (n > 0)
+    buf[n] = '\0';
+  return n;
 }
 
 /**
  * Implements the waitpid system call (SYS_WAITPID, 39).
  *
- * arg0: pid — > 0: that specific child; 0 or -1: any child of the caller
- *        (process-group forms pid < -1 are treated as "any child": no
- *        process groups exist yet).
+ * arg0: pid — > 0: that specific child leader; 0 or -1: any child of the
+ *        caller; < -1: any child (documented divergence: no pgid sets
+ *        beyond a group's own pid; WebKit never uses the form).
  * arg1: int *status — filled with the child's exit status in waitpid()
  *        layout: (exit_code & 0xff) << 8 for a normal exit, or the
  *        terminating signal number in the low byte for a killed child.
  * arg2: options — WNOHANG (1) returns 0 immediately when children are
- *        still running instead of blocking.
+ *        still running instead of blocking; WUNTRACED (2) is accepted and
+ *        ignored (no stop states exist); any other bit -> -EINVAL (D5.1).
  *
- * Returns the reaped child's pid, 0 (WNOHANG, children alive),
- * -ECHILD (no children), or blocks the caller in PROC_STATE_WAIT_CHILD
- * until a matching child exits.
+ * Returns the reaped child's pid, 0 (WNOHANG, children alive), -ECHILD
+ * (no children), -EFAULT (bad status pointer), or blocks the caller in
+ * PROC_STATE_WAIT_CHILD until a matching child exits.
  *
  * Blocking delivery: the parent's saved context (context[0] = pid return,
- * context[1] = the still-saved status pointer) is filled by process_exit()
- * when the child dies, exactly like the spawn worker fills context[0].
+ * context[1] = the still-saved status pointer) is filled by the unified
+ * reap_deliver_locked() helper (D5.3) when the child dies -- whether the
+ * death is a normal exit or a kill -- exactly like the spawn worker fills
+ * context[0].
  */
 int process_waitpid(struct trap_frame *tf) {
   int want_pid = (int)tf->regs[0];
@@ -1323,10 +1762,21 @@ int process_waitpid(struct trap_frame *tf) {
   if (!caller)
     return -EINVAL;
 
+  /* D5.1: option validation -- WNOHANG (1) and WUNTRACED (2, accepted
+     and ignored: no stop states exist); any other bit -> -EINVAL. */
+  if (options & ~(1 | 2))
+    return -EINVAL;
+
   /* P1 (D7): children are parented to the group ANCHOR, so match against
      the caller's group pid -- a thread blocked in waitpid() must see the
      group's children. */
   struct process *grp = process_group(caller);
+
+  /* D5.7/OQ5: a non-NULL status pointer is validated once here (and
+     demand-materialized through vm_touch for v2); delivery then writes
+     it cross-context.  Bad pointer -> -EFAULT. */
+  if (status && process_user_ok(grp, (uint64_t)status, 4, 1) != 0)
+    return -EFAULT;
 
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   for (int i = 0; i < MAX_PROCESSES; i++) {
@@ -1346,10 +1796,11 @@ int process_waitpid(struct trap_frame *tf) {
     p->exit_status = 0;
     spinlock_release_irqrestore(&proc_lock, flags);
 
-    if (status && (uint64_t)status >= USER_VIRT_BASE &&
-        (uint64_t)status + 4 <= USER_VIRT_BASE + USER_REGION_SIZE) {
+    /* The status range was validated at entry (vm_touch for v2, range for
+       v1) and we are on the caller's own context: direct write is the P2
+       contract ("after vm_touch the kernel reads/writes directly"). */
+    if (status)
       *status = st;
-    }
     return child_pid;
   }
 
@@ -2137,6 +2588,14 @@ int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
   }
   t->exit_status = 0;
   t->thread_ret = 0;
+  /* P5 (D7): a recycled slot must not carry stale signal state (unread on
+     threads — group state lives on the anchor — but keep it clean). */
+  t->sig_pending = 0;
+  t->sig_restorer = 0;
+  t->sig_in_handler = 0;
+  t->sig_frame = 0;
+  for (int i = 0; i < HO_SIG_MAX; i++)
+    t->sig_handler[i] = 0;
   for (int i = 0; i < 36; i++)
     t->context[i] = 0;
   /* Fresh FP state at create (F1.5 per-thread contract): never the

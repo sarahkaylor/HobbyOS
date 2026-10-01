@@ -170,6 +170,15 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write);
 /* 0/-1 view of vm_touch for the legacy boolean call sites. */
 int vm_range_ok(struct process *p, uint64_t va, uint64_t len, int write);
 
+/* P5 (D5.7): kernel-context write into process p's user memory when the
+ * caller runs on ANOTHER process's context (the reap status write; the
+ * S3 signal frame).  The range must already have been validated and
+ * demand-materialized through vm_touch.  v2 only: v1 callers use the
+ * user_phys_base translation.  Bytes go through the target's own page
+ * tables and the kernel direct map (kernel VA == phys).  Returns 0 or -1
+ * (mapping unresolvable). */
+int vm_kwrite(struct process *p, uint64_t va, const void *src, int len);
+
 /* P2.3 (design sections 5.1-5.5): the demand-fault face.  Called from
  * the arch fault handlers with the CURRENT process (`grp` = its group).
  * Never yields, never blocks; installs one zeroed 4 KiB frame when the
@@ -223,6 +232,9 @@ void vm_arch_unmap(struct addr_space *as, uint64_t va);
 void vm_arch_prot(struct addr_space *as, uint64_t va, uint16_t prot);
 /* 0 + *leaf when a page mapping is present; -1 when absent. */
 int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf);
+/* P5 (D5.7): the physical address encoded in a vm_arch_walk leaf (OA
+ * bits, both arches).  Used by vm_kwrite for cross-context writes. */
+uint64_t vm_arch_leaf_phys(uint64_t leaf);
 void vm_arch_teardown(uint64_t root_phys, uint16_t asid);
 void vm_arch_switch(struct addr_space *as);
 /* P2.2 (S2): hand the calling CPU back to the kernel table (no-op when

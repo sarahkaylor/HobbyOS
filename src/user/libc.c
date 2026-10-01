@@ -582,8 +582,10 @@ int execv(const char *path, char *const argv[]) {
 }
 
 int execve(const char *path, char *const argv[], char *const envp[]) {
-  (void)envp; /* a fixed empty environment; POSIX exec keeps env semantics */
-  return execv(path, argv);
+  /* P5 (D3.1): the 3-arg row -- envp marshals to the group env blob
+     (NULL = empty environment; execv keeps passing an empty set until
+     the libc environ bridge lands with L3). */
+  return (int)errno_ret(syscall(SYS_EXEC, (long)path, (long)argv, (long)envp, 0));
 }
 
 /* Phase F2.3 (browser.md §6 — append-only region): wall + monotonic
