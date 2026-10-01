@@ -93,26 +93,35 @@ extern "C" {
   float nearbyintf(float x);
   double fdim(double x, double y);
 
+  /* impl. (P3.2 transcendentals: software kernels, glibc-raced; see
+   * math.c for the per-function accuracy notes and the ulp budgets) */
+  double asin(double x);
+  double atan(double x);
+  double atan2(double y, double x);
+  double cos(double x);
+  double sin(double x);
+  double tan(double x);
+  double log(double x);
+  double pow(double x, double y);
+  double modf(double value, double *iptr);
+  float modff(float value, float *iptr);
+  float expf(float x);
+  float tanhf(float x);
+
   /* declared-only (link error if referenced) */
   double acos(double x);
   float acosf(float x);
   long double acosl(long double x);
-  double asin(double x);
   float asinf(float x);
   long double asinl(long double x);
-  double atan(double x);
   float atanf(float x);
   long double atanl(long double x);
-  double atan2(double y, double x);
   float atan2f(float y, float x);
   long double atan2l(long double y, long double x);
-  double cos(double x);
   float cosf(float x);
   long double cosl(long double x);
-  double sin(double x);
   float sinf(float x);
   long double sinl(long double x);
-  double tan(double x);
   float tanf(float x);
   long double tanl(long double x);
   double cosh(double x);
@@ -122,7 +131,6 @@ extern "C" {
   float sinhf(float x);
   long double sinhl(long double x);
   double tanh(double x);
-  float tanhf(float x);
   long double tanhl(long double x);
   double acosh(double x);
   float acoshf(float x);
@@ -134,7 +142,6 @@ extern "C" {
   float atanhf(float x);
   long double atanhl(long double x);
   double exp(double x);
-  float expf(float x);
   long double expl(long double x);
   double exp2(double x);
   float exp2f(float x);
@@ -148,7 +155,6 @@ extern "C" {
   double ldexp(double value, int exp);
   float ldexpf(float value, int exp);
   long double ldexpl(long double value, int exp);
-  double log(double x);
   float logf(float x);
   long double logl(long double x);
   double log10(double x);
@@ -163,8 +169,6 @@ extern "C" {
   double logb(double x);
   float logbf(float x);
   long double logbl(long double x);
-  double modf(double value, double *iptr);
-  float modff(float value, float *iptr);
   long double modfl(long double value, long double *iptr);
   double scalbn(double x, int n);
   float scalbnf(float x, int n);
@@ -175,7 +179,6 @@ extern "C" {
   double hypot(double x, double y);
   float hypotf(float x, float y);
   long double hypotl(long double x, long double y);
-  double pow(double x, double y);
   float powf(float x, float y);
   long double powl(long double x, long double y);
   double remainder(double x, double y);
