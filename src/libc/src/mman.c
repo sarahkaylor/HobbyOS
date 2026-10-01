@@ -118,16 +118,11 @@ void *sbrk(intptr_t delta) {
 }
 
 void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
-  /* Anonymous only; file-backed mappings are not implemented yet. */
-  if (fd >= 0 && !(flags & MAP_ANONYMOUS)) {
-    errno = ENOTSUP;
-    return MAP_FAILED;
-  }
-  /* P2.3 (S3): fd/offset slots are explicit now (row 62 grew to 6 args).
-     fd < 0 with MAP_ANONYMOUS stays the only accepted shape; the kernel
-     rejects fd >= 0 with ENOTSUP. */
+  /* P2.4 (S4): fd >= 0 is the memfd MAP_SHARED path (the kernel rejects
+     every other file type with ENOTSUP, and the fd/offset slots are
+     explicit in the 6-arg row); fd < 0 keeps the anonymous path. */
   long r = hb_syscall6(SYS_MMAP, (long)addr, (long)length, prot, flags,
-                       (long)((fd < 0) ? -1 : fd), (long)offset);
+                       (long)fd, (long)offset);
   if (r < 0) {
     errno = (int)(-r);
     return MAP_FAILED;
@@ -137,6 +132,32 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
 
 int munmap(void *addr, size_t length) {
   long r = hb_syscall4(SYS_MUNMAP, (long)addr, (long)length, 0, 0);
+  return (int)hb_errno_ret(r);
+}
+
+/* P2.4 (S4, design sections 4.1/4.3): mprotect/madvise (rows 81/82),
+ * memfd_create (row 80) and ftruncate (row 33, memfd only). */
+int mprotect(void *addr, size_t len, int prot) {
+  long r = hb_syscall4(SYS_MPROTECT, (long)addr, (long)len, (long)prot, 0);
+  return (int)hb_errno_ret(r);
+}
+
+int madvise(void *addr, size_t len, int advice) {
+  long r = hb_syscall4(SYS_MADVISE, (long)addr, (long)len, (long)advice, 0);
+  return (int)hb_errno_ret(r);
+}
+
+int memfd_create(const char *name, unsigned int flags) {
+  long r = hb_syscall4(SYS_MEMFD_CREATE, (long)name, (long)flags, 0, 0);
+  if (r < 0) {
+    errno = (int)(-r);
+    return -1;
+  }
+  return (int)r;
+}
+
+int ftruncate(int fd, off_t length) {
+  long r = hb_syscall4(SYS_FTRUNCATE, (long)fd, (long)length, 0, 0);
   return (int)hb_errno_ret(r);
 }
 

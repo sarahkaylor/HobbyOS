@@ -46,7 +46,8 @@
  *     hidden symbols `__init_array_start` / `__init_array_end`.  Being
  *     part of the contiguous image, the array is inside the flat binary
  *     that `objcopy -O binary` produces, and inside the region the kernel
- *     loader copies to USER_VIRT_BASE (0x44000000) — hence no loader
+ *     loader copies to USER_IMG_BASE (v2 base, 64 GiB since the S5 flip) —
+ *     hence no loader
  *     change is required.  `.fini_array` is collected the same way and
  *     reserved for P3; nothing runs it yet.
  *  3. src/libc/crt0.c's `_start` walks [__init_array_start,

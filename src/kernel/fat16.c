@@ -912,6 +912,18 @@ int fat16_open(const char* filename, struct file* f) {
   uint32_t offset = 0;
 
   if (fat16_resolve_path(abs_path, &entry, &sector, &offset) == 0) {
+    /* Never hand back a file handle for a DIRECTORY.  The synthetic root
+       entry ("/" or "") reports dir_sector == 0 and attr 0x10; with a
+       handle on it, file_open()'s O_TRUNC path calls fat16_truncate() ->
+       fat16_sync_entry(), which read-modify-writes LBA 0 and splices the
+       synthetic entry over the BOOT SECTOR (observed post-wave: boot
+       sector replaced by an 11-space name + attr 0x10 entry).  A real
+       subdirectory has the same shape at its own dir_sector and would get
+       its entry's cluster/size fields clobbered the same way.  Directories
+       are reached via chdir/read_dir, never as files. */
+    if (sector == 0 || (entry.attr & 0x10)) {
+      return -1;
+    }
     f->type = FILE_TYPE_FAT16;
     f->fat16.entry = entry;
     f->fat16.dir_sector = sector;
@@ -1469,6 +1481,11 @@ int fat16_close(struct file* f) {
  */
 int fat16_truncate(struct file* f) {
   if (!f) return -1;
+  /* A handle whose dir_sector is 0 addresses no real directory entry (the
+     synthetic root of fat16_resolve_path("/")); truncating it would sync
+     the entry over LBA 0.  Fat16_open() refuses such handles now -- this
+     is the belt for any already-crafted one. */
+  if (f->fat16.dir_sector == 0) return -1;
 
   uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
   uint16_t c = f->fat16.entry.start_cluster;

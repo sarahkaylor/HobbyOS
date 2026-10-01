@@ -38,6 +38,9 @@ extern "C" {
   off_t lseek(int fd, off_t offset, int whence);
   int dup(int oldfd);
   int dup2(int oldfd, int newfd);
+  /* P2.4 (S4): ftruncate is real for memfd fds (row 33; other file types
+     return ENOTSUP). */
+  int ftruncate(int fd, off_t length);
   int access(const char *path, int mode);
   int unlink(const char *path);
   int isatty(int fd);

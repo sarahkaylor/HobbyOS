@@ -325,6 +325,8 @@ int64_t sys_mmap6(uint64_t addr, uint64_t len, int64_t prot, int64_t flags,
                   int64_t fd, uint64_t offset);
 int64_t sys_mprotect(uint64_t addr, uint64_t len, int64_t prot);
 int64_t sys_madvise(uint64_t addr, uint64_t len, int64_t advice);
+/* P2.4 (S4): memfd create + ftruncate (design section 4.3). */
+int64_t sys_memfd_create(uint64_t name, int64_t flags);
 
 /* P2.3 (design section 5.4): terminate the CURRENT (faulting) process
  * with a signal-shaped waitpid status (low byte = signo).  SIGSEGV = 11.
@@ -369,7 +371,8 @@ void process_exec_terminate_siblings(struct process *grp,
 // BEFORE the image load (proc_marshal_argv -- the elements live in the old
 // image) and installs it only on success (proc_set_argv_array).
 void proc_split_argv(struct process *p, const char *args);
-int proc_marshal_argv(char *const *argv, char *dst, int cap, int *count_out);
+int proc_marshal_argv(struct process *p, char *const *argv, char *dst,
+                      int cap, int *count_out);
 int proc_set_argv_array(struct process *p, const char *blob, int count);
 // idx == -1: return eargc; else copy the idx-th argument into buf (size
 // bytes) and return its length, or -1 when out of range.

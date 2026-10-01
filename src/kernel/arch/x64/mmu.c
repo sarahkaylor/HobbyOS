@@ -521,7 +521,8 @@ int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf) {
   return 0;
 }
 
-/* P5 (D5.7): OA bits of a walked leaf (vm_kwrite / cross-context writes). */
+/* P5 (D5.7) / S4 (fork clone): OA bits of a leaf returned by
+ * vm_arch_walk -- cross-context writes (vm_kwrite) and the v2 fork clone. */
 uint64_t vm_arch_leaf_phys(uint64_t leaf) { return leaf & X64_OA_MASK; }
 
 void vm_arch_flush_va(struct addr_space *as, uint64_t va) {

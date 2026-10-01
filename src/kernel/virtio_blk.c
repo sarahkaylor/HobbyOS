@@ -399,6 +399,20 @@ int virtio_blk_read_sector(uint64_t sector, void* buf, uint32_t count) {
 }
 
 int virtio_blk_write_sector(uint64_t sector, const void* buf, uint32_t count) {
+  /* Hard invariant: LBA 0 is the FAT boot sector (eb 3c 90 ...); no kernel
+     path may ever write it.  The observed post-wave corruption -- a
+     32-byte zeroed-name directory entry spliced over the boot sector -- is
+     exactly a read-modify-write whose sector base resolved to 0.  Refuse
+     (and attribute, bounded) instead of destroying the volume. */
+  if (sector == 0 && count > 0) {
+    static int guard_once;
+    if (guard_once++ < 4) {
+      uart_puts("[BLK-GUARD] refused write to sector 0, caller LR=");
+      uart_print_hex((uint64_t)__builtin_return_address(0));
+      uart_puts("\n");
+    }
+    return -1;
+  }
   uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
   int res = 0;
   for (uint32_t i = 0; i < count; i++) {
@@ -743,6 +757,21 @@ int virtio_blk_read_sector(uint64_t sector, void* buf, uint32_t count) {
 }
 
 int virtio_blk_write_sector(uint64_t sector, const void* buf, uint32_t count) {
+  /* Hard invariant: LBA 0 is the FAT boot sector (eb 3c 90 ...); no kernel
+     path may ever write it.  The observed post-wave corruption -- a
+     32-byte zeroed-name directory entry spliced over the boot sector -- is
+     exactly a read-modify-write whose sector base resolved to 0.  Refuse
+     (and attribute, bounded) instead of destroying the volume.  (count == 0
+     means one sector here, so the guard ignores count on this arch.) */
+  if (sector == 0) {
+    static int guard_once;
+    if (guard_once++ < 4) {
+      uart_puts("[BLK-GUARD] refused write to sector 0, caller LR=");
+      uart_print_hex((uint64_t)__builtin_return_address(0));
+      uart_puts("\n");
+    }
+    return -1;
+  }
   uint64_t flags;
   while (1) {
     flags = spinlock_acquire_irqsave(&blk_request_lock);

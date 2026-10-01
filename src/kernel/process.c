@@ -1095,10 +1095,30 @@ void schedule(struct trap_frame *tf, int is_yield) {
     int current_search_pid = (current_pid >= 0) ? current_pid : 0;
     for (int i = 1; i <= MAX_PROCESSES; i++) {
       int idx = (current_search_pid + i) % MAX_PROCESSES;
-      if (proc_table[idx].state == PROC_STATE_READY) {
-        next = idx;
-        break;
+      if (proc_table[idx].state != PROC_STATE_READY)
+        continue;
+      /* Claim guard (the picking half of `taken_elsewhere` above): a
+         READY process may still be EXECUTING on another CPU -- a waker
+         flipped its parked state back to READY while its owner was still
+         in the block-to-schedule gap and its LIVE trap frame has not been
+         saved yet.  Picking it here would resume a stale context (the
+         owner's older save) while the owner still runs it: that window
+         produced the observed torn cross-process register frames, replayed
+         syscalls with garbage args (e.g. set_tls x0 = small constants) and
+         TPIDR_EL0 = 0 resumes.  Leave such a process to its owner, whose
+         schedule() saves the live frame and re-homes the claim; pick only
+         processes no other CPU currently claims. */
+      int claimed_elsewhere = 0;
+      for (uint32_t c2 = 0; c2 < MAX_CPUS; c2++) {
+        if (c2 != cpu && cpu_current_pids[c2] == idx) {
+          claimed_elsewhere = 1;
+          break;
+        }
       }
+      if (claimed_elsewhere)
+        continue;
+      next = idx;
+      break;
     }
 
     if (next >= 0) {
@@ -1875,7 +1895,9 @@ int process_fork(struct trap_frame *tf) {
      children exec or use leader TLS.  atfork is deferred (P2+). */
   struct process *group = process_group(parent);
 
-  int child_pid = process_create();
+  /* P2.4 (S4): a v2 fork takes an address space, a v1 fork a 32 MiB
+     block -- pick the matching creation variant. */
+  int child_pid = group->as ? process_create_v2() : process_create();
   if (child_pid < 0)
     return -1;
 
@@ -1890,11 +1912,27 @@ int process_fork(struct trap_frame *tf) {
     child->cwd[i] = group->cwd[i];
   }
 
-  kmemcpy((void *)child->user_phys_base, (void *)group->user_phys_base,
-          USER_INITIAL_CLEAR_SIZE);
-  kmemcpy((void *)(child->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
-          (void *)(group->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
-          USER_STACK_CLEAR_SIZE);
+  if (group->as) {
+    /* P2.4 (S4, design 5.3/D10): v2 fork clones the group's address
+       space into the child's fresh AS (process_create_v2's provisioning):
+       resident private pages are copied frame-by-frame, memfd/MAP_SHARED
+       pages re-map the same object frames, holes stay holes.  The child
+       holds no v1 block (user_phys_base stays 0). */
+    if (vm_as_clone_into(group->as, child->as) != 0) {
+      vm_as_teardown(child->as);
+      child->as = 0;
+      child->state = PROC_STATE_FREE;
+      spinlock_release_irqrestore(&proc_lock, flags);
+      uart_puts("[KERNEL] fork: AS clone failed\n");
+      return -1;
+    }
+  } else {
+    kmemcpy((void *)child->user_phys_base, (void *)group->user_phys_base,
+            USER_INITIAL_CLEAR_SIZE);
+    kmemcpy((void *)(child->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
+            (void *)(group->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
+            USER_STACK_CLEAR_SIZE);
+  }
   save_context(child, tf);
   child->context[0] = 0; // x0 = 0 for child
 
@@ -2054,7 +2092,21 @@ void start_scheduler(void) {
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     process_check_sleeping();
     for (int i = 0; i < MAX_PROCESSES; i++) {
-      if (proc_table[i].state == PROC_STATE_READY) {
+      if (proc_table[i].state != PROC_STATE_READY)
+        continue;
+      /* Same claim guard as in schedule(): never pick a READY process
+         another CPU still claims (wake raced its block-to-schedule gap;
+         its live frame is not saved yet).  See the long comment there. */
+      int claimed_elsewhere = 0;
+      for (uint32_t c2 = 0; c2 < MAX_CPUS; c2++) {
+        if (c2 != cpu && cpu_current_pids[c2] == i) {
+          claimed_elsewhere = 1;
+          break;
+        }
+      }
+      if (claimed_elsewhere)
+        continue;
+      {
         set_current_process_pid(cpu, i);
         proc_table[i].state = PROC_STATE_RUNNING;
         sched_idle_rounds = 0;
@@ -2198,6 +2250,14 @@ void start_scheduler(void) {
           uart_puts("\n");
         }
       }
+      uart_puts("[IDLESTUCK] claims:");
+      for (int c = 0; c < MAX_CPUS; c++) {
+        uart_puts(" c");
+        print_int(c);
+        uart_puts("=");
+        print_int(cpu_current_pids[c]);
+      }
+      uart_puts("\n");
       spinlock_release_irqrestore(&proc_lock, dflags);
     }
 
@@ -2297,11 +2357,22 @@ int64_t sys_brk(uint64_t addr) {
     if (addr > old) {
       uint64_t base = (old + 0xFFF) & ~0xFFFULL;
       uint64_t end = (addr + 0xFFF) & ~0xFFFULL;
-      if (end > base &&
-          vm_region_insert(cur->as, base, end - base,
-                           VM_PROT_READ | VM_PROT_WRITE, VMK_HEAP,
-                           VM_MAP_PRIVATE, 0, 0) != 0)
-        return -ENOMEM;
+      if (end > base) {
+        /* P2.5 (S5): the loader reserves the whole HEAP slot demand-zero,
+           so a grow that stays inside it is already backed -- and a
+           redundant insert would be rejected as an overlap.  Only an
+           uncovered span (no loader-created v2 AS looks like that) needs
+           its own region. */
+        struct vm_region *cov = vm_region_find(cur->as, base);
+        int covered = cov && cov->base <= base &&
+                      cov->base + cov->len >= end &&
+                      (cov->prot & VM_PROT_WRITE) && cov->kind == VMK_HEAP;
+        if (!covered &&
+            vm_region_insert(cur->as, base, end - base,
+                             VM_PROT_READ | VM_PROT_WRITE, VMK_HEAP,
+                             VM_MAP_PRIVATE, 0, 0) != 0)
+          return -ENOMEM;
+      }
     }
     cur->heap_brk = addr;
     return 0;
@@ -2472,6 +2543,18 @@ int64_t sys_madvise(uint64_t addr, uint64_t len, int64_t advice) {
   return 0;
 }
 
+/* SYS_MEMFD_CREATE (80, design section 4.3): (name*, flags) -> fd.  The
+ * name is accepted for compat and not retained (recorded: flags). */
+int64_t sys_memfd_create(uint64_t name, int64_t flags) {
+  struct process *cur = current_process();
+  if (!cur)
+    return -EINVAL;
+  /* v2: the (optional) name must at least be a readable user string. */
+  if (name && cur->as && vm_range_ok(cur, name, 1, 0) != 0)
+    return -EFAULT;
+  return file_memfd_create(cur, (const char *)name, (int)flags);
+}
+
 /* Design section 5.4: the fault paths (ARM EL0 abort / x64 #PF) call
  * this once they have decided the process must die.  Status is
  * signal-shaped (SIGSEGV = 11) via the group_teardown marker; the
@@ -2497,22 +2580,36 @@ int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
     return -EINVAL;
   if (flags != 0)
     return -EINVAL;
-  /* entry and [stack-16, stack) inside the caller's own region; stack
-     16-aligned (both ABIs enter with a 16-aligned SP). */
-  if (entry < USER_VIRT_BASE || entry >= USER_VIRT_BASE + USER_REGION_SIZE)
-    return -EINVAL;
-  if (stack < USER_VIRT_BASE + 16 ||
-      stack > USER_VIRT_BASE + USER_REGION_SIZE)
-    return -EINVAL;
-  if (stack & 15)
-    return -EINVAL;
+  /* entry and [stack-16, stack) inside the caller's own window; stack
+     16-aligned (both ABIs enter with a 16-aligned SP).  S4: a v2 caller
+     validates against its AS -- entry mapped readable, stack top mapped
+     writable (the mmap+guard stack from libpthread). */
+  if (caller->as) {
+    if (stack < USER_VA_BASE + 16 || stack > USER_VA_TOP)
+      return -EINVAL;
+    if (stack & 15)
+      return -EINVAL;
+    if (vm_touch(caller, entry, 1, 0) != 0)
+      return -EINVAL;
+    if (vm_touch(caller, stack - 16, 16, 1) != 0)
+      return -EINVAL;
+  } else {
+    if (entry < USER_VIRT_BASE || entry >= USER_VIRT_BASE + USER_REGION_SIZE)
+      return -EINVAL;
+    if (stack < USER_VIRT_BASE + 16 ||
+        stack > USER_VIRT_BASE + USER_REGION_SIZE)
+      return -EINVAL;
+    if (stack & 15)
+      return -EINVAL;
+  }
 
   struct process *grp = process_group(caller);
 
   uint64_t p_flags = spinlock_acquire_irqsave(&proc_lock);
   /* A group under teardown (anchor gone, block released) takes no new
-     threads. */
-  if (grp->phys_block_idx < 0 || grp->state == PROC_STATE_FREE ||
+     threads.  S4: v2 groups have no block (as != NULL instead). */
+  if ((grp->phys_block_idx < 0 && !grp->as) ||
+      grp->state == PROC_STATE_FREE ||
       grp->state == PROC_STATE_EXITED ||
       grp->state == PROC_STATE_THREAD_DONE) {
     spinlock_release_irqrestore(&proc_lock, p_flags);
@@ -2574,6 +2671,7 @@ int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
   t->heap_brk = grp->heap_brk;
   t->user_phys_base = grp->user_phys_base;
   t->user_l2_table = grp->user_l2_table;
+  t->as = grp->as; /* S4: a thread shares the group's address space */
   t->phys_block_idx = -1; /* threads never own a block */
   t->num_open_fds = 0;
   for (int i = 0; i < MAX_OPEN_FDS; i++)
@@ -2708,18 +2806,36 @@ int process_futex(struct process *caller, struct trap_frame *tf, uint64_t uaddr,
   if (!caller)
     return -EINVAL;
   struct process *grp = process_group(caller);
-  /* (1) validate: 4-byte aligned, [uaddr, uaddr+4) inside the caller's own
-     region (misaligned -> -EINVAL, outside -> -EFAULT). */
+  /* (1) validate: 4-byte aligned always; the region bounds are checked
+     where the word is actually read (WAIT), per addressing model -- v2
+     through the caller's address-space walk, v1 through the legacy 32 MiB
+     block window.  The WAKE path validates nothing and never dereferences
+     (futex-lite contract, futex-bounds case). */
   if (uaddr & 3)
     return -EINVAL;
-  if (uaddr < USER_VIRT_BASE || uaddr + 4 > USER_VIRT_BASE + USER_REGION_SIZE)
-    return -EFAULT;
-  if (!grp->user_phys_base)
-    return -EFAULT;
 
   if (op == 0) {
-    volatile uint32_t *word =
-      (volatile uint32_t *)(grp->user_phys_base + (uaddr - USER_VIRT_BASE));
+    volatile uint32_t *word;
+    if (grp->as) {
+      /* v2 (S5 flip): the word lives in the caller's address space.  The
+         walk demand-materializes the page; with the trap's TTBR0 still
+         the process AS, the direct read then sees the live mapping (the
+         same "vm_touch + direct access" model as the other user-pointer
+         sites).  The old phys-linear translation below only exists for
+         v1 processes: grp->user_phys_base is 0 under v2 and the v1 window
+         compare rejected every v2 stack address -- every wait returned
+         -EFAULT after the flip (THRD_T futex trio). */
+      if (vm_touch(caller, uaddr, 4, 0) != 0)
+        return -EFAULT;
+      word = (volatile uint32_t *)uaddr;
+    } else {
+      if (uaddr < USER_VIRT_BASE ||
+          uaddr + 4 > USER_VIRT_BASE + USER_REGION_SIZE)
+        return -EFAULT;
+      if (!grp->user_phys_base)
+        return -EFAULT;
+      word = (volatile uint32_t *)(grp->user_phys_base + (uaddr - USER_VIRT_BASE));
+    }
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     /* (2) compare under proc_lock: no lost wakeups (see process.h). */
     uint32_t word_now = *word;

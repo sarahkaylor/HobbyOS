@@ -106,6 +106,14 @@ int load_and_run_program(const char* filename) {
  *   The PID of the new process, or -1 on failure.
  */
 int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid, const char *args) {
+  /* P2.5 (S5 flip, design section 8/D4): the loader default is v2 -- every
+     wave/spawn user program loads as an AS_V2 process at USER_IMG_BASE
+     (kernel tasks never pass through here).  Rollback lever: this call is
+     the AS_V2 selection line; returning to the 32 MiB v1 body below
+     restores the pre-flip behavior. */
+  if (1)
+    return load_and_run_program_v2(filename, stdin_fd, stdout_fd, stderr_fd,
+                                   caller_pid, args);
   if (!filename) return -1;
   uart_puts("Loading program for scheduler: ");
   uart_puts(filename);
@@ -312,6 +320,75 @@ int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int st
   return load_and_run_program_in_scheduler_args(filename, stdin_fd, stdout_fd, stderr_fd, caller_pid, 0);
 }
 
+/* P2.5 (S5 flip): reserve the whole v2 HEAP slot as one RW demand-zero
+ * region.  The user allocator (src/user/malloc.c) carves its arena from
+ * this span, so its handed-out memory is always backed -- pages materialize
+ * on first touch (VMK_HEAP is demand-zero).  It also makes SYS_BRK grows
+ * bookkeeping within an already-backed span (sys_brk skips the redundant
+ * region insert).  Costs no frames at load.  Returns 0 / -1. */
+static int v2_insert_heap(struct addr_space *as) {
+  if (vm_region_insert(as, USER_HEAP_BASE_V2, USER_HEAP_SIZE,
+                       VM_PROT_READ | VM_PROT_WRITE, VMK_HEAP,
+                       VM_MAP_PRIVATE, 0, 0) != 0) {
+    uart_puts("v2 loader: heap region insert failed\n");
+    return -1;
+  }
+  return 0;
+}
+
+/* P2.5 (S5 flip): read a flat .bin image into fresh zeroed frames mapped at
+ * USER_IMG_BASE in `as` and register the IMAGE region (loader v2 and v2
+ * exec share this).  The flat .bin now covers the full image span through
+ * _end (.bss included; linker.ld's .tls_meta pads it), so every page the
+ * program needs is backed.  Returns 0 (file cursor consumed) or -1 -- the
+ * caller tears `as` down. */
+static int v2_map_image(struct addr_space *as, struct file *f, uint32_t fsize) {
+  if (fsize == 0 || fsize > USER_IMG_SIZE) {
+    uart_puts("v2 loader: bad image size ");
+    print_int((int)fsize);
+    uart_puts("\n");
+    return -1;
+  }
+  uint64_t img_len = ((uint64_t)fsize + 0xFFF) & ~0xFFFULL;
+
+  /* IMAGE region + one mapped frame per 4 KiB page (read path). */
+  if (vm_region_insert(as, USER_IMG_BASE, img_len,
+                       VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC, VMK_IMG,
+                       VM_MAP_PRIVATE, 0, 0) != 0) {
+    uart_puts("v2 loader: image region insert failed\n");
+    return -1;
+  }
+  uint64_t off = 0;
+  int total = 0;
+  while (off < img_len) {
+    uint64_t fr = frame_alloc_zeroed();
+    if (!fr)
+      return -1;
+    int n = fat16_read(f, (void *)fr, (int)FRAME_SIZE);
+    if (n <= 0) {
+      frame_free(fr);
+      break;
+    }
+    if (vm_map_page(as, USER_IMG_BASE + off, fr,
+                    VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC, VMK_IMG) != 0) {
+      frame_free(fr);
+      return -1;
+    }
+    /* Same cache discipline as the v1 loader: clean by the identity VA,
+       invalidate the I-cache shareably (the user VA is not mapped in the
+       kernel's current context, so it cannot be used here). */
+    __builtin___clear_cache((char *)fr, (char *)fr + FRAME_SIZE);
+    total += n;
+    off += FRAME_SIZE;
+  }
+  uart_puts("v2 loader: image mapped, bytes=");
+  print_int(total);
+  uart_puts(" pages=");
+  print_int((int)(off / FRAME_SIZE));
+  uart_puts("\n");
+  return 0;
+}
+
 /**
  * P2.2 (S2): loader v2 — the AS_V2 opt-in path (design section 8, S2).
  *
@@ -327,9 +404,6 @@ int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int st
 int load_and_run_program_v2(const char* filename, int stdin_fd,
                             int stdout_fd, int stderr_fd, int caller_pid,
                             const char *args) {
-  (void)stdin_fd;
-  (void)stdout_fd;
-  (void)stderr_fd;
   if (!filename) return -1;
   uart_puts("Loading program for scheduler (v2 AS): ");
   uart_puts(filename);
@@ -400,6 +474,41 @@ int load_and_run_program_v2(const char* filename, int stdin_fd,
     proc_split_argv(child, flat);
   }
 
+  /* P2.5 (S5 flip): spawn fd inheritance.  The v1 loader's wiring applies
+     verbatim to a v2 PCB -- fds are group state, not AS state -- and the
+     utility-test programs (CUTTEST/…) and PIPETEST/SHTEST spawn children
+     with pipe ends on fd 0/1/2. */
+  if (parent && child) {
+    if (stdin_fd >= 0 && stdin_fd < MAX_OPEN_FDS &&
+        parent->open_fds[stdin_fd] != -1) {
+      child->open_fds[0] = parent->open_fds[stdin_fd];
+      fs_reopen(child->open_fds[0]);
+      child->num_open_fds++;
+    }
+    if (stdout_fd >= 0 && stdout_fd < MAX_OPEN_FDS &&
+        parent->open_fds[stdout_fd] != -1) {
+      child->open_fds[1] = parent->open_fds[stdout_fd];
+      fs_reopen(child->open_fds[1]);
+      child->num_open_fds++;
+    }
+    if (stderr_fd >= 0 && stderr_fd < MAX_OPEN_FDS &&
+        parent->open_fds[stderr_fd] != -1) {
+      child->open_fds[2] = parent->open_fds[stderr_fd];
+      fs_reopen(child->open_fds[2]);
+      child->num_open_fds++;
+    } else {
+      /* Default: inherit the parent's fd 2 only when it is NOT a pipe
+         (same rule and rationale as the v1 loader: a duplicated pipe end
+         keeps reader/writer counts alive and self-deadlocks full pipes). */
+      int gf = parent->open_fds[2];
+      if (gf != -1 && !file_gfd_is_pipe(gf)) {
+        child->open_fds[2] = gf;
+        fs_reopen(gf);
+        child->num_open_fds++;
+      }
+    }
+  }
+
   struct file f;
   if (fat16_open(filename, &f) != 0) {
     uart_puts("Failed to open file: ");
@@ -409,54 +518,12 @@ int load_and_run_program_v2(const char* filename, int stdin_fd,
     return -1;
   }
   uint32_t fsize = f.fat16.entry.file_size;
-  if (fsize == 0 || fsize > USER_IMG_SIZE) {
-    uart_puts("v2 loader: bad image size ");
-    print_int((int)fsize);
-    uart_puts("\n");
+  if (v2_map_image(as, &f, fsize) != 0) {
     fat16_close(&f);
     process_free(pid);
     return -1;
-  }
-  uint64_t img_len = ((uint64_t)fsize + 0xFFF) & ~0xFFFULL;
-
-  /* IMAGE region + one mapped frame per 4 KiB page (read path). */
-  if (vm_region_insert(as, USER_IMG_BASE, img_len,
-                       VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC, VMK_IMG,
-                       VM_MAP_PRIVATE, 0, 0) != 0) {
-    uart_puts("v2 loader: image region insert failed\n");
-    fat16_close(&f);
-    process_free(pid);
-    return -1;
-  }
-  uint64_t off = 0;
-  int total = 0;
-  while (off < img_len) {
-    uint64_t fr = frame_alloc_zeroed();
-    if (!fr)
-      goto fail;
-    int n = fat16_read(&f, (void *)fr, (int)FRAME_SIZE);
-    if (n <= 0) {
-      frame_free(fr);
-      break;
-    }
-    if (vm_map_page(as, USER_IMG_BASE + off, fr,
-                    VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC, VMK_IMG) != 0) {
-      frame_free(fr);
-      goto fail;
-    }
-    /* Same cache discipline as the v1 loader: clean by the identity VA,
-       invalidate the I-cache shareably (the user VA is not mapped in the
-       kernel's current context, so it cannot be used here). */
-    __builtin___clear_cache((char *)fr, (char *)fr + FRAME_SIZE);
-    total += n;
-    off += FRAME_SIZE;
   }
   fat16_close(&f);
-  uart_puts("v2 loader: image mapped, bytes=");
-  print_int(total);
-  uart_puts(" pages=");
-  print_int((int)(off / FRAME_SIZE));
-  uart_puts("\n");
 
   /* Main-stack region (the 64 KiB guard below stays a hole).  S3: demand
      materializes every stack page on first touch, so the loader only
@@ -466,6 +533,11 @@ int load_and_run_program_v2(const char* filename, int stdin_fd,
                        VM_PROT_READ | VM_PROT_WRITE, VMK_STACK,
                        VM_MAP_PRIVATE, 0, 0) != 0) {
     uart_puts("v2 loader: stack region insert failed\n");
+    process_free(pid);
+    return -1;
+  }
+  /* P2.5 (S5 flip): the heap slot, demand-zero (the user malloc's arena). */
+  if (v2_insert_heap(as) != 0) {
     process_free(pid);
     return -1;
   }
@@ -487,14 +559,6 @@ int load_and_run_program_v2(const char* filename, int stdin_fd,
   print_int((int)as->table_frames);
   uart_puts("\n");
   return pid;
-
-fail:
-  uart_puts("v2 loader: out of frames / map failure for ");
-  uart_puts(filename);
-  uart_puts("\n");
-  fat16_close(&f);
-  process_free(pid);
-  return -1;
 }
 
 /**
@@ -557,6 +621,76 @@ int process_exec_current(struct trap_frame *tf, const char *path,
   if (cur->is_thread || grp->live_threads > 1)
     process_exec_terminate_siblings(grp, cur);
 
+  /* P2.5 (S5 flip): v2 exec -- replace the group's AS with a fresh one
+     holding the new image (fresh frames at USER_IMG_BASE + the main-stack
+     reserve) and redirect the live trap frame.  The AS pool is
+     pid-indexed, so a second slot is not available while the old AS
+     lives: restore the kernel table, tear the old AS down, rebuild in the
+     same slot.  A failure past that point leaves the group AS-less, which
+     kills it on the next user fault -- the same effective contract as the
+     v1 path below, whose failed read leaves a zeroed image.  Sibling
+     threads keep the old image (documented P1 divergence, as for v1). */
+  if (grp->as) {
+    vm_arch_restore_kernel();
+    struct addr_space *old = grp->as;
+    grp->as = 0;
+    vm_as_teardown(old);
+    struct addr_space *nas = vm_as_create((uint64_t)grp->pid);
+    if (!nas) {
+      fat16_close(&f);
+      return -ENOMEM;
+    }
+    if (v2_map_image(nas, &f, f.fat16.entry.file_size) != 0) {
+      fat16_close(&f);
+      vm_as_teardown(nas);
+      return -ENOEXEC;
+    }
+    fat16_close(&f);
+    if (vm_region_insert(nas, USER_MAIN_STK_LIMIT_V2, USER_MAIN_STK_SIZE,
+                         VM_PROT_READ | VM_PROT_WRITE, VMK_STACK,
+                         VM_MAP_PRIVATE, 0, 0) != 0) {
+      vm_as_teardown(nas);
+      return -ENOMEM;
+    }
+    if (v2_insert_heap(nas) != 0) {
+      vm_as_teardown(nas);
+      return -ENOMEM;
+    }
+    int vi;
+    for (vi = 0; new_name && new_name[vi] && vi < 31; vi++)
+      cur->name[vi] = new_name[vi];
+    cur->name[vi] = '\0';
+    for (vi = 0; args && args[vi] && vi < 255; vi++)
+      cur->args[vi] = args[vi];
+    cur->args[vi] = '\0';
+    grp->as = nas;
+    vm_arch_switch(nas);
+    grp->heap_brk = USER_HEAP_BASE_V2;
+    grp->anon_map_count = 0;
+    /* Exec resets the TLS register state: the incoming image has NOT
+       installed a TLS block, and a fork-inherited foreign TP (the parent
+       shell's image) must not leak into it -- otherwise the new program's
+       lazy __errno_location() sees TP != 0, skips its install, and its
+       first errno store lands at [old image's TLS + offset], a hole in
+       the new image (observed: mkdir killed writing errno=EEXIST at
+       0x100002C3D0 after fork+exec from the shell). */
+    grp->tls_base = 0;
+    /* P5 (D3.1-D3.3): the same success-path apply as the v1 tail --
+       environment, signal-state reset, FD_CLOEXEC sweep. */
+    process_exec_apply(grp, env, envc);
+    /* P5 (D3-order): install the pre-load marshalled argv[] blob. */
+    proc_set_argv_array(grp, argvblob, argc);
+    tf->elr = USER_IMG_BASE;
+#ifdef __x86_64__
+    grp->context[33] = USER_MAIN_STK_TOP_V2 - 8; /* SysV: 16n+8 at entry */
+#else
+    grp->context[33] = USER_MAIN_STK_TOP_V2;
+#endif
+    arch_set_user_sp(grp->context[33]);
+    tf->regs[0] = 0;
+    return 0;
+  }
+
   uint64_t base = grp->user_phys_base;
 
   /* Zero image + bss [0, MAX_PROGRAM_SIZE) so the new program starts
@@ -581,7 +715,10 @@ int process_exec_current(struct trap_frame *tf, const char *path,
   grp->args[i] = '\0';
 
   /* Exec resets the address-space state: fresh heap top, no anonymous
-     mappings (the new image's data/bss start at the load cap). */
+     mappings (the new image's data/bss start at the load cap), and NO TLS
+     register: a fork-inherited foreign TP would defeat the new image's
+     lazy/crt0 TLS install (same 0x2C3D0-class errno-hole as the v2 path). */
+  grp->tls_base = 0;
   grp->heap_brk = USER_HEAP_BASE;
   grp->anon_map_count = 0;
   for (int i = 0; i < USER_ANON_MAX_REGS; i++) {
@@ -635,15 +772,28 @@ void proc_split_argv(struct process *p, const char *args) {
   p->eargc = narg;
 }
 
+/* P2.5 (S5): is [addr, addr+len) readable (write=0) / writable (write=1)
+ * caller user space?  A v2 process answers to the address-space walk --
+ * vm_range_ok demand-commits the pages (S2 semantics), so a raw access
+ * after this check is safe; v1 keeps the flat-window test. */
+static int pl_user_ok(struct process *p, uint64_t addr, uint64_t len,
+                      int write) {
+  if (len == 0)
+    len = 1;
+  if (p && p->as)
+    return vm_range_ok(p, addr, len, write) == 0;
+  if (addr < USER_VIRT_BASE || addr + len - 1 >= USER_VIRT_BASE + USER_REGION_SIZE)
+    return 0;
+  return 1;
+}
+
 /* Copy a NUL-terminated user string into kernel memory with full bounds
  * checking (mirrors the static u_strcpy in each trap.c). Returns 1 on
  * success (dst NUL-terminated), 0 on bad/out-of-range pointer. */
-static int pl_strcpy(const char *src, char *dst, int cap) {
-  uint64_t base = (uint64_t)src;
-  if (!src || base < USER_VIRT_BASE ||
-      base >= USER_VIRT_BASE + USER_REGION_SIZE)
+static int pl_strcpy(struct process *p, const char *src, char *dst, int cap) {
+  if (!src || cap <= 1)
     return 0;
-  if (base + cap - 1 >= USER_VIRT_BASE + USER_REGION_SIZE)
+  if (!pl_user_ok(p, (uint64_t)src, (uint64_t)cap, 0))
     return 0;
   int i = 0;
   for (; i < cap - 1 && src[i]; i++)
@@ -659,19 +809,24 @@ static int pl_strcpy(const char *src, char *dst, int cap) {
  * argv may be NULL; a bad element stops the copy (the caller falls back to
  * name + flat args, as before).  Always returns 0; *count_out gets the
  * number of elements captured. */
-int proc_marshal_argv(char *const *argv, char *dst, int cap, int *count_out) {
+int proc_marshal_argv(struct process *p, char *const *argv, char *dst, int cap,
+                      int *count_out) {
   if (!dst || !count_out || cap <= 0)
     return -1;
+  p = process_group(p);
   *count_out = 0;
   dst[0] = '\0';
   if (!argv)
     return 0;
   int pos = 0;
   for (int ai = 0; ai < HO_EXEC_MAX_ARGS; ai++) {
+    /* Validate the array slot itself before the raw load below. */
+    if (!pl_user_ok(p, (uint64_t)(argv + ai), sizeof(char *), 0))
+      break;
     if (argv[ai] == 0)
       break;
     char one[64];
-    if (!pl_strcpy((const char *)argv[ai], one, sizeof one))
+    if (!pl_strcpy(p, (const char *)argv[ai], one, sizeof one))
       break;
     if (pos >= cap - 1)
       break;

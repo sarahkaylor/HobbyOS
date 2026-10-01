@@ -26,7 +26,12 @@ int ho_tls_ready_flag;
  * lazy TLS install for crt0-less programs lives (the accessor is called
  * before the very first errno read or write). */
 int *__errno_location(void) {
-  if (!ho_tls_installed())
+  /* The register alone is NOT proof this image's TLS is installed: after
+     fork+exec a foreign TP (the parent's block: valid in the OLD image,
+     a hole here) can still be live while this process never installed.
+     The per-process flag is the ground truth; the register check covers
+     the first-install case where TP is 0 and the flag is cold. */
+  if (!ho_tls_installed() || !ho_tls_ready_flag)
     ho_tls_setup_initial();
   return &errno_storage;
 }
@@ -104,12 +109,13 @@ static long syscall5(long num, long a0, long a1, long a2, long a3, long a4) {
  * p1-threads-design.md section 4). */
 extern char __tls_start[];
 extern char __tls_end[];
-/* Linker-script symbols (linker.ld) are ABSOLUTE: the symbol's value IS the
- * number, and there is no storage behind it.  Declaring it as an array and
- * using the decayed pointer reads that value; declaring it as a variable
- * (or reading an array element) would dereference address `value` instead
- * -- observed as a data abort at 0x10 from crt0's setup call. */
-extern char __tls_align[];
+/* P2.5 (S5): the TLS alignment as DATA.  Linker-script symbols are
+ * ABSOLUTE (the value IS the number); the old reference here was an
+ * absolute-symbol read `(unsigned long)__tls_align`, which llvm/ld.lld
+ * cannot encode PC-relative from a 64 GiB image base (R_AARCH64_ADR_PREL_
+ * PG_HI21 out of range).  .tls_meta (linker.ld, after .bss) carries the
+ * same number at an in-image address, so this is an ordinary load. */
+extern const unsigned long __tls_meta_align[];
 
 /* Is the calling thread's TLS register installed?  aarch64: read TPIDR_EL0
  * (per-thread truth).  x86_64: the flag every installer sets (the FS base
@@ -143,7 +149,7 @@ static char main_tls_block[HO_TLS_MAIN_BLOCK] __attribute__((aligned(16)));
  * pthread.c). */
 void ho_tls_setup_initial(void) {
   extern char __tls_start[], __tls_end[], __tls_data_end[];
-  unsigned long align = (unsigned long)__tls_align ? (unsigned long)__tls_align : 8;
+  unsigned long align = __tls_meta_align[0] ? __tls_meta_align[0] : 8;
   unsigned long tls_data = (unsigned long)(__tls_data_end - __tls_start);
   unsigned long tls_size = (unsigned long)(__tls_end - __tls_start);
   unsigned long image = (tls_size + align - 1) & ~(align - 1);
@@ -200,7 +206,12 @@ int ho_futex_wake(volatile int *uaddr, int count) {
 void ho_futex_wake_all(volatile int *uaddr) {
   syscall(SYS_FUTEX, (long)uaddr, 1, 0x7fffffffL, 0);
 }
-int ho_set_tls_raw(long tls) { return (int)syscall(SYS_SET_TLS, tls, 0, 0, 0); }
+int ho_set_tls_raw(long tls) {
+  int r = (int)syscall(SYS_SET_TLS, tls, 0, 0, 0);
+  if (r == 0)
+    ho_tls_mark_installed();
+  return r;
+}
 int ho_yield_raw(void) { return (int)syscall(SYS_YIELD, 0, 0, 0, 0); }
 void ho_thread_exit_raw(int retval) {
   syscall(SYS_THREAD_EXIT, (long)retval, 0, 0, 0);

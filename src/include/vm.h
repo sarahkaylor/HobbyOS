@@ -85,7 +85,34 @@
 #define AS_V1 1
 #define AS_V2 2
 
-struct vm_object; /* memfd / fb backing (P2.4); NULL in S2/S3 */
+/* --- P2.4 (S4): shared objects (memfd / MAP_SHARED anon) ------------- */
+
+/* Object slots and cap.  64 MiB per object is the S4 acceptance scope
+ * (terabytes of sparse VA are fine; resident object pages are frames). */
+#define VM_OBJ_MAX 64
+#define VM_OBJ_MAX_BYTES 0x4000000ULL /* 64 MiB */
+#define VM_OBJ_MAX_FRAMES (VM_OBJ_MAX_BYTES / 0x1000)
+
+#define VM_OBJ_MEMFD 1 /* SYS_MEMFD_CREATE backing */
+#define VM_OBJ_ANON 2  /* MAP_SHARED|MAP_ANONYMOUS backing (no fd) */
+
+/* fcntl(F_ADD_SEALS/F_GET_SEALS) subset (design section 4.3, Linux
+ * numbers; SHRINK/GROW enforced at ftruncate, WRITE recorded advisory). */
+#define VM_SEAL_SEAL 0x0001
+#define VM_SEAL_SHRINK 0x0002
+#define VM_SEAL_GROW 0x0004
+#define VM_SEAL_WRITE 0x0008
+
+struct vm_object {
+  int used;      /* slot allocated */
+  int refs;      /* owners: create=1, +1 per fd instance / region record */
+  int kind;      /* VM_OBJ_* */
+  uint64_t size; /* bytes (page capacity = ceil(size/FRAME_SIZE)) */
+  uint64_t seals;
+  int nr_frames; /* frame-array capacity (pages) */
+  int arr_frames;/* frames owned by the array itself */
+  uint64_t *frames; /* frame-backed array; 0 = not materialized */
+};
 
 struct vm_region {  /* sorted by base; per AS, under proc_lock */
   uint64_t base;    /* 4 KiB-aligned VA span */
@@ -188,6 +215,50 @@ int vm_kwrite(struct process *p, uint64_t va, const void *src, int len);
  * report line. */
 int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
                     const char **why);
+
+/* --- Shared objects (S4; vm.c) --------------------------------------- */
+
+/* Allocate an object slot with `size` bytes of page capacity (rounded up;
+ * 0 allowed).  The creation reference is refs=1 (the caller owns it); each
+ * fd instance / region record takes one more.  NULL when the slot table or
+ * the frame array cannot be allocated, or size > VM_OBJ_MAX_BYTES. */
+struct vm_object *vm_object_create(int kind, uint64_t size);
+
+/* Take/release a reference.  The last unref frees every materialized
+ * page, the frame array, and the slot. */
+void vm_object_ref(struct vm_object *o);
+void vm_object_unref(struct vm_object *o);
+
+/* The physical frame backing `off` (materialized zero-fill on first
+ * touch), or 0 when off is past the object's capacity or the pool is
+ * exhausted.  Caller holds vm_lock (the demand/fault paths do). */
+uint64_t vm_object_page_locked(struct vm_object *o, uint64_t off);
+
+/* ftruncate for objects: set the byte size.  Grow allocates a bigger
+ * frame array; shrink frees materialized pages above the new size.
+ * VM_SEAL_SHRINK/GROW are enforced here (-EPERM). Returns 0 or -errno. */
+int vm_object_truncate(struct vm_object *o, uint64_t size);
+
+uint64_t vm_object_size(struct vm_object *o);
+int vm_object_add_seals(struct vm_object *o, uint64_t seals); /* -EPERM on SEAL */
+uint64_t vm_object_get_seals(struct vm_object *o);
+
+/* Clone `src`'s regions and resident pages into `dst`, which must be a
+ * fresh empty v2 AS (process_create_v2's provisioning / vm_as_create).
+ * Private pages are copied frame-by-frame, shared/object pages map the
+ * same backing (object refs taken), holes stay holes.  Returns 0, or -1
+ * having left partial state for the caller's teardown. */
+int vm_as_clone_into(struct addr_space *src, struct addr_space *dst);
+
+/* Convenience wrapper (unit tests): create the AS for `tgid` and clone
+ * into it.  Returns the new AS or NULL. */
+struct addr_space *vm_as_clone(struct addr_space *src, uint64_t tgid);
+
+/* Map the 4 MiB framebuffer slot (USER_FB_BASE_V2, VMK_FB, RW, noexec)
+ * into a v2 group's AS.  Idempotent (returns the VA when already mapped);
+ * the leaves point at `fb_phys` and are never freed by teardown.
+ * Returns the VA or a negative errno. */
+int64_t vm_map_fb(struct process *grp, uint64_t fb_phys);
 
 /* --- mmap family v2 (S3; design section 4.1) ------------------------- */
 
