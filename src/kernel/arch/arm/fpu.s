@@ -87,3 +87,16 @@ fpu_restore:
     ldr x2, [x0, #520]
     msr fpsr, x2
     ret
+
+// void arch_fpu_save_to(void *area) / void arch_fpu_restore_from(const void *)
+// P5 S3 (D8.7): destination-pointer variants for the signal frame — the
+// same 528-byte FPSIMD image as fpu_save/fpu_restore, but the destination
+// is the delivery frame on the user stack instead of the PCB.  The area
+// must be 16-byte aligned (stp/ldp q accesses).  Thin aliases: the
+// existing bodies already take the area in x0.
+.global arch_fpu_save_to
+.global arch_fpu_restore_from
+arch_fpu_save_to:
+    b fpu_save
+arch_fpu_restore_from:
+    b fpu_restore

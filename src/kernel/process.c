@@ -8,6 +8,7 @@
 #include "arch/cpu.h"
 #include "timer.h"
 #include "errno.h"
+#include "syscall.h"
 #include <stdint.h>
 
 /* --- debugcon (0xE9) parking diagnostic: IRQ-safe port writes only --- */
@@ -378,6 +379,45 @@ static void reap_status_write(struct process *parent, uint64_t va, int st) {
     *(int *)(parent->user_phys_base + off) = st;
 }
 
+/* --- P5 S3 (D8): delivery-engine helpers ----------------------------- */
+
+/* D6 (frozen table): the fault class (SIGILL/SIGABRT/SIGBUS/SIGSEGV) is
+ * accepted-and-recorded but never delivered to a handler, and SIGUSR1/
+ * SIGUSR2 delivery is deliberately deferred (D13/OQ3) — a mis-delivered
+ * suspend/resume signal must never let WTF's suspend() proceed.  Pending
+ * bits for these accumulate harmlessly; everything else delivers. */
+static int sig_deliverable(int sig) {
+  switch (sig) {
+  case HO_SIGILL:
+  case HO_SIGABRT:
+  case HO_SIGBUS:
+  case HO_SIGSEGV:
+  case HO_SIGUSR1:
+  case HO_SIGUSR2:
+  case HO_SIGSTOP:
+    return 0;
+  default:
+    return 1;
+  }
+}
+
+/* D8.3: a leader parked in a restartable slice (select/poll/sleep: BLOCKED
+ * with a wake_ms deadline/slice) is woken NOW so handler delivery happens
+ * at the park restart (the syscall rewinds and re-probes; the deadline is
+ * not consumed).  Blocked pipe / futex / WAIT_* parks keep their state:
+ * their delivery defers until the syscall completes (D8.4).  Caller holds
+ * proc_lock. */
+static void sig_wake_leader_locked(struct process *grp, int sig) {
+  if (!grp || grp->is_thread || grp->is_kernel_process)
+    return;
+  if (!sig_deliverable(sig) || grp->sig_in_handler)
+    return;
+  if (grp->state == PROC_STATE_BLOCKED && grp->wake_ms > 0) {
+    grp->wake_ms = 0;
+    grp->state = PROC_STATE_READY;
+  }
+}
+
 /* D5.3/D5.4: THE unified child-death delivery -- called from every death
  * path (group_teardown for normal exit/exit_group, process_kill_group_sig
  * for kill/fatal signals).  Wakes a parent parked in WAIT_CHILD (matched
@@ -407,13 +447,20 @@ static void reap_deliver_locked(struct process *grp) {
     grp->exit_status = 0;
   }
   /* D5.4/D8.3: SIGCHLD pending on the parent group so both routes (GLib
-     handler, own reaper) observe the death promptly.  Delivery (handler
-     invocation) is S3; the bit is recorded either way. */
+     handler, own reaper) observe the death promptly.  The S3 frame engine
+     delivers the handler at the leader's next return-to-user boundary; a
+     parent parked in a select/poll/sleep slice is woken here. */
   int pp = grp->parent_pid;
   if (pp > 0 && pp < MAX_PROCESSES) {
     struct process *pgp = process_group(&proc_table[pp]);
-    if (pgp->state != PROC_STATE_FREE)
+    if (pgp->state != PROC_STATE_FREE) {
       pgp->sig_pending |= (1u << (HO_SIGCHLD - 1));
+      /* D8.2 minimal siginfo: si_pid = the dead child, si_status = the
+         waitpid status word recorded by group_teardown. */
+      pgp->sig_child_pid = grp->pid;
+      pgp->sig_child_status = grp->exit_status;
+      sig_wake_leader_locked(pgp, HO_SIGCHLD);
+    }
   }
 }
 
@@ -1158,6 +1205,12 @@ void schedule(struct trap_frame *tf, int is_yield) {
       interrupts_disable();
       spinlock_release(&proc_lock);
 
+      /* P5 S3 (D8.4a/b): the resume boundary — timer-preempt resume of a
+         leader and the restart of a parked slice.  The resumed AS is
+         installed (vm_arch_switch above), so a planted handler frame lands
+         in the right address space; a rewound blocked-park restart defers
+         to its own trap exit (D8.4b). */
+      process_signal_resume_deliver(&proc_table[next], &local_tf);
 
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
       enter_user_space(&local_tf, target_sp);
@@ -1633,10 +1686,9 @@ int process_signal(int pid, int sig) {
     spinlock_release_irqrestore(&proc_lock, flags);
     return 0;
   }
-  /* Real handler: record pending.  Delivery happens at the leader's next
-     return-to-user boundary (D8; the frame engine lands in S3 — until then
-     the bit accumulates, which is the documented S1/S2 state). */
+  /* Real handler: record pending + wake a restartable-slice park (D8.3). */
   target->sig_pending |= (1u << (sig - 1));
+  sig_wake_leader_locked(target, sig);
   spinlock_release_irqrestore(&proc_lock, flags);
   return 0;
 }
@@ -1662,6 +1714,8 @@ int signal_epipe(struct process *grp) {
   }
   if (h != 1)
     grp->sig_pending |= (1u << (HO_SIGPIPE - 1));
+  if (h != 1)
+    sig_wake_leader_locked(grp, HO_SIGPIPE);
   spinlock_release_irqrestore(&proc_lock, flags);
   return 0;
 }
@@ -1704,20 +1758,264 @@ int process_sigaction(int signum, const struct ho_sigaction *act,
   return 0;
 }
 
-/* Row 84 (D8.6): a stale/no-frame call is the documented defensive
- * -EINVAL.  No frame can exist before the S3 engine lands, so this is
- * always the defensive path today. */
+/* --- P5 S3 (D8): the main-thread signal delivery frame engine -------- */
+
+/* D8.2 frame: built on the target's user stack, 16-byte aligned,
+ * immediately below SP.  Saves the full register context + FP/SIMD state
+ * and a minimal siginfo.  Only `signo`/`si_*` are ever read from user
+ * space in P5 (GLib's handler takes the signal number as an argument);
+ * the FP area sits at the 16-byte-aligned offset 320 (fxsave64 / ldp q
+ * require it).  848 bytes = 320 header/context + 528 FP image (the ARM
+ * FPSIMD format; x64 uses the first 512 of the same area). */
+#define HO_SIGFRAME_MAGIC 0x484F5333ULL /* "HOS3" */
+struct ho_sigframe {
+  uint64_t magic;
+  int64_t signo;
+  int64_t si_code;   /* 0 = SI_USER; 1 = CLD_EXITED (SIGCHLD, minimal) */
+  int64_t si_pid;    /* SIGCHLD: the dead child (else 0) */
+  int64_t si_status; /* SIGCHLD: its waitpid status word (else 0) */
+  uint64_t regs[30];
+  uint64_t lr;     /* x30 at interruption (ARM) / user RSP (x64) */
+  uint64_t elr;    /* interrupted PC */
+  uint64_t spsr;   /* interrupted flags (ARM SPSR_EL1 / x64 RFLAGS) */
+  uint64_t sp;     /* interrupted user SP */
+  uint64_t restorer;
+  uint64_t fpu[66] __attribute__((aligned(16)));
+};
+#define HO_SIGFRAME_SIZE 848
+/* Layout lock: a size drift silently corrupts handler stacks. */
+typedef char ho_sigframe_size_assert[sizeof(struct ho_sigframe) <= HO_SIGFRAME_SIZE ? 1 : -1];
+
+/* D8.8 / disposition-turned-default: run the signal's default action
+ * instead of a handler frame.  SIGCHLD's default is ignore (D6). */
+static void sig_force_default(struct process *grp, int sig) {
+  if (sig == HO_SIGCHLD)
+    return;
+  process_kill_group_sig(grp, sig);
+}
+
+/* D8.8: the frame must fit in the leader's MAPPED stack — a guard hit
+ * forces the default action rather than faulting in delivery.  vm_touch
+ * must not run under proc_lock, so this is called before the commit. */
+static int sig_frame_range_ok(struct process *grp, uint64_t base, uint64_t top) {
+  if (base < (uint64_t)USER_VIRT_BASE)
+    return 0;
+  return process_user_ok(grp, base, top - base, 1) == 0;
+}
+
+/* Drop one pending bit (used by the engines' disposition/bounds paths). */
+static void sig_drop_pending(struct process *grp, int sig) {
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  grp->sig_pending &= ~(1u << (sig - 1));
+  spinlock_release_irqrestore(&proc_lock, flags);
+}
+
+/* D8.4(a): called at every trap exit of the leader to user mode.
+ * Returns 1 when a handler frame was planted (the trap will enter the
+ * handler instead of returning to the interrupted PC). */
+int process_signal_deliver(struct process *grp, struct trap_frame *tf) {
+  if (!grp || grp->is_kernel_process || grp->is_thread || !tf)
+    return 0;
+#ifdef __x86_64__
+  /* CPL3 target only: kernel-mode trap frames (a timer inside a syscall)
+     never deliver; delivery happens at the syscall's own exit.  The
+     frame-carried user RSP is tf->lr (per-trap, switch-immune). */
+  if ((tf->cs & 3) != 3)
+    return 0;
+  uint64_t user_sp = tf->lr;
+#else
+  /* EL0t only; SP_EL0 still holds the interrupted user SP (both trap
+     exits and the resume tail restore it via arch_set_user_sp). */
+  if ((tf->spsr & 0xF) != 0)
+    return 0;
+  uint64_t user_sp = arch_get_user_sp();
+#endif
+  /* Pick the lowest deliverable pending signal (no nesting, D8.5). */
+  int sig = 0;
+  for (int s = 1; s < HO_SIG_MAX; s++) {
+    if ((grp->sig_pending & (1u << (s - 1))) && sig_deliverable(s)) {
+      sig = s;
+      break;
+    }
+  }
+  if (!sig || grp->sig_in_handler)
+    return 0;
+  uint64_t handler = grp->sig_handler[sig];
+  if (handler == HO_SIG_IGN) {
+    sig_drop_pending(grp, sig);
+    return 0;
+  }
+  if (handler == HO_SIG_DFL) {
+    sig_drop_pending(grp, sig);
+    sig_force_default(grp, sig);
+    return 0;
+  }
+  uint64_t restorer = grp->sig_restorer;
+  if (restorer == 0 || process_user_ok(grp, restorer, 4, 0) != 0 ||
+      user_sp < (uint64_t)HO_SIGFRAME_SIZE + 32) {
+    uart_puts("[KERNEL] signal delivery: no trampoline/SP -> default action\n");
+    sig_drop_pending(grp, sig);
+    sig_force_default(grp, sig);
+    return 0;
+  }
+  uint64_t base = (user_sp - (uint64_t)HO_SIGFRAME_SIZE - 16) & ~(uint64_t)15;
+  if (!sig_frame_range_ok(grp, base, user_sp)) {
+    uart_puts("[KERNEL] signal delivery: stack bounds -> default action\n");
+    sig_drop_pending(grp, sig);
+    sig_force_default(grp, sig);
+    return 0;
+  }
+  /* Commit: only the leader delivers for its group, so no other deliverer
+     races this state; pending-set racers lose harmlessly. */
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  if (!(grp->sig_pending & (1u << (sig - 1))) || grp->sig_in_handler ||
+      grp->sig_handler[sig] <= HO_SIG_IGN) {
+    spinlock_release_irqrestore(&proc_lock, flags);
+    return 0;
+  }
+  handler = grp->sig_handler[sig];
+  restorer = grp->sig_restorer;
+  int si_pid = 0, si_status = 0, si_code = 0;
+  if (sig == HO_SIGCHLD) {
+    si_pid = grp->sig_child_pid;
+    si_status = grp->sig_child_status;
+    si_code = 1; /* CLD_EXITED (minimal; D11 keeps siginfo fidelity out) */
+  }
+  grp->sig_pending &= ~(1u << (sig - 1));
+  grp->sig_in_handler = 1;
+  grp->sig_frame = base;
+  spinlock_release_irqrestore(&proc_lock, flags);
+
+  /* Plant the frame.  The target address space is live at every call
+     site: trap exits run in the caller's AS; the resume hook runs after
+     vm_arch_switch already installed the resumed AS. */
+  struct ho_sigframe *f = (struct ho_sigframe *)base;
+  f->magic = HO_SIGFRAME_MAGIC;
+  f->signo = sig;
+  f->si_code = si_code;
+  f->si_pid = si_pid;
+  f->si_status = si_status;
+  for (int i = 0; i < 30; i++)
+    f->regs[i] = tf->regs[i];
+  f->lr = tf->lr;
+  f->elr = tf->elr;
+  f->spsr = tf->spsr;
+  f->sp = user_sp;
+  f->restorer = restorer;
+  arch_fpu_save_to(f->fpu);
+
+  /* D8.2 handler entry state per arch ABI. */
+#ifdef __x86_64__
+  uint64_t entry_sp = base - 8;
+  *(volatile uint64_t *)entry_sp = restorer; /* handler return address */
+  tf->regs[5] = (uint64_t)(int64_t)sig;      /* rdi = signum */
+  tf->lr = entry_sp;                         /* iretq RSP slot source */
+  tf->elr = handler;
+  tf->cs = 0x1B;
+  tf->ss = 0x23;
+  tf->spsr |= 0x200; /* RFLAGS.IF: handlers run with IRQs on */
+  arch_set_user_sp(entry_sp);
+#else
+  tf->regs[0] = (uint64_t)(int64_t)sig; /* x0 = signum */
+  tf->lr = restorer;                    /* x30 = return into the trampoline */
+  tf->elr = handler;
+  arch_set_user_sp(base);
+#endif
+  return 1;
+}
+
+/* D8.4(b): the resume boundary (timer-preempt resume of the leader and
+ * the restart of a parked slice).  A resume that re-executes a rewound
+ * syscall restart delivers only for the restartable slices
+ * (select/poll/sleep); blocked pipe/futex/WAIT_* completes at its own
+ * trap exit instead (D8.4's documented deferral). */
+static int sig_resume_defers(struct process *grp, struct trap_frame *tf) {
+  uint64_t at = tf->elr;
+#ifdef __x86_64__
+  if (at < 2 || process_user_ok(grp, at, 2, 0) != 0)
+    return 0;
+  const volatile uint8_t *q = (const volatile uint8_t *)at;
+  if (q[0] != 0x0F || q[1] != 0x05) /* the `syscall` opcode */
+    return 0;
+  uint64_t num = tf->regs[0]; /* rax */
+#else
+  if (at < 4 || process_user_ok(grp, at, 4, 0) != 0)
+    return 0;
+  const volatile uint32_t insn = *(const volatile uint32_t *)at;
+  if ((insn & 0xFFE0001Fu) != 0xD4000001u) /* svc #0 */
+    return 0;
+  uint64_t num = tf->regs[8]; /* x8 */
+#endif
+  return !(num == SYS_SELECT || num == SYS_POLL || num == SYS_SLEEP);
+}
+
+void process_signal_resume_deliver(struct process *p, struct trap_frame *tf) {
+  if (!p || p->is_kernel_process || p->is_thread || !tf)
+    return;
+  if (p->sig_in_handler || p->sig_pending == 0)
+    return;
+  if (sig_resume_defers(p, tf))
+    return;
+  process_signal_deliver(p, tf);
+}
+
+/* The trap-exit hook the arch dispatchers call: the leader's return to
+ * user mode.  No-op for kernel tasks/threads/siblings. */
+void process_signal_trap_exit(struct trap_frame *tf) {
+  struct process *cur = current_process();
+  if (!cur || cur->is_kernel_process || cur->is_thread)
+    return;
+  process_signal_deliver(cur, tf);
+}
+
+/* Row 84 (D8.6): restore the interrupted context from the active signal
+ * frame, clear sig_in_handler, and re-check pending delivery (the
+ * re-check rides the caller's trap exit: the dispatcher calls this, then
+ * falls through to the trap-exit hook, which delivers the NEXT pending
+ * signal with no nesting).  A stale/no-frame call is the documented
+ * defensive -EINVAL and the process continues. */
 int process_sigreturn(struct trap_frame *tf) {
-  (void)tf;
+  if (!tf)
+    return -EINVAL;
   struct process *cur = current_process();
   if (!cur)
     return -EINVAL;
   struct process *grp = process_group(cur);
-  if (!grp->sig_in_handler || grp->sig_frame == 0)
+  uint64_t base = grp->sig_frame;
+  if (!grp->sig_in_handler || base == 0) {
+    tf->regs[0] = (uint64_t)(int64_t)(-EINVAL);
     return -EINVAL;
-  /* S3 (frame engine): restore registers + FP + interrupted PC/SP/flags
-     from the frame, clear sig_in_handler, re-check pending delivery. */
-  return -EINVAL;
+  }
+  if (process_user_ok(grp, base, HO_SIGFRAME_SIZE, 1) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)(-EINVAL);
+    return -EINVAL;
+  }
+  const struct ho_sigframe *f = (const struct ho_sigframe *)base;
+  if (f->magic != HO_SIGFRAME_MAGIC) {
+    tf->regs[0] = (uint64_t)(int64_t)(-EINVAL);
+    return -EINVAL;
+  }
+  arch_fpu_restore_from(f->fpu);
+  for (int i = 0; i < 30; i++)
+    tf->regs[i] = f->regs[i];
+  tf->lr = f->lr;
+  tf->elr = f->elr;
+  tf->spsr = f->spsr;
+#ifdef __x86_64__
+  tf->cs = 0x1B;
+  tf->ss = 0x23;
+  tf->spsr |= 0x200;
+#endif
+  arch_set_user_sp(f->sp);
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  grp->sig_in_handler = 0;
+  grp->sig_frame = 0;
+  spinlock_release_irqrestore(&proc_lock, flags);
+  /* The re-check of pending delivery is the trap-exit hook (the caller's
+     dispatcher runs it right after this returns): a handler that
+     SIGRETURNs with another signal pending gets it delivered before the
+     interrupted context resumes (D8.6/D8.5). */
+  return 0;
 }
 
 /* Row 85 (D2): read the environment blob (mirror of sys_readargv; the
@@ -2139,6 +2437,9 @@ void start_scheduler(void) {
         interrupts_disable();
         spinlock_release(&proc_lock);
         (void)flags;
+
+        /* P5 S3 (D8.4a/b): same resume-boundary delivery as schedule(). */
+        process_signal_resume_deliver(&proc_table[i], &local_tf);
 
         extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
         enter_user_space(&local_tf, target_sp);

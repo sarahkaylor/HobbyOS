@@ -818,6 +818,121 @@ static void sys_spawn(struct trap_frame *tf) {
   }
 }
 
+/* --- P5 S5 (D4, row 86): SYS_SPAWN_EX ------------------------------- */
+
+static void sys_spawn_ex_worker(void *arg) {
+  struct ho_spawn_ex *ex = (struct ho_spawn_ex *)arg;
+  int r = load_and_run_spawn_ex(ex);
+
+  struct process *caller = process_get_pcb(ex->caller_pid);
+  if (caller) {
+    extern spinlock_t proc_lock;
+    uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    if (caller->state == PROC_STATE_WAIT_SPAWN) {
+      caller->spawn_retval = r;
+      caller->context[0] = (uint64_t)(int64_t)r; /* return value in rax */
+      caller->state = PROC_STATE_READY;
+    }
+    spinlock_release_irqrestore(&proc_lock, flags);
+  }
+
+  kernel_exit();
+}
+
+/* spawn_ex(path, argv, envp, fdmap, n): marshal the caller's pointers into
+ * the caller's pool slot (still in the caller's context; x64 ABI: rdi,
+ * rsi, rdx, r10, r8 -> regs[5], regs[4], regs[3], regs[9], regs[7]),
+ * park in WAIT_SPAWN, run the spawn2 worker machinery, return pid |
+ * -errno. */
+static void sys_spawn_ex(struct trap_frame *tf) {
+  const char *path = (const char *)tf->regs[5];
+  char *const *argv = (char *const *)tf->regs[4];
+  const char *envp = (const char *)tf->regs[3];
+  const int *fdmap = (const int *)tf->regs[9];
+  int n = (int)tf->regs[7];
+
+  struct process *caller = current_process();
+  if (!caller) {
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return;
+  }
+  if (!path || !sys_user_range_ok((uint64_t)path, 1)) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  if (n < 0 || n > HO_SPAWN_EX_MAX_MAP) {
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL; /* D4.4: bad fdmap */
+    return;
+  }
+  uint64_t fdm_addr = (uint64_t)fdmap;
+  if (n > 0 &&
+      (!fdmap || (fdm_addr & 3) || !sys_user_range(fdm_addr, (uint64_t)n * 8, 0))) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+
+  struct ho_spawn_ex *ex = &spawn_ex_pool[caller->pid];
+  int i = 0;
+  while (path[i] && i < 31) {
+    ex->filename[i] = path[i];
+    i++;
+  }
+  ex->filename[i] = '\0';
+  ex->caller_pid = caller->pid;
+  if (proc_marshal_argv(caller, argv, ex->argvblob, (int)sizeof ex->argvblob,
+                        &ex->argc) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  if (process_read_envp(caller, (const char *const *)envp, ex->env,
+                        (int)sizeof ex->env, &ex->envc) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  for (int k = 0; k < n; k++) {
+    ex->fdmap_src[k] = fdmap[2 * k];
+    ex->fdmap_dst[k] = fdmap[2 * k + 1];
+  }
+  ex->fdmap_n = n;
+
+  extern spinlock_t proc_lock;
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  save_context(caller, tf);
+  caller->spawn_retval = -EAGAIN; /* failure default until the worker reports */
+  caller->state = PROC_STATE_WAIT_SPAWN;
+  spinlock_release_irqrestore(&proc_lock, flags);
+
+  extern int process_create_kernel_nowait(void (*entry)(void*), void *arg);
+  extern uint64_t timer_get_ms(void);
+  int wpid = process_create_kernel_nowait(sys_spawn_ex_worker, ex);
+  /* Same bounded worker-slot retry as sys_spawn: the caller is parked and
+     must never wait forever for a worker that cannot run. */
+  for (int attempt = 0; attempt < 18000 && wpid < 0; attempt++) {
+    uint64_t t0 = timer_get_ms();
+    for (volatile int spin = 0; spin < 4000000; spin++) {
+      if (timer_get_ms() - t0 >= 100u) break;
+    }
+    wpid = process_create_kernel_nowait(sys_spawn_ex_worker, ex);
+  }
+  if (wpid < 0) {
+    /* Release-on-worker-failure (D4.4): -EAGAIN, never a hang. */
+    flags = spinlock_acquire_irqsave(&proc_lock);
+    caller->spawn_retval = -EAGAIN;
+    caller->context[0] = (uint64_t)(int64_t)-EAGAIN;
+    caller->state = PROC_STATE_READY;
+    spinlock_release_irqrestore(&proc_lock, flags);
+    tf->regs[0] = (uint64_t)(int64_t)-EAGAIN;
+  }
+
+  schedule(tf, 0);
+
+  /* Deliver the result once the caller runs again (same race handling as
+     sys_spawn): read the worker's word into both the live frame and the
+     saved context so either resume path returns it. */
+  caller->context[0] = (uint64_t)caller->spawn_retval;
+  tf->regs[0] = (uint64_t)caller->spawn_retval;
+}
+
 static void sys_pipe(struct trap_frame *tf) {
   int *fds = (int *)tf->regs[5]; // rdi
   struct process *caller = current_process();
@@ -1348,6 +1463,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_write(tf);
   } else if (syscall_num == SYS_SPAWN) {
     sys_spawn(tf);
+  } else if (syscall_num == SYS_SPAWN_EX) {
+    sys_spawn_ex(tf);
   } else if (syscall_num == SYS_MAP_FB) {
     sys_map_fb(tf);
   } else if (syscall_num == SYS_FLUSH_FB) {
@@ -1462,7 +1579,7 @@ void sync_lower_handler_c(struct trap_frame *tf) {
   } else if (syscall_num == SYS_SIGACTION) {
     sys_sigaction(tf);
   } else if (syscall_num == SYS_SIGRETURN) {
-    tf->regs[0] = (uint64_t)(int64_t)process_sigreturn(tf);
+    process_sigreturn(tf);
   } else if (syscall_num == SYS_GETENV) {
     sys_getenv(tf);
   } else if (syscall_num == SYS_POLL) {
@@ -1753,6 +1870,9 @@ void general_interrupt_handler(struct trap_frame *tf) {
         gic_end_interrupt(intid);
       }
       schedule(tf, 0);
+      /* P5 S3 (D8.4a): schedule() returns only when this process kept the
+         CPU; a switch resumes via enter_user_space's own boundary. */
+      process_signal_trap_exit(tf);
       return;
     }
     if (cpu == 0) {
@@ -1906,6 +2026,12 @@ void general_interrupt_handler(struct trap_frame *tf) {
       while (1);
     }
   }
+
+  /* P5 S3 (D8.4a): the vector 0x80 (syscall) and 0x81 (yield) branches
+     fall through to here — the leader's return-to-user boundary.  A no-op
+     unless a deliverable handler signal is pending (D8.5: never while
+     sig_in_handler; kernel-mode frames never deliver). */
+  process_signal_trap_exit(tf);
 }
 
 struct idt_entry {

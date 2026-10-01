@@ -260,6 +260,14 @@ struct process {
    * v2-only.  Appended at the END so parallel lanes merge additively. */
   struct addr_space *as; /**< P2.2: AS_V2 address space, else NULL */
 
+  /* --- P5 S3 (D8.2): SIGCHLD siginfo payload -------------------------- *
+   * Captured by reap_deliver_locked when the parent anchor's SIGCHLD bit
+   * is set, consumed by the frame engine when the handler frame is built
+   * (minimal siginfo: si_pid = the dead child, si_status = its waitpid
+   * status word).  Appended at the END so parallel lanes merge additively. */
+  int sig_child_pid;
+  int sig_child_status;
+
   /* --- P4/P5 (integrator consent 2026-09-30): FD_CLOEXEC storage -------- *
    * One canonical bitmask (the P4 review amendment: replaces the note's
    * fd_flags[] byte array with the P5 note's mask shape): bit i = fd i is
@@ -496,6 +504,13 @@ void fpu_save(uint64_t *area);
 void fpu_restore(const uint64_t *area);
 #endif
 
+/* P5 S3 (D8.7): destination-pointer FP/FPSIMD variants — the same image
+ * formats as fpu_state (ARM 528 bytes: q0-q31 + FPCR + FPSR; x64 512 bytes:
+ * the FXSAVE64 image), saved/restored to/from the signal frame on the user
+ * stack.  The area must be 16-byte aligned on both arches. */
+void arch_fpu_save_to(void *dst);
+void arch_fpu_restore_from(const void *src);
+
 /* --- P5 (docs/browser/p5-exec-signals-design.md): signals/kill/env ----
  * Rows: 16 kill (semantics completed, D9), 83 sigaction (D7), 84 sigreturn
  * (D8.6), 85 getenv (D2), 86 spawn_ex (D4).  40/39 are extended in place.
@@ -533,9 +548,20 @@ int process_sigaction(int signum, const struct ho_sigaction *act,
                       struct ho_sigaction *oldact);
 
 /* Row 84 (D8.6): restore the interrupted context from the active signal
- * frame.  The frame engine lands in S3; until then every call is the
- * documented defensive -EINVAL (no frame can exist). */
+ * frame, clear sig_in_handler, and re-check pending delivery (the
+ * re-check rides the caller's trap exit; see the engine section in
+ * process.c).  A stale/no-frame call writes -EINVAL to the syscall
+ * return slot and the process continues (defensive). */
 int process_sigreturn(struct trap_frame *tf);
+
+/* P5 S3 (D8) delivery engine.  process_signal_deliver() returns 1 when a
+ * handler frame was planted into tf (the trap enters the handler instead
+ * of returning to the interrupted PC).  process_signal_trap_exit() is the
+ * arch dispatchers' return-to-user hook; process_signal_resume_deliver()
+ * is the scheduler's resume-boundary hook (D8.4a/b). */
+int process_signal_deliver(struct process *grp, struct trap_frame *tf);
+void process_signal_trap_exit(struct trap_frame *tf);
+void process_signal_resume_deliver(struct process *p, struct trap_frame *tf);
 
 /* Row 85 (D2): read the process's environment blob.  idx == -1 returns
  * the entry count; idx >= 0 copies the idx-th "NAME=VALUE" entry into buf
@@ -543,6 +569,29 @@ int process_sigreturn(struct trap_frame *tf);
  * layer validates buf; this helper does no user-memory checks (kernel unit
  * tests call it with kernel buffers). */
 int sys_readenv(struct process *p, int idx, char *buf, int size);
+
+/* --- P5 S5 (D4, row 86): SYS_SPAWN_EX --------------------------------- *
+ * spawn_ex(path, argv, envp, fdmap, n).  The trap layer marshals the
+ * caller's pointers into the caller's pool slot (kernel memory) while
+ * still in the caller's context, parks the caller in WAIT_SPAWN and runs
+ * the existing spawn2 worker machinery; the worker calls
+ * load_and_run_spawn_ex() which returns the child pid or -errno
+ * (-ENOENT, -ENOEXEC, -EFAULT, -EBADF, -EAGAIN, -ENOMEM). */
+#define HO_SPAWN_EX_MAX_MAP 8
+struct ho_spawn_ex {
+  char filename[32];
+  int caller_pid;
+  char argvblob[HO_EXEC_ARGV_LEN]; /* proc_marshal_argv layout */
+  int argc;
+  char env[HO_ENV_LEN]; /* process_read_envp layout */
+  int envc;
+  int fdmap_src[HO_SPAWN_EX_MAX_MAP]; /* {src, dst} pairs as {src[k], dst[k]} */
+  int fdmap_dst[HO_SPAWN_EX_MAX_MAP];
+  int fdmap_n;
+};
+/* One slot per caller pid (same shape as the trap layers' spawn pools). */
+extern struct ho_spawn_ex spawn_ex_pool[];
+int load_and_run_spawn_ex(const struct ho_spawn_ex *ex);
 
 /* D10: the SIGPIPE helper for a write to a closed peer.  Applies the
  * writer group's SIGPIPE disposition: SIG_IGN -> 0 (writer survives, the

@@ -98,16 +98,34 @@ void arch_fpu_reset(struct process *p) {
 }
 
 /**
+ * Saves the live x87+SSE register file into an arbitrary 16-byte-aligned
+ * destination.  P5 S3 (D8.7): the signal frame carries the same FXSAVE64
+ * image; arch_fpu_save() below is the PCB-specialized alias.
+ */
+void arch_fpu_save_to(void *dst) {
+  __asm__ volatile("fxsave64 (%0)" : : "r"(dst) : "memory");
+}
+
+/**
+ * Loads an x87+SSE register file from an arbitrary 16-byte-aligned source
+ * (P5 S3: SIGRETURN restores from the signal frame).  arch_fpu_restore()
+ * below is the PCB-specialized alias.
+ */
+void arch_fpu_restore_from(const void *src) {
+  __asm__ volatile("fxrstor64 (%0)" : : "r"(src) : "memory");
+}
+
+/**
  * Saves the live x87+SSE register file into a PCB.  FXSAVE64 stores the
  * 64-bit-pointer image form, pairing with FXRSTOR64 below.
  */
 void arch_fpu_save(struct process *p) {
-  __asm__ volatile("fxsave64 (%0)" : : "r"((void *)p->fpu_state) : "memory");
+  arch_fpu_save_to(p->fpu_state);
 }
 
 /**
  * Loads a process's x87+SSE register file from its PCB image.
  */
 void arch_fpu_restore(struct process *p) {
-  __asm__ volatile("fxrstor64 (%0)" : : "r"((const void *)p->fpu_state) : "memory");
+  arch_fpu_restore_from(p->fpu_state);
 }
