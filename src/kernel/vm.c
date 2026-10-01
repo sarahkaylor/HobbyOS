@@ -22,6 +22,7 @@
 
 extern void uart_puts(const char *s);
 extern void print_int(int v);
+extern void uart_print_hex(uint64_t v);
 
 #define VM_REGION_INIT_CAP 16
 #define VM_REGION_MAX_CAP 1024
@@ -1011,12 +1012,11 @@ static void vm_frame_copy(uint64_t dst, uint64_t src, uint64_t n) {
     d[i] = s[i];
 }
 
-struct addr_space *vm_as_clone(struct addr_space *src, uint64_t tgid) {
-  if (!src || src->ver != AS_V2)
-    return 0;
-  struct addr_space *dst = vm_as_create(tgid);
-  if (!dst)
-    return 0;
+int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
+  if (!src || src->ver != AS_V2 || !dst || dst->ver != AS_V2)
+    return -1;
+  if (dst->nr != 0)
+    return -1; /* only into a fresh AS */
 
   /* Copy the regions in list order; each insert takes vm_lock itself.
      Sibling threads of the parent could in principle mutate the list
@@ -1034,8 +1034,16 @@ struct addr_space *vm_as_clone(struct addr_space *src, uint64_t tgid) {
     spinlock_release_irqrestore(&vm_lock, fl);
 
     if (vm_region_insert(dst, r.base, r.len, r.prot, r.kind, r.flags, r.obj,
-                         r.obj_off) != 0)
+                         r.obj_off) != 0) {
+      uart_puts("[VM] clone: insert failed i=");
+      print_int(i);
+      uart_puts(" base=");
+      uart_print_hex(r.base);
+      uart_puts(" len=");
+      uart_print_hex(r.len);
+      uart_puts("\n");
       goto fail;
+    }
 
     for (uint64_t a = r.base; a < r.base + r.len; a += FRAME_SIZE) {
       uint64_t leaf = 0;
@@ -1051,8 +1059,14 @@ struct addr_space *vm_as_clone(struct addr_space *src, uint64_t tgid) {
         fl = spinlock_acquire_irqsave(&vm_lock);
         phys = vm_object_page_locked(r.obj, (a - r.base) + r.obj_off);
         spinlock_release_irqrestore(&vm_lock, fl);
-        if (!phys)
+        if (!phys) {
+          uart_puts("[VM] clone: obj page failed i=");
+          print_int(i);
+          uart_puts(" va=");
+          uart_print_hex(a);
+          uart_puts("\n");
           goto fail;
+        }
         mkind = VMK_SHARED;
       } else if (r.kind == VMK_FB) {
         phys = vm_arch_leaf_phys(leaf); /* kernel framebuffer frame(s) */
@@ -1066,18 +1080,38 @@ struct addr_space *vm_as_clone(struct addr_space *src, uint64_t tgid) {
       if (vm_map_page(dst, a, phys, r.prot, mkind) != 0) {
         if (!r.obj && r.kind != VMK_FB)
           frame_free(phys);
+        uart_puts("[VM] clone: map failed i=");
+        print_int(i);
+        uart_puts(" va=");
+        uart_print_hex(a);
+        uart_puts(" kind=");
+        print_int(mkind);
+        uart_puts("\n");
         goto fail;
       }
     }
     i++;
   }
-  return dst;
+  return 0;
 
 fail:
-  /* Teardown frees what the partial clone installed (private leaves are
-     frame-owned; shared/object leaves are not). */
-  vm_as_teardown(dst);
-  return 0;
+  /* The caller tears `dst` down (it may be a process PCB's AS). */
+  return -1;
+}
+
+struct addr_space *vm_as_clone(struct addr_space *src, uint64_t tgid) {
+  struct addr_space *dst = vm_as_create(tgid);
+  if (!dst) {
+    uart_puts("[VM] clone: as_create failed tgid=");
+    print_int((int)tgid);
+    uart_puts("\n");
+    return 0;
+  }
+  if (vm_as_clone_into(src, dst) != 0) {
+    vm_as_teardown(dst);
+    return 0;
+  }
+  return dst;
 }
 
 int64_t vm_map_fb(struct process *grp, uint64_t fb_phys) {

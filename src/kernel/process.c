@@ -1466,17 +1466,18 @@ int process_fork(struct trap_frame *tf) {
 
   if (group->as) {
     /* P2.4 (S4, design 5.3/D10): v2 fork clones the group's address
-       space -- resident private pages are copied frame-by-frame, memfd/
-       MAP_SHARED pages re-map the same object frames, holes stay holes.
-       The child holds no v1 block (user_phys_base stays 0). */
-    struct addr_space *cas = vm_as_clone(group->as, (uint64_t)child_pid);
-    if (!cas) {
+       space into the child's fresh AS (process_create_v2's provisioning):
+       resident private pages are copied frame-by-frame, memfd/MAP_SHARED
+       pages re-map the same object frames, holes stay holes.  The child
+       holds no v1 block (user_phys_base stays 0). */
+    if (vm_as_clone_into(group->as, child->as) != 0) {
+      vm_as_teardown(child->as);
+      child->as = 0;
       child->state = PROC_STATE_FREE;
       spinlock_release_irqrestore(&proc_lock, flags);
       uart_puts("[KERNEL] fork: AS clone failed\n");
       return -1;
     }
-    child->as = cas;
   } else {
     kmemcpy((void *)child->user_phys_base, (void *)group->user_phys_base,
             USER_INITIAL_CLEAR_SIZE);

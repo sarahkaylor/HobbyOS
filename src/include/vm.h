@@ -234,10 +234,15 @@ uint64_t vm_object_size(struct vm_object *o);
 int vm_object_add_seals(struct vm_object *o, uint64_t seals); /* -EPERM on SEAL */
 uint64_t vm_object_get_seals(struct vm_object *o);
 
-/* Clone `src`'s regions and resident pages into a fresh AS for `tgid`
- * (P2 v2 fork, design section 5.3): private pages are copied
- * frame-by-frame, shared/object pages map the same backing (object refs
- * taken), holes stay holes.  Returns the new AS or NULL. */
+/* Clone `src`'s regions and resident pages into `dst`, which must be a
+ * fresh empty v2 AS (process_create_v2's provisioning / vm_as_create).
+ * Private pages are copied frame-by-frame, shared/object pages map the
+ * same backing (object refs taken), holes stay holes.  Returns 0, or -1
+ * having left partial state for the caller's teardown. */
+int vm_as_clone_into(struct addr_space *src, struct addr_space *dst);
+
+/* Convenience wrapper (unit tests): create the AS for `tgid` and clone
+ * into it.  Returns the new AS or NULL. */
 struct addr_space *vm_as_clone(struct addr_space *src, uint64_t tgid);
 
 /* Map the 4 MiB framebuffer slot (USER_FB_BASE_V2, VMK_FB, RW, noexec)
