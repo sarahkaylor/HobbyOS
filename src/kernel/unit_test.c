@@ -19,6 +19,7 @@ void run_all_unit_tests(void) {
   fat16_test_suite();
   locks_test_suite();
   pipe_test_suite();
+  unix_test_suite(); /* P4: AF_UNIX pairs, cmsg codec, poll engine */
   fs_test_suite();
   mmu_test_suite();
   vm_test_suite();

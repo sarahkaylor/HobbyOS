@@ -40,6 +40,7 @@ void frame_test_suite(void);
 void fat16_test_suite(void);
 void locks_test_suite(void);
 void pipe_test_suite(void);
+void unix_test_suite(void);
 void fs_test_suite(void);
 void mmu_test_suite(void);
 void vm_test_suite(void);
