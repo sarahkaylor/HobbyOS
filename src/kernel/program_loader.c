@@ -312,6 +312,22 @@ int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int st
   return load_and_run_program_in_scheduler_args(filename, stdin_fd, stdout_fd, stderr_fd, caller_pid, 0);
 }
 
+/* P2.5 (S5 flip): reserve the whole v2 HEAP slot as one RW demand-zero
+ * region.  The user allocator (src/user/malloc.c) carves its arena from
+ * this span, so its handed-out memory is always backed -- pages materialize
+ * on first touch (VMK_HEAP is demand-zero).  It also makes SYS_BRK grows
+ * bookkeeping within an already-backed span (sys_brk skips the redundant
+ * region insert).  Costs no frames at load.  Returns 0 / -1. */
+static int v2_insert_heap(struct addr_space *as) {
+  if (vm_region_insert(as, USER_HEAP_BASE_V2, USER_HEAP_SIZE,
+                       VM_PROT_READ | VM_PROT_WRITE, VMK_HEAP,
+                       VM_MAP_PRIVATE, 0, 0) != 0) {
+    uart_puts("v2 loader: heap region insert failed\n");
+    return -1;
+  }
+  return 0;
+}
+
 /* P2.5 (S5 flip): read a flat .bin image into fresh zeroed frames mapped at
  * USER_IMG_BASE in `as` and register the IMAGE region (loader v2 and v2
  * exec share this).  The flat .bin now covers the full image span through
@@ -512,6 +528,11 @@ int load_and_run_program_v2(const char* filename, int stdin_fd,
     process_free(pid);
     return -1;
   }
+  /* P2.5 (S5 flip): the heap slot, demand-zero (the user malloc's arena). */
+  if (v2_insert_heap(as) != 0) {
+    process_free(pid);
+    return -1;
+  }
 
 #ifdef __x86_64__
   process_set_entry(pid, USER_IMG_BASE, USER_MAIN_STK_TOP_V2 - 8);
@@ -610,6 +631,10 @@ int process_exec_current(struct trap_frame *tf, const char *path,
     if (vm_region_insert(nas, USER_MAIN_STK_LIMIT_V2, USER_MAIN_STK_SIZE,
                          VM_PROT_READ | VM_PROT_WRITE, VMK_STACK,
                          VM_MAP_PRIVATE, 0, 0) != 0) {
+      vm_as_teardown(nas);
+      return -ENOMEM;
+    }
+    if (v2_insert_heap(nas) != 0) {
       vm_as_teardown(nas);
       return -ENOMEM;
     }

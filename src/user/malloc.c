@@ -4,6 +4,7 @@
 #ifndef HOST_TEST
 #include "process.h"
 #include "errno.h"
+#include "vm.h" /* P2.5 (S5): USER_VA_BASE and the v2 heap-slot constants */
 #else
 /* Host stand-in: the allocator is pure free-list logic on a fake heap, so
  * compile it natively (hb_* names) and test against glibc behavior.
@@ -80,7 +81,17 @@ static void *malloc_locked(size_t size) {
 #ifdef HOST_TEST
       heap_ptr = (void *)host_heap_buf;
 #else
-      heap_ptr = (void *)(((uintptr_t)_end + 15) & ~15);
+      /* P2.5 (S5 flip): user programs link at USER_IMG_BASE (64 GiB), where
+       * the v1 "arena from _end" span is meaningless (its limit lies below
+       * the image).  A v2 process allocates from the HEAP slot
+       * [USER_HEAP_BASE_V2, USER_HEAP_LIMIT_V2), which the loader reserves
+       * as one demand-zero region -- pages materialize on first touch.
+       * The v1 layout stays for the loader's rollback path (then _end is
+       * back at 0x4400....). */
+      if ((uintptr_t)_end >= (uintptr_t)USER_VA_BASE)
+        heap_ptr = (void *)USER_HEAP_BASE_V2;
+      else
+        heap_ptr = (void *)(((uintptr_t)_end + 15) & ~15);
 #endif
     }
     free_list = (struct block *)heap_ptr;
@@ -91,7 +102,11 @@ static void *malloc_locked(size_t size) {
         (uintptr_t)heap_ptr + sizeof(host_heap_buf) - 256 * 1024;
 #else
     uintptr_t stack_reserve = 256 * 1024;
-    uintptr_t heap_limit = USER_VIRT_BASE + USER_REGION_SIZE - stack_reserve;
+    uintptr_t heap_limit;
+    if ((uintptr_t)_end >= (uintptr_t)USER_VA_BASE)
+      heap_limit = (uintptr_t)USER_HEAP_LIMIT_V2; /* v2: the whole slot */
+    else
+      heap_limit = USER_VIRT_BASE + USER_REGION_SIZE - stack_reserve;
 #endif
 
     if ((uintptr_t)heap_ptr >= heap_limit) return NULL;

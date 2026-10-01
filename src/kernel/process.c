@@ -1887,11 +1887,22 @@ int64_t sys_brk(uint64_t addr) {
     if (addr > old) {
       uint64_t base = (old + 0xFFF) & ~0xFFFULL;
       uint64_t end = (addr + 0xFFF) & ~0xFFFULL;
-      if (end > base &&
-          vm_region_insert(cur->as, base, end - base,
-                           VM_PROT_READ | VM_PROT_WRITE, VMK_HEAP,
-                           VM_MAP_PRIVATE, 0, 0) != 0)
-        return -ENOMEM;
+      if (end > base) {
+        /* P2.5 (S5): the loader reserves the whole HEAP slot demand-zero,
+           so a grow that stays inside it is already backed -- and a
+           redundant insert would be rejected as an overlap.  Only an
+           uncovered span (no loader-created v2 AS looks like that) needs
+           its own region. */
+        struct vm_region *cov = vm_region_find(cur->as, base);
+        int covered = cov && cov->base <= base &&
+                      cov->base + cov->len >= end &&
+                      (cov->prot & VM_PROT_WRITE) && cov->kind == VMK_HEAP;
+        if (!covered &&
+            vm_region_insert(cur->as, base, end - base,
+                             VM_PROT_READ | VM_PROT_WRITE, VMK_HEAP,
+                             VM_MAP_PRIVATE, 0, 0) != 0)
+          return -ENOMEM;
+      }
     }
     cur->heap_brk = addr;
     return 0;
