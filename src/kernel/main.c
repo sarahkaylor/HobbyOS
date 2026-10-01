@@ -218,6 +218,13 @@ static void test_wave_loader(void *arg) {
      released by the time it runs. */
   load_and_run_program_in_scheduler("FPU_T.BIN", -1, -1, -1, -1);
 
+  /* P3.2 (browser.md): sysroot transcendental acceptance — sin/cos/tan/
+     asin/atan/atan2/log/pow/sqrt/modf and the float expf/tanhf/sqrtf,
+     checked in ulps against glibc references and exact specials
+     (src/user/math_test.c).  Links crt0 + libc.a, so it also proves the
+     public symbols resolve from the archive.  Spawns nothing. */
+  load_and_run_program_in_scheduler("MATH_T.BIN", -1, -1, -1, -1);
+
   /* F2.4 (browser.md): minimal C++ runtime acceptance.  CXXSMOKE.BIN runs
      static constructors via crt0's .init_array walk, operator new/delete,
      the __cxa_guard_* init guards, virtual dispatch, a class template and
