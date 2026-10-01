@@ -649,6 +649,14 @@ int process_exec_current(struct trap_frame *tf, const char *path,
     vm_arch_switch(nas);
     grp->heap_brk = USER_HEAP_BASE_V2;
     grp->anon_map_count = 0;
+    /* Exec resets the TLS register state: the incoming image has NOT
+       installed a TLS block, and a fork-inherited foreign TP (the parent
+       shell's image) must not leak into it -- otherwise the new program's
+       lazy __errno_location() sees TP != 0, skips its install, and its
+       first errno store lands at [old image's TLS + offset], a hole in
+       the new image (observed: mkdir killed writing errno=EEXIST at
+       0x100002C3D0 after fork+exec from the shell). */
+    grp->tls_base = 0;
     tf->elr = USER_IMG_BASE;
 #ifdef __x86_64__
     grp->context[33] = USER_MAIN_STK_TOP_V2 - 8; /* SysV: 16n+8 at entry */
@@ -684,7 +692,10 @@ int process_exec_current(struct trap_frame *tf, const char *path,
   cur->args[i] = '\0';
 
   /* Exec resets the address-space state: fresh heap top, no anonymous
-     mappings (the new image's data/bss start at the load cap). */
+     mappings (the new image's data/bss start at the load cap), and NO TLS
+     register: a fork-inherited foreign TP would defeat the new image's
+     lazy/crt0 TLS install (same 0x2C3D0-class errno-hole as the v2 path). */
+  grp->tls_base = 0;
   grp->heap_brk = USER_HEAP_BASE;
   grp->anon_map_count = 0;
   for (int i = 0; i < USER_ANON_MAX_REGS; i++) {

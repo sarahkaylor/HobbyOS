@@ -106,6 +106,12 @@ static void ho_pthread_reap(void) {
   list = dead_list;
   dead_list = NULL;
   __atomic_clear(&dead_lock_byte, __ATOMIC_RELEASE);
+  /* Exiting members are pushed here BEFORE their final syscall leaves
+     their stack; give the tick-granular drain settling time so a reap
+     from a concurrent create/exit cannot munmap a stack still in use
+     (same window as the join path -- see pthread_join). */
+  if (list)
+    usleep(10000);
   while (list) {
     struct __ho_tcb *n = list->dead_next;
     if (list->stack_base)
@@ -348,8 +354,18 @@ int pthread_join(pthread_t thread, void **retval) {
   }
   if (retval)
     *retval = t->retval;
-  if (t->stack_base)
+  if (t->stack_base) {
+    /* The exiting thread publishes tid = 0 and wakes joiners BEFORE its
+       last few instructions leave this stack (futex_wake_all's frames +
+       the final restore epilogue).  Freeing the stack on the spot can
+       munmap the page out from under it: observed as a THRD_T epilogue
+       fault reading [stack_top - 16] right after a join woke.  Bounded
+       tick-granular drain (the kernel's own claims-drain style): the
+       thread cannot need the stack beyond its next resume, which the
+       10 ms grace covers. */
+    usleep(10000);
     ho_stack_free(t->stack_base, t->stack_size, t->stack_mmap);
+  }
   free(t);
   return 0;
 }
