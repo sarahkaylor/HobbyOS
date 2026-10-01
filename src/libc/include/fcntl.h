@@ -4,7 +4,13 @@
 /* HobbyOS Phase-2 sysroot: fcntl.h — O_* open flags.
  * The kernel honors O_CREAT, O_EXCL and O_TRUNC in SYS_OPEN (missing
  * files without O_CREAT fail ENOENT, POSIX-style); O_APPEND is still
- * accepted but treated as plain write. */
+ * accepted but treated as plain write.
+ *
+ * P5 (D3.2): fcntl(F_GETFD/F_SETFD) read/write FD_CLOEXEC (bit 0) in the
+ * process's fd mask; fds with the bit set are closed at exec. */
+#define F_GETFD   1
+#define F_SETFD   2
+#define FD_CLOEXEC 1
 
 #ifdef __cplusplus
 extern "C" {

@@ -1434,6 +1434,147 @@ int process_kill(int pid) {
   return 0;
 }
 
+/* ---------------------------------------------------------------------------
+ * P5 S4 (docs/browser/p5-exec-signals-design.md D3): execve marshalling,
+ * success-path apply, and the from-thread sibling exit.
+ * ------------------------------------------------------------------------- */
+
+/* Byte-wise bounded read of one user NUL-terminated string; every byte
+ * range-checked through process_user_ok (constraints: no wide user reads;
+ * OQ5 routing).  Writes at most cap-1 bytes + NUL.  Returns the length
+ * written (excluding NUL), or -1 on a bad pointer. */
+static int exec_read_str(struct process *p, uint64_t va, char *dst, int cap) {
+  if (!va || cap < 2)
+    return -1;
+  int n = 0;
+  for (;;) {
+    if (n >= cap - 1) {
+      dst[cap - 1] = '\0';
+      return n; /* truncated */
+    }
+    if (process_user_ok(p, va + (uint64_t)n, 1, 0) != 0)
+      return -1;
+    char c = (char)(*(volatile uint8_t *)(va + (uint64_t)n));
+    dst[n++] = c;
+    if (c == 0)
+      return n - 1;
+  }
+}
+
+int process_read_envp(struct process *p, const char *const *envp, char *dst,
+                      int cap, int *count_out) {
+  p = process_group(p);
+  if (!p || !dst || !count_out || cap <= 0)
+    return -1;
+  *count_out = 0;
+  dst[0] = '\0';
+  if (!envp)
+    return 0; /* D3.1: envp == NULL = empty environment */
+  int pos = 0;
+  for (int i = 0; i < HO_EXEC_MAX_ARGS; i++) {
+    uint64_t slot = (uint64_t)envp + (uint64_t)i * 8;
+    if (process_user_ok(p, slot, 8, 0) != 0)
+      return -1; /* bad envp array pointer -> EFAULT */
+    uint64_t sp = 0;
+    for (int k = 0; k < 8; k++)
+      sp |= ((uint64_t)(*(volatile uint8_t *)(slot + (uint64_t)k))) << (8 * k);
+    if (sp == 0)
+      return 0; /* end of envp */
+    int room = cap - pos;
+    if (room < 2)
+      return 0; /* blob full: truncate the rest (mirrors argv, D3.1) */
+    int len = exec_read_str(p, sp, dst + pos, room);
+    if (len < 0)
+      return -1;
+    (*count_out)++;
+    if (len >= room - 1)
+      return 0; /* entry consumed the remaining room */
+    pos += len + 1; /* keep the NUL separator */
+  }
+  return 0; /* count cap reached: truncate the rest */
+}
+
+void process_exec_apply(struct process *grp, const char *env, int envc) {
+  if (!grp)
+    return;
+  /* D3.3: caught dispositions -> SIG_DFL, ignored stay ignored; pending
+     and delivery state cleared (exec is a fresh program). */
+  for (int s = 1; s < HO_SIG_MAX; s++) {
+    if (grp->sig_handler[s] != HO_SIG_IGN)
+      grp->sig_handler[s] = HO_SIG_DFL;
+  }
+  grp->sig_pending = 0;
+  grp->sig_in_handler = 0;
+  grp->sig_frame = 0;
+  grp->sig_restorer = 0;
+
+  /* D3.1: the new environment.  `env` is a zero-padded kernel buffer of
+     `envc` NUL-separated entries (see process_read_envp + the trap-layer
+     zero-fill), so the scan cannot run past a real entry. */
+  grp->env[0] = '\0';
+  grp->envc = 0;
+  if (env && envc > 0) {
+    int used = 0;
+    for (int k = 0; k < envc && used < HO_ENV_LEN - 1; k++) {
+      while (used < HO_ENV_LEN - 1 && env[used]) {
+        grp->env[used] = env[used];
+        used++;
+      }
+      if (used < HO_ENV_LEN - 1) {
+        grp->env[used] = '\0';
+        used++;
+      }
+    }
+    grp->env[used] = '\0';
+    grp->envc = envc;
+  }
+
+  /* D3.2: the FD_CLOEXEC sweep -- close every fd whose mask bit is set,
+     keeping the numbers of all others.  No proc_lock held (file_close
+     takes the file locks itself). */
+  if (grp->fd_cloexec) {
+    for (int fd = 0; fd < MAX_OPEN_FDS; fd++) {
+      if ((grp->fd_cloexec >> fd) & 1u) {
+        file_close(grp, fd); /* no-op -1 when the slot was already empty */
+        grp->fd_cloexec &= ~(1u << fd);
+      }
+    }
+  }
+}
+
+void process_exec_terminate_siblings(struct process *grp,
+                                     struct process *caller) {
+  /* D3.4: the P1 exit_group pattern, minus the teardown -- mark every
+     other member THREAD_DONE, then drain their CPU claims (tick-granular,
+     bounded; parked members die at once).  The caller survives as the
+     new image; the anchor (and the pid the parent knows) is unchanged. */
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *m = &proc_table[i];
+    if (m == caller || m->tgid != grp->pid)
+      continue;
+    if (m->state == PROC_STATE_FREE || m->state == PROC_STATE_EXITED ||
+        m->state == PROC_STATE_THREAD_DONE)
+      continue;
+    m->state = PROC_STATE_THREAD_DONE;
+    m->futex_uaddr = 0;
+    m->wake_ms = 0;
+    file_select_forget(m->pid);
+  }
+  grp->live_threads = 1; /* just the caller (the new single image) */
+  spinlock_release_irqrestore(&proc_lock, flags);
+
+  for (int waited = 0; group_claims_pending(grp, caller);) {
+    if (++waited > 32) {
+      uart_puts("[P5] exec sibling claim drain timeout, group ");
+      print_int(grp->pid);
+      uart_puts("\n");
+      break;
+    }
+    safe_wfi();
+  }
+}
+
 /* Row 16 completion (D9): process-directed targeting + disposition-based
  * action.  See process.h for the contract. */
 int process_signal(int pid, int sig) {

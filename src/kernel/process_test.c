@@ -3,6 +3,7 @@
 #include "unit_test.h"
 #include "process.h"
 #include "errno.h"
+#include "fs.h"
 
 extern void uart_puts(const char* s);
 
@@ -555,6 +556,62 @@ static void test_p5_waitpid_validation(void) {
   process_free(ppid);
 }
 
+/* S4 (D3): envp pointer validation (the full round-trip needs real user
+ * VAs and lives in PROC_T), the exec apply (env reset, dispositions,
+ * FD_CLOEXEC sweep) and the fcntl FD bits. */
+static void test_p5_exec_env_and_apply(void) {
+  tests_run++;
+  uart_puts("  Running test_p5_exec_env_and_apply...\n");
+
+  int pid = process_create();
+  EXPECT_EQ((pid >= 0 && pid < MAX_PROCESSES), 1);
+  struct process *p = process_group(process_get_pcb(pid));
+
+  /* envp == NULL -> empty blob, count 0; bad array pointer -> -1 */
+  char blob[HO_ENV_LEN];
+  int cnt = -1;
+  EXPECT_EQ(process_read_envp(p, 0, blob, HO_ENV_LEN, &cnt), 0);
+  EXPECT_EQ(cnt, 0);
+  EXPECT_EQ(blob[0], '\0');
+  EXPECT_EQ(process_read_envp(p, (const char *const *)0x1000, blob,
+                               HO_ENV_LEN, &cnt), -1);
+
+  /* Two open fds, first CLOEXEC via fcntl(F_SETFD). */
+  int old_pid = cpu_current_pids[0];
+  set_current_process_pid(0, pid);
+  int fd1 = file_open(p, "TEST.TXT", 0);
+  int fd2 = file_open(p, "TEST.TXT", 0);
+  EXPECT_EQ((fd1 >= 0 && fd2 >= 0), 1);
+  EXPECT_EQ(file_fcntl(p, fd1, K_F_GETFD, 0), 0);
+  EXPECT_EQ(file_fcntl(p, fd1, K_F_SETFD, K_FD_CLOEXEC), 0);
+  EXPECT_EQ(file_fcntl(p, fd1, K_F_GETFD, 0), 1);
+  EXPECT_EQ(file_fcntl(p, fd2, K_F_GETFD, 0), 0);
+
+  /* Dispositions: caught -> DFL, ignored stays ignored, pending cleared. */
+  p->sig_handler[HO_SIGTERM] = USER_VIRT_BASE + 0x5000;
+  p->sig_handler[HO_SIGINT] = HO_SIG_IGN;
+  p->sig_pending = 0xFFFFFFFFu;
+
+  const char envblob[] = "A=1\0B=22\0";
+  process_exec_apply(p, envblob, 2);
+
+  EXPECT_EQ((p->fd_cloexec & (1u << fd1)) != 0, 0); /* bit cleared */
+  EXPECT_EQ(p->open_fds[fd1], -1);                  /* sweep closed it */
+  EXPECT_EQ((p->open_fds[fd2] != -1), 1);           /* others survive */
+  EXPECT_EQ(p->envc, 2);
+  EXPECT_EQ(p->env[0], 'A');
+  EXPECT_EQ(p->env[2], '1');
+  EXPECT_EQ(p->env[4], 'B');
+  EXPECT_EQ(p->sig_handler[HO_SIGTERM], 0);           /* caught -> DFL */
+  EXPECT_EQ(p->sig_handler[HO_SIGINT], HO_SIG_IGN);   /* ignored stays */
+  EXPECT_EQ(p->sig_pending, 0);
+  EXPECT_EQ(sys_readenv(p, -1, 0, 0), 2);
+
+  file_close(p, fd2);
+  set_current_process_pid(0, old_pid);
+  process_free(pid);
+}
+
 void process_test_suite(void) {
   uart_puts("process_test_suite:\n");
   test_process_init_and_create();
@@ -571,6 +628,7 @@ void process_test_suite(void) {
   test_p5_env_readback();
   test_p5_reap_delivery_on_kill();
   test_p5_waitpid_validation();
+  test_p5_exec_env_and_apply();
 }
 
 #endif // KERNEL_MODE_UNIT_TEST

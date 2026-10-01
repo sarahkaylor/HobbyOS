@@ -843,11 +843,30 @@ static void sys_exec(struct trap_frame *tf) {
   }
   argbuf[alen] = '\0';
 
-  int r = process_exec_current(tf, pathbuf, argbuf, namebuf);
+  /* P5 (D3-order): argv[] elements live in the OLD image -- marshal them
+     into kernel memory before the load clobbers it. */
+  char argvblob[HO_EXEC_ARGV_LEN];
+  int argvc = 0;
+  proc_marshal_argv((char *const *)argv, argvblob, HO_EXEC_ARGV_LEN, &argvc);
+
+  /* P5 (D3.1/D3.5): marshal envp (regs[2]) into the kernel env blob; a bad
+     pointer anywhere is -EFAULT (argv keeps its truncating behavior). */
+  char envbuf[HO_ENV_LEN];
+  for (int i = 0; i < HO_ENV_LEN; i++)
+    envbuf[i] = 0;
+  int envc = 0;
+  if (process_read_envp(cur, (const char *const *)tf->regs[2], envbuf,
+                        HO_ENV_LEN, &envc) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+
+  /* Success redirects elr + sets regs[0]=0 (the new program never reads
+     the exec return); the argv/env blobs were installed kernel-side. */
+  int r = process_exec_current(tf, pathbuf, argbuf, namebuf, envbuf, envc,
+                               argvblob, argvc);
   if (r < 0)
-    tf->regs[0] = (uint64_t)r;  /* success redirects elr + sets regs[0]=0 */
-  else
-    proc_set_argv_array(cur, argv);
+    tf->regs[0] = (uint64_t)r;
 }
 
 /* --- P5 (docs/browser/p5-exec-signals-design.md): rows 83-85 ---------- */

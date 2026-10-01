@@ -504,7 +504,9 @@ fail:
  * the current program intact.
  */
 int process_exec_current(struct trap_frame *tf, const char *path,
-                         const char *args, const char *new_name) {
+                         const char *args, const char *new_name,
+                         const char *env, int envc,
+                         const char *argvblob, int argc) {
   struct process *cur = current_process();
   if (!cur)
     return -EINVAL;
@@ -512,8 +514,9 @@ int process_exec_current(struct trap_frame *tf, const char *path,
     return -EINVAL;
 
   /* P1 (D7): cwd and address space are group state; exec replaces the
-     group's image.  (Exec from a secondary thread is a documented P1
-     divergence: siblings would keep running the old image.) */
+     group's image.  P5 (D3.4): from a secondary thread (or with live
+     siblings) POSIX requires every other thread to die first -- the
+     caller survives as the new single-threaded image. */
   struct process *grp = process_group(cur);
 
   /* Resolve a relative path against the process cwd (which the shell
@@ -539,6 +542,13 @@ int process_exec_current(struct trap_frame *tf, const char *path,
     return -ENOEXEC;
   }
 
+  /* D3.4: past this point the image replaces the old one, so the other
+     threads must already be gone (their next tick would execute clobbered
+     memory).  A later load failure leaves the caller single-threaded on
+     the old image -- documented deviation from "no state change". */
+  if (cur->is_thread || grp->live_threads > 1)
+    process_exec_terminate_siblings(grp, cur);
+
   uint64_t base = grp->user_phys_base;
 
   /* Zero image + bss [0, MAX_PROGRAM_SIZE) so the new program starts
@@ -556,11 +566,11 @@ int process_exec_current(struct trap_frame *tf, const char *path,
 
   int i;
   for (i = 0; new_name && new_name[i] && i < 31; i++)
-    cur->name[i] = new_name[i];
-  cur->name[i] = '\0';
+    grp->name[i] = new_name[i];
+  grp->name[i] = '\0';
   for (i = 0; args && args[i] && i < 255; i++)
-    cur->args[i] = args[i];
-  cur->args[i] = '\0';
+    grp->args[i] = args[i];
+  grp->args[i] = '\0';
 
   /* Exec resets the address-space state: fresh heap top, no anonymous
      mappings (the new image's data/bss start at the load cap). */
@@ -570,6 +580,14 @@ int process_exec_current(struct trap_frame *tf, const char *path,
     grp->anon_maps[i].addr = 0;
     grp->anon_maps[i].len = 0;
   }
+
+  /* P5 (D3.1-D3.3): the new environment, the signal-state reset and the
+     FD_CLOEXEC sweep -- all success-path only. */
+  process_exec_apply(grp, env, envc);
+
+  /* P5 (D3-order): install the pre-load marshalled argv[] blob; empty
+     leaves crt0 on its name+flat-args fallback. */
+  proc_set_argv_array(grp, argvblob, argc);
 
   /* Redirect the running process into the fresh image. regs[0]=0 is the
      exec() success return that the new program never actually reads. */
@@ -626,15 +644,18 @@ static int pl_strcpy(const char *src, char *dst, int cap) {
   return 1;
 }
 
-/* Copy a caller-space argv[] array into the process's argv blob at exec
- * time.  Unlike the space-joined flat args string, each element keeps its
- * own length, so quoted words that contain spaces round-trip exactly.
- * argv may be NULL (leaves eargc == 0 so crt0 falls back to name+args).
- * Elements are truncated at 63 chars (matching the flat-args path). */
-int proc_set_argv_array(struct process *p, char *const *argv) {
-  p = process_group(p); /* P1 (D7): the argv blob is group state */
-  p->eargc = 0;
-  p->eargv[0] = '\0';
+/* Copy a caller-space argv[] array into a kernel blob BEFORE exec replaces
+ * the image (P5 D3-order fix: the elements live in the OLD image and are
+ * clobbered by the load, so they must be read early).  Layout matches the
+ * process argv blob (NUL-separated, 63-char elements, <= max entries).
+ * argv may be NULL; a bad element stops the copy (the caller falls back to
+ * name + flat args, as before).  Always returns 0; *count_out gets the
+ * number of elements captured. */
+int proc_marshal_argv(char *const *argv, char *dst, int cap, int *count_out) {
+  if (!dst || !count_out || cap <= 0)
+    return -1;
+  *count_out = 0;
+  dst[0] = '\0';
   if (!argv)
     return 0;
   int pos = 0;
@@ -644,14 +665,41 @@ int proc_set_argv_array(struct process *p, char *const *argv) {
     char one[64];
     if (!pl_strcpy((const char *)argv[ai], one, sizeof one))
       break;
-    if (pos >= HO_EXEC_ARGV_LEN)
+    if (pos >= cap - 1)
       break;
-    for (int k = 0; one[k] && pos < HO_EXEC_ARGV_LEN - 1; k++)
-      p->eargv[pos++] = one[k];
-    if (pos < HO_EXEC_ARGV_LEN)
-      p->eargv[pos++] = '\0';
-    p->eargc++;
+    for (int k = 0; one[k] && pos < cap - 1; k++)
+      dst[pos++] = one[k];
+    if (pos < cap)
+      dst[pos++] = '\0';
+    (*count_out)++;
   }
+  if (pos < cap)
+    dst[pos] = '\0';
+  return 0;
+}
+
+/* Install a marshalled argv blob (proc_marshal_argv) as group state; runs
+ * on the exec success path.  argv may be NULL/empty (leaves eargc == 0 so
+ * crt0 falls back to name+args). */
+int proc_set_argv_array(struct process *p, const char *blob, int count) {
+  p = process_group(p); /* P1 (D7): the argv blob is group state */
+  p->eargc = 0;
+  p->eargv[0] = '\0';
+  if (!blob || count <= 0)
+    return 0;
+  int pos = 0;
+  for (int k = 0; k < count && pos < HO_EXEC_ARGV_LEN - 1; k++) {
+    while (pos < HO_EXEC_ARGV_LEN - 1 && blob[pos]) {
+      p->eargv[pos] = blob[pos];
+      pos++;
+    }
+    if (pos < HO_EXEC_ARGV_LEN - 1) {
+      p->eargv[pos] = '\0';
+      pos++;
+    }
+  }
+  p->eargv[pos] = '\0';
+  p->eargc = count;
   return 0;
 }
 

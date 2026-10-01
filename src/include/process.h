@@ -333,14 +333,44 @@ int64_t sys_madvise(uint64_t addr, uint64_t len, int64_t advice);
 void process_fault_exit(struct trap_frame *tf, int signo);
 
 // In-place exec (SYS_EXEC): replace the current image, keep pid/fds/cwd.
+// P5 (D3): extended to 3-arg execve -- `env` is the kernel-marshalled env
+// blob (NUL-separated, `envc` entries; NULL/"" = empty per D3.1), applied
+// together with the disposition reset and the FD_CLOEXEC sweep on success.
+// P5 (D3-order): `argvblob`/`argc` arrive pre-marshalled (proc_marshal_argv)
+// because the caller's argv[] lives in the OLD image; installed on success.
 int process_exec_current(struct trap_frame *tf, const char *path,
-                         const char *args, const char *new_name);
+                         const char *args, const char *new_name,
+                         const char *env, int envc,
+                         const char *argvblob, int argc);
+
+/* --- P5 S4 (D3): execve marshalling + apply --------------------------- */
+
+/* D3.1/D3.5: marshal a user envp array into the kernel env blob (cap bytes,
+ * count_out entries, silently truncated past the cap/count like argv).
+ * envp == NULL -> empty.  All reads go through process_user_ok (OQ5);
+ * returns 0, or -1 when a pointer is invalid (caller -> -EFAULT). */
+int process_read_envp(struct process *p, const char *const *envp, char *dst,
+                      int cap, int *count_out);
+
+/* D3.3/D3.2: the success-path apply -- store env, reset signal state
+ * (caught -> DFL, ignored stay ignored, pending/delivery cleared) and run
+ * the FD_CLOEXEC sweep over the group's mask. */
+void process_exec_apply(struct process *grp, const char *env, int envc);
+
+/* D3.4: POSIX exec-from-thread -- terminate every other group member
+ * (P1 exit_group pattern: THREAD_DONE + bounded claim drain) so the
+ * calling thread survives as the new single-threaded image. */
+void process_exec_terminate_siblings(struct process *grp,
+                                     struct process *caller);
 
 // SYS_GETARGV plumbing: split a flat space-separated args string into the
-// process's argv blob (spawn path), or copy a caller argv[] array into it
-// (exec path, preserving quoted words that contain spaces).
+// process's argv blob (spawn path), or copy a caller argv[] array into it.
+// P5 (D3-order): the exec path reads the caller argv[] into a kernel blob
+// BEFORE the image load (proc_marshal_argv -- the elements live in the old
+// image) and installs it only on success (proc_set_argv_array).
 void proc_split_argv(struct process *p, const char *args);
-int proc_set_argv_array(struct process *p, char *const *argv);
+int proc_marshal_argv(char *const *argv, char *dst, int cap, int *count_out);
+int proc_set_argv_array(struct process *p, const char *blob, int count);
 // idx == -1: return eargc; else copy the idx-th argument into buf (size
 // bytes) and return its length, or -1 when out of range.
 int sys_readargv(struct process *p, int idx, char *buf, int size);

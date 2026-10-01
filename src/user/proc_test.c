@@ -9,11 +9,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include "libc.h" /* fork(), print_console(), usleep(), execv() */
 
 static int failures = 0;
+static int checks_run = 0;
 
 static void con_int(long v) {
   char b[20];
@@ -27,6 +29,7 @@ static void con_int(long v) {
 }
 
 static void check(const char *what, long got, long want) {
+  checks_run++;
   if (got == want) {
     print_console("[PROCTEST] PASS ");
     print_console(what);
@@ -41,6 +44,28 @@ static void check(const char *what, long got, long want) {
     print_console("\n");
     failures++;
   }
+}
+
+/* Minimal int -> decimal for the fd numbers handed across exec. */
+static void i2s(int v, char *b) {
+  char t[12];
+  int n = 0, i = 0;
+  if (v == 0) {
+    b[0] = '0';
+    b[1] = 0;
+    return;
+  }
+  if (v < 0) {
+    b[i++] = '-';
+    v = -v;
+  }
+  while (v > 0 && n < 12) {
+    t[n++] = (char)('0' + v % 10);
+    v /= 10;
+  }
+  while (n > 0)
+    b[i++] = t[--n];
+  b[i] = 0;
 }
 
 int main(void) {
@@ -128,8 +153,63 @@ int main(void) {
   check("no-children waitpid=-1", r, -1);
   check("errno==ECHILD", errno == ECHILD, 1);
 
+  /* 4) P5: execve() with envp -- PROCCHLD reads PROCTEST_ENV through
+     getenv() and exits with its value; argv carries no number, so 33
+     can only have come from the environment blob. */
+  child = fork();
+  for (int attempt = 0; child < 0 && attempt < 200; attempt++) {
+    usleep(50000);
+    child = fork();
+  }
+  if (child == 0) {
+    char *const argv[] = { "PROCCHLD.BIN", "env", 0 };
+    char *const envp[] = { "PROCTEST_ENV=33", 0 };
+    execve("/PROCCHLD.BIN", argv, envp);
+    exit(4);
+  }
+  if (child < 0) {
+    print_console("[PROCTEST] fork #4 failed\n");
+    failures++;
+  } else {
+    status = 0;
+    r = waitpid(child, &status, 0);
+    check("execve envp -> child getenv", WIFEXITED(status) ? WEXITSTATUS(status) : -1, 33);
+  }
+
+  /* 5) P5: FD_CLOEXEC -- fd A flagged CLOEXEC must be gone after exec
+     (close -> EBADF), fd B must survive; PROCCHLD probes both and exits
+     0 only for the expected pair. */
+  child = fork();
+  for (int attempt = 0; child < 0 && attempt < 200; attempt++) {
+    usleep(50000);
+    child = fork();
+  }
+  if (child == 0) {
+    int fa = open("/PROCCHLD.BIN", 0);
+    int fb = open("/PROCCHLD.BIN", 0);
+    if (fa < 0 || fb < 0)
+      exit(5);
+    fcntl(fa, F_SETFD, FD_CLOEXEC);
+    char a1[12], a2[12];
+    i2s(fa, a1);
+    i2s(fb, a2);
+    char *const argv[] = { "PROCCHLD.BIN", "fds", a1, a2, 0 };
+    execve("/PROCCHLD.BIN", argv, 0);
+    exit(6);
+  }
+  if (child < 0) {
+    print_console("[PROCTEST] fork #5 failed\n");
+    failures++;
+  } else {
+    status = 0;
+    r = waitpid(child, &status, 0);
+    check("FD_CLOEXEC swept, plain fd kept", r == child && WIFEXITED(status) ? WEXITSTATUS(status) : -1, 0);
+  }
+
   if (failures == 0) {
-    print_console("[PROCTEST] ALL PASSED (8 checks)\n");
+    print_console("[PROCTEST] ALL PASSED (");
+    con_int(checks_run);
+    print_console(" checks)\n");
     exit(0);
   }
   print_console("[PROCTEST] FAILURES: ");
