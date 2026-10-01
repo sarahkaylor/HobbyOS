@@ -1237,6 +1237,8 @@ void fs_reopen(int global_fd) {
     f->ref_count++;
     if (f->type == FILE_TYPE_PIPE) {
       pipe_reopen(f->pipe.ptr, f->pipe.end);
+    } else if (f->type == FILE_TYPE_UNIXSOCK) {
+      usock_reopen(f->usock.ptr, f->usock.end); /* P4: fork's fd copies */
     }
   }
   spinlock_release_irqrestore(&f->lock, flags);
