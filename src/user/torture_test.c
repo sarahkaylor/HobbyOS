@@ -212,7 +212,10 @@ static void mem_sample(void) {
  * spawn-heavy tests blocked for minutes).  Each burst runs CHURN_LIVE
  * concurrent threads whose whole life is bounded; the bursts complete the
  * 64-cycle budget.  The turnstile release is a STICKY flag broadcast right
- * after the create loop, so neither side waits on the other.
+ * after the create loop, so neither side waits on the other.  Under
+ * sustained slot pressure the bursts stop early and release immediately
+ * (two pressured bursts abandon the remainder with a note) -- re-attempting
+ * through a famine just extends it for every sibling suite.
  */
 
 static pthread_mutex_t churn_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -275,7 +278,15 @@ static void *churn_fn(void *arg) {
 
 /* One burst of up to n threads.  Returns 1 = all created threads churned
  * correctly, 0 = churn mismatch (real failure), -1 = every launch rejected
- * (slot pressure, tolerated), -2 = non-EAGAIN create error (real). */
+ * (slot pressure, tolerated), -2 = non-EAGAIN create error (real).
+ *
+ * Under slot pressure a launch can burn the shim's full ~2 s retry before
+ * returning EAGAIN, so the burst STOPS at the first rejection instead of
+ * grinding through the rest: the caller decides whether to keep going, and
+ * any threads already created are released below either way.  This bounds
+ * the table-hold window during a wave-overlap famine (observed: a churn
+ * that kept re-attempting under a full table starved every sibling suite's
+ * spawns for minutes). */
 static int churn_burst(int n, int *created_out) {
   pthread_t th[CHURN_LIVE_SOAK];
   int created = 0, rejected = 0;
@@ -292,8 +303,8 @@ static int churn_burst(int n, int *created_out) {
       continue;
     }
     if (rc == EAGAIN) {
-      rejected++;
-      continue;
+      rejected = n - i; /* this and every remaining launch: not attempted */
+      break;
     }
     /* Non-EAGAIN from pthread_create is a real defect, not pressure. */
     label_num("[TORTURE] pthread_create rc=", rc);
@@ -330,19 +341,25 @@ static int churn_burst(int n, int *created_out) {
 
 /* Runs CHURN_TOTAL create/join cycles in bursts of `live` concurrent
  * threads.  Returns 1 = ran and passed, 0 = ran and failed, -1 = skipped
- * (every launch rejected: tolerated, noted, never a FAIL). */
+ * (every launch rejected: tolerated, noted, never a FAIL).
+ *
+ * Famine discipline: a burst that saw ANY rejected launch counts as
+ * pressured; two pressured bursts in a row abandon the remaining cycles
+ * with a note (the table is held by someone else -- retrying would just
+ * extend the famine for every sibling suite). */
 static int thread_churn(void) {
   int live = soak_mode ? CHURN_LIVE_SOAK : CHURN_LIVE_QUICK;
   uint64_t t0 = now_ms();
   int bursts = (CHURN_TOTAL + live - 1) / live;
   int created_total = 0, rejected_total = 0, skipped = 0, bad = 0;
+  int pressure = 0;
   for (int b = 0; b < bursts; b++) {
     int n = CHURN_TOTAL - b * live;
     int created = 0;
     int rc;
     if (n > live)
       n = live;
-    if (now_ms() - t0 > CHURN_DEADLINE_MS) {
+    if (pressure >= 2 || now_ms() - t0 > CHURN_DEADLINE_MS) {
       skipped += n;
       continue;
     }
@@ -352,11 +369,16 @@ static int thread_churn(void) {
       return 0;
     }
     if (rc == -1) {
+      pressure++;
       skipped += n;
       continue;
     }
     created_total += created;
     rejected_total += n - created;
+    if (n - created > 0)
+      pressure++;
+    else
+      pressure = 0;
     if (rc == 0)
       bad = 1;
   }
