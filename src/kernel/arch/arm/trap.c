@@ -425,7 +425,19 @@ static void sys_thread_exit(struct trap_frame *tf) {
 /* SYS_SET_TLS (75): (tls) -> 0 | -EINVAL. */
 static void sys_set_tls(struct trap_frame *tf) {
   struct process *caller = current_process();
-  tf->regs[0] = (uint64_t)(int64_t)process_set_tls(caller, tf->regs[0]);
+  uint64_t tls = tf->regs[0];
+  int r = process_set_tls(caller, tls);
+  tf->regs[0] = (uint64_t)(int64_t)r;
+  /* TEMP S5 triage (remove me): TLS-install trajectory. */
+  uart_puts("[KERNEL] set_tls pid=");
+  print_int(caller ? (int)caller->pid : -1);
+  uart_puts(" as=");
+  print_int((caller && caller->as) ? 1 : 0);
+  uart_puts(" tls=0x");
+  uart_print_hex(tls);
+  uart_puts(" r=");
+  print_int(r);
+  uart_puts("\n");
 }
 
 static void sys_getsockopt(struct trap_frame *tf) {
