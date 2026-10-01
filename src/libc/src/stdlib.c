@@ -416,7 +416,15 @@ int rand(void) {
 
 /* ---------------- environment table ---------------- */
 
+#ifdef HOST_TEST
+/* Device builds define the table in src/user/libc.o (and environ_init()
+   there as well): every link flavour carries that object, while stdlib.o
+   exists only inside libc.a.  The host build keeps the renamed hb_environ
+   here so host tests can race getenv/setenv against glibc. */
 char **environ = NULL;
+#else
+extern char **environ; /* P6.3: defined in src/user/libc.o */
+#endif
 
 /* Find the index of NAME (or -1) and its string length. */
 static int hb_env_find(const char *name) {
@@ -449,12 +457,83 @@ static int hb_name_has_eq(const char *name) {
   return 0;
 }
 
+/* P6.3: the table + environ_init() live in src/user/libc.o (see the note
+   at the environ definition above): every link flavour carries that
+   object, stdlib.o is archive-only. */
+
+/* P6.3: execvpe()/execvp() -- PATH search lives here (stdlib.o owns
+ * getenv(); execve() comes from user_libc.o), never in the kernel: the
+ * exec row resolves its path argument literally (absolute, or relative to
+ * the process cwd) and does not consult PATH.
+ * Search rules: a name containing '/' is exec'd as-is; otherwise every
+ * colon-separated PATH element is tried in order with the file appended,
+ * and the walk continues while candidates fail with ENOENT/ENOTDIR.
+ * HobbyOS adjustment: when PATH is unset the search defaults to "/" (the
+ * flat namespace has no /bin), so execvp("TOOL.BIN", ...) matches
+ * spawn2("/TOOL.BIN", ...).  There is no shebang handling: `file` must be
+ * a loadable image. */
+#ifndef HOST_TEST
+int execvpe(const char *file, char *const argv[], char *const envp[]) {
+  static char cand[96];
+  const char *path;
+  const char *p;
+  int saw_candidate = 0;
+  int last = ENOENT;
+
+  if (!file || !file[0]) {
+    errno = ENOENT;
+    return -1;
+  }
+  if (strchr(file, '/'))
+    return execve(file, argv, envp);
+
+  path = getenv("PATH");
+  if (!path || !path[0])
+    path = "/";
+  p = path;
+  for (;;) {
+    const char *end = p;
+    int n = 0;
+
+    while (*end && *end != ':')
+      end++;
+    if ((size_t)(end - p) + 1 + strlen(file) < sizeof(cand)) {
+      for (const char *d = p; d < end; d++)
+        cand[n++] = *d;
+      if (n > 0 && cand[n - 1] != '/')
+        cand[n++] = '/';
+      for (const char *f = file; *f; f++)
+        cand[n++] = *f;
+      cand[n] = '\0';
+      execve(cand, argv, envp);
+      last = errno; /* execve never returns on success */
+      saw_candidate = 1;
+      if (last != ENOENT && last != ENOTDIR)
+        return -1; /* name resolved but the exec failed */
+    }
+    if (!*end)
+      break;
+    p = end + 1;
+  }
+  errno = saw_candidate ? last : ENOENT;
+  return -1;
+}
+
+int execvp(const char *file, char *const argv[]) {
+  return execvpe(file, argv, environ);
+}
+#endif
+
 char *getenv(const char *name) {
 #ifndef HOST_TEST
-  /* P5 S4 minimal device bridge: with no environ table yet (the L3
-     environ build-out owns that), read the kernel env blob through
-     SYS_GETENV (row 85) and return a pointer into a static scratch
-     buffer.  Single-value lifetime, like many embedded getenvs. */
+  /* P6.3: programs that link crt0 materialize the table before main();
+     any other entry point gets it lazily right here. */
+  if (!environ)
+    environ_init();
+  /* P5 S4 minimal device bridge (fallback): if the table could not be
+     materialized, read the kernel env blob through SYS_GETENV (row 85)
+     and return a pointer into a static scratch buffer.  Single-value
+     lifetime, like many embedded getenvs. */
   if (!environ && name && name[0]) {
     static char gbuf[128];
     long count = hb_syscall4(SYS_GETENV, -1, 0, 0, 0);

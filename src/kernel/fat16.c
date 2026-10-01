@@ -1487,6 +1487,61 @@ int fat16_truncate(struct file* f) {
   return 0;
 }
 
+/**
+ * P6.1: resize an existing file to `new_size` bytes -- byte-granular like
+ * fat16_write.  Extending appends zero fill (allocating clusters as
+ * needed); shrinking frees every cluster past the one holding byte
+ * new_size-1 and re-terminates that cluster's FAT entry.  Callers hold the
+ * file's lock (fs.c file_ftruncate); this never holds fat_lock across a
+ * fat16_write call (that takes it itself).
+ */
+int fat16_truncate_to(struct file* f, uint32_t new_size) {
+  if (!f) return -1;
+  if (new_size == 0) return fat16_truncate(f);
+
+  uint32_t old_size = f->fat16.entry.file_size;
+  if (new_size == old_size) return 0;
+
+  if (new_size > old_size) {
+    uint8_t zeros[64];
+    for (int i = 0; i < 64; i++) zeros[i] = 0;
+    if (fat16_seek(f, (int)old_size) != 0) return -1;
+    uint32_t left = new_size - old_size;
+    while (left > 0) {
+      uint32_t chunk = left > sizeof zeros ? (uint32_t)sizeof zeros : left;
+      if (fat16_write(f, zeros, (int)chunk) != (int)chunk) return -1;
+      left -= chunk;
+    }
+    return 0;
+  }
+
+  /* Shrink: walk to the last cluster to keep, then free the rest. */
+  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  uint32_t keep = (new_size + cluster_size - 1) / cluster_size;
+  uint16_t c = f->fat16.entry.start_cluster;
+  for (uint32_t i = 1; i < keep && c >= 2 && c < 0xFFF8; i++)
+    c = read_fat(c);
+  if (c < 2 || c >= 0xFFF8) {
+    /* No cluster chain covers the kept range: collapsed chain. */
+    spinlock_release_irqrestore(&fat_lock, flags);
+    return -1;
+  }
+  uint16_t rest = read_fat(c);
+  write_fat(c, 0xFFFF); /* re-terminate the last kept cluster */
+  while (rest >= 2 && rest < 0xFFF8) {
+    uint16_t next = read_fat(rest);
+    write_fat(rest, 0);
+    rest = next;
+  }
+  spinlock_release_irqrestore(&fat_lock, flags);
+
+  f->fat16.entry.file_size = new_size;
+  if (f->fat16.cursor > new_size) f->fat16.cursor = new_size;
+  f->fat16.dirty = 1;
+  fat16_sync_entry(f);
+  return 0;
+}
+
 static uint16_t get_cluster_for_offset(uint16_t start, uint32_t offset) {
   uint32_t jumps = offset / cluster_size;
   uint16_t current = start;

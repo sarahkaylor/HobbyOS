@@ -155,6 +155,23 @@ struct fd_set_k {
 #define K_FD_CLOEXEC   1
 #define K_O_NONBLOCK   0x800
 
+/* P6.1 (browser.md section 6): advisory record locks (SQLite).  The
+ * commands ride the EXISTING SYS_FCNTL number (68) -- no new syscall
+ * rows -- and the numbers match the sysroot's fcntl.h (Linux numbering).
+ * The argument is a user pointer to the LP64 struct flock (32 bytes,
+ * 8-byte natural alignment), which the kernel parses byte-wise; the
+ * commands/lock types mirror <fcntl.h>. */
+#define K_F_GETLK      5
+#define K_F_SETLK      6
+#define K_F_SETLKW     7
+#define K_F_RDLCK      0
+#define K_F_WRLCK      1
+#define K_F_UNLCK      2
+
+/* Size of the user-ABI LP64 struct flock the lock commands marshal in the
+ * fcntl argument (2 + 2 + 8 + 8 + 4 bytes + 4 pad). */
+#define K_FLOCK_SIZE   32
+
 /* P4 (docs/browser/p4-ipc-design.md sections 2-6): AF_UNIX + fd flags. */
 #define K_AF_UNIX       1
 #define K_SOCK_RAW      3
@@ -175,8 +192,24 @@ int file_socket_connect(struct process *p, int fd, uint32_t ip_be,
                         uint16_t port_be);
 
 /* SYS_FCNTL: F_GETFL / F_SETFL over a socket fd (O_NONBLOCK stored on the
- * PCB); any other command, or a non-socket fd, is -EINVAL. */
-int file_fcntl(struct process *p, int fd, int cmd, int arg);
+ * PCB); any other command, or a non-socket fd, is -EINVAL.  P6.1 adds the
+ * record-lock commands (K_F_GETLK/K_F_SETLK/K_F_SETLKW) over regular FAT16
+ * files; `arg` carries either an int flag word or a user pointer to the
+ * LP64 struct flock, so it is passed with its full 64-bit width. */
+int file_fcntl(struct process *p, int fd, int cmd, uint64_t arg);
+
+/* P6.1: release every record lock owned by process `pid` on the file
+ * identified by `file_id` (dir-entry identity).  Callers hold proc_lock
+ * or are single-threaded (close/exit paths). */
+void file_locks_release(int pid, uint64_t file_id);
+
+/* P6.1: drop every record lock owned by `pid` (process teardown sweep). */
+void file_locks_release_pid(int pid);
+
+/* P6.1: SYS_FTRUNCATE (row 33) -- resize an open regular file.  Extends
+ * with zero fill, shrinks by freeing whole trailing clusters.  Returns 0
+ * or -errno (EBADF/ESPIPE/EINVAL/ENOSPC). */
+int file_ftruncate(struct process *p, int fd, int64_t length);
 
 /* SYS_SELECT engine (F1.2).  Returns the number of ready descriptors with
  * the masks rewritten to hold only the ready fds; 0 on timeout; -2 when the

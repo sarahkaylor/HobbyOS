@@ -12,9 +12,14 @@
  *   "fds A B"      close(A) must fail EBADF (A had FD_CLOEXEC and was
  *                  swept at exec) and close(B) must succeed (kept);
  *                  exit 0 on that pair, 1 otherwise.
+ *   "spawnenv"     P6.3: spawn2() a grandchild in "env" mode and exit
+ *                  with its exit code, proving the group's environment
+ *                  blob crossed the spawn boundary (spawned children
+ *                  used to get an empty environment).
  */
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/wait.h>
 
 /* The old-trio libc has no atoi; every tool keeps its own tiny parser. */
 static int p_atoi(const char *s) {
@@ -26,11 +31,20 @@ static int p_atoi(const char *s) {
 
 int main(int argc, char **argv) {
   extern void print_console(const char *s);
+  extern int spawn2(const char *filename, int stdin_fd, int stdout_fd,
+                    int stderr_fd, const char *args);
   print_console("[PROCCHLD] running\n");
 
   if (argc >= 2 && argv[1] && argv[1][0] == 'e' && argv[1][1] == 'n') {
     char *v = getenv("PROCTEST_ENV");
     return v ? p_atoi(v) : 99;
+  }
+  if (argc >= 2 && argv[1] && argv[1][0] == 's' && argv[1][1] == 'p') {
+    int pid = spawn2("/PROCCHLD.BIN", -1, -1, -1, "env");
+    int st = 0;
+    if (pid < 0) return 90;
+    if (waitpid(pid, &st, 0) != pid) return 91;
+    return WIFEXITED(st) ? WEXITSTATUS(st) : 92;
   }
   if (argc >= 4 && argv[1] && argv[1][0] == 'f' && argv[1][1] == 'd') {
     int a = p_atoi(argv[2]);

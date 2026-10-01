@@ -1,5 +1,7 @@
 #include "libc.h"
 #include <stdint.h>
+#include <stdarg.h>
+#include <fcntl.h>      /* P6.1: struct flock + F_GETLK/F_SETLK/F_SETLKW */
 #include "syscall.h"
 #include "errno.h"
 #include <poll.h>       /* P4: struct pollfd */
@@ -344,8 +346,63 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
                                  (long)writefds, (long)exceptfds, (long)timeout_ms));
 }
 
-int fcntl(int fd, int cmd, int arg) {
-  return (int)errno_ret(syscall(SYS_FCNTL, (long)fd, (long)cmd, (long)arg, 0));
+/* P6.1 (browser.md section 6): fcntl is variadic like glibc so the
+ * record-lock commands can pass a struct flock pointer (the syscall
+ * argument is a 64-bit user pointer; the trap layer validates its range
+ * and natural alignment).  F_SETLKW is the blocking form: the kernel's
+ * lock commands are non-blocking (single attempt, -EAGAIN on conflict), so
+ * this wrapper retries F_SETLK with short sleeps, capped at ~10 s, before
+ * surfacing EAGAIN -- the non-blocking + bounded-retry shape SQLite's busy
+ * handling consumes, without syscall-restart plumbing in the kernel. */
+int fcntl(int fd, int cmd, ...) {
+  long arg;
+  va_list ap;
+
+  va_start(ap, cmd);
+  arg = va_arg(ap, long);
+  va_end(ap);
+
+  if (cmd == F_SETLKW) {
+    for (int i = 0; i < 1000; i++) {
+      long r = syscall(SYS_FCNTL, (long)fd, (long)F_SETLK, arg, 0);
+      if (r != -EAGAIN)
+        return (int)errno_ret(r);
+      usleep(10000); /* 10 ms; 1000 tries ~= 10 s bound */
+    }
+    errno = EAGAIN;
+    return -1;
+  }
+  return (int)errno_ret(syscall(SYS_FCNTL, (long)fd, (long)cmd, arg, 0));
+}
+
+/* P6.1: flock(2) whole-file locks over the record locks.  LOCK_NB picks
+ * the non-blocking form; the default blocks with the bounded retry above. */
+int flock(int fd, int op) {
+  struct flock fl;
+
+  fl.l_type = (op & LOCK_UN) ? F_UNLCK
+                             : ((op & LOCK_SH) ? F_RDLCK : F_WRLCK);
+  fl.l_whence = 0; /* SEEK_SET */
+  fl.l_start = 0;
+  fl.l_len = 0;    /* whole file */
+  return fcntl(fd, (op & LOCK_NB) ? F_SETLK : F_SETLKW, &fl);
+}
+
+/* P6.1: ftruncate(2) -- the kernel resizes regular FAT16 files (row 33). */
+int ftruncate(int fd, off_t length) {
+  return (int)errno_ret(syscall(SYS_FTRUNCATE, (long)fd, (long)length, 0, 0));
+}
+
+/* P6.1: single-user identity -- no accounts on the device, uid/gid 0 (the
+ * pwd.h/grp.h stubs report the matching "user"/"root" entries). */
+unsigned int getuid(void) { return 0; }
+unsigned int geteuid(void) { return 0; }
+unsigned int getgid(void) { return 0; }
+unsigned int getegid(void) { return 0; }
+int getgroups(int size, unsigned int list[]) {
+  (void)size;
+  (void)list;
+  return 0; /* no supplementary groups */
 }
 
 int getsockopt(int fd, int level, int optname, void *val, int *len) {
@@ -604,14 +661,61 @@ int wait(int *status) {
   return waitpid(-1, status, 0);
 }
 
+/* P6.3: the environment table + its kernel bridge.  The table lives HERE
+ * (not in libc.a's stdlib.o) because the trio-linked programs
+ * (user_libc.o + user_malloc.o + libc_string.o) have no archive, and every
+ * link flavour must resolve it; stdlib.o's getenv/setenv/execvp()
+ * reference it as a plain extern. */
+char **environ = NULL;
+
+/* Materialize `environ` from the kernel env blob (SYS_GETENV, row 85): the
+ * kernel keeps the group's environment as one NUL-separated buffer.  crt0
+ * calls this before main(); it is idempotent, and stdlib.o's getenv()
+ * re-tries it for programs without crt0.  The byte cap mirrors HO_ENV_LEN
+ * in src/include/process.h -- grow both together. */
+#define HB_ENV_BLOB_MAX 512
+
+void environ_init(void) {
+  /* malloc()/free() live in user_malloc.o, which a few lean graphics
+     binaries do not link; the weak references let those links resolve and
+     environ_init() simply declines (getenv() keeps its blob fallback;
+     nothing else uses the table in those links). */
+  extern void *malloc(size_t size) __attribute__((weak));
+  extern void free(void *ptr) __attribute__((weak));
+  if (environ || !malloc || !free) return;
+  long total = syscall(SYS_GETENV, -1, 0, 0, 0);
+  if (total < 0) return; /* no env rows; getenv() keeps its blob fallback */
+  if (total > HB_ENV_BLOB_MAX / 2) total = HB_ENV_BLOB_MAX / 2; /* >=1 char + NUL */
+  char **vec = (char **)malloc(((size_t)total + 1) * sizeof(char *));
+  if (!vec) return;
+  static char blob[HB_ENV_BLOB_MAX];
+  int used = 0;
+  int kept = 0;
+  for (long i = 0; i < total; i++) {
+    int room = HB_ENV_BLOB_MAX - used;
+    if (room < 2) break;
+    long len = syscall(SYS_GETENV, i, (long)(blob + used), (long)room, 0);
+    if (len < 0) {
+      free(vec);
+      return;
+    }
+    vec[kept++] = blob + used;
+    used += (int)len + 1; /* past the NUL SYS_GETENV wrote */
+  }
+  vec[kept] = 0;
+  environ = vec;
+}
+
 int execv(const char *path, char *const argv[]) {
-  return (int)errno_ret(syscall(SYS_EXEC, (long)path, (long)argv, 0, 0));
+  /* P6.3: POSIX execv() uses the caller's environment; the table is
+     defined in this object (see the P6.3 section above), so trio-linked
+     programs get a real environment across exec too. */
+  return execve(path, argv, environ);
 }
 
 int execve(const char *path, char *const argv[], char *const envp[]) {
   /* P5 (D3.1): the 3-arg row -- envp marshals to the group env blob
-     (NULL = empty environment; execv keeps passing an empty set until
-     the libc environ bridge lands with L3). */
+     (NULL = empty environment). */
   return (int)errno_ret(syscall(SYS_EXEC, (long)path, (long)argv, (long)envp, 0));
 }
 

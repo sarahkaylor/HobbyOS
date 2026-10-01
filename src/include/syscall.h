@@ -90,18 +90,22 @@
 #define SYS_SOCKET        (65)  /* (domain, type, protocol)            -> fd | -errno */
 #define SYS_CONNECT_FD    (66)  /* (fd, ip_be, port_be) -> 0 | -EINPROGRESS | -errno */
 #define SYS_SELECT        (67)  /* (nfds, rd*, wr*, ex*, timeout_ms)   -> count | -errno */
-#define SYS_FCNTL         (68)  /* (fd, cmd, arg)                      -> value | -errno */
+#define SYS_FCNTL         (68)  /* (fd, cmd, arg64)  -> value | -errno
+* arg64: flag value for F_GETFD/F_SETFD/
+* F_GETFL/F_SETFL; user pointer to the LP64
+                                 * struct flock for F_GETLK/F_SETLK/F_SETLKW
+  * (P6.1 record locks). */
 #define SYS_GETSOCKOPT    (69)  /* (fd, level, optname, val*, len*)    -> 0 | -errno */
 #define SYS_SETSOCKOPT    (70)  /* (fd, level, optname, val, len)      -> 0 | -errno */
 #define SYS_GETRANDOM     (71)  /* (buf, len, flags)                   -> written | -errno */
 
-/* P1 (browser.md A.1b, design D2/OQ1 consented): kernel threads,
- * futex-lite and the TLS register.  72/73 are the planned P1 rows; 74/75
- * were INSERTED, so the P4+ provisional rows shift +2 (SYS_POLL 74 -> 76,
- * et seq. -- nothing >= 72 was implemented before this renumber). */
+  /* P1 (browser.md A.1b, design D2/OQ1 consented): kernel threads,
+   * futex-lite and the TLS register.  72/73 are the planned P1 rows; 74/75
+   * were INSERTED, so the P4+ provisional rows shift +2 (SYS_POLL 74 -> 76,
+   * et seq. -- nothing >= 72 was implemented before this renumber). */
 #define SYS_THREAD_CREATE (72)  /* (entry, arg, stack, flags) -> tid | -EINVAL | -EAGAIN */
 #define SYS_FUTEX         (73)  /* (uaddr, op, val, timeout_ms) -> 0/count | -EAGAIN
-*  | -ETIMEDOUT | -EINVAL | -EFAULT | -ENOSYS */
+  *  | -ETIMEDOUT | -EINVAL | -EFAULT | -ENOSYS */
 #define SYS_THREAD_EXIT   (74)  /* (retval) -> noreturn (exits this thread) */
 #define SYS_SET_TLS       (75)  /* (tls) -> 0 | -EINVAL */
 

@@ -159,6 +159,36 @@ FILE *fopen(const char *path, const char *mode) {
   }
 }
 
+/* P6.1: tmpfile() -- an anonymous scratch FILE under /tmp.  FAT16 has no
+ * delete-on-last-close: unlinking an open file would let the driver's
+ * cached directory entry resurrect it when the fd closes, so the temp file
+ * is NOT unlinked -- it lives until something removes it.  The mkstemp
+ * name is not 8.3 (base "tmpXXXXXX"); the driver's LFN create path already
+ * handles the same shape for tac/antfarm temp usage. */
+FILE *tmpfile(void) {
+  char tmpl[24] = "/tmp/tmpXXXXXX";
+  FILE *f;
+  int fd = mkstemp(tmpl);
+
+  if (fd < 0)
+    return NULL;
+  f = fdopen(fd, "w+b");
+  if (!f) {
+    close(fd);
+    return NULL;
+  }
+  return f;
+}
+
+/* P6.1: remove(3) -- the file case of the POSIX name, over unlink(). */
+int remove(const char *path) {
+  if (!path) {
+    errno = EFAULT;
+    return -1;
+  }
+  return unlink(path);
+}
+
 int fclose(FILE *f) {
   int r = 0;
   if (!f)
