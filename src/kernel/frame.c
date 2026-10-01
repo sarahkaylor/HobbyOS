@@ -78,31 +78,58 @@ static int popcount64(uint64_t v) {
   return n;
 }
 
-/* Reserve [lo, hi) (physical, rounded outward) so the pool never hands
-   out frames over it.  Boot-time use: the kernel image must be reserved
-   -- the allocation hint walks forward with churn (contig blocks set it
-   past each run), and once it crossed into the image the allocator
-   handed out frames over live kernel memory and frame_alloc_zeroed
-   wiped them (exception vector table + text), an unrecoverable
-   freeze.  Idempotent; may be called once at boot before any alloc. */
+/* Reserve [lo, hi) (physical; rounded outward to whole 32 MiB blocks) so
+   the pool never hands out frames over it.  Boot-time use: the kernel
+   image must be reserved -- the allocation hint walks forward with churn
+   (contig blocks set it past each run), and once it crossed into the
+   image the allocator handed out frames over live kernel memory and
+   frame_alloc_zeroed wiped them (exception vector table + text), an
+   unrecoverable freeze.
+
+   Blocks are always reserved as whole units (all frames marked + the
+   block claimed): the legacy block layer partitions blocks into free vs
+   claimed (phys_block_free_count + blocks_used == block_count), so a
+   partially-reserved unclaimed block would break that partition.
+   Idempotent: re-reserving an already-claimed block is a no-op.  Must
+   be called before any allocation (boot). */
 void frame_reserve_range(uint64_t lo, uint64_t hi) {
+  if (hi <= lo)
+    return;
   uint64_t flags = spinlock_acquire_irqsave(&frame_lock);
-  lo &= ~((uint64_t)FRAME_SIZE - 1);
-  hi = (hi + FRAME_SIZE - 1) & ~((uint64_t)FRAME_SIZE - 1);
-  for (uint64_t a = lo; a < hi; a += FRAME_SIZE) {
-    int ok = 0;
-    int idx = frame_index_of(a, &ok);
-    if (!ok)
-      continue;
-    uint32_t w = (uint32_t)idx / 64;
-    uint32_t b = (uint32_t)idx % 64;
-    if (frame_bits[w] & (1ULL << b))
-      continue;
-    frame_bits[w] |= (1ULL << b);
-    frame_used++;
-    if (frame_used > frame_high)
-      frame_high = frame_used;
+  uint64_t a_lo = lo & ~((uint64_t)FRAME_SIZE - 1);
+  uint64_t a_hi = (hi + FRAME_SIZE - 1) & ~((uint64_t)FRAME_SIZE - 1);
+  int ok0 = 0;
+  int ok1 = 0;
+  int idx_lo = frame_index_of(a_lo, &ok0);
+  int idx_hi = frame_index_of(a_hi - FRAME_SIZE, &ok1);
+  if (!ok0 || !ok1) {
+    /* Outside every pool extent on this arch: nothing to reserve. */
+    spinlock_release_irqrestore(&frame_lock, flags);
+    return;
   }
+  int fb0 = (idx_lo / FRAME_BLOCK_FRAMES) * FRAME_BLOCK_FRAMES;
+  int fb1 = ((idx_hi / FRAME_BLOCK_FRAMES) + 1) * FRAME_BLOCK_FRAMES;
+  for (int bk = fb0; bk < fb1; bk += FRAME_BLOCK_FRAMES) {
+    int whole = 1;
+    for (int i = bk; i < bk + FRAME_BLOCK_FRAMES; i++) {
+      if (!(frame_bits[i / 64] & (1ULL << (i % 64)))) {
+        whole = 0;
+        break;
+      }
+    }
+    if (!whole)
+      block_used++; /* newly a whole unit (idempotent otherwise) */
+    for (int i = bk; i < bk + FRAME_BLOCK_FRAMES; i++) {
+      uint32_t w = (uint32_t)i / 64;
+      uint32_t b = (uint32_t)i % 64;
+      if (frame_bits[w] & (1ULL << b))
+        continue;
+      frame_bits[w] |= (1ULL << b);
+      frame_used++;
+    }
+  }
+  if (frame_used > frame_high)
+    frame_high = frame_used;
   spinlock_release_irqrestore(&frame_lock, flags);
 }
 

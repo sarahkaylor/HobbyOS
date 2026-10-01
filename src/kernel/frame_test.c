@@ -4,6 +4,7 @@
 #include "frame.h"
 
 extern void uart_puts(const char *s);
+extern void uart_print_hex(uint64_t val);
 
 /* Expected pool sizes (design section 2.1).  ARM: [0x70000000,
    0x240000000); x64: [0x20000000, 0x70000000) + [0x80000000,
@@ -175,6 +176,99 @@ static void test_frame_exhaustion_path(void) {
   EXPECT_EQ(frame_blocks_used_count(), frame_block_count() - frame_phys_block_free_count());
 }
 
+static void test_frame_image_reserved(void) {
+  extern char _start[];
+  extern char __stack_top[];
+  tests_run++;
+  uart_puts("  Running test_frame_image_reserved...\n");
+
+  /* The kernel image must be reserved in the pool: the allocation hint
+     walks forward with churn (frame_alloc_contig sets it past each run),
+     and if the image is not marked the frontier eventually allocates
+     over live kernel pages and frame_alloc_zeroed wipes them.  This is
+     the soak-freeze mechanism; the churn below reproduces the frontier
+     walk up to the reserved region deterministically.  frame_init
+     reserves the image as whole 32 MiB blocks, so the reserved extent
+     starts at the image's block boundary. */
+  uint64_t img_lo = (uint64_t)(uintptr_t)_start;
+  uint64_t img_hi = (uint64_t)(uintptr_t)__stack_top;
+  uint64_t rsv_lo = img_lo & ~((uint64_t)FRAME_BLOCK_SIZE - 1);
+
+  int used0 = frame_used_count();
+
+  /* Churn the frontier from the pool bottom up to the reserved region:
+     each step allocates a run at the frontier and frees the previous
+     one, exactly like the loader/fork cycle.  No allocation may land
+     inside the image, and the walk must reach the region's edge and
+     wrap (nothing free lives past the reserved top-block tail).
+     Run size 2048 frames (8 MiB) keeps ~920 steps for the walk. */
+  frame_test_save_all();
+  enum { RUN = 2048 };
+  uint64_t last = 0;
+  uint64_t seen_high = 0;
+  int wrapped = 0;
+  int inside = 0;
+  int iters = 0;
+  while (iters++ < 12000) {
+    uint64_t b = frame_alloc_contig(RUN);
+    if (!b)
+      break;
+    if (!(b + RUN * FRAME_SIZE <= img_lo || b >= img_hi))
+      inside++;
+    if (b > seen_high)
+      seen_high = b;
+    if (last && b < last)
+      wrapped = 1; /* reached the reserved tail, allocation wrapped low */
+    if (last) {
+      for (int j = 0; j < RUN; j++)
+        frame_free(last + (uint64_t)j * FRAME_SIZE);
+    }
+    last = b;
+    if (wrapped)
+      break;
+  }
+  if (last) {
+    for (int j = 0; j < RUN; j++)
+      frame_free(last + (uint64_t)j * FRAME_SIZE);
+  }
+
+  /* The single-frame path shares the bitmap scan; singles after the
+     walk (post-wrap hint, so they land low) must not land inside the
+     image either. */
+  uint64_t singles[4];
+  int singles_ok = 1;
+  for (int i = 0; i < 4; i++) {
+    singles[i] = frame_alloc();
+    if (singles[i] == 0 || !(singles[i] < img_lo || singles[i] >= img_hi))
+      singles_ok = 0;
+  }
+  for (int i = 0; i < 4; i++)
+    frame_free(singles[i]);
+
+  /* Restore the exact pre-test pool state before asserting: EXPECT_EQ
+     returns from the test on failure, and an early return must not
+     leave the churned bitmap in place (it would starve every later
+     suite of free blocks). */
+  frame_test_restore_all();
+
+  uart_puts("  [imgrsv] iters=");
+  print_int(iters);
+  uart_puts(" high=");
+  uart_print_hex(seen_high);
+  uart_puts(" last=");
+  uart_print_hex(last);
+  uart_puts(" inside=");
+  print_int(inside);
+  uart_puts(" wrapped=");
+  print_int(wrapped);
+  uart_puts("\n");
+  EXPECT_EQ(inside, 0);
+  EXPECT_EQ((seen_high + RUN * FRAME_SIZE >= rsv_lo), 1);
+  EXPECT_EQ(wrapped, 1);
+  EXPECT_EQ(singles_ok, 1);
+  EXPECT_EQ(frame_free_count(), frame_total_count() - used0);
+}
+
 void frame_test_suite(void) {
   uart_puts("frame_test_suite:\n");
   test_frame_counts();
@@ -183,6 +277,7 @@ void frame_test_suite(void) {
   test_frame_alloc_zeroed();
   test_frame_block_layer();
   test_frame_exhaustion_path();
+  test_frame_image_reserved();
 }
 
 #endif // KERNEL_MODE_UNIT_TEST
