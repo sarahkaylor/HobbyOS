@@ -6,8 +6,10 @@
 #include "lock.h"
 #include "process.h"
 #include "nfs.h"
+#include "ipc_proto.h"
 
 struct socket_pcb;
+struct usock;
 
 /**
  * Types of files supported by the VFS layer.
@@ -17,7 +19,8 @@ typedef enum {
   FILE_TYPE_FAT16,    /**< Regular file on FAT16 filesystem */
   FILE_TYPE_PIPE,     /**< Anonymous pipe for IPC */
   FILE_TYPE_SOCKET,   /**< Network socket */
-  FILE_TYPE_NFS       /**< Regular file on a mounted NFS export (read-only) */
+  FILE_TYPE_NFS,      /**< Regular file on a mounted NFS export (read-only) */
+  FILE_TYPE_UNIXSOCK  /**< P4: AF_UNIX socketpair end (struct usock) */
 } file_type_t;
 
 /**
@@ -43,6 +46,10 @@ struct file {
     struct {
       struct socket_pcb *pcb;      /**< Pointer to the protocol control block */
     } socket;
+    struct {
+      struct usock *ptr;           /**< P4: AF_UNIX pair object */
+      int end;                     /**< 0|1: which half this fd is */
+    } usock;
     struct {
       struct nfs_fh fh;            /**< NFSv3 file handle */
       uint64_t size;               /**< Size from the open attributes */
@@ -145,6 +152,16 @@ struct fd_set_k {
 #define K_F_SETFL      4
 #define K_O_NONBLOCK   0x800
 
+/* P4 (docs/browser/p4-ipc-design.md sections 2-6): AF_UNIX + fd flags. */
+#define K_AF_UNIX       1
+#define K_SOCK_RAW      3
+#define K_SOCK_SEQPACKET 5
+#define K_SOCK_CLOEXEC  0x80000
+#define K_SO_DOMAIN     39
+#define K_F_GETFD       1
+#define K_F_SETFD       2
+#define K_FD_CLOEXEC    1
+
 /* SYS_SOCKET: create a socket and install it in the process fd table.
  * Returns the user fd (>= 0) or -errno (EAFNOSUPPORT, EPROTONOSUPPORT,
  * EMFILE, ENFILE). */
@@ -202,5 +219,39 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
 int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp);
 int file_stat_path(struct process *p, const char *path, struct k_stat *st,
                    int *errp);
+
+/* --- P4 (docs/browser/p4-ipc-design.md; freeze consented 2026-09-30) ----- */
+
+/* SYS_SOCKETPAIR (77): AF_UNIX pair.  Returns 0 with ufds[0]/ufds[1] filled
+ * (user pointers already range-checked by the trap layer) or -errno
+ * (EAFNOSUPPORT/EPROTONOSUPPORT/EINVAL/EMFILE/EFAULT). */
+int file_socketpair(struct process *p, int domain, int type, int proto,
+                    int *ufds);
+
+/* SYS_SENDMSG (78) / SYS_RECVMSG (79): `umsg` points at a user msghdr whose
+ * storage the trap layer has range-checked for sizeof(struct k_msghdr);
+ * the iovec array and control block are validated and copied to kernel
+ * scratch here.  Returns bytes / -errno (-EOPNOTSUPP for INET sockets,
+ * -ENOTSOCK for pipes/files, -ENOTCONN for an unconnected unix endpoint). */
+int file_sendmsg(struct process *p, int fd, uint64_t umsg, int flags);
+int file_recvmsg(struct process *p, int fd, uint64_t umsg, int flags);
+
+/* SYS_POLL (76) engine: probes every entry, rewrites revents, parks
+ * (returns -2) through the shared select deadline table.  `fds` is user
+ * memory (range-checked, aligned) accessed directly.  Returns the number of
+ * entries with nonzero revents, 0 on timeout, -errno (EINVAL/EFAULT). */
+int file_poll(struct process *p, struct k_pollfd *fds, int nfds,
+              int timeout_ms);
+
+/* 1 when the global slot holds an IPC endpoint end (pipe or unix socket
+ * end): the spawn2 default-stderr exclusion class. */
+int file_gfd_is_ipc_endpoint(int gfd);
+
+/* SCM_RIGHTS fd machine (§4.2): take a message-owned reference to an open
+ * global fd (validate + ref++ + per-fd type reopen under that file's lock);
+ * install a message-owned reference into the receiver group's table as the
+ * lowest free user fd (no ref bump: the reference transfers). */
+int fs_msg_ref_gfd(int gfd);
+int fs_msg_install_gfd(struct process *p, int gfd);
 
 #endif // FS_H
