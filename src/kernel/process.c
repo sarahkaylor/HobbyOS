@@ -1338,6 +1338,31 @@ int process_kill(int pid) {
     file_select_forget(m->pid);
   }
   p->live_threads = 0;
+
+  /* Wake a parent blocked in waitpid() on this (now EXITED) child and
+     deliver the reap result, mirroring group_teardown's wake for graceful
+     exits.  Without this, a waitpid() parked on a child that is later
+     killed by a fault or kill() sleeps forever: the graceful path never
+     runs for a killed child, and process_wake_all() only touches BLOCKED
+     states.  (Observed wave stall: TAILTEST and WCTEST stuck in
+     WAIT_CHILD with their fault-killed children already EXITED.) */
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *parent = &proc_table[i];
+    if (parent->state != PROC_STATE_WAIT_CHILD ||
+        process_group(parent)->pid != p->parent_pid)
+      continue;
+    int want = (int)parent->context[0];
+    if (want > 0 && want != p->pid)
+      continue;
+    parent->context[0] = p->pid;         /* waitpid return value */
+    int *stp = (int *)parent->context[1]; /* saved arg1: status ptr */
+    if (stp)
+      proc_write_user_u32(parent, (uint64_t)stp, (uint32_t)p->exit_status);
+    parent->state = PROC_STATE_READY;
+    /* The kill delivered the reap; the slot is reusable now. */
+    p->state = PROC_STATE_FREE;
+    p->exit_status = 0;
+  }
   spinlock_release_irqrestore(&proc_lock, flags);
 
   // We close the global file descriptors directly to properly free resources
