@@ -232,6 +232,14 @@ struct process {
    * their group-charged addr_space; the mmap/mprotect/fault paths are
    * v2-only.  Appended at the END so parallel lanes merge additively. */
   struct addr_space *as; /**< P2.2: AS_V2 address space, else NULL */
+
+  /* --- P4/P5 (integrator consent 2026-09-30): FD_CLOEXEC storage -------- *
+   * One canonical bitmask (the P4 review amendment: replaces the note's
+   * fd_flags[] byte array with the P5 note's mask shape): bit i = fd i is
+   * closed at exec.  fcntl F_GETFD/F_SETFD read/write bit 0; dup2/dup and
+   * spawn2's 0/1/2 grants clear the bit on the new fd; P5's execve runs
+   * the sweep.  Appended at the END so parallel lanes merge additively. */
+  uint32_t fd_cloexec;
 };
 
 // Initialize the process subsystem and zero out the process table.

@@ -105,19 +105,38 @@
 #define SYS_THREAD_EXIT   (74)  /* (retval) -> noreturn (exits this thread) */
 #define SYS_SET_TLS       (75)  /* (tls) -> 0 | -EINVAL */
 
+/* P4 (docs/browser/p4-ipc-design.md section 6.2; integrator consent
+ * 2026-09-30, formal freeze at the P4 gate): IPC primitives.  Rows frozen
+ * in place; SYS_MAX already covered them -- P2's write landed first, so
+ * the P4 "top-up" was a no-op (order record for A.1b). */
+#define SYS_POLL          (76)  /* (fds*, nfds, timeout_ms)            -> count | 0 | -errno */
+#define SYS_SOCKETPAIR    (77)  /* (domain, type, proto, fds[2])       -> 0 | -errno */
+#define SYS_SENDMSG       (78)  /* (fd, msghdr*, flags)                -> bytes | -errno */
+#define SYS_RECVMSG       (79)  /* (fd, msghdr*, flags)                -> bytes | -errno */
+
 /* P2 (docs/browser/p2-vm-design.md section 4.2, rows FROZEN at the P2
  * gate): the mmap family.  Section 4.2's table is the binding numbering:
  * 80/81/82 were already the provisional [P2] rows in A.1b, so no
- * renumbering; rows 76-79 (P4) stay provisional gaps.  SYS_MMAP keeps row
- * 62 with its 6-arg Linux-shaped ABI (ARM x0..x5 = regs[0..5]; x64
- * rdi/rsi/rdx/r10/r8/r9 = regs[5]/[4]/[3]/[9]/[7]/[8]).
+ * renumbering; rows 76-79 (P4) are defined above (consented 2026-09-30).
+ * SYS_MMAP keeps row 62 with its 6-arg Linux-shaped ABI (ARM x0..x5 =
+ * regs[0..5]; x64 rdi/rsi/rdx/r10/r8/r9 = regs[5]/[4]/[3]/[9]/[7]/[8]).
  * Status: MEMFD_CREATE is defined here but implemented in S4 (P2.4);
  * MPROTECT/MADVISE/SYS_MMAP-v2/SYS_MUNMAP-partial land in S3 (P2.3). */
 #define SYS_MEMFD_CREATE  (80)  /* (name*, flags)                      -> fd | -errno */
 #define SYS_MPROTECT      (81)  /* (addr, len, prot)                   -> 0 | -errno */
 #define SYS_MADVISE       (82)  /* (addr, len, advice)  advisory       -> 0 | -errno */
 
+/* P5 (docs/browser/p5-exec-signals-design.md D2; integrator consent
+ * 2026-09-30, formal freeze at the P5 gate): exec/launch + signals.
+ * 40/39/16 are EXTENDED IN PLACE (3-arg execve; completed waitpid/kill)
+ * -- no new rows there; the v1 A.1b provisionals EXECVE 83 / WAITPID 84 /
+ * KILL 86 are WITHDRAWN in favor of those in-place extensions. */
+#define SYS_SIGACTION     (83)  /* (signum, act*, oldact*)             -> 0 | -errno */
+#define SYS_SIGRETURN     (84)  /* (void) -> resumes (libc trampoline)          */
+#define SYS_GETENV        (85)  /* (idx, buf, size)                    -> len | -errno */
+#define SYS_SPAWN_EX      (86)  /* (path, argv*, envp*, fdmap*, n)     -> pid | -errno */
+
 /* Highest defined syscall number. Dispatch tables are sized SYS_MAX + 1. */
-#define SYS_MAX           (82)
+#define SYS_MAX           (86)
 
 #endif /* SYSCALL_H */

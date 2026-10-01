@@ -63,10 +63,12 @@
 
 /* Networking / socket errnos (Linux values; Phase F1, browser.md A.1a). */
 #define ENOTSOCK      88
+#define EMSGSIZE      90 /* P4 design D13 (consent 2026-09-30); Linux value */
 #define ENOPROTOOPT   92
 #define EADDRINUSE    98
 #define ENETUNREACH  101
 #define ECONNRESET   104
+#define ENOTCONN     107 /* P4/P5 designs (D13/D2); Linux value */
 #define ETIMEDOUT    110
 #define ECONNREFUSED 111
 #define EHOSTUNREACH 113
