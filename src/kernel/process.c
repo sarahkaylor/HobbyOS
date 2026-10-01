@@ -2429,18 +2429,36 @@ int process_futex(struct process *caller, struct trap_frame *tf, uint64_t uaddr,
   if (!caller)
     return -EINVAL;
   struct process *grp = process_group(caller);
-  /* (1) validate: 4-byte aligned, [uaddr, uaddr+4) inside the caller's own
-     region (misaligned -> -EINVAL, outside -> -EFAULT). */
+  /* (1) validate: 4-byte aligned always; the region bounds are checked
+     where the word is actually read (WAIT), per addressing model -- v2
+     through the caller's address-space walk, v1 through the legacy 32 MiB
+     block window.  The WAKE path validates nothing and never dereferences
+     (futex-lite contract, futex-bounds case). */
   if (uaddr & 3)
     return -EINVAL;
-  if (uaddr < USER_VIRT_BASE || uaddr + 4 > USER_VIRT_BASE + USER_REGION_SIZE)
-    return -EFAULT;
-  if (!grp->user_phys_base)
-    return -EFAULT;
 
   if (op == 0) {
-    volatile uint32_t *word =
-      (volatile uint32_t *)(grp->user_phys_base + (uaddr - USER_VIRT_BASE));
+    volatile uint32_t *word;
+    if (grp->as) {
+      /* v2 (S5 flip): the word lives in the caller's address space.  The
+         walk demand-materializes the page; with the trap's TTBR0 still
+         the process AS, the direct read then sees the live mapping (the
+         same "vm_touch + direct access" model as the other user-pointer
+         sites).  The old phys-linear translation below only exists for
+         v1 processes: grp->user_phys_base is 0 under v2 and the v1 window
+         compare rejected every v2 stack address -- every wait returned
+         -EFAULT after the flip (THRD_T futex trio). */
+      if (vm_touch(caller, uaddr, 4, 0) != 0)
+        return -EFAULT;
+      word = (volatile uint32_t *)uaddr;
+    } else {
+      if (uaddr < USER_VIRT_BASE ||
+          uaddr + 4 > USER_VIRT_BASE + USER_REGION_SIZE)
+        return -EFAULT;
+      if (!grp->user_phys_base)
+        return -EFAULT;
+      word = (volatile uint32_t *)(grp->user_phys_base + (uaddr - USER_VIRT_BASE));
+    }
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     /* (2) compare under proc_lock: no lost wakeups (see process.h). */
     uint32_t word_now = *word;
