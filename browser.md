@@ -1446,6 +1446,12 @@ curl -sI https://lite.cnn.com | grep -i content-length
     (`2bf6dcc`; glibc accepts any alignment) — after which IPC_T is all-pass; the
     x64 panic in the lane was a 64 KiB test stack array vs 64 KiB kernel stacks
     (fixed by the lane; two consecutive clean gates).
+  - **ICU 16→0 closure proven at the merged tip** (`w1f` re-run, both arches):
+    the committed link probe reports `link OK (libicui18n.a libicuuc.a libicudata.a
+    libcxx.a libc.a)` (arm + intel; build logs + `obj/<arch>/icu/MANIFEST.txt`),
+    and the whole-archive upper bound (`nm --undefined-only` over the three ICU
+    archives minus everything defined by {archives ∪ `libcxx.a` ∪ `libc.a}`) is
+    **0 unresolved symbols on both arches** — was exactly 16.
   - **P2-S45 (carve-out, not merged)**: S4 committed on `browser/l2-p2-s45`; the
     S5 v2-routing flip runs red with variance (1–7 FAILs across identical
     kernels): TP=0 TLS/errno tiny-VA faults, `set_tls` garbage tiny args, torn
