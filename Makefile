@@ -75,6 +75,14 @@ ifeq ($(ARCH),intel)
   # Keep in sync with third_party/libcxx-21.1.8/build-target.sh (STDINC).
   CLANG_RESOURCE_INCLUDE := $(shell $(CC) -print-resource-dir 2>/dev/null)/include
   USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem $(CLANG_RESOURCE_INCLUDE)
+  # P2.5 (S5 flip): user programs link at USER_IMG_BASE (64 GiB), which the
+  # x86_64 small code model cannot address (clang emits 32-bit absolute
+  # symbol references: R_X86_64_32S out of range at link).  The large model
+  # emits movabs/64-bit forms for every symbol address and links cleanly at
+  # any base.  aarch64 needs no equivalent (its codegen is PC-relative and
+  # in-image).  Keep in sync with third_party/libcxx-21.1.8/build-target.sh
+  # (TARGET_FLAGS intel branch).
+  USER_CFLAGS += -mcmodel=large
   ARCH_DIR = src/kernel/arch/x64
   LDFLAGS = -T linker_x64.ld
   # QEMU parameters for x86_64: 8 cores, 6GB RAM, mounting disk.img as NVMe, booting with UEFI

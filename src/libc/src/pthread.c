@@ -196,11 +196,14 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
    *   x86_64  variant II: image at the block base, FS = base +
    *                       align_up(size, align), self-pointer at FS:[0]. */
   extern char __tls_start[], __tls_end[], __tls_data_end[];
-  /* Absolute linker symbol (value = alignment), see libc.c. */
-  extern char __tls_align[];
+  /* P2.5 (S5): the TLS alignment is loaded as DATA from linker.ld's
+     .tls_meta word (an in-image address); the old absolute-symbol read
+     `(unsigned long)__tls_align` cannot be PC-relative-reached from the
+     64 GiB v2 image base.  See libc.c for the full note. */
+  extern const unsigned long __tls_meta_align[];
   size_t tls_data = (size_t)(__tls_data_end - __tls_start);
   size_t tls_size = (size_t)(__tls_end - __tls_start);
-  unsigned long align = (unsigned long)__tls_align ? (unsigned long)__tls_align : 8;
+  unsigned long align = __tls_meta_align[0] ? __tls_meta_align[0] : 8;
   size_t image_aligned = (tls_size + align - 1) & ~(align - 1);
 
 #ifdef __x86_64__

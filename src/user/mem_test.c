@@ -8,7 +8,8 @@ void _start(void) {
         "==============================\n");
 
   print("Test 1: Writing to user space (should work):\n");
-  volatile uint64_t *user_mem = (uint64_t*)0x44000000;
+  volatile uint64_t *user_mem = (uint64_t*)0x1000000000UL; /* v2 image base
+      (S5 flip): user programs link at USER_IMG_BASE, 64 GiB */
   *user_mem = 42; // This should work
   print("✓ Write to user space successful\n");
 

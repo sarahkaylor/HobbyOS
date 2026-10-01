@@ -6,9 +6,12 @@
 #include "errno.h"
 #else
 /* Host stand-in: the allocator is pure free-list logic on a fake heap, so
- * compile it natively (hb_* names) and test against glibc behavior. */
+ * compile it natively (hb_* names) and test against glibc behavior.
+ * P2.5 (S5 flip): the mirrors follow the real (v2) layout -- user
+ * programs image at USER_IMG_BASE, 64 GiB; the v1 constants live on only
+ * for kernel tasks. */
 #include <errno.h>
-#define USER_VIRT_BASE 0x44000000UL
+#define USER_VIRT_BASE 0x1000000000UL
 #define USER_REGION_SIZE 0x2000000UL
 #endif
 

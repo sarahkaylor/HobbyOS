@@ -70,7 +70,11 @@ case "$ARCH" in
     TARGET_FLAGS="--target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53"
     ;;
   intel)
-    TARGET_FLAGS="--target=x86_64-none-elf -ffreestanding -mno-red-zone"
+    # -mcmodel=large: P2.5 (S5 flip) -- user programs link at
+    # USER_IMG_BASE (64 GiB); the default small model's 32-bit absolute
+    # symbol references cannot encode that base.  Mirror of the Makefile
+    # USER_CFLAGS intel branch.
+    TARGET_FLAGS="--target=x86_64-none-elf -ffreestanding -mno-red-zone -mcmodel=large"
     ;;
   *)
     echo "[libcxx] ERROR: unknown arch '$ARCH'" >&2
