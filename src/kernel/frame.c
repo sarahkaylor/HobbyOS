@@ -78,6 +78,34 @@ static int popcount64(uint64_t v) {
   return n;
 }
 
+/* Reserve [lo, hi) (physical, rounded outward) so the pool never hands
+   out frames over it.  Boot-time use: the kernel image must be reserved
+   -- the allocation hint walks forward with churn (contig blocks set it
+   past each run), and once it crossed into the image the allocator
+   handed out frames over live kernel memory and frame_alloc_zeroed
+   wiped them (exception vector table + text), an unrecoverable
+   freeze.  Idempotent; may be called once at boot before any alloc. */
+void frame_reserve_range(uint64_t lo, uint64_t hi) {
+  uint64_t flags = spinlock_acquire_irqsave(&frame_lock);
+  lo &= ~((uint64_t)FRAME_SIZE - 1);
+  hi = (hi + FRAME_SIZE - 1) & ~((uint64_t)FRAME_SIZE - 1);
+  for (uint64_t a = lo; a < hi; a += FRAME_SIZE) {
+    int ok = 0;
+    int idx = frame_index_of(a, &ok);
+    if (!ok)
+      continue;
+    uint32_t w = (uint32_t)idx / 64;
+    uint32_t b = (uint32_t)idx % 64;
+    if (frame_bits[w] & (1ULL << b))
+      continue;
+    frame_bits[w] |= (1ULL << b);
+    frame_used++;
+    if (frame_used > frame_high)
+      frame_high = frame_used;
+  }
+  spinlock_release_irqrestore(&frame_lock, flags);
+}
+
 void frame_init(void) {
   spinlock_init(&frame_lock);
   for (int i = 0; i < FRAME_WORDS; i++)
@@ -87,12 +115,27 @@ void frame_init(void) {
   frame_high = 0;
   block_used = 0;
 
+  /* Keep the kernel image out of the pool: _start..__stack_top covers
+     text/rodata/data/bss and the boot stacks; +64 KiB guard.  Without
+     this the hint walk reaches the image after ~1.88M frames of churn
+     (soak: fork seq ~5900) and zeroes live kernel pages. */
+  {
+    extern char _start[];
+    extern char __stack_top[];
+    uint64_t img_lo = (uint64_t)(uintptr_t)_start;
+    uint64_t img_hi = (uint64_t)(uintptr_t)__stack_top + 0x10000;
+    frame_reserve_range(img_lo, img_hi);
+  }
+
   /* Boot log line (design section 2.1): the pool constants are VMM
-     constants; this line is their validation in every boot's log. */
+     constants; this line is their validation in every boot's log.
+     reserved= is the kernel-image reservation above (non-zero). */
   uart_puts("[FRAME] frames=");
   print_int((int)FRAME_TOTAL_FRAMES);
   uart_puts(" total_mib=");
   print_int((int)((uint64_t)FRAME_TOTAL_FRAMES * FRAME_SIZE / 0x100000));
+  uart_puts(" reserved=");
+  print_int(frame_used);
   uart_puts("\n");
 }
 
