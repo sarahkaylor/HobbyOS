@@ -98,7 +98,11 @@ case "$ARCH" in
     # from crt0.o/libc.a is rejected (R_X86_64_32S ... recompile with -fPIC).
     # The driver-form -no-pie is swallowed by clang; only -Wl,-no-pie reaches
     # gcc.  See cross-notes.md "why each flag".
-    TARGET_FLAGS="--target=${TRIPLE} -ffreestanding -mno-red-zone"
+    # -mcmodel=large: P2.5 (S5 flip) -- ICU objects are consumed by user
+    # programs linking at USER_IMG_BASE (64 GiB); the default small model's
+    # 32-bit absolute symbol references cannot encode that base.  Mirror of
+    # the libcxx build-target.sh and Makefile USER_CFLAGS intel branches.
+    TARGET_FLAGS="--target=${TRIPLE} -ffreestanding -mno-red-zone -mcmodel=large"
     EXTRA_LDFLAGS="-Wl,-no-pie"
     ;;
 esac
