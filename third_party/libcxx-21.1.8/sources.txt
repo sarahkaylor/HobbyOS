@@ -3,6 +3,9 @@
 # One line per translation unit, relative to the extracted tree:
 #   L  = <vendor>/src/llvm-project-<ver>.src/libcxx
 #   A  = <vendor>/src/llvm-project-<ver>.src/libcxxabi
+#   B  = <vendor>/src/llvm-project-<ver>.src/libcxxabi (RTTI subclass: the
+#        TUs built with -frtti; see build-target.sh CXXFLAGS_B)
+#   R  = <vendor>/src/llvm-project-<ver>.src/compiler-rt/lib/builtins
 #
 # Derived from libcxx/src/CMakeLists.txt + libcxxabi/src/CMakeLists.txt at
 # llvmorg-21.1.8 with this option set (see README.md "Build configuration"):
@@ -35,18 +38,29 @@ A src/cxa_noexception.cpp
 # libcxxabi thread support (TLS destructors):
 A src/cxa_thread_atexit.cpp
 # libcxxabi STL files:
-A src/stdlib_exception.cpp
 A src/stdlib_stdexcept.cpp
-A src/stdlib_typeinfo.cpp
 # libcxxabi internal:
 A src/abort_message.cpp
 A src/fallback_malloc.cpp
-# A src/private_typeinfo.cpp -- EXCLUDED: implements __dynamic_cast and the
-# __*_type_info cast machinery, which requires -frtti to compile.  The
-# milestone policy is "no exceptions, no RTTI" (browser.md section 6 P3.1),
-# so the cast machinery is out of scope; user code doing dynamic_cast /<typeid>
-# gets a link-time gap by design.  Revisit if a later milestone needs it
-# (would need -frtti for this TU only, or RTTI=ON for the archive).
+# libcxxabi RTTI closure (l3-rtti lane, 2026-09-30).  private_typeinfo.cpp
+# implements __dynamic_cast and the __class/__si_class/__vmi_class_type_info
+# vtables — the four symbols ICU 78.3's C++ TUs reference (dynamic_cast/typeid
+# in common/serv.cpp, normalizer2.cpp, rbbi.cpp, i18n/alphaindex.cpp).  It is
+# the TU that cannot compile under the archive-wide -fno-rtti policy, and with
+# it come the two TUs whose classes' typeinfo objects it references and that
+# -fno-rtti never emits: stdlib_typeinfo.cpp owns std::type_info's key
+# function (hence _ZTISt9type_info, referenced by every __*_class_type_info
+# typeinfo's base pointer) and stdlib_exception.cpp owns std::exception's
+# (hence _ZTISt9exception, the base of the bad_cast/bad_typeid typeinfos that
+# stdlib_typeinfo.o emits once RTTI is on).  All three build as class B with
+# -frtti (build-target.sh CXXFLAGS_B); exceptions stay off, so the failure
+# path is cxa_aux_runtime.cpp's std::terminate() (still in class A).  Keep
+# them out of class A (one -frtti TU's emitted typeinfos are unreachable from
+# -fno-rtti siblings) and out of the excluded set (the ICU link probe would
+# report the four RTTI symbols again).
+B src/private_typeinfo.cpp
+B src/stdlib_typeinfo.cpp
+B src/stdlib_exception.cpp
 # libcxx always-on:
 L src/algorithm.cpp
 L src/any.cpp

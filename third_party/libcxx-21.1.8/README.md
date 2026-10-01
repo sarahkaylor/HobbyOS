@@ -48,7 +48,7 @@ and builds with plain `clang++` flags against the HobbyOS sysroot.
 | option | value | why |
 |---|---|---|
 | `LIBCXX_ENABLE_EXCEPTIONS` | **OFF** | browser.md §6 P3.1; HobbyOS has no unwind tables/`__cxa_throw` landing pads |
-| `LIBCXX_ENABLE_RTTI` | **OFF** | same block; `libcxxabi/src/private_typeinfo.cpp` is excluded from the build (it requires RTTI) |
+| `LIBCXX_ENABLE_RTTI` | **OFF, one per-TU exception** | same block; everything stays `-fno-rtti` except `sources.txt` class `B` (`-frtti`): the libc++abi RTTI closure — `private_typeinfo.cpp` plus the `stdlib_typeinfo.cpp` / `stdlib_exception.cpp` typeinfo owners that reference it (see "RTTI closure" below). The rest of the archive, and every first-party user program but `RTTI_T.BIN`, stay RTTI-off |
 | `LIBCXX_ENABLE_THREADS` | ON | P1 pthreads are implemented (syscalls 72-75, `docs/browser/p1-threads-design.md`); libc++ needs zero pthread symbols beyond HobbyOS's surface (checked: `comm` of the two symbol lists is empty) |
 | `LIBCXX_ENABLE_MONOTONIC_CLOCK` | ON | `clock_gettime(CLOCK_MONOTONIC)` exists; `<unistd.h>` advertises `_POSIX_TIMERS` so libc++ enables its `clock_gettime` steady_clock path |
 | `LIBCXX_ENABLE_LOCALIZATION` | ON, C-only | LLVM 21 compiles `<sstream>`/`<iostream>`/`basic_ostream` out entirely when 0; the C-only `*_l`/xlocale shims (`src/libc/src/xlocale.c`) make every `std::locale` observe the C locale |
@@ -88,7 +88,8 @@ bash third_party/libcxx-21.1.8/build-target.sh \
 F2.4 shipped `src/libc/src/cxxrt.cpp` (committed `bd8b7e8`) as a minimal
 freestanding C++ runtime archived in `libc.a`: `operator new/delete`,
 `__cxa_guard_*`, `__cxa_atexit/__cxa_finalize`, `__cxa_pure_virtual`,
-`__dso_handle`, and a `type_info`/`__dynamic_cast` surface.
+`__dso_handle`.  (No RTTI surface there: the cast machinery is libc++abi's,
+shipped as the class-B closure in the section above.)
 
 P3 keeps **libc++abi inside `libcxx.a` as the single owner** of:
 
@@ -98,17 +99,57 @@ P3 keeps **libc++abi inside `libcxx.a` as the single owner** of:
 - `__cxa_pure_virtual`, `__cxa_deleted_virtual`,
 - `__cxa_atexit`/`__cxa_finalize`/`__cxa_thread_atexit*`, demangling, etc.
 
-and `cxxrt.cpp` keeps only the surface libc++abi's no-exceptions/no-RTTI
-build does **not** provide: the `type_info` vtable/`__dynamic_cast`
-fallback that `-fno-rtti` programs linked against `libc.a` alone still
-reference (CXXSMOKE.BIN, `src/user/cxx_smoke.cpp`).  The duplicate
-definitions were enumerated mechanically before trimming:
-`ar x obj/arm/libc.a cxxrt.o && nm -g --defined-only cxxrt.o` versus
-`nm obj/arm/libcxx.a`, intersect with `comm -12`.
+and `cxxrt.cpp` keeps only the weak fallbacks a `libc.a`-only link needs
+(CXXSMOKE.BIN, `src/user/cxx_smoke.cpp`): `__cxa_guard_*` and
+`__cxa_pure_virtual`, which libc++abi then overrides strongly in
+libcxx.a-linked programs.  The duplicate definitions were enumerated
+mechanically before trimming: `ar x obj/arm/libc.a cxxrt.o && nm -g
+--defined-only cxxrt.o` versus `nm obj/arm/libcxx.a`, intersect with
+`comm -12`.
 
 Evidence: `obj/arm/cxx_t.bin` links clean (584,312-byte raw binary) and the
 wave's CXXSMOKE.BIN still passes -- CXXSMOKE links `libc.a` only, CXX_T
 links `libcxx.a` + `libc.a`; both agree on the ABI.
+
+## RTTI closure: libc++abi cast machinery (l3-rtti lane, 2026-09-30)
+
+The P3.1 "no RTTI" policy left exactly four symbols undefined for any
+consumer of ICU 78.3's C++ surface (its `dynamic_cast`/`typeid` TUs:
+`common/serv.cpp`, `normalizer2.cpp`, `rbbi.cpp`, `i18n/alphaindex.cpp`):
+`__dynamic_cast` and the vtables of `__class_type_info`,
+`__si_class_type_info`, `__vmi_class_type_info` — all defined in one
+libcxxabi file, `private_typeinfo.cpp`.  The closure now ships as
+`sources.txt` class `B`, compiled with `-frtti` — and only that class:
+
+| TU | why it is in the closure |
+|---|---|
+| `private_typeinfo.cpp` | `__dynamic_cast` + the three `__*_class_type_info` vtables; cannot compile under `-fno-rtti` |
+| `stdlib_typeinfo.cpp` | `std::type_info`'s key function — `_ZTISt9type_info` is the base of every `__*_class_type_info` typeinfo, and `-fno-rtti` never emits it |
+| `stdlib_exception.cpp` | `std::exception`'s key function — `_ZTISt9exception` is the base of the `bad_cast`/`bad_typeid` typeinfos `stdlib_typeinfo.o` emits once RTTI is on |
+
+Everything else stays `-fno-exceptions -fno-rtti`; the failure path is
+still `cxa_aux_runtime.cpp`'s no-exceptions `std::terminate()`.  The ICU
+link probe (`third_party/icu-78.3/build-target.sh`) previously reported the
+four as `ld.lld: error: undefined symbol: ...`; after the closure they
+resolve (the probe's remaining gaps are the libm transcendentals, a
+separate workstream).
+
+Two latent archive defects surfaced while wiring this and are fixed in the
+same change: `LIBCXX_BUILDING_LIBCXXABI` must be defined for the whole
+libc++ class (upstream `HandleLibCXXABI.cmake` adds it as an interface
+compile definition; only class A had it here), otherwise `exception.cpp`,
+`typeinfo.cpp`, `new_handler.cpp` and `stdexcept_default.ipp` take their
+"no ABI library" fallback branches and the archive carries duplicate strong
+definitions of `~type_info` / `std::exception` / `bad_cast` etc. that
+collide the moment one link pulls both copies (the RTTI closure does).
+Also `stdlib_new_delete.cpp`'s `std::get/set_new_handler` pair: with the
+define, libc++ defers to libc++abi's (`cxa_default_handlers.cpp`).
+
+Evidence: `src/host/rtti_test.cpp` (host; the class-B sources compiled
+natively, linked closed-world with `-nostdlib++`: up/down/cross/virtual
+bases, nullptr paths, typeid, and the `dynamic_cast<T&>` abort path in a
+forked child) and `RTTI_T.BIN` (device wave; same battery minus the
+fork-abort check, `src/user/cxx_rtti_t.cpp`, compiled `-frtti`).
 
 ## libc gaps the port exposed (P3.2)
 
@@ -135,10 +176,10 @@ needs digits" commit-and-fail rules).
 
 ## Risks / open questions
 
-- `private_typeinfo.cpp` is excluded, so `__dynamic_cast`/`classof` come
-  from `cxxrt.cpp`; RTTI-dependent code that wants libc++abi's full
-  dynamic-cast hierarchy (multiple/virtual inheritance) is unsupported
-  (no exceptions/RTTI in this port anyway).
+- RTTI is now available: the class-B closure above ships libc++abi's
+  `__dynamic_cast` + `__*_class_type_info` machinery.  Exceptions stay off
+  by design, so a failing `dynamic_cast<T&>` aborts (`__cxa_bad_cast` ->
+  `std::terminate()`) and `throw`/`catch` remain unsupported.
 - x86_64 long double is x87 (needs no builtins); aarch64 long double is
   binary128 and pulls the `R` class -- both arches were built.
 - `<charconv>` floating point pulls LLVM-libc `shared/` headers; whether

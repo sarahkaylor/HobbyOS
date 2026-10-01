@@ -13,7 +13,8 @@
 #   2. generates an incremental makefile in <objdir>/ so objects rebuild only
 #      when sources, flags or the site config change;
 #   3. compiles every TU in sources.txt with the HobbyOS userland target
-#      flags (-fno-exceptions -fno-rtti -std=c++23, C locale, P1 pthreads);
+#      flags (-fno-exceptions -std=c++23, C locale, P1 pthreads; RTTI off
+#      except sources.txt class B — see CXXFLAGS_B below);
 #   4. arch[ives] the objects into <out>.
 #
 # Exit is non-zero on any compile error; the caller sees the make output.
@@ -107,10 +108,33 @@ STDINC="-nostdinc -isystem ${CLANG_RESOURCE_INCLUDE}"
 
 CXXFLAGS_BASE="-O2 -g -std=c++23 -fno-exceptions -fno-rtti -nostdinc++ ${STDINC}
  -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
+ -DLIBCXX_BUILDING_LIBCXXABI
  -I${LIB}/include -I${LIB}/src -I${LIB}/src/include -I${ABI}/include
  -I${REPO_ROOT}/src/libc/include -I${REPO_ROOT}/src/include -I${REPO_ROOT}/src/user_include
  ${TARGET_FLAGS}"
-CXXFLAGS_ABI="${CXXFLAGS_BASE} -D_LIBCXXABI_BUILDING_LIBRARY -DLIBCXX_BUILDING_LIBCXXABI"
+# -DLIBCXX_BUILDING_LIBCXXABI on the WHOLE libc++ class (upstream
+# HandleLibCXXABI.cmake adds it as an interface compile definition when
+# libc++abi is the ABI backend, which it is here -- class A ships it in the
+# same archive).  It matters for four TUs: exception.cpp (uses
+# exception_libcxxabi.ipp -> __cxa_uncaught_exceptions), new_handler.cpp
+# (defers to libc++abi's std::get/set_new_handler), typeinfo.cpp (does NOT
+# define ~type_info) and stdexcept_default.ipp (skips the what()/dtor
+# definitions libcxxabi's stdlib_stdexcept.cpp owns).  Without it the archive
+# carries duplicate strong definitions of those symbols (libc++ fallback +
+# libc++abi), which only stayed latent until the RTTI closure below made a
+# single link pull both copies (l3-rtti lane).
+CXXFLAGS_ABI="${CXXFLAGS_BASE} -D_LIBCXXABI_BUILDING_LIBRARY"
+# Class B (sources.txt `B `): the libcxxabi RTTI closure -- private_typeinfo.cpp
+# (the cast machinery + __*_class_type_info vtables ICU's dynamic_cast/typeid
+# code references) plus stdlib_typeinfo.cpp / stdlib_exception.cpp, whose
+# classes' typeinfo objects it references and -fno-rtti never emits.  RTTI
+# is ON for this TU set only -- -frtti replaces the archive-wide -fno-rtti and
+# nothing else changes (exceptions stay off; the failure path calls
+# __cxa_bad_cast, which cxa_aux_runtime.cpp in class A defines as
+# std::terminate()).  The ICU 78.3 link probe's four RTTI holes
+# (__dynamic_cast + the three __*_class_type_info vtables) are all defined by
+# this set.
+CXXFLAGS_B="$(echo ${CXXFLAGS_BASE//-fno-rtti/-frtti} | tr '\n' ' ') -D_LIBCXXABI_BUILDING_LIBRARY"
 
 # compiler-rt builtins (the "R" class in sources.txt): freestanding C, no
 # HobbyOS headers needed -- clang's own freestanding headers cover
@@ -152,19 +176,23 @@ GEN_TMP="${OBJDIR}/.Makefile.gen.tmp"
   echo "RT := ${RT}"
   echo "CXXFLAGS_L := $(echo ${CXXFLAGS_BASE} | tr '\n' ' ')"
   echo "CXXFLAGS_A := $(echo ${CXXFLAGS_ABI} | tr '\n' ' ')"
+  echo "CXXFLAGS_B := $(echo ${CXXFLAGS_B} | tr '\n' ' ')"
   echo "CFLAGS_R := $(echo ${CFLAGS_R} | tr '\n' ' ')"
   echo
   { printf 'L_SRCS := '; grep '^L ' "${VENDOR_DIR}/sources.txt" | sed 's/^L //' | sed "s|^|${LIB}/|" | paste -sd' ' -; echo; }
   echo
   { printf 'A_SRCS := '; grep '^A ' "${VENDOR_DIR}/sources.txt" | sed 's/^A //' | sed "s|^|${ABI}/|" | paste -sd' ' -; echo; }
   echo
+  { printf 'B_SRCS := '; grep '^B ' "${VENDOR_DIR}/sources.txt" | sed 's/^B //' | sed "s|^|${ABI}/|" | paste -sd' ' -; echo; }
+  echo
   { printf 'R_SRCS := '; grep '^R ' "${VENDOR_DIR}/sources.txt" | sed 's/^R //' | sed "s|^|${RT}/|" | paste -sd' ' -; echo; }
   echo
   cat <<'EOF'
 L_OBJS := $(patsubst $(LIB)/%.cpp,$(OBJDIR)/L/%.o,$(L_SRCS))
 A_OBJS := $(patsubst $(ABI)/%.cpp,$(OBJDIR)/A/%.o,$(A_SRCS))
+B_OBJS := $(patsubst $(ABI)/%.cpp,$(OBJDIR)/B/%.o,$(B_SRCS))
 R_OBJS := $(patsubst $(RT)/%.c,$(OBJDIR)/R/%.o,$(R_SRCS))
-OBJS := $(L_OBJS) $(A_OBJS) $(R_OBJS)
+OBJS := $(L_OBJS) $(A_OBJS) $(B_OBJS) $(R_OBJS)
 
 $(OBJS): $(OBJDIR)/sysroot.stamp
 
@@ -178,6 +206,10 @@ $(A_OBJS): $(OBJDIR)/A/%.o: $(ABI)/%.cpp $(OBJDIR)/Makefile.gen
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_A) -c $< -o $@
 
+$(B_OBJS): $(OBJDIR)/B/%.o: $(ABI)/%.cpp $(OBJDIR)/Makefile.gen
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS_B) -c $< -o $@
+
 $(R_OBJS): $(OBJDIR)/R/%.o: $(RT)/%.c $(OBJDIR)/Makefile.gen
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_R) -c $< -o $@
@@ -189,7 +221,7 @@ else
   rm -f "$GEN_TMP"
 fi
 
-echo "[libcxx] building for ${ARCH}: $(grep -c -E '^[LAR] ' "${VENDOR_DIR}/sources.txt") TUs (${JOBS} jobs)"
+echo "[libcxx] building for ${ARCH}: $(grep -c -E '^[LABR] ' "${VENDOR_DIR}/sources.txt") TUs (${JOBS} jobs)"
 make -f "$GEN" -j"${JOBS}" all
 
 # --- 4. archive -----------------------------------------------------------
@@ -197,6 +229,7 @@ make -f "$GEN" -j"${JOBS}" all
 {
   grep '^L ' "${VENDOR_DIR}/sources.txt" | sed 's/^L //' | sed "s|^|${OBJDIR}/L/|; s|\.cpp$|.o|"
   grep '^A ' "${VENDOR_DIR}/sources.txt" | sed 's/^A //' | sed "s|^|${OBJDIR}/A/|; s|\.cpp$|.o|"
+  grep '^B ' "${VENDOR_DIR}/sources.txt" | sed 's/^B //' | sed "s|^|${OBJDIR}/B/|; s|\.cpp$|.o|"
   grep '^R ' "${VENDOR_DIR}/sources.txt" | sed 's/^R //' | sed "s|^|${OBJDIR}/R/|; s|\.c$|.o|"
 } > "${OBJDIR}/objects.txt"
 rm -f "$OUT"
