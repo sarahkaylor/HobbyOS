@@ -1380,6 +1380,80 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-10-01 — **Wave 1f (part 1) — batteries: GREEN both machines at `a7b7330`** —
+  first merged-tip attempt, no defects found beyond the pre-battery fixup below.
+  **P2-S45 is deliberately NOT in this merge** (its S5 routing flip still shows
+  run-to-run race variance; round-3 continuation active — it lands as this wave's
+  tail with its own battery).
+  - **Local `w1f` battery**: host all suites 0 failed + `TEST EXIT: 0` (single FAIL
+    token = a corpus skip-note); unit-arm **286/0**; unit-x64 **288/0** (KVM); ARM
+    wave `System halt from CPU 6.`, **0 FAIL / 0 FAILED tokens**, **13/13 suite
+    summaries** = 10 baseline + the three new suites: `MATH_T` (60+ `MATH_*: PASS`
+    incl. INF/NaN specials + its own summary), `RTTI_T` (16/16 distinct names),
+    `IPC_T` (full suite); MMTEST 7/7 + `MMTEST PASS` (v2 loader live); DNSTST live
+    (`example.com A = 104.20.23.154`).
+  - **VM `w1f1-*`** at the same tip (runner v3, fresh dir per tier): host rc=0
+    (`w1f1-host_20261001-110744_host.log`; `ALL APPS SUITE TESTS PASSED`,
+    `TEST EXIT: 0`); unit-arm rc=0 (`w1f1-unit-arm_20261001-110849`; **286/0**);
+    unit-x64 rc=0 (`w1f1-unit-x64_20261001-111002`; **288/0**); test-arm rc=0
+    (`w1f1-test-arm_20261001-111108`; `System halt from CPU 4.`, **0 FAIL**, 13/13
+    summaries, MATH_T/RTTI_T/IPC_T/MMTEST/DNSTST all present). Counts byte-match
+    the local receipts.
+  - **Pre-battery fixup (`a7b7330`)**: the P4 merge's conflict resolutions left 10
+    line-joins (a lost trailing newline glued the following line onto the resolved
+    line: Makefile ×4 — incl. the `disk.img` recipe having absorbed its `dd`/`mkfs`
+    lines and the `host_tests` deps line its first recipe lines — arm/x64 `trap.c`
+    ×2 each, `fs.c` ×2, `main.c` ×1; plus an fs.h duplicate-macro dedup).  Caught
+    by a scan-before-batteries pass; all sites split back; cstyle 5/5; `make -n
+    disk.img` / `make -n host_tests` parse checks pass.
+  - **Method notes:** splice-tolerant counting needed again — `IPC_T`'s 70 checks
+    reconcile as 58 strict regex matches + 12 names containing `: ` (the `[^:]+`
+    class regex cannot match them) + **12 failure-only setup guards** verified in
+    source (82 sites − 12 guards = 70; guard names are absent on green by design).
+    `MATH_T`'s verdict rides a splice; its `ALL TESTS PASSED SUCCESSFULLY!` sits
+    directly before its process exit.
+
+- 2026-10-01 — **Wave 1f (part 1) landed: rtti + libm + P5 + P4 merged at
+  `a7b7330`** (base `25d1c86`; merge order rtti → libm → p5 → p4; conflicts:
+  Makefile (unions), arm/x64 `trap.c` (errno-carve-out unified to one branch;
+  dispatch chain unions), `fs.c` (`file_fcntl` = the P4 implementation — both
+  lanes' suites only pin valid-fd mask semantics; dup/dup2 CLOEXEC comment unions),
+  `main.c` (wave order CXX_T → RTTI_T → IPC_T → MMTEST)).
+  - **Wave-1f prep (same line)**: `a4d66db` — P4 §11 + P5 §8 integrator-review
+    consent records (OQs approved; fd_cloexec unification; OQ5 EPIPE w/o signal),
+    §A.1b amendment rows 83–86 (`SIGACTION`/`SIGRETURN`/`GETENV`/`SPAWN_EX`;
+    v1 provisionals withdrawn); `25d1c86` — ABI freeze (rows 76–86, `SYS_MAX` 86,
+    errno `EMSGSIZE 90`/`ENOTCONN 107`, canonical `fd_cloexec`).
+  - **l3-rtti `089d49c`, `5d66c3e`**: 4 libc++abi RTTI holes closed
+    (`__dynamic_cast` + class-info vtables; vendor class-list `-frtti` subset);
+    ICU link probe: the 4 gone, none introduced; host `rtti_test` 17/17; wave
+    `RTTI_T` 16/16 (up/down/cross/vbase + typeid).
+  - **l3-libm `8de2c9e`, `66eb787`, `5743d33`**: 12 libm transcendentals
+    (sin/cos/tan/asin/atan/atan2/log/pow/sqrt/modf/expf/tanhf — the probe's true
+    hole list, "no 13th"); ICU link probe **16 undefined → 0** (4 RTTI + 12 libm,
+    jointly with rtti); host parity vs glibc 1–3 ulp within budget; new
+    `math_test_suite` (EL1, both arches) + `MATH_T.BIN` in the wave.
+  - **l2-p5 `87795d5`, `018a5aa`, `9a0e27c`**: SIGACTION/SIGRETURN/GETENV rows
+    83–85 + kill/SIGPIPE; unified reap delivery (closes the confirmed
+    waitpid-wake gap; `vm_kwrite` cross-context status path); 3-arg execve +
+    FD_CLOEXEC sweep + fcntl bits; `process_test_suite` added.  S3 (frame
+    engine) + S5 (SPAWN_EX) remain deferred at the route-B boundary (Wave 1g).
+  - **l2-p4 `435a0aa`…`2bf6dcc`** (13 commits incl. continuation): AF_UNIX usock
+    pairs on the pipe park engine, poll/socketpair/sendmsg/recvmsg rows 76–79,
+    SCM_RIGHTS cross-process fd passing, SOCK2TST flip.  Tail defects root-caused:
+    LP64 cmsg header layout (`6b0309c`; fixed 11 of the last 12 failing checks),
+    `sys_poll` demanding **8-byte alignment** of a natural-4 `struct pollfd` array
+    (`2bf6dcc`; glibc accepts any alignment) — after which IPC_T is all-pass; the
+    x64 panic in the lane was a 64 KiB test stack array vs 64 KiB kernel stacks
+    (fixed by the lane; two consecutive clean gates).
+  - **P2-S45 (carve-out, not merged)**: S4 committed on `browser/l2-p2-s45`; the
+    S5 v2-routing flip runs red with variance (1–7 FAILs across identical
+    kernels): TP=0 TLS/errno tiny-VA faults, `set_tls` garbage tiny args, torn
+    save/resume register frames, fat16 sector-0 write corruption (prime suspect
+    `alloc_entry_in_dir`).  Round-3 continuation active (WIP already committed;
+    fix-forward).  Its record appends here when green; Wave 1f then closes
+    formally and Wave 1g proceeds.
+
 - 2026-09-30 — **Wave 1e — batteries: GREEN both machines at `9a939e5`** —
   first merged-tip attempt, no defects found (contrast Wave 1d's RED #1).
   - **Local `w1g`**: host 482/0 + `TEST EXIT: 0` (wide parity PASSED); unit-arm
