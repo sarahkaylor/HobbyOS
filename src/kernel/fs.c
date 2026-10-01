@@ -12,6 +12,22 @@
 static struct file global_file_table[MAX_GLOBAL_FILES];
 static spinlock_t fs_lock;
 
+/* P6.1: advisory record-lock table (the engine lives further down with
+ * the fcntl commands; declared up here so fs_init initializes its lock). */
+#define MAX_FILE_LOCKS 64
+
+struct file_lock_entry {
+  int used;
+  int pid;          /* owning process-group pid */
+  uint64_t file_id; /* FAT16 dir-entry identity */
+  int64_t start;
+  int64_t len;      /* 0 = to EOF */
+  int type;         /* K_F_RDLCK / K_F_WRLCK */
+};
+
+static struct file_lock_entry file_locks[MAX_FILE_LOCKS];
+static spinlock_t file_locks_lock;
+
 extern void uart_puts(const char *s);
 extern void print_int(int val);
 
@@ -25,6 +41,7 @@ extern int sys_user_range_ok(uint64_t ptr, uint64_t len);
  */
 void fs_init(void) {
   spinlock_init(&fs_lock);
+  spinlock_init(&file_locks_lock);
   for (int i = 0; i < MAX_GLOBAL_FILES; i++) {
     global_file_table[i].type = FILE_TYPE_EMPTY;
     global_file_table[i].ref_count = 0;
@@ -366,10 +383,238 @@ int file_socket_connect(struct process *p, int fd, uint32_t ip_be,
   return 0;
 }
 
+/* ---- P6.1 (browser.md section 6): advisory record locks -----------------
+ *
+ * A small fixed table of region locks over regular FAT16 files, serving
+ * fcntl(F_GETLK/F_SETLK/F_SETLKW) -- the lock surface SQLite's unix-style
+ * VFS consumes.  Semantics that matter for SQLite:
+ *   - locks belong to the PROCESS: the owner is the process-group pid, so
+ *     every thread and fd of one process shares them;
+ *   - a process never conflicts with its own locks (an overlapping
+ *     F_SETLK from the same owner replaces the owner's earlier entry);
+ *   - closing an fd referring to the file drops that process's locks on
+ *     it (POSIX), and a sweep drops entries whose owning process has
+ *     exited (the fs_close_global teardown path carries no pid);
+ *   - len == 0 means "to EOF", as in POSIX.
+ *
+ * Identity: the directory-entry location, unique per file on FAT16 --
+ * stable across separate opens of one file and distinct for empty files
+ * (whose start_cluster is 0 for all of them).  NFS/pipe/socket fds have no
+ * record locks here (-EINVAL; SQLite runs off FAT16 for P6).
+ *
+ * The kernel never blocks on a lock: F_SETLKW behaves like F_SETLK (one
+ * attempt, -EAGAIN on conflict).  The libc wrapper supplies the bounded
+ * blocking loop with real sleeps -- the same shape as SQLite's own
+ * non-blocking + busy-retry consumption.  Parking the syscall instead
+ * would need the -2 restart plumbing select() uses, which buys nothing
+ * here.
+ */
+
+static uint64_t file_lock_id(const struct file *f) {
+  return ((uint64_t)f->fat16.dir_sector << 16) |
+         ((uint64_t)f->fat16.dir_offset & 0xFFFFu);
+}
+
+/* User-ABI struct flock (LP64: 2 + 2 + 8 + 8 + 4 bytes + 4 pad = 32,
+ * K_FLOCK_SIZE in fs.h).  Parsed byte-wise: never a wide load through a
+ * user pointer. */
+#define K_FLOCK_OFF_TYPE   0
+#define K_FLOCK_OFF_WHENCE 2
+#define K_FLOCK_OFF_START  8
+#define K_FLOCK_OFF_LEN    16
+#define K_FLOCK_OFF_PID    24
+
+static int64_t fs_ld64(const uint8_t *p) {
+  uint64_t v = 0;
+  for (int i = 0; i < 8; i++) v |= ((uint64_t)p[i]) << (8 * i);
+  return (int64_t)v;
+}
+
+static void fs_st64(uint8_t *p, int64_t v) {
+  uint64_t u = (uint64_t)v;
+  for (int i = 0; i < 8; i++) p[i] = (uint8_t)(u >> (8 * i));
+}
+
+static void fs_st32(uint8_t *p, int v) {
+  uint32_t u = (uint32_t)v;
+  p[0] = (uint8_t)u;
+  p[1] = (uint8_t)(u >> 8);
+  p[2] = (uint8_t)(u >> 16);
+  p[3] = (uint8_t)(u >> 24);
+}
+
+static int64_t file_lock_end(int64_t start, int64_t len) {
+  if (len == 0) return 0x7FFFFFFFFFFFFFFFLL; /* to EOF */
+  return start + len;                        /* len > 0 (caller checked) */
+}
+
+static int file_lock_overlap(int64_t a_start, int64_t a_len,
+                             int64_t b_start, int64_t b_len) {
+  int64_t a_end = file_lock_end(a_start, a_len);
+  int64_t b_end = file_lock_end(b_start, b_len);
+  return a_start < b_end && b_start < a_end;
+}
+
+/* First lock conflicting with (pid, range, type), or -1.  Same-pid locks
+ * never conflict: a process's own locks merge/replace. */
+static int file_lock_find_conflict(int pid, uint64_t id, int64_t start,
+                                   int64_t len, int type) {
+  for (int i = 0; i < MAX_FILE_LOCKS; i++) {
+    struct file_lock_entry *e = &file_locks[i];
+    if (!e->used || e->file_id != id || e->pid == pid) continue;
+    if (!file_lock_overlap(e->start, e->len, start, len)) continue;
+    if (e->type == K_F_WRLCK || type == K_F_WRLCK) return i;
+  }
+  return -1;
+}
+
+/* Drop the owner's entries overlapping (start, len). */
+static void file_lock_drop_own(int pid, uint64_t id, int64_t start,
+                               int64_t len) {
+  for (int i = 0; i < MAX_FILE_LOCKS; i++) {
+    struct file_lock_entry *e = &file_locks[i];
+    if (!e->used || e->file_id != id || e->pid != pid) continue;
+    if (!file_lock_overlap(e->start, e->len, start, len)) continue;
+    e->used = 0;
+  }
+}
+
+/* Drop entries whose owning process no longer exists (state read is a
+ * benign race: a live owner is never FREE/EXITED at the same instant). */
+static void file_locks_sweep_dead(void) {
+  for (int i = 0; i < MAX_FILE_LOCKS; i++) {
+    if (!file_locks[i].used) continue;
+    struct process *o = process_get_pcb(file_locks[i].pid);
+    if (!o || o->state == PROC_STATE_FREE || o->state == PROC_STATE_EXITED)
+      file_locks[i].used = 0;
+  }
+}
+
+void file_locks_release(int pid, uint64_t file_id) {
+  uint64_t flags = spinlock_acquire_irqsave(&file_locks_lock);
+  for (int i = 0; i < MAX_FILE_LOCKS; i++) {
+    if (file_locks[i].used && file_locks[i].pid == pid &&
+        file_locks[i].file_id == file_id)
+      file_locks[i].used = 0;
+  }
+  spinlock_release_irqrestore(&file_locks_lock, flags);
+}
+
+void file_locks_release_pid(int pid) {
+  uint64_t flags = spinlock_acquire_irqsave(&file_locks_lock);
+  for (int i = 0; i < MAX_FILE_LOCKS; i++) {
+    if (file_locks[i].used && file_locks[i].pid == pid)
+      file_locks[i].used = 0;
+  }
+  spinlock_release_irqrestore(&file_locks_lock, flags);
+}
+
+/* The F_GETLK/F_SETLK/F_SETLKW engine for one open FAT16 file.  `uarg` is a
+ * user pointer whose range + alignment the trap layer has validated. */
+static int file_lock_fcntl(struct process *pg, struct file *f, int cmd,
+                           uint64_t uarg) {
+  if (f->type != FILE_TYPE_FAT16) return -EINVAL;
+  if (!uarg) return -EFAULT;
+  const uint8_t *u = (const uint8_t *)uarg;
+  int type = (int)(int16_t)((uint16_t)u[K_FLOCK_OFF_TYPE] |
+                            ((uint16_t)u[K_FLOCK_OFF_TYPE + 1] << 8));
+  int whence = (int)(int16_t)((uint16_t)u[K_FLOCK_OFF_WHENCE] |
+                              ((uint16_t)u[K_FLOCK_OFF_WHENCE + 1] << 8));
+  int64_t start = fs_ld64(u + K_FLOCK_OFF_START);
+  int64_t len = fs_ld64(u + K_FLOCK_OFF_LEN);
+  if (type != K_F_RDLCK && type != K_F_WRLCK && type != K_F_UNLCK)
+    return -EINVAL;
+  if (len < 0) return -EINVAL;
+
+  /* Resolve whence against the open handle's cursor / size (SQLite uses
+   * SEEK_SET; CUR/END are supported for completeness). */
+  if (whence == 1) /* SEEK_CUR */
+    start += (int64_t)f->fat16.cursor;
+  else if (whence == 2) /* SEEK_END */
+    start += (int64_t)f->fat16.entry.file_size;
+  else if (whence != 0) /* SEEK_SET */
+    return -EINVAL;
+  if (start < 0) return -EINVAL;
+
+  int pid = pg->pid;
+  uint64_t id = file_lock_id(f);
+  uint64_t flags = spinlock_acquire_irqsave(&file_locks_lock);
+  file_locks_sweep_dead();
+
+  if (cmd == K_F_GETLK) {
+    int ci = file_lock_find_conflict(pid, id, start, len, type);
+    int rtype = K_F_UNLCK;
+    int64_t rstart = 0, rlen = 0;
+    int rpid = 0;
+    if (ci >= 0) {
+      rtype = file_locks[ci].type;
+      rstart = file_locks[ci].start;
+      rlen = file_locks[ci].len;
+      rpid = file_locks[ci].pid;
+    }
+    spinlock_release_irqrestore(&file_locks_lock, flags);
+    uint8_t *w = (uint8_t *)uarg;
+    w[K_FLOCK_OFF_TYPE] = (uint8_t)rtype;
+    w[K_FLOCK_OFF_TYPE + 1] = 0;
+    w[K_FLOCK_OFF_WHENCE] = 0;
+    w[K_FLOCK_OFF_WHENCE + 1] = 0;
+    fs_st64(w + K_FLOCK_OFF_START, rstart);
+    fs_st64(w + K_FLOCK_OFF_LEN, rlen);
+    fs_st32(w + K_FLOCK_OFF_PID, rpid);
+    return 0;
+  }
+
+  /* F_SETLK / F_SETLKW: replace the owner's overlapping locks, then add the
+   * new one unless this is an unlock.  Kernel-side this is one attempt for
+   * both commands (see the block comment above). */
+  if (type != K_F_UNLCK &&
+      file_lock_find_conflict(pid, id, start, len, type) >= 0) {
+    spinlock_release_irqrestore(&file_locks_lock, flags);
+    return -EAGAIN;
+  }
+  file_lock_drop_own(pid, id, start, len);
+  if (type != K_F_UNLCK) {
+    int slot = -1;
+    for (int i = 0; i < MAX_FILE_LOCKS; i++)
+      if (!file_locks[i].used) {
+        slot = i;
+        break;
+      }
+    if (slot < 0) {
+      spinlock_release_irqrestore(&file_locks_lock, flags);
+      return -EAGAIN; /* table exhausted: transient contention */
+    }
+    file_locks[slot].used = 1;
+    file_locks[slot].pid = pid;
+    file_locks[slot].file_id = id;
+    file_locks[slot].start = start;
+    file_locks[slot].len = len;
+    file_locks[slot].type = type;
+  }
+  spinlock_release_irqrestore(&file_locks_lock, flags);
+  return 0;
+}
+
+/* P6.1: SYS_FTRUNCATE (row 33) -- resize an open regular file.  FAT16 gets
+ * cluster-granular shrink + zero-fill extend from fat16_truncate_to. */
+int file_ftruncate(struct process *p, int fd, int64_t length) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
+  int g_fd = p->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
+  struct file *f = &global_file_table[g_fd];
+  if (f->type != FILE_TYPE_FAT16) return -EINVAL;
+  if (length < 0 || length > 0xFFFFFFFFLL) return -EINVAL;
+  uint64_t flags = spinlock_acquire_irqsave(&f->lock);
+  int r = fat16_truncate_to(f, (uint32_t)length);
+  spinlock_release_irqrestore(&f->lock, flags);
+  return r == 0 ? 0 : -EIO;
+}
+
 /* P4 (§6): F_GETFD/F_SETFD are handled on the fd_cloexec mask for every fd
  * type; F_GETFL/F_SETFL keep their socket-only behavior (now also for
  * AF_UNIX).  Non-socket fds keep today's ENOTSOCK for other commands. */
-int file_fcntl(struct process *p, int fd, int cmd, int arg) {
+int file_fcntl(struct process *p, int fd, int cmd, uint64_t arg) {
   struct process *pg = process_group(p);
   if (!pg) return -EINVAL;
   if (fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
@@ -386,6 +631,10 @@ int file_fcntl(struct process *p, int fd, int cmd, int arg) {
   int g_fd = pg->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
   struct file *f = &global_file_table[g_fd];
+
+  /* P6.1: record-lock commands (FAT16 regular files). */
+  if (cmd == K_F_GETLK || cmd == K_F_SETLK || cmd == K_F_SETLKW)
+    return file_lock_fcntl(pg, f, cmd, arg);
 
   if (f->type == FILE_TYPE_SOCKET && f->socket.pcb) {
     struct socket_pcb *pcb = f->socket.pcb;
@@ -914,6 +1163,11 @@ int file_close(struct process *cur, int fd) {
 
   struct file *f = &global_file_table[g_fd];
 
+  /* P6.1: capture the record-lock identity before the type may be cleared;
+   * closing ANY fd of a FAT16 file drops this process's locks on it. */
+  int lock_release = (f->type == FILE_TYPE_FAT16);
+  uint64_t lock_id = lock_release ? file_lock_id(f) : 0;
+
   uint64_t flags = spinlock_acquire_irqsave(&f->lock);
 
   if (f->type == FILE_TYPE_PIPE) {
@@ -933,6 +1187,8 @@ int file_close(struct process *cur, int fd) {
     f->type = FILE_TYPE_EMPTY;
   }
   spinlock_release_irqrestore(&f->lock, flags);
+
+  if (lock_release) file_locks_release(cur->pid, lock_id);
 
   cur->open_fds[fd] = -1;
   cur->fd_cloexec &= ~(1u << fd); /* P5 (D3.2): closing discards fd flags */

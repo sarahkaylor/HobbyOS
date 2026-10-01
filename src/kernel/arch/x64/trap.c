@@ -420,8 +420,14 @@ static void sys_connect_fd(struct trap_frame *tf) {
 
 static void sys_fcntl(struct trap_frame *tf) {
   struct process *caller = current_process();
-  tf->regs[0] = (uint64_t)file_fcntl(caller, (int)tf->regs[5],
-                                     (int)tf->regs[4], (int)tf->regs[3]);
+  int cmd = (int)tf->regs[4];      // rsi
+  uint64_t arg = tf->regs[3];      // rdx
+  if ((cmd == K_F_GETLK || cmd == K_F_SETLK || cmd == K_F_SETLKW) &&
+      ((arg & 7) || !sys_user_range_ok(arg, K_FLOCK_SIZE))) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  tf->regs[0] = (uint64_t)file_fcntl(caller, (int)tf->regs[5], cmd, arg);
 }
 
 static void sys_select(struct trap_frame *tf) {
@@ -982,6 +988,13 @@ static void sys_lseek(struct trap_frame *tf) {
   tf->regs[0] = r < 0 ? (uint64_t)(-err) : (uint64_t)r;
 }
 
+/* P6.1: SYS_FTRUNCATE (row 33) -- plain (fd, length) pair. */
+static void sys_ftruncate(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  tf->regs[0] = (uint64_t)file_ftruncate(caller, (int)tf->regs[5],   // rdi
+                                         (int64_t)tf->regs[4]);      // rsi
+}
+
 static void sys_stat(struct trap_frame *tf) {
   const char *path = (const char *)tf->regs[5];  // rdi
   struct k_stat *st = (struct k_stat *)tf->regs[4];  // rsi
@@ -1366,6 +1379,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_stat(tf);
   } else if (syscall_num == SYS_FSTAT) {
     sys_fstat(tf);
+  } else if (syscall_num == SYS_FTRUNCATE) {
+    sys_ftruncate(tf);
   } else if (syscall_num == SYS_MOUNT) {
     sys_mount(tf);
   } else if (syscall_num == SYS_UMOUNT) {

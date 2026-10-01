@@ -36,6 +36,10 @@ int fat16_write(struct file* f, const void* buf, int size);
 int fat16_close(struct file* f);
 int fat16_truncate(struct file* f);
 
+// P6.1: resize to an arbitrary byte length (zero-fill extend, free trailing
+// clusters on shrink).
+int fat16_truncate_to(struct file* f, uint32_t new_size);
+
 // Seeks a FAT16 file.
 int fat16_seek(struct file* f, int offset);
 
