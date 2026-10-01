@@ -84,6 +84,13 @@ extern "C" {
    * propagates a changed environment.  execvpe()/execvp() add the PATH
    * search at the libc layer. */
   int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args);
+  /* P5 S5 (D4, row 86): spawn_ex() -- literal path, explicit argv/envp
+   * (envp == NULL = empty environment) and an fd map: the child starts
+   * with a copy of the parent's fd table, the n {src, dst} pairs apply
+   * like dup2 in the child, then remaining FD_CLOEXEC fds are closed.
+   * Returns the child pid, or -1 with errno set. */
+  int spawn_ex(const char *path, char *const argv[], char *const envp[],
+               const int fdmap[][2], int n);
   int pipe(int fds[2]);
   int get_args(char *buf, int size);
 

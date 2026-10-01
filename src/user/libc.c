@@ -516,6 +516,24 @@ int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, con
                        (long)stdout_fd, (long)stderr_fd, (long)args);
 }
 
+/* P5 S5 (D4, row 86): spawn_ex() -- create a child from a literal path
+ * with an explicit argv, envp and fd map.  The child starts with a copy
+ * of the parent's fd table, then `fdmap`'s n {src, dst} pairs are applied
+ * like dup2 (the dst's FD_CLOEXEC is cleared), then the remaining
+ * FD_CLOEXEC descriptors are closed.  envp == NULL means an empty
+ * environment (D3.1).  Returns the child pid, or -1 with errno set
+ * (ENOENT/ENOEXEC/EFAULT/EBADF/EINVAL/EAGAIN/ENOMEM). */
+int spawn_ex(const char *path, char *const argv[], char *const envp[],
+             const int fdmap[][2], int n) {
+  long r = syscall5(SYS_SPAWN_EX, (long)path, (long)argv, (long)envp,
+                    (long)fdmap, (long)n);
+  if (r < 0) {
+    errno = (int)(-r);
+    return -1;
+  }
+  return (int)r;
+}
+
 int spawn(const char *filename, const char *args) {
   int fd = -1;
   return spawn2(filename, fd, fd, fd, args);

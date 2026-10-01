@@ -401,10 +401,65 @@ static int v2_map_image(struct addr_space *as, struct file *f, uint32_t fsize) {
  * fd inheritance is not wired here: S2's only v2 program (MMTEST) uses
  * no descriptors.  Returns the pid, or -1 (pid slot released) on failure.
  */
-int load_and_run_program_v2(const char* filename, int stdin_fd,
-                            int stdout_fd, int stderr_fd, int caller_pid,
-                            const char *args) {
-  if (!filename) return -1;
+/* P5 S5 (D4, row 86): the spawn_ex payload + pool (shared by both arch
+   trap layers, which marshal the caller's pointers into the caller's slot
+   while still in the caller's context; the spawn worker consumes it). */
+struct ho_spawn_ex spawn_ex_pool[MAX_PROCESSES];
+
+/* D4.1: apply the spawn_ex fd semantics to a freshly created child:
+   (1) child fd table = parent copy (fs_reopen per open slot -- this is
+   what INHERIT_FDS means for WebKit), (2) fdmap pairs as dup2 in the
+   child (dst CLOEXEC cleared; glib's source==target trick relies on it),
+   (3) the CLOEXEC sweep (map first, sweep second -- gspawn's order).
+   The whole map is validated before the first mutation, so an illegal
+   src/dst fails atomically (-EBADF) with nothing half-applied. */
+static int spawn_ex_apply_fds(struct process *child, struct process *parent,
+                              const struct ho_spawn_ex *ex) {
+  for (int k = 0; k < ex->fdmap_n; k++) {
+    int src = ex->fdmap_src[k];
+    int dst = ex->fdmap_dst[k];
+    if (!parent || src < 0 || src >= MAX_OPEN_FDS || dst < 0 ||
+        dst >= MAX_OPEN_FDS || parent->open_fds[src] == -1)
+      return -EBADF;
+  }
+  if (!parent)
+    return 0;
+  child->num_open_fds = 0;
+  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+    child->open_fds[i] = parent->open_fds[i];
+    if (child->open_fds[i] != -1) {
+      fs_reopen(child->open_fds[i]);
+      child->num_open_fds++;
+    }
+  }
+  child->fd_cloexec = parent->fd_cloexec;
+  for (int k = 0; k < ex->fdmap_n; k++) {
+    int src = ex->fdmap_src[k];
+    int dst = ex->fdmap_dst[k];
+    if (src == dst) {
+      /* file_dup2's oldfd==newfd early return skips the CLOEXEC clear;
+         dup2 semantics still clear it (D4.1 / D3.2). */
+      child->fd_cloexec &= ~(1u << dst);
+      continue;
+    }
+    if (file_dup2(child, src, dst) < 0)
+      return -EBADF; /* validated above; stay atomic if it still fails */
+  }
+  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+    if (child->open_fds[i] != -1 && (child->fd_cloexec & (1u << i)))
+      file_close(child, i);
+  }
+  return 0;
+}
+
+/* The v2 loader body, shared by spawn2 (ex == 0) and spawn_ex (ex != 0).
+ * Returns the child pid or -errno; the spawn2 wrapper below maps a
+ * negative result back to the historical -1 so existing callers see the
+ * unchanged contract. */
+static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
+                            int stderr_fd, int caller_pid, const char *args,
+                            const struct ho_spawn_ex *ex) {
+  if (!filename) return -EINVAL;
   uart_puts("Loading program for scheduler (v2 AS): ");
   uart_puts(filename);
   uart_puts("\n");
@@ -429,14 +484,14 @@ int load_and_run_program_v2(const char* filename, int stdin_fd,
     uart_puts("Loader (v2) starved: ");
     uart_puts(filename);
     uart_puts("\n");
-    return -1;
+    return -EAGAIN; /* slot/AS pressure (D4.4's -EAGAIN class) */
   }
 
   struct process *child = process_get_pcb(pid);
   struct addr_space *as = child ? child->as : 0;
   if (!child || !as) {
     process_free(pid);
-    return -1;
+    return -ENOMEM;
   }
   for (int i = 0; i < 31 && filename[i] != '\0'; i++) {
     child->name[i] = filename[i];
@@ -454,23 +509,48 @@ int load_and_run_program_v2(const char* filename, int stdin_fd,
        hands its environment down).  The spawn contract carries no envp
        -- execve() stays the explicit form.  S5 flip: the v2 loader is
        the live path, so the copy must live here too (the v1 body below
-       keeps its copy for the rollback lever). */
-    for (int i = 0; i < HO_ENV_LEN; i++)
-      child->env[i] = parent->env[i];
-    child->envc = parent->envc;
+       keeps its copy for the rollback lever).  spawn_ex carries its own
+       envp blob (D4.5 / D3.1: NULL = empty), so the inheritance is
+       skipped for it. */
+    if (!ex) {
+      for (int i = 0; i < HO_ENV_LEN; i++)
+        child->env[i] = parent->env[i];
+      child->envc = parent->envc;
+    }
   } else {
     child->cwd[0] = '/';
     child->cwd[1] = '\0';
   }
-  int ai = 0;
-  if (args) {
-    while (args[ai] && ai < 255) {
-      child->args[ai] = args[ai];
-      ai++;
+  if (ex) {
+    /* D4.5/D3.1: envp as given (NULL marshalled to empty); argv[0] stored
+       as given (WebKit's aux main parses argv[1..]).  Dispositions are
+       all-default by construction (fresh PCB; D4.2). */
+    for (int i = 0; i < HO_ENV_LEN; i++)
+      child->env[i] = ex->env[i];
+    child->envc = ex->envc;
+    proc_set_argv_array(child, ex->argvblob, ex->argc);
+    /* Flat args string for get_args() consumers: the blob's entries
+       space-joined (argv blob keeps spaces, the flat string cannot). */
+    int pos = 0, fi = 0;
+    for (int k = 0; k < ex->argc && fi < 255; k++) {
+      while (pos < HO_EXEC_ARGV_LEN && ex->argvblob[pos] && fi < 255)
+        child->args[fi++] = ex->argvblob[pos++];
+      if (pos < HO_EXEC_ARGV_LEN && ex->argvblob[pos] == '\0')
+        pos++;
+      if (k + 1 < ex->argc && fi < 255)
+        child->args[fi++] = ' ';
     }
+    child->args[fi] = '\0';
   }
-  child->args[ai] = '\0';
-  {
+  if (!ex) {
+    int ai = 0;
+    if (args) {
+      while (args[ai] && ai < 255) {
+        child->args[ai] = args[ai];
+        ai++;
+      }
+    }
+    child->args[ai] = '\0';
     char flat[320];
     int fi = 0;
     for (int i = 0; child->name[i] && fi < 63; i++)
@@ -486,8 +566,11 @@ int load_and_run_program_v2(const char* filename, int stdin_fd,
   /* P2.5 (S5 flip): spawn fd inheritance.  The v1 loader's wiring applies
      verbatim to a v2 PCB -- fds are group state, not AS state -- and the
      utility-test programs (CUTTEST/…) and PIPETEST/SHTEST spawn children
-     with pipe ends on fd 0/1/2. */
-  if (parent && child) {
+     with pipe ends on fd 0/1/2.  spawn_ex (ex != 0) replaces this block
+     with the D4.1 copy+map+sweep, applied after the image load below. */
+  if (ex) {
+    ; /* spawn_ex: see the D4.1 block after the image/region setup */
+  } else if (parent && child) {
     if (stdin_fd >= 0 && stdin_fd < MAX_OPEN_FDS &&
         parent->open_fds[stdin_fd] != -1) {
       child->open_fds[0] = parent->open_fds[stdin_fd];
@@ -524,13 +607,21 @@ int load_and_run_program_v2(const char* filename, int stdin_fd,
     uart_puts(filename);
     uart_puts("\n");
     process_free(pid);
-    return -1;
+    return -ENOENT;
   }
   uint32_t fsize = f.fat16.entry.file_size;
+  if (fsize == 0) {
+    /* D4.4: a missing image surfaces as a zero-size entry (fat16_open
+       creates on miss), and an empty image can never be executed -- the
+       documented -ENOENT.  The spawn2 wrapper below folds it back to -1. */
+    fat16_close(&f);
+    process_free(pid);
+    return -ENOENT;
+  }
   if (v2_map_image(as, &f, fsize) != 0) {
     fat16_close(&f);
     process_free(pid);
-    return -1;
+    return -ENOEXEC;
   }
   fat16_close(&f);
 
@@ -543,12 +634,21 @@ int load_and_run_program_v2(const char* filename, int stdin_fd,
                        VM_MAP_PRIVATE, 0, 0) != 0) {
     uart_puts("v2 loader: stack region insert failed\n");
     process_free(pid);
-    return -1;
+    return -ENOMEM;
   }
   /* P2.5 (S5 flip): the heap slot, demand-zero (the user malloc's arena). */
   if (v2_insert_heap(as) != 0) {
     process_free(pid);
-    return -1;
+    return -ENOMEM;
+  }
+
+  /* P5 S5 (D4.1): spawn_ex fd semantics -- after a successful image load
+     (a load failure must not leak the reopened fd references) and before
+     the child is made runnable (process_set_entry below).  -EBADF fails
+     the whole spawn atomically and releases the child slot. */
+  if (ex && spawn_ex_apply_fds(child, parent, ex) != 0) {
+    process_free(pid);
+    return -EBADF;
   }
 
 #ifdef __x86_64__
@@ -568,6 +668,28 @@ int load_and_run_program_v2(const char* filename, int stdin_fd,
   print_int((int)as->table_frames);
   uart_puts("\n");
   return pid;
+}
+
+/* The spawn2/v1-compat entry (spawn2's worker path): unchanged contract
+ * (child pid or -1).  The v2 loader body above reports negative errnos
+ * for spawn_ex; fold them back to the historical -1 here. */
+int load_and_run_program_v2(const char* filename, int stdin_fd,
+                            int stdout_fd, int stderr_fd, int caller_pid,
+                            const char *args) {
+  int r = load_v2_internal(filename, stdin_fd, stdout_fd, stderr_fd,
+                           caller_pid, args, 0);
+  return r < 0 ? -1 : r;
+}
+
+/* P5 S5 (D4, row 86): the spawn_ex loader (both arch spawn_ex workers call
+ * this).  Returns the child pid or -errno: -ENOENT (no image), -ENOEXEC
+ * (bad image), -EBADF (illegal fdmap, atomic), -EAGAIN (slot/AS pressure),
+ * -ENOMEM (frames/regions).  The caller's parked WAIT_SPAWN context is
+ * released by the caller's spawn worker with this value. */
+int load_and_run_spawn_ex(const struct ho_spawn_ex *ex) {
+  if (!ex)
+    return -EINVAL;
+  return load_v2_internal(ex->filename, -1, -1, -1, ex->caller_pid, 0, ex);
 }
 
 /**

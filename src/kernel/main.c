@@ -288,6 +288,13 @@ static void test_wave_loader(void *arg) {
      (the cross-process lock check), so a late slot keeps it cheap. */
   load_and_run_program_in_scheduler("SQLTEST.BIN", -1, -1, -1, -1);
 
+  /* P5 (docs/browser/p5-exec-signals-design.md): S3 signal-delivery
+     acceptance (frame engine + SIGRETURN + SIGCHLD via the reap path +
+     the D13 SIGUSR1 boundary) and S5 spawn_ex fd semantics (row 86,
+     fdmap/CLOEXEC/copy).  Forks children and spawns SPAWNEX.BIN, so it
+     runs late, next to the other churn suites. */
+  load_and_run_program_in_scheduler("SIG_T.BIN", -1, -1, -1, -1);
+
   extern void kernel_exit(void);
   kernel_exit();
 }
