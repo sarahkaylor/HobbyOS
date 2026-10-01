@@ -19,6 +19,15 @@ static void wr32(uint8_t *p, uint32_t v) {
   p[3] = (uint8_t)((v >> 24) & 0xFF);
 }
 
+static uint64_t rd64(const uint8_t *p) {
+  return (uint64_t)rd32(p) | ((uint64_t)rd32(p + 4) << 32);
+}
+
+static void wr64(uint8_t *p, uint64_t v) {
+  wr32(p, (uint32_t)v);
+  wr32(p + 4, (uint32_t)(v >> 32));
+}
+
 uint32_t ipc_cmsg_align(uint32_t len) { return (len + 7u) & ~7u; }
 
 uint32_t ipc_cmsg_len(uint32_t nfds) { return 16u + 4u * nfds; }
@@ -27,9 +36,9 @@ uint32_t ipc_cmsg_space(uint32_t nfds) { return ipc_cmsg_align(ipc_cmsg_len(nfds
 
 uint32_t ipc_cmsg_emit(uint8_t *buf, const int *fds, int nfds) {
   uint32_t clen = ipc_cmsg_len((uint32_t)nfds);
-  wr32(buf + 0, clen);
-  wr32(buf + 4, (uint32_t)K_SOL_SOCKET);
-  wr32(buf + 8, (uint32_t)K_SCM_RIGHTS);
+  wr64(buf + 0, (uint64_t)clen); /* size_t cmsg_len: 8 bytes on LP64 */
+  wr32(buf + 8, (uint32_t)K_SOL_SOCKET);
+  wr32(buf + 12, (uint32_t)K_SCM_RIGHTS);
   for (int i = 0; i < nfds; i++)
     wr32(buf + 16 + i * 4, (uint32_t)fds[i]);
   return clen;
@@ -43,23 +52,24 @@ int ipc_cmsg_parse(const uint8_t *ctrl, uint32_t ctrl_len,
   uint32_t off = 0;
   for (;;) {
     if (ctrl_len - off < 16) break; /* no full cmsghdr left */
-    uint32_t clen = rd32(ctrl + off + 0);
-    int32_t level = (int32_t)rd32(ctrl + off + 4);
-    int32_t type = (int32_t)rd32(ctrl + off + 8);
-    /* Header layout: cmsg_len @0, cmsg_level @4, cmsg_type @8; the payload
-     * starts at 16 (sizeof(struct cmsghdr) == 16). */
-    if (clen < 16 || clen > ctrl_len - off) return -EINVAL;
+    uint64_t clen = rd64(ctrl + off + 0);
+    int32_t level = (int32_t)rd32(ctrl + off + 8);
+    int32_t type = (int32_t)rd32(ctrl + off + 12);
+    /* Header layout (LP64, what the sysroot's <sys/socket.h> hands over):
+     * cmsg_len @0 (size_t, 8 bytes), cmsg_level @8, cmsg_type @12; the
+     * payload starts at 16 (sizeof(struct cmsghdr) == 16). */
+    if (clen < 16 || clen > (uint64_t)(ctrl_len - off)) return -EINVAL;
     if ((clen & 3u) != 0 || ((clen - 16u) & 3u) != 0) return -EINVAL;
     if (level != K_SOL_SOCKET) return -EINVAL;
     if (type != K_SCM_RIGHTS) return -EINVAL;
 
-    uint32_t n = (clen - 16u) / 4u;
+    uint32_t n = (uint32_t)((clen - 16u) / 4u);
     if (n == 0) return -EINVAL; /* SCM_RIGHTS carries at least one fd */
     if (out->nfds + (int)n > K_IPC_MAX_FDS) return -EMSGSIZE;
     for (uint32_t i = 0; i < n; i++)
       out->fds[out->nfds++] = (int)rd32(ctrl + off + 16 + i * 4);
 
-    off += clen;
+    off += (uint32_t)clen;
     uint32_t nxt = ipc_cmsg_align(off);
     if (nxt <= ctrl_len) off = nxt; /* consume the alignment padding */
     else break;

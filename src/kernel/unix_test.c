@@ -330,10 +330,10 @@ static void test_ipc_cmsg_codec(void) {
   one[0] = (uint8_t)(len + 2); /* clen - 16 not a multiple of 4 */
   EXPECT_EQ(ipc_cmsg_parse(one, ipc_cmsg_space(1), &parsed), -EINVAL);
   ipc_cmsg_emit(one, fds, 1);
-  one[4] = 99; /* unknown level */
+  one[8] = 99; /* unknown level (LP64: cmsg_level @8) */
   EXPECT_EQ(ipc_cmsg_parse(one, ipc_cmsg_space(1), &parsed), -EINVAL);
   ipc_cmsg_emit(one, fds, 1);
-  one[8] = 99; /* unknown type */
+  one[12] = 99; /* unknown type (LP64: cmsg_type @12) */
   EXPECT_EQ(ipc_cmsg_parse(one, ipc_cmsg_space(1), &parsed), -EINVAL);
   ipc_cmsg_emit(one, fds, 1);
   one[0] = 16; /* zero-fd SCM_RIGHTS */

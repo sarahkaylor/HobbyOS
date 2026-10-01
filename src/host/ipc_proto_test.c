@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <sys/socket.h>
 
 #include "ipc_proto.h"
 #include "errno.h"
@@ -66,10 +67,13 @@ static void test_emit_parse(void) {
   int fds1[1] = { 7 };
   uint32_t cl = ipc_cmsg_emit(buf, fds1, 1);
   check(cl == 20, "emit(1 fd) reports cmsg_len 20");
-  check(buf[0] == 20 && buf[1] == 0 && buf[2] == 0 && buf[3] == 0,
-        "cmsg_len byte 0..3 little-endian");
-  check(buf[4] == K_SOL_SOCKET && buf[8] == K_SCM_RIGHTS && buf[12] == 0,
-        "cmsg_level@4 cmsg_type@8, payload at 16");
+  check(buf[0] == 20 && buf[1] == 0 && buf[2] == 0 && buf[3] == 0 &&
+            buf[4] == 0 && buf[5] == 0 && buf[6] == 0 && buf[7] == 0,
+        "cmsg_len @0..7 little-endian (LP64 size_t)");
+  check(buf[8] == K_SOL_SOCKET && buf[9] == 0 && buf[10] == 0 &&
+            buf[11] == 0 && buf[12] == K_SCM_RIGHTS && buf[13] == 0 &&
+            buf[14] == 0 && buf[15] == 0,
+        "cmsg_level@8 cmsg_type@12 (LP64 cmsghdr), payload at 16");
   check(buf[16] == 7 && buf[17] == 0 && buf[18] == 0 && buf[19] == 0,
         "fd payload little-endian at offset 16");
 
@@ -106,6 +110,38 @@ static void test_emit_parse(void) {
   check(r == 0 && out.nfds == 1, "1-byte tail is tolerated as padding");
 }
 
+/* The bytes the codec emits/accepts must be exactly what real LP64 callers
+ * build with glibc's CMSG_* macros — the integration bug this pins against:
+ * a 4-byte cmsg_len made parse read cmsg_level from the high half of the
+ * length word and reject every real user control block with EINVAL. */
+static void test_glibc_layout_pin(void) {
+  printf("-- glibc CMSG_* cross-pin\n");
+  check(sizeof(struct cmsghdr) == 16, "glibc cmsghdr is 16 bytes (LP64)");
+  int fd = 7;
+  uint8_t want[64];
+  memset(want, 0, sizeof want);
+  struct cmsghdr *c = (struct cmsghdr *)want;
+  c->cmsg_len = CMSG_LEN(sizeof(int));
+  c->cmsg_level = SOL_SOCKET;
+  c->cmsg_type = SCM_RIGHTS;
+  memcpy(CMSG_DATA(c), &fd, sizeof fd);
+
+  uint8_t got[64];
+  memset(got, 0, sizeof got);
+  uint32_t cl = ipc_cmsg_emit(got, &fd, 1);
+  check(memcmp(want, got, CMSG_SPACE(sizeof(int))) == 0 &&
+            cl == CMSG_LEN(sizeof(int)),
+        "emit is byte-identical to glibc CMSG_LEN/DATA/SPACE");
+  check(ipc_cmsg_space(1) == CMSG_SPACE(sizeof(int)) &&
+            ipc_cmsg_len(1) == CMSG_LEN(sizeof(int)),
+        "ipc_cmsg_len/space match CMSG_LEN/CMSG_SPACE");
+
+  struct ipc_cmsg_fds out;
+  int r = ipc_cmsg_parse(want, (uint32_t)CMSG_SPACE(sizeof(int)), &out);
+  check(r == 0 && out.nfds == 1 && out.fds[0] == 7,
+        "parse accepts a glibc-built cmsg (the device EINVAL regression)");
+}
+
 /* ==================================================================== */
 /* 3. parse rejection paths                                             */
 /* ==================================================================== */
@@ -133,15 +169,20 @@ static void test_parse_rejects(void) {
   check(ipc_cmsg_parse(b1, 24, &out) == -EINVAL, "unaligned cmsg_len -> EINVAL");
 
   memcpy(b1, buf, sizeof b1);
+  b1[4] = 1; /* high half of the size_t cmsg_len: length far past the block */
+  check(ipc_cmsg_parse(b1, 24, &out) == -EINVAL,
+        "cmsg_len high word nonzero -> EINVAL");
+
+  memcpy(b1, buf, sizeof b1);
   b1[0] = 28; /* claims more than the supplied block */
   check(ipc_cmsg_parse(b1, 24, &out) == -EINVAL, "cmsg_len > control len -> EINVAL");
 
   memcpy(b1, buf, sizeof b1);
-  b1[4] = K_SOL_SOCKET + 1;
+  b1[8] = K_SOL_SOCKET + 1;
   check(ipc_cmsg_parse(b1, 24, &out) == -EINVAL, "wrong cmsg_level -> EINVAL");
 
   memcpy(b1, buf, sizeof b1);
-  b1[8] = K_SCM_RIGHTS + 1;
+  b1[12] = K_SCM_RIGHTS + 1;
   check(ipc_cmsg_parse(b1, 24, &out) == -EINVAL, "wrong cmsg_type -> EINVAL");
 
   memcpy(b1, buf, sizeof b1);
@@ -229,14 +270,18 @@ static void test_fuzz(void) {
       buf[1] = (clen >> 8) & 0xff;
       buf[2] = 0;
       buf[3] = 0;
-      buf[4] = K_SOL_SOCKET;
+      buf[4] = 0;
       buf[5] = 0;
       buf[6] = 0;
       buf[7] = 0;
-      buf[8] = K_SCM_RIGHTS;
+      buf[8] = K_SOL_SOCKET;
       buf[9] = 0;
       buf[10] = 0;
       buf[11] = 0;
+      buf[12] = K_SCM_RIGHTS;
+      buf[13] = 0;
+      buf[14] = 0;
+      buf[15] = 0;
     }
     int r = ipc_cmsg_parse(buf, len, &out);
     if (r != 0 && r != -EINVAL && r != -EMSGSIZE) bad_rcs++;
@@ -275,6 +320,7 @@ int main(void) {
 
   test_geometry();
   test_emit_parse();
+  test_glibc_layout_pin();
   test_parse_rejects();
   test_fit_flags_poll();
   test_fuzz();
