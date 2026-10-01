@@ -272,6 +272,14 @@ static void test_wave_loader(void *arg) {
      thread-torture suites is cheapest. */
   load_and_run_program_v2("MMTEST.BIN", -1, -1, -1, -1, 0);
 
+  /* P6.2 (browser.md §6): SQLite acceptance — SQLTEST.BIN links the pinned
+     3.49.2.0 amalgamation + the HobbyOS VFS/mutex port (SQLITE_OS_OTHER=1,
+     THREADSAFE=1) over the P6.1 file API and record locks: create/insert/
+     select on disk.img, journal lifecycle, a RESERVED lock handed across
+     fork, VACUUM + integrity_check, reopen persistence.  Spawns a child
+     (the cross-process lock check), so a late slot keeps it cheap. */
+  load_and_run_program_in_scheduler("SQLTEST.BIN", -1, -1, -1, -1);
+
   extern void kernel_exit(void);
   kernel_exit();
 }
