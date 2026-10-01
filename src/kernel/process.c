@@ -608,6 +608,9 @@ static int phys_block_alloc_locked(void) {
  * process_create() for why.  P2.2 (S2): `ver` selects the backing --
  * AS_V1 takes a 32 MiB block (today's semantics), AS_V2 takes an
  * address space and no block. */
+/* TEMP (l2-clonefix triage, strip before final): fork-path window gate. */
+volatile int g_p8_triage = 0;
+
 static int process_create_internal_ver(int ver) {
   uart_puts("Inside process_create: acquiring lock...\n");
   int pid = -1;
@@ -2186,6 +2189,23 @@ int process_fork(struct trap_frame *tf) {
   if (!parent)
     return -1;
 
+  /* TEMP (l2-clonefix triage, strip before final): window gate + timing.
+     Prints stay off until the freeze window (fork ~5500 of the soak) so
+     the serial log is not flooded for the first ~13 minutes. */
+  extern uint64_t timer_get_ms(void);
+  uint64_t vmd_t0 = timer_get_ms();
+  {
+    static long p8_fork_seq;
+    p8_fork_seq++;
+    if (p8_fork_seq >= 5500)
+      g_p8_triage = 1;
+    if (g_p8_triage) {
+      uart_puts("[VMF] enter seq=");
+      print_int((int)p8_fork_seq);
+      uart_puts("\n");
+    }
+  }
+
   /* P1 (OQ5, binding): the child is a single-threaded copy of the CALLER.
      A fork from a secondary thread copies the shared group block (identical
      for every member) and keeps the caller's TLS register value, but heap
@@ -2223,6 +2243,11 @@ int process_fork(struct trap_frame *tf) {
       spinlock_release_irqrestore(&proc_lock, flags);
       uart_puts("[KERNEL] fork: AS clone failed\n");
       return -1;
+    }
+    if (g_p8_triage) { /* TEMP (l2-clonefix triage, strip before final) */
+      uart_puts("[VMF] cloned ms=");
+      print_int((int)(timer_get_ms() - vmd_t0));
+      uart_puts("\n");
     }
   } else {
     kmemcpy((void *)child->user_phys_base, (void *)group->user_phys_base,
@@ -2263,6 +2288,11 @@ int process_fork(struct trap_frame *tf) {
 
   child->state = PROC_STATE_READY;
   spinlock_release_irqrestore(&proc_lock, flags);
+  if (g_p8_triage) { /* TEMP (l2-clonefix triage, strip before final) */
+    uart_puts("[VMF] ready ms=");
+    print_int((int)(timer_get_ms() - vmd_t0));
+    uart_puts("\n");
+  }
   return child_pid;
 }
 

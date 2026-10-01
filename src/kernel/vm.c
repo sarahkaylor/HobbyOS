@@ -31,6 +31,75 @@ static spinlock_t vm_lock;
 static struct addr_space vm_as_pool[MAX_PROCESSES];
 static int vm_lock_ready;
 
+/* TEMP (l2-clonefix triage, strip before final): clone-stall forensics.
+   Armed by process_fork's window gate; the heartbeat is driven from the
+   timer IRQ paths (kernel- and user-mode) so it keeps reporting while a
+   fork's AS clone stops making progress.  All reads in the heartbeat are
+   lock-free by design: taking a lock here could self-deadlock on a CPU
+   that already holds it when the tick lands. */
+extern uint64_t timer_get_ms(void);
+extern volatile int g_p8_triage;
+extern int cpu_current_pids[];
+extern int frame_total_count(void);
+extern int frame_used_get(void);
+extern int frame_lock_locked(void);
+extern int frame_hint_get(void);
+extern volatile int g_vmd_fa_scan_max;
+extern spinlock_t proc_lock;
+
+volatile int g_vmd_armed = 0;
+volatile uint64_t g_vmd_iter = 0;
+volatile uint64_t g_vmd_va = 0;
+volatile uint64_t g_vmd_t0 = 0;
+volatile int g_vmd_region = 0;
+
+void vmd_heartbeat(void) {
+  static uint64_t last_ms;
+  static uint64_t last_iter = ~0ULL;
+  static int same_count = 0;
+  if (!g_vmd_armed)
+    return;
+  uint64_t now = timer_get_ms();
+  if (last_ms && now - last_ms < 20000)
+    return;
+  last_ms = now;
+  if (g_vmd_iter == last_iter)
+    same_count++;
+  else
+    same_count = 0;
+  last_iter = g_vmd_iter;
+  uart_puts("[VMD] hb cpu=");
+  print_int((int)get_cpuid());
+  uart_puts(" iter=");
+  print_int((int)g_vmd_iter);
+  uart_puts(" same=");
+  print_int(same_count);
+  uart_puts(" reg=");
+  print_int(g_vmd_region);
+  uart_puts(" va=");
+  uart_print_hex(g_vmd_va);
+  uart_puts(" clonems=");
+  print_int(g_vmd_t0 ? (int)(now - g_vmd_t0) : -1);
+  uart_puts(" pids=");
+  for (int c = 0; c < MAX_CPUS; c++) {
+    print_int(cpu_current_pids[c]);
+    uart_puts(" ");
+  }
+  uart_puts("vm=");
+  print_int((int)vm_lock.locked);
+  uart_puts(" fr=");
+  print_int(frame_lock_locked());
+  uart_puts(" pr=");
+  print_int((int)proc_lock.locked);
+  uart_puts(" free=");
+  print_int(frame_total_count() - frame_used_get());
+  uart_puts(" hint=");
+  print_int(frame_hint_get());
+  uart_puts(" fasmax=");
+  print_int(g_vmd_fa_scan_max);
+  uart_puts("\n");
+}
+
 static void vm_lock_init_once(void) {
   if (!vm_lock_ready) {
     spinlock_init(&vm_lock);
@@ -1047,6 +1116,21 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
   if (dst->nr != 0)
     return -1; /* only into a fresh AS */
 
+  /* TEMP (l2-clonefix triage, strip before final): arm the heartbeat and
+     per-iteration timing for the fork window. */
+  g_vmd_iter = 0;
+  g_vmd_va = 0;
+  g_vmd_region = 0;
+  g_vmd_t0 = timer_get_ms();
+  g_vmd_armed = g_p8_triage;
+  if (g_vmd_armed) {
+    uart_puts("[VMD] clone start nr=");
+    print_int(src->nr);
+    uart_puts(" res=");
+    print_int((int)src->resident_frames);
+    uart_puts("\n");
+  }
+
   /* Copy the regions in list order; each insert takes vm_lock itself.
      Sibling threads of the parent could in principle mutate the list
      concurrently -- v2 fork's binding contract is a copy of the CALLER
@@ -1076,11 +1160,16 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
 
     for (uint64_t a = r.base; a < r.base + r.len; a += FRAME_SIZE) {
       uint64_t leaf = 0;
+      uint64_t t_it = 0; /* TEMP (l2-clonefix triage, strip before final) */
+      g_vmd_iter++;
+      g_vmd_va = a;
+      if (g_vmd_armed)
+        t_it = timer_get_ms();
       fl = spinlock_acquire_irqsave(&vm_lock);
       int present = (vm_arch_walk(src, a, &leaf) == 0);
       spinlock_release_irqrestore(&vm_lock, fl);
       if (!present)
-        continue; /* holes stay holes */
+        goto vmd_iter_end; /* holes stay holes */
       uint16_t mkind = r.kind;
       uint64_t phys;
       if (r.obj) {
@@ -1118,8 +1207,38 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
         uart_puts("\n");
         goto fail;
       }
+    vmd_iter_end:
+      /* TEMP (l2-clonefix triage, strip before final): flag iterations
+         that take >= 1s -- the freeze signature is a huge per-page cost. */
+      if (t_it && timer_get_ms() - t_it >= 1000) {
+        uart_puts("[VMD] SLOWITER dt=");
+        print_int((int)(timer_get_ms() - t_it));
+        uart_puts(" i=");
+        print_int(i);
+        uart_puts(" va=");
+        uart_print_hex(a);
+        uart_puts("\n");
+      }
+    }
+    /* TEMP (l2-clonefix triage, strip before final) */
+    g_vmd_region = i + 1;
+    if (g_vmd_armed) {
+      uart_puts("[VMD] region ");
+      print_int(i);
+      uart_puts(" done ms=");
+      print_int((int)(timer_get_ms() - g_vmd_t0));
+      uart_puts(" iters=");
+      print_int((int)g_vmd_iter);
+      uart_puts("\n");
     }
     i++;
+  }
+  if (g_vmd_armed) {
+    uart_puts("[VMD] clone done ms=");
+    print_int((int)(timer_get_ms() - g_vmd_t0));
+    uart_puts(" iters=");
+    print_int((int)g_vmd_iter);
+    uart_puts("\n");
   }
   return 0;
 
