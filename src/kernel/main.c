@@ -245,6 +245,13 @@ static void test_wave_loader(void *arg) {
      variables, so it runs after THRD_T/TLS_T (last in the wave). */
   load_and_run_program_in_scheduler("CXX_T.BIN", -1, -1, -1, -1);
 
+  /* l3-rtti (browser.md §6/L6): libc++abi RTTI acceptance — RTTI_T.BIN
+     exercises dynamic_cast up/down/cross/virtual-base and typeid over
+     libcxx.a's RTTI closure (the four symbols the ICU link probe needed),
+     compiled -frtti like the ICU cross build.  Spawns nothing; one slot,
+     right after CXX_T. */
+  load_and_run_program_in_scheduler("RTTI_T.BIN", -1, -1, -1, -1);
+
   /* P2.2 (S2): v2 address-space acceptance.  MMTEST.BIN is the first
      AS_V2 program in the wave: loader v2 maps its image into fresh 4 KiB
      frames at USER_IMG_BASE (64 GiB) and commits the top of the v2 main

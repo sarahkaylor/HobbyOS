@@ -122,6 +122,11 @@ LIBCXX_INCLUDE = $(LIBCXX_ROOT)/libcxx/include
 # wchar.h/... wrappers are found first and pull the C headers with
 # #include_next (the upstream "C++ headers before C headers" rule).
 CXX_LIBCXX_USER_FLAGS = -I$(LIBCXX_INCLUDE) $(USER_CFLAGS) -std=c++23 -fno-exceptions -fno-rtti -nostdinc++
+# l3-rtti (browser.md §6/L6): RTTI ON for the RTTI acceptance program — the
+# exact consumption mode the ICU cross build uses (-fno-exceptions -frtti).
+# The archive-wide -fno-rtti policy is unchanged for every other program; the
+# per-TU split lives in the vendor build (sources.txt class B).
+CXX_RTTI_USER_FLAGS = -I$(LIBCXX_INCLUDE) $(USER_CFLAGS) -std=c++23 -fno-exceptions -frtti -nostdinc++
 
 ifeq ($(MODE),test)
   CFLAGS += -DKERNEL_MODE_TEST
@@ -206,6 +211,9 @@ DNSTST_BIN = $(OBJ_DIR)/dns_test.bin
 CXXSMOKE_BIN = $(OBJ_DIR)/cxx_smoke.bin
 # P3 (browser.md §6): libc++ acceptance (8.3-safe).
 CXX_T_BIN = $(OBJ_DIR)/cxx_t.bin
+# l3-rtti (browser.md §6/L6): libc++abi RTTI acceptance (8.3-safe
+# RTTI_T.BIN).  Compiled -frtti; links libcxx.a's class-B RTTI closure.
+CXX_RTTI_T_BIN = $(OBJ_DIR)/rtti_t.bin
 # P2.2 (S2, docs/browser/p2-vm-design.md section 8): v2 (AS_V2) userland
 # acceptance.  MMTEST.BIN is 8.3-safe, linked with linker_v2.ld at
 # USER_IMG_BASE and loaded by loader v2 (no crt0, like MEMTEST).
@@ -601,6 +609,19 @@ $(CXX_T_BIN): $(OBJ_DIR)/cxx_t.o $(OBJ_DIR)/libcxx.a $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/cxx_t.elf $(OBJ_DIR)/cxx_t.o $(OBJ_DIR)/libcxx.a $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/cxx_t.elf $(CXX_T_BIN)
 
+# l3-rtti (browser.md §6/L6): RTTI acceptance for the libc++abi cast
+# machinery.  The program compiles -frtti (the ICU consumption mode) and
+# links libcxx.a, whose class-B objects define the four symbols the ICU link
+# probe reported (__dynamic_cast + the __*_class_type_info vtables).  See
+# src/user/cxx_rtti_t.cpp for the battery; RTTI_T.BIN is 8.3-safe.
+$(OBJ_DIR)/cxx_rtti_t.o: src/user/cxx_rtti_t.cpp $(USER_LIBC) $(USER_HDRS) $(LIBCXX_VENDOR)/.fetched-ok $(LIBCXX_VENDOR)/sources.txt
+	@mkdir -p $(OBJ_DIR)
+	$(CXX) $(CXX_RTTI_USER_FLAGS) -c $< -o $@
+
+$(CXX_RTTI_T_BIN): $(OBJ_DIR)/cxx_rtti_t.o $(OBJ_DIR)/libcxx.a $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/rtti_t.elf $(OBJ_DIR)/cxx_rtti_t.o $(OBJ_DIR)/libcxx.a $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/rtti_t.elf $(CXX_RTTI_T_BIN)
+
 # The vendored libc++ + libc++abi static archive (one per arch).  Built by
 # third_party/libcxx-21.1.8/build-target.sh from sources.txt with the
 # committed __config_site; the extracted upstream tree is fetched by
@@ -655,6 +676,17 @@ $(LIBCXX_ROOT)/compiler-rt/lib/builtins/%.c: $(LIBCXX_VENDOR)/.fetched-ok
 # as intermediate files and deletes them after use; .SECONDARY keeps them in
 # place so a later rebuild does not re-extract the tree.
 .SECONDARY: $(addprefix $(LIBCXX_ROOT)/compiler-rt/lib/builtins/,$(LIBC_BUILTIN_SRCS))
+
+# Same guard for the libcxxabi sources the HOST RTTI test compiles
+# (obj/host_rtti_*.o below): on a fresh checkout the file does not exist yet,
+# so the pattern rule must carry a recipe, invalidate the marker BEFORE
+# fetching and fail loudly (see the note above).  .SECONDARY again keeps the
+# fetched sources in place across builds.
+$(LIBCXX_ROOT)/libcxxabi/src/%.cpp: $(LIBCXX_VENDOR)/.fetched-ok
+	@test -f $@ || { rm -f $(LIBCXX_VENDOR)/.fetched-ok; bash $(LIBCXX_VENDOR)/fetch.sh; test -f $@; }
+
+RTTI_HOST_VENDOR_SRCS = libcxxabi/src/private_typeinfo.cpp libcxxabi/src/stdlib_typeinfo.cpp libcxxabi/src/stdlib_exception.cpp
+.SECONDARY: $(addprefix $(LIBCXX_ROOT)/,$(RTTI_HOST_VENDOR_SRCS))
 
 $(OBJ_DIR)/builtins/%.o: $(LIBCXX_ROOT)/compiler-rt/lib/builtins/%.c $(LIBCXX_VENDOR)/.fetched-ok
 	@mkdir -p $(OBJ_DIR)/builtins
@@ -1294,7 +1326,7 @@ $(XEYES_BIN): $(OBJ_DIR)/xeyes_main.o $(X11_LIB_OBJS) $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/xeyes.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/xeyes.elf $(XEYES_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(CXX_T_BIN) $(MMTEST_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -1359,6 +1391,7 @@ endif
 	$(MCOPY) -i disk.img $(THRD_T_BIN) ::/THRD_T.BIN
 	$(MCOPY) -i disk.img $(TLS_T_BIN) ::/TLS_T.BIN
 	$(MCOPY) -i disk.img $(CXX_T_BIN) ::/CXX_T.BIN
+	$(MCOPY) -i disk.img $(CXX_RTTI_T_BIN) ::/RTTI_T.BIN
 	$(MCOPY) -i disk.img $(MMTEST_T_BIN) ::/MMTEST.BIN
 	$(MCOPY) -i disk.img $(HELLO_BIN) ::/HELLO.BIN
 	$(MCOPY) -i disk.img $(SH_BIN) ::/SH.BIN
@@ -2021,6 +2054,39 @@ obj/host_cxx_headers_test.o: src/host/cxx_headers_test.cpp src/libc/include/*.h 
 $(CXX_HEADERS_TEST): obj/host_cxx_headers_test.o
 	$(HOST_CC) -o $@ $^
 
+# --- l3-rtti (browser.md §6/L6): libc++abi RTTI closure, host --------------
+# The host test compiles the SHIPPED vendor RTTI objects natively with the
+# same hermetic flags the target class-B build uses (-nostdinc++ + the
+# vendored libc++ headers; -frtti for the closure only) and drives them with
+# real compiler-emitted dynamic_cast/typeid calls.  The link is closed-world:
+# -nostdlib++ + the four objects + the support shim leave no host C++ runtime
+# in ldd(), so a call can never fall through to a system implementation.
+# The vendor sources are files of the fetched tree, so their prerequisite is
+# the guarded pattern rule above (fresh-checkout discipline).
+VENDOR_HOST_CXXFLAGS = -O2 -g -std=c++23 -fno-exceptions -frtti -nostdinc++ \
+  -I$(LIBCXX_INCLUDE) -I$(LIBCXX_ROOT)/libcxx/src -I$(LIBCXX_ROOT)/libcxx/src/include \
+  -I$(LIBCXX_ROOT)/libcxxabi/include \
+  -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES \
+  -DLIBCXX_BUILDING_LIBCXXABI -D_LIBCXXABI_BUILDING_LIBRARY
+RTTI_TEST = rtti_test_host
+obj/host_rtti_test.o: src/host/rtti_test.cpp
+	@mkdir -p obj
+	$(HOST_CC) -Wall -Wextra -g $(VENDOR_HOST_CXXFLAGS) -c $< -o $@
+obj/host_rtti_private_typeinfo.o: $(LIBCXX_ROOT)/libcxxabi/src/private_typeinfo.cpp $(LIBCXX_VENDOR)/.fetched-ok
+	@mkdir -p obj
+	$(HOST_CC) $(VENDOR_HOST_CXXFLAGS) -c $< -o $@
+obj/host_rtti_stdlib_typeinfo.o: $(LIBCXX_ROOT)/libcxxabi/src/stdlib_typeinfo.cpp $(LIBCXX_VENDOR)/.fetched-ok
+	@mkdir -p obj
+	$(HOST_CC) $(VENDOR_HOST_CXXFLAGS) -c $< -o $@
+obj/host_rtti_stdlib_exception.o: $(LIBCXX_ROOT)/libcxxabi/src/stdlib_exception.cpp $(LIBCXX_VENDOR)/.fetched-ok
+	@mkdir -p obj
+	$(HOST_CC) $(VENDOR_HOST_CXXFLAGS) -c $< -o $@
+obj/host_rtti_test_support.o: src/host/rtti_test_support.cpp
+	@mkdir -p obj
+	$(HOST_CC) -Wall -Wextra -g $(VENDOR_HOST_CXXFLAGS) -c $< -o $@
+$(RTTI_TEST): obj/host_rtti_test.o obj/host_rtti_private_typeinfo.o obj/host_rtti_stdlib_typeinfo.o obj/host_rtti_stdlib_exception.o obj/host_rtti_test_support.o
+	$(HOST_CC) -nostdlib++ -o $@ $^
+
 # WM damage bookkeeping: line-level window repair + the base (damage) clip
 # (window.c + graphics.c are included into the test's single TU).
 WINDOW_DAMAGE_TEST = window_damage_test_host
@@ -2064,7 +2130,7 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
@@ -2098,6 +2164,7 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	$(HOST_RUN) ./$(HEADERS_TEST)
 	$(HOST_RUN) ./$(CXXRT_TEST)
 	$(HOST_RUN) ./$(CXX_HEADERS_TEST)
+	$(HOST_RUN) ./$(RTTI_TEST)
 	$(HOST_RUN) ./$(GETOPT_TEST)
 	$(HOST_RUN) ./$(REGEX_TEST)
 	$(HOST_RUN) ./$(LANGINFO_TEST)
