@@ -465,6 +465,96 @@ static void test_p5_env_readback(void) {
   process_free(pid);
 }
 
+/* D5.3/D5.4: unified reap delivery on the KILL path -- a parent parked in
+ * WAIT_CHILD wakes with the status when a third party kills the child
+ * (the confirmed wakeup gap), and SIGCHLD goes pending. */
+static void test_p5_reap_delivery_on_kill(void) {
+  tests_run++;
+  uart_puts("  Running test_p5_reap_delivery_on_kill...\n");
+
+  int ppid = process_create();
+  int ppid2 = process_create();
+  int cpid = process_create();
+  EXPECT_EQ((ppid >= 0 && ppid2 >= 0 && cpid >= 0), 1);
+  struct process *parent = process_get_pcb(ppid);
+  struct process *parent2 = process_get_pcb(ppid2);
+  struct process *child = process_get_pcb(cpid);
+
+  child->parent_pid = ppid;
+  /* Park both parents; #1 wants exactly this child, #2 wants another pid. */
+  parent->state = PROC_STATE_WAIT_CHILD;
+  parent->context[0] = cpid;
+  parent->context[1] = USER_VIRT_BASE + 0x120;
+  parent2->state = PROC_STATE_WAIT_CHILD;
+  parent2->context[0] = 9999;
+
+  /* Third-party default kill (SIGTERM without a handler). */
+  EXPECT_EQ(process_signal(cpid, HO_SIGTERM), 0);
+
+  /* Parent #1 woke with the reap result; the status word landed in its
+     region; the zombie slot was delivered (FREE). */
+  EXPECT_EQ(parent->state, PROC_STATE_READY);
+  EXPECT_EQ((int)parent->context[0], cpid);
+  EXPECT_EQ(child->state, PROC_STATE_FREE);
+  EXPECT_EQ(*(int *)(parent->user_phys_base + 0x120), HO_SIGTERM);
+  EXPECT_EQ((parent->sig_pending & (1u << (HO_SIGCHLD - 1))) != 0, 1);
+
+  /* Parent #2 was waiting for a different pid: still parked. */
+  EXPECT_EQ(parent2->state, PROC_STATE_WAIT_CHILD);
+
+  process_free(ppid2);
+  process_free(ppid);
+  process_free(cpid);
+}
+
+/* D5.1/D5.7: waitpid option validation, EFAULT, and the WNOHANG reap. */
+static void test_p5_waitpid_validation(void) {
+  tests_run++;
+  uart_puts("  Running test_p5_waitpid_validation...\n");
+
+  int ppid = process_create();
+  int old_pid = cpu_current_pids[0];
+  set_current_process_pid(0, ppid);
+
+  struct trap_frame tf;
+  for (unsigned i = 0; i < sizeof(tf) / sizeof(uint64_t); i++)
+    ((uint64_t *)&tf)[i] = 0;
+
+  /* unknown option bits -> -EINVAL (before any child scan) */
+  tf.regs[0] = -1;
+  tf.regs[1] = USER_VIRT_BASE + 0x200;
+  tf.regs[2] = 4;
+  EXPECT_EQ(process_waitpid(&tf), -EINVAL);
+
+  /* out-of-region status pointer -> -EFAULT */
+  tf.regs[2] = 0;
+  tf.regs[1] = 0x1000;
+  EXPECT_EQ(process_waitpid(&tf), -EFAULT);
+
+  /* no children at all -> -ECHILD; WUNTRACED is accepted (ignored) */
+  tf.regs[1] = USER_VIRT_BASE + 0x200;
+  tf.regs[2] = 1;
+  EXPECT_EQ(process_waitpid(&tf), -ECHILD);
+  tf.regs[2] = 1 | 2;
+  EXPECT_EQ(process_waitpid(&tf), -ECHILD);
+
+  /* an EXITED child reaps via WNOHANG (status ptr NULL: the write itself
+     is covered by the kill-path test above and by PROC_T on device) */
+  int cpid = process_create();
+  struct process *ch = process_get_pcb(cpid);
+  ch->parent_pid = ppid;
+  ch->state = PROC_STATE_EXITED;
+  ch->exit_status = 42 << 8;
+  tf.regs[0] = -1;
+  tf.regs[1] = 0;
+  tf.regs[2] = 1;
+  EXPECT_EQ(process_waitpid(&tf), cpid);
+  EXPECT_EQ(ch->state, PROC_STATE_FREE);
+
+  set_current_process_pid(0, old_pid);
+  process_free(ppid);
+}
+
 void process_test_suite(void) {
   uart_puts("process_test_suite:\n");
   test_process_init_and_create();
@@ -479,6 +569,8 @@ void process_test_suite(void) {
   test_p5_kill_semantics();
   test_p5_sigpipe_semantics();
   test_p5_env_readback();
+  test_p5_reap_delivery_on_kill();
+  test_p5_waitpid_validation();
 }
 
 #endif // KERNEL_MODE_UNIT_TEST

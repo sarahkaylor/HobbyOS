@@ -341,6 +341,82 @@ static int group_claims_pending(struct process *grp, struct process *self) {
   return pending;
 }
 
+/* ---------------------------------------------------------------------------
+ * P5 (D5.3/D5.4/D5.6): unified reap delivery + slot forensics.
+ * ------------------------------------------------------------------------- */
+
+/* D5.6: zombie accounting for the pressure forensics.  "zombie" = an
+ * EXITED leader still waiting to be reaped by a live parent ("UI process
+ * stopped reaping" is this number climbing).  Diagnostic only: unlocked
+ * reads, called on exhaustion paths. */
+static int zombie_slots_count(int *exited_out) {
+  int z = 0, e = 0;
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    if (proc_table[i].state != PROC_STATE_EXITED)
+      continue;
+    e++;
+    int par = proc_table[i].parent_pid;
+    if (par > 0 && par < MAX_PROCESSES)
+      z++;
+  }
+  if (exited_out)
+    *exited_out = e;
+  return z;
+}
+
+/* D5.7: the reap status word goes into the PARENT's memory while this
+ * runs on the dying child's context.  v1: translation via user_phys_base
+ * (same shape as before); v2: the page was materialized by
+ * process_user_ok() above, bytes land through vm_kwrite. */
+static void reap_status_write(struct process *parent, uint64_t va, int st) {
+  if (parent->as) {
+    vm_kwrite(parent, va, &st, 4);
+    return;
+  }
+  uint64_t off = va - USER_VIRT_BASE;
+  if (off + 4 <= USER_REGION_SIZE && parent->user_phys_base)
+    *(int *)(parent->user_phys_base + off) = st;
+}
+
+/* D5.3/D5.4: THE unified child-death delivery -- called from every death
+ * path (group_teardown for normal exit/exit_group, process_kill_group_sig
+ * for kill/fatal signals).  Wakes a parent parked in WAIT_CHILD (matched
+ * on the pid its saved context requested), writes the status word, flips
+ * the zombie to FREE on delivery, and sets SIGCHLD pending on the parent
+ * group.  Caller holds proc_lock; never blocks, O(slots). */
+static void reap_deliver_locked(struct process *grp) {
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *parent = &proc_table[i];
+    if (parent->state != PROC_STATE_WAIT_CHILD ||
+        process_group(parent)->pid != grp->parent_pid)
+      continue;
+    int want = (int)parent->context[0];
+    if (want > 0 && want != grp->pid)
+      continue;
+    parent->context[0] = grp->pid;         /* waitpid return value */
+    uint64_t stp = (uint64_t)parent->context[1]; /* saved arg1 */
+    if (stp) {
+      /* D5.7/OQ5: route the user-range check through P2's helper
+         (materializes for v2), then write cross-context. */
+      if (process_user_ok(parent, stp, 4, 1) == 0)
+        reap_status_write(parent, stp, grp->exit_status);
+    }
+    parent->state = PROC_STATE_READY;
+    /* Deliver the reap: the anchor's PCB slot is now reusable. */
+    grp->state = PROC_STATE_FREE;
+    grp->exit_status = 0;
+  }
+  /* D5.4/D8.3: SIGCHLD pending on the parent group so both routes (GLib
+     handler, own reaper) observe the death promptly.  Delivery (handler
+     invocation) is S3; the bit is recorded either way. */
+  int pp = grp->parent_pid;
+  if (pp > 0 && pp < MAX_PROCESSES) {
+    struct process *pgp = process_group(&proc_table[pp]);
+    if (pgp->state != PROC_STATE_FREE)
+      pgp->sig_pending |= (1u << (HO_SIGCHLD - 1));
+  }
+}
+
 /* Group teardown (design section 1): release the shared resources exactly
  * once -- close the group fd table, free the physical block, turn the anchor
  * into a reapable zombie (EXITED; straight to FREE when a parent was already
@@ -397,29 +473,11 @@ static void group_teardown(struct process *grp, uint64_t code) {
      parent's saved context still holds the syscall args (context[0] = the
      requested pid, context[1] = the status pointer), so a pid-specific wait
      is matched and the user status is filled in place -- through the
-     PARENT'S physical region (this runs on the dying group's context, so a
-     user-virtual write would land in the wrong block). */
-  for (int i = 0; i < MAX_PROCESSES; i++) {
-    struct process *parent = &proc_table[i];
-    if (parent->state != PROC_STATE_WAIT_CHILD ||
-        process_group(parent)->pid != grp->parent_pid)
-      continue;
-    int want = (int)parent->context[0];
-    if (want > 0 && want != grp->pid)
-      continue;
-    parent->context[0] = grp->pid;         /* waitpid return value */
-    int *stp = (int *)parent->context[1];  /* saved arg1: status ptr */
-    if (stp && (uint64_t)stp >= USER_VIRT_BASE) {
-      uint64_t off = (uint64_t)stp - USER_VIRT_BASE;
-      if (off + 4 <= USER_REGION_SIZE && parent->user_phys_base) {
-        *(int *)(parent->user_phys_base + off) = grp->exit_status;
-      }
-    }
-    parent->state = PROC_STATE_READY;
-    /* Deliver the reap: the anchor's PCB slot is now reusable. */
-    grp->state = PROC_STATE_FREE;
-    grp->exit_status = 0;
-  }
+     PARENT'S mapping (this runs on the dying group's context, so a
+     user-virtual write would land in the wrong block).  P5 (D5.3/D5.4):
+     this is now the shared reap_deliver_locked helper, also called from
+     the kill path -- the confirmed third-party-kill wakeup gap. */
+  reap_deliver_locked(grp);
   spinlock_release_irqrestore(&proc_lock, flags);
 }
 
@@ -555,7 +613,15 @@ static int process_create_internal_ver(int ver) {
     }
     if (pid < 0) {
       spinlock_release_irqrestore(&proc_lock, p_flags);
-      uart_puts("[KERNEL] process_create: no free process slots!\n");
+      /* D5.6 slot forensics: how many slots are zombies (EXITED with a
+         live parent: "UI process stopped reaping") vs all EXITED. */
+      int exited = 0;
+      int zombies = zombie_slots_count(&exited);
+      uart_puts("[KERNEL] process_create: no free process slots! zombies=");
+      print_int(zombies);
+      uart_puts(" exited=");
+      print_int(exited);
+      uart_puts("\n");
       return -1;
     }
   }
@@ -574,10 +640,16 @@ static int process_create_internal_ver(int ver) {
     if (dump_count < 3) {
       dump_count++;
       int used = frame_blocks_used_count();
+      int zexited = 0;
+      int zzombies = zombie_slots_count(&zexited);
       uart_puts("[BLOCKS] used=");
       print_int(used);
       uart_puts("/");
       print_int(frame_block_count());
+      uart_puts(" zmb=");
+      print_int(zzombies);
+      uart_puts(" exd=");
+      print_int(zexited);
       uart_puts(" holders:");
       for (int i = 1; i < MAX_PROCESSES; i++) {
         struct process *h = &proc_table[i];
@@ -1327,6 +1399,10 @@ void process_kill_group_sig(struct process *p, int sig) {
     file_select_forget(m->pid);
   }
   p->live_threads = 0;
+  /* P5 (D9.4/D5.3): run the unified reap delivery so a parent blocked in
+     WAIT_CHILD learns of the death immediately -- the confirmed
+     third-party-kill wakeup gap this design closes. */
+  reap_deliver_locked(p);
   spinlock_release_irqrestore(&proc_lock, flags);
 
   // We close the global file descriptors directly to properly free resources
@@ -1516,22 +1592,25 @@ int sys_readenv(struct process *p, int idx, char *buf, int size) {
 /**
  * Implements the waitpid system call (SYS_WAITPID, 39).
  *
- * arg0: pid — > 0: that specific child; 0 or -1: any child of the caller
- *        (process-group forms pid < -1 are treated as "any child": no
- *        process groups exist yet).
+ * arg0: pid — > 0: that specific child leader; 0 or -1: any child of the
+ *        caller; < -1: any child (documented divergence: no pgid sets
+ *        beyond a group's own pid; WebKit never uses the form).
  * arg1: int *status — filled with the child's exit status in waitpid()
  *        layout: (exit_code & 0xff) << 8 for a normal exit, or the
  *        terminating signal number in the low byte for a killed child.
  * arg2: options — WNOHANG (1) returns 0 immediately when children are
- *        still running instead of blocking.
+ *        still running instead of blocking; WUNTRACED (2) is accepted and
+ *        ignored (no stop states exist); any other bit -> -EINVAL (D5.1).
  *
- * Returns the reaped child's pid, 0 (WNOHANG, children alive),
- * -ECHILD (no children), or blocks the caller in PROC_STATE_WAIT_CHILD
- * until a matching child exits.
+ * Returns the reaped child's pid, 0 (WNOHANG, children alive), -ECHILD
+ * (no children), -EFAULT (bad status pointer), or blocks the caller in
+ * PROC_STATE_WAIT_CHILD until a matching child exits.
  *
  * Blocking delivery: the parent's saved context (context[0] = pid return,
- * context[1] = the still-saved status pointer) is filled by process_exit()
- * when the child dies, exactly like the spawn worker fills context[0].
+ * context[1] = the still-saved status pointer) is filled by the unified
+ * reap_deliver_locked() helper (D5.3) when the child dies -- whether the
+ * death is a normal exit or a kill -- exactly like the spawn worker fills
+ * context[0].
  */
 int process_waitpid(struct trap_frame *tf) {
   int want_pid = (int)tf->regs[0];
@@ -1542,10 +1621,21 @@ int process_waitpid(struct trap_frame *tf) {
   if (!caller)
     return -EINVAL;
 
+  /* D5.1: option validation -- WNOHANG (1) and WUNTRACED (2, accepted
+     and ignored: no stop states exist); any other bit -> -EINVAL. */
+  if (options & ~(1 | 2))
+    return -EINVAL;
+
   /* P1 (D7): children are parented to the group ANCHOR, so match against
      the caller's group pid -- a thread blocked in waitpid() must see the
      group's children. */
   struct process *grp = process_group(caller);
+
+  /* D5.7/OQ5: a non-NULL status pointer is validated once here (and
+     demand-materialized through vm_touch for v2); delivery then writes
+     it cross-context.  Bad pointer -> -EFAULT. */
+  if (status && process_user_ok(grp, (uint64_t)status, 4, 1) != 0)
+    return -EFAULT;
 
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   for (int i = 0; i < MAX_PROCESSES; i++) {
@@ -1565,10 +1655,11 @@ int process_waitpid(struct trap_frame *tf) {
     p->exit_status = 0;
     spinlock_release_irqrestore(&proc_lock, flags);
 
-    if (status && (uint64_t)status >= USER_VIRT_BASE &&
-        (uint64_t)status + 4 <= USER_VIRT_BASE + USER_REGION_SIZE) {
+    /* The status range was validated at entry (vm_touch for v2, range for
+       v1) and we are on the caller's own context: direct write is the P2
+       contract ("after vm_touch the kernel reads/writes directly"). */
+    if (status)
       *status = st;
-    }
     return child_pid;
   }
 

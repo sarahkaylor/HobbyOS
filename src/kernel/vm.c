@@ -434,6 +434,35 @@ int vm_range_ok(struct process *p, uint64_t va, uint64_t len, int write) {
   return vm_touch(p, va, len, write) == 0 ? 0 : -1;
 }
 
+/* P5 (D5.7): cross-context write helper.  The caller has already run
+ * vm_touch on the range (validated + demand-materialized); this resolves
+ * each 4 KiB page through the target's own tables and stores the bytes
+ * via the kernel direct map (kernel VA == phys, both arches).  v2 only --
+ * a v1 group has no page tables and its callers use user_phys_base. */
+int vm_kwrite(struct process *p, uint64_t va, const void *src, int len) {
+  if (!p || !src || len <= 0)
+    return 0;
+  if (!p->as)
+    return -1; /* v1: the caller owns the translation */
+  const unsigned char *s = (const unsigned char *)src;
+  uint64_t page_pa = 0;
+  for (int i = 0; i < len; i++) {
+    uint64_t a = va + (uint64_t)i;
+    if (i == 0 || (a & (FRAME_SIZE - 1)) == 0) {
+      uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+      uint64_t leaf = 0;
+      int rc = vm_arch_walk(p->as, a & ~(uint64_t)(FRAME_SIZE - 1), &leaf);
+      if (rc == 0)
+        page_pa = vm_arch_leaf_phys(leaf);
+      spinlock_release_irqrestore(&vm_lock, fl);
+      if (rc != 0)
+        return -1; /* unmapped: the vm_touch contract was violated */
+    }
+    *(volatile unsigned char *)(page_pa + (a & (FRAME_SIZE - 1))) = s[i];
+  }
+  return 0;
+}
+
 /* ---------------------------------------------------------------------
  * P2.3 (S3, design sections 5.1-5.5): demand faults
  * ------------------------------------------------------------------- */
