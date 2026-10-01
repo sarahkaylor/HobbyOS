@@ -560,3 +560,52 @@ threads/processes (the in-OS tier), the GLib-on-OS integration checks for `GSock
   sysroot headers; integrator resolves merges.
 - **OQ5** P5 interface note: P4 ships EPIPE-without-signal; confirm P5's SIGPIPE work keeps the -EPIPE
   return and adds the signal, and that P5 execve owns FD_CLOEXEC honoring (fd_flags[] contract).
+
+## 11. Integrator review (consent record — 2026-09-30)
+
+Reviewed at merged base `9a939e5` (P2 S1–S3 on main); the note's grounding
+claims spot-verified against the tree: the `sock2_test.c:57` AF_UNIX
+assertion, `K_S_IFSOCK`, `FD_SETSIZE 256`, `MAX_OPEN_FDS 32` /
+`MAX_GLOBAL_FILES 128`, the read/write legacy returns (-1 only) and the
+`f1_probe_fd` select engine.  Verdict: **consented as designed, with one
+amendment and one order record.**
+
+- **OQ1(a) rows 76–79 + `SYS_MAX` — approved.**  Order record: P2's write
+  landed first, so `SYS_MAX` was already 82 at the base; the P4 freeze is a
+  **top-up no-op** (no `SYS_MAX` change).  Rows/args exactly as §6.2.  The
+  four rows are defined in `src/include/syscall.h` now (single-writer edit
+  with the P5 block, ahead of Wave 1f); the P4 gate record then only adds
+  test evidence.
+- **OQ1(b) errno — approved.**  `EMSGSIZE 90`, `ENOTCONN 107` (both
+  verified free against `src/include/errno.h`); defined now with this
+  review.
+- **OQ1(c) trap.c carve-out — approved.**  `ret == -1 → -EBADF` stays for
+  the legacy backends; `ret < -1` (other than the -2 restart) passes
+  through, both arches; existing backends verified to return only -1/-2.
+- **OQ1(d) SOCK2TST expectation flip — approved; the P4 impl lane owns the
+  §6.6 edit** (file is L9-owned; the lane applies it, the integrator
+  records it in §11 at the gate).
+- **OQ2 naming policy — approved as recommended:** no reservation; append
+  order `GETSOCKNAME` → `SHUTDOWN` → `BIND`/`CONNECT_UNIX`/`LISTEN`/
+  `ACCEPT` at the consuming gate; recorded in §A.1b at that gate.
+- **OQ3 pool/budget — approved as gate constants** (16 pairs; 64 KiB per
+  direction; 8192-byte message cap; 16 fds per message).  Revisit with P8
+  torture evidence, including the `MAX_OPEN_FDS 32` question for WK.
+- **OQ4 ownership — approved** (P4 lane owns its `fs.c`/`fs.h`,
+  `src/user/libc.c`, `src/user_include/libc.h` and the new sysroot
+  headers).  Wave-1f coordination note: the P2 S4/S5 lane and the P5 impl
+  lane also touch `fs.h`/`fs.c` (FILE_TYPE_MEMFD; exec fd sweep) — all
+  additive edits; the parent reconciles merges.
+- **OQ5 P5 interface — confirmed:** P4 ships `-EPIPE` without a signal; P5
+  keeps the return value and adds SIGPIPE; P5 owns FD_CLOEXEC honoring at
+  exec.
+- **Amendment (cross-note review): `fd_flags[]` → `fd_cloexec` mask.**  D6's
+  `uint8_t fd_flags[32]` and the P5 note's `uint32_t fd_cloexec` were
+  independently designed for the same state; the **mask is canonical**
+  (`struct process.fd_cloexec`, bit i = fd i; pre-frozen on main with this
+  review).  fcntl `F_GETFD`/`F_SETFD` read/write bit 0; `dup2`/`dup` clear
+  the bit on the new fd; spawn2's 0/1/2 grants clear their bits; the exec
+  sweep is a bit loop.  No further semantic change.
+
+Implementation starts in Wave 1f (`browser/l2-p4-impl`) at this review's
+base (`SYS_MAX` 86 / rows 76–86 / errno / `fd_cloexec` pre-landed on main).

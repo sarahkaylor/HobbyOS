@@ -651,3 +651,49 @@ CLOEXEC, from-thread) → S5 `spawn_ex` + libc `spawn_ex` → S6 PROC_T/batterie
   pointer-using code after P2's helper freezes, or dual-path it as P2 does.
 - **glib route A hidden surface**: `F_DUPFD(_CLOEXEC)`, `dupfd_cloexec`, fdwalk-closes —
   only if Route A is chosen; sized in D12/D13, not built in P5.
+
+## 8. Integrator review (consent record — 2026-09-30)
+
+Reviewed at merged base `9a939e5` (P2 S1–S3 on main; the P4 design was
+consented in the same review round).  Spot-verified against the tree: the
+sysroot `<signal.h>` placeholder status, the `sys/wait.h` status-macro
+subset, the `process_kill`-does-not-wake-`WAIT_CHILD` gap (confirmed by
+inspection), today's rows 16/39/40 shapes, and the absence of any
+FD_CLOEXEC storage.  Verdict: **consented as designed; OQ1's amendment is
+applied to §A.1b with this record.**
+
+- **OQ1 A.1b amendment — approved as designed.**  40/39/16 extended in
+  place; 83/84/85/86 = `SIGACTION`/`SIGRETURN`/`GETENV`/`SPAWN_EX`; the v1
+  provisionals (`EXECVE 83`/`WAITPID 84`/`KILL 86`) are **withdrawn**.  The
+  rows are defined in `src/include/syscall.h` **now** (single-writer edit
+  ahead of Wave 1f, together with P4's 76–79); `SYS_MAX` is 86 from that
+  edit — the P5 gate record adds test evidence, it does not edit `SYS_MAX`.
+- **OQ2 launcher route — ratified as recommended:** Route B primary,
+  Route A kept viable; the `posix_spawn` adapter is L3 if Route A wins at
+  WK-2; `F_DUPFD(_CLOEXEC)` is scheduled with that decision.
+- **OQ3 SIGUSR1 deferral — approved** with the trigger (decide before WK-3
+  / the first multi-JS-thread scenario; P5.5 per-thread delivery vs
+  fork-patch).  The landmine stays flagged for L8/WK.
+- **OQ4 sysroot `<signal.h>` upgrade — approved for the P5 impl lane**
+  (`union { sa_handler; sa_sigaction; }`, `sa_mask`, `sa_flags`,
+  `sa_restorer`, minimal `siginfo_t`); no parallel owner in Wave 1f.
+- **OQ5 P2 interplay — resolved: P2 S1–S3 are merged at the 1f base.**
+  Route ALL user-pointer reads/writes (reap status write, parked-caller
+  result rewrite, signal-frame write, exec argv/envp reads) through P2's
+  frozen helpers (`vm_touch` + the per-arch user-range checks in `vm.c` /
+  trap.c).  No dual path needed; the design's "until then" clauses are
+  void.
+- **OQ6 FP-frame helpers — approved** (`arch_fpu_save_to`/`restore_from`
+  refactor; F1.5/P1 precedent, mechanical change).
+- **OQ7 D9.3 — ratified:** kill of any group member targets the group; the
+  thread-only kill branch loses public meaning; no in-tree caller depends
+  on the old shape (verified).
+- **OQ8 `getenv` row 85 — P5 owns it** (not deferred to P6.3): needed for
+  end-to-end envp verification at the P5 gate.
+- **Storage-shape note:** the P4 review adopted `uint32_t fd_cloexec`
+  (D7's shape) as the canonical FD_CLOEXEC storage — already pre-frozen on
+  main; D7's block references it.
+
+Implementation starts in Wave 1f (`browser/l2-p5-impl`) at this review's
+base, S1–S2 first (storage/kill/SIGPIPE → reap unification), with the
+note's stage-green discipline and the route-B hedge for the frame engine.

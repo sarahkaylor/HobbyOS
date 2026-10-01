@@ -1217,21 +1217,30 @@ SYS_RECVMSG       79  (fd, msghdr*, flags)                                 [P4]
 SYS_MEMFD_CREATE  80  (name*, flags)                    -> fd | -errno      [P2]
 SYS_MPROTECT      81  (addr, len, prot)                 -> 0 | -errno       [P2]
 SYS_MADVISE       82  (addr, len, advice)               -> 0 | -errno (adv.)[P2]
-SYS_EXECVE        83  (path, argv*, envp*)              -> noreturn | -errno[P5]
-SYS_WAITPID       84  (pid, status*, options)           -> pid | -errno     [P5]
-SYS_SIGACTION     85  (signum, act*, oldact*)           -> 0 | -errno       [P5]
-SYS_KILL          86  (pid, signum)                     -> 0 | -errno       [P5]
-SYS_SIGRETURN?    —    (only if handlers need it; default-kill-only scope may avoid it) [P5, verify]
+SYS_SIGACTION     83  (signum, act*, oldact*)           -> 0 | -errno       [P5]
+SYS_SIGRETURN     84  (void) -> resumes (libc trampoline only)            [P5]
+SYS_GETENV        85  (idx, buf, size)                  -> len | -errno     [P5]
+SYS_SPAWN_EX      86  (path, argv*, envp*, fdmap*, n)   -> pid | -errno     [P5]
 ```
 
 **P1 renumber (consented, §9 OQ1; applied 2026-09-30 with the P1 lane):**
 THREAD_EXIT and SET_TLS were inserted at 74/75 (the pthread/TLS layer needs
 them; splitting them across numbers would leave a P1-dependency hole), so
 every provisional row from the old 74 up shifted **+2** (POLL 74->76 through
-KILL 84->86; SIGRETURN stays unnumbered).  `SYS_MAX` is 75 in
-`src/include/syscall.h`; the P4+ rows remain provisional until their gates.
-Existing `SYS_MMAP/MUNMAP` (62/63-class) get **semantic extensions** (flags for
-MAP_SHARED/fd-backed) rather than new numbers — record exact ABI at P2.
+KILL 84->86).
+
+**P4/P5 consent (2026-09-30, integrator reviews; formal freeze at each
+milestone gate):** P4 rows 76–79 freeze as printed; the `SYS_MAX` 75→79
+top-up was a **no-op** (P2's write landed first — `SYS_MAX` was 82 at
+`9a939e5`).  P5's amendment (D2): `SYS_EXEC` (40) / `SYS_WAITPID` (39) /
+`SYS_KILL` (16) are **extended in place** — the v1 provisional rows
+`EXECVE 83` / `WAITPID 84` / `KILL 86` are **withdrawn**; 83–86 carry
+`SIGACTION` / `SIGRETURN` / `GETENV` / `SPAWN_EX` as printed above;
+`SYS_MAX` = **86**.  All rows are already defined in
+`src/include/syscall.h` (single-writer edit ahead of Wave 1f; see
+`docs/browser/p4-ipc-design.md` §11 and `p5-exec-signals-design.md` §8).
+Existing `SYS_MMAP/MUNMAP` (62/63-class) get **semantic extensions** (flags
+for MAP_SHARED/fd-backed) rather than new numbers — record exact ABI at P2.
 
 ### A.2 Desktop protocol additions (F2; carried unchanged from v1)
 
