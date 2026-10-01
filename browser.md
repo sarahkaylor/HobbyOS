@@ -335,7 +335,18 @@ trio (recipe-form per AD-11; full sums + recipes in each `third_party/*/README.m
   33.1 MB full); smoke deterministic with static data. Cross memo: `configure`
   exit 0 on `aarch64-none-elf` + `x86_64-none-elf` via the documented clang
   wrapper (lld, `-Wl,-no-pie`); next layers = mh-* stub + target libc++
-  (the latter now satisfied by the libc++ record above).
+  (the latter now satisfied by the libc++ record above). **Target cross-build
+  DONE (Wave 1e, `84d7832`):** recipe `third_party/icu-78.3/build-target.sh`
+  (+ committed `config/mh-unknown` overlay, JSC-class link probe) builds
+  `obj/<arch>/icu/{libicuuc,libicui18n,libicudata}.a` for both targets, cold
+  ~14 s/arch (one-time host-tools stage 18 s); nm spot-check 13/13 both
+  arches; `libicudata.a` byte-identical across runs (uc/i18n hashes vary with
+  DWARF/`ar` mtimes — do not gate on them); whole-archive closure leaves
+  exactly **16 holes, identical both arches** (4 libc++abi RTTI —
+  `__dynamic_cast` + class-info vtables, per the P3.1 no-RTTI policy; 13 libm
+  transcendentals — asin atan atan2 cos expf log modf pow sin sqrt tan tanhf).
+  Integrator: Makefile wiring + remediation tracked for Wave 1f; details
+  `third_party/icu-78.3/cross-notes.md`.
 - GLib **2.88.3** (sha256 `ab24d24e…` = GNOME sum) + pcre2 **10.49**
   (`53c156e1…`, GPG Good) + libffi **3.4.8** (`bc9842a1…`, Gentoo/Debian
   cross-checked); static host builds; smokes 46/46 + 12/12 + 8/8;
@@ -675,24 +686,41 @@ regressions in existing wave. **Gate P1 CLOSED 2026-09-30** — lane gate
 TLS_T 6/6); boot delta ARM +0.09 s / x64 ~0; merged-tip batteries: see §11.
 
 ### P2 — VM & memory overhaul  *(new; Track B, the deepest kernel item)*
+*(S1–S3 delivered 2026-09-30 (`c1214c5`/`f0e8473`/`6cbd49e`) — frame
+allocator, address-space v2, demand-zero mmap family; S4 (memfd/MAP_SHARED/fb/
+pthread-guard stacks) and S5 (crt0/TLS sweep + fatal-fault exerciser) remain.
+Details §11 Wave 1e; design `docs/browser/p2-vm-design.md`.)*
 
 - [ ] **P2.1 Address-space model v2** — per-process *sparse* VA (multi-GB
       range), region lists; unmapped-hole faults become clean segmentation
       errors (not crashes of others); document the model in `docs/`.
+      **Done (S2):** per-AS arm L1+L3 / x64 PML4+PDPT roots, 4 KiB leaves,
+      USER_VA_BASE `0x1_0000_0000`, sparse 32 GiB window; HOLE faults kill
+      only the faulting process (prev-round leaks fixed by construction).
 - [ ] **P2.2 Demand-zero anonymous pages** — fault → allocate zeroed physical
       on first touch; reclaim policy for never-touched overcommit; page-pool
       growth (current 40×32 MiB pool is the floor; add growth + accounting).
+      **Done (S3):** demand-zero on both arches; frame accounting = 4 KiB
+      bitmap; OOM kills the faulting process (swap out of scope, design D6).
 - [ ] **P2.3 mmap family v2** — `mmap` (anon + `MAP_SHARED` + fd-backed),
       `munmap`, `mprotect`, `madvise` (advisory ok), `mremap` (verify need),
-      guard pages; libc wrappers (F2 gap).
+      guard pages; libc wrappers (F2 gap). **Anon + munmap/mprotect/madvise +
+      guard/segv rules done (S3)** (rows 62 6-arg, 81, 82; `SYS_MAX` 75→82);
+      `MAP_SHARED`/fd-backed/memfd and `mremap` = S4.
 - [ ] **P2.4 Shared memory** — `memfd`-style anonymous file fd (proposed
       `SYS_MEMFD_CREATE`, §A.1b) + `MAP_SHARED` mapping = the WebKit
       shared-memory primitive; tests: two processes write/read shared pages.
+      (row 80 frozen in `syscall.h`; implementation = S4.)
 - [ ] **P2.5 Loader v2** — load images up to the new budgets into demand-
       mapped regions; measure load time for ~30–60 MiB blobs (record);
-      keep read-path loader as the mechanism initially.
+      keep read-path loader as the mechanism initially. **Done (S2):**
+      IMAGE-only commit, 8 MiB stack + heap + mmaps demand-materialize
+      (`v2 loader: PID=49 entry=0x100000000 sp=0x180000000 resident=2
+      tables=3`); large-blob load timing still to measure (S5).
 - [ ] **P2.6 Regression sweep** — all existing tests re-run; document any
-      behavior changes (fix log §11); boot-time delta recorded.
+      behavior changes (fix log §11); boot-time delta recorded. **Suite
+      re-runs green per stage** (S2→S3 wave counts byte-identical; host
+      482/0; unit-arm 66/0; unit-x64 68/0); boot-delta recording pending (S5).
 
 **Gate P2:** memory stress suite (map/fault/free loops, shared-page test,
 two-process shm test, existing suites) green both arches; boot delta within
@@ -733,6 +761,10 @@ recorded budget.
       `944fbda`, wide-parity `1a5277d`, silent CXX_T truncation `9104be5`; §11).
 
 ### P4 — IPC primitives  *(new; Track B)*
+*(Design note complete: `docs/browser/p4-ipc-design.md` — `d454566`; D1–D13
+(usock pairs riding the pipe park engine, SCM_RIGHTS transfer machine,
+poll-only/no-epoll, rows 76–79 + errno EMSGSIZE/ENOTCONN); OQ1–OQ5 pending
+integrator review. Implementation pending.)*
 
 - [ ] **P4.1 AF_UNIX sockets** — `socketpair(AF_UNIX)` + pathless sockets;
       stream semantics; fd namespace integration. (`SYS_SOCKETPAIR` §A.1b.)
@@ -746,6 +778,11 @@ recorded budget.
 **Gate P4:** `IPC_T.BIN` both arches; no regressions.
 
 ### P5 — Process management & signals  *(new; Track B)*
+*(Design note complete: `docs/browser/p5-exec-signals-design.md` — `b2bf160`;
+D1–D13 (in-place execve + `SYS_SPAWN_EX`, unified reap delivery closing the
+waitpid-wake gap, main-thread SIGCHLD frame engine, rows 83–86 supersede the
+§A.1b provisionals); OQ1–OQ8 pending integrator review. Implementation
+pending.)*
 
 - [ ] **P5.1 `execve`** — replace current image with a new one (argv/envp
       pass-through; fd inheritance + `FD_CLOEXEC` honored; executable found
@@ -1333,6 +1370,41 @@ curl -sI https://lite.cnn.com | grep -i content-length
 ---
 
 ## 11. Fix log (append-only; see also per-lane reports)
+
+- 2026-09-30 — **Wave 1e landed: P2 S1–S3 (VM v2) + P4/P5 design notes + ICU
+  target build — merged at `9a939e5`** (base `07b6c00`; p4 fast-forward,
+  p5/icu/p2 merges clean; 31 files, +5702/−270; cstyle 20/20 on changed src;
+  no conflicts).
+  - **L2 / P2 implementation** — `c1214c5` S1 (4 KiB frame allocator bitmap +
+    block layer on the bitmap), `f0e8473` S2 (address-space v2: per-AS roots,
+    4 KiB leaves, loader v2 IMAGE-only commit, `MMTEST.BIN`), `6cbd49e` S3
+    (demand-zero faults; HOLE/PROT/OOM classification kills only the faulting
+    process with a signal-shaped waitpid status (SIGSEGV=11); mmap-family v2 —
+    row 62 6-arg, row 80 MEMFD_CREATE number frozen, `SYS_MAX` 75→82; brk
+    range-switched; kernel copyin/copyout paths demand-materialize via
+    `vm_touch`; v1 fallbacks explicit — v1 mprotect returns 0, v1 madvise
+    no-op, fd-backed mmap `-ENOTSUP`).  Stage gates: host 482/0; unit-arm
+    66/0 (7 vm tests); unit-x64 68/0 (KVM); ARM wave `MMTEST PASS` + v2-loader
+    boot (`entry=0x100000000 sp=0x180000000 resident=2 tables=3`), 0 FAIL
+    tokens, suite-count histogram byte-identical to S2; `lane-gate` OK;
+    cstyle 11/11.  Deliberately deferred by design §8.4/§8.5: memfd +
+    MAP_SHARED + fb slot + pthread-guard stacks (S4); crt0/TLS rework,
+    fatal-fault exerciser, boot-delta recording (S5).
+  - **L2 / P4 design** — `d454566`: `docs/browser/p4-ipc-design.md` (562
+    lines; D1–D13, OQ1–OQ5 pending integrator review) — usock pairs on the
+    pipe park engine, SCM_RIGHTS transfer machine, poll-only (epoll decided
+    out on pinned-consumer evidence), rows 76–79 + errno EMSGSIZE/ENOTCONN.
+  - **L6 / ICU target** — `0e9f19b`…`84d7832` (7 commits): `build-target.sh`
+    + committed `config/mh-unknown` overlay + JSC-class link probe +
+    cross-notes; both arches green, cold-reproducible; whole-archive closure
+    = exactly 16 holes (§2).
+  - **L2 / P5 design** — `b2bf160`: `docs/browser/p5-exec-signals-design.md`
+    (653 lines; D1–D13, OQ1–OQ8 pending integrator review) — in-place execve
+    + `SYS_SPAWN_EX`, unified reap delivery (closes the confirmed
+    waitpid-wake gap), main-thread SIGCHLD frame engine, rows 83–86 supersede
+    the §A.1b provisionals.
+  - Merged-tip batteries (local + VM) launched at `9a939e5` — verdict entry
+    above this one when green.
 
 - 2026-09-30 — **Wave 1d — batteries: GREEN both machines** at `9104be5`
   (first merged-tip attempt at `3b83823` was RED; the failures were three real
