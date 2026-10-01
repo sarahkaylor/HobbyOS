@@ -793,26 +793,36 @@ integrator review. Implementation pending.)*
 **Gate P4:** `IPC_T.BIN` both arches; no regressions.
 
 ### P5 — Process management & signals  *(new; Track B)*
-*(Design note complete: `docs/browser/p5-exec-signals-design.md` — `b2bf160`;
-D1–D13 (in-place execve + `SYS_SPAWN_EX`, unified reap delivery closing the
-waitpid-wake gap, main-thread SIGCHLD frame engine, rows 83–86 supersede the
-§A.1b provisionals); OQ1–OQ8 pending integrator review. Implementation
-pending.)*
+*(Design note `docs/browser/p5-exec-signals-design.md` — `b2bf160`; D1–D13;
+OQ1–OQ8 resolved (`a4d66db`). Delivered: S1/S2 storage + kill semantics
+(Waves 1e–1f: `87795d5`, `018a5aa`), S4 execve completion via the P2-S45 tail
+merge (`e017069`), S3 frame engine + S5 `SYS_SPAWN_EX` in Wave 3
+(`2450663`).)*
 
-- [ ] **P5.1 `execve`** — replace current image with a new one (argv/envp
+- [x] **P5.1 `execve`** — replace current image with a new one (argv/envp
       pass-through; fd inheritance + `FD_CLOEXEC` honored; executable found
-      via explicit path first).
-- [ ] **P5.2 `waitpid`** — exit-status propagation, zombie reaping,
-      parent/child bookkeeping for multiple children.
-- [ ] **P5.3 Minimal signals** — `sigaction` real for a small set
+      via explicit path first). — **Done** (S4, via the P2-S45 tail merge
+      `e017069`; v2-loader routing + env-blob fixup `1aaa3b2` — see §11).
+- [x] **P5.2 `waitpid`** — exit-status propagation, zombie reaping,
+      parent/child bookkeeping for multiple children. — **Done** (S2 storage
+      + the unified reap delivery `reap_deliver_locked`; status layout frozen
+      — see §11).
+- [x] **P5.3 Minimal signals** — `sigaction` real for a small set
       (`SIGKILL`, `SIGTERM`, `SIGPIPE`, `SIGCHLD`, `SIGSEGV`/`SIGBUS` default
       kill + report), delivery on process threads (pick main-thread delivery
       initially — **verify** WebKit's needs; JIT-off reduces requirements).
-- [ ] **P5.4 Tests** — `PROC_T.BIN`: spawn child → socketpair talk → exec →
+      — **Done** (S1 storage `87795d5` + S3 frame engine `2450663`: trap-exit
+      + resume delivery, SIGRETURN, no-nesting, SIGCHLD from the reap path;
+      SIGUSR1 tenure stays D13-deferred — see §11).
+- [x] **P5.4 Tests** — `PROC_T.BIN`: spawn child → socketpair talk → exec →
       exit code → reap; SIGCHLD observed; SIGPIPE kills writer cleanly.
+      — **Done** (`PROC_T` + `SIG_T.BIN` 62/62 in-wave incl. spawn_ex
+      fdmap/CLOEXEC; wave 17 summaries at `cbbdd70` — see §11).
 
 **Gate P5:** `PROC_T.BIN` both arches; no regressions; process-capacity check
-(≥ 6 concurrent processes documented).
+(≥ 6 concurrent processes documented). — **Met (ARM wave)**: `PROC_T` +
+`SIG_T` green at `cbbdd70`/`447f02a`; x64 evidence = unit-x64 293/0 + no new
+x64 wave signature (§11).
 
 ### P6 — POSIX fill-in & SQLite  *(new; Track B)*
 
@@ -1538,6 +1548,43 @@ curl -sI https://lite.cnn.com | grep -i content-length
   - **Host part**: `torture_test_host` green 64/64 checks, ~180 ms (incl. the
     host-only mem-highwater monotonic check; device prints the 8 suite
     checks).
+
+- 2026-10-01 — **Wave 3 — batteries: GREEN both machines at `cbbdd70`
+  (+`447f02a`)** — three lanes merged: `070989e` (`browser/l3-x64char`, the x64
+  re-characterization entry above), `2450663` (`browser/l2-p5-tail`: **P5
+  S3/S5** — D8 signal-delivery frame engine (rows 83–84) + **SPAWN_EX** (row
+  86); lane entry above), `cbbdd70` (`browser/l3-p8`: **P8** — `TORTURE.BIN` +
+  `MODE=soak`; lane entry above); plus flake fix `447f02a` (below).
+  - **Local battery at `cbbdd70`** (main worktree): host 0-fail (`TEST EXIT:
+    0`); unit-arm **291/0**; unit-x64 **293/0** (KVM); ARM wave `System halt`,
+    **0 FAIL / 0 FAILED tokens**, **17 suite summaries** = 15 baseline +
+    `SIG_T` (62/62) + `TORTURE` (all-PASS; thr_created=64/thr_rejected=0/
+    exec_ok=8; suite_ms=12731) — `/tmp/w1fc_*.log`, `/tmp/w3_battery_driver.log`.
+  - **VM battery at `cbbdd70`** (`w3-*` tiers): host rc=0 (56 s), unit-arm
+    rc=0 (148 s), unit-x64 rc=0 (140 s), test-arm rc=1 = **the POLLTST
+    park-floor flake** (2 FAIL lines: the `timeout took >= 95ms …` check +
+    `POLLTST FAILED: 1`; the elapsed value itself was console-spliced out of
+    the log). Same class as the `db2e3f2` IPC_T fix, POLLTST edition — fixed
+    in **`447f02a`** (bounds widened to `>= 85` / `< 5000` with the tick-
+    quantization + caller-preemption rationale inline; discriminating
+    properties kept, check name updated). **Re-verified both machines**:
+    local wave at `447f02a` — 0 FAIL + halt + patched check PASS
+    (`/tmp/w3b_wave_local.log`); VM `w3b-test-arm` **rc=0 — 0 FAIL tokens**,
+    halt, `SIG_T` 62/0, `TORTURE` 8/8, patched check PASS
+    (`w3b-test-arm_20261001-205407_test-arm.log`).
+  - **P8.2 soak receipts**: 482 rounds, 0 violations, thr_created=30848,
+    exec_ok=5784, fdpass_bad=0, exec_rejected=0, min_free_kb=7372800, mem
+    high-water delta 0 — **then a reproducible kernel freeze at ~round
+    483–488 inside `vm_as_clone_into`** (region i=1/MAIN-STACK; ~460% host
+    CPU; 3/3 runs; no watchdog). The full 28-min clean pass is NOT yet
+    achieved; handed to follow-up lane `browser/l2-clonefix` (in flight;
+    findings `/tmp/p8_FINDINGS.md`, QEMU coredump kept). The wave-overlap
+    slot-famine variant + TORTURE stop-fast (`eeb3692`) are in the P8 lane
+    entry above.
+  - §6: P5.1–P5.4 ticked (S1/S2 Waves 1e–1f; S4 via `e017069`; S3/S5 here);
+    P8.1/P8.2 ticked with the soak caveat; x64 wave = the re-characterization
+    entry above (6-copy KVM battery: all-idle stall 6/6, SQLTEST reach,
+    MMTEST FAIL 11 6/6, unit-x64 293/0).
 
 - 2026-10-01 — **Wave 1f (part 1) — batteries: GREEN both machines at `a7b7330`** —
   first merged-tip attempt, no defects found beyond the pre-battery fixup below.
