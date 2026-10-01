@@ -1395,6 +1395,50 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-10-01 — **l2-p5-tail S3+S5 lane: GREEN (lane gate OK)** — `browser/l2-p5-tail`
+  at `25d1fa6` (base `b122e0c` = post-wave-1f-merge fixups; 3 commits: `9e25062`,
+  `a652227`, `25d1fa6`).  Closes the two deferrals the wave-1f record left open
+  (S3 frame engine + S5 SPAWN_EX, route-B boundary):
+  - **S3 (D8 frame engine, rows 83–84)**: frame construction on the leader's user
+    stack (16-byte aligned below SP; full regs + FP/SIMD via the new
+    `arch_fpu_save_to`/`arch_fpu_restore_from` per-arch helpers; minimal siginfo:
+    signo + SIGCHLD CLD payload); restorer mechanism (libc
+    `__ho_sigreturn_trampoline`, already landed with S1; kernel stores
+    `sa_restorer`, libc auto-fills); SIGRETURN full restore + pending re-check +
+    `-EINVAL` on a stale call; delivery at the trap-exit boundary (syscall return,
+    incl. the yield path, and timer-preempt resume) and at the schedule() resume
+    boundary (timer resume + parked-slice restarts: select/poll/sleep deliver,
+    rewound pipe/futex/`WAIT_*` parks defer to their own trap exit); no-nesting
+    via `sig_in_handler`; D8.8 stack-bounds/no-trampoline -> force default;
+    SIGCHLD generation from the unified reap path (D5.4) incl. the D8.3 early
+    wake of `BLOCKED`+`wake_ms>0` slice parks.  Deliverable set stays D6/D13
+    (SIGUSR1 recorded-never-delivered — asserted by the test).
+  - **S5 (D4 / row 86 SPAWN_EX)**: loader copies the caller's fd table via
+    `fs_reopen` per slot, applies the fdmap pairs as dup2 (dst CLOEXEC cleared;
+    whole map validated first -> `-EBADF` atomic), then the CLOEXEC sweep;
+    envp blob (NULL = empty, D3.1), argv stored as given; all-default
+    dispositions; spawn2 worker machinery reused in both arch dispatchers
+    (`WAIT_SPAWN` + `spawn_retval` + retry/release-on-worker-failure); returns
+    pid | `-errno` (ENOENT/ENOEXEC/EFAULT/EBADF/EAGAIN/ENOMEM); libc `spawn_ex()`
+    wrapper.  A zero-size image entry (fat16_open creates on miss) now reports
+    `-ENOENT`; the spawn2 wrapper keeps its historical `-1`.
+  - **Evidence** (all at `25d1fa6` unless noted): host `ALL APPS SUITE TESTS
+    PASSED` / `TEST EXIT: 0` (482 checks; `/tmp/l2p5_host.log`, `/tmp/lane_gate_l2-p5-tail_host.log`);
+    unit-arm **291/0** (`/tmp/l2p5_unit_arm.log`); unit-x64 **293/0** KVM
+    (`/tmp/l2p5_unit_x64.log`); ARM wave `timeout 1500 make test`
+    `/tmp/l2p5_wave_arm2.log`: `System halt from CPU 3.`, **0 FAIL / 0 FAILED
+    tokens**, suite-summary set = the wave-1f baseline + `[SIGTEST] ALL TESTS
+    PASSED SUCCESSFULLY!` (62/62 checks — SIG_T.BIN: delivery/no-nesting/pending
+    re-check, stale-sigreturn -EINVAL, SIGCHLD at the waitpid resume and inside a
+    poll() slice park with the park restarting and completing, D13 SIGUSR1, and
+    the spawn_ex fd copy/fdmap(dst 20)/CLOEXEC sweep/argv/envp + EBADF/ENOENT
+    paths); first-wave run `/tmp/l2p5_wave_arm.log` documented the pre-fix reds
+    (test-side fd-probe shadowing, fixed in `25d1fa6`).
+  - Lane-gate: run on this worktree (host+unit tiers); cstyle clean on all
+    touched files.  Fidelity note: the FP/SIMD save-restore is exercised
+    functionally (handler FP math across SIGRETURN) but not register-window
+    exact; `SIGUSR1` tenure remains D13's deferred item.
+
 - 2026-10-01 — **Wave 1f (part 1) — batteries: GREEN both machines at `a7b7330`** —
   first merged-tip attempt, no defects found beyond the pre-battery fixup below.
   **P2-S45 is deliberately NOT in this merge** (its S5 routing flip still shows
