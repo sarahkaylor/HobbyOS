@@ -922,19 +922,6 @@ int fat16_open(const char* filename, struct file* f) {
        its entry's cluster/size fields clobbered the same way.  Directories
        are reached via chdir/read_dir, never as files. */
     if (sector == 0 || (entry.attr & 0x10)) {
-      /* Attribution (bounded): name the caller path that tried to open a
-         directory as a file -- wave triage wants to know which tool passes
-         an empty/root pathname. */
-      static int dir_open_reported;
-      if (dir_open_reported++ < 4) {
-        extern void print_int(int);
-        uart_puts("[FAT-EISDIR] refused dir/root open, name='");
-        uart_puts(filename ? filename : "(null)");
-        uart_puts("' pid=");
-        struct process *cp = current_process();
-        print_int(cp ? cp->pid : -1);
-        uart_puts("\n");
-      }
       return -1;
     }
     f->type = FILE_TYPE_FAT16;

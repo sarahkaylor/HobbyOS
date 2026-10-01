@@ -541,10 +541,6 @@ void vm_arch_switch(struct addr_space *as) {
    already there.  Required (a) when a CPU stops running a v2 AS (v1
    switch, idle entry) and (b) before an AS's table frames are freed --
    continuing to run on a freed root is instant corruption. */
-/* TEMP(triage): expose v2 mode state for the fault dump (remove before final). */
-int vm_arch_dbg_live(void) {
-  return v2_live[get_cpuid()];
-}
 
 void vm_arch_restore_kernel(void) {
   uint32_t cpu = get_cpuid();

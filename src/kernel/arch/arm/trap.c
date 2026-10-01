@@ -428,16 +428,6 @@ static void sys_set_tls(struct trap_frame *tf) {
   uint64_t tls = tf->regs[0];
   int r = process_set_tls(caller, tls);
   tf->regs[0] = (uint64_t)(int64_t)r;
-  /* TEMP S5 triage (remove me): TLS-install trajectory. */
-  uart_puts("[KERNEL] set_tls pid=");
-  print_int(caller ? (int)caller->pid : -1);
-  uart_puts(" as=");
-  print_int((caller && caller->as) ? 1 : 0);
-  uart_puts(" tls=0x");
-  uart_print_hex(tls);
-  uart_puts(" r=");
-  print_int(r);
-  uart_puts("\n");
 }
 
 static void sys_getsockopt(struct trap_frame *tf) {
@@ -1340,54 +1330,6 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       uart_puts(is_exec ? "x" : " ");
       uart_puts(" in=");
       uart_puts(why);
-      /* TEMP(triage): AS-switch invariant at kill time -- hardware TTBR0
-         vs this process's AS root (remove before final). */
-      {
-        uint64_t t0;
-        __asm__ volatile("mrs %0, ttbr0_el1" : "=r"(t0));
-        extern int vm_arch_dbg_live(void);
-        uart_puts(" cpu=");
-        print_int(get_cpuid());
-        uart_puts(" ttbr0=");
-        uart_print_hex(t0);
-        uart_puts(" asroot=");
-        uart_print_hex(gcur->as->root_phys);
-        uart_puts(" asid=");
-        print_int((int)gcur->as->asid);
-        uart_puts(" live=");
-        print_int(vm_arch_dbg_live());
-      }
-      /* TEMP S5 triage: register dump for killed faults (remove me). */
-      {
-        uint64_t tp;
-        __asm__ volatile("mrs %0, tpidr_el0" : "=r"(tp));
-        uart_puts(" R x0=");
-        uart_print_hex(tf->regs[0]);
-        uart_puts(" x1=");
-        uart_print_hex(tf->regs[1]);
-        uart_puts(" x2=");
-        uart_print_hex(tf->regs[2]);
-        uart_puts(" x8=");
-        uart_print_hex(tf->regs[8]);
-        uart_puts(" x9=");
-        uart_print_hex(tf->regs[9]);
-        uart_puts(" x10=");
-        uart_print_hex(tf->regs[10]);
-        uart_puts(" x11=");
-        uart_print_hex(tf->regs[11]);
-        uart_puts(" x12=");
-        uart_print_hex(tf->regs[12]);
-        uart_puts(" x13=");
-        uart_print_hex(tf->regs[13]);
-        uart_puts(" x29=");
-        uart_print_hex(tf->regs[29]);
-        uart_puts(" lr=");
-        uart_print_hex(tf->lr);
-        uart_puts(" tp=");
-        uart_print_hex(tp);
-        uart_puts(" tlsb=");
-        uart_print_hex(gcur->tls_base);
-      }
       uart_puts(" -> killed\n");
       process_fault_exit(tf, 11); /* SIGSEGV status byte */
       return;
