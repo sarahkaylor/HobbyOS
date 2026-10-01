@@ -2,6 +2,9 @@
 #include <stdint.h>
 #include "syscall.h"
 #include "errno.h"
+#include <poll.h>       /* P4: struct pollfd */
+#include <sys/socket.h> /* P4: msghdr/socketpair/sendmsg/recvmsg */
+#include <sys/uio.h>    /* P4: struct iovec */
 
 /* Per-thread errno (P1, p1-threads-design.md sections 4/6), served through
  * __errno_location() -- errno.h defines `errno` as (*__errno_location()),
@@ -358,6 +361,30 @@ int setsockopt(int fd, int level, int optname, const void *val, int len) {
 int getrandom(void *buf, size_t len, unsigned int flags) {
   return (int)errno_ret(syscall(SYS_GETRANDOM, (long)buf, (long)len, (long)flags, 0));
 }
+
+/* P4 (docs/browser/p4-ipc-design.md §6.3): the AF_UNIX IPC surface —
+ * socketpair/sendmsg/recvmsg/poll over syscalls 76-79.  Device-only (host
+ * builds take glibc's, see <sys/socket.h>/<poll.h>). */
+int socketpair(int domain, int type, int protocol, int sv[2]) {
+  return (int)errno_ret(syscall(SYS_SOCKETPAIR, (long)domain, (long)type,
+                                (long)protocol, (long)sv));
+}
+
+ssize_t sendmsg(int fd, const struct msghdr *msg, int flags) {
+  return (ssize_t)errno_ret(syscall(SYS_SENDMSG, (long)fd, (long)msg,
+                                    (long)flags, 0));
+}
+
+ssize_t recvmsg(int fd, struct msghdr *msg, int flags) {
+  return (ssize_t)errno_ret(syscall(SYS_RECVMSG, (long)fd, (long)msg,
+                                    (long)flags, 0));
+}
+
+int poll(struct pollfd *fds, nfds_t nfds, int timeout_ms) {
+  return (int)errno_ret(syscall(SYS_POLL, (long)fds, (long)nfds,
+                                (long)timeout_ms, 0));
+}
+
 
 /* P3.2: getentropy() (glibc 2.25+), used by libc++'s std::random_device.
  * glibc semantics: length <= 256 (EIO otherwise), returns 0 on success,

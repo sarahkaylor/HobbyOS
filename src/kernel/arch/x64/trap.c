@@ -19,8 +19,9 @@ extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
 
 /* Defined below (line ~380); declared here for the early syscall helpers
-   that are v2-aware since P2.2 S2. */
-static int sys_user_range_ok(uint64_t ptr, uint64_t len);
+   that are v2-aware since P2.2 S2.  P4: non-static — fs.c range-checks
+   msghdr/iovec/cmsg blocks through the same arch helper. */
+int sys_user_range_ok(uint64_t ptr, uint64_t len);
 
 struct cpu_local {
   uint64_t kernel_stack;
@@ -169,7 +170,10 @@ static void sys_read(struct trap_frame *tf) {
       save_context(caller, tf);
       schedule(tf, 0);
     } else if (ret < 0) {
-      tf->regs[0] = -EBADF;
+      /* P4 (docs/browser/p4-ipc-design.md §6.5): -errno (< -1) passes
+       * through; -1 keeps the historical EBADF mapping for legacy
+       * backends.  -2 is the restart marker handled above. */
+      tf->regs[0] = (ret == -1) ? (uint64_t)-EBADF : (uint64_t)ret;
     } else {
       tf->regs[0] = ret;
     }
@@ -386,8 +390,9 @@ static void sys_connect(struct trap_frame *tf) {
  * convention (rewind ELR over the 2-byte `syscall` instruction, save our
  * own frame, schedule away). */
 
-/* True when [ptr, ptr+len) lies inside the caller's user region. */
-static int sys_user_range_ok(uint64_t ptr, uint64_t len) {
+/* True when [ptr, ptr+len) lies inside the caller's user region.  P4: shared
+ * with fs.c (non-static) for the msghdr/iovec/cmsg block checks. */
+int sys_user_range_ok(uint64_t ptr, uint64_t len) {
   struct process *p = current_process();
   if (p && p->as) {
     /* P2.2 (S2): a v2 process answers to the address-space walk instead
@@ -438,6 +443,109 @@ static void sys_select(struct trap_frame *tf) {
   if (r == -2) {
     if ((tf->cs & 3) == 3) {
       tf->elr -= 2; // rewind over the `syscall` instruction
+    }
+    save_context(caller, tf);
+    schedule(tf, 0);
+  } else {
+    tf->regs[0] = (uint64_t)r;
+  }
+}
+
+/* --- P4 (docs/browser/p4-ipc-design.md §6): poll/socketpair/sendmsg/
+ * recvmsg (76-79).  Args: rdi/rsi/rdx/r10 = regs[5]/[4]/[3]/[9].  -2 parks
+ * ride the same rewind+save_context+schedule restart as sys_read. -------- */
+
+/* SYS_POLL (76): (struct pollfd *fds, int nfds, int timeout_ms) -> count. */
+static void sys_poll(struct trap_frame *tf) {
+  struct k_pollfd *fds = (struct k_pollfd *)tf->regs[5]; // rdi
+  int nfds = (int)tf->regs[4]; // rsi
+  int timeout_ms = (int)tf->regs[3]; // rdx
+  struct process *caller = current_process();
+
+  if (nfds < 0 || nfds > K_FD_SETSIZE) {
+    tf->regs[0] = -EINVAL;
+    return;
+  }
+  if (nfds > 0 &&
+      (!fds || ((uint64_t)fds & 3) != 0 ||
+       !sys_user_range_ok((uint64_t)fds, (uint64_t)nfds * sizeof(struct k_pollfd)))) {
+    tf->regs[0] = -EFAULT; /* range + natural (4-byte) alignment, §6.5 */
+    return;
+  }
+
+  int r = file_poll(caller, fds, nfds, timeout_ms);
+  if (r == -2) {
+    if ((tf->cs & 3) == 3) {
+      tf->elr -= 2; // rewind over the `syscall` instruction
+    }
+    save_context(caller, tf);
+    schedule(tf, 0);
+  } else {
+    tf->regs[0] = (uint64_t)r;
+  }
+}
+
+/* SYS_SOCKETPAIR (77): (domain, type, proto, int fds[2]) -> 0 | -errno. */
+static void sys_socketpair(struct trap_frame *tf) {
+  int domain = (int)tf->regs[5]; // rdi
+  int type = (int)tf->regs[4]; // rsi
+  int proto = (int)tf->regs[3]; // rdx
+  int *ufds = (int *)tf->regs[9]; // r10
+  struct process *caller = current_process();
+
+  if (!ufds || ((uint64_t)ufds & 3) != 0 ||
+      !sys_user_range_ok((uint64_t)ufds, 2 * sizeof(int))) {
+    tf->regs[0] = -EFAULT; /* validated before any allocation (§3) */
+    return;
+  }
+
+  int out[2] = {-1, -1};
+  int r = file_socketpair(caller, domain, type, proto, out);
+  if (r == 0) {
+    ufds[0] = out[0];
+    ufds[1] = out[1];
+  }
+  tf->regs[0] = (uint64_t)r;
+}
+
+/* SYS_SENDMSG (78): (fd, struct msghdr *msg, flags) -> bytes | -errno. */
+static void sys_sendmsg(struct trap_frame *tf) {
+  int fd = (int)tf->regs[5]; // rdi
+  uint64_t umsg = tf->regs[4]; // rsi
+  int flags = (int)tf->regs[3]; // rdx
+  struct process *caller = current_process();
+
+  if (!sys_user_range_ok(umsg, sizeof(struct k_msghdr))) {
+    tf->regs[0] = -EFAULT;
+    return;
+  }
+  int r = file_sendmsg(caller, fd, umsg, flags);
+  if (r == -2) {
+    if ((tf->cs & 3) == 3) {
+      tf->elr -= 2;
+    }
+    save_context(caller, tf);
+    schedule(tf, 0);
+  } else {
+    tf->regs[0] = (uint64_t)r;
+  }
+}
+
+/* SYS_RECVMSG (79): (fd, struct msghdr *msg, flags) -> bytes | -errno. */
+static void sys_recvmsg(struct trap_frame *tf) {
+  int fd = (int)tf->regs[5]; // rdi
+  uint64_t umsg = tf->regs[4]; // rsi
+  int flags = (int)tf->regs[3]; // rdx
+  struct process *caller = current_process();
+
+  if (!sys_user_range_ok(umsg, sizeof(struct k_msghdr))) {
+    tf->regs[0] = -EFAULT;
+    return;
+  }
+  int r = file_recvmsg(caller, fd, umsg, flags);
+  if (r == -2) {
+    if ((tf->cs & 3) == 3) {
+      tf->elr -= 2;
     }
     save_context(caller, tf);
     schedule(tf, 0);
@@ -562,14 +670,12 @@ static void sys_write(struct trap_frame *tf) {
       }
       save_context(caller, tf);
       schedule(tf, 0);
-    } else if (ret == -1) {
-      tf->regs[0] = -EBADF;
     } else if (ret < 0) {
-      /* P4/P5 carve-out: a backend's rich negative errno (e.g. -EPIPE
-         from a closed pipe peer) passes through; only the legacy -1
-         means EBADF. */
-      tf->regs[0] = (uint64_t)(int64_t)ret;
-    } else {
+      /* P4/P5 carve-out (docs/browser/p4-ipc-design.md §6.5): a backend's
+         rich negative errno (e.g. -EPIPE from a closed pipe peer) passes
+         through; only the legacy -1 keeps the historical EBADF mapping
+         for the older backends.  -2 is the restart marker handled above. */
+      tf->regs[0] = (ret == -1) ? (uint64_t)-EBADF : (uint64_t)(int64_t)ret;    } else {
       tf->regs[0] = ret;
     }
   } else {
@@ -1328,7 +1434,14 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)process_sigreturn(tf);
   } else if (syscall_num == SYS_GETENV) {
     sys_getenv(tf);
-  } else {
+  } else if (syscall_num == SYS_POLL) {
+    sys_poll(tf);
+  } else if (syscall_num == SYS_SOCKETPAIR) {
+    sys_socketpair(tf);
+  } else if (syscall_num == SYS_SENDMSG) {
+    sys_sendmsg(tf);
+  } else if (syscall_num == SYS_RECVMSG) {
+    sys_recvmsg(tf);  } else {
     uart_puts("Unknown System Call Invoked!\n");
     tf->regs[0] = -ENOSYS;
   }

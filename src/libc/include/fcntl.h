@@ -28,6 +28,21 @@ extern "C" {
    * accepted and ignored, so ported code that passes O_BINARY or similar
    * still compiles and runs. */
 
+  /* P4 (docs/browser/p4-ipc-design.md §6.4): fcntl() commands + the fd flag
+   * bits.  F_GETFL/F_SETFL/O_NONBLOCK repeat the values in libc.h (identical
+   * replacement lists, so both headers coexist). */
+#define F_GETFD    1
+#define F_SETFD    2
+#define F_GETFL    3
+#define F_SETFL    4
+#define FD_CLOEXEC 1
+
+#define O_NONBLOCK 0x800
+
+  /* fcntl() itself (the libc.a wrapper covers every fd type; identical
+   * prototype to libc.h's so TUs including both still compile). */
+  int fcntl(int fd, int cmd, int arg);
+
 #ifdef __cplusplus
 }
 #endif

@@ -20,6 +20,7 @@
 
 #include "libc.h"
 #include <stdint.h>
+#include <sys/socket.h> /* P4: SOCK_RAW for the flipped AF_UNIX checks */
 
 /* 1.1.1.1 in network byte order. */
 #define NET2_IP_1_1_1_1 0x01010101u
@@ -53,9 +54,16 @@ static uint64_t now_ms(void) { return (uint64_t)sysinfo(1, 0, 0); }
 /* ---- hard section (offline) ------------------------------------------- */
 
 static void hard_socket_error_paths(void) {
+  /* P4 §6.6 expectation flip (consented 2026-09-30): AF_UNIX is real now —
+   * this check replaces the pre-P4 "socket(AF_UNIX) -> EAFNOSUPPORT". */
+  int afu = socket(AF_UNIX, SOCK_STREAM, 0);
+  check("socket(AF_UNIX, SOCK_STREAM, 0) >= 0", afu >= 0);
+  if (afu >= 0) close(afu);
+
   errno = 0;
-  int r = socket(AF_UNIX, SOCK_STREAM, 0);
-  check("socket(AF_UNIX) -> -1/EAFNOSUPPORT", r == -1 && errno == EAFNOSUPPORT);
+  int r = socket(AF_UNIX, SOCK_RAW, 0);
+  check("socket(AF_UNIX, SOCK_RAW, 0) -> -1/EPROTONOSUPPORT",
+        r == -1 && errno == EPROTONOSUPPORT);
 
   errno = 0;
   r = socket(AF_INET, SOCK_STREAM, IPPROTO_UDP);
