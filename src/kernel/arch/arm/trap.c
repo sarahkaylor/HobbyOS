@@ -24,6 +24,7 @@ extern void print_int(int val);
 
 /* Defined below (line ~330); declared here for the early syscall helpers
    that are v2-aware since P2.2 S2. */
+static int sys_user_range(uint64_t ptr, uint64_t len, int write);
 static int sys_user_range_ok(uint64_t ptr, uint64_t len);
 
 /**
@@ -80,8 +81,7 @@ static void sys_open(struct trap_frame *tf) {
   const char *filename = (const char *)tf->regs[0];
   int flags = (int)tf->regs[1];
   struct process *caller = current_process();
-  if ((uint64_t)filename >= USER_VIRT_BASE &&
-      (uint64_t)filename < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (sys_user_range_ok((uint64_t)filename, 1)) {
     /* file_open returns >= 0 (fd) or a negative errno it picked itself
        (ENOENT/EEXIST/EMFILE), which errno_ret decodes in libc. */
     tf->regs[0] = file_open(caller, filename, flags);
@@ -113,8 +113,7 @@ static void sys_read(struct trap_frame *tf) {
   void *buf = (void *)tf->regs[1];
   int size = (int)tf->regs[2];
   struct process *caller = current_process();
-  if ((uint64_t)buf >= USER_VIRT_BASE &&
-      (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (sys_user_range((uint64_t)buf, size > 0 ? (uint64_t)size : 0, 1)) {
     int ret = file_read(caller, fd, buf, size, tf);
 
     if (ret == -2) {
@@ -134,7 +133,7 @@ static void sys_get_args(struct trap_frame *tf) {
   char *buf = (char *)tf->regs[0];
   int size = (int)tf->regs[1];
   struct process *cur = process_group(current_process()); /* P1 (D7) */
-  if (cur && buf && sys_user_range_ok((uint64_t)buf, (uint64_t)size)) {
+  if (cur && buf && sys_user_range((uint64_t)buf, (uint64_t)size, 1)) {
     int i = 0;
     while (cur->args[i] && i < size - 1) {
       buf[i] = cur->args[i];
@@ -195,8 +194,7 @@ static void sys_sysinfo(struct trap_frame *tf) {
     return;
   }
 
-  if ((uint64_t)buf >= USER_VIRT_BASE &&
-      (uint64_t)buf < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (sys_user_range((uint64_t)buf, size > 0 ? (uint64_t)size : 0, 1)) {
     if (cmd == 2) { // Memory usage
       if (size >= (int)sizeof(struct sys_meminfo)) {
         struct sys_meminfo *info = (struct sys_meminfo *)buf;
@@ -292,8 +290,7 @@ static void sys_sysinfo(struct trap_frame *tf) {
 
 static void sys_unlink(struct trap_frame *tf) {
   const char *filename = (const char *)tf->regs[0];
-  if ((uint64_t)filename >= USER_VIRT_BASE &&
-      (uint64_t)filename < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (sys_user_range_ok((uint64_t)filename, 1)) {
     extern int vfs_unlink(const char *path);
     int r = vfs_unlink(filename);
     tf->regs[0] = r < 0 ? -ENOENT : r;
@@ -305,10 +302,8 @@ static void sys_unlink(struct trap_frame *tf) {
 static void sys_rename(struct trap_frame *tf) {
   const char *oldname = (const char *)tf->regs[0];
   const char *newname = (const char *)tf->regs[1];
-  if ((uint64_t)oldname >= USER_VIRT_BASE &&
-      (uint64_t)oldname < (USER_VIRT_BASE + USER_REGION_SIZE) &&
-      (uint64_t)newname >= USER_VIRT_BASE &&
-      (uint64_t)newname < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (sys_user_range_ok((uint64_t)oldname, 1) &&
+      sys_user_range_ok((uint64_t)newname, 1)) {
     extern int vfs_rename(const char *oldp, const char *newp);
     int r = vfs_rename(oldname, newname);
     tf->regs[0] = r < 0 ? -ENOENT : r;
@@ -333,18 +328,29 @@ static void sys_connect(struct trap_frame *tf) {
  * follows the pipe_read -2 convention (rewind ELR over the svc, schedule
  * away; the syscall re-executes on wake). */
 
-/* True when [ptr, ptr+len) lies inside the caller's user region. */
-static int sys_user_range_ok(uint64_t ptr, uint64_t len) {
+/* True when [ptr, ptr+len) lies inside the caller's user region: the v2
+ * address-space walk for a v2 process (vm_touch demand-commits the pages),
+ * the legacy 32 MiB block window for v1/kernel tasks.  `write` selects the
+ * access mode: out-buffers must pass write=1 so a not-yet-touched user
+ * page is materialized writable before the kernel stores into it (an EL1
+ * store to an absent v2 page is a fatal kernel fault; the trap keeps
+ * TTBR0 = the process AS, so once resident the store itself is legal). */
+static int sys_user_range(uint64_t ptr, uint64_t len, int write) {
   struct process *p = current_process();
   if (p && p->as) {
     /* P2.2 (S2): a v2 process answers to the address-space walk instead
-       of the legacy 32 MiB range.  Residency-only until S3's vm_touch
-       (no demand paging yet). */
-    return vm_range_ok(p, ptr, len, 0) == 0;
+       of the legacy 32 MiB range. */
+    if (len == 0) len = 1;
+    return vm_range_ok(p, ptr, len, write) == 0;
   }
   if (ptr < USER_VIRT_BASE) return 0;
   if (len > USER_REGION_SIZE) return 0;
   return ptr - USER_VIRT_BASE <= USER_REGION_SIZE - len;
+}
+
+/* Read-side sugar (in-buffers, strings, structures the kernel only reads). */
+static int sys_user_range_ok(uint64_t ptr, uint64_t len) {
+  return sys_user_range(ptr, len, 0);
 }
 
 static void sys_socket(struct trap_frame *tf) {
@@ -427,8 +433,8 @@ static void sys_getsockopt(struct trap_frame *tf) {
   int *len = (int *)tf->regs[4];
   struct process *caller = current_process();
 
-  if (!val || !len || !sys_user_range_ok((uint64_t)val, sizeof(int)) ||
-      !sys_user_range_ok((uint64_t)len, sizeof(int))) {
+  if (!val || !len || !sys_user_range((uint64_t)val, sizeof(int), 1) ||
+      !sys_user_range((uint64_t)len, sizeof(int), 1)) {
     tf->regs[0] = -EFAULT;
     return;
   }
@@ -469,7 +475,7 @@ static void sys_getrandom(struct trap_frame *tf) {
     tf->regs[0] = 0;
     return;
   }
-  if (!sys_user_range_ok((uint64_t)buf, len)) {
+  if (!sys_user_range((uint64_t)buf, len, 1)) {
     tf->regs[0] = -EFAULT;
     return;
   }
@@ -495,8 +501,7 @@ static void sys_write(struct trap_frame *tf) {
   const void *buf = (const void *)tf->regs[1];
   int size = (int)tf->regs[2];
   struct process *caller = current_process();
-  if ((uint64_t)buf >= USER_VIRT_BASE &&
-      (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (sys_user_range((uint64_t)buf, size > 0 ? (uint64_t)size : 0, 0)) {
     int ret = file_write(caller, fd, buf, size, tf);
 
     if (ret == -2) {
@@ -562,8 +567,7 @@ static void sys_spawn(struct trap_frame *tf) {
     return;
   }
 
-  if ((uint64_t)filename >= USER_VIRT_BASE &&
-      (uint64_t)filename < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (sys_user_range_ok((uint64_t)filename, 1)) {
 
     struct sys_spawn_args *args = &spawn_args_pool[caller->pid];
 
@@ -579,8 +583,7 @@ static void sys_spawn(struct trap_frame *tf) {
     args->stderr_fd = stderr_fd;
     args->caller_pid = caller->pid;
 
-    if (args_ptr && (uint64_t)args_ptr >= USER_VIRT_BASE &&
-        (uint64_t)args_ptr < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+    if (args_ptr && sys_user_range_ok((uint64_t)args_ptr, 1)) {
       int k = 0;
       while (args_ptr[k] && k < 255) {
         args->args[k] = args_ptr[k];
@@ -646,8 +649,7 @@ static void sys_pipe(struct trap_frame *tf) {
   int *fds = (int *)tf->regs[0];
   struct process *caller = current_process();
   uint64_t fds_addr = (uint64_t)fds;
-  if (fds_addr >= USER_VIRT_BASE &&
-      fds_addr + 8 <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (sys_user_range(fds_addr, 8, 1)) {
     int kernel_fds[2];
     int res = file_pipe(caller, kernel_fds);
     if (res == 0) {
@@ -692,8 +694,8 @@ extern int virtio_input_get_events(void *buf, int max_events);
 static void sys_get_events(struct trap_frame *tf) {
   void *buf = (void *)tf->regs[0];
   int max_events = (int)tf->regs[1];
-  if ((uint64_t)buf >= USER_VIRT_BASE &&
-      (uint64_t)buf + max_events * 8 <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (sys_user_range((uint64_t)buf,
+                     max_events > 0 ? (uint64_t)max_events * 8 : 8, 1)) {
     tf->regs[0] = virtio_input_get_events(buf, max_events);
   } else {
     tf->regs[0] = -1;
@@ -724,10 +726,8 @@ static void sys_read_dir(struct trap_frame *tf) {
 
   struct local_dirent *ud = (struct local_dirent *)tf->regs[2];
 
-  if ((uint64_t)path >= USER_VIRT_BASE &&
-      (uint64_t)path < (USER_VIRT_BASE + USER_REGION_SIZE) &&
-      (uint64_t)ud >= USER_VIRT_BASE &&
-      (uint64_t)ud + sizeof(struct local_dirent) <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (sys_user_range_ok((uint64_t)path, 1) &&
+      sys_user_range((uint64_t)ud, sizeof(struct local_dirent), 1)) {
 
     char name_buf[32];
     uint8_t attr_val = 0;
@@ -755,8 +755,7 @@ static void sys_read_dir(struct trap_frame *tf) {
 static void sys_mkdir(struct trap_frame *tf) {
   const char *path = (const char *)tf->regs[0];
   struct process *caller = current_process();
-  if ((uint64_t)path >= USER_VIRT_BASE &&
-      (uint64_t)path < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (sys_user_range_ok((uint64_t)path, 1)) {
     extern int file_mkdir(struct process *cur, const char *path);
     int r = file_mkdir(caller, path);
     tf->regs[0] = r < 0 ? -EEXIST : r;
@@ -769,13 +768,13 @@ static void sys_mkdir(struct trap_frame *tf) {
  * directory of the FAT volume.  The mount point is created when missing. */
 
 /* Copy a NUL-terminated user string into kernel memory with full bounds
- * checking. Returns 1 on success (dst NUL-terminated), 0 on bad ptr. */
+ * checking. Returns 1 on success (dst NUL-terminated), 0 on bad ptr.
+ * P2.5 (S5 flip): v2-aware via sys_user_range_ok (the old window test
+ * rejected every v2 string pointer). */
 static int u_strcpy(const char *src, char *dst, int cap) {
-  uint64_t base = (uint64_t)src;
-  if (!src || base < USER_VIRT_BASE ||
-      base >= USER_VIRT_BASE + USER_REGION_SIZE)
+  if (!src || cap <= 1)
     return 0;
-  if (base + cap - 1 >= USER_VIRT_BASE + USER_REGION_SIZE)
+  if (!sys_user_range_ok((uint64_t)src, (uint64_t)cap))
     return 0;
   int i = 0;
   for (; i < cap - 1 && src[i]; i++)
@@ -858,10 +857,8 @@ static void sys_exec(struct trap_frame *tf) {
 static void sys_mount(struct trap_frame *tf) {
   const char *source = (const char *)tf->regs[0];
   const char *target = (const char *)tf->regs[1];
-  if ((uint64_t)source >= USER_VIRT_BASE &&
-      (uint64_t)source < (USER_VIRT_BASE + USER_REGION_SIZE) &&
-      (uint64_t)target >= USER_VIRT_BASE &&
-      (uint64_t)target < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (sys_user_range_ok((uint64_t)source, 1) &&
+      sys_user_range_ok((uint64_t)target, 1)) {
     extern int vfs_mount(const char *source, const char *target);
     int r = vfs_mount(source, target);
     tf->regs[0] = r < 0 ? -EINVAL : r;
@@ -873,8 +870,7 @@ static void sys_mount(struct trap_frame *tf) {
 /* umount(target): unmount the NFS export mounted exactly at `target`. */
 static void sys_umount(struct trap_frame *tf) {
   const char *target = (const char *)tf->regs[0];
-  if ((uint64_t)target >= USER_VIRT_BASE &&
-      (uint64_t)target < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (sys_user_range_ok((uint64_t)target, 1)) {
     extern int vfs_umount(const char *target);
     int r = vfs_umount(target);
     tf->regs[0] = r < 0 ? -EINVAL : r;
@@ -887,8 +883,7 @@ static void sys_getcwd(struct trap_frame *tf) {
   char *buf = (char *)tf->regs[0];
   int size = (int)tf->regs[1];
   struct process *caller = process_group(current_process()); /* P1 (D7) */
-  if (caller && (uint64_t)buf >= USER_VIRT_BASE &&
-      (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (caller && sys_user_range((uint64_t)buf, size > 0 ? (uint64_t)size : 0, 1)) {
     int len = 0;
     while (caller->cwd[len]) len++;
     if (len + 1 > size) {
@@ -919,11 +914,8 @@ static void sys_lseek(struct trap_frame *tf) {
 static void sys_stat(struct trap_frame *tf) {
   const char *path = (const char *)tf->regs[0];
   struct k_stat *st = (struct k_stat *)tf->regs[1];
-  if ((uint64_t)path >= USER_VIRT_BASE &&
-      (uint64_t)path < (USER_VIRT_BASE + USER_REGION_SIZE) &&
-      (uint64_t)st >= USER_VIRT_BASE &&
-      (uint64_t)st + sizeof(struct k_stat) <=
-          (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (sys_user_range_ok((uint64_t)path, 1) &&
+      sys_user_range((uint64_t)st, sizeof(struct k_stat), 1)) {
     struct process *caller = current_process();
     int err = 0;
     extern int file_stat_path(struct process *p, const char *path,
@@ -940,9 +932,7 @@ static void sys_stat(struct trap_frame *tf) {
 static void sys_fstat(struct trap_frame *tf) {
   int fd = (int)tf->regs[0];
   struct k_stat *st = (struct k_stat *)tf->regs[1];
-  if ((uint64_t)st >= USER_VIRT_BASE &&
-      (uint64_t)st + sizeof(struct k_stat) <=
-          (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (sys_user_range((uint64_t)st, sizeof(struct k_stat), 1)) {
     struct process *caller = current_process();
     int err = 0;
     extern int file_stat_fd(struct process *p, int fd, struct k_stat *st,
@@ -959,8 +949,7 @@ static void sys_fstat(struct trap_frame *tf) {
 static void sys_chdir(struct trap_frame *tf) {
   const char *path = (const char *)tf->regs[0];
   struct process *caller = process_group(current_process()); /* P1 (D7) */
-  if (caller && (uint64_t)path >= USER_VIRT_BASE &&
-      (uint64_t)path < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (caller && sys_user_range_ok((uint64_t)path, 1)) {
     extern int vfs_chdir(const char *path, char *out_new_cwd, int cap);
     char new_cwd[128];
     if (vfs_chdir(path, new_cwd, sizeof new_cwd) == 0) {
@@ -1006,7 +995,7 @@ static void sys_get_progname(struct trap_frame *tf) {
   struct process *caller = current_process();
   if (!caller) {
     tf->regs[0] = -1;
-  } else if (buf && sys_user_range_ok((uint64_t)buf, (uint64_t)size)) {
+  } else if (buf && sys_user_range((uint64_t)buf, (uint64_t)size, 1)) {
     int i = 0;
     while (caller->name[i] && i < size - 1) {
       buf[i] = caller->name[i];
