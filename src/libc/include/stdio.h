@@ -78,9 +78,10 @@ extern "C" {
   int fgetpos(FILE *stream, fpos_t *pos);
   int fsetpos(FILE *stream, const fpos_t *pos);
 
-  /* --- misc names required by libc++'s <cstdio> (declarations only;
-     gets/tmpfile/tmpnam are not implemented — referencing them faults at
-     link time like any missing symbol, see the vendor README) --- */
+  /* --- misc names required by libc++'s <cstdio> (gets/tmpnam remain
+     declarations only — referencing them faults at link time like any
+     missing symbol, see the vendor README; P6.1 implemented tmpfile and
+     remove) --- */
   char *gets(char *s);
   FILE *tmpfile(void);
   char *tmpnam(char *s);

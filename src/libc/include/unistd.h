@@ -45,6 +45,43 @@ extern "C" {
   unsigned int sleep(unsigned int seconds);
   int usleep(unsigned int useconds);
 
+  /* P6.1 (browser.md section 6): file resize + sync.  ftruncate reaches
+   * the kernel's FAT16 resize (row 33); every FAT16 write is synchronous
+   * (no page cache), so fsync/fdatasync validate the fd and succeed. */
+  int ftruncate(int fd, off_t length);
+  int fsync(int fd);
+  int fdatasync(int fd);
+
+  /* P6.1: single-user identity — HobbyOS has no accounts, uid/gid 0. */
+  unsigned int getuid(void);
+  unsigned int geteuid(void);
+  unsigned int getgid(void);
+  unsigned int getegid(void);
+  int getgroups(int size, unsigned int list[]);
+
+  /* P6.1: sysconf() bits.  Names carry glibc's numbering; unsupported
+   * names return -1/EINVAL like glibc. */
+  long sysconf(int name);
+#define _SC_ARG_MAX           0
+#define _SC_CHILD_MAX         1
+#define _SC_CLK_TCK           2
+#define _SC_NGROUPS_MAX       3
+#define _SC_OPEN_MAX          4
+#define _SC_JOB_CONTROL       7
+#define _SC_SAVED_IDS         8
+#define _SC_VERSION           29
+#define _SC_PAGESIZE          30
+#define _SC_PAGE_SIZE         _SC_PAGESIZE
+#define _SC_GETPW_R_SIZE_MAX  70
+#define _SC_GETGR_R_SIZE_MAX  71
+#define _SC_LOGIN_NAME_MAX    73
+#define _SC_TTY_NAME_MAX      74
+#define _SC_NPROCESSORS_CONF  83
+#define _SC_NPROCESSORS_ONLN  84
+#define _SC_ATEXIT_MAX        87
+#define _SC_MONOTONIC_CLOCK   149
+#define _SC_HOST_NAME_MAX     180
+
   /* Phase 3 (posix.md): process identity + exec. */
   int getpid(void);
   int getppid(void);

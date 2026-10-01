@@ -242,7 +242,9 @@ extern "C" {
    * as in struct sockaddr_in) — the syscall boundary converts to the host
    * order the network stack uses internally.  htons() the port. */
   int connect_fd(int fd, uint32_t ip_be, uint16_t port_be);
-  int fcntl(int fd, int cmd, int arg);
+  /* P6.1: variadic like glibc — F_GETLK/F_SETLK/F_SETLKW pass a pointer to
+   * struct flock (<fcntl.h>), which the full-width syscall arg preserves. */
+  int fcntl(int fd, int cmd, ...);
   int getsockopt(int fd, int level, int optname, void *val, int *len);
   int setsockopt(int fd, int level, int optname, const void *val, int len);
   int getrandom(void *buf, size_t len, unsigned int flags);

@@ -1,5 +1,7 @@
 #include "libc.h"
 #include <stdint.h>
+#include <stdarg.h>
+#include <fcntl.h>      /* P6.1: struct flock + F_GETLK/F_SETLK/F_SETLKW */
 #include "syscall.h"
 #include "errno.h"
 #include <poll.h>       /* P4: struct pollfd */
@@ -344,8 +346,63 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
                                  (long)writefds, (long)exceptfds, (long)timeout_ms));
 }
 
-int fcntl(int fd, int cmd, int arg) {
-  return (int)errno_ret(syscall(SYS_FCNTL, (long)fd, (long)cmd, (long)arg, 0));
+/* P6.1 (browser.md section 6): fcntl is variadic like glibc so the
+ * record-lock commands can pass a struct flock pointer (the syscall
+ * argument is a 64-bit user pointer; the trap layer validates its range
+ * and natural alignment).  F_SETLKW is the blocking form: the kernel's
+ * lock commands are non-blocking (single attempt, -EAGAIN on conflict), so
+ * this wrapper retries F_SETLK with short sleeps, capped at ~10 s, before
+ * surfacing EAGAIN -- the non-blocking + bounded-retry shape SQLite's busy
+ * handling consumes, without syscall-restart plumbing in the kernel. */
+int fcntl(int fd, int cmd, ...) {
+  long arg;
+  va_list ap;
+
+  va_start(ap, cmd);
+  arg = va_arg(ap, long);
+  va_end(ap);
+
+  if (cmd == F_SETLKW) {
+    for (int i = 0; i < 1000; i++) {
+      long r = syscall(SYS_FCNTL, (long)fd, (long)F_SETLK, arg, 0);
+      if (r != -EAGAIN)
+        return (int)errno_ret(r);
+      usleep(10000); /* 10 ms; 1000 tries ~= 10 s bound */
+    }
+    errno = EAGAIN;
+    return -1;
+  }
+  return (int)errno_ret(syscall(SYS_FCNTL, (long)fd, (long)cmd, arg, 0));
+}
+
+/* P6.1: flock(2) whole-file locks over the record locks.  LOCK_NB picks
+ * the non-blocking form; the default blocks with the bounded retry above. */
+int flock(int fd, int op) {
+  struct flock fl;
+
+  fl.l_type = (op & LOCK_UN) ? F_UNLCK
+                             : ((op & LOCK_SH) ? F_RDLCK : F_WRLCK);
+  fl.l_whence = 0; /* SEEK_SET */
+  fl.l_start = 0;
+  fl.l_len = 0;    /* whole file */
+  return fcntl(fd, (op & LOCK_NB) ? F_SETLK : F_SETLKW, &fl);
+}
+
+/* P6.1: ftruncate(2) -- the kernel resizes regular FAT16 files (row 33). */
+int ftruncate(int fd, off_t length) {
+  return (int)errno_ret(syscall(SYS_FTRUNCATE, (long)fd, (long)length, 0, 0));
+}
+
+/* P6.1: single-user identity -- no accounts on the device, uid/gid 0 (the
+ * pwd.h/grp.h stubs report the matching "user"/"root" entries). */
+unsigned int getuid(void) { return 0; }
+unsigned int geteuid(void) { return 0; }
+unsigned int getgid(void) { return 0; }
+unsigned int getegid(void) { return 0; }
+int getgroups(int size, unsigned int list[]) {
+  (void)size;
+  (void)list;
+  return 0; /* no supplementary groups */
 }
 
 int getsockopt(int fd, int level, int optname, void *val, int *len) {

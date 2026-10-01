@@ -11,6 +11,7 @@
  */
 #include <sys/stat.h>
 #include <unistd.h>
+#include <utime.h>
 #include <errno.h>
 #include "syscall.h"
 
@@ -123,12 +124,112 @@ int access(const char *path, int mode) {
   return stat(path, &st);
 }
 
-/* No mtime setting on the VFS yet (nano shrugs at the failure). */
+/* No mtime setting on the VFS: honest no-op success for a valid fd (the
+ * same contract as chmod/fchmod on this permissionless filesystem; nano
+ * shrugs at either behavior). */
 int futimens(int fd, const struct timespec times[2]) {
-  (void)fd;
+  struct stat st;
+
   (void)times;
-  errno = ENOSYS;
-  return -1;
+  return fstat(fd, &st);
+}
+
+/* ---- P6.1 (browser.md section 6): utime family ------------------------
+ *
+ * FAT16 here carries no maintained timestamps (the driver writes only the
+ * creation field) and the frozen syscall table has no set-time call, so
+ * these are honest no-op successes for an existing path: they validate the
+ * path via stat() (ENOENT et al. propagate) and report success without
+ * changing anything -- the same shape as chmod(). */
+int utime(const char *path, const struct utimbuf *times) {
+  struct stat st;
+
+  (void)times;
+  if (!path) {
+    errno = EFAULT;
+    return -1;
+  }
+  return stat(path, &st);
+}
+
+int utimes(const char *path, const struct timeval times[2]) {
+  (void)times;
+  return utime(path, 0);
+}
+
+int utimensat(int dirfd, const char *path, const struct timespec times[2],
+              int flags) {
+  (void)dirfd;
+  (void)times;
+  (void)flags;
+  return utime(path, 0);
+}
+
+/* ---- P6.1: fsync/fdatasync --------------------------------------------
+ *
+ * Every FAT16 write in this kernel goes straight to virtio-blk (there is no
+ * dirty page cache), so a completed write() is already durable: validate
+ * the fd and succeed.  Pipes/sockets fail with EINVAL, matching Linux. */
+int fsync(int fd) {
+  struct stat st;
+
+  if (fstat(fd, &st) != 0) return -1;
+  if ((st.st_mode & S_IFMT) == S_IFIFO || (st.st_mode & S_IFMT) == S_IFSOCK) {
+    errno = EINVAL;
+    return -1;
+  }
+  return 0;
+}
+
+int fdatasync(int fd) { return fsync(fd); }
+
+/* ---- P6.1: sysconf -----------------------------------------------------
+ *
+ * Report the real kernel limits where they exist (CPU count from sysinfo
+ * cmd 5), fixed truths elsewhere.  Unsupported names: -1/EINVAL. */
+long sysconf(int name) {
+  switch (name) {
+  case _SC_ARG_MAX:
+    return 256; /* kernel exec arg blob */
+  case _SC_CHILD_MAX:
+  case _SC_OPEN_MAX:
+    return 64;  /* MAX_PROCESSES / MAX_OPEN_FDS */
+  case _SC_CLK_TCK:
+    return 100; /* the 10 ms timer tick */
+  case _SC_NGROUPS_MAX:
+    return 1;   /* single-user: one implicit group */
+  case _SC_JOB_CONTROL:
+  case _SC_SAVED_IDS:
+  case _SC_MONOTONIC_CLOCK:
+    return 1;   /* supported */
+  case _SC_VERSION:
+    return 200809L; /* POSIX.1-2008 */
+  case _SC_PAGESIZE:
+    return 4096;
+  case _SC_GETPW_R_SIZE_MAX:
+  case _SC_GETGR_R_SIZE_MAX:
+    return 512;
+  case _SC_LOGIN_NAME_MAX:
+  case _SC_TTY_NAME_MAX:
+  case _SC_HOST_NAME_MAX:
+    return 32;
+  case _SC_NPROCESSORS_CONF:
+  case _SC_NPROCESSORS_ONLN: {
+      struct {
+        uint64_t uptime_ms;
+        uint64_t total_idle_ms;
+        int num_cpus;
+      } cpu;
+      long r = hb_syscall5(SYS_SYSINFO, 5, (long)&cpu, (long)sizeof cpu, 0, 0);
+      if (r == 0 && cpu.num_cpus > 0) return cpu.num_cpus;
+      return 1;
+    }
+  case _SC_ATEXIT_MAX:
+    return 32; /* HB_ATEXIT_MAX in stdlib.c */
+  default:
+    errno = EINVAL;
+    return -1;
+  }
 }
 
 #else /* HOST_TEST */
