@@ -546,7 +546,14 @@ static void t_poll(void) {
   check("poll timeout 40ms returns 0 with elapsed >= requested (10ms tick)",
         r == 0 && now_ms() - t0 >= 30);
 
-  /* timeout -1: park and wake on a real child write. */
+  /* timeout -1: park and wake on a real child write.  t0 is taken BEFORE
+     the fork so the measured interval always contains the child's full
+     100 ms sleep: under wave load this process can be preempted for tens
+     of ms between fork() and the poll call, which used to shrink the
+     measurement below the 50 ms floor even though the park itself was
+     fine (a genuinely short park -- or a short child sleep -- still
+     fails here). */
+  t0 = now_ms();
   int pid = fork();
   if (pid == 0) {
     close(pe[0]);
@@ -557,7 +564,6 @@ static void t_poll(void) {
   }
   close(pe[1]);
   empty.revents = 0;
-  t0 = now_ms();
   r = poll(&empty, 1, -1);
   uint64_t el = now_ms() - t0;
   check("poll(-1) woke with POLLIN after the child's write",
@@ -587,6 +593,9 @@ static void t_blocking_park(void) {
     check("park socketpair", 0);
     return;
   }
+  /* t0 before the fork: see the poll(-1) check above -- the floor must not
+     depend on this process staying scheduled right after fork(). */
+  uint64_t t0 = now_ms();
   int pid = fork();
   if (pid == 0) {
     close(sv[0]);
@@ -597,7 +606,6 @@ static void t_blocking_park(void) {
   }
   close(sv[1]);
   char b[4];
-  uint64_t t0 = now_ms();
   int r = (int)read(sv[0], b, 1);
   uint64_t el = now_ms() - t0;
   check("blocking read returned the child's byte", r == 1 && b[0] == 'Z');
