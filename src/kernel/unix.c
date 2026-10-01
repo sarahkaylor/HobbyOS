@@ -180,25 +180,24 @@ void usock_probe(struct usock *u, int end, int *r, int *w, int *e, int *hup) {
     spinlock_release_irqrestore(&u->lock, flags);
     return;
   }
+  /* Full-duplex: fd `end` reads chan[1-end] (EOF once refs[1-end] hits 0)
+   * and writes into chan[end] (EPIPE once the peer is gone).  Both
+   * directions of every end must be probed — the socketpair ends are
+   * peers, not pipe-style read/write halves. */
   int peer = 1 - end;
-  if (end == 0) {
-    /* Read side: drains chan[1]. */
-    struct usock_chan *c = &u->chan[1];
-    if (!chan_empty(u, c)) {
-      *r = 1;
-    } else if (u->refs[peer] == 0) {
-      *r = 1;
-      *hup = 1; /* drained and peer closed: EOF is readable */
-    }
-  } else {
-    /* Write side: fills chan[1]. */
-    struct usock_chan *c = &u->chan[1];
-    if (u->refs[peer] == 0) {
-      *w = 1;
-      *e = 1; /* peer closed: writes fail EPIPE (POLLOUT|POLLERR) */
-    } else if (!chan_full(u, c)) {
-      *w = 1;
-    }
+  struct usock_chan *rc = &u->chan[1 - end];
+  struct usock_chan *wc = &u->chan[end];
+  if (!chan_empty(u, rc)) {
+    *r = 1;
+  } else if (u->refs[peer] == 0) {
+    *r = 1;
+    *hup = 1; /* drained and peer closed: EOF is readable */
+  }
+  if (u->refs[peer] == 0) {
+    *w = 1;
+    *e = 1; /* peer closed: writes fail EPIPE (POLLOUT|POLLERR) */
+  } else if (!chan_full(u, wc)) {
+    *w = 1;
   }
   spinlock_release_irqrestore(&u->lock, flags);
 }
