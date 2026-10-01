@@ -92,7 +92,7 @@ extern unsigned long long mock_sysinfo_mem_total, mock_sysinfo_mem_free;
 /* ---- modes ------------------------------------------------------------- */
 
 static int soak_mode;
-static unsigned long soak_cap_ms = 25UL * 60UL * 1000UL; /* default 25 min */
+static unsigned long soak_cap_ms = 28UL * 60UL * 1000UL; /* default 28 min */
 
 /* ---- bounded per-mode sizes (quick = in-wave budget; soak = per round) -- */
 

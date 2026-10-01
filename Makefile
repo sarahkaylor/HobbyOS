@@ -156,7 +156,7 @@ else ifeq ($(MODE),filedialog_test)
   USER_CFLAGS += -DDESKTOP_TEST_AUTO_LAUNCH
 else ifeq ($(MODE),soak)
   # P8.2 (browser.md §6): the soak — the standard test wave plus TORTURE.BIN
-  # running its bounded soak loop (25-minute cap; main.c's KERNEL_SOAK_WAVE
+  # running its bounded soak loop (28-minute cap; main.c's KERNEL_SOAK_WAVE
   # branch passes the "soak" argument).  Bound the whole run externally:
   #   timeout 2100 make soak
   CFLAGS += -DKERNEL_MODE_TEST -DKERNEL_SOAK_WAVE
@@ -1686,7 +1686,7 @@ test:
 
 # P8.2 (browser.md §6): the 30-minute soak — a dedicated combined run.  The
 # whole standard wave runs while TORTURE.BIN loops its combined groups for a
-# 25-minute wall cap; "System halt" lands when the soak ends.  Bound it:
+# 28-minute wall cap; "System halt" lands when the soak ends.  Bound it:
 #   timeout 2100 make soak
 soak:
 	$(MAKE) MODE=soak run
