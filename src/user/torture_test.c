@@ -96,8 +96,11 @@ static unsigned long soak_cap_ms = 25UL * 60UL * 1000UL; /* default 25 min */
 
 /* ---- bounded per-mode sizes (quick = in-wave budget; soak = per round) -- */
 
-#define CHURN_THREADS 64
-#define CHURN_ITERS 32
+#define CHURN_TOTAL 64 /* create/join cycles per group run */
+#define CHURN_LIVE_QUICK 8
+#define CHURN_LIVE_SOAK 16
+#define CHURN_ITERS 24
+#define CHURN_DEADLINE_MS 30000UL /* total create-effort budget per run */
 #define FDPASS_ITERS_QUICK 16
 #define FDPASS_ITERS_SOAK 32
 #define MMAP_ITERS_QUICK 24
@@ -211,12 +214,6 @@ static void mem_sample(void) {
  * 64-cycle budget.  The turnstile release is a STICKY flag broadcast right
  * after the create loop, so neither side waits on the other.
  */
-
-#define CHURN_TOTAL 64 /* create/join cycles per group run */
-#define CHURN_LIVE_QUICK 8
-#define CHURN_LIVE_SOAK 16
-#define CHURN_ITERS 24
-#define CHURN_DEADLINE_MS 30000UL /* total create-effort budget per run */
 
 static pthread_mutex_t churn_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t churn_cv = PTHREAD_COND_INITIALIZER;
