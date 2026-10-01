@@ -143,6 +143,19 @@ KiB of spare tables, and `user_l2_table` (a vestigial field) is deleted in the i
   - Both tops are **VMM constants validated by a boot log line** (`frames=… total=…`); QEMU RAM is
     fixed per target (ARM 8192M, x64 6144M) per the Makefile. No DTB/multiboot parsing in P2 (recorded
     as a follow-up in §11 OQ-level; a RAM-size probe is a risk if the runner's -m changes).
+- **Kernel-image reservation** (fix, browser/l2-clonefix): the pool is not all free RAM — the running
+  kernel's own image sits inside the ARM extent (`phys(_start)..phys(__stack_top)` =
+  `[0x23A680000, ~0x23F2DE000)`), and the alloc hint walks forward with churn (contig runs set it past
+  each run).  After ~1.88M frames of loader/fork churn the frontier crossed into the image and
+  `frame_alloc_zeroed` was handed frames over live kernel memory — wiping the exception vector table
+  (first image page) and text, an unrecoverable silent freeze (P8 soak: reproducible at fork seq
+  ~5905, round ~485; coredump shows frame_alloc_zeroed zeroing the page containing its own code).
+  `frame_init` now calls `frame_reserve_range(phys(_start), phys(__stack_top) + 64 KiB)`, subtracting
+  it from the pool.  Reservations round outward to whole 32 MiB **blocks** (all frames marked + the
+  block claimed), preserving §2.2's free/claimed partition
+  (`phys_block_free_count() + blocks_used == block_count`); `[FRAME] reserved=` in the boot log line
+  reports the count.  `frame_test_image_reserved` (frame_test.c) walks the frontier from the pool
+  bottom to the region and asserts no allocation ever lands inside the image.
 - **Accounting** (P2.2): `frames_total/used/free`, per-AS resident peak, table frames; end-of-wave
   numbers printed as part of evidence (§9). `sysinfo(2)` (memory usage) reports from these counters
   (§4.5).
