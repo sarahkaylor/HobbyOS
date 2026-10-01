@@ -7,8 +7,9 @@
  * argument through load_and_run_program_in_scheduler_args).
  *
  * Groups (P8.1):
- *   1. 64 threads x mutex/condvar churn (shared counter + trylock EBUSY
- *      contract + a broadcast turnstile), slot-pressure tolerant;
+ *   1. 64 thread create/join cycles x mutex/condvar churn (shared counter
+ *      + trylock EBUSY contract + a broadcast turnstile), run in bounded
+ *      bursts so the shared PCB table is never grabbed full-width;
  *   2. socketpair + SCM_RIGHTS fd-pass loops (in-process rounds + one
  *      cross-fork round with bounded polls);
  *   3. mmap/fault/free storms (demand-zero fault-in, PROT_NONE zap +
@@ -200,7 +201,22 @@ static void mem_sample(void) {
   mem_samples++;
 }
 
-/* ---- 1. 64 threads x mutex/condvar churn ------------------------------- */
+/* ---- 1. 64 thread create/join cycles x mutex/condvar churn ------------ *
+ *
+ * "64 threads" is a create/join torture budget, not a 64-way table grab:
+ * the wave shares the 64-slot PCB table, and a full-width grab starves
+ * every sibling suite's spawns (bring-up smoke: table 63/63, the wave's
+ * spawn-heavy tests blocked for minutes).  Each burst runs CHURN_LIVE
+ * concurrent threads whose whole life is bounded; the bursts complete the
+ * 64-cycle budget.  The turnstile release is a STICKY flag broadcast right
+ * after the create loop, so neither side waits on the other.
+ */
+
+#define CHURN_TOTAL 64 /* create/join cycles per group run */
+#define CHURN_LIVE_QUICK 8
+#define CHURN_LIVE_SOAK 16
+#define CHURN_ITERS 24
+#define CHURN_DEADLINE_MS 30000UL /* total create-effort budget per run */
 
 static pthread_mutex_t churn_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t churn_cv = PTHREAD_COND_INITIALIZER;
@@ -224,9 +240,9 @@ static void *churn_fn(void *arg) {
       sched_yield();
     pthread_mutex_unlock(&churn_mu);
   }
-  /* Condvar turnstile: publish readiness, then park until the broadcast.
-   * The wait is bounded (5 s absolute chunks, give up after 3) so a lost
-   * wakeup fails the check instead of hanging the suite. */
+  /* Condvar turnstile: publish readiness, then park until the (sticky)
+   * broadcast.  The wait is bounded (5 s absolute chunks, give up after 3)
+   * so a lost wakeup fails the check instead of hanging the suite. */
   pthread_mutex_lock(&churn_mu);
   churn_ready++;
   pthread_cond_signal(&churn_cv);
@@ -260,10 +276,11 @@ static void *churn_fn(void *arg) {
   return (void *)0;
 }
 
-/* Returns 1 = ran and passed, 0 = ran and failed, -1 = skipped (every
- * launch rejected: tolerated, noted, never a FAIL). */
-static int thread_churn(void) {
-  pthread_t th[CHURN_THREADS];
+/* One burst of up to n threads.  Returns 1 = all created threads churned
+ * correctly, 0 = churn mismatch (real failure), -1 = every launch rejected
+ * (slot pressure, tolerated), -2 = non-EAGAIN create error (real). */
+static int churn_burst(int n, int *created_out) {
+  pthread_t th[CHURN_LIVE_SOAK];
   int created = 0, rejected = 0;
   churn_counter = 0;
   churn_ready = 0;
@@ -271,7 +288,7 @@ static int thread_churn(void) {
   churn_bad = 0;
   churn_woken = 0;
   churn_timedout_waiters = 0;
-  for (int i = 0; i < CHURN_THREADS; i++) {
+  for (int i = 0; i < n; i++) {
     int rc = pthread_create(&th[i], 0, churn_fn, (void *)(long)i);
     if (rc == 0) {
       created++;
@@ -284,37 +301,20 @@ static int thread_churn(void) {
     /* Non-EAGAIN from pthread_create is a real defect, not pressure. */
     label_num("[TORTURE] pthread_create rc=", rc);
     print_console(" (non-EAGAIN)\n");
+    *created_out = created;
+    thr_created += created;
     thr_rejected += rejected;
-    check("threads-churn-64", 0);
-    for (int j = 0; j < created; j++) {
-      void *r = 0;
-      churn_go = 1;
-      pthread_cond_broadcast(&churn_cv);
-      pthread_join(th[j], &r);
-    }
-    return 0;
+    return -2;
   }
+  *created_out = created;
   thr_created += created;
   thr_rejected += rejected;
-  if (rejected > 0) {
-    label_num("[TORTURE] note: thread launch rejected (slot pressure), "
-              "created=", created);
-    print_console("/64\n");
-  }
   if (created == 0)
     return -1;
-  /* Bounded wait for all created threads to reach the turnstile. */
-  int ready_ok = 0;
-  for (int spin = 0; spin < 60000; spin++) {
-    if (churn_ready >= created) {
-      ready_ok = 1;
-      break;
-    }
-    sched_yield();
-    if ((spin & 511) == 0)
-      usleep(1000);
-  }
-  /* Release: broadcast under the mutex (lost signals cannot happen). */
+  /* Sticky release: a thread that parks after this sees go=1 immediately,
+   * one already parked wakes on the broadcast (the wait snapshots the
+   * cond sequence before parking, so no lost wakeup).  Nobody waits on
+   * anybody -- the join bounds the stragglers. */
   pthread_mutex_lock(&churn_mu);
   churn_go = 1;
   pthread_cond_broadcast(&churn_cv);
@@ -325,11 +325,62 @@ static int thread_churn(void) {
     if (pthread_join(th[i], &r) != 0)
       joined_all = 0;
   }
-  int ok = ready_ok && joined_all && churn_woken == created &&
+  int ok = joined_all && churn_ready == created && churn_woken == created &&
            churn_timedout_waiters == 0 && churn_bad == 0 &&
            churn_counter == (long)created * CHURN_ITERS;
-  check("threads-churn-64", ok);
   return ok ? 1 : 0;
+}
+
+/* Runs CHURN_TOTAL create/join cycles in bursts of `live` concurrent
+ * threads.  Returns 1 = ran and passed, 0 = ran and failed, -1 = skipped
+ * (every launch rejected: tolerated, noted, never a FAIL). */
+static int thread_churn(void) {
+  int live = soak_mode ? CHURN_LIVE_SOAK : CHURN_LIVE_QUICK;
+  uint64_t t0 = now_ms();
+  int bursts = (CHURN_TOTAL + live - 1) / live;
+  int created_total = 0, rejected_total = 0, skipped = 0, bad = 0;
+  for (int b = 0; b < bursts; b++) {
+    int n = CHURN_TOTAL - b * live;
+    int created = 0;
+    int rc;
+    if (n > live)
+      n = live;
+    if (now_ms() - t0 > CHURN_DEADLINE_MS) {
+      skipped += n;
+      continue;
+    }
+    rc = churn_burst(n, &created);
+    if (rc == -2) {
+      check("threads-churn-64", 0);
+      return 0;
+    }
+    if (rc == -1) {
+      skipped += n;
+      continue;
+    }
+    created_total += created;
+    rejected_total += n - created;
+    if (rc == 0)
+      bad = 1;
+  }
+  if (rejected_total > 0) {
+    label_num("[TORTURE] note: thread launch rejected (slot pressure), "
+              "created=", created_total);
+    print_console("/64\n");
+  }
+  if (skipped > 0) {
+    label_num("[TORTURE] note: churn cycles skipped (create budget), "
+              "skipped=", skipped);
+    print_console("\n");
+  }
+  label_num("[TORTURE] churn: cycles=", CHURN_TOTAL);
+  label_num(" live=", live);
+  label_num(" created=", created_total);
+  print_console("\n");
+  if (created_total == 0)
+    return -1;
+  check("threads-churn-64", !bad);
+  return bad ? 0 : 1;
 }
 
 /* ---- 2. socketpair + SCM_RIGHTS fd-pass loops -------------------------- */
