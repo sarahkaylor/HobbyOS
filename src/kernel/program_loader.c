@@ -449,6 +449,15 @@ int load_and_run_program_v2(const char* filename, int stdin_fd,
     child->parent_pid = parent->pid;
     for (int i = 0; i < 128; i++)
       child->cwd[i] = parent->cwd[i];
+    /* P6.3: a spawned child inherits the group's environment blob (set
+       by execve(envp); execv() forwards `environ`, so an exec'd parent
+       hands its environment down).  The spawn contract carries no envp
+       -- execve() stays the explicit form.  S5 flip: the v2 loader is
+       the live path, so the copy must live here too (the v1 body below
+       keeps its copy for the rollback lever). */
+    for (int i = 0; i < HO_ENV_LEN; i++)
+      child->env[i] = parent->env[i];
+    child->envc = parent->envc;
   } else {
     child->cwd[0] = '/';
     child->cwd[1] = '\0';
