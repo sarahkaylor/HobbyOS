@@ -1395,6 +1395,36 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-10-01 — **x64 full-wave re-characterization at the Wave 1f tail tip (`b122e0c`) —
+  6-copy KVM battery: one class (all-idle stall), no resets, deeper reach than baseline;
+  `unit-x64` green** — lane `browser/l3-x64char`; template `make ARCH=intel MODE=test
+  hobbyos.elf disk.img` (no run), then 6 fresh copies seeded from it (rsync source +
+  `cp -a obj/ disk.img hobbyos.elf`; per-copy OVMF pflash and vendor-marker mtimes
+  normalized so each copy boots QEMU-only), each run bounded `timeout 900 make
+  ARCH=intel MODE=test run QEMU_ARGS='-enable-kvm -display none'`; leftovers killed via
+  `fuser -k <copy>/disk.img`. Logs `/tmp/x64char_20261001-1214/wave{1..6}.log` (+ `.meta`,
+  `analysis.json`, `build_template.log`).
+  - **Outcome class — 6/6 identical**: 1 boot per run (**0 silent resets / 0 guest
+    re-entries**), **0/6 reached `System halt.`**, **0 LOCKFOREVER / 0 WATCHDOG / 0
+    LOSTWAKE**; **[IDLESTUCK] storm 36.6k–37.3k dumps per run** (all cores in the idle
+    loop, rounds ~450k, guest t≈740 s at the bound; the storm's table dump shows the wave's
+    slots held at `st=4` EXITED, unreaped). This maps to the *late-IDLESTUCK / all-idle
+    stall* family; the silent-reset class (wave4's 1167 boots) did not reproduce in this
+    batch.
+  - **Furthest reached: `SQLTEST.BIN`** (the loader's last `Loading program …` in all six;
+    the five tail programs `EDITOR_T`/`APPS_T`/`PONG_T`/`FILEDIAL`/`DESKTOP` never load) —
+    past `STRESS.BIN` (`[STRESS TEST] SUCCESS`), i.e. deeper than the F1-era "late
+    IDLESTUCK at STRESS.BIN" note. En route per run: `[ERRNO] ALL TESTS PASSED` + 4×
+    `ALL TESTS PASSED SUCCESSFULLY!`.
+  - **FAIL tokens: exactly 1 plain per run — `MMTEST FAIL 11`** (the S4
+    memfd+`MAP_SHARED`-across-fork step), consistent 6/6; 0 `FAILED`/`FAILURES`.
+    **New-at-tip signal:** ~40 `in=HOLE -> killed` v2 fault kills per run (SUBPRB…SQLTEST);
+    the two historical x64 wave logs (l2-fpu-x64 `wave1`/`wave4`, pre-S4/S5) carry 0 such
+    events. Recorded as wave evidence only — the x64 full wave remains incomplete and
+    `unit-x64` stays the hard gate.
+  - **`unit-x64` at `b122e0c` (KVM, fresh disk)**: `run_unit_tests_intel.sh` rc=0 —
+    `Tests run: 293 / Tests failed: 0`, `UNIT TESTS PASSED` (`unit_x64.log`).
+
 - 2026-10-01 — **Wave 1f (part 1) — batteries: GREEN both machines at `a7b7330`** —
   first merged-tip attempt, no defects found beyond the pre-battery fixup below.
   **P2-S45 is deliberately NOT in this merge** (its S5 routing flip still shows
