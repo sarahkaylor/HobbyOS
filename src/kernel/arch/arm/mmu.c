@@ -504,6 +504,9 @@ void vm_arch_flush_va(struct addr_space *as, uint64_t va) {
   arm_v2_flush_va(as->asid, va);
 }
 
+/* S4 (fork clone): physical address of a leaf returned by vm_arch_walk. */
+uint64_t vm_arch_leaf_phys(uint64_t leaf) { return leaf & ARM_OA_MASK; }
+
 void vm_arch_shootdown(struct addr_space *as) {
   (void)as; /* ARM invalidations are already broadcast per VA/ASID */
 }

@@ -330,6 +330,30 @@ static int group_claims_pending(struct process *grp, struct process *self) {
   return pending;
 }
 
+/* S4: deliver one u32 into `p`'s user memory.  v1: through the block's
+ * physical base (the write may run on another process's context).  v2:
+ * through the AS walk, materializing the page first.  Best-effort: a
+ * missing/hole page is skipped (the reap still happens). */
+static void proc_write_user_u32(struct process *p, uint64_t va, uint32_t val) {
+  if (!p)
+    return;
+  if (p->as) {
+    if (va < USER_VA_BASE || va + 4 > USER_VA_TOP)
+      return;
+    if (vm_touch(p, va, 4, 1) != 0)
+      return;
+    uint64_t leaf = 0;
+    if (vm_arch_walk(p->as, va & ~0xFFFULL, &leaf) != 0)
+      return;
+    *(volatile uint32_t *)(vm_arch_leaf_phys(leaf) + (va & 0xFFF)) = val;
+    return;
+  }
+  if (p->user_phys_base && va >= USER_VIRT_BASE &&
+      va + 4 <= USER_VIRT_BASE + USER_REGION_SIZE) {
+    *(volatile uint32_t *)(p->user_phys_base + (va - USER_VIRT_BASE)) = val;
+  }
+}
+
 /* Group teardown (design section 1): release the shared resources exactly
  * once -- close the group fd table, free the physical block, turn the anchor
  * into a reapable zombie (EXITED; straight to FREE when a parent was already
@@ -398,12 +422,8 @@ static void group_teardown(struct process *grp, uint64_t code) {
       continue;
     parent->context[0] = grp->pid;         /* waitpid return value */
     int *stp = (int *)parent->context[1];  /* saved arg1: status ptr */
-    if (stp && (uint64_t)stp >= USER_VIRT_BASE) {
-      uint64_t off = (uint64_t)stp - USER_VIRT_BASE;
-      if (off + 4 <= USER_REGION_SIZE && parent->user_phys_base) {
-        *(int *)(parent->user_phys_base + off) = grp->exit_status;
-      }
-    }
+    if (stp)
+      proc_write_user_u32(parent, (uint64_t)stp, (uint32_t)grp->exit_status);
     parent->state = PROC_STATE_READY;
     /* Deliver the reap: the anchor's PCB slot is now reusable. */
     grp->state = PROC_STATE_FREE;
@@ -1328,6 +1348,11 @@ int process_waitpid(struct trap_frame *tf) {
      group's children. */
   struct process *grp = process_group(caller);
 
+  /* S4: a v2 caller's status pointer is validated (and its page
+     materialized) up front, so the deferred delivery below can land. */
+  if (grp->as && status && vm_touch(caller, (uint64_t)status, 4, 1) != 0)
+    return -EFAULT;
+
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   for (int i = 0; i < MAX_PROCESSES; i++) {
     struct process *p = &proc_table[i];
@@ -1346,10 +1371,8 @@ int process_waitpid(struct trap_frame *tf) {
     p->exit_status = 0;
     spinlock_release_irqrestore(&proc_lock, flags);
 
-    if (status && (uint64_t)status >= USER_VIRT_BASE &&
-        (uint64_t)status + 4 <= USER_VIRT_BASE + USER_REGION_SIZE) {
-      *status = st;
-    }
+    if (status)
+      proc_write_user_u32(caller, (uint64_t)status, (uint32_t)st);
     return child_pid;
   }
 
@@ -1424,7 +1447,9 @@ int process_fork(struct trap_frame *tf) {
      children exec or use leader TLS.  atfork is deferred (P2+). */
   struct process *group = process_group(parent);
 
-  int child_pid = process_create();
+  /* P2.4 (S4): a v2 fork takes an address space, a v1 fork a 32 MiB
+     block -- pick the matching creation variant. */
+  int child_pid = group->as ? process_create_v2() : process_create();
   if (child_pid < 0)
     return -1;
 
@@ -1439,11 +1464,26 @@ int process_fork(struct trap_frame *tf) {
     child->cwd[i] = group->cwd[i];
   }
 
-  kmemcpy((void *)child->user_phys_base, (void *)group->user_phys_base,
-          USER_INITIAL_CLEAR_SIZE);
-  kmemcpy((void *)(child->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
-          (void *)(group->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
-          USER_STACK_CLEAR_SIZE);
+  if (group->as) {
+    /* P2.4 (S4, design 5.3/D10): v2 fork clones the group's address
+       space -- resident private pages are copied frame-by-frame, memfd/
+       MAP_SHARED pages re-map the same object frames, holes stay holes.
+       The child holds no v1 block (user_phys_base stays 0). */
+    struct addr_space *cas = vm_as_clone(group->as, (uint64_t)child_pid);
+    if (!cas) {
+      child->state = PROC_STATE_FREE;
+      spinlock_release_irqrestore(&proc_lock, flags);
+      uart_puts("[KERNEL] fork: AS clone failed\n");
+      return -1;
+    }
+    child->as = cas;
+  } else {
+    kmemcpy((void *)child->user_phys_base, (void *)group->user_phys_base,
+            USER_INITIAL_CLEAR_SIZE);
+    kmemcpy((void *)(child->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
+            (void *)(group->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
+            USER_STACK_CLEAR_SIZE);
+  }
   save_context(child, tf);
   child->context[0] = 0; // x0 = 0 for child
 
@@ -2021,6 +2061,29 @@ int64_t sys_madvise(uint64_t addr, uint64_t len, int64_t advice) {
   return 0;
 }
 
+/* SYS_MEMFD_CREATE (80, design section 4.3): (name*, flags) -> fd.  The
+ * name is accepted for compat and not retained (recorded: flags). */
+int64_t sys_memfd_create(uint64_t name, int64_t flags) {
+  struct process *cur = current_process();
+  if (!cur)
+    return -EINVAL;
+  /* v2: the (optional) name must at least be a readable user string. */
+  if (name && cur->as && vm_range_ok(cur, name, 1, 0) != 0)
+    return -EFAULT;
+  return file_memfd_create(cur, (const char *)name, (int)flags);
+}
+
+/* SYS_FTRUNCATE (33, design section 4.3): memfd size setting (SHRINK/GROW
+ * seals enforced); other file types -ENOTSUP. */
+int64_t sys_ftruncate(int64_t fd, uint64_t size) {
+  struct process *cur = current_process();
+  if (!cur)
+    return -EINVAL;
+  if (fd < 0 || fd >= MAX_OPEN_FDS)
+    return -EBADF;
+  return file_ftruncate(cur, (int)fd, size);
+}
+
 /* Design section 5.4: the fault paths (ARM EL0 abort / x64 #PF) call
  * this once they have decided the process must die.  Status is
  * signal-shaped (SIGSEGV = 11) via the group_teardown marker; the
@@ -2046,22 +2109,36 @@ int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
     return -EINVAL;
   if (flags != 0)
     return -EINVAL;
-  /* entry and [stack-16, stack) inside the caller's own region; stack
-     16-aligned (both ABIs enter with a 16-aligned SP). */
-  if (entry < USER_VIRT_BASE || entry >= USER_VIRT_BASE + USER_REGION_SIZE)
-    return -EINVAL;
-  if (stack < USER_VIRT_BASE + 16 ||
-      stack > USER_VIRT_BASE + USER_REGION_SIZE)
-    return -EINVAL;
-  if (stack & 15)
-    return -EINVAL;
+  /* entry and [stack-16, stack) inside the caller's own window; stack
+     16-aligned (both ABIs enter with a 16-aligned SP).  S4: a v2 caller
+     validates against its AS -- entry mapped readable, stack top mapped
+     writable (the mmap+guard stack from libpthread). */
+  if (caller->as) {
+    if (stack < USER_VA_BASE + 16 || stack > USER_VA_TOP)
+      return -EINVAL;
+    if (stack & 15)
+      return -EINVAL;
+    if (vm_touch(caller, entry, 1, 0) != 0)
+      return -EINVAL;
+    if (vm_touch(caller, stack - 16, 16, 1) != 0)
+      return -EINVAL;
+  } else {
+    if (entry < USER_VIRT_BASE || entry >= USER_VIRT_BASE + USER_REGION_SIZE)
+      return -EINVAL;
+    if (stack < USER_VIRT_BASE + 16 ||
+        stack > USER_VIRT_BASE + USER_REGION_SIZE)
+      return -EINVAL;
+    if (stack & 15)
+      return -EINVAL;
+  }
 
   struct process *grp = process_group(caller);
 
   uint64_t p_flags = spinlock_acquire_irqsave(&proc_lock);
   /* A group under teardown (anchor gone, block released) takes no new
-     threads. */
-  if (grp->phys_block_idx < 0 || grp->state == PROC_STATE_FREE ||
+     threads.  S4: v2 groups have no block (as != NULL instead). */
+  if ((grp->phys_block_idx < 0 && !grp->as) ||
+      grp->state == PROC_STATE_FREE ||
       grp->state == PROC_STATE_EXITED ||
       grp->state == PROC_STATE_THREAD_DONE) {
     spinlock_release_irqrestore(&proc_lock, p_flags);
@@ -2123,6 +2200,7 @@ int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
   t->heap_brk = grp->heap_brk;
   t->user_phys_base = grp->user_phys_base;
   t->user_l2_table = grp->user_l2_table;
+  t->as = grp->as; /* S4: a thread shares the group's address space */
   t->phys_block_idx = -1; /* threads never own a block */
   t->num_open_fds = 0;
   for (int i = 0; i < MAX_OPEN_FDS; i++)

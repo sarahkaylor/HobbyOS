@@ -526,6 +526,9 @@ void vm_arch_flush_va(struct addr_space *as, uint64_t va) {
   x64_invlpg(va);
 }
 
+/* S4 (fork clone): physical address of a leaf returned by vm_arch_walk. */
+uint64_t vm_arch_leaf_phys(uint64_t leaf) { return leaf & X64_OA_MASK; }
+
 /* Shootdown IPI (vector 0x82, OQ5): sent only when the AS is claimed on
  * another CPU (cpu_current_pids scan).  The handler reloads CR3 when this
  * CPU runs the target AS; the sender waits for acks with a bounded spin.

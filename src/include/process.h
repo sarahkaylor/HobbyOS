@@ -283,6 +283,9 @@ int64_t sys_mmap6(uint64_t addr, uint64_t len, int64_t prot, int64_t flags,
                   int64_t fd, uint64_t offset);
 int64_t sys_mprotect(uint64_t addr, uint64_t len, int64_t prot);
 int64_t sys_madvise(uint64_t addr, uint64_t len, int64_t advice);
+/* P2.4 (S4): memfd create + ftruncate (design section 4.3). */
+int64_t sys_memfd_create(uint64_t name, int64_t flags);
+int64_t sys_ftruncate(int64_t fd, uint64_t size);
 
 /* P2.3 (design section 5.4): terminate the CURRENT (faulting) process
  * with a signal-shaped waitpid status (low byte = signo).  SIGSEGV = 11.

@@ -721,6 +721,16 @@ extern void virtio_gpu_flush(void);
 
 static void sys_map_fb(struct trap_frame *tf) {
   uint64_t phys_addr = (uint64_t)virtio_gpu_get_framebuffer();
+  struct process *cur = current_process();
+  if (cur)
+    cur = process_group(cur);
+  if (cur && cur->as) {
+    /* P2.4 (S4, design 7.3): a v2 process maps the fb into its own AS at
+       the reserved USER_FB_OFF slot (same physical frames, VMK_FB);
+       idempotent per process. */
+    tf->regs[0] = (uint64_t)vm_map_fb(cur, phys_addr);
+    return;
+  }
   mmu_map_user_framebuffer(phys_addr);
   tf->regs[0] = USER_FB_VIRT_BASE; // Return user virtual address
 }
@@ -1184,6 +1194,13 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)sys_madvise(tf->regs[5],  /* rdi: addr */
                                         tf->regs[4],  /* rsi: len */
                                         (int64_t)tf->regs[3]); /* rdx: advice */
+  } else if (syscall_num == SYS_FTRUNCATE) {
+    /* P2.4 (S4, design 4.3): (fd, size) -> rdi/rsi, memfd only. */
+    tf->regs[0] = (uint64_t)sys_ftruncate((int64_t)tf->regs[5], tf->regs[4]);
+  } else if (syscall_num == SYS_MEMFD_CREATE) {
+    /* P2.4 (S4, design 4.3): (name*, flags) -> rdi/rsi. */
+    tf->regs[0] =
+      (uint64_t)sys_memfd_create(tf->regs[5], (int64_t)tf->regs[4]);
   } else if (syscall_num == SYS_SOCKET) {
     sys_socket(tf);
   } else if (syscall_num == SYS_CONNECT_FD) {

@@ -7,6 +7,7 @@
 #include "vfs.h"
 #include "errno.h"
 #include "timer.h"
+#include "vm.h" /* P2.4 (S4): memfd objects */
 
 static struct file global_file_table[MAX_GLOBAL_FILES];
 static spinlock_t fs_lock;
@@ -295,6 +296,9 @@ int file_socket_connect(struct process *p, int fd, uint32_t ip_be,
 }
 
 int file_fcntl(struct process *p, int fd, int cmd, int arg) {
+  /* P2.4 (S4): memfd sealing (F_ADD_SEALS/F_GET_SEALS, Linux numbers). */
+  if (cmd == K_F_ADD_SEALS || cmd == K_F_GET_SEALS)
+    return file_memfd_seals(p, fd, cmd, arg);
   int err = 0;
   struct file *f = f1_socket_file(p, fd, &err);
   if (!f) return -err;
@@ -703,6 +707,8 @@ int file_close(struct process *cur, int fd) {
   }
 
   f->ref_count--;
+  if (f->type == FILE_TYPE_MEMFD)
+    vm_object_unref(f->memfd.obj); /* one instance ref goes away (S4) */
   if (f->ref_count == 0) {
     if (f->type == FILE_TYPE_FAT16) {
       fat16_close(f);
@@ -738,6 +744,8 @@ int file_dup(struct process *cur, int fd) {
   if (newfd < 0) return -EMFILE;
   uint64_t flags = spinlock_acquire_irqsave(&f->lock);
   f->ref_count++;
+  if (f->type == FILE_TYPE_MEMFD)
+    vm_object_ref(f->memfd.obj); /* one more instance ref (S4) */
   if (f->type == FILE_TYPE_PIPE)
     pipe_reopen(f->pipe.ptr, f->pipe.end); /* keep the pipe end's fd count
         in sync: file_close calls pipe_close per fd, so every dup must too,
@@ -765,6 +773,8 @@ int file_dup2(struct process *cur, int oldfd, int newfd) {
   }
   uint64_t flags = spinlock_acquire_irqsave(&f->lock);
   f->ref_count++;
+  if (f->type == FILE_TYPE_MEMFD)
+    vm_object_ref(f->memfd.obj); /* one more instance ref (S4) */
   if (f->type == FILE_TYPE_PIPE)
     pipe_reopen(f->pipe.ptr, f->pipe.end); /* see file_dup: keep the pipe
         end's per-fd count aligned with ref_count */
@@ -790,6 +800,8 @@ void fs_close_global(int g_fd) {
   }
 
   f->ref_count--;
+  if (f->type == FILE_TYPE_MEMFD)
+    vm_object_unref(f->memfd.obj); /* one instance ref goes away (S4) */
   if (f->ref_count == 0) {
     if (f->type == FILE_TYPE_FAT16) {
       fat16_close(f);
@@ -981,6 +993,114 @@ int file_pipe(struct process *cur, int fds[2]) {
   return 0;
 }
 
+/* ---------------------------------------------------------------------
+ * P2.4 (S4, design section 4.3): memfd objects.
+ *
+ * A memfd's backing object lives in the global file table slot
+ * (FILE_TYPE_MEMFD / f->memfd.obj).  Object references mirror the fd's
+ * lifetime: every fd instance holds one reference (the ref_count
+ * increment/decrement sites below) and every region record holds one
+ * more (vm.c), so the object is freed only at the last unref.
+ * ------------------------------------------------------------------- */
+
+/* Resolve an fd to its FILE_TYPE_MEMFD global file; *err carries the
+ * failure (-EBADF for a closed/absent fd, -EINVAL for another type). */
+static struct file *f1_memfd(struct process *p, int fd, int *err) {
+  p = process_group(p); /* P1 (D7): the fd table is group state */
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) {
+    *err = EBADF;
+    return 0;
+  }
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) {
+    *err = EBADF;
+    return 0;
+  }
+  struct file *f = &global_file_table[gfd];
+  if (f->type != FILE_TYPE_MEMFD) {
+    *err = EINVAL;
+    return 0;
+  }
+  *err = 0;
+  return f;
+}
+
+int file_memfd_create(struct process *cur, const char *name, int flags) {
+  (void)name; /* accepted for compat; not visible in the FAT namespace and
+                 not retained (design 4.3) */
+  if (flags & ~(K_MFD_CLOEXEC | K_MFD_ALLOW_SEALING))
+    return -EINVAL;
+  cur = process_group(cur); /* P1 (D7): the fd table is group state */
+  if (!cur || cur->num_open_fds >= MAX_OPEN_FDS)
+    return -EMFILE;
+  int ufd = -1;
+  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+    if (cur->open_fds[i] == -1) {
+      ufd = i;
+      break;
+    }
+  }
+  if (ufd < 0)
+    return -EMFILE;
+
+  struct vm_object *o = vm_object_create(VM_OBJ_MEMFD, 0);
+  if (!o)
+    return -ENOMEM;
+  struct file *f = file_alloc();
+  if (!f) {
+    vm_object_unref(o);
+    return -ENFILE;
+  }
+  f->type = FILE_TYPE_MEMFD;
+  f->memfd.obj = o; /* this fd instance's object reference */
+  f->memfd.mfd_flags = flags & (K_MFD_CLOEXEC | K_MFD_ALLOW_SEALING);
+
+  cur->open_fds[ufd] = get_global_fd(f);
+  cur->num_open_fds++;
+  if (flags & K_MFD_CLOEXEC)
+    cur->fd_cloexec |= (1u << ufd); /* recorded; P5's exec sweep consumes */
+  return ufd;
+}
+
+struct vm_object *file_memfd_obj(struct process *p, int fd) {
+  int err = 0;
+  struct file *f = f1_memfd(p, fd, &err);
+  if (!f || !f->memfd.obj)
+    return 0;
+  return f->memfd.obj;
+}
+
+/* SYS_FTRUNCATE (33) for memfd: sets the object size (design 4.3).
+ * Other file types are not truncatable: -ENOTSUP. */
+int file_ftruncate(struct process *p, int fd, uint64_t size) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS)
+    return -EBADF;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
+    return -EBADF;
+  struct file *f = &global_file_table[gfd];
+  if (f->type != FILE_TYPE_MEMFD)
+    return -ENOTSUP;
+  if (size > VM_OBJ_MAX_BYTES)
+    return -EINVAL;
+  return vm_object_truncate(f->memfd.obj, size);
+}
+
+/* fcntl(F_ADD_SEALS/F_GET_SEALS) for memfd (design 4.3, OQ7 minimal set:
+ * SHRINK/GROW enforced at ftruncate, WRITE recorded advisory). */
+int file_memfd_seals(struct process *p, int fd, int cmd, int arg) {
+  int err = 0;
+  struct file *f = f1_memfd(p, fd, &err);
+  if (!f)
+    return -err;
+  if (cmd == K_F_GET_SEALS)
+    return (int)vm_object_get_seals(f->memfd.obj);
+  if (arg & ~(K_F_SEAL_SEAL | K_F_SEAL_SHRINK | K_F_SEAL_GROW | K_F_SEAL_WRITE))
+    return -EINVAL;
+  return vm_object_add_seals(f->memfd.obj, (uint64_t)arg);
+}
+
 /**
  * Increments the reference count of a global file descriptor.
  * Used during process fork to share open file descriptors with the child.
@@ -994,6 +1114,8 @@ void fs_reopen(int global_fd) {
   uint64_t flags = spinlock_acquire_irqsave(&f->lock);
   if (f->type != FILE_TYPE_EMPTY) {
     f->ref_count++;
+    if (f->type == FILE_TYPE_MEMFD)
+      vm_object_ref(f->memfd.obj); /* one more instance ref (S4) */
     if (f->type == FILE_TYPE_PIPE) {
       pipe_reopen(f->pipe.ptr, f->pipe.end);
     }

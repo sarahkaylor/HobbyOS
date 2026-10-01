@@ -17,8 +17,11 @@ typedef enum {
   FILE_TYPE_FAT16,    /**< Regular file on FAT16 filesystem */
   FILE_TYPE_PIPE,     /**< Anonymous pipe for IPC */
   FILE_TYPE_SOCKET,   /**< Network socket */
-  FILE_TYPE_NFS       /**< Regular file on a mounted NFS export (read-only) */
+  FILE_TYPE_NFS,      /**< Regular file on a mounted NFS export (read-only) */
+  FILE_TYPE_MEMFD     /**< P2.4 (S4): memory file backed by a vm_object */
 } file_type_t;
+
+struct vm_object;
 
 /**
  * Represents an open file instance in the global file table.
@@ -50,6 +53,11 @@ struct file {
       int is_dir;                  /**< Opened entry is a directory */
       int mount_idx;               /**< Index of the mount serving it */
     } nfs;
+    struct {
+      struct vm_object *obj;       /**< P2.4 (S4): memfd backing object;
+                                        holds one object ref per fd instance */
+      int mfd_flags;               /**< MFD_* passed at create (recorded) */
+    } memfd;
   };
 };
 
@@ -66,6 +74,14 @@ int file_read(struct process *p, int fd, void *buf, int size, struct trap_frame 
 int file_write(struct process *p, int fd, const void *buf, int size, struct trap_frame *tf);
 int file_pipe(struct process *p, int fds[2]);
 int file_available(struct process *p, int fd);
+/* P2.4 (S4, design section 4.3): memfd objects.  file_memfd_create
+ * installs a FILE_TYPE_MEMFD fd (fd or -errno); file_memfd_obj resolves
+ * an fd to its backing object (NULL when not a memfd); file_ftruncate
+ * sets the object size (SHRINK/GROW seals enforced). */
+int file_memfd_create(struct process *p, const char *name, int flags);
+struct vm_object *file_memfd_obj(struct process *p, int fd);
+int file_ftruncate(struct process *p, int fd, uint64_t size);
+int file_memfd_seals(struct process *p, int fd, int cmd, int arg);
 int file_connect(struct process *p, uint32_t ip, uint16_t port, int protocol);
 int file_mkdir(struct process *p, const char *path);
 
@@ -144,6 +160,17 @@ struct fd_set_k {
 #define K_F_GETFL      3
 #define K_F_SETFL      4
 #define K_O_NONBLOCK   0x800
+/* P2.4 (S4, design section 4.3): memfd sealing commands + seal bits
+ * (Linux numbers; SHRINK/GROW enforced at ftruncate, WRITE advisory). */
+#define K_F_ADD_SEALS  1033
+#define K_F_GET_SEALS  1034
+#define K_F_SEAL_SEAL  0x0001
+#define K_F_SEAL_SHRINK 0x0002
+#define K_F_SEAL_GROW  0x0004
+#define K_F_SEAL_WRITE 0x0008
+/* memfd_create(2) flags (recorded; MFD_CLOEXEC also arms fd_cloexec). */
+#define K_MFD_CLOEXEC      0x0001
+#define K_MFD_ALLOW_SEALING 0x0002
 
 /* SYS_SOCKET: create a socket and install it in the process fd table.
  * Returns the user fd (>= 0) or -errno (EAFNOSUPPORT, EPROTONOSUPPORT,
