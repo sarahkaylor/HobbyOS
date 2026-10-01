@@ -32,14 +32,6 @@ static int frame_high;      /* high-water mark of frame_used */
 static int block_used;      /* blocks currently claimed as whole units */
 static spinlock_t frame_lock;
 
-/* TEMP (l2-clonefix triage, strip before final): lock-free snapshot
-   getters for the clone heartbeat (called from IRQ context -- must not
-   take frame_lock) + alloc-scan-distance forensics. */
-volatile int g_vmd_fa_scan_max = 0;
-int frame_used_get(void) { return frame_used; }
-int frame_lock_locked(void) { return (int)frame_lock.locked; }
-int frame_hint_get(void) { return (int)frame_hint; }
-
 /* Frame index -> physical address (kernel VA == phys, both arches). */
 static uint64_t frame_phys_of(int idx) {
 #ifdef __x86_64__
@@ -170,7 +162,6 @@ uint64_t frame_alloc(void) {
   uint64_t flags = spinlock_acquire_irqsave(&frame_lock);
   uint64_t res = 0;
   uint32_t hint = frame_hint;
-  int vmd_scanned = 0; /* TEMP (l2-clonefix triage, strip before final) */
 
   /* Find-first-zero-word scan from the rotating hint, wrapping once.
      Sequential allocation (faults, loader, spawns) advances the hint
@@ -182,7 +173,6 @@ uint64_t frame_alloc(void) {
     uint32_t end = (pass == 0) ? FRAME_WORDS : hint;
     for (uint32_t w = start; w < end; w++) {
       uint64_t inv = ~frame_bits[w];
-      vmd_scanned++; /* TEMP */
       if (!inv)
         continue;
       int bit = __builtin_ctzll(inv);
@@ -196,22 +186,6 @@ uint64_t frame_alloc(void) {
     }
   }
   spinlock_release_irqrestore(&frame_lock, flags);
-  /* TEMP (l2-clonefix triage, strip before final): scan-distance
-     forensics, printed outside the lock (uart_lock order). */
-  if (vmd_scanned > g_vmd_fa_scan_max)
-    g_vmd_fa_scan_max = vmd_scanned;
-  if (vmd_scanned > 4096) {
-    extern volatile int g_p8_triage;
-    if (g_p8_triage) {
-      uart_puts("[VMD] FASCAN n=");
-      print_int(vmd_scanned);
-      uart_puts(" hint=");
-      print_int((int)hint);
-      uart_puts(" used=");
-      print_int(frame_used);
-      uart_puts("\n");
-    }
-  }
   return res;
 }
 

@@ -54,9 +54,6 @@ void irq_handler_c(struct trap_frame *tf) {
   } else if (intid == 30) {
     // Timer PPI
     timer_reload();
-    /* TEMP (l2-clonefix triage, strip before final): clone heartbeat. */
-    extern void vmd_heartbeat(void);
-    vmd_heartbeat();
   }
 
   gic_end_interrupt(intid);

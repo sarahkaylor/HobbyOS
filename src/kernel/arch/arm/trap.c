@@ -1793,8 +1793,6 @@ void sync_lower_handler_c(struct trap_frame *tf) {
  * interrupt occurred.
  */
 void irq_lower_handler_c(struct trap_frame *tf) {
-  /* TEMP (l2-clonefix triage, strip before final): clone heartbeat. */
-  extern void vmd_heartbeat(void);
   uint32_t intid = gic_acknowledge_interrupt();
 
   if (intid == TIMER_PPI_INTID) {
@@ -1802,7 +1800,6 @@ void irq_lower_handler_c(struct trap_frame *tf) {
     struct process *cur = current_process();
     if (cur) {
       timer_reload();
-      vmd_heartbeat();
       gic_end_interrupt(intid);
       schedule(tf, 0);
       /* P5 S3 (D8.4a): schedule() returns only when this process kept the
@@ -1813,7 +1810,6 @@ void irq_lower_handler_c(struct trap_frame *tf) {
     }
     // Not under scheduler — just reload and continue
     timer_reload();
-    vmd_heartbeat(); /* TEMP (l2-clonefix triage, strip before final) */
   } else if (intid == virtio_blk_irq) {
     virtio_blk_handle_irq();
   } else {
