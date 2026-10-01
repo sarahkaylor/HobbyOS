@@ -686,45 +686,60 @@ regressions in existing wave. **Gate P1 CLOSED 2026-09-30** — lane gate
 TLS_T 6/6); boot delta ARM +0.09 s / x64 ~0; merged-tip batteries: see §11.
 
 ### P2 — VM & memory overhaul  *(new; Track B, the deepest kernel item)*
-*(S1–S3 delivered 2026-09-30 (`c1214c5`/`f0e8473`/`6cbd49e`) — frame
-allocator, address-space v2, demand-zero mmap family; S4 (memfd/MAP_SHARED/fb/
-pthread-guard stacks) and S5 (crt0/TLS sweep + fatal-fault exerciser) remain.
-Details §11 Wave 1e; design `docs/browser/p2-vm-design.md`.)*
+*(S1–S5 delivered and merged — S1–S3 2026-09-30 (`c1214c5`/`f0e8473`/`6cbd49e`):
+frame allocator, address-space v2, demand-zero mmap family; S4/S5 on
+`browser/l2-p2-s45` (`b6b85c1`), merged 2026-10-01 as `e017069` + post-merge
+integration fixups (`88f680c`/`058547d`/`1aaa3b2`): memfd/MAP_SHARED/fb/
+pthread-guard stacks, crt0/TLS sweep + fatal-fault exerciser, v2 exec +
+routing flip, TLS/ASID/waitpid fixes. Details §11 Wave 1e + Wave 1f tail;
+design `docs/browser/p2-vm-design.md`.)*
 
-- [ ] **P2.1 Address-space model v2** — per-process *sparse* VA (multi-GB
+- [x] **P2.1 Address-space model v2** — per-process *sparse* VA (multi-GB
       range), region lists; unmapped-hole faults become clean segmentation
       errors (not crashes of others); document the model in `docs/`.
       **Done (S2):** per-AS arm L1+L3 / x64 PML4+PDPT roots, 4 KiB leaves,
       USER_VA_BASE `0x1_0000_0000`, sparse 32 GiB window; HOLE faults kill
       only the faulting process (prev-round leaks fixed by construction).
-- [ ] **P2.2 Demand-zero anonymous pages** — fault → allocate zeroed physical
+- [x] **P2.2 Demand-zero anonymous pages** — fault → allocate zeroed physical
       on first touch; reclaim policy for never-touched overcommit; page-pool
       growth (current 40×32 MiB pool is the floor; add growth + accounting).
       **Done (S3):** demand-zero on both arches; frame accounting = 4 KiB
       bitmap; OOM kills the faulting process (swap out of scope, design D6).
-- [ ] **P2.3 mmap family v2** — `mmap` (anon + `MAP_SHARED` + fd-backed),
+- [x] **P2.3 mmap family v2** — `mmap` (anon + `MAP_SHARED` + fd-backed),
       `munmap`, `mprotect`, `madvise` (advisory ok), `mremap` (verify need),
       guard pages; libc wrappers (F2 gap). **Anon + munmap/mprotect/madvise +
       guard/segv rules done (S3)** (rows 62 6-arg, 81, 82; `SYS_MAX` 75→82);
-      `MAP_SHARED`/fd-backed/memfd and `mremap` = S4.
-- [ ] **P2.4 Shared memory** — `memfd`-style anonymous file fd (proposed
+      `MAP_SHARED`/fd-backed/memfd done (S4): rows 80–82 through the v2
+      object layer (memfd slabs, MAP_SHARED instance refcounts,
+      `F_ADD_SEALS`/`F_GET_SEALS` with Linux numbers); `mremap` verified
+      unnecessary (no consumers in-tree).
+- [x] **P2.4 Shared memory** — `memfd`-style anonymous file fd (proposed
       `SYS_MEMFD_CREATE`, §A.1b) + `MAP_SHARED` mapping = the WebKit
       shared-memory primitive; tests: two processes write/read shared pages.
-      (row 80 frozen in `syscall.h`; implementation = S4.)
-- [ ] **P2.5 Loader v2** — load images up to the new budgets into demand-
+      **Done (S4):** `SYS_MEMFD_CREATE` (row 80) both arches; anonymous
+      file objects (truncate via `ftruncate`) with Linux-numbered seals;
+      `MAP_SHARED` instance refcounting — two-process shm covered by the
+      merged vm unit tests.
+- [x] **P2.5 Loader v2** — load images up to the new budgets into demand-
       mapped regions; measure load time for ~30–60 MiB blobs (record);
       keep read-path loader as the mechanism initially. **Done (S2):**
       IMAGE-only commit, 8 MiB stack + heap + mmaps demand-materialize
       (`v2 loader: PID=49 entry=0x100000000 sp=0x180000000 resident=2
-      tables=3`); large-blob load timing still to measure (S5).
-- [ ] **P2.6 Regression sweep** — all existing tests re-run; document any
+      tables=3`); **S5:** v2 is the routing default (rollback lever at the
+      AS_V2 selection line); large-blob timing recorded as an extrapolation
+      (≈12–17 MB/s ⇒ 30 MiB ≈ 1.7–2.6 s / 60 MiB ≈ 3.4–5.2 s) — direct
+      measurement is blocked by a pre-existing >1 MiB fat16 create-path
+      defect (`attr=0` entries; `v2 loader: bad image size 0`).
+- [x] **P2.6 Regression sweep** — all existing tests re-run; document any
       behavior changes (fix log §11); boot-time delta recorded. **Suite
-      re-runs green per stage** (S2→S3 wave counts byte-identical; host
-      482/0; unit-arm 66/0; unit-x64 68/0); boot-delta recording pending (S5).
+      re-runs green per stage** (S2→S3 wave counts byte-identical);
+      **final at `1aaa3b2`:** host 482/0, unit-arm 291/0, unit-x64 293/0,
+      ARM wave 0 FAIL + `System halt`; **boot delta −3.05 s** (median
+      5.93 s vs 8.98 s baseline; budget ≤ +0.5 s ✓).
 
 **Gate P2:** memory stress suite (map/fault/free loops, shared-page test,
 two-process shm test, existing suites) green both arches; boot delta within
-recorded budget.
+recorded budget. **Met at `1aaa3b2`** (batteries §11).
 
 ### P3 — libc++ & C++ runtime  *(new; Track B)*
 
@@ -1459,6 +1474,52 @@ curl -sI https://lite.cnn.com | grep -i content-length
     `alloc_entry_in_dir`).  Round-3 continuation active (WIP already committed;
     fix-forward).  Its record appends here when green; Wave 1f then closes
     formally and Wave 1g proceeds.
+
+- 2026-10-01 — **Wave 1f tail: P2 S4/S5 — MERGED AND VERIFIED; Wave 1f formally
+  CLOSED** — `browser/l2-p2-s45` (`b6b85c1`) merged as **`e017069`** (parents
+  `9d691b7` + `b6b85c1`) plus three post-merge integration fixups found by the
+  merged-tip batteries: **`88f680c`** (user-space `ftruncate` duplicate — S4
+  `mman.c` vs P6.1 `src/user/libc.c`; kept the universally-linked one),
+  **`058547d`** (ICU intel cross-build needs `-mcmodel=large`: the S5 flip's
+  USER_IMG_BASE breaks its configure link tests (`unknown endianness`) and the
+  archive link otherwise), **`1aaa3b2`** (**v2 loader env-blob inheritance**:
+  the S5 flip routes all wave/spawn loads through `load_and_run_program_v2`,
+  which predated P6.3 and copied only pid/cwd/fds — PROCTEST `spawn2 child
+  inherits env blob` failed on both machines at the merged tip; fixed and
+  wave-verified).
+  - Reconciliation: 7 conflicted files / 20 hunks — P5 reap machinery unified
+    (`reap_deliver_locked` kept; the branch's `proc_write_user_u32` retired —
+    no remaining users); argv = marshal→blob→install with the branch's v2
+    pointer validation folded in; `file_ftruncate` = FAT16+memfd union; the
+    v2 exec path now applies env + signal-state + FD_CLOEXEC + argv like v1
+    (integration gap fixed during the merge); duplicate-artifact sweep removed
+    both-sides additions (`vm_arch_leaf_phys` ×2 arches, `ftruncate`
+    defs/decls, dead S4 dispatch arms, the global `sys_ftruncate` wrapper).
+  - Lane evidence: round-3 waves 10+11 consecutive green on the TEMP-free tree
+    (78.3 s / 62.3 s; 19/19 suites; 0 FAIL); post-wave sector 0 `eb 3c 90`;
+    boot delta −3.05 s (median 5.93 s vs 8.98 s baseline; budget ≤ +0.5 s);
+    LANE GATE OK.
+  - Merged-tip batteries at `1aaa3b2` (local + CI VM): LOCAL host 482/0
+    (`TEST EXIT: 0`), unit-arm **291/0**, unit-x64 **293/0** (KVM), ARM wave
+    **0 FAIL + `System halt` + 15 summaries** (`/tmp/w1fc_*.log`). VM: host
+    rc=0 (`w1fcg`/`w1fch`), unit-arm rc=0 (both); unit-x64 rc=0 (`w1fch`;
+    `w1fcg` missed it — the sync had skipped `git checkout -- third_party/`,
+    leaving the pre-fix ICU script); test-arm rc=0 at `w1fcg` **and** green
+    rerun `w1fch2` (0 FAIL tokens; `w1fch` itself took one documented
+    slot-pressure transient — below).
+  - Documented/known: **thread-slot transients in CI waves** — sustained
+    63/63 exhaustion amid the SHTEST3 fork-burst outlasts the shim's ~2 s
+    EAGAIN retry, failing launch-hungry checks (observed: CXX_T
+    `condvar_wait_notify` at `w1gf`; THRD_T `futex-wake` at `w1fch` with
+    `no free slot (used=63/63 done=0)` forensics; ~2/3 recent VM waves, 0
+    local); kernel rejects correctly — recommended follow-up: make those two
+    checks tolerate a failed launch. Also: the fat16 >1 MiB create-path
+    `attr=0` defect (pre-existing, out of scope) blocks direct blob-timing
+    (extrapolation 12–17 MB/s recorded, P2.5).
+  - **Wave 1f formally closed** — part-1 (`a7b7330`…`1b517f7`) + tail
+    (`e017069` + fixups `88f680c`/`058547d`/`1aaa3b2`); §6 P2.1–P2.6 ticked;
+    Wave 1g carries on (P5 S3/S5 + P8 next).
+
 
 - 2026-09-30 — **Wave 1e — batteries: GREEN both machines at `9a939e5`** —
   first merged-tip attempt, no defects found (contrast Wave 1d's RED #1).
