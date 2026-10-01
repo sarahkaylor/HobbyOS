@@ -135,8 +135,9 @@ int munmap(void *addr, size_t length) {
   return (int)hb_errno_ret(r);
 }
 
-/* P2.4 (S4, design sections 4.1/4.3): mprotect/madvise (rows 81/82),
- * memfd_create (row 80) and ftruncate (row 33, memfd only). */
+/* P2.4 (S4, design sections 4.1/4.3): mprotect/madvise (rows 81/82) and
+ * memfd_create (row 80).  (ftruncate lives in src/user/libc.c: one
+ * definition for every link flavour.) */
 int mprotect(void *addr, size_t len, int prot) {
   long r = hb_syscall4(SYS_MPROTECT, (long)addr, (long)len, (long)prot, 0);
   return (int)hb_errno_ret(r);
@@ -154,11 +155,6 @@ int memfd_create(const char *name, unsigned int flags) {
     return -1;
   }
   return (int)r;
-}
-
-int ftruncate(int fd, off_t length) {
-  long r = hb_syscall4(SYS_FTRUNCATE, (long)fd, (long)length, 0, 0);
-  return (int)hb_errno_ret(r);
 }
 
 #else /* HOST_TEST */
