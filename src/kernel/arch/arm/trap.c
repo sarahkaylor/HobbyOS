@@ -1340,6 +1340,23 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       uart_puts(is_exec ? "x" : " ");
       uart_puts(" in=");
       uart_puts(why);
+      /* TEMP(triage): AS-switch invariant at kill time -- hardware TTBR0
+         vs this process's AS root (remove before final). */
+      {
+        uint64_t t0;
+        __asm__ volatile("mrs %0, ttbr0_el1" : "=r"(t0));
+        extern int vm_arch_dbg_live(void);
+        uart_puts(" cpu=");
+        print_int(get_cpuid());
+        uart_puts(" ttbr0=");
+        uart_print_hex(t0);
+        uart_puts(" asroot=");
+        uart_print_hex(gcur->as->root_phys);
+        uart_puts(" asid=");
+        print_int((int)gcur->as->asid);
+        uart_puts(" live=");
+        print_int(vm_arch_dbg_live());
+      }
       /* TEMP S5 triage: register dump for killed faults (remove me). */
       {
         uint64_t tp;

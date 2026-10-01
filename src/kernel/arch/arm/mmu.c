@@ -390,7 +390,9 @@ static uint64_t arm_v2_leaf_desc(uint64_t phys, uint16_t prot, uint16_t kind) {
 }
 
 static void arm_v2_flush_va(uint16_t asid, uint64_t va) {
-  uint64_t op = ((va >> 12) & 0xFFFFFFFFFFFULL) | ((uint64_t)asid << 48);
+  /* 8-bit ASID config: the TLBI operand's ASID sits in [63:56] (see the
+     TTBR0 encoding note in vm_arch_switch). */
+  uint64_t op = ((va >> 12) & 0xFFFFFFFFFFFULL) | ((uint64_t)asid << 56);
   __asm__ volatile("dsb ishst\n"
                    "tlbi vae1is, %0\n"
                    "dsb ish\n"
@@ -515,8 +517,13 @@ void vm_arch_switch(struct addr_space *as) {
   uint32_t cpu = get_cpuid();
   v2_active_root[cpu] = as->root_phys;
   __asm__ volatile("dsb sy" ::: "memory");
+  /* TCR_EL1.AS=0 (cortex-a53/v8.0): the 8-bit ASID lives in TTBR0[63:56]
+     -- NOT [15:0] (that is BADDR).  With the old encoding every AS ran as
+     ASID 0, so the flush-free v2->v2 switch served the previous process's
+     TLB entries: cross-process translations, "present but hardware
+     faulted" kills, and image bytes from the wrong program. */
   __asm__ volatile("msr ttbr0_el1, %0" ::"r"(as->root_phys |
-                                             (uint64_t)as->asid));
+                                             ((uint64_t)as->asid << 56)));
   if (!v2_live[cpu]) {
     /* v1 -> v2 mode change: the v1 overlay leaves are global and may be
        cached; full local flush.  v2 -> v2 is TTBR0 + isb only. */
@@ -534,6 +541,11 @@ void vm_arch_switch(struct addr_space *as) {
    already there.  Required (a) when a CPU stops running a v2 AS (v1
    switch, idle entry) and (b) before an AS's table frames are freed --
    continuing to run on a freed root is instant corruption. */
+/* TEMP(triage): expose v2 mode state for the fault dump (remove before final). */
+int vm_arch_dbg_live(void) {
+  return v2_live[get_cpuid()];
+}
+
 void vm_arch_restore_kernel(void) {
   uint32_t cpu = get_cpuid();
   if (!v2_live[cpu] && !v2_active_root[cpu])
@@ -583,11 +595,12 @@ void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
     }
     frame_free(l2p);
   }
-  /* ASID free/reuse: broadcast-invalidate before the root is released. */
+  /* ASID free/reuse: broadcast-invalidate before the root is released.
+     Operand ASID in [63:56] (8-bit config, see vm_arch_switch). */
   __asm__ volatile("dsb ishst\n"
                    "tlbi aside1is, %0\n"
                    "dsb ish\n"
-                   "isb" ::"r"((uint64_t)asid << 48)
+                   "isb" ::"r"((uint64_t)asid << 56)
                    : "memory");
   frame_free(root_phys);
 }
