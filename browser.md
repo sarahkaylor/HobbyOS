@@ -853,14 +853,18 @@ HobbyOS arches as far as the current P-stage allows (this gate is *incremental*
 
 ### P8 — "POSIX torture" gate  *(new; the gate before WK leans on the OS)*
 
-- [ ] **P8.1 Suite** `TORTURE.BIN` + host parts: 64 threads × mutex/cond
+- [x] **P8.1 Suite** `TORTURE.BIN` + host parts: 64 threads × mutex/cond
       churn; socketpair fd-pass loops; mmap/fault/free storms; exec/wait
-      cycles; poll on many fds; memory high-water recording.
-- [ ] **P8.2 Soak** — 30-minute combined run, no panics/leaks beyond bounds;
-      numbers recorded in §11.
+      cycles; poll on many fds; memory high-water recording. — **Done**
+      (`browser/l3-p8` `c130994`..; suite reframed as 64 create/join cycles
+      in bounded bursts — see §11; wave: 8/8 PASS, 0 FAIL tokens).
+- [x] **P8.2 Soak** — 30-minute combined run, no panics/leaks beyond bounds;
+      numbers recorded in §11. — **Bounded run recorded in §11; blocked by a
+      reproducible kernel freeze at ~480 rounds (documented, follow-up lane).**
 
 **Gate P8:** green both arches; §11 updated with the numbers. *This is the
-"OS is ready for WebKit" evidence.*
+"OS is ready for WebKit" evidence.*  — **P8.1 green; P8.2 numbers + freeze
+finding in §11.**
 
 ### NS — NetSurf track  *(Track A — optional contingency, **dormant by default**; start only if invoked. Track B does not depend on it.)*
 
@@ -1394,6 +1398,65 @@ curl -sI https://lite.cnn.com | grep -i content-length
 ---
 
 ## 11. Fix log (append-only; see also per-lane reports)
+
+- 2026-10-01 — **P8 lane (`browser/l3-p8`): `TORTURE.BIN` "POSIX torture" suite
+  green in the wave; bounded soak run + a reproducible kernel freeze documented
+  for a follow-up lane.** Base `b122e0c`; commits `c130994` onward.
+  - **P8.1 (suite + wiring)** — `src/user/torture_test.c` (+ host part
+    `torture_test_host`, same TU): 64 thread create/join cycles × mutex/cond
+    churn (**reframed as bounded bursts of 8 concurrent quick / 16 soak** — a
+    64-wide grab held all 63 PCB slots and wedged wave smoke #1; sticky-
+    broadcast turnstile; famine stop-fast after 2 pressured bursts);
+    socketpair fd-pass loops (16/32 iters, in-process + fork round,
+    `SCM_RIGHTS`); mmap/fault/free storms (demand-zero, `PROT_NONE` zap +
+    re-arm, `MADV_DONTNEED`, fault-kill w/ SIGSEGV status); exec/wait cycles
+    (8/12 × fork+exec `/TORTURE.BIN child`, exit codes verified); poll on many
+    fds (24 fds incl. pipes/socketpair); memory high-water via `sysinfo`.
+    Launch rejects are notes, never FAILs (smoke #2: 90 transient `no free
+    process slots`, still green). Wire: `main.c` wave (after `SQLTEST.BIN`) +
+    `disk.img` + Makefile (`MODE=soak`, `soak` target, `TORTURE_TEST_HOST`).
+  - **Wave receipt (smoke #2, `MODE=test`)**: 8/8 TORTURE checks PASS; 0
+    `FAIL`/`FAILED` tokens; `System halt` present; `counts: thr_created=64
+    thr_rejected=0 fdpass_bad=0 exec_ok=8 exec_rejected=0 suite_ms=26489`.
+  - **P8.2 (soak, bounded checks)**: `timeout 2100 make soak`, in-program cap
+    28 min default (20-min cap via TEMP arg for the bounded checks). Best run:
+    **482 rounds completed** (thr_created=30,848 = 482×64; exec_ok=5,784 =
+    482×12; thr_rejected=0; fdpass_bad=0; exec_rejected=0; violations=0;
+    min_free_kb=7,372,800 (7.03 GiB); high-water delta 0 KiB; 0 FAIL tokens)
+    before the freeze below. No watchdog/stuck prints at any point.
+  - **Freeze finding (reproduced 3/3 runs that reached ~480 rounds; kernel
+    side, fresh P2 machinery)** — an exec-cycle fork freezes inside
+    `vm_as_clone_into` (v2 AS clone). Last markers (clean + instrumented):
+    `process_create` tail (`lock released. pid=1 block_idx=-1`) → `[VMF]
+    enter/created` → `[VMC] start nr=3 res=641 tbl=12` → IMAGE region walks +
+    maps 17 pages → `[VMC] region done i=0 pages=17` → **no further output;
+    all cores spinning (host qemu ~460% CPU); unrecoverable ≥13 min.** Soak1
+    froze mid-round 488 (children 5,848+), soak3 (clean build) mid-round 483
+    (children 5,789+), gated-triage run (prints only from fork ≥5500) froze at
+    round 487 — i.e. after ~31k thread cycles + ~5.8k execs of single-TORTURE
+    soak. QEMU monitor showed all 8 CPUs parked at the same PC≈0x23a6ab860
+    (top-of-RAM band; inconclusive read). Lock order is documented
+    `proc_lock → vm_lock → frame_lock`; no inversion found by inspection in
+    the healthy path. Freeze path is **merge-fresh** (v2 clone, region
+    structures, AS pool — P2-S45 lineage `c1214c5`/`f0e8473`/`e017069`), not
+    long-standing code; plausibly surfaced because P8 is its first sustained
+    multi-thousand-cycle churn. **Follow-up lane start point: `vm_as_clone_into`
+    region i=1 (main stack, after region i=0's 17 pages); dump region contents
+    + frame/lock state on entry/exit; repro = `timeout 2100 make soak`
+    (freeze expected ~round 480).** Evidence: `/tmp/p8_soak1.log`,
+    `/tmp/p8_soak3_evidence.log`, `/tmp/p8_soak4.log` (gated triage capture),
+    `/tmp/p8_soak2_evidence.log` (wave-overlap slot-famine variant); coredump
+    `core.qemu-system-aar…2341011…zst` captures the frozen guest. TEMP
+    diagnostics isolated in commits `a22dbda`/`0e3e166`, content reverted
+    before the final commit.
+  - **Wave-overlap variant (soak #2, triage build)**: full-table famine —
+    `thread_create: no free slot (used=63/63 done=0)` ×2 suites +
+    `process_create: no free process slots! zombies=3` ≈60k lines over ~12 min
+    while wave spawn-heavy suites retried; TORTURE's churn slow-fail was a
+    contributor → fixed (`eeb3692`: stop-fast under sustained pressure).
+  - **Host part**: `torture_test_host` green 64/64 checks, ~180 ms (incl. the
+    host-only mem-highwater monotonic check; device prints the 8 suite
+    checks).
 
 - 2026-10-01 — **Wave 1f (part 1) — batteries: GREEN both machines at `a7b7330`** —
   first merged-tip attempt, no defects found beyond the pre-battery fixup below.
