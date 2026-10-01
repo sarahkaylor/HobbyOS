@@ -1438,6 +1438,13 @@ curl -sI https://lite.cnn.com | grep -i content-length
     touched files.  Fidelity note: the FP/SIMD save-restore is exercised
     functionally (handler FP math across SIGRETURN) but not register-window
     exact; `SIGUSR1` tenure remains D13's deferred item.
+  - x64 wave attempted (KVM, bounded): reached the documented pre-existing
+    late-IDLESTUCK signature right after STRESS.BIN/FPU_T completed (~60+
+    suites in, zero exception/panic markers; `/tmp/l2p5_wave_x64.log`) —
+    SIG_T.BIN not reached on x64.  Per the F1 convention the x64 evidence is
+    unit-x64 green + no NEW wave signature; the x64 delivery paths were still
+    exercised (fork-heavy suites raise SIGCHLD pending -> the DFL path runs
+    at their trap exits/resumes with no incidents).
 
 - 2026-10-01 — **Wave 1f (part 1) — batteries: GREEN both machines at `a7b7330`** —
   first merged-tip attempt, no defects found beyond the pre-battery fixup below.
