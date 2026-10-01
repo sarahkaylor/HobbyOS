@@ -272,6 +272,14 @@ static void test_wave_loader(void *arg) {
      thread-torture suites is cheapest. */
   load_and_run_program_v2("MMTEST.BIN", -1, -1, -1, -1, 0);
 
+  /* l3-icu-wire (browser L6): ICU 78.3 target acceptance — ICUSMK.BIN calls
+     the data-free ICU C API subset (u_strlen, U8/U16 iteration macros, ASCII
+     u_tolower, u_errorName, u_getVersion) over the target libicuuc.a +
+     libcxx.a + libc.a closure; no libicudata.a is linked (see
+     docs/browser/icu-usage-note.md).  Spawns nothing; one slot, positioned
+     last so the process-table churn of the earlier suites has drained. */
+  load_and_run_program_in_scheduler("ICUSMK.BIN", -1, -1, -1, -1);
+
   extern void kernel_exit(void);
   kernel_exit();
 }

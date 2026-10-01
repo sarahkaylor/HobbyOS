@@ -226,6 +226,13 @@ IPC_T_BIN = $(OBJ_DIR)/ipc_test.bin
 # acceptance.  MMTEST.BIN is 8.3-safe, linked with linker_v2.ld at
 # USER_IMG_BASE and loaded by loader v2 (no crt0, like MEMTEST).
 MMTEST_T_BIN = $(OBJ_DIR)/mmtest.bin
+# l3-icu-wire (browser L6): ICU 78.3 target acceptance.  ICUSMK.BIN is
+# 8.3-safe and links the target ICU archive set data-FREE (libicuuc.a only:
+# u_strlen + UTF iteration + ASCII u_tolower + u_errorName + u_getVersion;
+# see docs/browser/icu-usage-note.md).  The archive is produced on demand
+# by third_party/icu-78.3/build-target.sh (self-healing fetch -> host tools
+# -> target configure/make -> link probe -> MANIFEST).
+ICU_SMOKE_BIN = $(OBJ_DIR)/icusmk.bin
 ERRNO_TEST_BIN = $(OBJ_DIR)/errtest.bin
 # Phase F1 (browser.md): socket/select acceptance + deterministic select
 # checks + SYS_GETRANDOM entropy (see main.c's KERNEL_MODE_TEST wave).
@@ -649,6 +656,37 @@ $(CXX_RTTI_T_BIN): $(OBJ_DIR)/cxx_rtti_t.o $(OBJ_DIR)/libcxx.a $(OBJ_DIR)/libc.a
 $(OBJ_DIR)/libcxx.a: $(LIBCXX_VENDOR)/build-target.sh $(LIBCXX_VENDOR)/sources.txt $(LIBCXX_VENDOR)/config/__config_site
 	@mkdir -p $(OBJ_DIR)
 	bash $(LIBCXX_VENDOR)/build-target.sh --arch $(ARCH) --objdir $(OBJ_DIR)/libcxx --out $@
+
+# --- l3-icu-wire (browser L6): ICU 78.3 target archives + smoke ----------
+# build-target.sh is the single entry point (fetch -> host tools -> target
+# configure/make -> nm spot-check -> link probe -> MANIFEST).  It self-heals
+# every gitignored piece (tarball, extracted src/, host buildroot, objdir),
+# so the committed scripts are the ONLY prerequisites a fresh checkout
+# needs; MANIFEST.txt is the evidence file (probe status + archive hashes).
+# Additive by design: this lane touches no other build step.
+ICU_DIR = third_party/icu-78.3
+ICU_MANIFEST = $(OBJ_DIR)/icu/MANIFEST.txt
+
+$(ICU_MANIFEST): $(ICU_DIR)/build-target.sh $(ICU_DIR)/fetch.sh $(ICU_DIR)/build-host.sh $(ICU_DIR)/config/mh-unknown $(ICU_DIR)/data-filter-en.json $(ICU_DIR)/probe/icu_target_probe.cpp
+	@mkdir -p $(OBJ_DIR)/icu
+	bash $(ICU_DIR)/build-target.sh --arch $(ARCH)
+
+# Guard against a hand-deleted archive under an up-to-date MANIFEST: the
+# script re-stages the archives and rewrites the manifest (~1s warm).
+$(OBJ_DIR)/icu/libicuuc.a: $(ICU_MANIFEST)
+	@test -f $@ || bash $(ICU_DIR)/build-target.sh --arch $(ARCH)
+
+# The smoke TU compiles against the extracted ICU headers (gitignored,
+# created by the manifest rule) with the house user flags;
+# -ffunction-sections + the link's --gc-sections keep the image far below
+# the 1 MB user-image loader cap (program_loader.c MAX_PROGRAM_SIZE).
+$(OBJ_DIR)/icu_smoke.o: src/user/icu_smoke.c $(USER_LIBC) $(USER_HDRS) $(ICU_MANIFEST)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -ffunction-sections -I$(ICU_DIR)/src/source/common -I$(ICU_DIR)/src/source/i18n -c $< -o $@
+
+$(ICU_SMOKE_BIN): $(OBJ_DIR)/icu_smoke.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/icu/libicuuc.a $(OBJ_DIR)/libcxx.a $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start --gc-sections -o $(OBJ_DIR)/icusmk.elf $(OBJ_DIR)/icu_smoke.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/icu/libicuuc.a $(OBJ_DIR)/libcxx.a $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/icusmk.elf $(ICU_SMOKE_BIN)
 
 $(ERRNO_TEST_BIN): $(OBJ_DIR)/user_errno_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/errno_test.elf $^
@@ -1364,7 +1402,7 @@ $(XEYES_BIN): $(OBJ_DIR)/xeyes_main.o $(X11_LIB_OBJS) $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/xeyes.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/xeyes.elf $(XEYES_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -1522,6 +1560,7 @@ endif
 	$(MCOPY) -i disk.img $(NANO_BIN) ::/NANO.BIN
 	$(MCOPY) -i disk.img $(MONITOR_BIN) ::/MONITOR.BIN
 	$(MCOPY) -i disk.img $(MONITOR_TEST_BIN) ::/MONITORT.BIN
+	$(MCOPY) -i disk.img $(ICU_SMOKE_BIN) ::/ICUSMK.BIN
 	echo "HobbyOS Terminal Test File" > SHTEST.TXT
 	echo "This is line number two." >> SHTEST.TXT
 	echo "Line three is right here." >> SHTEST.TXT
