@@ -263,6 +263,7 @@ static void test_wave_loader(void *arg) {
      socketpair + poll + SCM_RIGHTS fd passing, forks children.  LATE for
      the same reason as THRD_T (process-table churn). */
   load_and_run_program_in_scheduler("IPC_T.BIN", -1, -1, -1, -1);
+
   /* P2.2 (S2): v2 address-space acceptance.  MMTEST.BIN is the first
      AS_V2 program in the wave: loader v2 maps its image into fresh 4 KiB
      frames at USER_IMG_BASE (64 GiB) and commits the top of the v2 main

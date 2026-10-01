@@ -967,7 +967,8 @@ int file_dup(struct process *cur, int fd) {
     usock_reopen(f->usock.ptr, f->usock.end); /* P4: same ref discipline */
   spinlock_release_irqrestore(&f->lock, flags);
   cur->open_fds[newfd] = g_fd;
-  cur->fd_cloexec &= ~(1u << newfd); /* P5 (D3.2): dup clears CLOEXEC */  cur->num_open_fds++;
+  cur->fd_cloexec &= ~(1u << newfd); /* P5 (D3.2): dup clears CLOEXEC */
+  cur->num_open_fds++;
   return newfd;
 }
 
@@ -995,7 +996,8 @@ int file_dup2(struct process *cur, int oldfd, int newfd) {
     usock_reopen(f->usock.ptr, f->usock.end); /* P4 */
   spinlock_release_irqrestore(&f->lock, flags);
   cur->open_fds[newfd] = g_fd;
-  cur->fd_cloexec &= ~(1u << newfd); /* P5 (D3.2): dup2 clears CLOEXEC */  cur->num_open_fds++;
+  cur->fd_cloexec &= ~(1u << newfd); /* P5 (D3.2): dup2 clears CLOEXEC */
+  cur->num_open_fds++;
   return newfd;
 }
 

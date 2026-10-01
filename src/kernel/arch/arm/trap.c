@@ -607,7 +607,8 @@ static void sys_write(struct trap_frame *tf) {
          rich negative errno (e.g. -EPIPE from a closed pipe peer) passes
          through; only the legacy -1 keeps the historical EBADF mapping
          for the older backends.  -2 is the restart marker handled above. */
-      tf->regs[0] = (ret == -1) ? (uint64_t)-EBADF : (uint64_t)(int64_t)ret;    } else {
+      tf->regs[0] = (ret == -1) ? (uint64_t)-EBADF : (uint64_t)(int64_t)ret;
+    } else {
       tf->regs[0] = ret;
     }
   } else {
@@ -1503,7 +1504,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     } else if (syscall_num == SYS_SENDMSG) {
       sys_sendmsg(tf);
     } else if (syscall_num == SYS_RECVMSG) {
-      sys_recvmsg(tf);    } else {
+      sys_recvmsg(tf);
+    } else {
       uart_puts("Unknown System Call Invoked!\n");
       tf->regs[0] = -ENOSYS;
     }
