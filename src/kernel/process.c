@@ -557,13 +557,10 @@ static int phys_block_alloc_locked(void) {
   return -1;
 }
 
-/* TEMP (P8 triage, strip before final): fork-path window marker gate. */
-volatile int g_p8_triage = 0;
-
 /* Shared process-creation body.  Never waits for memory; see
- * process_create() for why.  P2.2 (S2): `ver` selects the backing -- AS_V1
- * takes a 32 MiB block (today's semantics), AS_V2 takes an address space
- * and no block. */
+ * process_create() for why.  P2.2 (S2): `ver` selects the backing --
+ * AS_V1 takes a 32 MiB block (today's semantics), AS_V2 takes an
+ * address space and no block. */
 static int process_create_internal_ver(int ver) {
   uart_puts("Inside process_create: acquiring lock...\n");
   int pid = -1;
@@ -766,20 +763,15 @@ static int process_create_internal_ver(int ver) {
   /* P2.2 (S2): give the v2 slot its address space (root + region array).
      Failure frees the slot; the caller (loader v2) treats it as OOM. */
   if (ver == AS_V2) {
-    struct addr_space *as2;
-    if (g_p8_triage)
-      uart_puts("[VMD] as create...\n");
-    as2 = vm_as_create((uint64_t)pid);
-    if (!as2) {
+    struct addr_space *as = vm_as_create((uint64_t)pid);
+    if (!as) {
       uint64_t f2 = spinlock_acquire_irqsave(&proc_lock);
       p->state = PROC_STATE_FREE;
       spinlock_release_irqrestore(&proc_lock, f2);
       uart_puts("[KERNEL] process_create_v2: no address space!\n");
       return -1;
     }
-    p->as = as2;
-    if (g_p8_triage)
-      uart_puts("[VMD] as ok\n");
+    p->as = as;
   }
 
   return pid;
@@ -1895,19 +1887,6 @@ int process_fork(struct trap_frame *tf) {
   struct process *parent = current_process();
   if (!parent)
     return -1;
-  /* TEMP (P8 triage, strip before final): print-free until the freeze
-     window (~fork 5500 of the soak run), then full markers. */
-  {
-    static long p8_fork_seq;
-    p8_fork_seq++;
-    if (p8_fork_seq >= 5500)
-      g_p8_triage = 1;
-    if (g_p8_triage) {
-      uart_puts("[VMF] enter seq=");
-      print_int((int)p8_fork_seq);
-      uart_puts("\n");
-    }
-  }
 
   /* P1 (OQ5, binding): the child is a single-threaded copy of the CALLER.
      A fork from a secondary thread copies the shared group block (identical
@@ -1921,11 +1900,6 @@ int process_fork(struct trap_frame *tf) {
   int child_pid = group->as ? process_create_v2() : process_create();
   if (child_pid < 0)
     return -1;
-  if (g_p8_triage) {
-    uart_puts("[VMF] created pid=");
-    print_int(child_pid);
-    uart_puts("\n");
-  }
 
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   struct process *child = &proc_table[child_pid];
@@ -1952,8 +1926,6 @@ int process_fork(struct trap_frame *tf) {
       uart_puts("[KERNEL] fork: AS clone failed\n");
       return -1;
     }
-    if (g_p8_triage)
-      uart_puts("[VMF] cloned\n");
   } else {
     kmemcpy((void *)child->user_phys_base, (void *)group->user_phys_base,
             USER_INITIAL_CLEAR_SIZE);
@@ -1979,8 +1951,6 @@ int process_fork(struct trap_frame *tf) {
       fs_reopen(child->open_fds[i]);
     }
   }
-  if (g_p8_triage)
-    uart_puts("[VMF] fds\n");
 
   /* Child inherits the parent's heap top and anonymous mappings (like the
      data segment: fork shares the address-space layout, exec re-sets it). */
@@ -1995,8 +1965,6 @@ int process_fork(struct trap_frame *tf) {
 
   child->state = PROC_STATE_READY;
   spinlock_release_irqrestore(&proc_lock, flags);
-  if (g_p8_triage)
-    uart_puts("[VMF] ready\n");
   return child_pid;
 }
 

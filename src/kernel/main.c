@@ -297,9 +297,8 @@ static void test_wave_loader(void *arg) {
      (KERNEL_SOAK_WAVE) the same binary runs its bounded soak loop and
      prints the [SOAK] numbers (P8.2). */
 #ifdef KERNEL_SOAK_WAVE
-  /* TEMP (P8 triage, strip before final): bounded 20-minute repro cap. */
   load_and_run_program_in_scheduler_args("TORTURE.BIN", -1, -1, -1, -1,
-                                         "soak=1200");
+                                         "soak");
 #else
   load_and_run_program_in_scheduler("TORTURE.BIN", -1, -1, -1, -1);
 #endif
