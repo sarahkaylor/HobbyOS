@@ -2,6 +2,8 @@
 #include "mmu.h"
 #include "process.h"
 #include "lock.h"
+#include "frame.h"
+#include "vm.h"
 
 extern uint32_t get_cpuid(void);
 
@@ -16,6 +18,12 @@ uint64_t cpu_pd4[512] __attribute__((aligned(4096)));
 uint64_t cpu_pd5[512] __attribute__((aligned(4096)));
 uint64_t cpu_pd6[512] __attribute__((aligned(4096)));
 uint64_t cpu_pd7[512] __attribute__((aligned(4096)));
+/* P2.2 (S2): the kernel-only twin of the 1-2 GiB window for v2 address
+   spaces.  v1 keeps per-CPU cpu_pd1[c] (which carries the legacy user
+   overlay at entries 32..47); v2 PDPTs point entry 1 here instead, so a
+   v2 process can never see whatever v1 mapping the CPU last installed
+   (design sections 1.5/7.2). */
+static uint64_t pd1_kernel[512] __attribute__((aligned(4096)));
 
 static spinlock_t mmu_lock;
 
@@ -128,6 +136,14 @@ void mmu_init_tables(void) {
       cpu_pd1[c][i] = addr | 0x83;
     }
   }
+
+  // P2.2 (S2): the v2 address spaces' kernel-only 1-2 GiB table.  Unlike
+  // cpu_pd1[c] it never carries the legacy user overlay: it is the plain
+  // kernel identity map, so a v2 process cannot see the v1 window.
+  for (int i = 0; i < 512; i++) {
+    uint64_t addr = USER_START + (uint64_t)i * 0x200000;
+    pd1_kernel[i] = addr | 0x83;
+  }
 }
 
 /**
@@ -135,6 +151,16 @@ void mmu_init_tables(void) {
  */
 void mmu_init_core_with_id(uint32_t cpu) {
   uint64_t pml4_phys = (uint64_t)&cpu_pml4[cpu];
+
+  /* P2.2 (design section 1.5): EFER.NXE must be enabled for the v2 page
+     tables' NX leaves (bit 63); idempotent per core (boot.s also sets it
+     on the boot + AP paths). */
+  {
+    uint32_t lo, hi;
+    __asm__ volatile("rdmsr" : "=a"(lo), "=d"(hi) : "c"(0xC0000080));
+    lo |= (1u << 11);
+    __asm__ volatile("wrmsr" : : "a"(lo), "d"(hi), "c"(0xC0000080));
+  }
 
   __asm__ volatile("mov %0, %%cr3" : : "r"(pml4_phys) : "memory");
 
@@ -163,6 +189,9 @@ void mmu_init(void) {
  */
 void mmu_switch_user_mapping(uint64_t phys_base) {
   uint64_t flags = spinlock_acquire_irqsave(&mmu_lock);
+  /* P2.2 (S2): a v1 context requires the kernel PML4; if the previous
+     user context was a v2 AS, hand the CPU back first. */
+  vm_arch_restore_kernel();
 
   int num_blocks = USER_REGION_SIZE / 0x200000;
   if (USER_REGION_SIZE % 0x200000) num_blocks++;
@@ -335,4 +364,290 @@ void mmu_map_mmio_range(uint64_t phys_addr, uint64_t size) {
   );
 
   spinlock_release_irqrestore(&mmu_lock, flags);
+}
+
+/* ---------------------------------------------------------------------
+ * P2.2 (S2): v2 address spaces (design sections 1.5 / 5.3 / 7.2).
+ *
+ * Per-AS PML4 + PDPT frames; the AS PDPT's kernel entries (0..7) point
+ * at the shared kernel PDs (with pd1_kernel for the 1-2 GiB window) and
+ * the 32 GiB user window at USER_VA_BASE lives at PDPT[64..95] ->
+ * per-AS PD -> PT -> 4 KiB PTE leaves.  EFER.NXE is enabled by
+ * mmu_init_core_with_id (and boot.s) so bit 63 is a real NX bit.
+ * ------------------------------------------------------------------- */
+
+#define X64_PTE_P (1ULL << 0)
+#define X64_PTE_RW (1ULL << 1)
+#define X64_PTE_US (1ULL << 2)
+#define X64_PTE_NX (1ULL << 63)
+/* Software bit (bits 9-11 are available to software): the frame is
+   owned by a shared object (memfd/fb); teardown must not free it. */
+#define X64_PTE_SHARED (1ULL << 9)
+#define X64_OA_MASK 0x000FFFFFFFFFF000ULL
+
+/* P2.2 (S2): the root_phys this CPU is currently translating through
+   (0 = kernel PML4).  Used to hand the CPU back to the kernel table
+   before an AS is freed or when a CPU stops running user code. */
+static uint64_t v2_active_root[MAX_CPUS];
+
+static uint64_t x64_v2_pte_desc(uint64_t phys, uint16_t prot, uint16_t kind) {
+  uint64_t d = (phys & X64_OA_MASK) | X64_PTE_P | X64_PTE_US;
+  if (prot & VM_PROT_WRITE)
+    d |= X64_PTE_RW;
+  if (!(prot & VM_PROT_EXEC))
+    d |= X64_PTE_NX;
+  if (kind == VMK_FB || kind == VMK_SHARED)
+    d |= X64_PTE_SHARED;
+  return d;
+}
+
+static void x64_invlpg(uint64_t va) {
+  __asm__ volatile("invlpg (%0)" ::"r"(va) : "memory");
+}
+
+/* Walk (optionally allocating) to the 4 KiB PTE slot for `va`. */
+static uint64_t *x64_v2_walk_alloc(struct addr_space *as, uint64_t va,
+                                   int alloc) {
+  if (!as->root_phys)
+    return 0;
+  uint64_t *p4 = (uint64_t *)as->root_phys;
+  uint64_t pdpt_pa = p4[0] & X64_OA_MASK;
+  if (!pdpt_pa)
+    return 0;
+  uint64_t *pdpt = (uint64_t *)pdpt_pa;
+  uint32_t i3 = (va >> 30) & 0x1FF;
+  if (i3 < 64 || i3 > 95)
+    return 0;
+  uint64_t *pd;
+  if (!(pdpt[i3] & X64_PTE_P)) {
+    if (!alloc)
+      return 0;
+    uint64_t t = frame_alloc_zeroed();
+    if (!t)
+      return 0;
+    pd = (uint64_t *)t;
+    pdpt[i3] = t | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+    as->table_frames++;
+  } else {
+    if (pdpt[i3] & 0x80)
+      return 0; /* 1 GiB page in a v2 table: not produced */
+    pd = (uint64_t *)(pdpt[i3] & X64_OA_MASK);
+  }
+  uint32_t i2 = (va >> 21) & 0x1FF;
+  if (pd[i2] & 0x80)
+    return 0; /* 2 MiB page in a v2 table: not produced */
+  uint64_t *pt;
+  if (!(pd[i2] & X64_PTE_P)) {
+    if (!alloc)
+      return 0;
+    uint64_t t = frame_alloc_zeroed();
+    if (!t)
+      return 0;
+    pt = (uint64_t *)t;
+    pd[i2] = t | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+    as->table_frames++;
+  } else {
+    pt = (uint64_t *)(pd[i2] & X64_OA_MASK);
+  }
+  return &pt[(va >> 12) & 0x1FF];
+}
+
+uint64_t vm_arch_root_alloc(struct addr_space *as) {
+  uint64_t pdpt = frame_alloc_zeroed();
+  uint64_t pml4 = frame_alloc_zeroed();
+  if (!pdpt || !pml4) {
+    if (pdpt)
+      frame_free(pdpt);
+    if (pml4)
+      frame_free(pml4);
+    return 0;
+  }
+  uint64_t *p4 = (uint64_t *)pml4;
+  uint64_t *pd = (uint64_t *)pdpt;
+  p4[0] = pdpt | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+  pd[0] = ((uint64_t)&cpu_pd0) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+  pd[1] = ((uint64_t)&pd1_kernel) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+  pd[2] = ((uint64_t)&cpu_pd2) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+  pd[3] = ((uint64_t)&cpu_pd3) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+  pd[4] = ((uint64_t)&cpu_pd4) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+  pd[5] = ((uint64_t)&cpu_pd5) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+  pd[6] = ((uint64_t)&cpu_pd6) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+  pd[7] = ((uint64_t)&cpu_pd7) | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
+  as->table_frames += 2;
+  return pml4;
+}
+
+int vm_arch_map(struct addr_space *as, uint64_t va, uint64_t phys,
+                uint16_t prot, uint16_t kind) {
+  uint64_t *pte = x64_v2_walk_alloc(as, va, 1);
+  if (!pte)
+    return -1;
+  *pte = x64_v2_pte_desc(phys, prot, kind);
+  x64_invlpg(va);
+  return 0;
+}
+
+void vm_arch_unmap(struct addr_space *as, uint64_t va) {
+  uint64_t *pte = x64_v2_walk_alloc(as, va, 0);
+  if (!pte)
+    return;
+  uint64_t leaf = *pte;
+  if (!(leaf & X64_PTE_P))
+    return;
+  if (!(leaf & X64_PTE_SHARED))
+    frame_free(leaf & X64_OA_MASK);
+  *pte = 0;
+  x64_invlpg(va);
+}
+
+void vm_arch_prot(struct addr_space *as, uint64_t va, uint16_t prot) {
+  uint64_t *pte = x64_v2_walk_alloc(as, va, 0);
+  if (!pte)
+    return;
+  uint64_t leaf = *pte;
+  if (!(leaf & X64_PTE_P))
+    return;
+  uint16_t kind = (leaf & X64_PTE_SHARED) ? VMK_SHARED : VMK_ANON;
+  *pte = x64_v2_pte_desc(leaf & X64_OA_MASK, prot, kind);
+  x64_invlpg(va);
+}
+
+int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf) {
+  uint64_t *pte = x64_v2_walk_alloc(as, va, 0);
+  if (!pte || !(*pte & X64_PTE_P))
+    return -1;
+  if (leaf)
+    *leaf = *pte;
+  return 0;
+}
+
+void vm_arch_flush_va(struct addr_space *as, uint64_t va) {
+  (void)as;
+  x64_invlpg(va);
+}
+
+/* Shootdown IPI (vector 0x82, OQ5): sent only when the AS is claimed on
+ * another CPU (cpu_current_pids scan).  The handler reloads CR3 when this
+ * CPU runs the target AS; the sender waits for acks with a bounded spin.
+ * Coarse but correct; page-granular invlpg is a later optimization. */
+static volatile uint64_t x64_shootdown_root;
+static volatile int x64_shootdown_acks;
+
+static void x64_send_ipi(uint32_t cpu, uint32_t vector) {
+  volatile uint32_t *icr_hi = (volatile uint32_t *)(0xFEE00000 + 0x310);
+  volatile uint32_t *icr_lo = (volatile uint32_t *)(0xFEE00000 + 0x300);
+  *icr_hi = cpu << 24; /* APIC id == CPU index (smp.c convention) */
+  *icr_lo = vector;    /* fixed delivery, physical destination, edge */
+}
+
+void vm_arch_shootdown(struct addr_space *as) {
+  if (!as || !as->root_phys)
+    return;
+  uint32_t me = get_cpuid();
+  int targets = 0;
+  for (uint32_t c = 0; c < MAX_CPUS; c++) {
+    if (c == me)
+      continue;
+    extern int current_pid_of_cpu(uint32_t cpu);
+    int pid = current_pid_of_cpu(c);
+    if (pid <= 0)
+      continue;
+    struct process *p = process_get_pcb(pid);
+    if (p && process_group(p)->as == as)
+      targets++;
+  }
+  if (!targets)
+    return;
+  x64_shootdown_root = as->root_phys;
+  x64_shootdown_acks = 0;
+  for (uint32_t c = 0; c < MAX_CPUS; c++) {
+    if (c == me)
+      continue;
+    extern int current_pid_of_cpu(uint32_t cpu);
+    int pid = current_pid_of_cpu(c);
+    if (pid <= 0)
+      continue;
+    struct process *p = process_get_pcb(pid);
+    if (p && process_group(p)->as == as)
+      x64_send_ipi(c, 0x82);
+  }
+  for (volatile int spin = 0; spin < 10000000; spin++) {
+    if (x64_shootdown_acks >= targets)
+      break;
+  }
+  x64_shootdown_root = 0;
+}
+
+/* Called from the vector 0x82 handler (trap.c): never schedules, never
+ * touches kernel-mode task state beyond a CR3 reload of the target AS. */
+void vm_x64_shootdown_handler(void) {
+  if (!x64_shootdown_root)
+    return;
+  struct process *cur = current_process();
+  if (cur && process_group(cur)->as &&
+      process_group(cur)->as->root_phys == x64_shootdown_root) {
+    uint64_t cr3 = x64_shootdown_root;
+    __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
+  }
+  x64_shootdown_acks++;
+}
+
+/* P2.2 (S2): hand this CPU back to the kernel PML4.  Cheap no-op when
+   already there.  Required (a) when a CPU stops running a v2 AS (v1
+   switch, idle entry) and (b) before an AS's table frames are freed --
+   continuing to run on a freed root is instant corruption. */
+void vm_arch_restore_kernel(void) {
+  uint32_t cpu = get_cpuid();
+  if (!v2_active_root[cpu])
+    return;
+  v2_active_root[cpu] = 0;
+  uint64_t cr3 = (uint64_t)&cpu_pml4[cpu];
+  __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
+}
+
+void vm_arch_switch(struct addr_space *as) {
+  v2_active_root[get_cpuid()] = as->root_phys;
+  uint64_t cr3 = as->root_phys;
+  __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
+}
+
+void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
+  (void)asid; /* unused on x64 */
+  if (!root_phys)
+    return;
+  /* P2.2 (S2): if THIS cpu is translating through the AS being freed,
+     leave v2 mode first (the design's claim-drain guarantees no other
+     CPU is executing in it). */
+  if (v2_active_root[get_cpuid()] == root_phys)
+    vm_arch_restore_kernel();
+  uint64_t *p4 = (uint64_t *)root_phys;
+  uint64_t pdpt_pa = p4[0] & X64_OA_MASK;
+  if (pdpt_pa) {
+    uint64_t *pdpt = (uint64_t *)pdpt_pa;
+    for (uint32_t i3 = 64; i3 <= 95; i3++) {
+      uint64_t pde = pdpt[i3];
+      if (!(pde & X64_PTE_P) || (pde & 0x80))
+        continue;
+      uint64_t pdp = pde & X64_OA_MASK;
+      uint64_t *pd = (uint64_t *)pdp;
+      for (int i2 = 0; i2 < 512; i2++) {
+        uint64_t pte2 = pd[i2];
+        if (!(pte2 & X64_PTE_P) || (pte2 & 0x80))
+          continue;
+        uint64_t ptp = pte2 & X64_OA_MASK;
+        uint64_t *pt = (uint64_t *)ptp;
+        for (int j = 0; j < 512; j++) {
+          uint64_t leaf = pt[j];
+          if (!(leaf & X64_PTE_P))
+            continue;
+          if (!(leaf & X64_PTE_SHARED))
+            frame_free(leaf & X64_OA_MASK);
+        }
+        frame_free(ptp);
+      }
+      frame_free(pdp);
+    }
+    frame_free(pdpt_pa);
+  }
+  frame_free(root_phys);
 }

@@ -10,12 +10,17 @@
 #include "syscall.h"
 #include "errno.h"
 #include "vfs.h"
+#include "vm.h"
 #include <stdint.h>
 
 extern void uart_puts(const char *s);
 extern void uart_putc(char c);
 extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
+
+/* Defined below (line ~380); declared here for the early syscall helpers
+   that are v2-aware since P2.2 S2. */
+static int sys_user_range_ok(uint64_t ptr, uint64_t len);
 
 struct cpu_local {
   uint64_t kernel_stack;
@@ -56,7 +61,13 @@ void restore_user_sp_helper(void) {
 
 static void sys_write_console(struct trap_frame *tf) {
   uint64_t ptr = tf->regs[5]; // rdi
-  if (ptr >= USER_VIRT_BASE && ptr < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  struct process *p = current_process();
+  int ok;
+  if (p && p->as)
+    ok = (vm_range_ok(p, ptr, 1, 0) == 0); /* P2.2 (S2): v2 pointer */
+  else
+    ok = (ptr >= USER_VIRT_BASE && ptr < (USER_VIRT_BASE + USER_REGION_SIZE));
+  if (ok) {
     uart_puts("[CONSOLE] ");
     uart_puts((const char *)ptr);
   }
@@ -171,8 +182,7 @@ static void sys_get_args(struct trap_frame *tf) {
   char *buf = (char *)tf->regs[5]; // rdi
   int size = (int)tf->regs[4]; // rsi
   struct process *cur = process_group(current_process()); /* P1 (D7) */
-  if (cur && buf && (uint64_t)buf >= USER_VIRT_BASE &&
-      (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (cur && buf && sys_user_range_ok((uint64_t)buf, (uint64_t)size)) {
     int i = 0;
     while (cur->args[i] && i < size - 1) {
       buf[i] = cur->args[i];
@@ -378,6 +388,13 @@ static void sys_connect(struct trap_frame *tf) {
 
 /* True when [ptr, ptr+len) lies inside the caller's user region. */
 static int sys_user_range_ok(uint64_t ptr, uint64_t len) {
+  struct process *p = current_process();
+  if (p && p->as) {
+    /* P2.2 (S2): a v2 process answers to the address-space walk instead
+       of the legacy 32 MiB range.  Residency-only until S3's vm_touch
+       (no demand paging yet). */
+    return vm_range_ok(p, ptr, len, 0) == 0;
+  }
   if (ptr < USER_VIRT_BASE) return 0;
   if (len > USER_REGION_SIZE) return 0;
   return ptr - USER_VIRT_BASE <= USER_REGION_SIZE - len;
@@ -943,8 +960,7 @@ static void sys_get_progname(struct trap_frame *tf) {
   struct process *caller = current_process();
   if (!caller) {
     tf->regs[0] = -1;
-  } else if (buf && (uint64_t)buf >= USER_VIRT_BASE &&
-             (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  } else if (buf && sys_user_range_ok((uint64_t)buf, (uint64_t)size)) {
     int i = 0;
     while (caller->name[i] && i < size - 1) {
       buf[i] = caller->name[i];
@@ -1149,13 +1165,25 @@ void sync_lower_handler_c(struct trap_frame *tf) {
   } else if (syscall_num == SYS_BRK) {
     tf->regs[0] = (uint64_t)sys_brk(tf->regs[5]); /* rdi */
   } else if (syscall_num == SYS_MMAP) {
-    tf->regs[0] = (uint64_t)sys_mmap(tf->regs[5], /* rdi: addr */
-                                     tf->regs[4], /* rsi: len */
-                                     tf->regs[3], /* rdx: prot */
-                                     tf->regs[9]); /* r10: flags */
+    /* P2.3 (S3, design section 4.2): 6-arg Linux shape.
+       rdi=r5, rsi=r4, rdx=r3, r10=r9, r8=r7, r9=r8 (the x64 reg map). */
+    tf->regs[0] = (uint64_t)sys_mmap6(tf->regs[5],  /* rdi: addr */
+                                      tf->regs[4],  /* rsi: len */
+                                      (int64_t)tf->regs[3],  /* rdx: prot */
+                                      (int64_t)tf->regs[9],  /* r10: flags */
+                                      (int64_t)tf->regs[7],  /* r8: fd */
+                                      tf->regs[8]);          /* r9: offset */
   } else if (syscall_num == SYS_MUNMAP) {
     tf->regs[0] = (uint64_t)sys_munmap(tf->regs[5], /* rdi: addr */
                                        tf->regs[4]); /* rsi: len */
+  } else if (syscall_num == SYS_MPROTECT) {
+    tf->regs[0] = (uint64_t)sys_mprotect(tf->regs[5],  /* rdi: addr */
+                                         tf->regs[4],  /* rsi: len */
+                                         (int64_t)tf->regs[3]); /* rdx: prot */
+  } else if (syscall_num == SYS_MADVISE) {
+    tf->regs[0] = (uint64_t)sys_madvise(tf->regs[5],  /* rdi: addr */
+                                        tf->regs[4],  /* rsi: len */
+                                        (int64_t)tf->regs[3]); /* rdx: advice */
   } else if (syscall_num == SYS_SOCKET) {
     sys_socket(tf);
   } else if (syscall_num == SYS_CONNECT_FD) {
@@ -1496,9 +1524,47 @@ void general_interrupt_handler(struct trap_frame *tf) {
       return;
     }
     schedule(tf, 1);
+  } else if (tf->vector == 0x82) {
+    // P2.2 (S2/OQ5) TLB shootdown IPI: LAPIC-delivered, so EOI first.
+    // The handler never schedules and never preempts anything: it may
+    // only reload CR3 when this CPU runs the target AS (snapshot read).
+    lapic_send_eoi();
+    extern void vm_x64_shootdown_handler(void);
+    vm_x64_shootdown_handler();
   } else if (tf->vector < 32) {
     // Exception
     struct process *cur = current_process();
+    /* P2.3 (S3, design section 5.2): a v2 process's user #PF is either a
+       demand fault (materialize + retry) or a kill with an exact reason.
+       Error code: bit0 P (0 = not-present), bit1 W/R, bit4 I/D. */
+    if (tf->vector == 14 && cur && cur->as && (tf->cs & 3) == 3) {
+      uint64_t cr2;
+      __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
+      int pf_w = (int)(tf->error_code & 2);
+      int pf_x = (int)((tf->error_code >> 4) & 1);
+      int pf_present = (int)(tf->error_code & 1);
+      const char *why = "PROT";
+      if (!pf_present &&
+          vm_handle_fault(process_group(cur), cr2, pf_w, pf_x, &why) == 0) {
+        return; /* mapping is live; iretq re-executes the instruction */
+      }
+      uart_puts("[KERNEL] pid=");
+      print_int(cur->pid);
+      uart_puts(" (");
+      uart_puts(cur->name);
+      uart_puts(") memory fault VA=");
+      uart_print_hex(cr2);
+      uart_puts(" PC=");
+      uart_print_hex(tf->elr);
+      uart_puts(" rw=");
+      uart_puts(pf_w ? "w" : "r");
+      uart_puts(pf_x ? "x" : " ");
+      uart_puts(" in=");
+      uart_puts(why);
+      uart_puts(" -> killed\n");
+      process_fault_exit(tf, 11); /* SIGSEGV status byte */
+      return;
+    }
     if (cur && !cur->is_kernel_process && (tf->cs & 3) == 3) {
       uart_puts("[KERNEL] User process fault! Vector: ");
       safe_print_int(tf->vector);
@@ -1787,6 +1853,8 @@ EXCEPTION_NO_ERR(46);
 EXCEPTION_NO_ERR(47);
 // Yield
 EXCEPTION_NO_ERR(129); // 0x81
+// P2.2 (S2/OQ5): TLB shootdown IPI
+EXCEPTION_NO_ERR(130); // 0x82
 
 __asm__(
 ".intel_syntax noprefix\n"
@@ -2117,4 +2185,6 @@ void trap_init(void) {
 
   // Register software yield interrupt on vector 0x81 (with Ring 3 permissions 0xEE)
   idt_set_gate(129, (uint64_t)exception_129, 0x08, 0xEE);
+  // P2.2 (S2): TLB shootdown IPI on vector 0x82 (kernel-only gate, 0x8E).
+  idt_set_gate(130, (uint64_t)exception_130, 0x08, 0x8E);
 }

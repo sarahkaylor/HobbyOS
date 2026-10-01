@@ -11,6 +11,7 @@
 #include "syscall.h"
 #include "errno.h"
 #include "vfs.h"
+#include "vm.h"
 #include <stdint.h>
 
 extern jmp_buf user_exit_context;
@@ -20,6 +21,10 @@ extern void uart_puts(const char *s);
 extern void uart_putc(char c);
 extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
+
+/* Defined below (line ~330); declared here for the early syscall helpers
+   that are v2-aware since P2.2 S2. */
+static int sys_user_range_ok(uint64_t ptr, uint64_t len);
 
 /**
  * Prints the state of a trap frame for debugging purposes.
@@ -48,7 +53,13 @@ extern uint32_t virtio_blk_irq;
 
 static void sys_write_console(struct trap_frame *tf) {
   uint64_t ptr = tf->regs[0];
-  if (ptr >= USER_VIRT_BASE && ptr < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  struct process *p = current_process();
+  int ok;
+  if (p && p->as)
+    ok = (vm_range_ok(p, ptr, 1, 0) == 0); /* P2.2 (S2): v2 pointer */
+  else
+    ok = (ptr >= USER_VIRT_BASE && ptr < (USER_VIRT_BASE + USER_REGION_SIZE));
+  if (ok) {
     uart_puts("[CONSOLE] ");
     uart_puts((const char *)ptr);
   }
@@ -123,8 +134,7 @@ static void sys_get_args(struct trap_frame *tf) {
   char *buf = (char *)tf->regs[0];
   int size = (int)tf->regs[1];
   struct process *cur = process_group(current_process()); /* P1 (D7) */
-  if (cur && buf && (uint64_t)buf >= USER_VIRT_BASE &&
-      (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  if (cur && buf && sys_user_range_ok((uint64_t)buf, (uint64_t)size)) {
     int i = 0;
     while (cur->args[i] && i < size - 1) {
       buf[i] = cur->args[i];
@@ -325,6 +335,13 @@ static void sys_connect(struct trap_frame *tf) {
 
 /* True when [ptr, ptr+len) lies inside the caller's user region. */
 static int sys_user_range_ok(uint64_t ptr, uint64_t len) {
+  struct process *p = current_process();
+  if (p && p->as) {
+    /* P2.2 (S2): a v2 process answers to the address-space walk instead
+       of the legacy 32 MiB range.  Residency-only until S3's vm_touch
+       (no demand paging yet). */
+    return vm_range_ok(p, ptr, len, 0) == 0;
+  }
   if (ptr < USER_VIRT_BASE) return 0;
   if (len > USER_REGION_SIZE) return 0;
   return ptr - USER_VIRT_BASE <= USER_REGION_SIZE - len;
@@ -979,8 +996,7 @@ static void sys_get_progname(struct trap_frame *tf) {
   struct process *caller = current_process();
   if (!caller) {
     tf->regs[0] = -1;
-  } else if (buf && (uint64_t)buf >= USER_VIRT_BASE &&
-             (uint64_t)buf + size <= (USER_VIRT_BASE + USER_REGION_SIZE)) {
+  } else if (buf && sys_user_range_ok((uint64_t)buf, (uint64_t)size)) {
     int i = 0;
     while (caller->name[i] && i < size - 1) {
       buf[i] = caller->name[i];
@@ -1228,10 +1244,16 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     } else if (syscall_num == SYS_BRK) {
       tf->regs[0] = sys_brk(tf->regs[0]);
     } else if (syscall_num == SYS_MMAP) {
-      tf->regs[0] = sys_mmap(tf->regs[0], tf->regs[1], tf->regs[2],
-                            tf->regs[3]);
+      /* P2.3 (S3): 6-arg Linux shape, ARM x0..x5 = regs[0..5]. */
+      tf->regs[0] = sys_mmap6(tf->regs[0], tf->regs[1], (int64_t)tf->regs[2],
+                              (int64_t)tf->regs[3], (int64_t)tf->regs[4],
+                              tf->regs[5]);
     } else if (syscall_num == SYS_MUNMAP) {
       tf->regs[0] = sys_munmap(tf->regs[0], tf->regs[1]);
+    } else if (syscall_num == SYS_MPROTECT) {
+      tf->regs[0] = sys_mprotect(tf->regs[0], tf->regs[1], (int64_t)tf->regs[2]);
+    } else if (syscall_num == SYS_MADVISE) {
+      tf->regs[0] = sys_madvise(tf->regs[0], tf->regs[1], (int64_t)tf->regs[2]);
     } else if (syscall_num == SYS_SOCKET) {
       sys_socket(tf);
     } else if (syscall_num == SYS_CONNECT_FD) {
@@ -1258,12 +1280,73 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       uart_puts("Unknown System Call Invoked!\n");
       tf->regs[0] = -ENOSYS;
     }
-  } else if (ec == 0x20 || ec == 0x24 || ec == 0x00) {
+  } else if (ec == 0x20 || ec == 0x24) {
     // EC = 0x20: Instruction Abort from a lower Exception Level
     // EC = 0x24: Data Abort from a lower Exception Level
-    // EC = 0x00: Unknown Reason (e.g. executing zeroes)
+    struct process *gcur = current_process();
+    uint64_t far = 0;
+    __asm__ volatile("mrs %0, far_el1" : "=r"(far));
+    int wnr = (int)((iss >> 6) & 1);   // WnR (data aborts)
+    uint32_t dfsc = iss & 0x3F;        // fault status
+    int is_exec = (ec == 0x20);
 
-    // Terminate the user program
+    /* P2.3 (design section 5.1): v2 processes get demand-paging
+       classification: translation faults (DFSC 0b0001xx) demand a
+       zero-fill page; everything else is a kill with the exact reason. */
+    if (gcur && gcur->as) {
+      const char *why = "PROT";
+      int demand = ((dfsc & 0x3C) == 0x04);
+      if (demand &&
+          vm_handle_fault(process_group(gcur), far, wnr, is_exec, &why) == 0) {
+        return; /* mapping is live; eret re-executes the instruction */
+      }
+      uart_puts("[KERNEL] pid=");
+      print_int(gcur->pid);
+      uart_puts(" (");
+      uart_puts(gcur->name);
+      uart_puts(") memory fault VA=");
+      uart_print_hex(far);
+      uart_puts(" PC=");
+      uart_print_hex(tf->elr);
+      uart_puts(" rw=");
+      uart_puts(wnr ? "w" : "r");
+      uart_puts(is_exec ? "x" : " ");
+      uart_puts(" in=");
+      uart_puts(why);
+      uart_puts(" -> killed\n");
+      process_fault_exit(tf, 11); /* SIGSEGV status byte */
+      return;
+    }
+
+    // v1 (or no process): the pre-P2 fatal path, verbatim.
+    if (gcur) {
+      uart_puts("[KERNEL] User process ");
+      print_int(gcur->pid);
+      if (gcur->name[0] != '\0') {
+        uart_puts(" (");
+        uart_puts(gcur->name);
+        uart_puts(")");
+      }
+      uart_puts(" fault! EC: ");
+      uart_print_hex(ec);
+      uart_puts(" ELR: ");
+      uart_print_hex(tf->elr);
+      uart_puts("\n");
+      process_exit(tf);
+    } else {
+      uart_puts("\n[KERNEL] FATAL: EL0 Synchronous Exception with no running process!\n");
+      uart_puts("EC: ");
+      uart_print_hex(ec);
+      uart_puts("\nELR: ");
+      uart_print_hex(tf->elr);
+      uart_puts("\n");
+      while (1) {
+        safe_wfi();
+      }
+    }
+  } else if (ec == 0x00) {
+    // EC = 0x00: Unknown Reason (e.g. executing zeroes) -- no FAR/ISS
+    // classification; keep the pre-P2 fatal path.
     struct process *cur = current_process();
     if (cur) {
       uart_puts("[KERNEL] User process ");

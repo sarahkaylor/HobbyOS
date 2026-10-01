@@ -105,7 +105,19 @@
 #define SYS_THREAD_EXIT   (74)  /* (retval) -> noreturn (exits this thread) */
 #define SYS_SET_TLS       (75)  /* (tls) -> 0 | -EINVAL */
 
+/* P2 (docs/browser/p2-vm-design.md section 4.2, rows FROZEN at the P2
+ * gate): the mmap family.  Section 4.2's table is the binding numbering:
+ * 80/81/82 were already the provisional [P2] rows in A.1b, so no
+ * renumbering; rows 76-79 (P4) stay provisional gaps.  SYS_MMAP keeps row
+ * 62 with its 6-arg Linux-shaped ABI (ARM x0..x5 = regs[0..5]; x64
+ * rdi/rsi/rdx/r10/r8/r9 = regs[5]/[4]/[3]/[9]/[7]/[8]).
+ * Status: MEMFD_CREATE is defined here but implemented in S4 (P2.4);
+ * MPROTECT/MADVISE/SYS_MMAP-v2/SYS_MUNMAP-partial land in S3 (P2.3). */
+#define SYS_MEMFD_CREATE  (80)  /* (name*, flags)                      -> fd | -errno */
+#define SYS_MPROTECT      (81)  /* (addr, len, prot)                   -> 0 | -errno */
+#define SYS_MADVISE       (82)  /* (addr, len, advice)  advisory       -> 0 | -errno */
+
 /* Highest defined syscall number. Dispatch tables are sized SYS_MAX + 1. */
-#define SYS_MAX           (75)
+#define SYS_MAX           (82)
 
 #endif /* SYSCALL_H */

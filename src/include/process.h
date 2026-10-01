@@ -76,29 +76,33 @@
 #define USER_ANON_MAX_REGS 8
 
 // Physical address pool base for dynamically allocated process memory
-// This ensures user memory does not overlap with kernel code
+// This ensures user memory does not overlap with kernel code.
+// P2.2 (docs/browser/p2-vm-design.md section 2.1): the pool extents and
+// the 32 MiB block layer now live in frame.h/frame.c (the frame bitmap
+// is the single source of truth).  See frame.h for the x64 growth
+// extent [0x80000000, 0x180000000) added with the frame allocator.
 #ifdef __x86_64__
 #define PROC_PHYS_POOL_BASE 0x20000000
-/* x86_64: the pool ends just below the kernel's 0x70000000 load address
-   (which is fixed by the linker / Limine entry), so x64 tops out at 40
-   blocks even with more RAM installed. */
+/* x86_64: the low pool ends just below the kernel's 0x70000000 load
+   address (fixed by the linker / Limine entry). */
 #define PROC_PHYS_POOL_TOP 0x70000000
 #else
 /* AArch64: RAM runs [0x40000000, 0x240000000) with QEMU -m 8192M; the
-   kernel loads and lives at the bottom (image + bss + stack top = link
-   0x45A00000).  The pool sits just above that and extends to RAM top,
-   so 232 * 32MB = 7.25GB of process backing stores. */
+   kernel loads and lives near RAM top (Limine load base ~0x23A680000).
+   The pool sits above the low kernel residue and extends to RAM top. */
 #define PROC_PHYS_POOL_BASE 0x70000000
 #define PROC_PHYS_POOL_TOP 0x240000000ULL
 #endif
-// Number of 32MB process-region blocks inside [BASE, TOP).
-#define NUM_PHYS_BLOCKS ((PROC_PHYS_POOL_TOP - PROC_PHYS_POOL_BASE) / USER_REGION_SIZE)
 // QEMU Virt machine GIC memory-mapped register addresses (v2 + v3)
 #define GICD_BASE 0x08000000 // Distributor base address
 #define GICC_BASE 0x08010000 // CPU Interface base address (v2)
 #define GICR_BASE 0x080A0000 // Redistributor base address (v3)
 
 #define MAX_OPEN_FDS 32 // Increased per user request
+
+/* P2.2: the address-space object (src/include/vm.h) — only ever a pointer
+   here, so the kernel headers don't grow a hard include chain. */
+struct addr_space;
 
 /* SYS_GETARGV blob limits (see struct process.eargv). */
 #define HO_EXEC_MAX_ARGS 32
@@ -220,6 +224,14 @@ struct process {
   uint64_t tls_base;     /**< opaque TLS register value (TPIDR_EL0 / IA32_FS_BASE) */
   uint64_t futex_uaddr;  /**< P1.2: non-zero while parked in FUTEX WAIT */
   uint64_t thread_ret;   /**< SYS_THREAD_EXIT argument (diagnostics only) */
+
+  /* --- P2 (docs/browser/p2-vm-design.md section 1.3): address space ---- *
+   * NULL for AS_V1 processes (kernel tasks, every program through S4's
+   * loader default): user_phys_base/phys_block_idx remain the truth for
+   * those.  v2 processes (loader v2 opt-in from S2, MMTEST) point at
+   * their group-charged addr_space; the mmap/mprotect/fault paths are
+   * v2-only.  Appended at the END so parallel lanes merge additively. */
+  struct addr_space *as; /**< P2.2: AS_V2 address space, else NULL */
 };
 
 // Initialize the process subsystem and zero out the process table.
@@ -229,6 +241,15 @@ void process_init(void);
 // Returns the new PID or -1 on failure.
 int process_create(void);
 int process_create_nowait(void);
+
+/* P2.2 (S2): create an AS_V2 process slot (no 32 MiB block, no eager
+ * zeroing; the caller populates the AS through the v2 loader).  Returns
+ * the pid or -1 when no slot / no address space is available. */
+int process_create_v2(void);
+
+/* P2.2 (S2): which slot currently claims `cpu` (-1 = none); the x64
+ * shootdown send path scans it (design section 7.2). */
+int current_pid_of_cpu(uint32_t cpu);
 
 // Number of free physical blocks (advisory; see program_loader.c's
 // boot-wave headroom reserve).
@@ -246,6 +267,20 @@ int process_waitpid(struct trap_frame *tf);
 int64_t sys_brk(uint64_t addr);
 int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags);
 int sys_munmap(uint64_t addr, uint64_t len);
+
+/* P2.3 (S3, design section 4.2): the 6-arg Linux-shaped extensions.
+ * v2 processes go through the AS region machinery (src/kernel/vm.c);
+ * v1 processes keep the legacy anon_maps behavior (fd/offset rejected). */
+int64_t sys_mmap6(uint64_t addr, uint64_t len, int64_t prot, int64_t flags,
+                  int64_t fd, uint64_t offset);
+int64_t sys_mprotect(uint64_t addr, uint64_t len, int64_t prot);
+int64_t sys_madvise(uint64_t addr, uint64_t len, int64_t advice);
+
+/* P2.3 (design section 5.4): terminate the CURRENT (faulting) process
+ * with a signal-shaped waitpid status (low byte = signo).  SIGSEGV = 11.
+ * Everything else is the ordinary exit machinery; only this process dies. */
+#define PROCESS_STATUS_SIGNAL 0x40000000 /* int-safe marker, group_teardown */
+void process_fault_exit(struct trap_frame *tf, int signo);
 
 // In-place exec (SYS_EXEC): replace the current image, keep pid/fds/cwd.
 int process_exec_current(struct trap_frame *tf, const char *path,

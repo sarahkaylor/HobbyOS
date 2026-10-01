@@ -2,6 +2,8 @@
 #include "mmu.h"
 #include "process.h"
 #include "lock.h"
+#include "frame.h"
+#include "vm.h"
 
 extern uint32_t get_cpuid(void);
 
@@ -16,7 +18,22 @@ static uint64_t l2_table_5[512] __attribute__((aligned(4096)));
 static uint64_t l2_table_6[512] __attribute__((aligned(4096)));
 static uint64_t l2_table_7[512] __attribute__((aligned(4096)));
 static uint64_t l2_table_8[512] __attribute__((aligned(4096)));
+/* P2.2 (S2): the kernel half of a v2 root's 1-2 GiB window.  v1 roots
+   keep per-CPU l2_table_1[c] (which carries the legacy user overlay);
+   v2 roots share this kernel-only table instead: the 0x44000000-0x46000000
+   overlay hole is left UNMAPPED so a v2 process cannot see whatever v1
+   mapping the CPU last installed (design sections 1.4/1.5). */
+static uint64_t l2_kernel_1[512] __attribute__((aligned(4096)));
 static spinlock_t mmu_lock;
+
+/* P2.2 (S2): per-CPU "last context was a v2 AS" flag.  v1 overlay leaves
+   are global (nG=0), so the v1<->v2 mode change needs a full local flush;
+   v2->v2 switch is TTBR0 + isb only (design section 7.1). */
+static uint8_t v2_live[MAX_CPUS];
+/* P2.2 (S2): the root_phys this CPU is currently translating through
+   (0 = kernel/host table).  Used to hand the CPU back to the kernel
+   table before an AS is freed or when a CPU stops running user code. */
+static uint64_t v2_active_root[MAX_CPUS];
 
 #define MAIR_DEVICE_nGnRnE  0x00
 #define MAIR_NORMAL_NC      0x44  // Normal Non-Cacheable (avoids explicit flushes)
@@ -160,6 +177,17 @@ void mmu_init_tables(void) {
     for (int c = 0; c < MAX_CPUS; c++) {
       l2_table_1[c][i] = addr | attr;
     }
+    // P2.2 (S2): the v2 roots' kernel-only twin.  Entries [32..47] (the
+    // legacy 0x44000000 window) stay unmapped; everything else is the
+    // kernel identity map with kernel attributes.
+    if (i >= USER_VIRT_L2_INDEX &&
+        i < USER_VIRT_L2_INDEX + (int)(USER_REGION_SIZE / 0x200000)) {
+      l2_kernel_1[i] = 0;
+    } else {
+      uint64_t kattr = (PT_MEM_NORMAL << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
+      kattr |= (1ULL << 54); // UXN=1
+      l2_kernel_1[i] = addr | kattr;
+    }
   }
 }
 
@@ -253,6 +281,9 @@ uint64_t mmu_make_user_block_desc(uint64_t phys_addr) {
  */
 void mmu_switch_user_mapping(uint64_t phys_base) {
   uint64_t flags = spinlock_acquire_irqsave(&mmu_lock);
+  /* P2.2 (S2): a v1 context requires the kernel table; if the previous
+     user context was a v2 AS, hand the CPU back first. */
+  vm_arch_restore_kernel();
   // The user virtual address USER_VIRT_BASE falls in L1 index 1 (USER_START-USER_END),
   // L2 index USER_VIRT_L2_INDEX.
   // Map multiple 2MB blocks based on USER_REGION_SIZE.
@@ -263,6 +294,10 @@ void mmu_switch_user_mapping(uint64_t phys_base) {
   for (int i = 0; i < num_blocks; i++) {
     l2_table_1[cpu][USER_VIRT_L2_INDEX + i] = mmu_make_user_block_desc(phys_base + (uint64_t)i * 0x200000);
   }
+
+  /* P2.2 (S2): this is a v1 context now; the next v2 switch must do the
+     full mode-change flush (v1 overlay leaves are global). */
+  v2_live[cpu] = 0;
 
   // Invalidate TLB and synchronize
   __asm__ volatile(
@@ -319,4 +354,237 @@ void __clear_cache(void *begin, void *end) {
 void mmu_map_mmio_range(uint64_t phys_addr, uint64_t size) {
   (void)phys_addr;
   (void)size;
+}
+
+/* ---------------------------------------------------------------------
+ * P2.2 (S2): v2 address spaces (design sections 1.4 / 5.3 / 7.1).
+ *
+ * Per-AS L1 root (a 4 KiB frame) duplicating the kernel entries (with
+ * l2_kernel_1 for the 1-2 GiB window) + per-AS L2/L3 tables for the
+ * 32 GiB user window at USER_VA_BASE (L1[64..95]).  4 KiB leaves are
+ * nG=1 tagged with the group ASID; the kernel half is nG=0 global.
+ * ------------------------------------------------------------------- */
+
+#define ARM_L3_PAGE 0b11ULL
+#define ARM_AP_RW (0b01ULL << 6)
+#define ARM_AP_RO (0b11ULL << 6)
+#define ARM_AF (1ULL << 10)
+#define ARM_NG (1ULL << 11)
+#define ARM_PXN_BIT (1ULL << 53)
+#define ARM_UXN_BIT (1ULL << 54)
+/* Software bit (bits [58:55] are ignored by the hardware walker when
+   the leaf is a page descriptor): the frame is owned by a shared
+   object (memfd/fb) — teardown must not free it. */
+#define ARM_LEAF_SHARED (1ULL << 55)
+#define ARM_OA_MASK 0x0000FFFFFFFFF000ULL
+
+static uint64_t arm_v2_leaf_desc(uint64_t phys, uint16_t prot, uint16_t kind) {
+  uint64_t d = (phys & ARM_OA_MASK) | (PT_MEM_NORMAL << 2) | ARM_AF | ARM_NG |
+               ARM_PXN_BIT | ARM_L3_PAGE;
+  d |= (prot & VM_PROT_WRITE) ? ARM_AP_RW : ARM_AP_RO;
+  if (!(prot & VM_PROT_EXEC))
+    d |= ARM_UXN_BIT;
+  if (kind == VMK_FB || kind == VMK_SHARED)
+    d |= ARM_LEAF_SHARED;
+  return d;
+}
+
+static void arm_v2_flush_va(uint16_t asid, uint64_t va) {
+  uint64_t op = ((va >> 12) & 0xFFFFFFFFFFFULL) | ((uint64_t)asid << 48);
+  __asm__ volatile("dsb ishst\n"
+                   "tlbi vae1is, %0\n"
+                   "dsb ish\n"
+                   "isb" ::"r"(op)
+                   : "memory");
+}
+
+/* Walk (optionally allocating) to the L3 leaf slot for `va`; NULL when
+   the VA is outside the user window or a table run is exhausted. */
+static uint64_t *arm_v2_walk_alloc(struct addr_space *as, uint64_t va,
+                                   int alloc) {
+  uint64_t l1i = (va >> 30) & 0x1FF;
+  if (l1i < 64 || l1i > 95)
+    return 0;
+  uint64_t *l1 = (uint64_t *)as->root_phys;
+  uint64_t l2d = l1[l1i];
+  uint64_t *l2;
+  if (!(l2d & 1)) {
+    if (!alloc)
+      return 0;
+    uint64_t t = frame_alloc_zeroed();
+    if (!t)
+      return 0;
+    l2 = (uint64_t *)t;
+    l1[l1i] = t | 0b11;
+    as->table_frames++;
+  } else {
+    l2 = (uint64_t *)(l2d & ARM_OA_MASK);
+  }
+  uint64_t l2i = (va >> 21) & 0x1FF;
+  uint64_t l3d = l2[l2i];
+  uint64_t *l3;
+  if (!(l3d & 1)) {
+    if (!alloc)
+      return 0;
+    uint64_t t = frame_alloc_zeroed();
+    if (!t)
+      return 0;
+    l3 = (uint64_t *)t;
+    l2[l2i] = t | 0b11;
+    as->table_frames++;
+  } else {
+    l3 = (uint64_t *)(l3d & ARM_OA_MASK);
+  }
+  return &l3[(va >> 12) & 0x1FF];
+}
+
+uint64_t vm_arch_root_alloc(struct addr_space *as) {
+  uint64_t root = frame_alloc_zeroed();
+  if (!root)
+    return 0;
+  uint64_t *l1 = (uint64_t *)root;
+  l1[0] = ((uint64_t)&l2_table_0) | 0b11;
+  l1[1] = ((uint64_t)&l2_kernel_1) | 0b11;
+  l1[2] = ((uint64_t)&l2_table_2) | 0b11;
+  l1[3] = ((uint64_t)&l2_table_3) | 0b11;
+  l1[4] = ((uint64_t)&l2_table_4) | 0b11;
+  l1[5] = ((uint64_t)&l2_table_5) | 0b11;
+  l1[6] = ((uint64_t)&l2_table_6) | 0b11;
+  l1[7] = ((uint64_t)&l2_table_7) | 0b11;
+  l1[8] = ((uint64_t)&l2_table_8) | 0b11;
+  as->table_frames++;
+  return root;
+}
+
+int vm_arch_map(struct addr_space *as, uint64_t va, uint64_t phys,
+                uint16_t prot, uint16_t kind) {
+  uint64_t *pte = arm_v2_walk_alloc(as, va, 1);
+  if (!pte)
+    return -1;
+  *pte = arm_v2_leaf_desc(phys, prot, kind);
+  arm_v2_flush_va(as->asid, va);
+  return 0;
+}
+
+void vm_arch_unmap(struct addr_space *as, uint64_t va) {
+  uint64_t *pte = arm_v2_walk_alloc(as, va, 0);
+  if (!pte)
+    return;
+  uint64_t leaf = *pte;
+  if (!(leaf & 1))
+    return;
+  if (!(leaf & ARM_LEAF_SHARED))
+    frame_free(leaf & ARM_OA_MASK);
+  *pte = 0;
+  arm_v2_flush_va(as->asid, va);
+}
+
+void vm_arch_prot(struct addr_space *as, uint64_t va, uint16_t prot) {
+  uint64_t *pte = arm_v2_walk_alloc(as, va, 0);
+  if (!pte)
+    return;
+  uint64_t leaf = *pte;
+  if (!(leaf & 1))
+    return;
+  uint16_t kind = (leaf & ARM_LEAF_SHARED) ? VMK_SHARED : VMK_ANON;
+  *pte = arm_v2_leaf_desc(leaf & ARM_OA_MASK, prot, kind);
+  arm_v2_flush_va(as->asid, va);
+}
+
+int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf) {
+  uint64_t *pte = arm_v2_walk_alloc(as, va, 0);
+  if (!pte || !(*pte & 1))
+    return -1;
+  if (leaf)
+    *leaf = *pte;
+  return 0;
+}
+
+void vm_arch_flush_va(struct addr_space *as, uint64_t va) {
+  arm_v2_flush_va(as->asid, va);
+}
+
+void vm_arch_shootdown(struct addr_space *as) {
+  (void)as; /* ARM invalidations are already broadcast per VA/ASID */
+}
+
+void vm_arch_switch(struct addr_space *as) {
+  uint32_t cpu = get_cpuid();
+  v2_active_root[cpu] = as->root_phys;
+  __asm__ volatile("dsb sy" ::: "memory");
+  __asm__ volatile("msr ttbr0_el1, %0" ::"r"(as->root_phys |
+                                             (uint64_t)as->asid));
+  if (!v2_live[cpu]) {
+    /* v1 -> v2 mode change: the v1 overlay leaves are global and may be
+       cached; full local flush.  v2 -> v2 is TTBR0 + isb only. */
+    __asm__ volatile("dsb sy\n"
+                     "tlbi vmalle1\n"
+                     "dsb sy\n"
+                     "isb" ::: "memory");
+  } else {
+    __asm__ volatile("isb" ::: "memory");
+  }
+  v2_live[cpu] = 1;
+}
+
+/* P2.2 (S2): hand this CPU back to the kernel table.  Cheap no-op when
+   already there.  Required (a) when a CPU stops running a v2 AS (v1
+   switch, idle entry) and (b) before an AS's table frames are freed --
+   continuing to run on a freed root is instant corruption. */
+void vm_arch_restore_kernel(void) {
+  uint32_t cpu = get_cpuid();
+  if (!v2_live[cpu] && !v2_active_root[cpu])
+    return;
+  v2_live[cpu] = 0;
+  v2_active_root[cpu] = 0;
+  __asm__ volatile("dsb sy" ::: "memory");
+  __asm__ volatile("msr ttbr0_el1, %0" ::"r"((uint64_t)&l1_table[cpu]));
+  __asm__ volatile("dsb sy\n"
+                   "tlbi vmalle1\n"
+                   "dsb sy\n"
+                   "isb" ::: "memory");
+}
+
+/* Free every table frame this AS owns plus its private leaf frames, then
+   the root.  Runs after the group is claim-drained (no CPU is executing
+   in this AS), under proc_lock (design section 5.3). */
+void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
+  if (!root_phys)
+    return;
+  /* P2.2 (S2): if THIS cpu is translating through the AS being freed,
+     leave v2 mode first (the design's claim-drain guarantees no other
+     CPU is executing in it). */
+  if (v2_active_root[get_cpuid()] == root_phys)
+    vm_arch_restore_kernel();
+  uint64_t *l1 = (uint64_t *)root_phys;
+  for (uint64_t c = 64; c <= 95; c++) {
+    uint64_t l2d = l1[c];
+    if (!(l2d & 1))
+      continue;
+    uint64_t l2p = l2d & ARM_OA_MASK;
+    uint64_t *l2 = (uint64_t *)l2p;
+    for (int i = 0; i < 512; i++) {
+      uint64_t l3d = l2[i];
+      if (!(l3d & 1))
+        continue;
+      uint64_t l3p = l3d & ARM_OA_MASK;
+      uint64_t *l3 = (uint64_t *)l3p;
+      for (int j = 0; j < 512; j++) {
+        uint64_t leaf = l3[j];
+        if (!(leaf & 1))
+          continue;
+        if (!(leaf & ARM_LEAF_SHARED))
+          frame_free(leaf & ARM_OA_MASK);
+      }
+      frame_free(l3p);
+    }
+    frame_free(l2p);
+  }
+  /* ASID free/reuse: broadcast-invalidate before the root is released. */
+  __asm__ volatile("dsb ishst\n"
+                   "tlbi aside1is, %0\n"
+                   "dsb ish\n"
+                   "isb" ::"r"((uint64_t)asid << 48)
+                   : "memory");
+  frame_free(root_phys);
 }

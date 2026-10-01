@@ -5,11 +5,14 @@
 #include "arch/cpu.h"
 #include "errno.h"
 #include "timer.h"
+#include "frame.h"
+#include "vm.h"
 
 
 extern struct process *process_get_pcb(int pid);
 extern void uart_puts(const char* s);
 extern void print_int(int val);
+extern void uart_print_hex(uint64_t val);
 
 jmp_buf user_exit_context;
 
@@ -299,6 +302,191 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
 
 int load_and_run_program_in_scheduler(const char* filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid) {
   return load_and_run_program_in_scheduler_args(filename, stdin_fd, stdout_fd, stderr_fd, caller_pid, 0);
+}
+
+/**
+ * P2.2 (S2): loader v2 — the AS_V2 opt-in path (design section 8, S2).
+ *
+ * Reads the flat .bin image into FRESH ZEROED FRAMES (one per 4 KiB page,
+ * through the ordinary read path) and maps them into the process's v2
+ * IMAGE region at USER_IMG_BASE; commits the top 64 KiB of the main-stack
+ * reserve; registers the IMAGE + MAIN-STACK regions in the address space.
+ * Everything else (demand commit, mmap, memfd) builds on this in S3+.
+ *
+ * fd inheritance is not wired here: S2's only v2 program (MMTEST) uses
+ * no descriptors.  Returns the pid, or -1 (pid slot released) on failure.
+ */
+int load_and_run_program_v2(const char* filename, int stdin_fd,
+                            int stdout_fd, int stderr_fd, int caller_pid,
+                            const char *args) {
+  (void)stdin_fd;
+  (void)stdout_fd;
+  (void)stderr_fd;
+  if (!filename) return -1;
+  uart_puts("Loading program for scheduler (v2 AS): ");
+  uart_puts(filename);
+  uart_puts("\n");
+
+  int pid = -1;
+  for (int attempt = 0; attempt < 18000; attempt++) {
+    uint64_t t0 = timer_get_ms();
+    for (volatile int spin = 0; spin < 4000000; spin++) {
+      if (timer_get_ms() - t0 >= 100u) break;
+    }
+    /* Same headroom rationale as the v1 loader, in frames now: a wave
+       load must leave WAVE_LOAD_RESERVE blocks' worth of frames free so
+       child spawns always find memory (design section 2.2). */
+    if (caller_pid < 0 &&
+        frame_free_count() <= (int)WAVE_LOAD_RESERVE * FRAME_BLOCK_FRAMES)
+      continue;
+    pid = process_create_v2();
+    if (pid >= 0)
+      break;
+  }
+  if (pid < 0) {
+    uart_puts("Loader (v2) starved: ");
+    uart_puts(filename);
+    uart_puts("\n");
+    return -1;
+  }
+
+  struct process *child = process_get_pcb(pid);
+  struct addr_space *as = child ? child->as : 0;
+  if (!child || !as) {
+    process_free(pid);
+    return -1;
+  }
+  for (int i = 0; i < 31 && filename[i] != '\0'; i++) {
+    child->name[i] = filename[i];
+    child->name[i + 1] = '\0';
+  }
+  struct process *parent = process_get_pcb(caller_pid);
+  if (parent)
+    parent = process_group(parent);
+  if (parent) {
+    child->parent_pid = parent->pid;
+    for (int i = 0; i < 128; i++)
+      child->cwd[i] = parent->cwd[i];
+  } else {
+    child->cwd[0] = '/';
+    child->cwd[1] = '\0';
+  }
+  int ai = 0;
+  if (args) {
+    while (args[ai] && ai < 255) {
+      child->args[ai] = args[ai];
+      ai++;
+    }
+  }
+  child->args[ai] = '\0';
+  {
+    char flat[320];
+    int fi = 0;
+    for (int i = 0; child->name[i] && fi < 63; i++)
+      flat[fi++] = child->name[i];
+    if (fi)
+      flat[fi++] = ' ';
+    for (int i = 0; child->args[i] && fi < 315; i++)
+      flat[fi++] = child->args[i];
+    flat[fi] = '\0';
+    proc_split_argv(child, flat);
+  }
+
+  struct file f;
+  if (fat16_open(filename, &f) != 0) {
+    uart_puts("Failed to open file: ");
+    uart_puts(filename);
+    uart_puts("\n");
+    process_free(pid);
+    return -1;
+  }
+  uint32_t fsize = f.fat16.entry.file_size;
+  if (fsize == 0 || fsize > USER_IMG_SIZE) {
+    uart_puts("v2 loader: bad image size ");
+    print_int((int)fsize);
+    uart_puts("\n");
+    fat16_close(&f);
+    process_free(pid);
+    return -1;
+  }
+  uint64_t img_len = ((uint64_t)fsize + 0xFFF) & ~0xFFFULL;
+
+  /* IMAGE region + one mapped frame per 4 KiB page (read path). */
+  if (vm_region_insert(as, USER_IMG_BASE, img_len,
+                       VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC, VMK_IMG,
+                       VM_MAP_PRIVATE, 0, 0) != 0) {
+    uart_puts("v2 loader: image region insert failed\n");
+    fat16_close(&f);
+    process_free(pid);
+    return -1;
+  }
+  uint64_t off = 0;
+  int total = 0;
+  while (off < img_len) {
+    uint64_t fr = frame_alloc_zeroed();
+    if (!fr)
+      goto fail;
+    int n = fat16_read(&f, (void *)fr, (int)FRAME_SIZE);
+    if (n <= 0) {
+      frame_free(fr);
+      break;
+    }
+    if (vm_map_page(as, USER_IMG_BASE + off, fr,
+                    VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC, VMK_IMG) != 0) {
+      frame_free(fr);
+      goto fail;
+    }
+    /* Same cache discipline as the v1 loader: clean by the identity VA,
+       invalidate the I-cache shareably (the user VA is not mapped in the
+       kernel's current context, so it cannot be used here). */
+    __builtin___clear_cache((char *)fr, (char *)fr + FRAME_SIZE);
+    total += n;
+    off += FRAME_SIZE;
+  }
+  fat16_close(&f);
+  uart_puts("v2 loader: image mapped, bytes=");
+  print_int(total);
+  uart_puts(" pages=");
+  print_int((int)(off / FRAME_SIZE));
+  uart_puts("\n");
+
+  /* Main-stack region (the 64 KiB guard below stays a hole).  S3: demand
+     materializes every stack page on first touch, so the loader only
+     creates the region -- the old eager top-64-KiB commit is gone (the
+     design's "committed on load: IMAGE only"). */
+  if (vm_region_insert(as, USER_MAIN_STK_LIMIT_V2, USER_MAIN_STK_SIZE,
+                       VM_PROT_READ | VM_PROT_WRITE, VMK_STACK,
+                       VM_MAP_PRIVATE, 0, 0) != 0) {
+    uart_puts("v2 loader: stack region insert failed\n");
+    process_free(pid);
+    return -1;
+  }
+
+#ifdef __x86_64__
+  process_set_entry(pid, USER_IMG_BASE, USER_MAIN_STK_TOP_V2 - 8);
+#else
+  process_set_entry(pid, USER_IMG_BASE, USER_MAIN_STK_TOP_V2);
+#endif
+  uart_puts("v2 loader: PID=");
+  print_int(pid);
+  uart_puts(" entry=");
+  uart_print_hex(USER_IMG_BASE);
+  uart_puts(" sp=");
+  uart_print_hex(USER_MAIN_STK_TOP_V2);
+  uart_puts(" resident=");
+  print_int((int)as->resident_frames);
+  uart_puts(" tables=");
+  print_int((int)as->table_frames);
+  uart_puts("\n");
+  return pid;
+
+fail:
+  uart_puts("v2 loader: out of frames / map failure for ");
+  uart_puts(filename);
+  uart_puts("\n");
+  fat16_close(&f);
+  process_free(pid);
+  return -1;
 }
 
 /**
