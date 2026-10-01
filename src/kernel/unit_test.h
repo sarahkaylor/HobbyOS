@@ -52,6 +52,7 @@ void virtio_input_test_suite(void);
 void timer_test_suite(void);
 void smp_test_suite(void);
 void time_test_suite(void);
+void math_test_suite(void);
 void virtio_net_test_suite(void);
 void net_test_suite(void);
 void net_rdma_test_suite(void);
