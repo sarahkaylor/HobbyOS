@@ -1380,10 +1380,11 @@ curl -sI https://lite.cnn.com | grep -i content-length
     resident=2 tables=3`), CXX_T 20/20 distinct names, THRD_T 20/20 + TLS_T
     6/6 (per-name check), DNSTST live (`example.com A = 104.20.23.154`); 3
     `no free slot` pressure events absorbed by the P1 fix.
-  - **VM `w1g-*`** at the same tip: host rc=0
+  - **VM `w1g-*`** at the same tip: host rc=0 wall=50 s
     (`w1g-host_20261001-001101_host.log`; wide parity PASSED, `TEST EXIT: 0`);
-    unit-arm rc=0 66/0 (`w1g-unit-arm_20261001-001156`); unit-x64 rc=0 68/0
-    (KVM; `w1g-unit-x64_20261001-001307`); test-arm rc=0
+    unit-arm rc=0 wall=66 s (66/0; `w1g-unit-arm_20261001-001156`); unit-x64
+    rc=0 wall=57 s (68/0 KVM; `w1g-unit-x64_20261001-001307`); test-arm rc=0
+    wall=103 s
     (`w1g-test-arm_20261001-001410`; `System halt from CPU 5.`, **0 FAIL**,
     10/10 suites, MMTEST `PASS`, v2 loader live, DNSTST live; 1 absorbed
     pressure event).
