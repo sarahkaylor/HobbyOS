@@ -951,6 +951,18 @@ static void process_check_sleeping(void) {
 
 volatile int scheduler_started = 0;
 
+/* TEMP(triage): per-CPU last scheduler site + timestamp, dumped in the
+   [IDLESTUCK] diagnostic to name WHERE a CPU froze while still claiming a
+   pid (the wave-stall class: RUNNING process whose owner never re-homes).
+   Sites: 1 sched-entry, 2 after-save, 3 sched-picked, 4 sched-pre-enter,
+   5 idle-entry, 6 idle-picked, 8 kernel-exit. */
+volatile uint8_t sched_site[MAX_CPUS];
+volatile uint64_t sched_site_ms[MAX_CPUS];
+static void mark_site(uint32_t c, uint8_t s) {
+  sched_site[c] = s;
+  sched_site_ms[c] = timer_get_ms();
+}
+
 /**
  * The core scheduler. Implements round-robin scheduling across all CPUs.
  * Saves the current process context, finds the next READY process, and restores
@@ -976,6 +988,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
 
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   int current_pid = cpu_current_pids[cpu];
+  mark_site(cpu, 1);
 
   if (current_pid >= 0) {
     struct process *cur = &proc_table[current_pid];
@@ -1012,6 +1025,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
       }
     }
   }
+  mark_site(cpu, 2);
 
   process_check_sleeping();
 
@@ -1049,8 +1063,10 @@ void schedule(struct trap_frame *tf, int is_yield) {
     if (next >= 0) {
       set_current_process_pid(cpu, next);
       proc_table[next].state = PROC_STATE_RUNNING;
+      mark_site(cpu, 3);
       struct trap_frame local_tf;
       restore_context(&proc_table[next], &local_tf);
+      mark_site(cpu, 4);
 
       extern char __stack_top;
       uint64_t target_sp = (uint64_t)&__stack_top - cpu * 0x10000 - 4096;
@@ -1244,6 +1260,7 @@ void process_exit(struct trap_frame *tf) {
 }
 
 void kernel_exit(void) {
+  mark_site(get_cpuid(), 8);
   struct process *cur = current_process();
   if (cur) {
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
@@ -1662,6 +1679,7 @@ void start_scheduler(void) {
 
   while (1) {
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    mark_site(cpu, 5);
     process_check_sleeping();
     for (int i = 0; i < MAX_PROCESSES; i++) {
       if (proc_table[i].state != PROC_STATE_READY)
@@ -1681,6 +1699,7 @@ void start_scheduler(void) {
       {
         set_current_process_pid(cpu, i);
         proc_table[i].state = PROC_STATE_RUNNING;
+        mark_site(cpu, 6);
         sched_idle_rounds = 0;
 
         if (proc_table[i].as)
@@ -1822,6 +1841,18 @@ void start_scheduler(void) {
           uart_puts("\n");
         }
       }
+      uart_puts("[IDLESTUCK] claims:");
+      for (int c = 0; c < MAX_CPUS; c++) {
+        uart_puts(" c");
+        print_int(c);
+        uart_puts("=");
+        print_int(cpu_current_pids[c]);
+        uart_puts(":s");
+        print_int((int)sched_site[c]);
+        uart_puts(":age");
+        print_int((int)(timer_get_ms() - sched_site_ms[c]));
+      }
+      uart_puts("\n");
       spinlock_release_irqrestore(&proc_lock, dflags);
     }
 
