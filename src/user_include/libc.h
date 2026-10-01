@@ -77,6 +77,12 @@ extern "C" {
   int dup(int fd);
   int dup2(int oldfd, int newfd);
   int spawn(const char *filename, const char *args);
+  /* P6.3: spawn2() takes a literal path (no PATH search; the kernel
+   * resolves relative names against the cwd) and has no envp parameter:
+   * children inherit the group's environment blob, which execve(envp)
+   * writes.  execv() forwards the caller's `environ`, so setenv()+execv()
+   * propagates a changed environment.  execvpe()/execvp() add the PATH
+   * search at the libc layer. */
   int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args);
   int pipe(int fds[2]);
   int get_args(char *buf, int size);
@@ -89,9 +95,17 @@ extern "C" {
   int wait(int *status);
   int execv(const char *path, char *const argv[]);
   int execve(const char *path, char *const argv[], char *const envp[]);
+  /* P6.3: PATH search for bare names (rules in src/libc/src/stdlib.c);
+   * execvp() forwards the caller's environment, execvpe() the given one. */
+  int execvp(const char *file, char *const argv[]);
+  int execvpe(const char *file, char *const argv[], char *const envp[]);
 
   /* Native extension: copy the process's binary name into buf (for crt0
-   * argv[0]). Returns 0 on success, -1 on failure (no errno set). */
+   * argv[0]). Returns 0 on success, -1 on failure (no errno set).
+   * P6.3: the name is exactly the string passed to spawn2()/the
+   * exec-family (path included when the caller gave one) -- this OS's
+   * executable-path primitive (there is no /proc/self/exe), so e.g. the
+   * WebKit port derives currentExecutablePath() from it. */
   int get_progname(char *buf, int size);
 
   /* Native extension: read the process's positional parameters (argv),

@@ -661,14 +661,61 @@ int wait(int *status) {
   return waitpid(-1, status, 0);
 }
 
+/* P6.3: the environment table + its kernel bridge.  The table lives HERE
+ * (not in libc.a's stdlib.o) because the trio-linked programs
+ * (user_libc.o + user_malloc.o + libc_string.o) have no archive, and every
+ * link flavour must resolve it; stdlib.o's getenv/setenv/execvp()
+ * reference it as a plain extern. */
+char **environ = NULL;
+
+/* Materialize `environ` from the kernel env blob (SYS_GETENV, row 85): the
+ * kernel keeps the group's environment as one NUL-separated buffer.  crt0
+ * calls this before main(); it is idempotent, and stdlib.o's getenv()
+ * re-tries it for programs without crt0.  The byte cap mirrors HO_ENV_LEN
+ * in src/include/process.h -- grow both together. */
+#define HB_ENV_BLOB_MAX 512
+
+void environ_init(void) {
+  /* malloc()/free() live in user_malloc.o, which a few lean graphics
+     binaries do not link; the weak references let those links resolve and
+     environ_init() simply declines (getenv() keeps its blob fallback;
+     nothing else uses the table in those links). */
+  extern void *malloc(size_t size) __attribute__((weak));
+  extern void free(void *ptr) __attribute__((weak));
+  if (environ || !malloc || !free) return;
+  long total = syscall(SYS_GETENV, -1, 0, 0, 0);
+  if (total < 0) return; /* no env rows; getenv() keeps its blob fallback */
+  if (total > HB_ENV_BLOB_MAX / 2) total = HB_ENV_BLOB_MAX / 2; /* >=1 char + NUL */
+  char **vec = (char **)malloc(((size_t)total + 1) * sizeof(char *));
+  if (!vec) return;
+  static char blob[HB_ENV_BLOB_MAX];
+  int used = 0;
+  int kept = 0;
+  for (long i = 0; i < total; i++) {
+    int room = HB_ENV_BLOB_MAX - used;
+    if (room < 2) break;
+    long len = syscall(SYS_GETENV, i, (long)(blob + used), (long)room, 0);
+    if (len < 0) {
+      free(vec);
+      return;
+    }
+    vec[kept++] = blob + used;
+    used += (int)len + 1; /* past the NUL SYS_GETENV wrote */
+  }
+  vec[kept] = 0;
+  environ = vec;
+}
+
 int execv(const char *path, char *const argv[]) {
-  return (int)errno_ret(syscall(SYS_EXEC, (long)path, (long)argv, 0, 0));
+  /* P6.3: POSIX execv() uses the caller's environment; the table is
+     defined in this object (see the P6.3 section above), so trio-linked
+     programs get a real environment across exec too. */
+  return execve(path, argv, environ);
 }
 
 int execve(const char *path, char *const argv[], char *const envp[]) {
   /* P5 (D3.1): the 3-arg row -- envp marshals to the group env blob
-     (NULL = empty environment; execv keeps passing an empty set until
-     the libc environ bridge lands with L3). */
+     (NULL = empty environment). */
   return (int)errno_ret(syscall(SYS_EXEC, (long)path, (long)argv, (long)envp, 0));
 }
 

@@ -113,6 +113,12 @@ extern "C" {
   int putenv(char *string); /* gnu-style "NAME=VALUE", takes ownership */
   int unsetenv(const char *name);
 
+  /* P6.3: build `environ` from the kernel environment blob (SYS_GETENV);
+   * idempotent -- crt0 calls it before main(), getenv() re-tries lazily.
+   * Implemented in src/user/libc.c (the one object every link flavour
+   * carries). */
+  void environ_init(void);
+
   void abort(void) __attribute__((noreturn));
   void exit(int status) __attribute__((noreturn));
 

@@ -165,6 +165,14 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
       for (int i = 0; i < 128; i++) {
         child->cwd[i] = parent->cwd[i];
       }
+      /* P6.3: a spawned child inherits the group's environment blob (set
+         by execve(envp); execv() forwards `environ`, so an exec'd parent
+         hands its environment down).  The spawn contract carries no envp
+         -- execve() stays the explicit form. */
+      for (int i = 0; i < HO_ENV_LEN; i++) {
+        child->env[i] = parent->env[i];
+      }
+      child->envc = parent->envc;
     } else {
       child->cwd[0] = '/';
       child->cwd[1] = '\0';

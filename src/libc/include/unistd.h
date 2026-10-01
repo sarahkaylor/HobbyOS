@@ -87,6 +87,9 @@ extern "C" {
   int getppid(void);
   int execv(const char *path, char *const argv[]);
   int execve(const char *path, char *const argv[], char *const envp[]);
+  /* P6.3: bare-name search through $PATH ("/" when unset; see stdlib.c). */
+  int execvp(const char *file, char *const argv[]);
+  int execvpe(const char *file, char *const argv[], char *const envp[]);
 
   /* Phase 4 (posix.md): heap break control. */
   void _exit(int status) __attribute__((noreturn)); /* POSIX: exit w/o atexit */

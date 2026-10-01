@@ -105,7 +105,7 @@ static void test_create_insert_select(void) {
   check("begin", exec_sql(db, "BEGIN;") == SQLITE_OK);
   rc = sqlite3_prepare_v2(db, "INSERT INTO t(b, c) VALUES(?1, ?2);", -1, &st, 0);
   check("insert-prepare", rc == SQLITE_OK);
-  for (i = 0; i < ROWS_FLAT && rc == SQLITE_OK; i++) {
+  for (i = 0; i < ROWS_FLAT; i++) {
     char word[32];
 
     snprintf(word, sizeof word, "row-%03d", i);

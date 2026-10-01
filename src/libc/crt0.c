@@ -35,6 +35,11 @@ void _start(void) {
    * fallback for programs that do not link crt0. */
   ho_tls_setup_initial();
 
+  /* P6.3: materialize `environ` from the kernel environment blob (the
+   * spawn/exec contract carries it; SYS_GETENV reads it back) so main()
+   * and ported POSIX code see a real environment table. */
+  environ_init();
+
   int argc = 0;
 
   /* Preferred: the kernel's positional-parameter blob (SYS_GETARGV).

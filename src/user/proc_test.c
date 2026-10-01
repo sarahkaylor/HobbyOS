@@ -206,6 +206,55 @@ int main(void) {
     check("FD_CLOEXEC swept, plain fd kept", r == child && WIFEXITED(status) ? WEXITSTATUS(status) : -1, 0);
   }
 
+  /* 6) P6.3: execv() forwards the caller's environment.  setenv() writes
+     the libc table, execv() marshals it through the kernel blob; PROCCHLD
+     "env" exits with PROCTEST_ENV's value (99 when unset), so 57 proves
+     the chain that used to exec with an empty set. */
+  setenv("PROCTEST_ENV", "57", 1);
+  child = fork();
+  for (int attempt = 0; child < 0 && attempt < 200; attempt++) {
+    usleep(50000);
+    child = fork();
+  }
+  if (child == 0) {
+    char *const eargv[] = { "PROCCHLD.BIN", "env", 0 };
+    execv("/PROCCHLD.BIN", eargv);
+    exit(7);
+  }
+  if (child < 0) {
+    print_console("[PROCTEST] fork #6 failed\n");
+    failures++;
+  } else {
+    status = 0;
+    r = waitpid(child, &status, 0);
+    check("execv passes environ", WIFEXITED(status) ? WEXITSTATUS(status) : -1, 57);
+  }
+
+  /* 7) P6.3: spawn2() has no envp parameter -- children inherit the
+     group's environment blob.  The exec'd child carries PROCTEST_ENV=71
+     (envp) and its "spawnenv" mode spawn2()s a grandchild that reads the
+     variable; 71 at the top proves the blob crossed the spawn boundary
+     (spawned children got an empty environment before P6.3). */
+  child = fork();
+  for (int attempt = 0; child < 0 && attempt < 200; attempt++) {
+    usleep(50000);
+    child = fork();
+  }
+  if (child == 0) {
+    char *const sargv[] = { "PROCCHLD.BIN", "spawnenv", 0 };
+    char *const senvp[] = { "PROCTEST_ENV=71", 0 };
+    execve("/PROCCHLD.BIN", sargv, senvp);
+    exit(8);
+  }
+  if (child < 0) {
+    print_console("[PROCTEST] fork #7 failed\n");
+    failures++;
+  } else {
+    status = 0;
+    r = waitpid(child, &status, 0);
+    check("spawn2 child inherits env blob", WIFEXITED(status) ? WEXITSTATUS(status) : -1, 71);
+  }
+
   if (failures == 0) {
     print_console("[PROCTEST] ALL PASSED (");
     con_int(checks_run);
