@@ -245,6 +245,11 @@ static void test_wave_loader(void *arg) {
      variables, so it runs after THRD_T/TLS_T (last in the wave). */
   load_and_run_program_in_scheduler("CXX_T.BIN", -1, -1, -1, -1);
 
+  /* P4 (docs/browser/p4-ipc-design.md §6.6): AF_UNIX IPC acceptance —
+     socketpair + poll + SCM_RIGHTS fd passing, forks children.  LATE for
+     the same reason as THRD_T (process-table churn). */
+  load_and_run_program_in_scheduler("IPC_T.BIN", -1, -1, -1, -1);
+
   /* P2.2 (S2): v2 address-space acceptance.  MMTEST.BIN is the first
      AS_V2 program in the wave: loader v2 maps its image into fresh 4 KiB
      frames at USER_IMG_BASE (64 GiB) and commits the top of the v2 main
@@ -285,6 +290,8 @@ void main(void) {
   fs_init();
   extern void pipes_init(void);
   pipes_init();
+  extern void unix_init(void);
+  unix_init(); /* P4: AF_UNIX pair pool (docs/browser/p4-ipc-design.md §2) */
 
   // Initialize and enable the timer
   timer_init();
