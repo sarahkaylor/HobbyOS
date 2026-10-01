@@ -1371,6 +1371,30 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-09-30 — **Wave 1e — batteries: GREEN both machines at `9a939e5`** —
+  first merged-tip attempt, no defects found (contrast Wave 1d's RED #1).
+  - **Local `w1g`**: host 482/0 + `TEST EXIT: 0` (wide parity PASSED); unit-arm
+    66/0; unit-x64 68/0 (KVM); ARM wave `System halt.`, **0 FAIL tokens**,
+    **10/10 suite summaries** — MMTEST full acceptance (7 checks + `MMTEST
+    PASS`) with the **v2 loader live** (`entry=0x100000000 sp=0x180000000
+    resident=2 tables=3`), CXX_T 20/20 distinct names, THRD_T 20/20 + TLS_T
+    6/6 (per-name check), DNSTST live (`example.com A = 104.20.23.154`); 3
+    `no free slot` pressure events absorbed by the P1 fix.
+  - **VM `w1g-*`** at the same tip: host rc=0
+    (`w1g-host_20261001-001101_host.log`; wide parity PASSED, `TEST EXIT: 0`);
+    unit-arm rc=0 66/0 (`w1g-unit-arm_20261001-001156`); unit-x64 rc=0 68/0
+    (KVM; `w1g-unit-x64_20261001-001307`); test-arm rc=0
+    (`w1g-test-arm_20261001-001410`; `System halt from CPU 5.`, **0 FAIL**,
+    10/10 suites, MMTEST `PASS`, v2 loader live, DNSTST live; 1 absorbed
+    pressure event).
+  - **Method note:** the strict `name : PASS` adjacency regex **undercounts**
+    under `[CONSOLE]` multiplexer splices — THRD_T read 18/20 and TLS_T 5/6 by
+    regex while per-name substring search found all names in both logs; count
+    by per-name substring against the known list and cross-check the suite's
+    `ALL TESTS PASSED SUCCESSFULLY` line (run-tests skill updated).
+  - Wave 1e is closed with this entry: all four lanes merged (`9a939e5`) and
+    the merged tip carries verified green batteries on both machines.
+
 - 2026-09-30 — **Wave 1e landed: P2 S1–S3 (VM v2) + P4/P5 design notes + ICU
   target build — merged at `9a939e5`** (base `07b6c00`; p4 fast-forward,
   p5/icu/p2 merges clean; 31 files, +5702/−270; cstyle 20/20 on changed src;
@@ -1403,8 +1427,8 @@ curl -sI https://lite.cnn.com | grep -i content-length
     + `SYS_SPAWN_EX`, unified reap delivery (closes the confirmed
     waitpid-wake gap), main-thread SIGCHLD frame engine, rows 83–86 supersede
     the §A.1b provisionals.
-  - Merged-tip batteries (local + VM) launched at `9a939e5` — verdict entry
-    above this one when green.
+  - Merged-tip batteries (local + VM) launched at `9a939e5`: **GREEN** — see
+    the verdict entry above.
 
 - 2026-09-30 — **Wave 1d — batteries: GREEN both machines** at `9104be5`
   (first merged-tip attempt at `3b83823` was RED; the failures were three real
