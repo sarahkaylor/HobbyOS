@@ -9,8 +9,9 @@
  *            getenv("P5EX") is visible (envp blob), that the fd named by
  *            getenv("P5K") is OPEN (parent table copy) and the fd named
  *            by getenv("P5C") is CLOSED (CLOEXEC sweep).  Report the four
- *            findings as "ARG=... EX=... K=... C=..." to fd 7 — the
- *            spawn_ex-mapped pipe write end — then exit 7.
+ *            findings as "ARG=... EX=... K=... C=..." to the fd named by
+ *            getenv("P5O") (the spawn_ex fdmap dst; default 7) — the
+ *            mapped pipe write end — then exit 7.
  *   "empty": exit 9 when getenv("P5EX") is absent (envp == NULL means an
  *            empty environment, D3.1), 8 when it is set.  No fd use.
  */
@@ -19,6 +20,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <sys/stat.h>
 
 /* The old-trio libc has no atoi; keep the tiny parser (proc_child rule). */
 static int p_atoi(const char *s) {
@@ -33,13 +35,14 @@ static int p_atoi(const char *s) {
   return neg ? -v : v;
 }
 
-/* fd-liveness probe (skill rule: fcntl(F_GETFD) is NOT a probe; a real
- * close() must fail EBADF for a closed slot).  Runs at the very end of
- * the child, so destroying an open probe fd is harmless. */
+/* fd-liveness probe: fstat succeeds on every live fd type (fat16 file,
+ * pipe, socket — file_stat_fd) and -EBADF on a closed slot.  Non-
+ * destructive, unlike close(), and fcntl(F_GETFD) is NOT a probe. */
 static int fd_is_open(int fd) {
   if (fd < 0)
     return 0;
-  return close(fd) == 0;
+  struct stat st;
+  return fstat(fd, &st) == 0;
 }
 
 int main(int argc, char **argv) {
@@ -69,8 +72,12 @@ int main(int argc, char **argv) {
     strcat(rep, (ce && fd_is_open(p_atoi(ce))) ? "open" : "closed");
   }
 
-  /* fd 7 is the spawn_ex fdmap destination (the pipe write end). */
-  size_t len = strlen(rep);
-  ssize_t w = write(7, rep, len);
-  return (w == (ssize_t)len) ? 7 : 6;
+  /* the spawn_ex fdmap dst (default 7): report back over it */
+  {
+    char *oe = getenv("P5O");
+    int ofd = (oe && p_atoi(oe) > 0) ? p_atoi(oe) : 7;
+    size_t len = strlen(rep);
+    ssize_t w = write(ofd, rep, len);
+    return (w == (ssize_t)len) ? 7 : 6;
+  }
 }

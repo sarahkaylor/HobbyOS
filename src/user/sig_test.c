@@ -315,11 +315,12 @@ int main(void) {
   i2s(keepfd, kenv + 4);
   strcpy(cenv, "P5C=");
   i2s(clofd, cenv + 4);
-  char *envp3[4];
+  char *envp3[5];
   envp3[0] = "P5EX=yes";
   envp3[1] = kenv;
   envp3[2] = cenv;
-  envp3[3] = 0;
+  envp3[3] = "P5O=20"; /* the fdmap dst; the child reports back over it */
+  envp3[4] = 0;
   char *argv3[4];
   argv3[0] = "SPAWNEX.BIN";
   argv3[1] = "probe";
@@ -327,16 +328,16 @@ int main(void) {
   argv3[3] = 0;
   int map1[1][2];
   map1[0][0] = pp[1];
-  map1[0][1] = 7;
+  map1[0][1] = 20; /* away from the probe fds so nothing shadows */
   errno = 0;
   int sp = spawn_ex("SPAWNEX.BIN", argv3, envp3, map1, 1);
   check("spawn_ex(SPAWNEX.BIN) returns a pid", sp > 0, 1);
-  close(pp[1]); /* the child holds its own copy at fd 7 */
+  close(pp[1]); /* the child holds its own copy at fd 20 */
   if (sp > 0) {
     char rb[80];
     long rn = read(pp[0], rb, sizeof rb - 1);
     rb[rn > 0 ? rn : 0] = 0;
-    check("child reported over the mapped fd 7", rn > 0, 1);
+    check("child reported over the mapped fd 20", rn > 0, 1);
     check("child argv passed (ARG=hello)", strstr(rb, "ARG=hello") != 0, 1);
     check("child envp applied (EX=yes)", strstr(rb, "EX=yes") != 0, 1);
     check("parent fd-table copy visible (K=open)", strstr(rb, "K=open") != 0, 1);
@@ -355,7 +356,9 @@ int main(void) {
   errno = 0;
   check("spawn_ex illegal dst -> -1", spawn_ex("SPAWNEX.BIN", argv3, envp3, badmap, 1), -1);
   check("   errno == EBADF (atomic fail)", errno == EBADF, 1);
-  badmap[0][1] = 30; /* src never opened */
+  badmap[0][1] = 30; /* dst in range but the SECOND pair's src is closed */
+  badmap[1][0] = pp[1]; /* already closed above -> -EBADF atomically */
+  badmap[1][1] = 8;
   errno = 0;
   check("spawn_ex closed src -> -1", spawn_ex("SPAWNEX.BIN", argv3, envp3, badmap, 2), -1);
   check("   errno == EBADF", errno == EBADF, 1);

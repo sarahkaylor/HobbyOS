@@ -610,6 +610,14 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     return -ENOENT;
   }
   uint32_t fsize = f.fat16.entry.file_size;
+  if (fsize == 0) {
+    /* D4.4: a missing image surfaces as a zero-size entry (fat16_open
+       creates on miss), and an empty image can never be executed -- the
+       documented -ENOENT.  The spawn2 wrapper below folds it back to -1. */
+    fat16_close(&f);
+    process_free(pid);
+    return -ENOENT;
+  }
   if (v2_map_image(as, &f, fsize) != 0) {
     fat16_close(&f);
     process_free(pid);
