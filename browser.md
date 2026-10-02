@@ -779,16 +779,21 @@ recorded budget. **Met at `1aaa3b2`** (batteries §11).
 *(Design note complete: `docs/browser/p4-ipc-design.md` — `d454566`; D1–D13
 (usock pairs riding the pipe park engine, SCM_RIGHTS transfer machine,
 poll-only/no-epoll, rows 76–79 + errno EMSGSIZE/ENOTCONN); OQ1–OQ5 pending
-integrator review. Implementation pending.)*
+integrator review. Implementation in tree: rows 76–79, IPC_T 86 checks — see
+§11.)*
 
-- [ ] **P4.1 AF_UNIX sockets** — `socketpair(AF_UNIX)` + pathless sockets;
+- [x] **P4.1 AF_UNIX sockets** — `socketpair(AF_UNIX)` + pathless sockets;
       stream semantics; fd namespace integration. (`SYS_SOCKETPAIR` §A.1b.)
-- [ ] **P4.2 fd-passing** — `sendmsg`/`recvmsg` with `SCM_RIGHTS` (one fd
+      *(In tree: rows 76–79; IPC_T runs. Checkbox lagging records — see §11.)*
+- [x] **P4.2 fd-passing** — `sendmsg`/`recvmsg` with `SCM_RIGHTS` (one fd
       minimum, arrays best-effort); close-on-fork inheritance rules defined.
-- [ ] **P4.3 `poll()`** — syscall + libc (`pollfds` incl. `POLLIN/POLLOUT/
+      *(In tree: SYS_SENDMSG/SYS_RECVMSG rows 78/79; IPC_T ✓.)*
+- [x] **P4.3 `poll()`** — syscall + libc (`pollfds` incl. `POLLIN/POLLOUT/
       POLLERR/HUP`), used by WebKit event loops; select stays for old code.
-- [ ] **P4.4 Tests** — `IPC_T.BIN`: socketpair echo, fd-pass to a child
-      process, poll multiplexing 3 fds; kernel-unit coverage.
+      *(In tree: SYS_POLL row 76; POLLTST bounds 85–5000ms `447f02a`.)*
+- [x] **P4.4 Tests** — `IPC_T.BIN`: socketpair echo, fd-pass to a child
+      process, poll multiplexing 3 fds; kernel-unit coverage. *(86 IPC_T
+      checks green on wave batteries; hardened against wave-pressure.)*
 
 **Gate P4:** `IPC_T.BIN` both arches; no regressions.
 
@@ -826,36 +831,45 @@ x64 wave signature (§11).
 
 ### P6 — POSIX fill-in & SQLite  *(new; Track B)*
 
-- [ ] **P6.1** `mkstemp`/`tmpfile`/`fsync`/`ftruncate`/`fchmod` stubs-as-
+- [x] **P6.1** `mkstemp`/`tmpfile`/`fsync`/`ftruncate`/`fchmod` stubs-as-
       appropriate; `flock`/`fcntl` record locks (SQLite); `getcwd`/`chdir`
       (if missing); `utime`; `sched_yield`; `sysconf` bits; `getpwuid`/
       `getgroups` stubs returning sane single-user values; `locale` C.
-- [ ] **P6.2 Port SQLite** — pinned version; `SQLITE_THREADSAFE=1`,
+      *(In tree; ftruncate dup fixed `88f680c` — see §11.)*
+- [x] **P6.2 Port SQLite** — pinned version; `SQLITE_THREADSAFE=1`,
       single-OS VFS over our file API; fcntl locks per P6.1; in-OS test
-      (create/insert/select, WAL off initially).
-- [ ] **P6.3** Environment/aux: `environ` hygiene, `PATH`-less exec rules,
+      (create/insert/select, WAL off initially). *(Pinned + vendored (AD-11);
+      SQLTEST boots in-OS; sqlite3.h explicit Makefile rule.)*
+- [x] **P6.3** Environment/aux: `environ` hygiene, `PATH`-less exec rules,
       argv[0]/program-path exposure needed by WebKit (**verify** its
       executable-path discovery; supply via spawn contract).
+      *(Env blob `1aaa3b2`; argv pipeline landed with P5 exec.)*
 
 **Gate P6:** SQLite in-OS test + host tests green both arches.
 
 ### P7 — Toolchain, fork, build system  *(new; Track B; starts at W1)*
 
-- [ ] **P7.1 Fork stand-up** — `HobbyOS/WebKit` clone at tag
+- [x] **P7.1 Fork stand-up** — `HobbyOS/WebKit` clone at tag
       `webkitgtk-2.54.0`; add `HobbyOS/` port dir (platform files, cmake
       toolchain file, port README + rebase log); CI script = "does it
-      configure" on host for sanity.
-- [ ] **P7.2 Port scaffolding** — `WTF_OS_HOBBYOS` platform detection;
+      configure" on host for sanity. *(Fork at ~/webkit-hobbyos
+      `browser/l8-wk1`; WK-0 ✓; WK-2 configure GREEN `5692a0516b`.)*
+- [x] **P7.2 Port scaffolding** — `WTF_OS_HOBBYOS` platform detection;
       `Platform.h`/`PlatformHobbyOS.*` (time, memory, threads conversion,
       file syscalls, StackBounds, OSAllocator); build with
-      `USE_SYSTEM_MALLOC`; strip JIT options.
-- [ ] **P7.3 Build integration for HobbyOS** — cross CMake toolchain
+      `USE_SYSTEM_MALLOC`; strip JIT options. *(toolchain-hobbyos.cmake;
+      JSCOnly static C_LOOP; WK-1 jsc on-device ✓.)*
+- [x] **P7.3 Build integration for HobbyOS** — cross CMake toolchain
       (`CMAKE_SYSTEM_NAME=HobbyOS`, clang, static, our sysroot + libc++);
       document the exact cmake invocation in the fork README; Wire into the
       OS repo as build rules request (Integrator applies).
-- [ ] **P7.4 Feature-trim list applied** — from W0.4: media/GPU/WebRTC/WebGL/
+      *(Toolchain `b502c65`; canonical recipe in fork README + WK2-EVIDENCE.)*
+- [x] **P7.4 Feature-trim list applied** — from W0.4: media/GPU/WebRTC/WebGL/
       WebAudio/PDF/plugins off; SVG/WebP on; ICU + harfbuzz on; curl backend
       on; sandbox off; JIT off; record the full define set in the fork README.
+      *(Trims applied + validated vs WebKitFeatures.cmake across WK-2; curl OFF
+      at WK-2 (D-7), harfbuzz via hbcore (D-15), JIT off, media/GPU/WebGL off —
+      see PORT_PLAN register.)*
 
 **Gate P7:** fork configures + builds the "null" targets (WTF only) for both
 HobbyOS arches as far as the current P-stage allows (this gate is *incremental*
