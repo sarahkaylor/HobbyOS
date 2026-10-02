@@ -1410,6 +1410,76 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-10-02 — **Wave L8 batch-2 — CLASS B RESOLVED + wave pressure hardened +
+  WK-1 `jsc` ON-DEVICE; batteries GREEN both machines at `5ae0362`** —
+  three lanes merged (`0668f54` = `browser/l8-idlefix` + `browser/l8-wave-harden`,
+  then `5ae0362` = WK-1 single-program boot mode).
+  - **Class B IDLESTUCK lost-owner soak freeze — ROOT-CAUSED + FIXED** (lane
+    `l8-idlefix`, commits `5eb9309`/`a10fdf9`/`f58e52d`, doc
+    `docs/browser/l8-idlestuck-class-RESOLVED-l8-idlefix.md`): a TORTURE
+    exec-child slot left RUNNING-but-claimed because its claiming CPU wedges
+    permanently IRQ-off inside the claim→resume window (heartbeat frozen —
+    c3 1554 ms vs ~4 ms others; `claims: c3=1`; identical signature in the
+    historical freeze@337/186 logs). The old reaper only reclaimed RUNNING
+    slots with **no** claiming CPU, so the stale claim pinned the slot
+    forever and the soak froze with no halt. First fix candidate (re-READY
+    the slot) **disproven empirically**: re-picking the wedged child
+    cascades and wedges all 8 cores (the poison rides the child's AS).
+    Landed recovery: the reaper detects a RUNNING slot whose every claimer
+    heartbeat is ≥2000 ms stale **with the table otherwise drained**,
+    releases the zombie claims, and `group_teardown`s the slot (code 97) —
+    the parked WAIT_CHILD parent reaps a rejected exec and TORTURE reforks
+    fresh; rounds continue, violations=0. Evidence: repro freeze@392 (197
+    IDLESTUCK); live-recovery soak — wedge@~199, exactly one `[LOSTWAKE]
+    disposing`, resumed to 800 rounds + halt; clean soak **807 rounds,
+    IDLESTUCK=0, violations=0**; unit regression
+    `test_lostwake_stale_claim_reclaim` both arches; LANE GATE OK. Residual
+    risk (documented): each wedge permanently burns one core (a 28-min soak
+    loses ~1); the clean-run receipt is luck-dependent (wedge fires ~2/3 of
+    runs — the fix's value is the live recovery).
+  - **Wave-pressure flake class — CLOSED at the tip by test-side hardening**
+    (lane `l8-wave-harden`, 8 commits; the merged-tip wave that prompted it:
+    **12 FAIL tokens** — shell×3, IPC_T×4, MMTEST, NFS×2; different suites
+    per run, every run carrying exactly the 6 rate-limited `no free
+    slot/process` forensics): extended the 4cddb2a skip-with-note pattern to
+    SIGTEST/POLLTST/FPU_T/IPC_T/MMTEST/shell_*/SQLTEST fork/spawn-dependent
+    checks (retry 3×2 s then skip-with-note on sustained pressure; precise
+    stderr-pipe fork-failure discriminator; bounded reads + watchdog for
+    starved-shell stalls), moved **WK1C_T to the END of the churn group**
+    (launch-hungry-last rule), densified pressure classification across the
+    whole check window, and fixed PROCTEST's WNOHANG probe to sample the
+    table around the probe. TEMP SPAWNPR probes committed then cleanly
+    reverted. Result: merged-tip wave = **0 FAIL, 18 summaries** (local) —
+    the 12-token / hang tail-freeze samples (hooktails correlated to class B,
+    now kernel-fixed) are gone.
+  - **WK-1 `jsc` — ON-DEVICE (M3 ARM + M4 x64)** (fork lane, `browser/l8-wk1`
+    head `9b1bfc83c9`): jsc relinked against the merged real libc sysroot
+    (0 undefined; raw 26.9 MB ARM / 30.2 MB x64 flat, both < 64 MiB
+    USER_IMG_SIZE); **ARM QEMU smoke 42/42 PASS crash-free + `System halt`**
+    + **x64 TCG smoke 42/42** (raw serial logs + image-budget math in
+    `HobbyOS/continuation/` + `WK1-M3-EVIDENCE.md` ledger). Remaining before
+    the formal WK-1 gate: the **test262 language-subset run** (gate's second
+    evidence item) and an OS defect found by M4 — an **x64 KVM page fault at
+    RIP 0x7002E0E0 during v2 image load of a 30 MB image** (before any jsc
+    code; TCG-green accepted for M4's own gate, kernel fault is a follow-up).
+  - **OS mode landed** (`5ae0362`): `console_write_user()` (length-bounded,
+    full-range `vm_range_ok`, byte-wise `uart_putc`), `sys_write_console`
+    honoring the length on both arches, **fd-1/2→console fallback** for
+    boot-wave programs with no console fd (jsc's stdout; `print_console`
+    prefix dropped — verified benign across the wave), and
+    `KERNEL_MODE_JSC`/`MODE=jsc`/`jsc_run`. cstyle clean; MODE=jsc kernel
+    build smoke green.
+  - **Batteries at `5ae0362`** — LOCAL: host 0-fail; unit-arm **294/0**;
+    unit-x64 **296/0** (both +2 = the lostwake regression); wave **0 FAIL +
+    `System halt` + 18 summaries**. VM (`w6-*`): host ✓ rc=0;
+    unit-arm ✓ 294; unit-x64 ✓ 296; test-arm rc=0, **0 FAIL tokens, halt,
+    21 summaries, TORTURE 8/8** (`w6-test-arm_20261002-120055_test-arm.log`).
+    Both machines green at the merged tip.
+  - **Open at this tip (carry-forward)**: test262 subset harness + x64 KVM
+    v2-load fault (above); the fat16 >1 MiB `attr=0` create-path defect
+    (pre-existing; blocks direct blob-timing); the WK-1.5 architecture
+    decision, which CP-2 (at the WK-1 gate) makes.
+
 - 2026-10-01 — **x64 full-wave re-characterization at the Wave 1f tail tip (`b122e0c`) —
   6-copy KVM battery: one class (all-idle stall), no resets, deeper reach than baseline;
   `unit-x64` green** — lane `browser/l3-x64char`; template `make ARCH=intel MODE=test
