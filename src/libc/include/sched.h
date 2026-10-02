@@ -16,6 +16,13 @@ extern "C" {
    * a declaration for historical reasons (they must match). */
   int sched_yield(void);
 
+  /* L8 ABI ext (topology only): the HobbyOS scheduler has a single fixed
+   * priority level, so both bounds are 1 (SCHED_OTHER/FIFO/RR); invalid
+   * policies return -1 with errno = EINVAL.  Implemented in the pthread
+   * layer (src/libc/src/pthread.c), next to sched_yield(). */
+  int sched_get_priority_min(int policy);
+  int sched_get_priority_max(int policy);
+
   /* sched_param + the two required policies: declared for source
    * compatibility only.  pthread_attr_setschedpolicy() accepts the policy
    * values as a no-op (P1, pthread.c); no scheduler policy is implemented. */

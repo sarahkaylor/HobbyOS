@@ -21,6 +21,8 @@ extern void uart_puts(const char *s);
 extern void uart_putc(char c);
 extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
+// L8 ABI ext (row 87): boot-anchored REALTIME clock (src/kernel/time.c).
+extern uint64_t hb_clock_realtime_ms(void);
 
 /* Defined below (line ~330); declared here for the early syscall helpers
    that are v2-aware since P2.2 S2.  P4: non-static — fs.c range-checks
@@ -594,6 +596,59 @@ static void sys_getrandom(struct trap_frame *tf) {
     return;
   }
   tf->regs[0] = (uint64_t)net_get_random_bytes(buf, len);
+}
+
+/* L8 ABI extension (row 87): (clk_id, struct timespec*) -> 0 | -EINVAL |
+ * -EFAULT.  CLOCK_REALTIME (0) is the boot-anchored wall clock (RTC epoch
+ * at boot + monotonic uptime); CLOCK_MONOTONIC (1) is timer_get_ms(). */
+static void sys_gettime(struct trap_frame *tf) {
+  int clk = (int)tf->regs[0];
+  void *tp = (void *)tf->regs[1];
+  int64_t *sec = (int64_t *)tp;
+  int64_t *nsec = sec + 1;
+  uint64_t ms;
+
+  if (!tp || !sys_user_range((uint64_t)tp, 16, 1)) {
+    tf->regs[0] = -EFAULT;
+    return;
+  }
+  if (clk == 0) {               /* CLOCK_REALTIME */
+    ms = hb_clock_realtime_ms();
+  } else if (clk == 1) {        /* CLOCK_MONOTONIC */
+    extern uint64_t timer_get_ms(void);
+    ms = timer_get_ms();
+  } else {
+    tf->regs[0] = -EINVAL;
+    return;
+  }
+  *sec = (int64_t)(ms / 1000);
+  *nsec = (int64_t)((ms % 1000) * 1000000);
+  tf->regs[0] = 0;
+}
+
+/* L8 ABI extension (row 88): (struct hb_stackinfo*) -> 0 | -EFAULT.
+ * Returns the calling process's MAIN-THREAD kernel-created stack region:
+ * v2 = [USER_MAIN_STK_LIMIT_V2, +USER_MAIN_STK_SIZE); v1 = the cleared top
+ * USER_STACK_CLEAR_SIZE bytes of the 32 MiB user region.  WebKit's
+ * StackBounds (UNIX branch) gets the same numbers via pthread_getattr_np. */
+static void sys_getstack(struct trap_frame *tf) {
+  struct process *p = current_process();
+  void *out = (void *)tf->regs[0];
+  uint64_t *base = (uint64_t *)out;
+  uint64_t *size = base + 1;
+
+  if (!out || !sys_user_range((uint64_t)out, 16, 1)) {
+    tf->regs[0] = -EFAULT;
+    return;
+  }
+  if (p && p->as) {             /* v2 */
+    *base = USER_MAIN_STK_LIMIT_V2;
+    *size = USER_MAIN_STK_SIZE;
+  } else {                      /* v1 */
+    *base = USER_VIRT_BASE + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE;
+    *size = USER_STACK_CLEAR_SIZE;
+  }
+  tf->regs[0] = 0;
 }
 
 static void sys_sleep(struct trap_frame *tf) {
@@ -1638,6 +1693,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_setsockopt(tf);
     } else if (syscall_num == SYS_GETRANDOM) {
       sys_getrandom(tf);
+    } else if (syscall_num == SYS_GETTIME) {   /* L8 ABI ext (87) */
+      sys_gettime(tf);
+    } else if (syscall_num == SYS_GETSTACK) {  /* L8 ABI ext (88) */
+      sys_getstack(tf);
     } else if (syscall_num == SYS_THREAD_CREATE) {
       sys_thread_create(tf);
     } else if (syscall_num == SYS_FUTEX) {

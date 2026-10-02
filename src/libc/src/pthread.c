@@ -24,6 +24,7 @@
 #include "errno.h"
 #include "time.h"
 #include "unistd.h"
+#include "sched.h"   /* L8: SCHED_* policies for sched_get_priority_min/max */
 #include <sys/mman.h>
 
 #define HO_PTHREAD_KEYS 128
@@ -40,6 +41,7 @@ struct __ho_tcb {
   void *stack_base;
   size_t stack_size;
   int stack_mmap;         /* P2.4 (S4): stack_base came from mmap+guard  */
+  int stack_caller;       /* L8: caller-provided stack (never freed)     */
   void *keys[HO_PTHREAD_KEYS];
 };
 
@@ -114,7 +116,7 @@ static void ho_pthread_reap(void) {
     usleep(10000);
   while (list) {
     struct __ho_tcb *n = list->dead_next;
-    if (list->stack_base)
+    if (list->stack_base && !list->stack_caller)
       ho_stack_free(list->stack_base, list->stack_size, list->stack_mmap);
     free(list);
     list = n;
@@ -190,10 +192,21 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
   if (!t)
     return 12; /* ENOMEM */
   int stack_is_mmap = 0;
-  void *stack = ho_stack_alloc(stack_size, &stack_is_mmap);
-  if (!stack) {
-    free(t);
-    return 12; /* ENOMEM */
+  int stack_caller = 0;   /* L8: caller provided a stack region */
+  void *stack;
+  if (attr && attr->stackaddr) {
+    /* L8: honour pthread_attr_setstack() — the caller's region is used
+       as the stack and is NEVER freed (not even on join).  The usable
+       stack is [stackaddr, stackaddr + stacksize). */
+    stack = attr->stackaddr;
+    stack_is_mmap = 0;
+    stack_caller = 1;
+  } else {
+    stack = ho_stack_alloc(stack_size, &stack_is_mmap);
+    if (!stack) {
+      free(t);
+      return 12; /* ENOMEM */
+    }
   }
 
   /* Per-thread TLS block.  Layout probe-verified (design section 4,
@@ -246,6 +259,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
   t->stack_base = stack;
   t->stack_size = stack_size;
   t->stack_mmap = stack_is_mmap;
+  t->stack_caller = stack_caller;
   t->tid = 1;      /* sentinel: not-yet-published (joiners park on it) */
   *thread = t;     /* publish before the call (design: init; publish; create) */
 
@@ -273,7 +287,8 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
   if (rc < 0) {
     *thread = 0;
     free(tls_mem);
-    ho_stack_free(stack, stack_size, stack_is_mmap);
+    if (!stack_caller)
+      ho_stack_free(stack, stack_size, stack_is_mmap);
     free(t);
     return (rc == -11 /* -EAGAIN */) ? 11 : 12;
   }
@@ -354,7 +369,7 @@ int pthread_join(pthread_t thread, void **retval) {
   }
   if (retval)
     *retval = t->retval;
-  if (t->stack_base) {
+  if (t->stack_base && !t->stack_caller) {
     /* The exiting thread publishes tid = 0 and wakes joiners BEFORE its
        last few instructions leave this stack (futex_wake_all's frames +
        the final restore epilogue).  Freeing the stack on the spot can
@@ -739,6 +754,7 @@ int pthread_setspecific(pthread_key_t key, const void *value) {
 int pthread_attr_init(pthread_attr_t *attr) {
   attr->detachstate = PTHREAD_CREATE_JOINABLE;
   attr->stacksize = HO_PTHREAD_STACK_DEFAULT;
+  attr->stackaddr = 0;
   return 0;
 }
 int pthread_attr_destroy(pthread_attr_t *attr) {
@@ -763,6 +779,26 @@ int pthread_attr_getstacksize(const pthread_attr_t *attr, size_t *stacksize) {
   *stacksize = attr->stacksize;
   return 0;
 }
+/* L8 ABI ext: POSIX pthread_attr_setstack/getstack.  setstack records an
+ * explicit (base, size) stack region; getstack reports it (both zero when
+ * no explicit region was ever set).  pthread_create() honours stackaddr
+ * when present, using the caller's region instead of allocating one. */
+int pthread_attr_setstack(pthread_attr_t *attr, void *stackaddr,
+                          size_t stacksize) {
+  if (!attr || !stackaddr || stacksize < 4096)
+    return 22; /* EINVAL */
+  attr->stackaddr = stackaddr;
+  attr->stacksize = stacksize;
+  return 0;
+}
+int pthread_attr_getstack(const pthread_attr_t *attr, void **stackaddr,
+                          size_t *stacksize) {
+  if (!stackaddr || !stacksize)
+    return 22; /* EINVAL */
+  *stackaddr = attr->stackaddr;
+  *stacksize = attr->stacksize;
+  return 0;
+}
 /* Not supported in P1 (documented): scheduling knobs report ENOTSUP. */
 int pthread_attr_setinheritsched(pthread_attr_t *attr, int inheritsched) {
   (void)attr;
@@ -780,11 +816,53 @@ int pthread_attr_setguardsize(pthread_attr_t *attr, size_t guardsize) {
   return 95;
 }
 
+/* ---- pthread_getattr_np (L8 ABI ext; glibc's pthread_getattr_np) ------- */
+
+int pthread_getattr_np(pthread_t thread, pthread_attr_t *attr) {
+  struct __ho_tcb *t = thread;
+  if (!t || !attr)
+    return 22; /* EINVAL */
+  attr->detachstate = t->detach ? PTHREAD_CREATE_DETACHED
+                                : PTHREAD_CREATE_JOINABLE;
+  if (t == &main_tcb) {
+    /* The main thread runs on the kernel-created process stack: ask the
+       kernel for its region (SYS_GETSTACK, row 88). */
+    uint64_t base = 0, size = 0;
+    if (ho_get_stack_bounds(&base, &size) < 0)
+      return 12; /* ENOMEM — no region to report */
+    attr->stackaddr = (void *)(uintptr_t)base;
+    attr->stacksize = (size_t)size;
+  } else {
+    attr->stackaddr = (void *)((char *)t->stack_base +
+                               (t->stack_mmap ? HO_PTHREAD_GUARD : 0));
+    attr->stacksize = t->stack_size;
+  }
+  return 0;
+}
+
 /* ---- sched -------------------------------------------------------------- */
 
 int sched_yield(void) {
   ho_yield_raw();
   return 0;
+}
+
+/* L8 ABI ext (topology only): the HobbyOS scheduler has a single fixed
+ * priority level (SCHED_OTHER), so both bounds are 1.  Invalid policies
+ * report EINVAL like POSIX. */
+int sched_get_priority_min(int policy) {
+  if (policy != SCHED_OTHER && policy != SCHED_FIFO && policy != SCHED_RR) {
+    errno = EINVAL;
+    return -1;
+  }
+  return 1;
+}
+int sched_get_priority_max(int policy) {
+  if (policy != SCHED_OTHER && policy != SCHED_FIFO && policy != SCHED_RR) {
+    errno = EINVAL;
+    return -1;
+  }
+  return 1;
 }
 
 #endif /* !HOST_TEST */

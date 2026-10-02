@@ -748,27 +748,50 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
   return (int)errno_ret(syscall(SYS_EXEC, (long)path, (long)argv, (long)envp, 0));
 }
 
-/* Phase F2.3 (browser.md §6 — append-only region): wall + monotonic
- * clocks over the frozen sysinfo surface.  Device-only, like the block
- * above; the declarations live in the sysroot <time.h>/<sys/time.h>.
+/* Phase F2.3 + L8 ABI extension (browser.md §6): wall + monotonic clocks.
+ * Device-only, like the block above; declarations in <time.h>/<sys/time.h>.
  *
- *   CLOCK_REALTIME  — RTC epoch seconds (sysinfo 6).  The RTC reports
- *                     whole seconds: tv_nsec = 0.  Without an RTC the
- *                     kernel answers -1, so fall back to uptime (the doc
- *                     on <time.h> promises a usable clock either way).
- *   CLOCK_MONOTONIC — uptime milliseconds (sysinfo 1), ms resolution.
+ *   CLOCK_REALTIME  — SYS_GETTIME (L8 row 87): kernel boot-anchored wall
+ *                     clock = RTC epoch captured at boot + monotonic
+ *                     uptime (ms resolution; without an RTC, realtime ==
+ *                     uptime).  Falls back to the frozen sysinfo path
+ *                     (whole-second RTC, else uptime) if the row is absent.
+ *   CLOCK_MONOTONIC — SYS_GETTIME: kernel monotonic uptime (ms resolution);
+ *                     sysinfo(1) fallback.
  *
- * gettimeofday() mirrors CLOCK_REALTIME into a struct timeval (tz is
- * ignored: there is no timezone database). */
+ * gettimeofday() is a thin wrapper over clock_gettime(CLOCK_REALTIME)
+ * (tz is ignored: there is no timezone database). */
+
+/* L8 ABI ext (row 87): raw wrapper, returns 0 or negative errno (the
+ * dispatch arm validates clk and the user pointer). */
+static long ho_gettime_raw(int clk, struct timespec *tp) {
+  return syscall(SYS_GETTIME, (long)clk, (long)tp, 0, 0);
+}
+
 int clock_gettime(clockid_t clk_id, struct timespec *tp) {
-  struct sys_time t;
-  int ms;
+  long r;
 
   if (!tp) {
     errno = EFAULT;
     return -1;
   }
+  if (clk_id == CLOCK_REALTIME || clk_id == CLOCK_MONOTONIC) {
+    r = ho_gettime_raw(clk_id, tp);
+    if (r == 0)
+      return 0;
+    if (r != -ENOSYS) {   /* any real error from the new arm */
+      errno = (int)(-r);
+      return -1;
+    }
+    /* No L8 row on this kernel: fall back to the frozen sysinfo surface. */
+  } else {
+    errno = EINVAL;
+    return -1;
+  }
+
   if (clk_id == CLOCK_REALTIME) {
+    struct sys_time t;
+    int ms;
     if (sysinfo(6, &t, (int)sizeof t) == 0) {
       tp->tv_sec = (time_t)t.epoch;
       tp->tv_nsec = 0;
@@ -783,8 +806,8 @@ int clock_gettime(clockid_t clk_id, struct timespec *tp) {
     tp->tv_nsec = (long)(ms % 1000) * 1000000L;
     return 0;
   }
-  if (clk_id == CLOCK_MONOTONIC) {
-    ms = sysinfo(1, 0, 0);
+  { /* CLOCK_MONOTONIC */
+    int ms = sysinfo(1, 0, 0);
     if (ms < 0) {
       errno = EINVAL;
       return -1;
@@ -793,31 +816,35 @@ int clock_gettime(clockid_t clk_id, struct timespec *tp) {
     tp->tv_nsec = (long)(ms % 1000) * 1000000L;
     return 0;
   }
-  errno = EINVAL;
-  return -1;
 }
 
 int gettimeofday(struct timeval *tv, void *tz) {
-  struct sys_time t;
-  int ms;
+  struct timespec ts;
 
   (void)tz; /* no timezone database */
   if (!tv) {
     errno = EFAULT;
     return -1;
   }
-  if (sysinfo(6, &t, (int)sizeof t) == 0) {
-    tv->tv_sec = (time_t)t.epoch;
-    tv->tv_usec = 0; /* the RTC reports whole seconds */
-    return 0;
-  }
-  ms = sysinfo(1, 0, 0);
-  if (ms < 0) {
-    errno = EINVAL;
+  if (clock_gettime(CLOCK_REALTIME, &ts) < 0)
+    return -1;
+  tv->tv_sec = (time_t)ts.tv_sec;
+  tv->tv_usec = (long)(ts.tv_nsec / 1000);
+  return 0;
+}
+
+/* L8 ABI ext (row 88): main-thread kernel-created stack region.  Returns
+ * 0 on success (base/size filled) or -1 with errno set.  Backs
+ * pthread_getattr_np() for the main thread (src/libc/src/pthread.c). */
+int ho_get_stack_bounds(uint64_t *base, uint64_t *size) {
+  struct hb_stackinfo si;
+  long r = syscall(SYS_GETSTACK, (long)&si, 0, 0, 0);
+  if (r < 0) {
+    errno = (int)(-r);
     return -1;
   }
-  tv->tv_sec = (time_t)(ms / 1000);
-  tv->tv_usec = (long)(ms % 1000) * 1000L;
+  *base = si.base;
+  *size = si.size;
   return 0;
 }
 #endif

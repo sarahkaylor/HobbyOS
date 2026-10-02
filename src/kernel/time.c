@@ -6,9 +6,18 @@
  *
  * Used by the RTC drivers (arch/arm/rtc.c, arch/x64/rtc.c) to serve
  * sysinfo command 6.
+ *
+ * L8 ABI extension (browser lane l8-libc-wk1): also anchors a boot-time
+ * REALTIME base so SYS_GETTIME (row 87) can serve CLOCK_REALTIME with the
+ * RTC's epoch (captured once, close to boot) plus monotonic uptime.  The
+ * epoch is read lazily on the first realtime request; on machines without
+ * an RTC (epoch 0) the base is simply 0, so realtime == monotonic uptime
+ * (matches the no-RTC fallback sysinfo command 6 documents).
  */
 
 #include <stdint.h>
+#include "lock.h"
+#include "timer.h"
 
 int rtc_is_leap(int year) {
   return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
@@ -58,4 +67,36 @@ void rtc_epoch_to_time(uint64_t epoch, int *year, int *month, int *day,
   if (month) *month = (int)mm;
   if (day)   *day = (int)dd;
   if (weekday) *weekday = (int)(((days % 7) + 4 + 7) % 7);
+}
+
+/* ---- L8 WK-1: boot-anchored REALTIME clock (SYS_GETTIME, row 87) ------- */
+
+/* RTC epoch (seconds since 1970) used as the boot-time wall-clock anchor.
+ * Per-arch: provided by arch/{arm,x64}/rtc.c.  Returns 0 when no RTC is
+ * present or it has not been set. */
+extern uint64_t rtc_read_epoch(void);
+
+static uint64_t hb_rt_base_ms;   /* boot-anchored epoch in ms (0 = no RTC) */
+static int hb_rt_base_ready;
+static spinlock_t hb_rt_base_lock = {0};
+
+/* Boot-anchored REALTIME in milliseconds: the RTC epoch captured once
+ * (first realtime read after boot) minus the uptime elapsed before the
+ * capture, so the base is the wall clock AT BOOT; the caller adds
+ * monotonic uptime to get realtime.  With no RTC (epoch 0) the base is 0
+ * and realtime collapses to uptime (matches sysinfo command 6's no-RTC
+ * fallback).  SMP-safe: the one-time capture is under a spinlock, and
+ * further reads are plain (only the first lock holder stores the base). */
+uint64_t hb_clock_realtime_ms(void) {
+  if (!hb_rt_base_lock.locked && !hb_rt_base_ready) {
+    uint64_t flags = spinlock_acquire_irqsave(&hb_rt_base_lock);
+    if (!hb_rt_base_ready) {
+      uint64_t epoch_ms = rtc_read_epoch() * 1000ULL;
+      uint64_t uptime_ms = timer_get_ms();
+      hb_rt_base_ms = (epoch_ms > uptime_ms) ? (epoch_ms - uptime_ms) : 0;
+      hb_rt_base_ready = 1;
+    }
+    spinlock_release_irqrestore(&hb_rt_base_lock, flags);
+  }
+  return hb_rt_base_ms + timer_get_ms();
 }

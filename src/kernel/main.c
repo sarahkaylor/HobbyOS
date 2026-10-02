@@ -245,6 +245,15 @@ static void test_wave_loader(void *arg) {
   load_and_run_program_in_scheduler("THRD_T.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("TLS_T.BIN", -1, -1, -1, -1);
 
+  /* L8 WK-1 (browser.md §6 / docs/browser/wk1-feasibility.md OQ-9): libc/OS
+     prerequisites for the WebKit JSC shell — clock_gettime (MONOTONIC +
+     REALTIME via the SYS_GETTIME row 87 boot-anchored clock), gettimeofday,
+     getentropy (SYS_GETRANDOM), sched_yield, sched_get_priority_min/max,
+     isatty, and the pthread stack-bounds exposure (pthread_getattr_np over
+     SYS_GETSTACK row 88) WebKit's ThreadingPOSIX/StackBounds need.  It
+     creates a few threads, so it sits with the thread suites. */
+  load_and_run_program_in_scheduler("WK1C_T.BIN", -1, -1, -1, -1);
+
   /* P3 (browser.md §6): libc++ acceptance — CXX_T.BIN exercises the
      ported <vector>/<string>/<map>/<unordered_map>/<algorithm>/<memory>/
      <atomic>/<thread>/<mutex>/<condition_variable>/<chrono>/<sstream>

@@ -31,6 +31,10 @@ extern "C" {
   typedef struct {
     int detachstate;
     size_t stacksize;
+    /* L8 ABI ext: explicit stack region (base + size, NULL = kernel/libc
+     * allocated).  Backs pthread_attr_setstack/getstack and
+     * pthread_getattr_np() (WebKit StackBounds UNIX branch). */
+    void *stackaddr;
   } pthread_attr_t;
 
   /* ---- mutex -------------------------------------------------------------- */
@@ -112,9 +116,18 @@ extern "C" {
   int pthread_attr_getdetachstate(const pthread_attr_t *attr, int *detachstate);
   int pthread_attr_setstacksize(pthread_attr_t *attr, size_t stacksize);
   int pthread_attr_getstacksize(const pthread_attr_t *attr, size_t *stacksize);
+  int pthread_attr_setstack(pthread_attr_t *attr, void *stackaddr,
+                            size_t stacksize);
+  int pthread_attr_getstack(const pthread_attr_t *attr, void **stackaddr,
+                            size_t *stacksize);
   int pthread_attr_setinheritsched(pthread_attr_t *attr, int inheritsched);
   int pthread_attr_setschedpolicy(pthread_attr_t *attr, int policy);
   int pthread_attr_setguardsize(pthread_attr_t *attr, size_t guardsize);
+  /* L8 ABI ext: snapshot a thread's attrs (detachstate + its stack region)
+   * — the glibc pthread_getattr_np() WebKit's StackBounds UNIX branch
+   * calls.  For the main thread the stack region is the kernel-created one
+   * (SYS_GETSTACK, row 88); for created threads the TCB's region. */
+  int pthread_getattr_np(pthread_t thread, pthread_attr_t *attr);
 
   /* ---- threads ------------------------------------------------------------ */
   int pthread_create(pthread_t *thread, const pthread_attr_t *attr,

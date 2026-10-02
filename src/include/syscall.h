@@ -140,7 +140,28 @@
 #define SYS_GETENV        (85)  /* (idx, buf, size)                    -> len | -errno */
 #define SYS_SPAWN_EX      (86)  /* (path, argv*, envp*, fdmap*, n)     -> pid | -errno */
 
+/* L8 ABI extension (browser lane l8-libc-wk1, WebKit WK-1 libc/OS gate):
+ * ADDITIVE rows ABOVE the frozen table (SYS_MAX 86 floor preserved;
+ * nothing at or below 86 changed).  Rows 87-88 land in BOTH arch
+ * dispatchers (src/kernel/arch/{arm,x64}/trap.c), the user wrapper layer
+ * (src/user/libc.c) and the libc pthread layer (src/libc/src/pthread.c).
+ *
+ *   SYS_GETTIME (87)  (clk_id, struct timespec*) -> 0 | -EINVAL | -EFAULT
+ *     Fills tv_sec/tv_nsec for CLOCK_REALTIME (0) or CLOCK_MONOTONIC (1)
+ *     from the kernel's boot-anchored clock: realtime = a wall-clock base
+ *     captured at boot (RTC epoch, or 0 without an RTC) + monotonic uptime.
+ *
+ *   SYS_GETSTACK (88)  (struct hb_stackinfo*) -> 0 | -EFAULT
+ *     Returns the caller's MAIN-THREAD kernel-created stack region
+ *     { base, size } (v2: USER_MAIN_STK_LIMIT_V2..TOP_V2; v1: the cleared
+ *     top 256 KiB of the 32 MiB user region).  Backs glibc's
+ *     pthread_getattr_np()/pthread_attr_getstack() so WebKit's StackBounds
+ *     UNIX branch works unchanged. */
+#define SYS_GETTIME       (87)
+#define SYS_GETSTACK      (88)
+
+
 /* Highest defined syscall number. Dispatch tables are sized SYS_MAX + 1. */
-#define SYS_MAX           (86)
+#define SYS_MAX           (88)
 
 #endif /* SYSCALL_H */

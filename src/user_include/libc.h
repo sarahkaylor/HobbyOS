@@ -311,6 +311,18 @@ extern "C" {
   int ho_tls_installed(void);
   extern int ho_tls_ready_flag;
 
+  /* ---- L8 ABI ext (row 88): main-thread kernel-created stack region ----
+   * Backs pthread_getattr_np() for the main thread so WebKit's StackBounds
+   * UNIX branch works unchanged.  Returns 0 (base/size filled) or -1 with
+   * errno set.  Device-only: the host resolves the same *test* logic
+   * against glibc's pthread_getattr_np().  struct hb_stackinfo mirrors
+   * the kernel's copy (src/{arch}/trap.c) — keep them 16 bytes. */
+  struct hb_stackinfo {
+    uint64_t base;
+    uint64_t size;
+  };
+  int ho_get_stack_bounds(uint64_t *base, uint64_t *size);
+
 #endif /* !HOST_TEST */
 
 #ifdef __cplusplus
