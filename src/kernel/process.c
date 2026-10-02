@@ -2362,11 +2362,8 @@ static jmp_buf scheduler_return_ctx[MAX_CPUS];
  * process runs; drives the [IDLESTUCK] diagnostic in the idle loop. */
 static int sched_idle_rounds;
 static int last_idlestuck_div;
-/* Owner-liveness grace, ms: the heartbeat bumps on every timer IRQ and
-   every idle pass, so 2s with no bump means the owner CPU is dead or in a
-   >2s IRQ-off spin — either way the RUNNING process is unrecoverable in
-   place and must be reclaimed so the suite can continue. */
-#define LOSTWAKE_DEAD_OWNER_MS 2000
+/* Owner-liveness grace lives in process.h as LOSTWAKE_DEAD_OWNER_MS
+   (the unit test fabricates stale claimers with the same constant). */
 
 void scheduler_finished(void) {
   uint32_t cpu = get_cpuid();
@@ -2376,6 +2373,89 @@ void scheduler_finished(void) {
 void kernel_thread_exit_jump(void) {
   uint32_t cpu = get_cpuid();
   longjmp(scheduler_return_ctx[cpu], 2);
+}
+
+/* ---------------------------------------------------------------------------
+ * Class-B idle-fix: lost-owner reclaim helpers.
+ *
+ * The soak freeze (P8.2): a TORTURE exec-child slot ends in PROC_STATE_RUNNING
+ * claimed by a CPU that then vanishes (the wake was consumed by the switch
+ * machinery but the body never ran, and the claiming CPU never returned to
+ * the scheduler).  The old reaper only reclaimed RUNNING slots with NO
+ * claiming CPU; a stale claim (cpu_current_pids[c] == pid with a dead/frozen
+ * heartbeat) pinned the slot forever, every other process drained to
+ * THREAD_DONE, and `timeout 2100 make soak` burned its whole cap with no
+ * System halt.
+ *
+ * A stale claim cannot be reclaimed blindly: a healthy core stalled IRQ-off
+ * on a contended console lock (uart_puts) can look stale for >2 s, and
+ * requeueing its genuinely-running process (the historical x64 double-run:
+ * pid torn into user-mode resumes at 0x4400xxxx/.bss) corrupted the table.
+ * So the reclaim is gated on the WHOLE WORLD being otherwise drained: no
+ * READY slot and no RUNNING slot with a live claimer.  In that state no live
+ * core is executing anything, so requeueing the stale-claimed pid cannot
+ * double-run a live process (the frozen soak is exactly this: the stuck
+ * child is the only non-parked slot; its zombie claim is released and the
+ * child re-READYs, runs, execs, exits, and the parked waitpid parent wakes
+ * and the rounds resume).
+ * ------------------------------------------------------------------------- */
+
+/* True when a live (recently-heartbeated) core claims `pid` — i.e. a core is
+   genuinely executing it right now.  `now_ms` is the caller's clock sample;
+   injected so the unit test can fabricate deterministic ages.  Caller holds
+   proc_lock. */
+static int slot_has_live_claim(int pid, uint64_t now_ms) {
+  for (int c = 0; c < MAX_CPUS; c++) {
+    if (cpu_current_pids[c] == pid &&
+        now_ms - cpu_heartbeat_ms[c] <= LOSTWAKE_DEAD_OWNER_MS)
+      return 1;
+  }
+  return 0;
+}
+
+/* True when every slot except `k` is parked or dead: nothing READY, and no
+   RUNNING slot with a live claimer.  A slot in this state guarantees no live
+   core is mid-resume of any other process, so re-READYing `k` is safe. */
+static int table_drained_except(int k, uint64_t now_ms) {
+  for (int j = 1; j < MAX_PROCESSES; j++) {
+    if (j == k)
+      continue;
+    if (proc_table[j].state == PROC_STATE_READY)
+      return 0;
+    if (proc_table[j].state == PROC_STATE_RUNNING &&
+        slot_has_live_claim(j, now_ms))
+      return 0;
+  }
+  return 1;
+}
+
+/* Lostwake stale-claim decision (unit-tested in process_test.c): may the
+   reaper reclaim RUNNING slot `k`, whose every claimer has gone stale
+   (heartbeat older than LOSTWAKE_DEAD_OWNER_MS at `now_ms`)?  Requires the
+   world else-drained (see table_drained_except) so the requeue cannot
+   double-run a live process.  Caller holds proc_lock. */
+int lostwake_stale_claim_reclaimable_at(int k, uint64_t now_ms) {
+  if (k < 1 || k >= MAX_PROCESSES)
+    return 0;
+  if (proc_table[k].state != PROC_STATE_RUNNING)
+    return 0;
+  int claimers = 0;
+  for (int c = 0; c < MAX_CPUS; c++) {
+    if (cpu_current_pids[c] != k)
+      continue;
+    claimers++;
+    if (now_ms - cpu_heartbeat_ms[c] <= LOSTWAKE_DEAD_OWNER_MS)
+      return 0; /* a live claimer: the process is genuinely running */
+  }
+  if (!claimers)
+    return 0; /* the no-claimer path owns this case */
+  return table_drained_except(k, now_ms);
+}
+
+/* The reaper's now-sample: the LOSTWAKE pass always samples the clock once
+   per candidate under proc_lock. */
+int lostwake_stale_claim_reclaimable(int k) {
+  return lostwake_stale_claim_reclaimable_at(k, timer_get_ms());
 }
 
 /**
@@ -2523,6 +2603,7 @@ void start_scheduler(void) {
     sched_idle_rounds++;
     if (sched_idle_rounds >= 500) {
       uint64_t wflags = spinlock_acquire_irqsave(&proc_lock);
+      int dispose_slot = 0;
       for (int k = 1; k < MAX_PROCESSES; k++) {
         if (proc_table[k].state == PROC_STATE_RUNNING) {
           /* Only reclaim when NO core has this pid in cpu_current_pids at
@@ -2554,10 +2635,50 @@ void start_scheduler(void) {
             uart_puts(proc_table[k].name);
             uart_puts(" from RUNNING with no claiming CPU\n");
             proc_table[k].state = PROC_STATE_READY;
+          } else if (lostwake_stale_claim_reclaimable(k)) {
+            /* Class-B idle-fix: every claimer of this RUNNING slot has a
+               stale heartbeat (lost wake: the wake was consumed by the
+               switch machinery but the body never ran and the claiming CPU
+               never came back), and the rest of the table is drained.
+               Re-READYing is NOT the recovery: resuming the wedged child
+               again deterministically wedges the picking CPU — the same
+               poisoned resume consumes a fresh core on every pick (an
+               observed freeze burned all 8 cores in one cascade before
+               silence).  The resume path writes only per-CPU state before
+               eret, so the wedge kills nothing shared; the poison rides
+               the child's ADDRESS SPACE (its guest MMU state: re-picks of
+               the same AS wedge deterministically while every other ASID
+               resumes fine).  The only recoverable move is to DISPOSE the
+               slot: release the zombie claims, then let group_teardown
+               free the AS/ASID and deliver a waitpid reap, so the parked
+               parent treats the cycle as a rejected exec (exit 97) and
+               reforks a fresh child on a fresh ASID. */
+            uart_puts("[LOSTWAKE] disposing pid=");
+            print_int(proc_table[k].pid);
+            uart_puts(" ");
+            uart_puts(proc_table[k].name);
+            uart_puts(" (stale dead-owner claim, poisoned resume)\n");
+            for (int c = 0; c < MAX_CPUS; c++) {
+              if (cpu_current_pids[c] == k)
+                set_current_process_pid(c, -1);
+            }
+            dispose_slot = k;
+            break;
           }
         }
       }
       spinlock_release_irqrestore(&proc_lock, wflags);
+
+      /* Dispose a lost-owner slot OUTSIDE proc_lock (group_teardown takes
+         it again for the teardown + reap).  group_teardown's phys_block/as
+         exactly-once token makes a racing concurrent disposal a no-op.
+         Code 97 = the exec-rejection sentinel: the parked parent's
+         exec_cycle sees WEXITSTATUS==97, counts the cycle as a rejected
+         exec (tolerated, exec_rejected) and reforks a fresh child, so the
+         soak continues with zero violations; the parent's waitpid
+         completion then reaps the EXITED slot. */
+      if (dispose_slot > 0)
+        group_teardown(&proc_table[dispose_slot], 97);
     }
 
     /* Diagnostic dump (monotone trigger so concurrent CPUs racing the

@@ -667,6 +667,114 @@ static void test_loader_fail_fast_full_table(void) {
   }
 }
 
+/* ---------------------------------------------------------------------
+ * P8.2 class-B idle-fix regression: the lostwake stale-claim reclaim
+ * decision.  Covers the frozen-soak signature — a RUNNING slot whose
+ * every claimer has a stale heartbeat (a CPU that consumed the wake but
+ * never ran the body and never returned to the scheduler) with the rest
+ * of the table drained — and its false sides (live claimer / busy table)
+ * so the historical x64 double-run (reclaiming a genuinely-running
+ * process whose owner was merely print-stalled, tearing its frames) can
+ * never come back without this test failing.  Runs in EL1 before the
+ * scheduler, so no 30-minute soak is needed to cover the class.
+ * ------------------------------------------------------------------- */
+static void test_lostwake_stale_claim_reclaim(void) {
+  tests_run++;
+  uart_puts("  Running test_lostwake_stale_claim_reclaim...\n");
+
+  extern int cpu_current_pids[MAX_CPUS];
+  extern volatile uint64_t cpu_heartbeat_ms[MAX_CPUS];
+  extern spinlock_t proc_lock;
+
+  /* Snapshot everything the test touches. */
+  int saved_state[MAX_PROCESSES];
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *q = process_get_pcb(i);
+    saved_state[i] = q ? q->state : PROC_STATE_FREE;
+  }
+  int saved_claims[MAX_CPUS];
+  uint64_t saved_hb[MAX_CPUS];
+  for (int c = 0; c < MAX_CPUS; c++) {
+    saved_claims[c] = cpu_current_pids[c];
+    saved_hb[c] = cpu_heartbeat_ms[c];
+  }
+
+  const int k = 5;  /* the stuck slot (pid == slot index) */
+  const int c3 = 3; /* the vanished claimer */
+  /* Injected clock for the decision: a fabricated mid-run instant, so the
+     test is deterministic on both arches (x64's early-boot clock can be a
+     small value; ARM's is uptime-based).  Stale == heartbeat older than
+     LOSTWAKE_DEAD_OWNER_MS at this instant. */
+  const uint64_t now_ms = 1000000;
+  const uint64_t stale_hb = now_ms - LOSTWAKE_DEAD_OWNER_MS - 1;
+
+  /* Clean the table: drain every other slot so the drain check sees
+     exactly what each case sets up. */
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    if (i == k)
+      continue;
+    struct process *q = process_get_pcb(i);
+    if (q)
+      q->state = PROC_STATE_THREAD_DONE;
+  }
+
+  uint64_t f = spinlock_acquire_irqsave(&proc_lock);
+
+  /* Case 1: the frozen-soak signature — RUNNING, stale claim, drained:
+     must reclaim. */
+  process_get_pcb(k)->state = PROC_STATE_RUNNING;
+  cpu_current_pids[c3] = k;
+  cpu_heartbeat_ms[c3] = stale_hb;
+  EXPECT_EQ(lostwake_stale_claim_reclaimable_at(k, now_ms), 1);
+
+  /* Case 2: same, but the claimer's heartbeat is fresh (the process is
+     genuinely running on a live core): must NOT reclaim — this is the
+     false-positive that double-ran pids in the old stale-heartbeat
+     reaper. */
+  cpu_heartbeat_ms[c3] = now_ms;
+  EXPECT_EQ(lostwake_stale_claim_reclaimable_at(k, now_ms), 0);
+  cpu_heartbeat_ms[c3] = stale_hb;
+
+  /* Case 3: a busy table — another slot is READY: must NOT reclaim. */
+  process_get_pcb(6)->state = PROC_STATE_READY;
+  EXPECT_EQ(lostwake_stale_claim_reclaimable_at(k, now_ms), 0);
+  process_get_pcb(6)->state = PROC_STATE_THREAD_DONE;
+
+  /* Case 4: another slot is RUNNING with a LIVE claimer (a live core is
+     executing it): must NOT reclaim — a requeue of k could double-run. */
+  process_get_pcb(6)->state = PROC_STATE_RUNNING;
+  cpu_current_pids[4] = 6;
+  cpu_heartbeat_ms[4] = now_ms;
+  EXPECT_EQ(lostwake_stale_claim_reclaimable_at(k, now_ms), 0);
+  cpu_current_pids[4] = -1;
+  process_get_pcb(6)->state = PROC_STATE_THREAD_DONE;
+
+  /* Case 5: RUNNING with NO claimer: the existing no-claimer reaper path
+     owns this; the stale path must not claim it. */
+  cpu_current_pids[c3] = -1;
+  EXPECT_EQ(lostwake_stale_claim_reclaimable_at(k, now_ms), 0);
+  cpu_current_pids[c3] = k;
+
+  /* Case 6: not RUNNING: never reclaimable via the stale path. */
+  process_get_pcb(k)->state = PROC_STATE_READY;
+  EXPECT_EQ(lostwake_stale_claim_reclaimable_at(k, now_ms), 0);
+  process_get_pcb(k)->state = PROC_STATE_RUNNING;
+  EXPECT_EQ(lostwake_stale_claim_reclaimable_at(k, now_ms), 1); /* drained again */
+
+  spinlock_release_irqrestore(&proc_lock, f);
+
+  /* Restore the snapshot. */
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *q = process_get_pcb(i);
+    if (q)
+      q->state = saved_state[i];
+  }
+  for (int c = 0; c < MAX_CPUS; c++) {
+    cpu_current_pids[c] = saved_claims[c];
+    cpu_heartbeat_ms[c] = saved_hb[c];
+  }
+}
+
 void process_test_suite(void) {
   uart_puts("process_test_suite:\n");
   test_process_init_and_create();
@@ -676,6 +784,7 @@ void process_test_suite(void) {
   test_process_thread_validation();
   test_process_thread_slot_reclaim();
   test_loader_fail_fast_full_table();
+  test_lostwake_stale_claim_reclaim();
   test_process_futex_machine();
   test_process_set_tls();
   test_p5_sigaction_storage();

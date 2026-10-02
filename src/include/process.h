@@ -453,6 +453,22 @@ void schedule(struct trap_frame *tf, int is_yield);
 // Save CPU context into a process PCB.
 void save_context(struct process *p, struct trap_frame *tf);
 
+// Lost-owner (class-B) reaper decision: may RUNNING slot `k`, whose every
+// claimer has a stale heartbeat (>= LOSTWAKE_DEAD_OWNER_MS at `now_ms`), be
+// reclaimed as a lost wake?  Requires the rest of the table to be drained
+// (no READY slot, no RUNNING slot with a live claimer) so the requeue cannot
+// double-run a live process.  `now_ms` is injected for deterministic unit
+// tests.  Caller holds proc_lock.  Unit-tested in process_test.c.
+int lostwake_stale_claim_reclaimable_at(int k, uint64_t now_ms);
+int lostwake_stale_claim_reclaimable(int k);
+
+// Owner-liveness grace, ms: the per-CPU heartbeat bumps on every timer IRQ
+// and every idle pass, so this long without a bump means the claiming CPU is
+// wedged/vanished (the wake was consumed but the body never ran) — its
+// RUNNING claim becomes stale and reclaimable (when the table is otherwise
+// drained).  Also used by the unit test to fabricate a stale claimer.
+#define LOSTWAKE_DEAD_OWNER_MS 2000
+
 // Mark the current process as EXITED and cleanup resources.
 // tf: The trap frame of the process calling exit.
 void process_exit(struct trap_frame *tf);
