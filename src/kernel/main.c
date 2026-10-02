@@ -245,15 +245,6 @@ static void test_wave_loader(void *arg) {
   load_and_run_program_in_scheduler("THRD_T.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("TLS_T.BIN", -1, -1, -1, -1);
 
-  /* L8 WK-1 (browser.md §6 / docs/browser/wk1-feasibility.md OQ-9): libc/OS
-     prerequisites for the WebKit JSC shell — clock_gettime (MONOTONIC +
-     REALTIME via the SYS_GETTIME row 87 boot-anchored clock), gettimeofday,
-     getentropy (SYS_GETRANDOM), sched_yield, sched_get_priority_min/max,
-     isatty, and the pthread stack-bounds exposure (pthread_getattr_np over
-     SYS_GETSTACK row 88) WebKit's ThreadingPOSIX/StackBounds need.  It
-     creates a few threads, so it sits with the thread suites. */
-  load_and_run_program_in_scheduler("WK1C_T.BIN", -1, -1, -1, -1);
-
   /* P3 (browser.md §6): libc++ acceptance — CXX_T.BIN exercises the
      ported <vector>/<string>/<map>/<unordered_map>/<algorithm>/<memory>/
      <atomic>/<thread>/<mutex>/<condition_variable>/<chrono>/<sstream>
@@ -303,6 +294,19 @@ static void test_wave_loader(void *arg) {
      fdmap/CLOEXEC/copy).  Forks children and spawns SPAWNEX.BIN, so it
      runs late, next to the other churn suites. */
   load_and_run_program_in_scheduler("SIG_T.BIN", -1, -1, -1, -1);
+
+  /* L8 WK-1 (browser.md §6 / docs/browser/wk1-feasibility.md OQ-9): libc/OS
+     prerequisites for the WebKit JSC shell — clock_gettime (MONOTONIC +
+     REALTIME via the SYS_GETTIME row 87 boot-anchored clock), gettimeofday,
+     getentropy (SYS_GETRANDOM), sched_yield, sched_get_priority_min/max,
+     isatty, and the pthread stack-bounds exposure (pthread_getattr_np over
+     SYS_GETSTACK row 88) WebKit's ThreadingPOSIX/StackBounds need.  It
+     creates a few threads (each thread consumes a process-table slot), so
+     per the 'a launch-hungry test is loaded LAST' rule it sits at the END
+     of the churn group, right before the wave's terminal TORTURE, so the
+     fork/spawn-heavy suites ahead of it (IPC_T/MMTEST/SQLTEST/SIG_T) get
+     the maximum drain before their children spawn. */
+  load_and_run_program_in_scheduler("WK1C_T.BIN", -1, -1, -1, -1);
 
   /* P8.1 (browser.md §6): POSIX torture acceptance — 64-thread
      mutex/condvar churn, socketpair fd-pass loops, mmap/fault/free
