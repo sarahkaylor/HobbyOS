@@ -47,6 +47,13 @@ uint64_t frame_alloc_zeroed(void);
  * in-pool address: clearing an already-clear bit is a no-op. */
 void frame_free(uint64_t phys);
 
+/* Reserve the physical range [lo, hi) (rounded outward to frames) so the
+ * allocator never hands out frames over it.  Boot-time use: the kernel
+ * image (text/rodata/data/bss + boot stacks) must be reserved, else the
+ * forward-walking hint eventually allocates over live kernel pages.
+ * Idempotent; call once at boot before any allocation. */
+void frame_reserve_range(uint64_t lo, uint64_t hi);
+
 /* Allocate `n` contiguous frames (n >= 1); returns the physical base
  * address, or 0 on failure/exhaustion.  First-fit from the rotating
  * hint; used for multi-frame kernel structures (region-array growth,

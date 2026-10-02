@@ -70,6 +70,61 @@ static int popcount64(uint64_t v) {
   return n;
 }
 
+/* Reserve [lo, hi) (physical; rounded outward to whole 32 MiB blocks) so
+   the pool never hands out frames over it.  Boot-time use: the kernel
+   image must be reserved -- the allocation hint walks forward with churn
+   (contig blocks set it past each run), and once it crossed into the
+   image the allocator handed out frames over live kernel memory and
+   frame_alloc_zeroed wiped them (exception vector table + text), an
+   unrecoverable freeze.
+
+   Blocks are always reserved as whole units (all frames marked + the
+   block claimed): the legacy block layer partitions blocks into free vs
+   claimed (phys_block_free_count + blocks_used == block_count), so a
+   partially-reserved unclaimed block would break that partition.
+   Idempotent: re-reserving an already-claimed block is a no-op.  Must
+   be called before any allocation (boot). */
+void frame_reserve_range(uint64_t lo, uint64_t hi) {
+  if (hi <= lo)
+    return;
+  uint64_t flags = spinlock_acquire_irqsave(&frame_lock);
+  uint64_t a_lo = lo & ~((uint64_t)FRAME_SIZE - 1);
+  uint64_t a_hi = (hi + FRAME_SIZE - 1) & ~((uint64_t)FRAME_SIZE - 1);
+  int ok0 = 0;
+  int ok1 = 0;
+  int idx_lo = frame_index_of(a_lo, &ok0);
+  int idx_hi = frame_index_of(a_hi - FRAME_SIZE, &ok1);
+  if (!ok0 || !ok1) {
+    /* Outside every pool extent on this arch: nothing to reserve. */
+    spinlock_release_irqrestore(&frame_lock, flags);
+    return;
+  }
+  int fb0 = (idx_lo / FRAME_BLOCK_FRAMES) * FRAME_BLOCK_FRAMES;
+  int fb1 = ((idx_hi / FRAME_BLOCK_FRAMES) + 1) * FRAME_BLOCK_FRAMES;
+  for (int bk = fb0; bk < fb1; bk += FRAME_BLOCK_FRAMES) {
+    int whole = 1;
+    for (int i = bk; i < bk + FRAME_BLOCK_FRAMES; i++) {
+      if (!(frame_bits[i / 64] & (1ULL << (i % 64)))) {
+        whole = 0;
+        break;
+      }
+    }
+    if (!whole)
+      block_used++; /* newly a whole unit (idempotent otherwise) */
+    for (int i = bk; i < bk + FRAME_BLOCK_FRAMES; i++) {
+      uint32_t w = (uint32_t)i / 64;
+      uint32_t b = (uint32_t)i % 64;
+      if (frame_bits[w] & (1ULL << b))
+        continue;
+      frame_bits[w] |= (1ULL << b);
+      frame_used++;
+    }
+  }
+  if (frame_used > frame_high)
+    frame_high = frame_used;
+  spinlock_release_irqrestore(&frame_lock, flags);
+}
+
 void frame_init(void) {
   spinlock_init(&frame_lock);
   for (int i = 0; i < FRAME_WORDS; i++)
@@ -79,12 +134,27 @@ void frame_init(void) {
   frame_high = 0;
   block_used = 0;
 
+  /* Keep the kernel image out of the pool: _start..__stack_top covers
+     text/rodata/data/bss and the boot stacks; +64 KiB guard.  Without
+     this the hint walk reaches the image after ~1.88M frames of churn
+     (soak: fork seq ~5900) and zeroes live kernel pages. */
+  {
+    extern char _start[];
+    extern char __stack_top[];
+    uint64_t img_lo = (uint64_t)(uintptr_t)_start;
+    uint64_t img_hi = (uint64_t)(uintptr_t)__stack_top + 0x10000;
+    frame_reserve_range(img_lo, img_hi);
+  }
+
   /* Boot log line (design section 2.1): the pool constants are VMM
-     constants; this line is their validation in every boot's log. */
+     constants; this line is their validation in every boot's log.
+     reserved= is the kernel-image reservation above (non-zero). */
   uart_puts("[FRAME] frames=");
   print_int((int)FRAME_TOTAL_FRAMES);
   uart_puts(" total_mib=");
   print_int((int)((uint64_t)FRAME_TOTAL_FRAMES * FRAME_SIZE / 0x100000));
+  uart_puts(" reserved=");
+  print_int(frame_used);
   uart_puts("\n");
 }
 
