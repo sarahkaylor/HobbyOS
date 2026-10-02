@@ -1433,6 +1433,21 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-10-02 — **Wave 4 progress — WK-2: WebCore compile gate CLEAN, process
+  layer in flight** (fork `browser/l8-wk1`). After CP-2 GO: WebKit2 ARM configure
+  GREEN (fresh-cache recipe, all -D on CLI — `5692a0516b`); Skia + ALL of
+  WebCore now compile against the bare-metal sysroot (fork shims in PORT_PLAN
+  register rows 23–36; notable root causes fixed: `SK_BUILD_FOR_MAC`
+  misdetection → `SK_BUILD_FOR_UNIX` pin, sysroot gaps semaphore/malloc/unistd/
+  netinet + weak nextafterf/pread/pwrite fillers, a `/*`-in-a-comment breaking
+  4+ TUs, framework-header platform set, NetworkStorageSession 2.54 cookie API,
+  CryptoKey token containers, AX 2.54 drift). WK-1.5 written comparison BODY
+  confirmed in the fork README (`a50fa78ebf`, WebKit2 per AD-3). CI script
+  `HobbyOS/scripts/wk2-link-ci.sh` committed. Gate residual: Source/WebKit
+  process layer ~18 TUs + the three-binary link (IPC unix ConnectionUnix,
+  AuxiliaryProcessMain, WebMemoryPressureHandler, …) — continuation lane in
+  flight. WK-2 remains OPEN until three binaries link + sizes/times recorded.
+
 - 2026-10-02 — **CP-2 CHECKPOINT TAKEN — GO** (Wave 3 close; WK-1 gate met on
   ARM; WK-1.5 architecture decision made). Recorded in §7.2 + the WK-1 / WK-1.5
   items above: WebKit2 multi-process (AD-3 default) adopted; written comparison
