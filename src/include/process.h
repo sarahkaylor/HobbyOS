@@ -313,6 +313,11 @@ int current_pid_of_cpu(uint32_t cpu);
 // boot-wave headroom reserve).
 int phys_block_free_count(void);
 
+// Number of free process slots (1..MAX_PROCESSES-1).  Exported for the
+// loader's retry loop (program_loader.c): distinguishes a draining
+// transient from a stuck full table so the famine wait stays bounded.
+int process_free_slots(void);
+
 // Free a previously created process.
 void process_free(int pid);
 

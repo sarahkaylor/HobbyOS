@@ -608,6 +608,22 @@ static int phys_block_alloc_locked(void) {
  * process_create() for why.  P2.2 (S2): `ver` selects the backing --
  * AS_V1 takes a 32 MiB block (today's semantics), AS_V2 takes an
  * address space and no block. */
+/* Number of free process slots (1..MAX_PROCESSES-1; slot 0 is reserved).
+ * Exported for the loader's retry loop (program_loader.c) to tell a
+ * DRAINING transient — slots free continuously as processes exit — from
+ * a STUCK table with no progress (the famine signature: zero exits for
+ * minutes).  Patient waits must only extend while the table drains. */
+int process_free_slots(void) {
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  int n = 0;
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    if (proc_table[i].state == PROC_STATE_FREE)
+      n++;
+  }
+  spinlock_release_irqrestore(&proc_lock, flags);
+  return n;
+}
+
 static int process_create_internal_ver(int ver) {
   /* P8.2 (soak famine class): the per-call trace prints below are
      unthrottled and every loader/spawn retry emits them — a slot shortage

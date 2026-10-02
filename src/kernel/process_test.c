@@ -646,12 +646,13 @@ static void test_loader_fail_fast_full_table(void) {
   }
 
   uint64_t t0 = timer_get_ms();
-  /* Child spawn (caller_pid >= 0): must fail fast, not loop. */
+  /* Child spawn (caller_pid >= 0): must give up (bounded), not loop for
+     ~30 minutes. */
   int r = load_and_run_program_v2("NOPE.BIN", -1, -1, -1, 1, 0);
   uint64_t elapsed = timer_get_ms() - t0;
 
   EXPECT_EQ(r, -1);                  /* -EAGAIN folded by the wrapper */
-  EXPECT_EQ((int)(elapsed < 5000), 1); /* child budget is 2 s, not 30 min */
+  EXPECT_EQ((int)(elapsed < 25000), 1); /* child budget is 20 s, not 30 min */
 
   /* Restore the table so later suites see a clean state. */
   for (int i = 0; i < MAX_PROCESSES; i++) {

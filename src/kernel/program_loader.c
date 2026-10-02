@@ -35,14 +35,27 @@ jmp_buf user_exit_context;
 
 /* Famine-pacing budgets for the load retry loop (P8.2 soak class).  A
  * child spawn (caller_pid >= 0) that cannot get a process slot or AS
- * must give up fast — a full 63-slot table only drains as processes
- * exit, which the caller's own bounded respawn logic is the right place
- * to wait for; retrying in-kernel for minutes was the 28-minute soak
- * wedge (see load_v2_internal).  Boot loads (caller_pid < 0) keep a
- * longer budget: the boot loader has no user-side retry to fall back
- * on and must ride out the wave's frame-headroom wait. */
-#define LOAD_RETRY_CHILD_MS  2000u
-#define LOAD_RETRY_BOOT_MS   20000u
+ * waits out the transient — the wave-start table is legitimately full
+ * for ~tens of seconds while ~60 programs load and drain, and the
+ * queue-idle spawns MUST succeed there (a 2 s fail-fast budget caused
+ * a retry churn that starved fork-dependent wave suites: measured 8/8
+ * prior waves green -> 9 FAIL tokens when it was introduced).  The
+ * budget can be generous because the console-storm amplifier is gone
+ * (the slot-full forensic is rate-limited): the drain completes at
+ * normal speed, so a patient wait succeeds in seconds; a genuinely
+ * starved spawn still gives up after LOAD_RETRY_CHILD_MS instead of
+ * hammering for 30 minutes (the pre-fix 18 000 x 100 ms loop).  Boot
+ * loads (caller_pid < 0) keep a longer budget: the boot loader has no
+ * user-side retry to fall back on. */
+#define LOAD_RETRY_CHILD_MS  20000u
+#define LOAD_RETRY_BOOT_MS   30000u
+
+/* If no process slot frees within this window, the table is STUCK (the
+ * famine signature: zero exits for minutes), not draining — the loader
+ * bails early instead of riding out a wait that can never succeed.  A
+ * healthy wave-start transient frees slots continuously (hundreds of
+ * exits over the first minute), so this only fires on a true jam. */
+#define LOAD_RETRY_STALL_MS  2000u
 
 /* Is the opened program too big for MAX_PROGRAM_SIZE?  (Call after
  * fat16_open, before reading.) */
@@ -159,6 +172,8 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
   uint64_t t_start = timer_get_ms();
   uint32_t budget_ms = (caller_pid < 0) ? LOAD_RETRY_BOOT_MS
                                         : LOAD_RETRY_CHILD_MS;
+  uint64_t last_progress = t_start;
+  int free_before = -1;
   for (;;) {
     if (caller_pid < 0 && phys_block_free_count() <= WAVE_LOAD_RESERVE) {
       /* keep headroom for child spawns: wait, do not burn a reserve */;
@@ -167,8 +182,20 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
       if (pid >= 0)
         break;
     }
-    if (timer_get_ms() - t_start >= budget_ms)
+    /* Bail on a STUCK table: if no slot has freed for the stall window
+       the drain is not happening — waiting further only extends the
+       famine.  A draining transient frees slots continuously, so a
+       patient wait rides it out (up to the budget). */
+    uint64_t now = timer_get_ms();
+    if (now - t_start >= budget_ms)
       break;
+    int free_now = process_free_slots();
+    if (free_now != free_before) {
+      free_before = free_now;
+      last_progress = now;
+    } else if (now - last_progress >= LOAD_RETRY_STALL_MS) {
+      break;
+    }
     for (volatile int spin = 0; spin < 400000; spin++) { /* ~10 ms park */
       if (timer_get_ms() - t_start >= budget_ms)
         break;
@@ -495,12 +522,13 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
 
   int pid = -1;
   /* Famine pacing — same contract as the v1 loop above: try immediately,
-     park ~10 ms, fail fast on slot pressure (a full 63-slot table is the
-     soak wedge; the caller retries).  Boot loads keep the longer budget
-     for the frame-headroom wait. */
+     park ~10 ms, ride out a draining transient (budget) but bail when
+     the table is stuck (no slot freed for the stall window). */
   uint64_t t_start = timer_get_ms();
   uint32_t budget_ms = (caller_pid < 0) ? LOAD_RETRY_BOOT_MS
                                         : LOAD_RETRY_CHILD_MS;
+  uint64_t last_progress = t_start;
+  int free_before = -1;
   for (;;) {
     /* Same headroom rationale as the v1 loader, in frames now: a wave
        load must leave WAVE_LOAD_RESERVE blocks' worth of frames free so
@@ -513,8 +541,16 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
       if (pid >= 0)
         break;
     }
-    if (timer_get_ms() - t_start >= budget_ms)
+    uint64_t now = timer_get_ms();
+    if (now - t_start >= budget_ms)
       break;
+    int free_now = process_free_slots();
+    if (free_now != free_before) {
+      free_before = free_now;
+      last_progress = now;
+    } else if (now - last_progress >= LOAD_RETRY_STALL_MS) {
+      break; /* stuck table: waiting further would extend the famine */
+    }
     for (volatile int spin = 0; spin < 400000; spin++) { /* ~10 ms park */
       if (timer_get_ms() - t_start >= budget_ms)
         break;
