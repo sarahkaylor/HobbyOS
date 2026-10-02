@@ -608,8 +608,35 @@ static int phys_block_alloc_locked(void) {
  * process_create() for why.  P2.2 (S2): `ver` selects the backing --
  * AS_V1 takes a 32 MiB block (today's semantics), AS_V2 takes an
  * address space and no block. */
+/* Number of free process slots (1..MAX_PROCESSES-1; slot 0 is reserved).
+ * Exported for the loader's retry loop (program_loader.c) to tell a
+ * DRAINING transient — slots free continuously as processes exit — from
+ * a STUCK table with no progress (the famine signature: zero exits for
+ * minutes).  Patient waits must only extend while the table drains. */
+int process_free_slots(void) {
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  int n = 0;
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    if (proc_table[i].state == PROC_STATE_FREE)
+      n++;
+  }
+  spinlock_release_irqrestore(&proc_lock, flags);
+  return n;
+}
+
 static int process_create_internal_ver(int ver) {
-  uart_puts("Inside process_create: acquiring lock...\n");
+  /* P8.2 (soak famine class): the per-call trace prints below are
+     unthrottled and every loader/spawn retry emits them — a slot shortage
+     turned a 35-minute run into a 145k-line console storm that saturated
+     the UART and stalled the exits that free slots.  Show the first few
+     events for diagnosis, then stay silent (the failure-class prints are
+     rate-limited separately at their sites). */
+  static int create_trace_count;
+  int trace = create_trace_count < 4;
+  if (trace)
+    create_trace_count++;
+  if (trace)
+    uart_puts("Inside process_create: acquiring lock...\n");
   int pid = -1;
   int block_idx = -1;
   uint64_t p_flags = spinlock_acquire_irqsave(&proc_lock);
@@ -661,14 +688,21 @@ static int process_create_internal_ver(int ver) {
     if (pid < 0) {
       spinlock_release_irqrestore(&proc_lock, p_flags);
       /* D5.6 slot forensics: how many slots are zombies (EXITED with a
-         live parent: "UI process stopped reaping") vs all EXITED. */
+         live parent: "UI process stopped reaping") vs all EXITED.  P8.2
+         (famine): rate-limit to the first few events — unthrottled this
+         line printed 138k times in a wedged soak and the console storm
+         was itself the amplifier (it stalled the exits that free slots). */
       int exited = 0;
       int zombies = zombie_slots_count(&exited);
-      uart_puts("[KERNEL] process_create: no free process slots! zombies=");
-      print_int(zombies);
-      uart_puts(" exited=");
-      print_int(exited);
-      uart_puts("\n");
+      static int slotflood_count;
+      if (slotflood_count < 3) {
+        slotflood_count++;
+        uart_puts("[KERNEL] process_create: no free process slots! zombies=");
+        print_int(zombies);
+        uart_puts(" exited=");
+        print_int(exited);
+        uart_puts("\n");
+      }
       return -1;
     }
   }
@@ -725,11 +759,13 @@ static int process_create_internal_ver(int ver) {
   p->user_phys_base = (block_idx >= 0) ? frame_block_base_phys(block_idx) : 0;
   spinlock_release_irqrestore(&proc_lock, p_flags);
 
-  uart_puts("Inside process_create: lock released. pid=");
-  print_int(pid);
-  uart_puts(" block_idx=");
-  print_int(block_idx);
-  uart_puts("\n");
+  if (trace) {
+    uart_puts("Inside process_create: lock released. pid=");
+    print_int(pid);
+    uart_puts(" block_idx=");
+    print_int(block_idx);
+    uart_puts("\n");
+  }
 
   p->parent_pid = -1;
   p->is_kernel_process = 0;
@@ -779,12 +815,15 @@ static int process_create_internal_ver(int ver) {
   /* P2.2 (S2): v2 processes demand-commit (S3) and never touch a block;
      the eager 1 MiB + 256 KiB zeroing is the v1 contract only. */
   if (ver == AS_V1) {
-    uart_puts("Inside process_create: clearing memory at ");
-    uart_print_hex(p->user_phys_base);
-    uart_puts("\n");
+    if (trace) {
+      uart_puts("Inside process_create: clearing memory at ");
+      uart_print_hex(p->user_phys_base);
+      uart_puts("\n");
+    }
     kmemset((void *)p->user_phys_base, 0, USER_INITIAL_CLEAR_SIZE);
     kmemset((void *)(p->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE), 0, USER_STACK_CLEAR_SIZE);
-    uart_puts("Inside process_create: kmemset done.\n");
+    if (trace)
+      uart_puts("Inside process_create: kmemset done.\n");
   }
 
   for (int i = 0; i < 36; i++) {
