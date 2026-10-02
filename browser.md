@@ -1618,8 +1618,10 @@ curl -sI https://lite.cnn.com | grep -i content-length
   unit-arm **292/0**, unit-x64 **294/0** (each +1 = the new regression test),
   wave 0 FAIL + halt + 17 summaries + `TORTURE` 8/8; merged-tip soak **806
   rounds, violations=0** (thr_created=51584, exec_ok=9672, fdpass_bad=0,
-  exec_rejected=0), `System halt from CPU 7.`; VM host + unit-arm green
-  (unit-x64/test-arm reruns pending VM disk cleanup). Lane gate: host /
+  exec_rejected=0), `System halt from CPU 7.`; VM battery (merged tip, `w4`/`w4b`)
+  fully green: host rc=0, unit-arm rc=0 (292/0), unit-x64 rc=0 (294/0,
+  incl. the imgrsv regression), test-arm rc=0 (0 FAIL + halt, TORTURE
+  8/8, SIGTEST 62/0). Lane gate: host /
   unit-arm / unit-x64 / wave all PASS pre-merge. TEMP triage stripped
   (`1028fb1` reverts `c85f971`; zero TEMP symbols).
   **Separate open issue (risk-noted)**: sustained process-slot starvation —
