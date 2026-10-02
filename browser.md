@@ -1447,6 +1447,18 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-10-02 — **WK-1 GATE COMPLETE ON BOTH ARCHES — ARM + x64 test262
+  500/500.** The x64 leg (previously blocked by the OVMF freeze, itself a stale
+  AArch64-ELF disk — see below) is now fully green: chunks 2–13 ran 40/40×11 +
+  20/20 first-pass on KVM with the root-caused recipe (forced x86-64 relink,
+  `-smp 8`); joined with the OVMF lane's `c1-x64.log` = **x64 500/500 PASS,
+  0 FAIL, 0 SKIP (100%)**, categories all clean (arithmetic 110 / strings 76 /
+  regex 34 / JSON 23 / Date 68 / core 189). Combined with ARM (500/500 at
+  `e3bc45f`) the on-device test262 subset is green on BOTH arches. Evidence:
+  ~/.hermes/cache/scratch/ovmf/test262-x64/ (raw serial `x64/chunk-{1..13}.log`
+  with T262 DONE + ALL-DONE markers). No OS/kernel defect found. Script fixes
+  landed in the fork (`c712f63d3d`).
+
 - 2026-10-02 — **x64 OVMF freeze ROOT-CAUSED + FIXED** (parallel lane
   deleg_1a266585). The `BdsDxe: starting Boot0002` hang was NEVER a host/
   qemu/firmware regression: the x64 disks shipped an **AArch64 kernel ELF** —
