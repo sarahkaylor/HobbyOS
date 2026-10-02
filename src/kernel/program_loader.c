@@ -33,6 +33,17 @@ jmp_buf user_exit_context;
  * child demand seen in the suite. */
 #define WAVE_LOAD_RESERVE  6
 
+/* Famine-pacing budgets for the load retry loop (P8.2 soak class).  A
+ * child spawn (caller_pid >= 0) that cannot get a process slot or AS
+ * must give up fast — a full 63-slot table only drains as processes
+ * exit, which the caller's own bounded respawn logic is the right place
+ * to wait for; retrying in-kernel for minutes was the 28-minute soak
+ * wedge (see load_v2_internal).  Boot loads (caller_pid < 0) keep a
+ * longer budget: the boot loader has no user-side retry to fall back
+ * on and must ride out the wave's frame-headroom wait. */
+#define LOAD_RETRY_CHILD_MS  2000u
+#define LOAD_RETRY_BOOT_MS   20000u
+
 /* Is the opened program too big for MAX_PROGRAM_SIZE?  (Call after
  * fat16_open, before reading.) */
 static int program_too_large(const struct file *f) {
@@ -132,21 +143,39 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
      free-running counter (~100 ms per attempt) also capped by an
      iteration count so it terminates even if the counter is
      uncalibrated. */
+  /* Famine pacing (P8.2 soak): the old loop retried every 100 ms up to
+     18 000 times (~30 min), and each failed attempt printed a flood
+     line.  Under a full 63-slot table (the wave + TORTURE at once) that
+     console storm saturated the UART and stalled the very exits that
+     free slots — a self-sustaining wedge (observed: 138k flood lines
+     at 1 soak round vs 800+ clean).  A transient drains in a tick or
+     two: try immediately, park ~10 ms, and give up after a SHORT window
+     so the caller's own bounded retry (the wave tests all respawn on -1)
+     handles the rest.  Boot loads (caller_pid < 0) keep a longer budget:
+     the boot loader has no user-side retry to fall back on and must ride
+     out the frame-headroom wait. */
   extern int phys_block_free_count(void);
   int pid = -1;
-  for (int attempt = 0; attempt < 18000; attempt++) {
-    uint64_t t0 = timer_get_ms();
-    for (volatile int spin = 0; spin < 4000000; spin++) {
-      if (timer_get_ms() - t0 >= 100u) break;
+  uint64_t t_start = timer_get_ms();
+  uint32_t budget_ms = (caller_pid < 0) ? LOAD_RETRY_BOOT_MS
+                                        : LOAD_RETRY_CHILD_MS;
+  for (;;) {
+    if (caller_pid < 0 && phys_block_free_count() <= WAVE_LOAD_RESERVE) {
+      /* keep headroom for child spawns: wait, do not burn a reserve */;
+    } else {
+      pid = process_create();
+      if (pid >= 0)
+        break;
     }
-    if (caller_pid < 0 && phys_block_free_count() <= WAVE_LOAD_RESERVE)
-      continue; /* keep headroom for child spawns */
-    pid = process_create();
-    if (pid >= 0)
+    if (timer_get_ms() - t_start >= budget_ms)
       break;
+    for (volatile int spin = 0; spin < 400000; spin++) { /* ~10 ms park */
+      if (timer_get_ms() - t_start >= budget_ms)
+        break;
+    }
   }
   if (pid < 0) {
-    uart_puts("Loader starved: ");
+    uart_puts("Loader starved (slot pressure): ");
     uart_puts(filename);
     uart_puts(" never got a physical block.\n");
     uart_puts("Failed to create process for ");
@@ -465,23 +494,34 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
   uart_puts("\n");
 
   int pid = -1;
-  for (int attempt = 0; attempt < 18000; attempt++) {
-    uint64_t t0 = timer_get_ms();
-    for (volatile int spin = 0; spin < 4000000; spin++) {
-      if (timer_get_ms() - t0 >= 100u) break;
-    }
+  /* Famine pacing — same contract as the v1 loop above: try immediately,
+     park ~10 ms, fail fast on slot pressure (a full 63-slot table is the
+     soak wedge; the caller retries).  Boot loads keep the longer budget
+     for the frame-headroom wait. */
+  uint64_t t_start = timer_get_ms();
+  uint32_t budget_ms = (caller_pid < 0) ? LOAD_RETRY_BOOT_MS
+                                        : LOAD_RETRY_CHILD_MS;
+  for (;;) {
     /* Same headroom rationale as the v1 loader, in frames now: a wave
        load must leave WAVE_LOAD_RESERVE blocks' worth of frames free so
        child spawns always find memory (design section 2.2). */
     if (caller_pid < 0 &&
-        frame_free_count() <= (int)WAVE_LOAD_RESERVE * FRAME_BLOCK_FRAMES)
-      continue;
-    pid = process_create_v2();
-    if (pid >= 0)
+        frame_free_count() <= (int)WAVE_LOAD_RESERVE * FRAME_BLOCK_FRAMES) {
+      /* boot headroom: wait, do not burn a reserve */;
+    } else {
+      pid = process_create_v2();
+      if (pid >= 0)
+        break;
+    }
+    if (timer_get_ms() - t_start >= budget_ms)
       break;
+    for (volatile int spin = 0; spin < 400000; spin++) { /* ~10 ms park */
+      if (timer_get_ms() - t_start >= budget_ms)
+        break;
+    }
   }
   if (pid < 0) {
-    uart_puts("Loader (v2) starved: ");
+    uart_puts("Loader (v2) starved (slot pressure): ");
     uart_puts(filename);
     uart_puts("\n");
     return -EAGAIN; /* slot/AS pressure (D4.4's -EAGAIN class) */
