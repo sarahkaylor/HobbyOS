@@ -4,6 +4,8 @@
 #include "process.h"
 #include "errno.h"
 #include "fs.h"
+#include "program_loader.h"
+#include "timer.h"
 
 extern void uart_puts(const char* s);
 
@@ -612,6 +614,58 @@ static void test_p5_exec_env_and_apply(void) {
   process_free(pid);
 }
 
+/* Famine fail-fast regression (P8.2 soak): with the process table full,
+ * a CHILD load (real caller pid) must give up with -EAGAIN (folded to
+ * -1 by the v2 wrapper) after the short child retry budget instead of
+ * retrying ~30 minutes like the pre-fix loop — that outlasted the
+ * transient, flooded the console, and wedged the soak at 1 round.  The
+ * 2 s budget is real wall time (timer_get_ms reads the ARM generic
+ * counter), so the test self-bounds; the elapsed assertion would catch a
+ * regression back to the unbounded retry. */
+static void test_loader_fail_fast_full_table(void) {
+  tests_run++;
+  uart_puts("  Running test_loader_fail_fast_full_table...\n");
+
+  /* Snapshot + poison every PCB slot so process_create_v2() must fail.
+     Mirror the slot-reclaim test's poison fields (no stale block/AS
+     pointers for the reclaim scan to touch). */
+  int saved[MAX_PROCESSES];
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    saved[i] = -1;
+    struct process *q = process_get_pcb(i);
+    if (!q || q->state != PROC_STATE_FREE)
+      continue;
+    saved[i] = q->state;
+    q->state = PROC_STATE_ALLOCATED; /* poison: not reclaimable */
+    q->is_thread = 0;
+    q->live_threads = 1;
+    q->phys_block_idx = -1;
+    q->as = 0;
+    q->futex_uaddr = 0;
+    q->wake_ms = 0;
+  }
+
+  uint64_t t0 = timer_get_ms();
+  /* Child spawn (caller_pid >= 0): must fail fast, not loop. */
+  int r = load_and_run_program_v2("NOPE.BIN", -1, -1, -1, 1, 0);
+  uint64_t elapsed = timer_get_ms() - t0;
+
+  EXPECT_EQ(r, -1);                  /* -EAGAIN folded by the wrapper */
+  EXPECT_EQ((int)(elapsed < 5000), 1); /* child budget is 2 s, not 30 min */
+
+  /* Restore the table so later suites see a clean state. */
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *q = process_get_pcb(i);
+    if (!q || saved[i] == -1)
+      continue;
+    q->state = saved[i];
+    q->is_thread = 0;
+    q->live_threads = 0;
+    q->phys_block_idx = -1;
+    q->as = 0;
+  }
+}
+
 void process_test_suite(void) {
   uart_puts("process_test_suite:\n");
   test_process_init_and_create();
@@ -620,6 +674,7 @@ void process_test_suite(void) {
   test_process_thread_group();
   test_process_thread_validation();
   test_process_thread_slot_reclaim();
+  test_loader_fail_fast_full_table();
   test_process_futex_machine();
   test_process_set_tls();
   test_p5_sigaction_storage();
