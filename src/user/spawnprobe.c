@@ -69,10 +69,7 @@ __attribute__((section(".text._start"))) void _start(void) {
     }
     if (iter++ % 100 == 0)
       live_line("snapshot", now - t_start, live);
-    /* Spawn every ~1 s (20 iters x 50 ms) — 4x less than the first
-       revision, to keep probe block-pool churn from amplifying the wave
-       (a 250 ms rate starved boot loads in the run it was tried). */
-    if (iter % 20 == 0) {
+    if (iter % 5 == 0) {
       long t0 = sysinfo(1, 0, 0);
       errno = 0;
       int pid = spawn2("HELLO.BIN", -1, -1, -1, 0);
