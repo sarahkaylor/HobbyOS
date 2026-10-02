@@ -189,7 +189,9 @@ static void test_trap_data_abort(void) {
    (e.g. -smp 4 under x64 KVM: cores 4-7 time out) leaves kernel_stack == 0,
    so the scan would dereference (top - 8) = -8 and fault the watchdog mid-
    dump with Vector 14 / CR2 = -8 during a long v2 load.  The guard must
-   reject such tops instead of scanning them. */
+   reject such tops instead of scanning them.  (x64-only: the ARM arch has
+   no watchdog caller-chain scans.) */
+#ifdef __x86_64__
 static void test_watchdog_stack_scan_guard(void) {
   tests_run++;
   uart_puts("  Running test_watchdog_stack_scan_guard...\n");
@@ -206,12 +208,15 @@ static void test_watchdog_stack_scan_guard(void) {
   EXPECT_EQ(watchdog_stack_scan_ok(0x70000000ULL), 1);
   EXPECT_EQ(watchdog_stack_scan_ok(0x74F08BF0ULL), 1);
 }
+#endif
 
 void trap_test_suite(void) {
   uart_puts("trap_test_suite:\n");
   test_trap_unknown_syscall();
   test_trap_sys_get_cpuid();
+#ifdef __x86_64__
   test_watchdog_stack_scan_guard();
+#endif
 
   // The following tests simulate EL0 exceptions and trigger the scheduler.
   // However, because they are called from EL1 C code with a mock trap frame,
