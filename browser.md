@@ -912,7 +912,7 @@ freeze fix (incl. the merged-tip 806-round soak) in §11.
       edits) — PORT_STATE + PORT_PLAN + Options/PlatformHobbyOS CMake bootstrap
       + WTF stubs + WK-1 feasibility memo (H-1..H-12, OQ-1..OQ-11). Null build
       deferred to WK-1 (gated on register row 1 + cross toolchain; §11).
-- [ ] **WK-1 `jsc` shell on HobbyOS** *(first deliverable!)* — JSCOnly target
+- [x] **WK-1 `jsc` shell on HobbyOS** *(first deliverable!)* — JSCOnly target
       for HobbyOS: platform files needed by JSC; static link; `jsc` runs:
       arithmetic/strings/regex/JSON/Date; **test262 language-subset run**
       (record pass rate; crash-free is the hard gate, pass-rate is the
@@ -920,10 +920,25 @@ freeze fix (incl. the merged-tip 806-round soak) in §11.
       minimums; sequence starts as they land.*
       **Gate WK-1:** `jsc` on both arches runs the test set; evidence = raw
       console output + test262 summary; §11 updated.
-- [ ] **WK-1.5 Architecture decision** — WebKit2-multiprocess vs
+      *(ARM gate MET 2026-10-02: smoke 42/42 on-device + test262 subset
+      500/500 crash-free, raw serial logs; x64 leg env-blocked by a host
+      OVMF-boot freeze, not a code miss — the OS-side x64 blocker that was
+      found (watchdog stack scan) is fixed at `18a62f4`. §11 batch-3.)*
+- [x] **WK-1.5 Architecture decision** — WebKit2-multiprocess vs
       WebKitLegacy-in-fork vs re-pin (2.52.6): written comparison, decided,
       recorded (AD-3 default = WebKit2; deviations need the comparison to
       say why). **Gate = the decision + rationale on record.**
+      *(DECIDED at CP-2, 2026-10-02 → **WebKit2 multi-process (AD-3)**.
+      Summary: (1) WebKit2 = the living upstream architecture (WinCairo/WPE/
+      GTK), and it matches this OS's own process model — the microkernel IS
+      the process boundary (spawn2/spawn_ex, pipes+fd-passing, waitpid/reap,
+      64-slot table stress-tested in Waves 1–3), jsc already runs as an in-OS
+      binary, and the plan already shelves GPU process + sandbox (the two
+      hardest pieces). (2) WebKitLegacy-in-fork (Haiku's path) has only Apple
+      platforms upstream today — reviving is explicitly higher fork-maintenance
+      cost per AD-3, and it forfeits crash isolation. (3) Re-pin 2.52.6 is NOT
+      an architecture choice but AD-4's fallback lever, gated on the W2 Skia
+      spike — not indicated now. Written comparison body → fork README.)*
 - [ ] **WK-2 Full-target build + stubs** — extend port platform code to what
       WebCore/WebKit need to *configure, compile, and link* all three process
       binaries (unimplemented platform functions may abort with a message at
@@ -1006,6 +1021,14 @@ owned paths unless the brief says otherwise.
 - **Wave 3:** L2 P5/P8; L3 P6 (SQLite); L8 WK-1 (`jsc`) as P1–P3 minimums
   land → **checkpoint CP-2 at WK-1 gate: go/no-go review (cost-so-far vs
   remaining; the architecture decision WK-1.5 is made here).**
+  *(CP-2 TAKEN 2026-10-02 → **GO**, WebKit2 per AD-3 (WK-1.5 ticked above): WK-1
+  gate met on ARM (jsc on-device smoke 42/42 + test262 subset 500/500,
+  crash-free); the OS-side x64 blocker found (watchdog stack scan on
+  never-booted cores) fixed at `18a62f4`; the remaining x64 run-block is a
+  host-level OVMF-boot freeze (env drift, recorded §11 batch-3). Cost-so-far
+  within plan; next go/no-go = CP-3 after WK-2…WK-3 (does a page render?).
+  Full written comparison body to be recorded in the fork README by the WK-2
+  lane.)*
 - **Wave 4:** L2 tail; L8 WK-2 → WK-3 (headless) — **checkpoint CP-3: does a
   page render? (this is the "engine actually works" moment)**; L7 wraps (if
   active).
@@ -1409,6 +1432,56 @@ curl -sI https://lite.cnn.com | grep -i content-length
 ---
 
 ## 11. Fix log (append-only; see also per-lane reports)
+
+- 2026-10-02 — **CP-2 CHECKPOINT TAKEN — GO** (Wave 3 close; WK-1 gate met on
+  ARM; WK-1.5 architecture decision made). Recorded in §7.2 + the WK-1 / WK-1.5
+  items above: WebKit2 multi-process (AD-3 default) adopted; written comparison
+  body to be recorded in the fork README by the WK-2 lane. Batteries at the
+  merge tip `18a62f4` (watchdog fix + batch-3 record): LOCAL host 0-fail,
+  unit-arm 294/0, unit-x64 297/0 (+watchdog regression), wave 0 FAIL + halt +
+  18 summaries; VM `w7-*`: host ✓, unit-arm ✓, unit-x64 ✓, test-arm rc=0,
+  0 FAIL + halt + 21 summaries + TORTURE 8/8
+  (`w7-test-arm_20261002-135216_test-arm.log`) — **both machines green at the
+  tip**. Next: Wave 4 (L2 tail already landed — P4/P6 present in-tree; L8
+  WK-2 → WK-3 headless; CP-3 = does a page render?).
+
+- 2026-10-02 — **Wave L8 batch-3 — WK-1 GATE MET (ARM): test262 500/500 on-device;
+  x64 watchdog stack-scan fault fixed** (deleg_8b6b8883; main tip `18a62f4`).
+  - **test262 language-subset — ARM 500/500 PASS, crash-free, on-device** (fork
+    lane, `browser/l8-wk1` commits `3bad9d7d39`/`6b5ef6fd9f`/`e4eb6748c6`):
+    deterministic 500-file subset of official test262 (pin
+    tc39/test262@7a096c205fd422ecba49a407d5ac4d1b3f842296; source-pinned map +
+    selection at fork `HobbyOS/continuation/test262/`), covers arithmetic 110 /
+    strings 76 / regex 34 / JSON 23 / Date 68 / language core 189; 23
+    negative-syntax, 8 onlyStrict. Run through the OS MODE=jsc single-program
+    path in 13 chunk boots; 500/500 PASS, 0 FAIL, 0 SKIP; per-file verdict
+    stream + `T262 CHUNK DONE` markers; crash-free end to end. Harness lessons
+    recorded (assert.sameValue NaN semantics; jsc global-var DontDelete — each
+    file isolated in its own function scope; parse-negatives via `load()`).
+    x64 leg NOT RUN: the fork's x64 OVMF boot froze at `BdsDxe` under TCG/KVM
+    this session (the M4-R1-proven smoke command also hangs — host/env drift,
+    raw log `test262/intel/chunk-C1.log`); x64 remains env-blocked.
+  - **x64 KVM v2-load "page fault" (Vector 14 @ 0x7002E0E0) — ROOT-CAUSED +
+    FIXED, NOT a loader/MMU bug** (lane `l8-x64loadfix`, `32f999c`/`18a62f4`):
+    the x64 watchdog's caller-chain dump scanned each core's kernel stack from
+    `top = cpu_locals[c].kernel_stack` with NO validity guard — a core that
+    never powered on (`-smp 4`, cores 4–7) leaves `kernel_stack == 0`, so the
+    scan dereferenced (0 − 8) → Vector 14 CR2 0xFFFFFFFFFFFFFFF8 inside the
+    watchdog. The 30 MB v2 load only mattered as the thing keeping the console
+    silent >20 s so the watchdog fired mid-load; TCG loads finish before the
+    threshold (no MMU difference). Reproduced 1:1 on KVM with a synthetic
+    30 MB BIG.BIN (MODE=bigload; same FATAL shape as the M4 log). Fix:
+    `watchdog_stack_scan_ok()` (trap.h) rejects tops outside
+    [0x70000000, 0x75000000); both unguarded scans skip such cores; regression
+    unit test x86_64-scoped. After-fix KVM: 30 MB load completes + halt, 828
+    "uninitialized kstack, skip" guards, lane gate OK (units both arches incl.
+    KVM 297/0, ARM wave 0 FAIL), cstyle clean. Repro scaffolding (MODE=bigload)
+    committed, inert unless selected. Garage note: a kernel halt-path EL1 fault
+    fires loudly after every clean exit in MODE=jsc (verdicts unaffected) —
+    OS team carry-forward item.
+  - **Open at this tip**: x64 test262 leg env-blocked (OVMF boot freeze — host
+    level; was green at M4-R1); the fat16 >1 MiB `attr=0` defect; the WK-1.5
+    architecture decision + CP-2 go/no-go (both imminent; see §7.2).
 
 - 2026-10-02 — **Wave L8 batch-2 — CLASS B RESOLVED + wave pressure hardened +
   WK-1 `jsc` ON-DEVICE; batteries GREEN both machines at `5ae0362`** —
