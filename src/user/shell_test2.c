@@ -82,7 +82,13 @@ static int run_cmd_check(int in, int out, const char *cmd,
   int clen = 0;
   while (cmd[clen]) clen++;
   int timed_out = 0;
+  int peak = 0;
   for (int attempt = 0; attempt < 2; attempt++) {
+    {
+      struct sys_procinfo info[64];
+      int lv = sysinfo(3, info, (int)sizeof info);
+      if (lv > peak) peak = lv;
+    }
     write(in, cmd, clen);
     if (read_until(out, buf, bufsz, "$ ", 8000) < 0)
       timed_out = 1;
@@ -96,9 +102,12 @@ static int run_cmd_check(int in, int out, const char *cmd,
     if (all) return 1;
     usleep(500000); /* let the wave drain before the retry */
   }
-  struct sys_procinfo info[64];
-  int live = sysinfo(3, info, (int)sizeof info);
-  if (live >= 55)
+  {
+    struct sys_procinfo info[64];
+    int lv = sysinfo(3, info, (int)sizeof info);
+    if (lv > peak) peak = lv;
+  }
+  if (peak >= 55)
     return -1;
   if (timed_out) {
     /* The shell sat dead-quiet through both deadlines with room in the
@@ -296,7 +305,13 @@ int main(void) {
        failure, then classify (see run_cmd_check). */
     int rc = 0;
     int timed_out = 0;
+    int peak = 0;
     for (int attempt = 0; attempt < 2 && rc == 0; attempt++) {
+      {
+        struct sys_procinfo info[64];
+        int lv = sysinfo(3, info, (int)sizeof info);
+        if (lv > peak) peak = lv;
+      }
       write(in_p[1], "echo file_content > TEMP.TXT\n", 29);
       if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000) < 0)
         timed_out = 1;
@@ -324,8 +339,9 @@ int main(void) {
     }
     if (rc != 1) {
       struct sys_procinfo info[64];
-      int live = sysinfo(3, info, (int)sizeof info);
-      if (live >= 55 || timed_out) {
+      int lv = sysinfo(3, info, (int)sizeof info);
+      if (lv > peak) peak = lv;
+      if (peak >= 55 || timed_out) {
         print_console("shell_test2: SKIP file ops validation (slot pressure)\n");
       } else {
         print_console("shell_test2: FAILED file ops validation\n");

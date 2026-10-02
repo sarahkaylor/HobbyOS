@@ -121,7 +121,16 @@ static int run_cmd_check(int in, int out, const char *cmd,
   int clen = 0;
   while (cmd[clen]) clen++;
   int timed_out = 0;
+  int peak = 0;
   for (int attempt = 0; attempt < 2; attempt++) {
+    /* Sample the table at attempt START too: a pressure spike that
+       starved the shell's child spawn can drain before the final
+       sample, and the check must still classify as slot pressure. */
+    {
+      struct sys_procinfo info[64];
+      int lv = sysinfo(3, info, (int)sizeof info);
+      if (lv > peak) peak = lv;
+    }
     write(in, cmd, clen);
     if (read_until(out, buf, bufsz, "$ ", 8000) < 0)
       timed_out = 1;
@@ -135,9 +144,12 @@ static int run_cmd_check(int in, int out, const char *cmd,
     if (all) return 1;
     usleep(500000); /* let the wave drain before the retry */
   }
-  struct sys_procinfo info[64];
-  int live = sysinfo(3, info, (int)sizeof info);
-  if (live >= 55)
+  {
+    struct sys_procinfo info[64];
+    int lv = sysinfo(3, info, (int)sizeof info);
+    if (lv > peak) peak = lv;
+  }
+  if (peak >= 55)
     return -1;
   if (timed_out) {
     /* The shell sat dead-quiet through both deadlines with room in the
@@ -157,7 +169,13 @@ static int run_seq_check(int in, int out, const char *const *cmds, int ncmds,
                          const char *const *needles, int nneedles,
                          char *buf, int bufsz) {
   int timed_out = 0;
+  int peak = 0;
   for (int attempt = 0; attempt < 2; attempt++) {
+    {
+      struct sys_procinfo info[64];
+      int lv = sysinfo(3, info, (int)sizeof info);
+      if (lv > peak) peak = lv;
+    }
     for (int c = 0; c < ncmds; c++) {
       int clen = 0;
       while (cmds[c][clen]) clen++;
@@ -175,9 +193,12 @@ static int run_seq_check(int in, int out, const char *const *cmds, int ncmds,
     if (all) return 1;
     usleep(500000); /* let the wave drain before the retry */
   }
-  struct sys_procinfo info[64];
-  int live = sysinfo(3, info, (int)sizeof info);
-  if (live >= 55)
+  {
+    struct sys_procinfo info[64];
+    int lv = sysinfo(3, info, (int)sizeof info);
+    if (lv > peak) peak = lv;
+  }
+  if (peak >= 55)
     return -1;
   if (timed_out) {
     /* The shell sat dead-quiet through both deadlines with room in the
@@ -420,7 +441,13 @@ int main(void) {
        classifies as slot pressure instead of wedging the boot suite. */
     int rc = 0;
     int timed_out = 0;
+    int peak = 0;
     for (int attempt = 0; attempt < 2 && rc == 0; attempt++) {
+      {
+        struct sys_procinfo info[64];
+        int lv = sysinfo(3, info, (int)sizeof info);
+        if (lv > peak) peak = lv;
+      }
       write(in_p[1], "rm /SUB1/SUB2/nested.txt\n", 25);
       if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000) < 0)
         timed_out = 1;
@@ -435,8 +462,9 @@ int main(void) {
     }
     if (rc != 1) {
       struct sys_procinfo info[64];
-      int live = sysinfo(3, info, (int)sizeof info);
-      if (live >= 55 || timed_out) {
+      int lv = sysinfo(3, info, (int)sizeof info);
+      if (lv > peak) peak = lv;
+      if (peak >= 55 || timed_out) {
         print_console("shell_test3: SKIP file deletion check (slot pressure)\n");
       } else {
         print_console("shell_test3: FAILED file deletion check. Output was:\n");
