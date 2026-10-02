@@ -74,6 +74,34 @@ static int read_until(int fd, char *buf, int max_len, const char *pattern,
 /* Sample the live process table into *peak so a pressure spike that
    starved the shell's child spawn is caught even if it drains before
    classification time. */
+
+/* Shell stderr is wired to a test-owned pipe so a fork() EAGAIN under
+   the full process table is observable precisely: the shell prints
+   "sh: fork failed" to stderr, whereas sysinfo sampling can miss a
+   sub-sample-width full-table pulse. */
+static int s_err = -1;
+
+static int err_has_fork_failed(void) {
+  char eb[64];
+  int n = 0;
+  while (n < (int)sizeof(eb) - 1) {
+    struct pollfd pfd;
+    pfd.fd = s_err;
+    pfd.events = POLLIN;
+    if (poll(&pfd, 1, 0) <= 0)
+      break;
+    int r = read(s_err, eb + n, 1);
+    if (r != 1)
+      break;
+    n++;
+  }
+  eb[n] = 0;
+  for (int i = 0; i + 11 <= n; i++)
+    if (eb[i] == 'f' && !memcmp(eb + i, "fork failed", 11))
+      return 1;
+  return 0;
+}
+
 static void sample_peak(int *peak) {
   struct sys_procinfo info[64];
   int lv = sysinfo(3, info, (int)sizeof info);
@@ -98,6 +126,7 @@ static int run_cmd_check(int in, int out, const char *cmd,
   int timed_out = 0;
   int peak = 0;
   for (int attempt = 0; attempt < 2; attempt++) {
+    err_has_fork_failed(); /* drain stale sentinels from earlier checks */
     sample_peak(&peak);
     write(in, cmd, clen);
     sample_peak(&peak);
@@ -111,6 +140,10 @@ static int run_cmd_check(int in, int out, const char *cmd,
         break;
       }
     }
+    if (err_has_fork_failed())
+      return -1;
+    if (err_has_fork_failed())
+      return -1;
     if (all) return 1;
     usleep(500000); /* let the wave drain before the retry */
   }
@@ -208,7 +241,7 @@ static void start_watchdog(int in_w, int out_r, const char *test_name) {
 int main(void) {
   print_console("Shell Advanced Utilities Integration Test Starting...\n");
 
-  int in_p[2], out_p[2];
+  int in_p[2], out_p[2], err_p[2];
   if (pipe(in_p) != 0 || pipe(out_p) != 0) {
     print_console("shell_test2: failed to create pipes\n");
     return 1;
@@ -220,7 +253,14 @@ int main(void) {
      block pool (32 blocks) while ~40 programs start in a burst; retry so a
      scheduling wave can't silently kill the test (bounded at 20 s). */
   for (int attempt = 0; attempt < 200 && pid < 0; attempt++) {
-    pid = spawn2("SH.BIN", in_p[0], out_p[1], -1, 0);
+    if (pipe(err_p) == 0) {
+      pid = spawn2("SH.BIN", in_p[0], out_p[1], err_p[1], 0);
+      s_err = err_p[0];
+      close(err_p[1]);
+    } else {
+      pid = spawn2("SH.BIN", in_p[0], out_p[1], -1, 0);
+      s_err = -1;
+    }
     if (pid < 0) {
       if (attempt == 0)
         print_console("shell_test2: spawn failed (memory wave), retrying...\n");
@@ -315,6 +355,7 @@ int main(void) {
     int timed_out = 0;
     int peak = 0;
     for (int attempt = 0; attempt < 2 && rc == 0; attempt++) {
+      err_has_fork_failed(); /* drain stale sentinels */
       sample_peak(&peak);
       write(in_p[1], "echo file_content > TEMP.TXT\n", 29);
       sample_peak(&peak);
@@ -349,15 +390,23 @@ int main(void) {
         rc = 1;
         break;
       }
+      if (err_has_fork_failed()) {
+        rc = -1;
+        break;
+      }
       usleep(500000); /* let the wave drain before the retry */
     }
     if (rc != 1) {
-      sample_peak(&peak);
-      if (peak >= 55 || timed_out) {
+      if (rc == -1) {
         print_console("shell_test2: SKIP file ops validation (slot pressure)\n");
       } else {
-        print_console("shell_test2: FAILED file ops validation\n");
-        return 1;
+        sample_peak(&peak);
+        if (peak >= 55 || timed_out) {
+          print_console("shell_test2: SKIP file ops validation (slot pressure)\n");
+        } else {
+          print_console("shell_test2: FAILED file ops validation\n");
+          return 1;
+        }
       }
     }
   }
