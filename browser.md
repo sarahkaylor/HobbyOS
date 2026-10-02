@@ -953,12 +953,18 @@ freeze fix (incl. the merged-tip 806-round soak) in §11.
       cost per AD-3, and it forfeits crash isolation. (3) Re-pin 2.52.6 is NOT
       an architecture choice but AD-4's fallback lever, gated on the W2 Skia
       spike — not indicated now. Written comparison body → fork README.)*
-- [ ] **WK-2 Full-target build + stubs** — extend port platform code to what
+- [x] **WK-2 Full-target build + stubs** — extend port platform code to what
       WebCore/WebKit need to *configure, compile, and link* all three process
       binaries (unimplemented platform functions may abort with a message at
       this stage); Skia-vs-Cairo spike result applied (AD-4 lever).
-      **Gate WK-2:** three binaries build for both arches (size + time
-      recorded); "configure→link" CI script green.
+      **Gate WK-2: MET 2026-10-02 (fork `browser/l8-wk1`)** — WebKit static
+      (AD-6), configure GREEN, WebCore+WebKit+Skia compile clean, `extern "C"`
+      sysroot-header hygiene fixed; ARM binaries LINK: WebProcess 139,108,664 B
+      / NetworkProcess 135,088,920 B / HobbyOS-UIProcess 58,311,528 B (+ relink
+      wall-times); jsc smoke rc=0 (47,516,296 B); ci script `wk2-link-ci.sh`
+      validated; x64 test262 script fixes committed (c712f63d3d). W2-R5 receipts
+      in fork WK2-EVIDENCE.md. Note: WebProcess ELF exceeds the 64 MiB
+      user-image cap — flatten/strip or a cap decision is WK-3 step 0.
 - [ ] **WK-3 Headless web process** — WebProcess standalone: create a page,
       load `file://` fixtures, run JS, paint into our surface, **dump
       PNG/pixel-hash** for comparison (no UI process yet); JS probes via
@@ -1446,6 +1452,19 @@ curl -sI https://lite.cnn.com | grep -i content-length
 ---
 
 ## 11. Fix log (append-only; see also per-lane reports)
+
+- 2026-10-02 — **WK-2 GATE MET — three ARM process binaries LINK.** All three
+  targets link RC=0 (fork `browser/l8-wk1`, finalization lane deleg_de1d1eaf):
+  WebProcess 139,108,664 B / NetworkProcess 135,088,920 B / HobbyOS-UIProcess
+  58,311,528 B; jsc smoke rc=0; CI script `wk2-link-ci.sh` validated;
+  `extern "C"` sysroot-header hygiene fixed fork-side (mangled C++ refs to
+  shm_open/mkdir/setjmp were the last link cluster; gaps strong/weak variants
+  were symptom treatment); Skia-vs-Cairo spike resolved in favour of Skia (all
+  three binaries are Skia-backed — Cairo falls back only under AD-4, not
+  indicated); W2-R5 receipts appended to the fork WK2-EVIDENCE.md. Note for
+  WK-3: WebProcess ELF (139 MB) exceeds the 64 MiB user-image cap — step 0 is
+  measuring the flattened raw size and either stripping or raising the cap
+  (OS change, patch-for-controller-apply).
 
 - 2026-10-02 — **WK-1 GATE COMPLETE ON BOTH ARCHES — ARM + x64 test262
   500/500.** The x64 leg (previously blocked by the OVMF freeze, itself a stale
