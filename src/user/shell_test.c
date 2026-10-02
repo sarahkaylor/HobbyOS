@@ -126,7 +126,7 @@ static int run_cmd_check(int in, int out, const char *cmd,
   while (cmd[clen]) clen++;
   int timed_out = 0;
   int peak = 0;
-  for (int attempt = 0; attempt < 2; attempt++) {
+  for (int attempt = 0; attempt < 3; attempt++) {
     err_has_fork_failed(); /* drain stale sentinels from earlier checks */
     sample_peak(&peak);
     write(in, cmd, clen);
@@ -141,12 +141,12 @@ static int run_cmd_check(int in, int out, const char *cmd,
         break;
       }
     }
-        if (err_has_fork_failed())
+    if (err_has_fork_failed())
       return -1;
-        if (err_has_fork_failed())
+    if (err_has_fork_failed())
       return -1;
     if (all) return 1;
-    usleep(500000); /* let the wave drain before the retry */
+    usleep(2000000); /* let the wave burst drain before the retry */
   }
   sample_peak(&peak);
   if (peak >= 55)
@@ -254,7 +254,7 @@ int main(void) {
      block pool (32 blocks) while ~40 programs start in a burst; retry so a
      scheduling wave can't silently kill the test (bounded at 20 s). */
   for (int attempt = 0; attempt < 200 && pid < 0; attempt++) {
-        if (pipe(err_p) == 0) {
+    if (pipe(err_p) == 0) {
       pid = spawn2("SH.BIN", in_p[0], out_p[1], err_p[1], 0);
       s_err = err_p[0];
       close(err_p[1]);

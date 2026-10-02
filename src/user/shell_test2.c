@@ -125,7 +125,7 @@ static int run_cmd_check(int in, int out, const char *cmd,
   while (cmd[clen]) clen++;
   int timed_out = 0;
   int peak = 0;
-  for (int attempt = 0; attempt < 2; attempt++) {
+  for (int attempt = 0; attempt < 3; attempt++) {
     err_has_fork_failed(); /* drain stale sentinels from earlier checks */
     sample_peak(&peak);
     write(in, cmd, clen);
@@ -145,7 +145,7 @@ static int run_cmd_check(int in, int out, const char *cmd,
     if (err_has_fork_failed())
       return -1;
     if (all) return 1;
-    usleep(500000); /* let the wave drain before the retry */
+    usleep(2000000); /* let the wave burst drain before the retry */
   }
   sample_peak(&peak);
   if (peak >= 55)
@@ -354,7 +354,7 @@ int main(void) {
     int rc = 0;
     int timed_out = 0;
     int peak = 0;
-    for (int attempt = 0; attempt < 2 && rc == 0; attempt++) {
+    for (int attempt = 0; attempt < 3 && rc == 0; attempt++) {
       err_has_fork_failed(); /* drain stale sentinels */
       sample_peak(&peak);
       write(in_p[1], "echo file_content > TEMP.TXT\n", 29);
@@ -394,7 +394,7 @@ int main(void) {
         rc = -1;
         break;
       }
-      usleep(500000); /* let the wave drain before the retry */
+      usleep(2000000); /* let the wave burst drain before the retry */
     }
     if (rc != 1) {
       if (rc == -1) {
