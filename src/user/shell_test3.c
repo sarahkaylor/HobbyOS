@@ -102,6 +102,15 @@ static int read_until(int fd, char *buf, int max_len, const char *pattern,
   return len;
 }
 
+/* Sample the live process table into *peak so a pressure spike that
+   starved the shell's child spawn is caught even if it drains before
+   classification time. */
+static void sample_peak(int *peak) {
+  struct sys_procinfo info[64];
+  int lv = sysinfo(3, info, (int)sizeof info);
+  if (lv > *peak) *peak = lv;
+}
+
 /* Documented wave slot-pressure class: a command that runs an EXTERNAL
    binary (ls/cat/rm/mkdir/... or a pipeline, which make the shell fork)
    can come back empty when the shell's fork hits the legitimately-full
@@ -123,17 +132,12 @@ static int run_cmd_check(int in, int out, const char *cmd,
   int timed_out = 0;
   int peak = 0;
   for (int attempt = 0; attempt < 2; attempt++) {
-    /* Sample the table at attempt START too: a pressure spike that
-       starved the shell's child spawn can drain before the final
-       sample, and the check must still classify as slot pressure. */
-    {
-      struct sys_procinfo info[64];
-      int lv = sysinfo(3, info, (int)sizeof info);
-      if (lv > peak) peak = lv;
-    }
+    sample_peak(&peak);
     write(in, cmd, clen);
+    sample_peak(&peak);
     if (read_until(out, buf, bufsz, "$ ", 8000) < 0)
       timed_out = 1;
+    sample_peak(&peak);
     int all = 1;
     for (int i = 0; i < nneedles; i++) {
       if (!my_strstr(buf, needles[i])) {
@@ -144,11 +148,7 @@ static int run_cmd_check(int in, int out, const char *cmd,
     if (all) return 1;
     usleep(500000); /* let the wave drain before the retry */
   }
-  {
-    struct sys_procinfo info[64];
-    int lv = sysinfo(3, info, (int)sizeof info);
-    if (lv > peak) peak = lv;
-  }
+  sample_peak(&peak);
   if (peak >= 55)
     return -1;
   if (timed_out) {
@@ -171,17 +171,15 @@ static int run_seq_check(int in, int out, const char *const *cmds, int ncmds,
   int timed_out = 0;
   int peak = 0;
   for (int attempt = 0; attempt < 2; attempt++) {
-    {
-      struct sys_procinfo info[64];
-      int lv = sysinfo(3, info, (int)sizeof info);
-      if (lv > peak) peak = lv;
-    }
+    sample_peak(&peak);
     for (int c = 0; c < ncmds; c++) {
       int clen = 0;
       while (cmds[c][clen]) clen++;
       write(in, cmds[c], clen);
+      sample_peak(&peak);
       if (read_until(out, buf, bufsz, "$ ", 8000) < 0)
         timed_out = 1;
+      sample_peak(&peak);
     }
     int all = 1;
     for (int i = 0; i < nneedles; i++) {
@@ -193,11 +191,7 @@ static int run_seq_check(int in, int out, const char *const *cmds, int ncmds,
     if (all) return 1;
     usleep(500000); /* let the wave drain before the retry */
   }
-  {
-    struct sys_procinfo info[64];
-    int lv = sysinfo(3, info, (int)sizeof info);
-    if (lv > peak) peak = lv;
-  }
+  sample_peak(&peak);
   if (peak >= 55)
     return -1;
   if (timed_out) {
@@ -443,15 +437,13 @@ int main(void) {
     int timed_out = 0;
     int peak = 0;
     for (int attempt = 0; attempt < 2 && rc == 0; attempt++) {
-      {
-        struct sys_procinfo info[64];
-        int lv = sysinfo(3, info, (int)sizeof info);
-        if (lv > peak) peak = lv;
-      }
+      sample_peak(&peak);
       write(in_p[1], "rm /SUB1/SUB2/nested.txt\n", 25);
+      sample_peak(&peak);
       if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000) < 0)
         timed_out = 1;
       write(in_p[1], "ls -l /SUB1/SUB2\n", 17);
+      sample_peak(&peak);
       if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000) < 0)
         timed_out = 1;
       if (!my_strstr(buf, "NESTED.TXT")) {
@@ -461,9 +453,7 @@ int main(void) {
       usleep(500000); /* let the wave drain before the retry */
     }
     if (rc != 1) {
-      struct sys_procinfo info[64];
-      int lv = sysinfo(3, info, (int)sizeof info);
-      if (lv > peak) peak = lv;
+      sample_peak(&peak);
       if (peak >= 55 || timed_out) {
         print_console("shell_test3: SKIP file deletion check (slot pressure)\n");
       } else {

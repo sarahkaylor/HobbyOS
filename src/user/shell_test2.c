@@ -66,6 +66,15 @@ static int read_until(int fd, char *buf, int max_len, const char *pattern,
   return len;
 }
 
+/* Sample the live process table into *peak so a pressure spike that
+   starved the shell's child spawn is caught even if it drains before
+   classification time. */
+static void sample_peak(int *peak) {
+  struct sys_procinfo info[64];
+  int lv = sysinfo(3, info, (int)sizeof info);
+  if (lv > *peak) *peak = lv;
+}
+
 /* Documented wave slot-pressure class: a command that runs an EXTERNAL
    binary (ps/free/uptime/ifconfig/sort/uniq/wc/... or a pipeline) can
    come back empty when the shell's fork hits the legitimately-full
@@ -84,14 +93,12 @@ static int run_cmd_check(int in, int out, const char *cmd,
   int timed_out = 0;
   int peak = 0;
   for (int attempt = 0; attempt < 2; attempt++) {
-    {
-      struct sys_procinfo info[64];
-      int lv = sysinfo(3, info, (int)sizeof info);
-      if (lv > peak) peak = lv;
-    }
+    sample_peak(&peak);
     write(in, cmd, clen);
+    sample_peak(&peak);
     if (read_until(out, buf, bufsz, "$ ", 8000) < 0)
       timed_out = 1;
+    sample_peak(&peak);
     int all = 1;
     for (int i = 0; i < nneedles; i++) {
       if (!my_strstr(buf, needles[i])) {
@@ -102,11 +109,7 @@ static int run_cmd_check(int in, int out, const char *cmd,
     if (all) return 1;
     usleep(500000); /* let the wave drain before the retry */
   }
-  {
-    struct sys_procinfo info[64];
-    int lv = sysinfo(3, info, (int)sizeof info);
-    if (lv > peak) peak = lv;
-  }
+  sample_peak(&peak);
   if (peak >= 55)
     return -1;
   if (timed_out) {
@@ -307,30 +310,36 @@ int main(void) {
     int timed_out = 0;
     int peak = 0;
     for (int attempt = 0; attempt < 2 && rc == 0; attempt++) {
-      {
-        struct sys_procinfo info[64];
-        int lv = sysinfo(3, info, (int)sizeof info);
-        if (lv > peak) peak = lv;
-      }
+      sample_peak(&peak);
       write(in_p[1], "echo file_content > TEMP.TXT\n", 29);
+      sample_peak(&peak);
       if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000) < 0)
         timed_out = 1;
+      sample_peak(&peak);
 
       write(in_p[1], "mv TEMP.TXT TEMP2.TXT\n", 22);
+      sample_peak(&peak);
       if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000) < 0)
         timed_out = 1;
+      sample_peak(&peak);
 
       write(in_p[1], "cp TEMP2.TXT TEMP3.TXT\n", 23);
+      sample_peak(&peak);
       if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000) < 0)
         timed_out = 1;
+      sample_peak(&peak);
 
       write(in_p[1], "rm TEMP2.TXT\n", 13);
+      sample_peak(&peak);
       if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000) < 0)
         timed_out = 1;
+      sample_peak(&peak);
 
       write(in_p[1], "cat TEMP3.TXT\n", 14);
+      sample_peak(&peak);
       if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000) < 0)
         timed_out = 1;
+      sample_peak(&peak);
       if (my_strstr(buf, "file_content")) {
         rc = 1;
         break;
@@ -338,9 +347,7 @@ int main(void) {
       usleep(500000); /* let the wave drain before the retry */
     }
     if (rc != 1) {
-      struct sys_procinfo info[64];
-      int lv = sysinfo(3, info, (int)sizeof info);
-      if (lv > peak) peak = lv;
+      sample_peak(&peak);
       if (peak >= 55 || timed_out) {
         print_console("shell_test2: SKIP file ops validation (slot pressure)\n");
       } else {
