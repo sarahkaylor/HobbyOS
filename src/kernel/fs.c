@@ -1399,12 +1399,44 @@ int file_available(struct process *cur, int fd) {
  * Returns:
  *   Number of bytes written, or -1 on failure.
  */
+/* WK-1 M3: length-bounded console write from user space.
+ * SYS_WRITE_CONSOLE historically NUL-terminated its output (uart_puts) and
+ * returned 0 — unsafe for size-bounded stdio/libc++ writes (an overrun past
+ * a short buffer into an unmapped page faults the kernel) and broken for the
+ * write-count contract (fwrite stops after one chunk).  This emits exactly
+ * `size` bytes and returns the count; -EFAULT when the user range is
+ * invalid.  Byte-at-a-time uart_putc (not uart_puts) so no NUL assumption is
+ * made about the buffer. */
+int console_write_user(struct process *p, const void *buf, int size) {
+  extern void uart_putc(char c);
+  if (size <= 0)
+    return 0;
+  if (vm_range_ok(p, (uint64_t)buf, (uint64_t)size, 0) != 0)
+    return -EFAULT;
+  const char *s = (const char *)buf;
+  for (int i = 0; i < size; i++)
+    uart_putc(s[i]);
+  return size;
+}
+
 int file_write(struct process *cur, int fd, const void *buf, int size, struct trap_frame *tf) {
   cur = process_group(cur); /* P1 (D7): the fd table is group state */
   if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
 
   int g_fd = cur->open_fds[fd];
-  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) {
+    /* WK-1 M3: a program launched by the boot wave (e.g. the
+       statically linked WebKit jsc shell) has no console fd assigned —
+       open_fds[1]/[2] are -1 — so write(1)/write(2) returned EBADF and
+       printf/fwrite output vanished silently.  Route fd 1/2 to the
+       length-bounded console writer, mirroring user/libc.c print()'s
+       SYS_WRITE_CONSOLE fallback at the syscall layer so every stdio
+       path (printf/puts/fwrite/std::cout) works.  Console writes are
+       synchronous; other fds keep the historical EBADF. */
+    if (fd == 1 || fd == 2)
+      return console_write_user(cur, buf, size);
+    return -1;
+  }
 
   struct file *f = &global_file_table[g_fd];
   if (f->type == FILE_TYPE_FAT16) {

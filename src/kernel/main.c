@@ -446,6 +446,15 @@ void main(void) {
 #elif defined(KERNEL_MODE_FILEDIALOG_TEST)
   uart_puts("Mode: FILEDIALOG_TEST - Launching file dialog arrow key test...\n");
   load_and_run_program_in_scheduler("FILEDIAL.BIN", -1, -1, -1, -1);
+#elif defined(KERNEL_MODE_JSC)
+  /* WK-1 M3: single-program jsc smoke.  Boots ONLY JSC.BIN
+     (the statically linked WebKit jsc shell, fork-built) with the smoke
+     script SMOKE.JS as argv[1]; both files must be on the boot disk (the
+     fork-side minimal-disk recipe assembles kernel + JSC.BIN + SMOKE.JS
+     only).  fd 1/2 are unset -> the console-fd fallback (0002) relays
+     jsc's stdout/stderr to the serial console. */
+  uart_puts("Mode: JSC - Running WebKit jsc smoke (WK-1 M3)...\n");
+  load_and_run_program_in_scheduler_args("JSC.BIN", -1, -1, -1, -1, "SMOKE.JS");
 #else
   uart_puts("Mode: DESKTOP - Launching desktop...\n");
   load_and_run_program_in_scheduler("DESKTOP.BIN", -1, -1, -1, -1);

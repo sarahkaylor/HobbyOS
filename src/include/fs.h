@@ -79,6 +79,11 @@ int file_dup2(struct process *p, int oldfd, int newfd);
 int file_gfd_is_pipe(int gfd);
 int file_read(struct process *p, int fd, void *buf, int size, struct trap_frame *tf);
 int file_write(struct process *p, int fd, const void *buf, int size, struct trap_frame *tf);
+/* WK-1 M3: length-bounded console write from user space, shared by
+ * SYS_WRITE_CONSOLE (0001) and the fd-1/2 console fallback in file_write
+ * (0002).  Emits exactly `size` bytes and returns size; -EFAULT on an
+ * out-of-range user pointer (full range check, not just the first byte). */
+int console_write_user(struct process *p, const void *buf, int size);
 int file_pipe(struct process *p, int fds[2]);
 int file_available(struct process *p, int fd);
 /* P2.4 (S4, design section 4.3): memfd objects.  file_memfd_create

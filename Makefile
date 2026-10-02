@@ -154,6 +154,13 @@ else ifeq ($(MODE),pong_test)
 else ifeq ($(MODE),filedialog_test)
   CFLAGS += -DKERNEL_MODE_FILEDIALOG_TEST
   USER_CFLAGS += -DDESKTOP_TEST_AUTO_LAUNCH
+else ifeq ($(MODE),jsc)
+  # WK-1 M3 (draft 0003): WebKit jsc smoke — single-program boot.  The fork
+  # side assembles a minimal boot disk (kernel + JSC.BIN + SMOKE.JS only)
+  # and boots it; see the fork's HobbyOS/continuation/README.md for the
+  # runner (this tree stays self-contained — nothing here references the
+  # fork's build outputs).
+  CFLAGS += -DKERNEL_MODE_JSC
 else ifeq ($(MODE),soak)
   # P8.2 (browser.md §6): the soak — the standard test wave plus TORTURE.BIN
   # running its bounded soak loop (28-minute cap; main.c's KERNEL_SOAK_WAVE
@@ -1738,6 +1745,12 @@ pong_test_run:
 
 filedialog_test_run:
 	$(MAKE) MODE=filedialog_test run
+
+# WK-1 M3 (draft 0003): build the kernel in jsc (single-program) mode.
+# Booting needs the fork-side minimal disk; see the fork's
+# HobbyOS/continuation/README.md for the full runner.
+jsc_run:
+	$(MAKE) MODE=jsc run
 
 filedialog_test:
 	python3 ./run_filedialog_test.py

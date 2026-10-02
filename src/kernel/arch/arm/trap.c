@@ -57,17 +57,24 @@ extern uint32_t virtio_blk_irq;
 
 static void sys_write_console(struct trap_frame *tf) {
   uint64_t ptr = tf->regs[0];
+  int len = (int)tf->regs[1]; /* WK-1 M3: honor the length */
   struct process *p = current_process();
-  int ok;
+  int ret;
   if (p && p->as)
-    ok = (vm_range_ok(p, ptr, 1, 0) == 0); /* P2.2 (S2): v2 pointer */
-  else
-    ok = (ptr >= USER_VIRT_BASE && ptr < (USER_VIRT_BASE + USER_REGION_SIZE));
-  if (ok) {
-    uart_puts("[CONSOLE] ");
-    uart_puts((const char *)ptr);
+    ret = console_write_user(p, (const void *)ptr, len);
+  else {
+    /* No process context (kernel path): legacy range check, then emit at
+       most len bytes (NUL-stops before that — the buffer is kernel text). */
+    extern void uart_putc(char c);
+    const char *s = (const char *)ptr;
+    ret = 0;
+    if (ptr >= USER_VIRT_BASE && ptr < (USER_VIRT_BASE + USER_REGION_SIZE)) {
+      for (int i = 0; i < len && s[i]; i++)
+        uart_putc(s[i]);
+      ret = len;
+    }
   }
-  tf->regs[0] = 0;
+  tf->regs[0] = (uint64_t)ret;
 }
 
 static void sys_exit(struct trap_frame *tf) { process_exit(tf); }
