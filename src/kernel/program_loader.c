@@ -182,10 +182,15 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
       if (pid >= 0)
         break;
     }
-    /* Bail on a STUCK table: if no slot has freed for the stall window
-       the drain is not happening — waiting further only extends the
-       famine.  A draining transient frees slots continuously, so a
-       patient wait rides it out (up to the budget). */
+    /* Bail on a STUCK table — child spawns ONLY.  A child (caller_pid
+       >= 0) gives up after the stall window; the caller retries.  A
+       BOOT load (caller_pid < 0) must NEVER bail early: it has no
+       caller to retry, and silently skipping the load drops a wave
+       program (observed: TORTURE's final-wave boot load bailed under a
+       momentary full table and MODE=soak ran as a plain wave — a clean
+       System halt with zero [SOAK] rounds).  Boot loads ride the full
+       budget; the console-storm amplifier is gone, so the drain always
+       completes within it. */
     uint64_t now = timer_get_ms();
     if (now - t_start >= budget_ms)
       break;
@@ -193,7 +198,8 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
     if (free_now != free_before) {
       free_before = free_now;
       last_progress = now;
-    } else if (now - last_progress >= LOAD_RETRY_STALL_MS) {
+    } else if (caller_pid >= 0 &&
+               now - last_progress >= LOAD_RETRY_STALL_MS) {
       break;
     }
     for (volatile int spin = 0; spin < 400000; spin++) { /* ~10 ms park */
@@ -523,7 +529,9 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
   int pid = -1;
   /* Famine pacing — same contract as the v1 loop above: try immediately,
      park ~10 ms, ride out a draining transient (budget) but bail when
-     the table is stuck (no slot freed for the stall window). */
+     the table is stuck (no slot freed for the stall window).  The stall
+     bail applies to CHILD spawns only — see the v1 loop for why a boot
+     load must never give up early. */
   uint64_t t_start = timer_get_ms();
   uint32_t budget_ms = (caller_pid < 0) ? LOAD_RETRY_BOOT_MS
                                         : LOAD_RETRY_CHILD_MS;
@@ -548,8 +556,9 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     if (free_now != free_before) {
       free_before = free_now;
       last_progress = now;
-    } else if (now - last_progress >= LOAD_RETRY_STALL_MS) {
-      break; /* stuck table: waiting further would extend the famine */
+    } else if (caller_pid >= 0 &&
+               now - last_progress >= LOAD_RETRY_STALL_MS) {
+      break; /* child: stuck table, waiting further extends the famine */
     }
     for (volatile int spin = 0; spin < 400000; spin++) { /* ~10 ms park */
       if (timer_get_ms() - t_start >= budget_ms)
