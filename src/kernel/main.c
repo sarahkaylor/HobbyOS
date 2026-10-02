@@ -127,10 +127,6 @@ void uart_print_hex_raw(uint64_t val) {
  * waiting cannot wedge the suite the way the old inline loop did). */
 static void test_wave_loader(void *arg) {
   (void)arg;
-  /* TEMP (l8-wave-harden measurement lane, revert with the TEMP commit):
-     spawn-latency / table-full-window probe, loaded first while the
-     table is legitimately full. */
-  load_and_run_program_in_scheduler("SPAWNPR.BIN", -1, -1, -1, -1);
   /* Diagnostic probe for the subdirectory create/spawn/cat flow that
      shell_test3 exercises.  Runs first so its console output is intact. */
   load_and_run_program_in_scheduler("SUBPRB.BIN", -1, -1, -1, -1);
