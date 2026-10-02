@@ -1447,6 +1447,23 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-10-02 — **x64 OVMF freeze ROOT-CAUSED + FIXED** (parallel lane
+  deleg_1a266585). The `BdsDxe: starting Boot0002` hang was NEVER a host/
+  qemu/firmware regression: the x64 disks shipped an **AArch64 kernel ELF** —
+  the OS Makefile uses ONE shared `hobbyos.elf` target across arches
+  (`TARGET=hobbyos.elf`, `OBJ_DIR=obj/$(ARCH)`) and a leftover ARM `MODE=jsc`
+  build (03:39) made `make ARCH=intel` a no-op, so the ARM ELF (Machine=AArch64,
+  entry 0x40080000) was silently shipped as the x64 kernel; x86 Limine failed to
+  load it and spun in a `hlt`/IF=0 loop. Secondary: `-smp 4` fails AP-bringup
+  (TCG hang, KVM stack-dump) but `-smp 8` boots (matches the green unit-x64
+  tier). Fix = force the intel relink (`rm -f hobbyos.elf` outside the repo +
+  `make ARCH=intel`) + `-smp 8`. **Verified: jsc x64 smoke PASS (smp8 KVM/TCG/
+  pkg OVMF) + test262 C1 x64 40/40 PASS/0 FAIL/0 SKIP `T262 ALL-DONE`** — first
+  green x64 chunk since the freeze; chunks 2–13 should pass with the same script
+  fixes. Two fork-script diffs await controller apply (scratch/ovmf/diffs/) once
+  the WK-2 fork lane is clear; optional OS Makefile hardening (arch-keyed
+  target) recommended. Evidence: ~/.hermes/cache/scratch/ovmf/.
+
 - 2026-10-02 — **Wave 4 progress — WK-2: WebCore compile gate CLEAN, process
   layer in flight** (fork `browser/l8-wk1`). After CP-2 GO: WebKit2 ARM configure
   GREEN (fresh-cache recipe, all -D on CLI — `5692a0516b`); Skia + ALL of
