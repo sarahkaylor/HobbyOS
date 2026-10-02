@@ -21,4 +21,9 @@ void sync_lower_handler_c(struct trap_frame *tf);
  */
 void irq_lower_handler_c(struct trap_frame *tf);
 
+/* Watchdog caller-chain safety: true only for a plausible kernel-stack
+   top (cores that never powered on leave kernel_stack == 0 — the scans
+   must not dereference (top - 8) downwards). See trap.c. */
+int watchdog_stack_scan_ok(uint64_t top);
+
 #endif // TRAP_H

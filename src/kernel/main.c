@@ -455,6 +455,12 @@ void main(void) {
      jsc's stdout/stderr to the serial console. */
   uart_puts("Mode: JSC - Running WebKit jsc smoke (WK-1 M3)...\n");
   load_and_run_program_in_scheduler_args("JSC.BIN", -1, -1, -1, -1, "SMOKE.JS");
+#elif defined(KERNEL_MODE_BIGLOAD)
+  /* L8 x64-loadfix lane (repro): single ~30 MB v2 load before the
+     scheduler — mirrors MODE=jsc's first load without the WebKit assets.
+     The image never runs; the load itself is what must not fault. */
+  uart_puts("Mode: BIGLOAD - single 30MB v2 load repro...\n");
+  load_and_run_program_in_scheduler_args("BIG.BIN", -1, -1, -1, -1, 0);
 #else
   uart_puts("Mode: DESKTOP - Launching desktop...\n");
   load_and_run_program_in_scheduler("DESKTOP.BIN", -1, -1, -1, -1);

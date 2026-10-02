@@ -161,6 +161,11 @@ else ifeq ($(MODE),jsc)
   # runner (this tree stays self-contained — nothing here references the
   # fork's build outputs).
   CFLAGS += -DKERNEL_MODE_JSC
+else ifeq ($(MODE),bigload)
+  # L8 x64-loadfix lane: single-v2-load repro for the 30 MB image kernel
+  # page fault under KVM.  Boots ONLY BIG.BIN (a synthetic ~30 MB image)
+  # through the v2 loader before the scheduler; used for the KVM repro.
+  CFLAGS += -DKERNEL_MODE_BIGLOAD
 else ifeq ($(MODE),soak)
   # P8.2 (browser.md §6): the soak — the standard test wave plus TORTURE.BIN
   # running its bounded soak loop (28-minute cap; main.c's KERNEL_SOAK_WAVE
@@ -253,6 +258,15 @@ MMTEST_T_BIN = $(OBJ_DIR)/mmtest.bin
 # free storms, exec/wait cycles, poll on many fds, memory high-water.
 # TORTURE.BIN is 8.3-safe; MODE=soak (P8.2) feeds it the soak argument.
 TORTURE_T_BIN = $(OBJ_DIR)/torture_test.bin
+# L8 x64-loadfix lane (repro): a synthetic ~30 MB flat image (30,167,040
+# bytes = 7365 x 4 KiB pages, just over the M4 JSC.BIN size) generated at
+# build time.  BIG.BIN never executes; the v2 loader must be able to read
+# + map it on x64 KVM without a kernel page fault.
+BIG_BIN = $(OBJ_DIR)/big.bin
+$(BIG_BIN):
+	mkdir -p $(dir $@)
+	python3 -c "import sys; sys.stdout.buffer.write(b'HO_BIGLOAD_30MB\n' * 1885440)" > $@
+	@test -s $@ && echo "built $(BIG_BIN): $$(wc -c < $@) bytes"
 # l3-icu-wire (browser L6): ICU 78.3 target acceptance.  ICUSMK.BIN is
 # 8.3-safe and links the target ICU archive set data-FREE (libicuuc.a only:
 # u_strlen + UTF iteration + ASCII u_tolower + u_errorName + u_getVersion;
@@ -1513,7 +1527,7 @@ $(SQLTEST_BIN): $(OBJ_DIR)/sqlite_test.o $(OBJ_DIR)/sqlite_os.o $(OBJ_DIR)/sqlit
 	$(LD) -T src/user/linker.ld -e _start --gc-sections -o $(OBJ_DIR)/sqltest.elf $(OBJ_DIR)/sqlite_test.o $(OBJ_DIR)/sqlite_os.o $(OBJ_DIR)/sqlite3.o $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/sqltest.elf $(SQLTEST_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -1585,6 +1599,7 @@ endif
 	$(MCOPY) -i disk.img $(MMTEST_T_BIN) ::/MMTEST.BIN
 	$(MCOPY) -i disk.img $(SQLTEST_BIN) ::/SQLTEST.BIN
 	$(MCOPY) -i disk.img $(TORTURE_T_BIN) ::/TORTURE.BIN
+	$(MCOPY) -i disk.img $(BIG_BIN) ::/BIG.BIN
 	$(MCOPY) -i disk.img $(HELLO_BIN) ::/HELLO.BIN
 	$(MCOPY) -i disk.img $(SH_BIN) ::/SH.BIN
 	$(MCOPY) -i disk.img $(LS_BIN) ::/LS.BIN
@@ -2460,6 +2475,9 @@ unit_tests_arm:
 unit_tests_intel:
 	$(MAKE) ARCH=intel MODE=unit_tests run
 
+bigload_intel:
+	$(MAKE) ARCH=intel MODE=bigload run
+
 desktop_test_arm:
 	ARCH=arm python3 ./run_desktop_test.py
 
@@ -2503,4 +2521,4 @@ style-diff:
 style-test:
 	python3 tools/test_cstyle.py
 
-.PHONY: all clean run memtest fileio_test fork_test tests test unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test
+.PHONY: all clean run memtest fileio_test fork_test tests test unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test bigload_intel

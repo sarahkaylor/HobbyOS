@@ -1711,6 +1711,16 @@ static struct trap_frame wd_last_frame[MAX_CPUS];
 static volatile uint64_t wd_last_tfp[MAX_CPUS]; /* stack addr of that frame */
 static volatile uint64_t wd_ticks[MAX_CPUS];     /* interrupt count per core */
 
+/* Is `top` a plausible kernel-stack address for the watchdog's caller-chain
+   scans?  Cores that never powered on leave cpu_locals[c].kernel_stack == 0
+   (or stale), and scanning downward from (top - 8) would dereference
+   negative addresses and fault the watchdog itself (x64 KVM Vector 14 at
+   CR2 = -8 while a long v2 load keeps the console silent).  Mirrors the
+   guard already applied to wd_last_tfp below. */
+int watchdog_stack_scan_ok(uint64_t top) {
+  return top >= 0x70000000ULL && top < 0x75000000ULL;
+}
+
 static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
   extern volatile uint64_t uart_last_activity_ms;
   extern volatile uint64_t lock_wait_addr[MAX_CPUS];
@@ -1829,18 +1839,23 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
       }
     }
     uart_puts_raw2("\n");
-    /* Full stack chain: every .text return address, deepest first. */
+    /* Full stack chain: every .text return address, deepest first.
+       Guard against cores that never powered on (kernel_stack == 0): the
+       loop start (top - 8) would dereference negative addresses and fault
+       the very watchdog that is supposed to report the stall. */
     uint64_t top = cpu_locals[c].kernel_stack;
     int hits = 0;
     uart_puts_raw2("  stk");
     print_int_raw2((int)c);
     uart_puts_raw2(":");
-    for (uint64_t a = top - 8; a > (top - 24576) && hits < 20; a -= 8) {
-      uint64_t v = *(volatile uint64_t *)a;
-      if (v >= 0x70000000ULL && v < 0x7001c000ULL) {
-        uart_puts_raw2(" ");
-        uart_print_hex_raw2(v);
-        hits++;
+    if (watchdog_stack_scan_ok(top)) {
+      for (uint64_t a = top - 8; a > (top - 24576) && hits < 20; a -= 8) {
+        uint64_t v = *(volatile uint64_t *)a;
+        if (v >= 0x70000000ULL && v < 0x7001c000ULL) {
+          uart_puts_raw2(" ");
+          uart_print_hex_raw2(v);
+          hits++;
+        }
       }
     }
     uart_puts_raw2("\n");
@@ -1852,6 +1867,14 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
   for (uint32_t c = 1; c < MAX_CPUS; c++) {
     if (now - wd_last_seen_ms[c] < 60000) continue;
     uint64_t top = cpu_locals[c].kernel_stack;
+    /* Same guard as the WD2 stall dump: a core that never powered on has
+       kernel_stack == 0, and the scan below would read (top - 8) = -8. */
+    if (!watchdog_stack_scan_ok(top)) {
+      uart_puts_raw("  CSTK cpu");
+      print_int_raw((int)c);
+      uart_puts_raw(": (uninitialized kstack, skip)\n");
+      continue;
+    }
     uint64_t last_hit = 0;
     int hits = 0;
     uart_puts_raw("  CSTK cpu");
@@ -2068,6 +2091,15 @@ void general_interrupt_handler(struct trap_frame *tf) {
       uart_print_hex_raw(tf->regs[4]);
       uart_puts_raw("  RBP: ");
       uart_print_hex_raw(tf->regs[6]);
+      uart_puts_raw("\n");
+      uart_puts_raw("  ERR: ");
+      uart_print_hex_raw(tf->error_code);
+      uart_puts_raw("  R8:  ");
+      uart_print_hex_raw(tf->regs[7]);
+      uart_puts_raw("  R9:  ");
+      uart_print_hex_raw(tf->regs[8]);
+      uart_puts_raw("  R10: ");
+      uart_print_hex_raw(tf->regs[9]);
       uart_puts_raw("\n");
       uart_puts_raw("  CPU: ");
       print_int_raw((int)get_cpuid());

@@ -184,10 +184,34 @@ static void test_trap_data_abort(void) {
   }
 }
 
+/* Regression (L8 x64-loadfix): the watchdog's caller-chain scans read
+   downward from cpu_locals[c].kernel_stack.  A core that never powered on
+   (e.g. -smp 4 under x64 KVM: cores 4-7 time out) leaves kernel_stack == 0,
+   so the scan would dereference (top - 8) = -8 and fault the watchdog mid-
+   dump with Vector 14 / CR2 = -8 during a long v2 load.  The guard must
+   reject such tops instead of scanning them. */
+static void test_watchdog_stack_scan_guard(void) {
+  tests_run++;
+  uart_puts("  Running test_watchdog_stack_scan_guard...\n");
+
+  /* Never-booted core: kernel_stack == 0 -> must NOT scan. */
+  EXPECT_EQ(watchdog_stack_scan_ok(0), 0);
+  /* Stale garbage below the kernel image -> must NOT scan. */
+  EXPECT_EQ(watchdog_stack_scan_ok(0x100000ULL), 0);
+  EXPECT_EQ(watchdog_stack_scan_ok(0x6FFFFFFFULL), 0);
+  /* Above the kernel/stack region -> must NOT scan. */
+  EXPECT_EQ(watchdog_stack_scan_ok(0x75000000ULL), 0);
+  EXPECT_EQ(watchdog_stack_scan_ok(0xFFFFFFFFFFFFFFFFULL), 0);
+  /* Booted cores: tops live inside the kernel region -> scan allowed. */
+  EXPECT_EQ(watchdog_stack_scan_ok(0x70000000ULL), 1);
+  EXPECT_EQ(watchdog_stack_scan_ok(0x74F08BF0ULL), 1);
+}
+
 void trap_test_suite(void) {
   uart_puts("trap_test_suite:\n");
   test_trap_unknown_syscall();
   test_trap_sys_get_cpuid();
+  test_watchdog_stack_scan_guard();
 
   // The following tests simulate EL0 exceptions and trigger the scheduler.
   // However, because they are called from EL1 C code with a mock trap frame,
