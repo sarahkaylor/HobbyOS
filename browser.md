@@ -869,12 +869,13 @@ HobbyOS arches as far as the current P-stage allows (this gate is *incremental*
       (`browser/l3-p8` `c130994`..; suite reframed as 64 create/join cycles
       in bounded bursts — see §11; wave: 8/8 PASS, 0 FAIL tokens).
 - [x] **P8.2 Soak** — 30-minute combined run, no panics/leaks beyond bounds;
-      numbers recorded in §11. — **Bounded run recorded in §11; blocked by a
-      reproducible kernel freeze at ~480 rounds (documented, follow-up lane).**
+      numbers recorded in §11. — **Done**: the ~480-round freeze was
+      root-caused and fixed (`30e0089`; lane + follow-up entries in §11);
+      post-fix merged-tip soak 806 rounds, violations=0, clean halt.
 
 **Gate P8:** green both arches; §11 updated with the numbers. *This is the
-"OS is ready for WebKit" evidence.*  — **P8.1 green; P8.2 numbers + freeze
-finding in §11.**
+"OS is ready for WebKit" evidence.*  — **Met**: P8.1 green; P8.2 numbers +
+freeze fix (incl. the merged-tip 806-round soak) in §11.
 
 ### NS — NetSurf track  *(Track A — optional contingency, **dormant by default**; start only if invoked. Track B does not depend on it.)*
 
@@ -1585,6 +1586,47 @@ curl -sI https://lite.cnn.com | grep -i content-length
     P8.1/P8.2 ticked with the soak caveat; x64 wave = the re-characterization
     entry above (6-copy KVM battery: all-idle stall 6/6, SQLTEST reach,
     MMTEST FAIL 11 6/6, unit-x64 293/0).
+
+- 2026-10-01 — **Wave 3 follow-up — the P8 soak freeze: root-caused, fixed,
+  merged** (`browser/l2-clonefix` → `30e0089`; reproduced 3/3 at ~round
+  483–488 / fork seq ~5905). **Root cause (coredump-proven)**: the frame pool
+  `[0x70000000,0x240000000)` never reserved the kernel image
+  (`[phys(_start), phys(__stack_top)) = [0x23A680000, 0x23F2DE000)`); the
+  forward allocation hint crosses into the image after ~1,877,632 frames of
+  loader/fork churn, and `frame_alloc_zeroed` (reached from
+  `vm_as_clone_into` → `vm_arch_map`'s L3 allocation) zeroed live kernel
+  frames. The first image page holds `_start` + the exception vector table:
+  once wiped, every exception (next timer tick onward, any CPU) jumped into
+  zeroed memory — a silent, lock-free, unrecoverable spin (~460 % host CPU,
+  zero LOCKDIAG — matches all observations). Coredump forensics: exactly
+  nine set bits inside the image range in the frame bitmap = the child's last
+  nine frames `0x23a680000..0x23a688000`; the frozen allocation
+  `0x23a688000` is the page containing `frame_alloc_zeroed`'s own code (the
+  CPU was zeroing the page it executed from). The clone's region i=1 is the
+  1 GiB HEAP (region i=0/IMAGE had completed).
+  **Fix**: `frame_reserve_range(lo, hi)` (`frame.c`/`frame.h`) reserves whole
+  32 MiB blocks (preserving the legacy block layer's free/claimed partition),
+  called from `frame_init` for `[phys(_start), phys(__stack_top) + 64 KiB)`
+  on both arches; the boot line now reports `[FRAME] … reserved=24576`
+  (96 MiB, 0.24 % of the pool). **Regression test**:
+  `frame_test_image_reserved` drives the frontier from the pool bottom to the
+  reserved region with 2048-frame contig runs (the exact soak churn pattern),
+  asserting no allocation lands inside the image, the edge is reached, and
+  the next allocation wraps ("a wall, not a hole"); green both arches.
+  **Receipts**: pre-fix 3/3 freeze ≈ round 485; post-fix lane run **831
+  rounds, violations=0**, clean halt; merged-tip local battery: host 0-fail,
+  unit-arm **292/0**, unit-x64 **294/0** (each +1 = the new regression test),
+  wave 0 FAIL + halt + 17 summaries + `TORTURE` 8/8; merged-tip soak **806
+  rounds, violations=0** (thr_created=51584, exec_ok=9672, fdpass_bad=0,
+  exec_rejected=0), `System halt from CPU 7.`; VM host + unit-arm green
+  (unit-x64/test-arm reruns pending VM disk cleanup). Lane gate: host /
+  unit-arm / unit-x64 / wave all PASS pre-merge. TEMP triage stripped
+  (`1028fb1` reverts `c85f971`; zero TEMP symbols).
+  **Separate open issue (risk-noted)**: sustained process-slot starvation —
+  soak attempts can still wedge at low rounds under the `no free process
+  slots` flood (3/4 pre-fix attempts; merged-tip attempt #1 wedged at
+  rounds=1, attempt #2 clean at 806). Fix direction: bound the loader's
+  create-retry and/or reclaim dead-parent zombies.
 
 - 2026-10-01 — **Wave 1f (part 1) — batteries: GREEN both machines at `a7b7330`** —
   first merged-tip attempt, no defects found beyond the pre-battery fixup below.
