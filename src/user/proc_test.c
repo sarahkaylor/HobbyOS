@@ -22,10 +22,13 @@ static int checks_run = 0;
    a timing assumption while the table is saturated.  sysinfo cmd 3
    returns the live non-thread process count; >= 55 of 63 means the
    window is still open. */
-static int table_saturated(void) {
+static int table_live(void) {
   struct sys_procinfo info[64];
-  int live = sysinfo(3, info, (int)sizeof info);
-  return live >= 55;
+  return sysinfo(3, info, (int)sizeof info);
+}
+
+static int table_saturated(void) {
+  return table_live() >= 55;
 }
 
 static void con_int(long v) {
@@ -150,13 +153,21 @@ int main(void) {
   } else {
     int status = 0;
     check("fork #2 child id", child != me, 1);
+    /* Sample the table around the probe: a parent starved past the
+       child's 500 ms window can drain the table before a later sample,
+       so catch the pulse before AND after the WNOHANG. */
+    int wlive = table_live();
     int r = waitpid(child, &status, WNOHANG);
+    {
+      int lv = table_live();
+      if (lv > wlive) wlive = lv;
+    }
     if (r == 0) {
       /* normal path: the child was still alive for the WNOHANG probe */
       r = waitpid(child, &status, 0); /* blocks ~0.5s */
       check("blocking waitpid reaps", r, child);
       check("WEXITSTATUS == 1", WIFEXITED(status) ? WEXITSTATUS(status) : -1, 1);
-    } else if (r == child && table_saturated()) {
+    } else if (r == child && (wlive >= 55 || table_saturated())) {
       /* Documented wave class: the parent was starved past the child's
          500 ms window while the table was full, so the WNOHANG probe
          reaped an already-dead child.  The kernel is correct; skip the
