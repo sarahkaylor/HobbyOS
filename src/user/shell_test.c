@@ -30,10 +30,15 @@ int my_strstr(const char *haystack, const char *needle) {
 }
 
 int read_until(int fd, char *buf, int max_len, const char *pattern,
-               int deadline_ms) {
+               int deadline_ms, int *live_peak) {
   int len = 0;
   long t0 = deadline_ms > 0 ? sysinfo(1, 0, 0) : 0;
   while (len < max_len - 1) {
+    if (live_peak) {
+      struct sys_procinfo info2[64];
+      int lv = sysinfo(3, info2, (int)sizeof info2);
+      if (lv > *live_peak) *live_peak = lv;
+    }
     if (deadline_ms > 0) {
       struct pollfd pfd;
       pfd.fd = fd;
@@ -97,7 +102,7 @@ static int run_cmd_check(int in, int out, const char *cmd,
     sample_peak(&peak);
     write(in, cmd, clen);
     sample_peak(&peak);
-    if (read_until(out, buf, bufsz, "$ ", 8000) < 0)
+    if (read_until(out, buf, bufsz, "$ ", 8000, &peak) < 0)
       timed_out = 1;
     sample_peak(&peak);
     int all = 1;
@@ -235,13 +240,13 @@ int main(void) {
   char buf[1024];
 
   // 1. Read greeting and prompt
-  read_until(out_p[0], buf, sizeof(buf), "$ ", 0);
+  read_until(out_p[0], buf, sizeof(buf), "$ ", 0, 0);
   print_console("[TEST] Initial prompt read successfully.\n");
 
   // 2. Send 'help'
   print_console("[TEST] Sending 'help' command...\n");
   write(in_p[1], "help\n", 5);
-  read_until(out_p[0], buf, sizeof(buf), "$ ", 0);
+  read_until(out_p[0], buf, sizeof(buf), "$ ", 0, 0);
   if (!my_strstr(buf, "HobbyOS Bash-like Shell")) {
     print_console("shell_test: FAILED help validation\n");
     return 1;
@@ -251,7 +256,7 @@ int main(void) {
   // 3. Send 'cd /home'
   print_console("[TEST] Sending 'cd /home' command...\n");
   write(in_p[1], "cd /home\n", 9);
-  read_until(out_p[0], buf, sizeof(buf), "$ ", 0);
+  read_until(out_p[0], buf, sizeof(buf), "$ ", 0, 0);
   if (!my_strstr(buf, "user@hobbyos:/home$")) {
     print_console("shell_test: FAILED cd prompt validation\n");
     return 1;
@@ -295,7 +300,7 @@ int main(void) {
   // 5a. Send 'echo hello'
   print_console("[TEST] Sending 'echo hello' command...\n");
   write(in_p[1], "echo hello\n", 11);
-  read_until(out_p[0], buf, sizeof(buf), "$ ", 0);
+  read_until(out_p[0], buf, sizeof(buf), "$ ", 0, 0);
   if (!my_strstr(buf, "hello")) {
     print_console("shell_test: FAILED echo validation\n");
     return 1;
@@ -305,7 +310,7 @@ int main(void) {
   // 5b. Send 'clear'
   print_console("[TEST] Sending 'clear' command...\n");
   write(in_p[1], "clear\n", 6);
-  read_until(out_p[0], buf, sizeof(buf), "$ ", 0);
+  read_until(out_p[0], buf, sizeof(buf), "$ ", 0, 0);
   if (!my_strstr(buf, "\f")) {
     print_console("shell_test: FAILED clear validation\n");
     return 1;
@@ -315,7 +320,7 @@ int main(void) {
   // 5c. Send 'echo redirected > OUT.TXT'
   print_console("[TEST] Sending 'echo redirected > OUT.TXT' command...\n");
   write(in_p[1], "echo redirected > OUT.TXT\n", 26);
-  read_until(out_p[0], buf, sizeof(buf), "$ ", 0);
+  read_until(out_p[0], buf, sizeof(buf), "$ ", 0, 0);
   print_console("[TEST] Redirection command sent.\n");
 
   // 5d. Send 'cat OUT.TXT'

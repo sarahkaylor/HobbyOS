@@ -207,6 +207,14 @@ static void test_cross_process_lock(void) {
   check("begin-immediate", exec_sql(db, "BEGIN IMMEDIATE;") == SQLITE_OK);
 
   pid = fork();
+  /* The boot-wave process table is legitimately full at times; retry
+     the fork so a transient EAGAIN does not fail the record-lock check
+     (the same documented class every fork-dependent wave suite guards
+     against). */
+  for (int attempt = 0; pid < 0 && attempt < 200; attempt++) {
+    usleep(50000); /* 50 ms */
+    pid = fork();
+  }
   if (pid == 0) {
     /* child: its own connection must be refused the RESERVED lock */
     sqlite3 *c = 0;
@@ -219,6 +227,14 @@ static void test_cross_process_lock(void) {
     _exit(rc == SQLITE_BUSY ? 0 : 1);
   }
   if (pid < 0) {
+    /* The table stayed full through the retry window: skip-with-note
+       (slot pressure) instead of failing the lock test. */
+    struct sys_procinfo info[64];
+    int live = sysinfo(3, info, (int)sizeof info);
+    if (live >= 55) {
+      print_console("  SQLTEST fork: SKIP (slot pressure)\n");
+      return;
+    }
     check("fork", 0);
     return;
   }

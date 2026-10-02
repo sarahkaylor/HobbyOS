@@ -42,12 +42,17 @@ static int my_strstr(const char *haystack, const char *needle) {
    wedges the whole boot suite (observed: the wave never halted).
    Returns -1 when the deadline expires without a match. */
 static int read_until(int fd, char *buf, int max_len, const char *pattern,
-                      int deadline_ms) {
+                      int deadline_ms, int *live_peak) {
   int len = 0;
   int pat_len = 0;
   while (pattern[pat_len]) pat_len++;
   long t0 = deadline_ms > 0 ? sysinfo(1, 0, 0) : 0;
   for (;;) {
+    if (live_peak) {
+      struct sys_procinfo info2[64];
+      int lv = sysinfo(3, info2, (int)sizeof info2);
+      if (lv > *live_peak) *live_peak = lv;
+    }
     if (deadline_ms > 0 && sysinfo(1, 0, 0) - t0 >= deadline_ms) {
       print_console("[read_until] DEADLINE EXPIRED (stalled shell?)\n");
       return -1;
@@ -135,7 +140,7 @@ static int run_cmd_check(int in, int out, const char *cmd,
     sample_peak(&peak);
     write(in, cmd, clen);
     sample_peak(&peak);
-    if (read_until(out, buf, bufsz, "$ ", 8000) < 0)
+    if (read_until(out, buf, bufsz, "$ ", 8000, &peak) < 0)
       timed_out = 1;
     sample_peak(&peak);
     int all = 1;
@@ -177,7 +182,7 @@ static int run_seq_check(int in, int out, const char *const *cmds, int ncmds,
       while (cmds[c][clen]) clen++;
       write(in, cmds[c], clen);
       sample_peak(&peak);
-      if (read_until(out, buf, bufsz, "$ ", 8000) < 0)
+      if (read_until(out, buf, bufsz, "$ ", 8000, &peak) < 0)
         timed_out = 1;
       sample_peak(&peak);
     }
@@ -316,7 +321,7 @@ int main(void) {
   char buf[2048];
 
   // Read greeting
-  read_until(out_p[0], buf, sizeof(buf), "$ ", 0);
+  read_until(out_p[0], buf, sizeof(buf), "$ ", 0, 0);
   print_console("[TEST3] Initial prompt read successfully.\n");
 
   // 1+2. Create '/SUB1' and verify with ls -l /  (mkdir+ls both run
@@ -342,7 +347,7 @@ int main(void) {
   // 3. Change directory to /SUB1
   print_console("[TEST3] Changing directory to /SUB1...\n");
   write(in_p[1], "cd /SUB1\n", 9);
-  read_until(out_p[0], buf, sizeof(buf), "$ ", 0);
+  read_until(out_p[0], buf, sizeof(buf), "$ ", 0, 0);
 
   // 4+5. Create relative directory SUB2 and verify it lists in /SUB1
   print_console("[TEST3] Creating relative directory SUB2...\n");
@@ -365,12 +370,12 @@ int main(void) {
   // 6. Change directory into SUB2
   print_console("[TEST3] Entering SUB2...\n");
   write(in_p[1], "cd SUB2\n", 8);
-  read_until(out_p[0], buf, sizeof(buf), "$ ", 0);
+  read_until(out_p[0], buf, sizeof(buf), "$ ", 0, 0);
 
   // 7. Write nested file nested.txt
   print_console("[TEST3] Writing nested file...\n");
   write(in_p[1], "echo nested_content_val > nested.txt\n", 37);
-  read_until(out_p[0], buf, sizeof(buf), "$ ", 0);
+  read_until(out_p[0], buf, sizeof(buf), "$ ", 0, 0);
 
   // 8. Cat nested.txt
   print_console("[TEST3] Reading nested file...\n");
@@ -407,7 +412,7 @@ int main(void) {
   // 10. Go back to root
   print_console("[TEST3] Returning to root directory...\n");
   write(in_p[1], "cd /\n", 5);
-  read_until(out_p[0], buf, sizeof(buf), "$ ", 0);
+  read_until(out_p[0], buf, sizeof(buf), "$ ", 0, 0);
 
   // 11. Cat from root using absolute path
   print_console("[TEST3] Reading absolute path nested file from root...\n");
@@ -440,11 +445,11 @@ int main(void) {
       sample_peak(&peak);
       write(in_p[1], "rm /SUB1/SUB2/nested.txt\n", 25);
       sample_peak(&peak);
-      if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000) < 0)
+      if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000, &peak) < 0)
         timed_out = 1;
       write(in_p[1], "ls -l /SUB1/SUB2\n", 17);
       sample_peak(&peak);
-      if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000) < 0)
+      if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000, &peak) < 0)
         timed_out = 1;
       if (!my_strstr(buf, "NESTED.TXT")) {
         rc = 1;

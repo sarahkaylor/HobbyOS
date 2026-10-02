@@ -30,10 +30,15 @@ static int my_strstr(const char *haystack, const char *needle) {
 }
 
 static int read_until(int fd, char *buf, int max_len, const char *pattern,
-                      int deadline_ms) {
+                      int deadline_ms, int *live_peak) {
   int len = 0;
   long t0 = deadline_ms > 0 ? sysinfo(1, 0, 0) : 0;
   while (len < max_len - 1) {
+    if (live_peak) {
+      struct sys_procinfo info2[64];
+      int lv = sysinfo(3, info2, (int)sizeof info2);
+      if (lv > *live_peak) *live_peak = lv;
+    }
     if (deadline_ms > 0) {
       struct pollfd pfd;
       pfd.fd = fd;
@@ -96,7 +101,7 @@ static int run_cmd_check(int in, int out, const char *cmd,
     sample_peak(&peak);
     write(in, cmd, clen);
     sample_peak(&peak);
-    if (read_until(out, buf, bufsz, "$ ", 8000) < 0)
+    if (read_until(out, buf, bufsz, "$ ", 8000, &peak) < 0)
       timed_out = 1;
     sample_peak(&peak);
     int all = 1;
@@ -234,7 +239,7 @@ int main(void) {
   char buf[2048];
 
   // Read greeting
-  read_until(out_p[0], buf, sizeof(buf), "$ ", 0);
+  read_until(out_p[0], buf, sizeof(buf), "$ ", 0, 0);
   print_console("[TEST2] Initial prompt read successfully.\n");
 
   // 1. Test ps
@@ -313,31 +318,31 @@ int main(void) {
       sample_peak(&peak);
       write(in_p[1], "echo file_content > TEMP.TXT\n", 29);
       sample_peak(&peak);
-      if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000) < 0)
+      if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000, &peak) < 0)
         timed_out = 1;
       sample_peak(&peak);
 
       write(in_p[1], "mv TEMP.TXT TEMP2.TXT\n", 22);
       sample_peak(&peak);
-      if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000) < 0)
+      if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000, &peak) < 0)
         timed_out = 1;
       sample_peak(&peak);
 
       write(in_p[1], "cp TEMP2.TXT TEMP3.TXT\n", 23);
       sample_peak(&peak);
-      if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000) < 0)
+      if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000, &peak) < 0)
         timed_out = 1;
       sample_peak(&peak);
 
       write(in_p[1], "rm TEMP2.TXT\n", 13);
       sample_peak(&peak);
-      if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000) < 0)
+      if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000, &peak) < 0)
         timed_out = 1;
       sample_peak(&peak);
 
       write(in_p[1], "cat TEMP3.TXT\n", 14);
       sample_peak(&peak);
-      if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000) < 0)
+      if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000, &peak) < 0)
         timed_out = 1;
       sample_peak(&peak);
       if (my_strstr(buf, "file_content")) {
@@ -420,7 +425,7 @@ int main(void) {
 
   // Cleanup
   write(in_p[1], "rm SORT.TXT TEMP3.TXT\n", 22);
-  if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000) < 0)
+  if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000, 0) < 0)
     print_console("[TEST2] Cleanup rm produced no prompt; continuing.\n");
 
   close(in_p[1]);
