@@ -40,9 +40,18 @@ int main(int argc, char **argv) {
     return v ? p_atoi(v) : 99;
   }
   if (argc >= 2 && argv[1] && argv[1][0] == 's' && argv[1][1] == 'p') {
-    int pid = spawn2("/PROCCHLD.BIN", -1, -1, -1, "env");
+    /* The grandchild spawn rides the same wave slot-pressure window as
+       every other boot child (the PCB table is legitimately full); retry
+       in-process so a transient starve does not look like a P6.3 env
+       regression to PROC_TEST. */
+    int pid = -1;
+    for (int attempt = 0; attempt < 200 && pid < 0; attempt++) {
+      pid = spawn2("/PROCCHLD.BIN", -1, -1, -1, "env");
+      if (pid < 0)
+        usleep(50000); /* 50 ms; up to ~10 s */
+    }
     int st = 0;
-    if (pid < 0) return 90;
+    if (pid < 0) return 90; /* table stayed full: PROC_TEST classifies */
     if (waitpid(pid, &st, 0) != pid) return 91;
     return WIFEXITED(st) ? WEXITSTATUS(st) : 92;
   }
