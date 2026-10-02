@@ -2678,7 +2678,7 @@ void start_scheduler(void) {
          soak continues with zero violations; the parent's waitpid
          completion then reaps the EXITED slot. */
       if (dispose_slot > 0)
-        group_teardown(&proc_table[dispose_slot], 97);
+        group_teardown(process_group(&proc_table[dispose_slot]), 97);
     }
 
     /* Diagnostic dump (monotone trigger so concurrent CPUs racing the
