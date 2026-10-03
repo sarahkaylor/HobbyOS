@@ -2121,6 +2121,30 @@ void general_interrupt_handler(struct trap_frame *tf) {
       } else {
         uart_puts_raw("  STACK: skipped (RSP outside identity-mapped RAM)\n");
       }
+      /* WK-3 (draft 0007, x64 mirror of the ARM EL1 fix): a kernel-mode
+         #PF (vector 14) whose faulting address references USER address
+         space while a process is current is the process's bug (the WK-3
+         fork's unclamped exit-diag stack walk read one VA past the
+         main-stack region during teardown).  The kernel only touches user
+         v2 pages after sys_user_range/vm_touch pre-commits them in the
+         process AS (CR3 = process AS), so a kernel-mode #PF inside the
+         user window is a real overrun: kill the offending process cleanly
+         instead of halting the whole OS.  Only #PF has a trustworthy
+         faulting address (CR2); every other kernel-mode vector keeps the
+         raw dump + halt below. */
+      if (tf->vector == 14 && cur) {
+        uint64_t kcr2;
+        __asm__ volatile("mov %%cr2, %0" : "=r"(kcr2));
+        if (kcr2 >= USER_VA_BASE) {
+          uart_puts_raw("[KERNEL] Kernel-mode #PF in user address space -> killing pid=");
+          print_int_raw(cur->pid);
+          uart_puts_raw("\n");
+          process_fault_exit(tf, 11); /* SIGSEGV status byte */
+          /* process_fault_exit -> process_exit -> schedule() never
+             returns (it resumes another process or idles forever). */
+          while (1);
+        }
+      }
       while (1);
     }
   }

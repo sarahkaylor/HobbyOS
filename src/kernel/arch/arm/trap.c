@@ -1528,6 +1528,34 @@ void sync_handler_c(struct trap_frame *tf) {
     }
     uart_puts("\n");
   }
+
+  /* WK-3 (draft 0007): an EL1 data/instruction abort that references USER
+     address space while a process context is current is the process's bug,
+     not the OS's: the WK-3 fork's unclamped exit-diag stack walk read one
+     VA past the 8 MiB main-stack region (window top) during teardown ->
+     EC=0x25 data abort, translation-level-1.  Print the diagnostic above,
+     then kill the offending process cleanly instead of halting the whole
+     OS.  Faults at kernel addresses (below USER_VA_BASE), or with no
+     current process, stay FATAL and spin below. */
+  {
+    uint64_t ffar;
+    __asm__ volatile("mrs %0, far_el1" : "=r"(ffar));
+    struct process *pfp = current_process();
+    if ((ec == 0x21 || ec == 0x25) && pfp && ffar >= USER_VA_BASE) {
+      uart_puts("[KERNEL] EL1 fault in user address space -> killing pid=");
+      print_int(pfp->pid);
+      uart_puts(" ");
+      uart_puts(pfp->name);
+      uart_puts("\n");
+      spinlock_release_irqrestore(&fatal_lock, flags);
+      process_fault_exit(tf, 11); /* SIGSEGV status byte */
+      /* process_fault_exit -> process_exit -> schedule() never returns
+         (it either resumes another process or idles forever), so this is
+         unreachable; keep a spin as a guard. */
+      while (1)
+        ;
+    }
+  }
   spinlock_release_irqrestore(&fatal_lock, flags);
   while (1)
     ;
