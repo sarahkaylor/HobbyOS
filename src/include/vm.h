@@ -30,7 +30,18 @@
 
 /* Slot offsets from USER_VA_BASE (section 1.2). */
 #define USER_IMG_OFF 0x000000000ULL
-#define USER_IMG_SIZE 0x04000000ULL /* 64 MiB */
+/* WK-3 (draft 0004): image cap raised 64 MiB -> 128 MiB.  The flat WebKit
+ * WebProcess raw image is 80.2 MiB (llvm-objcopy -O binary of the 139 MB
+ * ELF), over the old cap; the v2 loader's single image-size gate is
+ * `fsize > USER_IMG_SIZE` (program_loader.c v2_map_image), so this one
+ * define is the only loader change.  The IMAGE slot starts at +0 in the
+ * 32 GiB v2 window and the HEAP slot at +1 GiB (USER_HEAP_OFF), so a
+ * 128 MiB image overlaps nothing.  FAT16 8 KiB clusters cap files at
+ * 512 MiB (65536 x 8 KiB); the ~80.2 MiB image + fixtures fit a 128 MiB
+ * disk.  The kernel-image physical reservation (30e0089) is kernel-side
+ * and untouched; the ~20.5k frames for 80 MiB fit the 1.9M-frame ARM pool.
+ */
+#define USER_IMG_SIZE 0x08000000ULL /* 128 MiB */
 #define USER_HEAP_OFF 0x040000000ULL
 #define USER_HEAP_SIZE 0x040000000ULL /* 1 GiB */
 #define USER_MMAP_OFF 0x080000000ULL
