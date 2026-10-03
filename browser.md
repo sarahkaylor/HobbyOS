@@ -1453,6 +1453,27 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-10-02 — **OS-side lane: 3 root causes, 3 draft patches (0006/0007/0008).**
+  (a) EL1 "double-fault" on process teardown = the WK-3 fork's unclamped
+  exit-diag stack walk read one VA past the 8 MiB main-stack region → EL1 data
+  abort EC=0x25 (translation-level-1), unrecoverable in sync_handler_c → FATAL
+  spin; EC=0 FATALs were `halt()` `hlt` raised as EC=0 without `-semihosting`.
+  Proof: instruction-level disassembly of the fork's own ELF (ELR
+  0xBA69AFEC). Patch 0007 = recoverable EL1 fault → clean process kill.
+  (b) ARM owner-liveness heartbeat only refreshed on idle → an idle reaper
+  DISPOSES a still-running single process after a >2 s user-mode stretch
+  (caught mid-malloc-ladder on-device) — likely the run-22 IDLESTUCK wedge
+  class. Patch 0008 = refresh `cpu_heartbeat_ms` on every claim in
+  `schedule()`.
+  (c) Loader image gate was only `fsize <= USER_IMG_SIZE` with no span-vs-heap
+  check (matters once 0004 raises the cap to 128 MiB). Patch 0006 adds
+  `USER_IMG_BASE + img_len > USER_HEAP_BASE_V2 → reject` in `v2_map_image`.
+  Budget verdict: NO limit raise needed (in-OS ladder 1…256 MiB malloc +
+  256 MiB mmap + 192 MiB brk all green on-device). All three patches
+  `git apply --check` clean vs the OS repo; evidence + repros under
+  ~/.hermes/cache/scratch/ostear/. OS repo untouched (drafts for controller
+  apply after battery).
+
 - 2026-10-02 — **WK-2 GATE MET — three ARM process binaries LINK.** All three
   targets link RC=0 (fork `browser/l8-wk1`, finalization lane deleg_de1d1eaf):
   WebProcess 139,108,664 B / NetworkProcess 135,088,920 B / HobbyOS-UIProcess
