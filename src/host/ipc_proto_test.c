@@ -229,8 +229,10 @@ static void test_fit_flags_poll(void) {
   check(ipc_msg_flags_ok(K_MSG_CMSG_CLOEXEC, 1) == 0, "recv: CMSG_CLOEXEC ok");
   check(ipc_msg_flags_ok(K_MSG_DONTWAIT | K_MSG_CMSG_CLOEXEC, 1) == 0,
         "recv: DONTWAIT|CMSG_CLOEXEC ok");
-  check(ipc_msg_flags_ok(K_MSG_NOSIGNAL, 1) == -EINVAL,
-        "recv: NOSIGNAL -> EINVAL (send-only)");
+  /* 0005: NOSIGNAL accepted on recv too (Linux parity -- ignored on recv). */
+  check(ipc_msg_flags_ok(K_MSG_NOSIGNAL, 1) == 0, "recv: NOSIGNAL ok");
+  check(ipc_msg_flags_ok(K_MSG_DONTWAIT | K_MSG_NOSIGNAL, 1) == 0,
+        "recv: DONTWAIT|NOSIGNAL ok");
   check(ipc_msg_flags_ok(K_MSG_PEEK, 1) == -EOPNOTSUPP,
         "recv: PEEK -> EOPNOTSUPP (no opaque peek in P4)");
 

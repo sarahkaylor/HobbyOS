@@ -88,7 +88,11 @@ uint32_t ipc_cmsg_fit(uint32_t controllen, uint32_t nfds) {
 
 int ipc_msg_flags_ok(int flags, int recv) {
   if (flags & K_MSG_PEEK) return -EOPNOTSUPP;
-  int allowed = recv ? (K_MSG_DONTWAIT | K_MSG_CMSG_CLOEXEC)
+  /* WK-3 (draft 0005): accept K_MSG_NOSIGNAL on recv too.  WebKit2's unix
+     Connection sends AND receives with MSG_NOSIGNAL and relies on
+     O_NONBLOCK -> EAGAIN, so recvmsg EINVAL'd and killed the IPC read
+     pump.  Linux parity: MSG_NOSIGNAL is ignored on recv. */
+  int allowed = recv ? (K_MSG_DONTWAIT | K_MSG_CMSG_CLOEXEC | K_MSG_NOSIGNAL)
                      : (K_MSG_DONTWAIT | K_MSG_NOSIGNAL);
   if (flags & ~allowed) return -EINVAL;
   return 0;

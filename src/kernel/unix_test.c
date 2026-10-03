@@ -361,7 +361,8 @@ static void test_ipc_cmsg_codec(void) {
   EXPECT_EQ(ipc_msg_flags_ok(K_MSG_DONTWAIT, 0), 0);
   EXPECT_EQ(ipc_msg_flags_ok(K_MSG_CMSG_CLOEXEC, 0), -EINVAL); /* recv-only */
   EXPECT_EQ(ipc_msg_flags_ok(K_MSG_CMSG_CLOEXEC, 1), 0);
-  EXPECT_EQ(ipc_msg_flags_ok(K_MSG_NOSIGNAL, 1), -EINVAL); /* send-only */
+  /* 0005: NOSIGNAL accepted on recv too (Linux parity -- ignored on recv). */
+  EXPECT_EQ(ipc_msg_flags_ok(K_MSG_NOSIGNAL, 1), 0);
   EXPECT_EQ(ipc_msg_flags_ok(K_MSG_PEEK, 1), -EOPNOTSUPP);
   EXPECT_EQ(ipc_msg_flags_ok(0x1000, 0), -EINVAL);
 }
