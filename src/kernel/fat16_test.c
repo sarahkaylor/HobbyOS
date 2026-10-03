@@ -201,6 +201,128 @@ static void test_fat16_lfn_names(void) {
   }
 }
 
+/* L7 (fat16 large-file lane): the pre-existing >1 MiB create-path defect.
+ * Creating a file and writing > ~1 MiB through the kernel's FAT16 path used
+ * to leave a directory entry that reads back with file_size 0 (the "v2
+ * loader: bad image size 0" class): reopen reports size 0 and the image
+ * loader refuses the file.  This pins create -> write(2 MiB) -> close ->
+ * reopen -> size + tail-checksum. */
+static void test_fat16_large_create_write(void) {
+  uart_puts("  Running test_fat16_large_create_write...\n");
+  tests_run++;
+
+  const uint32_t TARGET = 2u * 1024u * 1024u; /* 2 MiB, > the 1 MiB boundary */
+  const uint32_t STEP = 16u * 1024u;          /* one call spans many clusters */
+  uint8_t chunk[STEP];
+
+  /* Pattern: byte at absolute position p is ((p >> 8) ^ (p & 0xFF)) — a
+     position-dependent value that a size-0 / short-read would not survive. */
+  struct file f;
+  EXPECT_EQ(fat16_open("/BIG1M.BIN", &f), 0); /* create-on-open */
+
+  uint32_t pos = 0;
+  int ok = 1;
+  while (pos < TARGET) {
+    uint32_t n = TARGET - pos;
+    if (n > STEP) n = STEP;
+    for (uint32_t i = 0; i < n; i++) {
+      uint32_t p = pos + i;
+      chunk[i] = (uint8_t)((p >> 8) ^ (p & 0xFF));
+    }
+    if (fat16_write(&f, chunk, (int)n) != (int)n) { ok = 0; break; }
+    pos += n;
+  }
+  EXPECT_EQ(ok, 1);
+
+  /* In-memory size right after the writes (the write path must have tracked
+     it) — 2097152. */
+  EXPECT_EQ(f.fat16.entry.file_size, (int)TARGET);
+  fat16_close(&f);
+
+  /* Reopen by path: the on-disk entry must carry the full size.  This is
+     the exact read the loader does before mapping an image. */
+  struct fat16_dir_entry e;
+  EXPECT_EQ(fat16_resolve_path("/BIG1M.BIN", &e, 0, 0), 0);
+  EXPECT_EQ(e.file_size, (int)TARGET);
+
+  EXPECT_EQ(fat16_open("/BIG1M.BIN", &f), 0);
+  EXPECT_EQ(f.fat16.entry.file_size, (int)TARGET);
+
+  /* Read the tail cluster and checksum it (a size-0 entry would stop the
+     read at 0 bytes; a truncated chain would stop it at 1 MiB). */
+  uint32_t lo = TARGET > 4096 ? TARGET - 4096 : 0;
+  ASSERT(fat16_seek(&f, (int)lo) == 0);
+  uint8_t tail[4096];
+  int rn = fat16_read(&f, tail, (int)sizeof tail);
+  fat16_close(&f);
+  EXPECT_EQ(rn, (int)sizeof tail);
+  if (rn == (int)sizeof tail) {
+    uint32_t sum = 0;
+    for (uint32_t i = 0; i < sizeof tail; i++) {
+      uint32_t p = lo + i;
+      uint8_t want = (uint8_t)((p >> 8) ^ (p & 0xFF));
+      if (tail[i] != want) sum++;
+    }
+    EXPECT_EQ(sum, 0);
+  }
+}
+
+/* L7 lane: same >1 MiB round-trip but through the LONG-NAME create path
+ * (alloc_lfn_run).  The plan records the defect symptom as "attr=0 entries"
+ * next to "file_size reads back as 0" — both point at the 0x0F LFN run /
+ * short-entry pair, so the long-name create path is the prime suspect that
+ * the 8.3-only path (test_fat16_large_create_write) does not cover. */
+static void test_fat16_large_lfn_create_write(void) {
+  uart_puts("  Running test_fat16_large_lfn_create_write...\n");
+  tests_run++;
+
+  const uint32_t TARGET = 2u * 1024u * 1024u;
+  const uint32_t STEP = 16u * 1024u;
+  uint8_t chunk[STEP];
+
+  struct file f;
+  /* Long name: 14 chars, forces a 0x0F LFN run before the short entry. */
+  static const char *path = "/BIG_LONGFILE_1MB.BIN";
+  EXPECT_EQ(fat16_open(path, &f), 0);
+
+  uint32_t pos = 0;
+  int ok = 1;
+  while (pos < TARGET) {
+    uint32_t n = TARGET - pos;
+    if (n > STEP) n = STEP;
+    for (uint32_t i = 0; i < n; i++) {
+      uint32_t p = pos + i;
+      chunk[i] = (uint8_t)((p >> 8) ^ (p & 0xFF));
+    }
+    if (fat16_write(&f, chunk, (int)n) != (int)n) { ok = 0; break; }
+    pos += n;
+  }
+  EXPECT_EQ(ok, 1);
+  fat16_close(&f);
+
+  struct fat16_dir_entry e;
+  EXPECT_EQ(fat16_resolve_path(path, &e, 0, 0), 0);
+  EXPECT_EQ(e.file_size, (int)TARGET);
+
+  EXPECT_EQ(fat16_open(path, &f), 0);
+  EXPECT_EQ(f.fat16.entry.file_size, (int)TARGET);
+
+  uint32_t lo = TARGET > 4096 ? TARGET - 4096 : 0;
+  ASSERT(fat16_seek(&f, (int)lo) == 0);
+  uint8_t tail[4096];
+  int rn = fat16_read(&f, tail, (int)sizeof tail);
+  fat16_close(&f);
+  EXPECT_EQ(rn, (int)sizeof tail);
+  if (rn == (int)sizeof tail) {
+    uint32_t sum = 0;
+    for (uint32_t i = 0; i < sizeof tail; i++) {
+      uint32_t p = lo + i;
+      if (tail[i] != (uint8_t)((p >> 8) ^ (p & 0xFF))) sum++;
+    }
+    EXPECT_EQ(sum, 0);
+  }
+}
+
 void fat16_test_suite(void) {
   uart_puts("fat16_test_suite:\n");
   test_fat16_open_existing();
@@ -208,6 +330,8 @@ void fat16_test_suite(void) {
   test_fat16_read_file();
   test_fat16_move_across_dirs();
   test_fat16_lfn_names();
+  test_fat16_large_create_write();
+  test_fat16_large_lfn_create_write();
 }
 
 #endif // KERNEL_MODE_UNIT_TEST
