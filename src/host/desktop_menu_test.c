@@ -114,6 +114,8 @@ int main(void) {
     check(strcmp(out, "PONG") == 0, "\"PONG.BIN\" displays as \"PONG\"");
     menu_display_name("MILLIPED.BIN", out, sizeof(out));
     check(strcmp(out, "MILLIPED") == 0, "\"MILLIPED.BIN\" displays as \"MILLIPED\"");
+    menu_display_name("browser.bin", out, sizeof(out));
+    check(strcmp(out, "browser") == 0, "\"browser.bin\" (lowercase 8.3) displays as \"browser\"");
   }
 
   /* 5) load_menu() end-to-end through the mock read_dir override. */

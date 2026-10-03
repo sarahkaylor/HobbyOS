@@ -40,8 +40,18 @@ endif
 
 # Mode selection (desktop or test)
 MODE ?= desktop
+# Default core count for `make run` (browser-capable desktop; 4-8 cores is
+# the standing requirement — never ship -smp 1 as the default).
+QEMU_SMP ?= 8
 OBJ_DIR = obj/$(ARCH)
 MODE_FILE = $(OBJ_DIR)/.mode
+
+# Flat WebProcess binary (WK-5 windowed browser shell).  The browser is a
+# fork artifact (webkit-hobbyos); the OS tree stays self-contained, so when
+# BROWSER_BIN is unset or missing the standard disk simply ships without the
+# browser and the Apps menu omits it.  Set it (or let it default to the fork
+# path) to get "browser" in the Apps menu.
+BROWSER_BIN ?= $(HOME)/webkit-hobbyos/WebKitBuild/HobbyOS-arm-wk5/obj/arm/webproc.bin
 
 # Include path for the X11 support library headers (src/user/x11/include),
 # added only to the rules that need it: the library and X11 apps.  Defined
@@ -86,7 +96,7 @@ ifeq ($(ARCH),intel)
   ARCH_DIR = src/kernel/arch/x64
   LDFLAGS = -T linker_x64.ld
   # QEMU parameters for x86_64: 8 cores, 6GB RAM, mounting disk.img as NVMe, booting with UEFI
-  QEMU_CMD = $(QEMU) -M q35 -smp 8 -m 6144M -pflash $(EDK2_X86_64) -display $(QEMU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff $(QEMU_ARGS)
+  QEMU_CMD = $(QEMU) -M q35 -smp $(QEMU_SMP) -m 6144M -pflash $(EDK2_X86_64) -display $(QEMU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff $(QEMU_ARGS)
 else
   # Default to ARM
   QEMU = qemu-system-aarch64
@@ -100,7 +110,7 @@ else
   ARCH_DIR = src/kernel/arch/arm
   LDFLAGS = -T linker.ld
   # QEMU parameters for ARM: 8 cores, 8GB RAM, booting with UEFI
-  QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp 8 -m 8192M -accel tcg,thread=multi -bios $(EDK2_AARCH64) -display $(QEMU_DISPLAY) -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
+  QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp $(QEMU_SMP) -m 8192M -accel tcg,thread=multi -bios $(EDK2_AARCH64) -display $(QEMU_DISPLAY) -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
 endif
 
 # --- F2.4 (browser.md §6): userland C++ build policy ---------------------
@@ -1551,8 +1561,8 @@ $(SQLTEST_BIN): $(OBJ_DIR)/sqlite_test.o $(OBJ_DIR)/sqlite_os.o $(OBJ_DIR)/sqlit
 	$(OBJCOPY) -O binary $(OBJ_DIR)/sqltest.elf $(SQLTEST_BIN)
 
 disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(MODE_FILE)
-	dd if=/dev/zero of=disk.img bs=1M count=64
-	$(MKFS_FAT) -F 16 disk.img 
+	dd if=/dev/zero of=disk.img bs=1M count=256
+	$(MKFS_FAT) -F 16 -s 16 disk.img
 	$(MMD) -i disk.img ::/EFI
 	$(MMD) -i disk.img ::/EFI/BOOT
 	$(MMD) -i disk.img ::/boot
@@ -1598,6 +1608,14 @@ endif
 	$(MCOPY) -i disk.img $(TIMEOUT_BIN) ::/TIMEOUT.BIN
 	$(MCOPY) -i disk.img $(NFSTEST_BIN) ::/NFSTEST.BIN
 	$(MCOPY) -i disk.img $(DESKTOP_BIN) ::/DESKTOP.BIN
+	@if [ -f "$(BROWSER_BIN)" ]; then \
+	  echo "browser: installing $(BROWSER_BIN) as ::/browser.bin"; \
+	  $(MCOPY) -i disk.img "$(BROWSER_BIN)" ::/browser.bin; \
+	  $(MCOPY) -i disk.img tests/fixtures/browser/HOME.HTM ::/HOME.HTM; \
+	  $(MCOPY) -i disk.img tests/fixtures/browser/TALL.HTM ::/TALL.HTM; \
+	else \
+	  echo "browser: BROWSER_BIN not present ($(BROWSER_BIN)) — Apps menu ships without browser"; \
+	fi
 	$(MCOPY) -i disk.img $(EDITOR_BIN) ::/EDITOR.BIN
 	$(MCOPY) -i disk.img $(EDITOR_T_BIN) ::/EDITOR_T.BIN
 	$(MCOPY) -i disk.img $(APPS_T_BIN) ::/APPS_T.BIN

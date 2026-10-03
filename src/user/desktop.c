@@ -798,7 +798,7 @@ void wm_handle_app_escape(int win_id, char* seq) {
  * and move ahead of everything else, which keeps its own order. Editing
  * these lists is the only change needed to alter what gets pinned. */
 static const char *const pinned_apps[] = {
-  "CONSOLE.BIN", "FILES.BIN", "CALC.BIN", "XCALC.BIN", "ANTFARM.BIN", "XEYES.BIN", "CLOCK.BIN", "SYSMON.BIN",
+  "browser.bin", "CONSOLE.BIN", "FILES.BIN", "CALC.BIN", "XCALC.BIN", "ANTFARM.BIN", "XEYES.BIN", "CLOCK.BIN", "SYSMON.BIN",
   "HEX.BIN", "TASKS.BIN", "FIND.BIN", "DIFF.BIN", "NOTES.BIN",
   "NANO.BIN", "UNIT.BIN",
 };
@@ -860,12 +860,22 @@ void menu_apps_first(void) {
 
 /* Display label for a menu entry: the file name minus a trailing ".BIN"
  * (launcher entries read "FILES", not "FILES.BIN"); other names unchanged.
- * Non-static: exercised directly by the host test. */
+ * The strip is case-insensitive so the browser ships as 8.3 lowercase
+ * "browser.bin" and reads exactly "browser".  Non-static: exercised directly
+ * by the host test. */
 void menu_display_name(const char *raw, char *out, int max) {
   copy_name(out, raw, max);
   int i = 0;
   while (out[i] && i < max - 1) i++;
-  if (i >= 4 && name_is(out + i - 4, ".BIN")) out[i - 4] = '\0';
+  if (i >= 4) {
+    /* Case-insensitive .BIN/.bin: uppercase the four tail bytes and compare. */
+    char b0 = out[i - 4], b1 = out[i - 3], b2 = out[i - 2], b3 = out[i - 1];
+    if (b0 >= 'a' && b0 <= 'z') b0 -= 32;
+    if (b1 >= 'a' && b1 <= 'z') b1 -= 32;
+    if (b2 >= 'a' && b2 <= 'z') b2 -= 32;
+    if (b3 >= 'a' && b3 <= 'z') b3 -= 32;
+    if (b0 == '.' && b1 == 'B' && b2 == 'I' && b3 == 'N') out[i - 4] = '\0';
+  }
 }
 
 void load_menu(void) {
