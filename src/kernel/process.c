@@ -2372,6 +2372,19 @@ static jmp_buf scheduler_return_ctx[MAX_CPUS];
  * process runs; drives the [IDLESTUCK] diagnostic in the idle loop. */
 static int sched_idle_rounds;
 static int last_idlestuck_div;
+/* L9: one pending lostwake-dispose candidate per idle CPU.  A stale-claim
+   sighting is ARMED here and only confirmed when the very same heartbeat
+   is still present on the NEXT reaper pass (~1.4 s later).  Under MTTCG a
+   genuinely-running claimer's vCPU can be host-starved for longer than
+   LOSTWAKE_DEAD_OWNER_MS while a peer core idles — its clock freezes, so
+   a single sample reads it stale, then it refreshes the instant it runs
+   again; single-sampling DISPOSEd a live WebProcess loader mid-load at
+   -smp 8 (dispose raced the load, FATAL).  A truly wedged owner's
+   heartbeat is frozen FOREVER, so its claim still confirms on the next
+   pass — the gate filters only transient starvations, never the
+   poison-resume recovery. */
+static int lw_disp_arm_slot[MAX_CPUS];
+static uint64_t lw_disp_arm_hb[MAX_CPUS];
 /* Owner-liveness grace lives in process.h as LOSTWAKE_DEAD_OWNER_MS
    (the unit test fabricates stale claimers with the same constant). */
 
@@ -2614,6 +2627,7 @@ void start_scheduler(void) {
     if (sched_idle_rounds >= 500) {
       uint64_t wflags = spinlock_acquire_irqsave(&proc_lock);
       int dispose_slot = 0;
+      int lw_candidate = 0; /* stale-claim slot this pass (0 = none) */
       for (int k = 1; k < MAX_PROCESSES; k++) {
         if (proc_table[k].state == PROC_STATE_RUNNING) {
           /* Only reclaim when NO core has this pid in cpu_current_pids at
@@ -2646,37 +2660,66 @@ void start_scheduler(void) {
             uart_puts(" from RUNNING with no claiming CPU\n");
             proc_table[k].state = PROC_STATE_READY;
           } else if (lostwake_stale_claim_reclaimable(k)) {
-            /* Class-B idle-fix: every claimer of this RUNNING slot has a
-               stale heartbeat (lost wake: the wake was consumed by the
-               switch machinery but the body never ran and the claiming CPU
-               never came back), and the rest of the table is drained.
-               Re-READYing is NOT the recovery: resuming the wedged child
-               again deterministically wedges the picking CPU — the same
-               poisoned resume consumes a fresh core on every pick (an
-               observed freeze burned all 8 cores in one cascade before
-               silence).  The resume path writes only per-CPU state before
-               eret, so the wedge kills nothing shared; the poison rides
-               the child's ADDRESS SPACE (its guest MMU state: re-picks of
-               the same AS wedge deterministically while every other ASID
-               resumes fine).  The only recoverable move is to DISPOSE the
-               slot: release the zombie claims, then let group_teardown
-               free the AS/ASID and deliver a waitpid reap, so the parked
-               parent treats the cycle as a rejected exec (exit 97) and
-               reforks a fresh child on a fresh ASID. */
-            uart_puts("[LOSTWAKE] disposing pid=");
-            print_int(proc_table[k].pid);
-            uart_puts(" ");
-            uart_puts(proc_table[k].name);
-            uart_puts(" (stale dead-owner claim, poisoned resume)\n");
-            for (int c = 0; c < MAX_CPUS; c++) {
-              if (cpu_current_pids[c] == k)
-                set_current_process_pid(c, -1);
+            /* L9 arm-and-confirm: a single stale sample cannot prove the
+               owner dead — under MTTCG a live claimer's vCPU is regularly
+               host-starved past LOSTWAKE_DEAD_OWNER_MS (its clock freezes,
+               then it refreshes the instant it runs again), so single-
+               sampling DISPOSEd a genuinely-running process (the 86 MB
+               WebProcess loader) mid-load at -smp 8 and cascaded into a
+               kernel FATAL.  Arm the candidate on the first sighting and
+               confirm only when the freshest claimer heartbeat has NOT
+               advanced by the NEXT pass (~1.4 s later).  A truly wedged
+               owner's heartbeat is frozen forever, so its claim still
+               confirms — the poison-resume recovery below is unchanged,
+               merely delayed one idle round. */
+            lw_candidate = k;
+            uint64_t freshest = 0;
+            for (int c2 = 0; c2 < MAX_CPUS; c2++) {
+              if (cpu_current_pids[c2] == k && cpu_heartbeat_ms[c2] > freshest)
+                freshest = cpu_heartbeat_ms[c2];
             }
-            dispose_slot = k;
-            break;
+            if (lw_disp_arm_slot[cpu] == k && lw_disp_arm_hb[cpu] == freshest) {
+              lw_disp_arm_slot[cpu] = 0;
+              /* Class-B idle-fix: every claimer of this RUNNING slot has a
+                 stale heartbeat (lost wake: the wake was consumed by the
+                 switch machinery but the body never ran and the claiming
+                 CPU never came back), and the rest of the table is drained.
+                 Re-READYing is NOT the recovery: resuming the wedged child
+                 again deterministically wedges the picking CPU — the same
+                 poisoned resume consumes a fresh core on every pick (an
+                 observed freeze burned all 8 cores in one cascade before
+                 silence).  The resume path writes only per-CPU state before
+                 eret, so the wedge kills nothing shared; the poison rides
+                 the child's ADDRESS SPACE (its guest MMU state: re-picks of
+                 the same AS wedge deterministically while every other ASID
+                 resumes fine).  The only recoverable move is to DISPOSE the
+                 slot: release the zombie claims, then let group_teardown
+                 free the AS/ASID and deliver a waitpid reap, so the parked
+                 parent treats the cycle as a rejected exec (exit 97) and
+                 reforks a fresh child on a fresh ASID. */
+              uart_puts("[LOSTWAKE] disposing pid=");
+              print_int(proc_table[k].pid);
+              uart_puts(" ");
+              uart_puts(proc_table[k].name);
+              uart_puts(" (stale dead-owner claim, poisoned resume)\n");
+              for (int c = 0; c < MAX_CPUS; c++) {
+                if (cpu_current_pids[c] == k)
+                  set_current_process_pid(c, -1);
+              }
+              dispose_slot = k;
+              break;
+            }
+            lw_disp_arm_slot[cpu] = k;
+            lw_disp_arm_hb[cpu] = freshest;
           }
         }
       }
+      /* A previously armed candidate that is no longer the (same) stale
+         claim this pass either recovered (its heartbeat advanced and the
+         claim went live again) or the slot moved on — drop the arm so a
+         fresh sighting re-arms from scratch. */
+      if (lw_candidate != lw_disp_arm_slot[cpu])
+        lw_disp_arm_slot[cpu] = 0;
       spinlock_release_irqrestore(&proc_lock, wflags);
 
       /* Dispose a lost-owner slot OUTSIDE proc_lock (group_teardown takes

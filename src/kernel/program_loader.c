@@ -435,6 +435,16 @@ static int v2_map_image(struct addr_space *as, struct file *f, uint32_t fsize) {
   uint64_t off = 0;
   int total = 0;
   while (off < img_len) {
+    /* L9 liveness: this loop holds the loader IRQ-off across the whole
+       86 MB WebProcess image (frame alloc + fat16_read + page map), so no
+       timer/syscall entry fires to refresh the ownership heartbeat — an
+       idle peer core would age the claim past LOSTWAKE_DEAD_OWNER_MS and
+       DISPOSE the mid-load process (the -smp 8 wedge).  Refresh once per
+       page: the core is provably alive and making progress.  Writes only;
+       process.c owns the array. */
+    extern volatile uint64_t cpu_heartbeat_ms[];
+    extern uint64_t timer_get_ms(void);
+    cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
     uint64_t fr = frame_alloc_zeroed();
     if (!fr)
       return -1;
