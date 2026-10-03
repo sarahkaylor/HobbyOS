@@ -461,6 +461,16 @@ void main(void) {
      The image never runs; the load itself is what must not fault. */
   uart_puts("Mode: BIGLOAD - single 30MB v2 load repro...\n");
   load_and_run_program_in_scheduler_args("BIG.BIN", -1, -1, -1, -1, 0);
+#elif defined(KERNEL_MODE_WEBPROC)
+  /* WK-3 (draft 0003): single-program headless WebProcess boot.  Boots ONLY
+     WEBPROC.BIN (the statically linked WebKit WebProcess, fork-built, with
+     the fork-side --wk3-driver headless driver) and passes "--wk3-driver";
+     the driver needs the FIX01.HTM fixture + probe files on the boot disk.
+     fd 1/2 are unset -> the console-fd fallback relays stdout/stderr to
+     the serial console. */
+  uart_puts("Mode: WEBPROC - Running headless WebProcess (WK-3)...\n");
+  load_and_run_program_in_scheduler_args("WEBPROC.BIN", -1, -1, -1, -1,
+                                         "--wk3-driver");
 #else
   uart_puts("Mode: DESKTOP - Launching desktop...\n");
   load_and_run_program_in_scheduler("DESKTOP.BIN", -1, -1, -1, -1);

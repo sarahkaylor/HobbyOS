@@ -166,6 +166,13 @@ else ifeq ($(MODE),bigload)
   # page fault under KVM.  Boots ONLY BIG.BIN (a synthetic ~30 MB image)
   # through the v2 loader before the scheduler; used for the KVM repro.
   CFLAGS += -DKERNEL_MODE_BIGLOAD
+else ifeq ($(MODE),webproc)
+  # WK-3 (draft 0003): headless WebProcess single-program boot.  The fork
+  # side assembles the boot disk (kernel + WEBPROC.BIN + FIX01.HTM + probe
+  # files) and boots it; see the fork's HobbyOS/continuation/README.md
+  # WK-3 section (this tree stays self-contained -- nothing here
+  # references the fork's build outputs).
+  CFLAGS += -DKERNEL_MODE_WEBPROC
 else ifeq ($(MODE),soak)
   # P8.2 (browser.md §6): the soak — the standard test wave plus TORTURE.BIN
   # running its bounded soak loop (28-minute cap; main.c's KERNEL_SOAK_WAVE
@@ -1766,6 +1773,12 @@ filedialog_test_run:
 # HobbyOS/continuation/README.md for the full runner.
 jsc_run:
 	$(MAKE) MODE=jsc run
+
+# WK-3 (draft 0003): build the kernel in webproc (single-program) mode.
+# Booting needs the fork-side minimal disk; see the fork's
+# HobbyOS/continuation/README.md for the full runner.
+webproc_run:
+	$(MAKE) MODE=webproc run
 
 filedialog_test:
 	python3 ./run_filedialog_test.py
