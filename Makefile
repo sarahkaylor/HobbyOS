@@ -221,6 +221,11 @@ SMP_TEST_BIN = $(OBJ_DIR)/smp_test.bin
 
 PIPETEST_BIN = $(OBJ_DIR)/pipetest.bin
 NETTEST_BIN = $(OBJ_DIR)/nettest.bin
+# l8-netfix: on-device TX/console + RX-NUL repro and regression app
+# (src/user/netfix_test.c).  Booted in MODE=webproc as WEBPROC.BIN by the
+# lane harness; stays on disk.img for the wave as NETFIX.BIN (inert unless
+# a loader entry selects it).
+NETFIX_BIN = $(OBJ_DIR)/netfix.bin
 TIMEOUT_BIN = $(OBJ_DIR)/timeout.bin
 NFSTEST_BIN = $(OBJ_DIR)/nfstest.bin
 DESKTOP_BIN = $(OBJ_DIR)/desktop.bin
@@ -657,6 +662,15 @@ $(RANDTST_BIN): $(OBJ_DIR)/rand_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_ma
 $(DNSTST_BIN): $(OBJ_DIR)/user_dns_test.o $(OBJ_DIR)/user_resolv.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/dns_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/dns_test.elf $(DNSTST_BIN)
+
+# l8-netfix repro app (TX/console + RX-NUL); see src/user/netfix_test.c.
+$(OBJ_DIR)/user_netfix_test.o: src/user/netfix_test.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(NETFIX_BIN): $(OBJ_DIR)/user_netfix_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/netfix_test.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/netfix_test.elf $(NETFIX_BIN)
 
 # --- F2.4 (browser.md §6): minimal C++ runtime + smoke -------------------
 # cxxrt.cpp is the runtime (operator new/delete, __cxa_guard_*, __cxa_atexit
@@ -1536,7 +1550,7 @@ $(SQLTEST_BIN): $(OBJ_DIR)/sqlite_test.o $(OBJ_DIR)/sqlite_os.o $(OBJ_DIR)/sqlit
 	$(LD) -T src/user/linker.ld -e _start --gc-sections -o $(OBJ_DIR)/sqltest.elf $(OBJ_DIR)/sqlite_test.o $(OBJ_DIR)/sqlite_os.o $(OBJ_DIR)/sqlite3.o $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/sqltest.elf $(SQLTEST_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(MODE_FILE)
 	dd if=/dev/zero of=disk.img bs=1M count=64
 	$(MKFS_FAT) -F 16 disk.img 
 	$(MMD) -i disk.img ::/EFI
@@ -1598,6 +1612,7 @@ endif
 	$(MCOPY) -i disk.img $(POLLTST_BIN) ::/POLLTST.BIN
 	$(MCOPY) -i disk.img $(RANDTST_BIN) ::/RANDTST.BIN
 	$(MCOPY) -i disk.img $(DNSTST_BIN) ::/DNSTST.BIN
+	$(MCOPY) -i disk.img $(NETFIX_BIN) ::/NETFIX.BIN
 	$(MCOPY) -i disk.img $(CXXSMOKE_BIN) ::/CXXSMOKE.BIN
 	$(MCOPY) -i disk.img $(THRD_T_BIN) ::/THRD_T.BIN
 	$(MCOPY) -i disk.img $(TLS_T_BIN) ::/TLS_T.BIN

@@ -310,6 +310,143 @@ static void test_net_getrandom(void) {
   EXPECT_EQ(any_zero_run, 0);
 }
 
+/* l8-netfix (WK-4): build an Ethernet+IPv4+TCP frame for the RX-layer
+ * regression tests below.  `frame_len` is the FULL padded frame length the
+ * driver hands net_rx_packet(); `datagram_len` is the IPv4 total-length
+ * field as it appears on the wire (Ethernet minimum-frame padding must not
+ * be counted as IP payload).  No checksums are validated by the L4
+ * handlers, so none are filled in here. */
+static void netfix_build_tcp_frame(uint8_t* f, uint32_t frame_len,
+                                   uint32_t datagram_len, uint16_t src_port,
+                                   uint16_t dst_port, uint32_t seq,
+                                   uint32_t ack, const uint8_t* payload,
+                                   uint32_t plen) {
+  struct eth_hdr* eth = (struct eth_hdr*)f;
+  struct ipv4_hdr* ip = (struct ipv4_hdr*)(f + sizeof(struct eth_hdr));
+  struct tcp_hdr* tcp = (struct tcp_hdr*)(f + sizeof(struct eth_hdr) +
+                                          sizeof(struct ipv4_hdr));
+  uint8_t* p = f + sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr) +
+               sizeof(struct tcp_hdr);
+  int i;
+  for (i = 0; i < 6; i++) eth->dst_mac[i] = 0x52;
+  for (i = 0; i < 6; i++) eth->src_mac[i] = 0x53;
+  eth->type = htons(ETH_TYPE_IPV4);
+
+  ip->version = 4;
+  ip->ihl = 5;
+  ip->tos = 0;
+  ip->total_len = htons((uint16_t)datagram_len);
+  ip->id = 0;
+  ip->frag_off = 0;
+  ip->ttl = 64;
+  ip->protocol = IP_PROTO_TCP;
+  ip->checksum = 0;
+  ip->src_ip = 0x0202000Au; /* 10.0.2.2 (wire order) */
+  ip->dst_ip = 0x0F02000Au; /* 10.0.2.15 (wire order) */
+
+  tcp->src_port = htons(src_port);
+  tcp->dst_port = htons(dst_port);
+  tcp->seq = htonl(seq);
+  tcp->ack = htonl(ack);
+  tcp->data_offset = 5;
+  tcp->reserved = 0;
+  tcp->ns = 0;
+  tcp->fin = 0;
+  tcp->syn = 0;
+  tcp->rst = 0;
+  tcp->psh = 0;
+  tcp->ack_flag = 1;
+  tcp->urg = 0;
+  tcp->ece = 0;
+  tcp->cwr = 0;
+  tcp->window_size = 0;
+  tcp->checksum = 0;
+  tcp->urgent_ptr = 0;
+
+  for (i = 0; i < (int)plen; i++) p[i] = payload[i];
+  for (i = (int)(sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr) +
+                 sizeof(struct tcp_hdr) + plen);
+       i < (int)frame_len; i++)
+    f[i] = 0; /* Ethernet minimum-frame padding */
+}
+
+/* l8-netfix bug #2 (WK-4): a TCP connection must not deliver Ethernet
+ * minimum-frame padding as payload.  QEMU slirp pads every 54-byte
+ * header-only segment (ACK/FIN/SYN-ACK) to 60 bytes with zeros; the kernel
+ * must derive the L4 length from the IPv4 total-length field, never from
+ * the padded frame length.  Regression: an ACK padded to 60 bytes before
+ * the data segment used to prepend six 0x00 bytes to recv() (the WK-4
+ * "stray NULs before the HTTP response"). */
+static void test_net_ether_padding(void) {
+  uart_puts("  Running test_net_ether_padding...\n");
+  tests_run++;
+
+  int pid = -1;
+  struct process* cur = net_test_begin(&pid);
+  ASSERT(cur != 0);
+
+  /* 10.0.2.15/24, gw 10.0.2.2 — slirp's user-network layout. */
+  net_set_ip(0x0F02000Au, 0x00FFFFFFu, 0x0202000Au);
+  net_refresh_mac();
+
+  int fd = file_socket(cur, K_AF_INET, K_SOCK_STREAM, 0);
+  ASSERT(fd >= 0);
+  struct socket_pcb* pcb = file_socket_pcb(cur, fd);
+  ASSERT(pcb != 0);
+
+  /* Established against the host echo server. */
+  pcb->state = SOCKET_ESTABLISHED;
+  pcb->remote_ip = 0x0202000Au; /* 10.0.2.2 */
+  pcb->remote_port = 8765;
+  pcb->seq = 1000;
+  pcb->ack = 100;
+
+  /* 1) Header-only ACK, padded on the wire to the 60-byte Ethernet
+        minimum: must contribute ZERO payload bytes. */
+  uint8_t ack_frame[60];
+  netfix_build_tcp_frame(ack_frame, sizeof(ack_frame), 40, /* ip len */
+                         pcb->remote_port, pcb->local_port, pcb->ack, pcb->seq,
+                         0, 0);
+  net_rx_packet(ack_frame, (uint32_t)sizeof(ack_frame));
+  EXPECT_EQ(net_socket_available(pcb), 0);
+
+  /* 2) A real data segment (8 payload bytes, frame > 60 so no pad):
+        recv must return exactly the payload with no leading NULs. */
+  uint8_t data_frame[sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr) +
+                     sizeof(struct tcp_hdr) + 8];
+  static const uint8_t payload[8] = {'A', 'B', 'C', 'D',
+                                     'E', 'F', 'G', 'H'};
+  netfix_build_tcp_frame(data_frame, (uint32_t)sizeof(data_frame),
+                         40 + 8, /* ip len */
+                         pcb->remote_port, pcb->local_port, pcb->ack, pcb->seq,
+                         payload, 8);
+  net_rx_packet(data_frame, (uint32_t)sizeof(data_frame));
+  EXPECT_EQ(net_socket_available(pcb), 8);
+
+  uint8_t got[16];
+  for (int i = 0; i < 16; i++) got[i] = 0xEE;
+  int n = net_socket_recv(pcb, got, 16);
+  EXPECT_EQ(n, 8);
+  int match = 1;
+  for (int i = 0; i < 8; i++) {
+    if (got[i] != payload[i]) match = 0;
+  }
+  EXPECT_EQ(match, 1);
+  EXPECT_EQ(net_socket_available(pcb), 0);
+
+  /* 3) Defensive clamp: a corrupt total_len larger than the frame must not
+        push the L4 parse past the buffer (no overflow past 60 bytes). */
+  uint8_t ack2[60];
+  netfix_build_tcp_frame(ack2, sizeof(ack2), 4000, /* absurd ip len */
+                         pcb->remote_port, pcb->local_port, pcb->ack, pcb->seq,
+                         0, 0);
+  net_rx_packet(ack2, (uint32_t)sizeof(ack2));
+  EXPECT_EQ(net_socket_available(pcb), 0);
+
+  file_close(cur, fd);
+  net_test_end(pid);
+}
+
 void net_test_suite(void) {
   uart_puts("Running net stack tests...\n");
   net_test();
@@ -317,6 +454,7 @@ void net_test_suite(void) {
   test_net_connect_state();
   test_net_select_engine();
   test_net_getrandom();
+  test_net_ether_padding();
 }
 
 #endif
