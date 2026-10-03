@@ -1520,8 +1520,13 @@ int fat16_truncate_to(struct file* f, uint32_t new_size) {
   if (new_size == old_size) return 0;
 
   if (new_size > old_size) {
-    uint8_t zeros[64];
-    for (int i = 0; i < 64; i++) zeros[i] = 0;
+    /* Zero-fill in 4 KiB chunks rather than 64 bytes: the byte-granular
+       extension is also what a multi-MB ftruncate pays for, and 64-byte
+       calls made a >1 MiB ftruncate (thousands of fat16_write calls, each
+       walking/resyncing) effectively unbounded.  4 KiB keeps the write path
+       coalesced while staying on the kernel stack. */
+    uint8_t zeros[4096];
+    for (int i = 0; i < 4096; i++) zeros[i] = 0;
     if (fat16_seek(f, (int)old_size) != 0) return -1;
     uint32_t left = new_size - old_size;
     while (left > 0) {
@@ -1750,20 +1755,25 @@ int fat16_write(struct file* f, const void* buf, int size) {
     }
   }
 
-  while (size > 0) {
-    uint16_t c = f->fat16.entry.start_cluster;
-    uint32_t target_cluster_idx = f->fat16.cursor / cluster_size;
-
-    uint16_t prev = 0;
-    for (uint32_t i = 0; i < target_cluster_idx; i++) {
-      prev = c;
-      c = read_fat(c);
-      if (c >= 0xFFF8) {
-        c = alloc_cluster();
-        if (c == 0) break;
-        write_fat(prev, c);
-      }
+  /* Walk the chain ONCE to the cluster holding the cursor, extending it as
+     needed.  The cursor advances monotonically for the rest of this call,
+     so the walk state carries forward instead of restarting from the start
+     per chunk — the old restart made a >1 MiB create/write O(n^2) in chain
+     length (a 2 MiB write walked ~2e6 FAT entries and blew the unit-tier
+     budget; a 30 MiB blob was effectively unwritable under TCG). */
+  uint16_t c = f->fat16.entry.start_cluster;
+  uint32_t target_cluster_idx = f->fat16.cursor / cluster_size;
+  for (uint32_t i = 0; i < target_cluster_idx; i++) {
+    uint16_t nxt = read_fat(c);
+    if (nxt >= 0xFFF8) {
+      nxt = alloc_cluster();
+      if (nxt == 0) break;
+      write_fat(c, nxt);
     }
+    c = nxt;
+  }
+
+  while (size > 0) {
     if (c == 0) break;
 
     uint32_t offset_in_cluster = f->fat16.cursor % cluster_size;
@@ -1788,6 +1798,20 @@ int fat16_write(struct file* f, const void* buf, int size) {
       f->fat16.entry.file_size = f->fat16.cursor;
     }
     size -= chunk;
+
+    /* Advance to the next cluster only at a real cluster boundary: a chunk
+       is one sector (512 B) while a cluster spans bpb_sectors_per_cluster
+       sectors, so crossing early would skip the rest of the current cluster
+       (the tail-checksum test in fat16_test.c catches exactly this). */
+    if (size > 0 && (f->fat16.cursor % cluster_size) == 0) {
+      uint16_t nxt = read_fat(c);
+      if (nxt >= 0xFFF8) {
+        nxt = alloc_cluster();
+        if (nxt == 0) break;
+        write_fat(c, nxt);
+      }
+      c = nxt;
+    }
   }
   spinlock_release_irqrestore(&fat_lock, flags);
   if (written_bytes > 0) {
