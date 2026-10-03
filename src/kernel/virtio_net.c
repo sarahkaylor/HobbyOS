@@ -658,7 +658,19 @@ static struct virtq tx_vq __attribute__((aligned(4096)));
 static uint8_t rx_buffers[NUM_RX_BUFFERS][RX_BUFFER_SIZE] __attribute__((aligned(4096)));
 static struct virtio_net_hdr rx_hdrs[NUM_RX_BUFFERS] __attribute__((aligned(4096)));
 
-static struct virtio_net_hdr tx_hdr __attribute__((aligned(4096)));
+/* TX slots owned by the driver.  The TX descriptor must NEVER point at a
+ * caller-owned buffer: the device reads it asynchronously, so any stack or
+ * console-owned memory at that address can be reused (or be mid-write) by
+ * the time the DMA actually happens — observed as a socket send carrying
+ * the last UART console line instead of the payload (WK-4: host server
+ * logged "WK4 NET connect=ok ..." -> HTTP 400).  Each slot gets its own
+ * header + data buffer exactly like the x86/PCI path, so the DMA source is
+ * exclusively ours on both arches.  The queue holds 16 descriptors = 8
+ * header+payload pairs, hence 8 slots. */
+#define NUM_TX_SLOTS 8
+static struct virtio_net_hdr tx_hdrs[NUM_TX_SLOTS] __attribute__((aligned(64)));
+static uint8_t tx_buffers[NUM_TX_SLOTS][1500] __attribute__((aligned(64)));
+static uint16_t tx_submit_idx = 0;  /* next slot to hand to the device */
 
 static uint8_t* net_mmio = 0;
 int virtio_net_irq = -1;
@@ -798,27 +810,59 @@ int virtio_net_send(const void *buf, uint32_t len) {
     return -1;
   }
 
-  for (int i = 0; i < (int)sizeof(struct virtio_net_hdr); i++) {
-    ((uint8_t*)&tx_hdr)[i] = 0;
+  extern uint64_t timer_get_ms(void);
+
+  /* Reclaim slots the device has already consumed. */
+  tx_ack_used_idx = *(volatile uint16_t*)&tx_vq.used.idx;
+
+  /* With NUM_TX_SLOTS pairs and the (bounded) synchronous wait below there
+     is normally one in-flight send, but if the device lags (a dropped or
+     delayed completion) cap the pending slots so a descriptor pair and its
+     driver-owned buffer are never reused while still in the queue. */
+  if ((uint16_t)(tx_submit_idx - tx_ack_used_idx) >= NUM_TX_SLOTS) {
+    uint64_t t0 = timer_get_ms();
+    while ((uint16_t)(tx_submit_idx - tx_ack_used_idx) >= NUM_TX_SLOTS) {
+      if (timer_get_ms() - t0 >= 500) {
+        spinlock_release_irqrestore(&net_tx_lock, flags);
+        return -1;
+      }
+    }
+    tx_ack_used_idx = *(volatile uint16_t*)&tx_vq.used.idx;
   }
 
-  uint16_t desc_idx = (tx_vq.avail.idx % 8) * 2;
+  uint16_t slot = tx_submit_idx % NUM_TX_SLOTS;
+  uint16_t desc_idx = slot * 2;
 
-  tx_vq.desc[desc_idx].addr = (uint64_t)&tx_hdr;
+  /* Zero this slot's header. */
+  for (int i = 0; i < (int)sizeof(struct virtio_net_hdr); i++) {
+    ((uint8_t*)&tx_hdrs[slot])[i] = 0;
+  }
+
+  /* Copy the payload into OUR slot buffer.  The descriptor must never
+     point at the caller's memory: the device DMA-reads it asynchronously
+     and any reuse (a stack frame taken over by the console write path, a
+     format buffer, the caller's own scratch) shows up on the wire — the
+     WK-4 400s sent a console line instead of the request. */
+  uint32_t copy_len = len > 1500 ? 1500 : len;
+  for (uint32_t i = 0; i < copy_len; i++) {
+    tx_buffers[slot][i] = ((const uint8_t*)buf)[i];
+  }
+
+  tx_vq.desc[desc_idx].addr = (uint64_t)&tx_hdrs[slot];
   tx_vq.desc[desc_idx].len = sizeof(struct virtio_net_hdr);
   tx_vq.desc[desc_idx].flags = 1;
   tx_vq.desc[desc_idx].next = desc_idx + 1;
 
-  tx_vq.desc[desc_idx + 1].addr = (uint64_t)buf;
-  tx_vq.desc[desc_idx + 1].len = len;
+  tx_vq.desc[desc_idx + 1].addr = (uint64_t)tx_buffers[slot];
+  tx_vq.desc[desc_idx + 1].len = copy_len;
   tx_vq.desc[desc_idx + 1].flags = 0;
   tx_vq.desc[desc_idx + 1].next = 0;
 
   tx_vq.avail.ring[tx_vq.avail.idx % 16] = desc_idx;
-
   arch_memory_barrier();
   tx_vq.avail.idx++;
   arch_memory_barrier();
+  tx_submit_idx++;
 
   reg_write32(VIRTIO_QUEUE_SEL, 1);
   reg_write32(VIRTIO_QUEUE_NOTIFY, 1);
@@ -830,8 +874,9 @@ int virtio_net_send(const void *buf, uint32_t len) {
      PING left "RUNNING" with no CPU on them, blocking system halt ~1
      run in 3).  The clock bound also covers a genuinely-lost request
      without wedging the caller.  Normally the completion is visible
-     within microseconds. */
-  extern uint64_t timer_get_ms(void);
+     within microseconds.  Note the payload stays valid while polling
+     because it lives in the driver-owned slot, not on the caller's
+     stack. */
   uint64_t tx_t0 = timer_get_ms();
   int tx_timeout = 0;
   while (*(volatile uint16_t*)&tx_vq.used.idx == tx_ack_used_idx) {
@@ -840,9 +885,6 @@ int virtio_net_send(const void *buf, uint32_t len) {
       break;
     }
   }
-  /* Sync either way: on timeout this resyncs past the lost request so
-     the next send waits for its own completion rather than reading a
-     stale one. */
   tx_ack_used_idx = tx_vq.used.idx;
 
   arch_memory_barrier();
