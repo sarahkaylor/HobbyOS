@@ -413,6 +413,18 @@ static int v2_map_image(struct addr_space *as, struct file *f, uint32_t fsize) {
   }
   uint64_t img_len = ((uint64_t)fsize + 0xFFF) & ~0xFFFULL;
 
+  /* WK-3 (draft 0006): reject an image whose span would overlap the heap
+     slot.  USER_IMG_BASE is +0 in the v2 window and the HEAP slot starts
+     at USER_HEAP_BASE_V2 (+1 GiB), so 128 MiB is fine -- but the old gate
+     was ONLY `fsize <= USER_IMG_SIZE`, so a cap raise or oversized file
+     could silently let the IMAGE region collide with the HEAP region.
+     Keep the fsize gate above (bounds the real mapped size); this one
+     bounds the span. */
+  if (USER_IMG_BASE + img_len > USER_HEAP_BASE_V2) {
+    uart_puts("v2 loader: image span overlaps heap\n");
+    return -1;
+  }
+
   /* IMAGE region + one mapped frame per 4 KiB page (read path). */
   if (vm_region_insert(as, USER_IMG_BASE, img_len,
                        VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC, VMK_IMG,
