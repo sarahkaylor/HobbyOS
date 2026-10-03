@@ -136,6 +136,9 @@ static void test_wave_loader(void *arg) {
   load_and_run_program_in_scheduler("CONSOLE.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("MEMTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("FILEIO.BIN", -1, -1, -1, -1);
+  /* L7 (fat16 large-file lane): >1 MiB create/write/reopen round-trip.
+     Proves the pre-existing fat16 create-path defect live in the wave. */
+  load_and_run_program_in_scheduler("FATBIG_T.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("HEAPTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("SPAWN.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("FORKTEST.BIN", -1, -1, -1, -1);
