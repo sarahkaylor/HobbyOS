@@ -612,6 +612,21 @@ void net_rx_packet(uint8_t* packet, uint32_t len) {
     struct ipv4_hdr* ip = (struct ipv4_hdr*)(packet + sizeof(struct eth_hdr));
     arp_cache_update(ip->src_ip, eth->src_mac);
 
+    /* Ethernet frames shorter than the 60-byte IEEE minimum are padded
+     * with zeroes by the producer (QEMU slirp pads every 54-byte header
+     * only TCP segment to 60 bytes).  The L4 length MUST come from the
+     * IPv4 total-length field, never from the received frame length, or
+     * the trailing pad is parsed as TCP payload and prepended to the
+     * socket stream as stray NULs (WK-4: six 0x00 before the HTTP
+     * response on accepted connections).  A total-length smaller than the
+     * IPv4 header or larger than the delivered frame is a malformed /
+     * truncated datagram — drop it rather than hand the L4 handler
+     * garbage (which could include the same pad bytes). */
+    uint32_t iplen = (uint32_t)ntohs(ip->total_len);
+    uint32_t framed_ip = len - sizeof(struct eth_hdr);
+    if (iplen < sizeof(struct ipv4_hdr) || iplen > framed_ip) return;
+    uint32_t l4len = iplen - sizeof(struct ipv4_hdr);
+
     /*
     if (ip->protocol == IP_PROTO_UDP || ip->protocol == IP_PROTO_ICMP) {
         uart_puts("[NET RX] IP Packet: proto=");
@@ -641,11 +656,11 @@ void net_rx_packet(uint8_t* packet, uint32_t len) {
 
     // Demultiplex incoming IPv4 datagrams by protocol
     if (ip->protocol == IP_PROTO_ICMP) {
-      handle_icmp(ip, packet + sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr), len - sizeof(struct eth_hdr) - sizeof(struct ipv4_hdr));
+      handle_icmp(ip, packet + sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr), l4len);
     } else if (ip->protocol == IP_PROTO_UDP) {
-      handle_udp(ip, packet + sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr), len - sizeof(struct eth_hdr) - sizeof(struct ipv4_hdr));
+      handle_udp(ip, packet + sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr), l4len);
     } else if (ip->protocol == IP_PROTO_TCP) {
-      handle_tcp(ip, packet + sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr), len - sizeof(struct eth_hdr) - sizeof(struct ipv4_hdr));
+      handle_tcp(ip, packet + sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr), l4len);
     }
   }
 }
