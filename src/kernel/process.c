@@ -1209,6 +1209,16 @@ void schedule(struct trap_frame *tf, int is_yield) {
 
     if (next >= 0) {
       set_current_process_pid(cpu, next);
+      /* WK-3 (draft 0008): liveness heartbeat on every claim, not just
+         the idle path.  The heartbeat proves a CPU is alive; the idle
+         reaper wastes a RUNNING slot whose every claimer heartbeat is
+         stale (>= ~2 s).  But the heartbeat was only refreshed when a CPU
+         went IDLE, so a CPU that runs ONE process for a >2 s user-mode
+         stretch never refreshed it, and the reaper could DISPOSE a
+         genuinely running process (caught mid-malloc-ladder on-device).
+         Any CPU actively running or claiming a process proves the OS is
+         alive; refresh here on each claim. */
+      cpu_heartbeat_ms[cpu] = timer_get_ms();
       proc_table[next].state = PROC_STATE_RUNNING;
       struct trap_frame local_tf;
       restore_context(&proc_table[next], &local_tf);
