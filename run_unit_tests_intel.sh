@@ -39,7 +39,10 @@ make ARCH=intel MODE=unit_tests run QEMU_ARGS="-display none $EXTRA_QEMU_ARGS" >
 QEMU_PID=$!
 
 # Wait for tests to finish or timeout after 20 seconds
-TIMEOUT=20
+# Wait for tests to finish or timeout (default 300 s; override with
+# UNIT_TESTS_TIMEOUT).  The >1 MiB fat16 unit tests legitimately take
+# ~60-90 s of wall time, so the old hardcoded 20 s reds green suites.
+TIMEOUT="${UNIT_TESTS_TIMEOUT:-300}"
 while [ $TIMEOUT -gt 0 ]; do
     if grep -q "UNIT TESTS PASSED" qemu.log; then
         echo "Tests passed!"
