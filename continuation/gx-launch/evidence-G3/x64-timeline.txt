@@ -1,0 +1,52 @@
+# x64 GL timeline experiment - 'does gtk,gl=on show the guest?' (crop-to-guest fix)
+# script: ~/.hermes/cache/scratch/g3-x64-timeline.py (tag x64-gl); QEMU_GPU=auto MODE=desktop DISPLAY=:20
+# window geometry: 1024x768 guest content + 27px GTK header = 1024x795; rows 0-26 = chrome, row 27+ = guest
+# guest post-fix (01fd26d); launcher unchanged (no -accel flag)
+
+[tl] gpu=auto args=-qmp unix:./q4.sock,server,nowait
+[tl] t+   0.0s f001 ovmf/limine  nonblack=n/a
+[tl] t+   0.4s f002 ovmf/limine  nonblack=1.0000  <-- CONTENT
+[tl] t+   0.8s f003 ovmf/limine  nonblack=0.0034  <-- CONTENT
+[tl] t+   1.3s f004 ovmf/limine  nonblack=0.0034  <-- CONTENT
+[tl] t+   1.7s f005 ovmf/limine  nonblack=0.0034  <-- CONTENT
+[tl] t+   2.2s f006 ovmf/limine  nonblack=0.0034  <-- CONTENT
+[tl] t+   2.6s f007 ovmf/limine  nonblack=0.0000
+[tl] t+   3.2s f008 ovmf/limine  nonblack=0.0110  <-- CONTENT
+[tl] t+   3.7s f009 ovmf/limine  nonblack=0.0194  <-- CONTENT
+[tl] t+   4.3s f010 ovmf/limine  nonblack=0.0000
+[tl] t+   4.8s f011 ovmf/limine  nonblack=0.0000
+[tl] t+   5.4s f012 desktop      nonblack=0.0706  <-- CONTENT
+[tl] t+   5.9s f013 desktop      nonblack=1.0000  <-- CONTENT
+[tl] t+   6.4s f014 desktop      nonblack=1.0000  <-- CONTENT
+[tl] content frames: 10; first: (0.4, 2, 'ovmf/limine', 1.0)
+
+## per-frame nonblack - cropped 48px top (script) vs FULL window
+f002 640x507 cropped=1.0000 full=1.0000
+f003 640x507 cropped=0.0034 full=0.0565
+f004 640x507 cropped=0.0034 full=0.0565
+f005 640x507 cropped=0.0034 full=0.0565
+f006 640x507 cropped=0.0034 full=0.0565
+f007 1280x827 cropped=0.0000 full=0.0326
+f008 1280x827 cropped=0.0110 full=0.0432
+f009 1280x827 cropped=0.0194 full=0.0513
+f010 1024x795 cropped=0.0000 full=0.0340
+f011 1024x795 cropped=0.0000 full=0.0340
+f012 1024x795 cropped=0.0706 full=0.1057
+f013 1024x795 cropped=1.0000 full=1.0000
+f014 1024x795 cropped=1.0000 full=1.0000
+
+## f007 top-band row profile (mean row gray of rows 0-26 vs 27-63)
+rows 0-26: gray(218..223) = GTK window header (chrome band)
+rows 27-63: gray(0) = guest area (black frame)
+
+## verdict
+- YES: gtk,gl=on renders the x64 std-VGA guest continuously - firmware/console text
+  from t+0.8s, black gaps at mode switches, desktop paint at t+5.4s, full desktop
+  (nonblack 1.0000) at t+5.9s; early-stop fired at t+6.4s (3 consecutive desktop frames).
+- Crop fix validated: pure-black guest frames read exactly 0.0000 after the 48px
+  chop; the same frames read 0.0326-0.0565 FULL - chrome band only, i.e. the exact 5.6%
+  reading that tripped the pre-fix early-stop.
+- f002's 1.0000 is the undrawn window's default background (light bluish-gray; channel
+  means 0.75/0.78/0.85 - the window is mapped before the guest scanout attaches), not
+  guest content.
+- Desktop frame rows match the wallpaper palette exactly: (14,19,39)/(22,30,59)/(26,34,59)/(32,42,69).

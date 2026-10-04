@@ -12,6 +12,21 @@ All commands were run in the lane worktree (`~/hobbyos-lanes/gx-launch`) on
   `[IDLESTUCK]` lines are the §1-documented GL-device anomaly, not a gate)
 - `e2e-desktop-test.txt` — item 9: `python3 run_desktop_test.py` green
 
+x64 rows (captured after the controller's x64 flat-image fix `4cf6d44` was
+cherry-picked into this branch as commit `01fd26d`; the guest now boots to
+the desktop, zero fault markers):
+
+- `matrix-x64.txt` — x64 `make -n` rows (ARCH=intel). Filtered to the qemu
+  command line: the dry-run in this tree also lists would-be
+  fetch-guard/relink steps (same tree behavior as the ARM capture).
+- `boot-x64-soft.txt` — x64 soft/headless boot + QMP screendump (PASS)
+- `boot-x64-gl.txt` — x64 gl boot (`gtk,gl=on`, std-VGA guest) + X11
+  capture + gradient parity check vs the soft screendump (PASS)
+- `x64-timeline.txt` — x64 GL timeline experiment: gtk,gl=on renders the
+  guest std-VGA scanout from firmware through desktop; the crop-to-guest
+  fix (48px chop) is validated — pure-black guest frames read exactly
+  0.0000 (full-window read 0.03–0.06 = chrome band).
+
 Note (item 9): `run_desktop_test.py` internally runs `pkill -9 -f
 qemu-system-*` (global). To honor the lane rule "never signal other lanes'
 QEMUs", it was run with a PATH shim (a `pkill` wrapper that only signals

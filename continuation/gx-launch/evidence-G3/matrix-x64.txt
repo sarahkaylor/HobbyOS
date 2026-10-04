@@ -1,0 +1,22 @@
+# make -n matrix (x64 / ARCH=intel) — qemu command lines
+# captured 2026-10-04 19:30:26 UTC; DISPLAY=:20; QEMU emulator version 10.2.1 (Debian 1:10.2.1+ds-1ubuntu3.2)
+# (filtered to '^qemu-system': the dry-run also lists would-be fetch-guard/relink steps)
+
+== [make -n run ARCH=intel]
+qemu-system-x86_64 -M q35 -smp 8 -m 6144M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk,gl=on -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff 
+
+== [make -n run ARCH=intel QEMU_ARGS="-display none -qmp unix:./q.sock,server,nowait"]
+qemu-system-x86_64 -M q35 -smp 8 -m 6144M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff -display none -qmp unix:./q.sock,server,nowait
+
+== [make -n run ARCH=intel QEMU_GPU=gl]
+qemu-system-x86_64 -M q35 -smp 8 -m 6144M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk,gl=on -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff 
+
+== [env -u DISPLAY make -n run ARCH=intel]
+qemu-system-x86_64 -M q35 -smp 8 -m 6144M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff 
+
+== [make -n run ARCH=intel QEMU_GPU=soft]
+qemu-system-x86_64 -M q35 -smp 8 -m 6144M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff 
+
+== [make -n desktop_test_run ARCH=intel]
+qemu-system-x86_64 -M q35 -smp 8 -m 6144M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff -display none
+

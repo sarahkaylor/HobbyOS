@@ -1,0 +1,22 @@
+# x64 GL boot (make run ARCH=intel, auto -> -display gtk,gl=on, std-VGA guest), X11 capture
+# post-fix: 4cf6d44 cherry-picked as 01fd26d; cmdline-has-gl = (device,display): device False by design (G2 hook)
+make-pid: 1121371
+qemu-args: -qmp unix:./q2.sock,server,nowait
+desktop-marker: True
+qemu-holder-pids: [1121381]
+qemu-cmdline: qemu-system-x86_64 -M q35 -smp 8 -m 6144M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk,gl=on -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff -qmp unix:./q2.sock,server,nowait 
+cmdline-has-gl: (False, True)
+xwininfo-line: 0x8200001 "qemu": ("qemu-system-x86_64" "Qemu-system-x86_64")  10x10+10+10  +10+10
+xwininfo-line: 0x820000a "QEMU": ("qemu" "Qemu-system-x86_64")  1024x795+0+0  +1400+371
+import-rc: 0
+xcap: size=1024x795 nonblack-frac=1.0000
+fatal-count: 0
+serial-bytes: 8209
+VERDICT: PASS (nonblack=True fatal=0)
+
+## serial markers
+Desktop starting: 1 | memory fault: 0 | in=HOLE: 0 | FAULT: 0 | FATAL: 0 | IDLESTUCK: 0
+
+## gradient parity check (gl capture guest rows vs soft screendump rows)
+soft rows 100/300/500/700: (14,19,39) (22,30,59) (26,34,59) (32,42,69)
+gl  rows 100/300/500/700 (capture y+27): identical values
