@@ -19,6 +19,12 @@
 void virtio_blk_handle_irq(void);
 extern int virtio_blk_irq;
 extern int virtio_net_irq;
+#ifndef __x86_64__
+/* GX G1 (docs/graphics-accel.md): harvested virtual GPU IRQ + handler
+   (ARM virtio-mmio driver; the x64 GPU path has no IRQ wiring yet). */
+extern int virtio_gpu_irq;
+void virtio_gpu_handle_irq(void);
+#endif
 extern void smp_init(void);
 extern void mmu_init_core(void);
 extern void gic_init_cpu(void);
@@ -48,6 +54,10 @@ void irq_handler_c(struct trap_frame *tf) {
     virtio_blk_handle_irq();
   } else if (intid == (uint32_t)virtio_net_irq) {
     virtio_net_handle_irq();
+#ifndef __x86_64__
+  } else if (intid == (uint32_t)virtio_gpu_irq) {
+    virtio_gpu_handle_irq();
+#endif
   } else if (intid >= 48 && intid <= 79) {
     extern void virtio_input_handle_irq(int irq);
     virtio_input_handle_irq(intid);
@@ -386,6 +396,13 @@ void main(void) {
   // scanning, we instruct the GIC Distributor to unmask and forward the device
   // INTID specifically to this runtime.
   gic_enable_interrupt(virtio_blk_irq);
+#ifndef __x86_64__
+  /* GX G1: the GPU's IRQ was harvested in virtio_gpu_init() (which runs
+     before gic_init); unmask it now that interrupts are enabled.  A
+     missing GPU leaves virtio_gpu_irq == -1. */
+  if (virtio_gpu_irq >= 0)
+    gic_enable_interrupt(virtio_gpu_irq);
+#endif
   uart_puts("VirtIO Block successfully initialized.\n");
 
   if (fat16_init() != 0) {
