@@ -105,6 +105,43 @@ This launches QEMU with:
 When running in nographic mode:
 - Press `Ctrl+A`, then `X` to exit QEMU
 
+## Graphics acceleration
+
+QEMU launches through a single `QEMU_GPU` switch (see the launcher design in
+`docs/graphics-accel.md` §3-D5):
+
+- `auto` (default) — use the accelerated path only when a real interactive
+  display is in play: `MODE=desktop` **and** `DISPLAY` is set **and**
+  `QEMU_ARGS` does not force `-display none`. On ARM that means
+  `-device virtio-gpu-gl-device` + `-display gtk,gl=on` (host GL via
+  llvmpipe counts as accelerated). Everything else resolves to soft.
+- `soft` — always the plain 2D path: `virtio-gpu-device` + the plain
+  `gtk` display (or `-display none`).
+- `gl` — force the accelerated path. It is only valid when the display
+  backend actually has OpenGL support, so combining it with a
+  `-display none` override fails by design (QEMU rejects the GL device —
+  e.g. don't combine it with the `run_*.py` headless overrides).
+
+```bash
+make run                     # ARM desktop: GL device + gtk,gl=on when possible
+make run QEMU_GPU=soft       # force the plain 2D path
+make gpu-check               # probe this host; prints which mode auto picks
+```
+
+On x86_64 the guest still drives Bochs std-VGA (the x64 virtio-gpu driver
+lands separately); `QEMU_GPU` switches only the display backend there for
+now. `make gpu-check` probes both arches, shows why `egl-headless` and
+gl-with-`-display none` are excluded, and prints the mode `auto` will pick
+for the current invocation (it is harmless without `DISPLAY`).
+
+**Headless tiers stay on the plain device.** QMP `screendump` — what every
+`run_*.py` E2E and the CI VM rely on — has no surface under a `gtk,gl=on`
+window. `test`/`unit_tests`/`desktop_test` modes append `-display none` and
+resolve to `soft` automatically, as does any `make run` with a `-display
+none` override, so those paths behave exactly as before. To verify a GL
+boot interactively, capture the X11 window instead:
+`xwininfo -root -tree | grep -i qemu`, then `import -window <id> shot.png`.
+
 ## NFS (read-only NFSv3 client)
 
 The kernel can mount NFSv3 exports over UDP and route path-based syscalls
