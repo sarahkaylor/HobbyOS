@@ -2624,6 +2624,7 @@ void start_scheduler(void) {
        forever, so without the heartbeat the reaper would never reclaim
        its RUNNING process and every CPU would IDLESTUCK-cycle forever. */
     sched_idle_rounds++;
+    int anomaly = 0; /* this pass found a real stuck process to name */
     if (sched_idle_rounds >= 500) {
       uint64_t wflags = spinlock_acquire_irqsave(&proc_lock);
       int dispose_slot = 0;
@@ -2653,6 +2654,7 @@ void start_scheduler(void) {
             }
           }
           if (!claimers) {
+            anomaly = 1;
             uart_puts("[LOSTWAKE] reclaiming pid=");
             print_int(proc_table[k].pid);
             uart_puts(" ");
@@ -2672,6 +2674,7 @@ void start_scheduler(void) {
                owner's heartbeat is frozen forever, so its claim still
                confirms — the poison-resume recovery below is unchanged,
                merely delayed one idle round. */
+            anomaly = 1;
             lw_candidate = k;
             uint64_t freshest = 0;
             for (int c2 = 0; c2 < MAX_CPUS; c2++) {
@@ -2734,11 +2737,14 @@ void start_scheduler(void) {
         group_teardown(process_group(&proc_table[dispose_slot]), 97);
     }
 
-    /* Diagnostic dump (monotone trigger so concurrent CPUs racing the
-       shared counter cannot skip the exact modulo value): dump the
-       stuck process table every ~1000 idle rounds so a wedged suite
-       names its stuck process in the boot log. */
-    if (sched_idle_rounds >= 500 &&
+    /* Diagnostic dump: name a stuck process ONLY when this pass actually
+       found something real (a RUNNING slot with no claiming CPU, or a
+       stale-dead-owner candidate worth an arm).  A healthy-but-idle desktop
+       has RUNNING slots that ARE claimed (cX=pid) — those are alive and
+       must not spam the console with a full table dump every ~1000 idle
+       rounds.  The monotone trigger still rate-limits a genuinely wedged
+       system to one dump per window so the stuck suite names itself. */
+    if (anomaly && sched_idle_rounds >= 500 &&
         (sched_idle_rounds / 1000) != last_idlestuck_div) {
       last_idlestuck_div = sched_idle_rounds / 1000;
       uart_puts("[IDLESTUCK] cpu=");
