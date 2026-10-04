@@ -392,6 +392,15 @@ int virtio_blk_read_sector(uint64_t sector, void* buf, uint32_t count) {
       res = -1;
       break;
     }
+    /* L9 liveness: each sector is an IRQ-off NVMe poll; a peer reaper must
+       not age this core's claim stale across a long image read (the -smp 8
+       WebProcess wedge).  Refresh per sector — the core is provably alive.
+       Writes only; process.c owns the array. */
+    {
+      extern volatile uint64_t cpu_heartbeat_ms[];
+      extern uint64_t timer_get_ms(void);
+      cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+    }
     memcpy((uint8_t*)buf + (i * 512), (const void*)&bounce_buf[0], 512);
   }
   spinlock_release_irqrestore(&blk_request_lock, flags);
@@ -694,6 +703,17 @@ static int virtio_blk_do_op(uint64_t sector, void* buf, uint32_t type, uint32_t 
 
   uint64_t wait_guard = 0;
   while (*(volatile uint16_t*)&vq.used.idx == ack_used_idx) {
+    /* L9 liveness: this poll is the IRQ-off disk wait the loader core
+       stands in for the whole 86 MB image read, so a peer reaper must not
+       age the claim stale and DISPOSE the mid-load process.  Refresh the
+       ownership heartbeat on a throttled cadence — the core is provably
+       alive (it is servicing the device).  Writes only; process.c owns
+       the array. */
+    if ((wait_guard & 0xFFF) == 0) {
+      extern volatile uint64_t cpu_heartbeat_ms[];
+      extern uint64_t timer_get_ms(void);
+      cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+    }
     arch_memory_barrier();
     if ((++wait_guard & 0xFFFFFFF) == 0) {
       uart_puts("[BLKDIAG] waiting used.idx=");
@@ -747,6 +767,18 @@ int virtio_blk_read_sector(uint64_t sector, void* buf, uint32_t count) {
      single-sector round trips per program into a handful. */
   if (virtio_blk_do_op(sector, buf, VIRTIO_BLK_T_IN, count) != 0) {
     res = -1;
+  }
+  /* L9 liveness: bound the IRQ-off refresh gap to ONE device op.  The
+     loader's fat16_read path issues one op per 512 B sector here
+     (count==1), and under TCG a cross-core sampling race once aged a
+     genuinely-loading owner past LOSTWAKE_DEAD_OWNER_MS between the
+     per-page refreshes in v2_map_image (a false LOSTWAKE dispose).  This
+     core is provably alive right after a completed op.  Writes only;
+     process.c owns the array. */
+  {
+    extern volatile uint64_t cpu_heartbeat_ms[];
+    extern uint64_t timer_get_ms(void);
+    cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
   }
 
   flags = spinlock_acquire_irqsave(&blk_request_lock);

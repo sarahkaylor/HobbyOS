@@ -1498,6 +1498,19 @@ static void sys_getenv(struct trap_frame *tf) {
 static volatile int core_in_syscall[MAX_CPUS];
 
 void sync_lower_handler_c(struct trap_frame *tf) {
+  /* L9 liveness (the x64 lane's proven scratch fix): a syscall entry proves
+     this core is executing, so refresh the ownership heartbeat at entry.
+     Timeout-driven loads (the 86 MB WebProcess) make the owner core spend
+     seconds in user mode or IRQ-off on the console path between timer
+     ticks; the idle reaper on another core must never treat that
+     genuinely-running owner as a stale dead claim and dispose its process.
+     The interrupt handler already refreshes on every IRQ (watchdog_tick);
+     this closes the syscall-only, IRQ-starved window on the same clock.
+     Writes only; process.c owns the array. */
+  extern volatile uint64_t cpu_heartbeat_ms[];
+  extern uint64_t timer_get_ms(void);
+  cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+
   uint64_t syscall_num = tf->regs[0]; // rax
   core_in_syscall[get_cpuid()] = (int)syscall_num;
 

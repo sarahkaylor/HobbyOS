@@ -23,6 +23,12 @@ extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
 // L8 ABI ext (row 87): boot-anchored REALTIME clock (src/kernel/time.c).
 extern uint64_t hb_clock_realtime_ms(void);
+/* L9 liveness: per-CPU ownership heartbeat bank owned by process.c.  The
+   trap handlers below REFRESH it on every EL0->EL1 entry (IRQ, syscall,
+   fault) so a core genuinely executing a process never looks 'dead' to the
+   lost-owner reaper; refresh sites only ever WRITE.  Decision logic (the
+   only reader) stays in process.c. */
+extern volatile uint64_t cpu_heartbeat_ms[];
 
 /* Defined below (line ~330); declared here for the early syscall helpers
    that are v2-aware since P2.2 S2.  P4: non-static — fs.c range-checks
@@ -1584,6 +1590,17 @@ void sync_handler_c(struct trap_frame *tf) {
  * syscall.  Any added arm/x64 syscall must append an else-if here. */
 
 void sync_lower_handler_c(struct trap_frame *tf) {
+  /* L9 liveness: any EL0->EL1 sync entry proves this core is executing,
+     not wedged (syscall, page fault, or unknown-class trap alike).  A core
+     running a long-lived user process spends huge stretches between
+     context switches — the 86 MB WebProcess load alone can hold a core in
+     user mode for seconds while other cores idle — and only refreshing the
+     heartbeat here keeps the owner from aging past LOSTWAKE_DEAD_OWNER_MS
+     on the reaper's clock.  Refresh at the TOP so even a faulting path
+     proves life; writes only, process.c owns the array. */
+  extern uint64_t timer_get_ms(void);
+  cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+
   uint64_t esr;
   __asm__ volatile("mrs %0, esr_el1" : "=r"(esr));
 
@@ -1887,6 +1904,16 @@ void sync_lower_handler_c(struct trap_frame *tf) {
  * interrupt occurred.
  */
 void irq_lower_handler_c(struct trap_frame *tf) {
+  /* L9 liveness (mirrors x64 general_interrupt_handler -> watchdog_tick's
+     refresh): EVERY IRQ entry — timer tick, virtio blk/net/input — proves
+     this core is alive and dispatching.  Refresh the ownership heartbeat
+     at the TOP so a core genuinely running a process keeps a live
+     heartbeat even in long user-mode stretches between syscalls; a stale
+     owner is what made the idle reaper DISPOSE a live WebProcess at 4-8
+     cores.  Writes only; process.c owns the array. */
+  extern uint64_t timer_get_ms(void);
+  cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+
   uint32_t intid = gic_acknowledge_interrupt();
 
   if (intid == TIMER_PPI_INTID) {
