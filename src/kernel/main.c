@@ -24,6 +24,7 @@ extern int virtio_net_irq;
    (ARM virtio-mmio driver; the x64 GPU path has no IRQ wiring yet). */
 extern int virtio_gpu_irq;
 void virtio_gpu_handle_irq(void);
+void virtio_gpu_arm_wait_park(void);
 #endif
 extern void smp_init(void);
 extern void mmu_init_core(void);
@@ -398,10 +399,14 @@ void main(void) {
   gic_enable_interrupt(virtio_blk_irq);
 #ifndef __x86_64__
   /* GX G1: the GPU's IRQ was harvested in virtio_gpu_init() (which runs
-     before gic_init); unmask it now that interrupts are enabled.  A
-     missing GPU leaves virtio_gpu_irq == -1. */
-  if (virtio_gpu_irq >= 0)
+     before gic_init); unmask it now that interrupts are enabled, then arm
+     the driver's wfi park (a local wake source - the timer tick - exists
+     from here on; before this point the wait must stay a spin).  A
+     missing GPU leaves virtio_gpu_irq == -1 and the park unarmed. */
+  if (virtio_gpu_irq >= 0) {
     gic_enable_interrupt(virtio_gpu_irq);
+    virtio_gpu_arm_wait_park();
+  }
 #endif
   uart_puts("VirtIO Block successfully initialized.\n");
 

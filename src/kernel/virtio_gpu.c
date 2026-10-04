@@ -111,6 +111,19 @@ static volatile int gpu_in_use = 0;
  * it after interrupts_enable() and routes it to virtio_gpu_handle_irq. */
 int virtio_gpu_irq = -1;
 
+/* One-time arming for the wfi park in gpu_wait_completed: main.c sets
+ * this after the GPU IRQ is unmasked AND the per-core timer tick is live.
+ * Before that (boot-time init commands run before gic_init/timer_init) a
+ * wfi has NO guaranteed wake source and would sleep forever — G1's
+ * 2026-10-04 boot hang was exactly a park entered in that window, so the
+ * wait refuses to park until armed (it stays a bounded spin). */
+static volatile int gpu_wait_park_ok = 0;
+
+void virtio_gpu_arm_wait_park(void) {
+  gpu_wait_park_ok = 1;
+}
+
+
 static uint32_t framebuffer[GPU_FB_W * GPU_FB_H] __attribute__((aligned(2097152)));
 
 static inline void reg_write32(uint32_t offset, uint32_t val) {
@@ -204,47 +217,66 @@ static void gpu_release(void) {
  * Discipline (docs/graphics-accel.md D3): a bounded tight spin covers the
  * usual (fast) completion; past GPU_WAIT_SPIN_MS the core parks on wfi,
  * which the per-core local timer re-arms every ~10 ms (so the park is
- * bounded even if the completion IRQ lands on another core).  IRQs are
- * enabled across the whole wait (interrupts_save_enable; the same
- * primitive ARP-wait-in-syscall uses) so a completion interrupt can be
- * taken and acknowledged here, and the syscall never sits in a long
- * IRQ-off stretch.  The heartbeat bank is refreshed on every park wake
- * (and throttle-spaced during the spin) so a peer LOSTWAKE reaper can
+ * bounded even if the completion IRQ lands on another core).  The park is
+ * additionally gated on gpu_wait_park_ok (armed by main.c once the GPU
+ * IRQ is unmasked): boot-time init commands run before gic_init/timer
+ * init, where a wfi has no wake source at all, so those waits stay a
+ * spin.  IRQs are enabled across the whole wait (interrupts_save_enable;
+ * the same primitive the ARP-in-syscall wait uses) so a completion
+ * interrupt can be taken and acknowledged here, and the syscall never
+ * sits in a long IRQ-off stretch.  The heartbeat bank is refreshed on
+ * every park wake (and throttle-spaced during the spin) so a peer
+ * LOSTWAKE reaper can
  * never age this core out mid-wait.
  */
 static void gpu_wait_completed(uint16_t ack_before) {
   uint64_t daif = interrupts_save_enable();
   uint64_t t0 = timer_get_ms();
   uint32_t iters = 0;
-  uint32_t parked_wakes = 0;
+  static uint32_t slow_events; /* rate limit for the diagnostic below */
 
   for (;;) {
     if (*(volatile uint16_t*)&gpu_vq.used.idx != ack_before) {
-      cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
       break;
     }
     arch_memory_barrier();
-    if ((++iters & 0x3F) != 0)
+    if ((++iters & 0x3F) != 0) {
       continue;
+    }
 
     uint64_t now = timer_get_ms();
     cpu_heartbeat_ms[get_cpuid()] = now;
-    if (now - t0 < GPU_WAIT_SPIN_MS)
+    if (now - t0 < GPU_WAIT_SPIN_MS) {
       continue;
+    }
 
-    parked_wakes++;
-    if (parked_wakes <= 3 || (parked_wakes & 0x3FF) == 0) {
+    slow_events++;
+    if (slow_events <= 3 || (slow_events & 0x3FF) == 0) {
       uart_puts("[GPUDIAG] gpu wait > ");
       print_int((int)(now - t0));
       uart_puts(" ms: ack=");
       print_int((int)ack_before);
       uart_puts(" used=");
       print_int((int)(*(volatile uint16_t*)&gpu_vq.used.idx));
+      if (!gpu_wait_park_ok) {
+        uart_puts(" (park off)");
+      }
       uart_puts("\n");
+    }
+    if (!gpu_wait_park_ok) {
+      continue; /* no local wake source yet: keep the bounded spin */
+    }
+    /* Re-check right before sleeping: a completion that landed since the
+       loop top must not be slept on (with the park armed, the local tick
+       bounds any residual race to ~10 ms). */
+    arch_memory_barrier();
+    if (*(volatile uint16_t*)&gpu_vq.used.idx != ack_before) {
+      break;
     }
     safe_wfi();
   }
 
+  cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
   interrupts_restore(daif);
 }
 
