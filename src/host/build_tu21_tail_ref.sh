@@ -14,6 +14,7 @@ WD_ARG="${1:-/tmp}"
 BASE="$(cd "$(dirname "$0")/../../third_party/textutils-2.1" && pwd)"
 OUT="${1:-/tmp/tu21_tail_ref}"
 WD="$(mktemp -d /tmp/tu21tailref.XXXXXX)"
+trap 'rm -rf "$WD"' EXIT
 
 cat > "$WD/config.h" <<'EOF'
 #define VERSION "2.1"
