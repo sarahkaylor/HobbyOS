@@ -198,6 +198,16 @@ unit-arm, unit-x64, ARM wave + x64 wave characterization on the CI VM
 
 ## 7. Log (append-only)
 
+- 2026-10-04 — **GFXBENCH v2 instrument (controller; measurement fix).**
+  Freeze-version wave numbers showed spread artifacts on both arches with
+  IDENTICAL work per op (ARM: r256 mean 125 ms vs full 0.5 ms; x64: full
+  mean 8.2 ms vs r256 0.55 ms) — mean-of-few-samples under wave churn is
+  not an estimator. v2: warmup iterations + min/median/mean per phase,
+  the timer brackets only the flush call, 10/30/50 samples. Lanes'
+  own before/after runs (both sides on the freeze bench) stay internally
+  consistent; the clean before/after for this log will be re-derived at
+  integration (freeze tip vs merged tip, both with v2).
+
 - 2026-10-04 — **GX program created + freeze landed (this commit).**
   De-risk evidence archived (§1): GL device works with the 2D-only guest
   (46-min desktop run + X11 capture); egl-headless and gl-device-with-
