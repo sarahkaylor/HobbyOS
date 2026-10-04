@@ -1457,6 +1457,32 @@ void sync_handler_c(struct trap_frame *tf) {
     return;
   }
 
+  /* L9 (pagein): the v2 IMAGE region is demand-paged, so a kernel path
+     (a syscall marshalling a user buffer) can touch a not-yet-faulted
+     LEGAL user page through the process AS before userspace faulted it.
+     Materialize the page here with the same demand fill a user fault
+     would run and retry the EL1 instruction SILENTLY — this restores
+     exactly the residency the eager loader used to provide.  Genuinely
+     illegal accesses (holes / guards / protection violations / present-
+     but-aborting pages) fall through to the fatal dump + kill below. */
+  if (ec == 0x21 || ec == 0x25) {
+    uint64_t far;
+    __asm__ volatile("mrs %0, far_el1" : "=r"(far));
+    struct process *pfp = current_process();
+    if (pfp && pfp->as && far >= USER_VA_BASE) {
+      /* A genuine write to a read-only page (wnr=1) must NOT fall back to
+         a read-only materialization (the retried store would fault again
+         forever), so the read-only retry is gated on wnr==0. */
+      const char *why = "PROT";
+      int wnr = (ec == 0x25) ? (int)((iss >> 6) & 1) : 0;
+      if (vm_handle_fault(process_group(pfp), far, 1, 0, &why) == 0 ||
+          (wnr == 0 && vm_handle_fault(process_group(pfp), far, 0, 0,
+                                       &why) == 0)) {
+        return; /* page is live; eret retries the EL1 instruction */
+      }
+    }
+  }
+
   // Serialize multi-core fault dumps so one CPU at a time prints a clean
   // line (otherwise 4 CPUs interleave the FATAL text char-by-char).
   static spinlock_t fatal_lock = {0};
@@ -1536,13 +1562,15 @@ void sync_handler_c(struct trap_frame *tf) {
   }
 
   /* WK-3 (draft 0007): an EL1 data/instruction abort that references USER
-     address space while a process context is current is the process's bug,
-     not the OS's: the WK-3 fork's unclamped exit-diag stack walk read one
-     VA past the 8 MiB main-stack region (window top) during teardown ->
-     EC=0x25 data abort, translation-level-1.  Print the diagnostic above,
-     then kill the offending process cleanly instead of halting the whole
-     OS.  Faults at kernel addresses (below USER_VA_BASE), or with no
-     current process, stay FATAL and spin below. */
+     address space while a process context is current is normally the
+     process's bug, not the OS's: the WK-3 fork's unclamped exit-diag stack
+     walk read one VA past the 8 MiB main-stack region (window top) during
+     teardown -> EC=0x25 data abort, translation-level-1.  The L9 (pagein)
+     materialize attempt at the top of this handler already ran and did not
+     resolve it (hole / guard / protection violation / present-but-aborting):
+     print the diagnostic above, then kill the offending process cleanly
+     instead of halting the whole OS.  Faults at kernel addresses (below
+     USER_VA_BASE), or with no current process, stay FATAL and spin below. */
   {
     uint64_t ffar;
     __asm__ volatile("mrs %0, far_el1" : "=r"(ffar));

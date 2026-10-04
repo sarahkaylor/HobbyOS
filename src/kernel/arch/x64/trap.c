@@ -2136,19 +2136,37 @@ void general_interrupt_handler(struct trap_frame *tf) {
       }
       /* WK-3 (draft 0007, x64 mirror of the ARM EL1 fix): a kernel-mode
          #PF (vector 14) whose faulting address references USER address
-         space while a process is current is the process's bug (the WK-3
-         fork's unclamped exit-diag stack walk read one VA past the
-         main-stack region during teardown).  The kernel only touches user
-         v2 pages after sys_user_range/vm_touch pre-commits them in the
-         process AS (CR3 = process AS), so a kernel-mode #PF inside the
-         user window is a real overrun: kill the offending process cleanly
-         instead of halting the whole OS.  Only #PF has a trustworthy
+         space while a process is current is normally the process's bug
+         (the WK-3 fork's unclamped exit-diag stack walk read one VA past
+         the main-stack region during teardown).  The kernel only touches
+         user v2 pages after sys_user_range/vm_touch pre-commits them in
+         the process AS (CR3 = process AS), so a kernel-mode #PF inside
+         the user window is a real overrun: kill the offending process
+         cleanly instead of halting the whole OS.  L9 (pagein) refines
+         this: the v2 IMAGE region is now demand-paged, so a kernel path
+         marshalling a user buffer can touch a not-yet-faulted LEGAL user
+         page; materialize it with the same demand fill a user fault runs
+         and let iretq retry (restoring the residency the eager loader
+         used to provide).  Genuine overruns (holes / guards / prot
+         violations) still kill below.  Only #PF has a trustworthy
          faulting address (CR2); every other kernel-mode vector keeps the
          raw dump + halt below. */
       if (tf->vector == 14 && cur) {
         uint64_t kcr2;
         __asm__ volatile("mov %%cr2, %0" : "=r"(kcr2));
         if (kcr2 >= USER_VA_BASE) {
+          if (cur->as) {
+            /* vm_handle_fault may do device I/O; the write-fallback to a
+               read-only materialization is gated on a read fault (a real
+               write to a read-only page must keep faulting -> kill). */
+            const char *why = "PROT";
+            int pf_w = (int)((tf->error_code >> 1) & 1);
+            if (vm_handle_fault(process_group(cur), kcr2, 1, 0, &why) == 0 ||
+                (!pf_w && vm_handle_fault(process_group(cur), kcr2, 0, 0,
+                                          &why) == 0)) {
+              return; /* PTE live; iretq retries the faulting instruction */
+            }
+          }
           uart_puts_raw("[KERNEL] Kernel-mode #PF in user address space -> killing pid=");
           print_int_raw(cur->pid);
           uart_puts_raw("\n");
