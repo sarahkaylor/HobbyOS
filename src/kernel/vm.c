@@ -25,6 +25,14 @@ extern void uart_puts(const char *s);
 extern void print_int(int v);
 extern void uart_print_hex(uint64_t v);
 
+/* L9 (prefetch): the background loader's kernel-task plumbing (the same
+   externs the other kernel-task callers use, e.g. trap.c / virtio_blk.c). */
+extern uint32_t get_cpuid(void);
+extern uint64_t timer_get_ms(void);
+extern volatile uint64_t cpu_heartbeat_ms[];
+extern void kernel_exit(void);
+extern int process_create_kernel_nowait(void (*entry)(void *), void *arg);
+
 #define VM_REGION_INIT_CAP 16
 #define VM_REGION_MAX_CAP 1024
 
@@ -98,6 +106,8 @@ struct addr_space *vm_as_create(uint64_t tgid) {
   as->table_frames = 0;
   as->peak_frames = 0;
   as->tgid = tgid;
+  as->img_active = 0;
+  as->img_epoch++; /* a reused slot must never look like its old life */
   uint64_t root = vm_arch_root_alloc(as); /* sets as->root_phys accounting */
   if (!root) {
     as->ver = 0;
@@ -134,6 +144,8 @@ void vm_as_teardown(struct addr_space *as) {
   as->resident_frames = 0;
   as->peak_frames = 0;
   as->table_frames = 0;
+  as->img_active = 0;
+  as->img_epoch++; /* L9 (prefetch): abort any stale background task */
   spinlock_release_irqrestore(&vm_lock, flags);
 
   /* S4: every region record held one object reference; drop it while the
@@ -881,6 +893,298 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
     as->peak_frames = as->resident_frames;
   spinlock_release_irqrestore(&vm_lock, fl);
   return 0; /* the instruction retries (ELR/CR2 untouched) */
+}
+
+/* ---------------------------------------------------------------------
+ * L9 (prefetch): proactive background load of a lazy v2 IMAGE.
+ *
+ * The loader leaves the IMAGE region demand-paged and pulls only the
+ * first executable page in (vm_image_load_first_page, called by
+ * v2_map_image).  For images at or above V2_PREFETCH_MIN_BYTES,
+ * vm_image_prefetch_autostart spawns one kernel task that walks the
+ * remaining pages in file order and reads up to V2_PREFETCH_BATCH_PAGES
+ * pages per coalesced fat16 call (one device request per chain-
+ * contiguous run, up to the 1024-sector device cap) into a reusable
+ * contiguous scratch run, installing each page with the same
+ * map-if-absent protocol the demand path uses.  Races are benign by
+ * construction: whichever of {demand fault, eager first page, prefetch,
+ * peer CPU} maps a page first wins; everyone else sees the present leaf
+ * under vm_lock and drops their frame.  A collision costs one duplicate
+ * 4 KiB read, never corruption.  The task stops when the image is fully
+ * processed or the AS dies / is rebuilt (the img_epoch check) and
+ * refreshes the CPU liveness heartbeat as it goes, so a long prefetch
+ * is never mistaken for a stale claim by the idle reaper.
+ * ------------------------------------------------------------------- */
+
+#define V2_PREFETCH_BATCH_PAGES 128 /* 512 KiB: one 1024-sector device cap */
+#define V2_PREFETCH_BATCH_MIN 16    /* scratch-run floor before giving up */
+#define V2_PREFETCH_MIN_BYTES (2u * 1024u * 1024u) /* autostart threshold */
+
+struct v2_prefetch_args {
+  struct addr_space *as;
+  int pid;
+  uint32_t epoch;
+  uint32_t file_size;
+  uint16_t start_cluster;
+};
+
+/* One slot per process id: a load for pid P owns slot P until its AS is
+   torn down.  The task copies the slot at entry; a torn read from a
+   rapid slot reuse (pid reuse / exec) can only ever yield a mismatched
+   epoch -- which aborts. */
+static struct v2_prefetch_args v2_prefetch_pool[MAX_PROCESSES];
+
+static int v2_prefetch_alive_locked(struct addr_space *as, uint32_t epoch,
+                                    uint16_t cluster, uint32_t fsize) {
+  return as->ver == AS_V2 && as->img_active &&
+         as->img_epoch == epoch && as->img_start_cluster == cluster &&
+         as->img_file_size == fsize;
+}
+
+/* Word-wise frame copy for the prefetch path (both sides are 4 KiB frame
+   runs; kernel C is -mgeneral-regs-only, so no SIMD). */
+static void v2_prefetch_copy(uint64_t dst, uint64_t src) {
+  volatile uint64_t *d = (volatile uint64_t *)dst;
+  const uint64_t *s = (const uint64_t *)src;
+  for (uint64_t i = 0; i < FRAME_SIZE / 8; i++)
+    d[i] = s[i];
+}
+
+int vm_image_load_first_page(struct addr_space *as) {
+  if (!as || as->ver != AS_V2 || !as->img_active)
+    return -EINVAL;
+  return v2_image_materialize(as, USER_IMG_BASE);
+}
+
+int vm_image_prefetch_run(struct addr_space *as, uint64_t start_page,
+                          uint64_t npages, struct vm_prefetch_stats *st) {
+  struct vm_prefetch_stats local;
+  if (!st)
+    st = &local;
+  st->pages = npages;
+  st->processed = 0;
+  st->mapped = 0;
+  st->skipped = 0;
+  st->batches = 0;
+  st->stopped = 0;
+
+  if (!as || as->ver != AS_V2 || !as->img_active)
+    return -1;
+
+  uint32_t epoch, fsize;
+  uint16_t cluster;
+  {
+    uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+    if (as->ver != AS_V2 || !as->img_active) {
+      spinlock_release_irqrestore(&vm_lock, fl);
+      return -1;
+    }
+    epoch = as->img_epoch;
+    cluster = as->img_start_cluster;
+    fsize = as->img_file_size;
+    spinlock_release_irqrestore(&vm_lock, fl);
+  }
+
+  uint64_t img_pages = ((uint64_t)fsize + FRAME_SIZE - 1) / FRAME_SIZE;
+  if (start_page >= img_pages)
+    npages = 0;
+  else if (npages > img_pages - start_page)
+    npages = img_pages - start_page;
+  st->pages = npages;
+  if (npages == 0)
+    return 0;
+
+  /* Scratch: one contiguous run, reused for every batch.  On allocation
+     failure decay the batch size; below the floor the image is left to
+     the (already working) demand path. */
+  int batch = V2_PREFETCH_BATCH_PAGES;
+  uint64_t buf = 0;
+  while (batch >= V2_PREFETCH_BATCH_MIN) {
+    buf = frame_alloc_contig(batch);
+    if (buf)
+      break;
+    batch >>= 1;
+  }
+  if (!buf) {
+    st->stopped = 2;
+    return 0;
+  }
+
+  uint64_t page = start_page;
+  uint64_t endp = start_page + npages;
+  while (page < endp) {
+    uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+    int alive = v2_prefetch_alive_locked(as, epoch, cluster, fsize);
+    spinlock_release_irqrestore(&vm_lock, fl);
+    if (!alive) {
+      st->stopped = 1;
+      break;
+    }
+    cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+
+    uint64_t n = (uint64_t)batch;
+    if (n > endp - page)
+      n = endp - page;
+
+    /* One coalesced read covers the whole batch.  A short read is either
+       the EOF tail (zero the remainder so the last page matches the
+       demand path's fill) or an I/O anomaly (leave the rest to demand
+       faults). */
+    uint32_t pos = (uint32_t)(page * FRAME_SIZE);
+    int want = (int)(n * FRAME_SIZE);
+    st->batches++;
+    int got = fat16_read_direct_pos(cluster, fsize, buf, want, pos);
+    if (got < 0) {
+      st->stopped = 2;
+      break;
+    }
+    if (got < want) {
+      if ((uint64_t)pos + (uint64_t)got < (uint64_t)fsize) {
+        st->stopped = 2;
+        break;
+      }
+      volatile uint8_t *bp = (volatile uint8_t *)buf;
+      for (int i = got; i < want; i++)
+        bp[i] = 0;
+    }
+
+    int stop = 0;
+    for (uint64_t i = 0; i < n; i++) {
+      uint64_t va = USER_IMG_BASE + (page + i) * FRAME_SIZE;
+
+      /* Already resident (the eager first page, a demand fault ahead of
+         us, or a peer)?  Skip without a frame. */
+      fl = spinlock_acquire_irqsave(&vm_lock);
+      int present = (vm_arch_walk(as, va, 0) == 0);
+      spinlock_release_irqrestore(&vm_lock, fl);
+      if (present) {
+        st->skipped++;
+        st->processed++;
+        continue;
+      }
+
+      uint64_t fr = frame_alloc();
+      if (!fr) {
+        st->stopped = 2;
+        stop = 1;
+        break;
+      }
+      v2_prefetch_copy(fr, buf + i * FRAME_SIZE);
+      __builtin___clear_cache((char *)fr, (char *)fr + FRAME_SIZE);
+      cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+
+      /* Re-validate under vm_lock and install if still absent: a peer
+         (demand fault / eager fill) may have mapped the page while we
+         read -- the loser drops its frame. */
+      fl = spinlock_acquire_irqsave(&vm_lock);
+      int mapped = 0;
+      int alive2 = v2_prefetch_alive_locked(as, epoch, cluster, fsize);
+      if (alive2) {
+        struct vm_region *r2 = vm_region_find(as, va);
+        if (r2 && r2->kind == VMK_IMG && va >= r2->base &&
+            va + FRAME_SIZE <= r2->base + r2->len &&
+            vm_arch_walk(as, va, 0) != 0) {
+          if (vm_arch_map(as, va, fr, r2->prot, VMK_IMG) == 0) {
+            as->resident_frames++;
+            if (as->resident_frames > as->peak_frames)
+              as->peak_frames = as->resident_frames;
+            mapped = 1;
+          }
+        }
+      }
+      spinlock_release_irqrestore(&vm_lock, fl);
+
+      if (!mapped)
+        frame_free(fr);
+      if (!alive2) {
+        st->stopped = 1;
+        stop = 1;
+        break;
+      }
+      if (mapped)
+        st->mapped++;
+      else
+        st->skipped++; /* lost the race (or region changed): peer owns it */
+      st->processed++;
+    }
+    if (stop)
+      break;
+    page += n;
+  }
+
+  for (int i = 0; i < batch; i++)
+    frame_free(buf + (uint64_t)i * FRAME_SIZE);
+  return (int)st->mapped;
+}
+
+/* The kernel task itself: one per large-image load, spawned by
+   vm_image_prefetch_autostart; exits via kernel_exit() when the image is
+   fully processed or the AS dies. */
+static void v2_image_prefetch_task(void *arg) {
+  struct v2_prefetch_args a = *(struct v2_prefetch_args *)arg;
+  uint64_t t0 = timer_get_ms();
+  uint64_t total = ((uint64_t)a.file_size + FRAME_SIZE - 1) / FRAME_SIZE;
+  struct vm_prefetch_stats st;
+  vm_image_prefetch_run(a.as, 0, total, &st);
+  uart_puts("[IMGPRF] pid=");
+  print_int(a.pid);
+  uart_puts(" done: pages=");
+  print_int((int)st.pages);
+  uart_puts(" mapped=");
+  print_int((int)st.mapped);
+  uart_puts(" skipped=");
+  print_int((int)st.skipped);
+  uart_puts(" batches=");
+  print_int((int)st.batches);
+  uart_puts(" stop=");
+  print_int(st.stopped);
+  uart_puts(" ms=");
+  print_int((int)(timer_get_ms() - t0));
+  uart_puts("\n");
+  kernel_exit();
+}
+
+void vm_image_prefetch_autostart(struct addr_space *as) {
+  if (!as)
+    return;
+  int pid;
+  uint32_t epoch, fsize;
+  uint16_t cluster;
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  if (as->ver != AS_V2 || !as->img_active ||
+      as->img_file_size < V2_PREFETCH_MIN_BYTES) {
+    spinlock_release_irqrestore(&vm_lock, fl);
+    return;
+  }
+  pid = (int)as->tgid;
+  epoch = as->img_epoch;
+  cluster = as->img_start_cluster;
+  fsize = as->img_file_size;
+  spinlock_release_irqrestore(&vm_lock, fl);
+
+  if (pid <= 0 || pid >= MAX_PROCESSES)
+    return;
+  struct v2_prefetch_args *args = &v2_prefetch_pool[pid];
+  args->as = as;
+  args->pid = pid;
+  args->epoch = epoch;
+  args->file_size = fsize;
+  args->start_cluster = cluster;
+
+  int kpid = process_create_kernel_nowait(v2_image_prefetch_task, args);
+  if (kpid < 0) {
+    uart_puts("[IMGPRF] pid=");
+    print_int(pid);
+    uart_puts(" spawn failed (kernel task slot/block pressure)\n");
+    return;
+  }
+  uart_puts("[IMGPRF] pid=");
+  print_int(pid);
+  uart_puts(" start: pages=");
+  print_int((int)(((uint64_t)fsize + FRAME_SIZE - 1) / FRAME_SIZE));
+  uart_puts(" batch=");
+  print_int(V2_PREFETCH_BATCH_PAGES);
+  uart_puts("\n");
 }
 
 /* ---------------------------------------------------------------------

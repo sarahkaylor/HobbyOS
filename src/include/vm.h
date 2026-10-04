@@ -155,6 +155,11 @@ struct addr_space { /* one per group (leader PCB owned) */
   int img_active;
   uint32_t img_file_size;
   uint16_t img_start_cluster;
+  /* L9 (prefetch): generation counter, bumped on create and teardown.  A
+     background prefetch task captures it at spawn and aborts when it no
+     longer matches — pid reuse / exec must never let an old task adopt
+     (or tear) a new life of this slot. */
+  uint32_t img_epoch;
 };
 
 /* --- AS lifecycle (vm.c) --------------------------------------------- */
@@ -235,6 +240,42 @@ int vm_kwrite(struct process *p, uint64_t va, const void *src, int len);
  * report line. */
 int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
                     const char **why);
+
+/* --- L9 (prefetch): background loader for the lazy v2 IMAGE ---------- */
+
+/* Eagerly materialize the first executable page (page 0; the v2 entry
+ * point is USER_IMG_BASE) right after v2_map_image recorded the image
+ * identity.  Best-effort: on failure the page stays lazy and the first
+ * touch faults it in as before.  Returns 0 or a negative errno. */
+int vm_image_load_first_page(struct addr_space *as);
+
+/* Spawn the background prefetch kernel task for `as` once the loaders
+ * have made the process runnable.  Self-gating: only for images at or
+ * above the size threshold (vm.c); best-effort — a failed spawn leaves
+ * the demand path unaffected. */
+void vm_image_prefetch_autostart(struct addr_space *as);
+
+/* Prefetch-pass counters (the kernel task's report line + unit tests). */
+struct vm_prefetch_stats {
+  uint64_t pages;     /* pages in the requested range */
+  uint64_t processed; /* pages reached (mapped + skipped) before stopping */
+  uint64_t mapped;    /* pages filled + mapped by this pass */
+  uint64_t skipped;   /* pages already resident when reached */
+  uint64_t batches;   /* batched coalesced read calls issued */
+  int stopped;        /* 0 = range complete; 1 = AS died / epoch changed;
+                         2 = stopped early (no frames / short read) */
+};
+
+/* The prefetch engine: fill + map [start_page, start_page+npages) of the
+ * lazy image with batched coalesced reads, installing each page through
+ * the same map-if-absent protocol the demand path uses, so demand
+ * faults, the eager first page and peers all resolve benignly.  Called
+ * by the kernel task over the whole image and directly by unit tests
+ * (the unit tier runs without a scheduler).  *st (optional) receives the
+ * counters.  Returns pages mapped, or -1 when `as` is not a live v2
+ * image. */
+int vm_image_prefetch_run(struct addr_space *as, uint64_t start_page,
+                          uint64_t npages, struct vm_prefetch_stats *st);
 
 /* --- Shared objects (S4; vm.c) --------------------------------------- */
 
