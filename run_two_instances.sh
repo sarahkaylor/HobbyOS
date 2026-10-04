@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# GX note (docs/graphics-accel.md §3-D5): this two-VM RDMA rehearsal is
+# headless by design — both instances boot `-nographic` (display none) with
+# no GPU device — so the soft path is already in effect; there is no
+# QEMU_GPU flag in this legacy macOS-era runner (the /opt/homebrew qemu
+# paths and legacy net flags predate the launcher-wide switch and are
+# intentionally left as-is).
+#
 # Clear old logs
 rm -f host.log receiver.log disk_guest.img
 

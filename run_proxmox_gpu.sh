@@ -4,6 +4,15 @@
 #
 # Automates the build, deployment, and execution of HobbyOS on the Proxmox server
 # (192.168.10.174) with NVIDIA RTX 4090 GPU remote sharing over UDP/IP RDMA.
+#
+# GX note (2026-10-04, docs/graphics-accel.md §3-D5): OUT OF SCOPE for the
+# launcher-acceleration pass.  This stale macOS-era script provisions the
+# REMOTE Proxmox RDMA-sharing demo (VMs 205/206 on 192.168.10.174,
+# serial-only, no QEMU display backend in use) — there is nothing local for
+# the QEMU_GPU / gtk,gl=on matrix to attach to here.  Deliberately left
+# unchanged; revisit only if the Proxmox demo is revived.  Local desktop /
+# browser launchers are covered by the Makefile's QEMU_GPU switch and
+# `make gpu-check`.
 # ==============================================================================
 
 PROXMOX_IP="192.168.10.174"

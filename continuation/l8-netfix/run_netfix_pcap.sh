@@ -7,6 +7,10 @@ LANE="${2:-/home/sarah/Documents/GitHub/hobbyos-lanes/l8-netfix}"
 OUT="${LANE}/continuation/l8-netfix"
 SCRATCH="${SCRATCH:-/tmp/l8-netfix-scratch}"
 PORT="${NETFIX_PORT:-8765}"
+# GX (docs/graphics-accel.md §3-D5): pass-through parity only — headless
+# pcap capture run (`-display none`), no GPU device in the invocation;
+# QEMU_GPU defaults to soft (see run_netfix.sh).
+QEMU_GPU="${QEMU_GPU:-soft}"
 FW="${FW:-/usr/share/AAVMF/AAVMF_CODE.fd}"
 [ -f "$FW" ] || FW="$HOME/.local/share/qemu/AAVMF_CODE.fd"
 OBJCOPY="${LLVM_OBJCOPY:-/usr/bin/llvm-objcopy}"

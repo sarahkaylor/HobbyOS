@@ -15,6 +15,14 @@ LANE="${2:-/home/sarah/Documents/GitHub/hobbyos-lanes/l8-netfix}"
 OUT="${LANE}/continuation/l8-netfix"
 SCRATCH="${SCRATCH:-/tmp/l8-netfix-scratch}"
 PORT="${NETFIX_PORT:-8765}"
+# GX (docs/graphics-accel.md §3-D5): graphics-acceleration pass-through.
+# This repro runner is headless by design (`-display none`, serial verdicts)
+# and boots no desktop, so its QEMU invocation carries no GPU device to
+# accelerate.  QEMU_GPU defaults to soft and is accepted for interface
+# parity with the Makefile switch; `gl` is clamped to soft (the gl device
+# is rejected without a GL-capable display backend — §1).
+QEMU_GPU="${QEMU_GPU:-soft}"
+[ "$QEMU_GPU" = "soft" ] || echo "== QEMU_GPU=$QEMU_GPU clamped to soft (headless runner)" >&2
 FW="${FW:-/usr/share/AAVMF/AAVMF_CODE.fd}"
 [ -f "$FW" ] || FW="$HOME/.local/share/qemu/AAVMF_CODE.fd"
 OBJCOPY="${LLVM_OBJCOPY:-/usr/bin/llvm-objcopy}"
