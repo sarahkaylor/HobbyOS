@@ -1016,6 +1016,11 @@ static void sys_pipe(struct trap_frame *tf) {
 
 extern uint32_t *virtio_gpu_get_framebuffer(void);
 extern void virtio_gpu_flush(void);
+/* GX (docs/graphics-accel.md): damage-rect present (SYS_FLUSH_FB_RECTS).
+ * Local mirror of the user ABI rect; the kernel copy is validated then
+ * handed to the driver. */
+struct virtio_gpu_xrect { int32_t x, y, w, h; };
+extern void virtio_gpu_flush_rects(const struct virtio_gpu_xrect *rects, int count);
 
 static void sys_map_fb(struct trap_frame *tf) {
   uint64_t phys_addr = (uint64_t)virtio_gpu_get_framebuffer();
@@ -1035,6 +1040,33 @@ static void sys_map_fb(struct trap_frame *tf) {
 
 static void sys_flush_fb(struct trap_frame *tf) {
   virtio_gpu_flush();
+  tf->regs[0] = 0;
+}
+
+/* GX (docs/graphics-accel.md): damage-rect present.  Validates the user
+ * rect array, copies it into a kernel buffer, and hands it to the driver
+ * (which clamps/merges as it may -- covered pixels must end identical to a
+ * full flush).  count 0 is a no-op; out-of-range counts are EINVAL. */
+static void sys_flush_fb_rects(struct trap_frame *tf) {
+  const struct virtio_gpu_xrect *urects = (const struct virtio_gpu_xrect *)tf->regs[5]; // rdi
+  int count = (int)tf->regs[4]; // rsi
+  if (count < 0 || count > 32) {
+    tf->regs[0] = (uint64_t)-EINVAL;
+    return;
+  }
+  if (count == 0) {
+    tf->regs[0] = 0;
+    return;
+  }
+  if (!urects || ((uint64_t)urects & 3) != 0 ||
+      !sys_user_range_ok((uint64_t)urects, (uint64_t)count * sizeof(struct virtio_gpu_xrect))) {
+    tf->regs[0] = (uint64_t)-EFAULT;
+    return;
+  }
+  struct virtio_gpu_xrect krects[32];
+  for (int i = 0; i < count; i++)
+    krects[i] = urects[i];
+  virtio_gpu_flush_rects(krects, count);
   tf->regs[0] = 0;
 }
 
@@ -1544,6 +1576,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_map_fb(tf);
   } else if (syscall_num == SYS_FLUSH_FB) {
     sys_flush_fb(tf);
+  } else if (syscall_num == SYS_FLUSH_FB_RECTS) {
+    sys_flush_fb_rects(tf);
   } else if (syscall_num == SYS_GET_CPUID) {
     sys_get_cpuid(tf);
   } else if (syscall_num == SYS_PIPE) {

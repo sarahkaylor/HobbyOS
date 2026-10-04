@@ -221,6 +221,11 @@ static void test_wave_loader(void *arg) {
      released by the time it runs. */
   load_and_run_program_in_scheduler("FPU_T.BIN", -1, -1, -1, -1);
 
+  /* GX (docs/graphics-accel.md): full-vs-rect framebuffer present timing
+     (src/user/gfxbench.c) — prints GFXBENCH lines; the GX lanes' raw
+     before/after evidence.  No forks/spawns; a few seconds. */
+  load_and_run_program_in_scheduler("GFXBENCH.BIN", -1, -1, -1, -1);
+
   /* P3.2 (browser.md): sysroot transcendental acceptance — sin/cos/tan/
      asin/atan/atan2/log/pow/sqrt/modf and the float expf/tanhf/sqrtf,
      checked in ulps against glibc references and exact specials

@@ -127,6 +127,15 @@ extern "C" {
 
   void *map_fb(void);
   void flush_fb(void);
+
+  /* GX (docs/graphics-accel.md): damage-rect present.  flush_fb_rects()
+   * presents the listed screen-space rects (up to 32; the covered pixels
+   * end up identical to a full flush_fb()); flush_fb_rect() is the
+   * single-rect convenience wrapper.  Return 0 or -errno. */
+  struct fb_rect { int32_t x, y, w, h; };
+  int flush_fb_rect(int x, int y, int w, int h);
+  int flush_fb_rects(const struct fb_rect *rects, int count);
+
   int get_cpuid(void);
 
 #define EV_SYN 0x00

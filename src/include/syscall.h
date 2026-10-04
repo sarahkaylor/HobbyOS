@@ -160,8 +160,19 @@
 #define SYS_GETTIME       (87)
 #define SYS_GETSTACK      (88)
 
+/* GX (docs/graphics-accel.md) ABI row: damage-rect framebuffer present.
+ *
+ *   SYS_FLUSH_FB_RECTS (89)  (const struct fb_rect *rects, int count)
+ *     -> 0 | -EFAULT (bad range/alignment) | -EINVAL (count out of 0..32)
+ *
+ * Presents the listed screen-space rects.  After it returns, every covered
+ * pixel must equal what a full SYS_FLUSH_FB would have presented (the
+ * driver may expand/merge the rects internally; overlaps and order are
+ * meaningless; count == 0 is a no-op).  SYS_FLUSH_FB (10) is unchanged:
+ * the full-screen present. */
+#define SYS_FLUSH_FB_RECTS (89)
 
 /* Highest defined syscall number. Dispatch tables are sized SYS_MAX + 1. */
-#define SYS_MAX           (88)
+#define SYS_MAX           (89)
 
 #endif /* SYSCALL_H */

@@ -112,6 +112,17 @@ int virtio_gpu_init(void);
 void virtio_gpu_flush(void);
 
 /**
+ * GX (docs/graphics-accel.md): damage-rect present.  Presents the listed
+ * screen-space rects; after it returns, every covered pixel must equal a
+ * full virtio_gpu_flush() result (implementations may expand/merge rects
+ * internally; overlaps/order are meaningless; count == 0 is a no-op).
+ * Freeze default: the full-flush fallback -- G1/G2 replace the internals
+ * with the real rect command paths (ARM virtio-mmio / x64 virtio-pci+BGA).
+ */
+struct virtio_gpu_xrect { int32_t x, y, w, h; };
+void virtio_gpu_flush_rects(const struct virtio_gpu_xrect *rects, int count);
+
+/**
  * Returns the base address of the kernel's memory-mapped framebuffer.
  */
 uint32_t* virtio_gpu_get_framebuffer(void);

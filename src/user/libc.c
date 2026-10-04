@@ -561,6 +561,20 @@ void *map_fb(void) { return (void *)syscall(SYS_MAP_FB, 0, 0, 0, 0); }
 
 __attribute__((weak)) void flush_fb(void) { syscall(SYS_FLUSH_FB, 0, 0, 0, 0); }
 
+/* GX (docs/graphics-accel.md): damage-rect present (SYS_FLUSH_FB_RECTS). */
+__attribute__((weak)) int flush_fb_rects(const struct fb_rect *rects, int count) {
+  return (int)syscall(SYS_FLUSH_FB_RECTS, (long)rects, (long)count, 0, 0);
+}
+
+__attribute__((weak)) int flush_fb_rect(int x, int y, int w, int h) {
+  struct fb_rect r;
+  r.x = x;
+  r.y = y;
+  r.w = w;
+  r.h = h;
+  return flush_fb_rects(&r, 1);
+}
+
 int get_cpuid(void) { return (int)syscall(SYS_GET_CPUID, 0, 0, 0, 0); }
 
 __attribute__((weak)) int get_events(void *buf, int max_events) {

@@ -177,6 +177,29 @@ void flush_fb(void) {
   }
 }
 
+/* GX (docs/graphics-accel.md): host mocks for the damage-rect present.
+ * Freeze default: route both through the same flush callback (the rects
+ * are dropped -- tests that need the rect list will extend this; G4). */
+int flush_fb_rects(const struct fb_rect *rects, int count) {
+  (void)rects;
+  (void)count;
+  if (flush_callback) {
+    flush_callback();
+  }
+  return 0;
+}
+
+int flush_fb_rect(int x, int y, int w, int h) {
+  (void)x;
+  (void)y;
+  (void)w;
+  (void)h;
+  if (flush_callback) {
+    flush_callback();
+  }
+  return 0;
+}
+
 int get_cpuid(void) {
   return 0; // Host runs on "core 0" for tests
 }
