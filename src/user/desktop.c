@@ -2,6 +2,10 @@
 #include "libc.h"
 #include "window.h"
 #include "desktop_damage.h"
+#include <signal.h>
+#ifndef HOST_TEST
+#include "syscall.h"
+#endif
 
 
 
@@ -1820,7 +1824,60 @@ void _start(void) {
 #endif
 #endif
 
+/* ---- SIGPIPE ---------------------------------------------------------
+ * The desktop must outlive its children.  A pixel app can exit between a
+ * desktop write (a repair request, a close request or a pointer report)
+ * and the drain that notices the exit; the write then hits a pipe whose
+ * reader is gone.  The kernel raises SIGPIPE on such a write (P5/D10,
+ * kernel pipe.c) and the default disposition kills the writing process
+ * GROUP -- i.e. the whole desktop, halting the machine.  Reproduced on
+ * the pristine freeze build (2/9 xcalc E2E runs), so it is a pre-existing
+ * race, not this lane's damage-rect change.  Ignore SIGPIPE: the failed
+ * write just returns -EPIPE (every writer below already ignores the
+ * result) and the next drain pass removes the dead window.  The desktop's
+ * bespoke link set ($(DESKTOP_BIN)) has no libc_signal.o, so the device
+ * build issues SYS_SIGACTION directly with the same 40-byte user struct
+ * libc's sigaction() marshals (see <signal.h>); the host build uses the
+ * host libc's signal(). */
+static void desktop_ignore_sigpipe(void) {
+#ifdef HOST_TEST
+  signal(SIGPIPE, SIG_IGN);
+#else
+  struct sigaction sa;
+  sa.sa_handler = SIG_IGN;
+  sa.sa_mask.__bits[0] = 0;
+  sa.sa_mask.__bits[1] = 0;
+  sa.sa_flags = 0;
+  sa.sa_restorer = 0;
+#ifdef __x86_64__
+  long ret;
+  register long rdi __asm__("rdi") = SIGPIPE;
+  register long rsi __asm__("rsi") = (long)&sa;
+  register long rdx __asm__("rdx") = 0;
+  register long r10 __asm__("r10") = 0;
+  __asm__ volatile("syscall\n"
+                   : "=a"(ret)
+                   : "a"(SYS_SIGACTION), "r"(rdi), "r"(rsi), "r"(rdx),
+                     "r"(r10)
+                   : "rcx", "r11", "memory");
+  (void)ret;
+#else
+  register long x8 __asm__("x8") = SYS_SIGACTION;
+  register long x0 __asm__("x0") = SIGPIPE;
+  register long x1 __asm__("x1") = (long)&sa;
+  register long x2 __asm__("x2") = 0;
+  register long x3 __asm__("x3") = 0;
+  __asm__ volatile("svc #0\n"
+                   : "+r"(x0)
+                   : "r"(x8), "r"(x1), "r"(x2), "r"(x3)
+                   : "memory");
+  (void)x0;
+#endif
+#endif
+}
+
 int main(void) {
+  desktop_ignore_sigpipe();
   print("Desktop starting...\n");
   if (graphics_init() < 0) {
     print("Failed to initialize graphics.\n");
