@@ -198,6 +198,38 @@ unit-arm, unit-x64, ARM wave + x64 wave characterization on the CI VM
 
 ## 7. Log (append-only)
 
+- 2026-10-04 — **x64 desktop boot blocker root-caused + fixed: large-model
+  flat-image truncation (controller).** Under `-mcmodel=large` every intel
+  user program links zero-init globals into `.lbss`; `src/user/linker.ld`
+  claimed only standard names, so `.ldata`/`.lbss` became orphans placed
+  AFTER `.tls_meta`.  `objcopy -O binary` stops at the last reachable
+  section, so the flat `.bin` silently OMITTED the whole bss span and the
+  v2 loader's IMAGE region (file-size sized) never covered it — first
+  deep-bss access faults as a HOLE and kills the process (observed on
+  pristine freeze, TCG+KVM: `DESKTOP.BIN ... memory fault VA=0x100001C800
+  ... in=HOLE -> killed`).  aarch64 unaffected (no `.l*` names); x64
+  programs only survived by landing bss uses in the mapped tail page.
+  Latent since the S5 base flip; x64 desktop was never boot-gated.
+  Fix: linker.ld claims `.ltext/.lrodata/.ldata/.lbss` into
+  `.text/.rodata/.data/.bss` (`.tls_meta` genuinely last — the padding
+  contract its own comment describes) + Makefile relink-on-script-change
+  (`.EXTRA_PREREQS`; a plain prereq leaks into `$^` and gets fed to ld.lld
+  as an input file — that's how the fix first failed to propagate).
+  Verified: intel desktop.bin 109,704 -> 547,528 B (= `_end`), 134 pages;
+  x64 desktop boots to `Desktop starting`, zero fault markers, QMP
+  screendump 1024x768 non-black frac 1.0000.  Lanes G2/G3 told to
+  cherry-pick.
+
+- 2026-10-04 — **GFXBENCH v2 instrument (controller; measurement fix).**
+  Freeze-version wave numbers showed spread artifacts on both arches with
+  IDENTICAL work per op (ARM: r256 mean 125 ms vs full 0.5 ms; x64: full
+  mean 8.2 ms vs r256 0.55 ms) — mean-of-few-samples under wave churn is
+  not an estimator. v2: warmup iterations + min/median/mean per phase,
+  the timer brackets only the flush call, 10/30/50 samples. Lanes'
+  own before/after runs (both sides on the freeze bench) stay internally
+  consistent; the clean before/after for this log will be re-derived at
+  integration (freeze tip vs merged tip, both with v2).
+
 - 2026-10-04 — **GX program created + freeze landed (this commit).**
   De-risk evidence archived (§1): GL device works with the 2D-only guest
   (46-min desktop run + X11 capture); egl-headless and gl-device-with-
