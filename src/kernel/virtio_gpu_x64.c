@@ -50,9 +50,9 @@
 /* Damage batches are clamped by the syscall contract (0..32 rects). */
 #define VGPU_RECT_MAX 32
 
-/* Bring-up diagnostics: 1 while developing G2 (prints "G2DBG ..." lines);
- * flipped to 0 for the final commits. */
-#define G2_VPCI_DBG 1
+/* Bring-up diagnostics: prints "G2DBG ..." lines when 1.  Final form: 0
+ * (development logs with these prints are quoted in GX-REPORT-G2.md). */
+#define G2_VPCI_DBG 0
 
 static int gpu_mode = VGPU_MODE_NONE;
 static spinlock_t gpu_lock;
@@ -267,6 +267,10 @@ static struct virtio_gpu_transfer_to_host_2d gpu_req_transfer;
 static struct virtio_gpu_resource_flush gpu_req_flush;
 static struct virtio_gpu_ctrl_hdr gpu_resp;
 
+#if G2_VPCI_DBG
+static int gpu_dbg_cmds = 0;
+#endif
+
 static inline uint32_t gpu_cc_r32(uint32_t off) { return *(volatile uint32_t*)(gpu_cc + off); }
 static inline void gpu_cc_w32(uint32_t off, uint32_t v) { *(volatile uint32_t*)(gpu_cc + off) = v; }
 static inline uint16_t gpu_cc_r16(uint32_t off) { return *(volatile uint16_t*)(gpu_cc + off); }
@@ -394,6 +398,7 @@ static int gpu_transact(const void* req, uint32_t req_len, const void* data, uin
   gpu_avail.ring[gpu_avail_next % gpu_qsize] = 0; /* head descriptor */
   arch_memory_barrier();
   gpu_avail.idx = (uint16_t)(gpu_avail_next + 1);
+  gpu_avail_next++;
   arch_memory_barrier();
 
   *(volatile uint16_t*)(gpu_notify + (uint64_t)gpu_notify_off * gpu_notify_mult) =
@@ -409,6 +414,15 @@ static int gpu_transact(const void* req, uint32_t req_len, const void* data, uin
        * by the next transaction's wait) and stop trusting the device after
        * repeated timeouts. */
       gpu_timeouts++;
+#if G2_VPCI_DBG
+      uart_puts("G2DBG cmd TIMEOUT used.idx=");
+      uart_print_hex(*(volatile uint16_t*)&gpu_used.idx);
+      uart_puts(" ack0=");
+      uart_print_hex(ack0);
+      uart_puts(" avail_next=");
+      print_int((int)gpu_avail_next);
+      uart_puts("\n");
+#endif
       if (gpu_timeouts >= 4) gpu_failed = 1;
       return -1;
     }
@@ -416,6 +430,19 @@ static int gpu_transact(const void* req, uint32_t req_len, const void* data, uin
   arch_memory_barrier();
   gpu_used_ack = *(volatile uint16_t*)&gpu_used.idx;
   arch_memory_barrier();
+
+#if G2_VPCI_DBG
+  if (gpu_dbg_cmds < 12) {
+    uart_puts("G2DBG cmd ok spins=");
+    print_int((int)(spins > 500000000ull ? 500000000 : (int)spins));
+    uart_puts(" rt=");
+    uart_print_hex(gpu_resp.type);
+    uart_puts(" req=");
+    uart_print_hex(*(volatile uint32_t*)req);
+    uart_puts("\n");
+  }
+  gpu_dbg_cmds++;
+#endif
 
   if (gpu_resp.type >= 0x1200) return -1; /* RESP_ERR_* */
   return 0;
@@ -439,7 +466,13 @@ static int vgpu_resource_setup(void) {
   gpu_req_create.format = VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM;
   gpu_req_create.width = GPU_SCREEN_W;
   gpu_req_create.height = GPU_SCREEN_H;
-  if (gpu_transact(&gpu_req_create, sizeof(gpu_req_create), 0, 0) != 0) return -1;
+  int r = gpu_transact(&gpu_req_create, sizeof(gpu_req_create), 0, 0);
+#if G2_VPCI_DBG
+  uart_puts("G2DBG create rc=");
+  print_int(r);
+  uart_puts("\n");
+#endif
+  if (r != 0) return -1;
 
   gpu_req_mem.addr = (uint64_t)framebuffer;
   gpu_req_mem.length = sizeof(framebuffer);
@@ -451,9 +484,14 @@ static int vgpu_resource_setup(void) {
   gpu_req_attach.hdr.padding = 0;
   gpu_req_attach.resource_id = 1;
   gpu_req_attach.nr_entries = 1;
-  if (gpu_transact(&gpu_req_attach, sizeof(gpu_req_attach), &gpu_req_mem,
-                   sizeof(gpu_req_mem)) != 0)
-    return -1;
+  r = gpu_transact(&gpu_req_attach, sizeof(gpu_req_attach), &gpu_req_mem,
+                   sizeof(gpu_req_mem));
+#if G2_VPCI_DBG
+  uart_puts("G2DBG attach rc=");
+  print_int(r);
+  uart_puts("\n");
+#endif
+  if (r != 0) return -1;
 
   gpu_req_scanout.hdr.type = VIRTIO_GPU_CMD_SET_SCANOUT;
   gpu_req_scanout.hdr.flags = 0;
@@ -466,7 +504,13 @@ static int vgpu_resource_setup(void) {
   gpu_req_scanout.r.height = GPU_SCREEN_H;
   gpu_req_scanout.scanout_id = 0;
   gpu_req_scanout.resource_id = 1;
-  return gpu_transact(&gpu_req_scanout, sizeof(gpu_req_scanout), 0, 0);
+  r = gpu_transact(&gpu_req_scanout, sizeof(gpu_req_scanout), 0, 0);
+#if G2_VPCI_DBG
+  uart_puts("G2DBG scanout rc=");
+  print_int(r);
+  uart_puts("\n");
+#endif
+  return r;
 }
 
 static int vgpu_bringup(uint32_t bus, uint32_t slot) {
