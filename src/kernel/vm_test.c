@@ -2,7 +2,9 @@
 
 #include "unit_test.h"
 #include "errno.h"
+#include "fat16.h"
 #include "frame.h"
+#include "fs.h"
 #include "vm.h"
 #include "process.h"
 
@@ -640,6 +642,153 @@ static void test_vm_teardown_leak_cycles(void) {
   EXPECT_EQ(frame_free_count(), free0);
 }
 
+/* L9 (prefetch): the eager first page — the entry page is resident right
+ * after the loader mapped the image, everything else stays lazy. */
+static void test_v2_image_first_page(void) {
+  tests_run++;
+  uart_puts("  Running test_v2_image_first_page...\n");
+
+  int free0 = frame_free_count();
+  struct addr_space *as = vm_as_create(VM_TEST_TAG + 1);
+  EXPECT_EQ((as != 0), 1);
+  if (!as)
+    return;
+
+  struct file f;
+  if (fat16_open("BIG.BIN", &f) != 0) {
+    uart_puts("ASSERTION FAILED: BIG.BIN missing from the boot disk\n");
+    vm_as_teardown(as);
+    return;
+  }
+  as->img_active = 1;
+  as->img_file_size = f.fat16.entry.file_size;
+  as->img_start_cluster = f.fat16.entry.start_cluster;
+  fat16_close(&f);
+
+  EXPECT_EQ(vm_region_insert(as, USER_IMG_BASE, 4 * FRAME_SIZE,
+                             VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC,
+                             VMK_IMG, VM_MAP_PRIVATE, 0, 0),
+            0);
+  EXPECT_EQ(vm_image_load_first_page(as), 0);
+  uint64_t leaf = 0;
+  EXPECT_EQ(vm_arch_walk(as, USER_IMG_BASE, &leaf), 0);
+  const char *pat = "HO_BIGLOAD_30MB\n"; /* BIG.BIN's 16-byte generator unit */
+  volatile uint8_t *p0 = (volatile uint8_t *)vm_arch_leaf_phys(leaf);
+  int ok = 1;
+  for (int i = 0; i < 16; i++) {
+    if (p0[i] != (volatile uint8_t)pat[i])
+      ok = 0;
+  }
+  EXPECT_EQ(ok, 1);
+  /* The rest of the region stays lazy. */
+  EXPECT_EQ(vm_arch_walk(as, USER_IMG_BASE + FRAME_SIZE, 0), -1);
+
+  vm_as_teardown(as);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* L9 (prefetch): the background-loader engine driven synchronously (the
+ * unit tier has no scheduler, so the kernel task itself cannot run here).
+ * Sources the real 30 MB BIG.BIN from the boot disk and checks the
+ * batched fill, the skip protocol, content parity and frame accounting. */
+static void test_v2_image_prefetch(void) {
+  tests_run++;
+  uart_puts("  Running test_v2_image_prefetch...\n");
+
+  int free0 = frame_free_count();
+  struct addr_space *as = vm_as_create(VM_TEST_TAG);
+  EXPECT_EQ((as != 0), 1);
+  if (!as)
+    return;
+
+  struct file f;
+  if (fat16_open("BIG.BIN", &f) != 0) {
+    uart_puts("ASSERTION FAILED: BIG.BIN missing from the boot disk\n");
+    vm_as_teardown(as);
+    return;
+  }
+  uint32_t fsize = f.fat16.entry.file_size;
+  uint16_t cluster = f.fat16.entry.start_cluster;
+  fat16_close(&f);
+  EXPECT_EQ((fsize >= (4u << 20)), 1);
+
+  const uint64_t pages = 300; /* 1.2 MB window: 2 full batches + a tail */
+  EXPECT_EQ(vm_region_insert(as, USER_IMG_BASE, pages * FRAME_SIZE,
+                             VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC,
+                             VMK_IMG, VM_MAP_PRIVATE, 0, 0),
+            0);
+  as->img_active = 1;
+  as->img_file_size = fsize;
+  as->img_start_cluster = cluster;
+
+  /* The loader's eager first page; capture its frame to prove the
+     prefetch pass skips (never remaps) resident pages. */
+  EXPECT_EQ(vm_image_load_first_page(as), 0);
+  uint64_t leaf0 = 0;
+  EXPECT_EQ(vm_arch_walk(as, USER_IMG_BASE, &leaf0), 0);
+  EXPECT_EQ((vm_arch_leaf_phys(leaf0) != 0), 1);
+
+  struct vm_prefetch_stats st;
+  int mapped = vm_image_prefetch_run(as, 0, pages, &st);
+  EXPECT_EQ(st.stopped, 0);
+  EXPECT_EQ(st.pages, pages);
+  EXPECT_EQ(st.processed, pages);
+  EXPECT_EQ(st.mapped, pages - 1); /* page 0 was already resident */
+  EXPECT_EQ(st.skipped, 1);
+  EXPECT_EQ((mapped == (int)(pages - 1)), 1);
+  EXPECT_EQ((st.batches >= 3 && st.batches <= 8), 1); /* 300/128 -> 3 */
+
+  uint64_t leaf0b = 0;
+  EXPECT_EQ(vm_arch_walk(as, USER_IMG_BASE, &leaf0b), 0);
+  EXPECT_EQ((leaf0b == leaf0), 1); /* skipped, not remapped */
+
+  /* Every page resident; content byte-exact against a fresh positional
+     read of the same file, plus the generator's 16-byte pattern at the
+     window's page starts. */
+  {
+    uint64_t ref = frame_alloc();
+    EXPECT_EQ((ref != 0), 1);
+    int bad = 0;
+    for (uint64_t p = 0; p < pages && ref; p++) {
+      uint64_t leaf = 0;
+      if (vm_arch_walk(as, USER_IMG_BASE + p * FRAME_SIZE, &leaf) != 0) {
+        bad++;
+        continue;
+      }
+      int n = fat16_read_direct_pos(cluster, fsize, ref, FRAME_SIZE,
+                                    (uint32_t)(p * FRAME_SIZE));
+      if (n != (int)FRAME_SIZE) {
+        bad++;
+        continue;
+      }
+      volatile uint8_t *a = (volatile uint8_t *)vm_arch_leaf_phys(leaf);
+      volatile uint8_t *b = (volatile uint8_t *)ref;
+      for (int i = 0; i < (int)FRAME_SIZE; i++) {
+        if (a[i] != b[i]) {
+          bad++;
+          break;
+        }
+      }
+      if (p == 0 || p == pages - 1) {
+        const char *pat = "HO_BIGLOAD_30MB\n";
+        for (int i = 0; i < 16; i++) {
+          if (a[i] != (volatile uint8_t)pat[i])
+            bad++;
+        }
+      }
+    }
+    if (ref)
+      frame_free(ref);
+    EXPECT_EQ(bad, 0);
+  }
+
+  /* A pass against a torn-down AS aborts without touching anything. */
+  vm_as_teardown(as);
+  struct vm_prefetch_stats st2;
+  EXPECT_EQ(vm_image_prefetch_run(as, 0, pages, &st2) < 0, 1);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
 void vm_test_suite(void) {
   uart_puts("vm_test_suite:\n");
   test_vm_as_lifecycle();
@@ -648,6 +797,8 @@ void vm_test_suite(void) {
   test_vm_windows_distinct();
   test_vm_hole_find();
   test_vm_demand_fault();
+  test_v2_image_first_page();
+  test_v2_image_prefetch();
   test_vm_mmap_family();
   test_vm_shared_objects();
   test_vm_as_clone_fork();

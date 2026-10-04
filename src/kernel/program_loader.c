@@ -436,26 +436,36 @@ static int v2_map_image(struct addr_space *as, struct file *f, uint32_t fsize) {
     return -1;
   }
 
-  /* L9 (pagein): the IMAGE region is mapped LAZILY.  Nothing is read or
-     frame-allocated here — the loader syscall returns as soon as the
-     region and the image identity are recorded, and every page
-     materializes on its first EL0 touch from the data-abort / #PF
-     handler (vm.c v2_image_materialize -> fat16_read_direct_pos), which
-     reads exactly that page with the same coalesced multi-sector device
-     requests the v1 loader uses.  An 86 MiB image costs ~21 k single-page
-     faults (each a normal uninterruptible-but-bounded trap that refreshes
-     the SMP ownership heartbeat) instead of one multi-second kernel read,
-     and only pages actually touched ever occupy frames.  The identity
+  /* L9 (pagein): the IMAGE region is mapped LAZILY.  Only the first
+     executable page is pulled in here (vm_image_load_first_page) so the
+     process starts on its entry without a fault; the remainder
+     materializes through two cooperative paths — the background
+     prefetch task for large images (vm_image_prefetch_autostart, called
+     once the loaders have set the process up) and the EL0/kernel-mode
+     demand fault (vm.c v2_image_materialize -> fat16_read_direct_pos)
+     for anything the prefetcher has not reached yet.  Both use the same
+     coalesced multi-sector device requests, and the map-if-absent
+     protocol under vm_lock makes the two benign when they race: at
+     worst one duplicate 4 KiB read, never corruption.  The identity
      recorded here (start cluster + size) is the whole file handle: the
      FAT entry is read-only state, so nothing needs closing at teardown. */
   as->img_active = 1;
   as->img_file_size = fsize;
   as->img_start_cluster = f->fat16.entry.start_cluster;
 
+  /* L9 (prefetch): page 0 is the entry page (process_set_entry uses
+     USER_IMG_BASE), so pull it in eagerly.  Best-effort: a failure here
+     leaves it lazy for the first fault to fill, exactly as before. */
+  int pref = vm_image_load_first_page(as);
+  if (pref != 0)
+    uart_puts("v2 loader: first-page prefill failed (fault-fill path)\n");
+
   uart_puts("v2 loader: image mapped (lazy), bytes=");
   print_int((int)fsize);
   uart_puts(" pages=");
   print_int((int)(img_len / FRAME_SIZE));
+  uart_puts(" first=");
+  uart_puts(pref == 0 ? "in" : "lazy");
   uart_puts(" elap=");
   print_int((int)(timer_get_ms() - t_load0));
   uart_puts("ms\n");
@@ -763,6 +773,12 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
   uart_puts(" tables=");
   print_int((int)as->table_frames);
   uart_puts("\n");
+
+  /* L9 (prefetch): with the process runnable (process_set_entry above),
+     hand the rest of a large image to a background loader kernel task.
+     Self-gating (image-size threshold) + non-fatal when the spawn fails
+     (slot / block pressure): the demand path still carries the image. */
+  vm_image_prefetch_autostart(as);
   return pid;
 }
 
@@ -915,6 +931,9 @@ int process_exec_current(struct trap_frame *tf, const char *path,
 #endif
     arch_set_user_sp(grp->context[33]);
     tf->regs[0] = 0;
+    /* L9 (prefetch): same background-load hand-off as the spawn loaders
+       (self-gating; non-fatal when the spawn fails). */
+    vm_image_prefetch_autostart(grp->as);
     return 0;
   }
 
