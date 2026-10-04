@@ -1497,7 +1497,46 @@ int desktop_damage(const struct desktop_chrome *prev,
   return n;
 }
 
-/* Composite one frame and push it to the display. */
+/* Composite one frame and push it to the display.  The full path keeps a
+ * full present; a damage frame presents exactly the screen rectangles it
+ * painted -- the chrome passes (dmg[]), the window-text repairs and the
+ * pointer re-stamp (GX D1: docs/graphics-accel.md; presenting anything
+ * less would leave stale pixels, so the union is what goes out).  The
+ * present call is made even for an empty set: it is the frame boundary
+ * the desktop harnesses tick on, and count == 0 is a driver no-op. */
+
+/* ---- Present list (GX D1: docs/graphics-accel.md) --------------------
+ * struct desktop_rect / struct wm_rect / struct fb_rect are all four
+ * 32-bit ints (x, y, w, h in screen pixels), so the rectangles move
+ * between the three as-is.  Overflow (impossible with the frame's fixed
+ * budget: <= DMG_MAX-1 chrome rects + <= MAX_WINDOWS row bands + the
+ * pointer cell) folds into a bounding box rather than dropping a rect,
+ * which keeps pixel equality a hard guarantee. */
+#define PRESENT_MAX 32
+
+static void present_add(struct fb_rect *out, int *n, int max, int x, int y,
+                        int w, int h) {
+  if (w <= 0 || h <= 0) return;
+  for (int i = 0; i < *n; i++) {
+    if (out[i].x == x && out[i].y == y && out[i].w == w && out[i].h == h)
+      return;                          /* already covered */
+  }
+  if (*n >= max) {
+    int x0 = x, y0 = y, x1 = x + w, y1 = y + h;
+    for (int i = 0; i < *n; i++) {
+      if (out[i].x < x0) x0 = out[i].x;
+      if (out[i].y < y0) y0 = out[i].y;
+      if (out[i].x + out[i].w > x1) x1 = out[i].x + out[i].w;
+      if (out[i].y + out[i].h > y1) y1 = out[i].y + out[i].h;
+    }
+    out[0].x = x0; out[0].y = y0; out[0].w = x1 - x0; out[0].h = y1 - y0;
+    *n = 1;
+    return;
+  }
+  out[*n].x = x; out[*n].y = y; out[*n].w = w; out[*n].h = h;
+  (*n)++;
+}
+
 static void paint_frame(void) {
   static struct desktop_chrome last;
   static int have_last = 0;
@@ -1517,14 +1556,26 @@ static void paint_frame(void) {
     for (int i = 0; i < num_windows; i++) {
       if (windows[i].pixel_mode) wm_pixel_queue_expose_all(&windows[i]);
     }
+    flush_fb();
   } else {
-    /* 1. Window text damage first (see the contract above). */
+    struct fb_rect present[PRESENT_MAX];
+    int present_n = 0;
     int rows_painted = 0;
+
+    /* 1. Window text damage first (see the contract above).  The repaired
+     * band is not part of dmg[], so it joins the present list here. */
     for (int i = 0; i < num_windows; i++) {
-      if (wm_draw_window_rows(&windows[i])) rows_painted = 1;
+      if (wm_draw_window_rows(&windows[i])) {
+        rows_painted = 1;
+        present_add(present, &present_n, PRESENT_MAX, windows[i].row_damage.x,
+                    windows[i].row_damage.y, windows[i].row_damage.w,
+                    windows[i].row_damage.h);
+      }
     }
     /* 2. Everything else that moved, one clipped scene pass per rect. */
     for (int i = 0; i < count; i++) {
+      present_add(present, &present_n, PRESENT_MAX, dmg[i].x, dmg[i].y,
+                  dmg[i].w, dmg[i].h);
       graphics_set_base_clip(dmg[i].x, dmg[i].y, dmg[i].w, dmg[i].h);
       paint_scene();
     }
@@ -1536,8 +1587,18 @@ static void paint_frame(void) {
           wm_pixel_queue_expose(&windows[w], dmg[i].x, dmg[i].y, dmg[i].w, dmg[i].h);
       }
     }
-    /* Repainted rows may have covered the pointer. */
-    if (rows_painted) wm_draw_cursor(mouse_x, mouse_y);
+    /* Repainted rows may have covered the pointer: it is stamped outside
+     * every clip, so its cell is presented too. */
+    if (rows_painted) {
+      wm_draw_cursor(mouse_x, mouse_y);
+      present_add(present, &present_n, PRESENT_MAX, mouse_x - 1, mouse_y - 1,
+                  10, 14);
+    }
+
+    /* Present exactly what this frame painted.  A count of 0 is still a
+     * call: the harnesses' frame tick hangs off it (empty damage = no
+     * repaint, but the frame boundary stays). */
+    flush_fb_rects(present, present_n);
   }
 
   last = cur;
@@ -1548,8 +1609,10 @@ static void paint_frame(void) {
 /* Post-frame service for pixel-mode windows: re-stamp the pointer -- and
  * any open menu -- for apps that just painted the framebuffer (ESC ] F),
  * then deliver queued repair requests (clipped around open menus).  Runs
- * right after the frame's graphics_flush(), so a repair the frame queued
- * reaches the app in the same iteration. */
+ * right after the frame's present, so a repair the frame queued reaches
+ * the app in the same iteration.  Only the stamps are the desktop's
+ * pixels: the app presented its own content, so the re-stamp rects are
+ * presented here with a rect flush (nothing stamped = no flush). */
 static void wm_pixel_service_frame(void) {
   struct desktop_rect ov[3];
   overlay_rects(ov);
@@ -1560,7 +1623,8 @@ static void wm_pixel_service_frame(void) {
       win->pix_restamp = 0;
       int cx, cy, cw, ch;
       wm_pixel_content_rect(win, &cx, &cy, &cw, &ch);
-      int redraw = 0;
+      struct fb_rect stamped[12];
+      int sn = 0;
       /* Menus sit above the app's pixels: re-stamp the part of each open
        * menu that overlaps the content this flush may have painted. */
       for (int k = 0; k < 3; k++) {
@@ -1571,14 +1635,14 @@ static void wm_pixel_service_frame(void) {
         draw_menu();
         draw_start_menu();
         graphics_reset_clip();
-        redraw = 1;
+        present_add(stamped, &sn, 12, ox, oy, ow, oh);
       }
       if (mouse_x >= cx && mouse_x < cx + cw &&
           mouse_y >= cy && mouse_y < cy + ch) {
         wm_draw_cursor(mouse_x, mouse_y);
-        redraw = 1;
+        present_add(stamped, &sn, 12, mouse_x - 1, mouse_y - 1, 10, 14);
       }
-      if (redraw) graphics_flush();
+      if (sn > 0) flush_fb_rects(stamped, sn);
     }
     overlay_flush_exposes(win);
   }
@@ -2097,8 +2161,10 @@ int main(void) {
     }
 
     if (num > 0 || needs_redraw) {
+      /* paint_frame presents exactly the rects it painted (full present on
+       * a whole-scene repaint); wm_pixel_service_frame presents only the
+       * pixels it re-stamps over an app's own frame. */
       paint_frame();
-      graphics_flush();
       wm_pixel_service_frame();
       needs_redraw = 0;
     } else {

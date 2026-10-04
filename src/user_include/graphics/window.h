@@ -204,6 +204,12 @@ extern "C" {
     /* Title or menu bar changed (ESC ] T / ESC ] M): the desktop must
      * repaint this window's chrome (and its taskbar button). */
     int  chrome_dirty;
+
+    /* Screen rect the last wm_draw_window_rows() pass painted (w == 0
+     * when it painted nothing).  Row repairs live outside the desktop's
+     * chrome damage rects, so the frame loop folds this rect into its
+     * damage-rect present (see desktop.c) -- GX D1 pixel equality. */
+    struct wm_rect row_damage;
   };
 
   void wm_init(void);

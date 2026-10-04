@@ -107,9 +107,18 @@ static int pixel_matches(int x, int y, uint32_t expected) {
 static int test_phase = 0;
 static int flush_count = 0;
 
+/* One presented frame ticks the counter.  The desktop presents whole-scene
+ * frames with SYS_FLUSH_FB (10) and damage frames with the GX rect flush
+ * (SYS_FLUSH_FB_RECTS 89), so both wrappers count. */
 void flush_fb(void) {
   syscall(10 /* SYS_FLUSH_FB */, 0, 0, 0, 0);
   flush_count++;
+}
+
+int flush_fb_rects(const struct fb_rect *rects, int count) {
+  syscall(89 /* SYS_FLUSH_FB_RECTS */, (long)rects, (long)count, 0, 0);
+  flush_count++;
+  return 0;
 }
 
 /* --- Entry point --- */

@@ -22,6 +22,12 @@ extern "C" {
   void graphics_clear(uint32_t color);
   void graphics_flush(void);
 
+  /* GX (docs/graphics-accel.md): present exactly one screen rectangle
+   * (driver-side damage-rect flush, SYS_FLUSH_FB_RECTS).  The covered
+   * pixels must end up identical to a full graphics_flush() of the same
+   * framebuffer state -- the pixel-equality contract. */
+  void graphics_flush_rect(int x, int y, int w, int h);
+
   /* ---- Fast primitives ---- */
 
   /* Horizontal/vertical runs. Coordinates outside the screen/clip are handled

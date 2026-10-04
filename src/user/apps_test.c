@@ -109,6 +109,7 @@ static long syscall(long num, long a0, long a1, long a2, long a3) {
 }
 
 #define SYS_FLUSH_FB 10
+#define SYS_FLUSH_FB_RECTS 89   /* GX: damage-rect present (graphics-accel.md) */
 
 /* ====================================================================== */
 /* Mock input: the injected-event queue the desktop reads via get_events  */
@@ -652,11 +653,11 @@ static void app_passed(const char *extra) {
   start_app();
 }
 
-void flush_fb(void) {
-  /* Actually push the composed frame to the GPU (real syscall), exactly
-   * like editor_test.c does. */
-  syscall(SYS_FLUSH_FB, 0, 0, 0, 0);
-
+/* One presented frame ticks the state machine.  The desktop presents
+ * whole-scene frames with SYS_FLUSH_FB and damage frames with the GX
+ * rect flush (SYS_FLUSH_FB_RECTS, 89), so both wrappers land here --
+ * without the rect hook the harness would stall on partial frames. */
+static void apps_frame_tick(void) {
   if (st_stage == ST_DONE) return;
 
   switch (st_stage) {
@@ -956,6 +957,17 @@ void flush_fb(void) {
   default:
     break;
   }
+}
+
+void flush_fb(void) {
+  syscall(SYS_FLUSH_FB, 0, 0, 0, 0);
+  apps_frame_tick();
+}
+
+int flush_fb_rects(const struct fb_rect *rects, int count) {
+  syscall(SYS_FLUSH_FB_RECTS, (long)rects, (long)count, 0, 0);
+  apps_frame_tick();
+  return 0;
 }
 
 /* ====================================================================== */
