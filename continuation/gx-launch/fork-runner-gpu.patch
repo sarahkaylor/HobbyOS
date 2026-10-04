@@ -1,0 +1,208 @@
+--- a/HobbyOS/continuation/smoke/run_jsc_arm.sh
++++ b/HobbyOS/continuation/smoke/run_jsc_arm.sh
+@@ -17,6 +17,18 @@
+ FW="${FW:-/home/sarah/.local/share/qemu/AAVMF_CODE.fd}"
+ OUT="${OUT:-${FORK}/HobbyOS/continuation/smoke/arm-serial.log}"
+ 
++# GX (docs/graphics-accel.md §3-D5 pattern): graphics-acceleration
++# pass-through.  `soft` (default) keeps today's headless boot exactly —
++# `-display none`, no GPU device; the serial log is the verification
++# channel.  `gl` (opt-in) adds virtio-gpu-gl-device + `-display gtk,gl=on`
++# on hosts with host GL (llvmpipe counts) for a live window of the guest
++# framebuffer; gate runs never use it.
++QEMU_GPU="${QEMU_GPU:-soft}"
++GX_FLAGS=(-display none)
++if [ "$QEMU_GPU" = "gl" ]; then
++  GX_FLAGS=(-display gtk,gl=on -device virtio-gpu-gl-device)
++fi
++
+ # Per-run /tmp hygiene: remove the assembled disk at exit (KEEP_DISK=1 keeps).
+ cleanup_run() {
+   if [ "${KEEP_DISK:-0}" = "1" ]; then
+@@ -72,7 +84,7 @@
+ echo "== booting AArch64 (log -> $OUT)"
+ rm -f "$OUT"
+ timeout 120 qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 4 -m 2048M \
+-    -accel tcg,thread=multi -bios "$FW" -display none -serial stdio \
++    -accel tcg,thread=multi -bios "$FW" "${GX_FLAGS[@]}" -serial stdio \
+     -drive if=none,file=disk-jsc.img,format=raw,id=hd0 \
+     -device virtio-blk-device,drive=hd0 \
+     -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 \
+--- a/HobbyOS/continuation/smoke/run_jsc_x64.sh
++++ b/HobbyOS/continuation/smoke/run_jsc_x64.sh
+@@ -15,6 +15,18 @@
+ OUT="${OUT:-${FORK}/HobbyOS/continuation/smoke/intel-serial.log}"
+ ACCEL="${ACCEL:-}"   # set to tcg to force TCG
+ 
++# GX (docs/graphics-accel.md §3-D5 pattern): graphics-acceleration
++# pass-through.  `soft` (default) keeps today's headless boot exactly
++# (`-display none`).  `gl` (opt-in) uses `-display gtk,gl=on`; the x64
++# guest still renders through Bochs std-VGA, so this switches only the
++# display backend — add `-device virtio-gpu-gl-pci` here when the x64
++# virtio-gpu driver lands.
++QEMU_GPU="${QEMU_GPU:-soft}"
++GX_FLAGS=(-display none)
++if [ "$QEMU_GPU" = "gl" ]; then
++  GX_FLAGS=(-display gtk,gl=on)
++fi
++
+ # Per-run /tmp hygiene: remove the assembled disk + OVMF copy at exit
+ # (KEEP_DISK=1 keeps the disk).
+ cleanup_run() {
+@@ -71,7 +83,7 @@
+ echo "== booting x86_64 (${ACCELARG:-tcg}) -> $OUT"
+ rm -f "$OUT"
+ timeout 240 qemu-system-x86_64 -M q35 -smp ${X64_SMP:-8} -m 4096M -pflash /tmp/ovmf-jsc.fd \
+-    -display none -serial stdio $ACCELARG \
++    "${GX_FLAGS[@]}" -serial stdio $ACCELARG \
+     -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 \
+     -drive file=disk-jsc-intel.img,format=raw,id=disk0,if=none \
+     -device nvme,drive=disk0,serial=1234,bus=pcie.1 \
+--- a/HobbyOS/continuation/wk3/scripts/run_wk3.sh
++++ b/HobbyOS/continuation/wk3/scripts/run_wk3.sh
+@@ -24,6 +24,18 @@
+ if [ -n "${WK3_FIXTURE:-}" ]; then ARGS="${ARGS} --wk3-fixture=${WK3_FIXTURE}"; fi
+ if [ -n "${WK3_STABLE:-}" ]; then ARGS="${ARGS} --wk3-stable=${WK3_STABLE}"; fi
+ 
++# GX (docs/graphics-accel.md §3-D5 pattern): graphics-acceleration
++# pass-through.  `soft` (default) keeps today's headless boot exactly —
++# `-display none`, no GPU device; serial log + guest-disk PIXEL0.RAW stay
++# the verification channel.  `gl` (opt-in) adds virtio-gpu-gl-device +
++# `-display gtk,gl=on` on hosts with host GL (llvmpipe counts) so the
++# kernel's 2D presents live in a window; gate runs never use it.
++QEMU_GPU="${QEMU_GPU:-soft}"
++GX_FLAGS=(-display none)
++if [ "$QEMU_GPU" = "gl" ]; then
++  GX_FLAGS=(-display gtk,gl=on -device virtio-gpu-gl-device)
++fi
++
+ export PATH="$HOME/.local/bin:/usr/sbin:/sbin:$PATH"
+ OBJCOPY="${LLVM_OBJCOPY:-/home/sarah/.local/bin/llvm-objcopy}"
+ [ -x "$OBJCOPY" ] || OBJCOPY="$(clang -print-prog-name=objcopy)"
+@@ -123,7 +135,7 @@
+ mkdir -p "$OUTDIR"
+ rm -f "$OUT"
+ timeout "${TIMEOUT_QEMU:-540}" qemu-system-aarch64 -M virt -cpu cortex-a53 -smp "${QEMU_SMP:-4}" -m 2048M \
+-    -accel tcg,thread=multi -bios "$FW" -display none -serial stdio \
++    -accel tcg,thread=multi -bios "$FW" "${GX_FLAGS[@]}" -serial stdio \
+     -semihosting \
+     -drive if=none,file="$DISK",format=raw,id=hd0 \
+     -device virtio-blk-device,drive=hd0 \
+--- a/HobbyOS/continuation/wk3/scripts/run_wk3_intel.sh
++++ b/HobbyOS/continuation/wk3/scripts/run_wk3_intel.sh
+@@ -25,6 +25,17 @@
+ if [ -n "${WK3_STABLE:-}" ]; then ARGS="${ARGS} --wk3-stable=${WK3_STABLE}"; fi
+ ACCEL="${QEMU_ACCEL:-auto}"
+ 
++# GX (docs/graphics-accel.md §3-D5 pattern): graphics-acceleration
++# pass-through.  `soft` (default) keeps all three boots below byte-for-byte
++# as today (`-display none`).  `gl` (opt-in) uses `-display gtk,gl=on`; the
++# x64 guest still renders through Bochs std-VGA — add
++# `-device virtio-gpu-gl-pci` here when the x64 virtio-gpu driver lands.
++QEMU_GPU="${QEMU_GPU:-soft}"
++GX_FLAGS=(-display none)
++if [ "$QEMU_GPU" = "gl" ]; then
++  GX_FLAGS=(-display gtk,gl=on)
++fi
++
+ export PATH="$HOME/.local/bin:/usr/sbin:/sbin:$PATH"
+ 
+ echo "== scratch: $OS_SCRATCH / fork: $FORK / run: $RUN (args: ${ARGS})"
+@@ -123,7 +134,7 @@
+ echo "== booting (accel=${ACCEL}) -> $OUT"
+ if [ "$ACCEL" = kvm ] || [ "$ACCEL" = auto ]; then
+   if timeout "${TIMEOUT_QEMU:-540}" qemu-system-x86_64 -M q35 -smp 8 -m 4096M \
+-      -enable-kvm -pflash "$FW" -display none -serial stdio \
++      -enable-kvm -pflash "$FW" "${GX_FLAGS[@]}" -serial stdio \
+       -drive file="$DISK",format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234 \
+       -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 \
+       -action shutdown=poweroff > "$OUT" 2>&1; then
+@@ -133,7 +144,7 @@
+     if [ "$ACCEL" = auto ] && grep -qE "KVM|kvm|accel" "$OUT" 2>/dev/null; then
+       echo "== KVM failed (rc=$RC), falling back to TCG"
+       timeout "${TIMEOUT_QEMU:-540}" qemu-system-x86_64 -M q35 -smp 8 -m 4096M \
+-          -accel tcg,thread=multi -pflash "$FW" -display none -serial stdio \
++          -accel tcg,thread=multi -pflash "$FW" "${GX_FLAGS[@]}" -serial stdio \
+           -drive file="$DISK",format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234 \
+           -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 \
+           -action shutdown=poweroff > "$OUT" 2>&1 || true
+@@ -141,7 +152,7 @@
+   fi
+ else
+   timeout "${TIMEOUT_QEMU:-540}" qemu-system-x86_64 -M q35 -smp 8 -m 4096M \
+-      -accel tcg,thread=multi -pflash "$FW" -display none -serial stdio \
++      -accel tcg,thread=multi -pflash "$FW" "${GX_FLAGS[@]}" -serial stdio \
+       -drive file="$DISK",format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234 \
+       -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 \
+       -action shutdown=poweroff > "$OUT" 2>&1 || true
+--- a/HobbyOS/continuation/wk4/scripts/run_wk4.sh
++++ b/HobbyOS/continuation/wk4/scripts/run_wk4.sh
+@@ -28,6 +28,18 @@
+ SERVEDIR="/tmp/wk4-http"
+ OUT="${OUTDIR}/run-WK4-${RUN}.log"
+ 
++# GX (docs/graphics-accel.md §3-D5 pattern): graphics-acceleration
++# pass-through.  `soft` (default) keeps today's headless boot exactly —
++# `-display none`, no GPU device; serial log + guest-disk PIXEL0.RAW stay
++# the verification channel.  `gl` (opt-in) adds virtio-gpu-gl-device +
++# `-display gtk,gl=on` on hosts with host GL (llvmpipe counts); gate runs
++# never use it.
++QEMU_GPU="${QEMU_GPU:-soft}"
++GX_FLAGS=(-display none)
++if [ "$QEMU_GPU" = "gl" ]; then
++  GX_FLAGS=(-display gtk,gl=on -device virtio-gpu-gl-device)
++fi
++
+ export PATH="$HOME/.local/bin:/usr/sbin:/sbin:$PATH"
+ OBJCOPY="${LLVM_OBJCOPY:-/usr/bin/llvm-objcopy}"
+ [ -x "$OBJCOPY" ] || OBJCOPY="$(clang -print-prog-name=llvm-objcopy)"
+@@ -129,7 +141,7 @@
+ mkdir -p "$OUTDIR"
+ rm -f "$OUT"
+ timeout "${TIMEOUT_QEMU:-540}" qemu-system-aarch64 -M virt -cpu cortex-a53 -smp "${QEMU_SMP:-1}" -m 2048M \
+-    -accel tcg,thread=multi -bios "$FW" -display none -serial stdio \
++    -accel tcg,thread=multi -bios "$FW" "${GX_FLAGS[@]}" -serial stdio \
+     -semihosting \
+     -drive if=none,file="$DISK",format=raw,id=hd0 \
+     -device virtio-blk-device,drive=hd0 \
+--- a/HobbyOS/continuation/wk5/scripts/run_wk5.sh
++++ b/HobbyOS/continuation/wk5/scripts/run_wk5.sh
+@@ -28,6 +28,22 @@
+ OUT="${OUTDIR}/run-WK5-${RUN}.log"
+ QMP_SOCK="${OUTDIR}/qmp-wk5-${RUN}.sock"
+ 
++# GX (docs/graphics-accel.md §3-D5 pattern): graphics-acceleration
++# pass-through.  `soft` (default) keeps today's headless boot exactly —
++# `-display none` + plain virtio-gpu-device (QMP input AND the driver's
++# screendump PNG evidence stay intact).  `gl` (opt-in) swaps to
++# virtio-gpu-gl-device + `-display gtk,gl=on` for interactive inspection;
++# QMP input keeps working, but QMP screendump has no surface on GL windows
++# (docs/graphics-accel.md §1), so the driver's PNG evidence will fail.
++QEMU_GPU="${QEMU_GPU:-soft}"
++GX_DISPLAY=(-display none)
++GX_GPU=(-device virtio-gpu-device)
++if [ "$QEMU_GPU" = "gl" ]; then
++  GX_DISPLAY=(-display gtk,gl=on)
++  GX_GPU=(-device virtio-gpu-gl-device)
++  echo "== QEMU_GPU=gl: interactive GL window (no QMP screendump evidence)" >&2
++fi
++
+ export PATH="$HOME/.local/bin:/usr/sbin:/sbin:$PATH"
+ OBJCOPY="${LLVM_OBJCOPY:-/usr/bin/llvm-objcopy}"
+ [ -x "$OBJCOPY" ] || OBJCOPY="$(clang -print-prog-name=llvm-objcopy)"
+@@ -93,13 +109,13 @@
+ mkdir -p "$OUTDIR"
+ rm -f "$OUT" "$QMP_SOCK"
+ timeout "${TIMEOUT_QEMU:-900}" qemu-system-aarch64 -M virt -cpu cortex-a53 -smp "${QEMU_SMP:-1}" -m 2048M \
+-    -accel tcg,thread=multi -bios "$FW" -display none \
++    -accel tcg,thread=multi -bios "$FW" "${GX_DISPLAY[@]}" \
+     -serial file:"$OUT" \
+     -qmp unix:"$QMP_SOCK",server,nowait \
+     -semihosting \
+     -drive if=none,file="$DISK",format=raw,id=hd0 \
+     -device virtio-blk-device,drive=hd0 \
+-    -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device \
++    "${GX_GPU[@]}" -device virtio-keyboard-device -device virtio-tablet-device \
+     -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 \
+     -action shutdown=poweroff &
+ QEMU_PID=$!

@@ -1,0 +1,17 @@
+# x64 soft/headless boot (make run ARCH=intel QEMU_ARGS='-display none -qmp ...'), QMP screendump
+# post-fix: 4cf6d44 x64 flat-image fix cherry-picked into this branch as 01fd26d (guest boots to desktop)
+make-pid: 1121237
+qemu-args: -display none -qmp unix:./q.sock,server,nowait
+desktop-marker: True
+qemu-holder-pids: [1121285]
+qemu-cmdline: qemu-system-x86_64 -M q35 -smp 8 -m 6144M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff -display none -qmp unix:./q.sock,server,nowait 
+cmdline-has-gl: (False, False)
+screendump-resp: {"return": {}}
+screendump: 1024x768 total=786432 nonblack=786432 frac=1.0000
+fatal-count: 0
+serial-bytes: 8082
+VERDICT: PASS (nonblack=True fatal=0)
+
+## serial markers
+Desktop starting: 1 (guest reached the desktop phase)
+memory fault: 0 | in=HOLE: 0 | FAULT: 0 | FATAL: 0 | IDLESTUCK: 0

@@ -25,6 +25,18 @@ INTEL_IMG=disk-intel-test.img
 ARM_LOG="$LOG_DIR/wave_arm.log"
 INTEL_LOG="$LOG_DIR/wave_intel.log"
 
+# GX (docs/graphics-accel.md §3-D5): graphics-acceleration pass-through.
+# This runner is headless BY DESIGN — `-display none` is the serial-verdict
+# boot channel — and QEMU rejects virtio-gpu-gl-device without a GL-capable
+# display backend, so the guest always gets the plain 2D virtio-gpu-device
+# here.  QEMU_GPU is accepted for interface parity with the Makefile switch
+# (auto|gl|soft) but only `soft` is usable; anything else is clamped to
+# soft with a warning.
+QEMU_GPU="${QEMU_GPU:-soft}"
+if [ "$QEMU_GPU" != "soft" ]; then
+  echo "[run_waves] QEMU_GPU=$QEMU_GPU: headless wave stays soft (plain 2D device + -display none)" >&2
+fi
+
 # EDK2 firmware paths, mirroring the Makefile's per-OS defaults.
 if [ "$(uname)" = "Darwin" ]; then
   EDK2_X86_64=/opt/homebrew/share/qemu/edk2-x86_64-code.fd
@@ -59,6 +71,7 @@ if [ "${1:-}" = "--build-only" ]; then
 fi
 
 run_arm() {
+  # soft 2D GPU by design (headless; see the QEMU_GPU note above).
   qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 8 -m 8192M -accel tcg,thread=multi \
     -bios "$EDK2_AARCH64" -serial stdio \
     -drive if=none,file="$ARM_IMG",format=raw,id=hd0 \

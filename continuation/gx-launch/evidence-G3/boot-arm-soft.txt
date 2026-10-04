@@ -1,0 +1,15 @@
+# item 7 — ARM soft/headless boot (make run QEMU_ARGS='-display none -qmp ...'), QMP screendump
+make-pid: 1017948
+qemu-args: -display none -qmp unix:./q.sock,server,nowait
+desktop-marker: True
+qemu-holder-pids: [1018374]
+qemu-cmdline: qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 8 -m 8192M -accel tcg,thread=multi -bios /home/sarah/.local/share/AAVMF/AAVMF_CODE.fd -display gtk -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff -display none -qmp unix:./q.sock,server,nowait 
+cmdline-has-gl: (False, False)
+screendump-resp: {"return": {}}
+screendump: 1024x768 total=786432 nonblack=786432 frac=1.0000
+fatal-count: 0
+serial-bytes: 30439
+VERDICT: PASS (nonblack=True fatal=0)
+
+## serial markers
+Desktop starting...

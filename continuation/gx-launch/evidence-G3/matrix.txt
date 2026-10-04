@@ -1,0 +1,24 @@
+# make -n matrix — qemu command lines
+
+== [make -n run]
+qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 8 -m 8192M -accel tcg,thread=multi -bios /home/sarah/.local/share/AAVMF/AAVMF_CODE.fd -display gtk,gl=on -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-gl-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff 
+
+== [make -n run ARCH=intel]
+qemu-system-x86_64 -M q35 -smp 8 -m 6144M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk,gl=on -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff 
+
+== [make -n run QEMU_ARGS="-display none -qmp unix:./q.sock,server,nowait"]
+qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 8 -m 8192M -accel tcg,thread=multi -bios /home/sarah/.local/share/AAVMF/AAVMF_CODE.fd -display gtk -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff -display none -qmp unix:./q.sock,server,nowait
+
+== [env -u DISPLAY make -n run]
+qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 8 -m 8192M -accel tcg,thread=multi -bios /home/sarah/.local/share/AAVMF/AAVMF_CODE.fd -display gtk -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff 
+
+== [make -n run QEMU_GPU=soft]
+qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 8 -m 8192M -accel tcg,thread=multi -bios /home/sarah/.local/share/AAVMF/AAVMF_CODE.fd -display gtk -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff 
+
+== [make -n MODE=desktop_test run]
+qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 8 -m 8192M -accel tcg,thread=multi -bios /home/sarah/.local/share/AAVMF/AAVMF_CODE.fd -display gtk -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff -display none
+
+== [make -n desktop_test_run]
+qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 8 -m 8192M -accel tcg,thread=multi -bios /home/sarah/.local/share/AAVMF/AAVMF_CODE.fd -display gtk -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff -display none
+
+== [literal 'make -n MODE=desktop_test' (no target) hits the default build goal; use 6a/6b above]
