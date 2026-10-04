@@ -880,19 +880,31 @@ void menu_display_name(const char *raw, char *out, int max) {
 
 void load_menu(void) {
   num_menu_items = 0;
-  while (num_menu_items < MAX_MENU_ITEMS) {
+
+  /* Pass 1: the pinned launcher entries, wherever they sit in the
+   * directory.  A single scan stopped at MAX_MENU_ITEMS entries, so once
+   * the disk root grew past that (the 256 MiB W0.3 boot disk) the tail of
+   * the listing -- FILES, CALC, XCALC, XEYES, CLOCK and the rest -- was
+   * silently cut off and those apps vanished from the Apps menu (the
+   * run_xcalc_test gate could no longer reach XCALC.BIN at all).  The
+   * pinned set must always surface; the rest fills the remaining slots. */
+  for (int idx = 0; num_menu_items < MAX_MENU_ITEMS; idx++) {
     struct sys_dirent ent;
-    if (read_dir("/", num_menu_items, &ent) < 0) {
-      break;
-    }
-    int k = 0;
-    while (ent.name[k] && k < 15) {
-      menu_items[num_menu_items][k] = ent.name[k];
-      k++;
-    }
-    menu_items[num_menu_items][k] = '\0';
+    if (read_dir("/", idx, &ent) < 0) break;
+    if (!is_pinned_app(ent.name) && !is_pinned_game(ent.name)) continue;
+    copy_name(menu_items[num_menu_items], ent.name, 16);
     num_menu_items++;
   }
+
+  /* Pass 2: everything else, in directory order, until the cap. */
+  for (int idx = 0; num_menu_items < MAX_MENU_ITEMS; idx++) {
+    struct sys_dirent ent;
+    if (read_dir("/", idx, &ent) < 0) break;
+    if (is_pinned_app(ent.name) || is_pinned_game(ent.name)) continue;
+    copy_name(menu_items[num_menu_items], ent.name, 16);
+    num_menu_items++;
+  }
+
   /* Surface the GUI apps at the top of the Apps menu. */
   menu_apps_first();
   /* Test-support: dump the exact menu index -> name mapping once at load. */
