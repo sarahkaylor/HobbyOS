@@ -140,6 +140,12 @@ void graphics_clear(uint32_t color) {
 
 void graphics_flush(void) { flush_fb(); }
 
+/* GX (docs/graphics-accel.md): present one screen rectangle with the
+ * driver's damage-rect flush.  The covered pixels end up identical to a
+ * full graphics_flush(); the caller guarantees only those pixels changed
+ * since the last present (or that presenting them is harmless). */
+void graphics_flush_rect(int x, int y, int w, int h) { flush_fb_rect(x, y, w, h); }
+
 /* ---- Fast primitives ---- */
 
 void graphics_draw_hline(int x, int y, int w, uint32_t color) {

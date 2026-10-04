@@ -223,6 +223,12 @@ static void window_paint_rows(struct window *win, int top, int skip, int r0, int
     }
   }
   graphics_reset_clip();
+  /* Remember the repainted band: the desktop presents it with the frame's
+   * damage rects (row repairs are not part of the chrome damage). */
+  win->row_damage.x = win->x + 2;
+  win->row_damage.y = top + r0 * 10;
+  win->row_damage.w = win->w - 4;
+  win->row_damage.h = (r1 - r0 + 1) * 10;
 }
 
 /* Repair a window's captured text at line granularity: repaint only the
@@ -234,6 +240,7 @@ static void window_paint_rows(struct window *win, int top, int skip, int r0, int
  * that differ.  Falls back to a full content repaint when the visible
  * window moved (scrolling) or the bookkeeping is invalid. */
 int wm_draw_window_rows(struct window *win) {
+  win->row_damage.w = 0;
   /* Pixel mode: the app owns its content pixels; the WM never repaints
    * them (see window.h). */
   if (win->pixel_mode) return 0;
@@ -718,6 +725,7 @@ static int term_paint_dirty(struct window *win) {
   window_content_geom(win, &top, &rows);
   if (rows > win->term_rows) rows = win->term_rows;
   int painted = 0;
+  int first = -1, last = -1;
 
   graphics_set_clip(win->x + 2, win->y + 34, win->w - 4, win->h - 36);
   for (int r = 0; r < rows; r++) {
@@ -740,6 +748,8 @@ static int term_paint_dirty(struct window *win) {
       cx += 8;
     }
     win->term_dirty[r] = 0;
+    if (first < 0) first = r;
+    last = r;
     painted = 1;
   }
 
@@ -758,6 +768,21 @@ static int term_paint_dirty(struct window *win) {
     win->term_caret_col = -1;
   }
   graphics_reset_clip();
+
+  if (painted) {
+    /* The caret bar can land on a row whose cells did not change (a
+     * cursor move vacates the old row instead), so fold its row into the
+     * repainted band the desktop presents. */
+    int cr = win->term_caret_row;
+    if (cr >= 0) {
+      if (first < 0 || cr < first) first = cr;
+      if (last < 0 || cr > last) last = cr;
+    }
+    win->row_damage.x = win->x + 2;
+    win->row_damage.y = top + first * 10;
+    win->row_damage.w = win->w - 4;
+    win->row_damage.h = (last - first + 1) * 10;
+  }
   return painted;
 }
 

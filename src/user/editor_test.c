@@ -115,10 +115,11 @@ static int test_state = 0;
 #define STATE_CLICK_FILE_MENU 4
 #define STATE_WAIT_FINISH 6
 
-void flush_fb(void) {
-  // Actually call the real syscall
-  syscall(10 /* SYS_FLUSH_FB */, 0, 0, 0, 0);
-
+/* One presented frame ticks the test state machine.  The desktop presents
+ * whole-scene frames with SYS_FLUSH_FB (10) and damage frames with the GX
+ * rect flush (SYS_FLUSH_FB_RECTS 89), so both wrappers land here -- a
+ * rect-present frame must keep the state machine moving. */
+static void editor_test_tick(void) {
   print_console("[TEST] flush_fb: test_state=");
   char buf[16];
   int st = test_state;
@@ -237,6 +238,18 @@ void flush_fb(void) {
       while(1);
     }
   }
+}
+
+void flush_fb(void) {
+  // Actually call the real syscall
+  syscall(10 /* SYS_FLUSH_FB */, 0, 0, 0, 0);
+  editor_test_tick();
+}
+
+int flush_fb_rects(const struct fb_rect *rects, int count) {
+  syscall(89 /* SYS_FLUSH_FB_RECTS */, (long)rects, (long)count, 0, 0);
+  editor_test_tick();
+  return 0;
 }
 
 __attribute__((section(".text._start")))

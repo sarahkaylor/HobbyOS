@@ -171,18 +171,45 @@ void set_flush_callback(void (*cb)(void)) {
   flush_callback = cb;
 }
 
+/* GX (docs/graphics-accel.md): host mocks for the damage-rect present.
+ * flush_fb() and flush_fb_rect()/flush_fb_rects() route through the same
+ * flush callback (existing tests count frames that way); the rect mocks
+ * also RECORD the presented rectangles so host tests can assert exactly
+ * what the desktop asked the driver for.  mock_flush_reset() clears the
+ * recorders; the counters below are the whole accessor surface (matching
+ * the other mock recorder globals in this file). */
+#define MOCK_FLUSH_RECT_MAX 32
+int mock_flush_full_count = 0;                /* flush_fb() calls          */
+int mock_flush_rect_calls = 0;                /* flush_fb_rect(s) calls    */
+int mock_flush_rect_count = 0;                /* rects in the last call    */
+int mock_flush_last_full = 0;                 /* last call was flush_fb()  */
+struct fb_rect mock_flush_rects[MOCK_FLUSH_RECT_MAX];
+
+void mock_flush_reset(void) {
+  mock_flush_full_count = 0;
+  mock_flush_rect_calls = 0;
+  mock_flush_rect_count = 0;
+  mock_flush_last_full = 0;
+}
+
 void flush_fb(void) {
+  mock_flush_full_count++;
+  mock_flush_last_full = 1;
+  mock_flush_rect_count = 0;
   if (flush_callback) {
     flush_callback();
   }
 }
 
-/* GX (docs/graphics-accel.md): host mocks for the damage-rect present.
- * Freeze default: route both through the same flush callback (the rects
- * are dropped -- tests that need the rect list will extend this; G4). */
 int flush_fb_rects(const struct fb_rect *rects, int count) {
-  (void)rects;
-  (void)count;
+  mock_flush_rect_calls++;
+  mock_flush_last_full = 0;
+  if (count < 0) count = 0;
+  if (count > MOCK_FLUSH_RECT_MAX) count = MOCK_FLUSH_RECT_MAX;
+  for (int i = 0; i < count; i++) {
+    mock_flush_rects[i] = rects[i];
+  }
+  mock_flush_rect_count = count;
   if (flush_callback) {
     flush_callback();
   }
@@ -190,14 +217,12 @@ int flush_fb_rects(const struct fb_rect *rects, int count) {
 }
 
 int flush_fb_rect(int x, int y, int w, int h) {
-  (void)x;
-  (void)y;
-  (void)w;
-  (void)h;
-  if (flush_callback) {
-    flush_callback();
-  }
-  return 0;
+  struct fb_rect r;
+  r.x = x;
+  r.y = y;
+  r.w = w;
+  r.h = h;
+  return flush_fb_rects(&r, 1);
 }
 
 int get_cpuid(void) {

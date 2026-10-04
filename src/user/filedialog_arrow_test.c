@@ -198,9 +198,10 @@ static void dbg_int(const char *label, int v) {
   print_console(buf);
 }
 
-void flush_fb(void) {
-  syscall(10 /* SYS_FLUSH_FB */, 0, 0, 0, 0);
-
+/* One presented frame ticks the state machine.  The desktop presents
+ * whole-scene frames with SYS_FLUSH_FB (10) and damage frames with the GX
+ * rect flush (SYS_FLUSH_FB_RECTS 89), so both wrappers land here. */
+static void filedialog_tick(void) {
   flush_count++;
 
   /* State machine driven by flush callbacks */
@@ -403,6 +404,17 @@ void flush_fb(void) {
     /* Spin to keep the result visible */
     while (1) {}
   }
+}
+
+void flush_fb(void) {
+  syscall(10 /* SYS_FLUSH_FB */, 0, 0, 0, 0);
+  filedialog_tick();
+}
+
+int flush_fb_rects(const struct fb_rect *rects, int count) {
+  syscall(89 /* SYS_FLUSH_FB_RECTS */, (long)rects, (long)count, 0, 0);
+  filedialog_tick();
+  return 0;
 }
 
 __attribute__((section(".text._start")))

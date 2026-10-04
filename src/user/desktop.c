@@ -2,6 +2,10 @@
 #include "libc.h"
 #include "window.h"
 #include "desktop_damage.h"
+#include <signal.h>
+#ifndef HOST_TEST
+#include "syscall.h"
+#endif
 
 
 
@@ -880,19 +884,31 @@ void menu_display_name(const char *raw, char *out, int max) {
 
 void load_menu(void) {
   num_menu_items = 0;
-  while (num_menu_items < MAX_MENU_ITEMS) {
+
+  /* Pass 1: the pinned launcher entries, wherever they sit in the
+   * directory.  A single scan stopped at MAX_MENU_ITEMS entries, so once
+   * the disk root grew past that (the 256 MiB W0.3 boot disk) the tail of
+   * the listing -- FILES, CALC, XCALC, XEYES, CLOCK and the rest -- was
+   * silently cut off and those apps vanished from the Apps menu (the
+   * run_xcalc_test gate could no longer reach XCALC.BIN at all).  The
+   * pinned set must always surface; the rest fills the remaining slots. */
+  for (int idx = 0; num_menu_items < MAX_MENU_ITEMS; idx++) {
     struct sys_dirent ent;
-    if (read_dir("/", num_menu_items, &ent) < 0) {
-      break;
-    }
-    int k = 0;
-    while (ent.name[k] && k < 15) {
-      menu_items[num_menu_items][k] = ent.name[k];
-      k++;
-    }
-    menu_items[num_menu_items][k] = '\0';
+    if (read_dir("/", idx, &ent) < 0) break;
+    if (!is_pinned_app(ent.name) && !is_pinned_game(ent.name)) continue;
+    copy_name(menu_items[num_menu_items], ent.name, 16);
     num_menu_items++;
   }
+
+  /* Pass 2: everything else, in directory order, until the cap. */
+  for (int idx = 0; num_menu_items < MAX_MENU_ITEMS; idx++) {
+    struct sys_dirent ent;
+    if (read_dir("/", idx, &ent) < 0) break;
+    if (is_pinned_app(ent.name) || is_pinned_game(ent.name)) continue;
+    copy_name(menu_items[num_menu_items], ent.name, 16);
+    num_menu_items++;
+  }
+
   /* Surface the GUI apps at the top of the Apps menu. */
   menu_apps_first();
   /* Test-support: dump the exact menu index -> name mapping once at load. */
@@ -1485,7 +1501,46 @@ int desktop_damage(const struct desktop_chrome *prev,
   return n;
 }
 
-/* Composite one frame and push it to the display. */
+/* Composite one frame and push it to the display.  The full path keeps a
+ * full present; a damage frame presents exactly the screen rectangles it
+ * painted -- the chrome passes (dmg[]), the window-text repairs and the
+ * pointer re-stamp (GX D1: docs/graphics-accel.md; presenting anything
+ * less would leave stale pixels, so the union is what goes out).  The
+ * present call is made even for an empty set: it is the frame boundary
+ * the desktop harnesses tick on, and count == 0 is a driver no-op. */
+
+/* ---- Present list (GX D1: docs/graphics-accel.md) --------------------
+ * struct desktop_rect / struct wm_rect / struct fb_rect are all four
+ * 32-bit ints (x, y, w, h in screen pixels), so the rectangles move
+ * between the three as-is.  Overflow (impossible with the frame's fixed
+ * budget: <= DMG_MAX-1 chrome rects + <= MAX_WINDOWS row bands + the
+ * pointer cell) folds into a bounding box rather than dropping a rect,
+ * which keeps pixel equality a hard guarantee. */
+#define PRESENT_MAX 32
+
+static void present_add(struct fb_rect *out, int *n, int max, int x, int y,
+                        int w, int h) {
+  if (w <= 0 || h <= 0) return;
+  for (int i = 0; i < *n; i++) {
+    if (out[i].x == x && out[i].y == y && out[i].w == w && out[i].h == h)
+      return;                          /* already covered */
+  }
+  if (*n >= max) {
+    int x0 = x, y0 = y, x1 = x + w, y1 = y + h;
+    for (int i = 0; i < *n; i++) {
+      if (out[i].x < x0) x0 = out[i].x;
+      if (out[i].y < y0) y0 = out[i].y;
+      if (out[i].x + out[i].w > x1) x1 = out[i].x + out[i].w;
+      if (out[i].y + out[i].h > y1) y1 = out[i].y + out[i].h;
+    }
+    out[0].x = x0; out[0].y = y0; out[0].w = x1 - x0; out[0].h = y1 - y0;
+    *n = 1;
+    return;
+  }
+  out[*n].x = x; out[*n].y = y; out[*n].w = w; out[*n].h = h;
+  (*n)++;
+}
+
 static void paint_frame(void) {
   static struct desktop_chrome last;
   static int have_last = 0;
@@ -1505,14 +1560,26 @@ static void paint_frame(void) {
     for (int i = 0; i < num_windows; i++) {
       if (windows[i].pixel_mode) wm_pixel_queue_expose_all(&windows[i]);
     }
+    flush_fb();
   } else {
-    /* 1. Window text damage first (see the contract above). */
+    struct fb_rect present[PRESENT_MAX];
+    int present_n = 0;
     int rows_painted = 0;
+
+    /* 1. Window text damage first (see the contract above).  The repaired
+     * band is not part of dmg[], so it joins the present list here. */
     for (int i = 0; i < num_windows; i++) {
-      if (wm_draw_window_rows(&windows[i])) rows_painted = 1;
+      if (wm_draw_window_rows(&windows[i])) {
+        rows_painted = 1;
+        present_add(present, &present_n, PRESENT_MAX, windows[i].row_damage.x,
+                    windows[i].row_damage.y, windows[i].row_damage.w,
+                    windows[i].row_damage.h);
+      }
     }
     /* 2. Everything else that moved, one clipped scene pass per rect. */
     for (int i = 0; i < count; i++) {
+      present_add(present, &present_n, PRESENT_MAX, dmg[i].x, dmg[i].y,
+                  dmg[i].w, dmg[i].h);
       graphics_set_base_clip(dmg[i].x, dmg[i].y, dmg[i].w, dmg[i].h);
       paint_scene();
     }
@@ -1524,8 +1591,18 @@ static void paint_frame(void) {
           wm_pixel_queue_expose(&windows[w], dmg[i].x, dmg[i].y, dmg[i].w, dmg[i].h);
       }
     }
-    /* Repainted rows may have covered the pointer. */
-    if (rows_painted) wm_draw_cursor(mouse_x, mouse_y);
+    /* Repainted rows may have covered the pointer: it is stamped outside
+     * every clip, so its cell is presented too. */
+    if (rows_painted) {
+      wm_draw_cursor(mouse_x, mouse_y);
+      present_add(present, &present_n, PRESENT_MAX, mouse_x - 1, mouse_y - 1,
+                  10, 14);
+    }
+
+    /* Present exactly what this frame painted.  A count of 0 is still a
+     * call: the harnesses' frame tick hangs off it (empty damage = no
+     * repaint, but the frame boundary stays). */
+    flush_fb_rects(present, present_n);
   }
 
   last = cur;
@@ -1536,8 +1613,10 @@ static void paint_frame(void) {
 /* Post-frame service for pixel-mode windows: re-stamp the pointer -- and
  * any open menu -- for apps that just painted the framebuffer (ESC ] F),
  * then deliver queued repair requests (clipped around open menus).  Runs
- * right after the frame's graphics_flush(), so a repair the frame queued
- * reaches the app in the same iteration. */
+ * right after the frame's present, so a repair the frame queued reaches
+ * the app in the same iteration.  Only the stamps are the desktop's
+ * pixels: the app presented its own content, so the re-stamp rects are
+ * presented here with a rect flush (nothing stamped = no flush). */
 static void wm_pixel_service_frame(void) {
   struct desktop_rect ov[3];
   overlay_rects(ov);
@@ -1548,7 +1627,8 @@ static void wm_pixel_service_frame(void) {
       win->pix_restamp = 0;
       int cx, cy, cw, ch;
       wm_pixel_content_rect(win, &cx, &cy, &cw, &ch);
-      int redraw = 0;
+      struct fb_rect stamped[12];
+      int sn = 0;
       /* Menus sit above the app's pixels: re-stamp the part of each open
        * menu that overlaps the content this flush may have painted. */
       for (int k = 0; k < 3; k++) {
@@ -1559,14 +1639,14 @@ static void wm_pixel_service_frame(void) {
         draw_menu();
         draw_start_menu();
         graphics_reset_clip();
-        redraw = 1;
+        present_add(stamped, &sn, 12, ox, oy, ow, oh);
       }
       if (mouse_x >= cx && mouse_x < cx + cw &&
           mouse_y >= cy && mouse_y < cy + ch) {
         wm_draw_cursor(mouse_x, mouse_y);
-        redraw = 1;
+        present_add(stamped, &sn, 12, mouse_x - 1, mouse_y - 1, 10, 14);
       }
-      if (redraw) graphics_flush();
+      if (sn > 0) flush_fb_rects(stamped, sn);
     }
     overlay_flush_exposes(win);
   }
@@ -1744,7 +1824,60 @@ void _start(void) {
 #endif
 #endif
 
+/* ---- SIGPIPE ---------------------------------------------------------
+ * The desktop must outlive its children.  A pixel app can exit between a
+ * desktop write (a repair request, a close request or a pointer report)
+ * and the drain that notices the exit; the write then hits a pipe whose
+ * reader is gone.  The kernel raises SIGPIPE on such a write (P5/D10,
+ * kernel pipe.c) and the default disposition kills the writing process
+ * GROUP -- i.e. the whole desktop, halting the machine.  Reproduced on
+ * the pristine freeze build (2/9 xcalc E2E runs), so it is a pre-existing
+ * race, not this lane's damage-rect change.  Ignore SIGPIPE: the failed
+ * write just returns -EPIPE (every writer below already ignores the
+ * result) and the next drain pass removes the dead window.  The desktop's
+ * bespoke link set ($(DESKTOP_BIN)) has no libc_signal.o, so the device
+ * build issues SYS_SIGACTION directly with the same 40-byte user struct
+ * libc's sigaction() marshals (see <signal.h>); the host build uses the
+ * host libc's signal(). */
+static void desktop_ignore_sigpipe(void) {
+#ifdef HOST_TEST
+  signal(SIGPIPE, SIG_IGN);
+#else
+  struct sigaction sa;
+  sa.sa_handler = SIG_IGN;
+  sa.sa_mask.__bits[0] = 0;
+  sa.sa_mask.__bits[1] = 0;
+  sa.sa_flags = 0;
+  sa.sa_restorer = 0;
+#ifdef __x86_64__
+  long ret;
+  register long rdi __asm__("rdi") = SIGPIPE;
+  register long rsi __asm__("rsi") = (long)&sa;
+  register long rdx __asm__("rdx") = 0;
+  register long r10 __asm__("r10") = 0;
+  __asm__ volatile("syscall\n"
+                   : "=a"(ret)
+                   : "a"(SYS_SIGACTION), "r"(rdi), "r"(rsi), "r"(rdx),
+                     "r"(r10)
+                   : "rcx", "r11", "memory");
+  (void)ret;
+#else
+  register long x8 __asm__("x8") = SYS_SIGACTION;
+  register long x0 __asm__("x0") = SIGPIPE;
+  register long x1 __asm__("x1") = (long)&sa;
+  register long x2 __asm__("x2") = 0;
+  register long x3 __asm__("x3") = 0;
+  __asm__ volatile("svc #0\n"
+                   : "+r"(x0)
+                   : "r"(x8), "r"(x1), "r"(x2), "r"(x3)
+                   : "memory");
+  (void)x0;
+#endif
+#endif
+}
+
 int main(void) {
+  desktop_ignore_sigpipe();
   print("Desktop starting...\n");
   if (graphics_init() < 0) {
     print("Failed to initialize graphics.\n");
@@ -2085,8 +2218,10 @@ int main(void) {
     }
 
     if (num > 0 || needs_redraw) {
+      /* paint_frame presents exactly the rects it painted (full present on
+       * a whole-scene repaint); wm_pixel_service_frame presents only the
+       * pixels it re-stamps over an app's own frame. */
       paint_frame();
-      graphics_flush();
       wm_pixel_service_frame();
       needs_redraw = 0;
     } else {
