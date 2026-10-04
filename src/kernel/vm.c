@@ -15,6 +15,7 @@
 #include <stdint.h>
 
 #include "errno.h"
+#include "fat16.h" /* L9 (pagein): positional lazy-IMAGE page fill */
 #include "frame.h"
 #include "fs.h" /* P2.4 (S4): memfd object lookup for fd-backed mmap */
 #include "lock.h"
@@ -627,6 +628,11 @@ int vm_prot_page(struct addr_space *as, uint64_t va, uint16_t prot) {
   return 0;
 }
 
+/* L9 (pagein): lazy IMAGE page fill, defined with the demand-fault
+ * helpers below.  Both the fault path and vm_touch feed it; never call
+ * with vm_lock held. */
+static int v2_image_materialize(struct addr_space *as, uint64_t a);
+
 int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
   if (!p || !p->as)
     return -1;
@@ -656,6 +662,17 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
        (memfd / MAP_SHARED anon) materializes from the object and maps the
        object's frame shared (never freed by unmap/teardown). */
     if (vm_arch_walk(as, a, 0) != 0) {
+      /* L9 (pagein): a lazy IMAGE page must be filled from the image
+         file — the anonymous zero-fill below would corrupt the image.  The
+         disk read runs WITHOUT vm_lock (v2_image_materialize takes it
+         itself for the final map). */
+      if (r->kind == VMK_IMG && as->img_active) {
+        spinlock_release_irqrestore(&vm_lock, fl);
+        int mrc = v2_image_materialize(as, a);
+        if (mrc != 0)
+          return (mrc == -ENOMEM) ? -2 : -1;
+        continue;
+      }
       uint64_t fr;
       int shared = (r->obj != 0);
       if (shared) {
@@ -720,9 +737,65 @@ int vm_kwrite(struct process *p, uint64_t va, const void *src, int len) {
   return 0;
 }
 
-/* ---------------------------------------------------------------------
- * P2.3 (S3, design sections 5.1-5.5): demand faults
+/* P2.3 (S3, design sections 5.1-5.5): demand faults
  * ------------------------------------------------------------------- */
+
+/* L9 (pagein): materialize one lazy IMAGE page from the image file into
+   `as` at page-aligned VA `a`.  Must be called WITHOUT vm_lock held (the
+   fat16/virtio completion chain takes proc_lock, which sits ABOVE
+   vm_lock in the lock order).  Fills the frame with the page's bytes,
+   then re-validates under vm_lock and maps; a concurrent fill of the same
+   page by a peer CPU drops the duplicate.  Returns 0 (mapped, or already
+   mapped by a peer), or a negative errno. */
+static int v2_image_materialize(struct addr_space *as, uint64_t a) {
+  uint64_t fr = frame_alloc();
+  if (!fr)
+    return -ENOMEM;
+  uint32_t pos = (uint32_t)(a - USER_IMG_BASE);
+  int n = fat16_read_direct_pos(as->img_start_cluster, as->img_file_size,
+                                fr, (int)FRAME_SIZE, pos);
+  if (n < 0) {
+    frame_free(fr);
+    return -EIO;
+  }
+  /* Tail of a partial last page: zero it (the eager path delivered a
+     zeroed frame, so the bytes past the image size were already zero). */
+  volatile uint8_t *fp = (volatile uint8_t *)fr;
+  for (int i = n; i < (int)FRAME_SIZE; i++)
+    fp[i] = 0;
+  __builtin___clear_cache((char *)fr, (char *)fr + FRAME_SIZE);
+
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+  if (as->ver != AS_V2) {
+    spinlock_release_irqrestore(&vm_lock, fl);
+    frame_free(fr);
+    return -ESRCH; /* AS torn down while we were reading; drop the frame */
+  }
+  struct vm_region *r2 = vm_region_find(as, a);
+  if (!r2 || r2->kind != VMK_IMG || !as->img_active ||
+      a < r2->base || a + FRAME_SIZE > r2->base + r2->len) {
+    spinlock_release_irqrestore(&vm_lock, fl);
+    frame_free(fr);
+    return -EFAULT; /* region gone / no longer image-backed */
+  }
+  if (vm_arch_walk(as, a, 0) == 0) {
+    /* A peer CPU faulted and mapped the same page while we read. */
+    spinlock_release_irqrestore(&vm_lock, fl);
+    frame_free(fr);
+    return 0;
+  }
+  int rc = vm_arch_map(as, a, fr, r2->prot, VMK_IMG);
+  if (rc != 0) {
+    spinlock_release_irqrestore(&vm_lock, fl);
+    frame_free(fr);
+    return -ENOMEM;
+  }
+  as->resident_frames++;
+  if (as->resident_frames > as->peak_frames)
+    as->peak_frames = as->resident_frames;
+  spinlock_release_irqrestore(&vm_lock, fl);
+  return 0;
+}
 
 int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
                     const char **why) {
@@ -759,6 +832,22 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
       *why = "PROT";
     return 1;
   }
+
+  /* L9 (pagein): a lazy IMAGE region fault is the one I/O-bearing fault
+     class: fill exactly this page from the image file (coalesced) and map
+     it.  The disk read must NOT run under vm_lock (see the helper), so
+     release first; the helper re-checks under the lock before mapping. */
+  if (r->kind == VMK_IMG && as->img_active) {
+    spinlock_release_irqrestore(&vm_lock, fl);
+    int mrc = v2_image_materialize(as, a);
+    if (mrc != 0) {
+      if (why)
+        *why = (mrc == -ENOMEM) ? "OOM" : "PROT";
+      return 1;
+    }
+    return 0; /* the instruction retries (ELR/CR2 untouched) */
+  }
+
   uint64_t fr;
   int shared = (r->obj != 0);
   if (shared) {
@@ -1046,6 +1135,13 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
     return -1;
   if (dst->nr != 0)
     return -1; /* only into a fresh AS */
+
+  /* L9 (pagein): the image source is process-group state (the same flat
+     file backs both share spaces); a child that faults a lazy IMAGE page
+     after a fork must be able to source it too. */
+  dst->img_active = src->img_active;
+  dst->img_file_size = src->img_file_size;
+  dst->img_start_cluster = src->img_start_cluster;
 
   /* Copy the regions in list order; each insert takes vm_lock itself.
      Sibling threads of the parent could in principle mutate the list

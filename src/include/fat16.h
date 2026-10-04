@@ -28,6 +28,9 @@ int fat16_open(const char* filename, struct file* f);
 // Reads bytes from a FAT16 file.
 int fat16_read(struct file* f, void* buf, int size);
 int fat16_read_direct(struct file* f, uint64_t dest, int size);
+/* L9 (pagein): positional coalesced read for demand-paged v2 images. */
+int fat16_read_direct_pos(uint16_t start_cluster, uint32_t file_size,
+                          uint64_t dest, int size, uint32_t pos);
 
 // Writes bytes to a FAT16 file.
 int fat16_write(struct file* f, const void* buf, int size);

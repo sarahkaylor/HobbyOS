@@ -1644,29 +1644,20 @@ int fat16_read(struct file* f, void* buf, int size) {
 }
 
 /**
- * Reads `size` bytes at the file cursor straight into an identity-mapped
- * physical destination, coalescing contiguous cluster runs into single
- * multi-sector device requests.  Used by the program loader (destination
- * = the child's physical block): a ~150 KiB program that used to cost
- * hundreds of single-sector round trips now needs a handful of requests.
- * A sub-sector tail (or an unaligned edge) is completed with a one-sector
- * bounce read.
- *
- * Returns the number of bytes read.
+ * The loop behind fat16_read_direct / fat16_read_direct_pos.  Caller holds
+ * fat_lock and passes the saved IRQ state (`flags`) so per-request
+ * releases/restores match; f->fat16.cursor / entry.start_cluster /
+ * entry.file_size define the position and bounds.  Returns the number of
+ * bytes read (0 at EOF).
  */
-int fat16_read_direct(struct file* f, uint64_t dest, int size) {
-  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
-
-  if (f->fat16.cursor >= f->fat16.entry.file_size) {
-    spinlock_release_irqrestore(&fat_lock, flags);
+static int fat16_read_direct_locked(struct file *f, uint64_t dest, int size,
+                                    uint64_t flags) {
+  if (f->fat16.cursor >= f->fat16.entry.file_size)
     return 0;
-  }
   uint32_t remaining = f->fat16.entry.file_size - f->fat16.cursor;
   if ((uint32_t)size > remaining) size = remaining;
-  if (size == 0) {
-    spinlock_release_irqrestore(&fat_lock, flags);
+  if (size == 0)
     return 0;
-  }
 
   uint64_t out = dest;
   int read_bytes = 0;
@@ -1726,6 +1717,47 @@ int fat16_read_direct(struct file* f, uint64_t dest, int size) {
     f->fat16.cursor += bytes;
     size -= bytes;
   }
+  return read_bytes;
+}
+
+/**
+ * Reads `size` bytes at the file cursor straight into an identity-mapped
+ * physical destination, coalescing contiguous cluster runs into single
+ * multi-sector device requests.  Used by the program loader (destination
+ * = the child's physical block): a ~150 KiB program that used to cost
+ * hundreds of single-sector round trips now needs a handful of requests.
+ * A sub-sector tail (or an unaligned edge) is completed with a one-sector
+ * bounce read.
+ *
+ * Returns the number of bytes read.
+ */
+int fat16_read_direct(struct file* f, uint64_t dest, int size) {
+  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  int read_bytes = fat16_read_direct_locked(f, dest, size, flags);
+  spinlock_release_irqrestore(&fat_lock, flags);
+  return read_bytes;
+}
+
+/**
+ * L9 (pagein lane): positional coalesced read for demand-paged v2 images.
+ * Reads `size` bytes at file offset `pos` into an identity-mapped physical
+ * destination, using the same coalesced loop as fat16_read_direct but
+ * resolving the position from the entry identity (start cluster + size)
+ * instead of a live cursor — the exact use the EL0 page-fault fill needs
+ * (any number of CPUs may fault different pages of the same lazy image).
+ * Serialized under fat_lock like every other FAT16 op.
+ *
+ * Returns the number of bytes read (0 when pos is at/after EOF).
+ */
+int fat16_read_direct_pos(uint16_t start_cluster, uint32_t file_size,
+                          uint64_t dest, int size, uint32_t pos) {
+  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  struct file tmp;
+  __builtin_memset(&tmp, 0, sizeof(tmp));
+  tmp.fat16.entry.start_cluster = start_cluster;
+  tmp.fat16.entry.file_size = file_size;
+  tmp.fat16.cursor = pos;
+  int read_bytes = fat16_read_direct_locked(&tmp, dest, size, flags);
   spinlock_release_irqrestore(&fat_lock, flags);
   return read_bytes;
 }

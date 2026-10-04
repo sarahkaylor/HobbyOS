@@ -146,6 +146,15 @@ struct addr_space { /* one per group (leader PCB owned) */
   int64_t table_frames;    /* table frames owned by this AS (incl. root) */
   int64_t peak_frames;     /* resident peak */
   uint64_t tgid;           /* owning group pid (shootdown claim scan) */
+  /* L9 (pagein): demand-paged v2 IMAGE source.  The v2 loader maps the
+     IMAGE region lazily and stashes the opened image's identity here so
+     the EL0 page-fault fill can source bytes positionally with
+     fat16_read_direct_pos.  Only ever consulted for VMK_IMG regions that
+     are still backed by the file.  Scalars only — no file handle to
+     close at teardown (the FAT entry is untouched read-only state). */
+  int img_active;
+  uint32_t img_file_size;
+  uint16_t img_start_cluster;
 };
 
 /* --- AS lifecycle (vm.c) --------------------------------------------- */
