@@ -425,7 +425,10 @@ static int v2_map_image(struct addr_space *as, struct file *f, uint32_t fsize) {
     return -1;
   }
 
-  /* IMAGE region + one mapped frame per 4 KiB page (read path). */
+  /* IMAGE region (read path).  L9 timing probe: report the load elapsed
+     milliseconds in the image-mapped line so on-device runs can measure
+     the load without host-side serial timestamps. */
+  uint64_t t_load0 = timer_get_ms();
   if (vm_region_insert(as, USER_IMG_BASE, img_len,
                        VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC, VMK_IMG,
                        VM_MAP_PRIVATE, 0, 0) != 0) {
@@ -434,42 +437,94 @@ static int v2_map_image(struct addr_space *as, struct file *f, uint32_t fsize) {
   }
   uint64_t off = 0;
   int total = 0;
-  while (off < img_len) {
-    /* L9 liveness: this loop holds the loader IRQ-off across the whole
-       86 MB WebProcess image (frame alloc + fat16_read + page map), so no
-       timer/syscall entry fires to refresh the ownership heartbeat — an
-       idle peer core would age the claim past LOSTWAKE_DEAD_OWNER_MS and
-       DISPOSE the mid-load process (the -smp 8 wedge).  Refresh once per
-       page: the core is provably alive and making progress.  Writes only;
-       process.c owns the array. */
-    extern volatile uint64_t cpu_heartbeat_ms[];
-    extern uint64_t timer_get_ms(void);
-    cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
-    uint64_t fr = frame_alloc_zeroed();
-    if (!fr)
-      return -1;
-    int n = fat16_read(f, (void *)fr, (int)FRAME_SIZE);
+
+  /* L9 (pagein lane): coalesced v2 load.  The old loop read the image one
+     4 KiB frame at a time through fat16_read, which issues ONE virtio-blk
+     device request per 512 B sector — an 86 MB WebProcess image cost
+     ~168 k single-sector TCG round trips (~99 s on-device).  fat16_read_direct
+     coalesces chain-contiguous cluster runs into up-to-1024-sector (~512 KiB)
+     device requests, but its destination must be physically contiguous.
+     So: pull the whole image into ONE contiguous frame run with a single
+     direct read, then map it page-by-page exactly as before.  Teardown
+     frees each mapped leaf individually, so the run needs no extra
+     bookkeeping; on failure the as-yet-unmapped remainder is freed here.
+     If no contiguous run is available (fragmented pool), fall back to the
+     legacy per-frame path rather than fail the load. */
+  extern volatile uint64_t cpu_heartbeat_ms[];
+  uint32_t npages = (uint32_t)(img_len / FRAME_SIZE);
+  uint64_t img_phys = frame_alloc_contig((int)npages);
+  if (img_phys) {
+    int n = fat16_read_direct(f, img_phys, (int)fsize);
     if (n <= 0) {
-      frame_free(fr);
-      break;
-    }
-    if (vm_map_page(as, USER_IMG_BASE + off, fr,
-                    VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC, VMK_IMG) != 0) {
-      frame_free(fr);
+      for (uint64_t ft = 0; ft < img_len; ft += FRAME_SIZE)
+        frame_free(img_phys + ft);
+      uart_puts("v2 loader: coalesced image read failed\n");
       return -1;
     }
-    /* Same cache discipline as the v1 loader: clean by the identity VA,
-       invalidate the I-cache shareably (the user VA is not mapped in the
-       kernel's current context, so it cannot be used here). */
-    __builtin___clear_cache((char *)fr, (char *)fr + FRAME_SIZE);
-    total += n;
-    off += FRAME_SIZE;
+    total = n;
+    /* Fresh frames are not zeroed; the tail page beyond the image size
+       must be zero like the zeroed-frame path used to deliver. */
+    volatile uint8_t *ip = (volatile uint8_t *)img_phys;
+    for (uint64_t i = (uint64_t)n; i < img_len; i++)
+      ip[i] = 0;
+    while (off < img_len) {
+      /* L9 liveness: this loop holds the loader IRQ-off across the whole
+         86 MB WebProcess image (frame alloc + fat16_read + page map), so no
+         timer/syscall entry fires to refresh the ownership heartbeat — an
+         idle peer core would age the claim past LOSTWAKE_DEAD_OWNER_MS and
+         DISPOSE the mid-load process (the -smp 8 wedge).  Refresh once per
+         page: the core is provably alive and making progress.  Writes only;
+         process.c owns the array. */
+      cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+      if (vm_map_page(as, USER_IMG_BASE + off, img_phys + off,
+                      VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC, VMK_IMG) != 0) {
+        /* Mapped leaves belong to the AS (the caller tears it down);
+           free only the run still owned here. */
+        for (uint64_t ft = off; ft < img_len; ft += FRAME_SIZE)
+          frame_free(img_phys + ft);
+        return -1;
+      }
+      /* Same cache discipline as the v1 loader: clean by the identity VA,
+         invalidate the I-cache shareably (the user VA is not mapped in the
+         kernel's current context, so it cannot be used here). */
+      __builtin___clear_cache((char *)(img_phys + off),
+                              (char *)(img_phys + off) + FRAME_SIZE);
+      off += FRAME_SIZE;
+    }
+  } else {
+    uart_puts("v2 loader: no contiguous run; legacy per-frame read\n");
+    while (off < img_len) {
+      /* L9 liveness (same rationale as the coalesced loop above). */
+      cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+      uint64_t fr = frame_alloc_zeroed();
+      if (!fr)
+        return -1;
+      int n = fat16_read(f, (void *)fr, (int)FRAME_SIZE);
+      if (n <= 0) {
+        frame_free(fr);
+        break;
+      }
+      if (vm_map_page(as, USER_IMG_BASE + off, fr,
+                      VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC, VMK_IMG) != 0) {
+        frame_free(fr);
+        return -1;
+      }
+      /* Same cache discipline as the v1 loader: clean by the identity VA,
+         invalidate the I-cache shareably (the user VA is not mapped in the
+         kernel's current context, so it cannot be used here). */
+      __builtin___clear_cache((char *)fr, (char *)fr + FRAME_SIZE);
+      total += n;
+      off += FRAME_SIZE;
+    }
   }
+
   uart_puts("v2 loader: image mapped, bytes=");
   print_int(total);
   uart_puts(" pages=");
   print_int((int)(off / FRAME_SIZE));
-  uart_puts("\n");
+  uart_puts(" elap=");
+  print_int((int)(timer_get_ms() - t_load0));
+  uart_puts("ms\n");
   return 0;
 }
 
