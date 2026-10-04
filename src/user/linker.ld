@@ -19,10 +19,21 @@ SECTIONS
     .text : {
         *(.text._start)
         *(.text*)
+        /* GX fix (2026-10-04): x86_64 -mcmodel=large emits .ltext/.ldata/
+         * .lbss (and .lrodata*) section names.  They MUST be claimed by
+         * this script: an unclaimed orphan NOBITS section (.lbss) lands
+         * AFTER .tls_meta, objcopy -O binary silently drops it, and the
+         * loader's flat image then ends before the bss span -- every
+         * access past the tail page faults as a hole (observed: the x64
+         * desktop's first bss write at image+0x1C800 -> SIGSEGV).  With
+         * them claimed here, .tls_meta is the last allocated section --
+         * the padding contract documented on .tls_meta below. */
+        *(.ltext*)
     }
     
     .rodata : {
         *(.rodata*)
+        *(.lrodata*)
     }
 
     /* F2.4 (browser.md §6): C++ static initializers.  The compiler puts the
@@ -49,6 +60,7 @@ SECTIONS
 
     .data : {
         *(.data*)
+        *(.ldata*)
     }
 
     /* P1 (p1-threads-design.md section 4): TLS image.  .tdata/.tbss are
@@ -84,6 +96,7 @@ SECTIONS
 
     .bss : {
         *(.bss*)
+        *(.lbss*)
         *(COMMON)
     }
 
