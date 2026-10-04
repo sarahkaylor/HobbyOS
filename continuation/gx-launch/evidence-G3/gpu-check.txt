@@ -1,0 +1,16 @@
+# gpu-check (DISPLAY=:20) — raw output
+== gpu-check: host GL probe (docs/graphics-accel.md §1 / §3-D5) ==
+-- ARM (qemu-system-aarch64) --
+  ok        gtk,gl=on + virtio-gpu-gl-device (the GL config)
+  excluded  egl-headless,gl=on + virtio-gpu-gl-device (why it is excluded) (rc=1)
+            qemu-system-aarch64: egl: no drm render node available
+            qemu-system-aarch64: egl: render node init failed
+  excluded  -display none + virtio-gpu-gl-device (why headless stays soft) (rc=1)
+            qemu-system-aarch64: -device virtio-gpu-gl-device: The display backend does not have OpenGL support enabled
+            It can be enabled with '-display BACKEND,gl=on' where BACKEND is the name of the display backend to use.
+  ok        gtk + virtio-gpu-device (soft fallback)
+  => ARM verdict: GL OK — auto picks virtio-gpu-gl-device + gtk,gl=on for interactive desktop boots
+-- x64 (qemu-system-x86_64) --
+  ok        gtk,gl=on display (std-VGA scanout side; guest stays BGA until G2)
+  => x64 verdict: GL display backend OK — QEMU_GPU=gl is usable; guest still renders via std-VGA
+gpu-check: this invocation (QEMU_GPU=auto MODE=desktop) resolves to GL -> -display gtk,gl=on + -device virtio-gpu-gl-device

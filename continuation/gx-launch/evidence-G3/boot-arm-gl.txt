@@ -1,0 +1,23 @@
+# item 8 — ARM gl boot (make run, auto->gl), X11 capture
+make-pid: 1021305
+qemu-args: -qmp unix:./q2.sock,server,nowait
+desktop-marker: True
+qemu-holder-pids: [1021313]
+qemu-cmdline: qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 8 -m 8192M -accel tcg,thread=multi -bios /home/sarah/.local/share/AAVMF/AAVMF_CODE.fd -display gtk,gl=on -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-gl-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff -qmp unix:./q2.sock,server,nowait 
+cmdline-has-gl: (True, True)
+xwininfo-line: 0x8000001 "qemu": ("qemu-system-aarch64" "Qemu-system-aarch64")  10x10+10+10  +10+10
+xwininfo-line: 0x800000a "QEMU": ("qemu" "Qemu-system-aarch64")  640x507+0+0  +1600+1013
+import-rc: 0
+xcap: size=640x507 nonblack-frac=1.0000
+fatal-count: 0
+serial-bytes: 6074
+VERDICT: PASS (nonblack=True fatal=0)
+
+## serial markers (+IDLESTUCK = documented GL-device anomaly, §1)
+Desktop starting...
+[IDLESTUCK] cpu=0 rounds=5165 t=13284
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 DESKTOP.BIN
+[IDLESTUCK] claims: c0=-1 c1=1 c2=-1 c3=-1 c4=-1 c5=-1 c6=-1 c7=-1
+
+## gradient parity check (gl capture rows vs soft screendump rows)
+soft rows 100/300/500/700 mean rgb: (14,19,39) (22,30,59) (26,34,59) (32,42,69); gl guest-crop rows 50/150/250/350: (14,19,39) (21,28,57) (24,31,55) (29,37,63) — same wallpaper gradient, 0 pure-black px in both

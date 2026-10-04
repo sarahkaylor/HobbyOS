@@ -1,0 +1,4 @@
+# gpu-check without DISPLAY — raw output
+== gpu-check: host GL probe (docs/graphics-accel.md §1 / §3-D5) ==
+gpu-check: no DISPLAY -> soft (GL probes skipped)
+gpu-check: this invocation (QEMU_GPU=auto MODE=desktop) resolves to soft -> -display gtk + -device virtio-gpu-device
