@@ -83,6 +83,43 @@ def upstream_fetch(path, head=None):
     return status, raw_hdr, data
 
 
+def reader_page(topic):
+    """Real-Wikipedia 'reader mode' page: fetch the official REST summary
+    for <topic> from en.wikipedia.org and emit a minimal HTML document the
+    HobbyOS shell renderer can paint (mirrors the fixture styling: inline
+    style, plain <h1>/<p>/<a>).  Content is REAL wikipedia data (title +
+    article extract) — this is the display-friendly path for the windowed
+    browser's address bar; the raw-page path stays /wiki-proxy upstream."""
+    import json as _json
+    from urllib.request import urlopen, Request
+    api = "https://en.wikipedia.org/api/rest_v1/page/summary/" + topic.replace(" ", "_")
+    title, extract = topic, ""
+    try:
+        req = Request(api, headers={"User-Agent": "HobbyOS-WC-proxy/1.0 (reader mode)",
+                                    "Accept": "application/json"})
+        with urlopen(req, timeout=45) as r:
+            data = _json.loads(r.read().decode("utf-8", "replace"))
+        title = data.get("title") or title
+        extract = data.get("extract") or ""
+    except Exception as e:  # noqa: BLE001 — degrade to a readable error page
+        extract = "[reader: upstream fetch failed: %s]" % e
+    import html as _html
+    t = _html.escape(title)
+    x = _html.escape(extract)
+    body = (
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+        "<style>html,body{margin:0;padding:0;background:#ffffff;color:#000000}"
+        "h1{margin:0;padding:8px;background:#3366cc;color:#ffffff;font-size:18px}"
+        "p{margin:8px;padding:4px;font-size:15px}"
+        "a{display:block;margin:8px;padding:8px;background:#e8f0fe;color:#0000aa;font-size:15px}</style>"
+        "</head><body>"
+        "<h1>%s</h1><p>%s</p>"
+        "<a href=\"https://en.wikipedia.org/wiki/%s\">[open] %s on Wikipedia (live)</a>"
+        "</body></html>"
+    ) % (t, x, _html.escape(topic.replace(" ", "_")), t)
+    return body.encode("utf-8")
+
+
 class WikiProxy(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.0"
 
@@ -90,6 +127,23 @@ class WikiProxy(BaseHTTPRequestHandler):
         return
 
     def do_GET(self):
+        # /reader/<Topic>: reader-mode Wikipedia page (real REST extract, see
+        # reader_page).  Everything else: the raw /wiki-proxy upstream relay.
+        if self.path.startswith("/reader/"):
+            topic = self.path[len("/reader/"):].split("?")[0].strip("/")
+            data = reader_page(topic)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            try:
+                self.wfile.write(data)
+            except OSError:
+                pass
+            self._log("READER topic=%s bytes=%d -> guest %s" % (
+                topic, len(data), self.client_address[0]))
+            return
         # ?head=N: serve a byte-exact prefix of the real body (window-sized
         # for the guest's 2048-B TCP window; see docs/browser/host-wiki-proxy.md)
         from urllib.parse import urlsplit, parse_qs
