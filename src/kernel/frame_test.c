@@ -12,8 +12,17 @@ extern void uart_print_hex(uint64_t val);
    validates; a mismatch here means a constant and the bitmap drifted. */
 #ifdef __x86_64__
 #define EXPECT_FRAMES 1376256
+/* x64: the kernel image lives inside ext0, so the reservation always
+   bounds the walk frontier below 0x70000000. */
+#define POOL_FRONTIER_CAP 0x70000000ULL
 #else
 #define EXPECT_FRAMES 1900544
+/* ARM: single extent [0x70000000, 0x240000000).  WE1 (arm-16gib-map):
+   Limine loads the kernel image near the TOP of RAM, which with a
+   12/16 GiB guest (~12.98/16.98 GiB) sits ABOVE the pool — frame_init's
+   image reservation then correctly no-ops, so the walk's frontier is the
+   pool top, not the (out-of-pool) image. */
+#define POOL_FRONTIER_CAP 0x240000000ULL
 #endif
 
 static void test_frame_counts(void) {
@@ -263,7 +272,10 @@ static void test_frame_image_reserved(void) {
   print_int(wrapped);
   uart_puts("\n");
   EXPECT_EQ(inside, 0);
-  EXPECT_EQ((seen_high + RUN * FRAME_SIZE >= rsv_lo), 1);
+  /* The walk must reach the border of the free region: the reserved
+     image edge when the image is inside the pool, else the pool top. */
+  uint64_t frontier = rsv_lo < POOL_FRONTIER_CAP ? rsv_lo : POOL_FRONTIER_CAP;
+  EXPECT_EQ((seen_high + RUN * FRAME_SIZE >= frontier), 1);
   EXPECT_EQ(wrapped, 1);
   EXPECT_EQ(singles_ok, 1);
   EXPECT_EQ(frame_free_count(), frame_total_count() - used0);

@@ -87,9 +87,13 @@
    address (fixed by the linker / Limine entry). */
 #define PROC_PHYS_POOL_TOP 0x70000000
 #else
-/* AArch64: RAM runs [0x40000000, 0x240000000) with QEMU -m 8192M; the
-   kernel loads and lives near RAM top (Limine load base ~0x23A680000).
-   The pool sits above the low kernel residue and extends to RAM top. */
+/* AArch64: RAM runs [0x40000000, RAM_top) with RAM_top = 0x40000000 + RAM
+   (9 GiB at -m 8192M, 17 GiB at -m 16384M).  Limine's linux-protocol
+   loader places the kernel image near RAM top (load base ~93.6 MiB below
+   top), and the static identity map covers 0..18 GiB (mmu.c L1[0..17]).
+   The frame POOL is deliberately capped at 9 GiB (frame.c FRAME_EXT0_TOP):
+   every allocated frame stays inside the map, and handouts above 9 GiB
+   would put user pages in image/BSS territory of large-RAM guests. */
 #define PROC_PHYS_POOL_BASE 0x70000000
 #define PROC_PHYS_POOL_TOP 0x240000000ULL
 #endif

@@ -18,6 +18,23 @@ static uint64_t l2_table_5[512] __attribute__((aligned(4096)));
 static uint64_t l2_table_6[512] __attribute__((aligned(4096)));
 static uint64_t l2_table_7[512] __attribute__((aligned(4096)));
 static uint64_t l2_table_8[512] __attribute__((aligned(4096)));
+/* WE1 (arm-16gib-map): the identity map extends 0..18 GiB (L1[0..17]) so
+   a 16 GiB guest boots.  Limine's `linux`-protocol loader places the flat
+   image just below the TOP of RAM (~93.6 MiB down), i.e. ~8.98 GiB in an
+   8 GiB guest but ~12.98/~16.98 GiB in 12/16 GiB guests -- tables 0..8
+   (<=9 GiB) left those loads unmapped, so the MMU enable in mmu_init_core
+   faulted on the very next instruction fetch (hang at the banner).  The
+   cover through 18 GiB also exceeds the 16 GiB guest's RAM top (17 GiB),
+   so the table-framed image + BSS land well inside the map. */
+static uint64_t l2_table_9[512] __attribute__((aligned(4096)));
+static uint64_t l2_table_10[512] __attribute__((aligned(4096)));
+static uint64_t l2_table_11[512] __attribute__((aligned(4096)));
+static uint64_t l2_table_12[512] __attribute__((aligned(4096)));
+static uint64_t l2_table_13[512] __attribute__((aligned(4096)));
+static uint64_t l2_table_14[512] __attribute__((aligned(4096)));
+static uint64_t l2_table_15[512] __attribute__((aligned(4096)));
+static uint64_t l2_table_16[512] __attribute__((aligned(4096)));
+static uint64_t l2_table_17[512] __attribute__((aligned(4096)));
 /* P2.2 (S2): the kernel half of a v2 root's 1-2 GiB window.  v1 roots
    keep per-CPU l2_table_1[c] (which carries the legacy user overlay);
    v2 roots share this kernel-only table instead: the 0x44000000-0x46000000
@@ -71,6 +88,15 @@ void mmu_init_tables(void) {
     l1_table[c][6] = ((uint64_t)&l2_table_6) | 0b11;
     l1_table[c][7] = ((uint64_t)&l2_table_7) | 0b11;
     l1_table[c][8] = ((uint64_t)&l2_table_8) | 0b11;
+    l1_table[c][9] = ((uint64_t)&l2_table_9) | 0b11;
+    l1_table[c][10] = ((uint64_t)&l2_table_10) | 0b11;
+    l1_table[c][11] = ((uint64_t)&l2_table_11) | 0b11;
+    l1_table[c][12] = ((uint64_t)&l2_table_12) | 0b11;
+    l1_table[c][13] = ((uint64_t)&l2_table_13) | 0b11;
+    l1_table[c][14] = ((uint64_t)&l2_table_14) | 0b11;
+    l1_table[c][15] = ((uint64_t)&l2_table_15) | 0b11;
+    l1_table[c][16] = ((uint64_t)&l2_table_16) | 0b11;
+    l1_table[c][17] = ((uint64_t)&l2_table_17) | 0b11;
   }
 
   for (int i = 0; i < 512; i++) {
@@ -82,6 +108,15 @@ void mmu_init_tables(void) {
     l2_table_6[i] = 0;
     l2_table_7[i] = 0;
     l2_table_8[i] = 0;
+    l2_table_9[i] = 0;
+    l2_table_10[i] = 0;
+    l2_table_11[i] = 0;
+    l2_table_12[i] = 0;
+    l2_table_13[i] = 0;
+    l2_table_14[i] = 0;
+    l2_table_15[i] = 0;
+    l2_table_16[i] = 0;
+    l2_table_17[i] = 0;
   }
 
   // 4. Populate L2 Tables
@@ -148,6 +183,81 @@ void mmu_init_tables(void) {
     uint64_t attr = (PT_MEM_NORMAL << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
     attr |= (1ULL << 54); // UXN=1
     l2_table_8[i] = addr | attr;
+  }
+
+  // WE1 (arm-16gib-map): tables 9..17 map 9..18 GiB so Limine's
+  // near-RAM-top image load is inside the identity map at 12/16 GiB
+  // guests (see the table declarations above for the full rationale).
+  // Populate L2 Table 9 (9GB - 10GB)
+  for (int i = 0; i < 512; i++) {
+    uint64_t addr = 0x240000000ULL + (uint64_t)i * 0x200000;
+    uint64_t attr = (PT_MEM_NORMAL << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
+    attr |= (1ULL << 54); // UXN=1
+    l2_table_9[i] = addr | attr;
+  }
+
+  // Populate L2 Table 10 (10GB - 11GB)
+  for (int i = 0; i < 512; i++) {
+    uint64_t addr = 0x280000000ULL + (uint64_t)i * 0x200000;
+    uint64_t attr = (PT_MEM_NORMAL << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
+    attr |= (1ULL << 54); // UXN=1
+    l2_table_10[i] = addr | attr;
+  }
+
+  // Populate L2 Table 11 (11GB - 12GB)
+  for (int i = 0; i < 512; i++) {
+    uint64_t addr = 0x2C0000000ULL + (uint64_t)i * 0x200000;
+    uint64_t attr = (PT_MEM_NORMAL << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
+    attr |= (1ULL << 54); // UXN=1
+    l2_table_11[i] = addr | attr;
+  }
+
+  // Populate L2 Table 12 (12GB - 13GB)
+  for (int i = 0; i < 512; i++) {
+    uint64_t addr = 0x300000000ULL + (uint64_t)i * 0x200000;
+    uint64_t attr = (PT_MEM_NORMAL << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
+    attr |= (1ULL << 54); // UXN=1
+    l2_table_12[i] = addr | attr;
+  }
+
+  // Populate L2 Table 13 (13GB - 14GB)
+  for (int i = 0; i < 512; i++) {
+    uint64_t addr = 0x340000000ULL + (uint64_t)i * 0x200000;
+    uint64_t attr = (PT_MEM_NORMAL << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
+    attr |= (1ULL << 54); // UXN=1
+    l2_table_13[i] = addr | attr;
+  }
+
+  // Populate L2 Table 14 (14GB - 15GB)
+  for (int i = 0; i < 512; i++) {
+    uint64_t addr = 0x380000000ULL + (uint64_t)i * 0x200000;
+    uint64_t attr = (PT_MEM_NORMAL << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
+    attr |= (1ULL << 54); // UXN=1
+    l2_table_14[i] = addr | attr;
+  }
+
+  // Populate L2 Table 15 (15GB - 16GB)
+  for (int i = 0; i < 512; i++) {
+    uint64_t addr = 0x3C0000000ULL + (uint64_t)i * 0x200000;
+    uint64_t attr = (PT_MEM_NORMAL << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
+    attr |= (1ULL << 54); // UXN=1
+    l2_table_15[i] = addr | attr;
+  }
+
+  // Populate L2 Table 16 (16GB - 17GB)
+  for (int i = 0; i < 512; i++) {
+    uint64_t addr = 0x400000000ULL + (uint64_t)i * 0x200000;
+    uint64_t attr = (PT_MEM_NORMAL << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
+    attr |= (1ULL << 54); // UXN=1
+    l2_table_16[i] = addr | attr;
+  }
+
+  // Populate L2 Table 17 (17GB - 18GB)
+  for (int i = 0; i < 512; i++) {
+    uint64_t addr = 0x440000000ULL + (uint64_t)i * 0x200000;
+    uint64_t attr = (PT_MEM_NORMAL << 2) | PT_KERNEL_RW | (1 << 10) | 0b01;
+    attr |= (1ULL << 54); // UXN=1
+    l2_table_17[i] = addr | attr;
   }
 
   // L2 Table 1 covers USER_START - 0x7FFFFFFF (RAM, 1GB)
@@ -454,6 +564,15 @@ uint64_t vm_arch_root_alloc(struct addr_space *as) {
   l1[6] = ((uint64_t)&l2_table_6) | 0b11;
   l1[7] = ((uint64_t)&l2_table_7) | 0b11;
   l1[8] = ((uint64_t)&l2_table_8) | 0b11;
+  l1[9] = ((uint64_t)&l2_table_9) | 0b11;
+  l1[10] = ((uint64_t)&l2_table_10) | 0b11;
+  l1[11] = ((uint64_t)&l2_table_11) | 0b11;
+  l1[12] = ((uint64_t)&l2_table_12) | 0b11;
+  l1[13] = ((uint64_t)&l2_table_13) | 0b11;
+  l1[14] = ((uint64_t)&l2_table_14) | 0b11;
+  l1[15] = ((uint64_t)&l2_table_15) | 0b11;
+  l1[16] = ((uint64_t)&l2_table_16) | 0b11;
+  l1[17] = ((uint64_t)&l2_table_17) | 0b11;
   as->table_frames++;
   return root;
 }
