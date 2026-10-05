@@ -1453,6 +1453,35 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-10-05 — **WK-4 GATE GREEN on ARM — Path B end-to-end (fork merged at
+  `232f694b74`).** WN2 passed the WK-4c runtime-networking gate: on-device
+  HTTP (status 200) + redirect (302→follow) + HTTPS (200, plus CA-ENFORCED
+  negative test: bogus CA → curl rc=77) + cookie round-trip (ROUNDTRIP-42)
+  through the real NetworkProcess→libcurl(mbedTLS) path. Root causes fixed:
+  the spawned NetProcess has no stdio fds so `socket()` stole fd 0/2 and
+  console writes vanished into the socket (curl aborted already-ESTABLISHED
+  handshakes) → reserve fds 0–2 at NetworkProcessMainCurl entry;
+  BSD `send()`/`recv()` routed over AF_UNIX-only `sendmsg`/`recvmsg`
+  (-EOPNOTSUPP) → routed to `write()`/`read()`; curl was configured against
+  another lane's include path (reconfigured for wn). FDMA other caveats:
+  mbedTLS post-handshake `verify_result`=0xffffffff on TLS-1.3-era ⇒ CA
+  enforcement proven via the negative test; redirect `chain='none'`
+  (effective-URL evidence gates). WF1: the x64 WK-3 "wedge" was LOST
+  EVIDENCE, not a defect — the current intel WebProcess redirects gate
+  markers to `/WK4DBG.TXT` (UART-DMA workaround) and the old runner only
+  tallied serial; with dual-channel tally the CURRENT binary is green
+  (JWK3 ALL-DONE + FPC 0x759431c5, runs 26-28; WX's "wedged" runs produced
+  byte-identical pixels). WF2: WK-7 auto-respawn GREEN — WEBWATCH.BIN
+  supervisor (waitpid + bounded relaunch, max 2 per 180 s burst, graceful
+  close never respawns): kill -11 → respawn + window + page reload with zero
+  human action; third crash → give-up stop-loud; desktop never faults. WF3:
+  full 5-min §8.3 site-soak ok=True (300 s, 16 iters, 64 wheel, 16/16 exact
+  URLs), checklist truth-swept (every row evidence-mapped or gated+owner),
+  http site-live dry proves the transfer (byte-identical FETCHED.HTM over
+  Path A; the WK-4 probe-timing fail is documented non-gating). Left for
+  wave-4→5: live Google/CNN runs (text-input wiring for Google queries),
+  x64 toolkit leg, ARM 16 GiB memory map, intel curl staging.
+
 - 2026-10-05 — **Browser wave 2 + OS x64 RCA (merged).** OS main:
   `SYS_GETARGV` lacked the `process_user_ok` pre-commit its sibling GETENV
   has → with lazy demand-loaded webproc the argv page could fault the KERNEL
