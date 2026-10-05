@@ -89,9 +89,10 @@ static void test_fat16_stats(void) {
   uint64_t total = 0, freeb = 0;
   int rc = fat16_stats(&total, &freeb);
   EXPECT_EQ(rc, 0);
-  /* The 64 MB image must report a plausible data area. */
+  /* The shipped image (1 GiB startup disk since b8e69a9) must report a
+   * plausible data area: above 16 MiB, below the FAT16 ceiling (2 GiB). */
   EXPECT_EQ((total > 16ULL * 1024 * 1024), 1);
-  EXPECT_EQ((total < 256ULL * 1024 * 1024), 1);
+  EXPECT_EQ((total < 2ULL * 1024 * 1024 * 1024), 1);
   EXPECT_EQ((freeb > 0), 1);
   EXPECT_EQ((freeb <= total), 1);
   /* Sectors are 512 bytes; the data area must be sector-aligned. */
