@@ -1453,6 +1453,26 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-10-05 — **Browser in the Apps menu + 1 GiB startup disk (user ask).**
+  `make disk.img` is now 1 GiB FAT16 (auto cluster; driver BPB-driven, no
+  kernel change) and ships the flat windowed WebProcess as `::/BROWSER.BIN`
+  (BROWSER_BIN per-arch default; objcopy -O binary'ed to the v2 loader
+  contract — the raw ELF was rejected: `v2 loader: bad image size` over the
+  128 MiB cap; the flat is 82/96 MiB).  desktop.c pins BROWSER.BIN first in
+  the Apps menu and adds **F1 = open Apps menu preselected on BROWSER**
+  (Enter launches) — a keyboard path to the menu, needed on x64 where the
+  kernel's PS/2 mouse buttons are never delivered (WF1B).  Also fixed an
+  arch-stale kernel ELF trap: ./hobbyos.elf is shared by both ARCHs, so
+  building intel then arm produced an arm disk with an intel kernel
+  (`limine: invalid kernel image`); the kernel rule now relinks on ARCH
+  change (FORCE_ARCH via .EXTRA_PREREQS).  VERIFIED on-device both arches:
+  ARM click-launch and F1-launch render HOME.HTM (checksum 0x39878dc5, the
+  probe-green page); x64 F1 → menu (BROWSER preselected) → Enter launches
+  the 100 MB windowed browser with a byte-identical frame checksum.  NEW
+  FINDING (x64 windowed display): the x64 frame blit paints the window
+  WHITE while the render is correct — first x64 windowed render surfaced an
+  x64-specific display bug in the fork's WK5 blit/scanout path (open).
+
 - 2026-10-05 — **Wave-5 close-outs (fork tip `befd84e00`, OS main has all).**
   ARM 16 GiB FIXED (WE1): root cause = Limine loads the flat kernel near
   TOP of RAM (image_pc = RAM_top - ~94 MiB), so at 12/16 GiB the image sat
