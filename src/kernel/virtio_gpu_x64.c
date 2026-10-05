@@ -35,6 +35,13 @@
  */
 #ifdef __x86_64__
 
+/* WD lane: set to 1 to re-enable the flush-path probes used in the
+ * x64 white-window investigation (serial " [WD] ..." lines).  Default
+ * 0 keeps the shipped kernel quiet. */
+#ifndef WD_X64_FLUSH_PROBE
+#define WD_X64_FLUSH_PROBE 0
+#endif
+
 #include "virtio_gpu.h"
 #include "lock.h"
 #include "arch/cpu.h"
@@ -757,6 +764,41 @@ void virtio_gpu_flush(void) {
 void virtio_gpu_flush_rects(const struct virtio_gpu_xrect* rects, int count) {
   if (!rects || count <= 0) return;
   if (count > VGPU_RECT_MAX) count = VGPU_RECT_MAX;
+
+  /* WD probe (WD_X64_FLUSH_PROBE=1): time-series of the KERNEL fb at
+   * browser-window monitor points on every large (near full-screen)
+   * flush (first 1500), so a second mapper's blit can be correlated
+   * with the kernel fb and the visible scanout.  Leaving on is ~60
+   * bytes per full flush; harmless, but off by default. */
+#if WD_X64_FLUSH_PROBE
+  static int wd_probe_n = 0;
+  for (int i = 0; i < count; i++) {
+    int32_t x, y, w, h;
+    if (!virtio_gpu_x64_clamp_rect(rects[i].x, rects[i].y, rects[i].w, rects[i].h,
+                                   &x, &y, &w, &h))
+      continue;
+    if ((uint64_t)w * h >= 100000ULL && wd_probe_n < 1500) {
+      wd_probe_n++;
+      struct { int x, y; } pts[6] = {
+        {102, 100}, {800, 300}, {102, 650}, {512, 300}, {512, 640}, {40, 200}
+      };
+      uart_puts("[WD] n=");
+      print_int(wd_probe_n);
+      uart_puts(" rect=(");
+      print_int(x); uart_puts(","); print_int(y); uart_puts(",");
+      print_int(w); uart_puts(","); print_int(h); uart_puts(")");
+      for (int k = 0; k < 6; k++) {
+        uint32_t v = framebuffer[(uint64_t)pts[k].y * GPU_SCREEN_W + pts[k].x];
+        uart_puts(" P");
+        print_int(k + 1);
+        uart_puts("=");
+        uart_print_hex(v);
+      }
+      uart_puts("\n");
+      break;
+    }
+  }
+#endif /* WD_X64_FLUSH_PROBE */
 
   uint64_t flags = spinlock_acquire_irqsave(&gpu_lock);
   if (gpu_mode == VGPU_MODE_VIRTIO) {

@@ -8,6 +8,12 @@
 #include "arch/cpu.h"
 #include "arch/mmu.h"
 #include "syscall.h"
+
+/* WD lane: x64 flush-path probes (serial "[WD] ..."); default 0 keeps the
+ * shipped kernel quiet.  See docs/wd-x64-white-blit.md. */
+#ifndef WD_X64_FLUSH_PROBE
+#define WD_X64_FLUSH_PROBE 0
+#endif
 #include "errno.h"
 #include "vfs.h"
 #include "vm.h"
@@ -1027,18 +1033,42 @@ static void sys_map_fb(struct trap_frame *tf) {
   struct process *cur = current_process();
   if (cur)
     cur = process_group(cur);
+#if WD_X64_FLUSH_PROBE
+  uart_puts("[WD] SYS_MAP_FB pid=");
+  print_int(cur ? cur->pid : -1);
+  uart_puts(" phys=");
+  uart_print_hex(phys_addr);
+#endif
   if (cur && cur->as) {
     /* P2.4 (S4, design 7.3): a v2 process maps the fb into its own AS at
        the reserved USER_FB_OFF slot (same physical frames, VMK_FB);
        idempotent per process. */
-    tf->regs[0] = (uint64_t)vm_map_fb(cur, phys_addr);
+    int64_t va = vm_map_fb(cur, phys_addr);
+#if WD_X64_FLUSH_PROBE
+    uart_puts(" v2va=");
+    uart_print_hex((uint64_t)va);
+    uart_puts("\n");
+#endif
+    tf->regs[0] = (uint64_t)va;
     return;
   }
   mmu_map_user_framebuffer(phys_addr);
+#if WD_X64_FLUSH_PROBE
+  uart_puts(" v1va=60000000\n");
+#endif
   tf->regs[0] = USER_FB_VIRT_BASE; // Return user virtual address
 }
 
 static void sys_flush_fb(struct trap_frame *tf) {
+#if WD_X64_FLUSH_PROBE
+  /* WD probe: attribute every full flush to its process (used to
+   * correlate a second mapper's blit with the kernel fb + scanout). */
+  struct process *cur = current_process();
+  int pid = cur ? cur->pid : -1;
+  uart_puts("[WD] SYS_FLUSH_FB pid=");
+  print_int(pid);
+  uart_puts("\n");
+#endif
   virtio_gpu_flush();
   tf->regs[0] = 0;
 }
