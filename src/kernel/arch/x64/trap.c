@@ -1633,10 +1633,23 @@ void sync_lower_handler_c(struct trap_frame *tf) {
   } else if (syscall_num == SYS_GETPROGNAME) {
     sys_get_progname(tf);
   } else if (syscall_num == SYS_GETARGV) {
-    tf->regs[0] = (uint64_t)sys_readargv(current_process(),
-                                         (int)tf->regs[5], /* rdi: idx */
-                                         (char *)tf->regs[4], /* rsi: buf */
-                                         (int)tf->regs[3]);  /* rdx: size */
+    /* WX: pre-commit the user argv buffer before sys_readargv's direct
+       store — the same write-validate guard SYS_GETENV uses.  The argv
+       destination can sit in the not-yet-resident tail of a lazily
+       demand-loaded image (observed: the WK-3 WEBPROC.BIN argv buffer at
+       0x1005FD23B0 faulting in sys_readargv, RIP 0x70020EB6): without
+       this, the kernel-mode store #PFs and the trap handler prints a
+       "FATAL" dump (the L9 materialize path then recovers it, but the
+       dump is alarming and serial noise on every x64 webproc boot). */
+    struct process *av = current_process();
+    char *avbuf = (char *)tf->regs[4];       /* rsi: buf */
+    int avsz = (int)tf->regs[3];             /* rdx: size */
+    if ((int)tf->regs[5] >= 0 && avsz > 0 && /* rdi: idx; writes only then */
+        (!av || process_user_ok(av, (uint64_t)avbuf, (uint64_t)avsz, 1) != 0)) {
+      tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    } else {
+      tf->regs[0] = (uint64_t)sys_readargv(av, (int)tf->regs[5], avbuf, avsz);
+    }
   } else if (syscall_num == SYS_BRK) {
     tf->regs[0] = (uint64_t)sys_brk(tf->regs[5]); /* rdi */
   } else if (syscall_num == SYS_MMAP) {

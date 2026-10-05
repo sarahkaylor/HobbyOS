@@ -1,0 +1,38 @@
+{
+  "lane": "WX (x64 regression family)",
+  "branch": "x64/wedge-fix",
+  "base": "98fe20b (merged GX tip)",
+  "verdict": "FAMILY = SEVERAL DISTINCT CAUSES (3 items, 3 root causes; none share a single kernel defect). One OS-scope fix landed (item 3); items 1 (wave) and 2 (WK-3 wedge) are absent at the merged tip as new kernel bugs.",
+  "items": {
+    "1_test_wave_STRESS_wedge": {
+      "verdict": "PRE-EXISTING LATENT x64 CLASS, NOT a GX regression",
+      "repro": "merged tip KVM: wedges at STRESS iter 10-20 (all 8 CPUs busy in SYS_SPAWN, 'Loader (v2) starved (slot pressure)' x265, sys_fork -11 x284, zombies=34 at process_create); merged tip TCG: wedges at STRESS 1/120 (watchdog, static log -- reproduces the brief's TCG 0/3); freeze 9a3b87e KVM control on same box: ALSO wedges at STRESS 80/120 (all-idle + LOSTWAKE dispose of STRESS pid). freeze's historical completions (batF TCG Oct 4) = same luck-dependent class. box load 1.37 (quiet).",
+      "evidence": "/tmp/wx-logs/wave-x64-kvm.MERGED-TIP-WEDGED.log, /tmp/wx-logs/wave-x64-freeze.WEDGED.log, browser.md lines 1485/1491/1762-1777/1824/2415 ('test-x64 known-incomplete', 'late-IDLESTUCK at STRESS.BIN', 'slots held st=4 EXITED unreaped', 'wedge fires ~2/3 of runs' soak note, FATBIG tail-checksum got=0x800 want=0x0 and PROCTEST waitpid fails all pre-recorded on main).",
+      "cause": "process-credit/frame pool exhaustion under the ~40-program parallel wave hitting the latent zombie-slot (EXITED-unreaped) reaping limit at STRESS (fork+pipe+file heavy). The wave kernel scheduler/loader code is byte-identical freeze-vs-tip (diff only hit Makefile, main.c ARM-guard, virtio_gpu*, linker.ld). Tip manifests earlier (iter 10-20 vs ~80) because the .lbss claim (+8-10% on every bin: STRESS.BIN 54,328->59,096) consumes more frames per slot sooner.",
+      "gate": "x64 wave: NOT met (wedges both trees on this box under identical runner) -> documented, evidenced limit (this doc + browser.md). unit-x64 KVM 306/0 remains the reliable x64 gate and is GREEN."
+    },
+    "2_wk3_x64_webproc_early_halt": {
+      "verdict": "FORK-SIDE (current intel WebProcess build), precise handoff",
+      "repro": "current fork intel WebProcess (100,490,824 B flat) on the merged OS: WK4 START network-smoke -> all-CPU SYS_FUTEX spin -> process exit (runs 20/21/22). Gate-era intel binary (99,720,440 B flat) on the SAME merged OS scratch: WK-3 ALL-DONE with cross-arch FPC parity 0x759431c5 (run 23).",
+      "os_scope": "merged OS can complete WK-3 x64 deterministically (run 23); with the OS item-3 fix applied the #PF noise is gone and the gate-era binary still completes (run 25, ALL-DONE, FPC 0x759431c5). The current binary's WK-4 network-smoke path (blocking DNS + TCP fetch over the OS socket/recv surface) wedges before PAGE (runs 20/21/22, also run 24 with the OS fix) -> root cause is the fork's current WebProcess WK-4 smoke/threading on this OS, not the merged kernel.",
+      "handoff": "fork: use the gate-era WK-3 binary (browser/l8-wk3x64) for the x64 gate, or fix the WK-4 network-smoke path (socket recv/futex join) in the current HeadlessDriver; OS owns no fix needed for the current binary's smoke to run."
+    },
+    "3_early_kernel_PF_dump": {
+      "verdict": "OS-SCOPE DEFECT, FIXED + VERIFIED ON-DEVICE",
+      "root_cause": "SYS_GETARGV (sys_readargv) marshalled argv into the user buffer with NO process_user_ok(...write) pre-commit, unlike sibling SYS_GETENV. With WEBPROC.BIN lazily demand-loaded, the argv buffer page (0x1005FD23B0, deep in the 100 MB image) is not yet resident when the kernel stores into it -> kernel-mode #PF vector 14 err=2. The x64 trap handler then printed a 16-line 'FATAL' dump (4/4 runs at the merged tip) BEFORE its L9 recovery path materialized the LEGAL page and iretq retried (so runs continued: run 23 still ALL-DONE).",
+      "fix": "2b75311 (x64 + arm trap.c): pre-commit via process_user_ok in the SYS_GETARGV dispatch, mirroring SYS_GETENV; return -EFAULT on an invalid range else sys_readargv. cstyle clean.",
+      "verification": "on-device (KVM, same box): FATAL=1 in old runs 20-23 (4/4); FATAL=0 in fixed-OS runs 24 (current binary, still reaches WK3 probes ok) and 25 (gate-era binary). unit-x64 KVM 306/0 PASS after fix; ARM unit 302 PASS after fix."
+    }
+  },
+  "gates": {
+    "unit-x64_kvm": "GREEN 306/0 (baseline 306/0) -- pre-fix run + post-fix run 2b75311",
+    "x64_wave": "NOT MET -- documented, evidenced pre-existing limit (see item 1); unit-x64 is the reliable x64 gate and holds",
+    "wk3_x64_webproc": "gate-era binary: ALL-DONE + FPC 0x759431c5 + System halt on the FIXED OS (run 25); current binary: fork-side wedge, precise handoff above",
+    "arm_clean": "ARM builds clean; ARM unit tests run 302 PASS with the fix"
+  },
+  "commits": [
+    "3aef1c7 x64: WX evidence -- wedge family RCA",
+    "2b75311 x64: pre-commit user argv buffer in SYS_GETARGV (kill the fake-FATAL #PF)"
+  ],
+  "files": ["continuation/wx/WX-EVIDENCE.md", "continuation/wx/WX-REPORT.json", "continuation/wx/run-WK3X64-24-current-FIXEDOS.log", "continuation/wx/run-WK3X64-25-gatebinary-FIXEDOS.log", "continuation/wx/unit-x64-kvm-FIXED-PASS.txt", "continuation/wx/unit-arm-FIXED-PASS.txt"]
+}

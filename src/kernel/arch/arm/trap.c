@@ -1773,9 +1773,20 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     } else if (syscall_num == SYS_GETPROGNAME) {
       sys_get_progname(tf);
     } else if (syscall_num == SYS_GETARGV) {
-      struct process *gp = current_process();
-      tf->regs[0] = sys_readargv(gp, (int)tf->regs[0], (char *)tf->regs[1],
-                                 (int)tf->regs[2]);
+      /* WX: pre-commit the user argv buffer (parity with the x64 fix and
+         with SYS_GETENV's write-validate guard).  The argv destination
+         can sit in the not-yet-resident tail of a lazily demand-loaded
+         image, and a kernel-mode store there #PFs/aborts without the
+         materialize-first commit. */
+      struct process *av = current_process();
+      char *avbuf = (char *)tf->regs[1];
+      int avsz = (int)tf->regs[2];
+      if ((int)tf->regs[0] >= 0 && avsz > 0 &&
+          (!av || process_user_ok(av, (uint64_t)avbuf, (uint64_t)avsz, 1) != 0)) {
+        tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+      } else {
+        tf->regs[0] = sys_readargv(av, (int)tf->regs[0], avbuf, avsz);
+      }
     } else if (syscall_num == SYS_BRK) {
       tf->regs[0] = sys_brk(tf->regs[0]);
     } else if (syscall_num == SYS_MMAP) {
