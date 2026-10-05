@@ -22,6 +22,8 @@ build.log
 # Disk images
 disk.img
 guest.img
+# lane-run evidence (logs/screenshots/copy-backs; regenerable)
+evidence/
 
 # Vendored upstream source trees extracted from pinned tarballs.  The pinned
 # tarball + .sums (+ patches/ + README once ports land) are committed; the

@@ -38,10 +38,14 @@ MAX_BODY = 32 << 20  # 32 MiB cap, mirroring the guest shell's page-body cap
 ARGS = None
 
 
-def upstream_fetch(path):
+def upstream_fetch(path, head=None):
     """Fetch the real page via host curl. Returns (status, headers, body)
     where headers is the verbatim upstream status line + header lines
-    (curl -D output form), or (0, "", b"") on transport error."""
+    (curl -D output form), or (0, "", b"") on transport error.
+
+    `head`: when set, return only the first `head` bytes of the real body
+    (still upstream bytes, byte-exact prefix) — the guest should only be
+    asked for window-sized transfers below (see runner docs)."""
     url = ARGS.upstream.rstrip("/") + path
     hdr = os.path.join(ARGS.scratch, "whdr_%d.txt" % os.getpid())
     body = os.path.join(ARGS.scratch, "wbody_%d.bin" % os.getpid())
@@ -59,6 +63,8 @@ def upstream_fetch(path):
         return 0, "", err.encode("utf-8", "replace")
     with open(body, "rb") as f:
         data = f.read()
+    if head is not None:
+        data = data[:head]
     # parse status line + headers from curl -D output
     try:
         with open(hdr, "rb") as f:
@@ -84,7 +90,19 @@ class WikiProxy(BaseHTTPRequestHandler):
         return
 
     def do_GET(self):
-        status, headers, data = upstream_fetch(self.path)
+        # ?head=N: serve a byte-exact prefix of the real body (window-sized
+        # for the guest's 2048-B TCP window; see docs/browser/host-wiki-proxy.md)
+        from urllib.parse import urlsplit, parse_qs
+        parts = urlsplit(self.path)
+        pathname = parts.path
+        q = parse_qs(parts.query)
+        head = None
+        if "head" in q:
+            try:
+                head = int(q["head"][0])
+            except (ValueError, IndexError):
+                head = None
+        status, headers, data = upstream_fetch(pathname, head=head)
         if status == 0:
             err = data.decode("utf-8", "replace") if data else "curl-fail"
             self.send_response(502)

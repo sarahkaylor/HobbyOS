@@ -158,20 +158,28 @@ fi
 # ----------------------------------------------- guest shell net receipts --
 if [ -n "$SHELL_GET" ]; then
   SHELL_URL="http://10.0.2.2:$PORT$SHELL_GET"
-  # Deterministic receipt: build the request one line per console action
-  # (slow per-char typing so nothing races the shell), verify /REQ.WC on
-  # device, run nc in the background capturing to /ROB.WC, then cat it.
-  step console-req1 "{\"action\":\"console\",\"cmd\":\"echo 'GET $SHELL_GET HTTP/1.0' > /REQ.WC\",\"type_pause\":0.18}"
-  step console-req2 "{\"action\":\"console\",\"cmd\":\"echo 'Host: 10.0.2.2:$PORT' >> /REQ.WC\",\"launch\":false,\"type_pause\":0.18}"
-  step console-req3 "{\"action\":\"console\",\"cmd\":\"echo >> /REQ.WC\",\"launch\":false,\"type_pause\":0.18}"
-  step console-verify "{\"action\":\"console\",\"cmd\":\"cat /REQ.WC\",\"launch\":false}"
+  # Deterministic receipt: the request file is staged ONTO the guest disk by
+  # the runner (byte-exact, CRLF, host-written) — the guest only types one
+  # simple redirect line (`nc < REQ > ROB`), the shape proven by the WK-6
+  # mem-probe receipts.  No multi-line `echo` construction (raced the shell).
+  # The target uses ?head=N so the relayed body (a byte-exact prefix of the
+  # REAL wikipedia robots.txt, markers at ~600 B) fits the guest's fixed
+  # 2048-B TCP window (net.c window_size=2048 — see the proxy doc).
+  SHELL_GET_HEAD="${SHELL_GET_HEAD:-?head=900}"
+  printf 'GET %s%s HTTP/1.0\r\nHost: 10.0.2.2:%s\r\n\r\n' "$SHELL_GET" "$SHELL_GET_HEAD" "$PORT" > "$EV/REQ.WC"
+  mcopy -i "$STAGE" "$EV/REQ.WC" ::/REQ.WC
+  log "staged /REQ.WC on the guest disk ($(wc -c < "$EV/REQ.WC") B, GET $SHELL_GET$SHELL_GET_HEAD)"
+  step console-warmup "{\"action\":\"console\",\"cmd\":\"echo WARMUP-WC > /TMP.WC\"}"
   step console-nc "{\"action\":\"console\",\"cmd\":\"nc 10.0.2.2 $PORT < /REQ.WC > /ROB.WC &\",\"launch\":false,\"type_pause\":0.18}"
-  log "guest GET issued; waiting 12s for the response to land in /ROB.WC"
+  log "guest GET issued (request file staged); waiting 12s for response in /ROB.WC"
   sleep 12
   step console-cat "{\"action\":\"console\",\"cmd\":\"cat /ROB.WC\",\"launch\":false,\"settle\":2.0}"
-  step dns-start "{\"action\":\"console\",\"cmd\":\"dnstst\",\"launch\":false,\"settle\":5.0}"
   sleep 2
   step shell-robots-shot "{\"action\":\"shot\",\"name\":\"console-shell\"}"
+  # DNS on-serial receipt: a FRESH console launch worked (run3: [DNSTST]
+  # printed to the serial); typing into the reused console did not.
+  step dns-start "{\"action\":\"console\",\"cmd\":\"dnstst\",\"settle\":5.0}"
+  sleep 2
 fi
 
 step final-status "{\"action\":\"status\"}"
