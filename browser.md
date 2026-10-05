@@ -1453,6 +1453,34 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-10-05 — **Wave-5 close-outs (fork tip `befd84e00`, OS main has all).**
+  ARM 16 GiB FIXED (WE1): root cause = Limine loads the flat kernel near
+  TOP of RAM (image_pc = RAM_top - ~94 MiB), so at 12/16 GiB the image sat
+  OUTSIDE the old 0..9 GiB identity map and faulted the instant MMU turned
+  on. Map extended 0..18 GiB (mmu.c L2 tables 9..17); full ARM wave 120/120
+  @16 GiB and @8 GiB control, unit 302/0 both; Makefile ARM back to
+  `-m 16384M` — the user's RAM×2 now fully valid both arches.  Intel
+  build reproducible (WE2): tools/cross-intel-wk2-libs.sh stages
+  mbedTLS 3.6.7 + libcurl 8.22.0 into the intel prefix (same layout as
+  ARM); fresh ARCH=intel configure finds CURL and NetworkProcess links
+  (180.7 MB).  WN3 site-live: G2 text-input + F9/F10 scripted ops landed
+  fork-side; REAL google/CNN attempted — guest TLS genuinely reaches
+  google's wire (142.251.155.119:443, pcaps) but the mbedTLS<->edge
+  handshake interop fails; host-proxied https handshake is GREEN (real
+  google 200/88486B upstream) with a guest bulk-recv class left; 0 FATAL
+  across all five site runs.  CRITICAL finding: the merged-tree windowed
+  WebProcess renders an EMPTY DOM even for fixtures (load/policy/start-main
+  all execute; doc title=|0|0|0|0) while the pre-WK-4b 141 MB ELF passes
+  dryfix+link-click in the same env —=> merged-build render regression is
+  the top fix target for the G/C rows.  WF1B x64 toolkit: --arch intel
+  wired end-to-end (OVMF/q35 runner, rel-pointer mode calibrated
+  pixel-exact, fresh 182 MB intel windowed WebProcess via WE2's staging);
+  the x64 acceptance gate is BLOCKED on an OS-side x64 PS/2 mouse-button
+  gap (EV_KEY 0x110/0x111 never reaches userland; wheel is ARM-only per
+  browser.md) — OS input lane scheduled; retest command documented in the
+  toolkit.  Also surfaced: x64 windowed desktop crashes at -smp 8 (kernel
+  LOSTWAKE->#PF), worked around with -smp 1; scheduled for a kernel lane.
+
 - 2026-10-05 — **WK-4 GATE GREEN on ARM — Path B end-to-end (fork merged at
   `232f694b74`).** WN2 passed the WK-4c runtime-networking gate: on-device
   HTTP (status 200) + redirect (302→follow) + HTTPS (200, plus CA-ENFORCED
