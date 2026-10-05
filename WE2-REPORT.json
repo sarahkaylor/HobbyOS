@@ -1,0 +1,85 @@
+{
+  "lane": "WE2",
+  "branch": "x64-intel-staging",
+  "base_commit": "a07fa61",
+  "fork_head": "232f694b74",
+  "status": "GREEN",
+  "timebox": "~4h (completed in ~35min wall)",
+  "problem": "fork canonical WebKitBuild/HobbyOS-intel predates merged USE_CURL wiring; no intel curl/mbedTLS staging exists (wk4b-libs-cross.sh is ARM-only), so a fresh ARCH=intel configure failed at find_package(CURL).",
+  "deliverables": {
+    "1_intel_staging_script": {
+      "status": "DONE",
+      "path": "/home/sarah/Documents/GitHub/HobbyOS/tools/cross-intel-wk2-libs.sh",
+      "git": "7f33ab3 + ddf6e3b (OS repo)",
+      "notes": "mirrors fork wk4b-libs-cross.sh with intel delta: --target=x86_64-none-elf -mno-red-zone -mcmodel=large, -nostdinc -isystem clang-resource, -Wl,-no-pie (non-PIC closure), setjmp from obj/intel/setjmp.o; tarballs from OS third_party (mbedtls-3.6.7.tar.bz2, curl-8.22.0.tar.xz); closure objects netcompat/resolv/mbedtls_alt/gaps/gaps_varc compiled from READ-ONLY fork."
+    },
+    "2_intel_prefix_staging": {
+      "status": "DONE",
+      "prefix": "/home/sarah/webkit-hobbyos-wk2/intel/prefix",
+      "layout": "same as arm prefix: include/ + lib/",
+      "artifacts": {
+        "libcurl.a": 7903958,
+        "libmbedtls.a": 1628522,
+        "libmbedx509.a": 360810,
+        "libmbedcrypto.a": 3024644,
+        "include/curl": true,
+        "include/mbedtls": true,
+        "include/psa": true
+      },
+      "versions": "mbedTLS 3.6.7, libcurl 8.22.0 (static, mbedTLS backend; select.h + wait.c WK-4b patches applied)"
+    },
+    "3_link_smoke": {
+      "status": "GREEN (2/2 backend symbols resolved, 0 undefined refs)",
+      "binary": "/home/sarah/webkit-hobbyos-wk2/intel/src/wk4b-obj/intel-link-smoke",
+      "size_bytes": 6537440,
+      "symbols": "curl_easy_init + mbedtls_ssl_init concrete defs in final ELF",
+      "gotcha": "static fn-ptr refs are DCE'd at -O2 -> volatile globals force the relocations; fork shim -I needed for curl.h's <sys/select.h>"
+    },
+    "4_fresh_configure": {
+      "status": "GREEN",
+      "where": "/tmp/we2-fork (read-only fork rsynced to /tmp, excluding .git/WebKitBuild; 6.9GB)",
+      "command": "cmake-3.31.8 -S /tmp/we2-fork -B WebKitBuild/HobbyOS-intel -G Ninja -DPORT=HobbyOS -DHOBBYOS_ARCH=intel -DWDK_FORK_DIR=/tmp/we2-fork -DHOBBYOS_WK2_PREFIX=/home/sarah/webkit-hobbyos-wk2/intel/prefix -DCMAKE_TOOLCHAIN_FILE=/tmp/we2-fork/HobbyOS/toolchain-hobbyos.cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_MAKE_PROGRAM=ninja -DUSE_LCMS=OFF -DUSE_WOFF2=OFF -DUSE_JPEGXL=OFF -DUSE_AVIF=OFF",
+      "curl_found": "-- Found CURL: /home/sarah/webkit-hobbyos-wk2/intel/prefix/lib/libcurl.a (found suitable version \"8.22.0\", minimum required is \"7.87.0\")",
+      "closure_from_tmp_copy": "hobbyos_wk4b_{netcompat,mbedtls_alt,resolv}.o etc. compiled in the /tmp build dir (WDK_FORK_DIR)"
+    },
+    "5_networkprocess_link": {
+      "status": "GREEN",
+      "ninja": "NetworkProcess -j64, all 7913 steps, rc=0",
+      "binary": "/tmp/we2-fork/WebKitBuild/HobbyOS-intel/bin/NetworkProcess",
+      "size_bytes": 180723360,
+      "elf": "ELF64 x86-64, statically linked, entry 0x1000000000",
+      "backend_symbols_defined": 2,
+      "undefined_syms": 0,
+      "canonical_sizes_for_compare": {"NetworkProcess": 171644168, "WebProcess": "n/a", "HobbyOS-UIProcess": "n/a"}
+    },
+    "5b_other_process_links": {
+      "status": "GREEN",
+      "WebProcess_bytes": 182197792,
+      "HobbyOS_UIProcess_bytes": 174769472
+    },
+    "6_integration_note": {
+      "status": "DONE",
+      "path": "/home/sarah/Documents/GitHub/HobbyOS/docs/browser/intel-wk2-libs-note.md",
+      "git": "8e0462b + follow-up",
+      "contents": "exact re-configure commands for the canonical HobbyOS-intel dir, arm/intel staging parity table, evidence"
+    }
+  },
+  "commits": [
+    "7f33ab3 gx: WE2 intel staging — cross-intel-wk2-libs.sh + mbedtls-user-config.h",
+    "ddf6e3b gx: WE2 intel staging fixes — smoke DCE/fork-shim/-L prefix/nm t/T gate",
+    "8e0462b gx: WE2 integration note — re-configure recipe + arm/intel parity"
+  ],
+  "hard_rules": {
+    "os_worktree_only": true,
+    "fork_untouched": true,
+    "no_qemu_pkill": true,
+    "no_make_clean": true
+  },
+  "issues_encountered": [
+    "smoke DCE: -O2 elided static fn-ptr refs -> volatile globals fix",
+    "smoke TU missing fork shim (-I HobbyOS/include) for <sys/select.h> -> added",
+    "smoke link missing -L${PREFIX}/lib -> added",
+    "nm gate: lld resolves archive global to local t in final ELF -> accept [tTwW]",
+    "transient /tmp ENOSPC from parallel lanes (orchestrator pruned +15GB stale scratch); rsync restarted clean"
+  ]
+}
