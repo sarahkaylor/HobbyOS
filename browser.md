@@ -1513,7 +1513,9 @@ curl -sI https://lite.cnn.com | grep -i content-length
   rects), every launcher carries `QEMU_GPU` gl/soft/auto + `make gpu-check`,
   desktop damage rects drive `flush_fb_rects` end to end, and the x64 desktop
   boot blocker (`.lbss` flat-image truncation, `4cf6d44`) is fixed.  Test
-  throughput: VM RAM ×2 + `tools/run_parallel.sh` (3×8 = 24 cores).  Browser
+  throughput: VM RAM (x64 6→12 GiB verified; ARM kept 8 GiB — kernel identity
+  map ≤9 GiB, >8 hangs; follow-up logged) + `tools/run_parallel.sh` (3×8 =
+  24 cores).  Browser
   resume next: WK-4 Path B (NetworkProcess + libcurl) → WK-5 perf sanity on
   the accelerated present path → WK-6 acceptance; apply G3's fork-runner GPU
   patch at dispatch; note the x64 main-wave wedge open item (unit-x64 is the

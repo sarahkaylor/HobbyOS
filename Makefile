@@ -45,8 +45,11 @@ MODE ?= desktop
 # The GUEST side caps at MAX_CPUS 8 (src/include/process.h); higher test
 # throughput comes from running several VMs in parallel (this host has 64
 # cores — see tools/run_parallel.sh), not from raising this value.
-# VM RAM: doubled 2026-10-05 (x64 6 -> 12 GiB, ARM 8 -> 16 GiB; user-directed)
-# so concurrent test VMs have headroom.
+# VM RAM (user-directed from 2026-10-05): x64 6 -> 12 GiB (verified booting);
+# ARM is KEPT at 8 GiB — the ARM kernel's static identity map covers only
+# <=~9 GiB (mmu.c L2 tables 0..8), and >8 GiB hangs at "Booting AArch64 OS..."
+# (verified 12/16 GiB on-device, 0 kernel lines).  Extending the ARM map to
+# 16 GiB is a scheduled kernel follow-up; until then 8 GiB is the ARM max.
 QEMU_SMP ?= 8
 
 # GX (docs/graphics-accel.md §3-D5): host graphics-acceleration selection.
@@ -148,7 +151,7 @@ else
   # GX (§3-D5): GX_GPU_DEV/GX_GPU_DISPLAY resolve after the MODE/QEMU_ARGS
   # block below — gl -> virtio-gpu-gl-device + `gtk,gl=on`, soft (default
   # for every headless tier) -> virtio-gpu-device + the plain display.
-  QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp $(QEMU_SMP) -m 16384M -accel tcg,thread=multi -bios $(EDK2_AARCH64) -display $(GX_GPU_DISPLAY) -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device $(GX_GPU_DEV) -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
+  QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp $(QEMU_SMP) -m 8192M -accel tcg,thread=multi -bios $(EDK2_AARCH64) -display $(GX_GPU_DISPLAY) -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device $(GX_GPU_DEV) -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
 endif
 
 # --- F2.4 (browser.md §6): userland C++ build policy ---------------------
