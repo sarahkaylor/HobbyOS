@@ -1453,6 +1453,29 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-10-05 — **Browser wave 2 + OS x64 RCA (merged).** OS main:
+  `SYS_GETARGV` lacked the `process_user_ok` pre-commit its sibling GETENV
+  has → with lazy demand-loaded webproc the argv page could fault the KERNEL
+  (early x64 #PF dump, vector 14, RIP 0x70020EB6; the handler's FATAL dump
+  printed before its L9 recover — non-fatal but loud); fixed in `2b75311`
+  (x64+arm trap.c), verified on-device 4/4→0/4. WX verdicts: the x64 wave
+  final-STRESS wedge is a PRE-EXISTING latent x64 class (freeze-tree control
+  wedges identically on this box; kernel process/loader byte-identical;
+  `.lbss`-enlarged bins manifest it earlier) — unit-x64 remains the hard
+  gate; the current-intel-WebProcess early halt is FORK-side (gate-era
+  binary completes ALL-DONE with cross-arch FPC parity 0x759431c5 on the
+  same OS) → x64 WK-3 fix lane dispatched. Fork (`94e72db74e`,
+  `e79b385ff6`): WI fixed the port input bugs — URL bleed was the driver's
+  `m_urlBuf` never tail-cleared (wire tap proved zero phantom bytes: OS key
+  re-delivery exonerated), wheel-up crash was the tick loop running through
+  the fragile sysroot RunLoop-timer/condvar path (replaced with a self-pumped
+  poll loop) — gate 16/16, soak ok=True (7 iters, 28 wheels, 0 mangled,
+  0 exits). WH proved WK-7 crash recovery (real SIGSEGV via kill -11 →
+  desktop survives, page reloadable, no reboot; no auto-respawn yet — WK-7
+  respawn lane dispatched), measured startup (6.6s desktop / 14.8s first
+  frame / 1.5s warm respawn) + high water, finalized docs/webkit.md, drafted
+  the WK-7 evidence matrix. WK-4c (runtime networking) in flight.
+
 - 2026-10-05 — **Browser wave 1 (WK-4 Path B build-out) MERGED in the fork
   (`659a8d6cc5`, 4 lanes, zero conflicts).** (a) **WK-4b backend**: mbedTLS
   3.6.7 + libcurl 8.22.0 (static, ARM) cross-built into the wk2 prefix;
