@@ -313,24 +313,24 @@ build_smoke() {
       "${PREFIX}/lib/libmbedx509.a" "${PREFIX}/lib/libmbedcrypto.a" \
       "$CRT" "$LIBC" "$SETJMP" "$NETCOMPAT_O" "$MBEDTLS_ALT_O" "$GAPS_O" "$GAPS_VARC_O"; then
     cat > "$c" <<'CEOF'
-/* WE-2 link smoke: reference the two staged backends, never call them. */
+/* WE-2 link smoke: reference the two staged backends, never call them.
+   volatile globals -> the compiler cannot elide the function-pointer
+   initializers, so both relocations survive to the link. */
 #include <curl/curl.h>
 #include <mbedtls/ssl.h>
-#include <stddef.h>
-static void *keep1;
-static void *keep2;
+void *(*volatile wk_curl_init)(void) = (void *)curl_easy_init;
+void (*volatile wk_mbedtls_ssl_init)(mbedtls_ssl_context *) = mbedtls_ssl_init;
 int main(void) {
     mbedtls_ssl_context ssl;
     mbedtls_ssl_init(&ssl);
-    keep1 = (void *)curl_easy_init;
-    keep2 = (void *)mbedtls_ssl_init;
-    return (keep1 && keep2) ? 0 : 1;
+    return (wk_curl_init && wk_mbedtls_ssl_init) ? 0 : 1;
 }
 CEOF
-    clang ${TARGET_FLAGS} ${SPEC} -O2 ${STDINC} -I${PREFIX}/include ${SYSINCS} \
+    clang ${TARGET_FLAGS} ${SPEC} -O2 ${STDINC} -I${PREFIX}/include ${FORK_SHIM} ${SYSINCS} \
       -c "$c" -o "$o"
     clang ${TARGET_FLAGS} ${SPEC} -O2 -fuse-ld=lld -nostdlib -nostartfiles \
       -T ${LSCRIPT} -Wl,-no-pie -Wl,-e,_start -o "$bin" \
+      -L${PREFIX}/lib \
       "$CRT" "$o" \
       -Wl,--start-group \
       "$LIBC" "$SETJMP" "$NETCOMPAT_O" "$MBEDTLS_ALT_O" "$RESOLV_O" "$GAPS_O" "$GAPS_VARC_O" \
@@ -339,8 +339,12 @@ CEOF
       >"${LOGS}/smoke-link.log" 2>&1 \
       || { log "smoke LINK FAILED — see ${LOGS}/smoke-link.log"; tail -40 "${LOGS}/smoke-link.log"; return 1; }
   fi
-  file "$bin" && nm "$bin" | grep -cE " [TU] (curl_easy_init|mbedtls_ssl_init)$" | xargs -I{} log "smoke: {} of 2 backend symbols resolved to concrete defs"
-  [ "$(nm "$bin" | grep -cE " [TU] (curl_easy_init|mbedtls_ssl_init)$")" = "2" ] || { log "smoke FAILED: backend symbols not defined"; return 1; }
+  local n
+  # t/T = defined (lld may resolve the archive's global to a local def in the
+  # final binary under -ffunction-sections/--gc-sections), w/W = weak import (no).
+  n="$(nm "$bin" | grep -cE " [tTwW] (curl_easy_init|mbedtls_ssl_init)$")"
+  log "smoke: ${n} of 2 backend symbols resolved to concrete defs"
+  [ "$n" = "2" ] || { log "smoke FAILED: backend symbols not defined"; return 1; }
   log "smoke ok: $(stat -c%s "$bin") B — curl_easy_init + mbedtls_ssl_init linked"
 }
 
