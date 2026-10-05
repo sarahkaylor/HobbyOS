@@ -802,7 +802,7 @@ void wm_handle_app_escape(int win_id, char* seq) {
  * and move ahead of everything else, which keeps its own order. Editing
  * these lists is the only change needed to alter what gets pinned. */
 static const char *const pinned_apps[] = {
-  "browser.bin", "CONSOLE.BIN", "FILES.BIN", "CALC.BIN", "XCALC.BIN", "ANTFARM.BIN", "XEYES.BIN", "CLOCK.BIN", "SYSMON.BIN",
+  "BROWSER.BIN", "CONSOLE.BIN", "FILES.BIN", "CALC.BIN", "XCALC.BIN", "ANTFARM.BIN", "XEYES.BIN", "CLOCK.BIN", "SYSMON.BIN",
   "HEX.BIN", "TASKS.BIN", "FIND.BIN", "DIFF.BIN", "NOTES.BIN",
   "NANO.BIN", "UNIT.BIN",
 };
@@ -2120,6 +2120,40 @@ int main(void) {
               int idx = start_sel;
               start_menu_open = 0;
               launch_menu_item(idx);
+              needs_redraw = 1;
+            } else if (ev->code == 59) {
+              /* F1: keyboard path to the Apps menu.  The desktop's menu is
+               * normally opened by clicking the Apps button; on x64 the
+               * kernel's PS/2 input path does not deliver mouse buttons
+               * (browser.md, WF1B), so an F1 map keeps the menu launchable
+               * on both arches.  Opens preselected on the browser when it
+               * is pinned (index 0 otherwise), then Enter launches. */
+              if (!start_menu_open && !app_menu_open) {
+                start_menu_open = 1;
+                start_sel = 0;
+                for (int mi = 0; mi < num_menu_items; mi++) {
+                  char m0 = menu_items[mi][0], m1 = menu_items[mi][1],
+                       m2 = menu_items[mi][2], m3 = menu_items[mi][3],
+                       m4 = menu_items[mi][4], m5 = menu_items[mi][5],
+                       m6 = menu_items[mi][6];
+                  if (m0 >= 'a' && m0 <= 'z') m0 -= 32;
+                  if (m1 >= 'a' && m1 <= 'z') m1 -= 32;
+                  if (m2 >= 'a' && m2 <= 'z') m2 -= 32;
+                  if (m3 >= 'a' && m3 <= 'z') m3 -= 32;
+                  if (m4 >= 'a' && m4 <= 'z') m4 -= 32;
+                  if (m5 >= 'a' && m5 <= 'z') m5 -= 32;
+                  if (m6 >= 'a' && m6 <= 'z') m6 -= 32;
+                  if (m0 == 'B' && m1 == 'R' && m2 == 'O' && m3 == 'W' &&
+                      m4 == 'S' && m5 == 'E' && m6 == 'R') {
+                    start_sel = mi;
+                    break;
+                  }
+                }
+              } else {
+                /* Pressing F1 again closes the menu. */
+                start_menu_open = 0;
+              }
+              start_menu_ensure_visible();
               needs_redraw = 1;
             } else if (ev->code != 62) {
               /* Everything else: the mapped byte (Shift/Ctrl applied) or a
