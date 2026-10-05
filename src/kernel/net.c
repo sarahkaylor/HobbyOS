@@ -11,6 +11,10 @@ extern void uart_puts(const char* s);
 extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
 
+/* WK-real-site (draft 0009): handle_tcp (below) ACKs received data, so the
+ * segment builder needs a forward declaration. */
+static void send_tcp_segment(struct socket_pcb* pcb, uint8_t flags, const void* data, uint16_t data_len);
+
 static uint32_t local_ip = 0;
 static uint32_t local_netmask = 0;
 static uint32_t local_gateway = 0;
@@ -503,6 +507,16 @@ static void handle_tcp(struct ipv4_hdr* ip, uint8_t* packet, uint32_t len) {
           arch_memory_barrier();
           sockets[i].rx_tail += data_len;
           sockets[i].ack += data_len;
+          /* WK-real-site (draft 0009): ACK the received payload.  The v1
+           * stack previously NEVER transmitted an ACK for received data, so
+           * the peer only pushed up to the advertised window then stalled
+           * waiting for the ACK that never came: a TLS handshake whose
+           * server flight (ServerHello + certificate chain) exceeded the
+           * window died with "SSL connect error"; a proxied bulk body died
+           * with "Failure when receiving data from the peer" after ~2 KiB.
+           * Immediate per-segment ACK is the bounded fix. */
+          if (sockets[i].mac_cached)
+            send_tcp_segment(&sockets[i], 0x10, NULL, 0);
         }
 
         // Handle remote FIN segment indicating connection closure
@@ -800,7 +814,16 @@ static void send_tcp_segment(struct socket_pcb* pcb, uint8_t flags, const void* 
   tcp->urg = 0; // Urgent pointer not used
   tcp->ece = 0; // ECN-Echo not used
   tcp->cwr = 0; // Congestion Window Reduced not used
-  tcp->window_size = htons(2048); // Default receive window size (2048 bytes)
+  /* WK-real-site (draft 0009): advertise real free rx_buf space (capped at
+   * 65535, the 16-bit window field) instead of a fixed 2048.  With a fixed
+   * tiny window the peer could never push more than ~2 KiB before needing an
+   * ACK/window-update even once we learn to ACK. */
+  {
+    uint32_t rx_free = SOCKET_RX_BUF_SIZE - (pcb->rx_tail - pcb->rx_head);
+    uint32_t win = rx_free > 0xFFFF ? 0xFFFF : rx_free;
+    if (win < 2048) win = 2048; /* never advertise a degenerately tiny window */
+    tcp->window_size = htons((uint16_t)win);
+  }
   tcp->checksum = 0; // Initial checksum is 0 for calculation
   tcp->urgent_ptr = 0;
 
@@ -1059,6 +1082,10 @@ int net_socket_recv(struct socket_pcb* pcb, void* buf, uint32_t len) {
     pcb->rx_head++;
   }
   spinlock_release_irqrestore(&net_lock, flags);
+  /* WK-real-site (draft 0009): window-update ACK after the app drains
+   * rx_buf, so a peer whose window was consumed learns the buffer re-opened. */
+  if (to_read > 0 && pcb->state == SOCKET_ESTABLISHED && pcb->mac_cached)
+    send_tcp_segment(pcb, 0x10, NULL, 0);
   return to_read;
 }
 
@@ -1087,6 +1114,8 @@ int net_socket_recv_timeout(struct socket_pcb* pcb, void* buf, uint32_t len, int
     pcb->rx_head++;
   }
   spinlock_release_irqrestore(&net_lock, flags);
+  if (to_read > 0 && pcb->state == SOCKET_ESTABLISHED && pcb->mac_cached)
+    send_tcp_segment(pcb, 0x10, NULL, 0);
   return (int)to_read;
 }
 
