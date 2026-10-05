@@ -170,12 +170,21 @@ if [ -n "$SHELL_GET" ]; then
   mcopy -i "$STAGE" "$EV/REQ.WC" ::/REQ.WC
   log "staged /REQ.WC on the guest disk ($(wc -c < "$EV/REQ.WC") B, GET $SHELL_GET$SHELL_GET_HEAD)"
   step console-warmup "{\"action\":\"console\",\"cmd\":\"echo WARMUP-WC > /TMP.WC\"}"
-  step console-nc "{\"action\":\"console\",\"cmd\":\"nc 10.0.2.2 $PORT < /REQ.WC > /ROB.WC &\",\"launch\":false,\"type_pause\":0.18}"
-  log "guest GET issued (request file staged); waiting 12s for response in /ROB.WC"
-  sleep 12
-  step console-cat "{\"action\":\"console\",\"cmd\":\"cat /ROB.WC\",\"launch\":false,\"settle\":2.0}"
+  # The guest TCP connect/send leg is stochastic (WK-6 racy-RX + fixed 2048-B
+  # window classes; run3 landed one fully-served guest GET, runs5/6 the
+  # request echo only).  Retry a few bounded attempts so a landed connection
+  # is caught; each writes its own file (nc never exits on EOF).
+  for i in 1 2 3; do
+    step "console-nc$i" "{\"action\":\"console\",\"cmd\":\"nc 10.0.2.2 $PORT < /REQ.WC > /ROB.WC.$i &\",\"launch\":false,\"type_pause\":0.18}"
+    log "guest GET attempt $i issued; waiting 8s for response in /ROB.WC.$i"
+    sleep 8
+  done
+  step console-last "{\"action\":\"console\",\"cmd\":\"cat /ROB.WC.3\",\"launch\":false,\"settle\":2.0}"
   sleep 2
   step shell-robots-shot "{\"action\":\"shot\",\"name\":\"console-shell\"}"
+  # Independent on-device live HTTP GET: SOCK2TST does a real non-blocking
+  # connect + GET round-trip and prints the outcome to the serial.
+  step sock2tst "{\"action\":\"console\",\"cmd\":\"sock2tst\",\"settle\":10.0}"
   # DNS on-serial receipt: a FRESH console launch worked (run3: [DNSTST]
   # printed to the serial); typing into the reused console did not.
   step dns-start "{\"action\":\"console\",\"cmd\":\"dnstst\",\"settle\":5.0}"
@@ -201,10 +210,19 @@ if mdir -i "$STAGE" ::/PAGE-NET.HTM >/dev/null 2>&1; then
   log "browser page copy-back: PAGE-NET.HTM sha256=$PG size=$(stat -c %s "$EV/PAGE-NET.HTM")"
 fi
 RW=""
-if [ -n "$SHELL_GET" ] && mdir -i "$STAGE" ::/ROB.WC >/dev/null 2>&1; then
-  mcopy -i "$STAGE" ::/ROB.WC "$EV/ROB.WC"
-  RW="$(sha256sum "$EV/ROB.WC" | cut -d' ' -f1)"
-  log "shell GET copy-back: ROB.WC sha256=$RW size=$(stat -c %s "$EV/ROB.WC") marker=$(grep -ci 'user-agent' "$EV/ROB.WC" || echo 0)"
+if [ -n "$SHELL_GET" ]; then
+  # per-attempt nc output files on the guest disk; merge host-side
+  ( mcopy -i "$STAGE" ::/ROB.WC.1 "$EV/ROB.WC.1" 2>/dev/null; \
+    mcopy -i "$STAGE" ::/ROB.WC.2 "$EV/ROB.WC.2" 2>/dev/null; \
+    mcopy -i "$STAGE" ::/ROB.WC.3 "$EV/ROB.WC.3" 2>/dev/null )
+  : > "$EV/ROB.WC"
+  for f in "$EV"/ROB.WC.[123]; do
+    [ -f "$f" ] && cat "$f" >> "$EV/ROB.WC"
+  done
+  if [ -s "$EV/ROB.WC" ]; then
+    RW="$(sha256sum "$EV/ROB.WC" | cut -d' ' -f1)"
+    log "shell GET copy-back: ROB.WC sha256=$RW size=$(stat -c %s "$EV/ROB.WC") marker=$(grep -ci 'user-agent' "$EV/ROB.WC" || echo 0)"
+  fi
 fi
 
 # ------------------------------------------------------------ report -------
@@ -239,12 +257,19 @@ try:
 except OSError:
     pass
 
+guest_http = {
+    "sock2tst_live_get_passes": len(re.findall(r"SOCK2TST .*: PASS", serial)),
+    "sock2tst_response_prefix": [
+        l for l in serial.splitlines() if "SOCK2TST response prefix" in l],
+}
+
 markers = {}
 for m in ["[WIN] BOOT", "[WIN] created", "[WIN] geom", "[WIN] url-prompt",
           "[WIN] url-entry", "[WIN] net fetch", "[WIN] load start url=",
           "[WIN] load-ok", "[WIN] load open-fail", "[WIN] frame",
           "[WIN] net persist", "[LAUNCH] CONSOLE.BIN", "[DNSTST]",
-          "DHCP DNS server", "Network configured", "FATAL", "IDLESTUCK"]:
+          "DHCP DNS server", "Network configured", "FATAL", "IDLESTUCK",
+          "SOCK2TST"]:
     markers[m] = serial.count(m)
 
 go = load("go")
@@ -277,6 +302,7 @@ report = {
               "host_self_check_robots_markers": int(mhost)},
     "url": url,
     "steps": {"type_url": type_url, "go": go},
+    "guest_http": guest_http,
     "dns": {
         "guest_dhcp_dns": "10.0.2.3",
         "serial_evidence": markers.get("DHCP DNS server", 0) > 0,
