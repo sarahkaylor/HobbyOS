@@ -1453,6 +1453,31 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-10-05 — **Address bar + GO button; Wikipedia loads on-device (user ask).**
+  The windowed browser now has a persistent address input field + a GO
+  button (WK5 driver chrome, bitmap font): click focus → type → Enter/GO →
+  navigate.  WA also root-caused the merged empty-DOM regression: the
+  self-pumped poll loop dropped the RunLoop pump, so substitute-data bytes
+  never reached the HTML parser; DocumentLoader now delivers them
+  synchronously under OS(HOBBYOS).  WB found the OTHER half: the guest v1
+  TCP stack never ACKed and advertised a fixed 2048-B window → any receive
+  > ~2 KiB stalled (direct-edge TLS 'SSL connect error' + proxied-bulk
+  'Failure when receiving data from the peer'); fixed on OS main (per-segment
+  ACK + real window + window-update after drain, `477c5c4`), unit-arm 302/0.
+  WB proved 5/5 real en.wikipedia fetches on-device (robots.txt direct + via
+  relay + https-proxy, and the 120 KB wiki/Hobbyist_operating_system page).
+  WD corrected an earlier controller error: the x64 'identical checksum'
+  was FNV-1a of an ALL-WHITE frame — the OS display path is byte-perfect
+  (chroma probe); the fork-side paint black hole is WK5WindowDriver's
+  Skia readback (real page hash 0x759431c5).  FINAL integrated run (merged
+  fork + TCP-patched OS): address bar → GO on the reader-mode Wikipedia
+  URL (`/reader/Hobbyist_operating_system` on `tools/wiki_proxy.py` —
+  real REST extract) → `load-ok` + painted frame `0xdabdfbc5` with page
+  structure on screen; session.ok=True.  Known limits: text glyphs are
+  shell-font blobs; DIRECT https to https://en.wikipedia.org still hits the
+  mbedTLS<->edge interop (documented; the proxied/reader path is the
+  deliverable).
+
 - 2026-10-05 — **Browser in the Apps menu + 1 GiB startup disk (user ask).**
   `make disk.img` is now 1 GiB FAT16 (auto cluster; driver BPB-driven, no
   kernel change) and ships the flat windowed WebProcess as `::/BROWSER.BIN`
