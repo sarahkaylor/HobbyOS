@@ -1453,6 +1453,37 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-10-05 — **Browser wave 1 (WK-4 Path B build-out) MERGED in the fork
+  (`659a8d6cc5`, 4 lanes, zero conflicts).** (a) **WK-4b backend**: mbedTLS
+  3.6.7 + libcurl 8.22.0 (static, ARM) cross-built into the wk2 prefix;
+  `USE_CURL` wired (find_package + Curl.cmake + MbedTLS::MbedTLS); real
+  mbedTLS TLS glue (MbedTLSHelper, CurlSSLVerifier/CurlContext
+  OS(HOBBYOS) branches, PAL CryptoDigest over mbedtls_md — replaces the WK-2
+  abort stub); NetworkProcess LINKS with the real backend (146,192,872 B,
+  curl + 250 mbedtls syms). Link-gate only — runtime is WK-4c (next wave);
+  no CA bundle yet; `CURLINFO_SSL_VERIFYRESULT` always 0 on mbedTLS
+  (use `mbedtls_ssl_get_verify_result`). (b) **NetworkProcess bootstrap**:
+  real spawn_ex fd-handover + AuxiliaryProcess init handshake + IPC
+  round-trips, e on-device ARM (`pid=4 … ping#1/ping#2 reply=pong`, alive
+  13 s, rc=0). ROOT-CAUSED kernel boundary: OS caps `msg_controllen` at
+  `K_IPC_CTRL_MAX=512` but upstream WebKit asks `CMSG_SPACE(254×4)=1032` →
+  every `recvmsg` EINVAL → vacuous teardowns; fork-side fix:
+  `attachmentMaxAmount 254→120` + a vacuous-completion diagnostic. (c) WK-5
+  E2E on the GX-merged OS tip: soft headless rc=0 + framebuffer checksum
+  `0xe0982225` (runs 5/7/8) and GL run 8 rc=0 with X-capture parity (same-
+  step MAD 0.68–0.80, byte-identical samples); first-frame ≈23 s soft/GL.
+  x64 found split: gate-era intel WebProcess completes WK-3 ALL-DONE (cross-
+  arch FPC parity 0x759431c5 = ARM), CURRENT intel build wedges (WK-4
+  network-smoke region, all-CPU SYS_FUTEX) — plus a new merged-tip early x64
+  #PF (vector 14, RIP 0x70020EB6) → scheduled x64 fix lane. (d) WK-6
+  acceptance TOOLKIT: parameterized driver + executable checklist + soak
+  harness + hung-page watchdog + license inventory; dry-run **ACCEPTED**
+  (session.ok=True, 10 steps 9/0/1-gated, 11 screenshots, guest mem/proc
+  artifacts, close step passes); settle() race fixed (offline 13/13). Soak
+  documented as limitation: wheel-up exits WEBPROC + repeated-URL key bleed
+  → scheduled input-fix lane. Next wave: WK-4c runtime networking, x64
+  wedge, input fixes, WK-7 recovery.
+
 - 2026-10-05 — **GX graphics program COMPLETE + merged (`9fce7ec`; full record
   in `docs/graphics-accel.md` §7).** Both arches present through accelerated
   paths (ARM virtio-gpu IRQ-completed rect flush; x64 modern virtio-pci + BGA
