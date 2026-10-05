@@ -93,4 +93,16 @@ NetworkProcess` links.
   backend symbols, 0 undefined refs.
 - Fresh configure in `/tmp/we2-fork` (rsync of the fork without .git/
   WebKitBuild) with `-DHOBBYOS_WK2_PREFIX=/home/sarah/webkit-hobbyos-wk2/intel/
-  prefix`: GREEN (CURL found), and `ninja NetworkProcess` links.
+  prefix`: GREEN — `-- Found CURL:
+  .../intel/prefix/lib/libcurl.a (found suitable version "8.22.0", minimum
+  required is "7.87.0")` (the WF1 integration flag), and the generated
+  closure objects all compile from the /tmp copy (WDK_FORK_DIR).
+- `ninja NetworkProcess -j 64` (all 7913 steps) LINKS GREEN:
+  `bin/NetworkProcess` = 180,723,360 B, ELF64 x86-64, entry `0x1000000000`,
+  `curl_easy_init` + `mbedtls_ssl_init` concretely defined inside (static
+  backend closure), no undefined symbols.  The canonical predates the USE_CURL
+  wiring (171,644,168 B, no CURL in its cache); the fresh build is ~9 MB
+  larger — that delta is the curl/mbedTLS path-B networking closure.
+- `ninja WebProcess HobbyOS-UIProcess` also LINKS GREEN in the same fresh
+  build dir (182,197,792 B / 174,769,472 B), so the WHOLE intel WebKit2
+  process stack is re-configurable + reproducible from the merged tree.
