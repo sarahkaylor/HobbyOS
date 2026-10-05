@@ -8,8 +8,8 @@
  * "64 GiB" and the top as "96 GiB" (and both the ARM L1 index 64 and the
  * x64 PDPT index 64 confirm it): the hex literals in the note were one
  * digit short -- a literal 0x1_0000_0000 is only 4 GiB and would overlap
- * the RAM identity maps the design requires the window to clear (ARM
- * identity covers 0x40000000-0x240000000 = 9 GiB, x64 0-8 GiB).  The
+ * RAM identity maps the design requires the window to clear (ARM
+ * identity covers 0x40000000-0x480000000 = 18 GiB, x64 0-8 GiB).  The
  * binding reading is the annotated one:
  *
  *   USER_VA_BASE 0x10_0000_0000 (64 GiB), 32 GiB sparse window:
