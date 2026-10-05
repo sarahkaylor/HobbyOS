@@ -198,6 +198,50 @@ unit-arm, unit-x64, ARM wave + x64 wave characterization on the CI VM
 
 ## 7. Log (append-only)
 
+- 2026-10-05 — **GX program COMPLETE: accelerated graphics end-to-end on both
+  arches, merged at `9fce7ec` (lanes G1–G4, 4 parallel subagents + controller).**
+  Delivered: **G1** ARM virtio-gpu v2 — per-rect `TRANSFER_TO_HOST_2D` +
+  `RESOURCE_FLUSH`, IRQ-acknowledged completion (parked-wait gated on a live
+  wake source after the early-boot WFI hang fix), kernel unit coverage.
+  **G2** x64 — the legacy I/O-port virtio-gpu transport turned out impossible
+  on QEMU 10.2.1 (modern-only devices; verified), so it built the **modern
+  virtio 1.0 PCI transport** (cap walk, feature handshake, control queue,
+  64-bit BAR remap via `cpu_pd7`), per-rect transfers + BGA row-wise rect
+  fallback; 4 new tests.  **G3** launchers — `QEMU_GPU=auto|gl|soft`
+  resolution (gl iff desktop + DISPLAY + not `-display none`), `make
+  gpu-check`, runner pass-throughs, README section, fork-runner patch (for
+  the browser resume), full selection matrix + boot evidence.  **G4**
+  userland — desktop damage rects → `flush_fb_rects` end to end (host tests +
+  pixel suites), plus a real find: the desktop died on EPIPE when a child app
+  exited mid-present (pre-existing race, 2/9 freeze runs; fixed with
+  desktop-side SIGPIPE ignore; 6/6 xcalc green).  Controller extras: the x64
+  flat-image `.lbss` fix (`4cf6d44` — the x64 desktop could not boot at all
+  before it), GFXBENCH v2 (`bd84429`), **x64 launcher acceleration enabled**
+  (GL path adds `-device virtio-gpu-gl-pci -vga none`; headless tiers
+  byte-identical), VM RAM ×2 + `tools/run_parallel.sh` (3×8 = 24-core test
+  parallelism, user-directed).
+  **Verified on the merged tip:** host suite 0 failed; unit-arm 302/0;
+  unit-x64 (KVM) 306/0; ARM wave clean (STRESS SUCCESS + System halt, 0 fail
+  tokens) + GFXBENCH v2 all phases; x64 desktop boots on BOTH paths (virtio
+  device: `VirtIO GPU: virtio-pci`, screendump 1024×768 non-black 1.0000;
+  BGA: same); launcher GL path resolves and boots `gtk,gl=on +
+  virtio-gpu-gl-pci + -vga none` (window appears; X capture tooling gap
+  noted); ARM E2E (`run_desktop_test.py`) green on merged tip; freeze x64
+  wave completes 2/2 incl. under parallel load.
+  **Bench (v2; min/med are floored at the µs instruments — quote floors, not
+  means):** G2's pinned pair r256 `min=1000 med=2000` → `min=0 med=0`
+  (identical method); merged ARM full med 0-1000 µs vs before ≈600-1000
+  (means 400-460 quiet / 150 ms under churn — contention-sensitive); the
+  architectural claim is exact: a 64×64 rect transfers ~16 KiB instead of a
+  3 MiB frame (~190× less traffic), and IRQ completion replaced sync spins.
+  **Open items:** (1) the main-tip x64 wave wedges near the final STRESS
+  phase (0/3 attempts on main TCG+KVM; freeze completes 2/2 incl. under a
+  3-way parallel load; 0 new fail signatures; unit-x64 remains the reliable
+  x64 gate — characterize, possibly a merged-driver interaction); (2) ARM
+  bench sub-ms resolution needs a CNTVCT-based timer (stretch); (3)
+  `run_xcalc_test.py`'s post-close check is a no-op (G4 proposed diff); (4)
+  x64 GL interactive window capture fallback (xwd) for screenshot tooling.
+
 - 2026-10-04 — **x64 desktop boot blocker root-caused + fixed: large-model
   flat-image truncation (controller).** Under `-mcmodel=large` every intel
   user program links zero-init globals into `.lbss`; `src/user/linker.ld`

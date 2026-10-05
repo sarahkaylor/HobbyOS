@@ -1453,6 +1453,18 @@ curl -sI https://lite.cnn.com | grep -i content-length
 
 ## 11. Fix log (append-only; see also per-lane reports)
 
+- 2026-10-05 — **GX graphics program COMPLETE + merged (`9fce7ec`; full record
+  in `docs/graphics-accel.md` §7).** Both arches present through accelerated
+  paths (ARM virtio-gpu IRQ-completed rect flush; x64 modern virtio-pci + BGA
+  rects), every launcher carries `QEMU_GPU` gl/soft/auto + `make gpu-check`,
+  desktop damage rects drive `flush_fb_rects` end to end, and the x64 desktop
+  boot blocker (`.lbss` flat-image truncation, `4cf6d44`) is fixed.  Test
+  throughput: VM RAM ×2 + `tools/run_parallel.sh` (3×8 = 24 cores).  Browser
+  resume next: WK-4 Path B (NetworkProcess + libcurl) → WK-5 perf sanity on
+  the accelerated present path → WK-6 acceptance; apply G3's fork-runner GPU
+  patch at dispatch; note the x64 main-wave wedge open item (unit-x64 is the
+  x64 gate).
+
 - 2026-10-04 — **GX graphics-acceleration program opened (user-directed:
   "high performance, accelerated graphics throughout the system" + "each
   QEMU launcher ... graphics acceleration (even if it needs to be

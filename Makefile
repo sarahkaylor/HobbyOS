@@ -42,6 +42,11 @@ endif
 MODE ?= desktop
 # Default core count for `make run` (browser-capable desktop; 4-8 cores is
 # the standing requirement — never ship -smp 1 as the default).
+# The GUEST side caps at MAX_CPUS 8 (src/include/process.h); higher test
+# throughput comes from running several VMs in parallel (this host has 64
+# cores — see tools/run_parallel.sh), not from raising this value.
+# VM RAM: doubled 2026-10-05 (x64 6 -> 12 GiB, ARM 8 -> 16 GiB; user-directed)
+# so concurrent test VMs have headroom.
 QEMU_SMP ?= 8
 
 # GX (docs/graphics-accel.md §3-D5): host graphics-acceleration selection.
@@ -115,12 +120,18 @@ ifeq ($(ARCH),intel)
   ARCH_DIR = src/kernel/arch/x64
   LDFLAGS = -T linker_x64.ld
   # QEMU parameters for x86_64: 8 cores, 6GB RAM, mounting disk.img as NVMe, booting with UEFI
-  # GX hook (lane G2 follow-up): enable virtio-gpu-pci / virtio-gpu-gl-pci
-  # here when the x64 virtio-gpu driver merges — append
-  # `-device $(if $(GX_GPU_GL),virtio-gpu-gl-pci,virtio-gpu-pci)` to
-  # QEMU_CMD below.  Until then x64 keeps its std-VGA setup, so QEMU_GPU
-  # only switches the display backend on this arch.
-  QEMU_CMD = $(QEMU) -M q35 -smp $(QEMU_SMP) -m 6144M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff $(QEMU_ARGS)
+  # GX (§3-D5 + lane G2, merged 9fce7ec): the accelerated path ADDS the
+  # modern virtio GPU device, and only on the GL resolution (interactive
+  # desktop — see the resolution block below).  Headless tiers keep their
+  # exact historical std-VGA lines.  With the device up, `-vga none` makes
+  # the virtio scanout console 0, so the GL window AND QMP screendump both
+  # target the accelerated scanout (with VGA also present, screendump
+  # captures the VGA console instead — lane-G2 finding).  GX_X64_GPU_DEV
+  # is empty in every non-GL invocation.  If virtio-gpu-gl-pci ever
+  # misbehaves on a host, plain `-device virtio-gpu-pci -vga none` is the
+  # lane-G2-verified equivalent (the driver negotiates VIRTIO_F_VERSION_1
+  # only, so the gl variant's virgl capability is simply not negotiated).
+  QEMU_CMD = $(QEMU) -M q35 -smp $(QEMU_SMP) -m 12288M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 $(GX_X64_GPU_DEV) -action shutdown=poweroff $(QEMU_ARGS)
 else
   # Default to ARM
   QEMU = qemu-system-aarch64
@@ -137,7 +148,7 @@ else
   # GX (§3-D5): GX_GPU_DEV/GX_GPU_DISPLAY resolve after the MODE/QEMU_ARGS
   # block below — gl -> virtio-gpu-gl-device + `gtk,gl=on`, soft (default
   # for every headless tier) -> virtio-gpu-device + the plain display.
-  QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp $(QEMU_SMP) -m 8192M -accel tcg,thread=multi -bios $(EDK2_AARCH64) -display $(GX_GPU_DISPLAY) -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device $(GX_GPU_DEV) -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
+  QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp $(QEMU_SMP) -m 16384M -accel tcg,thread=multi -bios $(EDK2_AARCH64) -display $(GX_GPU_DISPLAY) -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device $(GX_GPU_DEV) -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
 endif
 
 # --- F2.4 (browser.md §6): userland C++ build policy ---------------------
@@ -251,6 +262,23 @@ ifeq ($(GX_GPU_GL),1)
 else
   GX_GPU_DISPLAY := $(QEMU_DISPLAY)
   GX_GPU_DEV := virtio-gpu-device
+endif
+
+# x64 accelerated-path device (see the x64 QEMU_CMD comment): additive and
+# GL-only, paired with `-vga none`.  Empty in every non-GL invocation, so
+# test/unit/soak/desktop_test waves keep their exact historical qemu lines.
+ifeq ($(GX_GPU_GL),1)
+  GX_X64_GPU_DEV := -device virtio-gpu-gl-pci -vga none
+else
+  GX_X64_GPU_DEV :=
+endif
+# Per-arch note appended by `make gpu-check` so x64 invocations don't print
+# the ARM device names.
+GX_X64_NOTE_GL :=
+GX_X64_NOTE_SOFT :=
+ifeq ($(ARCH),intel)
+  GX_X64_NOTE_GL := (x64: $(GX_X64_GPU_DEV))
+  GX_X64_NOTE_SOFT := (x64: no GPU device -- std VGA)
 endif
 
 # Target and objects
@@ -1875,19 +1903,19 @@ gpu-check:
 	  fi; \
 	  echo "-- x64 (qemu-system-x86_64) --"; \
 	  if command -v qemu-system-x86_64 >/dev/null 2>&1; then \
-	    probe "gtk,gl=on display (std-VGA scanout side; guest stays BGA until G2)" \
-	      qemu-system-x86_64 -M q35 -m 512M -display gtk,gl=on -S -monitor none -serial none -nodefaults && GLX64=1 || true; \
+	    probe "gtk,gl=on + virtio-gpu-gl-pci + -vga none (the GL config)" \
+	      qemu-system-x86_64 -M q35 -m 512M -display gtk,gl=on -device virtio-gpu-gl-pci -vga none -S -monitor none -serial none -nodefaults && GLX64=1 || true; \
 	  else echo "  (qemu-system-x86_64 not on PATH)"; fi; \
 	  if [ "$$GLX64" = "1" ]; then \
-	    echo "  => x64 verdict: GL display backend OK — QEMU_GPU=gl is usable; guest still renders via std-VGA"; \
+	    echo "  => x64 verdict: GL OK — auto picks virtio-gpu-gl-pci + -vga none + gtk,gl=on for interactive desktop boots"; \
 	  else \
-	    echo "  => x64 verdict: gtk,gl=on unavailable — auto falls back to plain gtk"; \
+	    echo "  => x64 verdict: gtk,gl=on unavailable — auto falls back to plain gtk (no virtio device; guest uses BGA/std-VGA)"; \
 	  fi; \
 	fi
 	@if [ "$(GX_GPU_GL)" = "1" ]; then \
-	  echo "gpu-check: this invocation (QEMU_GPU=$(QEMU_GPU) MODE=$(MODE)) resolves to GL -> -display $(GX_GPU_DISPLAY) + -device $(GX_GPU_DEV)"; \
+	  echo "gpu-check: this invocation (QEMU_GPU=$(QEMU_GPU) MODE=$(MODE)) resolves to GL -> -display $(GX_GPU_DISPLAY) + -device $(GX_GPU_DEV) $(GX_X64_NOTE_GL)"; \
 	else \
-	  echo "gpu-check: this invocation (QEMU_GPU=$(QEMU_GPU) MODE=$(MODE)) resolves to soft -> -display $(GX_GPU_DISPLAY) + -device $(GX_GPU_DEV)"; \
+	  echo "gpu-check: this invocation (QEMU_GPU=$(QEMU_GPU) MODE=$(MODE)) resolves to soft -> -display $(GX_GPU_DISPLAY) + -device $(GX_GPU_DEV) $(GX_X64_NOTE_SOFT)"; \
 	fi
 
 # Rebuild the boot disk image from scratch (fresh mkfs + full mcopy).
