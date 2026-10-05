@@ -46,10 +46,11 @@ MODE ?= desktop
 # throughput comes from running several VMs in parallel (this host has 64
 # cores — see tools/run_parallel.sh), not from raising this value.
 # VM RAM (user-directed from 2026-10-05): x64 6 -> 12 GiB (verified booting);
-# ARM is KEPT at 8 GiB — the ARM kernel's static identity map covers only
-# <=~9 GiB (mmu.c L2 tables 0..8), and >8 GiB hangs at "Booting AArch64 OS..."
-# (verified 12/16 GiB on-device, 0 kernel lines).  Extending the ARM map to
-# 16 GiB is a scheduled kernel follow-up; until then 8 GiB is the ARM max.
+# ARM 8 -> 16 GiB (root-caused + fixed: the static identity map was extended
+# 0..9 -> 0..18 GiB in src/kernel/arch/arm/mmu.c, L1[0..17]; the 12/16 GiB
+# 'Booting AArch64 OS...' hang came from Limine loading the kernel image just
+# below the TOP of RAM, i.e. ~12.98/16.98 GiB, outside the old <=9 GiB map;
+# verified on-device 8/12/16 GiB boot.  The frame pool stays capped at 9 GiB).
 QEMU_SMP ?= 8
 
 # GX (docs/graphics-accel.md §3-D5): host graphics-acceleration selection.
@@ -147,11 +148,12 @@ else
   USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53
   ARCH_DIR = src/kernel/arch/arm
   LDFLAGS = -T linker.ld
-  # QEMU parameters for ARM: 8 cores, 8GB RAM, booting with UEFI
+  # QEMU parameters for ARM: 8 cores, 16GB RAM, booting with UEFI (RAM x2,
+  # see the VM RAM comment at the top).
   # GX (§3-D5): GX_GPU_DEV/GX_GPU_DISPLAY resolve after the MODE/QEMU_ARGS
   # block below — gl -> virtio-gpu-gl-device + `gtk,gl=on`, soft (default
   # for every headless tier) -> virtio-gpu-device + the plain display.
-  QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp $(QEMU_SMP) -m 8192M -accel tcg,thread=multi -bios $(EDK2_AARCH64) -display $(GX_GPU_DISPLAY) -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device $(GX_GPU_DEV) -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
+  QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp $(QEMU_SMP) -m 16384M -accel tcg,thread=multi -bios $(EDK2_AARCH64) -display $(GX_GPU_DISPLAY) -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device $(GX_GPU_DEV) -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
 endif
 
 # --- F2.4 (browser.md §6): userland C++ build policy ---------------------

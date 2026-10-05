@@ -218,9 +218,10 @@ unit-arm, unit-x64, ARM wave + x64 wave characterization on the CI VM
   flat-image `.lbss` fix (`4cf6d44` — the x64 desktop could not boot at all
   before it), GFXBENCH v2 (`bd84429`), **x64 launcher acceleration enabled**
   (GL path adds `-device virtio-gpu-gl-pci -vga none`; headless tiers
-  byte-identical), VM RAM (x64 6→12 GiB verified; ARM stays 8 GiB — its
-  kernel identity map caps at ~9 GiB and >8 GiB hangs at boot; 16 GiB map
-  = scheduled follow-up) + `tools/run_parallel.sh` (3×8 = 24-core test
+  byte-identical), VM RAM (x64 6→12 GiB, ARM 8→16 GiB — the ARM identity
+  map now covers 0..18 GiB (mmu.c L1[0..17]), fixing the >8 GiB boot hang
+  where Limine loads the kernel near RAM top) + `tools/run_parallel.sh`
+  (3×8 = 24-core test
   parallelism, user-directed).
   **Verified on the merged tip:** host suite 0 failed; unit-arm 302/0;
   unit-x64 (KVM) 306/0; ARM wave clean (STRESS SUCCESS + System halt, 0 fail
