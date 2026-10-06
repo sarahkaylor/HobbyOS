@@ -126,38 +126,6 @@ static void lapic_timer_calibration_tick(void) {
      is counts / (2 * 1193182).  (See the accumulation loop above.) */
   uint64_t elapsed_us = counts * 500000ULL / 1193182ULL;
 
-  /* --- X2 probe: second independent measurement window --- */
-  {
-    uint32_t last2 = pit_counter_read();
-    uint64_t counts2 = 0;
-    uint64_t t0b = rdtsc();
-    uint64_t tsc2 = 0;
-    for (;;) {
-      uint32_t cc = pit_counter_read();
-      if (cc > last2) counts2 += last2 + 11931u - cc;
-      else counts2 += last2 - cc;
-      last2 = cc;
-      tsc2 = rdtsc() - t0b;
-      if (counts2 >= 12ULL * 11931ULL) break;
-      if (tsc2 > 700000000ULL) break;
-    }
-    uint64_t el2_us = counts2 * 500000ULL / 1193182ULL;
-    uint64_t rate2 = el2_us ? tsc2 * 1000ULL / el2_us : 0;
-    uart_puts("[X2CAL] counts=");
-    print_int((int)(counts / 11931));
-    uart_puts("p c2=");
-    print_int((int)(counts2 / 11931));
-    uart_puts("p tsc_used=");
-    print_int((int)(tsc_used / 1000000));
-    uart_puts("M tsc2=");
-    print_int((int)(tsc2 / 1000000));
-    uart_puts("M rate=");
-    print_int((int)tsc_per_ms);
-    uart_puts(" rate2=");
-    print_int((int)rate2);
-    uart_puts("\n");
-  }
-
   if (elapsed_us > 0) {
     uint32_t lapic_elapsed_ms = (uint32_t)(elapsed_us / 1000);
     lapic_counts_per_ms = lapic_used / (lapic_elapsed_ms ? lapic_elapsed_ms : 1);
