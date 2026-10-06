@@ -1,0 +1,9 @@
+[WIN] BOOT mode=windowed start=HOME.HTM
+[WIN] created pref=320x240
+[WIN] init webprocess=ok
+[WIN] page id=8 viewport=320x240
+[WIN] nav name=HOME.HTM
+[WIN] load start fixture=HOME.HTM (483 B)
+
+[WIN] geom x=2 y=34 w=1916 h=1018  (1920x1080 desktop, single-window tile; before R6: 1020x670 +36 at 2,70)
+[WIN] painted rect=1916x1018 at 2,34
