@@ -50,10 +50,14 @@ static void handle_keyboard_byte(uint8_t data) {
     uint8_t base = data & 0x7F;
     int is_release = (data & 0x80) != 0;
 
-    if (base == 0x48) code = 103;      // KEY_UP
+    if (base == 0x47) code = 102;      // KEY_HOME (E0)
+    else if (base == 0x48) code = 103; // KEY_UP
+    else if (base == 0x49) code = 104; // KEY_PAGEUP (E0)
     else if (base == 0x4B) code = 105; // KEY_LEFT
     else if (base == 0x4D) code = 106; // KEY_RIGHT
+    else if (base == 0x4F) code = 107; // KEY_END (E0)
     else if (base == 0x50) code = 108; // KEY_DOWN
+    else if (base == 0x51) code = 109; // KEY_PAGEDOWN (E0)
 
     if (code != 0) {
       value = is_release ? 0 : 1;
@@ -93,6 +97,13 @@ static void handle_mouse_byte(uint8_t data) {
     if (flags & 0x10) dx -= 256;
     if (flags & 0x20) dy -= 256;
 
+    /* A set X/Y overflow bit means the delta for that axis is UNKNOWN
+       (the device / buffer overflowed) — integrating the payload byte
+       would inject a garbage jump and permanently unpin the cursor's
+       absolute position.  Always apply the button bits; drop the axis. */
+    if (flags & 0x40) dx = 0;
+    if (flags & 0x80) dy = 0;
+
     mouse_x += dx * 40;
     mouse_y -= dy * 40;
 
@@ -120,10 +131,14 @@ static void handle_mouse_byte(uint8_t data) {
   }
 }
 
-void virtio_input_handle_irq(int irq) {
-  (void)irq;
-  uint64_t flags = spinlock_acquire_irqsave(&input_lock);
-
+/* Drain any bytes the i8042 has for us.  Runs under input_lock.  The
+   guest's interrupt-driven drain alone lets QEMU's i8042 output queue fill
+   (q35 PS/2 bursts): when the queue is full QEMU defers the packet to the
+   next input event and it lands LATE — the integrated absolute position is
+   then read before the motion arrives, so clicks land off-target.  The
+   desktop polls get_events() on every loop, so draining here too keeps the
+   queue empty (packets stay in order, none deferred) without any IRQ work. */
+static void input_drain_nolock(void) {
   while (1) {
     uint8_t status = inb(0x64);
     if (!(status & 1)) {
@@ -136,12 +151,20 @@ void virtio_input_handle_irq(int irq) {
       handle_keyboard_byte(data);
     }
   }
+}
 
+void virtio_input_handle_irq(int irq) {
+  (void)irq;
+  uint64_t flags = spinlock_acquire_irqsave(&input_lock);
+  input_drain_nolock();
   spinlock_release_irqrestore(&input_lock, flags);
 }
 
 int virtio_input_get_events(struct virtio_input_event *buf, int max_events) {
   uint64_t flags = spinlock_acquire_irqsave(&input_lock);
+#ifdef __x86_64__
+  input_drain_nolock();
+#endif
   int count = 0;
   while (ring_tail != ring_head && count < max_events) {
     buf[count] = event_ring[ring_tail];
