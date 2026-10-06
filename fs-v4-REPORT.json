@@ -1,0 +1,30 @@
+{
+  "lane": "fs-v4",
+  "verdict": "pass",
+  "gate": "soak ok=True with numbers + every T2 row pass-or-named-gated at FINAL merged state",
+  "commits": [
+    "browser/fs-v4: T2 flips at FINAL merged state — full-skin (T2-15) + direct https (T2-16) load-ok on R7 fix, T2-01/07/08/09 closed, T2-17 shell-GET/DNS, 10.8-min soak (T2-18) + memory + perf refresh"
+  ],
+  "evidence": [
+    "continuation/fs-v4/receipts/report-flip-full-v4.json: full-skin relay load-ok ms=425529, styled frame 0x036bb41a @1916x982, 26 subres, 24/24 imgs, PAGE-NET bb765a43… byte-exact",
+    "continuation/fs-v4/receipts/report-flip-direct-v4.json: direct https load-ok ms=824991, frame 0xfbd4089a, 33 subres (30 TLS), vision-verified full article render",
+    "continuation/fs-v4/receipts/report-fixture-v4.json: fixture 8/8 pass (T2-14), 0 FATAL",
+    "continuation/fs-v4/receipts/report-reader-v4.json: reader pass load-ok ms=19708 (T2-13)",
+    "continuation/fs-v4/receipts/report-soak-v4.json: soak 10.8 min wall, 8 pass/2 gated(transient)/0 fail, 0 FATAL (T2-18)",
+    "continuation/fs-v4/receipts/report-t217-v4.json: SOCK2TST 35 live-GET PASS (301 prefix), DNS example.com A=172.66.147.243 (T2-17)",
+    "continuation/fs-v4/receipts/clock-probe-{soak,reader,flip-full}.txt: guest-vs-host Δ13 s ×3 (T2-19)",
+    "continuation/fs-v4/receipts/mem-probe-soak.txt + MEMFREE.TXT: guest sysinfo(2) block pool 7.25 GiB used=0 — WebProcess working set not guest-visible (honest memory limitation)",
+    "continuation/fs-v4/receipts/full-skin-go-1916x982.png / direct-go-1916x982.png / reader-post-render-1916x982.png / soak-post-render.png: screenshots",
+    "tests/fixtures/browser/T2-CHECKLIST.md (canonical) + continuation/fs-v4/T2-CHECKLIST.md: every row pass-or-named-gated at FINAL merged state",
+    "continuation/fs-v4/PERF-NUMBERS.md: per-page load-ok, frame-times, soak + memory deltas",
+    "binary sha256: ELF fa621da173b8ec9a015096643a419116695c36759862e24ca77293bd8decc16c / flat 09673700768a330c2200c668617c71c3f1459ad72be64166b94c31117cda9782 (87,527,632 B)"
+  ],
+  "blockers": [],
+  "next_steps": [
+    "Integrator I: relay full-skin main-column paint gap (sidebar/TOC/logo render but content column blank; direct leg renders same bytes fully) — candidate: relayed-CSS application or fractional clip on the base-injected document",
+    "N2: merged-tree CA-negative rc=77 re-run + protocol-relative redirect matrix (T2-02/03 positive legs already GREEN at merged)",
+    "Optional kernel nicety: export frame_high via sysinfo so guest memory high-water becomes measurable",
+    "Optional: scripted hung-fetch negative test for the R1c watchdog"
+  ],
+  "notes": "The binary under test is the controller's FINAL merged-verification build (verify proc f077dd5a3e0c, branch bw-verify-w3 @1af2b6d3fc, mtime 10:39Z — polled, no newer mtime after). R7's parser-completion fix is present and working: both full-skin relay and direct https legs now emit [WIN] load-ok (previously stalled at parser-completion in V2c's dry). Two aborted soak attempts (LOSTWAKE boot + a set -u KIND unbound in the first soak-row log line) were cleaned up with a WT-scoped shim (fs-v2 cwd only; G11/H4 untouched); the fixes are in the committed runner. Soak verdict counts 8/10 with 2 transient host-proxy peer-reset rows that each PASS standalone on the same binary. Timebox respected (~1.6 h, well under 4 h)."
+}
