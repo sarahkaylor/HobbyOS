@@ -15,6 +15,8 @@ remote GPU-over-RDMA setup.
 | [`hobbyos-run-tests`](hobbyos-run-tests/SKILL.md) | The three test tiers (host golden / kernel unit / integration) + two-VM RDMA test; the 30 s deadlock rule. |
 | [`hobbyos-add-userland-program`](hobbyos-add-userland-program/SKILL.md) | Exact Makefile recipe to add a new user program + optional host test, with a completion checklist. |
 | [`hobbyos-kernel-constraints`](hobbyos-kernel-constraints/SKILL.md) | ARM64 EL1 rules that prevent trap classes (alignment, no SIMD, byte-wise parsing, Device memory). |
+| [`hobbyos-graphics-acceleration`](hobbyos-graphics-acceleration/SKILL.md) | GPU acceleration program: virtio-gpu flush/FB path, `SYS_FLUSH_FB_RECTS` (89), `virtio_gpu_flush_rects`, driver split, `GFXBENCH.BIN`, QEMU GL launchers. See `references/graphics-pipe-map.md`. |
+| [`hobbyos-port-planning`](hobbyos-port-planning/SKILL.md) | Plan docs (browser.md / gnu-ports.md house style): survey→audit→pin-provenance→decompose; multi-lane execution design, frozen interfaces, gates. See `templates/plan-doc.md`. |
 | [`hobbyos-proxmox-gpu`](hobbyos-proxmox-gpu/SKILL.md) | Remote Intel/GPU-over-RDMA deploy + serial/screenshot debugging on `192.168.10.174`; current Xid-79/MSI-X blocker. |
 
 ## Deploy to local Hermes

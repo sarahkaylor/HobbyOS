@@ -3,6 +3,14 @@
 Lane WD (OS x64 display path). Branch `x64-fb-flush` (base `b8e69a9`).
 Status: **OS side exonerated with on-device evidence; bug is in the fork's
 WK5WindowDriver paint path (WA's file).** Handoff + OS groundwork below.
+**RESOLVED (2026-10-06, lane X3 OQ-2): the merged WA render fix
+(`49f28a3bb5`, sync SubstituteData delivery) cures the x64 white paint —
+see fs-x3 verdict** (fork worktree `~/webkit-lanes/wf1b`,
+`HobbyOS/continuation/fs-x3/evidence/README.md`, commit `c7423037ef`,
+evidence `evidence/boot4/`): x64 windowed run 134, HOME checksum
+`0x107630ad` byte-parity with the ARM canonical frame, 0/66 white-canary
+frames, content-rect pure-white fraction 0.0001, screenshot
+`wk6-dryfix-134-01-01-window.png`. No fork readback fix was needed.
 
 ## 1. Repro (current disk, KVM q35, virtio-gpu-pci, -vga none, -smp 1)
 
