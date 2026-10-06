@@ -1,0 +1,342 @@
+{
+  "toolkit": "fs-browser-accept",
+  "schema_version": 2,
+  "report_schema": "hobbyos-browser-accept-v2",
+  "mode": "soak",
+  "topic": null,
+  "url": "http://10.0.2.2:8855/wiki/Hobbyist_operating_system",
+  "instance": "v4",
+  "rows": [
+    {
+      "id": "soak1-FIX01",
+      "kind": "fixture",
+      "url": "http://10.0.2.2:8855/fixture/FIX01",
+      "status": "pass",
+      "load_ok": true,
+      "load_ms": 9941,
+      "open_fail": null,
+      "frames": 2,
+      "checksum": "0xb6ef95b9",
+      "net": "[WIN] net fetch url=http://10.0.2.2:8855/fixture/FIX01 ok=1 status=200 bytes=267 effective=http://10.0.2.2:8855/fixture/FIX01 err=",
+      "persist": "[WIN] net persist 267 B -> /PAGE-NET.HTM",
+      "screenshot": "e2e-go-http___10.0.2.2_8855_fixture_FIX01.png",
+      "entry_echo": "http://10.0.2.2:8855/fixture/FIX01",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    },
+    {
+      "id": "soak1-FIX02",
+      "kind": "fixture",
+      "url": "http://10.0.2.2:8855/fixture/FIX02",
+      "status": "gated",
+      "load_ok": false,
+      "load_ms": null,
+      "open_fail": "[WIN] load open-fail url=http://10.0.2.2:8855/fixture/FIX02 status=0 bytes=0 err=Failure when receiving data from the peer",
+      "frames": 0,
+      "checksum": "0xb6ef95b9",
+      "net": "[WIN] net fetch url=http://10.0.2.2:8855/fixture/FIX02 ok=0 status=0 bytes=0 effective=http://10.0.2.2:8855/fixture/FIX02 err=Failure when receiving data from the peer",
+      "persist": "[WIN] net persist 267 B -> /PAGE-NET.HTM",
+      "screenshot": "e2e-go-http___10.0.2.2_8855_fixture_FIX02.png",
+      "entry_echo": "http://10.0.2.2:8855/fixture/FIX02",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    },
+    {
+      "id": "soak1-FIX02D",
+      "kind": "fixture",
+      "url": "http://10.0.2.2:8855/fixture/FIX02D",
+      "status": "pass",
+      "load_ok": true,
+      "load_ms": 47066,
+      "open_fail": null,
+      "frames": 2,
+      "checksum": "0xf4deb986",
+      "net": "[WIN] net fetch url=http://10.0.2.2:8855/fixture/FIX02D ok=1 status=200 bytes=507 effective=http://10.0.2.2:8855/fixture/FIX02D err=",
+      "persist": "[WIN] net persist 507 B -> /PAGE-NET.HTM",
+      "screenshot": "e2e-go-http___10.0.2.2_8855_fixture_FIX02D.png",
+      "entry_echo": "http://10.0.2.2:8855/fixture/FIX02D",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    },
+    {
+      "id": "soak1-FIX03",
+      "kind": "fixture",
+      "url": "http://10.0.2.2:8855/fixture/FIX03",
+      "status": "pass",
+      "load_ok": true,
+      "load_ms": 55364,
+      "open_fail": null,
+      "frames": 4,
+      "checksum": "0xac079a1a",
+      "net": "[WIN] net fetch url=http://10.0.2.2:8855/fixture/FIX03 ok=1 status=200 bytes=578 effective=http://10.0.2.2:8855/fixture/FIX03 err=",
+      "persist": "[WIN] net persist 578 B -> /PAGE-NET.HTM",
+      "screenshot": "e2e-go-http___10.0.2.2_8855_fixture_FIX03.png",
+      "entry_echo": "http://10.0.2.2:8855/fixture/FIX03",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    },
+    {
+      "id": "soak1-FIX04",
+      "kind": "fixture",
+      "url": "http://10.0.2.2:8855/fixture/FIX04",
+      "status": "pass",
+      "load_ok": true,
+      "load_ms": 68719,
+      "open_fail": null,
+      "frames": 2,
+      "checksum": "0xd4dd2080",
+      "net": "[WIN] net fetch url=http://10.0.2.2:8855/fixture/FIX04 ok=1 status=200 bytes=642 effective=http://10.0.2.2:8855/fixture/FIX04 err=",
+      "persist": "[WIN] net persist 642 B -> /PAGE-NET.HTM",
+      "screenshot": "e2e-go-http___10.0.2.2_8855_fixture_FIX04.png",
+      "entry_echo": "http://10.0.2.2:8855/fixture/FIX04",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    },
+    {
+      "id": "soak1-FIX05",
+      "kind": "fixture",
+      "url": "http://10.0.2.2:8855/fixture/FIX05",
+      "status": "pass",
+      "load_ok": true,
+      "load_ms": 76753,
+      "open_fail": null,
+      "frames": 4,
+      "checksum": "0x2d14a03e",
+      "net": "[WIN] net fetch url=http://10.0.2.2:8855/fixture/FIX05 ok=1 status=200 bytes=440 effective=http://10.0.2.2:8855/fixture/FIX05 err=",
+      "persist": "[WIN] net persist 440 B -> /PAGE-NET.HTM",
+      "screenshot": "e2e-go-http___10.0.2.2_8855_fixture_FIX05.png",
+      "entry_echo": "http://10.0.2.2:8855/fixture/FIX05",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    },
+    {
+      "id": "soak1-HOME",
+      "kind": "fixture",
+      "url": "http://10.0.2.2:8855/fixture/HOME",
+      "status": "pass",
+      "load_ok": true,
+      "load_ms": 84530,
+      "open_fail": null,
+      "frames": 4,
+      "checksum": "0x2a55551e",
+      "net": "[WIN] net fetch url=http://10.0.2.2:8855/fixture/HOME ok=1 status=200 bytes=483 effective=http://10.0.2.2:8855/fixture/HOME err=",
+      "persist": "[WIN] net persist 483 B -> /PAGE-NET.HTM",
+      "screenshot": "e2e-go-http___10.0.2.2_8855_fixture_HOME.png",
+      "entry_echo": "http://10.0.2.2:8855/fixture/HOME",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    },
+    {
+      "id": "soak1-TALL",
+      "kind": "fixture",
+      "url": "http://10.0.2.2:8855/fixture/TALL",
+      "status": "pass",
+      "load_ok": true,
+      "load_ms": 92971,
+      "open_fail": null,
+      "frames": 4,
+      "checksum": "0x55c92e34",
+      "net": "[WIN] net fetch url=http://10.0.2.2:8855/fixture/TALL ok=1 status=200 bytes=817 effective=http://10.0.2.2:8855/fixture/TALL err=",
+      "persist": "[WIN] net persist 817 B -> /PAGE-NET.HTM",
+      "screenshot": "e2e-go-http___10.0.2.2_8855_fixture_TALL.png",
+      "entry_echo": "http://10.0.2.2:8855/fixture/TALL",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    },
+    {
+      "id": "soak1-reader",
+      "kind": "reader",
+      "url": "http://10.0.2.2:8855/reader/Hobbyist_operating_system",
+      "status": "gated",
+      "load_ok": false,
+      "load_ms": null,
+      "open_fail": "[WIN] load open-fail url=http://10.0.2.2:8855/reader/Hobbyist_operating_system status=0 bytes=0 err=Failure when receiving data from the peer",
+      "frames": 0,
+      "checksum": "0x55c92e34",
+      "net": "[WIN] net fetch url=http://10.0.2.2:8855/reader/Hobbyist_operating_system ok=0 status=0 bytes=0 effective=http://10.0.2.2:8855/reader/Hobbyist_operating_system err=Failure when receiving data from the peer",
+      "persist": "[WIN] net persist 817 B -> /PAGE-NET.HTM",
+      "screenshot": "e2e-go-.2_8855_reader_Hobbyist_operating_system.png",
+      "entry_echo": "http://10.0.2.2:8855/reader/Hobbyist_operating_system",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    },
+    {
+      "id": "soak1-full",
+      "kind": "full",
+      "url": "http://10.0.2.2:8855/wiki/Hobbyist_operating_system",
+      "status": "pass",
+      "load_ok": true,
+      "load_ms": 653995,
+      "open_fail": null,
+      "frames": 2,
+      "checksum": "0x1140aa94",
+      "net": "[WIN] net fetch url=http://10.0.2.2:8855/wiki/Hobbyist_operating_system ok=1 status=200 bytes=120003 effective=http://10.0.2.2:8855/wiki/Hobbyist_operating_system err=",
+      "persist": "[WIN] net persist 120003 B -> /PAGE-NET.HTM",
+      "screenshot": "e2e-go-.2.2_8855_wiki_Hobbyist_operating_system.png",
+      "entry_echo": "http://10.0.2.2:8855/wiki/Hobbyist_operating_system",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    }
+  ],
+  "proxy": {
+    "port": 8855,
+    "port_file": "/tmp/wiki-proxy-port-v4",
+    "upstream": "https://en.wikipedia.org",
+    "host_self_check_robots_markers": 35,
+    "fixture_self_check_FIX01_markers": 1
+  },
+  "netlog": {
+    "rel_path": "net.log.jsonl",
+    "lines": 17,
+    "sha256": "2ab77a58bfcc37f2f6e10a2825f0585d06227a9c965e42d34f124baf1c5de42f",
+    "routes": {
+      "relay": 8,
+      "fixture": 8
+    }
+  },
+  "guest_http": {
+    "sock2tst_live_get_passes": 0,
+    "sock2tst_response_prefix": []
+  },
+  "dns": {
+    "guest_dhcp_dns": "10.0.2.3",
+    "serial_evidence": true,
+    "resolver": "guest resolv_lookup -> 10.0.2.3 (QEMU user-net -> host resolver)",
+    "etc_hosts": "no /etc/hosts on this OS; resolver queries 10.0.2.3 directly"
+  },
+  "session": {
+    "ok": false,
+    "verdict": "gated",
+    "row_counts": {
+      "n_pass": 8,
+      "n_gated": 2,
+      "n_fail": 0
+    },
+    "mem_probe": "# guest memory probe (T2-18) \u2014 host side\n# guest side (FREE.BIN sysinfo(2) -> /MEMFREE.TXT copy-back):\n              total        used        free\nMem:     7784628224    0    7784628224",
+    "notes": [
+      "rows gated: soak1-FIX02, soak1-reader"
+    ],
+    "markers": {
+      "[WIN] BOOT": 1,
+      "[WIN] created": 1,
+      "[WIN] geom": 3,
+      "[WIN] url-prompt": 10,
+      "[WIN] url-entry": 10,
+      "[WIN] net fetch": 10,
+      "[WIN] load start url=": 8,
+      "[WIN] load-ok": 9,
+      "[WIN] load open-fail": 2,
+      "[WIN] frame": 44,
+      "[WIN] net persist": 8,
+      "[WIN] render": 1,
+      "[WIN] checksum": 0,
+      "[LAUNCH] CONSOLE.BIN": 2,
+      "[DNSTST]": 0,
+      "DHCP DNS server": 1,
+      "Network configured": 1,
+      "FATAL": 0,
+      "IDLESTUCK": 22,
+      "SOCK2TST": 1
+    },
+    "screenshots": [
+      "e2e-browser-launch.png",
+      "e2e-go-.2.2_8855_wiki_Hobbyist_operating_system.png",
+      "e2e-go-.2_8855_reader_Hobbyist_operating_system.png",
+      "e2e-go-http___10.0.2.2_8855_fixture_FIX01.png",
+      "e2e-go-http___10.0.2.2_8855_fixture_FIX02.png",
+      "e2e-go-http___10.0.2.2_8855_fixture_FIX02D.png",
+      "e2e-go-http___10.0.2.2_8855_fixture_FIX03.png",
+      "e2e-go-http___10.0.2.2_8855_fixture_FIX04.png",
+      "e2e-go-http___10.0.2.2_8855_fixture_FIX05.png",
+      "e2e-go-http___10.0.2.2_8855_fixture_HOME.png",
+      "e2e-go-http___10.0.2.2_8855_fixture_TALL.png",
+      "e2e-mem-post-render.png",
+      "e2e-post-render.png"
+    ],
+    "artifacts": {
+      "serial.log": {
+        "size": 74030,
+        "sha256": "5278577e6b3fd337ce2ca58fc7c373aac54ffaa4a64e6ba2478f688bca4aa46d"
+      },
+      "driver.log": {
+        "size": 7344,
+        "sha256": "352324c967b40313c200c1637fddca93268b1780ab6237f22e4999106f3c6e02"
+      },
+      "wiki-proxy.log": {
+        "size": 3523,
+        "sha256": "09a67ca44617ae85e76f7d7f6fa12fa818eb2999662cd5abdb1456df0b529f55"
+      },
+      "net.log.jsonl": {
+        "size": 5330,
+        "sha256": "2ab77a58bfcc37f2f6e10a2825f0585d06227a9c965e42d34f124baf1c5de42f"
+      },
+      "host-robots.txt": {
+        "size": 28275,
+        "sha256": "48b98d80c8444d37cdf50cc9a4d2257b66039477e581066d2356062a4cbd678f"
+      },
+      "host-fixture-FIX01.txt": {
+        "size": 267,
+        "sha256": "fe4df6bc781989afce330d8fa35a92c126abdbc34bfd124b8a29e52d24c9f3d2"
+      },
+      "PAGE-NET.HTM": {
+        "size": 120003,
+        "sha256": "bb765a430b9fd80a60c39ebdb0fc2db01e9de46c820624fb9cbdfa4d9579e511"
+      },
+      "WNPAGE.HTM": {
+        "size": 1,
+        "sha256": "36a9e7f1c95b82ffb99743e0c5c4ce95d83c9a430aac59f84ef3cbfab6145068"
+      },
+      "wiki-proxy-console.log": {
+        "size": 3686,
+        "sha256": "2d061fe53741b7aa1256fae34d902e334f0a30b008e296b0a36c1f94aea6e113"
+      },
+      "mem-probe.txt": {
+        "size": 188,
+        "sha256": "2412b0fd2d4fee46ab89e24c05a3726008ada2747a6181dcf0f05232d54ed79a"
+      },
+      "MEMFREE.TXT": {
+        "size": 83,
+        "sha256": "96f923757de66e4b54c7b3b6e6dda7afdb187eb11bec509e3c9ad8d019a3df99"
+      }
+    },
+    "sha256_page_net": "bb765a430b9fd80a60c39ebdb0fc2db01e9de46c820624fb9cbdfa4d9579e511",
+    "sha256_rob_wc": ""
+  },
+  "summary": {
+    "verdict": "gated",
+    "n_pass": 8,
+    "n_gated": 2,
+    "n_fail": 0,
+    "rows": 10
+  }
+}

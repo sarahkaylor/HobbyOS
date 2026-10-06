@@ -1,0 +1,143 @@
+{
+  "toolkit": "fs-browser-accept",
+  "schema_version": 2,
+  "report_schema": "hobbyos-browser-accept-v2",
+  "mode": "reader",
+  "topic": "Hobbyist_operating_system",
+  "url": "",
+  "instance": "v4",
+  "rows": [
+    {
+      "id": "reader-Hobbyist_operating_system",
+      "kind": "reader",
+      "url": "http://10.0.2.2:8855/reader/Hobbyist_operating_system",
+      "status": "pass",
+      "load_ok": true,
+      "load_ms": 19708,
+      "open_fail": null,
+      "frames": 2,
+      "checksum": "0x78168b3c",
+      "net": "[WIN] net fetch url=http://10.0.2.2:8855/reader/Hobbyist_operating_system ok=1 status=200 bytes=1448 effective=http://10.0.2.2:8855/reader/Hobbyist_operating_system err=",
+      "persist": "[WIN] net persist 1448 B -> /PAGE-NET.HTM",
+      "screenshot": "e2e-go-.2_8855_reader_Hobbyist_operating_system.png",
+      "entry_echo": "http://10.0.2.2:8855/reader/Hobbyist_operating_system",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    }
+  ],
+  "proxy": {
+    "port": 8855,
+    "port_file": "/tmp/wiki-proxy-port-v4",
+    "upstream": "https://en.wikipedia.org",
+    "host_self_check_robots_markers": 35,
+    "fixture_self_check_FIX01_markers": 1
+  },
+  "netlog": {
+    "rel_path": "net.log.jsonl",
+    "lines": 4,
+    "sha256": "eb3ceea5d6b539aa9a1a253bf2f2edfbf895a7a67d33cc74b428af38ecc09268",
+    "routes": {
+      "relay": 1,
+      "fixture": 1,
+      "reader": 1
+    }
+  },
+  "guest_http": {
+    "sock2tst_live_get_passes": 0,
+    "sock2tst_response_prefix": []
+  },
+  "dns": {
+    "guest_dhcp_dns": "10.0.2.3",
+    "serial_evidence": true,
+    "resolver": "guest resolv_lookup -> 10.0.2.3 (QEMU user-net -> host resolver)",
+    "etc_hosts": "no /etc/hosts on this OS; resolver queries 10.0.2.3 directly"
+  },
+  "session": {
+    "ok": true,
+    "verdict": "pass",
+    "row_counts": {
+      "n_pass": 1,
+      "n_gated": 0,
+      "n_fail": 0
+    },
+    "mem_probe": null,
+    "notes": [],
+    "markers": {
+      "[WIN] BOOT": 1,
+      "[WIN] created": 1,
+      "[WIN] geom": 2,
+      "[WIN] url-prompt": 1,
+      "[WIN] url-entry": 1,
+      "[WIN] net fetch": 1,
+      "[WIN] load start url=": 1,
+      "[WIN] load-ok": 2,
+      "[WIN] load open-fail": 0,
+      "[WIN] frame": 12,
+      "[WIN] net persist": 1,
+      "[WIN] render": 1,
+      "[WIN] checksum": 0,
+      "[LAUNCH] CONSOLE.BIN": 1,
+      "[DNSTST]": 0,
+      "DHCP DNS server": 1,
+      "Network configured": 1,
+      "FATAL": 0,
+      "IDLESTUCK": 0,
+      "SOCK2TST": 1
+    },
+    "screenshots": [
+      "e2e-browser-launch.png",
+      "e2e-go-.2_8855_reader_Hobbyist_operating_system.png",
+      "e2e-post-render.png"
+    ],
+    "artifacts": {
+      "serial.log": {
+        "size": 16535,
+        "sha256": "ad4f61e56ebc6ee60262fafd691b4fb271b2199a39f1e209eef5b676330ac801"
+      },
+      "driver.log": {
+        "size": 1206,
+        "sha256": "cdc89bb1f7f665e3ffa120ce0b93cc1c71b88fd1cb0aae8c721d5e4543823843"
+      },
+      "wiki-proxy.log": {
+        "size": 303,
+        "sha256": "60a0ea28260481084369dd1f41927de41bb576a24f0a7f1ecf17054db1b8bfb2"
+      },
+      "net.log.jsonl": {
+        "size": 1144,
+        "sha256": "eb3ceea5d6b539aa9a1a253bf2f2edfbf895a7a67d33cc74b428af38ecc09268"
+      },
+      "host-robots.txt": {
+        "size": 28275,
+        "sha256": "48b98d80c8444d37cdf50cc9a4d2257b66039477e581066d2356062a4cbd678f"
+      },
+      "host-fixture-FIX01.txt": {
+        "size": 267,
+        "sha256": "fe4df6bc781989afce330d8fa35a92c126abdbc34bfd124b8a29e52d24c9f3d2"
+      },
+      "PAGE-NET.HTM": {
+        "size": 1448,
+        "sha256": "eaa65cad058f441d10473b08ff4f72fa19c64176b969fd79ce2fc211db3aaa75"
+      },
+      "WNPAGE.HTM": {
+        "size": 1,
+        "sha256": "36a9e7f1c95b82ffb99743e0c5c4ce95d83c9a430aac59f84ef3cbfab6145068"
+      },
+      "wiki-proxy-console.log": {
+        "size": 464,
+        "sha256": "d66fe97a767051456083b6b464b0b3138c23e5d940d822507c463fe6bef598e7"
+      }
+    },
+    "sha256_page_net": "eaa65cad058f441d10473b08ff4f72fa19c64176b969fd79ce2fc211db3aaa75",
+    "sha256_rob_wc": ""
+  },
+  "summary": {
+    "verdict": "pass",
+    "n_pass": 1,
+    "n_gated": 0,
+    "n_fail": 0,
+    "rows": 1
+  }
+}

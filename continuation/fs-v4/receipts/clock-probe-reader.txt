@@ -1,0 +1,5 @@
+# guest-clock probe (T2-19) — host side
+host_t0_iso=2026-10-06T11:36:01Z host_t0_epoch=1791286561
+host_t1_iso=2026-10-06T11:36:34Z host_t1_epoch=1791286594
+# guest side (CLOCKPX.BIN -> /CLOCKPX.TXT copy-back):
+[CLOCKPX] epoch=1791286574 sec; 2026-10-06 11:36:14 UTC Tue

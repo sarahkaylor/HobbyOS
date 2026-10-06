@@ -1,0 +1,4 @@
+# guest memory probe (T2-18) — host side
+# guest side (FREE.BIN sysinfo(2) -> /MEMFREE.TXT copy-back):
+              total        used        free
+Mem:     7784628224    0    7784628224
