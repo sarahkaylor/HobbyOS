@@ -495,32 +495,75 @@ static void handle_tcp(struct ipv4_hdr* ip, uint8_t* packet, uint32_t len) {
         sockets[i].connect_err = 0;
         sockets[i].connect_started = 1;
       } else if (sockets[i].state == SOCKET_ESTABLISHED) {
-        // Process incoming payload and push to socket's ring buffer
+        /* N3: TCP RX flow control — the per-socket RX ring is a fixed
+         * SOCKET_RX_BUF_SIZE (4 MiB) circular buffer written in ISR context
+         * and drained by the app's read() path.  The v1 code copied every
+         * segment into the ring unconditionally: as soon as unread bytes
+         * reached the ring size (a single-response body >= ~4 MiB flooding
+         * in ahead of the app's drain), the write wrapped and silently
+         * overwrote unread data, corrupting the byte stream and aborting the
+         * fetch with open-fail 'Unsupported protocol', bytes=0 — at exactly
+         * the ring-size threshold, independent of server/port/content.
+         * The fix is producer flow control, not a bigger buffer: store ONLY
+         * the contiguous expected bytes that fit, ACK only what was stored,
+         * and advertise the true free space (window 0 when full).  The peer
+         * then parks on the zero window and resumes on the window-update ACK
+         * net_socket_recv() sends after every drain.  The ring can never
+         * wrap and the stream can never reorder, at ANY body size.
+         * A modest ring raise would only move the cliff (16 x 4 MiB static
+         * buffers = 64 MiB already), so this stays the streaming-drain
+         * design: ring size is latency slack, not the correctness bound. */
         uint32_t data_offset = tcp->data_offset * 4;
-        if (data_offset < len) {
-          uint32_t data_len = len - data_offset;
+        uint32_t data_len = (data_offset < len) ? (len - data_offset) : 0;
+        uint32_t seg_seq = ntohl(tcp->seq);
+        uint32_t stored = 0;
+        if (data_len > 0 && seg_seq == sockets[i].ack) {
+          /* In-order payload: store only what fits in the free ring. */
+          uint32_t free_space =
+              SOCKET_RX_BUF_SIZE - (sockets[i].rx_tail - sockets[i].rx_head);
+          uint32_t to_store = data_len < free_space ? data_len : free_space;
           uint8_t* data = packet + data_offset;
-          for (uint32_t j = 0; j < data_len; j++) {
+          for (uint32_t j = 0; j < to_store; j++) {
             sockets[i].rx_buf[(sockets[i].rx_tail + j) % SOCKET_RX_BUF_SIZE] = data[j];
           }
-          extern void arch_memory_barrier(void);
-          arch_memory_barrier();
-          sockets[i].rx_tail += data_len;
-          sockets[i].ack += data_len;
-          /* WK-real-site (draft 0009): ACK the received payload.  The v1
-           * stack previously NEVER transmitted an ACK for received data, so
-           * the peer only pushed up to the advertised window then stalled
-           * waiting for the ACK that never came: a TLS handshake whose
-           * server flight (ServerHello + certificate chain) exceeded the
-           * window died with "SSL connect error"; a proxied bulk body died
-           * with "Failure when receiving data from the peer" after ~2 KiB.
-           * Immediate per-segment ACK is the bounded fix. */
-          if (sockets[i].mac_cached)
-            send_tcp_segment(&sockets[i], 0x10, NULL, 0);
+          if (to_store) {
+            extern void arch_memory_barrier(void);
+            arch_memory_barrier();
+            sockets[i].rx_tail += to_store;
+            sockets[i].ack += to_store;
+            stored = to_store;
+          }
+        } else if (data_len > 0) {
+          /* Out-of-order / beyond-window payload (a segment ahead of a
+           * retransmission hole, or one that would overflow the ring):
+           * never store it — appending it would reorder the byte stream.
+           * The peer retransmits from ack once a window update reopens the
+           * flow.  Counted + printed once so the serial log proves the
+           * guard engaged. */
+          sockets[i].rx_drops += data_len;
+          sockets[i].rx_drop_segments++;
+          if (sockets[i].rx_drop_segments == 1) {
+            extern void uart_puts(const char* s);
+            extern void print_int(int val);
+            uart_puts("[NET] rx flow-control drop: ring full / out-of-order, "
+                      "seq_off=");
+            print_int((int)(sockets[i].ack - seg_seq));
+            uart_puts("\n");
+          }
         }
+        /* Immediate per-segment ACK (WK-real-site draft 0009): reports the
+         * contiguous ack number and the true free window.  With the
+         * contiguous-only store above, a full ring advertises window 0 and
+         * the peer parks with zero-window probes instead of overflowing. */
+        if (sockets[i].mac_cached)
+          send_tcp_segment(&sockets[i], 0x10, NULL, 0);
 
-        // Handle remote FIN segment indicating connection closure
-        if (tcp->fin) {
+        /* Handle remote FIN segment indicating connection closure — only
+         * honored when it sits exactly at the end of the contiguous stored
+         * stream (all of this segment's payload stored, nothing refused
+         * ahead of it); otherwise an un-retransmitted tail would be
+         * silently discarded along with the FIN. */
+        if (tcp->fin && seg_seq + data_len == sockets[i].ack) {
           sockets[i].ack++;
           sockets[i].state = SOCKET_CLOSED;
           sockets[i].connect_err = 0; // clean EOF, not an error
@@ -817,11 +860,16 @@ static void send_tcp_segment(struct socket_pcb* pcb, uint8_t flags, const void* 
   /* WK-real-site (draft 0009): advertise real free rx_buf space (capped at
    * 65535, the 16-bit window field) instead of a fixed 2048.  With a fixed
    * tiny window the peer could never push more than ~2 KiB before needing an
-   * ACK/window-update even once we learn to ACK. */
+   * ACK/window-update even once we learn to ACK.
+   * N3: the v1 "min 2048" floor below lied once the ring approached full —
+   * a peer could keep pushing segments past the true free space and the RX
+   * ISR would wrap/overwrite the ring.  Advertise the TRUE free space (0
+   * when full): handle_tcp refuses out-of-window payload, the peer parks on
+   * window 0, and net_socket_recv()'s post-drain window-update ACK reopens
+   * the flow.  Ring size is now latency slack, not a correctness bound. */
   {
     uint32_t rx_free = SOCKET_RX_BUF_SIZE - (pcb->rx_tail - pcb->rx_head);
     uint32_t win = rx_free > 0xFFFF ? 0xFFFF : rx_free;
-    if (win < 2048) win = 2048; /* never advertise a degenerately tiny window */
     tcp->window_size = htons((uint16_t)win);
   }
   tcp->checksum = 0; // Initial checksum is 0 for calculation
