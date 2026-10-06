@@ -48,10 +48,12 @@
 #define USER_MMAP_SIZE 0x480000000ULL /* 18 GiB */
 #define USER_TSTK_OFF 0x500000000ULL
 #define USER_TSTK_SIZE 0x100000000ULL /* 4 GiB */
-/* Framebuffer slot: a reserved 4 MiB slot in the 0x6..0x7.FF GiB band
- * (section 7.3).  Documented here; mapped by SYS_MAP_FB in P2.4 (S4). */
+/* Framebuffer slot: reserved in the 0x6..0x7.FF GiB band (section 7.3).
+ * Sized for a full 1920x1080x32bpp frame (8,294,400 B, ~8 MiB) plus slack;
+ * mapped by SYS_MAP_FB in P2.4 (S4).  The desktop mode itself lives in
+ * display_mode.h. */
 #define USER_FB_OFF 0x6F0000000ULL
-#define USER_FB_SIZE 0x00400000ULL
+#define USER_FB_SIZE 0x00A00000ULL
 #define USER_MAIN_STK_TOP_OFF 0x800000000ULL /* == window top */
 #define USER_MAIN_STK_SIZE 0x00800000ULL    /* 8 MiB demand reserve */
 #define USER_MAIN_STK_GUARD 0x00010000ULL   /* 64 KiB guard below */

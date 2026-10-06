@@ -26,6 +26,7 @@
 #ifndef __x86_64__
 
 #include "virtio_gpu.h"
+#include "display_mode.h"
 #include "lock.h"
 #include "arch/cpu.h"
 
@@ -57,9 +58,10 @@ extern volatile uint64_t cpu_heartbeat_ms[];
 #define MMIO_BASE(slot) ((uint8_t*)0x0A000000 + (slot) * 0x200)
 
 #define GPU_QUEUE_NUM 16
-#define GPU_FB_W 1024
-#define GPU_FB_H 768
-#define GPU_FB_STRIDE_BYTES (GPU_FB_W * 4)
+/* R6: mode constants live in display_mode.h (single shared definition). */
+#define GPU_FB_W DISPLAY_WIDTH
+#define GPU_FB_H DISPLAY_HEIGHT
+#define GPU_FB_STRIDE_BYTES DISPLAY_STRIDE_BYTES
 
 /* Tight-spin window of the completion wait (ms) before the core parks on
  * wfi; completions are normally far below this, so the parked path only
@@ -137,9 +139,11 @@ static inline uint32_t reg_read32(uint32_t offset) {
 /* ---- pure rect geometry (kept device-free for the unit suite) --------- */
 
 /**
- * Clamps a screen-space rect to the 1024x768 panel: skips empty rects
- * (w<=0 || h<=0) and intersects the rest with [0,1024)x[0,768).  Edges
+ * Clamps a screen-space rect to the desktop panel: skips empty rects
+ * (w<=0 || h<=0) and intersects the rest with [0,SCREEN_W)x[0,SCREEN_H).  Edges
  * are computed in 64-bit so INT32-extreme w/h cannot overflow.
+ *
+ * The panel-size macros (GPU_FB_W/H) come from display_mode.h.
  *
  * Returns 1 and fills `out` with the clamped rect when at least one pixel
  * is on-screen, 0 when the rect is empty or fully off-screen.
@@ -168,11 +172,10 @@ int virtio_gpu_rect_clamp(const struct virtio_gpu_xrect *in,
 }
 
 /**
- * Byte offset of pixel (x,y) in the B8G8R8A8 framebuffer (stride 1024*4):
+ * Byte offset of pixel (x,y) in the B8G8R8A8 framebuffer (stride = GPU_FB_W*4):
  * the TRANSFER_TO_HOST_2D source pointer QEMU's virtio-gpu walks row-wise
- * from (offset + stride*h).  x/y must be CLAMPED on-screen values
- * (0..1023 / 0..767); for the full-screen rect this yields 0, i.e. the
- * legacy full-flush offset.
+ * from (offset + stride*h).  x/y must be CLAMPED on-screen values; for the
+ * full-screen rect this yields 0, i.e. the legacy full-flush offset.
  */
 uint32_t virtio_gpu_rect_transfer_offset(int32_t x, int32_t y) {
   return (uint32_t)y * GPU_FB_STRIDE_BYTES + (uint32_t)x * 4u;

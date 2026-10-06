@@ -49,7 +49,7 @@ SERIAL_LOG = "/tmp/xcalc_serial.log"
 SHOT_DIR = "/tmp/hobbyos_xcalc"
 QEMU_BIN = "qemu-system-x86_64" if INTEL else "qemu-system-aarch64"
 
-W, H = 1024, 768
+W, H = 1920, 1080
 TASKBAR_Y = H - 26
 
 # The desktop's single-window tile is the whole area above the taskbar;

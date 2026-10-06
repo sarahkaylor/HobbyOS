@@ -36,7 +36,7 @@ SERIAL = f"{RUN_DIR}/serial.log"
 FILE_NAME = "HELLO.TXT"                 # what nano will save (FAT root = cwd)
 TYPED_LINES = ["hello from nano", "second line"]
 EXPECT_BYTES = ("hello from nano\nsecond line").encode()
-SCREEN_W, SCREEN_H = 1024, 768          # desktop resolution (pixels)
+SCREEN_W, SCREEN_H = 1920, 1080         # desktop resolution (pixels)
 
 os.makedirs(RUN_DIR, exist_ok=True)
 
@@ -57,10 +57,11 @@ def check(ok, what):
 #
 # ED_BOX = the first two content rows of the editor window (below the title
 # bar); PROMPT_BOX = the status/prompt band at the VERY BOTTOM of the nano
-# window (the write-out prompt is the last grid row, just above the taskbar,
-# around y 700-742 on the 1024x768 desktop).
-ED_BOX = (6, 40, 1018, 116)
-PROMPT_BOX = (6, 700, 1018, 741)
+# window (the write-out prompt is the last grid row, just above the taskbar;
+# at the R6 1920x1080 mode the single window is 1920 wide and its 72-row
+# (capped) grid puts the last row around y 750-770).
+ED_BOX = (40, 40, 1900, 160)
+PROMPT_BOX = (40, 730, 1900, 800)
 
 
 def ppm_pixels(path):
@@ -350,7 +351,7 @@ def main():
 
     try:
         qmp = QMP(QMP_SOCK)
-        qmp.move(512, 384)                     # park the pointer mid-screen
+        qmp.move(SCREEN_W // 2, SCREEN_H // 2)   # park the pointer mid-screen
         time.sleep(0.5)
 
         ok = screenshot(qmp, "00-desktop")
@@ -369,8 +370,8 @@ def main():
         check("NANO.BIN" in menu, "NANO.BIN is listed in the Apps menu")
         nano_idx = menu.get("NANO.BIN", 0)
 
-        # Taskbar APPS button: x 6..70, y 742..768 (1024x768, taskbar 26px).
-        qmp.click(38, 755)
+        # Taskbar APPS button: x 6..70, y SCREEN_H-26..SCREEN_H (taskbar 26px).
+        qmp.click(38, SCREEN_H - 13)
         screenshot(qmp, "01-apps-menu")
         # Keyboard navigation: Down moves the selection (the desktop scrolls
         # the menu as needed), Enter launches it.

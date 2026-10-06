@@ -42,7 +42,7 @@ import threading
 import time
 import zlib
 
-W, H = 1024, 768
+W, H = 1920, 1080
 TASKBAR_Y = H - 26
 APPS_BTN_X, APPS_BTN_W = 6, 64
 

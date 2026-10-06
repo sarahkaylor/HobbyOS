@@ -348,7 +348,7 @@ static void test_wallpaper_carve(void) {
   check(bad_survive == 0, "carve leaves every sampled content pixel untouched");
   check(bad_color == 0, "carve repaints the wallpaper with the exact row colours");
 
-  /* Single-window boundaries: content is (2,34,1020,706). */
+  /* Single-window boundaries: content is (2,34,SCREEN_WIDTH-4,span_h-36). */
   graphics_reset_base_clip();
   wm_init();
   num_windows = 0;
@@ -356,23 +356,24 @@ static void test_wallpaper_carve(void) {
   windows[0].pixel_mode = 1;
   graphics_fill_gradient_v(0, 0, SCREEN_WIDTH, span_h,
                            COLOR(16, 20, 38), COLOR(44, 56, 96));
+  int cw = SCREEN_WIDTH - 4, ch = span_h - 36;   /* single-window content */
   uint32_t ref_above = graphics_get_pixel(500, 33);
-  uint32_t ref_below = graphics_get_pixel(500, 740);
+  uint32_t ref_below = graphics_get_pixel(500, 34 + ch);
   uint32_t ref_left = graphics_get_pixel(1, 400);
-  uint32_t ref_right = graphics_get_pixel(1022, 400);
+  uint32_t ref_right = graphics_get_pixel(SCREEN_WIDTH - 2, 400);
   for (int r = 0; r < span_h; r++) {
     graphics_draw_pixel(1, r, MARKER);
     graphics_draw_pixel(500, r, MARKER);
-    graphics_draw_pixel(1022, r, MARKER);
+    graphics_draw_pixel(SCREEN_WIDTH - 2, r, MARKER);
   }
   paint_wallpaper();
   check(graphics_get_pixel(500, 33) == ref_above, "last wallpaper row above content exact");
   check(graphics_get_pixel(500, 34) == MARKER, "first content row untouched");
   check(graphics_get_pixel(500, 400) == MARKER, "middle of the content untouched");
-  check(graphics_get_pixel(500, 739) == MARKER, "last content row untouched");
-  check(graphics_get_pixel(500, 740) == ref_below, "first wallpaper row below content exact");
+  check(graphics_get_pixel(500, 34 + ch - 1) == MARKER, "last content row untouched");
+  check(graphics_get_pixel(500, 34 + ch) == ref_below, "first wallpaper row below content exact");
   check(graphics_get_pixel(1, 400) == ref_left, "left sliver repainted");
-  check(graphics_get_pixel(1022, 400) == ref_right, "right sliver repainted");
+  check(graphics_get_pixel(SCREEN_WIDTH - 2, 400) == ref_right, "right sliver repainted");
 
   wm_init();
   num_windows = 0;
@@ -439,7 +440,7 @@ static void test_pixel_input(void) {
   wm_mouse_pixel(w, w->x + 2 + 10, w->y + 34 + 20, &x, &y);
   check(x == 10 && y == 20, "content pixels are 1:1");
   wm_mouse_pixel(w, 5000, 5000, &x, &y);
-  check(x == 1019 && y == 705, "far corner clamps to the last content pixel");
+  check(x == (w->w - 4 - 1) && y == (w->h - 36 - 1), "far corner clamps to the last content pixel");
   wm_mouse_pixel(w, 0, 0, &x, &y);
   check(x == 0 && y == 0, "screen corner clamps to origin");
 
@@ -597,17 +598,30 @@ static void test_menu_overlay_protection(void) {
   wm_pixel_queue_expose(w, mv_right - 24, mv_top + 10, 100, 40);
   wm_pixel_service_frame();
   drain(rd, buf, sizeof buf);
-  check(strcmp(buf, "\033[E 222;638;76;40~") == 0,
-        "repair is clipped to the part outside the menu");
+  /* Content coords: y = mv_top+10-34, x visible from 222 (menu right edge). */
+  {
+    char want[96];
+    snprintf(want, sizeof want, "\033[E 222;%d;76;40~", mv_top + 10 - 34);
+    check(strcmp(buf, want) == 0, "repair is clipped to the part outside the menu");
+  }
 
-  /* A full repair while the menu is open splits around it (content is
-   * 1020x706; the menu covers content x 2..222, y 628..706). */
-  wm_pixel_queue_expose_all(w);
-  wm_pixel_service_frame();
-  drain(rd, buf, sizeof buf);
-  check(strcmp(buf,
-               "\033[E 0;0;1020;628~\033[E 0;628;2;78~\033[E 222;628;798;78~") == 0,
-        "full repair splits around the open menu");
+  /* A full repair while the menu is open splits around it.  Content is
+   * (2,34,SCREEN_WIDTH-4,SCREEN_HEIGHT-TASKBAR_H-36); the menu covers
+   * content x 2..222, and from y = mv_top-34 to the content bottom. */
+  {
+    int cw = SCREEN_WIDTH - 4;
+    int ch = (SCREEN_HEIGHT - TASKBAR_H) - 36;
+    int my = mv_top - 34;                    /* menu top in content coords */
+    int bh = (34 + ch) - (34 + my);          /* height below the menu top */
+    char want[192];
+    snprintf(want, sizeof want,
+             "\033[E 0;0;%d;%d~\033[E 0;%d;2;%d~\033[E 222;%d;%d;%d~",
+             cw, my, my, bh, my, cw - 222, bh);
+    wm_pixel_queue_expose_all(w);
+    wm_pixel_service_frame();
+    drain(rd, buf, sizeof buf);
+    check(strcmp(buf, want) == 0, "full repair splits around the open menu");
+  }
 
   /* An app flush re-stamps the menu over the app's pixels, while the
    * pointer (above everything) still re-stamps over the content. */

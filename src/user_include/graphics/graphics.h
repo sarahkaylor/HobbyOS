@@ -8,8 +8,12 @@
 extern "C" {
 #endif
 
-#define SCREEN_WIDTH 1024
-#define SCREEN_HEIGHT 768
+/* R6: the desktop display mode is defined ONCE in src/include/display_mode.h
+ * (consumed by both kernel GPU drivers and this userland surface). */
+#include "../../include/display_mode.h"
+
+#define SCREEN_WIDTH DISPLAY_WIDTH
+#define SCREEN_HEIGHT DISPLAY_HEIGHT
 
   // Color definitions (A R G B) - Virtio GPU format we used is B8G8R8A8
   // Let's define macro for easier color creation

@@ -26,7 +26,7 @@ import time
 REPO = os.path.dirname(os.path.abspath(__file__))
 os.chdir(REPO)
 
-W, H = 1024, 768
+W, H = 1920, 1080
 TASKBAR_Y = H - 26
 QMP_SOCK = "./qmp-readme"
 SERIAL = "/tmp/readme_serial.log"

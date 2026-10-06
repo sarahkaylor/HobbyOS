@@ -2,6 +2,7 @@
 
 #include "unit_test.h"
 #include "virtio_gpu.h"
+#include "display_mode.h"
 #include <stdint.h>
 
 static void test_virtio_gpu_get_framebuffer(void) {
@@ -31,12 +32,12 @@ static void test_virtio_gpu_rect_clamp(void) {
   tests_run++;
 
   /* Full-screen rect (virtio_gpu_flush's fast path) is the identity. */
-  in.x = 0; in.y = 0; in.w = 1024; in.h = 768;
+  in.x = 0; in.y = 0; in.w = DISPLAY_WIDTH; in.h = DISPLAY_HEIGHT;
   EXPECT_EQ(virtio_gpu_rect_clamp(&in, &out), 1);
   EXPECT_EQ(out.x, 0);
   EXPECT_EQ(out.y, 0);
-  EXPECT_EQ(out.w, 1024);
-  EXPECT_EQ(out.h, 768);
+  EXPECT_EQ(out.w, DISPLAY_WIDTH);
+  EXPECT_EQ(out.h, DISPLAY_HEIGHT);
 
   /* Interior rect is untouched. */
   in.x = 10; in.y = 20; in.w = 100; in.h = 50;
@@ -54,13 +55,14 @@ static void test_virtio_gpu_rect_clamp(void) {
   EXPECT_EQ(out.w, 90);
   EXPECT_EQ(out.h, 45);
 
-  /* Right/bottom edge clip. */
-  in.x = 1000; in.y = 700; in.w = 100; in.h = 100;
+  /* Right/bottom edge clip (R6 mode = DISPLAY_WIDTH x DISPLAY_HEIGHT). */
+  in.x = DISPLAY_WIDTH - 20; in.y = DISPLAY_HEIGHT - 20;
+  in.w = 100; in.h = 100;
   EXPECT_EQ(virtio_gpu_rect_clamp(&in, &out), 1);
-  EXPECT_EQ(out.x, 1000);
-  EXPECT_EQ(out.y, 700);
-  EXPECT_EQ(out.w, 24);
-  EXPECT_EQ(out.h, 68);
+  EXPECT_EQ(out.x, DISPLAY_WIDTH - 20);
+  EXPECT_EQ(out.y, DISPLAY_HEIGHT - 20);
+  EXPECT_EQ(out.w, 20);
+  EXPECT_EQ(out.h, 20);
 
   /* Fully off-screen / empty / negative-size rects are skipped. */
   in.x = 2000; in.y = 0; in.w = 100; in.h = 100;
@@ -86,16 +88,19 @@ static void test_virtio_gpu_rect_transfer_offset(void) {
   /* Full-screen top-left: the legacy full-flush offset. */
   EXPECT_EQ(virtio_gpu_rect_transfer_offset(0, 0), 0);
 
-  /* Sample rect (x=16, y=20): 20 rows * 4096 B + 16 px * 4 B. */
-  EXPECT_EQ(virtio_gpu_rect_transfer_offset(16, 20), 20 * 4096 + 16 * 4);
+  /* Sample rect (x=16, y=20): 20 rows * stride + 16 px * 4 B. */
+  EXPECT_EQ(virtio_gpu_rect_transfer_offset(16, 20),
+            20 * (DISPLAY_WIDTH * 4) + 16 * 4);
 
   /* Row-only and column-only offsets. */
-  EXPECT_EQ(virtio_gpu_rect_transfer_offset(0, 5), 5 * 4096);
+  EXPECT_EQ(virtio_gpu_rect_transfer_offset(0, 5), 5 * (DISPLAY_WIDTH * 4));
   EXPECT_EQ(virtio_gpu_rect_transfer_offset(7, 0), 7 * 4);
 
   /* Bottom-right pixel: the maximum in-range offset. */
-  EXPECT_EQ(virtio_gpu_rect_transfer_offset(1023, 767), 767 * 4096 + 1023 * 4);
-  EXPECT_EQ(virtio_gpu_rect_transfer_offset(1023, 767), 3145724);
+  EXPECT_EQ(virtio_gpu_rect_transfer_offset(DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1),
+            (DISPLAY_HEIGHT - 1) * (DISPLAY_WIDTH * 4) + (DISPLAY_WIDTH - 1) * 4);
+  EXPECT_EQ(virtio_gpu_rect_transfer_offset(DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1),
+            (DISPLAY_HEIGHT - 1) * (DISPLAY_WIDTH * 4) + (DISPLAY_WIDTH - 1) * 4);
 }
 
 static void test_virtio_gpu_flush_rects_empty(void) {
@@ -161,16 +166,18 @@ static void test_virtio_gpu_x64_clamp(void) {
     tests_failed++;
     return;
   }
-  /* positive overrun clips at 1024x768 */
-  if (!virtio_gpu_x64_clamp_rect(1020, 760, 100, 100, &x, &y, &w, &h) ||
-      x != 1020 || y != 760 || w != 4 || h != 8) {
+  /* positive overrun clips at DISPLAY_WIDTH x DISPLAY_HEIGHT (R6 mode) */
+  if (!virtio_gpu_x64_clamp_rect(DISPLAY_WIDTH - 4, DISPLAY_HEIGHT - 4, 100, 100,
+                                 &x, &y, &w, &h) ||
+      x != DISPLAY_WIDTH - 4 || y != DISPLAY_HEIGHT - 4 ||
+      w != 4 || h != 4) {
     uart_puts("FAILED: overrun clip\n");
     tests_failed++;
     return;
   }
   /* fully off-screen rects are skipped */
   if (virtio_gpu_x64_clamp_rect(-100, 10, 50, 50, &x, &y, &w, &h) ||
-      virtio_gpu_x64_clamp_rect(10, 800, 50, 50, &x, &y, &w, &h) ||
+      virtio_gpu_x64_clamp_rect(10, DISPLAY_HEIGHT + 100, 50, 50, &x, &y, &w, &h) ||
       virtio_gpu_x64_clamp_rect(2000, 2000, 10, 10, &x, &y, &w, &h)) {
     uart_puts("FAILED: off-screen rect not skipped\n");
     tests_failed++;
@@ -185,30 +192,32 @@ static void test_virtio_gpu_x64_clamp(void) {
     return;
   }
   /* full screen passes through */
-  if (!virtio_gpu_x64_clamp_rect(0, 0, 1024, 768, &x, &y, &w, &h) ||
-      x != 0 || y != 0 || w != 1024 || h != 768) {
+  if (!virtio_gpu_x64_clamp_rect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT,
+                                 &x, &y, &w, &h) ||
+      x != 0 || y != 0 || w != DISPLAY_WIDTH || h != DISPLAY_HEIGHT) {
     uart_puts("FAILED: full-screen rect\n");
     tests_failed++;
     return;
   }
   /* huge 32-bit extents clamp without overflow (x+w wraps int32) */
   if (!virtio_gpu_x64_clamp_rect(100, 100, 0x7FFFFFFF, 10, &x, &y, &w, &h) ||
-      x != 100 || y != 100 || w != 924 || h != 10) {
+      x != 100 || y != 100 || w != (DISPLAY_WIDTH - 100) || h != 10) {
     uart_puts("FAILED: 32-bit overflow clamp\n");
     tests_failed++;
     return;
   }
 }
 
-/* GX: TRANSFER_TO_HOST_2D offset math (stride 1024*4). */
+/* GX: TRANSFER_TO_HOST_2D offset math (stride DISPLAY_WIDTH*4). */
 static void test_virtio_gpu_x64_rect_offset(void) {
   uart_puts("  Running test_virtio_gpu_x64_rect_offset...\n");
   tests_run++;
   if (virtio_gpu_x64_rect_offset(0, 0) != 0 ||
       virtio_gpu_x64_rect_offset(1, 0) != 4 ||
-      virtio_gpu_x64_rect_offset(0, 1) != 4096 ||
-      virtio_gpu_x64_rect_offset(512, 384) != 1574912 ||
-      virtio_gpu_x64_rect_offset(1023, 767) != 3145724) {
+      virtio_gpu_x64_rect_offset(0, 1) != (uint64_t)(DISPLAY_WIDTH * 4) ||
+      virtio_gpu_x64_rect_offset(512, 384) != 384 * (uint64_t)(DISPLAY_WIDTH * 4) + 512 * 4 ||
+      virtio_gpu_x64_rect_offset(DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1) !=
+          (uint64_t)(DISPLAY_HEIGHT - 1) * (uint64_t)(DISPLAY_WIDTH * 4) + (uint64_t)(DISPLAY_WIDTH - 1) * 4) {
     uart_puts("FAILED: rect offset math\n");
     tests_failed++;
   }
@@ -255,23 +264,23 @@ static void test_virtio_gpu_flush_smoke(void) {
   if (virtio_gpu_x64_active_mode() == 2) {
     uint32_t* fb = virtio_gpu_get_framebuffer();
     volatile uint32_t* lfb = (volatile uint32_t*)(uint64_t)bga_framebuffer_phys;
-    uint32_t old_in = lfb[100 * 1024 + 200];
-    uint32_t old_out = lfb[50 * 1024 + 50];
-    fb[100 * 1024 + 200] = 0xFF123456;
-    fb[50 * 1024 + 50] = 0xFFABCDEF;
+    uint32_t old_in = lfb[100 * DISPLAY_WIDTH + 200];
+    uint32_t old_out = lfb[50 * DISPLAY_WIDTH + 50];
+    fb[100 * DISPLAY_WIDTH + 200] = 0xFF123456;
+    fb[50 * DISPLAY_WIDTH + 50] = 0xFFABCDEF;
     struct virtio_gpu_xrect r = {199, 99, 4, 4}; /* covers (200,100) only */
     virtio_gpu_flush_rects(&r, 1);
-    if (lfb[100 * 1024 + 200] != 0xFF123456) {
+    if (lfb[100 * DISPLAY_WIDTH + 200] != 0xFF123456) {
       uart_puts("FAILED: rect copy did not land in the BGA LFB\n");
       tests_failed++;
       return;
     }
-    if (lfb[50 * 1024 + 50] != old_out) {
+    if (lfb[50 * DISPLAY_WIDTH + 50] != old_out) {
       uart_puts("FAILED: rect copy spilled outside the rect\n");
       tests_failed++;
       return;
     }
-    fb[100 * 1024 + 200] = old_in;
+    fb[100 * DISPLAY_WIDTH + 200] = old_in;
   }
 }
 #endif

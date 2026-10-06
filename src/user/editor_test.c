@@ -138,8 +138,9 @@ static void editor_test_tick(void) {
     inject_mock_event(EV_KEY, 0x111, 1);
     inject_mock_event(EV_KEY, 0x111, 0);
 
-    // Move mouse down to hit NETTEST.BIN (index 0 -> y = 384 + 0 * 20 + 10 = 394)
-    inject_mock_event(EV_ABS, ABS_Y, (394 * 0x7FFF) / 768);
+    // Move mouse down to hit NETTEST.BIN (index 0 -> y = menu_y + 10, and the
+    // menu opens at the pointer = screen centre: SCREEN_HEIGHT/2 + 10)
+    inject_mock_event(EV_ABS, ABS_Y, ((SCREEN_HEIGHT / 2 + 10) * 0x7FFF) / SCREEN_HEIGHT);
 
     // Left click to select NETTEST.BIN
     inject_mock_event(EV_KEY, 0x110, 1);
@@ -160,8 +161,8 @@ static void editor_test_tick(void) {
       inject_mock_event(EV_KEY, 0x111, 1);
       inject_mock_event(EV_KEY, 0x111, 0);
 
-      // Move mouse down to hit EDITOR.BIN (index 1 -> y = 384 + 1 * 20 + 10 = 414)
-      inject_mock_event(EV_ABS, ABS_Y, (414 * 0x7FFF) / 768);
+      // Move mouse down to hit EDITOR.BIN (index 1 -> y = menu_y + 30)
+      inject_mock_event(EV_ABS, ABS_Y, ((SCREEN_HEIGHT / 2 + 30) * 0x7FFF) / SCREEN_HEIGHT);
 
       // Left click to select EDITOR.BIN
       inject_mock_event(EV_KEY, 0x110, 1);
@@ -193,8 +194,8 @@ static void editor_test_tick(void) {
     }
     if (found) {
       print_console("[TEST] Moving mouse to File menu...\n");
-      inject_mock_event(EV_ABS, ABS_X, (20 * 0x7FFF) / 1024);
-      inject_mock_event(EV_ABS, ABS_Y, (26 * 0x7FFF) / 768);
+      inject_mock_event(EV_ABS, ABS_X, (20 * 0x7FFF) / SCREEN_WIDTH);
+      inject_mock_event(EV_ABS, ABS_Y, (26 * 0x7FFF) / SCREEN_HEIGHT);
       test_state = 100;
     }
   }
@@ -205,8 +206,8 @@ static void editor_test_tick(void) {
   }
   if (test_state == 101) {
     print_console("[TEST] Moving mouse to Open item...\n");
-    inject_mock_event(EV_ABS, ABS_X, (20 * 0x7FFF) / 1024);
-    inject_mock_event(EV_ABS, ABS_Y, (64 * 0x7FFF) / 768);
+    inject_mock_event(EV_ABS, ABS_X, (20 * 0x7FFF) / SCREEN_WIDTH);
+    inject_mock_event(EV_ABS, ABS_Y, (64 * 0x7FFF) / SCREEN_HEIGHT);
     test_state = 102;
   }
   if (test_state == 102) {

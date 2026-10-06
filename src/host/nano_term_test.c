@@ -134,7 +134,13 @@ static void test_handshake(void) {
   check(g_win->term_mode == 1, "the desktop window switched into terminal mode");
   check(LINES == g_win->term_rows && COLS == g_win->term_cols,
         "LINES/COLS match the desktop grid exactly");
-  check(LINES == 69 && COLS == 126, "one window: a 69x126 surface");
+  {
+    int rows = (SCREEN_HEIGHT - TASKBAR_H - 48) / 10;
+    int cols = (SCREEN_WIDTH - 12) / 8;
+    if (rows > TERM_MAX_ROWS) rows = TERM_MAX_ROWS;
+    if (cols > TERM_MAX_COLS) cols = TERM_MAX_COLS;
+    check(LINES == rows && COLS == cols, "one window: mode-sized surface");
+  }
 }
 
 /* ---- 2. Drawing lands on the desktop grid ---- */
@@ -210,7 +216,13 @@ static void test_resize(void) {
 
   check(wgetch(stdscr) == KEY_RESIZE,
         "the reflow arrives as KEY_RESIZE (like a real SIGWINCH)");
-  check(COLS == 62 && LINES == 69, "the new size is adopted (69x62)");
+  {
+    int rows = (SCREEN_HEIGHT - TASKBAR_H - 48) / 10;
+    int cols = (SCREEN_WIDTH / 2 - 12) / 8;
+    if (rows > TERM_MAX_ROWS) rows = TERM_MAX_ROWS;
+    if (cols > TERM_MAX_COLS) cols = TERM_MAX_COLS;
+    check(COLS == cols && LINES == rows, "the new size is adopted");
+  }
   check(COLS == g_win->term_cols && LINES == g_win->term_rows,
         "and it matches the desktop's re-flowed grid");
 
@@ -221,7 +233,11 @@ static void test_resize(void) {
 
   wm_remove_window(id2);
   check(wgetch(stdscr) == KEY_RESIZE, "closing it reflows back (KEY_RESIZE)");
-  check(COLS == 126, "back to 126 columns");
+  {
+    int cols = (SCREEN_WIDTH - 12) / 8;
+    if (cols > TERM_MAX_COLS) cols = TERM_MAX_COLS;
+    check(COLS == cols, "back to the wide grid");
+  }
 }
 
 /* ---- 5. Typing: the nano per-keystroke flow (waddch a fresh window row

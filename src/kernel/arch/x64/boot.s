@@ -15,10 +15,10 @@ multiboot_header:
     .long 0
     .long 0
     
-    /* Graphics fields */
+    /* Graphics fields (match the display_mode.h desktop mode: 1920x1080x32) */
     .long 0                      /* mode_type: 0 = linear graphics */
-    .long 1024                   /* width */
-    .long 768                    /* height */
+    .long 1920                   /* width */
+    .long 1080                   /* height */
     .long 32                     /* depth */
 
 .global _start

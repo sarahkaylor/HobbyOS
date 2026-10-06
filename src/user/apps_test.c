@@ -241,9 +241,10 @@ static void inject_keys(const char *keys) {
   }
 }
 
-/* Taskbar "Apps" button geometry (see desktop.c): x in [6,70), y >= 742. */
+/* Taskbar "Apps" button geometry (see desktop.c): x in [6,70),
+ * y in the taskbar strip (SCREEN_HEIGHT-26 .. SCREEN_HEIGHT). */
 #define APPS_BTN_MX 20
-#define APPS_BTN_MY 750
+#define APPS_BTN_MY (SCREEN_HEIGHT - 18)
 static void inject_mouse(int x, int y) {
   inject_mock_event(EV_ABS, ABS_X, (uint32_t)((x * 0x7FFF) / SCREEN_WIDTH));
   inject_mock_event(EV_ABS, ABS_Y, (uint32_t)((y * 0x7FFF) / SCREEN_HEIGHT));

@@ -26,7 +26,7 @@ import json, os, re, socket, subprocess, time
 
 ROOT = os.path.expanduser("~/Documents/GitHub/HobbyOS")
 os.chdir(ROOT)
-W, H = 1024, 768
+W, H = 1920, 1080
 TASKBAR_Y = H - 26
 SHOT_DIR = "/tmp/hobbyos_files_nav"
 SERIAL = "/tmp/files_nav_serial.log"
