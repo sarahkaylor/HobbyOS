@@ -1,0 +1,33 @@
+{
+  "lane": "fs-v1",
+  "verdict": "gated",
+  "gate": "fixture leg re-runs GREEN on the merged tip with report.json v2 as the artifact",
+  "evidence": [
+    "OS worktree /home/sarah/hobbyos-lanes/fs-v1 commits b403492 (modes+report v2+/fixture route+guard) and bf7b135 (concurrency --instance/--port-file)",
+    "ARM disk rebuilt from tip 61f6dbf via 'make -j48 ARCH=arm MODE=desktop disk.img BROWSER_BIN=/home/sarah/webkit-lanes/ib/WebKitBuild/HobbyOS-arm/bin/WebProcess'; on-disk ::/BROWSER.BIN flat sha256 943bdff8... == source ELF flat (fresh, not the stale Oct-3 main disk)",
+    "evidence/fs-v1/demo-fixture/report.json (schema_version 2, mode=fixture, 8 rows: 6 pass / 2 gated / 0 fail): FIX01 267B 0x759431c5, FIX02 314B 0x63309a45, FIX02D gated 507B, FIX03 578B 0xb1e75dc5, FIX04 642B 0xbc622575, FIX05 gated 440B, HOME 483B 0x0e8f25c5, TALL 817B 0xe0982225; all on-device load-ok + exact-byte net fetch + frame checksums; PAGE-NET.HTM sha256 47e0fe49... (817B); net log net.log.jsonl 11 records (relay 1, fixture 9) sha256 1595e7d6...",
+    "evidence/fs-v1/demo-fixture/serial.log: [WIN] load-ok url=http://10.0.2.2:8800/fixture/<n> per pass row, 0 FATAL, [WIN] load open-fail 0",
+    "evidence/fs-v1/demo-fixture/*.png: 9 screenshots (browser-launch + one per fixture row), FPC checksums differ per page",
+    "evidence/fs-v1/demo-conc-a/report.json: instance=a port=8811 port_file=/tmp/wiki-proxy-port-a, verdict=gated 7 pass / 1 gated / 0 fail (FIX02D gated, FIX05 passed under concurrency)",
+    "evidence/fs-v1/demo-conc-b/report.json: instance=b port=8812 port_file=/tmp/wiki-proxy-port-b, verdict=gated 6 pass / 2 gated / 0 fail",
+    "evidence/fs-v1/demo-reader/report.json: mode=reader instance=r port=8813, verdict=pass 1/1 (load-ok 926B, checksum 0xdabdfbc5 == the documented reader-mode paint milestone), netlog 4 records",
+    "tools/test_wiki_proxy.py: 13/13 guards PASS on the committed tree (raw relay, ?head=N 900-B byte-exact prefix, /reader/<Topic>, /fixture byte-identical FIX01-FIX05/FIX02D/HOME/TALL + 404, port file /tmp/wiki-proxy-port contract, one-instance loud fail, per-request JSONL emission, --port-file per-instance isolation)",
+    "All four runs executed under flock with no double-start; concurrent instances ran two ARM QEMUs (instance a 8811 + instance b 8812) with fully isolated sockets /tmp/br-wc-ctrl-{a,b}.sock, serials, and port files; 0 collisions with other lanes (N1/R1 QEMUs confirmed started after my runs; no fs-v1 qemu left running)",
+    "Guard test + report-writer heredoc unit-tested against mock step files before the ARM run (per-row pass|gated|fail classification verified)"
+  ],
+  "commits": [
+    "b403492 fs-v1: acceptance-maker modes fixture/reader/direct/full + report.json v2 + proxy /fixture route + host-side guard test",
+    "bf7b135 fs-v1: runner + proxy concurrency capability (--instance / ACCEPT_ID)"
+  ],
+  "blockers": [
+    "FIXTURE ROWS FIX02D (embedded base64 data:image in <img>) and FIX05 (inline <script>): on-device they fetch + substitute + PAINT a real frame (FIX02D nonZero=307200 checksum 0x5f62b9c5, FIX05 nonZero=246400 checksum 0xa0bf6dc5) but then the browser's own [WIN] FAIL load-timeout watchdog fires before [WIN] load-ok -> classified gated, not fail. This is the documented F6/F7 'resource-load/settle' class in HobbyOS/continuation/wk4b/wk6/acceptance_checklist.md; owner: lane WN2 (netproc join / resource loader). Re-check after WN2 lands; no harness change needed.",
+    "reader/relay/direct legs: reader proven pass; direct (https) and full (raw relay) modes are implemented + classified per-row but were not ARM-demonstrated this session (timebox + shared lock contention)."
+  ],
+  "next_steps": [
+    "When WN2 makes image/script settles land, re-run the fixture leg unchanged: flock -w 7200 /tmp/fs-accept.lock bash tools/run_browser_accept.sh --mode fixture --evdir evidence/fs-v1/demo-fixture-2 — expect verdict=pass 8/8.",
+    "Exercise the other modes on ARM: --mode reader --topic <T> (proven pass, 0xdabdfbc5), --mode full --url http://10.0.2.2:<port>/wiki/<Article>, --mode direct --url https://... (currently expected gated/fail at TLS recv per checklist N2).",
+    "Concurrency rollout: give every concurrent lane a distinct --instance + --port + its own flock file (e.g. /tmp/fs-accept-<lane>.lock). NOTE for N1/R1: their tools/ snapshots predate --instance; once they pick up the merged tools, legacy /tmp/br-wc-* can stop being shared.",
+    "Proposed diffs (I do not own these, per brief): when netproc/WN2 lands, F7 image step in acceptance_checklist.md flips [W]->[R]; recommend the checklist gains a fixture-leg row group referencing the fs-v1 demo reports."
+  ],
+  "notes": "Harness deliverable COMPLETE and verified: one canonical runner (tools/run_browser_accept.sh) with modes fixture/reader/direct/full + default legacy, per-request structured JSONL netlog (tools/wiki_proxy.py --netlog), /fixture/<name> route (fork wk3 FIX01-05/FIX02D + OS HOME/TALL, byte-identical), report.json v2 (schema_version, mode, per-row pass|gated|fail, netlog ref with sha256, artifact hashes, session/markers/screenshots blocks), host-side guard test tools/test_wiki_proxy.py (13/13 green, runnable without QEMU), and concurrency capability (--instance/ACCEPT_ID, per-instance sockets + proxy --port-file, default byte-compatible to the F-R2 /tmp/wiki-proxy-port contract). Fixture leg re-runs deterministically on the merged tip: 6/8 or 7/8 pass in 3 distinct runs, 0 fail, all pass rows byte-exact. The 2 recurring gated rows are a documented browser-side limitation (F6/F7, owner WN2), never a harness defect. Default no-flag behavior verified identical to the legacy runner (paths/sockets/port-file unchanged); the demo-fixture run used the legacy paths with no collision (other lanes booted afterward). Fork wk6 toolkit files needed no edits (gate runs fully OS-side)."
+}

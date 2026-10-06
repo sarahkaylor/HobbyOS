@@ -1,80 +1,138 @@
 #!/usr/bin/env bash
 # run_browser_accept.sh — E2E address-bar acceptance run for the HobbyOS
-# windowed browser over the host Wikipedia proxy (lane WC).
+# windowed browser over the host Wikipedia proxy (lane WC / FS).
 #
 # Boots the ARM startup disk, opens the browser from the Apps menu (F1 path),
-# drives the address bar (type-url / go) against the proxied Wikipedia URL and
+# drives the address bar (type-url / go) against a MODE-DEPENDENT URL set and
 # collects on-device receipts into <evdir> (serial + screenshots + guest-file
 # byte proofs), plus the guest-shell HTTP GET / DNS receipts for the host-net
-# gates.  Strict JSON report at <evdir>/report.json and on stdout.
+# gates.  Strict JSON report (schema v2, per-row pass|gated|fail) at
+# <evdir>/report.json and on stdout.
+#
+# Modes (--mode):
+#   fixture  serve T0 fixtures (fork wk3 FIX01-05 + OS HOME/TALL) via the
+#            proxy /fixture/<name> route; drive + verify render markers/FPC
+#   reader   drive /reader/<Topic> (real Wikipedia REST extract)
+#   direct   https://<url> via --url (formalized direct leg; classified)
+#   full     raw relay of a full article page (--url or /wiki/<Article>)
+#   (default) legacy behavior: proxied Wikipedia Main_Page address-bar run
+#
+# Concurrency (--instance ID): the runner is host-global single-instance by
+# default (fixed /tmp sockets + proxy port-file /tmp/wiki-proxy-port).  Pass
+# --instance <id> (or ACCEPT_ID=<id>) to scope a run: the ctrl/qmp serial
+# sockets become /tmp/br-<id>-*.sock|log and the proxy is told a per-instance
+# port file --port-file /tmp/wiki-proxy-port-<id>.  YOU must still give the
+# instance a distinct --port.  No flag = exactly the fixed legacy paths, so
+# the F-R2 /tmp/wiki-proxy-port contract is preserved for existing consumers.
+# Concurrent runs each need their own lock file (e.g. flock /tmp/fs-accept-<id>.lock).
 #
 # Usage:
-#   run_browser_accept.sh [--url URL] [--port PORT] [--evdir DIR]
-#                         [--disk DISK] [--no-go] [--shell-get PATH]
-#                         [--keep] [--boot-timeout S]
+#   run_browser_accept.sh [--mode fixture|reader|direct|full] [--url URL]
+#                         [--port PORT] [--evdir DIR] [--disk DISK]
+#                         [--no-go] [--shell-get PATH] [--keep]
+#                         [--boot-timeout S] [--topic TOPIC] [--instance ID]
 #
-#   --url      URL to drive in the address bar (default: the proxied wikipedia
-#              Main_Page at http://10.0.2.2:$PORT/wiki/Main_Page)
+#   --url      URL override (direct/full; default depends on the mode)
 #   --port     host wiki-proxy port (default 8800)
+#   --mode     row-set selection (see above)
 #   --shell-get  also run the guest-shell HTTP GET for PATH (default /robots.txt)
 #   --no-go    boot + launch browser only (no address-bar drive)
 #   --keep     leave qemu up after the run (else poweroff)
+#   --topic    reader-mode topic (default: Habitat)
+#   --instance run-scope id (concurrency; see above; default: fixed legacy paths)
+#
+# Host-global single-instance: fixed /tmp sockets + proxy port 8800.  Always
+# wrap in `flock -w 7200 /tmp/fs-accept.lock ... --mode ...`.
 set -u
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 : "${WIKI_PORT:=8800}"
 URL=""
+MODE=""
+TOPIC="Habitat"
 EV="evidence/e2e"
 DISK="$REPO/disk.img"
 BOOT_TIMEOUT=420
 SHELL_GET=""
 DO_GO=1
 KEEP=0
+INSTANCE="${ACCEPT_ID:-}"
+FIX_DIRS="${WIKI_PROXY_FIXTURES:-}"
+if [ -z "$FIX_DIRS" ]; then
+  FIX_DIRS="/home/sarah/webkit-lanes/fs-v1/HobbyOS/continuation/wk3/fixtures:$REPO/tests/fixtures/browser"
+fi
 
 usage() {
-  sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --mode) MODE="$2"; shift 2 ;;
     --url) URL="$2"; shift 2 ;;
+    --topic) TOPIC="$2"; shift 2 ;;
     --port) WIKI_PORT="$2"; shift 2 ;;
     --evdir) EV="$2"; shift 2 ;;
     --disk) DISK="$2"; shift 2 ;;
     --boot-timeout) BOOT_TIMEOUT="$2"; shift 2 ;;
     --shell-get) SHELL_GET="${2:-/robots.txt}"; shift 2 ;;
+    --instance) INSTANCE="$2"; shift 2 ;;
     --no-go) DO_GO=0; shift ;;
     --keep) KEEP=1; shift ;;
     *) usage ;;
   esac
 done
 
-[ -f "$DISK" ] || { echo "disk not found: $DISK (build with: make ARCH=arm MODE=desktop disk.img)"; exit 1; }
+case "$MODE" in
+  ""|"default"|"fixture"|"reader"|"direct"|"full") ;;
+  *) echo "unknown --mode: $MODE"; usage ;;
+esac
+
+[ -f "$DISK" ] || { echo "disk not found: $DISK (build with: make ARCH=arm MODE=desktop disk.img BROWSER_BIN=... )"; exit 1; }
 mkdir -p "$EV"
 
 PROXY_LOG="$EV/wiki-proxy.log"
-CTRL="/tmp/br-wc-ctrl.sock"
-QMP="/tmp/br-wc-qmp.sock"
-SER="/tmp/br-wc-serial.log"
+NETLOG="$EV/net.log.jsonl"
+# instance-scoped /tmp paths; default (no --instance) = fixed legacy paths
+SUF=""
+PORT_FILE="/tmp/wiki-proxy-port"
+if [ -n "$INSTANCE" ]; then
+  SUF="-$INSTANCE"
+  PORT_FILE="/tmp/wiki-proxy-port$SUF"
+  if [ "$WIKI_PORT" = "8800" ]; then
+    echo "ERROR: --instance $INSTANCE needs a distinct --port (default 8800 is"
+    echo "       the legacy single-instance port).  e.g. --port 8811 --instance a"
+    exit 1
+  fi
+fi
+CTRL="/tmp/br-wc-ctrl$SUF.sock"
+QMP="/tmp/br-wc-qmp$SUF.sock"
+SER="/tmp/br-wc-serial$SUF.log"
 RUNNER_LOG="$EV/runner.log"
 : > "$RUNNER_LOG"
 log() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$RUNNER_LOG"; }
 
 # ------------------------------------------------------------------ proxy --
-rm -f /tmp/wiki-proxy-port
-log "starting wiki proxy on :$WIKI_PORT (upstream en.wikipedia.org)"
+rm -f "$PORT_FILE"
+log "starting wiki proxy on :$WIKI_PORT (upstream en.wikipedia.org; netlog=$NETLOG; port-file=$PORT_FILE)"
 python3 "$REPO/tools/wiki_proxy.py" --port "$WIKI_PORT" --scratch /tmp --log "$PROXY_LOG" \
+  --netlog "$NETLOG" --fixtures "$FIX_DIRS" --port-file "$PORT_FILE" \
   >> "$EV/wiki-proxy-console.log" 2>&1 &
 PROXY_PID=$!
-for _ in $(seq 1 20); do [ -f /tmp/wiki-proxy-port ] && break; sleep 0.5; done
-PORT="$(cat /tmp/wiki-proxy-port 2>/dev/null || echo "$WIKI_PORT")"
-log "proxy port file: /tmp/wiki-proxy-port=$PORT (listener=$WIKI_PORT)"
+for _ in $(seq 1 20); do [ -f "$PORT_FILE" ] && break; sleep 0.5; done
+PORT="$(cat "$PORT_FILE" 2>/dev/null || echo "$WIKI_PORT")"
+log "proxy port file: $PORT_FILE=$PORT (listener=$WIKI_PORT)"
 # host self-check: the proxy really serves real wikipedia bytes
 curl -sS --max-time 30 -o "$EV/host-robots.txt" -w "proxy self-check HTTP %{http_code} %{size_download} B\n" \
   "http://127.0.0.1:$PORT/robots.txt" | tee -a "$RUNNER_LOG"
 MARKERS_HOST="$(grep -ci 'user-agent' "$EV/host-robots.txt" 2>/dev/null || echo 0)"
 log "host-side robots.txt marker lines: $MARKERS_HOST"
+# fixture route self-check (byte-identical T0 fixture via the new route)
+curl -sS --max-time 30 -o "$EV/host-fixture-FIX01.txt" -w "fixture self-check HTTP %{http_code} %{size_download} B\n" \
+  "http://127.0.0.1:$PORT/fixture/FIX01" | tee -a "$RUNNER_LOG"
+FIX01_OK="$(grep -c 'POK' "$EV/host-fixture-FIX01.txt" 2>/dev/null || echo 0)"
+log "host-side /fixture/FIX01 marker lines: $FIX01_OK"
 
 # ------------------------------------------------------------- disk stage --
 STAGE="$EV/disk.img"
@@ -109,7 +167,7 @@ done
 if [ "$READY" != 1 ]; then
   log "FAIL: browser never reached READY"
   cp -f "$SER" "$EV/serial.log" 2>/dev/null || true
-  echo '{"session":{"ok":false},"verdict":"fail"}'
+  echo '{"schema_version":2,"session":{"ok":false},"verdict":"fail"}'
   exit 1
 fi
 log "driver READY (desktop + browser up)"
@@ -136,7 +194,7 @@ print(buf.decode(errors="replace").strip())
 EOF
 }
 
-STEPS='{}'
+STEP='{}'
 step() {  # step <name> <json-msg> -> writes name.json and appends to report
   local name="$1"; shift
   local out
@@ -145,35 +203,60 @@ step() {  # step <name> <json-msg> -> writes name.json and appends to report
   echo "  step $name -> $out" | tee -a "$RUNNER_LOG"
 }
 
-# ------------------------------------------------------ address-bar drive --
+# ------------------------------------------------------- row set (per mode) --
+# Rows are (id,kind,url).  Backward-compatible default = the legacy single
+# proxied-Main_Page row.
+ROWS=""
+GHOST="http://10.0.2.2:$PORT"
+case "$MODE" in
+  fixture)
+    for f in FIX01 FIX02 FIX02D FIX03 FIX04 FIX05 HOME TALL; do
+      ROWS="$ROWS fixture-$f fixture $GHOST/fixture/$f"
+    done
+    ;;
+  reader)
+    ROWS="$ROWS reader-$TOPIC reader $GHOST/reader/$TOPIC"
+    ;;
+  direct)
+    [ -n "$URL" ] || { echo "--mode direct needs --url https://..."; exit 1; }
+    ROWS="$ROWS direct direct $URL"
+    ;;
+  full)
+    [ -n "$URL" ] || URL="$GHOST/wiki/Web_browser"
+    ROWS="$ROWS full full $URL"
+    ;;
+  *)
+    if [ -n "$URL" ]; then
+      ROWS="$ROWS url default $URL"
+    else
+      ROWS="$ROWS wiki-default default $GHOST/wiki/Main_Page"
+    fi
+    ;;
+esac
+
 if [ "$DO_GO" = 1 ]; then
-  if [ -z "$URL" ]; then
-    URL="http://10.0.2.2:$PORT/wiki/Main_Page"
-  fi
-  log "address-bar run -> $URL"
-  step type-url "{\"action\":\"type-url\",\"url\":\"$URL\"}"
-  step go "{\"action\":\"go\",\"url\":\"$URL\",\"timeout\":300}"
+  set -- $ROWS
+  while [ $# -gt 0 ]; do
+    RID="$1"; KIND="$2"; RURL="$3"; shift 3
+    log "address-bar row $RID ($KIND) -> $RURL"
+    step "$RID-type-url" "{\"action\":\"type-url\",\"url\":\"$RURL\"}"
+    step "$RID-go" "{\"action\":\"go\",\"url\":\"$RURL\",\"timeout\":300}"
+    sleep 1
+  done
 fi
 
 # ----------------------------------------------- guest shell net receipts --
 if [ -n "$SHELL_GET" ]; then
-  SHELL_URL="http://10.0.2.2:$PORT$SHELL_GET"
+  SHELL_URL="$GHOST$SHELL_GET"
   # Deterministic receipt: the request file is staged ONTO the guest disk by
   # the runner (byte-exact, CRLF, host-written) — the guest only types one
   # simple redirect line (`nc < REQ > ROB`), the shape proven by the WK-6
   # mem-probe receipts.  No multi-line `echo` construction (raced the shell).
-  # The target uses ?head=N so the relayed body (a byte-exact prefix of the
-  # REAL wikipedia robots.txt, markers at ~600 B) fits the guest's fixed
-  # 2048-B TCP window (net.c window_size=2048 — see the proxy doc).
   SHELL_GET_HEAD="${SHELL_GET_HEAD:-?head=900}"
   printf 'GET %s%s HTTP/1.0\r\nHost: 10.0.2.2:%s\r\n\r\n' "$SHELL_GET" "$SHELL_GET_HEAD" "$PORT" > "$EV/REQ.WC"
   mcopy -i "$STAGE" "$EV/REQ.WC" ::/REQ.WC
   log "staged /REQ.WC on the guest disk ($(wc -c < "$EV/REQ.WC") B, GET $SHELL_GET$SHELL_GET_HEAD)"
   step console-warmup "{\"action\":\"console\",\"cmd\":\"echo WARMUP-WC > /TMP.WC\"}"
-  # The guest TCP connect/send leg is stochastic (WK-6 racy-RX + fixed 2048-B
-  # window classes; run3 landed one fully-served guest GET, runs5/6 the
-  # request echo only).  Retry a few bounded attempts so a landed connection
-  # is caught; each writes its own file (nc never exits on EOF).
   for i in 1 2 3; do
     step "console-nc$i" "{\"action\":\"console\",\"cmd\":\"nc 10.0.2.2 $PORT < /REQ.WC > /ROB.WC.$i &\",\"launch\":false,\"type_pause\":0.18}"
     log "guest GET attempt $i issued; waiting 8s for response in /ROB.WC.$i"
@@ -182,11 +265,7 @@ if [ -n "$SHELL_GET" ]; then
   step console-last "{\"action\":\"console\",\"cmd\":\"cat /ROB.WC.3\",\"launch\":false,\"settle\":2.0}"
   sleep 2
   step shell-robots-shot "{\"action\":\"shot\",\"name\":\"console-shell\"}"
-  # Independent on-device live HTTP GET: SOCK2TST does a real non-blocking
-  # connect + GET round-trip and prints the outcome to the serial.
   step sock2tst "{\"action\":\"console\",\"cmd\":\"sock2tst\",\"settle\":10.0}"
-  # DNS on-serial receipt: a FRESH console launch worked (run3: [DNSTST]
-  # printed to the serial); typing into the reused console did not.
   step dns-start "{\"action\":\"console\",\"cmd\":\"dnstst\",\"settle\":5.0}"
   sleep 2
 fi
@@ -211,7 +290,6 @@ if mdir -i "$STAGE" ::/PAGE-NET.HTM >/dev/null 2>&1; then
 fi
 RW=""
 if [ -n "$SHELL_GET" ]; then
-  # per-attempt nc output files on the guest disk; merge host-side
   ( mcopy -i "$STAGE" ::/ROB.WC.1 "$EV/ROB.WC.1" 2>/dev/null; \
     mcopy -i "$STAGE" ::/ROB.WC.2 "$EV/ROB.WC.2" 2>/dev/null; \
     mcopy -i "$STAGE" ::/ROB.WC.3 "$EV/ROB.WC.3" 2>/dev/null )
@@ -225,12 +303,17 @@ if [ -n "$SHELL_GET" ]; then
   fi
 fi
 
-# ------------------------------------------------------------ report -------
-python3 - "$EV" "$PORT" "$URL" "$SHELL_GET" "$MARKERS_HOST" "$PG" "$RW" <<'EOF'
+# ------------------------------------------------------------ report v2 -----
+python3 - "$EV" "$PORT" "$URL" "$MODE" "$SHELL_GET" "$MARKERS_HOST" "$PG" "$RW" "$ROWS" "$TOPIC" "$FIX01_OK" "$PORT_FILE" "$INSTANCE" <<'EOF'
 import hashlib, json, os, re, sys
-ev, port, url, shell_get, mhost, pg, rw = sys.argv[1:]
+ev, port, url, mode, shell_get, mhost, pg, rw, rows, topic, fix01, port_file, instance = sys.argv[1:]
 ev = ev.strip('"'); port = port.strip('"'); url = url.strip('"')
-shell_get = shell_get.strip('"') if shell_get.strip('"') else None
+mode = mode.strip('"'); shell_get = shell_get.strip('"') if shell_get.strip('"') else None
+mhost = int(mhost.strip('"'))
+fix01 = int(fix01.strip('"'))
+port_file = port_file.strip('"')
+instance = instance.strip('"') or None
+rows = rows.split()
 
 def sha(p):
     try:
@@ -267,41 +350,109 @@ markers = {}
 for m in ["[WIN] BOOT", "[WIN] created", "[WIN] geom", "[WIN] url-prompt",
           "[WIN] url-entry", "[WIN] net fetch", "[WIN] load start url=",
           "[WIN] load-ok", "[WIN] load open-fail", "[WIN] frame",
-          "[WIN] net persist", "[LAUNCH] CONSOLE.BIN", "[DNSTST]",
+          "[WIN] net persist", "[WIN] render", "[WIN] checksum",
+          "[LAUNCH] CONSOLE.BIN", "[DNSTST]",
           "DHCP DNS server", "Network configured", "FATAL", "IDLESTUCK",
           "SOCK2TST"]:
     markers[m] = serial.count(m)
 
-go = load("go")
-type_url = load("type-url")
-verdict = "fail"
+# ---- per-row status (STRICT: pass|gated|fail) ----
+#   pass:  the browser's own load-ok marker for exactly this URL + a frame
+#   gated: network layers reached (net fetch / url-entry) but no render, or
+#          an explicit open-fail recorded with evidence (classified, not hung)
+#   fail:  nothing observed for the row (no entry echo, no fetch) or FATAL
+fail_re = re.compile(r"FATAL")
+row_results = []
+i = 0
+while i < len(rows):
+    rid, kind, rurl = rows[i], rows[i+1], rows[i+2]
+    i += 3
+    g = load(rid + "-go")
+    t = load(rid + "-type-url")
+    if g.get("load_ok"):
+        status = "pass"
+    elif g.get("open_fail") or g.get("entry_echo") or g.get("net"):
+        status = "gated"
+    else:
+        status = "fail"
+    # system-fatal overrides every row
+    if fail_re.search(serial):
+        status = "fail"
+    row_results.append({
+        "id": rid, "kind": kind, "url": rurl, "status": status,
+        "load_ok": bool(g.get("load_ok")), "load_ms": g.get("load_ms"),
+        "open_fail": g.get("open_fail"), "frames": g.get("frames", 0),
+        "checksum": g.get("checksum"), "net": g.get("net"),
+        "persist": g.get("persist"), "screenshot": g.get("screenshot"),
+        "entry_echo": g.get("entry_echo"), "type_url_ok": bool(t.get("ok")),
+        "evidence": {"go_step": bool(g), "type_url_step": bool(t)},
+    })
+
+n_pass = sum(1 for r in row_results if r["status"] == "pass")
+n_gated = sum(1 for r in row_results if r["status"] == "gated")
+n_fail = sum(1 for r in row_results if r["status"] == "fail")
+
+verdict = "pass"
 notes = []
-if go.get("load_ok"):
-    verdict = "pass"
-elif go.get("open_fail"):
-    verdict = "gated"   # proxied fetch worked at the network layer? open-fail
-    notes.append("browser reported open-fail: " + str(go.get("open_fail"))[:160])
-elif type_url and not url:
-    verdict = "pass"    # --no-go: boot+launch+hooks evidence only
-    notes.append("no address-bar drive requested")
-else:
-    notes.append("no load-ok and no open-fail observed")
+if n_fail > 0:
+    verdict = "fail"
+    notes.append("fail rows: %s" % ", ".join(r["id"] for r in row_results if r["status"] == "fail"))
+elif n_pass == 0:
+    verdict = "gated"
+    notes.append("no row reached load-ok (%d gated)" % n_gated)
+elif n_gated > 0:
+    verdict = "gated"   # all-rows-green is the gate; any gated row -> gated leg
+    notes.append("rows gated: %s" % ", ".join(r["id"] for r in row_results if r["status"] == "gated"))
+if fatal := (re.search(r"FATAL", serial) or ""):
+    notes.append("serial carries FATAL: " + fatal[:120])
 
 screens = sorted(n for n in os.listdir(ev) if n.endswith(".png"))
+netlog_file = os.path.join(ev, "net.log.jsonl")
+netlog = {"rel_path": "net.log.jsonl", "lines": 0, "sha256": None}
+if os.path.isfile(netlog_file):
+    try:
+        with open(netlog_file) as f:
+            netlog["lines"] = sum(1 for _ in f)
+    except OSError:
+        pass
+    netlog["sha256"] = sha(netlog_file)
+    # quick route census of the netlog (per-request structured capture)
+    try:
+        routes = {}
+        with open(netlog_file) as f:
+            for ln in f:
+                if not ln.strip():
+                    continue
+                try:
+                    rec = json.loads(ln)
+                except Exception:
+                    continue
+                if rec.get("event"):
+                    continue
+                routes[rec.get("route", "?")] = routes.get(rec.get("route", "?"), 0) + 1
+        netlog["routes"] = routes
+    except Exception:
+        pass
+
 artifacts = {}
-for n in ("serial.log", "driver.log", "wiki-proxy.log", "host-robots.txt",
-          "PAGE-NET.HTM", "ROB.WC", "WNPAGE.HTM"):
+for n in ("serial.log", "driver.log", "wiki-proxy.log", "net.log.jsonl",
+          "host-robots.txt", "host-fixture-FIX01.txt", "PAGE-NET.HTM",
+          "ROB.WC", "WNPAGE.HTM", "wiki-proxy-console.log"):
     p = os.path.join(ev, n)
     if os.path.isfile(p):
         artifacts[n] = {"size": os.path.getsize(p), "sha256": sha(p)}
 
 report = {
-    "toolkit": "wc-e2e-browser-accept", "schema": 1,
-    "proxy": {"port": int(port), "port_file": "/tmp/wiki-proxy-port",
+    "toolkit": "fs-browser-accept", "schema_version": 2,
+    "report_schema": "hobbyos-browser-accept-v2",
+    "mode": mode, "topic": topic if mode == "reader" else None,
+    "url": url, "instance": instance,
+    "rows": row_results,
+    "proxy": {"port": int(port), "port_file": port_file,
               "upstream": "https://en.wikipedia.org",
-              "host_self_check_robots_markers": int(mhost)},
-    "url": url,
-    "steps": {"type_url": type_url, "go": go},
+              "host_self_check_robots_markers": mhost,
+              "fixture_self_check_FIX01_markers": fix01},
+    "netlog": netlog,
     "guest_http": guest_http,
     "dns": {
         "guest_dhcp_dns": "10.0.2.3",
@@ -312,6 +463,7 @@ report = {
     "session": {
         "ok": verdict == "pass",
         "verdict": verdict,
+        "row_counts": {"n_pass": n_pass, "n_gated": n_gated, "n_fail": n_fail},
         "notes": notes,
         "markers": markers,
         "screenshots": screens,
@@ -319,10 +471,15 @@ report = {
         "sha256_page_net": pg,
         "sha256_rob_wc": rw,
     },
+    "summary": {"verdict": verdict, "n_pass": n_pass, "n_gated": n_gated,
+                "n_fail": n_fail, "rows": len(row_results)},
 }
 with open(os.path.join(ev, "report.json"), "w") as f:
     json.dump(report, f, indent=2)
-print(json.dumps({"verdict": verdict, "notes": notes, "markers": markers,
-                  "screenshots": screens, "page_sha": pg, "rob_sha": rw}))
+print(json.dumps({"verdict": verdict, "n_pass": n_pass, "n_gated": n_gated,
+                  "n_fail": n_fail, "notes": notes, "markers": markers,
+                  "screenshots": screens, "page_sha": pg, "rob_sha": rw,
+                  "netlog_lines": netlog["lines"]}))
 EOF
-echo "== done: evidence in $EV (report.json)"
+echo "== done: evidence in $EV (report.json v2)"
+echo "== verdict summary: $(python3 -c "import json;r=json.load(open('$EV/report.json'));s=r['summary'];print('verdict=%s n_pass=%d n_gated=%d n_fail=%d rows=%d'%(s['verdict'],s['n_pass'],s['n_gated'],s['n_fail'],s['rows']))")"
