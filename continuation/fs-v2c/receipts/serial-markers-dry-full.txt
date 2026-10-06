@@ -1,0 +1,12 @@
+[WIN] viewport render=1916x982 (window content 1916x1018, chrome 36, scale 100%)
+[WIN] load-ok url=HOME.HTM ms=432
+[IMG1d] imgs=0,0 rt=1
+[WIN] frame view=1916x982 nonZero=7525894 checksum=0xfd3915b9
+[WIN] frame-times render=365ms blit=31ms total=420ms
+[IMG1p] view=1916x982 colors=190 dom=0x102030 foreign=47824
+[IMG1d] imgs=0,0 rt=1
+[WIN] frame view=1916x982 nonZero=7525894 checksum=0xfd3915b9
+[WIN] frame-times render=115ms blit=24ms total=156ms
+[IMG1p] view=1916x982 colors=190 dom=0x102030 foreign=47824
+[IMG1d] imgs=0,0 rt=1
+[WIN] net fetch url=http://10.0.2.2:8854/wiki/Web_browser ok=1 status=200 bytes=415161 effective=http://10.0.2.2:8854/wiki/Web_browser err=
