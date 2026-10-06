@@ -1,0 +1,33 @@
+{
+  "lane": "fs-v2",
+  "verdict": "gated",
+  "gate": "V2 = T2 table complete + dry run recorded (final-stretch §4 Track V lane V2); fixture/reader legs re-run green on the current tip; direct/full classified gated OQ-1 pending R1 merge (054b307db1 + rebuild)",
+  "evidence": [
+    "continuation/fs-v2/T2-CHECKLIST.md — frozen T2 table: capability rows T2-01..T2-12, acceptance rows T2-13..T2-18, NEW guest-clock row T2-19 (G5b), extended/x64 rows T2-20..T2-25 mapped; every row evidence-mapped or gated-with-owner (evidence-map table §4 == the V2 gate deliverable)",
+    "browser.md R9/R13 clock mitigations folded into T2-19: (a) guest-epoch-vs-host receipt (NEW row), (b) wrong-CA negative -> T2-02 (WK-4c rc=77 ENFORCED), (c) CA bundle pinned /CERTS/CA.PEM, (d) calendar-math parity F2.3 merged 1fce4f9 (host 314 checks) — described in T2-CHECKLIST §3",
+    "tests/fixtures/browser/README.md — canonical fixture staging map (fork HobbyOS/continuation/wk3/fixtures FIX01-05+FIX02D+IMG01/PROBE01/font vs OS tests/fixtures/browser HOME/TALL; disjoint-by-name; proxy /fixture route serves byte-identical; sha256 + FPC anchors incl. known-good 0x759431c5 FIX01 and 0x0e8f25c5 HOME)",
+    "tools/test_wiki_proxy.py (V1 guard) 13/13 PASS re-run this session — /fixture byte-identical for FIX01-05/FIX02D/HOME/TALL, reader route, port-file contract, netlog",
+    "continuation/fs-v2/evidence/dry-fixture/report.json (schema_version 2, mode=fixture, instance=v2, port=8855, port_file=/tmp/wiki-proxy-port-v2) — verdict gated, 6 pass / 2 gated / 0 fail over 8 rows; FIX01 FPC 0x759431c5 (anchor), HOME FPC 0x0e8f25c5 (anchor), TALL 0xe0982225; FIX02D+FIX05 gated (paint, load-timeout class F6/F7 -> owner WN2); 0 FATAL, 0 open-fail; netlog 17 lines (relay 2 / fixture 13); DHCP DNS 10.0.2.3 serial evidence",
+    "continuation/fs-v2/evidence/dry-reader/report.json (schema_version 2, mode=reader, topic=Hobbyist_operating_system, instance=v2, port=8855) — verdict PASS, 1 pass / 0 gated / 0 fail; load-ok 10483 ms, FPC 0xdabdfbc5 == documented reader-mode paint milestone; 0 FATAL; netlog 4 lines (relay 1 / fixture 1 / reader 1)",
+    "continuation/fs-v2/evidence/**/serial.log + net.log.jsonl + screenshots + PAGE-NET.HTM (fixture PAGE-NET.HTM sha 47e0fe49... == TALL fixture; reader PAGE-NET.HTM 983 B sha 7d2caa19...) + runner.log per run; receipts copied to continuation/fs-v2/receipts/ (tracked copies of both report.json v2)",
+    "Runs used V1's canonical multi-mode runner (fs-v1 lane, unmerged to this tree) with ACCEPT_ID=v2 / --instance v2 / --port 8855 / own lock /tmp/fs-accept-v2.lock; default 8800 + F-R2 /tmp/wiki-proxy-port untouched; disk = fs-v1/disk.img built from merged tip with PRE-R1-fix browser (:://BROWSER.BIN flat sha 943bdff8fa9fb9e9) so full-skin rows classify gated-OQ-1 not false-pass; teardown left no QEMU/proxy; stale v2 socket+port-file removed after runs",
+    "Direct/full modes classified gated 'OQ-1 fix pending merge (R1 054b307db1 + rebuild)' — NOT run in this dry per the brief (R1's decisive re-test holds the ARM slot; the pre-merge binary cannot demonstrate full-skin render by construction). R1 g0 fetch receipts cross-referenced: webkit-lanes/ib/.../fs-r1/evidence/g0-direct-fixed*/ (direct https 120003 B sha bb765a43...9e511 GREEN)",
+    "T2-19 guest-clock row: no on-device guest-epoch receipt committed and no runner mode drives a wall-clock print (machinery exists: PL031 RTC arm rtc.c, libc time.c, kernel time_test_suite [rtc] epoch= line) -> gated-with-owner V2 (clock-probe runner step, next wave); N-lane fix-owner only if receipt fails. Full rationale in T2-CHECKLIST §3/§4a/§5."
+  ],
+  "commits": [
+    "967662b fs-v2: freeze T2 checklist (+G5b clock row), reconcile fixture staging (canonical README), propose browser.md §11 entry",
+    "NEXT fs-v2: T2 dry-run receipts (fixture 6p/2g/0f + reader pass) + run-dry.sh + T2-CHECKLIST §4a/§5 filled with real results"
+  ],
+  "blockers": [
+    "T2 full-skin rows (T2-08, T2-15, T2-16 render side, part of T2-07): blocked on R1's subresource fix (054b307db1) merge + rebuild — OQ-1. Not chased in this dry per the wave rule.",
+    "T2-19 (guest clock): no on-device receipt possible with the current runner modes; needs a small clock-probe step (owner V2) — receipt-probe gap, not a fix gap.",
+    "T2-02/03/17 definitive merged-tree re-runs: pending R1 merge + V3/V4 batteries on the merged tree."
+  ],
+  "next_steps": [
+    "After R1 merges: re-run --mode full + --mode direct with the fixed binary (expect T2-15/16 to flip pass or gated-with-new-RCA); also captures T2-19 via a new clock-probe step in the runner (V2/V1 coordinate).",
+    "FIX02D/FIX05 gate: reassess when WN2's resource-settle lands (re-run fixture leg unchanged; expect 8/8).",
+    "Hold T2-CHECKLIST.md permanent home = tests/fixtures/browser/T2-CHECKLIST.md (Integrator applies; see §6 of the checklist).",
+    "Integrator: apply proposed browser.md §11 entry (continuation/fs-v2/browser-md-s11-proposal.md)."
+  ],
+  "notes": "T2 table COMPLETE + dry run RECORDED (V2 gate). Host-side lane: no WebKit builds; QEMU only via the acceptance runner on my own instance; local commits only (967662b + receipts commit); no fetch/push/gc; no unscoped pkill (runner teardown only); paced: fixture then reader, one QEMU at a time, concurrent with R1 (g0-direct-fixed5) and X4's intel KVM — all isolated. Fixture anchors reproduced byte-for-byte from V1's committed run (0x759431c5/0x0e8f25c5), proving deterministic renders on the current tip. Ambient TCG slowness recorded honestly (FIX03 332 s, HOME 666 s, TALL 679 s load_ms). Run receipts stored under continuation/fs-v2/evidence/ (regenerable, gitignored) with tracked copies in continuation/fs-v2/receipts/."
+}

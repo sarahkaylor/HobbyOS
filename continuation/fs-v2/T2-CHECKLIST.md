@@ -51,7 +51,7 @@ ARM T2 dry).  G1..G12 from §3 are cross-referenced per row.
 
 | Row | What's checked | Required evidence | Pass criterion | Status |
 |---|---|---|---|---|
-| **T2-19** guest wall clock ≈ host (cert validity window depends on it) | on-device RTC/date vs host `date -u`; wrong-CA still rejected when clock sane | guest `clock`/`sysinfo(6)` output (serial) + host wall clock side-by-side in the same receipt; CA-negative already covered in T2-02 | `|guest_epoch − host_epoch| ≤ 5 min` | **GATED (dry):** no on-device receipt committed yet — this is the V2 dry-run row. QEMU `virt` PL031 RTC (`src/kernel/arch/arm/rtc.c`) starts from host time (verified code path, `time.c` + `clock.c`), so the check is a receipt-collection task, not a fix. Owner: V2 captures in dry run; N-lane owns any fix. Related browser.md R9 R13 mitigations folded in: `clock_gettime`/`gettimeofday` calendar parity (F2.3, merged `1fce4f9`, host 314 checks), CA bundle pinned `/CERTS/CA.PEM`, wrong-CA negative (T2-02). |
+| **T2-19** guest wall clock ≈ host (cert validity window depends on it) | on-device RTC/date vs host `date -u`; wrong-CA still rejected when clock sane | guest `clock`/`sysinfo(6)` output (serial) + host wall clock side-by-side in the same receipt; CA-negative already covered in T2-02 | `|guest_epoch − host_epoch| ≤ 5 min` | **GATED (dry):** no on-device guest-epoch receipt committed yet and none of the runner's current modes (fixture/reader/direct/full) drives a wall-clock print — the receipt needs a small clock-probe step in a runner mode (console `sysinfo(6)`/kernel `time_test` `[rtc] epoch=` line — the machinery exists: PL031 RTC at 0x09010000 `src/kernel/arch/arm/rtc.c`, `libc/src/time.c`, kernel `time_test_suite` prints `[rtc] epoch=… -> YYYY-MM-DD HH:MM:SS`).  Owner: V2 (probe step, next wave) with N-lane as fix-owner only if the receipt fails (±5 min).  Related browser.md R9 R13 mitigations folded in: `clock_gettime`/`gettimeofday` calendar parity (F2.3, merged `1fce4f9`, host 314 checks), CA bundle pinned `/CERTS/CA.PEM`, wrong-CA negative (T2-02). |
 
 > R13-device clock tests folded in (from browser.md R9 row + F2.3 + WK-4c):
 > (a) guest epoch vs host epoch receipt — **T2-19**; (b) wrong-CA negative
@@ -83,16 +83,35 @@ ARM T2 dry).  G1..G12 from §3 are cross-referenced per row.
 | T2-16 | R1 `g0-direct-fixed` fetch receipts | GATED: OQ-1 render side |
 | T2-17 | WK-4c + N1 DNS/dnstst receipts | merged-tree shell-GET/dns leg: V4/soak owner |
 | T2-18 | — | GATED: V4 (post R1-R4) |
-| T2-19 | **this V2 dry run** (guest clock vs host) — see §4a | captured in dry run below; N-lane = fix owner if wrong |
+| T2-19 | code path verified (PL031 `src/kernel/arch/arm/rtc.c`, `time.c`, kernel `time_test_suite`) but **no on-device receipt in this dry** — see §3/§4a | GATED: V2 (needs a clock-probe runner step); N-lane = fix owner only if receipt fails |
 
 ### 4a. V2 dry-run receipts (this session, instance v2)
 
 | Run | Mode | Instance | Port | Evdir | Result |
 |---|---|---|---|---|---|
-| DRY-1 | fixture | v2 | 8855 | `continuation/fs-v2/evidence/dry-fixture` | see per-row below (report.json v2) |
-| DRY-2 | reader | v2 | 8855 | `continuation/fs-v2/evidence/dry-reader` | see per-row below (report.json v2) |
+| DRY-1 | fixture | v2 | 8855 | `continuation/fs-v2/evidence/dry-fixture` | **6 pass / 2 gated / 0 fail** (report.json v2, schema 2) |
+| DRY-2 | reader | v2 | 8855 | `continuation/fs-v2/evidence/dry-reader` | **1 pass / 0 gated / 0 fail — verdict pass** (report.json v2) |
 
-*(filled after the runs; see also V1 `demo-*` receipts above)*
+DRY-1 per-row (report `continuation/fs-v2/evidence/dry-fixture/report.json`):
+FIX01 **pass** (load_ms 7016, FPC **0x759431c5** ✓ anchor) · FIX02 pass (14474,
+0x63309a45) · FIX02D gated (frames 1, FPC 0x5f62b9c5 — paints, no load-ok,
+F6/F7→WN2) · FIX03 pass (332236, 0xb1e75dc5) · FIX04 pass (342890, 0xbc622575)
+· FIX05 gated (FPC 0xa0bf6dc5 — paints, no load-ok, F6/F7→WN2) · HOME **pass**
+(666703, FPC **0x0e8f25c5** ✓ anchor) · TALL pass (679711, 0xe0982225).  0
+FATAL, 0 open-fail, netlog 17 lines (routes relay 2 / fixture 13), DNS serial
+evidence true (DHCP 10.0.2.3).  PAGE-NET.HTM sha 47e0fe49… == TALL fixture.
+DRY-2 per-row: reader-Hobbyist_operating_system **pass** (load_ms 10483, FPC
+**0xdabdfbc5** == documented reader-mode paint milestone), netlog 4 lines
+(relay 1 / fixture 1 / reader 1), 0 FATAL, PAGE-NET.HTM 983 B sha 7d2caa19….
+
+Instance hygiene: own sockets `/tmp/br-wc-ctrl-v2.sock`(+qmp, serial),
+own port-file `/tmp/wiki-proxy-port-v2`, port 8855 (default 8800 untouched);
+teardown removed QEMU + proxy cleanly; stale v2 socket/port-file removed by
+lane after the runs (H4).  Direct/full classified **gated — OQ-1 fix pending
+merge (R1 `054b307db1` + rebuild)**, not run this dry (per brief; R1's
+decisive re-test holds the ARM slot concurrently).  Concurrent with R1's
+`g0-direct-fixed5` and X4's intel KVM run — all isolated instances; my two
+runs were sequential (one QEMU at a time per lane).
 
 ## 5. Gap list (rows not yet demonstrable + why + owner)
 
@@ -107,8 +126,14 @@ ARM T2 dry).  G1..G12 from §3 are cross-referenced per row.
    action.
 3. **T2-18 soak + memory numbers** — V4 lane, dependent on R1-R4; the runner
    and report schema are ready (V1).
-4. **T2-19 guest-clock receipt** — this V2 session's dry run collects it;
-   fix-owner would be N-lane only if the receipt fails (±5 min).
+4. **T2-19 guest-clock receipt** — the V2 dry run could NOT collect an
+   on-device guest-epoch receipt: the runner's modes never drive a wall-clock
+   print (no CLI `date`; CLOCK.BIN is GUI; `[rtc] epoch=` lives in the kernel
+   unit suite).  The QEMU virt PL031 RTC starts from host time (code path
+   verified), so this is a **receipt-probe gap, not a fix gap**: add a small
+   console/probe step to a runner mode (or capture the unit-tier
+   `time_test_suite` `[rtc] epoch=` line) — owner V2, next wave; N-lane is
+   fix-owner only if the receipt then comes back > ±5 min.
 5. **T2-02/03/17 merged-tree re-runs** — the definitive re-runs happen on the
    merged tree with the R1 fix present (so the direct leg, not just relay,
    is the contract); folded into V3/V4 batteries.  Do not re-run the full
