@@ -36,7 +36,18 @@ ARM T2 dry).  G1..G12 from §3 are cross-referenced per row.
 | **T2-11** SVG render (SHOULD; site logo) / CSS grid (SHOULD) | logo + grid if present | screenshot + serial | renders without error | stretch — **GATED**: owner R2/R3, post-T2-09/10 |
 | **T2-12** Fidelity ladder L1 (window-native render, legible text on reader page) | `view` == window content size; glyph census | serial viewport/paint lines + glyph census + screenshot (§6.3 v1.1) | native res, legible text | **GATED**: R5 (window-native viewport) + R2 (fonts) not merged |
 
-## 2. Acceptance-run rows (driven by `run_browser_accept.sh`, V1)
+## 2a. Extended / x64 rows (G7..G12 — mapped, out-of-scope for the ARM T2 dry)
+
+| Row | What's checked | Evidence / owner | Status |
+|---|---|---|---|
+| **T2-20** x64 PS/2 button delivery (G7) | click-launch + click-nav on intel | X1 — `fs-x1` commits (`4b611c1` 2026, E0 key parity); formal retest running | GATED: X1 (wheel = stretch) |
+| **T2-21** x64 LOSTWAKE/TSC (G8) | `-smp 8` stability + TSC ~18× fix | X2 — `fs-x2` commits (`2f48639` PIT-cal, `d65e75a` RCA doc) | GATED: X2 (unit-x64 is the hard gate) |
+| **T2-22** x64 white-paint (G9) | frame parity post-WA-fix merge | X3 — **CURED** (run 134; merged WA fix `49f28a3bb5` + `408cb3c` verdict) | PASSED (x64 leg) |
+| **T2-23** intel runtime net leg (G10) | intel https fetch receipt + load ms | X4 — `fs-x4` lane (WE2 staging) | GATED: X4 |
+| **T2-24** Google Search + CNN (G11) | WK-6 §8.3 rows re-run with render fix | WN3 `wk6-live` receipts; re-run post-merge | GATED: post T2 / WK-6 close |
+| **T2-25** license package, docs refresh, WK3 unification (G12) | license relink + docs | H1 `license-*` `[wip]`; H2 docs wave | GATED: H1/H2 (also OQ-1 wording retirement) |
+
+## 2b. Acceptance-run rows (driven by `run_browser_accept.sh`, V1)
 
 | Row | Mode / URL | Required evidence | Pass criterion | Status (dry run 2026-10-06) |
 |---|---|---|---|---|
@@ -84,6 +95,12 @@ ARM T2 dry).  G1..G12 from §3 are cross-referenced per row.
 | T2-17 | WK-4c + N1 DNS/dnstst receipts | merged-tree shell-GET/dns leg: V4/soak owner |
 | T2-18 | — | GATED: V4 (post R1-R4) |
 | T2-19 | code path verified (PL031 `src/kernel/arch/arm/rtc.c`, `time.c`, kernel `time_test_suite`) but **no on-device receipt in this dry** — see §3/§4a | GATED: V2 (needs a clock-probe runner step); N-lane = fix owner only if receipt fails |
+| T2-20 | X1 `fs-x1` commits (`4b611c1` PS/2 E0 parity) | GATED: X1 retest in flight (wheel stretch) |
+| T2-21 | X2 `fs-x2` commits (`2f48639` TSC PIT-cal, `d65e75a` RCA) | GATED: X2 (unit-x64 hard gate) |
+| T2-22 | X3 CURED — `408cb3c` verdict (run 134, WA fix `49f28a3bb5` merged) | — (PASSED, x64 leg) |
+| T2-23 | X4 lane (`fs-x4` WE2 staging) | GATED: X4 (intel net leg) |
+| T2-24 | WN3 `wk6-live` receipts | GATED: WK-6 close / post-T2 re-run |
+| T2-25 | H1 `license-*` `[wip]`; H2 docs wave | GATED: H1/H2; OQ-1 wording retirement pending verdict |
 
 ### 4a. V2 dry-run receipts (this session, instance v2)
 
