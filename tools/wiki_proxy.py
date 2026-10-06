@@ -157,26 +157,45 @@ def fixture_page(name):
     optional).  Returns (bytes, content_type) or (None, None) when the
     fixture is unknown.  Deterministic — this is the 'serve T0 fixtures' leg
     the acceptance runner drives the address bar against (render markers +
-    frame pixel checksum)."""
+    frame pixel checksum).
+
+    fs-r3: fixture-referenced non-HTML assets (the FIX02 page references
+    IMG01.PNG in the same fixtures dir) are also served byte-exact when the
+    requested name carries a non-.HTM extension; content type comes from the
+    extension so the windowed browser's image decoder gets image/png etc.
+    This is additive — extension-less fixture names (FIX01/HOME/TALL) keep
+    the exact legacy .HTM behaviour."""
     dirs = (ARGS.fixtures or "").split(":")
     want = name.upper()
-    if not want.endswith(".HTM"):
-        want += ".HTM"
-    for d in dirs:
-        if not d:
-            continue
-        try:
-            entries = os.listdir(d)
-        except OSError:
-            continue
-        for e in entries:
-            if e.upper() == want:
-                p = os.path.join(d, e)
-                try:
-                    with open(p, "rb") as f:
-                        return f.read(), "text/html; charset=utf-8"
-                except OSError:
-                    continue
+    ext = os.path.splitext(name)[1].upper()
+    want_candidates = [want]
+    if ext and ext != ".HTM":
+        # exact asset name first (IMG01.PNG), then the .HTM fallback below
+        pass
+    elif not want.endswith(".HTM"):
+        want_candidates = [want + ".HTM"]
+    for want_file in want_candidates:
+        for d in dirs:
+            if not d:
+                continue
+            try:
+                entries = os.listdir(d)
+            except OSError:
+                continue
+            for e in entries:
+                if e.upper() == want_file:
+                    p = os.path.join(d, e)
+                    try:
+                        with open(p, "rb") as f:
+                            data = f.read()
+                    except OSError:
+                        continue
+                    if ext and ext != ".HTM":
+                        import mimetypes
+                        ctype = mimetypes.guess_type(e)[0] or "application/octet-stream"
+                    else:
+                        ctype = "text/html; charset=utf-8"
+                    return data, ctype
     return None, None
 
 
