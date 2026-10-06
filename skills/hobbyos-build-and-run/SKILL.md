@@ -149,11 +149,27 @@ These are hard rules from the project design doc — treat violations as defects
    Recon that finds this: `make -d <target> 2>&1 | grep <target>` shows which
    rules make tried and why each was rejected.
 5. **Zombie QEMU holding the disk/socket.** If a run refuses to start or the display is stale, `fuser -k -9 disk.img` (kills exactly the processes holding the image). **Never** run `pkill -f qemu-system-aarch64` from a scripted shell whose own command line contains that pattern — `pkill -f` matches the invoking bash too (only pkill itself is excluded), silently killing your own background job before make even starts. `fuser -k disk.img` cannot self-match. On a shared workstation never use `make clean` to reset (Makefile:1962-1965 runs `pkill -f qemu-system` = kills every lane's VMs globally).
-6. **Most root `run_*.py` runners kill ALL QEMUs on the machine.** `run_desktop_test.py`, `run_desktop_apps_test.py`, `run_antfarm_test.py`, `run_apps_test.py`, `run_console_test.py`, `run_filedialog_test.py`, `run_files_nav_test.py`, `run_games_test.py`, `run_nano_test.py` (plain `qemu-system`), `run_pong_test.py`, `run_xcalc_test.py`, `run_xeyes_test.py` and `capture_screenshots.py` each run `pkill -9 -f qemu-system*` internally (some with the `[-]` self-match trick — still global). Only `run_unit_tests*.sh` kill scoped (`pkill -P`). On a shared host run the python tiers only with a **cwd-scoped `pkill` shim** first on PATH (signals only processes whose `/proc/<pid>/cwd` is inside the tree); proven pattern + working shim: `continuation/gx-launch/evidence-G3/README.md` item 9, shim copy at `HobbyOS-review/.review-artifacts/shim/pkill`.
+6. **Most root `run_*.py` runners kill ALL QEMUs on the machine.** `run_desktop_test.py`, `run_desktop_apps_test.py`, `run_antfarm_test.py`, `run_apps_test.py`, `run_console_test.py`, `run_filedialog_test.py`, `run_files_nav_test.py`, `run_games_test.py`, `run_nano_test.py` (plain `qemu-system`), `run_pong_test.py`, `run_xcalc_test.py`, `run_xeyes_test.py` and `capture_screenshots.py` each run `pkill -9 -f qemu-system*` internally (some with the `[-]` self-match trick — still global). Only `run_unit_tests*.sh` kill scoped (`pkill -P`). On a shared host run the python tiers only with a **cwd-scoped `pkill` shim** first on PATH (signals only processes whose `/proc/<pid>/cwd` is inside the tree). Proven pattern: PATH-prepend the shim in the SAME command as any kill; current fleet shims live at `~/.hermes/cache/scratch/fs-shims/<lane>/pkill` (set `WT=<your tree>`; the shim rewrites `pkill` to owner-cwd-filtered signals). Path-less fallback for a pattern kill: `for p in $(pgrep -f <pat>); do case "$(readlink /proc/$p/cwd)" in */<my-tree>*) kill -9 $p;; esac; done`. Never use broad `/tmp/*` (or `/tmp`-filtered) kills — a concurrent lane's scratch can match — and never `fuser -k` without an exact file argument.
 7. **Every chained tier target recompiles the kernel end-to-end — that is the designed behavior, not staleness.** Top-level make parse applies default `MODE=desktop` (Makefile:42) and rewrites `obj/<arch>/.mode` when it differs; the sub-make for the tier rewrites it again — every kernel object depends on `$(MODE_FILE)`, so all rebuild. `hobbyos.elf` relinks on *every* invocation (`FORCE_ARCH` via `.EXTRA_PREREQS`) and `disk.img` depends on the ELF, so the (now 1 GiB) disk rebuilds too. Budget ~1-3 min per tier on a fast box. Consequence: do not "dry-run" these targets — recipe lines containing `$(MAKE)` execute even under `-n`, so `make -n test` runs the tier for real.
 8. **1 GiB startup disk (2026-10 tip).** `disk.img` is 1024 MiB (was 64 MB); anything asserting disk geometry must use bounds covering it (`time_test.c`'s `< 256 MiB` bound went stale with this bump — a deterministic unit-tier red).
 
-## [IDLESTUCK] false positives + live-guest probing (2026-10-06)
+## Cross-lane shared-artifact protection (2026-10-06)
+
+**The shared ARM cross-prefix is PROTECTED.** `/home/sarah/webkit-hobbyos-wk2/arm/prefix`
+(and the intel prefix, 16 libs) hold every link-line `.a` for the WebKit/WebProcess
+service build — all 14 libs. They are shared by every lane and are NEVER removed,
+cleaned, or rearranged by a lane. Never `rm`/prune anything under them; never run a
+broad `make clean` or `/tmp` sweep that could reach them. Rebuilds happen only via
+the canonical scripts (`rebuild-prefix.sh`, `wk4b-libs-cross.sh`) and only when a
+lane owns that task. If the prefix is missing, STOP — do not rebuild ad hoc; report
+and follow the canonical recovery. Deleting it costs every concurrent WebKit lane a
+multi-hour rebuild (2026-10-06 incident).
+
+**WebKit service rebuilds re-link against that prefix.** After a kernel or service-lib
+change, the ARM `WebProcess` binary in the tenant tree is rebuilt and the prefix
+provides the link-line libs; relinking does NOT touch the prefix itself. Verify the
+linked binary's presence + sha256 after a rebuild rather than re-deriving libs.
+
 
 **A healthy desktop can log [IDLESTUCK] storms.** At `-smp >= 2` the ARM
 desktop (DESKTOP.BIN) periodically appears "stale-claimed" to idle peers
