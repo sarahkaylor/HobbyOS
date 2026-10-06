@@ -222,6 +222,21 @@ def main():
     except Exception as e:
         ok &= report("?head=N prefix", False, repr(e))
 
+    # 2b. fs-r9: query strings must be relayed upstream verbatim (minus the
+    # proxy-internal ?head=N).  Wikipedia's /w/load.php modules ride in the
+    # query — dropping it returned the 196-byte "no modules were requested"
+    # stub and the full-skin relay leg rendered unstyled (blank content
+    # column on the guest).
+    try:
+        st_q, hdrs_q, body_q = http_get(
+            port, "/w/load.php?lang=en&modules=site.styles&only=styles&skin=vector-2022")
+        q_ok = st_q == 200 and len(body_q) > 196 and b"no modules" not in body_q[:200]
+        ok &= report("query string relayed upstream (load.php modules)",
+                     q_ok, "status=%d bytes=%d" % (st_q, len(body_q)))
+    except Exception as e:
+        ok &= report("query string relayed upstream (load.php modules)",
+                     False, repr(e))
+
     # 3. /reader/<Topic>: real REST extract → minimal HTML (h1 title).
     try:
         st, hdrs, body = http_get(port, "/reader/Habitat")

@@ -1,0 +1,138 @@
+{
+  "toolkit": "fs-browser-accept",
+  "schema_version": 2,
+  "report_schema": "hobbyos-browser-accept-v2",
+  "mode": "direct",
+  "topic": null,
+  "url": "https://en.wikipedia.org/wiki/Hobbyist_operating_system",
+  "instance": "r9d",
+  "rows": [
+    {
+      "id": "direct",
+      "kind": "direct",
+      "url": "https://en.wikipedia.org/wiki/Hobbyist_operating_system",
+      "status": "gated",
+      "load_ok": false,
+      "load_ms": null,
+      "open_fail": "[WIN] load open-fail url=https://en.wikipedia.org/wiki/Hobbyist_operating_system status=0 bytes=0 err=no-CA-bundle(/CERTS/CA.PEM missing; verification will fail)SSL peer certificate or SSH remote key was not OK",
+      "frames": 0,
+      "checksum": "0xfd3915b9",
+      "net": "[WIN] net fetch url=https://en.wikipedia.org/wiki/Hobbyist_operating_system ok=0 status=0 bytes=0 effective=https://en.wikipedia.org/wiki/Hobbyist_operating_system err=no-CA-bundle(/CERTS/CA.PEM missing; verification will fail)SSL peer certificate or SSH remote key was not OK",
+      "persist": null,
+      "screenshot": "e2e-go-pedia.org_wiki_Hobbyist_operating_system.png",
+      "entry_echo": "https://en.wikipedia.org/wiki/Hobbyist_operating_system",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    }
+  ],
+  "proxy": {
+    "port": 8862,
+    "port_file": "/tmp/wiki-proxy-port-r9d",
+    "upstream": "https://en.wikipedia.org",
+    "host_self_check_robots_markers": 35,
+    "fixture_self_check_FIX01_markers": 1
+  },
+  "netlog": {
+    "rel_path": "net.log.jsonl",
+    "lines": 3,
+    "sha256": "2b526b4be721b405cca993d80c13172334ebadca967266dea142448ae020c5e6",
+    "routes": {
+      "relay": 1,
+      "fixture": 1
+    }
+  },
+  "guest_http": {
+    "sock2tst_live_get_passes": 0,
+    "sock2tst_response_prefix": []
+  },
+  "dns": {
+    "guest_dhcp_dns": "10.0.2.3",
+    "serial_evidence": true,
+    "resolver": "guest resolv_lookup -> 10.0.2.3 (QEMU user-net -> host resolver)",
+    "etc_hosts": "no /etc/hosts on this OS; resolver queries 10.0.2.3 directly"
+  },
+  "session": {
+    "ok": false,
+    "verdict": "gated",
+    "row_counts": {
+      "n_pass": 0,
+      "n_gated": 1,
+      "n_fail": 0
+    },
+    "notes": [
+      "no row reached load-ok (1 gated)"
+    ],
+    "markers": {
+      "[WIN] BOOT": 1,
+      "[WIN] created": 1,
+      "[WIN] geom": 1,
+      "[WIN] url-prompt": 1,
+      "[WIN] url-entry": 1,
+      "[WIN] net fetch": 1,
+      "[WIN] load start url=": 0,
+      "[WIN] load-ok": 1,
+      "[WIN] load open-fail": 1,
+      "[WIN] frame": 4,
+      "[WIN] net persist": 0,
+      "[WIN] render": 1,
+      "[WIN] checksum": 0,
+      "[LAUNCH] CONSOLE.BIN": 0,
+      "[DNSTST]": 0,
+      "DHCP DNS server": 1,
+      "Network configured": 1,
+      "FATAL": 0,
+      "IDLESTUCK": 0,
+      "SOCK2TST": 1
+    },
+    "screenshots": [
+      "e2e-browser-launch.png",
+      "e2e-go-pedia.org_wiki_Hobbyist_operating_system.png"
+    ],
+    "artifacts": {
+      "serial.log": {
+        "size": 12866,
+        "sha256": "f0f626e3cd353518cbe32402143e35ff9553d697abe39942f77b19875d71fa66"
+      },
+      "driver.log": {
+        "size": 1489,
+        "sha256": "60f1c46eb39f3d8fcf1a8ae9bd6913c2e30634ec1a5dde4739bd90289f11b208"
+      },
+      "wiki-proxy.log": {
+        "size": 223,
+        "sha256": "ec9369a80c8da63f3f6d5d4b1147e0786c154b302035b22ac6db5d445dc74609"
+      },
+      "net.log.jsonl": {
+        "size": 845,
+        "sha256": "2b526b4be721b405cca993d80c13172334ebadca967266dea142448ae020c5e6"
+      },
+      "host-robots.txt": {
+        "size": 28275,
+        "sha256": "48b98d80c8444d37cdf50cc9a4d2257b66039477e581066d2356062a4cbd678f"
+      },
+      "host-fixture-FIX01.txt": {
+        "size": 267,
+        "sha256": "fe4df6bc781989afce330d8fa35a92c126abdbc34bfd124b8a29e52d24c9f3d2"
+      },
+      "WNPAGE.HTM": {
+        "size": 1,
+        "sha256": "36a9e7f1c95b82ffb99743e0c5c4ce95d83c9a430aac59f84ef3cbfab6145068"
+      },
+      "wiki-proxy-console.log": {
+        "size": 417,
+        "sha256": "e024b8164536fe69c8dde96cffa49a55bf8cc6ad63dc807b0c13ad585519b5cd"
+      }
+    },
+    "sha256_page_net": "",
+    "sha256_rob_wc": ""
+  },
+  "summary": {
+    "verdict": "gated",
+    "n_pass": 0,
+    "n_gated": 1,
+    "n_fail": 0,
+    "rows": 1
+  }
+}

@@ -53,6 +53,7 @@ TOPIC="Habitat"
 EV="evidence/e2e"
 DISK="$REPO/disk.img"
 BOOT_TIMEOUT=420
+GO_TIMEOUT=300
 SHELL_GET=""
 DO_GO=1
 KEEP=0
@@ -76,6 +77,7 @@ while [ $# -gt 0 ]; do
     --evdir) EV="$2"; shift 2 ;;
     --disk) DISK="$2"; shift 2 ;;
     --boot-timeout) BOOT_TIMEOUT="$2"; shift 2 ;;
+    --go-timeout) GO_TIMEOUT="$2"; shift 2 ;;
     --shell-get) SHELL_GET="${2:-/robots.txt}"; shift 2 ;;
     --instance) INSTANCE="$2"; shift 2 ;;
     --no-go) DO_GO=0; shift ;;
@@ -178,7 +180,7 @@ ctrl() {
   python3 - "$CTRL" "$payload" <<'EOF'
 import json, socket, sys
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-s.settimeout(600)
+s.settimeout(1800)
 s.connect(sys.argv[1])
 s.sendall(sys.argv[2].encode() + b"\n")
 buf = b""
@@ -240,7 +242,7 @@ if [ "$DO_GO" = 1 ]; then
     RID="$1"; KIND="$2"; RURL="$3"; shift 3
     log "address-bar row $RID ($KIND) -> $RURL"
     step "$RID-type-url" "{\"action\":\"type-url\",\"url\":\"$RURL\"}"
-    step "$RID-go" "{\"action\":\"go\",\"url\":\"$RURL\",\"timeout\":300}"
+    step "$RID-go" "{\"action\":\"go\",\"url\":\"$RURL\",\"timeout\":$GO_TIMEOUT}"
     sleep 1
   done
 fi
