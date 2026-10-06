@@ -17,11 +17,20 @@
 #   full     raw relay of a full article page (--url or /wiki/<Article>)
 #   (default) legacy behavior: proxied Wikipedia Main_Page address-bar run
 #
+# Concurrency (--instance ID): the runner is host-global single-instance by
+# default (fixed /tmp sockets + proxy port-file /tmp/wiki-proxy-port).  Pass
+# --instance <id> (or ACCEPT_ID=<id>) to scope a run: the ctrl/qmp serial
+# sockets become /tmp/br-<id>-*.sock|log and the proxy is told a per-instance
+# port file --port-file /tmp/wiki-proxy-port-<id>.  YOU must still give the
+# instance a distinct --port.  No flag = exactly the fixed legacy paths, so
+# the F-R2 /tmp/wiki-proxy-port contract is preserved for existing consumers.
+# Concurrent runs each need their own lock file (e.g. flock /tmp/fs-accept-<id>.lock).
+#
 # Usage:
 #   run_browser_accept.sh [--mode fixture|reader|direct|full] [--url URL]
 #                         [--port PORT] [--evdir DIR] [--disk DISK]
 #                         [--no-go] [--shell-get PATH] [--keep]
-#                         [--boot-timeout S] [--topic TOPIC]
+#                         [--boot-timeout S] [--topic TOPIC] [--instance ID]
 #
 #   --url      URL override (direct/full; default depends on the mode)
 #   --port     host wiki-proxy port (default 8800)
@@ -30,6 +39,7 @@
 #   --no-go    boot + launch browser only (no address-bar drive)
 #   --keep     leave qemu up after the run (else poweroff)
 #   --topic    reader-mode topic (default: Habitat)
+#   --instance run-scope id (concurrency; see above; default: fixed legacy paths)
 #
 # Host-global single-instance: fixed /tmp sockets + proxy port 8800.  Always
 # wrap in `flock -w 7200 /tmp/fs-accept.lock ... --mode ...`.
@@ -46,6 +56,7 @@ BOOT_TIMEOUT=420
 SHELL_GET=""
 DO_GO=1
 KEEP=0
+INSTANCE="${ACCEPT_ID:-}"
 FIX_DIRS="${WIKI_PROXY_FIXTURES:-}"
 if [ -z "$FIX_DIRS" ]; then
   FIX_DIRS="/home/sarah/webkit-lanes/fs-v1/HobbyOS/continuation/wk3/fixtures:$REPO/tests/fixtures/browser"
@@ -66,6 +77,7 @@ while [ $# -gt 0 ]; do
     --disk) DISK="$2"; shift 2 ;;
     --boot-timeout) BOOT_TIMEOUT="$2"; shift 2 ;;
     --shell-get) SHELL_GET="${2:-/robots.txt}"; shift 2 ;;
+    --instance) INSTANCE="$2"; shift 2 ;;
     --no-go) DO_GO=0; shift ;;
     --keep) KEEP=1; shift ;;
     *) usage ;;
@@ -82,23 +94,35 @@ mkdir -p "$EV"
 
 PROXY_LOG="$EV/wiki-proxy.log"
 NETLOG="$EV/net.log.jsonl"
-CTRL="/tmp/br-wc-ctrl.sock"
-QMP="/tmp/br-wc-qmp.sock"
-SER="/tmp/br-wc-serial.log"
+# instance-scoped /tmp paths; default (no --instance) = fixed legacy paths
+SUF=""
+PORT_FILE="/tmp/wiki-proxy-port"
+if [ -n "$INSTANCE" ]; then
+  SUF="-$INSTANCE"
+  PORT_FILE="/tmp/wiki-proxy-port$SUF"
+  if [ "$WIKI_PORT" = "8800" ]; then
+    echo "ERROR: --instance $INSTANCE needs a distinct --port (default 8800 is"
+    echo "       the legacy single-instance port).  e.g. --port 8811 --instance a"
+    exit 1
+  fi
+fi
+CTRL="/tmp/br-wc-ctrl$SUF.sock"
+QMP="/tmp/br-wc-qmp$SUF.sock"
+SER="/tmp/br-wc-serial$SUF.log"
 RUNNER_LOG="$EV/runner.log"
 : > "$RUNNER_LOG"
 log() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$RUNNER_LOG"; }
 
 # ------------------------------------------------------------------ proxy --
-rm -f /tmp/wiki-proxy-port
-log "starting wiki proxy on :$WIKI_PORT (upstream en.wikipedia.org; netlog=$NETLOG)"
+rm -f "$PORT_FILE"
+log "starting wiki proxy on :$WIKI_PORT (upstream en.wikipedia.org; netlog=$NETLOG; port-file=$PORT_FILE)"
 python3 "$REPO/tools/wiki_proxy.py" --port "$WIKI_PORT" --scratch /tmp --log "$PROXY_LOG" \
-  --netlog "$NETLOG" --fixtures "$FIX_DIRS" \
+  --netlog "$NETLOG" --fixtures "$FIX_DIRS" --port-file "$PORT_FILE" \
   >> "$EV/wiki-proxy-console.log" 2>&1 &
 PROXY_PID=$!
-for _ in $(seq 1 20); do [ -f /tmp/wiki-proxy-port ] && break; sleep 0.5; done
-PORT="$(cat /tmp/wiki-proxy-port 2>/dev/null || echo "$WIKI_PORT")"
-log "proxy port file: /tmp/wiki-proxy-port=$PORT (listener=$WIKI_PORT)"
+for _ in $(seq 1 20); do [ -f "$PORT_FILE" ] && break; sleep 0.5; done
+PORT="$(cat "$PORT_FILE" 2>/dev/null || echo "$WIKI_PORT")"
+log "proxy port file: $PORT_FILE=$PORT (listener=$WIKI_PORT)"
 # host self-check: the proxy really serves real wikipedia bytes
 curl -sS --max-time 30 -o "$EV/host-robots.txt" -w "proxy self-check HTTP %{http_code} %{size_download} B\n" \
   "http://127.0.0.1:$PORT/robots.txt" | tee -a "$RUNNER_LOG"
@@ -280,13 +304,15 @@ if [ -n "$SHELL_GET" ]; then
 fi
 
 # ------------------------------------------------------------ report v2 -----
-python3 - "$EV" "$PORT" "$URL" "$MODE" "$SHELL_GET" "$MARKERS_HOST" "$PG" "$RW" "$ROWS" "$TOPIC" "$FIX01_OK" <<'EOF'
+python3 - "$EV" "$PORT" "$URL" "$MODE" "$SHELL_GET" "$MARKERS_HOST" "$PG" "$RW" "$ROWS" "$TOPIC" "$FIX01_OK" "$PORT_FILE" "$INSTANCE" <<'EOF'
 import hashlib, json, os, re, sys
-ev, port, url, mode, shell_get, mhost, pg, rw, rows, topic, fix01 = sys.argv[1:]
+ev, port, url, mode, shell_get, mhost, pg, rw, rows, topic, fix01, port_file, instance = sys.argv[1:]
 ev = ev.strip('"'); port = port.strip('"'); url = url.strip('"')
 mode = mode.strip('"'); shell_get = shell_get.strip('"') if shell_get.strip('"') else None
 mhost = int(mhost.strip('"'))
 fix01 = int(fix01.strip('"'))
+port_file = port_file.strip('"')
+instance = instance.strip('"') or None
 rows = rows.split()
 
 def sha(p):
@@ -420,9 +446,9 @@ report = {
     "toolkit": "fs-browser-accept", "schema_version": 2,
     "report_schema": "hobbyos-browser-accept-v2",
     "mode": mode, "topic": topic if mode == "reader" else None,
-    "url": url,
+    "url": url, "instance": instance,
     "rows": row_results,
-    "proxy": {"port": int(port), "port_file": "/tmp/wiki-proxy-port",
+    "proxy": {"port": int(port), "port_file": port_file,
               "upstream": "https://en.wikipedia.org",
               "host_self_check_robots_markers": mhost,
               "fixture_self_check_FIX01_markers": fix01},

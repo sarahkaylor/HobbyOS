@@ -46,6 +46,10 @@ Usage: python3 tools/wiki_proxy.py [--port PORT] [--log FILE] [--netlog FILE]
   --port     explicit listen port; default 8800 (written to /tmp/wiki-proxy-port)
   --upstream base URL; default https://en.wikipedia.org
   --fixtures colon-separated fixture dirs (default: $WIKI_PROXY_FIXTURES)
+  --port-file path for the port file (default: $WIKI_PROXY_PORT_FILE or
+             /tmp/wiki-proxy-port — the F-R2 contract path).  Per-instance
+             runners pass e.g. /tmp/wiki-proxy-port-<id> so concurrent
+             instances never clobber each other's port file.
 """
 import argparse
 import json
@@ -311,7 +315,14 @@ def main():
     ap.add_argument("--upstream", default=DEFAULT_UPSTREAM)
     ap.add_argument("--fixtures", default=os.environ.get("WIKI_PROXY_FIXTURES", ""),
                     help="colon-separated fixture dirs for the /fixture/<name> route")
+    ap.add_argument("--port-file", default=None,
+                    help="override the port file path (per-instance concurrency)")
     ARGS = ap.parse_args()
+    if ARGS.port_file:
+        pf = ARGS.port_file
+    else:
+        pf = PORT_FILE
+    ARGS.port_file = pf
     if not ARGS.netlog:
         ARGS.netlog = ARGS.log + ".jsonl" if ARGS.log != "-" else "/tmp/wiki-proxy.jsonl"
     os.makedirs(os.path.dirname(os.path.abspath(ARGS.netlog)), exist_ok=True)
@@ -325,22 +336,27 @@ def main():
                          "another instance already owns the port?\n"
                          % (ARGS.port, e))
         return 1
-    with open(PORT_FILE, "w") as f:
+    try:
+        os.unlink(ARGS.port_file)   # stale per-instance port file
+    except OSError:
+        pass
+    with open(ARGS.port_file, "w") as f:
         f.write(str(ARGS.port))
     with open(ARGS.netlog, "a") as f:
         f.write(json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                             "event": "proxy-start", "port": ARGS.port,
                             "upstream": ARGS.upstream,
-                            "fixtures": ARGS.fixtures}) + "\n")
+                            "fixtures": ARGS.fixtures,
+                            "port_file": ARGS.port_file}) + "\n")
     print("wiki-proxy: listening on 0.0.0.0:%d (upstream %s) port->%s netlog->%s" % (
-        ARGS.port, ARGS.upstream, PORT_FILE, ARGS.netlog), flush=True)
+        ARGS.port, ARGS.upstream, ARGS.port_file, ARGS.netlog), flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         try:
-            os.unlink(PORT_FILE)
+            os.unlink(ARGS.port_file)
         except OSError:
             pass
     return 0

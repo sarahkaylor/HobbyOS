@@ -93,6 +93,30 @@ def start_proxy(port, port_file, log, netlog, fixtures):
     raise RuntimeError("proxy did not write port file %s" % port_file)
 
 
+def start_proxy_explicit_portfile(port, port_file, log, netlog, fixtures):
+    """Same as start_proxy but passes the --port-file CLI arg explicitly
+    (the concurrency extension).  The default /tmp/wiki-proxy-port must NOT
+    be touched, proving the per-instance override keeps instances isolated."""
+    env = dict(os.environ)
+    env["WIKI_PROXY_FIXTURES"] = fixtures
+    if "WIKI_PROXY_PORT_FILE" in env:
+        del env["WIKI_PROXY_PORT_FILE"]   # isolation under test: CLI wins
+    p = subprocess.Popen(
+        [sys.executable, PROXY, "--port", str(port), "--log", log,
+         "--netlog", netlog, "--port-file", port_file,
+         "--scratch", tempfile.gettempdir()],
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True)
+    for _ in range(100):
+        if os.path.exists(port_file) and p.poll() is None:
+            return p
+        if p.poll() is not None:
+            out = p.stdout.read() if p.stdout else ""
+            raise RuntimeError("proxy died on start: %s" % out[-500:])
+        time.sleep(0.1)
+    raise RuntimeError("proxy did not write port file %s" % port_file)
+
+
 def http_get(port, path, timeout=90):
     """Raw http.client GET over the proxy (guest-style plain HTTP/1.0)."""
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
@@ -143,6 +167,28 @@ def main():
     out2 = p2.stdout.read() if p2.stdout else ""
     ok &= report("one-instance: second bind fails loudly (rc=%d)" % rc,
                  rc != 0 and "cannot bind" in out2, out2.strip()[:120])
+
+    # 0b. --port-file option: per-instance proxy isolation (concurrency).
+    #     A second proxy with a DIFFERENT --port-file and DIFFERENT port runs
+    #     alongside the first: each instance writes its OWN port file and
+    #     neither clobbers the other's.
+    p3 = None
+    pf3 = os.path.join(tmp, "port-inst2")
+    try:
+        port2 = free_port()
+        p3 = start_proxy_explicit_portfile(port2, pf3,
+                                           os.path.join(tmp, "proxy3.log"),
+                                           os.path.join(tmp, "proxy3.jsonl"),
+                                           fixture_dirs)
+        one_txt = open(port_file).read().strip()
+        two_txt = open(pf3).read().strip()
+        iso_ok = (one_txt == str(port) and two_txt == str(port2)
+                  and port != port2 and p1.poll() is None and p3.poll() is None)
+        ok &= report("--port-file: per-instance port file isolation",
+                     iso_ok, "inst1=%s inst2=%s" % (one_txt, two_txt))
+    except Exception as e:
+        ok &= report("--port-file: per-instance port file isolation", False,
+                     repr(e))
 
     # 1. raw relay semantics: REAL wikipedia bytes relayed verbatim.
     body = b""
@@ -258,6 +304,12 @@ def main():
         p1.wait(timeout=10)
     except subprocess.TimeoutExpired:
         p1.kill()
+    if p3 is not None:
+        p3.terminate()
+        try:
+            p3.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            p3.kill()
 
     # 6. port-file contract cleanup documented (removed on exit).
     ok &= report("port file removed on proxy exit",
