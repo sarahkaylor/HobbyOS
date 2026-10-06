@@ -118,7 +118,22 @@ def reader_page(topic):
     HobbyOS shell renderer can paint (mirrors the fixture styling: inline
     style, plain <h1>/<p>/<a>).  Content is REAL wikipedia data (title +
     article extract) — this is the display-friendly path for the windowed
-    browser's address bar; the raw-page path stays /wiki-proxy upstream."""
+    browser's address bar; the raw-page path stays /wiki-proxy upstream.
+
+    fs-r4 (nav surface, ADDITIVE): the served reader page is the T2 nav
+    gate material, so it now ships a small chrome/surface block on top:
+      * a GET search form (empty action = submit to the current URL with
+        '?q=<query>'; the /reader/ route honors q= to switch the topic,
+        which makes a real form-GET submission navigate to new content),
+      * three deterministic block links: two reader-mode topics
+        (/reader/HTML, /reader/CSS — exercises cross-page link follow +
+        back/forward), one same-document anchor (#sec2 — exercises a
+        fragment jump),
+      * the original live-Wikipedia link (real-internet, gated class),
+      * tall filler + an id=sec2 anchor below the fold so the windowed
+        page actually scrolls and fragment jumps visibly move the viewport.
+    No-query output keeps the exact previous structure plus these blocks;
+    nothing downstream (fixture/relay/head routes, netlog) changes."""
     import json as _json
     from urllib.request import urlopen, Request
     api = "https://en.wikipedia.org/api/rest_v1/page/summary/" + topic.replace(" ", "_")
@@ -135,6 +150,15 @@ def reader_page(topic):
     import html as _html
     t = _html.escape(title)
     x = _html.escape(extract)
+    topic_esc = _html.escape(topic.replace(" ", "_"))
+    nav = (
+        "<form id=\"f\" method=\"get\" action=\"\">"
+        "<input id=\"qi\" name=\"q\" type=\"search\" size=\"24\">"
+        "<button type=\"submit\">search</button></form>"
+        "<a id=\"nl0\" href=\"/reader/HTML\">go to HTML article</a>"
+        "<a id=\"nl1\" href=\"/reader/CSS\">go to CSS article</a>"
+        "<a id=\"nl2\" href=\"#sec2\">jump to Section 2 (same page)</a>"
+    )
     body = (
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
         "<style>html,body{margin:0;padding:0;background:#ffffff;color:#000000}"
@@ -142,10 +166,15 @@ def reader_page(topic):
         "p{margin:8px;padding:4px;font-size:15px}"
         "a{display:block;margin:8px;padding:8px;background:#e8f0fe;color:#0000aa;font-size:15px}</style>"
         "</head><body>"
+        + nav +
         "<h1>%s</h1><p>%s</p>"
         "<a href=\"https://en.wikipedia.org/wiki/%s\">[open] %s on Wikipedia (live)</a>"
+        "<div style=\"height:900px\"></div>"
+        "<h2 id=\"sec2\">Section 2</h2><p>fragment target (id=sec2)</p>"
+        "<div style=\"height:900px\"></div>"
+        "<p id=\"tail\">end of %s</p>"
         "</body></html>"
-    ) % (t, x, _html.escape(topic.replace(" ", "_")), t)
+    ) % (t, x, topic_esc, t, topic_esc)
     return body.encode("utf-8")
 
 
@@ -240,7 +269,14 @@ class WikiProxy(BaseHTTPRequestHandler):
     def do_GET(self):
         # /reader/<Topic>: reader-mode Wikipedia page (real REST extract).
         if self.path.startswith("/reader/"):
+            from urllib.parse import urlsplit, parse_qs
             topic = self.path[len("/reader/"):].split("?")[0].strip("/")
+            # fs-r4: honor a GET-submit query — the reader page's empty-action
+            # search form submits to the current URL with '?q=<topic>', so the
+            # navigation is real (new content rendered), not a mock.
+            q = parse_qs(urlsplit(self.path).query)
+            if q.get("q"):
+                topic = q["q"][0].strip("/")
             data = reader_page(topic)
             self._serve_bytes(data, "text/html; charset=utf-8", "reader",
                               guest=self.client_address[0], path=self.path)
