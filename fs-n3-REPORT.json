@@ -1,0 +1,29 @@
+{
+  "lane": "N3",
+  "verdict": "pass",
+  "gate": "identity >4MiB single-response fetches complete byte-exact without gzip",
+  "commits": [
+    "9479d7b fs-n3: TCP RX flow control — fix >=4MiB single-response aborts (per-socket ring overflow)",
+    "d270f97 fs-n3: identity-gate retest receipts — 6 MiB blob + CNN 5,704,241 B identity both complete byte-exact"
+  ],
+  "evidence": [
+    "continuation/fs-n3/evidence/probe/go-blob8893.json  [WIN] net fetch ok=1 status=200 bytes=6291456 + persist; PAGE-NET copy-back sha=6ec571f1... = served blob (6 MiB identity, byte-exact)",
+    "continuation/fs-n3/evidence/probe2/go-cnn.json     [WIN] net fetch ok=1 status=200 bytes=5704241 (CNN identity, wire=5704241 sha=c1dd9525); PAGE-NET copy-back sha=c1dd9525 = fixture (byte-exact)",
+    "continuation/fs-n3/evidence/probe/serial.log + probe2/serial.log (net fetch/persist/open-fail markers; flow-control guard counter = 0 drops under truthful-window pacing)",
+    "continuation/fs-n3/evidence/CNN-5704241.HTM (5,704,241 B fixture, G11 cnn-direct persist)",
+    "continuation/fs-n3/evidence/netfix/run-n3-serial.log  NETFIX RESULTS: ALL PASS (24/24 TX-OK + RX-OK)",
+    "continuation/fs-n3/evidence/sweep-net/report.json   verdict=pass; SOCK2TST 35 PASS; DNSTST example.com A=104.20.23.154",
+    "continuation/fs-n3/evidence/unit-x64/run.log  UNIT TESTS PASSED (306/0)",
+    "continuation/fs-n3/evidence/unit-arm/run.log  UNIT TESTS PASSED (302/0)",
+    "continuation/fs-n3/evidence/wave/ (wave_arm.log) ARM wave rc=0 — 'ALL TESTS PASSED SUCCESSFULLY!' 0-FAIL (intel run_waves component still mid-suite at finalize; not a gate)",
+    "continuation/fs-n3/evidence/sweep-N3.md (exact sweep commands + results)",
+    "continuation/fs-n3/tools/ (n3_identity_relay.py, n3_run_probe.sh/2.sh, run_netfix.sh, netfix_server.py, pkill)"
+  ],
+  "notes": "Root cause (G11 A/B + code): handle_tcp copied every RX segment into the fixed 4 MiB per-socket ring (SOCKET_RX_BUF_SIZE) with no overflow guard and ACKed it all; a body >= ~4 MiB ahead of the app drain wrapped the ring and overwrote unread data -> open-fail 'Unsupported protocol', bytes=0, server/port/content independent. Fix = producer flow control on the existing ring (memory unchanged): (1) store only contiguous expected payload that fits free space, ACK only stored bytes, refuse out-of-order/overflow (counted rx_drops); (2) advertise the true free TCP window (removed the min-2048 floor; window 0 when full; post-drain window-update ACK reopens); (3) honor FIN only at the contiguous stream end. Ring size is now latency slack, not the correctness bound; documented in src/kernel/net.c + continuation/fs-n3/README.md. Retest on identity wire (no gzip): 6 MiB blob and CNN 5,704,241 B both complete with byte-match copy-backs; small/head controls pass; flow-control guard engaged with 0 drops (peer self-paced). Regression sweep green: SOCK2TST 35 PASS, DNSTST A-record, NETFIX ALL PASS, unit-arm 302/0, unit-x64 KVM 306/0, ARM wave 0-FAIL. Known unrelated: CNN page render still parks in the pre-existing parser-completion-stall class (fetch+transfer+persist GREEN; render-in-progress) exactly as G11 classified; guest shell `nc` only captures 39 B of a >4 MiB response (guest nc app limitation; kernel path proven via the browser fetch).",
+  "blockers": [],
+  "next_steps": [
+    "Controller: run CI labels for the merged OS commits (hobytest) — all local tier results above are green.",
+    "Optional: backfill a kernel-only >4MiB byte-match via a fixed guest nc once the guest nc app is extended for large streams.",
+    "Optional: restore MODE=desktop in fs-r5 (mode tracker currently MODE=test after the wave); hobbyos.bin in the repo root is the test-mode build."
+  ]
+}

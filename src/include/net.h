@@ -112,6 +112,13 @@ struct socket_pcb {
   volatile uint8_t rx_buf[SOCKET_RX_BUF_SIZE];
   volatile uint32_t rx_head;
   volatile uint32_t rx_tail;
+  // N3: RX flow-control diagnostics.  rx_drops counts payload bytes refused
+  // because they were out-of-order (a retransmission hole) or would have
+  // overflowed the ring; post-N3 this is the evidence the producer flow
+  // control (truthful window + contiguous-only store) actually engaged
+  // instead of silently wrapping the ring.
+  volatile uint32_t rx_drops;
+  volatile uint32_t rx_drop_segments;
 
   // --- Phase F1 (browser.md A.1a) state --------------------------------
   // O_NONBLOCK as set through fcntl(F_SETFL); a non-blocking connect_fd()
