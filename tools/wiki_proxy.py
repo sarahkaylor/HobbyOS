@@ -308,7 +308,23 @@ class WikiProxy(BaseHTTPRequestHandler):
                 head = int(q["head"][0])
             except (ValueError, IndexError):
                 head = None
-        status, headers, data = upstream_fetch(pathname, head=head)
+        # fs-r9 root-cause fix: relay the guest's query string upstream.
+        # Wikipedia's /w/load.php and /w/api.php carry their real parameters
+        # (the %7C-joined module list, skin, lang, only=styles, ...) in the
+        # URL query; the legacy pathname-only relay turned EVERY load.php
+        # request into the 196-byte "no modules were requested" stub, so the
+        # full-skin relay leg laid out without the skin stylesheet (article
+        # body pushed below the fold -> blank content column) while the
+        # direct TLS leg served the real 213-KB CSS bundle.  ?head=N stays a
+        # proxy-internal control param (windowed prefix) — stripped, never
+        # relayed upstream.
+        up_path = pathname
+        if parts.query:
+            keep = [p for p in parts.query.split("&")
+                    if not p.split("=", 1)[0] == "head"]
+            if keep:
+                up_path = pathname + "?" + "&".join(keep)
+        status, headers, data = upstream_fetch(up_path, head=head)
         route = "head" if head is not None else "relay"
         if status == 0:
             err = data.decode("utf-8", "replace") if data else "curl-fail"
