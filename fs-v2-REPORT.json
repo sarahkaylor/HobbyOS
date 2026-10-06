@@ -16,7 +16,8 @@
   ],
   "commits": [
     "967662b fs-v2: freeze T2 checklist (+G5b clock row), reconcile fixture staging (canonical README), propose browser.md §11 entry",
-    "NEXT fs-v2: T2 dry-run receipts (fixture 6p/2g/0f + reader pass) + run-dry.sh + T2-CHECKLIST §4a/§5 filled with real results"
+    "bcbabe9 fs-v2: T2 dry-run receipts (fixture 6p/2g/0f + reader pass) recorded in T2-CHECKLIST §4a; lane report",
+    "4f87ea0 fs-v2: map extended/x64 rows T2-20..25 (G7-G12) in the checklist evidence table"
   ],
   "blockers": [
     "T2 full-skin rows (T2-08, T2-15, T2-16 render side, part of T2-07): blocked on R1's subresource fix (054b307db1) merge + rebuild — OQ-1. Not chased in this dry per the wave rule.",
@@ -29,5 +30,5 @@
     "Hold T2-CHECKLIST.md permanent home = tests/fixtures/browser/T2-CHECKLIST.md (Integrator applies; see §6 of the checklist).",
     "Integrator: apply proposed browser.md §11 entry (continuation/fs-v2/browser-md-s11-proposal.md)."
   ],
-  "notes": "T2 table COMPLETE + dry run RECORDED (V2 gate). Host-side lane: no WebKit builds; QEMU only via the acceptance runner on my own instance; local commits only (967662b + receipts commit); no fetch/push/gc; no unscoped pkill (runner teardown only); paced: fixture then reader, one QEMU at a time, concurrent with R1 (g0-direct-fixed5) and X4's intel KVM — all isolated. Fixture anchors reproduced byte-for-byte from V1's committed run (0x759431c5/0x0e8f25c5), proving deterministic renders on the current tip. Ambient TCG slowness recorded honestly (FIX03 332 s, HOME 666 s, TALL 679 s load_ms). Run receipts stored under continuation/fs-v2/evidence/ (regenerable, gitignored) with tracked copies in continuation/fs-v2/receipts/."
+  "notes": "T2 table COMPLETE + dry run RECORDED (V2 gate). Host-side lane: no WebKit builds; QEMU only via the acceptance runner on my own instance; local commits only (967662b, bcbabe9, 4f87ea0); no fetch/push/gc; no unscoped pkill (runner teardown only); paced: fixture then reader, one QEMU at a time, concurrent with R1 (g0-direct-fixed5) and X4's intel KVM — all isolated. Fixture anchors reproduced byte-for-byte from V1's committed run (0x759431c5/0x0e8f25c5), proving deterministic renders on the current tip. Ambient TCG slowness recorded honestly (FIX03 332 s, HOME 666 s, TALL 679 s load_ms). Run receipts stored under continuation/fs-v2/evidence/ (regenerable, gitignored) with tracked copies in continuation/fs-v2/receipts/. Features completed: frozen T2 checklist (25 rows, all evidence-mapped or gated-with-owner), NEW G5b guest-clock row with R13 tests folded, canonical fixture staging README (guard 13/13), fixture + reader dry runs recorded, browser.md §11 proposal, run-dry.sh launcher. Notable finding: T2-19 (guest clock) cannot be receipted by the current runner modes — needs a small clock-probe step (owner V2), not a fix (PL031 RTC starts from host time)."
 }
