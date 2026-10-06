@@ -1,0 +1,17 @@
+#!/bin/bash
+# WT-scoped pkill for FS lane N3 (fs-r5 OS worktree + its n3 evidence/scratch).
+# Kills ONLY processes whose cwd is inside N3-owned paths. Usage: PATH-prepend this dir.
+WT1=/home/sarah/hobbyos-lanes/fs-r5
+sig=-TERM; pat=""
+for a in "$@"; do case "$a" in -9) sig=-KILL;; -f) ;; --) ;; -*) ;; ?*) pat="$a";; esac; done
+[ -n "$pat" ] || exit 1
+found=0
+while IFS= read -r pid; do
+  [ "$pid" = "$$" ] && continue
+  cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null) || continue
+  case "$cwd" in
+    "$WT1"|"$WT1"/*) kill "$sig" "$pid" 2>/dev/null && found=1;;
+  esac
+done < <(pgrep -f -- "$pat" 2>/dev/null)
+[ "$found" = 1 ] && exit 0
+exit 1
