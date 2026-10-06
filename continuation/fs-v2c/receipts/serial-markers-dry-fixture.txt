@@ -1,0 +1,40 @@
+[WIN] viewport render=1916x982 (window content 1916x1018, chrome 36, scale 100%)
+[WIN] load-ok url=HOME.HTM ms=431
+[IMG1d] imgs=0,0 rt=1
+[WIN] frame view=1916x982 nonZero=7525894 checksum=0xfd3915b9
+[WIN] frame-times render=381ms blit=28ms total=435ms
+[IMG1p] view=1916x982 colors=190 dom=0x102030 foreign=47824
+[IMG1d] imgs=0,0 rt=1
+[WIN] frame view=1916x982 nonZero=7525894 checksum=0xfd3915b9
+[WIN] frame-times render=125ms blit=24ms total=176ms
+[IMG1p] view=1916x982 colors=190 dom=0x102030 foreign=47824
+[IMG1d] imgs=0,0 rt=1
+[WIN] net fetch url=http://10.0.2.2:8854/fixture/FIX01 ok=1 status=200 bytes=267 effective=http://10.0.2.2:8854/fixture/FIX01 err=
+[WIN] load-ok url=http://10.0.2.2:8854/fixture/FIX01 ms=7303
+[IMG1d] imgs=0,0 rt=1
+[WIN] frame view=1916x982 nonZero=7525262 checksum=0xab92ba47
+[WIN] frame-times render=83ms blit=25ms total=126ms
+[IMG1p] view=1916x982 colors=79 dom=0x102030 foreign=12961
+[IMG1d] imgs=0,0 rt=1
+[WIN] frame view=1916x982 nonZero=7525262 checksum=0xab92ba47
+[WIN] frame-times render=66ms blit=52ms total=134ms
+[IMG1p] view=1916x982 colors=79 dom=0x102030 foreign=12961
+[IMG1d] imgs=0,0 rt=1
+[WIN] net fetch url=http://10.0.2.2:8854/fixture/FIX02 ok=1 status=200 bytes=314 effective=http://10.0.2.2:8854/fixture/FIX02 err=
+[WIN] load-ok url=http://10.0.2.2:8854/fixture/FIX02 ms=15253
+[IMG1d] imgs=1,1 rt=1
+[IMG1i] 0 src=http://10.0.2.2:8854/fixture/IMG01.PNG complete=1 w=64 h=64 renderer=1
+[WIN] frame view=1916x982 nonZero=7300877 checksum=0x48fb02c4
+[WIN] frame-times render=341ms blit=27ms total=384ms
+[IMG1p] view=1916x982 colors=68 dom=0x301020 foreign=66873
+[IMG1d] imgs=1,1 rt=1
+[IMG1i] 0 src=http://10.0.2.2:8854/fixture/IMG01.PNG complete=1 w=64 h=64 renderer=1
+[WIN] frame view=1916x982 nonZero=7300877 checksum=0x48fb02c4
+[WIN] frame-times render=173ms blit=23ms total=213ms
+[IMG1p] view=1916x982 colors=68 dom=0x301020 foreign=66873
+[IMG1d] imgs=1,1 rt=1
+[IMG1i] 0 src=http://10.0.2.2:8854/fixture/IMG01.PNG complete=1 w=64 h=64 renderer=1
+[WIN] net fetch url=http://10.0.2.2:8854/fixture/FIX02D ok=1 status=200 bytes=507 effective=http://10.0.2.2:8854/fixture/FIX02D err=
+[WIN] load-ok url=http://10.0.2.2:8854/fixture/FIX02D ms=22597
+[IMG1d] imgs=1,1 rt=1
+[IMG1i] 0 src=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAATElEQVR42u3PQQkAAAgAseufzFhG8C0MVmA1/SYgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgcFncr4C1OHup8AAAAABJRU5ErkJggg== complete=1 w=64 h=64 renderer=1

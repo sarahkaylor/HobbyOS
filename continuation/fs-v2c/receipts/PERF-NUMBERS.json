@@ -1,0 +1,190 @@
+{
+  "meta": {
+    "binary_elf_sha": "649713f0d8d36df6febfec641ce81c7e706c4757d175596a2af2836d0fbb409d",
+    "binary_flat_sha": "f3761afd75a2d15441e67f8b770da525a4b0342dab8e3a920abf84fc1f3b178a",
+    "os_tip": "734b619",
+    "fork_tip": "16b88d4fb8",
+    "emulation": "qemu-system-aarch64 virt smp8 16G TCG",
+    "viewport_native": "1916x982 (window 1916x1018, chrome 36, scale 100%)",
+    "memory_high_water": "unavailable (V4 soak owns it)"
+  },
+  "runs": {
+    "dry-fixture": {
+      "frame_times_n": 20,
+      "render_ms": {
+        "mean": 209,
+        "min": 66,
+        "max": 721
+      },
+      "blit_ms": {
+        "mean": 29,
+        "min": 18,
+        "max": 52
+      },
+      "total_ms": {
+        "mean": 255,
+        "min": 124,
+        "max": 760
+      },
+      "stable_repaint": 10,
+      "reblit_cached": 309,
+      "fatal": 0,
+      "idlestuck": 0,
+      "img1d_positive": 6,
+      "img1i_total": 6,
+      "viewport": "1916x982",
+      "loads": {
+        "fixture-FIX01": {
+          "load_ok_ms": 7303,
+          "delta_ms": 7303,
+          "checksum": "0xab92ba47"
+        },
+        "fixture-FIX02": {
+          "load_ok_ms": 15253,
+          "delta_ms": 7950,
+          "checksum": "0xab92ba47"
+        },
+        "fixture-FIX02D": {
+          "load_ok_ms": 22597,
+          "delta_ms": 7344,
+          "checksum": "0x1739d8d3"
+        },
+        "fixture-FIX03": {
+          "load_ok_ms": 30177,
+          "delta_ms": 7580,
+          "checksum": "0x1739d8d3"
+        },
+        "fixture-FIX04": {
+          "load_ok_ms": 38056,
+          "delta_ms": 7879,
+          "checksum": "0x8f7f0f87"
+        },
+        "fixture-FIX05": {
+          "load_ok_ms": 45445,
+          "delta_ms": 7389,
+          "checksum": "0xe8700da6"
+        },
+        "fixture-HOME": {
+          "load_ok_ms": 52682,
+          "delta_ms": 7237,
+          "checksum": "0x44135d8c"
+        },
+        "fixture-TALL": {
+          "load_ok_ms": 62688,
+          "delta_ms": 10006,
+          "checksum": "0x44135d8c"
+        }
+      }
+    },
+    "dry-reader": {
+      "frame_times_n": 6,
+      "render_ms": {
+        "mean": 367,
+        "min": 119,
+        "max": 1198
+      },
+      "blit_ms": {
+        "mean": 27,
+        "min": 13,
+        "max": 51
+      },
+      "total_ms": {
+        "mean": 409,
+        "min": 176,
+        "max": 1243
+      },
+      "stable_repaint": 3,
+      "reblit_cached": 63,
+      "fatal": 0,
+      "idlestuck": 0,
+      "img1d_positive": 0,
+      "img1i_total": 0,
+      "viewport": "1916x982",
+      "loads": {
+        "reader-Hobbyist_operating_system": {
+          "load_ok_ms": 11418,
+          "delta_ms": 11418,
+          "checksum": "0xfd3915b9"
+        }
+      },
+      "final_frame": {
+        "view": "1916x982",
+        "nonZero": 7490472,
+        "checksum": "0x91d24588",
+        "note": "styled reader article frame (serial, post-load); step-level checksum 0xfd3915b9 is the HOME frame captured at load-ok"
+      }
+    },
+    "dry-clock": {
+      "frame_times_n": 6,
+      "render_ms": {
+        "mean": 370,
+        "min": 117,
+        "max": 1211
+      },
+      "blit_ms": {
+        "mean": 27,
+        "min": 18,
+        "max": 39
+      },
+      "total_ms": {
+        "mean": 412,
+        "min": 168,
+        "max": 1253
+      },
+      "stable_repaint": 3,
+      "reblit_cached": 63,
+      "fatal": 0,
+      "idlestuck": 0,
+      "img1d_positive": 0,
+      "img1i_total": 0,
+      "viewport": "1916x982",
+      "loads": {
+        "reader-Hobbyist_operating_system": {
+          "load_ok_ms": 11053,
+          "delta_ms": 11053,
+          "checksum": "0xfd3915b9"
+        }
+      },
+      "final_frame": {
+        "view": "1916x982",
+        "nonZero": 7490472,
+        "checksum": "0x91d24588",
+        "note": "styled reader article frame (serial, post-load); step-level checksum 0xfd3915b9 is the HOME frame captured at load-ok"
+      }
+    },
+    "dry-full": {
+      "frame_times_n": 2,
+      "render_ms": {
+        "mean": 240,
+        "min": 115,
+        "max": 365
+      },
+      "blit_ms": {
+        "mean": 28,
+        "min": 24,
+        "max": 31
+      },
+      "total_ms": {
+        "mean": 288,
+        "min": 156,
+        "max": 420
+      },
+      "stable_repaint": 1,
+      "reblit_cached": 41,
+      "fatal": 0,
+      "idlestuck": 0,
+      "img1d_positive": 0,
+      "img1i_total": 0,
+      "viewport": "1916x982",
+      "loads": {},
+      "fetch": {
+        "url": "http://10.0.2.2:8854/wiki/Web_browser",
+        "status": 200,
+        "bytes": 415161,
+        "persisted": "PAGE-NET.HTM",
+        "load_ok": false,
+        "gated_owner": "R7 (parser-completion)"
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+[WIN] viewport render=1916x982 (window content 1916x1018, chrome 36, scale 100%)
+[WIN] load-ok url=HOME.HTM ms=438
+[IMG1d] imgs=0,0 rt=1
+[WIN] frame view=1916x982 nonZero=7525894 checksum=0xfd3915b9
+[WIN] frame-times render=362ms blit=39ms total=426ms
+[IMG1p] view=1916x982 colors=190 dom=0x102030 foreign=47824
+[IMG1d] imgs=0,0 rt=1
+[WIN] frame view=1916x982 nonZero=7525894 checksum=0xfd3915b9
+[WIN] frame-times render=117ms blit=36ms total=168ms
+[IMG1p] view=1916x982 colors=190 dom=0x102030 foreign=47824
+[IMG1d] imgs=0,0 rt=1
+[WIN] net fetch url=http://10.0.2.2:8854/reader/Hobbyist_operating_system ok=1 status=200 bytes=1448 effective=http://10.0.2.2:8854/reader/Hobbyist_operating_system err=
+[WIN] load-ok url=http://10.0.2.2:8854/reader/Hobbyist_operating_system ms=11053
+[IMG1d] imgs=0,0 rt=1
+[WIN] frame view=1916x982 nonZero=7490472 checksum=0x91d24588
+[WIN] frame-times render=1211ms blit=24ms total=1253ms
+[IMG1p] view=1916x982 colors=256 dom=0xffffff foreign=69412
+[IMG1d] imgs=0,0 rt=1
+[WIN] frame view=1916x982 nonZero=7490472 checksum=0x91d24588
+[WIN] frame-times render=179ms blit=25ms total=221ms
+[IMG1p] view=1916x982 colors=256 dom=0xffffff foreign=69412
+[IMG1d] imgs=0,0 rt=1
+[WIN] viewport render=956x982 (window content 956x1018, chrome 36, scale 100%)
+[WIN] frame-times render=202ms blit=18ms total=228ms
+[IMG1p] view=956x982 colors=256 dom=0xffffff foreign=36867
+[IMG1d] imgs=0,0 rt=1
+[WIN] frame-times render=150ms blit=21ms total=179ms
+[IMG1p] view=956x982 colors=256 dom=0xffffff foreign=36867
+[IMG1d] imgs=0,0 rt=1

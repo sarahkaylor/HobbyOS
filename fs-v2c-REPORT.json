@@ -1,0 +1,42 @@
+{
+  "lane": "fs-v2c",
+  "tree": "/home/sarah/hobbyos-lanes/fs-v2",
+  "branch": "browser/fs-v2c",
+  "os_tip": "734b619",
+  "fork_tip": "16b88d4fb8",
+  "binary": {
+    "elf": "/home/sarah/webkit-lanes/ib/WebKitBuild/HobbyOS-arm/bin/WebProcess",
+    "elf_sha256": "649713f0d8d36df6febfec641ce81c7e706c4757d175596a2af2836d0fbb409d",
+    "flat_sha256": "f3761afd75a2d15441e67f8b770da525a4b0342dab8e3a920abf84fc1f3b178a",
+    "flat_bytes": 87560416
+  },
+  "verdict": "gated",
+  "gate": "CP-FS3 T2 checklist dry at merged state: fixture 8/8 + reader 1/1 PASS, T2-19 guest-clock receipt PASS; full-skin/direct rows gated-with-owner R7 (parser-completion), soak owner V4. Perf numbers captured.",
+  "runs": [
+    "continuation/fs-v2c/receipts/report-dry-fixture-v2.json",
+    "continuation/fs-v2c/receipts/report-dry-reader-v2.json",
+    "continuation/fs-v2c/receipts/report-dry-full-v2.json",
+    "continuation/fs-v2c/receipts/report-dry-clock-v2.json"
+  ],
+  "t2_checklist": "tests/fixtures/browser/T2-CHECKLIST.md",
+  "perf": "continuation/fs-v2c/receipts/PERF-NUMBERS.md",
+  "perf_json": "continuation/fs-v2c/receipts/PERF-NUMBERS.json",
+  "clock_probe_receipt": "continuation/fs-v2c/receipts/clock-probe-dry-clock.txt",
+  "proposal": "continuation/fs-v2c/browser-md-s11-proposal.md",
+  "evidence_dir": "continuation/fs-v2c/evidence/",
+  "summary": {
+    "fixture": "8 pass / 0 gated / 0 fail (FIX01-05+FIX02D+HOME+TALL; FIX02D+FIX05 were gated in V2 dry, now pass)",
+    "reader": "1 pass / 0 gated / 0 fail, load-ok, styled frame 0x91d24588, legible at 1916x982",
+    "full": "0 pass / 1 gated (net fetch 200 bytes=415161 persisted; no load-ok -> R7 parser-completion)",
+    "clock": "guest 1791278242 vs host 1791278229/8262 -> d13s PASS",
+    "frames": "viewport render=1916x982 (content 1916x1018, chrome 36, scale 100%) on all runs",
+    "fatal": 0,
+    "idlestuck": 0,
+    "perf_frame_times": "fixture render mean 209ms (66-721), blit mean 29ms; reader render mean 368ms (117-1211), blit mean 27ms; pure TCG"
+  },
+  "next_steps": [
+    "R7: land parser-completion fix (g0-direct-fixed9), then re-run full-skin + direct legs (T2-15/16/08/07-full/09-JPEG TBD)",
+    "V4: soak + memory high-water + merged-tree shell-GET leg (T2-17/18)",
+    "Apply browser.md s11 proposal (checklist + clock-probe runner step + perf)"
+  ]
+}
