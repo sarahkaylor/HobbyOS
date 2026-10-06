@@ -89,6 +89,20 @@ else
 BROWSER_BIN ?= $(HOME)/webkit-lanes/wf1b/WebKitBuild/HobbyOS-intel/bin/WebProcess
 endif
 
+# Bundled browser font (DejaVu Sans).  The windowed HobbyOSFontManager text
+# backend is DEFAULT ON since FS-R2 (retired /USE-FONT; an empty ::/NO-FONT
+# marker opts out deterministically) and reads the face as /DEJAVU.TTF on the
+# guest disk.  Extraction is rebuildable from the committed, sha-pinned zip
+# (see third_party/fonts/README.md).
+BROWSER_FONT := third_party/fonts/dejavu-2.37/ttf/DejaVuSans.ttf
+$(BROWSER_FONT): third_party/fonts/dejavu-fonts-ttf-2.37.zip third_party/fonts/dejavu-2.37.sha256
+	@cd third_party/fonts && tmp=$$(mktemp -d) \
+	  && unzip -q dejavu-fonts-ttf-2.37.zip -d $$tmp \
+	  && rm -rf dejavu-2.37 \
+	  && mv $$tmp/dejavu-fonts-ttf-2.37 dejavu-2.37 \
+	  && rmdir $$tmp \
+	  && sha256sum -c dejavu-2.37.sha256
+
 # Include path for the X11 support library headers (src/user/x11/include),
 # added only to the rules that need it: the library and X11 apps.  Defined
 # here so arm, intel and host builds all see it.
@@ -1747,6 +1761,8 @@ endif
 	  $(MCOPY) -i disk.img obj/$(ARCH)/browser.bin ::/BROWSER.BIN; \
 	  $(MCOPY) -i disk.img tests/fixtures/browser/HOME.HTM ::/HOME.HTM; \
 	  $(MCOPY) -i disk.img tests/fixtures/browser/TALL.HTM ::/TALL.HTM; \
+	  [ -f "$(BROWSER_FONT)" ] || $(MAKE) --no-print-directory $(BROWSER_FONT); \
+	  $(MCOPY) -i disk.img $(BROWSER_FONT) ::/DEJAVU.TTF; \
 	else \
 	  echo "browser: BROWSER_BIN not present ($(BROWSER_BIN)) — Apps menu ships without browser"; \
 	fi
