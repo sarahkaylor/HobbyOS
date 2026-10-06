@@ -31,54 +31,159 @@ static inline uint64_t rdtsc(void) {
 }
 
 static uint32_t calib_start_count = 0;
-static uint64_t calib_start_ticks = 0;
-static uint64_t calib_start_tsc = 0;
 static int calib_state = 0; // 0 = not started, 1 = measuring, 2 = done
 
 static inline void outb(uint16_t port, uint8_t val) {
   __asm__ volatile("outb %0, %1" : : "a"(val), "Nd"(port));
 }
 
+static inline uint8_t inb(uint16_t port) {
+  uint8_t v;
+  __asm__ volatile("inb %1, %0" : "=a"(v) : "Nd"(port));
+  return v;
+}
+
+/* Latch + read the PIT channel-0 countdown counter (8254, 1.193182 MHz).
+   The counter walks 11931 counts per 10 ms period regardless of which
+   interrupts are delivered, so it is the one clean wall-time reference
+   available at boot (see lapic_timer_calibration_tick below). */
+static uint32_t pit_counter_read(void) {
+  outb(0x43, 0x00); // latch channel 0
+  uint8_t lo = inb(0x40);
+  uint8_t hi = inb(0x40);
+  return (uint32_t)(lo | (hi << 8));
+}
+
 extern void uart_puts(const char *s);
 extern void print_int(int val);
 
 /**
- * Drives the one-time LAPIC timer calibration from the boot core's ticks.
- * Called on every CPU0 tick until done; measures the LAPIC countdown rate
- * against the PIT-driven tick clock.
+ * Drives the one-time TSC calibration from the boot core's ticks.
+ * Called on every CPU0 tick; the actual measurement is a single ~60 ms
+ * busy-wait inside the first tick (IRQs are masked there, so the counter
+ * sampling below is the only thing this core does).
+ *
+ * The TSC rate is measured against the PIT channel-0 COUNTER, not the
+ * tick counter: on x64 the firmware (OVMF/EDK2) arms its own periodic
+ * LAPIC timer on vector 32 and leaves it unmasked, so vector-32 arrives
+ * far faster than the PIT's 100 Hz during early boot.  Measuring against
+ * the PIT COUNT would then count the fake ticks, compute an elapsed_ms
+ * that is many times the real window, and derive a tsc_per_ms that is
+ * many times too low -> timer_get_ms() runs 5-15x fast, collapsing
+ * LOSTWAKE_DEAD_OWNER_MS=2000 to a few hundred real-ms and making the
+ * x64 idle lost-wake reaper dispose live processes (the -smp 8 desktop
+ * crash).  The hardware counter is immune to that noise.
+ *
+ * The counter is sampled in a TIGHT loop (not once per tick): sampled at
+ * the tick cadence its ~10 ms period collides with the 10 ms tick spacing
+ * and a whole period can slip between two samples, biasing the clock
+ * ~1.5x slow.  A few-hundred-microsecond sample interval catches every
+ * wrap.
  */
 static void lapic_timer_calibration_tick(void) {
   if (calib_state == 2) {
     return;
   }
-  if (calib_state == 0) {
-    LAPIC_TDC = 0x3;              // divide by 16
-    LAPIC_TIC_INIT = 0xFFFFFF00u; // start a long one-shot count
-    calib_start_count = LAPIC_TIC_CUR;
-    calib_start_ticks = timer_ticks;
-    calib_start_tsc = rdtsc();
-    calib_state = 1;
-    return;
+
+  // LAPIC one-shot still measured here (parity with the old code; the
+  // value is only consumed by lapic_timer_start_periodic()).
+  LAPIC_TDC = 0x3;              // divide by 16
+  LAPIC_TIC_INIT = 0xFFFFFF00u; // start a long one-shot count
+  calib_start_count = LAPIC_TIC_CUR;
+  uint64_t t0 = rdtsc();
+
+  // --- tight-counter accumulation over ~60 ms (12 PIT periods) ---
+  uint32_t last = pit_counter_read();
+  uint64_t counts = 0;
+  uint64_t tsc_used = 0;
+  for (;;) {
+    uint32_t c = pit_counter_read();
+    if (c > last) { // wrapped: this sample crossed the 0->11931 reload
+      counts += last + 11931u - c;
+    } else {
+      counts += last - c;
+    }
+    last = c;
+    tsc_used = rdtsc() - t0;
+    // 8254 mode 3 is a square-wave counter: it decrements by TWO per
+    // clock (verified: QEMU i8254.c mode 3 = count - (2*d)%count; the
+    // real 8254 counts by two in mode 3 as well).  A full 11931-count
+    // cycle therefore covers HALF the ~10 ms output period, i.e. ~5 ms.
+    if (counts >= 12ULL * 11931ULL) {
+      break; // >= ~60 ms of PIT time accumulated
+    }
+    // Safety bound for a dead/frozen PIT (~200 ms at 2.6 GHz): fall
+    // through with whatever counts were seen.
+    if (tsc_used > 700000000ULL) {
+      break;
+    }
   }
 
-  if (timer_ticks - calib_start_ticks >= 20) {
-    uint32_t used = calib_start_count - LAPIC_TIC_CUR;
-    uint32_t elapsed_ms = (uint32_t)((timer_ticks - calib_start_ticks) * 10);
-    uint64_t tsc_used = rdtsc() - calib_start_tsc;
-    LAPIC_TIC_INIT = 0; // stop the calibration count
-    lapic_counts_per_ms = used / elapsed_ms;
-    if (lapic_counts_per_ms == 0) {
-      // Timer did not count (or wrapped): fall back to a safe default.
-      lapic_counts_per_ms = 100000;
+  uint32_t lapic_used = calib_start_count - LAPIC_TIC_CUR;
+  LAPIC_TIC_INIT = 0; // stop the calibration count
+  /* Mode-3 count-by-two: the PIT counter decrements 2 counts per
+     1.193182 MHz clock, so counts/s = 2 * 1193182 and the elapsed time
+     is counts / (2 * 1193182).  (See the accumulation loop above.) */
+  uint64_t elapsed_us = counts * 500000ULL / 1193182ULL;
+
+  /* --- X2 probe: second independent measurement window --- */
+  {
+    uint32_t last2 = pit_counter_read();
+    uint64_t counts2 = 0;
+    uint64_t t0b = rdtsc();
+    uint64_t tsc2 = 0;
+    for (;;) {
+      uint32_t cc = pit_counter_read();
+      if (cc > last2) counts2 += last2 + 11931u - cc;
+      else counts2 += last2 - cc;
+      last2 = cc;
+      tsc2 = rdtsc() - t0b;
+      if (counts2 >= 12ULL * 11931ULL) break;
+      if (tsc2 > 700000000ULL) break;
     }
-    tsc_per_ms = tsc_used / elapsed_ms;
-    calib_state = 2;
-    uart_puts("[KERNEL] LAPIC timer rate: ");
-    print_int((int)lapic_counts_per_ms);
-    uart_puts(" counts/ms, TSC rate: ");
+    uint64_t el2_us = counts2 * 500000ULL / 1193182ULL;
+    uint64_t rate2 = el2_us ? tsc2 * 1000ULL / el2_us : 0;
+    uart_puts("[X2CAL] counts=");
+    print_int((int)(counts / 11931));
+    uart_puts("p c2=");
+    print_int((int)(counts2 / 11931));
+    uart_puts("p tsc_used=");
+    print_int((int)(tsc_used / 1000000));
+    uart_puts("M tsc2=");
+    print_int((int)(tsc2 / 1000000));
+    uart_puts("M rate=");
     print_int((int)tsc_per_ms);
-    uart_puts(" ticks/ms\n");
+    uart_puts(" rate2=");
+    print_int((int)rate2);
+    uart_puts("\n");
   }
+
+  if (elapsed_us > 0) {
+    uint32_t lapic_elapsed_ms = (uint32_t)(elapsed_us / 1000);
+    lapic_counts_per_ms = lapic_used / (lapic_elapsed_ms ? lapic_elapsed_ms : 1);
+    if (lapic_counts_per_ms == 0) {
+      lapic_counts_per_ms = 100000; // safe default, never used on x64
+    }
+    tsc_per_ms = tsc_used * 1000ULL / elapsed_us;
+  } else {
+    lapic_counts_per_ms = 100000;
+    tsc_per_ms = 0; // unmeasurable: fall back to the tick clock
+  }
+
+  /* Conservative bound: never let the TSC clock run AHEAD of wall time.
+     A correct rate here is >= ~700 MHz on every machine HobbyOS runs on;
+     a rate below that is a broken/emulated timebase and the tick-based
+     fallback (which at least never reads as faster than realistic) is
+     safer than a 5-15x fast clock collapsing the lost-wake deadlines. */
+  if (tsc_per_ms > 0 && tsc_per_ms < 700000) {
+    tsc_per_ms = 0;
+  }
+  calib_state = 2;
+  uart_puts("[KERNEL] LAPIC timer rate: ");
+  print_int((int)lapic_counts_per_ms);
+  uart_puts(" counts/ms, TSC rate: ");
+  print_int((int)tsc_per_ms);
+  uart_puts(" ticks/ms (PIT-counter calibrated)\n");
 }
 
 /**
@@ -116,6 +221,16 @@ void timer_init(void) {
     // Send divisor
     outb(0x40, (uint8_t)(divisor & 0xFF));
     outb(0x40, (uint8_t)((divisor >> 8) & 0xFF));
+
+    /* Stop and mask the LAPIC timer that the firmware (OVMF/EDK2) left
+       armed as a PERIODIC vec-32 source (unmasked, div-1, 10M count):
+       while it runs it delivers vector-32 far faster than the PIT's
+       100 Hz, corrupting the early-boot tick cadence the TSC calibration
+       used to measure against.  Stop the countdown and mask the LVT so
+       no stray APIC tick can fire again; the calibration below re-arms
+       its own one-shot (masked) to finish the LAPIC rate census. */
+    LAPIC_TIC_INIT = 0;
+    LAPIC_LVT_TIMER = 32u | (1u << 16); // vec 32, masked
 
     // Unmask PIT timer interrupt locally
     extern void gic_enable_interrupt(uint32_t intid);
