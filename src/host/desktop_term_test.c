@@ -113,13 +113,22 @@ static void test_opt_in_and_size(void) {
   feed(win, "\033]V 1~");
   check(win->term_mode == 1, "ESC ] V 1 ~ switches the window into terminal mode");
 
-  /* One window fills the screen: 1024x768 -> content 1024 wide, 742 high,
-   * minus chrome -> 69 rows of 10px and (1024-12)/8 = 126 columns. */
-  check(win->term_rows == 69 && win->term_cols == 126,
-        "grid matches the window's content area (69x126)");
+  /* One window fills the screen: mode-sized content (SCREEN_WIDTH wide,
+   * SCREEN_HEIGHT-TASKBAR_H high), minus chrome -> (h-48)/10 rows and
+   * (w-12)/8 columns, capped at the grid limits TERM_MAX_ROWS/COLS
+   * (see term_fit_rows/cols in window.c). */
+  {
+    int r = (SCREEN_HEIGHT - TASKBAR_H - 48) / 10;
+    int c = (SCREEN_WIDTH - 12) / 8;
+    if (r > TERM_MAX_ROWS) r = TERM_MAX_ROWS;
+    if (c > TERM_MAX_COLS) c = TERM_MAX_COLS;
+    check(win->term_rows == r && win->term_cols == c,
+          "grid matches the window's content area (capped)");
 
-  check_drain(rd, "\033]S 69;126~",
-              "the app is answered with ESC ] S 69;126 ~");
+    char want[32];
+    snprintf(want, sizeof want, "\033]S %d;%d~", r, c);
+    check_drain(rd, want, "the app is answered with ESC ] S rows;cols ~");
+  }
 
   wm_remove_window(id);
 }
@@ -225,22 +234,34 @@ static void test_reflow_resize(void) {
   char buf[64];
   feed(win, "\033]V 1~");
   drain(rd, buf, sizeof buf);
-  check(win->term_cols == 126, "one window: 126 columns");
+
+  int wide_cols = (SCREEN_WIDTH - 12) / 8;
+  int rows = (SCREEN_HEIGHT - TASKBAR_H - 48) / 10;
+  if (rows > TERM_MAX_ROWS) rows = TERM_MAX_ROWS;
+  if (wide_cols > TERM_MAX_COLS) wide_cols = TERM_MAX_COLS;
+  check(win->term_cols == wide_cols, "one window: wide columns");
 
   /* A second window halves the width; update_layout runs inside
    * wm_create_window, so the terminal window is re-sized and told. */
   int id2 = wm_create_window(0, 1, -1, -1);
   (void)id2;
-  check(win->term_cols == 62, "two windows: the grid narrows to 62 columns");
-  check(win->term_rows == 69, "the rows stay the same");
-
-  check_drain(rd, "\033]S 69;62~",
-              "the app is told the new size (ESC ] S 69;62 ~)");
+  int half_cols = (SCREEN_WIDTH / 2 - 12) / 8;
+  if (half_cols > TERM_MAX_COLS) half_cols = TERM_MAX_COLS;
+  check(win->term_cols == half_cols, "two windows: the grid narrows to half");
+  check(win->term_rows == rows, "the rows stay the same");
+  {
+    char want[32];
+    snprintf(want, sizeof want, "\033]S %d;%d~", rows, half_cols);
+    check_drain(rd, want, "the app is told the new size");
+  }
 
   wm_remove_window(id2);
-  check(win->term_cols == 126, "closing the window restores the wide grid");
-  check_drain(rd, "\033]S 69;126~",
-              "and the app is told about that too");
+  check(win->term_cols == wide_cols, "closing the window restores the wide grid");
+  {
+    char want[32];
+    snprintf(want, sizeof want, "\033]S %d;%d~", rows, wide_cols);
+    check_drain(rd, want, "and the app is told about that too");
+  }
 
   wm_remove_window(id);
 }

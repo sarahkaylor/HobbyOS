@@ -293,9 +293,11 @@ static void test_gradient_old_case_unchanged(void) {
   CHECK(graphics_get_pixel(0, 399) == C(44, 56, 96), "short full-width span keeps the passed bottom colour");
 
   reset();
-  graphics_fill_gradient_v(0, 1, SCREEN_WIDTH, 742, C(16, 20, 38), C(44, 56, 96));
+  graphics_fill_gradient_v(0, 1, SCREEN_WIDTH, SCREEN_HEIGHT - TASKBAR_H,
+                           C(16, 20, 38), C(44, 56, 96));
   CHECK(graphics_get_pixel(0, 1) == C(16, 20, 38), "offset full-size span keeps the passed top colour");
-  CHECK(graphics_get_pixel(0, 742) == C(44, 56, 96), "offset full-size span keeps the passed bottom colour");
+  CHECK(graphics_get_pixel(0, SCREEN_HEIGHT - TASKBAR_H) == C(44, 56, 96),
+        "offset full-size span keeps the passed bottom colour");
 
   /* The taskbar strip span (desktop.c) stays a plain ramp too. */
   reset();
@@ -322,37 +324,42 @@ static void test_wallpaper_endpoints(void) {
   CHECK(graphics_get_pixel(SCREEN_WIDTH - 1, 0) == C(12, 16, 34), "wallpaper top spans the full width");
   CHECK(graphics_get_pixel(0, WP_H - 1) == C(34, 44, 72), "wallpaper bottom = dark slate (34,44,72) at the taskbar line");
   CHECK(graphics_get_pixel(SCREEN_WIDTH / 2, WP_H - 1) == C(34, 44, 72), "wallpaper bottom row spans the full width");
-  CHECK(graphics_get_pixel(0, 100) == C(14, 19, 39), "wallpaper row 100 interpolates navy -> slate");
-  CHECK(graphics_get_pixel(0, 370) == C(22, 30, 55), "wallpaper row 370 interpolates navy -> slate");
-  CHECK(graphics_get_pixel(0, 556) == C(28, 37, 62), "wallpaper row 556 interpolates navy -> slate");
+  CHECK(graphics_get_pixel(0, 100) == C(14, 18, 37), "wallpaper row 100 interpolates navy -> slate");
+  CHECK(graphics_get_pixel(0, 370) == C(21, 28, 56), "wallpaper row 370 interpolates navy -> slate");
+  CHECK(graphics_get_pixel(0, 556) == C(23, 30, 55), "wallpaper row 556 interpolates navy -> slate");
   CHECK(graphics_get_pixel(0, WP_H - 2) == C(33, 43, 71), "wallpaper row before the taskbar is dark slate");
 }
 
 static void test_wallpaper_lighter_band(void) {
   reset();
   fill_wallpaper();
-  /* The lighter band peaks at 38% of the height: row 281 of 742. */
-  CHECK(graphics_get_pixel(10, 281) == C(23, 30, 60), "wallpaper band peak colour (23,30,60)");
-  CHECK(graphics_get_pixel(600, 281) == C(23, 30, 60), "wallpaper band is horizontal across the width");
-  CHECK(graphics_get_pixel(SCREEN_WIDTH - 1, 281) == C(23, 30, 60), "wallpaper band reaches the right edge");
-  /* 48 is the plain navy -> slate value at row 281; the band lifts blue by 12. */
-  CHECK((int)(graphics_get_pixel(0, 281) & 0xFF) == 48 + 12, "wallpaper band lifts blue by 12 over the plain ramp");
-  CHECK((int)((graphics_get_pixel(0, 281) >> 16) & 0xFF) == 20 + 3, "wallpaper band lifts red slightly");
-  CHECK((int)((graphics_get_pixel(0, 281) >> 8) & 0xFF) == 26 + 4, "wallpaper band lifts green slightly");
+  /* The lighter band peaks at 38% of the height: row 400 of 1054.
+   * (Rows here are derived from the mode so the checks stay at the band
+   * centre/fade for any height.) */
+  int peak_row = (WP_H * 38) / 100;
+  int fade_row = peak_row + WP_H / 6;
+  CHECK(graphics_get_pixel(10, peak_row) == C(23, 30, 60), "wallpaper band peak colour (23,30,60)");
+  CHECK(graphics_get_pixel(600, peak_row) == C(23, 30, 60), "wallpaper band is horizontal across the width");
+  CHECK(graphics_get_pixel(SCREEN_WIDTH - 1, peak_row) == C(23, 30, 60), "wallpaper band reaches the right edge");
+  /* 48 is the plain navy -> slate value at the band centre; the band lifts
+   * blue by 12. */
+  CHECK((int)(graphics_get_pixel(0, peak_row) & 0xFF) == 48 + 12, "wallpaper band lifts blue by 12 over the plain ramp");
+  CHECK((int)((graphics_get_pixel(0, peak_row) >> 16) & 0xFF) == 20 + 3, "wallpaper band lifts red slightly");
+  CHECK((int)((graphics_get_pixel(0, peak_row) >> 8) & 0xFF) == 26 + 4, "wallpaper band lifts green slightly");
   /* The band fades out h/6 rows from its centre... */
-  CHECK(graphics_get_pixel(0, 404) == C(23, 31, 54), "wallpaper band faded out at centre + h/6 (row 404)");
+  CHECK(graphics_get_pixel(0, fade_row) == C(24, 31, 54), "wallpaper band faded out at centre + h/6");
   /* ...and the first/last rows keep the exact endpoint colours. */
   CHECK(graphics_get_pixel(0, 0) == C(12, 16, 34), "band never reaches the top row");
   CHECK(graphics_get_pixel(0, WP_H - 1) == C(34, 44, 72), "band never reaches the bottom row");
   /* Blue rises monotonically into the band and again below it. */
   int prev = 0, mono_up = 1, mono_down = 1;
-  for (int row = 0; row <= 281; row++) {
+  for (int row = 0; row <= peak_row; row++) {
     int b = (int)(graphics_get_pixel(0, row) & 0xFF);
     if (b < prev) mono_up = 0;
     prev = b;
   }
   prev = 0;
-  for (int row = 404; row < WP_H; row++) {
+  for (int row = fade_row; row < WP_H; row++) {
     int b = (int)(graphics_get_pixel(0, row) & 0xFF);
     if (b < prev) mono_down = 0;
     prev = b;
@@ -373,8 +380,8 @@ static void test_wallpaper_clip(void) {
   fill_wallpaper();
   graphics_reset_clip();
   CHECK(graphics_get_pixel(99, 100) == 0, "wallpaper obeys clip (left of clip)");
-  CHECK(graphics_get_pixel(100, 100) == C(14, 19, 39), "wallpaper paints inside the clip");
-  CHECK(graphics_get_pixel(103, 100) == C(14, 19, 39), "wallpaper paints the last clipped pixel");
+  CHECK(graphics_get_pixel(100, 100) == C(14, 18, 37), "wallpaper paints inside the clip");
+  CHECK(graphics_get_pixel(103, 100) == C(14, 18, 37), "wallpaper paints the last clipped pixel");
   CHECK(graphics_get_pixel(104, 100) == 0, "wallpaper obeys clip (right of clip)");
   CHECK(graphics_get_pixel(100, 101) == 0, "wallpaper obeys clip (below clip)");
   CHECK(graphics_get_pixel(0, 0) == 0, "wallpaper obeys clip (screen top untouched)");
@@ -447,7 +454,7 @@ static void test_window_tiling_and_titlebar(void) {
 
   struct window *win = &windows[0];
   CHECK(win->x == 0 && win->y == 0 && win->w == SCREEN_WIDTH && win->h == WP_H,
-        "single window fills the tiled area (1024 x 742)");
+        "single window fills the tiled area (mode-sized)");
 
   CHECK(px_w(win, 4, 6) == C(96, 166, 255), "focused title bar is the bright blue (96,166,255)");
   CHECK(px_w(win, 300, 3) == C(96, 166, 255), "focused title bar blue across the bar");

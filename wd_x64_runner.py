@@ -13,7 +13,7 @@ Usage: wd_x64_runner.py [--disk PATH] [--outdir DIR] [--tag NAME]
 """
 import argparse, json, os, socket, subprocess, sys, time
 
-W, H = 1024, 768
+W, H = 1920, 1080
 REPO = os.path.dirname(os.path.abspath(__file__))
 
 

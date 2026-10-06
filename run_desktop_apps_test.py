@@ -39,7 +39,7 @@ APPS = [
     ("UNIT", "UNIT.BIN"),
 ]
 
-W, H = 1024, 768
+W, H = 1920, 1080
 TASKBAR_Y = H - 26
 
 

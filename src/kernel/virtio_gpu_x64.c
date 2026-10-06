@@ -43,11 +43,13 @@
 #endif
 
 #include "virtio_gpu.h"
+#include "display_mode.h"
 #include "lock.h"
 #include "arch/cpu.h"
 
-#define GPU_SCREEN_W 1024
-#define GPU_SCREEN_H 768
+/* R6: mode constants live in display_mode.h (single shared definition). */
+#define GPU_SCREEN_W DISPLAY_WIDTH
+#define GPU_SCREEN_H DISPLAY_HEIGHT
 
 /* Present-path modes (exported to the unit tests via _active_mode()). */
 #define VGPU_MODE_NONE   0
@@ -135,7 +137,8 @@ static void bga_write(uint16_t index, uint16_t data) {
   outw(VBE_DISPI_IOPORT_DATA, data);
 }
 
-/* Probe + program the Bochs VGA (PCI 1234:1111) at 1024x768x32 with LFB.
+/* Probe + program the Bochs VGA (PCI 1234:1111) at the shared desktop
+ * mode (GPU_SCREEN_W x GPU_SCREEN_H x 32, display_mode.h) with LFB.
  * Returns 0 on success. */
 static int bga_setup(void) {
   int found = 0;
@@ -156,8 +159,8 @@ static int bga_setup(void) {
   if (!found || bga_framebuffer_phys == 0) return -1;
 
   bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
-  bga_write(VBE_DISPI_INDEX_XRES, 1024);
-  bga_write(VBE_DISPI_INDEX_YRES, 768);
+  bga_write(VBE_DISPI_INDEX_XRES, GPU_SCREEN_W);
+  bga_write(VBE_DISPI_INDEX_YRES, GPU_SCREEN_H);
   bga_write(VBE_DISPI_INDEX_BPP, 32);
   bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_ENABLED | VBE_DISPI_LFB);
   return 0;
@@ -696,9 +699,10 @@ int virtio_gpu_x64_is_gpu_dev(uint16_t vendor, uint16_t device) {
          (device == VIRTIO_PCI_DEV_GPU_MODERN || device == VIRTIO_PCI_DEV_GPU_LEGACY);
 }
 
-/* Clamp a screen-space rect to 1024x768.  Returns 1 and writes the clipped
- * rect when any pixel remains, 0 for empty/off-screen rects.  64-bit math:
- * rect coordinates come from user space, so x+w / y+h can overflow int32. */
+/* Clamp a screen-space rect to the desktop panel (display_mode.h).  Returns
+ * 1 and writes the clipped rect when any pixel remains, 0 for empty/off-screen
+ * rects.  64-bit math: rect coordinates come from user space, so x+w / y+h
+ * can overflow int32. */
 int virtio_gpu_x64_clamp_rect(int32_t x, int32_t y, int32_t w, int32_t h,
                               int32_t* ox, int32_t* oy, int32_t* ow, int32_t* oh) {
   if (!ox || !oy || !ow || !oh) return 0;
@@ -717,9 +721,9 @@ int virtio_gpu_x64_clamp_rect(int32_t x, int32_t y, int32_t w, int32_t h,
   return 1;
 }
 
-/* Byte offset of (x,y) in the 1024x768x32 backing store -- the
- * TRANSFER_TO_HOST_2D offset (spec: offset of the rectangle in the
- * resource, stride 1024*4). */
+/* Byte offset of (x,y) in the (GPU_SCREEN_W * GPU_SCREEN_H) x32 backing
+ * store -- the TRANSFER_TO_HOST_2D offset (spec: offset of the rectangle in
+ * the resource, stride GPU_SCREEN_W*4). */
 uint64_t virtio_gpu_x64_rect_offset(int32_t x, int32_t y) {
   return (uint64_t)y * (GPU_SCREEN_W * 4) + (uint64_t)x * 4;
 }

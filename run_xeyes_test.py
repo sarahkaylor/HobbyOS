@@ -37,7 +37,7 @@ SERIAL_LOG = "/tmp/xeyes_serial.log"
 SHOT_DIR = "/tmp/hobbyos_xeyes"
 QEMU_BIN = "qemu-system-aarch64"
 
-W, H = 1024, 768
+W, H = 1920, 1080
 TASKBAR_Y = H - 26
 
 # The desktop's single-window tile is the whole area above the taskbar;

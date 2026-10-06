@@ -1,0 +1,8 @@
+[GPUDIAG] gpu wait > 8 ms: ack=3 used=4 (park off)
+[GPU] virtio-gpu mmio irq=78
+VirtIO GPU successfully initialized.
+VirtIO Input devices successfully initialized.
+VirtIO Block successfully initialized.
+VirtIO Network successfully initialized.
+Desktop starting...
+[MENU] count=128

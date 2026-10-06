@@ -11,6 +11,7 @@
 #include <signal.h>
 
 #include "../user_include/libc.h"
+#include "../user_include/graphics/graphics.h"
 
 #undef open
 #undef read
@@ -74,7 +75,7 @@ int ho_pipe(int fds[2]) {
 
 // Mock Framebuffer
 static uint32_t *mock_fb = NULL;
-#define MOCK_FB_SIZE (1024 * 768 * 4)
+#define MOCK_FB_SIZE (SCREEN_WIDTH * SCREEN_HEIGHT * 4)
 
 void print(const char *str) {
   write(1, str, strlen(str));
@@ -326,8 +327,8 @@ int dump_screenshot(const char *filename) {
   if (!mock_fb) return -1;
   FILE *f = fopen(filename, "wb");
   if (!f) return -1;
-  fprintf(f, "P6\n1024 768\n255\n");
-  for (int i = 0; i < 1024 * 768; i++) {
+  fprintf(f, "P6\n%d %d\n255\n", SCREEN_WIDTH, SCREEN_HEIGHT);
+  for (int i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) {
     uint32_t color = mock_fb[i];
     uint8_t r = (color >> 16) & 0xFF;
     uint8_t g = (color >> 8) & 0xFF;
@@ -362,12 +363,12 @@ int validate_screenshot(const char *expected_filename) {
   if (fscanf(f, "%d %d\n%d\n", &w, &h, &maxval) != 3) {
     fclose(f); return -1;
   }
-  if (w != 1024 || h != 768) {
+  if (w != SCREEN_WIDTH || h != SCREEN_HEIGHT) {
     fclose(f); return -1;
   }
 
   int mismatch = 0;
-  for (int i = 0; i < 1024 * 768; i++) {
+  for (int i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) {
     uint8_t rgb[3];
     if (fread(rgb, 1, 3, f) != 3) {
       printf("[TEST] Unexpected EOF in expected image.\n");
@@ -380,7 +381,7 @@ int validate_screenshot(const char *expected_filename) {
     uint8_t b = color & 0xFF;
     if (r != rgb[0] || g != rgb[1] || b != rgb[2]) {
       printf("[TEST] Pixel mismatch at (%d, %d). Expected (%d,%d,%d), Got (%d,%d,%d)\n",
-             i % 1024, i / 1024, rgb[0], rgb[1], rgb[2], r, g, b);
+             i % SCREEN_WIDTH, i / SCREEN_WIDTH, rgb[0], rgb[1], rgb[2], r, g, b);
       mismatch = 1;
       break;
     }
