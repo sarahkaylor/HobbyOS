@@ -120,3 +120,11 @@ third_party/libffi-3.4.8/.fetched-ok
 third_party/libcxx-21.1.8/llvm-*.tar.xz
 third_party/libcxx-21.1.8/src/
 third_party/libcxx-21.1.8/.fetched-ok
+
+# WebKit fork vendoring (browser.md §11, 2026-10-07): committed = the snapshot
+# parts + SHA256SUMS + extract.sh + build.sh + the optional binary cache
+# (third_party/webkit-hobbyos/cache/); the extracted source tree and the
+# from-source build output are rebuilt from the parts (extract.sh / build.sh).
+third_party/webkit-hobbyos/src/
+third_party/webkit-hobbyos/src-wk2/
+third_party/webkit-hobbyos/build/

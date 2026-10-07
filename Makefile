@@ -74,20 +74,36 @@ QEMU_GPU ?= auto
 OBJ_DIR = obj/$(ARCH)
 MODE_FILE = $(OBJ_DIR)/.mode
 
-# Flat WebProcess binary (WK-5 windowed browser shell).  The browser is a
-# fork artifact (webkit-hobbyos); the OS tree stays self-contained, so when
-# BROWSER_BIN is unset or missing the standard disk simply ships without the
-# browser and the Apps menu omits it.  Defaults point at known-good WINDOWED
+# Flat WebProcess binary (WK-5 windowed browser shell).  The browser SOURCE is
+# vendored in this repo since 2026-10-07 — third_party/webkit-hobbyos/
+# (sha-verified snapshot parts + extract.sh + build.sh; see its README.md).
+# Build from source with:   make browser
+#   (or:  bash third_party/webkit-hobbyos/build.sh --arch intel --build-deps)
+# Source order used by disk.img: (1) BROWSER_BIN if present (explicit override
+# or a local fork/worktree build; defaults below), (2) the vendored-source
+# build output (third_party/webkit-hobbyos/build/<arch>/browser.bin), (3) the
+# OPTIONAL binary cache (third_party/webkit-hobbyos/cache/) for machines that
+# have not built anything yet, (4) skip — the disk ships without the browser
+# and the Apps menu omits it.  Defaults point at known-good WINDOWED
 # WebProcess builds per arch (the canonical ARM one is the pre-WK-4b
 # renderer verified green by WN3; the intel one is WF1B's fresh merged-tree
-# build — the canonical intel dir is stale/pre-windowed).  Refresh these
-# from the fork's merged builds once the render/TLS gate closes.  Override
-# on the command line with:  make disk.img BROWSER_BIN=/path/to/WebProcess
+# build — the canonical intel dir is stale/pre-windowed).  Override on the
+# command line with:  make disk.img BROWSER_BIN=/path/to/WebProcess
 ifeq ($(ARCH),arm)
 BROWSER_BIN ?= $(HOME)/webkit-hobbyos/WebKitBuild/HobbyOS-arm-wk5/bin/WebProcess
 else
 BROWSER_BIN ?= $(HOME)/webkit-lanes/wf1b/WebKitBuild/HobbyOS-intel/bin/WebProcess
 endif
+# Vendored-source build output + optional binary cache (browser.md §11, 2026-10-07).
+BROWSER_BUILT ?= third_party/webkit-hobbyos/build/$(ARCH)/browser.bin
+BROWSER_CACHE ?= third_party/webkit-hobbyos/cache/browser-$(ARCH).bin.xz
+XZ ?= xz
+
+# Build WebProcess from the vendored WebKit fork source (source-first path).
+# BUILD_ARGS forwards flags:  make browser BUILD_ARGS='--arch intel --build-deps'
+.PHONY: browser
+browser:
+	bash third_party/webkit-hobbyos/build.sh --arch $(ARCH) $(BUILD_ARGS)
 
 # Bundled browser font (DejaVu Sans).  The windowed HobbyOSFontManager text
 # backend is DEFAULT ON since FS-R2 (retired /USE-FONT; an empty ::/NO-FONT
@@ -1755,16 +1771,23 @@ endif
 	$(MCOPY) -i disk.img $(TIMEOUT_BIN) ::/TIMEOUT.BIN
 	$(MCOPY) -i disk.img $(NFSTEST_BIN) ::/NFSTEST.BIN
 	$(MCOPY) -i disk.img $(DESKTOP_BIN) ::/DESKTOP.BIN
-	@if [ -f "$(BROWSER_BIN)" ]; then \
-	  $(OBJCOPY) -O binary "$(BROWSER_BIN)" obj/$(ARCH)/browser.bin && \
-	  echo "browser: $(BROWSER_BIN) -> obj/$(ARCH)/browser.bin (flat, installed as ::/BROWSER.BIN)"; \
+	@src=""; \
+	if [ -f "$(BROWSER_BIN)" ]; then \
+	  $(OBJCOPY) -O binary "$(BROWSER_BIN)" obj/$(ARCH)/browser.bin && src="$(BROWSER_BIN)"; \
+	elif [ -f "$(BROWSER_BUILT)" ]; then \
+	  mkdir -p obj/$(ARCH) && cp "$(BROWSER_BUILT)" obj/$(ARCH)/browser.bin && src="$(BROWSER_BUILT) (vendored-source build)"; \
+	elif [ -f "$(BROWSER_CACHE)" ]; then \
+	  mkdir -p obj/$(ARCH) && $(XZ) -dc "$(BROWSER_CACHE)" > obj/$(ARCH)/browser.bin && src="$(BROWSER_CACHE) (cache)"; \
+	fi; \
+	if [ -n "$$src" ]; then \
+	  echo "browser: $$src -> obj/$(ARCH)/browser.bin (flat, installed as ::/BROWSER.BIN)"; \
 	  $(MCOPY) -i disk.img obj/$(ARCH)/browser.bin ::/BROWSER.BIN; \
 	  $(MCOPY) -i disk.img tests/fixtures/browser/HOME.HTM ::/HOME.HTM; \
 	  $(MCOPY) -i disk.img tests/fixtures/browser/TALL.HTM ::/TALL.HTM; \
 	  [ -f "$(BROWSER_FONT)" ] || $(MAKE) --no-print-directory $(BROWSER_FONT); \
 	  $(MCOPY) -i disk.img $(BROWSER_FONT) ::/DEJAVU.TTF; \
 	else \
-	  echo "browser: BROWSER_BIN not present ($(BROWSER_BIN)) — Apps menu ships without browser"; \
+	  echo "browser: no WebProcess source ($(BROWSER_BIN) | $(BROWSER_BUILT) | $(BROWSER_CACHE)) — Apps menu ships without browser"; \
 	fi
 	$(MCOPY) -i disk.img $(EDITOR_BIN) ::/EDITOR.BIN
 	$(MCOPY) -i disk.img $(EDITOR_T_BIN) ::/EDITOR_T.BIN
