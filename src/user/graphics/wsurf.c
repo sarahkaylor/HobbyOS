@@ -183,6 +183,8 @@ int wsurf_text8x8(struct wsurf *s, int x, int y, const char *text, int max_x,
                   uint32_t fg, uint32_t bg) {
   int pen = x;
   int row = y;
+  if (!text)
+    return pen;
   while (*text) {
     if (*text == '\n') {
       row += 8;
