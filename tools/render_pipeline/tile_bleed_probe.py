@@ -232,7 +232,14 @@ def run_scenario(args, evdir, qmp, serial_log, wp_sha):
         ok = wait("[WIN] url-entry=" + url, 30, f"url-entry-{url}") and ok
         mark = len(R.serial_text(s))
         ok = wait("[WIN] load-ok", 120, f"load-ok-{url}") and ok
-        return ok, _slice_load_ms(s, mark)
+        t = R.serial_text(s)
+        ms = _slice_load_ms(s, mark)
+        results.setdefault("load_debug", []).append({
+            "url": url, "mark": mark, "total": len(t),
+            "slice_tail_has_loadok": "[WIN] load-ok" in t[mark:],
+            "slice_head": t[mark:mark + 80].replace("\r", "<CR>"),
+        })
+        return ok, ms
 
     if args.scenario == "perf":
         out = {"scenario": "perf", "runs": []}
@@ -510,10 +517,10 @@ def main(argv=None) -> int:
                       "evdir": evdir}, indent=2))
     if results and results.get("summary"):
         sm = results["summary"]
-        print(f"[probe] pairs={sm['pairs_total']} "
-              f"with_unattributed={sm['pairs_with_unattributed_changes']} "
-              f"persistent_residual={sm['captures_with_persistent_residual']} "
-              f"unattributed_px={sm['unattributed_total_pixels']}")
+        print(f"[probe] pairs={sm.get('pairs_total')} "
+              f"with_unattributed={sm.get('pairs_with_unattributed_changes')} "
+              f"persistent_residual={sm.get('captures_with_persistent_residual')} "
+              f"unattributed_px={sm.get('unattributed_total_pixels')}")
     return rc
 
 

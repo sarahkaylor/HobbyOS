@@ -39,7 +39,7 @@ PROBE="${1:-}"
 [ -n "$PROBE" ] || { echo "usage: run_rp.sh <probe> --wp-elf PATH [--instance ID --port N] [probe args...]"; exit 2; }
 shift
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
+REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 PIPE="$REPO/tools/render_pipeline"
 WP_ELF=""
 INSTANCE="rp-h"
