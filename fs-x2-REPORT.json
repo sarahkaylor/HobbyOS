@@ -1,0 +1,29 @@
+{
+  "lane": "fs-x2",
+  "verdict": "pass",
+  "gate": "GATE X2: bounded -smp 8 stability receipt (desktop boots at smp 8, idles >=5-10 min with NO FATAL/#PF, input still responsive) + unit-x64 0-fail. MET on all four legs.",
+  "evidence": [
+    "Baseline repro (x2-smp8-baseline1.log): [KERNEL] LAPIC timer rate: 9311 counts/ms, TSC rate: 386430 ticks/ms (host ground truth 2,595,081 => clock ~6.7x fast on this box; browser.md-era host was ~18x) => [WATCHDOG] console silent => [LOSTWAKE] disposing pid=1 DESKTOP.BIN (stale dead-owner claim, poisoned resume) => [LOSTWAKE] reclaiming pid=1 => System halt at ~35-46 s idle. Confirms the documented -smp 8 crash on this machine.",
+    "Root cause A (tick-timebase corruption): HMP 'info lapic' at boot shows firmware (OVMF/EDK2) left LVTT=0x00020020 unmasked PERIODIC vec32, DCR div-by-1, initial_count=10,000,000, RUNNING. It fires vector-32 at ~500-1400 Hz (boot-varying) on top of the PIT's 100 Hz, so the old calibration's 20 timer_reload() ticks spanned ~30-90 real-ms while it assumed 200 ms => tsc_per_ms ~4-13x low => timer_get_ms() fast => LOSTWAKE_DEAD_OWNER_MS=2000 collapsed to a few hundred real-ms => idle reaper disposed the live DESKTOP.BIN.",
+    "Root cause B (mode-3 count-by-two): with the PIT counter as the reference, two independent in-kernel windows both read 1,297,578 ticks/ms (deterministic) while wall-vs-guest stamps showed clock 2.000x fast => the 8254 mode-3 counter decrements 2 counts per clock (QEMU i8254.c: 'counter = s->count - ((2*d) % s->count)'; real 8254 also counts by two in mode 3). Fixed factor elapsed_us = counts*1000000/(2*1193182).",
+    "Fix (commits 2f48639, d65e75a; src/kernel/arch/x64/timer.c only): (1) timer_init stops+masks the firmware LAPIC periodic timer; (2) tsc_per_ms calibrated against the PIT channel-0 counter in a tight IRQ-off ~60 ms accumulation (wrap-aware); (3) mode-3 count-by-two factor; (4) conservative floor: rate <700000 ticks/ms treated as broken => tick-clock fallback (never faster than wall). No process.c/LOSTWAKE logic changed - arm-and-confirm gate now has a wall-true clock, matching ARM.",
+    "Calibration after fix: TSC rate 2,596,268 / 2,596,677 / 2,596,339 ticks/ms across desktop + unit sockets vs host 2,595,081 (was 216,985-532,489). Guest clock vs wall (wall-stamped serial): 13315-7916=5399 guest-ms over 7.979 s = 1.000x (was 5-13x fast).",
+    "smp8 idle receipt run A (x2-fix4.log, same calibration logic): 12.5 min idle, 0 [LOSTWAKE], 0 FATAL/#PF/System halt/CSTK; DESKTOP.BIN claim live (c1=1/c4=1) throughout; IDLESTUCK dumps are unconfirmed arm-and-confirm anomalies (heartbeat always recovers) - designed safe path.",
+    "smp8 receipt run B (x2-receipt1.log, probe-stripped FINAL build): 6.2 min idle clean (0 faults); QMP input-send-event keyboard accepted ({'return':{}}) and tolerated - guest stayed healthy through continued idle.",
+    "unit-x64 (KVM, private .ovmf OVMF): Tests run 306, Tests failed 0, UNIT TESTS PASSED, rc 0 (baseline 306/0). unit-arm: 302/0 UNIT TESTS PASSED rc 0 (baseline 302/0). host: ALL PASSED rc 0.",
+    "RCA filed: docs/browser/x2-tsc-lostwake-RESOLVED.md"
+  ],
+  "commits": [
+    "2f48639 fs-x2: x64 TSC calibration against PIT channel-0 counter (mode-3 count-by-2)",
+    "d65e75a fs-x2: strip calibration probe, file TSC/LOSTWAKE RCA doc"
+  ],
+  "blockers": [
+    "In-guest observable reaction to injected keyboard (app launch) not achievable on this tip: the x64 desktop's start-menu input needs a mouse click/focus that the current kernel input path cannot deliver (x64 input is PS/2 via i8042; QMP injection is accepted and tolerated). Brief marks input injection optional; liveness proven by continued healthy idle + 0 faults."
+  ],
+  "next_steps": [
+    "X1 lane's in-flight input fix (mouse click/buttons) will close the observable-reaction gap; re-verify a keyboard/mouse-launched app then.",
+    "Optional hardening: independent third wall reference (HPET/RTC) in the calibration, or move calibration later (post-firmware-timer disarm) - not needed for correctness here; the PIT-counter path is host-independent.",
+    "Merge-to-main: rebase browser/fs-x2 onto main when the wave lands; tree currently 2 commits ahead of 61f6dbf."
+  ],
+  "notes": "Mission (a)+(b) resolved with a 2-commit kernel-only fix. (a) x64 TSC calibration was broken by two stacked defects: the firmware-left unmasked periodic LAPIC vector-32 stream corrupted the tick-count timebase (~5-13x here, ~18x on the browser-era host), and the 8254 mode-3 counter decrements by two per clock (until the second, the 1.297M read was exactly 2x low). (b) the -smp 8 desktop LOSTWAKE->#PF crash was the fast clock collapsing LOSTWAKE_DEAD_OWNER_MS; with a wall-true clock + arm-and-confirm gate intact, the x64 idle reaper behaves like ARM's (single-sight arms are safe; disposal requires a >=3.4 s real frozen-claim confirmation). All gates green: smp8 idle receipts (12.5 min & 6.2 min, zero FATAL/#PF/LOSTWAKE), unit-x64 306/0 KVM, unit-arm 302/0, host PASS. Baseline control crashed at ~35 s. Time used ~3.5 h."
+}

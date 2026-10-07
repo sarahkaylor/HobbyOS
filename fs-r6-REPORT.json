@@ -1,0 +1,25 @@
+{
+  "lane": "r6",
+  "verdict": "pass",
+  "gate": "PASS — desktop boots at 1920x1080 with layout intact (visual + pixel sanity), desktop_test (EDITOR_T flow) green at new mode, make host_tests green, ./run_unit_tests.sh (ARM) green; browser window geom recorded at new mode.",
+  "commits": [
+    "dbaec3c fs-r6: raise desktop display mode 1024x768 -> 1920x1080 (shared mode definition)",
+    "0cc2877 fs-r6: drop .arch-stamp build artifact from the tree",
+    "dc9e8e5 fs-r6: evidence -- 1920x1080 desktop/desktop-test shots, pixel sanity, browser window geom at the new mode"
+  ],
+  "evidence": [
+    "evidence/fs-r6/desktop-1920x1080.png/.ppm — visual screenshot of the booted 1920x1080 desktop (wallpaper, taskbar, Apps button, clock; no clipping/overdraw)",
+    "evidence/fs-r6/desktop-test-1920x1080.png/.ppm + desktop-test-serial.txt — run_desktop_test at new mode: SCREENSHOT_READY, non-blank, EDITOR_T full flow (menu -> NETTEST -> EDITOR -> File->Open)",
+    "evidence/fs-r6/browser-geom-1920x1080.txt — [WIN] geom x=2 y=34 w=1916 h=1018; painted rect=1916x1018 at 2,34 (was 1020x670+36 at 2,70)",
+    "evidence/fs-r6/browser-single-window-1920x1080.png — browser window at new mode, full-width",
+    "evidence/fs-r6/boot-serial-excerpt.txt — VirtIO GPU init + Desktop starting + MENU count=128",
+    "Pixel sanity (inline): wallpaper top (12,16,34), bottom (34,44,72) at taskbar line y=1053, taskbar top (96,166,255) at y=1054, band peak (23,30,60) at row 400, Apps button text pixel present"
+  ],
+  "blockers": [],
+  "notes": "Raised the desktop from hard-coded 1024x768 to 1920x1080 via ONE shared definition (src/include/display_mode.h: DISPLAY_WIDTH/HEIGHT/STRIDE_BYTES). Consumed by ARM virtio-mmio GPU (virtio_gpu.c), x64 virtio-pci+BGA driver incl. Bochs VGA XRES/YRES (virtio_gpu_x64.c), userland graphics surface (graphics.h SCREEN_WIDTH/HEIGHT), the x64 multiboot graphics header (boot.s), and the kernel unit suite (virtio_gpu_test.c). Framebuffer sizing: 1920x1080x32bpp = 8,294,400 B/frame on both paths; USER_FB_SIZE bumped 4 MiB -> 10 MiB (src/include/vm.h) so SYS_MAP_FB maps a full frame (8.3 MiB needs it). WM/layout needed no clamp changes: tiling, taskbar, wallpaper are all driven by SCREEN_WIDTH/HEIGHT, so they scale automatically; browser window rect = full-res tile (1916x1018 at 2,34) verified. Host tests migrated: compat mock fb/PPM header uses mode constants; wallpaper colours/rows, term grid, menu-split rects and pixel clamps now derive from SCREEN_* (graphics_lib/desktop_pixel/desktop_term/nano_term tests); on-device editor_test/apps_test coordinates drive absolute input from SCREEN_WIDTH/HEIGHT; run_*.py + capture_screenshots + wd_x64_runner + br_e2e W/H = 1920x1080. Verified: ARM desktop boots at new mode (visual + pixel-exact wallpaper/taskbar), run_desktop_test green at new mode, make host_tests green (0 failed), ./run_unit_tests.sh ARM green (0 failures, incl. updated rect-clamp/offset suites), x64 kernel compiles. The _only_ environment caveat: this worktree initially lacked the fetched libcxx third_party (fetch.sh), which pre-existed on the base and blocks the RTTI host test when unfetched; I ran the fetch so host_tests is fully green. Makefile / disk recipe / test-wave lists untouched (slide-rule: I-only, propose-only) — no change was actually needed there; final merged-tip mode bump = controller-run.",
+  "next_steps": [
+    "Controller: flip the merged tip so all lanes pick up the single display_mode.h source (no per-file 1024x768 literals remain in OS paths).",
+    "Optional: run the now-migrated E2E scripts (run_nano_test.py, run_games_test.py, ...) at 1920x1080 to re-baseline their pixel-diff deltas (ED_BOX/PROMPT_BOX and game-region thresholds were kept as-is where scale-relative).",
+    "Optional: x64 desktop re-boot at the new mode for x64 parity confirmation (kernel compiles; ARM verified end-to-end)."
+  ]
+}

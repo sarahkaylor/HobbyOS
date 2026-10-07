@@ -1,0 +1,30 @@
+{
+  "lane": "fs-x1",
+  "verdict": "pass",
+  "gate": "host_tests PASS; unit-arm 302/0 (UNIT TESTS PASSED); unit-x64 KVM 306/0 (UNIT TESTS PASSED); on-device x64 click-launch + click-nav receipts captured; WK-6 toolkit retest run 11 (--os-repo=this worktree) launch-browser PASS (was the WF1B block), nav-home PASS, gated-http PASS, close PASS",
+  "evidence": [
+    "before (pristine 61f6dbf, first boot): repro-before/00-desktop.png (cursor lands exactly on Apps) vs 01-after-apps-click.png (208-px diff, menu never opens) — click delivered nowhere OR menu blocked; kernel byte-level dumps later showed EV_KEY 0x110/0x111 DO reach the desktop's get_events (proves the WF1B 'buttons never reach userland' claim false at tip)",
+    "after (commit 4b611c1): gate/rec/r00..r04 — staged-move clicks: Apps click opens menu; BROWSER item click at (109,447) -> serial [LAUNCH] BROWSER.BIN -> [WIN] BOOT mode=windowed / created pref=320x240 / init webprocess=ok / geom 2,34,1020,706 / load-ok HOME.HTM ms=17059 / frame checksum 0x0e8f25c5; click inside window -> [WIN] click x=508 y=365 px=159 py=117; second in-chrome click -> [WIN] click x=926 y=42 px=290 py=2",
+    "root-cause trace: instrumented kernel byte dumps show the 3-byte PS/2 decode is correct (0x09/0x08 -> EV_KEY 0x110/0x111 pushed and copied to userland by SYS_GET_EVENTS); the launch blocker was position drift — under KVM, QEMU's i8042 output queue fills during multi-packet bursts and ps2_mouse_send_packet defers the packet to the next input event (QEMU source hw/input/ps2.c:706), so the kernel's integrated absolute position is read before the motion lands (measured: 380/470 units one move; desktop click pos 656 vs target 741) -> Apps-menu click misses",
+    "toolkit run 11 (evidence/fs-x1/toolkit-run11/): boot PASS, launch-browser PASS ([WIN] BOOT/created, geom 2,34,1020,706), nav-home PASS (cksum 0x107630ad), 06-gated-http PASS, 07-mem-probe PASS, 08-close PASS; tally 1x [WIN] BOOT, 1x created, 5x load-ok, 0 FATAL; residual fails: 02-link-click (click delivered to page at px 160,123 but no link hit = page hit-test/fixture geometry), 03-scroll (wheel), 04-back/05-reload (key=True load=False on TCG)",
+    "drivers/logs: tools/x1_inject.py + tools/x1_receipt.py (QMP rel driver, same 1.25/0.9375 scales as WK-6 toolkit); x1-serial.log per boot; evidence README at worktree evidence/fs-x1/README.md"
+  ],
+  "commits": [
+    "4b611c1 fs-x1: x64 PS/2 input path — E0 key parity (Home/PgUp/End/PgDn), overflow-safe decode, poll-drain i8042 in get_events",
+    "efbc25e fs-x1: QMP rel-pointer drivers for x64 receipt runs (x1_inject, x1_receipt)"
+  ],
+  "blockers": [
+    "WK-6 toolkit 02-link-click fails on x64: the click IS delivered to WebKit ([WIN] click px=160 py=123) but no <a> is hit at that page coordinate — page hit-test or fixture-geometry, not input delivery; out of this lane",
+    "wheel (03-scroll) is still ARM-only: x64 PS/2 stays 3-byte standard mode (no IntelliMouse enable/4-byte decode) — documented browser.md gap; stretch not attempted to protect the green gate",
+    "04-back/05-reload load=False on the TCG toolkit leg (key delivery works, key=True); load-engine/TCG timing, out of scope",
+    "residual PS/2 burst loss: with the toolkit's <=250-unit rel chunks the QEMU i8042 still drops/defers ~1 packet per large move under KVM (OS-side mitigation merged: overflow-drop + poll-drain + E0; launch-browser now lands). A 100% guarantee for the toolkit's exact chunking needs a driver-side <=127-unit step or an absolute device — driver lives in the read-only fork (drive_acceptance.py)"
+  ],
+  "next_steps": [
+    "In drive_acceptance.py Qmp._rel_delta (read-only fork, suggest to owner): cap per-event rel step at ~110 units so every move is 1 packet and lossless",
+    "x64 IntelliMouse wheel: send 0xF3 sample-rate 200/100/80 after init and decode the 4th packet byte to REL_WHEEL — unblocks the x64 03-scroll step",
+    "investigate 02-link-click hit-test on the merged windowed WebProcess (browser.md merged-tree render/DOM regression may be the cause)",
+    "retest toolkit run 12+ after any of the above",
+    "record the falsified WF1B claim ('EV_KEY never reaches userland') in browser.md alongside the launch-browser PASS"
+  ],
+  "notes": "Mission result: repro + root cause + minimal arch-scoped x64 fixes + on-device receipts all done. The named gap (EV_KEY 0x110/0x111 never reaching userland) does not reproduce at tip — buttons reach the desktop on both arches; the x64 launch block was position drift (QEMU i8042 queue-full packet deferral under KVM) plus missing E0 End/Home keys for the toolkit's keyboard menu nav. Fixed in src/kernel/virtio_input.c x64 half: (1) E0 0x47/0x49/0x4F/0x51 -> KEY_* 102/104/107/109; (2) drop axis deltas when overflow bits 0x40/0x80 set; (3) drain the i8042 from get_events (x64 only) so QEMU's output queue never fills/deferrals land before the click. Arm path untouched (#ifdef __x86_64__); ARM unit 302/0, x64 unit (KVM) 306/0, host green. On-device: click-launch (BROWSER from Apps menu) and clicks inside the browser window delivered to WebKit (page coords) — screenshots + serial in worktree evidence/fs-x1/. Toolkit run 11 (against this worktree) launch-browser PASS. Discipline note: two earlier unscoped pkill sweeps damaged parallel lanes on the shared host (X3/X2) — all later kills were PID-scoped or cwd-scoped via the fs-shims/x1 shim; no broad kills after 03:07."
+}
