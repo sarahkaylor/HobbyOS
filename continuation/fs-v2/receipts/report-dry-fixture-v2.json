@@ -1,0 +1,289 @@
+{
+  "toolkit": "fs-browser-accept",
+  "schema_version": 2,
+  "report_schema": "hobbyos-browser-accept-v2",
+  "mode": "fixture",
+  "topic": null,
+  "url": "",
+  "instance": "v2",
+  "rows": [
+    {
+      "id": "fixture-FIX01",
+      "kind": "fixture",
+      "url": "http://10.0.2.2:8855/fixture/FIX01",
+      "status": "pass",
+      "load_ok": true,
+      "load_ms": 7016,
+      "open_fail": null,
+      "frames": 2,
+      "checksum": "0x759431c5",
+      "net": "[WIN] net fetch url=http://10.0.2.2:8855/fixture/FIX01 ok=1 status=200 bytes=267 effective=http://10.0.2.2:8855/fixture/FIX01 err=",
+      "persist": "[WIN] net persist 267 B -> /PAGE-NET.HTM",
+      "screenshot": "e2e-go-http___10.0.2.2_8855_fixture_FIX01.png",
+      "entry_echo": "http://10.0.2.2:8855/fixture/FIX01",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    },
+    {
+      "id": "fixture-FIX02",
+      "kind": "fixture",
+      "url": "http://10.0.2.2:8855/fixture/FIX02",
+      "status": "pass",
+      "load_ok": true,
+      "load_ms": 14474,
+      "open_fail": null,
+      "frames": 2,
+      "checksum": "0x63309a45",
+      "net": "[WIN] net fetch url=http://10.0.2.2:8855/fixture/FIX02 ok=1 status=200 bytes=314 effective=http://10.0.2.2:8855/fixture/FIX02 err=",
+      "persist": "[WIN] net persist 314 B -> /PAGE-NET.HTM",
+      "screenshot": "e2e-go-http___10.0.2.2_8855_fixture_FIX02.png",
+      "entry_echo": "http://10.0.2.2:8855/fixture/FIX02",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    },
+    {
+      "id": "fixture-FIX02D",
+      "kind": "fixture",
+      "url": "http://10.0.2.2:8855/fixture/FIX02D",
+      "status": "gated",
+      "load_ok": false,
+      "load_ms": null,
+      "open_fail": null,
+      "frames": 1,
+      "checksum": "0x5f62b9c5",
+      "net": "[WIN] net fetch url=http://10.0.2.2:8855/fixture/FIX02D ok=1 status=200 bytes=507 effective=http://10.0.2.2:8855/fixture/FIX02D err=",
+      "persist": "[WIN] net persist 507 B -> /PAGE-NET.HTM",
+      "screenshot": "e2e-go-http___10.0.2.2_8855_fixture_FIX02D.png",
+      "entry_echo": "http://10.0.2.2:8855/fixture/FIX02D",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    },
+    {
+      "id": "fixture-FIX03",
+      "kind": "fixture",
+      "url": "http://10.0.2.2:8855/fixture/FIX03",
+      "status": "pass",
+      "load_ok": true,
+      "load_ms": 332236,
+      "open_fail": null,
+      "frames": 2,
+      "checksum": "0xb1e75dc5",
+      "net": "[WIN] net fetch url=http://10.0.2.2:8855/fixture/FIX03 ok=1 status=200 bytes=578 effective=http://10.0.2.2:8855/fixture/FIX03 err=",
+      "persist": "[WIN] net persist 578 B -> /PAGE-NET.HTM",
+      "screenshot": "e2e-go-http___10.0.2.2_8855_fixture_FIX03.png",
+      "entry_echo": "http://10.0.2.2:8855/fixture/FIX03",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    },
+    {
+      "id": "fixture-FIX04",
+      "kind": "fixture",
+      "url": "http://10.0.2.2:8855/fixture/FIX04",
+      "status": "pass",
+      "load_ok": true,
+      "load_ms": 342890,
+      "open_fail": null,
+      "frames": 2,
+      "checksum": "0xbc622575",
+      "net": "[WIN] net fetch url=http://10.0.2.2:8855/fixture/FIX04 ok=1 status=200 bytes=642 effective=http://10.0.2.2:8855/fixture/FIX04 err=",
+      "persist": "[WIN] net persist 642 B -> /PAGE-NET.HTM",
+      "screenshot": "e2e-go-http___10.0.2.2_8855_fixture_FIX04.png",
+      "entry_echo": "http://10.0.2.2:8855/fixture/FIX04",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    },
+    {
+      "id": "fixture-FIX05",
+      "kind": "fixture",
+      "url": "http://10.0.2.2:8855/fixture/FIX05",
+      "status": "gated",
+      "load_ok": false,
+      "load_ms": null,
+      "open_fail": null,
+      "frames": 1,
+      "checksum": "0xa0bf6dc5",
+      "net": "[WIN] net fetch url=http://10.0.2.2:8855/fixture/FIX05 ok=1 status=200 bytes=440 effective=http://10.0.2.2:8855/fixture/FIX05 err=",
+      "persist": "[WIN] net persist 440 B -> /PAGE-NET.HTM",
+      "screenshot": "e2e-go-http___10.0.2.2_8855_fixture_FIX05.png",
+      "entry_echo": "http://10.0.2.2:8855/fixture/FIX05",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    },
+    {
+      "id": "fixture-HOME",
+      "kind": "fixture",
+      "url": "http://10.0.2.2:8855/fixture/HOME",
+      "status": "pass",
+      "load_ok": true,
+      "load_ms": 666703,
+      "open_fail": null,
+      "frames": 2,
+      "checksum": "0x0e8f25c5",
+      "net": "[WIN] net fetch url=http://10.0.2.2:8855/fixture/HOME ok=1 status=200 bytes=483 effective=http://10.0.2.2:8855/fixture/HOME err=",
+      "persist": "[WIN] net persist 483 B -> /PAGE-NET.HTM",
+      "screenshot": "e2e-go-http___10.0.2.2_8855_fixture_HOME.png",
+      "entry_echo": "http://10.0.2.2:8855/fixture/HOME",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    },
+    {
+      "id": "fixture-TALL",
+      "kind": "fixture",
+      "url": "http://10.0.2.2:8855/fixture/TALL",
+      "status": "pass",
+      "load_ok": true,
+      "load_ms": 679711,
+      "open_fail": null,
+      "frames": 2,
+      "checksum": "0xe0982225",
+      "net": "[WIN] net fetch url=http://10.0.2.2:8855/fixture/TALL ok=1 status=200 bytes=817 effective=http://10.0.2.2:8855/fixture/TALL err=",
+      "persist": "[WIN] net persist 817 B -> /PAGE-NET.HTM",
+      "screenshot": "e2e-go-http___10.0.2.2_8855_fixture_TALL.png",
+      "entry_echo": "http://10.0.2.2:8855/fixture/TALL",
+      "type_url_ok": true,
+      "evidence": {
+        "go_step": true,
+        "type_url_step": true
+      }
+    }
+  ],
+  "proxy": {
+    "port": 8855,
+    "port_file": "/tmp/wiki-proxy-port-v2",
+    "upstream": "https://en.wikipedia.org",
+    "host_self_check_robots_markers": 35,
+    "fixture_self_check_FIX01_markers": 1
+  },
+  "netlog": {
+    "rel_path": "net.log.jsonl",
+    "lines": 17,
+    "sha256": "7f39bbc743429514c86d5e73feb17a0fc83b153f118eedda0c8949c02849186c",
+    "routes": {
+      "relay": 2,
+      "fixture": 13
+    }
+  },
+  "guest_http": {
+    "sock2tst_live_get_passes": 0,
+    "sock2tst_response_prefix": []
+  },
+  "dns": {
+    "guest_dhcp_dns": "10.0.2.3",
+    "serial_evidence": true,
+    "resolver": "guest resolv_lookup -> 10.0.2.3 (QEMU user-net -> host resolver)",
+    "etc_hosts": "no /etc/hosts on this OS; resolver queries 10.0.2.3 directly"
+  },
+  "session": {
+    "ok": false,
+    "verdict": "gated",
+    "row_counts": {
+      "n_pass": 6,
+      "n_gated": 2,
+      "n_fail": 0
+    },
+    "notes": [
+      "rows gated: fixture-FIX02D, fixture-FIX05"
+    ],
+    "markers": {
+      "[WIN] BOOT": 1,
+      "[WIN] created": 1,
+      "[WIN] geom": 1,
+      "[WIN] url-prompt": 8,
+      "[WIN] url-entry": 8,
+      "[WIN] net fetch": 8,
+      "[WIN] load start url=": 8,
+      "[WIN] load-ok": 7,
+      "[WIN] load open-fail": 0,
+      "[WIN] frame": 295,
+      "[WIN] net persist": 8,
+      "[WIN] render": 0,
+      "[WIN] checksum": 0,
+      "[LAUNCH] CONSOLE.BIN": 0,
+      "[DNSTST]": 0,
+      "DHCP DNS server": 1,
+      "Network configured": 1,
+      "FATAL": 0,
+      "IDLESTUCK": 0,
+      "SOCK2TST": 1
+    },
+    "screenshots": [
+      "e2e-browser-launch.png",
+      "e2e-go-http___10.0.2.2_8855_fixture_FIX01.png",
+      "e2e-go-http___10.0.2.2_8855_fixture_FIX02.png",
+      "e2e-go-http___10.0.2.2_8855_fixture_FIX02D.png",
+      "e2e-go-http___10.0.2.2_8855_fixture_FIX03.png",
+      "e2e-go-http___10.0.2.2_8855_fixture_FIX04.png",
+      "e2e-go-http___10.0.2.2_8855_fixture_FIX05.png",
+      "e2e-go-http___10.0.2.2_8855_fixture_HOME.png",
+      "e2e-go-http___10.0.2.2_8855_fixture_TALL.png"
+    ],
+    "artifacts": {
+      "serial.log": {
+        "size": 105230724,
+        "sha256": "a0783f48c8ddea78a8d99cc6d58f832d43471f398676e417f5c8cf4eef1562d1"
+      },
+      "driver.log": {
+        "size": 5554,
+        "sha256": "4621500c85d8cacf80acc98d8ba4f3690eb9079141dfdce3b716246b192771eb"
+      },
+      "wiki-proxy.log": {
+        "size": 1095,
+        "sha256": "d15bf5bfb5cb35b8f14185e39a12ae714c7ed2d305893534beb80f521ffee4ef"
+      },
+      "net.log.jsonl": {
+        "size": 4779,
+        "sha256": "7f39bbc743429514c86d5e73feb17a0fc83b153f118eedda0c8949c02849186c"
+      },
+      "host-robots.txt": {
+        "size": 28275,
+        "sha256": "48b98d80c8444d37cdf50cc9a4d2257b66039477e581066d2356062a4cbd678f"
+      },
+      "host-fixture-FIX01.txt": {
+        "size": 267,
+        "sha256": "fe4df6bc781989afce330d8fa35a92c126abdbc34bfd124b8a29e52d24c9f3d2"
+      },
+      "PAGE-NET.HTM": {
+        "size": 817,
+        "sha256": "47e0fe49aabd13c429bba225ab3241fa4a7d8c40ad84d4e371311f96e25349f7"
+      },
+      "WNPAGE.HTM": {
+        "size": 1,
+        "sha256": "36a9e7f1c95b82ffb99743e0c5c4ce95d83c9a430aac59f84ef3cbfab6145068"
+      },
+      "wiki-proxy-console.log": {
+        "size": 1491,
+        "sha256": "352d8f39b8f40e41c4c7a87915a9619c21d59f7868f2e05f844bf27742c7945c"
+      }
+    },
+    "sha256_page_net": "47e0fe49aabd13c429bba225ab3241fa4a7d8c40ad84d4e371311f96e25349f7",
+    "sha256_rob_wc": ""
+  },
+  "summary": {
+    "verdict": "gated",
+    "n_pass": 6,
+    "n_gated": 2,
+    "n_fail": 0,
+    "rows": 8
+  }
+}
