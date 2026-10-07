@@ -14,8 +14,8 @@
 #   1. extracts the vendored snapshot to src/ if not present (extract.sh;
 #      sha-verified)
 #   2. checks the cross-deps staging prefix; --build-deps runs the port's own
-#      recipes (snapshot HobbyOS/scripts/wk2-libs-cross.sh; intel curl/mbedTLS
-#      via the OS repo's tools/cross-intel-wk2-libs.sh)
+#      recipes (snapshot HobbyOS/scripts/wk2-libs-cross.sh --only ...hbcore...,
+#      D-15; curl/mbedTLS via the OS repo's tools/cross-{arm,intel}-wk2-libs.sh)
 #   3. configures with the canonical WK-2 recipe (mirrors
 #      HobbyOS/scripts/wk2-link-ci.sh) against the extracted source —
 #      -DWDK_FORK_DIR / -DHDYOS_SYSROOT / -DHOBBYOS_WK2_PREFIX are re-pointed
@@ -103,13 +103,26 @@ fi
 
 # 2. cross-deps staging prefix -----------------------------------------------------
 if [ "$BUILD_DEPS" = 1 ]; then
-  log "building cross-deps -> $PREFIX   (wk2-libs-cross.sh; tarballs from $ROOT/third_party)"
-  HDYOS="$ROOT" bash "$SRC/HobbyOS/scripts/wk2-libs-cross.sh" --arch "$ARCH" --prefix "$PREFIX" -j "$JOBS"
+  # wk2-libs-cross.sh's default order tries the FULL harfbuzz CMake build
+  # first; that build is D-15-BLOCKED (libc++ <> sysroot header chain) — the
+  # port ships hbcore (minimal core; same lib/libharfbuzz.a output).  Build
+  # exactly the canonical set, then the per-arch curl/mbedTLS staging.
+  log "building cross-deps -> $PREFIX   (wk2-libs-cross.sh --only ...hbcore...; tarballs from $ROOT/third_party)"
+  HDYOS="$ROOT" bash "$SRC/HobbyOS/scripts/wk2-libs-cross.sh" --arch "$ARCH" --prefix "$PREFIX" -j "$JOBS" \
+    --only zlib,png,jpeg,webp,freetype,hbcore,sqlite,xml2
   if [ "$ARCH" = intel ]; then
     log "intel curl/mbedTLS staging (OS repo tools/cross-intel-wk2-libs.sh)"
-    HOBBYOS_WK2_PREFIX="$PREFIX" FORK="$SRC" bash "$ROOT/tools/cross-intel-wk2-libs.sh" -j "$JOBS" || {
+    HOBBYOS_WK2_PREFIX="$PREFIX" WK4B_SRCROOT="$SRC-wk2/$ARCH/src" FORK="$SRC" \
+      bash "$ROOT/tools/cross-intel-wk2-libs.sh" -j "$JOBS" || {
       echo "HINT: intel curl/mbedTLS staging failed — re-run manually:" >&2
-      echo "  HOBBYOS_WK2_PREFIX=$PREFIX FORK=$SRC bash $ROOT/tools/cross-intel-wk2-libs.sh" >&2
+      echo "  HOBBYOS_WK2_PREFIX=$PREFIX WK4B_SRCROOT=$SRC-wk2/$ARCH/src FORK=$SRC bash $ROOT/tools/cross-intel-wk2-libs.sh" >&2
+    }
+  else
+    log "arm curl/mbedTLS staging (OS repo tools/cross-arm-wk2-libs.sh)"
+    HOBBYOS_WK2_PREFIX="$PREFIX" WK4B_SRCROOT="$SRC-wk2/$ARCH/src" FORK="$SRC" \
+      bash "$ROOT/tools/cross-arm-wk2-libs.sh" -j "$JOBS" || {
+      echo "HINT: arm curl/mbedTLS staging failed — re-run manually:" >&2
+      echo "  HOBBYOS_WK2_PREFIX=$PREFIX WK4B_SRCROOT=$SRC-wk2/$ARCH/src FORK=$SRC bash $ROOT/tools/cross-arm-wk2-libs.sh" >&2
     }
   fi
 fi

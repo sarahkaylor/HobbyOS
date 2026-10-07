@@ -1,43 +1,44 @@
 #!/usr/bin/env bash
-# cross-intel-wk2-libs.sh — WK-4b (D-7) intel staging: curl/mbedTLS for the
-# x86_64-none-elf WebKit NetworkProcess backend (WE-2 lane).
+# cross-arm-wk2-libs.sh — WK-4b (D-7) ARM staging: curl/mbedTLS for the
+# aarch64-none-elf WebKit backend closure.
 #
-# The fork's ARM recipe (HobbyOS/continuation/wk4b/wk4b-libs-cross.sh) is
-# ARM-only; the canonical WebKitBuild/HobbyOS-intel build dir predates the
-# merged USE_CURL wiring, so a fresh ARCH=intel configure fails at
-# find_package(CURL) — no intel curl/mbedTLS staging exists.  This script is
-# the missing intel half, mirroring wk4b-libs-cross.sh one-for-one (same
-# layout, same patches, same closure) with the intel spec delta:
+# In-repo port of the fork's continuation/wk4b/wk4b-libs-cross.sh (which is
+# excluded from the vendored snapshot in third_party/webkit-hobbyos/), so a
+# fresh clone can stage ARM cross-deps from committed sources alone.  The
+# intel half is tools/cross-intel-wk2-libs.sh (mirrors the same recipe with
+# the intel spec delta — see docs/browser/intel-wk2-libs-note.md for the
+# arm/intel parity table).
 #
-#   triple              x86_64-none-elf
-#   arch CFLAGS         -mno-red-zone -mcmodel=large   (matches the OS
-#                       USER_CFLAGS + toolchain-hobbyos.cmake intel row)
-#   freestanding        -nostdinc -isystem <clang-resource>/include
-#   non-PIE             -Wl,-no-pie (x86_64 none-elf defaults PIE; the
-#                       non-PIC sysroot closure is not PIC)
-#   setjmp              obj/intel/setjmp.o  (the OS keeps setjmp/longjmp
-#                       OUT of libc.a on x86_64; the ARM naked defs in the
-#                       fork's gaps.c are compiled out there)
+#   bash tools/cross-arm-wk2-libs.sh [--only mbedtls,curl] [--prefix DIR]
+#                                    [--srcroot DIR] [-j N] [--skip-smoke]
 #
-# It cross-builds, into the SAME prefix layout as the ARM staging
-# (/home/sarah/webkit-hobbyos-wk2/<arch>/prefix {include/, lib/}):
+# It cross-builds, into the SAME prefix layout as the other WK-2 staging
+# (third_party/webkit-hobbyos/src-wk2/arm/prefix {include/, lib/} by default
+# through build.sh, or ~/webkit-hobbyos-wk2/<arch>/prefix on the dev machine
+# via HOBBYOS_WK2_PREFIX):
 #
 #   mbedTLS 3.6.7   -> include/mbedtls (+ include/psa), lib/libmbed{tls,x509,crypto}.a
 #   libcurl 8.22.0  -> include/curl/curl.h, lib/libcurl.a  (mbedTLS backend)
 #
 # and compiles the fork's BSD/POSIX net-compat closure objects used by BOTH
-# the curl autoconf probes and (via the fork toolchain) the WebKit link
-# closure.  Finally it runs a link smoke: a tiny freestanding executable
-# referencing curl_easy_init() + mbedtls_ssl_init() links against the prefix
-# archives + sysroot closure (the same shape as the NetworkProcess link).
+# the curl autoconf probes and (via HobbyOS/toolchain-hobbyos.cmake) the
+# WebKit link closure.  Finally it runs a link smoke: a tiny freestanding
+# executable referencing curl_easy_init() + mbedtls_ssl_init() links against
+# the prefix archives + sysroot closure.
 #
-#   bash tools/cross-intel-wk2-libs.sh [--only mbedtls,curl] [--prefix DIR]
-#                                      [--srcroot DIR] [-j N] [--skip-smoke]
+# ARM deltas vs the intel script (mirroring wk4b-libs-cross.sh):
+#   triple      aarch64-none-elf
+#   arch CFLAGS -mcpu=cortex-a53
+#   gap objects -mcpu=generic
+#   setjmp      NOT a closure member on ARM (gaps.c naked defs provide
+#               setjmp/longjmp; passing obj/arm/setjmp.o too duplicates them)
+#   curl        --with-zlib=${PREFIX} (zlib is a first-class ARM dep)
 #
 # tarballs come from the OS repo's committed third_party (mbedtls-3.6.7.tar.bz2,
-# curl-8.22.0.tar.xz); FORK (read-only) supplies the net-compat sources +
-# shim headers.  The fork is NEVER modified; build artifacts land only in
-# PREFIX / SRCROOT.
+# curl-8.22.0.tar.xz); FORK supplies the net-compat sources + shim headers
+# (default: the canonical fork clone; the vendored build.sh passes
+# FORK=<repo>/third_party/webkit-hobbyos/src).  The fork is NEVER modified;
+# build artifacts land only in PREFIX / SRCROOT.
 set -euo pipefail
 
 export PATH="$HOME/.local/bin:/usr/lib/llvm-21/bin:$PATH"
@@ -45,9 +46,9 @@ export PATH="$HOME/.local/bin:/usr/lib/llvm-21/bin:$PATH"
 HDYOS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"     # OS repo root
 TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FORK="${FORK:-/home/sarah/webkit-hobbyos}"                  # canonical fork (READ-ONLY)
-TRIPLE=x86_64-none-elf
-SPEC="-mno-red-zone -mcmodel=large"
-ARCH=intel
+TRIPLE=aarch64-none-elf
+SPEC="-mcpu=cortex-a53"
+ARCH=arm
 PREFIX="${HOBBYOS_WK2_PREFIX:-/home/sarah/webkit-hobbyos-wk2/${ARCH}/prefix}"
 SRCROOT="${WK4B_SRCROOT:-/home/sarah/webkit-hobbyos-wk2/${ARCH}/src}"
 DL="${DL_DIR:-${HDYOS}/third_party}"                        # OS repo committed tarballs
@@ -91,7 +92,7 @@ MBEDTLS_ALT_O="${OBJROOT}/mbedtls_alt.o"
 GAPS_O="${OBJROOT}/gaps.o"
 GAPS_VARC_O="${OBJROOT}/gaps_varc.o"
 
-log() { printf '[cross-intel-wk2:%s] %s\n' "$ARCH" "$*"; }
+log() { printf '[cross-arm-wk2:%s] %s\n' "$ARCH" "$*"; }
 
 stale() {
   local out="$1"; shift
@@ -104,9 +105,8 @@ stale() {
 # ---------------------------------------------------------- net-compat closure
 # Same closure objects the fork toolchain builds into every WebKit process
 # (netcompat.c weak POSIX/BSD defs, OS resolv, mbedtls platform glue, gap
-# fillers).  intel: gaps.c/gaps_varc.S/-mtune and gaps_varc.S use
-# -mno-red-zone -mcmodel=large (the ARM recipe's -mcpu=generic/-mcpu=cortex-a53
-# are ARM-only; the fork toolchain's intel fork-lib CFLAGS are these).
+# fillers).  ARM: gaps.c/gaps_varc.S are compiled -mcpu=generic (mirrors
+# wk4b-libs-cross.sh; the naked setjmp/longjmp defs in gaps.c are ARM-only).
 build_closure() {
   local SHIMS="${FORK}/HobbyOS/include"
   if stale "$NETCOMPAT_O" "${FORK}/HobbyOS/lib/netcompat.c" "${SHIMS}/netdb.h" "${SHIMS}/sys/socket.h" "${SHIMS}/errno.h" "${SHIMS}/netinet/in.h" "${SHIMS}/unistd.h" "${SHIMS}/fcntl.h"; then
@@ -122,11 +122,11 @@ build_closure() {
       -c "${FORK}/HobbyOS/lib/mbedtls_alt.c" -o "$MBEDTLS_ALT_O"
   fi
   if stale "$GAPS_O" "${FORK}/HobbyOS/lib/gaps.c"; then
-    clang ${TARGET_FLAGS} ${SPEC} -O2 -g ${STDINC} ${SYSINCS} \
+    clang ${TARGET_FLAGS} ${SPEC} -mcpu=generic -O2 -g \
       -c "${FORK}/HobbyOS/lib/gaps.c" -o "$GAPS_O"
   fi
   if stale "$GAPS_VARC_O" "${FORK}/HobbyOS/lib/gaps_varc.S"; then
-    clang ${TARGET_FLAGS} ${SPEC} -O2 -g ${STDINC} ${SYSINCS} \
+    clang ${TARGET_FLAGS} ${SPEC} -mcpu=generic -O2 -g \
       -c "${FORK}/HobbyOS/lib/gaps_varc.S" -o "$GAPS_VARC_O"
   fi
   log "closure objects ok (netcompat $(stat -c%s "$NETCOMPAT_O") B / resolv $(stat -c%s "$RESOLV_O") B / mbedtls_alt $(stat -c%s "$MBEDTLS_ALT_O") B / gaps $(stat -c%s "$GAPS_O") B / gaps_varc $(stat -c%s "$GAPS_VARC_O") B)"
@@ -256,15 +256,16 @@ build_curl() {
   patch_curl_wait "$d"
 
   # Closure for the autoconf probes: sysroot closure + the fork objects
-  # (net-compat, mbedTLS platform glue, gap fillers).  intel: setjmp/longjmp
-  # ride in via obj/intel/setjmp.o (the OS keeps them out of libc.a on
-  # x86_64; the fork's gaps.c naked defs are ARM-only).  (Stripped out of the
-  # generated Makefiles right after configure — archives need no closure and
-  # libtool chokes on non-libtool objects.)
+  # (net-compat, mbedTLS platform glue, gap fillers).  ARM gets setjmp/
+  # longjmp from gaps.c's naked defs — NOT from the standalone setjmp.o
+  # (that object is the intel closure member; passing both duplicates the
+  # symbols).  (Stripped out of the generated Makefiles right after
+  # configure — archives need no closure and libtool chokes on non-libtool
+  # objects.)
   export CC="clang ${TARGET_FLAGS} ${SPEC} ${STDINC}"
   export CFLAGS="-O2 -g ${STDINC} ${FORK_SHIM} ${SYSINCS}"
   export CPPFLAGS="${STDINC} ${FORK_SHIM} ${SYSINCS} -I${PREFIX}/include"
-  export LDFLAGS="-T ${LSCRIPT} -fuse-ld=lld -Wl,-no-pie -L${PREFIX}/lib ${CRT} ${LIBC} ${SETJMP} ${GAPS_O} ${GAPS_VARC_O} ${MBEDTLS_ALT_O} ${NETCOMPAT_O} ${RESOLV_O}"
+  export LDFLAGS="-T ${LSCRIPT} -fuse-ld=lld -Wl,-no-pie -L${PREFIX}/lib ${CRT} ${LIBC} ${GAPS_O} ${GAPS_VARC_O} ${MBEDTLS_ALT_O} ${NETCOMPAT_O} ${RESOLV_O}"
   export LIBS=""
   export AR=llvm-ar RANLIB=llvm-ranlib NM=llvm-nm
   export PKG_CONFIG_LIBDIR="${PREFIX}/lib/pkgconfig"
@@ -275,7 +276,7 @@ build_curl() {
       --disable-shared --enable-static \
       --with-mbedtls="${PREFIX}" \
       --without-openssl --without-gnutls --without-wolfssl \
-      --without-libpsl --without-zlib --without-brotli --without-zstd \
+      --without-libpsl --with-zlib="${PREFIX}" --without-brotli --without-zstd \
       --without-libidn2 --without-librtmp --without-nghttp2 \
       --disable-ldap --disable-ldaps --disable-rtsp --disable-dict \
       --disable-telnet --disable-tftp --disable-pop3 --disable-imap \
@@ -285,14 +286,18 @@ build_curl() {
       >"${LOGS}/curl-configure.log" 2>&1 \
       || { log "curl configure FAILED — see ${LOGS}/curl-configure.log"; tail -40 "${LOGS}/curl-configure.log"; return 1; }
 
+    # libtool would try to link the .la with the non-libtool closure objects;
+    # archives don't need them — strip (keep -T/-L switches).
     find . \( -name Makefile -o -name '*.mk' \) -exec sed -i \
       "s#${CRT}# #g; s#${LIBC}# #g; s#${SETJMP}# #g; s#${GAPS_O}# #g; s#${GAPS_VARC_O}# #g; s#${MBEDTLS_ALT_O}# #g; s#${NETCOMPAT_O}# #g; s#${RESOLV_O}# #g" {} +
 
+    # Library only (no programs/tests); lib/.libs/libcurl.a is the static archive.
     make -C lib -j"${JOBS}" >"${LOGS}/curl-make.log" 2>&1 \
       || { log "curl make FAILED — see ${LOGS}/curl-make.log"; tail -40 "${LOGS}/curl-make.log"; return 1; }
     mkdir -p "${PREFIX}/lib" "${PREFIX}/include"
     cp -f lib/.libs/libcurl.a "${PREFIX}/lib/"
     cp -rf include/curl "${PREFIX}/include/"
+    # curl-config is a host shell script (not a binary) — keep it for receipts.
     mkdir -p "${PREFIX}/bin" && cp -f curl-config "${PREFIX}/bin/" 2>/dev/null || true )
   [ -f "${PREFIX}/lib/libcurl.a" ] || { log "curl FAILED (archive missing)"; return 1; }
   [ -f "${PREFIX}/include/curl/curl.h" ] || { log "curl FAILED (headers missing)"; return 1; }
@@ -300,20 +305,20 @@ build_curl() {
 }
 
 # ---------------------------------------------------------------- link smoke
-# A tiny freestanding intel executable referencing curl_easy_init() +
+# A tiny freestanding ARM executable referencing curl_easy_init() +
 # mbedtls_ssl_init(), linked against the staged archives + the full sysroot
-# closure — the same link shape (and same closure members) as the WebKit
-# NetworkProcess link.
+# closure — the same link shape (and same closure members) as a WebKit
+# process link.
 build_smoke() {
   want smoke || return 0
-  local c="${OBJROOT}/intel-link-smoke.c" o="${OBJROOT}/intel-link-smoke.o" bin="${OBJROOT}/intel-link-smoke"
+  local c="${OBJROOT}/arm-link-smoke.c" o="${OBJROOT}/arm-link-smoke.o" bin="${OBJROOT}/arm-link-smoke"
   [ -f "${PREFIX}/lib/libcurl.a" ] || { log "smoke: skip (no libcurl.a)"; return 1; }
   if stale "$bin" "$c" "$o" \
       "${PREFIX}/lib/libcurl.a" "${PREFIX}/lib/libmbedtls.a" \
       "${PREFIX}/lib/libmbedx509.a" "${PREFIX}/lib/libmbedcrypto.a" \
-      "$CRT" "$LIBC" "$SETJMP" "$NETCOMPAT_O" "$MBEDTLS_ALT_O" "$GAPS_O" "$GAPS_VARC_O"; then
+      "$CRT" "$LIBC" "$NETCOMPAT_O" "$MBEDTLS_ALT_O" "$GAPS_O" "$GAPS_VARC_O"; then
     cat > "$c" <<'CEOF'
-/* WE-2 link smoke: reference the two staged backends, never call them.
+/* ARM link smoke: reference the two staged backends, never call them.
    volatile globals -> the compiler cannot elide the function-pointer
    initializers, so both relocations survive to the link. */
 #include <curl/curl.h>
@@ -328,13 +333,16 @@ int main(void) {
 CEOF
     clang ${TARGET_FLAGS} ${SPEC} -O2 ${STDINC} -I${PREFIX}/include ${FORK_SHIM} ${SYSINCS} \
       -c "$c" -o "$o"
+    # arm curl is built --with-zlib (see build_curl), so its content_encoding
+    # object pulls zlib symbols — -lz closes the smoke group (zlib is staged
+    # in the prefix by wk2-libs-cross.sh).
     clang ${TARGET_FLAGS} ${SPEC} -O2 -fuse-ld=lld -nostdlib -nostartfiles \
       -T ${LSCRIPT} -Wl,-no-pie -Wl,-e,_start -o "$bin" \
       -L${PREFIX}/lib \
       "$CRT" "$o" \
       -Wl,--start-group \
-      "$LIBC" "$SETJMP" "$NETCOMPAT_O" "$MBEDTLS_ALT_O" "$RESOLV_O" "$GAPS_O" "$GAPS_VARC_O" \
-      -lcurl -lmbedtls -lmbedx509 -lmbedcrypto \
+      "$LIBC" "$NETCOMPAT_O" "$MBEDTLS_ALT_O" "$RESOLV_O" "$GAPS_O" "$GAPS_VARC_O" \
+      -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -lz \
       -Wl,--end-group \
       >"${LOGS}/smoke-link.log" 2>&1 \
       || { log "smoke LINK FAILED — see ${LOGS}/smoke-link.log"; tail -40 "${LOGS}/smoke-link.log"; return 1; }

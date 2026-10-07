@@ -106,3 +106,16 @@ NetworkProcess` links.
 - `ninja WebProcess HobbyOS-UIProcess` also LINKS GREEN in the same fresh
   build dir (182,197,792 B / 174,769,472 B), so the WHOLE intel WebKit2
   process stack is re-configurable + reproducible from the merged tree.
+
+---
+
+_Update (2026-10-07, vendoring):_ the ARM half now also lives in the OS repo —
+`tools/cross-arm-wk2-libs.sh` (direct port of `continuation/wk4b/
+wk4b-libs-cross.sh`, which is excluded from the vendored snapshot in
+`third_party/webkit-hobbyos/`), so both arches stage curl/mbedTLS from
+committed sources alone.  The vendored `build.sh --build-deps` runs
+`wk2-libs-cross.sh --only zlib,png,jpeg,webp,freetype,hbcore,sqlite,xml2`
+(D-15: the full harfbuzz build is blocked; hbcore fills `lib/libharfbuzz.a`)
+plus the per-arch curl/mbedTLS script, with `WK4B_SRCROOT` keeping the
+workspaces inside the repo.  Verified: ARM staging + link smoke green on a
+fresh prefix; `rebuild_browser.sh arm` completes end-to-end from it.

@@ -118,15 +118,22 @@ resolves through a developer's home directory.
    intel) and `obj/<arch>/icu/libicu*.a` — produced by the OS repo's own
    build targets / cross recipes (`third_party/icu-78.3/build-target.sh`,
    `third_party/libcxx-21.1.8/build-target.sh`, the Makefile's `OBJ_DIR`
-   targets).
+   targets).  `rebuild_browser.sh` builds any missing pieces automatically
+   via these same make targets.
 3. Cross-deps staging prefix (`src-wk2/<arch>/prefix`) — `build.sh
-   --arch <arch> --build-deps` runs the port's own recipes:
-   - `src/HobbyOS/scripts/wk2-libs-cross.sh`: zlib, libpng, libjpeg-turbo,
-     libwebp, freetype, harfbuzz (with the documented hbcore fallback),
-     sqlite3, libxml2 — source tarballs come from this repo's committed
-     `third_party/` (libxml2 is downloaded from gnome.org).
-   - intel only: `tools/cross-intel-wk2-libs.sh` (mbedTLS + libcurl, using
-     this repo's committed tarballs).
+   --arch <arch> --build-deps` runs the port's own recipes
+   (`rebuild_browser.sh` adds `--build-deps` automatically when missing):
+   - `src/HobbyOS/scripts/wk2-libs-cross.sh --only zlib,png,jpeg,webp,
+     freetype,hbcore,sqlite,xml2`: zlib, libpng, libjpeg-turbo, libwebp,
+     freetype, HarfBuzz, sqlite3, libxml2 — source tarballs come from this
+     repo's committed `third_party/` (libxml2 is downloaded from gnome.org).
+     HarfBuzz is the minimal-core build ("hbcore", D-15 — the full
+     CMake/ICU harfbuzz is blocked in the port and its default order entry
+     would abort the deps stage), so the canonical `--only` set is used.
+   - `tools/cross-arm-wk2-libs.sh` / `tools/cross-intel-wk2-libs.sh`:
+     mbedTLS + libcurl (mbedTLS backend) + the net-compat closure objects,
+     from this repo's committed tarballs (the arm half is the in-repo port
+     of the fork's `continuation/wk4b/wk4b-libs-cross.sh`).
 4. `WebProcess` is the browser; the other process binaries build with the
    same recipe via `--targets "WebProcess NetworkProcess HobbyOS-UIProcess"`.
 
@@ -148,7 +155,12 @@ build (`build/<arch>/browser.bin`) exists; the line it prints says
 ### Rebuilding the cache
 
 `rebuild_browser.sh` regenerates the cache files from the vendored source
-(either architecture, or both):
+(either architecture, or both), and on a fresh clone it sets the machine up
+on its own: any missing OS-side sysroot closure pieces
+(`obj/<arch>/{crt0.o,libc.a,libcxx.a[,setjmp.o]}` + `obj/<arch>/icu/libicuuc.a`)
+are built from the OS tree's own make targets, and a missing cross-deps
+prefix is built via `build.sh --build-deps` from the committed `third_party/`
+tarballs — `--no-build-closure` / `--no-build-deps` turn those off.
 
 ```sh
 bash third_party/webkit-hobbyos/rebuild_browser.sh both        # or: arm | x64
@@ -158,14 +170,13 @@ bash third_party/webkit-hobbyos/rebuild_browser.sh both \
   --prefix-x64 ~/webkit-hobbyos-wk2/intel/prefix
 ```
 
-It drives `build.sh`, re-compresses the resulting flat with the committed
-settings (`xz -T0 -6`), verifies the round-trip (decompressed sha256 == flat
-sha256), rewrites the `cache/…` lines in `SHA256SUMS`, and prints the new
-hashes — then commit `cache/` + `SHA256SUMS` to publish.  `--from-existing`
-refreshes the cache from `build/<arch>/browser.bin` without rebuilding.
-The x64 leg additionally needs the OS-side intel sysroot closure
-(`obj/intel/{crt0.o,libc.a,libcxx.a,setjmp.o}` + `obj/intel/icu/`) built
-first.
+It then drives `build.sh`, re-compresses the resulting flat with the
+committed settings (`xz -T0 -6`), verifies the round-trip (decompressed
+sha256 == flat sha256), rewrites the `cache/…` lines in `SHA256SUMS`, and
+prints the new hashes — then commit `cache/` + `SHA256SUMS` to publish.
+`--from-existing` refreshes the cache from `build/<arch>/browser.bin`
+without rebuilding.  A first run on a fresh machine is long (closure +
+deps + a full WebKit build per arch); `-j N` is forwarded throughout.
 
 License note: the WebKit source tree carries its own license files; the
 binary license/relink package for the shipped `WebProcess` is recorded in
