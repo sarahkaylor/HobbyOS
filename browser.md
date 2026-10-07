@@ -1023,6 +1023,43 @@ input stretch; `docs/webkit.md` + `docs/RELEASE-READINESS.md` done.
 
 ---
 
+### Close-out — final-stretch.md executed end-to-end (2026-10-07)
+
+**Final state (frozen):** OS `~/Documents/GitHub/HobbyOS` @ main `1b06ca1` (+ this record); fork `~/webkit-hobbyos`
+@ `cdabe011af` (ARM WebProcess ref `779d154bad00…`, 147.5 MB; intel `51232e4b…`). All five tracks (R/N/X/V/H) and
+every wave (FS-W1…W5 + the close-out run R11→V5) executed and merged; the WK-3…WK-7 boxes above stand; §11 carries
+the complete, evidence-linked fix log. Plan exit condition met: WK-6/WK-7 checkboxes honest; docs done.
+
+**What the close-out run resolved after the 2026-10-06 exceptions were recorded:**
+- **CNN big-doc completion — CLOSED.** R11 font flush → R12 SVG hidden-page replay suppression → R13b coalesced
+  drain (batch-kick + post-complete straggler gate): `[WIN] load-ok` fires on the 5.7 MB page (`ms=2812839`),
+  `readyState=Complete` reachable, receipt quartet captured (styled frame `0xb30e689e`, census 80/80 images,
+  screenshot). R14 then closed CNN **text**: the WK6 disk never staged `/DEJAVU.TTF` → empty font manager → zero
+  glyphs for any family; staging fix folded into the shared runner; gate8 shows the lead h2 legible and nav-link
+  rects went 0-width → text-width.
+- **WM integration (user-reported) — FIXED.** R15: instant reflow catch-up (cached frame re-blit into the new tile +
+  instrumented viewport apply before the slow re-render; adapted in the same second — 2.67 s), WM close exits within
+  grace (`[WIN] close ok` + `exit rc=0`), address-bar font = the taskbar's 8×8 at 1:1 (pixel-identical,
+  controller vision-verified).
+- **Interaction validation (user-requested) — DONE.** V5: fixture pass all-green (link click; scroll both directions;
+  typed address-bar entry + navigation; close 3/3); real page: link activation (`[WIN] link -> …/Main_Page` + title +
+  load-ok), scroll receipts, search-form submit → `…/w/index.php?search=hobbyist`. Six limitations documented
+  precisely (PageUp guest-input drop; settle-window starvation; sidebar-link overlay hit-test; slow TCG reloads;
+  close-under-heavy-load; F3-channel typing) — none release-blocking; all detailed in §11.
+
+**Frozen-tip battery `fs-w7` (2026-10-07):** host rc=0 (53 s) — unit-arm rc=0 (179 s) — unit-x64 rc=0 (109 s, KVM) —
+test-arm: wave complete (`System halt.`, STRESS 120/120) with 1× SHELLTEST WATCHDOG (documented ambient family).
+
+**Residual register (all documented; none release-blocking):** x64 wheel step + x64 §8.3 stretch rows
+(input-stretch owner); CI test-arm ambient families (SHELLTEST / slot-pressure / condvar — proven variance; clean
+local waves on the same kernels); teardown ATEXIT stack-walker VA=0x8 (cosmetic, post-exit); PageUp guest-input
+drop; Wikipedia sidebar-link overlay hit-test; slow address-bar reloads under TCG; WK6-harness `c1-images` /
+`c2-close` step quirks (driver-side, pre-existing, byte-identical across gates 5–8).
+**Accepted limitations carried from plan §1.6:** TCG performance ("works but glacial" — numbers recorded, not
+hidden), no JIT/GPU, no-JS posture on the T2 path.
+
+---
+
 ## 7. Parallel execution plan (multiple agent sessions)
 
 ### 7.1 Lanes
