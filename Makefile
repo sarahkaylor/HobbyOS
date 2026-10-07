@@ -96,7 +96,10 @@ BROWSER_BIN ?= $(HOME)/webkit-lanes/wf1b/WebKitBuild/HobbyOS-intel/bin/WebProces
 endif
 # Vendored-source build output + optional binary cache (browser.md §11, 2026-10-07).
 BROWSER_BUILT ?= third_party/webkit-hobbyos/build/$(ARCH)/browser.bin
-BROWSER_CACHE ?= third_party/webkit-hobbyos/cache/browser-$(ARCH).bin.xz
+# Cache files use the flat-image arch naming (browser-arm / browser-x64);
+# $(ARCH) is arm|intel, so intel maps to the x64 cache name.
+BROWSER_CACHE_ARCH := $(if $(filter intel,$(ARCH)),x64,$(ARCH))
+BROWSER_CACHE ?= third_party/webkit-hobbyos/cache/browser-$(BROWSER_CACHE_ARCH).bin.xz
 XZ ?= xz
 
 # Build WebProcess from the vendored WebKit fork source (source-first path).

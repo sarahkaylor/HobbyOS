@@ -14,6 +14,7 @@ not built anything yet — never a requirement.
 | `webkit-hobbyos-rp-f-45349cb2.tar.xz.part-00/01` | The fork snapshot (split tarball; parts are sha-verified) |
 | `extract.sh` | Reassemble the parts → verify sha256 → extract to `src/` |
 | `build.sh` | Build `WebProcess` from the vendored source → `build/<arch>/browser.bin` |
+| `rebuild_browser.sh` | Regenerate the optional caches (`cache/browser-{arm,x64}.bin.xz`) from the vendored source |
 | `cache/browser-arm.bin.xz`, `cache/browser-x64.bin.xz` | Optional binary cache (see below) |
 | `SHA256SUMS` | All hashes (parts, reassembled snapshot, raw tar, cache) |
 | `src/`, `src-wk2/`, `build/` | Rebuilt workspaces (gitignored; produced by `extract.sh` / `build.sh`) |
@@ -143,6 +144,28 @@ committed cache carries the two known-good flat images:
 (explicit override or a local fork/worktree build) nor a vendored-source
 build (`build/<arch>/browser.bin`) exists; the line it prints says
 `(cache)` when the cache is what shipped.
+
+### Rebuilding the cache
+
+`rebuild_browser.sh` regenerates the cache files from the vendored source
+(either architecture, or both):
+
+```sh
+bash third_party/webkit-hobbyos/rebuild_browser.sh both        # or: arm | x64
+# on this workstation, reuse the existing prefixes instead of --build-deps:
+bash third_party/webkit-hobbyos/rebuild_browser.sh both \
+  --prefix-arm ~/webkit-hobbyos-wk2/arm/prefix \
+  --prefix-x64 ~/webkit-hobbyos-wk2/intel/prefix
+```
+
+It drives `build.sh`, re-compresses the resulting flat with the committed
+settings (`xz -T0 -6`), verifies the round-trip (decompressed sha256 == flat
+sha256), rewrites the `cache/…` lines in `SHA256SUMS`, and prints the new
+hashes — then commit `cache/` + `SHA256SUMS` to publish.  `--from-existing`
+refreshes the cache from `build/<arch>/browser.bin` without rebuilding.
+The x64 leg additionally needs the OS-side intel sysroot closure
+(`obj/intel/{crt0.o,libc.a,libcxx.a,setjmp.o}` + `obj/intel/icu/`) built
+first.
 
 License note: the WebKit source tree carries its own license files; the
 binary license/relink package for the shipped `WebProcess` is recorded in
