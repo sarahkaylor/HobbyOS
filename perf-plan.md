@@ -27,12 +27,14 @@ stable rendered frame**: first full paint whose `[WIN] frame … checksum` conve
 
 - Boot and app launch are reported separately (targets: boot ≤ 5 s x64-KVM,
   launch ≤ 1 s) — they are NOT part of T_nav but must not regress.
-- JS policy: the served document + CSS + images + fonts must be visually complete
-  within budget. Page-script execution is a **first-class workstream** (W4: LLInt;
-  JIT x64-first) and CNN is measured **both JS-off and JS-on**; the JS-on row
-  must meet the same budget once JIT lands on x64, else the gap is reported
-  with evidence. (Interpretation flagged for maintainer confirmation; the
-  JS-off/JS-on split changes no wave-0 work.)
+- **Metric CONFIRMED by maintainer 2026-10-08:**
+  - T_nav = URL typed → fully rendered; boot + browser launch reported
+    separately (targets: boot ≤ 5 s x64-KVM, launch ≤ 1 s).
+  - "Fully rendered" bar = **visual completeness** (served document + CSS +
+    images + fonts + legible text applied). Page-script execution is a
+    **first-class workstream** (W4: LLInt; JIT x64-first) with its own target
+    row (JS-on measured; goal = same budget once JIT lands on x64, else the
+    gap is reported with evidence).
 
 **Current honest numbers (ARM TCG, smp1, run 700 evidence):** CNN nav ≈ 47–58 min
 (R13b: `load-ok ms=2812839`; R14: `ms=3495000`; run 700 still in flight at ~80 min).
@@ -195,7 +197,7 @@ Lane briefs live at `~/hobbyos-perf-lanes/briefs/<lane>.md` (transcripts
 | P4 | 15 s ARM-TCG may be physically unattainable | Budget sketch is honest; report best-achieved + gap; x64 8 s is the committed number |
 | P5 | Lane collisions on the fork driver file | File ownership (§5) + merge order via controller |
 | P6 | Orphan run 700 / other sessions | Kill discipline; own PIDs only; distinct scratch dirs |
-| P7 | Metric ambiguity (JS-on vs JS-off, boot counted?) | Flagged for maintainer; wave-0 lanes robust to either answer |
+| P7 | ~~Metric ambiguity~~ **RESOLVED 2026-10-08** (maintainer): T_nav = nav→rendered, boot/launch separate; visual completeness is the bar; JS-on = separate first-class row | — |
 
 ---
 
