@@ -1,0 +1,102 @@
+{
+  "lane": "PX",
+  "status": "green",
+  "branch": "browser/perf-x64",
+  "head_sha": "5f1b9fc7806ef822e0600088bcbfa7d581e99637",
+  "artifacts": {
+    "flat_sha256": "8ce4186d40c773ab6ee2105609a76239a4ac3537aa0addc945f241ce2d3868b8",
+    "elf_sha256": "2b3675ca0da29feab75e4d17e796144c00bc9834e98550ceb130d9fcf241c538",
+    "flat_size_bytes": 101206832,
+    "runner_paths": [
+      "tools/run_x64_browser.sh",
+      "tools/drive_x64_perf.py"
+    ],
+    "example_page_png": "evidence/perf-x64/run3-example_com_/example_com-page.png",
+    "wikipedia_page_png": "evidence/perf-x64/run4-https___en_wikipedia_org_/https___en_wikipedia_org-page.png",
+    "example_page_net_sha256": "25ddf2c883e0d1958ea971d279a7e4f0fd446724ee3db7db19dadabd4a62e484",
+    "wikipedia_page_net_sha256": "4c8ea021e9faa332225cae82a79fd8d773f63e019925ee299eca53c7e490ed50"
+  },
+  "receipts": [
+    {
+      "id": "r1-closure",
+      "what": "intel sysroot closure obj/intel/{crt0,libc,libcxx,setjmp,icu}",
+      "evidence_paths": [
+        "continuation/perf-x64/closure-intel.log"
+      ],
+      "verdict": "pass"
+    },
+    {
+      "id": "r2-build",
+      "what": "vendored-source build.sh --arch intel -> WebProcess ELF + flat browser.bin (marker WK5WindowDriver)",
+      "evidence_paths": [
+        "continuation/perf-x64/browser-intel-build.log",
+        "continuation/perf-x64/flat.txt"
+      ],
+      "verdict": "pass"
+    },
+    {
+      "id": "r3-home",
+      "what": "x64 KVM boot + Apps-menu browser launch + HOME.HTM load-ok + styled frame, 0 mem faults, vision-checked",
+      "evidence_paths": [
+        "evidence/perf-x64/run3-example_com_/serial.log",
+        "evidence/perf-x64/run3-example_com_/home.png"
+      ],
+      "verdict": "pass"
+    },
+    {
+      "id": "r4-example",
+      "what": "typed example.com -> net fetch status=200 bytes=577 -> load-ok ms=11665 -> page frame 0x1004744d; PAGE-NET byte-exact vs live curl",
+      "evidence_paths": [
+        "evidence/perf-x64/run3-example_com_/PAGE-NET.HTM",
+        "evidence/perf-x64/run3-example_com_/example_com-page.png"
+      ],
+      "verdict": "pass"
+    },
+    {
+      "id": "r5-wikipedia",
+      "what": "typed https://en.wikipedia.org -> net fetch status=200 bytes=253010 -> load-ok ms=350796 -> page frame 0x73abcc39; PAGE-NET byte-exact vs live curl Main_Page (253010 B)",
+      "evidence_paths": [
+        "evidence/perf-x64/run4-https___en_wikipedia_org_/PAGE-NET.HTM",
+        "evidence/perf-x64/run4-https___en_wikipedia_org_/https___en_wikipedia_org-page.png"
+      ],
+      "verdict": "pass"
+    },
+    {
+      "id": "r6-runner",
+      "what": "reusable x64 perf runner committed (tools/run_x64_browser.sh + drive_x64_perf.py; builds disk, QEMU-KVM -smp8, drives QMP, report.json)",
+      "evidence_paths": [
+        "tools/run_x64_browser.sh",
+        "tools/drive_x64_perf.py"
+      ],
+      "verdict": "pass"
+    }
+  ],
+  "numbers": {
+    "boot_s": 3.263,
+    "launch_s": 10.173,
+    "load_ok_ms_example_com": 47791,
+    "load_ok_ms_wikipedia": 386955,
+    "guest_load_ok_ms_example_com": 11665,
+    "guest_load_ok_ms_wikipedia": 350796,
+    "home_frame_checksum": "0xfd3915b9",
+    "example_page_checksum": "0x1004744d",
+    "wikipedia_page_checksum": "0x73abcc39",
+    "memory_faults_total": 0,
+    "qemu": {
+      "machine": "q35",
+      "smp": 8,
+      "mem": "4096M",
+      "accel": "kvm",
+      "cpu": "host",
+      "ovmf": "~/.local/share/OVMF/OVMF_CODE_4M.fd pristine",
+      "nvme": true,
+      "virtio_gpu": true
+    }
+  },
+  "blockers": [],
+  "next_steps": [
+    "HOME checksum 0xfd3915b9 (x64 native canon, nonZero=7525894 == ARM) vs ARM 0x4719ef4d: verify pixel-diff source (possible cursor/chrome raster) if byte-parity is required",
+    "wikipedia load 350.8s guest / 386.9s wall vs 8s CNN target: x64 WebKit render pipeline throughput is the current bottleneck (parse+layout+paint under KVM)",
+    "optional: close-window receipt ([WIN] close ok / exit rc=0) + F9 link-nav for the full WK6-style battery"
+  ]
+}

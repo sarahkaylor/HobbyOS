@@ -3,6 +3,13 @@
 Status: **active plan** (2026-10-08). Owner: controller session. Record: `browser.md`
 §11 remains the append-only fix log; this document owns the performance endgame.
 
+**Wave status (2026-10-08):** W0 complete — net stall root-caused (no CONNECT
+sharing × per-connection handshake cost) + fix validated (116→115 reused,
+134 ms median; rp-f `9a7b77ffb9`); x64 leg live (PX runner + receipts); JSC
+path mapped (LLInt flip; x64 JIT needs **no** OS changes). Wave 1 in flight:
+N1 (async pool), J1 (JSC tiers), O1 (OS dressing), M1 (post-fix CNN
+measurement). Wave-0 reports: `continuation/perf/wave0/`.
+
 Ground snapshot: OS main `835e19b` · fork `browser/rp-f` @ `e9a040c5b4` (vendored
 snapshot `third_party/webkit-hobbyos/`; verified identical for the net path) ·
 workstation: 64-core AMD / 251 GB / `/dev/kvm` · QEMU 10.2.1 · curl 8.22.0
