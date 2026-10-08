@@ -164,8 +164,8 @@ committed cache carries the two known-good flat images:
 
 | Cache file | Flat sha256 (decompressed) | Size | Built from |
 |---|---|---|---|
-| `cache/browser-arm.bin.xz` | `1ebac9a4c2dc04b693bdb3c550ba9e018d003d536942e1e75ef64edee4cb3b03` | 87,507,168 B | `WebKitBuild/HobbyOS-arm-wk5` `WebProcess` (ELF sha256 `0a815545…`), 2026-10-07 |
-| `cache/browser-x64.bin.xz` | `8f256a3641c2ec70e7723d5d04dabd1036a2e438339bda59429aa04fa6a208ba` | 101,206,816 B | wf1b `WebKitBuild/HobbyOS-intel` `WebProcess` (ELF sha256 `a90337ea…`), 2026-10-06 |
+| `cache/browser-arm.bin.xz` | `4dcdd5095ff80efb03c081f3ffe99cf70a6e1ada0b4077904a5ae52c9d8515ae` | 87,568,624 B | from-source build of this snapshot (`e9a040c5b4`; `build/arm/browser.bin`, ELF `3553f80a…`), 2026-10-08 |
+| `cache/browser-x64.bin.xz` | `8f256a3641c2ec70e7723d5d04dabd1036a2e438339bda59429aa04fa6a208ba` | 101,206,816 B | **STALE** — wf1b-era `WebKitBuild/HobbyOS-intel` `WebProcess` (ELF sha256 `a90337ea…`), 2026-10-06, pre-D2/D3 (no `ui close-detected` / `url-norm`). Not regenerated; refresh when the intel track resumes. |
 
 `make disk.img` uses a cache file only when neither a `BROWSER_BIN` file
 (explicit override or a local fork/worktree build) nor a vendored-source
