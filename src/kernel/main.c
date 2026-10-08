@@ -156,6 +156,8 @@ static void test_wave_loader(void *arg) {
   load_and_run_program_in_scheduler("SMPTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("PIPETEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("GRAPHICS.BIN", -1, -1, -1, -1);
+  /* rp-w: wsurf window-surface render-confinement tests. */
+  load_and_run_program_in_scheduler("WSRF_T.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("NETTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("TIMEOUT.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("STRESS.BIN", -1, -1, -1, -1);

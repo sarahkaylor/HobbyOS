@@ -80,6 +80,15 @@ extern "C" {
    * its client-side shadow (its drawing never reaches the display until a
    * flush, exactly like Xlib's output buffer).
    *
+   * Render sandbox: an app that draws straight into the framebuffer (rather
+   * than through the X11 shadow) must route every pixel write through the
+   * wsurf layer (src/user_include/graphics/wsurf.h).  wsurf binds the ESC ] G
+   * content rect and clamps every draw to it in window-local coordinates,
+   * tracking a damage union for rect presents -- so an app cannot paint
+   * outside its designated window area by construction (platform-layer
+   * confinement, user-mode only).  The repair/expose machinery above stays
+   * as the recovery net.
+   *
    * Mouse input for a pixel window arrives as ESC [ P/G/R <x>;<y>;<btn> ~
    * with x;y in content-relative pixels (cell coordinates for text
    * windows).  After painting, the app prints ESC ] F ~ ("frame flushed")
