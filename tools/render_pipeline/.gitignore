@@ -1,0 +1,3 @@
+# rp-h render-pipeline probe evidence (per-run disks, serials, PPMs) —
+# intentionally untracked; baselines doc references these paths on disk.
+tools/render_pipeline/evidence/

@@ -1,0 +1,67 @@
+{
+  "lane": "rp-h",
+  "verdict": "partial",
+  "pinned_elf": {
+    "path": "/home/sarah/hobbyos-scratch/rp-baseline-WP-0a8155451f2d.bin",
+    "sha256": "0a8155451f2d73e6a43b057f6da21003d9af6b90908431eb847b09967acf512d",
+    "verified": "2026-10-07, sha256 matches; identical to fork-tree WebProcess at pin time (re-checked post-runs)"
+  },
+  "commits": [],
+  "deliverables": [
+    {"name": "PIN baseline ELF + doc note", "status": "done",
+     "evidence": "pinned copy sha verified == 0a815545…; baselines doc documents thread 816805f9→b583486e→0a815545 and mandates --wp-elf <pinned> for all remaining/rp-f after-runs"},
+    {"name": "perf table HOME rows filled from evidence", "status": "done",
+     "evidence": "HOME N=3 from perf-rp-perf{1,2,3}/report.json serial_tail: load-ok 5346/5366/5687 ms; frame-times 108/42/167, 111/27/155, 114/23/154 ms; spot-checked vs each report's embedded serial"},
+    {"name": "perf table TALL rows", "status": "partial",
+     "evidence": "TALL cells marked not-run with verified reason: perf probe's [WIN] load-ok marker matches boot auto-load receipt (load_debug slice_tail_has_loadok=false), stored 4000B serial_tails truncate before TALL completes, /tmp serials pruned; contextual TALL first-paint 707/23/746 (load-ok 6782) and 698/25/739 (load-ok 6624) from bleed-load/settle runs included, labeled non-perf single-run"},
+    {"name": "tile-bleed table filled + gentle re-run", "status": "done",
+     "evidence": "gentle re-run vs pinned ELF = NO-BLEED-OBSERVED (8 pairs, 0 unattributed px); load/settle/openclose NO-BLEED-OBSERVED (7/7/6 pairs, 0 unattributed). All 4 scenarios 0 unattributed pixels"},
+    {"name": "responsive-close table filled + titlebar run", "status": "done",
+     "evidence": "titlebar run vs pinned ELF = FAIL-STARVED; starvation re-run vs pinned ELF = FAIL-STARVED (2 attempts); midload = FAIL-STARVED; midsettle = not-run (probe driver exception [Errno 32] Broken pipe, report status=error, re-run would exceed ≤2 extra-run budget)"},
+    {"name": "uncommitted tool changes reconciled", "status": "done",
+     "evidence": "run_rp.sh REPO path fix (dirname $0/../.. → repo root) + tile_bleed_probe.py load_debug instrumentation + get() hardening committed with rationale; .gitignore (evidence/) committed"},
+    {"name": "docs/browser/render-pipeline-baselines.md", "status": "done",
+     "evidence": "tables filled with real numbers / labeled not-run; frozen-thread + PIN section added, 2026-10-07"}
+  ],
+  "gates": [
+    {"name": "perf_receipts parses existing serials", "result": "pass"},
+    {"name": "tile-bleed no-bleed (gentle/load/settle/openclose)", "result": "pass",
+     "cmd": "run_rp.sh tile-bleed --wp-elf <pinned> --scenario <s>",
+     "detail": "all four scenarios NO-BLEED-OBSERVED, 0 unattributed pixels each"},
+    {"name": "responsive close within grace", "result": "FAIL on current build",
+     "cmd": "run_rp.sh resp-close --wp-elf <pinned> --scenario <s>",
+     "detail": "midload/starvation/titlebar all FAIL-STARVED (no close-ok within 30s grace); midsettle not runnable (probe crashed). Gate previously 'pending' — now a real negative on 0a815545"},
+    {"name": "run_rp.sh runs completed", "result": "pass",
+     "detail": "4 finisher runs (gentle, titlebar, perf, starvation) all rc=0, report.json valid (validated by json.load)"},
+    {"name": "report JSON valid", "result": "pass"}
+  ],
+  "baselines": {
+    "command": "tools/render_pipeline/run_rp.sh <perf|tile-bleed|resp-close> --wp-elf /home/sarah/hobbyos-scratch/rp-baseline-WP-0a8155451f2d.bin --instance rp-hf --port 8830",
+    "elf_sha256": "0a8155451f2d73e6a43b057f6da21003d9af6b90908431eb847b09967acf512d",
+    "perf_table": {
+      "HOME": [{"run": 1, "load_ok_ms": 5346, "render_ms": 108, "blit_ms": 42, "total_ms": 167, "viewport_apply_end_ms": "n/a (no re-tile)"},
+               {"run": 2, "load_ok_ms": 5366, "render_ms": 111, "blit_ms": 27, "total_ms": 155, "viewport_apply_end_ms": "n/a (no re-tile)"},
+               {"run": 3, "load_ok_ms": 5687, "render_ms": 114, "blit_ms": 23, "total_ms": 154, "viewport_apply_end_ms": "n/a (no re-tile)"}],
+      "TALL": "not-run (see doc: probe marker limitation + pruned serials; contextual bleed-run TALL first-paint listed in doc)"
+    },
+    "tile_bleed": {"gentle": {"verdict": "NO-BLEED-OBSERVED", "pairs": 8, "unattributed_px": 0, "evidence": "tile-bleed-rp-hf-20261007-212020"},
+                   "load":   {"verdict": "NO-BLEED-OBSERVED", "pairs": 7, "unattributed_px": 0, "evidence": "tile-bleed-rp-bleed-load-20261007-151741"},
+                   "settle": {"verdict": "NO-BLEED-OBSERVED", "pairs": 7, "unattributed_px": 0, "evidence": "tile-bleed-rp-bleed-settle-20261007-151851"},
+                   "openclose": {"verdict": "NO-BLEED-OBSERVED", "pairs": 6, "unattributed_px": 0, "evidence": "tile-bleed-rp-bleed-openclose-20261007-151958"}},
+    "resp_close": {"midload": {"verdict": "FAIL-STARVED", "cp": "during TALL load", "close_ok_latency_s": "none <30s", "exit_rc": "never observed", "evidence": "resp-close-rp-rclose-midload-20261007-152112"},
+                   "midsettle": {"verdict": "not-run", "reason": "probe driver exception [Errno 32] Broken pipe"},
+                   "starvation": {"verdict": "FAIL-STARVED", "cp": "at load-ok (+retry)", "close_ok_latency_s": "none <30s", "exit_rc": "never observed", "evidence": "resp-close-rp-hf-20261007-212420"},
+                   "titlebar": {"verdict": "FAIL-STARVED", "cp": "X button after load", "close_ok_latency_s": "none <30s", "exit_rc": "never observed", "evidence": "resp-close-rp-hf-20261007-212115"}}
+  },
+  "next": [
+    "rp-f after-runs: use --wp-elf <pinned copy> (see PIN in doc)",
+    "consider fixing perf probe load-ok marker (needs per-url distinct marker or 'load start' fence) to capture real TALL receipts",
+    "investigate resp-close starvation on 0a815545 (close-under-load gate currently red)"
+  ],
+  "risks": [
+    "perf numbers are TCG single-machine, 1920x1080-era; compare only same-command/same-box",
+    "pinned copy is a raw ELF: sha differs from the objcopy-flat on disk — record probe-reported hash consistently",
+    "midsettle + TALL-perf cells are 'not-run' by budget/evidence limits, labeled in doc; not invented",
+    "responsive-close failures may be TCG-scheduling artifacts or a real freeze — needs a non-TCG or longer-grace follow-up to disambiguate"
+  ]
+}
