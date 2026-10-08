@@ -1,10 +1,10 @@
-# SHA256SUMS — third_party/webkit-hobbyos/ (2026-10-07)
-# The snapshot is a split tarball; "webkit-hobbyos-rp-f-45349cb2.tar.xz" is
+# SHA256SUMS — third_party/webkit-hobbyos/ (2026-10-08)
+# The snapshot is a split tarball; "webkit-hobbyos-rp-f-e9a040c5b4.tar.xz" is
 # the reassembled whole (checked by extract.sh).  The raw tar hash is a
 # reference for the uncompressed stream (xz -dc part-* | sha256sum).
-3baa2237da6f70e81055ba2b92bbca124a4d82049186920277f440778f0cea17  webkit-hobbyos-rp-f-45349cb2.tar.xz
-9ab77fd43d17dc1ed710015d5b907fcae5612542242299cc170b2123e7cf329d  webkit-hobbyos-rp-f-45349cb2.tar.xz.part-00
-aefdfc20be732fc61b10699ed68e57fe64beb8ec67d76b9fc5c44c88fa88c68a  webkit-hobbyos-rp-f-45349cb2.tar.xz.part-01
-# 5d86449c5e506bcf757b634529af7e39660bf978510e2601facf78a82697b2d5  webkit-hobbyos-rp-f-45349cb2.tar (reference)
+b850179d07c034e10d4b17cd864f26f313f61a18270a739c02119fca16536b2e  webkit-hobbyos-rp-f-e9a040c5b4.tar.xz
+c77cdf82d956647fa6f3d0b51963a8a5d3ac0d13bda41019cc9fc1d8d9528b56  webkit-hobbyos-rp-f-e9a040c5b4.tar.xz.part-00
+3bb5a81fb012d596b2a41ef6a5d644662c2aebf41a9560943a588b9510afaea2  webkit-hobbyos-rp-f-e9a040c5b4.tar.xz.part-01
+# 6ee50d00f0c732c0c55038e8b4e282a5f97d7fc1dc355adbd9f3102d0ad72d72  webkit-hobbyos-rp-f-e9a040c5b4.tar (reference)
 89d015c39dfc060b826da57988c44418dbc1ca478a1bceb086fd3abf577d6f9f  cache/browser-arm.bin.xz
 6706d645d953eccd70464b70b3adc2ebe51de0979a0a2840c55e999fae2cd8b0  cache/browser-x64.bin.xz

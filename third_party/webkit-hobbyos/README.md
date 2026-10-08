@@ -11,7 +11,7 @@ not built anything yet — never a requirement.
 
 | Path | Role |
 |---|---|
-| `webkit-hobbyos-rp-f-45349cb2.tar.xz.part-00/01` | The fork snapshot (split tarball; parts are sha-verified) |
+| `webkit-hobbyos-rp-f-e9a040c5b4.tar.xz.part-00/01` | The fork snapshot (split tarball; parts are sha-verified) |
 | `extract.sh` | Reassemble the parts → verify sha256 → extract to `src/` |
 | `build.sh` | Build `WebProcess` from the vendored source → `build/<arch>/browser.bin` |
 | `rebuild_browser.sh` | Regenerate the optional caches (`cache/browser-{arm,x64}.bin.xz`) from the vendored source |
@@ -36,10 +36,13 @@ sanity check), and `--deps-only` just builds the cross-deps prefix.
 
 - Fork origin: `https://github.com/WebKit/WebKit.git` (clone; base = tag
   `webkitgtk-2.54.0` @ `5220e80b97a253c60ed899361654142ab5021998`).
-- Snapshot ref: **`browser/rp-f` @ `45349cb2929b07035f90b3b4fc7db49c3c6ecfab`**
-  (2026-10-07) — the integration tip containing every merged port line
-  (`browser/l8-wk5` @ `cdabe011af` included).  291 commits / 3,953 files over
-  the base; port content is grouped under `HobbyOS/` in the tree (AD-11).
+- Snapshot ref: **`browser/rp-f` @ `e9a040c5b4`**
+  (2026-10-08) — the integration tip containing every merged port line
+  (`browser/l8-wk5` @ `cdabe011af` included): D1 pthread smoke, D2 URL
+  normalization, the crash-fix toolchain hardening (mtime-aware shims,
+  `IS_NEWER_THAN`), the tracer guard, and the D3 UI-thread split (close owned
+  by the UI thread).  Port content is grouped under `HobbyOS/` in the tree
+  (AD-11).
 - Exclusions (and why):
   - Test suites: `LayoutTests/`, `JSTests/`, `PerformanceTests/`, `Websites/`,
     `WebDriverTests/`, `ManualTests/` — not build inputs.
@@ -51,24 +54,25 @@ sanity check), and `--deps-only` just builds the cross-deps prefix.
   - `HobbyOS/continuation/` — ~33 GB of lane receipts/evidence (a working
     archive, not port source).
   - Root-level lane scratch (`*-BRIEF.md`, `fs-*-REPORT.json`, `logs/`, agent
-    dirs).  `Source/ThirdParty/{skia,ANGLE,capstone,...}` are KEPT (skia is on
-    the port's link graph; ANGLE/capstone mirror the upstream release-tarball
-    composition).
-- Contents: 58,592 files; raw tar 865,198,080 B; xz 173,702,644 B over two parts.
+    dirs).  All `.gitignore`/`.gitattributes` files (any depth) are dropped —
+    they are meta, not build inputs.  `Source/ThirdParty/{skia,ANGLE,capstone,...}`
+    are KEPT (skia is on the port's link graph; ANGLE/capstone mirror the
+    upstream release-tarball composition).
+- Contents: 55,157 files; raw tar 865,218,560 B; xz 173,734,396 B over two parts.
 
 SHA256 (canonical list in `SHA256SUMS`):
 
 | Artifact | SHA256 |
 |---|---|
-| reassembled snapshot `.tar.xz` | `3baa2237da6f70e81055ba2b92bbca124a4d82049186920277f440778f0cea17` |
-| `...part-00` | `9ab77fd43d17dc1ed710015d5b907fcae5612542242299cc170b2123e7cf329d` |
-| `...part-01` | `aefdfc20be732fc61b10699ed68e57fe64beb8ec67d76b9fc5c44c88fa88c68a` |
-| raw tar (reference) | `5d86449c5e506bcf757b634529af7e39660bf978510e2601facf78a82697b2d5` |
+| reassembled snapshot `.tar.xz` | `b850179d07c034e10d4b17cd864f26f313f61a18270a739c02119fca16536b2e` |
+| `...part-00` | `c77cdf82d956647fa6f3d0b51963a8a5d3ac0d13bda41019cc9fc1d8d9528b56` |
+| `...part-01` | `3bb5a81fb012d596b2a41ef6a5d644662c2aebf41a9560943a588b9510afaea2` |
+| raw tar (reference) | `6ee50d00f0c732c0c55038e8b4e282a5f97d7fc1dc355adbd9f3102d0ad72d72` |
 
 Refreshing the snapshot when the fork moves (run in the fork clone, from the
 desired ref; then re-split with `split -b 90000000 -d`, update `SHA256SUMS`
-and this README — the full 2026-10-07 exclusion list is in the browser.md §11
-entry for that date):
+and this README — the full 2026-10-08 exclusion list is in the browser.md §11
+entry for that date; the previous 2026-10-07 entry is the same shape):
 
 ```sh
 git archive --format=tar --prefix=webkit-hobbyos-<ref>/ <ref> \
@@ -77,8 +81,24 @@ git archive --format=tar --prefix=webkit-hobbyos-<ref>/ <ref> \
   ':(exclude)WebDriverTests' ':(exclude)WebKitLibraries' \
   ':(exclude)WebKit.xcworkspace' ':(exclude)Configurations' \
   ':(exclude)Source/ThirdParty/libwebrtc' \
+  ':(exclude).claude' ':(exclude).codex' ':(exclude).gemini' ':(exclude)logs' \
+  ':(exclude)BW4-BRIEF.md' ':(exclude)WB-BRIEF.md' ':(exclude)WI-BRIEF.md' \
+  ':(exclude)WN-BRIEF.md' ':(exclude)WN3-BRIEF.md' \
+  ':(exclude)fs-n1-REPORT.json' ':(exclude)fs-r1c-REPORT.json' \
+  ':(exclude)fs-r3-REPORT.json' ':(exclude)fs-r4-REPORT.json' \
+  ':(exclude)fs-r5-REPORT.json' ':(exclude)fs-r7-REPORT.json' \
+  ':(exclude)fs-x3-REPORT.json' ':(exclude)fs-x5-REPORT.json' \
+  ':(exclude)fs-x6-REPORT.json' \
+  ':(exclude).gitattributes' ':(exclude).gitignore' \
+  ':(exclude).metadata_never_index' ':(exclude).submitproject' \
+  ':(exclude).submitproject-append' ':(exclude).submitproject-tools' \
+  ':(exclude,glob)**/.gitignore' ':(exclude,glob)**/.gitattributes' \
   | xz -T0 -6 > webkit-hobbyos-<ref>.tar.xz
 ```
+
+(xz must be fed the archive on stdin — `git archive -o` resolves the path
+relative to the `-C` dir, which for an outside checkout writes into the fork
+tree; redirect stdout instead.)
 
 ## Build from source (supported path)
 
