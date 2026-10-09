@@ -95,6 +95,30 @@ PASS (`p3/run/gate_nudge_smoke.cpp`). NOT compiled into any binary yet —
 BuildB-arm2 (pre-fix snapshot) is the gate-NAMING leg; the fix binary +
 after-leg2 per `RUN-REQUEST-2.md`.
 
+## P3c (09:20) — WK5Alloc NULL-crash fix (run 802), committed `4ce6afcfda`
+**BUG**: run-802 (x64) browser killed at `fastMalloc+0x31` writing VA=0xbbadbeef
+= the compiled-in bmalloc-NULL BCRASH, mid-CNN-fetch (~5 pkts in).
+**CHAIN (proven)**: `fastMalloc` → `bmalloc::api::malloc` → `::malloc`
+(WK5Alloc override — libpas not linked: 1 pas symbol in the w2-intel binary) →
+`fetchArena` → `P3_SBRK == -1` → NULL → BCRASH. 1 GiB heap window cannot be
+exhausted that early, so sbrk failing is the only NULL source.
+**OS ROOT (controller item)**: `kernel/process.c` `sys_brk` checks "covered?"
+via LOCK-FREE `vm_region_find()` while a concurrent `vm_region_insert()`
+(pool worker-stack mmap at fetch start; JIT mmap) memmoves/reallocates the
+same `as->regions[]` under vm_lock (region_insert_at shift; region_grow array
+realloc) — torn read → `covered=0` → `vm_region_insert()` rejects the span as
+overlap → spurious `-ENOMEM` → sbrk -1 → NULL → BCRASH. Race confirmed by the
+w2 serial's multi-CPU syscall interleave right at the fault.
+**FIX (this lane, `bw-perf-parse`)**: `fetchArena` retries sbrk up to 4× (the
+race is transient), then falls back to anonymous mmap (guest mmap path fully
+locked, 18 GiB window) — malloc can never NULL-crash from the brk race.
+**HOST A/B (`p3c/evidence/A-B.md`)**: extended `alloc_stress.c` with phase 6
+(fetch-scale pattern: multi-MB large allocs + 16 B churn + realloc growth +
+free storms) under `p3_host_sbrk_fail_arm()` spurious failures, and phase 7
+(hard sbrk failure). PRE-fix: **RESULT FAIL, 11984 NULL failures** (run-802
+shape). POST-fix: **RESULT PASS**, 64 B churn **43.7x** retained.
+See `p3/RUN-REQUEST-3.md` (rebuild + provenance + fixture/CNN legs).
+
 ## Notes for the controller
 - Build A (markers only) that I started died during the JSC phase; the dir
   `WebKitBuild/HobbyOS-arm-wk5` is resumable (ninja reruns). Build B
