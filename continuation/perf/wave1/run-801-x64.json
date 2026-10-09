@@ -1,0 +1,108 @@
+{
+  "run": "801-x64",
+  "leg": "x64 (KVM, qemu-system-x86_64 q35 -smp 8 -m 4096M, OVMF_4M, NVMe, virtio-gpu-pci)",
+  "status": "ENDED - BROWSER PROCESS CRASHED in loader-wedge backstop (FrameLoader.cpp:2348 stopAllLoaders -> RELEASE_ASSERT ScriptDisallowedScope) at ~04:14 UTC (crash line 2313-2314; 25 post-crash [WATCHDOG] dumps; [KERNEL] Process 3: BROWSER.BIN exited). load-ok NOT reached. Driver FAILed 'no load-ok url within 1800s' (driver.log, written 04:25:49).",
+  "pins": {
+    "fork_branch": "browser/rp-f",
+    "fork_sha": "9a7b77ffb9",
+    "webprocess_sha256": "1d4434805fac1805caaa37f15315fb18d64521581119f22700dfb7038bdb5822",
+    "browser_bin_sha256": "be00b42b4058959b9dc024601ca638f06ca4a93637283fc177522d20273559cf",
+    "marker_check": "[SR-t] / SR-VERBOSE / SR-URLS present (post-fix binary confirmed by marker)",
+    "pin_note": "PINS.md still lacks the x64 sha row (flagged to controller in PREP-801); sha verified on disk from pinned/x64/WebProcess"
+  },
+  "phases": [
+    {"phase": "qemu-start",       "mono_ms": 0,      "wall": "03:49:25.9", "note": "qemu_start_epoch=1791517765.864"},
+    {"phase": "desktop-booted",   "mono_ms": 5938,   "wall": "03:49:31.8", "note": "5.9 s to desktop (perf.json boot_s)"},
+    {"phase": "browser-launched", "mono_ms": 17059,  "wall": "03:49:43.0", "note": "[WIN] BOOT 17.06 s; load-ok HOME.HTM ms=605"},
+    {"phase": "home-frame",       "mono_ms": 68199,  "wall": "03:50:34.1", "note": "HOME frame checksum 0xfd3915b9 stable (65,680 B windowed shell, IMGPRF 54.6s)"},
+    {"phase": "nav-typed",        "mono_ms": 71275,  "wall": "03:50:37.1", "note": "T_nav start (perf.json nav_start_s=71.275)"},
+    {"phase": "main-fetch-ok",    "mono_ms": null,   "wall": "~03:50:45..03:52:05", "note": "[WIN] net fetch ok status=200 bytes=6,725,887 effective=https://www.cnn.com/; leg est 87s incl. cold-TLS (~44s) on primary cnn.com conn (wave0_est derived, see analysis.wall_uncertainty)"},
+    {"phase": "fetch-wave-1",     "mono_ms": null,   "wall": "~03:52:05..03:52:17", "note": "fonts nconn=0 ttfb 22-32ms; optimizely @12,009ms OK (fresh, tls=5,769ms -> 5.7s)"},
+    {"phase": "silent-parse-1",   "mono_ms": null,   "wall": "~03:52:17..03:57:00", "note": "303,547 ms gap; 0 fetches; WATCHDOG console-silent dumps x11; tokens 600->5200 (parse/layout grind)"},
+    {"phase": "media-image-wave", "mono_ms": null,   "wall": "~03:57:00..04:02:43", "note": "~36 images; first media.cnn.com COLD TLS 33,664ms (33.7s); all subsequent nconn=0 ttfb 34-75ms total ~200ms; cadence median 1.7s; DOMContentLoaded dispatched (line 1819) at wave-offset ~648,879ms"},
+    {"phase": "silent-parse-2",   "mono_ms": null,   "wall": "~04:02:43..04:13:34", "note": "646,251 ms gap after app-store QR; 15 WATCHDOG dumps; tokens->17000; then [SR] container-skeleton reappears"},
+    {"phase": "skeleton-fetch",   "mono_ms": null,   "wall": "~04:13:34 (off 1,295,099ms)", "note": "container-skeleton-desktop.svg COLD tls=27,053ms (27.1s, dns 8.4s) - a NEW cross-host fresh connect after a 10-min silent stretch"},
+    {"phase": "wedge-onset",      "mono_ms": null,   "wall": "~04:13:36 (line 2139)", "note": "first [COMP] checkCompleted reqC=3 complete=0 parsing=0; wedge-dump reqC=3 pending=129 (line 2140) lists 17 fonts loading=1 needs=1 loader=0"},
+    {"phase": "font-refetch",     "mono_ms": null,   "wall": "~04:13:36..04:14:00 (lines 2160-2304)", "note": "17 font re-fetches (scheduleLoad + fetch), all nconn=0 fast; reqC stays pin at 3 through all of them"},
+    {"phase": "wedge-streak",     "mono_ms": null,   "wall": "~04:14:00 (lines 2310-2312)", "note": "checkCompleted reqC=3 + font-batch-kick 1/2; m_fsStuckReqCStreak reaches threshold"},
+    {"phase": "CRASH",            "mono_ms": null,   "wall": "~04:14:0x (line 2313-2314)", "note": "[COMP] checkCompleted wedge-streak stop reqC=3 -> stopAllLoaders() -> [WTF-HOBBYOS CRASH] FrameLoader.cpp:2348 void WebCore::FrameLoader::stopAllLoaders (RELEASE_ASSERT_WITH_SECURITY_IMPLICATION ScriptDisallowedScope) -> [WIN] ATEXIT -> [KERNEL] Process 3: BROWSER.BIN exited unexpectedly"},
+    {"phase": "load-ok",          "mono_ms": null,   "wall": null, "note": "NOT REACHED. Exactly 3 requests created during implicitClose (load-event / loading=lazy-class) never received a serviced loader; requestCount=3 forever; readyState Interactive; load-ok never fires (controller-attributed; comment at FrameLoader.cpp:1095-1113)"},
+    {"phase": "frame",            "mono_ms": null,   "wall": null, "note": "2 frames logged, both HOME (0xfd3915b9); NO CNN frame checksum"}
+  ],
+  "t_nav": {
+    "status": "NOT MEASURED - load-ok not reached (crash)",
+    "furthest_progress": "DOMContentLoaded dispatched at wave-offset ~648,879ms (line 1819) then 17 final fonts fetched before crash",
+    "budget": "8 s x64-KVM - FAILED (crash at ~23.9 min after nav)"
+  },
+  "fetch_stats": {
+    "fetch_starts": 135,
+    "srt_lines_raw": 135,
+    "srt_parsed_clean": 133,
+    "completion_pct": 100.0,
+    "completion_note": "2 [SR-t] lines interleaved/garbled (img-7424.jpg line 1112, RTRMADP JPG line 1208 - concurrent serial writers); both DID complete (fetch+[SR-t] present) per controller; NOT stuck",
+    "ok_200": 134,
+    "rc_errors": [],
+    "reuse_nconn0": 128,
+    "fresh_nconn1": 4,
+    "reuse_pct": 95.5,
+    "median_total_ms": 232.5,
+    "p90_total_ms": 390,
+    "max_total_ms": 33868,
+    "min_total_ms": 74,
+    "median_ttfb_ms": 85.5,
+    "sum_total_ms": 122324,
+    "sum_bytes": 10879984,
+    "cold_tls_ge10s": [
+      {"off_ms": 315601, "url": "https://media.cnn.com/api/v1/images/stellar/prod/20261008-isaias-satellite-thumb0.png?c=2x3&q=h_384,w_256,c_fill/f_webp", "dns_ms": 4856, "conn_ms": 4894, "tls_ms": 33664, "ttfb_ms": 33790, "total_ms": 33868, "ip": "151.101.131.5:443", "wall_est": "~03:57:00"},
+      {"off_ms": 645768, "url": "https://www.cnn.com/media/sites/cnn/google-play-cnn-app-qr-code.png", "dns_ms": 165, "conn_ms": 250, "tls_ms": 25001, "ttfb_ms": 25367, "total_ms": 25634, "ip": "151.101.131.5:443", "wall_est": "~04:02:40"},
+      {"off_ms": 1295122, "url": "https://www.cnn.com/media/sites/cnn/container-skeleton-desktop.svg", "dns_ms": 8365, "conn_ms": 8398, "tls_ms": 27053, "ttfb_ms": 27242, "total_ms": 27295, "ip": "151.101.195.5:443", "wall_est": "~04:13:34"}
+    ],
+    "near_miss": {"off_ms": 12009, "url": "https://cdn.optimizely.com/public/125375509/s/landingprod.js", "tls_ms": 5769, "note": "5.8s cold TLS, OK; the OTHER cross-host fresh connect (media/QR/skeleton are 25-45s)"}
+  },
+  "stalls_ge10s": [
+    {"ms": 11477, "window": "noto_serif_display-v1.woff2 @532ms -> optimizely @12,009ms", "cause": "fresh connect to Cloudflare, tls=5,769ms"},
+    {"ms": 303547, "window": "optimizely @12,009ms -> first media image @315,601ms", "cause": "silent parse phase (parser/style/layout on 6.7MB doc); tokens 600->5200; WATCHDOG x11 (benign) -> NOT a crash"},
+    {"ms": 43330, "window": "jumblecrossword.jpg @602,409ms -> google-play QR @645,768ms", "cause": "parse tail; QR fresh TLS 25.0s"},
+    {"ms": 646251, "window": "app-store QR @648,879ms -> container-skeleton-desktop.svg @1,295,099ms", "cause": "second silent phase (tokens->17000, WATCHDOG x15) then skeleton cold TLS 27.1s"},
+    {"ms": null, "window": "crash @line 2314 -> serial end", "cause": "post-crash: 25 WATCHDOG + IDLESTUCK dumps while kernel idle; browser dead"}
+  ],
+  "wedge_timeline": [
+    {"line": 2131, "event": "[WIN-sr] fetch container-skeleton-desktop.svg ok (cold tls=27,053ms)"},
+    {"line": 2139, "event": "first [COMP] checkCompleted begin complete=0 parsing=0 reqC=3 delayLoad=0 stylesheets=1 - reqC went 0->3 here and NEVER decrements"},
+    {"line": 2140, "event": "[COMP] wedge-dump reqC=3 pending=129: lists 17 fonts 'loading=1 needs=1 loader=0' (fonts marked loading but NO serviced loader; e.g. noto_serif-italic-v1.woff2, cnn_sans_condensed.woff2, ...)"},
+    {"line": "2160-2304", "event": "17 font re-fetches (scheduleLoad + [WIN-sr] fetch, all nconn=0 rc=0 fast) - the 'loading' fonts get re-kicked but reqC stays pin at 3"},
+    {"line": "2310-2312", "event": "checkCompleted begin reqC=3 + [COMP] font-batch-kick 1/2"},
+    {"line": 2313, "event": "[COMP] checkCompleted wedge-streak stop reqC=3  (m_fsStuckReqCStreak>=3 -> stopAllLoaders(); FrameLoader.cpp:1113-1119)"},
+    {"line": 2314, "event": "[WTF-HOBBYOS CRASH] /home/sarah/webkit-hobbyos/Source/WebCore/loader/FrameLoader.cpp:2348 void WebCore::FrameLoader::stopAllLoaders(ClearProvisionalItem, StopLoadingPolicy) - RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(ScriptDisallowedScope::InMainThread::isScriptAllowed()) fails because checkCompleted runs in a script-disallowed scope"},
+    {"line": "2316-2318", "event": "[WIN] ATEXIT ra0=... ; [KERNEL] Process 3: BROWSER.BIN exited unexpectedly or gracefully."},
+    {"line": "after", "event": "25 [WATCHDOG] + 5 IDLESTUCK dumps; driver kept polling to nav+1800s (04:20:37) then FAILed at 04:25:49"}
+  ],
+  "wedge_attribution": {
+    "stuck_requests": "Exactly 3 requests created during implicitClose at load-event/flush time (the `loading=lazy`-class / load-event image flush) that NEVER receive a serviced loader in the single-process shell: no [SR]/[WIN-sr]/[SR-t] ever appears for them, requestCount stays 3 forever -> readyState stays Interactive, load-ok never fires. (Controller-verified; matches the intended-comment at FrameLoader.cpp:1093-1113.)",
+    "backstop_intent": "fs-r10 big-doc completion backstop: if parser done and requestCount is frozen at the same value across several checkCompleted calls, force stopAllLoaders() so completion may proceed.",
+    "backstop_bug": "The backstop fires (wedge-streak stop) but stopAllLoaders() itself CRASHES: RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(ScriptDisallowedScope) at FrameLoader.cpp:2348 because checkCompleted is invoked from a script-disallowed scope. Intended graceful 'stop the 3 wedged requests and continue' becomes a process abort. Net: the recovery path is itself the crash.",
+    "line_numbers": "FrameLoader.cpp:1093-1122 (backstop, prints '[COMP] checkCompleted wedge-streak stop reqC=%d'), FrameLoader.cpp:2348 (RELEASE_ASSERT), comment 1095-1113"
+  },
+  "tokens": {"marks": 85, "first": {"line": 466, "tok": 200}, "mid": {"line": 1129, "tok": 8600}, "last": {"line": 1806, "tok": 17000}},
+  "frames": [{"line": 337, "checksum": "0xfd3915b9"}, {"line": 344, "checksum": "0xfd3915b9"}],
+  "completion_marks": 134,
+  "watchdog_dumps": 56,
+  "load_ok": null,
+  "evidence": {
+    "serial": "m1/evidence/x64-run801/serial.log (203,457 B @04:22:44, still appending watchdog noise; crash region lines 2139-2318)",
+    "driver_log": "m1/evidence/x64-run801/driver.log ([FAIL] no load-ok url within 1800s, written 04:25:49)",
+    "runner_log": "m1/evidence/x64-run801/runner.log",
+    "perf_json": "m1/evidence/x64-run801/perf.json",
+    "report_json": "m1/evidence/x64-run801/report.json",
+    "home_png": "m1/evidence/x64-run801/home.png",
+    "tables": ["m1/evidence/tables/x64-fetch-stats.json", "m1/evidence/tables/x64-wave-events.json", "m1/evidence/tables/x64-tokens.json"]
+  },
+  "analysis": {
+    "connection_reuse": "WORKING in-guest (95.5% nconn=0 tls=0ms; 115 of 135 on reused conns; pre-fix 29s-per-fetch behavior gone)",
+    "fetch_layer": "NO LONGER THE WALL: 135/135 fetches completed (100%), sum total ~122s overlapping parse; median 232ms, p90 390ms",
+    "dominant_cost": "TWO silent parse stretches (303.5s + 646.3s = ~950s of 21.9-min wave) + 3 cold-TLS fresh connects (33.7s + 25.0s + 27.1s) + fresh-TLS for every new cross-host origin",
+    "wall_uncertainty": "Absolute x64 walls derived from wave0_est = crash(est 04:13:57) - 1,313,100ms = ~03:52:05; driver-anchored phases (boot/launch/HOME/nav) are exact; fetch-phase walls carry +/-60s uncertainty",
+    "crash_was_backstop": "The crash is NOT a per-fetch failure and NOT compute starvation - it is the fs-r10 wedge backstop firing correctly but aborting in RELEASE_ASSERT(ScriptDisallowedScope) at FrameLoader.cpp:2348",
+    "next_wave_hint": "stopAllLoaders from checkCompleted must tolerate script-disallowed scope (or the 3 implicitClose lazy-load requests must receive a loader) - N1/J1-adjacent, controller-attribution for wave-2"
+  }
+}

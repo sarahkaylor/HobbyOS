@@ -1,0 +1,91 @@
+{
+  "run": "801-arm",
+  "leg": "ARM (TCG, qemu-system-aarch64, -smp 8 -m 2048M, virtio-gpu)",
+  "status": "ENDED - BROWSER PROCESS CRASHED ~04:44:41 UTC with the EXACT same loader-wedge signature as x64: skeleton fetch (cold TLS 118s) -> reqC pins 3 -> wedge-dump pending=129 -> font refetch -> wedge-streak stop -> stopAllLoaders RELEASE_ASSERT (FrameLoader.cpp:2348). load-ok NOT reached.",
+  "pins": {
+    "fork_branch": "browser/rp-f",
+    "fork_sha": "9a7b77ffb9",
+    "webprocess_sha256": "d81af7445e647be5fc51813f1b4e743adb86351206577306de9faf2c8f432612",
+    "browser_bin_sha256": "7c3d9e09246e372a1322dfe4c86b7effcbb0ad4ff99b4d500eb44d00069ed3e7",
+    "marker_check": "SR-t / SR-VERBOSE / SR-URLS present (verified)"
+  },
+  "phases": [
+    {"phase": "driver-start",        "mono_ms": 0,       "wall": "03:46:01", "note": "runner up; disk-m1-cnn-801.img staged"},
+    {"phase": "desktop-booted",      "mono_ms": 5603,    "wall": "03:46:06", "note": "boot duration 5.6 s"},
+    {"phase": "browser-launched",    "mono_ms": 133162,  "wall": "03:48:14", "note": "boot->launch 127.6 s (F1+Enter menu launch)"},
+    {"phase": "home-rendered",       "mono_ms": 133709,  "wall": "03:48:15", "note": "HOME checksum 0x4719ef4d (boot regression green)"},
+    {"phase": "url-prompt-open",     "mono_ms": 149023,  "wall": "03:48:30"},
+    {"phase": "nav-typed",           "mono_ms": 151585,  "wall": "03:48:32", "note": "T_nav start (typed cnn.com + Enter)"},
+    {"phase": "url-entry",           "mono_ms": 152386,  "wall": "03:48:33"},
+    {"phase": "main-fetch-ok",       "mono_ms": 184416,  "wall": "03:49:05", "note": "bytes=6,725,887; main-fetch leg = 32.8 s"},
+    {"phase": "fetch-wave-1",        "mono_ms": null,    "wall": "03:49:05..03:49:54", "note": "fonts reuse green (nconn=0, ttfb 18-43ms)"},
+    {"phase": "optimizely-fail",     "mono_ms": null,    "wall": "03:49:54", "note": "rc=35 SSL connect error, wave-offset 49,391ms (ttfb 25,731ms), repro of open item"},
+    {"phase": "silent-parse-1",      "mono_ms": null,    "wall": "03:49:54..04:04:55", "note": "901,445 ms gap: zero subresource fetches; parser/style/layout grind on 6.7MB doc; tokens 200->8600; serial silent 03:51:36->04:15:56 (freeze)"},
+    {"phase": "media-image-wave",    "mono_ms": null,    "wall": "04:04:55..04:14:12", "note": "first media.cnn.com image cold tls=44,123ms; QR cold tls=73,295ms; tokens 8600->17000; DOMContentLoaded dispatched ~04:15:56"}, 
+    {"phase": "silent-parse-2",      "mono_ms": null,    "wall": "04:14:12..04:43:55", "note": "1,801,274 ms gap (app-store QR @1,506,830ms -> skeleton @3,308,107ms); tokens->17000; serial frozen 04:15:56-04:44:06; QEMU grinding; then skeleton reappears"},
+    {"phase": "skeleton-fetch",      "mono_ms": null,    "wall": "~04:43:55 (off 3,308,107ms)", "note": "container-skeleton-desktop.svg COLD tls=118,267ms (118.3s!) dns=10.4s - worst cold connect of both runs"},
+    {"phase": "wedge-onset",         "mono_ms": null,    "wall": "~04:44:27 (line 1024)", "note": "first [COMP] checkCompleted reqC=3; wedge-dump reqC=3 pending=129 (line 1026) - same 17 fonts loading=1 needs=1 loader=0"},
+    {"phase": "font-refetch",        "mono_ms": null,    "wall": "~04:44:27..04:44:40 (lines 1027-1124)", "note": "17 font re-fetches, all nconn=0 fast; reqC stays pin at 3"},
+    {"phase": "wedge-streak",        "mono_ms": null,    "wall": "~04:44:40 (lines 1129-1130)", "note": "checkCompleted reqC=3 + font-batch-kick 1/2"},
+    {"phase": "CRASH",               "mono_ms": null,    "wall": "~04:44:41 (line 1131-1132)", "note": "[COMP] checkCompleted wedge-streak stop reqC=3 -> stopAllLoaders() -> [WTF-HOBBYOS CRASH] FrameLoader.cpp:2348 stopAllLoaders -> [WIN] ATEXIT -> [KERNEL] Process 3: BROWSER.BIN exited"},
+    {"phase": "load-ok",             "mono_ms": null,    "wall": null,      "note": "NOT REACHED. Same 3 unserviced implicitClose/lazy-load requests as x64; readyState Interactive; load-ok never fires"},
+    {"phase": "frame",               "mono_ms": null,    "wall": null,      "note": "7 frames logged: 5x HOME (0x4719ef4d/0xe5bf0b4d) + 2x 0x4719ef4d AFTER crash (HOME checksum); NO CNN render frame"}
+  ],
+  "t_nav": {
+    "definition": "URL typed -> [WIN] load-ok + stable frame",
+    "status": "NOT MEASURED - load-ok not reached; crash at ~56.2 min after nav (03:48:32 -> 04:44:41)",
+    "budget": "15 s ARM-TCG (stretch) / 8 s x64-KVM - FAILED"
+  },
+  "fetch_stats": {
+    "fetch_starts": 135,
+    "with_srt": 135,
+    "completion_pct": 100.0,
+    "ok_200": 134,
+    "rc_errors": [{"line": 336, "off_ms": 49391, "url": "https://cdn.optimizely.com/public/125375509/s/landingprod.js", "rc": 35, "err": "SSL connect error", "ttfb_ms": 25731, "total_ms": 25731}],
+    "reuse_nconn0": 131,
+    "fresh_nconn1": 4,
+    "reuse_pct": 97.0,
+    "median_total_ms": 349,
+    "p90_total_ms": 625,
+    "max_total_ms": 119046,
+    "min_total_ms": 63,
+    "median_ttfb_ms": 141,
+    "sum_total_ms": null,
+    "sum_bytes": 9984619,
+    "cold_tls_ge10s": [
+      {"off_ms": 950836, "url": "https://media.cnn.com/api/v1/images/stellar/prod/20261008-isaias-satellite-thumb0.png?c=1x1&q=h_256,w_256,c_fill/f_webp", "dns_ms": 4119, "conn_ms": 4142, "tls_ms": 44123, "ttfb_ms": 44269, "total_ms": 44366, "ip": "151.101.195.5:443"},
+      {"off_ms": 1493442, "url": "https://www.cnn.com/media/sites/cnn/google-play-cnn-app-qr-code.png", "dns_ms": 214, "conn_ms": 261, "tls_ms": 73295, "ttfb_ms": 73674, "total_ms": 74095, "ip": "151.101.67.5:443"},
+      {"off_ms": 3308104, "url": "https://www.cnn.com/media/sites/cnn/container-skeleton-desktop.svg", "dns_ms": 10354, "conn_ms": 10409, "tls_ms": 118267, "ttfb_ms": 118676, "total_ms": 119046, "ip": "151.101.195.5:443"}
+    ]
+  },
+  "stalls_ge10s": [
+    {"ms": 48660, "window": "noto_serif_display-v1.woff2 @731ms -> optimizely @49,391ms", "cause": "cross-host fresh connect to Cloudflare; TLS failed rc=35 after 25.7s ttfb"},
+    {"ms": 901445, "window": "optimizely @49,391ms -> first media image @950,836ms", "cause": "silent parse phase: parser/style/layout grind; tokens 200->8600; serial freeze 03:51:36-04:15:56"},
+    {"ms": 119336, "window": "jumblecrossword.jpg @1,374,106ms -> google-play QR @1,493,442ms", "cause": "parse tail / post-script inline=2228402 region"},
+    {"ms": 13388, "window": "google-play QR @1,493,442ms -> app-store QR @1,506,830ms", "cause": "TLS renegotiation/ttfb 7,998ms on reused conn"},
+    {"ms": 1801274, "window": "app-store QR @1,506,830ms -> skeleton @3,308,107ms", "cause": "long post-DOMContentLoaded freeze (tokens->17000, serial silent 04:15:56-04:44:06) then skeleton COLD TLS 118.3s - region that ends in the wedge crash"},
+    {"ms": 17238, "window": "skeleton @3,308,107ms -> first font @3,310,153ms", "cause": "wedge onset; wait for first font re-kick"}
+  ],
+  "tokens": {"marks": 85, "first": {"line": 332, "tok": 200}, "mid": {"line": 636, "tok": 8600}, "last": {"line": 1004, "tok": 17000}},
+  "frames": [{"line": 155, "checksum": "0x4719ef4d"}, {"line": 162, "checksum": "0x4719ef4d"}, {"line": 181, "checksum": "0xe5bf0b4d"}, {"line": 188, "checksum": "0xe5bf0b4d"}, {"line": 265, "checksum": "0xe5bf0b4d"}, {"line": 1142, "checksum": "0x4719ef4d"}, {"line": 1148, "checksum": "0x4719ef4d"}],
+  "completion_marks": 135,
+  "watchdog_dumps": 0,
+  "load_ok": null,
+  "evidence": {
+    "serial": "m1/evidence/cnn-801.log (final ~114.3 KB; crash region lines 1024-1132)",
+    "phases_jsonl": "m1/evidence/phases-801.jsonl",
+    "runner": "m1/evidence/runner-801.log",
+    "boot_png": "m1/evidence/m1-cnn-801-boot.png",
+    "tables": ["m1/evidence/tables/arm-fetch-stats.json", "m1/evidence/tables/arm-wave-events.json", "m1/evidence/tables/arm-tokens.json"],
+    "note": "tables were snapshotted before the final crash burst; authoritative counts are in this JSON"
+  },
+  "analysis": {
+    "connection_reuse": "WORKING in-guest (97% nconn=0, tls=0ms)",
+    "dominant_cost": "two silent stretches (901s + 1,801s = ~45 min of 56-min run) + 3 cold-TLS fresh connects (44.1s + 73.3s + 118.3s)",
+    "fresh_connect_cost": "4 fresh connects total = 262s of TLS+ttfb (optimizely 25.7s FAIL + media 44.3s + QR 74.1s + skeleton 119.0s)",
+    "open_item_repro": "cdn.optimizely.com rc=35 cross-host TLS FAIL repros again (run-800 @34,814ms, run-801 @49,391ms)",
+    "furthest_engine_state": "Document::finishedParsing + DOMContentLoaded dispatched ~04:15:56; then a 1,801s freeze before skeleton fetch and the identical wedge crash as x64",
+    "cross_arch_consistency": "x64 and ARM hit the IDENTICAL crash sequence: skeleton SVG fetch (cold TLS 27.1s x64 / 118.3s ARM) -> reqC pins 3 -> wedge-dump pending=129 w/ same 17 fonts -> font refetch -> wedge-streak stop -> RELEASE_ASSERT(ScriptDisallowedScope) at FrameLoader.cpp:2348. Deterministic, not a race.",
+    "vs_x64": "same wall: (a) cold fresh-TLS on new cross-host origins, (b) engine completion never fires load-ok because of 3 unserviced implicitClose requests, (c) fs-r10 backstop crashes instead of recovering"
+  }
+}
