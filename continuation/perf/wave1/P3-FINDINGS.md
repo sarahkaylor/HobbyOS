@@ -79,6 +79,22 @@ a directed `checkCompleted()` nudge in enginePhaseTick when
 readyState==Interactive && !parsing && reqC==0) — NOT yet implemented (needs
 the instrumented leg's answer first).
 
+## P3b (06:40) — completion-gate pump IMPLEMENTED (commit `aaf43252e5`)
+The self-driven shell never pumps the generic RunLoop, so the post-parse
+re-check parked on 0s timers (FrameLoader::startCheckCompleteTimer family +
+parser scripts-waiting-for-stylesheets) never fires: before3's LAST
+`[COMP] checkCompleted` (all printed gates OPEN) is followed by SILENCE.
+Fix: `Document::hobbyosNudgeCompletionGate()` (WebCore, OS(HOBBYOS)) fires
+the exact timer-fire bodies inline (FrameLoader::checkCompletenessNow ==
+checkTimerFired; ScriptableDocumentParser::executeScriptsWaitingForStylesheetsSoon
+== its inlined timer body, then doc->checkCompleted); `enginePhaseTick`
+(Load phase) calls it ONLY when readyState==Interactive && !parsing &&
+requestCount==0, once per 30 qualifying ticks max, marker
+`[WIN] gate-nudge fired`, drops out on Complete. Host decision-logic smoke
+PASS (`p3/run/gate_nudge_smoke.cpp`). NOT compiled into any binary yet —
+BuildB-arm2 (pre-fix snapshot) is the gate-NAMING leg; the fix binary +
+after-leg2 per `RUN-REQUEST-2.md`.
+
 ## Notes for the controller
 - Build A (markers only) that I started died during the JSC phase; the dir
   `WebKitBuild/HobbyOS-arm-wk5` is resumable (ninja reruns). Build B
