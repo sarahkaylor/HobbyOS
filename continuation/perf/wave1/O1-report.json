@@ -1,0 +1,66 @@
+{
+  "lane": "O1",
+  "status": "green",
+  "branch": "browser/perf-os",
+  "head_sha": "f9518fc",
+  "psci": {
+    "verdict": "ARM TCG multi-vCPU: core 1 powers on live at -smp 2, but cores 2-7 fail at -smp 8 (PSCI error -2). Desktop/browser stays effectively single-core; no working >2-vCPU QEMU config found. Config diff hypothesis (wave runner -cpu cortex-a53 -smp N vs desktop -smp 1) still the leading suspect; kernel conduit is PSCI v0.2 PSCI_CPU_ON via hvc.",
+    "config": "-smp 2 (-accel tcg,thread=multi, -cpu cortex-a53): core 1 LIVE (System halt from CPU 1 proves power-on + scheduling). -smp 8: cores 2-7 PSCI_CPU_ON -> error -2 (does not start).",
+    "evidence": [
+      "SRLCOST runs at -smp 1 and -smp 2 (serial_cost.c); core-1 liveness at -smp 2",
+      "PSCI -2 on cores 2-7 at -smp 8 (recorded pre-reap)"
+    ],
+    "landed": null
+  },
+  "serial_cost": {
+    "verdict": "Guest console write cost measured: ~2.37 us/byte at -smp 1, ~2.44 us/byte at -smp 2 (MTTCG, +3% contention). A 1000-char console line costs ~2.4 ms; the browser's [WIN] frame spam (80-char lines) is a meaningful share of the serial budget on a slow line.",
+    "numbers": {
+      "per_byte_us_smp1": 2.37,
+      "per_byte_us_smp2": 2.44,
+      "contention_pct": 3.0,
+      "bulk_line_1000B_us": 2370,
+      "spam_line_80B_us": 190
+    },
+    "proposal": "Perf-run quiet knob: no default change. Add a kernel boot arg / env (e.g. CONSOLE_QUIET=1 set by the wave runner inside the guest) that gates the per-frame [WIN] spam behind a single global suppress flag, leaving crash/watchdog lines always-on. Cost saving ~190 us per frame line x frames; on a page with thousands of repaint lines this is multi-second per run.",
+    "landed": "f9518fc (harness SRLCOST.BIN staged on wave disk, inert)"
+  },
+  "x64_clock": {
+    "verdict": "Plugging x64 KVM guest clock into host: TSC passthrough is accurate. All 8 boot probes in this session printed 'TSC rate: 2596xxx ticks/ms (PIT-counter calibrated)' = host TSC (2.596 GHz), i.e. the X2 TSC fix (PIT-counter calibration, commit 2f48639) is ACTIVE in the pinned intel build. Guest-vs-host monotonic: measured 1:1 (IDLESTUCK t=ms [guest] vs host-wall stamps: 74332/74551 = 0.997; 92528/92717 = 0.998). The PX 'guest 11.7 s vs wall 47.8 s' numbers do NOT indicate a clock defect: [WIN] load-ok ms= is (MonotonicTime::now() - m_start) with m_start set once at window-driver construction (WK5WindowDriver.cpp:657), so it is a per-session elapsed timer, not a boot-anchored wall clock. The guest launch composition (PX run3): kernel boot 3.3 s -> [WIN] BOOT 10.2 s (includes 101 MB webproc image prefault = 30 s of IMGPRF wall, guest ms=30064 vs host 30.4 s) -> HOME frame 40.6 s. The '10 s launch' decomposes into ~3.3 s kernel boot + desktop launch; the dominant cost is the webproc image prefault, not the clock.",
+    "numbers": {
+      "guest_tsc_ghz": 2.596,
+      "host_tsc_passthrough": true,
+      "guest_host_monotonic_ratio": 0.998,
+      "kernel_boot_to_mode_desktop_s": 3.0,
+      "mode_desktop_to_win_boot_s": 10.2,
+      "imgprf_prefault_s_guest": 30.064,
+      "imgprf_prefault_s_host": 30.42,
+      "home_frame_s": 40.589,
+      "x2_fix_active": true
+    },
+    "landed": "f9518fc (report only; no kernel change needed)"
+  },
+  "x64_stability": {
+    "verdict": "Bonus finding: the pinned x64 disk image, when re-booted fresh in this session, wedged at the DESKTOP menu in 4/4 probe boots (2x -smp 8 with torn copy + clean copy, 1x -smp 8 with quiescent copy, 1x -smp 1). Console goes silent >20 s, watchdog fires, cores idle-stuck at rip 0x7002A296 with pid=-1, IDLESTUCK never satisfied, no [WIN] BOOT. M1's live run 801 on the same disk reached [WIN] BOOT + HOME but then wedged on the cnn.com fetch (watchdog + idle-stuck). This is the same class of stuck-idle the X2 lane fought; worth a P3 lane. It blocks inline clock correlation on a truly clean load-ok, but the boot-phase anchors and the 801 evidence are sufficient for the verdict.",
+    "numbers": {
+      "menu_wedge_probes": "4/4",
+      "idle_rip": "0x7002A296",
+      "m1_801_wedge": "after url-entry cnn.com"
+    },
+    "landed": null
+  },
+  "gates": {
+    "host_tests": "n/a (no kernel change), SRLCOST harness is build-only",
+    "unit_arm": "n/a",
+    "unit_x64": "n/a",
+    "wave": "n/a"
+  },
+  "blockers": [
+    "x64 pinned-disk guest wedges at DESKTOP menu in fresh boots (4/4) and at cnn.com fetch in run 801: same stuck-idle class; no clean end-to-end x64 load-ok obtainable from my probes this session",
+    "ARM PSCI cores 2-7 fail to power on at -smp 8 (error -2) - multi-vCPU desktop still blocked"
+  ],
+  "next_steps": [
+    "Cost the x64 menu-wedge vs the X2 lost-wake fix (was it ever re-tested at -smp 8 on a fresh boot?)",
+    "Controller: budget the CONSOLE_QUIET=1 spinner for a browser lane to adopt",
+    "ARM: diff the wave runner QEMU line vs desktop launcher for -smp/-cpu/-accel differences; PSCI conduit review in src/kernel/arch/arm"
+  ]
+}
