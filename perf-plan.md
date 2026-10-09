@@ -189,6 +189,18 @@ cross-prefixes are read-only; do not touch `~/webkit-hobbyos` main tree or the
 repo main tree from lanes (PX builds in its worktree; PN likewise); checkpoint
 commits ~30 min; strict JSON reports + raw evidence; timebox ~4 h per wave.
 
+**Wave-1 v2 (2026-10-09, after two mid-flight delegation reaps):** children are
+ephemeral — both attempts were reaped (`owner exited`) and a child's background
+processes die with it. The controller therefore OWNS all long-running jobs
+(builds, guest runs) as its own tracked background processes; lanes do short
+committed chunks and hand long commands back via
+`~/hobbyos-perf-lanes/<lane>/RUN-REQUEST.md`. Also: after ANY kill of a ninja
+build, treat outputs newer than their deps as suspect (SIGKILLed lld leaves
+partial files that ninja then skips — `premature end of file; recovering` is
+the tell; clean and rebuild). Current controller jobs: N1 pool build resume;
+J1 arm-jit + intel-jit builds; ARM CNN run 801; x64 CNN run 801 (pinned
+binaries; `~/hobbyos-perf-lanes/pinned/PINS.md`).
+
 Lane briefs live at `~/hobbyos-perf-lanes/briefs/<lane>.md` (transcripts
 `~/.hermes/cache/delegation/live/**`).
 
