@@ -1,0 +1,22 @@
+{
+ "mode": "url",
+ "url": "cnn.com",
+ "home_checksum": "0xfd3915b9",
+ "home_checksum_parked": "0xfd3915b9",
+ "page_checksum": null,
+ "fetch_ok": true,
+ "load_ok_line": null,
+ "load_ok_ms": null,
+ "boot_s": 3.27,
+ "launch_s": 10.579,
+ "wall": {
+  "desktop_boot_s": 3.27,
+  "launch_s": 10.579,
+  "home_frame_s": 39.206,
+  "nav_start_s": 42.276,
+  "shot_s": 2152.448
+ },
+ "memory_faults": 0,
+ "fatal_count": 0,
+ "load_ok_line_present": false
+}

@@ -1,0 +1,54 @@
+{
+ "lane": "PX",
+ "status": "red",
+ "branch": "browser/perf-x64",
+ "run": "c1a",
+ "url": "cnn.com",
+ "qemu": {
+  "mem": "4096M",
+  "smp": 8,
+  "kvm": true,
+  "machine": "q35",
+  "ovmf": "OVMF_CODE_4M pristine",
+  "nvme": true,
+  "virtio_gpu": true
+ },
+ "numbers": {
+  "boot_s": 3.27,
+  "launch_s": 10.579,
+  "load_ok_ms": null,
+  "load_ok_ms_example_com": null,
+  "load_ok_ms_wikipedia": null,
+  "home_checksum": "0xfd3915b9",
+  "page_checksum": null,
+  "memory_faults": 0,
+  "fatal_count": 0,
+  "fetch_ok": true
+ },
+ "markers": {
+  "load_ok_line": null,
+  "load_ok_in_serial": true,
+  "net_fetch_200": true
+ },
+ "wall": {
+  "desktop_boot_s": 3.27,
+  "launch_s": 10.579,
+  "home_frame_s": 39.206,
+  "nav_start_s": 42.276,
+  "shot_s": 2152.448
+ },
+ "driver_rc": 0,
+ "artifacts": {
+  "perf_json": "/home/sarah/hobbyos-perf-lanes/c1/evidence/x64-c1a/perf.json",
+  "serial_log": "/home/sarah/hobbyos-perf-lanes/c1/evidence/x64-c1a/serial.log",
+  "driver_log": "/home/sarah/hobbyos-perf-lanes/c1/evidence/x64-c1a/driver.log",
+  "home_png": "/home/sarah/hobbyos-perf-lanes/c1/evidence/x64-c1a/home.png",
+  "page_png": null,
+  "page_net_htm": "/home/sarah/hobbyos-perf-lanes/c1/evidence/x64-c1a/PAGE-NET.HTM",
+  "perf_json_sha256": "9a4a1ce71acc27493fae2629646141e1bc690edcaefa16fac710f3d8819121e2",
+  "serial_log_sha256": "532d7831d24ef4b9c24b58e6375198a180b8d47571bb13985d384e9773e99fdd",
+  "driver_log_sha256": "3493e32ed710de49e67bb4db1fd0d9599b617a1e51c74ded0c1812013ba2bd9d",
+  "home_png_sha256": "723440238468cae1caf2516b727be45a76640e7abcc110f0445874dcac7429de",
+  "page_net_htm_sha256": "9678fecae6699969ac45415858cdfa73b8cf3069793b048e386be4ccc2739771"
+ }
+}
