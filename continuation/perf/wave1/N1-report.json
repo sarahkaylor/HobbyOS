@@ -1,0 +1,43 @@
+{
+  "lane": "N1",
+  "status": "green",
+  "branch": "bw-perf-pool",
+  "head_sha": "b14180d16d",
+  "design": {
+    "workers": 4,
+    "drain_hook": "enginePhaseTick (WK5WindowDriver) + scheduleLoad entry + dispatchDidFinishDocumentLoad (before checkCompleted)",
+    "tunables": ["/SR-POOL=N", "/SR-MAXB", "fsSrDeadlineSec (default 150s)"]
+  },
+  "gates": [
+    {"id": "fixtures", "verdict": "pass",
+     "evidence": ["n1/evidence/n1-fixtures-10.log", "fixtures-10-harness.log"],
+     "detail": "FIX01/02/02D/03/04/05 + TALL + HOME all load-ok + frame; close ok; 0 memory faults"},
+    {"id": "example", "verdict": "gated",
+     "evidence": ["n1/RUN-REQUEST.md"],
+     "detail": "live URL leg -> controller-owned run (wr q/command in RUN-REQUEST.md)"},
+    {"id": "wiki", "verdict": "gated",
+     "evidence": ["n1/RUN-REQUEST.md"],
+     "detail": "live URL leg -> controller-owned run"},
+    {"id": "overlap", "verdict": "pass",
+     "evidence": ["n1/evidence/n1-fixtures-10.log"],
+     "detail": "6 subresources submitted concurrently (srq inflight 0->4), 6/6 pump-delivered (srp), 0 dropped (srd), 6 [SR-t] timing lines, page load-ok url=http:/10.0.2.2:8891/overlap.htm"},
+    {"id": "cnn", "verdict": "gated",
+     "evidence": ["n1/RUN-REQUEST.md"],
+     "detail": "CNN wave >10 min TCG -> controller-owned (RUN-REQUEST.md)"}
+  ],
+  "numbers": {
+    "cnn_wave_before_s": 0,
+    "cnn_wave_after_s": 0,
+    "max_inflight": 4,
+    "sr_t_median_ms": 128
+  },
+  "blockers": [
+    "Host CPU contention (J1 arm/intel-jit builds + M1 QEMU) slowed TCG runs; fixed by -smp 1 + F1+Enter launch, but live CNN leg still needs a quiet host => controller-owned",
+    "External <script src> subresources do NOT route through WebLoaderStrategy::scheduleLoad on this port (pre-existing HobbyOS gap, out of N1 scope); overlap fixture avoids <script src>"
+  ],
+  "next_steps": [
+    "Controller launches CNN live leg with b14180d16d binary (command in n1/RUN-REQUEST.md); expect [WIN-srq]/[WIN-srp]/[WIN-srop] + non-serialized fetches on the real wave",
+    "example.com typed-URL + wiki regression legs likewise controller-owned",
+    "If CNN gate logs a regression, compare srp/srd counts + [SR-t] medians vs run-700/800 baselines"
+  ]
+}

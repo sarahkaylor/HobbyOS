@@ -3,12 +3,17 @@
 Status: **active plan** (2026-10-08). Owner: controller session. Record: `browser.md`
 §11 remains the append-only fix log; this document owns the performance endgame.
 
-**Wave status (2026-10-08):** W0 complete — net stall root-caused (no CONNECT
-sharing × per-connection handshake cost) + fix validated (116→115 reused,
-134 ms median; rp-f `9a7b77ffb9`); x64 leg live (PX runner + receipts); JSC
-path mapped (LLInt flip; x64 JIT needs **no** OS changes). Wave 1 in flight:
-N1 (async pool), J1 (JSC tiers), O1 (OS dressing), M1 (post-fix CNN
-measurement). Wave-0 reports: `continuation/perf/wave0/`.
+**Wave status (2026-10-09):** W0 complete (net stall root-caused + fixed, rp-f
+`9a7b77ffb9`). **W1 COMPLETE** — N1 async pool green (fixture proof 6/6 concurrent,
+6/6 delivered; pump fixes post-cut), J1 JSC tiers built + gate flip verified
+(scripts-ON completion deadlock = wave-2 item), O1 OS dressing + clock verdict
+(1:1; launch = IMGPRF prefault), M1 run-801 harvest done, C1 wedge-stop fixes +
+block-layer root-cause. **W1.5:** O1-continuation kernel fix landed
+(`browser/perf-os` `ccca3ec`: bounded poll + recover, ticker, desync hardening).
+**W2 (now):** net1 builds green both arches (pins `5ca115c8…`/`5e67a765…`); Leg A
+x64 CNN crash-validation live; next = integration (net1 + pool pumps + JIT + P3)
+on the kernel fix, runs 802/803 = T_nav attempts. Wave-0/1 reports:
+`continuation/perf/wave0/`, `continuation/perf/wave1/`.
 
 Ground snapshot: OS main `835e19b` · fork `browser/rp-f` @ `e9a040c5b4` (vendored
 snapshot `third_party/webkit-hobbyos/`; verified identical for the net path) ·

@@ -1,0 +1,29 @@
+{
+  "lane": "J1",
+  "status": "gated",
+  "branch": "bw-perf-jit",
+  "head_sha": "37a5044c05",
+  "x64": {
+    "config": "ENABLE_JIT=ON ENABLE_C_LOOP=OFF (LLInt + baseline JIT, DFG/FTL OFF), FIXED_EXECUTABLE_MEMORY_POOL_SIZE_IN_MB=64",
+    "rlconf_probe": "gated (page script executes under JIT; completion deadlocks idle-stuck, no load-ok; /NO-SCRIPT A/B green 25524ms)",
+    "example": "green load_ok_ms=10838 (pre-37a5044c05 bin: scripts inert at parser)",
+    "wiki": "green load_ok_ms=229577 (pre-37a5044c05 bin: scripts inert at parser)",
+    "cnn_js_on_load_ok_ms": 0,
+    "cnn_js_off_load_ok_ms": null,
+    "flat_bytes": 105402496
+  },
+  "arm": {
+    "config": "ENABLE_JIT=OFF ENABLE_C_LOOP=OFF (native LLInt only)",
+    "smoke": "pending (RUN-REQUEST.md written; controller-owned TCG; ARM bin rebuilt @05:35 with gate fix)"
+  },
+  "gate_patch": "1f3cbb8d12 (gate flip + /NO-SCRIPT opt-out) + 37a5044c05 (fs-r10 parser skip now gated on isScriptEnabled)",
+  "blockers": [
+    "Page-completion deadlock with parser scripts ON (fs-g11 class): RLCONF script executes under JIT but readyState never Complete, all CPUs idle-stuck, no load-ok. Overlaps C1 loader-wedge work; diagnose together before CNN T-JS.",
+    "example/wiki rows so far used pre-37a5044c05 binary (parser scripts inert); need re-run with fixed bin for honest JS-on numbers."
+  ],
+  "next_steps": [
+    "Diagnose completion deadlock (parser-blocking-script / requestCount==0 && !parsing honesty per PJ §4.4).",
+    "Re-run x64 example/wiki with fixed binary once deadlock understood.",
+    "ARM RLCONF smoke via RUN-REQUEST (controller)."
+  ]
+}
