@@ -28,6 +28,23 @@ cadence during console silence):
   cached → both ACK sites are gated on `mac_cached` — if mac=0 shows up with
   frozen acktx/wupd, the ACK gate is the stall).
 
+## ROOT CAUSE (2026-10-09 ~11:50) — SOLVED, and it was NOT the kernel
+The stall = **O(n²) reallocation crawl in the port's own fetch sink**, proven three ways:
+1. Kernel exonerated: 804b/806 NETDBG series — healthy TCP (1 MB wire delivered/ACKed,
+   mac=1, zero drops, peer active); run 806's `rxb` probe reached 5.05 MB decoded
+   (gzip ~5:1 reconciles with ~1.02 MB wire).
+2. Counters (run 807): `al − n = 69603` and `bg − n = 8` CONSTANT across dumps =
+   **exactly one malloc (large, >128 KB) per write-callback, zero others**.
+3. In-code proof: WTF `Vector::appendRange` calls `reserveCapacity(size()+range)` —
+   EXACT-size reserve (alloc + full move via `TypeOperations::move` = libc memcpy +
+   free) — the one-shot form. Feeding it 8-16 KB chunks reallocs and copies the whole
+   buffer per chunk; at 5 MB in, each callback copies ~5 MB at ~2.5 MB/s (guest slow
+   memcpy) = the observed multi-minute "freeze". The memcpy-hot sampler rip = the move.
+Fix: commit `4a7612fedf` — amortized pre-reserve (1.5×) in `wk5NetWrite` before the
+appendRange (inner exact-reserve becomes a no-op). Other appendRange sites audited:
+one-shot only, no change needed. Probe confirmation target (run 808): `bg` stops
+tracking `n` 1:1, cadence fast, fetch completes.
+
 ## Design review outcome (net.c, 1222 lines, read in full)
 The flow-control design is structurally present and sane: truthful window in
 every outgoing segment (`send_tcp_segment` computes real free rx space,
