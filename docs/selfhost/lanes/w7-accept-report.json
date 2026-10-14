@@ -44,17 +44,23 @@
         "marker": "[SELFHOST] phase=s0-check-start; phase=s0-check-done rc=0"
       },
       "S1_user": {
-        "result": "PENDING",
+        "result": "PASS",
         "started": "[SELFHOST] phase=s1-user-start",
-        "detail": "sh.c -O2 in-OS compile in progress (>= 53 min TCG); 5 TUs + 4 links + 4 objcopies"
+        "detail": "sh.c -O2 in-OS compile in progress (>= 53 min TCG); 5 TUs + 4 links + 4 objcopies",
+        "marker": "phase=s1-user-start; phase=user-compile rc=0 (5 TUs); phase=s1-user-done rc=0",
+        "elapsed": "~61 min wall (sh.c ~60 min in-OS TCG, concurrent battery-6 VM sharing CPU; w6 measured 53 min on a quieter bus)",
+        "sh_o": "src/user/sh.c compiled in-OS by /TOOLS/CLANG.BIN with -isystem /TOOLS/RESDIR/include"
       },
       "T25": {
-        "result": "PENDING",
-        "expect": "[HELLO] entering main / argc=1 / argv[0]=\"./HELLO.BIN\" / main returned 0; phase=t25-run-done"
+        "result": "PASS",
+        "expect": "[HELLO] entering main / argc=1 / argv[0]=\"./HELLO.BIN\" / main returned 0; phase=t25-run-done",
+        "marker": "phase=t25-run-start; [HELLO] entering main / argc=1 / argv[0]=\"./HELLO.BIN\" / main returned 0; phase=t25-run-done rc=0",
+        "note": "the in-OS-built HELLO.BIN ran in-OS, stdout relayed to SERIAL by the MODE=selfhost driver pipe \u2014 the full program-side marker acceptance.md 8.3 wants"
       },
       "S2_kernel": {
-        "result": "PENDING",
-        "expect": "59 TU compile + lld @OBJS.RSP link + objcopy -> hobbyos.bin; phase=s2-kernel-done"
+        "result": "RUNNING",
+        "expect": "59 TU compile + lld @OBJS.RSP link + objcopy -> hobbyos.bin; phase=s2-kernel-done",
+        "detail": "kernel-compile rc=0 markers in progress (59 TUs + lld link + objcopy); fat16.c warnings visible in serial"
       },
       "S3_disk": {
         "result": "PENDING",
