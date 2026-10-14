@@ -1,7 +1,9 @@
 /* statp.c — w10-fstime lane stat probe (host-built, staged in-OS).
- * Prints path, size and mtime (epoch seconds + UTC calendar breakdown)
- * so serial evidence shows 1980/0 before the fix and a real 2026 date
- * after.  Uses only libc.h primitives + stat() from the sysroot.
+ * Subcommands:
+ *   statp <path>...   print size + mtime/ctime (epoch + UTC breakdown)
+ *   statp now         print the kernel RTC epoch as of now
+ *   statp sleep N     busy-wait ~N wall seconds (RTC-anchored)
+ * Serial output is the w10 timestamp evidence.
  */
 #include "libc.h"
 #include <sys/stat.h>
@@ -28,6 +30,28 @@ static void to_civil(long epoch, int *y, int *m, int *d, int *hh, int *mi, int *
   *y = (int)(yy + (mm <= 2)); *m = (int)mm; *d = (int)dd;
 }
 
+static void print_utc(long epoch) {
+  int y, mo, d, h, mi, s;
+  to_civil(epoch, &y, &mo, &d, &h, &mi, &s);
+  print_dec(y); print("-"); print_2(mo); print("-"); print_2(d);
+  print(" ");
+  print_2(h); print(":"); print_2(mi); print(":"); print_2(s);
+}
+
+static long now_epoch(void) {
+  struct sys_time t;
+  if (sysinfo(6, &t, sizeof t) == 0) return (long)t.epoch;
+  return -1;
+}
+
+static int eq(const char *a, const char *b) {
+  while (*a && *b) {
+    if (*a != *b) return 0;
+    a++; b++;
+  }
+  return *a == *b;
+}
+
 static void dump(const char *path) {
   struct stat st;
   int rc = stat(path, &st);
@@ -41,16 +65,44 @@ static void dump(const char *path) {
   print_dec((int)st.st_mtime);
   print(" ctime=");
   print_dec((int)st.st_ctime);
-  int y, mo, d, h, mi, s;
-  to_civil((long)st.st_mtime, &y, &mo, &d, &h, &mi, &s);
   print(" UTC=");
-  print_dec(y); print("-"); print_2(mo); print("-"); print_2(d);
-  print(" ");
-  print_2(h); print(":"); print_2(mi); print(":"); print_2(s);
+  print_utc((long)st.st_mtime);
   print("\n");
 }
 
+static int parse_int(const char *s) {
+  int v = 0;
+  while (*s >= '0' && *s <= '9') {
+    v = v * 10 + (*s - '0');
+    s++;
+  }
+  return v;
+}
+
 int main(int argc, char **argv) {
-  for (int i = 1; i < argc; i++) dump(argv[i]);
+  for (int i = 1; i < argc; i++) {
+    if (eq(argv[i], "now")) {
+      long n = now_epoch();
+      print("NOW-EPOCH=");
+      print_dec((int)n);
+      print(" UTC=");
+      print_utc(n);
+      print("\n");
+    } else if (eq(argv[i], "sleep") && i + 1 < argc) {
+      int sec = parse_int(argv[i + 1]);
+      i++;
+      print("SLEEP-START ");
+      print_dec(sec);
+      print("s\n");
+      long start = now_epoch();
+      while (now_epoch() < start + sec) {
+      }
+      print("SLEEP-END elapsed=");
+      print_dec((int)(now_epoch() - start));
+      print("s\n");
+    } else {
+      dump(argv[i]);
+    }
+  }
   return 0;
 }

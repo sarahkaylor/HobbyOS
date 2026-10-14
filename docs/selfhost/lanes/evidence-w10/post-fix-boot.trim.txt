@@ -1,0 +1,45 @@
+W10POST-STEP1-CREATE-DATES
+A.TXT: stat=[KERNEL] Process 2: /W10/STATP.BIN exited unexpectedly or gracefully.
+0 size=0 mtime=1792012324 ctime=1792012324 UTC=2026-10-14 21:12:04
+W10POST-STEP2-MAKE-RUN1
+/CP.BIN A.C A.O
+[KERNEL] Process 5: /CP.BIN exited unexpectedly or gracefully.
+P1-BUILD-AL[KERNEL] Process 4: /SH.BIN exited unexpectedly or gracefully.
+W10POST-STEP3-SLEEP3-THEN-MAKE2
+SLEEP-START 3s
+SLEEP-END elapsed=3s
+W10POST-STEP4-REWRITE-SOURCE-THEN-MAKE
+[KERNEL] Process 2: /CP.BIN exited unexpectedly or gracefully.
+A.C: stat=[KERNEL] Process 2: /W10/STATP.BIN exited unexpectedly or gracefully.
+0 size=8 mtime=1792012328 ctime=1792012328 UTC=2026-10-14 21:12:08
+P1-COMP[KERNEL] Process 4: /SH.BIN exited unexpectedly or gracefully.
+/CP.BIN A.C A.O
+[KERNEL] Process 5: /CP.BIN exited unexpectedly or gracefully.
+P1-BUILD-ALL
+W10POST-STEP5-5TU-FULL-BUILD
+P2-COMPILING-B
+/CP.BIN B.C B.O
+[KERNEL] Process 5: /CP.BIN exited unexpectedly or gracefully.
+P2-COMPILING[KERNEL] Process 4: /SH.BIN exited unexpectedly or gracefully.
+/CP.BIN C.C C.O
+[KERNEL] Process 5: /CP.BIN exited unexpectedly or gracefully.
+P2-COMPILING-D
+/CP.BIN D.C D.O
+[KERNEL] Process 5: /CP.BIN exited unexpectedly or gracefully.
+P2-COMPILING-E
+/CP.BIN E.C E.O
+[KERNEL] Process 5: /CP.BIN exited unexpectedly or gracefully.
+P2-COM[KERNEL] Process 4: /SH.BIN exited unexpectedly or gracefully.
+/CP.BIN F.C F.O
+[KERNEL] Process 5: /CP.BIN exited unexpectedly or gracefully.
+P2-BUILD-ALL
+W10POST-STEP6-5TU-MAKE2-AFTER-SLEEP
+SLEEP-START 3s
+SLEEP-END elapsed=3s
+P2-BUILD-ALL
+W10POST-STEP7-5TU-REWRITE-ONE-SOURCE
+[KERNEL] Process 2: /CP.BIN exited unexpectedly or gracefully.
+P2-COMPILING-D
+[KERNEL] Process 5: /CP.BIN exited unexpectedly or gracefully.
+P2-BU[KERNEL] Process 4: /SH.BIN exited unexpectedly or gracefully.
+W10POST-DONE
