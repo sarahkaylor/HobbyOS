@@ -13,7 +13,8 @@ image with `fat16img.py`.
 | S0 | `make -f Makefile.hobbyos check` | **PASS** — `phase=s0-check-done rc=0`, `ACCEPTANCE-COMPLETE` | s0.serial.txt + s0-check.o (21144 B, AArch64 ELF REL) |
 | S1 | `make -f Makefile.hobbyos user` | **PASS** — 5 user .o compiled in-OS (sh.o 245528 B = the 53-min sh.c -O2 TCG compile), 4 links + 4 objcopies in-OS, `phase=s1-user-done rc=0` | s1.serial.txt + s1-products/ (HELLO.BIN 37360 B BYTE-IDENTICAL to host hello.bin) |
 | T2.5 | in-OS run of S1-built HELLO.BIN | **PASS** — `[HELLO] entering main / argc=1 / argv[0]="./HELLO.BIN" / main returned 0`; `phase=t25-run-done rc=0`; `ACCEPTANCE-COMPLETE stages=2` | s1.serial.txt |
-| S2 | `make -f Makefile.hobbyos kernel` | **RUNNING** (bounded, 7800 s budget); per-TU markers counted (see live section) | s2.serial.txt |
+| S2 | `make -f Makefile.hobbyos kernel` | **PASS** — 59 TUs + lld link + objcopy; `kernel-link-done rc=0`, `s2-kernel-done rc=0`, `ACCEPTANCE-COMPLETE` | s2.serial.txt + s2-products/ (hobbyos.elf 1372912 B, hobbyos.bin 219564 B ARM64 boot Image) |
+| S3 (bonus) | `make -f Makefile.hobbyos disk` | **PASS** — OUT.IMG 134217728 B (128 MiB FAT16 bps512/spc4/nfats2/root512/fatsz256), complete acceptance layout; `s3-disk-done rc=0`, `ACCEPTANCE-COMPLETE` (365 s) | s3.serial.txt + s2-products/OUT.IMG |
 
 ## Newly found + fixed this lane (fix-forward)
 
