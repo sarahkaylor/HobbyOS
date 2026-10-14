@@ -13,7 +13,8 @@ Ordering = priority. Items 1–3 are the active build-velocity work (user direct
 4. **Build-wedge class** — guest freezes mid in-OS build; serial goes silent, CPU 0%. Three sightings this session: battery-4 VM wave, battery-6 local wave (after GREPTEST), w7 S2 stall at TU 45/59. Each costs a full rebuild. Needs a real diagnosis (suspects: console/UART storm saturation under churn, MTTCG race, loader interaction). Adjacent ambient: `SHELLTEST WATCHDOG: protocol stalled 25 s`.
 5. **Slot-pressure robustness** — loader backoff vs stuck-table detection; test-side retry tolerance (CXX_T `condvar_wait_notify`, THRD_T `futex-wake`); re-verify behavior after the FS work (the wave + torture interplay).
 6. **In-OS make pattern rules vs FAT case** — FAT readdir returns UPPERCASE 8.3 names; make's pattern-prereq match is case-sensitive → `Makefile.hobbyos` uses 59 explicit rules as a workaround. Replace with proper case handling in the in-OS make/filesystem path when convenient.
-7. **`mcopy -o` over LFN duplicates** (w6 note) — likely same writer class as item 1; confirm fixed by w9, else track here.
+7. **`mcopy -o` over LFN duplicates** (w6 note) — likely same writer class as item 1; confirm fixed by w9, else track here. Also re-sample after w9: the VM `[LFN] FAIL ... "listed with long name"` checks (2 sightings, different sub-checks, not reproducing on rerun — possibly the same dirent-writer family).
+8. **Host-tier `EDITOR.BIN_host` hang hygiene** — the root-dir editor host-test binary can block forever on an anonymous pipe read (no watchdog); it wedges `make host_tests` and leaves an orphan per occurrence (20 found, ~20 h old). Add a runner timeout/stdin redirection, reap orphans, and root-cause the pipe-read hang.
 
 ## P2 — performance / quality
 8. **Per-TU launch overhead** — 94 MB clang prefetch + ~22k page mappings per launch (~1.3 M mappings per S2 run). Consider cheaper prefetch/segment mapping.

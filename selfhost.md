@@ -590,6 +590,24 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-14 (~22:40) — Battery round 9 + post-merge hotfix (`8aa7b7c`).** LOCAL: host
+  rc=2 — **w11's new `src/libc/include/sys/select.h` shadowed glibc's in HOST_TEST builds**
+  (glibc <sys/types.h> -> our select.h -> signal/unistd chain -> `intptr_t` unknown); fixed
+  (`#ifdef HOST_TEST` -> `#include_next <sys/select.h>`), then local host_tests **482/0**
+  green. unit-arm rc=0, unit-x64 rc=0, wave rc=0 (tokens: 1x `IPC_T received fd...` inside
+  a starved-spawn window WITH `no free slot` forensics = documented pressure family; 2x
+  WATCHDOG; TORTURE PASS `exec_ok=8`). VM (`merged-w10`): host rc=2 same select.h cause
+  (6 s); units rc=0; test-arm 3 tokens = `[LFN] FAIL rename: new long name listed...` +
+  `[LFN] FAILED: 0x1` + WATCHDOG; rerun `merged-w10r` = **watchdog only, LFN did NOT
+  reproduce** (flare; same "listed with long name" class as the pre-w6 sighting; re-sample
+  after w9 — dirent-writer family suspect). VM host re-verify queued (`merged-w10h`).
+  **Hygiene finds:** (a) 20 orphaned root-dir `EDITOR.BIN_host` processes (ppid=1, ~20 h
+  old) + one fresh one wedged this box's `make host_tests` — the host editor test can hang
+  on an anonymous pipe read with no watchdog (swept by exact /proc/comm match; todo item);
+  (b) an accidental `pkill -f "./EDITOR.BIN_host"` matched the runner's own command line
+  and killed it — reinforces the "never broad pkill" rule; sweep via pid lists filtered by
+  /proc/<pid>/comm.
+
 - **2026-10-14 (~21:50) — Waves 8a/8b (w10-fstime + w11-makej) merged (`465c9b4`,
   `1ac7c7d`) — THE IN-OS BUILD IS NOW INCREMENTAL AND PARALLEL.** w10: writes left
   mtime=0/1980 so make's dependency tracking was dead; `f9c6771` stamps FAT dirents from
