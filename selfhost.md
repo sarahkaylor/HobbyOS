@@ -393,6 +393,9 @@ wait for the current run's log to show its final line, then start the next.
   `__lcxx_override` link config → flat clang completes a compile (T2.4); (d) after a+b+c:
   the real S0/S1 dry-run (first true in-OS compile) then S2/S3; (e) watchdog-stall hardening
   (shell_test); (f) socket reconciliation; (g) image budget/stripping.
+  **DISPATCHED 2026-10-14 (`deleg_6283bc5f`, 3 lanes from `92815fa`):** w5-flat = (a);
+  w5-kernel = (b); w5-nothrow = (c), working in the warm l1 worktree (branch
+  `selfhost/w5-nothrow`). After these land: the real S0/S1 in-OS run, then S2/S3.
 - Integrator = parent session: merges lanes to `main` here, runs merged-tip gates, is the
   sole writer of `selfhost.md`, `.gitignore`, syscall.h/both trap.c.
 
