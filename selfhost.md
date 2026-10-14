@@ -590,6 +590,25 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-14 — Wave 7 (w7-accept) merged (`4f96d0f`): S4/S5 PASS + the last red
+  root-caused.** (A) **The w6 in-OS-assembled OUT.IMG (sha `7e24b4ca…`) BOOTS standalone**
+  (6.5 s, `Mode: DESKTOP`) and **launches the in-OS-built OUTPROG.BIN** from its menu
+  (`[LAUNCH] OUTPROG.BIN`, clean exit); OUTPROG/HELLO sha `61b3be6a…` == w6 in-OS HELLO ==
+  host hello.bin — the full circle closes. New helper `tools/w7_accept_boot.py`. (B) T4.3
+  full loop: S0 ✓, S1 ✓ (~61 min), **T2.5 ✓ full markers** (`[HELLO] entering main; argc=1;
+  argv[0]="./HELLO.BIN"; main returned 0`), then the S2 link failed TWICE (fresh disks incl.
+  post-w8 cherry-pick) on `cannot open nfs_test.o/cpu.o` → root-caused as a **FAT16
+  dirent-WRITER bug**: dump `t43-s2-fix.dirents.txt` shows every file receives a clean
+  dirent + a mangled twin sharing its cluster, and for exactly 2/59 names only the mangled
+  twin survives (`NFS_TEST.O.T`, `CPU-8167.O.T`) — deterministic, filename-keyed.
+  (C) acceptance.md reconciled (TCG 900–1500×, S1→7200 s/S2→10800 s timeouts,
+  non-incremental caveat, MODE=selfhost runbook §9, §8.3 verdict table). (D) reports +
+  evidence committed.
+- **2026-10-14 — Wave 8 (w9-dirent) dispatched (`deleg_e891f889`, 1 lane from `4f96d0f`):**
+  fix the dirent writer (failing unit test with the trigger names + name set → fix
+  `fat16.c` → unit gates + in-OS dump (zero twins) → S2-stage re-run crown). After w9: the
+  acceptance RC re-cut (S3 + extract + boot on the fixed lineage).
+
 - **2026-10-14 — w7-accept T4.3 full-loop intermediate: S0 PASS + S1 PASS + T2.5 PASS +
   S2 blocked at the link (its best run yet; 2.4 h).** `t43-loop.serial` in the w7 worktree
   logs all 59 compile/ascompile phases rc=0, then `LLD.BIN: error: cannot open
