@@ -284,10 +284,14 @@ load + staged payload present. **Evidence:** serial log + artifact sizes.
 - [x] **T2.2 Install to `/TOOLS` + `/TOOLS/RESDIR`** — COMPLETE (wave 3: 12 entries /
   223 MB on the 1 GiB image; LFN carries the resdir — 8.3 curation NOT required (§6.2,
   decided with byte-fidelity evidence); in-OS MAKE.BIN exec proof on the staged image).
-- [ ] **T2.3 In-OS smoke A:** `clang --version` runs. (MAKE.BIN already executes in-OS
-  from `/TOOLS` — w3-tools harness boot; clang still open.)
-- [ ] **T2.4 In-OS smoke B:** compile `hello.c` → `.o` in-OS (freestanding flags).
-- [ ] **T2.5 In-OS smoke C:** lld-link + objcopy + **run `HELLO.BIN` in-OS**.
+- [x] **T2.3 In-OS smoke A:** `clang --version` runs. — COMPLETE (w5-flat pipeline staging +
+  w5-nothrow closure fix; full 21.1.8 banner from the staged pipeline, rc=0).
+- [x] **T2.4 In-OS smoke B:** compile `hello.c` → `.o` in-OS (freestanding flags). —
+  COMPLETE (w5-nothrow: `phase=w5-compile-done rc=0`; HELLO.O 2272 B valid AArch64 REL,
+  pulled off the image + host-validated).
+- [ ] **T2.5 In-OS smoke C:** lld-link + objcopy + **run `HELLO.BIN` in-OS**. (Flat LLD/
+  OBJCOPY staged and loadable; the prefetch-race kill that hit flat LLD in w4 is FIXED
+  by w5-kernel (iv) — re-run on the merged tip = w6-run.)
 - [ ] **T2.6** Fix whatever L2 predicted that actually fires (single-writer rounds).
 
 **Gate M2:** T2.3–T2.5 green in one boot transcript; installed tool sizes recorded.
@@ -296,8 +300,9 @@ load + staged payload present. **Evidence:** serial log + artifact sizes.
 ### M3 — Build driver in-OS
 
 - [ ] **T3.1** make port runs in-OS (trivial Makefile: `sh -c` recipes, `test`/`[`).
-  Partial: MAKE.BIN loads + executes in-OS (`/TOOLS/MAKE.BIN` scheduler line in the
-  w3-tools serial proof); fails cleanly only at the not-yet-existing `Makefile.hobbyos`.
+  Partial: MAKE.BIN loads + executes in-OS; w5-src's S0/S1 dry-runs show make parsing
+  `Makefile.hobbyos` + issuing compile lines; the recipe-shell exec bug (missing-image
+  exec after AS teardown) is FIXED by w5-kernel (vii). Full merged-tip S0/S1 = w6-run.
 - [ ] **T3.2** `Makefile.hobbyos` v1: `check` + `user` (acceptance set) green in-OS from
   `/SRC`.
 - [ ] **T3.3** sh fixes L4's matrix proves necessary.
@@ -396,6 +401,13 @@ wait for the current run's log to show its final line, then start the next.
   **DISPATCHED 2026-10-14 (`deleg_6283bc5f`, 3 lanes from `92815fa`):** w5-flat = (a);
   w5-kernel = (b); w5-nothrow = (c), working in the warm l1 worktree (branch
   `selfhost/w5-nothrow`). After these land: the real S0/S1 in-OS run, then S2/S3.
+- **Wave 5: COMPLETE — all three merged (`42c6c0b`; §11 entry).** Flat pipeline conversion
+  proven in-OS; all 7 kernel blockers fixed (318/0 + 322/0 + wave green); **T2.3 + T2.4
+  green (clang compiles in-OS)**.
+- **Wave 6 (roster):** (a) w6-run: merged-tip end-to-end drive — S0 `check` → S1 `user` →
+  T2.5 link+run → S2 kernel attempt (bounded), fix-forward; plus the `src/libc/src/
+  cxxrt.cpp` latent-fix follow-up; (b) after S2: S3 OUT.IMG in-OS + S4/S5; (c) watchdog
+  hardening; (d) socket reconciliation; (e) budget/stripping.
 - Integrator = parent session: merges lanes to `main` here, runs merged-tip gates, is the
   sole writer of `selfhost.md`, `.gitignore`, syscall.h/both trap.c.
 
@@ -561,6 +573,33 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 ---
 
 ## 11. Fix log (append-only, newest first)
+
+- **2026-10-14 — Wave 5 (3 lanes) all merged (`42c6c0b`); zero conflicts. THE TOOLCHAIN RUNS IN-OS.**
+  (1) **w5-flat**: `selfhost-stage.sh` converts every LLVM dist ELF (clang-21/lld/llvm-ar/
+  llvm-objcopy) to flat at `--tools` stage time (host `llvm-objcopy -O binary` + sanity checks:
+  AArch64 ELF, e_entry==0x1000000000, first PT_LOAD vaddr==entry, flat head==LOAD content;
+  failure aborts staging). Pipeline proof in-OS: full clang banner, `phase=…done rc=0`,
+  `ACCEPTANCE-COMPLETE`. Flat sizes: CLANG 94,192,000 / LLD 53,250,208 / LLVMAR 8,348,856 /
+  OBJCOPY 4,982,328 B (byte-identical to the hand conversions).
+  (2) **w5-kernel — all 7 blockers fixed with pre/post serial pairs**: (i) exec gate
+  1 MiB→128 MiB on the v2 path; (ii) fault-killed child → non-zero status
+  (`process_fault_set_status`; +test); (iii) pid=5 housekeeping EL1 fault = L9-prefetch vs
+  group teardown dead page-table walk (`vm_arch_walk` deref) → zero-root guard + alive
+  recheck (+test); (iv) L9-prefetch PROT instruction-fetch race → bounded (4)
+  TLB-flush-and-retry in `vm_handle_fault`; (v) IDLESTUCK dump only on actual reclaim;
+  (vi) spawn/exec args 255→1024 (kernel + crt0); (vii) exec of a *missing* image now fails
+  -ENOENT BEFORE the AS teardown (was: teardown → bad-size-0 → AS-less fault loop). Gates:
+  ARM 318/0, x64 322/0 (KVM), wave green (`ALL TESTS PASSED`).
+  (3) **w5-nothrow — the in-OS compile works**: root cause = libc.a's `cxxrt.o` (pulled for
+  `__cxa_atexit`) carries STRONG `operator new/delete` beating libc++'s weak
+  `__lcxx_override`-section defs → nothrow override assert (brk #1). Fix: new
+  `cxxrt_shim.cpp` at the head of the closure (strong `__lcxx_override` new/new[] + cxa
+  atexit/finalize/dso/placement/oom; lld never extracts cxxrt.o) + delete→`free(ptr)` (raw
+  malloc payloads have no stash). Verified: `_Znwm == __start___lcxx_override` in all four;
+  **T2.3 banner PASS + T2.4 compile PASS (hello.c → HELLO.O, 2272 B valid ELF, pulled off
+  the image and host-validated)**. Follow-up queued: `src/libc/src/cxxrt.cpp` same latent
+  issues (section attribute + delete→free) → w6. Merged-tip battery round 5 launched on
+  `42c6c0b`.
 
 - **2026-10-14 — Battery round 4: local GREEN; VM test-arm wedged (investigating).** Local
   (`82d4d81`): host rc=0, unit-arm 316/0, unit-x64 320/0, wave rc=0 ('System halt.'; 2
