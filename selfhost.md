@@ -518,9 +518,23 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-14 — Wave 2 dispatched** (7 lanes, `deleg_aaf311af`): w2-llvm (LLVM build
+  continuation from the 211/564 checkpoint), w2-kernel (wait4 + argv envelope + rmdir),
+  w2-userland (setjmp/longjmp + resource/decl shims + wait4 wrapper), w2-make, w2-mtools,
+  w2-mkfs (ports), w2-harness (SELFHOST.BIN + runner + staging v2). All branch off
+  `d48ada6`; integration + merged gates when reports land.
 - **2026-10-14 — Wave 1 (L1–L5) complete; all lanes merged clean (`059997a`…`5a9967b`);
-  `pid_t`→int landed (`4a30ca4`); merged-tip battery running (local + CI VM in parallel —
-  results appended here when landed).** L1: configure GREEN (18 spike runs; zero LLVM
+  `pid_t`→int landed (`4a30ca4`); merged-tip battery RESULTS:** local = host_tests PASS,
+  unit-arm 309/0 PASS, unit-x64 313/1 (single `patched==1` red in
+  `test_fat16_lfn_truncated_run`; standalone re-run in flight), wave-arm marker + halt with
+  ONE `shell_test: FAILED echo validation` token. CI VM = ALL FOUR TIERS GREEN (host /
+  unit-arm / unit-x64 under KVM = 313/0 / test-arm; the VM wave carried the documented
+  SHELLTEST WATCHDOG + the same echo token). **Echo token attributed:** the local log shows
+  `thread_create: no free slot (used=63/63)` immediately before it — under slot pressure the
+  pre-echo pipe step SKIPs and SHTEST's echo step then reads a stale prompt buffer → its
+  echo guard fires. Test-side fragility of the pressure-skip-guard family, NOT a product
+  regression (L3 run5's zero-token result = lucky timing, same tree content). Follow-up:
+  guard the echo step / drain fix (wave-3 QoL). L1: configure GREEN (18 spike runs; zero LLVM
   source patches); vendor + toolchain + sysroot machinery committed; the one hard gate was
   the `Process::Pid` static_assert → resolved by AD-12. L2: audit 66 FULL / 20 PARTIAL /
   16 MISSING / 12 NO-ACTION; cc1 runs IN-PROCESS; W2-1..W2-15 fix list. L3: five real LFN
