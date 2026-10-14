@@ -22,7 +22,10 @@ extern "C" {
 #else
   typedef long long off_t;
 #endif
-  typedef long pid_t;
+  /* int32, Linux/glibc parity (AD-12): LLVM 21.1.8's Process::Pid
+   * static_assert and the kernel's byte-wise struct flock both assume
+   * a 32-bit pid stored at the low bytes of the field. */
+  typedef int pid_t;
   typedef unsigned int mode_t;
   typedef long time_t;
   typedef unsigned long dev_t;

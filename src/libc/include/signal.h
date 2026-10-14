@@ -59,8 +59,8 @@ extern "C" {
   /* KEEP THIS SIGNATURE IDENTICAL to <libc.h>'s kill() (implemented in
    * src/user/libc.c as kill(int, int)).  A C++ TU that includes both headers
    * sees a single extern "C" function there, so any signature drift is a
-   * hard "conflicting types" error; pid_t (long) arguments convert
-   * implicitly at the call sites. */
+   * hard "conflicting types" error; pid_t (int32 since AD-12; was long)
+   * arguments convert implicitly at the call sites. */
   int kill(int pid, int sig);
   int raise(int sig);
 

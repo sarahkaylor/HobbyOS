@@ -62,8 +62,10 @@ extern "C" {
 #define F_SETLK  6
 #define F_SETLKW 7
 
-  /* LP64 layout (32 bytes, 8-byte natural alignment): short, short, off_t,
-   * off_t, pid_t.  The kernel parses this byte-wise, and the trap layer
+  /* Layout (32 bytes, 8-byte natural alignment): short, short, off_t,
+   * off_t, pid_t (int32) + 4 pad — matching the kernel's byte-wise
+   * K_FLOCK_SIZE note (l_pid is stored as a 32-bit value at offset 24).
+   * The kernel parses this byte-wise, and the trap layer
    * requires the pointer to carry the struct's natural 8-byte alignment. */
   struct flock {
     short l_type;    /* F_RDLCK / F_WRLCK / F_UNLCK                    */
