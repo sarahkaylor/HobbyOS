@@ -349,8 +349,11 @@ $(OBJDIR)/arm/boot.o: src/kernel/arch/arm/boot.s
 	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
 	@echo "[SELFHOST] phase=kernel-ascompile rc=$$?"
 
+# F1.5 caveat (mirror of the host Makefile:662-676): fpu.s is the ONE kernel
+# TU allowed to touch the FP/SIMD register file; clang's assembler rejects
+# `ldp q22,q23…`/`msr fpcr` under -mgeneral-regs-only, so fpu.o drops it.
 $(OBJDIR)/arm/fpu.o: src/kernel/arch/arm/fpu.s
-	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	$(CC) $(filter-out -mgeneral-regs-only,$(KERNEL_CFLAGS)) -c $< -o $@
 	@echo "[SELFHOST] phase=kernel-ascompile rc=$$?"
 
 $(OBJDIR)/arm/setjmp.o: src/kernel/arch/arm/setjmp.s
