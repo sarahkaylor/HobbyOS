@@ -1,0 +1,63 @@
+{
+  "lane": "l4",
+  "status": "complete",
+  "commits": [
+    "1a5e5e53faddfb1d38588c59cf1c5b537d01cba3",
+    "fd21eb9f50e98ff0aa4a9e9fff729215d3a93932"
+  ],
+  "artifacts": [
+    "docs/selfhost/buildtools-audit.md"
+  ],
+  "evidence": [
+    "docs/selfhost/buildtools-audit.md",
+    "third_party/_staging/make-4.4.1.tar.gz",
+    "third_party/_staging/mtools-4.0.49.tar.gz",
+    "third_party/_staging/dosfstools-4.2.tar.gz",
+    "third_party/_staging/make-4.4.1/ (extracted, audit source)",
+    "third_party/_staging/mtools-4.0.49/ (extracted, audit source)",
+    "third_party/_staging/dosfstools-4.2/ (extracted, audit source)"
+  ],
+  "pins": [
+    {
+      "tool": "make",
+      "version": "4.4.1",
+      "url": "https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz",
+      "sha256": "dd16fb1d67bfab79a72f5e8390735c49e3e8e70b4945a15ab1f81ddb78658fb3",
+      "tag_to_commit": "tag 4.4.1 -> 6dd575465372c7d8c22d9b35b977c1c6c63a0b6b (git.savannah.gnu.org/git/make.git)",
+      "release_date": "2023-02-26",
+      "license": "GPL-3+",
+      "verified": "sha256 computed locally from the downloaded tarball"
+    },
+    {
+      "tool": "mtools",
+      "version": "4.0.49",
+      "url": "https://ftp.gnu.org/gnu/mtools/mtools-4.0.49.tar.gz",
+      "sha256": "10cd1111da87bf2400a380c1639a6cba8bfb937a24f9c51f5f88d393ae5f6f76",
+      "tag_to_commit": "N/A - upstream VCS is SVN not git (savannah svn://svn.savannah.gnu.org/mtools/); Debian salsa mirror is a reference only",
+      "release_date": "2025-06-14",
+      "license": "GPL-3+",
+      "verified": "sha256 computed locally; sha1 matches the GNU release announcement (b9f90c51a91cab19b5c470daff6f18cfb5740473)"
+    },
+    {
+      "tool": "dosfstools",
+      "version": "4.2",
+      "url": "https://github.com/dosfstools/dosfstools/releases/download/v4.2/dosfstools-4.2.tar.gz",
+      "sha256": "64926eebf90092dca21b14259a5301b7b98e7b1943e8a201c7d726084809b527",
+      "tag_to_commit": "tag v4.2 -> bba5a12447991cc1be9c33855c6c68e89b9ab29c (github.com/dosfstools/dosfstools.git)",
+      "release_date": "2021-01-31",
+      "license": "GPL-3+",
+      "verified": "sha256 computed locally; GitHub release publisher v4.2"
+    }
+  ],
+  "blockers": [
+    "mtools has no git tag->commit: upstream VCS is savannah SVN (no git repo exists); recorded as N/A with the tarball sha256 + published SHA-1 as the integrity gate. No functional blocker."
+  ],
+  "next_steps": [
+    "wave-2 lane 1: make-port (transcribe ~25 src/*.c + lib/glob.c+fnmatch.c + config.h; land shared dirent glue + getlogin/alarm first; gate: make -f Makefile.hobbyos user green in-OS T3.2)",
+    "wave-2 lane 2: mtools-port (mcopy+mmd subset, LFN writers kept; ioctl/termios stubs; gate: MMD+MCOPY disk-recipe copy-in in-OS)",
+    "wave-2 lane 3: mkfs-port (4 files: mkfs.fat.c common.c charconv.c device_info.c; ioctl stub + check_mount no-op; gate: MKFSFAT -F 16 -C OUT.IMG boots)",
+    "parent single-writer libc milestones: wire opendir/readdir/closedir to SYS_READ_DIR (M), add getlogin+alarm stubs (S), MKDIR.BIN -p (S), RM.BIN -f (S)",
+    "L5 owns the final OUT.IMG size; this audit sketches 256 MiB / 524288 blocks"
+  ],
+  "notes": "sh matrix: 22 constructs audited vs sh.c; SUPPORTED=12, PARTIAL=4 (mkdir -p via MKDIR.BIN, rm -f via RM.BIN, test -d via dirent ENOSYS, 2>/dev/null no /dev/null), ABSENT=1 (heredocs, unused), host-only dropped=5 (command -v, $(shell), qemu/ssh/scp/unzip/python). Core recipe contract sh -c proven (sh.c:3346). make audit finds dirent (ENOSYS stubs, kernel SYS_READ_DIR complete), getlogin, alarm as the only hard sysroot gaps; glob/fnmatch/umask/strndup are bundled. mkfs.fat 4.2 needs NO SEEK_HOLE/SEEK_DATA (absent), O_EXCL/O_CREAT/O_TRUNC honored by kernel fs.c, ftruncate+fsync full; -C + explicit size required in-OS. Makefile.hobbyos sketch: explicit lists, absolute /TOOLS paths (sh has no PATH), one command per line, stage markers [SELFHOST] phase=<name> rc=<n>, dd replaced by MKFSFAT ftruncate-only sizing. Open questions: kernel list 59 (measured) vs 71 (plan snapshot incl. x64), drop *_test.c TUs?, final OUT.IMG size (L5), MKDIR -p vs staging-precreate, DESKTOP in acceptance."
+}
