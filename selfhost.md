@@ -1,6 +1,6 @@
 # Toolchain Self-Hosting Program — in-OS clang + build toolchain (selfhost.md)
 
-Status: living document — **v1 (plan + pins + first lane wave dispatched), 2026-10-14**.
+Status: living document — **v1.1 (wave 1 complete; all five lanes merged; merged-tip battery running), 2026-10-14**. Wave-1 results: §11 + `docs/selfhost/lanes/`; wave-2 roster: §7.2.
 Executors: read §0 and §7 before touching anything; the §7.3 frozen interfaces are binding.
 
 **Repo note.** This document lives in the WORK COPY of HobbyOS (`~/hobbyos-selfhost`,
@@ -162,7 +162,7 @@ Makefile:189; hermetic include pattern (`-nostdinc -isystem <clang resource>/inc
 Makefile:145-156. ASM: pattern rules Makefile:600/:610. Disk recipe: `dd` + `mkfs.fat
 -F 16` + `mmd` dirs + `mcopy` files (~Makefile:1741+). libcxx archive: Makefile:905.
 
-**Trees.** `src/` = 18 MB / 613 files; kernel = 71 C/asm sources. Host: clang 21.1.8,
+**Trees.** `src/` = 18 MB / 613 files; kernel = 59 ARM TUs (71 C/asm sources incl. the x64 branch; L4 count). Host: clang 21.1.8,
 64 cores, ≈318 GB free on `/`. CI VM `hobytest` (192.168.0.20, 64 cores) reachable for
 long runs.
 
@@ -213,15 +213,24 @@ x64: 12 GB, KVM-capable (Makefile:167-197).
 - **AD-7** Build driver v1 = **GNU make port** + `Makefile.hobbyos` (subset, frozen targets
   `check/user/kernel/disk/all`); `SHELL=/TOOLS/SH.BIN -c` (supported, sh.c:3346). Native
   `hbuild` driver = dormant contingency; activation gate: M3 slips >1 week.
-- **AD-8** Disk output: in-OS `MKFSFAT` + `MCOPY` assemble `/SRC/OUT.IMG` (FAT16, ≤256 MiB;
-  exact size fixed by L5 from the space math — 939 MB free today). Host verifies by booting
+- **AD-8** Disk output: in-OS `MKFSFAT` + `MCOPY` assemble `/SRC/OUT.IMG` — **frozen:
+  128 MiB** (L5 sizing from the space math; real-disk staging measured 2.02× cluster
+  slack; `-C` + explicit size; `dd` replaced by ftruncate-only creation; byte-match bar =
+  BPB + both FATs + root entries, not host-identical images). Host verifies by booting
   OUT.IMG under QEMU (Limine chain). Second-raw-drive alternative = stretch.
 - **AD-9** Acceptance user set v1 (provisional; freeze at M3): `HELLO`, `SH`, `LS`, `CAT`
-  (+ `DESKTOP` if it links cheaply). Stretch: editor/files/everything.
+  (+ `DESKTOP` if it links cheaply; L5: the staging tool's `STAGE_LIBCXX` default flips at
+  freeze). Stretch: editor/files/everything.
 - **AD-10** No exceptions/RTTI anywhere (repo policy; LLVM built `LLVM_ENABLE_EH=OFF`,
   `LLVM_ENABLE_RTTI=OFF`).
 - **AD-11** The in-OS build tree is the REAL source tree (no name mangling, no shadow
   tree) — enabled by LFN support; this fidelity is the point. Payload = repo subtree copy.
+- **AD-12** `pid_t` is **int32** (Linux/glibc parity; `src/libc/include/sys/types.h`).
+  Forced by LLVM 21.1.8's `Process::Pid` static_assert; the kernel's byte-wise
+  `struct flock` already stores `l_pid` as a 32-bit value at offset 24 (`K_FLOCK_SIZE`
+  stays 32). Landed 2026-10-14 (`4a30ca4`).
+- **AD-13** The `read_dir` syscall's 31-char name cap STAYS (frozen ABI; payload basenames
+  ≤26 chars today). Revisit only if a staged/output name exceeds 31 (L3 note).
 
 ---
 
@@ -235,11 +244,13 @@ by the integrator; a lane may not tick a gate it did not run.
 - [x] **T0.1 Copy + seed + smoke** — `~/hobbyos-selfhost` @ `64093f6`, remote `ws`;
   container seeded; libcxx `fetch.sh` verified (sha + anchors); `obj/arm/hello.bin` built;
   unit-tier validation run kicked (record result in §11).
-- [ ] **T0.2 Plan + briefs + lane dispatch** — this doc + `docs/selfhost/lanes/*`
-  committed; L1–L5 dispatched.
-- [ ] **T0.3 L1 vendor scaffold** — `third_party/llvm-21.1.8/` fetch.sh re-runnable from
-  committed files; extraction sizes recorded.
-- [ ] **T0.4 L4 pin table** — make/mtools/dosfstools pins (URL+sha256+tag→commit) recorded.
+- [x] **T0.2 Plan + briefs + lane dispatch** — this doc + `docs/selfhost/lanes/*`
+  committed; L1–L5 dispatched (2026-10-14).
+- [x] **T0.3 L1 vendor scaffold** — `third_party/llvm-21.1.8/` fetch.sh re-runnable from
+  committed files; extraction 1.7 GB; anchors + early-exit verified by re-run (L1).
+- [x] **T0.4 L4 pin table** — make 4.4.1 / mtools 4.0.49 / dosfstools 4.2 (URL + sha256 +
+  tag→commit recorded; mtools' upstream is SVN — tarball sha256 + published SHA-1 is the
+  integrity gate).
 
 **Gate M0:** `bash third_party/llvm-21.1.8/fetch.sh` green from a clean checkout state
 (marker + anchors verify); plan + briefs committed; L1–L5 reports committed.
@@ -247,26 +258,30 @@ by the integrator; a lane may not tick a gate it did not run.
 
 ### M1 — OS prerequisites verified + staging
 
-- [ ] **T1.1 LFN build-payload verification** (L3) — deep long-name tree (mcopy-written,
-  nested: e.g. `/src/kernel/program_loader.c`, `/src/user_include/...`) fully usable in-OS:
-  open/read/read_dir/rename/mkdir/unlink; long-name outputs creatable; edge cases
-  (collisions, deep paths). Add the permanent tests (unit + in-OS `LFN_T.BIN`-class).
-- [ ] **T1.2 Staging tool** (L5 first cut → harness owner) — `tools/selfhost-stage.sh`
-  (host): copies the payload (`/SRC` tree: `src/`, `Makefile.hobbyos`, minimal libcxx
-  include set, `bootloader/BOOTAA64.EFI`, limine.conf template) into `disk.img` via mcopy;
-  idempotent; size report.
+- [x] **T1.1 LFN build-payload verification** (L3; merged `5a9967b`) — five real gaps found
+  and fixed, failing-test-first: G1 read_dir long names; G2 mkdir writes 0x0F runs;
+  G3 rename rewrites runs; G4 cross-sector unlink; G5 read_dir accumulator across
+  sector/cluster boundaries. `LFN_T.BIN` 25 checks + 7 unit tests; unit 309/0; ARM wave
+  zero-FAIL; pristine attribution in `docs/selfhost/lanes/l3-*`.
+- [x] **T1.2 Staging tool** (L5 first cut, merged; harness owner refines) —
+  `tools/selfhost-stage.sh` tested on a scratch image AND a real 1 GiB copy (mdir arrival +
+  content spot-checks); payload = 2322 files / 30,108,339 B; 1362/2322 basenames exceed 8.3
+  (informational; LFN carries them).
 - [ ] **T1.3 Large-image load test** — synthetic ~96 MB flat bin loads + runs in-OS via v2
   loader; load time recorded (feeds M2 sizing).
-- [ ] **T1.4 L2 audit closed** — every MISSING/PARTIAL item scheduled (or documented
-  no-action); single-writer fix commits for anything quick.
+- [x] **T1.4 L2 audit closed** (merged `06d5b44`) — 66 FULL / 20 PARTIAL / 16 MISSING /
+  12 NO-ACTION; work items W2-1..W2-15; load-bearers = argv envelope 256 B/32 args,
+  temp dir, M1 headers; cc1 runs IN-PROCESS (compile half needs no fork/exec).
 
 **Gate M1:** one in-OS run shows: long-name tree listing + deep-path reads + the 96 MB
 load + staged payload present. **Evidence:** serial log + artifact sizes.
 
 ### M2 — The toolchain runs on HobbyOS (critical path)
 
-- [ ] **T2.1 Cross-build** clang + lld + llvm-ar + llvm-objcopy (wave-2 lanes continue
-  L1's recipe; sizes + build log committed).
+- [ ] **T2.1 Cross-build** clang + lld + llvm-ar + llvm-objcopy — configure GREEN (spike
+  run 18); compile reached 211/564 TUs, first hard gate `Process::Pid` static_assert →
+  resolved at this tip (AD-12); wave 2 resumes `ninja llvm-ar llvm-objcopy` →
+  `ninja clang lld` → `install-distribution` (recipe `docs/selfhost/llvm-bootstrap.md` §6).
 - [ ] **T2.2 Install to `/TOOLS` + `/TOOLS/RESDIR`** (staging path; 8.3 checks; curated
   resource headers).
 - [ ] **T2.3 In-OS smoke A:** `clang --version` runs.
@@ -289,7 +304,7 @@ in-OS. **Evidence:** serial log.
 
 ### M4 — THE ACCEPTANCE: self-built OS
 
-- [ ] **T4.1** `make -f Makefile.hobbyos kernel` in-OS: all 71 kernel TU compile, link
+- [ ] **T4.1** `make -f Makefile.hobbyos kernel` in-OS: all 59 ARM kernel TU compile, link
   `hobbyos.elf`, objcopy `hobbyos.bin` — in-OS.
 - [ ] **T4.2** `disk` target: MKFSFAT+MCOPY/build `OUT.IMG` (kernel + limine.conf +
   BOOTAA64.EFI + user set) in-OS.
@@ -329,9 +344,13 @@ Merge model: **one lane = one branch + disjoint files** (§7.4); parent merges t
 
 - **Wave 1 (now):** L1–L5 fully parallel (disjoint file sets; L3 is the only Makefile
   writer this wave).
-- **Wave 2 (after wave-1 reports):** clang full-build iterations (continuation of L1);
-  libc/syscall fix batches (from L2 work items, single-writer); make-port lane; mtools +
-  mkfs.fat port lanes; harness lane (`run_selfhost_build_test.py` + staging v2).
+- **Wave 2 (at the merged tip `4a30ca4`):** (a) LLVM build continuation — resume
+  `ninja llvm-ar llvm-objcopy` → `ninja clang lld` → `install-distribution`
+  (recipe: `docs/selfhost/llvm-bootstrap.md` §6; sizes recorded); (b) libc/syscall M1
+  batch — L2 W2-1..W2-10 (headers/shims, argv envelope, temp dir; syscall surfaces
+  single-writer = parent); (c) make-port lane; (d) mtools-port lane; (e) mkfs-port lane;
+  (f) harness lane — `SELFHOST.BIN` + `run_selfhost_build_test.py`
+  (`docs/selfhost/acceptance.md` §5); (g) merged-tip + CI-VM batteries (running; §11).
 - **Wave 3:** M3/M4 integration rounds, fixups, records.
 - Integrator = parent session: merges lanes to `main` here, runs merged-tip gates, is the
   sole writer of `selfhost.md`, `.gitignore`, syscall.h/both trap.c.
@@ -438,14 +457,22 @@ a snapshot, not scripture).
 
 ## 10. Open questions (close by M1/M2)
 
-1. Exact `OUT.IMG` size + content set (L5 + M3 freeze).
-2. make vs hbuild final (L4 recommendation; default: make).
-3. Curated `RESDIR` header list (L1: which builtin headers the kernel/user builds
-   actually resolve; everything unused is dropped).
-4. Integrated cc1 availability/effect in the 21.1.8 config (L1/L2; affects per-TU cost).
-5. clang binary size after Release + strip (L1; feeds R3).
-6. lld threading needs on HobbyOS (`--threads=1` fallback; L2).
+1. ~~OUT.IMG exact size~~ **CLOSED: 128 MiB** (L5; content set freezes at M3 with the
+   `STAGE_LIBCXX` flip).
+2. ~~make vs hbuild~~ **CLOSED: make** (port breakdown in `docs/selfhost/buildtools-audit.md`).
+3. Curated `RESDIR` header list (wave 2, with `install-distribution`; keep only the builtin
+   headers the freestanding builds actually resolve).
+4. ~~integrated cc1~~ **CLOSED: cc1 runs in-process by default** (L2; `Job.cpp`
+   `CC1Command::Execute` spawns nothing).
+5. clang binary size — probe closure GREEN (127,752 B `.text`); final size at full build
+   (wave 2; feeds R3).
+6. ~~lld threading~~ **CLOSED: `hardware_concurrency()` (≤16) over the existing pthreads is
+   sufficient** (L2).
 7. x64 self-host scheduling (M5 stretch).
+8. Temp-dir strategy in-OS (L2 W2-9: disk dir vs `TMPDIR` env; prerequisite of the first
+   in-OS clang smoke).
+9. `raw_socket_stream` closure: are the socket calls truly unreachable in the shipped tool
+   set? (L2; ENOSYS stubs acceptable if so.)
 
 ---
 
@@ -490,6 +517,21 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 ---
 
 ## 11. Fix log (append-only, newest first)
+
+- **2026-10-14 — Wave 1 (L1–L5) complete; all lanes merged clean (`059997a`…`5a9967b`);
+  `pid_t`→int landed (`4a30ca4`); merged-tip battery running (local + CI VM in parallel —
+  results appended here when landed).** L1: configure GREEN (18 spike runs; zero LLVM
+  source patches); vendor + toolchain + sysroot machinery committed; the one hard gate was
+  the `Process::Pid` static_assert → resolved by AD-12. L2: audit 66 FULL / 20 PARTIAL /
+  16 MISSING / 12 NO-ACTION; cc1 runs IN-PROCESS; W2-1..W2-15 fix list. L3: five real LFN
+  gaps found+fixed (G1–G5); `LFN_T.BIN` 25 checks; unit 309/0; ARM wave zero-FAIL; ambient
+  flakes attributed via a same-window pristine gate. L4: pins (make 4.4.1 / mtools 4.0.49 /
+  dosfstools 4.2); sh matrix (12 SUPPORTED / 4 PARTIAL / 1 ABSENT); `Makefile.hobbyos`
+  sketch. L5: staging tool tested against a real 1 GiB image copy (2322 files / 30.1 MB
+  payload); OUT.IMG = 128 MiB; TCG boot ≈9 s.
+- **2026-10-14 — `pid_t` → `int` (AD-12).** Linux/glibc parity; unblocks LLVM 21.1.8's
+  `Process::Pid` static_assert; kernel `struct flock` byte layout unchanged (32 bytes,
+  `st32` at offset 24). Single-writer commit `4a30ca4`.
 
 - **2026-10-14 — Program start.** Copy created (`~/hobbyos-selfhost` @ `64093f6`; remote
   `ws`; container seeded; libcxx fetch verified; `hello.bin` smoke built). Plan v1
