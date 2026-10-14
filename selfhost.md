@@ -590,6 +590,17 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-14 — w7-accept T4.3 full-loop intermediate: S0 PASS + S1 PASS + T2.5 PASS +
+  S2 blocked at the link (its best run yet; 2.4 h).** `t43-loop.serial` in the w7 worktree
+  logs all 59 compile/ascompile phases rc=0, then `LLD.BIN: error: cannot open
+  /SRC/obj/arm/nfs_test.o` + `/SRC/obj/arm/cpu.o` → make Error 1 →
+  `phase=s2-kernel-fail reason=tool-rc rc=512` → `FAILED-AT stage=s2-kernel`. Integrator
+  verified in-serial: the two objects' compile commands are complete/correct and echoed
+  before the link; the rsp (w6 reference) lists both names right; w6's identical stage
+  passed on a FRESH disk while w7 re-ran on an already-built one → steered the fresh-disk
+  kernel-stage re-run + mdir-of-failing-image discriminator (FAT create/overwrite-loss
+  class vs code). w7 to report either way.
+
 - **2026-10-14 — Wave 6.5 (w8-torture) merged (`bd58474`): the `TORTURE exec-wait-cycles`
   red is ROOT-CAUSED and FIXED — and the class was deterministic ON ARM all along (the
   "local pass" earlier was the HOST_TEST build: `suite_ms=301`/`total_kb=65536` mock lines,
