@@ -1,0 +1,8 @@
+# w7-accept evidence dir: transient build/scratch artifacts stay UNCOMMITTED
+# (raw serial captures + pulled artifacts are committed; build logs are not).
+make-diskimg.log
+make-diskimg.pid
+*.qmp
+out-loop.img
+out-loop-*.img
+w7-loop/

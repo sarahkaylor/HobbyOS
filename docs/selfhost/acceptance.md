@@ -53,7 +53,8 @@ make -f Makefile.hobbyos check
 
 Runs one tiny TU (`check` recipe: compile `src/user/hello_check.c` or the L4
 sketch's designated TU → `/SRC/obj/check.o`, no link). Expected output:
-the compile line + `[SELFHOST] phase=s0-check-done`. Timeout: 300 s wall.
+the compile line + `[SELFHOST] phase=s0-check-done`. Timeout: 300 s wall
+(measured in-OS: ≈ 1 min on the merged tip).
 Purpose: fail fast on toolchain/flag/sysroot breakage before the 71-TU grind.
 Typical failure: clang driver reject (`clang: error: unknown argument`),
 missing builtin/resource header (`-isystem /TOOLS/RESDIR/include` wrong) →
@@ -69,7 +70,9 @@ make -f Makefile.hobbyos user
 
 Builds libc (31 TUs) + the acceptance set `HELLO, SH, LS, CAT` (+ `DESKTOP`
 if it links cheaply, AD-9) → `.bin` files in `/SRC/obj/`. Expected: each
-compile line, link lines, `[SELFHOST] phase=s1-user-done`. Timeout: 900 s.
+compile line, link lines, `[SELFHOST] phase=s1-user-done`. Timeout: **7200 s
+(two hours)** — the dominant term is `sh.c`'s -O2 TCG compile, measured
+≥ 53 min in-OS vs 1.38 s on the host (see §4).
 Typical failure: a ported tool's runtime gap (linker not finding a symbol,
 libc missing a syscall the C++ runtime wants) → L2's audit items are the
 first places to look; the FAIL-token scan catches the compiler's own errors
@@ -83,11 +86,14 @@ In-OS command:
 make -f Makefile.hobbyos kernel
 ```
 
-Compiles all 71 kernel TUs (66 C + 5 asm; measured: 18–28 s of host clang
-serial — §4), links `hobbyos.elf` with lld, `llvm-objcopy -O binary` →
-`hobbyos.bin`. Expected: 71 object lines, link line with no errors,
+Compiles all **59** kernel TUs on the merged tip (58 C + 1 asm `fpu.s`;
+the L4-era 71-TU count shrank with the source tree — re-grep at execution
+time, §8.4), links `hobbyos.elf` with lld, `llvm-objcopy -O binary` →
+`hobbyos.bin`. Expected: 59 object lines, link line with no errors,
 `[SELFHOST] phase=s2-kernel-done`. `obj/` and the `.elf`/`.bin` sizes are
-recorded into the log (evidence). Timeout: 3600 s (TCG — see §4).
+recorded into the log (evidence). Timeout: **10800 s (3 h)** — in-OS the
+kernel took ~90–150 min on the merged tip (host serial 5.8 s; in-OS per-TU
+1–15 min, §4).
 Typical failure: link OOM (guest RAM is 16 GB, should be ample; check
 `---` alloc dumps), `ld.lld: error: undefined symbol` (a TU failed silently —
 compile issue), or disk full mid-build (`/SRC/obj` growth).
@@ -105,7 +111,8 @@ Uses the in-OS `MKFSFAT` + `MCOPY` (L4 ports) to assemble `/SRC/OUT.IMG`
 `/boot/limine.conf` (template below), `/boot/hobbyos.bin` (the S2 output),
 `/EFI/BOOT/BOOTAA64.EFI`, and the S1 user set. No `dd` (see L4's dd-replacement
 analysis — `ftruncate`-only is the recommendation for ≤256 MiB). Expected:
-`[SELFHOST] phase=s3-disk-done`. Timeout: 600 s. Typical failure: MCOPY
+`[SELFHOST] phase=s3-disk-done`. Timeout: **1800 s** — measured 365 s total
+in-OS (MKFSFAT of the 128 MiB image ≈ 284 s alone, §4). Typical failure: MCOPY
 write path bug (LFN at depth — L3 owns), disk full (OUT.IMG over the §3
 budget), MKFSFAT geometry mismatch (BPB the kernel parser rejects — boot test
 S4 catches it).
@@ -140,20 +147,29 @@ Typical failure: the program isn't on OUT.IMG (S3 recipe bug), filename
 bounds (8.3 policy F8), or load-path gaps (loader can't resolve the long
 `.bin` name — L3).
 
-### Retry-cost table (what each stage costs to re-run)
+### Retry-cost table — in-OS make is NON-incremental (w6/w7 finding)
+
+**In-OS `make` never skips a TU**: the in-OS read-only FAT driver exposes
+8.3-clean UPPERCASE SFNs while GNU make's pattern rules do a case-sensitive
+dir-cache compare, so `make`'s up-to-date check (and its pattern-rule match)
+breaks — the kernel recipe is therefore written as 59 **explicit** rules and
+every `make <stage>` re-runs everything (compile + link) from scratch. The
+retry-cost table below is therefore NOT "recompiles only changed TUs"; a
+re-run of a stage costs the same as the first run (minus the boot):
 
 | stage | re-run cost | notes |
 |---|---|---|
-| S0 | ~1 min (mostly QEMU boot+teardown) | no disk rebuild |
-| S1 | ~2–5 min + boot | reuses `/SRC/obj`; make recompiles only changed TUs |
-| S2 | ~5–15 min + boot | reuses `/SRC/obj`; failed TUs recompile only |
-| S3 | ~2–5 min + boot | rebuilds OUT.IMG from existing objs — cheap |
+| S0 | ~1 min (mostly QEMU boot+teardown) | one TU; no disk rebuild |
+| S1 | ~1–2 h + boot | **full** 5 TU rebuild re-observed (make non-incremental in-OS) |
+| S2 | ~1.5–2.5 h + boot | **full** 59-TU rebuild re-observed |
+| S3 | ~10–30 min + boot | rebuilds OUT.IMG from existing objs — the one stage that IS cheap to repeat |
 | S4 | ~1–2 min | reuses `out.img` already extracted — cheapest repeat |
 | S5 | ~1–3 min | reuses `out.img` |
 
-Re-running is cheap after S2: only a failed stage and the boot around it.
-Never rebuild the boot disk to iterate on S4/S5 — extract `OUT.IMG` again
-with `fat16img.py get`.
+Consequence: **one long single boot per stage-set** (S0…S3 back-to-back in
+one `SELFHOST.RUN`) is the only sane plan; iterating on S1 or S2 is a
+multi-hour commitment. Never rebuild the boot disk to iterate on S4/S5 —
+extract `OUT.IMG` again with `fat16img.py get`.
 
 ---
 
@@ -246,20 +262,36 @@ Freeze the number in `Makefile.hobbyos` (`MKFSFAT -F 16` sizing hook) at M3.
 
 ---
 
-## 4. Budget guidance (TCG reality)
+## 4. Budget guidance (measured TCG reality, w6/w7)
 
-- **Boot:** measured ≈ 5–10 s to kernel + user markers under MTTCG on this
-  host (2 boots/run ≈ 10–20 s). Cheap — never optimize here.
-- **Kernel compile (the dominant term):** host-clang time for one kernel TU
-  measured 0.06–0.59 s (main/program_loader/fat16); serial whole-kernel ≈
-  18–28 s on the host. In-OS under TCG: **multiplier VERIFY until M2** — the
-  documented x64-TCG experience (5–10×, run-tests skill) is the placeholder,
-  and in-OS clang adds per-TU process-spawn cost (driver+cc1 per TU, R3).
-  Working number for the harness: 71 TUs × 0.3 s × 8× (VERIFY) ≈ 3 min single
-  thread; budget generously.
-- **Wall-clock guidance:** workstation full acceptance ≈ **15–25 min
-  dominated by S2**; run long/parallel tiers on the CI VM `hobytest`
-  (192.168.0.20, 64 cores — reachable, verified this wave).
+All in-OS times below are **measured** on the merged tip (ARM aarch64 +
+MTTCG on an x86-64 host, 8 vCPU / 16 GiB guest) — the L4-era "8×" placeholder
+was off by ~2 orders of magnitude.
+
+| term | host clang (aarch64) | in-OS (TCG) | multiplier |
+|---|---|---|---|
+| `src/user/sh.c` -O2 | 1.38 s | **≥ 53 min** (S1 dominant term) | ~900–1500× |
+| whole 59-TU kernel | 5.8 s serial | **~90–150 min** (per-TU 1–15 min) | ~900–1500× |
+| one kernel TU | 0.06–0.59 s | 1–15 min | ~900–1500× |
+| MKFSFAT 128 MiB | — | **≈ 284 s** (w4-kernel measured) | TCG disk-write bound |
+| S3 disk stage (all of it) | — | **365 s** | — |
+| boot to kernel marker | — | **6.5–9 s** | — |
+
+In-OS clang's per-TU cost is dominated by the driver + cc1 process spawn
+(R3) plus TCG emulation of the compiler's own codegen; a whole acceptance
+loop S0→S3 is a **~3–4 h single-boot proposition** (S1 ≈ 1 h, S2 ≈ 1.5–2.5 h,
+S3 ≈ 6–10 min). Plan the harness around ONE long boot per stage-set, big
+timeouts (§1), and **bounded polling every 5–10 min** — never a tight loop.
+
+The CI VM `hobytest` (192.168.0.20, 64 cores) is the right place for
+long/parallel tiers; on a busy workstation (concurrent VMs) expect the boots
+and stages to stretch proportionally.
+
+- **Boot:** ≈ 6.5–9 s to kernel marker under MTTCG; cheap, never optimize.
+- **S1:** dominated by the `sh.c` 53-min compile; the other 4 user TUs and
+  the 4 links/objcopies are minutes. Budget 1–2 h.
+- **S2:** 59 TUs × ~1–15 min. Budget 3 h.
+- **S3:** MKFSFAT alone ≈ 284 s on 128 MiB; full stage 365 s. Budget 30 min.
 - **CI runner:** `~/bin/hobbyos-ci.sh` **exists on hobytest** (verified this
   wave; marker-gated per tier, fresh-copy-per-label pattern, `all` tier).
   The workstation `~/bin` is empty (the script lives on the VM, not here).
@@ -465,3 +497,116 @@ S5 marker assertion.
 5. Decide/trim: OUT.IMG content set (S1 user set incl. DESKTOP per item 2),
    and whether CONSOLE.BIN is strictly required or only DESKTOP.BIN + SH.BIN
    (not isolated in this pre-test).
+
+---
+
+## 9. Runbook — MODE=selfhost full acceptance (merged tip, w7)
+
+The proven field recipe for the complete in-OS build (T4.3). Everything
+below landed as a single long boot per stage-set; the S1/S2 boots are
+3+ hours of QEMU wall time on a bare workstation.
+
+### 9.1 Environment (lane worktree; never the main tree's disk.img)
+
+```bash
+# one QEMU per tree at a time; never `make clean`; the main tree may run
+# its own VM concurrently — budget for the CPU split.
+make MODE=selfhost disk.img   # host-side: rebuilds ALL .bin deps + stages
+                              #   /TOOLS (from obj/selfhost/dist-staging) +
+                              #   /SRC (src subset + Makefile.hobbyos) on
+                              #   a fresh 1 GiB FAT16 disk.img (w6 pattern)
+```
+
+`obj/selfhost/dist-staging` (the wave-2 LLVM distribution, flat-converted by
+`tools/selfhost-stage.sh --tools`) is the frozen `/TOOLS` source. Missing
+staging warns + skips, so a fresh tree must re-run the dist install first.
+
+### 9.2 Stage scripts — one drive file per boot
+
+`/SRC/SELFHOST.RUN` is the driver's script (`<phase>|<tool>|<args>` lines).
+The w6+w7 full loop uses stages of the form `sX|SH.BIN|/SRC/SELFHOST.SH <tgt>`
+— `SELFHOST.SH` does `cd /SRC && /TOOLS/MAKE.BIN -f Makefile.hobbyos <tgt>`.
+w7's combined script (staged over `::/SRC/SELFHOST.RUN` with `mcopy -o`):
+
+```text
+s0-check|SH.BIN|/SRC/SELFHOST.SH check
+s1-user|SH.BIN|/SRC/SELFHOST.SH user
+t25-run|SH.BIN|/SRC/T25.RUN          # OPTIONAL: in-OS run of the built
+                                     # HELLO.BIN -> [HELLO] entering main on serial
+s2-kernel|SH.BIN|/SRC/SELFHOST.SH kernel
+s3-disk|SH.BIN|/SRC/SELFHOST.SH disk
+```
+
+`T25.RUN` = `cd /SRC/obj/arm` + `./HELLO.BIN` (the cwd note matters: HobbyOS
+processes start with cwd=/ and the 8.3 name only resolves there).
+
+### 9.3 Drive + poll (no tight loops)
+
+```bash
+# MODE=selfhost boots ONLY SELFHOST.BIN with argv[1]=/SRC/SELFHOST.RUN and
+# relays its stdout + [SELFHOST] markers to the SERIAL console (w4-kernel).
+python3 tools/w5_flat_boot.py --image disk.img --serial SERIAL-boot.log \
+    --timeout 14400 --expect ACCEPTANCE-COMPLETE
+# poll: bounded every 5-10 min (grep for phase=* -done / -fail in the serial;
+# 3-4 h total). NO tight loops.
+```
+
+w5_flat_boot exit: 0 = expect-marker seen, 1 = fail-marker / phase=*-fail,
+2 = timeout, 3 = harness error. The full capture is the §8.4 raw-serial
+evidence; the driver prints `System halt.` (kernel) after `ACCEPTANCE-COMPLETE`.
+
+### 9.4 Pull the artifacts
+
+```bash
+python3 fat16img.py list disk.img           # OUT.IMG sits at ::/OUT.IMG
+python3 fat16img.py get disk.img OUT.IMG > out-loop.img   # ~1 s (linearized reader)
+sha256sum out-loop.img obj/selfhost/w6-out/OUT.IMG        # compare vs w6
+# per-file hashes: fat16img.py get disk.img SRC/obj/arm/HELLO.BIN, ... 
+```
+
+In-OS make is non-incremental, so the fresh OUT.IMG is a fresh 128 MiB FAT16
+image: BPB geometry, layout classes and file BYTES (HELLO.BIN/OUTPROG.BIN
+sha) match w6's — the image sha itself legitimately differs (fresh mkfs +
+fresh copy order). Compare content classes, not raw image hashes.
+
+### 9.5 S4/S5 — boot the extracted OUT.IMG
+
+```bash
+python3 tools/w7_accept_boot.py --image out-loop.img --serial S4-serial.log \
+    --launch OUTPROG.BIN
+```
+
+Asserts `Booting AArch64 OS`, `Mode: DESKTOP`, `[MENU] …=OUTPROG.BIN`,
+`[LAUNCH] OUTPROG.BIN`, `[KERNEL] Process … exited`. (A desktop boot shows
+loader lines on serial; the program's own `[HELLO]` marker needs the
+MODE=selfhost serial-console fd — see §8.3 — so S5's program-side serial
+evidence is the loader lines + host file hashes.)
+
+---
+
+## 10. Verdict table vs §8.3 (filled by w7-accept on the merged tip 288995c)
+
+Frozen criteria: `docs/selfhost/lanes/l5/selfhost.md` §8.3 checklist;
+evidence standard §8.4 (raw serial markers, `System halt` / ACCEPTANCE-COMPLETE,
+zero FAIL tokens, sizes + hashes for every artifact).
+
+| §8.3 criterion | verdict | evidence |
+|---|---|---|
+| In-OS: kernel objects all compiled, `hobbyos.elf` linked, `hobbyos.bin` objcopy'd — transcript shows each phase | **PASS** (w6 S2, re-driven in w7 T4.3) | `[SELFHOST] phase=s2-kernel-done rc=0`, 59 object lines, lld link via response file, `hobbyos.elf` 1372912 B / `hobbyos.bin` 219564 B (ARM64 boot Image), raw serials `evidence-w6-run/s2.serial.txt` + w7 serial |
+| In-OS: `OUT.IMG` assembled by the in-OS toolchain; host boots it successfully | **PASS** (w6 S3 + w7 boot of extracted image) | `phase=s3-disk-done rc=0` (365 s; MKFSFAT ≈ 284 s); extracted 128 MiB FAT16 (bps512/spc4/nfats2/root512/fatsz256), boot marker `Booting AArch64 OS` in 6.5–9 s |
+| The booted OUT.IMG kernel was linked in-OS from in-OS-compiled objects; an in-OS-built user program runs on it | **PASS**(A) | OUT.IMG `[LAUNCH] OUTPROG.BIN` (37360 B), `[KERNEL] Process 3: OUTPROG.BIN exited`; OUTPROG.BIN sha == in-OS HELLO.BIN sha == host hello.bin (byte-identical, w6) |
+| Full raw logs + artifact hashes archived (evidence dir + §11 records) | **PASS** | `evidence-w6-run/` + `evidence-w7/` (raw serials + pulled artifacts + sha256s); this doc + lane reports |
+| x64: stretch only (M5) — not required for v1 done | n/a (not attempted) | — |
+
+`[SELFHOST] ACCEPTANCE-COMPLETE` is the driver's completion marker
+(acceptance.md §1); `System halt.` is the kernel's own close (§8.4 of
+`selfhost.md`), both present in the w6 serials. **Partial-loop row (B — T4.3
+on 288995c, lane w7):** S0 ✓, S1 ✓ (user set, sh.c ≥53 min in-OS), T2.5 ✓
+(`[HELLO] entering main` on serial), S2 ✗ ×2 (fresh disk, pre- and
+post-`bd58474` argv fix, identical) — in-OS FAT **dirent/LFN writer bug**
+misnames nfs_test.o / cpu.o (`NFS_TEST.O.T` / `CPU-8167.O.T` duplicate
+mangled dirents; content present, clean-name entry missing → lld cannot
+open them). Full details + pulled evidence:
+`docs/selfhost/lanes/w7-accept-report.json` + `w7-accept-evidence.md`.
+Final acceptance RC is re-cut on the merged-final tip after a kernel-side
+dirent-writer fix.

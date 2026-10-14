@@ -1,0 +1,128 @@
+{
+  "lane": "w7-accept",
+  "wave": 7,
+  "role": "acceptance close-out on the merged tip: (A) boot the w6 in-OS-assembled OUT.IMG and run an in-OS-built program from it; (B) full T4.3 loop S0->S3 on a fresh disk.img, extract + sha-compare the produced OUT.IMG, boot it and run its in-OS-built program; (C) reconcile acceptance.md to measured TCG reality + selfhost runbook + verdict table vs l5/selfhost.md 8.3; (D) report json + evidence",
+  "branch": "selfhost/w7-accept",
+  "base_tip": "288995c",
+  "commits": [
+    "b02f8fe w7-accept: (A) w6 OUT.IMG boots + in-OS-built OUTPROG.BIN runs (S4/S5 evidence); acceptance.md TCG-reality reconciliation",
+    "0c96a55 w7-accept: evidence doc + report skeleton + combined drive script (T4.3 loop in progress)",
+    "d9ecd05 w7-accept: T4.3 loop S1 + T2.5 PASS — in-OS user build + in-OS run of HELLO.BIN",
+    "c7c5823 selfhost: merge w8-torture — exec argv marshal per-page fix (cherry-picked bd58474)",
+    "bb59524 w7-accept: S2 tail failure evidence + fix cherry-pick + S2-only re-run plan",
+    "58c072d w7-accept: S2-only re-run drive (fresh fixed disk.img; one stage one boot)",
+    "d16f0d9 w7-accept: DISCRIMINATOR VERDICT — S2 failure is a FAT dirent/LFN write bug, not argv, not prior state",
+    "be4785b w7-accept: acceptance.md 10 verdict row — partial-loop status + dirent bug + re-cut note"
+  ],
+  "environment": {
+    "host": "x86_64, 64 cores, QEMU aarch64 TCG MTTCG (no KVM for ARM guests)",
+    "concurrent_load": "integrator battery-6 VM (qemu-system-aarch64, disk.img of ~/hobbyos-selfhost) running the whole lane; my tree independent, timing budgets draw on the shared CPU",
+    "tcg_multiplier_measured": "~900-1500x vs host (anchor: sh.c host clang -O2 aarch64 1.38 s -> in-OS >= 53 min; whole 59-TU kernel host 5.8 s -> in-OS 1.5-2 h; MKFSFAT 128 MiB ~284 s; boot 6.5-9 s)",
+    "w6_out_img": {
+      "path": "obj/selfhost/w6-out/OUT.IMG",
+      "sha256": "7e24b4ca1db8deff4dee75c3b1c71e63460f8eb90e4fa3027934b1126e20286b",
+      "layout": "root HELLO.BIN/SH.BIN/LS.BIN/CAT.BIN/DESKTOP.BIN/CONSOLE.BIN/OUTPROG.BIN/OUTMARK.TXT; /boot/hobbyos.bin 219564 B + limine.conf 99 B; /EFI/BOOT/BOOTAA64.EFI 315392 B; /bin/SH.BIN"
+    }
+  },
+  "A_boot_w6_outimg": {
+    "result": "PASS",
+    "cmd": "tools/w7_accept_boot.py --image obj/selfhost/w6-out/OUT.IMG --launch OUTPROG.BIN",
+    "serial": "evidence-w7/s4-w6outimg.serial",
+    "boot_marker": "Booting AArch64 OS at 6.5 s (standalone boot of the in-OS-assembled OUT.IMG)",
+    "mode_line": "Mode: DESKTOP - Launching desktop...",
+    "menu": "[MENU] 9=OUTPROG.BIN count=11",
+    "launch_line": "[LAUNCH] OUTPROG.BIN; v2 loader image mapped bytes=37360 pages=10",
+    "exit_line": "[KERNEL] Process 3: OUTPROG.BIN exited unexpectedly or gracefully.",
+    "byte_identity": "OUTPROG.BIN sha256 61b3be6ad97e0286... == HELLO.BIN (extracted from the same image) == w6 in-OS HELLO.BIN == host obj/arm/hello.bin (w6-recorded); flat ARM64 binary (first bytes fd 7b bb a9 = stp x29,x30 prologue)",
+    "serial_program_note": "desktop-launched stdout is framebuffer-only (acceptance.md 8.3 ceiling); program-side serial proof = loader lines + exit line + host file hash; the [HELLO] entering main marker comes from the MODE=selfhost T2.5 path"
+  },
+  "B_T43_loop": {
+    "flow": "make MODE=selfhost disk.img -> stage SELFHOST-RUN-w7-full.txt (s0-check,s1-user,t25-run,s2-kernel,s3-disk) -> tools/w5_flat_boot.py --timeout 18000 (one boot) -> fat16img.py get OUT.IMG -> boot it + launch OUTPROG.BIN",
+    "host_prebuild": {
+      "result": "PASS",
+      "log": "evidence-w7/make-diskimg.log (uncommitted host build log)",
+      "tools_staged": "CLANG.BIN 94192328 B, LLD.BIN 53250536 B, LLVMAR.BIN 8349200 B, OBJCOPY.BIN 4982672 B (flat-converted), 282 files / 176717454 B ::/TOOLS + RESDIR 295 files / 14727254 B",
+      "src_staged": "232 files / 4805464 B ::/SRC incl SELFHOST.RUN/SELFHOST.SH/Makefile.hobbyos",
+      "mode_file": "obj/arm/.mode = selfhost"
+    },
+    "stages": {
+      "S0_check": {
+        "result": "PASS",
+        "marker": "[SELFHOST] phase=s0-check-start; phase=s0-check-done rc=0"
+      },
+      "S1_user": {
+        "result": "PASS",
+        "marker": "phase=s1-user-start; phase=user-compile rc=0 (5 TUs); phase=s1-user-done rc=0",
+        "elapsed": "~61 min wall (sh.c ~60 min in-OS TCG, concurrent battery-6 VM sharing CPU; w6 measured 53 min on a quieter bus)",
+        "sh_o": "src/user/sh.c compiled in-OS by /TOOLS/CLANG.BIN with -isystem /TOOLS/RESDIR/include"
+      },
+      "T25": {
+        "result": "PASS",
+        "expect": "[HELLO] entering main / argc=1 / argv[0]=\"./HELLO.BIN\" / main returned 0; phase=t25-run-done",
+        "marker": "phase=t25-run-start; [HELLO] entering main / argc=1 / argv[0]=\"./HELLO.BIN\" / main returned 0; phase=t25-run-done rc=0",
+        "note": "the in-OS-built HELLO.BIN ran in-OS, stdout relayed to SERIAL by the MODE=selfhost driver pipe \u2014 the full program-side marker acceptance.md 8.3 wants",
+        "serial_evidence": "t43-loop.serial lines: [HELLO] entering main / argc=1 / argv[0]=\"./HELLO.BIN\" / main returned 0"
+      },
+      "S2_kernel": {
+        "result": "FAIL x2 (unfixed tip + bd58474-fixed tip, both fresh disks)",
+        "expect": "59 TU compile + lld @OBJS.RSP link + objcopy -> hobbyos.bin; phase=s2-kernel-done",
+        "detail": "56 kernel-compile rc=0 + 3 ascompile rc=0 recipe runs all rc=0, then link failed: LLD.BIN error cannot open /SRC/obj/arm/nfs_test.o and /SRC/obj/arm/cpu.o (No such file or directory). No clang error block, no OOM; 57/59 .o landed. phase=s2-kernel-fail reason=tool-rc rc=512; FAILED-AT stage=s2-kernel; System halt from CPU 1; w5 outcome=1 elapsed 8637.1s. FINAL VERDICT (see discriminator_verdict): FAT dirent/LFN write bug — the objects exist under mangled dirent names (NFS_TEST.O.T / CPU-8167.O.T), NOT a silent exec-argv drop",
+        "evidence": "t43-loop.serial (link-error block), t43-loop.state (failure markers), t43-loop.outcome",
+        "rerun_row": "S2-only on fresh+fixed: identical LLD cannot open nfs_test.o + cpu.o after 56 kernel-compile rc=0 + 3 ascompile rc=0; no clang errors, no OOM; w5 outcome=1 elapsed 5039.5s",
+        "discriminator_verdict": {
+          "fresh_disk": "make disk.img recreated (dd+mkfs+staging); /SRC/obj/arm verified EMPTY pre-boot; single 'make -f Makefile.hobbyos kernel' stage in one boot",
+          "both_kernels_fail_identically": "288995c (unfixed) and +bd58474 (argv per-page fix) both dropped exactly nfs_test.o + cpu.o",
+          "class": "FAT16 dirent/LFN WRITE bug, NOT exec-argv, NOT prior-/SRC/obj state",
+          "evidence": "::/SRC/obj/arm on the failed image: NFS_TEST.O.T (832 B, ELF, sha 47804dee...) + CPU-8167.O.T (6968 B, ELF, sha 21d8dc63...) exist under mangled 8.3 names (extension field holds 'O.T' embedded dot); every other object has a clean dirent + a byte-identical mangled twin (FAT16.O == FAT16-AB.O.T sha efde5cec, same cluster) -> writer emits duplicate dirents; for 2/59 only the mangled twin survives -> lld cannot open the clean names",
+          "determinism": "same two filenames across independent runs/kernels -> filename/content-keyed, not address-layout -> not the argv class",
+          "pulled": "evidence-w7/sB/{CPU-8167.O.T,NFS_TEST.O.T,FAT16.O,FAT16-AB.O.T}; dirent dump evidence-w7/t43-s2-fix.dirents.txt"
+        }
+      },
+      "S3_disk": {
+        "result": "NOT RUN (S2 failure aborted the loop; parent re-cuts final RC)",
+        "expect": "MKFSFAT -C /SRC/OUT.IMG 131072 + MCOPY layout; phase=s3-disk-done; ACCEPTANCE-COMPLETE"
+      }
+    },
+    "out_img_comparison": {
+      "method": "fat16img.py get disk.img OUT.IMG; compare content classes (fresh non-incremental in-OS rebuild = fresh mkfs + copy order, so raw sha differs legitimately): BPB geometry, layout, per-file sizes, HELLO.BIN/OUTPROG.BIN sha vs 61b3be6a...",
+      "w6_sha": "7e24b4ca1db8deff4dee75c3b1c71e63460f8eb90e4fa3027934b1126e20286b",
+      "w7_sha": "NOT PRODUCED (S2 failed before S3 on the unfixed tip; w6 OUT.IMG boot evidence stands for item A)"
+    },
+    "B3_boot_extracted": {
+      "result": "PENDING",
+      "cmd": "tools/w7_accept_boot.py --image <w7-loop.out.img> --launch OUTPROG.BIN"
+    },
+    "fix": {
+      "suspected_class_pre_fix": "exec argv marshal drops an argument when a short string sits near the top of a mapped region (w6 64->4096 cap bump moved the whole-cap range check past the mapped-region end)",
+      "upstream_fix": "bd58474 (w8-torture): per-page validation replaces whole-cap check in src/kernel/program_loader.c + arch/arm/trap.c + arch/x64/trap.c",
+      "applied": "cherry-picked -m 1 bd58474 -> c7c5823 on selfhost/w7-accept (288995c is an ancestor; clean apply)",
+      "rerun": "S2-only in-OS re-run on the fixed kernel (disk.img rebuilt); serial t43-s2-fix.serial",
+      "integrator_note": "final acceptance RC re-cut by parent on the merged-final tip after this report (do not burn a fresh multi-hour full loop)",
+      "effective_for_this_failure": "NO \u2014 bd58474 (argv per-page validation) does not address the dirent-writer bug; it remains a real fix for the w8-torture argv case only",
+      "next_step": "final acceptance RC re-cut by parent after a kernel-side FAT dirent-writer fix (duplicate/LFN-dirent mangling), likely a w9/w8-adjacent kernel lane"
+    }
+  },
+  "C_acceptance_md": {
+    "result": "DONE",
+    "file": "docs/selfhost/acceptance.md",
+    "changes": [
+      "S1 user timeout 900 s -> 7200 s (sh.c 53-min TCG compile is the dominant term)",
+      "S2 timeout 3600 s -> 10800 s; 71 -> 59 kernel TUs (merged tip reality)",
+      "S3 timeout 600 s -> 1800 s (measured 365 s, MKFSFAT ~284 s)",
+      "4 rewritten: measured TCG table (900-1500x; sh.c 1.38 s -> >=53 min; kernel 5.8 s -> 1.5-2 h; MKFSFAT 128 MiB ~284 s; boot 6.5-9 s) replacing the 8x placeholder (off by ~2 orders); whole-loop budget 3-4 h in one boot; hobytest guidance",
+      "retry-cost table: in-OS make is NON-incremental (pattern rules vs 8.3-UPPERCASE SFN readdir -> explicit 59-rule kernel recipe; every stage re-runs fully)",
+      "new 9 runbook: MODE=selfhost full flow (make MODE=selfhost disk.img, SELFHOST.RUN drive file, w5_flat_boot.py polling cadence, fat16img extraction, w7_accept_boot.py S4/S5)",
+      "new 10 verdict table vs l5/selfhost.md 8.3"
+    ]
+  },
+  "D_report": {
+    "json": "docs/selfhost/lanes/w7-accept-report.json (this file)",
+    "evidence_md": "docs/selfhost/lanes/w7-accept-evidence.md",
+    "evidence_dir": "docs/selfhost/lanes/evidence-w7/"
+  },
+  "untouched": [
+    "main repo /home/sarah/Documents/GitHub/HobbyOS (no pushes; local commits on selfhost/w7-accept only)",
+    "integrator's ~/hobbyos-selfhost tree + its disk.img + its qemu process (battery-6)",
+    "LLVM/libc++ sources; dist-staging toolchain"
+  ]
+}
