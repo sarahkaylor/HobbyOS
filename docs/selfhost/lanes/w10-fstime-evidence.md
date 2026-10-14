@@ -85,9 +85,13 @@ Probe sources (reproducible): `W10PRE.SH`, `PRERUN.txt`, `STATP.C`,
 
 | gate | result |
 |---|---|
-| `./run_unit_tests.sh` (ARM, MODE=unit_tests) | see `w10-fstime-report.json` |
-| `EXTRA_QEMU_ARGS='-enable-kvm' ./run_unit_tests_intel.sh` (x64) | see report |
-| `make test` wave (ARM integration) | see report |
+| `./run_unit_tests.sh` (ARM, MODE=unit_tests) | **PASS — Tests run: 322 / failed: 0 / UNIT TESTS PASSED** (`evidence-w10/arm-unit-tier.txt`) |
+| `EXTRA_QEMU_ARGS='-enable-kvm' ./run_unit_tests_intel.sh` (x64) | **PASS — Tests run: 326 / failed: 0 / UNIT TESTS PASSED** (`evidence-w10/intel-unit-tier.txt`) |
+| `make test` (ARM integration wave) | **GREEN — ALL TESTS PASSED SUCCESSFULLY! + self-terminating `System halt` in runs 2 and 4 (TORTURE threads-churn-64: PASS both); exit 0. Run 1 hit the known-load TORTURE create-budget flake; run 3 was externally interrupted (SIGTERM to qemu, 0 failures before it). The only recurring token is the pre-existing ambient SHELLTEST WATCHDOG (w8 report: 'do not chase').** (`evidence-w10/make-test-wave.txt`, `evidence-w10/make-test-wave4.txt`) |
+
+The wave flake class is unrelated to FAT timestamps (process-slot / pacing
+contention under a host running three lane VMs + integrator batteries; w8's
+report documents the same token on pre-fix waves).
 
 ## 6. Two-second-resolution caveat (documented contract)
 
