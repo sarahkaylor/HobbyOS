@@ -1,0 +1,12 @@
+{
+ "outcome": 2,
+ "wall_s": 306.5833524610498,
+ "phases": {
+  "probe": {
+   "start_s": 6.504343984008301,
+   "done_s": null,
+   "elapsed_s": null,
+   "done": false
+  }
+ }
+}

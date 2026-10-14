@@ -1,0 +1,930 @@
+UEFI firmware (version 2025.11-3ubuntu7 built at 11:11:58 on Mar 31 2026)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+BdsDxe: starting Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+[001;001H[001;001H[001;001Hl[001;002Hi[001;003Hn[001;004Hu[001;005Hx[001;006H:[001;007H [001;008HL[001;009Ho[001;010Ha[001;011Hd[001;012Hi[001;013Hn[001;014Hg[001;015H [001;016Hk[001;017He[001;018Hr[001;019Hn[001;020He[001;021Hl[001;022H [001;023H`[001;024Hb[001;025Ho[001;026Ho[001;027Ht[001;028H([001;029H)[001;030H:[001;031H/[001;032Hb[001;033Ho[001;034Ho[001;035Ht[001;036H/[001;037Hh[001;038Ho[001;039Hb[001;040Hb[001;041Hy[001;042Ho[001;043Hs[001;044H.[001;045Hb[001;046Hi[001;047Hn[001;048H`[001;049H.[001;050H.[001;051H.[001;052H[001;001H[002;001HBooting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+[GPUDIAG] gpu wait > 7 ms: ack=3 used=4 (park off)
+[GPU] virtio-gpu mmio irq=78
+VirtIO GPU successfully initialized.
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1900544 total_mib=7424 reserved=0
+[KERNEL] Activating secondary cores via PSCI...
+[KERNEL] Core 1 power-on requested.
+[KERNEL] Core 2 power-on requested.
+[KERNEL] Core 3start_scheduler called on CPU  power-on requested.
+start_scheduler called on CPU 1[KERNEL] Core 34
+ power-on requested.
+start_scheduler called on CPU 
+[KERNEL] Core 25
+ power-on requested.
+start_scheduler called on CPU [KERNEL] Core 6start_scheduler called on CPU  power-on requested.
+46[KERNEL] Core 7
+ power-on requested.
+
+start_scheduler called on CPU start_scheduler called on CPU 57
+
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+virtio-net MAC: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP Discover sent
+DHCP initialization complete.
+
+--- Parallel Program Loading ---
+Mode: SELFHOST - Running in-OS acceptance build driver...
+Loading program for scheduler (v2 AS): SELFHOST.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=-1
+v2 loader: image mapped (lazy), bytes=52656 pages=13 first=in elap=1ms
+v2 loader: PID=1 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+start_scheduler called on CPU 0
+[SELFHOST] DRIVER-UP script=/SRC/SELFHOST.RUN
+[SELFHOST] phase=probe2-start
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=1
+Inside process_create: clearing memory at 0x0000000072000000
+Inside process_create: kmemset done.
+Loading program for scheduler (v2 AS): /TOOLS/SH.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=-1
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+v2 loader: PID=3 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+Q1 START
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=-1
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=314680 pages=77 first=in elap=1ms
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/SRC/BM/BURN.BIN 700
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=0ms
+[KERNEL] Process 5: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/TOOLS/CP.BIN /SRC/BM/SRC/TU01.C /SRC/BM/O1/TU01.O
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=1ms
+[KERNEL] Process 5: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4/SR ELR = C0x00000010000260F8/
+BM/BURN.BIN 700
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=0ms
+[KERNEL] Process 5: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4/ ELR = T0x00000010000260F8O
+OLS/CP.BIN /SRC/BM/SRC/TU02.C /SRC/BM/O1/TU02.O
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=0ms
+[KERNEL] Process 5: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/SRC/BM/BURN.BIN 700
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=1ms
+[KERNEL] Process 5: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4/ ELR = T0x00000010000260F8O
+OLS/CP.BIN /SRC/BM/SRC/TU03.C /SRC/BM/O1/TU03.O
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=1ms
+[KERNEL] Process 5: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/SRC/BM/BURN.BIN 700
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=0ms
+[KERNEL] Process 5: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+/TOOLS/CP.BIN /SRC/BM/SRC/TU04.C /SRC/BM/O1/TU04.O
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=0ms
+[KERNEL] Process 5: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = /0x00000010000260F8S
+RC/BM/BURN.BIN 700
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=0ms
+[KERNEL] Process 5: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/TOOLS/CP.BIN /SRC/BM/SRC/TU05.C /SRC/BM/O1/TU05.O
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=1ms
+[KERNEL] Process 5: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/SRC/BM/BURN.BIN 700
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=1ms
+[KERNEL] Process 5: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/TOOLS/CP.BIN /SRC/BM/SRC/TU06.C /SRC/BM/O1/TU06.O
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720v2 loader: image mapped (lazy), bytes=
+44832 pages=11 first=in elap=1ms
+[KERNEL] Process 5: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/SRC/BM/BURN.BIN 700
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=0ms
+[KERNEL] Process 5: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/TOOLS/CP.BIN /SRC/BM/SRC/TU07.C /SRC/BM/O1/TU07.O
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=0ms
+[KERNEL] Process 5: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+/SRC/BM/BURN.BIN 700
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=1ms
+[KERNEL] Process 5: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/TOOLS/CP.BIN /SRC/BM/SRC/TU08.C /SRC/BM/O1/TU08.O
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=1ms
+[KERNEL] Process 5: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4/SRC/BM/B ELR = U0x00000010000260F8R
+N.BIN 700
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=1ms
+[KERNEL] Process 5: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4/ ELR = T0x00000010000260F8O
+OLS/CP.BIN /SRC/BM/SRC/TU09.C /SRC/BM/O1/TU09.O
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=0ms
+[KERNEL] Process 5: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/SRC/BM/BURN.BIN 700
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=1ms
+[KERNEL] Process 5: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4/ ELR = T0x00000010000260F8O
+OLS/CP.BIN /SRC/BM/SRC/TU10.C /SRC/BM/O1/TU10.O
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+[KERNEL] Process 5: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4/ ELR = S0x00000010000260F8R
+C/BM/BURN.BIN 700
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=1ms
+[KERNEL] Process 5: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/TOOLS/CP.BIN /SRC/BM/SRC/TU11.C /SRC/BM/O1/TU11.O
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=0ms
+[KERNEL] Process 5: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /SRC4/ ELR = B0x00000010000260F8M
+/BURN.BIN 700
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=1ms
+[KERNEL] Process 5: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4/ ELR = T0x00000010000260F8O
+OLS/CP.BIN /SRC/BM/SRC/TU12.C /SRC/BM/O1/TU12.O
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=1ms
+[KERNEL] Process 5: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4/ ELR = S0x00000010000260F8R
+C/BM/BURN.BIN 700
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=0ms
+[KERNEL] Process 5: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+/TOOLS/CP.BIN /SRC/BM/SRC/TU13.C /SRC/BM/O1/TU13.O
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=1ms
+[KERNEL] Process 5: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/SRC/BM/BURN.BIN 700
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=0ms
+[KERNEL] Process 5: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/TOOLS/CP.BIN /SRC/BM/SRC/TU14.C /SRC/BM/O1/TU14.O
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=0ms
+[KERNEL] Process 5: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/SRC/BM/BURN.BIN 700
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=1ms
+[KERNEL] Process 5: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4/ ELR = T0x00000010000260F8O
+OLS/CP.BIN /SRC/BM/SRC/TU15.C /SRC/BM/O1/TU15.O
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=1ms
+[KERNEL] Process 5: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/SRC/BM/BURN.BIN 700
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=0ms
+[KERNEL] Process 5: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4/ ELR = T0x00000010000260F8O
+OLS/CP.BIN /SRC/BM/SRC/TU16.C /SRC/BM/O1/TU16.O
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=1ms
+[KERNEL] Process 5: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 2: /TOOLS/MAKE.BIN exited unexpectedly or gracefully.
+Q2 serial rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x000000100000DDF8
+v2 loader: image mapped (lazy), bytes=95536 pages=24 first=in elap=1ms
+[KERNEL] Process 2: /TOOLS/CMP.BIN exited unexpectedly or gracefully.
+Q3 cmp01 rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x000000100000DDF8
+v2 loader: image mapped (lazy), bytes=314680 pages=77 first=in elap=1ms
+/SRC/BM/BURN.BIN 700
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = /5S ELR = RC0x00000010000260F8/
+BM/BURN.BIN 700
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[KERNEL] sys_fork: tf->regs[0] is now 6
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = 0x000000100000DDF8
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=1ms
+[KERNEL] sys_fork: tf->regs[0] is now [DEBUG] Before eret, tf->regs[0] = 76
+ ELR = [DEBUG] Before eret, tf->regs[0] = 0x00000010000127207
+ ELR = 0x00000010000260F8/
+SRC/BM/BURN.BIN 700
+[KERNEL] sys_fork: tf->regs[0] is now 8
+[DEBUG] Before eret, tf->regs[0] = 8 ELR = 0x00000010000260F8
+/SRC/BM/BURN.BIN 700
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 9
+[DEBUG] Before eret, tf->regs[0] = 9 ELR = 0x00000010000260F8
+v2 loader: image mapped (lazy), bytes=/195136S pages=R48C first=/BM/inB elap=URN.80Bms
+IN 700
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[KERNEL] sys_fork: tf->regs[0] is now 10
+[DEBUG] Before eret, tf->regs[0] = [DEBUG] Before eret, tf->regs[0] = 1092187 ELR = [DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+ ELR = 0x000000100000DDF80x0000001000000AB0
+
+[KERNEL] sys_fork: tf->regs[0] is now 11
+[DEBUG] Before eret, tf->regs[0] = 11[DEBUG] Before eret, tf->regs[0] = [DEBUG] Before eret, tf->regs[0] = /92187 ELR = S0x00000010000260F8R
+C/BM/BURN ELR = .BIN 700
+0x0000001000000AC8
+10 ELR = 0x0000001000012720
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now v2 loader: image mapped (lazy), bytes=1258224
+ pages=[DEBUG] Before eret, tf->regs[0] = 1512 first= ELR = in0x000000100000DDF8 elap=
+80ms
+[KERNEL] sys_fork: tf->regs[0] is now [DEBUG] Before eret, tf->regs[0] = 13
+12[DEBUG] Before eret, tf->regs[0] =  ELR = 130x0000001000012720 ELR = 
+0x000000100000DDF8
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=76ms
+[DEBUG] Before eret, tf->regs[0] = 13 ELR = 0x0000001000012720
+/SRC/BM/BURN.BIN 700
+[KERNEL] sys_fork: tf->regs[0] is now 14
+[DEBUG] Before eret, tf->regs[0] = 14 ELR = 0x00000010000260F8
+[KERNEL] sys_fork: tf->regs[0] is now 15
+[DEBUG] Before eret, tf->regs[0] = 15v2 loader: image mapped (lazy), bytes= ELR = 582240x00000010000260F8 pages=/15S first=R
+Cin/BM elap=/v2 loader: image mapped (lazy), bytes=B87Ums
+RN.BIN 700
+[KERNEL] Process 6: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+58224 pages=15v2 loader: image mapped (lazy), bytes= first=195136in pages= elap=4889 first=ms
+in elap=3ms
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4/ ELR = T0x00000010000260F8O
+OLS/CP.BIN /SRC/BM/SRC/TU01.C /SRC/BM/O8/TU01.O
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=114ms
+[KERNEL] sys_fork: tf->regs[0] is now 6
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = 0x000000100000DDF8
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=3ms
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = 0x0000001000012720
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 16
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 16 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0[DEBUG] Before eret, tf->regs[0] = 16 ELR = 
+0x0000001000012720
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=11ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 17
+[DEBUG] Before eret, tf->regs[0] = 17 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = v2 loader: image mapped (lazy), bytes=17[KERNEL] Process 10: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+ ELR = 582240x0000001000012720 pages=
+15 first=in elap=44ms
+[KERNEL] Process 8: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=15ms
+[KERNEL] sys_fork: tf->regs[0] is now 8
+[DEBUG] Before eret, tf->regs[0] = 8 ELR = 0x00000010000260F8
+/TOOLS/CP.BIN /SRC/BM/SRC/TU04.C /SRC/BM/O8/TU04.O
+[KERNEL] sys_fork: tf->regs[0] is now 10
+[DEBUG] Before eret, tf->regs[0] = 10 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = v2 loader: image mapped (lazy), bytes=58224 pages=1510 first= ELR = in0x0000001000012720 elap=
+2ms
+[KERNEL] sys_fork: tf->regs[0] is now 18
+[DEBUG] Before eret, tf->regs[0] = 18 ELR = 0x000000100000DDF8
+v2 loader: image mapped (lazy), bytes=195136 pages=[KERNEL] Process 12: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+48 first=in elap=105ms
+[KERNEL] Process 7: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[DEBUG] Before eret, tf->regs[0] = 18 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=3ms
+[KERNEL] sys_fork: tf->regs[0] is now 7
+[DEBUG] Before eret, tf->regs[0] = 7 ELR = 0x00000010000260F8
+/TOOLS/CP.BIN /SRC/BM/SRC/TU03.C /SRC/BM/O8/TU03.O
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=2ms
+[KERNEL] Process 13: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 9: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 17: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/TOOLS/CP.BIN /SRC/BM/SRC/TU05.C /SRC/BM/O8/TU05.O
+/SRC/BM/BURN.BIN 700
+[KERNEL] sys_fork: tf->regs[0] is now 9
+[DEBUG] Before eret, tf->regs[0] = 9 ELR = 0x00000010000260F8
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=[DEBUG] Before eret, tf->regs[0] = in1073742496 elap= ELR = 0x00000010000040002
+ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = [DEBUG] Before eret, tf->regs[0] = 0x000000100000400092187
+ ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187[DEBUG] Before eret, tf->regs[0] =  ELR = 10737424960x0000001000000AC8 ELR = 
+0x0000001000005BC0
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 12
+[DEBUG] Before eret, tf->regs[0] = v2 loader: image mapped (lazy), bytes=12[DEBUG] Before eret, tf->regs[0] =  ELR = 10737424960x000000100000DDF8195136
+ ELR =  pages=0x0000001000005BC048
+ first=in elap=70ms
+[DEBUG] Before eret, tf->regs[0] = [KERNEL] Process 6: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+12 ELR = 0x0000001000012720
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 5: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x00000010000260F8
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=85ms
+/TOOLS/CP.BIN /SRC/BM/SRC/TU02.C /SRC/BM/O8/TU02.O
+[KERNEL] sys_fork: tf->regs[0] is now 6
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=2ms
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=3ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 13
+[DEBUG] Before eret, tf->regs[0] = 13 ELR = 0x000000100000DDF8
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=0ms
+[KERNEL] sys_fork: tf->regs[0] is now 17
+[DEBUG] Before eret, tf->regs[0] = 17 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 13 ELR = 0x0000001000012720
+[KERNEL] Process 16: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 11: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 11
+[DEBUG] Before eret, tf->regs[0] = [DEBUG] Before eret, tf->regs[0] = 1117 ELR =  ELR = 0x00000010000260F80x0000001000012720
+
+[KERNEL] sys_fork: tf->regs[0] is now 16
+[DEBUG] Before eret, tf->regs[0] = 16 ELR = 0x000000100000DDF8
+[KERNEL] Process 10: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+/TOOLS/CP.BIN /SRC/BM/SRC/TU06.C /SRC/BM/O8/TU06.O
+[KERNEL] Process 14: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 18: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[DEBUG] Before eret, tf->regs[0] = 11 ELR = 0x00000010000260F8
+[KERNEL] sys_fork: tf->regs[0] is now 10
+[DEBUG] Before eret, tf->regs[0] = 10 ELR = 0x00000010000260F8
+[KERNEL] Process 15: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[DEBUG] Before eret, tf->regs[0] = 16 ELR = 0x0000001000012720
+[KERNEL] Process 13: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 5: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+/TOOLS/CP.BIN /SRC/BM/SRC/TU07.C /SRC/BM/O8/TU07.O
+[KERNEL] sys_fork: tf->regs[0] is now 5v2 loader: image mapped (lazy), bytes=
+44832[DEBUG] Before eret, tf->regs[0] =  pages=511 ELR =  first=0x00000010000260F8in
+ elap=112ms
+[KERNEL] sys_fork: tf->regs[0] is now 13
+[DEBUG] Before eret, tf->regs[0] = 13 ELR = 0x00000010000260F8
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=74ms
+/TOOLS/CP.BIN /SRC/BM/SRC/TU08.C /SRC/BM/O8/TU08.O
+/SRC/BM/BURN.BIN 700
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=85ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+v2 loader: image mapped (lazy), bytes=195136 pages=48v2 loader: image mapped (lazy), bytes=195136 first= pages=in48 elap= first=12inms
+ elap=12ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=51ms
+[KERNEL] sys_fork: tf->regs[0] is now 14
+[DEBUG] Before eret, tf->regs[0] = 14 ELR = 0x000000100000DDF8
+[KERNEL] Process 12: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=[KERNEL] Process 7: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+2ms
+[DEBUG] Before eret, tf->regs[0] = 14 ELR = 0x0000001000012720
+[KERNEL] sys_fork: tf->regs[0] is now 7
+[DEBUG] Before eret, tf->regs[0] = 7 ELR = 0x00000010000260F8
+/SRC/BM/BURN.BIN 700
+[KERNEL] Process 6: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 14: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 11: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 17: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+v2 loader: image mapped (lazy), bytes=[KERNEL] Process 8: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+195136[DEBUG] Before eret, tf->regs[0] =  pages=107374249648 ELR =  first=0x0000001000004000in
+ elap=2ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 6
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = 0x000000100000DDF8
+[KERNEL] sys_fork: tf->regs[0] is now [DEBUG] Before eret, tf->regs[0] = 46
+ ELR = [DEBUG] Before eret, tf->regs[0] = 0x00000010000127204
+ ELR = v2 loader: image mapped (lazy), bytes=0x00000010000260F8/
+S44832RC/BM/ pages=B11U first=RinN. elap=BIN 700
+3ms
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 8
+[DEBUG] Before eret, tf->regs[0] = 8 ELR = 0x000000100000DDF8
+[KERNEL] sys_fork: tf->regs[0] is now 11
+[DEBUG] Before eret, tf->regs[0] = [DEBUG] Before eret, tf->regs[0] = 811 ELR =  ELR = 0x000000100000DDF80x0000001000012720
+
+[KERNEL] sys_fork: tf->regs[0] is now 12
+[DEBUG] Before eret, tf->regs[0] = 12 ELR = 0x00000010000260F8/
+SRC/BM/BURN.BIN 700
+[DEBUG] Before eret, tf->regs[0] = 11 ELR = 0x0000001000012720
+[KERNEL] Process 16: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 14
+[DEBUG] Before eret, tf->regs[0] = 14 ELR = 0x000000100000DDF8
+[KERNEL] Process 9: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[DEBUG] Before eret, tf->regs[0] = v2 loader: image mapped (lazy), bytes=1458224 ELR =  pages=0x000000100001272015
+ first=in elap=14ms
+[KERNEL] sys_fork: tf->regs[0] is now 15
+[DEBUG] Before eret, tf->regs[0] = 15 ELR = 0x000000100000DDF8
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=2ms
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=0ms
+[KERNEL] sys_fork: tf->regs[0] is now v2 loader: image mapped (lazy), bytes=9195136
+ pages=[DEBUG] Before eret, tf->regs[0] = 9 ELR = 480x00000010000260F8[DEBUG] Before eret, tf->regs[0] = v2 loader: image mapped (lazy), bytes= first=
+in15 ELR =  elap=582240x000000100001272089ms
+
+ pages=15 first=in elap=/v2 loader: image mapped (lazy), bytes=T195136O pages=O48L first=Sin/ elap=C1Pms
+.89Bms
+IN /SRC/BM/SRC/TU09.C /SRC/BM/O8/TU09.O
+[KERNEL] sys_fork: tf->regs[0] is now 16
+[DEBUG] Before eret, tf->regs[0] = 16 ELR = 0x00000010000260F8
+/SRC/BM/BURN.BIN 700
+v2 loader: image mapped (lazy), bytes=[KERNEL] Process 6: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+195136 pages=48 first=in elap=10ms
+[KERNEL] Process 5: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x00000010000260F8
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/SRC/BM/BURN.BIN 700
+[KERNEL] sys_fork: tf->regs[0] is now 6
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = 0x000000100000DDF8
+[KERNEL] Process 14: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[DEBUG] Before eret, tf->regs[0] = v2 loader: image mapped (lazy), bytes=658224 ELR =  pages=0x000000100001272015
+ first=in elap=2ms
+[KERNEL] Process 10: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+/SRC/BM/BURN.BIN 700
+[KERNEL] sys_fork: tf->regs[0] is now 10
+[DEBUG] Before eret, tf->regs[0] = 10 ELR = 0x00000010000260F8
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = v2 loader: image mapped (lazy), bytes=92187195136 ELR =  pages=0x0000001000000AC848
+ first=in elap=64ms
+[KERNEL] Process 15: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 7: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[KERNEL] sys_fork: tf->regs[0] is now 7
+[DEBUG] Before eret, tf->regs[0] = /TO7OLS/C ELR = P0x00000010000260F8.BIN
+ /SRC/BM/SRC/TU11.C /SRC/BM/O8/TU11.O
+[KERNEL] sys_fork: tf->regs[0] is now 14
+[DEBUG] Before eret, tf->regs[0] = 14 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 14 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[KERNEL] sys_fork: tf->regs[0] is now 15
+[DEBUG] Before eret, tf->regs[0] = 15 ELR = [KERNEL] Process 8: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 11: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+0x000000100000DDF8
+[KERNEL] Process 13: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 8/
+T[DEBUG] Before eret, tf->regs[0] = O[DEBUG] Before eret, tf->regs[0] = v2 loader: image mapped (lazy), bytes=92187O8 ELR = L0x0000001000000AB0Sv2 loader: image mapped (lazy), bytes=/58224C pages=P
+44832[DEBUG] Before eret, tf->regs[0] = 15. ELR = B pages=I0x00000010000260F8N11 15v2 loader: image mapped (lazy), bytes=/195136 first= pages=
+S48in first= elap=in first=RinC elap=/ elap=31ms
+ms
+B86Mms
+/ ELR = S0x0000001000012720R
+C/TU10.C /SRC/BM/O8/TU10.O
+[KERNEL] sys_fork: tf->regs[0] is now [DEBUG] Before eret, tf->regs[0] = 492187
+ ELR = [DEBUG] Before eret, tf->regs[0] = 0x0000001000000AB04
+ ELR = 0x00000010000260F8
+[DEBUG] Before eret, tf->regs[0] = [DEBUG] Before eret, tf->regs[0] = 92187/92187 ELR = T ELR = 0x0000001000000AB0O0x0000001000000AC8O
+L
+S[DEBUG] Before eret, tf->regs[0] = /92187C ELR = P0x0000001000000AC8.
+BIN /SRC/BM/SRC/TU12.C /SRC/BM/O8/TU12.O
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=2ms
+[KERNEL] sys_fork: tf->regs[0] is now 11
+[DEBUG] Before eret, tf->regs[0] = 11 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now [DEBUG] Before eret, tf->regs[0] = v2 loader: image mapped (lazy), bytes=58224 pages=111513 first= ELR = 
+[DEBUG] Before eret, tf->regs[0] = in0x000000100001272013 elap=
+ ELR = 780x000000100000DDF8
+ms
+[DEBUG] Before eret, tf->regs[0] = 13 ELR = 0x0000001000012720
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=1ms
+[KERNEL] Process 6: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 17
+[DEBUG] Before eret, tf->regs[0] = 17 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 17 ELR = 0x0000001000012720
+[KERNEL] Process 16: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 6
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = 0x000000100000DDF8
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=2ms
+v2 loader: image mapped (lazy), bytes=44832 pages=11[DEBUG] Before eret, tf->regs[0] =  first=6in ELR =  elap=0x0000001000012720
+2ms
+[KERNEL] sys_fork: tf->regs[0] is now 16
+[DEBUG] Before eret, tf->regs[0] = 16 ELR = 0x00000010000260F8
+/TOOLS/CP.BIN /SRC/BM/SRC/TU14.C /SRC/BM/O8/TU14.O
+[KERNEL] Process 6: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x000000100000DDF8
+v2 loader: image mapped (lazy), bytes=[DEBUG] Before eret, tf->regs[0] = 1951364 pages= ELR = 480x0000001000012720 first=
+in elap=70ms
+[KERNEL] Process 14: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 9: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 17: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 8: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 13: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 7: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 15: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 12: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 6
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = 0x00000010000260F8
+/TOOLS/CP.BIN /SRC/BM/SRC/TU13.C /SRC/BM/O8/TU13.O
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[KERNEL] Process 11: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 5: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x00000010000260F8/
+TOOLS/CP.BIN /SRC/BM/SRC/TU15.C /SRC/BM/O8/TU15.O
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+v2 loader: image mapped (lazy), bytes=58224 pages=15 first=in elap=22ms
+[KERNEL] sys_fork: tf->regs[0] is now 7
+v2 loader: image mapped (lazy), bytes=[DEBUG] Before eret, tf->regs[0] = 1951367 pages= ELR = 480x000000100000DDF8
+ first=in elap=97ms
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 7 ELR = 0x0000001000012720
+[KERNEL] Process 7: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[KERNEL] Process 5: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = [DEBUG] Before eret, tf->regs[0] = 0x0000001000000AC85
+ ELR = 0x0000001000012720
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 7
+[DEBUG] Before eret, tf->regs[0] = 7 ELR = 0x000000100000DDF8
+[KERNEL] Process 5: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 16: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+v2 loader: image mapped (lazy), bytes=44832 pages=[DEBUG] Before eret, tf->regs[0] = 117 first= ELR = in0x0000001000012720 elap=
+2ms
+[KERNEL] Process 7: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 6: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /SRC/BM/BURN.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 10: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/TOOLS/CP.BIN /SRC/BM/SRC/TU16.C /SRC/BM/O8/TU16.O
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000004000
+[DEBUG] Before eret, tf->regs[0] = 1073742496 ELR = 0x0000001000005BC0
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=44832 pages=11 first=in elap=1ms
+[KERNEL] Process 5: /TOOLS/CP.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 2: /TOOLS/MAKE.BIN exited unexpectedly or gracefully.
+Q4 j8 rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x000000100000DDF8
+v2 loader: image mapped (lazy), bytes=95536 pages=24 first=in elap=0ms
+[KERNEL] Process 2: /TOOLS/CMP.BIN exited unexpectedly or gracefully.
+Q5 cmp01j8 rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x000000100000DDF8
+v2 loader: image mapped (lazy), bytes=44944 pages=11 first=in elap=1ms
+  PID  PPID  STATE  NAME
+[KERNEL] Process 2: /TOOLS/PS.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 3: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+   1     -1      BLOCKED      SELFHOST.BIN
+   2     3      RUNNING      /TOOLS/PS.BIN
+   3     1      OTHER      /TOOLS/SH.BIN
+Q6 DONE
+[SELFHOST] phase=probe2-done rc=0
+[SELFHOST] ACCEPTANCE-COMPLETE stages=1
+[KERNEL] Process 1: SELFHOST.BIN exited unexpectedly or gracefully.
+System halt.

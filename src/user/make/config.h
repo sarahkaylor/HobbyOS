@@ -118,8 +118,13 @@
 /* #undef HAVE_GETRLIMIT */
 /* #undef HAVE_SETRLIMIT */
 /* #undef HAVE_SYS_RESOURCE_H */  /* no stack re-sizing (SET_STACK_SIZE) */
-/* #undef HAVE_PSELECT */
-/* #undef HAVE_SYS_SELECT_H */    /* -j work later; audit S3.3           */
+/* w11-makej: the -jN jobserver uses make's pselect() token-acquisition
+ * path, which this OS supports through the libc select() syscall (the
+ * HobbyOS pselect() stub in hb_stubs.c polls with a bounded interval —
+ * this kernel never returns EINTR from a syscall, so make's classic
+ * blocking-read jobserver would deadlock; see hb_stubs.c). */
+#define HAVE_PSELECT 1
+#define HAVE_SYS_SELECT_H 1
 /* #undef HAVE_TTYNAME */         /* makeint.h TTYNAME = "true"          */
 /* #undef HAVE_GETPWNAM_R */
 /* #undef HAVE_GETLOGIN_R */      /* glob.c uses the non-_r variants     */
@@ -129,9 +134,22 @@
                                 of 1 hides makeint.h's own decl and
                                 signame.c's fallback definition, so MAKE.BIN
                                 links against the real one. */
-/* #undef MAKE_JOBSERVER */   /* -j1 v1 (audit S3.3): an UNDEF compiles
-                                 the jobserver section OUT of posixos.c/
-                                 os.h (a value of 0 would keep it active) */
+/* w11-makej: parallel builds.  The audit's S3.3 \"-j1 v1\" pin is lifted:
+ * MAKE_JOBSERVER is now defined so the jobserver section of posixos.c/os.h
+ * compiles in.  -jN uses the pipe jobserver with make's pselect() token
+ * acquisition (HAVE_PSELECT above) — the classic blocking-read jobserver
+ * cannot work here because the kernel never interrupts a pipe read with a
+ * pending signal (a jobserver token is only written back by reap_children,
+ * which needs jobserver_acquire() to return first).  See hb_stubs.c for
+ * the pselect() stub and the bounded-poll rationale.
+ *
+ * JOBSERVER_USE_FIFO is pinned to 0 (value-guarded #if in posixos.c): the
+ * default-style fifo jobserver would first attempt mkfifo() in /tmp, which
+ * the sysroot lacks (the attempt would perror and fall back to a pipe, but
+ * noisily and only by luck of the fallback order).  A plain pipe is the
+ * audited -j mechanism and needs no /tmp. */
+#define MAKE_JOBSERVER 1
+#define JOBSERVER_USE_FIFO 0
 
 /* Make feature switches. */
 #define ENABLE_NLS 0

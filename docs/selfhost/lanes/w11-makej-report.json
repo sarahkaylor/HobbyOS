@@ -1,0 +1,67 @@
+{
+  "lane": "w11-makej",
+  "status": "complete",
+  "model": "GNU make 4.4.1 (HobbyOS port, src/user/make) parallel-build (-jN) viability in-OS",
+  "commits": [
+    "1c2481f selfhost w11-makej: parallel in-OS builds (make -jN) — enable, verify, measure"
+  ],
+  "branch": "selfhost/w11-makej",
+  "assessment": {
+    "enabled": {
+      "config.h": [
+        "#define MAKE_JOBSERVER 1 (was #undef, audit S3.3 '-j1 v1' pin lifted)",
+        "#define HAVE_PSELECT 1",
+        "#define HAVE_SYS_SELECT_H 1",
+        "#define JOBSERVER_USE_FIFO 0 (pure pipe jobserver; no mkfifo on this OS)"
+      ],
+      "hb_stubs.c": "new pselect() stub: bounded-poll (25 ms) wrapper over the device select() syscall; ignores sigmask",
+      "sysroot": "new src/libc/include/sys/select.h (fd_set FD_* pselect prototype)"
+    },
+    "root_cause_why_stub": {
+      "kernel": "src/kernel/process.c D8.4: signal delivery for a process parked in a pipe read defers until the syscall completes; the kernel never returns EINTR",
+      "mechanism": "make's classic jobserver blocks in read() on the token pipe expecting SIGCHLD->EINTR to wake it, but the token is written back by reap_children() which only runs after that read returns -> deadlock",
+      "fix": "pselect()-based token acquisition over select() with a bounded interval: returns 0 periodically so make reaps children, recovers tokens, starts next job. 25 ms only bounds detection latency; token-ready waits are immediate (select returns when fd ready)"
+    },
+    "serial_unchanged": true,
+    "untouched": ["kernel", "libc implementation", "upstream make sources (config.h + hb_stubs only, byte-identical upstream preserved)"]
+  },
+  "verification": {
+    "platform": "QEMU aarch64 TCG, 8 vCPUs, MODE=selfhost disk, in-OS MAKE.BIN",
+    "boots": 6,
+    "serial_evidence": ["docs/selfhost/lanes/evidence-w11/run2.serial.txt", "docs/selfhost/lanes/evidence-w11/run3.serial.txt", "docs/selfhost/lanes/evidence-w11/run4.serial.txt", "docs/selfhost/lanes/evidence-w11/run5.serial.txt", "docs/selfhost/lanes/evidence-w11/probe1.serial.txt", "docs/selfhost/lanes/evidence-w11/probe2.serial.txt"],
+    "correctness": {
+      "serial_rc": "0/0 (2 in-OS serial runs per boot, 8 total)",
+      "j4_rc": "0/0 (7 runs)",
+      "j8_rc": "0/0 (8 runs)",
+      "cmp_in_os": "16/16 per success-mode run, 0 mismatches",
+      "byte_identity_host": "all 16 O1(serial)/O8(-j8) outputs byte-identical (md5, pulled from disk.img)",
+      "fail_serial": "TU13 'exit 9' -> 'MAKE.BIN: *** Error 9', make rc=2, exit status propagated",
+      "fail_j8": "Error 9 + '*** Waiting for unfinished jobs....', make rc=2, no hang, all in-flight children reaped",
+      "failed_output_absent": "OF2/TU13.O not created; other 15 outputs present and byte-identical",
+      "zombies": "ps after -j8: only SELFHOST.BIN + stage SH.BIN (+ transient PS.BIN); every child shown as '[KERNEL] Process N: ... exited'",
+      "interleaving": "expected under -j; noted"
+    },
+    "timing_table": {
+      "project": "16 TUs, explicit rules, 0.7 s BURN per TU + CP copy, -B forced",
+      "serial_s": {"n": 8, "avg": 19.67, "min": 19.42, "max": 20.02, "spread_pct": 3.1},
+      "j4_s": {"n": 7, "avg": 10.01, "min": 9.21, "max": 10.61, "speedup": 1.96},
+      "j8_s": {"n": 8, "avg": 9.29, "min": 9.01, "max": 9.61, "speedup": 2.12},
+      "failser_s": {"n": 4, "avg": 15.77},
+      "failj8_s": {"n": 4, "avg": 9.16},
+      "interpretation": "plateau above -j4 is TCG fork/exec + scheduler overhead (0.5 s per TU vs 0.7 s burn); on real ~90 s/TU builds the fixed overhead vanishes, speedup approaches min(cores, slots)"
+    },
+    "slot_pressure": {
+      "observed_peak_procs": "16+ distinct child PIDs in a -j8 stage (make + 8 sh + 8 BURN + 8 CP waves); ~17-25 live",
+      "table": "63 PCB slots; -j8 leaves >2x headroom",
+      "no_free_slot": "no such event observed"
+    }
+  },
+  "optional_real_target": {
+    "attempted": false,
+    "reason": "Makefile.hobbyos user target is ~1 h serial (sh.c -O2 ~53 min in-OS); out of scope for a bounded lane; post-merge acceptance owns it"
+  },
+  "runbook_note": "docs/selfhost/acceptance.md 9.6 (use -j8, explicit rules, -B for rebuilds, expected interleaving, -Oline bonus untested)",
+  "evidence_doc": "docs/selfhost/lanes/evidence-w11/w11-makej-evidence.md",
+  "tools": "tools/w11_bench_boot.py (per-phase timing runner)",
+  "hard_rules": ["no pushes", "main repo untouched", "one QEMU per tree", "no make clean", "no broad pkill (learned: self-matching pgrep/pkill footgun)"]
+}

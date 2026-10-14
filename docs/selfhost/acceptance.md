@@ -582,6 +582,44 @@ loader lines on serial; the program's own `[HELLO]` marker needs the
 MODE=selfhost serial-console fd — see §8.3 — so S5's program-side serial
 evidence is the loader lines + host file hashes.)
 
+### 9.6 Parallel in-OS builds (`make -jN`) — w11-makej
+
+`MAKE.BIN` now supports `-jN` (GNU make 4.4.1 pipe jobserver, enabled in
+`src/user/make/config.h` — `MAKE_JOBSERVER` + `HAVE_PSELECT`, with a
+bounded-poll `pselect()` stub in `hb_stubs.c`).  Verified in-OS on the
+synthetic 16-TU project; see
+`docs/selfhost/lanes/evidence-w11/w11-makej-evidence.md` for the full
+table + correctness checks.
+
+What works:
+
+```text
+make -j4 -f <mk> <target>    # and -j8; serial -j1 (and bare) unchanged
+```
+
+- Cup the job count at `-j8` on the 8-core box: each running job occupies
+  PCB slots (parent + per-recipe `sh -c` + the recipe tool <= ~25 procs at
+  `-j8`; the table has 63 slots).
+- `-jN` needs the jobserver pipe; output interleaving under `-j` is
+  expected (use `-Oline` if the run needs tidy logs — but `-O` pulls in
+  output-sync temp files, untested on this OS; plain `-j` refunds the
+  wall-time win).
+- Keep everything else serial-certified: explicit rules, one command per
+  recipe line, `SHELL=/TOOLS/SH.BIN`, absolute `/TOOLS/*.BIN` paths,
+  `-B` to force rebuilds (FAT timestamps are whole-second).
+- Fail propagation in `-j` is safe: a failed recipe line stops the goal
+  (make waits for in-flight jobs — `*** Waiting for unfinished jobs....` —
+  then exits 2), children are all reaped (no zombies), and outputs are
+  byte-identical to a serial build.
+
+Measured on the synthetic project (QEMU aarch64 TCG, 8 vCPUs, per-TU
+~0.7 s burn + fork/exec overhead): serial ≈ 19.7 s, `-j4` ≈ 9.9 s
+(~2.0×), `-j8` ≈ 9.3 s (~2.1×), repeated ≥4× with <5 % run-to-run spread.
+The plateau above -j4 is TCG fork/spawn + scheduler overhead, not the
+make port.  On real builds (≈90 s per cc1 TU) that fixed overhead
+vanishes; expect the speedup to approach the core count (the 63-slot PCB
+table is the ceiling — keep ≤ -j8).
+
 ---
 
 ## 10. Verdict table vs §8.3 (filled by w7-accept on the merged tip 288995c)
