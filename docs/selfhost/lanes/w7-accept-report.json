@@ -5,7 +5,14 @@
   "branch": "selfhost/w7-accept",
   "base_tip": "288995c",
   "commits": [
-    "b02f8fe w7-accept: (A) w6 OUT.IMG boots + in-OS-built OUTPROG.BIN runs (S4/S5 evidence); acceptance.md TCG-reality reconciliation"
+    "b02f8fe w7-accept: (A) w6 OUT.IMG boots + in-OS-built OUTPROG.BIN runs (S4/S5 evidence); acceptance.md TCG-reality reconciliation",
+    "0c96a55 w7-accept: evidence doc + report skeleton + combined drive script (T4.3 loop in progress)",
+    "d9ecd05 w7-accept: T4.3 loop S1 + T2.5 PASS — in-OS user build + in-OS run of HELLO.BIN",
+    "c7c5823 selfhost: merge w8-torture — exec argv marshal per-page fix (cherry-picked bd58474)",
+    "bb59524 w7-accept: S2 tail failure evidence + fix cherry-pick + S2-only re-run plan",
+    "58c072d w7-accept: S2-only re-run drive (fresh fixed disk.img; one stage one boot)",
+    "d16f0d9 w7-accept: DISCRIMINATOR VERDICT — S2 failure is a FAT dirent/LFN write bug, not argv, not prior state",
+    "be4785b w7-accept: acceptance.md 10 verdict row — partial-loop status + dirent bug + re-cut note"
   ],
   "environment": {
     "host": "x86_64, 64 cores, QEMU aarch64 TCG MTTCG (no KVM for ARM guests)",
@@ -45,8 +52,6 @@
       },
       "S1_user": {
         "result": "PASS",
-        "started": "[SELFHOST] phase=s1-user-start",
-        "detail": "sh.c -O2 in-OS compile in progress (>= 53 min TCG); 5 TUs + 4 links + 4 objcopies",
         "marker": "phase=s1-user-start; phase=user-compile rc=0 (5 TUs); phase=s1-user-done rc=0",
         "elapsed": "~61 min wall (sh.c ~60 min in-OS TCG, concurrent battery-6 VM sharing CPU; w6 measured 53 min on a quieter bus)",
         "sh_o": "src/user/sh.c compiled in-OS by /TOOLS/CLANG.BIN with -isystem /TOOLS/RESDIR/include"
@@ -61,7 +66,7 @@
       "S2_kernel": {
         "result": "FAIL x2 (unfixed tip + bd58474-fixed tip, both fresh disks)",
         "expect": "59 TU compile + lld @OBJS.RSP link + objcopy -> hobbyos.bin; phase=s2-kernel-done",
-        "detail": "56 kernel-compile rc=0 + 3 ascompile rc=0 recipe runs all rc=0, then link failed: LLD.BIN error cannot open /SRC/obj/arm/nfs_test.o and /SRC/obj/arm/cpu.o (No such file or directory). No clang error block, no OOM; 57/59 .o landed. The two dropped-TU recipes returned rc=0 with no output file written == silent exec-argv drop near mapped-region top (bd58474 class). phase=s2-kernel-fail reason=tool-rc rc=512; FAILED-AT stage=s2-kernel; System halt from CPU 1; w5 outcome=1 elapsed 8637.1s",
+        "detail": "56 kernel-compile rc=0 + 3 ascompile rc=0 recipe runs all rc=0, then link failed: LLD.BIN error cannot open /SRC/obj/arm/nfs_test.o and /SRC/obj/arm/cpu.o (No such file or directory). No clang error block, no OOM; 57/59 .o landed. phase=s2-kernel-fail reason=tool-rc rc=512; FAILED-AT stage=s2-kernel; System halt from CPU 1; w5 outcome=1 elapsed 8637.1s. FINAL VERDICT (see discriminator_verdict): FAT dirent/LFN write bug — the objects exist under mangled dirent names (NFS_TEST.O.T / CPU-8167.O.T), NOT a silent exec-argv drop",
         "evidence": "t43-loop.serial (link-error block), t43-loop.state (failure markers), t43-loop.outcome",
         "rerun_row": "S2-only on fresh+fixed: identical LLD cannot open nfs_test.o + cpu.o after 56 kernel-compile rc=0 + 3 ascompile rc=0; no clang errors, no OOM; w5 outcome=1 elapsed 5039.5s",
         "discriminator_verdict": {
@@ -88,7 +93,7 @@
       "cmd": "tools/w7_accept_boot.py --image <w7-loop.out.img> --launch OUTPROG.BIN"
     },
     "fix": {
-      "root_cause_class": "exec argv marshal drops an argument when a short string sits near the top of a mapped region (w6 64->4096 cap bump moved the whole-cap range check past the mapped-region end; compile .o never written, recipe still rc=0)",
+      "suspected_class_pre_fix": "exec argv marshal drops an argument when a short string sits near the top of a mapped region (w6 64->4096 cap bump moved the whole-cap range check past the mapped-region end)",
       "upstream_fix": "bd58474 (w8-torture): per-page validation replaces whole-cap check in src/kernel/program_loader.c + arch/arm/trap.c + arch/x64/trap.c",
       "applied": "cherry-picked -m 1 bd58474 -> c7c5823 on selfhost/w7-accept (288995c is an ancestor; clean apply)",
       "rerun": "S2-only in-OS re-run on the fixed kernel (disk.img rebuilt); serial t43-s2-fix.serial",
