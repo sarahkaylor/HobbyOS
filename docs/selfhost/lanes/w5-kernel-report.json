@@ -12,13 +12,13 @@
       "evidence": "docs/selfhost/lanes/evidence-w5-kernel/unit-arm.log"
     },
     "run_unit_tests_x64": {
-      "green": null,
-      "counts": null,
+      "green": true,
+      "counts": "322/0 with -enable-kvm (floor 320 + the 2 new tests)",
       "evidence": "docs/selfhost/lanes/evidence-w5-kernel/unit-x64.log"
     },
     "make_test_arm_wave": {
-      "green": null,
-      "counts": null,
+      "green": true,
+      "counts": "[STRESS TEST] SUCCESS: ALL TESTS PASSED SUCCESSFULLY; MAKETEST_EXIT=0",
       "evidence": "docs/selfhost/lanes/evidence-w5-kernel/make-test-arm.log"
     }
   },
@@ -122,8 +122,9 @@
   ],
   "notes": [
     "Serial repros used a copy of the w4-clang probe image with a MODE=selfhost kernel swapped in; pre-fix evidence boots the base-commit (92815fa) kernel built in a scratch worktree.",
-    "The pre-fix (iv)+(iii)+(v) cascade reproduced in ONE boot (prefix-t25b-6.serial); the fixed kernel booted the identical racing script 3 times clean (fixed-t25b-{1,2,3}.serial, evidence filenames fixed-t25b-2 shown).",
+    "The pre-fix (iv)+(iii)+(v) cascade reproduced in ONE boot (prefix-t25b-6.serial); the fixed kernel booted the identical racing script 3 times clean (fixed-t25b-{1,2,3}.serial).",
     "The toolchain-side BRK (EC 0x3C) that lld/clang hit when actually compiling is the known toolchain-build defect (w4-clang b2, toolchain-builder-owned); the kernel now reports it as rc=4 instead of a stale value.",
+    "Unit-tier calibration: ARM 316+2=318, x64 320+2=322 (the two new tests: test_fault_kill_status_nonzero, test_vm_walk_dead_as_safe).  test_vm_demand_fault was updated to the w5(iv) contract (present-permissive fault = bounded retry; the old assertion encoded the killed-on-present behavior).",
     "One QEMU per tree observed; no pushes; all work committed locally on selfhost/w5-kernel."
   ]
 }
