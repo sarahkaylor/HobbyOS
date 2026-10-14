@@ -1,0 +1,58 @@
+{
+  "lane": "w9-dirent",
+  "wave": 9,
+  "role": "Fix the FAT16 dirent WRITER: files created in-OS got a mangled duplicate dirent (twin), and for exactly nfs_test.o/cpu.o the clean entry was lost so the in-OS lld link could not open them (w7 S2 link failure). Failing kernel unit test first, fix src/kernel/fat16.c, verify unit gates + in-OS dirent dump (zero twins), then S2-stage in-OS re-run as crown proof.",
+  "branch": "selfhost/w9-dirent",
+  "commits": [
+    "6de9508 selfhost: w9-dirent: fix FAT16 close-after-rename resurrecting deleted temp dirents (S2 twin/lost-clean bug) + repro test"
+  ],
+  "root_cause": {
+    "mechanism": "clang (LLVM) writes every -o object through a TempFile whose fd stays OPEN across rename(temp -> final) and is closed AFTERWARDS. fat16_rename correctly deletes the temp's 0x0F run + short entry and allocates the final entry (often REUSING the just-freed slot). The LATER close of the still-open temp fd then ran fat16_sync_entry (dirty) and wrote the stale cached temp dirent back over that slot: (a) the temp's mangled 8.3 alias ('CPU-09EF.O.T' = format_83 of the long temp name 'cpu-<hex>.o.tmp') resurfaces as a duplicate twin pointing at the same data cluster, and (b) when the rename's clean entry had reused the slot it got CLOBBERED -> only the twin survives, lld cannot open nfs_test.o / cpu.o.",
+    "why_not_seen_in_older_tests": "existing fat16 tests close the write handle BEFORE renaming; none exercised rename-while-open-then-close (the LLVM TempFile order).",
+    "determinism": "filename-keyed because the slot reuse/clobber pattern depends deterministically on allocation order, per fork burst not address layout.",
+    "evidence": [
+      "docs/selfhost/lanes/evidence-w9/inos-probe-prefix.dirents.txt (in-OS probe on the UNFIXED kernel: CPU.O + CPU-09EF.O.T twin sharing cluster; NFS_TEST.O + twin; FAT16.O + FAT16-B8.O.T)",
+      "docs/selfhost/lanes/evidence-w9/inos-probe-prefix-ren.trace.serial (rename trace: lfn_del correctly targets the temp short, twin still survives -> resurrection is post-rename, at close)",
+      "w7 evidence docs/selfhost/lanes/evidence-w7/t43-s2-fix.dirents.txt (the original 2/59 lost-clean failure)"
+    ]
+  },
+  "failing_test": {
+    "name": "test_fat16_clang_temp_rename_no_twins (src/kernel/fat16_test.c)",
+    "what": "creates CPU.O + NFS_TEST.O plus 45 object names via create(long TempFile name)->write->rename-while-open->close (the clang order), then asserts EXACTLY one clean dirent per final name and open-by-clean-name with written size 2048.",
+    "on_tip": "FAIL (Tests run 319, failed 1): the close-after-rename resurrected the temp alias; the exactly-one-clean-dirent check failed.",
+    "after_fix": "PASS (ARM 319/0; x64 323/0)"
+  },
+  "fix": {
+    "file": "src/kernel/fat16.c",
+    "function": "fat16_sync_entry",
+    "summary": "before writing a dirty entry back at close, read the on-disk slot at (dir_sector, dir_offset) and SKIP when the slot was freed (0x00/0xE5 by a rename/unlink under this open handle) or now holds a different file's 11-byte name (slot reused by the rename's clean entry). A handle whose entry a rename deleted must not resurrect it.",
+    "coverage": "also guards the synthetic-root handle (dir_sector==0) and generalizes the existing 'read descriptor must not clobber' intent to stale WRITE handles."
+  },
+  "unit_gates": {
+    "arm": {"cmd": "./run_unit_tests.sh", "result": "PASS", "tests_run": 319, "failed": 0},
+    "x64": {"cmd": "EXTRA_QEMU_ARGS='-enable-kvm' ./run_unit_tests_intel.sh", "result": "PASS", "tests_run": 323, "failed": 0}
+  },
+  "inos_verification": {
+    "method": "MODE=selfhost disk with obj/selfhost/dist-staging; probe drive runs REAL CLANG.BIN on src/kernel/arch/arm/cpu.c + nfs_test.c + fat16.c writing ::/SRC/obj/probe; dir dumped from the image after boot (fat16img-class raw scan).",
+    "prefix_serial": "docs/selfhost/lanes/evidence-w9/inos-probe-prefix.serial",
+    "prefix_dump": "docs/selfhost/lanes/evidence-w9/inos-probe-prefix.dirents.txt -> twins present (CPU-09EF.O.T, NFS_TEST.O.T, FAT16-B8.O.T)",
+    "postfix_serial": "docs/selfhost/lanes/evidence-w9/inos-probe-postfix.serial",
+    "postfix_dump": "PENDING - expect exactly CPU.O, NFS_TEST.O, FAT16.O (no twins)"
+  },
+  "s2_crown_proof": {
+    "status": "PENDING",
+    "cmd": "w5_flat_boot --image disk.img --serial evidence-w9/serial-w9-s2.serial --timeout 10800 --expect phase=s2-kernel-done",
+    "drive": "s2-kernel|SH.BIN|/SRC/SELFHOST.SH kernel (one stage, one boot, fresh disk)",
+    "expect": "56x kernel-compile rc=0 + 3x kernel-ascompile rc=0, lld link via @/SRC/OBJS.RSP, phase=s2-kernel-done rc=0, hobbyos.elf + hobbyos.bin present in ::/SRC, ::/SRC/obj/arm with exactly 59 clean objects and zero mangled twins"
+  },
+  "report_docs": {
+    "json": "docs/selfhost/lanes/w9-dirent-report.json (this file)",
+    "evidence_md": "docs/selfhost/lanes/w9-dirent-evidence.md",
+    "evidence_dir": "docs/selfhost/lanes/evidence-w9/"
+  },
+  "untouched": [
+    "main repo /home/sarah/Documents/GitHub/HobbyOS (no pushes)",
+    "integrator's other worktrees (w7-accept, w10-fstime, w11-makej)",
+    "LLVM/libc++ sources; dist-staging toolchain"
+  ]
+}
