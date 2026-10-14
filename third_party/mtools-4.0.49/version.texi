@@ -1,0 +1,3 @@
+@set EDITION 4.0.49
+@set VERSION 4.0.49
+@set UPDATED June 2025

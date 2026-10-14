@@ -1,0 +1,156 @@
+#!/bin/sh
+
+# Copyright 1997,1999,2001,2002,2004,2009,2010 Alain Knaff.
+# This file is part of mtools.
+#
+# Mtools is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Mtools is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with Mtools.  If not, see <http://www.gnu.org/licenses/>.
+
+# mkmanpages invokes a custom version of texi2roff.
+# Sources of standard texi2roff can be found at http://ftp.funet.fi/pub/TeX/CTAN/support/texi2roff/texi2roff-2.0.tar.gz
+# Custom patch at http://ftp.gnu.org/gnu/mtools/texi2roff-2.0-ak.diff
+#
+# However, if you're just interested in compiling mtools (rather than
+# working on the documentation), I'd suggest you rely on the
+# ready-made man pages and templates present in the mtools release
+# tarball instead.
+
+DIR=`dirname "$0" `
+
+# TODO
+VERSION=`cat $DIR/version.texi | awk '$2 == "VERSION" {print $3}'`
+UPDATED=`cat $DIR/version.texi | awk '$2 == "UPDATED" {print $3 " " $4}'`
+
+# extracts the manpage for a given command out of a texinfo doc
+unset LANG
+
+date=`date +%d%b%y`
+package="mtools-"`grep mversion $DIR/patchlevel.c | sed 's/^.*"\(.*\)";/\1/'`
+
+extract()
+{
+  command=$1
+  echo extracting $command
+  outfile=$command.1
+  exec 4>&1
+  exec >$outfile
+
+  echo \'\\\" t
+# '
+  echo .TH\ $command\ 1\ \"$date\" $package
+  echo .SH Name
+  egrep -i "^$command " "$DIR"/cmdname | fgrep -v '#'
+  #echo ".SH Description"
+  
+  cat "$DIR"/man-warning.texi "$DIR"/mtools.texi "$DIR"/man-warning-end.texi |
+  egrep -v '@end copying|@copying|@insertcopying' |
+  sed \
+   -e "/^@comment skipskipskip/,/^@node $command/d" \
+   -e "/^@node [^,]*, [^,]*, $command, Commands$/,/^@bye/d" \
+   -e "/^@node [^,]*, [^,]*, Commands/,/^@bye/d" \
+   -e 's/^@section/@chapter/' \
+   -e 's/^@subs/@s/' \
+   -e 's/^@chapter.*$/@chapter Description/' \
+   -e 's/^@section/@chapter/' \
+   -e 's/^@subs/@s/' \
+   -e 's/^@comment xMANoptions/@chapter Options/' \
+   -e "s/^@comment MAN/@MAN/"  |
+  texi2roff -ma  |
+  sed -f "$DIR"/strip-pp.sed |
+  sed -e '/^\.iX/d'
+  exec 1>&4
+#  echo ".SH See Also"
+#  echo "Mtools' texinfo doc"
+}
+
+
+for name in `fgrep -v '#' "$DIR"/cmdname | cut -f1 -d\  ` ; do
+  extract $name
+done
+
+rm -f mtools.tmpl.1
+exec >mtools.tmpl.1
+echo \'\\\" t
+# '
+echo .TH mtools 1 \"$date\" $package
+echo .SH Name
+echo "mtools - utilities to access DOS disks in Unix."
+cat "$DIR"/mtools.texi |
+  egrep -v '@end copying|@copying|@insertcopying' |
+	sed \
+	 -e "1,/^@comment MANstart 1/d" \
+	 -e '/^@comment MANskip 1/,/^@comment MANend-skip 1/d' \
+	 -e '/^@comment MANend-skip 5/d' \
+	 -e '/^@comment MANend 5/d' \
+	 -e "s/^@comment MAN/@MAN/" \
+	 -e "s/@value{VERSION}/$VERSION/g" \
+	 -e "s%@value{SYSCONFDIR}%SYSCONFDIR%g" |
+	texi2roff -ma  |
+	sed -f "$DIR"/strip-pp.sed |
+	sed -e '/^\.iX/d'
+
+echo .SH See also
+echo floppyd_installtest
+echo mattrib
+echo mbadblocks
+echo mcd
+echo mcopy
+echo mdel
+echo mdeltree
+echo mdir
+echo mdoctorfat
+echo mdu
+echo mformat
+echo minfo
+echo mkmanifest
+echo mlabel
+echo mmd
+echo mmount
+echo mmove
+echo mrd
+echo mren
+echo mshortname
+echo mshowfat
+echo mtoolstest
+echo mtype
+
+rm -f mtools.tmpl.5
+exec >mtools.tmpl.5
+echo \'\\\" t
+# '
+echo .TH mtools 5 \"$date\" "MTOOLS" "MTOOLS"
+echo .SH Name
+echo "mtools.conf - mtools configuration files"
+cat "$DIR"/mtools.texi |
+  egrep -v '@end copying|@copying|@insertcopying' |
+	sed \
+		-e '1d' \
+		-e '/^@comment MANskip 5/,/^@comment MANend-skip 5/d' \
+	        -e '/^@comment MANend-skip 1/d' \
+	        -e '/^@comment MANskip 1/d' \
+		-e "s/^@comment MAN/@MAN/"  \
+		-e "/@include/ d" \
+		-e "s/@value{VERSION}/$VERSION/g" \
+		-e "s/@value{UPDATED}/$UPDATED/g" \
+		-e "s%@value{SYSCONFDIR}%SYSCONFDIR%g" \
+		-e "/@top/d" \
+		-e "/@format/d" \
+		-e "/@end format/d" \
+		-e "/@ifnottex/d" \
+		-e "/@end ifnottex/d" |
+	texi2roff -ma  |
+	sed -f "$DIR"/strip-pp.sed |
+	sed -e '/^\.iX/d' -e 's/\.SS Description/.SH Description/'
+
+echo .SH See also
+echo mtools
