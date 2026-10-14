@@ -39,7 +39,12 @@ SHELL       := /TOOLS/SH.BIN
 MAKEFLAGS   += -r -R
 .PHONY: check user kernel disk all
 CC          := /TOOLS/CLANG.BIN
-LD          := /TOOLS/LLD.BIN
+# lld v21 is the UNIFIED driver: invoked as bare `lld` (our frozen /TOOLS
+# name LLD.BIN) it refuses with "lld is a generic driver. Invoke ld.lld
+# (Unix)..." (w6-run finding, first in-OS link).  -flavor gnu selects the
+# ELF/Unix driver explicitly — the host Makefile gets this for free via
+# the ld.lld symlink, the flat staged binary cannot rely on argv[0].
+LD          := /TOOLS/LLD.BIN -flavor gnu
 OBJCOPY     := /TOOLS/OBJCOPY.BIN
 AR          := /TOOLS/LLVMAR.BIN
 MKFSFAT     := /TOOLS/MKFSFAT.BIN

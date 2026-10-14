@@ -1,0 +1,51 @@
+{
+  "lane": "w6-run",
+  "wave": 6,
+  "role": "merged-tip end-to-end drive: fix src/libc/src/cxxrt.cpp (override section + delete->free) then run S0 check -> S1 user -> T2.5 link+run -> S2 kernel (bounded) with serial evidence per stage; fix-forward where possible, precise handoff for walls",
+  "branch": "selfhost/w6-run",
+  "base_tip": "42c6c0b",
+  "commits": [
+    "e49820a w6-run: cxxrt.cpp os-wide followup — section(__lcxx_override) new/new[] + delete->free(ptr); host test backed by the HobbyOS allocator",
+    "781c257 w6-run: S0 PASS on merged tip — fix kernel execv per-arg truncation (64B cap broke make->sh -c recipe lines)",
+    "ae73d74 w6-run evidence: S0 + argv-bisect serial captures"
+  ],
+  "environment": {
+    "host": "x86_64, 64 cores, QEMU aarch64 TCG MTTCG (no KVM for ARM guests)",
+    "tcg_multiplier_measured": "~900-1500x vs host (anchor: src/user/sh.c host clang -O2 aarch64 = 1.38 s; in-OS >= 20 min observed before budget kill; whole 59-TU kernel host time = 5.8 s serial)",
+    "parent_vm": "a stray `make MODE=test run` QEMU from the parent tree ran concurrently for ~3 h (exited on its own), splitting CPU"
+  },
+  "fixes": [
+    {
+      "id": "cxxrt-oswide-followup",
+      "file": "src/libc/src/cxxrt.cpp",
+      "change": "operator new/new[] get __attribute__((section(\"__lcxx_override\"))); operator delete delegates to free(ptr) with the RAW pointer (HobbyOS free_locked BLOCK_MAGIC check distinguishes stashed vs raw payloads)",
+      "rationale": "w5-nothrow os_wide_followup: any OS userland program linking cxxrt.o + -fno-exceptions libc++ that calls new(nothrow) (raw malloc payload) then delete had the latent free(BLOCK_MAGIC) data abort; and the throwing new's section address vs libc++'s nothrow-override check",
+      "verification": "cxxrt_test_host: 25 checks 0 failures (link now includes obj/host_malloc_hb.o + strong hb_* wrappers in the test TU — the free(ptr) contract is defined over the HobbyOS allocator, glibc free() corrupts on the aligned stash); llvm-nm: _Znwm/_Znam inside __lcxx_override, host + aarch64 obj",
+      "note": "host test now backed by the real allocator instead of glibc — the alignment/new-delete assertions test the actual on-device semantics"
+    },
+    {
+      "id": "execv-argv-64b-cap",
+      "file": "src/kernel/program_loader.c + arch/arm/trap.c + arch/x64/trap.c",
+      "change": "proc_marshal_argv per-arg temp 64 -> 1024; sys_exec flat-args argbuf 256 -> 1024 and per-arg 64 -> 1024 (both arches)",
+      "symptom": "S0 blocked at `CLANG: error: no input files` even though the identical command line compiles when run directly in-OS",
+      "root_cause": "make runs recipe lines as `sh -c '<line>'` — the whole 200+ char line is ONE argv element; the execv marshal capped each element at 63 chars, truncating the line mid-token; sh then tokenized a partial command (argc 16 -> 7 via argvprobe) and clang saw no input TU",
+      "verification": "post-fix S0: phase=s0-check-done rc=0 + ACCEPTANCE-COMPLETE; check.o (21144 B) pulled off the image, valid AArch64 ELF REL; x64 trap.o host compile-checked"
+    }
+  ],
+  "gates": {
+    "A_cxxrt": {"result": "PASS", "detail": "cxxrt_test_host 25 checks 0 failures; _Znwm/_Znam in __lcxx_override on host + aarch64-none-elf compiles"},
+    "S0_check": {"result": "PASS", "cmd": "make -f Makefile.hobbyos check (in-OS via MODE=selfhost, SELFHOST.RUN stage s0-check)", "serial": "phase=s0-check-done rc=0; ACCEPTANCE-COMPLETE stages=1", "artifact": "s0-check.o 21144 B, AArch64 ELF64 REL, pulled via fat16img.py", "evidence": "evidence-w6-run/s0.serial.txt"},
+    "S1_user": {"result": "PENDING (in flight, ~40-90 min under TCG)", "cmd": "make -f Makefile.hobbyos user"},
+    "T25": {"result": "PENDING", "cmd": "in-OS run of the S1-built HELLO.BIN"},
+    "S2_kernel": {"result": "PENDING (bounded attempt)", "cmd": "make -f Makefile.hobbyos kernel"}
+  },
+  "walls_and_handoffs": [
+    {
+      "id": "s2-tcg-throughput",
+      "severity": "important for the parent",
+      "what": "in-OS clang under ARM TCG is ~900-1500x slower than the host (measured). The whole 59-TU kernel host-compiles in 5.8 s, so S2 projects to ~90-150 min TCG; S3's in-OS disk assembly and S1's links carry the same multiplier",
+      "recommendation": "run S2 (and S3) as a long single boot with a >= 3h QEMU budget, or split per-TU, or run the acceptance on faster hardware/KVM (x64 selfhost path would need an x64 toolchain build — out of acceptance scope). If the lane must not run hours: capture per-TU progress via phase=kernel-compile rc=0 markers and hand off the count"
+    }
+  ],
+  "untouched": ["main repo /home/sarah/Documents/GitHub/HobbyOS (no pushes; local commits on selfhost/w6-run only)", "LLVM/libc++ sources", "dist-staging toolchain (not refreshed)"]
+}
