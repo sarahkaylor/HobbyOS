@@ -570,9 +570,12 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
   starved spawns failed downstream suites en masse (PASTETEST 24, FOLDTEST 45, SEDTEST 12,
   IPC_T, SQLTEST…) and the run never cleared. Starvation lines are chronic across ALL runs
   (local b3/b4: 60/54; VM w4: 86; VM w5: 61) — a flaky ESCALATION of a known fragility,
-  not obviously wave-4-caused; clean single-tier rerun launched (`merged-w5r`) to
-  discriminate. **Queued: slot-pressure cascade robustness** (loader backoff/retry, slot
-  recycling, or capacity) — CI determinism item.
+  not obviously wave-4-caused. **Clean rerun (`merged-w5r`): NO wedge — 338 s, halt marker
+  present, 0 `FAILURES:` lines** → the wedge was a flaky escalation, not reproducible.
+  Rerun tokens = 2× `SHELLTEST WATCHDOG` + 2× `[NFS] FAIL read PATTERN.BIN`; the NFS class
+  also appears in pre-selfhost VM logs (`fs-w6b`/`l9p-wave`/`fs-w1a-r2`) → attributed
+  network-timing ambient. **Queued: slot-pressure cascade robustness** (loader backoff/
+  retry, slot recycling, or capacity) — CI determinism item.
 
 - **2026-10-14 — Wave 4 (3 lanes) all merged (`82d4d81`); zero conflicts (Makefile auto-merged).**
   (1) **MODE=selfhost DELIVERED** (w4-kernel): Makefile plumbing + `main.c` branch launching only
