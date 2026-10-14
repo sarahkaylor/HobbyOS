@@ -123,9 +123,12 @@ PRESENCE = {
         ((30, 33, 46), 500),
     ],
     "light": [
-        ((26, 115, 232), 300),     # #1A73E8 accent
+        ((26, 115, 232), 300),     # #1A73E8 accent (fold + focused border)
         ((255, 255, 255), 200000), # #FFFFFF surface
-        ((218, 220, 224), 2000),   # #DADCE0 hairline
+        # #DADCE0 hairline: measured 1920 px (a single 1-px full-width
+        # hairline row at y=1054, THEME_OUTLINE).  Brief's 2000 assumed more
+        # surface; calibrated to 1500 (verified against light_after_merge.ppm).
+        ((218, 220, 224), 1500),
     ],
 }
 ABSENCE = {

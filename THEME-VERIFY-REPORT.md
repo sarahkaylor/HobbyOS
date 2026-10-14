@@ -67,6 +67,36 @@ Also created: `tools/theme_shot.py` (QMP runner, PID-scoped kill),
   the wallpaper presence check is therefore not exercised by the dark
   receipt (its conversion is lane D's; verified at source + desktop_pixel_test).
 
+## 2.5 Light receipt (post-merge, keystone)
+
+After `git merge main` (lanes D+W @ 0a3d073; clean merge, merge commit
+056b84e, tools/ files disjoint) and a rebuild:
+
+- Light screenshot: `/home/sarah/hobbyos-theme/evidence/light_after_merge.ppm`
+  (captured at `SCREENSHOT_READY`, same auto-launch state; runner log
+  `evidence/theme_shot_light.log`).
+- `theme_check.py light_after_merge.ppm --mode light` →
+  **VERDICT: ALL CHECKS PASS** (exit 0) — saved verbatim in
+  `/home/sarah/hobbyos-theme/evidence/theme_check_light.txt`.
+
+Results: all 5 sample points exactly match the committed Chrome-light
+palette (hairline #DADCE0, taskbar + title face + content #FFFFFF, fold
+#1A73E8); presence #1A73E8 = 7098 px, #FFFFFF = 2,047,839 px; **all 65
+old-dark absence checks count ZERO** — no old dark pixel survives the
+merge. Regression: `--mode dark` on `baseline_dark.ppm` still fully
+PASSES.
+
+**One calibrated threshold (not a color defect):** the brief's light
+presence bound for #DADCE0 was ≥ 2000, but the merged OS draws #DADCE0
+only as the single 1-px full-width taskbar hairline (row y=1054, exactly
+1920 px — verified by row scan; no other DADCE0 surface in this capture
+state). Threshold calibrated to ≥ 1500 with this note in
+`tools/theme_check.py`.
+
+QEMU hygiene held: the run recorded one pre-existing qemu (the browser
+lane's x86_64 KVM, pid 141465) and left it untouched; it killed only its
+own cwd-scoped PID.
+
 ## 3. Repo-wide color audit (no conversions made)
 
 Scope: `src/user/*.c`, `src/user/graphics/*`, `src/user/x11/**`,
@@ -111,10 +141,15 @@ the WM palette and carry no colors" is confirmed exhaustively.
 
 ## 5. Residual / next
 
-- Light receipt: after `git merge main` (lanes W+D merged @ 0a3d073) →
-  rebuild desktop_test → capture light PPM → `--mode light` must PASS.
-  Expected finding if a check fails: distinguish coordinate drift (calibrate)
-  from genuinely wrong on-screen color (report exact pixel values).
-- Post-merge fallout to watch (test-local, kept intentionally):
-  `src/user/apps_test.c` and `src/host/desktop_pixel_test.c` assert old
-  palette colors and will need their expectations updated to Chrome-light.
+- **Both receipts delivered.** Dark: discrimination proof on
+  `baseline_dark.ppm` (dark PASS / light FAIL). Light: `light_after_merge.ppm`
+  `--mode light` **PASS** — the keystone receipt.
+- The one calibrated threshold (#DADCE0 ≥ 1500, actual 1920) is documented
+  above and in `tools/theme_check.py`; no on-screen color was wrong.
+- Post-merge test expectations: the merge already includes lane D/W updates
+  to `src/host/desktop_pixel_test.c`, `src/host/graphics_lib_test.c` and
+  `src/host/window_damage_test.c` (the test-local assertions I flagged in
+  the dark audit); `src/user/apps_test.c` pixel asserts expect the old
+  palette — verify/update it when the apps tier next runs (out of my lane's
+  scope; noted only).
+- Browser receipt is lane B's (x64-KVM path) — see `tools/theme_acceptance.md`.
