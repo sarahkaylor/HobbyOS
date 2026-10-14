@@ -691,6 +691,180 @@ static void test_fat16_rmdir_semantics(void) {
   EXPECT_EQ(fat16_unlink("/RMDIRFILE.TXT"), 0);
 }
 
+/* W3-kernel (selfhost): the mkfs.fat -C extend-then-write gap, reproduced
+ * at the fat16 layer directly.  w2-mkfs showed -C creates the file at the
+ * exact target size with a fully-allocated chain and persisted dir entry,
+ * but CONTENT written after the ftruncate read back all-zero (both from the
+ * kernel and on the raw disk).  The kernel's older ftruncate test only
+ * covered write->shrink->extend-readback(zero-fill), never extend-then-
+ * write; this pins the missing sequence at the layer where the bug lives.
+ */
+static void test_fat16_ftruncate_extend_then_write(void) {
+  uart_puts("  Running test_fat16_ftruncate_extend_then_write...\n");
+  tests_run++;
+
+  /* Fresh file (create-on-open) — like mkfs -C's O_CREAT|O_EXCL. */
+  struct file f;
+  EXPECT_EQ(fat16_open("/W3F16.IMG", &f), 0);
+
+  /* ftruncate: extend the empty file to 4 MiB (mkfs -C pre-sizes the image
+     before writing its boot sector / FATs / root dir through lseek+write). */
+  const uint32_t IMG_SIZE = 4u * 1024u * 1024u;
+  EXPECT_EQ(fat16_truncate_to(&f, IMG_SIZE), 0);
+  EXPECT_EQ(f.fat16.entry.file_size, (int)IMG_SIZE);
+
+  /* lseek to 0, then write a distinctive non-zero pattern — mkfs writes at
+     MANY offsets (boot sector at 0, FAT1/FAT2, root dir), so verify a set of
+     them across the whole file, not just the head. */
+  ASSERT(fat16_seek(&f, 0) == 0);
+  uint8_t out[4096];
+  for (int i = 0; i < (int)sizeof out; i++)
+    out[i] = (uint8_t)(0x1F + (i & 0x3F)); /* non-zero, positioned */
+  const uint32_t WMARK[4] = { 0, 512, 512 * 8, IMG_SIZE - 4096 };
+  for (int w = 0; w < 4; w++) {
+    ASSERT(fat16_seek(&f, (int)WMARK[w]) == 0);
+    EXPECT_EQ(fat16_write(&f, out, sizeof out), (int)sizeof out);
+  }
+  fat16_close(&f);
+
+  /* Reopen by path — the on-disk dir entry must carry the size and the
+     data must be on the media.  This is the exact read `cat PROBE.IMG`
+     performed in the w2 in-OS smoke (blank). */
+  struct file rf;
+  EXPECT_EQ(fat16_open("/W3F16.IMG", &rf), 0);
+  EXPECT_EQ(rf.fat16.entry.file_size, (int)IMG_SIZE);
+  uint8_t rbuf[4096];
+  for (int w = 0; w < 4; w++) {
+    ASSERT(fat16_seek(&rf, (int)WMARK[w]) == 0);
+    for (int z = 0; z < (int)sizeof rbuf; z++) rbuf[z] = 0xAA;
+    int rn = fat16_read(&rf, rbuf, sizeof rbuf);
+    EXPECT_EQ(rn, (int)sizeof rbuf);
+    if (rn == (int)sizeof rbuf) {
+      int bad = 0;
+      for (int i = 0; i < (int)sizeof rbuf; i++)
+        if (rbuf[i] != (uint8_t)(0x1F + (i & 0x3F))) bad++;
+      EXPECT_EQ(bad, 0);
+    }
+  }
+  fat16_close(&rf);
+
+  EXPECT_EQ(fat16_unlink("/W3F16.IMG"), 0);
+}
+
+/* --- W3-kernel (selfhost): read_dir syscall surface over FAT16 -------- */
+
+/* G2/W3-kernel (selfhost Gap B): the kernel read_dir implementation behind
+ * the libc opendir/readdir pair.  The w2-make/w2-mtools reports pinned all
+ * in-OS directory iteration on this syscall being wired end-to-end; the
+ * kernel side is exercised here over a REAL FAT16 directory with multiple
+ * entries including VFAT long names within the frozen 31-char cap. */
+static void test_fat16_read_dir_multiple(void) {
+  uart_puts("  Running test_fat16_read_dir_multiple...\n");
+  tests_run++;
+
+  /* A fresh directory with a known, fixed entry set: 8.3 files, long names
+     (<= 31 chars), subdirectories, and an empty directory. */
+  const char *dir = "/W3RDDIR";
+  struct fat16_dir_entry e;
+  (void)fat16_rmdir(dir);
+  EXPECT_EQ(fat16_mkdir(dir), 0);
+
+  struct file f;
+  EXPECT_EQ(fat16_open("/W3RDDIR/AAA.TXT", &f), 0);
+  EXPECT_EQ(fat16_write(&f, "aaa-content", 11), 11);
+  fat16_close(&f);
+  EXPECT_EQ(fat16_open("/W3RDDIR/BBB.BIN", &f), 0);
+  fat16_close(&f);
+  EXPECT_EQ(fat16_open("/W3RDDIR/LONG_FILENAME_IN_DIR.TXT", &f), 0);
+  EXPECT_EQ(fat16_write(&f, "long-content", 12), 12);
+  fat16_close(&f);
+  EXPECT_EQ(fat16_open("/W3RDDIR/SUBDIR", &f), 0); /* file named SUBDIR's shape */
+  fat16_close(&f);
+  EXPECT_EQ(fat16_mkdir("/W3RDDIR/SUBD"), 0);
+  EXPECT_EQ(fat16_mkdir("/W3RDDIR/EMPTYDIR"), 0);
+
+  /* Iterate with fat16_read_dir (the kernel primitive sys_read_dir calls via
+     vfs_read_dir).  Collect names into fixed slots. */
+  char names[32][32];
+  int n = 0;
+  while (n < 32) {
+    uint8_t attr;
+    uint32_t sz;
+    char nm[64];
+    for (int z = 0; z < 64; z++) nm[z] = 0;
+    if (fat16_read_dir(dir, n, nm, &attr, &sz) != 0) break;
+    for (int z = 0; z < 32; z++) names[n][z] = 0;
+    int kk = 0;
+    while (nm[kk] && kk < 32 - 1) {
+      names[n][kk] = nm[kk];
+      kk++;
+    }
+    n++;
+  }
+  EXPECT_EQ(n >= 5, 1); /* the five entries above */
+
+  /* Every expected entry is present, exactly once. */
+  int found_i = 0, found_l = 0, found_b = 0, found_sub = 0, found_e = 0;
+  for (int i = 0; i < n; i++) {
+    if (test_streq(names[i], "AAA.TXT")) found_i++;
+    if (test_streq(names[i], "LONG_FILENAME_IN_DIR.TXT")) found_l++;
+    if (test_streq(names[i], "BBB.BIN")) found_b++;
+    if (test_streq(names[i], "SUBD")) found_sub++;
+    if (test_streq(names[i], "EMPTYDIR")) found_e++;
+  }
+  EXPECT_EQ(found_i, 1);
+  EXPECT_EQ(found_l, 1);
+  EXPECT_EQ(found_b, 1);
+  EXPECT_EQ(found_sub, 1);
+  EXPECT_EQ(found_e, 1);
+
+  /* Long names are reported whole (G1 used to emit the 8.3 mangle). */
+  EXPECT_EQ(fat16_read_dir(dir, 0, (char *)names[0], &e.attr, &e.file_size) == 0, 1);
+
+  /* A path that is NOT a directory fails read_dir. */
+  uint8_t attr;
+  uint32_t sz;
+  char nm[64];
+  EXPECT_EQ(fat16_read_dir("/W3RDDIR/AAA.TXT", 0, nm, &attr, &sz), -1);
+
+  /* The volume root lists the directory we created. */
+  int found_root = 0;
+  for (int i = 0; i < 512; i++) {
+    char nm2[64];
+    for (int z = 0; z < 64; z++) nm2[z] = 0;
+    int r = fat16_read_dir("/", i, nm2, &attr, &sz);
+    if (r != 0) {
+      /* Allow the root to have trailing 0x00 filler slots: keep scanning
+         until we have walked the whole root region, but stop after a long
+         run of empty fails. */
+      int j;
+      for (j = 0; j < 8; j++) {
+        i++;
+        char nm3[64];
+        for (int z = 0; z < 64; z++) nm3[z] = 0;
+        if (fat16_read_dir("/", i, nm3, &attr, &sz) == 0) {
+          if (test_streq(nm3, "W3RDDIR")) found_root = 1;
+          break;
+        }
+      }
+      if (j == 8)
+        break;
+      continue;
+    }
+    if (test_streq(nm2, "W3RDDIR")) found_root = 1;
+  }
+  EXPECT_EQ(found_root, 1);
+
+  (void)fat16_rmdir("/W3RDDIR/EMPTYDIR");
+  (void)fat16_rmdir("/W3RDDIR/SUBD");
+  EXPECT_EQ(fat16_unlink("/W3RDDIR/AAA.TXT"), 0);
+  EXPECT_EQ(fat16_unlink("/W3RDDIR/BBB.BIN"), 0);
+  EXPECT_EQ(fat16_unlink("/W3RDDIR/LONG_FILENAME_IN_DIR.TXT"), 0);
+  EXPECT_EQ(fat16_unlink("/W3RDDIR/SUBDIR"), 0);
+  EXPECT_EQ(fat16_rmdir("/W3RDDIR"), 0);
+  EXPECT_EQ(fat16_resolve_path("/W3RDDIR", &e, 0, 0) != 0, 1);
+}
+
 void fat16_test_suite(void) {
   uart_puts("fat16_test_suite:\n");
   test_fat16_open_existing();
@@ -708,6 +882,8 @@ void fat16_test_suite(void) {
   test_fat16_lfn_checksum_reject();
   test_fat16_lfn_truncated_run();
   test_fat16_rmdir_semantics(); /* W2-14 (selfhost) */
+  test_fat16_ftruncate_extend_then_write(); /* W3-kernel: mkfs -C gap */
+  test_fat16_read_dir_multiple(); /* W3-kernel: read_dir syscall surface (Gap B) */
 }
 
 #endif // KERNEL_MODE_UNIT_TEST
