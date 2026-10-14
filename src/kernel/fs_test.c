@@ -2,6 +2,7 @@
 
 #include "unit_test.h"
 #include "fs.h"
+#include "fat16.h"
 #include "process.h"
 #include "errno.h"
 
@@ -234,11 +235,112 @@ static void test_fs_ftruncate(void) {
   process_kill(pid);
 }
 
+/* W3-kernel (selfhost): the EXACT mkfs.fat -C access pattern that the
+ * w2-mkfs in-OS smoke lost.  mkfs.fat -C does open(O_CREAT|O_EXCL|O_RDWR),
+ * ftruncate(fd, size) to pre-size the image, then lseek(0) + write its
+ * content (boot sector / FATs / root dir) into the freshly-extended file.
+ * The w2 report showed: file + chain + dir-entry persist, but the CONTENT
+ * bytes written AFTER the ftruncate read back as all zeros.  Fixing this is
+ * the kernel side of the selfhosting S3 gate.  This test pins
+ * extend-then-write persistence through the full process/file layer that
+ * the syscall dispatchers call, including a raw-disk readback so a
+ * hypothetical in-memory-only write cannot pass.
+ */
+static void test_fs_ftruncate_extend_then_write(void) {
+  uart_puts("  Running test_fs_ftruncate_extend_then_write...\n");
+  tests_run++;
+
+  int pid = process_create();
+  EXPECT_EQ(pid >= 0, 1);
+  process_get_pcb(pid)->is_kernel_process = 1;
+  int old_pid = cpu_current_pids[0];
+  set_current_process_pid(0, pid);
+  struct process *p = current_process();
+
+  /* mkfs -C: open a fresh image with O_CREAT. */
+  int fd = file_open(p, "W3FTX.IMG", 0x40 /* O_CREAT */);
+  EXPECT_EQ(fd >= 0, 1);
+
+  /* ftruncate to the target image size (4 KiB in 512-B sectors, cluster
+     size on this volume is 32 KiB, so this spans several clusters). */
+  const int64_t IMG_SIZE = 4 * 1024 * 1024; /* 4 MiB, like mkfs -C blocks */
+  int err = 0;
+  EXPECT_EQ(file_ftruncate(p, fd, IMG_SIZE), 0);
+
+  struct k_stat st;
+  EXPECT_EQ(file_stat_fd(p, fd, &st, &err), 0);
+  EXPECT_EQ((int64_t)st.st_size, IMG_SIZE); /* extended size must be visible */
+
+  /* mkfs then lseeks to 0 and writes real content. */
+  err = 0;
+  EXPECT_EQ(file_seek(p, fd, 0, 0, &err), 0);
+
+  uint8_t out[2048];
+  for (int i = 0; i < (int)sizeof out; i++)
+    out[i] = (uint8_t)(0x5A ^ (i & 0xFF)); /* distinctive, non-zero */
+  EXPECT_EQ(file_write(p, fd, out, sizeof out, 0), (int)sizeof out);
+
+  /* Same-handle readback at 0 must return what was written (kernel cat
+     read the w2 probe back blank — this is the exact symptom). */
+  uint8_t in[2048];
+  err = 0;
+  EXPECT_EQ(file_seek(p, fd, 0, 0, &err), 0);
+  for (int z = 0; z < (int)sizeof in; z++) in[z] = 0xAA;
+  EXPECT_EQ(file_read(p, fd, in, sizeof in, 0), (int)sizeof in);
+  int bad = 0;
+  for (int i = 0; i < (int)sizeof in; i++)
+    if (in[i] != (uint8_t)(0x5A ^ (i & 0xFF))) bad++;
+  EXPECT_EQ(bad, 0);
+
+  /* Close, reopen by path, and read back: persistence across reopen is
+     the disk-persistence check (a size kept only in the handle fails). */
+  EXPECT_EQ(file_close(p, fd), 0);
+  fd = file_open(p, "W3FTX.IMG", 0);
+  EXPECT_EQ(fd >= 0, 1);
+  EXPECT_EQ(file_stat_fd(p, fd, &st, &err), 0);
+  EXPECT_EQ((int64_t)st.st_size, IMG_SIZE);
+  err = 0;
+  EXPECT_EQ(file_seek(p, fd, 0, 0, &err), 0);
+  for (int z = 0; z < (int)sizeof in; z++) in[z] = 0xAA;
+  EXPECT_EQ(file_read(p, fd, in, sizeof in, 0), (int)sizeof in);
+  bad = 0;
+  for (int i = 0; i < (int)sizeof in; i++)
+    if (in[i] != (uint8_t)(0x5A ^ (i & 0xFF))) bad++;
+  EXPECT_EQ(bad, 0);
+  EXPECT_EQ(file_close(p, fd), 0);
+
+  /* Raw-disk readback through the fat16 layer (fat16_read pulls straight
+     from the media via virtio_blk — no user/handle cache): a re-open of
+     the same path must surface the written bytes on the disk itself. */
+  {
+    struct file rf;
+    EXPECT_EQ(fat16_open("W3FTX.IMG", &rf), 0);
+    EXPECT_EQ(rf.fat16.entry.file_size, (uint32_t)IMG_SIZE);
+    EXPECT_EQ(fat16_seek(&rf, 0), 0);
+    uint8_t raw[2048];
+    for (int z = 0; z < (int)sizeof raw; z++) raw[z] = 0xAA;
+    int rn = fat16_read(&rf, raw, sizeof raw);
+    fat16_close(&rf);
+    EXPECT_EQ(rn, (int)sizeof raw);
+    int bad = 0;
+    for (int i = 0; i < (int)sizeof raw; i++)
+      if (raw[i] != (uint8_t)(0x5A ^ (i & 0xFF))) bad++;
+    EXPECT_EQ(bad, 0);
+  }
+
+  extern int fat16_unlink(const char *filename);
+  EXPECT_EQ(fat16_unlink("W3FTX.IMG"), 0);
+
+  set_current_process_pid(0, old_pid);
+  process_kill(pid);
+}
+
 void fs_test_suite(void) {
   uart_puts("fs_test_suite:\n");
   test_fs_file_open_close();
   test_fs_record_locks();
   test_fs_ftruncate();
+  test_fs_ftruncate_extend_then_write(); /* W3-kernel: mkfs -C extend-then-write */
 }
 
 #endif // KERNEL_MODE_UNIT_TEST
