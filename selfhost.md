@@ -590,6 +590,23 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-14 (~21:50) — Waves 8a/8b (w10-fstime + w11-makej) merged (`465c9b4`,
+  `1ac7c7d`) — THE IN-OS BUILD IS NOW INCREMENTAL AND PARALLEL.** w10: writes left
+  mtime=0/1980 so make's dependency tracking was dead; `f9c6771` stamps FAT dirents from
+  the RTC (`fat16_stamp_entry`, UTC; create/mkdir/write/append/truncate) and `fs.c` stat
+  returns real times. Serial acceptance: 2nd make → **`MAKE.BIN: Nothing to be done for
+  'all'.`**; rewriting one source of the 5-TU project compiles exactly that TU. Units
+  322/0 ARM + 326/0 x64; wave green ×2 (one load-flake create-budget red absent on rerun).
+  w11: `MAKE_JOBSERVER` was hard-undef'd; naive re-enable deadlocks (kernel never EINTRs;
+  signals defer on pipe-read parks) → fixed with a bounded-poll `pselect()` stub (25 ms) +
+  config.h enables + new `sys/select.h`; verified 16/16 byte-identical outputs, fail
+  propagation (`Error 9`, rc=2, no zombies); measured serial 19.7 s vs -j4 ~10.0 / -j8
+  ~9.3 on the synthetic (≈2× spawn-bound; near-8× expected on ~90 s/TU real builds; cap
+  -j8 at the 63-slot table). New tools: `fatdir_dump.py`, `w11_bench_boot.py`. In-OS sh
+  quirks recorded (drops empty quoted args; no `$(( ))` in while; no case alternation).
+  Battery 9 launched on `1ac7c7d`. Next: w9-dirent still in flight; then the acceptance
+  re-cut (todo §15) on the fast build path.
+
 - **2026-10-14 (~20:45) — USER PRIORITY CHANGE: pause the acceptance re-cut; raise
   build-velocity first — FAT timestamps (incremental in-OS make) + parallel in-OS builds
   (`-j`) — with dirent continuing; all other session issues parked in `todo.md` (new,
