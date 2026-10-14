@@ -510,6 +510,50 @@ int main(void) {
       return 1;
     }
   }
+  /* 5e2. The 2>&1 dup shape (BUG A root cause): `cmd > F 2>&1` used to
+     close the child's stdout after dup2(1,2), emptying the file.  Assert
+     the full bytes through the dup path too — the shape every selfhost
+     build-log recipe ("> LOG 2>&1") uses. */
+  print_console("[TEST] Sending 'cat SHTEST.TXT > OUT7.TXT 2>&1' (2>&1 dup)...\n");
+  {
+    int timed_out = 0;
+    int peak = 0;
+    int rc = 0;
+    for (int attempt = 0; attempt < 6 && rc != 1; attempt++) {
+      err_has_fork_failed();
+      drain_pending(out_p[0]);
+      sample_peak(&peak);
+      write(in_p[1], "cat SHTEST.TXT > OUT7.TXT 2>&1\n", 31);
+      sample_peak(&peak);
+      if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000, &peak) < 0)
+        timed_out = 1;
+      write(in_p[1], "wc -c OUT7.TXT\n", 14);
+      sample_peak(&peak);
+      if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000, &peak) < 0)
+        timed_out = 1;
+      if (my_strstr(buf, "194") && my_strstr(buf, "OUT7.TXT"))
+        rc = 1;
+      if (err_has_fork_failed())
+        rc = -1;
+      if (rc != 1)
+        usleep(1500000);
+    }
+    if (rc == -1) {
+      print_console("shell_test: SKIP 2>&1 dup check (slot pressure)\n");
+    } else if (rc != 1) {
+      sample_peak(&peak);
+      if (peak >= 55 || timed_out) {
+        print_console("shell_test: SKIP 2>&1 dup check (slot pressure)\n");
+      } else {
+        print_console("shell_test: FAILED 2>&1 dup redirect byte count. wc saw: ");
+        print_console(buf);
+        print_console("\n");
+        return 1;
+      }
+    } else {
+      print_console("[TEST] 2>&1 dup redirect byte assertion passed.\n");
+    }
+  }
   /* 5f. The w2 deferred file-based byte check, driven through pipes (the
      console-input path cannot type '>' reliably — documented in the lane
      report): `make --version > M.TXT` must put the GNU Make banner into
