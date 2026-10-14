@@ -1,0 +1,21 @@
+[SELFHOST] DRIVER-UP script=/SRC/SELFHOST.RUN
+[SELFHOST] phase=s0-check-start
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/main.c -o /SRC/obj/arm/check.o
+sh: exec failed: /TOOLS/CLANG.BIN
+MAKE.BIN: *** [Makefile.hobbyos:149: check] Error 127
+[KERNEL] Process 2: /TOOLS/MAKE.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 3: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=s0-check-fail reason=tool-rc rc=512
+[SELFHOST] FAILED-AT stage=s0-check
+[KERNEL] Process 1: SELFHOST.BIN exited unexpectedly or gracefully.
+System halt from CPU 5.
+
+Note: /TOOLS/CLANG.BIN here is the PIPELINE-staged FLAT image (94,192,000 B),
+not the raw ELF.  The failure is NOT the w4-clang ELF entry-fault: the driver's
+own scheduler spawn of the same /TOOLS/CLANG.BIN succeeds (see
+w5-clang-version.serial.txt — full banner).  The sh/make execv path rejects
+the file at the kernel's MAX_PROGRAM_SIZE (1 MiB, src/include/process.h:42 /
+src/kernel/program_loader.c program_too_large) — w4-src's
+CLANG-EXEC-1MIB-GATE, still present in the merged tip (kernel-side, owned by
+w5-kernel).  The w5-nothrow _Znwm wall is DOWNSTREAM of this gate (clang must
+run to reach codegen).
