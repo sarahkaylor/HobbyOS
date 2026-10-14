@@ -175,7 +175,7 @@ stage_tools() {
   local spec src dst
   for spec in "obj/arm/make.bin MAKE.BIN" "obj/arm/mcopy.bin MCOPY.BIN" \
               "obj/arm/mdel.bin MDEL.BIN"   "obj/arm/mmd.bin MMD.BIN" \
-              "obj/arm/mkfsfat.bin MKFSFAT.BIN"; do
+              "obj/arm/mkfsfat.bin MKFSFAT.BIN" "obj/arm/sh.bin SH.BIN"; do
     src="${spec% *}"; dst="${spec#* }"
     if [ -f "$src" ]; then
       mcopy -o -i "$IMAGE" "$src" "::/TOOLS/$dst" || fail "mcopy ::/TOOLS/$dst"
@@ -329,6 +329,15 @@ stage_src() {
   mcopy -s -o -i "$IMAGE" src/user/selfhost "::/SRC/src/user/./" || fail "mcopy src/user/selfhost"
   cnt=$(find src/user/selfhost -type f | wc -l)
   add_payload "$cnt" "$(du -sb src/user/selfhost | awk '{print $1}')"
+  # The driver's default script path is /SRC/SELFHOST.RUN and the RUN file's
+  # stages reference /SRC/SELFHOST.SH — both belong at the /SRC ROOT (not
+  # just nested under src/user/selfhost), exactly like the payload mode.
+  for f in SELFHOST.RUN SELFHOST.SH; do
+    if [ -f "src/user/selfhost/$f" ]; then
+      mcopy -o -i "$IMAGE" "src/user/selfhost/$f" "::/SRC/$f" || fail "mcopy ::/SRC/$f"
+      add_payload 1 "$(stat -c %s "src/user/selfhost/$f")"
+    fi
+  done
 
   # Kernel linker script (repo-root linker.ld; the host link uses
   # -T linker.ld, cwd = the script's dir) + the build driver + boot assets.
