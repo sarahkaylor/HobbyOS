@@ -108,9 +108,17 @@
    here, so the kernel headers don't grow a hard include chain. */
 struct addr_space;
 
-/* SYS_GETARGV blob limits (see struct process.eargv). */
-#define HO_EXEC_MAX_ARGS 32
-#define HO_EXEC_ARGV_LEN 256
+/* SYS_GETARGV blob limits (see struct process.eargv).
+ * W2-10 (selfhost, docs/selfhost/os-gap-audit.md): the 256 B / 32-arg
+ * envelope blocked every out-of-process toolchain job (ld/llvm-ar/
+ * objcopy argv ~>256 B with @resp + a half-dozen flags).  Raised to
+ * 4096 B / 128 args -- still two small per-PCB arrays (64 slots x
+ * ~3.8 KiB extra BSS each for proc_table.eargv and spawn_ex_pool), and
+ * a 4 KiB kernel-stack marshalling buffer is cheap inside the 64 KiB
+ * per-CPU kernel stacks.  _SC_ARG_MAX (src/libc/src/stat.c) reports the
+ * same honest number. */
+#define HO_EXEC_MAX_ARGS 128
+#define HO_EXEC_ARGV_LEN 4096
 
 /* P5 (docs/browser/p5-exec-signals-design.md D7): env blob + signal
  * table sizes.  Numbers 1..HO_SIG_MAX-1 are the valid disposition range;
@@ -294,6 +302,14 @@ struct process {
   uint64_t sig_restorer;
   int sig_in_handler;
   uint64_t sig_frame;
+
+  /* --- W2-5 (selfhost, os-gap-audit.md §4): wait4 rusage ------------- *\
+   * Set ONLY by the blocking path of process_wait4 (the caller's
+   * validated rusage out-ptr); 0 for plain waitpid() blocking waits.
+   * The unified reap_deliver_locked() re-validates and fills it
+   * cross-context before waking the parked parent, then clears it.
+   * Appended at the END so parallel lanes merge additively. */
+  uint64_t wait4_rusage;
 };
 
 // Initialize the process subsystem and zero out the process table.
@@ -328,6 +344,29 @@ void process_free(int pid);
 // Blocking waitpid: reaps an exited child (returns its pid + status),
 // returns 0 with WNOHANG when children are running, -ECHILD when none.
 int process_waitpid(struct trap_frame *tf);
+
+/* W2-5 (selfhost, os-gap-audit.md §§4/12): kernel-side rusage blob.
+ * Byte layout mirrors the sysroot's Linux-shaped `struct rusage`
+ * (src/user/toolchain/sysroot-headers/sys/resource.h -- the header the
+ * LLVM toolchain compiles against): two 16-byte timevals (sec, usec)
+ * then fourteen 8-byte longs; 144 bytes, no padding.  The kernel fills
+ * it FIELD-BY-FIELD into the caller's user buffer (never a whole-struct
+ * cast, house rule) and validates the range first (OQ5). */
+#define HO_RUSAGE_SIZE 144
+struct ho_rusage {
+  int64_t ru_utime_sec, ru_utime_usec; /* ru_utime (user CPU) */
+  int64_t ru_stime_sec, ru_stime_usec; /* ru_stime (system CPU) */
+  int64_t ru_maxrss;                   /* peak RSS, KiB */
+  int64_t ru_ixrss, ru_idrss, ru_isrss;
+  int64_t ru_minflt, ru_majflt, ru_nswap;
+  int64_t ru_inblock, ru_oublock, ru_msgsnd, ru_msgrcv;
+  int64_t ru_nsignals, ru_nvcsw, ru_nivcsw;
+};
+
+/* W2-5: waitpid(2) + a rusage out-param.  Same pid/status/options
+ * semantics as process_waitpid -- the rusage pointer rides tf->regs[3]
+ * (canonical ARM positions; the x64 trap handler remaps onto them). */
+int process_wait4(struct trap_frame *tf);
 /* Phase 4 (memory): per-process brk + anonymous mmap/munmap (region
  * carving over the pre-mapped 32MB user region; see process.h layout).
  * Return a VA or a negative errno (munmap: 0 or negative errno). */
