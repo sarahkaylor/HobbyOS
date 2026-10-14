@@ -16,7 +16,8 @@
 #             formatted FAT filesystem (e.g. created with mkfs.fat -F 16).
 #
 # Payload (frozen F2 shape, refined with measurements from the workstation
-# tree on 2026-10-14 — see docs/selfhost/acceptance.md §2):
+# tree on 2026-10-14 — see docs/selfhost/acceptance.md §2; wave-2 additions
+# marked [v2]):
 #   /SRC/src/**                   615 files, 22.33 MiB   (real source tree, AD-11)
 #   /SRC/Makefile.hobbyos         (optional — absent today, warned if missing)
 #   /SRC/tools/**                  26 files, 0.37 MiB   (small host-side tools)
@@ -27,7 +28,15 @@
 #                                   arm branch, Makefile:1763-1768)
 #   /SRC/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include/**
 #                                  (C++ acceptance set only; 1681 files,
-#                                   11.72 MiB; skip with STAGE_LIBCXX=0)
+#                                   11.72 MiB; skip with STAGE_LIBCXX=0 — kept
+#                                   at its default until the M3 AD-9 freeze)
+#   /SRC/SELFHOST.RUN              [v2] the in-OS build driver script
+#                                  (src/user/selfhost/SELFHOST.RUN)
+#   /SELFHOST.BIN                  [v2] the in-OS build driver binary
+#                                  (obj/arm/selfhost.bin by default; override
+#                                  with SELFHOST_BIN=<path>.  Skipped with a
+#                                  WARNING when not built yet)
+#   /tmp                           [v2] base dir ensured on the image
 #
 # Output: a size report (mdir totals | files | bytes) and an informational
 # count of payload entries whose basenames exceed FAT 8.3 (informational for
@@ -165,6 +174,33 @@ if [ "$STAGE_LIBCXX" = "1" ] && [ -d "$LIBCXX_INC" ]; then
   # regardless of the source directory's basename.
   mcopy -s -i "$IMAGE" "$LIBCXX_INC"/* "::/SRC/$local_dst/include/" || exit 1
   add_payload "$(find "$LIBCXX_INC" -type f | wc -l)" "$(du -sb "$LIBCXX_INC" | awk '{print $1}')"
+fi
+
+# [v2] base dirs the in-OS build expects on the boot disk (idempotent:
+# mmkdir_p skips components that already exist).  /tmp on a real disk.img
+# exists already (Makefile recipe); a minimal scratch image may lack it.
+mmkdir_p "::/tmp" || warn "could not ensure ::/tmp on the image"
+
+# [v2] in-OS acceptance driver: stage the binary to the disk ROOT (the
+# desktop Apps menu + the shell resolve it from there, acceptance §5.3) and
+# its command script to /SRC (the driver's default path).  The binary is a
+# build product — tolerate a pre-build invocation with a WARNING instead of
+# failing, so `stage` alone can still be a first step in a clean checkout.
+SELFHOST_BIN="${SELFHOST_BIN:-obj/arm/selfhost.bin}"
+if [ -f "$SELFHOST_BIN" ]; then
+  # -o: overwrite without prompting — a previous -f run's ::/SELFHOST.BIN is
+  # at the disk ROOT (outside /SRC), so it survives the /SRC mdeltree and
+  # must be replaced in place.
+  mcopy -o -i "$IMAGE" "$SELFHOST_BIN" ::/SELFHOST.BIN || exit 1
+  add_payload 1 "$(stat -c %s "$SELFHOST_BIN")"
+else
+  warn "SELFHOST driver bin not built ($SELFHOST_BIN) — skipping ::/SELFHOST.BIN (make obj/arm/selfhost.bin)"
+fi
+if [ -f src/user/selfhost/SELFHOST.RUN ]; then
+  mcopy -o -i "$IMAGE" src/user/selfhost/SELFHOST.RUN ::/SRC/SELFHOST.RUN || exit 1
+  add_payload 1 "$(stat -c %s src/user/selfhost/SELFHOST.RUN)"
+else
+  warn "SELFHOST.RUN script missing (src/user/selfhost/SELFHOST.RUN) — skipping ::/SRC/SELFHOST.RUN (driver will report SCRIPT-MISSING)"
 fi
 
 # ---- report ----

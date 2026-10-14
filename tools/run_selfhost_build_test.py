@@ -66,7 +66,12 @@ BOOT_MARKER = "Booting AArch64 OS"
 MENU_RE = re.compile(r"\[MENU\]\s*(?:\[CONSOLE\]\s*)*(\d+)\s*=\s*([A-Za-z0-9_.]+)")
 SELFHOST_TAG = "[SELFHOST]"
 COMPLETE = "ACCEPTANCE-COMPLETE"
-FAIL_RE = re.compile(r"\bFAIL(?:ED)?\b")
+# FAIL/FAILED token scan: requires the token NOT to be preceded by '-' and
+# NOT followed by "-AT", so the driver's own "...-fail" phase markers and its
+# "FAILED-AT stage=..." line (both part of the clean staged-failure contract)
+# are not counted as tool FAIL tokens — the scan targets compiler errors
+# ("FAIL:", "FAILED") from a tool that actually ran.
+FAIL_RE = re.compile(r"(?<!-)\bFAIL(?:ED)?\b(?!-AT)")
 
 EXIT_OK, EXIT_HARNESS = 0, 15
 EXIT_CODES = {
@@ -415,11 +420,24 @@ def main():
 
         serial_txt = read_serial(args.serial)
 
-        if args.no_launch:
-            cls, detail = classify(serial_txt, timeout_hit=boot_el is None)
-            result["failure_class"], result["failure_detail"] = cls, detail if cls == "boot_failure" or boot_el is None else "boot ok (no-launch mode)"
+        # Kernel never came up: classify right away — no driver can run, and
+        # waiting out the verdict timeout on a dead image wastes a QEMU run.
+        if boot_el is None:
+            cls, detail = classify(serial_txt, timeout_hit=False)
+            result["failure_class"], result["failure_detail"] = cls, detail
             save()
-            return EXIT_OK if boot_el is not None else EXIT_CODES[cls]
+            log("VERDICT: %s — %s" % (cls, detail))
+            return EXIT_CODES.get(cls, EXIT_HARNESS)
+
+        if args.no_launch:
+            cls, detail = classify(serial_txt, timeout_hit=False)
+            # no-launch = S4-style kernel-marker boot only: a booted kernel
+            # IS the pass condition; the driver assertions don't apply.
+            if boot_el is not None:
+                cls, detail = "success", "boot ok (no-launch mode) — kernel marker present, driver not run"
+            result["failure_class"], result["failure_detail"] = cls, detail
+            save()
+            return EXIT_OK if cls == "success" else EXIT_CODES.get(cls, EXIT_HARNESS)
 
         # driver launch via the Apps menu
         if boot_el is not None:

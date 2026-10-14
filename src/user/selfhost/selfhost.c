@@ -42,6 +42,8 @@
  *   tool reported failure); 2 = script missing/unreadable; 3 = usage error.
  */
 #include "libc.h"
+#include <fcntl.h>  /* O_CREAT — file_open() honors it: a missing target only
+* comes into existence with O_CREAT (kernel fs.c). */
 
 #define SCRIPT_MAX 16384
 #define LINE_MAX 384
@@ -269,11 +271,14 @@ int main(int argc, char **argv) {
   emit("\n");
 
   /* Best-effort evidence log.  unlink() first: FAT has no truncate, so an
-   * old, longer OUT.LOG would keep stale tail bytes (pitfall #10). */
+   * old, longer OUT.LOG would keep stale tail bytes (pitfall #10).  The
+   * create needs O_CREAT — file_open() returns ENOENT for a missing target
+   * otherwise (create-on-open is no longer implicit). */
   unlink("/SRC/OUT.LOG");
-  log_fd = open("/SRC/OUT.LOG", 0);
+  log_fd = open("/SRC/OUT.LOG", O_CREAT);
   if (log_fd < 0) {
     log_fd = -1;
+    emit("[SELFHOST] WARN out-log unavailable (open /SRC/OUT.LOG failed)\n");
   }
 
   fd = open(script, 0);
