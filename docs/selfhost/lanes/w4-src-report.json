@@ -3,6 +3,7 @@
   "wave": 4,
   "status": "complete",
   "branch": "selfhost/w4-src",
+  "summary": "Makefile.hobbyos v1 landed and is proven to parse + resolve targets under the in-OS GNU make port; /SRC build-subset staging (307 files, 4.77 MiB) rides the disk.img recipe; S0 and S1 both ran end-to-end through the host harness and reached the FIRST TRUE in-OS compile line (clang invoked for src/kernel/main.c and src/user/hello.c), failing cleanly at exec with a code-anchored kernel blocker: the 1 MiB MAX_PROGRAM_SIZE gate (program_loader.c program_too_large) rejects CLANG.BIN's 126 MB — reported to w4-kernel/w4-clang.  The missing /TOOLS/SH.BIN (sketch SHELL dependency) was found + fixed via a first-run kernel wedge.  AD-9 frozen: STAGE_LIBCXX=0 (all acceptance TUs are C).",
   "gates": {
     "make_disk_img": {
       "green": true,
@@ -77,7 +78,8 @@
   ],
   "commits": [
     "118508b (Makefile.hobbyos + --src + AD-9 + RUN/SH wrapper + acceptance)",
-    "da60f2f (--src nesting + fixture merge + payload carried products + /TOOLS/SH.BIN)"
+    "da60f2f (--src nesting + fixture merge + payload carried products + /TOOLS/SH.BIN)",
+    "37711c4 (S0/S1 dry-run evidence, report, evidence doc)"
   ],
   "blockers": [
     {
