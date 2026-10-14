@@ -97,9 +97,11 @@ python3 run_desktop_apps_test.py                             # expect: ALL DESKT
   Use `tools/run_apps_test_scoped.py` (never the broad-pkill
   `run_apps_test.py`) on a shared host.
 
-- **Nothing pushed**: repo `main` and the fork branch `browser/ui-theme` are
-  local only (publish decision deferred; mirror pipeline exists, see
-  browser.md §11 2026-10-11).
+- **Published 2026-10-14** (user request): OS repo `main` → `sarahkaylor/HobbyOS`
+  (all theme commits + records); fork `browser/ui-theme` → `sarahkaylor/webkit-hobbyos`
+  @ `e22366b385` (working `2952eed95d`; 8/8 files byte-identical, identical
+  diffstat; incremental patch-publish). Publish workspace + procedure:
+  `~/webkit-upload/README.md` (+ `publish_branch.sh`).
 - The vendored snapshot `third_party/webkit-hobbyos/` + its `build/intel/browser.bin`
   still carry the pre-theme chrome; refresh (or re-vendor) when the next
   browser artifact is cut — the x64 acceptance disk was built from the
