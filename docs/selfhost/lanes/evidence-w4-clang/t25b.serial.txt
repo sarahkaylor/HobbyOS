@@ -1,0 +1,11 @@
+v2 loader: image mapped (lazy), bytes=555568 pages=136 first=in elap=1ms
+v2 loader: image mapped (lazy), bytes=51120 pages=13 first=in elap=0ms
+[SELFHOST] phase=t25b-link-start
+Loading program for scheduler (v2 AS): /TOOLS/LLD2.BIN
+v2 loader: image mapped (lazy), bytes=53250208 pages=13001 first=in elap=1ms
+v2 loader: PID=4 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[IMGPRF] pid=4 start: pages=13001 batch=128
+[KERNEL] pid=4 (/TOOLS/LLD2.BIN) memory fault VA=0x000000100064E000 PC=0x000000100064E000 rw=rx in=PROT -> killed
+[KERNEL] Process 4: /TOOLS/LLD2.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=t25b-link-fail reason=tool-rc
+[KERNEL] FATAL: CPU 0x0000000000000000 Synchronous Exception in EL1! ESR: 0x0000000096000004 EC: 0x0000000000000025 ISS: 0x0000000000000004, FAR: 0x0000FFFFFFFFF018, ELR: 0x000000043A6AF37C, PROC pid=5 name=, SPSR: 0x0000000060000084, LR: 0x000000043A6ABE30, TFP: 0x000000043F6B1B50

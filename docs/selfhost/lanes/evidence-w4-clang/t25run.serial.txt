@@ -1,0 +1,10 @@
+[MENU] 73=HELLO.BIN
+[SELFHOST] phase=t25-hello-run-start
+Loading program for scheduler (v2 AS): /HELLO.BIN
+[HELLO] entering main
+[KERNEL] Process 4: /HELLO.BIN exited unexpectedly or gracefully.
+[HELLO] argc=1
+[HELLO] argv[0]="/HELLO.BIN"
+[HELLO] main returned 0
+[SELFHOST] phase=t25-hello-run-done rc=0
+[SELFHOST] ACCEPTANCE-COMPLETE stages=1
