@@ -1,0 +1,12 @@
+[SELFHOST] DRIVER-UP script=/SRC/SELFHOST.RUN
+[SELFHOST] phase=w5-version-start
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+v2 loader: PID=4 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[IMGPRF] pid=4 start: pages=22997 batch=128
+[IMGPRF] pid=4 done: pages=22997 mapped=22654 skipped=343 batches=180 stop=0 ms=6702
+clang version 21.1.8 (/home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang d2aab3df4e69c1ec959b45b6e9d8626291ea5bb5)
+Target: aarch64-unknown-none-elf
+Thread model: posix
+InstalledDir:
+[SELFHOST] phase=w5-version-done rc=0
+[SELFHOST] ACCEPTANCE-COMPLETE stages=1

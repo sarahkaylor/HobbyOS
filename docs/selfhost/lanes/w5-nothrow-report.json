@@ -1,0 +1,75 @@
+{
+  "lane": "w5-nothrow",
+  "wave": 5,
+  "role": "fix the clang in-OS operator-new(std::nothrow) override-assert wall (w4-clang b2) at the build-config/closure level; prove an in-OS hello.c -> Hello.o compile with serial evidence",
+  "branch": "selfhost/w5-nothrow",
+  "base_tip": "92815fa",
+  "commits": [
+    "d2aab3d w5-nothrow: toolchain closure cxxrt shim fixes clang _Znwm override wall",
+    "7b2607a w5-nothrow: shim operator delete must free() the raw pointer (nothrow-new fix)",
+    "<evidence commit>"
+  ],
+  "timestamps": {
+    "relink_start_utc": "2026-10-14 05:5x",
+    "relink_done_utc": "2026-10-14 05:57",
+    "t24_in_os_pass_utc": "2026-10-14 ~06:2x"
+  },
+  "method": "warm l1 worktree, branch selfhost/w5-nothrow (branch pre-created at the merged tip). Fixed the TOOLCHAIN CLOSURE (src/user/toolchain/**) + relinked clang/lld/llvm-ar/llvm-objcopy via ninja in obj/selfhost/llvm-build -j64; refreshed install-distribution staging; host llvm-objcopy -O binary -> CLANG3.BIN staged as a NEW /TOOLS probe name on a copy of the w3-tools disk; drove T2.3b/T2.4 through the SELFHOST.BIN driver via a staged /SRC/SELFHOST.RUN script (tools/w5_nothrow_probe.py, adaptation of w4_clang_probe.py). Verdicts from serial markers + the in-OS-produced HELLO.O pulled off the image and validated host-side.",
+  "gates": [
+    {
+      "gate": "host layout: _Znwm inside __lcxx_override after relink",
+      "result": "PASS (all four binaries)",
+      "detail": "clang-21: _Znwm == __start___lcxx_override == 0x1004866dd0, section [0x1004866dd0,0x1004866f04); lld ==0x100287b1b0; llvm-ar ==0x10003e2760; llvm-objcopy ==0x1000397fb0. Single strong _Znwm/__cxa_atexit/cxxrt_oom/__dso_handle (cxxrt.o never extracted).",
+      "cmd": "llvm-nm obj/selfhost/llvm-build/bin/* | grep -E '_Znwm|__start___lcxx_override'"
+    },
+    {
+      "gate": "T2.3b clang --version in-OS (flat CLANG3.BIN, fixed closure)",
+      "result": "PASS",
+      "serial": "clang version 21.1.8 (.../clang d2aab3df...); Target: aarch64-unknown-none-elf; Thread model: posix; InstalledDir: ; [SELFHOST] phase=w5-version-done rc=0; [SELFHOST] ACCEPTANCE-COMPLETE stages=1",
+      "evidence": "docs/selfhost/lanes/evidence-w5-nothrow/t23b-version.serial.txt"
+    },
+    {
+      "gate": "T2.4 clang -c hello.c -> hello.o IN-OS (fixed closure, acceptance flags)",
+      "result": "PASS",
+      "serial": "[IMGPRF] pid=4 done: pages=22997 mapped=22642 skipped=355 batches=180 stop=0 ms=4517; [SELFHOST] phase=w5-compile-done rc=0; [SELFHOST] ACCEPTANCE-COMPLETE stages=1",
+      "hello_o": "2272-byte ELF64 REL (relocatable) AArch64 object pulled off probe.img:/SRC/T2SRC/HELLO.O; nm: _Z4mainiPPc T + U print + U print_dec; sections .text/.rela.text/.rodata.str1.1",
+      "evidence": "docs/selfhost/lanes/evidence-w5-nothrow/t24-compile.serial.txt"
+    }
+  ],
+  "root_cause_1": {
+    "wall": "w4-clang b2: libc++ -fno-exceptions nothrow-operator-new override assert (brk #1 / EC=0x3C) in-OS",
+    "mechanism": "HobbyOS libc.a embeds src/libc/src/cxxrt.o with STRONG operator new/delete in plain .text (documented OS design). A toolchain link pulls that member for __cxa_atexit/__dso_handle (libc++abi cxa_atexit.cpp deliberately not built), so its strong _Znwm beats libc++ new.o's WEAK section-attributed _Znwm and lands OUTSIDE the __lcxx_override section -> libc++'s runtime check __is_function_overridden<&operator new> (new.cpp nothrow path) sees an 'overridden' function -> assert -> brk #1.",
+    "evidence_for": "pre-fix clang-21: _Znwm T 0x100484e410 (.text) vs section [0x1004866cc0,..); _Znwm body byte-identical to cxxrt.o's (malloc+over-align+cxxrt_oom), NOT libc++'s operator_new_impl; all four toolchain ELFs affected; NPNEW control unaffected (never pulls cxxrt.o).",
+    "fix": "src/user/toolchain/sysroot-headers/cxxrt_shim.cpp + closure edit in src/user/toolchain/cmake/toolchain-llvm-hobbyos.cmake (commits d2aab3d): shim heads the closure, strong section(\"__lcxx_override\") operator new/new[] + __cxa_atexit/__cxa_finalize/__dso_handle (+placement forms + cxxrt_oom) so lld never extracts cxxrt.o. Fail-safe: any future cxxrt.o pull collides strong-vs-strong -> loud link error."
+  },
+  "root_cause_2": {
+    "wall": "second in-OS data abort surfaced once wall 1 was fixed: free(BLOCK_MAGIC)",
+    "mechanism": "shim operator delete -> tc_free_aligned(p) -> free([p-8]); clang deletes memory from libc++'s operator new(std::nothrow), whose -fno-exceptions path returns a RAW std::malloc payload (no stash), so [p-8] == the block's own BLOCK_MAGIC -> free(BLOCK_MAGIC=0x48424F424C4B4D47) -> data abort (VA=0x48424F424C4B4D3F).",
+    "evidence_for": "gdb-multiarch over QEMU gdbstub, conditional breakpoint on free entry, latched x0==BLOCK_MAGIC: x0=0x48424f424c4b4d47 x30=0x10047d8708 (tc_free_aligned, cxxrt_shim.cpp) frame->0x10047d86c8 (operator delete(void*)) [evidence-w5-nothrow/gdb-free-caller.txt]. Serial: [KERNEL] pid=4 (/TOOLS/CLANG3.BIN) memory fault VA=0x48424F424C4B4D3F PC=0x100484C804 rw=r in=HOLE -> killed [t24-wall2-freemagic.serial.txt].",
+    "fix": "commit 7b2607a: shim delete delegates to free(ptr) (HobbyOS free() natively distinguishes stashed [p-8]=raw vs raw [p-8]=BLOCK_MAGIC payloads), mirroring libc++ delete.cpp."
+  },
+  "os_wide_followup": [
+    "src/libc/src/cxxrt.cpp's operator new/delete lack the __lcxx_override section attribute AND use the stash-read delete: any OS userland program linking cxxrt.o + libc++ that calls new(nothrow) (raw malloc payload) then delete has the same latent free(BLOCK_MAGIC) bug. Recommend: give cxxrt's new/delete the section attribute and make cxxrt delete call free(ptr).",
+    "w4-kernel b4 ([IDLESTUCK] pid=5 EL1 housekeeping crash) can fire after a SUCCESSFUL tool run and swallow ACCEPTANCE-COMPLETE (observed once on w5v; clean run captured for the verdicts)."
+  ],
+  "files_created_or_modified": [
+    "src/user/toolchain/sysroot-headers/cxxrt_shim.cpp (new; shim: strong section-attributed new/new[] + deletes + __cxa_atexit/__cxa_finalize/__dso_handle + placement forms + cxxrt_oom; delete delegates to free(ptr))",
+    "src/user/toolchain/cmake/toolchain-llvm-hobbyos.cmake (closure: compile cxxrt_shim.o at configure time and head the closure with it)",
+    "tools/w5_nothrow_probe.py (new; probe driver, adaptation of w4_clang_probe.py, harness imported unchanged; optional W5_GDB_FREE=1 gdbstub root-cause mode)",
+    "docs/selfhost/lanes/w5-nothrow-evidence.md (new)",
+    "docs/selfhost/lanes/evidence-w5-nothrow/t23b-version.serial.txt (new)",
+    "docs/selfhost/lanes/evidence-w5-nothrow/t24-compile.serial.txt (new)",
+    "docs/selfhost/lanes/evidence-w5-nothrow/t24-wall2-freemagic.serial.txt (new)",
+    "docs/selfhost/lanes/evidence-w5-nothrow/gdb-free-caller.txt (new)",
+    "docs/selfhost/lanes/w5-nothrow-report.json (this file)"
+  ],
+  "untouched": [
+    "LLVM/libc++ sources (AD-3): zero source patches; config/__config_site untouched",
+    "src/libc, src/kernel, Makefile, Makefile.hobbyos, tools/selfhost-stage.sh, tools/run_selfhost_build_test.py, /TOOLS/<frozen>.BIN names",
+    "main repo /home/sarah/Documents/GitHub/HobbyOS (no pushes; local commits only)"
+  ],
+  "build_state": {
+    "relinked": "clang-21 (126,056,528 B ELF), lld, llvm-ar, llvm-objcopy in obj/selfhost/llvm-build + obj/selfhost/dist-staging refreshed via DESTDIR install-distribution",
+    "flat_probe": "obj/w5nothrow/flat/CLANG3.BIN (94,192,328 B); flat[0]==ELF[0x10000] byte-verified; first bytes fd 7b bb a9 (real AArch64 prologue)"
+  }
+}
