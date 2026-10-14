@@ -587,6 +587,17 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-14 — Battery round 6 / VM red: `TORTURE exec-wait-cycles` tip-scoped failure at
+  `288995c` — investigation lane w8-torture dispatched.** Evidence: VM merged-w7 + merged-w7r
+  both FAIL (`exec_ok=0`, `exec_rejected=0`, suite 44 s; children DO run — 16×
+  `[TORTURE.CHILD] ok`; one fail-run had a NORMAL 179 s wall). Controlled A/B same night:
+  pre-w6 tip `42c6c0b` on the VM PASSES (`exec_ok=8`) even in a slow 322 s run. Local at the
+  new tip PASSES (`exec_ok=8`, 301 ms). Failure-class signature = all cycles `-1`
+  (waitpid≠pid ∥ !WIFEXITED ∥ status≠want) ×both retry attempts; candidates: exec-marshal
+  argv loss (`pl_strcpy` 64→4096), child exit-path fault vs new status rules, `sys_exec`
+  4096-wide stack locals, cxxrt.o binary delta. Side-note: the pre-w6 A/B run also showed a
+  new `[LFN] FAIL long dir listed with long name` token (first sighting — watch).
+
 - **2026-10-14 — Wave 6 (w6-run) merged (`288995c`): THE IN-OS BUILD RUNS END-TO-END.**
   Verified by the integrator against raw evidence before merge: every stage marker on raw
   serial (`s0-check-done rc=0`, `s1-user-done rc=0`, `t25-run-done rc=0`, `kernel-link-done
