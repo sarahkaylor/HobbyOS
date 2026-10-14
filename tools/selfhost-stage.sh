@@ -15,13 +15,21 @@
 #     image   FAT16 image path (default: disk.img).  Must exist and be a
 #             formatted FAT filesystem (e.g. created with mkfs.fat -F 16).
 #   tools/selfhost-stage.sh --tools [-f] [image]
-#     [v3] stage ONLY the in-OS toolchain to /TOOLS (frozen F1 layout:
+#     [v3+v5] stage ONLY the in-OS toolchain to /TOOLS (frozen F1 layout:
 #     /TOOLS/{CLANG.BIN, LLD.BIN, LLVMAR.BIN, OBJCOPY.BIN, MAKE.BIN,
 #     MCOPY.BIN, MDEL.BIN, MMD.BIN, MKFSFAT.BIN} + /TOOLS/RESDIR/include/**)
 #     and leave /SRC untouched.  With -f the existing /TOOLS tree is deleted
 #     first; without it, files are overwritten in place (-o).  The disk.img
 #     recipe invokes this variant; the SELFHOST harness keeps staging /SRC in
 #     its own -f run, so the two payloads never clobber each other.
+#     [v5] the LLVM distribution ELFs (clang-21, lld, llvm-ar, llvm-objcopy)
+#     are converted at STAGE TIME to FLAT .bin images via the host
+#     llvm-objcopy -O binary (the M2 step) — the in-OS loader executes a flat
+#     .bin at file offset 0 with entry == USER_IMG_BASE, so a raw ELF executes
+#     its \x7fELF header and faults instantly (w4-clang b1).  Each ELF is
+#     sanity-checked (e_entry == 0x1000000000 == first PT_LOAD p_vaddr, flat
+#     head == ELF first-LOAD content) before staging; an already-flat tool is
+#     skipped cleanly.  See stage_tools() elf_flat().
 #   tools/selfhost-stage.sh --src [-f] [image]
 #     [v4] stage ONLY the BUILD-REQUIRED source subset to /SRC — the kernel
 #     sources, shared headers, libc (for the future in-OS libc rebuild), the
@@ -133,6 +141,98 @@ mmkdir_p() {
   return 0
 }
 
+# ---- [v5] FLAT .bin conversion (the M2 step, now in the staging pipeline) ----
+# The in-OS loader executes a flat .bin at file offset 0 with entry ==
+# USER_IMG_BASE (0x1000000000) — it does NOT parse ELF.  The LLVM
+# distribution tools are raw aarch64-none-elf ELF (entry == first PT_LOAD
+# vaddr == 0x1000000000, but FILE offset 0 holds the ELF header), so a raw
+# ELF staged as .BIN executes "\x7fELF" and faults on entry (lane w4-clang,
+# docs/selfhost/lanes/w4-clang-report.json b1, serial EC=0 at
+# ELR=0x1000000000).  w4-clang PROVED the fix: llvm-objcopy -O binary of the
+# same clang runs in-OS printing its full version banner (94 MB flat, pages
+# prefetched, exit 0).  This block makes that conversion a function of the
+# --tools staging so a normal `make disk.img` yields a RUNNABLE /TOOLS.
+#
+# Sanity checks (llvm-objcopy -O binary is silent about ill-formed input, so
+# we verify the contract the loader depends on):
+#   * the source must be an ELF (magic 7f 45 4c 46) — anything else is
+#     already flat (ported obj/arm/*.bin) and is skipped cleanly;
+#   * e_entry must equal USER_IMG_BASE (0x1000000000);
+#   * the FIRST PT_LOAD p_vaddr must equal e_entry (so flat offset 0 IS
+#     _start — the loader's entry-at-0 contract);
+#   * after conversion, the flat image head (64 B) must be byte-identical
+#     to the ELF's first-LOAD file content (w4-clang's verified invariant:
+#     flat[0] == ELF[file offset 0x10000]).
+# Any check failure aborts the staging (a broken toolchain must not land
+# silently on the image).
+USER_IMG_BASE="0x0000001000000000"
+
+# le64 <file> <offset> — 8 little-endian bytes as 0x%016x (ELF field reader)
+le64() { od -An -tu1 -j "$2" -N8 "$1" | awk '{ v=0; for (i=1; i<=NF; i++) v += $i * 256^(i-1); printf "0x%016x", v }'; }
+# le32 <file> <offset> — 4 little-endian bytes as 0x%08x
+le32() { od -An -tu1 -j "$2" -N4 "$1" | awk '{ v=0; for (i=1; i<=NF; i++) v += $i * 256^(i-1); printf "0x%08x", v }'; }
+# le16 <file> <offset> — 2 little-endian bytes as 0x%04x
+le16() { od -An -tu1 -j "$2" -N2 "$1" | awk '{ v=0; for (i=1; i<=NF; i++) v += $i * 256^(i-1); printf "0x%04x", v }'; }
+
+# elf_flat <elf> <flat> — convert an ELF tool to a flat image in place via
+# llvm-objcopy -O binary, returning 0 (converted), 1 (not an ELF — already
+# flat, skip), or 2 (ELF but a sanity check failed; message on stderr).
+elf_flat() {
+  local elf="$1" flat="$2" magic
+  magic="$(od -An -tx1 -N4 "$elf" | tr -d ' \n')"
+  # ELF magic + 64-bit class (EI_CLASS, byte 4 = 2) + e_machine=EM_AARCH64 (0x00b7)
+  [ "$magic" = "7f454c46" ] && [ "$(od -An -tu1 -j 4 -N1 "$elf" | tr -d ' ')" = "2" ] && \
+    [ "$(le16 "$elf" 0x12)" = "0x00b7" ] || {
+    echo "elf_flat: $elf is not a 64-bit AArch64 ELF (magic=$magic) — skipping flat conversion" >&2
+    return 1
+  }
+  command -v llvm-objcopy >/dev/null 2>&1 || {
+    echo "elf_flat: llvm-objcopy not found on HOST — cannot convert $elf to flat .bin (M2 step)" >&2
+    return 2
+  }
+  local entry phoff phentsize phnum i off ptype poff pvaddr
+  entry="$(le64 "$elf" 0x18)"
+  [ "$entry" = "$USER_IMG_BASE" ] || {
+    echo "elf_flat: $elf e_entry=$entry != $USER_IMG_BASE (loader entry-at-0 contract)" >&2
+    return 2
+  }
+  phoff="$(le64 "$elf" 0x20)"; phoff=$((phoff))
+  phentsize="$(le32 "$elf" 0x36)"; phentsize=$((phentsize))
+  phnum="$(le32 "$elf" 0x38)"; phnum=$((phnum))
+  poff=""; pvaddr=""
+  i=0
+  while [ "$i" -lt "$phnum" ]; do
+    off=$((phoff + i*phentsize))
+    if [ "$(le32 "$elf" "$off")" = "0x00000001" ]; then   # PT_LOAD
+      pvaddr="$(le64 "$elf" $((off+16)))"
+      if [ "$pvaddr" != "$entry" ]; then
+        echo "elf_flat: $elf first PT_LOAD vaddr=$pvaddr != e_entry=$entry (flat image would not start at _start)" >&2
+        return 2
+      fi
+      poff="$(le64 "$elf" $((off+8)))"; poff=$((poff))
+      break
+    fi
+    i=$((i+1))
+  done
+  [ -n "$poff" ] || { echo "elf_flat: $elf has no PT_LOAD — cannot flat-convert" >&2; return 2; }
+  if ! llvm-objcopy -O binary "$elf" "$flat"; then
+    echo "elf_flat: llvm-objcopy -O binary failed on $elf" >&2
+    return 2
+  fi
+  # flat head (64 B) must match the ELF's first-LOAD file content
+  local head_elf head_flat
+  head_elf="$(mktemp)"; head_flat="$(mktemp)"
+  dd if="$elf" bs=1 skip="$poff" count=64 2>/dev/null > "$head_elf"
+  dd if="$flat" bs=1 count=64 2>/dev/null > "$head_flat"
+  if ! cmp -s "$head_elf" "$head_flat"; then
+    echo "elf_flat: $elf flat head != ELF first-LOAD content (offset $poff) — conversion broken" >&2
+    rm -f "$head_elf" "$head_flat"
+    return 2
+  fi
+  rm -f "$head_elf" "$head_flat"
+  return 0
+}
+
 # ---- [v3] /TOOLS toolchain staging (--tools; frozen F1 layout) ----
 # The in-OS build tools on the startup image: /TOOLS/{CLANG.BIN, LLD.BIN,
 # LLVMAR.BIN, OBJCOPY.BIN, MAKE.BIN, MCOPY.BIN, MDEL.BIN, MMD.BIN,
@@ -153,17 +253,34 @@ stage_tools() {
   mmkdir_p "::/TOOLS" || fail "mmkdir_p ::/TOOLS"
 
   # LLVM distribution tools (skip-with-warning when the M2 staging is absent).
+  # [v5] every ELF here is converted at stage time to a FLAT .bin via the
+  # host llvm-objcopy -O binary (elf_flat above, with sanity checks) — the
+  # M2 step previously recorded as pending.  The frozen /TOOLS names are
+  # unchanged; only the staged content is now runnable in-OS.  Already-flat
+  # sources (not ELF) are skipped cleanly and copied verbatim.
   if [ -f "$DIST_STAGING/usr/local/bin/clang-21" ]; then
-    mcopy -o -i "$IMAGE" "$DIST_STAGING/usr/local/bin/clang-21"  ::/TOOLS/CLANG.BIN  || fail "mcopy CLANG.BIN"
-    mcopy -o -i "$IMAGE" "$DIST_STAGING/usr/local/bin/lld"       ::/TOOLS/LLD.BIN    || fail "mcopy LLD.BIN"
-    mcopy -o -i "$IMAGE" "$DIST_STAGING/usr/local/bin/llvm-ar"   ::/TOOLS/LLVMAR.BIN || fail "mcopy LLVMAR.BIN"
-    mcopy -o -i "$IMAGE" "$DIST_STAGING/usr/local/bin/llvm-objcopy" ::/TOOLS/OBJCOPY.BIN || fail "mcopy OBJCOPY.BIN"
-    n=$((n + 4))
-    total_bytes=$((total_bytes +
-      $(stat -c %s "$DIST_STAGING/usr/local/bin/clang-21") +
-      $(stat -c %s "$DIST_STAGING/usr/local/bin/lld") +
-      $(stat -c %s "$DIST_STAGING/usr/local/bin/llvm-ar") +
-      $(stat -c %s "$DIST_STAGING/usr/local/bin/llvm-objcopy")))
+    local flatdir
+    flatdir="$(mktemp -d)" || fail "mktemp for flat conversion"
+    stage_flat() {  # stage_flat <elf> <flatname>  — convert-if-ELF then mcopy
+      local elf="$1" fname="$2" flat fl
+      flat="$flatdir/$fname"
+      if elf_flat "$elf" "$flat"; then
+        fl=converted
+      elif [ $? -eq 1 ]; then
+        fl=flat-copy; cp "$elf" "$flat"
+      else
+        rm -rf "$flatdir"; fail "flat conversion of $elf failed (see messages above)"
+      fi
+      mcopy -o -i "$IMAGE" "$flat" "::/TOOLS/$fname" || { rm -rf "$flatdir"; fail "mcopy $fname"; }
+      n=$((n + 1))
+      total_bytes=$((total_bytes + $(stat -c %s "$flat")))
+      echo "selfhost-stage:   $fname <- $elf ($fl, $(stat -c %s "$flat") B)"
+    }
+    stage_flat "$DIST_STAGING/usr/local/bin/clang-21"      CLANG.BIN
+    stage_flat "$DIST_STAGING/usr/local/bin/lld"           LLD.BIN
+    stage_flat "$DIST_STAGING/usr/local/bin/llvm-ar"       LLVMAR.BIN
+    stage_flat "$DIST_STAGING/usr/local/bin/llvm-objcopy"  OBJCOPY.BIN
+    rm -rf "$flatdir"
   else
     warn "/TOOLS toolchain not staged: LLVM distribution staging missing at $DIST_STAGING (build it per docs/selfhost/llvm-bootstrap.md §6 — install-distribution)"
   fi
