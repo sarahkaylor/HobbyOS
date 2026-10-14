@@ -521,8 +521,9 @@ static void test_fat16_lfn_checksum_reject(void) {
   EXPECT_EQ(fat16_resolve_path(path, &e, 0, 0), 0);
 }
 
-/* Parse edge: a truncated LFN run (the tail record's 0x40 last-flag
-   cleared, so the sequence can never complete) must not resolve. */
+/* Parse edge: a truncated LFN run (the 0x40 last-flag record — the run's
+   first slot, one before offset — is MISSING) must not resolve by the
+   long name; the partial chunks must never match a longer query. */
 static void test_fat16_lfn_truncated_run(void) {
   uart_puts("  Running test_fat16_lfn_truncated_run...\n");
   tests_run++;
@@ -540,24 +541,35 @@ static void test_fat16_lfn_truncated_run(void) {
   uint8_t buf[SECTOR_SIZE];
   EXPECT_EQ(virtio_blk_read_sector(sector, buf, 1), 0);
   struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
+  /* Find the record carrying the 0x40 last-flag: scanned backwards from
+     the short entry, it sits at the FARTHEST record of the run (alloc's
+     slot 0).  Save its ordinal for restore, then delete it (0xE5). */
+  int last_k = -1;
+  int first_k = -1;
+  for (int k = (int)offset - 1; k >= 0; k--) {
+    if (entries[k].attr != 0x0F) break;
+    if (last_k < 0) last_k = k;
+    first_k = k;
+  }
   unsigned char saved_ord = 0;
   int patched = 0;
-  int k = (int)offset - 1;
-  /* The record immediately preceding the short entry carries the 0x40
-     last-flag; clear that bit. */
-  if (k >= 0 && entries[k].attr == 0x0F) {
-    saved_ord = ((unsigned char *)&entries[k])[0];
-    ((unsigned char *)&entries[k])[0] = saved_ord & (unsigned char)~0x40;
-    patched = 1;
+  if (first_k >= 0 && (int)offset - first_k > 0) {
+    int k = first_k;
+    if (((unsigned char *)&entries[k])[0] & 0x40) {
+      saved_ord = ((unsigned char *)&entries[k])[0];
+      entries[k].name[0] = (char)0xE5; /* simulate a lost record */
+      patched = 1;
+    }
   }
   EXPECT_EQ(patched, 1);
   EXPECT_EQ(virtio_blk_write_sector(sector, buf, 1), 0);
 
-  /* Incomplete run: must NOT resolve by the long name. */
+  /* Truncated run: the head chunk alone (or the tail alone) must NOT
+     resolve to the full 19-char query. */
   EXPECT_EQ(fat16_resolve_path(path, &e, 0, 0) != 0, 1);
 
-  /* Restore: reachable again. */
-  ((unsigned char *)&entries[k])[0] = saved_ord;
+  /* Restore the record (name[0] IS the LFN ordinal byte): reachable again. */
+  entries[first_k].name[0] = (char)saved_ord;
   EXPECT_EQ(virtio_blk_write_sector(sector, buf, 1), 0);
   EXPECT_EQ(fat16_resolve_path(path, &e, 0, 0), 0);
 }
