@@ -507,6 +507,22 @@ void main(void) {
   uart_puts("Mode: WEBPROC - Running headless WebProcess (WK-3)...\n");
   load_and_run_program_in_scheduler_args("WEBPROC.BIN", -1, -1, -1, -1,
                                          "--wk3-driver");
+#elif defined(KERNEL_MODE_SELFHOST)
+  /* Self-hosting (docs/selfhost/acceptance.md §5.2/5.3, primary drive):
+     single-program boot that launches ONLY SELFHOST.BIN — the in-OS
+     acceptance build driver — with NO desktop.  The driver's stdout/stderr
+     are fd 1/2 unset -> the console-fd fallback (fs.c file_write 0002 ->
+     console_write_user) relays them to the SERIAL console, so every
+     [SELFHOST] phase= marker (echoed by the driver and by the in-OS build
+     tools it spawns) lands in the serial capture.  argv[1] is the driver
+     script (SELFHOST.RUN's <phase>|<tool>|<args> format, acceptance §5.3);
+     the driver defaults to /SRC/SELFHOST.RUN when absent.  The driver ends
+     with [SELFHOST] ACCEPTANCE-COMPLETE or a staged failure marker, exits,
+     all processes drain, and the boot core falls through to the clean
+     halt below. */
+  uart_puts("Mode: SELFHOST - Running in-OS acceptance build driver...\n");
+  load_and_run_program_in_scheduler_args("SELFHOST.BIN", -1, -1, -1, -1,
+                                         "/SRC/SELFHOST.RUN");
 #else
   uart_puts("Mode: DESKTOP - Launching desktop...\n");
   load_and_run_program_in_scheduler("DESKTOP.BIN", -1, -1, -1, -1);

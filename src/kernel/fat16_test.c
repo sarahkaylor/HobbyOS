@@ -865,6 +865,114 @@ static void test_fat16_read_dir_multiple(void) {
   EXPECT_EQ(fat16_resolve_path("/W3RDDIR", &e, 0, 0) != 0, 1);
 }
 
+/* W4-kernel (selfhost, Mission B): allocator-hint chain guard.  The
+ * free-cluster hint in alloc_cluster() changes allocation ORDER after
+ * free/allocate cycles (a freed low cluster is only reused once the scan
+ * wraps), so pin the invariants that must hold regardless: a ftruncate
+ * extend fully zero-fills, truncate frees, re-extend re-zero-fills, and
+ * the on-disk dir entry always reflects the size — through create,
+ * shrink, regrow, reopen and raw readback.
+ */
+static void test_fat16_alloc_hint_chain(void) {
+  uart_puts("  Running test_fat16_alloc_hint_chain...\n");
+  tests_run++;
+
+  const uint32_t BIG = 1024u * 1024u;   /* 1 MiB (spans many 32 KiB clusters) */
+  struct file f;
+  struct fat16_dir_entry e;
+
+  /* Fresh file, extend to 1 MiB: every byte must read back zero (the
+     zero-fill a mkfs -C ftruncate depends on). */
+  EXPECT_EQ(fat16_open("/W4HINT.IMG", &f), 0);
+  EXPECT_EQ(fat16_truncate_to(&f, BIG), 0);
+  EXPECT_EQ(f.fat16.entry.file_size, (int)BIG);
+  EXPECT_EQ(fat16_resolve_path("/W4HINT.IMG", &e, 0, 0), 0);
+  EXPECT_EQ(e.file_size, (int)BIG);
+
+  uint8_t probe[512];
+  for (int z = 0; z < 512; z++) probe[z] = 0;
+  /* watermarks: first sector, first sector of each big span, tail sector */
+  const uint32_t probes[3] = { 0, BIG / 2, BIG - 512 };
+  for (int i = 0; i < 3; i++) {
+    EXPECT_EQ(fat16_seek(&f, (int)probes[i]), 0);
+    EXPECT_EQ(fat16_read(&f, probe, 512), 512);
+    int bad = 0;
+    for (int b = 0; b < 512; b++) if (probe[b] != 0) bad++;
+    EXPECT_EQ(bad, 0);
+  }
+
+  /* Shrink to 4 KiB (frees the clusters above the first), then regrow:
+     the freed clusters are below/around the hint and may be reused in a
+     different ORDER — the regrown region must STILL be all zeros. */
+  EXPECT_EQ(fat16_truncate_to(&f, 4096), 0);
+  EXPECT_EQ(f.fat16.entry.file_size, 4096);
+  EXPECT_EQ(fat16_truncate_to(&f, BIG), 0);
+  EXPECT_EQ(f.fat16.entry.file_size, (int)BIG);
+
+  for (int i = 0; i < 3; i++) {
+    EXPECT_EQ(fat16_seek(&f, (int)probes[i]), 0);
+    EXPECT_EQ(fat16_read(&f, probe, 512), 512);
+    int bad = 0;
+    for (int b = 0; b < 512; b++) if (probe[b] != 0) bad++;
+    EXPECT_EQ(bad, 0);
+  }
+  fat16_close(&f);
+
+  /* Reopen: size and content persist (dir-entry sync on the extend path). */
+  EXPECT_EQ(fat16_open("/W4HINT.IMG", &f), 0);
+  EXPECT_EQ(fat16_seek(&f, (int)(BIG - 512)), 0);
+  EXPECT_EQ(fat16_read(&f, probe, 512), 512);
+  int bad = 0;
+  for (int b = 0; b < 512; b++) if (probe[b] != 0) bad++;
+  EXPECT_EQ(bad, 0);
+  fat16_close(&f);
+
+  EXPECT_EQ(fat16_unlink("/W4HINT.IMG"), 0);
+  EXPECT_EQ(fat16_resolve_path("/W4HINT.IMG", &e, 0, 0) != 0, 1);
+}
+
+/* W4-kernel (selfhost, Mission B): precise in-OS timing of a mkfs.fat -C
+ * ftruncate at the acceptance sizes, for the TCG-slowness investigation.
+ * Compiler-gated (W4_MKFS_TIMING_PROBE, added via CFLAGS on the probe
+ * builds only) so the stock unit tier stays quick; the probe lines carry
+ * the [W4-PROBE] token for serial evidence (grep: ftruncate size=... ms=).
+ * Sizes are deliberately > 1 MiB so the chain walk and per-cluster
+ * zeroing dominate, mirroring the 16/128 MiB OUT.IMG runs.
+ */
+#ifdef W4_MKFS_TIMING_PROBE
+static void test_fat16_extend_timing_probe(void) {
+  uart_puts("  Running test_fat16_extend_timing_probe...\n");
+  tests_run++;
+  extern uint64_t timer_get_ms(void);
+
+  static const uint32_t sizes_mib[3] = { 16, 64, 128 };
+  for (int s = 0; s < 3; s++) {
+    struct file f;
+    char name[24];
+    name[0] = '/'; name[1] = 'W'; name[2] = '4';
+    name[3] = 'P'; name[4] = 'R'; name[5] = 'B';
+    name[6] = (char)('0' + s); name[7] = '.';
+    name[8] = 'I'; name[9] = 'M'; name[10] = 'G'; name[11] = 0;
+    EXPECT_EQ(fat16_open(name, &f), 0);
+    uint64_t t0 = timer_get_ms();
+    uint32_t bytes = sizes_mib[s] * 1024u * 1024u;
+    int rc = fat16_truncate_to(&f, bytes);
+    uint64_t t1 = timer_get_ms();
+    uart_puts("[W4-PROBE] ftruncate size=");
+    print_int((int)sizes_mib[s]);
+    uart_puts(" MiB rc=");
+    print_int(rc);
+    uart_puts(" ms=");
+    print_int((int)(t1 - t0));
+    uart_puts("\n");
+    EXPECT_EQ(rc, 0);
+    EXPECT_EQ(f.fat16.entry.file_size, (int)bytes);
+    fat16_close(&f);
+    EXPECT_EQ(fat16_unlink(name), 0);
+  }
+}
+#endif /* W4_MKFS_TIMING_PROBE */
+
 void fat16_test_suite(void) {
   uart_puts("fat16_test_suite:\n");
   test_fat16_open_existing();
@@ -884,6 +992,10 @@ void fat16_test_suite(void) {
   test_fat16_rmdir_semantics(); /* W2-14 (selfhost) */
   test_fat16_ftruncate_extend_then_write(); /* W3-kernel: mkfs -C gap */
   test_fat16_read_dir_multiple(); /* W3-kernel: read_dir syscall surface (Gap B) */
+  test_fat16_alloc_hint_chain(); /* W4-kernel: alloc-hint invariants */
+#ifdef W4_MKFS_TIMING_PROBE
+  test_fat16_extend_timing_probe(); /* W4-kernel: MKFSFAT TCG timing probe */
+#endif
 }
 
 #endif // KERNEL_MODE_UNIT_TEST
