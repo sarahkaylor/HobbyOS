@@ -1,0 +1,5 @@
+# w4-kernel lane fixture (same format as src/user/selfhost/SELFHOST.RUN)
+# Used for evidence A1: runs a known-good staged tool (HELLO.BIN) through
+the full driver -> spawn2 -> pipe relay -> serial path, proving the
+MODE=selfhost acceptance chain with a clean ACCEPTANCE-COMPLETE + halt.
+s0-check|HELLO|

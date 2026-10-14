@@ -17,7 +17,7 @@
 #
 # Usage: docs/selfhost/lanes/w4-selfhost-boottest.sh <workdir> [label]
 set -eu
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 W=${1:?usage: w4-selfhost-boottest.sh <workdir> [label]}
 LABEL=${2:-boot}
 mkdir -p "$W"
@@ -52,8 +52,11 @@ disk:
 	@printf '[SELFHOST] fixture-make-disk-ran\n'
 EOF
 
-# Boot disk (128 MiB FAT16 — plenty for kernel + SELFHOST + MAKE + fixtures).
-truncate -s 134217728 "$W/selfhost-boot-$LABEL.img"
+# Boot disk (1 GiB by default — the acceptance boot disk's exact FAT16
+# geometry, L5-proven; a smaller scratch size can be passed as SIZE_MIB to
+# probe a different spc on a scratch run).
+SIZE_MIB=${SIZE_MIB:-1024}
+truncate -s $((SIZE_MIB * 1024 * 1024)) "$W/selfhost-boot-$LABEL.img"
 mformat -i "$W/selfhost-boot-$LABEL.img" ::
 mmd -i "$W/selfhost-boot-$LABEL.img" ::/EFI ::/EFI/BOOT ::/boot ::/TOOLS ::/SRC
 mcopy -i "$W/selfhost-boot-$LABEL.img" "$ROOT/bootloader/BOOTAA64.EFI" ::/EFI/BOOT/BOOTAA64.EFI
