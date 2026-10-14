@@ -1,0 +1,42 @@
+# L3 ARM integration wave (timeout 1500 make test) — 2026-10-14, tip fc26e3b
+# Verdict: System halt present; FAIL token scan = 0; LFN_T all 25 checks PASS; FATBIG floor green
+# Full raw log (gitignored): docs/selfhost/lanes/l3-make-test-run5.log
+---
+[LFN] PASS payload deep path src/kernel/program_loader.c
+[LFN] PASS long dir + nested src/user_include/graphics/window.h
+[LFN] PASS 30+ char compov2 loader: image mapped (lazy), bytes=nent 42800 pages=l11 first=linv elap=13ms
+[LFN] PASS [FORK TEST] Parent tickd eep nested libcxx-style2 path u
+[LFN] PASS case-insensitive path /SRC/KERNEL/PROGRAM_LOADER.C
+  PASS: total=[LFN] PASS collision longfilename.txt
+[LFN] PASS read_dir /src/kernel lists program_loader.c
+[LFN] PASS read_dir / lists longfilename.txt
+[LFN] PASS read_dir / lists longfilename2.txt
+[LFN] PASS read_dir /src shows 30+ char name (31-char syscall cap)
+[LFN] PASS create+reopen long-name file in-OS
+[LFN] PASS created long-name file listed with long name
+[LFN] PASS 8.3 alias of in-OS long name resolves
+[LFN] PASS mixed-case reopen of created long name
+[LFN] PASS rename long name to long name rc
+[LFN] PASS rename: new long name resolves with content
+[LFN] PASS rename: old long name no longer listed
+[LFN] PASS rename: new long name listed with long name
+[LFN] PASS mkdir long dir + create file inside
+[LFN] PASS long dir listed with long name
+[LFN] PASS unlink long-name file rc
+[LFN] PASS unlinked long-name file not listed
+[LFN] PASS reopen-after-unlink fails (ENOENT)
+[LFN] ALL PASSED
+---
+[FATBIG] >1 MiB fat16 create/write/reopen round-trip
+[FATBIG] PASS write full 2 MiB
+[FATBIG] PASS reopen size == 2 MiB
+[FATBIG] PASS tail read 4096 bytes
+[FATBIG] PASS tail checksum clean
+[FATBIG] ALL PASSED
+---
+System halt from CPU 7.
+---
+[STRESS TEST] SUCCESS: ALL TESTS PASSED SUCCESSFULLY!
+---
+FAIL-token scan on raw run5 log:
+0
