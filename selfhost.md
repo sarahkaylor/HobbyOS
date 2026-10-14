@@ -388,6 +388,9 @@ wait for the current run's log to show its final line, then start the next.
   POSIX / raw_socket_stream); (e) TCG perf for the 128 MiB in-OS MKFSFAT (QMP mid-ftruncate
   break) or accept host-port parity proof; (f) image-budget review (696 MiB free) + M2
   stripping/sizes; (g) AD-9 `STAGE_LIBCXX` freeze decision at M3.
+  **DISPATCHED 2026-10-14 (`deleg_a78cc310`, 3 lanes from `b27f4ec`):** w4-kernel = (a)+(e);
+  w4-src = (b)+(c)+(g); w4-clang = independent T2.3–T2.5 in-OS smokes (serial-backed,
+  staged script files; kernel-walls reported, not edited).
 - Integrator = parent session: merges lanes to `main` here, runs merged-tip gates, is the
   sole writer of `selfhost.md`, `.gitignore`, syscall.h/both trap.c.
 
@@ -553,6 +556,14 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 ---
 
 ## 11. Fix log (append-only, newest first)
+
+- **2026-10-14 — Merged-tip battery round 3 on `994116a`: GREEN.** Local: host rc=0,
+  unit-arm **315/0** (+3 dirent tests), unit-x64 (KVM) **319/0**, wave-arm rc=0 ('System
+  halt.') with exactly ONE FAIL token — the `SHELLTEST WATCHDOG: protocol stalled 25 s`
+  variant of the ambient family (the echo and shell_test3-cat variants are GONE — the
+  w3-shell drain holds on the merged tree); residual watchdog-stall hardening queued as a
+  minor follow-up. CI VM (`merged-w4`): host + unit-arm green; unit-x64/test-arm pending
+  at write time.
 
 - **2026-10-14 — Merged-tip battery RERUN after `1920dc9`: GREEN (local, all tiers).**
   Local: host rc=0 (all suites), unit-arm 312/0, unit-x64 (KVM) 316/0, wave-arm rc=0
