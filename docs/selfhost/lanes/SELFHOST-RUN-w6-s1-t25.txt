@@ -1,0 +1,5 @@
+# w6-run lane: S1 drive — acceptance user set in-OS (HELLO SH LS CAT;
+# Makefile.hobbyos `user` compiles 5 TUs + link + objcopy per recipe), then
+# T2.5 close-out: run the in-OS-built HELLO.BIN (its stdout relays to serial).
+s1-user|SH.BIN|/SRC/SELFHOST.SH user
+t25-run|SH.BIN|/SRC/T25.RUN

@@ -1,0 +1,1 @@
+/TOOLS/CLANG.BIN -c src/kernel/main.c -o /SRC/obj/probe1.o

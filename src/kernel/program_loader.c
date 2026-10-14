@@ -1090,7 +1090,13 @@ int proc_marshal_argv(struct process *p, char *const *argv, char *dst, int cap,
       break;
     if (argv[ai] == 0)
       break;
-    char one[64];
+    /* w6-run: one argv element can be a whole shell command line (make
+     * runs recipe lines via `sh -c '<line>'`, one long argv[2]); the old
+     * 64-byte cap silently truncated it to 63 chars and in-OS build
+     * commands died with "no input files" (the tail, incl. the input TU,
+     * never arrived).  Per-arg cap 1024 = HO_FLAT_ARGS_LEN parity; the
+     * whole blob stays bounded by HO_EXEC_ARGV_LEN below. */
+    char one[1024];
     if (!pl_strcpy(p, (const char *)argv[ai], one, sizeof one))
       break;
     if (pos >= cap - 1)

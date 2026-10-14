@@ -1,0 +1,5 @@
+# w6-run lane: S2 drive — the kernel, in-OS (Makefile.hobbyos `kernel`):
+# 59 TUs compile + lld link + objcopy to /SRC/hobbyos.bin.  Bounded: the
+# host-side driver times this run out after its budget; per-TU progress is
+# visible as repeated [SELFHOST] phase=kernel-compile rc=0 markers.
+s2-kernel|SH.BIN|/SRC/SELFHOST.SH kernel

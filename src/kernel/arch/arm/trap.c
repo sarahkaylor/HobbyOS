@@ -1192,19 +1192,24 @@ static void sys_exec(struct trap_frame *tf) {
   }
 
   /* argv[1..] become the args string (space-joined, like spawn). */
-  char argbuf[256];
+  /* w6-run: 1024-wide buffers (was 64-per-arg / 256 total) — one argv
+   * element can be a whole `sh -c` command line (make recipe lines) and
+   * the old caps truncated it mid-token, breaking in-OS builds.  Matches
+   * HO_FLAT_ARGS_LEN; the eargv blob path (HO_EXEC_ARGV_LEN) is the
+   * primary, this flat string is the fallback. */
+  char argbuf[1024];
   int alen = 0;
   argbuf[0] = '\0';
   if (argv) {
-    for (int ai = 1; alen < 251 &&
+    for (int ai = 1; alen < 1019 &&
                      sys_user_range_ok((uint64_t)(argv + ai), sizeof(char *)) &&
                      argv[ai] != 0; ai++) {
-      char one[64];
+      char one[1024];
       if (!u_strcpy((const char *)argv[ai], one, sizeof one))
         break;
       if (alen)
         argbuf[alen++] = ' ';
-      for (int k = 0; one[k] && alen < 255; k++)
+      for (int k = 0; one[k] && alen < 1023; k++)
         argbuf[alen++] = one[k];
     }
   }
