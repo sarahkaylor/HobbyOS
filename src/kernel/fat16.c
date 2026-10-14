@@ -1036,6 +1036,13 @@ int fat16_read_dir(const char* path, int index, char* out_name, uint8_t* out_att
   int current_idx = 0;
 
   if (cluster == 0) {
+    /* LFN state must carry ACROSS sector boundaries: a run that spans
+       sectors (alloc_lfn_run's cross-sector placement) has its 0x0F
+       records at the end of one sector and the short entry at the start
+       of the next, so the accumulator belongs OUTSIDE the sector loop
+       (mirrors find_entry_in_root). */
+    struct lfn_state st;
+    lfn_reset(&st);
     for (uint32_t i = 0; i < root_dir_sectors; i++) {
       spinlock_release_irqrestore(&fat_lock, flags);
       if (virtio_blk_read_sector(root_dir_sector + i, buf, 1) != 0) {
@@ -1044,8 +1051,6 @@ int fat16_read_dir(const char* path, int index, char* out_name, uint8_t* out_att
       flags = spinlock_acquire_irqsave(&fat_lock);
 
       struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
-      struct lfn_state st;
-      lfn_reset(&st);
       for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
         if (entries[j].name[0] == 0x00) {
           spinlock_release_irqrestore(&fat_lock, flags);
@@ -1077,6 +1082,11 @@ int fat16_read_dir(const char* path, int index, char* out_name, uint8_t* out_att
       }
     }
   } else {
+    /* LFN state carries across sectors AND cluster boundaries, mirroring
+       find_entry_in_subdir (a cross-sector run wraps at the end of one
+       sector into the start of the next). */
+    struct lfn_state st;
+    lfn_reset(&st);
     while (cluster != 0 && cluster < 0xFFF0) {
       for (uint32_t s = 0; s < bpb_sectors_per_cluster; s++) {
         uint32_t sector_num = data_sector + (cluster - 2) * bpb_sectors_per_cluster + s;
@@ -1087,8 +1097,6 @@ int fat16_read_dir(const char* path, int index, char* out_name, uint8_t* out_att
         flags = spinlock_acquire_irqsave(&fat_lock);
 
         struct fat16_dir_entry* entries = (struct fat16_dir_entry*)buf;
-        struct lfn_state st;
-        lfn_reset(&st);
         for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
           if (entries[j].name[0] == 0x00) {
             spinlock_release_irqrestore(&fat_lock, flags);
