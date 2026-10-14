@@ -1,0 +1,2 @@
+# w10-fstime failing-first drive: one boot, one stage.
+w10-pre|SH.BIN|/W10/PRE.SH

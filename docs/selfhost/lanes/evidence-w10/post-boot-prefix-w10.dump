@@ -1,0 +1,17 @@
+# dirent dump of ::W10 (cluster 8859) — date/time are the raw FAT16 fields
+name         attr  date  time  UTC                     size   clu
+.              16 23886 32943  2026-10-14 16:05:30        0  8859
+..             16 23886 32943  2026-10-14 16:05:30        0     0
+P1             16 23886 32943  2026-10-14 16:05:30        0  8860
+STATP   BIN    32 23886 33030  2026-10-14 16:08:12    40256  8861
+PRE     SH     32 23886 33030  2026-10-14 16:08:12      879  8866
+A       TXT     0     0     0  INVALID                    0     0
+(6 entries)
+# dirent dump of ::W10/P1 (cluster 8860) — date/time are the raw FAT16 fields
+name         attr  date  time  UTC                     size   clu
+.              16 23886 32943  2026-10-14 16:05:30        0  8860
+..             16 23886 32943  2026-10-14 16:05:30        0  8859
+A       C      32 23886 32943  2026-10-14 16:05:30        7  8864
+MAKEFILE       32 23886 32943  2026-10-14 16:05:30      396  8865
+A       O       0     0     0  INVALID                    7  8868
+(5 entries)

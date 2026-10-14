@@ -1,0 +1,12 @@
+W10PRE-STEP1-CREATE-DATES
+A.TXT: stat=[KERNEL] Process 2: /W10/STATP.BIN exited unexpectedly or gracefully.
+W10PRE-STEP2-MAKE-RUN1
+P1-COMPI[KERNEL] Process 4: /SH.BIN exited unexpectedly or gracefully.
+/CP.BIN A.C A.O
+[KERNEL] Process 5: /CP.BIN exited unexpectedly or gracefully.
+P1-BUILD-ALL
+W10PRE-STEP3-TOUCH-SOURCE-THEN-MAKE
+.C: stat=0 size=7 mtime=0 ctime=0 UTC=1970-01-01 00:00:00
+A.O: stat=[KERNEL] Process 2: /W10/STATP.BIN exited unexpectedly or gracefully.
+P1-BUILD-AL[KERNEL] Process 4: /SH.BIN exited unexpectedly or gracefully.
+W10PRE-DONE
