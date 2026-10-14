@@ -144,6 +144,26 @@ CXXFLAGS_B="$(echo ${CXXFLAGS_BASE//-fno-rtti/-frtti} | tr '\n' ' ') -D_LIBCXXAB
 # HobbyOS headers needed -- clang's own freestanding headers cover
 # <stdint.h>/<limits.h> etc. for the bare-metal triples.
 CC="${CC:-clang}"
+# Archive tool for the TARGET (ELF) library.  On macOS PATH `ar` is Apple's,
+# which builds Mach-O archives an ELF linker cannot read (cxx_t.bin then fails
+# with a flood of undefined libc++ symbols).  Mirror the repo Makefile's choice
+# of the Homebrew llvm ar/ranlib; env AR overrides.
+AR="${AR:-}"
+if [ -z "$AR" ]; then
+  if command -v llvm-ar >/dev/null 2>&1; then
+    AR="llvm-ar"
+  elif command -v llvm-ar-21 >/dev/null 2>&1; then
+    AR="llvm-ar-21"
+  fi
+fi
+if [ -z "$AR" ] && [ "$(uname -s)" = "Darwin" ]; then
+  for p in /opt/homebrew/opt/llvm/bin/llvm-ar /usr/local/opt/llvm/bin/llvm-ar; do
+    [ -x "$p" ] || continue
+    AR="$p"
+    break
+  done
+fi
+AR="${AR:-ar}"
 CFLAGS_R="-O2 -g -std=c11 -fno-builtin ${STDINC} -I${RT} ${TARGET_FLAGS}"
 
 mkdir -p "$OBJDIR"
@@ -237,7 +257,7 @@ make -f "$GEN" -j"${JOBS}" all
   grep '^R ' "${VENDOR_DIR}/sources.txt" | sed 's/^R //' | sed "s|^|${OBJDIR}/R/|; s|\.c$|.o|"
 } > "${OBJDIR}/objects.txt"
 rm -f "$OUT"
-ar rcs "$OUT" $(cat "${OBJDIR}/objects.txt")
+"$AR" rcs "$OUT" $(cat "${OBJDIR}/objects.txt")
 
 # Sanity: every object listed must exist.
 missing=0

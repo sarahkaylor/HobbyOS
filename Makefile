@@ -108,6 +108,12 @@ XZ ?= xz
 browser:
 	bash third_party/webkit-hobbyos/build.sh --arch $(ARCH) $(BUILD_ARGS)
 
+# The browser rule above is the first rule in the file; without an explicit
+# default-goal it would make `make` (no args) run the WebKit build.  The
+# documented default target is `all` (kernel ELF), as it was before the
+# vendored-browser block moved above it (0cc0783).
+.DEFAULT_GOAL := all
+
 # Bundled browser font (DejaVu Sans).  The windowed HobbyOSFontManager text
 # backend is DEFAULT ON since FS-R2 (retired /USE-FONT; an empty ::/NO-FONT
 # marker opts out deterministically) and reads the face as /DEJAVU.TTF on the

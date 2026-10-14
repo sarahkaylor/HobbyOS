@@ -27,6 +27,36 @@
 #                                      library must be built the same way
 set -euo pipefail
 
+# macOS-only guard for a host SDK that the installed clang cannot read.  A
+# newer CLT/Xcode SDK can ship libSystem.tbd with arch syntax the local clang
+# does not know yet (macOS 27: `arm64e.x1-macos` -> "ld: tapi error: malformed
+# file ... unknown architecture"), which breaks EVERY native link, including
+# this host stage.  When the default toolchain cannot link a trivial program,
+# pin SDKROOT to the newest installed SDK that does link (27.0 -> 26.5 -> ...).
+# No-op on the common path (the probe links fine and nothing changes).
+if [ "$(uname -s)" = "Darwin" ] && [ -z "${SDKROOT:-}" ]; then
+  cc_probe="$(mktemp "${TMPDIR:-/tmp}/icu-hostcc-XXXXXX.c")"
+  printf 'int main(void){return 0;}\n' > "$cc_probe"
+  if ! cc "$cc_probe" -o "$cc_probe.out" 2>/dev/null; then
+    for sdk_root in /Library/Developer/CommandLineTools/SDKs \
+                    /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs; do
+      [ -d "$sdk_root" ] || continue
+      # newest first; skip symlinks (MacOSX.sdk -> 27.0.sdk etc.) -- the real
+      # versioned dir is always listed, so symlinks would only re-try the same.
+      for sdk in $(ls -1d "$sdk_root"/MacOSX*.sdk 2>/dev/null | sort -r); do
+        [ -L "$sdk" ] && continue
+        if SDKROOT="$sdk" cc "$cc_probe" -o "$cc_probe.out" 2>/dev/null; then
+          SDKROOT="$sdk"; export SDKROOT
+          echo "== icu build-host: default macOS SDK unparseable by installed clang; using SDKROOT=$sdk ==" >&2
+          break 2
+        fi
+      done
+    done
+    [ -n "${SDKROOT:-}" ] || echo "== icu build-host: WARNING no linkable macOS SDK found; host stage will fail ==" >&2
+  fi
+  rm -f "$cc_probe" "$cc_probe.out"
+fi
+
 VENDOR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 JOBS="${JOBS:-4}"
 CC="${CC:-cc}"
@@ -75,8 +105,11 @@ echo "-- installed static libs --"
 ls -la "$PREFIX"/lib/libicu*.a
 echo "-- sizes (prefix/lib) --"
 du -sh "$PREFIX/lib"
+size_of() { # GNU stat -c%s vs BSD/macOS stat -f%z
+  if [ "$(uname -s)" = "Darwin" ]; then stat -f%z "$1"; else stat -c%s "$1"; fi
+}
 for f in "$PREFIX"/lib/libicu*.a; do
-  printf '%-56s %10s bytes\n' "${f#"$PREFIX"/}" "$(stat -c%s "$f")"
+  printf '%-56s %10s bytes\n' "${f#"$PREFIX"/}" "$(size_of "$f")"
 done
 
 bash "$VENDOR_DIR/smoke/run-smoke.sh"
