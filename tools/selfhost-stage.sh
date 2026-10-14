@@ -14,6 +14,20 @@
 #             left untouched and the script aborts.
 #     image   FAT16 image path (default: disk.img).  Must exist and be a
 #             formatted FAT filesystem (e.g. created with mkfs.fat -F 16).
+#   tools/selfhost-stage.sh --tools [-f] [image]
+#     [v3] stage ONLY the in-OS toolchain to /TOOLS (frozen F1 layout:
+#     /TOOLS/{CLANG.BIN, LLD.BIN, LLVMAR.BIN, OBJCOPY.BIN, MAKE.BIN,
+#     MCOPY.BIN, MDEL.BIN, MMD.BIN, MKFSFAT.BIN} + /TOOLS/RESDIR/include/**)
+#     and leave /SRC untouched.  With -f the existing /TOOLS tree is deleted
+#     first; without it, files are overwritten in place (-o).  The disk.img
+#     recipe invokes this variant; the SELFHOST harness keeps staging /SRC in
+#     its own -f run, so the two payloads never clobber each other.
+#     Source of the LLVM tools: obj/selfhost/dist-staging (override with
+#     DIST_STAGING=<path>); the ported tools come from obj/arm/*.bin
+#     (override per-tool with the same names as the Makefile vars).
+#     Absent staging is a WARNING + skip, not a failure — the M2 install
+#     recipe owns producing dist-staging, and trees without it must still
+#     build a bootable disk.img.
 #
 # Payload (frozen F2 shape, refined with measurements from the workstation
 # tree on 2026-10-14 — see docs/selfhost/acceptance.md §2; wave-2 additions
@@ -50,6 +64,11 @@ set -u
 
 IMAGE="disk.img"
 FORCE=0
+MODE="payload"   # payload (default) | tools (--tools; /TOOLS only)
+if [ "${1:-}" = "--tools" ]; then
+  MODE="tools"
+  shift || true
+fi
 if [ "${1:-}" = "-f" ]; then
   FORCE=1
   IMAGE="${2:-disk.img}"
@@ -63,9 +82,119 @@ cd "$REPO_ROOT"
 
 LIBCXX_INC="${LIBCXX_INC_DIR:-third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include}"
 STAGE_LIBCXX="${STAGE_LIBCXX:-1}"
+# [v3] Sources for the /TOOLS toolchain staging (--tools): the wave-2 LLVM
+# distribution staging, and the ported build tools from obj/arm.
+DIST_STAGING="${DIST_STAGING:-obj/selfhost/dist-staging}"
+RESDIR_SRC="$DIST_STAGING/usr/local/lib/clang/21/include"
+TOOL_SPLIT=" "  # list below
 
 fail() { echo "selfhost-stage: ERROR: $*" >&2; exit 1; }
 warn() { echo "selfhost-stage: WARNING: $*" >&2; }
+
+# mmkdir_p — create a directory path on the image one component at a time
+# (mtools 4.x mmd does not create parent dirs, and mcopy will not create the
+# destination's parent chain either).
+mmkdir_p() {
+  local p="$1" cur="" comp
+  p="${p#::}"
+  while [ -n "$p" ]; do
+    p="${p#/}"
+    comp="${p%%/*}"
+    [ -z "$comp" ] && break
+    cur="$cur/$comp"
+    if ! mdir -i "$IMAGE" "$cur" >/dev/null 2>&1; then
+      mmd -i "$IMAGE" "$cur" || { echo "mmd failed: $cur" >&2; return 1; }
+    fi
+    p="${p#$comp}"
+  done
+  return 0
+}
+
+# ---- [v3] /TOOLS toolchain staging (--tools; frozen F1 layout) ----
+# The in-OS build tools on the startup image: /TOOLS/{CLANG.BIN, LLD.BIN,
+# LLVMAR.BIN, OBJCOPY.BIN, MAKE.BIN, MCOPY.BIN, MDEL.BIN, MMD.BIN,
+# MKFSFAT.BIN} + /TOOLS/RESDIR/include/** (clang builtin headers, staged
+# FAITHFULLY with long names — F8 decision: LFN covers them, see
+# docs/selfhost/llvm-bootstrap.md §6.2).  The LLVM binaries are staged as the
+# raw aarch64-none-elf ELF install-distribution outputs for now; M2 replaces
+# them with stripped flat .bin images under the SAME frozen names.  Runs
+# standalone (--tools) so the disk.img recipe and the SELFHOST harness stage
+# /TOOLS and /SRC independently.
+stage_tools() {
+  local n=0 total_bytes=0
+  echo "selfhost-stage: staging in-OS toolchain to ::/TOOLS (F1 layout)"
+  if [ "$FORCE" -eq 1 ] && mdir -i "$IMAGE" ::/TOOLS >/dev/null 2>&1; then
+    echo "selfhost-stage: replacing existing ::/TOOLS on $IMAGE"
+    mdeltree -i "$IMAGE" ::/TOOLS 2>/dev/null || fail "could not delete existing /TOOLS (mdeltree)"
+  fi
+  mmkdir_p "::/TOOLS" || fail "mmkdir_p ::/TOOLS"
+
+  # LLVM distribution tools (skip-with-warning when the M2 staging is absent).
+  if [ -f "$DIST_STAGING/usr/local/bin/clang-21" ]; then
+    mcopy -o -i "$IMAGE" "$DIST_STAGING/usr/local/bin/clang-21"  ::/TOOLS/CLANG.BIN  || fail "mcopy CLANG.BIN"
+    mcopy -o -i "$IMAGE" "$DIST_STAGING/usr/local/bin/lld"       ::/TOOLS/LLD.BIN    || fail "mcopy LLD.BIN"
+    mcopy -o -i "$IMAGE" "$DIST_STAGING/usr/local/bin/llvm-ar"   ::/TOOLS/LLVMAR.BIN || fail "mcopy LLVMAR.BIN"
+    mcopy -o -i "$IMAGE" "$DIST_STAGING/usr/local/bin/llvm-objcopy" ::/TOOLS/OBJCOPY.BIN || fail "mcopy OBJCOPY.BIN"
+    n=$((n + 4))
+    total_bytes=$((total_bytes +
+      $(stat -c %s "$DIST_STAGING/usr/local/bin/clang-21") +
+      $(stat -c %s "$DIST_STAGING/usr/local/bin/lld") +
+      $(stat -c %s "$DIST_STAGING/usr/local/bin/llvm-ar") +
+      $(stat -c %s "$DIST_STAGING/usr/local/bin/llvm-objcopy")))
+  else
+    warn "/TOOLS toolchain not staged: LLVM distribution staging missing at $DIST_STAGING (build it per docs/selfhost/llvm-bootstrap.md §6 — install-distribution)"
+  fi
+
+  # Ported build tools — frozen 8.3 names.  The Makefile's own mcopy lines
+  # put MCOPY/MDEL/MMD (and MAKE at ::/MAKE.BIN, MKFSFAT at ::/MKFSFAT.BIN)
+  # on the image; these -o copies finish the F1 /TOOLS set, idempotently.
+  mmkdir_p "::/TOOLS" || fail "mmkdir_p ::/TOOLS"
+  local spec src dst
+  for spec in "obj/arm/make.bin MAKE.BIN" "obj/arm/mcopy.bin MCOPY.BIN" \
+              "obj/arm/mdel.bin MDEL.BIN"   "obj/arm/mmd.bin MMD.BIN" \
+              "obj/arm/mkfsfat.bin MKFSFAT.BIN"; do
+    src="${spec% *}"; dst="${spec#* }"
+    if [ -f "$src" ]; then
+      mcopy -o -i "$IMAGE" "$src" "::/TOOLS/$dst" || fail "mcopy ::/TOOLS/$dst"
+      n=$((n + 1))
+      total_bytes=$((total_bytes + $(stat -c %s "$src")))
+    else
+      warn "tool not built ($src) — ::/TOOLS/$dst not staged (make $src)"
+    fi
+  done
+
+  # Resource dir — faithful long-name tree incl. wrapper subdirs (272 files).
+  if [ -d "$RESDIR_SRC" ]; then
+    if [ "$FORCE" -eq 1 ] && mdir -i "$IMAGE" ::/TOOLS/RESDIR >/dev/null 2>&1; then
+      mdeltree -i "$IMAGE" ::/TOOLS/RESDIR 2>/dev/null || fail "mdeltree ::/TOOLS/RESDIR"
+    fi
+    mmkdir_p "::/TOOLS/RESDIR" || fail "mmkdir_p ::/TOOLS/RESDIR"
+    mcopy -s -o -i "$IMAGE" "$RESDIR_SRC" "::/TOOLS/RESDIR/./" || fail "mcopy RESDIR include tree"
+    local cnt; cnt=$(find "$RESDIR_SRC" -type f | wc -l)
+    n=$((n + cnt))
+    total_bytes=$((total_bytes + $(du -sb "$RESDIR_SRC" | awk '{print $1}')))
+  else
+    warn "clang resource dir missing at $RESDIR_SRC — /TOOLS/RESDIR not staged (stage the LLVM distribution first)"
+  fi
+
+  echo "selfhost-stage: staged $n files, $total_bytes bytes into ::/TOOLS"
+  echo "  --- ::/TOOLS (mdir) ---"
+  mdir -i "$IMAGE" ::/TOOLS 2>&1 | tail -5
+  echo "  --- ::/TOOLS/RESDIR/include count ---"
+  mdir -i "$IMAGE" -/ ::/TOOLS/RESDIR/include 2>&1 | tail -3
+}
+
+# --tools: stage /TOOLS only and exit before any /SRC logic (the harness's
+# own -f run owns /SRC; the two payloads are independent).
+if [ "$MODE" = "tools" ]; then
+  [ -f "$IMAGE" ] || fail "image not found: $IMAGE (create it, e.g. truncate -s 256M scratch.img && mkfs.fat -F 16 scratch.img)"
+  for t in mcopy mmd mdir mdeltree; do
+    command -v "$t" >/dev/null 2>&1 || fail "required tool not found: $t"
+  done
+  stage_tools
+  echo "selfhost-stage: done"
+  exit 0
+fi
 
 for t in mcopy mmd mdir mdeltree; do
   command -v "$t" >/dev/null 2>&1 || fail "required tool not found: $t"
@@ -114,25 +243,6 @@ add_payload() {  # add_payload <files> <bytes>
 
 # ---- stage the tree ----
 mmd -i "$IMAGE" ::/SRC || fail "mmd ::/SRC"
-
-# mmkdir_p — create a directory path on the image one component at a time
-# (mtools 4.x mmd does not create parent dirs, and mcopy will not create the
-# destination's parent chain either).
-mmkdir_p() {
-  local p="$1" cur="" comp
-  p="${p#::}"
-  while [ -n "$p" ]; do
-    p="${p#/}"
-    comp="${p%%/*}"
-    [ -z "$comp" ] && break
-    cur="$cur/$comp"
-    if ! mdir -i "$IMAGE" "$cur" >/dev/null 2>&1; then
-      mmd -i "$IMAGE" "$cur" || { echo "mmd failed: $cur" >&2; return 1; }
-    fi
-    p="${p#$comp}"
-  done
-  return 0
-}
 
 copy_tree() {  # copy_tree <src-dir> <dest-parent-on-image> — copies the dir ITSELF (dir/<basename>)
   local src="$1" dst="$2"

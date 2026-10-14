@@ -1,0 +1,61 @@
+{
+  "lane": "w3-tools",
+  "wave": 3,
+  "status": "complete",
+  "commit_tip": "36d0a88",
+  "branch": "selfhost/w3-tools",
+  "task_a": {
+    "question": "159/272 (re-measured: 221/272 incl. wrapper subdirs, 205/239 top-level) clang 21.1.8 RESDIR basenames violate FAT 8.3 — is 8.3 curation (mapped tree + rewritten #includes) REQUIRED for in-OS operation?",
+    "decision": "NO — stage faithfully with VFAT long names; no curation tree; tools/curate_resdir.py NOT created (documented as a fallback only).",
+    "evidence": [
+      "src/kernel/fat16.c: lfn_matches matches full long names on open over the 255-char space; the 31-char cap is read_dir DISPLAY-only (lfn_entry_display)",
+      "src/user/lfn_test.c:100 (merged wave-1 L3): in-OS open+read of the 36-char llvm-project-21.1.8.src-EXAMPLE.c — same length class as the longest RESDIR basename (__clang_cuda_math_forward_declares.h, 36)",
+      "host-side staging proof: mtype+sha256 of 36-char names + openmp_wrappers subtree + CLANG.BIN on scratch FAT16 image, byte-identical (w3-tools-evidence.md §2)",
+      "real disk.img mdir shows VFAT long names stored; mtype+sha256 byte-identical (w3-tools-evidence.md §3)",
+      "only residual: 5 basenames exceed the 31-char read_dir display cap (cosmetic listing truncation; nothing in S0-S5 lists the RESDIR; AD-13 watch list)"
+    ],
+    "docs": "docs/selfhost/llvm-bootstrap.md §6.2 appended"
+  },
+  "task_b": {
+    "scope": "/TOOLS on the startup disk.img: CLANG.BIN (clang-21 ELF), LLD.BIN, LLVMAR.BIN, OBJCOPY.BIN, MAKE.BIN, MCOPY.BIN/MDEL.BIN/MMD.BIN (w2 lines preserved), MKFSFAT.BIN (root ::/MKFSFAT.BIN preserved), RESDIR/include faithful tree",
+    "files_modified": [
+      "tools/selfhost-stage.sh — new --tools mode + stage_tools(): F1 /TOOLS layout, idempotent (-f replaces ::/TOOLS), soft dependency on obj/selfhost/dist-staging (warn+skip when absent), tools sourced from obj/arm/*.bin",
+      "Makefile — disk.img recipe invokes tools/selfhost-stage.sh --tools disk.img (ifneq STAGE_TOOLS=0 opt-out); sole Makefile writer this wave",
+      "docs/selfhost/lanes/w3-tools-evidence.md"
+    ],
+    "gate_make_disk_img": "GREEN — rc=0, full recipe incl. new stage step (281 files / 238,128,534 bytes into ::/TOOLS)",
+    "gate_mdir_proof": "GREEN — ::/TOOLS 12 entries (9 tools + RESDIR); 696,090,624 bytes free on the 1 GiB image after staging (was 936,984,576 pre-tools); RESDIR long names present; CLANG.BIN/MAKE.BIN + 36-char headers sha256-identical to staging sources",
+    "binaries_staged_as": "raw aarch64-none-elf ELF (not flat .bin — M2 converts via objcopy -O binary + strips; names CLANG.BIN etc. are frozen and content swaps in place)"
+  },
+  "gates": [
+    {"gate": "make disk.img", "result": "GREEN (rc=0)", "note": "host lld SIGBUS under heavy -j64 load once (host-tool crash, non-deterministic, not a product defect per wave steerer); retry passed"},
+    {"gate": "mtools mdir of ::/TOOLS + RESDIR", "result": "GREEN", "note": "12 ::/TOOLS entries; byte-fidelity sha256-verified"},
+    {"gate": "in-OS /TOOLS visibility (SELFHOST.BIN harness boot)", "result": "GREEN (proves /TOOLS visible in-OS)", "note": "serial shows /TOOLS/MAKE.BIN loaded + executed in-OS; s0 failed only on the future Makefile.hobbyos, not on tool-missing"}
+  ],
+  "harness": {
+    "ran": true,
+    "tool": "tools/run_selfhost_build_test.py --stage --image disk.img",
+    "verdict": "stage_failure (EXPECTED + PROVES /TOOLS): s0-check clean -fail reason=tool-rc rc=512 — MAKE.BIN resolved from /TOOLS and RAN in-OS; failed only on the not-yet-existing Makefile.hobbyos (later wave), NOT on tool-missing (abort=0)",
+    "serial_proof": [
+      "Booting AArch64 OS",
+      "[LAUNCH] SELFHOST.BIN",
+      "[SELFHOST] DRIVER-UP script=/SRC/SELFHOST.RUN",
+      "[SELFHOST] phase=s0-check-start",
+      "Loading program for scheduler (v2 AS): /TOOLS/MAKE.BIN",
+      "MAKE.BIN: Makefile.hobbyos: No such file or directory",
+      "MAKE.BIN: *** No rule to make target 'Makefile.hobbyos'.  Stop.",
+      "[SELFHOST] phase=s0-check-fail reason=tool-rc rc=512"
+    ],
+    "log": "docs/selfhost/lanes/w3-tools-harness-serial-excerpt.log (raw: serial-selfhost.log, gitignored)"
+  },
+  "blockers": [
+    "none blocking. Host lld SIGBUS (Bus error) while linking obj/arm/unexpand_test.bin under -j64 with ICU+libcxx building — host-tool crash, transient; re-run green (per wave steerer plus observed)."
+  ],
+  "decisions": [
+    "F8: LFN suffices for the RESDIR — stage faithfully, no curate_resdir.py (documented in llvm-bootstrap.md §6.2)",
+    "/TOOLS binaries staged as unstripped ELF under frozen F1 names; stripping + flat-.bin conversion is M2 (same names, content swaps)",
+    "selfhost-stage.sh --tools is the single /TOOLS stager, called from the disk.img recipe; w2 Makefile mcopy lines for MCOPY/MDEL/MMD/MKFSFAT/MAKE untouched",
+    "soft dependency on obj/selfhost/dist-staging keeps make disk.img green in trees without the LLVM install; STAGE_TOOLS=0 hard opt-out"
+  ],
+  "notes": "Wave-3 tools lane complete: both Task A (F8 curation decision, evidence-backed) and Task B (/TOOLS staging, gate green) done. Image-budget check: ~240 MB staged vs 936 MB free pre-tools on the 1 GiB disk — fits with ~696 MB free. Mandatory gates verified with real tool output (build rc + mdir + sha256). Optional in-OS harness boot attempted; see harness field. Commit 36d0a88 on selfhost/w3-tools; working tree clean."
+}
