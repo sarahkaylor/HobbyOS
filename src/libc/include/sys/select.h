@@ -16,6 +16,14 @@
  * sysroot has no pselect); it is a bounded-poll wrapper over the device
  * select() syscall.  See hb_stubs.c for the rationale.
  */
+#ifdef HOST_TEST
+/* Host tier: compile against the SYSTEM headers.  This file shadows the
+ * system <sys/select.h> by include-path precedence (observed breakage:
+ * glibc <sys/types.h> -> <sys/select.h> -> this file -> signal.h /
+ * unistd.h chain -> `intptr_t` unknown).  Hand over to the next include
+ * directory. */
+#include_next <sys/select.h>
+#else
 #ifndef HOBBYOS_SYS_SELECT_H
 #define HOBBYOS_SYS_SELECT_H
 
@@ -55,3 +63,4 @@ extern "C" {
 #endif
 
 #endif /* HOBBYOS_SYS_SELECT_H */
+#endif /* !HOST_TEST */
