@@ -590,6 +590,17 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-14 (~23:20) — w9-dirent S2 crown attempt #1: PROGRESS + remaining wall.** The
+  dirent fix eliminated the `cannot open` class — lld now WALKS all 59 in-OS objects (new
+  territory) and fails at symbol level: `undefined symbol: net_rdma_fast_write` (ref.
+  net.c:447 via /SRC/obj/arm/net.o). Integrator forensics on the lane's disk.img: staged
+  net_rdma.c byte-perfect; mtype-extracted `net_rdma.o` = a valid ELF with `.text` size 0
+  (near-empty twin) while mdir shows a 10,776-B entry and the host object (10,624 B, 18
+  syms) has the symbol → hypothesis: duplicate/broken twin still created for some objects;
+  lld opens an EMPTY twin → clean undefined-symbol instead of parse error. Steered to the
+  lane (dirent-per-entry dump + rewrite-path re-examination + re-crown). This supersedes the
+  earlier two-missing-objects failure mode.
+
 - **2026-10-14 (~22:40) — Battery round 9 + post-merge hotfix (`8aa7b7c`).** LOCAL: host
   rc=2 — **w11's new `src/libc/include/sys/select.h` shadowed glibc's in HOST_TEST builds**
   (glibc <sys/types.h> -> our select.h -> signal/unistd chain -> `intptr_t` unknown); fixed
