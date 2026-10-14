@@ -79,6 +79,7 @@ EXCLUDE_PREFIXES = {
                          # stay byte-identical; only the port's first-party
                          # files (config.h, mtools_port.c) are formatter-scope
                          # and are kept cstyle-clean.
+    "src/user/mkfs/",
 }
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

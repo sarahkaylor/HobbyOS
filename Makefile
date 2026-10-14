@@ -499,6 +499,14 @@ MTOOLS_ENGINE_OBJS = $(addprefix $(OBJ_DIR)/mtools_,$(addsuffix .o,$(MTOOLS_ENGI
 MCOPY_BIN = $(OBJ_DIR)/mcopy.bin
 MDEL_BIN = $(OBJ_DIR)/mdel.bin
 MMD_BIN = $(OBJ_DIR)/mmd.bin
+
+# GNU dosfstools 4.2 mkfs.fat port: four transcribed core sources plus the
+# port's first-party blkdev/termios glue.  src/user/mkfs/config.h pins the
+# HAVE_* feature set (docs/selfhost/buildtools-audit.md §5) and is force-
+# included on every object so the upstream sources stay byte-identical.
+MKFSFAT_SRC_NAMES = mkfs.fat common charconv device_info hb_blkdev
+MKFSFAT_OBJS = $(addprefix $(OBJ_DIR)/mkfs_,$(addsuffix .o,$(MKFSFAT_SRC_NAMES)))
+MKFSFAT_BIN = $(OBJ_DIR)/mkfsfat.bin
 HEDGNU_BIN = $(OBJ_DIR)/hedgnu.bin
 WCTEST_BIN = $(OBJ_DIR)/wc_test.bin
 REGTEST_BIN = $(OBJ_DIR)/regex_test.bin
@@ -1449,6 +1457,19 @@ $(eval $(call MTOOLS_PORT_RULE,mcopy))
 $(eval $(call MTOOLS_PORT_RULE,mdel))
 $(eval $(call MTOOLS_PORT_RULE,mmd))
 
+# --- GNU dosfstools 4.2 mkfs.fat (MKFSFAT.BIN; -C is ftruncate-only) -----
+# Objects named mkfs_<src>; config.h is -include'd so the transcribed
+# sources stay byte-identical to third_party/dosfstools-4.2/src/.  The
+# -Wno-* flags mirror upstream's own src/Makefile.am AM_CFLAGS.
+$(OBJ_DIR)/mkfs_%.o: src/user/mkfs/%.c src/user/mkfs/config.h src/user/mkfs/*.h $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -Isrc/user/mkfs -include src/user/mkfs/config.h \
+	      -Wno-sign-compare -Wno-missing-field-initializers -c $< -o $@
+
+$(MKFSFAT_BIN): $(MKFSFAT_OBJS) $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/mkfsfat.elf $(MKFSFAT_OBJS) $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/mkfsfat.elf $(MKFSFAT_BIN)
+
 $(OBJ_DIR)/wc_test.o: src/user/wc_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
@@ -1822,6 +1843,7 @@ disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BI
 
 # w2-mtools disk
 disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(MCOPY_BIN) $(MDEL_BIN) $(MMD_BIN) $(MODE_FILE)  # w2-mtools deps (union: MAKE_BIN + SELFHOST_BIN ride their own lines above)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(MKFSFAT_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(MODE_FILE)  # w2-mkfs deps
 	# Startup disk: 1 GiB (user-requested floor; FAT16 tops out at 2 GiB).
 	# mkfs.fat auto-picks the cluster size (32 KiB @ 1 GiB); the kernel
 	# fat16.c layout math is BPB data-driven (bpb_sectors_per_cluster), so
@@ -2040,6 +2062,9 @@ endif
 	$(MCOPY) -i disk.img $(MCOPY_BIN) ::/TOOLS/MCOPY.BIN
 	$(MCOPY) -i disk.img $(MDEL_BIN) ::/TOOLS/MDEL.BIN
 	$(MCOPY) -i disk.img $(MMD_BIN) ::/TOOLS/MMD.BIN
+
+	# Selfhost W2 (mkfs port): in-OS MKFSFAT (F1 layout).
+	$(MCOPY) -i disk.img $(MKFSFAT_BIN) ::/MKFSFAT.BIN
 	$(MCOPY) -i disk.img $(MONITOR_BIN) ::/MONITOR.BIN
 	$(MCOPY) -i disk.img $(MONITOR_TEST_BIN) ::/MONITORT.BIN
 	$(MCOPY) -i disk.img $(ICU_SMOKE_BIN) ::/ICUSMK.BIN

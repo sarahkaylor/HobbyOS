@@ -1,0 +1,56 @@
+binary: /home/sarah/hobbyos-selfhost-lanes/w2-mkfs/obj/mkfs_host/mkfsfat_host
+work:   /home/sarah/.hermes/cache/scratch/mkfsfat_w2_ug4nksgo
+[PASS] 1: -C exit 0
+[PASS] 2: -C opens with O_CREAT
+[PASS] 3: -C sizes via ftruncate only (no dd/fallocate/truncate) — ftruncate=True truncate=1 fallocate=False
+[PASS] 4: banner printed — mkfs.fat 4.2 (2021-01-31)
+[PASS] 4MiB FAT12 auto: file size = blocks*1024 — 4194304 vs 4194304
+[PASS] 4MiB FAT12 auto: boot sig 0x55AA — (85, 170)
+[PASS] 4MiB FAT12 auto: FS type 'FAT12   ' — 'FAT12   '
+[PASS] 4MiB FAT12 auto: bytes/sector 512
+[PASS] 4MiB FAT12 auto: 2 FATs
+[PASS] 4MiB FAT12 auto: media 0xF8
+[PASS] 4MiB FAT12 auto: root entries > 0
+[PASS] 4MiB FAT12 auto: total sectors == file size/512 — tot=8192
+[PASS] 4MiB FAT12 auto: FAT1 == FAT2
+[PASS] 4MiB FAT12 auto: root first entry empty (0x00)
+[PASS] 64MiB FAT16: file size = blocks*1024 — 67108864 vs 67108864
+[PASS] 64MiB FAT16: boot sig 0x55AA — (85, 170)
+[PASS] 64MiB FAT16: FS type 'FAT16   ' — 'FAT16   '
+[PASS] 64MiB FAT16: bytes/sector 512
+[PASS] 64MiB FAT16: 2 FATs
+[PASS] 64MiB FAT16: media 0xF8
+[PASS] 64MiB FAT16: root entries > 0
+[PASS] 64MiB FAT16: total sectors == file size/512 — tot=131072
+[PASS] 64MiB FAT16: cluster size spc=4 — spc=4
+[PASS] 64MiB FAT16: FAT1 == FAT2
+[PASS] 64MiB FAT16: root first entry empty (0x00)
+[PASS] 128MiB FAT16 (acceptance S3 size): file size = blocks*1024 — 134217728 vs 134217728
+[PASS] 128MiB FAT16 (acceptance S3 size): boot sig 0x55AA — (85, 170)
+[PASS] 128MiB FAT16 (acceptance S3 size): FS type 'FAT16   ' — 'FAT16   '
+[PASS] 128MiB FAT16 (acceptance S3 size): bytes/sector 512
+[PASS] 128MiB FAT16 (acceptance S3 size): 2 FATs
+[PASS] 128MiB FAT16 (acceptance S3 size): media 0xF8
+[PASS] 128MiB FAT16 (acceptance S3 size): root entries > 0
+[PASS] 128MiB FAT16 (acceptance S3 size): total sectors == file size/512 — tot=262144
+[PASS] 128MiB FAT16 (acceptance S3 size): cluster size spc=4 — spc=4
+[PASS] 128MiB FAT16 (acceptance S3 size): FAT1 == FAT2
+[PASS] 128MiB FAT16 (acceptance S3 size): root first entry empty (0x00)
+[PASS] 256MiB FAT16 cluster-arm: file size = blocks*1024 — 268435456 vs 268435456
+[PASS] 256MiB FAT16 cluster-arm: boot sig 0x55AA — (85, 170)
+[PASS] 256MiB FAT16 cluster-arm: FS type 'FAT16   ' — 'FAT16   '
+[PASS] 256MiB FAT16 cluster-arm: bytes/sector 512
+[PASS] 256MiB FAT16 cluster-arm: 2 FATs
+[PASS] 256MiB FAT16 cluster-arm: media 0xF8
+[PASS] 256MiB FAT16 cluster-arm: root entries > 0
+[PASS] 256MiB FAT16 cluster-arm: total sectors == file size/512 — tot=524288
+[PASS] 256MiB FAT16 cluster-arm: cluster size spc=8 — spc=8
+[PASS] 256MiB FAT16 cluster-arm: FAT1 == FAT2
+[PASS] 256MiB FAT16 cluster-arm: root first entry empty (0x00)
+[PASS] 6: -C on existing file refused — mkfsfat_host: file /home/sarah/.hermes/cache/scratch/mkfsfat_w2_ug4nksgo/exists.img already exists
+[PASS] 6b: existing file untouched — size=4194304 (was 4194304)
+[PASS] 7a: mdir reads image (label + empty root) — Volume in drive : is W2TEST      |  Volume Serial Number is B95D-E411 | Directory for ::/ |  | No files |                         133 937 152 bytes free
+[PASS] 7b: mcopy copy-in
+[PASS] 7c: mcopy round-trip byte-exact
+
+RESULT: ALL HOST-SIDE CHECKS PASSED

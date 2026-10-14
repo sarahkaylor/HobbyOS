@@ -1,0 +1,77 @@
+{
+  "lane": "w2-mkfs",
+  "status": "complete",
+  "summary": "dosfstools 4.2 mkfs.fat ported as MKFSFAT.BIN: pristine vendored (sha256 verified vs L4 pin), 4 transcribed sources + headers + first-party blkdev/termios glue in src/user/mkfs/, one tight Makefile block, ARM binary builds clean (148,024 B), cstyle clean (transcribeds excluded like sed), user build intact, host-functional proof fully green (ftruncate-only -C via strace, BPB/FATs/root at FAT12/FAT16 incl. acceptance 128 MiB, -C EEXIST, mtools mdir+mcopy round-trip byte-exact). In-OS smoke attempted and partially successful: MKFSFAT.BIN boots and runs, '-C' creates PROBE.IMG at the exact requested size with a fully-allocated FAT chain, but the content writes do not persist into the file's clusters (deterministic: zeros on raw disk after graceful QMP quit, and kernel 'cat' reads them back blank) — a kernel write-path gap for ftruncate-extended FAT16 files that wave 3 / the kernel lane must resolve before S3; the kernel's own ftruncate unit test only covers write->shrink->extend-readback, not extend-then-write. Also flags: mkfs.fat BLOCKS are 1024-byte units (acceptance DISK_BLOCKS for the frozen 128 MiB OUT.IMG is 131072, not the L4 sketch comment's 512-byte math).",
+  "commits": [
+    "c3da6f2 selfhost: w2-mkfs: vendor dosfstools 4.2 pristine (mkfs.fat port source)",
+    "ec91bbb selfhost: w2-mkfs: port dosfstools 4.2 mkfs.fat as MKFSFAT.BIN (in-OS image creation)"
+  ],
+  "pins": [
+    {
+      "tool": "dosfstools",
+      "version": "4.2",
+      "url": "https://github.com/dosfstools/dosfstools/releases/download/v4.2/dosfstools-4.2.tar.gz",
+      "sha256": "64926eebf90092dca21b14259a5301b7b98e7b1943e8a201c7d726084809b527",
+      "tag_to_commit": "tag v4.2 -> bba5a12447991cc1be9c33855c6c68e89b9ab29c",
+      "release_date": "2021-01-31",
+      "license": "GPL-3+",
+      "verified": "sha256 recomputed locally from the downloaded tarball (matches docs/selfhost/buildtools-audit.md section 1)"
+    }
+  ],
+  "files": {
+    "vendor": [
+      "third_party/dosfstools-4.2/ (151-file byte-identical tarball extraction, never edited)",
+      "third_party/dosfstools-4.2.tar.gz",
+      "third_party/dosfstools-4.2.tar.gz.sha256",
+      "third_party/dosfstools-4.2/README.md (provenance note)"
+    ],
+    "port": [
+      "src/user/mkfs/mkfs.fat.c (transcribed; marked HobbyOS patches: alarm/SIGALRM behind #if HAVE_ALARM)",
+      "src/user/mkfs/common.c (transcribed; <termios.h> -> hb_termios.h when !HAVE_TERMIOS_H)",
+      "src/user/mkfs/charconv.c (transcribed byte-identical; !HAVE_ICONV selects internal CP850 arm)",
+      "src/user/mkfs/device_info.c (transcribed; <sys/ioctl.h>/<sys/sysmacros.h> includes behind __linux__)",
+      "src/user/mkfs/common.h charconv.h device_info.h msdos_fs.h (byte-identical)",
+      "src/user/mkfs/endian_compat.h (HobbyOS LE fallback arm instead of #error)",
+      "src/user/mkfs/blkdev.h (trimmed transcription, ioctl/sysfs plumbing dropped)",
+      "src/user/mkfs/version.h (generated stamp pinned to 4.2 / 2021-01-31)",
+      "src/user/mkfs/config.h (pinned feature set, autotools presence/absence convention, -include'd)",
+      "src/user/mkfs/hb_termios.h, src/user/mkfs/hb_blkdev.c (first-party stubs: termios + blkdev geometry -> ENOTTY)",
+      "src/user/mkfs/README.md (port decisions + wave-3 in-OS test spec)",
+      "Makefile (vars block, pattern rule + link, disk.img prereq + MCOPY ::/MKFSFAT.BIN)",
+      "tools/cstyle.py (EXCLUDE_PREFIXES += src/user/mkfs/, sed precedent)",
+      "tools/build_mkfs_host.sh, tools/mkfs_host_proof.py, tools/assemble_w2_disk.sh, tools/w2_mkfs_inos.py, tools/ppm2png.py"
+    ]
+  },
+  "bin": {
+    "path": "obj/arm/mkfsfat.bin",
+    "size": 148024,
+    "sha256": "43eb56ef58d52ea5b9b38ec9a2a16f7f885d74560b1d7dcd0071be7a6dec6e4c",
+    "install_name": "MKFSFAT.BIN",
+    "install_note": "8.3 name MKFSFAT.BIN matches the acceptance '/TOOLS/MKFSFAT.BIN' reference (L4 sketch + acceptance S3); staged on the boot disk at ::/MKFSFAT.BIN by the disk recipe"
+  },
+  "ftruncate_path": {
+    "implemented": true,
+    "notes": "Upstream 4.2's -C already is open(O_EXCL|O_RDWR|O_CREAT,0666) then ftruncate(dev, part_sector*sector_size + blocks*BLOCK_SIZE) (mkfs.fat.c main(), lines ~1869-1881); no dd and no SEEK_HOLE anywhere in 4.2. Port changes nothing there. Host strace of the ported binary proves: open(O_CREAT|O_EXCL) + ftruncate, zero fallocate/truncate/dd writes. In-OS (desktop console): -C created PROBE.IMG at exactly 1,048,576 B with a fully-allocated FAT chain (clusters 108..171, verified on raw disk), dir entry + size persisted; the metadata content writes (boot sector/FATs/root) did NOT persist into the chain's clusters (all-zero on raw disk after graceful QMP quit and in the kernel's own read-back) -- see in_os_smoke."
+  },
+  "in_os_smoke": {
+    "attempted": true,
+    "method": "Minimal ARM boot disk assembled in-lane (mkfsfat_host -F 16 -C 1G + mtools + bootloader/BOOTAA64.EFI + kernel hobbyos.elf + desktop/console/sh/mkfsfat bins, uppercase 8.3 names); booted qemu-system-aarch64 (acceptance-section-5.1 line, own PID, no pkill; serial to file + QMP); drove via QMP input-send-event (run_console_test.py pattern): Apps menu -> CONSOLE.BIN -> typed 'mkfsfat -F 16 -C PROBE.IMG 1024'. Serial + framebuffer (ppm2png) + raw-disk extraction evidence. Shutdown by graceful QMP quit to rule out teardown-writeback.",
+    "result": "PARTIAL - MKFSFAT.BIN loads and runs in-OS (serial [LAUNCH] MKFSFAT.BIN 148024B; console rendered 'mkfs.fat 4.2 (2021-01-31)' + full geometry: 2048 sectors, media 0xf8, 2 16-bit FATs, 4 sectors/cluster, drive 0x80). '-C' created PROBE.IMG with the exact requested size (1,048,576 B) and a complete FAT chain. BUT the boot-sector/FAT/root content bytes do not persist into the file's clusters: raw disk reads back all zeros after a graceful QMP quit, and the kernel's own 'cat PROBE.IMG' renders blank. So file creation + ftruncate-as-size + chain allocation work in-OS; write-persistence of data into a freshly-f truncated file does not. The kernel's ftruncate unit test (fs_test.c:173-227) covers write->shrink->extend-readback(zero-fill) but never extend-then-write -- exactly mkfs.fat's -C access pattern.",
+    "deferred_reason": "The S3-gating in-OS round trip (MKFSFAT -C OUT.IMG then boot it) cannot pass until the kernel writes into ftruncate-extended FAT16 files persist (kernel/wave-3 fix, single-writer); documented precisely in src/user/mkfs/README.md for wave 3: (1) mkfsfat -F 16 -C OUT.IMG 131072 -> exit 0, 128 MiB OUT.IMG; (2) -C on existing file refuses (rm -f first); (3) extract with fat16img.py get and mdir -i / boot via Limine; (4) -n label incl. CP850 + default NO NAME; (5) the write-persistence fix must land in the kernel FS layer first (extend-then-write on FAT16)."
+  },
+  "gates": {
+    "a_arm_build_clean": "PASS - obj/arm/mkfsfat.bin 148,024 B, zero new warnings (5 TUs: mkfs.fat common charconv device_info hb_blkdev), linked against libc.a with ld.lld; sha256 43eb56ef...",
+    "b_cstyle": "PASS - first-party files (config.h version.h hb_termios.h hb_blkdev.c) verified cstyle-clean (checked outside the excluded path); transcribed src/user/mkfs/ sources added to cstyle.py EXCLUDE_PREFIXES exactly like src/user/sed/ (upstream formatting kept byte-identical); baseline 'cstyle check src' already non-clean repo-wide pre-lane",
+    "c_user_build_intact": "PASS - libc.a (33 TUs) rebuilt clean; SH.BIN still links/obj-copies; Makefile change purely additive; make -n smoke OK",
+    "d_host_functional": "PASS - tools/mkfs_host_proof.py all 53 checks green on the host build of the same sources: strace proves -C = open(O_CREAT|O_EXCL)+ftruncate only (no dd/fallocate/write); BPB structural checks (boot sig 0x55AA, FS-type strings, 512B sectors, 2 FATs, media 0xF8, total sectors == size/512, FAT1==FAT2, empty root) at FAT12 auto (4 MiB) and FAT16 64/128/256 MiB incl. the acceptance 128 MiB shape; -C on existing file refuses (EEXIST) and leaves it untouched; mtools mdir reads label + mcopy copy-in/out byte-exact round trip. Evidence: evidence/w2-mkfs-host-proof.log (committed).",
+    "e_in_os_smoke_gate": "ATTEMPTED - see in_os_smoke: partial (runs, creates+sizes+chains, content writes non-persistent => kernel gap handed to wave 3)."
+  },
+  "blockers": [],
+  "notes": [
+    "mkfs.fat BLOCKS argument is 1024-byte units (BLOCK_SIZE 1024 in mkfs.fat.c), so the acceptance recipe must use DISK_BLOCKS=131072 for the frozen 128 MiB OUT.IMG (131072 KiB), NOT the L4 sketch comment's 524288-sectors-for-256MiB math (that would produce a 512 MiB image). Measured cluster arms: 64 MiB->spc4 (L5 table's spc2 row was illustrative), 128 MiB->spc4 (matches L5 freeze), 256 MiB->spc8 (matches L5; the audit section 5.3 '8 KiB clusters at 256 MiB' guess was wrong).",
+    "Makefile hobbyos.bin is only produced inside the disk recipe (objcopy, Makefile:1803); the standalone kernel target is hobbyos.elf (TARGET at :331). Recorded because an early gate run 'make hobbyos.bin' printed RC=2 'No rule to make target'; rerun as 'make hobbyos.elf' -> KERNEL_BUILD_RC=0 (evidence/w2-mkfs-kernel-build.log).",
+    "Host native build reuses the same config.h/sources; harmless macro-redefinition warnings from glibc's <endian.h> on the HOST build only (ARM sysroot has no endian.h, ARM build warning-free).",
+    "Unit-test coverage gap flagged for the kernel lane: fs_test.c test_fs_ftruncate extends then reads zero-fill but never writes into the extended region -- extend-then-write is precisely what the in-OS -C path (and the whole S3 disk assembly) needs.",
+    "evidence/ artifacts (gitignored, committed with -f): w2-mkfs-host-proof.log (full PASS run), w2-mkfs-kernel-build.log (KERNEL_BUILD_RC=0), w2-mkfs-inos-serial.log (boot + [LAUNCH] MKFSFAT.BIN + menu dump), w2m_02_mkfsfat_run.png (console showing 'mkfs.fat 4.2 (2021-01-31)' + geometry), w2m_05_cat_probe.png (blank cat of PROBE.IMG)."
+  ]
+}
