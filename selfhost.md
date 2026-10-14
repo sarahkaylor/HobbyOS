@@ -289,9 +289,11 @@ load + staged payload present. **Evidence:** serial log + artifact sizes.
 - [x] **T2.4 In-OS smoke B:** compile `hello.c` → `.o` in-OS (freestanding flags). —
   COMPLETE (w5-nothrow: `phase=w5-compile-done rc=0`; HELLO.O 2272 B valid AArch64 REL,
   pulled off the image + host-validated).
-- [ ] **T2.5 In-OS smoke C:** lld-link + objcopy + **run `HELLO.BIN` in-OS**. (Flat LLD/
-  OBJCOPY staged and loadable; the prefetch-race kill that hit flat LLD in w4 is FIXED
-  by w5-kernel (iv) — re-run on the merged tip = w6-run.)
+- [x] **T2.5 In-OS smoke C:** lld-link + objcopy + **run `HELLO.BIN` in-OS**. — COMPLETE
+  (w6-run: in-OS-built HELLO.BIN ran in-OS, `[HELLO] entering main`, `phase=t25-run-done
+  rc=0`; LLD fix-forward `-flavor gnu`). **Gate M2: T2.3–T2.5 all green** (banner w5-flat;
+  compile w5-nothrow; link+run w6-run) — the combined transcript roll-up is part of w7's
+  acceptance driver.
 - [ ] **T2.6** Fix whatever L2 predicted that actually fires (single-writer rounds).
 
 **Gate M2:** T2.3–T2.5 green in one boot transcript; installed tool sizes recorded.
@@ -303,19 +305,23 @@ load + staged payload present. **Evidence:** serial log + artifact sizes.
   Partial: MAKE.BIN loads + executes in-OS; w5-src's S0/S1 dry-runs show make parsing
   `Makefile.hobbyos` + issuing compile lines; the recipe-shell exec bug (missing-image
   exec after AS teardown) is FIXED by w5-kernel (vii). Full merged-tip S0/S1 = w6-run.
-- [ ] **T3.2** `Makefile.hobbyos` v1: `check` + `user` (acceptance set) green in-OS from
-  `/SRC`.
-- [ ] **T3.3** sh fixes L4's matrix proves necessary.
+- [x] **T3.2** `Makefile.hobbyos` v1: `check` + `user` (acceptance set) green in-OS from
+  `/SRC`. — COMPLETE (w6-run: S0 + S1 green; HELLO.BIN byte-identical; pattern-rule/
+  argv/lld-flavor fix-forwards).
+- [x] **T3.3** sh fixes L4's matrix proves necessary. (w3-shell: redirect fd-close fix +
+  file-based byte assertions; w6's in-OS runs exercised make→sh recipes.)
 
 **Gate M3:** in-OS `make -f Makefile.hobbyos user` builds HELLO+SH from source; both run
 in-OS. **Evidence:** serial log.
 
 ### M4 — THE ACCEPTANCE: self-built OS
 
-- [ ] **T4.1** `make -f Makefile.hobbyos kernel` in-OS: all 59 ARM kernel TU compile, link
-  `hobbyos.elf`, objcopy `hobbyos.bin` — in-OS.
-- [ ] **T4.2** `disk` target: MKFSFAT+MCOPY/build `OUT.IMG` (kernel + limine.conf +
-  BOOTAA64.EFI + user set) in-OS.
+- [x] **T4.1** `make -f Makefile.hobbyos kernel` in-OS: all 59 ARM kernel TU compile, link
+  `hobbyos.elf`, objcopy `hobbyos.bin` — in-OS. — COMPLETE (w6-run; 1,372,912 B elf /
+  219,564 B bin; ≈1.5–2 h under TCG).
+- [x] **T4.2** `disk` target: MKFSFAT+MCOPY/build `OUT.IMG` (kernel + limine.conf +
+  BOOTAA64.EFI + user set) in-OS. — COMPLETE (w6-run; 128 MiB OUT.IMG in 365 s; layout
+  mdir-verified; sha256 `7e24b4ca…`).
 - [ ] **T4.3** Host verify loop `run_selfhost_build_test.py`: boot HobbyOS, drive the
   build, extract OUT.IMG (`fat16img.py`), boot OUT.IMG, assert the kernel marker + run an
   in-OS-built program. Pre-tested (wave 3, hand-built OUT.IMG): extraction byte-identical
@@ -575,6 +581,29 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 ---
 
 ## 11. Fix log (append-only, newest first)
+
+- **2026-10-14 — Wave 6 (w6-run) merged (`288995c`): THE IN-OS BUILD RUNS END-TO-END.**
+  Verified by the integrator against raw evidence before merge: every stage marker on raw
+  serial (`s0-check-done rc=0`, `s1-user-done rc=0`, `t25-run-done rc=0`, `kernel-link-done
+  rc=0`, `s2-kernel-done rc=0`, `s3-disk-done rc=0`, `ACCEPTANCE-COMPLETE`), and the
+  artifacts are real: **S1**: all 5 user objects compiled + 4 links + 4 objcopies in-OS;
+  **HELLO.BIN byte-identical (sha256) to the host build** — determinism proof. **T2.5**:
+  in-OS-built HELLO.BIN ran in-OS (`[HELLO] entering main`). **S2**: 59 TUs + lld link +
+  objcopy → hobbyos.elf (1,372,912 B) + hobbyos.bin (219,564 B, ARM64 Image header).
+  **S3**: OUT.IMG 134,217,728 B assembled in-OS in 365 s (sha256 `7e24b4ca…`), full
+  acceptance layout verified by mdir: `/boot/hobbyos.bin` + limine.conf,
+  `/EFI/BOOT/BOOTAA64.EFI`, root HELLO/SH/LS/CAT/DESKTOP/CONSOLE/OUTPROG.BIN + OUTMARK.TXT.
+  OUT.IMG + products also copied to `obj/selfhost/w6-out/` and committed as evidence.
+  Fix-forwards (9 commits): cxxrt.cpp os-wide followup; **execv per-arg cap 64→4096**
+  (broke make→`sh -c` recipe lines); **lld `-flavor gnu`** (bare lld refuses); **in-OS make
+  pattern rules never match** (FAT readdir returns UPPERCASE 8; make's check is
+  case-sensitive) → 59 explicit kernel rules; fpu.o drops `-mgeneral-regs-only`; **crt0
+  32-arg link cap** → lld response file (`/SRC/OBJS.RSP`); S3 stage gaps (RM.BIN, ::/bin).
+  **TCG reality (corrected):** in-OS clang under ARM TCG ≈900–1500× slower than host
+  (sh.c 1.38 s host → 53 min in-OS; kernel ≈1.5–2 h) — acceptance.md's 8× note is off by
+  ~2 orders; in-OS make is non-incremental (FAT timestamps). **S4/S5 = next (w7): boot the
+  real OUT.IMG + run the in-OS-built program — the acceptance moment.** Battery round 6
+  launched on `288995c`.
 
 - **2026-10-14 — Merged-tip battery round 5 on `42c6c0b`: GREEN both machines (ambient-class
   residuals only).** Local: host rc=0, unit-arm **318/0**, unit-x64 (KVM) **322/0**, wave
