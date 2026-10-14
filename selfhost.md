@@ -590,8 +590,17 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
-- **2026-10-14 — Battery round 6 / VM red: `TORTURE exec-wait-cycles` tip-scoped failure at
-  `288995c` — investigation lane w8-torture dispatched.** Evidence: VM merged-w7 + merged-w7r
+- **2026-10-14 — Battery round 6: local = host/arm/x64 green, wave WEDGED (guest CPU-dead
+  after GREPTEST's full pass; `WAVE_ARM_RC=124`; first LOCAL wedge, b4-class) → single-tier
+  rerun = rc=0, marker present, but the rerun ALSO hit `TORTURE exec-wait-cycles FAIL`
+  (exec_ok=0) — see the red entry below. Rerun log
+  `merged-battery6-wave-rerun-2026-10-14.log`; other tokens = 2× WATCHDOG, ~20 per-test
+  ALL-PASSED lines.
+- **2026-10-14 — `TORTURE exec-wait-cycles` failure at `288995c` — NOT VM-only: intermittent
+  on both machines, heavily biased to the new tip. Local wave #1 PASS (exec_ok=8, 301 ms);
+  local wave rerun FAIL (exec_ok=0); VM fail 2/2; pre-w6 `42c6c0b` passes on both (VM slow
+  run incl.). Investigation lane w8-torture dispatched (`deleg_689f3db2`) + steered with
+  the local-repro update.** Evidence: VM merged-w7 + merged-w7r
   both FAIL (`exec_ok=0`, `exec_rejected=0`, suite 44 s; children DO run — 16×
   `[TORTURE.CHILD] ok`; one fail-run had a NORMAL 179 s wall). Controlled A/B same night:
   pre-w6 tip `42c6c0b` on the VM PASSES (`exec_ok=8`) even in a slow 322 s run. Local at the
