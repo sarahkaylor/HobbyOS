@@ -168,6 +168,13 @@
  * vfork, and fork() is the correct (and safe) substitute here. */
 #define vfork fork
 
+/* HobbyOS crt0 ABI: main(argc, argv) only -- no environment pointer in a
+ * register (src/libc/crt0.c).  Make's POSIX build would read garbage in
+ * its third parameter (crash at the environment-scanning loop, VA ~0xF0).
+ * This pins the two-arg main, so make falls back to environ exactly like
+ * its own z/OS path (main.c:1164-1172, 1485-1491; marked [HobbyOS port]). */
+#define HOBBYOS_NO_ENVP_ARG 1
+
 /* Sysroot declaration shims.  HobbyOS declares these in
  * src/user_include/libc.h, which make's sources never include (they are
  * plain <unistd.h> consumers), and the sysroot <unistd.h> itself omits

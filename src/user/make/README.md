@@ -14,6 +14,7 @@ pinned in `docs/selfhost/buildtools-audit.md` §1 by lane L4).
 | `commands.h` `debug.h` `dep.h` `filedef.h` `getopt.h` `gettext.h` `gnumake.h` `hash.h` `job.h` `makeint.h` `mkcustom.h` `os.h` `output.h` `rule.h` `shuffle.h` `variable.h` | `third_party/make-4.4.1/src/` | byte-identical headers |
 | `glob.c` `fnmatch.c` | `third_party/make-4.4.1/lib/` | byte-identical (make bundles glob/fnmatch since 4.4) |
 | `glob.h` `fnmatch.h` `intprops.h` `intprops-internal.h` | `lib/glob.in.h` `lib/fnmatch.in.h` `lib/intprops*.h` | pristine content (configure generates these from the `.in.h`) |
+| `main.c` | `third_party/make-4.4.1/src/` | **byte-identical + two marked `[HobbyOS port]` patch points** — make's `main(argc,argv,envp)` needs the two-arg `main` (HobbyOS crt0 ABI) and `environ`, exactly its own z/OS fallback; see config.h `HOBBYOS_NO_ENVP_ARG` |
 | `config.h` | hand-written | pins the configure-time feature set — see below |
 | `hb_stubs.c` `hb_stubs.h` | first-party | sysroot-gap shims |
 | `ar.h` | first-party (OS shim) | the sysroot has no `<ar.h>`; System-V layout |

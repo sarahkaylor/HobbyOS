@@ -1160,11 +1160,15 @@ temp_stdin_unlink ()
     }
 }
 
-#ifdef MK_OS_ZOS
+/* HobbyOS port: the sysroot crt0 invokes main(argc, argv) -- no envp in a
+   register (src/libc/crt0.c declares a two-arg main) -- so make reads the
+   environment through environ instead, exactly make's own z/OS fallback.
+   HOBBYOS_NO_ENVP_ARG is pinned in src/user/make/config.h.  */
+#if defined(MK_OS_ZOS) || defined(HOBBYOS_NO_ENVP_ARG)
 extern char **environ;
 #endif
 
-#if defined(_AMIGA) || defined(MK_OS_ZOS)
+#if defined(_AMIGA) || defined(MK_OS_ZOS) || defined(HOBBYOS_NO_ENVP_ARG)
 int
 main (int argc, char **argv)
 #else
@@ -1482,7 +1486,8 @@ main (int argc, char **argv, char **envp)
      done before $(MAKE) is figured out so its definitions will not be
      from the environment.  */
 
-#ifdef MK_OS_ZOS
+/* [HobbyOS port] same fallback for the two-arg-main ABI (see above).  */
+#if defined(MK_OS_ZOS) || defined(HOBBYOS_NO_ENVP_ARG)
   char **envp = environ;
 #endif
 
