@@ -479,6 +479,14 @@ SED_OBJS = $(addprefix $(OBJ_DIR)/sed_,$(addsuffix .o,$(SED_CORE_NAMES))) $(addp
 NANO_SRC_NAMES = browser chars color cut files global help history move nano prompt rcfile search text utils winio
 NANO_OBJS = $(addprefix $(OBJ_DIR)/nano_,$(addsuffix .o,$(NANO_SRC_NAMES))) $(OBJ_DIR)/nano_hb_curses.o
 NANO_BIN = $(OBJ_DIR)/nano.bin
+# GNU make 4.4.1 port: the upstream transcription in src/user/make/
+# (byte-identical except the hand-pinned src/user/make/config.h +
+# src/user/make/hb_stubs.c glue; see docs/selfhost/buildtools-audit.md S3
+# and docs/gnu-ports.md).  MAKE_SRC_NAMES = the ported src/*.c core +
+# the bundled glob/fnmatch + the glue.
+MAKE_SRC_NAMES = ar arscan commands default dir expand file function getopt getopt1 guile hash implicit job load loadapi main misc output posixos read remake remote-stub rule shuffle signame strcache variable version vpath glob fnmatch hb_stubs
+MAKE_OBJS = $(addprefix $(OBJ_DIR)/make_,$(addsuffix .o,$(MAKE_SRC_NAMES)))
+MAKE_BIN = $(OBJ_DIR)/make.bin
 HEDGNU_BIN = $(OBJ_DIR)/hedgnu.bin
 WCTEST_BIN = $(OBJ_DIR)/wc_test.bin
 REGTEST_BIN = $(OBJ_DIR)/regex_test.bin
@@ -1379,6 +1387,17 @@ $(SED_BIN): $(SED_OBJS) $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/sed.elf $(SED_OBJS) $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/sed.elf $(SED_BIN)
 
+# --- GNU make 4.4.1 (multi-object port; objects named make_*) -----------
+# -DHAVE_CONFIG_H mirrors the configure build (config.h is only pulled by
+# the sources that #ifdef HAVE_CONFIG_H first, e.g. lib/glob.c).
+$(OBJ_DIR)/make_%.o: src/user/make/%.c src/user/make/config.h src/user/make/*.h $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -DHAVE_CONFIG_H -Isrc/user/make -c $< -o $@
+
+$(MAKE_BIN): $(MAKE_OBJS) $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/make.elf $(MAKE_OBJS) $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/make.elf $(MAKE_BIN)
+
 $(OBJ_DIR)/wc_test.o: src/user/wc_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
@@ -1742,6 +1761,12 @@ $(SQLTEST_BIN): $(OBJ_DIR)/sqlite_test.o $(OBJ_DIR)/sqlite_os.o $(OBJ_DIR)/sqlit
 	$(LD) -T src/user/linker.ld -e _start --gc-sections -o $(OBJ_DIR)/sqltest.elf $(OBJ_DIR)/sqlite_test.o $(OBJ_DIR)/sqlite_os.o $(OBJ_DIR)/sqlite3.o $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/sqltest.elf $(SQLTEST_BIN)
 
+# GNU make port: stay out of the giant prerequisite lists above (they are
+# merge-owner territory) and hang MAKE.BIN off linker.ld + the disk recipe
+# with target-specific rules of its own.
+$(MAKE_BIN): .EXTRA_PREREQS += src/user/linker.ld
+disk.img: $(MAKE_BIN)
+
 disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(MODE_FILE)
 	# Startup disk: 1 GiB (user-requested floor; FAT16 tops out at 2 GiB).
 	# mkfs.fat auto-picks the cluster size (32 KiB @ 1 GiB); the kernel
@@ -1875,6 +1900,7 @@ endif
 	$(MCOPY) -i disk.img $(TOUCH_BIN) ::/TOUCH.BIN
 	$(MCOPY) -i disk.img $(WC_BIN) ::/WC.BIN
 	$(MCOPY) -i disk.img $(SED_BIN) ::/SED.BIN
+	$(MCOPY) -i disk.img $(MAKE_BIN) ::/MAKE.BIN
 	$(MCOPY) -i disk.img $(HEDGNU_BIN) ::/HEDGNU.BIN
 	$(MCOPY) -i disk.img $(TAILGN_BIN) ::/TAILGN.BIN
 	$(MCOPY) -i disk.img $(CUT_BIN) ::/CUT.BIN
