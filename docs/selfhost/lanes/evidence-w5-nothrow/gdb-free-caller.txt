@@ -1,0 +1,13 @@
+# gdb-multiarch over QEMU gdbstub (tcp::12345), conditional breakpoint on
+# free() entry (0x100484c7d0), latch when x0 == HobbyOS malloc BLOCK_MAGIC
+# (0x48424F424C4B4D47).  Identifies WHICH caller passes the magic to free().
+### CULPRIT x0=0x48424f424c4b4d47 x1=0x10403556d0 x30=0x10047d8708 x29=0x17ffff69d0
+# Symbolize (llvm-addr2line):
+#   x30 = 0x10047d8708 -> tc_free_aligned(void*)        (cxxrt_shim.cpp, shim delete)
+#   frame at x29 (0x17ffff69d0, lr) = 0x10047d86c8 -> operator delete(void*) (shim)
+# Stack at latch:
+#  0x17ffff69c0: 0x0000001040085a00 0x0000001040355840
+#  0x17ffff69d0: 0x00000017ffff69f0 0x00000010047d86c8   (x29 -> operator delete)
+# Chain: operator delete(void*) [shim] -> tc_free_aligned(p) -> free([p-8]);
+# clang deletes a libc++ operator-new(nothrow) payload (RAW malloc block,
+# no stash) -> [p-8] == BLOCK_MAGIC -> free(BLOCK_MAGIC) -> data abort.

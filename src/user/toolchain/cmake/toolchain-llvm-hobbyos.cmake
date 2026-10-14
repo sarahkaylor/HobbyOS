@@ -248,8 +248,49 @@ if (NOT EXISTS "${HOBBYOS_SETJMP_OBJ}" OR "${HOBBYOS_SETJMP_SRC}" IS_NEWER_THAN 
     message(FATAL_ERROR "setjmp.S build failed: ${HOBBYOS_SETJMP_OUT} ${HOBBYOS_SETJMP_ERR}")
   endif ()
 endif ()
-set(HOBBYOS_CLOSURE_WITH_FSTREAM "${HOBBYOS_SETJMP_OBJ} ${HOBBYOS_FSTREAM_INST_OBJ} ${HOBBYOS_GAPS_IN_CLOSURE}")
-set(HOBBYOS_CLOSURE_ALL "${HOBBYOS_SETJMP_OBJ} ${HOBBYOS_FSTREAM_INST_OBJ} ${HOBBYOS_GAPS_IN_CLOSURE}"
+# ---------------------------------------------------------------------------
+# Toolchain C++-runtime shim (lane w5-nothrow): operator new/delete +
+# __cxa_atexit/__cxa_finalize/__dso_handle for the TOOLCHAIN's own link.
+#
+# HobbyOS's OS userland libc.a embeds src/libc/src/cxxrt.cpp (cxxrt.o):
+# STRONG operator new/delete in plain .text plus __cxa_atexit etc.  When a
+# toolchain binary's link pulls that member (to resolve __cxa_atexit /
+# __dso_handle, which libc++ deliberately leaves to the OS runtime), its
+# strong _Znwm lands OUTSIDE libc++'s __lcxx_override section -- so libc++'s
+# -fno-exceptions nothrow-operator-new override assertion (new.cpp,
+# _LIBCPP_ASSERT in operator new(nothrow)) trips -> brk #1 / EC=0x3C in-OS
+# (w4-clang T2.4b wall, blocker b2; docs/selfhost/lanes/w4-clang-report.json).
+# This shim supplies the same runtime surface FOR THE TOOLCHAIN CLOSURE ONLY
+# (never the OS userland build), with its operator new/delete inside
+# __lcxx_override so the override check passes, and with __cxa_atexit /
+# __dso_handle defined so cxxrt.o is never extracted from libc.a (its strong
+# plain-.text new/delete never enter the link).  AD-3: no LLVM/libc++ source
+# patch -- this file + the closure edit are build config.  OS-wide follow-up
+# (out of this lane's scope): give cxxrt.cpp's new/delete the same section
+# attribute.  See the file header in sysroot-headers/cxxrt_shim.cpp.
+set(HOBBYOS_CXXRT_SHIM_SRC
+    "${_toolchain_root}/src/user/toolchain/sysroot-headers/cxxrt_shim.cpp")
+set(HOBBYOS_CXXRT_SHIM_OBJ "${CMAKE_BINARY_DIR}/hobbyos_cxxrt_shim.o")
+if (NOT EXISTS "${HOBBYOS_CXXRT_SHIM_OBJ}" OR "${HOBBYOS_CXXRT_SHIM_SRC}" IS_NEWER_THAN "${HOBBYOS_CXXRT_SHIM_OBJ}")
+  set(HOBBYOS_CXXRT_SHIM_CFLAGS
+      "${HOBBYOS_TARGET_FLAGS} ${HOBBYOS_ARCH_CFLAGS} -ffreestanding ${HOBBYOS_FREESTANDING_INCLUDE} ${HOBBYOS_SYSROOT_INCLUDES_STR}"
+      CACHE INTERNAL "")
+  separate_arguments(HOBBYOS_CXXRT_SHIM_CFLAGS_LIST NATIVE_COMMAND "${HOBBYOS_CXXRT_SHIM_CFLAGS}")
+  execute_process(
+    COMMAND "${CMAKE_CXX_COMPILER}" ${HOBBYOS_CXXRT_SHIM_CFLAGS_LIST} -std=c++17 -fno-exceptions -fno-rtti
+            "${HOBBYOS_CXXRT_SHIM_SRC}" -c -o "${HOBBYOS_CXXRT_SHIM_OBJ}"
+    RESULT_VARIABLE HOBBYOS_CXXRT_SHIM_RC
+    OUTPUT_VARIABLE HOBBYOS_CXXRT_SHIM_OUT
+    ERROR_VARIABLE HOBBYOS_CXXRT_SHIM_ERR)
+  if (NOT HOBBYOS_CXXRT_SHIM_RC EQUAL 0)
+    message(FATAL_ERROR "cxxrt_shim.cpp build failed: ${HOBBYOS_CXXRT_SHIM_OUT} ${HOBBYOS_CXXRT_SHIM_ERR}")
+  endif ()
+endif ()
+# The shim must head the closure (before libcxx.a and libc.a) so its strong
+# new/delete and __cxa_* defs are registered first and cxxrt.o is never
+# extracted from libc.a.
+set(HOBBYOS_CLOSURE_WITH_FSTREAM "${HOBBYOS_CXXRT_SHIM_OBJ} ${HOBBYOS_SETJMP_OBJ} ${HOBBYOS_FSTREAM_INST_OBJ} ${HOBBYOS_GAPS_IN_CLOSURE}")
+set(HOBBYOS_CLOSURE_ALL "${HOBBYOS_CXXRT_SHIM_OBJ} ${HOBBYOS_SETJMP_OBJ} ${HOBBYOS_FSTREAM_INST_OBJ} ${HOBBYOS_GAPS_IN_CLOSURE}"
     CACHE INTERNAL "")
 set(CMAKE_CXX_STANDARD_LIBRARIES "${HOBBYOS_CLOSURE_ALL}"
     CACHE STRING "HobbyOS C++ sysroot closure (setjmp + fstream_inst + gaps + crt0 + libcxx.a + libc.a)" FORCE)

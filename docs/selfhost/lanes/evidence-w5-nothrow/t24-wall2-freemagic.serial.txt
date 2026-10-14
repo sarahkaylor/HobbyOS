@@ -1,0 +1,11 @@
+# Mid-fix wall #2, BEFORE the nothrow-new/delete pairing fix (delete-prefix).
+# clang got past the __lcxx_override override assert (no EC=0x3C), then
+# data-aborted in HobbyOS free(): clang passed BLOCK_MAGIC as the pointer.
+[SELFHOST] DRIVER-UP script=/SRC/SELFHOST.RUN
+[SELFHOST] phase=w5-compile-start
+v2 loader: image mapped (lazy), bytes=94192344 pages=22997 first=in elap=1ms
+v2 loader: PID=4 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[KERNEL] pid=4 (/TOOLS/CLANG3.BIN) memory fault VA=0x48424F424C4B4D3F PC=0x000000100484C804 rw=r  in=HOLE -> killed
+[KERNEL] Process 4: /TOOLS/CLANG3.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=w5-compile-fail reason=tool-rc rc=11
+[SELFHOST] FAILED-AT stage=w5-compile
