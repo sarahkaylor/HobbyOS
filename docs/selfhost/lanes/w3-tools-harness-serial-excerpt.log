@@ -1,0 +1,15 @@
+[001;001H[001;001H[001;001Hl[001;002Hi[001;003Hn[001;004Hu[001;005Hx[001;006H:[001;007H [001;008HL[001;009Ho[001;010Ha[001;011Hd[001;012Hi[001;013Hn[001;014Hg[001;015H [001;016Hk[001;017He[001;018Hr[001;019Hn[001;020He[001;021Hl[001;022H [001;023H`[001;024Hb[001;025Ho[001;026Ho[001;027Ht[001;028H([001;029H)[001;030H:[001;031H/[001;032Hb[001;033Ho[001;034Ho[001;035Ht[001;036H/[001;037Hh[001;038Ho[001;039Hb[001;040Hb[001;041Hy[001;042Ho[001;043Hs[001;044H.[001;045Hb[001;046Hi[001;047Hn[001;048H`[001;049H.[001;050H.[001;051H.[001;052H[001;001H[002;001HBooting AArch64 OS...
+Loading program for scheduler (v2 AS): DESKTOP.BIN
+[MENU] 74=SELFHOST.BIN
+[MENU] 98=MAKE.BIN
+[LAUNCH] SELFHOST.BIN
+Loading program for scheduler (v2 AS): SELFHOST.BIN
+[SELFHOST] DRIVER-UP script=/SRC/SELFHOST.RUN
+[SELFHOST] phase=s0-check-start
+Loading program for scheduler (v2 AS): /TOOLS/MAKE.BIN
+MAKE.BIN: Makefile.hobbyos: No such file or directory
+MAKE.BIN: *** No rule to make target 'Makefile.hobbyos'.  Stop.
+[KERNEL] Process 4: /TOOLS/MAKE.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=s0-check-fail reason=tool-rc rc=512
+[SELFHOST] FAILED-AT stage=s0-check
+[KERNEL] Process 3: SELFHOST.BIN exited unexpectedly or gracefully.

@@ -97,11 +97,29 @@ RESDIR       <DIR>
   skips when `obj/selfhost/dist-staging` is absent, so other trees stay
   green).  STAGE_TOOLS=0 disables the step entirely.
 
-## 4. Optional in-OS visibility run
+## 4. In-OS visibility run (SELFHOST.BIN harness boot)
 
-The `run_selfhost_build_test.py` harness boot is the independent proof that
-`/TOOLS` content is visible in-OS; verdict recorded in `w3-tools-report.json`
-(ran = yes/no; class).
+Ran `tools/run_selfhost_build_test.py --stage --image disk.img` — booted the
+staged startup image once, launched SELFHOST.BIN from the Apps menu via QMP
+keystrokes.  Serial proof that `/TOOLS` is visible and resolvable in-OS
+(committed excerpt: `w3-tools-harness-serial-excerpt.log`):
+
+```
+Booting AArch64 OS...
+[LAUNCH] SELFHOST.BIN
+[SELFHOST] DRIVER-UP script=/SRC/SELFHOST.RUN
+[SELFHOST] phase=s0-check-start
+Loading program for scheduler (v2 AS): /TOOLS/MAKE.BIN
+MAKE.BIN: Makefile.hobbyos: No such file or directory
+MAKE.BIN: *** No rule to make target 'Makefile.hobbyos'.  Stop.
+[SELFHOST] phase=s0-check-fail reason=tool-rc rc=512
+```
+
+The driver's /TOOLS-first tool resolution found `/TOOLS/MAKE.BIN` and the
+kernel loaded + executed it in-OS (307,720 B); make ran and failed cleanly
+only on the absent `Makefile.hobbyos` (a later wave), never on tool-missing
+(`abort` marker count = 0).  Harness verdict `stage_failure` is the
+acceptance's expected clean-staged-failure shape for this wave.
 
 ## 5. Files touched
 
