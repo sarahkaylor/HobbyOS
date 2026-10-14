@@ -447,6 +447,19 @@ static int find_entry_in_root(const char *name, struct fat16_dir_entry *out_entr
   uint8_t buf[SECTOR_SIZE];
   struct lfn_state st;
   lfn_reset(&st);
+
+  /* W9 (selfhost S2): like find_entry_in_subdir, a genuine 8.3 entry with
+     the EXACT name must win over a colliding LFN alias (an 8.3-representable
+     query such as "net_rdma.o" may also be the 8.3 truncation of a LONG
+     name's alias).  Remembered and preferred over the first OR-match. */
+  int rep83 = name_is_83(name);
+  int have83 = 0;
+  uint32_t a83_sector = 0, a83_offset = 0;
+  struct fat16_dir_entry a83_entry;
+  int or_seen = 0;
+  uint32_t or_sector = 0, or_offset = 0;
+  struct fat16_dir_entry or_entry;
+
   for (uint32_t i = 0; i < root_dir_sectors; i++) {
     if (virtio_blk_read_sector(root_dir_sector + i, buf, 1) != 0) {
       return -1;
@@ -456,7 +469,7 @@ static int find_entry_in_root(const char *name, struct fat16_dir_entry *out_entr
     for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
       if (entries[j].name[0] == 0x00) {
         spinlock_release_irqrestore(&fat_lock, flags);
-        return -1;
+        goto done_scan;
       }
       if (entries[j].name[0] == (char)0xE5) {
         lfn_reset(&st);
@@ -466,19 +479,35 @@ static int find_entry_in_root(const char *name, struct fat16_dir_entry *out_entr
         lfn_add_chunk(&st, (const unsigned char *)&entries[j]);
         continue;
       }
-      if (match_name(entries[j].name, name) ||
-          (lfn_matches(&st, name) && lfn_checksum(entries[j].name) == st.sum)) {
-        if (out_entry) *out_entry = entries[j];
-        if (out_sector) *out_sector = root_dir_sector + i;
-        if (out_offset) *out_offset = j;
-        spinlock_release_irqrestore(&fat_lock, flags);
-        return 0;
+      if (rep83 && !st.have && match_name(entries[j].name, name) && !have83) {
+        have83 = 1;
+        a83_entry = entries[j];
+        a83_sector = root_dir_sector + i;
+        a83_offset = j;
+      }
+      if (!or_seen &&
+          (match_name(entries[j].name, name) ||
+           (lfn_matches(&st, name) && lfn_checksum(entries[j].name) == st.sum))) {
+        or_seen = 1;
+        or_entry = entries[j];
+        or_sector = root_dir_sector + i;
+        or_offset = j;
       }
       lfn_reset(&st);
     }
     spinlock_release_irqrestore(&fat_lock, flags);
   }
-  return -1;
+done_scan:
+  {
+    uint32_t sec; uint32_t off; struct fat16_dir_entry *ent;
+    if (have83) { sec = a83_sector; off = a83_offset; ent = &a83_entry; }
+    else if (or_seen) { sec = or_sector; off = or_offset; ent = &or_entry; }
+    else { return -1; }
+    if (out_entry) *out_entry = *ent;
+    if (out_sector) *out_sector = sec;
+    if (out_offset) *out_offset = off;
+    return 0;
+  }
 }
 
 static int find_entry_in_subdir(uint16_t dir_cluster, const char *name, struct fat16_dir_entry *out_entry, uint32_t *out_sector, uint32_t *out_offset) {
@@ -486,6 +515,22 @@ static int find_entry_in_subdir(uint16_t dir_cluster, const char *name, struct f
   uint8_t buf[SECTOR_SIZE];
   struct lfn_state st;
   lfn_reset(&st);
+
+  /* W9 (selfhost S2): an 8.3-representable name can COLLIDE with the 8.3
+     alias of a LONG name stored as a VFAT 0x0F run (net_rdma.o and
+     net_rdma_test.o both alias to "NET_RDMAO"): the first entry in
+     directory order with a matching 8.3 name used to win, so opening
+     "/SRC/obj/arm/net_rdma.o" could return net_rdma_test.o's alias and
+     lld then failed with "undefined symbol: net_rdma_fast_write".  A
+     genuine 8.3 entry (no attached 0x0F chain) with the EXACT 8.3 name
+     takes priority over any LFN alias that merely truncates to it. */
+  int rep83 = name_is_83(name);
+  int have83 = 0;
+  uint32_t a83_sector = 0, a83_offset = 0;
+  struct fat16_dir_entry a83_entry;
+  int or_seen = 0;
+  uint32_t or_sector = 0, or_offset = 0;
+  struct fat16_dir_entry or_entry;
 
   while (cluster != 0 && cluster < 0xFFF0) {
     for (uint32_t s = 0; s < bpb_sectors_per_cluster; s++) {
@@ -498,7 +543,7 @@ static int find_entry_in_subdir(uint16_t dir_cluster, const char *name, struct f
       for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
         if (entries[j].name[0] == 0x00) {
           spinlock_release_irqrestore(&fat_lock, flags);
-          return -1;
+          goto done_scan;
         }
         if (entries[j].name[0] == (char)0xE5) {
           lfn_reset(&st);
@@ -508,13 +553,21 @@ static int find_entry_in_subdir(uint16_t dir_cluster, const char *name, struct f
           lfn_add_chunk(&st, (const unsigned char *)&entries[j]);
           continue;
         }
-        if (match_name(entries[j].name, name) ||
-            (lfn_matches(&st, name) && lfn_checksum(entries[j].name) == st.sum)) {
-          if (out_entry) *out_entry = entries[j];
-          if (out_sector) *out_sector = sector_num;
-          if (out_offset) *out_offset = j;
-          spinlock_release_irqrestore(&fat_lock, flags);
-          return 0;
+        if (rep83 && !st.have && match_name(entries[j].name, name) && !have83) {
+          /* exact 8.3 entry with no attached LFN chain -- the genuine short
+             file; remembered even if an LFN alias was seen earlier. */
+          have83 = 1;
+          a83_entry = entries[j];
+          a83_sector = sector_num;
+          a83_offset = j;
+        }
+        if (!or_seen &&
+            (match_name(entries[j].name, name) ||
+             (lfn_matches(&st, name) && lfn_checksum(entries[j].name) == st.sum))) {
+          or_seen = 1;
+          or_entry = entries[j];
+          or_sector = sector_num;
+          or_offset = j;
         }
         lfn_reset(&st);
       }
@@ -524,7 +577,17 @@ static int find_entry_in_subdir(uint16_t dir_cluster, const char *name, struct f
     cluster = read_fat(cluster);
     spinlock_release_irqrestore(&fat_lock, flags);
   }
-  return -1;
+done_scan:
+  {
+    uint32_t sec; uint32_t off; struct fat16_dir_entry *ent;
+    if (have83) { sec = a83_sector; off = a83_offset; ent = &a83_entry; }
+    else if (or_seen) { sec = or_sector; off = or_offset; ent = &or_entry; }
+    else { return -1; }
+    if (out_entry) *out_entry = *ent;
+    if (out_sector) *out_sector = sec;
+    if (out_offset) *out_offset = off;
+    return 0;
+  }
 }
 
 static int alloc_entry_in_dir(uint16_t dir_cluster, const struct fat16_dir_entry *new_entry, uint32_t *out_sector, uint32_t *out_offset) {

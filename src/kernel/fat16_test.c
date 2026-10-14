@@ -709,8 +709,64 @@ static void test_fat16_clang_temp_rename_no_twins(void) {
   }
 }
 
-/* EOF marker helpers below are parse-edge tests; W9 block above is the
-   in-OS clang temp+rename reproduction (w7 S2 dirent-writer defect). */
+/* W9 (selfhost S2): an 8.3-representable file name can collide with the 8.3
+ * alias of a LONG name in the same directory (net_rdma.o / net_rdma_test.o
+ * both alias to "NET_RDMAO").  The reader used to return the FIRST entry in
+ * directory order with a matching 8.3 name, so opening the 8.3 file could
+ * hand back the long name's alias (wrong file) and the in-OS lld link failed
+ * with "undefined symbol: net_rdma_fast_write".  A genuine 8.3 entry with
+ * the exact name must win over a colliding LFN alias, and the long name must
+ * still resolve to its own file. */
+static void test_fat16_83_alias_collision_lookup(void) {
+  uart_puts("  Running test_fat16_83_alias_collision_lookup...\n");
+  tests_run++;
+
+  (void)fat16_mkdir("/WB9C"); /* tolerate a prior run's EEXIST */
+
+  /* Exact collision shape from the S2 kernel set: short 8.3 "ABCDEFGH.O"
+     plus long "ABCDEFGH_MORE.O", whose format_83 alias is the SAME 8.3
+     name (ABCDEFGH.O). */
+  const char *shortn = "/WB9C/ABCDEFGH.O";
+  const char *longn = "/WB9C/ABCDEFGH_MORE.O";
+  struct file f;
+  uint8_t buf[16];
+
+  /* Long file FIRST so its alias (ABCDEFGH.O) precedes the genuine 8.3
+     entry in directory order (the old resolver's first match). */
+  EXPECT_EQ(fat16_open(longn, &f), 0);
+  for (int i = 0; i < 16; i++) buf[i] = (uint8_t)('A' + i);
+  EXPECT_EQ(fat16_write(&f, buf, 16), 16);
+  fat16_close(&f);
+
+  EXPECT_EQ(fat16_open(shortn, &f), 0);
+  for (int i = 0; i < 16; i++) buf[i] = (uint8_t)('a' + i);
+  EXPECT_EQ(fat16_write(&f, buf, 16), 16);
+  fat16_close(&f);
+
+  /* The exact 8.3 name must open the GENUINE short file, not the long
+     name's alias sharing the 8.3 form. */
+  struct fat16_dir_entry e;
+  EXPECT_EQ(fat16_resolve_path(shortn, &e, 0, 0), 0);
+  EXPECT_EQ(fat16_open(shortn, &f), 0);
+  ASSERT(fat16_seek(&f, 0) == 0);
+  {
+    char rb[17] = {0};
+    EXPECT_EQ(fat16_read(&f, rb, 16), 16);
+    fat16_close(&f);
+    EXPECT_EQ(rb[0], 'a'); /* the short file's content, NOT 'A' */
+  }
+
+  /* The long name still resolves to its own entry with its content. */
+  EXPECT_EQ(fat16_resolve_path(longn, &e, 0, 0), 0);
+  EXPECT_EQ(fat16_open(longn, &f), 0);
+  ASSERT(fat16_seek(&f, 0) == 0);
+  {
+    char rb[17] = {0};
+    EXPECT_EQ(fat16_read(&f, rb, 16), 16);
+    fat16_close(&f);
+    EXPECT_EQ(rb[0], 'A');
+  }
+}
 
 /* EOF marker helpers below are parse-edge tests; W9 block above is the
    in-OS clang temp+rename reproduction (w7 S2 dirent-writer defect). */
@@ -1225,6 +1281,7 @@ void fat16_test_suite(void) {
   test_fat16_lfn_mkdir_long();
   test_fat16_lfn_rename_long();
   test_fat16_clang_temp_rename_no_twins(); /* W9: in-OS clang temp+rename twin repro */
+  test_fat16_83_alias_collision_lookup();  /* W9: 8.3-vs-LFN-alias collision reader fix */
   test_fat16_lfn_checksum_reject();
   test_fat16_lfn_truncated_run();
   test_fat16_rmdir_semantics(); /* W2-14 (selfhost) */
