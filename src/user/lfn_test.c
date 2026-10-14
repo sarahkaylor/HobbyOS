@@ -49,9 +49,11 @@ static void report(const char *tag, const char *what, int ok) {
   print_console("\n");
 }
 
-/* Open `path`, read up to `want` bytes, require byte-exact match with
- * `expect` (its length is known from want).  Returns 1 on success. */
-static int read_expect(const char *path, const char *expect, int want) {
+/* Open `path`, read its (tiny) content and require a byte-exact match
+ * with `expect` — the expected length is derived from the string, so a
+ * mismatch can only be a real content difference.  Returns 1 on success. */
+static int read_expect(const char *path, const char *expect) {
+  int want = slen(expect);
   int fd = open(path, O_RDONLY);
   if (fd < 0) return 0;
   char buf[64];
@@ -89,35 +91,35 @@ static void check_fixtures(void) {
   /* 1. The payload shape: deep paths + long basenames written by mcopy. */
   report("[LFN]", "payload deep path src/kernel/program_loader.c",
          read_expect("/src/kernel/program_loader.c",
-                     "L3LFN:program_loader.c:0001\n", 27));
+                     "L3LFN:program_loader.c:0001\n"));
   report("[LFN]", "long dir + nested src/user_include/graphics/window.h",
          read_expect("/src/user_include/graphics/window.h",
-                     "L3LFN:window.h:0002\n", 17));
+                     "L3LFN:window.h:0002\n"));
 
   /* 2. A 30+ char component (36 chars: mirrors the libcxx vendor depth). */
   report("[LFN]", "30+ char component llvm-project-21.1.8.src-EXAMPLE.c",
          read_expect("/src/llvm-project-21.1.8.src-EXAMPLE.c",
-                     "L3LFN:EXAMPLE:0003\n", 17));
+                     "L3LFN:EXAMPLE:0003\n"));
 
   /* 3. Deep libcxx-style nesting (~85 char path, 7 components). */
   report("[LFN]", "deep nested libcxx-style path upper_bound.h",
          read_expect("/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/"
                      "libcxx/include/upper_bound.h",
-                     "L3LFN:upper_bound:0020\n", 22));
+                     "L3LFN:upper_bound:0020\n"));
 
   /* 4. Mixed case: all-caps path must reach the lowercase long names. */
   report("[LFN]", "case-insensitive path /SRC/KERNEL/PROGRAM_LOADER.C",
          read_expect("/SRC/KERNEL/PROGRAM_LOADER.C",
-                     "L3LFN:program_loader.c:0001\n", 27));
+                     "L3LFN:program_loader.c:0001\n"));
 
   /* 5. Collision family: three long names whose 8.3 aliases collide/edge
      must each resolve to their own content. */
   report("[LFN]", "collision longfilename.txt",
-         read_expect("/longfilename.txt", "L3LFN:longfilename:0010\n", 24));
+         read_expect("/longfilename.txt", "L3LFN:longfilename:0010\n"));
   report("[LFN]", "collision longfilename2.txt",
-         read_expect("/longfilename2.txt", "L3LFN:longfilename2:0011\n", 25));
+         read_expect("/longfilename2.txt", "L3LFN:longfilename2:0011\n"));
   report("[LFN]", "collision longfil~1.txt",
-         read_expect("/longfil~1.txt", "L3LFN:longfil~1:0012\n", 21));
+         read_expect("/longfil~1.txt", "L3LFN:longfil~1:0012\n"));
 
   /* 6. read_dir shows the LONG names (pre-fix it returned the 8.3 mangle). */
   report("[LFN]", "read_dir /src/kernel lists program_loader.c",
@@ -143,16 +145,16 @@ static void check_inos_writes(void) {
       close(fd);
     }
     report("[LFN]", "create+reopen long-name file in-OS",
-           read_expect(path, body, slen(body)));
+           read_expect(path, body));
 
     /* 8. Short-name fallback: the SAME file is reachable through the 8.3
        alias the driver derived for it. */
     report("[LFN]", "8.3 alias of in-OS long name resolves",
-           read_expect("/LFN_NEWF.TXT", body, slen(body)));
+           read_expect("/LFN_NEWF.TXT", body));
 
     /* 9. Mixed-case reopen of the same created file. */
     report("[LFN]", "mixed-case reopen of created long name",
-           read_expect("/LFN_NEWFILE_CREATED.TXT", body, slen(body)));
+           read_expect("/LFN_NEWFILE_CREATED.TXT", body));
   }
 
   /* 10. Rename a long name -> new long name; reopen by the new name and
@@ -170,7 +172,7 @@ static void check_inos_writes(void) {
     report("[LFN]", "rename long name to long name rc",
            (rename(src, dst) == 0) ? 1 : 0);
     report("[LFN]", "rename: new long name resolves with content",
-           read_expect(dst, body, slen(body)));
+           read_expect(dst, body));
     report("[LFN]", "rename: old long name no longer listed",
            !dir_has("/", src));
   }
@@ -189,7 +191,7 @@ static void check_inos_writes(void) {
       close(fd);
     }
     report("[LFN]", "mkdir long dir + create file inside",
-           read_expect(inner, body, slen(body)));
+           read_expect(inner, body));
     report("[LFN]", "long dir listed with long name", dir_has("/", dir));
   }
 

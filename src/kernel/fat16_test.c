@@ -450,31 +450,31 @@ static void test_fat16_lfn_rename_long(void) {
 
   const char *src = "/LFN_RENAME_SRC_NAME.TXT"; /* 23 chars */
   const char *dst = "/LFN_RENAME_DST_NAME.TXT";
-  const char *body = "rename-lfn-0123456789";   /* 20 bytes */
+  const char *body = "rename-lfn-0123456789";   /* 21 bytes */
   struct file f;
   EXPECT_EQ(fat16_open(src, &f), 0);
-  EXPECT_EQ(fat16_write(&f, body, 20), 20);
+  EXPECT_EQ(fat16_write(&f, body, 21), 21);
   fat16_close(&f);
 
   EXPECT_EQ(fat16_rename(src, dst), 0);
 
   struct fat16_dir_entry e;
   EXPECT_EQ(fat16_resolve_path(dst, &e, 0, 0), 0);
-  EXPECT_EQ(e.file_size, 20);
+  EXPECT_EQ(e.file_size, 21);
   /* The old long name must no longer resolve. */
   EXPECT_EQ(fat16_resolve_path(src, &e, 0, 0) != 0, 1);
   /* Content survives the rename. */
   EXPECT_EQ(fat16_open(dst, &f), 0);
   ASSERT(fat16_seek(&f, 0) == 0);
   char rbuf[32] = {0};
-  EXPECT_EQ(fat16_read(&f, rbuf, sizeof rbuf - 1), 20);
+  EXPECT_EQ(fat16_read(&f, rbuf, sizeof rbuf - 1), 21);
   fat16_close(&f);
   EXPECT_EQ(test_streq(rbuf, body), 1);
 
   /* Same-directory rename BACK to a new long name keeps working. */
   EXPECT_EQ(fat16_rename(dst, "/LFN_RENAME_THIRD_NAME.TXT"), 0);
   EXPECT_EQ(fat16_resolve_path("/LFN_RENAME_THIRD_NAME.TXT", &e, 0, 0), 0);
-  EXPECT_EQ(e.file_size, 20);
+  EXPECT_EQ(e.file_size, 21);
 }
 
 /* Parse edge: a corrupted 0x0F checksum must REJECT the long-name match
