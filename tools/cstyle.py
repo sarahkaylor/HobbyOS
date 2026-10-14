@@ -73,6 +73,7 @@ EXCLUDE_FILES = {
 # support headers follow this guide, and they are reviewed with it in mind).
 EXCLUDE_PREFIXES = {
     "src/user/sed/",
+    "src/user/mkfs/",
 }
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
