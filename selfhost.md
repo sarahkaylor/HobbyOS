@@ -600,7 +600,7 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
   (6 s); units rc=0; test-arm 3 tokens = `[LFN] FAIL rename: new long name listed...` +
   `[LFN] FAILED: 0x1` + WATCHDOG; rerun `merged-w10r` = **watchdog only, LFN did NOT
   reproduce** (flare; same "listed with long name" class as the pre-w6 sighting; re-sample
-  after w9 — dirent-writer family suspect). VM host re-verify queued (`merged-w10h`).
+  after w9 — dirent-writer family suspect). VM host re-verify `merged-w10h`: rc=0, 55 s — hotfix confirmed on the VM.
   **Hygiene finds:** (a) 20 orphaned root-dir `EDITOR.BIN_host` processes (ppid=1, ~20 h
   old) + one fresh one wedged this box's `make host_tests` — the host editor test can hang
   on an anonymous pipe read with no watchdog (swept by exact /proc/comm match; todo item);
