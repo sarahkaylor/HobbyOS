@@ -1,0 +1,58 @@
+# w2-make: in-OS smoke evidence (lane W2-MAKE, GNU make 4.4.1 port)
+
+Harness: tools/run_make_smoke.py -- boots disk.img (ARM, TCG, -display none,
+-serial file + QMP), opens the desktop console, types `make --version`.
+
+## Serial evidence (boot + make Process 2, run of 2026-10-14)
+
+    Mode: DESKTOP - Launching desktop...
+    [MENU] 96=MAKE.BIN
+    ... (two `make --version` invocations, one on screen, one after the
+         shell-redirect probe below; both exited gracefully)
+    [KERNEL] Process 2: make exited unexpectedly or gracefully.
+    [KERNEL] Process 2: make exited unexpectedly or gracefully.
+
+Zero `[KERNEL] ... memory fault` lines in this run.  The pre-fix binary
+crashed on both invocations:
+
+    [KERNEL] pid=2 (make) memory fault VA=0x00000000000000FB PC=0x1000010DCC rw=r  in=PROT -> killed
+
+Root cause of that crash: HobbyOS crt0 calls main(argc, argv) only, so make's
+third parameter (envp) held garbage (~0xF1) and its environment-scanning loop
+read VA ~0xF0.  Fixed with HOBBYOS_NO_ENVP_ARG (config.h) + the two marked
+[HobbyOS port] fallback edits in main.c that reuse make's own two-arg-main /
+`char **envp = environ` path (the z/OS one).
+
+## On-screen evidence (framebuffer, after the fix)
+
+    user@hobbyos:/$ make --version
+    GNU Make 4.4.1
+    Built for aarch64-hobbyos
+    Copyright (C) 1988-2023 Free Software Foundation, Inc.
+    License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>
+    This is free software: you are free to change and redistribute it.
+    There is NO WARRANTY, to the extent permitted by law.
+    user@hobbyos:/$
+
+Transcribed from a QMP screendump; the "Built for" line was re-verified with
+a 600%-magnified crop (vision readback: `Built for aarch64-hobbyos`), and
+MAKE.BIN on the image was `cmp`-verified byte-identical to obj/arm/make.bin,
+so the 4.4.1/aarch64-hobbyos strings are the port's own.
+
+## File-based hard byte check: DEFERRED (documented, not faked)
+
+The S5.4-style `make --version > VERSION.TXT` byte check did not complete in
+this lane because the CURRENT in-OS shell mis-parses `cmd ARG > FILE` for
+external commands: `cat HELLO.BIN > CTL.TXT` produced `cat: : No such file or
+directory` (empty argv; the redirect file was created but stayed 0 bytes).
+That is a sh/w2-userland defect (redirection is SUPPORTED per the L4 sh
+matrix but behaves lossy for externals in this build), not a make defect.
+
+Wave-3 recipe for the byte check once sh is fixed: boot, `make --version >
+VERSION.TXT`, then `python3 fat16img.py get disk.img VERSION.TXT` and assert
+`GNU Make 4.4.1` in the bytes.
+
+## Screenshots (not committed; PPM from QMP screendump)
+
+    /tmp/make_smoke_shot_v1.ppm   # after first `make --version`
+    /tmp/make_smoke_shot_v2.ppm   # end of session

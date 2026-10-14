@@ -69,10 +69,12 @@ EXCLUDE_FILES = {
 }
 
 # Repo-relative directory prefixes kept byte-exact (upstream GNU sources and
-# their generated config live under src/user/sed/; only the two hand-written
-# support headers follow this guide, and they are reviewed with it in mind).
+# their generated config live under src/user/sed/ and src/user/make/; only the
+# hand-written support headers follow this guide, and they are reviewed with
+# it in mind).
 EXCLUDE_PREFIXES = {
     "src/user/sed/",
+    "src/user/make/",
 }
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
