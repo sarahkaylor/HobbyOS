@@ -351,13 +351,24 @@ Merge model: **one lane = one branch + disjoint files** (§7.4); parent merges t
   single-writer = parent); (c) make-port lane; (d) mtools-port lane; (e) mkfs-port lane;
   (f) harness lane — `SELFHOST.BIN` + `run_selfhost_build_test.py`
   (`docs/selfhost/acceptance.md` §5); (g) merged-tip + CI-VM batteries (running; §11).
+  **STATUS: COMPLETE — all seven lanes merged on `main` (`0c272a4`; see §11 entry);
+  per-lane reports at `docs/selfhost/lanes/w2-*-report.json`; wave-2 merged-tip
+  batteries (local + CI VM) running.**
 
 **Gate etiquette (hard rule, learned wave 2).** One QEMU per tree at a time;
 `fuser -k disk.img` may only run when NOTHING of yours is using the image — firing it
 while your own background run is in flight kills YOUR run (observed: a lane fuser-killed
 its own mid-suite ARM wave and misread it as a regression; memory was fine). Serialize:
 wait for the current run's log to show its final line, then start the next.
-- **Wave 3:** M3/M4 integration rounds, fixups, records.
+- **Wave 3 (roster, carried from lane reports + merges):** (a) kernel write-path gap for
+  ftruncate-extended FAT16 files (in-OS MKFSFAT `-C` writes; deterministic repro in
+  `w2-mkfs-report.json`); (b) sysroot `dirent` (opendir/readdir) — unblocks make
+  wildcards/VPATH + `mcopy -s`; (c) sh external redirect `cmd ARG > FILE` fix
+  (w2-make report; blocks file-based byte assertions); (d) socket API reconciliation
+  (legacy `connect` vs POSIX / `raw_socket_stream` reachability); (e) `MODE=selfhost`
+  kernel boot mode + serial-console-fd stdout (acceptance 5.2/5.3); (f) RESDIR 159>8.3
+  name curation + `/TOOLS` staging of the toolchain (M2 sizes); (g) `shell_test`
+  echo-token drain (QoL); (h) M3 driver milestones once the toolchain is bootable.
 - Integrator = parent session: merges lanes to `main` here, runs merged-tip gates, is the
   sole writer of `selfhost.md`, `.gitignore`, syscall.h/both trap.c.
 
@@ -523,6 +534,37 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 ---
 
 ## 11. Fix log (append-only, newest first)
+
+- **2026-10-14 — Wave 2 (7 lanes) all merged; closure re-validation + merge-time fixes.**
+  Merges on `main`: w2-kernel `7abb674`, w2-userland `9587c45`, w2-llvm `a06daf7`,
+  w2-harness `4130325`, w2-make `b70be62`, w2-mtools `3234c0d`, w2-mkfs `0c272a4`. Merge
+  friction was exactly the predicted pair (`sysroot-headers/_missing.h` + `gaps.c`,
+  Makefile var/rule/disk blocks, `tools/cstyle.py` EXCLUDE_PREFIXES) — all reconciled by
+  hand. **Closure reconciliation (nm-verified):** the 24 symbols the userland lane made
+  real in libc.a (alarm, strsignal, setsid, wait4, getrusage, getrlimit, setrlimit,
+  fchown, fchmod, mkdir, symlink, link, pipe, pthread_sigmask, _Exit, statvfs, fstatvfs,
+  dlopen, dlsym, dlclose, dlerror, dladdr, socket, connect) were dropped from gaps.c;
+  true gaps remain (~20; gaps.o recompiles to 21 FUNC). **Closure rebuild gotcha (new
+  hard rule):** the three closure objects (`hobbyos_gaps.o` / `hobbyos_setjmp.o` /
+  `hobbyos_fstream_inst.o`) are built by `execute_process` at CMake **configure** time
+  (toolchain-llvm-hobbyos.cmake:151-257) — there is NO ninja edge — so after editing
+  gaps.c/_missing.h/setjmp.S you MUST re-run `cmake` in-place (warm, ~3 s) or the link
+  silently uses a stale gaps.o (observed: duplicate wait4/link/strsignal/symlink/setsid/
+  fchown/pthread_sigmask/alarm vs merged libc; fixed by reconfigure → llvm-ar +
+  llvm-objcopy relink CLEAN). **Socket caveat (wave-3 item):** libc's `socket/connect`
+  are the LEGACY ip-form API while `_missing.h` declares POSIX `connect(fd,addr,len)` —
+  harmless at link for the toolchain's raw_socket_stream path (currently unreachable)
+  but a semantic mismatch for the socket-reachability closure.
+  **Lane findings folded into the wave-3 roster (§7.2):** mkfs — MKFSFAT `-C` BLOCKS are
+  1024-byte units → acceptance uses `DISK_BLOCKS=131072` for the frozen 128 MiB OUT.IMG
+  (L4's sketch math 524288 would make a 512 MiB image); cluster arms 64/128 MiB→spc4,
+  256 MiB→spc8; in-OS ftruncate-extended writes do NOT persist (kernel write-path gap,
+  deterministic, zeros after graceful quit). make — crt0 two-arg-main envp caveat
+  (in-lane z/OS fallback), sysroot dirent ENOSYS → v1 = explicit-rule makefiles only,
+  sh `cmd ARG > FILE` redirect lossy for externals (blocks file-based byte assertions).
+  harness — S4/S5 gated on OUT.IMG (can pre-test with a hand-built OUT.IMG); the
+  driver's tool-present relay path is implemented but not exercised; MODE=selfhost
+  kernel boot mode still open (acceptance 5.2/5.3).
 
 - **2026-10-14 — Wave 2 dispatched** (7 lanes, `deleg_aaf311af`): w2-llvm (LLVM build
   continuation from the 211/564 checkpoint), w2-kernel (wait4 + argv envelope + rmdir),
