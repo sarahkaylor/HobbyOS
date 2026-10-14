@@ -198,6 +198,58 @@ Sizes (2026-10-14, unstripped Release ELF, aarch64): clang-21 120 MB,
 lld 69 MB, llvm-ar 13 MB, llvm-objcopy 9.6 MB; staging total 227 MB.
 These are the on-disk numbers to beat at M2 stripping/curation.
 
+### 6.2 F8 decision: 8.3 curation is NOT required — LFN carries the RESDIR (lane W3-Tools, 2026-10-14)
+
+**Question (F8 / llvm-bootstrap §10):** 205/239 top-level (221/272 incl.
+wrapper-subdir files) RESDIR basenames violate 8.3 — must they be curated
+to a mapped 8.3 tree (`tools/curate_resdir.py`) before /TOOLS staging?
+
+**Decision: stage the tree FAITHFULLY with long names. No mapped/curated
+tree is built. No `tools/curate_resdir.py` was created (not needed).**
+`/TOOLS/RESDIR/include` is a byte-exact copy of the install-distribution
+`lib/clang/21/include` tree (272 files, 14.7 MB, incl. the six wrapper
+subdirs); every header name survives verbatim.
+
+Evidence (all in-tree, re-verified this lane):
+
+1. **LFN open-by-path is the compiler's only lookup, and it is proven.**
+   clang's `-isystem` include resolution is a path-based `open()`; the HobbyOS
+   FAT16 driver matches VFAT long names on open over the full 255-char name
+   space (`fat16.c` `lfn_*`/`lfn_matches`; no component cap — the 31-char
+   limit applies ONLY to `read_dir` *display* names).  Wave-1 lane L3's merged
+   in-OS `LFN_T.BIN` opens the **36-char** `llvm-project-21.1.8.src-EXAMPLE.c`
+   by long name and reads its content back (`src/user/lfn_test.c:100`), the
+   worst-case class of the RESDIR's own longest basename
+   (`__clang_cuda_math_forward_declares.h`, also 36 chars) — and 21.1.8's
+   `install-distribution` RESDIR is exactly the tree previously staged with
+   2322 LFN payload files by the harness (L5/§2).
+2. **`read_dir` capping at 31 chars is listing-only and cosmetically
+   truncates 5 RESDIR basenames** (32–36 chars: 4 at the include root +
+   `openmp_wrappers/__clang_openmp_device_functions.h`).  Nothing in the
+   S0–S5 acceptance *lists* the RESDIR: the compiler's include path is
+   `-isystem /TOOLS/RESDIR/include` (AD-5), and make/cc1 never glob it.  If a
+   later milestone copies the RESDIR in-OS via `read_dir`, this is the one
+   item to revisit (AD-13 watch list: "revisit only if a staged/output name
+   exceeds 31" — exactly these 5).
+3. **Host-side staging fidelity verified this lane:** `selfhost-stage.sh
+   --tools` staged the full RESDIR + 4 ELF tools to a scratch FAT16 image;
+   `mtype`+sha256 of the 36-char names, the `openmp_wrappers` subtree and
+   `CLANG.BIN` (126,060,320 B) are byte-identical to the staging sources
+   (transcript: `docs/selfhost/lanes/w3-tools-*.md` / report §evidence).
+4. In-OS `-print-resource-dir` / compile-a-TU *proof* is an M2 item (needs
+   the M2 flat-.bin loader step, T2.3–T2.5); the *mounted-path* proof —
+   resource dir staged at its frozen path, byte-faithful, and the L3-proven
+   in-OS long-name open — is complete here.  M2's `-isystem
+   /TOOLS/RESDIR/include` smoke (S0) is pre-validated by this staging.
+
+Consequence for the /TOOLS recipe (wave-3 lane W3-Tools): the startup image
+carries the RESDIR **uncurated** at `/TOOLS/RESDIR/include`; `T2.2` reduces
+to "stage + verify mdir", and the hypothetical curation work (8.3-truncated
+names + rewritten `#include` lines + collision disambiguation for the 19
+8.3-truncation collision families) is dropped.  A `curate_resdir.py` is
+still a useful fallback ONLY if an in-OS tool is ever found listing the
+RESDIR — documented here so nobody re-derives the analysis.
+
 ## 7. Configure spike results
 
 See `docs/selfhost/lanes/l1-configure-1.log` (committed; use `git add -f` —
