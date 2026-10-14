@@ -120,6 +120,17 @@ struct addr_space;
 #define HO_EXEC_MAX_ARGS 128
 #define HO_EXEC_ARGV_LEN 4096
 
+/* w5 (vi): the flat args-string cap for spawn/exec (struct process.args,
+ * the sys_spawn_args pool, and the exec-copy loops).  Raised from 256 to
+ * 1024: w4-clang's S0/S1 driver lines (~200-260 chars for a clang
+ * compile) and real make recipe lines exceed 255, and the old cap
+ * silently truncated them.  The positional-parameter blob (eargv,
+ * HO_EXEC_ARGV_LEN) is the richer path; this only widens the legacy
+ * flat-args fallback that `get_args()`/crt0 consume for spawned
+ * programs.  Costs ~768 B per PCB + per spawn_worker slot; the kernel
+ * already carries HO_EXEC_ARGV_LEN (4096) per PCB. */
+#define HO_FLAT_ARGS_LEN 1024
+
 /* P5 (docs/browser/p5-exec-signals-design.md D7): env blob + signal
  * table sizes.  Numbers 1..HO_SIG_MAX-1 are the valid disposition range;
  * the signal set itself is frozen by the note's D6. */
@@ -159,7 +170,7 @@ struct process {
   int parent_pid; /**< PID of the process that created this one */
   int is_kernel_process; /**< Flag indicating if this is a kernel-only thread */
   char name[32];  /**< Name of the binary running in this process */
-  char args[256]; /**< Command line arguments passed to the process */
+  char args[HO_FLAT_ARGS_LEN]; /**< Command line args (w5 vi: flat cap 1024) */
   char cwd[128];  /**< Current working directory */
 
   /**
@@ -388,6 +399,14 @@ int64_t sys_memfd_create(uint64_t name, int64_t flags);
  * with a signal-shaped waitpid status (low byte = signo).  SIGSEGV = 11.
  * Everything else is the ordinary exit machinery; only this process dies. */
 #define PROCESS_STATUS_SIGNAL 0x40000000 /* int-safe marker, group_teardown */
+
+/* w5 (ii): the fault-kill status encoder.  A fault-killed child must NEVER
+ * reap as success: the trap fault paths stamp this marker (| the signal
+ * number) into regs[0] and group_teardown maps it to the waitpid SIGNAL
+ * byte, which is non-zero for every signal.  Split out of
+ * process_fault_exit so a unit test can verify the contract without
+ * going through schedule(). */
+void process_fault_set_status(struct trap_frame *tf, int signo);
 void process_fault_exit(struct trap_frame *tf, int signo);
 
 // In-place exec (SYS_EXEC): replace the current image, keep pid/fds/cwd.

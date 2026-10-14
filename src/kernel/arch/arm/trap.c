@@ -713,7 +713,7 @@ struct sys_spawn_args {
   int stdout_fd;
   int stderr_fd;
   int caller_pid;
-  char args[256];
+  char args[HO_FLAT_ARGS_LEN]; /* w5 (vi): flat args cap 1024 */
 };
 
 static struct sys_spawn_args spawn_args_pool[64];
@@ -771,7 +771,7 @@ static void sys_spawn(struct trap_frame *tf) {
 
     if (args_ptr && sys_user_range_ok((uint64_t)args_ptr, 1)) {
       int k = 0;
-      while (args_ptr[k] && k < 255) {
+      while (args_ptr[k] && k < HO_FLAT_ARGS_LEN - 1) {
         args->args[k] = args_ptr[k];
         k++;
       }
@@ -1926,7 +1926,7 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       uart_puts(" ELR: ");
       uart_print_hex(tf->elr);
       uart_puts("\n");
-      process_exit(tf);
+      process_fault_exit(tf, 11); /* SIGSEGV status byte (w5 ii) */
     } else {
       uart_puts("\n[KERNEL] FATAL: EL0 Synchronous Exception with no running process!\n");
       uart_puts("EC: ");
@@ -1955,7 +1955,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       uart_puts(" ELR: ");
       uart_print_hex(tf->elr);
       uart_puts("\n");
-      process_exit(tf);
+      /* w5 (ii): SIGILL (executing an invalid/zero instruction); a
+         process killed this way must report a non-zero waitpid status
+         (the old process_exit left stale x0 -> rc=0 false pass). */
+      process_fault_exit(tf, 4); /* SIGILL status byte */
     } else {
       uart_puts("\n[KERNEL] FATAL: EL0 Synchronous Exception with no running process!\n");
       uart_puts("EC: ");
@@ -1978,7 +1981,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
 
     struct process *cur = current_process();
     if (cur) {
-      process_exit(tf);
+      /* w5 (ii): EC=0x3C (BRK, e.g. a libc++ assert) and every other
+         unhandled EL0 exception kill the process with SIGILL status --
+         never a stale-x0 rc=0. */
+      process_fault_exit(tf, 4); /* SIGILL status byte */
     } else {
       while (1) {
         safe_wfi();

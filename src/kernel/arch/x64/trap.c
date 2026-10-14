@@ -774,7 +774,7 @@ struct sys_spawn_args {
   int stdout_fd;
   int stderr_fd;
   int caller_pid;
-  char args[256];
+  char args[HO_FLAT_ARGS_LEN]; /* w5 (vi): flat args cap 1024 */
 };
 
 static struct sys_spawn_args spawn_args_pool[64];
@@ -826,7 +826,7 @@ static void sys_spawn(struct trap_frame *tf) {
 
     if (args_ptr && sys_user_range_ok((uint64_t)args_ptr, 1)) {
       int k = 0;
-      while (args_ptr[k] && k < 255) {
+      while (args_ptr[k] && k < HO_FLAT_ARGS_LEN - 1) {
         args->args[k] = args_ptr[k];
         k++;
       }
@@ -2181,7 +2181,9 @@ void general_interrupt_handler(struct trap_frame *tf) {
       uart_puts(" RIP: ");
       safe_print_hex(tf->elr);
       uart_puts("\n");
-      process_exit(tf);
+      /* w5 (ii): a user-mode exception (BRK/#UD/#GP/...) kills with a
+         signal status, never a stale-x0 exit code (rc=0 false pass). */
+      process_fault_exit(tf, 11); /* SIGSEGV status byte */
     } else {
       /* Kernel-mode fault.  ALL of this dump goes to COM1 via the
          lock-free raw sink (NOT the 0xE9 debugcon, which QEMU usually
