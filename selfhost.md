@@ -381,16 +381,18 @@ wait for the current run's log to show its final line, then start the next.
   dirent landed; sh redirect fixed; token family drained; /TOOLS staged (in-OS MAKE.BIN
   exec); S4/S5 pre-tested. Socket reconciliation (d) and `MODE=selfhost` (e) rolled to
   wave 4.
-- **Wave 4 (roster, forming):** (a) `MODE=selfhost` kernel boot mode + serial-console-fd
-  stdout (acceptance 5.2/5.3) — unblocks full-serial S1–S5 evidence; (b) `Makefile.hobbyos`
-  v1 + `/SRC` source staging + driver S0–S3 dry-run (staged-failure path already proven);
-  (c) S1 program selection + 8.3 naming; (d) socket API reconciliation (legacy connect vs
-  POSIX / raw_socket_stream); (e) TCG perf for the 128 MiB in-OS MKFSFAT (QMP mid-ftruncate
-  break) or accept host-port parity proof; (f) image-budget review (696 MiB free) + M2
-  stripping/sizes; (g) AD-9 `STAGE_LIBCXX` freeze decision at M3.
-  **DISPATCHED 2026-10-14 (`deleg_a78cc310`, 3 lanes from `b27f4ec`):** w4-kernel = (a)+(e);
-  w4-src = (b)+(c)+(g); w4-clang = independent T2.3–T2.5 in-OS smokes (serial-backed,
-  staged script files; kernel-walls reported, not edited).
+- **Wave 4: COMPLETE — all three merged (`82d4d81`; §11 entry).** MODE=selfhost delivered
+  (serial-evidenced); FAT16 O(n²)→linear (128 MiB MKFSFAT 284 s); Makefile.hobbyos v1 +
+  /SRC staging + S0/S1 dry-runs (blocked at the 1 MiB exec gate); clang-in-OS walls
+  root-caused (raw-ELF staging; `_Znwm` link config; prefetch PROT race).
+- **Wave 5 (roster — the unblockers):** (a) w5-flat: stage-time `objcopy -O binary` flat
+  conversion of the /TOOLS toolchain + re-stage + in-OS `clang --version` from the staging
+  pipeline (T2.3); (b) w5-kernel: exec gate (`MAX_PROGRAM_SIZE` vs v2 128 MiB cap),
+  fault-killed-child rc=0 (process_fault_exit), pid=5 housekeeping fault, L9-prefetch PROT
+  instruction-fetch race, spawn-arg 255-char cap; (c) w5-nothrow: clang `_Znwm` inside
+  `__lcxx_override` link config → flat clang completes a compile (T2.4); (d) after a+b+c:
+  the real S0/S1 dry-run (first true in-OS compile) then S2/S3; (e) watchdog-stall hardening
+  (shell_test); (f) socket reconciliation; (g) image budget/stripping.
 - Integrator = parent session: merges lanes to `main` here, runs merged-tip gates, is the
   sole writer of `selfhost.md`, `.gitignore`, syscall.h/both trap.c.
 
@@ -556,6 +558,39 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 ---
 
 ## 11. Fix log (append-only, newest first)
+
+- **2026-10-14 — Wave 4 (3 lanes) all merged (`82d4d81`); zero conflicts (Makefile auto-merged).**
+  (1) **MODE=selfhost DELIVERED** (w4-kernel): Makefile plumbing + `main.c` branch launching only
+  SELFHOST.BIN (argv[1]=`/SRC/SELFHOST.RUN`); driver stdout/stderr reach serial via the
+  pre-existing console-fd fallback. Serial-evidenced run: `Mode: SELFHOST` → `[SELFHOST]
+  DRIVER-UP` → `phase=s0-check-start` → tool relay → `phase=s0-check-done rc=0` →
+  `ACCEPTANCE-COMPLETE` → `System halt.` (QEMU rc=0, 0 FAIL tokens;
+  `docs/selfhost/lanes/w4-a1-selfhost-hello-serial.log`). Acceptance 5.2/5.3 primary path works.
+  (2) **FAT16 TCG slowness FIXED** (w4-kernel): alloc_cluster free-cluster hint + bulk extension
+  in `fat16_truncate_to` (O(n²)→linear): 16 MiB 78.7→34.6 s, 64 MiB 347→142.6 s, 128 MiB
+  >720 s(killed)→**284 s** (clears the 600 s S3 budget). Units 316/0 ARM (317 w/probe) + 320/0 x64.
+  (3) **Makefile.hobbyos v1 + /SRC staging** (w4-src): check/user/kernel/disk/all, `[SELFHOST]
+  phase=s0..s3` markers, absolute `/TOOLS/*.BIN`, `SHELL=/TOOLS/SH.BIN`, explicit 59-TU kernel
+  list (corrections vs sketch: `-T linker.ld` repo-root, no obj glob). Staging = 307 files /
+  4.55 MiB subset + carried products + `SELFHOST.SH` cwd wrapper (processes start at cwd=/ →
+  run via `SH.BIN /SRC/SELFHOST.SH <target>`). S0/S1 dry-runs: make runs + parses + issues
+  compile lines in-OS, blocked at `sh: exec failed: /TOOLS/CLANG.BIN` → **the exec gate**:
+  `program_too_large()` = `MAX_PROGRAM_SIZE` 1 MiB (process.h:42; program_loader.c:63/:855-860
+  → `-ENOEXEC`) vs v2_map_image's 128 MiB cap — self-contradiction; rejects clang 126 MB (and
+  LLD/LLVMAR/OBJCOPY). Kernel-side → wave 5. **AD-9 FROZEN: `STAGE_LIBCXX=0`** (S0–S3 all C).
+  (4) **clang-in-OS walls root-caused** (w4-clang): (a) `/TOOLS/*.BIN` are raw ELF while the OS
+  runs flat .bin (entry=file offset 0) → execute `\x7fELF` → fault EC=0 @ ELR=0x1000000000;
+  **fix = the M2 `objcopy -O binary` conversion — proven: flat CLANG2.BIN runs in-OS, prints
+  its full version banner, exit 0** (94 MB flat; prefetch 22,127/22,997 pages in 4.7 s);
+  (b) flat clang compiled HELLO.C past parsing into codegen, then `brk #1` at
+  `operator new(std::nothrow)` — `_Znwm` outside clang's `__lcxx_override` link list;
+  OS/libc++ counter-proven healthy (NPNEW.BIN runs); (c) flat LLD2.BIN killed on
+  instruction-fetch classified PROT at a page the L9 prefetch was filling (timing-sensitive,
+  kernel); (d) fault-killed children can report rc=0 (process_fault_exit bypass; 2-line fix);
+  (e) driver spawn args capped at 255 chars; (f) deterministic pid=5 housekeeping EL1 fault +
+  IDLESTUCK false-positives on driver pipe-wait. Merged-tip battery round 4 launched on
+  `82d4d81`; **wave 5 = the unblockers: w5-flat (stage-time flat conversion), w5-kernel (exec
+  cap / fault-rc / pid5 / prefetch), w5-nothrow (clang `_Znwm` link config).**
 
 - **2026-10-14 — Merged-tip battery round 3 on `994116a`: GREEN.** Local: host rc=0,
   unit-arm **315/0** (+3 dirent tests), unit-x64 (KVM) **319/0**, wave-arm rc=0 ('System
