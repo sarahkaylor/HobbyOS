@@ -144,6 +144,26 @@ static void sample_peak(int *peak) {
   if (lv > *peak) *peak = lv;
 }
 
+/* Drain anything already buffered on the shell's stdout pipe (see
+   shell_test.c): a previous command's late tail, when consumed by a later
+   read_until, returns a STALE prompt and the caller's needle check trips
+   (the "FAILED cat nested.txt" wave token came from exactly this: a stale
+   'ls -l ... $ ' head).  Run before every command write. */
+static void drain_pending(int fd) {
+  for (int i = 0; i < 256; i++) {
+    struct pollfd pfd;
+    pfd.fd = fd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    if (poll(&pfd, 1, 0) <= 0)
+      return;
+    char tmp[256];
+    int r = read(fd, tmp, sizeof tmp);
+    if (r <= 0)
+      return;
+  }
+}
+
 /* Documented wave slot-pressure class: a command that runs an EXTERNAL
    binary (ls/cat/rm/mkdir/... or a pipeline, which make the shell fork)
    can come back empty when the shell's fork hits the legitimately-full
@@ -166,6 +186,7 @@ static int run_cmd_check(int in, int out, const char *cmd,
   int peak = 0;
   for (int attempt = 0; attempt < 3; attempt++) {
     err_has_fork_failed(); /* drain stale sentinels from earlier checks */
+    drain_pending(out);
     sample_peak(&peak);
     write(in, cmd, clen);
     sample_peak(&peak);
@@ -209,6 +230,7 @@ static int run_seq_check(int in, int out, const char *const *cmds, int ncmds,
   int peak = 0;
   for (int attempt = 0; attempt < 3; attempt++) {
     err_has_fork_failed(); /* drain stale sentinels from earlier checks */
+    drain_pending(out);
     sample_peak(&peak);
     for (int c = 0; c < ncmds; c++) {
       int clen = 0;
@@ -382,6 +404,7 @@ int main(void) {
 
   // 3. Change directory to /SUB1
   print_console("[TEST3] Changing directory to /SUB1...\n");
+  drain_pending(out_p[0]);
   write(in_p[1], "cd /SUB1\n", 9);
   read_until(out_p[0], buf, sizeof(buf), "$ ", 0, 0);
 
@@ -405,13 +428,15 @@ int main(void) {
 
   // 6. Change directory into SUB2
   print_console("[TEST3] Entering SUB2...\n");
+  drain_pending(out_p[0]);
   write(in_p[1], "cd SUB2\n", 8);
   read_until(out_p[0], buf, sizeof(buf), "$ ", 0, 0);
 
   // 7. Write nested file nested.txt
   print_console("[TEST3] Writing nested file...\n");
+  drain_pending(out_p[0]);
   write(in_p[1], "echo nested_content_val > nested.txt\n", 37);
-  read_until(out_p[0], buf, sizeof(buf), "$ ", 0, 0);
+  read_until(out_p[0], buf, sizeof(buf), "$ ", 8000, 0);
 
   // 8. Cat nested.txt
   print_console("[TEST3] Reading nested file...\n");
@@ -447,6 +472,7 @@ int main(void) {
 
   // 10. Go back to root
   print_console("[TEST3] Returning to root directory...\n");
+  drain_pending(out_p[0]);
   write(in_p[1], "cd /\n", 5);
   read_until(out_p[0], buf, sizeof(buf), "$ ", 0, 0);
 
@@ -479,6 +505,7 @@ int main(void) {
     int peak = 0;
     for (int attempt = 0; attempt < 3 && rc == 0; attempt++) {
       err_has_fork_failed(); /* drain stale sentinels */
+      drain_pending(out_p[0]);
       sample_peak(&peak);
       write(in_p[1], "rm /SUB1/SUB2/nested.txt\n", 25);
       sample_peak(&peak);
