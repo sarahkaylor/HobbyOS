@@ -29,6 +29,7 @@
 #include "../user_include/libc.h"
 #include "../user_include/graphics/graphics.h"
 #include "../user_include/graphics/window.h"
+#include "../user_include/graphics/theme.h"
 
 #include "../user/graphics/graphics.c"
 #include "../user/graphics/window.c"
@@ -50,7 +51,7 @@ static int checks_run = 0;
 #define RUN(fn) do { tests_run++; printf("  Test: %s ...\n", #fn); fn(); } while (0)
 
 #define WIN_BG C(16, 18, 30)
-#define TEXT_WHITE C(255, 255, 255)
+#define TEXT_INK ((uint32_t)THEME_TEXT) /* window content ink (theme.h) */
 
 static void set_text(struct window *w, const char *s) {
   int i = 0;
@@ -92,7 +93,7 @@ static int count_white(const struct window *w, int row) {
   int n = 0;
   for (int x = w->x + 10; x < w->x + w->w - 12; x++) {
     for (int y = w->y + 44 + row * 10; y < w->y + 44 + row * 10 + 8; y++) {
-      if (graphics_get_pixel(x, y) == TEXT_WHITE) n++;
+      if (graphics_get_pixel(x, y) == TEXT_INK) n++;
     }
   }
   return n;
@@ -146,7 +147,7 @@ static void test_one_line_change_repaints_one_row(void) {
   CHECK(marker_at(w, 1, 0) != C(1, 2, 3), "changed row 1 was repainted");
   CHECK(count_white(w, 1) > 20, "changed row shows the new text glyphs");
   CHECK(graphics_get_pixel(w->x + 200, w->y + 44 + 9) == WIN_BG ||
-        graphics_get_pixel(w->x + 200, w->y + 44 + 9) == TEXT_WHITE,
+        graphics_get_pixel(w->x + 200, w->y + 44 + 9) == TEXT_INK,
         "changed band is content again");
 }
 
