@@ -225,13 +225,20 @@ done
 
 [ -f "$IMAGE" ] || fail "image not found: $IMAGE (create it, e.g. truncate -s 256M scratch.img && mkfs.fat -F 16 scratch.img)"
 
-# ---- does /SRC already exist? (mdir returns 0 even on empty, so probe the dir) ----
+# ---- does /SRC already exist? (mdir returns 0 even on empty, so probe the
+# dir).  NOTE: the disk.img recipe pre-creates ::/src (the L3 LFN fixture
+# dirs, Makefile 1865-1874) which IS the same FAT dir as /SRC — so --src
+# mode must tolerate an existing /SRC and merge (mcopy -o) instead of
+# failing or deleting the fixtures.  The default payload mode keeps its
+# fail-without--f / delete-with--f contract. ----
 if mdir -i "$IMAGE" ::/SRC >/dev/null 2>&1; then
-  if [ "$FORCE" -ne 1 ]; then
+  if [ "$FORCE" -ne 1 ] && [ "$MODE" != "src" ]; then
     fail "image '$IMAGE' already contains /SRC — pass -f to replace it (idempotent)"
   fi
-  echo "selfhost-stage: replacing existing /SRC on $IMAGE"
-  mdeltree -i "$IMAGE" ::/SRC 2>/dev/null || fail "could not delete existing /SRC (mdeltree)"
+  if [ "$FORCE" -eq 1 ]; then
+    echo "selfhost-stage: replacing existing /SRC on $IMAGE"
+    mdeltree -i "$IMAGE" ::/SRC 2>/dev/null || fail "could not delete existing /SRC (mdeltree)"
+  fi
 fi
 
 # ---- payload sources (tolerate absence of the optional ones) ----
@@ -292,22 +299,24 @@ copy_tree() {  # copy_tree <src-dir> <dest-parent-on-image> — copies the dir I
 # /SRC/bin: the FAT mkdir is one-level and MKDIR.BIN fails on EEXIST, so the
 # in-OS make recipes never mkdir these (L4 sketch option (b)).
 stage_src() {
-  local n=0 total_bytes=0 cnt f spec src dst
+  local cnt
   payload_files=0
   payload_bytes=0
   echo "selfhost-stage: staging BUILD-REQUIRED source subset to ::/SRC"
-  if [ "$FORCE" -eq 1 ] && mdir -i "$IMAGE" ::/SRC >/dev/null 2>&1; then
-    echo "selfhost-stage: replacing existing ::/SRC on $IMAGE"
-    mdeltree -i "$IMAGE" ::/SRC 2>/dev/null || fail "mdeltree ::/SRC"
-  fi
+  # Merge into an existing ::/SRC (the disk recipe's ::/src L3 fixture dirs
+  # ARE /SRC); -f (payload mode owner) already deleted it above.
   mmkdir_p "::/SRC" || fail "mmkdir_p ::/SRC"
   mmkdir_p "::/SRC/obj/arm" || fail "mmkdir_p ::/SRC/obj/arm"
   mmkdir_p "::/SRC/bin" || fail "mmkdir_p ::/SRC/bin"
 
-  copy_tree src/kernel "::/SRC" || fail "copy src/kernel"
-  copy_tree src/include "::/SRC" || fail "copy src/include"
-  copy_tree src/user_include "::/SRC" || fail "copy src/user_include"
-  copy_tree src/libc "::/SRC" || fail "copy src/libc"
+  # Subsets land at /SRC/src/... — the SAME nesting the full payload mode
+  # produces (copy_tree src) — so the in-OS recipes' relative src/...
+  # references resolve with cwd=/SRC.
+  mmkdir_p "::/SRC/src" || fail "mmkdir_p ::/SRC/src"
+  for d in kernel include user_include libc; do
+    mcopy -s -o -i "$IMAGE" "src/$d" "::/SRC/src/./" || fail "mcopy src/$d"
+    add_payload "$(find "src/$d" -type f | wc -l)" "$(du -sb "src/$d" | awk '{print $1}')"
+  done
 
   # User set — the 5 acceptance TUs + user linker script + the driver dir
   # (SELFHOST.RUN/selfhost.c/SELFHOST.SH).  Explicit files, NOT the whole
@@ -450,6 +459,29 @@ if [ -f src/user/selfhost/SELFHOST.SH ]; then
 else
   warn "SELFHOST.SH wrapper missing (src/user/selfhost/SELFHOST.SH) — skipping ::/SRC/SELFHOST.SH"
 fi
+
+# [v4] carried host build products the in-OS v1 recipes reference (same set
+# as --src): the S1 user target links /SRC/obj/arm/libc.a, and the S3 disk
+# recipe stages the S5 desktop-path products from /SRC/bin.  Keep the
+# payload and --src modes consistent so a harness `--stage` re-stage leaves
+# the make recipes runnable.  WARNING+skip pre-build.
+mmkdir_p "::/SRC/obj/arm" || warn "could not ensure ::/SRC/obj/arm"
+mmkdir_p "::/SRC/bin" || warn "could not ensure ::/SRC/bin"
+for spec in "obj/arm/libc.a ::/SRC/obj/arm/libc.a" \
+            "obj/arm/desktop.bin ::/SRC/bin/DESKTOP.BIN" \
+            "obj/arm/console.bin ::/SRC/bin/CONSOLE.BIN" \
+            "obj/arm/sh.bin ::/SRC/bin/SH.BIN"; do
+  src_spec="${spec%% *}"; dst_spec="${spec#* }"
+  if [ -f "$src_spec" ]; then
+    mcopy -o -i "$IMAGE" "$src_spec" "$dst_spec" || exit 1
+    add_payload 1 "$(stat -c %s "$src_spec")"
+  else
+    warn "carried build product not built ($src_spec) — $dst_spec not staged (build the tree first)"
+  fi
+done
+printf 'OUTMARK:w4-src:staged-by-selfhost-stage\n' | \
+  mcopy -o -i "$IMAGE" - ::/SRC/bin/OUTMARK.TXT || warn "OUTMARK.TXT not staged"
+add_payload 1 42
 
 # ---- report ----
 echo
