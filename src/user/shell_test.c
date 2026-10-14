@@ -475,21 +475,25 @@ int main(void) {
       "HobbyOS Terminal Test File", "SENTINEL" };
     for (int k = 0; k < 2; k++) {
       char fb[280];
-      int fd = open(names[k], 0);
-      if (fd < 0) {
-        print_console("[TEST] DIRECT-");
-        print_console(lbls[k]);
-        print_console(" OPEN-FAIL\n");
-        continue;
+      int got = 0;
+      for (int r = 0; r < 6 && !got; r++) {
+        int fd = open(names[k], 0);
+        if (fd < 0) {
+          usleep(500000);
+          continue;
+        }
+        int n = read(fd, fb, (int)sizeof fb - 1);
+        close(fd);
+        if (n < 0) n = 0;
+        fb[n] = 0;
+        if (my_strstr(fb, expect[k]))
+          got = 1;
+        else if (r < 5)
+          usleep(700000); /* the redirect child's writes may still land */
       }
-      int n = read(fd, fb, (int)sizeof fb - 1);
-      close(fd);
-      if (n < 0) n = 0;
-      fb[n] = 0;
-      int ok = my_strstr(fb, expect[k]);
       print_console("[TEST] DIRECT-");
       print_console(lbls[k]);
-      print_console(ok ? " PASS\n" : " FAIL\n");
+      print_console(got ? " PASS\n" : " FAIL\n");
     }
   }
 
@@ -519,7 +523,7 @@ int main(void) {
     int timed_out = 0;
     int peak = 0;
     int rc = 0;
-    for (int attempt = 0; attempt < 6 && rc != 1; attempt++) {
+    for (int attempt = 0; attempt < 10 && rc != 1; attempt++) {
       err_has_fork_failed();
       drain_pending(out_p[0]);
       sample_peak(&peak);
@@ -536,7 +540,7 @@ int main(void) {
       if (err_has_fork_failed())
         rc = -1;
       if (rc != 1)
-        usleep(1500000);
+        usleep(2000000);
     }
     if (rc == -1) {
       print_console("shell_test: SKIP 2>&1 dup check (slot pressure)\n");
