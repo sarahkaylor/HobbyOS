@@ -532,9 +532,11 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
   chunk slots as the last slots of sector 556, so the test's sector-local backward scan starts
   at k=-1 and never sees the run — OS behavior correct on both layouts; fix steered to
   w2-kernel), wave-arm marker + halt with
-  ONE `shell_test: FAILED echo validation` token. CI VM = ALL FOUR TIERS GREEN (host /
-  unit-arm / unit-x64 under KVM = 313/0 / test-arm; the VM wave carried the documented
-  SHELLTEST WATCHDOG + the same echo token). **Echo token attributed:** the local log shows
+  ONE `shell_test: FAILED echo validation` token. CI VM = host / unit-arm / unit-x64
+  (KVM, 114 s) all rc=0 — x64 313/0 there; test-arm = marker present ('System halt.') but
+  the runner's FAIL-token gate counted exactly the two attributed ambient lines (SHELLTEST
+  WATCHDOG + the same echo token) → verdict 'FAILURE (2 lines)' by gate math, i.e.
+  attributed-ambient, not a product red (both lines are in the documented classes above). **Echo token attributed:** the local log shows
   `thread_create: no free slot (used=63/63)` immediately before it — under slot pressure the
   pre-echo pipe step SKIPs and SHTEST's echo step then reads a stale prompt buffer → its
   echo guard fires. Test-side fragility of the pressure-skip-guard family, NOT a product
