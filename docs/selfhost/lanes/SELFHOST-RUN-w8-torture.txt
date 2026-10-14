@@ -1,0 +1,7 @@
+# w8-torture lane probe: run the full TORTURE.BIN quick suite through the
+# MODE=selfhost driver (the suite's exec-wait-cycles section is the
+# reproduction).  Driver resolves TORTURE.BIN via /TOOLS -> /BOOT -> /.
+# Boot with: python3 tools/w5_flat_boot.py --image disk.img \
+#   --script-copy docs/selfhost/lanes/SELFHOST-RUN-w8-torture.txt \
+#   --serial <capture> ...   (disk.img = make MODE=selfhost disk.img)
+w8-torture|TORTURE.BIN|
