@@ -96,8 +96,18 @@ static void *tc_alloc_aligned(size_t size) {
 }
 
 static void tc_free_aligned(void *ptr) {
-  if (ptr)
-    free(((void **)ptr)[-1]);
+  /* Delete MUST go through HobbyOS's free() with the RAW pointer, exactly
+   * like libc++'s own operator delete does (delete.cpp: std::free).  The
+   * allocator distinguishes a shim/aligned payload (raw malloc pointer
+   * stashed at [-8]) from a raw malloc payload (BLOCK_MAGIC at [-8], e.g.
+   * operator new(nothrow), new(nothrow) from libc++ in the -fno-exceptions
+   * build, and HobbyOS's native aligned_alloc when it returns an already
+   * aligned block) via free_locked()'s magic check, so blindly calling
+   * free(ptr) is correct for BOTH classes.  The earlier
+   * free(((void**)ptr)[-1]) form crashed with free(BLOCK_MAGIC) on libc++
+   * nothrow-new'd memory (w5-nothrow in-OS data abort, VA=0x48424F424C4B4D3F)
+   * because that path has no stash -- [ptr-8] is the block's own magic. */
+  free(ptr);
 }
 
 /* The nothrow-override check inspects the THROWING forms; they must live in
