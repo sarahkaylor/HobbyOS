@@ -25,9 +25,14 @@ Failure classes (in the result JSON; see --classifier-self-test):
   harness_error      local error (image/tool missing, qemu failed to start)
 
 S4/S5 (host side: extract OUT.IMG, boot it, assert the kernel marker, then
-run an in-OS-built program) are reported as not_run while the in-OS build
-cannot succeed (no MAKE.BIN yet — S3 always fails first); they execute
-automatically as soon as OUT.IMG exists on the staged disk.
+run an in-OS-built program) execute automatically whenever OUT.IMG exists on
+the booted disk (root or /SRC).  S4 extracts it with the read-only fat16img
+extractor, records the extracted sha256, boots it and asserts the kernel
+marker; S5 boots the same image with QMP up and launches the S1 user program
+(--s5-program, default OUTPROG.BIN) from the desktop Apps menu, asserting the
+loader's [LAUNCH] line on serial.  While the in-OS build cannot succeed (no
+MAKE.BIN yet — S3 always fails first), both stages are pre-testable
+out-of-order with a hand-built OUT.IMG (lane w3-accept).
 
 Usage:
   tools/run_selfhost_build_test.py [options]
@@ -46,6 +51,7 @@ Usage:
                         ./run_selfhost_build_test.result.json)
 """
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -344,6 +350,117 @@ def read_staged_script(image):
 
 
 # --------------------------------------------------------------------------
+# S4/S5 (host side: extract OUT.IMG, boot it, run a user program on it)
+# --------------------------------------------------------------------------
+def run_s4_s5(args, result):
+    """Host-side acceptance stages (acceptance.md §1 S4/S5, out-of-order
+    pre-testable with a hand-built OUT.IMG).
+
+    S4: read OUT.IMG off the boot disk with the read-only fat16img extractor,
+    write it to <json-dir>/out-selfhost.img, boot that image with the exact
+    §5.1 QEMU line and assert the kernel marker.  The extracted image is
+    byte-compared (sha256) against the hand-built master by the calling
+    harness — the runner records the extracted hash.
+
+    S5: second boot of the same OUT.IMG with the QMP socket up; wait for the
+    desktop [MENU] dump, find --s5-program (default OUTPROG.BIN), launch it
+    from the Apps menu (QMP keystroke path, run_console_test.py precedent)
+    and assert the loader's '[LAUNCH] <prog>' serial line (and, when the
+    program is short-lived, the '[KERNEL] Process ... exited' line).  Because
+    a desktop-launched program's stdout is captured by its window (no
+    MODE=selfhost serial relay in the current kernel), the loader lines are
+    the program-side serial evidence for this pre-test; the file-based check
+    (OUTMARK.TXT / OUTPROG.BIN recovery from OUT.IMG) is the §5.4 fallback.
+
+    Returns an (failure_class, detail) override, or None when S4/S5 do not
+    change the verdict (the driver's S0..S3 class stands).
+    """
+    out = fat16_get(args.image, "OUT.IMG")
+    if out is None:
+        result["s4"] = {"status": "not_run",
+                        "detail": "no OUT.IMG on the boot disk (in-OS build not yet producing it)"}
+        result["s5"] = {"status": "not_run", "detail": "requires OUT.IMG (S4)"}
+        return None
+
+    out_path = os.path.join(os.path.dirname(args.json), "out-selfhost.img")
+    with open(out_path, "wb") as f:
+        f.write(out)
+    sha = hashlib.sha256(out).hexdigest()
+    result["s4"] = {
+        "status": "extracted",
+        "bytes": len(out),
+        "sha256": sha,
+        "path": out_path,
+        "boot_ok": False,
+        "elapsed_s": None,
+        "detail": "OUT.IMG extracted via fat16img.py get",
+    }
+    log("S4: extracted OUT.IMG (%d B, sha256 %s) -> %s"
+        % (len(out), sha[:16], out_path))
+
+    q2 = boot(out_path, args.serial + ".s4", qmp=None)
+    try:
+        el = wait_for(args.serial + ".s4", BOOT_MARKER, min(120, args.timeout))
+        result["s4"]["boot_ok"] = el is not None
+        result["s4"]["elapsed_s"] = round(el, 1) if el else None
+        result["s4"]["detail"] += "; kernel marker %s" % (
+            "ok %.1fs" % el if el else "NOT SEEN")
+    finally:
+        stop_qemu(q2)
+    if not result["s4"]["boot_ok"]:
+        result["s5"] = {"status": "blocked",
+                        "detail": "S4 boot failed — S5 skipped (same image cannot boot)"}
+        return "stage_failure", "S4 failed: OUT.IMG did not reach the kernel marker '%s'" % BOOT_MARKER
+
+    s5 = {"status": "run", "boot_ok": False, "menu_index": None,
+          "launched": False, "launch_line": False, "exit_line": False,
+          "detail": ""}
+    result["s5"] = s5
+    s5ser = args.serial + ".s5"
+    q3 = boot(out_path, s5ser, qmp=args.qmp_sock + ".s5")
+    try:
+        el = wait_for(s5ser, BOOT_MARKER, min(120, args.timeout))
+        s5["boot_ok"] = el is not None
+        s5["detail"] += "boot marker %s; " % ("ok %.1fs" % el if el else "NOT SEEN")
+        if el is None:
+            return "stage_failure", "S5 failed: OUT.IMG did not reach the kernel marker on the second boot"
+        if "[MENU]" not in read_serial(s5ser):
+            wait_for(s5ser, "[MENU]", 30)
+        t = read_serial(s5ser)
+        idx = menu_index(t, args.s5_program)
+        s5["menu_index"] = idx
+        if idx is None:
+            s5["detail"] += "program %s NOT in the Apps menu dump" % args.s5_program
+            return "stage_failure", "S5 failed: %s not in the OUT.IMG Apps menu" % args.s5_program
+        q = Q(args.qmp_sock + ".s5")
+        launch_driver(q, idx)
+        s5["launched"] = True
+        deadline = time.time() + args.s5_wait
+        probe = "[LAUNCH] %s" % args.s5_program
+        while time.time() < deadline:
+            t = read_serial(s5ser)
+            if probe in t:
+                s5["launch_line"] = True
+            if "Process " in t and args.s5_program in t and "exited" in t:
+                s5["exit_line"] = True
+            if s5["launch_line"]:
+                break
+            time.sleep(0.5)
+        if not s5["launch_line"]:
+            s5["detail"] += "menu click sent (idx %d) but %s not seen within %ds" % (
+                idx, probe, args.s5_wait)
+            return "stage_failure", "S5 failed: %s not observed on serial after menu launch" % probe
+        s5["detail"] += "%s seen; process-exit line %s" % (
+            probe, "yes" if s5["exit_line"] else "no")
+        log("S5: OUT.IMG booted, %s launched from the Apps menu (index %d), "
+            "launch line seen%s" % (args.s5_program, idx,
+                                    "" if s5["exit_line"] else " (no exit line yet)"))
+    finally:
+        stop_qemu(q3)
+    return None
+
+
+# --------------------------------------------------------------------------
 # Main driver
 # --------------------------------------------------------------------------
 def main():
@@ -358,6 +475,10 @@ def main():
     ap.add_argument("--classifier-self-test", action="store_true")
     ap.add_argument("--json", default="./run_selfhost_build_test.result.json")
     ap.add_argument("--keep-qemu", action="store_true")
+    ap.add_argument("--s5-program", default="OUTPROG.BIN",
+                    help="user program S5 launches from the OUT.IMG Apps menu (default OUTPROG.BIN)")
+    ap.add_argument("--s5-wait", type=int, default=60,
+                    help="seconds S5 waits for the [LAUNCH] line after the menu click")
     args = ap.parse_args()
 
     if args.classifier_self_test:
@@ -493,27 +614,10 @@ def main():
         result["stages_reached"] = len(started)
         result["phases"] = {"started": started, "done": done}
 
-        # ---------------- S4/S5 (only meaningful when a build exists) ------
-        out = fat16_get(args.image, "OUT.IMG")
-        if out is None:
-            result["s4"] = {"status": "not_run",
-                            "detail": "no OUT.IMG on the staged disk (in-OS build cannot succeed until MAKE.BIN exists)"}
-            result["s5"] = {"status": "not_run", "detail": "requires OUT.IMG (S4)"}
-        else:
-            out_path = os.path.join(os.path.dirname(args.json), "out-selfhost.img")
-            with open(out_path, "wb") as f:
-                f.write(out)
-            result["s4"] = {"status": "run", "boot_ok": False, "detail": "OUT.IMG extracted (%d bytes) to %s" % (len(out), out_path)}
-            q2 = boot(out_path, args.serial + ".s4", qmp=None)
-            try:
-                el = wait_for(args.serial + ".s4", BOOT_MARKER, min(120, args.timeout))
-                result["s4"]["boot_ok"] = el is not None
-                result["s4"]["detail"] += "; boot marker %s" % ("ok %.1fs" % el if el else "NOT SEEN")
-                if el is None:
-                    result["failure_class"] = "stage_failure"
-                    result["failure_detail"] = "S4 failed: OUT.IMG did not boot"
-            finally:
-                stop_qemu(q2)
+        # ---------------- S4/S5 (host side; pre-testable now) --------------
+        s45 = run_s4_s5(args, result)
+        if s45:
+            result["failure_class"], result["failure_detail"] = s45
     finally:
         if not args.keep_qemu:
             stop_qemu(qemu)
