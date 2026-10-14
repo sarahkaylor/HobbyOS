@@ -190,6 +190,25 @@ static void label_num(const char *label, long v) {
   print_console(&buf[i]);
 }
 
+/* W8 probe (diagnostic only): hex twin of label_num, for capturing the raw
+ * exec-child wait status and the child's argv[] stack addresses. */
+static void label_hex(const char *label, unsigned long v) {
+  char buf[20];
+  int i = (int)sizeof buf;
+  buf[--i] = 0;
+  if (v == 0)
+    buf[--i] = '0';
+  while (v) {
+    unsigned d = (unsigned)(v & 0xf);
+    buf[--i] = (char)(d < 10 ? '0' + d : 'a' + d - 10);
+    v >>= 4;
+  }
+  buf[--i] = 'x';
+  buf[--i] = '0';
+  print_console(label);
+  print_console(&buf[i]);
+}
+
 /* Sample the free-memory surface; keeps the running high-water minimum. */
 static void mem_sample(void) {
   struct sys_meminfo m;
@@ -682,6 +701,15 @@ static int exec_cycle(int seq) {
     argv[1] = "child";
     argv[2] = code;
     argv[3] = 0;
+    /* W8 probe (diagnostic only): where does the child's argv live, and
+     * what did this build hand the kernel?  code[] sits in this frame at
+     * sp+0x20; _start+main+exec_cycles+exec_cycle frames total 0x250. */
+    label_hex("[W8P] child want=", (unsigned long)want);
+    label_hex(" code@=", (unsigned long)(uintptr_t)code);
+    label_hex(" argv@=", (unsigned long)(uintptr_t)argv);
+    print_console(" argv2=");
+    print_console(code);
+    print_console("\n");
 #ifdef HOST_TEST
     execv("/proc/self/exe", argv);
 #else
@@ -690,12 +718,24 @@ static int exec_cycle(int seq) {
     exit(97); /* exec rejected */
   }
   int st = 0;
-  if (waitpid(pid, &st, 0) != pid)
+  if (waitpid(pid, &st, 0) != pid) {
+    label_num("[W8P] -1-cycle=", seq);
+    label_hex(" waitpid-mismatch st=", (unsigned)(unsigned long)st);
+    print_console("\n");
     return -1;
+  }
   if (WIFEXITED(st) && WEXITSTATUS(st) == 97)
     return -3;
-  if (!WIFEXITED(st) || WEXITSTATUS(st) != want)
+  if (!WIFEXITED(st) || WEXITSTATUS(st) != want) {
+    label_num("[W8P] -1-cycle=", seq);
+    label_hex(" st=", (unsigned)(unsigned long)st);
+    label_num(" exited=", WIFEXITED(st) ? 1 : 0);
+    label_num(" code=", WIFEXITED(st) ? (long)WEXITSTATUS(st) : -1);
+    label_num(" sig=", WIFSIGNALED(st) ? (long)WTERMSIG(st) : 0);
+    label_num(" want=", want);
+    print_console("\n");
     return -1;
+  }
   return 0;
 }
 
