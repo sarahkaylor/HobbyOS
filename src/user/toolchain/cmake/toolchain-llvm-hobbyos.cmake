@@ -144,7 +144,7 @@ set(CMAKE_C_STANDARD_LIBRARIES "${HOBBYOS_SYSROOT_CLOSURE_STR}"
     CACHE STRING "HobbyOS sysroot closure (crt0 + libc.a)" FORCE)
 
 set(CMAKE_EXE_LINKER_FLAGS
-    "-nostdlib -nostartfiles -Wl,-T,${HOBBYOS_LINKER_SCRIPT} -Wl,-e,_start -L${HOBBYOS_SYSROOT}/lib/stubs"
+    "-nostdlib -nostartfiles -Wl,-T,${HOBBYOS_LINKER_SCRIPT} -Wl,-e,_start -L${HOBBYOS_SYSROOT}/lib/stubs -Wl,-z,norelro"
     CACHE STRING "HobbyOS exe link flags" FORCE)
 
 # ---------------------------------------------------------------------------
@@ -229,9 +229,32 @@ if (NOT EXISTS "${HOBBYOS_FSTREAM_INST_OBJ}" OR "${HOBBYOS_FSTREAM_INST_SRC}" IS
     message(FATAL_ERROR "fstream_inst.cpp build failed: ${HOBBYOS_FSTREAM_OUT} ${HOBBYOS_FSTREAM_ERR}")
   endif ()
 endif ()
-set(HOBBYOS_CLOSURE_WITH_FSTREAM "${HOBBYOS_FSTREAM_INST_OBJ} ${HOBBYOS_GAPS_IN_CLOSURE}")
-set(CMAKE_CXX_STANDARD_LIBRARIES "${HOBBYOS_CLOSURE_WITH_FSTREAM}"
-    CACHE STRING "HobbyOS C++ sysroot closure (fstream_inst + gaps + crt0 + libcxx.a + libc.a)" FORCE)
+
+# aarch64 setjmp/longjmp (kernel src/kernel/arch/arm/setjmp.s layout) --
+# clang's CrashRecoveryContext.cpp pulls these at link; HobbyOS userland
+# libc has no bodies.  Assembled with the C driver (subtype from .S) into
+# the same closure.
+set(HOBBYOS_SETJMP_SRC "${_toolchain_root}/src/user/toolchain/sysroot-headers/setjmp.S")
+set(HOBBYOS_SETJMP_OBJ "${CMAKE_BINARY_DIR}/hobbyos_setjmp.o")
+if (NOT EXISTS "${HOBBYOS_SETJMP_OBJ}" OR "${HOBBYOS_SETJMP_SRC}" IS_NEWER_THAN "${HOBBYOS_SETJMP_OBJ}")
+  set(HOBBYOS_SETJMP_CFLAGS "${HOBBYOS_TARGET_FLAGS} ${HOBBYOS_ARCH_CFLAGS} -ffreestanding")
+  separate_arguments(HOBBYOS_SETJMP_CFLAGS_LIST NATIVE_COMMAND "${HOBBYOS_SETJMP_CFLAGS}")
+  execute_process(
+    COMMAND "${CMAKE_ASM_COMPILER}" ${HOBBYOS_SETJMP_CFLAGS_LIST} -c "${HOBBYOS_SETJMP_SRC}" -o "${HOBBYOS_SETJMP_OBJ}"
+    RESULT_VARIABLE HOBBYOS_SETJMP_RC
+    OUTPUT_VARIABLE HOBBYOS_SETJMP_OUT
+    ERROR_VARIABLE HOBBYOS_SETJMP_ERR)
+  if (NOT HOBBYOS_SETJMP_RC EQUAL 0)
+    message(FATAL_ERROR "setjmp.S build failed: ${HOBBYOS_SETJMP_OUT} ${HOBBYOS_SETJMP_ERR}")
+  endif ()
+endif ()
+set(HOBBYOS_CLOSURE_WITH_FSTREAM "${HOBBYOS_SETJMP_OBJ} ${HOBBYOS_FSTREAM_INST_OBJ} ${HOBBYOS_GAPS_IN_CLOSURE}")
+set(HOBBYOS_CLOSURE_ALL "${HOBBYOS_SETJMP_OBJ} ${HOBBYOS_FSTREAM_INST_OBJ} ${HOBBYOS_GAPS_IN_CLOSURE}"
+    CACHE INTERNAL "")
+set(CMAKE_CXX_STANDARD_LIBRARIES "${HOBBYOS_CLOSURE_ALL}"
+    CACHE STRING "HobbyOS C++ sysroot closure (setjmp + fstream_inst + gaps + crt0 + libcxx.a + libc.a)" FORCE)
+set(CMAKE_C_STANDARD_LIBRARIES "${HOBBYOS_CLOSURE_ALL}"
+    CACHE STRING "HobbyOS C sysroot closure (setjmp + gaps + crt0 + libc.a)" FORCE)
 
 # No dynamic linking anywhere.
 set(CMAKE_DL_LIBS "")

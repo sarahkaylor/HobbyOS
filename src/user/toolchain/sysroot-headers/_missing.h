@@ -23,6 +23,17 @@
 extern "C" {
 #endif
 
+  /* setjmp/longjmp extern-"C" fix: HobbyOS src/include/setjmp.h (staged into
+   * kernel-include) has NO extern "C" guard, so C++ TUs (clang/lib/Support/
+   * CrashRecoveryContext.cpp) mangle the references to _Z5setjmpPm /
+   * _Z8longjmppmj.  Force-declaring them extern "C" FIRST (this header is
+   * -include'd before anything) pins the C linkage; the later <setjmp.h>
+   * declaration (same signature, jmp_buf = uint64_t[16]) is then a benign
+   * redeclaration inherited the C linkage.  Bodies: sysroot-headers/setjmp.S.
+   * L2 work item. */
+  int    setjmp(unsigned long *env);
+  void   longjmp(unsigned long *env, int val);
+
   /* alarm() -- used by llvm::sys::Watchdog (Unix/Watchdog.inc). */
   unsigned int alarm(unsigned int seconds);
 

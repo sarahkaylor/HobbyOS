@@ -21,6 +21,7 @@
  * they were removed from gaps.c to avoid duplicate symbols at link time.
  */
 #include <errno.h>
+#include <math.h>
 #include <signal.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -54,6 +55,67 @@ int fseeko(FILE *stream, off_t offset, int whence) {
   return fseek(stream, offset, whence);
 }
 off_t ftello(FILE *stream) { return (off_t)ftell(stream); }
+
+/* getrlimit()/setrlimit() -- Unix/Process.inc:140/160 (PreventCoreFiles
+ * reads then zeroes RLIMIT_CORE).  HobbyOS has no resource limits; report
+ * RLIM_INFINITY and accept any set with 0.  L2 work item: real model. */
+int getrlimit(int resource, struct rlimit *rlim) {
+  (void)resource;
+  if (rlim) { rlim->rlim_cur = (unsigned long)RLIM_INFINITY; rlim->rlim_max = (unsigned long)RLIM_INFINITY; }
+  return 0;
+}
+int setrlimit(int resource, const struct rlimit *rlim) {
+  (void)resource; (void)rlim; return 0;
+}
+
+/* dynamic-loader surface -- DynamicLibrary.inc compiles the dlopen() path
+ * under HAVE_DLOPEN (compile-only probe says yes); HobbyOS has no loader, so
+ * these all report "no such object".  dladdr is above; L2 work items. */
+#include <dlfcn.h>
+void *dlopen(const char *filename, int flags) { (void)filename; (void)flags; return 0; }
+void *dlsym(void *handle, const char *symbol) { (void)handle; (void)symbol; return 0; }
+int   dlclose(void *handle) { (void)handle; return 0; }
+char *dlerror(void) { return "HobbyOS: no dynamic loader"; }
+
+/* Missing math bodies (HobbyOS math.h declares; math.c has only the first
+ * slice).  Implemented on top of the bodies math.c DOES provide (log, pow,
+ * sin/cos/tan/asin/atan/atan2, sqrt) so the compiler frontend's libcall
+ * folding gets real values; L2 work items for the libc proper. */
+double exp(double x)  { return pow(2.7182818284590452353602874713526625, x); }
+double log10(double x){ return log(x) / 2.30258509299404568401799145468436422; }
+double log2(double x) { return log(x) / 0.693147180559945309417232121458176568; }
+float  log2f(float x) { return (float)log2((double)x); }
+double log1p(double x){ return log(1.0 + x); }
+/* logb: floor of log2 of the magnitude == the IEEE exponent (proper logb
+ * returns the *integer* exponent; bit-mask it so SimplifyLibCalls folding
+ * of __builtin_logb gets the value LLVM expects). */
+double logb(double x) {
+  union { double d; unsigned long long u; } v;
+  v.d = x;
+  int e = (int)((v.u >> 52) & 0x7ff);
+  if (e == 0) {                       /* subnormal or zero */
+    if (v.u == 0) return -1.0 / 0.0;  /* -HUGE_VAL */
+    v.u &= 0x800fffffffffffffull; v.u |= 0x0010000000000000ull;
+    e = (int)((v.u >> 52) & 0x7ff);
+    return (double)(e - 1023 - 51);
+  }
+  if (e == 0x7ff) return x;           /* inf/nan pass through */
+  return (double)(e - 1023);
+}
+double acos(double x) { return atan2(sqrt(1.0 - x * x), x); }
+double cosh(double x) { double e = exp(x);  return (e + 1.0 / e) / 2.0; }
+double sinh(double x) { double e = exp(x);  return (e - 1.0 / e) / 2.0; }
+double tanh(double x) { double e = exp(2.0 * x); return 1.0 - 2.0 / (e + 1.0); }
+/* erf: Abramowitz & Stegun 7.1.26 (max abs err ~1.5e-7). */
+double erf(double x) {
+  static const double a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741,
+                      a4 = -1.453152027, a5 = 1.061405429,  p  = 0.3275911;
+  int sgn = (x < 0.0) ? -1 : 1;
+  double ax = x < 0.0 ? -x : x;
+  double t = 1.0 / (1.0 + p * ax);
+  double y = (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t;
+  return sgn * (1.0 - y * exp(-ax * ax));
+}
 
 int bind(int fd, const void *addr, unsigned int addrlen) {
   (void)fd; (void)addr; (void)addrlen;
