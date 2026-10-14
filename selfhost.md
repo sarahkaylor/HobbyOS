@@ -576,6 +576,15 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-14 — Merged-tip battery round 5 on `42c6c0b`: GREEN both machines (ambient-class
+  residuals only).** Local: host rc=0, unit-arm **318/0**, unit-x64 (KVM) **322/0**, wave
+  rc=0 with 3 token-lines: `[CMPTEST] FAIL identical files` (cmp exit 2 under slot pressure —
+  `no free slot (used=63/63)` + starvation forensics present in-window = the documented
+  pressure-fragility family; single check; 0 occurrences in b3/b4/w4-w6 runs → watch, not
+  regression) + 2× `SHELLTEST WATCHDOG`. CI VM (`merged-w6`): host/unit-arm/unit-x64 rc=0;
+  test-arm rc=1 by gate math on `CXX_T condvar_wait_notify` (documented slot-pressure check
+  class — `no free slot` forensic grep confirmed) + `SHELLTEST WATCHDOG`; 173 s, no wedge.
+
 - **2026-10-14 — Wave 5 (3 lanes) all merged (`42c6c0b`); zero conflicts. THE TOOLCHAIN RUNS IN-OS.**
   (1) **w5-flat**: `selfhost-stage.sh` converts every LLVM dist ELF (clang-21/lld/llvm-ar/
   llvm-objcopy) to flat at `--tools` stage time (host `llvm-objcopy -O binary` + sanity checks:
