@@ -1,7 +1,7 @@
 {
   "lane": "w2-llvm",
   "status": "complete",
-  "commit_tip": "aa5fc86",
+  "commit_tip": "a35602d",
   "phases": [
     {
       "name": "ninja llvm-ar llvm-objcopy (resume from 211/564 TU checkpoint)",
