@@ -1,0 +1,79 @@
+# L1 dependency surface: OS-facing call surface of the LLVM toolchain build (feeds L2).
+# One item per line: function_name <count> <example file:line>  -- count = call sites in scope.
+# Scope: llvm/lib/Support/Unix/*.inc, llvm/lib/Support/{Path,Program,Memory,Signals}.cpp,
+#        clang/lib/Driver/*.cpp, lld/Common/*.cpp  (llvmorg-21.1.8, extracted tree).
+# Regenerate: docs/selfhost/llvm-bootstrap.md; the generator script is embedded there.
+# Generated: 2026-10-14 (lane L1 wave 1). 'Declared' = present in HobbyOS
+#   src/libc/include + src/include + src/user_include headers. 'missing' = link-time
+#   blocker for the cross build; L2 owns the audit + syscall/fix items.
+
+## A. OS-facing functions CALLED in scope and DECLARED by HobbyOS headers
+# function  count  example
+strlen  20  llvm/lib/Support/Unix/Path.inc:377
+close  16  llvm/lib/Support/Unix/Memory.inc:120
+getenv  10  llvm/lib/Support/Unix/Path.inc:171
+strcmp  9  llvm/lib/Support/Unix/DynamicLibrary.inc:73
+free  9  llvm/lib/Support/Unix/Path.inc:180
+realpath  8  llvm/lib/Support/Unix/Path.inc:140
+open  5  llvm/lib/Support/Unix/Memory.inc:87
+read  5  llvm/lib/Support/Unix/Path.inc:297
+memset  5  llvm/lib/Support/Unix/Path.inc:310
+signal  5  llvm/lib/Support/Unix/Process.inc:183
+sigaction  5  llvm/lib/Support/Unix/Program.inc:404
+getpid  4  llvm/lib/Support/Unix/Path.inc:308
+sysconf  4  llvm/lib/Support/Unix/Path.inc:679
+raise  4  llvm/lib/Support/Unix/Signals.inc:403
+strrchr  4  llvm/lib/Support/Unix/Signals.inc:863
+stat  3  llvm/lib/Support/Unix/Path.inc:142
+remove  3  llvm/lib/Support/Unix/Path.inc:452
+lseek  3  llvm/lib/Support/Unix/Path.inc:1087
+dup2  3  llvm/lib/Support/Unix/Process.inc:248
+sigfillset  3  llvm/lib/Support/Unix/Process.inc:257
+sigprocmask  3  llvm/lib/Support/Unix/Process.inc:265
+snprintf  2  llvm/lib/Support/Unix/Path.inc:135
+strdup  2  llvm/lib/Support/Unix/Path.inc:173
+strtok_r  2  llvm/lib/Support/Unix/Path.inc:177
+readlink  2  llvm/lib/Support/Unix/Path.inc:239
+memcmp  2  llvm/lib/Support/Unix/Path.inc:546
+access  2  llvm/lib/Support/Unix/Path.inc:615
+write  2  llvm/lib/Support/Unix/Path.inc:1087
+fstat  2  llvm/lib/Support/Unix/Path.inc:1093
+sigemptyset  2  llvm/lib/Support/Unix/Program.inc:403
+pthread_self  2  llvm/lib/Support/Unix/Threading.inc:152
+strchr  1  llvm/lib/Support/Unix/Path.inc:160
+getcwd  1  llvm/lib/Support/Unix/Path.inc:162
+lstat  1  llvm/lib/Support/Unix/Path.inc:457
+rename  1  llvm/lib/Support/Unix/Path.inc:581
+getpwnam_r  1  llvm/lib/Support/Unix/Path.inc:686
+futimens  1  llvm/lib/Support/Unix/Path.inc:825
+fcntl  1  llvm/lib/Support/Unix/Path.inc:1030
+usleep  1  llvm/lib/Support/Unix/Path.inc:1242
+getpwuid_r  1  llvm/lib/Support/Unix/Path.inc:1360
+getuid  1  llvm/lib/Support/Unix/Path.inc:1360
+sbrk  1  llvm/lib/Support/Unix/Process.inc:112
+isatty  1  llvm/lib/Support/Unix/Process.inc:303
+fork  1  llvm/lib/Support/Unix/Program.inc:261
+execve  1  llvm/lib/Support/Unix/Program.inc:311
+execv  1  llvm/lib/Support/Unix/Program.inc:314
+_exit  1  llvm/lib/Support/Unix/Program.inc:321
+kill  1  llvm/lib/Support/Unix/Program.inc:429
+wait  1  llvm/lib/Support/Unix/Program.inc:438
+unlink  1  llvm/lib/Support/Unix/Signals.inc:171
+exit  1  llvm/lib/Support/Unix/Signals.inc:462
+strstr  1  clang/lib/Driver/Driver.cpp:5403
+memcpy  1  clang/lib/Driver/OffloadBundler.cpp:1188
+
+## B. POSIX/glibc calls in scope NOT declared by HobbyOS headers -- LINK BLOCKERS
+# function  count  example
+alarm  5  llvm/lib/Support/Unix/Program.inc:406
+getrlimit  3  llvm/lib/Support/Unix/Process.inc:140
+setrlimit  3  llvm/lib/Support/Unix/Process.inc:160
+syscall  3  llvm/lib/Support/Unix/Signals.inc:426
+ioctl  1  llvm/lib/Support/Unix/Process.inc:325
+strsignal  1  llvm/lib/Support/Unix/Program.inc:492
+
+## C. HAVE_* config surface
+# The cross configure compiles ONLY the #if HAVE_<X> branches CMake enables;
+# llvm/include/llvm/Config/{llvm-config.h,config.h}.cmake.in + llvm/cmake/config-ix.cmake
+# gate each. With the L1 option set (below) LLVM targets the generic POSIX path
+# (HAVE_* POSIX 2008 entries set per the probes CMake runs at configure time on the HOST).
