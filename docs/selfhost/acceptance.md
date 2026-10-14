@@ -172,11 +172,16 @@ with `fat16img.py get`.
 | libcxx include subset (C++ set only) | 1681 | 12,286,278 (11.7 MiB) | deep path via `mmkdir_p` + `mcopy -s` |
 | **total** | **2322** | **30,108,339 (28.7 MiB)** | verified `mdir` + content hashes |
 
-- **libcxx recommendation: stage by default, skippable (`STAGE_LIBCXX=0`).**
-  Cost 11.7 MiB (×2 FAT slack ≈ 24 MiB on the 1 GiB disk). Rationale: the C++
-  acceptance set is provisional (AD-9 "if it links cheaply"); including the
-  headers keeps the `user` target's C++ path runnable without a re-stage.
-  If the M3 freeze drops all C++ targets, flip the default off.
+- **libcxx: AD-9 freeze (w4-src, wave-4) — staged OFF by default
+  (`STAGE_LIBCXX=0`).** Evidence: every TU on the S0..S3 in-OS path is C —
+  check/kernel are C+asm, the acceptance user set (HELLO SH LS CAT) links
+  the carried libc.a, and DESKTOP (required for S5's desktop path) is C
+  (src/user/desktop.c, USER_CFLAGS).  Only CXX_LIBCXX_USER_FLAGS programs
+  outside the acceptance set (browser/ICU/libcxx tiers) reference the
+  libcxx include tree.  Re-enable with `STAGE_LIBCXX=1` when a C++ TU
+  enters the in-OS user set; both staging modes then carry the subset at
+  the frozen path (11.7 MiB / 1681 files).
+
 - **8.3-excess: 1362 of 2322 staged basenames exceed FAT 8.3** (informational
   for F8). LFN write is proven by the test (arrival of `program_loader.c`,
   `__config`, … verified by `mtype`+sha256); in-OS *read* is lane L3's gate.
@@ -365,7 +370,9 @@ rule from §8.4 applies: re-grep at execution time; this doc is a snapshot.
 
 ## 7. Open questions for M3 / harness wave
 
-1. Freeze AD-9 (LIBLLM-hello set incl. C++? → flips STAGE_LIBCXX default).
+1. ~~Freeze AD-9 (LIBLLM-hello set incl. C++? → flips STAGE_LIBCXX default).~~
+   **DECIDED (w4-src, wave-4): the acceptance user set is C-only (HELLO SH
+   LS CAT + DESKTOP in C); STAGE_LIBCXX defaults OFF.** See §2 libcxx row.
 2. `MODE=selfhost` + `SELFHOST.BIN` ownership (harness lane vs kernel lane).
 3. mkfs.fat port must byte-match enough (BPB+FATs+root) for Limine/AAVMF —
    L4 records what "enough" means.

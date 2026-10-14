@@ -1,0 +1,112 @@
+{
+  "lane": "w4-src",
+  "wave": 4,
+  "status": "complete",
+  "branch": "selfhost/w4-src",
+  "summary": "Makefile.hobbyos v1 landed and is proven to parse + resolve targets under the in-OS GNU make port; /SRC build-subset staging (307 files, 4.77 MiB) rides the disk.img recipe; S0 and S1 both ran end-to-end through the host harness and reached the FIRST TRUE in-OS compile line (clang invoked for src/kernel/main.c and src/user/hello.c), failing cleanly at exec with a code-anchored kernel blocker: the 1 MiB MAX_PROGRAM_SIZE gate (program_loader.c program_too_large) rejects CLANG.BIN's 126 MB — reported to w4-kernel/w4-clang.  The missing /TOOLS/SH.BIN (sketch SHELL dependency) was found + fixed via a first-run kernel wedge.  AD-9 frozen: STAGE_LIBCXX=0 (all acceptance TUs are C).",
+  "gates": {
+    "make_disk_img": {
+      "green": true,
+      "exit_code": 0,
+      "image": "disk.img (1 GiB FAT16; mformat shim used for the recipe's mkfs.fat -F 16 step — blocklist-compliant)",
+      "evidence": "docs/selfhost/lanes/w4-src-evidence.md §2"
+    },
+    "disk_img_src_staged": {
+      "files": 307,
+      "bytes": 4770966,
+      "on_disk": "::/SRC: src/{kernel,include,user_include,libc,user}, obj/arm/libc.a (1,202,774 B), bin/{DESKTOP,CONSOLE,SH,OUTMARK}, linker.ld, Makefile.hobbyos, bootloader/BOOTAA64.EFI, limine.conf, SELFHOST.RUN, SELFHOST.SH",
+      "free_bytes": 688111616,
+      "mdir_evidence": "mdir -i disk.img -/ ::/SRC -> 307 files, 4,770,966 B"
+    },
+    "disk_img_tools_staged": {
+      "files": 13,
+      "bytes": 223595232,
+      "note": "incl. /TOOLS/SH.BIN added this lane (the L4 sketch's SHELL= needs it; the disk recipe only staged SH at disk root)"
+    },
+    "s0_dry_run": {
+      "status": "blocked_clean",
+      "failure_class": "stage_failure",
+      "detail": "[SELFHOST] phase=s0-check-start ... /TOOLS/CLANG.BIN -O2 ... -c src/kernel/main.c -o /SRC/obj/arm/check.o ... 'sh: exec failed: /TOOLS/CLANG.BIN' ... [SELFHOST] phase=s0-check-fail reason=tool-rc rc=512, FAILED-AT stage=s0-check",
+      "blocker": "CLANG.BIN (126,060,320 B) rejected at exec: kernel MAX_PROGRAM_SIZE = 1 MiB (process.h:42 USER_INITIAL_CLEAR_SIZE; program_loader.c program_too_large() at :63, exec gate :855-860 returns -ENOEXEC).  v2_map_image's own cap is 128 MiB, so the standalone 1 MiB gate is the blocker.",
+      "owner": "w4-kernel / w4-clang (kernel-side; NOT edited by this lane)",
+      "runner": "tools/run_selfhost_build_test.py run2: boot 6.5s, driver menu_index 74, phases started=[s0-check], markers phase_fail=1, fail_token=0, exit 13"
+    },
+    "s1_attempt": {
+      "status": "attempted_blocked_clean",
+      "failure_class": "stage_failure",
+      "detail": "S1-first RUN variant: [SELFHOST] phase=s1-user-start ... /TOOLS/CLANG.BIN -O2 ... -c src/user/hello.c -o /SRC/obj/arm/hello.o ... 'sh: exec failed: /TOOLS/CLANG.BIN' ... 'MAKE.BIN: *** [Makefile.hobbyos:125: /SRC/obj/arm/hello.o] Error 127' ... [SELFHOST] phase=s1-user-fail reason=tool-rc rc=512, FAILED-AT stage=s1-user",
+      "meaning": "in-OS make PARSED Makefile.hobbyos, resolved the AD-9 user set, began compiling hello.c; blocked at the same 1 MiB exec gate.  This also proves Makefile.hobbyos parses + resolves targets in the in-OS make port.",
+      "runner": "run3: boot 6.5s, phases started=[s1-user], phase_fail=1, fail_token=0, exit 13"
+    },
+    "units": {
+      "classifier_self_test": "7/7 PASS",
+      "sh_compile": "bash -n tools/selfhost-stage.sh OK",
+      "runner_compile": "python3 -m py_compile tools/run_selfhost_build_test.py OK",
+      "host_make_parse": "make -f Makefile.hobbyos -n check/user/kernel all resolve (main.o/cpu.o/boot.o via the 3 pattern rules)"
+    }
+  },
+  "ad9_decision": {
+    "id": "AD-9",
+    "decision": "STAGE_LIBCXX defaults OFF (0) for acceptance + source staging",
+    "evidence": [
+      "S0 check TU = src/kernel/main.c (C, KERNEL_CFLAGS) — the dry-run compile line contains no libcxx include path",
+      "S1 user set = HELLO/SH/LS/CAT, all C, link the carried libc.a — no libcxx include path in any recipe line",
+      "S2 kernel = 59 C/asm TUs — no C++",
+      "DESKTOP (S5 desktop-path OUT.IMG requirement, acceptance §8.1) is C (src/user/desktop.c, built with USER_CFLAGS)",
+      "only CXX_LIBCXX_USER_FLAGS programs (browser/ICU/libcxx tiers) reference the libcxx include tree — none in the acceptance set",
+      "frozen: Makefile.hobbyos header, tools/selfhost-stage.sh STAGE_LIBCXX default (0), acceptance.md §2 + §7"
+    ],
+    "flip_condition": "STAGE_LIBCXX=1 when a C++ TU enters the in-OS user set (both staging modes then carry the subset at the frozen path)"
+  },
+  "deliverables": {
+    "Makefile.hobbyos": "v1 at repo root: check/user/kernel/disk/all, acceptance s0..s3 markers, absolute /TOOLS/BIN, SHELL=/TOOLS/SH.BIN, MAKEFLAGS -r -R, 59 kernel TUs enumerated, user links carried libc.a, disk = acceptance §8.1 OUT.IMG layout (128 MiB, DISK_BLOCKS=131072).  Deviations from the L4 sketch (documented in-file): kernel link -T linker.ld (repo-root script, matches host LDFLAGS; sketch said src/linker.ld — nonexistent), explicit KERNEL_OBJS link list (no shell-glob of obj/arm so check.o can never pollute the kernel link).",
+    "selfhost-stage.sh": "--src mode (BUILD-REQUIRED subset, /SRC/src/... nesting; merges into the recipe's ::/src L3 fixtures, never deletes; carries libc.a + DESKTOP/CONSOLE/SH + OUTMARK; stages SELFHOST.RUN/SELFHOST.SH at /SRC root); STAGE_LIBCXX default 0 (AD-9); /TOOLS/SH.BIN added to --tools (sketch SHELL dependency); payload mode stages the same carried products so a harness --stage re-stage keeps the S1 link prereq.",
+    "root Makefile": "one line: tools/selfhost-stage.sh --src disk.img, inside the STAGE_TOOLS guard, after the --tools step.",
+    "SELFHOST.RUN": "stages now run via SH.BIN + /SRC/SELFHOST.SH <target> (cwd=/SRC wrapper); without it make runs from cwd / and never finds Makefile.hobbyos.",
+    "SELFHOST.SH": "new: cd /SRC; /TOOLS/MAKE.BIN -f Makefile.hobbyos \"$1\".",
+    "acceptance.md": "AD-9 freeze sync (§2 libcxx row, §7 Q1 struck); no other change."
+  },
+  "files": [
+    "Makefile.hobbyos (new)",
+    "tools/selfhost-stage.sh (--src mode; AD-9 default; /TOOLS/SH.BIN; payload carried products; SELFHOST.SH staging)",
+    "Makefile (disk.img: --src line)",
+    "src/user/selfhost/SELFHOST.RUN (sh-wrapper stages)",
+    "src/user/selfhost/SELFHOST.SH (new)",
+    "docs/selfhost/acceptance.md (AD-9)",
+    "docs/selfhost/lanes/w4-src-evidence.md",
+    "docs/selfhost/lanes/w4-src-report.json"
+  ],
+  "commits": [
+    "118508b (Makefile.hobbyos + --src + AD-9 + RUN/SH wrapper + acceptance)",
+    "da60f2f (--src nesting + fixture merge + payload carried products + /TOOLS/SH.BIN)",
+    "37711c4 (S0/S1 dry-run evidence, report, evidence doc)"
+  ],
+  "blockers": [
+    {
+      "id": "CLANG-EXEC-1MIB-GATE",
+      "stage": "s0+s1 (everything that execs an LLVM tool)",
+      "symptom": "sh: exec failed: /TOOLS/CLANG.BIN (also LLD/LLVMAR/OBJCOPY at 72/13/10 MB would fail identically)",
+      "root_cause": "kernel exec gate program_too_large(): MAX_PROGRAM_SIZE = USER_INITIAL_CLEAR_SIZE = 0x100000 (1 MiB) (src/include/process.h:42; src/kernel/program_loader.c:63, exec path :855-860 returns -ENOEXEC)",
+      "why_odd": "the v2_map_image cap is USER_IMG_SIZE = 128 MiB (:44), so the 1 MiB gate is a standalone exec-path check that contradicts the loader's own cap",
+      "owner": "w4-kernel (fix: raise/remove the program_too_large gate for v2 exec, to USER_IMG_SIZE) / w4-clang (flat-format clang is NOT sufficient — even ELF is size-blocked)",
+      "evidence": "run2/serial lines 'sh: exec failed: /TOOLS/CLANG.BIN' at ELR 0x1000011020, rc 512"
+    },
+    {
+      "id": "MISSING-SHELL-WEDGE",
+      "stage": "driver",
+      "symptom": "with no /TOOLS/SH.BIN (the disk recipe only stages SH at disk root), make's first recipe line exec of the missing SHELL produced 'v2 loader: bad image size 0' + an INFINITE fault/exit respawn loop at ELR 0x100002A5FC flooding serial (hangs the harness)",
+      "fix": "selfhost-stage.sh --tools now stages /TOOLS/SH.BIN (done this lane); with it present the loop is gone",
+      "residual": "a missing-image exec still wedges the kernel for ~minutes instead of failing cleanly — worth a w4-kernel look (spawn/exec failure path), pre-existing, not this lane's gate",
+      "owner": "w4-kernel (investigate)", 
+      "evidence": "run1 serial: 'v2 loader: bad image size 0' + '[KERNEL] User process 5 (/TOOLS/MAKE.BIN) fault! EC: 0x20' repeated ~370k lines; verdict hang"
+    }
+  ],
+  "next_steps": [
+    "w4-kernel: raise/remove the 1 MiB exec gate (program_loader.c program_too_large) to USER_IMG_SIZE — unblocks clang/lld/llvm-ar/llvm-objcopy exec; with it, S0's compile line is already on the wire.",
+    "w4-clang: coordinate with the kernel gate — a flat-format clang alone does not clear the 1 MiB gate; size must be under the gate or the gate must rise.  After the kernel fix re-run S0: expect the next blocker (126 MB load cost / cc1 nested exec — cc1 is also a multi-MB ELF/clone of clang).",
+    "w4-src follow-up: re-run the harness exactly as run2/run3 (no code change needed); SELFHOST.RUN/SELFHOST.SH + Makefile.hobbyos are already proven parsed in-OS.",
+    "in-OS libc rebuild (make-port lane/M4): v1 links the carried libc.a; the S1-with-multiple-TUs path then needs the libc.a rebuild recipe.",
+    "decide OUT.IMG independence: S3's disk target sources DESKTOP/CONSOLE from /SRC/bin (carried host products) — a later wave can build them in-OS (C, cheap) to drop the last carried binaries."
+  ],
+  "notes": "The 1 GiB disk.img uses the mformat shim for the recipe's mkfs.fat -F 16 step (lane blocklist).  mkfs.fat shim at ~/.hermes/cache/scratch/w4-src-bin/mkfs.fat (not committed).  Raw serials (uncommitted): ~/.hermes/cache/scratch/w4-src/run{1,2,3}/serial-selfhost.log; run2/run3 result JSONs there too.  Boot 6.5s each; driver menu index 74.  The in-OS build driver (make) is now running and reaching the compile stage in both S0 and S1 — first true in-OS build attempts."
+}

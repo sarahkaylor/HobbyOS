@@ -2095,6 +2095,12 @@ endif
 	# build a bootable image.  Override with STAGE_TOOLS=0 to skip.
 ifneq ($(STAGE_TOOLS),0)
 	tools/selfhost-stage.sh --tools disk.img
+	# Selfhost W4 (src): the in-OS build-required source subset on the
+	# startup image (frozen F2 /SRC flavor): kernel+user sources, headers,
+	# Makefile.hobbyos, limine/EFI assets, the carried build products, and
+	# the SELFHOST.RUN/SELFHOST.SH stage scripts.  tools/selfhost-stage.sh
+	# --src; disable together with the tools step via STAGE_TOOLS=0.
+	tools/selfhost-stage.sh --src disk.img
 endif
 	$(MCOPY) -i disk.img $(MONITOR_BIN) ::/MONITOR.BIN
 	$(MCOPY) -i disk.img $(MONITOR_TEST_BIN) ::/MONITORT.BIN

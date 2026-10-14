@@ -22,6 +22,15 @@
 #     first; without it, files are overwritten in place (-o).  The disk.img
 #     recipe invokes this variant; the SELFHOST harness keeps staging /SRC in
 #     its own -f run, so the two payloads never clobber each other.
+#   tools/selfhost-stage.sh --src [-f] [image]
+#     [v4] stage ONLY the BUILD-REQUIRED source subset to /SRC — the kernel
+#     sources, shared headers, libc (for the future in-OS libc rebuild), the
+#     acceptance user set, Makefile.hobbyos, the limine/EFI boot assets the
+#     in-OS S2/S3 disk recipe needs, the carried host build products
+#     (libc.a + DESKTOP/CONSOLE/SH for the S5 desktop-path OUT.IMG layout),
+#     and SELFHOST.RUN + SELFHOST.SH.  Pre-creates /SRC/obj/arm + /SRC/bin
+#     (single-level FAT mkdir; MKDIR.BIN fails on EEXIST so the in-OS
+#     recipes never mkdir them).  ~4 MiB, vs 28.7 MiB for the full payload.
 #     Source of the LLVM tools: obj/selfhost/dist-staging (override with
 #     DIST_STAGING=<path>); the ported tools come from obj/arm/*.bin
 #     (override per-tool with the same names as the Makefile vars).
@@ -41,11 +50,15 @@
 #   /SRC/limine.conf               (template, copied verbatim from the Makefile
 #                                   arm branch, Makefile:1763-1768)
 #   /SRC/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include/**
-#                                  (C++ acceptance set only; 1681 files,
-#                                   11.72 MiB; skip with STAGE_LIBCXX=0 — kept
-#                                   at its default until the M3 AD-9 freeze)
+#                                  (C++ include subset; 1681 files, 11.72 MiB;
+#                                   AD-9 freeze — DEFAULT OFF (STAGE_LIBCXX=0):
+#                                   no acceptance-set TU is C++, re-enable with
+#                                   STAGE_LIBCXX=1 when a C++ TU enters the
+#                                   in-OS user set)
 #   /SRC/SELFHOST.RUN              [v2] the in-OS build driver script
 #                                  (src/user/selfhost/SELFHOST.RUN)
+#   /SRC/SELFHOST.SH               [v4] the in-OS cwd wrapper the RUN stages
+#                                  invoke (`sh /SRC/SELFHOST.SH <target>`)
 #   /SELFHOST.BIN                  [v2] the in-OS build driver binary
 #                                  (obj/arm/selfhost.bin by default; override
 #                                  with SELFHOST_BIN=<path>.  Skipped with a
@@ -64,9 +77,12 @@ set -u
 
 IMAGE="disk.img"
 FORCE=0
-MODE="payload"   # payload (default) | tools (--tools; /TOOLS only)
+MODE="payload"   # payload (default) | tools (--tools; /TOOLS only) | src (--src; /SRC build subset)
 if [ "${1:-}" = "--tools" ]; then
   MODE="tools"
+  shift || true
+elif [ "${1:-}" = "--src" ]; then
+  MODE="src"
   shift || true
 fi
 if [ "${1:-}" = "-f" ]; then
@@ -81,7 +97,14 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 LIBCXX_INC="${LIBCXX_INC_DIR:-third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include}"
-STAGE_LIBCXX="${STAGE_LIBCXX:-1}"
+# AD-9 freeze (w4-src, wave 4): STAGE_LIBCXX defaults to OFF (0).  Evidence:
+# every TU the S0..S3 in-OS path compiles is C — check/kernel are C+asm, and
+# the acceptance user set (HELLO SH LS CAT) plus DESKTOP (C, src/user/
+# desktop.c, built with USER_CFLAGS) never touch the libcxx include tree;
+# only CXX_LIBCXX_USER_FLAGS programs outside the acceptance set (browser/
+# ICU/libcxx tiers) would.  Re-enable with STAGE_LIBCXX=1 when a C++ TU
+# enters the in-OS user set (then both modes stage the subset below).
+STAGE_LIBCXX="${STAGE_LIBCXX:-0}"
 # [v3] Sources for the /TOOLS toolchain staging (--tools): the wave-2 LLVM
 # distribution staging, and the ported build tools from obj/arm.
 DIST_STAGING="${DIST_STAGING:-obj/selfhost/dist-staging}"
@@ -152,7 +175,7 @@ stage_tools() {
   local spec src dst
   for spec in "obj/arm/make.bin MAKE.BIN" "obj/arm/mcopy.bin MCOPY.BIN" \
               "obj/arm/mdel.bin MDEL.BIN"   "obj/arm/mmd.bin MMD.BIN" \
-              "obj/arm/mkfsfat.bin MKFSFAT.BIN"; do
+              "obj/arm/mkfsfat.bin MKFSFAT.BIN" "obj/arm/sh.bin SH.BIN"; do
     src="${spec% *}"; dst="${spec#* }"
     if [ -f "$src" ]; then
       mcopy -o -i "$IMAGE" "$src" "::/TOOLS/$dst" || fail "mcopy ::/TOOLS/$dst"
@@ -202,13 +225,20 @@ done
 
 [ -f "$IMAGE" ] || fail "image not found: $IMAGE (create it, e.g. truncate -s 256M scratch.img && mkfs.fat -F 16 scratch.img)"
 
-# ---- does /SRC already exist? (mdir returns 0 even on empty, so probe the dir) ----
+# ---- does /SRC already exist? (mdir returns 0 even on empty, so probe the
+# dir).  NOTE: the disk.img recipe pre-creates ::/src (the L3 LFN fixture
+# dirs, Makefile 1865-1874) which IS the same FAT dir as /SRC — so --src
+# mode must tolerate an existing /SRC and merge (mcopy -o) instead of
+# failing or deleting the fixtures.  The default payload mode keeps its
+# fail-without--f / delete-with--f contract. ----
 if mdir -i "$IMAGE" ::/SRC >/dev/null 2>&1; then
-  if [ "$FORCE" -ne 1 ]; then
+  if [ "$FORCE" -ne 1 ] && [ "$MODE" != "src" ]; then
     fail "image '$IMAGE' already contains /SRC — pass -f to replace it (idempotent)"
   fi
-  echo "selfhost-stage: replacing existing /SRC on $IMAGE"
-  mdeltree -i "$IMAGE" ::/SRC 2>/dev/null || fail "could not delete existing /SRC (mdeltree)"
+  if [ "$FORCE" -eq 1 ]; then
+    echo "selfhost-stage: replacing existing /SRC on $IMAGE"
+    mdeltree -i "$IMAGE" ::/SRC 2>/dev/null || fail "could not delete existing /SRC (mdeltree)"
+  fi
 fi
 
 # ---- payload sources (tolerate absence of the optional ones) ----
@@ -241,8 +271,10 @@ add_payload() {  # add_payload <files> <bytes>
   payload_bytes=$((payload_bytes + $2))
 }
 
-# ---- stage the tree ----
-mmd -i "$IMAGE" ::/SRC || fail "mmd ::/SRC"
+# ---- stage the tree (payload mode; --src exits earlier, below) ----
+if [ "$MODE" != "src" ]; then
+  mmd -i "$IMAGE" ::/SRC || fail "mmd ::/SRC"
+fi
 
 copy_tree() {  # copy_tree <src-dir> <dest-parent-on-image> — copies the dir ITSELF (dir/<basename>)
   local src="$1" dst="$2"
@@ -255,6 +287,121 @@ copy_tree() {  # copy_tree <src-dir> <dest-parent-on-image> — copies the dir I
   bytes=$(du -sb "$src" | awk '{print $1}')
   add_payload "$cnt" "$bytes"
 }
+
+# ---- [v4] /SRC BUILD-REQUIRED source subset (--src; frozen F2 flavor) ----
+# Stages only what the in-OS build recipe needs: the kernel sources, shared
+# headers, libc (headers + crt0 + sources — the future in-OS libc rebuild),
+# the acceptance user set + the driver script, Makefile.hobbyos, the
+# limine/EFI assets the in-OS S3 OUT.IMG recipe references, the carried host
+# build products (libc.a for the S1 link; DESKTOP/CONSOLE/SH + OUTMARK for
+# the S5 desktop-path OUT.IMG layout, acceptance.md §8.1/§8.3), and the
+# SELFHOST.RUN / SELFHOST.SH stage scripts.  Pre-creates /SRC/obj/arm and
+# /SRC/bin: the FAT mkdir is one-level and MKDIR.BIN fails on EEXIST, so the
+# in-OS make recipes never mkdir these (L4 sketch option (b)).
+stage_src() {
+  local cnt
+  payload_files=0
+  payload_bytes=0
+  echo "selfhost-stage: staging BUILD-REQUIRED source subset to ::/SRC"
+  # Merge into an existing ::/SRC (the disk recipe's ::/src L3 fixture dirs
+  # ARE /SRC); -f (payload mode owner) already deleted it above.
+  mmkdir_p "::/SRC" || fail "mmkdir_p ::/SRC"
+  mmkdir_p "::/SRC/obj/arm" || fail "mmkdir_p ::/SRC/obj/arm"
+  mmkdir_p "::/SRC/bin" || fail "mmkdir_p ::/SRC/bin"
+
+  # Subsets land at /SRC/src/... — the SAME nesting the full payload mode
+  # produces (copy_tree src) — so the in-OS recipes' relative src/...
+  # references resolve with cwd=/SRC.
+  mmkdir_p "::/SRC/src" || fail "mmkdir_p ::/SRC/src"
+  for d in kernel include user_include libc; do
+    mcopy -s -o -i "$IMAGE" "src/$d" "::/SRC/src/./" || fail "mcopy src/$d"
+    add_payload "$(find "src/$d" -type f | wc -l)" "$(du -sb "src/$d" | awk '{print $1}')"
+  done
+
+  # User set — the 5 acceptance TUs + user linker script + the driver dir
+  # (SELFHOST.RUN/selfhost.c/SELFHOST.SH).  Explicit files, NOT the whole
+  # 10.5 MiB src/user (browser/python tiers are not build-required).
+  mmkdir_p "::/SRC/src/user" || fail "mmkdir_p ::/SRC/src/user"
+  for f in hello.c sh.c sh_aux.c ls.c cat.c linker.ld; do
+    mcopy -o -i "$IMAGE" "src/user/$f" "::/SRC/src/user/$f" || fail "mcopy src/user/$f"
+    add_payload 1 "$(stat -c %s "src/user/$f")"
+  done
+  mcopy -s -o -i "$IMAGE" src/user/selfhost "::/SRC/src/user/./" || fail "mcopy src/user/selfhost"
+  cnt=$(find src/user/selfhost -type f | wc -l)
+  add_payload "$cnt" "$(du -sb src/user/selfhost | awk '{print $1}')"
+  # The driver's default script path is /SRC/SELFHOST.RUN and the RUN file's
+  # stages reference /SRC/SELFHOST.SH — both belong at the /SRC ROOT (not
+  # just nested under src/user/selfhost), exactly like the payload mode.
+  for f in SELFHOST.RUN SELFHOST.SH; do
+    if [ -f "src/user/selfhost/$f" ]; then
+      mcopy -o -i "$IMAGE" "src/user/selfhost/$f" "::/SRC/$f" || fail "mcopy ::/SRC/$f"
+      add_payload 1 "$(stat -c %s "src/user/selfhost/$f")"
+    fi
+  done
+
+  # Kernel linker script (repo-root linker.ld; the host link uses
+  # -T linker.ld, cwd = the script's dir) + the build driver + boot assets.
+  mcopy -o -i "$IMAGE" linker.ld ::/SRC/linker.ld || fail "mcopy linker.ld"
+  add_payload 1 "$(stat -c %s linker.ld)"
+  mcopy -o -i "$IMAGE" Makefile.hobbyos ::/SRC/Makefile.hobbyos || fail "mcopy Makefile.hobbyos"
+  add_payload 1 "$(stat -c %s Makefile.hobbyos)"
+  if [ -f bootloader/BOOTAA64.EFI ]; then
+    mmkdir_p "::/SRC/bootloader" || fail "mmkdir_p ::/SRC/bootloader"
+    mcopy -o -i "$IMAGE" bootloader/BOOTAA64.EFI ::/SRC/bootloader/BOOTAA64.EFI || fail "mcopy BOOTAA64.EFI"
+    add_payload 1 "$(stat -c %s bootloader/BOOTAA64.EFI)"
+  fi
+
+  # limine.conf template — verbatim arm branch of the disk recipe (Makefile:1763-1768)
+  printf 'timeout: 0\ndefault_entry: 1\n\n/HobbyOS (ARM AArch64)\nprotocol: linux\npath: boot():/boot/hobbyos.bin\n' | \
+    mcopy -o -i "$IMAGE" - ::/SRC/limine.conf || fail "mcopy limine.conf"
+  add_payload 1 136
+
+  # Carried host build products the v1 in-OS recipes reference (WARNING+skip
+  # when not built yet; they are disk.img prerequisites, so by recipe time
+  # every one below exists).
+  for spec in "obj/arm/libc.a ::/SRC/obj/arm/libc.a" \
+              "obj/arm/desktop.bin ::/SRC/bin/DESKTOP.BIN" \
+              "obj/arm/console.bin ::/SRC/bin/CONSOLE.BIN" \
+              "obj/arm/sh.bin ::/SRC/bin/SH.BIN"; do
+    src="${spec%% *}"; dst="${spec#* }"
+    if [ -f "$src" ]; then
+      mcopy -o -i "$IMAGE" "$src" "$dst" || fail "mcopy $dst"
+      add_payload 1 "$(stat -c %s "$src")"
+    else
+      warn "carried build product not built ($src) — $dst not staged (build the tree first)"
+    fi
+  done
+  printf 'OUTMARK:w4-src:staged-by-selfhost-stage-src\n' | \
+    mcopy -o -i "$IMAGE" - ::/SRC/bin/OUTMARK.TXT || fail "mcopy OUTMARK.TXT"
+  add_payload 1 42
+
+  if [ "$STAGE_LIBCXX" = "1" ] && [ -d "$LIBCXX_INC" ]; then
+    # C++ include subset at the frozen path (acceptance.md §2; opt-in —
+    # AD-9 freezes the default OFF).
+    local_dst="third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx"
+    mmkdir_p "::/SRC/$local_dst/include" || fail "mmkdir_p ::/SRC libcxx include"
+    mcopy -s -o -i "$IMAGE" "$LIBCXX_INC" "::/SRC/$local_dst/include/" || fail "mcopy libcxx include"
+    cnt=$(find "$LIBCXX_INC" -type f | wc -l)
+    add_payload "$cnt" "$(du -sb "$LIBCXX_INC" | awk '{print $1}')"
+  fi
+
+  echo
+  echo "selfhost-stage: staged BUILD-REQUIRED subset into $IMAGE"
+  echo "  payload: $payload_files files, $payload_bytes bytes"
+  echo "  --- ::/SRC (mdir) ---"
+  mdir -i "$IMAGE" -/ ::/SRC 2>&1 | tail -6
+}
+
+# --src: stage the build subset and exit before any full-payload logic.
+if [ "$MODE" = "src" ]; then
+  [ -f "$IMAGE" ] || fail "image not found: $IMAGE (create it, e.g. truncate -s 1G disk.img && mformat -i disk.img ::)"
+  for t in mcopy mmd mdir mdeltree; do
+    command -v "$t" >/dev/null 2>&1 || fail "required tool not found: $t"
+  done
+  stage_src
+  echo "selfhost-stage: done"
+  exit 0
+fi
 
 copy_tree src "::/SRC" || exit 1
 copy_tree tools "::/SRC" || exit 1
@@ -312,6 +459,38 @@ if [ -f src/user/selfhost/SELFHOST.RUN ]; then
 else
   warn "SELFHOST.RUN script missing (src/user/selfhost/SELFHOST.RUN) — skipping ::/SRC/SELFHOST.RUN (driver will report SCRIPT-MISSING)"
 fi
+# [v4] the cwd wrapper SELFHOST.SH must ride alongside SELFHOST.RUN: the
+# RUN file's stages invoke it (`sh /SRC/SELFHOST.SH <target>`).  Without it
+# every stage fails at sh's "cannot open /SRC/SELFHOST.SH".
+if [ -f src/user/selfhost/SELFHOST.SH ]; then
+  mcopy -o -i "$IMAGE" src/user/selfhost/SELFHOST.SH ::/SRC/SELFHOST.SH || exit 1
+  add_payload 1 "$(stat -c %s src/user/selfhost/SELFHOST.SH)"
+else
+  warn "SELFHOST.SH wrapper missing (src/user/selfhost/SELFHOST.SH) — skipping ::/SRC/SELFHOST.SH"
+fi
+
+# [v4] carried host build products the in-OS v1 recipes reference (same set
+# as --src): the S1 user target links /SRC/obj/arm/libc.a, and the S3 disk
+# recipe stages the S5 desktop-path products from /SRC/bin.  Keep the
+# payload and --src modes consistent so a harness `--stage` re-stage leaves
+# the make recipes runnable.  WARNING+skip pre-build.
+mmkdir_p "::/SRC/obj/arm" || warn "could not ensure ::/SRC/obj/arm"
+mmkdir_p "::/SRC/bin" || warn "could not ensure ::/SRC/bin"
+for spec in "obj/arm/libc.a ::/SRC/obj/arm/libc.a" \
+            "obj/arm/desktop.bin ::/SRC/bin/DESKTOP.BIN" \
+            "obj/arm/console.bin ::/SRC/bin/CONSOLE.BIN" \
+            "obj/arm/sh.bin ::/SRC/bin/SH.BIN"; do
+  src_spec="${spec%% *}"; dst_spec="${spec#* }"
+  if [ -f "$src_spec" ]; then
+    mcopy -o -i "$IMAGE" "$src_spec" "$dst_spec" || exit 1
+    add_payload 1 "$(stat -c %s "$src_spec")"
+  else
+    warn "carried build product not built ($src_spec) — $dst_spec not staged (build the tree first)"
+  fi
+done
+printf 'OUTMARK:w4-src:staged-by-selfhost-stage\n' | \
+  mcopy -o -i "$IMAGE" - ::/SRC/bin/OUTMARK.TXT || warn "OUTMARK.TXT not staged"
+add_payload 1 42
 
 # ---- report ----
 echo
