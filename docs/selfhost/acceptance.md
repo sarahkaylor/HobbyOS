@@ -600,6 +600,13 @@ zero FAIL tokens, sizes + hashes for every artifact).
 
 `[SELFHOST] ACCEPTANCE-COMPLETE` is the driver's completion marker
 (acceptance.md §1); `System halt.` is the kernel's own close (§8.4 of
-`selfhost.md`), both present in the w6 serials. Full final row (B: the
-complete T4.3 loop S0→S3 on a fresh disk.img) fills in from
+`selfhost.md`), both present in the w6 serials. **Partial-loop row (B — T4.3
+on 288995c, lane w7):** S0 ✓, S1 ✓ (user set, sh.c ≥53 min in-OS), T2.5 ✓
+(`[HELLO] entering main` on serial), S2 ✗ ×2 (fresh disk, pre- and
+post-`bd58474` argv fix, identical) — in-OS FAT **dirent/LFN writer bug**
+misnames nfs_test.o / cpu.o (`NFS_TEST.O.T` / `CPU-8167.O.T` duplicate
+mangled dirents; content present, clean-name entry missing → lld cannot
+open them). Full details + pulled evidence:
 `docs/selfhost/lanes/w7-accept-report.json` + `w7-accept-evidence.md`.
+Final acceptance RC is re-cut on the merged-final tip after a kernel-side
+dirent-writer fix.
