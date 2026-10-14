@@ -4,7 +4,8 @@
  * style): make's own sources stay byte-identical, the libc symbols the OS
  * lacks are provided here.  See the notes in src/user/make/config.h.
  *
- * The functions are the real libc symbols (getlogin, alarm) rather than
+ * The functions are the real libc symbols (getlogin, getloadavg, dup)
+ * rather than
  * make-only renames, so any other ported program in the tree can link them
  * the same way; they live in MAKE.BIN only.
  */
@@ -19,11 +20,6 @@ extern "C" {
    * expansion in read.c:3114.  Returns LOGNAME or the synthetic account
    * name "user" (which getpwnam() resolves to home "/"). */
   char *getlogin(void);
-
-  /* Sysroot gap (audit S3.2): no alarm(3).  Only referenced by make's
-   * jobserver load-throttle path, which is compiled out under -j1 v1.
-   * Returns 0 (no timer armed): the load throttle never fires. */
-  unsigned int alarm(unsigned int seconds);
 
   /* Sysroot gap (audit S3.2): no getloadavg(3).  Referenced by load_too_high
    * under -l (job.c:2138); -j1 v1 never runs it.  Returns -1 with errno 0,

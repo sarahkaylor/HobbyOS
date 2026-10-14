@@ -124,9 +124,11 @@
 /* #undef HAVE_GETPWNAM_R */
 /* #undef HAVE_GETLOGIN_R */      /* glob.c uses the non-_r variants     */
 /* #undef HAVE_STRUCT_DIRENT_D_TYPE */
-/* #undef HAVE_STRSIGNAL */   /* makeint.h #if !defined() guard: an
-                                 UNDEF selects signame.c strsignal();
-                                 a value of 0 would still hide the decl */
+#define HAVE_STRSIGNAL 1     /* W2 merge: the sysroot libc provides
+                                strsignal() (src/libc/src/string.c); a value
+                                of 1 hides makeint.h's own decl and
+                                signame.c's fallback definition, so MAKE.BIN
+                                links against the real one. */
 /* #undef MAKE_JOBSERVER */   /* -j1 v1 (audit S3.3): an UNDEF compiles
                                  the jobserver section OUT of posixos.c/
                                  os.h (a value of 0 would keep it active) */

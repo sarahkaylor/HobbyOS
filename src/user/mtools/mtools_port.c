@@ -97,13 +97,6 @@ char *getlogin(void) {
   return (n && *n) ? n : (char *) "user";
 }
 
-/* alarm(): no POSIX timer in the sysroot; a zero-return stub keeps
- * lockdev.c's timeout machinery inert (it only ever cancels + re-arms
- * here — for image files no device lock is ever taken). */
-unsigned int alarm(unsigned int seconds UNUSEDP) {
-  return 0;
-}
-
 /* setuid/setgid(): single-user OS, no privilege change exists; accept and
  * succeed so privileges.c's drop/reclaim arms compile and no-op. */
 int setuid(unsigned int uid UNUSEDP) {

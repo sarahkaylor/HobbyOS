@@ -32,17 +32,6 @@ getlogin(void) {
   return (char *)name;
 }
 
-/* Sysroot gap (audit S3.2 "alarm" row): no alarm(3).  Make only calls it
- * from posixos.c set_child_handler_action_flags (load-throttle wakeups for
- * the jobserver), which compiles out entirely under the v1 -j1 port policy
- * (MAKE_JOBSERVER 0, config.h).  Declared + shipped anyway so enabling
- * the jobserver later does not start with a link error (the audit says a
- * stub returning 0 is acceptable; the load throttle then never fires). */
-unsigned int alarm(unsigned int seconds) {
-  (void)seconds;
-  return 0;
-}
-
 /* Sysroot gap (audit S3.2): no getloadavg(3).  Referenced by load_too_high
  * under -l (job.c:2138); -j1 v1 never runs it.  Returns -1 with errno 0,
  * make's "not supported" convention. */
