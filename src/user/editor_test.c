@@ -4,7 +4,7 @@
 
 extern int desktop_main(void);
 
-static long syscall(long num, long a0, long a1, long a2, long a3) {
+static long ho_syscall4(long num, long a0, long a1, long a2, long a3) {
 #ifdef __x86_64__
   long ret;
   register long rdi __asm__("rdi") = a0;
@@ -243,12 +243,12 @@ static void editor_test_tick(void) {
 
 void flush_fb(void) {
   // Actually call the real syscall
-  syscall(10 /* SYS_FLUSH_FB */, 0, 0, 0, 0);
+  ho_syscall4(10 /* SYS_FLUSH_FB */, 0, 0, 0, 0);
   editor_test_tick();
 }
 
 int flush_fb_rects(const struct fb_rect *rects, int count) {
-  syscall(89 /* SYS_FLUSH_FB_RECTS */, (long)rects, (long)count, 0, 0);
+  ho_syscall4(89 /* SYS_FLUSH_FB_RECTS */, (long)rects, (long)count, 0, 0);
   editor_test_tick();
   return 0;
 }
