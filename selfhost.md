@@ -562,6 +562,18 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-14 — Battery round 4: local GREEN; VM test-arm wedged (investigating).** Local
+  (`82d4d81`): host rc=0, unit-arm 316/0, unit-x64 320/0, wave rc=0 ('System halt.'; 2
+  WATCHDOG ambient lines). CI VM (`merged-w5`): host/unit-arm/unit-x64 rc=0; test-arm hit
+  the full 1800 s timeout with NO halt marker — a mass-failure cascade rooted in the KNOWN
+  chronic slot-pressure condition (v2 loader starvation + `sys_fork` -11 + `used=63/63`):
+  starved spawns failed downstream suites en masse (PASTETEST 24, FOLDTEST 45, SEDTEST 12,
+  IPC_T, SQLTEST…) and the run never cleared. Starvation lines are chronic across ALL runs
+  (local b3/b4: 60/54; VM w4: 86; VM w5: 61) — a flaky ESCALATION of a known fragility,
+  not obviously wave-4-caused; clean single-tier rerun launched (`merged-w5r`) to
+  discriminate. **Queued: slot-pressure cascade robustness** (loader backoff/retry, slot
+  recycling, or capacity) — CI determinism item.
+
 - **2026-10-14 — Wave 4 (3 lanes) all merged (`82d4d81`); zero conflicts (Makefile auto-merged).**
   (1) **MODE=selfhost DELIVERED** (w4-kernel): Makefile plumbing + `main.c` branch launching only
   SELFHOST.BIN (argv[1]=`/SRC/SELFHOST.RUN`); driver stdout/stderr reach serial via the
