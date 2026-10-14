@@ -267,6 +267,16 @@ else ifeq ($(MODE),webproc)
   # WK-3 section (this tree stays self-contained -- nothing here
   # references the fork's build outputs).
   CFLAGS += -DKERNEL_MODE_WEBPROC
+else ifeq ($(MODE),selfhost)
+  # Self-hosting (docs/selfhost/acceptance.md §5.2/5.3): single-program
+  # boot that launches the in-OS acceptance build driver SELFHOST.BIN
+  # WITHOUT the desktop.  fd 1/2 are unset -> the console-fd fallback
+  # (fs.c file_write 0002 -> console_write_user) relays the driver's
+  # stdout/stderr to the SERIAL console, so every [SELFHOST] phase=
+  # marker lands in the serial capture with zero keystroke fragility.
+  # The driver script path is passed as argv[1] (main.c KERNEL_MODE_SELFHOST
+  # branch); the driver's own default is /SRC/SELFHOST.RUN.
+  CFLAGS += -DKERNEL_MODE_SELFHOST
 else ifeq ($(MODE),soak)
   # P8.2 (browser.md §6): the soak — the standard test wave plus TORTURE.BIN
   # running its bounded soak loop (28-minute cap; main.c's KERNEL_SOAK_WAVE
@@ -276,6 +286,15 @@ else ifeq ($(MODE),soak)
   USER_CFLAGS += -DKERNEL_MODE_TEST
 else
   CFLAGS += -DKERNEL_MODE_DESKTOP
+endif
+
+# W4-kernel (selfhost): in-OS MKFSFAT TCG-timing probe (Mission B).  Set
+# W4_MKFS_PROBE=1 to build the unit tier with the [W4-PROBE] ftruncate
+# timings (fat16_test.c test_fat16_extend_timing_probe) so a probe run
+# reuses the normal unit harness; off by default so stock unit runs stay
+# quick.  Keep the define OUT of USER_CFLAGS: it is kernel-test-only.
+ifneq ($(W4_MKFS_PROBE),)
+  CFLAGS += -DW4_MKFS_TIMING_PROBE
 endif
 
 ifneq ($(MODE),desktop)
@@ -2216,6 +2235,13 @@ jsc_run:
 # HobbyOS/continuation/README.md for the full runner.
 webproc_run:
 	$(MAKE) MODE=webproc run
+
+# Self-hosting (docs/selfhost/acceptance.md §5.2): MODE=selfhost boots the
+# in-OS acceptance build driver SELFHOST.BIN (no desktop) with stdout/stderr
+# on the serial console.  Needs SELFHOST.BIN + /SRC/SELFHOST.RUN on the boot
+# disk (tools/selfhost-stage.sh or the disk.img recipe stage them).
+selfhost_run:
+	$(MAKE) MODE=selfhost run
 
 filedialog_test:
 	python3 ./run_filedialog_test.py

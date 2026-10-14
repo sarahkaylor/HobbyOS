@@ -278,8 +278,22 @@ static void write_fat(uint16_t cluster, uint16_t val) {
   spinlock_release(&fat_cache_lock);
 }
 
+/* W4-kernel (selfhost): free-cluster hint.  alloc_cluster() used to scan
+ * the FAT from cluster 2 on EVERY allocation — O(n^2) total across a big
+ * zero-fill extend (128 MiB @ spc=4 = 65536 clusters = ~2e9 scan steps; even
+ * on the 1 GiB boot volume's 4096-cluster OUT.IMG it re-scanned ~8e6
+ * entries).  The hint remembers the next cluster to try, turning allocation
+ * into amortized O(n) while keeping the "lowest-free-on-empty-disk"
+ * behavior identical (sequential fills allocate contiguously from 2).  Only
+ * real callers (all call sites hold fat_lock) touch the statics, so no lock
+ * is added.  A freed cluster below the hint is simply not reused until the
+ * scan wraps — valid FAT behavior, standard in production FAT drivers. */
+static uint16_t alloc_hint = 2;
+
 static uint16_t alloc_cluster(void) {
-  for (uint16_t c = 2; c < 0xFFF0; c++) {
+  uint16_t start = alloc_hint;
+  uint16_t c = start;
+  for (;;) {
     if (read_fat(c) == 0x0000) {
       write_fat(c, 0xFFFF);
       uint8_t zero[SECTOR_SIZE];
@@ -288,8 +302,13 @@ static uint16_t alloc_cluster(void) {
       for (uint32_t i = 0; i < bpb_sectors_per_cluster; i++) {
         virtio_blk_write_sector(s + i, zero, 1);
       }
+      /* Advance the hint past the cluster we just took (wrap to 2). */
+      alloc_hint = (c + 1 >= 0xFFF0) ? 2 : (uint16_t)(c + 1);
       return c;
     }
+    c++;
+    if (c >= 0xFFF0) c = 2;      /* wrap to the bottom of the FAT */
+    if (c == start) break;        /* full circle: disk full */
   }
   return 0; // Disk full
 }
@@ -1760,20 +1779,70 @@ int fat16_truncate_to(struct file* f, uint32_t new_size) {
   if (new_size == old_size) return 0;
 
   if (new_size > old_size) {
-    /* Zero-fill in 4 KiB chunks rather than 64 bytes: the byte-granular
-       extension is also what a multi-MB ftruncate pays for, and 64-byte
-       calls made a >1 MiB ftruncate (thousands of fat16_write calls, each
-       walking/resyncing) effectively unbounded.  4 KiB keeps the write path
-       coalesced while staying on the kernel stack. */
-    uint8_t zeros[4096];
-    for (int i = 0; i < 4096; i++) zeros[i] = 0;
-    if (fat16_seek(f, (int)old_size) != 0) return -1;
-    uint32_t left = new_size - old_size;
-    while (left > 0) {
-      uint32_t chunk = left > sizeof zeros ? (uint32_t)sizeof zeros : left;
-      if (fat16_write(f, zeros, (int)chunk) != (int)chunk) return -1;
-      left -= chunk;
+    /* W4-kernel (selfhost, Mission B): bulk extension.  The old zero-fill
+       loop pushed 4 KiB chunks through fat16_write, and every fat16_write
+       call re-walked the cluster chain from start_cluster to the cursor —
+       O(chunks^2) total.  Measured in-OS under TCG (MKFSFAT OUT.IMG at
+       acceptance size): 16 MiB ftruncate = 78.7 s, 64 MiB = 347 s —
+       quadratic — and 128 MiB exceeded even the 720 s unit-tier budget.
+       New path: extend the chain to cover new_size-1 in ONE forward walk
+       (O(n); alloc_cluster's free-cluster hint makes each allocation
+       amortized O(1)), then zero-fill only the partial tail cluster via
+       fat16_write.  Every fully-fresh cluster is already zeroed by
+       alloc_cluster, so the bulk needs no content write and reads back as
+       all zeros (POSIX ftruncate extension semantics). */
+    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    if (f->fat16.entry.start_cluster == 0) {
+      uint16_t first = alloc_cluster();
+      if (first == 0) {
+        spinlock_release_irqrestore(&fat_lock, flags);
+        return -1;
+      }
+      f->fat16.entry.start_cluster = first;
     }
+    uint32_t target_idx = (new_size - 1) / cluster_size;
+    uint16_t c = f->fat16.entry.start_cluster;
+    for (uint32_t i = 0; i < target_idx; i++) {
+      uint16_t nxt = read_fat(c);
+      if (nxt == 0) { /* broken chain (a shrink would have rejected it) */
+        spinlock_release_irqrestore(&fat_lock, flags);
+        return -1;
+      }
+      if (nxt >= 0xFFF8) {
+        nxt = alloc_cluster();
+        if (nxt == 0) {
+          spinlock_release_irqrestore(&fat_lock, flags);
+          return -1; /* disk full */
+        }
+        write_fat(c, nxt);
+      }
+      c = nxt;
+    }
+    spinlock_release_irqrestore(&fat_lock, flags);
+
+    /* Zero the partial tail: the bytes from old_size to the end of its
+       cluster may hold stale pre-shrink data; full clusters beyond are
+       already zeroed by alloc_cluster.  At most one cluster's worth, so
+       the fat16_write re-walk cost is bounded. */
+    uint32_t cluster_end = ((old_size / cluster_size) + 1) * cluster_size;
+    uint32_t tail_end = (new_size < cluster_end) ? new_size : cluster_end;
+    if (tail_end > old_size) {
+      if (fat16_seek(f, (int)old_size) != 0) return -1;
+      uint8_t zeros[4096];
+      for (int i = 0; i < 4096; i++) zeros[i] = 0;
+      uint32_t left = tail_end - old_size;
+      while (left > 0) {
+        uint32_t chunk = left > sizeof zeros ? (uint32_t)sizeof zeros : left;
+        if (fat16_write(f, zeros, (int)chunk) != (int)chunk) return -1;
+        left -= chunk;
+      }
+    } else {
+      /* No partial tail (boundary-aligned extend): keep the cursor valid. */
+      if ((int)old_size > f->fat16.cursor) f->fat16.cursor = (int)old_size;
+    }
+    f->fat16.entry.file_size = new_size;
+    f->fat16.dirty = 1;
+    fat16_sync_entry(f);
     return 0;
   }
 

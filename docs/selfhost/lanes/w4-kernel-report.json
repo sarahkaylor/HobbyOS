@@ -1,0 +1,42 @@
+{
+  "lane": "w4-kernel",
+  "status": "done",
+  "branch": "selfhost/w4-kernel",
+  "task": "Mission A (primary): MODE=selfhost boot + serial-console-fd stdout for the in-OS build driver (acceptance 5.2/5.3); Mission B (bounded): 128 MiB in-OS MKFSFAT slowness under TCG.",
+  "commits": [
+    "92e8a46 selfhost: w4-kernel: MODE=selfhost boot (KERNEL_MODE_SELFHOST) + alloc-hint tests",
+    "0c339fe selfhost: w4-kernel: fix 128MiB MKFSFAT ftruncate TCG slowness (Mission B)"
+  ],
+  "files_changed": [
+    "Makefile (MODE=selfhost -> KERNEL_MODE_SELFHOST; selfhost_run target; W4_MKFS_PROBE=1 gate knob)",
+    "src/kernel/main.c (KERNEL_MODE_SELFHOST boot branch: boots ONLY SELFHOST.BIN, argv[1]=/SRC/SELFHOST.RUN, no desktop)",
+    "src/kernel/fat16.c (alloc_cluster free-cluster hint; fat16_truncate_to bulk extension)",
+    "src/kernel/fat16_test.c (test_fat16_alloc_hint_chain always-on; test_fat16_extend_timing_probe gated by W4_MKFS_TIMING_PROBE)",
+    "docs/selfhost/lanes/w4-selfhost-boottest.sh, w4-selfhost-boot.md, w4-mkfs-tcg-investigation.md, w4-SELFHOST-HELLO.fixture, w4-a1-selfhost-hello-serial.log, w4-a2-selfhost-realscript-serial.log, w4-fixed-128mib-probe.log, w4-kernel-report.json (this file)"
+  ],
+  "summary": {
+    "mission_a": "MODE=selfhost delivered: the kernel boots, launches SELFHOST.BIN (the staged in-OS acceptance driver) WITHOUT the desktop, and the driver's stdout/stderr reach the SERIAL console (boot program fd 1/2 unset -> fs.c file_write 0002 console-fd fallback -> console_write_user -> uart; driver's own markers go via SYS_WRITE_CONSOLE -> same uart).  Driver script + [SELFHOST] phase= markers supported; run ends ACCEPTANCE-COMPLETE + clean System halt.",
+    "mission_a_serial_evidence": "w4-a1-selfhost-hello-serial.log: Mode: SELFHOST ... [SELFHOST] DRIVER-UP script=/SRC/SELFHOST.RUN, phase=s0-check-start, [HELLO] entering main/argc=1/main returned 0 (driver relay), phase=s0-check-done rc=0, ACCEPTANCE-COMPLETE stages=1, System halt.  QEMU -action shutdown=poweroff exited rc=0.  A1 used a lane fixture script running the known-good HELLO.BIN through the exact driver->spawn2->pipe-relay->serial chain.",
+    "mission_b": "128 MiB MKFSFAT ftruncate slowness root-caused (O(n^2) chain re-walk per 4 KiB chunk in fat16_truncate_to + O(n^2) FAT re-scan in alloc_cluster), measured in-OS under TCG with a gated [W4-PROBE] unit probe, fixed bounded, re-measured: 16 MiB 78741->34595 ms, 64 MiB 347449->142580 ms, 128 MiB >720s(budget, run killed)->283981 ms.  Scaling went quadratic -> linear; the 128 MiB acceptance run now completes in 284 s inside the 600 s S3 budget."
+  },
+  "gates": {
+    "run_unit_tests_sh_arm_stock": "pass — 316 tests run, 0 failed ('UNIT TESTS PASSED'); floor 315 + new test_fat16_alloc_hint_chain",
+    "run_unit_tests_sh_arm_probe": "pass — 317 tests run, 0 failed (probe build W4_MKFS_PROBE=1, incl. test_fat16_extend_timing_probe), evidence in w4-fixed-128mib-probe.log",
+    "run_unit_tests_x64": "pass — 320 tests run, 0 failed with -enable-kvm (floor 319 + alloc_hint_chain)",
+    "serial_selfhost_boot_A1": "pass — real MODE=selfhost boot on serial: driver markers, HELLO relay, phase=s0-check-done rc=0, ACCEPTANCE-COMPLETE, System halt (w4-a1-selfhost-hello-serial.log)",
+    "mkfsfat_128mib_tcg": "pass — 128 MiB ftruncate completes at 283981 ms under TCG after the fix (was >720 s budget before)"
+  },
+  "blockers": [
+    "MAKE.BIN (ported GNU make) faults at execve+0x4 (ELR 0x100002A5FC, EC 0x20 instr abort) as soon as it runs an actual recipe: make exec's its recipe shell and the kernel's v2 exec tears down the old AS before mapping the (missing /bin/sh) target, leaving the process AS-less per the documented 'no state change' deviation (program_loader.c process_exec_current) - reproduced IDENTICALLY on the base w3 kernel (b27f4ec) with a lane A/B probe, i.e. NOT introduced by this lane.  w3's in-OS MAKE.BIN run never hit it because its Makefile.hobbyos was absent (make stops before running recipes).  Implication for w4-src S0-S3: the in-OS make must find its recipe shell at the path make's SHELL points to (or the exec-failure AS-restore bug must be fixed in a future kernel lane).  MODE=selfhost itself is unaffected (proven with HELLO)."
+  ],
+  "design_note": {
+    "mission_a_serial_path": "No new syscall or fd machinery was needed: MODE=selfhost is a boot-wave single-program load like JSC/WEBPROC, so fd 1/2 are unset and the pre-existing console-fd fallback (fs.c file_write 0002 -> console_write_user -> uart_putc) already routes stdout/stderr to serial.  The driver's own emit() uses print_console (SYS_WRITE_CONSOLE -> console_write_user -> serial).  Both paths verified end-to-end on serial.",
+    "mission_b_fix_scope": "Two self-contained src/kernel/fat16.c changes (free-cluster alloc hint; bulk truncate_to extension that walks the chain once and zero-fills only the partial tail cluster, exploiting alloc_cluster's pre-zeroing for POSIX zero-fill semantics).  Deliberately NOT changed: the block driver's per-512B request loop (affects every I/O path on both arches - out of bounded scope).  The W4_MKFS_PROBE=1 knob + gated probe stays in-tree so any future lane can re-measure the curve in one boot."
+  },
+  "notes": [
+    "One QEMU per tree observed; mkfs.fat/dd never used (mtools-only boot disks, FAT16 recipe from tools/w3_accept_pretest.sh).",
+    "Mode switching is safe via obj/arm/.mode tracker (kernel objects depend on MODE_FILE); W4_MKFS_PROBE is NOT tracker-covered -> probe builds need rm obj/<arch>/fat16_test.o (documented in the Makefile knob comment).",
+    "make.bin evidence runs booted a lane-scratch /Makefile.hobbyos fixture (the real one is w4-src's file; untouched).",
+    "No pushes; all work committed locally on selfhost/w4-kernel."
+  ]
+}
