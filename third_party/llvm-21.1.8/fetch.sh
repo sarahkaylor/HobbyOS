@@ -48,6 +48,7 @@ SUBTREES=(
   "llvm-project-${VER}.src/lld"
   "llvm-project-${VER}.src/cmake"
   "llvm-project-${VER}.src/third-party"
+  "llvm-project-${VER}.src/libunwind/include"
   "llvm-project-${VER}.src/LICENSE.TXT"
 )
 

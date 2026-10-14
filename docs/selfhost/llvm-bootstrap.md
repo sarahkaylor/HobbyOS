@@ -138,6 +138,66 @@ Tablegen choice: `LLVM_NATIVE_TOOL_DIR` is the canonical mechanism
 (`AddLLVM.cmake:2638`, `TableGen.cmake:181`); explicit `-DLLVM_TABLEGEN` /
 `-DCLANG_TABLEGEN` are belt-and-braces and match the same native build.
 
+### 6.1 Wave-2 actual commands (lane W2-LLVM — resume from the committed checkpoint)
+
+Resumed from the L1 checkpoint (tip d48ada6; build dir already present, do NOT
+re-configure from scratch — reconfigure in-place after toolchain-file edits,
+3 s, warm cache):
+
+```
+# 0) Re-stage the sysroot FIRST when src headers changed after the stage was
+#    made (the pid_t -> int fix, AD-12, landed AFTER L1 staged the sysroot;
+#    the STALE copy kept `typedef long pid_t` -> Process.inc:64 assert again).
+cp -a src/libc/include/. obj/selfhost/sysroot/include/libc-include/
+cp -a src/include/.      obj/selfhost/sysroot/include/kernel-include/
+cp -a src/user_include/. obj/selfhost/sysroot/include/user-include/
+make obj/arm/libc.a obj/arm/crt0.o obj/arm/libcxx.a -j64   # pid_t ABI in libc.a
+cp -a obj/arm/{crt0.o,libc.a,libcxx.a} obj/selfhost/sysroot/lib/
+
+# 1) llvm-ar + llvm-objcopy (was blocked at 211/564 TUs on the pid_t assert)
+ninja -C obj/selfhost/llvm-build llvm-ar llvm-objcopy -j64
+#    fix: sysroot re-stage above.  Link-only gap then: -lpthreads -lrt -ldl
+#    -lm (compile-only probes set HAVE_LIBDL/HAVE_LIBRT even without bodies).
+#    -> empty stub archives + -L (toolchain file; see blockers).
+#    Then WK-1: mangled C++ main (_Z4mainiPPc) vs crt0's C `main` -> weak
+#    main bridge in gaps.c (WebKit-fork mainlink_shim.c precedent).
+
+# 2) clang + lld (long phase; keep a log, resume with the same dir)
+ninja -C obj/selfhost/llvm-build clang lld -j64
+#    New blockers, all sysroot/build-config class (NO LLVM source patch):
+#    - <fstream> compiled out of staged libc++21 by _LIBCPP_HAS_FILESYSTEM 0
+#      (clang Frontend needs std::ifstream: CompilerInvocation.cpp:4678 &
+#      co).  Toolchain file overrides the STAGED (gitignored generated)
+#      include/__config_site to 1 + compiles sysroot-headers/fstream_inst.cpp
+#      (3 <char> explicit instantiations) into the closure.  Tracked
+#      config/__config_site untouched (L2 decision).
+#    - fseeko/ftello (POSIX-2008, needed by <fstream>) -> _missing.h decls +
+#      gaps.c bodies.
+#    - lldMachO needs libunwind "mach-o/compact_unwind_encoding.h":
+#      fetch.sh SUBTREES += llvm-project-.../libunwind/include; extract it
+#      into the EXISTING tree:
+#      tar -xJf third_party/llvm-21.1.8/llvm-project-21.1.8.src.tar.xz -C \
+#        third_party/llvm-21.1.8/src/llvm-project-21.1.8.src \
+#        --strip-components=1 llvm-project-21.1.8.src/libunwind/include
+#    - clang-21 link: dlopen/dlsym/dlclose/dlerror, getrlimit/setrlimit,
+#      math (exp/log10/log2/log2f/log1p/logb/acos/cosh/sinh/tanh/erf) ->
+#      gaps.c bodies; setjmp/longjmp (mangled because OS setjmp.h lacks
+#      extern "C") -> _missing.h extern-"C" decls + sysroot-headers/setjmp.S
+#      (kernel-derived aarch64 asm) + closure wiring.
+#    - "section: .tdata is not contiguous with other relro sections" ->
+#      -Wl,-z,norelro (HobbyOS loader has no PT_GNU_RELRO/page-protect).
+
+# 3) install-distribution with DESTDIR staging (the F1 /TOOLS layout)
+DESTDIR=<repo>/obj/selfhost/dist-staging ninja -C obj/selfhost/llvm-build \
+    install-distribution -j8
+#    staged: usr/local/bin/{clang-21,clang*,lld,ld.lld,wasm-ld,llvm-ar,
+#    llvm-objcopy} + usr/local/lib/clang/21/include (272 headers, 15 MB).
+#    F8: 159/272 resdir names are >8.3 -> M2 curation item (§10).
+
+Sizes (2026-10-14, unstripped Release ELF, aarch64): clang-21 120 MB,
+lld 69 MB, llvm-ar 13 MB, llvm-objcopy 9.6 MB; staging total 227 MB.
+These are the on-disk numbers to beat at M2 stripping/curation.
+
 ## 7. Configure spike results
 
 See `docs/selfhost/lanes/l1-configure-1.log` (committed; use `git add -f` —

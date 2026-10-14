@@ -1,0 +1,83 @@
+{
+  "lane": "w2-llvm",
+  "status": "complete",
+  "commit_tip": "a35602d",
+  "phases": [
+    {
+      "name": "ninja llvm-ar llvm-objcopy (resume from 211/564 TU checkpoint)",
+      "rc": 0,
+      "wall_s": 1020,
+      "log_path": "docs/selfhost/lanes/w2-step2-excerpt.log (full: obj/w2logs/w2-step1-ar-objcopy.log, gitignored)"
+    },
+    {
+      "name": "ninja clang lld (2949+ TUs, long phase)",
+      "rc": 0,
+      "wall_s": 1560,
+      "log_path": "docs/selfhost/lanes/w2-step2-excerpt.log (full: obj/w2logs/w2-step2-clang-lld.log, gitignored)"
+    },
+    {
+      "name": "ninja install-distribution (DESTDIR staging)",
+      "rc": 0,
+      "wall_s": 51,
+      "log_path": "obj/selfhost/dist-staging (staged tree); install log in w2 step-2 log"
+    },
+    {
+      "name": "make obj/arm libc.a+crt0.o+libcxx.a (pid_t ABI re-sync)",
+      "rc": 0,
+      "wall_s": 96,
+      "log_path": "obj/w2logs"
+    }
+  ],
+  "sizes": {
+    "clang": 126044464,
+    "lld": 72635232,
+    "llvm_ar": 13599576,
+    "llvm_objcopy": 10048064,
+    "resdir_headers": 272
+  },
+  "blockers": [
+    {
+      "item": "stale staged sysroot kept typedef long pid_t (src fix AD-12 landed after staging); Process.inc:64 static_assert re-fired until sysroot re-staged",
+      "error": "static assertion failed: sizeof(int) >= sizeof(long): Process::Pid should be big enough to store pid_t, Process.inc:64",
+      "file_line": "llvm/lib/Support/Unix/Process.inc:64; fix = re-stage obj/selfhost/sysroot/include + rebuild libc.a with pid_t=int",
+      "class": "sysroot re-staging (expect-the-previous-blocker-gone; staging lag)"
+    },
+    {
+      "item": "link-time -lpthreads -lrt -ldl -lm: compile-only CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY makes check_library_exists always succeed (HAVE_LIBDL/HAVE_LIBRT=1), lld emits -l flags HobbyOS sysroot cannot resolve",
+      "error": "ld.lld: error: unable to find library -lpthreads / -lrt / -ldl / -lm",
+      "file_line": "llvm/cmake/config-ix.cmake:136-149 + llvm/lib/Support/CMakeLists.txt:46-63; fix = sysroot/lib/stubs empty archives + -L in toolchain file",
+      "class": "sysroot gap (build-config; no LLVM patch)"
+    },
+    {
+      "item": "WK-1: -ffreestanding drops the 'main has C linkage' special case, C++ tool main mangles to _Z4mainiPPc, crt0.c references plain main",
+      "error": "ld.lld: undefined symbol: main (crt0.o:_start); did you mean _Z4mainiPPc",
+      "file_line": "crt0.c crt0 _start->main; fix = weak main bridge in gaps.c (WebKit mainlink_shim.c precedent)",
+      "class": "sysroot gap (build-config; recognized open item §10)"
+    },
+    {
+      "item": "lldMachO: fetch.sh SUBTREES never extracted libunwind/include; lld/MachO includes mach-o/compact_unwind_encoding.h",
+      "error": "fatal error: 'mach-o/compact_unwind_encoding.h' file not found (lld/MachO/Target.h:23)",
+      "file_line": "lld/MachO/CMakeLists.txt:5 + fetch.sh SUBTREES; fix = add libunwind/include subtree + extract (integrator-confirmed)",
+      "class": "vendor extraction gap (no source patch)"
+    },
+    {
+      "item": "<fstream> compiled out of staged libc++ because HobbyOS config sets _LIBCPP_HAS_FILESYSTEM 0; clang Frontend needs std::ifstream (CompilerInvocation.cpp:4678, LayoutOverrideSource.cpp:43, CrossTranslationUnit.cpp)",
+      "error": "implicit instantiation of undefined template 'std::basic_ifstream<char>' (fstream body gated entirely by _LIBCPP_HAS_FILESYSTEM && _LIBCPP_HAS_LOCALIZATION)",
+      "file_line": "libcxx include/fstream:194-1608; fix = staged (generated, gitignored) __config_site override 0->1 + sysroot-headers/fstream_inst.cpp explicit instantiations into closure; tracked config/__config_site untouched (L2 call). Also needs fseeko/ftello -> _missing.h + gaps.c",
+      "class": "sysroot gap (staged libc++ config; no LLVM patch, no tracked config change)"
+    },
+    {
+      "item": "clang-21 binary link pulls dlopen/dlsym/dlclose/dlerror, getrlimit/setrlimit, math (exp log10 log2 log2f log1p logb acos cosh sinh tanh erf) and setjmp/longjmp bodies absent from HobbyOS libc; setjmp/longjmp additionally mangled because OS setjmp.h lacks extern \"C\"",
+      "error": "ld.lld: undefined symbol: dlclose/getrlimit/log2/setjmp(unsigned long*)/longjmp(unsigned long*, int) ...",
+      "file_line": "references from DynamicLibrary.inc, Process.inc, ConstantFolding.cpp, CrashRecoveryContext.cpp; fix = gaps.c bodies (math on top of existing log/pow/atan2/sqrt) + dlno-loader stubs + rlimit INFINITY + setjmp.S (kernel-derived) + extern-C decls in _missing.h",
+      "class": "sysroot gap (documented L2 work items; AD-3 compat)"
+    },
+    {
+      "item": "ld.lld relro check: .tdata not contiguous with relro sections — clang links TLS sections and lld wants them inside PT_GNU_RELRO, but the HobbyOS flat-image loader has no page-protected relro segment",
+      "error": "ld.lld: error: section: .tdata is not contiguous with other relro sections",
+      "file_line": "src/user/linker.ld (no relro); fix = -Wl,-z,norelro in toolchain link flags (build-config)",
+      "class": "build-config (no LLVM patch, no OS semantic change)"
+    }
+  ],
+  "notes": "Wave-2 llvm-ar/llvm-objcopy/clang/lld ALL GREEN for aarch64-hobbyos (target aarch64-none-elf). No LLVM source patches were made (AD-3 held): every resolver was sysroot re-staging, compat sysroot-headers (fstream_inst.cpp, setjmp.S, fseeko/ftello + extern-C setjmp/longjmp declarations), gaps.c bodies (math via existing libc primitives, dl* no-loader semantics, rlimit INFINITY no-op, weak main bridge, __clear_cache, fseeko/ftello), empty stub archives for -lpthreads/-lrt/-ldl/-lm, -Wl,-z,norelro, staged-libc++ __config_site override (generated gitignored copy only; tracked config/__config_site untouched — L2 decides if fstream belongs in OS libc++), and fetch.sh SUBTREES += libunwind/include. install-distribution staged 227 MB to obj/selfhost/dist-staging: clang-21 120 MB, lld 69 MB, llvm-ar 13 MB, llvm-objcopy 9.6 MB (unstripped Release ELF; M2 strips/curates) + clang-resource-headers 272 headers / 15 MB (159 >8.3-name files = F8 curation item already in §10). RESDIR layout installed to usr/local/lib/clang/21/include. Wall times include iterate-and-fix cycles on -j64 (64-core host); pure compile of clang+lld dominates phase 2. pid_t fix (AD-12) verified present in current tree; previous blocker was simply a stale STAGED sysroot copy, not a code regression. Commit tip aa5fc86 on branch selfhost/w2-llvm; working tree clean."
+}
