@@ -1,0 +1,26 @@
+{
+  "lane": "l2",
+  "status": "complete",
+  "commits": [
+    "aaaf3fd",
+    "2d60e7f"
+  ],
+  "artifacts": [
+    "docs/selfhost/os-gap-audit.md"
+  ],
+  "evidence": [
+    "docs/selfhost/os-gap-audit.md",
+    "~/.hermes/cache/scratch/llvm-inventory.json (raw LLVM 21.1.8 call inventory, 293 hits, not committed)",
+    "~/.hermes/cache/scratch/llvm-osaudit-src/ (LLVM 21.1.8 llvm/clang/lld extract, grep source)"
+  ],
+  "blockers": [],
+  "next_steps": [
+    "W2-1..W2-8 M1 header/shims (float.h, setjmp.h+setjmp/longjmp, dlfcn.h, sys/resource.h+getrlimit/setrlimit/getrusage, wait4, sys/statvfs.h, SA_NODEFER/SA_ONSTACK+pthread_sigmask+mkdir/link/symlink/alarm/fchown/pipe/_Exit decls, strsignal) — unblock the LLVM build",
+    "W2-9 temp dir on disk image or TMPDIR env (infra) — first smoke prerequisite",
+    "W2-10 kernel: HO_EXEC_ARGV_LEN 256->4096 + HO_EXEC_MAX_ARGS 32->128 (single-writer process.h+trap.c both arches) + _SC_ARG_MAX sync",
+    "W2-11 build config + disk bundle: CLANG_RESOURCE_DIR absolute, default triple baked, HAVE_POSIX_SPAWN/HAVE_SIGALTSTACK/CLANG_HAVE_RLIMITS/HAVE_PREAD=0 etc per audit §13, tools+libs on image",
+    "W2-12 launcher: resolvable argv[0] + PATH export (findProgramByName for ld.lld/llvm-ar)",
+    "W2-14 opendir/readdir over SYS_READ_DIR (when-hit); W2-13 VERIFY lld output integrity via in-memory buffer fallback; W2-15 optional /dev/null,/dev/urandom"
+  ],
+  "notes": "COUNT — 66 FULL / 20 PARTIAL / 16 MISSING / 12 NO-ACTION. Verdict: the compile core is hostable once M1 header/shims land — clang 21.1.8 runs cc1 IN-PROCESS by default (Job.cpp CC1Command::Execute -> D.CC1Main, no fork/exec), so the compile half never needs wait4/posix_spawn/exec-argv; the load-bearing gaps are (1) exec argv envelope 256B/32 args (process.h:112) blocks ALL out-of-process toolchain jobs (linker/ar/objcopy), (2) no /tmp or TMPDIR -> Driver::GetTemporaryPath + response files fail, (3) M1 missing headers block the LLVM build itself (float.h, setjmp.h+setjmp/longjmp needed by CrashRecoveryContext in the in-process cc1 path!, dlfcn.h included unconditionally by Unix.h:37, sys/resource.h, sys/statvfs.h, strsignal, SA_NODEFER/SA_ONSTACK, pthread_sigmask), (4) wait4 missing but one shim over waitpid. File-backed mmap is correctly -ENOTSUP on both v1 (process.c:2922/3021) and v2 regular files (vm.c:1224-1228, memfd-only) and LLVM degrades gracefully (MemoryBuffer read-loop, FileOutputBuffer in-memory) — keep the -ENOTSUP, verify outputs. 8MiB v2 main stack (vm.h:58) matches cc1's ensureSufficientStack's DesiredStackSize. No /proc needed (default argv0/PATH exec-path resolution; getprogpath in-tree fallback). lld parallel threads default = hardware_concurrency <=16 over full pthreads. Directory iteration ENOSYS today but kernel SYS_READ_DIR exists for a when-hit impl. VERIFY items (exact commands) are in audit §14."
+}
