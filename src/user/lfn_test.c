@@ -128,10 +128,10 @@ static void check_fixtures(void) {
          dir_has("/", "longfilename.txt"));
   report("[LFN]", "read_dir / lists longfilename2.txt",
          dir_has("/", "longfilename2.txt"));
-  /* The 36-char name is capped at 31 chars by the read_dir syscall; its
+  /* The 33-char name is capped at 31 chars by the read_dir syscall; its
      long-name PREFIX must appear (never an 8.3 mangle like LLVM-PR~1.C). */
   report("[LFN]", "read_dir / shows 30+ char name (31-char syscall cap)",
-         dir_has("/", "llvm-project-21.1.8.src-EXAMP"));
+         dir_has("/", "llvm-project-21.1.8.src-EXAMPLE"));
 }
 
 static void check_inos_writes(void) {
@@ -174,7 +174,7 @@ static void check_inos_writes(void) {
     report("[LFN]", "rename: new long name resolves with content",
            read_expect(dst, body));
     report("[LFN]", "rename: old long name no longer listed",
-           !dir_has("/", src));
+           !dir_has("/", "lfn_rename_src.txt"));
   }
 
   /* 11. mkdir a LONG dir name, then create/read a file inside it — the
@@ -192,7 +192,8 @@ static void check_inos_writes(void) {
     }
     report("[LFN]", "mkdir long dir + create file inside",
            read_expect(inner, body));
-    report("[LFN]", "long dir listed with long name", dir_has("/", dir));
+    report("[LFN]", "long dir listed with long name",
+           dir_has("/", "lfn_long_dir_created"));
   }
 
   /* 12. Unlink the created long-name file: gone from listings, and a plain
