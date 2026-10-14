@@ -606,10 +606,12 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
   long-argv purpose (`sh -c '<recipe>'`) unaffected; probe commit `ac59b9c` kept in
   history. Verified: A/B unfixed 6/6 FAIL ↔ fixed 3/3 PASS (`exec_ok=8`); VM test-arm ×3
   PASS; local ARM wave PASS + marker rc=0; unit gates 318/0 ARM + x64 clean. Battery
-  round 7 launched on `bd58474`. **Queued:** re-cut the frozen-acceptance RC on the final
-  tip after the last red is merged (w7's loop runs the 288995c lineage). Skills updated
-  (kernel-constraints #7 whole-cap-check pitfall; run-tests host-vs-ARM battery-log
-  attribution pitfall).
+  round 7 launched on `bd58474`. **Battery round 7: GREEN both machines** — local 4/4
+  rc=0 (`exec_ok=8` in host AND ARM wave; 1 WATCHDOG); VM 3/4 rc=0 + test-arm gate rc=1
+  on 2× WATCHDOG only (157 s, no wedge; TORTURE PASS `exec_ok=8`, marker present).
+  **Queued:** re-cut the frozen-acceptance RC on the final tip after the last red is
+  merged (w7's loop runs the 288995c lineage). Skills updated (kernel-constraints #7
+  whole-cap-check pitfall; run-tests host-vs-ARM battery-log attribution pitfall).
 
 - **2026-10-14 — Battery round 6: local = host/arm/x64 green, wave WEDGED (guest CPU-dead
   after GREPTEST's full pass; `WAVE_ARM_RC=124`; first LOCAL wedge, b4-class) → single-tier
