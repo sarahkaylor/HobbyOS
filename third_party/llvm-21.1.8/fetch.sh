@@ -21,6 +21,9 @@
 #   clang/                      the C/C++ compiler driver + frontend
 #   lld/                        the ELF/COFF/Mach-O linker (ld.lld)
 #   cmake/                      upstream CMake glue (Modules, config)
+#   third-party/                monorepo-root vendored deps LLVM builds link
+#                               (siphash via LLVM_THIRD_PARTY_DIR; benchmark/
+#                               unittest present for parity)
 #   LICENSE.TXT                 Apache-2.0 WITH LLVM-exception
 #
 # Integrity model: container sha256 (raw download pin) plus an anchor
@@ -44,6 +47,7 @@ SUBTREES=(
   "llvm-project-${VER}.src/clang"
   "llvm-project-${VER}.src/lld"
   "llvm-project-${VER}.src/cmake"
+  "llvm-project-${VER}.src/third-party"
   "llvm-project-${VER}.src/LICENSE.TXT"
 )
 
