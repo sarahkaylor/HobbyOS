@@ -99,6 +99,13 @@ KERNEL_OBJS := $(patsubst %.c,$(OBJDIR)/arm/%.o,$(KERNEL_C_TOP)) \
                $(patsubst %.c,$(OBJDIR)/arm/%.o,$(KERNEL_C_ARM)) \
                $(patsubst %.s,$(OBJDIR)/arm/%.o,$(KERNEL_ASM))
 
+# w6-run: lld response file for the kernel link — the 59-object argv (66+
+# words) exceeds the crt0 positional-arg cap (CRT0_MAX_ARGS 32, flat-args
+# fallback), so the linker reads the object list from @/SRC/OBJS.RSP
+# instead.  Written HERE at parse time (make's $(file ...) function — no
+# shell, no argv), once per invocation, before any target runs.
+$(file > /SRC/OBJS.RSP,$(KERNEL_OBJS))
+
 # user set (AD-9 acceptance): HELLO SH LS CAT.  v1 links each against the
 # prebuilt libc archive carried in the payload (/SRC/obj/arm/libc.a), per
 # the L4 sketch; the in-OS libc rebuild is the make-port lane's follow-up.
@@ -408,7 +415,13 @@ user: $(USER_OBJS) $(OBJDIR)/arm/libc.a
 kernel: $(KERNEL_OBJS)
 	@echo "[SELFHOST] phase=s2-kernel-start"
 	@echo "[SELFHOST] phase=kernel-link-start"
-	$(LD) -T linker.ld -o $(TARGET) $(KERNEL_OBJS)
+	# w6-run: lld's link argv (66 words incl. 59 objects) exceeds the
+	# HobbyOS crt0 positional-arg cap (CRT0_MAX_ARGS 32) on the flat-args
+	# fallback, which merged the tail into one path ("cannot open /SRC/");
+	# the response file is written at parse time by the make file-write
+	# function attached to the KERNEL_OBJS definition above (no shell, no
+	# argv cap) and the link line itself stays short.
+	$(LD) -T linker.ld -o $(TARGET) @/SRC/OBJS.RSP
 	@echo "[SELFHOST] phase=kernel-link-done rc=$$?"
 	$(OBJCOPY) -O binary $(TARGET) $(BIN)
 	@echo "[SELFHOST] phase=s2-kernel-done rc=$$?"
