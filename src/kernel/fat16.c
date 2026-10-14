@@ -4,6 +4,18 @@
 #include "process.h"
 #include "errno.h"
 
+/* Wall-clock for dirent timestamps (selfhost w10-fstime): the kernel's
+ * RTC-anchored REALTIME clock (kernel/time.c — the same clock sysinfo 6
+ * and time() report) read once per stamp.  FAT timestamps are UTC
+ * everywhere: the RTC is UTC on both arches (QEMU's default) and there is
+ * no timezone database in the OS, so local == UTC for all tools. */
+extern uint64_t hb_clock_realtime_ms(void);
+extern void rtc_epoch_to_time(uint64_t epoch, int *year, int *month, int *day,
+                              int *hour, int *minute, int *second,
+                              int *weekday);
+extern uint64_t rtc_make_epoch(int year, int month, int day,
+                               int hour, int minute, int second);
+
 #define SECTOR_SIZE 512
 
 static uint32_t bpb_bytes_per_sector;
@@ -956,6 +968,52 @@ int fat16_resolve_parent(const char *path, struct fat16_dir_entry *out_parent_en
   return fat16_resolve_path(parent_path, out_parent_entry, 0, 0);
 }
 
+/* ------------------------------------------------------------------
+ * RTC-backed FAT dirent timestamps (selfhost w10-fstime)
+ * -----------------------------------------------------------------
+ * The FAT16 spec encodes a timestamp in two 16-bit fields:
+ *   date = ((year-1980) << 9) | (month << 5) | day
+ *   time = (hour << 11) | (minute << 5) | (second / 2)   (2 s resolution)
+ * Until now the writer left both zeroed (1980-01-01 00:00), so every
+ * in-OS file had the same mtime as every other: in-OS GNU make could
+ * never see a target NEWER than its prerequisites and rebuilt all 59
+ * kernel TUs on every run (~90 min).  All entry writes below stamp the
+ * REAL wall clock (UTC, RTC-read at boot, kernel/time.c).  The encode
+ * clamps pathological years (no-RTC fallback collapses to epoch 0) to
+ * a valid pre-1980 sentinel so the on-disk fields stay well-formed. */
+static uint64_t fat16_now_epoch(void) {
+  return hb_clock_realtime_ms() / 1000ULL;
+}
+
+static void fat16_stamp_entry(struct fat16_dir_entry *e) {
+  int year, month, day, hour, minute, second, weekday;
+  uint64_t now = fat16_now_epoch();
+  rtc_epoch_to_time(now, &year, &month, &day, &hour, &minute, &second, &weekday);
+  if (year < 1980 || year > 2107) {
+    year = 1980; month = 1; day = 1;
+    hour = 0; minute = 0; second = 0;
+  } else {
+    if (month < 1) month = 1;
+    if (month > 12) month = 12;
+    if (day < 1) day = 1;
+    if (day > 31) day = 31;
+  }
+  e->date = (uint16_t)(((year - 1980) << 9) | (month << 5) | day);
+  e->time = (uint16_t)((hour << 11) | (minute << 5) | (second / 2));
+}
+
+/* Decode a dirent's date/time back to Unix epoch seconds (UTC).  The
+ * stat path and the unit tests use this; it mirrors fat16_stamp_entry. */
+uint64_t fat16_entry_epoch(const struct fat16_dir_entry *e) {
+  int year = ((e->date >> 9) & 0x7F) + 1980;
+  int month = (e->date >> 5) & 0x0F;
+  int day = e->date & 0x1F;
+  int hour = (e->time >> 11) & 0x1F;
+  int minute = (e->time >> 5) & 0x3F;
+  int second = (e->time & 0x1F) * 2;
+  return rtc_make_epoch(year, month, day, hour, minute, second);
+}
+
 int fat16_open(const char* filename, struct file* f) {
   char abs_path[256];
   fat16_absolute_path(filename, abs_path);
@@ -1004,8 +1062,7 @@ int fat16_open(const char* filename, struct file* f) {
   }
   new_entry.attr = 0;
   for (int k = 0; k < 10; k++) new_entry.reserved[k] = 0;
-  new_entry.time = 0;
-  new_entry.date = 0;
+  fat16_stamp_entry(&new_entry);   /* real RTC date/time, not 1980-01-01 */
   new_entry.start_cluster = 0;
   new_entry.file_size = 0;
 
@@ -1631,8 +1688,7 @@ int fat16_mkdir(const char *path) {
   }
   new_dir_entry.attr = 0x10;
   for (int k = 0; k < 10; k++) new_dir_entry.reserved[k] = 0;
-  new_dir_entry.time = 0;
-  new_dir_entry.date = 0;
+  fat16_stamp_entry(&new_dir_entry);   /* real RTC date/time (mkdir is a write) */
   new_dir_entry.start_cluster = new_cluster;
   new_dir_entry.file_size = 0;
 
@@ -1756,6 +1812,7 @@ int fat16_truncate(struct file* f) {
   f->fat16.entry.start_cluster = 0;
   f->fat16.entry.file_size = 0;
   f->fat16.cursor = 0;
+  fat16_stamp_entry(&f->fat16.entry);  /* O_TRUNC is a modification */
   spinlock_release_irqrestore(&fat_lock, flags);
   f->fat16.dirty = 1;
 
@@ -1841,6 +1898,7 @@ int fat16_truncate_to(struct file* f, uint32_t new_size) {
       if ((int)old_size > f->fat16.cursor) f->fat16.cursor = (int)old_size;
     }
     f->fat16.entry.file_size = new_size;
+    fat16_stamp_entry(&f->fat16.entry);  /* ftruncate extend is a modification */
     f->fat16.dirty = 1;
     fat16_sync_entry(f);
     return 0;
@@ -1868,6 +1926,7 @@ int fat16_truncate_to(struct file* f, uint32_t new_size) {
 
   f->fat16.entry.file_size = new_size;
   if (f->fat16.cursor > new_size) f->fat16.cursor = new_size;
+  fat16_stamp_entry(&f->fat16.entry);  /* ftruncate shrink is a modification */
   f->fat16.dirty = 1;
   fat16_sync_entry(f);
   return 0;
@@ -2156,8 +2215,9 @@ int fat16_write(struct file* f, const void* buf, int size) {
   }
   spinlock_release_irqrestore(&fat_lock, flags);
   if (written_bytes > 0) {
+    fat16_stamp_entry(&f->fat16.entry);  /* last-write time (FAT mtime) */
     f->fat16.dirty = 1;
-    fat16_sync_entry(f);   /* keep the on-disk dir entry (size/clusters)
+    fat16_sync_entry(f);   /* keep the on-disk dir entry (size/clusters/time)
                               current so stat-by-path sees it immediately */
   }
   return written_bytes;
