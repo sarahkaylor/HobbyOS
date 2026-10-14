@@ -1,0 +1,303 @@
+=== MERGED BATTERY 2 START Wed Oct 14 06:32:26 UTC 2026 tip=0c272a4 selfhost: merge lane w2-mkfs — dosfstools 4.2 MKFSFAT port (53/53 host proof; in-OS found extend-write gap → wave 3) ===
+== host_tests ==
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/editor.c -o obj/host_user_editor.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/compat.c -o obj/host_compat.o
+src/host/compat.c:120:90: warning: unused parameter 'args' [-Wunused-parameter]
+  120 | int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args) {
+      |                                                                                          ^
+src/host/compat.c:451:5: error: conflicting types for 'ho_mkdir'
+  451 | int mkdir(const char *path) {
+      |     ^
+src/host/../user_include/libc.h:46:15: note: expanded from macro 'mkdir'
+   46 | #define mkdir ho_mkdir
+      |               ^
+src/host/../user_include/libc.h:166:7: note: previous declaration is here
+  166 |   int mkdir(const char *path, ...);
+      |       ^
+src/host/../user_include/libc.h:46:15: note: expanded from macro 'mkdir'
+   46 | #define mkdir ho_mkdir
+      |               ^
+1 warning and 1 error generated.
+make: *** [Makefile:2241: obj/host_compat.o] Error 1
+HOST_RC=2
+== unit-arm ==
+Building unit test image...
+Build failed!
+      |                                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/make/makeint.h:327:9: note: expanded from macro 'streq'
+  327 |    ((a) == (b) || \
+      |         ^  ~~~
+src/user/make/variable.c:1166:37: warning: result of comparison against a string literal is unspecified (use an explicit string comparison function instead) [-Wstring-compare]
+ 1166 |             if (!found_makeflags && streq (v->name, MAKEFLAGS_NAME))
+      |                                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/make/makeint.h:327:9: note: expanded from macro 'streq'
+  327 |    ((a) == (b) || \
+      |         ^  ~~~
+src/user/make/variable.c:1194:34: warning: result of comparison against a string literal is unspecified (use an explicit string comparison function instead) [-Wstring-compare]
+ 1194 |             if (!found_mflags && streq (v->name, "MFLAGS"))
+      |                                  ^~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/make/makeint.h:327:9: note: expanded from macro 'streq'
+  327 |    ((a) == (b) || \
+      |         ^  ~~~
+src/user/make/variable.c:1251:7: warning: result of comparison against a string literal is unspecified (use an explicit string comparison function instead) [-Wstring-compare]
+ 1251 |   if (streq (var->name, MAKEFLAGS_NAME))
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/make/makeint.h:327:9: note: expanded from macro 'streq'
+  327 |    ((a) == (b) || \
+      |         ^  ~~~
+src/user/make/variable.c:1254:12: warning: result of comparison against a string literal is unspecified (use an explicit string comparison function instead) [-Wstring-compare]
+ 1254 |   else if (streq (var->name, RECIPEPREFIX_NAME))
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/make/makeint.h:327:9: note: expanded from macro 'streq'
+  327 |    ((a) == (b) || \
+      |         ^  ~~~
+src/user/make/variable.c:1421:21: warning: result of comparison against a string literal is unspecified (use an explicit string comparison function instead) [-Wstring-compare]
+ 1421 |                 if (streq (varname, MAKEFLAGS_NAME)
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/make/makeint.h:327:9: note: expanded from macro 'streq'
+  327 |    ((a) == (b) || \
+      |         ^  ~~~
+9 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -DHAVE_CONFIG_H -Isrc/user/make -c src/user/make/version.c -o obj/arm/make_version.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -DHAVE_CONFIG_H -Isrc/user/make -c src/user/make/vpath.c -o obj/arm/make_vpath.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -DHAVE_CONFIG_H -Isrc/user/make -c src/user/make/glob.c -o obj/arm/make_glob.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -DHAVE_CONFIG_H -Isrc/user/make -c src/user/make/fnmatch.c -o obj/arm/make_fnmatch.o
+src/user/make/fnmatch.c:124:14: warning: a function declaration without a prototype is deprecated in all versions of C and is treated as a zero-parameter prototype in C23, conflicting with a previous declaration [-Wdeprecated-non-prototype]
+  124 | extern char *getenv ();
+      |              ^
+src/libc/include/stdlib.h:111:9: note: conflicting prototype is here
+  111 |   char *getenv(const char *name);
+      |         ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -DHAVE_CONFIG_H -Isrc/user/make -c src/user/make/hb_stubs.c -o obj/arm/make_hb_stubs.o
+ld.lld -T src/user/linker.ld -e _start -o obj/arm/make.elf obj/arm/make_ar.o obj/arm/make_arscan.o obj/arm/make_commands.o obj/arm/make_default.o obj/arm/make_dir.o obj/arm/make_expand.o obj/arm/make_file.o obj/arm/make_function.o obj/arm/make_getopt.o obj/arm/make_getopt1.o obj/arm/make_guile.o obj/arm/make_hash.o obj/arm/make_implicit.o obj/arm/make_job.o obj/arm/make_load.o obj/arm/make_loadapi.o obj/arm/make_main.o obj/arm/make_misc.o obj/arm/make_output.o obj/arm/make_posixos.o obj/arm/make_read.o obj/arm/make_remake.o obj/arm/make_remote-stub.o obj/arm/make_rule.o obj/arm/make_shuffle.o obj/arm/make_signame.o obj/arm/make_strcache.o obj/arm/make_variable.o obj/arm/make_version.o obj/arm/make_vpath.o obj/arm/make_glob.o obj/arm/make_fnmatch.o obj/arm/make_hb_stubs.o obj/arm/libc.a
+ld.lld: error: duplicate symbol: alarm
+>>> defined at hb_stubs.c:43 (/home/sarah/hobbyos-selfhost/src/user/make/hb_stubs.c:43)
+>>>            obj/arm/make_hb_stubs.o:(alarm)
+>>> defined at signal.c:235 (/home/sarah/hobbyos-selfhost/src/libc/src/signal.c:235)
+>>>            libc_signal.o:(.text+0x2a0) in archive obj/arm/libc.a
+
+ld.lld: error: duplicate symbol: strsignal
+>>> defined at signame.c:231 (/home/sarah/hobbyos-selfhost/src/user/make/signame.c:231)
+>>>            obj/arm/make_signame.o:(strsignal)
+>>> defined at string.c:471 (/home/sarah/hobbyos-selfhost/src/libc/src/string.c:471)
+>>>            libc_string.o:(.text+0xd80) in archive obj/arm/libc.a
+make: *** [Makefile:1430: obj/arm/make.bin] Error 1
+UNIT_ARM_RC=1
+== unit-x64 (kvm) ==
+Building unit test image...
+Build failed!
+      |                                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/make/makeint.h:327:9: note: expanded from macro 'streq'
+  327 |    ((a) == (b) || \
+      |         ^  ~~~
+src/user/make/variable.c:1166:37: warning: result of comparison against a string literal is unspecified (use an explicit string comparison function instead) [-Wstring-compare]
+ 1166 |             if (!found_makeflags && streq (v->name, MAKEFLAGS_NAME))
+      |                                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/make/makeint.h:327:9: note: expanded from macro 'streq'
+  327 |    ((a) == (b) || \
+      |         ^  ~~~
+src/user/make/variable.c:1194:34: warning: result of comparison against a string literal is unspecified (use an explicit string comparison function instead) [-Wstring-compare]
+ 1194 |             if (!found_mflags && streq (v->name, "MFLAGS"))
+      |                                  ^~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/make/makeint.h:327:9: note: expanded from macro 'streq'
+  327 |    ((a) == (b) || \
+      |         ^  ~~~
+src/user/make/variable.c:1251:7: warning: result of comparison against a string literal is unspecified (use an explicit string comparison function instead) [-Wstring-compare]
+ 1251 |   if (streq (var->name, MAKEFLAGS_NAME))
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/make/makeint.h:327:9: note: expanded from macro 'streq'
+  327 |    ((a) == (b) || \
+      |         ^  ~~~
+src/user/make/variable.c:1254:12: warning: result of comparison against a string literal is unspecified (use an explicit string comparison function instead) [-Wstring-compare]
+ 1254 |   else if (streq (var->name, RECIPEPREFIX_NAME))
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/make/makeint.h:327:9: note: expanded from macro 'streq'
+  327 |    ((a) == (b) || \
+      |         ^  ~~~
+src/user/make/variable.c:1421:21: warning: result of comparison against a string literal is unspecified (use an explicit string comparison function instead) [-Wstring-compare]
+ 1421 |                 if (streq (varname, MAKEFLAGS_NAME)
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/make/makeint.h:327:9: note: expanded from macro 'streq'
+  327 |    ((a) == (b) || \
+      |         ^  ~~~
+9 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DHAVE_CONFIG_H -Isrc/user/make -c src/user/make/version.c -o obj/intel/make_version.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DHAVE_CONFIG_H -Isrc/user/make -c src/user/make/vpath.c -o obj/intel/make_vpath.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DHAVE_CONFIG_H -Isrc/user/make -c src/user/make/glob.c -o obj/intel/make_glob.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DHAVE_CONFIG_H -Isrc/user/make -c src/user/make/fnmatch.c -o obj/intel/make_fnmatch.o
+src/user/make/fnmatch.c:124:14: warning: a function declaration without a prototype is deprecated in all versions of C and is treated as a zero-parameter prototype in C23, conflicting with a previous declaration [-Wdeprecated-non-prototype]
+  124 | extern char *getenv ();
+      |              ^
+src/libc/include/stdlib.h:111:9: note: conflicting prototype is here
+  111 |   char *getenv(const char *name);
+      |         ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DHAVE_CONFIG_H -Isrc/user/make -c src/user/make/hb_stubs.c -o obj/intel/make_hb_stubs.o
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/make.elf obj/intel/make_ar.o obj/intel/make_arscan.o obj/intel/make_commands.o obj/intel/make_default.o obj/intel/make_dir.o obj/intel/make_expand.o obj/intel/make_file.o obj/intel/make_function.o obj/intel/make_getopt.o obj/intel/make_getopt1.o obj/intel/make_guile.o obj/intel/make_hash.o obj/intel/make_implicit.o obj/intel/make_job.o obj/intel/make_load.o obj/intel/make_loadapi.o obj/intel/make_main.o obj/intel/make_misc.o obj/intel/make_output.o obj/intel/make_posixos.o obj/intel/make_read.o obj/intel/make_remake.o obj/intel/make_remote-stub.o obj/intel/make_rule.o obj/intel/make_shuffle.o obj/intel/make_signame.o obj/intel/make_strcache.o obj/intel/make_variable.o obj/intel/make_version.o obj/intel/make_vpath.o obj/intel/make_glob.o obj/intel/make_fnmatch.o obj/intel/make_hb_stubs.o obj/intel/libc.a
+ld.lld: error: duplicate symbol: strsignal
+>>> defined at signame.c:231 (/home/sarah/hobbyos-selfhost/src/user/make/signame.c:231)
+>>>            obj/intel/make_signame.o:(strsignal)
+>>> defined at string.c:471 (/home/sarah/hobbyos-selfhost/src/libc/src/string.c:471)
+>>>            libc_string.o:(.ltext+0x10e0) in archive obj/intel/libc.a
+
+ld.lld: error: duplicate symbol: alarm
+>>> defined at hb_stubs.c:41 (/home/sarah/hobbyos-selfhost/src/user/make/hb_stubs.c:41)
+>>>            obj/intel/make_hb_stubs.o:(alarm)
+>>> defined at signal.c:233 (/home/sarah/hobbyos-selfhost/src/libc/src/signal.c:233)
+>>>            libc_signal.o:(.ltext+0x290) in archive obj/intel/libc.a
+make: *** [Makefile:1430: obj/intel/make.bin] Error 1
+UNIT_X64_RC=1
+== wave-arm ==
+make MODE=test run
+make[1]: Entering directory '/home/sarah/hobbyos-selfhost'
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/dhcp.c -o obj/arm/dhcp.o
+src/kernel/dhcp.c:42:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   42 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:82:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   82 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:135:19: warning: unused variable 'udp' [-Wunused-variable]
+  135 |   struct udp_hdr* udp = (struct udp_hdr*)(packet + sizeof(struct ipv4_hdr));
+      |                   ^~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/fat16.c -o obj/arm/fat16.o
+src/kernel/fat16.c:1699:11: warning: unused variable 'buf' [-Wunused-variable]
+ 1699 |   uint8_t buf[SECTOR_SIZE];
+      |           ^~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -Iobj/arm -c src/kernel/fat16_test.c -o obj/arm/fat16_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/frame.c -o obj/arm/frame.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/frame_test.c -o obj/arm/frame_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/fs.c -o obj/arm/fs.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/fs_test.c -o obj/arm/fs_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/iommu_vtd.c -o obj/arm/iommu_vtd.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/ipc_proto.c -o obj/arm/ipc_proto.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/locks_test.c -o obj/arm/locks_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/main.c -o obj/arm/main.o
+src/kernel/main.c:50:39: warning: unused parameter 'tf' [-Wunused-parameter]
+   50 | void irq_handler_c(struct trap_frame *tf) {
+      |                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/math_test.c -o obj/arm/math_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/mmu_test.c -o obj/arm/mmu_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/net.c -o obj/arm/net.o
+src/kernel/net.c:519:18: warning: variable 'stored' set but not used [-Wunused-but-set-variable]
+  519 |         uint32_t stored = 0;
+      |                  ^
+src/kernel/net.c:782:21: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+  782 |   for (int i = 0; i < sizeof(struct pseudo_hdr)/2; i++) {
+      |                   ~ ^ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/net.c:624:39: warning: unused function 'safe_print_int' [-Wunused-function]
+  624 | __attribute__((noinline)) static void safe_print_int(int val) {
+      |                                       ^~~~~~~~~~~~~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/net_rdma.c -o obj/arm/net_rdma.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/net_rdma_test.c -o obj/arm/net_rdma_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/net_test.c -o obj/arm/net_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/nfs.c -o obj/arm/nfs.o
+src/kernel/nfs.c:157:12: warning: '/*' within block comment [-Wcomment]
+  157 |  * is *body/*body_len, valid until the next rpc_call (static buffer). */
+      |            ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/nfs_proto.c -o obj/arm/nfs_proto.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/nfs_test.c -o obj/arm/nfs_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/pipe.c -o obj/arm/pipe.o
+src/kernel/pipe.c:139:7: warning: unused variable 'i' [-Wunused-variable]
+  139 |   int i = 0;
+      |       ^
+src/kernel/pipe.c:136:68: warning: unused parameter 'tf' [-Wunused-parameter]
+  136 | int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
+      |                                                                    ^
+src/kernel/pipe.c:216:7: warning: unused variable 'i' [-Wunused-variable]
+  216 |   int i = 0;
+      |       ^
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/pipe_test.c -o obj/arm/pipe_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/process.c -o obj/arm/process.o
+src/kernel/process.c:1169:42: warning: unused parameter 'is_yield' [-Wunused-parameter]
+ 1169 | void schedule(struct trap_frame *tf, int is_yield) {
+      |                                          ^
+src/kernel/process.c:2996:50: warning: unused parameter 'prot' [-Wunused-parameter]
+ 2996 | int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags) {
+      |                                                  ^
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/process_test.c -o obj/arm/process_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/program_loader.c -o obj/arm/program_loader.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/program_loader_test.c -o obj/arm/program_loader_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/test_fw_cfg.c -o obj/arm/test_fw_cfg.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/test_smp.c -o obj/arm/test_smp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/time.c -o obj/arm/time.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/time_test.c -o obj/arm/time_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/timer_test.c -o obj/arm/timer_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/trap_test.c -o obj/arm/trap_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/unit_test.c -o obj/arm/unit_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/unix.c -o obj/arm/unix.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/unix_test.c -o obj/arm/unix_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/vfs.c -o obj/arm/vfs.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/virtio_blk.c -o obj/arm/virtio_blk.o
+src/kernel/virtio_blk.c:655:12: warning: unused variable 'desc_idx' [-Wunused-variable]
+  655 |   uint16_t desc_idx = 0;
+      |            ^~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/virtio_blk_test.c -o obj/arm/virtio_blk_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/virtio_gpu.c -o obj/arm/virtio_gpu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/virtio_gpu_test.c -o obj/arm/virtio_gpu_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/virtio_gpu_x64.c -o obj/arm/virtio_gpu_x64.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/virtio_input.c -o obj/arm/virtio_input.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/virtio_input_test.c -o obj/arm/virtio_input_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/virtio_net.c -o obj/arm/virtio_net.o
+src/kernel/virtio_net.c:699:20: warning: unused function 'reg_write8' [-Wunused-function]
+  699 | static inline void reg_write8(uint32_t offset, uint8_t val) {
+      |                    ^~~~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/virtio_net_test.c -o obj/arm/virtio_net_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/vm.c -o obj/arm/vm.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/vm_test.c -o obj/arm/vm_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/arch/arm/cpu.c -o obj/arm/cpu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/arch/arm/gic.c -o obj/arm/gic.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/arch/arm/locks.c -o obj/arm/locks.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/arch/arm/mmu.c -o obj/arm/mmu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/arch/arm/rtc.c -o obj/arm/rtc.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/arch/arm/smp.c -o obj/arm/smp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/arch/arm/timer.c -o obj/arm/timer.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/arch/arm/trap.c -o obj/arm/trap.o
+src/kernel/arch/arm/trap.c:1586:16: warning: unused variable 'l2idx' [-Wunused-variable]
+ 1586 |       uint32_t l2idx = ((uint64_t)tf->elr >> 21) & 0x1FF;
+      |                ^~~~~
+src/kernel/arch/arm/trap.c:1591:22: warning: array index 512 is past the end of the array (that has type 'uint64_t[512]' (aka 'unsigned long[512]')) [-Warray-bounds]
+ 1591 |       uart_print_hex(l2_table_1[cp][0x200]);
+      |                      ^              ~~~~~
+src/kernel/arch/arm/trap.c:1585:7: note: array 'l2_table_1' declared here
+ 1585 |       extern uint64_t l2_table_1[][512];
+      |       ^
+src/kernel/arch/arm/trap.c:1593:22: warning: array index 544 is past the end of the array (that has type 'uint64_t[512]' (aka 'unsigned long[512]')) [-Warray-bounds]
+ 1593 |       uart_print_hex(l2_table_1[cp][0x220]);
+      |                      ^              ~~~~~
+src/kernel/arch/arm/trap.c:1585:7: note: array 'l2_table_1' declared here
+ 1585 |       extern uint64_t l2_table_1[][512];
+      |       ^
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -DKERNEL_MODE_TEST -c src/kernel/arch/arm/uart.c -o obj/arm/uart.o
+ld.lld -T linker.ld -o hobbyos.elf obj/arm/boot.o obj/arm/fpu.o obj/arm/setjmp.o obj/arm/dhcp.o obj/arm/fat16.o obj/arm/fat16_test.o obj/arm/frame.o obj/arm/frame_test.o obj/arm/fs.o obj/arm/fs_test.o obj/arm/iommu_vtd.o obj/arm/ipc_proto.o obj/arm/locks_test.o obj/arm/main.o obj/arm/math_test.o obj/arm/mmu_test.o obj/arm/net.o obj/arm/net_rdma.o obj/arm/net_rdma_test.o obj/arm/net_test.o obj/arm/nfs.o obj/arm/nfs_proto.o obj/arm/nfs_test.o obj/arm/pipe.o obj/arm/pipe_test.o obj/arm/process.o obj/arm/process_test.o obj/arm/program_loader.o obj/arm/program_loader_test.o obj/arm/test_fw_cfg.o obj/arm/test_smp.o obj/arm/time.o obj/arm/time_test.o obj/arm/timer_test.o obj/arm/trap_test.o obj/arm/unit_test.o obj/arm/unix.o obj/arm/unix_test.o obj/arm/vfs.o obj/arm/virtio_blk.o obj/arm/virtio_blk_test.o obj/arm/virtio_gpu.o obj/arm/virtio_gpu_test.o obj/arm/virtio_gpu_x64.o obj/arm/virtio_input.o obj/arm/virtio_input_test.o obj/arm/virtio_net.o obj/arm/virtio_net_test.o obj/arm/vm.o obj/arm/vm_test.o obj/arm/cpu.o obj/arm/gic.o obj/arm/locks.o obj/arm/mmu.o obj/arm/rtc.o obj/arm/smp.o obj/arm/timer.o obj/arm/trap.o obj/arm/uart.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -DKERNEL_MODE_TEST -c src/user/console.c -o obj/arm/console.o
+ld.lld -T src/user/linker.ld -o obj/arm/console.elf obj/arm/console.o obj/arm/user_libc.o obj/arm/user_malloc.o obj/arm/libc_string.o
+llvm-objcopy -O binary obj/arm/console.elf obj/arm/console.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/arm/make.elf obj/arm/make_ar.o obj/arm/make_arscan.o obj/arm/make_commands.o obj/arm/make_default.o obj/arm/make_dir.o obj/arm/make_expand.o obj/arm/make_file.o obj/arm/make_function.o obj/arm/make_getopt.o obj/arm/make_getopt1.o obj/arm/make_guile.o obj/arm/make_hash.o obj/arm/make_implicit.o obj/arm/make_job.o obj/arm/make_load.o obj/arm/make_loadapi.o obj/arm/make_main.o obj/arm/make_misc.o obj/arm/make_output.o obj/arm/make_posixos.o obj/arm/make_read.o obj/arm/make_remake.o obj/arm/make_remote-stub.o obj/arm/make_rule.o obj/arm/make_shuffle.o obj/arm/make_signame.o obj/arm/make_strcache.o obj/arm/make_variable.o obj/arm/make_version.o obj/arm/make_vpath.o obj/arm/make_glob.o obj/arm/make_fnmatch.o obj/arm/make_hb_stubs.o obj/arm/libc.a
+ld.lld: error: duplicate symbol: strsignal
+>>> defined at signame.c:231 (/home/sarah/hobbyos-selfhost/src/user/make/signame.c:231)
+>>>            obj/arm/make_signame.o:(strsignal)
+>>> defined at string.c:471 (/home/sarah/hobbyos-selfhost/src/libc/src/string.c:471)
+>>>            libc_string.o:(.text+0xd80) in archive obj/arm/libc.a
+
+ld.lld: error: duplicate symbol: alarm
+>>> defined at hb_stubs.c:43 (/home/sarah/hobbyos-selfhost/src/user/make/hb_stubs.c:43)
+>>>            obj/arm/make_hb_stubs.o:(alarm)
+>>> defined at signal.c:235 (/home/sarah/hobbyos-selfhost/src/libc/src/signal.c:235)
+>>>            libc_signal.o:(.text+0x2a0) in archive obj/arm/libc.a
+make[1]: *** [Makefile:1430: obj/arm/make.bin] Error 1
+make[1]: Leaving directory '/home/sarah/hobbyos-selfhost'
+make: *** [Makefile:2175: test] Error 2
+WAVE_ARM_RC=2
+=== BATTERY 2 DONE Wed Oct 14 06:34:30 UTC 2026 ===
