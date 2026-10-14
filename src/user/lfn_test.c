@@ -147,6 +147,11 @@ static void check_inos_writes(void) {
     }
     report("[LFN]", "create+reopen long-name file in-OS",
            read_expect(path, body));
+    /* Positive listing check for the in-OS-created file: read_dir must
+       show the long name the driver wrote in-OS (same 0x0F run layout as
+       any create; mcopy-independent). */
+    report("[LFN]", "created long-name file listed with long name",
+           dir_has("/", "lfn_newfile_created.txt"));
 
     /* 8. Short-name fallback: the SAME file is reachable through the 8.3
        alias the driver derived for it. */
@@ -176,6 +181,9 @@ static void check_inos_writes(void) {
            read_expect(dst, body));
     report("[LFN]", "rename: old long name no longer listed",
            !dir_has("/", "lfn_rename_src.txt"));
+    /* Positive: the renamed-to long name is now the listed name. */
+    report("[LFN]", "rename: new long name listed with long name",
+           dir_has("/", "lfn_rename_dst.txt"));
   }
 
   /* 11. mkdir a LONG dir name, then create/read a file inside it — the
