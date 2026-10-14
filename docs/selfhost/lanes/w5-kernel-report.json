@@ -7,8 +7,8 @@
   "summary": "Wave-5 kernel blocker list all closed: (i) the 1 MiB exec gate raised to the v2 loader's 128 MiB cap (94 MB CLANG2.BIN execs in-OS, proven pre=-ENOEXEC/post=banner); (ii) fault-killed children now always reap non-zero (EC=0x00/0x3C/generic kill paths route through process_fault_set_status; t23 false rc=0 -> rc=4, unit test added); (iii) the 'housekeeping' EL1 fault (w4-clang pid=5) root-caused to the L9 prefetch kernel task racing group teardown -> vm_arch_walk deref of a dead/reused page-table chain (fault site = vm_arch_walk+0x2c, FAR 0xFFFF...F000-family) and fixed via a zero-root walk guard + an alive re-check inside the prefetch's presence-probe critical section; (iv) the L9-prefetch PROT instruction-fetch race fixed by bounded TLB-flush-and-retry in vm_handle_fault (reproduced pre-fix only: lld killed in=PROT at 0x1000673060, plus the EL1 fault + driver LOSTWAKE-disposal cascade in ONE boot; fixed kernel clean across 3 boots of the same racing script); (v) IDLESTUCK false-positives dampened by printing the table dump only when a slot was actually reclaimed/disposed (arm-only arming no longer spams; the LOSTWAKE reclaim/dispose lines still log real events); (vi) spawn/exec flat-args cap raised 255 -> 1024 kernel-side AND in crt0's argv/args copy buffers (the binding cap was the consumer; a 330-char line went from truncated argc=17 to full argc=27); (vii) MAKE.BIN recipe-shell exec triage closed as a REAL kernel bug fixed: exec of a missing image (fat16_open creates a zero-size entry) now fails cleanly pre-teardown (-ENOENT) instead of tearing down the old AS, reaching v2_map_image \"bad image size 0\", leaving the process AS-less and re-faulting forever (pre-fix repro shows the fault loop; fixed shows EXECX errno=2 + clean rc=1).",
   "gates": {
     "run_unit_tests_arm": {
-      "green": null,
-      "counts": null,
+      "green": true,
+      "counts": "318/0 (floor 316 + test_fault_kill_status_nonzero + test_vm_walk_dead_as_safe)",
       "evidence": "docs/selfhost/lanes/evidence-w5-kernel/unit-arm.log"
     },
     "run_unit_tests_x64": {
