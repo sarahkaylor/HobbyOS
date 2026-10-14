@@ -590,6 +590,27 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-14 — Wave 6.5 (w8-torture) merged (`bd58474`): the `TORTURE exec-wait-cycles`
+  red is ROOT-CAUSED and FIXED — and the class was deterministic ON ARM all along (the
+  "local pass" earlier was the HOST_TEST build: `suite_ms=301`/`total_kb=65536` mock lines,
+  not the ARM wave).** Root cause: the exec-argv marshallers (`pl_strcpy` in
+  `program_loader.c`, `u_strcpy` in both `trap.c`s) validated the WHOLE cap up front
+  (`sys_user_range_ok(src, cap)`); w6's 64→4096 bump made that check cross the
+  mapped-region top for short strings near the user stack top (torture child's `code[]` at
+  `0x1800000000−0x238`) → the arg was silently dropped → exec'd child saw argc=2, took the
+  code=7 default → `exit(7)≠want(10..17)` → every cycle `-1`, `exec_ok=0`. Proof:
+  `w8-probe-fail.serial.txt` — child prints `argv2=10` intact (argv fine in-child), parent
+  sees `st=0x700 exited=1 code=7 sig=0` ×16 forks; rules out fault-kill, kernel stacks
+  (64 KiB), and the cxxrt delta. **Fix (`9159e86`)**: per-page validation at all three
+  sites (validate exactly the page of each byte before the load; stop at NUL) — w6's
+  long-argv purpose (`sh -c '<recipe>'`) unaffected; probe commit `ac59b9c` kept in
+  history. Verified: A/B unfixed 6/6 FAIL ↔ fixed 3/3 PASS (`exec_ok=8`); VM test-arm ×3
+  PASS; local ARM wave PASS + marker rc=0; unit gates 318/0 ARM + x64 clean. Battery
+  round 7 launched on `bd58474`. **Queued:** re-cut the frozen-acceptance RC on the final
+  tip after the last red is merged (w7's loop runs the 288995c lineage). Skills updated
+  (kernel-constraints #7 whole-cap-check pitfall; run-tests host-vs-ARM battery-log
+  attribution pitfall).
+
 - **2026-10-14 — Battery round 6: local = host/arm/x64 green, wave WEDGED (guest CPU-dead
   after GREPTEST's full pass; `WAVE_ARM_RC=124`; first LOCAL wedge, b4-class) → single-tier
   rerun = rc=0, marker present, but the rerun ALSO hit `TORTURE exec-wait-cycles FAIL`
