@@ -8,16 +8,19 @@
 #           /BOOT, then / (uppercased, .BIN appended when absent);
 #   <args>  is passed verbatim to the tool.
 #
+# w4-src: every stage runs the in-OS GNU make THROUGH the in-OS shell
+# (SH.BIN + /SRC/SELFHOST.SH) so the build runs with cwd=/SRC.  The driver
+# itself spawns tools from cwd "/" — every HobbyOS process starts with
+# cwd=/ (src/kernel/process.c) — and `make -f Makefile.hobbyos <target>`
+# needs the /SRC working directory for its relative src/... references
+# (the frozen acceptance command).  SELFHOST.SH does `cd /SRC` then
+# `/TOOLS/MAKE.BIN -f Makefile.hobbyos "$1"`; sh script mode + the cd
+# builtin + external execution are all proven (sh.c script mode, builtits).
+#
 # The stages mirror acceptance.md S0..S3 (the in-OS build).  S4/S5 are host
 # side (extract OUT.IMG and boot it) and belong to the verify loop, not this
 # script.
-#
-# Wave-2 reality: no in-OS make/clang exists yet, so MAKE.BIN resolves
-# nowhere and the driver reports a CLEAN staged failure at s0 (rc=127,
-# [SELFHOST] phase=s0-check-fail + ABORT) instead of hanging.  When the
-# toolchain lands, the make binary drops into /TOOLS and the same script
-# runs the real build.
-s0-check|MAKE.BIN|-f Makefile.hobbyos check
-s1-user|MAKE.BIN|-f Makefile.hobbyos user
-s2-kernel|MAKE.BIN|-f Makefile.hobbyos kernel
-s3-disk|MAKE.BIN|-f Makefile.hobbyos disk
+s0-check|SH.BIN|/SRC/SELFHOST.SH check
+s1-user|SH.BIN|/SRC/SELFHOST.SH user
+s2-kernel|SH.BIN|/SRC/SELFHOST.SH kernel
+s3-disk|SH.BIN|/SRC/SELFHOST.SH disk

@@ -1,0 +1,43 @@
+{
+  "lane": "w4-src",
+  "wave": 4,
+  "status": "complete",
+  "gates": {
+    "make_disk_img_green": null,
+    "disk_img_src_staged": {
+      "files": 226,
+      "bytes": 2771368,
+      "note": "selfhost-stage.sh --src on a 1 GiB scratch image (pre-build, carried products warn-skipped); see mdir evidence"
+    },
+    "s0_dry_run": null,
+    "s1_attempt": null,
+    "units": null
+  },
+  "ad9_decision": {
+    "id": "AD-9",
+    "decision": "STAGE_LIBCXX defaults OFF (0) for acceptance/source staging",
+    "evidence": [
+      "check TU = src/kernel/main.c (C, KERNEL_CFLAGS) — no C++",
+      "user set = HELLO/SH/LS/CAT, all C, link the carried libc.a — no C++",
+      "kernel = 59 C/asm TUs — no C++",
+      "DESKTOP (S5 desktop-path requirement) is C (src/user/desktop.c, built with USER_CFLAGS + X11_INC)",
+      "only CXX_LIBCXX_USER_FLAGS programs (browser/ICU/libcxx tiers) reference the libcxx include tree — none in the acceptance set",
+      "frozen in Makefile.hobbyos header, tools/selfhost-stage.sh STAGE_LIBCXX default, acceptance.md §2 + §7"
+    ],
+    "flip_condition": "STAGE_LIBCXX=1 when a C++ TU enters the in-OS user set"
+  },
+  "summary": "",
+  "blockers": [],
+  "next_steps": [],
+  "files": [
+    "Makefile.hobbyos (new, v1 — L4-sketch build driver)",
+    "tools/selfhost-stage.sh (new --src mode; AD-9 STAGE_LIBCXX=0 default; SELFHOST.SH staging)",
+    "Makefile (disk.img recipe: one --src line after --tools)",
+    "src/user/selfhost/SELFHOST.RUN (stages now run via SH.BIN + SELFHOST.SH so cwd=/SRC)",
+    "src/user/selfhost/SELFHOST.SH (new, cwd wrapper)",
+    "docs/selfhost/acceptance.md (AD-9 freeze sync: §2 libcxx row + §7 Q1)",
+    "docs/selfhost/lanes/w4-src-evidence.md",
+    "docs/selfhost/lanes/w4-src-report.json"
+  ],
+  "notes": ""
+}

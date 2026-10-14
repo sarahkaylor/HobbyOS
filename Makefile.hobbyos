@@ -1,0 +1,201 @@
+# Makefile.hobbyos — the in-OS build driver, v1 (lane w4-src, wave 4).
+#
+# Executed INSIDE HobbyOS by the in-OS GNU make port (/TOOLS/MAKE.BIN),
+# usually as `make -f Makefile.hobbyos <check|user|kernel|disk|all>`
+# (acceptance.md §1, targets F3).  The driver's shell contract (L4 audit
+# §6) is baked in:
+#   - SHELL=/TOOLS/SH.BIN, one command per recipe line (sh -c per line);
+#   - no $(shell), no $(wildcard), no implicit-rule reliance: every source
+#     file is enumerated explicitly below;
+#   - absolute /TOOLS/*.BIN command paths (sh has no PATH search for /TOOLS);
+#   - no /dev/null (does not exist on FAT);
+#   - `-isystem /TOOLS/RESDIR/include` for clang's builtin headers (AD-5),
+#     replacing the host's `-print-resource-dir` $(shell);
+#   - every heavy step echoes the acceptance marker vocabulary
+#     (acceptance.md §1: phase=s0-check-*, s1-user-*, s2-kernel-*,
+#     s3-disk-*, all-done) with make's rc so failures show in-band.
+#
+# Paths are relative (src/...) exactly as the frozen acceptance text and the
+# L4 sketch spell them: the stage scripts that drive make cd /SRC first
+# (SELFHOST-Sn.SH, staged with SELFHOST.RUN), so the build always runs with
+# cwd=/SRC and these relative names resolve.
+#
+# AD-9 freeze (wave-4, w4-src): STAGE_LIBCXX defaults to 0 for acceptance /
+# source staging.  Evidence: every TU in the S0..S3 in-OS path is C
+# (check=kernel main.c; user=HELLO/SH/LS/CAT which link the carried libc.a;
+# kernel=59 C/asm TUs; DESKTOP for the S5 path is C, built with USER_CFLAGS,
+# src/user/desktop.c).  No recipe line references the libcxx include tree
+# (only CXX_LIBCXX_USER_FLAGS programs outside the acceptance set do).  Any
+# future C++ TU in the in-OS user set re-enables STAGE_LIBCXX=1 at staging.
+#
+# v1 keeps the L4 sketch's structure; the make-port lane's later file
+# (w4-make / M4) re-derives the kernel list from the host Makefile's
+# C_SRCS/ASM_SRCS wildcards and adds the in-OS libc rebuild.
+
+SHELL       := /TOOLS/SH.BIN
+# Make-level determinism (no shell involvement): disable GNU make's
+# builtin implicit rules and variables as early as possible so no builtin
+# %-rule (e.g. the %.a archive rule) can fire in-OS.
+MAKEFLAGS   += -r -R
+.PHONY: check user kernel disk all
+CC          := /TOOLS/CLANG.BIN
+LD          := /TOOLS/LLD.BIN
+OBJCOPY     := /TOOLS/OBJCOPY.BIN
+AR          := /TOOLS/LLVMAR.BIN
+MKFSFAT     := /TOOLS/MKFSFAT.BIN
+MMD         := /TOOLS/MMD.BIN
+MCOPY       := /TOOLS/MCOPY.BIN
+RM          := /TOOLS/RM.BIN
+RESDIR      := /TOOLS/RESDIR/include
+
+ARCH        := aarch64-none-elf
+OBJDIR      := /SRC/obj
+TARGET      := /SRC/hobbyos.elf
+BIN         := /SRC/hobbyos.bin
+OUTIMG      := /SRC/OUT.IMG
+# OUT.IMG size freeze (acceptance.md §3.1 + §8.1): 128 MiB FAT16.  The
+# ported MKFSFAT's -C BLOCKS argument is in 1024-byte units
+# (w2-mkfs-report.json), so 128 MiB = 134217728/1024 = 131072.
+DISK_BLOCKS := 131072
+
+# -- flags verbatim from the host Makefile (kernel :183, user :189) plus
+#    -isystem $(RESDIR) per AD-5 (the kernel resolves <stdint.h> from the
+#    clang resource dir; in-OS it is /TOOLS/RESDIR/include) ------------
+KERNEL_CFLAGS := -O2 -Wall -Wextra -g -Isrc/include \
+                 --target=$(ARCH) -ffreestanding -mcpu=cortex-a53 \
+                 -mgeneral-regs-only -isystem $(RESDIR)
+USER_CFLAGS   := -O2 -Wall -Wextra -g -Isrc/user_include \
+                 -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include \
+                 --target=$(ARCH) -ffreestanding -mcpu=cortex-a53 \
+                 -isystem $(RESDIR)
+# (kernel is C + asm only.  The CXX policy flags are deliberately absent in
+#  v1: no C++ TU is in the acceptance set — AD-9, see header.)
+
+# -- kept source sets (enumerated; ARM-only, measured on the w4 worktree:
+#    59 kernel TUs = 47 top-level .c + 9 arch/arm/.c + 3 arch/arm/.s) --
+KERNEL_C_TOP := \
+  dhcp.c fat16.c fat16_test.c frame.c frame_test.c fs.c fs_test.c iommu_vtd.c \
+  ipc_proto.c locks_test.c main.c math_test.c mmu_test.c net.c net_rdma.c \
+  net_rdma_test.c net_test.c nfs.c nfs_proto.c nfs_test.c pipe.c pipe_test.c \
+  process.c process_test.c program_loader.c program_loader_test.c test_fw_cfg.c \
+  test_smp.c time.c time_test.c timer_test.c trap_test.c unit_test.c unix.c \
+  unix_test.c vfs.c virtio_blk.c virtio_blk_test.c virtio_gpu.c \
+  virtio_gpu_test.c virtio_gpu_x64.c virtio_input.c virtio_input_test.c \
+  virtio_net.c virtio_net_test.c vm.c vm_test.c
+KERNEL_C_ARM := \
+  cpu.c gic.c locks.c mmu.c rtc.c smp.c timer.c trap.c uart.c
+KERNEL_ASM := \
+  boot.s fpu.s setjmp.s
+
+# Objects live flat in obj/arm (arch TUs use flat names too — cpu.o, not
+# arch/arm/cpu.o — so the explicit link list stays simple and collisions
+# with top-level TUs cannot occur: the basename sets are disjoint).
+KERNEL_OBJS := $(patsubst %.c,$(OBJDIR)/arm/%.o,$(KERNEL_C_TOP)) \
+               $(patsubst %.c,$(OBJDIR)/arm/%.o,$(KERNEL_C_ARM)) \
+               $(patsubst %.s,$(OBJDIR)/arm/%.o,$(KERNEL_ASM))
+
+# user set (AD-9 acceptance): HELLO SH LS CAT.  v1 links each against the
+# prebuilt libc archive carried in the payload (/SRC/obj/arm/libc.a), per
+# the L4 sketch; the in-OS libc rebuild is the make-port lane's follow-up.
+USER_C     := src/user/hello.c src/user/sh.c src/user/sh_aux.c \
+              src/user/ls.c src/user/cat.c
+USER_OBJS  := $(patsubst src/user/%.c,$(OBJDIR)/arm/%.o,$(USER_C))
+USER_BINS  := HELLO.BIN SH.BIN LS.BIN CAT.BIN
+
+# Dropped groups (v1): browser/ICU/libcxx, python tiers, E2E, screenshots,
+# x64 branch, tests.  stage has all dirs precreated (/SRC, /SRC/obj,
+# /SRC/obj/arm) so recipes never mkdir an existing dir (MKDIR.BIN fails on
+# EEXIST; the FAT mkdir is one-level — L4 sketch option (b)).
+
+# -- kernel object rules (pattern rules; one command per line) ---------
+$(OBJDIR)/arm/%.o: src/kernel/%.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/%.o: src/kernel/arch/arm/%.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/%.o: src/kernel/arch/arm/%.s
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-ascompile rc=$$?"
+
+# -- user object rules -------------------------------------------------
+$(OBJDIR)/arm/hello.o: src/user/hello.c
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=user-compile rc=$$?"
+
+$(OBJDIR)/arm/sh.o: src/user/sh.c
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=user-compile rc=$$?"
+
+$(OBJDIR)/arm/sh_aux.o: src/user/sh_aux.c
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=user-compile rc=$$?"
+
+$(OBJDIR)/arm/ls.o: src/user/ls.c
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=user-compile rc=$$?"
+
+$(OBJDIR)/arm/cat.o: src/user/cat.c
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=user-compile rc=$$?"
+
+# -- frozen targets ----------------------------------------------------
+# S0 — one-TU compile smoke (acceptance.md §1): compile the L4 sketch's
+# designated TU (src/kernel/main.c) with the kernel flags, no link.
+check:
+	@echo "[SELFHOST] phase=s0-check-start"
+	$(CC) $(KERNEL_CFLAGS) -c src/kernel/main.c -o $(OBJDIR)/arm/check.o
+	@echo "[SELFHOST] phase=s0-check-done rc=$$?"
+
+# S1 — the acceptance user set (AD-9 HELLO SH LS CAT), compiled + linked
+# against the carried libc archive (host shape: crt0.o is inside libc.a).
+user: $(USER_OBJS) $(OBJDIR)/arm/libc.a
+	@echo "[SELFHOST] phase=s1-user-start"
+	$(LD) -T src/user/linker.ld -o $(OBJDIR)/arm/sh.elf $(OBJDIR)/arm/sh.o $(OBJDIR)/arm/sh_aux.o $(OBJDIR)/arm/libc.a
+	$(OBJCOPY) -O binary $(OBJDIR)/arm/sh.elf $(OBJDIR)/arm/SH.BIN
+	$(LD) -T src/user/linker.ld -o $(OBJDIR)/arm/ls.elf $(OBJDIR)/arm/ls.o $(OBJDIR)/arm/libc.a
+	$(OBJCOPY) -O binary $(OBJDIR)/arm/ls.elf $(OBJDIR)/arm/LS.BIN
+	$(LD) -T src/user/linker.ld -o $(OBJDIR)/arm/cat.elf $(OBJDIR)/arm/cat.o $(OBJDIR)/arm/libc.a
+	$(OBJCOPY) -O binary $(OBJDIR)/arm/cat.elf $(OBJDIR)/arm/CAT.BIN
+	$(LD) -T src/user/linker.ld -o $(OBJDIR)/arm/hello.elf $(OBJDIR)/arm/hello.o $(OBJDIR)/arm/libc.a
+	$(OBJCOPY) -O binary $(OBJDIR)/arm/hello.elf $(OBJDIR)/arm/HELLO.BIN
+	@echo "[SELFHOST] phase=s1-user-done rc=$$?"
+
+# S2 — the kernel, in-OS: all 59 TUs, then the lld link + objcopy.
+kernel: $(KERNEL_OBJS)
+	@echo "[SELFHOST] phase=s2-kernel-start"
+	@echo "[SELFHOST] phase=kernel-link-start"
+	$(LD) -T linker.ld -o $(TARGET) $(KERNEL_OBJS)
+	@echo "[SELFHOST] phase=kernel-link-done rc=$$?"
+	$(OBJCOPY) -O binary $(TARGET) $(BIN)
+	@echo "[SELFHOST] phase=s2-kernel-done rc=$$?"
+
+# S3 — assemble OUT.IMG in-OS (acceptance.md §8.1 layout: the layout that
+# actually boots under AAVMF/Limine).  User bins come from the S1 build;
+# DESKTOP/CONSOLE/SH and the OUTMARK marker are carried host-built products
+# staged under /SRC/bin (the desktop-path requirement, acceptance §8.3).
+disk: kernel user
+	@echo "[SELFHOST] phase=s3-disk-start"
+	$(RM) -f $(OUTIMG)
+	$(MKFSFAT) -F 16 -C $(OUTIMG) $(DISK_BLOCKS)
+	$(MMD) -i $(OUTIMG) ::/boot
+	$(MMD) -i $(OUTIMG) ::/EFI
+	$(MMD) -i $(OUTIMG) ::/EFI/BOOT
+	$(MCOPY) -i $(OUTIMG) $(BIN) ::/boot/hobbyos.bin
+	$(MCOPY) -i $(OUTIMG) limine.conf ::/boot/limine.conf
+	$(MCOPY) -i $(OUTIMG) bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
+	$(MCOPY) -i $(OUTIMG) $(OBJDIR)/arm/HELLO.BIN ::/HELLO.BIN
+	$(MCOPY) -i $(OUTIMG) $(OBJDIR)/arm/SH.BIN ::/SH.BIN
+	$(MCOPY) -i $(OUTIMG) $(OBJDIR)/arm/LS.BIN ::/LS.BIN
+	$(MCOPY) -i $(OUTIMG) $(OBJDIR)/arm/CAT.BIN ::/CAT.BIN
+	$(MCOPY) -i $(OUTIMG) bin/DESKTOP.BIN ::/DESKTOP.BIN
+	$(MCOPY) -i $(OUTIMG) bin/CONSOLE.BIN ::/CONSOLE.BIN
+	$(MCOPY) -i $(OUTIMG) bin/SH.BIN ::/bin/SH.BIN
+	$(MCOPY) -i $(OUTIMG) $(OBJDIR)/arm/HELLO.BIN ::/OUTPROG.BIN
+	$(MCOPY) -i $(OUTIMG) bin/OUTMARK.TXT ::/OUTMARK.TXT
+	@echo "[SELFHOST] phase=s3-disk-done rc=$$?"
+
+all: check user kernel disk
+	@echo "[SELFHOST] phase=all-done rc=$$?"
