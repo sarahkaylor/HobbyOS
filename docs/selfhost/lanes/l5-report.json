@@ -1,0 +1,48 @@
+{
+  "lane": "l5",
+  "status": "complete",
+  "commits": [
+    "5123413",
+    "3a5a12b"
+  ],
+  "artifacts": [
+    "tools/selfhost-stage.sh",
+    "docs/selfhost/acceptance.md",
+    "docs/selfhost/lanes/l5-stage-test-a.md",
+    "docs/selfhost/lanes/l5-tcg-boot-timing.md",
+    "docs/selfhost/lanes/l5-report.json"
+  ],
+  "evidence": [
+    "docs/selfhost/lanes/l5-stage-test-a.md (committed curated transcript; raw at ~/.hermes/cache/scratch/l5/stage-test-a.transcript.txt)",
+    "docs/selfhost/lanes/l5-tcg-boot-timing.md (committed; raw serials at ~/.hermes/cache/scratch/l5/boot-smoke*.serial)",
+    "~/.hermes/cache/scratch/l5/disk-real-copy.img (staged 1 GiB real-disk copy; original untouched)",
+    "~/.hermes/cache/scratch/l5/test-b-real-disk.transcript.txt (test B raw transcript)",
+    "workstation mdir re-measure: 174 files / 133,032,359 B used / 938,786,816 B free"
+  ],
+  "sizes": {
+    "payload_bytes": 30108339,
+    "payload_files": 2322,
+    "payload_8_3_excess": 1362,
+    "libcxx_include_files": 1681,
+    "libcxx_include_bytes": 12286278,
+    "disk_free_bytes": 938786816,
+    "disk_used_bytes": 133032359,
+    "boot_to_kernel_marker_seconds_tcg": 9,
+    "host_clang_kernel_tu_seconds": "0.06-0.59 (main/program_loader/fat16)",
+    "outimg_proposal": "128 MiB FAT16 (content ~4 MiB; 64 MiB floor noted, 256 MiB ceiling)"
+  },
+  "blockers": [],
+  "next_steps": [
+    "harness lane: implement run_selfhost_build_test.py per acceptance.md section 5 — SELFHOST.BIN + MODE=selfhost primary drive (serial-console fd, JSC/WEBPROC precedent), QMP keystroke fallback",
+    "M3 freeze items: AD-9 set (flips STAGE_LIBCXX default), OUT.IMG size = 128 MiB, mkfs.fat byte-match bar, dd replacement = ftruncate-only",
+    "L1: exact /TOOLS + RESDIR sizes (feeds section 3 budget); L3: gate in-OS LFN read of the staged deep tree (mtools wrote; kernel must read)",
+    "wave-2 mtools port: mmd does not create parents, mdel -r does not exist (mdeltree), mcopy does not create destination parents — TODO list for the port lane",
+    "parent: sync workstation src/user_include/graphics/theme.h (tracked on ws main 0a3d073, absent from wave seed) on the next merge"
+  ],
+  "notes": "Staging first cut tested on (A) a scratch FAT16 image and (B) a copy of the real 1 GiB disk.img — both EXIT 0, LFN tree arrival verified via mdir + mtype/sha256 content spot-checks (program_loader.c, sh.c, libcxx __config, limine.conf prefix all MATCH). Payload = 2322 files / 30,108,339 B = 613 src + 26 tools + 1 EFI + 1 limine.conf + 1681 libcxx-include (exact arithmetic); 1362/2322 basenames exceed 8.3 (informational for F8). Real-disk staging consumed ~58 MiB of the 1 GiB image (2.02x slack at 32 KiB clusters — feeds the OUT.IMG cluster math). mkfs.fat is on the agent command blocklist, so the scratch image was formatted with mtools mformat instead (BPB verified FAT16: bps=512 spc=8 fatsize=256); the in-OS MKFSFAT port is unaffected. Boot under MTTCG measured: 'Booting AArch64 OS' + 'Mode: DESKTOP' both ~9 s (1 s poll granularity). Host-clang kernel-TU times 0.06-0.59 s -> serial whole-kernel ~18-28 s host; TCG multiplier marked VERIFY until M2. Drive-mechanism decision (acceptance.md 5.2): keystrokes into the desktop console/shell are the proven precedent (run_console_test.py QMP input-send-event) but a wav-2 SELFHOST.BIN driver with the console-fd fallback is recommended primary so [SELFHOST] markers land on serial. hobytest CI: hobbyos-ci.sh EXISTS at ~/bin on the VM (verified via ssh; marker-gated, fresh-copy-per-label); workstation ~/bin empty. Shared-host hygiene observed: only fuser -k <own-image> used; another lane's QEMU left untouched. Two files exist on the workstation tree but not the wave seed (l5-stage-test-a.md 3): src/user/actual_qemu.ppm (untracked byproduct — correctly excluded) and src/user_include/graphics/theme.h (tracked on ws main tip; parent merge concern). Disk free drifted 939,114,496 -> 938,786,816 B mid-wave because a concurrent desktop VM writes temp files to the live disk.img.",
+  "open_questions_for_M3": [
+    "freeze AD-9 (C++ in the set flips STAGE_LIBCXX default)",
+    "who owns MODE=selfhost + SELFHOST.BIN (harness lane vs kernel lane)",
+    "exact in-OS hobbyos.bin size after S2 (feeds OUT.IMG content budget)"
+  ]
+}

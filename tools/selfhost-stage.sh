@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+#
+# selfhost-stage.sh — stage the in-OS build payload into a FAT16 disk image.
+#
+# HOST-side tool for the HobbyOS self-hosting program (lane L5, wave 1).  It
+# copies the payload that the in-OS toolchain needs (frozen interface F2) into
+# /SRC on a FAT16 image, using mtools (mcopy -s for recursive/creates dirs,
+# mmd for directories).  It is idempotent: with -f it replaces an existing /SRC.
+#
+# Usage:
+#   tools/selfhost-stage.sh [-f] [image]
+#     -f      force: replace any existing /SRC on the image (recursive delete
+#             + fresh copy).  Without -f, an image that already has /SRC is
+#             left untouched and the script aborts.
+#     image   FAT16 image path (default: disk.img).  Must exist and be a
+#             formatted FAT filesystem (e.g. created with mkfs.fat -F 16).
+#
+# Payload (frozen F2 shape, refined with measurements from the workstation
+# tree on 2026-10-14 — see docs/selfhost/acceptance.md §2):
+#   /SRC/src/**                   615 files, 22.33 MiB   (real source tree, AD-11)
+#   /SRC/Makefile.hobbyos         (optional — absent today, warned if missing)
+#   /SRC/tools/**                  26 files, 0.37 MiB   (small host-side tools)
+#   /SRC/bootloader/BOOTAA64.EFI   (1 file, 308 KiB — the only EFI the in-OS
+#                                   disk recipe mounts; other arch EFIs are not
+#                                   part of the ARM acceptance)
+#   /SRC/limine.conf               (template, copied verbatim from the Makefile
+#                                   arm branch, Makefile:1763-1768)
+#   /SRC/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include/**
+#                                  (C++ acceptance set only; 1681 files,
+#                                   11.72 MiB; skip with STAGE_LIBCXX=0)
+#
+# Output: a size report (mdir totals | files | bytes) and an informational
+# count of payload entries whose basenames exceed FAT 8.3 (informational for
+# F8; long names are written for real — LFN is proven, lane L3).
+#
+# Exits non-zero on any mcopy/mmd failure.
+#
+# HOST script — bash is fine, but keep it shell-conservative.
+
+set -u
+
+IMAGE="disk.img"
+FORCE=0
+if [ "${1:-}" = "-f" ]; then
+  FORCE=1
+  IMAGE="${2:-disk.img}"
+elif [ -n "${1:-}" ]; then
+  IMAGE="$1"
+fi
+
+# Payload root = repo root (this script lives in tools/).
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO_ROOT"
+
+LIBCXX_INC="${LIBCXX_INC_DIR:-third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include}"
+STAGE_LIBCXX="${STAGE_LIBCXX:-1}"
+
+fail() { echo "selfhost-stage: ERROR: $*" >&2; exit 1; }
+warn() { echo "selfhost-stage: WARNING: $*" >&2; }
+
+for t in mcopy mmd mdir mdeltree; do
+  command -v "$t" >/dev/null 2>&1 || fail "required tool not found: $t"
+done
+
+[ -f "$IMAGE" ] || fail "image not found: $IMAGE (create it, e.g. truncate -s 256M scratch.img && mkfs.fat -F 16 scratch.img)"
+
+# ---- does /SRC already exist? (mdir returns 0 even on empty, so probe the dir) ----
+if mdir -i "$IMAGE" ::/SRC >/dev/null 2>&1; then
+  if [ "$FORCE" -ne 1 ]; then
+    fail "image '$IMAGE' already contains /SRC — pass -f to replace it (idempotent)"
+  fi
+  echo "selfhost-stage: replacing existing /SRC on $IMAGE"
+  mdeltree -i "$IMAGE" ::/SRC 2>/dev/null || fail "could not delete existing /SRC (mdeltree)"
+fi
+
+# ---- payload sources (tolerate absence of the optional ones) ----
+[ -d src ] || fail "no src/ at repo root ($REPO_ROOT) — run from the repo root"
+[ -d tools ] || warn "tools/ missing — skipping payload tools/**"
+[ -f bootloader/BOOTAA64.EFI ] || warn "bootloader/BOOTAA64.EFI missing — skipping"
+[ -f Makefile.hobbyos ] || warn "Makefile.hobbyos absent (lands in a later wave) — staging without it"
+if [ "$STAGE_LIBCXX" = "1" ]; then
+  [ -d "$LIBCXX_INC" ] || warn "libcxx include subset missing — skipping C++ set (STAGE_LIBCXX=0 to silence)"
+else
+  echo "selfhost-stage: STAGE_LIBCXX=0 — skipping C++ libcxx include subset"
+fi
+
+# ---- dry-run 8.3 excess count + file/byte pre-count on the payload ----
+# (basename violates 8.3 if the stem is >8 chars or the extension >3 chars)
+count_83_excess() {
+  find "$@" \( -type f -o -type l \) -printf '%f\n' 2>/dev/null | awk '
+    {
+      b=$0; e="";
+      if (match(b, /\.[^.]*$/)) { e=substr(b, RSTART+1); b=substr(b, 1, RSTART-1) }
+      if (length(b) > 8 || length(e) > 3) n++
+    }
+    END { print n+0 }'
+}
+
+payload_files=0
+payload_bytes=0
+add_payload() {  # add_payload <files> <bytes>
+  payload_files=$((payload_files + $1))
+  payload_bytes=$((payload_bytes + $2))
+}
+
+# ---- stage the tree ----
+mmd -i "$IMAGE" ::/SRC || fail "mmd ::/SRC"
+
+# mmkdir_p — create a directory path on the image one component at a time
+# (mtools 4.x mmd does not create parent dirs, and mcopy will not create the
+# destination's parent chain either).
+mmkdir_p() {
+  local p="$1" cur="" comp
+  p="${p#::}"
+  while [ -n "$p" ]; do
+    p="${p#/}"
+    comp="${p%%/*}"
+    [ -z "$comp" ] && break
+    cur="$cur/$comp"
+    if ! mdir -i "$IMAGE" "$cur" >/dev/null 2>&1; then
+      mmd -i "$IMAGE" "$cur" || { echo "mmd failed: $cur" >&2; return 1; }
+    fi
+    p="${p#$comp}"
+  done
+  return 0
+}
+
+copy_tree() {  # copy_tree <src-dir> <dest-parent-on-image> — copies the dir ITSELF (dir/<basename>)
+  local src="$1" dst="$2"
+  [ -d "$src" ] || return 0
+  # mcopy -s <dir> <existing-dir/> copies the directory into the target as
+  # <target>/<basename>; the ./ guard makes the directory-target explicit.
+  mcopy -s -i "$IMAGE" "$src" "$dst/./" || { echo "mcopy failed for $src" >&2; return 1; }
+  local cnt bytes
+  cnt=$(find "$src" -type f | wc -l)
+  bytes=$(du -sb "$src" | awk '{print $1}')
+  add_payload "$cnt" "$bytes"
+}
+
+copy_tree src "::/SRC" || exit 1
+copy_tree tools "::/SRC" || exit 1
+
+if [ -f Makefile.hobbyos ]; then
+  mcopy -i "$IMAGE" Makefile.hobbyos ::/SRC/Makefile.hobbyos || exit 1
+  add_payload 1 "$(stat -c %s Makefile.hobbyos)"
+fi
+
+if [ -f bootloader/BOOTAA64.EFI ]; then
+  mmd -i "$IMAGE" ::/SRC/bootloader 2>/dev/null || true
+  mcopy -i "$IMAGE" bootloader/BOOTAA64.EFI ::/SRC/bootloader/BOOTAA64.EFI || exit 1
+  add_payload 1 "$(stat -c %s bootloader/BOOTAA64.EFI)"
+fi
+
+# limine.conf template — verbatim arm branch of the disk recipe (Makefile:1763-1768)
+mmd -i "$IMAGE" ::/SRC 2>/dev/null || true
+printf 'timeout: 0\ndefault_entry: 1\n\n/HobbyOS (ARM AArch64)\nprotocol: linux\npath: boot():/boot/hobbyos.bin\n' | \
+  mcopy -i "$IMAGE" - ::/SRC/limine.conf || exit 1
+add_payload 1 136
+
+if [ "$STAGE_LIBCXX" = "1" ] && [ -d "$LIBCXX_INC" ]; then
+  # The include root lands at /SRC/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include
+  local_dst="third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx"
+  mmkdir_p "::/SRC/$local_dst/include" || exit 1
+  # Copy the CONTENTS so the destination keeps the frozen name "include"
+  # regardless of the source directory's basename.
+  mcopy -s -i "$IMAGE" "$LIBCXX_INC"/* "::/SRC/$local_dst/include/" || exit 1
+  add_payload "$(find "$LIBCXX_INC" -type f | wc -l)" "$(du -sb "$LIBCXX_INC" | awk '{print $1}')"
+fi
+
+# ---- report ----
+echo
+echo "selfhost-stage: staged payload into $IMAGE"
+echo "  payload: $payload_files files, $payload_bytes bytes"
+
+excess=$(count_83_excess src tools bootloader/BOOTAA64.EFI Makefile.hobbyos "$LIBCXX_INC" 2>/dev/null)
+echo "  8.3-oversized basenames in payload: ${excess:-0} (informational for F8; LFN is proven)"
+
+echo "  --- image report (mdir totals) ---"
+mdir -i "$IMAGE" -/ ::/SRC 2>&1 | tail -6
+echo "  --- full image ---"
+mdir -i "$IMAGE" ::/ 2>&1 | tail -3
+
+echo "selfhost-stage: done"
+exit 0
