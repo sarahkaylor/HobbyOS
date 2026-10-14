@@ -683,6 +683,9 @@ static void test_fat16_clang_temp_rename_no_twins(void) {
       uint8_t attr;
       uint32_t sz;
       if (fat16_read_dir("/WB9OBJ", i, name, &attr, &sz) != 0) break;
+      if (name[0] == '.' && (name[1] == '\0' ||
+          (name[1] == '.' && name[2] == '\0')))
+        continue; /* "." and ".." */
       int found = -1;
       for (int k = 0; k < W9_N_OBJS; k++) {
         char expect[96];
@@ -723,23 +726,25 @@ static void test_fat16_83_alias_collision_lookup(void) {
 
   (void)fat16_mkdir("/WB9C"); /* tolerate a prior run's EEXIST */
 
-  /* Exact collision shape from the S2 kernel set: short 8.3 "ABCDEFGH.O"
-     plus long "ABCDEFGH_MORE.O", whose format_83 alias is the SAME 8.3
-     name (ABCDEFGH.O). */
+  /* Exact collision shape from the S2 kernel set (net_rdma.o FIRST, then
+     net_rdma_test.o): short 8.3 "ABCDEFGH.O" then long "ABCDEFGH_MORE.O",
+     whose format_83 alias is the SAME 8.3 name.  (A LONG file created first
+     would swallow the later 8.3 create under standard VFAT semantics, so
+     the 8.3 file is created first to mirror the in-OS compile order.) */
   const char *shortn = "/WB9C/ABCDEFGH.O";
   const char *longn = "/WB9C/ABCDEFGH_MORE.O";
   struct file f;
   uint8_t buf[16];
 
-  /* Long file FIRST so its alias (ABCDEFGH.O) precedes the genuine 8.3
-     entry in directory order (the old resolver's first match). */
-  EXPECT_EQ(fat16_open(longn, &f), 0);
-  for (int i = 0; i < 16; i++) buf[i] = (uint8_t)('A' + i);
+  EXPECT_EQ(fat16_open(shortn, &f), 0);
+  for (int i = 0; i < 16; i++) buf[i] = (uint8_t)('a' + i);
   EXPECT_EQ(fat16_write(&f, buf, 16), 16);
   fat16_close(&f);
 
-  EXPECT_EQ(fat16_open(shortn, &f), 0);
-  for (int i = 0; i < 16; i++) buf[i] = (uint8_t)('a' + i);
+  /* The long name has a different alias-looking short entry; both files
+     must exist as SEPARATE entries sharing the 8.3 form. */
+  EXPECT_EQ(fat16_open(longn, &f), 0);
+  for (int i = 0; i < 16; i++) buf[i] = (uint8_t)('A' + i);
   EXPECT_EQ(fat16_write(&f, buf, 16), 16);
   fat16_close(&f);
 
