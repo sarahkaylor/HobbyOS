@@ -128,10 +128,11 @@ static void check_fixtures(void) {
          dir_has("/", "longfilename.txt"));
   report("[LFN]", "read_dir / lists longfilename2.txt",
          dir_has("/", "longfilename2.txt"));
-  /* The 33-char name is capped at 31 chars by the read_dir syscall; its
-     long-name PREFIX must appear (never an 8.3 mangle like LLVM-PR~1.C). */
-  report("[LFN]", "read_dir / shows 30+ char name (31-char syscall cap)",
-         dir_has("/", "llvm-project-21.1.8.src-EXAMPLE"));
+  /* The 33-char name lives under /src; it is capped at 31 chars by the
+     read_dir syscall, so its long-name PREFIX must appear in the /src
+     listing (never an 8.3 mangle like LLVM-PR~1.C). */
+  report("[LFN]", "read_dir /src shows 30+ char name (31-char syscall cap)",
+         dir_has("/src", "llvm-project-21.1.8.src-EXAMPLE"));
 }
 
 static void check_inos_writes(void) {
