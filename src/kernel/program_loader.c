@@ -1090,7 +1090,13 @@ int proc_marshal_argv(struct process *p, char *const *argv, char *dst, int cap,
       break;
     if (argv[ai] == 0)
       break;
-    char one[64];
+    /* w6-run: one argv element can be a whole shell command line (make
+     * runs recipe lines via `sh -c '<line>'`, one long argv[2]); the
+     * original 64-byte cap truncated it to 63 chars and in-OS build
+     * commands died with "no input files".  Per-arg cap = HO_EXEC_ARGV_LEN
+     * (4096): the S2 kernel link line (~59 objects -> ~1.3 KB) is a single
+     * argv element; the whole blob stays bounded by the same constant. */
+    char one[HO_EXEC_ARGV_LEN];
     if (!pl_strcpy(p, (const char *)argv[ai], one, sizeof one))
       break;
     if (pos >= cap - 1)

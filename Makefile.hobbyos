@@ -39,7 +39,12 @@ SHELL       := /TOOLS/SH.BIN
 MAKEFLAGS   += -r -R
 .PHONY: check user kernel disk all
 CC          := /TOOLS/CLANG.BIN
-LD          := /TOOLS/LLD.BIN
+# lld v21 is the UNIFIED driver: invoked as bare `lld` (our frozen /TOOLS
+# name LLD.BIN) it refuses with "lld is a generic driver. Invoke ld.lld
+# (Unix)..." (w6-run finding, first in-OS link).  -flavor gnu selects the
+# ELF/Unix driver explicitly — the host Makefile gets this for free via
+# the ld.lld symlink, the flat staged binary cannot rely on argv[0].
+LD          := /TOOLS/LLD.BIN -flavor gnu
 OBJCOPY     := /TOOLS/OBJCOPY.BIN
 AR          := /TOOLS/LLVMAR.BIN
 MKFSFAT     := /TOOLS/MKFSFAT.BIN
@@ -94,6 +99,13 @@ KERNEL_OBJS := $(patsubst %.c,$(OBJDIR)/arm/%.o,$(KERNEL_C_TOP)) \
                $(patsubst %.c,$(OBJDIR)/arm/%.o,$(KERNEL_C_ARM)) \
                $(patsubst %.s,$(OBJDIR)/arm/%.o,$(KERNEL_ASM))
 
+# w6-run: lld response file for the kernel link — the 59-object argv (66+
+# words) exceeds the crt0 positional-arg cap (CRT0_MAX_ARGS 32, flat-args
+# fallback), so the linker reads the object list from @/SRC/OBJS.RSP
+# instead.  Written HERE at parse time (make's $(file ...) function — no
+# shell, no argv), once per invocation, before any target runs.
+$(file > /SRC/OBJS.RSP,$(KERNEL_OBJS))
+
 # user set (AD-9 acceptance): HELLO SH LS CAT.  v1 links each against the
 # prebuilt libc archive carried in the payload (/SRC/obj/arm/libc.a), per
 # the L4 sketch; the in-OS libc rebuild is the make-port lane's follow-up.
@@ -107,18 +119,254 @@ USER_BINS  := HELLO.BIN SH.BIN LS.BIN CAT.BIN
 # /SRC/obj/arm) so recipes never mkdir an existing dir (MKDIR.BIN fails on
 # EEXIST; the FAT mkdir is one-level — L4 sketch option (b)).
 
-# -- kernel object rules (pattern rules; one command per line) ---------
-$(OBJDIR)/arm/%.o: src/kernel/%.c
+# -- kernel object rules (EXPLICIT targets; w6-run) --------
+# In-OS flaw (w6-run, evidenced by make -d + the s2ls probe): the in-OS
+# FAT driver reports 8.3-clean names in UPPERCASE (readdir), and GNU
+# make's PATTERN-rule prereq existence check is a case-SENSITIVE
+# dir-cache compare, so `$(OBJDIR)/arm/%.o: src/kernel/%.c` always ends
+# 'No rule to make target'.  Explicit rules use stat() (case-insensitive
+# on FAT) and build correctly; the header's no-implicit-rule intent is
+# now literal.  One command per line, as required.
+
+$(OBJDIR)/arm/dhcp.o: src/kernel/dhcp.c
 	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
 	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
 
-$(OBJDIR)/arm/%.o: src/kernel/arch/arm/%.c
+$(OBJDIR)/arm/fat16.o: src/kernel/fat16.c
 	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
 	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
 
-$(OBJDIR)/arm/%.o: src/kernel/arch/arm/%.s
+$(OBJDIR)/arm/fat16_test.o: src/kernel/fat16_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/frame.o: src/kernel/frame.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/frame_test.o: src/kernel/frame_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/fs.o: src/kernel/fs.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/fs_test.o: src/kernel/fs_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/iommu_vtd.o: src/kernel/iommu_vtd.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/ipc_proto.o: src/kernel/ipc_proto.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/locks_test.o: src/kernel/locks_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/main.o: src/kernel/main.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/math_test.o: src/kernel/math_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/mmu_test.o: src/kernel/mmu_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/net.o: src/kernel/net.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/net_rdma.o: src/kernel/net_rdma.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/net_rdma_test.o: src/kernel/net_rdma_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/net_test.o: src/kernel/net_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/nfs.o: src/kernel/nfs.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/nfs_proto.o: src/kernel/nfs_proto.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/nfs_test.o: src/kernel/nfs_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/pipe.o: src/kernel/pipe.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/pipe_test.o: src/kernel/pipe_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/process.o: src/kernel/process.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/process_test.o: src/kernel/process_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/program_loader.o: src/kernel/program_loader.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/program_loader_test.o: src/kernel/program_loader_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/test_fw_cfg.o: src/kernel/test_fw_cfg.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/test_smp.o: src/kernel/test_smp.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/time.o: src/kernel/time.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/time_test.o: src/kernel/time_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/timer_test.o: src/kernel/timer_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/trap_test.o: src/kernel/trap_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/unit_test.o: src/kernel/unit_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/unix.o: src/kernel/unix.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/unix_test.o: src/kernel/unix_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/vfs.o: src/kernel/vfs.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/virtio_blk.o: src/kernel/virtio_blk.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/virtio_blk_test.o: src/kernel/virtio_blk_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/virtio_gpu.o: src/kernel/virtio_gpu.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/virtio_gpu_test.o: src/kernel/virtio_gpu_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/virtio_gpu_x64.o: src/kernel/virtio_gpu_x64.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/virtio_input.o: src/kernel/virtio_input.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/virtio_input_test.o: src/kernel/virtio_input_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/virtio_net.o: src/kernel/virtio_net.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/virtio_net_test.o: src/kernel/virtio_net_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/vm.o: src/kernel/vm.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/vm_test.o: src/kernel/vm_test.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/cpu.o: src/kernel/arch/arm/cpu.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/gic.o: src/kernel/arch/arm/gic.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/locks.o: src/kernel/arch/arm/locks.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/mmu.o: src/kernel/arch/arm/mmu.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/rtc.o: src/kernel/arch/arm/rtc.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/smp.o: src/kernel/arch/arm/smp.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/timer.o: src/kernel/arch/arm/timer.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/trap.o: src/kernel/arch/arm/trap.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/uart.o: src/kernel/arch/arm/uart.c
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-compile rc=$$?"
+
+$(OBJDIR)/arm/boot.o: src/kernel/arch/arm/boot.s
 	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
 	@echo "[SELFHOST] phase=kernel-ascompile rc=$$?"
+
+# F1.5 caveat (mirror of the host Makefile:662-676): fpu.s is the ONE kernel
+# TU allowed to touch the FP/SIMD register file; clang's assembler rejects
+# `ldp q22,q23…`/`msr fpcr` under -mgeneral-regs-only, so fpu.o drops it.
+$(OBJDIR)/arm/fpu.o: src/kernel/arch/arm/fpu.s
+	$(CC) $(filter-out -mgeneral-regs-only,$(KERNEL_CFLAGS)) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-ascompile rc=$$?"
+
+$(OBJDIR)/arm/setjmp.o: src/kernel/arch/arm/setjmp.s
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
+	@echo "[SELFHOST] phase=kernel-ascompile rc=$$?"
+
 
 # -- user object rules -------------------------------------------------
 $(OBJDIR)/arm/hello.o: src/user/hello.c
@@ -167,7 +415,13 @@ user: $(USER_OBJS) $(OBJDIR)/arm/libc.a
 kernel: $(KERNEL_OBJS)
 	@echo "[SELFHOST] phase=s2-kernel-start"
 	@echo "[SELFHOST] phase=kernel-link-start"
-	$(LD) -T linker.ld -o $(TARGET) $(KERNEL_OBJS)
+	# w6-run: lld's link argv (66 words incl. 59 objects) exceeds the
+	# HobbyOS crt0 positional-arg cap (CRT0_MAX_ARGS 32) on the flat-args
+	# fallback, which merged the tail into one path ("cannot open /SRC/");
+	# the response file is written at parse time by the make file-write
+	# function attached to the KERNEL_OBJS definition above (no shell, no
+	# argv cap) and the link line itself stays short.
+	$(LD) -T linker.ld -o $(TARGET) @/SRC/OBJS.RSP
 	@echo "[SELFHOST] phase=kernel-link-done rc=$$?"
 	$(OBJCOPY) -O binary $(TARGET) $(BIN)
 	@echo "[SELFHOST] phase=s2-kernel-done rc=$$?"
@@ -183,6 +437,7 @@ disk: kernel user
 	$(MMD) -i $(OUTIMG) ::/boot
 	$(MMD) -i $(OUTIMG) ::/EFI
 	$(MMD) -i $(OUTIMG) ::/EFI/BOOT
+	$(MMD) -i $(OUTIMG) ::/bin
 	$(MCOPY) -i $(OUTIMG) $(BIN) ::/boot/hobbyos.bin
 	$(MCOPY) -i $(OUTIMG) limine.conf ::/boot/limine.conf
 	$(MCOPY) -i $(OUTIMG) bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI

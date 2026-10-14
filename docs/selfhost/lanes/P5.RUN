@@ -1,0 +1,2 @@
+cd /SRC
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -isystem /TOOLS/RESDIR/include -c src/user/hello.c -o /SRC/obj/arm/hello.capture.o

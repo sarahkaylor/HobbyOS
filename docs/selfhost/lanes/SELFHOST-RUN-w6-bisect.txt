@@ -1,0 +1,4 @@
+probe-c1|SH.BIN|/SRC/P1.RUN
+probe-c2|SH.BIN|/SRC/P2.RUN
+probe-c3|SH.BIN|/SRC/P3.RUN
+probe-c4|SH.BIN|/SRC/P4.RUN

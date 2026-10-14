@@ -2788,6 +2788,10 @@ $(HEADERS_TEST): obj/host_libc_headers_test.o
 # sysroot exactly as they do on-device; the test TU deliberately omits it
 # so <stdio.h>/<sys/wait.h> stay glibc's and cxxrt.h is reached by
 # relative include.
+# w6-run: obj/host_malloc_hb.o (host build of src/user/malloc.c) rides in the
+# link — cxxrt's delete now calls free(ptr) with the RAW pointer, a contract
+# defined over the HobbyOS allocator's BLOCK_MAGIC check, not glibc's free.
+# (See the test TU's header note; the hb_* wrappers shadow libc's malloc.)
 CXX_TEST_FLAGS = -std=c++17 -fno-exceptions -fno-rtti
 CXXRT_TEST = cxxrt_test_host
 obj/host_cxxrt_test.o: src/host/cxxrt_test.cpp src/libc/include/cxxrt.h
@@ -2796,7 +2800,7 @@ obj/host_cxxrt_test.o: src/host/cxxrt_test.cpp src/libc/include/cxxrt.h
 obj/host_cxxrt.o: src/libc/src/cxxrt.cpp src/libc/include/cxxrt.h
 	@mkdir -p obj
 	$(HOST_CC) $(HOST_CFLAGS) $(CXX_TEST_FLAGS) -Isrc/libc/include -c $< -o $@
-$(CXXRT_TEST): obj/host_cxxrt_test.o obj/host_cxxrt.o obj/host_compat.o
+$(CXXRT_TEST): obj/host_cxxrt_test.o obj/host_cxxrt.o obj/host_compat.o obj/host_malloc_hb.o
 	$(HOST_CC) -o $@ $^
 
 # cxx_headers_test: every public sysroot header in one C++ TU, compiled

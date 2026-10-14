@@ -1,0 +1,3 @@
+/ARGVPROBE.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/main.c -o /SRC/obj/arm/check.o
+/ARGVPROBE.BIN -c foo.c -o bar.o
+/ARGVPROBE.BIN
