@@ -1,0 +1,25 @@
+# Lane w2-harness — curated serial excerpt from the staged DESKTOP boot
+# (run-final, 2026-10-14T05:11Z, disk-w2-desktop.img, TCG, ACCEPTANCE §5.1 QEMU line + QMP).
+# Full raw serial: ~/.hermes/cache/scratch/w2/run/serial-selfhost.log (uncommitted).
+# Shows: boot marker, real desktop menu enumerating SELFHOST.BIN, driver
+# launching, executing S0 from /SRC/SELFHOST.RUN, and the CLEAN staged
+# failure at the first missing tool (MAKE.BIN) — not a hang.
+
+linux: Loading kernel `boot():/boot/hobbyos.bin`...Booting AArch64 OS...
+Mode: DESKTOP - Launching desktop...
+[MENU] 5=SELFHOST.BIN
+[MENU] count=8
+[LAUNCH] SELFHOST.BIN
+Loading program for scheduler (v2 AS): SELFHOST.BIN
+[SELFHOST] DRIVER-UP script=/SRC/SELFHOST.RUN
+[SELFHOST] phase=s0-check-start
+[SELFHOST] phase=s0-check-fail tool=MAKE.BIN reason=tool-missing rc=127
+[SELFHOST] ABORT stage=s0-check missing-tool=MAKE.BIN
+[SELFHOST] FAILED-AT stage=s0-check
+[KERNEL] Process 3: SELFHOST.BIN exited unexpectedly or gracefully.
+
+# /SRC/OUT.LOG recovered via: python3 fat16img.py get disk-w2-desktop.img SRC/OUT.LOG
+[SELFHOST] phase=s0-check-start
+[SELFHOST] phase=s0-check-fail tool=MAKE.BIN reason=tool-missing rc=127
+[SELFHOST] ABORT stage=s0-check missing-tool=MAKE.BIN
+[SELFHOST] FAILED-AT stage=s0-check
