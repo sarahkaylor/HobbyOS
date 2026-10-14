@@ -1,0 +1,10 @@
+[w7watch] start 11:47:01 (already-seen 5 markers)
+12:36:01 [SELFHOST] phase=s1-user-done rc=0
+12:36:01 [SELFHOST] phase=t25-run-start
+12:36:01 [SELFHOST] phase=t25-run-done rc=0
+12:36:01 [SELFHOST] phase=s2-kernel-start
+12:37:01 [SELFHOST] phase=kernel-compile rc=0
+13:58:01 [SELFHOST] phase=kernel-ascompile rc=0
+13:58:01 [SELFHOST] ph[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+13:58:01 [SELFHOST] phase=s2-kernel-fail reason=tool-rc rc=512
+13:58:01 [SELFHOST] FAILED-AT stage=s2-kernel

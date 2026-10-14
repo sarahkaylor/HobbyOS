@@ -1,0 +1,4 @@
+[w5boot] booted (6.5s)
+[w5boot] outcome=1 (0=pass,1=fail,2=timeout) elapsed=8637.1s
+[w5boot] capture: docs/selfhost/lanes/evidence-w7/t43-loop.serial
+w5_exit=1

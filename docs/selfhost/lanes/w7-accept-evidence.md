@@ -148,10 +148,47 @@ feeding `sh -c` an empty/garbled line.)
 - Re-boot with an S2-only drive (`s2-kernel|SH.BIN|/SRC/SELFHOST.SH kernel`)
   on the FIXED boot kernel; serial `t43-s2-fix.serial`.
 
-| run | kernel | result |
-|---|---|---|
-| S0–S3 full loop | 288995c (unfixed) | S0 ✓ S1 ✓ T2.5 ✓ S2 ✗ (2 TUs silently dropped) |
-| S2 only re-run | + bd58474 fix | (filled on completion) |
+| run | kernel | disk state | result |
+|---|---|---|---|
+| S0–S3 full loop | 288995c (unfixed) | fresh disk, sequential stages in one boot | S0 ✓ S1 ✓ T2.5 ✓ S2 ✗ (2 TUs silently dropped) |
+| S2 only re-run | + bd58474 fix | **fresh disk.img / empty /SRC/obj/arm, single stage** | S2 ✗ **IDENTICAL failure** (nfs_test.o + cpu.o) |
+
+### B2.7 DISCRIMINATOR VERDICT — it is a FAT-directory-write bug, NOT argv, NOT prior state
+
+The S2-only re-run was the integrator's cheap discriminating experiment
+(fresh `make disk.img` → `dd`+`mkfs`+staging, `/SRC/obj/arm` verified EMPTY
+pre-boot, exactly one `make -f Makefile.hobbyos kernel` in one boot) and it
+**failed identically**: `LLD.BIN: error: cannot open /SRC/obj/arm/nfs_test.o`
++ `cpu.o`, 56×`kernel-compile rc=0` + 3×`kernel-ascompile rc=0`, no clang
+errors, no OOM, at `Makefile.hobbyos:424`. Two runs, two kernels (pre- and
+post-argv-fix), two independent fresh boots → same two objects missing.
+
+Root cause is a **FAT16 directory-entry (dirent/LFN) write bug** in the
+in-OS path, evidenced by reading the FAILED image's `::/SRC/obj/arm`
+directory (`python3 fat16img.py list`-style deep scan, committed raw probes):
+
+- The two "missing" objects ARE on the image — under mangled dirents:
+  - `NFS_TEST.O.T` (832 B, cluster 19822) — valid ELF relocatable, sha
+    `47804dee…`; the 8.3 SFN extension field literally contains `O.T`
+    (embedded dot, invalid 8.3);
+  - `CPU-8167.O.T` (6968 B, cluster 20007) — valid ELF relocatable, sha
+    `21d8dc63…`.
+- Every other object has BOTH a clean dirent (`FAT16.O`) AND a mangled
+  duplicate twin (`FAT16-AB.O.T`) pointing at the SAME cluster with
+  BYTE-IDENTICAL content (both sha `efde5cec…`) — the writer emits a
+  duplicate dir-entry per file (VFAT LFN chain `seq 0x41/0x42/0x01…` +
+  SFN), and for exactly 2 of 59 files only the mangled twin survives; lld
+  then cannot open the clean names. Deterministic file-for-file across
+  runs (same names both times → filename/content-keyed, not address-layout
+  → rules out the exec-argv class, which is address-layout-keyed).
+
+So nothing is lost at the cluster level — the S2 objects exist; the in-OS
+directory writer misnames/duplicates entries. `bd58474` is a real fix for
+the w8-torture argv case but does NOT address this; the final acceptance
+RC must be re-cut after a kernel-side dirent-writer fix (parent's call —
+likely a w9/w8-adjacent kernel lane). Pulled evidence in `evidence-w7/sB/`
+(`CPU-8167.O.T`, `NFS_TEST.O.T`, `FAT16.O`, `FAT16-AB.O.T`) + raw dirent
+dump in `t43-s2-fix.dirents.txt`.
 
 ### B3. Boot the extracted OUT.IMG + run the in-OS-built program
 
