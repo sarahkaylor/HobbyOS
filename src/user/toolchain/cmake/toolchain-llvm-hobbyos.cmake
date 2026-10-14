@@ -97,7 +97,17 @@ set(HOBBYOS_FREESTANDING_INCLUDE
 set(HOBBYOS_SYSROOT_INCLUDES
     "-isystem ${HOBBYOS_SYSROOT}/include/libc-include"
     "-isystem ${HOBBYOS_SYSROOT}/include/kernel-include"
-    "-isystem ${HOBBYOS_SYSROOT}/include/user-include")
+    "-isystem ${HOBBYOS_SYSROOT}/include/user-include"
+    "-isystem ${_toolchain_root}/src/user/toolchain/sysroot-headers"
+    # Force-include the missing-declarations shim on every TU: LLVM's Unix
+    # shim compiles socket/bind/listen/accept/connect/pipe + alarm/
+    # gethostname/getsid/strsignal unconditionally, and HobbyOS lacks the
+    # declarations.  -include is build-config (no LLVM source patch); the
+    # BODIES are declared but never defined in this lane, so the LINK step
+    # reports each missing symbol verbatim (L2's blocker list,
+    # l1-dep-surface.txt B).  -include on a path resolves relative to the
+    # include dirs, so give the full path.
+    "-include ${_toolchain_root}/src/user/toolchain/sysroot-headers/_missing.h")
 # A CMake LIST must never reach *.cxx_flags / a compile line as-is: the Ninja
 # generator writes `;` separators literally and the shell mis-splits them
 # (observed: "/bin/sh: 1: -isystem: not found" in the L1 spike). Join to a
@@ -136,6 +146,35 @@ set(CMAKE_C_STANDARD_LIBRARIES "${HOBBYOS_SYSROOT_CLOSURE_STR}"
 set(CMAKE_EXE_LINKER_FLAGS
     "-nostdlib -nostartfiles -Wl,-T,${HOBBYOS_LINKER_SCRIPT} -Wl,-e,_start"
     CACHE STRING "HobbyOS exe link flags" FORCE)
+
+# ---------------------------------------------------------------------------
+# HobbyOS sysroot gap-filler object (WebKit-fork gaps.c precedent; lane L1
+# spike).  The LLVM tools link a POSIX surface HobbyOS's libc does not
+# provide (l1-dep-surface.txt B); these stubs make the toolchain's own link
+# closure go end-to-end.  Every stub is a documented L2 work item.  Compiled
+# once per build dir into the closure, like the WebKit fork-lib loop.
+# ---------------------------------------------------------------------------
+set(HOBBYOS_GAPS_SRC "${_toolchain_root}/src/user/toolchain/sysroot-headers/gaps.c")
+if (NOT EXISTS "${HOBBYOS_GAPS_SRC}")
+  message(FATAL_ERROR "missing HobbyOS gaps.c: ${HOBBYOS_GAPS_SRC}")
+endif ()
+set(HOBBYOS_GAPS_OBJ "${CMAKE_BINARY_DIR}/hobbyos_gaps.o")
+if (NOT EXISTS "${HOBBYOS_GAPS_OBJ}" OR "${HOBBYOS_GAPS_SRC}" IS_NEWER_THAN "${HOBBYOS_GAPS_OBJ}")
+  execute_process(
+    COMMAND "${CMAKE_C_COMPILER}" ${HOBBYOS_TARGET_FLAGS} ${HOBBYOS_ARCH_CFLAGS}
+            -ffreestanding "${HOBBYOS_GAPS_SRC}" -c -o "${HOBBYOS_GAPS_OBJ}"
+    RESULT_VARIABLE HOBBYOS_GAPS_RC
+    OUTPUT_VARIABLE HOBBYOS_GAPS_OUT
+    ERROR_VARIABLE HOBBYOS_GAPS_ERR)
+  if (NOT HOBBYOS_GAPS_RC EQUAL 0)
+    message(FATAL_ERROR "gaps.c build failed: ${HOBBYOS_GAPS_OUT} ${HOBBYOS_GAPS_ERR}")
+  endif ()
+endif ()
+set(HOBBYOS_GAPS_IN_CLOSURE "${HOBBYOS_GAPS_OBJ} ${HOBBYOS_SYSROOT_CLOSURE_STR}")
+set(CMAKE_CXX_STANDARD_LIBRARIES "${HOBBYOS_GAPS_IN_CLOSURE}"
+    CACHE STRING "HobbyOS sysroot closure (gaps + crt0 + libcxx.a + libc.a)" FORCE)
+set(CMAKE_C_STANDARD_LIBRARIES "${HOBBYOS_GAPS_IN_CLOSURE}"
+    CACHE STRING "HobbyOS sysroot closure (gaps + crt0 + libc.a)" FORCE)
 
 # No dynamic linking anywhere.
 set(CMAKE_DL_LIBS "")
