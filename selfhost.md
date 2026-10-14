@@ -526,7 +526,12 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 - **2026-10-14 — Wave 1 (L1–L5) complete; all lanes merged clean (`059997a`…`5a9967b`);
   `pid_t`→int landed (`4a30ca4`); merged-tip battery RESULTS:** local = host_tests PASS,
   unit-arm 309/0 PASS, unit-x64 313/1 (single `patched==1` red in
-  `test_fat16_lfn_truncated_run`; standalone re-run in flight), wave-arm marker + halt with
+  `test_fat16_lfn_truncated_run` — **byte-proven test-side gap**: `fat16_open` creates the
+  fixture at runtime (fat16_test.c:533) and its LFN run can split across the root-dir sector
+  boundary; the post-run dump shows the short entry at sector 557 offset 0 with its 0x42/0x01
+  chunk slots as the last slots of sector 556, so the test's sector-local backward scan starts
+  at k=-1 and never sees the run — OS behavior correct on both layouts; fix steered to
+  w2-kernel), wave-arm marker + halt with
   ONE `shell_test: FAILED echo validation` token. CI VM = ALL FOUR TIERS GREEN (host /
   unit-arm / unit-x64 under KVM = 313/0 / test-arm; the VM wave carried the documented
   SHELLTEST WATCHDOG + the same echo token). **Echo token attributed:** the local log shows
