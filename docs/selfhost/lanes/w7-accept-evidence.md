@@ -100,6 +100,59 @@ Stage-by-stage markers (final rows filled on completion; see
   layout, per-file sizes + HELLO.BIN/OUTPROG.BIN sha (must equal
   `61b3be6a…`).
 
+### B2.5 S2 tail FAILURE on the un-fixed tip (bd58474-class bug reproduced)
+
+The full loop FAILED at S2's link on the merged tip 288995c
+(`phase=s2-kernel-fail reason=tool-rc rc=512`, `FAILED-AT stage=s2-kernel`,
+then `System halt from CPU 1.`). w5_flat_boot outcome=1, elapsed 8637 s.
+
+Precise failure state (serial evidence, t43-loop.serial):
+
+```text
+LLD.BIN: error: cannot open /SRC/obj/arm/nfs_test.o: No such file or directory
+LLD.BIN: error: cannot open /SRC/obj/arm/cpu.o: No such file or directory
+MAKE.BIN: *** [Makefile.hobbyos:424: kernel] Error 1
+[SELFHOST] phase=s2-kernel-fail reason=tool-rc rc=512
+```
+
+- 56 `phase=kernel-compile rc=0` + 3 `phase=kernel-ascompile rc=0` recipe
+  runs = all 59 recipe lines reported rc=0, and make proceeded to the link.
+- **No clang error block anywhere** in the capture; **no OOM/alloc
+  diagnostics**; 57 of 59 `.o` files landed on the in-OS FAT — exactly
+  `nfs_test.o` and `cpu.o` are missing.
+- The two compile command lines ARE present on the wire and look complete
+  (`… -c src/kernel/nfs_test.c -o /SRC/obj/arm/nfs_test.o`, and
+  `… -c src/kernel/arch/arm/cpu.c -o /SRC/obj/arm/cpu.o` at serial lines
+  935 / 1661–1665 — the cpu.c line is split across the serial buffer with a
+  loader message interleaved), yet no output file was written and the
+  recipe still returned rc=0.
+
+Interpretation: make echoes its recipe (what it THINKS it ran), but the
+actual `exec` of CLANG.BIN for those two TUs received a cropped argv — an
+argument was **silently dropped** near the top of a mapped region. This is
+exactly the class fixed on main at **`bd58474` (w8-torture)**: w6's cap
+bump 64→4096 moved `proc_marshal_argv`'s whole-cap range check past the
+mapped-region end, so a short string near the region top got mis-bounded;
+the fix replaces the whole-cap check with **per-page validation**
+(`src/kernel/program_loader.c`, `arch/arm/trap.c`, `arch/x64/trap.c`);
+288995c is an ancestor, the fix cherry-picked cleanly. (Both dropped-TU
+recipes hitting rc=0 via sh is consistent with a silently failed exec
+feeding `sh -c` an empty/garbled line.)
+
+### B2.6 Fix applied + S2 re-run (one stage only, per integrator guidance)
+
+- Cherry-picked `bd58474` (w8-torture exec-argv fix) onto `selfhost/w7-accept`
+  → `c7c5823`; the same 3 kernel files compile host-side.
+- `make MODE=selfhost disk.img` rebuilt on the fixed kernel (log
+  `make-diskimg-fix.log`), re-staging /TOOLS + /SRC.
+- Re-boot with an S2-only drive (`s2-kernel|SH.BIN|/SRC/SELFHOST.SH kernel`)
+  on the FIXED boot kernel; serial `t43-s2-fix.serial`.
+
+| run | kernel | result |
+|---|---|---|
+| S0–S3 full loop | 288995c (unfixed) | S0 ✓ S1 ✓ T2.5 ✓ S2 ✗ (2 TUs silently dropped) |
+| S2 only re-run | + bd58474 fix | (filled on completion) |
+
 ### B3. Boot the extracted OUT.IMG + run the in-OS-built program
 
 `tools/w7_accept_boot.py --image w7-loop.out.img --launch OUTPROG.BIN` →

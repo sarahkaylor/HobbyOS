@@ -58,23 +58,31 @@
         "note": "the in-OS-built HELLO.BIN ran in-OS, stdout relayed to SERIAL by the MODE=selfhost driver pipe \u2014 the full program-side marker acceptance.md 8.3 wants"
       },
       "S2_kernel": {
-        "result": "RUNNING",
+        "result": "FAIL (unfixed tip); S2-only re-run on fixed tip PENDING",
         "expect": "59 TU compile + lld @OBJS.RSP link + objcopy -> hobbyos.bin; phase=s2-kernel-done",
-        "detail": "kernel-compile rc=0 markers in progress (59 TUs + lld link + objcopy); fat16.c warnings visible in serial"
+        "detail": "56 kernel-compile rc=0 + 3 ascompile rc=0 recipe runs all rc=0, then link failed: LLD.BIN error cannot open /SRC/obj/arm/nfs_test.o and /SRC/obj/arm/cpu.o (No such file or directory). No clang error block, no OOM; 57/59 .o landed. The two dropped-TU recipes returned rc=0 with no output file written == silent exec-argv drop near mapped-region top (bd58474 class). phase=s2-kernel-fail reason=tool-rc rc=512; FAILED-AT stage=s2-kernel; System halt from CPU 1; w5 outcome=1 elapsed 8637.1s",
+        "evidence": "t43-loop.serial (link-error block), t43-loop.state (failure markers), t43-loop.outcome"
       },
       "S3_disk": {
-        "result": "PENDING",
+        "result": "NOT RUN (S2 failure aborted the loop; parent re-cuts final RC)",
         "expect": "MKFSFAT -C /SRC/OUT.IMG 131072 + MCOPY layout; phase=s3-disk-done; ACCEPTANCE-COMPLETE"
       }
     },
     "out_img_comparison": {
       "method": "fat16img.py get disk.img OUT.IMG; compare content classes (fresh non-incremental in-OS rebuild = fresh mkfs + copy order, so raw sha differs legitimately): BPB geometry, layout, per-file sizes, HELLO.BIN/OUTPROG.BIN sha vs 61b3be6a...",
       "w6_sha": "7e24b4ca1db8deff4dee75c3b1c71e63460f8eb90e4fa3027934b1126e20286b",
-      "w7_sha": "PENDING"
+      "w7_sha": "NOT PRODUCED (S2 failed before S3 on the unfixed tip; w6 OUT.IMG boot evidence stands for item A)"
     },
     "B3_boot_extracted": {
       "result": "PENDING",
       "cmd": "tools/w7_accept_boot.py --image <w7-loop.out.img> --launch OUTPROG.BIN"
+    },
+    "fix": {
+      "root_cause_class": "exec argv marshal drops an argument when a short string sits near the top of a mapped region (w6 64->4096 cap bump moved the whole-cap range check past the mapped-region end; compile .o never written, recipe still rc=0)",
+      "upstream_fix": "bd58474 (w8-torture): per-page validation replaces whole-cap check in src/kernel/program_loader.c + arch/arm/trap.c + arch/x64/trap.c",
+      "applied": "cherry-picked -m 1 bd58474 -> c7c5823 on selfhost/w7-accept (288995c is an ancestor; clean apply)",
+      "rerun": "S2-only in-OS re-run on the fixed kernel (disk.img rebuilt); serial t43-s2-fix.serial",
+      "integrator_note": "final acceptance RC re-cut by parent on the merged-final tip after this report (do not burn a fresh multi-hour full loop)"
     }
   },
   "C_acceptance_md": {
