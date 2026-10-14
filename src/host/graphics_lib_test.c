@@ -316,20 +316,27 @@ static void test_gradient_old_case_unchanged(void) {
 
 static void fill_wallpaper(void) {
   /* Exactly what desktop.c's wallpaper line calls. */
-  graphics_fill_gradient_v(0, 0, SCREEN_WIDTH, WP_H, C(16, 20, 38), C(44, 56, 96));
+  graphics_fill_gradient_v(0, 0, SCREEN_WIDTH, WP_H, C(248, 249, 250), C(218, 220, 224));
 }
 
 static void test_wallpaper_endpoints(void) {
   reset();
   fill_wallpaper();
-  CHECK(graphics_get_pixel(0, 0) == C(12, 16, 34), "wallpaper top = deep navy (12,16,34)");
-  CHECK(graphics_get_pixel(SCREEN_WIDTH - 1, 0) == C(12, 16, 34), "wallpaper top spans the full width");
-  CHECK(graphics_get_pixel(0, WP_H - 1) == C(34, 44, 72), "wallpaper bottom = dark slate (34,44,72) at the taskbar line");
-  CHECK(graphics_get_pixel(SCREEN_WIDTH / 2, WP_H - 1) == C(34, 44, 72), "wallpaper bottom row spans the full width");
-  CHECK(graphics_get_pixel(0, 100) == C(14, 18, 37), "wallpaper row 100 interpolates navy -> slate");
-  CHECK(graphics_get_pixel(0, 370) == C(21, 28, 56), "wallpaper row 370 interpolates navy -> slate");
-  CHECK(graphics_get_pixel(0, 556) == C(23, 30, 55), "wallpaper row 556 interpolates navy -> slate");
-  CHECK(graphics_get_pixel(0, WP_H - 2) == C(33, 43, 71), "wallpaper row before the taskbar is dark slate");
+  CHECK(graphics_get_pixel(0, 0) == C(248, 249, 250), "wallpaper top = Chrome-light grey (248,249,250)");
+  CHECK(graphics_get_pixel(SCREEN_WIDTH - 1, 0) == C(248, 249, 250), "wallpaper top spans the full width");
+  CHECK(graphics_get_pixel(0, WP_H - 1) == C(218, 220, 224), "wallpaper bottom = grey-300 (218,220,224) at the taskbar line");
+  CHECK(graphics_get_pixel(SCREEN_WIDTH / 2, WP_H - 1) == C(218, 220, 224), "wallpaper bottom row spans the full width");
+  CHECK(graphics_get_pixel(0, 100) == C(246, 247, 248), "wallpaper row 100 interpolates grey -> grey-300");
+  CHECK(graphics_get_pixel(0, 370) == C(240, 242, 250), "wallpaper row 370 interpolates grey -> grey-300");
+  CHECK(graphics_get_pixel(0, 556) == C(233, 234, 238), "wallpaper row 556 interpolates grey -> grey-300");
+  CHECK(graphics_get_pixel(0, WP_H - 2) == C(219, 221, 225), "wallpaper row before the taskbar is grey-300");
+}
+
+/* Blue of the plain two-colour ramp (no band) at `row`, using the exact
+ * integer interpolation graphics.c applies (grey-050 -> grey-300). */
+static int wallpaper_plain_blue(int row) {
+  int den = WP_H - 1;
+  return 250 + (224 - 250) * row / den;
 }
 
 static void test_wallpaper_lighter_band(void) {
@@ -340,40 +347,54 @@ static void test_wallpaper_lighter_band(void) {
    * centre/fade for any height.) */
   int peak_row = (WP_H * 38) / 100;
   int fade_row = peak_row + WP_H / 6;
-  CHECK(graphics_get_pixel(10, peak_row) == C(23, 30, 60), "wallpaper band peak colour (23,30,60)");
-  CHECK(graphics_get_pixel(600, peak_row) == C(23, 30, 60), "wallpaper band is horizontal across the width");
-  CHECK(graphics_get_pixel(SCREEN_WIDTH - 1, peak_row) == C(23, 30, 60), "wallpaper band reaches the right edge");
-  /* 48 is the plain navy -> slate value at the band centre; the band lifts
-   * blue by 12. */
-  CHECK((int)(graphics_get_pixel(0, peak_row) & 0xFF) == 48 + 12, "wallpaper band lifts blue by 12 over the plain ramp");
-  CHECK((int)((graphics_get_pixel(0, peak_row) >> 16) & 0xFF) == 20 + 3, "wallpaper band lifts red slightly");
-  CHECK((int)((graphics_get_pixel(0, peak_row) >> 8) & 0xFF) == 26 + 4, "wallpaper band lifts green slightly");
+  CHECK(graphics_get_pixel(10, peak_row) == C(240, 242, 253), "wallpaper band peak colour (240,242,253)");
+  CHECK(graphics_get_pixel(600, peak_row) == C(240, 242, 253), "wallpaper band is horizontal across the width");
+  CHECK(graphics_get_pixel(SCREEN_WIDTH - 1, peak_row) == C(240, 242, 253), "wallpaper band reaches the right edge");
+  /* 241 is the plain grey -> grey-300 blue at the band centre; the band
+   * lifts blue by 12 (WALLPAPER_BAND_GAIN), red by 3 and green by 4. */
+  CHECK((int)(graphics_get_pixel(0, peak_row) & 0xFF) == 241 + 12, "wallpaper band lifts blue by 12 over the plain ramp");
+  CHECK((int)((graphics_get_pixel(0, peak_row) >> 16) & 0xFF) == 237 + 3, "wallpaper band lifts red slightly");
+  CHECK((int)((graphics_get_pixel(0, peak_row) >> 8) & 0xFF) == 238 + 4, "wallpaper band lifts green slightly");
   /* The band fades out h/6 rows from its centre... */
-  CHECK(graphics_get_pixel(0, fade_row) == C(24, 31, 54), "wallpaper band faded out at centre + h/6");
+  CHECK(graphics_get_pixel(0, fade_row) == C(232, 234, 236), "wallpaper band faded out at centre + h/6");
   /* ...and the first/last rows keep the exact endpoint colours. */
-  CHECK(graphics_get_pixel(0, 0) == C(12, 16, 34), "band never reaches the top row");
-  CHECK(graphics_get_pixel(0, WP_H - 1) == C(34, 44, 72), "band never reaches the bottom row");
-  /* Blue rises monotonically into the band and again below it. */
-  int prev = 0, mono_up = 1, mono_down = 1;
+  CHECK(graphics_get_pixel(0, 0) == C(248, 249, 250), "band never reaches the top row");
+  CHECK(graphics_get_pixel(0, WP_H - 1) == C(218, 220, 224), "band never reaches the bottom row");
+  /* The band is a smooth hump added over the plain ramp: its blue delta
+   * (actual minus the ramp) rises monotonically to +12 at the centre and
+   * falls monotonically back to 0 at fade_row — independent of the
+   * (downward) ramp direction. */
+  int prev = -1, delta_up = 1;
   for (int row = 0; row <= peak_row; row++) {
-    int b = (int)(graphics_get_pixel(0, row) & 0xFF);
-    if (b < prev) mono_up = 0;
+    int b = (int)(graphics_get_pixel(0, row) & 0xFF) - wallpaper_plain_blue(row);
+    if (b < prev) delta_up = 0;
     prev = b;
   }
-  prev = 0;
+  prev = 13; /* a delta can never exceed +12 */
+  int delta_down = 1;
+  for (int row = peak_row; row <= fade_row; row++) {
+    int b = (int)(graphics_get_pixel(0, row) & 0xFF) - wallpaper_plain_blue(row);
+    if (b > prev) delta_down = 0;
+    prev = b;
+  }
+  CHECK(delta_up, "band blue delta rises monotonically into the centre");
+  CHECK(delta_down, "band blue delta falls monotonically past the centre");
+  /* Past the band the raw ramp dominates: blue falls monotonically to the
+   * taskbar line (no clamp or inversion artifacts). */
+  prev = 256;
+  int falls = 1;
   for (int row = fade_row; row < WP_H; row++) {
     int b = (int)(graphics_get_pixel(0, row) & 0xFF);
-    if (b < prev) mono_down = 0;
+    if (b > prev) falls = 0;
     prev = b;
   }
-  CHECK(mono_up, "wallpaper blue rises monotonically into the band");
-  CHECK(mono_down, "wallpaper blue rises monotonically below the band");
+  CHECK(falls, "wallpaper blue falls monotonically below the band");
   int peak = 0;
   for (int row = 0; row < WP_H; row++) {
     int b = (int)(graphics_get_pixel(0, row) & 0xFF);
     if (b > peak) peak = b;
   }
-  CHECK(peak == 72, "brightest wallpaper row is the taskbar line");
+  CHECK(peak == 253, "brightest wallpaper blue is the band peak");
 }
 
 static void test_wallpaper_clip(void) {
@@ -382,8 +403,8 @@ static void test_wallpaper_clip(void) {
   fill_wallpaper();
   graphics_reset_clip();
   CHECK(graphics_get_pixel(99, 100) == 0, "wallpaper obeys clip (left of clip)");
-  CHECK(graphics_get_pixel(100, 100) == C(14, 18, 37), "wallpaper paints inside the clip");
-  CHECK(graphics_get_pixel(103, 100) == C(14, 18, 37), "wallpaper paints the last clipped pixel");
+  CHECK(graphics_get_pixel(100, 100) == C(246, 247, 248), "wallpaper paints inside the clip");
+  CHECK(graphics_get_pixel(103, 100) == C(246, 247, 248), "wallpaper paints the last clipped pixel");
   CHECK(graphics_get_pixel(104, 100) == 0, "wallpaper obeys clip (right of clip)");
   CHECK(graphics_get_pixel(100, 101) == 0, "wallpaper obeys clip (below clip)");
   CHECK(graphics_get_pixel(0, 0) == 0, "wallpaper obeys clip (screen top untouched)");
