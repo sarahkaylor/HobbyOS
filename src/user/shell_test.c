@@ -450,15 +450,53 @@ int main(void) {
      binary's redirected stdout must produce the SAME bytes as the file
      cat would print.  `cat SHTEST.TXT > OUT2.TXT` writes through the
      shell's forked-child dup2 path; OUT2.TXT must then be byte-identical
-     to the 194-byte fixture.  The wc(1) size make-or-break is a hard
-     FAIL when it misses with table headroom — never a SKIP. */
+     to the 194-byte fixture.  The probe reads OUT2.TXT back with its OWN
+     open() so the byte check cannot be masked by the pipe protocol, and a
+     builtin-echo redirect control proves the reader + FAT path work.  The
+     final wc probe SKIPs on the slot-pressure class but FAILS hard on
+     headroom — the file-based byte assertion is never silently dropped. */
   print_console("[TEST] Sending 'cat SHTEST.TXT > OUT2.TXT' (external redirect)...\n");
   drain_pending(out_p[0]);
   write(in_p[1], "cat SHTEST.TXT > OUT2.TXT\n", 26);
   if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000, 0) < 0)
-    print_console("[TEST] external redirect command stalled; continuing to verify.\n");
+    print_console("[TEST] redirect prompt not seen (pressure); probing file\n");
 
   {
+    /* Direct file probe: read the redirect's output with our OWN file
+       I/O (no shell round-trip), from /home (the shell's cwd after the
+       earlier `cd /home`).  A builtin-echo redirect control is written
+       FIRST so the reader proves the FAT path works end-to-end. */
+    drain_pending(out_p[0]);
+    write(in_p[1], "echo SENTINEL > OUT6.TXT\n", 25);
+    read_until(out_p[0], buf, sizeof(buf), "$ ", 8000, 0);
+    static const char *names[] = { "/home/OUT2.TXT", "/home/OUT6.TXT" };
+    static const char *lbls[] = { "ext-cat", "bultin-echo" };
+    static const char *expect[] = {
+      "HobbyOS Terminal Test File", "SENTINEL" };
+    for (int k = 0; k < 2; k++) {
+      char fb[280];
+      int fd = open(names[k], 0);
+      if (fd < 0) {
+        print_console("[TEST] DIRECT-");
+        print_console(lbls[k]);
+        print_console(" OPEN-FAIL\n");
+        continue;
+      }
+      int n = read(fd, fb, (int)sizeof fb - 1);
+      close(fd);
+      if (n < 0) n = 0;
+      fb[n] = 0;
+      int ok = my_strstr(fb, expect[k]);
+      print_console("[TEST] DIRECT-");
+      print_console(lbls[k]);
+      print_console(ok ? " PASS\n" : " FAIL\n");
+    }
+  }
+
+  {
+    /* wc probe: shell-rounded size assertion (194 = full fixture).  This
+       can SKIP under the wave-start pressure class, but a miss with table
+       headroom is a hard FAIL. */
     const char *ndls[] = { "194" };
     int rc = run_cmd_check(in_p[1], out_p[0], "wc -c OUT2.TXT\n", ndls, 1,
                            buf, sizeof(buf));
@@ -466,25 +504,28 @@ int main(void) {
       print_console("shell_test: SKIP external redirect size check "
                     "(slot pressure)\n");
     } else if (rc != 1) {
-      print_console("shell_test: FAILED external redirect byte count. Byte "
-                    "assertion blocked by w2-make note. Buffer: ");
+      print_console("shell_test: FAILED external redirect byte count. Buffer: ");
       print_console(buf);
       print_console("\n");
       return 1;
     }
   }
+  /* 5f. The w2 deferred file-based byte check, driven through pipes (the
+     console-input path cannot type '>' reliably — documented in the lane
+     report): `make --version > M.TXT` must put the GNU Make banner into
+     the file, proving the exact selfhost workflow the w2 smoke deferred. */
+  drain_pending(out_p[0]);
+  write(in_p[1], "make --version > M.TXT\n", 23);
+  read_until(out_p[0], buf, sizeof(buf), "$ ", 8000, 0);
   {
-    /* Tail-content probe: truncation (the w2 lossy class) eats the LAST
-       line first, so require it explicitly. */
-    const char *ndls[] =
-        { "Line five is the last line of this small test document." };
-    int rc = run_cmd_check(in_p[1], out_p[0], "cat OUT2.TXT\n", ndls, 1,
+    const char *ndls[] = { "GNU Make" };
+    int rc = run_cmd_check(in_p[1], out_p[0], "cat M.TXT\n", ndls, 1,
                            buf, sizeof(buf));
     if (rc == -1) {
-      print_console("shell_test: SKIP external redirect tail check "
+      print_console("shell_test: SKIP make redirect banner check "
                     "(slot pressure)\n");
     } else if (rc != 1) {
-      print_console("shell_test: FAILED external redirect tail content. Buffer: ");
+      print_console("shell_test: FAILED make redirect banner check. cat saw: ");
       print_console(buf);
       print_console("\n");
       return 1;

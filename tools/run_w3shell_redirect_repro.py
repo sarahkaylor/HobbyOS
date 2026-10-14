@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
-"""Deterministic in-OS repro for BUG A (sh external redirect).
+"""Deterministic in-OS repro for BUG A (sh external redirect) v2.
 
-Boots the ARM disk image in DESKTOP mode (NO test wave -> no slot
-pressure -> deterministic), opens a console (CONSOLE.BIN -> SH.BIN) from
-the Apps menu, and runs:
-
-    cat SHTEST.TXT > CTL.TXT        (EXTERNAL command, stdout redirect)
-    cat CTL.TXT                     (read it back)
-    make --version > VERSION.TXT    (the w2 deferred byte check)
-
-Then extracts CTL.TXT / VERSION.TXT from disk.img with fat16img.py and
-byte-compares against the fixture.  Verdict: exit 0 = redirect writes the
-full bytes in-OS; exit 1 = lossy (report actual byte count).
+Boots the ARM disk image in DESKTOP mode (no test wave -> no slot
+pressure -> deterministic), opens CONSOLE.BIN (SH.BIN with normal pipes)
+from the Apps menu, types the redirect command SLOWLY, SCREENSHOTS the
+console after each command (so the transcript state is verifiable), then
+extracts CTL.TXT / VERSION.TXT from disk.img with fat16img.py and
+byte-compares.  The screenshots tell us whether the command line was
+received intact and whether the shell returned to a prompt (vs. a cat with
+an empty argv sitting on stdin, eating subsequent keystrokes).
 """
 import json, os, re, socket, subprocess, sys, time
 
@@ -26,6 +23,7 @@ QEMU = "qemu-system-aarch64"
 EDK2 = os.path.expanduser("~/.local/share/AAVMF/AAVMF_CODE.fd")
 IMG = sys.argv[1] if len(sys.argv) > 1 else "disk.img"
 
+CTL, VER = "CTL.TXT", "VERSION.TXT"
 fails = []
 
 
@@ -66,7 +64,7 @@ class Q:
         s.c("input-send-event", {"events": [
             {"type": "abs", "data": {"axis": "x", "value": int(x * 0x7FFF / W)}},
             {"type": "abs", "data": {"axis": "y", "value": int(y * 0x7FFF / H)}}]})
-        time.sleep(0.1)
+        time.sleep(0.15)
 
     def click(s, x, y):
         s.mv(x, y)
@@ -77,32 +75,42 @@ class Q:
              "data": {"button": "left", "down": False}}]})
         time.sleep(0.4)
 
-    def key(s, q, pause=0.15):
-        s.c("send-key", {"keys": [{"type": "qcode", "data": q}]})
+    def key(s, q, pause=0.3, shift=False):
+        keys = [{"type": "qcode", "data": q}]
+        if shift:
+            keys.insert(0, {"type": "qcode", "data": "shift"})
+        s.c("send-key", {"keys": keys})
         time.sleep(pause)
 
-    def type_text(s, text):
-        # Lowercase input; ">" must be typed as shift+dot held together, so
-        # it is emitted as a simultaneous two-key chord (QMP send-key sends
-        # the listed keys down together, then up).
-        qcodes = {"-": "minus", " ": "spc", ".": "dot", "/": "slash",
-                  "$": "dollar"}
-        i = 0
-        while i < len(text):
-            ch = text[i]
+    def type_text(s, text, pause=0.18):
+        qcodes = {"-": "minus", " ": "spc", ".": "dot", "/": "slash"}
+        for ch in text:
             if ch == ">":
-                s.c("send-key", {"keys": [{"type": "qcode", "data": "shift"},
-                                          {"type": "qcode", "data": "dot"}]})
-                time.sleep(0.12)
-                i += 1
-                continue
-            s.key(qcodes.get(ch, ch), 0.09)
-            i += 1
-        time.sleep(0.2)
+                s.key("dot", pause=pause, shift=True)
+            elif ch == "$":
+                s.key("4", pause=pause, shift=True)
+            else:
+                s.key(qcodes.get(ch, ch), pause=pause)
+        time.sleep(0.5)
 
     def shot(s, path):
         s.c("screendump", {"filename": path})
-        time.sleep(0.4)
+        time.sleep(1.0)
+
+
+def menu_map(txt):
+    out = {}
+    for line in txt.splitlines():
+        if "[MENU]" in line and "=" in line:
+            seg = line.split("[MENU]", 1)[1].replace("[CONSOLE]", "")
+            for tok in seg.split():
+                if "=" in tok:
+                    k, v = tok.split("=", 1)
+                    try:
+                        out[int(k)] = v.strip()
+                    except ValueError:
+                        pass
+    return out
 
 
 def main():
@@ -111,7 +119,6 @@ def main():
     for f in (SERIAL, QMP):
         if os.path.exists(f):
             os.remove(f)
-    serial = open(SERIAL, "w")
     qemu = subprocess.Popen([
         QEMU, "-M", "virt", "-cpu", "cortex-a53", "-smp", "8", "-m", "16384M",
         "-accel", "tcg,thread=multi", "-bios", EDK2,
@@ -133,57 +140,37 @@ def main():
         if "Desktop starting" in txt:
             break
         time.sleep(0.5)
-    time.sleep(3)
+    time.sleep(4)
     txt = open(SERIAL, errors="ignore").read()
-
-    entries = {}
-    for line in txt.splitlines():
-        if "[MENU]" in line and "=" in line:
-            seg = line.split("[MENU]", 1)[1].replace("[CONSOLE]", "")
-            for tok in seg.split():
-                if "=" in tok:
-                    k, v = tok.split("=", 1)
-                    try:
-                        entries[int(k)] = v.strip()
-                    except ValueError:
-                        pass
-    idx = next((i for i, n in entries.items() if n == "CONSOLE.BIN"), None)
-    log("CONSOLE.BIN menu index: %s (menu size %d)" % (idx, len(entries)))
+    mm = menu_map(txt)
+    idx = next((i for i, n in mm.items() if n == "CONSOLE.BIN"), None)
+    log("CONSOLE.BIN menu index: %s (menu size %d)" % (idx, len(mm)))
     if idx is None:
-        fails.append("no CONSOLE.BIN in the serial [MENU] dump")
         log("serial tail:\n" + txt[-1500:])
         qemu.kill()
-        return 1
+        return 2
 
     q.click(38, TASKBAR_Y + 13)
-    time.sleep(0.8)
-    q.key("home", 0.3)
+    time.sleep(1.2)
+    q.key("home", 0.4)
     for _ in range(idx):
-        q.key("down", 0.06)
-    q.key("ret", 0.3)
-    time.sleep(2.0)
-
-    # 1: external command with redirect to a file.
-    q.type_text("cat SHTEST.TXT > CTL.TXT")
-    q.key("ret", 0.3)
+        q.key("down", 0.12)
+    q.key("ret", 0.5)
     time.sleep(3.0)
-    # 2: read it back on screen (for the serial log).
-    q.type_text("cat CTL.TXT")
-    q.key("ret", 0.3)
-    time.sleep(2.0)
-    # 3: the w2 deferred make byte check.
-    q.type_text("make --version > VERSION.TXT")
-    q.key("ret", 0.3)
-    time.sleep(4.0)
-    q.shot("/tmp/w3shell_shot.ppm")
+    q.shot("/tmp/w3shell_after_open.ppm")
+    log("screendump: /tmp/w3shell_after_open.ppm")
 
-    serial.flush()
-    time.sleep(1)
-    txt = open(SERIAL, errors="ignore").read()
-    # Capture the on-screen cat CTL.TXT echo if it reached serial.
-    m = re.findall(r"cat CTL\.TXT\n(.*?)\nuser@", txt, re.S)
-    if m:
-        log("on-screen cat CTL.TXT:\n" + m[-1][:300])
+    q.type_text("cat SHTEST.TXT > " + CTL, pause=0.18)
+    q.key("ret", 0.4)
+    time.sleep(15)
+    q.shot("/tmp/w3shell_after_cat.ppm")
+    log("screendump: /tmp/w3shell_after_cat.ppm")
+
+    q.type_text("make --version > " + VER, pause=0.18)
+    q.key("ret", 0.4)
+    time.sleep(15)
+    q.shot("/tmp/w3shell_after_make.ppm")
+    log("screendump: /tmp/w3shell_after_make.ppm")
 
     qemu.kill()
 
@@ -192,23 +179,21 @@ def main():
                            capture_output=True, text=True, timeout=60)
         return r.stdout
 
-    ctl = getf("CTL.TXT")
-    srcdat = subprocess.run(["python3", "fat16img.py", "get", IMG, "SHTEST.TXT"],
-                            capture_output=True, text=True, timeout=60).stdout
-    log("SHTEST.TXT extracted: %d bytes" % len(srcdat))
-    log("CTL.TXT extracted: %d bytes" % len(ctl))
+    srcdat = getf("SHTEST.TXT")
+    ctl = getf(CTL)
+    vertxt = getf(VER)
+    log("SHTEST.TXT=%d CTL.TXT=%d VERSION.TXT=%d" %
+        (len(srcdat), len(ctl), len(vertxt)))
     if ctl != srcdat:
-        fails.append("cat SHTEST.TXT > CTL.TXT LOSSY: %d bytes, expected %d; "
-                     "tail: %r" % (len(ctl), len(srcdat), ctl[-60:]))
+        fails.append("cat SHTEST.TXT > CTL.TXT: CTL.TXT=%d bytes, expected %d"
+                     % (len(ctl), len(srcdat)))
     else:
         log("CTL.TXT byte-identical to SHTEST.TXT (%d bytes)" % len(ctl))
-
-    vertxt = getf("VERSION.TXT")
-    if "GNU Make 4.4.1" in vertxt:
-        log("VERSION.TXT %d bytes, banner match OK" % len(vertxt))
+    if "GNU Make 4.4.1" not in vertxt:
+        fails.append("make --version > VERSION.TXT: %d bytes, no banner: %r"
+                     % (len(vertxt), vertxt[:120]))
     else:
-        fails.append("make --version > VERSION.TXT LOSSY/BROKEN: %d bytes: %r"
-                     % (len(vertxt), vertxt[:200]))
+        log("VERSION.TXT banner OK (%d bytes)" % len(vertxt))
 
     if fails:
         log("W3SHELL REPRO FAILED (%d): %s" % (len(fails), fails))
