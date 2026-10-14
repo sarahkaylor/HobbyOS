@@ -351,6 +351,12 @@ Merge model: **one lane = one branch + disjoint files** (§7.4); parent merges t
   single-writer = parent); (c) make-port lane; (d) mtools-port lane; (e) mkfs-port lane;
   (f) harness lane — `SELFHOST.BIN` + `run_selfhost_build_test.py`
   (`docs/selfhost/acceptance.md` §5); (g) merged-tip + CI-VM batteries (running; §11).
+
+**Gate etiquette (hard rule, learned wave 2).** One QEMU per tree at a time;
+`fuser -k disk.img` may only run when NOTHING of yours is using the image — firing it
+while your own background run is in flight kills YOUR run (observed: a lane fuser-killed
+its own mid-suite ARM wave and misread it as a regression; memory was fine). Serialize:
+wait for the current run's log to show its final line, then start the next.
 - **Wave 3:** M3/M4 integration rounds, fixups, records.
 - Integrator = parent session: merges lanes to `main` here, runs merged-tip gates, is the
   sole writer of `selfhost.md`, `.gitignore`, syscall.h/both trap.c.
