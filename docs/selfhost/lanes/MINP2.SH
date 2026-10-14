@@ -1,0 +1,2 @@
+cd /SRC
+/TOOLS/MAKE.BIN -f MINP2.MK all

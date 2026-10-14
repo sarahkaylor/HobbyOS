@@ -24,6 +24,14 @@
       "note": "host test now backed by the real allocator instead of glibc — the alignment/new-delete assertions test the actual on-device semantics"
     },
     {
+      "id": "lld-unified-driver-flavor",
+      "file": "Makefile.hobbyos",
+      "change": "LD := /TOOLS/LLD.BIN -flavor gnu",
+      "symptom": "S1's first in-OS link failed: 'lld is a generic driver. Invoke ld.lld (Unix)..'",
+      "root_cause": "lld v21 is the unified driver; invoked as bare lld (our frozen F1 name LLD.BIN) it requires a driver-mode flag because argv[0] is not ld.lld.  The host Makefile uses the ld.lld symlink and never sees this.",
+      "verification": "host: bare lld fails identically, -flavor gnu links the same ARM ELF set; in-OS S1 all 4 links passed"
+    },
+    {
       "id": "execv-argv-64b-cap",
       "file": "src/kernel/program_loader.c + arch/arm/trap.c + arch/x64/trap.c",
       "change": "proc_marshal_argv per-arg temp 64 -> 1024; sys_exec flat-args argbuf 256 -> 1024 and per-arg 64 -> 1024 (both arches)",
@@ -35,9 +43,9 @@
   "gates": {
     "A_cxxrt": {"result": "PASS", "detail": "cxxrt_test_host 25 checks 0 failures; _Znwm/_Znam in __lcxx_override on host + aarch64-none-elf compiles"},
     "S0_check": {"result": "PASS", "cmd": "make -f Makefile.hobbyos check (in-OS via MODE=selfhost, SELFHOST.RUN stage s0-check)", "serial": "phase=s0-check-done rc=0; ACCEPTANCE-COMPLETE stages=1", "artifact": "s0-check.o 21144 B, AArch64 ELF64 REL, pulled via fat16img.py", "evidence": "evidence-w6-run/s0.serial.txt"},
-    "S1_user": {"result": "PENDING (in flight, ~40-90 min under TCG)", "cmd": "make -f Makefile.hobbyos user"},
-    "T25": {"result": "PENDING", "cmd": "in-OS run of the S1-built HELLO.BIN"},
-    "S2_kernel": {"result": "PENDING (bounded attempt)", "cmd": "make -f Makefile.hobbyos kernel"}
+    "S1_user": {"result": "PASS", "cmd": "make -f Makefile.hobbyos user", "detail": "5 user TUs compiled in-OS in the prior run (sh.o = 245528 B, sh.c host compile 1.38 s -> ~53 min TCG observed); blocked at first link by the lld unified-driver wall, fixed via -flavor gnu; then 4 links + 4 objcopies ran in-OS", "serial": "phase=s1-user-done rc=0; ACCEPTANCE-COMPLETE stages=2", "artifacts": "HELLO.BIN 37360 B sha 61b3be6a (BYTE-IDENTICAL to host obj/arm/hello.bin); SH.BIN 195136 B; LS.BIN 35200 B; CAT.BIN 34960 B; hello.elf/sh.elf AArch64 ELF exec", "evidence": "evidence-w6-run/s1.serial.txt"},
+    "T25": {"result": "PASS", "cmd": "in-OS run of the S1-built HELLO.BIN (stage t25-run via /SRC/T25.RUN)", "serial": "phase=t25-run-start; [HELLO] entering main / argc=1 / argv[0]=\"./HELLO.BIN\" / main returned 0; phase=t25-run-done rc=0", "note": "the prefetch race that killed flat LLD in w4 is fixed; flat LLD.BIN + OBJCOPY.BIN linked hello.o -> HELLO.BIN in-OS and the binary ran in-OS"},
+    "S2_kernel": {"result": "PENDING (in flight, 7800 s budget; per-TU markers = phase=kernel-compile rc=0 repeated, plus phase=kernel-ascompile)", "cmd": "make -f Makefile.hobbyos kernel"}
   },
   "walls_and_handoffs": [
     {
