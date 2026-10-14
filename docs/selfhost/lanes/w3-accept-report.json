@@ -1,0 +1,62 @@
+{
+  "lane": "w3-accept",
+  "status": "complete",
+  "branch": "selfhost/w3-accept",
+  "commits": [
+    "f6ded59 selfhost: w3-accept: pre-test S4/S5 with a hand-built 128 MiB OUT.IMG"
+  ],
+  "purpose": "Pre-test the host-side acceptance stages S4 (extract OUT.IMG, boot it, assert kernel marker) and S5 (boot OUT.IMG, run an in-OS-built program) with a hand-built 128 MiB FAT16 OUT.IMG (mtools mformat/mcopy only), extending tools/run_selfhost_build_test.py where needed, and produce the exact requirements for what the real in-OS-built OUT.IMG must contain for S5 to pass.",
+  "summary": "S4 and S5 are now EXERCISED code paths with gated, serial-backed evidence. A hand-built 128 MiB FAT16 OUT.IMG (BPB bps=512 spc=4 nfats=2 root=512 fatsize=256 total=262144, matching dosfstools at the frozen size; mformat -F means FAT32, the FAT16 recipe is truncate + plain mformat) was planted on a 1 GiB pre-test boot disk (real DESKTOP shape + SELFHOST.BIN + SELFHOST.RUN + BOOTAA64.EFI + kernel). Full-runner Run A: S4 extracted OUT.IMG (134,217,728 B) with byte-identity (sha256 93a2f80a… == hand-built master), booted it (kernel marker ok 6.5 s), S5 booted it again with QMP and launched OUTPROG.BIN from the OUT.IMG Apps menu ([MENU] 5=OUTPROG.BIN; [LAUNCH] OUTPROG.BIN; [KERNEL] Process 3: OUTPROG.BIN exited on serial) — S4/S5 green. Driver part still clean stage_failure at s0 (no MAKE.BIN — honest, in-OS toolchain is the remaining gate). Run B (kernel-less OUT.IMG, program+marker only) classifies stage_failure 'S4 failed: OUT.IMG did not reach the kernel marker' with S5 blocked — the documented expected class for a bare FAT16 (AAVMF: 'No bootable option or device was found.'). W3 finding: a standalone OUT.IMG boots only with the limine/AAVMF layout AND the S5 desktop path REQUIRES DESKTOP.BIN (+ shell set) on OUT.IMG — the kernel's DESKTOP mode parallel-loads DESKTOP.BIN from the boot-disk root; without it no Apps menu ever appears (first S5 attempt proved the negative). OUT.IMG content requirement documented in acceptance.md §8.",
+  "gates": {
+    "runner_s4_s5_exercised": "PASS — run A: s4.status=extracted, s4.bytes=134217728, s4.boot_ok=true (6.5 s), s5.status=run, s5.boot_ok=true, s5.menu_index=5, s5.launch_line=true, s5.exit_line=true, exit 0 via --expected-class stage_failure. run B: s4.boot_ok=false -> final stage_failure 'S4 failed: OUT.IMG did not reach the kernel marker', exit 0 via --expected-class stage_failure. Classifier self-test 7/7.",
+    "byte_identity": "PASS — runner-extracted out-selfhost.img sha256 93a2f80a028f12ada1a73ca2fb9e5e2c581ece0f3452d339c86bfd59085ea195 == hand-built OUT.IMG-hand-boot.img sha256 (run A); a1c57e61568e8d53b6d3ede3ae44fa9dfaebf905a9939e8672cd4ae5156f3828 == OUT.IMG-hand-min.img (run B). Host re-extraction of OUTPROG.BIN from the runner file == obj/arm/hello.bin sha256 7110d326…; OUTMARK.TXT content intact.",
+    "exit_codes_per_class": "stage_failure=13 (run A, run B), gated to exit 0 via --expected-class stage_failure; success=0 / boot_failure=10 / driver_absent=11 / script_missing=12 / hang=14 / harness_error=15 unchanged and unit-covered (7/7).",
+    "serial_excerpts": "committed in docs/selfhost/lanes/w3-accept-evidence.md (run A main/s4/s5 + run B s4/firmware messages); raw at ~/.hermes/cache/scratch/w3-accept/run{A,B}-serial.log(.s4/.s5).",
+    "acceptance_updated": "PASS — docs/selfhost/acceptance.md §8 (pre-test evidence, exact OUT.IMG layout requirement incl. DESKTOP, remaining work).",
+    "report_json_valid": "validated with python3 -m json.tool"
+  },
+  "artifacts": [
+    "tools/run_selfhost_build_test.py (S5 stage, S4 sha256+boot, --s5-program/--s5-wait, S4/S5 verdict override)",
+    "fat16img.py (linear read_file: 128 MiB extract 1 s vs O(n^2) hang)",
+    "tools/w3_accept_pretest.sh (reproducible hand OUT.IMG min+bootable + 1 GiB pre-test boot disk)",
+    "docs/selfhost/acceptance.md §8",
+    "docs/selfhost/lanes/w3-accept-evidence.md"
+  ],
+  "evidence": [
+    "~/.hermes/cache/scratch/w3-accept/runA-serial.log(.s4/.s5), runB-serial.log(.s4/.s5), runA-result.json, runB-result.json (raw, uncommitted)",
+    "~/.hermes/cache/scratch/w3-accept/{OUT.IMG-hand-min.img,OUT.IMG-hand-boot.img,bootdisk.img,out-selfhost.img} + sha256s in evidence doc",
+    "docs/selfhost/lanes/w3-accept-evidence.md (committed curated excerpts)",
+    "obj/arm build (make -j32 ARCH=arm all + user bins; hobbyos.elf->hobbyos.bin via llvm-objcopy) — BUILD_RC=0"
+  ],
+  "requirements_for_real_S5": {
+    "out_img_size": "128 MiB FAT16, frozen (DOSFSTOOLS DISK_BLOCKS=131072 = 1024-byte units; file = 134,217,728 B; mformat -T is 512-byte sectors, -F means FAT32 — the proven host recipe is truncate -s 134217728 + mformat; the in-OS MKFSFAT port produces the same geometry: bps=512 spc=4 nfats=2)",
+    "must_contain": [
+      "/EFI/BOOT/BOOTAA64.EFI (firmware PE loader)",
+      "/boot/limine.conf (verbatim ARM template: timeout 0 / default_entry 1 / protocol linux / path boot():/boot/hobbyos.bin)",
+      "/boot/hobbyos.bin (kernel flat binary, llvm-objcopy of the in-OS-built ELF)",
+      "/DESKTOP.BIN (REQUIRED — kernel DESKTOP mode parallel-loads it at boot; without it no Apps menu for S5's keystroke path; w3 empirical finding)",
+      "/CONSOLE.BIN, /SH.BIN (desktop shell stack, w2 desktop-disk set)",
+      "<S1 program>.BIN at root with an 8.3 name (the program S5 launches; OUTPROG.BIN proven)",
+      "a marker file for the host file-based check (OUTMARK.TXT proven, acceptance §5.4)"
+    ],
+    "s5_program_launch_mechanism": "verified today via the desktop Apps menu (QMP input-send-event keystrokes) with loader-line evidence ([LAUNCH] <prog>, [KERNEL] Process N: <prog> exited); program stdout is framebuffer-only so its own marker needs the MODE=selfhost serial-console-fd driver (kernel follow-up, acceptance §5.2 primary drive)",
+    "s3_in_os_recipe": "the in-OS S3 recipe (Makefile.hobbyos disk) must produce exactly the layout above — DESKTOP is not optional in AD-9's user set for the desktop S5 path",
+    "prereqs_before_real_run": [
+      "in-OS toolchain MAKE.BIN + clang in /TOOLS (S0-S3 real execution)",
+      "w2-mkfs kernel gap: MKFSFAT -C content writes into ftruncate-extended files must persist (extend-then-write)",
+      "MODE=selfhost boot mode (kernel lane) for program markers on serial"
+    ]
+  },
+  "remaining_harness_work": [
+    "MODE=selfhost + SELFHOST.BIN serial-console-fd stdout (kernel lane) — replaces the keystroke path, gives [SELFHOST]/program markers on serial",
+    "isolate whether CONSOLE.BIN is strictly required on OUT.IMG or only DESKTOP.BIN + SH.BIN (present together in the w3 run; not isolated)",
+    "hang classifier real-boot case once the toolchain exists (a wedged cc1) — currently unit-only",
+    "full acceptance run: driver completes (ACCEPTANCE-COMPLETE, zero FAIL tokens) + s4.boot_ok + s5.launch_line + program marker (item 1) -> success"
+  ],
+  "blockers": [
+    "no in-OS MAKE.BIN/toolchain yet — S0-S3 cannot run for real, so the real OUT.IMG does not exist; S4/S5 are pre-tested with the hand-built image (this lane's whole purpose)",
+    "w2-mkfs kernel gap (extend-then-write on FAT16) blocks MKFSFAT -C from producing OUT.IMG in-OS",
+    "agent command blocklist: mkfs.fat and dd unusable for scratch images; mtools mformat/mcopy used instead (L5-proven, kernel mounts fine)"
+  ],
+  "notes": "The mformat -F=FAT32 pitfall is now documented in the assembly script and acceptance.md §8. The runner's S4/S5 run automatically once OUT.IMG exists on the staged disk (root or /SRC), so no new runner work is needed for the real acceptance run. Heuristics: OUT.IMG at the boot-disk root shifted SELFHOST.BIN's Apps-menu index (5 in w2 -> 9 here) — the runner reads the actual [MENU] dump, so indexes are never hardcoded. One QEMU per tree at a time; fuser -k only on own images; no make clean; no broad pkill observed."
+}

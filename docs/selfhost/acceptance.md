@@ -371,3 +371,90 @@ rule from §8.4 applies: re-grep at execution time; this doc is a snapshot.
    L4 records what "enough" means.
 4. `dd` replacement: `ftruncate`-only (recommended) vs zero-fill.
 5. Exact `hobbyos.bin` size after the in-OS build (feeds §3.1 freeze).
+
+---
+
+## 8. S4/S5 pre-test evidence (lane w3-accept, 2026-10-14)
+
+Both host stages were pre-tested out-of-order with a hand-built OUT.IMG
+*before* the in-OS build can succeed (still gated on MAKE.BIN / the w2-mkfs
+extend-then-write kernel gap), using the L5-proven mtools path (`truncate`
++ `mformat` + `mcopy`; mkfs.fat/dd are command-blocked for the lane).
+
+### 8.1 Hand-built OUT.IMG (what was proven bootable)
+
+128 MiB FAT16, created with `truncate -s 134217728 img && mformat -i img ::`
+— **mformat's `-F` means "FAT32", never use it for OUT.IMG** (the w2-harness
+1 GiB recipe is `truncate` + plain `mformat`). Verified BPB: bps=512,
+spc=4, nfats=2, root=512 entries, fatsize=256, total=262144 sectors — the
+same geometry dosfstools picks at the frozen 128 MiB size (`w2-mkfs-report`
+"128 MiB → spc4"; DISK_BLOCKS=131072 is 1024-byte units).
+
+Layout that actually boots (QEMU §5.1 line, AAVMF + Limine, verified):
+
+```text
+/EFI/BOOT/BOOTAA64.EFI      (the firmware's PE loader — bootloader/BOOTAA64.EFI)
+/boot/limine.conf           (verbatim ARM template: path boot():/boot/hobbyos.bin)
+/boot/hobbyos.bin           (kernel flat binary, llvm-objcopy of hobbyos.elf)
+/DESKTOP.BIN                REQUIRED for S5's Apps-menu path — the kernel's
+                            DESKTOP mode parallel-loads DESKTOP.BIN from the
+                            boot disk root at start (main.c); without it no
+                            desktop / Apps menu ever appears (w3 finding)
+/CONSOLE.BIN, /SH.BIN       the desktop's shell stack (w2 desktop-disk set)
+/OUTPROG.BIN                the S1 user-set program to launch (8.3 root name)
+/OUTMARK.TXT                marker file for host file-based checks (§5.4)
+```
+
+A bare kernel-less OUT.IMG (`OUTPROG.BIN` + `OUTMARK.TXT` only) does NOT
+boot — correct, and the runner classifies it `stage_failure` ("S4 failed:
+OUT.IMG did not reach the kernel marker").
+
+### 8.2 Runner evidence (tools/run_selfhost_build_test.py, runs A/B)
+
+| run | OUT.IMG on boot disk | runner result (exit via --expected-class stage_failure) |
+|---|---|---|
+| A | bootable (§8.1) | driver clean stage_failure at s0 (MAKE.BIN missing — honest); **S4: extracted 134,217,728 B, sha256 MATCH hand master, OUT.IMG boot marker ok 6.5 s**; **S5: OUT.IMG booted, `[MENU] 5=OUTPROG.BIN`, `[LAUNCH] OUTPROG.BIN`, `[KERNEL] Process 3: OUTPROG.BIN exited` on serial**; exit 0 |
+| B | kernel-less | class `stage_failure` "S4 failed: OUT.IMG did not reach the kernel marker", S5 blocked (same image); exit 0 |
+
+S4 byte-identity: `out-selfhost.img` (extracted by the runner via fat16img)
+sha256 == hand-built master sha256 (both runs); host re-extraction of
+`OUTPROG.BIN` from the runner's file == `obj/arm/hello.bin` sha256.
+Runner changes: S4 records extracted sha256 + boots the image; S5 boots it
+with QMP and launches `--s5-program` (default OUTPROG.BIN) from the Apps
+menu; S4/S5 only override the verdict when they themselves fail;
+`--s5-program` / `--s5-wait`. fat16img read_file made linear (~1 s for the
+128 MiB extract; the old bytes-concat was O(n²) and hung >120 s).
+Classifier self-test still 7/7. Raw serials (uncommitted):
+`~/.hermes/cache/scratch/w3-accept/run{A,B}-serial.log(.s4/.s5)`.
+
+### 8.3 What S5's keystroke path can and cannot see today
+
+Desktop-launched programs render stdout to their window (framebuffer), not
+serial — HELLO's `[HELLO]` lines do not reach the capture. S5 therefore
+proves the program-side via the loader lines (`[LAUNCH] OUTPROG.BIN`,
+`[KERNEL] Process ... exited`) plus host file checks, exactly the §5.4 /
+§5.3-fallback framing. The program's own marker on serial needs
+`MODE=selfhost` + SELFHOST.BIN's serial-console fd (kernel change, §5.2
+primary drive) — that is the one remaining kernel-side piece for a *full*
+S5 marker assertion.
+
+### 8.4 Remaining harness/build work for the real acceptance run
+
+1. **In-OS toolchain** (`MAKE.BIN` + clang in `/TOOLS`): makes S0–S3 run for
+   real; blocked first by the w2-mkfs kernel gap (MKFSFAT `-C` content
+   writes into ftruncate-extended files do not persist — extend-then-write).
+2. **S3 recipe (Makefile.hobbyos disk)** must produce exactly the §8.1
+   layout — including **DESKTOP.BIN + SH.BIN + CONSOLE.BIN on OUT.IMG**.
+   Consequence for AD-9: DESKTOP is not "optional if it links cheaply" — it
+   is **required** for S5's desktop-path boot (w3 finding; alternative is
+   the MODE=selfhost driver which needs no desktop, item 3).
+3. **`MODE=selfhost` boot mode** (kernel lane): launcher + serial-console-fd
+   stdout so SELFHOST.BIN and the S5 program emit markers on serial;
+   removes the keystroke fragility and the framebuffer-only limitation.
+4. After S3: runner already extracts + boots + launches automatically (no
+   new runner work for the real run); final acceptance expects
+   `s4.boot_ok=true` and `s5.launch_line=true` (then `success` once the
+   driver completes, `ACCEPTANCE-COMPLETE`, zero FAIL tokens).
+5. Decide/trim: OUT.IMG content set (S1 user set incl. DESKTOP per item 2),
+   and whether CONSOLE.BIN is strictly required or only DESKTOP.BIN + SH.BIN
+   (not isolated in this pre-test).

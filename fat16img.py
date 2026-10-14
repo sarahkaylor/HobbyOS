@@ -180,12 +180,14 @@ class Fat16:
         _, is_dir, cluster, size = ent[:4]  # subdir entries carry +long_name
         if is_dir:
             raise IsADirectoryError(name)
-        out = b""
+        chunks = []
+        got = 0
         c = cluster
-        while c and c >= 2 and len(out) < size:
-            out += self._cluster_bytes(c)
+        while c and c >= 2 and got < size:
+            chunks.append(self._cluster_bytes(c))
+            got += self.cluster_size
             c = self._next_cluster(c)
-        return out[:size]
+        return b"".join(chunks)[:size]
 
 
 def main(argv):
