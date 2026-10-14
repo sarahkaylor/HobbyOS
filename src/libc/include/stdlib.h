@@ -121,6 +121,9 @@ extern "C" {
 
   void abort(void) __attribute__((noreturn));
   void exit(int status) __attribute__((noreturn));
+  /* C99 _Exit (selfhost W2-7): terminate without running atexit/quick-exit
+   * handlers.  Implemented in src/libc/src/stdlib.c:767. */
+  void _Exit(int status) __attribute__((noreturn));
 
   /* atexit: handlers run LIFO inside exit() (libc.c calls back into the
    * stdlib.c registry via __hb_atexit_run).  Returns 0, or -1 if the

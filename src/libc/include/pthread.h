@@ -190,6 +190,14 @@ extern "C" {
   void *pthread_getspecific(pthread_key_t key);
   int pthread_setspecific(pthread_key_t key, const void *value);
 
+  /* ---- signals (selfhost W2-7) ------------------------------------------- */
+  /* pthread_sigmask = sigprocmask: both are 0-returning no-ops (no
+   * per-thread masks in the P5 disposition model).  sigset_t comes from
+   * <signal.h>; the declaration here mirrors glibc's <pthread.h>. */
+  struct __hb_sigset;
+  int pthread_sigmask(int how, const struct __hb_sigset *set,
+                      struct __hb_sigset *oldset);
+
   /* ---- sched (POSIX puts this in <sched.h>; kept here for P1) ------------- */
   int sched_yield(void);
 

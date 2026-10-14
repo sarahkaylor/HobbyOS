@@ -66,6 +66,11 @@ extern "C" {
    * errnum is unknown (EINVAL), glibc-XSI semantics. */
   int strerror_r(int errnum, char *buf, size_t buflen);
 
+  /* selfhost W2-4: signal-name text (Linux-style, real string table in
+   * src/libc/src/string.c).  Used by llvm Unix/Program.inc:492 to render
+   * a child's WIFSIGNALED status. */
+  char *strsignal(int sig);
+
   int memcmp(const void *s1, const void *s2, size_t n);
   void *memmove(void *dest, const void *src, size_t n);
   void *memcpy(void *dest, const void *src, size_t n);

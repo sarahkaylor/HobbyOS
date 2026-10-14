@@ -73,9 +73,12 @@ extern "C" {
    * accepted-and-recorded but never invoked (documented divergence, the
    * fault's default action still kills + reports).  sigprocmask and
    * pthread_sigmask are no-ops returning 0 (no per-thread masks yet). */
-  typedef struct {
+  /* Tagged (not anonymous) so <pthread.h> can forward-declare the same
+   * struct for its pthread_sigmask prototype without an include cycle. */
+  struct __hb_sigset {
     unsigned long __bits[2];
-  } sigset_t;
+  };
+  typedef struct __hb_sigset sigset_t;
 
   /* Minimal siginfo_t (glibc-sized: 128 bytes).  Only si_signo, si_code,
    * si_pid and si_status are meaningful today (a one-argument handler sees
@@ -107,6 +110,12 @@ extern "C" {
 #define SA_RESETHAND 0x2
 #define SA_SIGINFO   0x4
 #define SA_RESTORER  0x04000000 /* libc always fills sa_restorer anyway */
+  /* selfhost W2-7: Linux flag values used unguarded by
+   * llvm/lib/Support/Unix/Signals.inc:321.  Honoured by the P5 delivery
+   * engine (SA_ONSTACK is a no-op — there is no alternate stack, and no
+   * SA_NODEFER re-entrancy guard) but must be `#define`d for the build. */
+#define SA_ONSTACK   0x08000000
+#define SA_NODEFER   0x40000000
 
 #define SIG_BLOCK   0
 #define SIG_UNBLOCK 1
@@ -118,6 +127,9 @@ extern "C" {
   int sigaddset(sigset_t *set, int signum);
   int sigdelset(sigset_t *set, int signum);
   int sigprocmask(int how, const sigset_t *set, sigset_t *oldset);
+  /* selfhost W2-7: pthread_sigmask = sigprocmask (no per-thread masks yet;
+   * both are no-ops returning 0, per the P5 disposition model). */
+  int pthread_sigmask(int how, const sigset_t *set, sigset_t *oldset);
 
 #ifdef __cplusplus
 }

@@ -161,7 +161,9 @@ extern "C" {
   } __attribute__((packed));
 
   int read_dir(const char *path, int index, struct sys_dirent *ent);
-  int mkdir(const char *path);
+  /* selfhost W2-7: variadic — legacy call sites pass one arg, POSIX ports
+   * pass (path, mode); the mode is ignored on this permissionless VFS. */
+  int mkdir(const char *path, ...);
   char *getcwd(char *buf, size_t size);
   int chdir(const char *path);
 
