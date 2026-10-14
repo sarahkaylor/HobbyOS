@@ -890,6 +890,53 @@ static void test_lostwake_stale_claim_reclaim(void) {
   }
 }
 
+/* w5 (ii): a fault-killed child must NEVER report status 0.  The trap
+ * fault paths (EC=0x00/0x3C/generic) used to call process_exit(tf), which
+ * reaped the stale x0 left in the frame -- a crash could false-pass as
+ * rc=0 (w4-clang t23).  They now route through process_fault_set_status,
+ * which stamps PROCESS_STATUS_SIGNAL|signo, and group_teardown maps that
+ * marker to the waitpid SIGNAL byte (always non-zero). */
+static void test_fault_kill_status_nonzero(void) {
+  tests_run++;
+  uart_puts("  Running test_fault_kill_status_nonzero...\n");
+
+  /* 1) The encoder: even with a stale x0 == 0 in the frame (the exact
+     t23 shape: the tool faulted at entry, x0 was 0), the stamped code
+     carries the marker and turns into a non-zero signal-shaped status
+     through group_teardown's mapping (process.c group_teardown). */
+  struct trap_frame tf;
+  memset(&tf, 0, sizeof(tf)); /* regs[0] == 0: stale "success" */
+  process_fault_set_status(&tf, 11);
+  uint64_t code = tf.regs[0];
+  EXPECT_EQ((int)(code & PROCESS_STATUS_SIGNAL) != 0, 1);
+  /* group_teardown (:552): marker set -> waitpid status = (code & 0x7f) */
+  uint32_t st = ((int)(code & PROCESS_STATUS_SIGNAL))
+                  ? (uint32_t)((int)code & 0x7f)
+                  : ((uint32_t)((int)code & 0xff) << 8);
+  EXPECT_EQ((int)st != 0, 1);
+  EXPECT_EQ((int)st, 11); /* SIGSEGV */
+
+  /* every signal number the fault paths use must encode non-zero */
+  {
+    struct trap_frame tf2;
+    memset(&tf2, 0, sizeof(tf2));
+    process_fault_set_status(&tf2, 4);
+    EXPECT_EQ((int)((tf2.regs[0] & PROCESS_STATUS_SIGNAL) != 0), 1); /* SIGILL */
+  }
+
+  /* 2) End-to-end: the default-disposition kill path (what the trap
+     handler's process_fault_exit invokes) lands a non-zero signal-shaped
+     status on the dead group, exactly what waitpid() reports. */
+  int pid = process_create();
+  struct process *p = process_group(process_get_pcb(pid));
+  p->sig_handler[HO_SIGSEGV] = HO_SIG_DFL;
+  EXPECT_EQ(process_signal(pid, HO_SIGSEGV), 0);
+  EXPECT_EQ(p->state, PROC_STATE_EXITED);
+  EXPECT_EQ(p->exit_status != 0, 1);
+  EXPECT_EQ(p->exit_status, HO_SIGSEGV);
+  process_free(pid);
+}
+
 void process_test_suite(void) {
   uart_puts("process_test_suite:\n");
   test_process_init_and_create();
@@ -905,6 +952,7 @@ void process_test_suite(void) {
   test_p5_sigaction_storage();
   test_p5_kill_semantics();
   test_p5_sigpipe_semantics();
+  test_fault_kill_status_nonzero(); /* w5 (ii) */
   test_p5_env_readback();
   test_p5_reap_delivery_on_kill();
   test_p5_waitpid_validation();
