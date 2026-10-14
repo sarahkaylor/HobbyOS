@@ -47,7 +47,7 @@
     "a_wave_arm": {
       "cmd": "make ARCH=arm MODE=test run QEMU_ARGS='-display none'",
       "expect": "'System halt.' marker and ZERO FAIL tokens",
-      "result": "PASS — two independent full-wave runs after the sh.c fix, both 'System halt.' + zero 'shell_test*: FAILED' tokens; SHTEST 'SHELL INTEGRATION TEST PASSED' in the pre-polish run; all pressure-class steps SKIP cleanly (no FAIL) including echo, cat, redirection, 2>&1 dup, make-banner, cat-nested."
+      "result": "PASS — three independent full-wave runs after the sh.c fix, all 'System halt.' + zero 'shell_test*: FAILED' tokens (wave log: docs/selfhost/lanes/w3-shell-arm-wave.log); SHTEST 'SHELL INTEGRATION TEST PASSED' on the pre-polish run; all pressure-class steps SKIP cleanly (no FAIL) including echo, cat, redirection, 2>&1 dup, make-banner, cat-nested."
     },
     "b_unit_tier": {
       "cmd": "./run_unit_tests.sh",
