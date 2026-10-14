@@ -1080,6 +1080,18 @@ int vm_image_prefetch_run(struct addr_space *as, uint64_t start_page,
       /* Already resident (the eager first page, a demand fault ahead of
          us, or a peer)?  Skip without a frame. */
       fl = spinlock_acquire_irqsave(&vm_lock);
+      /* w5 (iii): re-validate liveness in the SAME critical section as
+         the walk.  The batch-top alive check is a separate window; a
+         peer CPU can tear the AS down between it and this walk, and a
+         walk on a dying AS is exactly the pid=5 housekeeping EL1 fault
+         (vm_arch_walk+0x2c, FAR 0xFFFF...F000).  The map path below
+         already re-checks alive2; the presence probe must too. */
+      if (!v2_prefetch_alive_locked(as, epoch, cluster, fsize)) {
+        spinlock_release_irqrestore(&vm_lock, fl);
+        st->stopped = 1;
+        stop = 1;
+        break;
+      }
       int present = (vm_arch_walk(as, va, 0) == 0);
       spinlock_release_irqrestore(&vm_lock, fl);
       if (present) {

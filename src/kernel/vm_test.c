@@ -789,6 +789,51 @@ static void test_v2_image_prefetch(void) {
   EXPECT_EQ(frame_free_count(), free0);
 }
 
+/* w5 (iii): a page-table walk on a torn-down (zero-root) AS must return
+ * -1 (absent) without dereferencing anything — the L9 prefetch kernel
+ * task races a peer CPU's group teardown, and the w4-clang pid=5/pid=4
+ * housekeeping EL1 fault (FAR 0xFFFF...F000, vm_arch_walk+0x2c) was a
+ * walk deref of a dead/reused table chain.  Also (w5 iv): a recreated
+ * AS must not inherit a stale fault-retry budget. */
+static void test_vm_walk_dead_as_safe(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_walk_dead_as_safe...\n");
+
+  int free0 = frame_free_count();
+  struct addr_space *as = vm_as_create(VM_TEST_TAG);
+  EXPECT_EQ((as != 0), 1);
+  if (!as)
+    return;
+
+  /* Live walks: absent reports -1; after a map the same VA reports 0. */
+  EXPECT_EQ(vm_arch_walk(as, USER_IMG_BASE, 0), -1);
+  uint64_t fr = frame_alloc();
+  EXPECT_EQ((fr != 0), 1);
+  EXPECT_EQ(vm_arch_map(as, USER_IMG_BASE, fr,
+                        VM_PROT_READ | VM_PROT_EXEC, VMK_IMG),
+            0);
+  EXPECT_EQ(vm_arch_walk(as, USER_IMG_BASE, 0), 0);
+
+  /* Teardown zeroes the root; a subsequent walk must return absent
+     WITHOUT dereferencing (any deref here is a kernel-mode fault). */
+  vm_as_teardown(as);
+  EXPECT_EQ(as->root_phys, 0);
+  EXPECT_EQ(vm_arch_walk(as, USER_IMG_BASE, 0), -1);
+  EXPECT_EQ(vm_arch_walk(as, USER_IMG_BASE + 0x1000, 0), -1);
+
+  /* w5 (iv): a fresh AS on the same slot starts with a clean budget. */
+  as->retry_va = 0x12345000u;
+  as->retry_count = 9;
+  struct addr_space *as2 = vm_as_create(VM_TEST_TAG);
+  EXPECT_EQ((as2 != 0), 1);
+  if (as2) {
+    EXPECT_EQ(as2->retry_count, 0);
+    EXPECT_EQ(as2->retry_va, 0);
+    vm_as_teardown(as2);
+    EXPECT_EQ(frame_free_count(), free0);
+  }
+}
+
 void vm_test_suite(void) {
   uart_puts("vm_test_suite:\n");
   test_vm_as_lifecycle();
@@ -799,6 +844,7 @@ void vm_test_suite(void) {
   test_vm_demand_fault();
   test_v2_image_first_page();
   test_v2_image_prefetch();
+  test_vm_walk_dead_as_safe(); /* w5 (iii)/(iv) */
   test_vm_mmap_family();
   test_vm_shared_objects();
   test_vm_as_clone_fork();
