@@ -369,6 +369,10 @@ wait for the current run's log to show its final line, then start the next.
   kernel boot mode + serial-console-fd stdout (acceptance 5.2/5.3); (f) RESDIR 159>8.3
   name curation + `/TOOLS` staging of the toolchain (M2 sizes); (g) `shell_test`
   echo-token drain (QoL); (h) M3 driver milestones once the toolchain is bootable.
+  **DISPATCHED 2026-10-14 (`deleg_1fa8515c`, 4 lanes from `1920dc9`):** w3-kernel = (a)+(b);
+  w3-shell = (c)+(g); w3-tools = (f) + `/TOOLS` staging (sole Makefile writer);
+  w3-accept = S4/S5 runner pre-test (hand-built OUT.IMG) + real-OUT.IMG requirements.
+  Socket reconciliation (d) and `MODE=selfhost` (e) stay queued for wave 4.
 - Integrator = parent session: merges lanes to `main` here, runs merged-tip gates, is the
   sole writer of `selfhost.md`, `.gitignore`, syscall.h/both trap.c.
 
@@ -534,6 +538,26 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 ---
 
 ## 11. Fix log (append-only, newest first)
+
+- **2026-10-14 — Post-merge closure re-validation GREEN + first merged-tip battery fallout
+  fixed (`1920dc9`).** Closure: re-staged sysroot from merged src, `cmake` reconfigure
+  (closure objects are configure-time — see entry below), then llvm-ar / llvm-objcopy /
+  clang-21 / lld ALL relinked clean against the merged libc.a with the reconciled gaps.c —
+  concrete proof the 24-symbol reconciliation holds for the full toolchain;
+  `install-distribution` restaged 227 MB. First merged-tip battery (finished in 2 min,
+  red): host rc=2 — `compat.c` host mock mkdir vs the new variadic `ho_mkdir` decl, then
+  a glibc C++ `<sys/stat.h>` __THROW mkdir clash; unit-arm/unit-x64 rc=1 + wave rc=2 —
+  MAKE.BIN duplicate `alarm` (hb_stubs.c) + `strsignal` (signame.c) vs the now-real libc
+  symbols; mtools carried the same `alarm` fallback. Fixes: compat mkdir variadic;
+  `unistd.h` mkdir decl HOST_TEST-guarded; make `config.h` `HAVE_STRSIGNAL 1`; alarm
+  stubs dropped in make + mtools. Post-fix pre-checks green (host ALL APPS SUITE PASSED;
+  arm make/mcopy/mdel/mmd relink clean). Full reruns (local + CI-VM `merged-w3`) in
+  flight. **Class lesson:** every symbol that newly lands in libc must be re-checked
+  against every port's private fallbacks — grep the symbol across `src/user` whenever
+  libc grows. **Wave 3 dispatched (4 lanes, `deleg_1fa8515c`):** w3-kernel (FAT16
+  extend-write gap + opendir/readdir), w3-shell (external redirect + echo-token drain),
+  w3-tools (resdir curation decision + /TOOLS staging; sole Makefile writer),
+  w3-accept (S4/S5 runner pre-test with a hand-built OUT.IMG + real-OUT.IMG requirements).
 
 - **2026-10-14 — Wave 2 (7 lanes) all merged; closure re-validation + merge-time fixes.**
   Merges on `main`: w2-kernel `7abb674`, w2-userland `9587c45`, w2-llvm `a06daf7`,
