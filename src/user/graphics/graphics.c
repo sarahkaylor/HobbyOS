@@ -9,6 +9,7 @@
  */
 
 #include "graphics.h"
+#include "theme.h"
 #include "libc.h"
 #include "font.h"
 #include "icons.h"
@@ -233,17 +234,18 @@ void graphics_draw_line(int x0, int y0, int x1, int y1, uint32_t color) {
  * The desktop paints its whole backdrop with a single full-span call:
  *   graphics_fill_gradient_v(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - TASKBAR_H, top, bottom)
  * That span is recognized here and rendered as the house wallpaper instead
- * of the raw two-colour ramp: deep navy (12,16,34) at the top easing into a
- * dark slate (34,44,72) at the taskbar line, plus a soft horizontal band of
- * a slightly lighter tone across the upper third. Any other span (window
- * title bars, the taskbar strip, demo gradients) keeps the plain linear ramp
- * it always had, so callers that pass their own colours are unaffected. */
-#define WALLPAPER_TOP_R 12
-#define WALLPAPER_TOP_G 16
-#define WALLPAPER_TOP_B 34
-#define WALLPAPER_BOT_R 34
-#define WALLPAPER_BOT_G 44
-#define WALLPAPER_BOT_B 72
+ * of the raw two-colour ramp: the Chrome-light grey (0xF8,0xF9,0xFA, grey-050)
+ * at the top easing into grey-300 (0xDA,0xDC,0xE0) at the taskbar line, plus a
+ * soft horizontal band of a slightly cooler (blue-tinged) tone across the
+ * upper third. Any other span (window title bars, the taskbar strip, demo
+ * gradients) keeps the plain linear ramp it always had, so callers that pass
+ * their own colours are unaffected. */
+#define WALLPAPER_TOP_R 0xF8
+#define WALLPAPER_TOP_G 0xF9
+#define WALLPAPER_TOP_B 0xFA
+#define WALLPAPER_BOT_R 0xDA
+#define WALLPAPER_BOT_G 0xDC
+#define WALLPAPER_BOT_B 0xE0
 #define WALLPAPER_BAND_GAIN 12 /* peak strength of the lighter band */
 #define WALLPAPER_BAND_CENTER_PCT 38 /* band centre as % of the height */
 #define WALLPAPER_MIN_H (SCREEN_HEIGHT - 64) /* anything shorter is a plain ramp */
@@ -267,7 +269,7 @@ static void wallpaper_band_gain(int row, int h, int *dr, int *dg, int *db) {
   *db = gain;
 }
 
-/* One row of the house wallpaper (navy -> slate, with the soft band).
+/* One row of the house wallpaper (light grey -> grey-300, with the soft band).
  * Exposed for the desktop: pixel-mode app content carves the wallpaper
  * apart, and the WM repaints the remaining bands row by row with exactly
  * these colours (see window.h). */

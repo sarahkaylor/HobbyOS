@@ -1,4 +1,5 @@
 #include "graphics.h"
+#include "theme.h"
 #include "libc.h"
 #include "window.h"
 #include "desktop_damage.h"
@@ -953,7 +954,7 @@ static void launch_app_named(const char *bin, const char *args) {
   print_console("\n");
   int pid = spawn2(bin, in_pipe[0], out_pipe[1], -1, args);
   if (pid >= 0) {
-    int win_id = wm_create_window(COLOR(16, 18, 30), pid, out_pipe[0], in_pipe[1]);
+    int win_id = wm_create_window(THEME_SURFACE, pid, out_pipe[0], in_pipe[1]);
     char name[24];
     app_name_from_bin(bin, name, sizeof(name));
     wm_set_window_title(win_id, name);
@@ -982,9 +983,9 @@ void draw_menu(void) {
     for(int i=0; i<num_windows; i++) if(windows[i].id == app_menu_win_id) { win = &windows[i]; break; }
     if (win && app_menu_idx >= 0 && app_menu_idx < win->num_menus) {
       int n_items = win->menus[app_menu_idx].num_items;
-      graphics_draw_rect(app_menu_x, app_menu_y, 100, n_items * 20, COLOR(200, 200, 200));
+      graphics_draw_rect(app_menu_x, app_menu_y, 100, n_items * 20, THEME_SURFACE);
       for(int i=0; i<n_items; i++) {
-        wm_draw_text(app_menu_x + 5, app_menu_y + i * 20 + 5, win->menus[app_menu_idx].items[i], COLOR(0, 0, 0));
+        wm_draw_text(app_menu_x + 5, app_menu_y + i * 20 + 5, win->menus[app_menu_idx].items[i], THEME_TEXT);
       }
     }
   }
@@ -993,12 +994,12 @@ void draw_menu(void) {
     return;
   int w = 120;
   int h = num_menu_items * 20;
-  graphics_draw_rect(menu_x, menu_y, w, h, COLOR(200, 200, 200));
+  graphics_draw_rect(menu_x, menu_y, w, h, THEME_SURFACE);
   for (int i = 0; i < num_menu_items; i++) {
     char label[16];
     menu_display_name(menu_items[i], label, sizeof(label));
     wm_draw_text(menu_x + 5, menu_y + i * 20 + 5, label,
-                 COLOR(0, 0, 0));
+                 THEME_TEXT);
   }
 }
 
@@ -1040,29 +1041,29 @@ static void taskbar_button_geometry(int *btn_w) {
 static void draw_taskbar(void) {
   /* Background */
   graphics_fill_gradient_v(0, TASKBAR_Y, SCREEN_WIDTH, TASKBAR_H,
-                           COLOR(48, 54, 74), COLOR(30, 33, 46));
-  graphics_draw_hline(0, TASKBAR_Y, SCREEN_WIDTH, COLOR(96, 166, 255));
+                           THEME_SURFACE, THEME_SURFACE);
+  graphics_draw_hline(0, TASKBAR_Y, SCREEN_WIDTH, THEME_OUTLINE);
 
   /* Apps button */
   graphics_draw_rect(APPS_BTN_X, TASKBAR_Y + 3, APPS_BTN_W, TASKBAR_H - 6,
-                     start_menu_open ? COLOR(96, 166, 255) : COLOR(64, 74, 100));
+                     start_menu_open ? THEME_ACCENT : THEME_ACCENT_SOFT);
   graphics_draw_rect_outline(APPS_BTN_X, TASKBAR_Y + 3, APPS_BTN_W, TASKBAR_H - 6,
-                             COLOR(140, 150, 180));
-  wm_draw_text(APPS_BTN_X + 10, TASKBAR_Y + 9, "Apps", COLOR(240, 242, 248));
+                             start_menu_open ? THEME_ACCENT : THEME_ACCENT_HOVER);
+  wm_draw_text(APPS_BTN_X + 10, TASKBAR_Y + 9, "Apps", start_menu_open ? THEME_SURFACE : THEME_ACCENT_DEEP);
 
   /* Window buttons */
   int bw;
   taskbar_button_geometry(&bw);
   int bx = TASKBAR_BTN_X;
   for (int i = 0; i < num_windows; i++) {
-    graphics_draw_rect(bx, TASKBAR_Y + 3, bw - 2, TASKBAR_H - 6, COLOR(52, 58, 78));
+    graphics_draw_rect(bx, TASKBAR_Y + 3, bw - 2, TASKBAR_H - 6, THEME_SURFACE_1);
     graphics_draw_rect_outline(bx, TASKBAR_Y + 3, bw - 2, TASKBAR_H - 6,
-                               (windows[i].id == focused_window) ? COLOR(96, 166, 255)
-                                                                 : COLOR(90, 96, 116));
+                               (windows[i].id == focused_window) ? THEME_ACCENT
+                                                                 : THEME_OUTLINE);
     graphics_set_clip(bx + 4, TASKBAR_Y + 3, bw - 10, TASKBAR_H - 6);
     wm_draw_text(bx + 6, TASKBAR_Y + 9,
                  windows[i].title[0] ? windows[i].title : "app",
-                 COLOR(226, 230, 240));
+                 (windows[i].id == focused_window) ? THEME_TEXT : THEME_TEXT_SUB);
     graphics_reset_clip();
     bx += bw;
   }
@@ -1070,7 +1071,7 @@ static void draw_taskbar(void) {
   /* Clock */
   char clk[12];
   get_clock_string(clk);
-  wm_draw_text(SCREEN_WIDTH - CLOCK_W + 8, TASKBAR_Y + 9, clk, COLOR(220, 226, 240));
+  wm_draw_text(SCREEN_WIDTH - CLOCK_W + 8, TASKBAR_Y + 9, clk, THEME_TEXT_SUB);
 }
 
 static void draw_start_menu(void) {
@@ -1084,14 +1085,14 @@ static void draw_start_menu(void) {
   int x = 4;
   int y = TASKBAR_Y - h;
 
-  graphics_draw_rect(x, y, w, h, COLOR(232, 234, 240));
-  graphics_draw_rect_outline(x, y, w, h, COLOR(96, 166, 255));
+  graphics_draw_rect(x, y, w, h, THEME_SURFACE);
+  graphics_draw_rect_outline(x, y, w, h, THEME_OUTLINE);
 
   if (start_scroll > 0) {
-    wm_draw_text(x + w - 40, y - 8, "more ^", COLOR(220, 226, 240));
+    wm_draw_text(x + w - 40, y - 8, "more ^", THEME_TEXT_SUB);
   }
   if (start_scroll + visible < num_menu_items) {
-    wm_draw_text(x + w - 40, y + h, "more v", COLOR(220, 226, 240));
+    wm_draw_text(x + w - 40, y + h, "more v", THEME_TEXT_SUB);
   }
 
   for (int i = 0; i < visible; i++) {
@@ -1101,10 +1102,10 @@ static void draw_start_menu(void) {
     char label[16];
     menu_display_name(menu_items[idx], label, sizeof(label));
     if (idx == start_sel) {
-      graphics_draw_rect(x + 2, row_y, w - 4, 20, COLOR(96, 166, 255));
-      wm_draw_text(x + 8, row_y + 5, label, COLOR(255, 255, 255));
+      graphics_draw_rect(x + 2, row_y, w - 4, 20, THEME_ACCENT_SOFT);
+      wm_draw_text(x + 8, row_y + 5, label, THEME_ACCENT_DEEP);
     } else {
-      wm_draw_text(x + 8, row_y + 5, label, COLOR(20, 20, 24));
+      wm_draw_text(x + 8, row_y + 5, label, THEME_TEXT);
     }
   }
 }
@@ -1172,7 +1173,7 @@ static void paint_wallpaper(void) {
   }
   if (ncut == 0) {
     graphics_fill_gradient_v(0, 0, SCREEN_WIDTH, span_h,
-                             COLOR(16, 20, 38), COLOR(44, 56, 96));
+                             THEME_WALLPAPER_TOP, THEME_WALLPAPER_BOT);
     return;
   }
 
