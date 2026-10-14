@@ -1,0 +1,8 @@
+[SELFHOST] phase=npnew-run-start
+Loading program for scheduler (v2 AS): /NPNEW.BIN
+[NPNEW] before new(nothrow)
+[NPNEW] alloc ok
+[NPNEW] done
+[KERNEL] Process 4: /NPNEW.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=npnew-run-done rc=0
+[SELFHOST] ACCEPTANCE-COMPLETE stages=1
