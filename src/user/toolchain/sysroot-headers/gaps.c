@@ -13,9 +13,12 @@
  *   gethostname()  - OS has no hostname concept; copy "hobbyos".
  *   getsid()       - no session support; return the pid (single-session OS).
  *   strsignal()    - HobbyOS libc has strerror() already; map via it.
- *   socket/bind/listen/accept/connect/pipe - HobbyOS P4 ships only
- *     socketpair()/sendmsg()/recvmsg(); the listener surface is missing, so
- *     these fail with ENOSYS (callers must handle the error).
+ *   bind/listen/accept - HobbyOS P4 ships only socket()/socketpair()/
+ *     sendmsg()/recvmsg(); the listener surface is missing, so these fail
+ *     with ENOSYS (callers must handle the error).
+ * Wave-2 note: socket()/connect()/pipe()/mkdir()/fchmod()/_Exit() were once
+ * stubbed here but are now REAL in HobbyOS libc.a (wave-2 libc rebuild), so
+ * they were removed from gaps.c to avoid duplicate symbols at link time.
  */
 #include <errno.h>
 #include <signal.h>
@@ -42,10 +45,6 @@ pid_t getsid(pid_t pid) { return pid; }
 
 char *strsignal(int sig) { return strerror(sig); }
 
-int socket(int domain, int type, int protocol) {
-  (void)domain; (void)type; (void)protocol;
-  errno = ENOSYS; return -1;
-}
 int bind(int fd, const void *addr, unsigned int addrlen) {
   (void)fd; (void)addr; (void)addrlen;
   errno = ENOSYS; return -1;
@@ -55,11 +54,6 @@ int accept(int fd, void *addr, unsigned int *addrlen) {
   (void)fd; (void)addr; (void)addrlen;
   errno = ENOSYS; return -1;
 }
-int connect(int fd, const void *addr, unsigned int addrlen) {
-  (void)fd; (void)addr; (void)addrlen;
-  errno = ENOSYS; return -1;
-}
-int pipe(int fds[2]) { (void)fds; errno = ENOSYS; return -1; }
 
 /* Process/session surface (l1-dep-surface.txt B; L2 owns real ones). */
 pid_t setsid(void) { errno = ENOSYS; return -1; }
@@ -79,14 +73,6 @@ int getrusage(int who, struct rusage *usage) {
 int fchown(int fd, unsigned int owner, unsigned int group) {
   (void)fd; (void)owner; (void)group; errno = ENOSYS; return -1;
 }
-int fchmod(int fd, unsigned int mode) {
-  (void)fd; (void)mode; errno = ENOSYS; return -1;
-}
-int mkdir(const char *path, unsigned int mode) {
-  /* HobbyOS libc.h ho_mkdir exists; delegate to it to avoid double-def. */
-  extern int ho_mkdir(const char *path);
-  (void)mode; return ho_mkdir(path);
-}
 int symlink(const char *target, const char *linkpath) {
   (void)target; (void)linkpath; errno = ENOSYS; return -1;
 }
@@ -97,8 +83,6 @@ int link(const char *oldpath, const char *newpath) {
 int pthread_sigmask(int how, const sigset_t *set, sigset_t *oldset) {
   (void)how; (void)set; (void)oldset; return 0; /* matches libc's no-op */
 }
-
-void _Exit(int status) { extern void _exit(int); _exit(status); } /* noreturn */
 
 /* uname() -- TargetParser/Unix/Host.inc builds the host triple from it. */
 int uname(struct utsname *buf) {
@@ -125,4 +109,30 @@ int dladdr(const void *addr, Dl_info *info) {
   (void)addr;
   if (info) { info->dli_fname = ""; info->dli_fbase = 0; info->dli_sname = 0; info->dli_saddr = 0; }
   return 0;
+}
+
+/* __clear_cache() -- compiler-rt builtin referenced by
+ * llvm::sys::Memory::invalidateInstructionCache (llvm/lib/Support/Unix/
+ * Memory.inc:Memory.cpp).  HobbyOS ships no compiler-rt archive and LLVM's
+ * declaration is `extern "C" void __clear_cache(char*, char*)`.  These
+ * freestanding tools never JIT on the target and the linker script keeps
+ * code in write-protected memory, so invalidating nothing is correct
+ * (a cached-code flush would be needed only if the OS ever self-modifies
+ * code).  L2 work item if a JIT lands. */
+void __clear_cache(void *begin, void *end) {
+  (void)begin; (void)end;
+}
+
+/* WK-1 weak `main` bridge (WebKit-fork mainlink_shim.c precedent; recognized
+ * open item llvm-bootstrap.md §10).  -ffreestanding makes clang drop the
+ * "main has C linkage" special case, so C++ tool `main` is emitted as the
+ * mangled `_Z4mainiPPc` while crt0.o (`_start`) references plain C `main`.
+ * This WEAK definition forwards to the mangled entry:
+ *   - C++ tool: strong _Z4mainiPPc satisfies this object's reference, and its
+ *     weak `main` satisfies crt0 (no strong unmangled main exists);
+ *   - C tool defining `main` unmangled: strong `main` wins over the weak one
+ *     and the undefined _Z4mainiPPc is dropped by --gc-sections. */
+extern int mangledMain(int, char **) __asm__("_Z4mainiPPc");
+int __attribute__((weak)) main(int argc, char **argv) {
+  return mangledMain(argc, argv);
 }

@@ -144,7 +144,7 @@ set(CMAKE_C_STANDARD_LIBRARIES "${HOBBYOS_SYSROOT_CLOSURE_STR}"
     CACHE STRING "HobbyOS sysroot closure (crt0 + libc.a)" FORCE)
 
 set(CMAKE_EXE_LINKER_FLAGS
-    "-nostdlib -nostartfiles -Wl,-T,${HOBBYOS_LINKER_SCRIPT} -Wl,-e,_start"
+    "-nostdlib -nostartfiles -Wl,-T,${HOBBYOS_LINKER_SCRIPT} -Wl,-e,_start -L${HOBBYOS_SYSROOT}/lib/stubs"
     CACHE STRING "HobbyOS exe link flags" FORCE)
 
 # ---------------------------------------------------------------------------
