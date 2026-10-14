@@ -679,6 +679,7 @@ static int alloc_lfn_run(uint16_t dir_cluster, const char *longname,
   uint8_t buf[SECTOR_SIZE];
   int need = nchunks + 1;
 
+
   if (dir_cluster == 0) {
     for (uint32_t i = 0; i < root_dir_sectors; i++) {
       uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
@@ -959,6 +960,9 @@ int fat16_resolve_parent(const char *path, struct fat16_dir_entry *out_parent_en
 int fat16_open(const char* filename, struct file* f) {
   char abs_path[256];
   fat16_absolute_path(filename, abs_path);
+
+  uart_puts(abs_path);
+  uart_puts("\n");
 
   struct fat16_dir_entry entry;
   uint32_t sector = 0;
@@ -1408,6 +1412,11 @@ int fat16_rename(const char* oldname, const char* newname) {
   fat16_absolute_path(oldname, abs_old);
   fat16_absolute_path(newname, abs_new);
 
+  uart_puts(abs_old);
+  uart_puts(" new=");
+  uart_puts(abs_new);
+  uart_puts("\n");
+
   struct fat16_dir_entry entry;
   uint32_t sector = 0;
   uint32_t offset = 0;
@@ -1724,6 +1733,36 @@ static void fat16_sync_entry(struct file* f) {
     return;
   }
   struct fat16_dir_entry entry = *(struct fat16_dir_entry*)&f->fat16.entry;
+  if (f->fat16.dir_sector == 0) {
+    return; /* no real on-disk slot (synthetic root handle) */
+  }
+  /* W9 (selfhost S2): LLVM writes each object through a TempFile whose fd
+     stays OPEN across rename(temp -> final) and is closed AFTERWARDS.  The
+     rename marks the temp's dirent (and its 0x0F run) deleted and allocates
+     the final entry — often REUSING the just-freed slot.  Without a guard,
+     this close's dirty sync writes the stale cached temp dirent back over
+     that slot: the temp's mangled 8.3 alias (e.g. "CPU-09EF.O.T") resurfaces
+     as a twin AND, when the final entry reused the slot, the final entry is
+     CLOBBERED (the w7 "clean entry lost -> lld cannot open cpu.o" failure).
+     Verify the slot still holds THIS entry before writing it back: skip when
+     the slot was freed (0x00/0xE5) or now belongs to a different file. */
+  if (virtio_blk_read_sector(f->fat16.dir_sector, buf, 1) != 0) {
+    return;
+  }
+  struct fat16_dir_entry *on = &((struct fat16_dir_entry *)buf)[f->fat16.dir_offset];
+  unsigned char b0 = (unsigned char)on->name[0];
+  if (b0 == 0x00 || b0 == (char)0xE5) {
+    return; /* the entry was deleted under this open handle */
+  }
+  {
+    int same = 1;
+    for (int k = 0; k < 11; k++) {
+      if (on->name[k] != entry.name[k]) { same = 0; break; }
+    }
+    if (!same) {
+      return; /* the slot now holds a different file's entry */
+    }
+  }
   fat16_dir_entry_write(f->fat16.dir_sector, f->fat16.dir_offset, &entry);
 }
 

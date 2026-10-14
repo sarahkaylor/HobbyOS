@@ -1,0 +1,11 @@
+# ::/SRC/obj/probe dirents after probe run 1 on the UNFIXED selfhost kernel
+# (the same class as w7: clean entry + mangled twin sharing the data cluster)
+# name  size  cluster   (fat16img-style)
+NFS_TEST.O   832    cl19778
+FAT16.O      132880 cl19779
+CPU-09EF.O.T 6968   cl19777    <<< twin (cpu.o), NO LFN records (records deleted by rename)
+CPU.O        6968   cl19777    <<< clean cpu.o
+NFS_TEST.O.T 832    cl19778    <<< twin (nfs_test.o)
+FAT16-B8.O.T 132880 cl19779    <<< twin (fat16.o)
+# The rename deleted each temp's 0x0F records but the temp's 8.3 alias
+# short entry survived (closed-after-rename dirty sync resurrected it).

@@ -478,6 +478,243 @@ static void test_fat16_lfn_rename_long(void) {
   EXPECT_EQ(e.file_size, 21);
 }
 
+/* W9 (selfhost, S2 dirent writer): the in-OS clang writes every object via
+ * LLVM's TempFile+rename flow: create "<base>-XXXXXXXX.o.tmp" (a LONG name,
+ * so the kernel writes a VFAT 0x0F run + an 8.3 alias whose format_83 mangle
+ * puts an embedded dot in the extension field, e.g. "CPU-8167.O.T"), write
+ * the object, close, then rename() to the final 8.3 name ("cpu.o").  The w7
+ * S2 evidence showed the kernel leaves BOTH entries: the temp's mutated 8.3
+ * alias survives pointing at the same data cluster, and for exactly two of
+ * the 59 names (cpu.o, nfs_test.o) the CLEAN entry is lost, so lld cannot
+ * open the object.  This drives create->write->close->rename for the two
+ * trigger names plus a directory of normal object names and asserts EXACTLY
+ * ONE directory entry per final name and open-by-clean-name success (the
+ * open-by-clean-name check reopens with create-on-open semantics, so a lost
+ * clean entry shows up as a fresh size-0 file instead of the written data). */
+#define W9_N_OBJS 47
+
+/* Build "/WB9OBJ/<BASE>.O" (final=0) or "/WB9OBJ/<BASE>-C0FFEE.O.TMP" (final=1)
+ * into `buf` from character constants in the instruction stream: the unit
+ * harness's data loading mangles large const tables, so no rodata is used
+ * for the names (paths are assembled here exactly like the W4HINT probe). */
+static void w9_build_path(char *buf, int which, int want_tmp) {
+  int p = 0;
+  buf[p++]='/'; buf[p++]='W'; buf[p++]='B'; buf[p++]='9'; buf[p++]='O'; buf[p++]='B'; buf[p++]='J'; buf[p++]='/';
+  switch (which) {
+      case 0: buf[p++]='C';buf[p++]='P';buf[p++]='U'; break;
+      case 1: buf[p++]='N';buf[p++]='F';buf[p++]='S';buf[p++]='_';buf[p++]='T';buf[p++]='E';buf[p++]='S';buf[p++]='T'; break;
+      case 2: buf[p++]='N';buf[p++]='F';buf[p++]='S'; break;
+      case 3: buf[p++]='M';buf[p++]='A';buf[p++]='I';buf[p++]='N'; break;
+      case 4: buf[p++]='F';buf[p++]='S'; break;
+      case 5: buf[p++]='N';buf[p++]='E';buf[p++]='T'; break;
+      case 6: buf[p++]='V';buf[p++]='F';buf[p++]='S'; break;
+      case 7: buf[p++]='D';buf[p++]='H';buf[p++]='C';buf[p++]='P'; break;
+      case 8: buf[p++]='F';buf[p++]='R';buf[p++]='A';buf[p++]='M';buf[p++]='E'; break;
+      case 9: buf[p++]='P';buf[p++]='I';buf[p++]='P';buf[p++]='E'; break;
+      case 10: buf[p++]='L';buf[p++]='O';buf[p++]='C';buf[p++]='K';buf[p++]='S'; break;
+      case 11: buf[p++]='M';buf[p++]='M';buf[p++]='U'; break;
+      case 12: buf[p++]='R';buf[p++]='T';buf[p++]='C'; break;
+      case 13: buf[p++]='S';buf[p++]='M';buf[p++]='P'; break;
+      case 14: buf[p++]='T';buf[p++]='I';buf[p++]='M';buf[p++]='E';buf[p++]='R'; break;
+      case 15: buf[p++]='T';buf[p++]='R';buf[p++]='A';buf[p++]='P'; break;
+      case 16: buf[p++]='U';buf[p++]='A';buf[p++]='R';buf[p++]='T'; break;
+      case 17: buf[p++]='G';buf[p++]='I';buf[p++]='C'; break;
+      case 18: buf[p++]='B';buf[p++]='O';buf[p++]='O';buf[p++]='T'; break;
+      case 19: buf[p++]='F';buf[p++]='P';buf[p++]='U'; break;
+      case 20: buf[p++]='S';buf[p++]='E';buf[p++]='T';buf[p++]='J';buf[p++]='M';buf[p++]='P'; break;
+      case 21: buf[p++]='T';buf[p++]='I';buf[p++]='M';buf[p++]='E'; break;
+      case 22: buf[p++]='V';buf[p++]='I';buf[p++]='R';buf[p++]='T';buf[p++]='I';buf[p++]='O';buf[p++]='_';buf[p++]='B'; break;
+      case 23: buf[p++]='V';buf[p++]='I';buf[p++]='R';buf[p++]='T';buf[p++]='I';buf[p++]='O';buf[p++]='_';buf[p++]='G'; break;
+      case 24: buf[p++]='V';buf[p++]='I';buf[p++]='R';buf[p++]='T';buf[p++]='I';buf[p++]='O';buf[p++]='_';buf[p++]='N'; break;
+      case 25: buf[p++]='V';buf[p++]='M'; break;
+      case 26: buf[p++]='F';buf[p++]='S';buf[p++]='_';buf[p++]='T';buf[p++]='E';buf[p++]='S';buf[p++]='T'; break;
+      case 27: buf[p++]='M';buf[p++]='M';buf[p++]='U';buf[p++]='_';buf[p++]='T';buf[p++]='E';buf[p++]='S';buf[p++]='T'; break;
+      case 28: buf[p++]='N';buf[p++]='E';buf[p++]='T';buf[p++]='_';buf[p++]='T';buf[p++]='E';buf[p++]='S';buf[p++]='T'; break;
+      case 29: buf[p++]='T';buf[p++]='E';buf[p++]='S';buf[p++]='T';buf[p++]='_';buf[p++]='S';buf[p++]='M';buf[p++]='P'; break;
+      case 30: buf[p++]='V';buf[p++]='M';buf[p++]='_';buf[p++]='T';buf[p++]='E';buf[p++]='S';buf[p++]='T'; break;
+      case 31: buf[p++]='F';buf[p++]='A';buf[p++]='T';buf[p++]='1';buf[p++]='6';buf[p++]='_';buf[p++]='T';buf[p++]='E'; break;
+      case 32: buf[p++]='P';buf[p++]='I';buf[p++]='P';buf[p++]='E';buf[p++]='_';buf[p++]='T';buf[p++]='E';buf[p++]='S'; break;
+      case 33: buf[p++]='T';buf[p++]='I';buf[p++]='M';buf[p++]='E';buf[p++]='_';buf[p++]='T';buf[p++]='E';buf[p++]='S'; break;
+      case 34: buf[p++]='U';buf[p++]='N';buf[p++]='I';buf[p++]='X';buf[p++]='_';buf[p++]='T';buf[p++]='E';buf[p++]='S'; break;
+      case 35: buf[p++]='I';buf[p++]='O';buf[p++]='M';buf[p++]='M';buf[p++]='U';buf[p++]='_';buf[p++]='V';buf[p++]='T'; break;
+      case 36: buf[p++]='N';buf[p++]='F';buf[p++]='S';buf[p++]='_';buf[p++]='P';buf[p++]='R';buf[p++]='O';buf[p++]='T'; break;
+      case 37: buf[p++]='I';buf[p++]='P';buf[p++]='C';buf[p++]='_';buf[p++]='P';buf[p++]='R';buf[p++]='O';buf[p++]='T'; break;
+      case 38: buf[p++]='M';buf[p++]='A';buf[p++]='T';buf[p++]='H';buf[p++]='_';buf[p++]='T';buf[p++]='E';buf[p++]='S'; break;
+      case 39: buf[p++]='T';buf[p++]='R';buf[p++]='A';buf[p++]='P';buf[p++]='_';buf[p++]='T';buf[p++]='E';buf[p++]='S'; break;
+      case 40: buf[p++]='U';buf[p++]='N';buf[p++]='I';buf[p++]='T';buf[p++]='_';buf[p++]='T';buf[p++]='E';buf[p++]='S'; break;
+      case 41: buf[p++]='T';buf[p++]='I';buf[p++]='M';buf[p++]='E';buf[p++]='R';buf[p++]='_';buf[p++]='T';buf[p++]='E'; break;
+      case 42: buf[p++]='L';buf[p++]='O';buf[p++]='C';buf[p++]='K';buf[p++]='S';buf[p++]='_';buf[p++]='T';buf[p++]='E'; break;
+      case 43: buf[p++]='F';buf[p++]='R';buf[p++]='A';buf[p++]='M';buf[p++]='E';buf[p++]='_';buf[p++]='T';buf[p++]='E'; break;
+      case 44: buf[p++]='T';buf[p++]='E';buf[p++]='S';buf[p++]='T';buf[p++]='_';buf[p++]='F';buf[p++]='W';buf[p++]='_'; break;
+      case 45: buf[p++]='P';buf[p++]='R';buf[p++]='O';buf[p++]='C';buf[p++]='E';buf[p++]='S';buf[p++]='S';buf[p++]='_'; break;
+      case 46: buf[p++]='P';buf[p++]='R';buf[p++]='O';buf[p++]='G';buf[p++]='R';buf[p++]='A';buf[p++]='M';buf[p++]='_'; break;
+    default: break;
+  }
+  if (want_tmp) {
+    buf[p++]='-'; buf[p++]='C'; buf[p++]='0'; buf[p++]='F'; buf[p++]='F'; buf[p++]='E'; buf[p++]='E';
+    buf[p++]='.'; buf[p++]='O'; buf[p++]='.'; buf[p++]='T'; buf[p++]='M'; buf[p++]='P';
+  } else {
+    buf[p++]='.'; buf[p++]='O';
+  }
+  buf[p]='\0';
+}
+
+/* Raw dump of a directory's slots (short names only) walked through the FAT
+ * cluster chain -- the same lens the w7 dirent dump used.  Printed for
+ * serial evidence ([W9] lines) and used by the live-entry counter. */
+static int w9_dump_dir(const char *label) {
+  struct fat16_dir_entry e;
+  uint32_t sec = 0, off = 0;
+  if (fat16_resolve_path("/WB9OBJ", &e, &sec, &off) != 0) {
+    uart_puts("[W9] resolve /WB9OBJ failed\n");
+    return -1;
+  }
+  uint16_t cluster = e.start_cluster;
+  uint8_t buf[SECTOR_SIZE];
+  int count = 0;
+  while (cluster != 0 && cluster < 0xFFF0) {
+    for (uint32_t s = 0; s < 32; s++) { /* bpb_sectors_per_cluster == 32 here */
+      uint32_t sector_num = 576u + (uint32_t)(cluster - 2) * 32u + s;
+      if (virtio_blk_read_sector(sector_num, buf, 1) != 0) break;
+      struct fat16_dir_entry *ents = (struct fat16_dir_entry *)buf;
+      for (unsigned int j = 0; j < 16; j++) {
+        unsigned char b0 = (unsigned char)ents[j].name[0];
+        if (b0 == 0x00) { cluster = 0; s = 32; break; }
+        if (b0 == 0xE5) continue;
+        if (ents[j].attr == 0x0F) continue;
+        if (ents[j].name[0] == '.' &&
+            (ents[j].name[1] == ' ' ||
+             (ents[j].name[1] == '.' && ents[j].name[2] == ' ')))
+          continue;
+        count++;
+        if (label) {
+          char nm[12];
+          int q = 0;
+          for (int k = 0; k < 8 && ents[j].name[k] != ' '; k++)
+            nm[q++] = ents[j].name[k];
+          if (ents[j].name[8] != ' ') {
+            nm[q++] = '.';
+            for (int k = 8; k < 11 && ents[j].name[k] != ' '; k++)
+              nm[q++] = ents[j].name[k];
+          }
+          nm[q] = 0;
+          uart_puts("[W9] ");
+          uart_puts(label);
+          uart_puts(" ");
+          uart_puts(nm);
+          uart_puts("\n");
+        }
+      }
+      if (cluster == 0) break;
+    }
+    if (cluster == 0) break;
+    /* read next cluster from FAT (sector layout as mkfs'd: 2 FATs, 256 spf) */
+    uint32_t fat_sec = 32u + (uint32_t)((cluster * 2u) / 512u);
+    uint8_t fbuf[512];
+    if (virtio_blk_read_sector(fat_sec, fbuf, 1) != 0) break;
+    cluster = (uint16_t)(fbuf[(cluster * 2u) % 512u] |
+                         (fbuf[(cluster * 2u) % 512u + 1u] << 8));
+  }
+  return count;
+}
+
+static void test_fat16_clang_temp_rename_no_twins(void) {
+  uart_puts("  Running test_fat16_clang_temp_rename_no_twins...\n");
+  tests_run++;
+
+  (void)fat16_mkdir("/WB9OBJ"); /* tolerate a prior run's EEXIST */
+
+  /* Mirror clang's per-object flow: TempFile create (long name), write,
+     then rename() onto the final object name WHILE THE TEMP FD IS STILL
+     OPEN (LLVM renames then closes).  The close's dirty-entry sync must NOT
+     resurrect the temp's deleted dirent (the w7 twin) or clobber the clean
+     entry the rename placed in the recycled slot.  Half the objects get the
+     final pre-created (empty) first, like clang's -o open path, which
+     exercises the rename-replaces-existing branch of fat16_rename. */
+  for (int i = 0; i < W9_N_OBJS; i++) {
+    char tmp[96], fin[96];
+    w9_build_path(tmp, i, 1);
+    w9_build_path(fin, i, 0);
+    struct file f;
+    if ((i & 1) == 0) {
+      struct file pf;
+      (void)fat16_open(fin, &pf);
+      (void)fat16_close(&pf);
+    }
+    EXPECT_EQ(fat16_open(tmp, &f), 0);
+    uint8_t seed[16];
+    for (int b = 0; b < 16; b++) seed[b] = (uint8_t)((i * 16 + b) ^ 0x5A);
+    uint8_t chunk[256];
+    for (int b = 0; b < 256; b++) chunk[b] = seed[b & 15];
+    int total = 0;
+    while (total < 2048) {
+      int n = fat16_write(&f, chunk, 256);
+      EXPECT_EQ(n, 256);
+      if (n != 256) break;
+      total += n;
+    }
+    /* clang's order: rename while open, close afterwards. */
+    EXPECT_EQ(fat16_rename(tmp, fin), 0);
+    fat16_close(&f);
+  }
+
+  /* Every final name must resolve and open by its CLEAN name with the
+     written size (create-on-open makes a lost entry read as size 0). */
+  for (int i = 0; i < W9_N_OBJS; i++) {
+    char fin[96];
+    w9_build_path(fin, i, 0);
+    struct file f;
+    EXPECT_EQ(fat16_open(fin, &f), 0);
+    EXPECT_EQ(f.fat16.entry.file_size, 2048);
+    fat16_close(&f);
+  }
+
+  /* The directory must hold EXACTLY the finals: one dirent per final, no
+     temp/twin leftovers.  An entry whose 8.3 extension field carries an
+     embedded dot (byte 9 == '.') is the w7 twin signature. */
+  int count = w9_dump_dir("obj");
+  EXPECT_EQ(count, W9_N_OBJS);
+  {
+    int seen[W9_N_OBJS];
+    for (int i = 0; i < W9_N_OBJS; i++) seen[i] = 0;
+    char name[64];
+    int i = 0;
+    for (;; i++) {
+      uint8_t attr;
+      uint32_t sz;
+      if (fat16_read_dir("/WB9OBJ", i, name, &attr, &sz) != 0) break;
+      int found = -1;
+      for (int k = 0; k < W9_N_OBJS; k++) {
+        char expect[96];
+        w9_build_path(expect, k, 0);
+        if (test_streq(name, expect + 8)) { found = k; break; }
+      }
+      if (found >= 0) {
+        seen[found]++;
+      } else {
+        uart_puts("[W9] UNEXPECTED dirent ");
+        uart_puts(name);
+        uart_puts("\n");
+      }
+    }
+    int all_once = 1;
+    for (int k = 0; k < W9_N_OBJS; k++) {
+      if (seen[k] != 1) {
+        all_once = 0;
+        EXPECT_EQ(seen[k], 1);
+        break;
+      }
+    }
+    EXPECT_EQ(all_once, 1);
+  }
+}
+
+/* EOF marker helpers below are parse-edge tests; W9 block above is the
+   in-OS clang temp+rename reproduction (w7 S2 dirent-writer defect). */
+
+/* EOF marker helpers below are parse-edge tests; W9 block above is the
+   in-OS clang temp+rename reproduction (w7 S2 dirent-writer defect). */
+
 /* Parse edge: a corrupted 0x0F checksum must REJECT the long-name match
    (no phantom open onto an unrelated entry).  Bytes are patched directly
    on the sector(s) holding the created entry's run and restored
@@ -987,6 +1224,7 @@ void fat16_test_suite(void) {
   test_fat16_lfn_read_dir_listing();
   test_fat16_lfn_mkdir_long();
   test_fat16_lfn_rename_long();
+  test_fat16_clang_temp_rename_no_twins(); /* W9: in-OS clang temp+rename twin repro */
   test_fat16_lfn_checksum_reject();
   test_fat16_lfn_truncated_run();
   test_fat16_rmdir_semantics(); /* W2-14 (selfhost) */

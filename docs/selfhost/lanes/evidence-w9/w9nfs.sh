@@ -1,0 +1,1 @@
+cd /SRC && /TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/nfs_test.c -o /SRC/obj/probe/nfs_test.o && echo [W9] NFS-DONE
