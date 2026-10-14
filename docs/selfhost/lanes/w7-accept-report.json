@@ -1,0 +1,97 @@
+{
+  "lane": "w7-accept",
+  "wave": 7,
+  "role": "acceptance close-out on the merged tip: (A) boot the w6 in-OS-assembled OUT.IMG and run an in-OS-built program from it; (B) full T4.3 loop S0->S3 on a fresh disk.img, extract + sha-compare the produced OUT.IMG, boot it and run its in-OS-built program; (C) reconcile acceptance.md to measured TCG reality + selfhost runbook + verdict table vs l5/selfhost.md 8.3; (D) report json + evidence",
+  "branch": "selfhost/w7-accept",
+  "base_tip": "288995c",
+  "commits": [
+    "b02f8fe w7-accept: (A) w6 OUT.IMG boots + in-OS-built OUTPROG.BIN runs (S4/S5 evidence); acceptance.md TCG-reality reconciliation"
+  ],
+  "environment": {
+    "host": "x86_64, 64 cores, QEMU aarch64 TCG MTTCG (no KVM for ARM guests)",
+    "concurrent_load": "integrator battery-6 VM (qemu-system-aarch64, disk.img of ~/hobbyos-selfhost) running the whole lane; my tree independent, timing budgets draw on the shared CPU",
+    "tcg_multiplier_measured": "~900-1500x vs host (anchor: sh.c host clang -O2 aarch64 1.38 s -> in-OS >= 53 min; whole 59-TU kernel host 5.8 s -> in-OS 1.5-2 h; MKFSFAT 128 MiB ~284 s; boot 6.5-9 s)",
+    "w6_out_img": {
+      "path": "obj/selfhost/w6-out/OUT.IMG",
+      "sha256": "7e24b4ca1db8deff4dee75c3b1c71e63460f8eb90e4fa3027934b1126e20286b",
+      "layout": "root HELLO.BIN/SH.BIN/LS.BIN/CAT.BIN/DESKTOP.BIN/CONSOLE.BIN/OUTPROG.BIN/OUTMARK.TXT; /boot/hobbyos.bin 219564 B + limine.conf 99 B; /EFI/BOOT/BOOTAA64.EFI 315392 B; /bin/SH.BIN"
+    }
+  },
+  "A_boot_w6_outimg": {
+    "result": "PASS",
+    "cmd": "tools/w7_accept_boot.py --image obj/selfhost/w6-out/OUT.IMG --launch OUTPROG.BIN",
+    "serial": "evidence-w7/s4-w6outimg.serial",
+    "boot_marker": "Booting AArch64 OS at 6.5 s (standalone boot of the in-OS-assembled OUT.IMG)",
+    "mode_line": "Mode: DESKTOP - Launching desktop...",
+    "menu": "[MENU] 9=OUTPROG.BIN count=11",
+    "launch_line": "[LAUNCH] OUTPROG.BIN; v2 loader image mapped bytes=37360 pages=10",
+    "exit_line": "[KERNEL] Process 3: OUTPROG.BIN exited unexpectedly or gracefully.",
+    "byte_identity": "OUTPROG.BIN sha256 61b3be6ad97e0286... == HELLO.BIN (extracted from the same image) == w6 in-OS HELLO.BIN == host obj/arm/hello.bin (w6-recorded); flat ARM64 binary (first bytes fd 7b bb a9 = stp x29,x30 prologue)",
+    "serial_program_note": "desktop-launched stdout is framebuffer-only (acceptance.md 8.3 ceiling); program-side serial proof = loader lines + exit line + host file hash; the [HELLO] entering main marker comes from the MODE=selfhost T2.5 path"
+  },
+  "B_T43_loop": {
+    "flow": "make MODE=selfhost disk.img -> stage SELFHOST-RUN-w7-full.txt (s0-check,s1-user,t25-run,s2-kernel,s3-disk) -> tools/w5_flat_boot.py --timeout 18000 (one boot) -> fat16img.py get OUT.IMG -> boot it + launch OUTPROG.BIN",
+    "host_prebuild": {
+      "result": "PASS",
+      "log": "evidence-w7/make-diskimg.log (uncommitted host build log)",
+      "tools_staged": "CLANG.BIN 94192328 B, LLD.BIN 53250536 B, LLVMAR.BIN 8349200 B, OBJCOPY.BIN 4982672 B (flat-converted), 282 files / 176717454 B ::/TOOLS + RESDIR 295 files / 14727254 B",
+      "src_staged": "232 files / 4805464 B ::/SRC incl SELFHOST.RUN/SELFHOST.SH/Makefile.hobbyos",
+      "mode_file": "obj/arm/.mode = selfhost"
+    },
+    "stages": {
+      "S0_check": {
+        "result": "PASS",
+        "marker": "[SELFHOST] phase=s0-check-start; phase=s0-check-done rc=0"
+      },
+      "S1_user": {
+        "result": "PENDING",
+        "started": "[SELFHOST] phase=s1-user-start",
+        "detail": "sh.c -O2 in-OS compile in progress (>= 53 min TCG); 5 TUs + 4 links + 4 objcopies"
+      },
+      "T25": {
+        "result": "PENDING",
+        "expect": "[HELLO] entering main / argc=1 / argv[0]=\"./HELLO.BIN\" / main returned 0; phase=t25-run-done"
+      },
+      "S2_kernel": {
+        "result": "PENDING",
+        "expect": "59 TU compile + lld @OBJS.RSP link + objcopy -> hobbyos.bin; phase=s2-kernel-done"
+      },
+      "S3_disk": {
+        "result": "PENDING",
+        "expect": "MKFSFAT -C /SRC/OUT.IMG 131072 + MCOPY layout; phase=s3-disk-done; ACCEPTANCE-COMPLETE"
+      }
+    },
+    "out_img_comparison": {
+      "method": "fat16img.py get disk.img OUT.IMG; compare content classes (fresh non-incremental in-OS rebuild = fresh mkfs + copy order, so raw sha differs legitimately): BPB geometry, layout, per-file sizes, HELLO.BIN/OUTPROG.BIN sha vs 61b3be6a...",
+      "w6_sha": "7e24b4ca1db8deff4dee75c3b1c71e63460f8eb90e4fa3027934b1126e20286b",
+      "w7_sha": "PENDING"
+    },
+    "B3_boot_extracted": {
+      "result": "PENDING",
+      "cmd": "tools/w7_accept_boot.py --image <w7-loop.out.img> --launch OUTPROG.BIN"
+    }
+  },
+  "C_acceptance_md": {
+    "result": "DONE",
+    "file": "docs/selfhost/acceptance.md",
+    "changes": [
+      "S1 user timeout 900 s -> 7200 s (sh.c 53-min TCG compile is the dominant term)",
+      "S2 timeout 3600 s -> 10800 s; 71 -> 59 kernel TUs (merged tip reality)",
+      "S3 timeout 600 s -> 1800 s (measured 365 s, MKFSFAT ~284 s)",
+      "4 rewritten: measured TCG table (900-1500x; sh.c 1.38 s -> >=53 min; kernel 5.8 s -> 1.5-2 h; MKFSFAT 128 MiB ~284 s; boot 6.5-9 s) replacing the 8x placeholder (off by ~2 orders); whole-loop budget 3-4 h in one boot; hobytest guidance",
+      "retry-cost table: in-OS make is NON-incremental (pattern rules vs 8.3-UPPERCASE SFN readdir -> explicit 59-rule kernel recipe; every stage re-runs fully)",
+      "new 9 runbook: MODE=selfhost full flow (make MODE=selfhost disk.img, SELFHOST.RUN drive file, w5_flat_boot.py polling cadence, fat16img extraction, w7_accept_boot.py S4/S5)",
+      "new 10 verdict table vs l5/selfhost.md 8.3"
+    ]
+  },
+  "D_report": {
+    "json": "docs/selfhost/lanes/w7-accept-report.json (this file)",
+    "evidence_md": "docs/selfhost/lanes/w7-accept-evidence.md",
+    "evidence_dir": "docs/selfhost/lanes/evidence-w7/"
+  },
+  "untouched": [
+    "main repo /home/sarah/Documents/GitHub/HobbyOS (no pushes; local commits on selfhost/w7-accept only)",
+    "integrator's ~/hobbyos-selfhost tree + its disk.img + its qemu process (battery-6)",
+    "LLVM/libc++ sources; dist-staging toolchain"
+  ]
+}
