@@ -3,8 +3,7 @@
   "status": "complete",
   "commits": [
     {"hash": "a6dc6c9", "subject": "selfhost: w2-kernel: fix LFN-run scan across sector boundary in fat16 LFN tests"},
-    {"hash": "f0eb59f", "subject": "selfhost: w2-kernel: SYS_WAIT4+rusage (90), argv envelope 256B/32->4096B/128, SYS_RMDIR (91) + fat16 empty-dir removal"},
-    {"hash": "af9c737", "subject": "selfhost: w2-kernel: lane evidence + report (ARM/x64 unit + ARM wave gates)"}
+    {"hash": "f0eb59f", "subject": "selfhost: w2-kernel: SYS_WAIT4+rusage (90), argv envelope 256B/32->4096B/128, SYS_RMDIR (91) + fat16 empty-dir removal"}
   ],
   "syscalls_added": [
     {
