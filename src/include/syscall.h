@@ -172,7 +172,31 @@
  * the full-screen present. */
 #define SYS_FLUSH_FB_RECTS (89)
 
-/* Highest defined syscall number. Dispatch tables are sized SYS_MAX + 1. */
-#define SYS_MAX           (89)
+/* W2 (selfhost, docs/selfhost/os-gap-audit.md §2/§3): the process/fork
+ * surface the clang/ld driver needs.
+ *
+ *   SYS_WAIT4 (90)  (pid, int *status, options, struct rusage*) -> pid | 0 | -errno
+ *     waitpid(2) plus a rusage out-param for the waited-for child
+ *     (LLVM's sys::Wait -> sys::wait4 -> ::wait4, Program.inc:418).
+ *     options: WNOHANG (1) / WUNTRACED (2, accepted+ignored), else
+ *     -EINVAL; bad status/rusage pointers -> -EFAULT; no children ->
+ *     -ECHILD; WNOHANG with children alive -> 0.  The kernel fills the
+ *     Linux-shaped rusage (see struct ho_rusage in process.h): ru_utime
+ *     and ru_stime are 0 (no per-process CPU accounting yet -- W2-17)
+ *     and ru_maxrss is the v1 resident block size in KiB (0 for v2).
+ *
+ *   SYS_RMDIR (91)  (path*) -> 0 | -errno
+ *     Remove an EMPTY directory (fat16).  Proper semantics per what
+ *     fat16 supports: -ENOENT missing path, -ENOTDIR not a directory,
+ *     -ENOTEMPTY still holds entries (incl. orphan LFN/volume-label
+ *     records -- conservative, never destroys data), -EBUSY for the
+ *     volume root / "." / "..", -EROFS on a routed (read-only) mount.
+ */
+#define SYS_WAIT4         (90)
+#define SYS_RMDIR         (91)
+
+/* Highest defined syscall number. Dispatch tables are sized SYS_MAX + 1.
+ * 90/91 were the next FREE numbers above the previous SYS_MAX (89). */
+#define SYS_MAX           (91)
 
 #endif /* SYSCALL_H */

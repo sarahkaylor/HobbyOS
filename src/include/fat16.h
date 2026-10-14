@@ -55,6 +55,12 @@ int fat16_rename(const char* oldname, const char* newname);
 // Creates a directory.
 int fat16_mkdir(const char* path);
 
+/* W2-14 (selfhost): removes an EMPTY directory with POSIX-errno-faithful
+ * semantics: 0 on success, else a precise negative errno (-ENOENT,
+ * -ENOTDIR, -ENOTEMPTY, -EBUSY for root/./.., -EIO).  unlink stays
+ * dir-refusing; rmdir is the only directory-removal primitive. */
+int fat16_rmdir(const char *path);
+
 // Changes directory: validates `path` (absolute or cwd-relative) and writes
 // the canonical absolute path of the resulting directory into out_new_cwd.
 // Returns 0 on success, -1 when the path does not name a directory.

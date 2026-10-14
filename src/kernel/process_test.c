@@ -558,9 +558,124 @@ static void test_p5_waitpid_validation(void) {
   process_free(ppid);
 }
 
-/* S4 (D3): envp pointer validation (the full round-trip needs real user
- * VAs and lives in PROC_T), the exec apply (env reset, dispositions,
- * FD_CLOEXEC sweep) and the fcntl FD bits. */
+/* W2-5 (selfhost): process_wait4 -- SYS_WAIT4 core.  The rusage out-param
+ * rides tf->regs[3]; a bad buffer -> -EFAULT; a reap fills the caller's
+ * Linux-shaped rusage blob (144 bytes: two timevals, then 14 longs) with
+ * documented values (zeros except ru_maxrss = the v1 resident block size
+ * in KiB at byte offset 32). */
+static void test_p5_wait4_rusage(void) {
+  tests_run++;
+  uart_puts("  Running test_p5_wait4_rusage...\n");
+
+  int ppid = process_create();
+  int old_pid = cpu_current_pids[0];
+  set_current_process_pid(0, ppid);
+  struct process *par = process_get_pcb(ppid);
+
+  struct trap_frame tf;
+  for (unsigned i = 0; i < sizeof(tf) / sizeof(uint64_t); i++)
+    ((uint64_t *)&tf)[i] = 0;
+
+  /* Out-of-region rusage pointer -> -EFAULT (in-window status OK, no
+     children yet; the rusage check precedes any child scan). */
+  tf.regs[0] = -1;
+  tf.regs[1] = USER_VIRT_BASE + 0x200;
+  tf.regs[2] = 1;            /* WNOHANG */
+  tf.regs[3] = 0x1000;       /* bogus rusage VA */
+  EXPECT_EQ(process_wait4(&tf), -EFAULT);
+
+  /* A reapable v1 child (process_create also sets user_phys_base). */
+  int cpid = process_create();
+  struct process *ch = process_get_pcb(cpid);
+  ch->parent_pid = ppid;
+  ch->state = PROC_STATE_EXITED;
+  ch->exit_status = 7 << 8;
+
+  uint64_t st_va = USER_VIRT_BASE + 0x400; /* status out */
+  uint64_t ru_va = USER_VIRT_BASE + 0x500; /* rusage out, 144 B */
+  tf.regs[0] = cpid;
+  tf.regs[1] = st_va;
+  tf.regs[2] = 1;
+  tf.regs[3] = ru_va;
+  EXPECT_EQ(process_wait4(&tf), cpid);
+  EXPECT_EQ(ch->state, PROC_STATE_FREE);
+
+  /* Status word: the immediate-reap path writes it through the direct
+     user VA (the P2 contract -- the waiting process's own context where
+     USER_VIRT_BASE is live).  At unit test time USER_VIRT_BASE is the
+     boot identity map, so read it back at the SAME VA.  (The rusage
+     store below deliberately goes through user_phys_base -- the v1
+     physical translation -- which is why THAT one is inspected via the
+     parent's physical block.) */
+  EXPECT_EQ(*(int *)(uint64_t)st_va, 7 << 8);
+
+  /* The rusage blob landed at ru_va: everything zero except the 8-byte
+     ru_maxrss at byte offset 32 (USER_REGION_SIZE/1024 = 0x8000 -> one
+     non-zero byte). */
+  uint8_t *ru = (uint8_t *)(par->user_phys_base + (ru_va - USER_VIRT_BASE));
+  int nonzero = 0;
+  for (int k = 0; k < (int)HO_RUSAGE_SIZE; k++)
+    if (ru[k]) nonzero++;
+  EXPECT_EQ(nonzero, 1);
+  int64_t maxrss = 0;
+  for (int k = 0; k < 8; k++)
+    maxrss |= ((int64_t)ru[32 + k]) << (8 * k);
+  EXPECT_EQ(maxrss, (int64_t)(USER_REGION_SIZE / 1024));
+
+  set_current_process_pid(0, old_pid);
+  process_free(ppid);
+}
+
+/* W2-10 (selfhost): the exec argv envelope must comfortably exceed the
+ * old 256 B / 32-arg blob -- a 60-arg, ~480 B blob (dead at the old
+ * limits) round-trips through proc_set_argv_array + sys_readargv. */
+static void test_w2_argv_envelope(void) {
+  tests_run++;
+  uart_puts("  Running test_w2_argv_envelope...\n");
+
+  /* Compile-time contract, made explicit at runtime. */
+  EXPECT_EQ(HO_EXEC_ARGV_LEN >= 2048, 1);
+  EXPECT_EQ(HO_EXEC_MAX_ARGS >= 64, 1);
+
+  int pid = process_create();
+  struct process *p = process_group(process_get_pcb(pid));
+  EXPECT_EQ((p != 0), 1);
+
+  /* 60 args of ~8 bytes each = ~480 B: over the old 256 B blob and the
+     old 32-arg cap, under the new 4096 B / 128-arg envelope. */
+  char blob[HO_EXEC_ARGV_LEN];
+  int nargs = 60;
+  int pos = 0;
+  for (int i = 0; i < nargs; i++) {
+    blob[pos++] = 'A';
+    blob[pos++] = 'R';
+    blob[pos++] = 'G';
+    blob[pos++] = '-';
+    blob[pos++] = (char)('0' + (i / 100) % 10);
+    blob[pos++] = (char)('0' + (i / 10) % 10);
+    blob[pos++] = (char)('0' + i % 10);
+    blob[pos++] = '\0';
+  }
+  blob[pos] = '\0';
+  EXPECT_EQ(pos > 256, 1);        /* provably past the old 256 B blob */
+
+  EXPECT_EQ(proc_set_argv_array(p, blob, nargs), 0);
+  EXPECT_EQ(p->eargc, nargs);
+  EXPECT_EQ(sys_readargv(p, -1, 0, 0), nargs);
+
+  char buf[64];
+  int got = sys_readargv(p, 0, buf, sizeof buf);     /* "ARG-000" */
+  EXPECT_EQ(got, 7);
+  EXPECT_EQ(buf[0], 'A');
+  EXPECT_EQ(buf[6], '0');
+  got = sys_readargv(p, nargs - 1, buf, sizeof buf); /* "ARG-059" */
+  EXPECT_EQ(got, 7);
+  EXPECT_EQ(buf[0], 'A');
+  EXPECT_EQ(buf[6], '9');
+  EXPECT_EQ(sys_readargv(p, nargs, buf, sizeof buf), -1); /* out of range */
+
+  process_free(pid);
+}
 static void test_p5_exec_env_and_apply(void) {
   tests_run++;
   uart_puts("  Running test_p5_exec_env_and_apply...\n");
@@ -793,6 +908,8 @@ void process_test_suite(void) {
   test_p5_env_readback();
   test_p5_reap_delivery_on_kill();
   test_p5_waitpid_validation();
+  test_p5_wait4_rusage();      /* W2-5 (selfhost) */
+  test_w2_argv_envelope();     /* W2-10 (selfhost) */
   test_p5_exec_env_and_apply();
 }
 

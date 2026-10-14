@@ -190,7 +190,7 @@ int fdatasync(int fd) { return fsync(fd); }
 long sysconf(int name) {
   switch (name) {
   case _SC_ARG_MAX:
-    return 256; /* kernel exec arg blob */
+    return 4096; /* kernel exec arg blob (process.h HO_EXEC_ARGV_LEN) */
   case _SC_CHILD_MAX:
   case _SC_OPEN_MAX:
     return 64;  /* MAX_PROCESSES / MAX_OPEN_FDS */

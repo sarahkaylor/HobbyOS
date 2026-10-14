@@ -1174,6 +1174,21 @@ static void sys_mkdir(struct trap_frame *tf) {
   }
 }
 
+/* W2-14 (selfhost): SYS_RMDIR -- remove an EMPTY directory.  The kernel
+ * layer returns precise negative errnos (fat16_rmdir: -ENOENT/-ENOTDIR/
+ * -ENOTEMPTY/-EBUSY; vfs_rmdir maps a routed read-only mount to -EROFS),
+ * passed through verbatim -- no coarse -ENOENT folding here. */
+static void sys_rmdir(struct trap_frame *tf) {
+  const char *path = (const char *)tf->regs[5]; // rdi
+  if (sys_user_range_ok((uint64_t)path, 1)) {
+    extern int vfs_rmdir(const char *path);
+    int r = vfs_rmdir(path);
+    tf->regs[0] = r < 0 ? (uint64_t)r : r;
+  } else {
+    tf->regs[0] = -EFAULT;
+  }
+}
+
 /* mount(source, target): mount an NFS export ("A.B.C.D:/export") at a
  * directory of the FAT volume.  The mount point is created when missing. */
 static void sys_mount(struct trap_frame *tf) {
@@ -1354,9 +1369,34 @@ static void sys_getppid(struct trap_frame *tf) {
 }
 
 /* SYS_WAITPID: shared implementation in process.c (blocks in
- * PROC_STATE_WAIT_CHILD; result delivered into the saved context). */
+ * PROC_STATE_WAIT_CHILD; result delivered into the saved context).
+ * W2-5: the shared core reads the CANONICAL regs[0..2] positions (the
+ * ARM layout), but x64 syscall args land scattered (rdi->regs[5],
+ * rsi->regs[4], rdx->regs[3]); remap here so real userland waitpid calls
+ * -- and the blocking save_context below -- carry the right values. */
 static void sys_waitpid(struct trap_frame *tf) {
+  uint64_t pid = tf->regs[5];  /* rdi */
+  uint64_t st = tf->regs[4];   /* rsi */
+  uint64_t opt = tf->regs[3];  /* rdx */
+  tf->regs[0] = pid;
+  tf->regs[1] = st;
+  tf->regs[2] = opt;
   tf->regs[0] = process_waitpid(tf);
+}
+
+/* W2-5 (selfhost): SYS_WAIT4 -- wait4(pid, status, options, rusage):
+ * rdi->regs[5], rsi->regs[4], rdx->regs[3], r10->regs[9].  Remap onto
+ * the canonical regs[0..3] the shared core reads (regs[3] = rusage). */
+static void sys_wait4(struct trap_frame *tf) {
+  uint64_t pid = tf->regs[5];  /* rdi */
+  uint64_t st = tf->regs[4];   /* rsi */
+  uint64_t opt = tf->regs[3];  /* rdx */
+  uint64_t ru = tf->regs[9];   /* r10 */
+  tf->regs[0] = pid;
+  tf->regs[1] = st;
+  tf->regs[2] = opt;
+  tf->regs[3] = ru;
+  tf->regs[0] = process_wait4(tf);
 }
 
 /* SYS_EXEC: replace the current image. Shared loader helper in
@@ -1636,6 +1676,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_rename(tf);
   } else if (syscall_num == SYS_MKDIR) {
     sys_mkdir(tf);
+  } else if (syscall_num == SYS_RMDIR) {   /* W2-14 (selfhost) */
+    sys_rmdir(tf);
   } else if (syscall_num == SYS_GETCWD) {
     sys_getcwd(tf);
   } else if (syscall_num == SYS_CHDIR) {
@@ -1658,6 +1700,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_getppid(tf);
   } else if (syscall_num == SYS_WAITPID) {
     sys_waitpid(tf);
+  } else if (syscall_num == SYS_WAIT4) {    /* W2-5 (selfhost) */
+    sys_wait4(tf);
   } else if (syscall_num == SYS_EXEC) {
     sys_exec(tf);
   } else if (syscall_num == SYS_GETPROGNAME) {

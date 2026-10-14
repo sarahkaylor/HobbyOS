@@ -2,6 +2,7 @@
 #include "virtio_blk.h"
 #include "lock.h"
 #include "process.h"
+#include "errno.h"
 
 #define SECTOR_SIZE 512
 
@@ -1196,7 +1197,118 @@ int fat16_unlink(const char* filename) {
   return 0;
 }
 
-/* --- rename/move support --------------------------------------------- */
+/* ------------------------------------------------------------------
+ * W2-14 (selfhost): rmdir -- remove an EMPTY directory.
+ * ----------------------------------------------------------------- */
+
+/* Is directory `cluster` (0 = volume root) EMPTY -- contains only "."
+ * and ".." plus deleted (0xE5)/end (0x00) markers?  Any live entry --
+ * INCLUDING an orphan 0x0F long-name record or a volume label -- answers
+ * "not empty" so rmdir stays conservative and never destroys data.
+ * Caller holds fat_lock (mirrors alloc_entry_in_dir's sector I/O under
+ * the lock).  Returns 1 empty, 0 not, -1 on I/O error. */
+static int fat16_dir_empty(uint16_t cluster) {
+  uint8_t buf[SECTOR_SIZE];
+  uint32_t total = (cluster == 0) ? root_dir_sectors
+                                  : bpb_sectors_per_cluster;
+  if (total == 0)
+    return 1; /* nothing to scan: empty */
+  uint16_t c = cluster;
+  for (;;) {
+    uint32_t base = (c == 0) ? root_dir_sector
+                    : data_sector + (uint32_t)(c - 2) * bpb_sectors_per_cluster;
+    for (uint32_t s = 0; s < total; s++) {
+      if (virtio_blk_read_sector(base + s, buf, 1) != 0)
+        return -1;
+      struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
+      for (unsigned int j = 0; j < SECTOR_SIZE / 32; j++) {
+        uint8_t b0 = (uint8_t)entries[j].name[0];
+        if (b0 == 0x00)
+          return 1; /* end marker: rest of the dir is empty */
+        if (b0 == 0xE5)
+          continue; /* deleted slot */
+        struct fat16_dir_entry *e = &entries[j];
+        if (e->attr == 0x0F)
+          return 0; /* orphan LFN record (conservative) */
+        if (e->attr & 0x08)
+          return 0; /* volume label */
+        if (e->name[0] == '.' &&
+            (e->name[1] == ' ' ||
+             (e->name[1] == '.' && e->name[2] == ' ')))
+          continue; /* "." or ".." */
+        return 0;   /* a real file/dir entry: NOT empty */
+      }
+    }
+    if (c == 0)
+      return 1; /* whole root scanned, no live entry */
+    c = read_fat(c);
+    if (c == 0 || c >= 0xFFF0)
+      return 1; /* cluster chain ended */
+  }
+}
+
+/* Remove an EMPTY directory, POSIX-errno-faithful per what fat16
+ * supports:
+ *   -ENOENT    path does not resolve,
+ *   -ENOTDIR   path names a regular file (rmdir is dir-only),
+ *   -ENOTEMPTY the directory still holds any entry (incl. orphan LFN /
+ *              volume-label records -- conservative),
+ *   -EBUSY     the volume root, or "." / ".." (POSIX leaves these to
+ *              EBUSY/EINVAL; EBUSY chosen and documented),
+ *   -EIO       sector I/O failure mid-operation.
+ * unlink (fat16_unlink) deliberately STAYS dir-refusing (-1 / folded to
+ * -ENOENT by the trap layer): POSIX unlink(2) must not remove
+ * directories -- rmdir is the directory-removal primitive.
+ * NOTE (documented limitation): the kernel does not track which
+ * directory is a process's cwd, so "directory in use as cwd" is NOT
+ * reported as EBUSY (POSIX allows it; LLVM never does this). */
+int fat16_rmdir(const char *path) {
+  char abs_path[256];
+  fat16_absolute_path(path, abs_path);
+
+  if (!abs_path[0] || !abs_path[1])
+    return -EBUSY; /* the volume root itself */
+
+  struct fat16_dir_entry entry;
+  uint32_t sector = 0;
+  uint32_t offset = 0;
+  if (fat16_resolve_path(abs_path, &entry, &sector, &offset) != 0)
+    return -ENOENT;
+
+  if (!(entry.attr & 0x10))
+    return -ENOTDIR;
+
+  /* On-disk "." (name ".          ") or ".." (name "..         "). */
+  if (entry.name[0] == '.' &&
+      (entry.name[1] == ' ' ||
+       (entry.name[1] == '.' && entry.name[2] == ' ')))
+    return -EBUSY;
+
+  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  int empty = fat16_dir_empty(entry.start_cluster);
+  if (empty < 0) {
+    spinlock_release_irqrestore(&fat_lock, flags);
+    return -EIO;
+  }
+  if (!empty) {
+    spinlock_release_irqrestore(&fat_lock, flags);
+    return -ENOTEMPTY;
+  }
+
+  /* Free the directory's cluster chain (mirrors fat16_unlink). */
+  uint16_t cluster = entry.start_cluster;
+  while (cluster != 0 && cluster < 0xFFF0) {
+    uint16_t next = read_fat(cluster);
+    write_fat(cluster, 0x0000);
+    cluster = next;
+  }
+
+  /* Free the short entry AND its 0x0F long-name records (same sector
+     plus any that spill into the previous sector). */
+  int r = lfn_del_entry(sector, offset);
+  spinlock_release_irqrestore(&fat_lock, flags);
+  return r == 0 ? 0 : -EIO;
+}
 
 static int name11_equal(const char *a, const char *b) {
   for (int i = 0; i < 11; i++)

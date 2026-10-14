@@ -1095,6 +1095,21 @@ static void sys_mkdir(struct trap_frame *tf) {
   }
 }
 
+/* W2-14 (selfhost): SYS_RMDIR -- remove an EMPTY directory.  The kernel
+ * layer returns precise negative errnos (fat16_rmdir: -ENOENT/-ENOTDIR/
+ * -ENOTEMPTY/-EBUSY; vfs_rmdir maps a routed read-only mount to -EROFS),
+ * passed through verbatim -- no coarse -ENOENT folding here. */
+static void sys_rmdir(struct trap_frame *tf) {
+  const char *path = (const char *)tf->regs[0];
+  if (sys_user_range_ok((uint64_t)path, 1)) {
+    extern int vfs_rmdir(const char *path);
+    int r = vfs_rmdir(path);
+    tf->regs[0] = r < 0 ? (uint64_t)r : r;
+  } else {
+    tf->regs[0] = -EFAULT;
+  }
+}
+
 /* mount(source, target): mount an NFS export ("A.B.C.D:/export") at a
  * directory of the FAT volume.  The mount point is created when missing. */
 
@@ -1126,6 +1141,13 @@ static void sys_getppid(struct trap_frame *tf) {
 
 static void sys_waitpid(struct trap_frame *tf) {
   tf->regs[0] = process_waitpid(tf);
+}
+
+/* W2-5 (selfhost): SYS_WAIT4 -- ARM canonical positions (regs[0]=pid,
+ * regs[1]=status, regs[2]=options, regs[3]=rusage) match the shared
+ * core's expectations directly; x64 remaps in its own handler. */
+static void sys_wait4(struct trap_frame *tf) {
+  tf->regs[0] = process_wait4(tf);
 }
 
 static void sys_exec(struct trap_frame *tf) {
@@ -1746,6 +1768,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_rename(tf);
     } else if (syscall_num == SYS_MKDIR) {
       sys_mkdir(tf);
+    } else if (syscall_num == SYS_RMDIR) {   /* W2-14 (selfhost) */
+      sys_rmdir(tf);
     } else if (syscall_num == SYS_GETCWD) {
       sys_getcwd(tf);
     } else if (syscall_num == SYS_CHDIR) {
@@ -1768,6 +1792,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_getppid(tf);
     } else if (syscall_num == SYS_WAITPID) {
       sys_waitpid(tf);
+    } else if (syscall_num == SYS_WAIT4) {    /* W2-5 (selfhost) */
+      sys_wait4(tf);
     } else if (syscall_num == SYS_EXEC) {
       sys_exec(tf);
     } else if (syscall_num == SYS_GETPROGNAME) {

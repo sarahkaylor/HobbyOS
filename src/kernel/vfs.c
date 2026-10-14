@@ -11,6 +11,7 @@
 #include "fs.h"
 #include "fat16.h"
 #include "process.h"
+#include "errno.h"
 
 extern struct process *current_process(void);
 
@@ -241,6 +242,19 @@ int vfs_mkdir(const char *path) {
   const char *rel = 0;
   if (vfs_route(abs, &midx, &rel)) return -1;       /* NFS: read-only */
   return fat16_mkdir(path);
+}
+
+/* W2-14 (selfhost): remove an EMPTY directory.  fat16_rmdir returns the
+ * precise negative errno (ENOENT/ENOTDIR/ENOTEMPTY/EBUSY); a routed
+ * (read-only NFS) mount refuses with -EROFS instead of the -1 the other
+ * vfs_* helpers use. */
+int vfs_rmdir(const char *path) {
+  char abs[VFS_PATH_MAX];
+  if (vfs_abs_path(path, abs, sizeof abs) != 0) return -ENOENT;
+  int midx = -1;
+  const char *rel = 0;
+  if (vfs_route(abs, &midx, &rel)) return -EROFS;   /* NFS: read-only */
+  return fat16_rmdir(path);
 }
 
 int vfs_cwd_writable(void) {
