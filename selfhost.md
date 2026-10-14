@@ -278,13 +278,14 @@ load + staged payload present. **Evidence:** serial log + artifact sizes.
 
 ### M2 — The toolchain runs on HobbyOS (critical path)
 
-- [ ] **T2.1 Cross-build** clang + lld + llvm-ar + llvm-objcopy — configure GREEN (spike
-  run 18); compile reached 211/564 TUs, first hard gate `Process::Pid` static_assert →
-  resolved at this tip (AD-12); wave 2 resumes `ninja llvm-ar llvm-objcopy` →
-  `ninja clang lld` → `install-distribution` (recipe `docs/selfhost/llvm-bootstrap.md` §6).
-- [ ] **T2.2 Install to `/TOOLS` + `/TOOLS/RESDIR`** (staging path; 8.3 checks; curated
-  resource headers).
-- [ ] **T2.3 In-OS smoke A:** `clang --version` runs.
+- [x] **T2.1 Cross-build** clang + lld + llvm-ar + llvm-objcopy — COMPLETE (wave 2;
+  relinked against merged libc post-merge: clang-21 126 MB, lld 72.6 MB, llvm-ar 13.6 MB,
+  llvm-objcopy 10.0 MB; zero LLVM source patches, AD-3 held).
+- [x] **T2.2 Install to `/TOOLS` + `/TOOLS/RESDIR`** — COMPLETE (wave 3: 12 entries /
+  223 MB on the 1 GiB image; LFN carries the resdir — 8.3 curation NOT required (§6.2,
+  decided with byte-fidelity evidence); in-OS MAKE.BIN exec proof on the staged image).
+- [ ] **T2.3 In-OS smoke A:** `clang --version` runs. (MAKE.BIN already executes in-OS
+  from `/TOOLS` — w3-tools harness boot; clang still open.)
 - [ ] **T2.4 In-OS smoke B:** compile `hello.c` → `.o` in-OS (freestanding flags).
 - [ ] **T2.5 In-OS smoke C:** lld-link + objcopy + **run `HELLO.BIN` in-OS**.
 - [ ] **T2.6** Fix whatever L2 predicted that actually fires (single-writer rounds).
@@ -295,6 +296,8 @@ load + staged payload present. **Evidence:** serial log + artifact sizes.
 ### M3 — Build driver in-OS
 
 - [ ] **T3.1** make port runs in-OS (trivial Makefile: `sh -c` recipes, `test`/`[`).
+  Partial: MAKE.BIN loads + executes in-OS (`/TOOLS/MAKE.BIN` scheduler line in the
+  w3-tools serial proof); fails cleanly only at the not-yet-existing `Makefile.hobbyos`.
 - [ ] **T3.2** `Makefile.hobbyos` v1: `check` + `user` (acceptance set) green in-OS from
   `/SRC`.
 - [ ] **T3.3** sh fixes L4's matrix proves necessary.
@@ -310,7 +313,11 @@ in-OS. **Evidence:** serial log.
   BOOTAA64.EFI + user set) in-OS.
 - [ ] **T4.3** Host verify loop `run_selfhost_build_test.py`: boot HobbyOS, drive the
   build, extract OUT.IMG (`fat16img.py`), boot OUT.IMG, assert the kernel marker + run an
-  in-OS-built program.
+  in-OS-built program. Pre-tested (wave 3, hand-built OUT.IMG): extraction byte-identical
+  (sha256), extracted image boots to kernel marker (6.5 s), program launches from the
+  OUT.IMG Apps menu; kernel-less case classifies `stage_failure`. OUT.IMG must-contain
+  list = `acceptance.md` §8 (limine/AAVMF layout + `/DESKTOP.BIN` MANDATORY + CONSOLE/SH +
+  8.3-named S1 program).
 
 **Gate M4 (frozen acceptance):** T4.3 green end-to-end with raw logs; OUT.IMG's kernel is
 linked in-OS from objects compiled in-OS. **Evidence:** full serial transcript + image
@@ -369,10 +376,18 @@ wait for the current run's log to show its final line, then start the next.
   kernel boot mode + serial-console-fd stdout (acceptance 5.2/5.3); (f) RESDIR 159>8.3
   name curation + `/TOOLS` staging of the toolchain (M2 sizes); (g) `shell_test`
   echo-token drain (QoL); (h) M3 driver milestones once the toolchain is bootable.
-  **DISPATCHED 2026-10-14 (`deleg_1fa8515c`, 4 lanes from `1920dc9`):** w3-kernel = (a)+(b);
-  w3-shell = (c)+(g); w3-tools = (f) + `/TOOLS` staging (sole Makefile writer);
-  w3-accept = S4/S5 runner pre-test (hand-built OUT.IMG) + real-OUT.IMG requirements.
-  Socket reconciliation (d) and `MODE=selfhost` (e) stay queued for wave 4.
+  **STATUS: COMPLETE — all four merged (`994116a`; §11 entry).** Gap-A outcome: the
+  “extend-write gap” was a sub-minimum probe size (1 MiB < FAT16 floor), NOT a kernel bug;
+  dirent landed; sh redirect fixed; token family drained; /TOOLS staged (in-OS MAKE.BIN
+  exec); S4/S5 pre-tested. Socket reconciliation (d) and `MODE=selfhost` (e) rolled to
+  wave 4.
+- **Wave 4 (roster, forming):** (a) `MODE=selfhost` kernel boot mode + serial-console-fd
+  stdout (acceptance 5.2/5.3) — unblocks full-serial S1–S5 evidence; (b) `Makefile.hobbyos`
+  v1 + `/SRC` source staging + driver S0–S3 dry-run (staged-failure path already proven);
+  (c) S1 program selection + 8.3 naming; (d) socket API reconciliation (legacy connect vs
+  POSIX / raw_socket_stream); (e) TCG perf for the 128 MiB in-OS MKFSFAT (QMP mid-ftruncate
+  break) or accept host-port parity proof; (f) image-budget review (696 MiB free) + M2
+  stripping/sizes; (g) AD-9 `STAGE_LIBCXX` freeze decision at M3.
 - Integrator = parent session: merges lanes to `main` here, runs merged-tip gates, is the
   sole writer of `selfhost.md`, `.gitignore`, syscall.h/both trap.c.
 
@@ -551,6 +566,38 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
   now bottom out at a single ambient token from the same slot-pressure/timing family.
   w3-shell lane steered to drain the whole family (echo + shell_test3 cat + watchdog
   interaction), goal = wave with ZERO FAIL tokens.
+- **2026-10-14 — Wave 3 (4 lanes) all merged (`994116a`); zero conflicts.** Merges:
+  w3-kernel `d4b5402`, w3-shell `e6bedf8`, w3-tools `8ff6241`, w3-accept `994116a`.
+  Headlines:
+  (1) **Gap A (FAT16 extend-write) re-diagnosed — NOT a kernel bug.** mkfs.fat `-C`
+  ftruncates BEFORE `setup_tables()` rejects a too-small filesystem: the w2 probe's 1 MiB
+  image is below FAT16's 4087-cluster floor, so only the ftruncate zero-fill persisted
+  (with a "too small" warning). Failing-test-first kernel tests (open→ftruncate→lseek0→
+  write→close→reopen→raw-compare at file+fat16 layers) PASS on the pre-fix tree — write
+  path exonerated, no kernel change made. In-OS proof: 1 MiB → zeros; 16 MiB minimum →
+  full FAT16 + non-zero content surviving graceful quit; host-port parity covers 128 MiB.
+  Watch: 128 MiB in-OS ran too slow under TCG (QMP broke mid-ftruncate, not persistence).
+  (2) **dirent landed end-to-end**: libc `opendir/readdir/closedir` over SYS_READ_DIR (kernel
+  `read_dir` already fine); in-OS DENTEST enumerated `[., .., ONE.TXT, SUB, ., .., TWO.TXT]`
+  incl. subdir descent; units **315/0 ARM + 319/0 x64**.
+  (3) **sh redirect root-caused + fixed**: `eval_simple()` closed the child's stdout when
+  `lerr == 1` in `> F 2>&1` shapes; every redirect-close now guards `>= 3`. Host-parity
+  byte proofs + in-OS SHTEST file-based assertions (`cat SHTEST.TXT > OUT2.TXT` ⇒ 194 B;
+  `make --version > M.TXT` ⇒ GNU Make banner). New finding: w2-make's console symptom was
+  a QMP keystroke artifact (guest translates `>`→`=`, drops chars) — `tools/run_w3kbd_probe.py`.
+  (4) **Slot-pressure token family drained**: drain-before-write + pressure-classified
+  SKIP; wave-arm **ZERO FAIL tokens across 3 full runs**.
+  (5) **/TOOLS staged**: `selfhost-stage.sh --tools` + Makefile; 12 entries / 223 MB;
+  in-OS harness boot shows `/TOOLS/MAKE.BIN` executing in the guest. **Resdir decision:
+  LFN suffices — no 8.3 curation** (fat16 full-name matching + LFN_T.BIN + sha256 fidelity;
+  §6.2; watch: 5 basenames >31 chars, cosmetic only). Image budget: 696 MiB free (M3 note).
+  (6) **S4/S5 pre-tested** with a hand-built image: extraction byte-identical; extracted
+  image boots (marker 6.5 s); program launches from the OUT.IMG Apps menu; kernel-less case
+  classifies `stage_failure`. Exact OUT.IMG must-contain list in `acceptance.md` §8
+  (limine/AAVMF layout + **`/DESKTOP.BIN` mandatory** + CONSOLE/SH + 8.3 S1 program).
+  Pitfall recorded: mformat `-F` = FAT32, not FAT16. `fat16img.py` extract linearized
+  (>120 s O(n²) → ~1 s). Merged-tip battery round 3 launched on `994116a`.
+
 - **2026-10-14 — Post-merge closure re-validation GREEN + first merged-tip battery fallout
   fixed (`1920dc9`).** Closure: re-staged sysroot from merged src, `cmake` reconfigure
   (closure objects are configure-time — see entry below), then llvm-ar / llvm-objcopy /
