@@ -479,6 +479,17 @@ SED_OBJS = $(addprefix $(OBJ_DIR)/sed_,$(addsuffix .o,$(SED_CORE_NAMES))) $(addp
 NANO_SRC_NAMES = browser chars color cut files global help history move nano prompt rcfile search text utils winio
 NANO_OBJS = $(addprefix $(OBJ_DIR)/nano_,$(addsuffix .o,$(NANO_SRC_NAMES))) $(OBJ_DIR)/nano_hb_curses.o
 NANO_BIN = $(OBJ_DIR)/nano.bin
+# Selfhost W2 (mtools port, lane w2-mtools): GNU mtools 4.0.49 transcribed
+# subset for the mcopy/mdel/mmd build-tools (L4 buildtools-audit §4).  The
+# engine objects are the shared FAT/image closure both commands link; the
+# per-tool main lives in mtools_port.c (upstream's single multicall main in
+# mtools.c is deliberately NOT transcribed — it dispatches on argv[0] and
+# references every tool, which does not fit HobbyOS's one-.BIN model).
+MTOOLS_ENGINE_NAMES = buffer charsetConv codepages config copyfile device devices dirCache directory direntry dos2unix fat fat_free file file_name force_io hash init lba llong lockdev mainloop match mcopy mdel misc missFuncs mk_direntry mmd offset old_dos open_image partition patchlevel plain_io privileges remap signal stream streamcache strtonum swap tty unix2dos unixdir vfat
+MTOOLS_ENGINE_OBJS = $(addprefix $(OBJ_DIR)/mtools_,$(addsuffix .o,$(MTOOLS_ENGINE_NAMES)))
+MCOPY_BIN = $(OBJ_DIR)/mcopy.bin
+MDEL_BIN = $(OBJ_DIR)/mdel.bin
+MMD_BIN = $(OBJ_DIR)/mmd.bin
 HEDGNU_BIN = $(OBJ_DIR)/hedgnu.bin
 WCTEST_BIN = $(OBJ_DIR)/wc_test.bin
 REGTEST_BIN = $(OBJ_DIR)/regex_test.bin
@@ -1379,6 +1390,33 @@ $(SED_BIN): $(SED_OBJS) $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/sed.elf $(SED_OBJS) $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/sed.elf $(SED_BIN)
 
+# --- GNU mtools 4.0.49 (multi-object port; objects named mtools_*) -------
+# Shared FAT/image engine, transcribed byte-identical from upstream except
+# config.h (the pinned port config; HobbyOS glue gated by HOBBYOS_TARGET).
+# -DSYSCONFDIR=\"/etc\" mirrors upstream's build-time define; no mtools.conf
+# exists in the OS root, so read_config() parses nothing and -i/-c drive the
+# recipes exactly as the acceptance requires.
+$(OBJ_DIR)/mtools_%.o: src/user/mtools/%.c src/user/mtools/config.h src/user/mtools/*.h $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c $< -o $@
+
+# One tiny main() per tool (mtools_port.c, compiled with the tool selected)
+# replaces upstream's multicall mtools.c; each .BIN links the shared engine.
+# Port-main objects use the mtoolsm_ prefix so they cannot collide with the
+# engine objects above (mcopy.o would otherwise map to mtools_mcopy.o twice).
+define MTOOLS_PORT_RULE
+$(OBJ_DIR)/mtoolsm_$(1).o: src/user/mtools/mtools_port.c src/user/mtools/config.h src/user/mtools/*.h $(USER_HDRS)
+	@mkdir -p $$(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DMTOOLS_TOOL_$(1) -DSYSCONFDIR=\"/etc\" -c $$< -o $$@
+
+$(OBJ_DIR)/$(1).bin: $(OBJ_DIR)/mtoolsm_$(1).o $(MTOOLS_ENGINE_OBJS) $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/$(1).elf $(OBJ_DIR)/mtoolsm_$(1).o $(MTOOLS_ENGINE_OBJS) $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/$(1).elf $$@
+endef
+$(eval $(call MTOOLS_PORT_RULE,mcopy))
+$(eval $(call MTOOLS_PORT_RULE,mdel))
+$(eval $(call MTOOLS_PORT_RULE,mmd))
+
 $(OBJ_DIR)/wc_test.o: src/user/wc_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
@@ -1742,7 +1780,7 @@ $(SQLTEST_BIN): $(OBJ_DIR)/sqlite_test.o $(OBJ_DIR)/sqlite_os.o $(OBJ_DIR)/sqlit
 	$(LD) -T src/user/linker.ld -e _start --gc-sections -o $(OBJ_DIR)/sqltest.elf $(OBJ_DIR)/sqlite_test.o $(OBJ_DIR)/sqlite_os.o $(OBJ_DIR)/sqlite3.o $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/sqltest.elf $(SQLTEST_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(MCOPY_BIN) $(MDEL_BIN) $(MMD_BIN) $(MODE_FILE)
 	# Startup disk: 1 GiB (user-requested floor; FAT16 tops out at 2 GiB).
 	# mkfs.fat auto-picks the cluster size (32 KiB @ 1 GiB); the kernel
 	# fat16.c layout math is BPB data-driven (bpb_sectors_per_cluster), so
@@ -1757,6 +1795,9 @@ disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BI
 	$(MMD) -i disk.img ::/mnt
 	$(MMD) -i disk.img ::/TESTDIR
 	$(MMD) -i disk.img ::/tmp
+	# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+	# build-tools at their frozen /TOOLS/ paths (Makefile.hobbyos sketch).
+	$(MMD) -i disk.img ::/TOOLS
 	# L3 (selfhost W-A): VFAT long-name build-payload fixture dirs (mtools-written).
 	$(MMD) -i disk.img ::/src
 	$(MMD) -i disk.img ::/src/kernel
@@ -1951,6 +1992,11 @@ endif
 	$(MCOPY) -i disk.img $(NOTES_BIN) ::/NOTES.BIN
 	$(MCOPY) -i disk.img $(UNIT_BIN) ::/UNIT.BIN
 	$(MCOPY) -i disk.img $(NANO_BIN) ::/NANO.BIN
+	# Selfhost W2 (mtools port): in-OS /TOOLS copies of the ported
+	# build-tools (8.3 names, the frozen F1 layout).
+	$(MCOPY) -i disk.img $(MCOPY_BIN) ::/TOOLS/MCOPY.BIN
+	$(MCOPY) -i disk.img $(MDEL_BIN) ::/TOOLS/MDEL.BIN
+	$(MCOPY) -i disk.img $(MMD_BIN) ::/TOOLS/MMD.BIN
 	$(MCOPY) -i disk.img $(MONITOR_BIN) ::/MONITOR.BIN
 	$(MCOPY) -i disk.img $(MONITOR_TEST_BIN) ::/MONITORT.BIN
 	$(MCOPY) -i disk.img $(ICU_SMOKE_BIN) ::/ICUSMK.BIN
