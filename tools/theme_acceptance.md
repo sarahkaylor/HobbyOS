@@ -27,6 +27,14 @@ The repository's python tiers (`run_desktop_test.py`, `run_desktop_apps_test.py`
   started (cwd-scoped scan of `/proc/*/cwd` against the worktree) and kills
   only those.
 
+- The APPS_T tier has an in-repo cwd-scoped replacement for
+  `run_apps_test.py`: **`tools/run_apps_test_scoped.py`** (run it from the
+  target tree; it kills only the QEMU it started, cwd-scoped).  Known
+  pre-existing failure (2026-10-14, NOT theme-related): it stops at
+  `TASKS.BIN` on both the light tree and the untouched pre-theme probe tree
+  @ 722e3b4 — kernel/loader/harness robustness follow-up; see `theme.md`
+  §5.  It passes 5/10 apps (FILES..HEX) before that point.
+
 ## (a) Build: MODE=desktop_test
 
 ```bash
