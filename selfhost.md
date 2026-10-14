@@ -415,7 +415,12 @@ wait for the current run's log to show its final line, then start the next.
   cxxrt.cpp` latent-fix follow-up; (b) after S2: S3 OUT.IMG in-OS + S4/S5; (c) watchdog
   hardening; (d) socket reconciliation; (e) budget/stripping.
   **DISPATCHED 2026-10-14 (`deleg_326875fa`, 1 lane from `42c6c0b`):** w6-run carries (a)
-  in full (fixes `cxxrt.cpp`, drives S0→S2, closes T2.5).
+  in full (fixes `cxxrt.cpp`, drives S0→S2, closes T2.5). → **COMPLETE + merged
+  (`288995c`, §11).**
+  **DISPATCHED 2026-10-14 (`deleg_36d019f2`, 1 lane from `288995c`):** w7-accept — the
+  acceptance: (A) boot the w6-produced OUT.IMG (kernel marker + in-OS-built program run),
+  (B) the full T4.3 loop (complete fresh in-OS build → extract OUT.IMG → boot it → run),
+  (C) acceptance.md reconciliation (TCG reality + runbook + §8.3 verdict table).
 - Integrator = parent session: merges lanes to `main` here, runs merged-tip gates, is the
   sole writer of `selfhost.md`, `.gitignore`, syscall.h/both trap.c.
 
