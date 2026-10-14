@@ -18,9 +18,13 @@
  *     these fail with ENOSYS (callers must handle the error).
  */
 #include <errno.h>
+#include <signal.h>
 #include <stddef.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/types.h>
+#include <sys/utsname.h>
+#include <sys/statvfs.h>
 
 unsigned int alarm(unsigned int seconds) { (void)seconds; return 0; }
 
@@ -56,3 +60,69 @@ int connect(int fd, const void *addr, unsigned int addrlen) {
   errno = ENOSYS; return -1;
 }
 int pipe(int fds[2]) { (void)fds; errno = ENOSYS; return -1; }
+
+/* Process/session surface (l1-dep-surface.txt B; L2 owns real ones). */
+pid_t setsid(void) { errno = ENOSYS; return -1; }
+
+int wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
+  (void)pid; (void)status; (void)options; (void)rusage;
+  errno = ENOSYS; return -1;
+}
+
+int getrusage(int who, struct rusage *usage) {
+  (void)who;
+  if (usage) memset(usage, 0, sizeof(*usage));
+  return 0;
+}
+
+/* File surface Path.inc calls (L2 owns real ones). */
+int fchown(int fd, unsigned int owner, unsigned int group) {
+  (void)fd; (void)owner; (void)group; errno = ENOSYS; return -1;
+}
+int fchmod(int fd, unsigned int mode) {
+  (void)fd; (void)mode; errno = ENOSYS; return -1;
+}
+int mkdir(const char *path, unsigned int mode) {
+  /* HobbyOS libc.h ho_mkdir exists; delegate to it to avoid double-def. */
+  extern int ho_mkdir(const char *path);
+  (void)mode; return ho_mkdir(path);
+}
+int symlink(const char *target, const char *linkpath) {
+  (void)target; (void)linkpath; errno = ENOSYS; return -1;
+}
+int link(const char *oldpath, const char *newpath) {
+  (void)oldpath; (void)newpath; errno = ENOSYS; return -1;
+}
+
+int pthread_sigmask(int how, const sigset_t *set, sigset_t *oldset) {
+  (void)how; (void)set; (void)oldset; return 0; /* matches libc's no-op */
+}
+
+void _Exit(int status) { extern void _exit(int); _exit(status); } /* noreturn */
+
+/* uname() -- TargetParser/Unix/Host.inc builds the host triple from it. */
+int uname(struct utsname *buf) {
+  /* sysname/release/machine matter most; fill them, nodename/version blank. */
+  memset(buf, 0, sizeof(*buf));
+  strcpy(buf->sysname, "HobbyOS");            /* sysname  */
+  strcpy(buf->release, "21.1.8");             /* release  */
+  strcpy(buf->machine, "aarch64");            /* machine  */
+  return 0;
+}
+
+/* disk-space probe -- Path.inc disk_space(); ENOSYS = "unknown" to callers. */
+int statvfs(const char *path, struct statvfs *buf) {
+  (void)path; (void)buf; errno = ENOSYS; return -1;
+}
+int fstatvfs(int fd, struct statvfs *buf) {
+  (void)fd; (void)buf; errno = ENOSYS; return -1;
+}
+
+/* dladdr() -- Signals.inc backtrace symbolization; no loader present, so
+ * report "no symbol" (return 0 like Linux when nothing found). */
+#include <dlfcn.h>
+int dladdr(const void *addr, Dl_info *info) {
+  (void)addr;
+  if (info) { info->dli_fname = ""; info->dli_fbase = 0; info->dli_sname = 0; info->dli_saddr = 0; }
+  return 0;
+}

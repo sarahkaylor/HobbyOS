@@ -20,11 +20,21 @@ extern "C" {
 #define RTLD_DEFAULT     ((void *)0)
 #define RTLD_NEXT        ((void *)-1)
 
+/* Full Dl_info: Unix/Signals.inc uses `Dl_info dlinfo;` by value under
+ * #if HAVE_DLOPEN (stack-dump symbolization), including dli_fname. */
+typedef struct dl_info {
+  const char *dli_fname;
+  void       *dli_fbase;
+  const char *dli_sname;
+  void       *dli_saddr;
+} Dl_info;
+
 /* Not implemented by HobbyOS (no dynamic loader); declarations only. */
 void *dlopen(const char *filename, int flags);
 void *dlsym(void *handle, const char *symbol);
 int   dlclose(void *handle);
 char *dlerror(void);
+int   dladdr(const void *addr, Dl_info *info);
 
 #ifdef __cplusplus
 }
