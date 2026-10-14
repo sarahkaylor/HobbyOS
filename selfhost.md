@@ -499,5 +499,7 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
   already fixed (`3c781c5`); (c) the full llvm-project 21.1.8 container (llvm/clang/lld)
   is already vendored — no new source downloads needed for the critical path;
   (d) host clang == pin 21.1.8 (no version skew).
-- Clone-validation unit-tier run: result recorded here when it lands (kicked 2026-10-14;
-  see `docs/selfhost/lanes/` for the raw log if archived).
+- Clone validation **GREEN** (2026-10-14): `./run_unit_tests.sh` on the copy —
+  `Tests run: 302 / Tests failed: 0 / UNIT TESTS PASSED` (evidence trimmed to
+  `docs/selfhost/lanes/l0-clone-unit-tier.log`; full log = the gitignored `qemu.log`
+  in the clone root).

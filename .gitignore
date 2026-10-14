@@ -136,3 +136,7 @@ third_party/webkit-hobbyos/build/
 third_party/llvm-21.1.8/llvm-*.tar.xz
 third_party/llvm-21.1.8/src/
 third_party/llvm-21.1.8/.fetched-ok
+
+# Selfhost lane evidence excerpts are committed on purpose (curated from
+# gitignored raw runs) — the global `*.log` rule must not swallow them.
+!docs/selfhost/lanes/*.log
