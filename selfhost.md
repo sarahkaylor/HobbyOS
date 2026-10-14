@@ -421,6 +421,9 @@ wait for the current run's log to show its final line, then start the next.
   acceptance: (A) boot the w6-produced OUT.IMG (kernel marker + in-OS-built program run),
   (B) the full T4.3 loop (complete fresh in-OS build → extract OUT.IMG → boot it → run),
   (C) acceptance.md reconciliation (TCG reality + runbook + §8.3 verdict table).
+- **Wave 6.5 (roster):** (a) w8-torture: root-cause + fix the VM-only tip-scoped `TORTURE
+  exec-wait-cycles` red (§11); (b) then the normal battery re-verify of the fix.
+  **DISPATCHED 2026-10-14 (`deleg_689f3db2`, 1 lane from `288995c`):** w8-torture.
 - Integrator = parent session: merges lanes to `main` here, runs merged-tip gates, is the
   sole writer of `selfhost.md`, `.gitignore`, syscall.h/both trap.c.
 
