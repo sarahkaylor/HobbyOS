@@ -479,7 +479,55 @@ static void test_fat16_lfn_rename_long(void) {
 
 /* Parse edge: a corrupted 0x0F checksum must REJECT the long-name match
    (no phantom open onto an unrelated entry).  Bytes are patched directly
-   on the sector holding the created entry and restored afterwards. */
+   on the sector(s) holding the created entry's run and restored
+   afterwards. */
+
+/* Locate the VFAT 0x0F records that immediately precede the short entry
+ * at (sector, offset).  The allocator packs a run's slots DIRECTLY
+ * BEFORE the short entry, so when offset < run length the run's head --
+ * and with a short entry at slot 0 even the WHOLE run -- lives in the
+ * PREVIOUS sector's tail (the short entry lands at a sector boundary
+ * whenever the run would otherwise straddle it; the on-disk layout is
+ * correct either way).  Walks backward from (sector, offset-1), crossing
+ * into the previous sector, and stops at the first non-0x0F record.
+ * Returns the count (0..max_rec); slots[0] is the record NEAREST the
+ * short entry and slots[count-1] the 0x40-flagged far end of the run. */
+struct lfn_slot {
+  uint32_t sector;
+  uint32_t slot;
+};
+static int lfn_run_locate(uint32_t sector, uint32_t offset,
+                          struct lfn_slot *slots, int max_rec) {
+  int n = 0;
+  uint32_t s = sector;
+  int32_t k = (int32_t)offset - 1;
+  uint8_t buf[SECTOR_SIZE];
+  if (virtio_blk_read_sector(s, buf, 1) != 0)
+    return 0;
+  for (;;) {
+    if (k < 0) {
+      /* Cross into the previous sector's tail (the run spills there
+         when the short entry sits at offset 0). */
+      if (s == 0)
+        break;
+      s -= 1;
+      if (virtio_blk_read_sector(s, buf, 1) != 0)
+        break;
+      k = (int32_t)(SECTOR_SIZE / 32) - 1;
+    }
+    struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
+    if (entries[k].attr != 0x0F)
+      break;
+    slots[n].sector = s;
+    slots[n].slot = (uint32_t)k;
+    n++;
+    if (n >= max_rec)
+      break;
+    k -= 1;
+  }
+  return n;
+}
+
 static void test_fat16_lfn_checksum_reject(void) {
   uart_puts("  Running test_fat16_lfn_checksum_reject...\n");
   tests_run++;
@@ -497,27 +545,48 @@ static void test_fat16_lfn_checksum_reject(void) {
   uint32_t sector;
   uint32_t offset;
   EXPECT_EQ(fat16_resolve_path(path, &e, &sector, &offset), 0);
-  EXPECT_EQ(virtio_blk_read_sector(sector, buf, 1), 0);
-  struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
 
-  unsigned char saved[8];
-  int nrec = 0;
-  for (int k = (int)offset - 1; k >= 0 && nrec < 8; k--) {
-    if (entries[k].attr != 0x0F) break;
-    saved[nrec] = ((unsigned char *)&entries[k])[13];
-    ((unsigned char *)&entries[k])[13] ^= 0xFF; /* wrong checksum */
-    nrec++;
-  }
+  /* Gather the run ACROSS a possible sector boundary (offset == 0 keeps
+     the pre-fix backward scan on the current sector empty). */
+  struct lfn_slot slots[8];
+  int nrec = lfn_run_locate(sector, offset, slots, 8);
   EXPECT_EQ(nrec > 0, 1);
-  EXPECT_EQ(virtio_blk_write_sector(sector, buf, 1), 0);
+
+  /* Flip the checksum byte (record byte 13) of every 0x0F record,
+     writing each affected sector back exactly once. */
+  unsigned char saved[8];
+  uint32_t cur = 0xFFFFFFFF;
+  for (int i = 0; i < nrec; i++) {
+    if (slots[i].sector != cur) {
+      if (cur != 0xFFFFFFFF)
+        EXPECT_EQ(virtio_blk_write_sector(cur, buf, 1), 0);
+      cur = slots[i].sector;
+      EXPECT_EQ(virtio_blk_read_sector(cur, buf, 1), 0);
+    }
+    struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
+    saved[i] = ((unsigned char *)&entries[slots[i].slot])[13];
+    ((unsigned char *)&entries[slots[i].slot])[13] ^= 0xFF; /* wrong check */
+  }
+  if (cur != 0xFFFFFFFF)
+    EXPECT_EQ(virtio_blk_write_sector(cur, buf, 1), 0);
 
   /* The long name must now fail to resolve; nothing else matches it. */
   EXPECT_EQ(fat16_resolve_path(path, &e, 0, 0) != 0, 1);
 
   /* Restore the pristine records: reachable again. */
-  for (int k = (int)offset - 1, m = 0; m < nrec; k--, m++)
-    ((unsigned char *)&entries[k])[13] = saved[m];
-  EXPECT_EQ(virtio_blk_write_sector(sector, buf, 1), 0);
+  cur = 0xFFFFFFFF;
+  for (int i = 0; i < nrec; i++) {
+    if (slots[i].sector != cur) {
+      if (cur != 0xFFFFFFFF)
+        EXPECT_EQ(virtio_blk_write_sector(cur, buf, 1), 0);
+      cur = slots[i].sector;
+      EXPECT_EQ(virtio_blk_read_sector(cur, buf, 1), 0);
+    }
+    struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
+    ((unsigned char *)&entries[slots[i].slot])[13] = saved[i];
+  }
+  if (cur != 0xFFFFFFFF)
+    EXPECT_EQ(virtio_blk_write_sector(cur, buf, 1), 0);
   EXPECT_EQ(fat16_resolve_path(path, &e, 0, 0), 0);
 }
 
@@ -538,39 +607,34 @@ static void test_fat16_lfn_truncated_run(void) {
   uint32_t offset;
   EXPECT_EQ(fat16_resolve_path(path, &e, &sector, &offset), 0);
 
+  /* Find the record carrying the 0x40 last-flag: the FARTHEST 0x0F
+     record of the run (alloc's slot 0).  The scan crosses a sector
+     boundary (offset == 0 pushes the run into the previous sector's
+     tail).  Save its ordinal for restore, then delete it (0xE5). */
+  struct lfn_slot slots[8];
+  int nrec = lfn_run_locate(sector, offset, slots, 8);
+  EXPECT_EQ(nrec > 0, 1);
+
+  struct lfn_slot *head = &slots[nrec - 1];
   uint8_t buf[SECTOR_SIZE];
-  EXPECT_EQ(virtio_blk_read_sector(sector, buf, 1), 0);
+  EXPECT_EQ(virtio_blk_read_sector(head->sector, buf, 1), 0);
   struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
-  /* Find the record carrying the 0x40 last-flag: scanned backwards from
-     the short entry, it sits at the FARTHEST record of the run (alloc's
-     slot 0).  Save its ordinal for restore, then delete it (0xE5). */
-  int last_k = -1;
-  int first_k = -1;
-  for (int k = (int)offset - 1; k >= 0; k--) {
-    if (entries[k].attr != 0x0F) break;
-    if (last_k < 0) last_k = k;
-    first_k = k;
-  }
-  unsigned char saved_ord = 0;
-  int patched = 0;
-  if (first_k >= 0 && (int)offset - first_k > 0) {
-    int k = first_k;
-    if (((unsigned char *)&entries[k])[0] & 0x40) {
-      saved_ord = ((unsigned char *)&entries[k])[0];
-      entries[k].name[0] = (char)0xE5; /* simulate a lost record */
-      patched = 1;
-    }
-  }
+  int patched = (((unsigned char *)&entries[head->slot])[0] & 0x40) ? 1 : 0;
+  unsigned char saved_ord = ((unsigned char *)&entries[head->slot])[0];
   EXPECT_EQ(patched, 1);
-  EXPECT_EQ(virtio_blk_write_sector(sector, buf, 1), 0);
+  entries[head->slot].name[0] = (char)0xE5; /* simulate a lost record */
+  EXPECT_EQ(virtio_blk_write_sector(head->sector, buf, 1), 0);
 
   /* Truncated run: the head chunk alone (or the tail alone) must NOT
      resolve to the full 19-char query. */
   EXPECT_EQ(fat16_resolve_path(path, &e, 0, 0) != 0, 1);
 
-  /* Restore the record (name[0] IS the LFN ordinal byte): reachable again. */
-  entries[first_k].name[0] = (char)saved_ord;
-  EXPECT_EQ(virtio_blk_write_sector(sector, buf, 1), 0);
+  /* Restore the record (name[0] IS the LFN ordinal byte): reachable
+     again -- written back to whichever sector owns the head slot. */
+  EXPECT_EQ(virtio_blk_read_sector(head->sector, buf, 1), 0);
+  entries = (struct fat16_dir_entry *)buf;
+  ((unsigned char *)&entries[head->slot])[0] = saved_ord;
+  EXPECT_EQ(virtio_blk_write_sector(head->sector, buf, 1), 0);
   EXPECT_EQ(fat16_resolve_path(path, &e, 0, 0), 0);
 }
 
