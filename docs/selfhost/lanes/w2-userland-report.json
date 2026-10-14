@@ -1,0 +1,77 @@
+{
+  "lane": "w2-userland",
+  "status": "complete",
+  "commits": [
+    "8708682 selfhost: w2-userland — setjmp/dlfcn/resource/statvfs + 6 link-blocker stubs + W2-7 decl set + wait4 wrapper",
+    "a19289a selfhost: w2-userland — free the public variadic syscall() name in userland test TUs",
+    "05ba221 selfhost: w2-userland — lane report + ARM unit/wave gate evidence"
+  ],
+  "items": [
+    {
+      "id": "W2-2",
+      "what": "setjmp/longjmp for aarch64 + x64, normal-return-path correct (LLVM CrashRecoveryContext); sigsetjmp/siglongjmp included",
+      "files": ["src/libc/include/setjmp.h", "src/libc/src/setjmp.c", "src/host/libc_setjmp_test.c", "Makefile (libc.a member + host test registration)"],
+      "status": "done"
+    },
+    {
+      "id": "W2-3",
+      "what": "dlfcn.h canonical + dlopen/dlsym/dlclose/dlerror/dladdr 'not supported' stubs; sysroot-headers/dlfcn.h deleted (canonical moved)",
+      "files": ["src/libc/include/dlfcn.h", "src/libc/src/dlfcn.c", "src/user/toolchain/sysroot-headers/dlfcn.h (deleted)"],
+      "status": "done"
+    },
+    {
+      "id": "W2-4",
+      "what": "sys/resource.h + getrlimit/setrlimit/getrusage stubs; alarm (honest 0); strsignal real string table; ioctl ENOTTY stub (no SYS_IOCTL class, verified vs syscall.h); variadic syscall() dispatcher",
+      "files": ["src/libc/include/sys/resource.h", "src/libc/src/resource.c", "src/libc/include/sys/ioctl.h", "src/libc/src/ioctl.c", "src/libc/src/syscall.c", "src/user/toolchain/sysroot-headers/sys/resource.h (deleted)", "src/libc/src/signal.c (alarm)", "src/libc/src/string.c + src/libc/include/string.h (strsignal)"],
+      "status": "done"
+    },
+    {
+      "id": "W2-6",
+      "what": "sys/statvfs.h + statvfs/fstatvfs over kernel sysinfo cmd 7 (total/free bytes); sysroot-headers copy deleted",
+      "files": ["src/libc/include/sys/statvfs.h", "src/libc/src/statvfs.c", "src/user/toolchain/sysroot-headers/sys/statvfs.h (deleted)"],
+      "status": "done"
+    },
+    {
+      "id": "W2-7",
+      "what": "declaration/shim set: mkdir 2-arg (variadic wrapper), link/symlink decls+stubs, pipe decl, setsid stub, _Exit decl, SA_NODEFER/SA_ONSTACK, pthread_sigmask (=sigprocmask), fchown stub",
+      "files": ["src/libc/include/unistd.h", "src/libc/include/signal.h", "src/libc/include/pthread.h", "src/libc/include/stdlib.h", "src/libc/include/sys/wait.h (wait4 decl)", "src/user/libc.c", "src/user_include/libc.h", "src/libc/src/signal.c (pthread_sigmask)", "src/libc/src/stat.c (fchown)"],
+      "status": "done"
+    },
+    {
+      "id": "W2-5",
+      "what": "wait4 user wrapper over the NEW syscall number",
+      "files": ["src/user/libc.c"],
+      "status": "done"
+    },
+    {
+      "id": "W2-coherence",
+      "what": "toolchain sysroot coherence: gaps.c trimmed to true gaps (zero symbol overlap vs libc.a, verified by nm), _missing.h cut to remaining toolchain-only surface, sysroot duplicate headers deleted",
+      "files": ["src/user/toolchain/sysroot-headers/gaps.c", "src/user/toolchain/sysroot-headers/_missing.h", "src/user/toolchain/sysroot-headers/sys/resource.h (deleted)", "src/user/toolchain/sysroot-headers/sys/statvfs.h (deleted)", "src/user/toolchain/sysroot-headers/dlfcn.h (deleted)"],
+      "status": "done"
+    }
+  ],
+  "wait4_number_used": 90,
+  "gates": {
+    "unit_arm": {
+      "marker": "UNIT TESTS PASSED",
+      "counts": "Tests run 309 / Tests failed 0"
+    },
+    "wave_arm": {
+      "marker": "System halt.",
+      "fail_tokens": [
+        "shell_test2: FAILED ping execution (documented wave-pressure flake — docs/browser/l8-idlestuck-class-RESOLVED-l8-idlefix.md line 54 cites it verbatim; network-timing under wave load, NOT lane-related; my changes are symbol-level inert for the network/shell path)"
+      ]
+    }
+  },
+  "blockers": [],
+  "notes": [
+    "unit-tier count stays 309: the kernel unit tier (src/kernel/**) is outside this lane's boundary, so the added setjmp coverage is a HOST-tier test (libc_setjmp_test_host: 9 checks, 0 failures, runs the real x86-64 handlers); the aarch64 path is verified by disassembly + every in-OS link of libc.a",
+    "wait4_number_used=90 is the next free after SYS_MAX(89); kernel lane adds SYS_WAIT4 in parallel — integrator reconciles (the libc.c fallback #define is scoped and harmless once syscall.h defines it)",
+    "libc.c's private 4-arg syscall() helper renamed ho_syscall4; seven userland test TUs with private syscall() helpers/decls updated (unistd.h now declares the public variadic syscall())",
+    "legacy connect() (3-arg ip form, libc.h/libc.c) coexists with the POSIX connect() prototype in _missing.h: LLVM's raw_socket_stream connect(fd,addr,len) would bind at link to the legacy symbol and degrade to an error (no listener surface anyway) — flagged for integrator; no P4 surface touched",
+    "src/include/setjmp.h (kernel 16-word context buffer) wins <setjmp.h> resolution for in-tree userland due to -I order; setjmp.c pairs with the sysroot 24-word layout via a relative include, and the toolchain sysroot build resolves libc-include first — both consumers correct",
+    "gaps.c is now symbol-disjoint with libc.a (verified: nm overlap = none), so the toolchain link closure cannot hit duplicate definitions for the W2 symbols; _missing.h retains only toolchain-only surface (sockets listener, gethostname/getsid, fork, PATH_MAX, _POSIX_ARG_MAX)",
+    "wave attempt 1 (cold MODE=test rebuild) was killed by the 1800s outer timeout before System halt; attempt 2 (warm obj) reached System halt cleanly — cold rebuilds of the full wave need >30 min",
+    "setjmp sigsetjmp/siglongjmp are their own naked asm (not wrappers over setjmp) — a wrapper's epilogue pops a stack slot reused by a later call (discovered + fixed via the -O0 host test)"
+  ]
+}
