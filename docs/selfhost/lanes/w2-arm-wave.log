@@ -1,0 +1,9 @@
+# W2-userland ARM integration wave (make MODE=test run, warm build) — 2026-10-14
+# Verdict: System halt present; FAIL scan = exactly one documented wave-pressure flake
+#   (shell_test2: FAILED ping execution — cited in docs/browser/l8-idlestuck-class-RESOLVED-l8-idlefix.md
+#    as a 'wave-pressure class' ambient flake, not lane-related; 0 panics, 0 Tests failed)
+# Raw log (gitignored): /tmp/wave2.log (also qemu.log at run time)
+---
+Mode: TEST - Running automated tests...
+shell_test2: FAILED ping execution. Output was:
+System halt.

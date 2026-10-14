@@ -15,7 +15,7 @@
 #include "graphics/window.h"
 
 /* --- Syscall wrapper --- */
-static long syscall(long num, long a0, long a1, long a2, long a3) {
+static long ho_syscall4(long num, long a0, long a1, long a2, long a3) {
 #ifdef __x86_64__
   long ret;
   register long rdi __asm__("rdi") = a0;
@@ -111,12 +111,12 @@ static int flush_count = 0;
  * frames with SYS_FLUSH_FB (10) and damage frames with the GX rect flush
  * (SYS_FLUSH_FB_RECTS 89), so both wrappers count. */
 void flush_fb(void) {
-  syscall(10 /* SYS_FLUSH_FB */, 0, 0, 0, 0);
+  ho_syscall4(10 /* SYS_FLUSH_FB */, 0, 0, 0, 0);
   flush_count++;
 }
 
 int flush_fb_rects(const struct fb_rect *rects, int count) {
-  syscall(89 /* SYS_FLUSH_FB_RECTS */, (long)rects, (long)count, 0, 0);
+  ho_syscall4(89 /* SYS_FLUSH_FB_RECTS */, (long)rects, (long)count, 0, 0);
   flush_count++;
   return 0;
 }

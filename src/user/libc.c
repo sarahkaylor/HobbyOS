@@ -7,6 +7,7 @@
 #include <poll.h>       /* P4: struct pollfd */
 #include <sys/socket.h> /* P4: msghdr/socketpair/sendmsg/recvmsg */
 #include <sys/uio.h>    /* P4: struct iovec */
+#include <sys/resource.h> /* selfhost W2-5: struct rusage (wait4) */
 
 /* Per-thread errno (P1, p1-threads-design.md sections 4/6), served through
  * __errno_location() -- errno.h defines `errno` as (*__errno_location()),
@@ -49,7 +50,7 @@ static long errno_ret(long r) {
 }
 
 #ifdef __x86_64__
-static long syscall(long num, long a0, long a1, long a2, long a3) {
+static long ho_syscall4(long num, long a0, long a1, long a2, long a3) {
   long ret;
   register long rdi __asm__("rdi") = a0;
   register long rsi __asm__("rsi") = a1;
@@ -75,7 +76,7 @@ static long syscall5(long num, long a0, long a1, long a2, long a3, long a4) {
   return ret;
 }
 #else
-static long syscall(long num, long a0, long a1, long a2, long a3) {
+static long ho_syscall4(long num, long a0, long a1, long a2, long a3) {
   register long x8 __asm__("x8") = num;
   register long x0 __asm__("x0") = a0;
   register long x1 __asm__("x1") = a1;
@@ -186,35 +187,35 @@ void ho_tls_setup_initial(void) {
     tls = ((long)__tls_start - 16) & ~(long)(align - 1);
   }
 #endif
-  syscall(SYS_SET_TLS, tls, 0, 0, 0);
+  ho_syscall4(SYS_SET_TLS, tls, 0, 0, 0);
   ho_tls_mark_installed();
 }
 
 /* Raw kernel-thread wrappers for libpthread (native extensions: the raw
  * result is returned, errno is never set). */
 int ho_thread_create(void *entry, void *arg, void *stack_top, int flags) {
-  return (int)syscall(SYS_THREAD_CREATE, (long)entry, (long)arg,
+  return (int)ho_syscall4(SYS_THREAD_CREATE, (long)entry, (long)arg,
                       (long)stack_top, (long)flags);
 }
 int ho_futex_wait(volatile int *uaddr, int val, int timeout_ms) {
-  return (int)syscall(SYS_FUTEX, (long)uaddr, 0, (long)val,
+  return (int)ho_syscall4(SYS_FUTEX, (long)uaddr, 0, (long)val,
                       (long)timeout_ms);
 }
 int ho_futex_wake(volatile int *uaddr, int count) {
-  return (int)syscall(SYS_FUTEX, (long)uaddr, 1, (long)count, 0);
+  return (int)ho_syscall4(SYS_FUTEX, (long)uaddr, 1, (long)count, 0);
 }
 void ho_futex_wake_all(volatile int *uaddr) {
-  syscall(SYS_FUTEX, (long)uaddr, 1, 0x7fffffffL, 0);
+  ho_syscall4(SYS_FUTEX, (long)uaddr, 1, 0x7fffffffL, 0);
 }
 int ho_set_tls_raw(long tls) {
-  int r = (int)syscall(SYS_SET_TLS, tls, 0, 0, 0);
+  int r = (int)ho_syscall4(SYS_SET_TLS, tls, 0, 0, 0);
   if (r == 0)
     ho_tls_mark_installed();
   return r;
 }
-int ho_yield_raw(void) { return (int)syscall(SYS_YIELD, 0, 0, 0, 0); }
+int ho_yield_raw(void) { return (int)ho_syscall4(SYS_YIELD, 0, 0, 0, 0); }
 void ho_thread_exit_raw(int retval) {
-  syscall(SYS_THREAD_EXIT, (long)retval, 0, 0, 0);
+  ho_syscall4(SYS_THREAD_EXIT, (long)retval, 0, 0, 0);
   /* noreturn contract: SYS_THREAD_EXIT never returns.  If a kernel bug ever
      let it, ending the process is the only sane fallback. */
   exit(0);
@@ -230,7 +231,7 @@ void print(const char *s) {
   while (written < len) {
     int res = write(1, s + written, len - written);
     if (res < 0) {
-      syscall(SYS_WRITE_CONSOLE, (long)(s + written), len - written, 0, 0);
+      ho_syscall4(SYS_WRITE_CONSOLE, (long)(s + written), len - written, 0, 0);
       break;
     }
     written += res;
@@ -241,7 +242,7 @@ void print_console(const char *s) {
   int len = 0;
   while (s[len])
     len++;
-  syscall(SYS_WRITE_CONSOLE, (long)s, len, 0, 0);
+  ho_syscall4(SYS_WRITE_CONSOLE, (long)s, len, 0, 0);
 }
 
 void print_hex(long val) {
@@ -303,52 +304,52 @@ void exit(int status) {
   extern int fflush(FILE *) __attribute__((weak));
   if (fflush)
     fflush(0);
-  syscall(SYS_EXIT, (long)status, 0, 0, 0);
+  ho_syscall4(SYS_EXIT, (long)status, 0, 0, 0);
   while (1)
     ; // Wait for the kernel to halt us safely
 }
 
-int kill(int pid, int sig) { return (int)errno_ret(syscall(SYS_KILL, (long)pid, (long)sig, 0, 0)); }
+int kill(int pid, int sig) { return (int)errno_ret(ho_syscall4(SYS_KILL, (long)pid, (long)sig, 0, 0)); }
 
-int fork(void) { return (int)errno_ret(syscall(SYS_FORK, 0, 0, 0, 0)); }
+int fork(void) { return (int)errno_ret(ho_syscall4(SYS_FORK, 0, 0, 0, 0)); }
 
 /* Phase-2 ABI: open takes flags and an optional mode (POSIX). The kernel
  * only reads the path today; the flags argument is forwarded so the
  * Phase-2 kernel flag handling needs no user-side ABI churn. */
 int open(const char *path, int flags, ...) {
-  return (int)errno_ret(syscall(SYS_OPEN, (long)path, flags, 0, 0));
+  return (int)errno_ret(ho_syscall4(SYS_OPEN, (long)path, flags, 0, 0));
 }
 
-int close(int fd) { return (int)errno_ret(syscall(SYS_CLOSE, (long)fd, 0, 0, 0)); }
+int close(int fd) { return (int)errno_ret(ho_syscall4(SYS_CLOSE, (long)fd, 0, 0, 0)); }
 
 /* Both supported architectures run 4K pages (PAGE_SIZE in process.h); this
    spares ported GNU code a sysconf maze it cannot satisfy. */
 int getpagesize(void) { return 4096; }
 
 ssize_t read(int fd, void *buf, size_t size) {
-  return (ssize_t)errno_ret(syscall(SYS_READ, (long)fd, (long)buf, (long)size, 0));
+  return (ssize_t)errno_ret(ho_syscall4(SYS_READ, (long)fd, (long)buf, (long)size, 0));
 }
 
 ssize_t write(int fd, const void *buf, size_t size) {
-  return (ssize_t)errno_ret(syscall(SYS_WRITE, (long)fd, (long)buf, (long)size, 0));
+  return (ssize_t)errno_ret(ho_syscall4(SYS_WRITE, (long)fd, (long)buf, (long)size, 0));
 }
 
 void yield(void) {
-  syscall(SYS_YIELD, 0, 0, 0, 0);
+  ho_syscall4(SYS_YIELD, 0, 0, 0, 0);
 }
 
 int connect(uint32_t ip, uint16_t port, int protocol) {
-  return (int)errno_ret(syscall(SYS_CONNECT, (long)ip, (long)port, (long)protocol, 0));
+  return (int)errno_ret(ho_syscall4(SYS_CONNECT, (long)ip, (long)port, (long)protocol, 0));
 }
 
 /* Phase F1 (browser.md A.1a — frozen): sockets + select over syscalls
  * 65-71.  Device-only (host builds take glibc's surface, see libc.h). */
 int socket(int domain, int type, int protocol) {
-  return (int)errno_ret(syscall(SYS_SOCKET, (long)domain, (long)type, (long)protocol, 0));
+  return (int)errno_ret(ho_syscall4(SYS_SOCKET, (long)domain, (long)type, (long)protocol, 0));
 }
 
 int connect_fd(int fd, uint32_t ip_be, uint16_t port_be) {
-  return (int)errno_ret(syscall(SYS_CONNECT_FD, (long)fd, (long)ip_be, (long)port_be, 0));
+  return (int)errno_ret(ho_syscall4(SYS_CONNECT_FD, (long)fd, (long)ip_be, (long)port_be, 0));
 }
 
 int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
@@ -375,7 +376,7 @@ int fcntl(int fd, int cmd, ...) {
 
   if (cmd == F_SETLKW) {
     for (int i = 0; i < 1000; i++) {
-      long r = syscall(SYS_FCNTL, (long)fd, (long)F_SETLK, arg, 0);
+      long r = ho_syscall4(SYS_FCNTL, (long)fd, (long)F_SETLK, arg, 0);
       if (r != -EAGAIN)
         return (int)errno_ret(r);
       usleep(10000); /* 10 ms; 1000 tries ~= 10 s bound */
@@ -383,7 +384,7 @@ int fcntl(int fd, int cmd, ...) {
     errno = EAGAIN;
     return -1;
   }
-  return (int)errno_ret(syscall(SYS_FCNTL, (long)fd, (long)cmd, arg, 0));
+  return (int)errno_ret(ho_syscall4(SYS_FCNTL, (long)fd, (long)cmd, arg, 0));
 }
 
 /* P6.1: flock(2) whole-file locks over the record locks.  LOCK_NB picks
@@ -401,7 +402,7 @@ int flock(int fd, int op) {
 
 /* P6.1: ftruncate(2) -- the kernel resizes regular FAT16 files (row 33). */
 int ftruncate(int fd, off_t length) {
-  return (int)errno_ret(syscall(SYS_FTRUNCATE, (long)fd, (long)length, 0, 0));
+  return (int)errno_ret(ho_syscall4(SYS_FTRUNCATE, (long)fd, (long)length, 0, 0));
 }
 
 /* P6.1: single-user identity -- no accounts on the device, uid/gid 0 (the
@@ -427,29 +428,29 @@ int setsockopt(int fd, int level, int optname, const void *val, int len) {
 }
 
 int getrandom(void *buf, size_t len, unsigned int flags) {
-  return (int)errno_ret(syscall(SYS_GETRANDOM, (long)buf, (long)len, (long)flags, 0));
+  return (int)errno_ret(ho_syscall4(SYS_GETRANDOM, (long)buf, (long)len, (long)flags, 0));
 }
 
 /* P4 (docs/browser/p4-ipc-design.md §6.3): the AF_UNIX IPC surface —
  * socketpair/sendmsg/recvmsg/poll over syscalls 76-79.  Device-only (host
  * builds take glibc's, see <sys/socket.h>/<poll.h>). */
 int socketpair(int domain, int type, int protocol, int sv[2]) {
-  return (int)errno_ret(syscall(SYS_SOCKETPAIR, (long)domain, (long)type,
+  return (int)errno_ret(ho_syscall4(SYS_SOCKETPAIR, (long)domain, (long)type,
                                 (long)protocol, (long)sv));
 }
 
 ssize_t sendmsg(int fd, const struct msghdr *msg, int flags) {
-  return (ssize_t)errno_ret(syscall(SYS_SENDMSG, (long)fd, (long)msg,
+  return (ssize_t)errno_ret(ho_syscall4(SYS_SENDMSG, (long)fd, (long)msg,
                                     (long)flags, 0));
 }
 
 ssize_t recvmsg(int fd, struct msghdr *msg, int flags) {
-  return (ssize_t)errno_ret(syscall(SYS_RECVMSG, (long)fd, (long)msg,
+  return (ssize_t)errno_ret(ho_syscall4(SYS_RECVMSG, (long)fd, (long)msg,
                                     (long)flags, 0));
 }
 
 int poll(struct pollfd *fds, nfds_t nfds, int timeout_ms) {
-  return (int)errno_ret(syscall(SYS_POLL, (long)fds, (long)nfds,
+  return (int)errno_ret(ho_syscall4(SYS_POLL, (long)fds, (long)nfds,
                                 (long)timeout_ms, 0));
 }
 
@@ -477,7 +478,7 @@ int getentropy(void *buf, size_t length) {
 /* POSIX sleep: seconds. Legacy HobbyOS callers used milliseconds and are
  * migrated to usleep() (phase-2 sweep); SYS_SLEEP is millisecond-based. */
 unsigned int sleep(unsigned int seconds) {
-  syscall(SYS_SLEEP, (long)seconds * 1000, 0, 0, 0);
+  ho_syscall4(SYS_SLEEP, (long)seconds * 1000, 0, 0, 0);
   return 0;
 }
 
@@ -485,7 +486,7 @@ int usleep(unsigned int usec) {
   unsigned long ms = (usec + 999) / 1000;
   if (ms == 0 && usec > 0)
     ms = 1;
-  syscall(SYS_SLEEP, (long)ms, 0, 0, 0);
+  ho_syscall4(SYS_SLEEP, (long)ms, 0, 0, 0);
   return 0;
 }
 
@@ -504,7 +505,7 @@ int nanosleep(const struct timespec *req, struct timespec *rem) {
        ((unsigned long)req->tv_nsec + 999999UL) / 1000000UL;
   if (ms == 0)
     ms = 1; /* ensure forward progress for sub-millisecond sleeps */
-  syscall(SYS_SLEEP, (long)ms, 0, 0, 0);
+  ho_syscall4(SYS_SLEEP, (long)ms, 0, 0, 0);
   if (rem != NULL) {
     rem->tv_sec = 0;
     rem->tv_nsec = 0;
@@ -540,30 +541,30 @@ int spawn(const char *filename, const char *args) {
 }
 
 int get_args(char *buf, int size) {
-  return (int)syscall(SYS_GET_ARGS, (long)buf, (long)size, 0, 0);
+  return (int)ho_syscall4(SYS_GET_ARGS, (long)buf, (long)size, 0, 0);
 }
 
 int get_progname(char *buf, int size) {
-  long r = syscall(SYS_GETPROGNAME, (long)buf, (long)size, 0, 0);
+  long r = ho_syscall4(SYS_GETPROGNAME, (long)buf, (long)size, 0, 0);
   if (r < 0) return -1;
   return 0;
 }
 
 int get_argv(int idx, char *buf, int size) {
-  return (int)syscall(SYS_GETARGV, (long)idx, (long)buf, (long)size, 0);
+  return (int)ho_syscall4(SYS_GETARGV, (long)idx, (long)buf, (long)size, 0);
 }
 
 int pipe(int fds[2]) {
-  return (int)errno_ret(syscall(SYS_PIPE, (long)fds, 0, 0, 0));
+  return (int)errno_ret(ho_syscall4(SYS_PIPE, (long)fds, 0, 0, 0));
 }
 
-void *map_fb(void) { return (void *)syscall(SYS_MAP_FB, 0, 0, 0, 0); }
+void *map_fb(void) { return (void *)ho_syscall4(SYS_MAP_FB, 0, 0, 0, 0); }
 
-__attribute__((weak)) void flush_fb(void) { syscall(SYS_FLUSH_FB, 0, 0, 0, 0); }
+__attribute__((weak)) void flush_fb(void) { ho_syscall4(SYS_FLUSH_FB, 0, 0, 0, 0); }
 
 /* GX (docs/graphics-accel.md): damage-rect present (SYS_FLUSH_FB_RECTS). */
 __attribute__((weak)) int flush_fb_rects(const struct fb_rect *rects, int count) {
-  return (int)syscall(SYS_FLUSH_FB_RECTS, (long)rects, (long)count, 0, 0);
+  return (int)ho_syscall4(SYS_FLUSH_FB_RECTS, (long)rects, (long)count, 0, 0);
 }
 
 __attribute__((weak)) int flush_fb_rect(int x, int y, int w, int h) {
@@ -575,20 +576,24 @@ __attribute__((weak)) int flush_fb_rect(int x, int y, int w, int h) {
   return flush_fb_rects(&r, 1);
 }
 
-int get_cpuid(void) { return (int)syscall(SYS_GET_CPUID, 0, 0, 0, 0); }
+int get_cpuid(void) { return (int)ho_syscall4(SYS_GET_CPUID, 0, 0, 0, 0); }
 
 __attribute__((weak)) int get_events(void *buf, int max_events) {
-  return (int)syscall(SYS_GET_EVENTS, (long)buf, (long)max_events, 0, 0);
+  return (int)ho_syscall4(SYS_GET_EVENTS, (long)buf, (long)max_events, 0, 0);
 }
 
-int available(int fd) { return (int)syscall(SYS_AVAILABLE, (long)fd, 0, 0, 0); }
+int available(int fd) { return (int)ho_syscall4(SYS_AVAILABLE, (long)fd, 0, 0, 0); }
 
 __attribute__((weak)) int read_dir(const char *path, int index, struct sys_dirent *ent) {
-  return (int)syscall(SYS_READ_DIR, (long)path, (long)index, (long)ent, 0);
+  return (int)ho_syscall4(SYS_READ_DIR, (long)path, (long)index, (long)ent, 0);
 }
 
-int mkdir(const char *path) {
-  return (int)errno_ret(syscall(SYS_MKDIR, (long)path, 0, 0, 0));
+/* selfhost W2-7: 2-arg POSIX form — declared variadic so legacy 1-arg call
+ * sites and POSIX (path, mode) call sites both compile; the mode is
+ * dropped here (this VFS has no permission bits; the kernel SYS_MKDIR
+ * ignores it too). */
+int mkdir(const char *path, ...) {
+  return (int)errno_ret(ho_syscall4(SYS_MKDIR, (long)path, 0, 0, 0));
 }
 
 void gui_add_menu(int idx, const char* name, const char* items) {
@@ -630,11 +635,11 @@ int parse_args(char *arg_str, char *argv[], int max_args) {
 }
 
 int sysinfo(int cmd, void *buf, int size) {
-  return (int)syscall(SYS_SYSINFO, (long)cmd, (long)buf, (long)size, 0);
+  return (int)ho_syscall4(SYS_SYSINFO, (long)cmd, (long)buf, (long)size, 0);
 }
 
 int unlink(const char *filename) {
-  return (int)errno_ret(syscall(SYS_UNLINK, (long)filename, 0, 0, 0));
+  return (int)errno_ret(ho_syscall4(SYS_UNLINK, (long)filename, 0, 0, 0));
 }
 
 int isatty(int fd) {
@@ -653,25 +658,25 @@ long readlink(const char *path, char *buf, unsigned long bufsiz) {
 }
 
 void _exit(int status) {
-  syscall(SYS_EXIT, (long)status, 0, 0, 0);
+  ho_syscall4(SYS_EXIT, (long)status, 0, 0, 0);
   while (1)
     ; /* the kernel stops us */
 }
 
 int rename(const char *oldname, const char *newname) {
-  return (int)errno_ret(syscall(SYS_RENAME, (long)oldname, (long)newname, 0, 0));
+  return (int)errno_ret(ho_syscall4(SYS_RENAME, (long)oldname, (long)newname, 0, 0));
 }
 
 int mount(const char *source, const char *target) {
-  return (int)errno_ret(syscall(SYS_MOUNT, (long)source, (long)target, 0, 0));
+  return (int)errno_ret(ho_syscall4(SYS_MOUNT, (long)source, (long)target, 0, 0));
 }
 
 int umount(const char *target) {
-  return (int)errno_ret(syscall(SYS_UMOUNT, (long)target, 0, 0, 0));
+  return (int)errno_ret(ho_syscall4(SYS_UMOUNT, (long)target, 0, 0, 0));
 }
 
 char *getcwd(char *buf, size_t size) {
-  long r = syscall(SYS_GETCWD, (long)buf, (long)size, 0, 0);
+  long r = ho_syscall4(SYS_GETCWD, (long)buf, (long)size, 0, 0);
   if (r < 0) {
     errno = (int)(-r);
     return NULL;
@@ -680,7 +685,7 @@ char *getcwd(char *buf, size_t size) {
 }
 
 int chdir(const char *path) {
-  return (int)errno_ret(syscall(SYS_CHDIR, (long)path, 0, 0, 0));
+  return (int)errno_ret(ho_syscall4(SYS_CHDIR, (long)path, 0, 0, 0));
 }
 
 #ifndef HOST_TEST
@@ -688,20 +693,59 @@ int chdir(const char *path) {
  * device-only — host tests use glibc's own versions. */
 
 int getpid(void) {
-  return (int)syscall(SYS_GETPID, 0, 0, 0, 0);
+  return (int)ho_syscall4(SYS_GETPID, 0, 0, 0, 0);
 }
 
 int getppid(void) {
-  return (int)syscall(SYS_GETPPID, 0, 0, 0, 0);
+  return (int)ho_syscall4(SYS_GETPPID, 0, 0, 0, 0);
 }
 
 int waitpid(int pid, int *status, int options) {
-  return (int)errno_ret(syscall(SYS_WAITPID, (long)pid, (long)status,
+  return (int)errno_ret(ho_syscall4(SYS_WAITPID, (long)pid, (long)status,
                                 (long)options, 0));
 }
 
 int wait(int *status) {
   return waitpid(-1, status, 0);
+}
+
+/* selfhost W2-5: wait4 — the waitpid(2) form LLVM's sys::wait4 uses
+ * (Unix/Program.inc:341/418).  The kernel lane adds SYS_WAIT4 in
+ * parallel; until it lands this lane uses the next-free number after
+ * SYS_MAX (89 in src/include/syscall.h).  The integrator reconciles the
+ * number at merge; rusage is accepted but not filled (kernel CPU-time
+ * accounting is W2-17). */
+#ifndef SYS_WAIT4
+#define SYS_WAIT4 90 /* next free after SYS_MAX (89) — see src/include/syscall.h */
+#endif
+int wait4(int pid, int *status, int options, struct rusage *rusage) {
+  (void)rusage;
+  return (int)errno_ret(syscall5(SYS_WAIT4, (long)pid, (long)status,
+                                 (long)options, (long)rusage, 0));
+}
+
+/* selfhost W2-7: link/symlink — this VFS has no hard links and no
+ * symlinks, so both fail with EPERM (Linux's answer for a filesystem that
+ * refuses the operation). */
+int link(const char *oldpath, const char *newpath) {
+  (void)oldpath;
+  (void)newpath;
+  errno = EPERM;
+  return -1;
+}
+
+int symlink(const char *target, const char *linkpath) {
+  (void)target;
+  (void)linkpath;
+  errno = EPERM;
+  return -1;
+}
+
+/* setsid — single-session OS: every process is already its own session
+ * leader, so the call succeeds returning the caller's pid (POSIX
+ * semantics for a fresh session). */
+pid_t setsid(void) {
+  return (pid_t)getpid();
 }
 
 /* P6.3: the environment table + its kernel bridge.  The table lives HERE
@@ -726,7 +770,7 @@ void environ_init(void) {
   extern void *malloc(size_t size) __attribute__((weak));
   extern void free(void *ptr) __attribute__((weak));
   if (environ || !malloc || !free) return;
-  long total = syscall(SYS_GETENV, -1, 0, 0, 0);
+  long total = ho_syscall4(SYS_GETENV, -1, 0, 0, 0);
   if (total < 0) return; /* no env rows; getenv() keeps its blob fallback */
   if (total > HB_ENV_BLOB_MAX / 2) total = HB_ENV_BLOB_MAX / 2; /* >=1 char + NUL */
   char **vec = (char **)malloc(((size_t)total + 1) * sizeof(char *));
@@ -737,7 +781,7 @@ void environ_init(void) {
   for (long i = 0; i < total; i++) {
     int room = HB_ENV_BLOB_MAX - used;
     if (room < 2) break;
-    long len = syscall(SYS_GETENV, i, (long)(blob + used), (long)room, 0);
+    long len = ho_syscall4(SYS_GETENV, i, (long)(blob + used), (long)room, 0);
     if (len < 0) {
       free(vec);
       return;
@@ -759,7 +803,7 @@ int execv(const char *path, char *const argv[]) {
 int execve(const char *path, char *const argv[], char *const envp[]) {
   /* P5 (D3.1): the 3-arg row -- envp marshals to the group env blob
      (NULL = empty environment). */
-  return (int)errno_ret(syscall(SYS_EXEC, (long)path, (long)argv, (long)envp, 0));
+  return (int)errno_ret(ho_syscall4(SYS_EXEC, (long)path, (long)argv, (long)envp, 0));
 }
 
 /* Phase F2.3 + L8 ABI extension (browser.md §6): wall + monotonic clocks.
@@ -779,7 +823,7 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
 /* L8 ABI ext (row 87): raw wrapper, returns 0 or negative errno (the
  * dispatch arm validates clk and the user pointer). */
 static long ho_gettime_raw(int clk, struct timespec *tp) {
-  return syscall(SYS_GETTIME, (long)clk, (long)tp, 0, 0);
+  return ho_syscall4(SYS_GETTIME, (long)clk, (long)tp, 0, 0);
 }
 
 int clock_gettime(clockid_t clk_id, struct timespec *tp) {
@@ -852,7 +896,7 @@ int gettimeofday(struct timeval *tv, void *tz) {
  * pthread_getattr_np() for the main thread (src/libc/src/pthread.c). */
 int ho_get_stack_bounds(uint64_t *base, uint64_t *size) {
   struct hb_stackinfo si;
-  long r = syscall(SYS_GETSTACK, (long)&si, 0, 0, 0);
+  long r = ho_syscall4(SYS_GETSTACK, (long)&si, 0, 0, 0);
   if (r < 0) {
     errno = (int)(-r);
     return -1;

@@ -5,7 +5,7 @@ int main(void);
 
 #ifndef HOST_TEST
 __attribute__((weak))
-long syscall(long num, long a0, long a1, long a2, long a3);
+long syscall(long number, ...); /* weak, unused; variadic per <unistd.h> */
 
 __attribute__((section(".text._start")))
 void _start(void) {

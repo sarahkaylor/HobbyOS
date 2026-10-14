@@ -27,6 +27,8 @@
 #define sigaddset hb_sigaddset
 #define sigdelset hb_sigdelset
 #define sigprocmask hb_sigprocmask
+#define alarm hb_alarm
+#define pthread_sigmask hb_pthread_sigmask
 #endif
 
 #define MAX_SIG 64
@@ -213,5 +215,22 @@ int sigprocmask(int how, const sigset_t *set, sigset_t *oldset) {
   (void)how;
   (void)set;
   if (oldset) sigemptyset(oldset);
+  return 0;
+}
+
+/* pthread_sigmask (selfhost W2-7): the pthread spelling of sigprocmask.
+ * Both are 0-returning no-ops in the P5 disposition model (no per-thread
+ * masks yet); LLVM's Unix/Process.inc:262/277 calls it per thread. */
+int pthread_sigmask(int how, const sigset_t *set, sigset_t *oldset) {
+  return sigprocmask(how, set, oldset);
+}
+
+/* alarm (selfhost W2-4): no alarm-capable timer exists, so there is never
+ * a pending alarm — the honest answer is "0 seconds remained from the
+ * previous alarm" and nothing is scheduled.  The LLVM driver passes
+ * secondsToWait=0 to the Watchdog (Job.cpp:379-385), which never fires for
+ * the in-OS cc1 path. */
+unsigned int alarm(unsigned int seconds) {
+  (void)seconds;
   return 0;
 }
