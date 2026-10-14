@@ -437,6 +437,7 @@ disk: kernel user
 	$(MMD) -i $(OUTIMG) ::/boot
 	$(MMD) -i $(OUTIMG) ::/EFI
 	$(MMD) -i $(OUTIMG) ::/EFI/BOOT
+	$(MMD) -i $(OUTIMG) ::/bin
 	$(MCOPY) -i $(OUTIMG) $(BIN) ::/boot/hobbyos.bin
 	$(MCOPY) -i $(OUTIMG) limine.conf ::/boot/limine.conf
 	$(MCOPY) -i $(OUTIMG) bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
