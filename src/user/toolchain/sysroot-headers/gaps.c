@@ -23,6 +23,7 @@
 #include <errno.h>
 #include <signal.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/resource.h>
 #include <sys/types.h>
@@ -44,6 +45,15 @@ int gethostname(char *name, size_t len) {
 pid_t getsid(pid_t pid) { return pid; }
 
 char *strsignal(int sig) { return strerror(sig); }
+
+/* fseeko()/ftello() -- POSIX-2008 large-file variants libc++21 <fstream>
+ * calls (basic_filebuf::seekoff).  HobbyOS off_t is already 64-bit, so these
+ * delegate to the existing fseek(off_t)/ftell.  L2 work item: graduate into
+ * src/libc. */
+int fseeko(FILE *stream, off_t offset, int whence) {
+  return fseek(stream, offset, whence);
+}
+off_t ftello(FILE *stream) { return (off_t)ftell(stream); }
 
 int bind(int fd, const void *addr, unsigned int addrlen) {
   (void)fd; (void)addr; (void)addrlen;
