@@ -545,8 +545,12 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
   nested.txt` under `thread_create: no free slot (used=63/63)` (the same slot-pressure
   fragility family as the echo token; this run drew the shell_test3 variant instead of
   the echo one). CI VM (`merged-w3`): host rc=0 55 s, unit-arm rc=0 175 s, unit-x64 rc=0
-  118 s (KVM); test-arm running at write time. w3-shell lane steered to drain the whole
-  slot-pressure family (echo + shell_test3 cat), goal = wave with ZERO FAIL tokens.
+  118 s (KVM); test-arm rc=1 by gate math on exactly ONE attributed token — `SHELLTEST
+  WATCHDOG: protocol stalled 25 s` (documented ambient class; the echo and shell_test3
+  variants were absent this run) with `System halt.` present. So both merged-tip runs
+  now bottom out at a single ambient token from the same slot-pressure/timing family.
+  w3-shell lane steered to drain the whole family (echo + shell_test3 cat + watchdog
+  interaction), goal = wave with ZERO FAIL tokens.
 - **2026-10-14 — Post-merge closure re-validation GREEN + first merged-tip battery fallout
   fixed (`1920dc9`).** Closure: re-staged sysroot from merged src, `cmake` reconfigure
   (closure objects are configure-time — see entry below), then llvm-ar / llvm-objcopy /
