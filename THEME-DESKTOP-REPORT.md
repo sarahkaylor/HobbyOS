@@ -80,4 +80,48 @@ src/user/graphics/graphics.c:307:    graphics_draw_hline(x, y + row, w, COLOR(r,
 (only the pre-existing dynamic mechanism calls; no literal palette colors remain)
 
 ### make host_tests
-(pending — appended after run)
+Full run (worktree `wt-desk`, 3rd attempt after test fixes): **GREEN, HOST_TESTS_EXIT=0**.
+No failing checks anywhere (`grep FAILED` → only the pre-existing uutils parity
+`note:` line). Raw direct re-runs of the lane's named desktop tests:
+
+```
+desktop_damage_test_host : 26 checks, 0 failed   ALL DESKTOP DAMAGE TESTS PASSED
+desktop_menu_test_host   : 13 checks, 0 failures
+desktop_drag_test_host   : 35 checks, 0 failed   ALL DESKTOP DRAG TESTS PASSED
+desktop_input_test_host  : 82 checks, 0 failed   ALL DESKTOP INPUT TESTS PASSED
+desktop_term_test_host   : 34 checks, 0 failed   ALL DESKTOP TERMINAL TESTS PASSED
+desktop_pixel_test_host  : 74 checks, 0 failed   ALL DESKTOP PIXEL TESTS PASSED
+graphics_lib_test_host   : 31 run,   0 failed    ALL GRAPHICS TESTS PASSED
+```
+
+## Host tests updated (2 files, both listed per lane rules)
+
+Both fail ONLY because they hard-coded converted palette colors (the brief's
+allowed case). Only the wallpaper/menu regions were touched.
+
+1. **`src/host/desktop_pixel_test.c`** — menu re-stamp golden: the start-menu
+   fill hard-coded the old `C(232, 234, 240)`, now `THEME_SURFACE` (white).
+   Changed to `(uint32_t)THEME_SURFACE` (cast keeps the -Wsign-compare
+   warning away; the test includes desktop.c, which pulls in theme.h).
+2. **`src/host/graphics_lib_test.c`** — wallpaper golden block (~lines 300-390):
+   - `fill_wallpaper()` now passes the new desktop-call colours.
+   - endpoints/band goldens recomputed from the new constants via the exact
+     `graphics_wallpaper_row_color` integer math (denom WP_H−1 = 1053,
+     band gain 12 → dr 3/dg 4/db 12): top (248,249,250), bottom (218,220,224),
+     row 100 (246,247,248), row 370 (240,242,250), row 556 (233,234,238),
+     row WP_H−2 (219,221,225), band peak (240,242,253), fade row (232,234,236),
+     clip row (246,247,248).
+   - The old absolute-blue monotonic checks were tied to the dark gradient's
+     direction (blue rises downward). On the light gradient blue is high at
+     the top, dips, humps at the band, then falls to the taskbar. Replaced
+     with direction-independent invariants of the unchanged band mechanism:
+     the band's blue **delta over the plain ramp** rises monotonically to +12
+     and falls back to 0 at fade_row; below the band blue falls monotonically;
+     global max blue == 253 (the band peak). These still catch clamp/band
+     regressions.
+   - No other `src/host` file was touched.
+
+## Test files touched (summary)
+- `src/user/desktop.c`, `src/user/graphics/graphics.c` (the conversion)
+- `src/host/desktop_pixel_test.c`, `src/host/graphics_lib_test.c` (palette goldens)
+

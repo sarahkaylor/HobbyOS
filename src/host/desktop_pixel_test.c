@@ -635,7 +635,7 @@ static void test_menu_overlay_protection(void) {
   w->pix_restamp = 1;
   wm_pixel_service_frame();
   check(restamp_flushes >= 1, "an app flush pushes a re-stamp flush");
-  check(graphics_get_pixel(200, mv_top + 60) == C(232, 234, 240),
+  check(graphics_get_pixel(200, mv_top + 60) == (uint32_t)THEME_SURFACE,
         "the menu is re-stamped over the app's pixels");
   check(graphics_get_pixel(10, 300) == MARKER,
         "the re-stamp is clipped to the menu rectangle");
