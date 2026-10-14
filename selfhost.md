@@ -590,6 +590,14 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-14 (~20:45) — USER PRIORITY CHANGE: pause the acceptance re-cut; raise
+  build-velocity first — FAT timestamps (incremental in-OS make) + parallel in-OS builds
+  (`-j`) — with dirent continuing; all other session issues parked in `todo.md` (new,
+  committed).** Wave 8 is now: **w9-dirent** (dirent-writer fix, in flight) +
+  **w10-fstime** (FAT timestamps → incremental make; failing-first in-OS "second make =
+  up to date" acceptance) + **w11-makej** (MAKE.BIN -j8 viability/fix + measured speedup).
+  The acceptance RC re-cut (todo §15) is sequenced AFTER these merges.
+
 - **2026-10-14 — Wave 7 (w7-accept) merged (`4f96d0f`): S4/S5 PASS + the last red
   root-caused.** (A) **The w6 in-OS-assembled OUT.IMG (sha `7e24b4ca…`) BOOTS standalone**
   (6.5 s, `Mode: DESKTOP`) and **launches the in-OS-built OUTPROG.BIN** from its menu
