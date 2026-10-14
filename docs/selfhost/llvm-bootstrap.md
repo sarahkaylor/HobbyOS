@@ -140,10 +140,33 @@ Tablegen choice: `LLVM_NATIVE_TOOL_DIR` is the canonical mechanism
 
 ## 7. Configure spike results
 
-See `docs/selfhost/lanes/l1-configure-1.log` (committed). First real
-errors and resolutions are logged there verbatim; any LLVM source patch that
-becomes necessary is recorded as a blocker in the lane report (none expected
-in v1 — build-config only, AD-3).
+See `docs/selfhost/lanes/l1-configure-1.log` (committed; use `git add -f` —
+`*.log` is globally gitignored).
+
+**Outcome: configure GREEN** (exit 0, build.ninja written) against the
+staged sysroot with the L1 option set. The cross-build build-system approach
+is proven at the configure level; the first real blockers were logged
+verbatim and iterated in bounded rounds (spike runs 1-18):
+
+| run | blocker (verbatim) | resolution |
+|---|---|---|
+| 1 | `${CXXFLAGS}` carried `-isystem …;-isystem …` (CMake LIST `;` into ninja) → `/bin/sh: 1: -isystem: not found` | `list(JOIN … " ")` in toolchain file (WebKit-fork trap) |
+| 1 | sysroot path resolved one level too high (`/l1/src/obj/…`) | toolchain file repo-root = 4 levels up |
+| 2 | `HandleLLVMOptions.cmake:245` `Unable to determine platform` (CMake 4.x sets `UNIX` only in `Platform/<os>-Initialize` modules) | committed `Platform/HobbyOS.cmake` module (UNIX=1; `modules/Platform/`) |
+| 4 | `LINKER_TYPE 'LLD' is unknown … by this toolchain` | drop `CMAKE_LINKER_TYPE LLD` (driver `-fuse-ld=lld` suffices) |
+| build | `llvm/ADT/bit.h:53` `machine/endian.h not found` (freestanding triple) | compat `sysroot-headers/machine/endian.h` |
+| build | `ExitCodes.h:30` `Exit code EX_IOERR not available` (no `<sysexits.h>`) | compat `sysroot-headers/sysexits.h` (+`HAVE_SYSEXITS_H` probe via fresh dir) |
+| build | `dlfcn.h`, `sys/resource.h`, `sys/statvfs.h`, `sys/utsname.h` not found; `Dl_info`, `SA_ONSTACK`/`SA_NODEFER`, `_POSIX_ARG_MAX`, `PATH_MAX`, `MNT_LOCAL` undeclared | compat headers in `sysroot-headers/` |
+| build | missing POSIX function *declarations* compiled into LLVMSupport unconditionally (alarm, gethostname, getsid, fork, setsid, wait4, pthread_sigmask, _Exit, strsignal, socket/bind/listen/accept/connect/pipe, fchown/fchmod/mkdir/symlink/link, getrusage, uname, statvfs, dladdr) | `sysroot-headers/_missing.h` (force-included via `-include`, build-config only) |
+| build | same list's **bodies** absent from HobbyOS libc | `sysroot-headers/gaps.c` stub object in the link closure (WebKit-fork gaps.c precedent); every stub is a documented L2 work item |
+| build | `Process.inc:64` `static assertion failed: sizeof(int) >= sizeof(long): Process::Pid should be big enough to store pid_t` | **NOT resolvable in-lane**: HobbyOS `sys/types.h` defines `typedef long pid_t` (8 B on aarch64) vs LLVM `Process::Pid = int32_t` (Process.h:46); POSIX/Linux uses `int`. No LLVM source patch, no src/libc edit (lane rules). **Recorded as the spike's first real blocker — L2 decides: change HobbyOS pid_t to int (Linux-parity) or carry an LLVM build patch.** |
+
+The spike stops at this committed checkpoint (211/564 TUs compiled;
+LLVMSupport is blocked on the pid_t assert). Every earlier blocker was a
+toolchain-file or sysroot-gap fix in-lane; none needed an LLVM source patch
+(AD-3 holds). Wave 2 resumes from here after L2 resolves pid_t (and lands
+the B-section libc functions, which the gaps stubs currently satisfy only
+for the toolchain's own link closure).
 
 ## 8. Dependency surface (feeds L2)
 

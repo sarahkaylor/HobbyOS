@@ -77,3 +77,41 @@ strsignal  1  llvm/lib/Support/Unix/Program.inc:492
 # llvm/include/llvm/Config/{llvm-config.h,config.h}.cmake.in + llvm/cmake/config-ix.cmake
 # gate each. With the L1 option set (below) LLVM targets the generic POSIX path
 # (HAVE_* POSIX 2008 entries set per the probes CMake runs at configure time on the HOST).
+
+## D. Spike-surfaced sysroot gaps resolved in-lane as compile-order compat
+# (all in src/user/toolchain/sysroot-headers/: machine/endian.h, sysexits.h,
+# dlfcn.h, sys/resource.h, sys/statvfs.h, sys/utsname.h, _missing.h,
+# gaps.c).  The gaps.c BODIES are STUBS (L2-owned work items; AD-3
+# build-config only, no LLVM source patch).
+alarm  Unix/Watchdog.inc
+gethostname  Unix/Path.inc:308 / LockFileManager.cpp:101
+getsid  LockFileManager.cpp:120
+strsignal  Unix/Program.inc:492
+socket  raw_socket_stream.cpp:77
+bind  raw_socket_stream.cpp:169
+listen  raw_socket_stream.cpp:177
+accept  raw_socket_stream.cpp:283
+connect  raw_socket_stream.cpp:94
+pipe  raw_socket_stream.cpp:186
+fork  Unix/Program.inc:261
+setsid  Unix/Program.inc:297
+wait4  Unix/Program.inc:339/413
+pthread_sigmask  Unix/Process.inc:262/277
+_Exit  Unix/Process.inc:433
+fchown  Unix/Path.inc:1339
+fchmod  Unix/Path.inc:1331
+mkdir  Unix/Path.inc:416
+symlink  Unix/Path.inc:433
+link  Unix/Path.inc:446
+getrusage  Unix/Process.inc:140 (via getrlimit path)
+uname  TargetParser/Unix/Host.inc:22
+statvfs/fstatvfs  Unix/Path.inc:74
+dladdr  Unix/Signals.inc:858/876
+
+## E. REMAINING HARD BLOCKER (wave-2 gate, not resolvable in-lane)
+# Process.inc:64 static assertion failed: sizeof(int) >= sizeof(long):
+#   Process::Pid should be big enough to store pid_t.
+# HobbyOS src/libc/include/sys/types.h:25 typedef long pid_t (8 B on
+# aarch64) vs llvm/include/llvm/Support/Process.h:46 using Pid = int32_t.
+# POSIX/Linux pid_t is int. L2 decision: change HobbyOS pid_t -> int, or
+# LLVM build patch (violates AD-3 no-source-patch -- needs plan consent).
