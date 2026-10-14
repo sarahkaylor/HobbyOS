@@ -1058,11 +1058,28 @@ static int pl_user_ok(struct process *p, uint64_t addr, uint64_t len,
 static int pl_strcpy(struct process *p, const char *src, char *dst, int cap) {
   if (!src || cap <= 1)
     return 0;
-  if (!pl_user_ok(p, (uint64_t)src, (uint64_t)cap, 0))
-    return 0;
   int i = 0;
-  for (; i < cap - 1 && src[i]; i++)
-    dst[i] = src[i];
+  for (;;) {
+    if (i >= cap - 1)
+      break;
+    /* Validate + materialize the page holding src[i] before the raw load
+       below (a raw user deref must never fault the kernel).  Deliberately
+       NOT the whole cap up front: a short string that starts near the TOP
+       of a mapped region (a user-stack argv element can sit ~0x240 below
+       the stack top, and the w6-run 64->4096 cap bump made the old
+       pl_user_ok(src, cap) reach past the region end) was judged
+       unreadable and silently dropped -> the exec'd program lost that
+       argument (w8-torture: TORTURE exec child argv[2] dropped, child
+       exits the 7-default instead of 10..17).  Per-page validation reads
+       exactly the bytes copied. */
+    if (!pl_user_ok(p, ((uint64_t)&src[i]) & ~0xFFFULL, 1, 0))
+      return 0;
+    char c = src[i];
+    dst[i] = c;
+    if (c == 0)
+      return 1;
+    i++;
+  }
   dst[i] = '\0';
   return 1;
 }

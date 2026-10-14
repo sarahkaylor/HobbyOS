@@ -1403,14 +1403,27 @@ static void sys_wait4(struct trap_frame *tf) {
  * program_loader.c; here we only marshal the user path/argv.
  * P2.5 (S5 flip): v2-aware via sys_user_range_ok (the old window test
  * rejected every v2 string pointer). */
+/* Copy a NUL-terminated user string into kernel memory with full bounds
+ * checking. Returns 1 on success (dst NUL-terminated), 0 on bad ptr.
+ * w8-torture: validate PER PAGE, not the whole cap up front — a short
+ * string near the TOP of a mapped region was dropped wholesale once the
+ * w6-run cap bump made the full-range check reach past the region end
+ * (mirror of pl_strcpy in program_loader.c + arch/arm/trap.c). */
 static int u_strcpy(const char *src, char *dst, int cap) {
   if (!src || cap <= 1)
     return 0;
-  if (!sys_user_range_ok((uint64_t)src, (uint64_t)cap))
-    return 0;
   int i = 0;
-  for (; i < cap - 1 && src[i]; i++)
-    dst[i] = src[i];
+  for (;;) {
+    if (i >= cap - 1)
+      break;
+    if (!sys_user_range_ok(((uint64_t)&src[i]) & ~0xFFFULL, 1))
+      return 0;
+    char c = src[i];
+    dst[i] = c;
+    if (c == 0)
+      return 1;
+    i++;
+  }
   dst[i] = '\0';
   return 1;
 }
