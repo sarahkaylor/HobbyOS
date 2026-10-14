@@ -1,0 +1,196 @@
+# LLVM/Clang cross-build recipe for the HobbyOS toolchain (lane L1)
+
+Status: **wave-1 spike record** — vendor scaffold + toolchain file + configure
+spike against the HobbyOS sysroot. Written 2026-10-14 by lane L1
+(`docs/selfhost/lanes/l1-llvm-bootstrap.md`). Consumed by wave-2 build lanes.
+
+## 1. Goal
+
+Cross-build `clang`, `lld`, `llvm-ar`, `llvm-objcopy` for
+`aarch64-none-elf` (the HobbyOS userland target) on the workstation, from the
+pinned llvm-project 21.1.8 monorepo, so wave 2 can install them to
+`/TOOLS/*.BIN` and boot the OS on the in-OS toolchain (selfhost.md M2).
+
+Pins / ADs: selfhost.md §2 (container sha `4633a23617fa31a…`),
+AD-1 (plain userland binaries vs the repo sysroot), AD-3 (vendor =
+`third_party/llvm-21.1.8/`), AD-4 (install layout), AD-5 (hermetic builtin
+headers), AD-6 (cc1), AD-10 (no exceptions/RTTI).
+
+## 2. Reference reads
+
+- WebKit-port toolchain precedent: `~/webkit-hobbyos/HobbyOS/toolchain-hobbyos.cmake`
+  + `docs/toolchain-sysroot.md` — the in-house recipe for cross-building C++23
+  against this sysroot. Reused: `CMAKE_SYSTEM_NAME=HobbyOS`,
+  `CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY`, clang as both drivers,
+  link closure in `CMAKE_CXX_STANDARD_LIBRARIES`, `-Wl,--start-group`.
+- `third_party/libcxx-21.1.8/build-target.sh` — how libc++ 21.1.8 was built
+  for the OS (flags mirror USER_CFLAGS; `-fno-exceptions -fno-rtti`).
+- Repo `Makefile` lines 140-260 — per-arch flag blocks
+  (`USER_CFLAGS` arm/intel).
+- Upstream `clang/docs/CrossCompilation.rst` and
+  `llvm/docs/HowToCrossCompileLLVM.rst` — single-stage cross build with an
+  existing clang as host compiler.
+
+## 3. Vendor scaffold (`third_party/llvm-21.1.8/`)
+
+Committed (integrity model identical to `third_party/libcxx-21.1.8/`):
+`fetch.sh`, `container.sha256`, `anchors.sha256`, `README.md`.
+Container + extraction + `.fetched-ok` gitignored (block pre-seeded on main).
+
+- Container **reused** from the libcxx vendor (no duplicate 152 MB download);
+  `fetch.sh` re-verifies the sha before extraction.
+- Extracted: `llvm/`, `clang/`, `lld/`, `cmake/`, `third-party/` (siphash —
+  required via `LLVM_THIRD_PARTY_DIR`; discovered by the first native build
+  attempt), `LICENSE.TXT`.
+- Extraction: 1.7 GB / 107,622 files, full (no test-tree trim — under the
+  ~3 GB threshold).
+- `.fetched-ok` marker + anchor verification drive the early-exit.
+
+## 4. Staged sysroot
+
+Built the repo's own artifacts and staged a scratch sysroot (gitignored
+`obj/`):
+
+```
+make obj/arm/libc.a obj/arm/libcxx.a            # Makefile:1011 / :905
+mkdir -p obj/selfhost/sysroot/{include,lib}
+cp -r src/libc/include  obj/selfhost/sysroot/include/libc-include
+cp -r src/include       obj/selfhost/sysroot/include/kernel-include
+cp -r src/user_include  obj/selfhost/sysroot/include/user-include
+cp -r <clang-resource>/include  obj/selfhost/sysroot/include/builtins
+cp obj/arm/{crt0.o,libc.a,libcxx.a}  obj/selfhost/sysroot/lib/
+```
+
+Sizes (2026-10-14): `crt0.o` 7.8 KB, `libc.a` 1.1 MB, `libcxx.a` 8.7 MB,
+builtins include 15 MB, total sysroot 26 MB. `src/user/linker.ld` is used
+directly from the repo (linker script, USER_IMG_BASE at 64 GiB).
+
+## 5. Toolchain file
+
+`src/user/toolchain/cmake/toolchain-llvm-hobbyos.cmake` (port glue lives in
+`src/user/` per the publication rule; AD-3):
+
+- `CMAKE_SYSTEM_NAME=HobbyOS`, `CMAKE_SYSTEM_PROCESSOR=aarch64`,
+  triple `aarch64-none-elf`, compiler = host `clang` (21.1.8) for both C and C++.
+- `-ffreestanding -mcpu=cortex-a53 -fuse-ld=lld`.
+- Hermetic includes: `-nostdinc` + `-isystem <host clang resource>/include`
+  (builtins staged under the sysroot for the OS-side install; the host
+  resource dir is used at cross-build time) + `-isystem` of the three sysroot
+  header trees.
+- C++: `-nostdinc++` + `-I <libcxx have/include>` **as `-I`, not `-isystem`** —
+  -isystem sorts after clang's builtin dir and libc++'s `<stddef.h>`
+  self-check fails (verified in the spike).
+- Link: `-nostdlib -nostartfiles -Wl,-T,src/user/linker.ld -Wl,-e,_start`;
+  `CMAKE_CXX_STANDARD_LIBRARIES` = `-Wl,--start-group crt0.o libcxx.a libc.a
+  -Wl,--end-group` (mutual libc.a↔libcxx.a refs, P3 closure).
+- `CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY` (no target code may run at
+  configure time).
+- `LLVM_HOST_TRIPLE`/`CMAKE_{C,CXX}_COMPILER_TARGET` = `aarch64-none-elf`.
+
+Spike probe (2026-10-14): a C++17 TU using `std::string` + `std::vector`
+compiled and linked statically with these exact flags → aarch64 ELF
+(**probe2.elf, text 127,752 / data 292 / bss 6,336**), proves the include
+order, the sysroot, and the link closure all work before LLVM itself is fed
+through. `main` must be `extern "C"` (freestanding clang mangles it — known
+WK-1 issue, handled in the WebKit recipe).
+
+## 6. CMake configure recipe (wave-2 starting point)
+
+Native (host) tablegen first — the target binaries cannot run on the host
+(no qemu-user for `aarch64-none-elf`), so `llvm-tblgen`/`clang-tblgen` are
+host-built from the same tree:
+
+```
+cmake -G Ninja -S <src>/llvm -B obj/selfhost/tblgen-native \
+  -DCMAKE_BUILD_TYPE=Release -DLLVM_TARGETS_TO_BUILD=AArch64 \
+  -DLLVM_ENABLE_PROJECTS=clang \
+  -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF \
+  -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_DOCS=OFF \
+  -DLLVM_ENABLE_TERMINFO=OFF -DLLVM_ENABLE_LIBXML2=OFF \
+  -DLLVM_ENABLE_LIBEDIT=OFF -DLLVM_ENABLE_ZLIB=OFF \
+  -DLLVM_ENABLE_ZSTD=OFF -DLLVM_ENABLE_CURL=OFF
+ninja -C obj/selfhost/tblgen-native llvm-tblgen clang-tblgen
+```
+
+Cross configure:
+
+```
+cmake -G Ninja -S <src>/llvm -B obj/selfhost/llvm-build \
+  -DCMAKE_TOOLCHAIN_FILE=<repo>/src/user/toolchain/cmake/toolchain-llvm-hobbyos.cmake \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DLLVM_TARGETS_TO_BUILD=AArch64 \
+  -DLLVM_ENABLE_PROJECTS="clang;lld" \
+  -DLLVM_ENABLE_EH=OFF -DLLVM_ENABLE_RTTI=OFF \
+  -DBUILD_SHARED_LIBS=OFF -DLLVM_ENABLE_ASSERTIONS=OFF \
+  -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF \
+  -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_DOCS=OFF \
+  -DLLVM_ENABLE_TERMINFO=OFF -DLLVM_ENABLE_LIBXML2=OFF \
+  -DLLVM_ENABLE_LIBEDIT=OFF -DLLVM_ENABLE_ZLIB=OFF \
+  -DLLVM_ENABLE_ZSTD=OFF -DLLVM_ENABLE_CURL=OFF -DLLVM_ENABLE_LIBPFM=OFF \
+  -DLLVM_TABLEGEN=<repo>/obj/selfhost/tblgen-native/bin/llvm-tblgen \
+  -DCLANG_TABLEGEN=<repo>/obj/selfhost/tblgen-native/bin/clang-tblgen \
+  -DLLVM_NATIVE_TOOL_DIR=<repo>/obj/selfhost/tblgen-native/bin \
+  -DLLVM_DISTRIBUTION_COMPONENTS="clang;lld;llvm-ar;llvm-objcopy;clang-resource-headers"
+ninja -C obj/selfhost/llvm-build install-distribution   # with DESTDIR staging
+```
+
+Tablegen choice: `LLVM_NATIVE_TOOL_DIR` is the canonical mechanism
+(`AddLLVM.cmake:2638`, `TableGen.cmake:181`); explicit `-DLLVM_TABLEGEN` /
+`-DCLANG_TABLEGEN` are belt-and-braces and match the same native build.
+
+## 7. Configure spike results
+
+See `docs/selfhost/lanes/l1-configure-1.log` (committed). First real
+errors and resolutions are logged there verbatim; any LLVM source patch that
+becomes necessary is recorded as a blocker in the lane report (none expected
+in v1 — build-config only, AD-3).
+
+## 8. Dependency surface (feeds L2)
+
+`docs/selfhost/lanes/l1-dep-surface.txt` — the OS-facing call surface of
+`llvm/lib/Support/Unix/*.inc`, `llvm/lib/Support/{Path,Program,Memory,Signals}.cpp`,
+`clang/lib/Driver/*.cpp`, `lld/Common/*.cpp`.
+
+- **A. Calls declared in the HobbyOS headers: 53** (strlen 20, close 16,
+  getenv 10, strcmp 9, free 9, realpath 8, open/read/memset/signal/sigaction
+  5 each, …) — these must link from the staged sysroot.
+- **B. POSIX/glibc calls NOT declared by the HobbyOS headers (link
+  blockers): 6**:
+  - `alarm` (5; `Unix/Program.inc:406`)
+  - `getrlimit` / `setrlimit` (3 each; `Unix/Process.inc:140/160`)
+  - `syscall` (3; `Unix/Signals.inc:426`)
+  - `ioctl` (1; `Unix/Process.inc:325`)
+  - `strsignal` (1; `Unix/Program.inc:492`)
+
+  These make the L2 work-item list concrete. The build stops linking at the
+  first open-archive member needing one; stubbing (return `-1`/`ENOSYS`
+  where legal) vs real syscalls is L2's call.
+- **C. HAVE_* config surface**: with the L1 option set, configure compiles
+  the generic POSIX path; `llvm/include/llvm/Config/*.cmake.in` +
+  `llvm/cmake/config-ix.cmake` gate the branches.
+
+Regeneration: the generator is embedded in the lane report; re-run against a
+re-extracted tree after any LLVM version pin change.
+
+## 9. Sizes / estimates (wave-2 full build)
+
+- Host: 64 cores, 251 GB RAM, ~299 GB free. Native tablegen-only build =
+  minutes. Full `clang`+`lld` cross build ≈ **hours** (LLVM Release with only
+  the AArch64 backend; ~6M LOC monorepo). Wave 2 continues in a fresh lane if
+  this lane's budget runs dry — the recipe above is the handoff.
+- Expected installed sizes (guesses to be replaced by `llvm-size`/`du` at
+  M2): `clang` ≈ 70-100 MB static ELF, `lld` ≈ 30-50 MB, `llvm-ar`/`llvm-objcopy`
+  ≈ 5-15 MB each, all stripped + flat `.bin`'d (`objcopy -O binary`) for the
+  FAT16 install. `clang-resource-headers` ≈ 10-20 MB (curated to 8.3-safe
+  names, F8).
+- Wave-2 exact targets: `ninja clang lld llvm-ar llvm-objcopy` then
+  `install-distribution`.
+
+## 10. Known open items (wave 2 / L2)
+
+- `main` mangling under `-ffreestanding` (applies to LLVM's own tools'
+  `main` — same WK-1 fix shape if the linker objects).
+- Whether clang's resource-dir *relative* discovery works in-OS (AD-5 says
+  do not rely on it; `-isystem /TOOLS/RESDIR/include` explicitly).
+- Builtin-header minimum set for `--target=aarch64-none-elf` must be curated
+  (8.3 names, F8) at M2.

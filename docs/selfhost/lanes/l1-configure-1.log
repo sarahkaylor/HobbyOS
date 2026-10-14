@@ -1,0 +1,1815 @@
+=== L1 configure spike, run 1: Wed Oct 14 02:48:09 UTC 2026 ===
+cmd: cmake -G Ninja -S <src>/llvm -B obj/selfhost/llvm-build <toolchain flags>
+
+-- The C compiler identification is Clang 21.1.8
+-- The CXX compiler identification is Clang 21.1.8
+-- The ASM compiler identification is Clang with GNU-like command-line
+-- Found assembler: /usr/bin/clang
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Detecting C compiler ABI info
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Detecting C compiler ABI info - failed
+-- Check for working C compiler: /usr/bin/clang
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Check for working C compiler: /usr/bin/clang - broken
+CMake Error at /usr/share/cmake-4.2/Modules/CMakeTestCCompiler.cmake:67 (message):
+  The C compiler
+
+    "/usr/bin/clang"
+
+  is not able to compile a simple test program.
+
+  It fails with the following output:
+
+    Change Dir: '/home/sarah/hobbyos-selfhost-lanes/l1/obj/selfhost/llvm-build/CMakeFiles/CMakeScratch/TryCompile-p7Uaq9'
+    
+    Run Build Command(s): /usr/bin/ninja -v cmTC_062c2
+    [1/2] /usr/bin/clang --target=aarch64-none-elf   --target=aarch64-none-elf -ffreestanding -fuse-ld=lld -mcpu=cortex-a53 -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -isystem /home/sarah/hobbyos-selfhost-lanes/l1/src/obj/selfhost/sysroot/include/libc-include;-isystem /home/sarah/hobbyos-selfhost-lanes/l1/src/obj/selfhost/sysroot/include/kernel-include;-isystem /home/sarah/hobbyos-selfhost-lanes/l1/src/obj/selfhost/sysroot/include/user-include --target=aarch64-none-elf -ffreestanding -fuse-ld=lld -mcpu=cortex-a53 -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -isystem /home/sarah/hobbyos-selfhost-lanes/l1/src/obj/selfhost/sysroot/include/libc-include;-isystem /home/sarah/hobbyos-selfhost-lanes/l1/src/obj/selfhost/sysroot/include/kernel-include;-isystem /home/sarah/hobbyos-selfhost-lanes/l1/src/obj/selfhost/sysroot/include/user-include -MD -MT CMakeFiles/cmTC_062c2.dir/testCCompiler.c.obj -MF CMakeFiles/cmTC_062c2.dir/testCCompiler.c.obj.d -o CMakeFiles/cmTC_062c2.dir/testCCompiler.c.obj -c /home/sarah/hobbyos-selfhost-lanes/l1/obj/selfhost/llvm-build/CMakeFiles/CMakeScratch/TryCompile-p7Uaq9/testCCompiler.c
+    FAILED: [code=127] CMakeFiles/cmTC_062c2.dir/testCCompiler.c.obj 
+    /usr/bin/clang --target=aarch64-none-elf   --target=aarch64-none-elf -ffreestanding -fuse-ld=lld -mcpu=cortex-a53 -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -isystem /home/sarah/hobbyos-selfhost-lanes/l1/src/obj/selfhost/sysroot/include/libc-include;-isystem /home/sarah/hobbyos-selfhost-lanes/l1/src/obj/selfhost/sysroot/include/kernel-include;-isystem /home/sarah/hobbyos-selfhost-lanes/l1/src/obj/selfhost/sysroot/include/user-include --target=aarch64-none-elf -ffreestanding -fuse-ld=lld -mcpu=cortex-a53 -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -isystem /home/sarah/hobbyos-selfhost-lanes/l1/src/obj/selfhost/sysroot/include/libc-include;-isystem /home/sarah/hobbyos-selfhost-lanes/l1/src/obj/selfhost/sysroot/include/kernel-include;-isystem /home/sarah/hobbyos-selfhost-lanes/l1/src/obj/selfhost/sysroot/include/user-include -MD -MT CMakeFiles/cmTC_062c2.dir/testCCompiler.c.obj -MF CMakeFiles/cmTC_062c2.dir/testCCompiler.c.obj.d -o CMakeFiles/cmTC_062c2.dir/testCCompiler.c.obj -c /home/sarah/hobbyos-selfhost-lanes/l1/obj/selfhost/llvm-build/CMakeFiles/CMakeScratch/TryCompile-p7Uaq9/testCCompiler.c
+    clang: error: no input files
+    /bin/sh: 1: -isystem: not found
+    /bin/sh: 1: -isystem: not found
+    /bin/sh: 1: -isystem: not found
+    /bin/sh: 1: -isystem: not found
+    ninja: build stopped: subcommand failed.
+    
+    
+
+
+
+  CMake will not be able to correctly generate this project.
+Call Stack (most recent call first):
+  CMakeLists.txt:46 (project)
+
+
+-- Configuring incomplete, errors occurred!
+
+=== configure exit: 0 ===
+-- The C compiler identification is Clang 21.1.8
+-- The CXX compiler identification is Clang 21.1.8
+-- The ASM compiler identification is Clang with GNU-like command-line
+-- Found assembler: /usr/bin/clang
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Detecting C compiler ABI info
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/clang - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/clang - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- bolt project is disabled
+-- clang project is enabled
+-- clang-tools-extra project is disabled
+-- compiler-rt project is disabled
+-- cross-project-tests project is disabled
+-- libclc project is disabled
+-- lld project is enabled
+-- lldb project is disabled
+-- mlir project is disabled
+-- openmp project is disabled
+-- polly project is disabled
+-- flang project is disabled
+-- libc project is disabled
+-- Found Python3: /home/sarah/.hermes/tools/python-3.14.7+20260901-linux-x64/bin/python3 (found suitable version "3.14.7", minimum required is "3.0") found components: Interpreter
+-- Performing Test LLVM_LIBSTDCXX_MIN
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test LLVM_LIBSTDCXX_MIN - Success
+-- Performing Test LLVM_LIBSTDCXX_SOFT_ERROR
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test LLVM_LIBSTDCXX_SOFT_ERROR - Success
+-- Looking for mach/mach.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for mach/mach.h - not found
+-- Looking for malloc/malloc.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for malloc/malloc.h - not found
+-- Looking for pthread.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pthread.h - found
+-- Looking for sys/mman.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for sys/mman.h - found
+-- Looking for sysexits.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for sysexits.h - not found
+-- Looking for unistd.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for unistd.h - found
+-- Looking for sys/ioctl.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for sys/ioctl.h - not found
+-- Looking for __GLIBC__
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for __GLIBC__ - not found
+-- Looking for valgrind/valgrind.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for valgrind/valgrind.h - not found
+-- Looking for FE_ALL_EXCEPT
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for FE_ALL_EXCEPT - not found
+-- Looking for FE_INEXACT
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for FE_INEXACT - not found
+-- Performing Test HAVE_BUILTIN_THREAD_POINTER
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test HAVE_BUILTIN_THREAD_POINTER - Success
+-- Looking for CrashReporterClient.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for CrashReporterClient.h - not found
+-- Looking for pthread_create in pthread
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pthread_create in pthread - found
+-- Looking for pthread_rwlock_init in pthread
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pthread_rwlock_init in pthread - found
+-- Looking for pthread_mutex_lock in pthread
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pthread_mutex_lock in pthread - found
+-- Looking for dlopen in dl
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for dlopen in dl - found
+-- Looking for shm_open in rt
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for shm_open in rt - found
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Failed
+-- Looking for pthread_create in pthreads
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pthread_create in pthreads - found
+-- Found Threads: TRUE
+-- Looking for arc4random
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for arc4random - not found
+-- Looking for backtrace
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for backtrace - not found
+-- Could NOT find Backtrace (missing: Backtrace_LIBRARY Backtrace_INCLUDE_DIR) 
+-- Performing Test C_SUPPORTS_WERROR_UNGUARDED_AVAILABILITY_NEW
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test C_SUPPORTS_WERROR_UNGUARDED_AVAILABILITY_NEW - Success
+-- Looking for __register_frame
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for __register_frame - found
+-- Looking for __deregister_frame
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for __deregister_frame - found
+-- Looking for __unw_add_dynamic_fde
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for __unw_add_dynamic_fde - found
+-- Looking for _Unwind_Backtrace
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for _Unwind_Backtrace - found
+-- Looking for getpagesize
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for getpagesize - found
+-- Looking for sysconf
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for sysconf - found
+-- Looking for getrusage
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for getrusage - not found
+-- Looking for isatty
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for isatty - found
+-- Looking for futimens
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for futimens - found
+-- Looking for futimes
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for futimes - not found
+-- Looking for getauxval
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for getauxval - not found
+-- Looking for sigaltstack
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for sigaltstack - not found
+-- Looking for mallctl
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for mallctl - not found
+-- Looking for mallinfo
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for mallinfo - not found
+-- Looking for mallinfo2
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for mallinfo2 - not found
+-- Looking for malloc_zone_statistics
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for malloc_zone_statistics - not found
+-- Looking for posix_spawn
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for posix_spawn - not found
+-- Looking for pread
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pread - not found
+-- Looking for sbrk
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for sbrk - found
+-- Looking for strerror_r
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for strerror_r - found
+-- Looking for strerror_s
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for strerror_s - not found
+-- Looking for setenv
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for setenv - found
+-- Performing Test HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC - Failed
+-- Performing Test HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC - Failed
+-- Looking for pthread_getname_np
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pthread_getname_np - not found
+-- Looking for pthread_setname_np
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pthread_setname_np - not found
+-- Looking for pthread_get_name_np
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pthread_get_name_np - not found
+-- Looking for pthread_set_name_np
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pthread_set_name_np - not found
+-- Looking for dlopen
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for dlopen - not found
+-- Looking for proc_pid_rusage
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for proc_pid_rusage - not found
+-- Performing Test HAVE_CXX_ATOMICS_WITHOUT_LIB
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test HAVE_CXX_ATOMICS_WITHOUT_LIB - Success
+-- Performing Test HAVE_CXX_ATOMICS64_WITHOUT_LIB
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test HAVE_CXX_ATOMICS64_WITHOUT_LIB - Success
+-- Performing Test LLVM_HAS_ATOMICS
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test LLVM_HAS_ATOMICS - Success
+-- LLVM host triple: x86_64-unknown-linux-gnu
+-- Native target X86 is not selected; lli will not JIT code
+-- Threads enabled.
+-- Doxygen disabled.
+-- Ninja version: 1.13.2
+-- Could NOT find OCaml (missing: OCAMLFIND OCAML_VERSION OCAML_STDLIB_PATH) 
+-- Could NOT find OCaml (missing: OCAMLFIND OCAML_VERSION OCAML_STDLIB_PATH) 
+-- OCaml bindings disabled.
+-- Could NOT find Python module pygments
+-- Could NOT find Python module pygments.lexers.c_cpp
+-- Could NOT find Python module yaml
+-- LLVM default target triple: 
+CMake Error at cmake/modules/HandleLLVMOptions.cmake:245 (MESSAGE):
+  Unable to determine platform
+Call Stack (most recent call first):
+  CMakeLists.txt:1086 (include)
+
+
+-- Performing Test C_SUPPORTS_FPIC
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test C_SUPPORTS_FPIC - Failed
+-- Performing Test CXX_SUPPORTS_FPIC
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test CXX_SUPPORTS_FPIC - Failed
+CMake Warning at cmake/modules/HandleLLVMOptions.cmake:377 (message):
+  -fPIC is not supported.
+Call Stack (most recent call first):
+  cmake/modules/HandleLLVMOptions.cmake:437 (add_flag_or_print_warning)
+  CMakeLists.txt:1086 (include)
+
+
+-- Performing Test C_SUPPORTS_FNO_SEMANTIC_INTERPOSITION
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test C_SUPPORTS_FNO_SEMANTIC_INTERPOSITION - Failed
+-- Performing Test CXX_SUPPORTS_FNO_SEMANTIC_INTERPOSITION
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test CXX_SUPPORTS_FNO_SEMANTIC_INTERPOSITION - Failed
+-- Performing Test SUPPORTS_FVISIBILITY_INLINES_HIDDEN_FLAG
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test SUPPORTS_FVISIBILITY_INLINES_HIDDEN_FLAG - Success
+-- Performing Test C_SUPPORTS_CXX98_COMPAT_EXTRA_SEMI_FLAG
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test C_SUPPORTS_CXX98_COMPAT_EXTRA_SEMI_FLAG - Failed
+-- Performing Test CXX_SUPPORTS_CXX98_COMPAT_EXTRA_SEMI_FLAG
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test CXX_SUPPORTS_CXX98_COMPAT_EXTRA_SEMI_FLAG - Failed
+-- Performing Test CXX_SUPPORTS_SUGGEST_OVERRIDE_FLAG
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test CXX_SUPPORTS_SUGGEST_OVERRIDE_FLAG - Success
+-- Performing Test CXX_WSUGGEST_OVERRIDE_ALLOWS_ONLY_FINAL
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test CXX_WSUGGEST_OVERRIDE_ALLOWS_ONLY_FINAL - Success
+-- Performing Test C_WCOMMENT_ALLOWS_LINE_WRAP
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test C_WCOMMENT_ALLOWS_LINE_WRAP - Failed
+-- Performing Test C_SUPPORTS_MISLEADING_INDENTATION_FLAG
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test C_SUPPORTS_MISLEADING_INDENTATION_FLAG - Failed
+-- Performing Test CXX_SUPPORTS_MISLEADING_INDENTATION_FLAG
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test CXX_SUPPORTS_MISLEADING_INDENTATION_FLAG - Failed
+-- Performing Test C_SUPPORTS_CTAD_MAYBE_UNSPPORTED_FLAG
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test C_SUPPORTS_CTAD_MAYBE_UNSPPORTED_FLAG - Failed
+-- Performing Test CXX_SUPPORTS_CTAD_MAYBE_UNSPPORTED_FLAG
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test CXX_SUPPORTS_CTAD_MAYBE_UNSPPORTED_FLAG - Failed
+-- Looking for os_signpost_interval_begin
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for os_signpost_interval_begin - not found
+-- Linker detection: GNU ld
+-- Setting native build dir to /home/sarah/hobbyos-selfhost-lanes/l1/obj/selfhost/llvm-build/NATIVE
+-- Setting native stamp dir to /home/sarah/hobbyos-selfhost-lanes/l1/obj/selfhost/llvm-build/NATIVE-stamps
+-- Performing Test LLVM_LINKER_SUPPORTS_B_SYMBOLIC_FUNCTIONS
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test LLVM_LINKER_SUPPORTS_B_SYMBOLIC_FUNCTIONS - Failed
+-- Performing Test HAS_WERROR_GLOBAL_CTORS
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test HAS_WERROR_GLOBAL_CTORS - Success
+-- Performing Test LLVM_HAS_NOGLOBAL_CTOR_MUTEX
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test LLVM_HAS_NOGLOBAL_CTOR_MUTEX - Failed
+-- Looking for __x86_64__
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for __x86_64__ - not found
+-- Found Git: /usr/bin/git (found version "2.53.0")
+-- Looking for logf128
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for logf128 - not found
+-- Targeting AArch64
+-- LLD version: 21.1.8
+-- Looking for sys/resource.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for sys/resource.h - not found
+-- Looking for dlfcn.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for dlfcn.h - not found
+-- Clang version: 21.1.8
+-- Performing Test HAVE_LINKER_FLAG_LONG_PLT
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test HAVE_LINKER_FLAG_LONG_PLT - Failed
+-- Not building llvm-mt because libxml2 is not available
+-- Configuring incomplete, errors occurred!
+configure exit: 1
+-- The C compiler identification is Clang 21.1.8
+-- The CXX compiler identification is Clang 21.1.8
+-- The ASM compiler identification is Clang with GNU-like command-line
+-- Found assembler: /usr/bin/clang
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Detecting C compiler ABI info
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/clang - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/clang - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- bolt project is disabled
+-- clang project is enabled
+-- clang-tools-extra project is disabled
+-- compiler-rt project is disabled
+-- cross-project-tests project is disabled
+-- libclc project is disabled
+-- lld project is enabled
+-- lldb project is disabled
+-- mlir project is disabled
+-- openmp project is disabled
+-- polly project is disabled
+-- flang project is disabled
+-- libc project is disabled
+-- Found Python3: /home/sarah/.hermes/tools/python-3.14.7+20260901-linux-x64/bin/python3 (found suitable version "3.14.7", minimum required is "3.0") found components: Interpreter
+-- Performing Test LLVM_LIBSTDCXX_MIN
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test LLVM_LIBSTDCXX_MIN - Success
+-- Performing Test LLVM_LIBSTDCXX_SOFT_ERROR
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test LLVM_LIBSTDCXX_SOFT_ERROR - Success
+-- Looking for mach/mach.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for mach/mach.h - not found
+-- Looking for malloc/malloc.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for malloc/malloc.h - not found
+-- Looking for pthread.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pthread.h - found
+-- Looking for sys/mman.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for sys/mman.h - found
+-- Looking for sysexits.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for sysexits.h - not found
+-- Looking for unistd.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for unistd.h - found
+-- Looking for sys/ioctl.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for sys/ioctl.h - not found
+-- Looking for __GLIBC__
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for __GLIBC__ - not found
+-- Looking for valgrind/valgrind.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for valgrind/valgrind.h - not found
+-- Looking for FE_ALL_EXCEPT
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for FE_ALL_EXCEPT - not found
+-- Looking for FE_INEXACT
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for FE_INEXACT - not found
+-- Performing Test HAVE_BUILTIN_THREAD_POINTER
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test HAVE_BUILTIN_THREAD_POINTER - Success
+-- Looking for CrashReporterClient.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for CrashReporterClient.h - not found
+-- Looking for pthread_create in pthread
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pthread_create in pthread - found
+-- Looking for pthread_rwlock_init in pthread
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pthread_rwlock_init in pthread - found
+-- Looking for pthread_mutex_lock in pthread
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pthread_mutex_lock in pthread - found
+-- Looking for dlopen in dl
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for dlopen in dl - found
+-- Looking for shm_open in rt
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for shm_open in rt - found
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Failed
+-- Looking for pthread_create in pthreads
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pthread_create in pthreads - found
+-- Found Threads: TRUE
+-- Looking for arc4random
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for arc4random - not found
+-- Looking for backtrace
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for backtrace - not found
+-- Could NOT find Backtrace (missing: Backtrace_LIBRARY Backtrace_INCLUDE_DIR) 
+-- Performing Test C_SUPPORTS_WERROR_UNGUARDED_AVAILABILITY_NEW
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test C_SUPPORTS_WERROR_UNGUARDED_AVAILABILITY_NEW - Success
+-- Looking for __register_frame
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for __register_frame - found
+-- Looking for __deregister_frame
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for __deregister_frame - found
+-- Looking for __unw_add_dynamic_fde
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for __unw_add_dynamic_fde - found
+-- Looking for _Unwind_Backtrace
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for _Unwind_Backtrace - found
+-- Looking for getpagesize
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for getpagesize - found
+-- Looking for sysconf
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for sysconf - found
+-- Looking for getrusage
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for getrusage - not found
+-- Looking for isatty
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for isatty - found
+-- Looking for futimens
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for futimens - found
+-- Looking for futimes
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for futimes - not found
+-- Looking for getauxval
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for getauxval - not found
+-- Looking for sigaltstack
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for sigaltstack - not found
+-- Looking for mallctl
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for mallctl - not found
+-- Looking for mallinfo
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for mallinfo - not found
+-- Looking for mallinfo2
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for mallinfo2 - not found
+-- Looking for malloc_zone_statistics
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for malloc_zone_statistics - not found
+-- Looking for posix_spawn
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for posix_spawn - not found
+-- Looking for pread
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pread - not found
+-- Looking for sbrk
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for sbrk - found
+-- Looking for strerror_r
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for strerror_r - found
+-- Looking for strerror_s
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for strerror_s - not found
+-- Looking for setenv
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for setenv - found
+-- Performing Test HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC - Failed
+-- Performing Test HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC - Failed
+-- Looking for pthread_getname_np
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pthread_getname_np - not found
+-- Looking for pthread_setname_np
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pthread_setname_np - not found
+-- Looking for pthread_get_name_np
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pthread_get_name_np - not found
+-- Looking for pthread_set_name_np
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for pthread_set_name_np - not found
+-- Looking for dlopen
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for dlopen - not found
+-- Looking for proc_pid_rusage
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for proc_pid_rusage - not found
+-- Performing Test HAVE_CXX_ATOMICS_WITHOUT_LIB
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test HAVE_CXX_ATOMICS_WITHOUT_LIB - Success
+-- Performing Test HAVE_CXX_ATOMICS64_WITHOUT_LIB
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test HAVE_CXX_ATOMICS64_WITHOUT_LIB - Success
+-- Performing Test LLVM_HAS_ATOMICS
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test LLVM_HAS_ATOMICS - Success
+-- LLVM host triple: aarch64-none-elf
+-- Native target architecture is AArch64
+-- Threads enabled.
+-- Doxygen disabled.
+-- Ninja version: 1.13.2
+-- Could NOT find OCaml (missing: OCAMLFIND OCAML_VERSION OCAML_STDLIB_PATH) 
+-- Could NOT find OCaml (missing: OCAMLFIND OCAML_VERSION OCAML_STDLIB_PATH) 
+-- OCaml bindings disabled.
+-- Could NOT find Python module pygments
+-- Could NOT find Python module pygments.lexers.c_cpp
+-- Could NOT find Python module yaml
+-- LLVM default target triple: aarch64-none-elf
+CMake Error at cmake/modules/HandleLLVMOptions.cmake:245 (MESSAGE):
+  Unable to determine platform
+Call Stack (most recent call first):
+  CMakeLists.txt:1086 (include)
+
+
+-- Performing Test C_SUPPORTS_FPIC
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test C_SUPPORTS_FPIC - Failed
+-- Performing Test CXX_SUPPORTS_FPIC
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test CXX_SUPPORTS_FPIC - Failed
+CMake Warning at cmake/modules/HandleLLVMOptions.cmake:377 (message):
+  -fPIC is not supported.
+Call Stack (most recent call first):
+  cmake/modules/HandleLLVMOptions.cmake:437 (add_flag_or_print_warning)
+  CMakeLists.txt:1086 (include)
+
+
+-- Performing Test C_SUPPORTS_FNO_SEMANTIC_INTERPOSITION
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test C_SUPPORTS_FNO_SEMANTIC_INTERPOSITION - Failed
+-- Performing Test CXX_SUPPORTS_FNO_SEMANTIC_INTERPOSITION
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test CXX_SUPPORTS_FNO_SEMANTIC_INTERPOSITION - Failed
+-- Performing Test SUPPORTS_FVISIBILITY_INLINES_HIDDEN_FLAG
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test SUPPORTS_FVISIBILITY_INLINES_HIDDEN_FLAG - Success
+-- Performing Test C_SUPPORTS_CXX98_COMPAT_EXTRA_SEMI_FLAG
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test C_SUPPORTS_CXX98_COMPAT_EXTRA_SEMI_FLAG - Failed
+-- Performing Test CXX_SUPPORTS_CXX98_COMPAT_EXTRA_SEMI_FLAG
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test CXX_SUPPORTS_CXX98_COMPAT_EXTRA_SEMI_FLAG - Failed
+-- Performing Test CXX_SUPPORTS_SUGGEST_OVERRIDE_FLAG
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test CXX_SUPPORTS_SUGGEST_OVERRIDE_FLAG - Success
+-- Performing Test CXX_WSUGGEST_OVERRIDE_ALLOWS_ONLY_FINAL
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test CXX_WSUGGEST_OVERRIDE_ALLOWS_ONLY_FINAL - Success
+-- Performing Test C_WCOMMENT_ALLOWS_LINE_WRAP
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test C_WCOMMENT_ALLOWS_LINE_WRAP - Failed
+-- Performing Test C_SUPPORTS_MISLEADING_INDENTATION_FLAG
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test C_SUPPORTS_MISLEADING_INDENTATION_FLAG - Failed
+-- Performing Test CXX_SUPPORTS_MISLEADING_INDENTATION_FLAG
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test CXX_SUPPORTS_MISLEADING_INDENTATION_FLAG - Failed
+-- Performing Test C_SUPPORTS_CTAD_MAYBE_UNSPPORTED_FLAG
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test C_SUPPORTS_CTAD_MAYBE_UNSPPORTED_FLAG - Failed
+-- Performing Test CXX_SUPPORTS_CTAD_MAYBE_UNSPPORTED_FLAG
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test CXX_SUPPORTS_CTAD_MAYBE_UNSPPORTED_FLAG - Failed
+-- Looking for os_signpost_interval_begin
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for os_signpost_interval_begin - not found
+-- Linker detection: GNU ld
+-- Setting native build dir to /home/sarah/hobbyos-selfhost-lanes/l1/obj/selfhost/llvm-build/NATIVE
+-- Setting native stamp dir to /home/sarah/hobbyos-selfhost-lanes/l1/obj/selfhost/llvm-build/NATIVE-stamps
+-- Performing Test LLVM_LINKER_SUPPORTS_B_SYMBOLIC_FUNCTIONS
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test LLVM_LINKER_SUPPORTS_B_SYMBOLIC_FUNCTIONS - Failed
+-- Performing Test HAS_WERROR_GLOBAL_CTORS
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test HAS_WERROR_GLOBAL_CTORS - Success
+-- Performing Test LLVM_HAS_NOGLOBAL_CTOR_MUTEX
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test LLVM_HAS_NOGLOBAL_CTOR_MUTEX - Failed
+-- Looking for __x86_64__
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for __x86_64__ - not found
+-- Found Git: /usr/bin/git (found version "2.53.0")
+-- Looking for logf128
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for logf128 - not found
+-- Targeting AArch64
+-- LLD version: 21.1.8
+-- Looking for sys/resource.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for sys/resource.h - not found
+-- Looking for dlfcn.h
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Looking for dlfcn.h - not found
+-- Clang version: 21.1.8
+-- Performing Test HAVE_LINKER_FLAG_LONG_PLT
+System is unknown to cmake, create:
+Platform/HobbyOS to use this system, please post your config file on discourse.cmake.org so it can be added to cmake
+-- Performing Test HAVE_LINKER_FLAG_LONG_PLT - Failed
+-- Not building llvm-mt because libxml2 is not available
+-- Configuring incomplete, errors occurred!
+configure exit: 1
+-- The C compiler identification is Clang 21.1.8
+-- The CXX compiler identification is Clang 21.1.8
+-- The ASM compiler identification is Clang with GNU-like command-line
+-- Found assembler: /usr/bin/clang
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/clang - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/clang - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- bolt project is disabled
+-- clang project is enabled
+-- clang-tools-extra project is disabled
+-- compiler-rt project is disabled
+-- cross-project-tests project is disabled
+-- libclc project is disabled
+-- lld project is enabled
+-- lldb project is disabled
+-- mlir project is disabled
+-- openmp project is disabled
+-- polly project is disabled
+-- flang project is disabled
+-- libc project is disabled
+-- Found Python3: /home/sarah/.hermes/tools/python-3.14.7+20260901-linux-x64/bin/python3 (found suitable version "3.14.7", minimum required is "3.0") found components: Interpreter
+-- Performing Test LLVM_LIBSTDCXX_MIN
+-- Performing Test LLVM_LIBSTDCXX_MIN - Success
+-- Performing Test LLVM_LIBSTDCXX_SOFT_ERROR
+-- Performing Test LLVM_LIBSTDCXX_SOFT_ERROR - Success
+-- Looking for mach/mach.h
+-- Looking for mach/mach.h - not found
+-- Looking for malloc/malloc.h
+-- Looking for malloc/malloc.h - not found
+-- Looking for pthread.h
+-- Looking for pthread.h - found
+-- Looking for sys/mman.h
+-- Looking for sys/mman.h - found
+-- Looking for sysexits.h
+-- Looking for sysexits.h - not found
+-- Looking for unistd.h
+-- Looking for unistd.h - found
+-- Looking for sys/ioctl.h
+-- Looking for sys/ioctl.h - not found
+-- Looking for __GLIBC__
+-- Looking for __GLIBC__ - not found
+-- Looking for valgrind/valgrind.h
+-- Looking for valgrind/valgrind.h - not found
+-- Looking for FE_ALL_EXCEPT
+-- Looking for FE_ALL_EXCEPT - not found
+-- Looking for FE_INEXACT
+-- Looking for FE_INEXACT - not found
+-- Performing Test HAVE_BUILTIN_THREAD_POINTER
+-- Performing Test HAVE_BUILTIN_THREAD_POINTER - Success
+-- Looking for CrashReporterClient.h
+-- Looking for CrashReporterClient.h - not found
+-- Looking for pthread_create in pthread
+-- Looking for pthread_create in pthread - found
+-- Looking for pthread_rwlock_init in pthread
+-- Looking for pthread_rwlock_init in pthread - found
+-- Looking for pthread_mutex_lock in pthread
+-- Looking for pthread_mutex_lock in pthread - found
+-- Looking for dlopen in dl
+-- Looking for dlopen in dl - found
+-- Looking for shm_open in rt
+-- Looking for shm_open in rt - found
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Failed
+-- Looking for pthread_create in pthreads
+-- Looking for pthread_create in pthreads - found
+-- Found Threads: TRUE
+-- Looking for arc4random
+-- Looking for arc4random - not found
+-- Looking for backtrace
+-- Looking for backtrace - not found
+-- Could NOT find Backtrace (missing: Backtrace_LIBRARY Backtrace_INCLUDE_DIR) 
+-- Performing Test C_SUPPORTS_WERROR_UNGUARDED_AVAILABILITY_NEW
+-- Performing Test C_SUPPORTS_WERROR_UNGUARDED_AVAILABILITY_NEW - Success
+-- Looking for __register_frame
+-- Looking for __register_frame - found
+-- Looking for __deregister_frame
+-- Looking for __deregister_frame - found
+-- Looking for __unw_add_dynamic_fde
+-- Looking for __unw_add_dynamic_fde - found
+-- Looking for _Unwind_Backtrace
+-- Looking for _Unwind_Backtrace - found
+-- Looking for getpagesize
+-- Looking for getpagesize - found
+-- Looking for sysconf
+-- Looking for sysconf - found
+-- Looking for getrusage
+-- Looking for getrusage - not found
+-- Looking for isatty
+-- Looking for isatty - found
+-- Looking for futimens
+-- Looking for futimens - found
+-- Looking for futimes
+-- Looking for futimes - not found
+-- Looking for getauxval
+-- Looking for getauxval - not found
+-- Looking for sigaltstack
+-- Looking for sigaltstack - not found
+-- Looking for mallctl
+-- Looking for mallctl - not found
+-- Looking for mallinfo
+-- Looking for mallinfo - not found
+-- Looking for mallinfo2
+-- Looking for mallinfo2 - not found
+-- Looking for malloc_zone_statistics
+-- Looking for malloc_zone_statistics - not found
+-- Looking for posix_spawn
+-- Looking for posix_spawn - not found
+-- Looking for pread
+-- Looking for pread - not found
+-- Looking for sbrk
+-- Looking for sbrk - found
+-- Looking for strerror_r
+-- Looking for strerror_r - found
+-- Looking for strerror_s
+-- Looking for strerror_s - not found
+-- Looking for setenv
+-- Looking for setenv - found
+-- Performing Test HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC
+-- Performing Test HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC - Failed
+-- Performing Test HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC
+-- Performing Test HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC - Failed
+-- Looking for pthread_getname_np
+-- Looking for pthread_getname_np - not found
+-- Looking for pthread_setname_np
+-- Looking for pthread_setname_np - not found
+-- Looking for pthread_get_name_np
+-- Looking for pthread_get_name_np - not found
+-- Looking for pthread_set_name_np
+-- Looking for pthread_set_name_np - not found
+-- Looking for dlopen
+-- Looking for dlopen - not found
+-- Looking for proc_pid_rusage
+-- Looking for proc_pid_rusage - not found
+-- Performing Test HAVE_CXX_ATOMICS_WITHOUT_LIB
+-- Performing Test HAVE_CXX_ATOMICS_WITHOUT_LIB - Success
+-- Performing Test HAVE_CXX_ATOMICS64_WITHOUT_LIB
+-- Performing Test HAVE_CXX_ATOMICS64_WITHOUT_LIB - Success
+-- Performing Test LLVM_HAS_ATOMICS
+-- Performing Test LLVM_HAS_ATOMICS - Success
+-- LLVM host triple: aarch64-none-elf
+-- Native target architecture is AArch64
+-- Threads enabled.
+-- Doxygen disabled.
+-- Ninja version: 1.13.2
+-- Could NOT find OCaml (missing: OCAMLFIND OCAML_VERSION OCAML_STDLIB_PATH) 
+-- Could NOT find OCaml (missing: OCAMLFIND OCAML_VERSION OCAML_STDLIB_PATH) 
+-- OCaml bindings disabled.
+-- Could NOT find Python module pygments
+-- Could NOT find Python module pygments.lexers.c_cpp
+-- Could NOT find Python module yaml
+-- LLVM default target triple: aarch64-none-elf
+-- Performing Test C_SUPPORTS_FPIC
+-- Performing Test C_SUPPORTS_FPIC - Failed
+-- Performing Test CXX_SUPPORTS_FPIC
+-- Performing Test CXX_SUPPORTS_FPIC - Failed
+CMake Warning at cmake/modules/HandleLLVMOptions.cmake:377 (message):
+  -fPIC is not supported.
+Call Stack (most recent call first):
+  cmake/modules/HandleLLVMOptions.cmake:437 (add_flag_or_print_warning)
+  CMakeLists.txt:1086 (include)
+
+
+-- Performing Test C_SUPPORTS_FNO_SEMANTIC_INTERPOSITION
+-- Performing Test C_SUPPORTS_FNO_SEMANTIC_INTERPOSITION - Failed
+-- Performing Test CXX_SUPPORTS_FNO_SEMANTIC_INTERPOSITION
+-- Performing Test CXX_SUPPORTS_FNO_SEMANTIC_INTERPOSITION - Failed
+-- Performing Test SUPPORTS_FVISIBILITY_INLINES_HIDDEN_FLAG
+-- Performing Test SUPPORTS_FVISIBILITY_INLINES_HIDDEN_FLAG - Success
+-- Performing Test C_SUPPORTS_CXX98_COMPAT_EXTRA_SEMI_FLAG
+-- Performing Test C_SUPPORTS_CXX98_COMPAT_EXTRA_SEMI_FLAG - Failed
+-- Performing Test CXX_SUPPORTS_CXX98_COMPAT_EXTRA_SEMI_FLAG
+-- Performing Test CXX_SUPPORTS_CXX98_COMPAT_EXTRA_SEMI_FLAG - Failed
+-- Performing Test CXX_SUPPORTS_SUGGEST_OVERRIDE_FLAG
+-- Performing Test CXX_SUPPORTS_SUGGEST_OVERRIDE_FLAG - Success
+-- Performing Test CXX_WSUGGEST_OVERRIDE_ALLOWS_ONLY_FINAL
+-- Performing Test CXX_WSUGGEST_OVERRIDE_ALLOWS_ONLY_FINAL - Success
+-- Performing Test C_WCOMMENT_ALLOWS_LINE_WRAP
+-- Performing Test C_WCOMMENT_ALLOWS_LINE_WRAP - Failed
+-- Performing Test C_SUPPORTS_MISLEADING_INDENTATION_FLAG
+-- Performing Test C_SUPPORTS_MISLEADING_INDENTATION_FLAG - Failed
+-- Performing Test CXX_SUPPORTS_MISLEADING_INDENTATION_FLAG
+-- Performing Test CXX_SUPPORTS_MISLEADING_INDENTATION_FLAG - Failed
+-- Performing Test C_SUPPORTS_CTAD_MAYBE_UNSPPORTED_FLAG
+-- Performing Test C_SUPPORTS_CTAD_MAYBE_UNSPPORTED_FLAG - Failed
+-- Performing Test CXX_SUPPORTS_CTAD_MAYBE_UNSPPORTED_FLAG
+-- Performing Test CXX_SUPPORTS_CTAD_MAYBE_UNSPPORTED_FLAG - Failed
+-- Performing Test LINKER_SUPPORTS_COLOR_DIAGNOSTICS
+-- Performing Test LINKER_SUPPORTS_COLOR_DIAGNOSTICS - Failed
+-- Looking for os_signpost_interval_begin
+-- Looking for os_signpost_interval_begin - not found
+-- Linker detection: GNU ld
+-- Setting native build dir to /home/sarah/hobbyos-selfhost-lanes/l1/obj/selfhost/llvm-build/NATIVE
+-- Setting native stamp dir to /home/sarah/hobbyos-selfhost-lanes/l1/obj/selfhost/llvm-build/NATIVE-stamps
+-- Performing Test LLVM_LINKER_SUPPORTS_B_SYMBOLIC_FUNCTIONS
+-- Performing Test LLVM_LINKER_SUPPORTS_B_SYMBOLIC_FUNCTIONS - Failed
+-- Performing Test HAS_WERROR_GLOBAL_CTORS
+-- Performing Test HAS_WERROR_GLOBAL_CTORS - Success
+-- Performing Test LLVM_HAS_NOGLOBAL_CTOR_MUTEX
+-- Performing Test LLVM_HAS_NOGLOBAL_CTOR_MUTEX - Failed
+-- Looking for __x86_64__
+-- Looking for __x86_64__ - not found
+-- Found Git: /usr/bin/git (found version "2.53.0")
+-- Looking for logf128
+-- Looking for logf128 - not found
+-- Targeting AArch64
+-- LLD version: 21.1.8
+-- Looking for sys/resource.h
+-- Looking for sys/resource.h - not found
+-- Looking for dlfcn.h
+-- Looking for dlfcn.h - not found
+-- Clang version: 21.1.8
+-- Performing Test HAVE_LINKER_FLAG_LONG_PLT
+-- Performing Test HAVE_LINKER_FLAG_LONG_PLT - Failed
+-- Not building llvm-mt because libxml2 is not available
+-- Configuring done (11.8s)
+CMake Error in utils/TableGen/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in utils/TableGen/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in utils/FileCheck/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in utils/PerfectShuffle/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in utils/count/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in utils/not/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in utils/UnicodeData/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in utils/yaml-bench/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in utils/split-file/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in utils/llvm-test-mustache-spec/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/lto/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-ar/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-config/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-ctxprof-util/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-lto/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-profdata/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/lld/tools/lld/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/utils/TableGen/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/lib/Analysis/plugins/SampleAnalyzer/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/lib/Analysis/plugins/CheckerDependencyHandling/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/lib/Analysis/plugins/CheckerOptionHandling/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/diagtool/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/driver/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/apinotes-test/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/clang-diff/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/clang-format/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/clang-fuzzer/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/clang-fuzzer/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/clang-fuzzer/dictionary/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/clang-import-test/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/clang-linker-wrapper/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/clang-nvlink-wrapper/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/clang-offload-packager/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/clang-offload-bundler/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/clang-scan-deps/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/clang-sycl-linker/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/clang-installapi/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/clang-repl/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/c-index-test/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/clang-refactor/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/clang-shlib/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/clang-check/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/clang-extdef-mapping/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/libclang/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/tools/offload-arch/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/examples/LLVMPrintFunctionNames/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/examples/PrintFunctionNames/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/examples/AnnotateFunctions/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/examples/Attribute/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/examples/CallSuperAttribute/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in /home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang/examples/PluginsOrder/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/bugpoint/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/bugpoint-passes/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/dsymutil/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llc/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/lli/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/lli/ChildTarget/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-as/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-bcanalyzer/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-c-test/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-cat/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-cfi-verify/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-cgdata/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-cov/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-cvtres/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-cxxdump/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-cxxfilt/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-cxxmap/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-debuginfo-analyzer/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-debuginfod/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-debuginfod-find/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-diff/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-dis/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-dlang-demangle-fuzzer/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-dwarfdump/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-dwarfutil/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-dwp/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-exegesis/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-extract/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-gsymutil/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-ifs/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-isel-fuzzer/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-itanium-demangle-fuzzer/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-jitlink/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-jitlink/llvm-jitlink-executor/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-libtool-darwin/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-link/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-lipo/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-lto2/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-mc/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-mca/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-microsoft-demangle-fuzzer/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-ml/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-modextract/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-nm/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-objcopy/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-objdump/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-opt-fuzzer/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-opt-report/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-pdbutil/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-profgen/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-rc/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-readobj/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-readtapi/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-reduce/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-remarkutil/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-rtdyld/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-rust-demangle-fuzzer/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-sim/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-size/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-special-case-list-fuzzer/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-split/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-stress/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-strings/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-symbolizer/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-tli-checker/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-undname/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-xray/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-yaml-numeric-parser-fuzzer/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/llvm-yaml-parser-fuzzer/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/obj2yaml/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/opt/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/reduce-chunk-list/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/remarks-shlib/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/sancov/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/sanstats/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/verify-uselistorder/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+CMake Error in tools/yaml2obj/CMakeLists.txt:
+  LINKER_TYPE 'LLD' is unknown or not supported by this toolchain.
+
+
+-- Generating done (1.4s)
+CMake Warning:
+  Manually-specified variables were not used by the project:
+
+    LLVM_ENABLE_TERMINFO
+
+
+CMake Generate step failed.  Build files cannot be regenerated correctly.
+configure exit: 1
+-- The C compiler identification is Clang 21.1.8
+-- The CXX compiler identification is Clang 21.1.8
+-- The ASM compiler identification is Clang with GNU-like command-line
+-- Found assembler: /usr/bin/clang
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/clang - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/clang - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- bolt project is disabled
+-- clang project is enabled
+-- clang-tools-extra project is disabled
+-- compiler-rt project is disabled
+-- cross-project-tests project is disabled
+-- libclc project is disabled
+-- lld project is enabled
+-- lldb project is disabled
+-- mlir project is disabled
+-- openmp project is disabled
+-- polly project is disabled
+-- flang project is disabled
+-- libc project is disabled
+-- Found Python3: /home/sarah/.hermes/tools/python-3.14.7+20260901-linux-x64/bin/python3 (found suitable version "3.14.7", minimum required is "3.0") found components: Interpreter
+-- Performing Test LLVM_LIBSTDCXX_MIN
+-- Performing Test LLVM_LIBSTDCXX_MIN - Success
+-- Performing Test LLVM_LIBSTDCXX_SOFT_ERROR
+-- Performing Test LLVM_LIBSTDCXX_SOFT_ERROR - Success
+-- Looking for mach/mach.h
+-- Looking for mach/mach.h - not found
+-- Looking for malloc/malloc.h
+-- Looking for malloc/malloc.h - not found
+-- Looking for pthread.h
+-- Looking for pthread.h - found
+-- Looking for sys/mman.h
+-- Looking for sys/mman.h - found
+-- Looking for sysexits.h
+-- Looking for sysexits.h - not found
+-- Looking for unistd.h
+-- Looking for unistd.h - found
+-- Looking for sys/ioctl.h
+-- Looking for sys/ioctl.h - not found
+-- Looking for __GLIBC__
+-- Looking for __GLIBC__ - not found
+-- Looking for valgrind/valgrind.h
+-- Looking for valgrind/valgrind.h - not found
+-- Looking for FE_ALL_EXCEPT
+-- Looking for FE_ALL_EXCEPT - not found
+-- Looking for FE_INEXACT
+-- Looking for FE_INEXACT - not found
+-- Performing Test HAVE_BUILTIN_THREAD_POINTER
+-- Performing Test HAVE_BUILTIN_THREAD_POINTER - Success
+-- Looking for CrashReporterClient.h
+-- Looking for CrashReporterClient.h - not found
+-- Looking for pthread_create in pthread
+-- Looking for pthread_create in pthread - found
+-- Looking for pthread_rwlock_init in pthread
+-- Looking for pthread_rwlock_init in pthread - found
+-- Looking for pthread_mutex_lock in pthread
+-- Looking for pthread_mutex_lock in pthread - found
+-- Looking for dlopen in dl
+-- Looking for dlopen in dl - found
+-- Looking for shm_open in rt
+-- Looking for shm_open in rt - found
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Failed
+-- Looking for pthread_create in pthreads
+-- Looking for pthread_create in pthreads - found
+-- Found Threads: TRUE
+-- Looking for arc4random
+-- Looking for arc4random - not found
+-- Looking for backtrace
+-- Looking for backtrace - not found
+-- Could NOT find Backtrace (missing: Backtrace_LIBRARY Backtrace_INCLUDE_DIR) 
+-- Performing Test C_SUPPORTS_WERROR_UNGUARDED_AVAILABILITY_NEW
+-- Performing Test C_SUPPORTS_WERROR_UNGUARDED_AVAILABILITY_NEW - Success
+-- Looking for __register_frame
+-- Looking for __register_frame - found
+-- Looking for __deregister_frame
+-- Looking for __deregister_frame - found
+-- Looking for __unw_add_dynamic_fde
+-- Looking for __unw_add_dynamic_fde - found
+-- Looking for _Unwind_Backtrace
+-- Looking for _Unwind_Backtrace - found
+-- Looking for getpagesize
+-- Looking for getpagesize - found
+-- Looking for sysconf
+-- Looking for sysconf - found
+-- Looking for getrusage
+-- Looking for getrusage - not found
+-- Looking for isatty
+-- Looking for isatty - found
+-- Looking for futimens
+-- Looking for futimens - found
+-- Looking for futimes
+-- Looking for futimes - not found
+-- Looking for getauxval
+-- Looking for getauxval - not found
+-- Looking for sigaltstack
+-- Looking for sigaltstack - not found
+-- Looking for mallctl
+-- Looking for mallctl - not found
+-- Looking for mallinfo
+-- Looking for mallinfo - not found
+-- Looking for mallinfo2
+-- Looking for mallinfo2 - not found
+-- Looking for malloc_zone_statistics
+-- Looking for malloc_zone_statistics - not found
+-- Looking for posix_spawn
+-- Looking for posix_spawn - not found
+-- Looking for pread
+-- Looking for pread - not found
+-- Looking for sbrk
+-- Looking for sbrk - found
+-- Looking for strerror_r
+-- Looking for strerror_r - found
+-- Looking for strerror_s
+-- Looking for strerror_s - not found
+-- Looking for setenv
+-- Looking for setenv - found
+-- Performing Test HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC
+-- Performing Test HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC - Failed
+-- Performing Test HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC
+-- Performing Test HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC - Failed
+-- Looking for pthread_getname_np
+-- Looking for pthread_getname_np - not found
+-- Looking for pthread_setname_np
+-- Looking for pthread_setname_np - not found
+-- Looking for pthread_get_name_np
+-- Looking for pthread_get_name_np - not found
+-- Looking for pthread_set_name_np
+-- Looking for pthread_set_name_np - not found
+-- Looking for dlopen
+-- Looking for dlopen - not found
+-- Looking for proc_pid_rusage
+-- Looking for proc_pid_rusage - not found
+-- Performing Test HAVE_CXX_ATOMICS_WITHOUT_LIB
+-- Performing Test HAVE_CXX_ATOMICS_WITHOUT_LIB - Success
+-- Performing Test HAVE_CXX_ATOMICS64_WITHOUT_LIB
+-- Performing Test HAVE_CXX_ATOMICS64_WITHOUT_LIB - Success
+-- Performing Test LLVM_HAS_ATOMICS
+-- Performing Test LLVM_HAS_ATOMICS - Success
+-- LLVM host triple: aarch64-none-elf
+-- Native target architecture is AArch64
+-- Threads enabled.
+-- Doxygen disabled.
+-- Ninja version: 1.13.2
+-- Could NOT find OCaml (missing: OCAMLFIND OCAML_VERSION OCAML_STDLIB_PATH) 
+-- Could NOT find OCaml (missing: OCAMLFIND OCAML_VERSION OCAML_STDLIB_PATH) 
+-- OCaml bindings disabled.
+-- Could NOT find Python module pygments
+-- Could NOT find Python module pygments.lexers.c_cpp
+-- Could NOT find Python module yaml
+-- LLVM default target triple: aarch64-none-elf
+-- Performing Test C_SUPPORTS_FPIC
+-- Performing Test C_SUPPORTS_FPIC - Failed
+-- Performing Test CXX_SUPPORTS_FPIC
+-- Performing Test CXX_SUPPORTS_FPIC - Failed
+CMake Warning at cmake/modules/HandleLLVMOptions.cmake:377 (message):
+  -fPIC is not supported.
+Call Stack (most recent call first):
+  cmake/modules/HandleLLVMOptions.cmake:437 (add_flag_or_print_warning)
+  CMakeLists.txt:1086 (include)
+
+
+-- Performing Test C_SUPPORTS_FNO_SEMANTIC_INTERPOSITION
+-- Performing Test C_SUPPORTS_FNO_SEMANTIC_INTERPOSITION - Failed
+-- Performing Test CXX_SUPPORTS_FNO_SEMANTIC_INTERPOSITION
+-- Performing Test CXX_SUPPORTS_FNO_SEMANTIC_INTERPOSITION - Failed
+-- Performing Test SUPPORTS_FVISIBILITY_INLINES_HIDDEN_FLAG
+-- Performing Test SUPPORTS_FVISIBILITY_INLINES_HIDDEN_FLAG - Success
+-- Performing Test C_SUPPORTS_CXX98_COMPAT_EXTRA_SEMI_FLAG
+-- Performing Test C_SUPPORTS_CXX98_COMPAT_EXTRA_SEMI_FLAG - Failed
+-- Performing Test CXX_SUPPORTS_CXX98_COMPAT_EXTRA_SEMI_FLAG
+-- Performing Test CXX_SUPPORTS_CXX98_COMPAT_EXTRA_SEMI_FLAG - Failed
+-- Performing Test CXX_SUPPORTS_SUGGEST_OVERRIDE_FLAG
+-- Performing Test CXX_SUPPORTS_SUGGEST_OVERRIDE_FLAG - Success
+-- Performing Test CXX_WSUGGEST_OVERRIDE_ALLOWS_ONLY_FINAL
+-- Performing Test CXX_WSUGGEST_OVERRIDE_ALLOWS_ONLY_FINAL - Success
+-- Performing Test C_WCOMMENT_ALLOWS_LINE_WRAP
+-- Performing Test C_WCOMMENT_ALLOWS_LINE_WRAP - Failed
+-- Performing Test C_SUPPORTS_MISLEADING_INDENTATION_FLAG
+-- Performing Test C_SUPPORTS_MISLEADING_INDENTATION_FLAG - Failed
+-- Performing Test CXX_SUPPORTS_MISLEADING_INDENTATION_FLAG
+-- Performing Test CXX_SUPPORTS_MISLEADING_INDENTATION_FLAG - Failed
+-- Performing Test C_SUPPORTS_CTAD_MAYBE_UNSPPORTED_FLAG
+-- Performing Test C_SUPPORTS_CTAD_MAYBE_UNSPPORTED_FLAG - Failed
+-- Performing Test CXX_SUPPORTS_CTAD_MAYBE_UNSPPORTED_FLAG
+-- Performing Test CXX_SUPPORTS_CTAD_MAYBE_UNSPPORTED_FLAG - Failed
+-- Performing Test LINKER_SUPPORTS_COLOR_DIAGNOSTICS
+-- Performing Test LINKER_SUPPORTS_COLOR_DIAGNOSTICS - Failed
+-- Looking for os_signpost_interval_begin
+-- Looking for os_signpost_interval_begin - not found
+-- Linker detection: GNU ld
+-- Setting native build dir to /home/sarah/hobbyos-selfhost-lanes/l1/obj/selfhost/llvm-build/NATIVE
+-- Setting native stamp dir to /home/sarah/hobbyos-selfhost-lanes/l1/obj/selfhost/llvm-build/NATIVE-stamps
+-- Performing Test LLVM_LINKER_SUPPORTS_B_SYMBOLIC_FUNCTIONS
+-- Performing Test LLVM_LINKER_SUPPORTS_B_SYMBOLIC_FUNCTIONS - Failed
+-- Performing Test HAS_WERROR_GLOBAL_CTORS
+-- Performing Test HAS_WERROR_GLOBAL_CTORS - Success
+-- Performing Test LLVM_HAS_NOGLOBAL_CTOR_MUTEX
+-- Performing Test LLVM_HAS_NOGLOBAL_CTOR_MUTEX - Failed
+-- Looking for __x86_64__
+-- Looking for __x86_64__ - not found
+-- Found Git: /usr/bin/git (found version "2.53.0")
+-- Looking for logf128
+-- Looking for logf128 - not found
+-- Targeting AArch64
+-- LLD version: 21.1.8
+-- Looking for sys/resource.h
+-- Looking for sys/resource.h - not found
+-- Looking for dlfcn.h
+-- Looking for dlfcn.h - not found
+-- Clang version: 21.1.8
+-- Performing Test HAVE_LINKER_FLAG_LONG_PLT
+-- Performing Test HAVE_LINKER_FLAG_LONG_PLT - Failed
+-- Not building llvm-mt because libxml2 is not available
+-- Configuring done (11.8s)
+-- Generating done (1.4s)
+CMake Warning:
+  Manually-specified variables were not used by the project:
+
+    LLVM_ENABLE_TERMINFO
+
+
+-- Build files have been written to: /home/sarah/hobbyos-selfhost-lanes/l1/obj/selfhost/llvm-build
+configure exit: 0

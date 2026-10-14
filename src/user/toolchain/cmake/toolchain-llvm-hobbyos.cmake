@@ -32,9 +32,9 @@
 #     -DLLVM_TABLEGEN=<...>/llvm-tblgen -DCLANG_TABLEGEN=<...>/clang-tblgen \
 #     <repo>/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/llvm
 
-# Repo root = three levels up from this file (src/user/toolchain/cmake/).
+# Repo root = four levels up from this file (src/user/toolchain/cmake/).
 get_filename_component(_tc_dir "${CMAKE_CURRENT_LIST_FILE}" DIRECTORY)
-get_filename_component(_toolchain_root "${_tc_dir}/../../.." ABSOLUTE)
+get_filename_component(_toolchain_root "${_tc_dir}/../../../.." ABSOLUTE)
 
 if (NOT HOBBYOS_ARCH)
     set(HOBBYOS_ARCH "arm")
@@ -54,12 +54,20 @@ endif ()
 
 set(CMAKE_SYSTEM_NAME HobbyOS)
 
+# Provide our own Platform/HobbyOS.cmake module (sets UNIX=1 so LLVM's
+# HandleLLVMOptions compiles the POSIX support shim; without it LLVM stops
+# with "Unable to determine platform").  Must precede project().
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/modules")
+
 # clang is both the C and C++ driver on this workstation (project
 # convention; the driver picks the frontend from the source extension).
 set(CMAKE_C_COMPILER "clang")
 set(CMAKE_CXX_COMPILER "clang")
 set(CMAKE_ASM_COMPILER "clang")
-set(CMAKE_LINKER_TYPE LLD)
+# LLD comes via -fuse-ld=lld in HOBBYOS_TARGET_FLAGS.  Do NOT also set
+# CMAKE_LINKER_TYPE LLD: CMake rejects it for unknown systems
+# ("LINKER_TYPE 'LLD' is unknown or not supported by this toolchain",
+# L1 spike run 4) and it is redundant with the driver flag.
 
 # No target code may run at configure time.
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
@@ -90,13 +98,18 @@ set(HOBBYOS_SYSROOT_INCLUDES
     "-isystem ${HOBBYOS_SYSROOT}/include/libc-include"
     "-isystem ${HOBBYOS_SYSROOT}/include/kernel-include"
     "-isystem ${HOBBYOS_SYSROOT}/include/user-include")
+# A CMake LIST must never reach *.cxx_flags / a compile line as-is: the Ninja
+# generator writes `;` separators literally and the shell mis-splits them
+# (observed: "/bin/sh: 1: -isystem: not found" in the L1 spike). Join to a
+# plain space-separated string (the same trap the WebKit toolchain hit).
+list(JOIN HOBBYOS_SYSROOT_INCLUDES " " HOBBYOS_SYSROOT_INCLUDES_STR)
 
-set(CMAKE_C_FLAGS "${HOBBYOS_TARGET_FLAGS} ${HOBBYOS_ARCH_CFLAGS} ${HOBBYOS_FREESTANDING_INCLUDE} ${HOBBYOS_SYSROOT_INCLUDES} ${CMAKE_C_FLAGS}")
+set(CMAKE_C_FLAGS "${HOBBYOS_TARGET_FLAGS} ${HOBBYOS_ARCH_CFLAGS} ${HOBBYOS_FREESTANDING_INCLUDE} ${HOBBYOS_SYSROOT_INCLUDES_STR} ${CMAKE_C_FLAGS}")
 # LLVM is C++17; RTTI/exceptions handled by LLVM_ENABLE_EH=OFF/
 # LLVM_ENABLE_RTTI=OFF (AD-10).  -nostdinc++ keeps host C++ headers out.
 # The libcxx include MUST be -I (lies before clang's builtin dir: -isystem
 # would sort after the resource dir and libc++ fails on <stddef.h>).
-set(CMAKE_CXX_FLAGS "${HOBBYOS_TARGET_FLAGS} ${HOBBYOS_ARCH_CFLAGS} ${HOBBYOS_FREESTANDING_INCLUDE} -nostdinc++ -I${_toolchain_root}/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include ${HOBBYOS_SYSROOT_INCLUDES} ${CMAKE_CXX_FLAGS}")
+set(CMAKE_CXX_FLAGS "${HOBBYOS_TARGET_FLAGS} ${HOBBYOS_ARCH_CFLAGS} ${HOBBYOS_FREESTANDING_INCLUDE} -nostdinc++ -I${_toolchain_root}/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include ${HOBBYOS_SYSROOT_INCLUDES_STR} ${CMAKE_CXX_FLAGS}")
 set(CMAKE_ASM_FLAGS "${HOBBYOS_TARGET_FLAGS} ${HOBBYOS_ARCH_CFLAGS} ${CMAKE_ASM_FLAGS}")
 
 # ---------------------------------------------------------------------------
