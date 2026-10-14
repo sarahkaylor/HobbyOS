@@ -1,0 +1,6 @@
+8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee  src/llvm-project-21.1.8.src/LICENSE.TXT
+fb887b217e0159839bdaa7b8e7bcf124166ec671d24290bd97d21a53f1a89559  src/llvm-project-21.1.8.src/llvm/CMakeLists.txt
+34115d417682bef08f1058ee385f27cef94d06310e8cfa83ef608b7de3b337fe  src/llvm-project-21.1.8.src/clang/CMakeLists.txt
+2739c6976f2f19286371f35a850b3bceb5964cecdd548142b18b0397db860b5a  src/llvm-project-21.1.8.src/lld/CMakeLists.txt
+f57ea9228e944b5203bd23bbf8e0733d24ebc7d303876127f331d729a03205f2  src/llvm-project-21.1.8.src/llvm/include/llvm/Support/thread.h
+54309d6f015458feee9b298612a2a049758cab9aa9f7d3cbd59d5a850a7e83d8  src/llvm-project-21.1.8.src/clang/docs/CrossCompilation.rst
