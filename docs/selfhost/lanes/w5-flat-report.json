@@ -84,6 +84,6 @@
       "what": "after the exec gate is lifted, clang -c will reach AArch64 codegen and trap at libc++ operator new(nothrow) override-assert (w4-clang b2 / T2.4b evidence).  Not hit in this lane's S0 attempt because the exec gate fires earlier"
     }
   ],
-  "units_state": "untouched-green by inspection: no test/kernel/user source was modified (git diff --stat is only tools/selfhost-stage.sh + the new lane helper/docs); the change is host-side staging + image content, so the unit binaries and their inputs are byte-identical to the pre-change build",
-  "notes": "All mandatory gates verified with real tool output (build rc + mdir/sha256 + serial capture).  One QEMU run at a time; no fuser -k; no mkfs.fat outside the make recipe (scratch images via mformat -F).  Working tree clean at commit dd70a03."
+  "units_state": "untouched-green by inspection: git diff --stat 92815fa..HEAD touches ONLY tools/selfhost-stage.sh, tools/w5_flat_boot.py and docs/** (7 files, +492/-11) — no test/, src/user/**, src/kernel/** or Makefile.hobbyos lines changed; the pipeline change is host-side staging bash + image content, so the unit binaries and their inputs are byte-identical to the pre-change build",
+  "notes": "All mandatory gates verified with real tool output (build rc + mdir/sha256 + serial capture).  One QEMU run at a time; no fuser -k; no mkfs.fat outside the make recipe (scratch images via mformat -F).  Working tree clean at commit c65f2a4 (selfhost/w5-flat)."
 }
