@@ -334,13 +334,25 @@ static void test_vm_demand_fault(void) {
   EXPECT_EQ(vm_touch(&fake, USER_MMAP_BASE_V2 - 0x1000, 1, 0), -1);
   EXPECT_EQ(vm_range_ok(&fake, USER_MMAP_BASE_V2 + 0x2000, 0x1000, 0), -1);
 
-  /* The fault classifier: hole -> HOLE (kill); present -> PROT (kill);
-     absent in-region -> demand. */
+  /* The fault classifier: hole -> HOLE (kill); absent in-region -> demand.
+     w5 (iv): a present-but-permissive page is the L9 prefetch race (the
+     prefetch mapped it between the hardware's walk and this handler), so
+     it is a TLB-flush-and-RETRY (0), bounded: after FAULT_RETRY_MAX
+     consecutive present-faults on the SAME VA it is a real fault (1,
+     "PROT").  Genuine permission violations still kill (line 355+). */
   const char *why = 0;
   EXPECT_EQ(vm_handle_fault(&fake, USER_MMAP_BASE_V2 + 0x2000, 0, 0, &why), 1);
   EXPECT_EQ((why && why[0] == 'H'), 1); /* "HOLE" */
+  /* present + permissive: retry, never kill */
+  EXPECT_EQ(vm_handle_fault(&fake, USER_MMAP_BASE_V2, 0, 0, &why), 0);
+  EXPECT_EQ(vm_handle_fault(&fake, USER_MMAP_BASE_V2, 0, 0, &why), 0);
+  EXPECT_EQ(vm_handle_fault(&fake, USER_MMAP_BASE_V2, 0, 0, &why), 0);
+  EXPECT_EQ(vm_handle_fault(&fake, USER_MMAP_BASE_V2, 0, 0, &why), 0);
   EXPECT_EQ(vm_handle_fault(&fake, USER_MMAP_BASE_V2, 0, 0, &why), 1);
-  EXPECT_EQ((why && why[0] == 'P'), 1); /* "PROT" (page is live) */
+  EXPECT_EQ((why && why[0] == 'P'), 1); /* budget exhausted: "PROT" */
+  /* a different VA resets the retry budget */
+  EXPECT_EQ(vm_handle_fault(&fake, USER_MMAP_BASE_V2 + 0x1000, 0, 0, &why), 0);
+  EXPECT_EQ(vm_handle_fault(&fake, USER_MMAP_BASE_V2 + 0x1000, 0, 0, &why), 0);
 
   /* A fresh page faults in as zero-fill: the walk must now succeed (the
      zero-content half of demand-zero is proven end to end by MMTEST,

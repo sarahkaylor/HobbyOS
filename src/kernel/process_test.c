@@ -905,7 +905,7 @@ static void test_fault_kill_status_nonzero(void) {
      carries the marker and turns into a non-zero signal-shaped status
      through group_teardown's mapping (process.c group_teardown). */
   struct trap_frame tf;
-  memset(&tf, 0, sizeof(tf)); /* regs[0] == 0: stale "success" */
+  tf.regs[0] = 0; /* stale "success" */
   process_fault_set_status(&tf, 11);
   uint64_t code = tf.regs[0];
   EXPECT_EQ((int)(code & PROCESS_STATUS_SIGNAL) != 0, 1);
@@ -919,7 +919,7 @@ static void test_fault_kill_status_nonzero(void) {
   /* every signal number the fault paths use must encode non-zero */
   {
     struct trap_frame tf2;
-    memset(&tf2, 0, sizeof(tf2));
+    tf2.regs[0] = 0;
     process_fault_set_status(&tf2, 4);
     EXPECT_EQ((int)((tf2.regs[0] & PROCESS_STATUS_SIGNAL) != 0), 1); /* SIGILL */
   }
