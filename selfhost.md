@@ -562,8 +562,10 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
   halt.') with exactly ONE FAIL token — the `SHELLTEST WATCHDOG: protocol stalled 25 s`
   variant of the ambient family (the echo and shell_test3-cat variants are GONE — the
   w3-shell drain holds on the merged tree); residual watchdog-stall hardening queued as a
-  minor follow-up. CI VM (`merged-w4`): host + unit-arm green; unit-x64/test-arm pending
-  at write time.
+  minor follow-up. CI VM (`merged-w4`): host rc=0 (54 s), unit-arm rc=0 (211 s), unit-x64
+  rc=0 (130 s, KVM); test-arm rc=1 by gate math on TWO `SHELLTEST WATCHDOG` lines (same
+  ambient class — MTTCG-timing; marker `System halt from CPU 5.` present). Residual to
+  harden: the watchdog-stall sub-class itself (queued for wave 5 / minor lane).
 
 - **2026-10-14 — Merged-tip battery RERUN after `1920dc9`: GREEN (local, all tiers).**
   Local: host rc=0 (all suites), unit-arm 312/0, unit-x64 (KVM) 316/0, wave-arm rc=0
