@@ -1,0 +1,23 @@
+# SELFHOST.RUN — acceptance build driver script (HobbyOS self-hosting,
+# wave 2).  Read and executed in-OS by SELFHOST.BIN (src/user/selfhost/).
+#
+# One stage per line, '|'-separated:  <phase>|<tool>|<args...>
+#   <phase> is the acceptance Sx-name used in the [SELFHOST] markers
+#           (acceptance.md §1: phase=s0-check-start ... phase=s3-disk-done);
+#   <tool>  is the tool's 8.3 binary name, resolved against /TOOLS, then
+#           /BOOT, then / (uppercased, .BIN appended when absent);
+#   <args>  is passed verbatim to the tool.
+#
+# The stages mirror acceptance.md S0..S3 (the in-OS build).  S4/S5 are host
+# side (extract OUT.IMG and boot it) and belong to the verify loop, not this
+# script.
+#
+# Wave-2 reality: no in-OS make/clang exists yet, so MAKE.BIN resolves
+# nowhere and the driver reports a CLEAN staged failure at s0 (rc=127,
+# [SELFHOST] phase=s0-check-fail + ABORT) instead of hanging.  When the
+# toolchain lands, the make binary drops into /TOOLS and the same script
+# runs the real build.
+s0-check|MAKE.BIN|-f Makefile.hobbyos check
+s1-user|MAKE.BIN|-f Makefile.hobbyos user
+s2-kernel|MAKE.BIN|-f Makefile.hobbyos kernel
+s3-disk|MAKE.BIN|-f Makefile.hobbyos disk
