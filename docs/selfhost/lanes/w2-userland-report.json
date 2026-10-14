@@ -4,7 +4,7 @@
   "commits": [
     "8708682 selfhost: w2-userland — setjmp/dlfcn/resource/statvfs + 6 link-blocker stubs + W2-7 decl set + wait4 wrapper",
     "a19289a selfhost: w2-userland — free the public variadic syscall() name in userland test TUs",
-    "05ba221 selfhost: w2-userland — lane report + ARM unit/wave gate evidence"
+    "c7bba4c selfhost: w2-userland — lane report + ARM unit/wave gate evidence"
   ],
   "items": [
     {
