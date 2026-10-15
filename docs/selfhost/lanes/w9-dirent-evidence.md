@@ -82,11 +82,31 @@ cluster; lookups by clean name are unaffected).
 |---|---|
 | Failing unit test on tip | **FAIL** (Tests run 319, failed 1) — twins resurrected |
 | Unit test after fix | **PASS** |
-| ARM unit tier `./run_unit_tests.sh` | **PASS 319/0** |
+| ARM unit tier `./run_unit_tests.sh` | **PASS 319/0 → 320/0** (with + collision test) |
 | x64 unit tier `EXTRA_QEMU_ARGS='-enable-kvm' ./run_unit_tests_intel.sh` | **PASS 323/0** |
 | In-OS probe, unfixed kernel | twins present (prefix dump) |
-| In-OS probe, fixed kernel | **PENDING** — expect zero twins |
-| S2-stage in-OS re-run (crown proof) | **PENDING** — expect `phase=s2-kernel-done rc=0` |
+| In-OS probe, fixed kernel | **ZERO twins** — CPU.O/NFS_TEST.O/FAT16.O only (postfix dump) |
+| S2 attempt 1 (writer fix only) | 59 objects compiled rc=0, NO 'cannot open', zero twins — link then hit the 8.3-collision reader bug: `undefined symbol: net_rdma_fast_write` (net_rdma.o resolved to net_rdma_test.o's alias) |
+| S2 attempt 2 (writer + reader fix) | **IN PROGRESS** (`serial-w9-s2b.serial`) |
+
+## Second bug found by the crown proof: 8.3-alias reader collision
+
+With the writer fixed, lld walked all 59 objects and failed with
+`undefined symbol: net_rdma_fast_write` referenced by `net.c:447`
+(`net.o:(handle_udp)`).  `net_rdma.o` (8 chars base, genuine 8.3 entry)
+and `net_rdma_test.o` (long name whose format_83 alias truncates to the
+SAME `NET_RDMA.O`, i.e. `NET_RDMAO` with ext `O`) coexist in obj/arm.
+`find_entry_in_*` returned the FIRST directory-order entry with a matching
+8.3 name, so opening `/SRC/obj/arm/net_rdma.o` handed lld `net_rdma_test.o`
+(the 840-B object, `.text` ~empty, no definitions): a clean
+"undefined symbol" instead of a parse error.
+
+`fix`: find_entry_in_root / find_entry_in_subdir now prefer an LFN-free
+entry whose 8.3 name EXACTLY matches an 8.3-representable query over any
+longer name's truncating alias; long-name lookups still match by the exact
+0x0F chain.  Same-pair collisions in the S2 set: virtio_blk/_-test,
+virtio_gpu/_-test/-x64, virtio_input, virtio_net, net_rdma, program_loader,
+process_test.  Covered by `test_fat16_83_alias_collision_lookup`.
 
 ## Artifacts in `docs/selfhost/lanes/evidence-w9/`
 

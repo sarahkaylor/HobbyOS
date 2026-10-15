@@ -37,13 +37,20 @@
     "prefix_serial": "docs/selfhost/lanes/evidence-w9/inos-probe-prefix.serial",
     "prefix_dump": "docs/selfhost/lanes/evidence-w9/inos-probe-prefix.dirents.txt -> twins present (CPU-09EF.O.T, NFS_TEST.O.T, FAT16-B8.O.T)",
     "postfix_serial": "docs/selfhost/lanes/evidence-w9/inos-probe-postfix.serial",
-    "postfix_dump": "PENDING - expect exactly CPU.O, NFS_TEST.O, FAT16.O (no twins)"
+    "postfix_dump": "docs/selfhost/lanes/evidence-w9/inos-probe-postfix.dirents.txt -> exactly CPU.O + NFS_TEST.O + FAT16.O (ZERO twins)"
   },
   "s2_crown_proof": {
-    "status": "PENDING",
-    "cmd": "w5_flat_boot --image disk.img --serial evidence-w9/serial-w9-s2.serial --timeout 10800 --expect phase=s2-kernel-done",
-    "drive": "s2-kernel|SH.BIN|/SRC/SELFHOST.SH kernel (one stage, one boot, fresh disk)",
-    "expect": "56x kernel-compile rc=0 + 3x kernel-ascompile rc=0, lld link via @/SRC/OBJS.RSP, phase=s2-kernel-done rc=0, hobbyos.elf + hobbyos.bin present in ::/SRC, ::/SRC/obj/arm with exactly 59 clean objects and zero mangled twins"
+    "status1_attempt": {
+      "outcome": "writer fix verified: 56 kernel-compile rc=0 + 3 kernel-ascompile rc=0, NO 'cannot open' (the w7 twin/lost-clean failure is gone; obj/arm holds exactly 59 clean objects, zero .O.T twins). Link however reached a SECOND, reader-side barrier: LLD.BIN error 'undefined symbol: net_rdma_fast_write' -> 8.3 alias collision (net_rdma.o vs net_rdma_test.o both alias NET_RDMAO; resolver returned the wrong object for net_rdma.o).",
+      "evidence": "inos-s2-writerfix.serial + inos-s2-writerfix.dirents.txt",
+      "fix": "e55adab (reader: exact 8.3 entry wins over colliding LFN alias) + test_fat16_83_alias_collision_lookup"
+    },
+    "attempt2": {
+      "status": "IN PROGRESS",
+      "serial": "evidence-w9/serial-w9-s2b.serial",
+      "kernel": "reader-fixed (e55adab) + writer-fixed (6de9508), fresh MODE=selfhost disk, obj/arm empty pre-boot, drive s2-kernel|SH.BIN|/SRC/SELFHOST.SH kernel",
+      "expect": "phase=s2-kernel-done rc=0, hobbyos.elf + hobbyos.bin present, link resolves ALL symbols (net_rdma_fast_write etc), obj/arm exactly 59 clean entries zero twins"
+    }
   },
   "report_docs": {
     "json": "docs/selfhost/lanes/w9-dirent-report.json (this file)",
