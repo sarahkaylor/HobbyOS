@@ -51,6 +51,9 @@ def main():
     ap.add_argument("--fail-on", default="[SELFHOST] FAILED-AT")
     ap.add_argument("--no-stage", action="store_true",
                     help="skip mcopy'ing the w12 lane drive artifacts")
+    ap.add_argument("--drive", default="SELFHOST-RUN-w12-full.txt",
+                    help="lane SELFHOST.RUN drive file to stage "
+                         "(w12-full=-j8 S1+S2, w12-j4=-j8 S1 + -j4 S2)")
     args = ap.parse_args()
 
     img = os.path.abspath(args.image)
@@ -58,8 +61,9 @@ def main():
         raise SystemExit("image not found: %s" % img)
 
     if not args.no_stage:
-        mcopy(os.path.join(LANE, "SELFHOST-RUN-w12-full.txt"), "::/SRC/SELFHOST.RUN", img)
+        mcopy(os.path.join(LANE, args.drive), "::/SRC/SELFHOST.RUN", img)
         mcopy(os.path.join(LANE, "SELFJ8.SH"), "::/SRC/SELFJ8.SH", img)
+        mcopy(os.path.join(LANE, "SELFJ4.SH"), "::/SRC/SELFJ4.SH", img)
         mcopy(os.path.join(LANE, "SELFINC.SH"), "::/SRC/SELFINC.SH", img)
         mcopy(os.path.join(LANE, "T25-RUN.txt"), "::/SRC/T25.RUN", img)
 

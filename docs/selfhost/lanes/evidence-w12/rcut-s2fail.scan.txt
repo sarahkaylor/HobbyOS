@@ -1,0 +1,11 @@
+cluster 19270 raw slots: 512
+15 SHORT 'FS_TEST O  '
+28 SHORT 'MMU_TESTO  '
+46 SHORT 'NET_TESTO  '
+48 SHORT 'NET_RDMAO  '
+49 SHORT 'NFS_TESTO  '
+63 SHORT 'TEST_FW_O  '
+64 SHORT 'TEST_SMPO  '
+68 SHORT 'VM_TEST O  '
+96 SHORT 'NET     O  '
+short entries: 75 lfn records: 45 deleted slots: 15
