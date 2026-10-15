@@ -590,6 +590,15 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-15 (~05:35) — w12-rcut attempt #3 (same-disk receipt rerun): THE FULL LOOP PASSES
+  — `ACCEPTANCE-COMPLETE`, outcome=0, wall 433.6 s.** The incremental machinery turned the
+  rerun into minutes: s0 11 s ✓; s1-user 101 s ✓ (skip-dominated; full was ~65 min); s2-inc
+  18 s ✓; s2-kernel 34 s ✓ (skip-dominated; full serial 77 min); kernel-link 15 s ✓;
+  t25-run ✓; **s3-disk 354 s ✓ (MKFSFAT 128 MiB + MCOPY in-OS)**; clean end. RM.BIN staged
+  per the w6 gap; no rebuild needed thanks to the incremental fix (which also made this
+  retry itself the strongest incremental demo). w12 now: extract OUT.IMG + sha → boot it
+  standalone → run the in-OS-built program → finalize acceptance.md §10.
+
 - **2026-10-15 (~05:10) — w12-rcut attempt #2: S2 SERIAL PASSES FULLY (the discriminator
   verdict) + incremental demo PASS; S3 failed on a staging gap (RM.BIN).** Phases:
   s0 ✓ 17 s; s1-user ✓ (~65 min at -j1; the -j8 run took 33 min); **s2-kernel 56 C + 3 asm +
