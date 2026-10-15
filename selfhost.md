@@ -590,6 +590,24 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-15 (~00:05) — Wave 8c (w9-dirent) COMPLETE + merged (`9beedc4`): THE S2 CROWN
+  PASSES — the in-OS kernel stage compiles 59/59, links and objcopies on the fixed kernel;
+  zero twins.** Two-sided root cause: **(writer)** clang writes objects via an LLVM TempFile
+  whose fd stays open across `rename(temp->final)` and is closed after; the rename frees the
+  temp's slots and the clean entry often reuses the freed slot, then the later CLOSE's dirty
+  `fat16_sync_entry` wrote the stale temp dirent back over it — twin resurrected + clean
+  entry clobbered (the deterministic nfs_test.o/cpu.o loss). Fix: `fat16_sync_entry` reads
+  the on-disk slot; skip when freed (0x00/0xE5) or the name changed. **(reader, exposed by
+  crown #1)** `net_rdma.o`/`net_rdma_test.o` share the 8.3 alias; the resolver returned
+  first-dir-order (the small test object) -> `undefined symbol: net_rdma_fast_write`. Fix:
+  prefer an LFN-free exact-8.3 entry over a colliding long-name alias. Failing-first:
+  `test_fat16_clang_temp_rename_no_twins` (319/1 on tip -> pass) + collision test. Gates:
+  **320/0 ARM + 324/0 x64**. In-OS proofs: probe zero twins; **S2 crown `phase=s2-kernel-done
+  rc=0` + `ACCEPTANCE-COMPLETE` (4321 s); `hobbyos.elf` 1,371,192 B + `hobbyos.bin`
+  218,036 B (sha `8126b413...`); exactly 59 objects, zero twins.** Battery 10 launched on
+  `9beedc4`. NEXT: the FINAL acceptance re-cut (full S0->S3 + extract + boot on the merged
+  lineage with incremental + -j8).
+
 - **2026-10-14 (~23:20) — w9-dirent S2 crown attempt #1: PROGRESS + remaining wall.** The
   dirent fix eliminated the `cannot open` class — lld now WALKS all 59 in-OS objects (new
   territory) and fails at symbol level: `undefined symbol: net_rdma_fast_write` (ref.
