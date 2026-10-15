@@ -292,7 +292,8 @@ stage_tools() {
   local spec src dst
   for spec in "obj/arm/make.bin MAKE.BIN" "obj/arm/mcopy.bin MCOPY.BIN" \
               "obj/arm/mdel.bin MDEL.BIN"   "obj/arm/mmd.bin MMD.BIN" \
-              "obj/arm/mkfsfat.bin MKFSFAT.BIN" "obj/arm/sh.bin SH.BIN"; do
+              "obj/arm/mkfsfat.bin MKFSFAT.BIN" "obj/arm/sh.bin SH.BIN" \
+              "obj/arm/rm.bin RM.BIN"; do
     src="${spec% *}"; dst="${spec#* }"
     if [ -f "$src" ]; then
       mcopy -o -i "$IMAGE" "$src" "::/TOOLS/$dst" || fail "mcopy ::/TOOLS/$dst"

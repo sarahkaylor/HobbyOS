@@ -1,0 +1,104 @@
+[SELFHOST] phase=s0-check-start
+[SELFHOST] phase=s0-check-start
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/main.c -o /SRC/obj/arm/check.o
+src/kernel/main.c:50:39: warning: unused parameter 'tf' [-Wunused-parameter]
+   50 | void irq_handler_c(struct trap_frame *tf) {
+      |                                       ^
+1 warning generated.
+[SELFHOST] phase=s0-check-done rc=0
+[SELFHOST] phase=s0-check-done rc=0
+[SELFHOST] phase=s1-user-start
+[SELFHOST] phase=s1-user-start
+/TOOLS/LLD.BIN -flavor gnu -T src/user/linker.ld -o /SRC/obj/arm/sh.elf /SRC/obj/arm/sh.o /SRC/obj/arm/sh_aux.o /SRC/obj/arm/libc.a
+/TOOLS/OBJCOPY.BIN -O binary /SRC/obj/arm/sh.elf /SRC/obj/arm/SH.BIN
+/TOOLS/LLD.BIN -flavor gnu -T src/user/linker.ld -o /SRC/obj/arm/ls.elf /SRC/obj/arm/ls.o /SRC/obj/arm/libc.a
+/TOOLS/OBJCOPY.BIN -O binary /SRC/obj/arm/ls.elf /SRC/obj/arm/LS.BIN
+/TOOLS/LLD.BIN -flavor gnu -T src/user/linker.ld -o /SRC/obj/arm/cat.elf /SRC/obj/arm/cat.o /SRC/obj/arm/libc.a
+/TOOLS/OBJCOPY.BIN -O binary /SRC/obj/arm/cat.elf /SRC/obj/arm/CAT.BIN
+/TOOLS/LLD.BIN -flavor gnu -T src/user/linker.ld -o /SRC/obj/arm/hello.elf /SRC/obj/arm/hello.o /SRC/obj/arm/libc.a
+/TOOLS/OBJCOPY.BIN -O binary /SRC/obj/arm/hello.elf /SRC/obj/arm/HELLO.BIN
+[SELFHOST] phase=s1-user-done rc=0
+[SELFHOST] phase=s1-user-done rc=0
+[SELFHOST] phase=t25-run-start
+[HELLO] entering main
+[HELLO] argc=1
+[HELLO] argv[0]="./HELLO.BIN"
+[HELLO] main returned 0
+[SELFHOST] phase=t25-run-done rc=0
+[SELFHOST] phase=s2-kernel-start
+[SELFHOST] phase=s2-kernel-start
+[SELFHOST] phase=kernel-link-start
+# w6-run: lld's link argv (66 words incl. 59 objects) exceeds the
+# HobbyOS crt0 positional-arg cap (CRT0_MAX_ARGS 32) on the flat-args
+# fallback, which merged the tail into one path ("cannot open /SRC/");
+# the response file is written at parse time by the make file-write
+# function attached to the KERNEL_OBJS definition above (no shell, no
+# argv cap) and the link line itself stays short.
+/TOOLS/LLD.BIN -flavor gnu -T linker.ld -o /SRC/hobbyos.elf @/SRC/OBJS.RSP
+[SELFHOST] phase=kernel-link-done rc=0
+/TOOLS/OBJCOPY.BIN -O binary /SRC/hobbyos.elf /SRC/hobbyos.bin
+[SELFHOST] phase=s2-kernel-done rc=0
+[SELFHOST] phase=s2-kernel-done rc=0
+[SELFHOST] phase=s2-inc-start
+MAKE.BIN: '/SRC/obj/arm/dhcp.o' is up to date.
+[SELFHOST] phase=s2-kernel-start
+[SELFHOST] phase=kernel-link-start
+# w6-run: lld's link argv (66 words incl. 59 objects) exceeds the
+# HobbyOS crt0 positional-arg cap (CRT0_MAX_ARGS 32) on the flat-args
+# fallback, which merged the tail into one path ("cannot open /SRC/");
+# the response file is written at parse time by the make file-write
+# function attached to the KERNEL_OBJS definition above (no shell, no
+# argv cap) and the link line itself stays short.
+/TOOLS/LLD.BIN -flavor gnu -T linker.ld -o /SRC/hobbyos.elf @/SRC/OBJS.RSP
+[SELFHOST] phase=kernel-link-done rc=0
+/TOOLS/OBJCOPY.BIN -O binary /SRC/hobbyos.elf /SRC/hobbyos.bin
+[SELFHOST] phase=s2-kernel-done rc=0
+[SELFHOST] phase=s2-inc-done rc=0
+[SELFHOST] phase=s3-disk-start
+[SELFHOST] phase=s2-kernel-start
+[SELFHOST] phase=kernel-link-start
+# w6-run: lld's link argv (66 words incl. 59 objects) exceeds the
+# HobbyOS crt0 positional-arg cap (CRT0_MAX_ARGS 32) on the flat-args
+# fallback, which merged the tail into one path ("cannot open /SRC/");
+# the response file is written at parse time by the make file-write
+# function attached to the KERNEL_OBJS definition above (no shell, no
+# argv cap) and the link line itself stays short.
+/TOOLS/LLD.BIN -flavor gnu -T linker.ld -o /SRC/hobbyos.elf @/SRC/OBJS.RSP
+[SELFHOST] phase=kernel-link-done rc=0
+/TOOLS/OBJCOPY.BIN -O binary /SRC/hobbyos.elf /SRC/hobbyos.bin
+[SELFHOST] phase=s2-kernel-done rc=0
+[SELFHOST] phase=s1-user-start
+/TOOLS/LLD.BIN -flavor gnu -T src/user/linker.ld -o /SRC/obj/arm/sh.elf /SRC/obj/arm/sh.o /SRC/obj/arm/sh_aux.o /SRC/obj/arm/libc.a
+/TOOLS/OBJCOPY.BIN -O binary /SRC/obj/arm/sh.elf /SRC/obj/arm/SH.BIN
+/TOOLS/LLD.BIN -flavor gnu -T src/user/linker.ld -o /SRC/obj/arm/ls.elf /SRC/obj/arm/ls.o /SRC/obj/arm/libc.a
+/TOOLS/OBJCOPY.BIN -O binary /SRC/obj/arm/ls.elf /SRC/obj/arm/LS.BIN
+/TOOLS/LLD.BIN -flavor gnu -T src/user/linker.ld -o /SRC/obj/arm/cat.elf /SRC/obj/arm/cat.o /SRC/obj/arm/libc.a
+/TOOLS/OBJCOPY.BIN -O binary /SRC/obj/arm/cat.elf /SRC/obj/arm/CAT.BIN
+/TOOLS/LLD.BIN -flavor gnu -T src/user/linker.ld -o /SRC/obj/arm/hello.elf /SRC/obj/arm/hello.o /SRC/obj/arm/libc.a
+/TOOLS/OBJCOPY.BIN -O binary /SRC/obj/arm/hello.elf /SRC/obj/arm/HELLO.BIN
+[SELFHOST] phase=s1-user-done rc=0
+[SELFHOST] phase=s3-disk-start
+/TOOLS/RM.BIN -f /SRC/OUT.IMG
+rm: cannot remove -f
+rm: cannot remove /SRC/OUT.IMG
+/TOOLS/MKFSFAT.BIN -F 16 -C /SRC/OUT.IMG 131072
+mkfs.fat 4.2 (2021-01-31)
+/TOOLS/MMD.BIN -i /SRC/OUT.IMG ::/boot
+/TOOLS/MMD.BIN -i /SRC/OUT.IMG ::/EFI
+/TOOLS/MMD.BIN -i /SRC/OUT.IMG ::/EFI/BOOT
+/TOOLS/MMD.BIN -i /SRC/OUT.IMG ::/bin
+/TOOLS/MCOPY.BIN -i /SRC/OUT.IMG /SRC/hobbyos.bin ::/boot/hobbyos.bin
+/TOOLS/MCOPY.BIN -i /SRC/OUT.IMG limine.conf ::/boot/limine.conf
+/TOOLS/MCOPY.BIN -i /SRC/OUT.IMG bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
+/TOOLS/MCOPY.BIN -i /SRC/OUT.IMG /SRC/obj/arm/HELLO.BIN ::/HELLO.BIN
+/TOOLS/MCOPY.BIN -i /SRC/OUT.IMG /SRC/obj/arm/SH.BIN ::/SH.BIN
+/TOOLS/MCOPY.BIN -i /SRC/OUT.IMG /SRC/obj/arm/LS.BIN ::/LS.BIN
+/TOOLS/MCOPY.BIN -i /SRC/OUT.IMG /SRC/obj/arm/CAT.BIN ::/CAT.BIN
+/TOOLS/MCOPY.BIN -i /SRC/OUT.IMG bin/DESKTOP.BIN ::/DESKTOP.BIN
+/TOOLS/MCOPY.BIN -i /SRC/OUT.IMG bin/CONSOLE.BIN ::/CONSOLE.BIN
+/TOOLS/MCOPY.BIN -i /SRC/OUT.IMG bin/SH.BIN ::/bin/SH.BIN
+/TOOLS/MCOPY.BIN -i /SRC/OUT.IMG /SRC/obj/arm/HELLO.BIN ::/OUTPROG.BIN
+/TOOLS/MCOPY.BIN -i /SRC/OUT.IMG bin/OUTMARK.TXT ::/OUTMARK.TXT
+[SELFHOST] phase=s3-disk-done rc=0
+[SELFHOST] phase=s3-disk-done rc=0
+[SELFHOST] ACCEPTANCE-COMPLETE stages=6

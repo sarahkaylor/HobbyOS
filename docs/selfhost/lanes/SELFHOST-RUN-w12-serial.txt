@@ -1,0 +1,12 @@
+# w12-rcut lane: FINAL T4.3 acceptance loop re-cut, ATTEMPT 2 (discriminator
+# + receipt candidate).  Per integrator order: serial -j1 S2 first (w9-fix x
+# w10-timestamps x w11-make merged-combo baseline; attempt 1's -j8 S2 tore
+# the net_rdma_test.o dirent).  S0 serial; S1 -j8 (proven, 33 min wall);
+# T2.5 in-OS run; S2 SERIAL (SELFHOST.SH); s2-inc incremental demo;
+# S3 serial.  One boot.
+s0-check|SH.BIN|/SRC/SELFHOST.SH check
+s1-user|SH.BIN|/SRC/SELFJ8.SH user
+t25-run|SH.BIN|/SRC/T25.RUN
+s2-kernel|SH.BIN|/SRC/SELFHOST.SH kernel
+s2-inc|SH.BIN|/SRC/SELFINC.SH
+s3-disk|SH.BIN|/SRC/SELFHOST.SH disk
