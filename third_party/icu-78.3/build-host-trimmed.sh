@@ -78,8 +78,11 @@ echo "-- trimmed static libs --"
 ls -la "$PREFIX"/lib/libicu*.a
 echo "-- sizes (prefix/lib) --"
 du -sh "$PREFIX/lib"
+size_of() { # GNU stat -c%s vs BSD/macOS stat -f%z
+  if [ "$(uname -s)" = "Darwin" ]; then stat -f%z "$1"; else stat -c%s "$1"; fi
+}
 for f in "$PREFIX"/lib/libicu*.a; do
-  printf '%-56s %10s bytes\n' "${f#"$PREFIX"/}" "$(stat -c%s "$f")"
+  printf '%-56s %10s bytes\n' "${f#"$PREFIX"/}" "$(size_of "$f")"
 done
 
 SMOKE_TAG=trim-src ICU_PREFIX="$PREFIX" bash "$VENDOR_DIR/smoke/run-smoke.sh"

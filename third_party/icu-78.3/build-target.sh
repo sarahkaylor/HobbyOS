@@ -142,6 +142,31 @@ LDFLAGS="-T ${REPO_ROOT}/src/user/linker.ld ${EXTRA_LDFLAGS}"
 # has none of them.
 LIBS="${REPO_ROOT}/obj/${ARCH}/crt0.o ${REPO_ROOT}/obj/${ARCH}/libc.a"
 
+# Archive tools for the TARGET (ELF) archives.  On macOS `ar`/`ranlib` from
+# PATH are Apple's, which create Mach-O archives that cannot hold the ELF
+# members correctly ("ranlib: warning: archive member ... not a mach-o file"
+# -> a symbol table an ELF linker cannot read).  Mirror the repo Makefile's
+# Homebrew-llvm choice; env AR/RANLIB override.  ICU's configure (and the
+# pkgdata host tool) then package the target libs with these.
+AR="${AR:-}"
+RANLIB="${RANLIB:-}"
+if [ -z "$AR" ]; then
+  if command -v llvm-ar >/dev/null 2>&1; then AR="llvm-ar"; elif command -v llvm-ar-21 >/dev/null 2>&1; then AR="llvm-ar-21"; fi
+fi
+if [ -z "$RANLIB" ]; then
+  if command -v llvm-ranlib >/dev/null 2>&1; then RANLIB="llvm-ranlib"; elif command -v llvm-ranlib-21 >/dev/null 2>&1; then RANLIB="llvm-ranlib-21"; fi
+fi
+if [ "$(uname -s)" = "Darwin" ]; then
+  for p in /opt/homebrew/opt/llvm/bin/llvm-ar /usr/local/opt/llvm/bin/llvm-ar; do
+    [ -x "$p" ] || continue
+    [ -z "$AR" ] && AR="$p"
+    [ -z "$RANLIB" ] && [ -x "${p%ar}ranlib" ] && RANLIB="${p%ar}ranlib"
+    break
+  done
+fi
+AR="${AR:-ar}"
+RANLIB="${RANLIB:-ranlib}"
+
 # --- 0. sysroot pieces the configure link tests need -----------------------
 if [ ! -f "${REPO_ROOT}/obj/${ARCH}/crt0.o" ] || [ ! -f "${REPO_ROOT}/obj/${ARCH}/libc.a" ]; then
   log "building the target sysroot (obj/${ARCH}/libc.a + crt0.o)"
@@ -206,6 +231,7 @@ CONFIGURE_ARGS=(
   --with-data-packaging=static
   "CC=${CC}" "CXX=${CXX}" "CFLAGS=${CFLAGS}" "CXXFLAGS=${CXXFLAGS}"
   "LDFLAGS=${LDFLAGS}" "LIBS=${LIBS}"
+  "AR=${AR}" "RANLIB=${RANLIB}"
 )
 if [ ! -f config.status ]; then
   log "configure (${ARCH}; trimmed=${TRIM})"
@@ -239,6 +265,13 @@ NM="${NM:-}"
 if [ -z "${NM}" ]; then
   for cand in llvm-nm llvm-nm-21 nm; do
     if command -v "$cand" >/dev/null 2>&1; then NM="$cand"; break; fi
+  done
+fi
+if [ -z "$NM" ] && [ "$(uname -s)" = "Darwin" ]; then
+  for p in /opt/homebrew/opt/llvm/bin/llvm-nm /usr/local/opt/llvm/bin/llvm-nm; do
+    [ -x "$p" ] || continue
+    NM="$p"
+    break
   done
 fi
 [ -n "${NM}" ] || die "no nm found"
@@ -337,6 +370,10 @@ fi
 
 # --- 9. manifest -----------------------------------------------------------
 MANIFEST="${OUTDIR}/MANIFEST.txt"
+# size_of: GNU stat is `-c%s`, BSD/macOS stat is `-f%z`.
+size_of() {
+  if [ "$(uname -s)" = "Darwin" ]; then stat -f%z "$1"; else stat -c%s "$1"; fi
+}
 {
   echo "ICU 78.3 target artifacts (HobbyOS, arch=${ARCH}, ${TRIPLE})"
   echo "built    : $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -351,7 +388,7 @@ MANIFEST="${OUTDIR}/MANIFEST.txt"
   echo "archives :"
   for lib in libicuuc.a libicui18n.a libicudata.a; do
     printf '  %-14s %12d B  %4d members  sha256 %s\n' "$lib" \
-      "$(stat -c%s "${OUTDIR}/${lib}")" "$(ar t "${OUTDIR}/${lib}" | wc -l)" \
+      "$(size_of "${OUTDIR}/${lib}")" "$(ar t "${OUTDIR}/${lib}" | wc -l)" \
       "$(sha256sum "${OUTDIR}/${lib}" | cut -d' ' -f1)"
   done
   if command -v file >/dev/null 2>&1; then

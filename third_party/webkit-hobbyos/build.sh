@@ -85,6 +85,13 @@ log() { printf '[browser-build:%s] %s\n' "$ARCH" "$*"; }
 # Workstation toolchain location used by the port's own scripts (clang, lld,
 # llvm-*); prepended BEFORE the checks so nothing depends on the login PATH.
 export PATH="$HOME/.local/bin:/usr/lib/llvm-21/bin:$PATH"
+# On macOS the toolchain is Homebrew's llvm (see the repo Makefile's OS
+# detection); its bin/ is not on the login PATH, so add it explicitly or the
+# llvm-objcopy check below fails (and the port's own scripts resolve llvm-*
+# through it too).
+if [ "$(uname -s)" = "Darwin" ]; then
+  [ -x /opt/homebrew/opt/llvm/bin/llvm-objcopy ] && export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+fi
 OBJCOPY_BIN="$(command -v llvm-objcopy || command -v objcopy || true)"
 [ -x "$CMAKE_BIN" ] || CMAKE_BIN="$(command -v cmake || true)"
 [ -n "$CMAKE_BIN" ] || { echo "FATAL: cmake not found (set CMAKE=... or install the l6-tools cmake 3.31.8)" >&2; exit 1; }
@@ -191,10 +198,12 @@ if [ "${MARKERS:-0}" -eq 0 ]; then
   exit 1
 fi
 "$OBJCOPY_BIN" -O binary "$WP" "$FLAT"
+# size_of: GNU stat -c%s vs BSD/macOS stat -f%z
+size_of() { if [ "$(uname -s)" = "Darwin" ]; then stat -f%z "$1"; else stat -c%s "$1"; fi; }
 log "WebProcess ELF: $WP"
-log "  size $(stat -c%s "$WP") B  sha256 $(sha256sum "$WP" | cut -d' ' -f1)"
+log "  size $(size_of "$WP") B  sha256 $(sha256sum "$WP" | cut -d' ' -f1)"
 log "  WK5WindowDriver marker strings: $MARKERS"
-log "flat image:     $FLAT ($(stat -c%s "$FLAT") B)"
+log "flat image:     $FLAT ($(size_of "$FLAT") B)"
 log "flat sha256:    $(sha256sum "$FLAT" | cut -d' ' -f1)"
 log "done.  'make disk.img' auto-uses the flat when no BROWSER_BIN/fork build is present;"
 log "force this build with:  make disk.img BROWSER_BIN=$WP"
