@@ -17,7 +17,8 @@
 #   tools/selfhost-stage.sh --tools [-f] [image]
 #     [v3+v5] stage ONLY the in-OS toolchain to /TOOLS (frozen F1 layout:
 #     /TOOLS/{CLANG.BIN, LLD.BIN, LLVMAR.BIN, OBJCOPY.BIN, MAKE.BIN,
-#     MCOPY.BIN, MDEL.BIN, MMD.BIN, MKFSFAT.BIN} + /TOOLS/RESDIR/include/**)
+#     MCOPY.BIN, MDEL.BIN, MMD.BIN, MKFSFAT.BIN, SH.BIN, RM.BIN, TAR.BIN}
+#     + /TOOLS/RESDIR/include/**)
 #     and leave /SRC untouched.  With -f the existing /TOOLS tree is deleted
 #     first; without it, files are overwritten in place (-o).  The disk.img
 #     recipe invokes this variant; the SELFHOST harness keeps staging /SRC in
@@ -293,7 +294,8 @@ stage_tools() {
   for spec in "obj/arm/make.bin MAKE.BIN" "obj/arm/mcopy.bin MCOPY.BIN" \
               "obj/arm/mdel.bin MDEL.BIN"   "obj/arm/mmd.bin MMD.BIN" \
               "obj/arm/mkfsfat.bin MKFSFAT.BIN" "obj/arm/sh.bin SH.BIN" \
-              "obj/arm/rm.bin RM.BIN"; do
+              "obj/arm/rm.bin RM.BIN" \
+              "obj/arm/tar.bin TAR.BIN"; do
     src="${spec% *}"; dst="${spec#* }"
     if [ -f "$src" ]; then
       mcopy -o -i "$IMAGE" "$src" "::/TOOLS/$dst" || fail "mcopy ::/TOOLS/$dst"
@@ -469,10 +471,10 @@ stage_src() {
     add_payload 1 "$(stat -c %s bootloader/BOOTAA64.EFI)"
   fi
 
-  # limine.conf template — verbatim arm branch of the disk recipe (Makefile:1763-1768)
-  printf 'timeout: 0\ndefault_entry: 1\n\n/HobbyOS (ARM AArch64)\nprotocol: linux\npath: boot():/boot/hobbyos.bin\n' | \
-    mcopy -o -i "$IMAGE" - ::/SRC/limine.conf || fail "mcopy limine.conf"
-  add_payload 1 136
+  # limine.conf — the canonical ARM boot config (bootloader/limine-arm.conf;
+  # previously a printf of the Makefile arm branch — now one shared file).
+  mcopy -o -i "$IMAGE" bootloader/limine-arm.conf ::/SRC/limine.conf || fail "mcopy limine.conf"
+  add_payload 1 "$(stat -c %s bootloader/limine-arm.conf)"
 
   # Carried host build products the v1 in-OS recipes reference (WARNING+skip
   # when not built yet; they are disk.img prerequisites, so by recipe time
@@ -535,11 +537,10 @@ if [ -f bootloader/BOOTAA64.EFI ]; then
   add_payload 1 "$(stat -c %s bootloader/BOOTAA64.EFI)"
 fi
 
-# limine.conf template — verbatim arm branch of the disk recipe (Makefile:1763-1768)
+# limine.conf — the canonical ARM boot config (bootloader/limine-arm.conf).
 mmd -i "$IMAGE" ::/SRC 2>/dev/null || true
-printf 'timeout: 0\ndefault_entry: 1\n\n/HobbyOS (ARM AArch64)\nprotocol: linux\npath: boot():/boot/hobbyos.bin\n' | \
-  mcopy -i "$IMAGE" - ::/SRC/limine.conf || exit 1
-add_payload 1 136
+mcopy -o -i "$IMAGE" bootloader/limine-arm.conf ::/SRC/limine.conf || exit 1
+add_payload 1 "$(stat -c %s bootloader/limine-arm.conf)"
 
 if [ "$STAGE_LIBCXX" = "1" ] && [ -d "$LIBCXX_INC" ]; then
   # The include root lands at /SRC/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include

@@ -488,6 +488,9 @@ EXPR_BIN = $(OBJ_DIR)/expr.bin
 TESTGNU_BIN = $(OBJ_DIR)/testgnu.bin
 CP_BIN = $(OBJ_DIR)/cp.bin
 RM_BIN = $(OBJ_DIR)/rm.bin
+# [inos-build-kernel] in-OS ustar extractor: /BUILD_KERNEL.SH unpacks the
+# ::/SRC.TAR source payload with /TOOLS/TAR.BIN (src/user/tar.c).
+TAR_BIN = $(OBJ_DIR)/tar.bin
 MV_BIN = $(OBJ_DIR)/mv.bin
 TOUCH_BIN = $(OBJ_DIR)/touch.bin
 WC_BIN = $(OBJ_DIR)/wc.bin
@@ -1350,6 +1353,17 @@ $(RM_BIN): $(OBJ_DIR)/rm.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/rm.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/rm.elf $(RM_BIN)
 
+# [inos-build-kernel] TAR.BIN — the in-OS source-tar extractor.  Port-style
+# (main(argc, argv) via the crt0 inside libc.a), like the textutils ports;
+# the same source is also the host test's subject (src/host/tar_test.c).
+$(OBJ_DIR)/tar.o: src/user/tar.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(TAR_BIN): $(OBJ_DIR)/tar.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/tar.elf $(OBJ_DIR)/tar.o $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/tar.elf $(TAR_BIN)
+
 $(OBJ_DIR)/mv.o: src/user/mv.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
@@ -1864,6 +1878,11 @@ $(SQLTEST_BIN): $(OBJ_DIR)/sqlite_test.o $(OBJ_DIR)/sqlite_os.o $(OBJ_DIR)/sqlit
 $(MAKE_BIN): .EXTRA_PREREQS += src/user/linker.ld
 disk.img: $(MAKE_BIN)
 
+# [inos-build-kernel] the in-OS tar extractor rides the disk too (staged
+# into /TOOLS by tools/selfhost-stage.sh --tools).
+$(TAR_BIN): .EXTRA_PREREQS += src/user/linker.ld
+disk.img: $(TAR_BIN)
+
 disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(SELFHOST_BIN) $(MODE_FILE)
 
 # w2-mtools disk
@@ -1902,13 +1921,12 @@ disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BI
 	$(MCOPY) -i disk.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
 	$(MCOPY) -i disk.img bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
 ifeq ($(ARCH),arm)
-	@echo "timeout: 0" > obj/$(ARCH)/limine.conf
-	@echo "default_entry: 1" >> obj/$(ARCH)/limine.conf
-	@echo "" >> obj/$(ARCH)/limine.conf
-	@echo "/HobbyOS (ARM AArch64)" >> obj/$(ARCH)/limine.conf
-	@echo "protocol: linux" >> obj/$(ARCH)/limine.conf
-	@echo "path: boot():/boot/hobbyos.bin" >> obj/$(ARCH)/limine.conf
-	$(MCOPY) -i disk.img obj/$(ARCH)/limine.conf ::/boot/limine.conf
+	# [inos-build-kernel] canonical ARM boot config from the repo file
+	# (single source of truth; also what --src staging copies to
+	# /SRC/limine.conf and what SRC.TAR carries).  Two entries: the boot
+	# kernel + the previous one, which /BUILD_KERNEL.SH's install step
+	# keeps at /boot/hobbyos.old.
+	$(MCOPY) -i disk.img bootloader/limine-arm.conf ::/boot/limine.conf
 	$(OBJCOPY) -O binary $(TARGET) hobbyos.bin
 	$(MCOPY) -i disk.img hobbyos.bin ::/boot/hobbyos.bin
 else
@@ -2107,6 +2125,14 @@ ifneq ($(STAGE_TOOLS),0)
 	# the SELFHOST.RUN/SELFHOST.SH stage scripts.  tools/selfhost-stage.sh
 	# --src; disable together with the tools step via STAGE_TOOLS=0.
 	tools/selfhost-stage.sh --src disk.img
+	# [inos-build-kernel] the source tarball + the in-OS build script:
+	# SRC.TAR (ustar, assembled by tools/selfhost-src-tar.sh from the real
+	# tree) lands at ::/SRC.TAR; build_kernel.sh at ::/BUILD_KERNEL.SH.
+	# In-OS: `SH.BIN /BUILD_KERNEL.SH` extracts the tar and builds the
+	# kernel from it (Makefile.hobbyos `all`) + assembles OUT.IMG.
+	tools/selfhost-src-tar.sh obj/selfhost/SRC.TAR
+	$(MCOPY) -i disk.img obj/selfhost/SRC.TAR ::/SRC.TAR
+	$(MCOPY) -i disk.img src/user/selfhost/build_kernel.sh ::/BUILD_KERNEL.SH
 endif
 	$(MCOPY) -i disk.img $(MONITOR_BIN) ::/MONITOR.BIN
 	$(MCOPY) -i disk.img $(MONITOR_TEST_BIN) ::/MONITORT.BIN
@@ -2651,6 +2677,29 @@ obj/host_wc.o: src/user/wc.c $(USER_HDRS) src/libc/include/*.h
 $(WC_HOST): obj/host_wc.o obj/host_hb_getopt.o obj/host_hb_error.o
 	$(HOST_CC) -o $@ $^
 
+# [inos-build-kernel] tar extractor host test: the test TU includes
+# src/user/tar.c directly and runs it over glibc with REAL file I/O (no
+# compat mocks — the extractor is port-style main(argc, argv)).  Two
+# archive sources: a synthetic edge-case archive built in-test (dirs, "./"
+# roots, 512/odd sizes, GNU 'L' longname, ustar prefix) and a real
+# `tar --format=ustar` archive of tests/fixtures/tar, compared
+# byte-for-byte against the source tree.
+TAR_TEST = tar_test_run
+obj/host_tar_test.o: src/host/tar_test.c src/user/tar.c
+	@mkdir -p obj
+	$(HOST_CC) -O2 -g -Wall -Wextra -c src/host/tar_test.c -o $@
+
+TAR_FIXTURE_FILES = tests/fixtures/tar/GREET.TXT tests/fixtures/tar/EMPTY.TXT \
+                    tests/fixtures/tar/DATA1200.DAT tests/fixtures/tar/MiXeD.TxT \
+                    tests/fixtures/tar/SUB/NESTED.TXT tests/fixtures/tar/SUB/DEEPER/LEAF.TXT
+obj/tar_fixture.tar: $(TAR_FIXTURE_FILES)
+	@mkdir -p obj
+	tar --format=ustar -cf $@ -C tests/fixtures/tar .
+
+$(TAR_TEST): obj/host_tar_test.o obj/tar_fixture.tar
+	$(HOST_CC) -o obj/tar_test obj/host_tar_test.o
+	./obj/tar_test obj/tar_fixture.tar tests/fixtures/tar
+
 WC_PARITY = wc_parity_run
 $(WC_PARITY): $(WC_HOST)
 	@bash src/host/wc_parity.sh $(WC_HOST)
@@ -2906,7 +2955,7 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
