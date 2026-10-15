@@ -1,0 +1,14 @@
+# w12-rcut lane: RECEIPT one-boot full loop re-run (attempt 3).
+# The disk holds every stage product from attempt 2 (S0/S1/T2.5/S2 PASS
+# incl. the full 59-TU serial kernel build + link), so this single boot
+# re-proves ALL phases end-to-end in ONE boot with S1/S2 running on
+# UP-TO-DATE objects (the in-OS incremental behavior, w10) and S3 real
+# (RM.BIN now staged -> the S3 staging gap that blocked attempt 2 is fixed
+# at its root: tools/selfhost-stage.sh --tools now stages rm.bin).
+# s2-inc re-shows the per-object up-to-date message.
+s0-check|SH.BIN|/SRC/SELFHOST.SH check
+s1-user|SH.BIN|/SRC/SELFHOST.SH user
+t25-run|SH.BIN|/SRC/T25.RUN
+s2-kernel|SH.BIN|/SRC/SELFHOST.SH kernel
+s2-inc|SH.BIN|/SRC/SELFINC.SH
+s3-disk|SH.BIN|/SRC/SELFHOST.SH disk

@@ -1,9 +1,8 @@
-# SELFINC.SH — w12-rcut BONUS: in-OS INCREMENTAL proof after the -j8 S2
-# kernel build (w10-fstime RTC timestamps; this re-cut demonstrates it on
-# the REAL 59-TU kernel set):
+# SELFINC.SH — w12-rcut BONUS: in-OS INCREMENTAL proof after S2 (w10-fstime
+# RTC timestamps; demonstrated on the REAL 59-TU kernel set in attempt 2):
 #   1. `make -f Makefile.hobbyos /SRC/obj/arm/dhcp.o` — an up-to-date real
-#      object target -> make prints "Nothing to be done for
-#      '/SRC/obj/arm/dhcp.o'." (serial evidence).
+#      object target -> make prints "MAKE.BIN: '/SRC/obj/arm/dhcp.o' is up
+#      to date." (single-target form of 'Nothing to be done').
 #   2. `make -f Makefile.hobbyos kernel` again — the .PHONY aggregate
 #      re-links, but every one of the 59 object rules sees an up-to-date
 #      target, so ZERO `phase=kernel-compile` lines appear between the
