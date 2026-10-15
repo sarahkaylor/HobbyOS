@@ -1,0 +1,117 @@
+{
+  "lane": "w12-rcut",
+  "wave": 12,
+  "role": "FINAL acceptance re-cut on the merged-final tip (w9-dirent cross w10-fstime cross w11-makej): one-boot full in-OS build S0->S3 (serial S2, incremental + first real -j8 data on real TUs), extract + sha + standalone-boot the in-OS-assembled OUT.IMG and run an in-OS-built program from it; finalize acceptance.md 10. Serial + artifact evidence under docs/selfhost/lanes/evidence-w12/.",
+  "branch": "selfhost/w12-rcut",
+  "base": "merged-final tip (w9-dirent lineage; plan commit efb081f)",
+  "commit_list": [
+    "600d0d9 w12-rcut: lane drive artifacts — full S0->S3 loop w/ -j8 (SELFJ8.SH) + incremental demo (SELFINC.SH) + timestamped boot runner; evidence-w12 dir",
+    "7802b99 w12-rcut: attempt-1 evidence — S0/S1/T2.5 PASS (S1 33 min @-j8), S2 -j8 torn dirent (net_rdma_test.o, slot-47 .o.tmp fragment; writer fix holds, new concurrency loss); j4 + serial drives + scan tool",
+    "c15225a w12-rcut: attempt-2 evidence + S3 blocking fix. S0/S1/T2.5/S2 (SERIAL) all PASS on the w9-w10-w11 merged combo (S2 59/59 + link, 4630s; discriminator confirms -j8 was the dirent-loss variable); s2-inc increments ('is up to date'); S2 products on image (hobbyos.elf 1372736, hobbyos.bin 218356). S3 blocked: /TOOLS/RM.BIN never staged by selfhost-stage.sh --tools (w6 fix missing) -> add rm.bin; receipt drive (one-boot re-prove, incremental S1/S2 + real S3)",
+    "<final> report json + evidence md + acceptance.md 10 FINAL (this commit)"
+  ],
+  "environment": {
+    "host": "x86_64, 64 cores (nproc=64), QEMU aarch64 TCG MTTCG, 8 vCPU / 16 GiB guest",
+    "concurrent_load": "integrator battery-10 VM (qemu-system-aarch64, cwd /home/sarah/hobbyos-selfhost) ran during attempt-1 S1 and most of attempt-2 S1; it exited before attempt-2 S2.  Attempt-1 S1 = 33 min (partly contended), attempt-2 S1 = 65 min (contended) — the S1 sh.c single-TU compile stretches under CPU share.",
+    "tree": "/home/sarah/hobbyos-selfhost-lanes/w12-rcut (worktree only; main repo untouched, no pushes)",
+    "dist_staging": "obj/selfhost/dist-staging (227 MB LLVM ELF dist) present; flat-converted at stage time by tools/selfhost-stage.sh --tools"
+  },
+  "host_prebuild": {
+    "result": "PASS x2",
+    "cmd": "make MODE=selfhost disk.img  (obj/arm/.mode = selfhost; kbuild MODE selfhost)",
+    "tools_staged": "/TOOLS: CLANG.BIN 94192328, LLD.BIN 53250536, LLVMAR.BIN 8349200, OBJCOPY.BIN 4982672, MAKE.BIN 314680, MKFSFAT.BIN 152120, SH.BIN 195136, MCOPY/MDEL/MMD.BIN 186200 each, RM.BIN 44704 (added this lane) — 14 files / 162,039,976 B",
+    "tools_flat_note": "LLVM ELFs flat-converted by host llvm-objcopy -O binary at stage time (elf_flat sanity: e_entry==0x1000000000 == first PT_LOAD, flat head == first-LOAD bytes)",
+    "src_staged": "/SRC build subset incl Makefile.hobbyos, SELFHOST.RUN/SH, limine.conf, linker.ld, user set, carried libc.a (1202942 B) + DESKTOP/CONSOLE/SH/OUTMARK"
+  },
+  "runs": {
+    "attempt1_j8": {
+      "drive": "SELFHOST-RUN-w12-full.txt  (s0-check serial; s1-user -j8; t25-run; s2-kernel -j8; s2-inc; s3-disk)",
+      "invocation": "SELFJ8.SH -> /TOOLS/MAKE.BIN -j8 -f Makefile.hobbyos <target>  (make 4.4.1 pipe jobserver, bounded-poll pselect)",
+      "outcome": "FAILED-AT stage=s2-kernel  (outcome=1, wall 3219s)",
+      "stages": {
+        "S0_check": "PASS  phase=s0-check-done rc=0 (11s)",
+        "S1_user": "PASS  phase=s1-user-done rc=0 (1982s = 33.0 min @ -j8; sh.c still the long pole; first real -j8 win vs w7 61-65 min on a contended bus)",
+        "T25": "PASS  [HELLO] entering main / argc=1 / argv[0]=\"./HELLO.BIN\" / main returned 0; phase=t25-run-done rc=0",
+        "S2_kernel_j8": {
+          "result": "FAIL (link)",
+          "detail": "56 kernel-compile rc=0 + 3 kernel-ascompile rc=0 in 1218s (~20 min to failure vs w9 serial 4321s whole S2) — the -j8 compile speedup is large; lld link then failed: 'LLD.BIN: error: cannot open /SRC/obj/arm/net_rdma_test.o: No such file or directory' (interleaved relay also shows a net_test.o fragment); MAKE.BIN Error 1; phase=s2-kernel-fail reason=tool-rc rc=512",
+          "diagnosis": "NEW concurrency-sensitive dirent loss (NOT the w9 serial close-after-rename bug): on the halted image ::/SRC/obj/arm holds 58/59 kernel objects with ZERO mangled twins and ZERO .O.T leftovers; 15 deleted slots show the OTHER clangs' temp pairs cleanly 0xE5-deleted (writer fix holds); net_rdma_test.o's short entry and LFN chain are absent ENTIRELY, with a torn LFN fragment '.o.tmp' surviving at slot 47 — clobbered mid-write by a concurrent rename in the same directory cluster.  Prime suspect: FAT directory mutations not serialized across processes (check-then-write window in rename / LFN write-back under the 7-8-way rename burst).  Rced as a NEW bug for a kernel lane (todo); NOT required for the receipt.",
+          "evidence": "rcut-s2fail.dirents.txt, rcut-s2fail.scan.txt, rcut-attempt1-s2-j8-loss.md, rcut-loop.serial(.ts)"
+        }
+      }
+    },
+    "attempt2_serial": {
+      "drive": "SELFHOST-RUN-w12-serial.txt  (s0/s1-j8/t25/s2 SERIAL/s2-inc/s3)",
+      "outcome": "S3 fail only (staging gap) — all S0..S2 green",
+      "stages": {
+        "S0_check": "PASS (17s)",
+        "S1_user": "PASS  phase=s1-user-done rc=0 (3898s = 65 min wall, battery-10 contended; full 5-TU compile incl sh.c)",
+        "T25": "PASS  [HELLO] entering main / argc=1 / argv[0]=\"./HELLO.BIN\" / main returned 0",
+        "S2_kernel_serial": "PASS (DISCRIMINATOR)  56 kernel-compile rc=0 + 3 kernel-ascompile rc=0, kernel-link-done rc=0, s2-kernel-done rc=0, ALL 59 objects present, hobbyos.elf/hobbyos.bin produced (1372736 / 218356 B) — 4630s (~77 min).  Verdict: the merged w9-w10-w11 combo builds the kernel correctly at -j1; the -j8 concurrency loss is the only new variable.",
+        "s2_inc": "PASS  MAKE.BIN: '/SRC/obj/arm/dhcp.o' is up to date. (single-target up-to-date message; in-OS incremental on the REAL 59-TU kernel set)",
+        "S3_disk": "FAIL  phase=s3-disk-start -> /TOOLS/RM.BIN -f /SRC/OUT.IMG -> 'sh: command not found: /TOOLS/RM.BIN' -> MAKE.BIN Error 127 -> s3-disk-fail reason=tool-rc rc=512.  ROOT CAUSE: tools/selfhost-stage.sh --tools never staged RM.BIN (w6-run staged it per w6-run-report.json; the merged --tools list lacked the entry).  FIXED at root: added 'obj/arm/rm.bin RM.BIN' to the --tools list and mcopied RM.BIN onto the existing image (no disk rebuild)."
+      }
+    },
+    "attempt3_receipt": {
+      "drive": "SELFHOST-RUN-w12-receipt.txt (one boot; disk already holds every attempt-2 product, so S1/S2 run on UP-TO-DATE objects = incremental re-prove; S3 real)",
+      "outcome": "PASS  ACCEPTANCE-COMPLETE stages=6, zero FAIL tokens, System halt",
+      "wall_s": 433.6,
+      "phases_s": {
+        "S0_check": "11.0",
+        "S1_user_inc": "101.0 (objects up to date -> only the 4 in-OS links re-ran)",
+        "T25": "0.0 ([HELLO] full marker on serial)",
+        "S2_kernel_inc": "34.0 (59/59 objects up to date -> only lld link + objcopy re-ran; kernel-link-done rc=0)",
+        "s2_inc": "18.0 ('/SRC/obj/arm/dhcp.o' is up to date.)",
+        "S3_disk": "354.0 (real in-OS assembly: RM, MKFSFAT -F 16 -C 131072, MMD, in-OS MCOPY layout; matches w6's 365s)",
+        "ACCEPTANCE_COMPLETE": "stages=6"
+      },
+      "serial_evidence": "rcut-loop3.serial(.ts) + rcut-out.log (driver's own mirrored OUT.LOG, pulled from the image)"
+    }
+  },
+  "out_img": {
+    "path": "docs/selfhost/lanes/evidence-w12/rcut-loop3.out.img",
+    "size": 134217728,
+    "sha256": "fcfa8a3f1fc9d84cc5a5b1586c19f8787c8e02e05979b7748ecd3892ac6be1ce",
+    "bpb": "bps512 spc4 nfats2 root512 fatsz256 reserved4 total_sectors262144 (128 MiB FAT16, exactly the acceptance.md 3.1/8.1 frozen geometry; fresh mkfs -> image sha legitimately differs from w6 7e24b4ca.../w7)",
+    "layout": "root: HELLO.BIN 37360, SH.BIN 195136, LS.BIN 35200, CAT.BIN 34960, DESKTOP.BIN 555568, CONSOLE.BIN 44992, OUTPROG.BIN 37360, OUTMARK.TXT 44; /boot/hobbyos.bin 218356 + limine.conf 99; /EFI/BOOT/BOOTAA64.EFI 315392; /bin/SH.BIN 195136 — the full acceptance.md 8.1 must-contain layout"
+  },
+  "s45_boot": {
+    "cmd": "python3 tools/w7_accept_boot.py --image docs/selfhost/lanes/evidence-w12/rcut-loop3.out.img --serial docs/selfhost/lanes/evidence-w12/s4-boot.serial --launch OUTPROG.BIN",
+    "result": "PASS",
+    "boot_marker": "Booting AArch64 OS at 6.5 s (in-OS-built kernel boots the in-OS-assembled OUT.IMG standalone)",
+    "mode_line": "Mode: DESKTOP - Launching desktop...",
+    "menu": "[MENU] 9=OUTPROG.BIN",
+    "launch_line": "[LAUNCH] OUTPROG.BIN",
+    "exit_line": "[KERNEL] Process 3: OUTPROG.BIN exited unexpectedly or gracefully.",
+    "serial": "s4-boot.serial",
+    "program_serial_note": "desktop-launched stdout is framebuffer-only (acceptance.md 8.3 ceiling); the program's own [HELLO] marker comes from the MODE=selfhost T2.5 path, present in rcut-loop2/loop3 serials"
+  },
+  "byte_identity": {
+    "HELLO_BIN": "in-OS-built HELLO.BIN (extracted from the in-OS disk AND from OUT.IMG as OUTPROG.BIN) sha256 61b3be6ad97e0286d0466e8f2e3ac6a2a2b2db14cd7c49488f00e79e1cdcc363 == host obj/arm/hello.bin == w6 anchor (BYTE-IDENTICAL across host/in-OS/OUT.IMG)",
+    "hobbyos_bin": "218356 B sha256 00bad4a7b99c1b1f295e5cf58d03da1359e4ad75ae0f18c54d15f0b123908742 (in-OS serial S2 product, in-OS MCOPY'd onto OUT.IMG; differs from w9-crown 218036/8126b413 by subsequent merged-tree changes, not a regrade)",
+    "hobbyos_elf": "1372736 B sha256 bf46a472103c25213f761af9af6357b21c69fbcd24984885996058d071192f7c",
+    "check_o": "21144 B sha256 42a430f171d49ccb8ada278aa5f87f1eb87e908d620a3ff403d7aa558429e46f",
+    "SH_BIN_note": "in-OS-built SH.BIN (03bbdc68...) differs from host sh.bin (5669333b...) — expected: the two clang resource dirs differ under -isystem so the larger TU's codegen differs; both valid builds, HELLO identity is the acceptance anchor and it matches exactly"
+  },
+  "parallel_findings": {
+    "s1_j8": "33 min at -j8 on a (lightly) contended bus vs 65 min at -j8 under battery-10 and 53-61 min serial in w6/w7 — the -j8 user-set overlap is a real win on the 5-TU S1 (sh.c remains the single-TU bound)",
+    "s2_j8": "57/59 TUs in ~20 min wall (vs ~77 min serial) — compile speedup approaches the core count as w11 predicted; BUT the previously-latent FAT dirent race surfaces under 8-way concurrent rename-while-open (net_rdma_test.o lost).  NOT receipt-safe as-is; logged as a NEW kernel-lane bug.",
+    "receipt_width": "receipt runs S2 at -j1 (proven).  -j4 remains an unproven-on-real-TUs middle; the integrator requested no repeated -j8 retries (honored)."
+  },
+  "staging_fix": {
+    "bug": "tools/selfhost-stage.sh --tools did not stage RM.BIN, so the in-OS S3 recipe's first line ($(RM) -f /SRC/OUT.IMG) failed 127 in attempt 2",
+    "fix": "added 'obj/arm/rm.bin RM.BIN' to the --tools spec list (committed c15225a)",
+    "effect": "receipt S3 (attempt 3) ran clean: phase=s3-disk-done rc=0, 354s"
+  },
+  "report_docs": {
+    "json": "docs/selfhost/lanes/w12-rcut-report.json (this file)",
+    "evidence_md": "docs/selfhost/lanes/w12-rcut-evidence.md",
+    "evidence_dir": "docs/selfhost/lanes/evidence-w12/",
+    "acceptance_md": "docs/selfhost/acceptance.md 10 verdict table finalized (this commit)"
+  },
+  "untouched": [
+    "main repo /home/sarah/Documents/GitHub/HobbyOS (no touches, no pushes)",
+    "integrator's /home/sarah/hobbyos-selfhost tree + its disk.img + its qemu (battery-10) — observed running, never touched; it exited on its own before attempt-2 S2",
+    "LLVM/libc++ sources; dist-staging toolchain (not refreshed)"
+  ]
+}

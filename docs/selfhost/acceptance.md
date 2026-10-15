@@ -147,29 +147,33 @@ Typical failure: the program isn't on OUT.IMG (S3 recipe bug), filename
 bounds (8.3 policy F8), or load-path gaps (loader can't resolve the long
 `.bin` name — L3).
 
-### Retry-cost table — in-OS make is NON-incremental (w6/w7 finding)
+### Retry-cost table — in-OS make: incremental via RTC timestamps (w10/w12)
 
-**In-OS `make` never skips a TU**: the in-OS read-only FAT driver exposes
-8.3-clean UPPERCASE SFNs while GNU make's pattern rules do a case-sensitive
-dir-cache compare, so `make`'s up-to-date check (and its pattern-rule match)
-breaks — the kernel recipe is therefore written as 59 **explicit** rules and
-every `make <stage>` re-runs everything (compile + link) from scratch. The
-retry-cost table below is therefore NOT "recompiles only changed TUs"; a
-re-run of a stage costs the same as the first run (minus the boot):
+w6/w7 observed **non-incremental** re-observations: the kernel recipe is 59
+**explicit** rules (never pattern rules — the in-OS FAT driver exposes
+8.3-clean UPPERCASE SFNs vs make's case-sensitive dir-cache compare, which
+breaks pattern-rule matching), and every `make <stage>` re-ran its recipe
+body.  **w10 (RTC timestamps) + w12 (this re-cut) change the economics:**
+the object rules' up-to-date check now works — `make kernel` on a fresh boot
+re-links but re-compiles NOTHING (zero `kernel-compile` lines), and an
+up-to-date object target prints `'/SRC/obj/arm/dhcp.o' is up to date.`
+(w12 attempt-2/3 serial, REAL 59-TU set).  Retry costs below therefore drop
+to link-band once objects exist:
 
 | stage | re-run cost | notes |
 |---|---|---|
 | S0 | ~1 min (mostly QEMU boot+teardown) | one TU; no disk rebuild |
-| S1 | ~1–2 h + boot | **full** 5 TU rebuild re-observed (make non-incremental in-OS) |
-| S2 | ~1.5–2.5 h + boot | **full** 59-TU rebuild re-observed |
-| S3 | ~10–30 min + boot | rebuilds OUT.IMG from existing objs — the one stage that IS cheap to repeat |
+| S1 | **~2 min incremental (4 links only)**; full fresh compile ≈ 33–65 min | w12: receipt S1 = 101 s on up-to-date objects |
+| S2 | **~1 min incremental (lld link + objcopy only)**; full fresh serial S2 ≈ 77 min | w12: receipt S2 = 34 s, zero compiles; `-j8` fresh = ~20 min to 57/59 (unproven-correct, dirent race) |
+| S3 | ~10–30 min + boot | rebuilds OUT.IMG from existing objs — the one stage that IS cheap to repeat; w12 receipt 354 s |
 | S4 | ~1–2 min | reuses `out.img` already extracted — cheapest repeat |
 | S5 | ~1–3 min | reuses `out.img` |
 
-Consequence: **one long single boot per stage-set** (S0…S3 back-to-back in
-one `SELFHOST.RUN`) is the only sane plan; iterating on S1 or S2 is a
-multi-hour commitment. Never rebuild the boot disk to iterate on S4/S5 —
-extract `OUT.IMG` again with `fat16img.py get`.
+Consequence: a fresh full build is one long single boot (S0…S3 back-to-back
+in one `SELFHOST.RUN`), but once the objects exist a re-boot can re-prove the
+whole loop incrementally in ~7 min (w12 attempt-3 receipt: 433.6 s total).
+Never rebuild the boot disk to iterate on S4/S5 — extract `OUT.IMG` again
+with `fat16img.py get`.
 
 ---
 
@@ -558,8 +562,8 @@ evidence; the driver prints `System halt.` (kernel) after `ACCEPTANCE-COMPLETE`.
 ### 9.4 Pull the artifacts
 
 ```bash
-python3 fat16img.py list disk.img           # OUT.IMG sits at ::/OUT.IMG
-python3 fat16img.py get disk.img OUT.IMG > out-loop.img   # ~1 s (linearized reader)
+python3 fat16img.py list disk.img           # OUT.IMG sits at ::/SRC/OUT.IMG
+python3 fat16img.py get disk.img SRC/OUT.IMG > out-loop.img   # ~1 s (linearized reader)
 sha256sum out-loop.img obj/selfhost/w6-out/OUT.IMG        # compare vs w6
 # per-file hashes: fat16img.py get disk.img SRC/obj/arm/HELLO.BIN, ... 
 ```
@@ -620,31 +624,49 @@ make port.  On real builds (≈90 s per cc1 TU) that fixed overhead
 vanishes; expect the speedup to approach the core count (the 63-slot PCB
 table is the ceiling — keep ≤ -j8).
 
+**w12 real-TU result (caveat):** on the REAL acceptance TUs the compile
+speedup is confirmed (S1 user set at `-j8`: 33 min vs 53–65 min serial;
+S2 kernel 57/59 TUs in ~20 min wall vs ~77 min serial), but the S2 `-j8`
+run exposed a NEW concurrency-sensitive FAT dirent loss (one object's
+rename-while-open entry torn under 8-way concurrency in the shared
+`/SRC/obj/arm` directory — `docs/selfhost/lanes/evidence-w12/
+rcut-attempt1-s2-j8-loss.md`).  `-j1` on the same tree builds 59/59 +
+links cleanly.  Until the FAT directory-mutation race is fixed, run
+serial (receipt default) or a width you have proven on real TUs; do not
+assume `-j8` correctness from the synthetic project alone.
+
 ---
 
-## 10. Verdict table vs §8.3 (filled by w7-accept on the merged tip 288995c)
+## 10. Verdict table vs §8.3 — FINAL (filled by w12-rcut on the merged-final tip)
 
 Frozen criteria: `docs/selfhost/lanes/l5/selfhost.md` §8.3 checklist;
 evidence standard §8.4 (raw serial markers, `System halt` / ACCEPTANCE-COMPLETE,
-zero FAIL tokens, sizes + hashes for every artifact).
+zero FAIL tokens, sizes + hashes for every artifact).  Final re-cut: ONE boot
+S0→S3 (attempt-3, serial S2 / incremental S1+S2; full fresh 59-TU serial S2 in
+attempt-2) → extracted OUT.IMG (sha `fcfa8a3f…`) → standalone boot + in-OS-built
+program run.  Evidence: `docs/selfhost/lanes/evidence-w12/` + `w12-rcut-report.json`.
 
 | §8.3 criterion | verdict | evidence |
 |---|---|---|
-| In-OS: kernel objects all compiled, `hobbyos.elf` linked, `hobbyos.bin` objcopy'd — transcript shows each phase | **PASS** (w6 S2, re-driven in w7 T4.3) | `[SELFHOST] phase=s2-kernel-done rc=0`, 59 object lines, lld link via response file, `hobbyos.elf` 1372912 B / `hobbyos.bin` 219564 B (ARM64 boot Image), raw serials `evidence-w6-run/s2.serial.txt` + w7 serial |
-| In-OS: `OUT.IMG` assembled by the in-OS toolchain; host boots it successfully | **PASS** (w6 S3 + w7 boot of extracted image) | `phase=s3-disk-done rc=0` (365 s; MKFSFAT ≈ 284 s); extracted 128 MiB FAT16 (bps512/spc4/nfats2/root512/fatsz256), boot marker `Booting AArch64 OS` in 6.5–9 s |
-| The booted OUT.IMG kernel was linked in-OS from in-OS-compiled objects; an in-OS-built user program runs on it | **PASS**(A) | OUT.IMG `[LAUNCH] OUTPROG.BIN` (37360 B), `[KERNEL] Process 3: OUTPROG.BIN exited`; OUTPROG.BIN sha == in-OS HELLO.BIN sha == host hello.bin (byte-identical, w6) |
-| Full raw logs + artifact hashes archived (evidence dir + §11 records) | **PASS** | `evidence-w6-run/` + `evidence-w7/` (raw serials + pulled artifacts + sha256s); this doc + lane reports |
+| In-OS: kernel objects all compiled, `hobbyos.elf` linked, `hobbyos.bin` objcopy'd — transcript shows each phase | **PASS (FINAL, w12)** | attempt-2 serial S2: 56 `phase=kernel-compile rc=0` + 3 `phase=kernel-ascompile rc=0`, `kernel-link-done rc=0`, `s2-kernel-done rc=0`, 59/59 objects, zero twins; `hobbyos.elf` 1372736 B (sha `bf46a472…`) / `hobbyos.bin` 218356 B (sha `00bad4a7…`); raw serials `evidence-w12/rcut-loop2.serial` (full build) + `rcut-loop3.serial` (receipt) |
+| In-OS: `OUT.IMG` assembled by the in-OS toolchain; host boots it successfully | **PASS (FINAL, w12)** | `phase=s3-disk-done rc=0` (354 s; MKFSFAT ≈ 284 s class); OUT.IMG 128 MiB FAT16 (bps512/spc4/nfats2/root512/fatsz256, 262144 sect, sha `fcfa8a3f…`); standalone boot marker `Booting AArch64 OS` in 6.5 s |
+| The booted OUT.IMG kernel was linked in-OS from in-OS-compiled objects; an in-OS-built user program runs on it | **PASS (FINAL, w12)** | OUT.IMG `[MENU] 9=OUTPROG.BIN`, `[LAUNCH] OUTPROG.BIN`, `[KERNEL] Process 3: OUTPROG.BIN exited` (`s4-boot.serial`); OUTPROG.BIN sha `61b3be6a…` == in-OS HELLO.BIN == host `obj/arm/hello.bin` (byte-identical, w12 re-measured) |
+| Full raw logs + artifact hashes archived (evidence dir + §11 records) | **PASS (FINAL, w12)** | `evidence-w12/` (raw serials + timestamped captures, dirent dumps, OUT.IMG + per-file products + sha256s); this doc + `w12-rcut-report.json` |
+| In-OS build is incremental (w10/w12); one-boot loop re-proves all stages on up-to-date objects | **PASS (BONUS, w12)** | `rcut-loop2.serial` + `rcut-loop3.serial`: `MAKE.BIN: '/SRC/obj/arm/dhcp.o' is up to date.`; receipt S1 101 s / S2 34 s = only the links re-ran (zero kernel-compile lines); whole receipt loop 433.6 s |
 | x64: stretch only (M5) — not required for v1 done | n/a (not attempted) | — |
 
-`[SELFHOST] ACCEPTANCE-COMPLETE` is the driver's completion marker
-(acceptance.md §1); `System halt.` is the kernel's own close (§8.4 of
-`selfhost.md`), both present in the w6 serials. **Partial-loop row (B — T4.3
-on 288995c, lane w7):** S0 ✓, S1 ✓ (user set, sh.c ≥53 min in-OS), T2.5 ✓
-(`[HELLO] entering main` on serial), S2 ✗ ×2 (fresh disk, pre- and
-post-`bd58474` argv fix, identical) — in-OS FAT **dirent/LFN writer bug**
-misnames nfs_test.o / cpu.o (`NFS_TEST.O.T` / `CPU-8167.O.T` duplicate
-mangled dirents; content present, clean-name entry missing → lld cannot
-open them). Full details + pulled evidence:
-`docs/selfhost/lanes/w7-accept-report.json` + `w7-accept-evidence.md`.
-Final acceptance RC is re-cut on the merged-final tip after a kernel-side
-dirent-writer fix.
+`[SELFHOST] ACCEPTANCE-COMPLETE stages=6` and `System halt.` both present in
+`evidence-w12/rcut-loop3.serial` (receipt, zero FAIL tokens); the w7 partial
+loop's dirent block (nfs_test.o/cpu.o) is closed by the w9 writer+reader fixes
+— serial S2 re-proved clean on the merged w9×w10×w11 combo (attempt 2,
+4630 s).
+
+**Parallel verdict (w12, first real `-jN` data):** S1 at `-j8` = 33 min
+(attempt 1) vs 65 min contended (attempt 2) vs 53–61 min serial (w6/w7) — the
+user-set overlap is a real win; sh.c stays the single-TU bound.  S2 at `-j8`
+compiled 57/59 TUs in ~20 min wall but hit a NEW concurrency-sensitive FAT
+dirent loss (`net_rdma_test.o` torn under 8-way concurrent rename-while-open;
+w9's writer fix held — all other temp pairs deleted cleanly).  Discriminator:
+the identical tree at `-j1` builds 59/59 + links (attempt 2).  The FINAL
+receipt therefore uses serial S2 (`-j8` correctness on real TUs stays open for
+a kernel lane; `-j4` unproven).
