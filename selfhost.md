@@ -590,6 +590,16 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-15 (wrap-up) — MERGE-BACK EXECUTED.** The self-hosting line was merged with the
+  workstation line (browser/theme work; 22 commits since the fork — clean automerge, no
+  conflicts) at `9f7db42`, and **the never-before-built union was validated end-to-end:
+  smoke + host_tests 482/0 + unit-arm + unit-x64 + wave ALL GREEN** (ambient LFN rename flare
+  + WATCHDOG only; TORTURE `exec_ok=8`; halt present). Export to GitHub prepared as a
+  filtered history (`git filter-repo`, two 128 MiB evidence disk images excluded per user
+  instruction; 5313-file tree shipped minus exactly those two; one 79 MB serial log will draw
+  a warning). The full unfiltered history + the images remain in the local copy. Merge lands
+  on the workstation repo and pushes to `github.com:sarahkaylor/HobbyOS` main.
+
 - **2026-10-15 (~06:15) — Wave 9 (w12-rcut) COMPLETE + merged (`2707fbc`): THE FINAL
   ACCEPTANCE RECEIPT IS DELIVERED.** One boot, `ACCEPTANCE-COMPLETE stages=6`, zero FAIL
   tokens, clean halt (433.6 s receipt rerun; 2.4 h full-build runs also green on the same
