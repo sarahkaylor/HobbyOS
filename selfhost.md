@@ -590,6 +590,16 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-15 (~05:10) — w12-rcut attempt #2: S2 SERIAL PASSES FULLY (the discriminator
+  verdict) + incremental demo PASS; S3 failed on a staging gap (RM.BIN).** Phases:
+  s0 ✓ 17 s; s1-user ✓ (~65 min at -j1; the -j8 run took 33 min); **s2-kernel 56 C + 3 asm +
+  `kernel-link-done rc=0` + `s2-kernel-done rc=0` — first full SERIAL S2 pass on the merged
+  lineage**; `s2-inc-done` (the second-make incremental demo, 17 s) ✓; then `s3-disk-fail`:
+  `/TOOLS/RM.BIN` missing (`sh: command not found`, Error 127) — same staging gap w6 hit.
+  Staged-fix + same-disk rerun steered (the rerun is itself the incremental receipt; S0/S1/S2
+  should skip; S3 ≈ minutes). **-j8 concurrency bug CONFIRMED** (-j1 pass vs -j8 dirent loss;
+  todo P1.5).
+
 - **2026-10-15 (~02:40) — w12-rcut attempt #1: S0/S1/T2.5 green at -j8 (S1 = 33 min vs ~61
   serial — first real parallel win); S2 lost `net_rdma_test.o`'s dirent entirely** (lld
   `cannot open`; image shows 75 files, **zero twins, zero mangled names — writer fix

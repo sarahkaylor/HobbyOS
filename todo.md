@@ -17,7 +17,7 @@ Ordering = priority. Items 1–3 are the active build-velocity work (user direct
 8. **Host-tier `EDITOR.BIN_host` hang hygiene** — the root-dir editor host-test binary can block forever on an anonymous pipe read (no watchdog); it wedges `make host_tests` and leaves an orphan per occurrence (20 found, ~20 h old). Add a runner timeout/stdin redirection, reap orphans, and root-cause the pipe-read hang.
 
 ## P1.5 — new (concurrency, 2026-10-15)
-- **Concurrent in-OS FAT writes can lose a dirent.** w12 S2 at `-j8`: `net_rdma_test.o` vanished entirely (zero twins — w9's writer fix holds; the colliding-pair name simply lost; compile was issued). Suspect: no cross-process serialization of FAT directory mutations (create/rename/close interleavings). Verify -j1/-j4 vs -j8 on a fresh disk; fix with a dir-level lock or bound the documented safe width; then re-decide -j8 for the acceptance runbook.
+- **Concurrent in-OS FAT writes can lose a dirent.** w12 S2 at `-j8`: `net_rdma_test.o` vanished entirely (zero twins — w9's writer fix holds; the colliding-pair name simply lost; compile was issued). Suspect: no cross-process serialization of FAT directory mutations (create/rename/close interleavings). **CONFIRMED 2026-10-15**: w12 attempt-2 S2 at -j1 PASSED fully (59/59+link) vs -j8 lost a dirent. Use serial/a-proven width for receipts; fix = dir-level lock (or documented safe width) then re-decide -j8.
 
 ## P2 — performance / quality
 8. **Per-TU launch overhead** — 94 MB clang prefetch + ~22k page mappings per launch (~1.3 M mappings per S2 run). Consider cheaper prefetch/segment mapping.
