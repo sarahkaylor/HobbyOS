@@ -73,6 +73,7 @@
 #include "libc.h"
 #include "graphics/graphics.h"
 #include "graphics/window.h"
+#include "graphics/theme.h"
 
 extern int desktop_main(void);
 extern struct window windows[];   /* window.c */
@@ -492,29 +493,34 @@ static const struct app_case APPS[APP_COUNT] = {
 /* ====================================================================== */
 
 /* Positive render check: read pixels back from the real framebuffer.
- *  - the focused title-bar fill color at (x+4, y+4) - before the title text
- *    starts at x+8 - proves wm_draw_windows() drew this window with focus.
+ *  - the focused title-bar fill at (x+4, y+4) - before the title text
+ *    starts at x+8 - proves wm_draw_windows() drew this window with the
+ *    focused face colour (Chrome-light: THEME_SURFACE).
+ *  - the 2px focus fold under the title bar at (x+4, y+17) is THEME_ACCENT
+ *    when focused: the focus signal in the light palette.
  *  - the focused menu-bar fill at (x+5, y+26) proves the window chrome
- *    (menu strip) was composited with focus, not left as background.
- *  - white pixels inside the content area are 8x8-font glyph pixels: the
- *    WM rasterised the text it captured, so the app's output is visibly on
- *    screen (a mere byte-count/text-buffer assertion would not catch a
- *    renderer that never writes the framebuffer). */
+ *    (menu strip) was composited, not left as background.
+ *  - dark THEME_TEXT pixels inside the content area are 8x8-font glyph
+ *    pixels: the WM rasterised the text it captured, so the app's output is
+ *    visibly on screen (a mere byte-count/text-buffer assertion would not
+ *    catch a renderer that never writes the framebuffer). */
 static int fb_window_rendered(const struct window *w) {
-  if (graphics_get_pixel(w->x + 4, w->y + 4) != (uint32_t)COLOR(96, 166, 255))
+  if (graphics_get_pixel(w->x + 4, w->y + 4) != (uint32_t)THEME_SURFACE)
     return 0;
-  if (graphics_get_pixel(w->x + 5, w->y + 26) != (uint32_t)COLOR(206, 208, 214))
+  if (graphics_get_pixel(w->x + 4, w->y + 17) != (uint32_t)THEME_ACCENT)
+    return 0;
+  if (graphics_get_pixel(w->x + 5, w->y + 26) != (uint32_t)THEME_SURFACE)
     return 0;
   int x1 = w->x + w->w - 8;
   if (x1 > w->x + 620) x1 = w->x + 620; /* bounded scan */
   int y1 = w->y + 320;
-  int white = 0;
+  int ink = 0;
   for (int y = w->y + 44; y < y1; y++) {
     for (int x = w->x + 10; x < x1; x++) {
-      if (graphics_get_pixel(x, y) == (uint32_t)COLOR(255, 255, 255)) white++;
+      if (graphics_get_pixel(x, y) == (uint32_t)THEME_TEXT) ink++;
     }
   }
-  return white >= 20; /* a couple of 8x8 glyphs worth of lit pixels */
+  return ink >= 20; /* a couple of 8x8 glyphs worth of lit pixels */
 }
 
 /* ====================================================================== */

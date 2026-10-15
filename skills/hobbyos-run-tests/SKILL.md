@@ -66,6 +66,22 @@ make test_intel QEMU_ARGS=-enable-kvm
 
 Authoritative liveness check for a long run: `wc -l` the log twice a minute apart — if it grows (even with watchdog/`CDATA` noise) it is alive; if it is flat for minutes with no new `PASS`/`FAIL`, treat it as the hang it is.
 
+## APPS_T (MODE=apps_test): shared-host runner + pre-existing TASKS stop
+
+`run_apps_test.py` **broad-pkills every QEMU on the host** (same class as the
+root runners noted in [[hobbyos-build-and-run]]). On this shared host use the
+in-repo cwd-scoped replacement: `python3 tools/run_apps_test_scoped.py` (kills
+only the QEMU it started, cwd == tree).
+
+Known pre-existing red (2026-10-14, NOT a regression from unrelated work):
+the harness stops at `TASKS.BIN` (`interact - window vanished during the
+functional check`) - 5/10 apps (FILES..HEX) pass first. Reproduced
+line-for-line identically on the untouched pre-theme probe tree @ `722e3b4`,
+so it predates the Chrome-light change; likely kernel/loader/harness
+robustness (P5/D10 SIGPIPE semantics postdate the harness's 10/10
+introduction). See `theme.md` §5; don't burn a debug cycle chasing it as a
+regression from theme/app work.
+
 ## Two-VM RDMA test (remote-PCIe, x86_64)
 
 ```bash

@@ -1,6 +1,7 @@
 #include "window.h"
 #include "graphics.h"
 #include "libc.h"
+#include "theme.h"
 
 #include "font.h"
 
@@ -73,7 +74,7 @@ int wm_create_window(uint32_t bg_color, int pid, int stdout_fd, int stdin_fd) {
   int win_id = next_id++;
   windows[idx].id = win_id;
   windows[idx].bg_color = bg_color;
-  windows[idx].border_color = COLOR(64, 68, 82); // Inactive border
+  windows[idx].border_color = THEME_OUTLINE; // Inactive border
   windows[idx].title[0] = '\0';
   windows[idx].text_len = 0;
   windows[idx].text[0] = '\0';
@@ -218,7 +219,7 @@ static void window_paint_rows(struct window *win, int top, int skip, int r0, int
     const char *line = skip_lines(win->text, skip + r);
     int cx = win->x + 10;
     for (int i = 0; line[i] && line[i] != '\n'; i++) {
-      wm_draw_char(cx, y, line[i], COLOR(255, 255, 255));
+      wm_draw_char(cx, y, line[i], THEME_TEXT);
       cx += 8;
     }
   }
@@ -285,7 +286,7 @@ void wm_draw_windows(int focused_id) {
     int focused = (win->id == focused_id);
 
     // Frame border (bright when focused)
-    uint32_t border = focused ? COLOR(96, 166, 255) : win->border_color;
+    uint32_t border = focused ? THEME_ACCENT : win->border_color;
     if (win->pixel_mode) {
       /* The app owns the content pixels: fill the frame as a ring around
        * the content rectangle instead of the whole window, so the frame
@@ -304,37 +305,38 @@ void wm_draw_windows(int focused_id) {
      * just outside the frame so the shadow also shows in the 1px gaps
      * the tiling leaves between windows. The left/top edges stay bright,
      * which gives every window a raised look. */
-    uint32_t shadow = COLOR(8, 10, 16);
+    uint32_t shadow = THEME_OUTLINE_DARK;
     graphics_draw_vline(win->x + win->w - 1, win->y, win->h, shadow);
     graphics_draw_hline(win->x, win->y + win->h - 1, win->w, shadow);
     graphics_draw_vline(win->x + win->w, win->y, win->h, shadow);
     graphics_draw_hline(win->x, win->y + win->h, win->w, shadow);
 
-    /* Title bar: bright blue for the focused window, muted gray-blue for
-     * the others, with a darker fold along the bottom edge for depth. */
-    uint32_t t_face = focused ? COLOR(96, 166, 255) : COLOR(72, 86, 120);
-    uint32_t t_fold = focused ? COLOR(58, 108, 188) : COLOR(44, 54, 80);
+    /* Title bar: white face for the focused window, grey for the others,
+     * with the accent/outline fold along the bottom edge for depth. */
+    uint32_t t_face = focused ? THEME_SURFACE : THEME_SURFACE_1;
+    uint32_t t_fold = focused ? THEME_ACCENT : THEME_OUTLINE;
     graphics_draw_rect(win->x + 2, win->y + 2, win->w - 4, 14, t_face);
     graphics_draw_rect(win->x + 2, win->y + 16, win->w - 4, 2, t_fold);
 
     // Title text (clipped so it never runs under the close button)
     if (win->title[0]) {
       graphics_set_clip(win->x + 6, win->y + 2, win->w - 28, 16);
-      wm_draw_text(win->x + 8, win->y + 6, win->title, COLOR(235, 238, 245));
+      wm_draw_text(win->x + 8, win->y + 6, win->title,
+                   focused ? THEME_TEXT : THEME_TEXT_SUB);
       graphics_reset_clip();
     }
 
     // Close button
-    graphics_draw_rect(win->x + win->w - 18, win->y + 2, 16, 16, COLOR(178, 54, 54));
-    graphics_draw_rect_outline(win->x + win->w - 18, win->y + 2, 16, 16, COLOR(230, 120, 120));
-    wm_draw_char(win->x + win->w - 14, win->y + 6, 'x', COLOR(255, 240, 240));
+    graphics_draw_rect(win->x + win->w - 18, win->y + 2, 16, 16, THEME_RED_SOFT);
+    graphics_draw_rect_outline(win->x + win->w - 18, win->y + 2, 16, 16, THEME_RED_EDGE);
+    wm_draw_char(win->x + win->w - 14, win->y + 6, 'x', THEME_RED);
 
     // Menu bar
-    uint32_t mb = focused ? COLOR(206, 208, 214) : COLOR(168, 170, 176);
+    uint32_t mb = focused ? THEME_SURFACE : THEME_SURFACE_1;
     graphics_draw_rect(win->x + 2, win->y + 18, win->w - 4, 16, mb);
     int menu_x = win->x + 10;
     for (int m = 0; m < win->num_menus; m++) {
-      wm_draw_text(menu_x, win->y + 22, win->menus[m].name, COLOR(20, 20, 24));
+      wm_draw_text(menu_x, win->y + 22, win->menus[m].name, THEME_TEXT);
       // rough width estimation: length * 8 + 16
       int len = 0;
       while(win->menus[m].name[len]) len++;
@@ -370,7 +372,7 @@ void wm_draw_windows(int focused_id) {
     const char *start = skip_lines(win->text, skip);
 
     graphics_set_clip(win->x + 2, win->y + 34, win->w - 4, win->h - 36);
-    wm_draw_text(win->x + 10, text_top, start, COLOR(255, 255, 255));
+    wm_draw_text(win->x + 10, text_top, start, THEME_TEXT);
     graphics_reset_clip();
 
     /* Painted in full: the framebuffer now matches the captured text
@@ -737,10 +739,10 @@ static int term_paint_dirty(struct window *win) {
       char ch = win->term_ch[r * win->term_cols + c];
       unsigned char at = win->term_at[r * win->term_cols + c];
       if (ch == ' ' && !(at & TERM_AT_REVERSE)) { cx += 8; continue; }
-      uint32_t ink = COLOR(255, 255, 255);
+      uint32_t ink = THEME_TEXT;
       if (at & TERM_AT_REVERSE) {
-        /* Reverse: swap the default pair (white field, window ink). */
-        graphics_draw_rect(cx, y, 8, 10, COLOR(235, 238, 245));
+        /* Reverse: swap the default pair (dark field, window ink). */
+        graphics_draw_rect(cx, y, 8, 10, THEME_TEXT);
         ink = win->bg_color;
       }
       if (ch != ' ') wm_draw_char(cx, y, ch, ink);
@@ -759,7 +761,7 @@ static int term_paint_dirty(struct window *win) {
     int cr = win->term_cur_row, cc = win->term_cur_col;
     if (cr >= 0 && cr < rows && cc >= 0 && cc < win->term_cols) {
       graphics_draw_rect(win->x + 10 + cc * 8, top + cr * 10 + 8, 8, 2,
-                         COLOR(96, 166, 255));
+                         THEME_ACCENT);
       win->term_caret_row = cr;
       win->term_caret_col = cc;
     }
@@ -787,8 +789,8 @@ static int term_paint_dirty(struct window *win) {
 }
 
 /* ---- Mouse cursor sprite ----
- * A classic arrow, 8x12 pixels. Drawn white with a 1px black outline
- * (the outline is produced by stamping the same shape offset in 8
+ * A classic arrow, 8x12 pixels. Drawn dark with an outline (the outline
+ * is produced by stamping the same shape offset in 8
  * directions first). */
 static const uint8_t cursor_shape[12] = {
   0x80, 0xC0, 0xE0, 0xF0, 0xF8, 0xFC, 0xFE, 0xFF,
@@ -810,10 +812,10 @@ void wm_draw_cursor(int x, int y) {
   for (int dy = -1; dy <= 1; dy++) {
     for (int dx = -1; dx <= 1; dx++) {
       if (dx == 0 && dy == 0) continue;
-      draw_cursor_shape(x + dx, y + dy, COLOR(10, 10, 12));
+      draw_cursor_shape(x + dx, y + dy, THEME_SURFACE);
     }
   }
-  draw_cursor_shape(x, y, COLOR(250, 250, 252));
+  draw_cursor_shape(x, y, THEME_TEXT);
 }
 
 /* ====================================================================== */

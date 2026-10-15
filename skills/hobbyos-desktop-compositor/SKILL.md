@@ -47,6 +47,23 @@ itself (→ [[hobbyos-add-userland-program]]), kernel rules (→
 | Window painter | `graphics/window.c` | full paint (`wm_draw_windows`) + row repair (`wm_draw_window_rows`) |
 | Primitives | `graphics/graphics.c` | base clip, current clip, paint counters (`-DPAINT_STATS`) |
 
+## Colors: the Chrome-light theme (theme.h)
+
+Since 2026-10-14 the OS and the browser chrome wear the **Chrome-light**
+palette (Google Chrome's light mode). All first-party color comes from
+`src/user_include/graphics/theme.h` (element map in the header; exact
+Chromium hexes: accent `#1A73E8`, surface/active-tab `#FFFFFF`, frame
+`#DEE1E6`, grey ramp) - **no widget file may carry its own color literals**;
+desktop.c / window.c / the wallpaper block of graphics.c all draw from
+`THEME_*` constants. The WK-7 browser palette mirrors it in the fork's
+`WK5Chrome.h`. The focus signal in the light palette is the **2px fold under
+the title bar (y+16..17): THEME_ACCENT when focused**, THEME_OUTLINE
+otherwise (focused face and menu bar are both THEME_SURFACE white).
+Record: `theme.md`; palette checker: `tools/theme_check.py <shot.ppm>
+--mode light|dark`. Color-golden host tests to retarget whenever the palette
+changes: `graphics_lib_test.c`, `desktop_pixel_test.c` (window_damage /
+window_text assert only what they drew).
+
 ## The Rules (keep these invariants when editing)
 
 1. **Windows are repaired at line granularity before rect passes.**
@@ -131,8 +148,12 @@ change that pushes `painting frames` above ~2 or the pixel count above
 ## Verification Checklist
 
 - [ ] `make host_tests` (window_damage + desktop_damage + apps_suite + ...) green.
-- [ ] `python3 run_apps_test.py`: APPS TEST PASSED and the FILES down-arrow
-      line shows ~1 painting frame / tens of thousands of pixels.
+- [ ] APPS_T via `tools/run_apps_test_scoped.py` (shared-host safe; NOT the
+      broad-pkill `run_apps_test.py`): expect 5/10 apps pass - FILES..HEX,
+      retargeted fb checks green - then the **pre-existing TASKS.BIN stop**
+      (kernel/harness robustness; reproduces on the untouched pre-theme tree
+      @722e3b4 - `theme.md` §5). The FILES down-arrow line (~1 painting
+      frame / tens of thousands of pixels) still gates the damage model.
 - [ ] `python3 run_console_test.py` and `run_desktop_apps_test.py` still pass
       (framebuffer diffs and 10-app acceptance).
 - [ ] Screenshots before/after a keypress: only the expected rows changed,

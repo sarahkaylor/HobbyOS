@@ -150,3 +150,18 @@ adopted tab stays Stable until interaction.  Acceptance receipts in
 box and nav glyphs are text glyphs (`x`, `<`, `>`, `R`); the 8×8 icon
 bitmaps exist in `WK5Font8x8.h` (host-tested) and are not yet wired into the
 paint.  ARM leg not re-run this wave (x64-KVM acceptance path per plan).
+
+## Palette re-theme (2026-10-14)
+
+The `WK5Chrome.h` palette block was converted from the original dark set to
+the **Chrome-light** set — same constant names, geometry, hit boxes and
+marker contract; values mirror the OS palette
+`src/user_include/graphics/theme.h` (exact Google hexes: frame/tab-strip
+`#DEE1E6`, toolbar/active-tab/bookmark bar `#FFFFFF`, omnibox `#F1F3F4` with
+a `#DADCE0` border, accent `#1A73E8`; two constants removed/changed by
+design: no green active-tab top accent, blue bookmarked star).  Fork branch
+`browser/ui-theme` @ `2952eed95d` (off `browser/ui`); host tests still
+107/107; the x64-KVM chrome-band sampler passes on both receipts
+(browser-only and combined-look with the light OS chrome).  Evidence:
+`continuation/ui-theme/` (REPORT.md, PNGs, `check_chrome_band.py`).  The
+geometry/viewport/marker contract above is unchanged.

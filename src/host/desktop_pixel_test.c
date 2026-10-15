@@ -35,6 +35,7 @@
 #include "../user_include/libc.h"
 #include "../user_include/graphics/graphics.h"
 #include "../user_include/graphics/window.h"
+#include "../user_include/graphics/theme.h"
 
 #define main desktop_main
 #include "../user/desktop.c"
@@ -401,7 +402,7 @@ static void test_restamp(void) {
   restamp_flushes = 0;
   wm_pixel_service_frame();
   check(w->pix_restamp == 0, "]F flag consumed");
-  check(graphics_get_pixel(mouse_x, mouse_y) == C(250, 250, 252),
+  check(graphics_get_pixel(mouse_x, mouse_y) == (uint32_t)THEME_TEXT,
         "pointer sprite re-stamped over the content");
   check(restamp_flushes >= 1, "re-stamp pushes a flush");
 
@@ -635,11 +636,11 @@ static void test_menu_overlay_protection(void) {
   w->pix_restamp = 1;
   wm_pixel_service_frame();
   check(restamp_flushes >= 1, "an app flush pushes a re-stamp flush");
-  check(graphics_get_pixel(200, mv_top + 60) == C(232, 234, 240),
+  check(graphics_get_pixel(200, mv_top + 60) == (uint32_t)THEME_SURFACE,
         "the menu is re-stamped over the app's pixels");
   check(graphics_get_pixel(10, 300) == MARKER,
         "the re-stamp is clipped to the menu rectangle");
-  check(graphics_get_pixel(mouse_x, mouse_y) == C(250, 250, 252),
+  check(graphics_get_pixel(mouse_x, mouse_y) == (uint32_t)THEME_TEXT,
         "the pointer still re-stamps over the content");
 
   /* Pointer tracking: silent while a menu is open, and the live position

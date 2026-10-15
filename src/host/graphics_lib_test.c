@@ -15,11 +15,13 @@
 #include "../user_include/libc.h"
 #include "../user_include/graphics/graphics.h"
 #include "../user_include/graphics/window.h"
+#include "../user_include/graphics/theme.h"
 
 #include "../user/graphics/graphics.c"
 #include "../user/graphics/window.c" /* wm_draw_windows: window frame polish */
 
 #define C(r, g, b) ((uint32_t)COLOR(r, g, b))
+#define TP(c) ((uint32_t)(c)) /* theme palette value as an unsigned pixel */
 
 static int tests_run = 0;
 static int tests_failed = 0;
@@ -314,20 +316,27 @@ static void test_gradient_old_case_unchanged(void) {
 
 static void fill_wallpaper(void) {
   /* Exactly what desktop.c's wallpaper line calls. */
-  graphics_fill_gradient_v(0, 0, SCREEN_WIDTH, WP_H, C(16, 20, 38), C(44, 56, 96));
+  graphics_fill_gradient_v(0, 0, SCREEN_WIDTH, WP_H, C(248, 249, 250), C(218, 220, 224));
 }
 
 static void test_wallpaper_endpoints(void) {
   reset();
   fill_wallpaper();
-  CHECK(graphics_get_pixel(0, 0) == C(12, 16, 34), "wallpaper top = deep navy (12,16,34)");
-  CHECK(graphics_get_pixel(SCREEN_WIDTH - 1, 0) == C(12, 16, 34), "wallpaper top spans the full width");
-  CHECK(graphics_get_pixel(0, WP_H - 1) == C(34, 44, 72), "wallpaper bottom = dark slate (34,44,72) at the taskbar line");
-  CHECK(graphics_get_pixel(SCREEN_WIDTH / 2, WP_H - 1) == C(34, 44, 72), "wallpaper bottom row spans the full width");
-  CHECK(graphics_get_pixel(0, 100) == C(14, 18, 37), "wallpaper row 100 interpolates navy -> slate");
-  CHECK(graphics_get_pixel(0, 370) == C(21, 28, 56), "wallpaper row 370 interpolates navy -> slate");
-  CHECK(graphics_get_pixel(0, 556) == C(23, 30, 55), "wallpaper row 556 interpolates navy -> slate");
-  CHECK(graphics_get_pixel(0, WP_H - 2) == C(33, 43, 71), "wallpaper row before the taskbar is dark slate");
+  CHECK(graphics_get_pixel(0, 0) == C(248, 249, 250), "wallpaper top = Chrome-light grey (248,249,250)");
+  CHECK(graphics_get_pixel(SCREEN_WIDTH - 1, 0) == C(248, 249, 250), "wallpaper top spans the full width");
+  CHECK(graphics_get_pixel(0, WP_H - 1) == C(218, 220, 224), "wallpaper bottom = grey-300 (218,220,224) at the taskbar line");
+  CHECK(graphics_get_pixel(SCREEN_WIDTH / 2, WP_H - 1) == C(218, 220, 224), "wallpaper bottom row spans the full width");
+  CHECK(graphics_get_pixel(0, 100) == C(246, 247, 248), "wallpaper row 100 interpolates grey -> grey-300");
+  CHECK(graphics_get_pixel(0, 370) == C(240, 242, 250), "wallpaper row 370 interpolates grey -> grey-300");
+  CHECK(graphics_get_pixel(0, 556) == C(233, 234, 238), "wallpaper row 556 interpolates grey -> grey-300");
+  CHECK(graphics_get_pixel(0, WP_H - 2) == C(219, 221, 225), "wallpaper row before the taskbar is grey-300");
+}
+
+/* Blue of the plain two-colour ramp (no band) at `row`, using the exact
+ * integer interpolation graphics.c applies (grey-050 -> grey-300). */
+static int wallpaper_plain_blue(int row) {
+  int den = WP_H - 1;
+  return 250 + (224 - 250) * row / den;
 }
 
 static void test_wallpaper_lighter_band(void) {
@@ -338,40 +347,54 @@ static void test_wallpaper_lighter_band(void) {
    * centre/fade for any height.) */
   int peak_row = (WP_H * 38) / 100;
   int fade_row = peak_row + WP_H / 6;
-  CHECK(graphics_get_pixel(10, peak_row) == C(23, 30, 60), "wallpaper band peak colour (23,30,60)");
-  CHECK(graphics_get_pixel(600, peak_row) == C(23, 30, 60), "wallpaper band is horizontal across the width");
-  CHECK(graphics_get_pixel(SCREEN_WIDTH - 1, peak_row) == C(23, 30, 60), "wallpaper band reaches the right edge");
-  /* 48 is the plain navy -> slate value at the band centre; the band lifts
-   * blue by 12. */
-  CHECK((int)(graphics_get_pixel(0, peak_row) & 0xFF) == 48 + 12, "wallpaper band lifts blue by 12 over the plain ramp");
-  CHECK((int)((graphics_get_pixel(0, peak_row) >> 16) & 0xFF) == 20 + 3, "wallpaper band lifts red slightly");
-  CHECK((int)((graphics_get_pixel(0, peak_row) >> 8) & 0xFF) == 26 + 4, "wallpaper band lifts green slightly");
+  CHECK(graphics_get_pixel(10, peak_row) == C(240, 242, 253), "wallpaper band peak colour (240,242,253)");
+  CHECK(graphics_get_pixel(600, peak_row) == C(240, 242, 253), "wallpaper band is horizontal across the width");
+  CHECK(graphics_get_pixel(SCREEN_WIDTH - 1, peak_row) == C(240, 242, 253), "wallpaper band reaches the right edge");
+  /* 241 is the plain grey -> grey-300 blue at the band centre; the band
+   * lifts blue by 12 (WALLPAPER_BAND_GAIN), red by 3 and green by 4. */
+  CHECK((int)(graphics_get_pixel(0, peak_row) & 0xFF) == 241 + 12, "wallpaper band lifts blue by 12 over the plain ramp");
+  CHECK((int)((graphics_get_pixel(0, peak_row) >> 16) & 0xFF) == 237 + 3, "wallpaper band lifts red slightly");
+  CHECK((int)((graphics_get_pixel(0, peak_row) >> 8) & 0xFF) == 238 + 4, "wallpaper band lifts green slightly");
   /* The band fades out h/6 rows from its centre... */
-  CHECK(graphics_get_pixel(0, fade_row) == C(24, 31, 54), "wallpaper band faded out at centre + h/6");
+  CHECK(graphics_get_pixel(0, fade_row) == C(232, 234, 236), "wallpaper band faded out at centre + h/6");
   /* ...and the first/last rows keep the exact endpoint colours. */
-  CHECK(graphics_get_pixel(0, 0) == C(12, 16, 34), "band never reaches the top row");
-  CHECK(graphics_get_pixel(0, WP_H - 1) == C(34, 44, 72), "band never reaches the bottom row");
-  /* Blue rises monotonically into the band and again below it. */
-  int prev = 0, mono_up = 1, mono_down = 1;
+  CHECK(graphics_get_pixel(0, 0) == C(248, 249, 250), "band never reaches the top row");
+  CHECK(graphics_get_pixel(0, WP_H - 1) == C(218, 220, 224), "band never reaches the bottom row");
+  /* The band is a smooth hump added over the plain ramp: its blue delta
+   * (actual minus the ramp) rises monotonically to +12 at the centre and
+   * falls monotonically back to 0 at fade_row — independent of the
+   * (downward) ramp direction. */
+  int prev = -1, delta_up = 1;
   for (int row = 0; row <= peak_row; row++) {
-    int b = (int)(graphics_get_pixel(0, row) & 0xFF);
-    if (b < prev) mono_up = 0;
+    int b = (int)(graphics_get_pixel(0, row) & 0xFF) - wallpaper_plain_blue(row);
+    if (b < prev) delta_up = 0;
     prev = b;
   }
-  prev = 0;
+  prev = 13; /* a delta can never exceed +12 */
+  int delta_down = 1;
+  for (int row = peak_row; row <= fade_row; row++) {
+    int b = (int)(graphics_get_pixel(0, row) & 0xFF) - wallpaper_plain_blue(row);
+    if (b > prev) delta_down = 0;
+    prev = b;
+  }
+  CHECK(delta_up, "band blue delta rises monotonically into the centre");
+  CHECK(delta_down, "band blue delta falls monotonically past the centre");
+  /* Past the band the raw ramp dominates: blue falls monotonically to the
+   * taskbar line (no clamp or inversion artifacts). */
+  prev = 256;
+  int falls = 1;
   for (int row = fade_row; row < WP_H; row++) {
     int b = (int)(graphics_get_pixel(0, row) & 0xFF);
-    if (b < prev) mono_down = 0;
+    if (b > prev) falls = 0;
     prev = b;
   }
-  CHECK(mono_up, "wallpaper blue rises monotonically into the band");
-  CHECK(mono_down, "wallpaper blue rises monotonically below the band");
+  CHECK(falls, "wallpaper blue falls monotonically below the band");
   int peak = 0;
   for (int row = 0; row < WP_H; row++) {
     int b = (int)(graphics_get_pixel(0, row) & 0xFF);
     if (b > peak) peak = b;
   }
-  CHECK(peak == 72, "brightest wallpaper row is the taskbar line");
+  CHECK(peak == 253, "brightest wallpaper blue is the band peak");
 }
 
 static void test_wallpaper_clip(void) {
@@ -380,8 +403,8 @@ static void test_wallpaper_clip(void) {
   fill_wallpaper();
   graphics_reset_clip();
   CHECK(graphics_get_pixel(99, 100) == 0, "wallpaper obeys clip (left of clip)");
-  CHECK(graphics_get_pixel(100, 100) == C(14, 18, 37), "wallpaper paints inside the clip");
-  CHECK(graphics_get_pixel(103, 100) == C(14, 18, 37), "wallpaper paints the last clipped pixel");
+  CHECK(graphics_get_pixel(100, 100) == C(246, 247, 248), "wallpaper paints inside the clip");
+  CHECK(graphics_get_pixel(103, 100) == C(246, 247, 248), "wallpaper paints the last clipped pixel");
   CHECK(graphics_get_pixel(104, 100) == 0, "wallpaper obeys clip (right of clip)");
   CHECK(graphics_get_pixel(100, 101) == 0, "wallpaper obeys clip (below clip)");
   CHECK(graphics_get_pixel(0, 0) == 0, "wallpaper obeys clip (screen top untouched)");
@@ -456,21 +479,21 @@ static void test_window_tiling_and_titlebar(void) {
   CHECK(win->x == 0 && win->y == 0 && win->w == SCREEN_WIDTH && win->h == WP_H,
         "single window fills the tiled area (mode-sized)");
 
-  CHECK(px_w(win, 4, 6) == C(96, 166, 255), "focused title bar is the bright blue (96,166,255)");
-  CHECK(px_w(win, 300, 3) == C(96, 166, 255), "focused title bar blue across the bar");
-  CHECK(px_w(win, 300, 14) == C(96, 166, 255), "focused title bar blue down to the fold");
-  CHECK(px_w(win, 4, 17) == C(58, 108, 188), "focused title bar has a darker fold at the bottom");
+  CHECK(px_w(win, 4, 6) == TP(THEME_SURFACE), "focused title bar is the white face");
+  CHECK(px_w(win, 300, 3) == TP(THEME_SURFACE), "focused title bar face across the bar");
+  CHECK(px_w(win, 300, 14) == TP(THEME_SURFACE), "focused title bar face down to the fold");
+  CHECK(px_w(win, 4, 17) == TP(THEME_ACCENT), "focused title bar has the accent fold at the bottom");
   CHECK(px_w(win, 4, 17) != px_w(win, 4, 6), "focused title bar fold differs from the face");
 
   /* title text still drawn at the historical position (x+8, y+6) */
   int title_px = 0;
   for (int yy = 6; yy < 14; yy++)
     for (int xx = 8; xx < 8 + 4 * 8; xx++)
-      if (px_w(win, xx, yy) == C(235, 238, 245)) title_px++;
+      if (px_w(win, xx, yy) == TP(THEME_TEXT)) title_px++;
   CHECK(title_px > 0, "focused title text still drawn at (x+8, y+6)");
 
   /* menu bar / content background unchanged */
-  CHECK(px_w(win, 4, 22) == C(206, 208, 214), "focused menu bar colour unchanged");
+  CHECK(px_w(win, 4, 22) == TP(THEME_SURFACE), "focused menu bar colour unchanged");
   CHECK(px_w(win, 4, 40) == C(16, 18, 30), "content background colour unchanged");
 }
 
@@ -482,12 +505,12 @@ static void test_window_unfocused_titlebar(void) {
   wm_draw_windows(-1); /* nothing focused */
 
   struct window *win = &windows[0];
-  CHECK(px_w(win, 4, 6) == C(72, 86, 120), "unfocused title bar is the muted gray-blue (72,86,120)");
-  CHECK(px_w(win, 300, 3) == C(72, 86, 120), "unfocused title bar colour across the bar");
-  CHECK(px_w(win, 4, 17) == C(44, 54, 80), "unfocused title bar has a darker fold");
-  CHECK(px_w(win, 4, 6) != C(96, 166, 255), "unfocused title bar is not the focused blue");
-  CHECK(px_w(win, 0, 40) == C(64, 68, 82), "unfocused frame border colour unchanged");
-  CHECK(px_w(win, 4, 22) == C(168, 170, 176), "unfocused menu bar colour unchanged");
+  CHECK(px_w(win, 4, 6) == TP(THEME_SURFACE_1), "unfocused title bar is the muted grey face");
+  CHECK(px_w(win, 300, 3) == TP(THEME_SURFACE_1), "unfocused title bar colour across the bar");
+  CHECK(px_w(win, 4, 17) == TP(THEME_OUTLINE), "unfocused title bar has the outline fold");
+  CHECK(px_w(win, 4, 6) != TP(THEME_SURFACE), "unfocused title bar is not the focused face");
+  CHECK(px_w(win, 0, 40) == TP(THEME_OUTLINE), "unfocused frame border colour unchanged");
+  CHECK(px_w(win, 4, 22) == TP(THEME_SURFACE_1), "unfocused menu bar colour unchanged");
 }
 
 static void test_window_drop_shadow(void) {
@@ -497,19 +520,21 @@ static void test_window_drop_shadow(void) {
   wm_draw_windows(id);
   struct window *win = &windows[0];
 
-  CHECK(px_w(win, win->w - 1, 40) == C(8, 10, 16), "shadow runs along the right edge");
-  CHECK(px_w(win, win->w - 1, win->h - 40) == C(8, 10, 16), "shadow runs low on the right edge");
-  CHECK(px_w(win, 40, win->h - 1) == C(8, 10, 16), "shadow runs along the bottom edge");
-  CHECK(px_w(win, win->w - 40, win->h - 1) == C(8, 10, 16), "shadow runs along the bottom edge (right half)");
-  CHECK(px_w(win, 40, win->h) == C(8, 10, 16), "shadow band just outside the bottom edge");
-  CHECK(px_w(win, win->w - 2, 40) == C(57, 99, 153), "frame inner bevel sits next to the shadow");
+  CHECK(px_w(win, win->w - 1, 40) == TP(THEME_OUTLINE_DARK), "shadow runs along the right edge");
+  CHECK(px_w(win, win->w - 1, win->h - 40) == TP(THEME_OUTLINE_DARK), "shadow runs low on the right edge");
+  CHECK(px_w(win, 40, win->h - 1) == TP(THEME_OUTLINE_DARK), "shadow runs along the bottom edge");
+  CHECK(px_w(win, win->w - 40, win->h - 1) == TP(THEME_OUTLINE_DARK), "shadow runs along the bottom edge (right half)");
+  CHECK(px_w(win, 40, win->h) == TP(THEME_OUTLINE_DARK), "shadow band just outside the bottom edge");
+  CHECK(px_w(win, win->w - 2, 40) == C(15, 69, 139), "frame inner bevel sits next to the shadow");
+  /* the bevel above is the 3/5 shade of the focused border (THEME_ACCENT)
+   * that graphics.c's outline polish paints 1px inside the frame */
 
   /* top and left edges stay bright: no shadow there */
-  CHECK(px_w(win, 0, 40) == C(96, 166, 255), "no shadow on the left edge");
-  CHECK(px_w(win, 40, 0) == C(96, 166, 255), "no shadow on the top edge");
-  CHECK(px_w(win, 0, win->h - 40) != C(8, 10, 16), "shadow colour not used low on the left edge");
-  CHECK(px_w(win, win->w - 40, 0) != C(8, 10, 16), "shadow colour not used on the right of the top edge");
-  CHECK(px_w(win, 0, 0) != C(8, 10, 16), "shadow does not wrap the top-left corner");
+  CHECK(px_w(win, 0, 40) == TP(THEME_ACCENT), "no shadow on the left edge");
+  CHECK(px_w(win, 40, 0) == TP(THEME_ACCENT), "no shadow on the top edge");
+  CHECK(px_w(win, 0, win->h - 40) != TP(THEME_OUTLINE_DARK), "shadow colour not used low on the left edge");
+  CHECK(px_w(win, win->w - 40, 0) != TP(THEME_OUTLINE_DARK), "shadow colour not used on the right of the top edge");
+  CHECK(px_w(win, 0, 0) != TP(THEME_OUTLINE_DARK), "shadow does not wrap the top-left corner");
 
   /* only the outer 1px is shadowed: the content area is intact */
   CHECK(px_w(win, win->w - 3, 40) == C(16, 18, 30), "content area untouched by the shadow");
@@ -524,27 +549,27 @@ static void test_window_close_button(void) {
   struct window *win = &windows[0];
   int bx = win->w - 18, by = 2; /* the click target the desktop uses */
 
-  CHECK(px_w(win, bx + 1, by + 1) == C(178, 54, 54), "close button red fill intact (TL)");
-  CHECK(px_w(win, bx + 8, by + 12) == C(178, 54, 54), "close button red fill intact (below the glyph)");
-  CHECK(px_w(win, bx + 14, by + 8) == C(178, 54, 54), "close button red fill intact (right of the glyph)");
-  CHECK(px_w(win, bx, by) == C(230, 120, 120), "close button outline intact (TL)");
-  CHECK(px_w(win, bx + 15, by + 15) == C(230, 120, 120), "close button outline intact (BR)");
+  CHECK(px_w(win, bx + 1, by + 1) == TP(THEME_RED_SOFT), "close button red fill intact (TL)");
+  CHECK(px_w(win, bx + 8, by + 12) == TP(THEME_RED_SOFT), "close button red fill intact (below the glyph)");
+  CHECK(px_w(win, bx + 14, by + 8) == TP(THEME_RED_SOFT), "close button red fill intact (right of the glyph)");
+  CHECK(px_w(win, bx, by) == TP(THEME_RED_EDGE), "close button outline intact (TL)");
+  CHECK(px_w(win, bx + 15, by + 15) == TP(THEME_RED_EDGE), "close button outline intact (BR)");
 
   int glyph_px = 0;
   for (int yy = by; yy < by + 16; yy++)
     for (int xx = bx; xx < bx + 16; xx++)
-      if (px_w(win, xx, yy) == C(255, 240, 240)) glyph_px++;
+      if (px_w(win, xx, yy) == TP(THEME_RED)) glyph_px++;
   CHECK(glyph_px > 0, "X glyph still drawn inside the close button");
 
   /* the drop shadow must never creep into the button */
   int shadow_px = 0;
   for (int yy = by; yy < by + 16; yy++)
     for (int xx = bx; xx < bx + 16; xx++)
-      if (px_w(win, xx, yy) == C(8, 10, 16)) shadow_px++;
+      if (px_w(win, xx, yy) == TP(THEME_OUTLINE_DARK)) shadow_px++;
   CHECK(shadow_px == 0, "no shadow pixels inside the close button");
 
   /* the title bar reaches the button: nothing else painted in the gutter */
-  CHECK(px_w(win, bx - 2, by + 6) == C(96, 166, 255), "title bar colour reaches the close button");
+  CHECK(px_w(win, bx - 2, by + 6) == TP(THEME_SURFACE), "title bar colour reaches the close button");
 }
 
 static void test_window_tiled_pair(void) {
@@ -560,17 +585,17 @@ static void test_window_tiled_pair(void) {
   struct window *b = &windows[1];
   CHECK(a->w == SCREEN_WIDTH / 2 && b->x == SCREEN_WIDTH / 2, "two windows tile side by side");
 
-  CHECK(px_w(a, 4, 6) == C(96, 166, 255), "left (focused) window title bar is bright blue");
-  CHECK(px_w(b, 4, 6) == C(72, 86, 120), "right (unfocused) window title bar is muted gray-blue");
+  CHECK(px_w(a, 4, 6) == TP(THEME_SURFACE), "left (focused) window title bar is the white face");
+  CHECK(px_w(b, 4, 6) == TP(THEME_SURFACE_1), "right (unfocused) window title bar is the muted grey face");
   CHECK(px_w(a, 4, 6) != px_w(b, 4, 6), "focused and unfocused title bars differ in one frame");
 
-  CHECK(px_w(a, a->w - 1, 40) == C(8, 10, 16), "left window right edge carries the shadow");
-  CHECK(px_w(b, 0, 40) == C(64, 68, 82), "right window left edge stays bright (no shadow)");
-  CHECK(px_w(b, b->w - 1, 40) == C(8, 10, 16), "right window right edge carries the shadow");
-  CHECK(px_w(b, 40, b->h - 1) == C(8, 10, 16), "bottom edge carries the shadow");
+  CHECK(px_w(a, a->w - 1, 40) == TP(THEME_OUTLINE_DARK), "left window right edge carries the shadow");
+  CHECK(px_w(b, 0, 40) == TP(THEME_OUTLINE), "right window left edge stays bright (no shadow)");
+  CHECK(px_w(b, b->w - 1, 40) == TP(THEME_OUTLINE_DARK), "right window right edge carries the shadow");
+  CHECK(px_w(b, 40, b->h - 1) == TP(THEME_OUTLINE_DARK), "bottom edge carries the shadow");
 
-  CHECK(px_w(a, 40, 0) == C(96, 166, 255), "focused window top edge stays bright");
-  CHECK(px_w(a, a->w, 40) == C(64, 68, 82), "shared edge shows the neighbour border, not the shadow");
+  CHECK(px_w(a, 40, 0) == TP(THEME_ACCENT), "focused window top edge stays bright");
+  CHECK(px_w(a, a->w, 40) == TP(THEME_OUTLINE), "shared edge shows the neighbour border, not the shadow");
 }
 
 /* --- icons (icons.h glyph bytes) --- */
