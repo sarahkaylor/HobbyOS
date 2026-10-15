@@ -606,7 +606,7 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
   rc=0` + `ACCEPTANCE-COMPLETE` (4321 s); `hobbyos.elf` 1,371,192 B + `hobbyos.bin`
   218,036 B (sha `8126b413...`); exactly 59 objects, zero twins.** Battery 10 launched on
   `9beedc4`. NEXT: the FINAL acceptance re-cut (full S0->S3 + extract + boot on the merged
-  lineage with incremental + -j8).
+  lineage with incremental + -j8). **DISPATCHED (`deleg_8d010caf`, 1 lane from `9beedc4`): w12-rcut** — the culminating receipt run.
 
 - **2026-10-14 (~23:20) — w9-dirent S2 crown attempt #1: PROGRESS + remaining wall.** The
   dirent fix eliminated the `cannot open` class — lld now WALKS all 59 in-OS objects (new
