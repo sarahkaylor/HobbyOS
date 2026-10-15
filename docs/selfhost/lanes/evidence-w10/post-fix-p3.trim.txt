@@ -1,0 +1,15 @@
+W10P3-STEP1-MKDIR-STAT
+/W10/D1: stat=[KERNEL] Process 2: /W10/STATP.BIN exited unexpectedly or gracefully.
+0 size=0 mtime=1792012374 ctime=1792012374 UTC=2026-10-14 21:12:54
+W10P3-STEP2-MAKE-FIRST
+P3-COMPILING-A
+/CP.BIN A.C A.O
+[KERNEL] Process 5: /CP.BIN exited unexpectedly or gracefully.
+W10P3-STEP3-MAKE-AGAIN-UP-TO-DATE
+MAKE.BIN: Nothing to be done for 'all'.
+W10P3-STEP4-REWRITE-SOURCE
+[KERNEL] Process 2: /CP.BIN exited unexpectedly or gracefully.
+P3-COMPILING-A
+/CP.BIN A.C A.O
+[KERNEL] Process 5: /CP.BIN exited unexpectedly or gracefully.
+W10P3-DONE

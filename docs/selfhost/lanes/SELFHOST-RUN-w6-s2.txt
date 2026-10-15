@@ -1,0 +1,2 @@
+s1-line|SH.BIN|/SRC/P5.RUN
+s2-kernel|SH.BIN|/SRC/SELFHOST.SH kernel

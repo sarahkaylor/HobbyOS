@@ -1,0 +1,7 @@
+# w5-flat lane probe: prove the PIPELINE-staged flat /TOOLS toolchain runs
+# in-OS.  CLANG.BIN here is the flat image produced by the --tools staging
+# (elf_flat conversion inside tools/selfhost-stage.sh), NOT a hand-made one.
+# The driver (SELFHOST.BIN, KERNEL_MODE_SELFHOST boot) resolves CLANG.BIN
+# against /TOOLS, relays its stdout to serial, and reports phase-done rc=0
+# when the clang process exits cleanly.
+w5-clang-version|CLANG.BIN|--version

@@ -1,0 +1,52 @@
+{
+  "lane": "w8-torture",
+  "wave": 8,
+  "role": "root-cause + fix the VM-only (actually ARM-only, intermittent) TORTURE exec-wait-cycles red at tip 288995c (exec_ok=0, all cycles -1) introduced by the w6-run exec-argv cap bump",
+  "branch": "selfhost/w8-torture",
+  "base_tip": "288995c",
+  "commits": [
+    "ac59b9c w8-torture probe: capture raw exec-child wait status + child argv stack addresses (diagnostic only)",
+    "9159e86 w8-torture: fix exec argv marshal dropping args near the user stack top (per-page validation)"
+  ],
+  "symptom": "CI VM test-arm waves at 288995c fail 'TORTURE exec-wait-cycles' deterministically-ish (labels merged-w7_20261014-162424, merged-w7r_20261014-162947): exec_ok=0 exec_rejected=0, every 8-cycle iteration (incl. the bounded retry) returns -1; children still print [TORTURE.CHILD] ok (~15-16x). Control 42c6c0b on the same VM passes (pre-w6_20261014-164131, exec_ok=8). Integrator rerun 2026-10-14 local at the same tip FAILED (exec_ok=0) after the first local wave PASSED -> intermittent on BOTH machines, 3 fails / 4 runs at 288995c, 0 fails across many recent pre-w6 runs.",
+  "root_cause": {
+    "code": "src/kernel/program_loader.c proc_marshal_argv -> pl_strcpy; src/kernel/arch/{arm,x64}/trap.c sys_exec flat-args u_strcpy",
+    "mechanism": "w6-run raised the per-argv-element copy cap 64 -> HO_EXEC_ARGV_LEN (4096). pl_strcpy/u_strcpy validate the WHOLE cap range up front (pl_user_ok(src, 4096) -> vm_touch). vm_touch fails (-EFAULT) when the range crosses the END of a mapped region. A fork+exec child builds argv/exit-code on the USER STACK ~0x238 below the stack top (v2 AS: stack region [0x17F8000000, 0x1800000000), SP 0x1800000000; frames _start 0x50 + main 0x130 + exec_cycles 0x80 + exec_cycle 0x50, code[] at sp+0x20 -> code@0x17fffffdc8). A 4096-byte pre-check from there reaches ~3.5 KiB past the stack top into unmapped space -> the range check rejects -> pl_strcpy returns 0 -> proc_marshal_argv drops argv[2] -> blob is ['TORTURE.BIN','child'] (argc=2) -> child main() takes the missing-arg default code=7 -> exit(7) != want(10..17) -> waitpid status 0x700 (WIFEXITED, WEXITSTATUS 7) fails every cycle -> -1, exec_ok=0, exec_rejected=0.",
+    "why_not_actually_intermittent": "Deterministic on ARM: the only local 'PASS at tip' was the native HOST build (merged-battery6-2026-10-14.log, suite_ms=301, total_kb=65536 mock) which never runs the ARM code. Every ARM run at 288995c fails (VM merged-w7 + merged-w7r, local ARM battery rerun merged-battery6-wave-rerun suite_ms=33898, and 6/6 local selfhost-harness runs with code@=0x17fffffdc8 stable and st=0x700 code=7 on all 16 forks). Pre-w6 ARM (cap 64) passes every run. The check outcome is a fixed function of (code[] offset below stack top) vs (cap = 4096), so the w6 cap bump makes it trip 100% of the time in the ARM build. The per-page fix validates only the bytes copied, so it holds at any stack depth/load.",
+    "discrimination": "probe build at unfixed tip (workstation, selfhost harness): child argv2=10 code@=0x17fffffdc8 argv@=0x17fffffda0 (argv intact in the child); parent waitpid st=0x700 exited=1 code=7 sig=0 want=10..17 on all 16 forks. H1 (argv[2] dropped in the kernel marshal -> default exit 7) PROVEN; H2 (child fault-killed after ok) RULED OUT (exited=1, sig=0); H3 (4096-wide sys_exec stack locals overflow) RULED OUT (per-CPU kernel stacks are 64 KiB; the flat-args fallback is not even the argv source); H4 (cxxrt.o/libc.a delta) RULED OUT (the same binary drives a healthy child that prints ok and exits normally; only the marshalled argv was short). serials: docs/selfhost/lanes/evidence-w8-torture/w8-probe-fail.serial.txt (pre-fix FAIL) and w8-fix-probe.serial.txt (post-fix PASS, same addresses)."
+  },
+  "fix": {
+    "commit": "9159e86",
+    "change": "pl_strcpy (program_loader.c) and u_strcpy (arch/arm/trap.c + arch/x64/trap.c): validate per page (exactly the bytes copied) instead of the whole cap up front; a page mid-string that is unreadable still drops the arg (same 0 return). Matches the established exec_read_str envp pattern.",
+    "w6_purpose_preserved": "long argv elements (sh -c '<recipe line>', the w6-run S0/S1/S2 in-OS build lines up to ~1.3 KB) are copied fully - every page spanned is validated/materialised as read.",
+    "no_diagnostics": "probe prints removed from the final tree; the probe commit stays in history for evidence."
+  },
+  "verification": {
+    "local_selfhost_A_B": {
+      "unfixed": "w8-probe-fail.serial.txt + w8-unfixed-harness-run1..6.serial.txt: 6/6 FAIL, exec_ok=0, all -1, st=0x700 code=7, code@=0x17fffffdc8 stable",
+      "fixed": "w8-fix-probe.serial.txt / w8-fix-clean.serial.txt / w8-fix-clean2.serial.txt / w8-fixed-harness-run2.serial.txt: exec-wait-cycles PASS, exec_ok=8 (probe and clean builds)"
+    },
+    "local_full_wave": "make MODE=test run at fixed tip: TORTURE exec-wait-cycles PASS, poll-many-fds PASS, exec_ok=8, System halt, rc=0 (/tmp/w8-local-battery.log; suite_ms=32248 ARM)",
+    "vm_test_arm": {
+      "runs": [
+        "w8-fix-a: TORTURE exec-wait-cycles PASS exec_ok=8 (1x ambient SHELLTEST WATCHDOG)",
+        "w8-fix-b: TORTURE exec-wait-cycles PASS exec_ok=8 (1x ambient SHELLTEST WATCHDOG)",
+        "w8-fix-c: TORTURE exec-wait-cycles PASS exec_ok=8 + System halt (2x ambient SHELLTEST WATCHDOG)"
+      ],
+      "verdict": "3/3 runs clean of the TORTURE token at the fixed tip (logs ~/ci/logs/w8-fix-*_test-arm.log on 192.168.0.20); the ci rc=1 lines are solely the known ambient SHELLTEST WATCHDOG token the task says not to chase"
+    },
+    "unit_gates": {
+      "arm": "./run_unit_tests.sh -> 318 tests, 0 failures, UNIT TESTS PASSED (rc=0)",
+      "x64": "EXTRA_QEMU_ARGS='-enable-kvm' ./run_unit_tests_intel.sh -> 0 failures, UNIT TESTS PASSED (rc=0)"
+    }
+  },
+  "notes": [
+    "poll-many-fds flaked 2/2 in the SELFHOST relay harness with the clean binary but passes in the real wave (local battery and all VM runs); the fix does not touch the poll path (identical kernel across those runs) - harness serial-relay timing artifact, not a regression.",
+    "The VM's ci rc=1 on waves with an otherwise-green TORTURE comes solely from the known ambient SHELLTEST WATCHDOG token (task: do not chase).",
+    "Local battery at the failing tip is now known to flake too (integrator rerun), so 'VM-only' is corrected to 'ARM-only, tip-biased, intermittent'."
+  ],
+  "untouched": [
+    "main repo /home/sarah/Documents/GitHub/HobbyOS (no pushes)",
+    "integrator trees: ~/hobbyos-selfhost and ~/hobbyos-selfhost-lanes/wt-pre-w6"
+  ]
+}

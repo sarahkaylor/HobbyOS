@@ -1,0 +1,3 @@
+# w7-accept lane: S2-only re-run on the bd58474-fixed kernel (per integrator
+# guidance — do NOT re-run the full S0->S3 loop).  One stage, one boot.
+s2-kernel|SH.BIN|/SRC/SELFHOST.SH kernel

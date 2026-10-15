@@ -1,0 +1,89 @@
+{
+  "lane": "w5-flat",
+  "wave": 5,
+  "status": "complete",
+  "role": "M2 last mile: make the /TOOLS toolchain ELF->FLAT .bin conversion a FUNCTION of the staging pipeline, rebuild the image, prove the in-OS clang version banner from the pipeline (w4-clang b1 fix)",
+  "branch": "selfhost/w5-flat",
+  "base_commit": "92815fa",
+  "commit_tip": "dd70a03",
+  "timestamp": "2026-10-14",
+  "files_owned_modified": [
+    "tools/selfhost-stage.sh ([v5] elf_flat() + stage_flat(): host llvm-objcopy -O binary conversion of the LLVM distribution ELFs at --tools stage time, with sanity checks; sole source-side change)",
+    "tools/w5_flat_boot.py (new; MODE=selfhost boot/capture helper — the stock harness assumes a desktop Apps-menu launch)",
+    "docs/selfhost/lanes/w5-flat-evidence.md (new)",
+    "docs/selfhost/lanes/evidence-w5-flat/w5-clang-version.serial.txt, w5-s0-check.serial.txt (new; trimmed serial evidence)",
+    "docs/selfhost/lanes/SELFHOST-RUN-w5-clang-version.txt (new; lane probe script)",
+    "docs/selfhost/lanes/w5-flat-report.json (this file)"
+  ],
+  "untouched": [
+    "src/kernel/** (no kernel edits — exec-gate finding handed to w5-kernel)",
+    "Makefile.hobbyos (w4-src authored; no change needed by this lane)",
+    "src/user/selfhost/** (driver unchanged)",
+    "root Makefile (no change needed — the disk.img recipe already calls tools/selfhost-stage.sh --tools)",
+    "tests/** (unit tier untouched; the change is host-side staging bash + image content)"
+  ],
+  "gates": [
+    {
+      "gate": "make disk.img green with FLAT /TOOLS from the pipeline",
+      "result": "PASS (rc=0)",
+      "command": "make MODE=selfhost disk.img -j64",
+      "detail": "staging lines in the real pipeline run: CLANG.BIN <- clang-21 (converted, 94192000 B), LLD.BIN (converted, 53250208 B), LLVMAR.BIN (converted, 8348856 B), OBJCOPY.BIN (converted, 4982328 B). No build errors; host lld SIGBUS not hit this run.",
+      "disk_img_sha256_prefix": "7947396ae92ff2ad",
+      "image_free_after": "749,682,688 bytes free on the 1 GiB disk"
+    },
+    {
+      "gate": "mdir + sha256 of staged /TOOLS (flat sizes recorded)",
+      "result": "PASS",
+      "entries": {
+        "CLANG.BIN":  {"bytes": 94192000, "sha256": "099e25f997b51674bc839a1f0c1e0dd1e19526f1e0c449c54bc1c15f61e1f2f3"},
+        "LLD.BIN":    {"bytes": 53250208, "sha256": "f6c2edd6afee22e391624ae25a4ba27f7b00a287ba16ae5028f3fac98f6a0ee6"},
+        "LLVMAR.BIN": {"bytes": 8348856,  "sha256": "e85a3f294afbfa4c75ac90989a4dbdc707ea9e3b25a78cf07512b8f001ebb6e3"},
+        "OBJCOPY.BIN":{"bytes": 4982328,  "sha256": "6b4e78b402f499824e68771118aebc1612b9a92045784c0f33379e2419651115"}
+      },
+      "note": "sizes equal w4-clang's hand-converted measurements exactly (126060320->94192000, 72651120->53250208, 13614528->8348856, 10063016->4982328); sha256 byte-identical to the scratch-verified flat conversions; flat[0:64]==ELF[0x10000:64] verified for every tool; flat head is a real stp x29,x30 prologue (fd 7b bb a9), not 7f 45 4c 46"
+    },
+    {
+      "gate": "in-OS /TOOLS/CLANG.BIN --version full banner from the PIPELINE (serial + exit 0)",
+      "result": "PASS",
+      "method": "booted the pipeline disk.img in MODE=selfhost (kernel auto-launches SELFHOST.BIN with /SRC/SELFHOST.RUN; no desktop; stdout relayed to serial) with a lane probe stage 'w5-clang-version|CLANG.BIN|--version'",
+      "serial": "v2 loader: image mapped (lazy), bytes=94192000 pages=22997 first=in elap=1ms; [IMGPRF] pid=3 done: pages=22997 mapped=22574 skipped=423 batches=180 stop=0 ms=4198; clang version 21.1.8 (/home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang 0c272a4e0cfc70e854e1958baaa2094524b4f9af); Target: aarch64-unknown-none-elf; Thread model: posix; InstalledDir: ; [SELFHOST] phase=w5-clang-version-done rc=0; [SELFHOST] ACCEPTANCE-COMPLETE stages=1",
+      "evidence": "docs/selfhost/lanes/evidence-w5-flat/w5-clang-version.serial.txt (raw serial-w5-clang.log, sha256 3a73aec370090f49)",
+      "note": "proves a normal `make disk.img` now yields a RUNNABLE /TOOLS toolchain — the M2 conversion w4-clang validated as a hand probe is now pipeline-built"
+    },
+    {
+      "gate": "S0 attempt (make -f Makefile.hobbyos check in-OS)",
+      "result": "BLOCKED at the 1 MiB exec gate (kernel-side; recorded and handed off, not chased)",
+      "serial": "phase=s0-check-start; /TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include ... -c src/kernel/main.c -o /SRC/obj/arm/check.o; sh: exec failed: /TOOLS/CLANG.BIN; MAKE.BIN: *** [Makefile.hobbyos:149: check] Error 127; phase=s0-check-fail reason=tool-rc rc=512; FAILED-AT stage=s0-check",
+      "evidence": "docs/selfhost/lanes/evidence-w5-flat/w5-s0-check.serial.txt (raw serial-w5-s0.log, sha256 ceedabdcf9c8318a)",
+      "findings": [
+        "in-OS make PARSED Makefile.hobbyos, resolved the check target and put the compile line on the wire (same milestone w4-src proved)",
+        "sh's execv path rejects the 94 MB flat CLANG.BIN at the kernel's MAX_PROGRAM_SIZE = 1 MiB exec gate (src/include/process.h:42; src/kernel/program_loader.c program_too_large -> -ENOEXEC) — w4-src's CLANG-EXEC-1MIB-GATE, still present in the merged tip, kernel-side, owner w5-kernel (raise/remove to USER_IMG_SIZE)",
+        "this is NOT the nothrow wall: the exec gate fires before clang's first instruction.  The _Znwm/nothrow wall (lane w5-nothrow) is DOWNSTREAM — clang must execute to reach codegen",
+        "contrast with the version gate: the driver's scheduler spawn of the SAME flat CLANG.BIN runs fine (94 MB loaded + prefetched + banner); only the execv path carries the 1 MiB gate"
+      ]
+    }
+  ],
+  "implementation": {
+    "elf_flat": "converts one ELF to a flat image via host llvm-objcopy -O binary with sanity checks: 64-bit AArch64 ELF magic/class/machine detection (return 1 = already flat -> copy verbatim), e_entry == USER_IMG_BASE (0x1000000000) [return 2 = abort staging], first PT_LOAD p_vaddr == e_entry [return 2], flat[0:64] == ELF first-LOAD file content [return 2].  Any return-2 aborts the staging so a broken toolchain can never land silently.",
+    "stage_flat": "per-tool wrapper: convert-if-ELF then mcopy -o to the frozen /TOOLS name; already-flat sources are cp'd (skip cleanly); recorded sizes/bytes are the FLAT sizes",
+    "idempotence": "-f replaces ::/TOOLS via mdeltree first; without -f mcopy -o overwrites in place.  Re-runs green (verified on scratch image + inside the real disk.img run).",
+    "host_dep": "llvm-objcopy checked only when an ELF is found; absent dist-staging still warns+skips (soft dependency preserved)"
+  },
+  "blockers_handed_off": [
+    {
+      "id": "exec-1mib-gate",
+      "severity": "critical for S0/S1/S2/s3",
+      "owner": "w5-kernel (kernel side; w4-src recorded the same CLANG-EXEC-1MIB-GATE)",
+      "what": "sh/make execv path rejects the flat 94 MB CLANG.BIN at MAX_PROGRAM_SIZE (1 MiB).  The driver's own scheduler spawn has no such gate (128 MiB cap), so /TOOLS/CLANG.BIN --version works while `make check` cannot even start clang",
+      "fix_candidates": ["raise/remove the program_too_large exec gate to USER_IMG_SIZE", "or route the shell exec through the same v2 loader path the scheduler spawn uses"]
+    },
+    {
+      "id": "nothrow-znwm",
+      "severity": "critical (downstream)",
+      "owner": "w5-nothrow (parallel lane)",
+      "what": "after the exec gate is lifted, clang -c will reach AArch64 codegen and trap at libc++ operator new(nothrow) override-assert (w4-clang b2 / T2.4b evidence).  Not hit in this lane's S0 attempt because the exec gate fires earlier"
+    }
+  ],
+  "units_state": "untouched-green by inspection: git diff --stat 92815fa..HEAD touches ONLY tools/selfhost-stage.sh, tools/w5_flat_boot.py and docs/** (7 files, +492/-11) — no test/, src/user/**, src/kernel/** or Makefile.hobbyos lines changed; the pipeline change is host-side staging bash + image content, so the unit binaries and their inputs are byte-identical to the pre-change build",
+  "notes": "All mandatory gates verified with real tool output (build rc + mdir/sha256 + serial capture).  One QEMU run at a time; no fuser -k; no mkfs.fat outside the make recipe (scratch images via mformat -F).  Working tree clean at commit c65f2a4 (selfhost/w5-flat)."
+}

@@ -1,0 +1,1 @@
+/TOOLS/CLANG.BIN --target=aarch64-none-elf -c src/kernel/main.c -o /SRC/obj/probe2.o

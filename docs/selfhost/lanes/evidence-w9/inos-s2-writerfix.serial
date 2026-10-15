@@ -1,0 +1,2532 @@
+UEFI firmware (version 2025.11-3ubuntu7 built at 11:11:58 on Mar 31 2026)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+BdsDxe: starting Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+[001;001H[001;001H[001;001Hl[001;002Hi[001;003Hn[001;004Hu[001;005Hx[001;006H:[001;007H [001;008HL[001;009Ho[001;010Ha[001;011Hd[001;012Hi[001;013Hn[001;014Hg[001;015H [001;016Hk[001;017He[001;018Hr[001;019Hn[001;020He[001;021Hl[001;022H [001;023H`[001;024Hb[001;025Ho[001;026Ho[001;027Ht[001;028H([001;029H)[001;030H:[001;031H/[001;032Hb[001;033Ho[001;034Ho[001;035Ht[001;036H/[001;037Hh[001;038Ho[001;039Hb[001;040Hb[001;041Hy[001;042Ho[001;043Hs[001;044H.[001;045Hb[001;046Hi[001;047Hn[001;048H`[001;049H.[001;050H.[001;051H.[001;052H[001;001H[002;001HBooting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+[GPUDIAG] gpu wait > 7 ms: ack=3 used=4 (park off)
+[GPU] virtio-gpu mmio irq=78
+VirtIO GPU successfully initialized.
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1900544 total_mib=7424 reserved=0
+[KERNEL] Activating secondary cores via PSCI...
+[KERNEL] Core 1 power-on requested.
+[KERNEL] Core 2 power-on requested.
+[KERNEL] Core 3 power-on requested.
+[KERNEL] Core 4 power-on requested.
+start_scheduler called on CPU start_scheduler called on CPU start_scheduler called on CPU 3[KERNEL] Core 25start_scheduler called on CPU 
+1
+ power-on requested.
+
+start_scheduler called on CPU [KERNEL] Core 65 power-on requested.
+
+4start_scheduler called on CPU 
+start_scheduler called on CPU 67
+
+[KERNEL] Core 7 power-on requested.
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+virtio-net MAC: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP Discover sent
+DHCP initialization complete.
+
+--- Parallel Program Loading ---
+Mode: SELFHOST - Running in-OS acceptance build driver...
+Loading program for scheduler (v2 AS): SELFHOST.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=-1
+/SELFHOST.BIN
+v2 loader: image mapped (lazy), bytes=52656 pages=13 first=in elap=1ms
+v2 loader: PID=1 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+start_scheduler called on CPU 0
+[SELFHOST] DRIVER-UP script=/SRC/SELFHOST.RUN
+/SRC/OUT.LOG
+/SRC/SELFHOST.RUN
+[SELFHOST] phase=s2-kernel-start
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=1
+Inside process_create: clearing memory at 0x0000000072000000
+Inside process_create: kmemset done.
+Loading program for scheduler (v2 AS): /TOOLS/SH.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=-1
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+v2 loader: PID=3 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/SRC/SELFHOST.SH
+/TOOLS/MAKE.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=-1
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x000000100000DDF8
+/TOOLS/MAKE.BIN
+v2 loader: image mapped (lazy), bytes=309608 pages=76 first=in elap=0ms
+/SRC/Makefile.hobbyos
+/SRC/OBJS.RSP
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/dhcp.c -o /SRC/ob/TOOLS/SH.BIN
+j/arm/dhcp.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22496 skipped=501 batches=180 stop=0 ms=3707
+/SRC/src/kernel/dhcp.c
+/SRC/obj/arm/dhcp-b81674d2.o.tmp
+/SRC/src/include/dhcp.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/net.h
+/TOOLS/RESDIR/include/stddef.h
+/TOOLS/RESDIR/include/__stddef_header_macro.h
+/TOOLS/RESDIR/include/__stddef_ptrdiff_t.h
+/TOOLS/RESDIR/include/__stddef_size_t.h
+/TOOLS/RESDIR/include/__stddef_wchar_t.h
+/TOOLS/RESDIR/include/__stddef_null.h
+/TOOLS/RESDIR/include/__stddef_max_align_t.h
+/TOOLS/RESDIR/include/__stddef_offsetof.h
+/SRC/src/include/virtio_net.h
+/SRC/src/include/timer.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+src/kernel/dhcp.c:42:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   42 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:82:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   82 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:135:19: warning: unused variable 'udp' [-Wunused-variable]
+  135 |   struct udp_hdr* udp = (struct udp_hdr*)(packet + sizeof(struct ipv4_hdr));
+      |                   ^~~
+/SRC/obj/arm/dhcp-b81674d2.o.tmp new=/SRC/obj/arm/dhcp.o
+3 warnings generated.
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/TOOLS/SH.BIN/
+kernel/fat16.c -o /SRC/obj/arm/fat16.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22510 skipped=487 batches=180 stop=0 ms=4104
+/SRC/src/kernel/fat16.c
+/SRC/obj/arm/fat16-b81674d2.o.tmp
+/SRC/src/include/fs.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/fat16.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/process.h
+/SRC/src/include/trap.h
+/SRC/src/include/arch/trap.h
+/SRC/src/include/nfs.h
+/SRC/src/include/ipc_proto.h
+/SRC/src/include/virtio_blk.h
+/TOOLS/RESDIR/include/stddef.h
+/TOOLS/RESDIR/include/__stddef_header_macro.h
+/TOOLS/RESDIR/include/__stddef_ptrdiff_t.h
+/TOOLS/RESDIR/include/__stddef_size_t.h
+/TOOLS/RESDIR/include/__stddef_wchar_t.h
+/TOOLS/RESDIR/include/__stddef_null.h
+/TOOLS/RESDIR/include/__stddef_max_align_t.h
+/TOOLS/RESDIR/include/__stddef_offsetof.h
+/SRC/src/include/errno.h
+src/kernel/fat16.c:1880:25: warning: comparison of integers of different signs: 'int' and 'uint32_t' (aka 'unsigned int') [-Wsign-compare]
+ 1880 |       if ((int)old_size > f->fat16.cursor) f->fat16.cursor = (int)old_size;
+      |           ~~~~~~~~~~~~~ ^ ~~~~~~~~~~~~~~~
+/SRC/obj/arm/fat16-b81674d2.o.tmp new=/SRC/obj/arm/fat16.o
+1 warning generated.
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4/ ELR = T0x0000001000024FE8O
+OLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c s/TOOLS/SH.BINr
+c/kernel/fat16_test.c -o /SRC/obj/arm/fat16_test.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+/TOOLS/CLANG.BIN[DEBUG] Before eret, tf->regs[0] = 
+5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22544 skipped=453 batches=180 stop=0 ms=3468
+/SRC/src/kernel/fat16_test.c
+/SRC/obj/arm/fat16_test-fc5ab816.o.tmp
+/SRC/obj/arm/fat16_test-fc5ab816.o.tmp new=/SRC/obj/arm/fat16_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a/TOOLS/SH.BIN5
+3 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/frame.c -o /SRC/ov2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+bj/arm/frame.o
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22517 skipped=480 batches=180 stop=0 ms=3836
+/SRC/src/kernel/frame.c
+/SRC/obj/arm/frame-2309efc5.o.tmp
+/SRC/src/include/frame.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+[DEBUG] Before eret, tf->regs[0] = 1074116792 ELR = 0x0000001002EEF9B0
+/SRC/obj/arm/frame-2309efc5.o.tmp new=/SRC/obj/arm/frame.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4/ ELR = T0x0000001000024FE8O
+OLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/frame_test.c -/TOOLS/SH.BINo
+ /v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+SRC/obj/arm/frame_test.o
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22485 skipped=512 batches=180 stop=0 ms=4007
+/SRC/src/kernel/frame_test.c
+/SRC/obj/arm/frame_test-2309efc5.o.tmp
+/SRC/obj/arm/frame_test-2309efc5.o.tmp new=/SRC/obj/arm/frame_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4/ ELR = T0x0000001000024FE8O
+OLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64/TOOLS/SH.BIN-
+none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDv2 loader: image mapped (lazy), bytes=I195136R pages=/48i first=ninc elap=lu0dms
+e -c src/kernel/fs.c -o /SRC/obj/[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+arm/fs.o
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22561 skipped=436 batches=180 stop=0 ms=3317
+/SRC/src/kernel/fs.c
+/SRC/obj/arm/fs-1674d230.o.tmp
+/SRC/src/include/fs.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/fat16.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/process.h
+/SRC/src/include/trap.h
+/SRC/src/include/arch/trap.h
+/SRC/src/include/nfs.h
+/SRC/src/include/ipc_proto.h
+/SRC/src/include/pipe.h
+/SRC/src/include/unix.h
+/SRC/src/include/net.h
+/TOOLS/RESDIR/include/stddef.h
+/TOOLS/RESDIR/include/__stddef_header_macro.h
+/TOOLS/RESDIR/include/__stddef_ptrdiff_t.h
+/TOOLS/RESDIR/include/__stddef_size_t.h
+/TOOLS/RESDIR/include/__stddef_wchar_t.h
+/TOOLS/RESDIR/include/__stddef_null.h
+/TOOLS/RESDIR/include/__stddef_max_align_t.h
+/TOOLS/RESDIR/include/__stddef_offsetof.h
+/SRC/src/include/vfs.h
+/SRC/src/include/errno.h
+/SRC/src/include/timer.h
+/SRC/src/include/vm.h
+/SRC/obj/arm/fs-1674d230.o.tmp new=/SRC/obj/arm/fs.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/TOOLS/SH.BIN/R
+ESDIR/include -c src/kernel/fs_test.c -o /SRC/obj/arm/fs_test.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=19ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22475 skipped=522 batches=180 stop=0 ms=4460
+/SRC/src/kernel/fs_test.c
+/SRC/obj/arm/fs_test-74d2309e.o.tmp
+/SRC/obj/arm/fs_test-74d2309e.o.tmp new=/SRC/obj/arm/fs_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8/TO
+OLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/iommu_vtd.c -o /S/TOOLS/SH.BIN
+RC/obj/arm/iommu_vtd.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22447 skipped=550 batches=180 stop=0 ms=4855
+/SRC/src/kernel/iommu_vtd.c
+/SRC/obj/arm/iommu_vtd-d2309efc.o.tmp
+/SRC/obj/arm/iommu_vtd-d2309efc.o.tmp new=/SRC/obj/arm/iommu_vtd.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/ipc_proto.c -o /S[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+RC/obj/arm/ipc_proto.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22474 skipped=523 batches=180 stop=0 ms=4052
+/SRC/src/kernel/ipc_proto.c
+/SRC/obj/arm/ipc_proto-5ab81674.o.tmp
+/SRC/src/include/ipc_proto.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/errno.h
+/SRC/obj/arm/ipc_proto-5ab81674.o.tmp new=/SRC/obj/arm/ipc_proto.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/locks_test.c -o //TOOLS/SH.BIN
+SRC/obj/arm/locks_test.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22610 skipped=387 batches=180 stop=0 ms=3837
+/SRC/src/kernel/locks_test.c
+/SRC/obj/arm/locks_test-309efc5a.o.tmp
+/SRC/obj/arm/locks_test-309efc5a.o.tmp new=/SRC/obj/arm/locks_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /4T ELR = O0x0000001000024FE8O
+LS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDI/TOOLS/SH.BINR
+/include -c src/kernel/main.c -o /SRC/obj/arm/main.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=20ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+/TOOLS/CLANG.BIN[DEBUG] Before eret, tf->regs[0] = 
+5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22469 skipped=528 batches=180 stop=0 ms=4189
+/SRC/src/kernel/main.c
+/SRC/obj/arm/main-b81674d2.o.tmp
+/SRC/src/include/fat16.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/fs.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/process.h
+/SRC/src/include/trap.h
+/SRC/src/include/arch/trap.h
+/SRC/src/include/nfs.h
+/SRC/src/include/ipc_proto.h
+/SRC/src/include/gic.h
+/SRC/src/include/mmu.h
+/SRC/src/include/arch/mmu.h
+/SRC/src/include/program_loader.h
+/SRC/src/include/timer.h
+/SRC/src/include/virtio_blk.h
+/TOOLS/RESDIR/include/stddef.h
+/TOOLS/RESDIR/include/__stddef_header_macro.h
+/TOOLS/RESDIR/include/__stddef_ptrdiff_t.h
+/TOOLS/RESDIR/include/__stddef_size_t.h
+/TOOLS/RESDIR/include/__stddef_wchar_t.h
+/TOOLS/RESDIR/include/__stddef_null.h
+/TOOLS/RESDIR/include/__stddef_max_align_t.h
+/TOOLS/RESDIR/include/__stddef_offsetof.h
+/SRC/src/include/virtio_gpu.h
+/SRC/src/include/virtio_input.h
+/SRC/src/include/net.h
+/SRC/src/include/virtio_net.h
+/SRC/src/include/dhcp.h
+src/kernel/main.c:50:39: warning: unused parameter 'tf' [-Wunused-parameter]
+   50 | void irq_handler_c(struct trap_frame *tf) {
+      |                                       ^
+/SRC/obj/arm/main-b81674d2.o.tmp new=/SRC/obj/arm/main.o
+1 warning generated.
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = /0x0000001000024FE8T
+OOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/math_test.c -o /S/TOOLS/SH.BIN
+RC/obj/arm/math_test.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22544 skipped=453 batches=180 stop=0 ms=3378
+/SRC/src/kernel/math_test.c
+/SRC/obj/arm/math_test-fc5ab816.o.tmp
+/SRC/obj/arm/math_test-fc5ab816.o.tmp new=/SRC/obj/arm/math_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/mmu_test.c -o /SR[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+C/obj/arm/mmu_test.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22548 skipped=449 batches=180 stop=0 ms=3557
+/SRC/src/kernel/mmu_test.c
+/SRC/obj/arm/mmu_test-309efc5a.o.tmp
+/SRC/obj/arm/mmu_test-309efc5a.o.tmp new=/SRC/obj/arm/mmu_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = /T0x0000001000024FE8O
+OLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/net.c -o /SRC/obj/TOOLS/SH.BIN
+/arm/net.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = /TOOLS/CLANG.BIN0x0000001000012720
+
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22546 skipped=451 batches=180 stop=0 ms=3533
+/SRC/src/kernel/net.c
+/SRC/obj/arm/net-c5ab8167.o.tmp
+/SRC/src/include/net.h
+/TOOLS/RESDIR/include/stdint.h
+/TOOLS/RESDIR/include/stddef.h
+/TOOLS/RESDIR/include/__stddef_header_macro.h
+/TOOLS/RESDIR/include/__stddef_ptrdiff_t.h
+/TOOLS/RESDIR/include/__stddef_size_t.h
+/TOOLS/RESDIR/include/__stddef_wchar_t.h
+/TOOLS/RESDIR/include/__stddef_null.h
+/TOOLS/RESDIR/include/__stddef_max_align_t.h
+/TOOLS/RESDIR/include/__stddef_offsetof.h
+/SRC/src/include/virtio_net.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/timer.h
+/SRC/src/include/process.h
+/SRC/src/include/trap.h
+/SRC/src/include/arch/trap.h
+/SRC/src/include/net_rdma.h
+/SRC/src/include/errno.h
+src/kernel/net.c:519:18: warning: variable 'stored' set but not used [-Wunused-but-set-variable]
+  519 |         uint32_t stored = 0;
+      |                  ^
+src/kernel/net.c:782:21: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+  782 |   for (int i = 0; i < sizeof(struct pseudo_hdr)/2; i++) {
+      |                   ~ ^ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/net.c:624:39: warning: unused function 'safe_print_int' [-Wunused-function]
+  624 | __attribute__((noinline)) static void safe_print_int(int val) {
+      |                                       ^~~~~~~~~~~~~~
+/SRC/obj/arm/net-c5ab8167.o.tmp new=/SRC/obj/arm/net.o
+3 warnings generated.
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/net_rdma.c -o /SR[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+C/obj/arm/net_rdma.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22522 skipped=475 batches=180 stop=0 ms=3404
+/SRC/src/kernel/net_rdma.c
+/SRC/obj/arm/net_rdma-674d2309.o.tmp
+/SRC/src/include/net_rdma.h
+/TOOLS/RESDIR/include/stdint.h
+/TOOLS/RESDIR/include/stddef.h
+/TOOLS/RESDIR/include/__stddef_header_macro.h
+/TOOLS/RESDIR/include/__stddef_ptrdiff_t.h
+/TOOLS/RESDIR/include/__stddef_size_t.h
+/TOOLS/RESDIR/include/__stddef_wchar_t.h
+/TOOLS/RESDIR/include/__stddef_null.h
+/TOOLS/RESDIR/include/__stddef_max_align_t.h
+/TOOLS/RESDIR/include/__stddef_offsetof.h
+/SRC/obj/arm/net_rdma-674d2309.o.tmp new=/SRC/obj/arm/net_rdma.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/net_rdma_test.c -[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+o /SRC/obj/arm/net_rdma_test.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = /TOOLS/CLANG.BIN5
+ ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22533 skipped=464 batches=180 stop=0 ms=3247
+/SRC/src/kernel/net_rdma_test.c
+/SRC/obj/arm/net_rdma_test-674d2309.o.tmp
+/SRC/obj/arm/net_rdma_test-674d2309.o.tmp new=/SRC/obj/arm/net_rdma_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/net_test.c -o /SR[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+C/obj/arm/net_test.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22544 skipped=453 batches=180 stop=0 ms=3442
+/SRC/src/kernel/net_test.c
+/SRC/obj/arm/net_test-fc5ab816.o.tmp
+/SRC/obj/arm/net_test-fc5ab816.o.tmp new=/SRC/obj/arm/net_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /4T ELR = O0x0000001000024FE8O
+LS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/nfs.c -o /SRC/obj/TOOLS/SH.BIN
+/arm/nfs.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22520 skipped=477 batches=180 stop=0 ms=3627
+/SRC/src/kernel/nfs.c
+/SRC/obj/arm/nfs-2309efc5.o.tmp
+/SRC/src/include/nfs.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/net.h
+/TOOLS/RESDIR/include/stddef.h
+/TOOLS/RESDIR/include/__stddef_header_macro.h
+/TOOLS/RESDIR/include/__stddef_ptrdiff_t.h
+/TOOLS/RESDIR/include/__stddef_size_t.h
+/TOOLS/RESDIR/include/__stddef_wchar_t.h
+/TOOLS/RESDIR/include/__stddef_null.h
+/TOOLS/RESDIR/include/__stddef_max_align_t.h
+/TOOLS/RESDIR/include/__stddef_offsetof.h
+src/kernel/nfs.c:157:12: warning: '/*' within block comment [-Wcomment]
+  157 |  * is *body/*body_len, valid until the next rpc_call (static buffer). */
+      |            ^
+/SRC/obj/arm/nfs-2309efc5.o.tmp new=/SRC/obj/arm/nfs.o
+1 warning generated.
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /4T ELR = O0x0000001000024FE8O
+LS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/nfs_proto.c -o /S/TOOLS/SH.BIN
+RC/obj/arm/nfs_proto.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22529 skipped=468 batches=180 stop=0 ms=3512
+/SRC/src/kernel/nfs_proto.c
+/SRC/obj/arm/nfs_proto-4d2309ef.o.tmp
+/SRC/src/include/nfs.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/obj/arm/nfs_proto-4d2309ef.o.tmp new=/SRC/obj/arm/nfs_proto.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = /0x0000001000024FE8T
+OOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/nfs_test.c -o /SR/TOOLS/SH.BIN
+C/obj/arm/nfs_test.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22566 skipped=431 batches=180 stop=0 ms=4192
+/SRC/src/kernel/nfs_test.c
+/SRC/obj/arm/nfs_test-81674d23.o.tmp
+/SRC/obj/arm/nfs_test-81674d23.o.tmp new=/SRC/obj/arm/nfs_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/pipe.c -o /SRC/ob/TOOLS/SH.BIN
+j/arm/pipe.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = /TOOLS/CLANG.BIN5
+ ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22489 skipped=508 batches=180 stop=0 ms=3915
+/SRC/src/kernel/pipe.c
+/SRC/obj/arm/pipe-09efc5ab.o.tmp
+/SRC/src/include/pipe.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/process.h
+/SRC/src/include/trap.h
+/SRC/src/include/arch/trap.h
+/SRC/src/include/errno.h
+/SRC/src/include/fs.h
+/SRC/src/include/fat16.h
+/SRC/src/include/nfs.h
+/SRC/src/include/ipc_proto.h
+src/kernel/pipe.c:139:7: warning: unused variable 'i' [-Wunused-variable]
+  139 |   int i = 0;
+      |       ^
+src/kernel/pipe.c:136:68: warning: unused parameter 'tf' [-Wunused-parameter]
+  136 | int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
+      |                                                                    ^
+src/kernel/pipe.c:216:7: warning: unused variable 'i' [-Wunused-variable]
+  216 |   int i = 0;
+      |       ^
+/SRC/obj/arm/pipe-09efc5ab.o.tmp new=/SRC/obj/arm/pipe.o
+3 warnings generated.
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4/
+T[DEBUG] Before eret, tf->regs[0] = O4O ELR = LS0x0000001000024FE8/
+CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/pipe_test.c -o /S/TOOLS/SH.BIN
+RC/obj/arm/pipe_test.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22435 skipped=562 batches=180 stop=0 ms=4232
+/SRC/src/kernel/pipe_test.c
+/SRC/obj/arm/pipe_test-fc5ab816.o.tmp
+/SRC/obj/arm/pipe_test-fc5ab816.o.tmp new=/SRC/obj/arm/pipe_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/includ4e ELR =  0x0000001000024FE8-
+-target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/process.c -o /SRC/TOOLS/SH.BIN
+/obj/arm/process.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22449 skipped=548 batches=180 stop=0 ms=4413
+/SRC/src/kernel/process.c
+/SRC/obj/arm/process-5ab81674.o.tmp
+/SRC/src/include/process.h
+/SRC/src/include/lock.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/trap.h
+/SRC/src/include/arch/trap.h
+/SRC/src/include/frame.h
+/SRC/src/include/vm.h
+/SRC/src/include/fs.h
+/SRC/src/include/fat16.h
+/SRC/src/include/nfs.h
+/SRC/src/include/ipc_proto.h
+/SRC/src/include/mmu.h
+/SRC/src/include/arch/mmu.h
+/SRC/src/include/setjmp.h
+/SRC/src/include/timer.h
+/SRC/src/include/errno.h
+/SRC/src/include/syscall.h
+src/kernel/process.c:1169:42: warning: unused parameter 'is_yield' [-Wunused-parameter]
+ 1169 | void schedule(struct trap_frame *tf, int is_yield) {
+      |                                          ^
+src/kernel/process.c:2997:50: warning: unused parameter 'prot' [-Wunused-parameter]
+ 2997 | int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags) {
+      |                                                  ^
+/SRC/obj/arm/process-5ab81674.o.tmp new=/SRC/obj/arm/process.o
+2 warnings generated.
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /4T ELR = O0x0000001000024FE8O
+LS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/process_test.c -o/TOOLS/SH.BIN
+ /SRC/obj/arm/process_test.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+/TOOLS/CLANG.BIN
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22544 skipped=453 batches=180 stop=0 ms=3954
+/SRC/src/kernel/process_test.c
+/SRC/obj/arm/process_test-81674d23.o.tmp
+/SRC/obj/arm/process_test-81674d23.o.tmp new=/SRC/obj/arm/process_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/program_loader.c -o /SRC/obj/arm/program_loader.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22495 skipped=502 batches=180 stop=0 ms=3983
+/SRC/src/kernel/program_loader.c
+/SRC/obj/arm/program_loader-309efc5a.o.tmp
+/SRC/src/include/program_loader.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/fs.h
+/SRC/src/include/fat16.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/process.h
+/SRC/src/include/trap.h
+/SRC/src/include/arch/trap.h
+/SRC/src/include/nfs.h
+/SRC/src/include/ipc_proto.h
+/SRC/src/include/setjmp.h
+/SRC/src/include/errno.h
+/SRC/src/include/timer.h
+/SRC/src/include/frame.h
+/SRC/src/include/vm.h
+/SRC/obj/arm/program_loader-309efc5a.o.tmp new=/SRC/obj/arm/program_loader.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/k/TOOLS/SH.BINe
+rnel/program_loader_tev2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+st.c -o /SRC/obj/arm/program_loader_test.o
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22507 skipped=490 batches=180 stop=0 ms=3451
+/SRC/src/kernel/program_loader_test.c
+/SRC/obj/arm/program_loader_test-81674d23.o.tmp
+/SRC/obj/arm/program_loader_test-81674d23.o.tmp new=/SRC/obj/arm/program_loader_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/test_fw_cfg.c -o /TOOLS/SH.BIN
+/SRC/obj/arm/test_fw_cfg.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+/TOOLS/CLANG.BIN
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22467 skipped=530 batches=180 stop=0 ms=4244
+/SRC/src/kernel/test_fw_cfg.c
+/SRC/obj/arm/test_fw_cfg-5ab81674.o.tmp
+/TOOLS/RESDIR/include/stdint.h
+/SRC/obj/arm/test_fw_cfg-5ab81674.o.tmp new=/SRC/obj/arm/test_fw_cfg.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /4T ELR = O0x0000001000024FE8O
+LS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/test_smp.c -o /SR/TOOLS/SH.BIN
+C/obj/arm/test_smp.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720/TOOLS/CLANG.BIN
+
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22508 skipped=489 batches=180 stop=0 ms=4448
+/SRC/src/kernel/test_smp.c
+/SRC/obj/arm/test_smp-09efc5ab.o.tmp
+/SRC/obj/arm/test_smp-09efc5ab.o.tmp new=/SRC/obj/arm/test_smp.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /TOOLS/C4L ELR = A0x0000001000024FE8N
+G.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/time.c -o /SRC/ob/TOOLS/SH.BIN
+j/arm/time.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22539 skipped=458 batches=180 stop=0 ms=4591
+/SRC/src/kernel/time.c
+/SRC/obj/arm/time-74d2309e.o.tmp
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/timer.h
+[DEBUG] Before eret, tf->regs[0] = 1074116888 ELR = 0x00000010043C0B64
+/SRC/obj/arm/time-74d2309e.o.tmp new=/SRC/obj/arm/time.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/time_test.c -o /S/TOOLS/SH.BIN
+RC/obj/arm/time_test.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22476 skipped=521 batches=180 stop=0 ms=4545
+/SRC/src/kernel/time_test.c
+/SRC/obj/arm/time_test-d2309efc.o.tmp
+/SRC/obj/arm/time_test-d2309efc.o.tmp new=/SRC/obj/arm/time_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/timer_test.c -o //TOOLS/SH.BIN
+SRC/obj/arm/timer_test.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720/TOOLS/CLANG.BIN
+
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22493 skipped=504 batches=180 stop=0 ms=4186
+/SRC/src/kernel/timer_test.c
+/SRC/obj/arm/timer_test-b81674d2.o.tmp
+/SRC/obj/arm/timer_test-b81674d2.o.tmp new=/SRC/obj/arm/timer_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /4T ELR = O0x0000001000024FE8O
+LS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/trap_test.c -o /S/TOOLS/SH.BIN
+RC/obj/arm/trap_test.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720/TOOLS/CLANG.BIN
+
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22487 skipped=510 batches=180 stop=0 ms=4210
+/SRC/src/kernel/trap_test.c
+/SRC/obj/arm/trap_test-2309efc5.o.tmp
+/SRC/obj/arm/trap_test-2309efc5.o.tmp new=/SRC/obj/arm/trap_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /4T ELR = O0x0000001000024FE8O
+LS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/unit_test.c -o /S/TOOLS/SH.BIN
+RC/obj/arm/unit_test.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22504 skipped=493 batches=180 stop=0 ms=3883
+/SRC/src/kernel/unit_test.c
+/SRC/obj/arm/unit_test-1674d230.o.tmp
+/SRC/obj/arm/unit_test-1674d230.o.tmp new=/SRC/obj/arm/unit_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /4T ELR = O0x0000001000024FE8O
+LS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/unix.c -o /SRC/ob/TOOLS/SH.BIN
+j/arm/unix.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22535 skipped=462 batches=180 stop=0 ms=3643
+/SRC/src/kernel/unix.c
+/SRC/obj/arm/unix-09efc5ab.o.tmp
+/SRC/src/include/unix.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/ipc_proto.h
+/SRC/src/include/fs.h
+/SRC/src/include/fat16.h
+/SRC/src/include/process.h
+/SRC/src/include/trap.h
+/SRC/src/include/arch/trap.h
+/SRC/src/include/nfs.h
+/SRC/src/include/errno.h
+/SRC/obj/arm/unix-09efc5ab.o.tmp new=/SRC/obj/arm/unix.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /4T ELR = O0x0000001000024FE8O
+LS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/unix_test.c -o /S/TOOLS/SH.BIN
+RC/obj/arm/unix_test.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22502 skipped=495 batches=180 stop=0 ms=4810
+/SRC/src/kernel/unix_test.c
+/SRC/obj/arm/unix_test-4d2309ef.o.tmp
+/SRC/obj/arm/unix_test-4d2309ef.o.tmp new=/SRC/obj/arm/unix_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/vfs.c -o /SRC/obj/arm/vfs.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22507 skipped=490 batches=180 stop=0 ms=5146
+/SRC/src/kernel/vfs.c
+/SRC/obj/arm/vfs-2309efc5.o.tmp
+/SRC/src/include/vfs.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/nfs.h
+/SRC/src/include/fs.h
+/SRC/src/include/fat16.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/process.h
+/SRC/src/include/trap.h
+/SRC/src/include/arch/trap.h
+/SRC/src/include/ipc_proto.h
+/SRC/src/include/errno.h
+/SRC/obj/arm/vfs-2309efc5.o.tmp new=/SRC/obj/arm/vfs.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8/
+TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c /TOOLS/SH.BINs
+rc/kernel/virtio_blk.c -o /v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+SRC/obj/arm/virtio_blk.o
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = /TOOLS/CLANG.BIN0x0000001000012720
+
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22527 skipped=470 batches=180 stop=0 ms=3627
+/SRC/src/kernel/virtio_blk.c
+/SRC/obj/arm/virtio_blk-1674d230.o.tmp
+/SRC/src/include/virtio_blk.h
+/TOOLS/RESDIR/include/stdint.h
+/TOOLS/RESDIR/include/stddef.h
+/TOOLS/RESDIR/include/__stddef_header_macro.h
+/TOOLS/RESDIR/include/__stddef_ptrdiff_t.h
+/TOOLS/RESDIR/include/__stddef_size_t.h
+/TOOLS/RESDIR/include/__stddef_wchar_t.h
+/TOOLS/RESDIR/include/__stddef_null.h
+/TOOLS/RESDIR/include/__stddef_max_align_t.h
+/TOOLS/RESDIR/include/__stddef_offsetof.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/process.h
+/SRC/src/include/trap.h
+/SRC/src/include/arch/trap.h
+src/kernel/virtio_blk.c:655:12: warning: unused variable 'desc_idx' [-Wunused-variable]
+  655 |   uint16_t desc_idx = 0;
+      |            ^~~~~~~~
+/SRC/obj/arm/virtio_blk-1674d230.o.tmp new=/SRC/obj/arm/virtio_blk.o
+1 warning generated.
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /4T ELR = O0x0000001000024FE8O
+LS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/virti/TOOLS/SH.BINo
+_blk_test.cv2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+ -o /SRC/obj/arm/virtio_blk_test.o
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22528 skipped=469 batches=180 stop=0 ms=3335
+/SRC/src/kernel/virtio_blk_test.c
+/SRC/obj/arm/virtio_blk_test-674d2309.o.tmp
+/SRC/obj/arm/virtio_blk_test-674d2309.o.tmp new=/SRC/obj/arm/virtio_blk_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now /4TOOLS/CLA
+N[DEBUG] Before eret, tf->regs[0] = G4. ELR = B0x0000001000024FE8I
+N -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/virtio_gpu.c -o //TOOLS/SH.BIN
+SRC/obj/arm/virtio_gpu.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720/TOOLS/CLANG.BIN
+
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22496 skipped=501 batches=180 stop=0 ms=3818
+/SRC/src/kernel/virtio_gpu.c
+/SRC/obj/arm/virtio_gpu-5ab81674.o.tmp
+/SRC/src/include/virtio_gpu.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/display_mode.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+/SRC/obj/arm/virtio_gpu-5ab81674.o.tmp new=/SRC/obj/arm/virtio_gpu.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = /0x0000001000024FE8T
+OOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /T/TOOLS/SH.BINO
+OLS/RESDIR/include -c src/kernel/virtio_gpu_test.c -o /SRC/obj/arm/virtio_gpu_test.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=9ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22524 skipped=473 batches=180 stop=0 ms=2923
+/SRC/src/kernel/virtio_gpu_test.c
+/SRC/obj/arm/virtio_gpu_test-5ab81674.o.tmp
+/SRC/obj/arm/virtio_gpu_test-5ab81674.o.tmp new=/SRC/obj/arm/virtio_gpu_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/virtio_gpu_x64.c [KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+-o /SRC/obj/arm/virtio_gpu_x64.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = /TOOLS/CLANG.BIN5
+ ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22510 skipped=487 batches=180 stop=0 ms=3875
+/SRC/src/kernel/virtio_gpu_x64.c
+/SRC/obj/arm/virtio_gpu_x64-2309efc5.o.tmp
+/SRC/obj/arm/virtio_gpu_x64-2309efc5.o.tmp new=/SRC/obj/arm/virtio_gpu_x64.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8/
+TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/virtio_input.c -o/TOOLS/SH.BIN
+ /SRC/obj/arm/virtio_input.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = /TOOLS/CLANG.BIN5
+ ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22487 skipped=510 batches=180 stop=0 ms=4011
+/SRC/src/kernel/virtio_input.c
+/SRC/obj/arm/virtio_input-309efc5a.o.tmp
+/SRC/src/include/virtio_input.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+/SRC/obj/arm/virtio_input-309efc5a.o.tmp new=/SRC/obj/arm/virtio_input.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/virtio_input_test.c -o /SRC/obj/arm/virtio_input_test.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720/TOOLS/CLANG.BIN
+
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22472 skipped=525 batches=180 stop=0 ms=4313
+/SRC/src/kernel/virtio_input_test.c
+/SRC/obj/arm/virtio_input_test-b81674d2.o.tmp
+/SRC/obj/arm/virtio_input_test-b81674d2.o.tmp new=/SRC/obj/arm/virtio_input_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/virtio_net.c -o /SRC/obj/arm/virtio_net.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22505 skipped=492 batches=180 stop=0 ms=4035
+/SRC/src/kernel/virtio_net.c
+/SRC/obj/arm/virtio_net-c5ab8167.o.tmp
+/SRC/src/include/virtio_net.h
+/TOOLS/RESDIR/include/stdint.h
+/TOOLS/RESDIR/include/stddef.h
+/TOOLS/RESDIR/include/__stddef_header_macro.h
+/TOOLS/RESDIR/include/__stddef_ptrdiff_t.h
+/TOOLS/RESDIR/include/__stddef_size_t.h
+/TOOLS/RESDIR/include/__stddef_wchar_t.h
+/TOOLS/RESDIR/include/__stddef_null.h
+/TOOLS/RESDIR/include/__stddef_max_align_t.h
+/TOOLS/RESDIR/include/__stddef_offsetof.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/process.h
+/SRC/src/include/trap.h
+/SRC/src/include/arch/trap.h
+src/kernel/virtio_net.c:699:20: warning: unused function 'reg_write8' [-Wunused-function]
+  699 | static inline void reg_write8(uint32_t offset, uint8_t val) {
+      |                    ^~~~~~~~~~
+/SRC/obj/arm/virtio_net-c5ab8167.o.tmp new=/SRC/obj/arm/virtio_net.o
+1 warning generated.
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/virtio_net_test.c[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+ -o /SRC/obj/arm/virtio_net_test.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22534 skipped=463 batches=180 stop=0 ms=3291
+/SRC/src/kernel/virtio_net_test.c
+/SRC/obj/arm/virtio_net_test-fc5ab816.o.tmp
+/SRC/obj/arm/virtio_net_test-fc5ab816.o.tmp new=/SRC/obj/arm/virtio_net_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /4T ELR = O0x0000001000024FE8O
+LS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgene/TOOLS/SH.BINr
+al-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/vm.c -o /SRC/obj/v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+arm/vm.o
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22544 skipped=453 batches=180 stop=0 ms=3379
+/SRC/src/kernel/vm.c
+/SRC/obj/arm/vm-674d2309.o.tmp
+/SRC/src/include/vm.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/errno.h
+/SRC/src/include/fat16.h
+/SRC/src/include/frame.h
+/SRC/src/include/fs.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/process.h
+/SRC/src/include/trap.h
+/SRC/src/include/arch/trap.h
+/SRC/src/include/nfs.h
+/SRC/src/include/ipc_proto.h
+/SRC/obj/arm/vm-674d2309.o.tmp new=/SRC/obj/arm/vm.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /4T ELR = O0x0000001000024FE8OLS
+/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cort/TOOLS/SH.BINe
+x-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/vm_test.c -o /SRCv2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/obj/arm/vm_test.o
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22546 skipped=451 batches=180 stop=0 ms=3667
+/SRC/src/kernel/vm_test.c
+/SRC/obj/arm/vm_test-2309efc5.o.tmp
+/SRC/obj/arm/vm_test-2309efc5.o.tmp new=/SRC/obj/arm/vm_test.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /4T ELR = O0x0000001000024FE8O
+LS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/cpu.c -o/TOOLS/SH.BIN
+ /SRC/obj/arm/cpu.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = /TOOLS/CLANG.BIN5
+ ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22482 skipped=515 batches=180 stop=0 ms=4450
+/SRC/src/kernel/arch/arm/cpu.c
+/SRC/obj/arm/cpu-674d2309.o.tmp
+/SRC/src/include/arch/cpu.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/obj/arm/cpu-674d2309.o.tmp new=/SRC/obj/arm/cpu.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /4T ELR = O0x0000001000024FE8O
+LS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/gic.c -o/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+/TOOLS/CLANG.BIN
+ /SRC/obj/arm/gic.o
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22495 skipped=502 batches=180 stop=0 ms=4155
+/SRC/src/kernel/arch/arm/gic.c
+/SRC/obj/arm/gic-9efc5ab8.o.tmp
+/SRC/src/include/gic.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/process.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/trap.h
+/SRC/src/include/arch/trap.h
+/SRC/obj/arm/gic-9efc5ab8.o.tmp new=/SRC/obj/arm/gic.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /TOOLS/CLANG.BIN -O42 -Wall ELR =  -Wextra0x0000001000024FE8 
+-g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem //TOOLS/SH.BINTOO
+LS/RESDIR/include -c src/kernel/arch/arm/locks.c v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+-o /SRC/obj/arm/locks.o
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22512 skipped=485 batches=180 stop=0 ms=4105
+/SRC/src/kernel/arch/arm/locks.c
+/SRC/obj/arm/locks-81674d23.o.tmp
+/SRC/src/include/lock.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/arch/cpu.h
+/SRC/obj/arm/locks-81674d23.o.tmp new=/SRC/obj/arm/locks.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /4T ELR = O0x0000001000024FE8O
+LS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53/TOOLS/SH.BIN 
+-mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/mmu.c -o /SRC/obj/arm/mmu.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=19ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = /TOOLS/CLANG.BIN0x0000001000012720
+
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22534 skipped=463 batches=180 stop=0 ms=3592
+/SRC/src/kernel/arch/arm/mmu.c
+/SRC/obj/arm/mmu-ab81674d.o.tmp
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/mmu.h
+/SRC/src/include/arch/mmu.h
+/SRC/src/include/process.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/trap.h
+/SRC/src/include/arch/trap.h
+/SRC/src/include/frame.h
+/SRC/src/include/vm.h
+/SRC/obj/arm/mmu-ab81674d.o.tmp new=/SRC/obj/arm/mmu.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /TOOLS/CLANG.BIN -O2 -Wall 4- ELR = W0x0000001000024FE8e
+xtra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/rtc.c -o/TOOLS/SH.BIN
+ /SRC/obj/arm/rtc.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = /TOOLS/CLANG.BIN5
+ ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22501 skipped=496 batches=180 stop=0 ms=3965
+/SRC/src/kernel/arch/arm/rtc.c
+/SRC/obj/arm/rtc-c5ab8167.o.tmp
+/TOOLS/RESDIR/include/stdint.h
+/SRC/obj/arm/rtc-c5ab8167.o.tmp new=/SRC/obj/arm/rtc.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /4T ELR = O0x0000001000024FE8O
+LS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/smp.c -o/TOOLS/SH.BIN
+ /SRC/obj/arm/smp.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22474 skipped=523 batches=180 stop=0 ms=4328
+/SRC/src/kernel/arch/arm/smp.c
+/SRC/obj/arm/smp-81674d23.o.tmp
+/SRC/src/include/lock.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/process.h
+/SRC/src/include/trap.h
+/SRC/src/include/arch/trap.h
+/SRC/obj/arm/smp-81674d23.o.tmp new=/SRC/obj/arm/smp.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /4TOOLS/CLANG.BIN -O2 -W ELR = all -Wextra -g -Isrc/inc0x0000001000024FE8lude -
+-target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/timer.c /TOOLS/SH.BIN
+-o /SRC/obj/arm/timer.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = /TOOLS/CLANG.BIN5
+ ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22505 skipped=492 batches=180 stop=0 ms=3638
+/SRC/src/kernel/arch/arm/timer.c
+/SRC/obj/arm/timer-5ab81674.o.tmp
+/SRC/src/include/timer.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/obj/arm/timer-5ab81674.o.tmp new=/SRC/obj/arm/timer.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4/
+T[DEBUG] Before eret, tf->regs[0] = O4O ELR = L0x0000001000024FE8S
+/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/trap.c -/TOOLS/SH.BIN
+o /SRC/obj/arm/trap.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22543 skipped=454 batches=180 stop=0 ms=3695
+/SRC/src/kernel/arch/arm/trap.c
+/SRC/obj/arm/trap-5ab81674.o.tmp
+/SRC/src/include/trap.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/arch/trap.h
+/SRC/src/include/fs.h
+/SRC/src/include/fat16.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/process.h
+/SRC/src/include/nfs.h
+/SRC/src/include/ipc_proto.h
+/SRC/src/include/net.h
+/TOOLS/RESDIR/include/stddef.h
+/TOOLS/RESDIR/include/__stddef_header_macro.h
+/TOOLS/RESDIR/include/__stddef_ptrdiff_t.h
+/TOOLS/RESDIR/include/__stddef_size_t.h
+/TOOLS/RESDIR/include/__stddef_wchar_t.h
+/TOOLS/RESDIR/include/__stddef_null.h
+/TOOLS/RESDIR/include/__stddef_max_align_t.h
+/TOOLS/RESDIR/include/__stddef_offsetof.h
+/SRC/src/include/setjmp.h
+/SRC/src/include/timer.h
+/SRC/src/include/arch/timer.h
+/SRC/src/include/syscall.h
+/SRC/src/include/errno.h
+/SRC/src/include/vfs.h
+/SRC/src/include/vm.h
+src/kernel/arch/arm/trap.c:1602:16: warning: unused variable 'l2idx' [-Wunused-variable]
+ 1602 |       uint32_t l2idx = ((uint64_t)tf->elr >> 21) & 0x1FF;
+      |                ^~~~~
+src/kernel/arch/arm/trap.c:1607:22: warning: array index 512 is past the end of the array (that has type 'uint64_t[512]' (aka 'unsigned long[512]')) [-Warray-bounds]
+ 1607 |       uart_print_hex(l2_table_1[cp][0x200]);
+      |                      ^              ~~~~~
+src/kernel/arch/arm/trap.c:1601:7: note: array 'l2_table_1' declared here
+ 1601 |       extern uint64_t l2_table_1[][512];
+      |       ^
+src/kernel/arch/arm/trap.c:1609:22: warning: array index 544 is past the end of the array (that has type 'uint64_t[512]' (aka 'unsigned long[512]')) [-Warray-bounds]
+ 1609 |       uart_print_hex(l2_table_1[cp][0x220]);
+      |                      ^              ~~~~~
+src/kernel/arch/arm/trap.c:1601:7: note: array 'l2_table_1' declared here
+ 1601 |       extern uint64_t l2_table_1[][512];
+      |       ^
+/SRC/obj/arm/trap-5ab81674.o.tmp new=/SRC/obj/arm/trap.o
+3 warnings generated.
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /4T ELR = O0x0000001000024FE8O
+LS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/uart.c -/TOOLS/SH.BIN
+o /SRC/obj/arm/uart.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720/TOOLS/CLANG.BIN
+
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22522 skipped=475 batches=180 stop=0 ms=3430
+/SRC/src/kernel/arch/arm/uart.c
+/SRC/obj/arm/uart-309efc5a.o.tmp
+/SRC/src/include/lock.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/arch/cpu.h
+/SRC/obj/arm/uart-309efc5a.o.tmp new=/SRC/obj/arm/uart.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-compile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/boot.s -o /SRC/obj/arm/boot.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+CLANG: warning: argument unused during compilation: '-O2' [-Wunused-command-line-argument]
+CLANG: warning: argument unused during compilation: '-ffreestanding' [-Wunused-command-line-argument]
+CLANG: warning: argument unused during compilation: '-isystem /TOOLS/RESDIR/include' [-Wunused-command-line-argument]
+[IMGPRF] pid=5 done: pages=22997 mapped=22506 skipped=491 batches=180 stop=0 ms=4190
+/SRC/src/kernel/arch/arm/boot.s
+/SRC/obj/arm/boot.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-ascompile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/fpu.s -o /SRC/obj/arm/fpu.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+/TOOLS/CLANG.BIN
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=C22545L skipped=A452N batches=G180: stop= 0w ms=a3725r
+ning: argument unused during compilation: '-O2' [-Wunused-command-line-argument]
+CLANG: warning: argument unused during compilation: '-ffreestanding' [-Wunused-command-line-argument]
+CLANG: warning: argument unused during compilation: '-isystem /TOOLS/RESDIR/include' [-Wunused-command-line-argument]
+/SRC/src/kernel/arch/arm/fpu.s
+/SRC/obj/arm/fpu.o
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-ascompile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8/
+TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/setjmp.s/TOOLS/SH.BIN
+ -o /SRC/obj/arm/setjmp.o
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000012720/TOOLS/CLANG.BIN
+
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+CLANG: warning: argument unused during compilation: '-O2' [-Wunused-command-line-argument]
+CLANG: warning: argument unused during compilation: '-ffreestanding' [-Wunused-command-line-argument]
+CLANG: warning: argument unused during compilation: '-isystem /TOOLS/RESDIR/include' [-Wunused-command-line-argument]
+/SRC/src/kernel/arch/arm/setjmp.s
+/SRC/obj/arm/setjmp.o
+[IMGPRF] pid=5 done: pages=22997 mapped=22418 skipped=579 batches=180 stop=0 ms=4337
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=kernel-ascompile rc=0
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[SELFHOST] [KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+phase=s2-kernel-start
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[SELFHOST] phase=kernel-link-start
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+# w6-run: lld's link argv (66 words incl. 59 objects) exceeds the
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8#
+ HobbyOS crt0 positional-arg cap (CRT0_MAX_ARGS 32) on the flat-args
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = #0x0000001000024FE8 
+fallback, which merged the tail into one path ("cannot open /SRC/");
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = #4  ELR = t0x0000001000024FE8h
+e response file is written at parse time by the make file-write
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/TOOLS/SH.BIN
+# function attached to the KERNEL_OBJS definition above (no shell, no
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+# argv cap) and the link line itself stays short.
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = /4T ELR = O0x0000001000024FE8O
+LS/LLD.BIN -flavor gnu -T linker.ld -o /SRC/hobbyos.elf @/SRC/OBJS.RSP
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/LLD.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = /TOOLS/LLD.BIN5
+ ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=53250536 pages=13001 first=in elap=0ms
+[IMGPRF] pid=5 start: pages=13001 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x000000100285D7C0
+[DEBUG] Before eret, tf->regs[0] = 43450365 ELR = 0x00000010028616E4
+[IMGPRF] pid=5 done: pages=13001 mapped=12629 skipped=372 batches=102 stop=0 ms=1890
+/SRC/OBJS.RSP
+/SRC/OBJS.RSP
+/SRC/linker.ld
+/SRC/obj/arm/dhcp.o
+/SRC/obj/arm/fat16.o
+/SRC/obj/arm/fat16_test.o
+/SRC/obj/arm/frame.o
+/SRC/obj/arm/frame_test.o
+/SRC/obj/arm/fs.o
+/SRC/obj/arm/fs_test.o
+/SRC/obj/arm/iommu_vtd.o
+/SRC/obj/arm/ipc_proto.o
+/SRC/obj/arm/locks_test.o
+/SRC/obj/arm/main.o
+/SRC/obj/arm/math_test.o
+/SRC/obj/arm/mmu_test.o
+/SRC/obj/arm/net.o
+/SRC/obj/arm/net_rdma.o
+/SRC/obj/arm/net_rdma_test.o
+/SRC/obj/arm/net_test.o
+/SRC/obj/arm/nfs.o
+/SRC/obj/arm/nfs_proto.o
+/SRC/obj/arm/nfs_test.o
+/SRC/obj/arm/pipe.o
+/SRC/obj/arm/pipe_test.o
+/SRC/obj/arm/process.o
+/SRC/obj/arm/process_test.o
+/SRC/obj/arm/program_loader.o
+/SRC/obj/arm/program_loader_test.o
+/SRC/obj/arm/test_fw_cfg.o
+/SRC/obj/arm/test_smp.o
+/SRC/obj/arm/time.o
+/SRC/obj/arm/time_test.o
+/SRC/obj/arm/timer_test.o
+/SRC/obj/arm/trap_test.o
+/SRC/obj/arm/unit_test.o
+/SRC/obj/arm/unix.o
+/SRC/obj/arm/unix_test.o
+/SRC/obj/arm/vfs.o
+/SRC/obj/arm/virtio_blk.o
+/SRC/obj/arm/virtio_blk_test.o
+/SRC/obj/arm/virtio_gpu.o
+/SRC/obj/arm/virtio_gpu_test.o
+/SRC/obj/arm/virtio_gpu_x64.o
+/SRC/obj/arm/virtio_input.o
+/SRC/obj/arm/virtio_input_test.o
+/SRC/obj/arm/virtio_net.o
+/SRC/obj/arm/virtio_net_test.o
+/SRC/obj/arm/vm.o
+/SRC/obj/arm/vm_test.o
+/SRC/obj/arm/cpu.o
+/SRC/obj/arm/gic.o
+/SRC/obj/arm/locks.o
+/SRC/obj/arm/mmu.o
+/SRC/obj/arm/rtc.o
+/SRC/obj/arm/smp.o
+/SRC/obj/arm/timer.o
+/SRC/obj/arm/trap.o
+/SRC/obj/arm/uart.o
+/SRC/obj/arm/boot.o
+/SRC/obj/arm/fpu.o
+/SRC/obj/arm/setjmp.o
+/SRC/hobbyos.elf.tmpfc5ab81
+LLD.BIN: error: undefined symbol: net_rdma_fast_write
+>>> referenced by net.c:447 (/SRC/src/kernel/net.c:447)
+>>>               /SRC/obj/arm/net.o:(handle_udp)
+[KERNEL] Process 5: /TOOLS/LLD.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+MAKE.BIN: *** [[KERNEL] Process 2: /TOOLS/MAKE.BIN exited unexpectedly or gracefully.
+Makefile.hobbyos:424: kernel] Error 1
+[KERNEL] Process 3: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=s2-kernel-fail reason=tool-rc rc=512
+[SELFHOST] FAILED-AT stage=s2-kernel
+[KERNEL] Process 1: SELFHOST.BIN exited unexpectedly or gracefully.
+System halt.

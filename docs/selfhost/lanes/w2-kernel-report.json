@@ -1,0 +1,56 @@
+{
+  "lane": "w2-kernel",
+  "status": "complete",
+  "commits": [
+    {"hash": "a6dc6c9", "subject": "selfhost: w2-kernel: fix LFN-run scan across sector boundary in fat16 LFN tests"},
+    {"hash": "f0eb59f", "subject": "selfhost: w2-kernel: SYS_WAIT4+rusage (90), argv envelope 256B/32->4096B/128, SYS_RMDIR (91) + fat16 empty-dir removal"}
+  ],
+  "syscalls_added": [
+    {
+      "name": "SYS_WAIT4",
+      "number": 90,
+      "arch_marshal": "ARM: regs[0..3] = pid,status,options,rusage (canonical). x64: handler remaps rdi/rsi/rdx/r10 (regs[5]/[4]/[3]/[9]) onto regs[0..3] before the shared core, so the blocking save_context and the unification in process_waitpid carry correct args on both arches. 90 was the next free number above SYS_MAX 89."
+    },
+    {
+      "name": "SYS_RMDIR",
+      "number": 91,
+      "arch_marshal": "ARM: regs[0] = path. x64: regs[5] (rdi) = path, matching sys_mkdir. Passes through fat16_rmdir's precise negative errno verbatim. 91 was the next free number above SYS_MAX 90."
+    }
+  ],
+  "argv": {
+    "old": "256 B / 32 args (HO_EXEC_ARGV_LEN 256, HO_EXEC_MAX_ARGS 32)",
+    "new": "4096 B / 128 args (HO_EXEC_ARGV_LEN 4096, HO_EXEC_MAX_ARGS 128)",
+    "sc_arg_max": 4096
+  },
+  "tests": [
+    {"name": "test_fat16_rmdir_semantics", "file": "src/kernel/fat16_test.c"},
+    {"name": "test_p5_wait4_rusage", "file": "src/kernel/process_test.c"},
+    {"name": "test_w2_argv_envelope", "file": "src/kernel/process_test.c"},
+    {"name": "test_fat16_lfn_checksum_reject (boundary-aware rewrite)", "file": "src/kernel/fat16_test.c"},
+    {"name": "test_fat16_lfn_truncated_run (boundary-aware rewrite)", "file": "src/kernel/fat16_test.c"}
+  ],
+  "gates": {
+    "unit_arm": {
+      "marker": "UNIT TESTS PASSED; Tests failed: 0; Tests run: 312 (floor was 309 ARM; +3 new)",
+      "counts": "Tests run: 312 / Tests failed: 0; new tests visible in the listing (test_fat16_rmdir_semantics, test_p5_wait4_rusage, test_w2_argv_envelope); LFN boundary tests pass. Evidence: docs/selfhost/lanes/w2-kernel-unit-arm.log"
+    },
+    "wave_arm": {
+      "marker": "System halt from CPU 6 + make rc 0 (EXIT=0); [STRESS TEST] SUCCESS: ALL TESTS PASSED SUCCESSFULLY!; single clean run, no overlap",
+      "fail_tokens": "2 raw 'FAIL' matches, BOTH integrator-documented ambient: (1) 'shell_test: FAILED echo validation' and (2) 'SHELLTEST WATCHDOG: protocol stalled 25 s'. No other FAIL/error tokens. Evidence: docs/selfhost/lanes/w2-kernel-arm-wave.log"
+    },
+    "unit_x64": {
+      "marker": "EXTRA_QEMU_ARGS='-enable-kvm' ./run_unit_tests_intel.sh: UNIT TESTS PASSED; Tests failed: 0; Tests run: 316 (base x64 313/1 -> LFN boundary fix clears the 1 failure, +3 new tests)",
+      "counts": "Tests run: 316 / Tests failed: 0. Evidence: docs/selfhost/lanes/w2-kernel-unit-x64.log"
+    },
+    "build": {
+      "marker": "make obj/arm/hello.bin builds clean; full ARM unit+wave builds compile (obj/arm) with the enlarged PCB / 4 KiB argvblob"
+    }
+  },
+  "blockers": [],
+  "notes": "W2-5 wait4: rusage is the kernel-side struct ho_rusage (144 B, Linux layout matching src/user/toolchain/sysroot-headers/sys/resource.h: 2x timeval + 14x long). LLVM's sys::Wait (Program.inc:413-468) reads only ru_utime + ru_stime (ProcessStatistics) and ru_maxrss (PeakMemory) when ProcStat is set; the kernel fills DOCUMENTED zeros there (no per-process CPU/IO accounting yet - that is W2-17) and sets ru_maxrss = v1 resident block size in KiB (USER_REGION_SIZE/1024 = 32768; v2: 0, framed pages not counted). Blocking wait4 parks the validated rusage pointer in a one-shot PCB field (struct process.wait4_rusage, appended at end - additive) so the unified reap_deliver_locked fills it cross-context on exit or kill. Bonus fix folded in: x64 waitpid's arg marshalling was reading the wrong regs (regs[0..2] hold rax/rbx/rcx on x64; args ride rdi/rsi/rdx = regs[5]/[4]/[3]); both x64 waitpid and wait4 now remap onto the canonical positions, and the shared core stores want-pid/status explicitly in context[0]/[1] so delivery is arch-independent. W2-10 argv: the two process.h constants are the single source; both trap.c marshal buffers (char argvblob[4096] on the 64 KiB kernel stack), struct process.eargv and struct ho_spawn_ex.argvblob (spawn_ex_pool[64]) inherit the new size (~480 KB BSS total, fine); _SC_ARG_MAX in src/libc/src/stat.c syncs to 4096 (the ONLY src/libc change, per program rules). W2-14 rmdir: fat16_rmdir returns 0 / -ENOENT / -ENOTDIR / -ENOTEMPTY / -EBUSY (root and on-disk '.'/'..') / -EIO; empty-check treats orphan 0x0F LFN records and volume labels as non-empty (conservative, never destroys data); vfs_rmdir maps a routed read-only NFS mount to -EROFS. DECISION: unlink (fat16_unlink) STAYS dir-refusing (POSIX unlink(2) must not remove directories; rmdir is the primitive) - documented in fat16.c. Documented limitation: the kernel does not track which dir is a process's cwd, so cwd-in-use is not reported as EBUSY (POSIX allows it; LLVM never does this). Userland decls (rmdir/wait4 sysroot + libc wrappers) are another lane's job and were NOT added. Failing-test-first: tests written with/for the new code; the LFN boundary test fix was failing-test-first by construction (integrator-diagnosed x64 KVM offset==0 layout). Integrator-decreed standalone commit for the LFN fix (a6dc6c9) kept separate from the feature commit (f0eb59f). Wave run note: an earlier wave was killed by my own `fuser -k disk.img` while it was still in flight (integrator diagnosis) - re-run cleanly with no overlap for the recorded gate result. cstyle clean on all 11 touched files. Makefile: no edits needed (unit tests live in existing *_test.c files already registered).",
+  "evidence": [
+    "docs/selfhost/lanes/w2-kernel-unit-arm.log",
+    "docs/selfhost/lanes/w2-kernel-unit-x64.log",
+    "docs/selfhost/lanes/w2-kernel-arm-wave.log"
+  ]
+}

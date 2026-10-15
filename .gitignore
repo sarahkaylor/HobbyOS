@@ -128,3 +128,15 @@ third_party/libcxx-21.1.8/.fetched-ok
 third_party/webkit-hobbyos/src/
 third_party/webkit-hobbyos/src-wk2/
 third_party/webkit-hobbyos/build/
+
+# Self-hosting program vendor (selfhost.md §2/AD-3; lane L1): committed =
+# fetch.sh + README.md + container.sha256 + anchors.sha256; the container
+# (reused from the libcxx vendor when present) and the extraction are
+# rebuilt by fetch.sh and are gitignored.
+third_party/llvm-21.1.8/llvm-*.tar.xz
+third_party/llvm-21.1.8/src/
+third_party/llvm-21.1.8/.fetched-ok
+
+# Selfhost lane evidence excerpts are committed on purpose (curated from
+# gitignored raw runs) — the global `*.log` rule must not swallow them.
+!docs/selfhost/lanes/*.log

@@ -1,0 +1,108 @@
+UEFI firmware (version 2025.11-3ubuntu7 built at 11:11:58 on Mar 31 2026)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+BdsDxe: starting Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+[001;001H[001;001H[001;001Hl[001;002Hi[001;003Hn[001;004Hu[001;005Hx[001;006H:[001;007H [001;008HL[001;009Ho[001;010Ha[001;011Hd[001;012Hi[001;013Hn[001;014Hg[001;015H [001;016Hk[001;017He[001;018Hr[001;019Hn[001;020He[001;021Hl[001;022H [001;023H`[001;024Hb[001;025Ho[001;026Ho[001;027Ht[001;028H([001;029H)[001;030H:[001;031H/[001;032Hb[001;033Ho[001;034Ho[001;035Ht[001;036H/[001;037Hh[001;038Ho[001;039Hb[001;040Hb[001;041Hy[001;042Ho[001;043Hs[001;044H.[001;045Hb[001;046Hi[001;047Hn[001;048H`[001;049H.[001;050H.[001;051H.[001;052H[001;001H[002;001HBooting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+[GPUDIAG] gpu wait > 7 ms: ack=3 used=4 (park off)
+[GPU] virtio-gpu mmio irq=78
+VirtIO GPU successfully initialized.
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1900544 total_mib=7424 reserved=0
+[KERNEL] Activating secondary cores via PSCI...
+[KERNEL] Core 1 power-on requested.
+[KERNEL] Core 2 power-on requested.
+[KERNEL] Core 3 power-on requested.
+[KERNEL] Core start_scheduler called on CPU 4 power-on requested.
+1start_scheduler called on CPU [KERNEL] Core 
+5 power-on requested.
+3start_scheduler called on CPU start_scheduler called on CPU 52
+
+[KERNEL] Core 6 power-on requested.
+
+start_scheduler called on CPU start_scheduler called on CPU 46
+
+[KERNEL] Core 7 power-on requested.
+start_scheduler called on CPU 7
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+virtio-net MAC: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP Discover sent
+DHCP initialization complete.
+
+--- Parallel Program Loading ---
+Mode: SELFHOST - Running in-OS acceptance build driver...
+Loading program for scheduler (v2 AS): SELFHOST.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=-1
+v2 loader: image mapped (lazy), bytes=52656 pages=13 first=in elap=1ms
+v2 loader: PID=1 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+start_scheduler called on CPU 0
+[SELFHOST] DRIVER-UP script=/SRC/SELFHOST.RUN
+[SELFHOST] phase=plong-start
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=1
+Inside process_create: clearing memory at 0x0000000072000000
+Inside process_create: kmemset done.
+Loading program for scheduler (v2 AS): /TOOLS/SH.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=-1
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+v2 loader: PID=3 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=-1
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x000000100000DDF8
+v2 loader: image mapped (lazy), bytes=309608 pages=76 first=in elap=1ms
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x0000001000024FE8
+/ARGVPROBE.BIN -flavor gnu -T linker.ld -o /SRC/hobbyos.elf /SRC/obj/arm/boot.o /SRC/obj/arm/cpu.o /SRC/obj/arm/dhcp.o /SRC/obj/arm/fat16.o /SRC/obj/arm/fat16_test.o /SRC/obj/arm/fpu.o /SRC/obj/arm/frame.o /SRC/obj/arm/frame_test.o /SRC/obj/arm/fs.o /SRC/obj/arm/fs_test.o /SRC/obj/arm/gic.o /SRC/obj/arm/iommu_vtd.o /SRC/obj/arm/ipc_proto.o /SRC/obj/arm/locks.o /SRC/obj/arm/locks_test.o /SRC/obj/arm/main.o /SRC/obj/arm/math_test.o /SRC/obj/arm/mmu.o /SRC/obj/arm/mmu_test.o /SRC/obj/arm/net.o /SRC/obj/arm/netv2 loader: image mapped (lazy), bytes=37328 pages=10 first=in elap=0ms
+[ARGVPROBE] argc=31
+[ARGVPROBE] argv[0]=/ARGVPROBE.BIN
+[ARGVPROBE] argv[1]=-flavor
+[ARGVPROBE] argv[2]=gnu
+[ARGVPROBE] argv[3]=-T
+[ARGVPROBE] argv[4]=linker.ld
+[ARGVPROBE] argv[5]=-o
+[ARGVPROBE] argv[6]=/SRC/hobbyos.elf
+[ARGVPROBE] argv[7]=/SRC/obj/arm/boot.o
+[ARGVPROBE] argv[8]=/SRC/obj/arm/cpu.o
+[ARGVPROBE] argv[9]=/SRC/obj/arm/dhcp.o
+[ARGVPROBE] argv[10]=/SRC/obj/arm/fat16.o
+[ARGVPROBE] argv[11]=/SRC/obj/arm/fat16_test.o
+[ARGVPROBE] argv[12]=/SRC/obj/arm/fpu.o
+[ARGVPROBE] argv[13]=/SRC/obj/arm/frame.o
+[ARGVPROBE] argv[14]=/SRC/obj/arm/frame_test.o
+[ARGVPROBE] argv[15]=/SRC/obj/arm/fs.o
+[ARGVPROBE] argv[16]=/SRC/obj/arm/fs_test.o
+[ARGVPROBE] argv[17]=/SRC/obj/arm/gic.o
+[ARGVPROBE] argv[18]=/SRC/obj/arm/iommu_vtd.o
+[ARGVPROBE] argv[19]=/SRC/obj/arm/ipc_proto.o
+[ARGVPROBE] argv[20]=/SRC/obj/arm/locks.o
+[ARGVPROBE] argv[21]=/SRC/obj/arm/locks_test.o
+[ARGVPROBE] argv[22]=/SRC/obj/arm/main.o
+[ARGVPROBE] argv[23]=/SRC/obj/arm/math_test.o
+[ARGVPROBE] argv[24]=/SRC/obj/arm/mmu.o
+[ARGVPROBE] argv[25]=/SRC/obj/arm/mmu_test.o
+[ARGVPROBE] argv[26]=/SRC/obj/arm/net.o
+[ARGVPROBE] argv[27]=/SRC/obj/arm/net_rdma.o
+[ARGVPROBE] argv[28]=/SRC/obj/arm/net_rdma_test.o
+[ARGVPROBE] argv[29]=/SRC/obj/arm/net_test.o
+[ARGVPROBE] argv[30]=/SRC/obj/arm/nfs.o /SRC/obj/arm/nfs_proto.o /SRC/obj/arm/nfs_test.o /SRC/obj/arm/pipe.o /SRC/obj/arm/pipe_test[KERNEL] Process 4: /ARGVPROBE.BIN exited unexpectedly or gracefully.
+.o /SRC/obj/arm/process.o /SRC/obj/arm/process_test.o /SRC/obj/arm/program_loader.o /SRC/obj/arm/program_loader_test.o /SRC/obj/arm[KERNEL] Process 2: /TOOLS/MAKE.BIN exited unexpectedly or gracefully.
+/rtc.o /SRC/obj/arm/setjmp.o /SRC/obj/arm/smp.o /SRC/obj/arm/[KERNEL] Process 3: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+test_fw_cfg.o /SRC/obj/arm/test_smp.o /SRC/obj/arm/time.o /SRC/obj/arm/time_test.o /SRC/obj/arm/timer.o /SRC/obj/arm/timer_test.o /SRC/obj/arm/trap.o /SRC/obj/arm/
+[ARGVPROBE] done
+MAKE.BIN: write error: stdout
+[SELFHOST] phase=plong-fail reason=tool-rc rc=256
+[SELFHOST] FAILED-AT stage=plong
+[KERNEL] Process 1: SELFHOST.BIN exited unexpectedly or gracefully.
+System halt from CPU 1.

@@ -1,0 +1,89 @@
+{
+  "lane": "w2-mtools",
+  "status": "complete",
+  "commits": [
+    "5d8a2df",
+    "4cfaf3c"
+  ],
+  "pins": [
+    {
+      "tool": "mtools",
+      "version": "4.0.49",
+      "url": "https://ftp.gnu.org/gnu/mtools/mtools-4.0.49.tar.gz",
+      "sha256": "10cd1111da87bf2400a380c1639a6cba8bfb937a24f9c51f5f88d393ae5f6f76",
+      "sha1": "b9f90c51a91cab19b5c470daff6f18cfb5740473",
+      "tag_to_commit": "N/A - upstream VCS is SVN not git (L4 audit); integrity gate = pinned tarball + sha256/sha1",
+      "release_date": "2025-06-14",
+      "license": "GPL-3+",
+      "verified": "sha256 + sha1 recomputed locally from the re-fetched tarball, both match L4's pins"
+    }
+  ],
+  "files": {
+    "vendor": [
+      "third_party/mtools-4.0.49.tar.gz",
+      "third_party/mtools-4.0.49.tar.gz.sha256",
+      "third_party/mtools-4.0.49/ (196 files, pristine 4.0.49 tree)"
+    ],
+    "port": [
+      "src/user/mtools/config.h",
+      "src/user/mtools/mtools_port.c",
+      "src/user/mtools/README.md",
+      "src/user/mtools/*.c (47 engine/tool sources, byte-identical to upstream)",
+      "src/user/mtools/*.h (37 headers, byte-identical to upstream)"
+    ]
+  },
+  "bins": [
+    {"name": "MCOPY.BIN", "path": "obj/arm/mcopy.bin", "size": 182120},
+    {"name": "MDEL.BIN",  "path": "obj/arm/mdel.bin",  "size": 182120},
+    {"name": "MMD.BIN",   "path": "obj/arm/mmd.bin",   "size": 182120}
+  ],
+  "x64_bins": [
+    {"name": "MCOPY.BIN", "path": "obj/intel/mcopy.bin", "size": 211464},
+    {"name": "MDEL.BIN",  "path": "obj/intel/mdel.bin",  "size": 211464},
+    {"name": "MMD.BIN",   "path": "obj/intel/mmd.bin",   "size": 211464}
+  ],
+  "in_os_smoke": {
+    "attempted": false,
+    "method": "Not attempted in-lane: requires the full desktop boot (disk.img with DESKTOP/BROWSER/ICU/sqlite) + QMP keystrokes (run_console_test.py drives the WORKSTATION tree, which is off-limits), OR a kernel mode hook to boot MCOPY directly -- and acceptance.md 5.2 assigns MODE=selfhost + SELFHOST.BIN to the wave-2 HARNESS lane / parent (kernel change).",
+    "result": "deferred",
+    "deferred_reason": "No AUTORUN mechanism in the shell today (acceptance.md 5.2); the primary in-OS driver (MODE=selfhost launching SELFHOST.BIN) is a kernel change owned by the harness lane; the QMP keystroke fallback needs the full desktop+console boot which is heavy and explicitly the weaker path. A lane-local kernel edit is out of scope (single-writer rule: kernel changes are parent-owned).",
+    "wave3_steps": [
+      "1. make disk.img (full OS incl. the new ::/TOOLS/MCOPY.BIN|MDEL.BIN|MMD.BIN staged by this lane's Makefile block)",
+      "2. Boot per acceptance.md 5.1 (qemu-system-aarch64, EDK2, -serial file:SERIAL.log, virtio-blk + the 8-core/16GB line)",
+      "3. Primary driver (harness lane): MODE=selfhost -> SELFHOST.BIN runs `mcopy -i /SRC/OUT.IMG <payload> ::</SRC/...` and mmd ::/BOOT ::/TOOLS ::/SRC; assert [SELFHOST] phase=s3-disk-done + zero FAIL tokens",
+      "4. Fallback keystrokes (if SELFHOST.BIN not ready): boot desktop, open the console (CONSOLE.BIN via Apps menu), type 'MMD -i /TMP/X.IMG ::/TOOLS' then 'MCOPY -i /TMP/X.IMG <file> ::/TOOLS/FILE.TXT' and 'MDEL -i /TMP/X.IMG ::/TOOLS/FILE.TXT', then verify via file extraction (fat16img.py get) that the copy-in round-trip matches (LFN names exercise vfat.c)",
+      "5. Evacuate the scratch image / copy-back for byte-compare; verdict = marker substring + zero FAIL/FAILED tokens (acceptance 8.4)"
+    ]
+  },
+  "host_parity": {
+    "method": "Transcribed subset + port mains built for host (HOST_TEST config retarget in config.h; pristine mformat/mtools built via upstream configure/make as the reference), raced on byte-identical 1.44MiB FAT12 images.",
+    "result": "8/8 PASS byte-identical images + rc parity",
+    "cases": [
+      "mmd dirs (::/TOOLS ::/BOOT ::/SRC)",
+      "mcopy single file copy-in",
+      "mcopy LFN long-name copy-in (vfat.c writer)",
+      "mcopy binary-blob copy-in",
+      "mdel entry + FAT chain removal",
+      "copy-out round trip (dos->unix, byte-identical)",
+      "mcopy -s directory recursion",
+      "--help ECG"
+    ]
+  },
+  "gates": {
+    "a_build_clean_arm": "PASS - make obj/arm/mcopy.bin + mdel + mmd, 182120 B each, text=168304 B nonempty, ELF entry 0x1000000000 (USER_VIRT_BASE, same as other user bins)",
+    "b_cstyle": "PASS - port first-party files (config.h, mtools_port.c) cstyle-clean with 0 -Wall -Wextra warnings; transcribed upstream tree stays byte-identical (added src/user/mtools/ to tools/cstyle.py EXCLUDE_PREFIXES, same policy as src/user/sed/)",
+    "c_user_build_intact": "PASS - make obj/arm/hello.bin still builds (34320 B)",
+    "d_in_os_smoke": "DEFERRED - see in_os_smoke (no AUTORUN; driver owned by harness lane; fallback needs full desktop boot)",
+    "host_sanity": "PASS - llvm-objcopy -O binary produces valid flat bins; program text nonempty; x64 cross-build also clean"
+  },
+  "blockers": [
+    "In-OS smoke deferred: no shell AUTORUN mechanism (acceptance.md 5.2), MODE=selfhost+SELFHOST.BIN is the harness lane's kernel change, and the QMP keystroke fallback requires a full desktop build (browser/ICU/sqlite deps not fetched in this lane). Not a ported-code blocker - the engine is proven byte-identical by host parity.",
+    "mcopy -s (local-directory recursion) needs working opendir/readdir, which is ENOSYS in the sysroot today (audit 4.2). Ported code compiles the non-recurse path on target; -s verified on host where glibc readdir exists. Acceptance recipes use individual-file MCOPY lines (no -s), so no acceptance blocker."
+  ],
+  "notes": "Upstream builds one multicall 'mtools' binary dispatching on argv[0]; HobbyOS loads one flat .BIN per program, so the port links each command separately: shared engine objects (mtools_*) + one tiny main per tool (mtoolsm_* from mtools_port.c, -DMTOOLS_TOOL_*). mtools.c/expand.c/precmd.c not transcribed - the port glue replaces them (expand/$(...) shell expansion and post-commands are unreachable for -i IMG; documented deviation). HobbyOS glue in config.h is gated by HOBBYOS_TARGET; HOST_TEST retargets HAVE_TZSET/STRNDUP/READDIR for the parity harness. Makefile block is one tight section; only edits: variables+MTOOLS_PORT_RULE+disk.img prereq/::/TOOLS copies. cstyle.py EXCLUDE_PREFIXES grew by src/user/mtools/ (same as sed). ARM user bins 182120 B, x64 211464 B. Warnings during port build (79 across 7 transcribed files, e.g. codepages 62, vfat 7) are upstream-inherent, byte-identical sources; house baseline (sed/nano) also warns; first-party files 0 warnings.",
+  "next_steps": [
+    "Wave 3: run the in_os_smoke steps above via the harness lane's MODE=selfhost (acceptance.md S3), asserting mcopy/mmd paths with LFN copy-in on a scratch OUT.IMG",
+    "Diagnose codepages.c/vfat.c -Wpointer-sign warnings ONLY if a future -Werror gate appears (upstream code, byte-identical by policy)",
+    "When the shared dirent fix lands (M1, parent single-writer), flip HAVE_READDIR on for the target to unlock mcopy -s in-OS"
+  ]
+}

@@ -1,0 +1,49 @@
+{
+ "outcome": 1,
+ "wall_s": 8551.38701890799,
+ "expect": "ACCEPTANCE-COMPLETE",
+ "phases": {
+  "s0-check": {
+   "start_s": 7.503823029983323,
+   "done_s": 24.507886181003414,
+   "elapsed_s": 17.00406315102009,
+   "done": true
+  },
+  "s1-user": {
+   "start_s": 24.507886181003414,
+   "done_s": 8551.386566705012,
+   "elapsed_s": 8526.878680524009,
+   "done": true
+  },
+  "t25-run": {
+   "start_s": 3898.3532023279695,
+   "done_s": 3898.3532023279695,
+   "elapsed_s": 0.0,
+   "done": true
+  },
+  "s2-kernel": {
+   "start_s": 3898.3532023279695,
+   "done_s": 8528.379900740983,
+   "elapsed_s": 4630.026698413014,
+   "done": true
+  },
+  "kernel-link": {
+   "start_s": null,
+   "done_s": 8526.379573821963,
+   "elapsed_s": null,
+   "done": true
+  },
+  "s2-inc": {
+   "start_s": 8495.371964869963,
+   "done_s": 8512.376429877011,
+   "elapsed_s": 17.004465007048566,
+   "done": true
+  },
+  "s3-disk": {
+   "start_s": 8512.376429877011,
+   "done_s": 8551.386566705012,
+   "elapsed_s": 39.01013682800112,
+   "done": false
+  }
+ }
+}

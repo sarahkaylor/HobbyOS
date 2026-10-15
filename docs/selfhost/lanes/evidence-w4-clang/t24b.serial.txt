@@ -1,0 +1,13 @@
+v2 loader: image mapped (lazy), bytes=555568 pages=136 first=in elap=2ms
+v2 loader: image mapped (lazy), bytes=51120 pages=13 first=in elap=1ms
+[SELFHOST] phase=t24b-compile-start
+Loading program for scheduler (v2 AS): /TOOLS/CLANG2.BIN
+v2 loader: image mapped (lazy), bytes=94192000 pages=22997 first=in elap=1ms
+v2 loader: PID=4 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[IMGPRF] pid=4 start: pages=22997 batch=128
+[IMGPRF] pid=4 done: pages=22997 mapped=22678 skipped=319 batches=180 stop=0 ms=3211
+[KERNEL] FATAL: Unhandled EL0 Synchronous Exception!
+EC: 0x000000000000003C
+[KERNEL] Process 4: /TOOLS/CLANG2.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=t24b-compile-fail reason=tool-rc rc=24576
+[SELFHOST] FAILED-AT stage=t24b-compile

@@ -1,0 +1,50 @@
+# w2-llvm step-2 clang+lld build log (curated excerpt)
+# full log: obj/w2logs/w2-step2-clang-lld.log (gitignored)
+#
+>>>               ConstantFolding.cpp.o:((anonymous namespace)::ConstantFoldScalarCall1(llvm::StringRef, unsigned int, llvm::Type*, llvm::ArrayRef<llvm::Constant*>, llvm::TargetLibraryInfo const*, llvm::CallBase const*)) in archive lib/libLLVMAnalysis.a
+>>> referenced by ConstantFolding.cpp
+>>>               ConstantFolding.cpp.o:((anonymous namespace)::ConstantFoldScalarCall1(llvm::StringRef, unsigned int, llvm::Type*, llvm::ArrayRef<llvm::Constant*>, llvm::TargetLibraryInfo const*, llvm::CallBase const*)) in archive lib/libLLVMAnalysis.a
+>>> referenced by ConstantFolding.cpp
+>>>               ConstantFolding.cpp.o:((anonymous namespace)::ConstantFoldScalarCall1(llvm::StringRef, unsigned int, llvm::Type*, llvm::ArrayRef<llvm::Constant*>, llvm::TargetLibraryInfo const*, llvm::CallBase const*)) in archive lib/libLLVMAnalysis.a
+>>> referenced 1 more times
+
+ld.lld: error: undefined symbol: acos
+>>> referenced by ConstantFolding.cpp
+>>>               ConstantFolding.cpp.o:((anonymous namespace)::ConstantFoldScalarCall1(llvm::StringRef, unsigned int, llvm::Type*, llvm::ArrayRef<llvm::Constant*>, llvm::TargetLibraryInfo const*, llvm::CallBase const*)) in archive lib/libLLVMAnalysis.a
+>>> referenced by ConstantFolding.cpp
+>>>               ConstantFolding.cpp.o:((anonymous namespace)::ConstantFoldScalarCall1(llvm::StringRef, unsigned int, llvm::Type*, llvm::ArrayRef<llvm::Constant*>, llvm::TargetLibraryInfo const*, llvm::CallBase const*)) in archive lib/libLLVMAnalysis.a
+
+ld.lld: error: undefined symbol: tanh
+>>> referenced by ConstantFolding.cpp
+>>>               ConstantFolding.cpp.o:((anonymous namespace)::ConstantFoldScalarCall1(llvm::StringRef, unsigned int, llvm::Type*, llvm::ArrayRef<llvm::Constant*>, llvm::TargetLibraryInfo const*, llvm::CallBase const*)) in archive lib/libLLVMAnalysis.a
+>>> referenced by ConstantFolding.cpp
+>>>               ConstantFolding.cpp.o:((anonymous namespace)::ConstantFoldScalarCall1(llvm::StringRef, unsigned int, llvm::Type*, llvm::ArrayRef<llvm::Constant*>, llvm::TargetLibraryInfo const*, llvm::CallBase const*)) in archive lib/libLLVMAnalysis.a
+
+ld.lld: error: undefined symbol: erf
+>>> referenced by ConstantFolding.cpp
+>>>               ConstantFolding.cpp.o:((anonymous namespace)::ConstantFoldScalarCall1(llvm::StringRef, unsigned int, llvm::Type*, llvm::ArrayRef<llvm::Constant*>, llvm::TargetLibraryInfo const*, llvm::CallBase const*)) in archive lib/libLLVMAnalysis.a
+
+ld.lld: error: undefined symbol: logb
+>>> referenced by ConstantFolding.cpp
+>>>               ConstantFolding.cpp.o:((anonymous namespace)::ConstantFoldScalarCall1(llvm::StringRef, unsigned int, llvm::Type*, llvm::ArrayRef<llvm::Constant*>, llvm::TargetLibraryInfo const*, llvm::CallBase const*)) in archive lib/libLLVMAnalysis.a
+
+ld.lld: error: undefined symbol: log1p
+>>> referenced by ConstantFolding.cpp
+>>>               ConstantFolding.cpp.o:((anonymous namespace)::ConstantFoldScalarCall1(llvm::StringRef, unsigned int, llvm::Type*, llvm::ArrayRef<llvm::Constant*>, llvm::TargetLibraryInfo const*, llvm::CallBase const*)) in archive lib/libLLVMAnalysis.a
+
+ld.lld: error: section: .tdata is not contiguous with other relro sections
+clang: error: linker command failed with exit code 1 (use -v to see invocation)
+[57/63] Building CXX object tools/lld/wasm/CMakeFiles/lldWasm.dir/Writer.cpp.o
+clang: warning: argument unused during compilation: '-fuse-ld=lld' [-Wunused-command-line-argument]
+[58/63] Building CXX object tools/lld/MachO/CMakeFiles/lldMachO.dir/Driver.cpp.o
+clang: warning: argument unused during compilation: '-fuse-ld=lld' [-Wunused-command-line-argument]
+[59/63] Building CXX object tools/lld/MachO/CMakeFiles/lldMachO.dir/InputFiles.cpp.o
+clang: warning: argument unused during compilation: '-fuse-ld=lld' [-Wunused-command-line-argument]
+ninja: build stopped: subcommand failed.
+
+# step-1 final: llvm-ar/llvm-objcopy
+ld.lld: warning: /home/sarah/hobbyos-selfhost-lanes/l1/obj/selfhost/sysroot/lib/stubs/libpthreads.a: archive member 'empty.o' is neither ET_REL nor LLVM bitcode
+ld.lld: warning: /home/sarah/hobbyos-selfhost-lanes/l1/obj/selfhost/sysroot/lib/stubs/librt.a: archive member 'empty.o' is neither ET_REL nor LLVM bitcode
+ld.lld: warning: /home/sarah/hobbyos-selfhost-lanes/l1/obj/selfhost/sysroot/lib/stubs/libdl.a: archive member 'empty.o' is neither ET_REL nor LLVM bitcode
+ld.lld: warning: /home/sarah/hobbyos-selfhost-lanes/l1/obj/selfhost/sysroot/lib/stubs/libpthreads.a: archive member 'empty.o' is neither ET_REL nor LLVM bitcode
+ld.lld: warning: /home/sarah/hobbyos-selfhost-lanes/l1/obj/selfhost/sysroot/lib/stubs/libm.a: archive member 'empty.o' is neither ET_REL nor LLVM bitcode

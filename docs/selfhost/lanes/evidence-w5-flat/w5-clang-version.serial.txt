@@ -1,0 +1,18 @@
+Mode: SELFHOST - Running in-OS acceptance build driver...
+Loading program for scheduler (v2 AS): SELFHOST.BIN
+v2 loader: image mapped (lazy), bytes=51120 pages=13 first=in elap=2ms
+v2 loader: PID=1 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[SELFHOST] DRIVER-UP script=/SRC/SELFHOST.RUN
+[SELFHOST] phase=w5-clang-version-start
+Loading program for scheduler (v2 AS): /TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192000 pages=22997 first=in elap=1ms
+v2 loader: PID=3 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[IMGPRF] pid=3 start: pages=22997 batch=128
+[IMGPRF] pid=3 done: pages=22997 mapped=22574 skipped=423 batches=180 stop=0 ms=4198
+clang version 21.1.8 (/home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang 0c272a4e0cfc70e854e1958baaa2094524b4f9af)
+Target: aarch64-unknown-none-elf
+Thread model: posix
+InstalledDir: 
+[SELFHOST] phase=w5-clang-version-done rc=0
+[SELFHOST] ACCEPTANCE-COMPLETE stages=1
+[KERNEL] Process 1: SELFHOST.BIN exited unexpectedly or gracefully.

@@ -1,0 +1,66 @@
+{
+  "lane": "w2-harness",
+  "status": "complete",
+  "commits": [
+    "87bc2e1",
+    "3699651"
+  ],
+  "files": [
+    "src/user/selfhost/selfhost.c",
+    "src/user/selfhost/SELFHOST.RUN",
+    "Makefile (SELFHOST_BIN rule + disk.img dep + mcopy to ::/SELFHOST.BIN)",
+    "tools/run_selfhost_build_test.py",
+    "tools/selfhost-stage.sh (v2: /tmp ensure, SELFHOST.BIN + SELFHOST.RUN staging, mcopy -o overwrite)",
+    "fat16img.py (deep paths + VFAT long-name reassembly)",
+    "docs/selfhost/lanes/w2-harness-validation.md",
+    "docs/selfhost/lanes/w2-harness-serial-excerpt.log (curated; git add -f)",
+    "docs/selfhost/lanes/w2-harness-report.json"
+  ],
+  "validation": {
+    "boot_ok": true,
+    "boot_elapsed_s": 6.5,
+    "mode": "DESKTOP",
+    "driver_launched": true,
+    "driver_menu_index": 5,
+    "stages_configured": 4,
+    "stages_reached": 1,
+    "failed_at": "s0-check",
+    "failure_class": "stage_failure",
+    "failure_detail": "clean staged failure at the first missing tool: phase=s0-check-fail tool=MAKE.BIN reason=tool-missing rc=127",
+    "hang": false,
+    "markers": {
+      "driver_up": 1,
+      "phase_start": 1,
+      "phase_done": 0,
+      "phase_fail": 1,
+      "abort": 1,
+      "complete": 0,
+      "fail_token": 0
+    },
+    "out_log_recovered": true,
+    "log": "docs/selfhost/lanes/w2-harness-serial-excerpt.log (raw at ~/.hermes/cache/scratch/w2/run/serial-selfhost.log)",
+    "asked_markers_readable_on_serial": true,
+    "asked_driver_executes_script": true,
+    "asked_clean_staged_failure_not_hang": true,
+    "classifier_matrix": {
+      "boot_failure": "real: 64 MiB zeroed image -> boot_failure, exit 10",
+      "driver_absent": "real: workstation APPS_TEST disk without SELFHOST.BIN in menu -> exit 11",
+      "stage_failure": "real: staged DESKTOP disk -> clean s0 fail, exit 0 with --expected-class stage_failure",
+      "script_missing": "unit (classifier self-test)",
+      "hang": "unit (classifier self-test); not producible by the driver today (missing tools fail fast)",
+      "success": "unit (classifier self-test)",
+      "selftest": "7/7 PASS"
+    }
+  },
+  "gaps_for_wave3": [
+    "MODE=selfhost kernel boot mode + serial-console-fd stdout for SELFHOST.BIN (owned by the kernel/harness-parent per acceptance 5.2/5.3; today the QMP keystroke + Apps-menu path is used)",
+    "in-OS toolchain (make/cc1 in /TOOLS): drop MAKE.BIN into /TOOLS and the SAME script runs the real build; the driver's tool-present path (pipe + spawn2 relay + waitpid) is implemented but NOT yet exercised on-device",
+    "verify the driver's spawned-tool relay under real make output volume + sparse stdout (untested code path this wave)",
+    "hang classification real-boot case once the toolchain exists (a wedged cc1) — currently only unit-covered",
+    "S4/S5 full loop (extract OUT.IMG, boot it, run an in-OS-built program) — runner code present, gated on OUT.IMG existing; can also be pre-tested with a hand-built OUT.IMG before the in-OS build lands",
+    "decide STAGE_LIBCXX default at the M3 AD-9 freeze (currently 1 per acceptance 2)",
+    "consider mdir/mtype-free staging path or full mtools CI guarantee (workstation mtools is complete; the older fat16img docstring said mdir/mtype missing — verify on hobytest)"
+  ],
+  "blockers": [],
+  "notes": "Validation used a lane-built DESKTOP-mode disk (mformat + mcopy + selfhost-stage v2; mkfs.fat/dd are agent-blocked, mformat is the L5-proven path) because the workstation's live disk.img boots an APPS_TEST kernel whose [MENU] is the test harness's 12-entry list, not a real desktop menu. Boot 6.5 s to 'Booting AArch64 OS', driver launched from the Apps menu (index 5) via QMP keystrokes, executed S0 from /SRC/SELFHOST.RUN, and reported a CLEAN staged failure at the first missing tool (MAKE.BIN, rc=127) with ABORT + FAILED-AT on serial; /SRC/OUT.LOG recovered via the now deep-path fat16img. Validation-driven bugs fixed: O_CREAT for OUT.LOG creation (kernel file_open honors O_CREAT — create-on-open is gone), mcopy -o for root SELFHOST.BIN overwrite on -f re-stage, fat16img deep paths + VFAT LFN, runner FAIL-scan exclusion of the driver's own -fail/FAILED-AT markers. Staging v2: 2338 files / 30,243,199 B, sha256 MATCH for SELFHOST.BIN, SELFHOST.RUN and a deep LFN source; idempotence verified both ways. cstyle-clean; SELFHOST.BIN links crt0+libc.a like the hello demo and builds with zero warnings."
+}

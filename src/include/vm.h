@@ -162,6 +162,15 @@ struct addr_space { /* one per group (leader PCB owned) */
      longer matches — pid reuse / exec must never let an old task adopt
      (or tear) a new life of this slot. */
   uint32_t img_epoch;
+  /* w5 (iv): present-but-faulting retry budget.  A user fault whose SW
+     page walk finds the leaf PRESENT with permissive prot is almost
+     always the L9 prefetch race: the page became mapped between the
+     hardware's (stale) translation walk and the fault handler, so the
+     right reply is a TLB flush + retry, not a kill.  Bounded per VA:
+     a page that genuinely refaults past the budget is a real fault and
+     must die. */
+  uint64_t retry_va;
+  int retry_count;
 };
 
 /* --- AS lifecycle (vm.c) --------------------------------------------- */

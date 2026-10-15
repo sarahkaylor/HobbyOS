@@ -379,6 +379,44 @@ static void reap_status_write(struct process *parent, uint64_t va, int st) {
     *(int *)(parent->user_phys_base + off) = st;
 }
 
+/* --- W2-5 (selfhost): wait4 rusage ----------------------------------- *\
+ * LLVM's sys::Wait -> wait4 (Program.inc:413-468) reads, on the rare
+ * ProcStat path, ru_utime + ru_stime (ProcessStatistics) and ru_maxrss
+ * (PeakMemory); the rest of the struct rides along zeroed.  The kernel
+ * keeps no per-process CPU/IO accounting (that is W2-17, getrusage with
+ * real times), so utime/stime and every counter stay 0 -- documented
+ * zeros.  The one honest value we DO know: a v1 process owns a full
+ * pre-allocated 32 MiB physical block, so its resident set (== peak) is
+ * USER_REGION_SIZE in KiB; v2 AS pages are not frame-counted here. */
+
+static void ho_rusage_fill(struct ho_rusage *ru, const struct process *child) {
+  int64_t *w = (int64_t *)ru;
+  for (int i = 0; i < (int)(sizeof(struct ho_rusage) / sizeof(int64_t)); i++)
+    w[i] = 0;
+  if (child && !child->as)
+    ru->ru_maxrss = (int64_t)(USER_REGION_SIZE / 1024);
+}
+
+/* Byte-wise 144-byte store into user memory (never a whole-struct cast).
+ * v2: pages were demand-materialized by process_user_ok (OQ5), bytes land
+ * through vm_kwrite; v1: translate via user_phys_base like
+ * reap_status_write.  Safe both on the caller's own context (immediate
+ * reap) and cross-context (delayed reap delivery). */
+static void user_rusage_store(struct process *p, uint64_t va,
+                              const struct ho_rusage *ru) {
+  if (p->as) {
+    vm_kwrite(p, va, ru, sizeof *ru);
+    return;
+  }
+  uint64_t off = va - USER_VIRT_BASE;
+  if (off + sizeof(*ru) <= USER_REGION_SIZE && p->user_phys_base) {
+    const uint8_t *src = (const uint8_t *)ru;
+    uint8_t *dst = (uint8_t *)(p->user_phys_base + off);
+    for (int k = 0; k < (int)sizeof(*ru); k++)
+      dst[k] = src[k];
+  }
+}
+
 /* --- P5 S3 (D8): delivery-engine helpers ----------------------------- */
 
 /* D6 (frozen table): the fault class (SIGILL/SIGABRT/SIGBUS/SIGSEGV) is
@@ -440,6 +478,17 @@ static void reap_deliver_locked(struct process *grp) {
          (materializes for v2), then write cross-context. */
       if (process_user_ok(parent, stp, 4, 1) == 0)
         reap_status_write(parent, stp, grp->exit_status);
+    }
+    /* W2-5: a wait4-blocked parent asked for this child's rusage; fill
+       it (re-validated, cross-context) and consume the one-shot request
+       so a later WAIT_CHILD wake cannot re-touch a stale pointer. */
+    if (parent->wait4_rusage) {
+      struct ho_rusage ru;
+      ho_rusage_fill(&ru, grp);
+      if (process_user_ok(parent, parent->wait4_rusage,
+                          (uint64_t)sizeof(struct ho_rusage), 1) == 0)
+        user_rusage_store(parent, parent->wait4_rusage, &ru);
+      parent->wait4_rusage = 0;
     }
     parent->state = PROC_STATE_READY;
     /* Deliver the reap: the anchor's PCB slot is now reusable. */
@@ -2120,17 +2169,36 @@ int sys_readenv(struct process *p, int idx, char *buf, int size) {
  * death is a normal exit or a kill -- exactly like the spawn worker fills
  * context[0].
  */
+static int process_wait_common(struct trap_frame *tf, uint64_t rusage_va);
 int process_waitpid(struct trap_frame *tf) {
+  return process_wait_common(tf, 0);
+}
+
+/* W2-5 (selfhost): SYS_WAIT4 -- waitpid(2) plus a rusage out-param.
+ * Same args/returns as process_waitpid; tf->regs[3] carries the caller's
+ * struct rusage out-pointer (canonical ARM position; the x64 handler
+ * remaps rdi/rsi/rdx/r10 onto regs[0..3] before calling).  The rusage
+ * buffer is validated like the status pointer; on reap it is filled with
+ * the child's rusage (see ho_rusage_fill: documented zeros + honest
+ * ru_maxrss).  Blocking waits store the rusage pointer in
+ * caller->wait4_rusage so reap_deliver_locked() fills it cross-context. */
+int process_wait4(struct trap_frame *tf) {
+  return process_wait_common(tf, (uint64_t)tf->regs[3]);
+}
+
+/* Shared wait core.  rusage_va != 0 selects wait4 semantics. */
+static int process_wait_common(struct trap_frame *tf, uint64_t rusage_va) {
   int want_pid = (int)tf->regs[0];
   int *status = (int *)tf->regs[1];
   int options = (int)tf->regs[2];
+  int want_rusage = rusage_va != 0;
   struct process *caller = current_process();
 
   if (!caller)
     return -EINVAL;
 
   /* D5.1: option validation -- WNOHANG (1) and WUNTRACED (2, accepted
-     and ignored: no stop states exist); any other bit -> -EINVAL. */
+    and ignored: no stop states exist); any other bit -> -EINVAL. */
   if (options & ~(1 | 2))
     return -EINVAL;
 
@@ -2141,8 +2209,12 @@ int process_waitpid(struct trap_frame *tf) {
 
   /* D5.7/OQ5: a non-NULL status pointer is validated once here (and
      demand-materialized through vm_touch for v2); delivery then writes
-     it cross-context.  Bad pointer -> -EFAULT. */
+     it cross-context.  Bad pointer -> -EFAULT.  W2-5: a non-NULL wait4
+     rusage buffer gets the same treatment (144 bytes). */
   if (status && process_user_ok(grp, (uint64_t)status, 4, 1) != 0)
+    return -EFAULT;
+  if (want_rusage &&
+      process_user_ok(grp, rusage_va, (uint64_t)sizeof(struct ho_rusage), 1) != 0)
     return -EFAULT;
 
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
@@ -2159,6 +2231,8 @@ int process_waitpid(struct trap_frame *tf) {
        (the physical block was already freed at exit). */
     int child_pid = p->pid;
     int st = p->exit_status;
+    struct ho_rusage ru;
+    ho_rusage_fill(&ru, p);
     p->state = PROC_STATE_FREE;
     p->exit_status = 0;
     spinlock_release_irqrestore(&proc_lock, flags);
@@ -2168,6 +2242,8 @@ int process_waitpid(struct trap_frame *tf) {
        contract ("after vm_touch the kernel reads/writes directly"). */
     if (status)
       *status = st;
+    if (want_rusage)
+      user_rusage_store(grp, rusage_va, &ru);
     return child_pid;
   }
 
@@ -2212,8 +2288,17 @@ int process_waitpid(struct trap_frame *tf) {
 
   /* Block until a matching child exits. process_exit() delivers the
      result into this saved context and flips us to READY; the syscall
-     then resumes in user mode with context[0] as the return value. */
+     then resumes in user mode with context[0] as the return value.
+     W2-5: want-pid/status are stored EXPLICITLY (not just via the saved
+     regs) so reap_deliver_locked() reads canonical slots on BOTH arches
+     (x64's scattered register positions never reach this code), and a
+     wait4 request parks its rusage pointer in the one-shot
+     caller->wait4_rusage field for the delivery to fill. */
   save_context(caller, tf);
+  caller->context[0] = (uint64_t)want_pid;
+  caller->context[1] = (uint64_t)status;
+  if (want_rusage)
+    caller->wait4_rusage = rusage_va;
   caller->state = PROC_STATE_WAIT_CHILD;
   spinlock_release_irqrestore(&proc_lock, flags);
   schedule(tf, 0);
@@ -2624,7 +2709,7 @@ void start_scheduler(void) {
        forever, so without the heartbeat the reaper would never reclaim
        its RUNNING process and every CPU would IDLESTUCK-cycle forever. */
     sched_idle_rounds++;
-    int anomaly = 0; /* this pass found a real stuck process to name */
+    int acted = 0;   /* w5 (v): this pass RECLAIMED or DISPOSED a slot */
     if (sched_idle_rounds >= 500) {
       uint64_t wflags = spinlock_acquire_irqsave(&proc_lock);
       int dispose_slot = 0;
@@ -2654,7 +2739,7 @@ void start_scheduler(void) {
             }
           }
           if (!claimers) {
-            anomaly = 1;
+            acted = 1; /* w5 (v): real reclaim this pass */
             uart_puts("[LOSTWAKE] reclaiming pid=");
             print_int(proc_table[k].pid);
             uart_puts(" ");
@@ -2674,7 +2759,6 @@ void start_scheduler(void) {
                owner's heartbeat is frozen forever, so its claim still
                confirms — the poison-resume recovery below is unchanged,
                merely delayed one idle round. */
-            anomaly = 1;
             lw_candidate = k;
             uint64_t freshest = 0;
             for (int c2 = 0; c2 < MAX_CPUS; c2++) {
@@ -2705,6 +2789,7 @@ void start_scheduler(void) {
               uart_puts(" ");
               uart_puts(proc_table[k].name);
               uart_puts(" (stale dead-owner claim, poisoned resume)\n");
+              acted = 1; /* w5 (v): real disposal this pass */
               for (int c = 0; c < MAX_CPUS; c++) {
                 if (cpu_current_pids[c] == k)
                   set_current_process_pid(c, -1);
@@ -2737,14 +2822,15 @@ void start_scheduler(void) {
         group_teardown(process_group(&proc_table[dispose_slot]), 97);
     }
 
-    /* Diagnostic dump: name a stuck process ONLY when this pass actually
-       found something real (a RUNNING slot with no claiming CPU, or a
-       stale-dead-owner candidate worth an arm).  A healthy-but-idle desktop
-       has RUNNING slots that ARE claimed (cX=pid) — those are alive and
-       must not spam the console with a full table dump every ~1000 idle
-       rounds.  The monotone trigger still rate-limits a genuinely wedged
-       system to one dump per window so the stuck suite names itself. */
-    if (anomaly && sched_idle_rounds >= 500 &&
+    /* Diagnostic dump: name the stuck set ONLY when this pass actually
+       RECLAIMED or DISPOSED a slot (acted).  A stale-claim CANDIDATE that
+       is merely armed (lostwake_stale_claim_reclaimable, but the
+       heartbeat just has not advanced -- normal under MTTCG host
+       starvation of a busy-but-legit claimer, e.g. the driver's pipe
+       wait) must NOT spam the table dump every ~1000 idle rounds (w4-clang:
+       [IDLESTUCK] false-positives on the driver's legit pipe-wait).  The
+       [LOSTWAKE] reclaim/dispose lines already name every real event. */
+    if (acted && sched_idle_rounds >= 500 &&
         (sched_idle_rounds / 1000) != last_idlestuck_div) {
       last_idlestuck_div = sched_idle_rounds / 1000;
       uart_puts("[IDLESTUCK] cpu=");
@@ -3079,9 +3165,12 @@ int64_t sys_memfd_create(uint64_t name, int64_t flags) {
  * this once they have decided the process must die.  Status is
  * signal-shaped (SIGSEGV = 11) via the group_teardown marker; the
  * ordinary exit machinery drains the group and reaps it. */
-void process_fault_exit(struct trap_frame *tf, int signo) {
+void process_fault_set_status(struct trap_frame *tf, int signo) {
   if (tf)
     tf->regs[0] = (uint64_t)(PROCESS_STATUS_SIGNAL | (signo & 0x7f));
+}
+void process_fault_exit(struct trap_frame *tf, int signo) {
+  process_fault_set_status(tf, signo);
   process_exit(tf);
 }
 

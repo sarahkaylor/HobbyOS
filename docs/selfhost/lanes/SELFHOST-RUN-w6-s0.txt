@@ -1,0 +1,5 @@
+# w6-run lane: S0 drive — one-TU compile smoke in-OS (acceptance.md S0).
+# The driver (SELFHOST.BIN, MODE=selfhost boot) runs this script staged as
+# ::/SRC/SELFHOST.RUN.  SH.BIN resolves to /TOOLS/SH.BIN; SELFHOST.SH does
+# `cd /SRC && /TOOLS/MAKE.BIN -f Makefile.hobbyos check`.
+s0-check|SH.BIN|/SRC/SELFHOST.SH check

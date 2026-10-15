@@ -8,7 +8,7 @@
  * (crt0 walks .init_array before main, exit() calls the finalizer, the
  * linker script collects the section) on both arches; this test pins the
  * runtime's own semantics under fork/glibc — guard state machine, the
- * alignment-correct new/delete over a foreign allocator, LIFO/dso-filtered
+ * alignment-correct new/delete over the HobbyOS allocator, LIFO/dso-filtered
  * finalization, and the abort paths — including boundaries (atexit table
  * full, >16-byte-safe alignment) the device wave cannot force.
  *
@@ -17,6 +17,18 @@
  * here, and cxxrt.h is reached by relative include.  cxxrt.cpp itself
  * keeps the sysroot on its path (its cxxrt.h + stdlib.h resolve exactly
  * as they do on-device), so both header modes are live across the pair.
+ *
+ * w6-run allocator contract: cxxrt's operator delete now calls free(ptr)
+ * with the RAW pointer (raw-payload semantics, w5-nothrow os-wide
+ * follow-up — free_locked's BLOCK_MAGIC check distinguishes an
+ * over-aligned/stashed payload from a raw malloc payload).  That contract
+ * is defined over the HOBBYOS allocator, whose free() does the magic
+ * check — glibc's free() does NOT (it corrupts on the misaligned
+ * non-malloc pointer).  So this host harness backs new/delete with a host
+ * build of the shipped allocator (src/user/malloc.c; its HOST_TEST path
+ * renames to hb_*), exactly the on-device backing, via the strong shim
+ * definitions below that shadow libc's.  Keep the HobbyOS allocator in
+ * the cxxrt_test_HOST link (obj/host_malloc_hb.o).
  */
 #include <signal.h>
 #include <stdint.h>
@@ -27,6 +39,24 @@
 #include <unistd.h>
 
 #include "../libc/include/cxxrt.h"
+
+/* ---- allocator wiring (see the header note): shadow glibc's malloc/free
+ *      with the HobbyOS allocator's hb_* entry points.  Strong definitions
+ *      in this TU win over libc.so's weak dynamic ones; calling the hb_*
+ *      directly avoids the HOST_TEST rename cycle. ---- */
+extern "C" void *hb_malloc(size_t);
+extern "C" void *hb_calloc(size_t, size_t);
+extern "C" void *hb_realloc(void *, size_t);
+extern "C" void hb_free(void *);
+extern "C" void *hb_aligned_alloc(size_t, size_t);
+
+extern "C" void *malloc(size_t n) { return hb_malloc(n); }
+extern "C" void *calloc(size_t n, size_t m) { return hb_calloc(n, m); }
+extern "C" void *realloc(void *p, size_t n) { return hb_realloc(p, n); }
+extern "C" void free(void *p) { hb_free(p); }
+extern "C" void *aligned_alloc(size_t a, size_t n) {
+  return hb_aligned_alloc(a, n);
+}
 
 static int total_checks = 0;
 static int failures = 0;
@@ -114,9 +144,10 @@ static void test_new_delete(void) {
   CHECK(1, "delete: NULL is a safe no-op");
 
   /* Alignment: max_align_t is 16 on both targets.  The runtime must
-   * over-align every block itself — the underlying allocator (glibc here,
-   * HobbyOS malloc on-device, which returns 8-mod-16 pointers) is not
-   * relied on for this. */
+   * over-align every block itself — the underlying HobbyOS malloc (the
+   * host build of src/user/malloc.c linked into this harness, which
+   * returns 8-mod-16 pointers just like on-device) is not relied on for
+   * this. */
   void *a1 = operator new(1);
   void *a2 = operator new(7);
   void *a3 = operator new(4096);

@@ -1,0 +1,23 @@
+# w12-rcut lane: FINAL T4.3 acceptance loop re-cut on the merged-final tip
+# (S0 -> S3 in ONE boot, plus the incremental demo).  Staged over
+# ::/SRC/SELFHOST.RUN (mcopy -o), replacing the pipeline's default 4-stage
+# script.  Each stage runs /TOOLS/MAKE.BIN -f Makefile.hobbyos <tgt> with
+# cwd=/SRC via the SELFHOST*.SH wrappers; the t25-run stage runs the
+# just-built HELLO.BIN in-OS (stdout relays to serial through the driver
+# pipe).
+#
+# -j invocation (w11-makej, acceptance.md 9.6): s1-user and s2-kernel run
+# the parallel jobserver variant SELFJ8.SH -> `make -j8 -f
+# Makefile.hobbyos <tgt>` (first REAL -j8 on the 5 real user TUs and the 59
+# real kernel TUs; cap -j8 on the 8-vCPU box).  s0-check, the incremental
+# demos and s3-disk stay serial (SELFHOST.SH -> plain make).
+#
+# s2-inc: after the -j8 kernel build, re-run make on a real OBJECT target
+# (must print 'Nothing to be done') and re-run the kernel goal (proves all
+# 59 objects were up to date: zero kernel-compile lines, only the relink).
+s0-check|SH.BIN|/SRC/SELFHOST.SH check
+s1-user|SH.BIN|/SRC/SELFJ8.SH user
+t25-run|SH.BIN|/SRC/T25.RUN
+s2-kernel|SH.BIN|/SRC/SELFJ8.SH kernel
+s2-inc|SH.BIN|/SRC/SELFINC.SH
+s3-disk|SH.BIN|/SRC/SELFHOST.SH disk

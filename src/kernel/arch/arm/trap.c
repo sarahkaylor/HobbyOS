@@ -713,7 +713,7 @@ struct sys_spawn_args {
   int stdout_fd;
   int stderr_fd;
   int caller_pid;
-  char args[256];
+  char args[HO_FLAT_ARGS_LEN]; /* w5 (vi): flat args cap 1024 */
 };
 
 static struct sys_spawn_args spawn_args_pool[64];
@@ -771,7 +771,7 @@ static void sys_spawn(struct trap_frame *tf) {
 
     if (args_ptr && sys_user_range_ok((uint64_t)args_ptr, 1)) {
       int k = 0;
-      while (args_ptr[k] && k < 255) {
+      while (args_ptr[k] && k < HO_FLAT_ARGS_LEN - 1) {
         args->args[k] = args_ptr[k];
         k++;
       }
@@ -1095,21 +1095,47 @@ static void sys_mkdir(struct trap_frame *tf) {
   }
 }
 
+/* W2-14 (selfhost): SYS_RMDIR -- remove an EMPTY directory.  The kernel
+ * layer returns precise negative errnos (fat16_rmdir: -ENOENT/-ENOTDIR/
+ * -ENOTEMPTY/-EBUSY; vfs_rmdir maps a routed read-only mount to -EROFS),
+ * passed through verbatim -- no coarse -ENOENT folding here. */
+static void sys_rmdir(struct trap_frame *tf) {
+  const char *path = (const char *)tf->regs[0];
+  if (sys_user_range_ok((uint64_t)path, 1)) {
+    extern int vfs_rmdir(const char *path);
+    int r = vfs_rmdir(path);
+    tf->regs[0] = r < 0 ? (uint64_t)r : r;
+  } else {
+    tf->regs[0] = -EFAULT;
+  }
+}
+
 /* mount(source, target): mount an NFS export ("A.B.C.D:/export") at a
  * directory of the FAT volume.  The mount point is created when missing. */
 
 /* Copy a NUL-terminated user string into kernel memory with full bounds
  * checking. Returns 1 on success (dst NUL-terminated), 0 on bad ptr.
  * P2.5 (S5 flip): v2-aware via sys_user_range_ok (the old window test
- * rejected every v2 string pointer). */
+ * rejected every v2 string pointer).
+ * w8-torture: validate PER PAGE, not the whole cap up front — a short
+ * string near the TOP of a mapped region was dropped wholesale once the
+ * w6-run cap bump made the full-range check reach past the region end
+ * (mirror of pl_strcpy in program_loader.c). */
 static int u_strcpy(const char *src, char *dst, int cap) {
   if (!src || cap <= 1)
     return 0;
-  if (!sys_user_range_ok((uint64_t)src, (uint64_t)cap))
-    return 0;
   int i = 0;
-  for (; i < cap - 1 && src[i]; i++)
-    dst[i] = src[i];
+  for (;;) {
+    if (i >= cap - 1)
+      break;
+    if (!sys_user_range_ok(((uint64_t)&src[i]) & ~0xFFFULL, 1))
+      return 0;
+    char c = src[i];
+    dst[i] = c;
+    if (c == 0)
+      return 1;
+    i++;
+  }
   dst[i] = '\0';
   return 1;
 }
@@ -1126,6 +1152,13 @@ static void sys_getppid(struct trap_frame *tf) {
 
 static void sys_waitpid(struct trap_frame *tf) {
   tf->regs[0] = process_waitpid(tf);
+}
+
+/* W2-5 (selfhost): SYS_WAIT4 -- ARM canonical positions (regs[0]=pid,
+ * regs[1]=status, regs[2]=options, regs[3]=rusage) match the shared
+ * core's expectations directly; x64 remaps in its own handler. */
+static void sys_wait4(struct trap_frame *tf) {
+  tf->regs[0] = process_wait4(tf);
 }
 
 static void sys_exec(struct trap_frame *tf) {
@@ -1170,19 +1203,24 @@ static void sys_exec(struct trap_frame *tf) {
   }
 
   /* argv[1..] become the args string (space-joined, like spawn). */
-  char argbuf[256];
+  /* w6-run: 4096-wide buffers — one argv element can be a whole `sh -c`
+   * command line (make recipe lines; the S2 kernel link line is ~1.3 KB)
+   * and the old 64-per-arg/256-total caps truncated it mid-token.  Matches
+   * HO_EXEC_ARGV_LEN; the eargv blob path is primary, this flat string the
+   * fallback. */
+  char argbuf[HO_EXEC_ARGV_LEN];
   int alen = 0;
   argbuf[0] = '\0';
   if (argv) {
-    for (int ai = 1; alen < 251 &&
+    for (int ai = 1; alen < HO_EXEC_ARGV_LEN - 1 &&
                      sys_user_range_ok((uint64_t)(argv + ai), sizeof(char *)) &&
                      argv[ai] != 0; ai++) {
-      char one[64];
+      char one[HO_EXEC_ARGV_LEN];
       if (!u_strcpy((const char *)argv[ai], one, sizeof one))
         break;
       if (alen)
         argbuf[alen++] = ' ';
-      for (int k = 0; one[k] && alen < 255; k++)
+      for (int k = 0; one[k] && alen < HO_EXEC_ARGV_LEN - 1; k++)
         argbuf[alen++] = one[k];
     }
   }
@@ -1746,6 +1784,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_rename(tf);
     } else if (syscall_num == SYS_MKDIR) {
       sys_mkdir(tf);
+    } else if (syscall_num == SYS_RMDIR) {   /* W2-14 (selfhost) */
+      sys_rmdir(tf);
     } else if (syscall_num == SYS_GETCWD) {
       sys_getcwd(tf);
     } else if (syscall_num == SYS_CHDIR) {
@@ -1768,6 +1808,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_getppid(tf);
     } else if (syscall_num == SYS_WAITPID) {
       sys_waitpid(tf);
+    } else if (syscall_num == SYS_WAIT4) {    /* W2-5 (selfhost) */
+      sys_wait4(tf);
     } else if (syscall_num == SYS_EXEC) {
       sys_exec(tf);
     } else if (syscall_num == SYS_GETPROGNAME) {
@@ -1900,7 +1942,7 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       uart_puts(" ELR: ");
       uart_print_hex(tf->elr);
       uart_puts("\n");
-      process_exit(tf);
+      process_fault_exit(tf, 11); /* SIGSEGV status byte (w5 ii) */
     } else {
       uart_puts("\n[KERNEL] FATAL: EL0 Synchronous Exception with no running process!\n");
       uart_puts("EC: ");
@@ -1929,7 +1971,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       uart_puts(" ELR: ");
       uart_print_hex(tf->elr);
       uart_puts("\n");
-      process_exit(tf);
+      /* w5 (ii): SIGILL (executing an invalid/zero instruction); a
+         process killed this way must report a non-zero waitpid status
+         (the old process_exit left stale x0 -> rc=0 false pass). */
+      process_fault_exit(tf, 4); /* SIGILL status byte */
     } else {
       uart_puts("\n[KERNEL] FATAL: EL0 Synchronous Exception with no running process!\n");
       uart_puts("EC: ");
@@ -1952,7 +1997,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
 
     struct process *cur = current_process();
     if (cur) {
-      process_exit(tf);
+      /* w5 (ii): EC=0x3C (BRK, e.g. a libc++ assert) and every other
+         unhandled EL0 exception kill the process with SIGILL status --
+         never a stale-x0 rc=0. */
+      process_fault_exit(tf, 4); /* SIGILL status byte */
     } else {
       while (1) {
         safe_wfi();

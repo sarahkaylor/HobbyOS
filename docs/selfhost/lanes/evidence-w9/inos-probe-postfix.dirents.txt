@@ -1,0 +1,7 @@
+# ::/SRC/obj/probe dirents after the probe on the FIXED selfhost kernel
+# (3 real clang objects: cpu.c, nfs_test.c, fat16.c)
+# name  size  cluster
+CPU.O      6968   cl19777
+NFS_TEST.O 832    cl19778
+FAT16.O    130224 cl19779
+# ZERO mangled twins — the close-after-rename resurrect/clobber bug is fixed.

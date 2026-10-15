@@ -1108,13 +1108,18 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) { *errp = EBADF; return -1; }
   struct file *f = &global_file_table[g_fd];
   switch (f->type) {
-  case FILE_TYPE_FAT16:
+  case FILE_TYPE_FAT16: {
     k_stat_fill(st,
                 fat16_synth_ino(f->fat16.dir_sector, f->fat16.dir_offset),
                 (f->fat16.entry.attr & 0x10)
                     ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
                 f->fat16.entry.file_size);
+    /* w10-fstime: report the dirent's real RTC timestamp (UTC).  FAT has
+       no atime; use the modify time for all three (matches sysinfo/time). */
+    long ts = (long)fat16_entry_epoch(&f->fat16.entry);
+    st->st_atime = st->st_mtime = st->st_ctime = ts;
     return 0;
+  }
   case FILE_TYPE_NFS:
     k_stat_fill(st, nfs_synth_ino(&f->nfs.fh),
                 f->nfs.is_dir ? (K_S_IFDIR | 0755)
@@ -1151,6 +1156,9 @@ int file_stat_path(struct process *p, const char *path, struct k_stat *st,
   k_stat_fill(st, fat16_synth_ino(sector, offset),
               (entry.attr & 0x10) ? (K_S_IFDIR | 0755) : (K_S_IFREG | 0644),
               entry.file_size);
+  /* w10-fstime: real RTC timestamp from the dirent (UTC; no FAT atime). */
+  long ts = (long)fat16_entry_epoch(&entry);
+  st->st_atime = st->st_mtime = st->st_ctime = ts;
   return 0;
 }
 

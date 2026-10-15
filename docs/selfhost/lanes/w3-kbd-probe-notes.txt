@@ -1,0 +1,11 @@
+elcome to Hobby0s Shell
+Type ‘help’ to see available builtins and syntax.
+
+userehobbues:/5 cat .
+Gat: .: No such file or directory
+Userehobbyos:7s echo hi >
+
+Shi cannot open =
+
+User@hobbyes:75
+

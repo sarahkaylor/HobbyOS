@@ -22,6 +22,20 @@
  * (W) by upstream design, so the HobbyOS allocator remains the single
  * backing for both worlds; __cxa_atexit/__cxa_finalize/__dso_handle stay
  * here because libc++abi's cxa_atexit.cpp is deliberately not built.
+ *
+ * w6-run (selfhost, from w5-nothrow's os_wide_followup): the THROWING
+ * new/new[] carry __attribute__((section("__lcxx_override"))) so that when
+ * a program links BOTH this object and a -fno-exceptions libc++, the
+ * section-attributed operator new that libc++'s nothrow-override check
+ * inspects is found INSIDE its __lcxx_override section (see cxxrt_shim.cpp,
+ * the toolchain-closure twin of this file — keep the two in sync).  And
+ * operator delete now calls free(ptr) directly instead of reading the
+ * stash word: HobbyOS free() distinguishes an aligned/stashed payload
+ * from a raw malloc payload by the block magic (src/user/malloc.c
+ * free_locked), so free(ptr) is correct for BOTH classes — in particular
+ * for memory returned by libc++'s operator new(nothrow), which is a raw
+ * malloc payload with no stash (the w5-nothrow in-OS free(BLOCK_MAGIC)
+ * data abort, VA=0x48424F424C4B4D3F).
  */
 #include "cxxrt.h"
 
@@ -44,11 +58,26 @@ __attribute__((weak)) void *__dso_handle = (void *)&__dso_handle;
  * requirement that new return storage aligned for any fundamental type
  * (max_align_t = 16 on both targets, where FP/SIMD is live userland since
  * F1.5).  So the runtime over-allocates by 16 bytes, aligns up and stashes
- * the raw malloc pointer in the word below the returned block; delete
- * recovers it.  malloc(0) returns NULL in the HobbyOS allocator, so
- * zero-size requests ask for 1 byte to keep the "never returns NULL" new
- * contract.  Without exceptions the only honest OOM behavior is a
- * diagnostic + abort; see cxxrt.h.
+ * the raw malloc pointer in the word below the returned block; malloc(0)
+ * returns NULL in the HobbyOS allocator, so zero-size requests ask for 1
+ * byte to keep the "never returns NULL" new contract.  Without exceptions
+ * the only honest OOM behavior is a diagnostic + abort; see cxxrt.h.
+ *
+ * The THROWING forms carry __attribute__((section("__lcxx_override"))):
+ * libc++ built with -fno-exceptions asserts at runtime (new.cpp nothrow
+ * path) that operator new has not been overridden OUTSIDE its own
+ * __lcxx_override section, so any program linking both this object and
+ * libc++ (toolchain closure precedent, w5-nothrow) must keep its strong
+ * _Znwm/_Znam inside that section.  This file is the OS-side twin of
+ * src/user/toolchain/sysroot-headers/cxxrt_shim.cpp — keep the two in sync.
+ *
+ * delete goes through HobbyOS free(ptr) with the RAW pointer, exactly like
+ * libc++'s own operator delete (delete.cpp: std::free).  free_locked()
+ * distinguishes an aligned/stashed payload (raw malloc pointer at [-8])
+ * from a raw malloc payload (BLOCK_MAGIC at the block header) by the magic
+ * check, so free(ptr) is correct for BOTH classes — including libc++'s
+ * operator new(nothrow) raw-malloc memory, which has NO stash (the
+ * w5-nothrow in-OS free(BLOCK_MAGIC) data abort).
  */
 #define CXXRT_MAX_ALIGN 16
 
@@ -68,14 +97,21 @@ static void *cxxrt_alloc_aligned(size_t size) {
   return (void *)p;
 }
 
-static void cxxrt_free_aligned(void *ptr) {
-  if (ptr)
-    free(((void **)ptr)[-1]);
+/* free(ptr) with the raw pointer — see the delete contract above.  Never
+ * free(((void**)ptr)[-1]): for a raw malloc payload (libc++ nothrow-new)
+ * ptr[-8] is the block's own BLOCK_MAGIC and freeing that value faults
+ * (w5-nothrow VA=0x48424F424C4B4D3F). */
+static void cxxrt_free_aligned(void *ptr) { free(ptr); }
+
+__attribute__((section("__lcxx_override"))) void *
+operator new(size_t size) {
+  return cxxrt_alloc_aligned(size);
 }
 
-void *operator new(size_t size) { return cxxrt_alloc_aligned(size); }
-
-void *operator new[](size_t size) { return cxxrt_alloc_aligned(size); }
+__attribute__((section("__lcxx_override"))) void *
+operator new[](size_t size) {
+  return cxxrt_alloc_aligned(size);
+}
 
 void operator delete(void *ptr) noexcept { cxxrt_free_aligned(ptr); }
 void operator delete[](void *ptr) noexcept { cxxrt_free_aligned(ptr); }

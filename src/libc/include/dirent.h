@@ -2,10 +2,11 @@
 #define HOBBYOS_DIRENT_H
 
 /* HobbyOS sysroot: <dirent.h> — directory iteration surface for ported
- * GNU tools.  The FAT16 filesystem can list directories; the kernel syscall
- * pair behind opendir/readdir is still to come, so the current
- * implementation reports ENOSYS and callers (e.g. grep -r) fail loudly
- * instead of silently seeing empty directories. */
+ * GNU tools.  opendir/readdir/closedir are implemented in dirent.c over
+ * the kernel's SYS_READ_DIR (row 15) — the same syscall the legacy
+ * read_dir() helper wraps.  The kernel caps entry names at 31 chars
+ * (FROZEN per AD-13; see sys_read_dir in both arch trap.c files), so
+ * d_name's 256-byte buffer always accepts the longest kernel name. */
 
 #include <sys/types.h>
 

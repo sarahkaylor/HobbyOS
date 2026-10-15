@@ -103,6 +103,18 @@ int fchmod(int fd, mode_t mode) {
   return 0;
 }
 
+/* selfhost W2-7: fchown — single-user OS with no ownership bits; validate
+ * the fd and succeed as a no-op (the same contract as fchmod/utimens on
+ * this permissionless filesystem).  LLVM's Unix/Path.inc:1339 calls it
+ * when setting the owner of a moved/copied temp file. */
+int fchown(int fd, uid_t owner, gid_t group) {
+  struct stat st;
+
+  (void)owner;
+  (void)group;
+  return fstat(fd, &st);
+}
+
 /* No symlinks on this VFS: lstat is stat. */
 int lstat(const char *path, struct stat *buf) {
   return stat(path, buf);
@@ -190,7 +202,7 @@ int fdatasync(int fd) { return fsync(fd); }
 long sysconf(int name) {
   switch (name) {
   case _SC_ARG_MAX:
-    return 256; /* kernel exec arg blob */
+    return 4096; /* kernel exec arg blob (process.h HO_EXEC_ARGV_LEN) */
   case _SC_CHILD_MAX:
   case _SC_OPEN_MAX:
     return 64;  /* MAX_PROCESSES / MAX_OPEN_FDS */

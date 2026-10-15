@@ -2239,9 +2239,9 @@ static int eval_simple(struct node *n, int in_fd, int out_fd, int err_fd) {
     }
   }
   if (astart >= n->nwords) {
-    if (lin != 0 && lin != in_fd) close(lin);
-    if (lout != 1 && lout != out_fd) close(lout);
-    if (lerr != 2 && lerr != err_fd) close(lerr);
+    if (lin != 0 && lin != in_fd && lin >= 3) close(lin);
+    if (lout != 1 && lout != out_fd && lout >= 3) close(lout);
+    if (lerr != 2 && lerr != err_fd && lerr >= 3) close(lerr);
     fields_free(&f);
     return 0;
   }
@@ -2298,9 +2298,9 @@ static int eval_simple(struct node *n, int in_fd, int out_fd, int err_fd) {
       dup2(saved2, 2);
       close(saved2);
     }
-    if (lin != 0 && lin != in_fd) close(lin);
-    if (lout != 1 && lout != out_fd) close(lout);
-    if (lerr != 2 && lerr != err_fd) close(lerr);
+    if (lin != 0 && lin != in_fd && lin >= 3) close(lin);
+    if (lout != 1 && lout != out_fd && lout >= 3) close(lout);
+    if (lerr != 2 && lerr != err_fd && lerr >= 3) close(lerr);
   } else {
     /* user-defined function first */
     int fst = call_function(arg0, cmdargc, cmdargv);
@@ -2321,15 +2321,15 @@ static int eval_simple(struct node *n, int in_fd, int out_fd, int err_fd) {
         } else if (pid == 0) {
           if (lin != 0) {
             dup2(lin, 0);
-            if (lin != 0) close(lin);
+            if (lin >= 3) close(lin);
           }
           if (lout != 1) {
             dup2(lout, 1);
-            if (lout != 1) close(lout);
+            if (lout >= 3) close(lout);
           }
           if (lerr != 2) {
             dup2(lerr, 2);
-            if (lerr != 2) close(lerr);
+            if (lerr >= 3) close(lerr);
           }
           char **av = (char **)malloc((size_t)(cmdargc + 1) * sizeof(char *));
           for (int i = 0; i < cmdargc; i++) av[i] = cmdargv[i];
@@ -2348,9 +2348,9 @@ static int eval_simple(struct node *n, int in_fd, int out_fd, int err_fd) {
     }
   }
 
-  if (lin != 0 && lin != in_fd) close(lin);
-  if (lout != 1 && lout != out_fd) close(lout);
-  if (lerr != 2 && lerr != err_fd) close(lerr);
+  if (lin != 0 && lin != in_fd && lin >= 3) close(lin);
+  if (lout != 1 && lout != out_fd && lout >= 3) close(lout);
+  if (lerr != 2 && lerr != err_fd && lerr >= 3) close(lerr);
   fields_free(&f);
   return st;
 }

@@ -1,0 +1,17 @@
+# w11-makej benchmark RUN — synthetic 16-TU project, serial vs -j4 vs -j8
+# (+ fail propagation), driven through the MODE=selfhost acceptance driver.
+# Stages the driver back-to-back in ONE boot so all wall times share the
+# same boot/scheduler state.  Every stage: sh runs /SRC/BM/BENCH.SH <mode>,
+# which runs ONE make invocation + correctness checks (cmp, ps).  Phase
+# markers are timestamped by the host runner (tools/w11_bench_boot.py).
+# Boot with:
+#   tools/w11_bench_boot.py --image disk.img --script-copy \
+#     docs/selfhost/lanes/evidence-w11/SELFHOST-RUN-w11-bench.txt ...
+bm-ser1|SH.BIN|/SRC/BM/BENCH.SH ser1
+bm-ser2|SH.BIN|/SRC/BM/BENCH.SH ser2
+bm-j41|SH.BIN|/SRC/BM/BENCH.SH j41
+bm-j42|SH.BIN|/SRC/BM/BENCH.SH j42
+bm-j81|SH.BIN|/SRC/BM/BENCH.SH j81
+bm-j82|SH.BIN|/SRC/BM/BENCH.SH j82
+bm-failser|SH.BIN|/SRC/BM/BENCH.SH failser
+bm-failj8|SH.BIN|/SRC/BM/BENCH.SH failj8

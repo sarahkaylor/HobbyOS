@@ -83,7 +83,7 @@ extern int num_windows;           /* window.c */
 /* Real syscalls (same shape as editor_test.c)                            */
 /* ====================================================================== */
 
-static long syscall(long num, long a0, long a1, long a2, long a3) {
+static long ho_syscall4(long num, long a0, long a1, long a2, long a3) {
 #ifdef __x86_64__
   long ret;
   register long rdi __asm__("rdi") = a0;
@@ -967,12 +967,12 @@ static void apps_frame_tick(void) {
 }
 
 void flush_fb(void) {
-  syscall(SYS_FLUSH_FB, 0, 0, 0, 0);
+  ho_syscall4(SYS_FLUSH_FB, 0, 0, 0, 0);
   apps_frame_tick();
 }
 
 int flush_fb_rects(const struct fb_rect *rects, int count) {
-  syscall(SYS_FLUSH_FB_RECTS, (long)rects, (long)count, 0, 0);
+  ho_syscall4(SYS_FLUSH_FB_RECTS, (long)rects, (long)count, 0, 0);
   apps_frame_tick();
   return 0;
 }

@@ -150,6 +150,10 @@ static void test_wave_loader(void *arg) {
   /* L7 (fat16 large-file lane): >1 MiB create/write/reopen round-trip.
      Proves the pre-existing fat16 create-path defect live in the wave. */
   load_and_run_program_in_scheduler("FATBIG_T.BIN", -1, -1, -1, -1);
+  /* L3 (selfhost W-A): VFAT long-name build-payload acceptance — mcopy
+     tree with long names, collision family, in-OS create/rename/mkdir/
+     unlink of long names.  Spawns nothing. */
+  load_and_run_program_in_scheduler("LFN_T.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("HEAPTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("SPAWN.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("FORKTEST.BIN", -1, -1, -1, -1);
@@ -503,6 +507,22 @@ void main(void) {
   uart_puts("Mode: WEBPROC - Running headless WebProcess (WK-3)...\n");
   load_and_run_program_in_scheduler_args("WEBPROC.BIN", -1, -1, -1, -1,
                                          "--wk3-driver");
+#elif defined(KERNEL_MODE_SELFHOST)
+  /* Self-hosting (docs/selfhost/acceptance.md §5.2/5.3, primary drive):
+     single-program boot that launches ONLY SELFHOST.BIN — the in-OS
+     acceptance build driver — with NO desktop.  The driver's stdout/stderr
+     are fd 1/2 unset -> the console-fd fallback (fs.c file_write 0002 ->
+     console_write_user) relays them to the SERIAL console, so every
+     [SELFHOST] phase= marker (echoed by the driver and by the in-OS build
+     tools it spawns) lands in the serial capture.  argv[1] is the driver
+     script (SELFHOST.RUN's <phase>|<tool>|<args> format, acceptance §5.3);
+     the driver defaults to /SRC/SELFHOST.RUN when absent.  The driver ends
+     with [SELFHOST] ACCEPTANCE-COMPLETE or a staged failure marker, exits,
+     all processes drain, and the boot core falls through to the clean
+     halt below. */
+  uart_puts("Mode: SELFHOST - Running in-OS acceptance build driver...\n");
+  load_and_run_program_in_scheduler_args("SELFHOST.BIN", -1, -1, -1, -1,
+                                         "/SRC/SELFHOST.RUN");
 #else
   uart_puts("Mode: DESKTOP - Launching desktop...\n");
   load_and_run_program_in_scheduler("DESKTOP.BIN", -1, -1, -1, -1);

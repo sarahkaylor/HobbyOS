@@ -1,0 +1,55 @@
+{
+  "lane": "l1",
+  "status": "partial",
+  "commits": [
+    "a2733a9",
+    "a1956da",
+    "ef45145",
+    "8da0b35",
+    "926b839",
+    "52239a1",
+    "c8a8ef0",
+    "6258919",
+    "ce1a879"
+  ],
+  "artifacts": [
+    "third_party/llvm-21.1.8/fetch.sh",
+    "third_party/llvm-21.1.8/container.sha256",
+    "third_party/llvm-21.1.8/anchors.sha256",
+    "third_party/llvm-21.1.8/README.md",
+    "docs/selfhost/llvm-bootstrap.md",
+    "docs/selfhost/lanes/l1-dep-surface.txt",
+    "docs/selfhost/lanes/l1-configure-1.log",
+    "src/user/toolchain/cmake/toolchain-llvm-hobbyos.cmake",
+    "src/user/toolchain/cmake/modules/Platform/HobbyOS.cmake",
+    "src/user/toolchain/sysroot-headers/machine/endian.h",
+    "src/user/toolchain/sysroot-headers/sysexits.h",
+    "src/user/toolchain/sysroot-headers/dlfcn.h",
+    "src/user/toolchain/sysroot-headers/sys/resource.h",
+    "src/user/toolchain/sysroot-headers/sys/statvfs.h",
+    "src/user/toolchain/sysroot-headers/sys/utsname.h",
+    "src/user/toolchain/sysroot-headers/_missing.h",
+    "src/user/toolchain/sysroot-headers/gaps.c"
+  ],
+  "evidence": [
+    "docs/selfhost/lanes/l1-configure-1.log (configure green run 18; 18 spike runs)",
+    "third_party/llvm-21.1.8/src/llvm-project-21.1.8.src (1.7 GB extraction, anchors verified, .fetched-ok)",
+    "obj/selfhost/sysroot/ (26 MB staged sysroot: crt0.o 7.8K + libc.a 1.1M + libcxx.a 8.7M + builtins headers)",
+    "obj/selfhost/tblgen-native/bin/llvm-tblgen + clang-tblgen (host, built from vendored source)",
+    "obj/selfhost/llvm-build/build.ninja + include/llvm/Config (configure exit 0)",
+    "probe2.elf (aarch64 ELF, text 127,752 / data 292 / bss 6,336 — toolchain flags + link closure green)",
+    "obj/selfhost/llvm-build/hobbyos_gaps.o (aarch64, in closure)"
+  ],
+  "blockers": [
+    "Process.inc:64 static_assert failed: sizeof(int) >= sizeof(long): Process::Pid should be big enough to store pid_t — HobbyOS src/libc/include/sys/types.h:25 typedef long pid_t (8 B on aarch64) vs LLVM Process.h:46 using Pid=int32_t; POSIX/Linux pid_t is int. Hard gate for LLVMSupport; NOT resolvable in-lane (no src/libc edit, no LLVM source patch). L2 decides: pid_t -> int, or plan consent for an LLVM patch. See l1-dep-surface.txt E.",
+    "L2 must land (or accept stub) the libc bodies for: alarm, gethostname, getsid, strsignal, socket/bind/listen/accept/connect/pipe, fork-decl-in-unistd, setsid, wait4, pthread_sigmask, _Exit, fchown, fchmod, mkdir, symlink, link, getrusage, uname, statvfs/fstatvfs, dladdr, getrlimit/setrlimit — currently satisfied by src/user/toolchain/sysroot-headers/gaps.c stubs (WebKit-fork precedent) only for the toolchain link closure.",
+    "LLVM_ENABLE_TERMINFO configure warning is inert (option unused upstream 21.1.8; harmless)."
+  ],
+  "next_steps": [
+    "Wave 2 first: L2 resolves the pid_t width decision (prefer HobbyOS pid_t -> int, Linux-parity) and the B-section libc functions; then resume `ninja -C obj/selfhost/llvm-build llvm-ar llvm-objcopy` from the committed recipe (docs/selfhost/llvm-bootstrap.md §6).",
+    "After llvm-ar/llvm-objcopy green: `ninja clang lld` full cross build (hours on 64-core host), then `ninja install-distribution` with DESTDIR staging (F1 /TOOLS layout).",
+    "M2: curate builtin-header set to /TOOLS/RESDIR (8.3, F8), verify clang resource-dir relative discovery (AD-5 says rely on explicit -isystem).",
+    "Check whether raw_socket_stream socket surface is truly needed by clang/lld/llvm-ar/llvm-objcopy (it is compiled into LLVMSupport unconditionally; if unreachable in the distribution closure, ENOSYS stubs are acceptable — L2 verifies)."
+  ],
+  "notes": "Deliverable 1 (vendor scaffold) complete: fetch.sh reuses the libcxx-21.1.8 container (sha-verified, no re-download), extracts llvm/clang/lld/cmake/third-party(siphash)/LICENSE.TXT into 1.7 GB, anchors.sha256 (6 files) + .fetched-ok early-exit both verified by running fetch.sh twice. .gitignore block for third_party/llvm-21.1.8/ was ALREADY on main (lines 136-138), no edits needed. Deliverable 2 (design note) complete: cross recipe + toolchain file + staged sysroot (26 MB) + probe (aarch64 ELF) + dependency surface (A: 53 declared OS-facing calls, B: 6 link blockers, C: HAVE_* config surface, D/E: spike-surfaced gaps + hard blocker). Deliverable 3 (configure spike) PARTIAL: configure GREEN (18 runs, all in-lane fixes: CMake list-join, Platform/HobbyOS.cmake UNIX=1 module, LINKER_TYPE drop, compat headers + gaps.c stubs); compile reaches 211/564 TUs and stops at the pid_t static_assert — a real OS ABI decision, recorded as the wave-2 gate. No LLVM source patches made (AD-3). Evidence logs committed with git add -f (*.log globally gitignored per integrator note). Extraction used the container from the libcxx vendor with zero duplicate downloads. Estimated full build: hours (clang+lld Release AArch64-only), exact targets in the note §9/§6."
+}

@@ -1,0 +1,119 @@
+% Copyright 1996,1997,1999,2001,2002 Alain Knaff.
+
+% This documentation is for Mtools which is a collection of tools to
+% allow Unix systems to manipulate MS-DOS files.
+
+% Permission is granted to copy, distribute and/or modify this document
+% under the terms of the GNU Free Documentation License, Version 1.3 or
+% any later version published by the Free Software Foundation; with no
+% Invariant Sections, with no Front-Cover Texts, and with no Back-Cover
+% Texts.  A copy of the license is included in the section entitled
+% ``GNU Free Documentation License''.
+
+Installation of mtools on the usual platforms is now pretty straightforward:
+
+  1. Run ./configure
+  2. Run make
+
+ Configuration options:
+
+  * Use ./configure --enable-vold to compile mtools to use Solaris'
+vold instead of directly accessing the floppy disk
+  * Use ./configure --disable-xdf to disable support for Xdf disks on Linux
+  * Use ./configure --enable-new-vold to compile mtools to use the *new* 
+vold for Solaris. With this, you no longer need precmd=volcheck, and
+users don't need to type "eject" before pushing the button.
+
+Further doc can be found in the manpages, and in the texinfo doc. The
+texinfo doc contains the same info as the manpages, but is more up to
+date. To generate a printable doc, make dvi. To generate an info file,
+make info.
+
+==================================================================
+Compiling on BEBOX (BeOS DR9)
+
+See detailed instructions in README.BEBOX
+
+==================================================================
+Compiling using diet libc
+
+./configure CC="diet gcc -nostdinc" ac_cv_build=x86_64-pc-linux-dietlibc ac_cv_header_iconv_h=no
+make
+
+# Diet libc is not properly supported by autoconf's config.sub hence
+# the manual setting of ac_cv_build=
+
+# Diet libc does have iconv support, but unfortunately its iconv_open
+# supports no encoding that represents wchar_t. UCS-4 is supported,
+# but not UCS-4LE which would be needed on Intel processor on Linux.
+
+# N.B. Dietlibc programs are always statically linked, and thus
+# actually *larger* than a program compiled against the system libc,
+# which is usually dynamically linked. Thus dietlibc only makes sense
+# in a situation where dynamic linking is not possible or desirable
+# (embedded systems), or for portability testing.
+
+==================================================================
+Cross-compiling for windows, 32 bit using mingw
+
+./configure --host=i686-w64-mingw32
+make
+
+==================================================================
+Cross-compiling for windows, "64" bit using mingw
+
+./configure --host=x86_64-w64-mingw32
+make
+
+
+==================================================================
+Open Watcom compiler
+
+Minimal build (with correct open watcom env of INCLUDE, PATH, etc,
+assuming sh, gnu make, etc. E.g. cygwin/msys2/w64devkit on windows):
+
+  ./configure --host=i386-pc-mingw32 CC="owcc -bnt -fo=.o"
+  make
+
+CC option -bnt seems to targets win95+ (runs on win10), and -fo=.o
+creates .o objects (which the makefile expects) instead of .obj .
+The default CFLAGS seems to be "-g".
+
+I believe configure can/does detect .exe/.obj as EXEEXT and OBJEXT,
+but I don't think Makefile uses them, hence the "manual" handling
+(it's probably not worth "fixing" Makefile.in just for this).
+
+To strip, use (ow) "wstrip" - one file at a time, or add "-s" to CC.
+
+However, it seems that stripping (both methods) is unable to fully
+revert the effect of "-g", so for the smallest binaries, override -g
+by adding CFLAGS=... (empty works, or -Os, etc).
+
+CFLAGS=-O2 currently results in this crashing: mcopy -ix.img file ::
+(wasn't explored further).
+
+
+==================================================================
+Cross-Compiling for UnixPC
+
+./configure CC=/usr/local/bin/unixpc-gcc CFLAGS="-shlib -O3 -Os -fomit-frame-pointer" --host unixpc
+make
+
+==================================================================
+Clang, all warnings except rare warnings that are "over the top"
+
+./configure CC=clang CFLAGS="-Weverything -Wno-padded -Wno-disabled-macro-expansion" --prefix=""
+make
+
+# For over-the-top warnings, see:
+#  disabled-macro-expansion:
+#   https://stackoverflow.com/questions/34704422/warning-disabled-expansion-of-recursive-macro
+#  padded:
+#   https://stackoverflow.com/questions/40662265/warning-for-struct-padding-in-clang
+#   padding warning is also shown when padding happens at end of
+#   structure, i.e. not easily avoidable by just re-ordering the variables
+
+==================================================================
+Gcc, "all" warnings
+
+./configure CC=gcc CFLAGS="-pedantic -Wall -Wextra -Wcast-qual -Wunused-macros -Wshadow -Wwrite-strings -Wundef -Wstrict-prototypes -Wunused -Wmissing-prototypes -Wmissing-declarations -Wdeclaration-after-statement -Wunused-but-set-variable"

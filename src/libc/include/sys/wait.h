@@ -8,6 +8,8 @@
 #ifndef _SYS_WAIT_H
 #define _SYS_WAIT_H
 
+#include <sys/types.h> /* pid_t */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -17,6 +19,14 @@ extern "C" {
 
   int waitpid(int pid, int *status, int options);
   int wait(int *status);
+
+  /* selfhost W2-5: wait4 — the waitpid(2) form LLVM's sys::wait4 uses
+   * (Unix/Program.inc:341/418).  The rusage pointer is accepted but not
+   * filled (kernel CPU-time accounting is W2-17); the wrapper lives in
+   * src/user/libc.c over the new SYS_WAIT4 row.  Full type in
+   * <sys/resource.h>. */
+  struct rusage;
+  int wait4(pid_t pid, int *status, int options, struct rusage *rusage);
 
   /* A normal exit (WIFEXITED) has all low 7 bits clear; otherwise the low
    * 7 bits hold the terminating signal number. */

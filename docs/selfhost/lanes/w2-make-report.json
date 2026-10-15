@@ -1,0 +1,65 @@
+{
+  "lane": "w2-make",
+  "status": "complete",
+  "commits": [
+    "d97393f1b47e4972e313e7bb804e48b27a151a0e",
+    "08d4a20ff8a071252ab440cbab787c57b475bb49"
+  ],
+  "pins": {
+    "tarball": "third_party/make-4.4.1.tar.gz (also third_party/_staging/make-4.4.1.tar.gz, gitignored)",
+    "url": "https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz",
+    "sha256": "dd16fb1d67bfab79a72f5e8390735c49e3e8e70b4945a15ab1f81ddb78658fb3",
+    "verified": "computed locally == L4 pin table (buildtools-audit.md S1); tarball size 2,348,200 B matches"
+  },
+  "files": {
+    "vendor": [
+      "third_party/make-4.4.1/ (pristine upstream tree, tracked)",
+      "third_party/make-4.4.1.tar.gz",
+      "third_party/make-4.4.1.tar.gz.sha256"
+    ],
+    "port": [
+      "src/user/make/ — 30 upstream sources + 17 headers transcribed byte-identical (cmp-verified vs third_party/make-4.4.1), glob/fnmatch/intprops from lib/, glob.h+fnmatch.h from the .in.h templates",
+      "src/user/make/config.h — hand-pinned configuration (audit S3.1 probe set)",
+      "src/user/make/main.c — byte-identical + 2 marked [HobbyOS port] guards (two-arg main ABI, see notes)",
+      "src/user/make/hb_stubs.c/.h — sysroot-gap shims: getlogin, alarm, getloadavg, dup",
+      "src/user/make/ar.h — OS shim (no sysroot <ar.h>)",
+      "src/user/make/README.md — port + Makefile.hobbyos sync notes",
+      "tools/run_make_smoke.py — QMP console smoke harness",
+      "docs/selfhost/lanes/w2-make-smoke.log — in-OS evidence + deferred-byte-check recipe",
+      "Makefile — 26-line block (make_* pattern/link rules, disk.img dep + ::/MAKE.BIN mcopy)",
+      "tools/cstyle.py — src/user/make/ EXCLUDE_PREFIXES (byte-exact vendored tree, sed precedent)"
+    ]
+  },
+  "bin": {
+    "arm": {"path": "obj/arm/make.bin", "size": 308552, "arch": "aarch64-none-elf", "host_string": "aarch64-hobbyos", "elf": "obj/arm/make.elf 1,145,928 B"},
+    "x64": {"path": "obj/intel/make.bin", "size": 365352, "arch": "x86_64-none-elf", "host_string": "x86_64-hobbyos", "elf": "obj/intel/make.elf 1,081,760 B"}
+  },
+  "in_os_smoke": {
+    "attempted": true,
+    "method": "QMP console shell (run_console_test.py precedent): booted ARM disk.img headless (-display none, -serial file, -qmp), opened CONSOLE.BIN from the Apps menu, typed 'make --version'",
+    "result": "pass",
+    "evidence": {
+      "screen": "user@hobbyos:/$ make --version / GNU Make 4.4.1 / Built for aarch64-hobbyos / Copyright (C) 1988-2023 ... (QMP screendump; 'Built for' line re-verified via 600% magnified-crop vision readback)",
+      "serial": "[LAUNCH] CONSOLE.BIN; MAKE.BIN loaded (308552 B); 2 clean 'make exited' — zero memory-fault lines after the ABI fix",
+      "disk_bytecheck": "MAKE.BIN on disk.img cmp-verified == obj/arm/make.bin"
+    },
+    "deferred": "FILE-based hard byte check ('make --version > VERSION.TXT' + fat16img.py get) deferred to the sh milestone: the current in-OS shell mis-parses 'cmd ARG > FILE' for externals (cat HELLO.BIN > CTL.TXT -> 'cat: : No such file or directory', file created but 0 bytes; observed + logged). This is a w2-userland sh defect (L4 sh matrix says '>' SUPPORTED) and not make's; exact wave-3 recipe is in w2-make-smoke.log."
+  },
+  "gates": {
+    "a_build_clean": "pass — obj/arm/make.bin 308,552 B and obj/intel/make.bin 365,352 B link clean with host clang targeting the sysroot (only upstream-cosmetic streq/getenv warnings)",
+    "b_cstyle": "pass — first-party files (config.h, hb_stubs.c/h, ar.h) cstyle-clean; transcribed upstream tree kept byte-exact via the tools/cstyle.py EXCLUDE_PREFIXES mechanism (same as src/user/sed/; verified cstyle format would otherwise rewrite glob.c, breaking byte-identity)",
+    "c_user_build_intact": "pass — make obj/arm/hello.bin builds (obj/arm/hello.bin 34,320 B)",
+    "d_in_os_smoke": "pass (see in_os_smoke)"
+  },
+  "blockers": [
+    "None for the port. In-OS findings (documented, not blockers for MAKE.BIN): (1) crt0 two-arg-main ABI — make would read garbage envp; fixed in-lane with make's own z/OS fallback pattern. (2) sysroot dirent ENOSYS (parent single-writer milestone) — v1 contract: explicit-rule makefiles work (stat path), wildcards/VPATH/implicit rules deferred. (3) sh 'cmd ARG > FILE' redirect lossy for externals in the current OS build — w2-userland item, blocks only the file-based byte assertion."
+  ],
+  "notes": [
+    "Port shape follows docs/gnu-ports.md + the sed/grep/nano pattern; all transcribed sources cmp-verified byte-identical vs third_party/make-4.4.1 (only main.c carries 2 marked [HobbyOS port] guards).",
+    "config.h pins the L4 audit's matrix: -j1 v1 (MAKE_JOBSERVER UNDEF — a 0 would NOT disable it, those guards are #ifdef/defined()), MAKE_LOAD 0, no NLS, rlimit/pselect/ttyname/_r variants UNDEF'd, value-guarded fallbacks at 0, FILE_TIMESTAMP_HI_RES 0 (sysroot struct stat has no nsec member), HOBBYOS_NO_ENVP_ARG for the two-arg main.",
+    "hb_stubs.c provides getlogin (read.c ~ expansion), alarm (jobserver load path, compiled out under -j1 but shipped), getloadavg (job.c -l path), dup (posixos.c os_anontmp never-implemented libc symbol); umask NOT stubbed — sysroot implements it.",
+    "Makefile.hobbyos sync (L4 S7.1): in-OS recipes must keep one-command-per-line + absolute /TOOLS/*.BIN + SHELL=/TOOLS/SH.BIN because make's dir cache is empty until the dirent milestone (explicit lists only). Full in-OS 'make -f Makefile.hobbyos user' is gate M3, not this lane.",
+    "MAKE.BIN staged at ::/MAKE.BIN by the disk recipe; the disk.img in this worktree was rebuilt and the smoke ran against it (SAFE: only this lane's disk.img fuser'd; QEMU one-at-a-time).",
+    "The pre-fix in-OS crash (MS fault at make startup, VA ~0xF0 = garbage main() envp) is documented in docs/selfhost/lanes/w2-make-smoke.log with the fix + post-fix clean evidence."
+  ]
+}

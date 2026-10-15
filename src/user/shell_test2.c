@@ -5,7 +5,7 @@ int main(void);
 
 #ifndef HOST_TEST
 __attribute__((weak))
-long syscall(long num, long a0, long a1, long a2, long a3);
+long syscall(long number, ...); /* weak, unused; variadic per <unistd.h> */
 
 __attribute__((section(".text._start")))
 void _start(void) {
@@ -108,6 +108,26 @@ static void sample_peak(int *peak) {
   if (lv > *peak) *peak = lv;
 }
 
+/* Drain anything already buffered on the shell's stdout pipe.  Thread-slot
+   pressure at wave start can delay a command's output past its read until
+   a LATER step consumes a stale "$ " prompt and trips the caller's guard
+   (echo/clear/cat-nested FAILs observed under "no free slot" storms).  Run
+   before every command write so the read ownership is exact. */
+static void drain_pending(int fd) {
+  for (int i = 0; i < 256; i++) {
+    struct pollfd pfd;
+    pfd.fd = fd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    if (poll(&pfd, 1, 0) <= 0)
+      return;
+    char tmp[256];
+    int r = read(fd, tmp, sizeof tmp);
+    if (r <= 0)
+      return;
+  }
+}
+
 /* Documented wave slot-pressure class: a command that runs an EXTERNAL
    binary (ps/free/uptime/ifconfig/sort/uniq/wc/... or a pipeline) can
    come back empty when the shell's fork hits the legitimately-full
@@ -127,6 +147,7 @@ static int run_cmd_check(int in, int out, const char *cmd,
   int peak = 0;
   for (int attempt = 0; attempt < 3; attempt++) {
     err_has_fork_failed(); /* drain stale sentinels from earlier checks */
+    drain_pending(out);
     sample_peak(&peak);
     write(in, cmd, clen);
     sample_peak(&peak);
@@ -355,6 +376,7 @@ int main(void) {
     int peak = 0;
     for (int attempt = 0; attempt < 3 && rc == 0; attempt++) {
       err_has_fork_failed(); /* drain stale sentinels */
+      drain_pending(out_p[0]);
       sample_peak(&peak);
       write(in_p[1], "echo file_content > TEMP.TXT\n", 29);
       sample_peak(&peak);

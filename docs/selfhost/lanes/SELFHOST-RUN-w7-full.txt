@@ -1,0 +1,10 @@
+# w7-accept lane: full T4.3 acceptance loop drive (S0 -> S3 in ONE boot).
+# Staged as ::/SRC/SELFHOST.RUN (mcopy -o), replacing the pipeline's default
+# 4-stage script.  Each stage runs /TOOLS/MAKE.BIN -f Makefile.hobbyos <tgt>
+# with cwd=/SRC via SELFHOST.SH; the t25-run stage runs the just-built
+# HELLO.BIN in-OS (its stdout relays to serial through the driver pipe).
+s0-check|SH.BIN|/SRC/SELFHOST.SH check
+s1-user|SH.BIN|/SRC/SELFHOST.SH user
+t25-run|SH.BIN|/SRC/T25.RUN
+s2-kernel|SH.BIN|/SRC/SELFHOST.SH kernel
+s3-disk|SH.BIN|/SRC/SELFHOST.SH disk

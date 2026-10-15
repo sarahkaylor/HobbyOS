@@ -1,0 +1,5 @@
+# w6-run lane: T2.5 in-OS run script — executes the HELLO.BIN produced by
+# the S1 `user` stage (staged to /SRC/T25.RUN).  cwd=/SRC/obj/arm so the
+# 8.3 name resolves; HELLO's stdout rides the driver pipe to serial.
+cd /SRC/obj/arm
+./HELLO.BIN

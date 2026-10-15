@@ -1,0 +1,194 @@
+UEFI firmware (version 2025.11-3ubuntu7 built at 11:11:58 on Mar 31 2026)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+BdsDxe: starting Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+[001;001H[001;001H[001;001Hl[001;002Hi[001;003Hn[001;004Hu[001;005Hx[001;006H:[001;007H [001;008HL[001;009Ho[001;010Ha[001;011Hd[001;012Hi[001;013Hn[001;014Hg[001;015H [001;016Hk[001;017He[001;018Hr[001;019Hn[001;020He[001;021Hl[001;022H [001;023H`[001;024Hb[001;025Ho[001;026Ho[001;027Ht[001;028H([001;029H)[001;030H:[001;031H/[001;032Hb[001;033Ho[001;034Ho[001;035Ht[001;036H/[001;037Hh[001;038Ho[001;039Hb[001;040Hb[001;041Hy[001;042Ho[001;043Hs[001;044H.[001;045Hb[001;046Hi[001;047Hn[001;048H`[001;049H.[001;050H.[001;051H.[001;052H[001;001H[002;001HBooting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+[GPUDIAG] gpu wait > 7 ms: ack=3 used=4 (park off)
+[GPU] virtio-gpu mmio irq=78
+VirtIO GPU successfully initialized.
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1900544 total_mib=7424 reserved=0
+[KERNEL] Activating secondary cores via PSCI...
+[KERNEL] Core 1 power-on requested.
+[KERNEL] Core 2 power-on requested.
+[KERNEL] Core 3 power-on requested.
+[KERNEL] Core 4 power-on requested.
+[KERNEL] Core 5 power-on requested.
+[KERNEL] Core 6 power-on requested.
+[KERNEL] Core 7start_scheduler called on CPU start_scheduler called on CPU start_scheduler called on CPU start_scheduler called on CPU start_scheduler called on CPU start_scheduler called on CPU 576start_scheduler called on CPU 32
+
+1
+
+
+ power-on requested.
+4
+
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+virtio-net MAC: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP Discover sent
+DHCP initialization complete.
+
+--- Parallel Program Loading ---
+Mode: SELFHOST - Running in-OS acceptance build driver...
+Loading program for scheduler (v2 AS): SELFHOST.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=-1
+v2 loader: image mapped (lazy), bytes=52656 pages=13 first=in elap=1ms
+v2 loader: PID=1 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+start_scheduler called on CPU 0
+[SELFHOST] DRIVER-UP script=/SRC/SELFHOST.RUN
+[SELFHOST] phase=s2dbg-start
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=1
+Inside process_create: clearing memory at 0x0000000072000000
+Inside process_create: kmemset done.
+Loading program for scheduler (v2 AS): /TOOLS/SH.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=-1
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+v2 loader: PID=3 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=-1
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x000000100000DDF8
+v2 loader: image mapped (lazy), bytes=309608 pages=76 first=in elap=1ms
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/dhcp.c -o /SRC/obj/arm/dhcp.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/fat16.c -o /SRC/obj/arm/fat16.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/fat16_test.c -o /SRC/obj/arm/fat16_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/frame.c -o /SRC/obj/arm/frame.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/frame_test.c -o /SRC/obj/arm/frame_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/fs.c -o /SRC/obj/arm/fs.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/fs_test.c -o /SRC/obj/arm/fs_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/iommu_vtd.c -o /SRC/obj/arm/iommu_vtd.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/ipc_proto.c -o /SRC/obj/arm/ipc_proto.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/locks_test.c -o /SRC/obj/arm/locks_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/main.c -o /SRC/obj/arm/main.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/math_test.c -o /SRC/obj/arm/math_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/mmu_test.c -o /SRC/obj/arm/mmu_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/net.c -o /SRC/obj/arm/net.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/net_rdma.c -o /SRC/obj/arm/net_rdma.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/net_rdma_test.c -o /SRC/obj/arm/net_rdma_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/net_test.c -o /SRC/obj/arm/net_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/nfs.c -o /SRC/obj/arm/nfs.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/nfs_proto.c -o /SRC/obj/arm/nfs_proto.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/nfs_test.c -o /SRC/obj/arm/nfs_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/pipe.c -o /SRC/obj/arm/pipe.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/pipe_test.c -o /SRC/obj/arm/pipe_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/process.c -o /SRC/obj/arm/process.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/process_test.c -o /SRC/obj/arm/process_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/program_loader.c -o /SRC/obj/arm/program_loader.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/program_loader_test.c -o /SRC/obj/arm/program_loader_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/test_fw_cfg.c -o /SRC/obj/arm/test_fw_cfg.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/test_smp.c -o /SRC/obj/arm/test_smp.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/time.c -o /SRC/obj/arm/time.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/time_test.c -o /SRC/obj/arm/time_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/timer_test.c -o /SRC/obj/arm/timer_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/trap_test.c -o /SRC/obj/arm/trap_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/unit_test.c -o /SRC/obj/arm/unit_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/unix.c -o /SRC/obj/arm/unix.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/unix_test.c -o /SRC/obj/arm/unix_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/vfs.c -o /SRC/obj/arm/vfs.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/virtio_blk.c -o /SRC/obj/arm/virtio_blk.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/virtio_blk_test.c -o /SRC/obj/arm/virtio_blk_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/virtio_gpu.c -o /SRC/obj/arm/virtio_gpu.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/virtio_gpu_test.c -o /SRC/obj/arm/virtio_gpu_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/virtio_gpu_x64.c -o /SRC/obj/arm/virtio_gpu_x64.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/virtio_input.c -o /SRC/obj/arm/virtio_input.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/virtio_input_test.c -o /SRC/obj/arm/virtio_input_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/virtio_net.c -o /SRC/obj/arm/virtio_net.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/virtio_net_test.c -o /SRC/obj/arm/virtio_net_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/vm.c -o /SRC/obj/arm/vm.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/vm_test.c -o /SRC/obj/arm/vm_test.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/cpu.c -o /SRC/obj/arm/cpu.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/gic.c -o /SRC/obj/arm/gic.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/locks.c -o /SRC/obj/arm/locks.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/mmu.c -o /SRC/obj/arm/mmu.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/rtc.c -o /SRC/obj/arm/rtc.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/smp.c -o /SRC/obj/arm/smp.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/timer.c -o /SRC/obj/arm/timer.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/trap.c -o /SRC/obj/arm/trap.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/uart.c -o /SRC/obj/arm/uart.o
+echo "[SELFHOST] phase=kernel-compile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/boot.s -o /SRC/obj/arm/boot.o
+echo "[SELFHOST] phase=kernel-ascompile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/fpu.s -o /SRC/obj/arm/fpu.o
+echo "[SELFHOST] phase=kernel-ascompile rc=$?"
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/arch/arm/setjmp.s -o /SRC/obj/arm/setjmp.o
+echo "[SELFHOST] phase=kernel-ascompile rc=$?"
+echo "[SELFHOST] phase=s2-kernel-start"
+echo "[SELFHOST] phase=kernel-link-start"
+/TOOLS/LLD.BIN -flavor gnu -T linker.ld -o /SRC/hobbyos.elf /SRC/obj/arm/dhcp.o /SRC/obj/arm/fat16.o /SRC/obj/arm/fat16_test.o /SRC/obj/arm/frame.o /SRC/obj/arm/frame_test.o /SRC/obj/arm/fs.o /SRC/obj/arm/fs_test.o /SRC/obj/arm/iommu_vtd.o /SRC/obj/arm/ipc_proto.o /SRC/obj/arm/locks_test.oecho "[SELFHOST] phase=kernel-[KERNEL] Process 2: /TOOLS/MAKE.BIN exited unexpectedly or gracefully.
+link-done rc=$?"
+/TOOLS/OBJCOPY.BI[KERNEL] Process 3: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+N -O binary /SRC/hobbyos.elf /SRC/hobbyos.bin
+echo "[SELFHOST] phase=s2-kernel-done rc=$?"
+MAKE.BIN: write error: stdout
+[SELFHOST] phase=s2dbg-fail reason=tool-rc rc=256
+[SELFHOST] FAILED-AT stage=s2dbg
+[KERNEL] Process 1: SELFHOST.BIN exited unexpectedly or gracefully.
+System halt.

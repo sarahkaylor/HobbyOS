@@ -638,12 +638,12 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     /* Flat args string for get_args() consumers: the blob's entries
        space-joined (argv blob keeps spaces, the flat string cannot). */
     int pos = 0, fi = 0;
-    for (int k = 0; k < ex->argc && fi < 255; k++) {
-      while (pos < HO_EXEC_ARGV_LEN && ex->argvblob[pos] && fi < 255)
+    for (int k = 0; k < ex->argc && fi < HO_FLAT_ARGS_LEN - 1; k++) {
+      while (pos < HO_EXEC_ARGV_LEN && ex->argvblob[pos] && fi < HO_FLAT_ARGS_LEN - 1)
         child->args[fi++] = ex->argvblob[pos++];
       if (pos < HO_EXEC_ARGV_LEN && ex->argvblob[pos] == '\0')
         pos++;
-      if (k + 1 < ex->argc && fi < 255)
+      if (k + 1 < ex->argc && fi < HO_FLAT_ARGS_LEN - 1)
         child->args[fi++] = ' ';
     }
     child->args[fi] = '\0';
@@ -651,19 +651,19 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
   if (!ex) {
     int ai = 0;
     if (args) {
-      while (args[ai] && ai < 255) {
+      while (args[ai] && ai < HO_FLAT_ARGS_LEN - 1) {
         child->args[ai] = args[ai];
         ai++;
       }
     }
     child->args[ai] = '\0';
-    char flat[320];
+    char flat[HO_FLAT_ARGS_LEN + 64];
     int fi = 0;
     for (int i = 0; child->name[i] && fi < 63; i++)
       flat[fi++] = child->name[i];
     if (fi)
       flat[fi++] = ' ';
-    for (int i = 0; child->args[i] && fi < 315; i++)
+    for (int i = 0; child->args[i] && fi < HO_FLAT_ARGS_LEN - 1; i++)
       flat[fi++] = child->args[i];
     flat[fi] = '\0';
     proc_split_argv(child, flat);
@@ -852,7 +852,26 @@ int process_exec_current(struct trap_frame *tf, const char *path,
   struct file f;
   if (fat16_open(abs, &f) != 0)
     return -ENOENT;
-  if (program_too_large(&f)) {
+  /* w5 (vii): fat16_open creates a zero-size entry on a MISS (D4.4), so
+     a missing image surfaces as file_size == 0.  Fail cleanly BEFORE the
+     v2 exec tears the old AS down -- the old flow reached v2_map_image
+     ("bad image size 0") after teardown and returned -ENOEXEC leaving
+     the process AS-less, so its very next user access killed it and
+     make's per-recipe shell re-exec loop flooded serial (the
+     MISSING-SHELL-WEDGE signature). */
+  if (f.fat16.entry.file_size == 0) {
+    fat16_close(&f);
+    return -ENOENT;
+  }
+  /* w5 (i): the exec-size gate must match the loader that will run.
+     v2 exec (grp->as set) loads via v2_map_image, whose own cap is
+     USER_IMG_SIZE (128 MiB); the old flat 1 MiB MAX_PROGRAM_SIZE gate
+     rejected a 126 MB /TOOLS/CLANG.BIN with -ENOEXEC (w4-src S0/S1
+     blocker) even though the same image spawns and runs fine.  The
+     legacy v1 exec (dead post-S5 flip; 32 MiB window over a
+     MAX_PROGRAM_SIZE read) keeps the conservative 1 MiB gate. */
+  if (f.fat16.entry.file_size > (uint32_t)(grp->as ? USER_IMG_SIZE
+                                                   : MAX_PROGRAM_SIZE)) {
     fat16_close(&f);
     return -ENOEXEC;
   }
@@ -903,7 +922,7 @@ int process_exec_current(struct trap_frame *tf, const char *path,
     for (vi = 0; new_name && new_name[vi] && vi < 31; vi++)
       cur->name[vi] = new_name[vi];
     cur->name[vi] = '\0';
-    for (vi = 0; args && args[vi] && vi < 255; vi++)
+    for (vi = 0; args && args[vi] && vi < HO_FLAT_ARGS_LEN - 1; vi++)
       cur->args[vi] = args[vi];
     cur->args[vi] = '\0';
     grp->as = nas;
@@ -956,7 +975,7 @@ int process_exec_current(struct trap_frame *tf, const char *path,
   for (i = 0; new_name && new_name[i] && i < 31; i++)
     grp->name[i] = new_name[i];
   grp->name[i] = '\0';
-  for (i = 0; args && args[i] && i < 255; i++)
+  for (i = 0; args && args[i] && i < HO_FLAT_ARGS_LEN - 1; i++)
     grp->args[i] = args[i];
   grp->args[i] = '\0';
 
@@ -1039,11 +1058,28 @@ static int pl_user_ok(struct process *p, uint64_t addr, uint64_t len,
 static int pl_strcpy(struct process *p, const char *src, char *dst, int cap) {
   if (!src || cap <= 1)
     return 0;
-  if (!pl_user_ok(p, (uint64_t)src, (uint64_t)cap, 0))
-    return 0;
   int i = 0;
-  for (; i < cap - 1 && src[i]; i++)
-    dst[i] = src[i];
+  for (;;) {
+    if (i >= cap - 1)
+      break;
+    /* Validate + materialize the page holding src[i] before the raw load
+       below (a raw user deref must never fault the kernel).  Deliberately
+       NOT the whole cap up front: a short string that starts near the TOP
+       of a mapped region (a user-stack argv element can sit ~0x240 below
+       the stack top, and the w6-run 64->4096 cap bump made the old
+       pl_user_ok(src, cap) reach past the region end) was judged
+       unreadable and silently dropped -> the exec'd program lost that
+       argument (w8-torture: TORTURE exec child argv[2] dropped, child
+       exits the 7-default instead of 10..17).  Per-page validation reads
+       exactly the bytes copied. */
+    if (!pl_user_ok(p, ((uint64_t)&src[i]) & ~0xFFFULL, 1, 0))
+      return 0;
+    char c = src[i];
+    dst[i] = c;
+    if (c == 0)
+      return 1;
+    i++;
+  }
   dst[i] = '\0';
   return 1;
 }
@@ -1071,7 +1107,13 @@ int proc_marshal_argv(struct process *p, char *const *argv, char *dst, int cap,
       break;
     if (argv[ai] == 0)
       break;
-    char one[64];
+    /* w6-run: one argv element can be a whole shell command line (make
+     * runs recipe lines via `sh -c '<line>'`, one long argv[2]); the
+     * original 64-byte cap truncated it to 63 chars and in-OS build
+     * commands died with "no input files".  Per-arg cap = HO_EXEC_ARGV_LEN
+     * (4096): the S2 kernel link line (~59 objects -> ~1.3 KB) is a single
+     * argv element; the whole blob stays bounded by the same constant. */
+    char one[HO_EXEC_ARGV_LEN];
     if (!pl_strcpy(p, (const char *)argv[ai], one, sizeof one))
       break;
     if (pos >= cap - 1)

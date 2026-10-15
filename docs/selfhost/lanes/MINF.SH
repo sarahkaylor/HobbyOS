@@ -1,0 +1,2 @@
+cd /SRC
+/TOOLS/MAKE.BIN -f MINF.MK all

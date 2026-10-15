@@ -1,0 +1,15 @@
+v2 loader: image mapped (lazy), bytes=555568 pages=136 first=in elap=1ms
+v2 loader: image mapped (lazy), bytes=51120 pages=13 first=in elap=1ms
+[SELFHOST] phase=t23b-version-start
+Loading program for scheduler (v2 AS): /TOOLS/CLANG2.BIN
+v2 loader: image mapped (lazy), bytes=94192000 pages=22997 first=in elap=1ms
+v2 loader: PID=4 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[IMGPRF] pid=4 start: pages=22997 batch=128
+clang version 21.1.8 (/home/sarah/hobbyos-selfhost-lanes/l1/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/clang 0c272a4e0cfc70e854e1958baaa2094524b4f9af)
+Target: aarch64-unknown-none-elf
+Thread model: posix
+InstalledDir: 
+[KERNEL] Process 4: /TOOLS/CLANG2.BIN exited unexpectedly or gracefully.
+[IMGPRF] pid=4 done: pages=22997 mapped=22127 skipped=331 batches=176 stop=1 ms=4745
+[SELFHOST] phase=t23b-version-done rc=0
+[SELFHOST] ACCEPTANCE-COMPLETE stages=1

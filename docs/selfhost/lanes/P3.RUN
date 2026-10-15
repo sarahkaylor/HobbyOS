@@ -1,0 +1,1 @@
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -c src/kernel/main.c -o /SRC/obj/probe3.o

@@ -69,10 +69,17 @@ EXCLUDE_FILES = {
 }
 
 # Repo-relative directory prefixes kept byte-exact (upstream GNU sources and
-# their generated config live under src/user/sed/; only the two hand-written
-# support headers follow this guide, and they are reviewed with it in mind).
+# their generated config live under src/user/sed/ and src/user/make/; only the
+# hand-written support headers follow this guide, and they are reviewed with
+# it in mind).
 EXCLUDE_PREFIXES = {
     "src/user/sed/",
+    "src/user/make/",
+    "src/user/mtools/",  # W2 mtools port: transcribed upstream sources
+                         # stay byte-identical; only the port's first-party
+                         # files (config.h, mtools_port.c) are formatter-scope
+                         # and are kept cstyle-clean.
+    "src/user/mkfs/",
 }
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

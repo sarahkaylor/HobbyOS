@@ -448,7 +448,7 @@ int  mock_rename_calls = 0;
 char mock_rename_last_old[64] = "";
 char mock_rename_last_new[64] = "";
 
-int mkdir(const char *path) {
+int mkdir(const char *path, ...) {
   mock_mkdir_calls++;
   snprintf(mock_mkdir_last, sizeof(mock_mkdir_last), "%s", path);
   return mock_mkdir_result;

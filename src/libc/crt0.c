@@ -17,11 +17,18 @@ extern int main(int argc, char **argv);
 
 #define CRT0_MAX_ARGS 32
 
+/* w5 (vi): the argv/args copy buffers must clear the kernel's flat-args
+ * cap (HO_FLAT_ARGS_LEN = 1024, process.h).  avbuf is the argv array the
+ * SYS_GETARGV blob is copied into; argbuf is the legacy flat-args
+ * fallback.  At 256, a >255-char compile line (in-OS clang) truncated
+ * mid-token exactly at 255 regardless of the kernel cap. */
+#define CRT0_AVBUF_LEN 1024
+
 __attribute__((section(".text._start")))
 void _start(void) {
   static char namebuf[32];
-  static char argbuf[256];
-  static char avbuf[256];
+  static char argbuf[CRT0_AVBUF_LEN];
+  static char avbuf[CRT0_AVBUF_LEN];
   static char *argv[CRT0_MAX_ARGS];
 
   /* P1 (p1-threads-design.md sections 4/6): install this thread's TLS

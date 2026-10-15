@@ -1,0 +1,11 @@
+# ::/SRC/obj/arm after S2 crown proof (attempt 2, writer + reader fixes):
+# exactly 59 object entries + . / .. , ZERO mangled .O.T twins.
+# Display names counted: 54 distinct (8.3-alias collisions show the same
+# short name; long names resolve by their 0x0F chains via the reader fix).
+# Produced artifacts (extracted from ::/SRC):
+#   HOBBYOS.ELF 1371192 B  sha256 015b793b85c66ec3...  (AArch64 EXEC,
+#     entry 0x40080000; symbol check: net_rdma_fast_write/net_rdma_init/
+#     net_rdma_poll all T -- the net_rdma.o/net_rdma_test.o collision
+#     resolved to the RIGHT object)
+#   HOBBYOS.BIN 218036 B   sha256 8126b41345c04b8c...  (ARM64 boot Image,
+#     first bytes 10 00 00 14)

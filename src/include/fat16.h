@@ -16,6 +16,12 @@ struct fat16_dir_entry {
   uint32_t file_size;         /**< File size in bytes */
 } __attribute__((packed));
 
+/* selfhost w10-fstime: decode a dirent's FAT date/time fields into Unix
+ * epoch seconds (UTC).  Mirror of the encode helper inside fat16.c; the
+ * stat path reports real mtime/ctime/atime from it and the unit tests
+ * verify the wire format. */
+uint64_t fat16_entry_epoch(const struct fat16_dir_entry *e);
+
 struct file; // Forward declaration
 
 // Initializes the FAT16 filesystem by reading the boot sector.
@@ -54,6 +60,12 @@ int fat16_rename(const char* oldname, const char* newname);
 
 // Creates a directory.
 int fat16_mkdir(const char* path);
+
+/* W2-14 (selfhost): removes an EMPTY directory with POSIX-errno-faithful
+ * semantics: 0 on success, else a precise negative errno (-ENOENT,
+ * -ENOTDIR, -ENOTEMPTY, -EBUSY for root/./.., -EIO).  unlink stays
+ * dir-refusing; rmdir is the only directory-removal primitive. */
+int fat16_rmdir(const char *path);
 
 // Changes directory: validates `path` (absolute or cwd-relative) and writes
 // the canonical absolute path of the resulting directory into out_new_cwd.

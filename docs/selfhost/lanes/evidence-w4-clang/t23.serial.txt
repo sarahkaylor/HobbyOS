@@ -1,0 +1,10 @@
+v2 loader: image mapped (lazy), bytes=555568 pages=136 first=in elap=2ms
+v2 loader: image mapped (lazy), bytes=51120 pages=13 first=in elap=0ms
+[SELFHOST] DRIVER-UP script=/SRC/SELFHOST.RUN
+[SELFHOST] phase=t23-version-start
+Loading program for scheduler (v2 AS): /TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=126060320 pages=30777 first=in elap=0ms
+v2 loader: PID=4 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[KERNEL] User process 4 (/TOOLS/CLANG.BIN) fault! EC: 0x0000000000000000 ELR: 0x0000001000000000
+[IMGPRF] pid=4 start: pages=30777[KERNEL] Process 4: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=t23-version-done rc=0

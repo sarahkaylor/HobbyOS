@@ -45,6 +45,29 @@ extern "C" {
   unsigned int sleep(unsigned int seconds);
   int usleep(unsigned int useconds);
 
+  /* selfhost W2-7: POSIX surface the LLVM toolchain link closure needs
+   * (docs/selfhost/lanes/l1-dep-surface.txt B).  Implementations live in
+   * src/user/libc.c and under src/libc/src. */
+#ifndef HOST_TEST
+  /* mkdir is variadic on purpose: HobbyOS's legacy call sites pass one
+   * argument, POSIX ports pass (path, mode) — mode is ignored on this
+   * permissionless VFS either way, and a variadic prototype accepts both
+   * without re-declaration conflicts.  Skipped under HOST_TEST: host C++
+   * TUs reach glibc's <sys/stat.h> (via include_next) whose non-variadic
+   * __THROW mkdir clashes with this shape; the host mock instead lives in
+   * src/host/compat.c and user_include/libc.h remaps mkdir for it. */
+  int mkdir(const char *path, ...);
+#endif
+  int link(const char *oldpath, const char *newpath);
+  int symlink(const char *target, const char *linkpath);
+  int pipe(int fds[2]);
+  pid_t setsid(void);
+  unsigned int alarm(unsigned int seconds);
+  int fchown(int fd, uid_t owner, gid_t group);
+  /* Linux-shaped variadic raw-syscall dispatcher (src/libc/src/syscall.c):
+   * syscall(number, ...) forwards up to 6 pointer-width args to the trap. */
+  long syscall(long number, ...);
+
   /* P6.1 (browser.md section 6): file resize + sync.  ftruncate reaches
    * the kernel resize (row 33: FAT16 regular files + S4 memfds); every
    * FAT16 write is synchronous (no page cache), so fsync/fdatasync

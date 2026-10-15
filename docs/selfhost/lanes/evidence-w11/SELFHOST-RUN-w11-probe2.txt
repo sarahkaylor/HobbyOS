@@ -1,0 +1,2 @@
+# w11-makej smoke probe2 (serial + -j8)
+probe2|SH.BIN|/SRC/PROBE2.SH

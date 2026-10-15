@@ -273,6 +273,16 @@ else ifeq ($(MODE),webproc)
   # WK-3 section (this tree stays self-contained -- nothing here
   # references the fork's build outputs).
   CFLAGS += -DKERNEL_MODE_WEBPROC
+else ifeq ($(MODE),selfhost)
+  # Self-hosting (docs/selfhost/acceptance.md §5.2/5.3): single-program
+  # boot that launches the in-OS acceptance build driver SELFHOST.BIN
+  # WITHOUT the desktop.  fd 1/2 are unset -> the console-fd fallback
+  # (fs.c file_write 0002 -> console_write_user) relays the driver's
+  # stdout/stderr to the SERIAL console, so every [SELFHOST] phase=
+  # marker lands in the serial capture with zero keystroke fragility.
+  # The driver script path is passed as argv[1] (main.c KERNEL_MODE_SELFHOST
+  # branch); the driver's own default is /SRC/SELFHOST.RUN.
+  CFLAGS += -DKERNEL_MODE_SELFHOST
 else ifeq ($(MODE),soak)
   # P8.2 (browser.md §6): the soak — the standard test wave plus TORTURE.BIN
   # running its bounded soak loop (28-minute cap; main.c's KERNEL_SOAK_WAVE
@@ -282,6 +292,15 @@ else ifeq ($(MODE),soak)
   USER_CFLAGS += -DKERNEL_MODE_TEST
 else
   CFLAGS += -DKERNEL_MODE_DESKTOP
+endif
+
+# W4-kernel (selfhost): in-OS MKFSFAT TCG-timing probe (Mission B).  Set
+# W4_MKFS_PROBE=1 to build the unit tier with the [W4-PROBE] ftruncate
+# timings (fat16_test.c test_fat16_extend_timing_probe) so a probe run
+# reuses the normal unit harness; off by default so stock unit runs stay
+# quick.  Keep the define OUT of USER_CFLAGS: it is kernel-test-only.
+ifneq ($(W4_MKFS_PROBE),)
+  CFLAGS += -DW4_MKFS_TIMING_PROBE
 endif
 
 ifneq ($(MODE),desktop)
@@ -485,6 +504,34 @@ SED_OBJS = $(addprefix $(OBJ_DIR)/sed_,$(addsuffix .o,$(SED_CORE_NAMES))) $(addp
 NANO_SRC_NAMES = browser chars color cut files global help history move nano prompt rcfile search text utils winio
 NANO_OBJS = $(addprefix $(OBJ_DIR)/nano_,$(addsuffix .o,$(NANO_SRC_NAMES))) $(OBJ_DIR)/nano_hb_curses.o
 NANO_BIN = $(OBJ_DIR)/nano.bin
+# GNU make 4.4.1 port: the upstream transcription in src/user/make/
+# (byte-identical except the hand-pinned src/user/make/config.h +
+# src/user/make/hb_stubs.c glue; see docs/selfhost/buildtools-audit.md S3
+# and docs/gnu-ports.md).  MAKE_SRC_NAMES = the ported src/*.c core +
+# the bundled glob/fnmatch + the glue.
+MAKE_SRC_NAMES = ar arscan commands default dir expand file function getopt getopt1 guile hash implicit job load loadapi main misc output posixos read remake remote-stub rule shuffle signame strcache variable version vpath glob fnmatch hb_stubs
+MAKE_OBJS = $(addprefix $(OBJ_DIR)/make_,$(addsuffix .o,$(MAKE_SRC_NAMES)))
+MAKE_BIN = $(OBJ_DIR)/make.bin
+
+# Selfhost W2 (mtools port, lane w2-mtools): GNU mtools 4.0.49 transcribed
+# subset for the mcopy/mdel/mmd build-tools (L4 buildtools-audit §4).  The
+# engine objects are the shared FAT/image closure both commands link; the
+# per-tool main lives in mtools_port.c (upstream's single multicall main in
+# mtools.c is deliberately NOT transcribed — it dispatches on argv[0] and
+# references every tool, which does not fit HobbyOS's one-.BIN model).
+MTOOLS_ENGINE_NAMES = buffer charsetConv codepages config copyfile device devices dirCache directory direntry dos2unix fat fat_free file file_name force_io hash init lba llong lockdev mainloop match mcopy mdel misc missFuncs mk_direntry mmd offset old_dos open_image partition patchlevel plain_io privileges remap signal stream streamcache strtonum swap tty unix2dos unixdir vfat
+MTOOLS_ENGINE_OBJS = $(addprefix $(OBJ_DIR)/mtools_,$(addsuffix .o,$(MTOOLS_ENGINE_NAMES)))
+MCOPY_BIN = $(OBJ_DIR)/mcopy.bin
+MDEL_BIN = $(OBJ_DIR)/mdel.bin
+MMD_BIN = $(OBJ_DIR)/mmd.bin
+
+# GNU dosfstools 4.2 mkfs.fat port: four transcribed core sources plus the
+# port's first-party blkdev/termios glue.  src/user/mkfs/config.h pins the
+# HAVE_* feature set (docs/selfhost/buildtools-audit.md §5) and is force-
+# included on every object so the upstream sources stay byte-identical.
+MKFSFAT_SRC_NAMES = mkfs.fat common charconv device_info hb_blkdev
+MKFSFAT_OBJS = $(addprefix $(OBJ_DIR)/mkfs_,$(addsuffix .o,$(MKFSFAT_SRC_NAMES)))
+MKFSFAT_BIN = $(OBJ_DIR)/mkfsfat.bin
 HEDGNU_BIN = $(OBJ_DIR)/hedgnu.bin
 WCTEST_BIN = $(OBJ_DIR)/wc_test.bin
 REGTEST_BIN = $(OBJ_DIR)/regex_test.bin
@@ -515,6 +562,7 @@ UNEXPAND_T_BIN = $(OBJ_DIR)/unexpand_test.bin
 CKSUM_BIN = $(OBJ_DIR)/cksum.bin
 CKSUM_T_BIN = $(OBJ_DIR)/cksum_test.bin
 FATBIG_T_BIN = $(OBJ_DIR)/fatbig_test.bin
+LFN_T_BIN = $(OBJ_DIR)/lfn_test.bin
 MD5SUM_BIN = $(OBJ_DIR)/md5sum.bin
 MD5SUM_T_BIN = $(OBJ_DIR)/md5sum_test.bin
 TAC_BIN = $(OBJ_DIR)/tac.bin
@@ -1014,7 +1062,7 @@ $(OBJ_DIR)/builtins/%.o: $(LIBCXX_ROOT)/compiler-rt/lib/builtins/%.c $(LIBCXX_VE
 	@mkdir -p $(OBJ_DIR)/builtins
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/cxxrt.o $(OBJ_DIR)/libc_pthread.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o $(OBJ_DIR)/libc_mman.o $(OBJ_DIR)/libc_regex.o $(OBJ_DIR)/libc_langinfo.o $(OBJ_DIR)/libc_wchar.o $(OBJ_DIR)/libc_wctype.o $(OBJ_DIR)/libc_locale.o $(OBJ_DIR)/libc_selinux.o $(OBJ_DIR)/libc_dirent.o $(OBJ_DIR)/libc_time.o $(OBJ_DIR)/libc_time_math.o $(OBJ_DIR)/libc_libgen.o $(OBJ_DIR)/libc_realpath.o $(OBJ_DIR)/libc_xlocale.o $(OBJ_DIR)/libc_strtod.o $(OBJ_DIR)/libc_strftime.o $(OBJ_DIR)/libc_math.o $(OBJ_DIR)/libc_pwd.o $(LIBC_BUILTIN_OBJS)
+$(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/cxxrt.o $(OBJ_DIR)/libc_pthread.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o $(OBJ_DIR)/libc_mman.o $(OBJ_DIR)/libc_regex.o $(OBJ_DIR)/libc_langinfo.o $(OBJ_DIR)/libc_wchar.o $(OBJ_DIR)/libc_wctype.o $(OBJ_DIR)/libc_locale.o $(OBJ_DIR)/libc_selinux.o $(OBJ_DIR)/libc_dirent.o $(OBJ_DIR)/libc_time.o $(OBJ_DIR)/libc_time_math.o $(OBJ_DIR)/libc_libgen.o $(OBJ_DIR)/libc_realpath.o $(OBJ_DIR)/libc_xlocale.o $(OBJ_DIR)/libc_strtod.o $(OBJ_DIR)/libc_strftime.o $(OBJ_DIR)/libc_math.o $(OBJ_DIR)/libc_pwd.o $(OBJ_DIR)/libc_setjmp.o $(OBJ_DIR)/libc_dlfcn.o $(OBJ_DIR)/libc_resource.o $(OBJ_DIR)/libc_statvfs.o $(OBJ_DIR)/libc_syscall.o $(OBJ_DIR)/libc_ioctl.o $(LIBC_BUILTIN_OBJS)
 	$(AR) rcs $@ $^
 
 # --- HELLO demo (Phase 0 gate): a main(argc, argv) program built against
@@ -1027,6 +1075,18 @@ $(HELLO_BIN): $(OBJ_DIR)/hello.o $(OBJ_DIR)/libc.a
 $(OBJ_DIR)/hello.o: src/user/hello.c $(USER_LIBC) $(USER_HDRS) src/libc/crt0.c
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+# --- SELFHOST driver (self-hosting wave-2 harness, acceptance.md §5): the
+# in-OS acceptance build driver.  Sources live in src/user/selfhost/; links
+# crt0 + libc.a like the hello demo.  Installed on the boot disk root as
+# SELFHOST.BIN (see the disk.img recipe). ---
+SELFHOST_BIN = $(OBJ_DIR)/selfhost.bin
+$(OBJ_DIR)/selfhost.o: src/user/selfhost/selfhost.c $(USER_LIBC) $(USER_HDRS) src/libc/crt0.c
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+$(SELFHOST_BIN): $(OBJ_DIR)/selfhost.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/selfhost.elf $(OBJ_DIR)/selfhost.o $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/selfhost.elf $(SELFHOST_BIN)
 
 # Fresh coreutils-parity utilities: basename, dirname, seq, expr, test.
 # These are hand-written POSIX programs (not vendored GNU sources); they
@@ -1384,6 +1444,57 @@ $(SED_BIN): $(SED_OBJS) $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/sed.elf $(SED_OBJS) $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/sed.elf $(SED_BIN)
 
+# --- GNU make 4.4.1 (multi-object port; objects named make_*) -----------
+# -DHAVE_CONFIG_H mirrors the configure build (config.h is only pulled by
+# the sources that #ifdef HAVE_CONFIG_H first, e.g. lib/glob.c).
+$(OBJ_DIR)/make_%.o: src/user/make/%.c src/user/make/config.h src/user/make/*.h $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -DHAVE_CONFIG_H -Isrc/user/make -c $< -o $@
+
+$(MAKE_BIN): $(MAKE_OBJS) $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/make.elf $(MAKE_OBJS) $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/make.elf $(MAKE_BIN)
+
+# --- GNU mtools 4.0.49 (multi-object port; objects named mtools_*) -------
+# Shared FAT/image engine, transcribed byte-identical from upstream except
+# config.h (the pinned port config; HobbyOS glue gated by HOBBYOS_TARGET).
+# -DSYSCONFDIR=\"/etc\" mirrors upstream's build-time define; no mtools.conf
+# exists in the OS root, so read_config() parses nothing and -i/-c drive the
+# recipes exactly as the acceptance requires.
+$(OBJ_DIR)/mtools_%.o: src/user/mtools/%.c src/user/mtools/config.h src/user/mtools/*.h $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c $< -o $@
+
+# One tiny main() per tool (mtools_port.c, compiled with the tool selected)
+# replaces upstream's multicall mtools.c; each .BIN links the shared engine.
+# Port-main objects use the mtoolsm_ prefix so they cannot collide with the
+# engine objects above (mcopy.o would otherwise map to mtools_mcopy.o twice).
+define MTOOLS_PORT_RULE
+$(OBJ_DIR)/mtoolsm_$(1).o: src/user/mtools/mtools_port.c src/user/mtools/config.h src/user/mtools/*.h $(USER_HDRS)
+	@mkdir -p $$(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DMTOOLS_TOOL_$(1) -DSYSCONFDIR=\"/etc\" -c $$< -o $$@
+
+$(OBJ_DIR)/$(1).bin: $(OBJ_DIR)/mtoolsm_$(1).o $(MTOOLS_ENGINE_OBJS) $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/$(1).elf $(OBJ_DIR)/mtoolsm_$(1).o $(MTOOLS_ENGINE_OBJS) $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/$(1).elf $$@
+endef
+$(eval $(call MTOOLS_PORT_RULE,mcopy))
+$(eval $(call MTOOLS_PORT_RULE,mdel))
+$(eval $(call MTOOLS_PORT_RULE,mmd))
+
+# --- GNU dosfstools 4.2 mkfs.fat (MKFSFAT.BIN; -C is ftruncate-only) -----
+# Objects named mkfs_<src>; config.h is -include'd so the transcribed
+# sources stay byte-identical to third_party/dosfstools-4.2/src/.  The
+# -Wno-* flags mirror upstream's own src/Makefile.am AM_CFLAGS.
+$(OBJ_DIR)/mkfs_%.o: src/user/mkfs/%.c src/user/mkfs/config.h src/user/mkfs/*.h $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -Isrc/user/mkfs -include src/user/mkfs/config.h \
+	      -Wno-sign-compare -Wno-missing-field-initializers -c $< -o $@
+
+$(MKFSFAT_BIN): $(MKFSFAT_OBJS) $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/mkfsfat.elf $(MKFSFAT_OBJS) $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/mkfsfat.elf $(MKFSFAT_BIN)
+
 $(OBJ_DIR)/wc_test.o: src/user/wc_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
@@ -1420,6 +1531,7 @@ $(eval $(call TU21_TEST_RULE,tsort,$(TSORT_T_BIN)))
 $(eval $(call TU21_TEST_RULE,expand,$(EXPAND_T_BIN)))
 $(eval $(call TU21_TEST_RULE,unexpand,$(UNEXPAND_T_BIN)))
 $(eval $(call TU21_TEST_RULE,fatbig,$(FATBIG_T_BIN)))
+$(eval $(call TU21_TEST_RULE,lfn,$(LFN_T_BIN)))
 $(eval $(call TU21_TEST_RULE,cksum,$(CKSUM_T_BIN)))
 $(eval $(call TU21_TEST_RULE,md5sum,$(MD5SUM_T_BIN)))
 $(eval $(call TU21_TEST_RULE,tac,$(TACTEST_BIN)))
@@ -1717,7 +1829,7 @@ SQLTEST_BIN = $(OBJ_DIR)/sqltest.bin
 # .EXTRA_PREREQS (GNU make >= 4.3) keeps it out of $^ -- a plain
 # prerequisite would be passed to ld.lld AS AN INPUT FILE by the
 # recipes' $^.  Names undefined in this config expand to nothing.
-$(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(SPAWN_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(NETFIX_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(APPS_T_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(DNSTST_BIN) $(CXXSMOKE_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(IPC_T_BIN) $(MMTEST_T_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(ICU_SMOKE_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(NANO_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(PIPEPROBE_BIN) $(SUBPRB_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILES_BIN) $(CALC_BIN) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(CLOCK_BIN) $(SYSMON_BIN) $(HEX_BIN) $(TASKS_BIN) $(FIND_BIN) $(DIFF_BIN) $(NOTES_BIN) $(UNIT_BIN) $(WK1C_T_BIN) $(FILEDIALOG_ARROW_T_BIN) $(DIALOG_TEST_BIN) $(SQLTEST_BIN): .EXTRA_PREREQS += src/user/linker.ld
+$(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(SPAWN_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(NETFIX_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(APPS_T_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(DNSTST_BIN) $(CXXSMOKE_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(IPC_T_BIN) $(MMTEST_T_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(ICU_SMOKE_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(NANO_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(PIPEPROBE_BIN) $(SUBPRB_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILES_BIN) $(CALC_BIN) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(CLOCK_BIN) $(SYSMON_BIN) $(HEX_BIN) $(TASKS_BIN) $(FIND_BIN) $(DIFF_BIN) $(NOTES_BIN) $(UNIT_BIN) $(WK1C_T_BIN) $(FILEDIALOG_ARROW_T_BIN) $(DIALOG_TEST_BIN) $(SQLTEST_BIN): .EXTRA_PREREQS += src/user/linker.ld
 
 $(SQLITE_DIR)/sqlite3.c:
 	cd third_party && sha256sum -c sqlite-amalgamation-3490200.zip.sums && \
@@ -1746,7 +1858,17 @@ $(SQLTEST_BIN): $(OBJ_DIR)/sqlite_test.o $(OBJ_DIR)/sqlite_os.o $(OBJ_DIR)/sqlit
 	$(LD) -T src/user/linker.ld -e _start --gc-sections -o $(OBJ_DIR)/sqltest.elf $(OBJ_DIR)/sqlite_test.o $(OBJ_DIR)/sqlite_os.o $(OBJ_DIR)/sqlite3.o $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/sqltest.elf $(SQLTEST_BIN)
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(MODE_FILE)
+# GNU make port: stay out of the giant prerequisite lists above (they are
+# merge-owner territory) and hang MAKE.BIN off linker.ld + the disk recipe
+# with target-specific rules of its own.
+$(MAKE_BIN): .EXTRA_PREREQS += src/user/linker.ld
+disk.img: $(MAKE_BIN)
+
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(SELFHOST_BIN) $(MODE_FILE)
+
+# w2-mtools disk
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(MCOPY_BIN) $(MDEL_BIN) $(MMD_BIN) $(MODE_FILE)  # w2-mtools deps (union: MAKE_BIN + SELFHOST_BIN ride their own lines above)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(MKFSFAT_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(MODE_FILE)  # w2-mkfs deps
 	# Startup disk: 1 GiB (user-requested floor; FAT16 tops out at 2 GiB).
 	# mkfs.fat auto-picks the cluster size (32 KiB @ 1 GiB); the kernel
 	# fat16.c layout math is BPB data-driven (bpb_sectors_per_cluster), so
@@ -1761,6 +1883,20 @@ disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BI
 	$(MMD) -i disk.img ::/mnt
 	$(MMD) -i disk.img ::/TESTDIR
 	$(MMD) -i disk.img ::/tmp
+	# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+	# build-tools at their frozen /TOOLS/ paths (Makefile.hobbyos sketch).
+	$(MMD) -i disk.img ::/TOOLS
+	# L3 (selfhost W-A): VFAT long-name build-payload fixture dirs (mtools-written).
+	$(MMD) -i disk.img ::/src
+	$(MMD) -i disk.img ::/src/kernel
+	$(MMD) -i disk.img ::/src/user_include
+	$(MMD) -i disk.img ::/src/user_include/graphics
+	$(MMD) -i disk.img ::/third_party
+	$(MMD) -i disk.img ::/third_party/libcxx-21.1.8
+	$(MMD) -i disk.img ::/third_party/libcxx-21.1.8/src
+	$(MMD) -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src
+	$(MMD) -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx
+	$(MMD) -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include
 	$(MCOPY) -i disk.img tests/fixtures/E2E.TXT ::/E2E.TXT
 	$(MCOPY) -i disk.img tests/fixtures/DRAGME.TXT ::/DRAGME.TXT
 	$(MCOPY) -i disk.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
@@ -1845,6 +1981,7 @@ endif
 	$(MCOPY) -i disk.img $(TORTURE_T_BIN) ::/TORTURE.BIN
 	$(MCOPY) -i disk.img $(BIG_BIN) ::/BIG.BIN
 	$(MCOPY) -i disk.img $(HELLO_BIN) ::/HELLO.BIN
+	$(MCOPY) -i disk.img $(SELFHOST_BIN) ::/SELFHOST.BIN
 	$(MCOPY) -i disk.img $(SH_BIN) ::/SH.BIN
 	$(MCOPY) -i disk.img $(LS_BIN) ::/LS.BIN
 	$(MCOPY) -i disk.img $(CAT_BIN) ::/CAT.BIN
@@ -1868,6 +2005,7 @@ endif
 	$(MCOPY) -i disk.img $(TOUCH_BIN) ::/TOUCH.BIN
 	$(MCOPY) -i disk.img $(WC_BIN) ::/WC.BIN
 	$(MCOPY) -i disk.img $(SED_BIN) ::/SED.BIN
+	$(MCOPY) -i disk.img $(MAKE_BIN) ::/MAKE.BIN
 	$(MCOPY) -i disk.img $(HEDGNU_BIN) ::/HEDGNU.BIN
 	$(MCOPY) -i disk.img $(TAILGN_BIN) ::/TAILGN.BIN
 	$(MCOPY) -i disk.img $(CUT_BIN) ::/CUT.BIN
@@ -1898,6 +2036,16 @@ endif
 	$(MCOPY) -i disk.img $(EXPAND_T_BIN) ::/EXPAND_T.BIN
 	$(MCOPY) -i disk.img $(UNEXPAND_T_BIN) ::/UNEXPAND_T.BIN
 	$(MCOPY) -i disk.img $(FATBIG_T_BIN) ::/FATBIG_T.BIN
+	# L3 (selfhost W-A): VFAT long-name build-payload fixtures.  Content
+	# markers must stay in sync with src/user/lfn_test.c.
+	$(MCOPY) -i disk.img tests/fixtures/lfn/program_loader.c ::/src/kernel/program_loader.c
+	$(MCOPY) -i disk.img tests/fixtures/lfn/window.h ::/src/user_include/graphics/window.h
+	$(MCOPY) -i disk.img tests/fixtures/lfn/llvm-project-21.1.8.src-EXAMPLE.c ::/src/llvm-project-21.1.8.src-EXAMPLE.c
+	$(MCOPY) -i disk.img tests/fixtures/lfn/upper_bound.h ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include/upper_bound.h
+	$(MCOPY) -i disk.img tests/fixtures/lfn/longfilename.txt ::/longfilename.txt
+	$(MCOPY) -i disk.img tests/fixtures/lfn/longfilename2.txt ::/longfilename2.txt
+	$(MCOPY) -i disk.img tests/fixtures/lfn/longfil~1.txt ::/longfil~1.txt
+	$(MCOPY) -i disk.img $(LFN_T_BIN) ::/LFN_T.BIN
 	$(MCOPY) -i disk.img $(CKSUM_T_BIN) ::/CKSUM_T.BIN
 	$(MCOPY) -i disk.img $(MD5SUM_T_BIN) ::/MD5SUM_T.BIN
 	$(MCOPY) -i disk.img $(TAC_BIN) ::/TAC.BIN
@@ -1934,6 +2082,32 @@ endif
 	$(MCOPY) -i disk.img $(NOTES_BIN) ::/NOTES.BIN
 	$(MCOPY) -i disk.img $(UNIT_BIN) ::/UNIT.BIN
 	$(MCOPY) -i disk.img $(NANO_BIN) ::/NANO.BIN
+	# Selfhost W2 (mtools port): in-OS /TOOLS copies of the ported
+	# build-tools (8.3 names, the frozen F1 layout).
+	$(MCOPY) -i disk.img $(MCOPY_BIN) ::/TOOLS/MCOPY.BIN
+	$(MCOPY) -i disk.img $(MDEL_BIN) ::/TOOLS/MDEL.BIN
+	$(MCOPY) -i disk.img $(MMD_BIN) ::/TOOLS/MMD.BIN
+
+	# Selfhost W2 (mkfs port): in-OS MKFSFAT (F1 layout).
+	$(MCOPY) -i disk.img $(MKFSFAT_BIN) ::/MKFSFAT.BIN
+	# Selfhost W3 (tools): the in-OS toolchain on the startup image (frozen
+	# F1 layout, selfhost.md §7.3).  tools/selfhost-stage.sh --tools stages
+	# CLANG.BIN/LLD.BIN/LLVMAR.BIN/OBJCOPY.BIN from the wave-2 LLVM
+	# distribution staging (obj/selfhost/dist-staging), the ported build
+	# tools (MAKE/MCOPY/MDEL/MMD/MKFSFAT), and the RESDIR header tree under
+	# /TOOLS — staged FAITHFULLY with long names (F8 decision, see
+	# docs/selfhost/llvm-bootstrap.md §6.2).  Soft dependency: an absent
+	# dist-staging warns + skips, so trees without the LLVM install still
+	# build a bootable image.  Override with STAGE_TOOLS=0 to skip.
+ifneq ($(STAGE_TOOLS),0)
+	tools/selfhost-stage.sh --tools disk.img
+	# Selfhost W4 (src): the in-OS build-required source subset on the
+	# startup image (frozen F2 /SRC flavor): kernel+user sources, headers,
+	# Makefile.hobbyos, limine/EFI assets, the carried build products, and
+	# the SELFHOST.RUN/SELFHOST.SH stage scripts.  tools/selfhost-stage.sh
+	# --src; disable together with the tools step via STAGE_TOOLS=0.
+	tools/selfhost-stage.sh --src disk.img
+endif
 	$(MCOPY) -i disk.img $(MONITOR_BIN) ::/MONITOR.BIN
 	$(MCOPY) -i disk.img $(MONITOR_TEST_BIN) ::/MONITORT.BIN
 	$(MCOPY) -i disk.img $(ICU_SMOKE_BIN) ::/ICUSMK.BIN
@@ -2073,6 +2247,13 @@ jsc_run:
 # HobbyOS/continuation/README.md for the full runner.
 webproc_run:
 	$(MAKE) MODE=webproc run
+
+# Self-hosting (docs/selfhost/acceptance.md §5.2): MODE=selfhost boots the
+# in-OS acceptance build driver SELFHOST.BIN (no desktop) with stdout/stderr
+# on the serial console.  Needs SELFHOST.BIN + /SRC/SELFHOST.RUN on the boot
+# disk (tools/selfhost-stage.sh or the disk.img recipe stage them).
+selfhost_run:
+	$(MAKE) MODE=selfhost run
 
 filedialog_test:
 	python3 ./run_filedialog_test.py
@@ -2343,6 +2524,13 @@ STDLIB_TEST = libc_stdlib_test_host
 $(STDLIB_TEST): obj/host_libc_stdlib_test.o obj/host_hb_stdlib.o
 	$(HOST_CC) -o $@ $^
 
+# selfhost W2-2: setjmp/longjmp — the real handlers run on the host (x86-64
+# path) via the hb_* renames; every device build links the same object into
+# libc.a, so aarch64 coverage comes from the in-OS compile + disassembly.
+SETJMP_TEST = libc_setjmp_test_host
+$(SETJMP_TEST): obj/host_libc_setjmp_test.o obj/host_hb_setjmp.o
+	$(HOST_CC) -o $@ $^
+
 # malloc.c's realloc compiled natively (hb_* names): free-list allocator
 # logic is pure, so it runs against a fake heap on the host.
 PRINTF_TEST = libc_printf_test_host
@@ -2606,6 +2794,10 @@ $(HEADERS_TEST): obj/host_libc_headers_test.o
 # sysroot exactly as they do on-device; the test TU deliberately omits it
 # so <stdio.h>/<sys/wait.h> stay glibc's and cxxrt.h is reached by
 # relative include.
+# w6-run: obj/host_malloc_hb.o (host build of src/user/malloc.c) rides in the
+# link — cxxrt's delete now calls free(ptr) with the RAW pointer, a contract
+# defined over the HobbyOS allocator's BLOCK_MAGIC check, not glibc's free.
+# (See the test TU's header note; the hb_* wrappers shadow libc's malloc.)
 CXX_TEST_FLAGS = -std=c++17 -fno-exceptions -fno-rtti
 CXXRT_TEST = cxxrt_test_host
 obj/host_cxxrt_test.o: src/host/cxxrt_test.cpp src/libc/include/cxxrt.h
@@ -2614,7 +2806,7 @@ obj/host_cxxrt_test.o: src/host/cxxrt_test.cpp src/libc/include/cxxrt.h
 obj/host_cxxrt.o: src/libc/src/cxxrt.cpp src/libc/include/cxxrt.h
 	@mkdir -p obj
 	$(HOST_CC) $(HOST_CFLAGS) $(CXX_TEST_FLAGS) -Isrc/libc/include -c $< -o $@
-$(CXXRT_TEST): obj/host_cxxrt_test.o obj/host_cxxrt.o obj/host_compat.o
+$(CXXRT_TEST): obj/host_cxxrt_test.o obj/host_cxxrt.o obj/host_compat.o obj/host_malloc_hb.o
 	$(HOST_CC) -o $@ $^
 
 # cxx_headers_test: every public sysroot header in one C++ TU, compiled
@@ -2714,7 +2906,7 @@ HOST_APP_TEST_BINS = $(foreach app,$(DESKTOP_APP_NAMES),$(app)_test_host)
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(HOST_APP_TEST_BINS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
@@ -2748,6 +2940,7 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	$(HOST_RUN) ./$(STRING_TEST)
 	$(HOST_RUN) ./$(CTYPE_TEST)
 	$(HOST_RUN) ./$(STDLIB_TEST)
+	$(HOST_RUN) ./$(SETJMP_TEST)
 	$(HOST_RUN) ./$(REALLOC_TEST)
 	$(HOST_RUN) ./$(PRINTF_TEST)
 	$(HOST_RUN) ./$(HEADERS_TEST)

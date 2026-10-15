@@ -1,0 +1,13 @@
+# w10-fstime synthetic 2-TU project.
+# Explicit rules ONLY: in-OS GNU make pattern rules (%.o: %.c) do not match
+# FAT16's uppercase short names, so the incremental proof must not depend on
+# pattern matching.  SHELL must resolve to the real in-OS sh (/bin/sh does
+# not exist on the FAT boot disk).
+SHELL := /SH.BIN
+
+all: A.O
+	@echo P1-BUILD-ALL
+
+A.O: A.C
+	@echo P1-COMPILING-A
+	/CP.BIN A.C A.O

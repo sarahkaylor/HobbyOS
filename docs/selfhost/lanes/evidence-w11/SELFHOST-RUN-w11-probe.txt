@@ -1,0 +1,2 @@
+# w11-makej diagnostic probe RUN (shell dialect + serial make smoke)
+probe|SH.BIN|/SRC/PROBE.SH

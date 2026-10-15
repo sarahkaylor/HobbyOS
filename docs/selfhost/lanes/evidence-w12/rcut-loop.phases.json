@@ -1,0 +1,31 @@
+{
+ "outcome": 1,
+ "wall_s": 3219.201592686004,
+ "expect": "ACCEPTANCE-COMPLETE",
+ "phases": {
+  "s0-check": {
+   "start_s": 7.50452644895995,
+   "done_s": 18.507930683961604,
+   "elapsed_s": 11.003404235001653,
+   "done": true
+  },
+  "s1-user": {
+   "start_s": 18.507930683961604,
+   "done_s": 2000.9260891049635,
+   "elapsed_s": 1982.4181584210019,
+   "done": true
+  },
+  "t25-run": {
+   "start_s": 2000.9260891049635,
+   "done_s": 2000.9260891049635,
+   "elapsed_s": 0.0,
+   "done": true
+  },
+  "s2-kernel": {
+   "start_s": 2000.9260891049635,
+   "done_s": 3219.201332775003,
+   "elapsed_s": 1218.2752436700393,
+   "done": false
+  }
+ }
+}

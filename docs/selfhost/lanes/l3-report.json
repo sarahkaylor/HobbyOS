@@ -1,0 +1,58 @@
+{
+  "lane": "l3",
+  "status": "complete",
+  "commits": [
+    "fc26e3b selfhost: l3: fix read_dir LFN accumulation across sector/cluster boundaries (run spans sectors on rename)",
+    "9e37646 selfhost: l3: add positive in-OS read_dir listing checks (created file + renamed-to name)",
+    "7bb4bae selfhost: l3: LFN_T 30+ char listing check scans /src (fixture lives there), exact 31-char prefix",
+    "c260db4 selfhost: l3: fix LFN_T listing needles — exact 31-char syscall prefix; names without leading slash",
+    "5649fdd selfhost: l3: fix test bugs — rename body is 21 bytes; read_expect derives length (no hand-counted sizes)",
+    "866756a selfhost: l3: Phase 2 — fix VFAT LFN gaps: read_dir lists long names, mkdir/rename write long-name runs, unlink frees cross-sector records; fix truncated-run test to delete the 0x40 record",
+    "a440a4d selfhost: l3: Phase 1 — payload-shape fixtures (recipe mmd/mcopy), LFN_T.BIN in-OS test + wiring, fat16 unit LFN tests (G1/G2/G3 failing-first)",
+    "9526d4f selfhost: l3: Phase 0 findings — LFN coverage, 4 gaps (read_dir/mkdir/rename/unlink), bounds"
+  ],
+  "artifacts": [
+    "src/kernel/fat16.c (VFAT LFN gap fixes)",
+    "src/kernel/fat16_test.c (7 new LFN unit tests)",
+    "src/user/lfn_test.c (LFN_T.BIN — 25 in-OS checks)",
+    "src/kernel/main.c (LFN_T.BIN registered in the boot wave)",
+    "Makefile (sole-writer test wiring: LFN_T_BIN rule, disk.img deps/mcopy, fixture mmd/mcopy)",
+    "tests/fixtures/lfn/ (7 payload-shape fixture files)",
+    "docs/selfhost/lanes/l3-findings.md",
+    "docs/selfhost/lanes/l3-pristine-comparison.md"
+  ],
+  "evidence": [
+    "docs/selfhost/lanes/l3-unit-tier-arm.log (unit tier: Tests run 309 / failed 0 / UNIT TESTS PASSED — includes all 7 new LFN unit tests)",
+    "docs/selfhost/lanes/l3-arm-wave.log (ARM wave gate: System halt present, FAIL-token scan = 0, LFN_T ALL PASSED 25 checks by name, FATBIG_T ALL PASSED, STRESS 120/120, 19 suite summaries; full raw log = gitignored l3-make-test-run5.log)",
+    "docs/selfhost/lanes/l3-pristine-comparison.md (pristine main @ ee22ac0 gate shows the same ambient SHELLTEST WATCHDOG with zero other FAILs — non-LFN flakes proven pre-existing)",
+    "Failing-first baseline: unit tier before fixes showed exactly test_fat16_lfn_read_dir_listing / lfn_mkdir_long / lfn_rename_long red (EXPECT_EQ FAILED), all green after Phase 2 fixes"
+  ],
+  "gaps_found": [
+    "G1: fat16_read_dir returned 8.3-mangled names only; a payload listing never shows the real long names",
+    "G2: fat16_mkdir wrote no 0x0F records, so a long directory name was unreachable by its real name",
+    "G3: fat16_rename (same-dir and cross-dir) rewrote only the 8.3 name — the long name was silently dropped and old records orphaned",
+    "G4: fat16_unlink freed only same-sector preceding 0x0F records; a cross-sector run leaked slots",
+    "G5 (found by the new positive in-OS check during gating): fat16_read_dir reset its LFN accumulator per sector, so a run spanning a sector boundary (rename placement) was not listed with its long name"
+  ],
+  "gaps_fixed": [
+    "G1: read_dir now emits the reconstructed long name (checksum-valid 0x0F run) with the 8.3 fallback",
+    "G2: mkdir writes a 0x0F run for non-8.3 directory names (alloc_lfn_run)",
+    "G3: rename rewrites the whole run when old or new name is long (fresh slot + records, old slot+records freed); cross-dir move allocates LFN runs for long destination names",
+    "G4: new lfn_del_entry() helper frees the entry plus its 0x0F records incl. records spilling into the previous sector; used by unlink/rename",
+    "G5: read_dir LFN state now carries across sector (and cluster) boundaries, mirroring find_entry_in_root/subdir"
+  ],
+  "gaps_deferred": [
+    "read_dir syscall hard-caps listed names at 31 chars (frozen ABI, parent-owned syscall files): long names list truncated at 31; payload names <= 26 chars today, the 36-char fixture documents the cap",
+    "In-OS format_83 alias generation does not produce unique numeric suffixes; two long names with an identical 8.3 alias share the alias (distinct long-name resolution is implemented and tested; short-alias uniqueness is a v1 non-goal)",
+    "VFAT 255-char components unsupported (resolve_path component buffer 63); payload max component is 36 chars — no action",
+    "Total-path limits (clean_path ~127 chars / 16 components, VFS_PATH_MAX 256): the fixture's 85-char/7-component deep path works; L5's staging tool must keep payload paths within the caps"
+  ],
+  "blockers": [],
+  "next_steps": [
+    "Integrator: merge selfhost/l3-lfn-verify to main and re-run the gates on the merged tree",
+    "L5 staging tool: honor the 127-char / 16-component path caps and <= 31-char (or 63-char component) naming when staging /SRC",
+    "Consider raising the read_dir name cap if the final payload contains staged filenames longer than 31 chars",
+    "Pre-existing note for the integrator: fat16.c fat16_sync_entry has an unused 'buf' variable warning (predates L3); left untouched"
+  ],
+  "notes": "unit tier: Tests run 309, failed 0 (twice, pinned at final tip fc26e3b). ARM wave gate (timeout 1500 make test, run5): System halt present, FAIL-token scan = 0, LFN_T ALL PASSED (25 checks by name), FATBIG_T ALL PASSED (regression floor), STRESS 120/120, 19 suite summaries, make rc 0. Ambient flakes (SHELLTEST WATCHDOG / shell protocol stalls, CXX_T condvar_wait_notify under 63/63 slot pressure, one slot-famine loader wedge under concurrent load) are proven pre-existing by a same-window pristine-main gate (docs/selfhost/lanes/l3-pristine-comparison.md) and carry the documented forensics (thread_create: no free slot used=63/63). Sole Makefile-writer rule honored: Makefile hunks are test wiring + fixture staging only. cstyle formatted/checked on fat16.c, fat16_test.c, lfn_test.c, main.c only."
+}

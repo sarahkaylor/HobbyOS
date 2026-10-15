@@ -25,6 +25,11 @@ extern void uart_puts(const char *s);
 extern void print_int(int v);
 extern void uart_print_hex(uint64_t v);
 
+/* w5 (iv): how many consecutive present-but-faulting retries on the SAME
+   VA before vm_handle_fault treats the fault as real and kills.  The
+   prefetch race describes a microsecond window; 4 is generous headroom. */
+#define FAULT_RETRY_MAX 4
+
 /* L9 (prefetch): the background loader's kernel-task plumbing (the same
    externs the other kernel-task callers use, e.g. trap.c / virtio_blk.c). */
 extern uint32_t get_cpuid(void);
@@ -107,6 +112,8 @@ struct addr_space *vm_as_create(uint64_t tgid) {
   as->peak_frames = 0;
   as->tgid = tgid;
   as->img_active = 0;
+  as->retry_va = 0; /* w5 (iv): a reused slot must not inherit retry state */
+  as->retry_count = 0;
   as->img_epoch++; /* a reused slot must never look like its old life */
   uint64_t root = vm_arch_root_alloc(as); /* sets as->root_phys accounting */
   if (!root) {
@@ -145,6 +152,8 @@ void vm_as_teardown(struct addr_space *as) {
   as->peak_frames = 0;
   as->table_frames = 0;
   as->img_active = 0;
+  as->retry_va = 0; /* w5 (iv): stale retry state must not survive teardown */
+  as->retry_count = 0;
   as->img_epoch++; /* L9 (prefetch): abort any stale background task */
   spinlock_release_irqrestore(&vm_lock, flags);
 
@@ -837,12 +846,28 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
     return 1;
   }
   if (vm_arch_walk(as, a, 0) == 0) {
-    /* Present but the hardware said fault: a protection violation on a
-       live leaf (or a stale negative entry) -- kill, never re-map. */
+    /* w5 (iv): the leaf IS present and (checked above) permissive, yet
+       the hardware aborted.  This is the L9 prefetch race (w4-clang
+       t25b: lld killed in=PROT at PC=0x100064E000 on a page the
+       background prefetch was filling): the page became mapped between
+       the hardware's translation walk and this handler, so the answer
+       is a TLB flush + re-execute, never a kill.  A page that
+       GENUINELY refaults is bounded -- FAULT_RETRY_MAX consecutive
+       retries on the same VA and the slot is a real fault -> kill. */
+    if (as->retry_va != a) {
+      as->retry_va = a;
+      as->retry_count = 1;
+    } else if (as->retry_count >= FAULT_RETRY_MAX) {
+      spinlock_release_irqrestore(&vm_lock, fl);
+      if (why)
+        *why = "PROT";
+      return 1;
+    } else {
+      as->retry_count++;
+    }
     spinlock_release_irqrestore(&vm_lock, fl);
-    if (why)
-      *why = "PROT";
-    return 1;
+    vm_arch_flush_va(as, a);
+    return 0; /* mapping is live: the trap layer eret re-executes */
   }
 
   /* L9 (pagein): a lazy IMAGE region fault is the one I/O-bearing fault
@@ -1055,6 +1080,18 @@ int vm_image_prefetch_run(struct addr_space *as, uint64_t start_page,
       /* Already resident (the eager first page, a demand fault ahead of
          us, or a peer)?  Skip without a frame. */
       fl = spinlock_acquire_irqsave(&vm_lock);
+      /* w5 (iii): re-validate liveness in the SAME critical section as
+         the walk.  The batch-top alive check is a separate window; a
+         peer CPU can tear the AS down between it and this walk, and a
+         walk on a dying AS is exactly the pid=5 housekeeping EL1 fault
+         (vm_arch_walk+0x2c, FAR 0xFFFF...F000).  The map path below
+         already re-checks alive2; the presence probe must too. */
+      if (!v2_prefetch_alive_locked(as, epoch, cluster, fsize)) {
+        spinlock_release_irqrestore(&vm_lock, fl);
+        st->stopped = 1;
+        stop = 1;
+        break;
+      }
       int present = (vm_arch_walk(as, va, 0) == 0);
       spinlock_release_irqrestore(&vm_lock, fl);
       if (present) {

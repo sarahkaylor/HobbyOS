@@ -1,0 +1,196 @@
+UEFI firmware (version 2025.11-3ubuntu7 built at 11:11:58 on Mar 31 2026)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+BdsDxe: starting Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+[001;001H[001;001H[001;001Hl[001;002Hi[001;003Hn[001;004Hu[001;005Hx[001;006H:[001;007H [001;008HL[001;009Ho[001;010Ha[001;011Hd[001;012Hi[001;013Hn[001;014Hg[001;015H [001;016Hk[001;017He[001;018Hr[001;019Hn[001;020He[001;021Hl[001;022H [001;023H`[001;024Hb[001;025Ho[001;026Ho[001;027Ht[001;028H([001;029H)[001;030H:[001;031H/[001;032Hb[001;033Ho[001;034Ho[001;035Ht[001;036H/[001;037Hh[001;038Ho[001;039Hb[001;040Hb[001;041Hy[001;042Ho[001;043Hs[001;044H.[001;045Hb[001;046Hi[001;047Hn[001;048H`[001;049H.[001;050H.[001;051H.[001;052H[001;001H[002;001HBooting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+[GPUDIAG] gpu wait > 8 ms: ack=3 used=4 (park off)
+[GPU] virtio-gpu mmio irq=78
+VirtIO GPU successfully initialized.
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1900544 total_mib=7424 reserved=0
+[KERNEL] Activating secondary cores via PSCI...
+[KERNEL] Core 1 power-on requested.
+[KERNEL] Core 2 power-on requested.
+[KERNEL] Core 3 power-on requested.
+[KERNEL] Core 4 power-on requested.
+[KERNEL] Core 5 power-on requested.
+[KERNEL] Core 6 power-on requested.
+start_scheduler called on CPU start_scheduler called on CPU start_scheduler called on CPU start_scheduler called on CPU 1start_scheduler called on CPU 26[KERNEL] Core start_scheduler called on CPU 73 power-on requested.
+
+
+
+start_scheduler called on CPU 
+7
+5
+VirtIO Block successfully initialized.
+4
+FAT-16 filesystem successfully initialized.
+virtio-net MAC: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP Discover sent
+DHCP initialization complete.
+
+--- Parallel Program Loading ---
+Mode: SELFHOST - Running in-OS acceptance build driver...
+Loading program for scheduler (v2 AS): SELFHOST.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=-1
+v2 loader: image mapped (lazy), bytes=52656 pages=13 first=in elap=2ms
+v2 loader: PID=1 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+start_scheduler called on CPU 0
+[SELFHOST] DRIVER-UP script=/SRC/SELFHOST.RUN
+[SELFHOST] phase=w8-torture-start
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=1
+Inside process_create: clearing memory at 0x0000000072000000
+Inside process_create: kmemset done.
+Loading program for scheduler (v2 AS): /TORTURE.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=-1
+v2 loader: image mapped (lazy), bytes=74024 pages=19 first=in elap=0ms
+v2 loader: PID=3 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[TORTURE] POSIX torture suite (P8.1) — quick
+[TORTURE] churn: cycles=64 live=8 created=64
+  TORTURE threads-churn-64: PASS
+  TORTURE socketpair-fdpass-loop: PASS
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=-1
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x0000001000004BB8
+[KERNEL] Process 2: /TORTURE.BIN exited unexpectedly or gracefully.
+  TORTURE socketpair-fdpass-fork: PASS
+  TORTURE mmap-fault-storm: PASS
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x0000001000004BB8
+[KERNEL] pid=2 (/TORTURE.BIN) memory fault VA=0x0000001080001000 PC=0x0000001000001F84 rw=w  in=PROT -> killed
+[KERNEL] Process 2: /TORTURE.BIN exited unexpectedly or gracefully.
+  TORTURE mmap-fault-kill: PASS
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x0000001000004BB8
+[W8P] child want=0xa code@=0x17fffffdc8 argv@=0x17fffffda0 argv2=10
+v2 loader: image mapped (lazy), bytes=74024 pages=19 first=in elap=1ms
+[TORTURE.CHILD] ok
+[KERNEL] Process 2: TORTURE.BIN exited unexpectedly or gracefully.
+[W8P] -1-cycle=0 st=0x700 exited=1 code=7 sig=0 want=10
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x0000001000004BB8
+[W8P] child want=0xa code@=0x17fffffdc8 argv@=0x17fffffda0 argv2=10
+v2 loader: image mapped (lazy), bytes=74024 pages=19 first=in elap=1ms
+[TORTURE.CHILD] ok
+[KERNEL] Process 2: TORTURE.BIN exited unexpectedly or gracefully.
+[W8P] -1-cycle=0 st=0x700 exited=1 code=7 sig=0 want=10
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = [2W ELR = 80x0000001000004BB8P
+] child want=0xb code@=0x17fffffdc8 argv@=0x17fffffda0 argv2=11
+v2 loader: image mapped (lazy), bytes=74024 pages=19 first=in elap=1ms
+[TORTURE.CHILD] ok
+[KERNEL] Process 2: TORTURE.BIN exited unexpectedly or gracefully.
+[W8P] -1-cycle=1 st=0x700 exited=1 code=7 sig=0 want=11
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = [2W ELR = 80x0000001000004BB8P
+] child want=0xb code@=0x17fffffdc8 argv@=0x17fffffda0 argv2=11
+v2 loader: image mapped (lazy), bytes=74024 pages=19 first=in elap=1ms
+[TORTURE.CHILD] ok
+[KERNEL] Process 2: TORTURE.BIN exited unexpectedly or gracefully.
+[W8P] -1-cycle=1 st=0x700 exited=1 code=7 sig=0 want=11
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x0000001000004BB8
+[W8P] child want=0xc code@=0x17fffffdc8 argv@=0x17fffffda0 argv2=12
+v2 loader: image mapped (lazy), bytes=74024 pages=19 first=in elap=0ms
+[TORTURE.CHILD] ok
+[KERNEL] Process 2: TORTURE.BIN exited unexpectedly or gracefully.
+[W8P] -1-cycle=2 st=0x700 exited=1 code=7 sig=0 want=12
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x0000001000004BB8
+[W8P] child want=0xc code@=0x17fffffdc8 argv@=0x17fffffda0 argv2=12
+v2 loader: image mapped (lazy), bytes=74024 pages=19 first=in elap=1ms
+[TORTURE.CHILD] ok
+[KERNEL] Process 2: TORTURE.BIN exited unexpectedly or gracefully.
+[W8P] -1-cycle=2 st=0x700 exited=1 code=7 sig=0 want=12
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x0000001000004BB8
+[W8P] child want=0xd code@=0x17fffffdc8 argv@=0x17fffffda0 argv2=13
+v2 loader: image mapped (lazy), bytes=74024 pages=19 first=in elap=0ms
+[TORTURE.CHILD] ok
+[KERNEL] Process 2: TORTURE.BIN exited unexpectedly or gracefully.
+[W8P] -1-cycle=3 st=0x700 exited=1 code=7 sig=0 want=13
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x0000001000004BB8
+[W8P] child want=0xd code@=0x17fffffdc8 argv@=0x17fffffda0 argv2=13
+v2 loader: image mapped (lazy), bytes=74024 pages=19 first=in elap=0ms
+[TORTURE.CHILD] ok
+[KERNEL] Process 2: TORTURE.BIN exited unexpectedly or gracefully.
+[W8P] -1-cycle=3 st=0x700 exited=1 code=7 sig=0 want=13
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x0000001000004BB8
+[W8P] child want=0xe code@=0x17fffffdc8 argv@=0x17fffffda0 argv2=14
+v2 loader: image mapped (lazy), bytes=74024 pages=19 first=in elap=1ms
+[TORTURE.CHILD] ok
+[KERNEL] Process 2: TORTURE.BIN exited unexpectedly or gracefully.
+[W8P] -1-cycle=4 st=0x700 exited=1 code=7 sig=0 want=14
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x0000001000004BB8
+[W8P] child want=0xe code@=0x17fffffdc8 argv@=0x17fffffda0 argv2=14
+v2 loader: image mapped (lazy), bytes=74024 pages=19 first=in elap=0ms
+[TORTURE.CHILD] ok
+[KERNEL] Process 2: TORTURE.BIN exited unexpectedly or gracefully.
+[W8P] -1-cycle=4 st=0x700 exited=1 code=7 sig=0 want=14
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x0000001000004BB8
+[W8P] child want=0xf code@=0x17fffffdc8 argv@=0x17fffffda0 argv2=15
+v2 loader: image mapped (lazy), bytes=74024 pages=19 first=in elap=0ms
+[TORTURE.CHILD] ok
+[KERNEL] Process 2: TORTURE.BIN exited unexpectedly or gracefully.
+[W8P] -1-cycle=5 st=0x700 exited=1 code=7 sig=0 want=15
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x0000001000004BB8
+[W8P] child want=0xf code@=0x17fffffdc8 argv@=0x17fffffda0 argv2=15
+v2 loader: image mapped (lazy), bytes=74024 pages=19 first=in elap=1ms
+[TORTURE.CHILD] ok
+[KERNEL] Process 2: TORTURE.BIN exited unexpectedly or gracefully.
+[W8P] -1-cycle=5 st=0x700 exited=1 code=7 sig=0 want=15
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x0000001000004BB8
+[W8P] child want=0x10 code@=0x17fffffdc8 argv@=0x17fffffda0 argv2=16
+v2 loader: image mapped (lazy), bytes=74024 pages=19 first=in elap=1ms
+[TORTURE.CHILD] ok
+[KERNEL] Process 2: TORTURE.BIN exited unexpectedly or gracefully.
+[W8P] -1-cycle=6 st=0x700 exited=1 code=7 sig=0 want=16
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = [W28 ELR = P0x0000001000004BB8]
+ child want=0x10 code@=0x17fffffdc8 argv@=0x17fffffda0 argv2=16
+v2 loader: image mapped (lazy), bytes=74024 pages=19 first=in elap=0ms
+[TORTURE.CHILD] ok
+[KERNEL] Process 2: TORTURE.BIN exited unexpectedly or gracefully.
+[W8P] -1-cycle=6 st=0x700 exited=1 code=7 sig=0 want=16
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x0000001000004BB8
+[W8P] child want=0x11 code@=0x17fffffdc8 argv@=0x17fffffda0 argv2=17
+v2 loader: image mapped (lazy), bytes=74024 pages=19 first=in elap=0ms
+[TORTURE.CHILD] ok
+[KERNEL] Process 2: TORTURE.BIN exited unexpectedly or gracefully.
+[W8P] -1-cycle=7 st=0x700 exited=1 code=7 sig=0 want=17
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x0000001000004BB8
+[W8P] child want=0x11 code@=0x17fffffdc8 argv@=0x17fffffda0 argv2=17
+v2 loader: image mapped (lazy), bytes=74024 pages=19 first=in elap=1ms
+[TORTURE.CHILD] ok
+[KERNEL] Process 2: TORTURE.BIN exited unexpectedly or gracefully.
+[W8P] -1-cycle=7 st=0x700 exited=1 code=7 sig=0 want=17
+  TORTURE exec-wait-cycles: FAIL
+  TORTURE poll-many-fds: PASS
+  TORTURE mem-highwater-recorded: PASS
+[TORTURE] mem: total_kb=7602176 free0_kb=7602176 min_free_kb=7602176 highwater_kb=0 samples=5
+[TORTURE] counts: thr_created=64 thr_rejected=0 fdpass_bad=0 exec_ok=0 exec_rejected=0 suite_ms=2684
+TORTURE FAILED: 1
+[KERNEL] Process 3: /TORTURE.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=w8-torture-fail reason=tool-rc rc=256
+[SELFHOST] FAILED-AT stage=w8-torture
+[KERNEL] Process 1: SELFHOST.BIN exited unexpectedly or gracefully.
+System halt from CPU 3.

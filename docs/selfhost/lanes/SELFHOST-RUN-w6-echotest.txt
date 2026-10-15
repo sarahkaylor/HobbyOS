@@ -1,0 +1,1 @@
+echotest|SH.BIN|/SRC/S-E2E.RUN

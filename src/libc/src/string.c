@@ -46,6 +46,7 @@
 #define strtok_r hb_strtok_r
 #define strdup hb_strdup
 #define strerror hb_strerror
+#define strsignal hb_strsignal
 #define memcmp hb_memcmp
 #define memmove hb_memmove
 #define memcpy hb_memcpy
@@ -432,6 +433,65 @@ char *strerror(int errnum) {
     *d = '\0';
   }
   return out;
+}
+
+/* strsignal (selfhost W2-4): Linux-style signal names (glibc text for the
+ * covered numbers).  POSIX only requires non-null text for a known signal;
+ * unknown numbers render "Unknown signal N", like glibc.  Used by
+ * llvm Unix/Program.inc:492 to describe a WIFSIGNALED child. */
+static const char *const hb_sig_messages[] = {
+  /* 0 */ "Hangup",                        /* glibc's index-0 text */
+  /* 1 */ "Hangup",                        /* SIGHUP */
+  /* 2 */ "Interrupt",                     /* SIGINT */
+  /* 3 */ "Quit",                          /* SIGQUIT */
+  /* 4 */ "Illegal instruction",           /* SIGILL */
+  /* 5 */ "Trace/breakpoint trap",         /* SIGTRAP */
+  /* 6 */ "Aborted",                       /* SIGABRT */
+  /* 7 */ "Bus error",                     /* SIGBUS */
+  /* 8 */ "Floating point exception",      /* SIGFPE */
+  /* 9 */ "Killed",                        /* SIGKILL */
+  /*10 */ "User defined signal 1",         /* SIGUSR1 */
+  /*11 */ "Segmentation fault",            /* SIGSEGV */
+  /*12 */ "User defined signal 2",         /* SIGUSR2 */
+  /*13 */ "Broken pipe",                   /* SIGPIPE */
+  /*14 */ "Alarm clock",                   /* SIGALRM */
+  /*15 */ "Terminated",                    /* SIGTERM */
+  /*16 */ "Stack fault",                   /* SIGSTKFLT (Linux) */
+  /*17 */ "Child exited",                  /* SIGCHLD */
+  /*18 */ "Continued",                     /* SIGCONT */
+  /*19 */ "Stopped (signal)",              /* SIGSTOP */
+  /*20 */ "Stopped",                       /* SIGTSTP */
+  /*21 */ "Stopped (tty input)",           /* SIGTTIN */
+  /*22 */ "Stopped (tty output)",          /* SIGTTOU */
+};
+
+char *strsignal(int sig) {
+  static char buf[32];
+  const char *msg = 0;
+  if (sig >= 0 && sig < (int)(sizeof(hb_sig_messages) / sizeof(*hb_sig_messages)))
+    msg = hb_sig_messages[sig];
+  if (msg != 0) return (char *)msg;
+  {
+    static const char unknown[] = "Unknown signal ";
+    char *d = buf;
+    const char *u = unknown;
+    char digits[12];
+    int nd = 0;
+    int n = sig;
+    while (*u) *d++ = *u++;
+    if (n < 0) {
+      *d++ = '-';
+      n = (int)(-(long)n);
+    }
+    if (n == 0) digits[nd++] = '0';
+    while (n > 0 && nd < 11) {
+      digits[nd++] = (char)('0' + (n % 10));
+      n /= 10;
+    }
+    while (nd > 0) *d++ = digits[--nd];
+    *d = '\0';
+  }
+  return buf;
 }
 
 /* C-locale collation: byte order, identical to strcmp (glibc's own

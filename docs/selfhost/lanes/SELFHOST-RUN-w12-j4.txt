@@ -1,0 +1,11 @@
+# w12-rcut lane: FINAL T4.3 acceptance loop re-cut, ATTEMPT 2 (fallback -j4).
+# S0 serial; S1 -j8 (proven clean in attempt 1); T2.5 in-OS run; S2 -j4
+# (attempt 1's -j8 S2 tore the net_rdma_test.o dirent under 8-way concurrent
+# rename-while-open — the mission's documented fallback ladder);
+# s2-inc incremental demo; S3 serial.  One boot.
+s0-check|SH.BIN|/SRC/SELFHOST.SH check
+s1-user|SH.BIN|/SRC/SELFJ8.SH user
+t25-run|SH.BIN|/SRC/T25.RUN
+s2-kernel|SH.BIN|/SRC/SELFJ4.SH kernel
+s2-inc|SH.BIN|/SRC/SELFINC.SH
+s3-disk|SH.BIN|/SRC/SELFHOST.SH disk

@@ -1,0 +1,9 @@
+[SELFHOST] DRIVER-UP script=/SRC/SELFHOST.RUN
+[SELFHOST] phase=w5-compile-start
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+v2 loader: PID=4 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[IMGPRF] pid=4 start: pages=22997 batch=128
+[IMGPRF] pid=4 done: pages=22997 mapped=22642 skipped=355 batches=180 stop=0 ms=4517
+[KERNEL] Process 4: /TOOLS/CLANG3.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=w5-compile-done rc=0
+[SELFHOST] ACCEPTANCE-COMPLETE stages=1

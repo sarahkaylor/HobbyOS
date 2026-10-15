@@ -517,6 +517,16 @@ static uint64_t *arm_v2_walk_alloc(struct addr_space *as, uint64_t va,
   uint64_t l1i = (va >> 30) & 0x1FF;
   if (l1i < 64 || l1i > 95)
     return 0;
+  /* w5 (iii): never walk a dead address space.  The prefetch kernel task
+     can race a peer CPU's group teardown (the process was kill-parked at
+     the exact page the background fill is on); teardown zeroes
+     root_phys under vm_lock, but if this walk gets a stale nonzero root
+     (pool-slot reuse / interleaving) a deref follows a freed frame --
+     the w4-clang pid=5 housekeeping EL1 fault (FAR 0xFFFF...F000,
+     vm_arch_walk+0x2c).  Treat a zero root as absent and let the
+     caller's alive re-check (v2_prefetch_alive_locked) stop the task. */
+  if (!as->root_phys)
+    return 0;
   uint64_t *l1 = (uint64_t *)as->root_phys;
   uint64_t l2d = l1[l1i];
   uint64_t *l2;
