@@ -610,8 +610,9 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
   `sys_fork -> -EAGAIN` sighting; the final-tip KERNEL is byte-identical to the 22:02 tip
   that passed clean (`merged-w10r`, 304 s), so this is the condition-sensitive wedge class,
   not a regression.** PVE host context at the time: load 9-12 with active neighbors (vllm,
-  plex, reports, kubuntu-dev) — nested-TCG timing jitter. Rerun #3 launched (`merged-finalr2`);
-  wedge-class evidence + fork-EAGAIN correlation appended to the todo item.
+  plex, reports, kubuntu-dev) — nested-TCG timing jitter. Rerun #3 (`merged-finalr2`) CLEAN: 273 s,
+  `exec_ok=8`, halt present, watchdog-only token — **battery 11 CLOSED: final tip green on
+  both machines (local 4/4; VM 3/4 + test-arm clean on rerun, burst attributed).**
 
 - **2026-10-15 (~05:35) — w12-rcut attempt #3 (same-disk receipt rerun): THE FULL LOOP PASSES
   — `ACCEPTANCE-COMPLETE`, outcome=0, wall 433.6 s.** The incremental machinery turned the
