@@ -590,6 +590,21 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-15 (~06:15) — Wave 9 (w12-rcut) COMPLETE + merged (`2707fbc`): THE FINAL
+  ACCEPTANCE RECEIPT IS DELIVERED.** One boot, `ACCEPTANCE-COMPLETE stages=6`, zero FAIL
+  tokens, clean halt (433.6 s receipt rerun; 2.4 h full-build runs also green on the same
+  lineage). **S4/S5 on the in-OS-assembled image: extracted OUT.IMG (128 MiB, sha
+  `fcfa8a3f...`) boots standalone in 6.5 s and launches the in-OS-built `OUTPROG.BIN`.**
+  Byte identity across the whole pipeline: in-OS HELLO.BIN == OUT.IMG's OUTPROG.BIN == host
+  hello.bin (`61b3be6a...`). Products: hobbyos.bin 218,356 B / hobbyos.elf 1,372,736 B.
+  Incremental proof on serial (`'...dhcp.o' is up to date`; rerun had ZERO compile lines).
+  Fixes/docs: `selfhost-stage.sh` now stages `rm.bin` (the S3 RM.BIN gap, w6's fix made
+  permanent); `-j8` real-TU concurrency loss documented (torn `.o.tmp` LFN fragment, slot
+  47; serial is clean — todo P1.5); acceptance.md §1 retry table rewritten for the
+  incremental era + §10 verdicts FINAL + §9.6 caveat. Evidence: 22 files incl. the OUT.IMG
+  itself. Battery 11 (final tip) launched. **The original goal — HobbyOS building its own
+  OS + user programs from within itself — is met end-to-end with receipts.**
+
 - **2026-10-15 (~05:35) — w12-rcut attempt #3 (same-disk receipt rerun): THE FULL LOOP PASSES
   — `ACCEPTANCE-COMPLETE`, outcome=0, wall 433.6 s.** The incremental machinery turned the
   rerun into minutes: s0 11 s ✓; s1-user 101 s ✓ (skip-dominated; full was ~65 min); s2-inc

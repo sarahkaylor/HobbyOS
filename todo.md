@@ -29,6 +29,6 @@ Ordering = priority. Items 1–3 are the active build-velocity work (user direct
 
 ## P3 — stretch / process
 14. **x64 self-host stretch (M5)** — scope and evaluate.
-15. **Acceptance RC re-cut** — after P0 items merge: one full loop S0→S3 (incremental + parallel, hopefully fast now) + extract OUT.IMG + boot it + run the in-OS-built program, on the final lineage (T4.3), then the S3/S4/S5 receipts in one record. **Now much cheaper**: incremental + `-j8` landed — a full S2 should drop from ~90 min to minutes.
+15. ~~**Acceptance RC re-cut**~~ ✅ **DELIVERED 2026-10-15 (`2707fbc`)**: one-boot S0→S3 ACCEPTANCE-COMPLETE + in-OS OUT.IMG booted + in-OS-built program run + byte-identity; acceptance.md §10 FINAL. Original goal met. Remaining open items below are post-goal hardening. — after P0 items merge: one full loop S0→S3 (incremental + parallel, hopefully fast now) + extract OUT.IMG + boot it + run the in-OS-built program, on the final lineage (T4.3), then the S3/S4/S5 receipts in one record. **Now much cheaper**: incremental + `-j8` landed — a full S2 should drop from ~90 min to minutes.
 16. **Merge-back to the workstation repo** `~/Documents/GitHub/HobbyOS` — user-deferred; do as a dedicated, careful step (its `ws/main` has kept moving).
 17. **`[NFS] FAIL read PATTERN.BIN` ambient on the CI VM** — network-timing, pre-selfhost history; annotate or stabilize.
