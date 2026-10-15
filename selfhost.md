@@ -590,6 +590,14 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-15 (~02:40) — w12-rcut attempt #1: S0/S1/T2.5 green at -j8 (S1 = 33 min vs ~61
+  serial — first real parallel win); S2 lost `net_rdma_test.o`'s dirent entirely** (lld
+  `cannot open`; image shows 75 files, **zero twins, zero mangled names — writer fix
+  holding**, the pair-colliding name just GONE; its compile was issued). Merged-combo first
+  test (w9 fix x w10 stamps x w11 -j8). Prime suspect: concurrent directory mutations under
+  -j8 (no cross-process serialization?). Steered: dump-first, then -j1/-j4 fresh-disk
+  discriminators; receipt may proceed at a proven-safe width (-j8 loss tracked as a new bug).
+
 - **2026-10-15 (~01:45) — Battery round 10 on the merged tip (`9beedc4`): LOCAL cleanest
   yet; VM green with one classified drop.** Local: host/unit-arm/unit-x64/wave ALL rc=0 —
   **single WATCHDOG token only** (no IPC_T, no LFN, no CMPTEST); TORTURE PASS + `exec_ok=8`.
