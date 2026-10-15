@@ -603,7 +603,8 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
   47; serial is clean — todo P1.5); acceptance.md §1 retry table rewritten for the
   incremental era + §10 verdicts FINAL + §9.6 caveat. Evidence: 22 files incl. the OUT.IMG
   itself. Battery 11 (final tip) launched. **The original goal — HobbyOS building its own
-  OS + user programs from within itself — is met end-to-end with receipts.**
+  OS + user programs from within itself — is met end-to-end with receipts.** Battery 11
+  local: all four tiers rc=0, TORTURE PASS (`exec_ok=8`), 2x WATCHDOG only (VM pending).
 
 - **2026-10-15 (~05:35) — w12-rcut attempt #3 (same-disk receipt rerun): THE FULL LOOP PASSES
   — `ACCEPTANCE-COMPLETE`, outcome=0, wall 433.6 s.** The incremental machinery turned the
