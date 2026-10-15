@@ -590,6 +590,17 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-15 (~01:45) — Battery round 10 on the merged tip (`9beedc4`): LOCAL cleanest
+  yet; VM green with one classified drop.** Local: host/unit-arm/unit-x64/wave ALL rc=0 —
+  **single WATCHDOG token only** (no IPC_T, no LFN, no CMPTEST); TORTURE PASS + `exec_ok=8`.
+  VM (`merged-w11`): host rc=0 57 s / unit-arm rc=0 / unit-x64 rc=0; test-arm 440 s, 1
+  token (WATCHDOG) BUT **`TORTURE.BIN` was dropped at BOOT LOAD — `Loader (v2) starved
+  (slot pressure): TORTURE.BIN`, never retried → suite silently absent** (the documented
+  boot-load-bail class: no caller to retry a caller_pid<0 load; no FAIL token, wave still
+  halted). 8 suite summaries + STRESS PASS otherwise. Attribution: ambient pressure class
+  (todo §5); a clean VM test-arm sample on this tip exists from `merged-w10r` (`exec_ok=8`).
+  w12-rcut (final acceptance receipt) in flight.
+
 - **2026-10-15 (~00:05) — Wave 8c (w9-dirent) COMPLETE + merged (`9beedc4`): THE S2 CROWN
   PASSES — the in-OS kernel stage compiles 59/59, links and objcopies on the fixed kernel;
   zero twins.** Two-sided root cause: **(writer)** clang writes objects via an LLVM TempFile
