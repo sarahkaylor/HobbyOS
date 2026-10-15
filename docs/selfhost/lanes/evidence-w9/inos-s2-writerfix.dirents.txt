@@ -1,0 +1,6 @@
+# ::/SRC/obj/arm after S2 ATTEMPT 1 (writer fix in, reader fix not yet):
+# exactly 59 clean objects, ZERO mangled twins (writer bug gone), e.g.
+# CPU.O cl19933, NFS_TEST.O cl19932, NET_RDMA.O cl19660 (10776 B, real
+# net_rdma.o) + NET_RDMA.O cl19661 (840 B, net_rdma_test.o alias collision).
+# lld then failed with: undefined symbol: net_rdma_fast_write (reader
+# 8.3-collision bug described in the S2 link-failure notes).

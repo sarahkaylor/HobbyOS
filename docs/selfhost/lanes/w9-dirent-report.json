@@ -46,10 +46,14 @@
       "fix": "e55adab (reader: exact 8.3 entry wins over colliding LFN alias) + test_fat16_83_alias_collision_lookup"
     },
     "attempt2": {
-      "status": "IN PROGRESS",
-      "serial": "evidence-w9/serial-w9-s2b.serial",
-      "kernel": "reader-fixed (e55adab) + writer-fixed (6de9508), fresh MODE=selfhost disk, obj/arm empty pre-boot, drive s2-kernel|SH.BIN|/SRC/SELFHOST.SH kernel",
-      "expect": "phase=s2-kernel-done rc=0, hobbyos.elf + hobbyos.bin present, link resolves ALL symbols (net_rdma_fast_write etc), obj/arm exactly 59 clean entries zero twins"
+      "status": "PASS",
+      "serial": "docs/selfhost/lanes/evidence-w9/inos-s2-crown.serial (copied from serial-w9-s2b.serial)",
+      "result": "56 kernel-compile rc=0 + 3 kernel-ascompile rc=0, LLD link via @/SRC/OBJS.RSP: phase=kernel-link-done rc=0 (ALL symbols resolved incl. net_rdma_fast_write), objcopy -> HOBBYOS.BIN, phase=s2-kernel-done rc=0, System halt, w5 outcome=0 elapsed 4321s (~72 min)",
+      "artifacts": {
+        "HOBBYOS.ELF": {"size": 1371192, "sha256": "015b793b85c66ec3...", "note": "AArch64 EXEC entry 0x40080000; nm shows net_rdma_fast_write/net_rdma_init/net_rdma_poll as T (collision resolved)"},
+        "HOBBYOS.BIN": {"size": 218036, "sha256": "8126b41345c04b8c...", "note": "ARM64 boot Image (first bytes 10 00 00 14)"},
+        "obj_arm": "exactly 59 object entries + ./.., ZERO mangled .O.T twins (inos-s2-crown.dirents.txt)"
+      }
     }
   },
   "report_docs": {

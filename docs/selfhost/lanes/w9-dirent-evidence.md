@@ -87,7 +87,7 @@ cluster; lookups by clean name are unaffected).
 | In-OS probe, unfixed kernel | twins present (prefix dump) |
 | In-OS probe, fixed kernel | **ZERO twins** — CPU.O/NFS_TEST.O/FAT16.O only (postfix dump) |
 | S2 attempt 1 (writer fix only) | 59 objects compiled rc=0, NO 'cannot open', zero twins — link then hit the 8.3-collision reader bug: `undefined symbol: net_rdma_fast_write` (net_rdma.o resolved to net_rdma_test.o's alias) |
-| S2 attempt 2 (writer + reader fix) | **IN PROGRESS** (`serial-w9-s2b.serial`) |
+| S2 attempt 2 (writer + reader fix) | **PASS** — `phase=s2-kernel-done rc=0`, `System halt`, w5 outcome=0 elapsed 4321s; hobbyos.elf 1371192 B + hobbyos.bin 218036 B; obj/arm exactly 59 clean entries, ZERO twins |
 
 ## Second bug found by the crown proof: 8.3-alias reader collision
 
