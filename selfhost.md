@@ -604,7 +604,14 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
   incremental era + §10 verdicts FINAL + §9.6 caveat. Evidence: 22 files incl. the OUT.IMG
   itself. Battery 11 (final tip) launched. **The original goal — HobbyOS building its own
   OS + user programs from within itself — is met end-to-end with receipts.** Battery 11
-  local: all four tiers rc=0, TORTURE PASS (`exec_ok=8`), 2x WATCHDOG only (VM pending).
+  local: all four tiers rc=0, TORTURE PASS (`exec_ok=8`), 2x WATCHDOG only. **VM: units green
+  (55/210/128 s) but test-arm WEDGED 2x in a row (`merged-final` early freeze 95 KB; rerun
+  `merged-finalr` late freeze at 2.5 MB, near REGTEST) — both freezes immediately follow a
+  `sys_fork -> -EAGAIN` sighting; the final-tip KERNEL is byte-identical to the 22:02 tip
+  that passed clean (`merged-w10r`, 304 s), so this is the condition-sensitive wedge class,
+  not a regression.** PVE host context at the time: load 9-12 with active neighbors (vllm,
+  plex, reports, kubuntu-dev) — nested-TCG timing jitter. Rerun #3 launched (`merged-finalr2`);
+  wedge-class evidence + fork-EAGAIN correlation appended to the todo item.
 
 - **2026-10-15 (~05:35) — w12-rcut attempt #3 (same-disk receipt rerun): THE FULL LOOP PASSES
   — `ACCEPTANCE-COMPLETE`, outcome=0, wall 433.6 s.** The incremental machinery turned the
