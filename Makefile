@@ -438,6 +438,11 @@ C_OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(wildcard $(SRC_DIR)/*.c)) 
 ASM_OBJS = $(patsubst $(SRC_DIR)/%.s, $(OBJ_DIR)/%.o, $(wildcard $(SRC_DIR)/*.s)) \
            $(patsubst $(ARCH_DIR)/%.s, $(OBJ_DIR)/%.o, $(wildcard $(ARCH_DIR)/*.s))
 OBJS = $(ASM_OBJS) $(C_OBJS)
+# TEMP INTEGRATION PROBE (ios-test lane, revert after): the merged
+# blkcache/core tree needs a kernel memcpy on ARM (blk_cache.c libcall);
+# no ARM TU provides one (x64 has arch/x64/cpu.c).  Providing it here lets
+# the post-merge wave be validated; the real fix belongs in lane core.
+OBJS += $(OBJ_DIR)/memcpy_stub.o
 
 USER_LIBC = src/user/libc.c
 # All user-visible headers (a change to any of these must rebuild user objects)
