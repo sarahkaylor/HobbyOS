@@ -189,13 +189,30 @@ static int fork_retry(int *pressure) {
   return -1;
 }
 
+/* open() with bounded retry: the wave's ~60 concurrent programs hammer the
+   kernel's global file table, so a fresh open can transiently return -1
+   under resource pressure (seen: the P3 writer's open(2, O_WRONLY) failed
+   once mid-wave; every other check that run was PASS).  Retry with
+   backoff; only report sustained pressure after the window drains. */
+static int open_retry(const char *path, int flags, int *pressure) {
+  *pressure = 0;
+  for (int attempt = 0; attempt < 150; attempt++) {
+    int fd = open(path, flags);
+    if (fd >= 0) return fd;
+    usleep(20000); /* 20 ms */
+  }
+  *pressure = 1;
+  return -1;
+}
+
 /* ---- P1: integrity ------------------------------------------------------ */
 
 /* Write `size` bytes of the LCG pattern and verify a full read that walks
  * the whole file with the given chunk size.  Returns the elapsed ms of the
  * verification read, or -1 on failure (failures already counted). */
 static int verify_read(const char *path, unsigned char *buf, int chunk) {
-  int fd = open(path, O_RDONLY);
+  int pressure = 0;
+  int fd = open_retry(path, O_RDONLY, &pressure);
   if (fd < 0) {
     check("open for verification read", 0);
     return -1;
@@ -231,7 +248,8 @@ static void phase1_integrity(unsigned char *buf) {
   pcon("BLKTEST P1: 512 KiB integrity (write + varied-chunk read-back)\n");
 
   unlink(BLKT_FILE1); /* path may not exist yet — ignore error */
-  int fd = open(BLKT_FILE1, O_WRONLY | O_CREAT | O_TRUNC);
+  int pressure = 0;
+  int fd = open_retry(BLKT_FILE1, O_WRONLY | O_CREAT | O_TRUNC, &pressure);
   if (fd < 0) {
     check("P1 create /BLKT1.TXT", 0);
     return;
@@ -349,9 +367,10 @@ static int reader_body(unsigned char *buf) {
   unsigned int uniform = 0;
   unsigned int reads = 0;
   for (int pass = 0; pass < READER_PASSES; pass++) {
-    int fd1 = open(BLKT_FILE1, O_RDONLY);
+    int pressure = 0;
+    int fd1 = open_retry(BLKT_FILE1, O_RDONLY, &pressure);
     if (fd1 < 0) {
-      pcon("  BLKTEST P3 [reader] open BLKT1 FAILED\n");
+      pcon("  BLKTEST P3 [reader] open BLKT1 FAILED (sustained pressure)\n");
       return f + 1;
     }
     int bad = 0;
@@ -381,9 +400,9 @@ static int reader_body(unsigned char *buf) {
       break;
     }
     /* Slot coherence: every byte must be exactly A or B. */
-    int fd2 = open(BLKT_FILE2, O_RDONLY);
+    int fd2 = open_retry(BLKT_FILE2, O_RDONLY, &pressure);
     if (fd2 < 0) {
-      pcon("  BLKTEST P3 [reader] open BLKT2 FAILED\n");
+      pcon("  BLKTEST P3 [reader] open BLKT2 FAILED (sustained pressure)\n");
       return f + 1;
     }
     int n = read(fd2, buf, SLOT_SIZE);
@@ -425,9 +444,10 @@ static int writer_body(unsigned char *buf) {
   for (int i = 0; i < WRITER_ITERS; i++) {
     unsigned char pat = (i & 1) ? SLOT_B : SLOT_A;
     for (int j = 0; j < SLOT_SIZE; j++) buf[j] = pat;
-    int fd = open(BLKT_FILE2, O_WRONLY);
+    int pressure = 0;
+    int fd = open_retry(BLKT_FILE2, O_WRONLY, &pressure);
     if (fd < 0) {
-      pcon("  BLKTEST P3 [writer] open BLKT2 FAILED\n");
+      pcon("  BLKTEST P3 [writer] open BLKT2 FAILED (sustained pressure)\n");
       return f + 1;
     }
     int w = write(fd, buf, SLOT_SIZE);
@@ -450,7 +470,8 @@ static void phase3_concurrency(unsigned char *buf) {
   /* The slot fixture must exist in a coherent state before any child is
      forked. */
   unlink(BLKT_FILE2);
-  int fd = open(BLKT_FILE2, O_WRONLY | O_CREAT | O_TRUNC);
+  int pressure = 0;
+  int fd = open_retry(BLKT_FILE2, O_WRONLY | O_CREAT | O_TRUNC, &pressure);
   if (fd < 0) {
     check("P3 create /BLKT2.TXT", 0);
     return;
