@@ -126,9 +126,18 @@ static void fill_pattern(unsigned char *buf, unsigned int off, int n) {
 static uint64_t now_ms(void) { return (uint64_t)sysinfo(1, 0, 0); }
 
 static void check(const char *name, int ok) {
-  pcon("  BLKTEST ");
-  pcon(name);
-  pcon(ok ? ": PASS\n" : ": FAIL\n");
+  /* One print_console call: a loaded wave can preempt between separate
+     calls and split the name away from its PASS/FAIL token. */
+  char line[96];
+  int n = 0;
+  const char *p = "  BLKTEST ";
+  while (*p && n < 92) line[n++] = *p++;
+  p = name;
+  while (*p && n < 92) line[n++] = *p++;
+  p = ok ? ": PASS\n" : ": FAIL\n";
+  while (*p && n < 95) line[n++] = *p++;
+  line[n] = '\0';
+  pcon(line);
   if (!ok) fails++;
 }
 
@@ -247,14 +256,29 @@ static void phase1_integrity(unsigned char *buf) {
   static const int chunks[4] = { 512, 4096, 3333, BIG_READ };
   static const char *names[4] = { "512", "4096", "3333", "65536" };
   for (int i = 0; i < 4; i++) {
+    /* One print_console call per verdict: separate calls can be preempted
+       between them, splicing the chunk name away from its ": PASS" token
+       on a loaded wave. */
     int ms = verify_read(BLKT_FILE1, buf, chunks[i]);
     if (ms >= 0 && g_cold_ms < 0) g_cold_ms = ms;
-    pcon("  BLKTEST P1 chunk ");
-    pcon(names[i]);
-    pcon(ms >= 0 ? ": PASS\n" : ": FAIL\n");
+    char line[48];
+    int n = 0;
+    const char *p = "  BLKTEST P1 chunk ";
+    while (*p && n < 40) line[n++] = *p++;
+    p = names[i];
+    while (*p && n < 44) line[n++] = *p++;
+    p = (ms >= 0) ? ": PASS\n" : ": FAIL\n";
+    while (*p && n < 47) line[n++] = *p++;
+    line[n] = '\0';
+    pcon(line);
   }
   if (g_cold_ms >= 0) {
-    pcon("  BLKTEST P1 cold (first) read ms=");
+    char line[48];
+    int n = 0;
+    const char *p = "  BLKTEST P1 cold (first) read ms=";
+    while (*p && n < 44) line[n++] = *p++;
+    line[n] = '\0';
+    pcon(line);
     pnum(g_cold_ms);
     pcon("\n");
   }
