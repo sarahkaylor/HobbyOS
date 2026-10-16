@@ -1,6 +1,7 @@
 #ifdef KERNEL_MODE_UNIT_TEST
 
 #include "unit_test.h"
+#include "blk_cache.h"
 
 int tests_run = 0;
 int tests_failed = 0;
@@ -23,10 +24,25 @@ void run_all_unit_tests(void) {
   fs_test_suite();
   mmu_test_suite();
   vm_test_suite();
+
+  /* blk-cache init (docs/blk-cache.md section 7).  NOTE: the cache is
+     enabled AFTER the frame/MMU/vm suites (not immediately after
+     frame_test_suite) because vm_test's leak checks assert EXACT
+     frame_free_count() equality across file reads (BIG.BIN): a live cache
+     absorbs those pages and the equality cannot hold.  process/loader/
+     trap/virtio_blk and everything after run with the cache live for
+     integration coverage, and the blk-cache suites below verify it. */
+  blk_cache_init();
+
   process_test_suite();
   program_loader_test_suite();
   trap_test_suite();
   virtio_blk_test_suite();
+  /* blk-cache suites; the press suite's strong definition lives in
+     blk_cache_press_test.c (tests lane) and wins over the WEAK fallback
+     defined here in blk_cache_test.c after the merge. */
+  blk_cache_test_suite();
+  blk_cache_press_suite();
   virtio_gpu_test_suite();
   virtio_input_test_suite();
   virtio_net_test_suite();

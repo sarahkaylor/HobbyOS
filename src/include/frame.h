@@ -93,6 +93,14 @@ void frame_block_free(int idx);
 int frame_phys_block_free_count(void);
 int frame_blocks_used_count(void);
 
+/* --- blk-cache reclaim hooks (docs/blk-cache.md section 6) -------------
+ * Evict cached units until `want` whole 32 MiB blocks / `want` frames are
+ * fully free, or the cache is empty.  Return 1 when the target was
+ * reached, 0 otherwise (cache empty / not ready).  Never call with
+ * frame_lock held (eviction takes its own locks). */
+int frame_reclaim_to_blocks(int want);
+int frame_reclaim_to_free_frames(int want);
+
 #ifdef KERNEL_MODE_UNIT_TEST
 /* Test-only helpers for the exhaustion-path check: snapshot the whole
  * bitmap, pretend the pool is full, then restore. */
