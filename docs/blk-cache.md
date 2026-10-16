@@ -107,7 +107,13 @@ construction.
       unit). Count `hits` for sectors valid before this fill, `misses`
       for sectors this call had to fetch; `fill_ops` += device ops;
       `raw_sectors` += sectors fetched.
-3. Release the fill lock, return 0 (or -1 on device error).
+3. Release the fill lock; **copy pass**: for every unit overlapped by the
+   range, copy its requested sectors out of its frame (per-unit bucket
+   lock; a unit whose entry vanished under a race is re-read raw so the
+   read still succeeds).  Units whose requested sectors were all already
+   valid when the fill pass reached them are skipped there and counted as
+   `hits` at the skip point; the copy pass itself never counts.  Return 0
+   (or -1 on device error).
 
 `passthrough` counts whole calls that bypassed the cache (not ready, or
 no frame obtainable for a unit). It must be possible for a read to fall
@@ -296,3 +302,9 @@ raw logs (markers + FAIL-token scan), never exit codes.
   `linker.ld`.  **Rule: the ARM kernel's static footprint has a
   single-digit-MB budget below the placement window — never add
   multi-MB `.bss`.**
+- 2026-10-16 (accounting fix, `blkcache/core` cec0eed): mixed-validity
+  reads (some units cached, some not) copied cached units' bytes
+  correctly but never counted their sectors as `hits` — found by the
+  tests lane's accounting oracle (2-valid/2-missing-unit read, hit-delta
+  check).  Fix: count at the skip point in the miss path; §4 step 3 now
+  documents the copy pass and where the accounting happens.
