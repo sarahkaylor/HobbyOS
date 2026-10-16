@@ -590,6 +590,24 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-15 (night) — inos-build-kernel follow-ups from a user console session: `./x.sh`
+  dispatch, `SH.BIN` resolution, toolchain preflight.** Three fixes.  (1) `src/user/sh.c`: a
+  command that resolves to a `.sh` file (or a `#!` file) is now run as a script — the shell
+  re-execs itself on the file (the shebang equivalent), so `./build_kernel.sh all` works from
+  any console; before, an explicit-path script was exec'd as a raw flat binary.  (2)
+  `pick_binary` tries a bare name as typed (cwd, then `/`) before appending `.BIN`, so
+  `SH.BIN` resolves (previously `SH.BIN` → `SH.BIN.BIN` → "command not found").  (3)
+  `build_kernel.sh` preflights `/TOOLS/{CLANG,LLD,OBJCOPY,MAKE,TAR}.BIN` and exits 2 with
+  build instructions instead of a make `Error 127` retry loop.  Root cause of the user-visible
+  failure: their `make disk.img` had run WITHOUT the LLVM dist staging in-tree (main tree
+  lacked `obj/selfhost/dist-staging` → `selfhost-stage.sh --tools` warns + skips → `/TOOLS`
+  had only the ported tools + TAR.BIN).  Staging restored in the tree (copied from the
+  w12-rcut lane), so a stock `make disk.img` now stages CLANG/LLD/LLVMAR/OBJCOPY + RESDIR
+  (94/53/8/5 MB + headers).  Verified: in-OS smoke `./build_kernel.sh check` from `/` rc=0
+  (check.o compiled in-OS) + `SH.BIN -c ...` rc=0, `[DOT] PASS`
+  (`bk-dot-smoke.serial.txt`); fresh default + MODE=selfhost disks rebuild with no staging
+  warnings; default disk boots `Mode: DESKTOP`.
+
 - **2026-10-15 (evening) — inos-build-kernel: THE FULL IN-OS LOOP PASSES from the disk-carried
   source tar.** `disk.img` now carries `/SRC.TAR` (29,040,640 B ustar; `tools/selfhost-src-tar.sh`),
   `/BUILD_KERNEL.SH` (extract → `make -f Makefile.hobbyos all` → install driver) and `/TOOLS/TAR.BIN`

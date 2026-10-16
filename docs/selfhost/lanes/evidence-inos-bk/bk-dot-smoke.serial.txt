@@ -1,0 +1,191 @@
+UEFI firmware (version 2025.11-3ubuntu7 built at 11:11:58 on Mar 31 2026)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+BdsDxe: starting Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+[001;001H[001;001H[001;001Hl[001;002Hi[001;003Hn[001;004Hu[001;005Hx[001;006H:[001;007H [001;008HL[001;009Ho[001;010Ha[001;011Hd[001;012Hi[001;013Hn[001;014Hg[001;015H [001;016Hk[001;017He[001;018Hr[001;019Hn[001;020He[001;021Hl[001;022H [001;023H`[001;024Hb[001;025Ho[001;026Ho[001;027Ht[001;028H([001;029H)[001;030H:[001;031H/[001;032Hb[001;033Ho[001;034Ho[001;035Ht[001;036H/[001;037Hh[001;038Ho[001;039Hb[001;040Hb[001;041Hy[001;042Ho[001;043Hs[001;044H.[001;045Hb[001;046Hi[001;047Hn[001;048H`[001;049H.[001;050H.[001;051H.[001;052H[001;001H[002;001HBooting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+[GPUDIAG] gpu wait > 9 ms: ack=3 used=4 (park off)
+[GPU] virtio-gpu mmio irq=78
+VirtIO GPU successfully initialized.
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1900544 total_mib=7424 reserved=0
+[KERNEL] Activating secondary cores via PSCI...
+[KERNEL] Core 1 power-on requested.
+[KERNEL] Core 2 power-on requested.
+[KERNEL] Core 3 power-on requested.
+[KERNEL] Core 4 power-on requested.
+[KERNEL] Core 5 power-on requested.
+[KERNEL] Core 6 power-on requested.
+start_scheduler called on CPU start_scheduler called on CPU start_scheduler called on CPU 32[KERNEL] Core 1start_scheduler called on CPU 
+67
+ power-on requested.
+start_scheduler called on CPU start_scheduler called on CPU 
+
+57start_scheduler called on CPU 
+
+4
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+virtio-net MAC: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP Discover sent
+DHCP initialization complete.
+
+--- Parallel Program Loading ---
+Mode: SELFHOST - Running in-OS acceptance build driver...
+Loading program for scheduler (v2 AS): SELFHOST.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=-1
+/SELFHOST.BIN
+v2 loader: image mapped (lazy), bytes=52656 pages=13 first=in elap=1ms
+v2 loader: PID=1 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+start_scheduler called on CPU 0
+[SELFHOST] DRIVER-UP script=/SRC/SELFHOST.RUN
+/SRC/OUT.LOG
+/SRC/SELFHOST.RUN
+[SELFHOST] phase=s-dot-smoke-start
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=1
+Inside process_create: clearing memory at 0x0000000072000000
+Inside process_create: kmemset done.
+Loading program for scheduler (v2 AS): /TOOLS/SH.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=-1
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=196624 pages=49 first=in elap=0ms
+v2 loader: PID=3 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[DEBUG] Before eret, tf->regs[0] = 93683 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 93683 ELR = 0x0000001000000AC8
+/SRC/dot_smoke.sh
+[DOT] smoke start
+/build_kernel.sh
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=-1
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x000000100000E3B8
+/TOOLS/SH.BIN
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=196624 pages=49 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = 93683 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 93683 ELR = 0x0000001000000AC8
+/build_kernel.sh
+[BUILD] build-kernel start
+[BUILD] mode=check
+/TOOLS/CLANG.BIN
+/TOOLS/LLD.BIN
+/TOOLS/OBJCOPY.BIN
+/TOOLS/MAKE.BIN
+/TOOLS/TAR.BIN
+/SRC/src/kernel/main.c
+[BUILD] /SRC source tree present
+[BUILD] make -f Makefile.hobbyos check
+/TOOLS/MAKE.BIN
+/TOOLS/MAKE.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x000000100000E3B8
+/TOOLS/MAKE.BIN
+v2 loader: image mapped (lazy), bytes=314680 pages=77 first=in elap=1ms
+/SRC/Makefile.hobbyos
+/SRC/OBJS.RSP
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x00000010000260F8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=196624 pages=49 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010000115E0
+[DEBUG] Before eret, tf->regs[0] = 93683 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 93683 ELR = 0x0000001000000AC8
+[KERNEL] Process 5: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=s0-check-start
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x00000010000260F8
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/main.c -o /SRC/obj/arm/check.o
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=196624 pages=49 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010000115E0
+[DEBUG] Before eret, tf->regs[0] = 93683 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 93683 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 6
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = 0x000000100000E3B8
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = 0x0000001000012CE0
+/TOOLS/CLANG.BIN
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=0ms
+[IMGPRF] pid=6 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=6 done: pages=22997 mapped=22483 skipped=514 batches=180 stop=0 ms=4515
+/SRC/src/kernel/main.c
+/SRC/obj/arm/check-b81674d2.o.tmp
+/SRC/src/include/fat16.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/fs.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/process.h
+/SRC/src/include/trap.h
+/SRC/src/include/arch/trap.h
+/SRC/src/include/nfs.h
+/SRC/src/include/ipc_proto.h
+/SRC/src/include/gic.h
+/SRC/src/include/mmu.h
+/SRC/src/include/arch/mmu.h
+/SRC/src/include/program_loader.h
+/SRC/src/include/timer.h
+/SRC/src/include/virtio_blk.h
+/TOOLS/RESDIR/include/stddef.h
+/TOOLS/RESDIR/include/__stddef_header_macro.h
+/TOOLS/RESDIR/include/__stddef_ptrdiff_t.h
+/TOOLS/RESDIR/include/__stddef_size_t.h
+/TOOLS/RESDIR/include/__stddef_wchar_t.h
+/TOOLS/RESDIR/include/__stddef_null.h
+/TOOLS/RESDIR/include/__stddef_max_align_t.h
+/TOOLS/RESDIR/include/__stddef_offsetof.h
+/SRC/src/include/virtio_gpu.h
+/SRC/src/include/virtio_input.h
+/SRC/src/include/net.h
+/SRC/src/include/virtio_net.h
+/SRC/src/include/dhcp.h
+src/kernel/main.c:50:39: warning: unused parameter 'tf' [-Wunused-parameter]
+   50 | void irq_handler_c(struct trap_frame *tf) {
+      |                                       ^
+/SRC/obj/arm/check-b81674d2.o.tmp new=/SRC/obj/arm/check.o
+1 warning generated.
+[KERNEL] Process 6: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 5: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x00000010000260F8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=196624 pages=49 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010000115E0
+[DEBUG] Before eret, tf->regs[0] = 93683 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 93683 ELR = 0x0000001000000AC8
+[KERNEL] Process 5: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=s0-check-done rc=0
+[KERNEL] Process 4: /TOOLS/MAKE.BIN exited unexpectedly or gracefully.
+[BUILD] make rc=0
+[KERNEL] Process 2: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[BUILD] build-kernel done
+[DOT] root ./build_kernel.sh check rc=0
+/SH.BIN
+/SH.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x000000100000E3B8
+/SH.BIN
+v2 loader: image mapped (lazy), bytes=196624 pages=49 first=in elap=1ms
+[DEBUG] Before eret, tf->regs[0] = 93683 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 93683 ELR = 0x0000001000000AC8
+[KERNEL] Process 2: SH.BIN exited unexpectedly or gracefully.
+[DOT] SH.BIN bare-name resolved
+[DOT] SH.BIN -c rc=0
+[KERNEL] Process 3: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[DOT] PASS
+[SELFHOST] phase=s-dot-smoke-done rc=0
+[SELFHOST] ACCEPTANCE-COMPLETE stages=1
+[KERNEL] Process 1: SELFHOST.BIN exited unexpectedly or gracefully.
+System halt from CPU 3.

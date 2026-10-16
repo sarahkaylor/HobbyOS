@@ -1,0 +1,2 @@
+# smoke: ./build_kernel.sh explicit-path dispatch + SH.BIN bare-name resolution
+s-dot-smoke|SH.BIN|/SRC/dot_smoke.sh

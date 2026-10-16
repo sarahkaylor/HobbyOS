@@ -48,15 +48,31 @@ The tarball is created with `tar --format=ustar --hard-dereference`
 
 ## Using it inside HobbyOS
 
-At the desktop shell (or any console):
+At the desktop shell or any console — preferred form first (the shell
+executes `.sh` files directly; this is the shebang equivalent):
 
-    SH.BIN /BUILD_KERNEL.SH            # all: extract-if-needed + make all + install
-    SH.BIN /BUILD_KERNEL.SH untar      # just re-extract /SRC.TAR into /SRC
-    SH.BIN /BUILD_KERNEL.SH check      # one-TU compile smoke
-    SH.BIN /BUILD_KERNEL.SH user       # HELLO SH LS CAT
-    SH.BIN /BUILD_KERNEL.SH kernel     # 59 TUs -> /SRC/hobbyos.elf + /SRC/hobbyos.bin
-    SH.BIN /BUILD_KERNEL.SH disk       # assemble the bootable /SRC/OUT.IMG
-    SH.BIN /BUILD_KERNEL.SH install    # /SRC/hobbyos.bin -> /boot/hobbyos.bin
+    ./build_kernel.sh              # all: extract-if-needed + make all + install
+    ./build_kernel.sh untar        # just re-extract /SRC.TAR into /SRC
+    ./build_kernel.sh check        # one-TU compile smoke
+    ./build_kernel.sh user         # HELLO SH LS CAT
+    ./build_kernel.sh kernel       # all kernel TUs -> /SRC/hobbyos.elf + .bin
+    ./build_kernel.sh disk         # assemble the bootable /SRC/OUT.IMG
+    ./build_kernel.sh install      # /SRC/hobbyos.bin -> /boot/hobbyos.bin
+    SH /BUILD_KERNEL.SH all        # equivalent, explicit
+    SH.BIN /BUILD_KERNEL.SH all    # also resolves: bare names try the name
+                                   # as typed (cwd, /) before appending .BIN
+
+In a staged `SELFHOST.RUN` (the driver context) the stage line is:
+
+    <phase>|SH.BIN|/BUILD_KERNEL.SH <mode>
+
+**Toolchain preflight:** the script checks `/TOOLS/{CLANG,LLD,OBJCOPY,MAKE,
+TAR}.BIN` up front and exits 2 with instructions when they are absent —
+which happens when `disk.img` was built without the LLVM dist staging
+(`obj/selfhost/dist-staging`; `docs/selfhost/llvm-bootstrap.md` §6 — the
+`selfhost-stage.sh --tools` step then warns and skips).  Stage onto an
+existing image with `tools/selfhost-stage.sh --tools disk.img`, or rebuild
+`disk.img` where the staging exists.
 
 The pieces the script drives (all in-OS):
 

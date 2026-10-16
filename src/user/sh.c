@@ -2068,6 +2068,42 @@ static int pick_binary(const char *cmd, char *resolved, size_t cap) {
     }
     return 0;
   }
+  /* bare name: first try it as typed (uppercased, FAT 8.3 convention; cwd
+     then root), so e.g. `SH.BIN` resolves; then the NAME.BIN fallback. */
+  {
+    char typed[64];
+    int l = s_len(cmd);
+    if (l > 0 && l < (int)sizeof typed) {
+      int k = 0;
+      for (; k < l; k++) {
+        char c = cmd[k];
+        if (c >= 'a' && c <= 'z') c -= 32;
+        typed[k] = c;
+      }
+      typed[k] = 0;
+      int fd = open(typed, O_RDONLY);
+      if (fd >= 0) {
+        close(fd);
+        if (l >= (int)cap) l = (int)cap - 1;
+        for (k = 0; k < l; k++) resolved[k] = typed[k];
+        resolved[l] = 0;
+        return 1;
+      }
+      char rroot[64];
+      rroot[0] = '/';
+      int rl = 1;
+      for (k = 0; k < l && rl < (int)sizeof rroot - 1; k++) rroot[rl++] = typed[k];
+      rroot[rl] = 0;
+      fd = open(rroot, O_RDONLY);
+      if (fd >= 0) {
+        close(fd);
+        if (rl >= (int)cap) rl = (int)cap - 1;
+        for (k = 0; k < rl; k++) resolved[k] = rroot[k];
+        resolved[rl] = 0;
+        return 1;
+      }
+    }
+  }
   /* bare name: uppercase to NAME.BIN, try cwd then root */
   char base[40];
   int i = 0;
@@ -2106,6 +2142,24 @@ static int pick_binary(const char *cmd, char *resolved, size_t cap) {
     return 1;
   }
   return 0;
+}
+
+/* A command resolved to a real file is run as a shell script when its name
+   ends in .sh (any case) or the file starts with "#!".  Flat .bin programs
+   have neither property, so this never misfires on them. */
+static int is_script_file(const char *path) {
+  int l = s_len(path);
+  if (l >= 3 && path[l - 3] == '.' &&
+      (path[l - 2] == 's' || path[l - 2] == 'S') &&
+      (path[l - 1] == 'h' || path[l - 1] == 'H'))
+    return 1;
+  int fd = open(path, O_RDONLY);
+  if (fd < 0)
+    return 0;
+  char b[2] = {0, 0};
+  int n = read(fd, b, 2);
+  close(fd);
+  return n == 2 && b[0] == '#' && b[1] == '!';
 }
 
 static int is_builtin(const char *name) {
@@ -2314,6 +2368,7 @@ static int eval_simple(struct node *n, int in_fd, int out_fd, int err_fd) {
         out2("\n");
         st = 127;
       } else {
+        int as_script = is_script_file(path);
         int pid = fork();
         if (pid < 0) {
           out2("sh: fork failed\n");
@@ -2330,6 +2385,25 @@ static int eval_simple(struct node *n, int in_fd, int out_fd, int err_fd) {
           if (lerr != 2) {
             dup2(lerr, 2);
             if (lerr >= 3) close(lerr);
+          }
+          if (as_script) {
+            /* Script file (e.g. `./build_kernel.sh args`): re-exec this
+               shell on it -- the shebang equivalent, so $1.. and the exit
+               status behave exactly like `sh file args...`. */
+            char self[64];
+            if (pick_binary(g_argv0_buf, self, sizeof self)) {
+              char **sav =
+                  (char **)malloc((size_t)(cmdargc + 2) * sizeof(char *));
+              sav[0] = self;
+              sav[1] = path;
+              for (int i = 1; i < cmdargc; i++) sav[i + 1] = cmdargv[i];
+              sav[cmdargc + 1] = 0;
+              execv(self, sav);
+            }
+            out2("sh: cannot run script: ");
+            out2(path);
+            out2("\n");
+            exit(126);
           }
           char **av = (char **)malloc((size_t)(cmdargc + 1) * sizeof(char *));
           for (int i = 0; i < cmdargc; i++) av[i] = cmdargv[i];
@@ -2462,20 +2536,20 @@ static int sh_eval(struct node *n, int in_fd, int out_fd, int err_fd) {
     st = sh_eval(n->body, in_fd, out_fd, err_fd);
     break;
   case N_SUBSH: {
-    int pid = fork();
-    if (pid < 0) {
-      st = 126;
+      int pid = fork();
+      if (pid < 0) {
+        st = 126;
+        break;
+      }
+      if (pid == 0) {
+        int s2 = sh_eval(n->body, in_fd, out_fd, err_fd);
+        exit(s2);
+      }
+      int wst = 0;
+      waitpid(pid, &wst, 0);
+      st = (wst >> 8) & 0xff;
       break;
     }
-    if (pid == 0) {
-      int s2 = sh_eval(n->body, in_fd, out_fd, err_fd);
-      exit(s2);
-    }
-    int wst = 0;
-    waitpid(pid, &wst, 0);
-    st = (wst >> 8) & 0xff;
-    break;
-  }
   case N_LIST:
     if (n->op == '|') {
       st = eval_pipeline(n, in_fd, out_fd, err_fd);
@@ -2516,11 +2590,11 @@ static int sh_eval(struct node *n, int in_fd, int out_fd, int err_fd) {
     }
     break;
   case N_IF: {
-    int c = sh_eval(n->cond, in_fd, out_fd, err_fd);
-    if (c == 0) st = sh_eval(n->thenn, in_fd, out_fd, err_fd);
-    else if (n->elsee) st = sh_eval(n->elsee, in_fd, out_fd, err_fd);
-    break;
-  }
+      int c = sh_eval(n->cond, in_fd, out_fd, err_fd);
+      if (c == 0) st = sh_eval(n->thenn, in_fd, out_fd, err_fd);
+      else if (n->elsee) st = sh_eval(n->elsee, in_fd, out_fd, err_fd);
+      break;
+    }
   case N_WHILE:
     st = 0;
     for (;;) {
@@ -2539,91 +2613,91 @@ static int sh_eval(struct node *n, int in_fd, int out_fd, int err_fd) {
     }
     break;
   case N_FOR: {
-    st = 0;
-    if (n->ninit > 0) {
-      /* expand each init word (field splitting + globbing), iterate */
-      struct node mini;
-      for (int wi = 0; wi < n->ninit && !g_exit_requested; wi++) {
-        mini.words = n->init_words;
-        mini.wq = n->init_wq;
-        mini.nwords = n->ninit;
-        struct fields f;
-        expand_word(&mini, wi, &f);
-        for (int k = 0; k < f.nwords && !g_exit_requested; k++) {
-          var_set(n->var, f.words[k], 0);
+      st = 0;
+      if (n->ninit > 0) {
+        /* expand each init word (field splitting + globbing), iterate */
+        struct node mini;
+        for (int wi = 0; wi < n->ninit && !g_exit_requested; wi++) {
+          mini.words = n->init_words;
+          mini.wq = n->init_wq;
+          mini.nwords = n->ninit;
+          struct fields f;
+          expand_word(&mini, wi, &f);
+          for (int k = 0; k < f.nwords && !g_exit_requested; k++) {
+            var_set(n->var, f.words[k], 0);
+            st = sh_eval(n->body, in_fd, out_fd, err_fd);
+            if (g_break_count > 0) {
+              g_break_count--;
+              k = f.nwords;
+              wi = n->ninit;
+              break;
+            }
+            if (g_continue_count > 0) {
+              g_continue_count--;
+              break;
+            }
+          }
+          fields_free(&f);
+        }
+      } else {
+        for (int i = 0; i < g_npos && !g_exit_requested; i++) {
+          var_set(n->var, pos_get(i + 1), 0);
           st = sh_eval(n->body, in_fd, out_fd, err_fd);
           if (g_break_count > 0) {
             g_break_count--;
-            k = f.nwords;
-            wi = n->ninit;
             break;
           }
           if (g_continue_count > 0) {
             g_continue_count--;
+            continue;
+          }
+        }
+      }
+      break;
+    }
+  case N_CASE: {
+      struct node mini;
+      int wq = 2; /* marker: expand but never glob/split */
+      mini.words = &n->case_word;
+      mini.wq = &wq;
+      mini.nwords = 1;
+      struct fields fw;
+      expand_word(&mini, 0, &fw);
+      const char *wval = fw.nwords > 0 ? fw.words[0] : "";
+      st = 0;
+      for (int i = 0; i < n->npats; i++) {
+        int got = 0;
+        for (int k = 0; k < n->pats[i].npats; k++) {
+          if (pat_match(n->pats[i].pats[k], wval)) {
+            got = 1;
             break;
           }
         }
-        fields_free(&f);
-      }
-    } else {
-      for (int i = 0; i < g_npos && !g_exit_requested; i++) {
-        var_set(n->var, pos_get(i + 1), 0);
-        st = sh_eval(n->body, in_fd, out_fd, err_fd);
-        if (g_break_count > 0) {
-          g_break_count--;
-          break;
-        }
-        if (g_continue_count > 0) {
-          g_continue_count--;
-          continue;
-        }
-      }
-    }
-    break;
-  }
-  case N_CASE: {
-    struct node mini;
-    int wq = 2; /* marker: expand but never glob/split */
-    mini.words = &n->case_word;
-    mini.wq = &wq;
-    mini.nwords = 1;
-    struct fields fw;
-    expand_word(&mini, 0, &fw);
-    const char *wval = fw.nwords > 0 ? fw.words[0] : "";
-    st = 0;
-    for (int i = 0; i < n->npats; i++) {
-      int got = 0;
-      for (int k = 0; k < n->pats[i].npats; k++) {
-        if (pat_match(n->pats[i].pats[k], wval)) {
-          got = 1;
+        if (got) {
+          st = sh_eval(n->pats[i].body, in_fd, out_fd, err_fd);
           break;
         }
       }
-      if (got) {
-        st = sh_eval(n->pats[i].body, in_fd, out_fd, err_fd);
-        break;
-      }
+      fields_free(&fw);
+      break;
     }
-    fields_free(&fw);
-    break;
-  }
   case N_FUNC: {
-    struct func_def *fd = 0;
-    for (int i = 0; i < g_func_n; i++) {
-      if (s_eq(g_funcs[i].name, n->fname)) {
-        fd = &g_funcs[i];
-        break;
+      struct func_def *fd = 0;
+      for (int i = 0; i < g_func_n; i++) {
+        if (s_eq(g_funcs[i].name, n->fname)) {
+          fd = &g_funcs[i];
+          break;
+        }
       }
+      if (!fd) {
+        if (g_func_n >= SH_MAX_FUNCS) break;
+        fd = &g_funcs[g_func_n++];
+        fd->name = s_dup(n->fname);
+      }
+      fd->body = n->body;
+      fd->defined = 1;
+      break;
     }
-    if (!fd) {
-      if (g_func_n >= SH_MAX_FUNCS) break;
-      fd = &g_funcs[g_func_n++];
-      fd->name = s_dup(n->fname);
-    }
-    fd->body = n->body;
-    fd->defined = 1;
-    break;
-  }
   default:
     break;
   }
@@ -2701,72 +2775,72 @@ static int printf_emit(const char *fmt, int argc, char **argv, int *argp) {
   int a = *argp;
   switch (conv) {
   case 's': {
-    if (a < argc) {
-      out1(argv[a]);
-      *argp = a + 1;
+      if (a < argc) {
+        out1(argv[a]);
+        *argp = a + 1;
+      }
+      break;
     }
-    break;
-  }
   case 'd': case 'i': {
-    if (a < argc) {
-      int v = atoi(argv[a]);
-      char b[24];
-      itoa10(v, b, sizeof b);
-      out1(b);
-      *argp = a + 1;
+      if (a < argc) {
+        int v = atoi(argv[a]);
+        char b[24];
+        itoa10(v, b, sizeof b);
+        out1(b);
+        *argp = a + 1;
+      }
+      break;
     }
-    break;
-  }
   case 'c': {
-    if (a < argc) {
-      char c = argv[a][0];
-      char s[2] = { c, 0 };
-      out1(s);
-      *argp = a + 1;
+      if (a < argc) {
+        char c = argv[a][0];
+        char s[2] = { c, 0 };
+        out1(s);
+        *argp = a + 1;
+      }
+      break;
     }
-    break;
-  }
   case 'u': {
-    if (a < argc) {
-      unsigned long v = strtoul(argv[a], 0, 10);
-      char b[24];
-      int i = 0;
-      unsigned long u = v;
-      char t[24];
-      if (u == 0) t[i++] = '0';
-      while (u > 0 && i < 23) {
-        t[i++] = (char)('0' + (u % 10));
-        u /= 10;
+      if (a < argc) {
+        unsigned long v = strtoul(argv[a], 0, 10);
+        char b[24];
+        int i = 0;
+        unsigned long u = v;
+        char t[24];
+        if (u == 0) t[i++] = '0';
+        while (u > 0 && i < 23) {
+          t[i++] = (char)('0' + (u % 10));
+          u /= 10;
+        }
+        int n = 0;
+        while (i > 0) b[n++] = t[--i];
+        b[n] = 0;
+        out1(b);
+        *argp = a + 1;
       }
-      int n = 0;
-      while (i > 0) b[n++] = t[--i];
-      b[n] = 0;
-      out1(b);
-      *argp = a + 1;
+      break;
     }
-    break;
-  }
   case 'x': case 'X': case 'o': {
-    if (a < argc) {
-      unsigned long v = strtoul(argv[a], 0, 0);
-      int base = (conv == 'o') ? 8 : 16;
-      char b[32];
-      int i = 0;
-      if (v == 0) b[i++] = '0';
-      while (v > 0 && i < 30) {
-        int d = (int)(v % (unsigned long)base);
-        b[i++] = (char)(d < 10 ? '0' + d : (conv == 'X' ? 'A' : 'a') + d - 10);
-        v /= (unsigned long)base;
+      if (a < argc) {
+        unsigned long v = strtoul(argv[a], 0, 0);
+        int base = (conv == 'o') ? 8 : 16;
+        char b[32];
+        int i = 0;
+        if (v == 0) b[i++] = '0';
+        while (v > 0 && i < 30) {
+          int d = (int)(v % (unsigned long)base);
+          b[i++] = (char)(d < 10 ? '0' + d : (conv == 'X' ? 'A' : 'a') + d - 10);
+          v /= (unsigned long)base;
+        }
+        char r[32];
+        int n = 0;
+        while (i > 0) r[n++] = b[--i];
+        r[n] = 0;
+        out1(r);
+        *argp = a + 1;
       }
-      char r[32];
-      int n = 0;
-      while (i > 0) r[n++] = b[--i];
-      r[n] = 0;
-      out1(r);
-      *argp = a + 1;
+      break;
     }
-    break;
-  }
   default:
     break;
   }
@@ -2793,29 +2867,29 @@ static int do_printf(int argc, char **argv) {
       case 'v': out1("\v"); p++; break;
       case '\\': out1("\\"); p++; break;
       case '0': {
-        int v = 0;
-        p++;
-        for (int i = 0; i < 3 && *p >= '0' && *p <= '7'; i++, p++) {
-          v = v * 8 + (*p - '0');
+          int v = 0;
+          p++;
+          for (int i = 0; i < 3 && *p >= '0' && *p <= '7'; i++, p++) {
+            v = v * 8 + (*p - '0');
+          }
+          char s[2] = { (char)v, 0 };
+          out1(s);
+          break;
         }
-        char s[2] = { (char)v, 0 };
-        out1(s);
-        break;
-      }
       case 'x': {
-        int v = 0;
-        p++;
-        for (int i = 0; i < 2 && ((*p >= '0' && *p <= '9') ||
-                                  (*p >= 'a' && *p <= 'f') ||
-                                  (*p >= 'A' && *p <= 'F')); i++, p++) {
-          int d = (*p <= '9') ? *p - '0' :
-                  ((*p >= 'a') ? *p - 'a' + 10 : *p - 'A' + 10);
-          v = v * 16 + d;
+          int v = 0;
+          p++;
+          for (int i = 0; i < 2 && ((*p >= '0' && *p <= '9') ||
+                                    (*p >= 'a' && *p <= 'f') ||
+                                    (*p >= 'A' && *p <= 'F')); i++, p++) {
+            int d = (*p <= '9') ? *p - '0' :
+                    ((*p >= 'a') ? *p - 'a' + 10 : *p - 'A' + 10);
+            v = v * 16 + d;
+          }
+          char s[2] = { (char)v, 0 };
+          out1(s);
+          break;
         }
-        char s[2] = { (char)v, 0 };
-        out1(s);
-        break;
-      }
       default:
         break;
       }
@@ -3174,23 +3248,23 @@ static int builtin_run(int which, int argc, char **argv) {
   case 17: return do_help(argc, argv);
   case 18: return do_clear(argc, argv);
   case 19: { /* break [n] */
-    int n = (argc > 1) ? atoi(argv[1]) : 1;
-    if (n < 1) n = 1;
-    g_break_count += n;
-    return 0;
-  }
+      int n = (argc > 1) ? atoi(argv[1]) : 1;
+      if (n < 1) n = 1;
+      g_break_count += n;
+      return 0;
+    }
   case 20: { /* continue [n] */
-    int n = (argc > 1) ? atoi(argv[1]) : 1;
-    if (n < 1) n = 1;
-    g_continue_count += n;
-    return 0;
-  }
+      int n = (argc > 1) ? atoi(argv[1]) : 1;
+      if (n < 1) n = 1;
+      g_continue_count += n;
+      return 0;
+    }
   case 21: { /* return [n] */
-    int n = (argc > 1) ? atoi(argv[1]) : g_laststatus;
-    g_returned = 1;
-    g_return_status = n;
-    return n;
-  }
+      int n = (argc > 1) ? atoi(argv[1]) : g_laststatus;
+      g_returned = 1;
+      g_return_status = n;
+      return n;
+    }
   default: return 0;
   }
 }

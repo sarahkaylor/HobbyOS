@@ -1,7 +1,13 @@
 # build_kernel.sh — build the HobbyOS kernel FROM THE SOURCE TAR on this disk.
 #
-# Run inside HobbyOS (from the desktop shell or any console):
-#   SH.BIN /BUILD_KERNEL.SH [mode]
+# Run inside HobbyOS.  Two equivalent spellings work in the desktop shell or
+# any console (the shell runs .sh files directly — the shebang equivalent):
+#   ./build_kernel.sh [mode]        (from the directory holding it, e.g. / )
+#   SH /BUILD_KERNEL.SH [mode]      (explicit; SH.BIN /BUILD_KERNEL.SH also
+#                                    resolves now that bare names try the
+#                                    name as typed before appending .BIN)
+# In a staged SELFHOST.RUN (the driver context) the stage line is:
+#   <phase>|SH.BIN|/BUILD_KERNEL.SH <mode>
 #
 # Modes:
 #   (none) / all — if /SRC has no source tree yet, extract /SRC.TAR into it,
@@ -47,6 +53,28 @@ if [ "x$mode" = "x" ]; then
   mode="all"
 fi
 echo "[BUILD] mode=$mode"
+
+# Preflight: the in-OS toolchain must actually be on this image.  A disk
+# built without the LLVM dist staging silently skips /TOOLS/CLANG.BIN etc.
+# (docs/selfhost/llvm-bootstrap.md 6); fail fast with instructions instead
+# of a make "Error 127" retry loop.  install only needs cp, so it skips.
+if [ "x$mode" != "xinstall" ]; then
+  missing=""
+  if [ -f /TOOLS/CLANG.BIN ]; then : ; else missing="$missing CLANG.BIN"; fi
+  if [ -f /TOOLS/LLD.BIN ]; then : ; else missing="$missing LLD.BIN"; fi
+  if [ -f /TOOLS/OBJCOPY.BIN ]; then : ; else missing="$missing OBJCOPY.BIN"; fi
+  if [ -f /TOOLS/MAKE.BIN ]; then : ; else missing="$missing MAKE.BIN"; fi
+  if [ -f /TOOLS/TAR.BIN ]; then : ; else missing="$missing TAR.BIN"; fi
+  if [ "x$missing" != "x" ]; then
+    echo "[BUILD] in-OS toolchain missing on this disk image:$missing"
+    echo "[BUILD] this image was built without the LLVM dist staging"
+    echo "[BUILD] (needs obj/selfhost/dist-staging on the host - see"
+    echo "[BUILD] docs/selfhost/llvm-bootstrap.md section 6); rebuild"
+    echo "[BUILD] disk.img there, or stage onto an image in place with:"
+    echo "[BUILD]   tools/selfhost-stage.sh --tools disk.img"
+    exit 2
+  fi
+fi
 
 if [ "$mode" = "untar" ]; then
   echo "[BUILD] extract /SRC.TAR into /SRC"
