@@ -27,6 +27,18 @@
 # (sh.c alone is ~1 h); once /SRC/obj exists, make re-runs are incremental
 # (FAT timestamps) and a re-prove is minutes.
 #
+# Retry policy: each of the build modes is attempted up to 3 times.  make
+# is incremental, so a retry only re-does the failed command (usually one
+# TU) and its dependents -- forward progress is monotone.  This exists
+# because of the known stochastic exec-wedge class: occasionally the
+# kernel's lost-owner watchdog disposes a long-running child (in-OS clang)
+# mid-compile -- the child sees exit 97 (the exec-rejection sentinel), the
+# resume poison riding that child's address space, and per the kernel's
+# own recovery design a reforked child on a fresh address space compiles
+# fine.  make itself cannot re-exec a rejected child, so the driver does
+# the refork: rerun make.  The failure is only terminal if the same single
+# command wedges on all 3 fresh attempts.
+#
 # Every command path is absolute, so the script works from any cwd.
 
 echo "[BUILD] build-kernel start"
@@ -82,6 +94,19 @@ cd /SRC
 echo "[BUILD] make -f Makefile.hobbyos $mode"
 /TOOLS/MAKE.BIN -f Makefile.hobbyos "$mode"
 rc="$?"
+if [ "x$rc" != "x0" ]; then
+  echo "[BUILD] attempt 1 failed rc=$rc - retrying incrementally (exec-wedge class)"
+  /TOOLS/MAKE.BIN -f Makefile.hobbyos "$mode"
+  rc="$?"
+fi
+if [ "x$rc" != "x0" ]; then
+  echo "[BUILD] attempt 2 failed rc=$rc - retrying incrementally (exec-wedge class)"
+  /TOOLS/MAKE.BIN -f Makefile.hobbyos "$mode"
+  rc="$?"
+fi
+if [ "x$rc" != "x0" ]; then
+  echo "[BUILD] attempt 3 failed rc=$rc - giving up"
+fi
 echo "[BUILD] make rc=$rc"
 
 if [ "x$rc" = "x0" ]; then

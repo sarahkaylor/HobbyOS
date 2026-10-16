@@ -1,0 +1,51 @@
+# inos-build-kernel receipts — 2026-10-15 (attempt 4 = the pass)
+
+Run: `SH.BIN /BUILD_KERNEL.SH all`  (RUN script: INOS-BK-FULL4.RUN)
+Driver: outcome=0, elapsed=1368.6 s (incremental resume: ~34 kernel TUs +
+link + objcopy + 128 MiB disk + install), `[SELFHOST] ACCEPTANCE-COMPLETE stages=1`.
+Serial: bk-full-attempt4-pass.serial.txt
+
+## Artifacts (extracted from disk.img after install)
+
+| path | size | sha256 |
+|---|---|---|
+| /SRC/hobbyos.bin (in-OS build) | 218356 | 00bad4a7b99c1b1f295e5cf58d03da1359e4ad75ae0f18c54d15f0b123908742 |
+| /boot/hobbyos.bin (installed) | 218356 | 00bad4a7…742 — cmp-verified identical to /SRC/hobbyos.bin |
+| /boot/hobbyos.old (prior kernel, selfhost-mode host build) | 218396 | 7dc47c2eb48a70bb36daa4b9e3c0d1563a04cc1bd04081ae3847057f73cebd71 |
+| /SRC/OUT.IMG (in-OS-assembled bootable image) | 134217728 | bc0268b02d6a6f2d867d3f0a81320ee850c5911fe5e0bd5d9a2263627214a98a |
+| /SRC/obj/arm/process.o (salvaged from the attempt-3 hang) | 208088 | (validated: 148 symbols, 72 text, incl. schedule/process_fault_exit) |
+
+## Host references
+
+| what | size | sha256 |
+|---|---|---|
+| host default-mode kernel flat bin (`make -j32 hobbyos.elf` + llvm-objcopy) | 218356 | 4a95adb713308bc4ea4d900aea7d9b78f228000715e56145fba054c57cad5314 |
+| host hello.bin == in-OS-built HELLO.BIN (byte-identical) | 37360 | 61b3be6ad97e0286d0466e8f2e3ac6a2a2b2db14cd7c49488f00e79e1cdcc363 |
+
+Determinism deltas (in-OS kernel vs host kernel, same size, ~87% of flat
+bytes differ): link order — Makefile.hobbyos KERNEL_OBJS lists the ASM
+objects (boot/fpu/setjmp) LAST, the host Makefile lists them FIRST — and
+host mode builds compile with `-DKERNEL_MODE_DESKTOP` (in-OS makefile does
+not add it).  Both explainable; neither affects bootability.
+
+## Boots
+
+- OUT.IMG standalone (w7_accept_boot): kernel marker ok 6.5 s;
+  `Mode: DESKTOP - Launching desktop...`; verdict boot_only_ok.
+  Serial: bk-outimg-boot.serial.txt
+- disk.img post-install reboot: kernel marker ok 6.5 s;
+  `Mode: DESKTOP - Launching desktop...` (limine default_entry 1 ->
+  /boot/hobbyos.bin = the in-OS-built kernel — the transition proof).
+  Serial: bk-disk-postinstall-boot.serial.txt
+- /boot/limine.conf on the disk = the canonical two-entry config
+  (entry 2 "previous kernel" -> /boot/hobbyos.old = recovery path).
+
+## Earlier attempts (wedge evidence)
+
+- attempt 1: bk-full-attempt1-fail.serial.txt — LOSTWAKE dispose of
+  in-OS clang pre-write; make `Error 97` (exec-rejection sentinel).
+- attempt 2: bk-full-attempt2-fail.serial.txt — same class.
+- attempt 3: bk-full-attempt3-hang.serial.txt — post-write silent
+  exit-hang (one vCPU pegged, no serial output for ~20 min); process.o
+  on disk was valid (salvaged) and used by attempt 4.
+- analysis: bk-wedge-report.md

@@ -1,0 +1,4 @@
+# inos-build-kernel attempt 2 (INCREMENTAL): resume after attempt 1's
+# LOSTWAKE-reclaim flake killed in-OS clang at process.o.  /SRC tree and
+# the first 21 kernel objects persist; no untar stage -> make skips them.
+s-full2-build|SH.BIN|/BUILD_KERNEL.SH all

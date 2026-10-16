@@ -1,0 +1,3 @@
+[full4] staged RUN -> ::/SRC/SELFHOST.RUN
+[full4] qemu pid 1319187 (gdb tcp:127.0.0.1:1234)
+[full4] outcome=0 elapsed=1368.6s; qemu stopped; serial=/home/sarah/.hermes/cache/scratch/inos-bk/full4.serial.log

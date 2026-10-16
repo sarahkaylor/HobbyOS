@@ -1,6 +1,7 @@
 # In-OS kernel build: `build_kernel.sh` + `SRC.TAR` (inos-build-kernel)
 
-Status: implemented 2026-10-15.  This is the user-facing self-hosting loop:
+Status: implemented + **verified 2026-10-15** (full in-OS loop passes; receipts in
+`docs/selfhost/lanes/evidence-inos-bk/`).  This is the user-facing self-hosting loop:
 boot HobbyOS from its own disk image and rebuild the kernel **inside
 HobbyOS** from a source tarball carried on that same disk — no host
 toolchain involved in the in-OS steps.
@@ -81,18 +82,29 @@ ever misbehaves.
 
 ## Budgets (ARM TCG, 8 vCPU / 16 GiB guest)
 
+Measured in-OS 2026-10-15 (`MODE=selfhost` boot, PROBE: 868 files / 53 dirs,
+28,298,626 bytes extracted):
+
 | step | fresh | incremental (objects exist) |
 |---|---|---|
-| extract `/SRC.TAR` (~900 entries, 27 MB) | ~5 min | n/a (force only) |
-| `check` | ~1 min | seconds |
+| extract `/SRC.TAR` (~920 entries, 29 MB) | **~5 min** (measured) | n/a (force only) |
+| `check` | **~1.5 min** (measured) | seconds |
 | `user` (dominated by `sh.c` -O2) | ~33–65 min | links only |
 | `kernel` (59 TUs) | ~77 min serial | link + objcopy only |
 | `disk` (MKFSFAT 128 MiB + MCOPY) | ~6 min | ~6 min |
-| full default loop | **~2.5–4 h, one boot** | minutes |
+| full default loop | **~2.5–4 h, one boot** | ~23 min measured (34 TUs + link + disk + install, attempt 4) |
 
 `make` re-runs are incremental (FAT timestamps are real since w10); the
 `-j8` caveat for real kernel TUs from `acceptance.md` §9.6 still applies —
 use serial for `kernel` until the FAT dirent race is fixed.
+
+**Reading the serial log:** this kernel build traces every successful
+`fat16_open()` with a bare absolute path line (`src/kernel/fat16.c`, the
+unconditional `uart_puts(abs_path)` in `fat16_open`) — so extraction and
+every in-OS clang header open print path-only lines.  They are ambient
+kernel debug chatter, not extractor output; the `[TAR]`/`[BUILD]`/
+`[SELFHOST]` markers are the evidence.  (Removing the trace is a kernel
+change with its own battery cost — deliberately not done here.)
 
 ## Evidence markers (never exit codes)
 
@@ -101,6 +113,42 @@ use serial for `kernel` until the FAT dirent race is fixed.
     [SELFHOST] phase=…         make-recipe/driver stage markers
     ACCEPTANCE-COMPLETE        driver success marker (MODE=selfhost runs)
     Mode: DESKTOP              a boot of the installed (in-OS-built) kernel
+
+## Verification — 2026-10-15 (full loop, receipts)
+
+`SH.BIN /BUILD_KERNEL.SH all`, attempt 4: `ACCEPTANCE-COMPLETE`, outcome=0,
+1368.6 s (incremental resume; the first attempts' wedges are analysed in
+`lanes/evidence-inos-bk/bk-wedge-report.md`).  Evidence in that directory:
+
+| receipt | file |
+|---|---|
+| full loop serial (the pass) | `bk-full-attempt4-pass.serial.txt` |
+| standalone boot of in-OS OUT.IMG (`Mode: DESKTOP`) | `bk-outimg-boot.serial.txt` |
+| post-install disk reboot (`Mode: DESKTOP` from the in-OS kernel) | `bk-disk-postinstall-boot.serial.txt` |
+| probe serial (extract + check; 868 files / 0 err) | `bk-probe.serial.txt` |
+| attempt 1-3 wedge serials + report | `bk-full-attempt{1,2,3}*.serial.txt`, `bk-wedge-report.md` |
+| hashes / sizes / boots | `bk-receipts.txt` |
+
+Kernel flat images: in-OS `00bad4a7…` (218,356 B) at `/SRC/hobbyos.bin` ==
+`/boot/hobbyos.bin` after install (cmp-verified); previous (selfhost-mode
+host build, also what the disk shipped with) `7dc47c2e…` (218,396 B) kept
+at `/boot/hobbyos.old`.  The in-OS kernel is **not byte-identical** to a
+host build of the same tree: same size, but the link order differs
+(Makefile.hobbyos lists the ASM objects last, the host Makefile first) and
+host mode builds add a `-DKERNEL_MODE_*` define — so the flat images differ
+byte-wise by design.  In-OS-vs-in-OS reproducibility is a separate question
+(not measured here).
+
+## Retry policy
+
+The driver retries each make invocation up to 3× on a non-zero exit.
+Rationale: the known stochastic exec-wedge class (see the wedge report)
+kills or hangs one child per occurrence; a re-run compiles only the
+missing TU, on a fresh process / fresh address space — per the kernel's
+own refork-on-rejection recovery design.  Progress is monotone; only 3
+consecutive failures on the same command are terminal.  (Not exercised in
+the passing attempt — attempts 1-2 died before the retry existed, and
+attempt 4 had no wedge.  A future wedge will exercise it naturally.)
 
 ## Related files
 

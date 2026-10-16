@@ -1,0 +1,4 @@
+# inos-build-kernel full loop: extract -> make all -> install, via the
+# default build_kernel.sh mode.
+s-ful-untar|SH.BIN|/BUILD_KERNEL.SH untar
+s-ful-build|SH.BIN|/BUILD_KERNEL.SH

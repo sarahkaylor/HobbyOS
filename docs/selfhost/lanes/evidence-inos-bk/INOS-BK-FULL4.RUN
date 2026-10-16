@@ -1,0 +1,6 @@
+# attempt 4 (INCREMENTAL): resume after attempt 3's post-write exit-hang.
+# process.o (valid, 72 text syms) is in place; process_test.o (truncated)
+# and both stale clang temps were deleted; the remaining kernel TUs compile,
+# then link -> objcopy -> disk -> install.  Booted with -gdb tcp:1234 so a
+# silent stall can be inspected live.
+s-full4-build|SH.BIN|/BUILD_KERNEL.SH all

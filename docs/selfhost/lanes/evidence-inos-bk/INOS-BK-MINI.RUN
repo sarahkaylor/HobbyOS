@@ -1,0 +1,4 @@
+# micro-repro: single-TU in-OS compile of the TU the last three full attempts
+# died at / spun on (process.c).  Run with the retry driver active; booted
+# with -gdb tcp:127.0.0.1:1234 so a silent spin can be inspected live.
+s-mini-po|SH.BIN|/BUILD_KERNEL.SH /SRC/obj/arm/process.o

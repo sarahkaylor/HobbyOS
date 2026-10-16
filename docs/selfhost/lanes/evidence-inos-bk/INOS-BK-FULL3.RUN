@@ -1,0 +1,5 @@
+# inos-build-kernel attempt 3 (INCREMENTAL, driver retry logic active):
+# s-full3-build | SH.BIN | /BUILD_KERNEL.SH all -- if the exec-wedge class
+# disposes a TU mid-compile, the driver re-runs make (<=3 attempts) and
+# pushes past it on a fresh address space (per the kernel's recovery design).
+s-full3-build|SH.BIN|/BUILD_KERNEL.SH all

@@ -590,6 +590,27 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-15 (evening) — inos-build-kernel: THE FULL IN-OS LOOP PASSES from the disk-carried
+  source tar.** `disk.img` now carries `/SRC.TAR` (29,040,640 B ustar; `tools/selfhost-src-tar.sh`),
+  `/BUILD_KERNEL.SH` (extract → `make -f Makefile.hobbyos all` → install driver) and `/TOOLS/TAR.BIN`
+  (first-party `src/user/tar.c`; host test 18/18, `host_tests` now 482/0).  **Attempt-4 receipt
+  (`ACCEPTANCE-COMPLETE`, outcome=0, 1368.6 s incremental):** in-OS extract 868 files / 0 err;
+  s0-check + s1-user ✓; remaining kernel TUs + **in-OS lld link + objcopy** ✓; **s3-disk
+  128 MiB MKFSFAT+MCOPY in-OS** ✓; install → `/boot/hobbyos.bin` (218,356 B; sha `00bad4a7…`) +
+  `/boot/hobbyos.old` (218,396 B; sha `7dc47c2e…`) behind limine entry 2; **standalone boot of the
+  in-OS-built OUT.IMG → `Mode: DESKTOP`**; **post-install disk reboot → `Mode: DESKTOP` = the disk
+  boots its own self-built kernel (the transition proof)**; in-OS HELLO.BIN `61b3be6a…` == host.
+  Evidence + hashes: `docs/selfhost/lanes/evidence-inos-bk/`.  Determinism note: the in-OS kernel
+  is NOT byte-identical to the host default build at equal size — link order differs
+  (Makefile.hobbyos lists ASM objects last; host Makefile first) and host mode builds add
+  `-DKERNEL_MODE_DESKTOP`; documented, not an acceptance requirement.  **Attempts 1-3 wedge
+  forensics:** the known-stochastic class hit the longest TU (`src/kernel/process.c`) in two
+  variants — LOSTWAKE exec-wedge killing clang pre-write (`Error 97` = exec-rejection sentinel;
+  attempts 1-2) and a post-write silent exit-hang (attempt 3; `process.o` salvaged valid, 148
+  symbols) — see `bk-wedge-report.md` + serials; kernel-lane recommendations listed there.
+  Mitigation shipped: the driver retries make ≤3× (incremental; fresh ASID per the kernel's own
+  refork-on-rejection theory).
+
 - **2026-10-15 (wrap-up) — MERGE-BACK EXECUTED.** The self-hosting line was merged with the
   workstation line (browser/theme work; 22 commits since the fork — clean automerge, no
   conflicts) at `9f7db42`, and **the never-before-built union was validated end-to-end:

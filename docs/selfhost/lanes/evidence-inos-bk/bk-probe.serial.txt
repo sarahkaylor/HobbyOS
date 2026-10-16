@@ -1,0 +1,1060 @@
+UEFI firmware (version 2025.11-3ubuntu7 built at 11:11:58 on Mar 31 2026)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+BdsDxe: starting Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+[001;001H[001;001H[001;001Hl[001;002Hi[001;003Hn[001;004Hu[001;005Hx[001;006H:[001;007H [001;008HL[001;009Ho[001;010Ha[001;011Hd[001;012Hi[001;013Hn[001;014Hg[001;015H [001;016Hk[001;017He[001;018Hr[001;019Hn[001;020He[001;021Hl[001;022H [001;023H`[001;024Hb[001;025Ho[001;026Ho[001;027Ht[001;028H([001;029H)[001;030H:[001;031H/[001;032Hb[001;033Ho[001;034Ho[001;035Ht[001;036H/[001;037Hh[001;038Ho[001;039Hb[001;040Hb[001;041Hy[001;042Ho[001;043Hs[001;044H.[001;045Hb[001;046Hi[001;047Hn[001;048H`[001;049H.[001;050H.[001;051H.[001;052H[001;001H[002;001HBooting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+[GPUDIAG] gpu wait > 8 ms: ack=3 used=4 (park off)
+[GPU] virtio-gpu mmio irq=78
+VirtIO GPU successfully initialized.
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1900544 total_mib=7424 reserved=0
+[KERNEL] Activating secondary cores via PSCI...
+[KERNEL] Core 1 power-on requested.
+[KERNEL] Core 2 power-on requested.
+[KERNEL] Core 3 power-on requested.
+[KERNEL] Core 4 power-on requested.
+[KERNEL] Core 5 power-on requested.
+start_scheduler called on CPU start_scheduler called on CPU start_scheduler called on CPU 162
+
+start_scheduler called on CPU start_scheduler called on CPU 4
+
+3start_scheduler called on CPU [KERNEL] Core 6 power-on requested.
+
+[KERNEL] Core 7 power-on requested.
+5
+start_scheduler called on CPU 7
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+virtio-net MAC: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP Discover sent
+DHCP initialization complete.
+
+--- Parallel Program Loading ---
+Mode: SELFHOST - Running in-OS acceptance build driver...
+Loading program for scheduler (v2 AS): SELFHOST.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=-1
+/SELFHOST.BIN
+v2 loader: image mapped (lazy), bytes=52656 pages=13 first=in elap=2ms
+v2 loader: PID=1 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+start_scheduler called on CPU 0
+[SELFHOST] DRIVER-UP script=/SRC/SELFHOST.RUN
+/SRC/OUT.LOG
+/SRC/SELFHOST.RUN
+[SELFHOST] phase=s-bk-untar-start
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=1
+Inside process_create: clearing memory at 0x0000000072000000
+Inside process_create: kmemset done.
+Loading program for scheduler (v2 AS): /TOOLS/SH.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=-1
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=1ms
+v2 loader: PID=3 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/BUILD_KERNEL.SH
+[BUILD] build-kernel start
+[BUILD] mode=untar
+[BUILD] extract /SRC.TAR into /SRC
+/TOOLS/TAR.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=-1
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x0000001000012720
+/TOOLS/TAR.BIN
+v2 loader: image mapped (lazy), bytes=144448 pages=36 first=in elap=1ms
+/SRC.TAR
+[TAR] /SRC.TAR -> /SRC
+/SRC/src/host/actual.ppm
+/SRC/src/host/antfarm_test.c
+/SRC/src/host/apps_suite_test.c
+/SRC/src/host/build_curl_host.sh
+/SRC/src/host/build_diffutils_cmp_ref.sh
+/SRC/src/host/build_mbedtls_host.sh
+/SRC/src/host/build_sqlite_host.sh
+/SRC/src/host/build_tu21_cksum_ref.sh
+/SRC/src/host/build_tu21_comm_ref.sh
+/SRC/src/host/build_tu21_cut_ref.sh
+/SRC/src/host/build_tu21_expand_ref.sh
+/SRC/src/host/build_tu21_fold_ref.sh
+/SRC/src/host/build_tu21_head_ref.sh
+/SRC/src/host/build_tu21_md5sum_ref.sh
+/SRC/src/host/build_tu21_nl_ref.sh
+/SRC/src/host/build_tu21_paste_ref.sh
+/SRC/src/host/build_tu21_tac_ref.sh
+/SRC/src/host/build_tu21_tail_ref.sh
+/SRC/src/host/build_tu21_tr_ref.sh
+/SRC/src/host/build_tu21_tsort_ref.sh
+/SRC/src/host/build_tu21_unexpand_ref.sh
+/SRC/src/host/build_tu21_wc_ref.sh
+/SRC/src/host/calc_test.c
+/SRC/src/host/cksum_parity.sh
+/SRC/src/host/clock_test.c
+/SRC/src/host/cmp_parity.sh
+/SRC/src/host/comm_parity.sh
+/SRC/src/host/compat.c
+/SRC/src/host/console_test.c
+/SRC/src/host/curl_smoke.c
+/SRC/src/host/cut_parity.sh
+/SRC/src/host/cxx_headers_test.cpp
+/SRC/src/host/cxxrt_test.cpp
+/SRC/src/host/desktop_damage_test.c
+/SRC/src/host/desktop_drag_test.c
+/SRC/src/host/desktop_input_test.c
+/SRC/src/host/desktop_menu_test.c
+/SRC/src/host/desktop_pixel_test.c
+/SRC/src/host/desktop_term_test.c
+/SRC/src/host/dialog_arrow_test.c
+/SRC/src/host/diff_test.c
+/SRC/src/host/editor_test.c
+/SRC/src/host/errno_test.c
+/SRC/src/host/expand_parity.sh
+/SRC/src/host/expected.ppm
+/SRC/src/host/files_test.c
+/SRC/src/host/find_test.c
+/SRC/src/host/fold_parity.sh
+/SRC/src/host/glibc_regex_layout.c
+/SRC/src/host/graphics_lib_test.c
+/SRC/src/host/gui_test.c
+/SRC/src/host/hb_assert.c
+/SRC/src/host/head_parity.sh
+/SRC/src/host/hex_test.c
+/SRC/src/host/ipc_proto_test.c
+/SRC/src/host/libc_ctype_test.c
+/SRC/src/host/libc_getopt_test.c
+/SRC/src/host/libc_headers_test.c
+/SRC/src/host/libc_langinfo_test.c
+/SRC/src/host/libc_num_parity_test.c
+/SRC/src/host/libc_printf_test.c
+/SRC/src/host/libc_realloc_test.c
+/SRC/src/host/libc_regex_test.c
+/SRC/src/host/libc_scanf_wprintf_test.c
+/SRC/src/host/libc_setjmp_test.c
+/SRC/src/host/libc_stdlib_test.c
+/SRC/src/host/libc_string_test.c
+/SRC/src/host/libc_wide_parity_test.c
+/SRC/src/host/math_transcend_test.c
+/SRC/src/host/mbedtls_smoke.c
+/SRC/src/host/md5sum_parity.sh
+/SRC/src/host/nano_term_test.c
+/SRC/src/host/nfs_fixtures.h
+/SRC/src/host/nfs_proto_test.c
+/SRC/src/host/nl_parity.sh
+/SRC/src/host/notes_test.c
+/SRC/src/host/paste_parity.sh
+/SRC/src/host/pong_test.c
+/SRC/src/host/resolv_test.c
+/SRC/src/host/rtti_test.cpp
+/SRC/src/host/rtti_test_support.cpp
+/SRC/src/host/sqlite_smoke.c
+/SRC/src/host/sysmon_test.c
+/SRC/src/host/tac_parity.sh
+/SRC/src/host/tail_parity.sh
+/SRC/src/host/tar_test.c
+/SRC/src/host/tasks_test.c
+/SRC/src/host/time_math_test.c
+/SRC/src/host/tr_parity.sh
+/SRC/src/host/tsort_parity.sh
+/SRC/src/host/unexpand_parity.sh
+/SRC/src/host/unit_test.c
+/SRC/src/host/wc_parity.sh
+/SRC/src/host/window_damage_test.c
+/SRC/src/host/window_text_test.c
+/SRC/src/host/x11_lib_test.c
+/SRC/src/host/xcalc_test.c
+/SRC/src/host/xeyes_test.c
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/arch/mmu.h
+[TAR] ... 100 files, 6069195 bytes
+/SRC/src/include/arch/smp.h
+/SRC/src/include/arch/timer.h
+/SRC/src/include/arch/trap.h
+/SRC/src/include/dhcp.h
+/SRC/src/include/display_mode.h
+/SRC/src/include/errno.h
+/SRC/src/include/fat16.h
+/SRC/src/include/frame.h
+/SRC/src/include/fs.h
+/SRC/src/include/gic.h
+/SRC/src/include/iommu_vtd.h
+/SRC/src/include/ipc_proto.h
+/SRC/src/include/lock.h
+/SRC/src/include/mmu.h
+/SRC/src/include/net.h
+/SRC/src/include/net_rdma.h
+/SRC/src/include/nfs.h
+/SRC/src/include/pipe.h
+/SRC/src/include/process.h
+/SRC/src/include/program_loader.h
+/SRC/src/include/setjmp.h
+/SRC/src/include/syscall.h
+/SRC/src/include/timer.h
+/SRC/src/include/trap.h
+/SRC/src/include/unix.h
+/SRC/src/include/vfs.h
+/SRC/src/include/virtio_blk.h
+/SRC/src/include/virtio_gpu.h
+/SRC/src/include/virtio_input.h
+/SRC/src/include/virtio_net.h
+/SRC/src/include/vm.h
+/SRC/src/kernel/arch/arm/boot.s
+/SRC/src/kernel/arch/arm/cpu.c
+/SRC/src/kernel/arch/arm/fpu.s
+/SRC/src/kernel/arch/arm/gic.c
+/SRC/src/kernel/arch/arm/locks.c
+/SRC/src/kernel/arch/arm/mmu.c
+/SRC/src/kernel/arch/arm/rtc.c
+/SRC/src/kernel/arch/arm/setjmp.s
+/SRC/src/kernel/arch/arm/smp.c
+/SRC/src/kernel/arch/arm/timer.c
+/SRC/src/kernel/arch/arm/trap.c
+/SRC/src/kernel/arch/arm/uart.c
+/SRC/src/kernel/arch/x64/boot.s
+/SRC/src/kernel/arch/x64/cpu.c
+/SRC/src/kernel/arch/x64/fpu.c
+/SRC/src/kernel/arch/x64/gic.c
+/SRC/src/kernel/arch/x64/locks.c
+/SRC/src/kernel/arch/x64/mmu.c
+/SRC/src/kernel/arch/x64/rtc.c
+/SRC/src/kernel/arch/x64/setjmp.s
+/SRC/src/kernel/arch/x64/smp.c
+/SRC/src/kernel/arch/x64/timer.c
+/SRC/src/kernel/arch/x64/trap.c
+/SRC/src/kernel/arch/x64/uart.c
+/SRC/src/kernel/dhcp.c
+/SRC/src/kernel/fat16.c
+/SRC/src/kernel/fat16_test.c
+/SRC/src/kernel/frame.c
+/SRC/src/kernel/frame_test.c
+/SRC/src/kernel/fs.c
+/SRC/src/kernel/fs_test.c
+/SRC/src/kernel/iommu_vtd.c
+/SRC/src/kernel/ipc_proto.c
+/SRC/src/kernel/locks_test.c
+/SRC/src/kernel/main.c
+/SRC/src/kernel/math_test.c
+/SRC/src/kernel/mmu_test.c
+/SRC/src/kernel/net.c
+/SRC/src/kernel/net_rdma.c
+/SRC/src/kernel/net_rdma_test.c
+/SRC/src/kernel/net_test.c
+/SRC/src/kernel/nfs.c
+/SRC/src/kernel/nfs_proto.c
+/SRC/src/kernel/nfs_test.c
+/SRC/src/kernel/pipe.c
+/SRC/src/kernel/pipe_test.c
+/SRC/src/kernel/process.c
+/SRC/src/kernel/process_test.c
+/SRC/src/kernel/program_loader.c
+/SRC/src/kernel/program_loader_test.c
+/SRC/src/kernel/test_fw_cfg.c
+/SRC/src/kernel/test_qemu.sh
+/SRC/src/kernel/test_smp.c
+/SRC/src/kernel/time.c
+/SRC/src/kernel/time_test.c
+/SRC/src/kernel/timer_test.c
+/SRC/src/kernel/trap_test.c
+/SRC/src/kernel/unit_test.c
+/SRC/src/kernel/unit_test.h
+/SRC/src/kernel/unix.c
+/SRC/src/kernel/unix_test.c
+/SRC/src/kernel/vfs.c
+/SRC/src/kernel/virtio_blk.c
+/SRC/src/kernel/virtio_blk_test.c
+/SRC/src/kernel/virtio_gpu.c
+/SRC/src/kernel/virtio_gpu_test.c
+/SRC/src/kernel/virtio_gpu_x64.c
+/SRC/src/kernel/virtio_input.c
+/SRC/src/kernel/virtio_input_test.c
+[TAR] ... 200 files, 7460034 bytes
+/SRC/src/kernel/virtio_net.c
+/SRC/src/kernel/virtio_net_test.c
+/SRC/src/kernel/vm.c
+/SRC/src/kernel/vm_test.c
+/SRC/src/libc/crt0.c
+/SRC/src/libc/include/alloca.h
+/SRC/src/libc/include/assert.h
+/SRC/src/libc/include/ctype.h
+/SRC/src/libc/include/cxxrt.h
+/SRC/src/libc/include/dirent.h
+/SRC/src/libc/include/dlfcn.h
+/SRC/src/libc/include/error.h
+/SRC/src/libc/include/fcntl.h
+/SRC/src/libc/include/getopt.h
+/SRC/src/libc/include/grp.h
+/SRC/src/libc/include/intprops.h
+/SRC/src/libc/include/inttypes.h
+/SRC/src/libc/include/langinfo.h
+/SRC/src/libc/include/libgen.h
+/SRC/src/libc/include/limits.h
+/SRC/src/libc/include/locale.h
+/SRC/src/libc/include/math.h
+/SRC/src/libc/include/poll.h
+/SRC/src/libc/include/pthread.h
+/SRC/src/libc/include/pwd.h
+/SRC/src/libc/include/regex.h
+/SRC/src/libc/include/sched.h
+/SRC/src/libc/include/selinux/context.h
+/SRC/src/libc/include/selinux/selinux.h
+/SRC/src/libc/include/setjmp.h
+/SRC/src/libc/include/signal.h
+/SRC/src/libc/include/stdarg.h
+/SRC/src/libc/include/stdbool.h
+/SRC/src/libc/include/stdint.h
+/SRC/src/libc/include/stdio.h
+/SRC/src/libc/include/stdlib.h
+/SRC/src/libc/include/string.h
+/SRC/src/libc/include/strings.h
+/SRC/src/libc/include/sys/ioctl.h
+/SRC/src/libc/include/sys/mman.h
+/SRC/src/libc/include/sys/param.h
+/SRC/src/libc/include/sys/random.h
+/SRC/src/libc/include/sys/resource.h
+/SRC/src/libc/include/sys/select.h
+/SRC/src/libc/include/sys/socket.h
+/SRC/src/libc/include/sys/stat.h
+/SRC/src/libc/include/sys/statvfs.h
+/SRC/src/libc/include/sys/time.h
+/SRC/src/libc/include/sys/types.h
+/SRC/src/libc/include/sys/uio.h
+/SRC/src/libc/include/sys/un.h
+/SRC/src/libc/include/sys/wait.h
+/SRC/src/libc/include/time.h
+/SRC/src/libc/include/uchar.h
+/SRC/src/libc/include/unistd.h
+/SRC/src/libc/include/utime.h
+/SRC/src/libc/include/verify.h
+/SRC/src/libc/include/wchar.h
+/SRC/src/libc/include/wctype.h
+/SRC/src/libc/src/ctype.c
+/SRC/src/libc/src/cxxrt.cpp
+/SRC/src/libc/src/dirent.c
+/SRC/src/libc/src/dlfcn.c
+/SRC/src/libc/src/error.c
+/SRC/src/libc/src/file.c
+/SRC/src/libc/src/getopt.c
+/SRC/src/libc/src/gnu_compat.h
+/SRC/src/libc/src/ioctl.c
+/SRC/src/libc/src/langinfo.c
+/SRC/src/libc/src/libgen.c
+/SRC/src/libc/src/locale.c
+/SRC/src/libc/src/math.c
+/SRC/src/libc/src/math_dispatch.h
+/SRC/src/libc/src/mman.c
+/SRC/src/libc/src/pthread.c
+/SRC/src/libc/src/pwd.c
+/SRC/src/libc/src/realpath.c
+/SRC/src/libc/src/regcomp.c
+/SRC/src/libc/src/regex.c
+/SRC/src/libc/src/regex_internal.c
+/SRC/src/libc/src/regex_internal.h
+/SRC/src/libc/src/regexec.c
+/SRC/src/libc/src/resource.c
+/SRC/src/libc/src/selinux.c
+/SRC/src/libc/src/setjmp.c
+/SRC/src/libc/src/signal.c
+/SRC/src/libc/src/stat.c
+/SRC/src/libc/src/statvfs.c
+/SRC/src/libc/src/stdio.c
+/SRC/src/libc/src/stdlib.c
+/SRC/src/libc/src/strftime.c
+/SRC/src/libc/src/string.c
+/SRC/src/libc/src/strtod.c
+/SRC/src/libc/src/syscall.c
+/SRC/src/libc/src/time.c
+/SRC/src/libc/src/time_math.c
+/SRC/src/libc/src/wchar.c
+/SRC/src/libc/src/wctype.c
+/SRC/src/libc/src/xlocale.c
+/SRC/src/tools/net_pcie/net_pci_client.c
+[TAR] ... 300 files, 8508592 bytes
+/SRC/src/user/actual_pong.png
+/SRC/src/user/actual_pong.ppm
+/SRC/src/user/actual_qemu.ppm
+/SRC/src/user/apps_test.c
+/SRC/src/user/argvprobe.c
+/SRC/src/user/basename.c
+/SRC/src/user/browser/fonts/README.md
+/SRC/src/user/browser/fonts/ft_memface_smoke.c
+/SRC/src/user/browser/fonts/hb_shape_smoke.c
+/SRC/src/user/browser/fonts/host_build_fonts.sh
+/SRC/src/user/browser/webkit/toolchain-hobbyos.cmake
+/SRC/src/user/browser/webkit/toolchain-sysroot.md
+/SRC/src/user/calc.c
+/SRC/src/user/cat.c
+/SRC/src/user/cksum_gnu.c
+/SRC/src/user/cksum_test.c
+/SRC/src/user/clock.c
+/SRC/src/user/cmp_gnu.c
+/SRC/src/user/cmp_test.c
+/SRC/src/user/comm_gnu.c
+/SRC/src/user/comm_test.c
+/SRC/src/user/console.c
+/SRC/src/user/cp.c
+/SRC/src/user/cut_gnu.c
+/SRC/src/user/cut_test.c
+/SRC/src/user/cxx_rtti_t.cpp
+/SRC/src/user/cxx_smoke.cpp
+/SRC/src/user/cxx_t.cpp
+/SRC/src/user/dentest.c
+/SRC/src/user/desktop.c
+/SRC/src/user/dialog.c
+/SRC/src/user/dialog_test.c
+/SRC/src/user/diff.c
+/SRC/src/user/dirname.c
+/SRC/src/user/dns_test.c
+/SRC/src/user/editor.c
+/SRC/src/user/editor_test.c
+/SRC/src/user/errno_test.c
+/SRC/src/user/expand_gnu.c
+/SRC/src/user/expand_test.c
+/SRC/src/user/expected_qemu.ppm
+/SRC/src/user/expr.c
+/SRC/src/user/fatbig_test.c
+/SRC/src/user/file_io_test.c
+/SRC/src/user/filedialog.c
+/SRC/src/user/filedialog_arrow_test.c
+/SRC/src/user/files.c
+/SRC/src/user/find.c
+/SRC/src/user/fold_gnu.c
+/SRC/src/user/fold_test.c
+/SRC/src/user/fork_test.c
+/SRC/src/user/fpu_test.c
+/SRC/src/user/free.c
+/SRC/src/user/gfxbench.c
+/SRC/src/user/graphics/graphics.c
+/SRC/src/user/graphics/window.c
+/SRC/src/user/graphics/wsurf.c
+/SRC/src/user/graphics_test.c
+/SRC/src/user/grep/config.h
+/SRC/src/user/grep/dfa.c
+/SRC/src/user/grep/dfa.h
+/SRC/src/user/grep/getpagesize.h
+/SRC/src/user/grep/gnulib/alloca.c
+/SRC/src/user/grep/gnulib/atexit.c
+/SRC/src/user/grep/gnulib/closeout.c
+/SRC/src/user/grep/gnulib/closeout.h
+/SRC/src/user/grep/gnulib/error.c
+/SRC/src/user/grep/gnulib/error.h
+/SRC/src/user/grep/gnulib/exclude.c
+/SRC/src/user/grep/gnulib/exclude.h
+/SRC/src/user/grep/gnulib/fnmatch.c
+/SRC/src/user/grep/gnulib/fnmatch.h
+/SRC/src/user/grep/gnulib/hard-locale.c
+/SRC/src/user/grep/gnulib/hard-locale.h
+/SRC/src/user/grep/gnulib/isdir.c
+/SRC/src/user/grep/gnulib/memchr.c
+/SRC/src/user/grep/gnulib/obstack.c
+/SRC/src/user/grep/gnulib/obstack.h
+/SRC/src/user/grep/gnulib/posix/Makefile
+/SRC/src/user/grep/gnulib/posix/Makefile.am
+/SRC/src/user/grep/gnulib/posix/Makefile.in
+/SRC/src/user/grep/gnulib/posix/regex.h
+/SRC/src/user/grep/gnulib/quotearg.c
+/SRC/src/user/grep/gnulib/quotearg.h
+/SRC/src/user/grep/gnulib/regex.c
+/SRC/src/user/grep/gnulib/regex.h
+/SRC/src/user/grep/gnulib/savedir.c
+/SRC/src/user/grep/gnulib/savedir.h
+/SRC/src/user/grep/gnulib/stpcpy.c
+/SRC/src/user/grep/gnulib/strtol.c
+/SRC/src/user/grep/gnulib/strtoul.c
+/SRC/src/user/grep/gnulib/strtoull.c
+/SRC/src/user/grep/gnulib/strtoumax.c
+/SRC/src/user/grep/gnulib/xalloc.h
+/SRC/src/user/grep/gnulib/xmalloc.c
+/SRC/src/user/grep/gnulib/xstrtol.c
+/SRC/src/user/grep/gnulib/xstrtol.h
+/SRC/src/user/grep/gnulib/xstrtoumax.c
+/SRC/src/user/grep/grep.c
+/SRC/src/user/grep/grep.h
+[TAR] ... 400 files, 20722870 bytes
+/SRC/src/user/grep/kwset.c
+/SRC/src/user/grep/kwset.h
+/SRC/src/user/grep/mbsupport.h
+/SRC/src/user/grep/search.c
+/SRC/src/user/grep/system.h
+/SRC/src/user/grep.c
+/SRC/src/user/grep_test.c
+/SRC/src/user/grep_test_cases.h
+/SRC/src/user/gui.c
+/SRC/src/user/head.c
+/SRC/src/user/head_gnu.c
+/SRC/src/user/head_test.c
+/SRC/src/user/heap_test.c
+/SRC/src/user/hello.c
+/SRC/src/user/hex.c
+/SRC/src/user/icu_smoke.c
+/SRC/src/user/ifconfig.c
+/SRC/src/user/ipc_test.c
+/SRC/src/user/kill.c
+/SRC/src/user/less.c
+/SRC/src/user/lfn_test.c
+/SRC/src/user/libc.c
+/SRC/src/user/linker.ld
+/SRC/src/user/linker_v2.ld
+/SRC/src/user/ls.c
+/SRC/src/user/lseek_test.c
+/SRC/src/user/make/README.md
+/SRC/src/user/make/ar.c
+/SRC/src/user/make/ar.h
+/SRC/src/user/make/arscan.c
+/SRC/src/user/make/commands.c
+/SRC/src/user/make/commands.h
+/SRC/src/user/make/config.h
+/SRC/src/user/make/debug.h
+/SRC/src/user/make/default.c
+/SRC/src/user/make/dep.h
+/SRC/src/user/make/dir.c
+/SRC/src/user/make/expand.c
+/SRC/src/user/make/file.c
+/SRC/src/user/make/filedef.h
+/SRC/src/user/make/fnmatch.c
+/SRC/src/user/make/fnmatch.h
+/SRC/src/user/make/function.c
+/SRC/src/user/make/getopt.c
+/SRC/src/user/make/getopt.h
+/SRC/src/user/make/getopt1.c
+/SRC/src/user/make/gettext.h
+/SRC/src/user/make/glob.c
+/SRC/src/user/make/glob.h
+/SRC/src/user/make/gnumake.h
+/SRC/src/user/make/guile.c
+/SRC/src/user/make/hash.c
+/SRC/src/user/make/hash.h
+/SRC/src/user/make/hb_stubs.c
+/SRC/src/user/make/hb_stubs.h
+/SRC/src/user/make/implicit.c
+/SRC/src/user/make/intprops-internal.h
+/SRC/src/user/make/intprops.h
+/SRC/src/user/make/job.c
+/SRC/src/user/make/job.h
+/SRC/src/user/make/load.c
+/SRC/src/user/make/loadapi.c
+/SRC/src/user/make/main.c
+/SRC/src/user/make/makeint.h
+/SRC/src/user/make/misc.c
+/SRC/src/user/make/mkcustom.h
+/SRC/src/user/make/os.h
+/SRC/src/user/make/output.c
+/SRC/src/user/make/output.h
+/SRC/src/user/make/posixos.c
+/SRC/src/user/make/read.c
+/SRC/src/user/make/remake.c
+/SRC/src/user/make/remote-stub.c
+/SRC/src/user/make/rule.c
+/SRC/src/user/make/rule.h
+/SRC/src/user/make/shuffle.c
+/SRC/src/user/make/shuffle.h
+/SRC/src/user/make/signame.c
+/SRC/src/user/make/strcache.c
+/SRC/src/user/make/variable.c
+/SRC/src/user/make/variable.h
+/SRC/src/user/make/version.c
+/SRC/src/user/make/vpath.c
+/SRC/src/user/malloc.c
+/SRC/src/user/malloc_test.c
+/SRC/src/user/math_test.c
+/SRC/src/user/md5sum_gnu.c
+/SRC/src/user/md5sum_test.c
+/SRC/src/user/mem_test.c
+/SRC/src/user/millipede.c
+/SRC/src/user/mkdir.c
+/SRC/src/user/mkfs/README.md
+/SRC/src/user/mkfs/blkdev.h
+/SRC/src/user/mkfs/charconv.c
+/SRC/src/user/mkfs/charconv.h
+/SRC/src/user/mkfs/common.c
+/SRC/src/user/mkfs/common.h
+/SRC/src/user/mkfs/config.h
+/SRC/src/user/mkfs/device_info.c
+/SRC/src/user/mkfs/device_info.h
+[TAR] ... 500 files, 22220881 bytes
+/SRC/src/user/mkfs/endian_compat.h
+/SRC/src/user/mkfs/hb_blkdev.c
+/SRC/src/user/mkfs/hb_termios.h
+/SRC/src/user/mkfs/mkfs.fat.c
+/SRC/src/user/mkfs/msdos_fs.h
+/SRC/src/user/mkfs/version.h
+/SRC/src/user/mmtest.c
+/SRC/src/user/monitor.c
+/SRC/src/user/monitor_test.c
+/SRC/src/user/mtools/README.md
+/SRC/src/user/mtools/buffer.c
+/SRC/src/user/mtools/buffer.h
+/SRC/src/user/mtools/byte_dword.h
+/SRC/src/user/mtools/charsetConv.c
+/SRC/src/user/mtools/codepage.h
+/SRC/src/user/mtools/codepages.c
+/SRC/src/user/mtools/config.c
+/SRC/src/user/mtools/config.h
+/SRC/src/user/mtools/copyfile.c
+/SRC/src/user/mtools/device.c
+/SRC/src/user/mtools/device.h
+/SRC/src/user/mtools/devices.c
+/SRC/src/user/mtools/devices.h
+/SRC/src/user/mtools/dirCache.c
+/SRC/src/user/mtools/dirCache.h
+/SRC/src/user/mtools/dirCacheP.h
+/SRC/src/user/mtools/directory.c
+/SRC/src/user/mtools/direntry.c
+/SRC/src/user/mtools/dos2unix.c
+/SRC/src/user/mtools/fat.c
+/SRC/src/user/mtools/fat_device.h
+/SRC/src/user/mtools/fat_free.c
+/SRC/src/user/mtools/file.c
+/SRC/src/user/mtools/file.h
+/SRC/src/user/mtools/file_name.c
+/SRC/src/user/mtools/file_name.h
+/SRC/src/user/mtools/floppyd_io.h
+/SRC/src/user/mtools/force_io.c
+/SRC/src/user/mtools/fs.h
+/SRC/src/user/mtools/fsP.h
+/SRC/src/user/mtools/hash.c
+/SRC/src/user/mtools/htable.h
+/SRC/src/user/mtools/init.c
+/SRC/src/user/mtools/lba.c
+/SRC/src/user/mtools/lba.h
+/SRC/src/user/mtools/llong.c
+/SRC/src/user/mtools/llong.h
+/SRC/src/user/mtools/lockdev.c
+/SRC/src/user/mtools/lockdev.h
+/SRC/src/user/mtools/mainloop.c
+/SRC/src/user/mtools/mainloop.h
+/SRC/src/user/mtools/match.c
+/SRC/src/user/mtools/mcopy.c
+/SRC/src/user/mtools/mdel.c
+/SRC/src/user/mtools/misc.c
+/SRC/src/user/mtools/missFuncs.c
+/SRC/src/user/mtools/mk_direntry.c
+/SRC/src/user/mtools/mmd.c
+/SRC/src/user/mtools/msdos.h
+/SRC/src/user/mtools/mtools.h
+/SRC/src/user/mtools/mtoolsDirentry.h
+/SRC/src/user/mtools/mtoolsPaths.h
+/SRC/src/user/mtools/mtools_port.c
+/SRC/src/user/mtools/nameclash.h
+/SRC/src/user/mtools/offset.c
+/SRC/src/user/mtools/offset.h
+/SRC/src/user/mtools/old_dos.c
+/SRC/src/user/mtools/old_dos.h
+/SRC/src/user/mtools/open_image.c
+/SRC/src/user/mtools/open_image.h
+/SRC/src/user/mtools/partition.c
+/SRC/src/user/mtools/partition.h
+/SRC/src/user/mtools/patchlevel.c
+/SRC/src/user/mtools/plain_io.c
+/SRC/src/user/mtools/plain_io.h
+/SRC/src/user/mtools/privileges.c
+/SRC/src/user/mtools/read_dword.h
+/SRC/src/user/mtools/remap.c
+/SRC/src/user/mtools/remap.h
+/SRC/src/user/mtools/scsi_io.h
+/SRC/src/user/mtools/signal.c
+/SRC/src/user/mtools/stream.c
+/SRC/src/user/mtools/stream.h
+/SRC/src/user/mtools/streamcache.c
+/SRC/src/user/mtools/strtonum.c
+/SRC/src/user/mtools/swap.c
+/SRC/src/user/mtools/swap.h
+/SRC/src/user/mtools/sysincludes.h
+/SRC/src/user/mtools/tty.c
+/SRC/src/user/mtools/unix2dos.c
+/SRC/src/user/mtools/unixdir.c
+/SRC/src/user/mtools/vfat.c
+/SRC/src/user/mtools/vfat.h
+/SRC/src/user/mtools/xdf_io.h
+/SRC/src/user/mv.c
+/SRC/src/user/nano/browser.c
+/SRC/src/user/nano/chars.c
+/SRC/src/user/nano/color.c
+/SRC/src/user/nano/config.h
+/SRC/src/user/nano/curses.h
+[TAR] ... 600 files, 22842986 bytes
+/SRC/src/user/nano/cut.c
+/SRC/src/user/nano/definitions.h
+/SRC/src/user/nano/files.c
+/SRC/src/user/nano/global.c
+/SRC/src/user/nano/hb_curses.c
+/SRC/src/user/nano/help.c
+/SRC/src/user/nano/history.c
+/SRC/src/user/nano/move.c
+/SRC/src/user/nano/nano.c
+/SRC/src/user/nano/prompt.c
+/SRC/src/user/nano/prototypes.h
+/SRC/src/user/nano/rcfile.c
+/SRC/src/user/nano/revision.h
+/SRC/src/user/nano/search.c
+/SRC/src/user/nano/term.h
+/SRC/src/user/nano/text.c
+/SRC/src/user/nano/utils.c
+/SRC/src/user/nano/winio.c
+/SRC/src/user/nc.c
+/SRC/src/user/net_test.c
+/SRC/src/user/net_timeout_test.c
+/SRC/src/user/netfix_test.c
+/SRC/src/user/nfs_test.c
+/SRC/src/user/nl_gnu.c
+/SRC/src/user/nl_test.c
+/SRC/src/user/notes.c
+/SRC/src/user/paste_gnu.c
+/SRC/src/user/paste_test.c
+/SRC/src/user/ping.c
+/SRC/src/user/pipe_test.c
+/SRC/src/user/pipeprobe.c
+/SRC/src/user/poll_test.c
+/SRC/src/user/pong.c
+/SRC/src/user/pong_test.c
+/SRC/src/user/proc_child.c
+/SRC/src/user/proc_test.c
+/SRC/src/user/ps.c
+/SRC/src/user/rand_test.c
+/SRC/src/user/regex_test.c
+/SRC/src/user/regex_test_cases.h
+/SRC/src/user/resolv.c
+/SRC/src/user/rm.c
+/SRC/src/user/sed/basicdefs.h
+/SRC/src/user/sed/compile.c
+/SRC/src/user/sed/config.h
+/SRC/src/user/sed/debug.c
+/SRC/src/user/sed/execute.c
+/SRC/src/user/sed/fwriting.h
+/SRC/src/user/sed/gnulib/acl-errno-valid.c
+/SRC/src/user/sed/gnulib/acl-internal.c
+/SRC/src/user/sed/gnulib/acl-internal.h
+/SRC/src/user/sed/gnulib/acl.h
+/SRC/src/user/sed/gnulib/acl_entries.c
+/SRC/src/user/sed/gnulib/basename-lgpl.c
+/SRC/src/user/sed/gnulib/binary-io.h
+/SRC/src/user/sed/gnulib/c-ctype.c
+/SRC/src/user/sed/gnulib/c-ctype.h
+/SRC/src/user/sed/gnulib/c-strcase.h
+/SRC/src/user/sed/gnulib/c-strcasecmp.c
+/SRC/src/user/sed/gnulib/c-strcaseeq.h
+/SRC/src/user/sed/gnulib/c-strncasecmp.c
+/SRC/src/user/sed/gnulib/close-stream.c
+/SRC/src/user/sed/gnulib/close-stream.h
+/SRC/src/user/sed/gnulib/closeout.c
+/SRC/src/user/sed/gnulib/closeout.h
+/SRC/src/user/sed/gnulib/copy-acl.c
+/SRC/src/user/sed/gnulib/dfa.c
+/SRC/src/user/sed/gnulib/dfa.h
+/SRC/src/user/sed/gnulib/dirname-lgpl.c
+/SRC/src/user/sed/gnulib/dirname.h
+/SRC/src/user/sed/gnulib/dosname.h
+/SRC/src/user/sed/gnulib/exitfail.c
+/SRC/src/user/sed/gnulib/exitfail.h
+/SRC/src/user/sed/gnulib/flexmember.h
+/SRC/src/user/sed/gnulib/fpending.h
+/SRC/src/user/sed/gnulib/get-permissions.c
+/SRC/src/user/sed/gnulib/getprogname.h
+/SRC/src/user/sed/gnulib/gettext.h
+/SRC/src/user/sed/gnulib/ignore-value.h
+/SRC/src/user/sed/gnulib/libc-config.h
+/SRC/src/user/sed/gnulib/localcharset.c
+/SRC/src/user/sed/gnulib/localcharset.h
+/SRC/src/user/sed/gnulib/localeinfo.c
+/SRC/src/user/sed/gnulib/localeinfo.h
+/SRC/src/user/sed/gnulib/minmax.h
+/SRC/src/user/sed/gnulib/obstack.c
+/SRC/src/user/sed/gnulib/obstack.h
+/SRC/src/user/sed/gnulib/progname.c
+/SRC/src/user/sed/gnulib/progname.h
+/SRC/src/user/sed/gnulib/qcopy-acl.c
+/SRC/src/user/sed/gnulib/qset-acl.c
+/SRC/src/user/sed/gnulib/quote.h
+/SRC/src/user/sed/gnulib/quotearg.c
+/SRC/src/user/sed/gnulib/quotearg.h
+/SRC/src/user/sed/gnulib/set-acl.c
+/SRC/src/user/sed/gnulib/set-permissions.c
+/SRC/src/user/sed/gnulib/stat-macros.h
+/SRC/src/user/sed/gnulib/strverscmp.c
+/SRC/src/user/sed/gnulib/unlocked-io.h
+/SRC/src/user/sed/gnulib/version-etc-fsf.c
+[TAR] ... 700 files, 24352602 bytes
+/SRC/src/user/sed/gnulib/version-etc.c
+/SRC/src/user/sed/gnulib/version-etc.h
+/SRC/src/user/sed/gnulib/xalloc-die.c
+/SRC/src/user/sed/gnulib/xalloc-oversized.h
+/SRC/src/user/sed/gnulib/xalloc.h
+/SRC/src/user/sed/gnulib/xmalloc.c
+/SRC/src/user/sed/mbcs.c
+/SRC/src/user/sed/regexp.c
+/SRC/src/user/sed/sed.c
+/SRC/src/user/sed/sed.h
+/SRC/src/user/sed/utils.c
+/SRC/src/user/sed/utils.h
+/SRC/src/user/sed/version.h
+/SRC/src/user/sed_test.c
+/SRC/src/user/sed_test_cases.h
+/SRC/src/user/sedprobe.c
+/SRC/src/user/selfhost/SELFHOST.RUN
+/SRC/src/user/selfhost/SELFHOST.SH
+/SRC/src/user/selfhost/build_kernel.sh
+/SRC/src/user/selfhost/selfhost.c
+/SRC/src/user/seq.c
+/SRC/src/user/sh.c
+/SRC/src/user/sh_aux.c
+/SRC/src/user/shell_test.c
+/SRC/src/user/shell_test2.c
+/SRC/src/user/shell_test3.c
+/SRC/src/user/shprobe.c
+/SRC/src/user/sig_test.c
+/SRC/src/user/smp_test.c
+/SRC/src/user/sock2_test.c
+/SRC/src/user/sort.c
+/SRC/src/user/spawn_test.c
+/SRC/src/user/spawnex_child.c
+/SRC/src/user/sqlite_os.c
+/SRC/src/user/sqlite_test.c
+/SRC/src/user/stress_test.c
+/SRC/src/user/subprobe.c
+/SRC/src/user/sysmon.c
+/SRC/src/user/tac_gnu.c
+/SRC/src/user/tac_test.c
+/SRC/src/user/tail.c
+/SRC/src/user/tail_gnu.c
+/SRC/src/user/tail_test.c
+/SRC/src/user/tar.c
+/SRC/src/user/tasks.c
+/SRC/src/user/testgnu.c
+/SRC/src/user/thrd_test.c
+/SRC/src/user/tls_test.c
+/SRC/src/user/toolchain/cmake/modules/Platform/HobbyOS.cmake
+/SRC/src/user/toolchain/cmake/toolchain-llvm-hobbyos.cmake
+/SRC/src/user/toolchain/sysroot-headers/_missing.h
+/SRC/src/user/toolchain/sysroot-headers/cxxrt_shim.cpp
+/SRC/src/user/toolchain/sysroot-headers/fstream_inst.cpp
+/SRC/src/user/toolchain/sysroot-headers/gaps.c
+/SRC/src/user/toolchain/sysroot-headers/machine/endian.h
+/SRC/src/user/toolchain/sysroot-headers/setjmp.S
+/SRC/src/user/toolchain/sysroot-headers/sys/utsname.h
+/SRC/src/user/toolchain/sysroot-headers/sysexits.h
+/SRC/src/user/torture_test.c
+/SRC/src/user/touch.c
+/SRC/src/user/tr_gnu.c
+/SRC/src/user/tr_test.c
+/SRC/src/user/tsort_gnu.c
+/SRC/src/user/tsort_test.c
+/SRC/src/user/unexpand_gnu.c
+/SRC/src/user/unexpand_test.c
+/SRC/src/user/uniq.c
+/SRC/src/user/unit.c
+/SRC/src/user/uptime.c
+/SRC/src/user/wc.c
+/SRC/src/user/wc_test.c
+/SRC/src/user/wdmap.c
+/SRC/src/user/wk1c_test.c
+/SRC/src/user/wsurf_test.c
+/SRC/src/user/x11/README.md
+/SRC/src/user/x11/apps/antfarm/LICENSE.txt
+/SRC/src/user/x11/apps/antfarm/README.md
+/SRC/src/user/x11/apps/antfarm/main.c
+/SRC/src/user/x11/apps/xcalc/LICENSE.txt
+/SRC/src/user/x11/apps/xcalc/README.md
+/SRC/src/user/x11/apps/xcalc/main.c
+/SRC/src/user/x11/apps/xeyes/LICENSE.txt
+/SRC/src/user/x11/apps/xeyes/README.md
+/SRC/src/user/x11/apps/xeyes/main.c
+/SRC/src/user/x11/include/X11/Xlib.h
+/SRC/src/user/x11/include/X11/keysym.h
+/SRC/src/user/x11/xlib_display.c
+/SRC/src/user/x11/xlib_draw.c
+/SRC/src/user/x11/xlib_event.c
+/SRC/src/user/x11/xlib_internal.h
+/SRC/src/user/x11/xlib_window.c
+/SRC/src/user_include/dialog.h
+/SRC/src/user_include/filedialog.h
+/SRC/src/user_include/graphics/desktop_damage.h
+/SRC/src/user_include/graphics/font.h
+/SRC/src/user_include/graphics/graphics.h
+/SRC/src/user_include/graphics/icons.h
+/SRC/src/user_include/graphics/theme.h
+/SRC/src/user_include/graphics/window.h
+/SRC/src/user_include/graphics/wsurf.h
+[TAR] ... 800 files, 25355556 bytes
+/SRC/src/user_include/gui.h
+/SRC/src/user_include/libc.h
+/SRC/src/user_include/malloc.h
+/SRC/src/user_include/resolv.h
+/SRC/tools/README.md
+/SRC/tools/__pycache__/cstyle.cpython-311.pyc
+/SRC/tools/__pycache__/wiki_proxy.cpython-314.pyc
+/SRC/tools/assemble_w2_disk.sh
+/SRC/tools/br_e2e.py
+/SRC/tools/build_mkfs_host.sh
+/SRC/tools/capture_nfs_fixtures.py
+/SRC/tools/cross-arm-wk2-libs.sh
+/SRC/tools/cross-intel-wk2-libs.sh
+/SRC/tools/cstyle.py
+/SRC/tools/fatdir_dump.py
+/SRC/tools/gen_grep_tests.py
+/SRC/tools/gen_sed_tests.py
+/SRC/tools/mbedtls-user-config.h
+/SRC/tools/mkfs_host_proof.py
+/SRC/tools/ppm2png.py
+/SRC/tools/render_pipeline/.gitignore
+/SRC/tools/render_pipeline/README.md
+/SRC/tools/render_pipeline/perf_receipts.py
+/SRC/tools/render_pipeline/resp_close_probe.py
+/SRC/tools/render_pipeline/rp_lib.py
+/SRC/tools/render_pipeline/run_rp.sh
+/SRC/tools/render_pipeline/tile_bleed_probe.py
+/SRC/tools/run_apps_test_scoped.py
+/SRC/tools/run_browser_accept.sh
+/SRC/tools/run_make_smoke.py
+/SRC/tools/run_parallel.sh
+/SRC/tools/run_selfhost_build_test.py
+/SRC/tools/run_w3kbd_probe.py
+/SRC/tools/run_w3shell_redirect_repro.py
+/SRC/tools/run_waves.sh
+/SRC/tools/selfhost-seed-worktree.sh
+/SRC/tools/selfhost-src-tar.sh
+/SRC/tools/selfhost-stage.sh
+/SRC/tools/test_cstyle.py
+/SRC/tools/test_wiki_proxy.py
+/SRC/tools/theme_acceptance.md
+/SRC/tools/theme_audit.py
+/SRC/tools/theme_check.py
+/SRC/tools/theme_shot.py
+/SRC/tools/w11_bench_boot.py
+/SRC/tools/w12_rcut_boot.py
+/SRC/tools/w12_scan_dirents.py
+/SRC/tools/w2_mkfs_inos.py
+/SRC/tools/w3_accept_pretest.sh
+/SRC/tools/w4_clang_probe.py
+/SRC/tools/w5_flat_boot.py
+/SRC/tools/w5_nothrow_probe.py
+/SRC/tools/w6_lane_stage.sh
+/SRC/tools/w7_accept_boot.py
+/SRC/tools/w7_watch.py
+/SRC/tools/wiki_proxy.py
+/SRC/tools/x1_inject.py
+/SRC/tools/x1_receipt.py
+/SRC/Makefile.hobbyos
+/SRC/linker.ld
+/SRC/bootloader/BOOTAA64.EFI
+/SRC/limine.conf
+/SRC/bin/CONSOLE.BIN
+/SRC/bin/DESKTOP.BIN
+/SRC/bin/OUTMARK.TXT
+/SRC/bin/SH.BIN
+/SRC/obj/arm/libc.a
+/SRC/build_kernel.sh
+[KERNEL] Process 2: /TOOLS/TAR.BIN exited unexpectedly or gracefully.
+[TAR] done: files=868 dirs=53 bytes=28298626 skipped=0 errors=0
+[KERNEL] Process 3: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[BUILD] untar done
+[SELFHOST] phase=s-bk-untar-done rc=0
+[SELFHOST] phase=s-bk-check-start
+Loading program for scheduler (v2 AS): /TOOLS/SH.BIN
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=4ms
+v2 loader: PID=3 entry=0x0000001000000000 sp=0x0000001800000000 resident=2 tables=5
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/BUILD_KERNEL.SH
+[BUILD] build-kernel start
+[BUILD] mode=check
+/SRC/src/kernel/main.c
+[BUILD] /SRC source tree present
+[BUILD] make -f Makefile.hobbyos check
+/TOOLS/MAKE.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x000000100000DDF8
+/TOOLS/MAKE.BIN
+v2 loader: image mapped (lazy), bytes=314680 pages=77 first=in elap=1ms
+/SRC/Makefile.hobbyos
+/SRC/OBJS.RSP
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[SELFHO[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+ST] phase=s0-check-start
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/TOOLS/CLANG.BIN -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -isystem /TOOLS/RESDIR/include -c src/kernel/main.c -o /SRC/obj/arm/check.o
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+/TOOLS/CLANG.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 5
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x000000100000DDF8
+/TOOLS/CLANG.BIN[DEBUG] Before eret, tf->regs[0] = 
+5 ELR = 0x0000001000012720
+v2 loader: image mapped (lazy), bytes=94192328 pages=22997 first=in elap=1ms
+[IMGPRF] pid=5 start: pages=22997 batch=128
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x00000010048493F0
+[DEBUG] Before eret, tf->regs[0] = 75956221 ELR = 0x000000100484D314
+[IMGPRF] pid=5 done: pages=22997 mapped=22542 skipped=455 batches=180 stop=0 ms=4381
+/SRC/src/kernel/main.c
+/SRC/obj/arm/check-09efc5ab.o.tmp
+/SRC/src/include/fat16.h
+/TOOLS/RESDIR/include/stdint.h
+/SRC/src/include/fs.h
+/SRC/src/include/lock.h
+/SRC/src/include/arch/cpu.h
+/SRC/src/include/process.h
+/SRC/src/include/trap.h
+/SRC/src/include/arch/trap.h
+/SRC/src/include/nfs.h
+/SRC/src/include/ipc_proto.h
+/SRC/src/include/gic.h
+/SRC/src/include/mmu.h
+/SRC/src/include/arch/mmu.h
+/SRC/src/include/program_loader.h
+/SRC/src/include/timer.h
+/SRC/src/include/virtio_blk.h
+/TOOLS/RESDIR/include/stddef.h
+/TOOLS/RESDIR/include/__stddef_header_macro.h
+/TOOLS/RESDIR/include/__stddef_ptrdiff_t.h
+/TOOLS/RESDIR/include/__stddef_size_t.h
+/TOOLS/RESDIR/include/__stddef_wchar_t.h
+/TOOLS/RESDIR/include/__stddef_null.h
+/TOOLS/RESDIR/include/__stddef_max_align_t.h
+/TOOLS/RESDIR/include/__stddef_offsetof.h
+/SRC/src/include/virtio_gpu.h
+/SRC/src/include/virtio_input.h
+/SRC/src/include/net.h
+/SRC/src/include/virtio_net.h
+/SRC/src/include/dhcp.h
+src/kernel/main.c:50:39: warning: unused parameter 'tf' [-Wunused-parameter]
+   50 | void irq_handler_c(struct trap_frame *tf) {
+      |                                       ^
+/SRC/obj/arm/check-09efc5ab.o.tmp new=/SRC/obj/arm/check.o
+1 warning generated.
+[KERNEL] Process 5: /TOOLS/CLANG.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 4
+[DEBUG] Before eret, tf->regs[0] = 4 ELR = 0x00000010000260F8
+/TOOLS/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+[DEBUG] Before eret, tf->regs[0] = -1 ELR = 0x0000001000011020
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] Process 4: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[SELFHOST] phase=s0-check-done rc=0
+[KERNEL] Process 2: /TOOLS/MAKE.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 3: /TOOLS/SH.BIN exited unexpectedly or gracefully.
+[BUILD] make rc=0
+[BUILD] build-kernel done
+[SELFHOST] phase=s-bk-check-done rc=0
+[SELFHOST] ACCEPTANCE-COMPLETE stages=2
+[KERNEL] Process 1: SELFHOST.BIN exited unexpectedly or gracefully.
+System halt from CPU 1.

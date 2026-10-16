@@ -1,0 +1,4 @@
+# inos-build-kernel bounded probe: extract the source tar in-OS, then the
+# one-TU compile smoke, all through build_kernel.sh.
+s-bk-untar|SH.BIN|/BUILD_KERNEL.SH untar
+s-bk-check|SH.BIN|/BUILD_KERNEL.SH check
