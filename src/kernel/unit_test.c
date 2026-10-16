@@ -17,13 +17,6 @@ void run_all_unit_tests(void) {
      process has taken a block yet), and its reuse checks rely on the
      rotating hint starting from zero. */
   frame_test_suite();
-
-  /* blk-cache init AFTER the frame suites (docs/blk-cache.md section 7):
-     the pristine-pool exhaustion checks must not have cache frames in
-     play.  Every later suite (fat16, vm, process, loader, ...) then runs
-     with the cache live for free integration coverage. */
-  blk_cache_init();
-
   fat16_test_suite();
   locks_test_suite();
   pipe_test_suite();
@@ -31,6 +24,16 @@ void run_all_unit_tests(void) {
   fs_test_suite();
   mmu_test_suite();
   vm_test_suite();
+
+  /* blk-cache init (docs/blk-cache.md section 7).  NOTE: the cache is
+     enabled AFTER the frame/MMU/vm suites (not immediately after
+     frame_test_suite) because vm_test's leak checks assert EXACT
+     frame_free_count() equality across file reads (BIG.BIN): a live cache
+     absorbs those pages and the equality cannot hold.  process/loader/
+     trap/virtio_blk and everything after run with the cache live for
+     integration coverage, and the blk-cache suites below verify it. */
+  blk_cache_init();
+
   process_test_suite();
   program_loader_test_suite();
   trap_test_suite();

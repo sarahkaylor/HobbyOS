@@ -8,9 +8,10 @@
  * neutral; fat16.c and the filesystems never change.
  *
  * Data model (section 3): cache units of 4 KiB (8 sectors), one frame per
- * unit from the frame allocator, static entry table with a uint32 free
- * list, 16384 bucket spinlocks keyed on the unit index, one global
- * fill_lock.  Per-sector validity is a per-unit 8-bit mask.
+ * unit from the frame allocator, entry table in the frame pool (fixed
+ * capacity 524288 entries, uint32 free list), 16384 bucket spinlocks
+ * keyed on the unit index, one global fill_lock.  Per-sector validity is
+ * a per-unit 8-bit mask.
  *
  * Locking (section 5, binding): fill_lock serializes ALL structural
  * mutation (insert/unlink/evict/invalidate/flush and the device fills
@@ -35,6 +36,8 @@
 /* Device ops the cache fills through; declared in virtio_blk.h. */
 #include "virtio_blk.h"
 
+extern void uart_puts(const char *s);
+
 /* ---------------- tables ---------------------------------------------- */
 
 struct blk_cache_entry {
@@ -45,7 +48,21 @@ struct blk_cache_entry {
   uint8_t ref;   /* second-chance clock bit (set on use) */
 };
 
-static struct blk_cache_entry entries[BLK_CACHE_MAX_ENTRIES];
+/* The entry table (BLK_CACHE_MAX_ENTRIES * 24 B = 12 MiB) is allocated
+   from the FRAME POOL at init, NOT from kernel .bss: with the full table
+   in .bss the kernel's RW segment grows to ~92 MiB and the Limine ARM
+   loader hangs after "linux: Loading kernel..." (baseline ~79 MiB
+   boots; empirically +12.6 MiB breaks it).  Same fixed capacity, free
+   list, and hashing as the frozen design; the table's frames are
+   metadata, claimed once at init and never evicted.  If the allocation
+   fails the cache simply never becomes ready and every read routes raw
+   (passthrough) — boot must never break on this. */
+static struct blk_cache_entry *entries;
+
+#define BLK_CACHE_ENTRIES_FRAMES \
+  ((BLK_CACHE_MAX_ENTRIES * (uint32_t)sizeof(struct blk_cache_entry) + \
+    (FRAME_SIZE - 1)) / FRAME_SIZE)
+
 static uint32_t bucket_head[BLK_CACHE_BUCKETS];
 static spinlock_t bucket_locks[BLK_CACHE_BUCKETS];
 static spinlock_t fill_lock;
@@ -172,7 +189,11 @@ static void copy_requested_sectors(uint64_t unit, uint8_t req, uint64_t frame,
     uint64_t s = unit * 8 + (uint64_t)bit;
     uint8_t *src = (uint8_t *)(frame + (uint64_t)bit * 512);
     uint8_t *dst = buf + (s - sector) * 512;
-    __builtin_memcpy(dst, src, 512);
+    /* Byte loop: with -mgeneral-regs-only this never becomes a libcall
+       or SIMD (other kernel files that call memcpy() compile it to an
+       inline loop only by luck of the optimizer). */
+    for (int k = 0; k < 512; k++)
+      dst[k] = src[k];
   }
 }
 
@@ -220,6 +241,20 @@ static void close_fill_op(struct fill_op *op, int *run_failed) {
 void blk_cache_init(void) {
   if (cache_ready)
     return;
+
+  /* Entry table lives in the frame pool (not .bss; see the table note).
+     Called here it can re-enter blk_cache_evict_pages only via the
+     frame_alloc_contig failure path, which is gated on cache_ready (0) —
+     no recursion.  On failure the cache stays not-ready: every read
+     routes raw (passthrough) and boot proceeds normally. */
+  if (entries == 0)
+    entries = (struct blk_cache_entry *)frame_alloc_contig(BLK_CACHE_ENTRIES_FRAMES);
+  if (!entries) {
+    uart_puts("[BLK-CACHE] frame-pool entry table allocation failed; "
+              "cache disabled (reads pass through raw)\n");
+    return;
+  }
+
   spinlock_init(&fill_lock);
   for (uint32_t i = 0; i < BLK_CACHE_BUCKETS; i++) {
     spinlock_init(&bucket_locks[i]);
