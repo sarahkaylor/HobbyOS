@@ -129,21 +129,35 @@ static void blkc_fill(uint64_t sector, uint32_t units) {
 /* ------------------------------------------------------------------ */
 static void test_blkc_oracle_matrix(void) {
   struct blk_cache_stats s0, s1, s2;
+  /* Tags as fixed-size arrays, NOT pointers out of a relocated struct:
+     the kernel applies no .data.rel.ro relocations, so a const char*
+     member in a static initializer reads back NULL (empty print). */
+  static const char tags[][28] = {
+    "oracle-sector0-1",
+    "oracle-sector1-1",
+    "oracle-aligned-2",
+    "oracle-unaligned-7",
+    "oracle-oneunit-8",
+    "oracle-crossunit-9",
+    "oracle-cross-both-ends-24",
+    "oracle-three-units-17",
+    "oracle-eight-units-64",
+    "oracle-sixtyfour-units-512",
+  };
   static const struct blkc_oracle {
     uint64_t sector;
     uint32_t count;
-    const char *tag;
   } cases[] = {
-    {0ULL, 1, "oracle-sector0-1"},
-    {1ULL, 1, "oracle-sector1-1"},
-    {2048ULL, 2, "oracle-aligned-2"},
-    {4101ULL, 7, "oracle-unaligned-7"},
-    {2040ULL, 8, "oracle-oneunit-8"},
-    {4095ULL, 9, "oracle-crossunit-9"},
-    {15ULL, 24, "oracle-cross-both-ends-24"}, /* units 1..4, both ends mid-unit */
-    {2041ULL, 17, "oracle-three-units-17"},
-    {131072ULL, 64, "oracle-eight-units-64"},
-    {262144ULL, 512, "oracle-sixtyfour-units-512"},
+    {0ULL, 1},
+    {1ULL, 1},
+    {2048ULL, 2},
+    {4101ULL, 7},
+    {2040ULL, 8},
+    {4095ULL, 9},
+    {15ULL, 24},
+    {2041ULL, 17},
+    {131072ULL, 64},
+    {262144ULL, 512},
   };
   int i;
 
@@ -153,64 +167,59 @@ static void test_blkc_oracle_matrix(void) {
   for (i = 0; i < (int)(sizeof(cases) / sizeof(cases[0])); i++) {
     uint64_t sec = cases[i].sector;
     uint32_t cnt = cases[i].count;
-    uint32_t covered = 0;
+    const char *tag = tags[i];
 
     /* Guaranteed cold: drop every unit in the range. */
     blk_cache_invalidate(sec, cnt);
     blkc_snap(&s0);
 
-    /* Cold fill in <= 256-sector segments; each segment's data stays in
-       blkc_buf while its chunks are verified below, so no per-range
-       buffer bigger than the segment is needed. */
-    while (covered < cnt) {
-      uint32_t n = cnt - covered;
-      if (n > BLKC_MAXSEG)
-        n = BLKC_MAXSEG;
-      uint64_t seg = sec + covered;
-      int rc = blk_cache_read(seg, blkc_buf, n);
-      blkc_check(rc == 0, cases[i].tag);
-
-      /* Warm (hit) reads + raw-device reads, chunked to <= 8 sectors,
-         each byte-compared against the cold segment data still in
-         blkc_buf. */
-      uint32_t got = 0;
-      while (got < n) {
-        uint32_t c = n - got;
-        if (c > 8)
-          c = 8;
-        int rc2 = blk_cache_read(seg + got, blkc_small, c);
-        blkc_check(rc2 == 0, cases[i].tag);
-        blkc_check(blkc_buf_eq(blkc_buf + got * 512, blkc_small, c * 512),
-                   cases[i].tag);
-        int rrc = virtio_blk_read_raw(seg + got, blkc_small, c);
-        blkc_check(rrc == 0, cases[i].tag);
-        blkc_check(blkc_buf_eq(blkc_buf + got * 512, blkc_small, c * 512),
-                   cases[i].tag);
-        got += c;
+    /* Phase 1 — cold fill, in <= 256-sector segments (keeps .bss small).
+       Accounting must be exactly the request: every sector a miss. */
+    {
+      uint32_t covered = 0;
+      while (covered < cnt) {
+        uint32_t n = cnt - covered;
+        if (n > BLKC_MAXSEG)
+          n = BLKC_MAXSEG;
+        int rc = blk_cache_read(sec + covered, blkc_buf, n);
+        blkc_check(rc == 0, tag);
+        covered += n;
       }
-      covered += n;
     }
     blkc_snap(&s1);
-
-    /* Cold-fill accounting over the whole range. */
-    blkc_check(BLKC_DELTA(s1, s0, misses) == (uint64_t)cnt, cases[i].tag);
-    blkc_check(BLKC_DELTA(s1, s0, hits) == 0, cases[i].tag);
+    blkc_check(BLKC_DELTA(s1, s0, misses) == (uint64_t)cnt, tag);
+    blkc_check(BLKC_DELTA(s1, s0, hits) == 0, tag);
     /* Entry math: a cold read adds exactly the units it overlapped. */
-    blkc_check(BLKC_DELTA(s1, s0, entries) == blkc_units(sec, cnt),
-               cases[i].tag);
+    blkc_check(BLKC_DELTA(s1, s0, entries) == blkc_units(sec, cnt), tag);
     /* No-regression (docs section 4a): a cold read of the whole range must
        not exceed one device op per unit plus slack. */
     blkc_check(BLKC_DELTA(s1, s0, fill_ops) <=
                    (uint64_t)(cnt / BLKC_UNIT_SECTORS + 2),
-               cases[i].tag);
+               tag);
 
-    /* The warm chunks above served entirely from cache: hits grew by the
-       whole range; raw reads never touch the cache. */
+    /* Phase 2 — hit-path and device parity in <= 8-sector chunks: a warm
+       read (served from the frame the cold fill wrote) into blkc_buf, a
+       raw device read into blkc_small, bytes must be identical.  These
+       reads are all hits: accounting adds exactly the request. */
+    {
+      uint32_t covered = 0;
+      while (covered < cnt) {
+        uint32_t c = cnt - covered;
+        if (c > 8)
+          c = 8;
+        int rc2 = blk_cache_read(sec + covered, blkc_buf, c);
+        blkc_check(rc2 == 0, tag);
+        int rrc = virtio_blk_read_raw(sec + covered, blkc_small, c);
+        blkc_check(rrc == 0, tag);
+        blkc_check(blkc_buf_eq(blkc_buf, blkc_small, c * 512), tag);
+        covered += c;
+      }
+    }
     blkc_snap(&s2);
-    blkc_check(BLKC_DELTA(s2, s1, hits) == (uint64_t)cnt, cases[i].tag);
-    blkc_check(BLKC_DELTA(s2, s1, misses) == 0, cases[i].tag);
-    blkc_check(BLKC_DELTA(s2, s1, fill_ops) == 0, cases[i].tag);
-    blkc_check(BLKC_DELTA(s2, s1, entries) == 0, cases[i].tag);
+    blkc_check(BLKC_DELTA(s2, s1, hits) == (uint64_t)cnt, tag);
+    blkc_check(BLKC_DELTA(s2, s1, misses) == 0, tag);
+    blkc_check(BLKC_DELTA(s2, s1, fill_ops) == 0, tag);
+    blkc_check(BLKC_DELTA(s2, s1, entries) == 0, tag);
   }
 
   /* Routing proof: the PUBLIC entry point (virtio_blk_read_sector) must
