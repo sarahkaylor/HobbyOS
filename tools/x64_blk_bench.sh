@@ -74,7 +74,9 @@ elapsed() { # <start-epoch> -> mm:ss
 scan_log() { # <log> -> "halt=... fails=... summaries=... stress=... reboots=..."
   local log="$1"
   local halts=0 fails=0 summaries=0 stress=no reboots=0
-  halts=$(grep -ac "System halt\." "$log" 2>/dev/null || echo 0)
+  # The completion marker prints as either "System halt." or "System halt from CPU N."
+  # (the boot core adds the CPU), so match the "System halt" prefix, not the period.
+  halts=$(grep -ac "System halt" "$log" 2>/dev/null || echo 0)
   fails=$(grep -ac "FAIL" "$log" 2>/dev/null || echo 0)
   summaries=$(grep -ac "ALL TESTS PASSED" "$log" 2>/dev/null || echo 0)
   grep -aq "STRESS TEST" "$log" && stress=yes
@@ -169,11 +171,11 @@ if [ "$SKIP_WAVE" = "0" ]; then
       grep -a "ALL TESTS PASSED" "$log" | sed 's/^/    /' | head -15
       grep -a "STRESS TEST" "$log" | head -2 | sed 's/^/    /'
     else
-      echo "  !! wave-$n did NOT print 'System halt.'"
+      echo "  !! wave-$n did NOT print 'System halt'"
       grep -aE "BdsDxe: starting|Guest reset|Triple fault|no free (process )?slot|LOCKFOREVER|IDLESTUCK|WATCHDOG" "$log" | head -6 | sed 's/^/    /'
     fi
   done
-  echo "== wave-green copies (System halt.): $wave_green/$COPIES =="
+  echo "== wave-green copies (System halt marker): $wave_green/$COPIES =="
 fi
 
 echo "== X64 BLK BENCH DONE - logs in $LOGDIR =="

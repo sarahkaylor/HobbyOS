@@ -79,37 +79,49 @@ Kill/reap: `fuser -k <copy>/disk.img` (exact file, per copy — never broad pkil
 
 | copy | rc | duration | System halt. | FAIL tokens | suite summaries | notes |
 |------|----|----------|--------------|-------------|-----------------|-------|
-| wave-1 | 0 | ~6.5 min | YES ("System halt from CPU 3.") | 256 | 11 (10 suites + STRESS) | red-but-completing: whole wave ran, halted cleanly, single OVMF boot (no reboot loop) |
-| wave-2 | 124 (timeout-bounded) | ~30 min budget | NO | 2 | 3 | wedged: serial froze at 1955 lines ~6.5 min in, mid-FAT-suite (FOLDLONG.TXT / sys_close), QEMU alive, timeout-bound by design; see forensics below |
+| wave-1 | 0 | ~4.5 min | YES ("System halt from CPU 3.") | 256 | 11 (10 suites + STRESS) | red-but-completing: whole wave ran, halted cleanly, single OVMF boot (no reboot loop) |
+| wave-2 | 0 | ~17.5 min | YES ("System halt from CPU 3.") | 245 | 11 (10 suites + STRESS) | same class, plus one long mid-run serial stall (~10 min frozen at 1955 lines, mid-FAT-suite) from which the guest recovered and completed |
 
-wave-1 is the strongest local x64 result available at tip: the wave does not reboot-loop
-locally (unlike the CI VM), it reaches and passes STRESS, but it completes RED under the
-slot-pressure cascade.
+Local truth at tip: **2/2 copies complete with the halt marker and reach STRESS SUCCESS — the
+CI-VM reboot-loop was NOT reproduced — but both complete RED** (~250 FAIL tokens) under the
+fork-EAGAIN slot-pressure cascade. `rc=0` means nothing here (QEMU self-terminates 0 on
+poweroff); the log carries the verdict.
 
-### wave-1 highlights (decisive lines, quoted)
+### Per-suite FAIL concentration (both waves, same signature)
+
+Child-pipe / exit-status suites dominate — the spawn-starvation signature:
 
 ```
-System halt from CPU 3.
- pages=[STRESS TEST] SUCCESS: ALL TESTS PASSED SUCCESSFULLY!
-[ERRNO] ALL TESTS PASSED
-[REGTEST] ALL TESTS PASSED
+      wave-1          wave-2
+83    SEDTEST   86    SEDTEST
+38    GREPTEST  36    GREPTEST
+20    TSORTTEST 20    CMPTEST
+20    CMPTEST   7     TSORTTEST
+ 7    TACTEST   4     TACTEST
+ 3    SIGTEST   2     TRTEST / PASTETEST / NLTEST / CKSUMTEST ...
+ 3    NLTEST / COMMTEST / CKSUMTEST / MD5TEST
 ```
-- 11 `ALL TESTS PASSED` lines: 10 per-suite summaries + STRESS SUCCESS.
-- Exactly **1** `BdsDxe: starting ...` line = the single normal OVMF boot (Boot0002 "UEFI QEMU NVMe Ctrl" — the auto-generated boot entry, not a reset loop). No `Guest reset` / `Triple fault`.
-- FAIL-token concentration (child-pipe / exit-status suites — the spawn-starvation signature):
-  `SEDTEST 83, GREPTEST 38, TSORTTEST 20, CMPTEST 20, TACTEST 7, SIGTEST 3, NLTEST 3, COMMTEST 3, CKSUMTEST 3, MD5TEST 2` (+ scattered).
-- Forensics: `[KERNEL] sys_fork: tf->regs[0] is now -11` × 528, `thread_create: no free slot` × 3, `LOCKFOREVER/IDLESTUCK/WATCHDOG` × 2.  The fork-EAGAIN storm starves the pipe-pair
-  helpers that SED/GREP/TSORT/CMP/TAC depend on -> wrong child exit statuses (e.g. `SIGTEST FAIL waitpid returns the child got=1 want=4294964048`, `FATBIG FAIL tail checksum clean`).
 
-### wave-2 highlight (the hang class, bounded)
+Forensics per run: `[KERNEL] sys_fork: tf->regs[0] is now -11` × 528 / × 157,
+`thread_create: no free slot` × 3 / × 3, `LOCKFOREVER/IDLESTUCK/WATCHDOG` × 2 / × 4,
+`process_create: no free process slots! zombies=N` present. The fork-EAGAIN storm starves
+the pipe-pair helpers SED/GREP/TSORT/CMP/TAC depend on -> wrong child exit statuses
+(e.g. `SIGTEST FAIL waitpid returns the child got=1 want=4294964048`,
+`FATBIG FAIL tail checksum clean got=0x...0800 want=0x...0000`).
 
-Serial output froze at 1955 lines while QEMU stayed alive (etime grew, zero new output —
-the skill's "no output yet is itself the signal"). Last kernel activity was the FAT suite
-(`/FOLDLONG.TXT`, `sys_close` debugs on CPU=7, `PIDs=[2,40,22,58]`). The recipe's
-`timeout 1800` is the bound that converts this hang into a receipt (rc=124) instead of a
-forever-wait; the copy is then reaped with `fuser -k <copy>/disk.img`. This is the
-documented "local copies historically mostly clean, but the tier does not complete
-reliably" reality — exactly why the battery is bounded.
+### Reboot-storm check (the CI failure mode is NOT local)
+
+Exactly **1** `BdsDxe: starting Boot0002 "UEFI QEMU NVMe Ctrl..."` line per log = the single
+normal OVMF boot (the auto-generated boot entry), no `Guest reset` / `Triple fault`.
+The CI VM reset-loop class did not reproduce on either local KVM copy.
+
+### Note on the mid-run stall (wave-2)
+
+Serial output froze at 1955 lines for ~10 min while QEMU stayed alive (last activity:
+FAT suite `/FOLDLONG.TXT`, `sys_close` on CPU=7), then resumed and completed — a
+slow/stalled phase, not a permanent hang, this time. This is why the battery is bounded:
+a run that freezes past its budget is reaped by the recipe (`timeout` rc=124, then
+`fuser -k <copy>/disk.img`) and recorded as a non-completion rather than waited on forever.
 
 ## 4. Recipe (reusable, committed)
 
