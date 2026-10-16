@@ -611,6 +611,13 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
   direct-mode passes) with BOTH the pre-change and post-change `sh.bin` (rc 9 / 2816 across
   runs — pre-existing, launch-context-dependent; interactive tests up to that point all
   validated successfully with the new shell).  Serials: `bk-shtest-menulaunch-{new,old}.serial.txt`.
+  **`make clean` follow-up:** a user `make clean` → `make run` cycle reproduced the
+  toolchain-less disk (clean deletes `obj/`, which held the restored dist-staging — the disk
+  rebuilt with CLANG/LLD/OBJCOPY silently skipped and `build_kernel.sh` preflight caught it).
+  Fixed durably: a persistent gitignored copy at `third_party/llvm-21.1.8/dist-staging` +
+  stager fallback search (obj first, then third_party) — `make clean` no longer breaks the
+  self-build disk; verified by a from-clean rebuild (no skip warning, CLANG/LLD/LLVMAR/OBJCOPY
+  + RESDIR on the image) and a `Mode: DESKTOP` boot.
 
 - **2026-10-15 (evening) — inos-build-kernel: THE FULL IN-OS LOOP PASSES from the disk-carried
   source tar.** `disk.img` now carries `/SRC.TAR` (29,040,640 B ustar; `tools/selfhost-src-tar.sh`),

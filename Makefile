@@ -2111,12 +2111,14 @@ endif
 	# Selfhost W3 (tools): the in-OS toolchain on the startup image (frozen
 	# F1 layout, selfhost.md §7.3).  tools/selfhost-stage.sh --tools stages
 	# CLANG.BIN/LLD.BIN/LLVMAR.BIN/OBJCOPY.BIN from the wave-2 LLVM
-	# distribution staging (obj/selfhost/dist-staging), the ported build
-	# tools (MAKE/MCOPY/MDEL/MMD/MKFSFAT), and the RESDIR header tree under
-	# /TOOLS — staged FAITHFULLY with long names (F8 decision, see
-	# docs/selfhost/llvm-bootstrap.md §6.2).  Soft dependency: an absent
-	# dist-staging warns + skips, so trees without the LLVM install still
-	# build a bootable image.  Override with STAGE_TOOLS=0 to skip.
+	# distribution staging (obj/selfhost/dist-staging, or the persistent
+	# third_party/llvm-21.1.8/dist-staging copy that survives `make clean`),
+	# the ported build tools (MAKE/MCOPY/MDEL/MMD/MKFSFAT), and the RESDIR
+	# header tree under /TOOLS — staged FAITHFULLY with long names (F8
+	# decision, see docs/selfhost/llvm-bootstrap.md §6.2).  Soft dependency:
+	# an absent dist-staging warns + skips, so trees without the LLVM
+	# install still build a bootable image (build_kernel.sh then refuses
+	# with instructions).  Override with STAGE_TOOLS=0 to skip.
 ifneq ($(STAGE_TOOLS),0)
 	tools/selfhost-stage.sh --tools disk.img
 	# Selfhost W4 (src): the in-OS build-required source subset on the

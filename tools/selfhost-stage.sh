@@ -116,7 +116,18 @@ LIBCXX_INC="${LIBCXX_INC_DIR:-third_party/libcxx-21.1.8/src/llvm-project-21.1.8.
 STAGE_LIBCXX="${STAGE_LIBCXX:-0}"
 # [v3] Sources for the /TOOLS toolchain staging (--tools): the wave-2 LLVM
 # distribution staging, and the ported build tools from obj/arm.
-DIST_STAGING="${DIST_STAGING:-obj/selfhost/dist-staging}"
+# Default search order: the build-tree staging (obj/...), then the
+# persistent copy under third_party that SURVIVES `make clean` (which
+# removes obj/).  An explicit DIST_STAGING=<path> overrides both.
+if [ -z "${DIST_STAGING:-}" ]; then
+  if [ -f obj/selfhost/dist-staging/usr/local/bin/clang-21 ]; then
+    DIST_STAGING="obj/selfhost/dist-staging"
+  elif [ -f third_party/llvm-21.1.8/dist-staging/usr/local/bin/clang-21 ]; then
+    DIST_STAGING="third_party/llvm-21.1.8/dist-staging"
+  else
+    DIST_STAGING="obj/selfhost/dist-staging"
+  fi
+fi
 RESDIR_SRC="$DIST_STAGING/usr/local/lib/clang/21/include"
 TOOL_SPLIT=" "  # list below
 
@@ -283,7 +294,7 @@ stage_tools() {
     stage_flat "$DIST_STAGING/usr/local/bin/llvm-objcopy"  OBJCOPY.BIN
     rm -rf "$flatdir"
   else
-    warn "/TOOLS toolchain not staged: LLVM distribution staging missing at $DIST_STAGING (build it per docs/selfhost/llvm-bootstrap.md §6 — install-distribution)"
+    warn "/TOOLS toolchain not staged: LLVM distribution staging missing at $DIST_STAGING (build it per docs/selfhost/llvm-bootstrap.md §6 — install-distribution, or restore the persistent copy at third_party/llvm-21.1.8/dist-staging — see docs/selfhost/inos-build-kernel.md and .gitignore)"
   fi
 
   # Ported build tools — frozen 8.3 names.  The Makefile's own mcopy lines

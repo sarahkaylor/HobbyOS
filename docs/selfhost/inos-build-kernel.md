@@ -69,10 +69,13 @@ In a staged `SELFHOST.RUN` (the driver context) the stage line is:
 **Toolchain preflight:** the script checks `/TOOLS/{CLANG,LLD,OBJCOPY,MAKE,
 TAR}.BIN` up front and exits 2 with instructions when they are absent —
 which happens when `disk.img` was built without the LLVM dist staging
-(`obj/selfhost/dist-staging`; `docs/selfhost/llvm-bootstrap.md` §6 — the
-`selfhost-stage.sh --tools` step then warns and skips).  Stage onto an
-existing image with `tools/selfhost-stage.sh --tools disk.img`, or rebuild
-`disk.img` where the staging exists.
+(`docs/selfhost/llvm-bootstrap.md` §6 — the `selfhost-stage.sh --tools`
+step then warns and skips).  The stager searches `obj/selfhost/dist-staging`
+first, then the persistent copy `third_party/llvm-21.1.8/dist-staging`
+(gitignored) — so the toolchain survives `make clean`, which deletes
+`obj/`.  Stage onto an existing image with
+`tools/selfhost-stage.sh --tools disk.img`, or rebuild `disk.img` where
+either staging source exists.
 
 The pieces the script drives (all in-OS):
 

@@ -140,3 +140,7 @@ third_party/llvm-21.1.8/.fetched-ok
 # Selfhost lane evidence excerpts are committed on purpose (curated from
 # gitignored raw runs) — the global `*.log` rule must not swallow them.
 !docs/selfhost/lanes/*.log
+
+# [inos-build-kernel] persistent LLVM dist staging (survives `make clean`;
+# tools/selfhost-stage.sh --tools uses it as fallback source for /TOOLS).
+third_party/llvm-21.1.8/dist-staging/
