@@ -36,6 +36,8 @@
 /* Device ops the cache fills through; declared in virtio_blk.h. */
 #include "virtio_blk.h"
 
+extern void uart_puts(const char *s);
+
 /* ---------------- tables ---------------------------------------------- */
 
 struct blk_cache_entry {
@@ -247,8 +249,11 @@ void blk_cache_init(void) {
      routes raw (passthrough) and boot proceeds normally. */
   if (entries == 0)
     entries = (struct blk_cache_entry *)frame_alloc_contig(BLK_CACHE_ENTRIES_FRAMES);
-  if (!entries)
+  if (!entries) {
+    uart_puts("[BLK-CACHE] frame-pool entry table allocation failed; "
+              "cache disabled (reads pass through raw)\n");
     return;
+  }
 
   spinlock_init(&fill_lock);
   for (uint32_t i = 0; i < BLK_CACHE_BUCKETS; i++) {
