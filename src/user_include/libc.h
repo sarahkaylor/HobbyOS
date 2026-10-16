@@ -229,6 +229,23 @@ extern "C" {
     int  type;          /* 0 = FAT16, 1 = NFS                               */
   };
 
+  /* cmd 9: block-level read cache statistics (docs/blk-cache.md).  The cache
+   * is demand-filled at 4 KiB granularity and reclaimed under memory
+   * pressure; writes are never cached.  Counters are approximate while
+   * several CPUs are doing I/O — use deltas/bounds, not exact equalities.
+   * Mirrors struct blk_cache_stats in src/include/blk_cache.h. */
+  struct sys_blkcache_stats {
+    uint64_t hits;          /* requested sectors served from cache          */
+    uint64_t misses;        /* requested sectors that needed a fill         */
+    uint64_t fill_ops;      /* device read ops issued by the cache          */
+    uint64_t raw_sectors;   /* sectors read from the device by fills        */
+    uint64_t evictions;     /* units discarded by pressure/flush            */
+    uint64_t invalidations; /* units dropped by write coherence             */
+    uint64_t entries;       /* units currently cached                       */
+    uint64_t bytes;         /* entries * 4096                               */
+    uint64_t passthrough;   /* whole reads that bypassed the cache          */
+  };
+
   int sysinfo(int cmd, void *buf, int size);
   int unlink(const char *filename);
   int rename(const char *oldname, const char *newname);
