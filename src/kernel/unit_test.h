@@ -48,6 +48,8 @@ void process_test_suite(void);
 void program_loader_test_suite(void);
 void trap_test_suite(void);
 void virtio_blk_test_suite(void);
+void blk_cache_test_suite(void);
+void blk_cache_press_suite(void);
 void virtio_gpu_test_suite(void);
 void virtio_input_test_suite(void);
 void timer_test_suite(void);

@@ -176,7 +176,11 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
   int free_before = -1;
   for (;;) {
     if (caller_pid < 0 && phys_block_free_count() <= WAVE_LOAD_RESERVE) {
-      /* keep headroom for child spawns: wait, do not burn a reserve */;
+      /* keep headroom for child spawns: wait, do not burn a reserve */
+      /* blk-cache reclaim (docs/blk-cache.md section 6.4): cached units
+         squat in the partially-used blocks the allocator otherwise counts
+         as taken; evict until the headroom holds before re-waiting. */
+      (void)frame_reclaim_to_blocks(WAVE_LOAD_RESERVE + 1);
     } else {
       pid = process_create();
       if (pid >= 0)
@@ -564,7 +568,12 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
        child spawns always find memory (design section 2.2). */
     if (caller_pid < 0 &&
         frame_free_count() <= (int)WAVE_LOAD_RESERVE * FRAME_BLOCK_FRAMES) {
-      /* boot headroom: wait, do not burn a reserve */;
+      /* boot headroom: wait, do not burn a reserve */
+      /* blk-cache reclaim (docs/blk-cache.md section 6.5): cached units
+         eat free frames; evict until the headroom (plus slack) holds
+         before re-waiting. */
+      (void)frame_reclaim_to_free_frames(
+          WAVE_LOAD_RESERVE * FRAME_BLOCK_FRAMES + 8192);
     } else {
       pid = process_create_v2();
       if (pid >= 0)

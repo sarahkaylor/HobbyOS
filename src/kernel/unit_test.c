@@ -1,6 +1,7 @@
 #ifdef KERNEL_MODE_UNIT_TEST
 
 #include "unit_test.h"
+#include "blk_cache.h"
 
 int tests_run = 0;
 int tests_failed = 0;
@@ -16,6 +17,13 @@ void run_all_unit_tests(void) {
      process has taken a block yet), and its reuse checks rely on the
      rotating hint starting from zero. */
   frame_test_suite();
+
+  /* blk-cache init AFTER the frame suites (docs/blk-cache.md section 7):
+     the pristine-pool exhaustion checks must not have cache frames in
+     play.  Every later suite (fat16, vm, process, loader, ...) then runs
+     with the cache live for free integration coverage. */
+  blk_cache_init();
+
   fat16_test_suite();
   locks_test_suite();
   pipe_test_suite();
@@ -27,6 +35,11 @@ void run_all_unit_tests(void) {
   program_loader_test_suite();
   trap_test_suite();
   virtio_blk_test_suite();
+  /* blk-cache suites; the press suite's strong definition lives in
+     blk_cache_press_test.c (tests lane) and wins over the WEAK fallback
+     defined here in blk_cache_test.c after the merge. */
+  blk_cache_test_suite();
+  blk_cache_press_suite();
   virtio_gpu_test_suite();
   virtio_input_test_suite();
   virtio_net_test_suite();
