@@ -17,6 +17,7 @@
 #include "errno.h"
 #include "vfs.h"
 #include "vm.h"
+#include "blk_cache.h"
 #include <stdint.h>
 
 extern void uart_puts(const char *s);
@@ -347,6 +348,13 @@ static void sys_sysinfo(struct trap_frame *tf) {
         if (vfs_mount_info(i, &out[written]) == 0) written++;
       }
       tf->regs[0] = written;
+    } else if (cmd == 9) { // Block cache stats (docs/blk-cache.md)
+      if (size >= (int)sizeof(struct blk_cache_stats)) {
+        blk_cache_get_stats((struct blk_cache_stats *)buf);
+        tf->regs[0] = 0;
+      } else {
+        tf->regs[0] = -1;
+      }
     } else {
       tf->regs[0] = -1;
     }
