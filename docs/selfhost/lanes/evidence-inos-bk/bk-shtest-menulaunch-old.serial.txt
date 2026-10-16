@@ -1,0 +1,322 @@
+UEFI firmware (version 2025.11-3ubuntu7 built at 11:11:58 on Mar 31 2026)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+BdsDxe: starting Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+[001;001H[001;001H[001;001Hl[001;002Hi[001;003Hn[001;004Hu[001;005Hx[001;006H:[001;007H [001;008HL[001;009Ho[001;010Ha[001;011Hd[001;012Hi[001;013Hn[001;014Hg[001;015H [001;016Hk[001;017He[001;018Hr[001;019Hn[001;020He[001;021Hl[001;022H [001;023H`[001;024Hb[001;025Ho[001;026Ho[001;027Ht[001;028H([001;029H)[001;030H:[001;031H/[001;032Hb[001;033Ho[001;034Ho[001;035Ht[001;036H/[001;037Hh[001;038Ho[001;039Hb[001;040Hb[001;041Hy[001;042Ho[001;043Hs[001;044H.[001;045Hb[001;046Hi[001;047Hn[001;048H`[001;049H.[001;050H.[001;051H.[001;052H[001;001H[002;001HBooting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+[GPUDIAG] gpu wait > 9 ms: ack=3 used=4 (park off)
+[GPU] virtio-gpu mmio irq=78
+VirtIO GPU successfully initialized.
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1900544 total_mib=7424 reserved=0
+[KERNEL] Activating secondary cores via PSCI...
+[KERNEL] Core 1 power-on requested.
+[KERNEL] Core 2 power-on requested.
+[KERNEL] Core 3 power-on requested.
+[KERNEL] Core 4 power-on requested.
+start_scheduler called on CPU 1start_scheduler called on CPU 
+2[KERNEL] Core start_scheduler called on CPU 
+5start_scheduler called on CPU 
+45
+ power-on requested.
+start_scheduler called on CPU 3
+[KERNEL] Core 6start_scheduler called on CPU  power-on requested.
+6[KERNEL] Core 
+7 power-on requested.
+start_scheduler called on CPU 7
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+virtio-net MAC: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP Discover sent
+DHCP initialization complete.
+
+--- Parallel Program Loading ---
+Mode: DESKTOP - Launching desktop...
+Loading program for scheduler (v2 AS): DESKTOP.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=-1
+/DESKTOP.BIN
+v2 loader: image mapped (lazy), bytes=555552 pages=136 first=in elap=2ms
+v2 loader: PID=1 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+start_scheduler called on CPU 0
+Desktop starting...
+[MENU] 0=CONSOLE.BIN
+[MENU] 1=BROWSER.BIN
+[MENU] 2=FILES.BIN
+[MENU] 3=CALC.BIN
+[MENU] 4=XCALC.BIN
+[MENU] 5=ANTFARM.BIN
+[MENU] 6=XEYES.BIN
+[MENU] 7=CLOCK.BIN
+[MENU] 8=SYSMON.BIN
+[MENU] 9=HEX.BIN
+[MENU] 10=TASKS.BIN
+[MENU] 11=FIND.BIN
+[MENU] 12=DIFF.BIN
+[MENU] 13=NOTES.BIN
+[MENU] 14=UNIT.BIN
+[MENU] 15=NANO.BIN
+[MENU] 16=PONG.BIN
+[MENU] 17=MILLIPED.BIN
+[MENU] 18=EFI
+[MENU] 19=BOOT
+[MENU] 20=HOME
+[MENU] 21=NFS
+[MENU] 22=MNT
+[MENU] 23=TESTDIR
+[MENU] 24=TMP
+[MENU] 25=TOOLS
+[MENU] 26=SRC
+[MENU] 27=third_party
+[MENU] 28=E2E.TXT
+[MENU] 29=DRAGME.TXT
+[MENU] 30=MEMTEST.BIN
+[MENU] 31=FILEIO.BIN
+[MENU] 32=FORKTEST.BIN
+[MENU] 33=HEAPTEST.BIN
+[MENU] 34=SPAWN.BIN
+[MENU] 35=GRAPHICS.BIN
+[MENU] 36=WSRF_T.BIN
+[MENU] 37=SMPTEST.BIN
+[MENU] 38=PIPETEST.BIN
+[MENU] 39=NETTEST.BIN
+[MENU] 40=TIMEOUT.BIN
+[MENU] 41=NFSTEST.BIN
+[MENU] 42=DESKTOP.BIN
+[MENU] 43=HOME.HTM
+[MENU] 44=TALL.HTM
+[MENU] 45=DEJAVU.TTF
+[MENU] 46=EDITOR.BIN
+[MENU] 47=EDITOR_T.BIN
+[MENU] 48=APPS_T.BIN
+[MENU] 49=FILEDIAL.BIN
+[MENU] 50=DIALOG_T.BIN
+[MENU] 51=PONG_T.BIN
+[MENU] 52=STRESS.BIN
+[MENU] 53=FPU_T.BIN
+[MENU] 54=GFXBENCH.BIN
+[MENU] 55=MATH_T.BIN
+[MENU] 56=ERRTEST.BIN
+[MENU] 57=SOCK2TST.BIN
+[MENU] 58=POLLTST.BIN
+[MENU] 59=RANDTST.BIN
+[MENU] 60=DNSTST.BIN
+[MENU] 61=NETFIX.BIN
+[MENU] 62=CXXSMOKE.BIN
+[MENU] 63=THRD_T.BIN
+[MENU] 64=TLS_T.BIN
+[MENU] 65=WK1C_T.BIN
+[MENU] 66=CXX_T.BIN
+[MENU] 67=RTTI_T.BIN
+[MENU] 68=IPC_T.BIN
+[MENU] 69=MMTEST.BIN
+[MENU] 70=SQLTEST.BIN
+[MENU] 71=TORTURE.BIN
+[MENU] 72=BIG.BIN
+[MENU] 73=HELLO.BIN
+[MENU] 74=SELFHOST.BIN
+[MENU] 75=SH.BIN
+[MENU] 76=LS.BIN
+[MENU] 77=CAT.BIN
+[MENU] 78=GREP.BIN
+[MENU] 79=LESS.BIN
+[MENU] 80=TAIL.BIN
+[MENU] 81=HEAD.BIN
+[MENU] 82=SHTEST.BIN
+[MENU] 83=PS.BIN
+[MENU] 84=FREE.BIN
+[MENU] 85=UPTIME.BIN
+[MENU] 86=KILL.BIN
+[MENU] 87=BASENAME.BIN
+[MENU] 88=DIRNAME.BIN
+[MENU] 89=SEQ.BIN
+[MENU] 90=EXPR.BIN
+[MENU] 91=TEST.BIN
+[MENU] 92=CP.BIN
+[MENU] 93=RM.BIN
+[MENU] 94=MV.BIN
+[MENU] 95=TOUCH.BIN
+[MENU] 96=WC.BIN
+[MENU] 97=SED.BIN
+[MENU] 98=MAKE.BIN
+[MENU] 99=HEDGNU.BIN
+[MENU] 100=TAILGN.BIN
+[MENU] 101=CUT.BIN
+[MENU] 102=TR.BIN
+[MENU] 103=PASTE.BIN
+[MENU] 104=FOLD.BIN
+[MENU] 105=NL.BIN
+[MENU] 106=COMM.BIN
+[MENU] 107=TSORT.BIN
+[MENU] 108=EXPAND.BIN
+[MENU] 109=UNEXPAND.BIN
+[MENU] 110=CKSUM.BIN
+[MENU] 111=MD5SUM.BIN
+[MENU] 112=PROCCHLD.BIN
+[MENU] 113=SPAWNEX.BIN
+[MENU] 114=SIG_T.BIN
+[MENU] 115=HEDTEST.BIN
+[MENU] 116=TAILTEST.BIN
+[MENU] 117=PROCTEST.BIN
+[MENU] 118=WCTEST.BIN
+[MENU] 119=CUTTEST.BIN
+[MENU] 120=TRTEST.BIN
+[MENU] 121=PASTE_T.BIN
+[MENU] 122=FOLDTEST.BIN
+[MENU] 123=NLTEST.BIN
+[MENU] 124=COMMTEST.BIN
+[MENU] 125=TSORT_T.BIN
+[MENU] 126=EXPAND_T.BIN
+[MENU] 127=UNEXPAND_T.BIN
+[MENU] count=128
+[GPU] irq handled (status=1)
+[GPU] irq handled (status=1)
+[GPU] irq handled (status=1)
+[LAUNCH] SELFHOST.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=1
+Inside process_create: clearing memory at 0x0000000072000000
+Inside process_create: kmemset done.
+Loading program for scheduler (v2 AS): SELFHOST.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=-1
+/SELFHOST.BIN
+v2 loader: image mapped (lazy), bytes=52656 pages=13 first=in elap=0ms
+v2 loader: PID=3 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[SELFHOST] DRIVER-UP script=/SRC/SELFHOST.RUN
+/SRC/OUT.LOG
+/SRC/SELFHOST.RUN
+[SELFHOST] phase=s-shtest-start
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=1
+Inside process_create: clearing memory at 0x0000000072000000
+Inside process_create: kmemset done.
+Loading program for scheduler (v2 AS): /SHTEST.BIN
+/SHTEST.BIN
+v2 loader: image mapped (lazy), bytes=54688 pages=14 first=in elap=0ms
+v2 loader: PID=4 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=5
+Shell Integration Test Starting...
+Loading program for scheduler (v2 AS): SH.BIN
+/SH.BIN
+v2 loader: image mapped (lazy), bytes=195136 pages=48 first=in elap=0ms
+v2 loader: PID=5 entry=0x0000001000000000 sp=0x0000001800000000 resident=2 tables=5
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 92187 ELR = 0x0000001000000AC8
+[KERNEL] sys_fork: tf->regs[0] is now 2
+[DEBUG] Before eret, tf->regs[0] = 2 ELR = 0x0000001000002A78
+[DEBUG] Before eret, tf->regs[0] = 5 ELR = 0x0000001000003070
+[TEST] Initial prompt read successfully.
+[TEST] Sending 'help' command...
+[TEST] 'help' output validated successfully.
+[TEST] Sending 'cd /home' command...
+[TEST] 'cd' prompt update validated successfully.
+[TEST] Sending 'cat SHTEST.TXT' command...
+/CAT.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 6
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = 0x000000100000DDF8
+/CAT.BIN
+v2 loader: image mapped (lazy), bytes=45040 pages=11 first=in elap=1ms
+/home/SHTEST.TXT
+[KERNEL] Process 6: cat exited unexpectedly or gracefully.
+[TEST] 'cat' file output validated successfully.
+[TEST] Sending piped 'cat SHTEST.TXT | grep line' command...
+[KERNEL] sys_fork: tf->regs[0] is now 6
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = 0x000000100000DDF8
+[KERNEL] sys_fork: tf->regs[0] is now 7
+[DEBUG] Before eret, tf->regs[0] = 7 ELR = 0x000000100000DDF8
+/CAT.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 8
+[DEBUG] Before eret, tf->regs[0] = 8 ELR = 0x000000100000DDF8
+/CAT.BIN
+v2 loader: image mapped (lazy), bytes=45040 pages=11 first=in elap=0ms
+/home/SHTEST.TXT
+[KERNEL] Process 8: cat exited unexpectedly or gracefully.
+[KERNEL] Process 6: SH.BIN exited unexpectedly or gracefully.
+/GREP.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 6
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = 0x000000100000DDF8
+[DEBUG] Before eret, tf->regs[0] = 3 ELR = 0x000000100000CCB0
+/GREP.BIN
+v2 loader: image mapped (lazy), bytes=184664 pages=46 first=in elap=0ms
+[KERNEL] Process 6: grep exited unexpectedly or gracefully.
+[KERNEL] Process 7: SH.BIN exited unexpectedly or gracefully.
+[TEST] Piped command output validated successfully.
+[TEST] Sending 'echo hello' command...
+[TEST] 'echo' command validated successfully.
+[TEST] Sending 'clear' command...
+[TEST] 'clear' command validated successfully.
+[TEST] Sending 'echo redirected > OUT.TXT' command...
+/home/OUT.TXT
+[DEBUG] Before eret, tf->regs[0] = 1 ELR = 0x000000100000CC90
+[TEST] Redirection command sent.
+[TEST] Sending 'cat OUT.TXT' command...
+/CAT.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 6
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = 0x000000100000DDF8
+/CAT.BIN
+v2 loader: image mapped (lazy), bytes=45040 pages=11 first=in elap=1ms
+/home/OUT.TXT
+[KERNEL] Process 6: cat exited unexpectedly or gracefully.
+[TEST] Redirection content validated successfully.
+[TEST] Sending 'cat SHTEST.TXT > OUT2.TXT' (external redirect)...
+/home/OUT2.TXT
+/CAT.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 6
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = 0x000000100000DDF8
+/CAT.BIN
+v2 loader: image mapped (lazy), bytes=45040 pages=11 first=in elap=1ms
+/home/SHTEST.TXT
+[KERNEL] Process 6: cat exited unexpectedly or gracefully.
+/home/OUT6.TXT
+/home/OUT2.TXT
+[TEST] DIRECT-ext-cat PASS
+/home/OUT6.TXT
+[TEST] DIRECT-bultin-echo PASS
+/WC.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 6
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = /WC.BIN0x000000100000DDF8
+
+v2 loader: image mapped (lazy), bytes=92304 pages=23 first=in elap=1ms
+/home/OUT2.TXT
+[KERNEL] Process 6: wc exited unexpectedly or gracefully.
+[TEST] Sending 'cat SHTEST.TXT > OUT7.TXT 2>&1' (2>&1 dup)...
+/home/OUT7.TXT
+/CAT.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 6
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = 0x000000100000DDF8
+/CAT.BIN
+v2 loader: image mapped (lazy), bytes=45040 pages=11 first=in elap=0ms
+/home/SHTEST.TXT
+[KERNEL] Process 6: cat exited unexpectedly or gracefully.
+/home/OUT7.TXT
+/WC.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 6
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = 0x000000100000DDF8
+/WC.BIN
+v2 loader: image mapped (lazy), bytes=92304 pages=23 first=in elap=1ms
+/home/SHTEST.TXT
+[KERNEL] Process 6: wc exited unexpectedly or gracefully.
+/home/OUT7.TXT
+/WC.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 6
+[DEBUG] Before eret, tf->regs[0] = 6 ELR = 0x000000100000DDF8
+/WC.BIN
+v2 loader: image mapped (lazy), bytes=92304 pages=23 first=in elap=1ms
+/home/SHTEST.TXT
+[KERNEL] Process 6: wc exited unexpectedly or gracefully.
+SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST. Process table:
+  pid= ppid=1 state= DESKTOP.BIN
+  pid= ppid= state= /SHTEST.BIN
+  pid= ppid= state= SELFHOST.BIN
+  pid= ppid= state= /SHTEST.BIN
+  pid= ppid= state= SH.BIN
+[KERNEL] Process 2: /SHTEST.BIN exited unexpectedly or gracefully.
+-12243313432542[SELFHOST] phase=s-shtest-fail reason=tool-rc rc=9
+[SELFHOST] FAILED-AT stage=s-shtest
+[KERNEL] Process 3: SELFHOST.BIN exited unexpectedly or gracefully.

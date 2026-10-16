@@ -606,7 +606,11 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
   (94/53/8/5 MB + headers).  Verified: in-OS smoke `./build_kernel.sh check` from `/` rc=0
   (check.o compiled in-OS) + `SH.BIN -c ...` rc=0, `[DOT] PASS`
   (`bk-dot-smoke.serial.txt`); fresh default + MODE=selfhost disks rebuild with no staging
-  warnings; default disk boots `Mode: DESKTOP`.
+  warnings; default disk boots `Mode: DESKTOP`.  **Shell-test A/B addendum:** the menu-launched
+  `SHTEST.BIN` suite stalls at the same test (`cat ... > OUT7.TXT 2>&1`, right after the
+  direct-mode passes) with BOTH the pre-change and post-change `sh.bin` (rc 9 / 2816 across
+  runs — pre-existing, launch-context-dependent; interactive tests up to that point all
+  validated successfully with the new shell).  Serials: `bk-shtest-menulaunch-{new,old}.serial.txt`.
 
 - **2026-10-15 (evening) — inos-build-kernel: THE FULL IN-OS LOOP PASSES from the disk-carried
   source tar.** `disk.img` now carries `/SRC.TAR` (29,040,640 B ustar; `tools/selfhost-src-tar.sh`),
