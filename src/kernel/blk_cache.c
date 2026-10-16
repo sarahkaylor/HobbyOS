@@ -537,6 +537,11 @@ int blk_cache_read(uint64_t sector, void *buf, uint32_t count) {
   uint64_t u = first_u;
   while (u <= last_u) {
     if (!unit_has_missing(u, sector, count)) {
+      /* Fully valid right now: the copy pass below serves this unit's
+         requested sectors straight from its frame.  Count them here — the
+         fill runs only account for sectors inside filled runs, and the
+         copy pass never counts. */
+      stat_hits += (uint64_t)popcount8(unit_request_mask(u, sector, count));
       u++;
       continue;
     }
