@@ -15,6 +15,13 @@ extern void print_int(int val);
  * segment builder needs a forward declaration. */
 static void send_tcp_segment(struct socket_pcb* pcb, uint8_t flags, const void* data, uint16_t data_len);
 
+/* KD (2026-10-16): on-wire payload budgets for the 1500-byte packet buffer
+ * used by the segment/datagram builders.  A single send larger than these
+ * used to overrun the stack buffer (the cookie-bearing HTTP-request #GP —
+ * ret popped a smashed frame).  Callers must segment/reject first. */
+#define TCP_MAX_PAYLOAD 1446 /* 1500 - eth_hdr(14) - ipv4_hdr(20) - tcp_hdr(20) */
+#define UDP_MAX_PAYLOAD 1472 /* 1500 - eth_hdr(14) - ipv4_hdr(20) - udp_hdr(8)  */
+
 static uint32_t local_ip = 0;
 static uint32_t local_netmask = 0;
 static uint32_t local_gateway = 0;
@@ -799,6 +806,16 @@ static uint16_t tcp_udp_checksum(uint32_t src_ip, uint32_t dst_ip, uint8_t proto
 
 static void send_tcp_segment(struct socket_pcb* pcb, uint8_t flags, const void* data, uint16_t data_len) {
   uint8_t packet[1500];
+  if (data_len > TCP_MAX_PAYLOAD) {
+    /* KD guard: scream once and clamp rather than smash the stack frame;
+       net_socket_send() segments, so this should never fire. */
+    static int payload_clamp_warned = 0;
+    if (!payload_clamp_warned) {
+      payload_clamp_warned = 1;
+      uart_puts("[NET] Error: send_tcp_segment payload clamp (caller must segment)\n");
+    }
+    data_len = TCP_MAX_PAYLOAD;
+  }
   uint32_t total_len = sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr) + sizeof(struct tcp_hdr) + data_len;
 
   struct eth_hdr* eth = (struct eth_hdr*)packet;
@@ -1038,10 +1055,25 @@ int net_socket_send(struct socket_pcb* pcb, const void* buf, uint32_t len) {
   pcb->local_ip = local_ip;
   if (pcb->protocol == IP_PROTO_TCP) {
     if (pcb->state != SOCKET_ESTABLISHED) return -1;
-    // Transmit TCP payload with PUSH and ACK flags set
-    send_tcp_segment(pcb, 0x18, buf, len); // PSH | ACK
+    /* KD fix (2026-10-16): segment to the on-wire payload budget.  A single
+       write() larger than TCP_MAX_PAYLOAD used to overrun the 1500-byte
+       stack packet buffer inside send_tcp_segment (the ~1.5 KB
+       cookie-bearing HTTP request crashed with a #GP at its ret).  No send
+       queue in v1: segments go out back-to-back; the peer ACKs
+       asynchronously like any pipelined sender. */
+    const uint8_t* send_ptr = (const uint8_t*)buf;
+    uint32_t off = 0;
+    while (off < len) {
+      uint32_t chunk = len - off;
+      if (chunk > TCP_MAX_PAYLOAD) chunk = TCP_MAX_PAYLOAD;
+      send_tcp_segment(pcb, 0x18, send_ptr + off, (uint16_t)chunk); // PSH | ACK
+      off += chunk;
+    }
     return len;
   } else if (pcb->protocol == IP_PROTO_UDP) {
+    /* KD (2026-10-16): no IP fragmentation in v1 — reject oversized
+       datagrams instead of overrunning the 1500-byte stack buffer. */
+    if (len > UDP_MAX_PAYLOAD) return -1;
     // Construct a raw UDP datagram for connectionless transmission
     uint8_t packet[1500];
     uint32_t total_len = sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr) + sizeof(struct udp_hdr) + len;
