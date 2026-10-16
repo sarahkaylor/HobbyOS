@@ -15,6 +15,7 @@
 #include "dhcp.h"
 #include "arch/cpu.h"
 #include "lock.h"
+#include "blk_cache.h"
 
 void virtio_blk_handle_irq(void);
 extern int virtio_blk_irq;
@@ -416,6 +417,15 @@ void main(void) {
   }
 #endif
   uart_puts("VirtIO Block successfully initialized.\n");
+
+  /* Block-level read cache (docs/blk-cache.md section 7): normal boots
+     enable it right after the driver (and before fat16_init, so boot
+     reads are cached).  Unit-test mode initializes it from unit_test.c
+     AFTER frame_test_suite() so the frame suites keep the pristine pool
+     they assert on. */
+#ifndef KERNEL_MODE_UNIT_TEST
+  blk_cache_init();
+#endif
 
   if (fat16_init() != 0) {
     uart_puts("FAT-16 initialization failed!\n");

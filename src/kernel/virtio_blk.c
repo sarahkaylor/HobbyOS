@@ -2,6 +2,7 @@
 #include "lock.h"
 #include "process.h"
 #include "arch/cpu.h"
+#include "blk_cache.h"
 
 
 #ifdef __x86_64__
@@ -374,7 +375,7 @@ int virtio_blk_init(void) {
   return 0;
 }
 
-int virtio_blk_read_sector(uint64_t sector, void* buf, uint32_t count) {
+int virtio_blk_read_raw(uint64_t sector, void* buf, uint32_t count) {
   uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
   int res = 0;
   for (uint32_t i = 0; i < count; i++) {
@@ -407,7 +408,7 @@ int virtio_blk_read_sector(uint64_t sector, void* buf, uint32_t count) {
   return res;
 }
 
-int virtio_blk_write_sector(uint64_t sector, const void* buf, uint32_t count) {
+int virtio_blk_write_raw(uint64_t sector, const void* buf, uint32_t count) {
   /* Hard invariant: LBA 0 is the FAT boot sector (eb 3c 90 ...); no kernel
      path may ever write it.  The observed post-wave corruption -- a
      32-byte zeroed-name directory entry spliced over the boot sector -- is
@@ -747,7 +748,7 @@ static int virtio_blk_do_op(uint64_t sector, void* buf, uint32_t type, uint32_t 
  */
 volatile int blk_in_use = 0;
 
-int virtio_blk_read_sector(uint64_t sector, void* buf, uint32_t count) {
+int virtio_blk_read_raw(uint64_t sector, void* buf, uint32_t count) {
   uint64_t flags;
   while (1) {
     flags = spinlock_acquire_irqsave(&blk_request_lock);
@@ -788,7 +789,7 @@ int virtio_blk_read_sector(uint64_t sector, void* buf, uint32_t count) {
   return res;
 }
 
-int virtio_blk_write_sector(uint64_t sector, const void* buf, uint32_t count) {
+int virtio_blk_write_raw(uint64_t sector, const void* buf, uint32_t count) {
   /* Hard invariant: LBA 0 is the FAT boot sector (eb 3c 90 ...); no kernel
      path may ever write it.  The observed post-wave corruption -- a
      32-byte zeroed-name directory entry spliced over the boot sector -- is
@@ -830,3 +831,23 @@ int virtio_blk_write_sector(uint64_t sector, const void* buf, uint32_t count) {
 }
 
 #endif
+
+/* ---------------------------------------------------------------------
+ * Public block API (shared, arch-neutral): routes reads through the
+ * block-level read cache (docs/blk-cache.md) when it is ready, and keeps
+ * cached copies coherent on writes (raw write COMMITS first, then the
+ * written range is invalidated — never the reverse, otherwise a
+ * concurrent reader could refill stale data between the two).
+ * ------------------------------------------------------------------- */
+
+int virtio_blk_read_sector(uint64_t sector, void* buf, uint32_t count) {
+  if (blk_cache_is_ready())
+    return blk_cache_read(sector, buf, count);
+  return virtio_blk_read_raw(sector, buf, count);
+}
+
+int virtio_blk_write_sector(uint64_t sector, const void* buf, uint32_t count) {
+  int rc = virtio_blk_write_raw(sector, buf, count);
+  blk_cache_invalidate(sector, count);
+  return rc;
+}
