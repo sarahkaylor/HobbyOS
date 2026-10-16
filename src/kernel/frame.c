@@ -1,5 +1,6 @@
 #include "frame.h"
 #include "lock.h"
+#include "blk_cache.h"
 #include <stdint.h>
 
 extern void uart_puts(const char *s);
@@ -159,34 +160,44 @@ void frame_init(void) {
 }
 
 uint64_t frame_alloc(void) {
-  uint64_t flags = spinlock_acquire_irqsave(&frame_lock);
-  uint64_t res = 0;
-  uint32_t hint = frame_hint;
+  for (;;) {
+    uint64_t flags = spinlock_acquire_irqsave(&frame_lock);
+    uint64_t res = 0;
+    uint32_t hint = frame_hint;
 
-  /* Find-first-zero-word scan from the rotating hint, wrapping once.
-     Sequential allocation (faults, loader, spawns) advances the hint
-     word by word, so the scan is amortized O(1) per frame; a nearly
-     full pool degrades to a bounded full scan and then reports
-     exhaustion with 0. */
-  for (int pass = 0; pass < 2 && res == 0; pass++) {
-    uint32_t start = (pass == 0) ? hint : 0;
-    uint32_t end = (pass == 0) ? FRAME_WORDS : hint;
-    for (uint32_t w = start; w < end; w++) {
-      uint64_t inv = ~frame_bits[w];
-      if (!inv)
-        continue;
-      int bit = __builtin_ctzll(inv);
-      frame_bits[w] |= (1ULL << bit);
-      frame_hint = w;
-      frame_used++;
-      if (frame_used > frame_high)
-        frame_high = frame_used;
-      res = frame_phys_of((int)(w * 64 + (uint32_t)bit));
-      break;
+    /* Find-first-zero-word scan from the rotating hint, wrapping once.
+       Sequential allocation (faults, loader, spawns) advances the hint
+       word by word, so the scan is amortized O(1) per frame; a nearly
+       full pool degrades to a bounded full scan and then reports
+       exhaustion with 0. */
+    for (int pass = 0; pass < 2 && res == 0; pass++) {
+      uint32_t start = (pass == 0) ? hint : 0;
+      uint32_t end = (pass == 0) ? FRAME_WORDS : hint;
+      for (uint32_t w = start; w < end; w++) {
+        uint64_t inv = ~frame_bits[w];
+        if (!inv)
+          continue;
+        int bit = __builtin_ctzll(inv);
+        frame_bits[w] |= (1ULL << bit);
+        frame_hint = w;
+        frame_used++;
+        if (frame_used > frame_high)
+          frame_high = frame_used;
+        res = frame_phys_of((int)(w * 64 + (uint32_t)bit));
+        break;
+      }
     }
+    spinlock_release_irqrestore(&frame_lock, flags);
+    if (res)
+      return res;
+
+    /* Pool exhausted: discard cached units and retry.  evict takes its
+       own locks (never called with frame_lock held); a no-progress evict
+       means the cache is empty/not ready — give up.  (blk-cache hooks,
+       docs/blk-cache.md section 6.) */
+    if (blk_cache_evict_pages(64) == 0)
+      return 0;
   }
-  spinlock_release_irqrestore(&frame_lock, flags);
-  return res;
 }
 
 uint64_t frame_alloc_zeroed(void) {
@@ -218,44 +229,54 @@ void frame_free(uint64_t phys) {
 uint64_t frame_alloc_contig(int n) {
   if (n <= 0 || (uint64_t)n > FRAME_TOTAL_FRAMES)
     return 0;
-  uint64_t flags = spinlock_acquire_irqsave(&frame_lock);
-  uint32_t total = (uint32_t)FRAME_TOTAL_FRAMES;
-  uint32_t run_start = 0;
-  uint32_t run = 0;
-  uint64_t res = 0;
+  for (;;) {
+    uint64_t flags = spinlock_acquire_irqsave(&frame_lock);
+    uint32_t total = (uint32_t)FRAME_TOTAL_FRAMES;
+    uint32_t run_start = 0;
+    uint32_t run = 0;
+    uint64_t res = 0;
 
-  /* Two passes: [hint, end) then [0, hint).  Bit-by-bit with a running
-     counter; n is small (<= a few hundred) so the worst-case cost is
-     bounded by the pool size once, same class as the exhaustion scan. */
-  for (int pass = 0; pass < 2 && !res; pass++) {
-    uint32_t b = (pass == 0) ? frame_hint * 64 : 0;
-    uint32_t e = (pass == 0) ? total : frame_hint * 64;
-    if (b >= e)
-      continue;
-    run = 0;
-    for (uint32_t i = b; i < e; i++) {
-      if (frame_bits[i / 64] & (1ULL << (i % 64))) {
-        run = 0;
+    /* Two passes: [hint, end) then [0, hint).  Bit-by-bit with a running
+       counter; n is small (<= a few hundred) so the worst-case cost is
+       bounded by the pool size once, same class as the exhaustion scan. */
+    for (int pass = 0; pass < 2 && !res; pass++) {
+      uint32_t b = (pass == 0) ? frame_hint * 64 : 0;
+      uint32_t e = (pass == 0) ? total : frame_hint * 64;
+      if (b >= e)
         continue;
-      }
-      if (run == 0)
-        run_start = i;
-      if (++run == (uint32_t)n) {
-        for (uint32_t j = run_start; j < run_start + (uint32_t)n; j++)
-          frame_bits[j / 64] |= (1ULL << (j % 64));
-        frame_hint = (run_start + (uint32_t)n) / 64;
-        if (frame_hint >= FRAME_WORDS)
-          frame_hint = 0;
-        frame_used += (uint32_t)n;
-        if (frame_used > frame_high)
-          frame_high = frame_used;
-        res = frame_phys_of((int)run_start);
-        break;
+      run = 0;
+      for (uint32_t i = b; i < e; i++) {
+        if (frame_bits[i / 64] & (1ULL << (i % 64))) {
+          run = 0;
+          continue;
+        }
+        if (run == 0)
+          run_start = i;
+        if (++run == (uint32_t)n) {
+          for (uint32_t j = run_start; j < run_start + (uint32_t)n; j++)
+            frame_bits[j / 64] |= (1ULL << (j % 64));
+          frame_hint = (run_start + (uint32_t)n) / 64;
+          if (frame_hint >= FRAME_WORDS)
+            frame_hint = 0;
+          frame_used += (uint32_t)n;
+          if (frame_used > frame_high)
+            frame_high = frame_used;
+          res = frame_phys_of((int)run_start);
+          break;
+        }
       }
     }
+    spinlock_release_irqrestore(&frame_lock, flags);
+    if (res)
+      return res;
+
+    /* Pool can't provide a contiguous run: evict up to `n` cached units
+       (frames go back to the pool) and retry; give up when no progress
+       (cache empty/not ready).  No cache lock is held here (frame_lock was
+       released above), so the eviction cannot self-deadlock. */
+    if (blk_cache_evict_pages((uint64_t)n) == 0)
+      return 0;
   }
-  spinlock_release_irqrestore(&frame_lock, flags);
-  return res;
 }
 
 int frame_total_count(void) { return (int)FRAME_TOTAL_FRAMES; }
@@ -308,25 +329,35 @@ int frame_block_is_free(int idx) {
 }
 
 int frame_block_alloc_first_free(void) {
-  uint64_t flags = spinlock_acquire_irqsave(&frame_lock);
-  int found = -1;
-  for (int idx = 0; idx < BLOCK_COUNT; idx++) {
-    if (!block_is_free_locked(idx))
-      continue;
-    uint32_t w0 = ((uint32_t)idx * FRAME_BLOCK_FRAMES) / 64;
-    for (uint32_t i = 0; i < FRAME_BLOCK_FRAMES / 64; i++) {
-      uint64_t prev = frame_bits[w0 + i];
-      frame_used += 64 - popcount64(prev);
-      frame_bits[w0 + i] = ~(uint64_t)0;
+  for (;;) {
+    uint64_t flags = spinlock_acquire_irqsave(&frame_lock);
+    int found = -1;
+    for (int idx = 0; idx < BLOCK_COUNT; idx++) {
+      if (!block_is_free_locked(idx))
+        continue;
+      uint32_t w0 = ((uint32_t)idx * FRAME_BLOCK_FRAMES) / 64;
+      for (uint32_t i = 0; i < FRAME_BLOCK_FRAMES / 64; i++) {
+        uint64_t prev = frame_bits[w0 + i];
+        frame_used += 64 - popcount64(prev);
+        frame_bits[w0 + i] = ~(uint64_t)0;
+      }
+      if (frame_used > frame_high)
+        frame_high = frame_used;
+      block_used++;
+      found = idx;
+      break;
     }
-    if (frame_used > frame_high)
-      frame_high = frame_used;
-    block_used++;
-    found = idx;
-    break;
+    spinlock_release_irqrestore(&frame_lock, flags);
+    if (found >= 0)
+      return found;
+
+    /* No fully-free block: cached units squat in otherwise-partially-used
+       blocks (docs/blk-cache.md section 6).  Evict batches until a block
+       comes free or the cache empties.  This runs under proc_lock on the
+       caller's side, so the batch loop stays tight with an early exit. */
+    if (blk_cache_evict_pages(FRAME_BLOCK_FRAMES) == 0)
+      return -1;
   }
-  spinlock_release_irqrestore(&frame_lock, flags);
-  return found;
 }
 
 void frame_block_free(int idx) {
@@ -360,6 +391,34 @@ int frame_blocks_used_count(void) {
   int b = block_used;
   spinlock_release_irqrestore(&frame_lock, flags);
   return b;
+}
+
+/* ---------------------------------------------------------------------
+ * blk-cache reclaim helpers (docs/blk-cache.md section 6).  Evict cached
+ * units until the requested headroom exists or the cache is empty.  Never
+ * called with frame_lock held (eviction takes fill/bucket locks).  Both
+ * are hard no-ops (return 0) before blk_cache_init() — blk_cache_evict
+ * gates on cache readiness.
+ * ------------------------------------------------------------------- */
+
+int frame_reclaim_to_blocks(int want) {
+  if (want <= 0)
+    return 1;
+  while (frame_phys_block_free_count() < want) {
+    if (blk_cache_evict_pages(FRAME_BLOCK_FRAMES) == 0)
+      return 0;
+  }
+  return 1;
+}
+
+int frame_reclaim_to_free_frames(int want) {
+  if (want <= 0)
+    return 1;
+  while (frame_free_count() < want) {
+    if (blk_cache_evict_pages(1024) == 0)
+      return 0;
+  }
+  return 1;
 }
 
 #ifdef KERNEL_MODE_UNIT_TEST

@@ -47,3 +47,16 @@ SECTIONS
     . = . + 0x80000;
     __stack_top = .;
 }
+
+/* Limine placement smoke alarm (docs/blk-cache.md section 11): Limine
+   loads the ARM kernel near the TOP of guest RAM, so at the standard
+   16 GiB config the link-space ceiling is ~0x45A00000 (slide 0x3FA600000
+   → RAM top 0x440000000 runtime).  A .bss that crosses the line makes
+   the boot zeroing loop (and the fault handler's own .bss) touch
+   unbacked RAM: data-abort cascade with zero serial output after
+   "linux: Loading kernel".  The pre-cache kernel ended at ~0x4503EC58
+   (~10 MB of headroom); 12+ MiB of new .bss blows through it.  Keep at
+   least 4 MB clear under the line: move big tables to the frame pool
+   instead of .bss. */
+ASSERT(__bss_end <= 0x45600000,
+       "kernel .bss exceeds the limine placement window (docs/blk-cache.md section 11)");
