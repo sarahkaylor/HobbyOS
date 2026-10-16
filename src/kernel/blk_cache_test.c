@@ -5,6 +5,7 @@
 #include "virtio_blk.h"
 #include "frame.h"
 #include "fat16.h"
+#include "fs.h" /* struct file (complete type; fat16.h only forward-declares) */
 #include <stdint.h>
 
 /* Basic blk-cache suite (docs/blk-cache.md sections 4-7).  Runs AFTER

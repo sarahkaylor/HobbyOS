@@ -26,6 +26,14 @@
  * the read_raw/write_raw rename and the reclaim hooks to the headers; the
  * compatible externs below keep this TU self-contained until that lands
  * (identical declarations in the headers are not conflicts).
+ *
+ * .bss budget: kernel .bss is scarce on this platform — the kernel image
+ * is loaded near the top of guest RAM and its end (including every suite's
+ * statics) must stay below the RAM top; the cache's own entries[] array
+ * already consumes most of the headroom.  This suite deliberately keeps
+ * its static/global data at ~132 KiB (one 128 KiB scratch buffer + one
+ * 4 KiB sector buffer) by chunking every large read into <= 256-sector
+ * segments.
  */
 
 /* The core lane exposes the rewritten device ops (docs section 2) and the
@@ -34,6 +42,24 @@
 extern int virtio_blk_read_raw(uint64_t sector, void *buf, uint32_t count);
 extern int frame_reclaim_to_blocks(int want);
 extern int frame_reclaim_to_free_frames(int want);
+
+/* The cache's fill/copy path uses __builtin_memcpy, which compiles to a
+ * call to `memcpy`.  The x64 kernel link gets that symbol from
+ * src/kernel/arch/x64/cpu.c, but the ARM kernel links no libc and defines
+ * it nowhere — provide the ARM-side definition here (same pattern as
+ * trap_test.c's memset shim), guarded off x64 to avoid a duplicate-
+ * symbol conflict with cpu.c's memcpy. */
+#ifndef __x86_64__
+void *memcpy(void *dest, const void *src, unsigned long n) {
+  /* Volatile byte copy: the optimizer must not rewrite the loop back into
+     a call to memcpy (self-recursion at -O2). */
+  const volatile unsigned char *s = (const volatile unsigned char *)src;
+  volatile unsigned char *d = (volatile unsigned char *)dest;
+  while (n--)
+    *d++ = *s++;
+  return dest;
+}
+#endif
 
 /* 1 GiB recipe image: exactly 2097152 sectors, indices 0 .. 2097151.  The
  * cache has NO capacity API (docs sections 1/3 — reads past its 2 GiB
@@ -45,12 +71,12 @@ extern int frame_reclaim_to_free_frames(int want);
 
 #define BLKC_UNIT_SECTORS 8 /* sectors per cache unit (blk_cache.h) */
 
-/* Biggest single read issued by this suite: the 512-sector oracle case.
- * 512 sectors * 512 B = 256 KiB per buffer. */
-#define BLKC_MAXSEC 512
-#define BLKC_MAXBUF (BLKC_MAXSEC * 512)
-static uint8_t blkc_bufa[BLKC_MAXBUF];
-static uint8_t blkc_bufb[BLKC_MAXBUF];
+/* Big reads are chunked into <= 256-sector (128 KiB) segments so the
+ * suite's .bss stays small: one 128 KiB scratch buffer + one 4 KiB sector
+ * buffer, ~132 KiB total. */
+#define BLKC_MAXSEG 256
+static uint8_t blkc_buf[BLKC_MAXSEG * 512]; /* 128 KiB */
+static uint8_t blkc_small[4096];            /* 8 sectors */
 
 /* Non-returning check for loop bodies: records the failure and keeps the
  * iteration going (EXPECT_EQ would return from the helper and silently
@@ -84,14 +110,14 @@ static uint32_t blkc_units(uint64_t sector, uint32_t count) {
 }
 
 /* Fill `units` worth of cache by reading [sector, sector+units*8) in
- * <= 512-sector chunks (keeps the 256 KiB scratch buffers from growing;
- * a scheduler-free unit-mode boot has no other contention, so chunking
- * does not affect the entry/op accounting asserted elsewhere). */
+ * <= 256-sector chunks into blkc_buf (keeps .bss small; a scheduler-free
+ * unit-mode boot has no contention, so chunking does not affect the
+ * entry/op accounting asserted elsewhere). */
 static void blkc_fill(uint64_t sector, uint32_t units) {
   uint32_t secs = units * BLKC_UNIT_SECTORS;
   while (secs > 0) {
-    uint32_t chunk = secs > BLKC_MAXSEC ? BLKC_MAXSEC : secs;
-    (void)blk_cache_read(sector, blkc_bufa, chunk);
+    uint32_t chunk = secs > BLKC_MAXSEG ? BLKC_MAXSEG : secs;
+    (void)blk_cache_read(sector, blkc_buf, chunk);
     sector += chunk;
     secs -= chunk;
   }
@@ -127,14 +153,46 @@ static void test_blkc_oracle_matrix(void) {
   for (i = 0; i < (int)(sizeof(cases) / sizeof(cases[0])); i++) {
     uint64_t sec = cases[i].sector;
     uint32_t cnt = cases[i].count;
-    uint32_t bytes = cnt * 512;
+    uint32_t covered = 0;
 
     /* Guaranteed cold: drop every unit in the range. */
     blk_cache_invalidate(sec, cnt);
     blkc_snap(&s0);
-    int rc = blk_cache_read(sec, blkc_bufa, cnt);
+
+    /* Cold fill in <= 256-sector segments; each segment's data stays in
+       blkc_buf while its chunks are verified below, so no per-range
+       buffer bigger than the segment is needed. */
+    while (covered < cnt) {
+      uint32_t n = cnt - covered;
+      if (n > BLKC_MAXSEG)
+        n = BLKC_MAXSEG;
+      uint64_t seg = sec + covered;
+      int rc = blk_cache_read(seg, blkc_buf, n);
+      blkc_check(rc == 0, cases[i].tag);
+
+      /* Warm (hit) reads + raw-device reads, chunked to <= 8 sectors,
+         each byte-compared against the cold segment data still in
+         blkc_buf. */
+      uint32_t got = 0;
+      while (got < n) {
+        uint32_t c = n - got;
+        if (c > 8)
+          c = 8;
+        int rc2 = blk_cache_read(seg + got, blkc_small, c);
+        blkc_check(rc2 == 0, cases[i].tag);
+        blkc_check(blkc_buf_eq(blkc_buf + got * 512, blkc_small, c * 512),
+                   cases[i].tag);
+        int rrc = virtio_blk_read_raw(seg + got, blkc_small, c);
+        blkc_check(rrc == 0, cases[i].tag);
+        blkc_check(blkc_buf_eq(blkc_buf + got * 512, blkc_small, c * 512),
+                   cases[i].tag);
+        got += c;
+      }
+      covered += n;
+    }
     blkc_snap(&s1);
-    blkc_check(rc == 0, cases[i].tag);
+
+    /* Cold-fill accounting over the whole range. */
     blkc_check(BLKC_DELTA(s1, s0, misses) == (uint64_t)cnt, cases[i].tag);
     blkc_check(BLKC_DELTA(s1, s0, hits) == 0, cases[i].tag);
     /* Entry math: a cold read adds exactly the units it overlapped. */
@@ -146,19 +204,13 @@ static void test_blkc_oracle_matrix(void) {
                    (uint64_t)(cnt / BLKC_UNIT_SECTORS + 2),
                cases[i].tag);
 
-    /* Warm read (hit path): same data as the cold fill. */
-    int rc2 = blk_cache_read(sec, blkc_bufb, cnt);
+    /* The warm chunks above served entirely from cache: hits grew by the
+       whole range; raw reads never touch the cache. */
     blkc_snap(&s2);
-    blkc_check(rc2 == 0, cases[i].tag);
     blkc_check(BLKC_DELTA(s2, s1, hits) == (uint64_t)cnt, cases[i].tag);
     blkc_check(BLKC_DELTA(s2, s1, misses) == 0, cases[i].tag);
     blkc_check(BLKC_DELTA(s2, s1, fill_ops) == 0, cases[i].tag);
-    blkc_check(blkc_buf_eq(blkc_bufa, blkc_bufb, bytes), cases[i].tag);
-
-    /* Device oracle: the uncached read of the same range is identical. */
-    int rrc = virtio_blk_read_raw(sec, blkc_bufb, cnt);
-    blkc_check(rrc == 0, cases[i].tag);
-    blkc_check(blkc_buf_eq(blkc_bufa, blkc_bufb, bytes), cases[i].tag);
+    blkc_check(BLKC_DELTA(s2, s1, entries) == 0, cases[i].tag);
   }
 
   /* Routing proof: the PUBLIC entry point (virtio_blk_read_sector) must
@@ -166,16 +218,16 @@ static void test_blkc_oracle_matrix(void) {
      bytes equal to the device. */
   blk_cache_invalidate(1ULL, 1);
   blkc_snap(&s0);
-  EXPECT_EQ(virtio_blk_read_sector(1ULL, blkc_bufa, 1), 0);
+  EXPECT_EQ(virtio_blk_read_sector(1ULL, blkc_buf, 1), 0);
   blkc_snap(&s1);
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, misses), 1);
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, hits), 0);
-  EXPECT_EQ(virtio_blk_read_sector(1ULL, blkc_bufb, 1), 0);
+  EXPECT_EQ(virtio_blk_read_sector(1ULL, blkc_small, 1), 0);
   blkc_snap(&s2);
   EXPECT_EQ((int)BLKC_DELTA(s2, s1, hits), 1);
   EXPECT_EQ((int)BLKC_DELTA(s2, s1, misses), 0);
-  EXPECT_EQ(virtio_blk_read_raw(1ULL, blkc_bufb, 1), 0);
-  EXPECT_EQ(blkc_buf_eq(blkc_bufa, blkc_bufb, 512), 1);
+  EXPECT_EQ(virtio_blk_read_raw(1ULL, blkc_small, 1), 0);
+  EXPECT_EQ(blkc_buf_eq(blkc_buf, blkc_small, 512), 1);
 }
 
 /* ------------------------------------------------------------------ */
@@ -193,7 +245,7 @@ static void test_blkc_accounting(void) {
   /* Whole-range cold, single unit (8 sectors): 8 misses, 1 entry, 1 fill. */
   blk_cache_invalidate(base, 8);
   blkc_snap(&s0);
-  EXPECT_EQ(blk_cache_read(base, blkc_bufa, 8), 0);
+  EXPECT_EQ(blk_cache_read(base, blkc_buf, 8), 0);
   blkc_snap(&s1);
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, misses), 8);
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, hits), 0);
@@ -203,7 +255,7 @@ static void test_blkc_accounting(void) {
 
   /* Immediate second read of the same range: pure hits, no device. */
   blkc_snap(&s0);
-  EXPECT_EQ(blk_cache_read(base, blkc_bufb, 8), 0);
+  EXPECT_EQ(blk_cache_read(base, blkc_buf, 8), 0);
   blkc_snap(&s1);
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, hits), 8);
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, misses), 0);
@@ -211,13 +263,15 @@ static void test_blkc_accounting(void) {
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, entries), 0);
 
   /* Units individually missing (interior invalidation): exactly one fill
-     op per missing unit (docs section 4a), hits for the rest. */
+     op per missing unit (docs section 4a), and the two fully-valid units
+     between the missing ones are READ from cache — they must count as
+     hits (docs section 4.2e: "hits for sectors valid before this fill"). */
   blk_cache_invalidate(base2, 32);
-  EXPECT_EQ(blk_cache_read(base2, blkc_bufa, 32), 0); /* units 0..3 */
-  blk_cache_invalidate(base2 + 8, 8);                 /* drop unit 1 */
-  blk_cache_invalidate(base2 + 24, 8);                /* drop unit 3 */
+  EXPECT_EQ(blk_cache_read(base2, blkc_buf, 32), 0); /* units 0..3 */
+  blk_cache_invalidate(base2 + 8, 8);                /* drop unit 1 */
+  blk_cache_invalidate(base2 + 24, 8);               /* drop unit 3 */
   blkc_snap(&s0);
-  EXPECT_EQ(blk_cache_read(base2, blkc_bufa, 32), 0);
+  EXPECT_EQ(blk_cache_read(base2, blkc_buf, 32), 0);
   blkc_snap(&s1);
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, hits), 16);
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, misses), 16);
@@ -227,7 +281,7 @@ static void test_blkc_accounting(void) {
   /* Whole-range cold, 8 units: the coalescing no-regression bound. */
   blk_cache_invalidate(base3, 64);
   blkc_snap(&s0);
-  EXPECT_EQ(blk_cache_read(base3, blkc_bufa, 64), 0);
+  EXPECT_EQ(blk_cache_read(base3, blkc_buf, 64), 0);
   blkc_snap(&s1);
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, misses), 64);
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, entries), 8);
@@ -437,15 +491,15 @@ static void test_blkc_boundaries(void) {
      device read (no capacity query exists; the 1 GiB recipe image makes
      2097151 the final sector — see BLKC_DISK_SECTORS above). */
   blk_cache_invalidate(last, 1);
-  EXPECT_EQ(blk_cache_read(last, blkc_bufa, 1), 0);
-  EXPECT_EQ(virtio_blk_read_raw(last, blkc_bufb, 1), 0);
-  EXPECT_EQ(blkc_buf_eq(blkc_bufa, blkc_bufb, 512), 1);
+  EXPECT_EQ(blk_cache_read(last, blkc_buf, 1), 0);
+  EXPECT_EQ(virtio_blk_read_raw(last, blkc_small, 1), 0);
+  EXPECT_EQ(blkc_buf_eq(blkc_buf, blkc_small, 512), 1);
 
   /* Unit-aligned read, then a single-sector read of the SAME unit: hit. */
   blk_cache_invalidate(aligned, 8);
-  EXPECT_EQ(blk_cache_read(aligned, blkc_bufa, 8), 0);
+  EXPECT_EQ(blk_cache_read(aligned, blkc_buf, 8), 0);
   blkc_snap(&s0);
-  EXPECT_EQ(blk_cache_read(aligned + 3, blkc_bufb, 1), 0);
+  EXPECT_EQ(blk_cache_read(aligned + 3, blkc_small, 1), 0);
   blkc_snap(&s1);
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, hits), 1);
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, misses), 0);
@@ -454,7 +508,7 @@ static void test_blkc_boundaries(void) {
      drops exactly those two entries, and units fully outside the range
      stay cached (proven by a hit read). */
   blk_cache_invalidate(pbase - 8, 32); /* clean units 65535..65538 */
-  EXPECT_EQ(blk_cache_read(pbase - 8, blkc_bufa, 32), 0);
+  EXPECT_EQ(blk_cache_read(pbase - 8, blkc_buf, 32), 0);
   blkc_snap(&s0);
   blk_cache_invalidate(pbase + 2, 12); /* units 65536 (6 secs) + 65537 (6) */
   blkc_snap(&s1);
@@ -462,20 +516,20 @@ static void test_blkc_boundaries(void) {
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, invalidations), 2);
   /* Neighbor unit 65535 (sector pbase-1) still cached: hit. */
   blkc_snap(&s0);
-  EXPECT_EQ(blk_cache_read(pbase - 1, blkc_bufb, 1), 0);
+  EXPECT_EQ(blk_cache_read(pbase - 1, blkc_small, 1), 0);
   blkc_snap(&s1);
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, hits), 1);
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, misses), 0);
   /* Neighbor unit 65538 (sector pbase+16, offset 0) still cached: hit. */
   blkc_snap(&s0);
-  EXPECT_EQ(blk_cache_read(pbase + 16, blkc_bufb, 1), 0);
+  EXPECT_EQ(blk_cache_read(pbase + 16, blkc_small, 1), 0);
   blkc_snap(&s1);
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, hits), 1);
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, misses), 0);
 
   /* Contract no-ops. */
   blk_cache_invalidate(pbase + 2, 1); /* drop the refetched unit's sector */
-  blk_cache_read(pbase + 2, blkc_bufa, 1);
+  blk_cache_read(pbase + 2, blkc_buf, 1);
   blkc_snap(&s0);
   blk_cache_invalidate(pbase + 2, 0); /* invalidate(s, 0) is a no-op */
   blkc_snap(&s1);
@@ -495,12 +549,12 @@ static void test_blkc_contract_read0(void) {
      bytes. */
   blk_cache_invalidate(sec, 1);
   blkc_snap(&s0);
-  EXPECT_EQ(blk_cache_read(sec, blkc_bufa, 0), 0);
+  EXPECT_EQ(blk_cache_read(sec, blkc_buf, 0), 0);
   blkc_snap(&s1);
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, misses), 1);
   EXPECT_EQ((int)BLKC_DELTA(s1, s0, hits), 0);
-  EXPECT_EQ(virtio_blk_read_raw(sec, blkc_bufb, 1), 0);
-  EXPECT_EQ(blkc_buf_eq(blkc_bufa, blkc_bufb, 512), 1);
+  EXPECT_EQ(virtio_blk_read_raw(sec, blkc_small, 1), 0);
+  EXPECT_EQ(blkc_buf_eq(blkc_buf, blkc_small, 512), 1);
 }
 
 void blk_cache_press_suite(void) {
