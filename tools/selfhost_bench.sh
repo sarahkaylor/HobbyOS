@@ -181,7 +181,8 @@ trap cleanup EXIT
 # This avoids the command-substitution newline-stripping trap of byte-based
 # reads (a chunk boundary newline was being dropped, gluing two lines).
 POS=0           # lines consumed so far
-MARKERS=()      # "elapsed label rawline" entries, appended chronologically
+MARKERS=()      # "elapsed label rawline" entries, first occurrence per label
+RECORDED=""     # space-separated labels already recorded (dedupe)
 
 poll_once() {
   local now_lines new_lines skip
@@ -193,6 +194,12 @@ poll_once() {
   while IFS= read -r line; do
     label=$(pick_label "$line")
     [ -n "$label" ] || continue
+    # first occurrence per label only (the driver AND the make recipe echo
+    # the same stage names; the earliest hit is the stage timing datum)
+    case " ${RECORDED:-} " in
+      *" $label "*) continue;;
+    esac
+    RECORDED="$RECORDED $label"
     MARKERS+=("$(( $(now_s) - T0 ))|$label|$line")
   done < <(tail -n +"$skip" "$LOG" 2>/dev/null | head -n "$new_lines")
 }
