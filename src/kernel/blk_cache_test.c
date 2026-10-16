@@ -5,6 +5,7 @@
 #include "virtio_blk.h"
 #include "frame.h"
 #include "fat16.h"
+#include "fs.h" /* full struct file definition */
 #include <stdint.h>
 
 /* Basic blk-cache suite (docs/blk-cache.md sections 4-7).  Runs AFTER
@@ -27,8 +28,8 @@ __attribute__((weak)) void blk_cache_press_suite(void) {}
 
 static uint8_t bc_buf1[512];
 static uint8_t bc_buf2[512];
-static uint8_t bc_big1[1024]; /* 2 sectors * 512 */
-static uint8_t bc_big2[1024];
+static uint8_t bc_big1[8192]; /* 16 sectors * 512 (the multi-run test) */
+static uint8_t bc_big2[1024]; /* 2 sectors * 512 */
 
 /* Index of the first differing byte between a and b, or n if equal. */
 static int bc_mismatch_at(const uint8_t *a, const uint8_t *b, int n) {
@@ -91,7 +92,10 @@ static void test_blk_cache_multi_sector_run(void) {
 
   blk_cache_get_stats(&s0);
   /* 16 sectors, deliberately straddling three 8-sector units: three new
-     entries, one contiguous frame run, all 16 sectors fetched. */
+     entries, one contiguous frame run, all 16 sectors fetched.  (Flush
+     first: the 2-sector read above already cached the first unit.) */
+  blk_cache_flush_all();
+  blk_cache_get_stats(&s0);
   EXPECT_EQ(virtio_blk_read_sector(BC_TEST_BASE_SECTOR + 4, bc_big1, 16), 0);
   blk_cache_get_stats(&s1);
   EXPECT_EQ((int)(s1.entries - s0.entries), 3);
@@ -113,7 +117,7 @@ static void test_blk_cache_invalidate_refill(void) {
   /* Invalidate a RANGE covering the cached unit and one extra sector. */
   blk_cache_invalidate(BC_TEST_BASE_SECTOR, 2);
   blk_cache_get_stats(&s0);
-  EXPECT_EQ((int)(s0.entries - s1.entries), 1);
+  EXPECT_EQ((int)(s1.entries - s0.entries), 1);
   EXPECT_EQ((int)(s0.invalidations - s1.invalidations), 1);
 
   /* The re-read must refill (a miss, not a hit) and return device bytes. */
@@ -212,7 +216,7 @@ static void test_blk_cache_write_coherence(void) {
   EXPECT_EQ(fat16_read(&f, rd, 1024), 1024);
   EXPECT_EQ(fat16_close(&f), 0);
   EXPECT_EQ(bc_mismatch_at(rd, pat_b, 1024), 1024);
-  EXPECT_EQ(bc_mismatch_at(rd, pat_a, 1024), 1024); /* must differ! */
+  EXPECT_EQ((bc_mismatch_at(rd, pat_a, 1024) < 1024), 1); /* must differ! */
 
   fat16_unlink(path);
 }
