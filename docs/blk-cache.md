@@ -56,9 +56,14 @@ construction.
 - **Storage**: one frame per unit, allocated with `frame_alloc()` /
   `frame_alloc_contig()` (kernel pool frames are identity-mapped; a unit's
   data is addressed at `frame + (sector & 7) * 512`).
-- **Entries**: fixed static array, `BLK_CACHE_MAX_ENTRIES = 524288`
-  (covers a 2 GiB volume; ~24 B each → ~12.6 MiB .bss, affordable next to
-  the current ~82 MiB of kernel .bss). Free-list of indexes.
+- **Entries**: a **frame-backed** table allocated once at init —
+  `BLK_CACHE_MAX_ENTRIES = 524288` (covers a 2 GiB volume; 24 B each =
+  12,582,912 B = exactly 3072 frames via `frame_alloc_contig`).  It is
+  deliberately NOT kernel `.bss`: the ARM kernel is placed near the top of
+  RAM by limine and the static footprint budget below that placement window
+  is only ~10 MB (see §11); a 12.6 MB `.bss` array aborts the boot.
+  Free-list of indexes; allocation failure ⇒ the cache stays off
+  (`cache_ready = 0`, one boot log line).
   `struct blk_cache_entry { uint64_t unit; uint64_t frame; uint32_t next;
   uint8_t valid; uint8_t ref; }`.
 - **Hash**: `BLK_CACHE_BUCKETS = 16384` buckets, singly-linked chains,
@@ -272,7 +277,22 @@ raw logs (markers + FAIL-token scan), never exit codes.
   single-op behavior.
 - 2026-10-16: no LRU; second-chance clock; eviction driven by frame
   pressure + flush only.
-- 2026-10-16: `BLK_CACHE_MAX_ENTRIES` 524288 (2 GiB coverage) — .bss is
-  cheap here (~12.6 MiB vs current 82 MiB).
+- 2026-10-16: `BLK_CACHE_MAX_ENTRIES` 524288 (2 GiB coverage) — table
+  frame-backed (superceded below by the crash-forensics amendment).
 - 2026-10-16: unit-test mode initializes the cache after
   `frame_test_suite()` (pristine-pool assertions preserved).
+- 2026-10-16 (crash forensics → amendment): the entry table moved from
+  kernel `.bss` to a frame-backed allocation.  The tests lane's ARM unit
+  boot aborted (Data Abort external at FAR 0x44042E050 → link
+  0x45E2E050 = `sync_handler_c.fatal_lock`, the tail of `.bss`): limine
+  places the ARM kernel content near RAM top; at the standard 16 GiB
+  config the boot's slide was 0x3FA600000 and RAM top is 0x440000000
+  (runtime), giving a hard link-space line of ≈0x45A00000.  The pre-cache
+  kernel ended at 0x4503EC58 — ~10 MB of headroom — and the 12.6 MB
+  entries array (plus unit-test statics) crossed it; the boot bss-zeroing
+  loop and the fault handler then touched unbacked RAM and looped with no
+  serial output.  Fix: entries via `frame_alloc_contig` (3072 frames);
+  smoke alarm `ASSERT(__bss_end <= 0x45600000, ...)` in the ARM
+  `linker.ld`.  **Rule: the ARM kernel's static footprint has a
+  single-digit-MB budget below the placement window — never add
+  multi-MB `.bss`.**
