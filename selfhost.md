@@ -590,6 +590,22 @@ for t in clang ld.lld llvm-objcopy llvm-ar mcopy mmd mkfs.fat make; do command -
 
 ## 11. Fix log (append-only, newest first)
 
+- **2026-10-15 (night 2) — `make run` completeness: the disk always ships the browser + the
+  in-OS build toolchain.** New `disk.img` prerequisites: **`browser-staged`** (resolve
+  `::/BROWSER.BIN` from `$BROWSER_BIN` → vendored-source build → committed cache; if none
+  exist, BUILD via `make browser --build-deps` and cache the result) and **`tools-staged`**
+  (ensure the LLVM dist staging; if neither `obj/` nor the persistent `third_party` copy
+  exists, build it via the new `tools/build-llvm-dist-staging.sh`, a transcription of
+  llvm-bootstrap §6/§6.1).  The `disk.img` recipe's own browser-resolution block was replaced
+  by a slim mcopy (resolution now happens exactly once, in the prerequisite).  Escape hatches:
+  `BROWSER_SKIP=1` / `TOOLS_SKIP=1`; `TOOLS_BUILD_CMD` overrides the staging build.
+  Verified: browser branch (fast/stub-build/fail/skip all rc-correct; real resolution → 87.5 MB
+  `::/BROWSER.BIN`), tools branch (fast/skip/stub-build/fail rc-correct; real staging restored,
+  clang-21 126 MB), full `make -j32 disk.img` clean + `Mode: DESKTOP` boot with BROWSER.BIN +
+  CLANG/LLD/LLVMAR/OBJCOPY + RESDIR + SRC.TAR + BUILD_KERNEL.SH all aboard.  Cold-cost
+  honesty: the LLVM script's full cold path is transcribed from the wave-2 receipts and has not
+  been re-run end-to-end since (the persistent staging made it moot); see the script header.
+
 - **2026-10-15 (night) — inos-build-kernel follow-ups from a user console session: `./x.sh`
   dispatch, `SH.BIN` resolution, toolchain preflight.** Three fixes.  (1) `src/user/sh.c`: a
   command that resolves to a `.sh` file (or a `#!` file) is now run as a script — the shell

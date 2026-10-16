@@ -77,6 +77,30 @@ first, then the persistent copy `third_party/llvm-21.1.8/dist-staging`
 `tools/selfhost-stage.sh --tools disk.img`, or rebuild `disk.img` where
 either staging source exists.
 
+### `make run` completeness (2026-10-15)
+
+`disk.img` — and so `make run` — depends on two completeness rules so a
+boot always carries a full OS; cached copies are reused, genuinely-missing
+ones are built once:
+
+- **`browser-staged`** resolves `::/BROWSER.BIN` from (1) `$BROWSER_BIN`,
+  (2) the vendored-source build output, (3) the committed binary cache; if
+  NONE exist it BUILDS the browser from the vendored source
+  (`make browser --build-deps`; cold = hours, warm = minutes) and caches
+  the result as the vendored-source build output for later runs.
+- **`tools-staged`** ensures the LLVM dist staging
+  (`obj/selfhost/dist-staging` or the persistent
+  `third_party/llvm-21.1.8/dist-staging`); if neither exists it builds it
+  via `tools/build-llvm-dist-staging.sh` (a transcription of
+  llvm-bootstrap.md §6/§6.1 services; cold = hours) and caches it under
+  `third_party/`.
+
+Escape hatches: `BROWSER_SKIP=1` / `TOOLS_SKIP=1` restore the old
+best-effort behavior; `TOOLS_BUILD_CMD=<cmd>` overrides the staging build;
+`BROWSER_BIN=<path>` pins a specific WebProcess binary.  The `disk.img`
+recipe itself no longer resolves the browser — it mcopies whatever
+`browser-staged` produced.
+
 The pieces the script drives (all in-OS):
 
     /TOOLS/TAR.BIN xf /SRC.TAR /SRC          # extract the source payload

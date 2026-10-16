@@ -79,16 +79,20 @@ MODE_FILE = $(OBJ_DIR)/.mode
 # (sha-verified snapshot parts + extract.sh + build.sh; see its README.md).
 # Build from source with:   make browser
 #   (or:  bash third_party/webkit-hobbyos/build.sh --arch intel --build-deps)
-# Source order used by disk.img: (1) BROWSER_BIN if present (explicit override
-# or a local fork/worktree build; defaults below), (2) the vendored-source
-# build output (third_party/webkit-hobbyos/build/<arch>/browser.bin), (3) the
-# OPTIONAL binary cache (third_party/webkit-hobbyos/cache/) for machines that
-# have not built anything yet, (4) skip — the disk ships without the browser
-# and the Apps menu omits it.  Defaults point at known-good WINDOWED
-# WebProcess builds per arch (the canonical ARM one is the pre-WK-4b
-# renderer verified green by WN3; the intel one is WF1B's fresh merged-tree
-# build — the canonical intel dir is stale/pre-windowed).  Override on the
-# command line with:  make disk.img BROWSER_BIN=/path/to/WebProcess
+# Source order used by the browser-staged rule (a disk.img prerequisite, so
+# `make run` always boots a complete OS): (1) BROWSER_BIN if present
+# (explicit override or a local fork/worktree build; defaults below),
+# (2) the vendored-source build output
+# (third_party/webkit-hobbyos/build/<arch>/browser.bin), (3) the binary
+# cache (third_party/webkit-hobbyos/cache/), (4) BUILD it from the vendored
+# source — `make browser --build-deps` (cold = hours, warm = minutes; the
+# result lands in $(BROWSER_BUILT) and is reused from then on).  Escape
+# hatch: BROWSER_SKIP=1 restores the old best-effort behavior (ship
+# without the browser).  Defaults point at known-good WINDOWED WebProcess
+# builds per arch (the canonical ARM one is the pre-WK-4b renderer verified
+# green by WN3; the intel one is WF1B's fresh merged-tree build — the
+# canonical intel dir is stale/pre-windowed).  Override on the command
+# line with:  make disk.img BROWSER_BIN=/path/to/WebProcess
 ifeq ($(ARCH),arm)
 BROWSER_BIN ?= $(HOME)/webkit-hobbyos/WebKitBuild/HobbyOS-arm-wk5/bin/WebProcess
 else
@@ -107,6 +111,74 @@ XZ ?= xz
 .PHONY: browser
 browser:
 	bash third_party/webkit-hobbyos/build.sh --arch $(ARCH) $(BUILD_ARGS)
+
+# Build-if-missing command for browser-staged (runs only when NONE of the
+# three sources exist).  --build-deps makes an otherwise-bare machine
+# self-sufficient (cross-deps are built too; warm re-runs are minutes).
+BROWSER_BUILD_CMD ?= $(MAKE) --no-print-directory browser BUILD_ARGS='--build-deps'
+BROWSER_SKIP ?= 0
+
+# ---------------------------------------------------------------------------
+# `make run` completeness (2026-10-15): disk.img depends on browser-staged
+# and tools-staged, so a boot ALWAYS carries a browser and the in-OS build
+# toolchain (/TOOLS/{CLANG,LLD,LLVMAR,OBJCOPY}.BIN + RESDIR).  Cached copies
+# are reused silently; genuinely-missing ones are BUILT once and cached.
+# Escape hatches for special flows: BROWSER_SKIP=1 / TOOLS_SKIP=1 (skip;
+# old warn/ship-without behavior), TOOLS_BUILD_CMD=<cmd> to override the
+# LLVM dist-staging build (see docs/selfhost/llvm-bootstrap.md §6 for what
+# the default script does and its cold-build cost).
+# ---------------------------------------------------------------------------
+
+# Resolve the WebProcess source chain into obj/$(ARCH)/browser.bin, building
+# the browser first when there is nothing to resolve from.
+.PHONY: browser-staged
+browser-staged:
+	@if [ ! -f "$(BROWSER_BIN)" ] && [ ! -f "$(BROWSER_BUILT)" ] && [ ! -f "$(BROWSER_CACHE)" ]; then \
+	  if [ "$(BROWSER_SKIP)" = "1" ]; then \
+	    echo "[browser] none of $(BROWSER_BIN) | $(BROWSER_BUILT) | $(BROWSER_CACHE) present; BROWSER_SKIP=1 - disk ships without the browser"; \
+	  else \
+	    echo "[browser] no cached WebProcess binary; building from the vendored source (cold = hours, warm = minutes; result cached in $(BROWSER_BUILT))..."; \
+	    $(BROWSER_BUILD_CMD); \
+	  fi; \
+	fi; \
+	if [ -f "$(BROWSER_BIN)" ]; then \
+	  $(OBJCOPY) -O binary "$(BROWSER_BIN)" obj/$(ARCH)/browser.bin && echo "[browser] $(BROWSER_BIN) -> obj/$(ARCH)/browser.bin"; \
+	elif [ -f "$(BROWSER_BUILT)" ]; then \
+	  mkdir -p obj/$(ARCH) && cp "$(BROWSER_BUILT)" obj/$(ARCH)/browser.bin && echo "[browser] $(BROWSER_BUILT) (vendored-source build) -> obj/$(ARCH)/browser.bin"; \
+	elif [ -f "$(BROWSER_CACHE)" ]; then \
+	  mkdir -p obj/$(ARCH) && $(XZ) -dc "$(BROWSER_CACHE)" > obj/$(ARCH)/browser.bin && echo "[browser] $(BROWSER_CACHE) (cache) -> obj/$(ARCH)/browser.bin"; \
+	elif [ "$(BROWSER_SKIP)" = "1" ]; then \
+	  rm -f obj/$(ARCH)/browser.bin; \
+	  echo "[browser] BROWSER_SKIP=1 - no browser staged"; \
+	else \
+	  echo "[browser] ERROR: still no WebProcess binary after the build - the disk would lack the browser"; \
+	  exit 1; \
+	fi
+
+# Ensure the in-OS LLVM toolchain staging exists (obj/selfhost/dist-staging
+# or the persistent third_party/llvm-21.1.8/dist-staging), building it when
+# neither is present.  tools/selfhost-stage.sh --tools consumes it for the
+# /TOOLS staging step in the disk.img recipe.
+TOOLS_BUILD_CMD ?= bash tools/build-llvm-dist-staging.sh
+TOOLS_SKIP ?= 0
+
+.PHONY: tools-staged
+tools-staged:
+	@if [ ! -f obj/selfhost/dist-staging/usr/local/bin/clang-21 ] && \
+	    [ ! -f third_party/llvm-21.1.8/dist-staging/usr/local/bin/clang-21 ]; then \
+	  if [ "$(TOOLS_SKIP)" = "1" ]; then \
+	    echo "[tools] no LLVM dist staging; TOOLS_SKIP=1 - /TOOLS will lack the LLVM toolchain"; \
+	  else \
+	    echo "[tools] no LLVM dist staging anywhere; building it (one-time; cold = hours; result cached in third_party/llvm-21.1.8/dist-staging; docs/selfhost/llvm-bootstrap.md section 6)..."; \
+	    $(TOOLS_BUILD_CMD); \
+	    if [ ! -f third_party/llvm-21.1.8/dist-staging/usr/local/bin/clang-21 ]; then \
+	      echo "[tools] ERROR: build did not produce third_party/llvm-21.1.8/dist-staging"; \
+	      exit 1; \
+	    fi; \
+	  fi; \
+	else \
+	  echo "[tools] LLVM dist staging present"; \
+	fi
 
 # The browser rule above is the first rule in the file; without an explicit
 # default-goal it would make `make` (no args) run the WebKit build.  The
@@ -1883,6 +1955,12 @@ disk.img: $(MAKE_BIN)
 $(TAR_BIN): .EXTRA_PREREQS += src/user/linker.ld
 disk.img: $(TAR_BIN)
 
+# [inos-build-kernel] `make run` completeness (2026-10-15): every disk
+# ships a browser and the in-OS build toolchain; each is built here when no
+# cached copy exists (rules above; see the completeness block near the
+# browser rules).
+disk.img: browser-staged tools-staged
+
 disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(SELFHOST_BIN) $(MODE_FILE)
 
 # w2-mtools disk
@@ -1953,23 +2031,15 @@ endif
 	$(MCOPY) -i disk.img $(TIMEOUT_BIN) ::/TIMEOUT.BIN
 	$(MCOPY) -i disk.img $(NFSTEST_BIN) ::/NFSTEST.BIN
 	$(MCOPY) -i disk.img $(DESKTOP_BIN) ::/DESKTOP.BIN
-	@src=""; \
-	if [ -f "$(BROWSER_BIN)" ]; then \
-	  $(OBJCOPY) -O binary "$(BROWSER_BIN)" obj/$(ARCH)/browser.bin && src="$(BROWSER_BIN)"; \
-	elif [ -f "$(BROWSER_BUILT)" ]; then \
-	  mkdir -p obj/$(ARCH) && cp "$(BROWSER_BUILT)" obj/$(ARCH)/browser.bin && src="$(BROWSER_BUILT) (vendored-source build)"; \
-	elif [ -f "$(BROWSER_CACHE)" ]; then \
-	  mkdir -p obj/$(ARCH) && $(XZ) -dc "$(BROWSER_CACHE)" > obj/$(ARCH)/browser.bin && src="$(BROWSER_CACHE) (cache)"; \
-	fi; \
-	if [ -n "$$src" ]; then \
-	  echo "browser: $$src -> obj/$(ARCH)/browser.bin (flat, installed as ::/BROWSER.BIN)"; \
+	@if [ -f obj/$(ARCH)/browser.bin ]; then \
+	  echo "browser: obj/$(ARCH)/browser.bin (resolved by the browser-staged completeness rule; installed as ::/BROWSER.BIN)"; \
 	  $(MCOPY) -i disk.img obj/$(ARCH)/browser.bin ::/BROWSER.BIN; \
 	  $(MCOPY) -i disk.img tests/fixtures/browser/HOME.HTM ::/HOME.HTM; \
 	  $(MCOPY) -i disk.img tests/fixtures/browser/TALL.HTM ::/TALL.HTM; \
 	  [ -f "$(BROWSER_FONT)" ] || $(MAKE) --no-print-directory $(BROWSER_FONT); \
 	  $(MCOPY) -i disk.img $(BROWSER_FONT) ::/DEJAVU.TTF; \
 	else \
-	  echo "browser: no WebProcess source ($(BROWSER_BIN) | $(BROWSER_BUILT) | $(BROWSER_CACHE)) — Apps menu ships without browser"; \
+	  echo "browser: no browser.bin resolved (BROWSER_SKIP) - Apps menu ships without browser"; \
 	fi
 	$(MCOPY) -i disk.img $(EDITOR_BIN) ::/EDITOR.BIN
 	$(MCOPY) -i disk.img $(EDITOR_T_BIN) ::/EDITOR_T.BIN
