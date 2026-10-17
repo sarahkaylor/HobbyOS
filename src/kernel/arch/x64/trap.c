@@ -92,7 +92,19 @@ static void sys_write_console(struct trap_frame *tf) {
   tf->regs[0] = (uint64_t)ret;
 }
 
-static void sys_exit(struct trap_frame *tf) { process_exit(tf); }
+/* SYS_EXIT: the shared process_exit() reads the exit code from the
+ * CANONICAL regs[0] slot (on ARM x0 carries the code — the syscall number
+ * rides in x8).  On x64 the number rides in rax == regs[0] and the code in
+ * rdi, so without this remap EVERY intel process exit is captured as the
+ * syscall number: SYS_EXIT == 2, i.e. (2 << 8) == 512, so every parent on
+ * intel sees WEXITSTATUS == 2 whatever the child returned.  That single
+ * missing remap is what turned the whole intel T3 tier red in the
+ * output-comparing suites ("status) got 2, want 0" everywhere) — GB-057.
+ * Remap exactly the way sys_waitpid/sys_fork do. */
+static void sys_exit(struct trap_frame *tf) {
+  tf->regs[0] = tf->regs[5]; /* rdi = the exit code */
+  process_exit(tf);
+}
 
 static void sys_fork(struct trap_frame *tf) {
   int pid = process_fork(tf);
@@ -853,15 +865,21 @@ static void sys_spawn(struct trap_frame *tf) {
     extern int process_create_kernel_nowait(void (*entry)(void*), void *arg);
     extern uint64_t timer_get_ms(void);
     int wpid = process_create_kernel_nowait(sys_spawn_worker, args);
-    /* The physical pool can be momentarily full (the boot wave, sibling
-       spawns).  The caller is parked in WAIT_SPAWN and shells/tests block
-       on the spawn result, so wait (bounded, ~30 min; the same poll the
-       loader uses) for the worker slot instead of failing the spawn —
-       a failed spawn deadlocks the caller's protocol. */
-    for (int attempt = 0; attempt < 18000 && wpid < 0; attempt++) {
+    /* GB-057: this used to retry the worker slot for up to ~30 minutes
+       (18000 x 100 ms) of HOT SPIN on the calling CPU.  Under the boot
+       test wave the process table is legitimately full, and every spawn
+       caller parks in WAIT_SPAWN holding a PCB slot while its worker
+       needs a free slot from that same table: waiting longer can never
+       fix that — it is a circular wait, and seven cores burning it at
+       once wedges the guest (watchdog: "console silent for more than
+       20 s", 7 CPUs at age 350 s inside this syscall, loader starved).
+       Absorb only the transient pressure (~1 s), then take the failure
+       path below: spawn2's callers retry with usleep() and so yield the
+       CPU between attempts instead of stealing it. */
+    for (int attempt = 0; attempt < 100 && wpid < 0; attempt++) {
       uint64_t t0 = timer_get_ms();
-      for (volatile int spin = 0; spin < 4000000; spin++) {
-        if (timer_get_ms() - t0 >= 100u) break;
+      for (volatile int spin = 0; spin < 400000; spin++) {
+        if (timer_get_ms() - t0 >= 10u) break;
       }
       wpid = process_create_kernel_nowait(sys_spawn_worker, args);
     }
@@ -981,12 +999,12 @@ static void sys_spawn_ex(struct trap_frame *tf) {
   extern int process_create_kernel_nowait(void (*entry)(void*), void *arg);
   extern uint64_t timer_get_ms(void);
   int wpid = process_create_kernel_nowait(sys_spawn_ex_worker, ex);
-  /* Same bounded worker-slot retry as sys_spawn: the caller is parked and
-     must never wait forever for a worker that cannot run. */
-  for (int attempt = 0; attempt < 18000 && wpid < 0; attempt++) {
+  /* GB-057: same circular wait as sys_spawn — see the comment there.
+     ~1 s of absorbed transient pressure, never a 30-minute hot spin. */
+  for (int attempt = 0; attempt < 100 && wpid < 0; attempt++) {
     uint64_t t0 = timer_get_ms();
-    for (volatile int spin = 0; spin < 4000000; spin++) {
-      if (timer_get_ms() - t0 >= 100u) break;
+    for (volatile int spin = 0; spin < 400000; spin++) {
+      if (timer_get_ms() - t0 >= 10u) break;
     }
     wpid = process_create_kernel_nowait(sys_spawn_ex_worker, ex);
   }

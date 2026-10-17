@@ -572,6 +572,21 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 
 ### 11.8 Execution log (newest first, maintained by the Coordinator)
 
+**2026-10-17 — continuation session (Coordinator on .233; `wabi`@farm-1, `wgfx`@farm-2,
+`wgames`@farm-3 alive and dispatched through the board).**
+
+| what | state |
+|---|---|
+| **GB-057 root cause #1 (the 222 FAIL lines)** | `src/kernel/arch/x64/trap.c: sys_exit` never remapped the exit code out of rdi into the canonical `regs[0]` slot the shared `process_exit()` reads — on x64 `regs[0]` is **rax**, which at `syscall` entry holds the *syscall number*, so `SYS_EXIT == 2` became every intel exit status (`status=512`, `WEXITSTATUS == 2` for **every** child, whatever it returned). That is why only the status-reading suites failed (SEDTEST/GREPTEST/CMPTEST/TSORTTEST/…). Fixed; ARM was already correct (x0 carries the code there) |
+| **GB-057 root cause #2 (early exits / ECHILD)** | `sys_spawn`/`sys_spawn_ex` (both arches) retried the spawn-worker slot for `18000 × 100 ms` — a 30-minute **hot spin** by a caller that is *already parked in WAIT_SPAWN holding a PCB slot*, while its worker needs a free slot from the same table: a circular wait that waiting harder cannot break. Watchdog proof captured (7 of 8 CPUs, `age_ms≈350000`, `syscall=8`, console silent, loader starved). Bounded to ~1 s + the documented `-EAGAIN` path |
+| **GB-057 blocker #3 (found, NOT fixed)** | With #2 bounded, the same intel wave runs much further and then **hard-deadlocks on `proc_lock`**: `[LOCKFOREVER] lock=0x74530c70 (= proc_lock)` from 7 CPUs, all in `spinlock_acquire_irqsave+0xe` called from `schedule()`, `process_create_internal_ver()`, `process_thread_create()`; after that the console is fully dead (IRQs off, watchdog silent). Suspect: `process_fork()` holds `proc_lock` across `vm_as_clone_into()` + the 32 MiB `kmemcpy`. Next owner: whoever takes GB-057's remainder |
+| **T3 tier is now a gate (GB-056/GB-057 DoD)** | `tools/t3_tier.sh` + `make test` / `make test_intel` / `test_arm` / `test_intel` now police their own console: non-zero exit on any `FAIL` line, on a missing `System halt`, or on the wall-clock deadline (hang = defect). Raw boots stay available as `make test_run_raw` |
+| **GB-006 worktree false-reds** | `tools/swarm/seed-worktree-vendored.sh` links every gitignored `third_party/…` tree from the main checkout into a `hermes -w` worktree (idempotent; never clobbers a tracked file — `ln -sfn` does, and silently type-changes tracked files, so never use `-f`). Verified: 13 vendored paths linked; `make host_tests` green in a seeded worktree |
+| **GB-001 fleet** | all 6 VMs answer ssh + passwordless sudo; `host_tests` green on coordinator + farm-1. The "shared store mounted" clause is **not met**: 192.168.0.56 is SMB-only (NFS closed) and no NAS credentials exist on .233 → `decision` label for Sarah. Not closed |
+| **M0 gate** | opened with two named exceptions (see the gate comment on PLAN/board) — GB-008 sync IN SYNC 57/57, GB-009 baseline archived (T1/T2 green both arches, T3 ARM green, T3 intel red → GB-057) |
+| **PR #1 (DOOM) / PR #2 (STARDUST)** | rebased onto `origin/main` (both were based on stale mains: 8101128 / e3039f1). PR #1 T1 gate green on the rebased tree (incl. ELF-image/ABI/fb_ioctl/evdev/t4_parity inside `make host_tests`). T5 playthrough still unrun → both stay In Review. Review note: both harnesses hardcode `ROOT=$HOME/Documents/GitHub/HobbyOS` and assert a magic launcher slot (12) that neither PR pins in `desktop.c`'s `pinned_games[]` |
+
+
 **2026-10-17 — kickoff (Coordinator on .233; workers `wabi`@farm-1, `wgfx`@farm-2, `wgames`@farm-3 in
 long-lived `hermes -w` tmux sessions).**
 

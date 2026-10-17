@@ -2325,7 +2325,15 @@ fork_test: $(FORK_TEST_BIN)
 tests: memtest fileio_test fork_test
 	@echo "All test programs compiled"
 
+# GB-057: the T3 tier is a GATE, not a boot.  `make test` = policed ARM run
+# via tools/t3_tier.sh: it fails on any FAIL line in the console and on a
+# run that never reaches its halt line.  The raw invocation is still
+# `make MODE=test run` (that is what the wrapper calls).
 test:
+	bash tools/t3_tier.sh arm
+
+# Raw, unpoliced boots (diagnostics only — never cite these as a tier).
+test_run_raw:
 	$(MAKE) MODE=test run
 
 # P8.2 (browser.md §6): the 30-minute soak — a dedicated combined run.  The
@@ -3170,10 +3178,10 @@ run_intel:
 	$(MAKE) ARCH=intel run
 
 test_arm:
-	$(MAKE) ARCH=arm MODE=test run
+	bash tools/t3_tier.sh arm
 
 test_intel:
-	$(MAKE) ARCH=intel MODE=test run
+	bash tools/t3_tier.sh intel
 
 unit_tests_arm:
 	$(MAKE) ARCH=arm MODE=unit_tests run
@@ -3227,4 +3235,4 @@ style-diff:
 style-test:
 	python3 tools/test_cstyle.py
 
-.PHONY: all clean run memtest fileio_test fork_test tests test unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test bigload_intel t4_compat_parity
+.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test bigload_intel t4_compat_parity
