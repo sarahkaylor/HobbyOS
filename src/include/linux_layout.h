@@ -186,6 +186,50 @@ typedef struct {
   char     d_name[256];
 } linux_dirent64_t;
 
+/* --- resource / process-identity structs the W0 shims fill (docs §6) ------ */
+
+/* struct rlimit (16 B): rlim_cur @0, rlim_max @8 (both u64). */
+typedef struct {
+  uint64_t rlim_cur;
+  uint64_t rlim_max;
+} linux_rlimit_t;
+
+/* struct rusage (144 B) — only the total size is pinned; glibc fills the
+ * per-process resource counters. */
+typedef struct {
+  uint8_t _p[144];
+} linux_rusage_t;
+
+/* struct itimerval (32 B): it_interval (timeval) @0, it_value (timeval) @16. */
+typedef struct {
+  linux_timeval_t it_interval;
+  linux_timeval_t it_value;
+} linux_itimerval_t;
+
+/* struct sysinfo (112 B) — only the total size is pinned here. */
+typedef struct {
+  uint8_t _p[112];
+} linux_sysinfo_t;
+
+/* struct utsname (390 B): six 65-byte NUL-padded char arrays. */
+typedef struct {
+  char sysname[65];     /* 0   */
+  char nodename[65];    /* 65  */
+  char release[65];     /* 130 */
+  char version[65];     /* 195 */
+  char machine[65];     /* 260 */
+  char domainname[65];  /* 325 */
+} linux_utsname_t;      /* 390 */
+
+/* struct flock (32 B): l_type @0, l_whence @2, l_start @8, l_len @16, l_pid @24. */
+typedef struct {
+  short   l_type;    /* 0  */
+  short   l_whence;  /* 2  */
+  int64_t l_start;   /* 8  */
+  int64_t l_len;     /* 16 */
+  int     l_pid;     /* 24 */
+} linux_flock_t;     /* 32 */
+
 #ifdef __cplusplus
 }
 #endif
