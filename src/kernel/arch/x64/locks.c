@@ -28,6 +28,13 @@ volatile uint64_t lock_wait_caller2[MAX_CPUS];
 static volatile uint64_t held_locks[MAX_CPUS][HELD_LOCK_SLOTS];
 static volatile uint32_t recursive_shouts[MAX_CPUS];
 
+/* The lock-free scream helpers are defined further down this file (after the
+   comment explaining why they must never take a lock); declare them here so
+   the detector below can use them. */
+extern void uart_putc_raw(char c);
+static void scream_hex(const char *label, uint64_t v);
+static void scream_dec(const char *label, uint32_t v);
+
 static void held_lock_push(uint64_t addr) {
   uint32_t cpu = get_cpuid();
   for (int i = 0; i < HELD_LOCK_SLOTS; i++)
