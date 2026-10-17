@@ -76,12 +76,16 @@ int hb_fb_mmap_translate(uint64_t offset, uint64_t len,
 int hb_fb_blank_ioctl(unsigned long arg) {
   /* /dev/fb0's FBIOBLANK on the fixed 2D mode: there is no refresh-rate /
    * suspend output to actually blank (virtio-gpu scanout has no VESA
-   * suspend states), so every arg SDL's fbcon sends is accepted and
-   * treated as a no-op success.  We reject only values no real driver or
-   * SDL would pass, so an accidental garbage ioctl is not silently
-   * swallowed.  HB_VESA_NO_BLANK(1)/HB_VESA_VSYNC_SUSPEND(2)/
-   * HB_VESA_HSYNC_SUSPEND(4) and HB_FB_BLANK_UNBLANK(0) are the accepted
-   * set (docs/linux-abi.md §9). */
+   * suspend states), so every blank level is accepted and treated as a
+   * no-op success -- SDL's fbcon must not be forced to handle an error for
+   * a state the mode does not have.  This is deliberate, not an oversight:
+   * the four levels SDL sends are HB_VESA_NO_BLANK(1)/
+   * HB_VESA_VSYNC_SUSPEND(2)/HB_VESA_HSYNC_SUSPEND(4) and
+   * HB_FB_BLANK_UNBLANK(0) (docs/linux-abi.md §9), and a garbage value is
+   * accepted too rather than refused.  (An earlier version of this comment
+   * claimed we reject implausible values; the code never did, and
+   * test_blank_ioctl only asserts the four legitimate levels.  Corrected by
+   * the Coordinator at merge time -- GB-025.) */
   (void)arg;
   return 0;
 }
