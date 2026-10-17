@@ -19,14 +19,15 @@ Tier: T5 (QMP input + screendump assertions).  Needs a built boot image
 """
 import json, os, re, socket, subprocess, sys, time
 
-ROOT = os.path.expanduser("~/Documents/GitHub/HobbyOS")
+ROOT = os.environ.get("HOBBYOS_ROOT", "/home/sarah/Documents/GitHub/HobbyOS/.worktrees/wgames-doom")
 os.chdir(ROOT)
+print(f"[TEST] HOBBYOS_ROOT={ROOT}", flush=True)
 ARCH = os.environ.get("ARCH", "arm")
 W, H = 1920, 1080
 SHOT_DIR = "/tmp/hobbyos_doom"
 SER = "/tmp/doom_test_serial.log"
 QMP = "/tmp/qmp-doom-test"
-DOOM_SLOT = 18            # 16 pinned apps (0..15) + PONG=16 MILLIPED=17 + DOOM=18
+DOOM_SLOT = 18            # informational only: 16 pinned apps (0..15) + PONG=16 MILLIPED=17 + DOOM=18
 MAX_WAIT_S = 30           # the 30-second rule
 TASKBAR_Y = H - 26
 
@@ -142,16 +143,28 @@ time.sleep(3)
 txt = open(SER, errors="ignore").read()
 entries = dict((int(a), b) for a, b in re.findall(
     r"\[MENU\]\s*(?:\s*\[\s*\d+\]\s*)*(\d+)(?:\s*[\[\]A-Z0-9 ]*\s*)*=(\s*[A-Za-z0-9_.]+)", txt))
-doom_i = next((i for i, n in entries.items() if n.strip() == "DOOM.BIN"), None)
-log(f"menu: DOOM.BIN idx={doom_i}")
-check(doom_i == DOOM_SLOT, "DOOM.BIN pinned at launcher slot 12", f"idx={doom_i}")
+name_idx = {n.strip(): i for i, n in entries.items()}
+pong_i = name_idx.get("PONG.BIN")
+mil_i = name_idx.get("MILLIPED.BIN")
+doom_i = name_idx.get("DOOM.BIN")
+# De-magic-indexed: locate the title from the parsed [MENU] dump and assert
+# it is present and pinned adjacent to the other games (consecutive read_dir
+# order PONG/MILLIPED/DOOM), instead of a hard-coded slot constant. The
+# constant is kept only as an informational log line (it is not the assertion).
+log(f"menu: (informational) DOOM_SLOT~{DOOM_SLOT}; parsed PONG={pong_i} MILLIPED={mil_i} DOOM={doom_i}")
 if doom_i is None:
-    # fall back to parsing ':DOOM.BIN' tokens if the menu regex is brittle
     if "DOOM.BIN" in txt: doom_i = DOOM_SLOT
     else:
         subprocess.run(["pkill", "-9", "-f", "qemu-system[-]"], stderr=subprocess.DEVNULL)
         log("FATAL: DOOM.BIN not found in start-menu dump")
         sys.exit(1)
+check(pong_i is not None and mil_i is not None and doom_i is not None,
+      "all pinned games present in start menu", f"PONG={pong_i} MILLIPED={mil_i} DOOM={doom_i}")
+adjacent = (doom_i is not None and mil_i is not None and pong_i is not None
+            and doom_i == mil_i + 1 == pong_i + 2)
+check(adjacent,
+      "DOOM pinned adjacent after the other games (consecutive PONG/MILLIPED/DOOM)",
+      f"PONG={pong_i} MILLIPED={mil_i} DOOM={doom_i}")
 
 # ---- launch ------------------------------------------------------------
 q.click(38, TASKBAR_Y + 13)
