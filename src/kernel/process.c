@@ -1180,6 +1180,12 @@ volatile int scheduler_started = 0;
    to a single call inside the resume-frame window. */
 volatile uint8_t sched_stage[MAX_CPUS];
 volatile uint8_t sched_pick[MAX_CPUS];
+/* GB-057 probe v9: how many times this CPU has entered schedule().  The stage
+   stamp below is a single slot, overwritten every pass, so a stage value on its
+   own cannot be trusted to belong to the current pass -- and a stale stage is
+   what made "stage 53 next to a while(1) that stage 6 should precede" look like
+   a contradiction.  passes + stage together date the stamp. */
+volatile uint32_t sched_passes[MAX_CPUS];
 /* GB-057 probe v5: what the resume path is about to INSTALL.  The v4 run put
    the holder at the address-space switch (stage 53, slot 31) and it never came
    back, so whatever it was about to load into CR3 is the evidence -- and a CPU
@@ -1209,6 +1215,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
 
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   sched_stage[cpu] = 1; /* holding proc_lock */
+  sched_passes[cpu]++;
   int current_pid = cpu_current_pids[cpu];
 
   if (current_pid >= 0) {

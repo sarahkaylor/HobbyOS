@@ -30,6 +30,16 @@ static volatile uint64_t held_lock_pc[MAX_CPUS][HELD_LOCK_SLOTS];
 static volatile uint32_t recursive_shouts[MAX_CPUS];
 static volatile uint32_t holder_shouts[MAX_CPUS];
 static volatile uint32_t table_full_shouts[MAX_CPUS];
+/* GB-057 probe v9: push/pop counters and the last RELEASE site, per CPU.
+   Without these a claim cannot be distinguished from a stale entry, and that
+   distinction has already decided one wrong conclusion on this ticket: a CPU's
+   claim from `schedule+0x4d` stayed live even though schedule() releases the
+   lock before the call it was stuck in.  `net = pushes - pops` is the number of
+   locks the CPU actually holds; if a table entry is set while net==0, the entry
+   is provably stale and the instrument -- not the kernel -- is the bug. */
+static volatile uint32_t held_pushes[MAX_CPUS];
+static volatile uint32_t held_pops[MAX_CPUS];
+static volatile uint64_t held_release_pc[MAX_CPUS];
 
 /* The lock-free scream helpers are defined further down this file (after the
    comment explaining why they must never take a lock); declare them here so
@@ -41,6 +51,7 @@ static void scream_dec(const char *label, uint32_t v);
 /* GB-057: schedule()'s per-CPU breadcrumbs (src/kernel/process.c).  See the
    note there -- with IF=0 the wedged CPU cannot be sampled by any timer. */
 extern volatile uint8_t sched_stage[];
+extern volatile uint32_t sched_passes[];
 extern volatile uint8_t sched_pick[];
 extern volatile uint64_t sched_as_ptr[];
 extern volatile uint64_t sched_as_root[];
@@ -49,12 +60,18 @@ extern volatile uint8_t sched_slot_state[];
 static void held_lock_push(uint64_t addr) {
   uint32_t cpu = get_cpuid();
   for (int i = 0; i < HELD_LOCK_SLOTS; i++)
-    if (held_locks[cpu][i] == addr)
-      return; /* already noted (should not happen; the scream path handles it) */
+    if (held_locks[cpu][i] == addr) {
+      /* Re-acquire of a lock already in the table (the recursion case).  The
+         count still advances, or net would read short and a live claim would
+         look stale -- the exact confusion this table exists to prevent. */
+      held_pushes[cpu]++;
+      return;
+    }
   for (int i = 0; i < HELD_LOCK_SLOTS; i++) {
     if (held_locks[cpu][i] == 0) {
       held_locks[cpu][i] = addr;
       held_lock_pc[cpu][i] = (uint64_t)__builtin_return_address(1);
+      held_pushes[cpu]++;
       return;
     }
   }
@@ -73,6 +90,8 @@ static void held_lock_push(uint64_t addr) {
 
 static void held_lock_pop(uint64_t addr) {
   uint32_t cpu = get_cpuid();
+  held_pops[cpu]++;
+  held_release_pc[cpu] = (uint64_t)__builtin_return_address(1);
   for (int i = 0; i < HELD_LOCK_SLOTS; i++) {
     if (held_locks[cpu][i] == addr) {
       held_locks[cpu][i] = 0;
@@ -99,6 +118,20 @@ int held_locks_of(uint32_t cpu, uint64_t *buf, int max) {
   return n;
 }
 
+/* GB-057 probe v9: acquisitions vs releases for a CPU, for the outside reader.
+   net = pushes - pops is how many locks that CPU actually holds; a live table
+   entry with net == 0 is a provably STALE entry, and the honest reading is then
+   the lock word itself, not the table. */
+void held_counts_of(uint32_t cpu, uint32_t *pushes, uint32_t *pops) {
+  if (cpu >= MAX_CPUS) {
+    if (pushes) *pushes = 0;
+    if (pops) *pops = 0;
+    return;
+  }
+  if (pushes) *pushes = held_pushes[cpu];
+  if (pops) *pops = held_pops[cpu];
+}
+
 /* Name the HOLDER of `addr`, from the table above.  Three outcomes, all
    useful: a CPU that claims it (the wedge is that CPU's critical section --
    `pc` is where it entered), nobody (the lock word is stale or was released
@@ -118,10 +151,17 @@ static void held_lock_report_holder(uint64_t addr) {
         scream_hex(" lock=", addr);
         scream_hex(" entered_at=", held_lock_pc[c][i]);
         scream_dec(" sched_stage=", sched_stage[c]);
+        scream_dec(" passes=", sched_passes[c]);
         scream_dec(" picked=", sched_pick[c]);
         scream_hex(" as=", sched_as_ptr[c]);
         scream_hex(" cr3=", sched_as_root[c]);
         scream_dec(" slot_state=", sched_slot_state[c]);
+        /* v9: is this claim LIVE or STALE?  net = acquisitions - releases;
+           a set slot with net==0 means the instrument, not the kernel, is
+           wrong -- read the lock word instead of trusting this row. */
+        scream_dec(" pushes=", held_pushes[c]);
+        scream_dec(" pops=", held_pops[c]);
+        scream_dec(" net=", held_pushes[c] - held_pops[c]);
         uart_putc_raw('\n');
       }
     }

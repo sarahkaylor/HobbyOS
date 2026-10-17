@@ -1997,19 +1997,27 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
        describing is frozen with interrupts off. */
     {
       extern int held_locks_of(uint32_t cpu, uint64_t *buf, int max);
+      extern void held_counts_of(uint32_t cpu, uint32_t *pushes, uint32_t *pops);
       extern volatile uint8_t sched_stage[];
+      extern volatile uint32_t sched_passes[];
       extern volatile uint8_t sched_pick[];
       extern volatile uint64_t sched_as_ptr[];
       extern volatile uint64_t sched_as_root[];
       uint64_t hl[8];
+      uint32_t pushes = 0, pops = 0;
       int nh = held_locks_of(c, hl, 8);
-      if (nh > 0) {
+      held_counts_of(c, &pushes, &pops);
+      if (nh > 0 || pushes != pops) {
         uart_puts_raw(" HOLDS=");
         for (int i = 0; i < nh; i++) {
           uart_print_hex_raw(hl[i]);
           if (i + 1 < nh)
             uart_puts_raw(",");
         }
+        uart_puts_raw(" net=");
+        print_int_raw((int)(pushes - pops));
+        uart_puts_raw(" passes=");
+        print_int_raw((int)sched_passes[c]);
         uart_puts_raw(" stage=");
         print_int_raw((int)sched_stage[c]);
         uart_puts_raw(" pick=");
