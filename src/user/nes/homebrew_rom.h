@@ -1,49 +1,60 @@
 /*
- * homebrew_rom.h — a tiny hand-authored NES (NROM) program, as raw PRG bytes
+ * homebrew_rom.h — a small hand-authored NES (NROM) homebrew, as raw PRG bytes
  * (added to a 32 KiB cart at $8000; reset vector is set to $8000 by main.c).
  *
- * Program (hand-assembled 6502), all via the $2006/$2007 PPU port protocol:
- *  1. PPUADDR=$1000 -> write 16 bytes of $FF (pattern tile 0 lo+hi = solid
- *     bright).  Tile 1 is left $00 (dark).
- *  2. PPUADDR=$2000 -> write 32 nametable cells of tile 1 (a dark band across
- *     the top row); the rest of the nametable is already tile 0 (bright).
- *  3. Park in a tight JMP loop.
- * Result: a bright field with a dark 8px band across the top — a
- * deterministic, recognizable frame for the T5 screendump assertion.
+ * Program (hand-assembled 6502):
+ *   1. Pattern tile 0 = solid bright (write 16 bytes of $FF at PPUADDR=$1000);
+ *      tile 1 stays dark ($00).
+ *   2. Draw a dark top band now (32 nametable cells = tile 1 at PPUADDR=$2000),
+ *      so the default boot frame is a bright field with a dark top band.
+ *   3. In a tight loop, read the NES controller ($4016 strobe + serial read):
+ *      - A released -> (re)draw the dark band (the resting frame);
+ *      - A pressed  -> clear it (write tile 0 = bright over the band).
+ *      So the ROM visibly responds to the A button — "boots and plays a ROM".
  *
  * License: MIT, swarm-authored, license-clean (no copyrighted NES BIOS/ROM).
  */
 #ifndef NES_HOMEBREW_ROM_H
 #define NES_HOMEBREW_ROM_H
 
-#define HOME_ROM_LEN 43
+#define HOME_ROM_LEN 94
 static const unsigned char home_rom[HOME_ROM_LEN] = {
-  /* set PPUADDR = $1000 (pattern tile 0) */
   0xA9, 0x10,             /* LDA #$10                 $8000 */
   0x8D, 0x06, 0x20,       /* STA $2006  (hi)          $8002 */
   0xA9, 0x00,             /* LDA #$00                 $8005 */
-  0x8D, 0x06, 0x20,       /* STA $2006  (lo) -> $1000 $8007 */
-  /* write 16 bytes of $FF: tile 0 lo+hi = solid bright */
+  0x8D, 0x06, 0x20,       /* STA $2006  (lo)->$1000   $8007 */
   0xA2, 0x10,             /* LDX #16                  $800A */
-  0xA9, 0xFF,             /* LDA #$FF                 $800C */
-                           /* loop0: */
-  0x8D, 0x07, 0x20,       /*   STA $2007              $800E */
+  0xA0, 0xFF,             /* LDY #$FF                 $800C */
+                           /* p0: */
+  0x8C, 0x07, 0x20,       /*   STY $2007              $800E */
   0xCA,                   /*   DEX                    $8011 */
-  0xD0, 0xFA,             /*   BNE loop0              $8012 */
-  /* set PPUADDR = $2000 (nametable) */
-  0xA9, 0x20,             /* LDA #$20                 $8014 */
-  0x8D, 0x06, 0x20,       /* STA $2006  (hi)          $8016 */
-  0xA9, 0x00,             /* LDA #$00                 $8019 */
-  0x8D, 0x06, 0x20,       /* STA $2006  (lo) -> $2000 $801B */
-  /* write 32 cells of tile 1 (dark top band) */
-  0xA2, 0x20,             /* LDX #32                  $801E */
-  0xA9, 0x01,             /* LDA #$01                 $8020 */
-                           /* loopNT: */
-  0x8D, 0x07, 0x20,       /*   STA $2007              $8022 */
-  0xCA,                   /*   DEX                    $8025 */
-  0xD0, 0xFA,             /*   BNE loopNT             $8026 */
-  /* halt */
-  0x4C, 0x28, 0x80        /* JMP $8028                $8028 */
+  0xD0, 0xFA,             /*   BNE p0                 $8012 */
+  0x20, 0x34, 0x80,       /* JSR band_dark            $8014 */
+   /* main: */
+  0xA9, 0x01,             /* LDA #$01                 $8017 */
+  0x8D, 0x16, 0x40,       /* STA $4016  (strobe hi)   $8019 */
+  0xA9, 0x00,             /* LDA #$00                 $801C */
+  0x8D, 0x16, 0x40,       /* STA $4016  (strobe lo)   $801E */
+  0xAD, 0x16, 0x40,       /* LDA $4016  (bit0 = A)    $8021 */
+  0x29, 0x01,             /* AND #$01                 $8024 */
+  0xD0, 0x06,             /* BNE a_down               $8026 */
+  0x20, 0x34, 0x80,       /* JSR band_dark            $8028 */
+  0x4C, 0x17, 0x80,       /* JMP main                 $802B */
+   /* a_down: */
+  0x20, 0x49, 0x80,       /* JSR band_bright          $802E */
+  0x4C, 0x17, 0x80,       /* JMP main                 $8031 */
+   /* band_dark ($8034): write 32 cells of $01 at PPUADDR=$2000 */
+  0xA9, 0x20, 0x8D, 0x06, 0x20,
+  0xA9, 0x00, 0x8D, 0x06, 0x20,
+  0xA2, 0x20, 0xA9, 0x01,
+                           /* bd: */
+  0x8D, 0x07, 0x20, 0xCA, 0xD0, 0xFA, 0x60,
+   /* band_bright ($8049): write 32 cells of $00 at PPUADDR=$2000 */
+  0xA9, 0x20, 0x8D, 0x06, 0x20,
+  0xA9, 0x00, 0x8D, 0x06, 0x20,
+  0xA2, 0x20, 0xA9, 0x00,
+                           /* bb: */
+  0x8D, 0x07, 0x20, 0xCA, 0xD0, 0xFA, 0x60
 };
 
 #endif

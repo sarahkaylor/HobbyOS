@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "../user/nes/nes.h"
+#include "../user/nes/homebrew_rom.h"
 #include "../user/nes/nes.c"
 
 static int passed = 0, failed = 0;
@@ -122,6 +123,37 @@ int main(void){
     u8 b1 = nes_read(&m, 0x4016);
     CHECK((b0 & 1) == 1, "controller bit0 read back set");
     CHECK((b1 & 1) == 0, "controller bit1 (0 in joy) reads 0");
+  }
+
+  /* ---- homebrew ROM responds to the controller (GB-035 "plays a ROM") - */
+  {
+    int i, band;
+    /* A released -> dark top band stays present (cells 0..31 = tile 1) */
+    nes_machine m;
+    memset(&m, 0, sizeof(m));
+    for (i = 0; i < HOME_ROM_LEN; i++) m.prg[i] = home_rom[i];
+    m.prg[0x7FFC] = 0x00; m.prg[0x7FFD] = 0x80;
+    nes_reset(&m);
+    m.joy = 0;
+    nes_run(&m, 60000);
+    CHECK(m.ppu.vram[0x1000] == 0xFF, "homebrew boots: pattern tile 0 solid bright");
+    band = 0;
+    for (i = 0; i < 32; i++)
+      if (m.ppu.vram[(0x2000 + i) & (NES_VRAM_SIZE - 1)] == 1) band++;
+    CHECK(band == 32, "homebrew: A released keeps the dark top band (resting frame)");
+
+    /* A pressed -> the ROM clears the band (picture visibly changes) */
+    nes_machine m2;
+    memset(&m2, 0, sizeof(m2));
+    for (i = 0; i < HOME_ROM_LEN; i++) m2.prg[i] = home_rom[i];
+    m2.prg[0x7FFC] = 0x00; m2.prg[0x7FFD] = 0x80;
+    nes_reset(&m2);
+    m2.joy = 0x01;                       /* A = controller bit 0 */
+    nes_run(&m2, 60000);
+    band = 0;
+    for (i = 0; i < 32; i++)
+      if (m2.ppu.vram[(0x2000 + i) & (NES_VRAM_SIZE - 1)] == 0) band++;
+    CHECK(band == 32, "homebrew: A pressed clears the band (ROM responds to input)");
   }
 
   printf("\nTests: passed=%d failed=%d -> %s\n",
