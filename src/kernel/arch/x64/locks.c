@@ -26,7 +26,9 @@ volatile uint64_t lock_wait_caller2[MAX_CPUS];
    the release path is the hottest code in the kernel. */
 #define HELD_LOCK_SLOTS 4
 static volatile uint64_t held_locks[MAX_CPUS][HELD_LOCK_SLOTS];
+static volatile uint64_t held_lock_pc[MAX_CPUS][HELD_LOCK_SLOTS];
 static volatile uint32_t recursive_shouts[MAX_CPUS];
+static volatile uint32_t holder_shouts[MAX_CPUS];
 
 /* The lock-free scream helpers are defined further down this file (after the
    comment explaining why they must never take a lock); declare them here so
@@ -43,6 +45,7 @@ static void held_lock_push(uint64_t addr) {
   for (int i = 0; i < HELD_LOCK_SLOTS; i++) {
     if (held_locks[cpu][i] == 0) {
       held_locks[cpu][i] = addr;
+      held_lock_pc[cpu][i] = (uint64_t)__builtin_return_address(1);
       return;
     }
   }
@@ -53,8 +56,37 @@ static void held_lock_pop(uint64_t addr) {
   for (int i = 0; i < HELD_LOCK_SLOTS; i++) {
     if (held_locks[cpu][i] == addr) {
       held_locks[cpu][i] = 0;
+      held_lock_pc[cpu][i] = 0;
       return;
     }
+  }
+}
+
+/* Name the HOLDER of `addr`, from the table above.  Three outcomes, all
+   useful: a CPU that claims it (the wedge is that CPU's critical section --
+   `pc` is where it entered), nobody (the lock word is stale or was released
+   without clearing -- corruption, not a wait), or several (a lock used
+   without atomicity). */
+static void held_lock_report_holder(uint64_t addr) {
+  uint32_t cpu = get_cpuid();
+  if (holder_shouts[cpu] >= 3)
+    return;
+  holder_shouts[cpu]++;
+  uint32_t found = 0;
+  for (uint32_t c = 0; c < MAX_CPUS; c++) {
+    for (int i = 0; i < HELD_LOCK_SLOTS; i++) {
+      if (held_locks[c][i] == addr) {
+        found++;
+        scream_dec("\n[HOLDER] cpu=", c);
+        scream_hex(" lock=", addr);
+        scream_hex(" entered_at=", held_lock_pc[c][i]);
+        uart_putc_raw('\n');
+      }
+    }
+  }
+  if (!found) {
+    scream_hex("\n[HOLDER] none claim ", addr);
+    uart_putc_raw('\n');
   }
 }
 
@@ -122,6 +154,8 @@ void spinlock_acquire(spinlock_t *lock) {
         scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
         scream_hex(" pc2=", (uint64_t)__builtin_return_address(1));
         uart_putc_raw('\n');
+        /* GB-057: and name whoever claims to hold it. */
+        held_lock_report_holder((uint64_t)lock);
       }
     }
     lock_wait_addr[cpu] = 0;
