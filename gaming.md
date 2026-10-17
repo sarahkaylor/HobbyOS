@@ -399,6 +399,7 @@ final list.
 | GB-040 | Per-game evidence rig: serial log + screendump + replay scripts | S | — | assets land in evidence dir |
 | GB-041 | **[DEEP]** **Doom as static-musl ELF under compat** (W4) — resolve interop gotchas (mmap, ioctl, threads) | L | GB-033, GB-034 | **playable on intel** — the S1 moonshot |
 | GB-042 | Gamepad/joystick via evdev for arcade titles (optional) | M | GB-027 | axis/buttons register |
+| GB-059 | Port the four hand-rolled T5 harnesses (`run_doom_test.py`, `run_stardust_test.py`, `run_xnibbler_test.py`, `run_xcrypt_test.py`) onto `tools/evidence_rig.py`: locate the title by name from the parsed `[MENU]` dump (never a magic slot index — four PRs each asserted their own on the same growing `pinned_games[]` line) and take the repo root from the environment so it works from a `hermes -w` worktree | M | GB-040 | both a native port and a compat title run through the one rig from a worktree; the four hand-rolled copies are deleted |
 
 ### Milestone M4 — Integration, testing, acceptance (GB-043 … GB-055)
 
@@ -513,7 +514,22 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 4. **Workers run `hermes -w`.** A git worktree does **not** contain gitignored trees, so the vendored
    `third_party/*/src` extractions are missing there and vendored lanes (C++/RTTI, WebKit) go red inside a
    worktree while the same tree is green in the main checkout. Seed them (symlink is cheapest) before
-   believing a worker's "main is red" report — tracked as GB-006.
+   believing a worker's "main is red" report — tracked as GB-006. Landed: `tools/swarm/seed-worktree-vendored.sh`
+   (plain `ln -s` only — `ln -sfn` silently type-changes tracked files, which blocks the next rebase).
+5. **A non-login/background shell may not have `/usr/sbin` on PATH**, and `mkfs.fat` lives there, so
+   `make disk.img` dies with `make: mkfs.fat: No such file or directory` / `Error 127` *after* the whole
+   build has succeeded — which reads like a code failure and is not. If a backgrounded build fails only at
+   the disk step, re-run it with `export PATH="/usr/sbin:/sbin:$PATH"` (or re-run `make disk.img` in an
+   interactive shell; the objects are already built). `tools/run_waves.sh` already carries its own PATH
+   handling for the same reason.
+6. **`/dev/kvm` exists on the fleet VMs but is NOT usable as provisioned.** `ls -l /dev/kvm` is
+   `crw-rw---- root:kvm`, and `sarah` is not in the `kvm` group, so an accelerated run dies with
+   `Could not access KVM kernel module: Permission denied` (the device's presence is not the capability —
+   that is the trap). The host CPU exposes nested SVM, so the one-line fix is provisioning:
+   `sudo usermod -aG kvm sarah` (then a fresh login), or a targeted device ACL. Until that is done, **every
+   intel QEMU run is TCG** — tens of minutes per wave, which is why an A/B measurement on `ARCH=intel` is
+   still expensive. Tracked as part of GB-006's provisioning checklist. `tools/t3_tier.sh` takes
+   `T3_QEMU_ARGS` so the fix is a one-liner away: `T3_QEMU_ARGS="-enable-kvm" make test_intel`.
 
 ### 11.3 Model endpoints & Hermes profiles
 - Two vLLM OpenAI-compatible endpoints, **recorded + verified 2026-10-17 (GB-004)**:

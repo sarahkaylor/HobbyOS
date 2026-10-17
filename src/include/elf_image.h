@@ -111,4 +111,41 @@ int elf_copy_into(const struct elf_image *img, const void *buf, uint64_t len,
 /* Human-readable name for an ELF_ERR_* (for serial logs; never NULL). */
 const char *elf_strerror(int err);
 
+/* --- GB-013 loader plan (the mapper half) ------------------------------ *
+ * The parser decides *whether* a Linux binary may load; the plan decides
+ * *where* and *with what protections*.  This is the kernel's mapping input:
+ * a list of disjoint, page-aligned, per-page unioned-protection regions that
+ * the loader hands to vm_region_insert + the eager frame fill.  Kept pure
+ * (kernel-free, host-testable) for the same reason the parser is: the merge /
+ * union / alignment decision is the risky logic and must be proven on the
+ * host before any QEMU run.
+ *
+ * Region flags are ELF_PF_* (the parser's vocabulary) so this file stays
+ * free of vm.h; the kernel maps them to VM_PROT_* (ELF_PF_X->EXEC,
+ * ELF_PF_W->WRITE, ELF_PF_R->READ) at insert time.  Offsets are *page-aligned
+ * image-relative*: region->off = segment.vaddr - img->vaddr_base, rounded
+ * down to the page.  The loader adds its chosen base (USER_IMG_BASE for the
+ * W0 static-PIE corpus) to get runtime VAs. */
+
+#define ELF_MAX_PLAN_REGIONS (ELF_MAX_LOAD_SEGMENTS + 1)
+
+struct elf_plan_region {
+  uint64_t off;   /* page-aligned image-relative offset */
+  uint64_t len;   /* page-aligned bytes */
+  uint32_t flags; /* ELF_PF_* union over the segments this region covers */
+};
+
+struct elf_plan {
+  uint64_t span;      /* total page-aligned image span (bytes) */
+  uint32_t nreg;
+  struct elf_plan_region regs[ELF_MAX_PLAN_REGIONS];
+};
+
+/* Build the loader plan for a *successfully parsed* image: page-aligned
+ * regions, one per PT_LOAD, with any two regions that share a page merged
+ * into the weaker-protection (union) flags.  Callers must elf_parse() first.
+ * Returns ELF_OK, or ELF_ERR_ARGS (null / unparsed), ELF_ERR_TOOMANY (more
+ * merged regions than we support). */
+int elf_build_plan(const struct elf_image *img, struct elf_plan *plan);
+
 #endif /* ELF_IMAGE_H */
