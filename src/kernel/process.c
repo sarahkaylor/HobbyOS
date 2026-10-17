@@ -2535,6 +2535,10 @@ static jmp_buf scheduler_return_ctx[MAX_CPUS];
  * process runs; drives the [IDLESTUCK] diagnostic in the idle loop. */
 static int sched_idle_rounds;
 static int last_idlestuck_div;
+/* GB-057: the same dump, for the quiet case -- a wave that ends with nothing
+   reclaimable and no state change.  Separate divisor so the two rate limits do
+   not consume each other. */
+static int last_quiet_div;
 /* L9: one pending lostwake-dispose candidate per idle CPU.  A stale-claim
    sighting is ARMED here and only confirmed when the very same heartbeat
    is still present on the NEXT reaper pass (~1.4 s later).  Under MTTCG a
@@ -2909,9 +2913,25 @@ void start_scheduler(void) {
        wait) must NOT spam the table dump every ~1000 idle rounds (w4-clang:
        [IDLESTUCK] false-positives on the driver's legit pipe-wait).  The
        [LOSTWAKE] reclaim/dispose lines already name every real event. */
+    int dump_stuck = 0;
     if (acted && sched_idle_rounds >= 500 &&
         (sched_idle_rounds / 1000) != last_idlestuck_div) {
       last_idlestuck_div = sched_idle_rounds / 1000;
+      dump_stuck = 1;
+    } else if (sched_idle_rounds >= 2000 &&
+               (sched_idle_rounds / 20000) != last_quiet_div) {
+      /* GB-057: a wave can also end with NOTHING reclaimable -- every slot
+         parked in a state that looks legitimately alive -- and then no dump
+         ever fires and the console simply stops.  Measured on the v14 intel
+         run: all CPUs idle in safe_wfi, timers healthy (age_ms single ms),
+         zero [IDLESTUCK] lines, and the tier failed it for a missing halt
+         marker with no explanation of what kept the wave alive.  A slow dump
+         (every 20000 idle rounds, not every 1000) names that slot without the
+         spam the acted path had to avoid. */
+      last_quiet_div = sched_idle_rounds / 20000;
+      dump_stuck = 1;
+    }
+    if (dump_stuck) {
       uart_puts("[IDLESTUCK] cpu=");
       print_int((int)get_cpuid());
       uart_puts(" rounds=");
