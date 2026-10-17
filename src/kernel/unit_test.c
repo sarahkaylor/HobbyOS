@@ -45,6 +45,7 @@ void run_all_unit_tests(void) {
   blk_cache_press_suite();
   virtio_gpu_test_suite();
   virtio_input_test_suite();
+  fb_ioctl_test_suite();
   virtio_net_test_suite();
   net_test_suite();
   net_rdma_test_suite();
