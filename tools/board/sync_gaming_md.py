@@ -63,10 +63,17 @@ def main():
     bd = board_snapshot()
     problems = []
 
-    # plan shape
+    # plan shape. Integrity = "every id GB-001..GB-N present exactly once", NOT
+    # "sorted": §8 is organised by milestone, so a minted ticket belongs in the
+    # section it serves (e.g. an intel-tier defect in M1) even though its number
+    # is higher than the ids around it.
     ids = [int(g.split("-")[1]) for g in order]
-    if ids != list(range(1, len(ids) + 1)):
-        problems.append(f"plan: GB ids are not a contiguous GB-001..GB-{len(ids):03d} run: {order}")
+    want = set(range(1, len(ids) + 1))
+    if set(ids) != want or len(ids) != len(set(ids)):
+        gaps = sorted(want - set(ids))
+        dups = sorted({i for i in ids if ids.count(i) > 1})
+        problems.append(f"plan: GB id set is not a clean GB-001..GB-{len(ids):03d} "
+                        f"(missing={gaps}, duplicated={dups})")
     for gid in order:
         t = plan[gid]
         if t["weight"] not in ("S", "M", "L"):

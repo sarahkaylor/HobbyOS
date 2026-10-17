@@ -369,6 +369,7 @@ final list.
 | GB-022 | TLS ABI: `arch_prctl(ARCH_SET_FS)` (x86) / `TPIDR_EL0` (arm) on context switch | L | GB-021 | T4 `errno` per-thread + `__thread` vars |
 | GB-023 | Real signal delivery: frame build, `sigreturn`, `rt_sigprocmask` | L | GB-021 | T4 signal test |
 | GB-024 | **M1 gate:** W0 corpus (hello, cat, sh, coreutils-static) boots on intel + writes expected output, T4 green | M | GB-013..23 | gate evidence |
+| GB-057 | **ARCH=intel T3 prints 222 failing checks (sed/grep/cmp/tsort) yet exits 0** — the intel integration tier is not a gate (minted from the GB-009 baseline run) | L | — | `make test_intel` with 0 FAIL lines + a deliberately-broken check fails the tier; `make test` (ARM) stays green |
 
 ### Milestone M2 — Compat device nodes + SDL (GB-025 … GB-033)
 
@@ -580,7 +581,7 @@ long-lived `hermes -w` tmux sessions).**
 | Board automation (GB-003) | webhook `coordinator-board-hook` + 60 s poll, both systemd units on .233 (§11.2a) |
 | Model split (GB-004) | DEEP `dgx1:8000` on the coordinator, FLASH `llm:8000` on farms 1-3 (§11.3) |
 | Plan sync (GB-008) | `tools/board/sync_gaming_md.py` — IN SYNC, drift detection proven |
-| Baseline (GB-009) | T1 green (coordinator + farm-1) and **T2 green on ARM** (`run_unit_tests.sh`); Intel T2 launching, **T3 still to capture** |
+| Baseline (GB-009) | T1 green (coordinator + farm-1); **T2 green arm + intel** (344/0 intel); **T3 ARM green (0 FAIL lines), T3 intel red-but-exit-0** (222 FAIL lines) → GB-057. The baseline is **not** complete on intel and no intel gate may cite T3 until it is |
 | ABI contract (GB-010) | `docs/linux-abi.md` v1 (measured; `gen_abi_doc.py --check` guards drift) — In Review |
 | ELF loader (GB-013) | parser + segment planner landed and host-tested (53 checks), linked into both kernel builds; **mapper half open** |
 | Syscall table (GB-014) | 114 measured numbers + errno locked by goldens (T1); **shims + trap routing open** |
