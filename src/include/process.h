@@ -321,7 +321,18 @@ struct process {
    * cross-context before waking the parked parent, then clears it.
    * Appended at the END so parallel lanes merge additively. */
   uint64_t wait4_rusage;
+
+  /* --- GB-013 (linux-abi.md §2): compat-process flag ----------------- *
+   * Set by the ELF loader for a Linux-ABI image so the trap path routes
+   * this process's x86_64 `syscall` traps to the Linux translation table
+   * (GB-014) instead of the native chain.  Group anchor state (the leader
+   * marks it; threads inherit from the anchor).  PROC_FLAG_LINUX_ABI = 1. */
+  uint32_t abi_flags;
 };
+
+/* Linux-compat process flag (GB-013): route syscalls through the Linux
+ * translation table (GB-014).  See linux-abi.md §2. */
+#define PROC_FLAG_LINUX_ABI 0x1u
 
 // Initialize the process subsystem and zero out the process table.
 void process_init(void);
