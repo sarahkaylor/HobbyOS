@@ -195,6 +195,28 @@ int main(void){
           "6502 PHA push / PLA pull restores A and balances the stack");
   }
 
+  /* ---- sprite (OAM) rendering (GB-035 PPU) ----------------------------- */
+  {
+    nes_machine m; memset(&m, 0, sizeof(m));
+    /* pattern tile 5, row 0: bit7 set -> palette 1 (shade 72) */
+    m.ppu.vram[0x1000 + 5*16] = 0x80;
+    /* place sprite 0 at (x=20, y=10) via $2003/$2004 (auto-increment) */
+    nes_write(&m, 0x2003, 0);
+    nes_write(&m, 0x2004, 11);   /* y = 10 => OAM stores y+1 */
+    nes_write(&m, 0x2004, 5);    /* tile = 5 */
+    nes_write(&m, 0x2004, 0);    /* attribute */
+    nes_write(&m, 0x2004, 20);   /* x = 20 */
+    /* $2004 read-back of the first OAM byte */
+    nes_write(&m, 0x2003, 0);
+    CHECK(nes_read(&m, 0x2004) == 11, "OAMDATA ($2004) reads back the written y");
+    /* background is left all-dark (palette 0 / shade 8) */
+    nes_ppu_render(&m);
+    CHECK(m.ppu.fb[10*NES_SCREEN_W + 20] == 72,
+          "sprite glyph blits over the background at (20,10)");
+    CHECK(m.ppu.fb[10*NES_SCREEN_W + 40] == 8,
+          "background (no sprite there) stays dark at (40,10)");
+  }
+
   printf("\nTests: passed=%d failed=%d -> %s\n",
          passed, failed, failed ? "FAILED" : "ALL PASSED");
   return failed ? 1 : 0;

@@ -38,6 +38,7 @@ typedef struct {
 typedef struct {
   u8  ctrl, mask, status;
   u8  oam_addr;
+  u8  oam[256];           /* sprite attribute memory (64 sprites x 4 bytes) */
   u16 vram_addr;
   u16 vram_latch;        /* two-stage $2006 address latch */
   u8  vram_buf;          /* the read buffer for $2007 */
