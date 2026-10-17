@@ -62,6 +62,23 @@ struct cpu_local {
 
 struct cpu_local cpu_locals[MAX_CPUS];
 
+/* GB-057 probe v14: what the resume tail ACTUALLY has, measured inside the asm.
+
+   v13's breadcrumb read `gs:[24]` at the C call site -- before
+   restore_user_sp_helper syncs it -- so it showed the previous task's value and
+   nearly sent me after a wrong-stack bug that does not exist.  These two are
+   written from inside enter_user_space itself:
+     sched_gs24_synced[cpu] : gs:[24] AFTER the helper, i.e. the stack the tail
+                              will actually build the frame on;
+     sched_iret_rip[cpu]    : the RIP slot the tail is about to hand to iretq,
+                              written just before the iretq.
+   If those two look sane and the CPU still resumes into garbage, the corruption
+   is neither the stack nor the frame and must be the copy/atomicity window --
+   which is the last hypothesis standing.  They must be written before the
+   register restores so the scratch registers are still disposable. */
+volatile uint64_t sched_gs24_synced[MAX_CPUS];
+volatile uint64_t sched_iret_rip[MAX_CPUS];
+
 void save_user_sp_helper(void) {
   uint32_t cpu = get_cpuid();
   arch_set_user_sp(cpu_locals[cpu].user_sp_temp);
@@ -2950,6 +2967,12 @@ __asm__(
 "    mov r12, rdi\n"
 "    mov r13, rsi\n"
 "    call restore_user_sp_helper\n"
+"    /* GB-057 probe v14: the stack the tail will actually use, measured after\n"
+"       the helper has synced it.  rax/rcx/rdx are still disposable here. */\n"
+"    mov rax, gs:[24]\n"
+"    mov rcx, gs:[32]\n"
+"    lea rdx, [rip + sched_gs24_synced]\n"
+"    mov [rdx + rcx*8], rax\n"
 "    /* Same-privilege (kernel-mode) resume: common_trap_exit's iretq\n"
 "       would pop only three words and leave RSP on this CPU's scratch\n"
 "       buffer, severing the task from its live stack frames.  Relocate\n"
@@ -3003,6 +3026,11 @@ __asm__(
 "       `jmp common_trap_exit` to a wrong offset inside the function, so\n"
 "       we keep the resume path self-contained). */\n"
 "    mov rbx, [rsp + 8]\n"
+"    /* GB-057 probe v14: the RIP the iretq will pop.  Its scratch registers are restored later\n"
+"    mov rax, [rsp + 248]\n"
+"    mov rcx, gs:[32]\n"
+"    lea rdx, [rip + sched_iret_rip]\n"
+"    mov [rdx + rcx*8], rax\n"
 "    mov rcx, [rsp + 16]\n"
 "    mov rdx, [rsp + 24]\n"
 "    mov rsi, [rsp + 32]\n"
