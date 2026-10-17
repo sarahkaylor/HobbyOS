@@ -589,6 +589,14 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 
 ### 11.8 Execution log (newest first, maintained by the Coordinator)
 
+**2026-10-17 — merge-queue pass (Coordinator, continuation).**
+
+| what | state |
+|---|---|
+| **Merge queue drained to the M2 ABI-lock layer** | Four increments landed and gated on the integrated tip (`092edf5`, +461 lines): PR #13 `fb_pixel` B8G8R8A8 packing lock (a2eebdb, credited to GB-025), PR #12 gamepad codes in `tools/linux-abi/probe_abi.c` (ad14334, GB-042 governance), PR #11 GB-042 gamepad/joystick ABI lock (49d523f), PR #6 GB-028 clock/timer ABI lock (092edf5). Gate: `make host_tests` T1=0 with `fb_pixel_test_host` 12, `joypad_test_host` 11 and `clockabi_test_host` 13 checks all executing **inside** the suite, plus `MODE=unit_tests hobbyos.elf` links ARM + intel T2A/T2B=0. All four tickets stay In Review: their runtime legs are not citable while the device tier is red (GB-057/GB-058) |
+| **Merge-conflict tooling (and a self-inflicted incident)** | Every native/ABI PR edits the same `host_tests:` prerequisite line, so conflicts are guaranteed. Added `resolve_makefile_additions.py` (prerequisite line → token union; recipe lines → keep both; anything else refused) and the rule that **`make -n host_tests` must parse after any resolution**. I first resolved `#6` with the older line-union script, which glued a recipe line onto the prerequisite line, and then committed the merge **with the markers still in the file** — caught immediately by the parse check and the grep, amended to `092edf5`. Exactly the incident recorded for GB-027 earlier; the *check* is what catches it, not the intent |
+| **PR hygiene** | Three of four branches were based on stale mains (the conflict work above), and one PR (#13) carried no ticket id in the title and no board comment — merged against GB-025 because the diff named it, with a note on the ticket asking for the id next time. `git fetch && git rebase origin/main` before opening a PR is now stated on the affected tickets |
+
 **2026-10-17 — continuation session (Coordinator on .233; `wabi`@farm-1, `wgfx`@farm-2,
 `wgames`@farm-3 alive and dispatched through the board).**
 
