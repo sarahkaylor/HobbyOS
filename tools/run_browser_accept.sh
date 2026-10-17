@@ -311,8 +311,14 @@ import hashlib, json, os, re, sys
 ev, port, url, mode, shell_get, mhost, pg, rw, rows, topic, fix01, port_file, instance = sys.argv[1:]
 ev = ev.strip('"'); port = port.strip('"'); url = url.strip('"')
 mode = mode.strip('"'); shell_get = shell_get.strip('"') if shell_get.strip('"') else None
-mhost = int(mhost.strip('"'))
-fix01 = int(fix01.strip('"'))
+def _int(x):
+    # Under multi-guest host load a count can arrive splice-joined
+    # (e.g. "0\n0"); take the last integer token instead of bare int().
+    m = re.findall(r"\d+", str(x))
+    return int(m[-1]) if m else 0
+
+mhost = _int(mhost)
+fix01 = _int(fix01)
 port_file = port_file.strip('"')
 instance = instance.strip('"') or None
 rows = rows.split()
