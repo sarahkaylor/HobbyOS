@@ -1223,6 +1223,20 @@ volatile uint32_t sched_passes[MAX_CPUS];
 volatile uint64_t sched_resumed_rip[MAX_CPUS];
 volatile uint8_t sched_kernel_proc[MAX_CPUS];
 volatile uint64_t sched_user_phys[MAX_CPUS];
+/* GB-057 probe v13: the stack the resume TAIL will use, versus the one it should.
+
+   v12b measured a frame that was sane at stage 52 (`resume_rip=0x70024c75`,
+   ordinary kernel code) and garbage when it executed (`#UD at rip=0x2DFFE971`, a
+   stack address).  For a kernel-mode resume the tail finds its stack from
+   `gs:[24]` -- which restore_context() set to `p->context[33]` -- copies the
+   frame to `[gs:[24]-320]` and iretqs from `[gs:[24]-616]`.  If gs:[24] is not
+   the target's saved RSP, the frame lands on someone else's stack and the iretq
+   pops whatever is there: a stack address as RIP, exactly as observed.  These
+   three values are read at the call site, so a mismatch is visible before the
+   CPU dies rather than inferred after. */
+volatile uint64_t sched_gs24[MAX_CPUS];
+volatile uint64_t sched_target_sp[MAX_CPUS];
+volatile uint64_t sched_ctx33[MAX_CPUS];
 /* GB-057 probe v5: what the resume path is about to INSTALL.  The v4 run put
    the holder at the address-space switch (stage 53, slot 31) and it never came
    back, so whatever it was about to load into CR3 is the evidence -- and a CPU
@@ -1427,6 +1441,13 @@ void schedule(struct trap_frame *tf, int is_yield) {
       process_signal_resume_deliver(&proc_table[next], &local_tf);
 
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
+      {
+        uint64_t gs24;
+        __asm__ volatile("mov %%gs:24, %0" : "=r"(gs24));
+        sched_gs24[cpu] = gs24;
+        sched_target_sp[cpu] = target_sp;
+        sched_ctx33[cpu] = proc_table[next].context[33];
+      }
       enter_user_space(&local_tf, target_sp);
       /* GB-060 (cheap half): a resume call that returns is a defect --
          enter_user_space iretqs into the target and must never come back.  The
