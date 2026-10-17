@@ -92,6 +92,15 @@ NOTE: syscall numbers below come from the kernel headers, not libc
 ```
 <!-- /PROBE -->
 
+### 3a. ELF / aux-vector constants
+
+<!-- PROBE:elf-constants -->
+```text
+AT_NULL=0 AT_PHDR=3 AT_PHNUM=5 AT_PAGESZ=6 AT_ENTRY=9 AT_BASE=7 AT_EXECFN=31 AT_RANDOM=25 AT_HWCAP=16 AT_SYSINFO_EHDR=33
+R_X86_64_RELATIVE=8 R_X86_64_JUMP_SLOT=7 R_X86_64_GLOB_DAT=6
+```
+<!-- /PROBE -->
+
 ## 4. Syscall numbers (x86_64)
 
 The table below is the authoritative number source for the translation table (GB-014). The

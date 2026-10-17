@@ -1,5 +1,7 @@
 #include "elf_image.h"
 
+#include <stddef.h>   /* NULL — a freestanding header, available in kernel and host builds */
+
 /*
  * GB-013 — pure ELF64/ET_EXEC parser (see elf_image.h for the contract).
  *
