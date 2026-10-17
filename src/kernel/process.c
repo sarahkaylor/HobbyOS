@@ -2734,6 +2734,13 @@ void start_scheduler(void) {
         set_current_process_pid(cpu, i);
         proc_table[i].state = PROC_STATE_RUNNING;
         sched_idle_rounds = 0;
+        /* GB-057: work was found, so this idle stretch is over -- reset the
+           quiet-dump divider with it.  Without this the divider (which is only
+           meaningful within one stretch) survives the reset, so a long run
+           re-crosses the threshold repeatedly and dumps the whole slot table
+           each time: probe v15 produced 18 dumps (~540 console lines) of a
+           single idle stretch.  One dump per stretch is the intent. */
+        last_quiet_div = 0;
 
         if (proc_table[i].as)
           vm_arch_switch(proc_table[i].as);
@@ -2908,6 +2915,60 @@ void start_scheduler(void) {
          fresh sighting re-arms from scratch. */
       if (lw_candidate != lw_disp_arm_slot[cpu])
         lw_disp_arm_slot[cpu] = 0;
+      /* GB-057: reap an ORPHANED WAIT.  A slot parked in WAIT_SPAWN/WAIT_CHILD
+         is waiting for an event another process must deliver -- a spawn
+         completing, a child exiting.  If its parent is gone (parent_pid <= 0,
+         or the parent's slot is FREE/EXITED) nothing can ever deliver it, so
+         the slot is unwakeable forever.  Measured (probe v15, evidence
+         t3intel_probe15_waitspawn_blocker.log): three such slots (SHTEST2.BIN,
+         SHTEST3.BIN, SPAWN.BIN) with parent=-1 and no CPU claiming them kept
+         `!any_alive` true for the rest of the run, so every CPU idled in
+         safe_wfi and the wave never printed `System halt` -- the tier failed
+         for a missing halt marker with a full console otherwise.  Marking them
+         EXITED is the minimal correct move: they are not running anywhere (the
+         claim check below proves it) and the normal reaper handles the slot.
+         Reported so the event is never silent. */
+      for (int k = 1; k < MAX_PROCESSES; k++) {
+        int st = proc_table[k].state;
+        if (st != PROC_STATE_WAIT_SPAWN && st != PROC_STATE_WAIT_CHILD)
+          continue;
+        int pp = proc_table[k].parent_pid;
+        int parent_gone = (pp <= 0);
+        if (!parent_gone && pp < MAX_PROCESSES) {
+          int pst = proc_table[pp].state;
+          if (pst == PROC_STATE_FREE || pst == PROC_STATE_EXITED)
+            parent_gone = 1;
+        }
+        if (!parent_gone)
+          continue;
+        int claimed = 0;
+        for (int c = 0; c < MAX_CPUS; c++)
+          if (cpu_current_pids[c] == k)
+            claimed = 1;
+        if (claimed)
+          continue; /* someone is still on it: let its owner finish */
+        /* Hand it to the existing outside-the-lock teardown rather than marking
+           the slot EXITED here: group_teardown is the tested route (it releases
+           the AS/block exactly once and delivers the reap), and it must not run
+           with proc_lock held.  One per pass, like the lost-wake path, and only
+           when that path has not already chosen a slot. */
+        if (dispose_slot == 0) {
+          uart_puts("[KERNEL] reaping orphaned wait: slot=");
+          print_int(k);
+          uart_puts(" pid=");
+          print_int(proc_table[k].pid);
+          uart_puts(" st=");
+          print_int(st);
+          uart_puts(" parent=");
+          print_int(pp);
+          uart_puts(" ");
+          uart_puts(proc_table[k].name);
+          uart_puts(" (unwakeable: no parent to deliver the wake)\n");
+          dispose_slot = k;
+          acted = 1;
+          break;
+        }
+      }
       spinlock_release_irqrestore(&proc_lock, wflags);
 
       /* Dispose a lost-owner slot OUTSIDE proc_lock (group_teardown takes
