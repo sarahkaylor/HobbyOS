@@ -1172,7 +1172,12 @@ volatile int scheduler_started = 0;
    sample the CPU that holds proc_lock -- which is why three runs produced
    names for the seven waiters and never for the holder.  A breadcrumb written
    at each step is the only observer that works with interrupts off: the lock
-   layer prints the stage of whichever CPU claims the contended lock. */
+   layer prints the stage of whichever CPU claims the contended lock.
+   1 holding the lock, 2 save done, 3 sleeping sweep done, 4 scanning,
+   5 picked (+sched_pick), 51 slot claimed, 52 frame/PFU/TLS loaded,
+   53 kernel-task park handled, 54 AS installed, 6 frame staged/releasing,
+   7 halt path, 8 blocked-exist abandon.  Stages 5x localise a wedged holder
+   to a single call inside the resume-frame window. */
 volatile uint8_t sched_stage[MAX_CPUS];
 volatile uint8_t sched_pick[MAX_CPUS];
 
@@ -1274,6 +1279,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
       sched_stage[cpu] = 5; /* picked; building the resume frame */
       sched_pick[cpu] = (uint8_t)next;
       set_current_process_pid(cpu, next);
+      sched_stage[cpu] = 51; /* claimed the slot for this CPU */
       /* WK-3 (draft 0008): liveness heartbeat on every claim, not just
          the idle path.  The heartbeat proves a CPU is alive; the idle
          reaper wastes a RUNNING slot whose every claimer heartbeat is
@@ -1287,6 +1293,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
       proc_table[next].state = PROC_STATE_RUNNING;
       struct trap_frame local_tf;
       restore_context(&proc_table[next], &local_tf);
+      sched_stage[cpu] = 52; /* register file + FPU + TLS loaded into the frame */
 
       extern char __stack_top;
       uint64_t target_sp = (uint64_t)&__stack_top - cpu * 0x10000 - 4096;
@@ -1302,6 +1309,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
         arch_set_user_sp(park);
         dbgpark(park);
       }
+      sched_stage[cpu] = 53; /* kernel-task park handled */
 #endif
       /* P2.2 (S2): a v2 slot switches by AS (TTBR0/CR3 + mode-change
          flush); a v1 slot keeps the legacy overlay rewrite path. */
@@ -1309,6 +1317,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
         vm_arch_switch(proc_table[next].as);
       else
         mmu_switch_user_mapping(proc_table[next].user_phys_base);
+      sched_stage[cpu] = 54; /* address space / user mapping installed for the target */
       /* The resume must be interrupt-atomic: the frame window
          [target_sp-296, target_sp) is copied and iretq'd right here, and a
          timer tick landing in that window pushes a frame onto the same
