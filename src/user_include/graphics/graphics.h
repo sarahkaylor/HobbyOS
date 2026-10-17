@@ -20,6 +20,11 @@ extern "C" {
 #define COLOR(r, g, b) ((0xFF << 24) | ((r) << 16) | ((g) << 8) | (b))
 
   int graphics_init(void);
+  /* S0 native-game ports (DOOM): direct access to the mapped VirtIO GPU
+   * framebuffer (B8G8R8A8) and its dimensions, for whole-frame blits. */
+  uint32_t *graphics_fb(void);
+  int graphics_width(void);
+  int graphics_height(void);
   void graphics_draw_pixel(int x, int y, uint32_t color);
   uint32_t graphics_get_pixel(int x, int y);
   void graphics_draw_rect(int x, int y, int w, int h, uint32_t color);
