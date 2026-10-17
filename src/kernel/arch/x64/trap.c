@@ -14,6 +14,16 @@
 #ifndef WD_X64_FLUSH_PROBE
 #define WD_X64_FLUSH_PROBE 0
 #endif
+/* GB-057: the sys_fork / sys_close per-syscall debug prints fired on EVERY
+ * call and flooded the emulated UART (~29% of the intel T3 console: the
+ * GB-009 baseline carried 5077+5524 sys_close lines and 85 sys_fork lines).
+ * That PIO write storm slowed the wave and interleaved real FAIL lines so
+ * they could not be attributed — the interleaving class that hid the
+ * GB-057 gate defect.  Off by default; turn on only when tracing the syscall
+ * path by hand. */
+#ifndef TRAP_SYSCALL_DEBUG
+#define TRAP_SYSCALL_DEBUG 0
+#endif
 #include "errno.h"
 #include "vfs.h"
 #include "vm.h"
@@ -109,9 +119,11 @@ static void sys_exit(struct trap_frame *tf) {
 static void sys_fork(struct trap_frame *tf) {
   int pid = process_fork(tf);
   tf->regs[0] = pid < 0 ? (uint64_t)-EAGAIN : (uint64_t)pid;
+#if TRAP_SYSCALL_DEBUG
   uart_puts("[KERNEL] sys_fork: tf->regs[0] is now ");
   print_int((int)tf->regs[0]);
   uart_puts("\n");
+#endif
 }
 
 static void sys_open(struct trap_frame *tf) {
@@ -129,9 +141,10 @@ static void sys_open(struct trap_frame *tf) {
 
 static void sys_close(struct trap_frame *tf) {
   int fd = (int)tf->regs[5]; // rdi
-  uint32_t cpu = get_cpuid();
   struct process *caller = current_process();
 
+#if TRAP_SYSCALL_DEBUG
+  uint32_t cpu = get_cpuid();
   uart_puts("[sys_close Debug] CPU=");
   print_int(cpu);
   uart_puts(", PIDs=[");
@@ -154,13 +167,16 @@ static void sys_close(struct trap_frame *tf) {
     uart_puts(", caller is NULL");
   }
   uart_puts("\n");
+#endif
 
   int ret = file_close(caller, fd);
+#if TRAP_SYSCALL_DEBUG
   uart_puts("[KERNEL Debug] sys_close: fd=");
   print_int(fd);
   uart_puts(", ret=");
   print_int(ret);
   uart_puts("\n");
+#endif
   tf->regs[0] = ret < 0 ? -EBADF : ret;
 }
 
