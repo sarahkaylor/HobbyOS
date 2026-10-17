@@ -370,6 +370,7 @@ final list.
 | GB-023 | Real signal delivery: frame build, `sigreturn`, `rt_sigprocmask` | L | GB-021 | T4 signal test |
 | GB-024 | **M1 gate:** W0 corpus (hello, cat, sh, coreutils-static) boots on intel + writes expected output, T4 green | M | GB-013..23 | gate evidence |
 | GB-057 | **ARCH=intel T3 prints 222 failing checks (sed/grep/cmp/tsort) yet exits 0** — the intel integration tier is not a gate (minted from the GB-009 baseline run) | L | — | `make test_intel` with 0 FAIL lines + a deliberately-broken check fails the tier; `make test` (ARM) stays green |
+| GB-058 | **ARCH=arm T3 carries one real failure the exit-status-only tier called green: `SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST`** (`evidence/gb-009-baseline/t3_integration.log:5329`, surfaced by `tools/t3_tier.sh police`) | M | GB-056 | the stall is explained and fixed (the watchdog process-table dump is the evidence); `make test` (policed, ARM) green |
 
 ### Milestone M2 — Compat device nodes + SDL (GB-025 … GB-033)
 
