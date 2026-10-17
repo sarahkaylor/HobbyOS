@@ -54,12 +54,39 @@ static void test_blank_ioctl(void) {
   EXPECT_EQ(hb_fb_blank_ioctl(HB_VESA_HSYNC_SUSPEND), 0);
 }
 
+static void test_route(void) {
+  uart_puts("  Running test_route...\n");
+  tests_run++;
+  struct hb_fb_var_screeninfo v;
+  struct hb_fb_fix_screeninfo f;
+  /* FBIOGET_VSCREENINFO fills the Linux-layout var struct. */
+  EXPECT_EQ(hb_fb_ioctl_arg_size(FBIOGET_VSCREENINFO),
+            (size_t)sizeof(struct hb_fb_var_screeninfo));
+  EXPECT_EQ(hb_fb_ioctl_route(FBIOGET_VSCREENINFO, &v, 0), 0);
+  EXPECT_EQ(v.xres, DISPLAY_WIDTH);
+  EXPECT_EQ(v.bits_per_pixel, 32);
+  /* FBIOGET_FSCREENINFO fills the fix struct (smem_start carried). */
+  EXPECT_EQ(hb_fb_ioctl_arg_size(FBIOGET_FSCREENINFO),
+            (size_t)sizeof(struct hb_fb_fix_screeninfo));
+  EXPECT_EQ(hb_fb_ioctl_route(FBIOGET_FSCREENINFO, &f, 0x1234000), 0);
+  EXPECT_EQ(f.smem_start, (uint64_t)0x1234000);
+  /* FBIOBLANK is a value, not a buffer -> routed no-op-success. */
+  EXPECT_EQ(hb_fb_ioctl_arg_size(HB_FBIOBLANK), (size_t)0);
+  EXPECT_EQ(hb_fb_ioctl_route(HB_FBIOBLANK, (void *)HB_VESA_NO_BLANK, 0), 0);
+  /* Unknown request is never a silent no-op. */
+  size_t unk = hb_fb_ioctl_arg_size(0xDEAD);
+  int unk_expect = (int)(size_t)-1;          /* macro casts to int */
+  EXPECT_EQ(unk, (size_t)unk_expect);
+  EXPECT_EQ(hb_fb_ioctl_route(0xDEAD, &v, 0), -1);
+}
+
 void fb_mmap_test_suite(void) {
   uart_puts("fb_mmap_test_suite:\n");
   test_smem_len();
   test_translate_valid();
   test_translate_invalid();
   test_blank_ioctl();
+  test_route();
 }
 
 #endif // KERNEL_MODE_UNIT_TEST

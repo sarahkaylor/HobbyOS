@@ -562,6 +562,12 @@ void *map_fb(void) { return (void *)ho_syscall4(SYS_MAP_FB, 0, 0, 0, 0); }
 
 __attribute__((weak)) void flush_fb(void) { ho_syscall4(SYS_FLUSH_FB, 0, 0, 0, 0); }
 
+/* GB-025: /dev/fb0 ioctl (SYS_FB_IOCTL).  (req, arg) — FBIOGET_* copy a
+ * Linux-layout struct out to arg, FBIOBLANK takes a value.  0 | -1. */
+__attribute__((weak)) int fb_ioctl(unsigned long req, void *arg) {
+  return (int)ho_syscall4(SYS_FB_IOCTL, (long)req, (long)arg, 0, 0);
+}
+
 /* GX (docs/graphics-accel.md): damage-rect present (SYS_FLUSH_FB_RECTS). */
 __attribute__((weak)) int flush_fb_rects(const struct fb_rect *rects, int count) {
   return (int)ho_syscall4(SYS_FLUSH_FB_RECTS, (long)rects, (long)count, 0, 0);

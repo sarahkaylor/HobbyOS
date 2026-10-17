@@ -36,6 +36,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "display_mode.h"
+#include "fb_ioctl.h"
 
 /* mmap(2) page size — Linux mandates the mmap offset be page-aligned and
  * the mapped window stay inside the device's smem. */
@@ -95,5 +96,19 @@ uint64_t hb_fb_smem_len(void);
  * pins the accepted behaviour.
  */
 int hb_fb_blank_ioctl(unsigned long arg);
+
+/* Render a /dev/fb0 ioctl into its fill (GB-025 wiring glue).  Routes the
+ * FBIOGET_VSCREENINFO/FSCREENINFO requests (which write a Linux-layout
+ * struct into `arg`) to hb_fb_ioctl (GB-026), and FBIOBLANK (arg is the
+ * blank level value, not a pointer) to hb_fb_blank_ioctl.  Returns 0 on
+ * success, -1 on an unknown request.  Device-free so the syscall shim on
+ * either arch can validate the user buffer and call this.
+ */
+int hb_fb_ioctl_route(unsigned long req, void *arg, uint64_t smem_start);
+
+/* Bytes copied out to `arg` for an FBIOGET_* request (Linux struct size),
+ * 0 for FBIOBLANK, (size_t)-1 for an unknown request.  Used by the
+ * syscall shims to validate the user buffer before routing. */
+size_t hb_fb_ioctl_arg_size(unsigned long req);
 
 #endif /* FB_MMAP_H */
