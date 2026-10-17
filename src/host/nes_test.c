@@ -141,6 +141,13 @@ int main(void){
     for (i = 0; i < 32; i++)
       if (m.ppu.vram[(0x2000 + i) & (NES_VRAM_SIZE - 1)] == 1) band++;
     CHECK(band == 32, "homebrew: A released keeps the dark top band (resting frame)");
+    /* the boot frame also places an OAM sprite: tile 3 (mid-grey) at (12,12) */
+    CHECK(m.ppu.vram[0x1038] == 0xFF && m.ppu.oam[0] == 13 && m.ppu.oam[1] == 3,
+          "homebrew: sprite tile 3 written and OAM[0] = (y=12,tile=3,x=12)");
+    nes_ppu_render(&m);
+    CHECK(m.ppu.fb[12*NES_SCREEN_W + 12] == 136 &&
+          m.ppu.fb[10*NES_SCREEN_W + 40] == 200,
+          "homebrew: rendered sprite pixel at (12,12) mid-grey over bright field");
 
     /* A pressed -> the ROM clears the band (picture visibly changes) */
     nes_machine m2;
