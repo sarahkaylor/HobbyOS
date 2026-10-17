@@ -1166,6 +1166,16 @@ volatile int scheduler_started = 0;
  * Saves the current process context, finds the next READY process, and restores
  * its context. If no processes are ready, waits for an interrupt (WFI).
  */
+/* GB-057 probe: WHERE in schedule() a CPU is, per CPU.
+
+   The critical section below runs with IF=0, so no timer and no IPI can ever
+   sample the CPU that holds proc_lock -- which is why three runs produced
+   names for the seven waiters and never for the holder.  A breadcrumb written
+   at each step is the only observer that works with interrupts off: the lock
+   layer prints the stage of whichever CPU claims the contended lock. */
+volatile uint8_t sched_stage[MAX_CPUS];
+volatile uint8_t sched_pick[MAX_CPUS];
+
 void schedule(struct trap_frame *tf, int is_yield) {
   if (!scheduler_started) return;
 
@@ -1185,6 +1195,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
   interrupts_disable();
 
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  sched_stage[cpu] = 1; /* holding proc_lock */
   int current_pid = cpu_current_pids[cpu];
 
   if (current_pid >= 0) {
@@ -1223,9 +1234,12 @@ void schedule(struct trap_frame *tf, int is_yield) {
     }
   }
 
+  sched_stage[cpu] = 2; /* current-process save/claim-guard done */
   process_check_sleeping();
+  sched_stage[cpu] = 3; /* sleeping sweep done */
 
   while (1) {
+    sched_stage[cpu] = 4; /* scanning for READY */
     int next = -1;
     int current_search_pid = (current_pid >= 0) ? current_pid : 0;
     for (int i = 1; i <= MAX_PROCESSES; i++) {
@@ -1257,6 +1271,8 @@ void schedule(struct trap_frame *tf, int is_yield) {
     }
 
     if (next >= 0) {
+      sched_stage[cpu] = 5; /* picked; building the resume frame */
+      sched_pick[cpu] = (uint8_t)next;
       set_current_process_pid(cpu, next);
       /* WK-3 (draft 0008): liveness heartbeat on every claim, not just
          the idle path.  The heartbeat proves a CPU is alive; the idle
@@ -1301,6 +1317,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
          per-core 100 Hz LVT timers).  Release the lock with IF=0 and let
          the iretq restore the target's own RFLAGS. */
       interrupts_disable();
+      sched_stage[cpu] = 6; /* resume frame staged; releasing the lock now */
       spinlock_release(&proc_lock);
 
       /* P5 S3 (D8.4a/b): the resume boundary — timer-preempt resume of a
@@ -1328,6 +1345,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
     }
 
     if (!any_alive) {
+      sched_stage[cpu] = 7; /* nothing alive: halt path */
       set_current_process_pid(cpu, -1);
       /* P2.2 (S2): no user context will run here; never keep an AS (whose
          tables are about to be freed) as this CPU's translation. */
@@ -1355,6 +1373,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
     // We CANNOT return, because the current process might be BLOCKED.
     // We must abandon this trap frame and return to the base start_scheduler()
     // loop so the CPU can sleep cleanly.
+    sched_stage[cpu] = 8; /* blocked-exist: abandoning the frame */
     set_current_process_pid(cpu, -1);
     vm_arch_restore_kernel(); /* P2.2 (S2): back to the kernel table */
     spinlock_release_irqrestore(&proc_lock, flags);

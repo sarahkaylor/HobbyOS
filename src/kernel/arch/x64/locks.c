@@ -37,6 +37,11 @@ extern void uart_putc_raw(char c);
 static void scream_hex(const char *label, uint64_t v);
 static void scream_dec(const char *label, uint32_t v);
 
+/* GB-057: schedule()'s per-CPU breadcrumbs (src/kernel/process.c).  See the
+   note there -- with IF=0 the wedged CPU cannot be sampled by any timer. */
+extern volatile uint8_t sched_stage[];
+extern volatile uint8_t sched_pick[];
+
 static void held_lock_push(uint64_t addr) {
   uint32_t cpu = get_cpuid();
   for (int i = 0; i < HELD_LOCK_SLOTS; i++)
@@ -80,6 +85,8 @@ static void held_lock_report_holder(uint64_t addr) {
         scream_dec("\n[HOLDER] cpu=", c);
         scream_hex(" lock=", addr);
         scream_hex(" entered_at=", held_lock_pc[c][i]);
+        scream_dec(" sched_stage=", sched_stage[c]);
+        scream_dec(" picked=", sched_pick[c]);
         uart_putc_raw('\n');
       }
     }
