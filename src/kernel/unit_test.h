@@ -56,6 +56,7 @@ void fb_ioctl_test_suite(void);
 void evdev_test_suite(void);
 void input_node_test_suite(void);
 void fb_mmap_test_suite(void);
+void abi_t2_test_suite(void);
 void timer_test_suite(void);
 void smp_test_suite(void);
 void time_test_suite(void);
