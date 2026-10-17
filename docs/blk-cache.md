@@ -413,3 +413,27 @@ raw logs (markers + FAIL-token scan), never exit codes.
   coherence contract (§9), and every press-suite oracle assertion are
   unchanged; passthrough unit reads are now served once by the copy pass
   instead of being double-issued during the fill.
+
+- 2026-10-17 (selfhost A/B resolution — the "cached selfhost slowdown"
+  is closed): the post-fixlock "cached selfhost stalls" were re-run with
+  full baseline patience (2.5h+ boundaries) on the frozen pristine seed
+  (`disk-selfhost-abcopy.img`, md5 `bef57f51…`).  Result: **all arms
+  PASS** — cache-on `25f1a0d3` `ACCEPTANCE-COMPLETE stages=4` in
+  ~2h58m (0 FAIL tokens), bypass `52cdc404` ~2h28m, old kernel
+  `085003f8` ~2h28m, historical baseline 2h31m — same class, ~1.2x
+  under a 3-VM-contended host, no pathology.  In-OS-built
+  `/SRC/hobbyos.bin` is byte-identical across all arms (218,356 B,
+  sha256 `00bad4a7…` = the baseline receipt), `/SRC/OUT.IMG` 128 MiB
+  and `/SRC/OUT.LOG` 26,423 B likewise.  Root cause of every "stall"
+  reading: (a) pre-fix — the real fill_lock↔fat_lock deadlock
+  (above); (b) post-fix — the **known stochastic exec-wedge class**
+  (docs/selfhost/selfhost-bench-baseline.md), which resolves as the
+  ~50–75-minute **silent sh.c compile** (92 KB TU under MTTCG) ending
+  at the `/SRC/obj/arm/sh-*.o.tmp new=…/sh.o` rename cascade; every
+  ≤40-minute bound froze at ~13,779 B exactly at that pre-rename
+  point.  Serial byte-landmarks for a healthy run: s0-done @7,392 /
+  s1-done @35,478 / s2-done @175,480 / ACCEPTANCE @217,348.  Do not
+  read instrumented-kernel serials by size (dump flood ≈95% of
+  bytes).  Receipts: `blkcache-evidence/selfhost/P2-AB-RECEIPT.md`,
+  `cached-arm2-full-pass.serial.log`, `bypass-arm-full-pass.serial.log`,
+  `oldkernel-control-full-pass.serial.log`.
