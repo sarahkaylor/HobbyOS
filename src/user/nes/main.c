@@ -67,10 +67,14 @@ static void drain_input(void){
   }
 }
 
-/* Present a single-button press edge to the machine (not a held level). */
+/* Present a single-button press edge to the machine (not a held level).
+ * Any controller edge also visibly flips the render (Left/Right/Up/Down/A/D/
+ * W/S/Space) so the "emulator is live and input reaches it" is demonstrable
+ * even though this first homebrew renders a static field. */
 static void apply_input_edges(void){
   unsigned edge = g_m.joy & ~g_joy_prev;
   g_joy_prev = g_m.joy;
+  if (edge) g_phase = !g_phase;
   g_m.joy = edge;
 }
 
