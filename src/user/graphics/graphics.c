@@ -85,6 +85,10 @@ void graphics_reset_clip(void) {
   cx0 = bx0; cy0 = by0; cx1 = bx1; cy1 = by1;
 }
 
+uint32_t *graphics_fb(void) { return fb; }
+int graphics_width(void)  { return SCREEN_WIDTH; }
+int graphics_height(void) { return SCREEN_HEIGHT; }
+
 void graphics_draw_pixel(int x, int y, uint32_t color) {
   if (!fb)
     return;
