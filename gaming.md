@@ -399,6 +399,7 @@ final list.
 | GB-040 | Per-game evidence rig: serial log + screendump + replay scripts | S | — | assets land in evidence dir |
 | GB-041 | **[DEEP]** **Doom as static-musl ELF under compat** (W4) — resolve interop gotchas (mmap, ioctl, threads) | L | GB-033, GB-034 | **playable on intel** — the S1 moonshot |
 | GB-042 | Gamepad/joystick via evdev for arcade titles (optional) | M | GB-027 | axis/buttons register |
+| GB-059 | Port the four hand-rolled T5 harnesses (`run_doom_test.py`, `run_stardust_test.py`, `run_xnibbler_test.py`, `run_xcrypt_test.py`) onto `tools/evidence_rig.py`: locate the title by name from the parsed `[MENU]` dump (never a magic slot index — four PRs each asserted their own on the same growing `pinned_games[]` line) and take the repo root from the environment so it works from a `hermes -w` worktree | M | GB-040 | both a native port and a compat title run through the one rig from a worktree; the four hand-rolled copies are deleted |
 
 ### Milestone M4 — Integration, testing, acceptance (GB-043 … GB-055)
 
