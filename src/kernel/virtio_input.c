@@ -1,4 +1,5 @@
 #include "virtio_input.h"
+#include "evdev.h"
 #include "lock.h"
 #include "arch/cpu.h"
 
@@ -34,101 +35,17 @@ static void push_event(uint16_t type, uint16_t code, uint32_t value) {
   }
 }
 
-static int kbd_escaped = 0;
+/* The PS/2 -> evdev decode (scancodes, mouse packets, the overflow-drop
+   rule, absolute-position clamp) lives in src/kernel/evdev.c, shared with
+   the host golden suite (src/host/evdev_test.c) so the driver's exact
+   translator is pinned on the host tier.  Here we bridge its events into
+   the kernel's event ring. */
+static struct evdev_decoder input_decoder;
 
-static void handle_keyboard_byte(uint8_t data) {
-  if (data == 0xE0) {
-    kbd_escaped = 1;
-    return;
-  }
-
-  uint16_t code = 0;
-  uint32_t value = 0;
-
-  if (kbd_escaped) {
-    kbd_escaped = 0;
-    uint8_t base = data & 0x7F;
-    int is_release = (data & 0x80) != 0;
-
-    if (base == 0x47) code = 102;      // KEY_HOME (E0)
-    else if (base == 0x48) code = 103; // KEY_UP
-    else if (base == 0x49) code = 104; // KEY_PAGEUP (E0)
-    else if (base == 0x4B) code = 105; // KEY_LEFT
-    else if (base == 0x4D) code = 106; // KEY_RIGHT
-    else if (base == 0x4F) code = 107; // KEY_END (E0)
-    else if (base == 0x50) code = 108; // KEY_DOWN
-    else if (base == 0x51) code = 109; // KEY_PAGEDOWN (E0)
-
-    if (code != 0) {
-      value = is_release ? 0 : 1;
-    }
-  } else {
-    int is_release = (data & 0x80) != 0;
-    code = data & 0x7F;
-    value = is_release ? 0 : 1;
-  }
-
-  if (code != 0) {
-    push_event(EV_KEY, code, value);
-    push_event(EV_SYN, 0, 0);
-  }
-}
-
-static int mouse_cycle = 0;
-static uint8_t mouse_packet[3];
-static int mouse_x = 16384;
-static int mouse_y = 16384;
-static int prev_left = 0;
-static int prev_right = 0;
-
-static void handle_mouse_byte(uint8_t data) {
-  if (mouse_cycle == 0 && !(data & 0x08)) {
-    return;
-  }
-
-  mouse_packet[mouse_cycle++] = data;
-
-  if (mouse_cycle == 3) {
-    mouse_cycle = 0;
-    uint8_t flags = mouse_packet[0];
-    int dx = (int)mouse_packet[1];
-    int dy = (int)mouse_packet[2];
-
-    if (flags & 0x10) dx -= 256;
-    if (flags & 0x20) dy -= 256;
-
-    /* A set X/Y overflow bit means the delta for that axis is UNKNOWN
-       (the device / buffer overflowed) — integrating the payload byte
-       would inject a garbage jump and permanently unpin the cursor's
-       absolute position.  Always apply the button bits; drop the axis. */
-    if (flags & 0x40) dx = 0;
-    if (flags & 0x80) dy = 0;
-
-    mouse_x += dx * 40;
-    mouse_y -= dy * 40;
-
-    if (mouse_x < 0) mouse_x = 0;
-    if (mouse_x > 32767) mouse_x = 32767;
-    if (mouse_y < 0) mouse_y = 0;
-    if (mouse_y > 32767) mouse_y = 32767;
-
-    push_event(EV_ABS, ABS_X, mouse_x);
-    push_event(EV_ABS, ABS_Y, mouse_y);
-
-    int left = (flags & 0x01) != 0;
-    int right = (flags & 0x02) != 0;
-
-    if (left != prev_left) {
-      push_event(EV_KEY, 0x110, left);
-      prev_left = left;
-    }
-    if (right != prev_right) {
-      push_event(EV_KEY, 0x111, right);
-      prev_right = right;
-    }
-
-    push_event(EV_SYN, 0, 0);
-  }
+static void decoder_emit(void *ctx, uint16_t type, uint16_t code,
+                         uint32_t value) {
+  (void)ctx;
+  push_event(type, code, value);
 }
 
 /* Drain any bytes the i8042 has for us.  Runs under input_lock.  The
@@ -146,9 +63,9 @@ static void input_drain_nolock(void) {
     }
     uint8_t data = inb(0x60);
     if (status & 0x20) {
-      handle_mouse_byte(data);
+      evdev_mouse_byte(&input_decoder, data, decoder_emit, 0);
     } else {
-      handle_keyboard_byte(data);
+      evdev_kbd_byte(&input_decoder, data, decoder_emit, 0);
     }
   }
 }
@@ -207,6 +124,7 @@ static void ps2_write_mouse(uint8_t data) {
 
 int virtio_input_init(void) {
   spinlock_init(&input_lock);
+  evdev_decoder_init(&input_decoder);
 
   // Enable mouse
   ps2_write_cmd(0xA8);
