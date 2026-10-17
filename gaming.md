@@ -1,6 +1,7 @@
 # HobbyOS Gaming Program — Plan (living document)
 
-Status: **READY — infrastructure built (2026-10-16/17). Execution awaits Sarah's go-ahead.**
+Status: **IN EXECUTION (started 2026-10-17, Coordinator on `swarm-coordinator` .233).**
+M0 board/fleet automation landed (GB-002/003/004); M1 ABI-core is the critical path.
 Owner: Sarah (architect), assisted by the HobbyOS agent swarm.
 Ticketing: **Forgejo v17 live at http://192.168.0.234:3000**, repo `sarah/gaming-program`;
 `GAMING-BOARD` board scaffolding = tickets GB-002/GB-003.
@@ -149,8 +150,8 @@ HobbyOS (QEMU: -M virt aarch64 / -M q35 x86_64)
 
 | Tier | Model | Endpoint | Used by | Policy |
 |---|---|---|---|---|
-| **FLASH (workhorse)** | DeepSeek **V4 Flash** | `vllm` OpenAI-compatible on the **RTX 6000 pair** box | **every** worker / reviewer / tester agent | **Default for ~all tickets.** Target >90% of fleet tokens. |
-| **DEEP (planner)** | DeepSeek **v4.1 Flash** (8× DGX Spark) | `vllm` OpenAI-compatible on the **Spark fleet** | **Coordinator only** | Planning, re-planning, ABI/architecture design, blocked-root-cause after 1 FLASH retry, milestone reviews. |
+| **FLASH (workhorse)** | DeepSeek **V4 Flash** | `http://llm.localdomain:8000/v1` (vLLM, RTX 6000 pair box) | **every** worker / reviewer / tester agent | **Default for ~all tickets.** Target >90% of fleet tokens. |
+| **DEEP (planner)** | DeepSeek **v4.1 Flash** (8× DGX Spark) | `http://dgx1.localdomain:8000/v1` (vLLM; alias `dgx-main`) | **Coordinator only** | Planning, re-planning, ABI/architecture design, blocked-root-cause after 1 FLASH retry, milestone reviews. |
 
 Measures behind us (Sept/Oct 2026 community benchmarks for exactly this class of hardware):
 ~156–241 tok/s aggregate on the 8-Spark v4.1 box; ~47 tok/s single-stream per RTX 6000 card;
@@ -162,10 +163,14 @@ cold prefill ~840–2,100 tok/s depending on context. Consequences coded into th
 - **Long-lived sessions, never churn.** Restarting a 300K-context agent costs minutes of
   prefill. Agents stay on their subsystem; new work = new ticket, not new session.
 - **Deterministic work stays in tools** (grep/sed/test/CI), never in model tokens.
-- Endpoints/IPs are NOT hardcoded here — the setup step (GB-004) records the real URLs and
-  verifies `GET /models`. Mapping the tiers to the built infra: **FLASH = DeepSeek V4 on the
-  RTX-6000 pair box** (workhorse), **DEEP = DeepSeek v4.1 on the 8× DGX Spark fleet**
-  (planner/coordinator only).
+- Endpoints recorded and verified 2026-10-17 (GB-004), see §11.3 for the probe evidence. Mapping the
+  tiers to the built infra: **FLASH = DeepSeek V4 on the RTX-6000 pair box** (workhorse),
+  **DEEP = DeepSeek v4.1 on the 8× DGX Spark fleet** (planner/coordinator only).
+- **Measured 2026-10-17 (single stream, GB-004, `max_tokens=200`, temp 0):** FLASH
+  `llm.localdomain:8000` **57.7 tok/s** (196 completion tokens); DEEP `dgx1.localdomain:8000`
+  **40.5 tok/s** (119 tokens). Both serve `max_model_len: 1048576`. These are *single-stream*
+  numbers on a shared box — §3.1's 94–150 tok/s is an aggregate/community figure, so cap active
+  workers from measurement, not from the table.
 - **Model budget (validated 2026-10-17):** split lands ~90% FLASH / ~10% DEEP tokens; DEEP duty
   ~3% (it is mostly parked — that is intended). The binding constraint is FLASH throughput:
   the RTX pair measures ~94–150 tok/s, which feeds only **~3–5 agents** at full clip (the
@@ -219,11 +224,23 @@ boards in one, milestones and labels, light enough for a VM.
 ### 4.1 Structure
 
 - **Project:** `GAMING-BOARD` (kanban).
-- **Lanes:** `📋 Backlog` → `🟦 Ready` → `🟨 In Progress` → `🟧 In Review` → `🚦 Merge Gate` → `✅ Done`; plus `🧊 Icebox` (Program-2 vision epics).
-- **Labels:** `infra`, `abi`, `loader`, `libc`, `elf-compat`, `graphics`, `input`, `audio`, `native-port`, `game`, `tests`, `perf`, `docs`, `decision` (needs Sarah's sign-off), `deep` (DEEP-model required), `blocked`, `parity-ar` (ARM), `parity-x64`.
-- **Milestones:** `M0·infra` `M1·abi-core` `M2·devices-sdl` `M3·games` `M4·acceptance`.
-- **Ticket skeleton:** ID, workstream, weight S/M/L, depends-on, DoD + test, evidence link.
-- **Bot user:** `swarm-bot` (API token) — the Coordinator and workers move/annotate tickets through it. Webhook on the board posts to the Coordinator.
+- Lanes: `📋 Backlog` → `🟦 Ready` → `🟨 In Progress` → `🟧 In Review` → `🚦 Merge Gate` → `✅ Done`; plus `🧊 Icebox` (Program-2 vision epics).
+- Labels: `infra`, `abi`, `loader`, `libc`, `elf-compat`, `graphics`, `input`, `audio`, `native-port`, `game`, `tests`, `perf`, `docs`, `decision` (needs Sarah's sign-off), `deep` (DEEP-model required), `blocked`, `parity-ar` (ARM), `parity-x64`.
+- Milestones: `M0·infra` `M1·abi-core` `M2·devices-sdl` `M3·games` `M4·acceptance`.
+- Ticket skeleton: ID, workstream, weight S/M/L, depends-on, DoD + test, evidence link.
+- Bot user: `swarm-bot` (API token) — the Coordinator and workers move/annotate tickets through it. Webhook on the board posts to the Coordinator.
+
+**LANE LIMITATION (GB-002, found 2026-10-17).** The live Forgejo is
+**v17.0.0+gitea-1.22.0** and its REST API has **no `/projects` endpoint**
+(`/api/v1/repos/sarah/gaming-program/projects` → `404 page not found`), so the
+`GAMING-BOARD` kanban project cannot be created or driven over the API that every
+agent works through. **The lanes are therefore labels** whose names are the lane
+names above (one lane label per issue, colours matching the lane), stacked on the
+**native milestones** M0–M4; agents move tickets with
+`tools/board/lane-move.sh GB-nnn "<lane>"` instead of dragging cards. When a Forgejo
+build with `/projects` lands, `tools/board/board.py` grows a project backend and the
+label fallback retires. Weight is carried as a `wt-S|wt-M|wt-L` label, the ticket
+skeleton as an issue header block (see `tools/board/README.md`).
 
 ### 4.2 Ticket workflow (agents own it end-to-end)
 
@@ -452,11 +469,37 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
   - Milestones/labels/projects (kanban) have their own namespaces; reuse the GB-003 lane-move
     scripts instead of ad-hoc curls.
 - `swarm-bot` account (all-scopes token) already exists — created 2026-10-16.
+- **Board tooling (GB-002/GB-003, in-repo):** `tools/board/` — `board.py` (claim/move/comment/status/lint),
+  `import_seed.py` (idempotent §8 → board import), `{claim,lane-move,comment}.sh` (workflow wrappers),
+  `hook_server.py` (webhook receiver), `poll.py` (60 s fallback). See `tools/board/README.md`.
+
+### 11.2a Board → Coordinator wiring (built 2026-10-17)
+
+- Webhook `coordinator-board-hook` (repo hooks API) → `http://192.168.0.233:8765/board-hook`,
+  served by systemd unit **`hobbyos-board-hook.service`** on `swarm-coordinator`; events land in
+  `/var/log/hobbyos/board-events.jsonl` (`wake: true` for lane moves into In Review/Merge Gate,
+  `decision` labels, closes).
+- **`hobbyos-board-poll.service`** runs the 60 s fallback poll (`poll.py`) into the same inbox.
+- Forgejo needed `ALLOWED_HOST_LIST = private` under a new `[webhook]` section in
+  `/etc/forgejo/app.ini` on `swarm-ticketing` — without it deliveries to a LAN address are refused
+  ("webhook can only call allowed HTTP servers"). The only change is that appended section
+  (the file had no `[webhook]` block before); removing it restores the original exactly.
 
 ### 11.3 Model endpoints & Hermes profiles
-- Two vLLM OpenAI-compatible endpoints; GB-004 records the final URLs (`GET /models` probe).
-  - **FLASH — DeepSeek V4 (RTX-6000 pair box).** Default for every role; all routine work.
-  - **DEEP — DeepSeek v4.1 (8× DGX Spark fleet).** Coordinator only: planning/re-plan/review.
+- Two vLLM OpenAI-compatible endpoints, **recorded + verified 2026-10-17 (GB-004)**:
+  - **FLASH — DeepSeek V4 Flash** = `http://llm.localdomain:8000/v1`, `GET /v1/models` →
+    `["deepseek-v4-flash"]` (root `/mnt/fast/deepseek-v4-flash-0731`), `max_model_len` 1048576.
+    Default for every role; all routine work. Measured **57.7 tok/s** single-stream.
+  - **DEEP — DeepSeek v4.1 Flash** = `http://dgx1.localdomain:8000/v1`, `GET /v1/models` →
+    `["deepseek-v4.1-flash", "dgx-main"]` (root `/models/deepseek-v4.1-flash`), `max_model_len`
+    1048576. Coordinator only: planning/re-plan/review. Measured **40.5 tok/s** single-stream.
+- Verification (GB-004): `swarm-coordinator` resolved `model.default=deepseek-v4.1-flash`,
+  `model.provider=dgx` → `hermes chat -q` answered (DEEP-LINK-OK); `swarm-farm-1..3` resolved
+  `model.default=deepseek-v4-flash`, `model.provider=flash`, `model.base_url=http://llm.localdomain:8000/v1`
+  → answered (FLASH-LINK-OK) with only `llm.localdomain:8000` in the logs. Role provisioning is
+  scripted: `tools/swarm/provision-hermes-role.sh` (`ROLE=flash|deep`); it uses `hermes config set`
+  only (never hand-edits `config.yaml`) and writes `FORGEJO_TOKEN` to `~/.hermes/.env` (chmod 600),
+  never to a tracked file.
 - Budget (validated 2026-10-17): ~90% FLASH / ~10% DEEP tokens. FLASH sustains ~94–150 tok/s →
   cap active workers at ~3–5 until GB-004 benchmarks say otherwise. Never put build/test load on
   the inference boxes.
