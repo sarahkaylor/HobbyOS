@@ -2554,6 +2554,17 @@ void general_interrupt_handler(struct trap_frame *tf) {
       uart_puts_raw(" pid=");
       print_int_raw(cur ? cur->pid : -1);
       uart_puts_raw("\n");
+      /* GB-060: same rule as the resume-return halt -- if this CPU is holding
+         proc_lock, give it back before stopping, so the survivors are not left
+         spinning behind a CPU that will never run again.  Only if the lock
+         records us as owner: freeing somebody else's lock would be worse than
+         the stall. */
+      {
+        extern int spinlock_release_if_held_by_me(spinlock_t *lock);
+        extern spinlock_t proc_lock;
+        if (spinlock_release_if_held_by_me(&proc_lock))
+          uart_puts_raw("[KERNEL] released proc_lock before halting (GB-060)\n");
+      }
       while (1);
     }
   }

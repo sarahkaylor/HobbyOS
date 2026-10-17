@@ -8,6 +8,7 @@
  */
 typedef struct {
   volatile uint32_t locked; /**< 1 if locked, 0 if free */
+  volatile uint32_t owner;  /**< cpu+1 of the holder, 0 = unowned (GB-060) */
 } spinlock_t;
 
 /**

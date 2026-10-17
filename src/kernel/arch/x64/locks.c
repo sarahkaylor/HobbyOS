@@ -277,12 +277,37 @@ void spinlock_acquire(spinlock_t *lock) {
     lock_wait_caller[cpu] = 0;
     lock_wait_caller2[cpu] = 0;
   }
+  /* GB-060: record the holder.  Written after the acquire succeeds and before
+     any use of the protected data, so a fatal path can ask "is this mine to
+     give back?" without guessing. */
+  lock->owner = get_cpuid() + 1;
   held_lock_push((uint64_t)lock);
 }
 
 void spinlock_release(spinlock_t *lock) {
+  /* Clear the owner BEFORE releasing: a CPU that finds the lock free must never
+     see its own id still in it, and the release-store below is what publishes
+     both fields to the next acquirer. */
+  lock->owner = 0;
   held_lock_pop((uint64_t)lock);
   __atomic_clear(&lock->locked, __ATOMIC_RELEASE);
+}
+
+/* GB-060: release a lock ONLY if this CPU is recorded as its owner.
+
+   Purpose: a fatal path must be able to give a stranded lock back without ever
+   writing a lock free that someone else holds -- clearing another CPU's lock
+   would convert a stall into a data race, which is strictly worse.  The check
+   is safe in the failure direction: if the lock was acquired by someone else,
+   owner != me; if it was released, owner == 0; so this can only fire when the
+   caller really is the holder (or the field is stale in the caller's favour,
+   which a proper release clears). */
+int spinlock_release_if_held_by_me(spinlock_t *lock) {
+  uint32_t me = get_cpuid() + 1;
+  if (lock->owner != me)
+    return 0;
+  spinlock_release(lock);
+  return 1;
 }
 
 uint64_t spinlock_acquire_irqsave(spinlock_t *lock) {
