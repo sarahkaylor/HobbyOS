@@ -41,6 +41,9 @@ static void scream_dec(const char *label, uint32_t v);
    note there -- with IF=0 the wedged CPU cannot be sampled by any timer. */
 extern volatile uint8_t sched_stage[];
 extern volatile uint8_t sched_pick[];
+extern volatile uint64_t sched_as_ptr[];
+extern volatile uint64_t sched_as_root[];
+extern volatile uint8_t sched_slot_state[];
 
 static void held_lock_push(uint64_t addr) {
   uint32_t cpu = get_cpuid();
@@ -87,6 +90,9 @@ static void held_lock_report_holder(uint64_t addr) {
         scream_hex(" entered_at=", held_lock_pc[c][i]);
         scream_dec(" sched_stage=", sched_stage[c]);
         scream_dec(" picked=", sched_pick[c]);
+        scream_hex(" as=", sched_as_ptr[c]);
+        scream_hex(" cr3=", sched_as_root[c]);
+        scream_dec(" slot_state=", sched_slot_state[c]);
         uart_putc_raw('\n');
       }
     }

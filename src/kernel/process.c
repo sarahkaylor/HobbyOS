@@ -1180,6 +1180,14 @@ volatile int scheduler_started = 0;
    to a single call inside the resume-frame window. */
 volatile uint8_t sched_stage[MAX_CPUS];
 volatile uint8_t sched_pick[MAX_CPUS];
+/* GB-057 probe v5: what the resume path is about to INSTALL.  The v4 run put
+   the holder at the address-space switch (stage 53, slot 31) and it never came
+   back, so whatever it was about to load into CR3 is the evidence -- and a CPU
+   that never returns cannot print it itself.  Captured here, printed by the
+   lock layer from the [HOLDER] report. */
+volatile uint64_t sched_as_ptr[MAX_CPUS];
+volatile uint64_t sched_as_root[MAX_CPUS];
+volatile uint8_t sched_slot_state[MAX_CPUS];
 
 void schedule(struct trap_frame *tf, int is_yield) {
   if (!scheduler_started) return;
@@ -1313,6 +1321,9 @@ void schedule(struct trap_frame *tf, int is_yield) {
 #endif
       /* P2.2 (S2): a v2 slot switches by AS (TTBR0/CR3 + mode-change
          flush); a v1 slot keeps the legacy overlay rewrite path. */
+      sched_as_ptr[cpu] = (uint64_t)proc_table[next].as;
+      sched_as_root[cpu] = proc_table[next].as ? proc_table[next].as->root_phys : 0;
+      sched_slot_state[cpu] = (uint8_t)proc_table[next].state;
       if (proc_table[next].as)
         vm_arch_switch(proc_table[next].as);
       else
