@@ -156,6 +156,45 @@ int main(void){
     CHECK(band == 32, "homebrew: A pressed clears the band (ROM responds to input)");
   }
 
+  /* ---- additional 6502 instructions (shifts, branches, ind-jmp, stack) - */
+  {
+    /* shifts/rotates: 0x86 ASL->(0x0C,C1) LSR->0x06 ROL->0x0C ROR->0x06 */
+    static const u8 p1[] = {0xA9,0x86, 0x0A, 0x4A, 0x2A, 0x6A, 0x85,0x10,
+                            0x4C,0x08,0x80};
+    nes_machine m; memset(&m, 0, sizeof(m));
+    memcpy(&m.prg[0], p1, sizeof(p1)); m.prg[0x7FFC]=0; m.prg[0x7FFD]=0x80;
+    nes_reset(&m); nes_run(&m, 300);
+    CHECK(m.cpu.a == 0x06, "6502 ASL/LSR/ROL/ROR chain yields A==0x06");
+    CHECK((m.cpu.p & 0x01) == 0, "shift chain leaves Carry clear");
+    CHECK(m.ram[0x10] == 0x06, "STA $10 (absolute,zero-page) stores the shift result");
+
+    /* branches: SEC -> BCC falls through (INX), BCS taken (skips INY) */
+    static const u8 p2[] = {0x38, 0x90,0x01, 0xE8, 0xB0,0x01, 0x88, 0x4C,0x07,0x80};
+    nes_machine m2; memset(&m2, 0, sizeof(m2));
+    memcpy(&m2.prg[0], p2, sizeof(p2)); m2.prg[0x7FFC]=0; m2.prg[0x7FFD]=0x80;
+    nes_reset(&m2); nes_run(&m2, 300);
+    CHECK(m2.cpu.x == 1 && m2.cpu.y == 0,
+          "6502 BCC falls through / BCS taken (X=1, INY skipped)");
+
+    /* indirect JMP ($0030): [0x30]=0x40 [0x31]=0x80 -> 0x8040 sets X=0x55 */
+    nes_machine m3; memset(&m3, 0, sizeof(m3));
+    static const u8 p3[] = {0xA9,0x40,0x85,0x30, 0xA9,0x80,0x85,0x31, 0x6C,0x30,0x00};
+    memcpy(&m3.prg[0], p3, sizeof(p3));
+    m3.prg[0x40]=0xA2; m3.prg[0x41]=0x55;          /* LDX #$55 @ $8040 */
+    m3.prg[0x42]=0x4C; m3.prg[0x43]=0x42; m3.prg[0x44]=0x80; /* JMP $8042 self */
+    m3.prg[0x7FFC]=0; m3.prg[0x7FFD]=0x80;
+    nes_reset(&m3); nes_run(&m3, 300);
+    CHECK(m3.cpu.x == 0x55, "6502 JMP ($xxxx) indirect takes the pointer target");
+
+    /* stack: PHA push / PLA pull round-trips A and balances the stack */
+    static const u8 p4[] = {0xA9,0x77, 0x48, 0xA9,0x22, 0x68, 0x4C,0x06,0x80};
+    nes_machine m4; memset(&m4, 0, sizeof(m4));
+    memcpy(&m4.prg[0], p4, sizeof(p4)); m4.prg[0x7FFC]=0; m4.prg[0x7FFD]=0x80;
+    nes_reset(&m4); nes_run(&m4, 300);
+    CHECK(m4.cpu.a == 0x77 && m4.cpu.sp == 0xFD,
+          "6502 PHA push / PLA pull restores A and balances the stack");
+  }
+
   printf("\nTests: passed=%d failed=%d -> %s\n",
          passed, failed, failed ? "FAILED" : "ALL PASSED");
   return failed ? 1 : 0;
