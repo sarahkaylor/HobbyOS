@@ -53,36 +53,36 @@ static void kq_push(uint8_t pressed, uint8_t key) {
 /* Map a Linux evdev scan code to a DOOM key code (doomkeys.h). */
 static uint8_t evdev_to_doom(uint8_t code) {
   switch (code) {
-    case 1:  return 27;             /* ESC      -> KEY_ESCAPE   */
-    case 15: return 9;              /* TAB      -> KEY_TAB      */
-    case 28: return 13;             /* ENTER    -> KEY_ENTER    */
-    case 57: return 0xa2;           /* SPACE    -> KEY_USE      */
-    case 29: return 0xa3;           /* LCTRL    -> KEY_FIRE     */
-    case 97: return 0xa3;           /* RCTRL    -> KEY_FIRE     */
-    case 42: case 54: return 0xb6;  /* SHIFT    -> KEY_RSHIFT   */
-    case 14: return 8;              /* BACKSPACE-> KEY_BACKSPACE(8) */
-    case 103: return 0xad;          /* UP       -> KEY_UPARROW  */
-    case 108: return 0xaf;          /* DOWN     -> KEY_DOWNARROW*/
-    case 105: return 0xac;          /* LEFT     -> KEY_LEFTARROW*/
-    case 106: return 0xae;          /* RIGHT    -> KEY_RIGHTARROW*/
-    /* number row 1..0 (evdev 2..11) -> ASCII '1'..'0' */
-    case 2: return '1';  case 3: return '2';  case 4: return '3';
-    case 5: return '4';  case 6: return '5';  case 7: return '6';
-    case 8: return '7';  case 9: return '8';  case 10: return '9';
-    case 11: return '0';
-    case 12: return '-'; case 13: return '=';
-    case 16: return 'q'; case 17: return 'w'; case 18: return 'e';
-    case 19: return 'r'; case 20: return 't'; case 21: return 'y';
-    case 22: return 'u'; case 23: return 'i'; case 24: return 'o';
-    case 25: return 'p'; case 26: return '['; case 27: return ']';
-    case 30: return 'a'; case 31: return 's'; case 32: return 'd';
-    case 33: return 'f'; case 34: return 'g'; case 35: return 'h';
-    case 36: return 'j'; case 37: return 'k'; case 38: return 'l';
-    case 47: return ';'; case 48: return '\'';
-    case 39: return 'z'; case 40: return 'x'; case 41: return 'c';
-    case 43: return 'v'; case 44: return 'b'; case 45: return 'n';
-    case 46: return 'm';
-    default: return 0;              /* unmapped */
+  case 1:  return 27;             /* ESC      -> KEY_ESCAPE   */
+  case 15: return 9;              /* TAB      -> KEY_TAB      */
+  case 28: return 13;             /* ENTER    -> KEY_ENTER    */
+  case 57: return 0xa2;           /* SPACE    -> KEY_USE      */
+  case 29: return 0xa3;           /* LCTRL    -> KEY_FIRE     */
+  case 97: return 0xa3;           /* RCTRL    -> KEY_FIRE     */
+  case 42: case 54: return 0xb6;  /* SHIFT    -> KEY_RSHIFT   */
+  case 14: return 8;              /* BACKSPACE-> KEY_BACKSPACE(8) */
+  case 103: return 0xad;          /* UP       -> KEY_UPARROW  */
+  case 108: return 0xaf;          /* DOWN     -> KEY_DOWNARROW*/
+  case 105: return 0xac;          /* LEFT     -> KEY_LEFTARROW*/
+  case 106: return 0xae;          /* RIGHT    -> KEY_RIGHTARROW*/
+  /* number row 1..0 (evdev 2..11) -> ASCII '1'..'0' */
+  case 2: return '1';  case 3: return '2';  case 4: return '3';
+  case 5: return '4';  case 6: return '5';  case 7: return '6';
+  case 8: return '7';  case 9: return '8';  case 10: return '9';
+  case 11: return '0';
+  case 12: return '-'; case 13: return '=';
+  case 16: return 'q'; case 17: return 'w'; case 18: return 'e';
+  case 19: return 'r'; case 20: return 't'; case 21: return 'y';
+  case 22: return 'u'; case 23: return 'i'; case 24: return 'o';
+  case 25: return 'p'; case 26: return '['; case 27: return ']';
+  case 30: return 'a'; case 31: return 's'; case 32: return 'd';
+  case 33: return 'f'; case 34: return 'g'; case 35: return 'h';
+  case 36: return 'j'; case 37: return 'k'; case 38: return 'l';
+  case 47: return ';'; case 48: return '\'';
+  case 39: return 'z'; case 40: return 'x'; case 41: return 'c';
+  case 43: return 'v'; case 44: return 'b'; case 45: return 'n';
+  case 46: return 'm';
+  default: return 0;              /* unmapped */
   }
 }
 
@@ -94,6 +94,38 @@ static void kq_drain(void) {
     uint8_t k = evdev_to_doom((uint8_t)ev[i].code);
     if (k == 0) continue;
     kq_push((uint8_t)(ev[i].value == 1), k);   /* 1=press, 0=release */
+  }
+  /* The desktop forwards the focused window's keystrokes to stdin (PONG
+   * reads it too; the desktop's event loop usually wins the raw virtio
+   * queue, so in a window this is the path that actually delivers input).
+   * Arrows arrive as ESC [ A/B/C/D; plain keys as one byte.  With no
+   * stdin drain, DOOM gets zero input when launched from the start menu
+   * and sits frozen on the title screen forever. */
+  while (available(0) > 0) {
+    char buf[32];
+    int m = read(0, buf, sizeof(buf));
+    if (m <= 0) break;
+    for (int i = 0; i < m; i++) {
+      char c = buf[i];
+      if (c == '\033') {                       /* ESC sequence */
+        if (i + 2 < m && buf[i+1] == '[') {
+          switch (buf[i+2]) {
+          case 'A': kq_push(1, 0xad); break; /* Up    */
+          case 'B': kq_push(1, 0xaf); break; /* Down  */
+          case 'C': kq_push(1, 0xae); break; /* Right */
+          case 'D': kq_push(1, 0xac); break; /* Left  */
+          default: break;
+          }
+          i += 2;
+        }
+        continue;
+      }
+      if (c == '\n' || c == '\r') { kq_push(1, 13); continue; } /* Enter */
+      if (c == ' ' )             { kq_push(1, 0xa2); continue; } /* Use   */
+      if (c >= 'a' && c <= 'z')  { kq_push(1, (uint8_t)c); continue; }
+      if (c >= '1' && c <= '9')  { kq_push(1, (uint8_t)c); continue; }
+      if (c >= 'A' && c <= 'Z')  { kq_push(1, (uint8_t)(c - 'A' + 'a')); continue; }
+    }
   }
 }
 
@@ -110,6 +142,7 @@ void DG_Init(void) {
   if (!hbfb || hb_w <= 0 || hb_h <= 0) exit(1);
   /* start on a black letterboxed screen */
   graphics_clear(0xFF000000u);
+  graphics_flush();
 }
 
 void DG_DrawFrame(void) {
@@ -130,6 +163,9 @@ void DG_DrawFrame(void) {
       }
     }
   }
+  /* Push the GPU-visible framebuffer changes (PONG calls graphics_flush()
+   * each frame; without it the direct hbfb writes never reach the screen). */
+  graphics_flush();
 }
 
 void DG_SleepMs(uint32_t ms) {

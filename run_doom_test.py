@@ -26,7 +26,7 @@ W, H = 1920, 1080
 SHOT_DIR = "/tmp/hobbyos_doom"
 SER = "/tmp/doom_test_serial.log"
 QMP = "/tmp/qmp-doom-test"
-DOOM_SLOT = 12            # after the 10 apps (10=PONG, 11=MILLIPED, 12=DOOM)
+DOOM_SLOT = 18            # 16 pinned apps (0..15) + PONG=16 MILLIPED=17 + DOOM=18
 MAX_WAIT_S = 30           # the 30-second rule
 TASKBAR_Y = H - 26
 
@@ -172,7 +172,7 @@ while time.time() - t0 < MAX_WAIT_S:
     if nz > 200000 and nc > 32 and abs(tmean - bmean) > 6:
         seen = (shot, nz, nc, tmean, bmean)
         break
-    if serial_has(r"IWAD|couldn't find|not found") and "DOOM" in open(SER, errors="ignore").read():
+    if serial_has(r"\bIWAD not found\b|couldn't find IWAD|IWAD.*(not found|couldn't)") and re.search(r"\[LAUNCH\].*DOOM|/DOOM\.BIN", open(SER, errors="ignore").read()):
         fail("IWAD not found in image; run tools/fetch_doom_wad.sh and rebuild")
         break
     time.sleep(1.0)
