@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
 
 #include "fb_mmap.h"
 #include "display_mode.h"
@@ -164,6 +165,44 @@ static void test_blank_ioctl(void) {
         "blank: VESA_HSYNC_SUSPEND accepted");
 }
 
+/* ---- 6. syscall-shim routing + arg sizing (GB-025 wiring) ---- */
+static void test_route(void) {
+  /* FBIOGET_VSCREENINFO copies a Linux-layout var struct into arg. */
+  struct hb_fb_var_screeninfo v;
+  memset(&v, 0xAA, sizeof(v));
+  check(hb_fb_ioctl_arg_size(FBIOGET_VSCREENINFO) == sizeof(struct hb_fb_var_screeninfo),
+        "route: FBIOGET_VSCREENINFO arg size == Linux var struct");
+  check(hb_fb_ioctl_route(FBIOGET_VSCREENINFO, &v, 0) == 0 &&
+            v.xres == DISPLAY_WIDTH && v.bits_per_pixel == 32,
+        "route: FBIOGET_VSCREENINFO fills the var struct");
+
+  /* FBIOGET_FSCREENINFO copies the fix struct (smem_start carried). */
+  struct hb_fb_fix_screeninfo f;
+  memset(&f, 0xAA, sizeof(f));
+  check(hb_fb_ioctl_arg_size(FBIOGET_FSCREENINFO) == sizeof(struct hb_fb_fix_screeninfo),
+        "route: FBIOGET_FSCREENINFO arg size == Linux fix struct");
+  check(hb_fb_ioctl_route(FBIOGET_FSCREENINFO, &f, 0x7654000) == 0 &&
+            f.smem_start == 0x7654000 && f.line_length == (uint32_t)DISPLAY_STRIDE_BYTES,
+        "route: FBIOGET_FSCREENINFO fills the fix struct (smem_start carried)");
+
+  /* FBIOBLANK: arg is a value, not a pointer -> arg size 0, routed to the
+   * no-op-success predicate. */
+  check(hb_fb_ioctl_arg_size(HB_FBIOBLANK) == 0,
+        "route: FBIOBLANK arg size 0 (value, not a buffer)");
+  check(hb_fb_ioctl_route(HB_FBIOBLANK, (void *)HB_VESA_NO_BLANK, 0) == 0,
+        "route: FBIOBLANK routed to no-op-success");
+
+  /* Unknown request: arg size -1 and route -1 (never a silent no-op). */
+  check(hb_fb_ioctl_arg_size(0xDEAD) == (size_t)-1,
+        "route: unknown request arg size (size_t)-1");
+  check(hb_fb_ioctl_route(0xDEAD, &v, 0) == -1,
+        "route: unknown request returns -1");
+
+  /* Arg-size request numbers match the Linux header (T4 parity). */
+  check(FBIOGET_VSCREENINFO == 0x4600 && FBIOGET_FSCREENINFO == 0x4602,
+        "route: FBIOGET_* request numbers match Linux header");
+}
+
 int main(void) {
   printf("fb_mmap_test_host:\n");
 #ifdef __linux__
@@ -174,6 +213,7 @@ int main(void) {
   test_translate_valid();
   test_translate_invalid();
   test_blank_ioctl();
+  test_route();
 
   printf("fb_mmap_test_host: %d checks, %d failed\n", checks_run, checks_failed);
   return checks_failed ? 1 : 0;

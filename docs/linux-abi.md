@@ -517,6 +517,15 @@ The mmap window follows Linux's `fb_mmap` contract (locked by the host different
   the fixed 2D scanout has no blankable/suspend output.
 - `FB_ACTIVATE_NOW = 0` is the only activate value the fixed mode reports/accepts.
 
+The ioctl wiring is a single native syscall (`SYS_FB_IOCTL`, src/include/syscall.h, both arches):
+`fb_ioctl(req, arg)` calls `hb_fb_ioctl_route()` (src/kernel/fb_mmap.c), which fills the Linux-layout
+var/fix struct into `arg` for `FBIOGET_VSCREENINFO`/`FBIOGET_FSCREENINFO` (via GB-026's
+`hb_fb_ioctl`) and routes `FBIOBLANK` to `hb_fb_blank_ioctl()`. The syscall shim validates the user
+`arg` buffer against the request's struct size before routing (`hb_fb_ioctl_arg_size()`: 160 B /
+80 B / 0 for FBIOBLANK), returning `-EFAULT` on a bad pointer and `-1` on an unknown request.
+Device-free, so the same route helper is locked by the host differential suite
+(`src/host/fb_mmap_test.c`) and the kernel unit suite (`src/kernel/fb_mmap_test.c`).
+
 `uname` for compat processes reports a Linux-shaped identity (§2.2 #4, GB-016): `sysname` =
 `Linux`, `release` = a fixed string baked into `linux_compat.c` (SDL's version gates parse it),
 `machine` = `x86_64`, `nodename` = the HobbyOS hostname. **Frozen at the M1 gate.**

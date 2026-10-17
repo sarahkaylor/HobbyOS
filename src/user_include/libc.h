@@ -128,6 +128,16 @@ extern "C" {
   void *map_fb(void);
   void flush_fb(void);
 
+  /* GB-025: /dev/fb0 Linux fb ioctl surface.  FBIOGET_VSCREENINFO (0x4600)
+   * / FBIOGET_FSCREENINFO (0x4602) copy a Linux-layout fb struct out to
+   * arg (src/include/linux_fb.h shapes); FBIOBLANK (0x4611) takes a blank
+   * level value.  All values are the Linux x86_64 ABI (linux-abi.md §9). */
+  struct fb_var { uint32_t xres, yres, xres_virtual, yres_virtual; };
+  int fb_ioctl(unsigned long req, void *arg);
+  #define FBIOGET_VSCREENINFO 0x4600
+  #define FBIOGET_FSCREENINFO 0x4602
+  #define FBIOBLANK 0x4611u
+
   /* GX (docs/graphics-accel.md): damage-rect present.  flush_fb_rects()
    * presents the listed screen-space rects (up to 32; the covered pixels
    * end up identical to a full flush_fb()); flush_fb_rect() is the

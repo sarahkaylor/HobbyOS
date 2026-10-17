@@ -195,8 +195,14 @@
 #define SYS_WAIT4         (90)
 #define SYS_RMDIR         (91)
 
+/* GB-025: /dev/fb0 ioctl (FBIOGET_VSCREENINFO/FSCREENINFO + FBIOBLANK).
+ * (req, arg, 0) -> 0 | -1 (unknown request) | -EFAULT (bad arg pointer).
+ * The kernel fills the Linux-layout struct into `arg` for the FBIOGET_*
+ * requests via hb_fb_ioctl_route() (src/kernel/fb_mmap.c). */
+#define SYS_FB_IOCTL      (92)
+
 /* Highest defined syscall number. Dispatch tables are sized SYS_MAX + 1.
  * 90/91 were the next FREE numbers above the previous SYS_MAX (89). */
-#define SYS_MAX           (91)
+#define SYS_MAX           (92)
 
 #endif /* SYSCALL_H */

@@ -18,6 +18,7 @@
 #include "vfs.h"
 #include "vm.h"
 #include "blk_cache.h"
+#include "fb_mmap.h"
 #include <stdint.h>
 
 extern void uart_puts(const char *s);
@@ -1067,6 +1068,28 @@ static void sys_map_fb(struct trap_frame *tf) {
   tf->regs[0] = USER_FB_VIRT_BASE; // Return user virtual address
 }
 
+/* GB-025: /dev/fb0 ioctl (SYS_FB_IOCTL).  Registers: rdi=req, rsi=arg.
+ * FBIOGET_VSCREENINFO/FSCREENINFO copy a Linux-layout struct OUT to arg
+ * (validated first); FBIOBLANK takes a plain value (validated implicitly
+ * by hb_fb_blank_ioctl).  Returns 0 | -1 (unknown request) | -EFAULT. */
+static void sys_fb_ioctl(struct trap_frame *tf) {
+  unsigned long req = (unsigned long)tf->regs[5];     /* rdi */
+  void *arg = (void *)tf->regs[4];                    /* rsi */
+  uint64_t smem_start = (uint64_t)virtio_gpu_get_framebuffer();
+
+  size_t sz = hb_fb_ioctl_arg_size(req);
+  if (sz == (size_t)-1) {
+    tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
+    return;
+  }
+  /* FBIOBLANK (sz==0) takes a value, not a buffer: nothing to validate. */
+  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  tf->regs[0] = (uint64_t)(int64_t)hb_fb_ioctl_route(req, arg, smem_start);
+}
+
 static void sys_flush_fb(struct trap_frame *tf) {
 #if WD_X64_FLUSH_PROBE
   /* WD probe: attribute every full flush to its process (used to
@@ -1674,6 +1697,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_flush_fb(tf);
   } else if (syscall_num == SYS_FLUSH_FB_RECTS) {
     sys_flush_fb_rects(tf);
+  } else if (syscall_num == SYS_FB_IOCTL) {
+    sys_fb_ioctl(tf);
   } else if (syscall_num == SYS_GET_CPUID) {
     sys_get_cpuid(tf);
   } else if (syscall_num == SYS_PIPE) {

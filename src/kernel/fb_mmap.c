@@ -10,10 +10,41 @@
  * suite (the nfs_proto / ipc_proto / evdev / fb_ioctl precedent).
  */
 #include "fb_mmap.h"
+#include "fb_ioctl.h"
 #include "display_mode.h"
 
 uint64_t hb_fb_smem_len(void) {
   return HB_FB_BYTES;
+}
+
+int hb_fb_ioctl_route(unsigned long req, void *arg, uint64_t smem_start) {
+  /* Route one /dev/fb0 ioctl request to its device-free fill:
+   *   FBIOGET_VSCREENINFO / FBIOGET_FSCREENINFO -> the GB-026 fill
+   *     logic (hb_fb_ioctl), which writes the Linux-layout struct into
+   *     `arg` exactly as a real /dev/fb0 would.
+   *   FBIOBLANK -> the GB-025 no-op-success predicate (arg is the blank
+   *     level value, not a pointer).
+   * Anything else is -1 (unknown request), never a silent no-op.
+   */
+  if (req == FBIOGET_VSCREENINFO || req == FBIOGET_FSCREENINFO)
+    return hb_fb_ioctl(req, arg, smem_start);
+  if (req == HB_FBIOBLANK)
+    return hb_fb_blank_ioctl((unsigned long)arg);
+  return -1;
+}
+
+size_t hb_fb_ioctl_arg_size(unsigned long req) {
+  /* Bytes the kernel must copy OUT to `arg` for each FBIOGET_* request
+   * (the Linux struct size), 0 for requests that take a plain value
+   * (FBIOBLANK).  Lets the syscall shim validate the user buffer without
+   * knowing the struct layout.  Returns (size_t)-1 for unknown requests. */
+  if (req == FBIOGET_VSCREENINFO)
+    return sizeof(struct hb_fb_var_screeninfo);
+  if (req == FBIOGET_FSCREENINFO)
+    return sizeof(struct hb_fb_fix_screeninfo);
+  if (req == HB_FBIOBLANK)
+    return 0;
+  return (size_t)-1;
 }
 
 int hb_fb_mmap_translate(uint64_t offset, uint64_t len,

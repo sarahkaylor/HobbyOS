@@ -2549,8 +2549,8 @@ $(EVDEV_TEST): src/host/evdev_test.c src/kernel/evdev.c src/include/evdev.h
 # exist on the host it also differentially locks the request number + mmap
 # window rules (the fb_ioctl/evdev/nfs_proto single-TU precedent).
 FB_MMAP_TEST = fb_mmap_test_host
-$(FB_MMAP_TEST): src/host/fb_mmap_test.c src/kernel/fb_mmap.c src/include/fb_mmap.h src/include/display_mode.h
-	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/fb_mmap.c src/host/fb_mmap_test.c -o $@
+$(FB_MMAP_TEST): src/host/fb_mmap_test.c src/kernel/fb_mmap.c src/kernel/fb_ioctl.c src/include/fb_mmap.h src/include/fb_ioctl.h src/include/linux_fb.h src/include/display_mode.h
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/fb_mmap.c src/kernel/fb_ioctl.c src/host/fb_mmap_test.c -o $@
 
 # F2.2 resolver codecs: src/user/resolv.c compiled with -DHOST_TEST (its
 # pure functions land as hb_*) in one command with the test; inet_pton/ntop/
