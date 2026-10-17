@@ -22,13 +22,14 @@ volatile uint64_t lock_wait_caller2[MAX_CPUS];
    remembered per CPU (a few slots deep -- enough for this kernel's nesting,
    which is one) and a re-acquire screams, lock-free, naming the holder.
 
-   Cost is a 4-entry scan on acquire/release; it is deliberately tiny because
+   Cost is an 8-entry scan on acquire/release; it is deliberately small because
    the release path is the hottest code in the kernel. */
-#define HELD_LOCK_SLOTS 4
+#define HELD_LOCK_SLOTS 8
 static volatile uint64_t held_locks[MAX_CPUS][HELD_LOCK_SLOTS];
 static volatile uint64_t held_lock_pc[MAX_CPUS][HELD_LOCK_SLOTS];
 static volatile uint32_t recursive_shouts[MAX_CPUS];
 static volatile uint32_t holder_shouts[MAX_CPUS];
+static volatile uint32_t table_full_shouts[MAX_CPUS];
 
 /* The lock-free scream helpers are defined further down this file (after the
    comment explaining why they must never take a lock); declare them here so
@@ -56,6 +57,17 @@ static void held_lock_push(uint64_t addr) {
       held_lock_pc[cpu][i] = (uint64_t)__builtin_return_address(1);
       return;
     }
+  }
+  /* GB-057: the table is full, and a DROPPED lock is worse than no table at
+     all -- it would make "nobody claims this lock" a false statement, which is
+     exactly the kind of lie I have already been bitten by once on this ticket
+     (wait_lock is cleared on a successful acquire, so the holder looks idle).
+     Say so, loudly and once per CPU, instead of dropping it silently. */
+  if (table_full_shouts[cpu] < 3) {
+    table_full_shouts[cpu]++;
+    scream_hex("\n[LOCKTABLE] full, dropping lock=", addr);
+    scream_dec(" cpu=", cpu);
+    uart_putc_raw('\n');
   }
 }
 

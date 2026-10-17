@@ -2001,8 +2001,8 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
       extern volatile uint8_t sched_pick[];
       extern volatile uint64_t sched_as_ptr[];
       extern volatile uint64_t sched_as_root[];
-      uint64_t hl[4];
-      int nh = held_locks_of(c, hl, 4);
+      uint64_t hl[8];
+      int nh = held_locks_of(c, hl, 8);
       if (nh > 0) {
         uart_puts_raw(" HOLDS=");
         for (int i = 0; i < nh; i++) {
