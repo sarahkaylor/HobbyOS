@@ -60,6 +60,13 @@ static uint64_t rd64(const uint8_t *p) {
 #define PT_LOAD 1
 #define PT_INTERP 3
 #define ET_EXEC 2
+#define ET_DYN 3
+/* USER_VA_BASE from vm.h, duplicated here on purpose: elf_image.c must compile
+ * freestanding on the host (where vm.h does not exist) and the loader is the only
+ * thing that may depend on the arch header.  Keep in sync with src/include/vm.h. */
+#ifndef ELF_USER_WINDOW_BASE
+#define ELF_USER_WINDOW_BASE 0x1000000000ULL /* 64 GiB */
+#endif
 #define EM_X86_64 62
 #define ELFCLASS64 2
 #define ELFDATA2LSB 1
@@ -84,7 +91,8 @@ int elf_parse(const void *buf, uint64_t len, struct elf_image *img) {
   if (b[5] != ELFDATA2LSB) return ELF_ERR_ENDIAN;
   if (b[6] != EV_CURRENT) return ELF_ERR_VERSION;
 
-  if (rd16(b + E_TYPE_OFF) != ET_EXEC) return ELF_ERR_TYPE;
+  const uint16_t e_type = rd16(b + E_TYPE_OFF);
+  if (e_type != ET_EXEC && e_type != ET_DYN) return ELF_ERR_TYPE;
   if (rd16(b + E_MACHINE_OFF) != EM_X86_64) return ELF_ERR_MACHINE;
   if (rd32(b + E_VERSION_OFF) != EV_CURRENT) return ELF_ERR_VERSION;
 
@@ -101,6 +109,8 @@ int elf_parse(const void *buf, uint64_t len, struct elf_image *img) {
 
   img->phnum = phnum;
   img->nsegs = 0;
+  img->is_pie = (e_type == ET_DYN);
+  img->needs_low_window = 0;
   img->entry = rd64(b + E_ENTRY_OFF);
 
   int have_interp = 0;
@@ -171,6 +181,11 @@ int elf_parse(const void *buf, uint64_t len, struct elf_image *img) {
 
   img->vaddr_base = base;
   img->vaddr_end = end;
+  /* ET_EXEC is linked at a fixed low VA (musl/glibc: 0x400000).  HobbyOS's user
+   * pages can only live in the 64 GiB window, so flag it for the loader to
+   * refuse with a reason instead of mapping something the program will not
+   * recognise.  A static-PIE (ET_DYN) has no such constraint. */
+  if (!img->is_pie && base < ELF_USER_WINDOW_BASE) img->needs_low_window = 1;
   return ELF_OK;
 }
 

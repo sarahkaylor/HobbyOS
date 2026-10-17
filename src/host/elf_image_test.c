@@ -119,6 +119,9 @@ int main(void) {
   CHECK_EQ(elf_page_up(0x401001), 0x402000ULL, "elf_page_up");
   CHECK_EQ(img.segs[0].flags, ELF_PF_R | ELF_PF_X, "segment 0 is R+X");
   CHECK_EQ(img.segs[1].flags, ELF_PF_R | ELF_PF_W, "segment 1 is R+W");
+  CHECK_EQ(img.is_pie, 0, "ET_EXEC flagged not-PIE");
+  CHECK_EQ(img.needs_low_window, 1,
+           "ET_EXEC at 0x400000 flagged needs_low_window (unmappable under the v2 window)");
 
   /* copy_into must place bytes at vaddr_base-relative offsets, zero the bss */
   {
@@ -181,11 +184,23 @@ int main(void) {
   }
 
   /* --- the reject classes (one vector each) ----------------------------- */
+  /* the accept class also covers static PIE, and ET_EXEC's window flag */
+  {
+    uint64_t lp = 0;
+    uint8_t *bp = slurp("valid-static-pie", &lp);
+    if (bp) {
+      struct elf_image ip;
+      CHECK_EQ(elf_parse(bp, lp, &ip), ELF_OK, "valid-static-pie (ET_DYN, no PT_INTERP) parses");
+      CHECK_EQ(ip.is_pie, 1, "static PIE flagged is_pie");
+      CHECK_EQ(ip.needs_low_window, 0, "static PIE needs no low window");
+      free(bp);
+    }
+  }
   expect("reject-bad-magic", ELF_ERR_MAGIC);
   expect("reject-class32", ELF_ERR_CLASS);
   expect("reject-bigendian", ELF_ERR_ENDIAN);
   expect("reject-arm-machine", ELF_ERR_MACHINE);
-  expect("reject-dyn-pie", ELF_ERR_TYPE);
+  expect("reject-dyn-interp", ELF_ERR_INTERP);
   expect("reject-truncated", ELF_ERR_SEG_RANGE);
   expect("reject-phoff-oob", ELF_ERR_PHOFF);
   expect("reject-phnum-zero", ELF_ERR_NO_LOAD);

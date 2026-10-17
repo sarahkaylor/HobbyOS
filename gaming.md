@@ -61,7 +61,7 @@ real Linux box vs. HobbyOS):
 
 | Class | Binary example | Enables | Target |
 |---|---|---|---|
-| W0 | static-musl `hello`, `cat`, shell builtins | ABI skeleton proven | **Week 1 gate (M1)** |
+| W0 | static-musl **`-static-pie`** `hello`, `cat`, shell builtins | ABI skeleton proven | **Week 1 gate (M1)** |
 | W1 | static-musl GNU coreutils / BusyBox | Real-world syscall coverage | Week 2 |
 | W2 | static-musl **ncurses** app (`ninvaders`, a roguelike) | termios, ioctl, TTY | Week 2 |
 | W3 | static-musl **SDL2** app (fbcon/fbdev path) | fbdev+evdev+threads+futex+TLS | **Week 3 gate (M2/M3)** |
@@ -101,14 +101,21 @@ HobbyOS (QEMU: -M virt aarch64 / -M q35 x86_64)
 - The ELF-compat track is **x86_64-only** (Linux binaries are x86_64; musl cross targets
   `x86_64-linux-musl`). It does **not** touch the ARM primary target — ARM stays the home of
   the native catalog and must never regress (two-arch parity rule, §6).
+- **Corpus flavour (GB-013 decision, 2026-10-17 — `docs/elf-loader.md`):** the compat corpus is
+  built **`-static-pie`** (`ET_DYN`, no `PT_INTERP`), not fixed-address `ET_EXEC`. A musl `ET_EXEC`
+  is linked at 0x400000, which HobbyOS cannot map: `vm_region_insert()` rejects any region outside
+  the 64 GiB user window, and low VAs are the shared kernel identity map in every address space
+  (x64 0-8 GiB). Static-PIE self-relocates, so the loader may place it in the window. `ET_EXEC`
+  still parses but is refused at load time with a clear reason.
 - "Required support" for ELF run = the kernel ABI surface below, not a userspace emulator.
 
 ### 2.2 The compat layer (what gets built)
 
-1. **ELF static loader.** Parse `ET_EXEC` (+ later static `ET_DYN`), map PT_LOAD/p->bss, set
-   entry. Loader lives alongside the existing flat-binary loader (`src/kernel/program_loader.c`)
-   and dispatches on magic bytes. `PT_INTERP` (dynamic) is a Program-2 ticket — musl static
-   builds don't need it.
+1. **ELF static loader.** Parse **static-PIE `ET_DYN`** (`ET_EXEC` accepted-but-refused, see §2.1),
+   map each PT_LOAD with its real `p_flags` protections, zero p->bss, set the entry to
+   `base + e_entry`. Loader lives alongside the existing flat-binary loader
+   (`src/kernel/program_loader.c`) and dispatches on magic bytes; design + integration points in
+   `docs/elf-loader.md`. `PT_INTERP` (dynamic) is a Program-2 ticket — static-PIE builds don't need it.
 2. **Syscall translation table.** Linux x86_64 syscall numbers and HobbyOS's internal ABI are
    different. Implement a per-syscall shim (Linux args → HobbyOS call → Linux negative-errno —
    errno *numbers* must be Linux's, see §2.3). Core set first (W0/W1), then ioctl/futex/etc. as
@@ -350,7 +357,7 @@ final list.
 
 | ID | Ticket | Wt | Depends | DoD |
 |---|---|---|---|---|
-| GB-013 | **[DEEP design, FLASH exec]** ELF static loader (`ET_EXEC`) in loader path; coexist w/ flat loader; magic dispatch | L | GB-012 | static-musl binary maps+boot, entry set right |
+| GB-013 | **[DEEP design, FLASH exec]** ELF static loader (static-PIE `ET_DYN`; `ET_EXEC` parsed-but-refused) in loader path; coexist w/ flat loader; magic dispatch | L | GB-012 | static-PIE binary maps+boot, entry set right (`docs/elf-loader.md`) |
 | GB-014 | Linux x86_64 syscall translation table: core set (open/read/write/close/lseek/stat/fstat/brk/mmap/munmap/fork/execve/waitpit/exit_group/writev… ) | L | GB-013, GB-010 | T4 W0 corpus pass |
 | GB-015 | errno + struct-layout parity locks (T4 assertion suite from GB-010) | M | GB-014 | T4 fails on any mismatch |
 | GB-016 | `uname` shim reporting Linux-ish identity (SDL/games sniff it) | S | GB-014 | T4 matches |

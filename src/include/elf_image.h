@@ -11,9 +11,22 @@
  * that decides whether a Linux binary may run is tested before QEMU is ever
  * booted.
  *
- * Scope: ET_EXEC static images only (musl static builds).  ET_DYN/PT_INTERP are
- * dynamic-loader territory and are refused here with a distinct code so the
- * caller can say *why* (Program-2 ticket per §2.2 #1).
+ * Scope (GB-013 decision, 2026-10-17 — see docs/elf-loader.md):
+ *   ET_DYN **without** PT_INTERP  -> ACCEPTED: static-PIE (musl `-static-pie`).
+ *                 It is position-independent and self-relocates
+ *                 (R_X86_64_RELATIVE), so the loader may place it anywhere
+ *                 inside HobbyOS's 64 GiB user window — which is the only place
+ *                 the v2 address space can put user pages at all (vm_region_insert
+ *                 refuses anything outside USER_VA_BASE..USER_VA_TOP, and PDPT
+ *                 entries 0..7 of every address space are the shared kernel
+ *                 identity map: x64 0-8 GiB, ARM 0x40000000-18 GiB).
+ *   ET_EXEC                       -> ACCEPTED for completeness, but flagged
+ *                 needs_low_window: a musl ET_EXEC is linked at 0x400000, which
+ *                 HobbyOS CANNOT map today (that VA is the kernel identity map).
+ *                 It parses, and the loader must refuse it with a clear reason
+ *                 rather than mis-map it.
+ *   ET_DYN **with** PT_INTERP or any PT_INTERP -> refused: dynamic, needs ld.so
+ *                 (Program-2 per §2.2 #1).
  *
  * All multi-byte fields are read little-endian, byte-by-byte.
  */
@@ -65,6 +78,8 @@ struct elf_segment {
 
 struct elf_image {
   uint64_t entry;      /* e_entry                                  */
+  uint32_t is_pie;     /* 1 = ET_DYN static-PIE (load at any aligned base) */
+  uint32_t needs_low_window; /* 1 = ET_EXEC linked below USER_VA_BASE: unloadable today */
   uint64_t vaddr_base; /* page-aligned lowest PT_LOAD vaddr        */
   uint64_t vaddr_end;  /* page-aligned end of the highest PT_LOAD  */
   uint32_t nsegs;

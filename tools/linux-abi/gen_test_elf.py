@@ -41,8 +41,9 @@ def phdr(ptype, flags, off, vaddr, paddr, filesz, memsz, align=PAGE):
 
 def build(name, *, etype=ET_EXEC, machine=EM_X86_64, phnum=None, extra_ph=None,
           segs=None, entry=None, magic=b"\x7fELF", truncate=0, phoff=64,
-          cls=2, data=1, extra_hdr_bytes=b""):
+          cls=2, data=1, extra_hdr_bytes=b"", vbase=BASE):
     """segs: list of (vaddr_off_from_base, filesz, memsz, flags, fill_byte)."""
+    segv = vbase  # ET_EXEC links at 0x400000; a static PIE links at 0
     if segs is None:
         segs = [(PAGE, 0x20, 0x40, PF_R | PF_X, 0x90)]         # .text: filesz < memsz -> bss tail
         segs = [(PAGE, 0x20, 0x20, PF_R | PF_X, 0x90),
@@ -51,13 +52,13 @@ def build(name, *, etype=ET_EXEC, machine=EM_X86_64, phnum=None, extra_ph=None,
     phs = []
     off = PAGE
     for (voff, filesz, memsz, flags, fill) in segs:
-        phs.append(phdr(PT_LOAD, flags, off, BASE + voff, BASE + voff, filesz, memsz))
+        phs.append(phdr(PT_LOAD, flags, off, segv + voff, segv + voff, filesz, memsz))
         body += bytes([fill]) * filesz
         pad = (-len(body)) % PAGE
         body += b"\x00" * pad
         off = PAGE + len(body)
     for (ptype, flags, voff, filesz, memsz, fill) in (extra_ph or []):
-        phs.append(phdr(ptype, flags, off, BASE + voff, BASE + voff, filesz, memsz))
+        phs.append(phdr(ptype, flags, off, segv + voff, segv + voff, filesz, memsz))
         body += bytes([fill]) * filesz
         pad = (-len(body)) % PAGE
         body += b"\x00" * pad
@@ -81,7 +82,9 @@ def main():
         build("valid-exec-bss", segs=[(PAGE, 0x20, 0x40, PF_R | PF_X, 0x90)]),  # memsz>filesz -> bss
         build("reject-bad-magic", magic=b"\x7fELg"),                           # not an ELF
         build("reject-arm-machine", machine=183),                              # EM_AARCH64
-        build("reject-dyn-pie", etype=ET_DYN),                                 # ET_DYN: Program-2
+        build("valid-static-pie", etype=ET_DYN, entry=PAGE, vbase=0),           # ET_DYN linked at 0: accepted
+        build("reject-dyn-interp", etype=ET_DYN, entry=PAGE, vbase=0,
+              extra_ph=[(PT_INTERP, 0, 2 * PAGE, 8, 8, 0x2f)]),                # ET_DYN + ld.so: Program-2
         build("reject-truncated", truncate=0x1200),                            # cuts into seg1
         build("reject-phoff-oob", phoff=0x10000),                              # phdr table outside file
         build("reject-phnum-zero", phnum=0),                                   # no program headers
