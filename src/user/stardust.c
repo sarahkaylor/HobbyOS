@@ -218,7 +218,35 @@ static void render(void) {
   graphics_flush();
 }
 
-/* --- Input handling (VirtIO raw events) --- */
+/* --- Input handling (VirtIO raw events + desktop stdin) --- */
+
+/* The desktop forwards the focused window's keystrokes to stdin (arrows as
+ * ESC [ A-D, plain keys as one byte) rather than the raw get_events() queue,
+ * so a game started from the Apps menu must drain stdin too (PONG does).
+ * Without this, STARDUST gets zero input when launched from the desktop. */
+static void handle_stdin_input(void) {
+  static int esc = 0;
+  char buf[32];
+  while (available(0) > 0) {
+    int n = read(0, buf, sizeof(buf));
+    if (n <= 0) break;
+    for (int i = 0; i < n; i++) {
+      char c = buf[i];
+      if (esc == 1) { esc = (c == '[') ? 2 : 0; continue; }
+      if (esc == 2) {
+        esc = 0;
+        if (c == 'D') move_player(-1);      /* Left  (ESC [ D) */
+        else if (c == 'C') move_player(+1); /* Right (ESC [ C) */
+        continue;
+      }
+      if (c == '\033') { esc = 1; continue; }
+      if (c == 'a' || c == 'A') move_player(-1);
+      else if (c == 'd' || c == 'D') move_player(+1);
+      else if (c == 'r' || c == 'R') reset_game();
+      else if (c == 'q' || c == 'Q') { print("Stardust: Quitting.\n"); exit(0); }
+    }
+  }
+}
 
 static void handle_input(void) {
   struct virtio_input_event events[16];
@@ -237,6 +265,7 @@ static void handle_input(void) {
     default: break;
     }
   }
+  handle_stdin_input();
 }
 
 /* --- Main entry point --- */
