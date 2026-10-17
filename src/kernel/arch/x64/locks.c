@@ -28,7 +28,8 @@ volatile uint64_t lock_wait_caller2[MAX_CPUS];
 static volatile uint64_t held_locks[MAX_CPUS][HELD_LOCK_SLOTS];
 static volatile uint64_t held_lock_pc[MAX_CPUS][HELD_LOCK_SLOTS];
 static volatile uint32_t recursive_shouts[MAX_CPUS];
-static volatile uint32_t holder_shouts[MAX_CPUS];
+static volatile uint64_t holder_last_ms[MAX_CPUS];
+static volatile uint32_t holder_total;
 static volatile uint32_t table_full_shouts[MAX_CPUS];
 /* GB-057 probe v9: push/pop counters and the last RELEASE site, per CPU.
    Without these a claim cannot be distinguished from a stale entry, and that
@@ -139,9 +140,25 @@ void held_counts_of(uint32_t cpu, uint32_t *pushes, uint32_t *pops) {
    without atomicity). */
 static void held_lock_report_holder(uint64_t addr) {
   uint32_t cpu = get_cpuid();
-  if (holder_shouts[cpu] >= 3)
+  if (cpu >= MAX_CPUS)
     return;
-  holder_shouts[cpu]++;
+  /* Rate-limit by TIME, not by a lifetime cap.
+
+     The previous version stopped after three shouts per CPU and then went
+     quiet forever -- and it did exactly that in the run where the wedge was
+     finally reproducible: `grep -c HOLDER` was 0 while seven CPUs screamed
+     LOCKFOREVER, because the report had silenced itself long before the freeze.
+     A diagnostic that goes quiet precisely when it is needed is worse than no
+     diagnostic, because the absence of a line looks like absence of a holder.
+     One report per CPU per second, plus a global flood guard, cannot do that. */
+  if (holder_total >= 400)
+    return;
+  extern uint64_t timer_get_ms(void);
+  uint64_t now = timer_get_ms();
+  if (holder_last_ms[cpu] != 0 && now - holder_last_ms[cpu] < 1000)
+    return;
+  holder_last_ms[cpu] = now ? now : 1;
+  holder_total++;
   uint32_t found = 0;
   for (uint32_t c = 0; c < MAX_CPUS; c++) {
     for (int i = 0; i < HELD_LOCK_SLOTS; i++) {
