@@ -2405,6 +2405,28 @@ void general_interrupt_handler(struct trap_frame *tf) {
           while (1);
         }
       }
+      /* GB-057: NEVER halt silently.
+         This path is reached when the kernel cannot diagnose a kernel-mode
+         fault.  The previous behaviour was a bare `while (1);` -- which left a
+         CPU spinning forever with proc_lock held and not one byte on the
+         console.  Five probe runs produced five different-looking freezes for
+         exactly this reason: the fault was never the mystery, the silence was.
+         The raw sink takes no lock (it cannot deadlock the console it is
+         reporting on), so this costs nothing on the happy path and names the
+         fault for whoever reads the log next. */
+      uart_puts_raw("[KERNEL] FATAL kernel-mode fault, halting this CPU: vector=");
+      print_int_raw((int)tf->vector);
+      uart_puts_raw(" rip=");
+      uart_print_hex_raw((uint64_t)tf->elr);
+      uart_puts_raw(" cr2=");
+      {
+        uint64_t fatal_cr2;
+        __asm__ volatile("mov %%cr2, %0" : "=r"(fatal_cr2));
+        uart_print_hex_raw(fatal_cr2);
+      }
+      uart_puts_raw(" pid=");
+      print_int_raw(cur ? cur->pid : -1);
+      uart_puts_raw("\n");
       while (1);
     }
   }
