@@ -502,6 +502,7 @@ The framebuffer the mmap window + virtio-gpu 2D path expose is a fixed `1920x108
 `src/include/fb_pixel.h` + `fb_pixel_test_host` (T1; the level below `fb_ioctl`
 's struct-field checks).
 | `/dev/input/event0..N` | virtio-input | `struct input_event` (see probe), `EVIOCGVERSION`, `EVIOCGNAME`, `EVIOCGBIT`, `EVIOCGABS`, non-blocking reads |
+| gamepad/joystick (`event*` or `js*` when GB-032 lands) | evdev gamepad node | gamepad `BTN_*`/`ABS_*` event codes (GB-042; `linux_joystick.h`, locked vs `<linux/input.h>` by `joypad_test_host`) |
 | `/dev/null`, `/dev/zero`, `/dev/urandom` | kernel shims | `read`, `mmap` (zero page) |
 | `/dev/tty` | console | `TCGETS`/`TCSETS`, `TIOCGWINSZ`, `isatty()` true |
 
