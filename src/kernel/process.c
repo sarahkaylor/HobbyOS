@@ -1186,6 +1186,18 @@ volatile uint8_t sched_pick[MAX_CPUS];
    what made "stage 53 next to a while(1) that stage 6 should precede" look like
    a contradiction.  passes + stage together date the stamp. */
 volatile uint32_t sched_passes[MAX_CPUS];
+/* GB-057 probe v11: what the frame we are about to resume actually holds.
+
+   v10's freeze reported `vector=13 (#GP) rip=0x29FFE912` -- a CPU executing on a
+   stack address, i.e. a torn frame -- and my fix (b)-lite guard did NOT skip
+   that slot, so its condition was not met.  Rather than guess whether the slot
+   was a kernel process or carried a non-zero user_phys_base, these three fields
+   make both visible, plus the frame's own RIP: if resumed_rip already reads a
+   stack address here, the corruption is upstream in the PCB context and not in
+   the address-space switch. */
+volatile uint64_t sched_resumed_rip[MAX_CPUS];
+volatile uint8_t sched_kernel_proc[MAX_CPUS];
+volatile uint64_t sched_user_phys[MAX_CPUS];
 /* GB-057 probe v5: what the resume path is about to INSTALL.  The v4 run put
    the holder at the address-space switch (stage 53, slot 31) and it never came
    back, so whatever it was about to load into CR3 is the evidence -- and a CPU
@@ -1309,6 +1321,9 @@ void schedule(struct trap_frame *tf, int is_yield) {
       struct trap_frame local_tf;
       restore_context(&proc_table[next], &local_tf);
       sched_stage[cpu] = 52; /* register file + FPU + TLS loaded into the frame */
+      sched_resumed_rip[cpu] = (uint64_t)local_tf.elr;
+      sched_kernel_proc[cpu] = proc_table[next].is_kernel_process ? 1 : 0;
+      sched_user_phys[cpu] = proc_table[next].user_phys_base;
 
       extern char __stack_top;
       uint64_t target_sp = (uint64_t)&__stack_top - cpu * 0x10000 - 4096;

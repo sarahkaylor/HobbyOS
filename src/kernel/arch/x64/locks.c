@@ -56,6 +56,9 @@ extern volatile uint32_t sched_passes[];
 extern volatile uint8_t sched_pick[];
 extern volatile uint64_t sched_as_ptr[];
 extern volatile uint64_t sched_as_root[];
+extern volatile uint64_t sched_resumed_rip[];
+extern volatile uint8_t sched_kernel_proc[];
+extern volatile uint64_t sched_user_phys[];
 extern volatile uint8_t sched_slot_state[];
 
 static void held_lock_push(uint64_t addr) {
@@ -173,6 +176,9 @@ static void held_lock_report_holder(uint64_t addr) {
         scream_hex(" as=", sched_as_ptr[c]);
         scream_hex(" cr3=", sched_as_root[c]);
         scream_dec(" slot_state=", sched_slot_state[c]);
+        scream_hex(" resume_rip=", sched_resumed_rip[c]);
+        scream_dec(" kernel_proc=", sched_kernel_proc[c]);
+        scream_hex(" user_phys=", sched_user_phys[c]);
         /* v9: is this claim LIVE or STALE?  net = acquisitions - releases;
            a set slot with net==0 means the instrument, not the kernel, is
            wrong -- read the lock word instead of trusting this row. */
