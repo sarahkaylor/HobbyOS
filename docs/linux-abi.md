@@ -495,6 +495,15 @@ KEY_A=30 KEY_ENTER=28 KEY_ESC=1 KEY_SPACE=57
 |---|---|---|
 | `/dev/fb0` | mmap'd HobbyOS framebuffer | mmap offsets/size, `FBIOGET_VSCREENINFO`/`FBIOGET_FSCREENINFO` (see the probe's `fb_*` layouts), `FB_ACTIVATE_NOW` |
 | `/dev/input/event0..N` | virtio-input | `struct input_event` (see probe), `EVIOCGVERSION`, `EVIOCGNAME`, `EVIOCGBIT`, `EVIOCGABS`, non-blocking reads |
+
+The `/dev/input/event*` node (GB-027) is exposed on the native track as two syscalls,
+`SYS_INPUT_IOCTL` (93) + `SYS_INPUT_READ` (94) in `src/kernel/input_node.c`
+(`src/include/input_node.h`), fed by the shared `virtio_input` ring + the PS/2→evdev
+decoder (`src/kernel/evdev.c`). `SYS_INPUT_IOCTL` answers `EVIOCGVERSION` (→ `0x010001`),
+`EVIOCGNAME` (→ `"hobbyos-input"`), `EVIOCGBIT` (event-type / key / abs / rel bitmaps) and
+`EVIOCGABS` (axis 0..32767) against real Linux `<linux/input.h>`; `SYS_INPUT_READ` drains
+the ring into non-blocking 24-byte `input_event` records. The device-free logic is pinned
+by `input_node_test_host` (T1/T4 differential) + the kernel `input_node_test_suite`.
 | `/dev/null`, `/dev/zero`, `/dev/urandom` | kernel shims | `read`, `mmap` (zero page) |
 | `/dev/tty` | console | `TCGETS`/`TCSETS`, `TIOCGWINSZ`, `isatty()` true |
 

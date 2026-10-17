@@ -13,6 +13,11 @@
 #include "vfs.h"
 #include "vm.h"
 #include "blk_cache.h"
+
+/* GB-027: /dev/input/event* ioctl + Linux-ABI event read (see x64 trap.c
+ * for the ABI contract; register convention is regs[0]=a0, regs[1]=a1). */
+#include "input_node.h"
+#include "virtio_input.h"
 #include <stdint.h>
 
 extern jmp_buf user_exit_context;
@@ -1028,7 +1033,53 @@ static void sys_flush_fb_rects(struct trap_frame *tf) {
   tf->regs[0] = 0;
 }
 
-extern int virtio_input_get_events(void *buf, int max_events);
+/* GB-027: /dev/input/event* ioctl (SYS_INPUT_IOCTL).  a0=req, a1=arg.
+ * EVIOCGVERSION/NAME/GBIT/GABS copy their Linux-ABI reply OUT to arg. */
+static void sys_input_ioctl(struct trap_frame *tf) {
+  unsigned long req = (unsigned long)tf->regs[0];
+  void *arg = (void *)tf->regs[1];
+  size_t sz = hb_input_ioctl_arg_size(req);
+  if (sz == (size_t)-1) {
+    tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
+    return;
+  }
+  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  tf->regs[0] = (uint64_t)(int64_t)hb_input_ioctl_route(req, arg);
+}
+
+/* GB-027: non-blocking /dev/input/event* read (SYS_INPUT_READ).  a0=buf,
+ * a1=max.  Drains the virtio_input ring into up to max Linux-ABI (24 B)
+ * input_event records.  Returns count read (0 = none pending). */
+static void sys_input_read(struct trap_frame *tf) {
+  struct hb_input_event *ubuf = (struct hb_input_event *)tf->regs[0];
+  int max = (int)tf->regs[1];
+  if (max < 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return;
+  }
+  if (max == 0) {
+    tf->regs[0] = 0;
+    return;
+  }
+  if (sys_user_range((uint64_t)ubuf,
+                     (uint64_t)max * sizeof(struct hb_input_event), 1)) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  extern uint64_t timer_get_ms(void);
+  struct virtio_input_event raw[32];
+  int want = max > 32 ? 32 : max;         /* bounded scratch: non-blocking */
+  int got = virtio_input_get_events(raw, want);
+  uint64_t t = timer_get_ms();
+  uint64_t sec = t / 1000u, usec = (t % 1000u) * 1000u;
+  for (int i = 0; i < got; i++)
+    hb_input_fill_event(&ubuf[i], raw[i].type, raw[i].code, raw[i].value,
+                        sec, usec);
+  tf->regs[0] = (uint64_t)got;
+}
 
 static void sys_get_events(struct trap_frame *tf) {
   void *buf = (void *)tf->regs[0];
@@ -1770,6 +1821,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_pipe(tf);
     } else if (syscall_num == SYS_GET_EVENTS) {
       sys_get_events(tf);
+    } else if (syscall_num == SYS_INPUT_IOCTL) {
+      sys_input_ioctl(tf);
+    } else if (syscall_num == SYS_INPUT_READ) {
+      sys_input_read(tf);
     } else if (syscall_num == SYS_AVAILABLE) {
       sys_available(tf);
     } else if (syscall_num == SYS_READ_DIR) {

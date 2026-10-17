@@ -9,6 +9,13 @@
 #include "arch/mmu.h"
 #include "syscall.h"
 
+/* GB-027: /dev/input/event* ioctl (EVIOCGVERSION/GNAME/GBIT/GABS) + the
+ * Linux-ABI event read that translates the virtio_input ring into
+ * 24-byte input_event records.  ABI numbers from src/include/linux_input.h
+ * / docs/linux-abi.md §9 (not from memory). */
+#include "input_node.h"
+#include "virtio_input.h"   /* struct virtio_input_event: the ring's record */
+
 /* WD lane: x64 flush-path probes (serial "[WD] ..."); default 0 keeps the
  * shipped kernel quiet.  See docs/wd-x64-white-blit.md. */
 #ifndef WD_X64_FLUSH_PROBE
@@ -1108,7 +1115,6 @@ static void sys_flush_fb_rects(struct trap_frame *tf) {
   tf->regs[0] = 0;
 }
 
-extern int virtio_input_get_events(void *buf, int max_events);
 static void sys_get_events(struct trap_frame *tf) {
   void *buf = (void *)tf->regs[5]; // rdi
   int max_events = (int)tf->regs[4]; // rsi
@@ -1118,6 +1124,57 @@ static void sys_get_events(struct trap_frame *tf) {
   } else {
     tf->regs[0] = -1;
   }
+}
+
+/* GB-027: /dev/input/event* ioctl (SYS_INPUT_IOCTL).  Registers: rdi=req,
+ * rsi=arg.  EVIOCGVERSION/NAME/GBIT/GABS copy their Linux-ABI reply OUT
+ * to arg (validated to hb_input_ioctl_arg_size() first).  0 | -1
+ * (unknown request) | -EFAULT (bad arg pointer). */
+static void sys_input_ioctl(struct trap_frame *tf) {
+  unsigned long req = (unsigned long)tf->regs[5];     /* rdi */
+  void *arg = (void *)tf->regs[4];                    /* rsi */
+  size_t sz = hb_input_ioctl_arg_size(req);
+  if (sz == (size_t)-1) {
+    tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
+    return;
+  }
+  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  tf->regs[0] = (uint64_t)(int64_t)hb_input_ioctl_route(req, arg);
+}
+
+/* GB-027: non-blocking /dev/input/event* read (SYS_INPUT_READ).  Registers:
+ * rdi=buf, rsi=max.  Drains the virtio_input ring and writes up to max
+ * Linux-ABI (24 B) input_event records out to buf.  Returns the count read
+ * (0 if nothing pending — non-blocking), -EFAULT on a bad buffer. */
+static void sys_input_read(struct trap_frame *tf) {
+  struct hb_input_event *ubuf = (struct hb_input_event *)tf->regs[5]; /* rdi */
+  int max = (int)tf->regs[4];                                        /* rsi */
+  if (max < 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return;
+  }
+  if (max == 0) {
+    tf->regs[0] = 0;
+    return;
+  }
+  if (sys_user_range((uint64_t)ubuf,
+                     (uint64_t)max * sizeof(struct hb_input_event), 1)) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  extern uint64_t timer_get_ms(void);
+  struct virtio_input_event raw[32];
+  int want = max > 32 ? 32 : max;         /* bounded scratch: non-blocking */
+  int got = virtio_input_get_events(raw, want);
+  uint64_t t = timer_get_ms();
+  uint64_t sec = t / 1000u, usec = (t % 1000u) * 1000u;
+  for (int i = 0; i < got; i++)
+    hb_input_fill_event(&ubuf[i], raw[i].type, raw[i].code, raw[i].value,
+                        sec, usec);
+  tf->regs[0] = (uint64_t)got;
 }
 
 static void sys_get_cpuid(struct trap_frame *tf) {
@@ -1680,6 +1737,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_pipe(tf);
   } else if (syscall_num == SYS_GET_EVENTS) {
     sys_get_events(tf);
+  } else if (syscall_num == SYS_INPUT_IOCTL) {
+    sys_input_ioctl(tf);
+  } else if (syscall_num == SYS_INPUT_READ) {
+    sys_input_read(tf);
   } else if (syscall_num == SYS_AVAILABLE) {
     sys_available(tf);
   } else if (syscall_num == SYS_READ_DIR) {
