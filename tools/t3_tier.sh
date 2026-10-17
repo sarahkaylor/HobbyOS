@@ -21,14 +21,40 @@
 set -euo pipefail
 
 ARCH_ARG="${1:-arm}"
+POLICE_ONLY=""
+if [ "$ARCH_ARG" = "police" ]; then
+  # tools/t3_tier.sh police <log> — run the verdict logic over an ALREADY
+  # captured console log.  This is how the tier's own FAIL detector is
+  # proven (inject a FAIL line into a green log: the tier must go red).
+  POLICE_ONLY="${2:?usage: t3_tier.sh police <log>}"
+  ARCH_ARG="${3:-intel}"
+fi
 case "$ARCH_ARG" in
   arm)   ARCH=arm ;;
   intel) ARCH=intel ;;
-  *) echo "usage: t3_tier.sh [arm|intel]" >&2; exit 2 ;;
+  *) echo "usage: t3_tier.sh [arm|intel] | t3_tier.sh police <log> [arch]" >&2; exit 2 ;;
 esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+
+if [ -n "$POLICE_ONLY" ]; then
+  LOG="$POLICE_ONLY"
+  halted=0; grep -aq "System halt" "$LOG" && halted=1
+  if [ "${T3_SKIP_HALT_CHECK:-0}" = "1" ]; then halted=1; fi
+  FAIL_LINES=$(grep -ac "FAIL" "$LOG" || true)
+  echo "T3_${ARCH} (police ${LOG}): $(wc -l <"$LOG") lines, ${FAIL_LINES} FAIL lines, halted=${halted}"
+  rc=0
+  [ "$halted" = "1" ] || { echo "T3_${ARCH}: FAIL — no halt line"; rc=1; }
+  if [ "$FAIL_LINES" != "0" ]; then
+    echo "T3_${ARCH}: FAIL — ${FAIL_LINES} FAIL line(s); first 5:"
+    grep -an "FAIL" "$LOG" | head -5
+    rc=1
+  fi
+  [ "$rc" -eq 0 ] && echo "T3_${ARCH}: PASS (0 FAIL lines, halted)"
+  echo "T3_${ARCH} EXIT=$rc"
+  exit "$rc"
+fi
 
 T3_TIMEOUT="${T3_TIMEOUT:-2700}"
 LOG="${T3_LOG:-$ROOT/obj/t3_${ARCH}.log}"
