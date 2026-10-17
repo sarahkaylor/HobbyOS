@@ -52,6 +52,23 @@ static void resume_returned_halt(uint32_t cpu, int pid) {
   uart_print_hex_raw((uint64_t)cpu);
   uart_puts_raw(" pid=");
   uart_print_hex_raw((uint64_t)(uint32_t)pid);
+  /* GB-060: a CPU that has to stop must not take the machine with it.  If this
+     CPU is holding proc_lock, hand it back -- but ONLY if the lock records us as
+     the owner, because clearing a lock somebody else holds would turn a stall
+     into a data race, which is strictly worse.  Measured rationale: every GB-057
+     freeze ended this way, a stopped CPU holding proc_lock while seven others
+     spun with interrupts off, so no timer fired anywhere and the box could not
+     even report.  Releasing here lets the survivors run the lost-owner reaper
+     and finish the wave (or reach the halt marker) instead of hanging. */
+  {
+    extern int spinlock_release_if_held_by_me(spinlock_t *lock);
+    extern spinlock_t proc_lock;
+    if (spinlock_release_if_held_by_me(&proc_lock)) {
+      uart_puts_raw(" -- released proc_lock (GB-060)\n");
+    } else {
+      uart_puts_raw(" -- proc_lock not ours to release\n");
+    }
+  }
   uart_puts_raw(" -- halting this CPU\n");
   for (;;) {
   }

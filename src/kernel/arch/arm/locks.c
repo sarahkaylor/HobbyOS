@@ -74,6 +74,10 @@ __attribute__((noinline)) static void spin_acquire_impl(spinlock_t *lock, uint64
   if (tmp != 0) {
     spin_slow(lock, ra);
   }
+  /* GB-060: record the holder (cpu+1, 0 = unowned).  Placed here rather than in
+     spinlock_acquire() so it also covers spinlock_acquire_irqsave(), which calls
+     this impl directly -- one place that knows the acquisition succeeded. */
+  lock->owner = get_cpuid() + 1;
 }
 
 /**
@@ -91,11 +95,25 @@ void spinlock_acquire(spinlock_t *lock) {
  * memory operations are visible before the lock is freed.
  */
 void spinlock_release(spinlock_t *lock) {
+  /* GB-060: clear the owner BEFORE the release-store, so a CPU that finds the
+     lock free never sees a stale holder. */
+  lock->owner = 0;
   __asm__ volatile(
       "stlr wzr, [%0]\n"           // Store-Release 0
       :
       : "r"(&lock->locked)
       : "memory");
+}
+
+/* GB-060: release a lock ONLY if this CPU is its recorded owner.
+   A fatal path must be able to hand a stranded lock back without ever freeing a
+   lock somebody else holds -- that would turn a stall into a data race. */
+int spinlock_release_if_held_by_me(spinlock_t *lock) {
+  uint32_t me = get_cpuid() + 1;
+  if (lock->owner != me)
+    return 0;
+  spinlock_release(lock);
+  return 1;
 }
 
 /**
