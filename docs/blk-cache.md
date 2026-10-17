@@ -65,7 +65,12 @@ construction.
   Free-list of indexes; allocation failure ⇒ the cache stays off
   (`cache_ready = 0`, one boot log line).
   `struct blk_cache_entry { uint64_t unit; uint64_t frame; uint32_t next;
-  uint8_t valid; uint8_t ref; }`.
+  uint8_t valid; uint8_t ref; uint8_t fstate; }` — `fstate` rides in the
+  former padding (sizeof stays 24 B → the 3072-frame table math is
+  unchanged) and is the per-entry fill state: `0` CLEAN, `1` INFLIGHT
+  (a fill owns the unit; its device read may be writing the frame), `2`
+  DEFERRED (invalidated while in-flight; the owning fill's publish
+  completes the drop).
 - **Hash**: `BLK_CACHE_BUCKETS = 16384` buckets, singly-linked chains,
   each bucket with its own spinlock; hash on the unit index.
 - **Eviction**: second-chance clock — a global rotating bucket cursor;
@@ -83,68 +88,136 @@ construction.
    lookup under the unit's bucket lock and record which requested sectors
    are already valid. If everything is valid → copy out (per unit, under
    its bucket lock), count `hits += count`, done. (Common fast path.)
+   An entry with `fstate != CLEAN` is deliberately treated as NOT valid
+   here and everywhere else that would copy from a frame: its frame may be
+   torn mid-DMA, so those sectors fall through to the miss machinery and
+   end up raw-read (below).
 2. Fill pass: iterate maximal **runs** of consecutive units that have at
    least one missing requested sector:
    a. Allocate frames for the run: `frame_alloc_contig(run_units)` first
       (so a cold multi-unit read fills with ONE device op — the loader's
       coalesced reads must not regress to per-unit ops); on failure fall
       back to per-unit `frame_alloc()`, and if even that fails mark the
-      unit passthrough (raw read straight into the caller's buffer; the
-      read must still succeed).
-   b. Take the **fill lock** (§5) — from here nothing can mutate the
-      structure. Per unit: lookup again; if a racer already inserted an
-      entry, adopt it (free our frame — contiguity of the rest of the run
-      is gracefully broken and handled by run-splitting below); else
-      install a new entry pointing at our frame (valid = 0).
-   c. Compute the missing requested sectors; merge consecutive missing
-      sectors into device ops **only while the target frames stay
-      contiguous** (always true within one unit; across units while the
-      run was contig-allocated and not broken by racers).
-   d. Issue the fill op(s) with `virtio_blk_read_raw()`. On success set
-      the valid bits; on device error record the failure (the read
-      returns -1 at the end, matching raw semantics).
-   e. Copy every requested sector out of its unit's frame (bucket lock per
-      unit). Count `hits` for sectors valid before this fill, `misses`
-      for sectors this call had to fetch; `fill_ops` += device ops;
-      `raw_sectors` += sectors fetched.
-3. Release the fill lock; **copy pass**: for every unit overlapped by the
-   range, copy its requested sectors out of its frame (per-unit bucket
-   lock; a unit whose entry vanished under a race is re-read raw so the
-   read still succeeds).  Units whose requested sectors were all already
-   valid when the fill pass reached them are skipped there and counted as
-   `hits` at the skip point; the copy pass itself never counts.  Return 0
-   (or -1 on device error).
+      unit passthrough (served raw by the copy pass in step 4; the read
+      must still succeed). Never under a cache lock (§5).
+   b. **Phase A (reserve/own + plan, under `fill_lock` + per-unit bucket
+      lock; SHORT — no device I/O happens here).**  Per unit:
+      - Entry **missing** → install a fresh entry (`fstate = INFLIGHT`,
+        `valid` as-is = 0, `ref = 1`) on this fill's pre-allocated frame;
+        this fill **owns** the unit; plan ops for the missing requested bits.
+      - Entry exists, `fstate == INFLIGHT` → a **different** fill owns the
+        unit (or it is mid-deferral after invalidation). **Exclude** the
+        unit from this run. Do NOT touch the entry and never free its
+        frame (its DMA may be active). This fill's own unused pre-allocated
+        run frame is freed (it was allocated for this call, not by the
+        other fill). The caller's copy pass (step 4) raw-reads those
+        sectors if they are still not valid.
+      - Entry exists, `fstate == DEFERRED` → same as above: **exclude**;
+        the owner-fill's publish completes the deferred drop. Its frame is
+        never freed here.
+      - Entry exists, `fstate == CLEAN` → this is the normal **partial-fill**
+        case (entry published with a subset of `valid`, requested bits
+        still missing): this fill **owns** the unit too — mark
+        `fstate = INFLIGHT` and plan ops for the missing bits into the
+        EXISTING entry's frame (preserve `entries[e].frame`; do not use a
+        different frame for it). The already-valid requested bits count as
+        `hits`, the refilled bits as `misses` — exactly the pre-fix
+        per-unit behavior, plus the `fstate` marking so concurrent fills
+        exclude each other.
+      At most one fill is active per unit at any time: `fstate ==
+      INFLIGHT` is the mutex, and installs only happen when no entry
+      exists.  Merged device ops are planned from the owned units' missing
+      bits **only while the target frames stay contiguous** (always true
+      within one unit; across units while the run was contig-allocated and
+      not broken by excluded units), capped at 1024 sectors, exactly as
+      before. The Phase-A plan (owned entry index + frame per unit) is
+      what lets Phase C prove ownership; a single fill_lock section covers
+      ≤ 512 units and oversized runs split into a few short sections.
+   c. **Phase B (device I/O — NO cache lock held).**  Issue + complete
+      the planned reads with `virtio_blk_read_raw()` into the owned
+      frames.  Account `fill_ops` += ops, `raw_sectors` += sectors.
+      Device errors are recorded (never published); the read returns -1 at
+      the end, matching raw semantics.
+   d. **Phase C (publish, under `fill_lock` + per-unit bucket lock;
+      SHORT).**  Per owned unit, re-find the entry and prove ownership
+      (same entry index + same frame this fill filled). If it is missing
+      or not ours: publish nothing and free nothing you don't own (a
+      racing evict must skip in-flight entries, §5, so this should not
+      happen — defensive only). If it is ours: `fstate == DEFERRED` →
+      unlink + push the entry to the free list + free the frame
+      (completing the deferred drop; NO valid bits set — the unit was
+      invalidated while the fill was in flight); otherwise →
+      `valid |= requested bits` (skipped on device error) and
+      `fstate = CLEAN`.
+3. Release `fill_lock` (never held across Phase B); count `passthrough`
+   for whole reads that bypassed the cache anywhere.
+4. **Copy pass**: for every unit overlapped by the range, a unit with a
+   readable entry (CLEAN **and** `valid` covering the request) is copied
+   out of its frame (per-unit bucket lock). Everything else — passthrough
+   units, units whose entry vanished (invalidate/evict race), and units
+   whose entry is not readable (`fstate != CLEAN`, or requested bits not
+   yet valid) — is raw-read from the device straight into `buf` so the
+   read still succeeds and never serves torn frame data.  This is the
+   existing 'entry vanished → raw read' fallback pattern, extended so a
+   fill-owned frame is never copied from.  The copy pass itself never
+   counts (half the accounting happens in the fill runs, half at the skip
+   points).  Return 0 (or -1 on device error).
 
 `passthrough` counts whole calls that bypassed the cache (not ready, or
-no frame obtainable for a unit). It must be possible for a read to fall
-back to passthrough at any point without failing.
+no frame/entry obtainable for a unit). It must be possible for a read to
+fall back to passthrough at any point without failing; passthrough
+sectors are served by the copy pass's raw read (device reads the cache
+issued before the fix are no longer double-issued — the copy pass is the
+single raw path for them).
 
 ## 5. Locking (binding)
 
-- `fill_lock` (one global plain spinlock): serializes **all structural
-  mutations** — insert, unlink, evict, invalidate, flush, and the device
-  fills themselves. While it is held, the entry set cannot change; that is
-  what makes multi-phase fills race-free without per-entry reference
-  counts.
+- `fill_lock` (one global plain spinlock): a **SHORT structural lock**
+  serializing entry-set mutations — install, unlink, evict, invalidate,
+  publish reservations (fill Phase A), publish (fill Phase C), and the
+  free list.  **It is NEVER held across a device op or any wait**: a
+  fill's device reads (Phase B) run with no cache lock held at all.  The
+  entry set can change only under `fill_lock`, and per-unit ownership
+  races are handled by the per-entry `fstate` (INFLIGHT marks the owning
+  fill), not by holding the lock across I/O.
 - `buckets[i]` (plain spinlock per bucket): chain traversal, slot copies,
-  `ref` updates. Never held across device I/O, `frame_alloc`, or
-  `frame_free`… except the eviction/unlink paths which call `frame_free`
-  while holding a bucket lock — the established order is
-  **fill_lock > bucket > frame_lock**.
+  `ref` updates. Never held across device I/O or `frame_alloc`;
+  `frame_free` is called under a bucket lock only in the eviction path —
+  the established order is **fill_lock > bucket > frame_lock**.
 - `frame_alloc` is **never called with any cache lock held**: it can, on
   failure, re-enter the cache via `blk_cache_evict_pages()` (which takes
   `fill_lock`); calling it under `fill_lock` would self-deadlock.
-  `frame_free` never re-enters the cache.
-- Device fills run under `fill_lock` but **not** under a bucket lock; the
-  driver's own `blk_in_use` token serializes device traffic, and the
-  driver keeps refreshing `cpu_heartbeat_ms[]` during waits (the L9
-  liveness contract).
+  `frame_free` never re-enters the cache.  (This is exactly why the fill
+  allocates its frames in §4 step 2a, before Phase A.)
+- **Fill ownership (`fstate`)** — at most one fill is active per unit:
+  Phase A marks owned entries INFLIGHT; concurrent fills, the invalidation
+  path and eviction all skip INFLIGHT entries. Phase C clears to CLEAN, or
+  completes the DEFERRED drop. Eviction **never** touches `fstate !=
+  CLEAN` entries (a device DMA may be writing the frame); the deferred
+  drop is performed only by the owning fill's publish, after its device
+  I/O has finished. `blk_cache_invalidate` unlinks CLEAN entries as before
+  but only flags INFLIGHT/DEFERRED ones (it may not free a frame under
+  active DMA).
+- Device fills (Phase B) run with **no cache lock held** (the driver's own
+  `blk_in_use` token serializes device traffic, and the driver keeps
+  refreshing `cpu_heartbeat_ms[]` during waits — the L9 liveness
+  contract). Because nothing waits on a lock while the device is slow, a
+  wedged/slow device can no longer stall writers or the filesystem lock:
+  this is the fix for the lock-coupling deadlock of §11.
 - Write path order (binding): raw write commits first, **then**
   `blk_cache_invalidate` — never the reverse (invalidating first would
   let a concurrent reader refill stale data from the device between the
-  invalidate and the write commit).
+  invalidate and the write commit).  Invalidate still guarantees
+  coherence while a fill races it: an in-flight entry is flagged DEFERRED
+  and dropped by that fill's publish before any frame copy can serve it,
+  so no pre-write cached copy survives a commit+invalidate.
 
 Deadlock-free argument (why this order is safe):
+- `fill_lock` sections are short (reserve/publish/invalidate/unlink)
+  and never block on the device, so no long-held lock ever sits behind a
+  device wait.  The old deadlock — a reader holding `fill_lock` across a
+  slow device op while a writer holding `fat_lock` waits on `fill_lock` —
+  cannot form, because a device op no longer runs under `fill_lock`.
 - frame.c failure paths take no frame_lock when they call evict (they
   release it first), so `frame_lock → fill_lock` never happens.
 - Cache code never calls into vm/process/proc locks, so no cycle exists
@@ -152,7 +225,7 @@ Deadlock-free argument (why this order is safe):
   some paths — a fault allocates under `vm_lock`; eviction under those
   locks only takes fill/bucket/frame locks, all leaves).
 - The device wait loop never waits on anything a fill-lock holder holds
-  in reverse (writers don't hold fill_lock across their raw op).
+  in reverse (no lock is held while the device op runs).
 
 ## 6. Reclaim hooks in frame.c (binding)
 
@@ -308,3 +381,35 @@ raw logs (markers + FAIL-token scan), never exit codes.
   tests lane's accounting oracle (2-valid/2-missing-unit read, hit-delta
   check).  Fix: count at the skip point in the miss path; §4 step 3 now
   documents the copy pass and where the accounting happens.
+- 2026-10-16 (lock-coupling deadlock, `blkcache/fixlock`): the block
+  cache held `fill_lock` across device I/O (a fill acquired it at entry
+  and kept it for the whole run, device ops included).  Meanwhile the
+  fat16 write path calls `virtio_blk_write_sector()` WHILE holding
+  `fat_lock` (dir-entry writes at fat16.c:621, FAT sector writes at
+  279–283), and the write path then calls `blk_cache_invalidate`, which
+  takes `fill_lock`.  Any device-op slowdown became a fatal embrace:
+  `fill_lock` hostage (reader's fill) → invalidate waits → `fat_lock`
+  hostage (writer) → every FS op piles up behind `find_entry_in_root`.
+  Evidence — x64 KVM wave, copies 2/2 wedged with ~1200 `[LOCKFOREVER]`
+  events each (`blkcache-evidence/x64-wedge/wave-{1,2}.log`): fill_lock
+  spinners at `blk_cache_invalidate <- virtio_blk_write_sector` and at
+  `fill_run_contig <- fat16_read`; fat_lock at
+  `spinlock_acquire_irqsave <- find_entry_in_root`; pre-fix the wedge
+  formed within ~10 min.  ARM in-OS selfhost build stalled 2/2 at the
+  same point (`blkcache-evidence/selfhost/cached-arm-selfhost-stall-v2
+  .serial.log`, `-wedge1`); a cache-less baseline completed
+  (`baseline-arm-selfhost.serial.log`).
+  **Discipline change (this commit):** `fill_lock` became a SHORT
+  structural lock never held across a device op or any wait.  Fills now
+  run in three phases — A reserve/own + plan under `fill_lock` (short),
+  B device I/O with no cache lock held, C publish under `fill_lock`
+  (short).  Per-entry `fstate` (CLEAN/INFLIGHT/DEFERRED, in the struct's
+  former padding — sizeof stays 24 B) makes INFLIGHT the per-unit
+  ownership mutex: concurrent fills exclude such units, eviction never
+  touches them, and `blk_cache_invalidate` flags them DEFERRED for the
+  owning fill's publish to drop after its device I/O completes.  Clean
+  entries are still adopted and partially-filled exactly as before (the
+  only change is the fstate marking).  Counters (§8), the write-path
+  coherence contract (§9), and every press-suite oracle assertion are
+  unchanged; passthrough unit reads are now served once by the copy pass
+  instead of being double-issued during the fill.
