@@ -494,6 +494,13 @@ KEY_A=30 KEY_ENTER=28 KEY_ESC=1 KEY_SPACE=57
 | node | backing | ABI asserted |
 |---|---|---|
 | `/dev/fb0` | mmap'd HobbyOS framebuffer | mmap offsets/size, `FBIOGET_VSCREENINFO`/`FBIOGET_FSCREENINFO` (see the probe's `fb_*` layouts), `FB_ACTIVATE_NOW` |
+
+The framebuffer the mmap window + virtio-gpu 2D path expose is a fixed `1920x1080`
+**32bpp packed B8G8R8A8** surface: byte0=blue, byte1=green, byte2=red, byte3=alpha
+(blue at bits 0..7 of the little-endian frame word), stride 7680 B/row, smem
+1920*1080*4. The concrete packing + pixel/row offset math are pinned by
+`src/include/fb_pixel.h` + `fb_pixel_test_host` (T1; the level below `fb_ioctl`
+'s struct-field checks).
 | `/dev/input/event0..N` | virtio-input | `struct input_event` (see probe), `EVIOCGVERSION`, `EVIOCGNAME`, `EVIOCGBIT`, `EVIOCGABS`, non-blocking reads |
 | `/dev/null`, `/dev/zero`, `/dev/urandom` | kernel shims | `read`, `mmap` (zero page) |
 | `/dev/tty` | console | `TCGETS`/`TCSETS`, `TIOCGWINSZ`, `isatty()` true |
