@@ -63,6 +63,28 @@ ROWS = [
     ("TCGETS", "TCGETS", "sys/ioctl.h"), ("TCSETS", "TCSETS", "sys/ioctl.h"),
     ("TIOCGWINSZ", "TIOCGWINSZ", "sys/ioctl.h"),
     ("FIONREAD", "FIONREAD", "sys/ioctl.h"), ("FIONBIO", "FIONBIO", "sys/ioctl.h"),
+    # stat mode bits (sys/stat.h)
+    ("S_IFMT", "S_IFMT", "sys/stat.h"), ("S_IFREG", "S_IFREG", "sys/stat.h"),
+    ("S_IFDIR", "S_IFDIR", "sys/stat.h"), ("S_IFCHR", "S_IFCHR", "sys/stat.h"),
+    ("S_IFBLK", "S_IFBLK", "sys/stat.h"), ("S_IFLNK", "S_IFLNK", "sys/stat.h"),
+    ("S_IFIFO", "S_IFIFO", "sys/stat.h"), ("S_ISUID", "S_ISUID", "sys/stat.h"),
+    # fcntl (fcntl.h)
+    ("F_DUPFD", "F_DUPFD", "fcntl.h"), ("F_GETFL", "F_GETFL", "fcntl.h"),
+    ("F_SETFL", "F_SETFL", "fcntl.h"), ("F_GETLK", "F_GETLK", "fcntl.h"),
+    ("F_SETLK", "F_SETLK", "fcntl.h"), ("F_SETLKW", "F_SETLKW", "fcntl.h"),
+    # signals (signal.h)
+    ("SIGCHLD", "SIGCHLD", "signal.h"), ("SIGSEGV", "SIGSEGV", "signal.h"),
+    ("SIGINT", "SIGINT", "signal.h"), ("SIGWINCH", "SIGWINCH", "signal.h"),
+    ("SIGKILL", "SIGKILL", "signal.h"), ("SIGSTOP", "SIGSTOP", "signal.h"),
+    ("SA_SIGINFO", "SA_SIGINFO", "signal.h"), ("SA_RESTART", "SA_RESTART", "signal.h"),
+    # epoll (sys/epoll.h)
+    ("EPOLLIN", "EPOLLIN", "sys/epoll.h"), ("EPOLLOUT", "EPOLLOUT", "sys/epoll.h"),
+    ("EPOLLET", "EPOLLET", "sys/epoll.h"),
+    # dirent d_type (dirent.h)
+    ("DT_REG", "DT_REG", "dirent.h"), ("DT_DIR", "DT_DIR", "dirent.h"),
+    ("DT_CHR", "DT_CHR", "dirent.h"),
+    # rlimit (sys/resource.h)
+    ("RLIMIT_NOFILE", "RLIMIT_NOFILE", "sys/resource.h"),
 ]
 # fmt: on
 
