@@ -48,6 +48,7 @@ void run_all_unit_tests(void) {
   fb_ioctl_test_suite();
   evdev_test_suite();
   input_node_test_suite();
+  fb_mmap_test_suite();
   virtio_net_test_suite();
   net_test_suite();
   net_rdma_test_suite();

@@ -18,6 +18,7 @@
  * for the ABI contract; register convention is regs[0]=a0, regs[1]=a1). */
 #include "input_node.h"
 #include "virtio_input.h"
+#include "fb_mmap.h"
 #include <stdint.h>
 
 extern jmp_buf user_exit_context;
@@ -1039,6 +1040,26 @@ static void sys_map_fb(struct trap_frame *tf) {
   tf->regs[0] = USER_FB_VIRT_BASE; // Return user virtual address
 }
 
+/* GB-025: /dev/fb0 ioctl (SYS_FB_IOCTL).  Registers: x0=req, x1=arg.
+ * FBIOGET_VSCREENINFO/FSCREENINFO copy a Linux-layout struct OUT to arg
+ * (validated first); FBIOBLANK takes a plain value.  0 | -1 | -EFAULT. */
+static void sys_fb_ioctl(struct trap_frame *tf) {
+  unsigned long req = (unsigned long)tf->regs[0];
+  void *arg = (void *)tf->regs[1];
+  uint64_t smem_start = (uint64_t)virtio_gpu_get_framebuffer();
+
+  size_t sz = hb_fb_ioctl_arg_size(req);
+  if (sz == (size_t)-1) {
+    tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
+    return;
+  }
+  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  tf->regs[0] = (uint64_t)(int64_t)hb_fb_ioctl_route(req, arg, smem_start);
+}
+
 static void sys_flush_fb(struct trap_frame *tf) {
   virtio_gpu_flush();
   tf->regs[0] = 0;
@@ -1853,6 +1874,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_flush_fb(tf);
     } else if (syscall_num == SYS_FLUSH_FB_RECTS) {
       sys_flush_fb_rects(tf);
+    } else if (syscall_num == SYS_FB_IOCTL) {
+      sys_fb_ioctl(tf);
     } else if (syscall_num == SYS_GET_CPUID) {
       sys_get_cpuid(tf);
     } else if (syscall_num == SYS_PIPE) {
