@@ -492,6 +492,20 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
   ("webhook can only call allowed HTTP servers"). The only change is that appended section
   (the file had no `[webhook]` block before); removing it restores the original exactly.
 
+### 11.2b Fleet preconditions discovered on first contact (fix these before any x86 run)
+
+1. **x86 firmware must be writable.** The Makefile passes `-pflash $(EDK2_X86_64)`, and `-pflash` opens
+   the image read-write; the cloud-init symlink to `/usr/share/OVMF/OVMF_CODE_4M.fd` makes every x86 QEMU
+   run fail with `Could not open ...: Permission denied`. Fix per VM:
+   `rm -f ~/.local/share/OVMF/OVMF_CODE_4M.fd && cp /usr/share/OVMF/OVMF_CODE_4M.fd ~/.local/share/OVMF/OVMF_CODE_4M.fd && chmod u+w …`
+   (ARM uses `-bios` and was never affected). Applied on .233 + farms 1-3.
+2. **`musl-tools`** must be installed wherever the T4 harness runs (`musl-gcc -static` is leg A); without
+   it the harness honestly SKIPs and the differential gate is hollow. Installed on .233.
+3. **Workers run `hermes -w`.** A git worktree does **not** contain gitignored trees, so the vendored
+   `third_party/*/src` extractions are missing there and vendored lanes (C++/RTTI, WebKit) go red inside a
+   worktree while the same tree is green in the main checkout. Seed them (symlink is cheapest) before
+   believing a worker's "main is red" report — tracked as GB-006.
+
 ### 11.3 Model endpoints & Hermes profiles
 - Two vLLM OpenAI-compatible endpoints, **recorded + verified 2026-10-17 (GB-004)**:
   - **FLASH — DeepSeek V4 Flash** = `http://llm.localdomain:8000/v1`, `GET /v1/models` →
@@ -567,6 +581,7 @@ long-lived `hermes -w` tmux sessions).**
 | Second worker MR | **GB-007 harness merged, In Review** (T4 differential host leg, worker `wabi`); device leg gated on GB-013 |
 | Fleet pitfall | workers run in `hermes -w` worktrees, which do **not** carry gitignored `third_party/*/src` — vendored lanes (C++) go red in a worktree while `main` is green; seeded as GB-006 |
 | Toolchain | `musl-tools` installed on the coordinator so the T4 harness leg A is real (`musl-gcc -static`); belongs in the fleet provisioning (GB-006) |
+| Fleet fix (blocker) | every VM's `~/.local/share/OVMF/OVMF_CODE_4M.fd` was a **symlink to the read-only system file**, and the Makefile passes it to `-pflash` — which opens read-write, so **every x86 QEMU run died with `Permission denied`** (ARM was fine: `-bios`). Replaced with a real, user-writable copy on .233 and farms 1-3 (`cp /usr/share/OVMF/OVMF_CODE_4M.fd …` + `chmod u+w`, sha256 identical to the system file). This blocked the whole Intel test path — i.e. the compat track's T2/T3/T4/T5 — until fixed |
 
 Merge path for workers (no GitHub token on the farms): push `ticket/<n>-<slug>` to `origin`, post an
 `EVIDENCE` comment on the ticket, and the Coordinator merges from `origin` after running the gate.
