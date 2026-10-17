@@ -540,3 +540,25 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 - `qemu-system-aarch64 -M virt -smp 4 -m 2048 -bios ~/.local/share/AAVMF/AAVMF_CODE.fd`
   boots UEFI to the shell, no crash (farm-2).
 - LLVM 21.1.8 dist-staging cached on farm-1.
+
+### 11.8 Execution log (newest first, maintained by the Coordinator)
+
+**2026-10-17 — kickoff (Coordinator on .233; workers `wabi`@farm-1, `wgfx`@farm-2, `wgames`@farm-3 in
+long-lived `hermes -w` tmux sessions).**
+
+| what | state |
+|---|---|
+| Board (GB-002) | 55 seed tickets + PLAN-001; lanes are labels (no Projects REST in this Forgejo build, §4.1) |
+| Board automation (GB-003) | webhook `coordinator-board-hook` + 60 s poll, both systemd units on .233 (§11.2a) |
+| Model split (GB-004) | DEEP `dgx1:8000` on the coordinator, FLASH `llm:8000` on farms 1-3 (§11.3) |
+| Plan sync (GB-008) | `tools/board/sync_gaming_md.py` — IN SYNC, drift detection proven |
+| Baseline (GB-009) | T1 `make host_tests` green on coordinator + farm-1; **T2/T3 still to capture** |
+| ABI contract (GB-010) | `docs/linux-abi.md` v1 (measured; `gen_abi_doc.py --check` guards drift) — In Review |
+| ELF loader (GB-013) | parser + segment planner landed and host-tested (53 checks), linked into both kernel builds; **mapper half open** |
+| Syscall table (GB-014) | 114 measured numbers + errno locked by goldens (T1); **shims + trap routing open** |
+| First worker MR | **GB-026 merged** (fb ABI surface, worker `wgfx`, branch `ticket/26-fb-ioctls`); gate = T1 + both kernel links |
+
+Merge path for workers (no GitHub token on the farms): push `ticket/<n>-<slug>` to `origin`, post an
+`EVIDENCE` comment on the ticket, and the Coordinator merges from `origin` after running the gate.
+The automated merge-gate CI is GB-005 — until it exists the Coordinator runs the gate by hand and
+records the output on the ticket.
