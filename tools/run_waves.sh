@@ -115,3 +115,35 @@ echo "---- ARM verdicts ----"
 grep -aE "TEST\]|Tests failed|EXIT=" "$ARM_LOG" | tail -25 || true
 echo "---- intel verdicts ----"
 grep -aE "TEST\]|Tests failed|EXIT=" "$INTEL_LOG" | tail -25 || true
+
+# GB-057 host-side gate: printed `[...] FAIL` lines must FAIL the tier
+# (QEMU always powers off with exit 0 after "System halt." no matter how
+# many FAILs the wave printed — that green exit code was hiding 222 intel
+# failures).  Run the gate on each wave log; any un-quarantined FAIL fails
+# the overall run.  Pass an allowlist via GATE_ALLOW (space- or COMMA-
+# separated REGEXes) when a test is explicitly quarantined with a reason in
+# gaming.md §6.
+GATE_ALLOW="${GATE_ALLOW:-}"
+declare -a gate_allow=()
+if [ -n "$GATE_ALLOW" ]; then
+  IFS=', ' read -r -a gate_allow <<< "$GATE_ALLOW"
+fi
+arm_gate=0
+intel_gate=0
+if [ -f "$ARM_LOG" ]; then
+  tools/integration_gate.sh -q "${gate_allow[@]/#/--allow=}" "$ARM_LOG" \
+    >/dev/null 2>&1 || arm_gate=$?
+fi
+if [ -f "$INTEL_LOG" ]; then
+  tools/integration_gate.sh -q "${gate_allow[@]/#/--allow=}" "$INTEL_LOG" \
+    >/dev/null 2>&1 || intel_gate=$?
+fi
+echo "---- integration gate (GB-057) ----"
+echo "  ARM   tier: $([ "$arm_gate" -eq 0 ] && echo PASS || echo FAIL)"
+echo "  intel tier: $([ "$intel_gate" -eq 0 ] && echo PASS || echo FAIL)"
+if [ "$arm_gate" -ne 0 ] || [ "$intel_gate" -ne 0 ]; then
+  echo "run_waves: integration tier FAILED (un-quarantined FAIL lines present)"
+  exit 1
+fi
+echo "run_waves: integration tier PASS (0 un-quarantined FAIL lines on both arches)"
+
