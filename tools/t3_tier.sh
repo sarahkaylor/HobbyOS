@@ -14,7 +14,10 @@
 #     run that never reaches its halt line FAILS the tier, it is never
 #     silently re-run);
 #   * requires the completion marker ("System halt");
-#   * counts FAIL lines in the captured console and FAILS if there is one.
+#   * counts FAIL lines in the captured console and FAILS if there is one;
+#   * FAILS on any FATAL kernel-mode fault line and on a console below the
+#     completeness floor (T3_MIN_LINES, default 1000) -- a crashed kernel also
+#     reaches "System halt", and a verdict on a wreck is worse than no verdict.
 #
 # Usage:  tools/t3_tier.sh [arm|intel]     (or: make test / test_intel)
 # Env:    T3_TIMEOUT (default 2700 s), T3_LOG (default obj/t3_<arch>.log)
@@ -51,9 +54,13 @@ if [ -n "$POLICE_ONLY" ]; then
   halted=0; grep -aq "System halt" "$LOG" && halted=1
   if [ "${T3_SKIP_HALT_CHECK:-0}" = "1" ]; then halted=1; fi
   FAIL_LINES=$(grep -ac "FAIL" "$LOG" || true)
-  echo "T3_${ARCH} (police ${LOG}): $(wc -l <"$LOG") lines, ${FAIL_LINES} FAIL lines, halted=${halted}"
+  KFAULT=$(grep -ac "FATAL kernel-mode fault" "$LOG" || true)
+  LINES=$(wc -l <"$LOG")
+  echo "T3_${ARCH} (police ${LOG}): ${LINES} lines, ${FAIL_LINES} FAIL lines, halted=${halted}, kfault=${KFAULT}"
   rc=0
   [ "$halted" = "1" ] || { echo "T3_${ARCH}: FAIL — no halt line"; rc=1; }
+  [ "$KFAULT" = "0" ] || { echo "T3_${ARCH}: FAIL — ${KFAULT} FATAL kernel-mode fault line(s): the guest halted because the kernel crashed"; rc=1; }
+  [ "$LINES" -ge "${T3_MIN_LINES:-1000}" ] || { echo "T3_${ARCH}: FAIL — only ${LINES} console lines (floor ${T3_MIN_LINES:-1000}): too little work for a complete wave"; rc=1; }
   if [ "$FAIL_LINES" != "0" ]; then
     echo "T3_${ARCH}: FAIL — ${FAIL_LINES} FAIL line(s); first 5:"
     grep -an "FAIL" "$LOG" | head -5
@@ -199,11 +206,27 @@ rc=0
 if [ "$halted" != "1" ]; then
   echo "T3_${ARCH}: FAIL — the console has no 'System halt' line (idle/hung wave, or the ${T3_TIMEOUT}s deadline hit; a hang is a defect, not a flake)"; rc=1
 fi
+# A halt marker alone cannot tell "the wave finished" from "the wave died early":
+# a FATAL kernel fault halts this CPU, the survivors then find nothing runnable,
+# and the scheduler prints the same 'System halt' line.  Measured (probe17): a run
+# that took a kernel #GP at line ~450 of 460 halted with 0 FAIL lines and the tier
+# called it a PASS -- a verdict on a wreck.  Two structural criteria fix that, both
+# measured rather than assumed: a kernel fault is never a pass, and a wave that
+# halted without doing its work is not a pass either.
+KFAULT=$(grep -ac "FATAL kernel-mode fault" "$LOG" || true)
+LINES=$(wc -l <"$LOG")
+MIN_LINES="${T3_MIN_LINES:-1000}"
+if [ "$KFAULT" != "0" ]; then
+  echo "T3_${ARCH}: FAIL — ${KFAULT} FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed"; rc=1
+fi
+if [ "$halted" = "1" ] && [ "$LINES" -lt "$MIN_LINES" ]; then
+  echo "T3_${ARCH}: FAIL — halted after only ${LINES} console lines (floor ${MIN_LINES}): too little work for a complete wave, so this cannot be a pass"; rc=1
+fi
 if [ "$FAIL_LINES" != "0" ]; then
   echo "T3_${ARCH}: FAIL — ${FAIL_LINES} FAIL line(s); first 20:"
   grep -an "FAIL" "$LOG" | head -20
   rc=1
 fi
-[ "$rc" -eq 0 ] && echo "T3_${ARCH}: PASS (0 FAIL lines, halted)"
+[ "$rc" -eq 0 ] && echo "T3_${ARCH}: PASS (0 FAIL lines, halted, no kernel fault, ${LINES} lines)"
 echo "T3_${ARCH} EXIT=$rc"
 exit "$rc"
