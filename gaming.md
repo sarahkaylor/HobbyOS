@@ -559,11 +559,14 @@ long-lived `hermes -w` tmux sessions).**
 | Board automation (GB-003) | webhook `coordinator-board-hook` + 60 s poll, both systemd units on .233 (§11.2a) |
 | Model split (GB-004) | DEEP `dgx1:8000` on the coordinator, FLASH `llm:8000` on farms 1-3 (§11.3) |
 | Plan sync (GB-008) | `tools/board/sync_gaming_md.py` — IN SYNC, drift detection proven |
-| Baseline (GB-009) | T1 `make host_tests` green on coordinator + farm-1; **T2/T3 still to capture** |
+| Baseline (GB-009) | T1 green (coordinator + farm-1) and **T2 green on ARM** (`run_unit_tests.sh`); Intel T2 launching, **T3 still to capture** |
 | ABI contract (GB-010) | `docs/linux-abi.md` v1 (measured; `gen_abi_doc.py --check` guards drift) — In Review |
 | ELF loader (GB-013) | parser + segment planner landed and host-tested (53 checks), linked into both kernel builds; **mapper half open** |
 | Syscall table (GB-014) | 114 measured numbers + errno locked by goldens (T1); **shims + trap routing open** |
 | First worker MR | **GB-026 merged** (fb ABI surface, worker `wgfx`, branch `ticket/26-fb-ioctls`); gate = T1 + both kernel links |
+| Second worker MR | **GB-007 harness merged, In Review** (T4 differential host leg, worker `wabi`); device leg gated on GB-013 |
+| Fleet pitfall | workers run in `hermes -w` worktrees, which do **not** carry gitignored `third_party/*/src` — vendored lanes (C++) go red in a worktree while `main` is green; seeded as GB-006 |
+| Toolchain | `musl-tools` installed on the coordinator so the T4 harness leg A is real (`musl-gcc -static`); belongs in the fleet provisioning (GB-006) |
 
 Merge path for workers (no GitHub token on the farms): push `ticket/<n>-<slug>` to `origin`, post an
 `EVIDENCE` comment on the ticket, and the Coordinator merges from `origin` after running the gate.

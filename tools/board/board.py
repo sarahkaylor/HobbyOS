@@ -179,10 +179,20 @@ def milestone_id(name):
     return None, None
 
 
-def comment(gid, text):
+def comment(gid, text, lane=None, close=False):
+    """Post a comment; optionally also move the lane (and close for Done).
+
+    The lane move happens FIRST so the comment lands in the state it describes
+    (the webhook/poll inbox then shows the transition with the explanation)."""
     it = issue_by_id(gid)
     if not it:
         raise SystemExit(f"no issue for {gid}")
+    if lane:
+        set_lane(it, lane)
+        if lane == "Done":
+            close = True
+    if close:
+        api_patch(f"/repos/{REPO}/issues/{it['number']}", {"state": "closed"})
     return api_post(f"/repos/{REPO}/issues/{it['number']}/comments", {"body": text})
 
 
