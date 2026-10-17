@@ -11,6 +11,65 @@ volatile uint64_t lock_wait_addr[MAX_CPUS];
 volatile uint64_t lock_wait_caller[MAX_CPUS];
 volatile uint64_t lock_wait_caller2[MAX_CPUS];
 
+/* GB-057: RE-ACQUIRE (recursion) detector.
+
+   The waiter table above cannot distinguish the two roles in a wedge: a CPU
+   that re-acquires a lock it is ALREADY holding spins in exactly the same
+   place as a CPU waiting for someone else, so "7 CPUs waiting on proc_lock"
+   is consistent both with a long holder and with a self-deadlocked holder
+   that is one of the seven.  That ambiguity is what kept GB-057 open.  This
+   table makes the difference visible: every acquired lock address is
+   remembered per CPU (a few slots deep -- enough for this kernel's nesting,
+   which is one) and a re-acquire screams, lock-free, naming the holder.
+
+   Cost is a 4-entry scan on acquire/release; it is deliberately tiny because
+   the release path is the hottest code in the kernel. */
+#define HELD_LOCK_SLOTS 4
+static volatile uint64_t held_locks[MAX_CPUS][HELD_LOCK_SLOTS];
+static volatile uint32_t recursive_shouts[MAX_CPUS];
+
+static void held_lock_push(uint64_t addr) {
+  uint32_t cpu = get_cpuid();
+  for (int i = 0; i < HELD_LOCK_SLOTS; i++)
+    if (held_locks[cpu][i] == addr)
+      return; /* already noted (should not happen; the scream path handles it) */
+  for (int i = 0; i < HELD_LOCK_SLOTS; i++) {
+    if (held_locks[cpu][i] == 0) {
+      held_locks[cpu][i] = addr;
+      return;
+    }
+  }
+}
+
+static void held_lock_pop(uint64_t addr) {
+  uint32_t cpu = get_cpuid();
+  for (int i = 0; i < HELD_LOCK_SLOTS; i++) {
+    if (held_locks[cpu][i] == addr) {
+      held_locks[cpu][i] = 0;
+      return;
+    }
+  }
+}
+
+/* Called when this CPU is about to block on `addr`; if this CPU is already
+   holding it, it is the deadlock, not a victim. */
+static void held_lock_check_recursion(uint64_t addr, uint64_t pc, uint64_t pc2) {
+  uint32_t cpu = get_cpuid();
+  for (int i = 0; i < HELD_LOCK_SLOTS; i++) {
+    if (held_locks[cpu][i] == addr) {
+      if (recursive_shouts[cpu] < 3) {
+        recursive_shouts[cpu]++;
+        scream_dec("\n[RECURSIVE] cpu=", cpu);
+        scream_hex(" lock=", addr);
+        scream_hex(" pc=", pc);
+        scream_hex(" pc2=", pc2);
+        uart_putc_raw('\n');
+      }
+      return;
+    }
+  }
+}
+
 /* Raw lock-free deadlock scream: a core spinning with IRQs disabled may be
    stuck because the lock's holder died mid-print, possibly while holding
    uart_lock itself.  This path must therefore never touch uart_lock (or any
@@ -41,6 +100,10 @@ void spinlock_acquire(spinlock_t *lock) {
     lock_wait_addr[cpu] = (uint64_t)lock;
     lock_wait_caller[cpu] = (uint64_t)__builtin_return_address(0);
     lock_wait_caller2[cpu] = (uint64_t)__builtin_return_address(1);
+    /* GB-057: is this CPU the deadlock rather than a victim? */
+    held_lock_check_recursion((uint64_t)lock,
+                              (uint64_t)__builtin_return_address(0),
+                              (uint64_t)__builtin_return_address(1));
     uint64_t spins = 0;
     while (__atomic_test_and_set(&lock->locked, __ATOMIC_ACQUIRE)) {
       __builtin_ia32_pause();
@@ -58,9 +121,11 @@ void spinlock_acquire(spinlock_t *lock) {
     lock_wait_caller[cpu] = 0;
     lock_wait_caller2[cpu] = 0;
   }
+  held_lock_push((uint64_t)lock);
 }
 
 void spinlock_release(spinlock_t *lock) {
+  held_lock_pop((uint64_t)lock);
   __atomic_clear(&lock->locked, __ATOMIC_RELEASE);
 }
 
