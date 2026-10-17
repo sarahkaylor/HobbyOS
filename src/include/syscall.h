@@ -195,6 +195,12 @@
 #define SYS_WAIT4         (90)
 #define SYS_RMDIR         (91)
 
+/* GB-025: /dev/fb0 ioctl (FBIOGET_VSCREENINFO/FSCREENINFO + FBIOBLANK).
+ * (req, arg, 0) -> 0 | -1 (unknown request) | -EFAULT (bad arg pointer).
+ * The kernel fills the Linux-layout struct into `arg` for the FBIOGET_*
+ * requests via hb_fb_ioctl_route() (src/kernel/fb_mmap.c). */
+#define SYS_FB_IOCTL      (92)
+
 /* GB-027: the compat /dev/input/event* node.  SYS_INPUT_IOCTL routes the
  * Linux EVIOCGVERSION/EVIOCGNAME/EVIOCGBIT/EVIOCGABS probe ioctls (the
  * `arg` out-buffer is validated to hb_input_ioctl_arg_size() first,

@@ -515,6 +515,34 @@ by `input_node_test_host` (T1/T4 differential) + the kernel `input_node_test_sui
 | `/dev/null`, `/dev/zero`, `/dev/urandom` | kernel shims | `read`, `mmap` (zero page) |
 | `/dev/tty` | console | `TCGETS`/`TCSETS`, `TIOCGWINSZ`, `isatty()` true |
 
+`/dev/fb0` is the mmap'd HobbyOS framebuffer (GB-025). After an SDL fbcon probe reads
+`FBIOGET_VSCREENINFO` + `FBIOGET_FSCREENINFO` it does the equivalent of:
+
+    len = var.xres_virtual * var.yres_virtual * bits_per_pixel/8   // 1920*1080*4 = 8,294,400 B
+    fb  = mmap(NULL, len, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0)
+
+The mmap window follows Linux's `fb_mmap` contract (locked by the host differential suite,
+`src/host/fb_mmap_test.c`, against a real `/dev/fb0` when present; pure geometry +
+`FBIOBLANK` dispatch in the shared TU `src/kernel/fb_mmap.c`):
+
+- `smem_len` is one full frame, `8,294,400` B for 1920x1080 B8G8R8A8 (`hb_fb_smem_len()`).
+- The mmap offset must be **page-aligned (4096)** and `< smem_len`; `(offset+len)` is clamped to
+  `smem_len` like Linux (`hb_fb_mmap_translate()`). An `offset >= smem_len` or a page-misaligned
+  offset is rejected (`-EINVAL`-shaped), never silently trimmed.
+- `FBIOBLANK = 0x4611` is accepted as a no-op success for the blank/activate args SDL fbcon
+  sends (`FB_BLANK_UNBLANK=0`, `VESA_NO_BLANK=1`, `VESA_VSYNC_SUSPEND=2`, `VESA_HSYNC_SUSPEND=4`);
+  the fixed 2D scanout has no blankable/suspend output.
+- `FB_ACTIVATE_NOW = 0` is the only activate value the fixed mode reports/accepts.
+
+The ioctl wiring is a single native syscall (`SYS_FB_IOCTL`, src/include/syscall.h, both arches):
+`fb_ioctl(req, arg)` calls `hb_fb_ioctl_route()` (src/kernel/fb_mmap.c), which fills the Linux-layout
+var/fix struct into `arg` for `FBIOGET_VSCREENINFO`/`FBIOGET_FSCREENINFO` (via GB-026's
+`hb_fb_ioctl`) and routes `FBIOBLANK` to `hb_fb_blank_ioctl()`. The syscall shim validates the user
+`arg` buffer against the request's struct size before routing (`hb_fb_ioctl_arg_size()`: 160 B /
+80 B / 0 for FBIOBLANK), returning `-EFAULT` on a bad pointer and `-1` on an unknown request.
+Device-free, so the same route helper is locked by the host differential suite
+(`src/host/fb_mmap_test.c`) and the kernel unit suite (`src/kernel/fb_mmap_test.c`).
+
 `uname` for compat processes reports a Linux-shaped identity (§2.2 #4, GB-016): `sysname` =
 `Linux`, `release` = a fixed string baked into `linux_compat.c` (SDL's version gates parse it),
 `machine` = `x86_64`, `nodename` = the HobbyOS hostname. **Frozen at the M1 gate.**
