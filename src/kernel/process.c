@@ -45,11 +45,16 @@ extern void print_int(int val);
    Note this is deliberately NOT a lock release: if the resume returned, the
    process state is already suspect, and the honest move is to name the CPU and
    stop it rather than to hand a possibly-torn state to another core. */
-static void resume_returned_halt(uint32_t cpu, int pid) {
+static void resume_returned_halt(int pid) {
   extern void uart_puts_raw(const char *s);
   extern void uart_print_hex_raw(uint64_t v);
   uart_puts_raw("[KERNEL] resume call RETURNED (must never happen): cpu=");
-  uart_print_hex_raw((uint64_t)cpu);
+  /* Read the CPU here rather than trusting the caller's argument: in the wild
+     (probe v16) both call sites passed a garbage value that printed as
+     cpu=0x24848B4800000120 next to a perfectly plausible pid.  A field that
+     prints nonsense is worse than an absent one -- it invites a wrong
+     conclusion about which CPU was lost. */
+  uart_print_hex_raw((uint64_t)get_cpuid());
   uart_puts_raw(" pid=");
   uart_print_hex_raw((uint64_t)(uint32_t)pid);
   /* GB-060: a CPU that has to stop must not take the machine with it.  If this
@@ -1392,7 +1397,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
          which is the same silence that made five GB-057 probe runs look like
          five different failures.  Report first, through the COM1 raw sink (it
          takes no lock, so it cannot deadlock the console it is reporting on). */
-      resume_returned_halt(cpu, proc_table[next].pid);
+      resume_returned_halt(proc_table[next].pid);
     }
 
     // No ready processes. Check if any are still alive.
@@ -2779,7 +2784,7 @@ void start_scheduler(void) {
 
         /* Same rule as schedule()'s resume boundary: if this returns, the CPU
            is lost, so say so before going quiet. */
-        resume_returned_halt(cpu, proc_table[i].pid);
+        resume_returned_halt(proc_table[i].pid);
       }
     }
     spinlock_release_irqrestore(&proc_lock, flags);
