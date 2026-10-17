@@ -153,6 +153,9 @@ extern "C" {
   };
 
   int get_events(void *buf, int max_events);
+  /* GB-027: compat /dev/input/event* node (see src/user/libc.c). */
+  int input_ioctl(unsigned long req, void *arg);
+  int read_input_events(void *buf, int max_events);
   int available(int fd);
   struct sys_dirent {
     char name[32];

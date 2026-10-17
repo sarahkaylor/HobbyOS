@@ -195,8 +195,19 @@
 #define SYS_WAIT4         (90)
 #define SYS_RMDIR         (91)
 
+/* GB-027: the compat /dev/input/event* node.  SYS_INPUT_IOCTL routes the
+ * Linux EVIOCGVERSION/EVIOCGNAME/EVIOCGBIT/EVIOCGABS probe ioctls (the
+ * `arg` out-buffer is validated to hb_input_ioctl_arg_size() first,
+ * src/kernel/input_node.c); SYS_INPUT_READ drains the virtio_input ring
+ * and writes Linux-ABI struct input_event (24 B) records out to `buf`.
+ * 92 is left free for GB-025's SYS_FB_IOCTL (its own unmerged branch);
+ * these two land above it so the additive tops of both tickets do not
+ * collide when they merge. */
+#define SYS_INPUT_IOCTL   (93)
+#define SYS_INPUT_READ    (94)
+
 /* Highest defined syscall number. Dispatch tables are sized SYS_MAX + 1.
  * 90/91 were the next FREE numbers above the previous SYS_MAX (89). */
-#define SYS_MAX           (91)
+#define SYS_MAX           (94)
 
 #endif /* SYSCALL_H */

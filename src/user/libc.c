@@ -582,6 +582,18 @@ __attribute__((weak)) int get_events(void *buf, int max_events) {
   return (int)ho_syscall4(SYS_GET_EVENTS, (long)buf, (long)max_events, 0, 0);
 }
 
+/* GB-027: compat /dev/input/event* node.  input_ioctl() routes the Linux
+ * EVIOCGVERSION/EVIOCGNAME/EVIOCGBIT/EVIOCGABS probe ioctls SDL's evdev
+ * driver sends before it reads; read_input_events() is the non-blocking
+ * read that returns Linux-ABI struct input_event (24 B) records fed from
+ * virtio-input.  Numbers from docs/linux-abi.md §9, not memory. */
+__attribute__((weak)) int input_ioctl(unsigned long req, void *arg) {
+  return (int)ho_syscall4(SYS_INPUT_IOCTL, (long)req, (long)arg, 0, 0);
+}
+__attribute__((weak)) int read_input_events(void *buf, int max_events) {
+  return (int)ho_syscall4(SYS_INPUT_READ, (long)buf, (long)max_events, 0, 0);
+}
+
 int available(int fd) { return (int)ho_syscall4(SYS_AVAILABLE, (long)fd, 0, 0, 0); }
 
 __attribute__((weak)) int read_dir(const char *path, int index, struct sys_dirent *ent) {
