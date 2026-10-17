@@ -1277,6 +1277,38 @@ void schedule(struct trap_frame *tf, int is_yield) {
       }
       if (claimed_elsewhere)
         continue;
+      /* GB-057: an unresumable slot must be SKIPPED, not resumed.
+
+         A user slot with no address space AND no v1 block cannot be resumed by
+         either branch below: the v2 path needs `as`, the legacy path needs
+         `user_phys_base`, and for a v2 slot that field is 0 by construction
+         (process.c:116 sets it only for v1).  The window is real: the v2 exec
+         path (program_loader.c) clears `grp->as` outside proc_lock for the whole
+         rebuild, because the AS pool is pid-indexed and the replacement cannot
+         exist while the old one does.
+
+         Measured consequence of not guarding here: the CPU took the legacy
+         branch with base 0, installed an overlay for physical address 0, resumed
+         the process into a garbage frame and executed at RIP=0x7 -- #UD, dump,
+         halt, with proc_lock held, which froze all eight CPUs.
+
+         Skipping is the honest failure: the slot cannot run either way, and
+         skipping it leaves a live machine with a report instead of a dead one
+         with a dump.  The report is rate-limited so a persistent window cannot
+         flood the console it is reporting on. */
+      if (!proc_table[idx].is_kernel_process && proc_table[idx].as == 0 &&
+          proc_table[idx].user_phys_base == 0) {
+        static volatile uint32_t unresumable_shouts;
+        if (unresumable_shouts < 8) {
+          extern void uart_puts_raw(const char *s);
+          extern void uart_print_hex_raw(uint64_t v);
+          unresumable_shouts++;
+          uart_puts_raw("[KERNEL] refusing to resume slot ");
+          uart_print_hex_raw((uint64_t)idx);
+          uart_puts_raw(": no address space (v2 exec window?) -- skipped\n");
+        }
+        continue;
+      }
       next = idx;
       break;
     }
