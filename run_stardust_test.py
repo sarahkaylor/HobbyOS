@@ -27,14 +27,14 @@ Tier: T5 (QMP input + screendump assertions).  Needs a built boot image
 """
 import json, os, re, socket, subprocess, sys, time
 
-ROOT = os.path.expanduser("~/Documents/GitHub/HobbyOS")
+ROOT = "/home/sarah/Documents/GitHub/HobbyOS/.worktrees/wgames-stardust"
 os.chdir(ROOT)
 ARCH = os.environ.get("ARCH", "arm")
 W, H = 1920, 1080
 SHOT_DIR = "/tmp/hobbyos_stardust"
 SER = "/tmp/stardust_test_serial.log"
 QMP = "/tmp/qmp-stardust-test"
-STARDUST_SLOT = 12        # after the 10 apps (10=PONG, 11=MILLIPED, 12=STARDUST)
+STARDUST_SLOT = 18        # 16 pinned apps (0..15) + PONG=16 MILLIPED=17 + STARDUST=18
 MAX_WAIT_S = 30           # the 30-second rule
 TASKBAR_Y = H - 26
 
@@ -149,7 +149,7 @@ entries = dict((int(a), b) for a, b in re.findall(
     r"\[MENU\]\s*(?:\s*\[\s*\d+\]\s*)*(\d+)(?:\s*[\[\]A-Z0-9 ]*\s*)*=(\s*[A-Za-z0-9_.]+)", txt))
 sd_i = next((i for i, n in entries.items() if n.strip() == "STARDUST.BIN"), None)
 log(f"menu: STARDUST.BIN idx={sd_i}")
-check(sd_i == STARDUST_SLOT, "STARDUST.BIN pinned at launcher slot 12", f"idx={sd_i}")
+check(sd_i == STARDUST_SLOT, "STARDUST.BIN pinned at launcher slot 18", f"idx={sd_i}")
 if sd_i is None:
     if "STARDUST.BIN" in txt: sd_i = STARDUST_SLOT
     else:
