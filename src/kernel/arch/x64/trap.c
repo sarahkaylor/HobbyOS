@@ -9,15 +9,33 @@
 #include "arch/mmu.h"
 #include "syscall.h"
 
+/* GB-027: /dev/input/event* ioctl (EVIOCGVERSION/GNAME/GBIT/GABS) + the
+ * Linux-ABI event read that translates the virtio_input ring into
+ * 24-byte input_event records.  ABI numbers from src/include/linux_input.h
+ * / docs/linux-abi.md §9 (not from memory). */
+#include "input_node.h"
+#include "virtio_input.h"   /* struct virtio_input_event: the ring's record */
+
 /* WD lane: x64 flush-path probes (serial "[WD] ..."); default 0 keeps the
  * shipped kernel quiet.  See docs/wd-x64-white-blit.md. */
 #ifndef WD_X64_FLUSH_PROBE
 #define WD_X64_FLUSH_PROBE 0
 #endif
+/* GB-057: the sys_fork / sys_close per-syscall debug prints fired on EVERY
+ * call and flooded the emulated UART (~29% of the intel T3 console: the
+ * GB-009 baseline carried 5077+5524 sys_close lines and 85 sys_fork lines).
+ * That PIO write storm slowed the wave and interleaved real FAIL lines so
+ * they could not be attributed — the interleaving class that hid the
+ * GB-057 gate defect.  Off by default; turn on only when tracing the syscall
+ * path by hand. */
+#ifndef TRAP_SYSCALL_DEBUG
+#define TRAP_SYSCALL_DEBUG 0
+#endif
 #include "errno.h"
 #include "vfs.h"
 #include "vm.h"
 #include "blk_cache.h"
+#include "fb_mmap.h"
 #include <stdint.h>
 
 extern void uart_puts(const char *s);
@@ -109,9 +127,11 @@ static void sys_exit(struct trap_frame *tf) {
 static void sys_fork(struct trap_frame *tf) {
   int pid = process_fork(tf);
   tf->regs[0] = pid < 0 ? (uint64_t)-EAGAIN : (uint64_t)pid;
+#if TRAP_SYSCALL_DEBUG
   uart_puts("[KERNEL] sys_fork: tf->regs[0] is now ");
   print_int((int)tf->regs[0]);
   uart_puts("\n");
+#endif
 }
 
 static void sys_open(struct trap_frame *tf) {
@@ -129,9 +149,10 @@ static void sys_open(struct trap_frame *tf) {
 
 static void sys_close(struct trap_frame *tf) {
   int fd = (int)tf->regs[5]; // rdi
-  uint32_t cpu = get_cpuid();
   struct process *caller = current_process();
 
+#if TRAP_SYSCALL_DEBUG
+  uint32_t cpu = get_cpuid();
   uart_puts("[sys_close Debug] CPU=");
   print_int(cpu);
   uart_puts(", PIDs=[");
@@ -154,13 +175,16 @@ static void sys_close(struct trap_frame *tf) {
     uart_puts(", caller is NULL");
   }
   uart_puts("\n");
+#endif
 
   int ret = file_close(caller, fd);
+#if TRAP_SYSCALL_DEBUG
   uart_puts("[KERNEL Debug] sys_close: fd=");
   print_int(fd);
   uart_puts(", ret=");
   print_int(ret);
   uart_puts("\n");
+#endif
   tf->regs[0] = ret < 0 ? -EBADF : ret;
 }
 
@@ -1117,6 +1141,28 @@ static void sys_map_fb(struct trap_frame *tf) {
   tf->regs[0] = USER_FB_VIRT_BASE; // Return user virtual address
 }
 
+/* GB-025: /dev/fb0 ioctl (SYS_FB_IOCTL).  Registers: rdi=req, rsi=arg.
+ * FBIOGET_VSCREENINFO/FSCREENINFO copy a Linux-layout struct OUT to arg
+ * (validated first); FBIOBLANK takes a plain value (validated implicitly
+ * by hb_fb_blank_ioctl).  Returns 0 | -1 (unknown request) | -EFAULT. */
+static void sys_fb_ioctl(struct trap_frame *tf) {
+  unsigned long req = (unsigned long)tf->regs[5];     /* rdi */
+  void *arg = (void *)tf->regs[4];                    /* rsi */
+  uint64_t smem_start = (uint64_t)virtio_gpu_get_framebuffer();
+
+  size_t sz = hb_fb_ioctl_arg_size(req);
+  if (sz == (size_t)-1) {
+    tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
+    return;
+  }
+  /* FBIOBLANK (sz==0) takes a value, not a buffer: nothing to validate. */
+  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  tf->regs[0] = (uint64_t)(int64_t)hb_fb_ioctl_route(req, arg, smem_start);
+}
+
 static void sys_flush_fb(struct trap_frame *tf) {
 #if WD_X64_FLUSH_PROBE
   /* WD probe: attribute every full flush to its process (used to
@@ -1158,7 +1204,6 @@ static void sys_flush_fb_rects(struct trap_frame *tf) {
   tf->regs[0] = 0;
 }
 
-extern int virtio_input_get_events(void *buf, int max_events);
 static void sys_get_events(struct trap_frame *tf) {
   void *buf = (void *)tf->regs[5]; // rdi
   int max_events = (int)tf->regs[4]; // rsi
@@ -1168,6 +1213,57 @@ static void sys_get_events(struct trap_frame *tf) {
   } else {
     tf->regs[0] = -1;
   }
+}
+
+/* GB-027: /dev/input/event* ioctl (SYS_INPUT_IOCTL).  Registers: rdi=req,
+ * rsi=arg.  EVIOCGVERSION/NAME/GBIT/GABS copy their Linux-ABI reply OUT
+ * to arg (validated to hb_input_ioctl_arg_size() first).  0 | -1
+ * (unknown request) | -EFAULT (bad arg pointer). */
+static void sys_input_ioctl(struct trap_frame *tf) {
+  unsigned long req = (unsigned long)tf->regs[5];     /* rdi */
+  void *arg = (void *)tf->regs[4];                    /* rsi */
+  size_t sz = hb_input_ioctl_arg_size(req);
+  if (sz == (size_t)-1) {
+    tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
+    return;
+  }
+  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  tf->regs[0] = (uint64_t)(int64_t)hb_input_ioctl_route(req, arg);
+}
+
+/* GB-027: non-blocking /dev/input/event* read (SYS_INPUT_READ).  Registers:
+ * rdi=buf, rsi=max.  Drains the virtio_input ring and writes up to max
+ * Linux-ABI (24 B) input_event records out to buf.  Returns the count read
+ * (0 if nothing pending — non-blocking), -EFAULT on a bad buffer. */
+static void sys_input_read(struct trap_frame *tf) {
+  struct hb_input_event *ubuf = (struct hb_input_event *)tf->regs[5]; /* rdi */
+  int max = (int)tf->regs[4];                                        /* rsi */
+  if (max < 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return;
+  }
+  if (max == 0) {
+    tf->regs[0] = 0;
+    return;
+  }
+  if (sys_user_range((uint64_t)ubuf,
+                     (uint64_t)max * sizeof(struct hb_input_event), 1)) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  extern uint64_t timer_get_ms(void);
+  struct virtio_input_event raw[32];
+  int want = max > 32 ? 32 : max;         /* bounded scratch: non-blocking */
+  int got = virtio_input_get_events(raw, want);
+  uint64_t t = timer_get_ms();
+  uint64_t sec = t / 1000u, usec = (t % 1000u) * 1000u;
+  for (int i = 0; i < got; i++)
+    hb_input_fill_event(&ubuf[i], raw[i].type, raw[i].code, raw[i].value,
+                        sec, usec);
+  tf->regs[0] = (uint64_t)got;
 }
 
 static void sys_get_cpuid(struct trap_frame *tf) {
@@ -1724,12 +1820,18 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_flush_fb(tf);
   } else if (syscall_num == SYS_FLUSH_FB_RECTS) {
     sys_flush_fb_rects(tf);
+  } else if (syscall_num == SYS_FB_IOCTL) {
+    sys_fb_ioctl(tf);
   } else if (syscall_num == SYS_GET_CPUID) {
     sys_get_cpuid(tf);
   } else if (syscall_num == SYS_PIPE) {
     sys_pipe(tf);
   } else if (syscall_num == SYS_GET_EVENTS) {
     sys_get_events(tf);
+  } else if (syscall_num == SYS_INPUT_IOCTL) {
+    sys_input_ioctl(tf);
+  } else if (syscall_num == SYS_INPUT_READ) {
+    sys_input_read(tf);
   } else if (syscall_num == SYS_AVAILABLE) {
     sys_available(tf);
   } else if (syscall_num == SYS_READ_DIR) {

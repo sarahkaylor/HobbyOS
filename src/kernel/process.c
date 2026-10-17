@@ -32,6 +32,31 @@ extern void uart_puts(const char *s);
 extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
 
+/* GB-060 (cheap half): a resume call that returns is a defect.
+
+   `enter_user_space` iretqs into the target and must never come back.  Both
+   resume boundaries used to answer a return with a bare `while (1);` /
+   `while (1) {}` -- a CPU silently lost from the system, indistinguishable in
+   a log from a CPU that faulted and halted.  On GB-057 that silence turned five
+   probe runs into five different-looking freezes.  Report first through the
+   COM1 raw sink: it takes no lock, so it cannot deadlock the console it is
+   reporting on, and it lands in the gate log.
+
+   Note this is deliberately NOT a lock release: if the resume returned, the
+   process state is already suspect, and the honest move is to name the CPU and
+   stop it rather than to hand a possibly-torn state to another core. */
+static void resume_returned_halt(uint32_t cpu, int pid) {
+  extern void uart_puts_raw(const char *s);
+  extern void uart_print_hex_raw(uint64_t v);
+  uart_puts_raw("[KERNEL] resume call RETURNED (must never happen): cpu=");
+  uart_print_hex_raw((uint64_t)cpu);
+  uart_puts_raw(" pid=");
+  uart_print_hex_raw((uint64_t)(uint32_t)pid);
+  uart_puts_raw(" -- halting this CPU\n");
+  for (;;) {
+  }
+}
+
 #ifdef __x86_64__
 /* x86_64 FPU/SSE state (src/kernel/arch/x64/fpu.c).  The context switch
    carries the x87+SSE register file through these hooks so state follows
@@ -1298,6 +1323,38 @@ void schedule(struct trap_frame *tf, int is_yield) {
       }
       if (claimed_elsewhere)
         continue;
+      /* GB-057: an unresumable slot must be SKIPPED, not resumed.
+
+         A user slot with no address space AND no v1 block cannot be resumed by
+         either branch below: the v2 path needs `as`, the legacy path needs
+         `user_phys_base`, and for a v2 slot that field is 0 by construction
+         (process.c:116 sets it only for v1).  The window is real: the v2 exec
+         path (program_loader.c) clears `grp->as` outside proc_lock for the whole
+         rebuild, because the AS pool is pid-indexed and the replacement cannot
+         exist while the old one does.
+
+         Measured consequence of not guarding here: the CPU took the legacy
+         branch with base 0, installed an overlay for physical address 0, resumed
+         the process into a garbage frame and executed at RIP=0x7 -- #UD, dump,
+         halt, with proc_lock held, which froze all eight CPUs.
+
+         Skipping is the honest failure: the slot cannot run either way, and
+         skipping it leaves a live machine with a report instead of a dead one
+         with a dump.  The report is rate-limited so a persistent window cannot
+         flood the console it is reporting on. */
+      if (!proc_table[idx].is_kernel_process && proc_table[idx].as == 0 &&
+          proc_table[idx].user_phys_base == 0) {
+        static volatile uint32_t unresumable_shouts;
+        if (unresumable_shouts < 8) {
+          extern void uart_puts_raw(const char *s);
+          extern void uart_print_hex_raw(uint64_t v);
+          unresumable_shouts++;
+          uart_puts_raw("[KERNEL] refusing to resume slot ");
+          uart_print_hex_raw((uint64_t)idx);
+          uart_puts_raw(": no address space (v2 exec window?) -- skipped\n");
+        }
+        continue;
+      }
       next = idx;
       break;
     }
@@ -1371,7 +1428,13 @@ void schedule(struct trap_frame *tf, int is_yield) {
 
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
       enter_user_space(&local_tf, target_sp);
-      while(1);
+      /* GB-060 (cheap half): a resume call that returns is a defect --
+         enter_user_space iretqs into the target and must never come back.  The
+         bare `while (1);` that used to be here lost a CPU with no trace at all,
+         which is the same silence that made five GB-057 probe runs look like
+         five different failures.  Report first, through the COM1 raw sink (it
+         takes no lock, so it cannot deadlock the console it is reporting on). */
+      resume_returned_halt(cpu, proc_table[next].pid);
     }
 
     // No ready processes. Check if any are still alive.
@@ -2393,18 +2456,23 @@ int process_fork(struct trap_frame *tf) {
   int child_pid = group->as ? process_create_v2() : process_create();
   if (child_pid < 0)
     return -1;
-
-  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   struct process *child = &proc_table[child_pid];
-  child->parent_pid = group->pid;
 
-  for (int i = 0; i < 32; i++) {
-    child->name[i] = parent->name[i];
-  }
-  for (int i = 0; i < 128; i++) {
-    child->cwd[i] = group->cwd[i];
-  }
-
+  /* GB-057 (proc_lock wedge): do the ADDRESS-SPACE CLONE / 32 MiB block
+     copy OUTSIDE proc_lock.  The heavy work is the vm_as_clone_into (a
+     frame-by-frame copy of every resident private page) / the two kmemcpy
+     block copies.  Holding proc_lock with IRQs off across that starves every
+     other core that needs proc_lock -- process_create_* / process_fork /
+     process_thread_create / schedule all take it first (lock order
+     proc_lock -> vm_lock -> frame_lock, §5.5) -- which is exactly the
+     7-of-8-CPU proc_lock wedge the intel wave hit.  This is safe:
+     - the child is not runnable yet (state != READY) until the end of this
+       function, so no other core can observe a half-populated child; the
+       create_v2 slot is already reserved,
+     - the parent's AS / 32 MiB block is pinned by this synchronous fork (the
+       running thread cannot be reaped), and vm_as_clone_into itself works in
+       short critical sections under vm_lock and tolerates a shrinking region
+       list (it never holds vm_lock across the frame copies). */
   if (group->as) {
     /* P2.4 (S4, design 5.3/D10): v2 fork clones the group's address
        space into the child's fresh AS (process_create_v2's provisioning):
@@ -2415,7 +2483,6 @@ int process_fork(struct trap_frame *tf) {
       vm_as_teardown(child->as);
       child->as = 0;
       child->state = PROC_STATE_FREE;
-      spinlock_release_irqrestore(&proc_lock, flags);
       uart_puts("[KERNEL] fork: AS clone failed\n");
       return -1;
     }
@@ -2426,6 +2493,17 @@ int process_fork(struct trap_frame *tf) {
             (void *)(group->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
             USER_STACK_CLEAR_SIZE);
   }
+
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  child->parent_pid = group->pid;
+
+  for (int i = 0; i < 32; i++) {
+    child->name[i] = parent->name[i];
+  }
+  for (int i = 0; i < 128; i++) {
+    child->cwd[i] = group->cwd[i];
+  }
+
   save_context(child, tf);
   child->context[0] = 0; // x0 = 0 for child
 
@@ -2732,8 +2810,9 @@ void start_scheduler(void) {
         extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
         enter_user_space(&local_tf, target_sp);
 
-        while (1) {
-        }
+        /* Same rule as schedule()'s resume boundary: if this returns, the CPU
+           is lost, so say so before going quiet. */
+        resume_returned_halt(cpu, proc_table[i].pid);
       }
     }
     spinlock_release_irqrestore(&proc_lock, flags);

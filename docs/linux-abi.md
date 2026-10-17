@@ -503,8 +503,45 @@ The framebuffer the mmap window + virtio-gpu 2D path expose is a fixed `1920x108
 's struct-field checks).
 | `/dev/input/event0..N` | virtio-input | `struct input_event` (see probe), `EVIOCGVERSION`, `EVIOCGNAME`, `EVIOCGBIT`, `EVIOCGABS`, non-blocking reads |
 | gamepad/joystick (`event*` or `js*` when GB-032 lands) | evdev gamepad node | gamepad `BTN_*`/`ABS_*` event codes (GB-042; `linux_joystick.h`, locked vs `<linux/input.h>` by `joypad_test_host`) |
+
+The `/dev/input/event*` node (GB-027) is exposed on the native track as two syscalls,
+`SYS_INPUT_IOCTL` (93) + `SYS_INPUT_READ` (94) in `src/kernel/input_node.c`
+(`src/include/input_node.h`), fed by the shared `virtio_input` ring + the PS/2→evdev
+decoder (`src/kernel/evdev.c`). `SYS_INPUT_IOCTL` answers `EVIOCGVERSION` (→ `0x010001`),
+`EVIOCGNAME` (→ `"hobbyos-input"`), `EVIOCGBIT` (event-type / key / abs / rel bitmaps) and
+`EVIOCGABS` (axis 0..32767) against real Linux `<linux/input.h>`; `SYS_INPUT_READ` drains
+the ring into non-blocking 24-byte `input_event` records. The device-free logic is pinned
+by `input_node_test_host` (T1/T4 differential) + the kernel `input_node_test_suite`.
 | `/dev/null`, `/dev/zero`, `/dev/urandom` | kernel shims | `read`, `mmap` (zero page) |
 | `/dev/tty` | console | `TCGETS`/`TCSETS`, `TIOCGWINSZ`, `isatty()` true |
+
+`/dev/fb0` is the mmap'd HobbyOS framebuffer (GB-025). After an SDL fbcon probe reads
+`FBIOGET_VSCREENINFO` + `FBIOGET_FSCREENINFO` it does the equivalent of:
+
+    len = var.xres_virtual * var.yres_virtual * bits_per_pixel/8   // 1920*1080*4 = 8,294,400 B
+    fb  = mmap(NULL, len, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0)
+
+The mmap window follows Linux's `fb_mmap` contract (locked by the host differential suite,
+`src/host/fb_mmap_test.c`, against a real `/dev/fb0` when present; pure geometry +
+`FBIOBLANK` dispatch in the shared TU `src/kernel/fb_mmap.c`):
+
+- `smem_len` is one full frame, `8,294,400` B for 1920x1080 B8G8R8A8 (`hb_fb_smem_len()`).
+- The mmap offset must be **page-aligned (4096)** and `< smem_len`; `(offset+len)` is clamped to
+  `smem_len` like Linux (`hb_fb_mmap_translate()`). An `offset >= smem_len` or a page-misaligned
+  offset is rejected (`-EINVAL`-shaped), never silently trimmed.
+- `FBIOBLANK = 0x4611` is accepted as a no-op success for the blank/activate args SDL fbcon
+  sends (`FB_BLANK_UNBLANK=0`, `VESA_NO_BLANK=1`, `VESA_VSYNC_SUSPEND=2`, `VESA_HSYNC_SUSPEND=4`);
+  the fixed 2D scanout has no blankable/suspend output.
+- `FB_ACTIVATE_NOW = 0` is the only activate value the fixed mode reports/accepts.
+
+The ioctl wiring is a single native syscall (`SYS_FB_IOCTL`, src/include/syscall.h, both arches):
+`fb_ioctl(req, arg)` calls `hb_fb_ioctl_route()` (src/kernel/fb_mmap.c), which fills the Linux-layout
+var/fix struct into `arg` for `FBIOGET_VSCREENINFO`/`FBIOGET_FSCREENINFO` (via GB-026's
+`hb_fb_ioctl`) and routes `FBIOBLANK` to `hb_fb_blank_ioctl()`. The syscall shim validates the user
+`arg` buffer against the request's struct size before routing (`hb_fb_ioctl_arg_size()`: 160 B /
+80 B / 0 for FBIOBLANK), returning `-EFAULT` on a bad pointer and `-1` on an unknown request.
+Device-free, so the same route helper is locked by the host differential suite
+(`src/host/fb_mmap_test.c`) and the kernel unit suite (`src/kernel/fb_mmap_test.c`).
 
 `uname` for compat processes reports a Linux-shaped identity (§2.2 #4, GB-016): `sysname` =
 `Linux`, `release` = a fixed string baked into `linux_compat.c` (SDL's version gates parse it),
