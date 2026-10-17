@@ -70,6 +70,23 @@ static void held_lock_pop(uint64_t addr) {
   }
 }
 
+/* GB-057: read-only view of what a CPU holds, for the watchdog dump.
+
+   The dump's own `wait_lock` field cannot name the holder: it is CLEARED on a
+   successful acquire, so the holder is exactly the CPU that shows none -- and
+   the CPU that shows none is indistinguishable from an idle one.  The dumped
+   CPUs also cannot be trusted about themselves when IF=0, so the table has to
+   be read from the outside.  Returns the number of held locks copied. */
+int held_locks_of(uint32_t cpu, uint64_t *buf, int max) {
+  int n = 0;
+  if (cpu >= MAX_CPUS)
+    return 0;
+  for (int i = 0; i < HELD_LOCK_SLOTS && n < max; i++)
+    if (held_locks[cpu][i])
+      buf[n++] = held_locks[cpu][i];
+  return n;
+}
+
 /* Name the HOLDER of `addr`, from the table above.  Three outcomes, all
    useful: a CPU that claims it (the wedge is that CPU's critical section --
    `pc` is where it entered), nobody (the lock word is stale or was released

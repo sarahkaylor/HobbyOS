@@ -1990,6 +1990,36 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
         uart_print_hex_raw(lock_wait_caller2[c]);
       }
     }
+    /* GB-057: what this CPU HOLDS (the waiting record above is cleared on a
+       successful acquire, so the holder is the CPU that shows no wait_lock --
+       which is also what an idle CPU looks like).  Read from the held-lock
+       table, which the outside observer can inspect even when the CPU it is
+       describing is frozen with interrupts off. */
+    {
+      extern int held_locks_of(uint32_t cpu, uint64_t *buf, int max);
+      extern volatile uint8_t sched_stage[];
+      extern volatile uint8_t sched_pick[];
+      extern volatile uint64_t sched_as_ptr[];
+      extern volatile uint64_t sched_as_root[];
+      uint64_t hl[4];
+      int nh = held_locks_of(c, hl, 4);
+      if (nh > 0) {
+        uart_puts_raw(" HOLDS=");
+        for (int i = 0; i < nh; i++) {
+          uart_print_hex_raw(hl[i]);
+          if (i + 1 < nh)
+            uart_puts_raw(",");
+        }
+        uart_puts_raw(" stage=");
+        print_int_raw((int)sched_stage[c]);
+        uart_puts_raw(" pick=");
+        print_int_raw((int)sched_pick[c]);
+        uart_puts_raw(" as=");
+        uart_print_hex_raw(sched_as_ptr[c]);
+        uart_puts_raw(" cr3=");
+        uart_print_hex_raw(sched_as_root[c]);
+      }
+    }
     uart_puts_raw("\n");
   }
 
