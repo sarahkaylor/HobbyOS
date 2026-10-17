@@ -54,6 +54,7 @@ void virtio_gpu_test_suite(void);
 void virtio_input_test_suite(void);
 void fb_ioctl_test_suite(void);
 void evdev_test_suite(void);
+void abi_t2_test_suite(void);
 void timer_test_suite(void);
 void smp_test_suite(void);
 void time_test_suite(void);
