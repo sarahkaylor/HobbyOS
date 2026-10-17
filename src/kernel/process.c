@@ -2332,18 +2332,23 @@ int process_fork(struct trap_frame *tf) {
   int child_pid = group->as ? process_create_v2() : process_create();
   if (child_pid < 0)
     return -1;
-
-  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   struct process *child = &proc_table[child_pid];
-  child->parent_pid = group->pid;
 
-  for (int i = 0; i < 32; i++) {
-    child->name[i] = parent->name[i];
-  }
-  for (int i = 0; i < 128; i++) {
-    child->cwd[i] = group->cwd[i];
-  }
-
+  /* GB-057 (proc_lock wedge): do the ADDRESS-SPACE CLONE / 32 MiB block
+     copy OUTSIDE proc_lock.  The heavy work is the vm_as_clone_into (a
+     frame-by-frame copy of every resident private page) / the two kmemcpy
+     block copies.  Holding proc_lock with IRQs off across that starves every
+     other core that needs proc_lock -- process_create_* / process_fork /
+     process_thread_create / schedule all take it first (lock order
+     proc_lock -> vm_lock -> frame_lock, §5.5) -- which is exactly the
+     7-of-8-CPU proc_lock wedge the intel wave hit.  This is safe:
+     - the child is not runnable yet (state != READY) until the end of this
+       function, so no other core can observe a half-populated child; the
+       create_v2 slot is already reserved,
+     - the parent's AS / 32 MiB block is pinned by this synchronous fork (the
+       running thread cannot be reaped), and vm_as_clone_into itself works in
+       short critical sections under vm_lock and tolerates a shrinking region
+       list (it never holds vm_lock across the frame copies). */
   if (group->as) {
     /* P2.4 (S4, design 5.3/D10): v2 fork clones the group's address
        space into the child's fresh AS (process_create_v2's provisioning):
@@ -2354,7 +2359,6 @@ int process_fork(struct trap_frame *tf) {
       vm_as_teardown(child->as);
       child->as = 0;
       child->state = PROC_STATE_FREE;
-      spinlock_release_irqrestore(&proc_lock, flags);
       uart_puts("[KERNEL] fork: AS clone failed\n");
       return -1;
     }
@@ -2365,6 +2369,17 @@ int process_fork(struct trap_frame *tf) {
             (void *)(group->user_phys_base + USER_REGION_SIZE - USER_STACK_CLEAR_SIZE),
             USER_STACK_CLEAR_SIZE);
   }
+
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  child->parent_pid = group->pid;
+
+  for (int i = 0; i < 32; i++) {
+    child->name[i] = parent->name[i];
+  }
+  for (int i = 0; i < 128; i++) {
+    child->cwd[i] = group->cwd[i];
+  }
+
   save_context(child, tf);
   child->context[0] = 0; // x0 = 0 for child
 
