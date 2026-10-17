@@ -495,6 +495,7 @@ KEY_A=30 KEY_ENTER=28 KEY_ESC=1 KEY_SPACE=57
 |---|---|---|
 | `/dev/fb0` | mmap'd HobbyOS framebuffer | mmap offsets/size, `FBIOGET_VSCREENINFO`/`FBIOGET_FSCREENINFO` (see the probe's `fb_*` layouts), `FB_ACTIVATE_NOW` |
 | `/dev/input/event0..N` | virtio-input | `struct input_event` (see probe), `EVIOCGVERSION`, `EVIOCGNAME`, `EVIOCGBIT`, `EVIOCGABS`, non-blocking reads |
+| gamepad/joystick (`event*` or `js*` when GB-032 lands) | evdev gamepad node | gamepad `BTN_*`/`ABS_*` event codes (GB-042; `linux_joystick.h`, locked vs `<linux/input.h>` by `joypad_test_host`) |
 | `/dev/null`, `/dev/zero`, `/dev/urandom` | kernel shims | `read`, `mmap` (zero page) |
 | `/dev/tty` | console | `TCGETS`/`TCSETS`, `TIOCGWINSZ`, `isatty()` true |
 
