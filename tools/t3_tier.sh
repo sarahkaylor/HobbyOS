@@ -77,6 +77,25 @@ echo "=== T3 ($ARCH): run (deadline ${T3_TIMEOUT}s, log $LOG) ==="
 # the same wave under KVM is minutes).  Never hardcoded here: KVM is not
 # available on every host, and a tier that silently changes its execution
 # mode is not reproducible.
+# Post-freeze evidence: read the LIVE guest through QEMU's monitor before
+# cleanup kills it.
+#
+# Why this exists, measured: on GB-057 the guest could not report anything at
+# all -- every CPU was interrupt-dead, so no timer fired anywhere and the
+# console simply stopped.  Every in-guest instrument was blind by construction.
+# The only observer that worked was QEMU itself, asked from outside, and it
+# turned an unexplained freeze into a named fault (vector=6 #UD at RIP=0x7 with
+# proc_lock held).  A no-halt failure must therefore always leave that evidence
+# behind, instead of depending on a human remembering to attach a monitor.
+#
+# Opt-in via T3_MONITOR=1: it changes the QEMU command line, and a tier that
+# silently changes its execution mode is not reproducible.
+MON_SOCK=""
+if [ "${T3_MONITOR:-0}" = "1" ]; then
+  MON_SOCK="${T3_MONITOR_SOCK:-/tmp/t3_monitor_${ARCH}_$$.sock}"
+  T3_QEMU_ARGS="${T3_QEMU_ARGS:-} -monitor unix:${MON_SOCK},server,nowait"
+fi
+
 make ARCH="$ARCH" MODE=test run QEMU_ARGS="-display none ${T3_QEMU_ARGS:-}" >>"$LOG" 2>&1 &
 MAKE_PID=$!
 cleanup() {
@@ -95,6 +114,41 @@ while kill -0 "$MAKE_PID" 2>/dev/null; do
 done
 # Let QEMU/make wind down once the guest has halted.
 for _ in $(seq 1 30); do kill -0 "$MAKE_PID" 2>/dev/null || break; sleep 1; done
+
+# If the console never reached its halt marker while a monitor was attached, read
+# the live guest NOW -- cleanup below kills it, and on a freeze this is the only
+# evidence that will ever exist.
+if [ -n "$MON_SOCK" ] && [ -S "$MON_SOCK" ] && ! grep -aq "System halt" "$LOG"; then
+  {
+    echo ""
+    echo "=== T3 post-freeze guest sample (QEMU monitor $MON_SOCK) ==="
+    echo "--- all CPUs (control registers included: CR2 names the fault address) ---"
+    printf 'info registers -a\n' | timeout 20 socat - "UNIX-CONNECT:$MON_SOCK" 2>/dev/null \
+      | tr -d '\r' | grep -av '^(qemu)' || echo "(monitor read failed)"
+    ELF="obj/$ARCH/hobbyos.elf"
+    [ -f "$ELF" ] || ELF="hobbyos.elf"
+    NMB="$(command -v llvm-nm || command -v nm || true)"
+    if [ -n "$NMB" ] && [ -f "$ELF" ]; then
+      sym() { "$NMB" --defined-only "$ELF" 2>/dev/null | awk -v s="$1" '$0 ~ " "s"$" {print "0x"$1; exit}'; }
+      MON_READ() { printf "%s\n" "$1" | timeout 20 socat - "UNIX-CONNECT:$MON_SOCK" 2>/dev/null | tr -d '\r' | grep -a ':' || true; }
+      PL="$(sym proc_lock)"
+      [ -n "$PL" ] && { echo "--- proc_lock word (1 = held) ---"; MON_READ "x/1xw $PL"; } || true
+      HL="$(sym held_locks)"
+      PC="$(sym held_lock_pc)"
+      ST="$(sym sched_stage)"
+      if [ -n "$HL" ]; then
+        echo "--- held-lock table (cpu0..7 x 8 slots): who claims what ---"
+        MON_READ "x/64xg $HL"
+        [ -n "$PC" ] && { echo "--- acquire sites for those claims ---"; MON_READ "x/64xg $PC"; } || true
+        [ -n "$ST" ] && { echo "--- sched_stage per cpu ---"; MON_READ "x/8xb $ST"; } || true
+      else
+        echo "--- no held-lock table in this build (probe scaffolding absent) ---"
+      fi
+    fi
+    echo "=== end guest sample ==="
+  } >>"$LOG" 2>&1
+fi
+
 cleanup
 trap - EXIT
 
