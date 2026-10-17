@@ -157,6 +157,15 @@ def layout_pairs():
         ("flock.l_start", D + "(struct flock, l_start)"),
         ("flock.l_len", D + "(struct flock, l_len)"),
         ("flock.l_pid", D + "(struct flock, l_pid)"),
+        ("timezone.size", "sizeof(struct timezone)"),
+        ("timezone.tz_minuteswest", D + "(struct timezone, tz_minuteswest)"),
+        ("timezone.tz_dsttime", D + "(struct timezone, tz_dsttime)"),
+        ("dirent.size", "sizeof(struct dirent)"),
+        ("dirent.d_ino", D + "(struct dirent, d_ino)"),
+        ("dirent.d_off", D + "(struct dirent, d_off)"),
+        ("dirent.d_reclen", D + "(struct dirent, d_reclen)"),
+        ("dirent.d_type", D + "(struct dirent, d_type)"),
+        ("dirent.d_name", D + "(struct dirent, d_name)"),
     ]
     return L
 

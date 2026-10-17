@@ -123,6 +123,15 @@ static const struct row rows[] = {
   R("flock.l_start", O(linux_flock_t, l_start))
   R("flock.l_len", O(linux_flock_t, l_len))
   R("flock.l_pid", O(linux_flock_t, l_pid))
+  R("timezone.size", sizeof(linux_timezone_t))
+  R("timezone.tz_minuteswest", O(linux_timezone_t, tz_minuteswest))
+  R("timezone.tz_dsttime", O(linux_timezone_t, tz_dsttime))
+  R("dirent.size", sizeof(linux_dirent_t))
+  R("dirent.d_ino", O(linux_dirent_t, d_ino))
+  R("dirent.d_off", O(linux_dirent_t, d_off))
+  R("dirent.d_reclen", O(linux_dirent_t, d_reclen))
+  R("dirent.d_type", O(linux_dirent_t, d_type))
+  R("dirent.d_name", O(linux_dirent_t, d_name))
 };
 #undef R
 #undef O

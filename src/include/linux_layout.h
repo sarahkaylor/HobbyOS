@@ -230,6 +230,24 @@ typedef struct {
   int     l_pid;     /* 24 */
 } linux_flock_t;     /* 32 */
 
+/* struct timezone (8 B): two ints (tz_minuteswest, tz_dsttime), pinned by
+ * gettimeofday's tz argument. */
+typedef struct {
+  int tz_minuteswest;  /* 0 */
+  int tz_dsttime;      /* 4 */
+} linux_timezone_t;    /* 8 */
+
+/* struct dirent, x86_64 -- same on-disk shape as dirent64 (280 B: d_ino @0,
+ * d_off @8, d_reclen @16, d_type @18, d_name @19); kept as a separate compat
+ * struct because musl/glibc may reference either name for getdents/getdents64. */
+typedef struct {
+  uint64_t d_ino;
+  int64_t  d_off;
+  uint16_t d_reclen;
+  uint8_t  d_type;
+  char     d_name[256];
+} linux_dirent_t;    /* 280 */
+
 #ifdef __cplusplus
 }
 #endif

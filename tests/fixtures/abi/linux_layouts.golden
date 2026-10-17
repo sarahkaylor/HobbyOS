@@ -2,6 +2,12 @@
 # headers on swarm-farm-1 (Linux 7.0.0-38-generic x86_64); values are the kernel's, names are ours.
 # Regenerate on a Linux x86_64 host; never hand-edit.
  # struct-layout sizes/offsets (GB-015) that src/include/linux_layout.h must match
+dirent.d_ino 0
+dirent.d_name 19
+dirent.d_off 8
+dirent.d_reclen 16
+dirent.d_type 18
+dirent.size 280
 dirent64.d_ino 0
 dirent64.d_name 19
 dirent64.d_off 8
@@ -74,6 +80,9 @@ timespec.tv_sec 0
 timeval.size 16
 timeval.tv_sec 0
 timeval.tv_usec 8
+timezone.size 8
+timezone.tz_dsttime 4
+timezone.tz_minuteswest 0
 ucontext.size 968
 ucontext.uc_flags 0
 ucontext.uc_link 8
