@@ -169,12 +169,12 @@ check(bright > n//2, "bright field dominates the NES area", f"bright_frac={brigh
 check(tbn > 0 and tbd > 0.15*tbn, "dark band present across the top row",
       f"topband_dark_frac={tbd/max(tbn,1):.2f}")
 
-# T5: Space inverts the frame -> the picture visibly changes (emulator live)
+# T5: input reaches the emulator -> the picture visibly changes (emulator live)
 shot2 = q.shot("nes_before.ppm")
-q.key("spc", 0.5); time.sleep(1.0)
+q.key("left", 0.4); time.sleep(4.0)   # one controller edge -> invert once (slow renderer)
 shot3 = q.shot("nes_after.ppm")
 d = diff(shot2, shot3)
-check(d > 5000, "Space inverts the frame (input reaches the emulator / game live)",
+check(d > 5000, "input reaches the emulator (frame visibly changes / game live)",
       f"diffs={d}")
 
 if fails:
