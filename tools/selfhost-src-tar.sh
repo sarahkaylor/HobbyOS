@@ -45,6 +45,10 @@ TREE="obj/selfhost/srctar-tree"
 fail() { echo "selfhost-src-tar: ERROR: $*" >&2; exit 1; }
 warn() { echo "selfhost-src-tar: WARNING: $*" >&2; }
 
+# GNU stat -c%s vs BSD/macOS stat -f%z (same helper as the sibling
+# selfhost-stage.sh / third_party/icu-78.3 build-host.sh).
+size_of() { if [ "$(uname -s)" = "Darwin" ]; then stat -f%z "$1"; else stat -c%s "$1"; fi; }
+
 for t in tar mcopy; do
   command -v "$t" >/dev/null 2>&1 || fail "required tool not found: $t"
 done
@@ -87,8 +91,18 @@ printf 'OUTMARK:inos-build-kernel:staged-by-src-tar\n' > "$TREE/bin/OUTMARK.TXT"
 # ---- single-pass ustar create ---------------------------------------------
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"
-tar --format=ustar --hard-dereference --numeric-owner --owner=0 --group=0 \
-    --sort=name -cf "$OUT" -C "$TREE" \
+# GNU tar vs bsdtar/macOS: --hard-dereference/--sort=name are GNU-only and
+# bsdtar rejects them; neither matters for correctness here (the repo has no
+# hard links to dereference, and --sort is cosmetic for a tarball our custom
+# in-OS reader re-reads).  Both accept --format=ustar --owner/--group/
+# --numeric-owner, which ARE load-bearing (the in-OS reader expects ustar +
+# uid/gid 0).
+if tar --version 2>&1 | grep -q "GNU tar"; then
+  TAR_CREATE_ARGS=(--format=ustar --hard-dereference --numeric-owner --owner=0 --group=0 --sort=name)
+else
+  TAR_CREATE_ARGS=(--format=ustar --numeric-owner --owner=0 --group=0)
+fi
+tar "${TAR_CREATE_ARGS[@]}" -cf "$OUT" -C "$TREE" \
     src tools Makefile.hobbyos linker.ld bootloader limine.conf bin obj build_kernel.sh \
   || fail "tar create failed"
 
@@ -113,7 +127,7 @@ if [ -f obj/arm/desktop.bin ]; then
   check_member bin/DESKTOP.BIN obj/arm/desktop.bin
 fi
 
-size=$(stat -c %s "$OUT")
+size=$(size_of "$OUT")
 echo "selfhost-src-tar: done — $OUT"
 echo "  entries: $n_tar (files+dirs), size: $size bytes"
 echo "  spot-checked members: src/kernel/main.c Makefile.hobbyos linker.ld limine.conf build_kernel.sh"

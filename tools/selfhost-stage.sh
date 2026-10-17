@@ -84,6 +84,31 @@
 
 set -u
 
+# GNU stat -c%s vs BSD/macOS stat -f%z (same helper as third_party/icu-78.3
+# build-host.sh and third_party/webkit-hobbyos/build.sh).
+size_of() { if [ "$(uname -s)" = "Darwin" ]; then stat -f%z "$1"; else stat -c%s "$1"; fi; }
+
+# The Makefile hardcodes the Homebrew LLVM bin dir on macOS (CC/OBJCOPY/AR
+# at /opt/homebrew/opt/llvm/bin) but that dir is not necessarily on PATH;
+# prepend it so host `llvm-objcopy` is found for the ELF->flat conversion.
+# On Linux the tools are expected on PATH, as in the Makefile's linux branch.
+case "$(uname -s)" in
+  Darwin)
+    if [ -d /opt/homebrew/opt/llvm/bin ] && ! printf ':%s:' "$PATH" | grep -q ":/opt/homebrew/opt/llvm/bin:"; then
+      PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+      export PATH
+    fi
+    ;;
+esac
+
+# GNU du -sb vs BSD/macOS du -sk (*1024).  Allocated-vs-apparent slight
+# difference is irrelevant — the value only feeds the informational size
+# report.  macOS can emit one line per mount, so sum the lines.
+size_dir_bytes() {
+  if [ "$(uname -s)" = "Darwin" ]; then du -sk "$1" | awk '{s+=$1} END {printf "%d", s*1024}'
+  else du -sb "$1" | awk 'END {printf "%d", $1}'; fi
+}
+
 IMAGE="disk.img"
 FORCE=0
 MODE="payload"   # payload (default) | tools (--tools; /TOOLS only) | src (--src; /SRC build subset)
@@ -179,12 +204,15 @@ mmkdir_p() {
 # silently on the image).
 USER_IMG_BASE="0x0000001000000000"
 
-# le64 <file> <offset> — 8 little-endian bytes as 0x%016x (ELF field reader)
-le64() { od -An -tu1 -j "$2" -N8 "$1" | awk '{ v=0; for (i=1; i<=NF; i++) v += $i * 256^(i-1); printf "0x%016x", v }'; }
+# le64 <file> <offset> — 8 little-endian bytes as 0x%016x (ELF field reader).
+# NOTE: macOS od splits -tu1 output across lines, so `awk` would otherwise run
+# once per byte and concatenate repeated values (0x00b70x0000) — merge lines
+# (and -v to stop od collapsing repeats) so the body runs on ONE record.
+le64() { od -An -v -tu1 -j "$2" -N8 "$1" | tr '\n' ' ' | awk '{ v=0; for (i=1; i<=NF; i++) v += $i * 256^(i-1); printf "0x%016x", v }'; }
 # le32 <file> <offset> — 4 little-endian bytes as 0x%08x
-le32() { od -An -tu1 -j "$2" -N4 "$1" | awk '{ v=0; for (i=1; i<=NF; i++) v += $i * 256^(i-1); printf "0x%08x", v }'; }
+le32() { od -An -v -tu1 -j "$2" -N4 "$1" | tr '\n' ' ' | awk '{ v=0; for (i=1; i<=NF; i++) v += $i * 256^(i-1); printf "0x%08x", v }'; }
 # le16 <file> <offset> — 2 little-endian bytes as 0x%04x
-le16() { od -An -tu1 -j "$2" -N2 "$1" | awk '{ v=0; for (i=1; i<=NF; i++) v += $i * 256^(i-1); printf "0x%04x", v }'; }
+le16() { od -An -v -tu1 -j "$2" -N2 "$1" | tr '\n' ' ' | awk '{ v=0; for (i=1; i<=NF; i++) v += $i * 256^(i-1); printf "0x%04x", v }'; }
 
 # elf_flat <elf> <flat> — convert an ELF tool to a flat image in place via
 # llvm-objcopy -O binary, returning 0 (converted), 1 (not an ELF — already
@@ -285,8 +313,8 @@ stage_tools() {
       fi
       mcopy -o -i "$IMAGE" "$flat" "::/TOOLS/$fname" || { rm -rf "$flatdir"; fail "mcopy $fname"; }
       n=$((n + 1))
-      total_bytes=$((total_bytes + $(stat -c %s "$flat")))
-      echo "selfhost-stage:   $fname <- $elf ($fl, $(stat -c %s "$flat") B)"
+      total_bytes=$((total_bytes + $(size_of "$flat")))
+      echo "selfhost-stage:   $fname <- $elf ($fl, $(size_of "$flat") B)"
     }
     stage_flat "$DIST_STAGING/usr/local/bin/clang-21"      CLANG.BIN
     stage_flat "$DIST_STAGING/usr/local/bin/lld"           LLD.BIN
@@ -311,7 +339,7 @@ stage_tools() {
     if [ -f "$src" ]; then
       mcopy -o -i "$IMAGE" "$src" "::/TOOLS/$dst" || fail "mcopy ::/TOOLS/$dst"
       n=$((n + 1))
-      total_bytes=$((total_bytes + $(stat -c %s "$src")))
+      total_bytes=$((total_bytes + $(size_of "$src")))
     else
       warn "tool not built ($src) — ::/TOOLS/$dst not staged (make $src)"
     fi
@@ -326,7 +354,7 @@ stage_tools() {
     mcopy -s -o -i "$IMAGE" "$RESDIR_SRC" "::/TOOLS/RESDIR/./" || fail "mcopy RESDIR include tree"
     local cnt; cnt=$(find "$RESDIR_SRC" -type f | wc -l)
     n=$((n + cnt))
-    total_bytes=$((total_bytes + $(du -sb "$RESDIR_SRC" | awk '{print $1}')))
+    total_bytes=$((total_bytes + $(size_dir_bytes "$RESDIR_SRC" | awk '{print $1}')))
   else
     warn "clang resource dir missing at $RESDIR_SRC — /TOOLS/RESDIR not staged (stage the LLVM distribution first)"
   fi
@@ -415,7 +443,7 @@ copy_tree() {  # copy_tree <src-dir> <dest-parent-on-image> — copies the dir I
   mcopy -s -i "$IMAGE" "$src" "$dst/./" || { echo "mcopy failed for $src" >&2; return 1; }
   local cnt bytes
   cnt=$(find "$src" -type f | wc -l)
-  bytes=$(du -sb "$src" | awk '{print $1}')
+  bytes=$(size_dir_bytes "$src" | awk '{print $1}')
   add_payload "$cnt" "$bytes"
 }
 
@@ -446,7 +474,7 @@ stage_src() {
   mmkdir_p "::/SRC/src" || fail "mmkdir_p ::/SRC/src"
   for d in kernel include user_include libc; do
     mcopy -s -o -i "$IMAGE" "src/$d" "::/SRC/src/./" || fail "mcopy src/$d"
-    add_payload "$(find "src/$d" -type f | wc -l)" "$(du -sb "src/$d" | awk '{print $1}')"
+    add_payload "$(find "src/$d" -type f | wc -l)" "$(size_dir_bytes "src/$d" | awk '{print $1}')"
   done
 
   # User set — the 5 acceptance TUs + user linker script + the driver dir
@@ -455,37 +483,37 @@ stage_src() {
   mmkdir_p "::/SRC/src/user" || fail "mmkdir_p ::/SRC/src/user"
   for f in hello.c sh.c sh_aux.c ls.c cat.c linker.ld; do
     mcopy -o -i "$IMAGE" "src/user/$f" "::/SRC/src/user/$f" || fail "mcopy src/user/$f"
-    add_payload 1 "$(stat -c %s "src/user/$f")"
+    add_payload 1 "$(size_of "src/user/$f")"
   done
   mcopy -s -o -i "$IMAGE" src/user/selfhost "::/SRC/src/user/./" || fail "mcopy src/user/selfhost"
   cnt=$(find src/user/selfhost -type f | wc -l)
-  add_payload "$cnt" "$(du -sb src/user/selfhost | awk '{print $1}')"
+  add_payload "$cnt" "$(size_dir_bytes src/user/selfhost | awk '{print $1}')"
   # The driver's default script path is /SRC/SELFHOST.RUN and the RUN file's
   # stages reference /SRC/SELFHOST.SH — both belong at the /SRC ROOT (not
   # just nested under src/user/selfhost), exactly like the payload mode.
   for f in SELFHOST.RUN SELFHOST.SH; do
     if [ -f "src/user/selfhost/$f" ]; then
       mcopy -o -i "$IMAGE" "src/user/selfhost/$f" "::/SRC/$f" || fail "mcopy ::/SRC/$f"
-      add_payload 1 "$(stat -c %s "src/user/selfhost/$f")"
+      add_payload 1 "$(size_of "src/user/selfhost/$f")"
     fi
   done
 
   # Kernel linker script (repo-root linker.ld; the host link uses
   # -T linker.ld, cwd = the script's dir) + the build driver + boot assets.
   mcopy -o -i "$IMAGE" linker.ld ::/SRC/linker.ld || fail "mcopy linker.ld"
-  add_payload 1 "$(stat -c %s linker.ld)"
+  add_payload 1 "$(size_of linker.ld)"
   mcopy -o -i "$IMAGE" Makefile.hobbyos ::/SRC/Makefile.hobbyos || fail "mcopy Makefile.hobbyos"
-  add_payload 1 "$(stat -c %s Makefile.hobbyos)"
+  add_payload 1 "$(size_of Makefile.hobbyos)"
   if [ -f bootloader/BOOTAA64.EFI ]; then
     mmkdir_p "::/SRC/bootloader" || fail "mmkdir_p ::/SRC/bootloader"
     mcopy -o -i "$IMAGE" bootloader/BOOTAA64.EFI ::/SRC/bootloader/BOOTAA64.EFI || fail "mcopy BOOTAA64.EFI"
-    add_payload 1 "$(stat -c %s bootloader/BOOTAA64.EFI)"
+    add_payload 1 "$(size_of bootloader/BOOTAA64.EFI)"
   fi
 
   # limine.conf — the canonical ARM boot config (bootloader/limine-arm.conf;
   # previously a printf of the Makefile arm branch — now one shared file).
   mcopy -o -i "$IMAGE" bootloader/limine-arm.conf ::/SRC/limine.conf || fail "mcopy limine.conf"
-  add_payload 1 "$(stat -c %s bootloader/limine-arm.conf)"
+  add_payload 1 "$(size_of bootloader/limine-arm.conf)"
 
   # Carried host build products the v1 in-OS recipes reference (WARNING+skip
   # when not built yet; they are disk.img prerequisites, so by recipe time
@@ -497,7 +525,7 @@ stage_src() {
     src="${spec%% *}"; dst="${spec#* }"
     if [ -f "$src" ]; then
       mcopy -o -i "$IMAGE" "$src" "$dst" || fail "mcopy $dst"
-      add_payload 1 "$(stat -c %s "$src")"
+      add_payload 1 "$(size_of "$src")"
     else
       warn "carried build product not built ($src) — $dst not staged (build the tree first)"
     fi
@@ -513,7 +541,7 @@ stage_src() {
     mmkdir_p "::/SRC/$local_dst/include" || fail "mmkdir_p ::/SRC libcxx include"
     mcopy -s -o -i "$IMAGE" "$LIBCXX_INC" "::/SRC/$local_dst/include/" || fail "mcopy libcxx include"
     cnt=$(find "$LIBCXX_INC" -type f | wc -l)
-    add_payload "$cnt" "$(du -sb "$LIBCXX_INC" | awk '{print $1}')"
+    add_payload "$cnt" "$(size_dir_bytes "$LIBCXX_INC" | awk '{print $1}')"
   fi
 
   echo
@@ -539,19 +567,19 @@ copy_tree tools "::/SRC" || exit 1
 
 if [ -f Makefile.hobbyos ]; then
   mcopy -i "$IMAGE" Makefile.hobbyos ::/SRC/Makefile.hobbyos || exit 1
-  add_payload 1 "$(stat -c %s Makefile.hobbyos)"
+  add_payload 1 "$(size_of Makefile.hobbyos)"
 fi
 
 if [ -f bootloader/BOOTAA64.EFI ]; then
   mmd -i "$IMAGE" ::/SRC/bootloader 2>/dev/null || true
   mcopy -i "$IMAGE" bootloader/BOOTAA64.EFI ::/SRC/bootloader/BOOTAA64.EFI || exit 1
-  add_payload 1 "$(stat -c %s bootloader/BOOTAA64.EFI)"
+  add_payload 1 "$(size_of bootloader/BOOTAA64.EFI)"
 fi
 
 # limine.conf — the canonical ARM boot config (bootloader/limine-arm.conf).
 mmd -i "$IMAGE" ::/SRC 2>/dev/null || true
 mcopy -o -i "$IMAGE" bootloader/limine-arm.conf ::/SRC/limine.conf || exit 1
-add_payload 1 "$(stat -c %s bootloader/limine-arm.conf)"
+add_payload 1 "$(size_of bootloader/limine-arm.conf)"
 
 if [ "$STAGE_LIBCXX" = "1" ] && [ -d "$LIBCXX_INC" ]; then
   # The include root lands at /SRC/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include
@@ -560,7 +588,7 @@ if [ "$STAGE_LIBCXX" = "1" ] && [ -d "$LIBCXX_INC" ]; then
   # Copy the CONTENTS so the destination keeps the frozen name "include"
   # regardless of the source directory's basename.
   mcopy -s -i "$IMAGE" "$LIBCXX_INC"/* "::/SRC/$local_dst/include/" || exit 1
-  add_payload "$(find "$LIBCXX_INC" -type f | wc -l)" "$(du -sb "$LIBCXX_INC" | awk '{print $1}')"
+  add_payload "$(find "$LIBCXX_INC" -type f | wc -l)" "$(size_dir_bytes "$LIBCXX_INC" | awk '{print $1}')"
 fi
 
 # [v2] base dirs the in-OS build expects on the boot disk (idempotent:
@@ -579,13 +607,13 @@ if [ -f "$SELFHOST_BIN" ]; then
   # at the disk ROOT (outside /SRC), so it survives the /SRC mdeltree and
   # must be replaced in place.
   mcopy -o -i "$IMAGE" "$SELFHOST_BIN" ::/SELFHOST.BIN || exit 1
-  add_payload 1 "$(stat -c %s "$SELFHOST_BIN")"
+  add_payload 1 "$(size_of "$SELFHOST_BIN")"
 else
   warn "SELFHOST driver bin not built ($SELFHOST_BIN) — skipping ::/SELFHOST.BIN (make obj/arm/selfhost.bin)"
 fi
 if [ -f src/user/selfhost/SELFHOST.RUN ]; then
   mcopy -o -i "$IMAGE" src/user/selfhost/SELFHOST.RUN ::/SRC/SELFHOST.RUN || exit 1
-  add_payload 1 "$(stat -c %s src/user/selfhost/SELFHOST.RUN)"
+  add_payload 1 "$(size_of src/user/selfhost/SELFHOST.RUN)"
 else
   warn "SELFHOST.RUN script missing (src/user/selfhost/SELFHOST.RUN) — skipping ::/SRC/SELFHOST.RUN (driver will report SCRIPT-MISSING)"
 fi
@@ -594,7 +622,7 @@ fi
 # every stage fails at sh's "cannot open /SRC/SELFHOST.SH".
 if [ -f src/user/selfhost/SELFHOST.SH ]; then
   mcopy -o -i "$IMAGE" src/user/selfhost/SELFHOST.SH ::/SRC/SELFHOST.SH || exit 1
-  add_payload 1 "$(stat -c %s src/user/selfhost/SELFHOST.SH)"
+  add_payload 1 "$(size_of src/user/selfhost/SELFHOST.SH)"
 else
   warn "SELFHOST.SH wrapper missing (src/user/selfhost/SELFHOST.SH) — skipping ::/SRC/SELFHOST.SH"
 fi
@@ -613,7 +641,7 @@ for spec in "obj/arm/libc.a ::/SRC/obj/arm/libc.a" \
   src_spec="${spec%% *}"; dst_spec="${spec#* }"
   if [ -f "$src_spec" ]; then
     mcopy -o -i "$IMAGE" "$src_spec" "$dst_spec" || exit 1
-    add_payload 1 "$(stat -c %s "$src_spec")"
+    add_payload 1 "$(size_of "$src_spec")"
   else
     warn "carried build product not built ($src_spec) — $dst_spec not staged (build the tree first)"
   fi
