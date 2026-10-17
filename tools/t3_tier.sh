@@ -70,7 +70,14 @@ echo "=== T3 ($ARCH): run (deadline ${T3_TIMEOUT}s, log $LOG) ==="
 # Same QEMU invocation as `make run`, serial captured to the log.  A
 # background job + poll (not a bare `timeout make`) so we can distinguish
 # "guest halted" from "deadline hit" and report both honestly.
-make ARCH="$ARCH" MODE=test run QEMU_ARGS="-display none" >>"$LOG" 2>&1 &
+# T3_QEMU_ARGS lets a caller add acceleration without editing the tier:
+#   T3_QEMU_ARGS="-enable-kvm" make test_intel
+# runs the intel wave near-native instead of under TCG (the fleet's VMs have
+# nested SVM and /dev/kvm, and a TCG 8-vCPU wave takes tens of minutes while
+# the same wave under KVM is minutes).  Never hardcoded here: KVM is not
+# available on every host, and a tier that silently changes its execution
+# mode is not reproducible.
+make ARCH="$ARCH" MODE=test run QEMU_ARGS="-display none ${T3_QEMU_ARGS:-}" >>"$LOG" 2>&1 &
 MAKE_PID=$!
 cleanup() {
   pkill -P "$MAKE_PID" 2>/dev/null || true
