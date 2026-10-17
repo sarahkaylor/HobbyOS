@@ -514,7 +514,18 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 4. **Workers run `hermes -w`.** A git worktree does **not** contain gitignored trees, so the vendored
    `third_party/*/src` extractions are missing there and vendored lanes (C++/RTTI, WebKit) go red inside a
    worktree while the same tree is green in the main checkout. Seed them (symlink is cheapest) before
-   believing a worker's "main is red" report — tracked as GB-006.
+   believing a worker's "main is red" report — tracked as GB-006. Landed: `tools/swarm/seed-worktree-vendored.sh`
+   (plain `ln -s` only — `ln -sfn` silently type-changes tracked files, which blocks the next rebase).
+5. **A non-login/background shell may not have `/usr/sbin` on PATH**, and `mkfs.fat` lives there, so
+   `make disk.img` dies with `make: mkfs.fat: No such file or directory` / `Error 127` *after* the whole
+   build has succeeded — which reads like a code failure and is not. If a backgrounded build fails only at
+   the disk step, re-run it with `export PATH="/usr/sbin:/sbin:$PATH"` (or re-run `make disk.img` in an
+   interactive shell; the objects are already built). `tools/run_waves.sh` already carries its own PATH
+   handling for the same reason.
+6. **KVM is available and worth using for the intel wave.** `/dev/kvm` exists on the fleet VMs (nested
+   SVM) and `tools/run_waves.sh` uses it, but `make test_intel` does not. `tools/t3_tier.sh` now takes
+   `T3_QEMU_ARGS`, so `T3_QEMU_ARGS="-enable-kvm" make test_intel` runs the wave near-native instead of
+   tens of minutes of TCG — call it out when asking a worker to do an A/B measurement.
 
 ### 11.3 Model endpoints & Hermes profiles
 - Two vLLM OpenAI-compatible endpoints, **recorded + verified 2026-10-17 (GB-004)**:
