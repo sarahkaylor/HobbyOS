@@ -40,6 +40,14 @@ cd "$ROOT"
 
 if [ -n "$POLICE_ONLY" ]; then
   LOG="$POLICE_ONLY"
+  # A log whose guest never booted must not be judged as a hang (see the run
+  # path's guard): "a hang is a defect" only holds while an environment failure
+  # cannot wear its clothes.
+  if grep -aq 'Failed to get "write" lock' "$LOG"; then
+    echo "T3_${ARCH} (police ${LOG}): ENVIRONMENT FAILURE — disk.img was locked; the guest never booted"
+    echo "T3_${ARCH} EXIT=2 (environment, not a tier result)"
+    exit 2
+  fi
   halted=0; grep -aq "System halt" "$LOG" && halted=1
   if [ "${T3_SKIP_HALT_CHECK:-0}" = "1" ]; then halted=1; fi
   FAIL_LINES=$(grep -ac "FAIL" "$LOG" || true)
@@ -94,6 +102,21 @@ MON_SOCK=""
 if [ "${T3_MONITOR:-0}" = "1" ]; then
   MON_SOCK="${T3_MONITOR_SOCK:-/tmp/t3_monitor_${ARCH}_$$.sock}"
   T3_QEMU_ARGS="${T3_QEMU_ARGS:-} -monitor unix:${MON_SOCK},server,nowait"
+fi
+
+# Guard: another QEMU holding disk.img makes this run fail at QEMU start with
+# "Failed to get write lock" -- which the verdict below would then report as a
+# HANG, because a guest that never booted also never prints 'System halt'.
+# Observed on GB-057: a second run started while a frozen guest was still alive
+# produced a 293-line "no halt" verdict for a machine that never started.  A
+# false hang verdict is worse than no verdict, since "a hang is a defect" is only
+# useful while an environment failure cannot masquerade as one.  Refuse to start,
+# with a distinct exit code, and say why.
+if command -v fuser >/dev/null 2>&1 && fuser "$ROOT/disk.img" >/dev/null 2>&1; then
+  echo "T3_${ARCH}: REFUSING TO START — $ROOT/disk.img is in use by another QEMU."
+  echo "T3_${ARCH}: a stale frozen guest must be killed first (its monitor socket is usually /tmp/t3_monitor_*.sock)"
+  echo "T3_${ARCH} EXIT=2 (environment, not a tier result)"
+  exit 2
 fi
 
 make ARCH="$ARCH" MODE=test run QEMU_ARGS="-display none ${T3_QEMU_ARGS:-}" >>"$LOG" 2>&1 &
@@ -162,6 +185,15 @@ fi
 
 FAIL_LINES=$(grep -ac "FAIL" "$LOG" || true)
 echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, halted=${halted}"
+
+# An environment failure must never be reported as a hang (see the pre-flight
+# guard above): if QEMU never got the image, this run says nothing about the
+# kernel, so it gets its own exit code and its own sentence.
+if grep -aq 'Failed to get "write" lock' "$LOG"; then
+  echo "T3_${ARCH}: ENVIRONMENT FAILURE — disk.img was locked by another QEMU; this guest never booted, so this is NOT a hang verdict"
+  echo "T3_${ARCH} EXIT=2 (environment, not a tier result)"
+  exit 2
+fi
 
 rc=0
 if [ "$halted" != "1" ]; then
