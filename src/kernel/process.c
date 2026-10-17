@@ -32,6 +32,31 @@ extern void uart_puts(const char *s);
 extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
 
+/* GB-060 (cheap half): a resume call that returns is a defect.
+
+   `enter_user_space` iretqs into the target and must never come back.  Both
+   resume boundaries used to answer a return with a bare `while (1);` /
+   `while (1) {}` -- a CPU silently lost from the system, indistinguishable in
+   a log from a CPU that faulted and halted.  On GB-057 that silence turned five
+   probe runs into five different-looking freezes.  Report first through the
+   COM1 raw sink: it takes no lock, so it cannot deadlock the console it is
+   reporting on, and it lands in the gate log.
+
+   Note this is deliberately NOT a lock release: if the resume returned, the
+   process state is already suspect, and the honest move is to name the CPU and
+   stop it rather than to hand a possibly-torn state to another core. */
+static void resume_returned_halt(uint32_t cpu, int pid) {
+  extern void uart_puts_raw(const char *s);
+  extern void uart_print_hex_raw(uint64_t v);
+  uart_puts_raw("[KERNEL] resume call RETURNED (must never happen): cpu=");
+  uart_print_hex_raw((uint64_t)cpu);
+  uart_puts_raw(" pid=");
+  uart_print_hex_raw((uint64_t)(uint32_t)pid);
+  uart_puts_raw(" -- halting this CPU\n");
+  for (;;) {
+  }
+}
+
 #ifdef __x86_64__
 /* x86_64 FPU/SSE state (src/kernel/arch/x64/fpu.c).  The context switch
    carries the x87+SSE register file through these hooks so state follows
@@ -1312,7 +1337,13 @@ void schedule(struct trap_frame *tf, int is_yield) {
 
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
       enter_user_space(&local_tf, target_sp);
-      while(1);
+      /* GB-060 (cheap half): a resume call that returns is a defect --
+         enter_user_space iretqs into the target and must never come back.  The
+         bare `while (1);` that used to be here lost a CPU with no trace at all,
+         which is the same silence that made five GB-057 probe runs look like
+         five different failures.  Report first, through the COM1 raw sink (it
+         takes no lock, so it cannot deadlock the console it is reporting on). */
+      resume_returned_halt(cpu, proc_table[next].pid);
     }
 
     // No ready processes. Check if any are still alive.
@@ -2686,8 +2717,9 @@ void start_scheduler(void) {
         extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
         enter_user_space(&local_tf, target_sp);
 
-        while (1) {
-        }
+        /* Same rule as schedule()'s resume boundary: if this returns, the CPU
+           is lost, so say so before going quiet. */
+        resume_returned_halt(cpu, proc_table[i].pid);
       }
     }
     spinlock_release_irqrestore(&proc_lock, flags);
