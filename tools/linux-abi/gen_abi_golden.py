@@ -60,6 +60,86 @@ def errno_names(path):
     return out
 
 
+def layout_pairs():
+    """The struct-layout rows GB-015 locks: our header's sizes/offsets must equal
+    these measured on a real Linux x86_64 box.  Names are the compat-layer keys
+    used by src/host/linux_layout_test.c; values are sizeof/offsetof expressions
+    against the LINUX headers (via <linux/*.h>/<sys/*.h>), not our header."""
+    D = "offsetof"
+    L = [
+        ("stat.size", "sizeof(struct stat)"),
+        ("stat.st_dev", D + "(struct stat, st_dev)"),
+        ("stat.st_ino", D + "(struct stat, st_ino)"),
+        ("stat.st_nlink", D + "(struct stat, st_nlink)"),
+        ("stat.st_mode", D + "(struct stat, st_mode)"),
+        ("stat.st_uid", D + "(struct stat, st_uid)"),
+        ("stat.st_gid", D + "(struct stat, st_gid)"),
+        ("stat.st_rdev", D + "(struct stat, st_rdev)"),
+        ("stat.st_size", D + "(struct stat, st_size)"),
+        ("stat.st_blksize", D + "(struct stat, st_blksize)"),
+        ("stat.st_blocks", D + "(struct stat, st_blocks)"),
+        ("stat.st_atim", D + "(struct stat, st_atim)"),
+        ("stat.st_mtim", D + "(struct stat, st_mtim)"),
+        ("stat.st_ctim", D + "(struct stat, st_ctim)"),
+        ("statx.size", "sizeof(struct statx)"),
+        ("statx.stx_mask", D + "(struct statx, stx_mask)"),
+        ("statx.stx_size", D + "(struct statx, stx_size)"),
+        ("statx.stx_mode", D + "(struct statx, stx_mode)"),
+        ("sigaction.size", "sizeof(struct sigaction)"),
+        ("sigaction.sa_handler", D + "(struct sigaction, sa_handler)"),
+        ("sigaction.sa_mask", D + "(struct sigaction, sa_mask)"),
+        ("sigaction.sa_flags", D + "(struct sigaction, sa_flags)"),
+        ("sigaction.sa_restorer", D + "(struct sigaction, sa_restorer)"),
+        ("ucontext.size", "sizeof(ucontext_t)"),
+        ("ucontext.uc_flags", D + "(ucontext_t, uc_flags)"),
+        ("ucontext.uc_link", D + "(ucontext_t, uc_link)"),
+        ("ucontext.uc_stack", D + "(ucontext_t, uc_stack)"),
+        ("ucontext.uc_mcontext", D + "(ucontext_t, uc_mcontext)"),
+        ("ucontext.uc_sigmask", D + "(ucontext_t, uc_sigmask)"),
+        ("mcontext.size", "sizeof(mcontext_t)"),
+        ("mcontext.gregs", D + "(mcontext_t, gregs)"),
+        ("mcontext.fpregs", D + "(mcontext_t, fpregs)"),
+        ("stack.size", "sizeof(stack_t)"),
+        ("termios.size", "sizeof(struct termios)"),
+        ("termios.c_iflag", D + "(struct termios, c_iflag)"),
+        ("termios.c_oflag", D + "(struct termios, c_oflag)"),
+        ("termios.c_cflag", D + "(struct termios, c_cflag)"),
+        ("termios.c_lflag", D + "(struct termios, c_lflag)"),
+        ("termios.c_line", D + "(struct termios, c_line)"),
+        ("termios.c_cc", D + "(struct termios, c_cc)"),
+        ("termios.c_ispeed", D + "(struct termios, c_ispeed)"),
+        ("termios.c_ospeed", D + "(struct termios, c_ospeed)"),
+        ("winsize.size", "sizeof(struct winsize)"),
+        ("winsize.ws_row", D + "(struct winsize, ws_row)"),
+        ("winsize.ws_col", D + "(struct winsize, ws_col)"),
+        ("winsize.ws_xpixel", D + "(struct winsize, ws_xpixel)"),
+        ("winsize.ws_ypixel", D + "(struct winsize, ws_ypixel)"),
+        ("epoll_event.size", "sizeof(struct epoll_event)"),
+        ("epoll_event.events", D + "(struct epoll_event, events)"),
+        ("epoll_event.data", D + "(struct epoll_event, data)"),
+        ("pollfd.size", "sizeof(struct pollfd)"),
+        ("pollfd.fd", D + "(struct pollfd, fd)"),
+        ("pollfd.events", D + "(struct pollfd, events)"),
+        ("pollfd.revents", D + "(struct pollfd, revents)"),
+        ("iovec.size", "sizeof(struct iovec)"),
+        ("iovec.iov_base", D + "(struct iovec, iov_base)"),
+        ("iovec.iov_len", D + "(struct iovec, iov_len)"),
+        ("timespec.size", "sizeof(struct timespec)"),
+        ("timespec.tv_sec", D + "(struct timespec, tv_sec)"),
+        ("timespec.tv_nsec", D + "(struct timespec, tv_nsec)"),
+        ("timeval.size", "sizeof(struct timeval)"),
+        ("timeval.tv_sec", D + "(struct timeval, tv_sec)"),
+        ("timeval.tv_usec", D + "(struct timeval, tv_usec)"),
+        ("dirent64.size", "sizeof(struct dirent64)"),
+        ("dirent64.d_ino", D + "(struct dirent64, d_ino)"),
+        ("dirent64.d_off", D + "(struct dirent64, d_off)"),
+        ("dirent64.d_reclen", D + "(struct dirent64, d_reclen)"),
+        ("dirent64.d_type", D + "(struct dirent64, d_type)"),
+        ("dirent64.d_name", D + "(struct dirent64, d_name)"),
+    ]
+    return L
+
+
 def run(pairs, include):
     """pairs: [(golden_name, c_expression)]; prints the Linux value of each."""
     src = "#include <stdio.h>\n#include <" + include + ">\nint main(void){\n"
@@ -100,6 +180,50 @@ def write_golden(path, rows, header_note):
     return body
 
 
+LAYOUT_INCLUDES = (
+    "<stdio.h>", "<stddef.h>", "<sys/stat.h>", "<sys/types.h>", "<sys/ucontext.h>",
+    "<sys/epoll.h>", "<sys/ioctl.h>", "<termios.h>", "<signal.h>", "<poll.h>",
+    "<sys/socket.h>", "<sys/uio.h>", "<time.h>", "<sys/time.h>", "<dirent.h>",
+    "<sys/resource.h>", "<sys/sysinfo.h>", "<sys/utsname.h>", "<fcntl.h>",
+    "<asm/prctl.h>",
+)
+
+
+def write_layout_golden(path, pairs):
+    """Compile the layout expressions against the LINUX headers and record each
+    value.  This is the measurement side of GB-015: the committed golden is what
+    src/host/linux_layout_test.c asserts our header against."""
+    src = "#define _GNU_SOURCE\n" + "\n".join(f"#include {h}" for h in LAYOUT_INCLUDES)
+    src += "\n#include <sys/wait.h>\n#include <stdlib.h>\n#include <stdint.h>\nint main(void){\n"
+    for name, expr in pairs:
+        src += f'  printf("%s %ld\\n", "{name}", (long)({expr}));\n'
+    src += "  return 0;\n}\n"
+    with tempfile.TemporaryDirectory() as d:
+        c, exe = os.path.join(d, "g.c"), os.path.join(d, "g")
+        open(c, "w").write(src)
+        cc = os.environ.get("CC", "cc")
+        r = subprocess.run([cc, "-o", exe, c], capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"layout probe compile failed:\n{r.stderr}", file=sys.stderr)
+            # find the offending name for actionable feedback
+            for name, expr in pairs:
+                probe = src.replace('int main(void){', 'int main(void){(void)(%s);' % expr, 1)
+                probe = '\n'.join("#include " + h for h in LAYOUT_INCLUDES) + "\nint main(void){(void)(" + expr + ");return 0;}\n"
+                rr = subprocess.run([cc, "-o", exe, "-x", "c", "-", "-include", "stddef.h"], input=probe,
+                                    capture_output=True, text=True)
+                if rr.returncode != 0:
+                    print(f"  bad layout row: {name} = {expr}", file=sys.stderr)
+                    print("  " + (rr.stderr.splitlines()[0] if rr.stderr else ""), file=sys.stderr)
+            raise SystemExit(3)
+        out = subprocess.run([exe], check=True, capture_output=True, text=True).stdout
+    rows = []
+    for line in out.splitlines():
+        name, val = line.split()
+        rows.append((name, int(val)))
+    write_golden(path, sorted(rows, key=lambda r: r[0]), "struct-layout sizes/offsets (GB-015) that src/include/linux_layout.h must match")
+    return rows
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--check", action="store_true")
@@ -111,6 +235,7 @@ def main():
 
     sc_path = os.path.join(OUTDIR, "linux_syscalls.golden")
     er_path = os.path.join(OUTDIR, "linux_errno.golden")
+    lay_path = os.path.join(OUTDIR, "linux_layouts.golden")
     sc = run(syscall_names(os.path.join(REPO, "src/include/linux_syscall.h")), "sys/syscall.h")
     er = run(errno_names(os.path.join(REPO, "src/include/errno.h")), "errno.h")
 
@@ -126,16 +251,33 @@ def main():
             for n, v in rows:
                 if cur.get(n) != v:
                     problems.append(f"{os.path.basename(path)}: {n} golden={cur.get(n)} linux={v}")
+        # layout golden check
+        lay = layout_pairs()
+        # layout rows come from the same probe source; compare committed golden
+        cur = {}
+        if os.path.exists(lay_path):
+            for line in open(lay_path, encoding="utf-8"):
+                if line.startswith("#"):
+                    continue
+                k, v = line.split()
+                cur[k] = int(v)
+            for n, _ in lay:
+                if cur.get(n) is None:
+                    problems.append(f"linux_layouts.golden: missing row {n}")
+        else:
+            problems.append("linux_layouts.golden missing (run without --check)")
         if problems:
             print("\n".join(problems))
             print("goldens are STALE vs this Linux box — re-run without --check to refresh")
             return 1
-        print(f"goldens match this Linux box ({len(sc)} syscalls, {len(er)} errno)")
+        print(f"goldens match this Linux box ({len(sc)} syscalls, {len(er)} errno, {len(lay)} layouts)")
         return 0
 
     write_golden(sc_path, sc, "syscall numbers (x86_64) that src/include/linux_syscall.h must match")
     write_golden(er_path, er, "errno values that src/include/errno.h must match")
-    print(f"wrote {sc_path} ({len(sc)} rows)\nwrote {er_path} ({len(er)} rows)")
+    lay = layout_pairs()
+    write_layout_golden(lay_path, lay)
+    print(f"wrote {sc_path} ({len(sc)} rows)\nwrote {er_path} ({len(er)} rows)\nwrote {lay_path} ({len(lay)} rows)")
     return 0
 
 
