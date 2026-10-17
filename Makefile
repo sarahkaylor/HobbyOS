@@ -3146,6 +3146,8 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	$(HOST_RUN) ./$(CONSOLE_APP_TEST)
 	$(HOST_RUN) ./$(DIALOG_ARROW_TEST)
 	$(HOST_RUN) ./$(PONG_TEST_BIN)
+	@echo "[host] tools/evidence_rig_test.py (GB-040 evidence rig)"
+	python3 tools/evidence_rig_test.py
 	$(HOST_RUN) ./$(GUI_TEST)
 	$(HOST_RUN) ./$(ERRNO_TEST)
 	$(HOST_RUN) ./$(ELF_IMAGE_TEST)
