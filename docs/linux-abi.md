@@ -498,6 +498,13 @@ KEY_A=30 KEY_ENTER=28 KEY_ESC=1 KEY_SPACE=57
 | `/dev/null`, `/dev/zero`, `/dev/urandom` | kernel shims | `read`, `mmap` (zero page) |
 | `/dev/tty` | console | `TCGETS`/`TCSETS`, `TIOCGWINSZ`, `isatty()` true |
 
+`/dev/dsp` (GB-029): the compat OSS node is a **silent-safe stub** that returns
+`ENODEV` on open until a real audio driver exists, so a program that probes OSS
+audio gets a clean "no audio device" rather than a hang or silent garbage, and
+SDL (which is silent-safe by design) falls back to its `dummy` driver and the
+game runs without sound. The audio decision (virtio-sound vs ALSA vs dummy) is
+recorded in `docs/audio.md`.
+
 `uname` for compat processes reports a Linux-shaped identity (§2.2 #4, GB-016): `sysname` =
 `Linux`, `release` = a fixed string baked into `linux_compat.c` (SDL's version gates parse it),
 `machine` = `x86_64`, `nodename` = the HobbyOS hostname. **Frozen at the M1 gate.**
