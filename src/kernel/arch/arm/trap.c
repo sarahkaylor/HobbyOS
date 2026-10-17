@@ -803,18 +803,35 @@ static void sys_spawn(struct trap_frame *tf) {
        test wave the process table is legitimately full, and every spawn
        caller parks in WAIT_SPAWN holding a PCB slot while its worker
        needs a free slot from that same table: waiting longer can never
-       fix that — it is a circular wait, and seven cores burning it at
+       fix that — it is a circular wait, and several cores burning it at
        once wedges the guest (watchdog: "console silent for more than
        20 s", 7 CPUs at age 350 s inside this syscall, loader starved).
-       Absorb only the transient pressure (~1 s), then take the failure
-       path below: spawn2's callers retry with usleep() and so yield the
-       CPU between attempts instead of stealing it. */
-    for (int attempt = 0; attempt < 100 && wpid < 0; attempt++) {
+       Wait while the free-slot count is MOVING (other processes exiting
+       and freeing rows — the transient case), then take the failure path
+       below: its -1 is the documented retryable class, and spawn2 callers
+       retry it with usleep(), i.e. they yield the CPU instead of stealing
+       it. */
+    uint64_t t_start = timer_get_ms();
+    uint64_t last_progress = t_start;
+    int free_before = -1;
+    for (int attempt = 0; attempt < 500 && wpid < 0; attempt++) {
       uint64_t t0 = timer_get_ms();
       for (volatile int spin = 0; spin < 400000; spin++) {
         if (timer_get_ms() - t0 >= 10u) break;
       }
       wpid = process_create_kernel_nowait(sys_spawn_worker, args);
+      if (wpid >= 0)
+        break;
+      int free_now = process_free_slots();
+      uint64_t now = timer_get_ms();
+      if (free_now != free_before) {
+        free_before = free_now;
+        last_progress = now;
+      } else if (now - last_progress >= 2000u) {
+        break; /* table stalled: waiting further cannot succeed */
+      }
+      if (now - t_start >= 5000u)
+        break;
     }
     if (wpid < 0) {
       /* no free process slot for the spawn worker: the caller must not
@@ -931,13 +948,28 @@ static void sys_spawn_ex(struct trap_frame *tf) {
   extern uint64_t timer_get_ms(void);
   int wpid = process_create_kernel_nowait(sys_spawn_ex_worker, ex);
   /* GB-057: same circular wait as sys_spawn — see the comment there.
-     ~1 s of absorbed transient pressure, never a 30-minute hot spin. */
-  for (int attempt = 0; attempt < 100 && wpid < 0; attempt++) {
+     Wait while the free-slot count moves, give up on a stall or budget. */
+  uint64_t t_start = timer_get_ms();
+  uint64_t last_progress = t_start;
+  int free_before = -1;
+  for (int attempt = 0; attempt < 500 && wpid < 0; attempt++) {
     uint64_t t0 = timer_get_ms();
     for (volatile int spin = 0; spin < 400000; spin++) {
       if (timer_get_ms() - t0 >= 10u) break;
     }
     wpid = process_create_kernel_nowait(sys_spawn_ex_worker, ex);
+    if (wpid >= 0)
+      break;
+    int free_now = process_free_slots();
+    uint64_t now = timer_get_ms();
+    if (free_now != free_before) {
+      free_before = free_now;
+      last_progress = now;
+    } else if (now - last_progress >= 2000u) {
+      break;
+    }
+    if (now - t_start >= 5000u)
+      break;
   }
   if (wpid < 0) {
     /* Release-on-worker-failure (D4.4): -EAGAIN, never a hang. */

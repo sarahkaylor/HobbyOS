@@ -91,12 +91,20 @@ for _ in $(seq 1 30); do kill -0 "$MAKE_PID" 2>/dev/null || break; sleep 1; done
 cleanup
 trap - EXIT
 
+# Re-read the log: the guest can halt and make can exit between two polls, so
+# the loop above may leave `halted` at 0 for a run that DID halt (observed on
+# the first ARM run — the tier must never fail a run for that).
+if [ "$halted" != "1" ] && grep -aq "System halt" "$LOG"; then
+  halted=1
+  echo "T3_${ARCH}: note — halt marker found after make exited (poll raced the exit)"
+fi
+
 FAIL_LINES=$(grep -ac "FAIL" "$LOG" || true)
 echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, halted=${halted}"
 
 rc=0
 if [ "$halted" != "1" ]; then
-  echo "T3_${ARCH}: FAIL — the wave never reached its halt line within ${T3_TIMEOUT}s (hang = defect, not a flake)"; rc=1
+  echo "T3_${ARCH}: FAIL — the console has no 'System halt' line (idle/hung wave, or the ${T3_TIMEOUT}s deadline hit; a hang is a defect, not a flake)"; rc=1
 fi
 if [ "$FAIL_LINES" != "0" ]; then
   echo "T3_${ARCH}: FAIL — ${FAIL_LINES} FAIL line(s); first 20:"
