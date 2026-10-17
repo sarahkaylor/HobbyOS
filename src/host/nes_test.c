@@ -91,6 +91,26 @@ int main(void){
     (void)0;
   }
 
+  /* ---- PPU address-latch write path ($2006/$2007) --------------------- */
+  {
+    nes_machine m;
+    memset(&m, 0, sizeof(m));
+    /* set PPUADDR = $1000 via the two-stage $2006 latch, then write a byte */
+    nes_write(&m, 0x2006, 0x10);
+    nes_write(&m, 0x2006, 0x00);
+    CHECK(m.ppu.vram_addr == 0x1000, "$2006 latch commits PPUADDR=$1000");
+    nes_write(&m, 0x2007, 0xFF);
+    CHECK(m.ppu.vram[0x1000 & (NES_VRAM_SIZE-1)] == 0xFF,
+          "$2007 writes through to the addressed VRAM byte");
+    CHECK(m.ppu.vram_addr == 0x1001, "$2007 auto-increments PPUADDR by 1");
+    /* second selector: PPUADDR = $2000 */
+    nes_write(&m, 0x2006, 0x20);
+    nes_write(&m, 0x2006, 0x00);
+    CHECK(m.ppu.vram_addr == 0x2000, "$2006 latch commits PPUADDR=$2000");
+    nes_write(&m, 0x2007, 0x01);
+    CHECK(m.ppu.vram[0x0000] == 0x01, "$2007 writes the first nametable cell");
+  }
+
   /* ---- controller ------------------------------------------------------ */
   {
     nes_machine m;

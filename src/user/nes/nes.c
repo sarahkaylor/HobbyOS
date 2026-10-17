@@ -175,18 +175,20 @@ void nes_write(nes_machine *m, u16 addr, u8 val){
         m->ppu.vram_latch = (u16)((m->ppu.vram_latch & 0xFF00) | val); return;
       case 6: {                               /* two-stage $2006 latch */
         if (m->ppu.vram_latch & 0x8000) {
+          u8 hi = (u8)(m->ppu.vram_latch & 0xFF);   /* stored hi byte */
           u16 lo = val;
-          m->ppu.vram_addr = (u16)(((m->ppu.vram_latch << 8) | lo) & 0x3FFF);
+          m->ppu.vram_addr = (u16)((hi << 8) | lo);
           m->ppu.vram_latch = 0;
         } else {
-          m->ppu.vram_latch = (u16)(0x8000 | (val << 8));
+          m->ppu.vram_latch = (u16)(0x8000 | val);  /* store hi byte */
         }
         return;
       }
-      case 7:
+      case 7: {
         m->ppu.vram[m->ppu.vram_addr & (NES_VRAM_SIZE-1)] = val;
         m->ppu.vram_addr = (u16)(m->ppu.vram_addr + (m->ppu.ctrl & 4 ? 32 : 1));
         return;
+      }
     }
     return;
   }
@@ -222,27 +224,38 @@ void nes_tick(nes_machine *m){
   u8 mode = (u8)(sel & 0x1F), grp = (u8)(sel >> 5);
   u16 addr = 0;
   u8  rval = 0;
+  /* Instructions that never use the operand VALUE (only the address) must not
+   * pre-read it: reading a PPU register ($2007) has the side effect of
+   * advancing vram_addr, which would corrupt a store.  Grouped by 6502
+   * semantics, not by mode. */
+  int needs_read = 1;
+  switch (grp) {
+    case G_STA: case G_STX: case G_STY:
+    case G_JMP: case G_JSR: case G_RTS: case G_RTI: case G_BRK:
+    case G_NOP:
+      needs_read = 0; break;
+    default: break;
+  }
 
   /* operand fetch */
   switch (mode) {
     case AM_IMM: rval = nes_read(m, c->pc++); break;
-    case AM_ZP:  addr = nes_read(m, c->pc++); rval = nes_read(m, addr); break;
-    case AM_ZPX: addr = (u8)(nes_read(m, c->pc++) + c->x); rval = nes_read(m, addr); break;
-    case AM_ZPY: addr = (u8)(nes_read(m, c->pc++) + c->y); rval = nes_read(m, addr); break;
+    case AM_ZP:  addr = nes_read(m, c->pc++); if (needs_read) rval = nes_read(m, addr); break;
+    case AM_ZPX: addr = (u8)(nes_read(m, c->pc++) + c->x); if (needs_read) rval = nes_read(m, addr); break;
+    case AM_ZPY: addr = (u8)(nes_read(m, c->pc++) + c->y); if (needs_read) rval = nes_read(m, addr); break;
     case AM_ABS: {
       u8 lo = nes_read(m, c->pc++), hi = nes_read(m, c->pc++);
-      addr = (u16)(lo | (hi << 8)); rval = nes_read(m, addr); break;
+      addr = (u16)(lo | (hi << 8)); if (needs_read) rval = nes_read(m, addr); break;
     }
     case AM_ABX: case AM_ABY: {
       u8 lo = nes_read(m, c->pc++), hi = nes_read(m, c->pc++);
       addr = (u16)(lo | (hi << 8));
       addr = (u16)(addr + (mode == AM_ABX ? c->x : c->y));
-      rval = nes_read(m, addr); break;
+      if (needs_read) rval = nes_read(m, addr); break;
     }
     case AM_IND: {
       u8 lo = nes_read(m, c->pc++), hi = nes_read(m, c->pc++);
       u16 ptr = (u16)(lo | (hi << 8));
-      /* bug-compatible page wrap on low byte */
       u16 p = (u16)((ptr & 0xFF00) | ((ptr + 1) & 0xFF));
       addr = (u16)(nes_read(m, ptr) | (nes_read(m, p) << 8));
       rval = nes_read(m, addr); break;
@@ -250,12 +263,12 @@ void nes_tick(nes_machine *m){
     case AM_IZX: {
       u8 zp = (u8)(nes_read(m, c->pc++) + c->x);
       addr = (u16)(nes_read(m, (u16)zp) | (nes_read(m, (u16)((zp+1)&0xFF)) << 8));
-      rval = nes_read(m, addr); break;
+      if (needs_read) rval = nes_read(m, addr); break;
     }
     case AM_IZY: {
       u8 zp = nes_read(m, c->pc++);
       addr = (u16)(nes_read(m, (u16)zp) | (nes_read(m, (u16)((zp+1)&0xFF)) << 8));
-      addr = (u16)(addr + c->y); rval = nes_read(m, addr); break;
+      addr = (u16)(addr + c->y); if (needs_read) rval = nes_read(m, addr); break;
     }
     case AM_REL: { s16 off = (s16)(int8_t)nes_read(m, c->pc++);
                    addr = (u16)(c->pc + off); break; }
