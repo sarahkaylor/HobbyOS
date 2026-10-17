@@ -522,10 +522,14 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
    the disk step, re-run it with `export PATH="/usr/sbin:/sbin:$PATH"` (or re-run `make disk.img` in an
    interactive shell; the objects are already built). `tools/run_waves.sh` already carries its own PATH
    handling for the same reason.
-6. **KVM is available and worth using for the intel wave.** `/dev/kvm` exists on the fleet VMs (nested
-   SVM) and `tools/run_waves.sh` uses it, but `make test_intel` does not. `tools/t3_tier.sh` now takes
-   `T3_QEMU_ARGS`, so `T3_QEMU_ARGS="-enable-kvm" make test_intel` runs the wave near-native instead of
-   tens of minutes of TCG — call it out when asking a worker to do an A/B measurement.
+6. **`/dev/kvm` exists on the fleet VMs but is NOT usable as provisioned.** `ls -l /dev/kvm` is
+   `crw-rw---- root:kvm`, and `sarah` is not in the `kvm` group, so an accelerated run dies with
+   `Could not access KVM kernel module: Permission denied` (the device's presence is not the capability —
+   that is the trap). The host CPU exposes nested SVM, so the one-line fix is provisioning:
+   `sudo usermod -aG kvm sarah` (then a fresh login), or a targeted device ACL. Until that is done, **every
+   intel QEMU run is TCG** — tens of minutes per wave, which is why an A/B measurement on `ARCH=intel` is
+   still expensive. Tracked as part of GB-006's provisioning checklist. `tools/t3_tier.sh` takes
+   `T3_QEMU_ARGS` so the fix is a one-liner away: `T3_QEMU_ARGS="-enable-kvm" make test_intel`.
 
 ### 11.3 Model endpoints & Hermes profiles
 - Two vLLM OpenAI-compatible endpoints, **recorded + verified 2026-10-17 (GB-004)**:
