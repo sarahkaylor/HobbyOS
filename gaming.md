@@ -415,6 +415,7 @@ final list.
 | GB-053 | Final acceptance run, both arches, full evidence archive | M | GB-047 | S0+S1 signed off |
 | GB-054 | **[DEEP]** Program-2 roadmap ticket: Mono (RimWorld) staging, Spring RTS (TA) evaluation, Vulkan-virgl evaluation, dynamic-loader/glibc plan | M | GB-053 | epics + staged tickets |
 | GB-055 | Program retrospective + rules update (what to teach `gaming.md`/skills) | S | GB-054 | lessons merged into skills |
+| GB-056 | T3 PROCTEST `WEXITSTATUS` mismatch (got=2 for want=1 and want=42) — suites exit 0 anyway (minted by the Coordinator from the GB-009 baseline run; §10/§11.8) | S | — | T3 suite's PROCTEST passes and a printed FAIL fails the suite |
 
 ---
 
