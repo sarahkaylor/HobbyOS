@@ -272,6 +272,18 @@ def cmd_status(a):
         print(f"  {m['title']:<16} {done:>2}/{len(iss):<2} open={len(iss)-done:<3} {pct:5.1f}%")
 
 
+def _has_evidence_comment(body):
+    """True when a comment opens with the EVIDENCE marker.
+
+    The marker is a convention, not a token match on the raw bytes: comments
+    are written in markdown, so the overwhelmingly common shape is
+    ``**EVIDENCE — ...``.  Stripping leading emphasis/space is what makes the
+    lint say what it means (a real EVIDENCE comment was being flagged as
+    missing because of two asterisks).
+    """
+    return body.lstrip(" \t\r\n*_#").upper().startswith("EVIDENCE")
+
+
 def cmd_lint(a):
     rc = 0
     missing = ensure_lanes(create=False)
@@ -288,7 +300,7 @@ def cmd_lint(a):
             print(f"LINT {gid}: `blocked` label without a 'Blocked:' reason in the body")
             rc = 1
         if lane_of(it) in ("In Review", "Merge Gate") and not any(
-            c["body"].startswith("EVIDENCE") for c in api_get(f"/repos/{REPO}/issues/{it['number']}/comments", "?limit=50")
+            _has_evidence_comment(c["body"]) for c in api_get(f"/repos/{REPO}/issues/{it['number']}/comments", "?limit=50")
         ):
             print(f"LINT {gid}: in {lane_of(it)} without an EVIDENCE comment")
             rc = 1
