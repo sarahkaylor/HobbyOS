@@ -45,3 +45,11 @@ tracked in GB-031's remaining half.
   GB-025/026).
 - The **loader-acceptance boot test** (static non-PIE ELF actually mapped by
   the running HobbyOS kernel) — needs the booted OS, tracked for the T3 tier.
+
+## fbcon conformance surface (T1, host)
+
+`src/host/fbcon_conformance_test.c` (`make fbcon_conformance_test_host`) runs
+the exact SDL-fbcon driver **sequence** against the merged /dev/fb0 node —
+FBIOGET_VSCREENINFO → FBIOGET_FSCREENINFO → mmap → FBIOBLANK → B8G8R8A8 blit —
+and asserts Linux parity at each step (11/11 checks). This is the contract the
+fbcon shim (above) must satisfy, verified without needing SDL or a booted OS.
