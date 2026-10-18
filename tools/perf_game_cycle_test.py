@@ -37,11 +37,13 @@ check(r is False, "sparse None observed, not yet frozen")
 
 print("rss_trend_growth (\u201cno unbounded growth\u201d)")
 g, ok = rss_trend_growth([1000, 1001, 1002], 64)
-check(ok is True and g == 2.0, "small RSS growth ok (growth=2)")
-g2, ok2 = rss_trend_growth([1000, 1000, 5000], 64)
-check(ok2 is False and g2 == 4000.0, "large RSS growth fails the bound (4000)")
-g3, ok3 = rss_trend_growth([], 64)
-check(ok3 is True and g3 == 0.0, "no samples => pass (nothing measured)")
+check(ok is True and round(g, 2) == 0.0, "small RSS growth (2 KB) ok under a 64 MB bound")
+g2, ok2 = rss_trend_growth([1000, 1000, 5000], 1)
+check(ok2 is False and round(g2, 2) == 3.91, "4000 KB (3.91 MB) growth fails a 1 MB bound")
+g3, ok3 = rss_trend_growth([1000, 1000, 5000], 4)
+check(ok3 is True and round(g3, 2) == 3.91, "4000 KB (3.91 MB) growth is fine under a 4 MB bound")
+g4, ok4 = rss_trend_growth([], 64)
+check(ok4 is True and g4 == 0.0, "no samples => pass (nothing measured)")
 
 print("flag_freeze_free")
 check(flag_freeze_free(["a", "a", "a", "a"], 3)[-1] is True,
