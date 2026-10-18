@@ -3364,6 +3364,18 @@ void start_scheduler(void) {
           print_int(proc_table[k].state);
           uart_puts(" parent=");
           print_int(proc_table[k].parent_pid);
+          /* GB-057: name the WAIT, do not infer it from the shape of the test.
+             Reading `st=5` only says "blocked"; the two things that say *what*
+             it is blocked on are whether a timer will ever release it (`wake_ms`,
+             0 = waiting on an event with no deadline) and where its saved return
+             address points (`context[31]`, the ELR both arches share).  I spent a
+             probe assuming a pipe from a comment in main.c about the spawn2
+             pattern, then cleared four pipe mechanisms by reading -- none of them
+             the bug, because the subject was assumed.  This prints the subject. */
+          uart_puts(" wake=");
+          print_int(proc_table[k].wake_ms);
+          uart_puts(" rip=");
+          uart_print_hex(proc_table[k].context[31]);
           uart_puts(" ");
           uart_puts(proc_table[k].name);
           uart_puts("\n");
