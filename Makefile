@@ -3277,6 +3277,8 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	$(HOST_RUN) ./$(PONG_TEST_BIN)
 	@echo "[host] tools/evidence_rig_test.py (GB-040 evidence rig)"
 	python3 tools/evidence_rig_test.py
+	@echo "[host] tools/perf_game_cycle_test.py (GB-046 game-cycling perf/leak core)"
+	python3 tools/perf_game_cycle_test.py
 	$(HOST_RUN) ./$(NES_TEST)
 	$(HOST_RUN) ./$(GUI_TEST)
 	$(HOST_RUN) ./$(ERRNO_TEST)
