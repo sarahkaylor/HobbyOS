@@ -82,6 +82,57 @@ static void dbg_resume(const char *tag, uint64_t v) {
   dbg_putc('0'); dbg_putc('x'); dbg_hex(v, 16); dbg_putc('\n');
 }
 
+/* GB-057: called from common_trap_exit immediately before the iretq, with a
+   pointer to the hardware frame the iretq is about to consume ([0] = RIP,
+   [1] = CS).
+
+   Why this site: probe26 showed the corrupt frame does NOT come from the
+   scheduler.  The corrected [BADELR] check reads context[31] at the pick and
+   stayed silent through three faults, two of them at rip=0x7 -- a value it tests
+   for.  So the bad RIP never passed through context[]: it is already in the stack
+   frame that common_trap_exit iretqs out of.  The scheduler resume sites carry an
+   IF=0 discipline against a clobbered frame window; this path has no equivalent,
+   which is the same bug at a site nobody armed.
+
+   The CS discriminator is load-bearing, not decoration: a kernel-mode trap return
+   has a perfectly legal kernel RIP, so a rule that only looked at the address
+   would flag every kernel iretq and spend its whole budget on false positives --
+   which is exactly the failure of my first [BADELR] rule (probe25).  Only
+   RPL==3 returns are user returns, and only those are judged. */
+void trap_exit_frame_check(uint64_t *frame) {
+  extern volatile uint64_t trap_exit_bad_rip_seen;
+  extern void uart_puts_raw(const char *s);
+  extern void uart_print_hex_raw(uint64_t v);
+  uint64_t rip = frame[0];
+  uint64_t cs = frame[1];
+  int implausible;
+
+  if ((cs & 3u) != 3u)
+    return; /* kernel-mode return: a kernel RIP here is correct */
+  implausible = (rip < 0x1000u) || (rip >= 0x70000000u && rip < USER_VA_BASE);
+  if (!implausible)
+    return;
+  if (trap_exit_bad_rip_seen >= 20)
+    return;
+  trap_exit_bad_rip_seen++;
+  uart_puts_raw("[BADIRET] about to return to an implausible user RIP=");
+  uart_print_hex_raw(rip);
+  uart_puts_raw(" cs=");
+  uart_print_hex_raw(cs);
+  uart_puts_raw(" rsp=");
+  uart_print_hex_raw(frame[3]);
+  uart_puts_raw(" eflags=");
+  uart_print_hex_raw(frame[2]);
+  uart_puts_raw(" cpu=");
+  uart_print_hex_raw((uint64_t)get_cpuid());
+  uart_puts_raw("\n");
+}
+
+/* GB-057: bounded count for the pre-iretq frame report (a rare event, not a
+   per-trap log -- a diagnostic that reports on every trap exit would be a
+   per-trap cost and a per-trap flood). */
+volatile uint64_t trap_exit_bad_rip_seen;
+
 void restore_user_sp_helper(void) {
   uint32_t cpu = get_cpuid();
   uint64_t v = arch_get_user_sp();
@@ -2928,6 +2979,16 @@ __asm__(
 "    /* Pop Vector and Error Code (16 bytes) */\n"
 "    add rsp, 16\n"
 "    \n"
+"    /* GB-057: before the iretq, ask whether the frame about to be consumed\n"
+"       is a legal return.  rsp points at the hardware frame; rax/rcx are\n"
+"       scratch and are preserved, and the two pushes keep the stack\n"
+"       16-byte aligned for the call. */\n"
+"    push rax\n"
+"    push rcx\n"
+"    lea rdi, [rsp + 16]\n"
+"    call trap_exit_frame_check\n"
+"    pop rcx\n"
+"    pop rax\n"
 "    iretq\n"
 ".att_syntax prefix\n"
 );
@@ -3036,6 +3097,16 @@ __asm__(
 "    mov rax, [rsp]\n"
 "    add rsp, 264\n"
 "    add rsp, 16\n"
+"    /* GB-057: before the iretq, ask whether the frame about to be consumed\n"
+"       is a legal return.  rsp points at the hardware frame; rax/rcx are\n"
+"       scratch and are preserved, and the two pushes keep the stack\n"
+"       16-byte aligned for the call. */\n"
+"    push rax\n"
+"    push rcx\n"
+"    lea rdi, [rsp + 16]\n"
+"    call trap_exit_frame_check\n"
+"    pop rcx\n"
+"    pop rax\n"
 "    iretq\n"
 ".att_syntax prefix\n"
 );
