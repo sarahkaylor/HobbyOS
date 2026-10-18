@@ -65,6 +65,14 @@ void cpu_halt_record(uint32_t cpu) {
 
 int cpu_is_halted(uint32_t cpu) { return cpu < MAX_CPUS ? cpu_halted[cpu] : 0; }
 
+/* GB-063: latch for the [ALIVE-SET] report (which live slots stop the wave from
+   halting), one per idle stretch and cleared when work is found.  Declared up
+   here because the end-of-wave branch that prints it lives near the top of
+   schedule(): declaring it beside the other idle-path latches (as I first did)
+   put the definition 1,200 lines below its first use, and the gate refused both
+   arches for it. */
+static int alive_reported;
+
 static void resume_returned_halt(int pid) {
   extern void uart_puts_raw(const char *s);
   extern void uart_print_hex_raw(uint64_t v);
@@ -1436,6 +1444,58 @@ void schedule(struct trap_frame *tf, int is_yield) {
       }
     }
 
+    if (any_alive && !alive_reported) {
+      /* GB-063: say WHAT keeps the wave alive, once per idle stretch.
+
+         The predicate below is a negative test -- "anything that is not
+         FREE/EXITED/ALLOCATED/THREAD_DONE is alive" -- so every state added to
+         the enum is silently counted as work by default.  That is how a wave can
+         run 30,179 console lines (probe20) with proc_lock free, no strand and no
+         kernel fault, and still never print `System halt`: a couple of parked
+         slots are enough to keep `!any_alive` false forever.
+
+         This does not change the predicate -- measuring first is the whole point
+         -- it prints the set and annotates the cases that cannot be woken, so the
+         next reader does not need to remember the enum:
+           st: 2=READY 3=RUNNING 4=EXITED 5=BLOCKED 6=WAIT_SPAWN 7=WAIT_CHILD
+               8=FUTEX 9=THREAD_DONE
+         Once per idle stretch (latched, cleared when work is found): probe20
+         printed the same slot 1,185 times with a window-based limiter. */
+      alive_reported = 1;
+      uart_puts(
+          "[ALIVE-SET] no READY work, yet the scheduler counts live work (the "
+          "predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no "
+          "halt. Live slots:\n");
+      for (int i = 0; i < MAX_PROCESSES; i++) {
+        int st = proc_table[i].state;
+        if (st == PROC_STATE_FREE || st == PROC_STATE_EXITED ||
+            st == PROC_STATE_ALLOCATED || st == PROC_STATE_THREAD_DONE)
+          continue;
+        int claimer = -1;
+        for (int c = 0; c < MAX_CPUS; c++)
+          if (cpu_current_pids[c] == i)
+            claimer = c;
+        uart_puts("  [ALIVE-SET] slot=");
+        print_int(i);
+        uart_puts(" pid=");
+        print_int(proc_table[i].pid);
+        uart_puts(" st=");
+        print_int(st);
+        uart_puts(" parent=");
+        print_int(proc_table[i].parent_pid);
+        uart_puts(" claimed_by=");
+        print_int(claimer);
+        uart_puts(" ");
+        uart_puts(proc_table[i].name);
+        if (st == PROC_STATE_RUNNING && claimer < 0)
+          uart_puts("  <-- RUNNING with NO cpu on it (stale claim)");
+        else if ((st == PROC_STATE_WAIT_SPAWN || st == PROC_STATE_WAIT_CHILD) &&
+                 proc_table[i].parent_pid <= 0)
+          uart_puts("  <-- parked WAIT with no parent to deliver the wake");
+        uart_puts("\n");
+      }
+    }
+
     if (!any_alive) {
       set_current_process_pid(cpu, -1);
       /* P2.2 (S2): no user context will run here; never keep an AS (whose
@@ -2794,6 +2854,8 @@ void start_scheduler(void) {
         /* ...and the parked-WAIT latch with it, for the same reason: the report
            is per idle stretch, not per window. */
         reap_reported = 0;
+        /* ...and the [ALIVE-SET] latch: a new stretch deserves a fresh report. */
+        alive_reported = 0;
 
         if (proc_table[i].as)
           vm_arch_switch(proc_table[i].as);
