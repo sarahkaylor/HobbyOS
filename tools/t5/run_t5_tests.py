@@ -20,7 +20,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 def discover():
     """Ordered, deduped set of python test scripts to execute."""
     scripts = [os.path.relpath(p, ROOT)
-               for p in glob.glob(os.path.join(ROOT, "tools", "t5", "*_test.py"))]
+               for p in glob.glob(os.path.join(ROOT, "tools", "*", "*_test.py"))]
     # tools-root T5 tests (stable, low churn); NOT run_selfhost_build_test.py
     # (a heavy standalone selfhost run, deliberately outside host_tests).
     scripts += ["tools/evidence_rig_test.py", "tools/perf_game_cycle_test.py"]
