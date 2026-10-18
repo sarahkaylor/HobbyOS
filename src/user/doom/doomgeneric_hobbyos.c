@@ -173,10 +173,14 @@ void DG_SleepMs(uint32_t ms) {
 }
 
 uint32_t DG_GetTicksMs(void) {
-  struct sys_cpuinfo c;
-  if (sysinfo(1, &c, sizeof(c)) == 0)
-    return (uint32_t)c.uptime_ms;
-  return 0;
+  /* NB: the kernel's sysinfo(cmd 1) returns the uptime in ms as its RETURN
+   * VALUE (tf->regs[0] = timer_get_ms()) — it does not fill a buffer and
+   * does not return 0.  Passing a struct and testing ==0 made this always
+   * return 0, so the engine's 35 Hz tic loop never advanced, BuildNewTic
+   * never ran, DG_GetKey was never called, and DOOM froze on the title
+   * screen after WAD load.  Match PONG/clock: sysinfo(1, 0, 0) -> ms. */
+  int ms = sysinfo(1, 0, 0);
+  return ms > 0 ? (uint32_t)ms : 0;
 }
 
 int DG_GetKey(int *pressed, unsigned char *doomKey) {
