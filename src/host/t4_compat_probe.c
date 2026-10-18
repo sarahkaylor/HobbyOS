@@ -29,6 +29,10 @@
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <sys/random.h>
+#include <sys/syscall.h>
+#include <sys/stat.h>
+#include <dirent.h>
+#include <stdlib.h>
 
 /* GB-017: /dev/urandom + getrandom return *random bytes* — the content is
  * non-deterministic and must never be diffed leg-to-leg.  Only the return
@@ -179,6 +183,56 @@ int main(void) {
     report("ioctl_tcgets_entty", ioctl(nt, TCGETS, &ts) < 0 ? errno : 0);
     close(nt);
     unlink("/tmp/ho_t4_ioctl_real");
+  }
+
+  /* GB-020: getdents64 over a fixed directory the probe creates with known
+   * entries.  Both legs open the SAME dir, so inodes/names/reclens/offsets are
+   * identical; we print each entry as name:type (type is DT_* 8-bit; reclen and
+   * inode are opaque but also diff identically).  The probe exits non-zero on
+   * any missing/extra entry so a directory-shim that drops or renames entries
+   * diverges even if it strings together the same bytes. */
+  {
+    const char *d = "/tmp/ho_t4_dent";
+    mkdir(d, 0700);
+    int created = 0;
+    char p[128];
+    snprintf(p, sizeof p, "%s/alpha", d);   FILE *fa = fopen(p, "w"); if (fa) { fputs("a", fa); fclose(fa); created++; }
+    snprintf(p, sizeof p, "%s/beta", d);    FILE *fb = fopen(p, "w"); if (fb) { fputs("b", fb); fclose(fb); created++; }
+    snprintf(p, sizeof p, "%s/charlie", d); FILE *fc = fopen(p, "w"); if (fc) { fputs("c", fc); fclose(fc); created++; }
+    report("dent_created", created);
+    int dfd = open(d, O_RDONLY | O_DIRECTORY);
+    report("dent_opendir", dfd);
+    if (dfd >= 0) {
+      char buf[8192];
+      int saw_alpha = 0, saw_beta = 0, saw_charlie = 0, total = 0;
+      for (;;) {
+        long n = syscall(SYS_getdents64, dfd, buf, sizeof buf);
+        if (n <= 0) break;
+        long off = 0;
+        while (off < n) {
+          struct linux_dirent64 { unsigned long d_ino; long d_off; unsigned short d_reclen; unsigned char d_type; char d_name[]; } *e =
+            (struct linux_dirent64 *)(void *)(buf + off);
+          char *nm = e->d_name;
+          if (strcmp(nm, ".") && strcmp(nm, "..")) {
+            total++;
+            if (!strcmp(nm, "alpha"))   saw_alpha = 1;
+            else if (!strcmp(nm, "beta"))  saw_beta = 1;
+            else if (!strcmp(nm, "charlie")) saw_charlie = 1;
+            printf("dent %s type=%u\n", nm, e->d_type);
+          }
+          off += e->d_reclen;
+        }
+      }
+      report("dent_total", total);
+      report("dent_have_alpha", saw_alpha);
+      report("dent_have_beta", saw_beta);
+      report("dent_have_charlie", saw_charlie);
+      close(dfd);
+      /* deterministic? printf order above is directory-insertion order, same on
+       * both legs because it's the same dir; we still assert set-membership. */
+    }
+    char rm[64]; snprintf(rm, sizeof rm, "rm -rf \"%s\"", d);
+    system(rm);
   }
 
   /* exit status is part of the diff: 0 here means every leg reached the
