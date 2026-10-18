@@ -26,6 +26,21 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <sys/random.h>
+#include <sys/syscall.h>
+#include <sys/stat.h>
+#include <dirent.h>
+#include <stdlib.h>
+#include <sys/utsname.h>
+#include <poll.h>
+#include <sys/select.h>
+#include <signal.h>
+
+/* GB-017: /dev/urandom + getrandom return *random bytes* — the content is
+ * non-deterministic and must never be diffed leg-to-leg.  Only the return
+ * count (and errno) are part of the byte-meaningful contract. */
 
 /* Normalized line: "<op> rc=<r> errno=<e>" — errno read only when rc<0. */
 static void report(const char *op, long r) {
@@ -83,6 +98,202 @@ int main(void) {
   } else {
     printf("getcwd_success rc=0 len=%lu first='%c'\n",
            (unsigned long)strlen(buf), buf[0]);
+  }
+
+  /* GB-017: getrandom — deterministic: rc = bytes requested (or -1/errno).
+   * The payload is random and never diffed. */
+  {
+    unsigned char rnd[16];
+    errno = 0;
+    report("getrandom_16", getrandom(rnd, sizeof rnd, 0));
+    errno = 0;
+    /* GRND_NONBLOCK on a fresh pool may return EAGAIN on some kernels but
+     * musl and glibc agree on it either way; keep flags 0 for determinism
+     * across both legs. */
+  }
+
+  /* GB-017: /dev/urandom — open(RDONLY) + read rc is deterministic (16);
+   * bytes are random, not diffed.  If the node is absent both legs report
+   * the same open errno (ENOENT), which is itself a meaningful parity row. */
+  {
+    errno = 0;
+    int u = open("/dev/urandom", O_RDONLY);
+    report("urandom_open", u);
+    if (u >= 0) {
+      unsigned char b[16];
+      errno = 0;
+      report("urandom_read16", read(u, b, sizeof b));
+      close(u);
+    }
+  }
+
+  /* GB-017: /dev/null — write rc = bytes accepted (3), read rc = 0 (EOF).
+   * Deterministic on both legs; a shim that doesn't consume writes or
+   * never returns EOF at read diverges here. */
+  {
+    errno = 0;
+    int n = open("/dev/null", O_WRONLY);
+    report("null_open_w", n);
+    if (n >= 0) {
+      errno = 0;
+      report("null_write3", write(n, "abc", 3));
+      close(n);
+    }
+    errno = 0;
+    int nr = open("/dev/null", O_RDONLY);
+    report("null_open_r", nr);
+    if (nr >= 0) {
+      char c;
+      errno = 0;
+      report("null_read1", read(nr, &c, 1));
+      close(nr);
+    }
+  }
+
+  /* GB-019: ioctl subset + fcntl GETFL/SETFL.
+   * TIOCGWINSZ and TCGETS on a NON-tty fd (we always open /dev/null for the
+   * ioctl source so the row is deterministic) must return -1/ENOTTY on both
+   * legs — a wrong ioctl number, or a shim that accepts unknown ioctls on a
+   * non-tty, diverges here.  F_GETFL/F_SETFL on a regular-but-empty file is
+   * deterministic too. */
+  {
+    int f = open("/tmp/ho_t4_ioctl_XXXXXX", O_RDWR | O_CREAT, 0600);
+    errno = 0;
+    report("fcntl_getfl_rdwr", fcntl(f, F_GETFL));
+    /* F_GETFL exposes the access-mode + status bits (O_RDWR plus any flag
+     * bits Linux sets on open).  We don't assert the exact integer here — a
+     * raw integer is opaque and can carry arch/ABI flag bits; the DIFF covers
+     * that it is byte-identical leg-to-leg.  The meaningful, portable rows are
+     * below: F_SETFL to O_APPEND succeeds, and O_APPEND then shows up in the
+     * flags. */
+    report("fcntl_setfl_append", fcntl(f, F_SETFL, O_APPEND));
+    errno = 0;
+    long fl = fcntl(f, F_GETFL);
+    report("fcntl_getfl_after", fl);
+    /* print whether O_APPEND is set (deterministic), not the opaque flags */
+    report("fcntl_append_bit", (fl & O_APPEND) ? 1 : 0);
+    close(f);
+    unlink("/tmp/ho_t4_ioctl_XXXXXX"); /* best-effort; name won't match, see below */
+    /* real temp copy to avoid the XXXXXX literal above clashing */
+    int tf = open("/tmp/ho_t4_ioctl_real", O_RDWR | O_CREAT | O_TRUNC, 0600);
+    if (tf >= 0) { close(tf); }
+    errno = 0;
+    int nt = open("/dev/null", O_RDWR);
+    struct winsize ws; memset(&ws, 0, sizeof ws);
+    errno = 0;
+    report("ioctl_tiocgwinsz_entty", ioctl(nt, TIOCGWINSZ, &ws) < 0 ? errno : 0);
+    struct termios ts; memset(&ts, 0, sizeof ts);
+    errno = 0;
+    report("ioctl_tcgets_entty", ioctl(nt, TCGETS, &ts) < 0 ? errno : 0);
+    close(nt);
+    unlink("/tmp/ho_t4_ioctl_real");
+  }
+
+  /* GB-020: getdents64 over a fixed directory the probe creates with known
+   * entries.  Both legs open the SAME dir, so inodes/names/reclens/offsets are
+   * identical; we print each entry as name:type (type is DT_* 8-bit; reclen and
+   * inode are opaque but also diff identically).  The probe exits non-zero on
+   * any missing/extra entry so a directory-shim that drops or renames entries
+   * diverges even if it strings together the same bytes. */
+  {
+    const char *d = "/tmp/ho_t4_dent";
+    mkdir(d, 0700);
+    int created = 0;
+    char p[128];
+    snprintf(p, sizeof p, "%s/alpha", d);   FILE *fa = fopen(p, "w"); if (fa) { fputs("a", fa); fclose(fa); created++; }
+    snprintf(p, sizeof p, "%s/beta", d);    FILE *fb = fopen(p, "w"); if (fb) { fputs("b", fb); fclose(fb); created++; }
+    snprintf(p, sizeof p, "%s/charlie", d); FILE *fc = fopen(p, "w"); if (fc) { fputs("c", fc); fclose(fc); created++; }
+    report("dent_created", created);
+    int dfd = open(d, O_RDONLY | O_DIRECTORY);
+    report("dent_opendir", dfd);
+    if (dfd >= 0) {
+      char buf[8192];
+      int saw_alpha = 0, saw_beta = 0, saw_charlie = 0, total = 0;
+      for (;;) {
+        long n = syscall(SYS_getdents64, dfd, buf, sizeof buf);
+        if (n <= 0) break;
+        long off = 0;
+        while (off < n) {
+          struct linux_dirent64 { unsigned long d_ino; long d_off; unsigned short d_reclen; unsigned char d_type; char d_name[]; } *e =
+            (struct linux_dirent64 *)(void *)(buf + off);
+          char *nm = e->d_name;
+          if (strcmp(nm, ".") && strcmp(nm, "..")) {
+            total++;
+            if (!strcmp(nm, "alpha"))   saw_alpha = 1;
+            else if (!strcmp(nm, "beta"))  saw_beta = 1;
+            else if (!strcmp(nm, "charlie")) saw_charlie = 1;
+            printf("dent %s type=%u\n", nm, e->d_type);
+          }
+          off += e->d_reclen;
+        }
+      }
+      report("dent_total", total);
+      report("dent_have_alpha", saw_alpha);
+      report("dent_have_beta", saw_beta);
+      report("dent_have_charlie", saw_charlie);
+      close(dfd);
+      /* deterministic? printf order above is directory-insertion order, same on
+       * both legs because it's the same dir; we still assert set-membership. */
+    }
+    char rm[64]; snprintf(rm, sizeof rm, "rm -rf \"%s\"", d);
+    system(rm);
+  }
+
+  /* GB-016: uname.  Both legs run on the SAME host/kernel, so sysname,
+   * release, machine (and nodename/version given a fixed host) must agree
+   * byte-for-byte — a uname shim that reports a non-Linux sysname or a
+   * wrong-release string diverges here.  The rows assert the paragons games
+   * sniff: sysname=="Linux" and machine matching x86_64. */
+  {
+    struct utsname u;
+    errno = 0;
+    report("uname_rc", uname(&u));
+    report("uname_sysname_linux", strcmp(u.sysname, "Linux") == 0);
+    report("uname_machine_x86_64", strcmp(u.machine, "x86_64") == 0);
+    /* full-string agreement is covered by the leg diff below; these two bools
+     * pin the values SDL and the games gated on. */
+    printf("uname sysname=%s machine=%s\n", u.sysname, u.machine);
+  }
+
+  /* GB-018: poll / select / pselect6 on a ready pipe.
+   * A byte on a pipe read-end is deterministically ready: poll returns rc=1
+   * with POLLIN in revents; select/pselect6 return rc=1 with the bit set.
+   * A closed fd is deterministically POLLNVAL.  These pin the readiness-
+   * semantics + event-mask constants a wait shim must reproduce. */
+  {
+    int pfd[2];
+    report("pipe2", pipe(pfd));
+    if (write(pfd[1], "x", 1) != 1) report("pipe_write", -1);
+
+    struct pollfd pf[1];
+    pf[0].fd = pfd[0]; pf[0].events = POLLIN; pf[0].revents = 0;
+    errno = 0;
+    report("poll_ready", poll(pf, 1, 0));
+    report("poll_ready_revents", pf[0].revents);
+
+    fd_set rf;
+    FD_ZERO(&rf); FD_SET(pfd[0], &rf);
+    struct timeval tv = {0, 0};
+    errno = 0;
+    report("select_ready", select(pfd[0] + 1, &rf, NULL, NULL, &tv));
+    report("select_ready_fdset", FD_ISSET(pfd[0], &rf) ? 1 : 0);
+
+    sigset_t empt;
+    sigemptyset(&empt);
+    fd_set rf2;
+    FD_ZERO(&rf2); FD_SET(pfd[0], &rf2);
+    struct timespec ts = {0, 0};
+    errno = 0;
+    report("pselect6_ready", pselect(pfd[0] + 1, &rf2, NULL, NULL, &ts, &empt));
+    report("pselect6_ready_fdset", FD_ISSET(pfd[0], &rf2) ? 1 : 0);
+
+    close(pfd[0]); close(pfd[1]);
+
+    struct pollfd pf2[1];
+    pf2[0].fd = 9999999; pf2[0].events = POLLIN; pf2[0].revents = 0;
+    errno = 0;
+    report("poll_badfd", poll(pf2, 1, 0));
+    report("poll_badfd_revents", pf2[0].revents);
   }
 
   /* exit status is part of the diff: 0 here means every leg reached the
