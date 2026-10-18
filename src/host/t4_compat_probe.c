@@ -26,6 +26,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/random.h>
+
+/* GB-017: /dev/urandom + getrandom return *random bytes* — the content is
+ * non-deterministic and must never be diffed leg-to-leg.  Only the return
+ * count (and errno) are part of the byte-meaningful contract. */
 
 /* Normalized line: "<op> rc=<r> errno=<e>" — errno read only when rc<0. */
 static void report(const char *op, long r) {
@@ -83,6 +88,56 @@ int main(void) {
   } else {
     printf("getcwd_success rc=0 len=%lu first='%c'\n",
            (unsigned long)strlen(buf), buf[0]);
+  }
+
+  /* GB-017: getrandom — deterministic: rc = bytes requested (or -1/errno).
+   * The payload is random and never diffed. */
+  {
+    unsigned char rnd[16];
+    errno = 0;
+    report("getrandom_16", getrandom(rnd, sizeof rnd, 0));
+    errno = 0;
+    /* GRND_NONBLOCK on a fresh pool may return EAGAIN on some kernels but
+     * musl and glibc agree on it either way; keep flags 0 for determinism
+     * across both legs. */
+  }
+
+  /* GB-017: /dev/urandom — open(RDONLY) + read rc is deterministic (16);
+   * bytes are random, not diffed.  If the node is absent both legs report
+   * the same open errno (ENOENT), which is itself a meaningful parity row. */
+  {
+    errno = 0;
+    int u = open("/dev/urandom", O_RDONLY);
+    report("urandom_open", u);
+    if (u >= 0) {
+      unsigned char b[16];
+      errno = 0;
+      report("urandom_read16", read(u, b, sizeof b));
+      close(u);
+    }
+  }
+
+  /* GB-017: /dev/null — write rc = bytes accepted (3), read rc = 0 (EOF).
+   * Deterministic on both legs; a shim that doesn't consume writes or
+   * never returns EOF at read diverges here. */
+  {
+    errno = 0;
+    int n = open("/dev/null", O_WRONLY);
+    report("null_open_w", n);
+    if (n >= 0) {
+      errno = 0;
+      report("null_write3", write(n, "abc", 3));
+      close(n);
+    }
+    errno = 0;
+    int nr = open("/dev/null", O_RDONLY);
+    report("null_open_r", nr);
+    if (nr >= 0) {
+      char c;
+      errno = 0;
+      report("null_read1", read(nr, &c, 1));
+      close(nr);
+    }
   }
 
   /* exit status is part of the diff: 0 here means every leg reached the
