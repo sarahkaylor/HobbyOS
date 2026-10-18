@@ -3293,6 +3293,8 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	python3 tools/t5/feasibility_doc_test.py
 	@echo "[host] tools/t5/flaky_triage_test.py (GB-050 flaky-test triage core)"
 	python3 tools/t5/flaky_triage_test.py
+	@echo "[host] tools/t5/game_docs_test.py (GB-052 game docs + user guide)"
+	python3 tools/t5/game_docs_test.py
 	$(HOST_RUN) ./$(NES_TEST)
 	$(HOST_RUN) ./$(GUI_TEST)
 	$(HOST_RUN) ./$(ERRNO_TEST)
