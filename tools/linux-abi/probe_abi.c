@@ -214,6 +214,16 @@ int main(void) {
   printf("ABS_X=0x%x ABS_Y=0x%x REL_X=0x%x REL_Y=0x%x REL_WHEEL=0x%x\n",
          ABS_X, ABS_Y, REL_X, REL_Y, REL_WHEEL);
   printf("KEY_A=%d KEY_ENTER=%d KEY_ESC=%d KEY_SPACE=%d\n", KEY_A, KEY_ENTER, KEY_ESC, KEY_SPACE);
+  /* GB-042 gamepad/joystick: the evdev BTN_ and ABS_ codes a gamepad node
+   * exposes (which src/include/linux_joystick.h locks against <linux/input.h>
+   * in joypad_test_host).  Print them here so the header's numbers are
+   * reproducible from the canonical measurement tool, not memory. */
+  printf("GAMEPAD BTN_A=0x%x BTN_B=0x%x BTN_X=0x%x BTN_Y=0x%x BTN_TL=0x%x BTN_TR=0x%x BTN_TL2=0x%x BTN_TR2=0x%x\n",
+         BTN_A, BTN_B, BTN_X, BTN_Y, BTN_TL, BTN_TR, BTN_TL2, BTN_TR2);
+  printf("GAMEPAD BTN_SELECT=0x%x BTN_START=0x%x BTN_MODE=0x%x BTN_THUMBL=0x%x BTN_THUMBR=0x%x\n",
+         BTN_SELECT, BTN_START, BTN_MODE, BTN_THUMBL, BTN_THUMBR);
+  printf("GAMEPAD ABS_X=0x%x ABS_Y=0x%x ABS_Z=0x%x ABS_RX=0x%x ABS_RY=0x%x ABS_RZ=0x%x ABS_HAT0X=0x%x ABS_HAT0Y=0x%x\n",
+         ABS_X, ABS_Y, ABS_Z, ABS_RX, ABS_RY, ABS_RZ, ABS_HAT0X, ABS_HAT0Y);
 
   printf("\n=== ELF/auxv/proc constants ==================================\n");
   printf("AT_NULL=%d AT_PHDR=%d AT_PHNUM=%d AT_PAGESZ=%d AT_ENTRY=%d AT_BASE=%d AT_EXECFN=%d AT_RANDOM=%d AT_HWCAP=%d AT_SYSINFO_EHDR=%d\n",

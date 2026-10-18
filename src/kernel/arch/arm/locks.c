@@ -1,4 +1,5 @@
 #include "lock.h"
+#include "process.h" /* MAX_CPUS + LOSTWAKE_DEAD_OWNER_MS: the shared definition of a dead owner (GB-060) */
 
 extern void uart_puts_raw(const char *s);
 extern void uart_print_hex_raw(uint64_t v);
@@ -26,6 +27,40 @@ void spinlock_init(spinlock_t *lock) {
 /* Per-CPU memo of the last lock address this CPU already reported, so a
    permanently-stuck spinner prints once instead of flooding the console. */
 static volatile uint64_t ld_reported[64];
+
+/* GB-060: the steal decision, in ONE place (mirrors the x64 implementation so
+   the two arches cannot drift in the rule that decides whether a lock may be
+   freed).  A lock is freed only when its recorded owner is a CPU recorded as
+   halted -- never because time passed. */
+int lock_steal_ok(uint32_t owner_slot, uint32_t cpu) {
+  extern int cpu_is_halted(uint32_t cpu);
+  if (owner_slot == 0)
+    return 0; /* free / unowned */
+  if ((owner_slot - 1) == cpu)
+    return 0; /* our own lock: a self-deadlock is a different bug */
+  return cpu_is_halted(owner_slot - 1);
+}
+
+/* GB-060 second shape (wedged-alive holder) -- mirrors the x64 rule so the two
+   arches cannot drift: a lock is broken out of when its recorded owner has
+   stopped taking timer interrupts for LOSTWAKE_DEAD_OWNER_MS (the same constant
+   the lost-owner reaper uses).  `now_ms` is injected for testability. */
+int lock_stallbreak_ok(uint32_t owner_slot, uint32_t cpu, uint64_t now_ms) {
+  extern int cpu_is_halted(uint32_t cpu);
+  extern volatile uint64_t cpu_heartbeat_ms[];
+  if (owner_slot == 0)
+    return 0;
+  if ((owner_slot - 1) == cpu)
+    return 0;
+  if (owner_slot - 1 >= MAX_CPUS)
+    return 0;
+  if (cpu_is_halted(owner_slot - 1))
+    return 1;
+  uint64_t hb = cpu_heartbeat_ms[owner_slot - 1];
+  if (hb == 0)
+    return 0;
+  return (now_ms - hb) >= LOSTWAKE_DEAD_OWNER_MS;
+}
 
 __attribute__((noinline)) static void spin_slow(spinlock_t *lock, uint64_t ra) {
   uint32_t cpu = get_cpuid();
@@ -56,6 +91,44 @@ __attribute__((noinline)) static void spin_slow(spinlock_t *lock, uint64_t ra) {
         uart_print_hex_raw(ra);
         uart_puts_raw("\n");
       }
+      /* GB-060: if the recorded owner is a CPU that has halted, free the lock and
+         go back to contending for it normally.  Freeing-then-re-acquiring (rather
+         than "taking" it here) is what keeps exactly one winner when several
+         waiters spot the same dead owner at once -- mutual exclusion is the one
+         property that must not be negotiated.  A live-but-slow owner is never
+         touched: only a recorded halt wins this, never elapsed time. */
+      {
+        extern int cpu_is_halted(uint32_t cpu);
+        uint32_t own = lock->owner;
+        if (lock_steal_ok(own, cpu)) {
+          uart_puts_raw("[STOLEN] cpu=");
+          uart_print_hex_raw(cpu);
+          uart_puts_raw(" lock=");
+          uart_print_hex_raw((uint64_t)(uintptr_t)lock);
+          uart_puts_raw(" from halted cpu=");
+          uart_print_hex_raw(own - 1);
+          uart_puts_raw("\n");
+          lock->owner = 0;
+          __asm__ volatile("stlr wzr, [%0]\n" ::"r"(&lock->locked) : "memory");
+        } else {
+          extern uint64_t timer_get_ms(void);
+          extern volatile uint64_t cpu_heartbeat_ms[];
+          uint64_t now = timer_get_ms();
+          if (lock_stallbreak_ok(own, cpu, now)) {
+            uart_puts_raw("[STALLBREAK] cpu=");
+            uart_print_hex_raw(cpu);
+            uart_puts_raw(" lock=");
+            uart_print_hex_raw((uint64_t)(uintptr_t)lock);
+            uart_puts_raw(" owner_cpu=");
+            uart_print_hex_raw(own - 1);
+            uart_puts_raw(" stale_ms=");
+            uart_print_hex_raw(now - cpu_heartbeat_ms[own - 1]);
+            uart_puts_raw("\n");
+            lock->owner = 0;
+            __asm__ volatile("stlr wzr, [%0]\n" ::"r"(&lock->locked) : "memory");
+          }
+        }
+      }
     }
   }
 }
@@ -74,6 +147,10 @@ __attribute__((noinline)) static void spin_acquire_impl(spinlock_t *lock, uint64
   if (tmp != 0) {
     spin_slow(lock, ra);
   }
+  /* GB-060: record the holder (cpu+1, 0 = unowned).  Placed here rather than in
+     spinlock_acquire() so it also covers spinlock_acquire_irqsave(), which calls
+     this impl directly -- one place that knows the acquisition succeeded. */
+  lock->owner = get_cpuid() + 1;
 }
 
 /**
@@ -91,11 +168,25 @@ void spinlock_acquire(spinlock_t *lock) {
  * memory operations are visible before the lock is freed.
  */
 void spinlock_release(spinlock_t *lock) {
+  /* GB-060: clear the owner BEFORE the release-store, so a CPU that finds the
+     lock free never sees a stale holder. */
+  lock->owner = 0;
   __asm__ volatile(
       "stlr wzr, [%0]\n"           // Store-Release 0
       :
       : "r"(&lock->locked)
       : "memory");
+}
+
+/* GB-060: release a lock ONLY if this CPU is its recorded owner.
+   A fatal path must be able to hand a stranded lock back without ever freeing a
+   lock somebody else holds -- that would turn a stall into a data race. */
+int spinlock_release_if_held_by_me(spinlock_t *lock) {
+  uint32_t me = get_cpuid() + 1;
+  if (lock->owner != me)
+    return 0;
+  spinlock_release(lock);
+  return 1;
 }
 
 /**

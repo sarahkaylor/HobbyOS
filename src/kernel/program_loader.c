@@ -733,13 +733,40 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     process_free(pid);
     return -ENOENT;
   }
-  if (v2_map_image(as, &f, fsize) != 0) {
+  /* GB-013 (ELF loader, docs/elf-loader.md §2): dispatch on the first four
+     bytes.  0x7fELF -> the ELF mapper (x86_64 only; ARM never loads ELF);
+     anything else -> the existing flat .bin loader, unchanged.  Peek the
+     magic 4 bytes into a tiny scratch and branch. */
+  int is_elf = 0;
+#ifdef __x86_64__
+  {
+    uint64_t magicw = 0;
+    /* dest is a physical address integer; &magicw is a stack VA == phys
+       (kernel direct map), so the read lands in the local. */
+    if (fat16_read_direct_pos(f.fat16.entry.start_cluster, fsize,
+                              (uint64_t)&magicw, 4, 0) == 4) {
+      uint8_t *mb = (uint8_t *)&magicw; /* little-endian: bytes 0..3 = magic */
+      is_elf = (mb[0] == 0x7f && mb[1] == 'E' && mb[2] == 'L' && mb[3] == 'F');
+    }
+  }
+#endif
+  uint64_t elf_entry = 0;
+  if (is_elf) {
+    /* ELF mapper: parse + plan + map.  On success *elf_entry = base+e_entry
+       and the process below is marked PROC_FLAG_LINUX_ABI. */
+    int erc = elf_loader_load(as, f.fat16.entry.start_cluster, fsize, &elf_entry);
+    fat16_close(&f);
+    if (erc != 0) {
+      process_free(pid);
+      return erc; /* -ENOEXEC / -ENOMEM / -ENOSPC */
+    }
+  } else if (v2_map_image(as, &f, fsize) != 0) {
     fat16_close(&f);
     process_free(pid);
     return -ENOEXEC;
+  } else {
+    fat16_close(&f);
   }
-  fat16_close(&f);
-
   /* Main-stack region (the 64 KiB guard below stays a hole).  S3: demand
      materializes every stack page on first touch, so the loader only
      creates the region -- the old eager top-64-KiB commit is gone (the
@@ -767,14 +794,24 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
   }
 
 #ifdef __x86_64__
-  process_set_entry(pid, USER_IMG_BASE, USER_MAIN_STK_TOP_V2 - 8);
+  if (is_elf) {
+    /* GB-013: the ELF mapper set the runtime entry (base+e_entry).  Mark the
+       process Linux-ABI so its x86_64 syscall traps route to the compat table
+       (GB-014).  The startup stack (argc/argv/envp/auxv) is laid down by the
+       mapper's caller-side contract (docs/linux-abi.md §1) before first run;
+       here we only set PC/SP to the v2 stack top. */
+    child->abi_flags |= PROC_FLAG_LINUX_ABI;
+    process_set_entry(pid, elf_entry, USER_MAIN_STK_TOP_V2 - 8);
+  } else {
+    process_set_entry(pid, USER_IMG_BASE, USER_MAIN_STK_TOP_V2 - 8);
+  }
 #else
   process_set_entry(pid, USER_IMG_BASE, USER_MAIN_STK_TOP_V2);
 #endif
   uart_puts("v2 loader: PID=");
   print_int(pid);
   uart_puts(" entry=");
-  uart_print_hex(USER_IMG_BASE);
+  uart_print_hex(is_elf ? elf_entry : USER_IMG_BASE);
   uart_puts(" sp=");
   uart_print_hex(USER_MAIN_STK_TOP_V2);
   uart_puts(" resident=");

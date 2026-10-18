@@ -583,6 +583,9 @@ SED_OBJS = $(addprefix $(OBJ_DIR)/sed_,$(addsuffix .o,$(SED_CORE_NAMES))) $(addp
 NANO_SRC_NAMES = browser chars color cut files global help history move nano prompt rcfile search text utils winio
 NANO_OBJS = $(addprefix $(OBJ_DIR)/nano_,$(addsuffix .o,$(NANO_SRC_NAMES))) $(OBJ_DIR)/nano_hb_curses.o
 NANO_BIN = $(OBJ_DIR)/nano.bin
+XCRYPT_BIN = $(OBJ_DIR)/xcrypt.bin
+# Compact NES emulator (GB-035): HobbyOS shell (main.c) + pure-C core (nes.c).
+NES_BIN = $(OBJ_DIR)/nes.bin
 # GNU make 4.4.1 port: the upstream transcription in src/user/make/
 # (byte-identical except the hand-pinned src/user/make/config.h +
 # src/user/make/hb_stubs.c glue; see docs/selfhost/buildtools-audit.md S3
@@ -676,6 +679,7 @@ CALC_BIN = $(OBJ_DIR)/calc.bin
 XCALC_BIN = $(OBJ_DIR)/xcalc.bin
 ANTFARM_BIN = $(OBJ_DIR)/antfarm.bin
 XEYES_BIN = $(OBJ_DIR)/xeyes.bin
+XNIBBLER_BIN = $(OBJ_DIR)/xnibbler.bin
 CLOCK_BIN = $(OBJ_DIR)/clock.bin
 SYSMON_BIN = $(OBJ_DIR)/sysmon.bin
 HEX_BIN = $(OBJ_DIR)/hex.bin
@@ -1530,6 +1534,28 @@ $(NANO_BIN): $(NANO_OBJS) $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/nano.elf $(NANO_OBJS) $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/nano.elf $(NANO_BIN)
 
+# --- xcrypt: the roguelike on the curses port (GB-036) -------------------
+# An original compact roguelike rendered through hb_curses.c (the curses
+# shim nano ships), tiling as a desktop terminal window.  Board logic is
+# host-testable (src/host/xcrypt_test.c).  Links the curses shim + libc.a.
+$(OBJ_DIR)/xcrypt.o: src/user/rogue/xcrypt.c src/user/nano/curses.h $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -Isrc/user/nano -c $< -o $@
+$(XCRYPT_BIN): $(OBJ_DIR)/xcrypt.o $(OBJ_DIR)/nano_hb_curses.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/xcrypt.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/xcrypt.elf $(XCRYPT_BIN)
+
+# --- NES emulator (GB-035) ---------------------------------------------
+$(OBJ_DIR)/nescore.o: src/user/nes/nes.c src/user/nes/nes.h $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -Isrc/user/nes -c $< -o $@
+$(OBJ_DIR)/nesmain.o: src/user/nes/main.c src/user/nes/nes.h src/user/nes/homebrew_rom.h $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -Isrc/user/nes -c $< -o $@
+$(NES_BIN): $(OBJ_DIR)/nesmain.o $(OBJ_DIR)/nescore.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/nes.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/nes.elf $(NES_BIN)
+
 # --- GNU sed 4.8 (multi-object GNU port; objects named sed_/sedg_) ------
 $(OBJ_DIR)/sed_%.o: src/user/sed/%.c src/user/sed/config.h src/user/sed/*.h src/user/sed/gnulib/*.h $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
@@ -1921,6 +1947,17 @@ $(XEYES_BIN): $(OBJ_DIR)/xeyes_main.o $(X11_LIB_OBJS) $(OBJ_DIR)/libc.a
 	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/xeyes.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/xeyes.elf $(XEYES_BIN)
 
+# --- xnibbler: the X11 support library's fourth application -------------
+# The original nibbler/Snake arcade game (clean-room implementation of the
+# 1982-1990s X11 genre classic); board logic host-tested, entry point forks
+# + pipes into xnibbler_main.  Linked against the X11 lib like the others.
+$(OBJ_DIR)/xnibbler_main.o: src/user/x11/apps/xnibbler/main.c src/user/x11/*.h src/user/x11/include/X11/*.h $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(X11_INC) -c $< -o $@
+$(XNIBBLER_BIN): $(OBJ_DIR)/xnibbler_main.o $(X11_LIB_OBJS) $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/xnibbler.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/xnibbler.elf $(XNIBBLER_BIN)
+
 # --- P6.2 (browser.md §6): SQLite target port ---------------------------
 # The pinned amalgamation (3.49.2.0) built for both arches with
 # SQLITE_OS_OTHER=1 — src/user/sqlite_os.c is the whole OS port: one VFS
@@ -1941,7 +1978,8 @@ SQLTEST_BIN = $(OBJ_DIR)/sqltest.bin
 # .EXTRA_PREREQS (GNU make >= 4.3) keeps it out of $^ -- a plain
 # prerequisite would be passed to ld.lld AS AN INPUT FILE by the
 # recipes' $^.  Names undefined in this config expand to nothing.
-$(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(SPAWN_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(NETFIX_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(APPS_T_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(DNSTST_BIN) $(CXXSMOKE_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(IPC_T_BIN) $(MMTEST_T_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(ICU_SMOKE_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(BLKTEST_BIN) $(RANDTST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(NANO_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(PIPEPROBE_BIN) $(SUBPRB_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(STARDUST_BIN) $(FILES_BIN) $(CALC_BIN) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(CLOCK_BIN) $(SYSMON_BIN) $(HEX_BIN) $(TASKS_BIN) $(FIND_BIN) $(DIFF_BIN) $(NOTES_BIN) $(UNIT_BIN) $(WK1C_T_BIN) $(FILEDIALOG_ARROW_T_BIN) $(DIALOG_TEST_BIN) $(SQLTEST_BIN): .EXTRA_PREREQS += src/user/linker.ld
+$(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(SPAWN_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(NETFIX_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(APPS_T_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(DNSTST_BIN) $(CXXSMOKE_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(IPC_T_BIN) $(MMTEST_T_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(ICU_SMOKE_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(BLKTEST_BIN) $(RANDTST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(NANO_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(PIPEPROBE_BIN) $(SUBPRB_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(STARDUST_BIN) $(FILES_BIN) $(CALC_BIN) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(XNIBBLER_BIN) $(CLOCK_BIN) $(SYSMON_BIN) $(HEX_BIN) $(TASKS_BIN) $(FIND_BIN) $(DIFF_BIN) $(NOTES_BIN) $(UNIT_BIN) $(WK1C_T_BIN) $(FILEDIALOG_ARROW_T_BIN) $(DIALOG_TEST_BIN) $(SQLTEST_BIN): .EXTRA_PREREQS += src/user/linker.ld $(XCRYPT_BIN)
+
 
 $(SQLITE_DIR)/sqlite3.c:
 	cd third_party && sha256sum -c sqlite-amalgamation-3490200.zip.sums && \
@@ -1987,11 +2025,12 @@ disk.img: $(TAR_BIN)
 # browser rules).
 disk.img: browser-staged tools-staged
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(BLKTEST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(STARDUST_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(SELFHOST_BIN) $(MODE_FILE)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(BLKTEST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(STARDUST_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(XNIBBLER_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(SELFHOST_BIN) $(MODE_FILE) $(XCRYPT_BIN) $(NES_BIN)
 
 # w2-mtools disk
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(BLKTEST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(STARDUST_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(MCOPY_BIN) $(MDEL_BIN) $(MMD_BIN) $(MODE_FILE)  # w2-mtools deps (union: MAKE_BIN + SELFHOST_BIN ride their own lines above)
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(BLKTEST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(STARDUST_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(NANO_BIN) $(MKFSFAT_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(MODE_FILE)  # w2-mkfs deps
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(BLKTEST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(STARDUST_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(XNIBBLER_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(MCOPY_BIN) $(MDEL_BIN) $(MMD_BIN) $(MODE_FILE) $(XCRYPT_BIN) # w2-mtools deps (union: MAKE_BIN + SELFHOST_BIN ride their own lines above)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(BLKTEST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(STARDUST_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(XNIBBLER_BIN) $(NANO_BIN) $(MKFSFAT_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(MODE_FILE) $(XCRYPT_BIN) # w2-mkfs deps
+
 	# Startup disk: 1 GiB (user-requested floor; FAT16 tops out at 2 GiB).
 	# mkfs.fat auto-picks the cluster size (32 KiB @ 1 GiB); the kernel
 	# fat16.c layout math is BPB data-driven (bpb_sectors_per_cluster), so
@@ -2189,6 +2228,7 @@ endif
 	$(MCOPY) -i disk.img $(XCALC_BIN) ::/XCALC.BIN
 	$(MCOPY) -i disk.img $(ANTFARM_BIN) ::/ANTFARM.BIN
 	$(MCOPY) -i disk.img $(XEYES_BIN) ::/XEYES.BIN
+	$(MCOPY) -i disk.img $(XNIBBLER_BIN) ::/XNIBBLER.BIN
 	$(MCOPY) -i disk.img $(CLOCK_BIN) ::/CLOCK.BIN
 	$(MCOPY) -i disk.img $(SYSMON_BIN) ::/SYSMON.BIN
 	$(MCOPY) -i disk.img $(HEX_BIN) ::/HEX.BIN
@@ -2198,6 +2238,8 @@ endif
 	$(MCOPY) -i disk.img $(NOTES_BIN) ::/NOTES.BIN
 	$(MCOPY) -i disk.img $(UNIT_BIN) ::/UNIT.BIN
 	$(MCOPY) -i disk.img $(NANO_BIN) ::/NANO.BIN
+	$(MCOPY) -i disk.img $(XCRYPT_BIN) ::/XCRYPT.BIN
+	$(MCOPY) -i disk.img $(NES_BIN) ::/NES.BIN
 	# Selfhost W2 (mtools port): in-OS /TOOLS copies of the ported
 	# build-tools (8.3 names, the frozen F1 layout).
 	$(MCOPY) -i disk.img $(MCOPY_BIN) ::/TOOLS/MCOPY.BIN
@@ -2469,6 +2511,15 @@ obj/host_xeyes_test.o: src/host/xeyes_test.c src/user/x11/apps/xeyes/main.c src/
 $(XEYES_TEST): obj/host_xeyes_test.o obj/host_user_x11_xlib_display.o obj/host_user_x11_xlib_window.o obj/host_user_x11_xlib_draw.o obj/host_user_x11_xlib_event.o obj/host_user_graphics_graphics.o obj/host_compat.o
 	$(HOST_CC) -o $@ $^
 
+# xnibbler: the nibbler/Snake port -- the board logic (reset / step / turn /
+# food / wall / self-collision), driven directly with no X or display.
+XNIBBLER_TEST = xnibbler_test_host
+obj/host_xnibbler_test.o: src/host/xnibbler_test.c src/user/x11/apps/xnibbler/main.c src/user/x11/*.h src/user/x11/include/X11/*.h src/user_include/*.h src/user_include/graphics/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) $(X11_INC) -Isrc/user/x11 -c $< -o $@
+$(XNIBBLER_TEST): obj/host_xnibbler_test.o obj/host_user_x11_xlib_display.o obj/host_user_x11_xlib_window.o obj/host_user_x11_xlib_draw.o obj/host_user_x11_xlib_event.o obj/host_user_graphics_graphics.o obj/host_compat.o
+	$(HOST_CC) -o $@ $^
+
 obj/host_x11_lib_test.o: src/host/x11_lib_test.c src/user/x11/*.h src/user/x11/include/X11/*.h src/user_include/*.h src/user_include/graphics/*.h
 	@mkdir -p obj
 	$(HOST_CC) $(HOST_CFLAGS) $(X11_INC) -Isrc/user/x11 -c $< -o $@
@@ -2534,6 +2585,15 @@ obj/nano_hb_curses_host.o: src/user/nano/hb_curses.c src/user/nano/curses.h
 	@mkdir -p obj
 	$(HOST_CC) $(HOST_CFLAGS) -Isrc/user/nano -c $< -o $@
 
+# xcrypt: the roguelike on the curses port -- the board logic (dungeon gen,
+# move, mob AI, combat, pickup, victory) driven directly, no curses needed.
+XCRYPT_TEST = xcrypt_test_host
+obj/host_xcrypt_test.o: src/host/xcrypt_test.c src/user/rogue/xcrypt.c src/user/nano/curses.h src/user_include/*.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/user/nano -Isrc/user_include -DHOST_TEST -c $< -o $@
+$(XCRYPT_TEST): obj/host_xcrypt_test.o obj/nano_hb_curses_host.o obj/host_compat.o
+	$(HOST_CC) -o $@ $^
+
 # The two desktop tests that #include src/user/desktop.c directly must
 # rebuild when it (or the window layer) changes.
 obj/host_desktop_input_test.o obj/host_desktop_term_test.o obj/host_nano_term_test.o obj/host_desktop_pixel_test.o: src/user/desktop.c src/user/graphics/window.c
@@ -2560,12 +2620,87 @@ $(NFS_PROTO_TEST): src/host/nfs_proto_test.c src/kernel/nfs_proto.c src/host/nfs
 FB_IOCTL_TEST = fb_ioctl_test_host
 $(FB_IOCTL_TEST): src/host/fb_ioctl_test.c src/kernel/fb_ioctl.c src/include/linux_fb.h src/include/display_mode.h
 	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/fb_ioctl.c src/host/fb_ioctl_test.c -o $@
+# B8G8R8A8 framebuffer pixel packing + geometry lock (GB-025/026): T1 host
+# golden for src/include/fb_pixel.h — the concrete byte order ([blue,green,red,alpha])
+# and pixel/row offset math under fb_ioctl_test's struct-field checks
+# (docs/linux-abi.md §9; single-header precedent like linux_input.h).
+FB_PIXEL_TEST = fb_pixel_test_host
+$(FB_PIXEL_TEST): src/host/fb_pixel_test.c src/include/fb_pixel.h src/include/display_mode.h
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/host/fb_pixel_test.c -o $@
+# M2 device-surface contract (GB-033): T1/T4 host tie-together of the full
+# Linux device-ABI surface a static-musl SDL fbcon+evdev app depends on —
+# fb_var<->pixel byte-order consistency, smem geometry, FBIOGET_*/FBIOBLANK/
+# EVIOCGVERSION vs <linux/{fb,input}.h>, gamepad-code space (docs §9).
+# Links the device-free fb TUs (fb_ioctl.c + fb_mmap.c) with the test.
+M2_CONTRACT_TEST = m2_dev_contract_test_host
+$(M2_CONTRACT_TEST): src/host/m2_dev_contract_test.c src/kernel/fb_ioctl.c src/kernel/fb_mmap.c src/include/linux_fb.h src/include/fb_ioctl.h src/include/fb_mmap.h src/include/linux_input.h src/include/linux_joystick.h src/include/fb_pixel.h src/include/display_mode.h
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/fb_ioctl.c src/kernel/fb_mmap.c src/host/m2_dev_contract_test.c -o $@
 # PS/2 -> evdev decode: pure single-TU host golden tests (T1) for
 # src/kernel/evdev.c, the device-free translator shared with the real
 # virtio-input driver (the nfs_proto/ipc_proto host-test precedent).
 EVDEV_TEST = evdev_test_host
+# GB-042 gamepad/joystick evdev event-code ABI lock: T1/T4 golden + differential
+# for src/include/linux_joystick.h (face/bumper BTN_*, stick/trigger/d-pad ABS_*)
+# vs <linux/input.h> / <linux/input-event-codes.h> when present — the axis/button
+# register surface SDL's gamecontroller layer consumes (docs/linux-abi.md §9).
+JOYPAD_TEST = joypad_test_host
+$(JOYPAD_TEST): src/host/joypad_test.c src/include/linux_joystick.h
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/host/joypad_test.c -o $@
 $(EVDEV_TEST): src/host/evdev_test.c src/kernel/evdev.c src/include/evdev.h
 	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/evdev.c src/host/evdev_test.c -o $@
+# nanosleep/clock_gettime/gettimeofday parity + timer precision (GB-028): T4
+# differential host test that RUNS real Linux clock_gettime/gettimeofday/
+# nanosleep and asserts the numeric ABI (CLOCK_* values, timespec/timeval
+# 16 B layout) + the timing behaviour the compat layer must match for SDL
+# (CLOCK_MONOTONIC monotonicity, nanosleep never under-sleeps and stays
+# within an overshoot tolerance, wall clock advances).
+CLOCKABI_TEST = clockabi_test_host
+$(CLOCKABI_TEST): src/host/clockabi_test.c
+	$(HOST_CC) $(HOST_CFLAGS) src/host/clockabi_test.c -o $@
+
+# GB-060 stale-owner lock steal: T1 host test that compiles the REAL x64 lock
+# implementation and asserts the rule that makes the mechanism safe -- a lock with
+# a live owner is never freed (no matter how long anyone waits), a lock whose
+# owner is a recorded-halted CPU is freed and re-acquired normally, and a CPU
+# never frees its own lock.
+LOCKSTEAL_TEST = locksteal_test_host
+$(LOCKSTEAL_TEST): src/host/locksteal_test.c src/kernel/arch/x64/locks.c src/include/lock.h
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/arch/x64/locks.c src/host/locksteal_test.c -o $@
+
+# memfd_create + shared-memory ABI surface (GB-030): T4 differential test that
+# RUNS the real Linux memfd_create/fcntl(F_ADD_SEALS)/mmap(MAP_SHARED) on the
+# host and proves the concrete behaviour + numeric ABI the compat layer must
+# match (syscall 319, MFD_* flags, F_ADD_SEALS/F_GET_SEALS, F_SEAL_*, and
+# two-process MAP_SHARED write visibility after fork — the SDL-surface
+# requirement).  Skips where memfd_create is unavailable (non-Linux).
+MEMFD_TEST = memfd_test_host
+$(MEMFD_TEST): src/host/memfd_test.c
+	$(HOST_CC) $(HOST_CFLAGS) src/host/memfd_test.c -o $@
+
+# Linux evdev / input ABI lock (GB-027): header-only T1/T4 golden test for
+# src/include/linux_input.h (struct input_event/input_absinfo layout, EV_*, BTN_*,
+# KEY_*, ABS_*, REL_* codes, EVIOCG* request numbers) vs <linux/input.h> when the
+# Linux headers are present — the input half of the /dev/input/event* contract
+# (docs/linux-abi.md §9).  Same single-header pattern as linux_fb.h + fb_ioctl.
+LINUX_INPUT_TEST = linux_input_test_host
+$(LINUX_INPUT_TEST): src/host/linux_input_test.c src/include/linux_input.h
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/host/linux_input_test.c -o $@
+# GB-027 /dev/input/event* node logic: device-free T1/T4 golden + differential
+# for src/kernel/input_node.c (event->Linux input_event translation, EVIOCG*
+# ioctl route + arg size) vs <linux/input.h> when present — the read/probe
+# half of the compat input node (docs/linux-abi.md §9).
+INPUT_NODE_TEST = input_node_test_host
+$(INPUT_NODE_TEST): src/host/input_node_test.c src/kernel/input_node.c src/include/input_node.h src/include/linux_input.h src/include/evdev.h
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/input_node.c src/host/input_node_test.c -o $@
+
+# /dev/fb0 mmap translation + fb blank/activate ABI surface: pure single-TU
+# host golden tests (T1) for src/kernel/fb_mmap.c, the device-free mmap half
+# of the compat /dev/fb0 node (GB-025).  When <linux/fb.h> and a real /dev/fb0
+# exist on the host it also differentially locks the request number + mmap
+# window rules (the fb_ioctl/evdev/nfs_proto single-TU precedent).
+FB_MMAP_TEST = fb_mmap_test_host
+$(FB_MMAP_TEST): src/host/fb_mmap_test.c src/kernel/fb_mmap.c src/kernel/fb_ioctl.c src/include/fb_mmap.h src/include/fb_ioctl.h src/include/linux_fb.h src/include/display_mode.h
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/fb_mmap.c src/kernel/fb_ioctl.c src/host/fb_mmap_test.c -o $@
 
 # F2.2 resolver codecs: src/user/resolv.c compiled with -DHOST_TEST (its
 # pure functions land as hb_*) in one command with the test; inet_pton/ntop/
@@ -2588,6 +2723,11 @@ $(CONSOLE_APP_TEST): obj/host_console_test.o obj/host_compat.o obj/host_user_gui
 
 PONG_TEST_BIN = pong_test_host
 $(PONG_TEST_BIN): obj/host_pong_test.o obj/host_user_graphics_graphics.o obj/host_compat.o
+	$(HOST_CC) -o $@ $^
+
+# NES emulator core (GB-035): single-TU host golden (nes.c included inline).
+NES_TEST = nes_test_host
+$(NES_TEST): obj/host_nes_test.o
 	$(HOST_CC) -o $@ $^
 
 DIALOG_ARROW_TEST = dialog_arrow_test_host
@@ -2622,6 +2762,24 @@ LINUX_ABI_TEST = linux_abi_test_host
 $(LINUX_ABI_TEST): obj/host_linux_abi_test.o
 	$(HOST_CC) -o $@ $^
 obj/host_linux_abi_test.o: src/host/linux_abi_test.c src/include/linux_syscall.h src/include/errno.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/include -c $< -o $@
+
+# GB-015/014: struct-layout parity lock + L_* constant lock — asserted against
+# the same tests/fixtures/abi goldens (linux_layouts.golden, linux_constants.golden),
+# the "silent corruption" class a wrong layout/constant causes.  Kernel headers
+# feed it; host-compiled here.
+LINUX_LAYOUT_TEST = linux_layout_test_host
+$(LINUX_LAYOUT_TEST): obj/host_linux_layout_test.o
+	$(HOST_CC) -o $@ $^
+obj/host_linux_layout_test.o: src/host/linux_layout_test.c src/include/linux_layout.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/include -c $< -o $@
+
+LINUX_ABI_CONSTANTS_TEST = linux_abi_constants_test_host
+$(LINUX_ABI_CONSTANTS_TEST): obj/host_linux_abi_constants_test.o
+	$(HOST_CC) -o $@ $^
+obj/host_linux_abi_constants_test.o: src/host/linux_abi_constants_test.c src/include/linux_syscall.h
 	@mkdir -p obj
 	$(HOST_CC) $(HOST_CFLAGS) -Isrc/include -c $< -o $@
 
@@ -3119,7 +3277,7 @@ $(T4_COMPAT_PARITY): src/host/t4_parity.sh src/host/t4_compat_probe.c
 # it. On macOS without coreutils this falls back to an unwrapped run.
 HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "$$@"; else exec "$$@"; fi' sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(M2_CONTRACT_TEST)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
@@ -3131,7 +3289,9 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	$(HOST_RUN) ./$(XCALC_TEST)
 	$(HOST_RUN) ./$(ANTFARM_TEST)
 	$(HOST_RUN) ./$(XEYES_TEST)
+	$(HOST_RUN) ./$(XNIBBLER_TEST)
 	$(HOST_RUN) ./$(NANO_TERM_TEST)
+	$(HOST_RUN) ./$(XCRYPT_TEST)
 	$(HOST_RUN) ./$(NFS_PROTO_TEST)
 	$(HOST_RUN) ./$(RESOLV_TEST)
 	$(HOST_RUN) ./$(TIME_MATH_TEST)
@@ -3139,10 +3299,15 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	$(HOST_RUN) ./$(DIALOG_ARROW_TEST)
 	$(HOST_RUN) ./$(PONG_TEST_BIN)
 	$(HOST_RUN) ./$(STARDUST_TEST)
+	@echo "[host] self-registering python host tests (GB-064)"
+	python3 tools/t5/run_t5_tests.py
+	$(HOST_RUN) ./$(NES_TEST)
 	$(HOST_RUN) ./$(GUI_TEST)
 	$(HOST_RUN) ./$(ERRNO_TEST)
 	$(HOST_RUN) ./$(ELF_IMAGE_TEST)
 	$(HOST_RUN) ./$(LINUX_ABI_TEST)
+	$(HOST_RUN) ./$(LINUX_LAYOUT_TEST)
+	$(HOST_RUN) ./$(LINUX_ABI_CONSTANTS_TEST)
 	$(HOST_RUN) ./$(THRD_TEST_HOST)
 	$(HOST_RUN) ./$(TLS_TEST_HOST)
 	$(HOST_RUN) ./$(WK1C_TEST_HOST)
@@ -3152,7 +3317,16 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	$(HOST_RUN) ./$(GRAPHICS_LIB_TEST)
 	$(HOST_RUN) ./$(WSURF_TEST_HOST)
 	$(HOST_RUN) ./$(FB_IOCTL_TEST)
+	$(HOST_RUN) ./$(FB_PIXEL_TEST)
+	$(HOST_RUN) ./$(M2_CONTRACT_TEST)
 	$(HOST_RUN) ./$(EVDEV_TEST)
+	$(HOST_RUN) ./$(JOYPAD_TEST)
+	$(HOST_RUN) ./$(CLOCKABI_TEST)
+	$(HOST_RUN) ./$(LOCKSTEAL_TEST)
+	$(HOST_RUN) ./$(MEMFD_TEST)
+	$(HOST_RUN) ./$(LINUX_INPUT_TEST)
+	$(HOST_RUN) ./$(INPUT_NODE_TEST)
+	$(HOST_RUN) ./$(FB_MMAP_TEST)
 	$(HOST_RUN) ./$(WINDOW_DAMAGE_TEST)
 	$(HOST_RUN) ./$(WINDOW_TEXT_TEST)
 	$(HOST_RUN) ./$(STRING_TEST)
