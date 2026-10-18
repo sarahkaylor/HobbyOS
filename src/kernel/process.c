@@ -76,7 +76,7 @@ static int alive_reported;
    space -- mid-exec), cleared with the other latches when work is found. */
 static int noas_reported;
 
-static void resume_returned_halt(int pid) {
+static void resume_returned_halt(int pid, const struct trap_frame *tf) {
   extern void uart_puts_raw(const char *s);
   extern void uart_print_hex_raw(uint64_t v);
   uart_puts_raw("[KERNEL] resume call RETURNED (must never happen): cpu=");
@@ -88,6 +88,24 @@ static void resume_returned_halt(int pid) {
   uart_print_hex_raw((uint64_t)get_cpuid());
   uart_puts_raw(" pid=");
   uart_print_hex_raw((uint64_t)(uint32_t)pid);
+  /* GB-057: and the FRAME it failed to enter.  Returning from
+     enter_user_space means the iretq did not take -- which happens when the
+     frame is not a legal return (non-canonical RIP, bad CS/SS, nonsense RFLAGS).
+     Without these four fields the line says a CPU was lost but not what it was
+     handed, which is the difference between naming a bug and describing a
+     symptom (probe22 printed only cpu and pid, and I could not tell which). */
+  if (tf) {
+    uart_puts_raw(" frame.elr=");
+    uart_print_hex_raw(tf->elr);
+    uart_puts_raw(" frame.spsr=");
+    uart_print_hex_raw(tf->spsr);
+#ifdef __x86_64__
+    uart_puts_raw(" frame.cs=");
+    uart_print_hex_raw(tf->cs);
+    uart_puts_raw(" frame.ss=");
+    uart_print_hex_raw(tf->ss);
+#endif
+  }
   /* GB-060: a CPU that has to stop must not take the machine with it.  If this
      CPU is holding proc_lock, hand it back -- but ONLY if the lock records us as
      the owner, because clearing a lock somebody else holds would turn a stall
@@ -1469,7 +1487,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
          which is the same silence that made five GB-057 probe runs look like
          five different failures.  Report first, through the COM1 raw sink (it
          takes no lock, so it cannot deadlock the console it is reporting on). */
-      resume_returned_halt(proc_table[next].pid);
+      resume_returned_halt(proc_table[next].pid, &local_tf);
     }
 
     // No ready processes. Check if any are still alive.
@@ -2957,7 +2975,7 @@ void start_scheduler(void) {
 
         /* Same rule as schedule()'s resume boundary: if this returns, the CPU
            is lost, so say so before going quiet. */
-        resume_returned_halt(proc_table[i].pid);
+        resume_returned_halt(proc_table[i].pid, &local_tf);
       }
     }
     spinlock_release_irqrestore(&proc_lock, flags);
