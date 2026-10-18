@@ -2859,8 +2859,36 @@ void start_scheduler(void) {
 
         if (proc_table[i].as)
           vm_arch_switch(proc_table[i].as);
-        else
+        else {
+          /* GB-057: a USER slot picked with no address space.  This is the entry
+             point the original root-cause analysis named: the v2 exec path clears
+             `grp->as` outside proc_lock, so the scheduler can pick a slot whose AS
+             is gone, fall into the v1 overlay path below, map `user_phys_base`
+             (which is 0 for a v2 slot) and restore into a frame built for physical
+             0 -- which is how a CPU ends up executing at address 7 (probe22:
+             `vector=6 rip=0x0000000000000007 pid=28 PIPETEST.BIN`).
+
+             Report at the moment of the pick, not after the crash: the register
+             dump tells you where it died, this tells you who handed it the frame.
+             A kernel thread legitimately has no AS, so only a user slot is called
+             out. */
+          if (!proc_table[i].is_kernel_process) {
+            uart_puts("[NOAS] picking USER slot with no address space: slot=");
+            print_int(i);
+            uart_puts(" pid=");
+            print_int(proc_table[i].pid);
+            uart_puts(" state=");
+            print_int((int)proc_table[i].state);
+            uart_puts(" user_phys_base=");
+            print_int((int)proc_table[i].user_phys_base);
+            uart_puts(" cpu=");
+            print_int((int)cpu);
+            uart_puts(" ");
+            uart_puts(proc_table[i].name);
+            uart_puts(" -- resuming via the v1 overlay path\n");
+          }
           mmu_switch_user_mapping(proc_table[i].user_phys_base);
+        }
 
         extern char __stack_top;
         uint64_t target_sp = (uint64_t)&__stack_top - cpu * 0x10000 - 4096;
