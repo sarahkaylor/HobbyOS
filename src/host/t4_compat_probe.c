@@ -43,6 +43,8 @@
  * count (and errno) are part of the byte-meaningful contract. */
 
 /* Normalized line: "<op> rc=<r> errno=<e>" — errno read only when rc<0. */
+static volatile sig_atomic_t g_sigusr1 = 0;
+static void on_sigusr1(int s) { (void)s; g_sigusr1 = 1; }
 static void report(const char *op, long r) {
   if (r < 0) {
     printf("%s rc=%ld errno=%d\n", op, r, errno);
@@ -294,6 +296,48 @@ int main(void) {
     errno = 0;
     report("poll_badfd", poll(pf2, 1, 0));
     report("poll_badfd_revents", pf2[0].revents);
+  }
+
+  /* GB-023: real signal delivery.
+   * sigaction installs on_sigusr1; raise(SIGUSR1) must have it fire
+   * synchronously (g_sigusr1 == 1) — a shim that drops the frame or never
+   * delivers diverges here.  rt_sigprocmask(SIG_BLOCK) on SIGUSR1, then
+   * kill(getpid(), SIGUSR1) must NOT run the handler while blocked (blocked
+   * row 0) and must instead show up in sigpending; after SIG_UNBLOCK the
+   * pending one is delivered to the (still-installed) handler, which is
+   * non-lethal. The handler is never reset to SIG_DFL, so the probe never
+   * dies on a pending signal. */
+  {
+    struct sigaction sa, old;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = on_sigusr1;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    errno = 0;
+    report("sigaction_install", sigaction(SIGUSR1, &sa, &old));
+
+    g_sigusr1 = 0;
+    errno = 0;
+    report("raise_sigusr1", raise(SIGUSR1));
+    report("sigusr1_delivered", g_sigusr1);
+
+    sigset_t block, oset, pend;
+    sigemptyset(&block); sigaddset(&block, SIGUSR1);
+    errno = 0;
+    report("sigprocmask_block", sigprocmask(SIG_BLOCK, &block, &oset));
+    g_sigusr1 = 0;
+    errno = 0;
+    report("kill_self_while_blocked", kill(getpid(), SIGUSR1));
+    report("sigusr1_fired_while_blocked", g_sigusr1);
+
+    sigemptyset(&pend);
+    errno = 0;
+    sigpending(&pend);
+    report("sigusr1_pending", sigismember(&pend, SIGUSR1) ? 1 : 0);
+
+    errno = 0;
+    report("sigprocmask_unblock", sigprocmask(SIG_UNBLOCK, &block, NULL));
+    report("sigusr1_delivered_after_unblock", g_sigusr1);
   }
 
   /* exit status is part of the diff: 0 here means every leg reached the
