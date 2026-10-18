@@ -196,6 +196,47 @@
 #define L_FIONREAD 0x541B
 #define L_FIONBIO 0x5421
 
+/* --- stat mode bits (docs §3) ---------------------------------------- */
+#define L_S_IFMT  0170000
+#define L_S_IFREG 0100000
+#define L_S_IFDIR 0040000
+#define L_S_IFCHR 0020000
+#define L_S_IFBLK 0060000
+#define L_S_IFLNK 0120000
+#define L_S_IFIFO 0010000
+#define L_S_ISUID 0004000
+
+/* --- fcntl (docs §3) -------------------------------------------------- */
+#define L_F_DUPFD 0
+#define L_F_GETFL 3
+#define L_F_SETFL 4
+#define L_F_GETLK 5
+#define L_F_SETLK 6
+#define L_F_SETLKW 7
+
+/* --- signal numbers + SA flags (docs §3) ------------------------------- */
+#define L_SIGCHLD 17
+#define L_SIGSEGV 11
+#define L_SIGINT  2
+#define L_SIGWINCH 28
+#define L_SIGKILL 9
+#define L_SIGSTOP 19
+#define L_SA_SIGINFO 0x4
+#define L_SA_RESTART 0x10000000
+
+/* --- epoll (docs §3) --------------------------------------------------- */
+#define L_EPOLLIN  0x1
+#define L_EPOLLOUT 0x4
+#define L_EPOLLET  0x80000000
+
+/* --- dirent d_type (docs §3) ------------------------------------------- */
+#define L_DT_REG 8
+#define L_DT_DIR 4
+#define L_DT_CHR 2
+
+/* --- rlimit (docs §3) --------------------------------------------------- */
+#define L_RLIMIT_NOFILE 7
+
 #define L_ELFMAG_0 0x7F
 
 #endif /* LINUX_SYSCALL_H */

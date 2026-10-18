@@ -115,3 +115,24 @@ echo "---- ARM verdicts ----"
 grep -aE "TEST\]|Tests failed|EXIT=" "$ARM_LOG" | tail -25 || true
 echo "---- intel verdicts ----"
 grep -aE "TEST\]|Tests failed|EXIT=" "$INTEL_LOG" | tail -25 || true
+
+# GB-057: the parallel wave runner must be a GATE, like `make test` /
+# `make test_intel` (which run through tools/t3_tier.sh on main).  Both QEMU
+# boots power off with exit 0 after "System halt." no matter how many
+# printed `[...] FAIL` lines the wave carried, so the raw QEMU rc is never a
+# verdict.  Police each captured log through the SAME tier detector that
+# gates the sequential targets (t3_tier.sh `police`): FAIL-line count +
+# halt-marker requirement.  Any un-quarantined FAIL (or a wave that never
+# halted) fails the whole run.  This is run_waves.sh's only non-sequential
+# addition — the gate logic itself lives in t3_tier.sh, not duplicated here.
+rc=0
+if [ -f "$ARM_LOG" ]; then
+  tools/t3_tier.sh police "$ARM_LOG" arm || rc=1
+fi
+if [ -f "$INTEL_LOG" ]; then
+  tools/t3_tier.sh police "$INTEL_LOG" intel || rc=1
+fi
+echo "[run_waves] integration tier (t3_tier.sh police) rc=$rc"
+echo "  ARM   log: $ARM_LOG"
+echo "  intel log: $INTEL_LOG"
+exit "$rc"
