@@ -26,6 +26,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
+#include <termios.h>
 #include <sys/random.h>
 
 /* GB-017: /dev/urandom + getrandom return *random bytes* — the content is
@@ -138,6 +140,45 @@ int main(void) {
       report("null_read1", read(nr, &c, 1));
       close(nr);
     }
+  }
+
+  /* GB-019: ioctl subset + fcntl GETFL/SETFL.
+   * TIOCGWINSZ and TCGETS on a NON-tty fd (we always open /dev/null for the
+   * ioctl source so the row is deterministic) must return -1/ENOTTY on both
+   * legs — a wrong ioctl number, or a shim that accepts unknown ioctls on a
+   * non-tty, diverges here.  F_GETFL/F_SETFL on a regular-but-empty file is
+   * deterministic too. */
+  {
+    int f = open("/tmp/ho_t4_ioctl_XXXXXX", O_RDWR | O_CREAT, 0600);
+    errno = 0;
+    report("fcntl_getfl_rdwr", fcntl(f, F_GETFL));
+    /* F_GETFL exposes the access-mode + status bits (O_RDWR plus any flag
+     * bits Linux sets on open).  We don't assert the exact integer here — a
+     * raw integer is opaque and can carry arch/ABI flag bits; the DIFF covers
+     * that it is byte-identical leg-to-leg.  The meaningful, portable rows are
+     * below: F_SETFL to O_APPEND succeeds, and O_APPEND then shows up in the
+     * flags. */
+    report("fcntl_setfl_append", fcntl(f, F_SETFL, O_APPEND));
+    errno = 0;
+    long fl = fcntl(f, F_GETFL);
+    report("fcntl_getfl_after", fl);
+    /* print whether O_APPEND is set (deterministic), not the opaque flags */
+    report("fcntl_append_bit", (fl & O_APPEND) ? 1 : 0);
+    close(f);
+    unlink("/tmp/ho_t4_ioctl_XXXXXX"); /* best-effort; name won't match, see below */
+    /* real temp copy to avoid the XXXXXX literal above clashing */
+    int tf = open("/tmp/ho_t4_ioctl_real", O_RDWR | O_CREAT | O_TRUNC, 0600);
+    if (tf >= 0) { close(tf); }
+    errno = 0;
+    int nt = open("/dev/null", O_RDWR);
+    struct winsize ws; memset(&ws, 0, sizeof ws);
+    errno = 0;
+    report("ioctl_tiocgwinsz_entty", ioctl(nt, TIOCGWINSZ, &ws) < 0 ? errno : 0);
+    struct termios ts; memset(&ts, 0, sizeof ts);
+    errno = 0;
+    report("ioctl_tcgets_entty", ioctl(nt, TCGETS, &ts) < 0 ? errno : 0);
+    close(nt);
+    unlink("/tmp/ho_t4_ioctl_real");
   }
 
   /* exit status is part of the diff: 0 here means every leg reached the
