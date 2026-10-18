@@ -34,6 +34,9 @@
 #include <dirent.h>
 #include <stdlib.h>
 #include <sys/utsname.h>
+#include <poll.h>
+#include <sys/select.h>
+#include <signal.h>
 
 /* GB-017: /dev/urandom + getrandom return *random bytes* — the content is
  * non-deterministic and must never be diffed leg-to-leg.  Only the return
@@ -250,6 +253,47 @@ int main(void) {
     /* full-string agreement is covered by the leg diff below; these two bools
      * pin the values SDL and the games gated on. */
     printf("uname sysname=%s machine=%s\n", u.sysname, u.machine);
+  }
+
+  /* GB-018: poll / select / pselect6 on a ready pipe.
+   * A byte on a pipe read-end is deterministically ready: poll returns rc=1
+   * with POLLIN in revents; select/pselect6 return rc=1 with the bit set.
+   * A closed fd is deterministically POLLNVAL.  These pin the readiness-
+   * semantics + event-mask constants a wait shim must reproduce. */
+  {
+    int pfd[2];
+    report("pipe2", pipe(pfd));
+    if (write(pfd[1], "x", 1) != 1) report("pipe_write", -1);
+
+    struct pollfd pf[1];
+    pf[0].fd = pfd[0]; pf[0].events = POLLIN; pf[0].revents = 0;
+    errno = 0;
+    report("poll_ready", poll(pf, 1, 0));
+    report("poll_ready_revents", pf[0].revents);
+
+    fd_set rf;
+    FD_ZERO(&rf); FD_SET(pfd[0], &rf);
+    struct timeval tv = {0, 0};
+    errno = 0;
+    report("select_ready", select(pfd[0] + 1, &rf, NULL, NULL, &tv));
+    report("select_ready_fdset", FD_ISSET(pfd[0], &rf) ? 1 : 0);
+
+    sigset_t empt;
+    sigemptyset(&empt);
+    fd_set rf2;
+    FD_ZERO(&rf2); FD_SET(pfd[0], &rf2);
+    struct timespec ts = {0, 0};
+    errno = 0;
+    report("pselect6_ready", pselect(pfd[0] + 1, &rf2, NULL, NULL, &ts, &empt));
+    report("pselect6_ready_fdset", FD_ISSET(pfd[0], &rf2) ? 1 : 0);
+
+    close(pfd[0]); close(pfd[1]);
+
+    struct pollfd pf2[1];
+    pf2[0].fd = 9999999; pf2[0].events = POLLIN; pf2[0].revents = 0;
+    errno = 0;
+    report("poll_badfd", poll(pf2, 1, 0));
+    report("poll_badfd_revents", pf2[0].revents);
   }
 
   /* exit status is part of the diff: 0 here means every leg reached the
