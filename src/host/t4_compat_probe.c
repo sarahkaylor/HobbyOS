@@ -418,7 +418,18 @@ int main(void) {
     /* give the waiter a moment to enter FUTEX_WAIT, then wake it */
     for (int k = 0; k < 2000 && __atomic_load_n(&g_futex_val, __ATOMIC_RELAXED)==0; k++) { usleep(200); }
     __atomic_store_n(&g_futex_val, 1, __ATOMIC_RELEASE);
-    report("futex_wake", syscall(SYS_futex, &g_futex_val, FUTEX_WAKE, 1, NULL, NULL, 0));
+    /* GB-021/coordinator: the RETURN VALUE of FUTEX_WAKE is not a contract and
+     * must not be diffed leg-to-leg.  It is the number of waiters actually
+     * parked at that instant, which cannot be observed without a race: whether
+     * the waiter has entered FUTEX_WAIT yet depends on host scheduling, so one
+     * leg returns 1 (a waiter was parked) and the other 0 (it had not parked --
+     * which is CORRECT, since it then sees *v != 0 and never waits).  Observed as
+     * a 1-in-3 failure of `make host_tests` on main, with every other row
+     * byte-identical.  Same rule as the GB-017 random rows: report what is
+     * deterministic, and keep the assertion that carries meaning.  The suite's
+     * contract here is `futex_waiter_woken` below -- the waiter must return
+     * *woken*, not the timeout path -- and that one is deterministic. */
+    report("futex_wake_ok", syscall(SYS_futex, &g_futex_val, FUTEX_WAKE, 1, NULL, NULL, 0) >= 0);
     void *wret = NULL;
     pthread_join(w, &wret);
     report("futex_waiter_woken", (long)wret == 0);   /* 1 = woken, not timeout */
