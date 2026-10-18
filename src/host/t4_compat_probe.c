@@ -37,6 +37,7 @@
 #include <poll.h>
 #include <sys/select.h>
 #include <signal.h>
+#include <stdint.h>
 
 /* GB-017: /dev/urandom + getrandom return *random bytes* — the content is
  * non-deterministic and must never be diffed leg-to-leg.  Only the return
@@ -338,6 +339,28 @@ int main(void) {
     errno = 0;
     report("sigprocmask_unblock", sigprocmask(SIG_UNBLOCK, &block, NULL));
     report("sigusr1_delivered_after_unblock", g_sigusr1);
+  }
+
+  /* GB-022: TLS ABI — arch_prctl(ARCH_SET_FS/ARCH_GET_FS) round-trips FS base.
+   * The FS/GS base is the x86_64 thread-local pointer a context switch must
+   * save/restore.  We READ the current FS base, then SET it back to that same
+   * (valid) value and read it again — exercising both syscalls without ever
+   * pointing FS at invalid memory (which would break TLS-relative libc and
+   * crash the probe).  rc + round-trip equality is the locked surface. */
+  {
+#define ARCH_SET_FS 0x1002
+#define ARCH_GET_FS 0x1003
+    uintptr_t cur = 0, after = 0;
+    errno = 0;
+    report("arch_get_fs_rc", syscall(SYS_arch_prctl, ARCH_GET_FS, &cur));
+    report("arch_get_fs_nonzero", cur != 0);
+    errno = 0;
+    report("arch_set_fs_rc", syscall(SYS_arch_prctl, ARCH_SET_FS, cur));
+    errno = 0;
+    syscall(SYS_arch_prctl, ARCH_GET_FS, &after);
+    report("arch_fs_roundtrip", after == cur);
+#undef ARCH_SET_FS
+#undef ARCH_GET_FS
   }
 
   /* exit status is part of the diff: 0 here means every leg reached the
