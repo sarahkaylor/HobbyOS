@@ -798,6 +798,11 @@ static void sys_spawn(struct trap_frame *tf) {
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     save_context(caller, tf);
     caller->spawn_retval = -1;  /* failure default until the worker reports */
+    {
+      extern uint64_t timer_get_ms(void);
+      /* GB-063: bound the parked wait -- see SPAWN_WAIT_BUDGET_MS. */
+      caller->spawn_deadline_ms = timer_get_ms() + SPAWN_WAIT_BUDGET_MS;
+    }
     caller->state = PROC_STATE_WAIT_SPAWN;
     spinlock_release_irqrestore(&proc_lock, flags);
 
@@ -947,6 +952,11 @@ static void sys_spawn_ex(struct trap_frame *tf) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   save_context(caller, tf);
   caller->spawn_retval = -EAGAIN; /* failure default until the worker reports */
+  {
+    extern uint64_t timer_get_ms(void);
+    /* GB-063: bound the parked wait -- see SPAWN_WAIT_BUDGET_MS. */
+    caller->spawn_deadline_ms = timer_get_ms() + SPAWN_WAIT_BUDGET_MS;
+  }
   caller->state = PROC_STATE_WAIT_SPAWN;
   spinlock_release_irqrestore(&proc_lock, flags);
 
