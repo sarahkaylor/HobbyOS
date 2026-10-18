@@ -3283,20 +3283,8 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	$(HOST_RUN) ./$(CONSOLE_APP_TEST)
 	$(HOST_RUN) ./$(DIALOG_ARROW_TEST)
 	$(HOST_RUN) ./$(PONG_TEST_BIN)
-	@echo "[host] tools/evidence_rig_test.py (GB-040 evidence rig)"
-	python3 tools/evidence_rig_test.py
-	@echo "[host] tools/t5/replay_test.py (GB-043 per-game replay scripts)"
-	python3 tools/t5/replay_test.py
-	@echo "[host] tools/perf_game_cycle_test.py (GB-046 game-cycling perf/leak core)"
-	python3 tools/perf_game_cycle_test.py
-	@echo "[host] tools/t5/feasibility_doc_test.py (GB-011 game-feasibility doc)"
-	python3 tools/t5/feasibility_doc_test.py
-	@echo "[host] tools/t5/flaky_triage_test.py (GB-050 flaky-test triage core)"
-	python3 tools/t5/flaky_triage_test.py
-	@echo "[host] tools/t5/game_docs_test.py (GB-052 game docs + user guide)"
-	python3 tools/t5/game_docs_test.py
-	@echo "[host] tools/t5/retro_skill_test.py (GB-055 retro + lessons in skills)"
-	python3 tools/t5/retro_skill_test.py
+	@echo "[host] self-registering python host tests (GB-064)"
+	python3 tools/t5/run_t5_tests.py
 	$(HOST_RUN) ./$(NES_TEST)
 	$(HOST_RUN) ./$(GUI_TEST)
 	$(HOST_RUN) ./$(ERRNO_TEST)
