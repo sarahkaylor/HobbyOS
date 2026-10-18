@@ -33,6 +33,7 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <stdlib.h>
+#include <sys/utsname.h>
 
 /* GB-017: /dev/urandom + getrandom return *random bytes* — the content is
  * non-deterministic and must never be diffed leg-to-leg.  Only the return
@@ -233,6 +234,22 @@ int main(void) {
     }
     char rm[64]; snprintf(rm, sizeof rm, "rm -rf \"%s\"", d);
     system(rm);
+  }
+
+  /* GB-016: uname.  Both legs run on the SAME host/kernel, so sysname,
+   * release, machine (and nodename/version given a fixed host) must agree
+   * byte-for-byte — a uname shim that reports a non-Linux sysname or a
+   * wrong-release string diverges here.  The rows assert the paragons games
+   * sniff: sysname=="Linux" and machine matching x86_64. */
+  {
+    struct utsname u;
+    errno = 0;
+    report("uname_rc", uname(&u));
+    report("uname_sysname_linux", strcmp(u.sysname, "Linux") == 0);
+    report("uname_machine_x86_64", strcmp(u.machine, "x86_64") == 0);
+    /* full-string agreement is covered by the leg diff below; these two bools
+     * pin the values SDL and the games gated on. */
+    printf("uname sysname=%s machine=%s\n", u.sysname, u.machine);
   }
 
   /* exit status is part of the diff: 0 here means every leg reached the
