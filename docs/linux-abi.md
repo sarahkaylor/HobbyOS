@@ -504,6 +504,11 @@ The framebuffer the mmap window + virtio-gpu 2D path expose is a fixed `1920x108
 | `/dev/input/event0..N` | virtio-input | `struct input_event` (see probe), `EVIOCGVERSION`, `EVIOCGNAME`, `EVIOCGBIT`, `EVIOCGABS`, non-blocking reads |
 | gamepad/joystick (`event*` or `js*` when GB-032 lands) | evdev gamepad node | gamepad `BTN_*`/`ABS_*` event codes (GB-042; `linux_joystick.h`, locked vs `<linux/input.h>` by `joypad_test_host`) |
 
+The whole M2 device surface a static-musl SDL fbcon+evdev app touches (fb
+structs/request numbers, mmap/smem, B8G8R8A8 pixel order, `input_event` +
+`EVIOCG*`, gamepad code space) is tied into one mutually-consistent,
+Linux-differential gate by `m2_dev_contract_test_host` (GB-033, T4 tier).
+
 The `/dev/input/event*` node (GB-027) is exposed on the native track as two syscalls,
 `SYS_INPUT_IOCTL` (93) + `SYS_INPUT_READ` (94) in `src/kernel/input_node.c`
 (`src/include/input_node.h`), fed by the shared `virtio_input` ring + the PS/2→evdev
