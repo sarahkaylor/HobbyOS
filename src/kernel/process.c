@@ -2768,6 +2768,9 @@ static int last_idlestuck_div;
 /* GB-057: the same dump, for the quiet case -- a wave that ends with nothing
    reclaimable and no state change.  Separate divisor so the two rate limits do
    not consume each other. */
+/* GB-057: bounded count for the [IDLECLAIM] report (a leaked per-CPU claim seen
+   on idle entry).  Rare-event report, not a per-idle log. */
+static int idleclaim_reported;
 static int last_quiet_div;
 /* GB-057: one-shot flag for the parked-WAIT reporter, cleared whenever work is
    found.  probe20 printed the same slot 1,185 times because the limiter was a
@@ -3333,6 +3336,46 @@ void start_scheduler(void) {
       spinlock_release_irqrestore(&proc_lock, dflags);
     }
 
+    /* GB-057: a CPU entering the idle loop must not still claim a process.
+
+       `set_current_process_pid(cpu, -1)` is the documented "no claim" state
+       (process.c:261, "which slot claims `cpu` (-1 = none)"), and the claim guard
+       in schedule() refuses to hand a slot to a CPU that still claims it.  So a
+       leaked claim does two bad things at once: `any_alive` counts a process no
+       CPU is running (the wave never halts), and that process can never be picked
+       again (permanent starvation).
+
+       Measured (probe32): the dump printed `claims: c0=-1 c1=-1 c2=-1 c3=-1
+       c4=16 c5=-1 c6=-1 c7=-1` while the QEMU monitor showed every CPU halted in
+       safe_wfi.  Seven CPUs read the documented -1; one read a pid it was not
+       running.
+
+       Only reported when the claimed process is not RUNNING: the kernel's own
+       self-tests legitimately execute inside a process context on this CPU, so an
+       unconditional check would drown in false positives from the test harness.
+       A claim pointing at a non-running process has no innocent explanation.
+
+       Reports, and deliberately does NOT clear: clearing here would hide the
+       leak's origin, and the origin is the entire question.  Bounded so an idle
+       CPU cannot flood the console. */
+    {
+      extern int current_pid_of_cpu(uint32_t cpu);
+      int leaked = current_pid_of_cpu(get_cpuid());
+      if (leaked >= 0 && leaked < MAX_PROCESSES &&
+          proc_table[leaked].state != PROC_STATE_RUNNING &&
+          idleclaim_reported < 20) {
+        idleclaim_reported++;
+        uart_puts("[IDLECLAIM] cpu=");
+        print_int((int)get_cpuid());
+        uart_puts(" still claims pid=");
+        print_int(leaked);
+        uart_puts(" name=");
+        uart_puts(proc_table[leaked].name);
+        uart_puts(" state=");
+        print_int(proc_table[leaked].state);
+        uart_puts(" on idle entry\n");
+      }
+    }
     // Track idle time: record entry, WFI, accumulate on wake
     uint64_t idle_start = timer_get_ms();
     safe_wfi();
