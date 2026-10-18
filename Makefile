@@ -3281,6 +3281,8 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) $(DESKTOP_MENU_TEST) $(DESKTOP_DRA
 	python3 tools/t5/replay_test.py
 	@echo "[host] tools/perf_game_cycle_test.py (GB-046 game-cycling perf/leak core)"
 	python3 tools/perf_game_cycle_test.py
+	@echo "[host] tools/t5/feasibility_doc_test.py (GB-011 game-feasibility doc)"
+	python3 tools/t5/feasibility_doc_test.py
 	$(HOST_RUN) ./$(NES_TEST)
 	$(HOST_RUN) ./$(GUI_TEST)
 	$(HOST_RUN) ./$(ERRNO_TEST)
