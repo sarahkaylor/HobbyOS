@@ -1,4 +1,5 @@
 #include "lock.h"
+#include "process.h" /* MAX_CPUS + LOSTWAKE_DEAD_OWNER_MS: the shared definition of a dead owner (GB-060) */
 
 extern void uart_puts_raw(const char *s);
 extern void uart_print_hex_raw(uint64_t v);
@@ -38,6 +39,27 @@ int lock_steal_ok(uint32_t owner_slot, uint32_t cpu) {
   if ((owner_slot - 1) == cpu)
     return 0; /* our own lock: a self-deadlock is a different bug */
   return cpu_is_halted(owner_slot - 1);
+}
+
+/* GB-060 second shape (wedged-alive holder) -- mirrors the x64 rule so the two
+   arches cannot drift: a lock is broken out of when its recorded owner has
+   stopped taking timer interrupts for LOSTWAKE_DEAD_OWNER_MS (the same constant
+   the lost-owner reaper uses).  `now_ms` is injected for testability. */
+int lock_stallbreak_ok(uint32_t owner_slot, uint32_t cpu, uint64_t now_ms) {
+  extern int cpu_is_halted(uint32_t cpu);
+  extern volatile uint64_t cpu_heartbeat_ms[];
+  if (owner_slot == 0)
+    return 0;
+  if ((owner_slot - 1) == cpu)
+    return 0;
+  if (owner_slot - 1 >= MAX_CPUS)
+    return 0;
+  if (cpu_is_halted(owner_slot - 1))
+    return 1;
+  uint64_t hb = cpu_heartbeat_ms[owner_slot - 1];
+  if (hb == 0)
+    return 0;
+  return (now_ms - hb) >= LOSTWAKE_DEAD_OWNER_MS;
 }
 
 __attribute__((noinline)) static void spin_slow(spinlock_t *lock, uint64_t ra) {
@@ -88,6 +110,23 @@ __attribute__((noinline)) static void spin_slow(spinlock_t *lock, uint64_t ra) {
           uart_puts_raw("\n");
           lock->owner = 0;
           __asm__ volatile("stlr wzr, [%0]\n" ::"r"(&lock->locked) : "memory");
+        } else {
+          extern uint64_t timer_get_ms(void);
+          extern volatile uint64_t cpu_heartbeat_ms[];
+          uint64_t now = timer_get_ms();
+          if (lock_stallbreak_ok(own, cpu, now)) {
+            uart_puts_raw("[STALLBREAK] cpu=");
+            uart_print_hex_raw(cpu);
+            uart_puts_raw(" lock=");
+            uart_print_hex_raw((uint64_t)(uintptr_t)lock);
+            uart_puts_raw(" owner_cpu=");
+            uart_print_hex_raw(own - 1);
+            uart_puts_raw(" stale_ms=");
+            uart_print_hex_raw(now - cpu_heartbeat_ms[own - 1]);
+            uart_puts_raw("\n");
+            lock->owner = 0;
+            __asm__ volatile("stlr wzr, [%0]\n" ::"r"(&lock->locked) : "memory");
+          }
         }
       }
     }
