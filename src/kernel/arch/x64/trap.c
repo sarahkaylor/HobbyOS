@@ -2510,6 +2510,15 @@ void general_interrupt_handler(struct trap_frame *tf) {
         if (spinlock_release_if_held_by_me(&proc_lock))
           uart_puts_raw("[KERNEL] released proc_lock before halting (GB-060)\n");
       }
+      /* GB-060: and record the halt, so a CPU waiting on any OTHER lock this one
+         still holds can take it over rather than spinning behind a stopped core
+         forever.  The release above only helps for proc_lock; this covers the
+         rest (a blk_cache bucket was the last one measured). */
+      {
+        extern void cpu_halt_record(uint32_t cpu);
+        extern uint32_t get_cpuid(void);
+        cpu_halt_record(get_cpuid());
+      }
       while (1);
     }
   }

@@ -1779,6 +1779,13 @@ void sync_handler_c(struct trap_frame *tf) {
     }
   }
   spinlock_release_irqrestore(&fatal_lock, flags);
+  /* GB-060: record the halt before stopping -- a CPU waiting on any lock this one
+     still holds can then free it and carry on, instead of spinning forever behind
+     a core that will never run again.  Same rule as the x64 fatal path. */
+  {
+    extern void cpu_halt_record(uint32_t cpu);
+    cpu_halt_record(get_cpuid());
+  }
   while (1)
     ;
 }

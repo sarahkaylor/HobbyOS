@@ -8,6 +8,26 @@
    console goes silent.  A core spinning with interrupts off freezes these
    in place, which is exactly what makes a wedged lock visible. */
 volatile uint64_t lock_wait_addr[MAX_CPUS];
+/* GB-060: a CPU that has taken a fatal fault and stopped.  Declared here (not in
+   a header) to keep the mechanism reviewable in the two files that implement it:
+   process.c records it at the halt, and this file reads it to decide whether a
+   lock's recorded owner is still alive. */
+extern int cpu_is_halted(uint32_t cpu);
+
+/* GB-060: the steal decision, in ONE place.
+
+   It lives in a function of its own so it can be tested directly, without
+   waiting for a real strand: the acquisition loop calls it, and the host test
+   asserts the whole truth table (free, ours, live owner, halted owner).  The
+   rule is deliberately narrow -- a lock is only freed when its recorded owner is
+   a CPU this kernel has recorded as halted, never because time passed. */
+int lock_steal_ok(uint32_t owner_slot, uint32_t cpu) {
+  if (owner_slot == 0)
+    return 0; /* free / unowned: nothing to steal */
+  if ((owner_slot - 1) == cpu)
+    return 0; /* our own lock: a self-deadlock is a different bug */
+  return cpu_is_halted(owner_slot - 1);
+}
 volatile uint64_t lock_wait_caller[MAX_CPUS];
 volatile uint64_t lock_wait_caller2[MAX_CPUS];
 
@@ -52,6 +72,39 @@ void spinlock_acquire(spinlock_t *lock) {
         scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
         scream_hex(" pc2=", (uint64_t)__builtin_return_address(1));
         uart_putc_raw('\n');
+      }
+      /* GB-060: break the strand when the holder is provably gone.  A CPU that
+         took a fatal fault halts holding whatever it held (the halt paths give
+         proc_lock back, but they cannot know about every other lock).  Waiting
+         forever behind a stopped CPU is exactly what turned every GB-057 run
+         into a machine-wide freeze: seven CPUs spinning with interrupts off
+         behind one that will never run again.
+
+         The guard is the safety argument, and it is why this is not a timeout:
+         a CPU marked halted never touches a lock again, so its lock may be freed
+         without racing a live owner.  A slow-but-live holder keeps its lock
+         forever if it likes.
+
+         Note the shape: this RELEASES the dead owner's lock and then goes back
+         to the normal test-and-set loop, rather than leaving the loop "holding"
+         it.  That matters -- several waiters can notice the same dead owner at
+         once, and if each simply broke out believing it held the lock, mutual
+         exclusion would be gone.  Freeing and re-acquiring keeps exactly one
+         winner, which is the only property that must not be negotiated.
+         The data the dead CPU left half-updated is another matter and is the
+         price of surviving at all; announced, never silent. */
+      if ((spins & 0xFFFFFFull) == 0xFFFFFFull) {
+        uint32_t own = lock->owner;
+        if (lock_steal_ok(own, cpu)) {
+          scream_dec("\n[STOLEN] cpu=", cpu);
+          scream_hex(" lock=", (uint64_t)lock);
+          scream_dec(" from halted cpu=", own - 1);
+          scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
+          uart_putc_raw('\n');
+          lock->owner = 0;
+          __atomic_clear(&lock->locked, __ATOMIC_RELEASE);
+          /* fall through and contend for it like any other waiter */
+        }
       }
     }
     lock_wait_addr[cpu] = 0;
