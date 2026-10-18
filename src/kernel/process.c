@@ -182,11 +182,22 @@ static void idle_claim_check(void) {
     uart_puts("[IDLECLAIM] cpu=");
     print_int((int)get_cpuid());
     uart_puts(" still claims pid=");
-    print_int(leaked);
+    /* GB-057: racy read of another slot, same as [ALIVE-SET] -- verify stability
+       of the pid before printing it, and of the state, so a torn value is labelled
+       rather than quoted. */
+    {
+      int p1 = proc_table[leaked].pid, p2 = proc_table[leaked].pid;
+      if (p1 != p2) { uart_puts("<torn:"); print_int(p1); uart_puts("/"); print_int(p2); uart_puts(">"); }
+      else print_int(p1);
+    }
     uart_puts(" name=");
     uart_puts(proc_table[leaked].name);
     uart_puts(" state=");
-    print_int(proc_table[leaked].state);
+    {
+      int s1 = proc_table[leaked].state, s2 = proc_table[leaked].state;
+      if (s1 != s2) { uart_puts("<torn:"); print_int(s1); uart_puts("/"); print_int(s2); uart_puts(">"); }
+      else print_int(s1);
+    }
     uart_puts(" on idle entry\n");
   }
 }
@@ -1631,7 +1642,28 @@ void schedule(struct trap_frame *tf, int is_yield) {
         uart_puts("  [ALIVE-SET] slot=");
         print_int(i);
         uart_puts(" pid=");
-        print_int(proc_table[i].pid);
+        /* GB-057: this block runs in schedule() WITHOUT proc_lock, so every field
+           below is a racy read -- another CPU may be mid-update on this slot.  I
+           caught it the hard way: probe54 printed `pid=62831` for slot 1 while the
+           [IDLESTUCK] line for the same slot printed `pid=1`, and 62831 is not a
+           plausible pid on a 64-slot table.  Rather than take proc_lock here (we
+           may already be inside it on some call paths, and a non-recursive
+           spinlock deadlocks), read twice and say so when the value is unstable.
+           An instrument that reports its own uncertainty is worth more than one
+           that reports a number I might quote. */
+        {
+          int p1 = proc_table[i].pid;
+          int p2 = proc_table[i].pid;
+          if (p1 != p2) {
+            uart_puts("<torn:");
+            print_int(p1);
+            uart_puts("/");
+            print_int(p2);
+            uart_puts(">");
+          } else {
+            print_int(p1);
+          }
+        }
         uart_puts(" st=");
         print_int(st);
         uart_puts(" parent=");
