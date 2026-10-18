@@ -14,7 +14,10 @@
 #     run that never reaches its halt line FAILS the tier, it is never
 #     silently re-run);
 #   * requires the completion marker ("System halt");
-#   * counts FAIL lines in the captured console and FAILS if there is one.
+#   * counts FAIL lines in the captured console and FAILS if there is one;
+#   * FAILS on any FATAL kernel-mode fault line and on a console below the
+#     completeness floor (T3_MIN_LINES, default 1000) -- a crashed kernel also
+#     reaches "System halt", and a verdict on a wreck is worse than no verdict.
 #
 # Usage:  tools/t3_tier.sh [arm|intel]     (or: make test / test_intel)
 # Env:    T3_TIMEOUT (default 2700 s), T3_LOG (default obj/t3_<arch>.log)
@@ -40,12 +43,24 @@ cd "$ROOT"
 
 if [ -n "$POLICE_ONLY" ]; then
   LOG="$POLICE_ONLY"
+  # A log whose guest never booted must not be judged as a hang (see the run
+  # path's guard): "a hang is a defect" only holds while an environment failure
+  # cannot wear its clothes.
+  if grep -aq 'Failed to get "write" lock' "$LOG"; then
+    echo "T3_${ARCH} (police ${LOG}): ENVIRONMENT FAILURE — disk.img was locked; the guest never booted"
+    echo "T3_${ARCH} EXIT=2 (environment, not a tier result)"
+    exit 2
+  fi
   halted=0; grep -aq "System halt" "$LOG" && halted=1
   if [ "${T3_SKIP_HALT_CHECK:-0}" = "1" ]; then halted=1; fi
   FAIL_LINES=$(grep -ac "FAIL" "$LOG" || true)
-  echo "T3_${ARCH} (police ${LOG}): $(wc -l <"$LOG") lines, ${FAIL_LINES} FAIL lines, halted=${halted}"
+  KFAULT=$(grep -ac "FATAL kernel-mode fault" "$LOG" || true)
+  LINES=$(wc -l <"$LOG")
+  echo "T3_${ARCH} (police ${LOG}): ${LINES} lines, ${FAIL_LINES} FAIL lines, halted=${halted}, kfault=${KFAULT}"
   rc=0
   [ "$halted" = "1" ] || { echo "T3_${ARCH}: FAIL — no halt line"; rc=1; }
+  [ "$KFAULT" = "0" ] || { echo "T3_${ARCH}: FAIL — ${KFAULT} FATAL kernel-mode fault line(s): the guest halted because the kernel crashed"; rc=1; }
+  [ "$LINES" -ge "${T3_MIN_LINES:-1000}" ] || { echo "T3_${ARCH}: FAIL — only ${LINES} console lines (floor ${T3_MIN_LINES:-1000}): too little work for a complete wave"; rc=1; }
   if [ "$FAIL_LINES" != "0" ]; then
     echo "T3_${ARCH}: FAIL — ${FAIL_LINES} FAIL line(s); first 5:"
     grep -an "FAIL" "$LOG" | head -5
@@ -70,7 +85,48 @@ echo "=== T3 ($ARCH): run (deadline ${T3_TIMEOUT}s, log $LOG) ==="
 # Same QEMU invocation as `make run`, serial captured to the log.  A
 # background job + poll (not a bare `timeout make`) so we can distinguish
 # "guest halted" from "deadline hit" and report both honestly.
-make ARCH="$ARCH" MODE=test run QEMU_ARGS="-display none" >>"$LOG" 2>&1 &
+# T3_QEMU_ARGS lets a caller add acceleration without editing the tier:
+#   T3_QEMU_ARGS="-enable-kvm" make test_intel
+# runs the intel wave near-native instead of under TCG (the fleet's VMs have
+# nested SVM and /dev/kvm, and a TCG 8-vCPU wave takes tens of minutes while
+# the same wave under KVM is minutes).  Never hardcoded here: KVM is not
+# available on every host, and a tier that silently changes its execution
+# mode is not reproducible.
+# Post-freeze evidence: read the LIVE guest through QEMU's monitor before
+# cleanup kills it.
+#
+# Why this exists, measured: on GB-057 the guest could not report anything at
+# all -- every CPU was interrupt-dead, so no timer fired anywhere and the
+# console simply stopped.  Every in-guest instrument was blind by construction.
+# The only observer that worked was QEMU itself, asked from outside, and it
+# turned an unexplained freeze into a named fault (vector=6 #UD at RIP=0x7 with
+# proc_lock held).  A no-halt failure must therefore always leave that evidence
+# behind, instead of depending on a human remembering to attach a monitor.
+#
+# Opt-in via T3_MONITOR=1: it changes the QEMU command line, and a tier that
+# silently changes its execution mode is not reproducible.
+MON_SOCK=""
+if [ "${T3_MONITOR:-0}" = "1" ]; then
+  MON_SOCK="${T3_MONITOR_SOCK:-/tmp/t3_monitor_${ARCH}_$$.sock}"
+  T3_QEMU_ARGS="${T3_QEMU_ARGS:-} -monitor unix:${MON_SOCK},server,nowait"
+fi
+
+# Guard: another QEMU holding disk.img makes this run fail at QEMU start with
+# "Failed to get write lock" -- which the verdict below would then report as a
+# HANG, because a guest that never booted also never prints 'System halt'.
+# Observed on GB-057: a second run started while a frozen guest was still alive
+# produced a 293-line "no halt" verdict for a machine that never started.  A
+# false hang verdict is worse than no verdict, since "a hang is a defect" is only
+# useful while an environment failure cannot masquerade as one.  Refuse to start,
+# with a distinct exit code, and say why.
+if command -v fuser >/dev/null 2>&1 && fuser "$ROOT/disk.img" >/dev/null 2>&1; then
+  echo "T3_${ARCH}: REFUSING TO START — $ROOT/disk.img is in use by another QEMU."
+  echo "T3_${ARCH}: a stale frozen guest must be killed first (its monitor socket is usually /tmp/t3_monitor_*.sock)"
+  echo "T3_${ARCH} EXIT=2 (environment, not a tier result)"
+  exit 2
+fi
+
+make ARCH="$ARCH" MODE=test run QEMU_ARGS="-display none ${T3_QEMU_ARGS:-}" >>"$LOG" 2>&1 &
 MAKE_PID=$!
 cleanup() {
   pkill -P "$MAKE_PID" 2>/dev/null || true
@@ -88,6 +144,41 @@ while kill -0 "$MAKE_PID" 2>/dev/null; do
 done
 # Let QEMU/make wind down once the guest has halted.
 for _ in $(seq 1 30); do kill -0 "$MAKE_PID" 2>/dev/null || break; sleep 1; done
+
+# If the console never reached its halt marker while a monitor was attached, read
+# the live guest NOW -- cleanup below kills it, and on a freeze this is the only
+# evidence that will ever exist.
+if [ -n "$MON_SOCK" ] && [ -S "$MON_SOCK" ] && ! grep -aq "System halt" "$LOG"; then
+  {
+    echo ""
+    echo "=== T3 post-freeze guest sample (QEMU monitor $MON_SOCK) ==="
+    echo "--- all CPUs (control registers included: CR2 names the fault address) ---"
+    printf 'info registers -a\n' | timeout 20 socat - "UNIX-CONNECT:$MON_SOCK" 2>/dev/null \
+      | tr -d '\r' | grep -av '^(qemu)' || echo "(monitor read failed)"
+    ELF="obj/$ARCH/hobbyos.elf"
+    [ -f "$ELF" ] || ELF="hobbyos.elf"
+    NMB="$(command -v llvm-nm || command -v nm || true)"
+    if [ -n "$NMB" ] && [ -f "$ELF" ]; then
+      sym() { "$NMB" --defined-only "$ELF" 2>/dev/null | awk -v s="$1" '$0 ~ " "s"$" {print "0x"$1; exit}'; }
+      MON_READ() { printf "%s\n" "$1" | timeout 20 socat - "UNIX-CONNECT:$MON_SOCK" 2>/dev/null | tr -d '\r' | grep -a ':' || true; }
+      PL="$(sym proc_lock)"
+      [ -n "$PL" ] && { echo "--- proc_lock word (1 = held) ---"; MON_READ "x/1xw $PL"; } || true
+      HL="$(sym held_locks)"
+      PC="$(sym held_lock_pc)"
+      ST="$(sym sched_stage)"
+      if [ -n "$HL" ]; then
+        echo "--- held-lock table (cpu0..7 x 8 slots): who claims what ---"
+        MON_READ "x/64xg $HL"
+        [ -n "$PC" ] && { echo "--- acquire sites for those claims ---"; MON_READ "x/64xg $PC"; } || true
+        [ -n "$ST" ] && { echo "--- sched_stage per cpu ---"; MON_READ "x/8xb $ST"; } || true
+      else
+        echo "--- no held-lock table in this build (probe scaffolding absent) ---"
+      fi
+    fi
+    echo "=== end guest sample ==="
+  } >>"$LOG" 2>&1
+fi
+
 cleanup
 trap - EXIT
 
@@ -102,15 +193,40 @@ fi
 FAIL_LINES=$(grep -ac "FAIL" "$LOG" || true)
 echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, halted=${halted}"
 
+# An environment failure must never be reported as a hang (see the pre-flight
+# guard above): if QEMU never got the image, this run says nothing about the
+# kernel, so it gets its own exit code and its own sentence.
+if grep -aq 'Failed to get "write" lock' "$LOG"; then
+  echo "T3_${ARCH}: ENVIRONMENT FAILURE — disk.img was locked by another QEMU; this guest never booted, so this is NOT a hang verdict"
+  echo "T3_${ARCH} EXIT=2 (environment, not a tier result)"
+  exit 2
+fi
+
 rc=0
 if [ "$halted" != "1" ]; then
   echo "T3_${ARCH}: FAIL — the console has no 'System halt' line (idle/hung wave, or the ${T3_TIMEOUT}s deadline hit; a hang is a defect, not a flake)"; rc=1
+fi
+# A halt marker alone cannot tell "the wave finished" from "the wave died early":
+# a FATAL kernel fault halts this CPU, the survivors then find nothing runnable,
+# and the scheduler prints the same 'System halt' line.  Measured (probe17): a run
+# that took a kernel #GP at line ~450 of 460 halted with 0 FAIL lines and the tier
+# called it a PASS -- a verdict on a wreck.  Two structural criteria fix that, both
+# measured rather than assumed: a kernel fault is never a pass, and a wave that
+# halted without doing its work is not a pass either.
+KFAULT=$(grep -ac "FATAL kernel-mode fault" "$LOG" || true)
+LINES=$(wc -l <"$LOG")
+MIN_LINES="${T3_MIN_LINES:-1000}"
+if [ "$KFAULT" != "0" ]; then
+  echo "T3_${ARCH}: FAIL — ${KFAULT} FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed"; rc=1
+fi
+if [ "$halted" = "1" ] && [ "$LINES" -lt "$MIN_LINES" ]; then
+  echo "T3_${ARCH}: FAIL — halted after only ${LINES} console lines (floor ${MIN_LINES}): too little work for a complete wave, so this cannot be a pass"; rc=1
 fi
 if [ "$FAIL_LINES" != "0" ]; then
   echo "T3_${ARCH}: FAIL — ${FAIL_LINES} FAIL line(s); first 20:"
   grep -an "FAIL" "$LOG" | head -20
   rc=1
 fi
-[ "$rc" -eq 0 ] && echo "T3_${ARCH}: PASS (0 FAIL lines, halted)"
+[ "$rc" -eq 0 ] && echo "T3_${ARCH}: PASS (0 FAIL lines, halted, no kernel fault, ${LINES} lines)"
 echo "T3_${ARCH} EXIT=$rc"
 exit "$rc"

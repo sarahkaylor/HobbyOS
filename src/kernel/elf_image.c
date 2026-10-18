@@ -210,6 +210,46 @@ int elf_copy_into(const struct elf_image *img, const void *buf, uint64_t len,
   return ELF_OK;
 }
 
+int elf_build_plan(const struct elf_image *img, struct elf_plan *plan) {
+  if (img == NULL || plan == NULL) return ELF_ERR_ARGS;
+  if (img->nsegs == 0 || img->vaddr_end <= img->vaddr_base) return ELF_ERR_ARGS;
+  plan->nreg = 0;
+  /* Regions are emitted in vaddr order (parser guarantees ascending, so we
+     can merge incrementally).  Two regions occupying the same or an
+     overlapping page merge into the weaker-protection union (per-page prot:
+     the loader cannot split a page, so a page shared by .text and .rodata
+     must be the union of both).  Offsets are image-relative. */
+  for (uint32_t i = 0; i < img->nsegs; i++) {
+    const struct elf_segment *s = &img->segs[i];
+    if (s->memsz == 0)
+      continue; /* zero-length PT_LOAD: nothing to map */
+    uint64_t lo = elf_page_down(s->vaddr - img->vaddr_base);
+    uint64_t hi = elf_page_up(s->vaddr + s->memsz - img->vaddr_base);
+    if (plan->nreg > 0) {
+      struct elf_plan_region *last = &plan->regs[plan->nreg - 1];
+      uint64_t last_hi = last->off + last->len;
+      if (lo < last_hi) { /* shares a page with the previous region -> merge */
+        if (hi > last_hi)
+          last->len = hi - last->off;
+        last->flags |= s->flags;
+        continue;
+      }
+    }
+    if (plan->nreg >= ELF_MAX_PLAN_REGIONS)
+      return ELF_ERR_TOOMANY;
+    struct elf_plan_region *r = &plan->regs[plan->nreg++];
+    r->off = lo;
+    r->len = hi - lo;
+    r->flags = s->flags;
+  }
+  uint64_t span = elf_image_span(img);
+  /* The plan span must cover [0, vaddr_end - vaddr_base).  A leading hole
+     before the first segment is fine (unmapped, demand-zeroed), but the plan
+     must not claim regions past the image span. */
+  plan->span = span;
+  return ELF_OK;
+}
+
 const char *elf_strerror(int err) {
   switch (err) {
     case ELF_OK: return "ok";

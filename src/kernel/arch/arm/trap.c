@@ -13,6 +13,12 @@
 #include "vfs.h"
 #include "vm.h"
 #include "blk_cache.h"
+
+/* GB-027: /dev/input/event* ioctl + Linux-ABI event read (see x64 trap.c
+ * for the ABI contract; register convention is regs[0]=a0, regs[1]=a1). */
+#include "input_node.h"
+#include "virtio_input.h"
+#include "fb_mmap.h"
 #include <stdint.h>
 
 extern jmp_buf user_exit_context;
@@ -792,6 +798,11 @@ static void sys_spawn(struct trap_frame *tf) {
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     save_context(caller, tf);
     caller->spawn_retval = -1;  /* failure default until the worker reports */
+    {
+      extern uint64_t timer_get_ms(void);
+      /* GB-063: bound the parked wait -- see SPAWN_WAIT_BUDGET_MS. */
+      caller->spawn_deadline_ms = timer_get_ms() + SPAWN_WAIT_BUDGET_MS;
+    }
     caller->state = PROC_STATE_WAIT_SPAWN;
     spinlock_release_irqrestore(&proc_lock, flags);
 
@@ -941,6 +952,11 @@ static void sys_spawn_ex(struct trap_frame *tf) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   save_context(caller, tf);
   caller->spawn_retval = -EAGAIN; /* failure default until the worker reports */
+  {
+    extern uint64_t timer_get_ms(void);
+    /* GB-063: bound the parked wait -- see SPAWN_WAIT_BUDGET_MS. */
+    caller->spawn_deadline_ms = timer_get_ms() + SPAWN_WAIT_BUDGET_MS;
+  }
   caller->state = PROC_STATE_WAIT_SPAWN;
   spinlock_release_irqrestore(&proc_lock, flags);
 
@@ -1034,6 +1050,26 @@ static void sys_map_fb(struct trap_frame *tf) {
   tf->regs[0] = USER_FB_VIRT_BASE; // Return user virtual address
 }
 
+/* GB-025: /dev/fb0 ioctl (SYS_FB_IOCTL).  Registers: x0=req, x1=arg.
+ * FBIOGET_VSCREENINFO/FSCREENINFO copy a Linux-layout struct OUT to arg
+ * (validated first); FBIOBLANK takes a plain value.  0 | -1 | -EFAULT. */
+static void sys_fb_ioctl(struct trap_frame *tf) {
+  unsigned long req = (unsigned long)tf->regs[0];
+  void *arg = (void *)tf->regs[1];
+  uint64_t smem_start = (uint64_t)virtio_gpu_get_framebuffer();
+
+  size_t sz = hb_fb_ioctl_arg_size(req);
+  if (sz == (size_t)-1) {
+    tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
+    return;
+  }
+  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  tf->regs[0] = (uint64_t)(int64_t)hb_fb_ioctl_route(req, arg, smem_start);
+}
+
 static void sys_flush_fb(struct trap_frame *tf) {
   virtio_gpu_flush();
   tf->regs[0] = 0;
@@ -1066,7 +1102,53 @@ static void sys_flush_fb_rects(struct trap_frame *tf) {
   tf->regs[0] = 0;
 }
 
-extern int virtio_input_get_events(void *buf, int max_events);
+/* GB-027: /dev/input/event* ioctl (SYS_INPUT_IOCTL).  a0=req, a1=arg.
+ * EVIOCGVERSION/NAME/GBIT/GABS copy their Linux-ABI reply OUT to arg. */
+static void sys_input_ioctl(struct trap_frame *tf) {
+  unsigned long req = (unsigned long)tf->regs[0];
+  void *arg = (void *)tf->regs[1];
+  size_t sz = hb_input_ioctl_arg_size(req);
+  if (sz == (size_t)-1) {
+    tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
+    return;
+  }
+  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  tf->regs[0] = (uint64_t)(int64_t)hb_input_ioctl_route(req, arg);
+}
+
+/* GB-027: non-blocking /dev/input/event* read (SYS_INPUT_READ).  a0=buf,
+ * a1=max.  Drains the virtio_input ring into up to max Linux-ABI (24 B)
+ * input_event records.  Returns count read (0 = none pending). */
+static void sys_input_read(struct trap_frame *tf) {
+  struct hb_input_event *ubuf = (struct hb_input_event *)tf->regs[0];
+  int max = (int)tf->regs[1];
+  if (max < 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return;
+  }
+  if (max == 0) {
+    tf->regs[0] = 0;
+    return;
+  }
+  if (sys_user_range((uint64_t)ubuf,
+                     (uint64_t)max * sizeof(struct hb_input_event), 1)) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  extern uint64_t timer_get_ms(void);
+  struct virtio_input_event raw[32];
+  int want = max > 32 ? 32 : max;         /* bounded scratch: non-blocking */
+  int got = virtio_input_get_events(raw, want);
+  uint64_t t = timer_get_ms();
+  uint64_t sec = t / 1000u, usec = (t % 1000u) * 1000u;
+  for (int i = 0; i < got; i++)
+    hb_input_fill_event(&ubuf[i], raw[i].type, raw[i].code, raw[i].value,
+                        sec, usec);
+  tf->regs[0] = (uint64_t)got;
+}
 
 static void sys_get_events(struct trap_frame *tf) {
   void *buf = (void *)tf->regs[0];
@@ -1707,6 +1789,13 @@ void sync_handler_c(struct trap_frame *tf) {
     }
   }
   spinlock_release_irqrestore(&fatal_lock, flags);
+  /* GB-060: record the halt before stopping -- a CPU waiting on any lock this one
+     still holds can then free it and carry on, instead of spinning forever behind
+     a core that will never run again.  Same rule as the x64 fatal path. */
+  {
+    extern void cpu_halt_record(uint32_t cpu);
+    cpu_halt_record(get_cpuid());
+  }
   while (1)
     ;
 }
@@ -1802,12 +1891,18 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_flush_fb(tf);
     } else if (syscall_num == SYS_FLUSH_FB_RECTS) {
       sys_flush_fb_rects(tf);
+    } else if (syscall_num == SYS_FB_IOCTL) {
+      sys_fb_ioctl(tf);
     } else if (syscall_num == SYS_GET_CPUID) {
       sys_get_cpuid(tf);
     } else if (syscall_num == SYS_PIPE) {
       sys_pipe(tf);
     } else if (syscall_num == SYS_GET_EVENTS) {
       sys_get_events(tf);
+    } else if (syscall_num == SYS_INPUT_IOCTL) {
+      sys_input_ioctl(tf);
+    } else if (syscall_num == SYS_INPUT_READ) {
+      sys_input_read(tf);
     } else if (syscall_num == SYS_AVAILABLE) {
       sys_available(tf);
     } else if (syscall_num == SYS_READ_DIR) {

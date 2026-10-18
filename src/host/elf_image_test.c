@@ -183,6 +183,84 @@ int main(void) {
     }
   }
 
+  /* --- the loader plan (GB-013 mapper half): regions + union merge ------- */
+  {
+    uint64_t lp = 0;
+    uint8_t *bp = slurp("valid-x86_64-exec", &lp);
+    if (bp) {
+      struct elf_image ip;
+      struct elf_plan pl;
+      CHECK_EQ(elf_parse(bp, lp, &ip), ELF_OK, "plan: parse valid-x86_64-exec");
+      CHECK_EQ(elf_build_plan(&ip, &pl), ELF_OK, "plan builds");
+      CHECK_EQ(pl.nreg, 2, "plan: one region per PT_LOAD (two segments)");
+      CHECK_EQ(pl.regs[0].off, 0x0, "plan: seg0 off (vaddr_base-relative)");
+      CHECK_EQ(pl.regs[0].len, 0x1000, "plan: seg0 len page-aligned");
+      CHECK_EQ(pl.regs[0].flags, ELF_PF_R | ELF_PF_X, "plan: seg0 R+X");
+      CHECK_EQ(pl.regs[1].off, 0x1000, "plan: seg1 off");
+      CHECK_EQ(pl.regs[1].len, 0x1000, "plan: seg1 len");
+      CHECK_EQ(pl.regs[1].flags, ELF_PF_R | ELF_PF_W, "plan: seg1 R+W");
+      CHECK_EQ(pl.span, 0x2000, "plan: span");
+      free(bp);
+    }
+  }
+  /* valid-static-pie: build at vaddr_base 0, one exec + one data segment */
+  {
+    uint64_t lp = 0;
+    uint8_t *bp = slurp("valid-static-pie", &lp);
+    if (bp) {
+      struct elf_image ip;
+      struct elf_plan pl;
+      CHECK_EQ(elf_parse(bp, lp, &ip), ELF_OK, "plan: parse static-pie");
+      CHECK_EQ((int)ip.is_pie, 1, "plan: is_pie");
+      CHECK_EQ(elf_build_plan(&ip, &pl), ELF_OK, "plan: static-pie builds");
+      /* static-pie segment 0 starts at vaddr 0 (relocatable image) */
+      CHECK_EQ(pl.regs[0].off, 0x0, "plan: static-pie seg0 at 0");
+      CHECK_EQ((pl.regs[0].flags & (ELF_PF_R | ELF_PF_X)),
+               (ELF_PF_R | ELF_PF_X), "plan: static-pie seg0 exec");
+      CHECK(pl.nreg <= ELF_MAX_PLAN_REGIONS, "plan: region cap respected");
+      free(bp);
+    }
+  }
+  /* hand-built merge case: two segments sharing a page must become ONE
+     region with the weaker (union) protection across that page.  The parser
+     rejects overlapping images, so this proves the plan's merge logic in
+     isolation from elf_parse. */
+  {
+    struct elf_image mt;
+    memset(&mt, 0, sizeof mt);
+    mt.nsegs = 2;
+    mt.vaddr_base = 0x1000;
+    mt.vaddr_end = 0x3000;
+    mt.segs[0].vaddr = 0x1000; mt.segs[0].memsz = 0x1000;
+    mt.segs[0].flags = ELF_PF_R | ELF_PF_X;
+    mt.segs[1].vaddr = 0x1800; mt.segs[1].memsz = 0x1000; /* shares last page */
+    mt.segs[1].flags = ELF_PF_R | ELF_PF_W;
+    struct elf_plan pl;
+    CHECK_EQ(elf_build_plan(&mt, &pl), ELF_OK, "plan merge builds");
+    CHECK_EQ(pl.nreg, 1, "plan: shared-page segments merge to one region");
+    CHECK_EQ(pl.regs[0].off, 0x0, "plan: merged off (vaddr_base-rel)");
+    CHECK_EQ(pl.regs[0].len, 0x2000, "plan: merged len spans both pages");
+    CHECK_EQ(pl.regs[0].flags, ELF_PF_R | ELF_PF_W | ELF_PF_X,
+             "plan: merged region carries weakest (union) protection");
+  }
+  /* hand-built adjacent-but-not-overlapping: must stay SEPARATE regions */
+  {
+    struct elf_image mt;
+    memset(&mt, 0, sizeof mt);
+    mt.nsegs = 2;
+    mt.vaddr_base = 0x1000;
+    mt.vaddr_end = 0x3000;
+    mt.segs[0].vaddr = 0x1000; mt.segs[0].memsz = 0x1000;
+    mt.segs[0].flags = ELF_PF_R | ELF_PF_X;
+    mt.segs[1].vaddr = 0x2000; mt.segs[1].memsz = 0x1000; /* distinct page */
+    mt.segs[1].flags = ELF_PF_R | ELF_PF_W;
+    struct elf_plan pl;
+    CHECK_EQ(elf_build_plan(&mt, &pl), ELF_OK, "plan adjacent builds");
+    CHECK_EQ(pl.nreg, 2, "plan: page-distinct segments stay separate");
+    CHECK_EQ(pl.regs[1].flags, ELF_PF_R | ELF_PF_W,
+             "plan: second region keeps its own narrower protection");
+  }
+
   /* --- the reject classes (one vector each) ----------------------------- */
   /* the accept class also covers static PIE, and ET_EXEC's window flag */
   {
@@ -232,6 +310,20 @@ int main(void) {
         if (rc == ELF_OK || rc == ELF_ERR_INTERP || rc == ELF_ERR_TYPE) {
           printf("  PASS real binary %s -> %s (entry 0x%llx, %u segs)\n", real, elf_strerror(rc),
                  (unsigned long long)ri.entry, ri.nsegs);
+          /* mapper input: a parse-OK real binary must produce a valid plan */
+          if (rc == ELF_OK) {
+            struct elf_plan rp;
+            int prc = elf_build_plan(&ri, &rp);
+            checks++;
+            if (prc == ELF_OK && rp.nreg >= 1) {
+              printf("  PASS real binary plan: %u region(s), span 0x%llx, first off 0x%llx fl 0x%x\n",
+                     rp.nreg, (unsigned long long)rp.span,
+                     (unsigned long long)rp.regs[0].off, rp.regs[0].flags);
+            } else {
+              printf("  FAIL real binary %s -> plan rc=%d nreg=%u\n", real, prc, rp.nreg);
+              failures++;
+            }
+          }
         } else {
           printf("  FAIL real binary %s -> %s\n", real, elf_strerror(rc));
           failures++;
