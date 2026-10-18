@@ -2368,12 +2368,28 @@ static int process_wait_common(struct trap_frame *tf, uint64_t rusage_va) {
     }
   }
   if (!has_child) {
-    /* Diagnostic: no reapable child at all.  Show what the wanted pid's
-       slot (if any) currently looks like, then report ECHILD. */
+    /* Diagnostic: no reapable child at all.  Name the caller and state the child
+       count explicitly, then (for a positive want) show what the wanted slot
+       looks like.
+
+       The slot dump used to be gated on `want_pid > 0`, which made the exact case
+       measured in probe20 -- caller=57, want=-204, looping 15,858 times -- print
+       only the two numbers, so the obvious question ("what does this caller
+       actually have?") had no answer in the log.  Fourth instrument on this
+       ticket that could not speak at the moment it was needed; the rule is to
+       print state, not to confirm a theory.
+
+       `children=0` is the load-bearing field: an ECHILD to a caller with no
+       children is POSIX-correct behaviour, so the line now points at the caller
+       (a test looping on a wait that can never be satisfied) instead of leaving a
+       reader to suspect the kernel. */
     uart_puts("[WAITPID] ECHILD caller=");
     print_int(caller->pid);
+    uart_puts(" ");
+    uart_puts(caller->name);
     uart_puts(" want=");
     print_int(want_pid);
+    uart_puts(" children=0");
     if (want_pid > 0) {
       for (int i = 0; i < MAX_PROCESSES; i++) {
         if (proc_table[i].pid == want_pid) {
@@ -2585,9 +2601,11 @@ static int last_idlestuck_div;
    reclaimable and no state change.  Separate divisor so the two rate limits do
    not consume each other. */
 static int last_quiet_div;
-/* GB-057: rate limiter for the parked-WAIT reporter (one line per 512 idle
-   rounds, per slot), so a stuck set is visible without flooding the UART. */
-static int reap_rounds;
+/* GB-057: one-shot flag for the parked-WAIT reporter, cleared whenever work is
+   found.  probe20 printed the same slot 1,185 times because the limiter was a
+   window (one line per 512 idle rounds) rather than a per-stretch latch: saying
+   1,185 times what once would have said is noise wearing the evidence costume. */
+static int reap_reported;
 /* L9: one pending lostwake-dispose candidate per idle CPU.  A stale-claim
    sighting is ARMED here and only confirmed when the very same heartbeat
    is still present on the NEXT reaper pass (~1.4 s later).  Under MTTCG a
@@ -2773,6 +2791,9 @@ void start_scheduler(void) {
            each time: probe v15 produced 18 dumps (~540 console lines) of a
            single idle stretch.  One dump per stretch is the intent. */
         last_quiet_div = 0;
+        /* ...and the parked-WAIT latch with it, for the same reason: the report
+           is per idle stretch, not per window. */
+        reap_reported = 0;
 
         if (proc_table[i].as)
           vm_arch_switch(proc_table[i].as);
@@ -2966,9 +2987,9 @@ void start_scheduler(void) {
          use-after-free -- the exact class of fault this ticket has spent the
          night chasing.  So the scheduler names the stuck set and the fix belongs
          in the spawn worker that parks it, where the ownership actually is. */
-      int reap_window = (reap_rounds != sched_idle_rounds / 512);
+      int reap_window = !reap_reported;
       if (reap_window)
-        reap_rounds = sched_idle_rounds / 512;
+        reap_reported = 1;
       for (int k = 1; k < MAX_PROCESSES; k++) {
         int st = proc_table[k].state;
         if (st != PROC_STATE_WAIT_SPAWN && st != PROC_STATE_WAIT_CHILD)
