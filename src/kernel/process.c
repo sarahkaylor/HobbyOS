@@ -3350,20 +3350,21 @@ void start_scheduler(void) {
        safe_wfi.  Seven CPUs read the documented -1; one read a pid it was not
        running.
 
-       Only reported when the claimed process is not RUNNING: the kernel's own
-       self-tests legitimately execute inside a process context on this CPU, so an
-       unconditional check would drown in false positives from the test harness.
-       A claim pointing at a non-running process has no innocent explanation.
+       The RUNNING discriminator I first shipped here was wrong, and the probe that
+       followed showed it: a run with a leaked claim (`c3=18`, repeating) printed
+       idleclaim=0, because the claimed process was still marked RUNNING.  I had
+       excluded exactly the case that occurs -- which is also the *interesting*
+       case, since a process that is RUNNING but claimed by an idle CPU is the
+       starvation half of the bug.  Reporting the fact and letting the reader
+       interpret it is the rule I keep re-learning; a filter built on a guess about
+       which states matter is how an instrument goes quiet where it matters.
 
-       Reports, and deliberately does NOT clear: clearing here would hide the
-       leak's origin, and the origin is the entire question.  Bounded so an idle
-       CPU cannot flood the console. */
+       Only the pid range is checked, and the state is PRINTED rather than used to
+       decide.  Bounded so an idle CPU cannot flood the console. */
     {
       extern int current_pid_of_cpu(uint32_t cpu);
       int leaked = current_pid_of_cpu(get_cpuid());
-      if (leaked >= 0 && leaked < MAX_PROCESSES &&
-          proc_table[leaked].state != PROC_STATE_RUNNING &&
-          idleclaim_reported < 20) {
+      if (leaked >= 0 && leaked < MAX_PROCESSES && idleclaim_reported < 40) {
         idleclaim_reported++;
         uart_puts("[IDLECLAIM] cpu=");
         print_int((int)get_cpuid());
