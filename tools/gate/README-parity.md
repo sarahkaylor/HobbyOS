@@ -7,6 +7,13 @@ and requires **both** to be green. It also enforces the ticket's DoD
 a `PARITY_BUDGET_S` baseline (the best-known window) fails the CI when the
 measured window exceeds it.
 
+## What `PARITY PASS` does *not* mean
+
+It is **software** parity: both arch images build, and both unit tiers pass. It is **not** a claim that the
+ARM and intel runtimes behave identically — the device tier still cannot be quoted while T3 fails, and a
+green parity line should never be read as "the arches agree at runtime". Stated here because the verdict is
+what a merge comment quotes, and a four-word verdict travels further than the paragraph under it.
+
 ## What it verifies
 
 - Both arches green -> **PASS**.
