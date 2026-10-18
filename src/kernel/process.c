@@ -3085,6 +3085,48 @@ void start_scheduler(void) {
         uart_puts(proc_table[k].name);
         uart_puts(" -- no state change attempted; see GB-057\n");
       }
+      /* GB-063: release a spawn caller whose worker will never report.
+
+         Owner-side on purpose (see struct process.spawn_deadline_ms): resuming a
+         caller's own bounded wait touches no other context's state, whereas the
+         scheduler forcing a slot's state is what I tried and withdrew -- the live
+         spawn path re-parks the slot underneath you.
+
+         Three guards, all necessary: the slot must be parked in WAIT_SPAWN (its
+         own state), past a deadline that sits above the loader's own 20 s retry
+         budget (so a slow but legitimate load is never preempted), and claimed by
+         no CPU (so a worker that is genuinely still working is left alone).  It
+         reports, because a release we cannot explain later is indistinguishable
+         from corruption. */
+      {
+        extern uint64_t timer_get_ms(void);
+        uint64_t now_ms = timer_get_ms();
+        for (int k = 1; k < MAX_PROCESSES; k++) {
+          if (proc_table[k].state != PROC_STATE_WAIT_SPAWN)
+            continue;
+          if (proc_table[k].spawn_deadline_ms == 0 ||
+              now_ms < proc_table[k].spawn_deadline_ms)
+            continue;
+          int claimed = 0;
+          for (int c = 0; c < MAX_CPUS; c++)
+            if (cpu_current_pids[c] == k)
+              claimed = 1;
+          if (claimed)
+            continue; /* a worker is still on it: leave it alone */
+          uart_puts("[SPAWNTIME] releasing spawn caller slot=");
+          print_int(k);
+          uart_puts(" pid=");
+          print_int(proc_table[k].pid);
+          uart_puts(" ");
+          uart_puts(proc_table[k].name);
+          uart_puts(" -> -EAGAIN (its worker never reported)\n");
+          proc_table[k].spawn_retval = -EAGAIN;
+          proc_table[k].context[0] = (uint64_t)(int64_t)-EAGAIN;
+          proc_table[k].state = PROC_STATE_READY;
+          proc_table[k].spawn_deadline_ms = 0;
+        }
+      }
+
       spinlock_release_irqrestore(&proc_lock, wflags);
 
       /* Dispose a lost-owner slot OUTSIDE proc_lock (group_teardown takes
