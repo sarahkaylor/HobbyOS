@@ -1,6 +1,7 @@
-# GB-062 — intel-vs-ARM delta in the FAT write path (FATBIG tail checksum)
+# GB-062 — the intel-only FATBIG tail checksum: a signed-`char` comparison, not the block device
 
-**Repro (from the ticket):** `[FATBIG] FAIL tail checksum clean (got=0x0000000000000800 want=0x0000000000000000)` in `evidence/gb-057/t3intel_probe16_gb060_release_fired.log`; the same test passes on ARM in the same night's run.
+**Repro (from the ticket):** `[FATBIG] FAIL tail checksum clean (got=0x0000000000000800 want=0x0000000000000000)`
+in `evidence/gb-057/t3intel_probe16_gb060_release_fired.log`; the same test passes on ARM in the same night's run.
 
 ## What FATBIG actually checks
 
@@ -9,25 +10,48 @@
 - reopens and asserts `lseek(SEEK_END) == 2 MiB` (passes),
 - reads the **tail 4 KiB** and counts mismatches `bad`; the failing check is `bad == 0x0` (got `bad = 0x800` = 2048).
 
-So exactly **half the tail read** (2048 of 4096 bytes) differs from the written pattern on intel, and the file *size* is correct — this is data corruption in the write/read-back, **not** a size/look-up defect (the >1 MiB directory-entry bug the test was created for is long fixed).
+## The cause
 
-## The intel-vs-ARM delta — explained
+`src/user/fatbig_test.c:95` compared:
 
-The user test and the shared FAT filesystem code are **arch-agnostic**:
-- `src/user/fatbig_test.c` — same on both arches (pure userspace writes/reads).
-- `src/kernel/fat16.c` (the create/write/reopen path the test exercises) — shared C, no `__x86_64__`/arch branches in the write path.
+```c
+if ((chunk[i] & 0xFF) != (char)((p >> 8) ^ (p & 0xFF))) bad++;
+```
 
-The block device **beneath** FAT is where the arches diverge, in `src/kernel/virtio_blk.c`:
+The left side is an `int` in `0..255`. The right side is `(char)`, which is **signed on x86_64** and
+**unsigned on ARM** — the ABI, not the device, is the intel-vs-ARM delta. A `(char)` with the high bit set
+sign-extends to `-128..-1`, so it can never equal the `128..255` on the left. The tail pattern
+`(p>>8) ^ (p&0xFF)` has bit 7 set in **exactly half** its bytes, which is why the count is `0x800` — half of
+4096 — and why the file *size* is correct: nothing was corrupted on disk, the comparison was wrong.
 
-| arch | block backend | write path |
-|---|---|---|
-| **ARM** | VirtIO-blk **MMIO** (`#else` branch, `reg_write32`, virtqueue) | passes (`bad == 0`) |
-| **intel (x86_64)** | **homemade NVMe driver on PCI** (`#ifdef __x86_64__` branch, `outl`/`inl`, `pci_write_config`, `nvme_...`) | 2048/4096 tail bytes wrong |
+**Verified on a host, all three readings matching the ticket:**
 
-Concretely the intel `virtio_blk_write_raw` (virtio_blk.c:411) copies each of `count` 512-byte sectors into a **single-page `bounce_buf`** and issues a per-sector NVMe write (`cdw12 = 0` = one block), polling `submit_io_cmd` per sector. The ARM MMIO branch issues the same logical 512-byte requests through the virtio virtqueue.
+```
+char is SIGNED   (x86_64) : as written in fatbig_test.c : bad=2048 (0x800) of 4096
+                            with (unsigned char) cast  : bad=0 (0x0)
+char is unsigned (ARM ABI): as written in fatbig_test.c : bad=0 (0x0)
+```
 
-## Conclusion / locus
+## The fix
 
-The shared FAT16 + user-test logic is **not** the culprit — the same code passes on ARM. The defect is isolated to the **intel NVMe block-device layer** (`virtio_blk.c` `__x86_64__` branch): a >1 MiB tail write on NVMe corrupting ~half the bytes (the 2 MiB boundary is exactly where a single-PRP / data-page issue would surface). Because the delta is the device backend, the **fix and the intel T3 verification belong on the intel storage/ABI track (GB-057's intel-runtime lane), not in FAT16 or the user test.**
+Compare as unsigned bytes on both sides:
 
-A host golden (src/host/fatbig_tail_test.c) locks the user-test + pattern round-trip on the host so any future intel regression is proven to be device-layer, not test/FAT logic.
+```c
+if ((unsigned char)chunk[i] != (unsigned char)((p >> 8) ^ (p & 0xFF))) bad++;
+```
+
+## What this doc previously said, and why it is wrong
+
+An earlier version of this file concluded the defect was in the **intel NVMe block-device layer**
+(`virtio_blk.c`'s `__x86_64__` branch, single-page `bounce_buf`, per-sector NVMe writes), reasoning that the
+shared FAT16 code and user test are arch-agnostic. That reasoning was sound but the conclusion was not: an
+NVMe data-path fault cannot produce **exactly half** of a tail, cannot be deterministic across runs, and
+cannot explain why the same bytes pass on ARM. The half-tail number is the signature of a sign bit, not a
+DMA boundary.
+
+Kept as a record because the wrong version was merged and read; the correction is the useful part.
+
+## A separate symptom, not part of this bug
+
+The ticket also recorded `[FATBIG] FAIL short` in another run. That is a *different* symptom and is not
+explained by this comparison: a short write points at the storage path and remains open.
