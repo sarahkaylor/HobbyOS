@@ -72,6 +72,9 @@ int cpu_is_halted(uint32_t cpu) { return cpu < MAX_CPUS ? cpu_halted[cpu] : 0; }
    put the definition 1,200 lines below its first use, and the gate refused both
    arches for it. */
 static int alive_reported;
+/* GB-057: latch for the [NOAS] skip report (a user slot picked with no address
+   space -- mid-exec), cleared with the other latches when work is found. */
+static int noas_reported;
 
 static void resume_returned_halt(int pid) {
   extern void uart_puts_raw(const char *s);
@@ -1311,6 +1314,43 @@ void schedule(struct trap_frame *tf, int is_yield) {
       int idx = (current_search_pid + i) % MAX_PROCESSES;
       if (proc_table[idx].state != PROC_STATE_READY)
         continue;
+      /* GB-057: never pick a BROKEN user slot -- one with no address space AND no
+         physical base to overlay.
+
+         The exec path leaves the exec'ing process with no AS for a long window
+         (teardown + create + image map + region inserts, interrupts enabled), and
+         a pick in that window takes the `else` branch below --
+         mmu_switch_user_mapping with `user_phys_base` (0 for a v2 slot) -- and
+         restores into a frame built for physical 0, which is how a CPU ends up
+         executing at address 7 (probe22: `vector=6 rip=0x0000000000000007 pid=28
+         PIPETEST.BIN`; FORKTEST pid=25 took a wild RIP the same way).
+
+         BOTH conditions are required, and the second one matters: a **v1** process
+         legitimately has `as == 0` with a valid `user_phys_base`, and the overlay
+         branch below is the correct resume path for it.  Skipping on `as == 0`
+         alone would starve the entire native/v1 track -- a fix worse than the bug.
+         Only a slot with neither an AS nor a physical base is unrecoverable.
+
+         Skipping is self-clearing: the exec'ing process is not blocked (it
+         completes on its own CPU), so the slot becomes pickable as soon as its new
+         AS is installed.  Reported (latched) because a silent skip is
+         indistinguishable from a scheduling bug. */
+      if (!proc_table[idx].is_kernel_process && !proc_table[idx].as &&
+          proc_table[idx].user_phys_base == 0) {
+        if (!noas_reported) {
+          noas_reported = 1;
+          uart_puts("[NOAS] skipping USER slot with no address space: slot=");
+          print_int(idx);
+          uart_puts(" pid=");
+          print_int(proc_table[idx].pid);
+          uart_puts(" state=");
+          print_int((int)proc_table[idx].state);
+          uart_puts(" ");
+          uart_puts(proc_table[idx].name);
+          uart_puts(" -- mid-exec AS swap; will be pickable when its AS is back\n");
+        }
+        continue;
+      }
       /* Claim guard (the picking half of `taken_elsewhere` above): a
          READY process may still be EXECUTING on another CPU -- a waker
          flipped its parked state back to READY while its owner was still
@@ -2828,6 +2868,24 @@ void start_scheduler(void) {
     for (int i = 0; i < MAX_PROCESSES; i++) {
       if (proc_table[i].state != PROC_STATE_READY)
         continue;
+      /* GB-057: same rule as the pick in schedule() -- never hand a frame to a
+         BROKEN user slot (no AS *and* no physical base; a v1 process has `as == 0`
+         with a valid base and must still be picked).  Reported through the same
+         latch so whichever site fires first is the one that speaks. */
+      if (!proc_table[i].is_kernel_process && !proc_table[i].as &&
+          proc_table[i].user_phys_base == 0) {
+        if (!noas_reported) {
+          noas_reported = 1;
+          uart_puts("[NOAS] skipping USER slot with no address space: slot=");
+          print_int(i);
+          uart_puts(" pid=");
+          print_int(proc_table[i].pid);
+          uart_puts(" ");
+          uart_puts(proc_table[i].name);
+          uart_puts(" -- mid-exec AS swap\n");
+        }
+        continue;
+      }
       /* Same claim guard as in schedule(): never pick a READY process
          another CPU still claims (wake raced its block-to-schedule gap;
          its live frame is not saved yet).  See the long comment there. */
@@ -2856,39 +2914,16 @@ void start_scheduler(void) {
         reap_reported = 0;
         /* ...and the [ALIVE-SET] latch: a new stretch deserves a fresh report. */
         alive_reported = 0;
+        noas_reported = 0;
 
         if (proc_table[i].as)
           vm_arch_switch(proc_table[i].as);
-        else {
-          /* GB-057: a USER slot picked with no address space.  This is the entry
-             point the original root-cause analysis named: the v2 exec path clears
-             `grp->as` outside proc_lock, so the scheduler can pick a slot whose AS
-             is gone, fall into the v1 overlay path below, map `user_phys_base`
-             (which is 0 for a v2 slot) and restore into a frame built for physical
-             0 -- which is how a CPU ends up executing at address 7 (probe22:
-             `vector=6 rip=0x0000000000000007 pid=28 PIPETEST.BIN`).
-
-             Report at the moment of the pick, not after the crash: the register
-             dump tells you where it died, this tells you who handed it the frame.
-             A kernel thread legitimately has no AS, so only a user slot is called
-             out. */
-          if (!proc_table[i].is_kernel_process) {
-            uart_puts("[NOAS] picking USER slot with no address space: slot=");
-            print_int(i);
-            uart_puts(" pid=");
-            print_int(proc_table[i].pid);
-            uart_puts(" state=");
-            print_int((int)proc_table[i].state);
-            uart_puts(" user_phys_base=");
-            print_int((int)proc_table[i].user_phys_base);
-            uart_puts(" cpu=");
-            print_int((int)cpu);
-            uart_puts(" ");
-            uart_puts(proc_table[i].name);
-            uart_puts(" -- resuming via the v1 overlay path\n");
-          }
+        else
+          /* Reached only by kernel threads now: a user slot with no AS is
+             skipped at the pick site above ([NOAS]), which is the decision point.
+             Keeping the report there rather than here means one instrument in the
+             place that decides, instead of two where one is dead code. */
           mmu_switch_user_mapping(proc_table[i].user_phys_base);
-        }
 
         extern char __stack_top;
         uint64_t target_sp = (uint64_t)&__stack_top - cpu * 0x10000 - 4096;
