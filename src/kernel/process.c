@@ -1392,8 +1392,17 @@ void schedule(struct trap_frame *tf, int is_yield) {
       {
         extern volatile uint64_t sched_badelr_seen;
         uint64_t elr = proc_table[idx].context[31];
-        if (!proc_table[idx].is_kernel_process &&
-            (elr < 0x1000u || elr >= 0x70000000u)) {
+        /* The gap between the x64 kernel's load base and the user VA base is
+           where no legal user entry point can live.  Getting this range wrong is
+           what my first version did: it used the kernel base as the upper bound
+           and so flagged EVERY healthy resume (elr=0x1000000000, the user image
+           base itself), burning the 20-line cap on false positives and going
+           blind exactly when the real one -- elr=0x7 -- occurred.  The same
+           failure mode as the holder reporter's lifetime cap: a noisy instrument
+           with a budget is worse than no instrument. */
+        int implausible = (elr < 0x1000u) ||
+                          (elr >= 0x70000000u && elr < USER_VA_BASE);
+        if (!proc_table[idx].is_kernel_process && implausible) {
           if (sched_badelr_seen < 20) {
             sched_badelr_seen++;
             uart_puts("[BADELR] picking a user slot with an implausible frame.elr=");
