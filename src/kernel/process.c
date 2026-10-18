@@ -75,6 +75,9 @@ static int alive_reported;
 /* GB-057: latch for the [NOAS] skip report (a user slot picked with no address
    space -- mid-exec), cleared with the other latches when work is found. */
 static int noas_reported;
+/* GB-057: count of implausible-frame picks reported (bounded -- this is a
+   rare-event report, not a per-pick log). */
+volatile uint64_t sched_badelr_seen;
 
 static void resume_returned_halt(int pid, const struct trap_frame *tf) {
   extern void uart_puts_raw(const char *s);
@@ -1368,6 +1371,44 @@ void schedule(struct trap_frame *tf, int is_yield) {
           uart_puts(" -- mid-exec AS swap; will be pickable when its AS is back\n");
         }
         continue;
+      }
+      /* GB-057: is the frame we are about to hand this process a plausible one?
+
+         The resume sites are interrupt-atomic and that race is documented and
+         handled (a timer tick in the 296-byte window clobbers the copied frame and
+         "the iretq pops garbage"), so a garbage frame surviving to the resume is
+         not that bug -- it is upstream corruption of `context[]`, i.e. the
+         save/restore race the claim guard above describes ("torn cross-process
+         register frames").
+
+         Measured (probe24): SMPTEST.BIN took `vector=6 rip=0x0000000000000007`
+         with `age_ms=219005` and a frame whose stack slots were all zero -- a
+         process resumed into a frame that was never properly written, then stuck
+         for 3.6 minutes before the fault was noticed.
+
+         elr (context[31], the ARM-position field both arches share) is the field
+         that would be wrong: a user process must resume into its own image, so
+         anything below the first page or above the kernel base is nonsense. */
+      {
+        extern volatile uint64_t sched_badelr_seen;
+        uint64_t elr = proc_table[idx].context[31];
+        if (!proc_table[idx].is_kernel_process &&
+            (elr < 0x1000u || elr >= 0x70000000u)) {
+          if (sched_badelr_seen < 20) {
+            sched_badelr_seen++;
+            uart_puts("[BADELR] picking a user slot with an implausible frame.elr=");
+            uart_print_hex(elr);
+            uart_puts(" slot=");
+            print_int(idx);
+            uart_puts(" pid=");
+            print_int(proc_table[idx].pid);
+            uart_puts(" sp=");
+            uart_print_hex(proc_table[idx].context[33]);
+            uart_puts(" ");
+            uart_puts(proc_table[idx].name);
+            uart_puts("\n");
+          }
+        }
       }
       /* Claim guard (the picking half of `taken_elsewhere` above): a
          READY process may still be EXECUTING on another CPU -- a waker
