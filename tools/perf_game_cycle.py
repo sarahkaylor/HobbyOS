@@ -59,11 +59,14 @@ class FreezeWatchdog:
 
 
 def rss_trend_growth(rss_samples, max_growth_mb):
-    """Return (growth_mb, ok). growth = last - first for the sampled RSS."""
+    """Return (growth_mb, ok). growth = last - first for the sampled QEMU RSS
+    (input in KB).  The bound `max_growth_mb` is in MB, so compare against
+    max_growth_mb * 1024 KB."""
     if not rss_samples:
         return (0.0, True)
-    growth_mb = rss_samples[-1] - rss_samples[0]
-    return (round(growth_mb, 2), growth_mb <= max_growth_mb)
+    growth_kb = rss_samples[-1] - rss_samples[0]
+    ok = growth_kb <= max_growth_mb * 1024.0
+    return (round(growth_kb / 1024.0, 2), ok)
 
 
 def flag_freeze_free(observed, window):
@@ -154,10 +157,6 @@ def main():
                 time.sleep(1.0)
             frozen = wd.frozen
             growth, mem_ok = rss_trend_growth([r for r in rss if r], args.max_growth_mb)
-            if rss and rss[-1] and rss[0]:
-                growth = round((rss[-1] - rss[0]) / 1024.0, 2)   # KB -> MB
-            else:
-                growth = 0.0
             line = f"cycle={cyc} game={spec} samples={samples} frozen={frozen} growth_mb={growth}"
             print(f"[perf] {line}")
             report.append({"cycle": cyc, "game": spec, "slot": slot,
