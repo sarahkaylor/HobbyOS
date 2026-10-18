@@ -45,6 +45,26 @@ extern void print_int(int val);
    Note this is deliberately NOT a lock release: if the resume returned, the
    process state is already suspect, and the honest move is to name the CPU and
    stop it rather than to hand a possibly-torn state to another core. */
+/* GB-060: CPUs that have taken a fatal fault and stopped for good.
+
+   Why this exists at all: every GB-057 freeze had the same shape -- one CPU
+   stopped inside an IRQs-off critical section and the rest spinning behind it
+   with interrupts off, so no timer fired anywhere and the machine could neither
+   recover nor report.  Guards at individual triggers changed which lock was
+   stranded (proc_lock, then a blk_cache bucket) but not that one was.  This
+   database is what lets a *waiter* decide the holder is gone: a CPU recorded
+   here never touches a lock again, so a lock it holds can be taken over safely.
+   Set only by the fatal halt paths, never cleared -- a halted CPU stays halted
+   until reboot, and clearing it would turn the steal into a race. */
+volatile uint8_t cpu_halted[MAX_CPUS];
+
+void cpu_halt_record(uint32_t cpu) {
+  if (cpu < MAX_CPUS)
+    cpu_halted[cpu] = 1;
+}
+
+int cpu_is_halted(uint32_t cpu) { return cpu < MAX_CPUS ? cpu_halted[cpu] : 0; }
+
 static void resume_returned_halt(int pid) {
   extern void uart_puts_raw(const char *s);
   extern void uart_print_hex_raw(uint64_t v);
@@ -75,6 +95,10 @@ static void resume_returned_halt(int pid) {
     }
   }
   uart_puts_raw(" -- halting this CPU\n");
+  /* GB-060: record it BEFORE stopping, so any CPU waiting on a lock this one
+     holds can tell the holder is gone and take it over instead of spinning
+     forever behind a core that will never run again. */
+  cpu_halt_record(get_cpuid());
   for (;;) {
   }
 }

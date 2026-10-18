@@ -27,6 +27,19 @@ void spinlock_init(spinlock_t *lock) {
    permanently-stuck spinner prints once instead of flooding the console. */
 static volatile uint64_t ld_reported[64];
 
+/* GB-060: the steal decision, in ONE place (mirrors the x64 implementation so
+   the two arches cannot drift in the rule that decides whether a lock may be
+   freed).  A lock is freed only when its recorded owner is a CPU recorded as
+   halted -- never because time passed. */
+int lock_steal_ok(uint32_t owner_slot, uint32_t cpu) {
+  extern int cpu_is_halted(uint32_t cpu);
+  if (owner_slot == 0)
+    return 0; /* free / unowned */
+  if ((owner_slot - 1) == cpu)
+    return 0; /* our own lock: a self-deadlock is a different bug */
+  return cpu_is_halted(owner_slot - 1);
+}
+
 __attribute__((noinline)) static void spin_slow(spinlock_t *lock, uint64_t ra) {
   uint32_t cpu = get_cpuid();
   uint64_t spins = 0;
@@ -55,6 +68,27 @@ __attribute__((noinline)) static void spin_slow(spinlock_t *lock, uint64_t ra) {
         uart_puts_raw(" caller=");
         uart_print_hex_raw(ra);
         uart_puts_raw("\n");
+      }
+      /* GB-060: if the recorded owner is a CPU that has halted, free the lock and
+         go back to contending for it normally.  Freeing-then-re-acquiring (rather
+         than "taking" it here) is what keeps exactly one winner when several
+         waiters spot the same dead owner at once -- mutual exclusion is the one
+         property that must not be negotiated.  A live-but-slow owner is never
+         touched: only a recorded halt wins this, never elapsed time. */
+      {
+        extern int cpu_is_halted(uint32_t cpu);
+        uint32_t own = lock->owner;
+        if (lock_steal_ok(own, cpu)) {
+          uart_puts_raw("[STOLEN] cpu=");
+          uart_print_hex_raw(cpu);
+          uart_puts_raw(" lock=");
+          uart_print_hex_raw((uint64_t)(uintptr_t)lock);
+          uart_puts_raw(" from halted cpu=");
+          uart_print_hex_raw(own - 1);
+          uart_puts_raw("\n");
+          lock->owner = 0;
+          __asm__ volatile("stlr wzr, [%0]\n" ::"r"(&lock->locked) : "memory");
+        }
       }
     }
   }
