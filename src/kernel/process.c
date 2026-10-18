@@ -2561,6 +2561,9 @@ static int last_idlestuck_div;
    reclaimable and no state change.  Separate divisor so the two rate limits do
    not consume each other. */
 static int last_quiet_div;
+/* GB-057: rate limiter for the parked-WAIT reporter (one line per 512 idle
+   rounds, per slot), so a stuck set is visible without flooding the UART. */
+static int reap_rounds;
 /* L9: one pending lostwake-dispose candidate per idle CPU.  A stale-claim
    sighting is ARMED here and only confirmed when the very same heartbeat
    is still present on the NEXT reaper pass (~1.4 s later).  Under MTTCG a
@@ -2920,19 +2923,28 @@ void start_scheduler(void) {
          fresh sighting re-arms from scratch. */
       if (lw_candidate != lw_disp_arm_slot[cpu])
         lw_disp_arm_slot[cpu] = 0;
-      /* GB-057: reap an ORPHANED WAIT.  A slot parked in WAIT_SPAWN/WAIT_CHILD
+      /* GB-057: name an ORPHANED WAIT.  A slot parked in WAIT_SPAWN/WAIT_CHILD
          is waiting for an event another process must deliver -- a spawn
          completing, a child exiting.  If its parent is gone (parent_pid <= 0,
-         or the parent's slot is FREE/EXITED) nothing can ever deliver it, so
-         the slot is unwakeable forever.  Measured (probe v15, evidence
+         or the parent's slot is FREE/EXITED) and no CPU claims it, nothing here
+         can ever deliver it.  Measured (probe v15, evidence
          t3intel_probe15_waitspawn_blocker.log): three such slots (SHTEST2.BIN,
          SHTEST3.BIN, SPAWN.BIN) with parent=-1 and no CPU claiming them kept
          `!any_alive` true for the rest of the run, so every CPU idled in
          safe_wfi and the wave never printed `System halt` -- the tier failed
-         for a missing halt marker with a full console otherwise.  Marking them
-         EXITED is the minimal correct move: they are not running anywhere (the
-         claim check below proves it) and the normal reaper handles the slot.
-         Reported so the event is never silent. */
+         for a missing halt marker with an otherwise complete console. */
+      /* GB-057 -- REPORT ONLY.  One line per stuck slot per 512 idle rounds, and
+         deliberately NOT a state change.  probe17 showed the same slot "reaped"
+         11 times in a row, and the reason is not cosmetic: trap.c sets
+         `caller->state = PROC_STATE_WAIT_SPAWN` on the spawn path, so a live
+         worker keeps re-parking the slot after any teardown performed here.
+         Forcing EXITED underneath that is how a scheduler hack becomes the next
+         use-after-free -- the exact class of fault this ticket has spent the
+         night chasing.  So the scheduler names the stuck set and the fix belongs
+         in the spawn worker that parks it, where the ownership actually is. */
+      int reap_window = (reap_rounds != sched_idle_rounds / 512);
+      if (reap_window)
+        reap_rounds = sched_idle_rounds / 512;
       for (int k = 1; k < MAX_PROCESSES; k++) {
         int st = proc_table[k].state;
         if (st != PROC_STATE_WAIT_SPAWN && st != PROC_STATE_WAIT_CHILD)
@@ -2952,27 +2964,19 @@ void start_scheduler(void) {
             claimed = 1;
         if (claimed)
           continue; /* someone is still on it: let its owner finish */
-        /* Hand it to the existing outside-the-lock teardown rather than marking
-           the slot EXITED here: group_teardown is the tested route (it releases
-           the AS/block exactly once and delivers the reap), and it must not run
-           with proc_lock held.  One per pass, like the lost-wake path, and only
-           when that path has not already chosen a slot. */
-        if (dispose_slot == 0) {
-          uart_puts("[KERNEL] reaping orphaned wait: slot=");
-          print_int(k);
-          uart_puts(" pid=");
-          print_int(proc_table[k].pid);
-          uart_puts(" st=");
-          print_int(st);
-          uart_puts(" parent=");
-          print_int(pp);
-          uart_puts(" ");
-          uart_puts(proc_table[k].name);
-          uart_puts(" (unwakeable: no parent to deliver the wake)\n");
-          dispose_slot = k;
-          acted = 1;
-          break;
-        }
+        if (!reap_window)
+          continue;
+        uart_puts("[KERNEL] parked WAIT slot with no parent to wake it: slot=");
+        print_int(k);
+        uart_puts(" pid=");
+        print_int(proc_table[k].pid);
+        uart_puts(" st=");
+        print_int(st);
+        uart_puts(" parent=");
+        print_int(pp);
+        uart_puts(" ");
+        uart_puts(proc_table[k].name);
+        uart_puts(" -- no state change attempted; see GB-057\n");
       }
       spinlock_release_irqrestore(&proc_lock, wflags);
 
