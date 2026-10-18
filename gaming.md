@@ -442,6 +442,13 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
   than writing it into tracked scripts:
   `export FORGEJO_TOKEN=$(cat ~/.hermes/cache/scratch/swarm-vm-bootstrap-pw.txt | grep swarm-bot | cut -d' ' -f4)`.
 - Admin password rotates in the Forgejo UI anytime; the swarm uses the token, so rotation is safe.
+- **GitHub API access (PR open/merge):** push is SSH (seeded key, no creds). For GitHub REST API calls
+  (open a PR, merge a PR, status), `GITHUB_TOKEN` is stored in `~/.hermes/.env` on every swarm VM
+  (chmod 600). Any shell needing it must load it first — sessions started before it was added do NOT
+  have it in env:
+  `set -a; source ~/.hermes/.env; set +a` (or `export GITHUB_TOKEN=$(grep '^GITHUB_TOKEN=' ~/.hermes/.env | cut -d= -f2-)`).
+  `GIT_TERMINAL_PROMPT=0` is also there so git never hangs on a credential prompt. The Coordinator owns
+  all merges (mount a merge = PATCH `/repos/sarahkaylor/HobbyOS/pulls/{n}/merge` with the token).
 
 ### 11.2 Ticketing (Forgejo) — agent-facing
 - Web UI: http://192.168.0.234:3000 — admin user `sarah`.
