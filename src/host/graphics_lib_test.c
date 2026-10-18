@@ -101,6 +101,20 @@ static void test_line_single_point(void) {
   CHECK(graphics_get_pixel(4, 4) == C(6, 6, 6), "single point line");
 }
 
+/* GB-065: replicate the EXACT in-OS GRAPHICS.BIN diagonal
+ * graphics_draw_line(10,600,110,700) + its three assertions.  On a coherent
+ * framebuffer this MUST pass (startpoint/midpoint/endpoint), which pins the
+ * allocation: the line algorithm + these reads are correct, so an intel
+ * in-OS failure would be the framebuffer read-back/interleave, NOT the loop.
+ * (The step bound is already ruled out: dx+dy+1 = 201 > the 101 steps used.) */
+static void test_line_diagonal_graphicsbin(void) {
+  reset();
+  graphics_draw_line(10, 600, 110, 700, C(255, 255, 0));
+  CHECK(graphics_get_pixel(10, 600) == C(255, 255, 0), "line startpoint");
+  CHECK(graphics_get_pixel(60, 650) == C(255, 255, 0), "line midpoint");
+  CHECK(graphics_get_pixel(110, 700) == C(255, 255, 0), "line endpoint");
+}
+
 static void test_rect_outline(void) {
   reset();
   graphics_draw_rect_outline(10, 10, 8, 6, C(4, 4, 4));
@@ -732,6 +746,7 @@ int main(void) {
   RUN(test_hline_vline);
   RUN(test_line_diagonal);
   RUN(test_line_single_point);
+  RUN(test_line_diagonal_graphicsbin);
   RUN(test_rect_outline);
   RUN(test_gradient);
   RUN(test_circle_filled);
