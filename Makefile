@@ -3409,4 +3409,18 @@ style-diff:
 style-test:
 	python3 tools/test_cstyle.py
 
-.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test bigload_intel t4_compat_parity
+# --- Merge gate (GB-005): one command to run the branch/PR gate -----------
+# merge_gate.sh aggregates the test tiers (T1 host golden always; heavy QEMU
+# T2/T3 tiers enabled via GATE_CI=1 / GATE_T2=1 / GATE_T3=1) into a single
+# verdict; merge_gate_test.sh proves the DoD "a dummy branch fails -> passes
+# the gate" (T3-verdict fail->pass + optional real T1 run).
+merge_gate:
+	bash tools/gate/merge_gate.sh
+
+merge_gate_ci:
+	GATE_CI=1 bash tools/gate/merge_gate.sh
+
+test_merge_gate:
+	bash tools/gate/merge_gate_test.sh
+
+.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test merge_gate merge_gate_ci test_merge_gate bigload_intel t4_compat_parity
