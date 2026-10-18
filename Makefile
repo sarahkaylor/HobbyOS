@@ -3425,4 +3425,15 @@ style-diff:
 style-test:
 	python3 tools/test_cstyle.py
 
-.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test bigload_intel t4_compat_parity
+# --- Two-arch parity CI (GB-044) ---
+# Runs the per-arch check on ARCH=arm AND ARCH=intel, requires both green
+# (gaming.md §2.3 parity), and enforces the GB-044 DoD "run window < best"
+# via a PARITY_BUDGET_S baseline (fails when the window exceeds it). The
+# self-test proves the verdict + budget (make test_parity_ci).
+parity_ci:
+	bash tools/gate/parity_ci.sh
+
+test_parity_ci:
+	bash tools/gate/parity_ci_test.sh
+
+.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test parity_ci test_parity_ci bigload_intel t4_compat_parity
