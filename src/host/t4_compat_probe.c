@@ -38,6 +38,7 @@
 #include <sys/select.h>
 #include <signal.h>
 #include <stdint.h>
+#include <pthread.h>
 
 /* GB-017: /dev/urandom + getrandom return *random bytes* — the content is
  * non-deterministic and must never be diffed leg-to-leg.  Only the return
@@ -46,6 +47,30 @@
 /* Normalized line: "<op> rc=<r> errno=<e>" — errno read only when rc<0. */
 static volatile sig_atomic_t g_sigusr1 = 0;
 static void on_sigusr1(int s) { (void)s; g_sigusr1 = 1; }
+
+/* GB-021: thread + futex shared state. */
+#ifndef FUTEX_WAIT
+#define FUTEX_WAIT 0
+#endif
+#ifndef FUTEX_WAKE
+#define FUTEX_WAKE 1
+#endif
+static _Atomic(int) g_counter = 0;
+static volatile int g_futex_val = 0;
+static void *thr_worker(void *p) { long n = (long)p;
+  for (long i = 0; i < n; i++) { g_counter++; }
+  return (void *)(n * 2);
+}
+static void *thr_futexwaiter(void *p) {
+  volatile int *v = p;
+  /* wait until *v != 0 (raw futex wait loop, timeout-bounded) */
+  for (int spin = 0; spin < 200000; spin++) {
+    if (__atomic_load_n(v, __ATOMIC_ACQUIRE) != 0) return (void *)0;    /* woken */
+    struct timespec ts; ts.tv_sec = 0; ts.tv_nsec = 50000; /* 50us */
+    syscall(SYS_futex, (int *)v, FUTEX_WAIT, 0, &ts, NULL, 0);
+  }
+  return (void *)1; /* timeout path (shouldn't happen when waker fires) */
+}
 static void report(const char *op, long r) {
   if (r < 0) {
     printf("%s rc=%ld errno=%d\n", op, r, errno);
@@ -361,6 +386,42 @@ int main(void) {
     report("arch_fs_roundtrip", after == cur);
 #undef ARCH_SET_FS
 #undef ARCH_GET_FS
+  }
+
+  /* GB-021: threads + futex.
+   * pthread_create/join with a fixed per-thread increment must yield an exact
+   * final counter (every thread really ran and joined) and the thread's exit
+   * value (2*N) must be observable — a thread layer that skips/duplicates work
+   * diverges.  The futex handshake proves FUTEX_WAIT/FUTEX_WAKE parity: a
+   * waiter blocks on g_futex_val==0, the main thread stores 1 and FUTEX_WAKE, so
+   * the waiter must return woken (0), not the timeout path (1). */
+  {
+    pthread_t t[4];
+    g_counter = 0;
+    for (long i = 0; i < 4; i++) {
+      errno = 0;
+      report("thread_create", pthread_create(&t[i], NULL, thr_worker, (void *)1000L));
+    }
+    long sum = 0;
+    for (int i = 0; i < 4; i++) {
+      void *ret = NULL;
+      pthread_join(t[i], &ret);
+      sum += (long)ret;
+    }
+    report("thread_join_sum", sum);          /* 4 * (2*1000) = 8000 */
+    report("thread_counter", g_counter);       /* 4000 */
+
+    /* futex handshake */
+    g_futex_val = 0;
+    pthread_t w;
+    pthread_create(&w, NULL, thr_futexwaiter, (void *)&g_futex_val);
+    /* give the waiter a moment to enter FUTEX_WAIT, then wake it */
+    for (int k = 0; k < 2000 && __atomic_load_n(&g_futex_val, __ATOMIC_RELAXED)==0; k++) { usleep(200); }
+    __atomic_store_n(&g_futex_val, 1, __ATOMIC_RELEASE);
+    report("futex_wake", syscall(SYS_futex, &g_futex_val, FUTEX_WAKE, 1, NULL, NULL, 0));
+    void *wret = NULL;
+    pthread_join(w, &wret);
+    report("futex_waiter_woken", (long)wret == 0);   /* 1 = woken, not timeout */
   }
 
   /* exit status is part of the diff: 0 here means every leg reached the
