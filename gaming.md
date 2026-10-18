@@ -592,6 +592,14 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 
 ### 11.8 Execution log (newest first, maintained by the Coordinator)
 
+**2026-10-18 — lane fan-out + board-drift correction (Coordinator, continuation).**
+
+| what | state |
+|---|---|
+| **Ready lane refilled (it was empty)** | Promoted five genuinely unblocked tickets, each with its deliverable, gate, and an explicit note about what is *not* gated: **wabi** ← GB-017 (dev nodes + `getrandom`), GB-020 (`getdents64` + `/proc/self`), GB-019 (ioctl subset) — the core of each is independent of GB-014's syscall routing, which is only their wiring tail; **wgames** ← GB-043 (long-duration playthrough harness, dep GB-040 Done) and GB-045 (gfxbench baseline, no unmet deps). **wgfx got nothing, deliberately**: every remaining graphics/input/audio Backlog ticket is gated by wgfx's own in-flight work (GB-032 SDL, GB-029 audio), so that lane is full rather than idle — manufacturing a promotion there would have been theatre |
+| **Board drift corrected (5 tickets)** | GB-025, GB-027, GB-028, GB-030, GB-042 were sitting in In Review / Merge Gate with their work already merged on `main`. Each was **verified present at `origin/main` before** being moved to Done, naming the PR that landed it. A merged ticket in a review lane tells the next reader that work is pending when it is finished — the same class of lie as an instrument that reports the wrong state |
+| **Merge queue** | PR #4 closed as superseded (its work landed via PR #10) with a pointer comment so nobody rebases it. PR #1 (DOOM / GB-034) and PR #2 (STARDUST / GB-038) stay red on their T5 legs; PR #17 (GB-059 rig) stays changes-requested. Nothing in the queue had green gates, so nothing was merged |
+
 **2026-10-17 — merge-queue pass (Coordinator, continuation).**
 
 | what | state |
