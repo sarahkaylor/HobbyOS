@@ -13,6 +13,12 @@ volatile uint64_t lock_wait_addr[MAX_CPUS];
    process.c records it at the halt, and this file reads it to decide whether a
    lock's recorded owner is still alive. */
 extern int cpu_is_halted(uint32_t cpu);
+/* GB-060: the program's existing per-CPU liveness clock (process.c defines it,
+   watchdog_tick refreshes it on every timer IRQ).  Reused rather than adding a
+   second liveness instrument -- see lock_stallbreak_ok below. */
+extern volatile uint64_t cpu_heartbeat_ms[];
+extern uint64_t timer_get_ms(void);
+int lock_stallbreak_ok(uint32_t owner_slot, uint32_t cpu, uint64_t now_ms);
 
 /* GB-060: the steal decision, in ONE place.
 
@@ -27,6 +33,41 @@ int lock_steal_ok(uint32_t owner_slot, uint32_t cpu) {
   if ((owner_slot - 1) == cpu)
     return 0; /* our own lock: a self-deadlock is a different bug */
   return cpu_is_halted(owner_slot - 1);
+}
+
+/* GB-060, second shape: the holder is not stopped, it is WEDGED-ALIVE.
+
+   Measured (probe19): the halted CPU released proc_lock and a *live* CPU
+   re-acquired it and then looped while holding it -- 46 [LOCKFOREVER] and no
+   [STOLEN], because the halt-keyed rule above correctly refuses to act on a
+   holder that is still running.  Both shapes strand the machine identically.
+
+   This breaks the wedged case using the liveness signal the program already
+   has: cpu_heartbeat_ms[], bumped by watchdog_tick on every timer IRQ from any
+   CPU that is still taking interrupts (trap.c), and read by the lost-owner
+   reaper with exactly the same threshold -- LOSTWAKE_DEAD_OWNER_MS, process.h.
+   One definition of "this owner looks dead", shared, so the two cannot drift.
+
+   Why this is not merely a timeout: a CPU that keeps taking timer interrupts
+   keeps its heartbeat fresh *whatever* it is doing -- running a game's user
+   loop, a long syscall, a spin with interrupts on -- so it is never broken out
+   of, however slow it is.  A frozen heartbeat means the CPU has not taken an
+   interrupt for the whole grace period, which for an IRQs-off critical section
+   is already a defect on its own.  `now_ms` is injected and the threshold is
+   the shared constant, so both are testable without waiting two seconds. */
+int lock_stallbreak_ok(uint32_t owner_slot, uint32_t cpu, uint64_t now_ms) {
+  if (owner_slot == 0)
+    return 0; /* unowned */
+  if ((owner_slot - 1) == cpu)
+    return 0; /* our own lock */
+  if (owner_slot - 1 >= MAX_CPUS)
+    return 0; /* out of range: refuse rather than guess */
+  if (owner_slot - 1 < MAX_CPUS && cpu_is_halted(owner_slot - 1))
+    return 1; /* already covered by the halt rule; break immediately */
+  uint64_t hb = cpu_heartbeat_ms[owner_slot - 1];
+  if (hb == 0)
+    return 0; /* never seen alive: not this rule's call */
+  return (now_ms - hb) >= LOSTWAKE_DEAD_OWNER_MS;
 }
 volatile uint64_t lock_wait_caller[MAX_CPUS];
 volatile uint64_t lock_wait_caller2[MAX_CPUS];
@@ -104,6 +145,21 @@ void spinlock_acquire(spinlock_t *lock) {
           lock->owner = 0;
           __atomic_clear(&lock->locked, __ATOMIC_RELEASE);
           /* fall through and contend for it like any other waiter */
+        } else if (lock_stallbreak_ok(own, cpu, timer_get_ms())) {
+          /* The holder is running but has stopped taking timer interrupts for
+             the whole grace period: wedged, not slow.  Free it and re-contend,
+             exactly like the halt case -- one winner, never a negotiated
+             mutual exclusion.  The age is printed because a break we cannot
+             explain afterwards is indistinguishable from corruption. */
+          uint64_t age = timer_get_ms() - cpu_heartbeat_ms[own - 1];
+          scream_dec("\n[STALLBREAK] cpu=", cpu);
+          scream_hex(" lock=", (uint64_t)lock);
+          scream_dec(" owner_cpu=", own - 1);
+          scream_dec(" stale_ms=", age);
+          scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
+          uart_putc_raw('\n');
+          lock->owner = 0;
+          __atomic_clear(&lock->locked, __ATOMIC_RELEASE);
         }
       }
     }
