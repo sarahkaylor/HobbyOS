@@ -1127,7 +1127,12 @@ int fat16_open(const char* filename, struct file* f) {
   for (int k = 0; k < 11; k++) {
     new_entry.name[k] = formatted_name[k];
   }
-  new_entry.attr = 0;
+  /* GB-067: a freshly created regular file MUST carry the archive attribute
+     (0x20), not attr=0.  attr=0 is not a valid 8.3 entry for a file: it names
+     nothing the FAT spec defines, and a later re-scan that sees only attr == 0
+     (probe58: "attr=0, cluster=0, size=0" survived) reads the entry as empty/absent.
+     mcopy / host-staged files all carry 0x20, so we match the ecosystem. */
+  new_entry.attr = 0x20; /* ATTR_ARCHIVE, same as host-written regular files */
   for (int k = 0; k < 10; k++) new_entry.reserved[k] = 0;
   fat16_stamp_entry(&new_entry);   /* real RTC date/time, not 1980-01-01 */
   new_entry.start_cluster = 0;
