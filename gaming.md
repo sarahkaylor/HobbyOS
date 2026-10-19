@@ -607,6 +607,21 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 
 ### 11.8 Execution log (newest first, maintained by the Coordinator)
 
+**2026-10-19 — GB-068 characterised: two instruction families, and three instrument defects that hid them.**
+
+| what | state |
+|---|---|
+| **Fault table, read as rows** | 44 serial-log lines carry `memory fault`; a strict line parse read **25**. The SMP console interleaves writes from 8 CPUs, so 43% of rows are shredded mid-line and silently dropped. Every fault count derived from the log is a lower bound until fault lines are atomic. |
+| **Family A** | `movb $0x0,(%r8,%rdx,1)` — a **NUL terminator** — at `align_up(_end)`, exact **4-for-4** against each binary's `_end`, with `rw=w in=HOLE region=NONE`: a static buffer at the top of `.bss` overrunning by one byte. |
+| **Family B** | `cmpb $0x0,0x1(%rdi,%rsi,1)` with `rsi=-1` — a **byte scan** — at `<64 KiB-aligned base> + 0xDBC8`, base varying per process, `rw=r in=PROT region=NONE`, CR3 correct: a string helper handed a kernel-range pointer. |
+| **Family C (unparsed)** | one shredded row shows a fault at `0x40000000`, the v1 user base, in `MEMTEST.BIN` — the v1-pointer-into-a-v2-process shape. Not characterisable from one line, but not dismissible either. |
+| **Dead mechanisms — do not re-walk** | TLS self-pointer (probe printed `block=0x1000005b90 image=0x10 tls=0x1000005ba0`, all correct), unsigned `tls_size` underflow, `.bss` filesz-vs-memsz, v1-overlay base, wrong CR3 (26/26 equal), ELF-induced damage, and "the heap region is never created" (`sbrk` returns `USER_HEAP_BASE_V2`; `malloc`'s v2 branch uses the same constant). |
+| **Instrument defect — symbol identity** | `ho_tls_setup_initial` is genuinely **1,903 bytes**: several `static` helpers in one libc translation unit share a section and one symbol, so every PC in the blob resolves to that name. That is how "15+ unrelated programs fault inside TLS setup" became a plausible finding. `-ffunction-sections -Wl,--gc-sections` makes it answerable by `nm`. |
+| **Instrument defect — parse coverage** | my table read 25 of 44 rows and I reported the split as a census. The tier should print `N parsed of M raw`, so a shrinking parse can never look like a clean wave. |
+| **Frame-of-reference defect — this checkout** | the main worktree was on the worker branch `gb057-recursion-probe`, so `grep tools/t3_tier.sh` read a stale file and "the tier has no fault count" looked true. It is not: `15c1733` and `59f16a8` add it on `main` (`grep -c` = 5 there). Checkout is now `coordinator-main` tracking `origin/main`; the uncommitted plan edits were stale duplicates of content already on main. |
+
+Rule recorded: **before trusting a tool's silence or its labels, make it say something falsifiable — and count what you parsed against what exists.** Two of today's three instrument failures were tools answering a narrower question than the one asked, read as complete.
+
 **2026-10-19 — §4.3 re-plan (PLAN-005): the gate had no instrument, and the compat track has one wall.**
 
 | what | state |
