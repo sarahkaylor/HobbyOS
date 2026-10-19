@@ -74,7 +74,7 @@ def parse_plan(path=PLAN):
             continue
         if not ms:
             continue
-        c = [x.strip() for x in line.strip().strip("|").split("|")] if line.startswith("|") else None
+        c = _cells(line) if line.startswith("|") else None
         if not c or len(c) < 5 or not re.match(r"^GB-\d{3}$", c[0]):
             continue
         gid = c[0]
@@ -86,7 +86,39 @@ def parse_plan(path=PLAN):
     return out, order
 
 
+def _cells(line):
+    """Split a markdown table row into cells, honouring `\\|` escapes.
+
+    A plan row may legitimately contain a literal pipe (e.g. a page-table
+    flag list `P|RW|PWT|PCD|PS`, written `P\\|RW\\|...` in the cell).  Splitting
+    on every `|` fragmented such rows into extra columns, so the importer
+    read the NEXT fields as weight/depends/DoD -- GB-069 landed on the board
+    with `Weight=RW\\`, `Depends on=PWT\\` and `DoD=PCD\\`.  Split on unescaped
+    pipes only, then unescape."""
+    s = line.strip()
+    if s.startswith("|"):
+        s = s[1:]
+    if s.endswith("|") and not s.endswith("\\|"):
+        s = s[:-1]
+    parts, cur, esc = [], [], False
+    for ch in s:
+        if esc:
+            cur.append(ch)
+            esc = False
+        elif ch == "\\":
+            esc = True
+            cur.append(ch)
+        elif ch == "|":
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    parts.append("".join(cur))
+    return [p.strip().replace("\\|", "|") for p in parts]
+
+
 def build_body(gid, t, lane=None):
+
     ws = WORKSTREAM.get(gid, [])
     deep = gid in DEEP_IDS
     tiers = MS_TIERS[t["ms"]]
