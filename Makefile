@@ -1023,7 +1023,13 @@ $(CXXSMOKE_BIN): $(OBJ_DIR)/cxx_smoke.o $(OBJ_DIR)/libc.a
 # <memory> <atomic> <thread> <mutex> <condition_variable> <chrono>
 # <sstream> from the vendored libc++, threads/mutex/cond from libc.a's
 # pthread.c, and prints "name : PASS" lines per check.
-$(OBJ_DIR)/cxx_t.o: src/user/cxx_t.cpp $(USER_LIBC) $(USER_HDRS) $(LIBCXX_VENDOR)/.fetched-ok $(LIBCXX_VENDOR)/sources.txt
+# These TUs compile against the vendored headers, so their prerequisite is a
+# real file of the fetched tree (not the bare .fetched-ok marker): a deleted
+# tree under an up-to-date marker would otherwise pass make's timestamp check
+# and the compile would hit the missing <algorithm>/<typeinfo> headers.  The
+# $(LIBCXX_INCLUDE)/% guard below shares the marker-invalidation recipe with
+# the source-pattern guards further down.
+$(OBJ_DIR)/cxx_t.o: src/user/cxx_t.cpp $(USER_LIBC) $(USER_HDRS) $(LIBCXX_INCLUDE)/algorithm $(LIBCXX_VENDOR)/sources.txt
 	@mkdir -p $(OBJ_DIR)
 	$(CXX) $(CXX_LIBCXX_USER_FLAGS) -c $< -o $@
 
@@ -1036,7 +1042,7 @@ $(CXX_T_BIN): $(OBJ_DIR)/cxx_t.o $(OBJ_DIR)/libcxx.a $(OBJ_DIR)/libc.a
 # links libcxx.a, whose class-B objects define the four symbols the ICU link
 # probe reported (__dynamic_cast + the __*_class_type_info vtables).  See
 # src/user/cxx_rtti_t.cpp for the battery; RTTI_T.BIN is 8.3-safe.
-$(OBJ_DIR)/cxx_rtti_t.o: src/user/cxx_rtti_t.cpp $(USER_LIBC) $(USER_HDRS) $(LIBCXX_VENDOR)/.fetched-ok $(LIBCXX_VENDOR)/sources.txt
+$(OBJ_DIR)/cxx_rtti_t.o: src/user/cxx_rtti_t.cpp $(USER_LIBC) $(USER_HDRS) $(LIBCXX_INCLUDE)/typeinfo $(LIBCXX_VENDOR)/sources.txt
 	@mkdir -p $(OBJ_DIR)
 	$(CXX) $(CXX_RTTI_USER_FLAGS) -c $< -o $@
 
@@ -1075,7 +1081,15 @@ $(OBJ_DIR)/icu/libicuuc.a: $(ICU_MANIFEST)
 # created by the manifest rule) with the house user flags;
 # -ffunction-sections + the link's --gc-sections keep the image far below
 # the 1 MB user-image loader cap (program_loader.c MAX_PROGRAM_SIZE).
-$(OBJ_DIR)/icu_smoke.o: src/user/icu_smoke.c $(USER_LIBC) $(USER_HDRS) $(ICU_MANIFEST)
+# The TU's prerequisite is a real header of the fetched tree, not the bare
+# MANIFEST evidence file: a hand-deleted src/ tree under an up-to-date
+# MANIFEST would otherwise skip the rebuild and the compile would hit the
+# missing <unicode/utypes.h>.  The guard invalidates the MANIFEST so
+# build-target.sh self-heals (fetch -> extract -> reconfigure -> rewrite).
+$(ICU_DIR)/src/source/common/unicode/utypes.h: $(ICU_MANIFEST)
+	@test -f $@ || { rm -f $(ICU_MANIFEST); bash $(ICU_DIR)/build-target.sh --arch $(ARCH); test -f $@; }
+
+$(OBJ_DIR)/icu_smoke.o: src/user/icu_smoke.c $(USER_LIBC) $(USER_HDRS) $(ICU_MANIFEST) $(ICU_DIR)/src/source/common/unicode/utypes.h
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -ffunction-sections -I$(ICU_DIR)/src/source/common -I$(ICU_DIR)/src/source/i18n -c $< -o $@
 
@@ -1121,6 +1135,18 @@ LIBC_BUILTIN_SRCS = extenddftf2.c trunctfdf2.c trunctfsf2.c
 LIBC_BUILTIN_OBJS = $(addprefix $(OBJ_DIR)/builtins/,$(LIBC_BUILTIN_SRCS:.c=.o))
 $(LIBCXX_VENDOR)/.fetched-ok: $(LIBCXX_VENDOR)/fetch.sh $(LIBCXX_VENDOR)/anchors.sha256
 	@bash $(LIBCXX_VENDOR)/fetch.sh
+
+# Header guard (mirror of the source guards below): any TU that includes
+# vendored libc++ headers depends on a concrete file of the fetched tree.
+# The marker is only trusted once a real extracted header exists under it, so
+# a hand-deleted tree (which would otherwise leave .fetched-ok stale and make
+# skip the fetch) is restored here instead of failing the later #include.
+$(LIBCXX_INCLUDE)/%: $(LIBCXX_VENDOR)/.fetched-ok
+	@test -f $@ || { rm -f $(LIBCXX_VENDOR)/.fetched-ok; bash $(LIBCXX_VENDOR)/fetch.sh; test -f $@; }
+
+# The header pattern builds the TUs' prerequisites; like the source patterns
+# below, keep the extracted headers in place across builds.
+.SECONDARY: $(LIBCXX_INCLUDE)/algorithm $(LIBCXX_INCLUDE)/typeinfo
 
 # On a fresh checkout the source does not exist yet.  make only accepts a
 # pattern rule as "makeable" when it has a recipe (an empty-recipe pattern is

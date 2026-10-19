@@ -124,6 +124,31 @@ third_party/libcxx-21.1.8/llvm-*.tar.xz
 third_party/libcxx-21.1.8/src/
 third_party/libcxx-21.1.8/.fetched-ok
 
+# LLVM 21.1.8 self-hosting toolchain vendor (docs/selfhost/llvm-bootstrap.md;
+# lane L1): committed = fetch.sh + README.md + anchors.sha256 +
+# container.sha256 + .fetched-ok regeneration; the extracted tree and the
+# dist-staging output are rebuilt by fetch.sh / build-llvm-dist-staging.sh.
+third_party/llvm-21.1.8/src/
+third_party/llvm-21.1.8/dist-staging/
+
+# Guard against re-committing these as machine-specific SYMLINKS.  The slash-
+# suffixed rules above ignore directories, but git stores a symlink as a file
+# entry (mode 120000), so a rendered pattern like "x/src/" does NOT match a
+# link literally named x/src.  All seven were once committed as absolute
+# links into /home/sarah/Documents/GitHub/HobbyOS/... (valid only on the
+# Linux workstation), which dangle on every other host and broke `make run`
+# compilation (missing <algorithm>/<typeinfo>/<unicode/utypes.h>).  The bare
+# (no-slash) forms below match the link entries so a stray symlink is never
+# re-added; the trees themselves are ignored and rebuilt from the pinned
+# containers by the vendored fetch/build scripts.
+third_party/fonts/dejavu-2.37
+third_party/icu-78.3/src
+third_party/icu-78.3/build-host
+third_party/libcxx-21.1.8/src
+third_party/llvm-21.1.8/src
+third_party/llvm-21.1.8/dist-staging
+third_party/sqlite-amalgamation-3490200
+
 # WebKit fork vendoring (browser.md §11, 2026-10-07): committed = the snapshot
 # parts + SHA256SUMS + extract.sh + build.sh + the optional binary cache
 # (third_party/webkit-hobbyos/cache/); the extracted source tree and the
