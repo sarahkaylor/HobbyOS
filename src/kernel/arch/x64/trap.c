@@ -9,15 +9,33 @@
 #include "arch/mmu.h"
 #include "syscall.h"
 
+/* GB-027: /dev/input/event* ioctl (EVIOCGVERSION/GNAME/GBIT/GABS) + the
+ * Linux-ABI event read that translates the virtio_input ring into
+ * 24-byte input_event records.  ABI numbers from src/include/linux_input.h
+ * / docs/linux-abi.md §9 (not from memory). */
+#include "input_node.h"
+#include "virtio_input.h"   /* struct virtio_input_event: the ring's record */
+
 /* WD lane: x64 flush-path probes (serial "[WD] ..."); default 0 keeps the
  * shipped kernel quiet.  See docs/wd-x64-white-blit.md. */
 #ifndef WD_X64_FLUSH_PROBE
 #define WD_X64_FLUSH_PROBE 0
 #endif
+/* GB-057: the sys_fork / sys_close per-syscall debug prints fired on EVERY
+ * call and flooded the emulated UART (~29% of the intel T3 console: the
+ * GB-009 baseline carried 5077+5524 sys_close lines and 85 sys_fork lines).
+ * That PIO write storm slowed the wave and interleaved real FAIL lines so
+ * they could not be attributed — the interleaving class that hid the
+ * GB-057 gate defect.  Off by default; turn on only when tracing the syscall
+ * path by hand. */
+#ifndef TRAP_SYSCALL_DEBUG
+#define TRAP_SYSCALL_DEBUG 0
+#endif
 #include "errno.h"
 #include "vfs.h"
 #include "vm.h"
 #include "blk_cache.h"
+#include "fb_mmap.h"
 #include <stdint.h>
 
 extern void uart_puts(const char *s);
@@ -64,6 +82,57 @@ static void dbg_resume(const char *tag, uint64_t v) {
   dbg_putc('0'); dbg_putc('x'); dbg_hex(v, 16); dbg_putc('\n');
 }
 
+/* GB-057: called from common_trap_exit immediately before the iretq, with a
+   pointer to the hardware frame the iretq is about to consume ([0] = RIP,
+   [1] = CS).
+
+   Why this site: probe26 showed the corrupt frame does NOT come from the
+   scheduler.  The corrected [BADELR] check reads context[31] at the pick and
+   stayed silent through three faults, two of them at rip=0x7 -- a value it tests
+   for.  So the bad RIP never passed through context[]: it is already in the stack
+   frame that common_trap_exit iretqs out of.  The scheduler resume sites carry an
+   IF=0 discipline against a clobbered frame window; this path has no equivalent,
+   which is the same bug at a site nobody armed.
+
+   The CS discriminator is load-bearing, not decoration: a kernel-mode trap return
+   has a perfectly legal kernel RIP, so a rule that only looked at the address
+   would flag every kernel iretq and spend its whole budget on false positives --
+   which is exactly the failure of my first [BADELR] rule (probe25).  Only
+   RPL==3 returns are user returns, and only those are judged. */
+void trap_exit_frame_check(uint64_t *frame) {
+  extern volatile uint64_t trap_exit_bad_rip_seen;
+  extern void uart_puts_raw(const char *s);
+  extern void uart_print_hex_raw(uint64_t v);
+  uint64_t rip = frame[0];
+  uint64_t cs = frame[1];
+  int implausible;
+
+  if ((cs & 3u) != 3u)
+    return; /* kernel-mode return: a kernel RIP here is correct */
+  implausible = (rip < 0x1000u) || (rip >= 0x70000000u && rip < USER_VA_BASE);
+  if (!implausible)
+    return;
+  if (trap_exit_bad_rip_seen >= 20)
+    return;
+  trap_exit_bad_rip_seen++;
+  uart_puts_raw("[BADIRET] about to return to an implausible user RIP=");
+  uart_print_hex_raw(rip);
+  uart_puts_raw(" cs=");
+  uart_print_hex_raw(cs);
+  uart_puts_raw(" rsp=");
+  uart_print_hex_raw(frame[3]);
+  uart_puts_raw(" eflags=");
+  uart_print_hex_raw(frame[2]);
+  uart_puts_raw(" cpu=");
+  uart_print_hex_raw((uint64_t)get_cpuid());
+  uart_puts_raw("\n");
+}
+
+/* GB-057: bounded count for the pre-iretq frame report (a rare event, not a
+   per-trap log -- a diagnostic that reports on every trap exit would be a
+   per-trap cost and a per-trap flood). */
+volatile uint64_t trap_exit_bad_rip_seen;
+
 void restore_user_sp_helper(void) {
   uint32_t cpu = get_cpuid();
   uint64_t v = arch_get_user_sp();
@@ -92,14 +161,28 @@ static void sys_write_console(struct trap_frame *tf) {
   tf->regs[0] = (uint64_t)ret;
 }
 
-static void sys_exit(struct trap_frame *tf) { process_exit(tf); }
+/* SYS_EXIT: the shared process_exit() reads the exit code from the
+ * CANONICAL regs[0] slot (on ARM x0 carries the code — the syscall number
+ * rides in x8).  On x64 the number rides in rax == regs[0] and the code in
+ * rdi, so without this remap EVERY intel process exit is captured as the
+ * syscall number: SYS_EXIT == 2, i.e. (2 << 8) == 512, so every parent on
+ * intel sees WEXITSTATUS == 2 whatever the child returned.  That single
+ * missing remap is what turned the whole intel T3 tier red in the
+ * output-comparing suites ("status) got 2, want 0" everywhere) — GB-057.
+ * Remap exactly the way sys_waitpid/sys_fork do. */
+static void sys_exit(struct trap_frame *tf) {
+  tf->regs[0] = tf->regs[5]; /* rdi = the exit code */
+  process_exit(tf);
+}
 
 static void sys_fork(struct trap_frame *tf) {
   int pid = process_fork(tf);
   tf->regs[0] = pid < 0 ? (uint64_t)-EAGAIN : (uint64_t)pid;
+#if TRAP_SYSCALL_DEBUG
   uart_puts("[KERNEL] sys_fork: tf->regs[0] is now ");
   print_int((int)tf->regs[0]);
   uart_puts("\n");
+#endif
 }
 
 static void sys_open(struct trap_frame *tf) {
@@ -117,9 +200,10 @@ static void sys_open(struct trap_frame *tf) {
 
 static void sys_close(struct trap_frame *tf) {
   int fd = (int)tf->regs[5]; // rdi
-  uint32_t cpu = get_cpuid();
   struct process *caller = current_process();
 
+#if TRAP_SYSCALL_DEBUG
+  uint32_t cpu = get_cpuid();
   uart_puts("[sys_close Debug] CPU=");
   print_int(cpu);
   uart_puts(", PIDs=[");
@@ -142,13 +226,16 @@ static void sys_close(struct trap_frame *tf) {
     uart_puts(", caller is NULL");
   }
   uart_puts("\n");
+#endif
 
   int ret = file_close(caller, fd);
+#if TRAP_SYSCALL_DEBUG
   uart_puts("[KERNEL Debug] sys_close: fd=");
   print_int(fd);
   uart_puts(", ret=");
   print_int(ret);
   uart_puts("\n");
+#endif
   tf->regs[0] = ret < 0 ? -EBADF : ret;
 }
 
@@ -847,23 +934,51 @@ static void sys_spawn(struct trap_frame *tf) {
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     save_context(caller, tf);
     caller->spawn_retval = -1;  /* failure default until the worker reports */
+    {
+      extern uint64_t timer_get_ms(void);
+      /* GB-063: bound the parked wait -- see SPAWN_WAIT_BUDGET_MS. */
+      caller->spawn_deadline_ms = timer_get_ms() + SPAWN_WAIT_BUDGET_MS;
+    }
     caller->state = PROC_STATE_WAIT_SPAWN;
     spinlock_release_irqrestore(&proc_lock, flags);
 
     extern int process_create_kernel_nowait(void (*entry)(void*), void *arg);
     extern uint64_t timer_get_ms(void);
     int wpid = process_create_kernel_nowait(sys_spawn_worker, args);
-    /* The physical pool can be momentarily full (the boot wave, sibling
-       spawns).  The caller is parked in WAIT_SPAWN and shells/tests block
-       on the spawn result, so wait (bounded, ~30 min; the same poll the
-       loader uses) for the worker slot instead of failing the spawn —
-       a failed spawn deadlocks the caller's protocol. */
-    for (int attempt = 0; attempt < 18000 && wpid < 0; attempt++) {
+    /* GB-057: this used to retry the worker slot for up to ~30 minutes
+       (18000 x 100 ms) of HOT SPIN on the calling CPU.  Under the boot
+       test wave the process table is legitimately full, and every spawn
+       caller parks in WAIT_SPAWN holding a PCB slot while its worker
+       needs a free slot from that same table: waiting longer can never
+       fix that — it is a circular wait, and seven cores burning it at
+       once wedges the guest (watchdog: "console silent for more than
+       20 s", 7 CPUs at age 350 s inside this syscall, loader starved).
+       Wait while the free-slot count is MOVING (other processes are
+       exiting and freeing rows — the transient case), and give up as soon
+       as it stalls or the budget runs out; the failure path below is the
+       documented -EAGAIN class, and spawn2 callers retry it with usleep()
+       so they yield the CPU instead of stealing it. */
+    uint64_t t_start = timer_get_ms();
+    uint64_t last_progress = t_start;
+    int free_before = -1;
+    for (int attempt = 0; attempt < 500 && wpid < 0; attempt++) {
       uint64_t t0 = timer_get_ms();
-      for (volatile int spin = 0; spin < 4000000; spin++) {
-        if (timer_get_ms() - t0 >= 100u) break;
+      for (volatile int spin = 0; spin < 400000; spin++) {
+        if (timer_get_ms() - t0 >= 10u) break;
       }
       wpid = process_create_kernel_nowait(sys_spawn_worker, args);
+      if (wpid >= 0)
+        break;
+      int free_now = process_free_slots();
+      uint64_t now = timer_get_ms();
+      if (free_now != free_before) {
+        free_before = free_now;
+        last_progress = now;
+      } else if (now - last_progress >= 2000u) {
+        break; /* table stalled: waiting further cannot succeed */
+      }
+      if (now - t_start >= 5000u)
+        break;
     }
     if (wpid < 0) {
       /* no free process slot for the spawn worker: the caller must not
@@ -975,20 +1090,40 @@ static void sys_spawn_ex(struct trap_frame *tf) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   save_context(caller, tf);
   caller->spawn_retval = -EAGAIN; /* failure default until the worker reports */
+  {
+    extern uint64_t timer_get_ms(void);
+    /* GB-063: bound the parked wait -- see SPAWN_WAIT_BUDGET_MS. */
+    caller->spawn_deadline_ms = timer_get_ms() + SPAWN_WAIT_BUDGET_MS;
+  }
   caller->state = PROC_STATE_WAIT_SPAWN;
   spinlock_release_irqrestore(&proc_lock, flags);
 
   extern int process_create_kernel_nowait(void (*entry)(void*), void *arg);
   extern uint64_t timer_get_ms(void);
   int wpid = process_create_kernel_nowait(sys_spawn_ex_worker, ex);
-  /* Same bounded worker-slot retry as sys_spawn: the caller is parked and
-     must never wait forever for a worker that cannot run. */
-  for (int attempt = 0; attempt < 18000 && wpid < 0; attempt++) {
+  /* GB-057: same circular wait as sys_spawn — see the comment there.
+     Wait while the free-slot count moves, give up on a stall or budget. */
+  uint64_t t_start = timer_get_ms();
+  uint64_t last_progress = t_start;
+  int free_before = -1;
+  for (int attempt = 0; attempt < 500 && wpid < 0; attempt++) {
     uint64_t t0 = timer_get_ms();
-    for (volatile int spin = 0; spin < 4000000; spin++) {
-      if (timer_get_ms() - t0 >= 100u) break;
+    for (volatile int spin = 0; spin < 400000; spin++) {
+      if (timer_get_ms() - t0 >= 10u) break;
     }
     wpid = process_create_kernel_nowait(sys_spawn_ex_worker, ex);
+    if (wpid >= 0)
+      break;
+    int free_now = process_free_slots();
+    uint64_t now = timer_get_ms();
+    if (free_now != free_before) {
+      free_before = free_now;
+      last_progress = now;
+    } else if (now - last_progress >= 2000u) {
+      break;
+    }
+    if (now - t_start >= 5000u)
+      break;
   }
   if (wpid < 0) {
     /* Release-on-worker-failure (D4.4): -EAGAIN, never a hang. */
@@ -1067,6 +1202,28 @@ static void sys_map_fb(struct trap_frame *tf) {
   tf->regs[0] = USER_FB_VIRT_BASE; // Return user virtual address
 }
 
+/* GB-025: /dev/fb0 ioctl (SYS_FB_IOCTL).  Registers: rdi=req, rsi=arg.
+ * FBIOGET_VSCREENINFO/FSCREENINFO copy a Linux-layout struct OUT to arg
+ * (validated first); FBIOBLANK takes a plain value (validated implicitly
+ * by hb_fb_blank_ioctl).  Returns 0 | -1 (unknown request) | -EFAULT. */
+static void sys_fb_ioctl(struct trap_frame *tf) {
+  unsigned long req = (unsigned long)tf->regs[5];     /* rdi */
+  void *arg = (void *)tf->regs[4];                    /* rsi */
+  uint64_t smem_start = (uint64_t)virtio_gpu_get_framebuffer();
+
+  size_t sz = hb_fb_ioctl_arg_size(req);
+  if (sz == (size_t)-1) {
+    tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
+    return;
+  }
+  /* FBIOBLANK (sz==0) takes a value, not a buffer: nothing to validate. */
+  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  tf->regs[0] = (uint64_t)(int64_t)hb_fb_ioctl_route(req, arg, smem_start);
+}
+
 static void sys_flush_fb(struct trap_frame *tf) {
 #if WD_X64_FLUSH_PROBE
   /* WD probe: attribute every full flush to its process (used to
@@ -1108,7 +1265,6 @@ static void sys_flush_fb_rects(struct trap_frame *tf) {
   tf->regs[0] = 0;
 }
 
-extern int virtio_input_get_events(void *buf, int max_events);
 static void sys_get_events(struct trap_frame *tf) {
   void *buf = (void *)tf->regs[5]; // rdi
   int max_events = (int)tf->regs[4]; // rsi
@@ -1118,6 +1274,57 @@ static void sys_get_events(struct trap_frame *tf) {
   } else {
     tf->regs[0] = -1;
   }
+}
+
+/* GB-027: /dev/input/event* ioctl (SYS_INPUT_IOCTL).  Registers: rdi=req,
+ * rsi=arg.  EVIOCGVERSION/NAME/GBIT/GABS copy their Linux-ABI reply OUT
+ * to arg (validated to hb_input_ioctl_arg_size() first).  0 | -1
+ * (unknown request) | -EFAULT (bad arg pointer). */
+static void sys_input_ioctl(struct trap_frame *tf) {
+  unsigned long req = (unsigned long)tf->regs[5];     /* rdi */
+  void *arg = (void *)tf->regs[4];                    /* rsi */
+  size_t sz = hb_input_ioctl_arg_size(req);
+  if (sz == (size_t)-1) {
+    tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
+    return;
+  }
+  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  tf->regs[0] = (uint64_t)(int64_t)hb_input_ioctl_route(req, arg);
+}
+
+/* GB-027: non-blocking /dev/input/event* read (SYS_INPUT_READ).  Registers:
+ * rdi=buf, rsi=max.  Drains the virtio_input ring and writes up to max
+ * Linux-ABI (24 B) input_event records out to buf.  Returns the count read
+ * (0 if nothing pending — non-blocking), -EFAULT on a bad buffer. */
+static void sys_input_read(struct trap_frame *tf) {
+  struct hb_input_event *ubuf = (struct hb_input_event *)tf->regs[5]; /* rdi */
+  int max = (int)tf->regs[4];                                        /* rsi */
+  if (max < 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return;
+  }
+  if (max == 0) {
+    tf->regs[0] = 0;
+    return;
+  }
+  if (sys_user_range((uint64_t)ubuf,
+                     (uint64_t)max * sizeof(struct hb_input_event), 1)) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  extern uint64_t timer_get_ms(void);
+  struct virtio_input_event raw[32];
+  int want = max > 32 ? 32 : max;         /* bounded scratch: non-blocking */
+  int got = virtio_input_get_events(raw, want);
+  uint64_t t = timer_get_ms();
+  uint64_t sec = t / 1000u, usec = (t % 1000u) * 1000u;
+  for (int i = 0; i < got; i++)
+    hb_input_fill_event(&ubuf[i], raw[i].type, raw[i].code, raw[i].value,
+                        sec, usec);
+  tf->regs[0] = (uint64_t)got;
 }
 
 static void sys_get_cpuid(struct trap_frame *tf) {
@@ -1674,12 +1881,18 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_flush_fb(tf);
   } else if (syscall_num == SYS_FLUSH_FB_RECTS) {
     sys_flush_fb_rects(tf);
+  } else if (syscall_num == SYS_FB_IOCTL) {
+    sys_fb_ioctl(tf);
   } else if (syscall_num == SYS_GET_CPUID) {
     sys_get_cpuid(tf);
   } else if (syscall_num == SYS_PIPE) {
     sys_pipe(tf);
   } else if (syscall_num == SYS_GET_EVENTS) {
     sys_get_events(tf);
+  } else if (syscall_num == SYS_INPUT_IOCTL) {
+    sys_input_ioctl(tf);
+  } else if (syscall_num == SYS_INPUT_READ) {
+    sys_input_read(tf);
   } else if (syscall_num == SYS_AVAILABLE) {
     sys_available(tf);
   } else if (syscall_num == SYS_READ_DIR) {
@@ -2325,6 +2538,48 @@ void general_interrupt_handler(struct trap_frame *tf) {
           while (1);
         }
       }
+      /* GB-057: NEVER halt silently.
+         This path is reached when the kernel cannot diagnose a kernel-mode
+         fault.  The previous behaviour was a bare `while (1);` -- which left a
+         CPU spinning forever with proc_lock held and not one byte on the
+         console.  Five probe runs produced five different-looking freezes for
+         exactly this reason: the fault was never the mystery, the silence was.
+         The raw sink takes no lock (it cannot deadlock the console it is
+         reporting on), so this costs nothing on the happy path and names the
+         fault for whoever reads the log next. */
+      uart_puts_raw("[KERNEL] FATAL kernel-mode fault, halting this CPU: vector=");
+      print_int_raw((int)tf->vector);
+      uart_puts_raw(" rip=");
+      uart_print_hex_raw((uint64_t)tf->elr);
+      uart_puts_raw(" cr2=");
+      {
+        uint64_t fatal_cr2;
+        __asm__ volatile("mov %%cr2, %0" : "=r"(fatal_cr2));
+        uart_print_hex_raw(fatal_cr2);
+      }
+      uart_puts_raw(" pid=");
+      print_int_raw(cur ? cur->pid : -1);
+      uart_puts_raw("\n");
+      /* GB-060: same rule as the resume-return halt -- if this CPU is holding
+         proc_lock, give it back before stopping, so the survivors are not left
+         spinning behind a CPU that will never run again.  Only if the lock
+         records us as owner: freeing somebody else's lock would be worse than
+         the stall. */
+      {
+        extern int spinlock_release_if_held_by_me(spinlock_t *lock);
+        extern spinlock_t proc_lock;
+        if (spinlock_release_if_held_by_me(&proc_lock))
+          uart_puts_raw("[KERNEL] released proc_lock before halting (GB-060)\n");
+      }
+      /* GB-060: and record the halt, so a CPU waiting on any OTHER lock this one
+         still holds can take it over rather than spinning behind a stopped core
+         forever.  The release above only helps for proc_lock; this covers the
+         rest (a blk_cache bucket was the last one measured). */
+      {
+        extern void cpu_halt_record(uint32_t cpu);
+        extern uint32_t get_cpuid(void);
+        cpu_halt_record(get_cpuid());
+      }
       while (1);
     }
   }
@@ -2724,6 +2979,16 @@ __asm__(
 "    /* Pop Vector and Error Code (16 bytes) */\n"
 "    add rsp, 16\n"
 "    \n"
+"    /* GB-057: before the iretq, ask whether the frame about to be consumed\n"
+"       is a legal return.  rsp points at the hardware frame; rax/rcx are\n"
+"       scratch and are preserved, and the two pushes keep the stack\n"
+"       16-byte aligned for the call. */\n"
+"    push rax\n"
+"    push rcx\n"
+"    lea rdi, [rsp + 16]\n"
+"    call trap_exit_frame_check\n"
+"    pop rcx\n"
+"    pop rax\n"
 "    iretq\n"
 ".att_syntax prefix\n"
 );
@@ -2832,6 +3097,16 @@ __asm__(
 "    mov rax, [rsp]\n"
 "    add rsp, 264\n"
 "    add rsp, 16\n"
+"    /* GB-057: before the iretq, ask whether the frame about to be consumed\n"
+"       is a legal return.  rsp points at the hardware frame; rax/rcx are\n"
+"       scratch and are preserved, and the two pushes keep the stack\n"
+"       16-byte aligned for the call. */\n"
+"    push rax\n"
+"    push rcx\n"
+"    lea rdi, [rsp + 16]\n"
+"    call trap_exit_frame_check\n"
+"    pop rcx\n"
+"    pop rax\n"
 "    iretq\n"
 ".att_syntax prefix\n"
 );
