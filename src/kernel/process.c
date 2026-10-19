@@ -72,6 +72,20 @@ int cpu_is_halted(uint32_t cpu) { return cpu < MAX_CPUS ? cpu_halted[cpu] : 0; }
    put the definition 1,200 lines below its first use, and the gate refused both
    arches for it. */
 static int alive_reported;
+/* GB-057-a: the wave-end predicate is a NEGATIVE test -- anything not
+   FREE/EXITED/ALLOCATED/THREAD_DONE counts as live work -- so PROC_STATE_BLOCKED
+   (5) is counted, and a process blocked with no possible waker keeps `any_alive`
+   true forever: `!any_alive` never fires, scheduler_finished() is never called,
+   and the wave never halts.  That is the 7-of-8 shape of this ticket (probe42:
+   `slot=12 pid=12 st=5 parent=-1 SPAWN.BIN`).  Rather than add BLOCKED to the
+   exclusion list -- which would truncate waves whose children wait legitimately
+   on a pipe -- stamp when the scheduler first observes the slot BLOCKED and
+   exclude it only after WAVE_BLOCK_BUDGET_MS, loudly, naming the slot.  The stamp
+   is lazy (one place, no park-site changes) and cleared the moment the state
+   leaves BLOCKED, so a reused slot never inherits an old wait. */
+#define WAVE_BLOCK_BUDGET_MS 60000ULL
+static uint64_t wait_since_ms[MAX_PROCESSES];
+static int orphan_reported[MAX_PROCESSES];
 /* GB-057: latch for the [NOAS] skip report (a user slot picked with no address
    space -- mid-exec), cleared with the other latches when work is found. */
 static int noas_reported;
@@ -1597,14 +1611,51 @@ void schedule(struct trap_frame *tf, int is_yield) {
     }
 
     // No ready processes. Check if any are still alive.
+    // GB-057-a: a BLOCKED slot is alive only while it has a possible waker. Stamp
+    // the first observation, exclude after the budget, and say so by name -- a
+    // wave that loses a test silently is worse than a wave that halts.
     int any_alive = 0;
-    for (int i = 0; i < MAX_PROCESSES; i++) {
-      if (proc_table[i].state != PROC_STATE_FREE &&
-          proc_table[i].state != PROC_STATE_EXITED &&
-          proc_table[i].state != PROC_STATE_ALLOCATED &&
-          proc_table[i].state != PROC_STATE_THREAD_DONE) {
-        any_alive = 1;
-        break;
+    {
+      uint64_t now_l = timer_get_ms();
+      if (now_l == 0)
+        now_l = 1; /* a zero stamp means "never observed", so never stamp zero */
+      for (int i = 0; i < MAX_PROCESSES; i++) {
+        int st = proc_table[i].state;
+        if (st != PROC_STATE_BLOCKED) {
+          wait_since_ms[i] = 0;
+          orphan_reported[i] = 0;
+        } else {
+          if (wait_since_ms[i] == 0)
+            wait_since_ms[i] = now_l;
+          else if (now_l - wait_since_ms[i] >= WAVE_BLOCK_BUDGET_MS) {
+            if (!orphan_reported[i]) {
+              orphan_reported[i] = 1;
+              uart_puts("[ORPHAN-WAIT] slot=");
+              print_int(i);
+              uart_puts(" pid=");
+              print_int(proc_table[i].pid);
+              uart_puts(" name=");
+              uart_puts(proc_table[i].name);
+              uart_puts(" parent=");
+              print_int(proc_table[i].parent_pid);
+              uart_puts(" wake_ms=");
+              print_int((int)proc_table[i].wake_ms);
+              uart_puts(" waited_ms=");
+              print_int((int)(now_l - wait_since_ms[i]));
+              uart_puts(
+                  " -- blocked past the wave budget with no possible waker: "
+                  "excluded from the wave-end predicate (the slot is NOT reaped)\n");
+            }
+            continue; /* cannot make progress, so it is not live work */
+          }
+        }
+        if (proc_table[i].state != PROC_STATE_FREE &&
+            proc_table[i].state != PROC_STATE_EXITED &&
+            proc_table[i].state != PROC_STATE_ALLOCATED &&
+            proc_table[i].state != PROC_STATE_THREAD_DONE) {
+          any_alive = 1;
+          break;
+        }
       }
     }
 
