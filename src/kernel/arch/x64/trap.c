@@ -2559,6 +2559,25 @@ void general_interrupt_handler(struct trap_frame *tf) {
       }
       uart_puts_raw(" pid=");
       print_int_raw(cur ? cur->pid : -1);
+      /* GB-069 discriminator: a #PF at cr2=0x1FC001008 lands INSIDE the 2 MiB page
+         cpu_pd7[480] installs (0x9B = P|RW|PWT|PCD|PS, VA 0x1FC000000-0x1FDFFFFF), so
+         "the mapping is too small" is excluded by arithmetic.  The three survivors are
+         PD-entry reuse, a wrong CR3, and a protection fault; these fields name which.
+         err bit0=P (0 = not present), bit1=W/R, bit2=U/S.  pd480 should still equal
+         (phys|0x9B) for the BAR page to exist in this table. */
+      uart_puts_raw(" err=");
+      print_int_raw((int)(tf->error_code & 7));
+      uart_puts_raw(" cr3=");
+      {
+        uint64_t fatal_cr3;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(fatal_cr3));
+        uart_print_hex_raw(fatal_cr3);
+      }
+      uart_puts_raw(" pd480=");
+      {
+        extern uint64_t cpu_pd7[512];
+        uart_print_hex_raw(cpu_pd7[480]);
+      }
       uart_puts_raw("\n");
       /* GB-060: same rule as the resume-return halt -- if this CPU is holding
          proc_lock, give it back before stopping, so the survivors are not left

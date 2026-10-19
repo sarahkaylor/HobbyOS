@@ -1713,6 +1713,40 @@ void schedule(struct trap_frame *tf, int is_yield) {
     }
 
     if (!any_alive) {
+      /* GB-057-b: settle the mechanism before changing the predicate again.  If a
+         halt ever coincides with a slot in ALLOCATED (which the predicate EXCLUDES),
+         then a wave whose only live work is a slot being created declares itself
+         finished -- that is the one premature halt on record (probe54: 443 lines,
+         slot 6 ALLOCATED).  Costs one line per halt and refutes the idea if the
+         counts are all zero. */
+      {
+        int n_free = 0, n_alloc = 0, n_exit = 0, n_run = 0, n_blk = 0, n_other = 0;
+        for (int q = 0; q < MAX_PROCESSES; q++) {
+          switch (proc_table[q].state) {
+            case PROC_STATE_FREE: n_free++; break;
+            case PROC_STATE_ALLOCATED: n_alloc++; break;
+            case PROC_STATE_EXITED: n_exit++; break;
+            case PROC_STATE_RUNNING: n_run++; break;
+            case PROC_STATE_BLOCKED: n_blk++; break;
+            default: n_other++; break;
+          }
+        }
+        uart_puts("[HALT-CD] cpu=");
+        print_int((int)cpu);
+        uart_puts(" free=");
+        print_int(n_free);
+        uart_puts(" alloc=");
+        print_int(n_alloc);
+        uart_puts(" exited=");
+        print_int(n_exit);
+        uart_puts(" running=");
+        print_int(n_run);
+        uart_puts(" blocked=");
+        print_int(n_blk);
+        uart_puts(" other=");
+        print_int(n_other);
+        uart_puts("\n");
+      }
       set_current_process_pid(cpu, -1);
       /* P2.2 (S2): no user context will run here; never keep an AS (whose
          tables are about to be freed) as this CPU's translation. */
