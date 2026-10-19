@@ -55,8 +55,9 @@ if [ -n "$POLICE_ONLY" ]; then
   if [ "${T3_SKIP_HALT_CHECK:-0}" = "1" ]; then halted=1; fi
   FAIL_LINES=$(grep -ac "FAIL" "$LOG" || true)
   KFAULT=$(grep -ac "FATAL kernel-mode fault" "$LOG" || true)
+  MEMFAULTS=$(grep -ac "memory fault" "$LOG" || true)
   LINES=$(wc -l <"$LOG")
-  echo "T3_${ARCH} (police ${LOG}): ${LINES} lines, ${FAIL_LINES} FAIL lines, halted=${halted}, kfault=${KFAULT}"
+  echo "T3_${ARCH} (police ${LOG}): ${LINES} lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} user memory faults, halted=${halted}, kfault=${KFAULT}"
   rc=0
   [ "$halted" = "1" ] || { echo "T3_${ARCH}: FAIL — no halt line"; rc=1; }
   [ "$KFAULT" = "0" ] || { echo "T3_${ARCH}: FAIL — ${KFAULT} FATAL kernel-mode fault line(s): the guest halted because the kernel crashed"; rc=1; }
@@ -64,6 +65,13 @@ if [ -n "$POLICE_ONLY" ]; then
   if [ "$FAIL_LINES" != "0" ]; then
     echo "T3_${ARCH}: FAIL — ${FAIL_LINES} FAIL line(s); first 5:"
     grep -an "FAIL" "$LOG" | head -5
+    rc=1
+  fi
+  # GB-068 regression guard (mirrors the run path): fail if user memory faults
+  # exceed the documented baseline ceiling (default 60; see run-path comment).
+  USER_FAULT_ALLOW="${T3_USER_FAULT_ALLOW:-60}"
+  if [ "$MEMFAULTS" -gt "$USER_FAULT_ALLOW" ]; then
+    echo "T3_${ARCH}: FAIL — ${MEMFAULTS} user memory faults exceeds the documented baseline ceiling ${USER_FAULT_ALLOW} (GB-068 regression)"
     rc=1
   fi
   [ "$rc" -eq 0 ] && echo "T3_${ARCH}: PASS (0 FAIL lines, halted)"
@@ -226,6 +234,30 @@ FAIL_LINES=$(grep -ac "FAIL" "$LOG" || true)
 MEMFAULTS=$(grep -ac "memory fault" "$LOG" || true)
 echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} user memory faults, halted=${halted}"
 
+# GB-068 regression guard: the intel wave carries a documented, long-standing
+# baseline of user-mode fatal faults (in=PROT) from legacy v1 flat binaries
+# (SUBPRB/SHTEST/SHTEST2) touching their stack-like low-VA region — measured
+# 44-55 on seven 2026-10-19 logs INCLUDING runs with no ELF process (54, 55),
+# so it predates GB-013/GB-066 and is a property of the v1 image programs, not
+# a regression here.  Evidence + mechanism: the surviving fault row is
+#   [KERNEL] pid=N (SHTEST.BIN) memory fault VA=0x00000000755xxxxx ... in=PROT
+#   -> the v1 flat loader (v1_map_image) leaves that low stack region with a
+#   non-writable / non-present guardish mapping, so the legacy program dies on
+#   first stack use every wave.  That is the negotiated baseline.
+#
+# Guard: FAIL the tier if the fault count REGRESSES above the allowed ceiling
+# (new faults = the tier was green before but a change added MORE user faults).
+# T3_USER_FAULT_ALLOW sets the ceiling (default 60 = the measured 44-55 max plus
+# headroom); a run at or below it is the known baseline, a run above it is a
+# regression and must fail.  Set T3_USER_FAULT_ALLOW=0 to demand the '0 user
+# memory faults' DoD literally once the v1 stack region is fixed.
+USER_FAULT_ALLOW="${T3_USER_FAULT_ALLOW:-60}"
+MEMREG=0
+if [ "$MEMFAULTS" -gt "$USER_FAULT_ALLOW" ]; then
+  echo "T3_${ARCH}: FAIL — ${MEMFAULTS} user memory faults exceeds the documented baseline ceiling ${USER_FAULT_ALLOW} (GB-068 regression); a change added user faults the wave did not previously carry"
+  MEMREG=1
+fi
+
 # An environment failure must never be reported as a hang (see the pre-flight
 # guard above): if QEMU never got the image, this run says nothing about the
 # kernel, so it gets its own exit code and its own sentence.
@@ -260,6 +292,7 @@ if [ "$FAIL_LINES" != "0" ]; then
   grep -an "FAIL" "$LOG" | head -20
   rc=1
 fi
+[ "$MEMREG" = "1" ] && rc=1
 [ "$rc" -eq 0 ] && echo "T3_${ARCH}: PASS (0 FAIL lines, halted, no kernel fault, ${LINES} lines)"
 echo "T3_${ARCH} EXIT=$rc"
 exit "$rc"
