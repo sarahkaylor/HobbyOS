@@ -232,7 +232,9 @@ FAIL_LINES=$(grep -ac "FAIL" "$LOG" || true)
 # ("[KERNEL] pid=N (IMG) memory fault VA=" not "FATAL kernel-mode fault").  A count
 # printed without a baseline in the same line invites exactly that mistake.
 MEMFAULTS=$(grep -ac "memory fault" "$LOG" || true)
-echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} user memory faults, halted=${halted}"
+PROGS_EXITED=$(grep -aoE "Process [0-9]+: [A-Z0-9_.]+\.BIN exited" "$LOG" 2>/dev/null \
+  | grep -oE "[A-Z][A-Z0-9_]{1,12}\.BIN" | sort -u | wc -l | tr -d ' ')
+echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} user memory faults, ${PROGS_EXITED} programs exited, halted=${halted}"
 
 # GB-068 regression guard: the intel wave carries a documented, long-standing
 # baseline of user-mode fatal faults (in=PROT) from legacy v1 flat binaries
@@ -280,12 +282,23 @@ fi
 # halted without doing its work is not a pass either.
 KFAULT=$(grep -ac "FATAL kernel-mode fault" "$LOG" || true)
 LINES=$(wc -l <"$LOG")
-MIN_LINES="${T3_MIN_LINES:-1000}"
+# Completeness is measured by PROGRAMS THAT EXITED, not by console lines.  The line
+# floor was calibrated when a healthy wave carried ~2,300 lines of [IDLESTUCK]/
+# [ALIVE-SET] chatter; once GB-057-a made the wave halt properly, that chatter (and
+# therefore the line count) collapsed, and three complete waves that reached the
+# suite's last test were failed as "too little work" at 984-1,011 lines.  Measured
+# separation: complete runs print `Process N: X.BIN exited` for 60-63 distinct
+# programs; a truncated boot prints 0.  The line floor stays only as a low backstop
+# for a wave that never got going.
+MIN_PROGRAMS="${T3_MIN_PROGRAMS:-55}"
+EXITED_PROGS=$(grep -aoE "Process [0-9]+: [A-Z0-9_.]+\.BIN exited" "$LOG" 2>/dev/null \
+  | grep -oE "[A-Z][A-Z0-9_]{1,12}\.BIN" | sort -u | wc -l | tr -d ' ')
+MIN_LINES="${T3_MIN_LINES:-300}"
 if [ "$KFAULT" != "0" ]; then
   echo "T3_${ARCH}: FAIL — ${KFAULT} FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed"; rc=1
 fi
-if [ "$halted" = "1" ] && [ "$LINES" -lt "$MIN_LINES" ]; then
-  echo "T3_${ARCH}: FAIL — halted after only ${LINES} console lines (floor ${MIN_LINES}): too little work for a complete wave, so this cannot be a pass"; rc=1
+if [ "$halted" = "1" ] && [ "$EXITED_PROGS" -lt "$MIN_PROGRAMS" ]; then
+  echo "T3_${ARCH}: FAIL — only ${EXITED_PROGS} programs exited (floor ${MIN_PROGRAMS}): too little work for a complete wave, so this cannot be a pass"; rc=1
 fi
 if [ "$FAIL_LINES" != "0" ]; then
   echo "T3_${ARCH}: FAIL — ${FAIL_LINES} FAIL line(s); first 20:"
