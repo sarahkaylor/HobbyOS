@@ -2,6 +2,13 @@
 #define PROGRAM_LOADER_H
 #include <stdint.h>
 
+/* GB-013 (ELF loader mapper).  Declared here (not in a new header) because the
+ * only caller is load_v2_internal in program_loader.c; the parser's structs
+ * live in elf_image.h.  See docs/elf-loader.md §2. */
+struct addr_space;
+int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
+                    uint64_t *entry_out);
+
 /**
  * Loads a user program from the disk and executes it in the current context.
  * Bypasses the scheduler.

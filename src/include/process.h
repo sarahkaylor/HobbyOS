@@ -242,6 +242,23 @@ struct process {
   int spawn_retval;
 
   /**
+   * GB-063: deadline (ms) for a caller parked in PROC_STATE_WAIT_SPAWN.
+   *
+   * The caller parks before its worker exists and is resumed by that worker on
+   * completion -- so a worker that dies before unparking (measured: the loader
+   * #GP, GB-013) leaves the caller parked forever, and `any_alive` then keeps the
+   * whole wave from halting (probe20: 30,179 lines, no strand, no halt).
+   *
+   * The bound is owner-side on purpose: resuming the caller's own wait touches no
+   * other context's state, whereas the scheduler forcing a slot's state is what I
+   * tried and withdrew (the live spawn path re-parks it underneath you -- the same
+   * slot "reaped" 11 times in a row).  SPAWN_WAIT_BUDGET_MS must stay comfortably
+   * above the loader's own retry budget (LOAD_RETRY_CHILD_MS = 20 s) or a slow but
+   * legitimate load would be preempted; 0 means "not parked".
+   */
+  uint64_t spawn_deadline_ms;
+
+  /**
    * F1.5 (FPU): per-process floating-point register image, saved on every
    * context switch (save_context/restore_context) so live FP state follows
    * the process across preemption and cross-CPU migration.  Appended at the
@@ -321,7 +338,18 @@ struct process {
    * cross-context before waking the parked parent, then clears it.
    * Appended at the END so parallel lanes merge additively. */
   uint64_t wait4_rusage;
+
+  /* --- GB-013 (linux-abi.md §2): compat-process flag ----------------- *
+   * Set by the ELF loader for a Linux-ABI image so the trap path routes
+   * this process's x86_64 `syscall` traps to the Linux translation table
+   * (GB-014) instead of the native chain.  Group anchor state (the leader
+   * marks it; threads inherit from the anchor).  PROC_FLAG_LINUX_ABI = 1. */
+  uint32_t abi_flags;
 };
+
+/* Linux-compat process flag (GB-013): route syscalls through the Linux
+ * translation table (GB-014).  See linux-abi.md §2. */
+#define PROC_FLAG_LINUX_ABI 0x1u
 
 // Initialize the process subsystem and zero out the process table.
 void process_init(void);
@@ -530,6 +558,12 @@ int lostwake_stale_claim_reclaimable(int k);
 // RUNNING claim becomes stale and reclaimable (when the table is otherwise
 // drained).  Also used by the unit test to fabricate a stale claimer.
 #define LOSTWAKE_DEAD_OWNER_MS 2000
+
+/* GB-063: how long a spawn caller may sit parked in WAIT_SPAWN before the
+   scheduler resumes it with -EAGAIN.  Deliberately above the loader's own child
+   retry budget (LOAD_RETRY_CHILD_MS = 20 s in program_loader.c) so only a caller
+   whose worker will never report is released. */
+#define SPAWN_WAIT_BUDGET_MS 45000u
 
 // Mark the current process as EXITED and cleanup resources.
 // tf: The trap frame of the process calling exit.

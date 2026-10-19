@@ -811,7 +811,7 @@ static const char *const pinned_apps[] = {
 
 /* The games, pinned right below the apps so all twelve fit on screen. */
 static const char *const pinned_games[] = {
-  "PONG.BIN", "MILLIPED.BIN",
+  "PONG.BIN", "MILLIPED.BIN", "STARDUST.BIN", "XNIBBLER.BIN", "XCRYPT.BIN", "NES.BIN",
 };
 #define NUM_PINNED_GAMES ((int)(sizeof(pinned_games) / sizeof(pinned_games[0])))
 

@@ -1,6 +1,7 @@
 # HobbyOS Gaming Program — Plan (living document)
 
-Status: **READY — infrastructure built (2026-10-16/17). Execution awaits Sarah's go-ahead.**
+Status: **IN EXECUTION (started 2026-10-17, Coordinator on `swarm-coordinator` .233).**
+M0 board/fleet automation landed (GB-002/003/004); M1 ABI-core is the critical path.
 Owner: Sarah (architect), assisted by the HobbyOS agent swarm.
 Ticketing: **Forgejo v17 live at http://192.168.0.234:3000**, repo `sarah/gaming-program`;
 `GAMING-BOARD` board scaffolding = tickets GB-002/GB-003.
@@ -60,7 +61,7 @@ real Linux box vs. HobbyOS):
 
 | Class | Binary example | Enables | Target |
 |---|---|---|---|
-| W0 | static-musl `hello`, `cat`, shell builtins | ABI skeleton proven | **Week 1 gate (M1)** |
+| W0 | static-musl **`-static-pie`** `hello`, `cat`, shell builtins | ABI skeleton proven | **Week 1 gate (M1)** |
 | W1 | static-musl GNU coreutils / BusyBox | Real-world syscall coverage | Week 2 |
 | W2 | static-musl **ncurses** app (`ninvaders`, a roguelike) | termios, ioctl, TTY | Week 2 |
 | W3 | static-musl **SDL2** app (fbcon/fbdev path) | fbdev+evdev+threads+futex+TLS | **Week 3 gate (M2/M3)** |
@@ -100,14 +101,21 @@ HobbyOS (QEMU: -M virt aarch64 / -M q35 x86_64)
 - The ELF-compat track is **x86_64-only** (Linux binaries are x86_64; musl cross targets
   `x86_64-linux-musl`). It does **not** touch the ARM primary target — ARM stays the home of
   the native catalog and must never regress (two-arch parity rule, §6).
+- **Corpus flavour (GB-013 decision, 2026-10-17 — `docs/elf-loader.md`):** the compat corpus is
+  built **`-static-pie`** (`ET_DYN`, no `PT_INTERP`), not fixed-address `ET_EXEC`. A musl `ET_EXEC`
+  is linked at 0x400000, which HobbyOS cannot map: `vm_region_insert()` rejects any region outside
+  the 64 GiB user window, and low VAs are the shared kernel identity map in every address space
+  (x64 0-8 GiB). Static-PIE self-relocates, so the loader may place it in the window. `ET_EXEC`
+  still parses but is refused at load time with a clear reason.
 - "Required support" for ELF run = the kernel ABI surface below, not a userspace emulator.
 
 ### 2.2 The compat layer (what gets built)
 
-1. **ELF static loader.** Parse `ET_EXEC` (+ later static `ET_DYN`), map PT_LOAD/p->bss, set
-   entry. Loader lives alongside the existing flat-binary loader (`src/kernel/program_loader.c`)
-   and dispatches on magic bytes. `PT_INTERP` (dynamic) is a Program-2 ticket — musl static
-   builds don't need it.
+1. **ELF static loader.** Parse **static-PIE `ET_DYN`** (`ET_EXEC` accepted-but-refused, see §2.1),
+   map each PT_LOAD with its real `p_flags` protections, zero p->bss, set the entry to
+   `base + e_entry`. Loader lives alongside the existing flat-binary loader
+   (`src/kernel/program_loader.c`) and dispatches on magic bytes; design + integration points in
+   `docs/elf-loader.md`. `PT_INTERP` (dynamic) is a Program-2 ticket — static-PIE builds don't need it.
 2. **Syscall translation table.** Linux x86_64 syscall numbers and HobbyOS's internal ABI are
    different. Implement a per-syscall shim (Linux args → HobbyOS call → Linux negative-errno —
    errno *numbers* must be Linux's, see §2.3). Core set first (W0/W1), then ioctl/futex/etc. as
@@ -149,8 +157,8 @@ HobbyOS (QEMU: -M virt aarch64 / -M q35 x86_64)
 
 | Tier | Model | Endpoint | Used by | Policy |
 |---|---|---|---|---|
-| **FLASH (workhorse)** | DeepSeek **V4 Flash** | `vllm` OpenAI-compatible on the **RTX 6000 pair** box | **every** worker / reviewer / tester agent | **Default for ~all tickets.** Target >90% of fleet tokens. |
-| **DEEP (planner)** | DeepSeek **v4.1 Flash** (8× DGX Spark) | `vllm` OpenAI-compatible on the **Spark fleet** | **Coordinator only** | Planning, re-planning, ABI/architecture design, blocked-root-cause after 1 FLASH retry, milestone reviews. |
+| **FLASH (workhorse)** | DeepSeek **V4 Flash** | `http://llm.localdomain:8000/v1` (vLLM, RTX 6000 pair box) | **every** worker / reviewer / tester agent | **Default for ~all tickets.** Target >90% of fleet tokens. |
+| **DEEP (planner)** | DeepSeek **v4.1 Flash** (8× DGX Spark) | `http://dgx1.localdomain:8000/v1` (vLLM; alias `dgx-main`) | **Coordinator only** | Planning, re-planning, ABI/architecture design, blocked-root-cause after 1 FLASH retry, milestone reviews. |
 
 Measures behind us (Sept/Oct 2026 community benchmarks for exactly this class of hardware):
 ~156–241 tok/s aggregate on the 8-Spark v4.1 box; ~47 tok/s single-stream per RTX 6000 card;
@@ -162,10 +170,14 @@ cold prefill ~840–2,100 tok/s depending on context. Consequences coded into th
 - **Long-lived sessions, never churn.** Restarting a 300K-context agent costs minutes of
   prefill. Agents stay on their subsystem; new work = new ticket, not new session.
 - **Deterministic work stays in tools** (grep/sed/test/CI), never in model tokens.
-- Endpoints/IPs are NOT hardcoded here — the setup step (GB-004) records the real URLs and
-  verifies `GET /models`. Mapping the tiers to the built infra: **FLASH = DeepSeek V4 on the
-  RTX-6000 pair box** (workhorse), **DEEP = DeepSeek v4.1 on the 8× DGX Spark fleet**
-  (planner/coordinator only).
+- Endpoints recorded and verified 2026-10-17 (GB-004), see §11.3 for the probe evidence. Mapping the
+  tiers to the built infra: **FLASH = DeepSeek V4 on the RTX-6000 pair box** (workhorse),
+  **DEEP = DeepSeek v4.1 on the 8× DGX Spark fleet** (planner/coordinator only).
+- **Measured 2026-10-17 (single stream, GB-004, `max_tokens=200`, temp 0):** FLASH
+  `llm.localdomain:8000` **57.7 tok/s** (196 completion tokens); DEEP `dgx1.localdomain:8000`
+  **40.5 tok/s** (119 tokens). Both serve `max_model_len: 1048576`. These are *single-stream*
+  numbers on a shared box — §3.1's 94–150 tok/s is an aggregate/community figure, so cap active
+  workers from measurement, not from the table.
 - **Model budget (validated 2026-10-17):** split lands ~90% FLASH / ~10% DEEP tokens; DEEP duty
   ~3% (it is mostly parked — that is intended). The binding constraint is FLASH throughput:
   the RTX pair measures ~94–150 tok/s, which feeds only **~3–5 agents** at full clip (the
@@ -219,11 +231,23 @@ boards in one, milestones and labels, light enough for a VM.
 ### 4.1 Structure
 
 - **Project:** `GAMING-BOARD` (kanban).
-- **Lanes:** `📋 Backlog` → `🟦 Ready` → `🟨 In Progress` → `🟧 In Review` → `🚦 Merge Gate` → `✅ Done`; plus `🧊 Icebox` (Program-2 vision epics).
-- **Labels:** `infra`, `abi`, `loader`, `libc`, `elf-compat`, `graphics`, `input`, `audio`, `native-port`, `game`, `tests`, `perf`, `docs`, `decision` (needs Sarah's sign-off), `deep` (DEEP-model required), `blocked`, `parity-ar` (ARM), `parity-x64`.
-- **Milestones:** `M0·infra` `M1·abi-core` `M2·devices-sdl` `M3·games` `M4·acceptance`.
-- **Ticket skeleton:** ID, workstream, weight S/M/L, depends-on, DoD + test, evidence link.
-- **Bot user:** `swarm-bot` (API token) — the Coordinator and workers move/annotate tickets through it. Webhook on the board posts to the Coordinator.
+- Lanes: `📋 Backlog` → `🟦 Ready` → `🟨 In Progress` → `🟧 In Review` → `🚦 Merge Gate` → `✅ Done`; plus `🧊 Icebox` (Program-2 vision epics).
+- Labels: `infra`, `abi`, `loader`, `libc`, `elf-compat`, `graphics`, `input`, `audio`, `native-port`, `game`, `tests`, `perf`, `docs`, `decision` (needs Sarah's sign-off), `deep` (DEEP-model required), `blocked`, `parity-ar` (ARM), `parity-x64`.
+- Milestones: `M0·infra` `M1·abi-core` `M2·devices-sdl` `M3·games` `M4·acceptance`.
+- Ticket skeleton: ID, workstream, weight S/M/L, depends-on, DoD + test, evidence link.
+- Bot user: `swarm-bot` (API token) — the Coordinator and workers move/annotate tickets through it. Webhook on the board posts to the Coordinator.
+
+**LANE LIMITATION (GB-002, found 2026-10-17).** The live Forgejo is
+**v17.0.0+gitea-1.22.0** and its REST API has **no `/projects` endpoint**
+(`/api/v1/repos/sarah/gaming-program/projects` → `404 page not found`), so the
+`GAMING-BOARD` kanban project cannot be created or driven over the API that every
+agent works through. **The lanes are therefore labels** whose names are the lane
+names above (one lane label per issue, colours matching the lane), stacked on the
+**native milestones** M0–M4; agents move tickets with
+`tools/board/lane-move.sh GB-nnn "<lane>"` instead of dragging cards. When a Forgejo
+build with `/projects` lands, `tools/board/board.py` grows a project backend and the
+label fallback retires. Weight is carried as a `wt-S|wt-M|wt-L` label, the ticket
+skeleton as an issue header block (see `tools/board/README.md`).
 
 ### 4.2 Ticket workflow (agents own it end-to-end)
 
@@ -299,7 +323,7 @@ compat layer's numbers are T4-locked before any T3/T5 work depends on them.
 | Milestone | Target | Gate (all must be green + evidence) |
 |---|---|---|
 | **M0 — Infra (d1–3)** | VMs up, Forgejo live, Hermes fleet configured, branching+CI wired, baseline green | GB-001→GB-012 done; baseline suites green on `main` |
-| **M1 — ABI core (wk1)** | static-musl W0 binary boots on `ARCH=intel`, differential parity | GB-013→GB-024; T4 green for W0 corpus |
+| **M1 — ABI core (wk1)** | static-musl W0 binary boots on `ARCH=intel`, differential parity | GB-013→GB-024; T4 green for W0 corpus — **T4 means leg A vs a *HobbyOS guest*, not vs host `ho_*` mocks** (2026-10-19: the host-mock leg is a proxy that has never compared HobbyOS against Linux; the device leg is GB-066 and it does not exist yet) |
 | **M2 — Devices + SDL (wk2)** | `/dev/fb0`, evdev, TLS, threads/futex under compat; static-musl **SDL app** draws+inputs | GB-025→GB-033; T4+T3 green |
 | **M3 — Games (wk3)** | native catalog ≥5 playable; launcher; **static-musl Doom (W4) playable under compat** | GB-034→GB-042 majority with T1/T3/T5 evidence |
 | **M4 — Acceptance (wk4)** | S0+S1 evidence pack; long-duration playthroughs pass; re-plan → Program-2 backlog | GB-043→GB-055; both arches; evidence archive on NAS |
@@ -328,12 +352,13 @@ final list.
 | GB-010 | **[DEEP]** Write `docs/linux-abi.md` v1: syscall numbers, errno values, struct layouts (stat/sigaction/ucontext/termios/epoll), TLS ABI, uname string | L | — | doc + first T4 assertions against it |
 | GB-011 | **[DEEP]** Re-derive RimWorld / DSP / TA feasibility: per-game 20K-word assessment → staging plan → `MONO`/`VULKAN`/`RTS` icebox epics | M | GB-010 | three epics on board with staged tickets |
 | GB-012 | Merge selfhost kernel core (threads/futex, vm v2+memfd+MAP_SHARED, fork/exec/signals) to `main` behind arch guards + tests | L | GB-010 | T2/T3 both arches green post-merge |
+| GB-064 | **Self-registering host test suite.** Every ticket PR edits the *same* `host_tests:` prerequisite line and recipe body (PRs #25–#31 all collided on it on the night of 2026-10-17/18; #27's branch even *replaced* #29's two recipe lines), so N open PRs guarantee N−1 conflicts and every merge is a hand-resolved line. Discover `src/host/*_test.c` (and the python/parity tests) by `$(wildcard …)`/`$(patsubst …)` instead of enumerating them | M | — | adding a host test needs no edit to a shared Makefile line; two branches that each add a test merge with **no** conflict; `make host_tests` still builds *and executes* every existing test (verified by grepping the run's own PASS lines, never by the build alone) |
 
 ### Milestone M1 — ABI core / ELF loader (GB-013 … GB-024)
 
 | ID | Ticket | Wt | Depends | DoD |
 |---|---|---|---|---|
-| GB-013 | **[DEEP design, FLASH exec]** ELF static loader (`ET_EXEC`) in loader path; coexist w/ flat loader; magic dispatch | L | GB-012 | static-musl binary maps+boot, entry set right |
+| GB-013 | **[DEEP design, FLASH exec]** ELF static loader (static-PIE `ET_DYN`; `ET_EXEC` parsed-but-refused) in loader path; coexist w/ flat loader; magic dispatch | L | GB-012 | static-PIE binary maps+boot, entry set right (`docs/elf-loader.md`) |
 | GB-014 | Linux x86_64 syscall translation table: core set (open/read/write/close/lseek/stat/fstat/brk/mmap/munmap/fork/execve/waitpit/exit_group/writev… ) | L | GB-013, GB-010 | T4 W0 corpus pass |
 | GB-015 | errno + struct-layout parity locks (T4 assertion suite from GB-010) | M | GB-014 | T4 fails on any mismatch |
 | GB-016 | `uname` shim reporting Linux-ish identity (SDL/games sniff it) | S | GB-014 | T4 matches |
@@ -345,6 +370,14 @@ final list.
 | GB-022 | TLS ABI: `arch_prctl(ARCH_SET_FS)` (x86) / `TPIDR_EL0` (arm) on context switch | L | GB-021 | T4 `errno` per-thread + `__thread` vars |
 | GB-023 | Real signal delivery: frame build, `sigreturn`, `rt_sigprocmask` | L | GB-021 | T4 signal test |
 | GB-024 | **M1 gate:** W0 corpus (hello, cat, sh, coreutils-static) boots on intel + writes expected output, T4 green | M | GB-013..23 | gate evidence |
+| GB-057 | **ARCH=intel T3 prints 222 failing checks (sed/grep/cmp/tsort) yet exits 0** — the intel integration tier is not a gate (minted from the GB-009 baseline run) | L | — | `make test_intel` with 0 FAIL lines + a deliberately-broken check fails the tier; `make test` (ARM) stays green. **Split 2026-10-19:** **a** (no halt at end of wave, 7/8) is **fixed** — `8995009`, waker-liveness predicate + `[ORPHAN-WAIT]`, two consecutive tiers `halt=2 orphan=1` (`evidence/gb-057/t3intel_probe56_wave_halts_orphan_named.log`); **b** (premature halt, 1/8, probe54) and **c** (LAPIC fault, ≤1/7) remain **open**, and b is the one that can still make a green tier a lie — `T3_MIN_LINES` caught it once, which is the only reason it was not read as a pass |
+| GB-058 | **ARCH=arm T3 carries one real failure the exit-status-only tier called green: `SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST`** (`evidence/gb-009-baseline/t3_integration.log:5329`, surfaced by `tools/t3_tier.sh police`) | M | GB-056 | the stall is explained and fixed (the watchdog process-table dump is the evidence); `make test` (policed, ARM) green. **2026-10-19 — do this before writing any code:** GB-063's whole hypothesis was that this stall and the intel never-halt were *one* predicate defect, and that predicate changed on `main` (`8995009`, `4cefd7d`). Re-run the policed ARM tier on current `main` first; if it is green the ticket closes as a consequence, if it still stalls the dump now names the live set and the work is scoped by that |
+| GB-060 | **x64 context-switch durability: a `proc_lock` critical section must not be able to strand the lock.** Measured on GB-057: a CPU that stops inside the scheduler's IRQs-off section holds `proc_lock` forever and every other CPU waits behind it — 9 `[HOLDER] cpu=2 sched_stage=5 picked=45` reports, exactly one claimant, no lock cycle, no exception (`evidence/gb-057/t3intel_probe3_*`). Whatever the immediate cause, the scheduler's critical sections need an owner + a failure path that releases (or a watchdog-bounded break) instead of a silent machine-wide freeze. **Update 2026-10-18: two shapes, and they must be separated.** The *stopped* holder is fixed and proven — `spinlock_t.owner`, `spinlock_release_if_held_by_me()` on both fatal halt paths, and a halt-keyed break that frees a dead owner's lock and re-acquires it normally (T1: `src/host/locksteal_test.c`, 14 checks, running in-suite); it was observed working in the wild (probe16) and declining correctly in probe19. The *wedged-alive* holder is measured and **open**: probe19 showed a halted CPU release `proc_lock`, a live CPU re-acquire it and then loop while holding it, with 46 `LOCKFOREVER` and no `[STOLEN]` — the break declined because the owner is running, not stopped (`evidence/gb-057/t3intel_probe19_steal_declined_live_owner.log`). Remaining work = a break keyed on **per-CPU progress heartbeat** (not elapsed time, which would free a live-but-slow holder's lock), with the threshold stated and printed on any break. **Second shape landed 2026-10-18 (`24a7f8a`):** `lock_stallbreak_ok()` breaks a lock whose recorded owner has stopped taking timer interrupts for `LOSTWAKE_DEAD_OWNER_MS` — the lost-owner reaper's own constant, reused so the two cannot drift — freeing it and re-contending exactly like the halt case, announced as `[STALLBREAK]` with the stale age; **T1 proves the boundary exactly** (`locksteal_test_host`, 27 checks: one ms inside the grace period protected, at the boundary broken, fresh heartbeat never broken, halt rule wins immediately). Wild (T3) run in flight as probe20 | M | GB-057 | **both** shapes recover: a deliberately-stopped holder *and* a deliberately-wedged holder do not freeze the machine, provable in T1/T3; the holder is named and the lock recovered in each |
+| GB-061 | **x64 resume-path exception: `general_interrupt_handler -> enter_user_space -> restore_user_sp_helper` faults (CPU 6, pid 42)** — resolved stack from `evidence/gb-057/t3intel_probe2_exception_not_wedge.log`; a fault in the interrupt-driven return-to-user path is a defect with or without the GB-057 wedge, and it has a reproducible register/stack dump to work from | M | — | the stack is explained and the path survives a stress run: no exception dump in a clean T3 intel run |
+| GB-063 | **Scheduler liveness accounting: a finished wave must reach `System halt`.** `schedule()`'s halt/`any_alive` branch is never reached because a slot parked in a state that is neither READY nor FREE/EXITED/ALLOCATED/THREAD_DONE is counted *alive*, so the machine idles forever instead of halting — measured all-idle-no-halt in `evidence/gb-057/t3intel_probe17_false_pass_loader_gp.log` (every CPU in `safe_wfi`, one slot parked), and consistent with GB-058's `SHELLTEST WATCHDOG: protocol stalled 25 s` (a test waiting on a process that is never scheduled again, machine otherwise healthy). **Update 2026-10-18 (Coordinator):** the *measurement* half is landed — when no READY work exists and the predicate still counts live work, the scheduler prints every live slot (`slot/pid/state/parent/claimed_by/name`), once per idle stretch, annotated in place for the two unwakeable shapes (RUNNING with no CPU on it = stale claim; a parked WAIT_SPAWN/WAIT_CHILD with no parent). probe20 is why: 30,179 console lines, `proc_lock` free, no strand, no kernel fault, and still no `System halt`. The predicate itself is **deliberately untouched** until that report has been read — `BLOCKED` on a timer is legitimately alive and a wrong predicate halts healthy waves, which is strictly worse than a wave that fails to halt. Second increment = the **owner-side bounded wait**: give a parked `WAIT_SPAWN` caller a deadline and resume it with `-EAGAIN` past it, which covers worker death, worker starvation and slot reuse with one rule and never touches another context's state. Ruled out by reading, so nobody repeats it: both spawn paths *do* release the caller when no worker slot is free, and both workers *do* unpark on completion — so the reachable leak is a worker that dies before unparking (the loader `#GP`, GB-013). Also ruled out by measurement: a scheduler-side forced reap (my own attempt) is wrong, because the live spawn path re-parks the slot underneath it — the same slot "reaped" 11 times in a row | M | — | the counter's state set is enumerated; a parked/idle slot is not counted live (or is reaped); a T3 run on the affected arch prints `System halt` where it previously idled forever, and each state it used to count is named. **CLOSED 2026-10-19 — both halves landed on `main`:** the counting half is `8995009` (a `BLOCKED` slot is alive only while it has a possible waker; 60 s budget; `[ORPHAN-WAIT]` names slot/pid/image/parent and states the slot is **not** reaped) and the owner-side half is `4cefd7d` (bounded parked `WAIT_SPAWN`, `-EAGAIN` past it, set at all four park sites on both arches). Proof of the DoD sentence itself: two consecutive intel tiers reach `System halt` with the orphan named (`evidence/gb-057/t3intel_probe56_wave_halts_orphan_named.log`, tail `[ORPHAN-WAIT] slot=13 … / System halt`), and the states it used to count are `BLOCKED`-on-a-dead-waker and `WAIT_SPAWN`-with-a-dead-worker |
+| GB-062 | **intel FAT big-file test is inconsistent across runs: `[FATBIG] FAIL tail checksum clean (got=0x0000000000000800 want=0x0000000000000000)` in one run and `[FATBIG] FAIL short` in another, while it passes in two other intel runs of the same night and passed on ARM** — evidence `evidence/gb-057/t3intel_probe16_gb060_release_fired.log` and `t3intel_probe14_idle_stuck_no_halt.log` versus `t3intel_probe15_waitspawn_blocker.log` and `t3intel_probe17_false_pass_loader_gp.log`. Two different sub-checks failing in different runs is the signature of a timing/ordering defect, not a wrong constant: count it as flaky-on-intel (2 of 4) rather than deterministically broken | M | — | FATBIG passes on intel in repeated consecutive T3 intel runs, and the cause is named with evidence. **DoD amended 2026-10-18:** the original second clause ("the ordering the FAT write path depends on is named") assumed a storage-ordering cause; the verified cause is a signed-`char` comparison in `fatbig_test.c:95` (half the tail has bit 7 set, sign-extended against an int), reproduced on a host three ways and confirmed by consecutive intel runs, with the wrong NVMe conclusion corrected in `docs/fatbig-intel-delta.md` |
+| GB-065 | **Device-tier blocker (2026-10-18): the only FAIL lines left in a complete intel T3 wave** — **`graphics_draw_line`'s pixel assertions fail on intel: GRAPHICS.BIN reports `FAIL: line startpoint`, `line midpoint`, `line endpoint`** — surfaced when GB-057's step bound let the graphics test complete for the first time; before the bound the process hung *inside* this function, so these assertions were never reached. **Attribution closed 2026-10-18 (worker `wgfx`, verified by me):** not the bound (the failing diagonal `(10,600)→(110,700)` needs 201 iterations and uses 101, so the bound cannot fire), not the line maths (32/32 host tests, 217 checks, exact in-OS call reproduced on a coherent buffer, `c654013`). Root cause = **`mmu_map_user_framebuffer()` mapped two 2 MB huge pages (4 MB) for an 8 MB 1920×1080×4 framebuffer**, so every pixel at y ≥ 546 was unmapped; the diagonal lives at y = 600..700 and the rect check at y = 100, which is exactly the observed asymmetry. **The fix is written and NOT on `main`** (`src/kernel/arch/x64/mmu.c`, map `ceil(fb_bytes/2 MB) = 4` pages; commit `3a86967` exists only on `ticket/65-line-assert` because PR #45 was merged at `c654013`, *before* this commit existed) | S | — | The three line assertions pass on intel with GRAPHICS.BIN completing. **Next action, stated so it is not re-derived:** rebase the single `3a86967` hunk onto `main`, build intel, rerun `tools/t3_tier.sh intel`, and attach the run where `FAIL=` is empty — that is the first intel tier that can be cited as green |
+| GB-066 | **T4's device leg does not exist — the M1 gate has never been measured against HobbyOS.** `src/host/t4_parity.sh` calls leg A (static-musl, real Linux) and leg B *the same probe compiled for the compat surface and run on the host against glibc `ho_*` mocks*, deferring the in-guest leg to "once the ELF loader lands"; `--device intel` **SKIPs**, and a SKIP is not a pass. So every "T4 green" so far compares Linux against a *model* of HobbyOS, and GB-024's gate sentence cannot be satisfied by any kernel fix. Deliverable: a probe in `src/user/` built **both** ways (Linux static-musl for leg A; HobbyOS intel for leg B), staged into the guest through `T3_STAGE` (`tools/t3_tier.sh`), its stdout captured from the serial console, and a `t4_device.sh` that diffs **return value / errno / stdout** for the W0 row set and **exits non-zero when leg B is absent** instead of skipping. The tier must assert the probe's *arrival in the guest* (the guest's own dispatch/output line), never an image listing — probe57's `mdir` output grepped for `pie.bin` could only ever print 0 (`mdir` renders `PIE      BIN`), and that cost two runs | L | GB-013, GB-014, GB-024 | leg B runs **inside HobbyOS-intel** for the W0 corpus and the diff passes; a deliberately-wrong shim makes the same harness FAIL (it must be able to report both); a missing/absent probe fails the tier rather than skipping it; the row set is the one GB-015 locked (numbers, errno, struct layout), not a new one |
 
 ### Milestone M2 — Compat device nodes + SDL (GB-025 … GB-033)
 
@@ -373,6 +406,7 @@ final list.
 | GB-040 | Per-game evidence rig: serial log + screendump + replay scripts | S | — | assets land in evidence dir |
 | GB-041 | **[DEEP]** **Doom as static-musl ELF under compat** (W4) — resolve interop gotchas (mmap, ioctl, threads) | L | GB-033, GB-034 | **playable on intel** — the S1 moonshot |
 | GB-042 | Gamepad/joystick via evdev for arcade titles (optional) | M | GB-027 | axis/buttons register |
+| GB-059 | Port the four hand-rolled T5 harnesses (`run_doom_test.py`, `run_stardust_test.py`, `run_xnibbler_test.py`, `run_xcrypt_test.py`) onto `tools/evidence_rig.py`: locate the title by name from the parsed `[MENU]` dump (never a magic slot index — four PRs each asserted their own on the same growing `pinned_games[]` line) and take the repo root from the environment so it works from a `hermes -w` worktree | M | GB-040 | both a native port and a compat title run through the one rig from a worktree; the four hand-rolled copies are deleted |
 
 ### Milestone M4 — Integration, testing, acceptance (GB-043 … GB-055)
 
@@ -391,6 +425,7 @@ final list.
 | GB-053 | Final acceptance run, both arches, full evidence archive | M | GB-047 | S0+S1 signed off |
 | GB-054 | **[DEEP]** Program-2 roadmap ticket: Mono (RimWorld) staging, Spring RTS (TA) evaluation, Vulkan-virgl evaluation, dynamic-loader/glibc plan | M | GB-053 | epics + staged tickets |
 | GB-055 | Program retrospective + rules update (what to teach `gaming.md`/skills) | S | GB-054 | lessons merged into skills |
+| GB-056 | T3 PROCTEST `WEXITSTATUS` mismatch (got=2 for want=1 and want=42) — suites exit 0 anyway (minted by the Coordinator from the GB-009 baseline run; §10/§11.8) | S | — | T3 suite's PROCTEST passes and a printed FAIL fails the suite |
 
 ---
 
@@ -459,11 +494,72 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
   - Milestones/labels/projects (kanban) have their own namespaces; reuse the GB-003 lane-move
     scripts instead of ad-hoc curls.
 - `swarm-bot` account (all-scopes token) already exists — created 2026-10-16.
+- **Board tooling (GB-002/GB-003, in-repo):** `tools/board/` — `board.py` (claim/move/comment/status/lint),
+  `import_seed.py` (idempotent §8 → board import), `{claim,lane-move,comment}.sh` (workflow wrappers),
+  `hook_server.py` (webhook receiver), `poll.py` (60 s fallback). See `tools/board/README.md`.
+
+### 11.2a Board → Coordinator wiring (built 2026-10-17)
+
+- Webhook `coordinator-board-hook` (repo hooks API) → `http://192.168.0.233:8765/board-hook`,
+  served by systemd unit **`hobbyos-board-hook.service`** on `swarm-coordinator`; events land in
+  `/var/log/hobbyos/board-events.jsonl` (`wake: true` for lane moves into In Review/Merge Gate,
+  `decision` labels, closes).
+- **`hobbyos-board-poll.service`** runs the 60 s fallback poll (`poll.py`) into the same inbox.
+- Forgejo needed `ALLOWED_HOST_LIST = private` under a new `[webhook]` section in
+  `/etc/forgejo/app.ini` on `swarm-ticketing` — without it deliveries to a LAN address are refused
+  ("webhook can only call allowed HTTP servers"). The only change is that appended section
+  (the file had no `[webhook]` block before); removing it restores the original exactly.
+
+### 11.2b Fleet preconditions discovered on first contact (fix these before any x86 run)
+
+1. **x86 firmware must be writable.** The Makefile passes `-pflash $(EDK2_X86_64)`, and `-pflash` opens
+   the image read-write; the cloud-init symlink to `/usr/share/OVMF/OVMF_CODE_4M.fd` makes every x86 QEMU
+   run fail with `Could not open ...: Permission denied`. Fix per VM:
+   `rm -f ~/.local/share/OVMF/OVMF_CODE_4M.fd && cp /usr/share/OVMF/OVMF_CODE_4M.fd ~/.local/share/OVMF/OVMF_CODE_4M.fd && chmod u+w …`
+   (ARM uses `-bios` and was never affected). Applied on .233 + farms 1-3.
+2. **`musl-tools`** must be installed wherever the T4 harness runs (`musl-gcc -static` is leg A); without
+   it the harness honestly SKIPs and the differential gate is hollow. Installed on .233.
+3. **The staging cache is not on every VM, and inter-VM SSH is not actually trusted.** §11.5 says to rsync
+   `third_party/llvm-21.1.8/dist-staging` (227 MB, already built on `swarm-farm-1`) instead of paying the
+   cold build; it was absent on farms 2 and 3, so `wgames` was blocked on hours of cold staging for its T5
+   acceptance runs. Landed on farms 2-3 from `swarm-coordinator` (the coordinator has host keys for every
+   VM; **farm-1 -> farm-2/3 rsync fails with `Host key verification failed`** because the cloud-init keys are
+   only seeded for sarah's own key pairs — either seed them or route copies through .233).
+4. **Workers run `hermes -w`.** A git worktree does **not** contain gitignored trees, so the vendored
+   `third_party/*/src` extractions are missing there and vendored lanes (C++/RTTI, WebKit) go red inside a
+   worktree while the same tree is green in the main checkout. Seed them (symlink is cheapest) before
+   believing a worker's "main is red" report — tracked as GB-006. Landed: `tools/swarm/seed-worktree-vendored.sh`
+   (plain `ln -s` only — `ln -sfn` silently type-changes tracked files, which blocks the next rebase).
+5. **A non-login/background shell may not have `/usr/sbin` on PATH**, and `mkfs.fat` lives there, so
+   `make disk.img` dies with `make: mkfs.fat: No such file or directory` / `Error 127` *after* the whole
+   build has succeeded — which reads like a code failure and is not. If a backgrounded build fails only at
+   the disk step, re-run it with `export PATH="/usr/sbin:/sbin:$PATH"` (or re-run `make disk.img` in an
+   interactive shell; the objects are already built). `tools/run_waves.sh` already carries its own PATH
+   handling for the same reason.
+6. **`/dev/kvm` exists on the fleet VMs but is NOT usable as provisioned.** `ls -l /dev/kvm` is
+   `crw-rw---- root:kvm`, and `sarah` is not in the `kvm` group, so an accelerated run dies with
+   `Could not access KVM kernel module: Permission denied` (the device's presence is not the capability —
+   that is the trap). The host CPU exposes nested SVM, so the one-line fix is provisioning:
+   `sudo usermod -aG kvm sarah` (then a fresh login), or a targeted device ACL. Until that is done, **every
+   intel QEMU run is TCG** — tens of minutes per wave, which is why an A/B measurement on `ARCH=intel` is
+   still expensive. Tracked as part of GB-006's provisioning checklist. `tools/t3_tier.sh` takes
+   `T3_QEMU_ARGS` so the fix is a one-liner away: `T3_QEMU_ARGS="-enable-kvm" make test_intel`.
 
 ### 11.3 Model endpoints & Hermes profiles
-- Two vLLM OpenAI-compatible endpoints; GB-004 records the final URLs (`GET /models` probe).
-  - **FLASH — DeepSeek V4 (RTX-6000 pair box).** Default for every role; all routine work.
-  - **DEEP — DeepSeek v4.1 (8× DGX Spark fleet).** Coordinator only: planning/re-plan/review.
+- Two vLLM OpenAI-compatible endpoints, **recorded + verified 2026-10-17 (GB-004)**:
+  - **FLASH — DeepSeek V4 Flash** = `http://llm.localdomain:8000/v1`, `GET /v1/models` →
+    `["deepseek-v4-flash"]` (root `/mnt/fast/deepseek-v4-flash-0731`), `max_model_len` 1048576.
+    Default for every role; all routine work. Measured **57.7 tok/s** single-stream.
+  - **DEEP — DeepSeek v4.1 Flash** = `http://dgx1.localdomain:8000/v1`, `GET /v1/models` →
+    `["deepseek-v4.1-flash", "dgx-main"]` (root `/models/deepseek-v4.1-flash`), `max_model_len`
+    1048576. Coordinator only: planning/re-plan/review. Measured **40.5 tok/s** single-stream.
+- Verification (GB-004): `swarm-coordinator` resolved `model.default=deepseek-v4.1-flash`,
+  `model.provider=dgx` → `hermes chat -q` answered (DEEP-LINK-OK); `swarm-farm-1..3` resolved
+  `model.default=deepseek-v4-flash`, `model.provider=flash`, `model.base_url=http://llm.localdomain:8000/v1`
+  → answered (FLASH-LINK-OK) with only `llm.localdomain:8000` in the logs. Role provisioning is
+  scripted: `tools/swarm/provision-hermes-role.sh` (`ROLE=flash|deep`); it uses `hermes config set`
+  only (never hand-edits `config.yaml`) and writes `FORGEJO_TOKEN` to `~/.hermes/.env` (chmod 600),
+  never to a tracked file.
 - Budget (validated 2026-10-17): ~90% FLASH / ~10% DEEP tokens. FLASH sustains ~94–150 tok/s →
   cap active workers at ~3–5 until GB-004 benchmarks say otherwise. Never put build/test load on
   the inference boxes.
@@ -504,3 +600,101 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 - `qemu-system-aarch64 -M virt -smp 4 -m 2048 -bios ~/.local/share/AAVMF/AAVMF_CODE.fd`
   boots UEFI to the shell, no crash (farm-2).
 - LLVM 21.1.8 dist-staging cached on farm-1.
+
+### 11.8 Execution log (newest first, maintained by the Coordinator)
+
+**2026-10-19 — §4.3 re-plan (PLAN-005): the gate had no instrument, and the compat track has one wall.**
+
+| what | state |
+|---|---|
+| **Board snapshot** | 73 tickets: Backlog 5 · Ready 2 · **In Progress 20** · In Review 16 · Merge Gate 0 · Done 30. M0 6/16 · M1 3/19 · M2 5/9 · M3 5/10 · M4 6/14. `sync_gaming_md.py` IN SYNC 65/65 before the pass. Repo: `origin/main` = `26325ac`, 5 open PRs (#43, #31, #30, #26, #1), all `mergeable=null` (GitHub recomputes lazily — nothing merged, nothing green by inspection) |
+| **Finding 1 — the M1 gate is not measurable, and that is a plan defect, not a kernel defect** | `src/host/t4_parity.sh` leg B is the probe compiled for the compat surface and run **on the host against glibc `ho_*` mocks**; its own header defers the in-guest leg to "once the ELF loader lands", and `--device intel` SKIPs. So M1's sentence ("T4 green for the W0 corpus") has been evaluated against a *model* of HobbyOS for the entire program. No amount of GB-057/GB-065 work can satisfy it. **Minted GB-066** (M1, L, → Ready `wabi`) = the device leg: a probe built both ways, staged through `T3_STAGE`, stdout captured from serial, diffed on rc/errno/stdout, and *failing* (not skipping) when leg B is absent. §7's M1 gate cell now says what T4 means |
+| **Finding 2 — zero ELF binaries have ever executed** | probe57 (committed) put the first static-PIE on the image and produced no `[ELF-DISPATCH]` line; the follow-up showed why: `t3_tier.sh` rebuilds `disk.img`, so the staged fixture was wiped before QEMU — a harness bug, now fixed with `T3_STAGE` (stage after build, before QEMU, fatal on failure). GB-013's mapper is good code with **no caller that has reached it in a guest**; that, not the loader's maths, is why M2's SDL leg and M3's W4 Doom leg are unreachable. Also retired: the `mdir \| grep pie.bin` check I published could only ever print `0` (`mdir` renders `PIE      BIN`) — a zero that could not have been otherwise is not evidence |
+| **Finding 3 — the board is holding claims, not progressing** | 20 In Progress vs 2 Ready, and the In Progress set is mostly *correct* — those tickets each hold a runtime leg that one wall blocks. The lanes therefore read as healthy while the track is serialized on a single binary execution. Two tickets were Done-in-fact and still In Progress (**GB-063** → Done: `8995009` counting half + `4cefd7d` owner-side bound, both on `main`, `[ORPHAN-WAIT]` then `System halt` in probe56). One fix was Done-in-fact and **not on `main`** (**GB-065**: `3a86967`, the 4 MB→8 MB framebuffer mapping, stranded on a branch whose PR had already merged at `c654013`) |
+| **Adjusted, not minted (deliberately)** | **GB-057** split into a/b/c in the plan: a fixed and proven, b (premature halt, 1/8) and c (LAPIC, ≤1/7) open — b matters because it is the one shape that can turn a green tier into a lie. **GB-058** told to *run the policed ARM tier on current `main` before writing code*, because GB-063's hypothesis was that ARM's stall and intel's never-halt were one predicate, and that predicate changed. **GB-065** given its exact next action (rebase one hunk, build intel, rerun T3) so the last red line in the intel tier is not re-derived by the next reader |
+| **Why only one ticket was minted** | The temptation was one ticket per stalled lane (M2 SDL, M3 Doom, M4 evidence). Those are not parallel problems: they are the *same* missing premise — an ELF that runs — plus, for M1, an instrument that can see it. Minting five tickets that all block on GB-013/GB-066 would put five honest-looking rows in Backlog and produce no work. The native track (S0) stays the one place capacity converts to playable games this week |
+| **Lane moves** | GB-063 → Done (2 commits named). GB-066 created (#74) → Ready `wabi`. EPICs #66/#67/#68 → Icebox (§4.1: Program-2 vision epics live there, and three cards in Backlog were being counted as backlog). After the pass: Backlog 4 · Ready 3 · In Progress 19 · In Review 16 · Merge Gate 0 · Done 32 · Icebox 3 |
+| **Tooling defect found and fixed** | `board.py issue_by_id()` only resolved `GB-nnn` titles, so `comment PLAN-005` and `move EPIC-66` both returned **`no issue for …`** — the tool could not address the two ticket kinds the re-plan loop itself creates. That is the mechanism behind the PLAN-003 phantom (a plan ticket that posted its summary and was never closed or laned) recorded on 2026-10-18. It now accepts `GB-`/`PLAN-`/`EPIC-` prefixes and a bare issue number; `import_seed.py`'s WORKSTREAM map also gained GB-063/064/065/066, which existed only in an uncommitted local copy while the board already carried those labels |
+| **Summary** | Posted on **PLAN-005 (#75)**, closed |
+
+**2026-10-18 — §4.3 re-plan (PLAN-004) + two tickets minted.**
+
+| what | state |
+|---|---|
+| **Re-plan pass** | Board snapshot 70 → 71 tickets, `lint` clean, `sync_gaming_md.py` IN SYNC 64/64. Lanes: Backlog 11→9 / Ready 4→6 / In Progress 16 / In Review 14 / Merge Gate 1 / Done 23→25 / no-lane 1→0. Milestones M0 5/16 · M1 2/18 · M2 5/9 · M3 4/10 · M4 4/14. Summary posted on **PLAN-004 (#71)**, closed. |
+| **The re-shape reality forced** | The T4 differential-lock layer is the one M1 lane *not* behind the intel wall (it runs on the host), and it is now essentially complete — GB-015/016/017/018/019/020/022/023 merged or on clean PRs. So M1's remaining gap is no longer "measure the contract"; it is "boot a W0 corpus on intel", which is single-threaded on x64 stability: **GB-057** (instance) / **GB-060** (lock durability — *both* shapes landed, `24a7f8a`, T1 boundary proof 27 checks) / **GB-061** (resume fault) / GB-013 loader `#GP` (`program_loader.c:611`) / new **GB-063**. Both T3 tiers remain uncitable; every green so far is T1/T2/T4-host + ARM T5. |
+| **Minted GB-063** (M1, M, → Ready `wabi`) | *Scheduler liveness accounting: a finished wave must reach `System halt`.* probe17's intel wave idled forever instead of halting (every CPU in `safe_wfi`, one slot parked) — the same shape as GB-058's ARM `SHELLTEST WATCHDOG: stalled 25 s`. Likely the **shared** root cause of both tier failures: `any_alive` counting a slot in a state the scheduler does not know how to drain. Provable on ARM ⇒ not behind the intel wall |
+| **Minted GB-064** (M0, M, → Ready `wgfx`) | *Self-registering host test suite.* PRs #25–#31 all collided on the same `host_tests:` prerequisite line and recipe body in one night (#27 even replaced #29's recipe lines). The resolver exists; the *cause* is one line every ticket edits. Wildcard/patsubst discovery ends the conflict class and unblocks GB-005/GB-044 |
+| **PLAN-003 (#64) tidied** | Its loop posted a complete re-plan but never closed the ticket and never gave it a lane — a phantom open plan ticket on the board. Moved to Done, superseded by PLAN-004 |
+| **No drift this pass** | Unlike the last two loops, the In Review set is honest — each holds a genuine runtime/leg it cannot yet evidence (e.g. GB-021's PR #35 is held by a real ABI disagreement: `futex(FUTEX_WAKE)` returns `rc=1` for us vs `rc=0` on Linux, i.e. our shim reports a waiter woken when none was). Nothing corrected |
+
+**2026-10-18 — lane fan-out + board-drift correction (Coordinator, continuation).**
+
+| what | state |
+|---|---|
+| **Ready lane refilled (it was empty)** | Promoted five genuinely unblocked tickets, each with its deliverable, gate, and an explicit note about what is *not* gated: **wabi** ← GB-017 (dev nodes + `getrandom`), GB-020 (`getdents64` + `/proc/self`), GB-019 (ioctl subset) — the core of each is independent of GB-014's syscall routing, which is only their wiring tail; **wgames** ← GB-043 (long-duration playthrough harness, dep GB-040 Done) and GB-045 (gfxbench baseline, no unmet deps). **wgfx got nothing, deliberately**: every remaining graphics/input/audio Backlog ticket is gated by wgfx's own in-flight work (GB-032 SDL, GB-029 audio), so that lane is full rather than idle — manufacturing a promotion there would have been theatre |
+| **Board drift corrected (5 tickets)** | GB-025, GB-027, GB-028, GB-030, GB-042 were sitting in In Review / Merge Gate with their work already merged on `main`. Each was **verified present at `origin/main` before** being moved to Done, naming the PR that landed it. A merged ticket in a review lane tells the next reader that work is pending when it is finished — the same class of lie as an instrument that reports the wrong state |
+| **Merge queue** | PR #4 closed as superseded (its work landed via PR #10) with a pointer comment so nobody rebases it. PR #1 (DOOM / GB-034) and PR #2 (STARDUST / GB-038) stay red on their T5 legs; PR #17 (GB-059 rig) stays changes-requested. Nothing in the queue had green gates, so nothing was merged |
+
+**2026-10-18 (later) — worker wave landed into the queue.**
+
+| what | state |
+|---|---|
+| **Second fan-out wave** | wabi ← GB-016 (`uname` shim) and GB-018 (`poll`/`select`/`pselect6`). GB-017/GB-019 went In Review and GB-020 In Progress within the hour of the first wave, so the lane is genuinely fed rather than nominally |
+| **GB-016: I demoted a claimed ticket, then corrected it** | I moved GB-016 In Progress → Ready as part of the wave, reading a lane listing taken a minute earlier — `swarm-farm-1` had claimed it in between. Restored to In Progress with an honest note. **Lesson: re-read the ticket's current lane at the instant of the move** (the board is live and claims arrive in seconds), which is the same stale-view error as reading an instrument once and believing it later |
+| **PR #25 merged (GB-017 + GB-019 + GB-020)** | One branch, three tickets, +150 lines of T4 differential probe: `main` now races 31 probe rows, static-musl vs the HobbyOS host compat surface. Reviewed rather than rubber-stamped — the probe deliberately does not diff *random payloads* leg-to-leg (only return counts and errno are contractual, which is the correct call: diffing random bytes would have produced a flaky test that "proves" failure) — and I ran the host leg by hand to confirm the rows are real (`getrandom_16 rc=16`, `urandom_open rc=3`, `urandom_read16 rc=16`, `null_write3 rc=3`, `null_read1 rc=0`). Gate: T1=0, parity PASS |
+| **PR #26 (GB-035 NES revision) returned to the worker** | Dirty against `main`: 10 content hunks across 5 files, because it revises files `main` already has from the earlier GB-035 merge (`nes.c` 383→411, `nes_test.c` 130→230). I did **not** resolve it — with 10 hunks inside emulator content, choosing a side is a judgement about the worker's own code. Told them precisely what conflicts and why, plus the two mechanical hints (the `host_tests:`-line resolution rule, and that a wholesale replacement must be *stated* in its EVIDENCE comment) |
+| **GB-060 scope amended after probe19** | The stale-owner break did **not** fire in the wild, and the log says why: the halted CPU released `proc_lock` (the earlier fix working), a **live** CPU re-acquired it and then wedged *alive* — a shape the halt-keyed break correctly declines (46 `LOCKFOREVER`, no `[STOLEN]`). So the class has two shapes and only one is closed. Plan row updated: remaining work = a break keyed on a **per-CPU progress heartbeat**, never on elapsed time, with the threshold printed on any break |
+
+**2026-10-17 — merge-queue pass (Coordinator, continuation).**
+
+| what | state |
+|---|---|
+| **Merge queue drained to the M2 ABI-lock layer** | Four increments landed and gated on the integrated tip (`092edf5`, +461 lines): PR #13 `fb_pixel` B8G8R8A8 packing lock (a2eebdb, credited to GB-025), PR #12 gamepad codes in `tools/linux-abi/probe_abi.c` (ad14334, GB-042 governance), PR #11 GB-042 gamepad/joystick ABI lock (49d523f), PR #6 GB-028 clock/timer ABI lock (092edf5). Gate: `make host_tests` T1=0 with `fb_pixel_test_host` 12, `joypad_test_host` 11 and `clockabi_test_host` 13 checks all executing **inside** the suite, plus `MODE=unit_tests hobbyos.elf` links ARM + intel T2A/T2B=0. All four tickets stay In Review: their runtime legs are not citable while the device tier is red (GB-057/GB-058) |
+| **Merge-conflict tooling (and a self-inflicted incident)** | Every native/ABI PR edits the same `host_tests:` prerequisite line, so conflicts are guaranteed. Added `resolve_makefile_additions.py` (prerequisite line → token union; recipe lines → keep both; anything else refused) and the rule that **`make -n host_tests` must parse after any resolution**. I first resolved `#6` with the older line-union script, which glued a recipe line onto the prerequisite line, and then committed the merge **with the markers still in the file** — caught immediately by the parse check and the grep, amended to `092edf5`. Exactly the incident recorded for GB-027 earlier; the *check* is what catches it, not the intent |
+| **PR hygiene** | Three of four branches were based on stale mains (the conflict work above), and one PR (#13) carried no ticket id in the title and no board comment — merged against GB-025 because the diff named it, with a note on the ticket asking for the id next time. `git fetch && git rebase origin/main` before opening a PR is now stated on the affected tickets |
+
+**2026-10-17 — continuation session (Coordinator on .233; `wabi`@farm-1, `wgfx`@farm-2,
+`wgames`@farm-3 alive and dispatched through the board).**
+
+| what | state |
+|---|---|
+| **GB-057 root cause #1 (the 222 FAIL lines)** | `src/kernel/arch/x64/trap.c: sys_exit` never remapped the exit code out of rdi into the canonical `regs[0]` slot the shared `process_exit()` reads — on x64 `regs[0]` is **rax**, which at `syscall` entry holds the *syscall number*, so `SYS_EXIT == 2` became every intel exit status (`status=512`, `WEXITSTATUS == 2` for **every** child, whatever it returned). That is why only the status-reading suites failed (SEDTEST/GREPTEST/CMPTEST/TSORTTEST/…). Fixed; ARM was already correct (x0 carries the code there) |
+| **GB-057 root cause #2 (early exits / ECHILD)** | `sys_spawn`/`sys_spawn_ex` (both arches) retried the spawn-worker slot for `18000 × 100 ms` — a 30-minute **hot spin** by a caller that is *already parked in WAIT_SPAWN holding a PCB slot*, while its worker needs a free slot from the same table: a circular wait that waiting harder cannot break. Watchdog proof captured (7 of 8 CPUs, `age_ms≈350000`, `syscall=8`, console silent, loader starved). Bounded to ~1 s + the documented `-EAGAIN` path |
+| **GB-057 blocker #3 (found, NOT fixed)** | With #2 bounded, the same intel wave runs much further and then **hard-deadlocks on `proc_lock`**: `[LOCKFOREVER] lock=0x74530c70 (= proc_lock)` from 7 CPUs, all in `spinlock_acquire_irqsave+0xe` called from `schedule()`, `process_create_internal_ver()`, `process_thread_create()`; after that the console is fully dead (IRQs off, watchdog silent). Suspect: `process_fork()` holds `proc_lock` across `vm_as_clone_into()` + the 32 MiB `kmemcpy`. Next owner: whoever takes GB-057's remainder |
+| **T3 tier is now a gate (GB-056/GB-057 DoD)** | `tools/t3_tier.sh` + `make test` / `make test_intel` / `test_arm` / `test_intel` now police their own console: non-zero exit on any `FAIL` line, on a missing `System halt`, or on the wall-clock deadline (hang = defect). Raw boots stay available as `make test_run_raw` |
+| **GB-006 worktree false-reds** | `tools/swarm/seed-worktree-vendored.sh` links every gitignored `third_party/…` tree from the main checkout into a `hermes -w` worktree (idempotent; never clobbers a tracked file — `ln -sfn` does, and silently type-changes tracked files, so never use `-f`). Verified: 13 vendored paths linked; `make host_tests` green in a seeded worktree |
+| **GB-001 fleet** | all 6 VMs answer ssh + passwordless sudo; `host_tests` green on coordinator + farm-1. The "shared store mounted" clause is **not met**: 192.168.0.56 is SMB-only (NFS closed) and no NAS credentials exist on .233 → `decision` label for Sarah. Not closed |
+| **M0 gate** | opened with two named exceptions (see the gate comment on PLAN/board) — GB-008 sync IN SYNC 58/58 (GB-058 minted), GB-009 baseline archived (T1/T2 green both arches, T3 ARM carries 1 real FAIL (GB-058), T3 intel red → GB-057) |
+| **M1 gate corrected** (2026-10-18) | I labelled GB-065 the M1 blocker and that was wrong: `gaming.md:372` makes the M1 gate *"W0 corpus boots on intel + writes expected output, T4 green"*, and GB-065's failures are in `GRAPHICS.BIN` — a T3 member, not the W0 corpus, not T4. Worse, the T4 leg that matters does not exist: `t4_parity.sh` compares musl-Linux against **host glibc `ho_*` mocks** and its own header defers the in-QEMU leg to "once the ELF loader lands"; there is no `src/user/` probe binary, so `--device intel` SKIPs. **T4 green has never meant HobbyOS agrees with Linux.** The loader itself is on `main` (`elf_image.c` ET_DYN/`is_pie`, `elf_loader.c`, `program_loader.c:757`) and GB-013 sits In Review. Next: verify GB-013's DoD by execution (static-PIE maps+boots on intel) and build the in-guest T4 probe |
+| **GB-057-a FIXED — the wave halts** (`8995009`) | The wave-end predicate was a negative test, so `PROC_STATE_BLOCKED` counted as live work and a parentless blocked `SPAWN.BIN` kept `any_alive` true forever: `!any_alive` never fired, `scheduler_finished()` never ran, the wave never halted (7 of 8 runs; the trace was already in probe42 as `slot=12 st=5 parent=-1`). Fix: a **waker-liveness** predicate — the scheduler lazily stamps the first pass that sees a slot `BLOCKED` and excludes it only after a 60 s budget, printing `[ORPHAN-WAIT] slot/pid/name/parent/wake_ms/waited_ms` and stating the slot is **not reaped**. Not a state exemption, because a wave whose children wait legitimately on a pipe must not truncate. Proven in two consecutive intel tiers (`halt=2 orphan=1` both, slots 12 and 13, same tail test `MMTEST.BIN`). Line count fell 3,689 -> 1,296 because **2,315 of the old run's lines were `[IDLESTUCK]` spin chatter** — so line count was partly a mark of a *sick* wave, retiring a number I had been quoting as progress. Also landed: `[ALIVE-SET]`/`[IDLECLAIM]` print `<torn:a/b>` instead of quoting a racy pid (probe54 printed `pid=62831` for slot 1). Remaining on GB-057: **b** (premature halt, 1/8, probe54) and **c** (LAPIC fault, <=1/7, the widened spawn storm failed to provoke it twice) |
+| **PR #1 (DOOM) / PR #2 (STARDUST)** | rebased onto `origin/main` (both were based on stale mains: 8101128 / e3039f1). PR #1 T1 gate green on the rebased tree (incl. ELF-image/ABI/fb_ioctl/evdev/t4_parity inside `make host_tests`). T5 playthrough still unrun → both stay In Review. Review note: both harnesses hardcode `ROOT=$HOME/Documents/GitHub/HobbyOS` and assert a magic launcher slot (12) that neither PR pins in `desktop.c`'s `pinned_games[]` |
+| **PR #1 gate verdict (intel T5)** | **NOT merged.** T1 green; launcher pin fixed by the coordinator (DOOM at idx 18, structurally asserted) and the harness's IWAD false-positive fixed (its own `[disk] IWAD …` build echo was being matched). T5 still **red and real**: `nonzero=1024000, colors=6` over the whole centre region = a flat fill, and the serial shows only `DESKTOP.BIN` was ever loaded → **DOOM never launched**; the screendumps are the desktop background. Handed back with the launch-path + stdin-input (desktop apps get keys on **stdin**, not `get_events()`) work named. Patch: `~/.hermes/cache/scratch/gb057/pr1_coordinator_review_fixes.patch` |
+| **Worker lane movement (continuation)** | `wgames` fixed two real STARDUST defects (unpinned title; no stdin input path) and posted **green ARM T5** evidence → GB-038 at Merge Gate (intel T5 + harness de-magic-index still required). `wgfx` posted ABI-lock increments for GB-027 (evdev) and GB-030 (memfd) — accepted as first increments, not as the tickets; both missing the runtime node / PR hygiene. `wabi` pushed a parallel tier-gating branch (`ticket/57-intel-t3-gate`) that duplicates the landed `tools/t3_tier.sh` → redirected to GB-057's remaining blocker (the `proc_lock` deadlock) |
+| **Re-plan (PLAN-002)** | M0 gate opened with named exceptions + §4.3 re-plan recorded on the board (ticket #60, closed). Gate rule now in force: no intel tier citable until GB-057 closes, no ARM T3 citable until GB-058 closes |
+
+
+**2026-10-17 — kickoff (Coordinator on .233; workers `wabi`@farm-1, `wgfx`@farm-2, `wgames`@farm-3 in
+long-lived `hermes -w` tmux sessions).**
+
+| what | state |
+|---|---|
+| Board (GB-002) | 55 seed tickets + PLAN-001; lanes are labels (no Projects REST in this Forgejo build, §4.1) |
+| Board automation (GB-003) | webhook `coordinator-board-hook` + 60 s poll, both systemd units on .233 (§11.2a) |
+| Model split (GB-004) | DEEP `dgx1:8000` on the coordinator, FLASH `llm:8000` on farms 1-3 (§11.3) |
+| Plan sync (GB-008) | `tools/board/sync_gaming_md.py` — IN SYNC, drift detection proven |
+| Baseline (GB-009) | T1 green (coordinator + farm-1); **T2 green arm + intel** (344/0 intel); **T3 ARM green (0 FAIL lines), T3 intel red-but-exit-0** (222 FAIL lines) → GB-057. The baseline is **not** complete on intel and no intel gate may cite T3 until it is |
+| ABI contract (GB-010) | `docs/linux-abi.md` v1 (measured; `gen_abi_doc.py --check` guards drift) — In Review |
+| ELF loader (GB-013) | parser + segment planner landed and host-tested (53 checks), linked into both kernel builds; **mapper half open** |
+| Syscall table (GB-014) | 114 measured numbers + errno locked by goldens (T1); **shims + trap routing open** |
+| First worker MR | **GB-026 merged** (fb ABI surface, worker `wgfx`, branch `ticket/26-fb-ioctls`); gate = T1 + both kernel links |
+| Second worker MR | **GB-007 harness merged, In Review** (T4 differential host leg, worker `wabi`); device leg gated on GB-013 |
+| Fleet pitfall | workers run in `hermes -w` worktrees, which do **not** carry gitignored `third_party/*/src` — vendored lanes (C++) go red in a worktree while `main` is green; seeded as GB-006 |
+| Toolchain | `musl-tools` installed on the coordinator so the T4 harness leg A is real (`musl-gcc -static`); belongs in the fleet provisioning (GB-006) |
+| Gate discipline (first incident) | a worker closed **GB-034 + GB-038 from the Ready lane** with the T5 playthrough unrun; both were **reopened to In Review** by the coordinator, the blocker (missing staging cache) was fixed, and the T5 evidence is now the gate. Recorded as the reason `tools/board/board.py` never closes from Done alone: `move` to Done closes, everything else is a lane swap |
+| Fleet fix (blocker) | every VM's `~/.local/share/OVMF/OVMF_CODE_4M.fd` was a **symlink to the read-only system file**, and the Makefile passes it to `-pflash` — which opens read-write, so **every x86 QEMU run died with `Permission denied`** (ARM was fine: `-bios`). Replaced with a real, user-writable copy on .233 and farms 1-3 (`cp /usr/share/OVMF/OVMF_CODE_4M.fd …` + `chmod u+w`, sha256 identical to the system file). This blocked the whole Intel test path — i.e. the compat track's T2/T3/T4/T5 — until fixed |
+
+Merge path for workers (no GitHub token on the farms): push `ticket/<n>-<slug>` to `origin`, post an
+`EVIDENCE` comment on the ticket, and the Coordinator merges from `origin` after running the gate.
+The automated merge-gate CI is GB-005 — until it exists the Coordinator runs the gate by hand and
+records the output on the ticket.

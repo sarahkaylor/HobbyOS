@@ -1,0 +1,461 @@
+ld.lld -T linker_x64.ld -o hobbyos.elf obj/intel/boot.o obj/intel/setjmp.o obj/intel/abi_t2_test.o obj/intel/blk_cache.o obj/intel/blk_cache_press_test.o obj/intel/blk_cache_test.o obj/intel/dhcp.o obj/intel/elf_image.o obj/intel/elf_loader.o obj/intel/evdev.o obj/intel/evdev_test.o obj/intel/fat16.o obj/intel/fat16_test.o obj/intel/fb_ioctl.o obj/intel/fb_ioctl_test.o obj/intel/fb_mmap.o obj/intel/fb_mmap_test.o obj/intel/frame.o obj/intel/frame_test.o obj/intel/fs.o obj/intel/fs_test.o obj/intel/input_node.o obj/intel/input_node_test.o obj/intel/iommu_vtd.o obj/intel/ipc_proto.o obj/intel/locks_test.o obj/intel/main.o obj/intel/math_test.o obj/intel/mmu_test.o obj/intel/net.o obj/intel/net_rdma.o obj/intel/net_rdma_test.o obj/intel/net_test.o obj/intel/nfs.o obj/intel/nfs_proto.o obj/intel/nfs_test.o obj/intel/pipe.o obj/intel/pipe_test.o obj/intel/process.o obj/intel/process_test.o obj/intel/program_loader.o obj/intel/program_loader_test.o obj/intel/test_fw_cfg.o obj/intel/test_smp.o obj/intel/time.o obj/intel/time_test.o obj/intel/timer_test.o obj/intel/trap_test.o obj/intel/unit_test.o obj/intel/unix.o obj/intel/unix_test.o obj/intel/vfs.o obj/intel/virtio_blk.o obj/intel/virtio_blk_test.o obj/intel/virtio_gpu.o obj/intel/virtio_gpu_test.o obj/intel/virtio_gpu_x64.o obj/intel/virtio_input.o obj/intel/virtio_input_test.o obj/intel/virtio_net.o obj/intel/virtio_net_test.o obj/intel/vm.o obj/intel/vm_test.o obj/intel/cpu.o obj/intel/fpu.o obj/intel/gic.o obj/intel/locks.o obj/intel/mmu.o obj/intel/rtc.o obj/intel/smp.o obj/intel/timer.o obj/intel/trap.o obj/intel/uart.o
+llvm-objcopy -I elf64-x86-64 -O elf32-i386 hobbyos.elf
+[browser] third_party/webkit-hobbyos/cache/browser-x64.bin.xz (cache) -> obj/intel/browser.bin
+[tools] LLVM dist staging present
+# Startup disk: 1 GiB (user-requested floor; FAT16 tops out at 2 GiB).
+# mkfs.fat auto-picks the cluster size (32 KiB @ 1 GiB); the kernel
+# fat16.c layout math is BPB data-driven (bpb_sectors_per_cluster), so
+# no driver change is needed for the larger disk/clusters.
+dd if=/dev/zero of=disk.img bs=1M count=1024
+1024+0 records in
+1024+0 records out
+1073741824 bytes (1.1 GB, 1.0 GiB) copied, 0.415838 s, 2.6 GB/s
+mkfs.fat -F 16 disk.img
+mkfs.fat 4.2 (2021-01-31)
+mmd -i disk.img ::/EFI
+mmd -i disk.img ::/EFI/BOOT
+mmd -i disk.img ::/boot
+mmd -i disk.img ::/home
+mmd -i disk.img ::/nfs
+mmd -i disk.img ::/mnt
+mmd -i disk.img ::/TESTDIR
+mmd -i disk.img ::/tmp
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+# build-tools at their frozen /TOOLS/ paths (Makefile.hobbyos sketch).
+mmd -i disk.img ::/TOOLS
+# L3 (selfhost W-A): VFAT long-name build-payload fixture dirs (mtools-written).
+mmd -i disk.img ::/src
+mmd -i disk.img ::/src/kernel
+mmd -i disk.img ::/src/user_include
+mmd -i disk.img ::/src/user_include/graphics
+mmd -i disk.img ::/third_party
+mmd -i disk.img ::/third_party/libcxx-21.1.8
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include
+mcopy -i disk.img tests/fixtures/E2E.TXT ::/E2E.TXT
+mcopy -i disk.img tests/fixtures/DRAGME.TXT ::/DRAGME.TXT
+mcopy -i disk.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+mcopy -i disk.img bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
+mcopy -i disk.img obj/intel/limine.conf ::/boot/limine.conf
+mcopy -i disk.img hobbyos.elf ::/boot/hobbyos.elf
+mcopy -i disk.img obj/intel/memtest.bin ::/MEMTEST.BIN
+mcopy -i disk.img obj/intel/fileio_test.bin ::/FILEIO.BIN
+mcopy -i disk.img obj/intel/console.bin ::/CONSOLE.BIN
+mcopy -i disk.img obj/intel/fork_test.bin ::/FORKTEST.BIN
+mcopy -i disk.img obj/intel/heap_test.bin ::/HEAPTEST.BIN
+mcopy -i disk.img obj/intel/spawntest.bin ::/SPAWN.BIN
+mcopy -i disk.img obj/intel/graphics.bin ::/GRAPHICS.BIN
+mcopy -i disk.img obj/intel/wsurf_test.bin ::/WSRF_T.BIN
+mcopy -i disk.img obj/intel/smp_test.bin ::/SMPTEST.BIN
+mcopy -i disk.img obj/intel/pipetest.bin ::/PIPETEST.BIN
+mcopy -i disk.img obj/intel/nettest.bin ::/NETTEST.BIN
+mcopy -i disk.img obj/intel/timeout.bin ::/TIMEOUT.BIN
+mcopy -i disk.img obj/intel/nfstest.bin ::/NFSTEST.BIN
+mcopy -i disk.img obj/intel/desktop.bin ::/DESKTOP.BIN
+browser: obj/intel/browser.bin (resolved by the browser-staged completeness rule; installed as ::/BROWSER.BIN)
+mcopy -i disk.img obj/intel/editor.bin ::/EDITOR.BIN
+mcopy -i disk.img obj/intel/EDITOR_T.BIN ::/EDITOR_T.BIN
+mcopy -i disk.img obj/intel/APPS_T.BIN ::/APPS_T.BIN
+mcopy -i disk.img obj/intel/FILEDIAL.BIN ::/FILEDIAL.BIN
+mcopy -i disk.img obj/intel/DIALOG_T.BIN ::/DIALOG_T.BIN
+mcopy -i disk.img obj/intel/PONG_T.BIN ::/PONG_T.BIN
+mcopy -i disk.img obj/intel/stress.bin ::/STRESS.BIN
+mcopy -i disk.img obj/intel/fpu_test.bin ::/FPU_T.BIN
+mcopy -i disk.img obj/intel/gfxbench.bin ::/GFXBENCH.BIN
+mcopy -i disk.img obj/intel/math_test.bin ::/MATH_T.BIN
+mcopy -i disk.img obj/intel/errtest.bin ::/ERRTEST.BIN
+mcopy -i disk.img obj/intel/SOCK2TST.BIN ::/SOCK2TST.BIN
+mcopy -i disk.img obj/intel/POLLTST.BIN ::/POLLTST.BIN
+mcopy -i disk.img obj/intel/BLKTEST.BIN ::/BLKTEST.BIN
+mcopy -i disk.img obj/intel/RANDTST.BIN ::/RANDTST.BIN
+mcopy -i disk.img obj/intel/dns_test.bin ::/DNSTST.BIN
+mcopy -i disk.img obj/intel/netfix.bin ::/NETFIX.BIN
+mcopy -i disk.img obj/intel/cxx_smoke.bin ::/CXXSMOKE.BIN
+mcopy -i disk.img obj/intel/thrd_test.bin ::/THRD_T.BIN
+mcopy -i disk.img obj/intel/tls_test.bin ::/TLS_T.BIN
+mcopy -i disk.img obj/intel/WK1C_T.BIN ::/WK1C_T.BIN
+mcopy -i disk.img obj/intel/cxx_t.bin ::/CXX_T.BIN
+mcopy -i disk.img obj/intel/rtti_t.bin ::/RTTI_T.BIN
+mcopy -i disk.img obj/intel/ipc_test.bin ::/IPC_T.BIN
+mcopy -i disk.img obj/intel/mmtest.bin ::/MMTEST.BIN
+mcopy -i disk.img obj/intel/sqltest.bin ::/SQLTEST.BIN
+mcopy -i disk.img obj/intel/torture_test.bin ::/TORTURE.BIN
+mcopy -i disk.img obj/intel/big.bin ::/BIG.BIN
+mcopy -i disk.img obj/intel/hello.bin ::/HELLO.BIN
+mcopy -i disk.img obj/intel/selfhost.bin ::/SELFHOST.BIN
+mcopy -i disk.img obj/intel/sh.bin ::/SH.BIN
+mcopy -i disk.img obj/intel/ls.bin ::/LS.BIN
+mcopy -i disk.img obj/intel/cat.bin ::/CAT.BIN
+mcopy -i disk.img obj/intel/grep.bin ::/GREP.BIN
+mcopy -i disk.img obj/intel/less.bin ::/LESS.BIN
+mcopy -i disk.img obj/intel/tail.bin ::/TAIL.BIN
+mcopy -i disk.img obj/intel/head.bin ::/HEAD.BIN
+mcopy -i disk.img obj/intel/shtest.bin ::/SHTEST.BIN
+mcopy -i disk.img obj/intel/ps.bin ::/PS.BIN
+mcopy -i disk.img obj/intel/free.bin ::/FREE.BIN
+mcopy -i disk.img obj/intel/uptime.bin ::/UPTIME.BIN
+mcopy -i disk.img obj/intel/kill.bin ::/KILL.BIN
+mcopy -i disk.img obj/intel/basename.bin ::/BASENAME.BIN
+mcopy -i disk.img obj/intel/dirname.bin ::/DIRNAME.BIN
+mcopy -i disk.img obj/intel/seq.bin ::/SEQ.BIN
+mcopy -i disk.img obj/intel/expr.bin ::/EXPR.BIN
+mcopy -i disk.img obj/intel/testgnu.bin ::/TEST.BIN
+mcopy -i disk.img obj/intel/cp.bin ::/CP.BIN
+mcopy -i disk.img obj/intel/rm.bin ::/RM.BIN
+mcopy -i disk.img obj/intel/mv.bin ::/MV.BIN
+mcopy -i disk.img obj/intel/touch.bin ::/TOUCH.BIN
+mcopy -i disk.img obj/intel/wc.bin ::/WC.BIN
+mcopy -i disk.img obj/intel/sed.bin ::/SED.BIN
+mcopy -i disk.img obj/intel/make.bin ::/MAKE.BIN
+mcopy -i disk.img obj/intel/hedgnu.bin ::/HEDGNU.BIN
+mcopy -i disk.img obj/intel/tailgnu.bin ::/TAILGN.BIN
+mcopy -i disk.img obj/intel/cut.bin ::/CUT.BIN
+mcopy -i disk.img obj/intel/tr.bin ::/TR.BIN
+mcopy -i disk.img obj/intel/paste.bin ::/PASTE.BIN
+mcopy -i disk.img obj/intel/fold.bin ::/FOLD.BIN
+mcopy -i disk.img obj/intel/nl.bin ::/NL.BIN
+mcopy -i disk.img obj/intel/comm.bin ::/COMM.BIN
+mcopy -i disk.img obj/intel/tsort.bin ::/TSORT.BIN
+mcopy -i disk.img obj/intel/expand.bin ::/EXPAND.BIN
+mcopy -i disk.img obj/intel/unexpand.bin ::/UNEXPAND.BIN
+mcopy -i disk.img obj/intel/cksum.bin ::/CKSUM.BIN
+mcopy -i disk.img obj/intel/md5sum.bin ::/MD5SUM.BIN
+mcopy -i disk.img obj/intel/proc_child.bin ::/PROCCHLD.BIN
+mcopy -i disk.img obj/intel/spawnex_child.bin ::/SPAWNEX.BIN
+mcopy -i disk.img obj/intel/sig_test.bin ::/SIG_T.BIN
+mcopy -i disk.img obj/intel/head_test.bin ::/HEDTEST.BIN
+mcopy -i disk.img obj/intel/tail_test.bin ::/TAILTEST.BIN
+mcopy -i disk.img obj/intel/proc_test.bin ::/PROCTEST.BIN
+mcopy -i disk.img obj/intel/wc_test.bin ::/WCTEST.BIN
+mcopy -i disk.img obj/intel/cut_test.bin ::/CUTTEST.BIN
+mcopy -i disk.img obj/intel/tr_test.bin ::/TRTEST.BIN
+mcopy -i disk.img obj/intel/paste_test.bin ::/PASTE_T.BIN
+mcopy -i disk.img obj/intel/fold_test.bin ::/FOLDTEST.BIN
+mcopy -i disk.img obj/intel/nl_test.bin ::/NLTEST.BIN
+mcopy -i disk.img obj/intel/comm_test.bin ::/COMMTEST.BIN
+mcopy -i disk.img obj/intel/tsort_test.bin ::/TSORT_T.BIN
+mcopy -i disk.img obj/intel/expand_test.bin ::/EXPAND_T.BIN
+mcopy -i disk.img obj/intel/unexpand_test.bin ::/UNEXPAND_T.BIN
+mcopy -i disk.img obj/intel/fatbig_test.bin ::/FATBIG_T.BIN
+# L3 (selfhost W-A): VFAT long-name build-payload fixtures.  Content
+# markers must stay in sync with src/user/lfn_test.c.
+mcopy -i disk.img tests/fixtures/lfn/program_loader.c ::/src/kernel/program_loader.c
+mcopy -i disk.img tests/fixtures/lfn/window.h ::/src/user_include/graphics/window.h
+mcopy -i disk.img tests/fixtures/lfn/llvm-project-21.1.8.src-EXAMPLE.c ::/src/llvm-project-21.1.8.src-EXAMPLE.c
+mcopy -i disk.img tests/fixtures/lfn/upper_bound.h ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include/upper_bound.h
+mcopy -i disk.img tests/fixtures/lfn/longfilename.txt ::/longfilename.txt
+mcopy -i disk.img tests/fixtures/lfn/longfilename2.txt ::/longfilename2.txt
+mcopy -i disk.img tests/fixtures/lfn/longfil~1.txt ::/longfil~1.txt
+mcopy -i disk.img obj/intel/lfn_test.bin ::/LFN_T.BIN
+mcopy -i disk.img obj/intel/cksum_test.bin ::/CKSUM_T.BIN
+mcopy -i disk.img obj/intel/md5sum_test.bin ::/MD5SUM_T.BIN
+mcopy -i disk.img obj/intel/tac.bin ::/TAC.BIN
+mcopy -i disk.img obj/intel/tac_test.bin ::/TACTEST.BIN
+mcopy -i disk.img obj/intel/cmp.bin ::/CMP.BIN
+mcopy -i disk.img obj/intel/cmp_test.bin ::/CMPTEST.BIN
+mcopy -i disk.img obj/intel/regex_test.bin ::/REGTEST.BIN
+mcopy -i disk.img obj/intel/sed_test.bin ::/SEDTEST.BIN
+mcopy -i disk.img obj/intel/grep_test.bin ::/GREPTEST.BIN
+mcopy -i disk.img obj/intel/subprobe.bin ::/SUBPRB.BIN
+mcopy -i disk.img obj/intel/pipeprobe.bin ::/PIPEPRB.BIN
+mcopy -i disk.img obj/intel/lseek_test.bin ::/LKSTEST.BIN
+mcopy -i disk.img obj/intel/sort.bin ::/SORT.BIN
+mcopy -i disk.img obj/intel/uniq.bin ::/UNIQ.BIN
+mcopy -i disk.img obj/intel/ping.bin ::/PING.BIN
+mcopy -i disk.img obj/intel/nc.bin ::/NC.BIN
+mcopy -i disk.img obj/intel/ifconfig.bin ::/IFCONFIG.BIN
+mcopy -i disk.img obj/intel/shtest2.bin ::/SHTEST2.BIN
+mcopy -i disk.img obj/intel/mkdir.bin ::/MKDIR.BIN
+mcopy -i disk.img obj/intel/shtest3.bin ::/SHTEST3.BIN
+mcopy -i disk.img obj/intel/pong.bin ::/PONG.BIN
+mcopy -i disk.img obj/intel/millipede.bin ::/MILLIPED.BIN
+mcopy -i disk.img obj/intel/files.bin ::/FILES.BIN
+mcopy -i disk.img obj/intel/calc.bin ::/CALC.BIN
+mcopy -i disk.img obj/intel/xcalc.bin ::/XCALC.BIN
+mcopy -i disk.img obj/intel/antfarm.bin ::/ANTFARM.BIN
+mcopy -i disk.img obj/intel/xeyes.bin ::/XEYES.BIN
+mcopy -i disk.img obj/intel/xnibbler.bin ::/XNIBBLER.BIN
+mcopy -i disk.img obj/intel/clock.bin ::/CLOCK.BIN
+mcopy -i disk.img obj/intel/sysmon.bin ::/SYSMON.BIN
+mcopy -i disk.img obj/intel/hex.bin ::/HEX.BIN
+mcopy -i disk.img obj/intel/tasks.bin ::/TASKS.BIN
+mcopy -i disk.img obj/intel/find.bin ::/FIND.BIN
+mcopy -i disk.img obj/intel/diff.bin ::/DIFF.BIN
+mcopy -i disk.img obj/intel/notes.bin ::/NOTES.BIN
+mcopy -i disk.img obj/intel/unit.bin ::/UNIT.BIN
+mcopy -i disk.img obj/intel/nano.bin ::/NANO.BIN
+mcopy -i disk.img obj/intel/xcrypt.bin ::/XCRYPT.BIN
+mcopy -i disk.img obj/intel/nes.bin ::/NES.BIN
+# Selfhost W2 (mtools port): in-OS /TOOLS copies of the ported
+# build-tools (8.3 names, the frozen F1 layout).
+mcopy -i disk.img obj/intel/mcopy.bin ::/TOOLS/MCOPY.BIN
+mcopy -i disk.img obj/intel/mdel.bin ::/TOOLS/MDEL.BIN
+mcopy -i disk.img obj/intel/mmd.bin ::/TOOLS/MMD.BIN
+# Selfhost W2 (mkfs port): in-OS MKFSFAT (F1 layout).
+mcopy -i disk.img obj/intel/mkfsfat.bin ::/MKFSFAT.BIN
+# Selfhost W3 (tools): the in-OS toolchain on the startup image (frozen
+# F1 layout, selfhost.md §7.3).  tools/selfhost-stage.sh --tools stages
+# CLANG.BIN/LLD.BIN/LLVMAR.BIN/OBJCOPY.BIN from the wave-2 LLVM
+# distribution staging (obj/selfhost/dist-staging, or the persistent
+# third_party/llvm-21.1.8/dist-staging copy that survives `make clean`),
+# the ported build tools (MAKE/MCOPY/MDEL/MMD/MKFSFAT), and the RESDIR
+# header tree under /TOOLS — staged FAITHFULLY with long names (F8
+# decision, see docs/selfhost/llvm-bootstrap.md §6.2).  Soft dependency:
+# an absent dist-staging warns + skips, so trees without the LLVM
+# install still build a bootable image (build_kernel.sh then refuses
+# with instructions).  Override with STAGE_TOOLS=0 to skip.
+tools/selfhost-stage.sh --tools disk.img
+selfhost-stage: staging in-OS toolchain to ::/TOOLS (F1 layout)
+selfhost-stage:   CLANG.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/clang-21 (converted, 94194168 B)
+selfhost-stage:   LLD.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/lld (converted, 53252504 B)
+selfhost-stage:   LLVMAR.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/llvm-ar (converted, 8351072 B)
+selfhost-stage:   OBJCOPY.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/llvm-objcopy (converted, 4984544 B)
+selfhost-stage: staged 284 files, 176920718 bytes into ::/TOOLS
+  --- ::/TOOLS (mdir) ---
+TAR      BIN    144448 2026-10-17  23:43 
+RESDIR       <DIR>     2026-10-17  23:43 
+       15 files         162 193 464 bytes
+                        738 639 872 bytes free
+
+  --- ::/TOOLS/RESDIR/include count ---
+      295 files          14 727 254 bytes
+                        738 639 872 bytes free
+
+selfhost-stage: done
+# Selfhost W4 (src): the in-OS build-required source subset on the
+# startup image (frozen F2 /SRC flavor): kernel+user sources, headers,
+# Makefile.hobbyos, limine/EFI assets, the carried build products, and
+# the SELFHOST.RUN/SELFHOST.SH stage scripts.  tools/selfhost-stage.sh
+# --src; disable together with the tools step via STAGE_TOOLS=0.
+tools/selfhost-stage.sh --src disk.img
+selfhost-stage: STAGE_LIBCXX=0 — skipping C++ libcxx include subset
+selfhost-stage: staging BUILD-REQUIRED source subset to ::/SRC
+
+selfhost-stage: staged BUILD-REQUIRED subset into disk.img
+  payload: 261 files, 5066441 bytes
+  --- ::/SRC (mdir) ---
+        3 files             315 392 bytes
+
+Total files listed:
+      335 files           5 066 510 bytes
+                        730 169 344 bytes free
+
+selfhost-stage: done
+# [inos-build-kernel] the source tarball + the in-OS build script:
+# SRC.TAR (ustar, assembled by tools/selfhost-src-tar.sh from the real
+# tree) lands at ::/SRC.TAR; build_kernel.sh at ::/BUILD_KERNEL.SH.
+# In-OS: `SH.BIN /BUILD_KERNEL.SH` extracts the tar and builds the
+# kernel from it (Makefile.hobbyos `all`) + assembles OUT.IMG.
+tools/selfhost-src-tar.sh obj/selfhost/SRC.TAR
+selfhost-src-tar: assembling obj/selfhost/SRC.TAR
+selfhost-src-tar: done — obj/selfhost/SRC.TAR
+  entries: 1004 (files+dirs), size: 23388160 bytes
+  spot-checked members: src/kernel/main.c Makefile.hobbyos linker.ld limine.conf build_kernel.sh
+mcopy -i disk.img obj/selfhost/SRC.TAR ::/SRC.TAR
+mcopy -i disk.img src/user/selfhost/build_kernel.sh ::/BUILD_KERNEL.SH
+mcopy -i disk.img obj/intel/monitor.bin ::/MONITOR.BIN
+mcopy -i disk.img obj/intel/monitort.bin ::/MONITORT.BIN
+mcopy -i disk.img obj/intel/icusmk.bin ::/ICUSMK.BIN
+echo "HobbyOS Terminal Test File" > SHTEST.TXT
+echo "This is line number two." >> SHTEST.TXT
+echo "Line three is right here." >> SHTEST.TXT
+echo "Fourth line has some interesting keywords like hello world." >> SHTEST.TXT
+echo "Line five is the last line of this small test document." >> SHTEST.TXT
+touch TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT
+echo "orange" > SORT.TXT
+echo "apple" >> SORT.TXT
+echo "orange" >> SORT.TXT
+mcopy -i disk.img SHTEST.TXT ::/SHTEST.TXT
+mcopy -i disk.img SHTEST.TXT ::/home/SHTEST.TXT
+mcopy -i disk.img TEST1.TXT ::/TEST1.TXT
+mcopy -i disk.img TEST2.TXT ::/TEST2.TXT
+mcopy -i disk.img TEST3.TXT ::/TEST3.TXT
+mcopy -i disk.img TEST4.TXT ::/TEST4.TXT
+mcopy -i disk.img SORT.TXT ::/SORT.TXT
+rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT
+qemu-system-x86_64 -M q35 -smp 8 -m 12288M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56  -action shutdown=poweroff -display none  -monitor unix:/tmp/t3_monitor_intel_2354956.sock,server,nowait
+WARNING: Image format was not specified for '/home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd' and probing guessed raw.
+         Automatically detecting the format is dangerous for raw images, write operations on block 0 will be restricted.
+         Specify the 'raw' format explicitly to remove the restrictions.
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+BdsDxe: starting Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+[001;001H[001;001H[UART] lock @ 0x000000007557fc48
+Booting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+VirtIO GPU: BGA
+VirtIO GPU successfully initialized.
+Original CCB: 0x0000000000000047
+Modified CCB: 0x0000000000000047
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1376256 total_mib=5376 reserved=0
+[KERNEL] Activating secondary cores via LAPIC IPIs...
+[KERNEL] smp_init: copying trampoline code...
+[KERNEL] smp_init: trampoline copied.
+[KERNEL] smp_init: Sending INIT IPI to core 1...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 1 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 2...
+[KERNEL] smp_init: Waiting after INIT IPI...
+start_scheduler called on CPU 1
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 2 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 3...
+start_scheduler called on CPU 2
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 3 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 4start_scheduler called on CPU ...
+[KERNEL] smp_init: Waiting after INIT IPI...
+3
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 4start_scheduler called on CPU 4
+ power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 5...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU 5
+[KERNEL] Core 5 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 6...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 6 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 7...
+start_scheduler called on CPU 6
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU 7
+[KERNEL] Core 7 power-on acknowledged.
+[KERNEL] LAPIC timer rate: 63640 counts/ms, TSC rate: 2596705 ticks/ms (PIT-counter calibrated)
+Found NVMe controller on PCI bus!
+PCI Config Space of NVMe:
+0x0000000000101B36 0x0000000000100007 0x0000000001080202 0x0000000000000000 
+0x0000000081000004 0x0000000000000000 0x0000000000000000 0x0000000000000000 
+0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000011001AF4 
+0x0000000000000000 0x0000000000000040 0x0000000000000000 0x000000000000010B 
+NVMe BAR0 Phys: 0x0000000081000000 (Mapped to Virtual: 0x00000001FC000000)
+Resetting controller, waiting for CSTS.RDY = 0...
+Controller reset complete!
+Enabling controller... CC=0x0000000000460001 CSTS=0x0000000000000001
+Controller enabled successfully!
+Create IO CQ Status: 0x0000000000000000
+Create IO SQ Status: 0x0000000000000000
+NVMe driver initialized successfully!
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+[VIRTIO_NET] PCI Interrupt Line: 10 (Vector: 42)
+[VIRTIO_NET] MAC Address: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+[VIRTIO_NET] RX queue size: 256 rx_vq address: 0x00000000753F4000 PFN: 0x00000000000753F4
+[VIRTIO_NET] TX queue size: 256 tx_vq address: 0x00000000753F7000 PFN: 0x00000000000753F7
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Discover sent
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP initialization complete.
+[RDMA] Remote PCIe sharing is INACTIVE (no startup parameter).
+
+--- Parallel Program Loading ---
+Mode: TEST - Running automated tests...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=1
+Inside process_create: clearing memory at 0x0000000022000000
+Inside process_create: kmemset done.
+start_scheduler called on CPU 0
+Loading program for scheduler (v2 AS): SUBPRB.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=-1
+/SUBPRB.BIN
+v2 loader: image mapped (lazy), bytes=64920 pages=16 first=in elap=2ms
+v2 loader: PID=2 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): SHTEST.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=-1
+/SHTEST.BIN
+v2 loader: image mapped (lazy), bytes=65496 pages=16 first=in elap=1ms
+v2 loader: PID=3 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): SHTEST2.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=4 block_idx=-1
+/SHTEST2.BIN
+v2 loader: image mapped (lazy), bytes=62680 pages=16 first=in elap=2ms
+v2 loader: PID=4 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): SHTEST3.BIN
+/SHTEST3.BIN
+[KERNEL] pid=3 (SHTEST.BIN) memory fault VA=0x00000000EABFD691v2 loader: image mapped (lazy), bytes= PC=62792 pages=16 first=in elap=2ms
+0x00000010000029F0 rw=v2 loader: PID=5rS  in= entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): CONSOLE.BIN
+hell Ad/CONSOLE.BIN
+PROTvanced Utilities Integration Test Starting...
+ -> killed
+[KERNEL] Process 3: SHTEST.BIN exited unexpectedly or gracefully.
+[SUBPRB] start
+v2 loader: image mapped (lazy), bytes=55288 pages=14 first=in elap=1ms
+v2 loader: PID=6 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): MEMTEST.BIN
+Loading program for scheduler (v2 AS): 
+[KERNEL] pid=5 (SHTEST3.BIN) memory fault VA=0x00000000755FEC60 PC=0x00000010000022E0 rw=rLoading program for scheduler (v2 AS): FILEIO.BIN
+
+/
+==============================
+Hello from isolated EL0 Space!
+==============================
+  in=PROT -> killed
+[KERNEL] Process 5: SHTEST3.BIN exited unexpectedly or gracefully.
+Failed to open file: [KERNEL] process_create_v2: no address space!
+
+[KERNEL] pid=6 (CONSOLE.BIN) memory fault VA=0x00[KERNEL00] FATAL:0000755EEA64 PC=0x000 000100000Exce0050 rw=pr  in=PROTt -> ion in kKeillernel Mdode! V
+[KERector: NEL] Process 6: CO13NSOLE.BIN ex ited unexpectedly or gracefully.
+Error Code: 0x0000000000000000
+  RIP: 0x0000000070024FD0  RSP: 0x0000000023FFEB28
+  CS:  0x0000000000000008  SS:  0x0000000000000010  RFLAGS: 0x0000000000010202
+  RAX: 0x0000000000000012  RBX: 0x00000000755021C8  RCX: 0x000000007454D670  RDX: 0x5E415BD889DB31D6
+  RDI: 0x0000000000000007  RSI: 0x0000000000000206  RBP: 0x0000000023FFE930
+  ERR: 0x0000000000000000  R8:  0x0000000000000C51  R9:  0x00000000FFFB0C51  R10: 0x00000001C7FFFFFF
+  CPU: 4  pid: 1
+  STACK[0]: 0x2E454C4F00017861
+  STACK[1]: 0x00000000204E4942
+  STACK[2]: 0x20454C4F534E4F43
+  STACK[3]: 0xBD650000204E4942
+  STACK[4]: 0xBD6500005D515D51
+  STACK[5]: 0x0000D7F801095D51
+  STACK[6]: 0x0000000F00000220
+  STACK[7]: 0x0000000000000000
+  STACK[8]: 0x0000000000000000
+  STACK[9]: 0x0000000000000000
+  STACK[10]: 0x0000000000000000
+  STACK[11]: 0x0000000000000000
+  STACK[12]: 0x000000000000002F
+  STACK[13]: 0x0000000000000000
+  STACK[14]: 0x0000000000000000
+  STACK[15]: 0x0000000000000000
+[KERNEL] FATAL kernel-mode fault, halting this CPU: vector=13 rip=0x0000000070024FD0 cr2=0x0000000000000000 pid=1
+[KERNEL] pid=2 (SUBPRB.BIN) memory fault VA=0x000000007559EC60 PC=0x000000007559EC60 rw=rx in=PROT -> killed
+[KERNEL] Process 2: SUBPRB.BIN exited unexpectedly or gracefully.
+[KERNEL] reaping orphaned wait: slot=4 pid=4 st=6 parent=-1 SHTEST2.BIN (unwakeable: no parent to deliver the wake)
+[KERNEL] reaping orphaned wait: slot=4 pid=4 st=6 parent=-1 SHTEST2.BIN (unwakeable: no parent to deliver the wake)
+[KERNEL] reaping orphaned wait: slot=4 pid=4 st=6 parent=-1 SHTEST2.BIN (unwakeable: no parent to deliver the wake)
+[KERNEL] reaping orphaned wait: slot=4 pid=4 st=6 parent=-1 SHTEST2.BIN (unwakeable: no parent to deliver the wake)
+[KERNEL] reaping orphaned wait: slot=4 pid=4 st=6 parent=-1 SHTEST2.BIN (unwakeable: no parent to deliver the wake)
+[KERNEL] reaping orphaned wait: slot=4 pid=4 st=6 parent=-1 SHTEST2.BIN (unwakeable: no parent to deliver the wake)
+[KERNEL] reaping orphaned wait: slot=4 pid=4 st=6 parent=-1 SHTEST2.BIN (unwakeable: no parent to deliver the wake)
+[KERNEL] reaping orphaned wait: slot=4 pid=4 st=6 parent=-1 SHTEST2.BIN (unwakeable: no parent to deliver the wake)
+[KERNEL] reaping orphaned wait: slot=4 pid=4 st=6 parent=-1 SHTEST2.BIN (unwakeable: no parent to deliver the wake)
+[KERNEL] reaping orphaned wait: slot=4 pid=4 st=6 parent=-1 SHTEST2.BIN (unwakeable: no parent to deliver the wake)
+[KERNEL] reaping orphaned wait: slot=4 pid=4 st=6 parent=-1 SHTEST2.BIN (unwakeable: no parent to deliver the wake)
+[LOSTWAKE] disposing pid=1  (stale dead-owner claim, poisoned resume)
+[IDLESTUCK] cpu=0 rounds=System halt from CPU 1433System halt from CPU 2System halt from CPU 3.
+.
+1
