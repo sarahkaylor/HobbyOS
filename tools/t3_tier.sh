@@ -76,9 +76,34 @@ LOG="${T3_LOG:-$ROOT/obj/t3_${ARCH}.log}"
 mkdir -p "$(dirname "$LOG")"
 
 echo "=== T3 ($ARCH): build ==="
+# Image integrity guard.  A QEMU killed at the deadline can leave disk.img's BPB
+# half-flushed (measured: bytes-per-sector 0 at offset 11 instead of 512), and
+# because the image is then NEWER than its prerequisites, every later `make` treats
+# it as up to date and boots the corrupt image -- which presents as
+# "FAT-16 initialization failed!" and 369 console lines, not as a filesystem bug.
+# Regenerate rather than debug a filesystem that was never mounted.
+if [ -f "$ROOT/disk.img" ]; then
+  BPS=$(od -An -tu2 -j 11 -N 2 "$ROOT/disk.img" 2>/dev/null | tr -d ' ')
+  if [ "$BPS" != "512" ]; then
+    echo "T3_${ARCH}: disk.img BPB is corrupt (bytes/sector='$BPS', want 512) - regenerating the image"
+    rm -f "$ROOT/disk.img"
+  fi
+fi
 make ARCH="$ARCH" MODE=test hobbyos.elf disk.img >"$LOG.build" 2>&1 || {
   echo "T3_${ARCH}: BUILD FAILED"; tail -40 "$LOG.build"; exit 1;
 }
+# Staging hook, added after two probes silently tested nothing: this build
+# REGENERATES disk.img, so a file mcopy'd onto it by hand before the tier ran was
+# wiped and the guest never saw it (the loader correctly reported -ENOENT and the
+# probe looked like a loader failure).  Anything a probe needs on the image must be
+# staged here, after the build and before QEMU starts:
+#   T3_STAGE='mcopy -o -i "$ROOT/disk.img" /tmp/pie_hello ::PIE.BIN' bash tools/t3_tier.sh intel
+# It runs in this shell, so $ROOT is available; a failing stage command is fatal
+# rather than silently booting an image without the fixture.
+if [ -n "${T3_STAGE:-}" ]; then
+  echo "=== T3 ($ARCH): stage ==="
+  ROOT="$ROOT" sh -c "$T3_STAGE" || { echo "T3_${ARCH}: STAGE FAILED - refusing to boot a stale image"; exit 2; }
+fi
 
 echo "=== T3 ($ARCH): run (deadline ${T3_TIMEOUT}s, log $LOG) ==="
 : >"$LOG"
@@ -126,7 +151,7 @@ if command -v fuser >/dev/null 2>&1 && fuser "$ROOT/disk.img" >/dev/null 2>&1; t
   exit 2
 fi
 
-make ARCH="$ARCH" MODE=test run QEMU_ARGS="-display none ${T3_QEMU_ARGS:-}" >>"$LOG" 2>&1 &
+make -o disk.img ARCH="$ARCH" MODE=test run QEMU_ARGS="-display none ${T3_QEMU_ARGS:-}" >>"$LOG" 2>&1 &
 MAKE_PID=$!
 cleanup() {
   pkill -P "$MAKE_PID" 2>/dev/null || true
