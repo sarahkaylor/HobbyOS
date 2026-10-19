@@ -216,7 +216,15 @@ if [ "$halted" != "1" ] && grep -aq "System halt" "$LOG"; then
 fi
 
 FAIL_LINES=$(grep -ac "FAIL" "$LOG" || true)
-echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, halted=${halted}"
+# Report the user-mode fault count beside the FAIL count, always.  On 2026-10-19 I
+# read "44 memory faults after the ELF process ran" as ELF-induced damage and wrote
+# two posts on it; the control (runs with no ELF process at all) showed 54 and 55.
+# The baseline fault rate had been invisible for the whole session because the tier's
+# verdict line only counted FAIL lines, and the fault lines use different wording
+# ("[KERNEL] pid=N (IMG) memory fault VA=" not "FATAL kernel-mode fault").  A count
+# printed without a baseline in the same line invites exactly that mistake.
+MEMFAULTS=$(grep -ac "memory fault" "$LOG" || true)
+echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} user memory faults, halted=${halted}"
 
 # An environment failure must never be reported as a hang (see the pre-flight
 # guard above): if QEMU never got the image, this run says nothing about the
