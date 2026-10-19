@@ -2410,6 +2410,32 @@ void general_interrupt_handler(struct trap_frame *tf) {
       uart_puts(pf_x ? "x" : " ");
       uart_puts(" in=");
       uart_puts(why);
+      /* GB-068: ask the VM layer what, if anything, contains the faulting address.
+         Three outcomes, three different defects:
+           region=NONE                    -> the pointer was never a user VA in this AS
+                                             (phys-as-VA or a wild write)
+           region=<base+len> prot=...     -> a region DOES contain it; if prot lacks
+                                             write, the permissions are wrong
+           region present + prot writable -> page tables disagree with the region list
+         The faulting VAs (0x755...DBC8, 0x40000000) are below USER_VA_BASE and inside
+         the kernel identity map, so "NONE" is the expected answer and would point at
+         whatever hands user code a supervisor address. */
+      uart_puts(" region=");
+      {
+        extern struct vm_region *vm_region_find(struct addr_space *as, uint64_t va);
+        struct vm_region *fr = cur->as ? vm_region_find(cur->as, cr2) : 0;
+        if (!fr) {
+          uart_puts("NONE");
+        } else {
+          uart_print_hex(fr->base);
+          uart_puts("+");
+          uart_print_hex(fr->len);
+          uart_puts(" prot=");
+          print_int((int)fr->prot);
+          uart_puts(" kind=");
+          print_int((int)fr->kind);
+        }
+      }
       uart_puts(" -> killed\n");
       process_fault_exit(tf, 11); /* SIGSEGV status byte */
       return;
