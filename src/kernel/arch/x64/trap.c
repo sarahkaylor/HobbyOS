@@ -2410,6 +2410,46 @@ void general_interrupt_handler(struct trap_frame *tf) {
       uart_puts(pf_x ? "x" : " ");
       uart_puts(" in=");
       uart_puts(why);
+      /* GB-068: ask the VM layer what, if anything, contains the faulting address.
+         Three outcomes, three different defects:
+           region=NONE                    -> the pointer was never a user VA in this AS
+                                             (phys-as-VA or a wild write)
+           region=<base+len> prot=...     -> a region DOES contain it; if prot lacks
+                                             write, the permissions are wrong
+           region present + prot writable -> page tables disagree with the region list
+         The faulting VAs (0x755...DBC8, 0x40000000) are below USER_VA_BASE and inside
+         the kernel identity map, so "NONE" is the expected answer and would point at
+         whatever hands user code a supervisor address. */
+      uart_puts(" region=");
+      {
+        extern struct vm_region *vm_region_find(struct addr_space *as, uint64_t va);
+        struct vm_region *fr = cur->as ? vm_region_find(cur->as, cr2) : 0;
+        if (!fr) {
+          uart_puts("NONE");
+        } else {
+          uart_print_hex(fr->base);
+          uart_puts("+");
+          uart_print_hex(fr->len);
+          uart_puts(" prot=");
+          print_int((int)fr->prot);
+          uart_puts(" kind=");
+          print_int((int)fr->kind);
+        }
+      }
+      /* GB-068: the faulting VA is outside every user window (v1 0x44000000-0x46000000,
+         v2 >= 0x1000000000) and above the kernel load base, so a CPL3 store reached
+         kernel memory.  The store target is main_tls_block+image, which can only be in
+         the kernel range if the page tables in use are not the ones mapping the image.
+         Compare the live CR3's PML4 frame against the AS's root: equal => the tables
+         are right and the address is genuinely wild; different => wrong CR3. */
+      uart_puts(" cr3frame=");
+      {
+        uint64_t cur_cr3;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(cur_cr3));
+        uart_print_hex(cur_cr3 & ~0xFFFULL);
+      }
+      uart_puts(" asroot=");
+      uart_print_hex(cur->as ? cur->as->root_phys : cur->user_phys_base);
       uart_puts(" -> killed\n");
       process_fault_exit(tf, 11); /* SIGSEGV status byte */
       return;
@@ -2559,6 +2599,25 @@ void general_interrupt_handler(struct trap_frame *tf) {
       }
       uart_puts_raw(" pid=");
       print_int_raw(cur ? cur->pid : -1);
+      /* GB-069 discriminator: a #PF at cr2=0x1FC001008 lands INSIDE the 2 MiB page
+         cpu_pd7[480] installs (0x9B = P|RW|PWT|PCD|PS, VA 0x1FC000000-0x1FDFFFFF), so
+         "the mapping is too small" is excluded by arithmetic.  The three survivors are
+         PD-entry reuse, a wrong CR3, and a protection fault; these fields name which.
+         err bit0=P (0 = not present), bit1=W/R, bit2=U/S.  pd480 should still equal
+         (phys|0x9B) for the BAR page to exist in this table. */
+      uart_puts_raw(" err=");
+      print_int_raw((int)(tf->error_code & 7));
+      uart_puts_raw(" cr3=");
+      {
+        uint64_t fatal_cr3;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(fatal_cr3));
+        uart_print_hex_raw(fatal_cr3);
+      }
+      uart_puts_raw(" pd480=");
+      {
+        extern uint64_t cpu_pd7[512];
+        uart_print_hex_raw(cpu_pd7[480]);
+      }
       uart_puts_raw("\n");
       /* GB-060: same rule as the resume-return halt -- if this CPU is holding
          proc_lock, give it back before stopping, so the survivors are not left

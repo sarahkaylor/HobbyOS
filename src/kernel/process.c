@@ -196,22 +196,14 @@ static void idle_claim_check(void) {
     uart_puts("[IDLECLAIM] cpu=");
     print_int((int)get_cpuid());
     uart_puts(" still claims pid=");
-    /* GB-057: racy read of another slot, same as [ALIVE-SET] -- verify stability
-       of the pid before printing it, and of the state, so a torn value is labelled
-       rather than quoted. */
-    {
-      int p1 = proc_table[leaked].pid, p2 = proc_table[leaked].pid;
-      if (p1 != p2) { uart_puts("<torn:"); print_int(p1); uart_puts("/"); print_int(p2); uart_puts(">"); }
-      else print_int(p1);
-    }
+    /* CORRECTION (GB-057): same misread as [ALIVE-SET] -- this reads under
+       proc_lock, so a plain read is correct; the `<torn:>` detector I added here
+       was based on a false premise and is removed. */
+    print_int(proc_table[leaked].pid);
     uart_puts(" name=");
     uart_puts(proc_table[leaked].name);
     uart_puts(" state=");
-    {
-      int s1 = proc_table[leaked].state, s2 = proc_table[leaked].state;
-      if (s1 != s2) { uart_puts("<torn:"); print_int(s1); uart_puts("/"); print_int(s2); uart_puts(">"); }
-      else print_int(s1);
-    }
+    print_int(proc_table[leaked].state);
     uart_puts(" on idle entry\n");
   }
 }
@@ -1693,28 +1685,16 @@ void schedule(struct trap_frame *tf, int is_yield) {
         uart_puts("  [ALIVE-SET] slot=");
         print_int(i);
         uart_puts(" pid=");
-        /* GB-057: this block runs in schedule() WITHOUT proc_lock, so every field
-           below is a racy read -- another CPU may be mid-update on this slot.  I
-           caught it the hard way: probe54 printed `pid=62831` for slot 1 while the
-           [IDLESTUCK] line for the same slot printed `pid=1`, and 62831 is not a
-           plausible pid on a 64-slot table.  Rather than take proc_lock here (we
-           may already be inside it on some call paths, and a non-recursive
-           spinlock deadlocks), read twice and say so when the value is unstable.
-           An instrument that reports its own uncertainty is worth more than one
-           that reports a number I might quote. */
-        {
-          int p1 = proc_table[i].pid;
-          int p2 = proc_table[i].pid;
-          if (p1 != p2) {
-            uart_puts("<torn:");
-            print_int(p1);
-            uart_puts("/");
-            print_int(p2);
-            uart_puts(">");
-          } else {
-            print_int(p1);
-          }
-        }
+        /* CORRECTION (GB-057): I previously wrote here that this block reads
+           without proc_lock and added a double-read `<torn:a/b>` detector on that
+           basis.  That was wrong: schedule() acquires proc_lock at 1360 and the
+           only releases before this point are the pick branch at 1593 (which
+         iretqs and never falls through) and the halt branch at 1740.  So these
+           reads ARE protected, and probe54's `pid=62831` for slot 1 was a REAL
+           value in the table, not a torn read -- which is a more interesting
+           problem (stale or uninitialised slot state), not an instrument defect.
+           Simple reads, because the lock is held. */
+        print_int(proc_table[i].pid);
         uart_puts(" st=");
         print_int(st);
         uart_puts(" parent=");
@@ -1733,6 +1713,40 @@ void schedule(struct trap_frame *tf, int is_yield) {
     }
 
     if (!any_alive) {
+      /* GB-057-b: settle the mechanism before changing the predicate again.  If a
+         halt ever coincides with a slot in ALLOCATED (which the predicate EXCLUDES),
+         then a wave whose only live work is a slot being created declares itself
+         finished -- that is the one premature halt on record (probe54: 443 lines,
+         slot 6 ALLOCATED).  Costs one line per halt and refutes the idea if the
+         counts are all zero. */
+      {
+        int n_free = 0, n_alloc = 0, n_exit = 0, n_run = 0, n_blk = 0, n_other = 0;
+        for (int q = 0; q < MAX_PROCESSES; q++) {
+          switch (proc_table[q].state) {
+            case PROC_STATE_FREE: n_free++; break;
+            case PROC_STATE_ALLOCATED: n_alloc++; break;
+            case PROC_STATE_EXITED: n_exit++; break;
+            case PROC_STATE_RUNNING: n_run++; break;
+            case PROC_STATE_BLOCKED: n_blk++; break;
+            default: n_other++; break;
+          }
+        }
+        uart_puts("[HALT-CD] cpu=");
+        print_int((int)cpu);
+        uart_puts(" free=");
+        print_int(n_free);
+        uart_puts(" alloc=");
+        print_int(n_alloc);
+        uart_puts(" exited=");
+        print_int(n_exit);
+        uart_puts(" running=");
+        print_int(n_run);
+        uart_puts(" blocked=");
+        print_int(n_blk);
+        uart_puts(" other=");
+        print_int(n_other);
+        uart_puts("\n");
+      }
       set_current_process_pid(cpu, -1);
       /* P2.2 (S2): no user context will run here; never keep an AS (whose
          tables are about to be freed) as this CPU's translation. */

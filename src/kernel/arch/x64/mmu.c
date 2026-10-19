@@ -4,6 +4,7 @@
 #include "lock.h"
 #include "frame.h"
 #include "vm.h"
+#include "display_mode.h" /* DISPLAY_STRIDE_BYTES/HEIGHT: full fb size (GB-065) */
 
 extern uint32_t get_cpuid(void);
 
@@ -220,9 +221,22 @@ void mmu_switch_user_mapping(uint64_t phys_base) {
 void mmu_map_user_framebuffer(uint64_t phys_addr) {
   uint64_t flags = spinlock_acquire_irqsave(&mmu_lock);
 
+  /* GB-065: the framebuffer is 1920x1080x4 = ~8 MB, but this v1 path mapped
+     only two 2 MB huge pages (4 MB), leaving every pixel at y >= ~546
+     (beyond row 546) unmapped.  GRAPHICS.BIN's diagonal is drawn at
+     y = 600..700, so its startpoint/midpoint/endpoint all sat outside the
+     mapping (read/write of unmapped memory -> FAIL / no pixel), while the
+     rect validation at y = 100 worked.  Cover the whole screen: map enough
+     2 MB huge pages.  USER_FB_VIRT_BASE (0x60000000) has 1 GB of user space
+     above it and nothing else is mapped there, so this is collision-free. */
+  const uint64_t fb_bytes =
+      (uint64_t)DISPLAY_STRIDE_BYTES * (uint64_t)DISPLAY_HEIGHT;
+  const int hp = (int)((fb_bytes + 0x1FFFFF) / 0x200000); /* huge pages */
+
   for (int c = 0; c < MAX_CPUS; c++) {
-    cpu_pd1[c][USER_FB_L2_INDEX] = mmu_make_user_block_desc(phys_addr);
-    cpu_pd1[c][USER_FB_L2_INDEX + 1] = mmu_make_user_block_desc(phys_addr + 0x200000);
+    for (int i = 0; i < hp; i++)
+      cpu_pd1[c][USER_FB_L2_INDEX + i] =
+          mmu_make_user_block_desc(phys_addr + (uint64_t)i * 0x200000);
   }
 
   // Invalidate TLB across all cores (reloading CR3 locally on the current core is sufficient in QEMU virt)
