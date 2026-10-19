@@ -129,9 +129,22 @@ def all_issues(state="all"):
 
 
 def issue_by_id(gid):
-    """Issue whose title starts with GB-nnn (the ticket id is in the title)."""
-    gid = gid.upper()
-    if not gid.startswith("GB-"):
+    """Issue whose title starts with the ticket id (GB-nnn, PLAN-nnn, EPIC-...).
+
+    The id is in the title.  PLAN/EPIC tickets were previously unaddressable
+    here (`no issue for PLAN-005`), which is how PLAN-003 was left open with no
+    lane — the tool could not name the ticket its own loop creates.  Any of the
+    three prefixes is accepted, and a bare number is read as GB-nnn.
+    """
+    gid = gid.upper().strip()
+    if gid.isdigit():
+        for it in all_issues():
+            if it["number"] == int(gid):
+                return it
+        return None
+    if gid.startswith("EPIC") and not re.match(r"^EPIC\b", gid):
+        gid = "EPIC"          # EPIC titles carry no number: "EPIC Program-2: …"
+    if not re.match(r"^(GB|PLAN|EPIC)-", gid) and not gid.startswith("EPIC"):
         gid = "GB-" + gid
     for it in all_issues():
         if re.match(rf"^{re.escape(gid)}\b", it["title"]):
