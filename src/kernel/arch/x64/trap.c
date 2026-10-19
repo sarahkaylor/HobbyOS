@@ -2436,6 +2436,20 @@ void general_interrupt_handler(struct trap_frame *tf) {
           print_int((int)fr->kind);
         }
       }
+      /* GB-068: the faulting VA is outside every user window (v1 0x44000000-0x46000000,
+         v2 >= 0x1000000000) and above the kernel load base, so a CPL3 store reached
+         kernel memory.  The store target is main_tls_block+image, which can only be in
+         the kernel range if the page tables in use are not the ones mapping the image.
+         Compare the live CR3's PML4 frame against the AS's root: equal => the tables
+         are right and the address is genuinely wild; different => wrong CR3. */
+      uart_puts(" cr3frame=");
+      {
+        uint64_t cur_cr3;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(cur_cr3));
+        uart_print_hex(cur_cr3 & ~0xFFFULL);
+      }
+      uart_puts(" asroot=");
+      uart_print_hex(cur->as ? cur->as->root_phys : cur->user_phys_base);
       uart_puts(" -> killed\n");
       process_fault_exit(tf, 11); /* SIGSEGV status byte */
       return;
