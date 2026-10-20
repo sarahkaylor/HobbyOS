@@ -1,0 +1,5 @@
+$ env -u MUSL_GCC make t4_compat_parity   # the CI/suite entry point, no musl on this VM
+SKIP leg A: musl-gcc not found (install musl musl-tools)
+t4 host differential: SKIPPED (missing toolchain: A=skip B=/home/sarah/.hermes/cache/scratch/tmp.shHcn8rMQP/t4_probe.host)
+t4_parity: PASS (host differential locked; device leg gated)
+EXIT=0

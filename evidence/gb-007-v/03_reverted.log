@@ -1,0 +1,4 @@
+$ bash src/host/t4_parity.sh   # injection reverted, same tree, sha 2ffa3be
+t4 host differential: A=0 B=0 cases=3
+t4_parity: PASS (host differential locked; device leg gated)
+EXIT=0

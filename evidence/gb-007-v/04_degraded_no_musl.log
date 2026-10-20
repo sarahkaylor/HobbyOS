@@ -1,0 +1,5 @@
+$ env -u MUSL_GCC -u HOST_CFLAGS bash src/host/t4_parity.sh   # default PATH, no musl-gcc installed on this VM
+SKIP leg A: musl-gcc not found (install musl musl-tools)
+t4 host differential: SKIPPED (missing toolchain: A=skip B=/home/sarah/.hermes/cache/scratch/tmp.3RtUEZm3fK/t4_probe.host)
+t4_parity: PASS (host differential locked; device leg gated)
+EXIT=0
