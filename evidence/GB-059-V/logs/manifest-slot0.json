@@ -1,0 +1,26 @@
+{
+  "game": "XNIBBLER",
+  "bin": "XNIBBLER.BIN",
+  "slot": 0,
+  "arch": "arm",
+  "captured_at": "2026-10-20T03:30:17.138933+00:00",
+  "commit": "98247dd9eccbf9ec434a8841abb1b3b267dea5f5",
+  "root": "/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-37d612f8",
+  "screendumps": {
+    "boot": "boot.ppm",
+    "launch": "launch.ppm",
+    "gameplay": "gameplay.ppm"
+  },
+  "inputs": "",
+  "run_seconds": 6,
+  "artifacts_sha256": {
+    "boot.png": "f191879ce5b3ee0e6eac338662c4bc67e835e1503e428f4be84212a165ccfe1a",
+    "boot.ppm": "1eb585ab9f512519e5438fa64768e0c59a59b39e6ea2554e28b24943ad2fafb0",
+    "gameplay.png": "10301ec6812d4a8c6c8d980e3d626e57337abe0a06b0a7a7f872a563458585a0",
+    "gameplay.ppm": "54666361793354e33420bce4f65dfc8a9f420d9626d3283902565ae33f33b7f2",
+    "launch.png": "06b62c5b92819e21bc6f3bbc426886644b1731376a4348831efb5669fe40476f",
+    "launch.ppm": "fe25b1509bec50486f48dc8fb8def004748c14c1f4ddd5a06786f082971035e7",
+    "replay.jsonl": "06f1cf24ec1d2f76d20621888a69044ecf066c31b1186494d7fcec4a06c46773",
+    "serial.log": "2dd0fa0c5ba3dfc14788ed083a94f9f77399e2bf6e14bb2b9e61642013f4aaa2"
+  }
+}

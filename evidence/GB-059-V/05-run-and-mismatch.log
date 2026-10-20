@@ -1,0 +1,27 @@
+# the actual run: --slot 0 supplied (a magic index), --bin XNIBBLER.BIN  @ 98247dd9eccbf9ec434a8841abb1b3b267dea5f5
+$ python3 tools/evidence_rig.py --game XNIBBLER --bin XNIBBLER.BIN --slot 0 --arch arm --root $PWD --run-seconds 6
+[rig] booting arm QEMU, capturing to evidence/XNIBBLER/20261020T032954Z
+[rig] XNIBBLER.BIN slot: expected=0 found=19
+[rig] evidence bundle: evidence/XNIBBLER/20261020T032954Z
+[rig] report: XNIBBLER-EVIDENCE-REPORT.md
+
+## guest's own menu dump says XNIBBLER.BIN is slot 19:
+[MENU] 16=PONG.BIN
+[MENU] 17=MILLIPED.BIN
+[MENU] 18=STARDUST.BIN
+[MENU] 19=XNIBBLER.BIN
+[MENU] 0=CONSOLE.BIN
+
+## what the guest actually launched:
+Loading program for scheduler (v2 AS): DESKTOP.BIN
+Loading program for scheduler (v2 AS): CONSOLE.BIN
+Loading program for scheduler (v2 AS): SH.BIN
+
+## the bundle's own report stamps the CLI slot, not the measured one:
+# XNIBBLER — GB-040 evidence bundle
+
+- Game: `XNIBBLER.BIN` (launcher slot 0, arm)
+- Commit: 98247dd9eccbf9ec434a8841abb1b3b267dea5f5
+
+## compat title leg: any .ELF on the image?
+(none — no compat title exists on disk.img, so the second gate run cannot be executed)

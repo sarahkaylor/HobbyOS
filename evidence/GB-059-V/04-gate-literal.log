@@ -1,0 +1,20 @@
+# GB-059-V gate, literal commands  @ 98247dd9eccbf9ec434a8841abb1b3b267dea5f5  2026-10-20T03:34:35Z  host=swarm-farm-2  cwd=/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-37d612f8 (worktree)
+
+$ git ls-files | grep -E 'run_(doom|stardust|xnibbler|xcrypt)_test\.py'
+(no matches — all four deleted)
+
+$ grep -nE 'slot\s*=\s*[0-9]+|index\s*=\s*[0-9]+' tools/evidence_rig.py
+(no literal slot constants — but see the CLI requirement below)
+
+$ python3 tools/evidence_rig.py --game XNIBBLER --arch arm   (gate command 1, verbatim)
+usage: evidence_rig.py [-h] --game GAME --bin BIN --slot SLOT
+                       [--arch {arm,intel}] [--root ROOT]
+                       [--checkpoints CHECKPOINTS] [--run-seconds RUN_SECONDS]
+                       [--input INPUT]
+evidence_rig.py: error: the following arguments are required: --bin, --slot
+exit=2
+
+# the rig therefore cannot be driven by name alone: --bin and --slot are REQUIRED
+171:    ap.add_argument("--slot", type=int, required=True, help="launcher slot index")
+196:    slot = args.slot
+197:    found = find_menu_slot(serial_log, args.bin)
