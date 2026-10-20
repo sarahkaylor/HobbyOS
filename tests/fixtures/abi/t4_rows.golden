@@ -30,3 +30,10 @@ pselect6_ready
 pselect6_ready_fdset
 poll_badfd
 poll_badfd_revents
+sockpair
+sockpoll_ready
+sockpoll_revents
+sockselect_ready
+sockselect_fdset
+sockpselect_ready
+sockpselect_fdset
