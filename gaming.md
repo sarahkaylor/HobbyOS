@@ -639,6 +639,19 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 
 ### 11.8 Execution log (newest first, maintained by the Coordinator)
 
+**2026-10-19 — GB-068: eleven mechanisms killed, and a debugger finally produced facts instead of inferences.**
+
+| what | state |
+|---|---|
+| **Method change that mattered** | After ~11 hypotheses died by inference from serial logs, one QEMU gdbstub session (`-s -S`, `hbreak`, hardware watchpoints) produced more than the whole preceding effort. `hbreak` on a user VA works before the process address space is installed; a watchpoint on a PCB field names the writer. Both should be the first move on any "user code faults at a wild address" question in this tree |
+| **Measured identity** | The faulting VA is exactly `target_sp(cpu) − 0x28` where `target_sp = &__stack_top - cpu*0x10000 - 0x1000` (`__stack_top = 0x755FEBF0`). Corroborated on five CPUs (`0x755FDBC8`, `0x755EDBC8`, `0x755DDBC8`, `0x755CDBC8`, `0x7558DBC8`). **Not** present as a constant in the kernel image (0 occurrences of each 8-byte value), so it is computed at runtime |
+| **First restore vs later** | `restore_context` for user processes: **every first restore has `context[5] = 0`** (correct `argc`), every later one carries the kernel-stack address. So the process starts correct and is corrupted in flight; `save_context` (`process.c:1143`) then persists it |
+| **Who writes the frame slot** | `common_trap_wrapper` writes the frame's `rdi` slot on entry with a legitimate user value (`0x62`) — the normal save, not the corruption. A conditioned watchpoint on **cpu 0's** frame slot (`> 0x70000000`) never fired in 240 s: cpu 0 is not the corrupted CPU, so the watch must be placed on the CPU that actually owns a corrupting process |
+| **Frame offsets are correct** | `struct trap_frame` (x86_64): `regs[30]` 0..239, `lr` 240, `elr` 248, `spsr` 256, `vector` 264, `error_code` 272, `cs` 280, `ss` 288 — and the asm reads `[rsp+40]` for rdi, `[rsp+248]` RIP, `[rsp+256]` RFLAGS, `[rsp+280]` CS, `[rsp+288]` SS. Every offset matches, so "misaligned restore" is dead |
+| **Dead mechanisms (13)** | TLS self-pointer; `tls_size` underflow; `.bss` filesz-vs-memsz; v1-overlay base; wrong CR3; ELF-induced damage; "heap never created"; resume-RSP plant; kernel-stack execution; syscall return (`ret == cr2` 0/57); stale registers (zeroing all 36 context slots changed nothing); **"kernel passes a bad `argc` at entry"** (first restores are 0 — the CPL3 stop I measured was a later re-entry); **"frame restore reads wrong offsets"** (offsets verified) |
+| **Still true** | The bad value is a runtime-computed kernel-stack address equal to `target_sp(cpu) − 0x28`; `usp` is a valid user address in every record; CR3 correct 56/56; 49 of 57 faults precede any kernel entry |
+| **Next action** | Conditioned watchpoint on the frame slot of the CPU that owns a corrupting process (`0x755xDAF0` for cpu N), stopping on the exact store. Frame-relative address computations do exist in this path (`lea rdi, [rsp+16]` at `trap.c:3086` and `:3204`) |
+
 **2026-10-20 — §4.3 re-plan (PLAN-007): the verification lane's first ten verdicts are 10 RED / 0 GREEN, and nine of
 them fail on an instrument, not a feature.** Board 99 → 103 tickets (Backlog 2→5 · Ready 11 · In Progress 30→32 ·
 In Review 9→8 · Merge Gate 0 · Done 44 · Icebox 3), `lint` clean, `sync_gaming_md.py` IN SYNC 75/75,
