@@ -57,6 +57,31 @@ static void test_fat16_open_nonexistent(void) {
   EXPECT_EQ(res, -1);
 }
 
+/* GB-067: a freshly created regular file's on-disk directory entry MUST
+ * carry the archive attribute (0x20).  Previously the create path stamped
+ * attr=0, which is not a valid 8.3 file entry — a later re-scan (probe58)
+ * read such an entry as empty/absent (attr=0, cluster=0, size=0) and the
+ * file was then treated as missing and corrupted in place.  This asserts the
+ * on-disk entry (re-resolved, not the in-memory copy) has attr & 0x20. */
+static void test_fat16_created_entry_has_attr(void) {
+  uart_puts("  Running test_fat16_created_entry_has_attr...\n");
+  tests_run++;
+
+  struct file f;
+  EXPECT_EQ(fat16_open("/ATTR_CHECK.TXT", &f), 0);
+  fat16_close(&f);
+
+  struct fat16_dir_entry e;
+  EXPECT_EQ(fat16_resolve_path("/ATTR_CHECK.TXT", &e, 0, 0), 0);
+  EXPECT_EQ((e.attr & 0x20) != 0, 1);   /* archive bit set on a created file */
+  EXPECT_EQ(e.attr == 0, 0);            /* never a bare attr=0 entry */
+  /* and the same through the raw entry inside an opened handle */
+  struct file f2;
+  EXPECT_EQ(fat16_open("/ATTR_CHECK.TXT", &f2), 0);
+  EXPECT_EQ(f2.fat16.entry.attr == 0, 0);
+  fat16_close(&f2);
+}
+
 static void test_fat16_read_file(void) {
   uart_puts("  Running test_fat16_read_file...\n");
   tests_run++;
@@ -1426,6 +1451,7 @@ void fat16_test_suite(void) {
   uart_puts("fat16_test_suite:\n");
   test_fat16_open_existing();
   test_fat16_open_nonexistent();
+  test_fat16_created_entry_has_attr();
   test_fat16_read_file();
   test_fat16_move_across_dirs();
   test_fat16_lfn_names();

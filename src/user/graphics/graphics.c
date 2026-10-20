@@ -217,11 +217,27 @@ void graphics_draw_line(int x0, int y0, int x1, int y1, uint32_t color) {
   int sx = x0 < x1 ? 1 : -1;
   int sy = y0 < y1 ? 1 : -1;
   int err = dx - dy;
+  /* GB-057: bound the loop by the number of steps Bresenham can actually need.
+     This loop's only exit is arriving exactly at (x1, y1), and that is safe only
+     while the invariants hold: `err` is an int and `e2 = err * 2`, so a large
+     enough coordinate wraps the doubling, flips the two comparisons below, and
+     x0/y0 then oscillate without advancing -- an infinite loop that plots pixels
+     silently forever.  Measured: GRAPHICS.BIN was found spinning inside this
+     function, in user mode, with the console dead, holding the whole intel wave
+     open (evidence/gb-057/t3intel_probe37_*).  A kernel-hang hunt turned out to
+     be this loop.
+
+     A correct line needs at most dx + dy + 1 iterations, so the bound changes no
+     output that is drawn correctly today, and it turns a silent hang into a line
+     that visibly stops -- a testable outcome instead of a dead wave. */
+  int steps = dx + dy + 1;
 
   for (;;) {
     graphics_draw_pixel(x0, y0, color);
     if (x0 == x1 && y0 == y1)
       break;
+    if (--steps <= 0)
+      break; /* cannot outlive the line */
     int e2 = err * 2;
     if (e2 > -dy) {
       err -= dy;

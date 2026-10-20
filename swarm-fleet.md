@@ -56,5 +56,23 @@ GitHub SSH key was copied from VM 125 so `git@github.com:sarahkaylor/HobbyOS.git
 - First `make run`/`make test` on the other VMs will trigger the one-time staging build
   (`tools-staged` = LLVM dist + browser/WebKit) — cache the resulting
   `third_party/llvm-21.1.8/dist-staging` (e.g. rsync from farm-1) to skip it.
-- Remaining swarm config (per gaming.md): Hermes endpoints → FLASH workhorse / DEEP planner,
-  tmux workers + worktrees, Forgejo webhook → coordinator, re-plan cadence (GB-003/004/048).
+## RUNNING STATE (initiated 2026-10-17 ~05:00 UTC)
+
+- **Model split (wired + verified):** workers → `http://llm.localdomain:8000/v1` (`deepseek-v4-flash`); coordinator → `http://dgx1.localdomain:8000/v1` (`deepseek-v4.1-flash`, `agent.reasoning_effort: high` is required — v4.1 rejects other values).
+- **Verification lane (added 2026-10-20, gaming.md §3.1/§4.2/§5.1):** every farm runs a second DEEP driver loop `swarm-verify@<agent>.service` (e.g. `wabi` → `swarm-verify@wabi`, `AGENT=%i-verify` for its own flock) that claims `verify`+`deep`-labeled tickets. Each farm's Hermes config got a `providers.dgx` block (flash default untouched); the verification session runs `--provider dgx -m deepseek-v4.1-flash --reasoning high --worktree`. The `verify` Forgejo label (id 29) exists; the re-plan mints `GB-nnn-V` tickets for every un-gated In Review item.
+- **Keep-alive is headless drivers (not tmux):** `swarm-driver@<agent>.service` on each agent VM (`.230` `wabi`, `.231` `wgfx`, `.232` `wgames`, `.233` `coord`) runs `hermes chat --resume <sid> --query-file /opt/swarm-charters/<a>.continue.txt --oneshot --worktree` when the session is idle >10 min, gated by a ~25 min cooldown against no-op spin (first-ever start uses `--query-file /opt/swarm-charters/<a>.txt`). Session id + last-launch in `~/.swarm/<a>.json`; drivers are `enabled` with `Restart=always`, so a VM reboot resumes the agent automatically (~first resume within ~25 min unless the cooldown is stale'd). Manual restart: `systemctl restart swarm-driver@<a>`. The tmux + `swarm-nudge@` poking approach is deprecated.
+- **2026-10-18:** rebooted the 4 agent VMs (farm-1..3 + coord) and added **sarah to the `kvm` group** on each (intel-QEMU accel — the item the replan had been flagging for a human). Verified post-boot: `/dev/kvm` RW-accessible from `sarah`, drivers auto-restarted and resumed sessions, board + both model endpoints reachable.
+- **Re-plan cron** on `.233`: daily 03:00 → one-shot coordinator re-plan per gaming.md §4.3 (log `~/replan.log`).
+- **Board:** 18 labels + GAMING-BOARD scaffolding live; coordinator imports GB-001..055 from gaming.md §8 (Forgejo Projects API 404s on v17 — before/kanban is milestone+label driven).
+- **Dashboard live view reads `~/.hermes/state.db`** (SQLite, via exporter) — real streaming transcripts/models/tokens, not just completed sessions.
+- **GitHub auth on agent VMs:** origin rewritten to `git@github.com:sarahkaylor/HobbyOS.git`; global
+  `url."git@github.com:".insteadOf https://github.com/` set — **pushes** work over the seeded SSH key
+  (verified `Hi sarahkaylor!`). **PR creation** uses the GitHub REST API via `GITHUB_TOKEN`, stored in
+  `~/.hermes/.env` on each VM (chmod 600, value never printed/logged). Sessions that started before
+  the token was added must source it in-shell first:
+  `set -a; source ~/.hermes/.env; set +a`
+  `GIT_TERMINAL_PROMPT=0` is also in `.env` so git never hangs on a credential prompt.
+  First fruit: PR #1 (DOOM native port) opened 2026-10-17 by games-worker.
+
+## Remaining swarm config (per gaming.md): Forgejo webhook → coordinator
+  (board automation), re-plan cadence tuning (GB-003/004/048), kanban project via UI/other API.
