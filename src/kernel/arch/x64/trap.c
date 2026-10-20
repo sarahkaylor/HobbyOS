@@ -2288,6 +2288,39 @@ void lapic_send_eoi(void) {
   *(volatile uint32_t *)0xFEE000B0 = 0;
 }
 
+/* GB-068 (2026-10-19): a fault record must be ONE write.
+   `uart_puts` takes uart_lock for the whole string, so assembling the line in
+   a buffer and emitting it once makes the record atomic on the wire.  The
+   previous ~15 separate uart_puts/uart_print_hex calls each took and released
+   the lock, so under 8 CPUs the record interleaved at every call boundary and
+   ~43% of fault lines were unparseable -- which is how several wrong readings
+   of this fault survived: the evidence itself was being shredded. */
+struct fl_buf { char b[448]; int n; };
+static void fl_s(struct fl_buf *f, const char *s2) {
+  while (*s2 && f->n < (int)sizeof f->b - 1) f->b[f->n++] = *s2++;
+}
+static void fl_c(struct fl_buf *f, char c) {
+  if (f->n < (int)sizeof f->b - 1) f->b[f->n++] = c;
+}
+static void fl_hex(struct fl_buf *f, uint64_t v) {
+  static const char hx[] = "0123456789ABCDEF";
+  char t[16];
+  int k = 0, i2;
+  if (!v) { fl_s(f, "0x0000000000000000"); return; }
+  while (v && k < 16) { t[k++] = hx[v & 0xF]; v >>= 4; }
+  fl_s(f, "0x");
+  for (i2 = 0; i2 < 16 - k; i2++) fl_c(f, '0');
+  while (k) fl_c(f, t[--k]);
+}
+static void fl_dec(struct fl_buf *f, int v) {
+  char t[12];
+  int k = 0;
+  if (v < 0) { fl_c(f, '-'); v = -v; }
+  if (!v) { fl_c(f, '0'); return; }
+  while (v && k < 11) { t[k++] = (char)('0' + v % 10); v /= 10; }
+  while (k) fl_c(f, t[--k]);
+}
+
 void general_interrupt_handler(struct trap_frame *tf) {
   extern void gic_set_current_vector(uint32_t cpu, uint32_t vector);
   extern uint32_t gic_acknowledge_interrupt(void);
@@ -2397,60 +2430,52 @@ void general_interrupt_handler(struct trap_frame *tf) {
           vm_handle_fault(process_group(cur), cr2, pf_w, pf_x, &why) == 0) {
         return; /* mapping is live; iretq re-executes the instruction */
       }
-      uart_puts("[KERNEL] pid=");
-      print_int(cur->pid);
-      uart_puts(" (");
-      uart_puts(cur->name);
-      uart_puts(") memory fault VA=");
-      uart_print_hex(cr2);
-      uart_puts(" PC=");
-      uart_print_hex(tf->elr);
-      uart_puts(" rw=");
-      uart_puts(pf_w ? "w" : "r");
-      uart_puts(pf_x ? "x" : " ");
-      uart_puts(" in=");
-      uart_puts(why);
-      /* GB-068: ask the VM layer what, if anything, contains the faulting address.
-         Three outcomes, three different defects:
-           region=NONE                    -> the pointer was never a user VA in this AS
-                                             (phys-as-VA or a wild write)
-           region=<base+len> prot=...     -> a region DOES contain it; if prot lacks
-                                             write, the permissions are wrong
-           region present + prot writable -> page tables disagree with the region list
-         The faulting VAs (0x755...DBC8, 0x40000000) are below USER_VA_BASE and inside
-         the kernel identity map, so "NONE" is the expected answer and would point at
-         whatever hands user code a supervisor address. */
-      uart_puts(" region=");
       {
-        extern struct vm_region *vm_region_find(struct addr_space *as, uint64_t va);
-        struct vm_region *fr = cur->as ? vm_region_find(cur->as, cr2) : 0;
-        if (!fr) {
-          uart_puts("NONE");
-        } else {
-          uart_print_hex(fr->base);
-          uart_puts("+");
-          uart_print_hex(fr->len);
-          uart_puts(" prot=");
-          print_int((int)fr->prot);
-          uart_puts(" kind=");
-          print_int((int)fr->kind);
+        struct fl_buf fl;
+        fl.n = 0;
+        fl_s(&fl, "[KERNEL] pid=");
+        fl_dec(&fl, cur->pid);
+        fl_s(&fl, " (");
+        fl_s(&fl, cur->name);
+        fl_s(&fl, ") memory fault VA=");
+        fl_hex(&fl, cr2);
+        fl_s(&fl, " PC=");
+        fl_hex(&fl, tf->elr);
+        fl_s(&fl, " rw=");
+        fl_c(&fl, pf_w ? 'w' : 'r');
+        fl_c(&fl, pf_x ? 'x' : ' ');
+        fl_s(&fl, " in=");
+        fl_s(&fl, why);
+        {
+          extern struct vm_region *vm_region_find(struct addr_space *as, uint64_t va);
+          struct vm_region *fr = cur->as ? vm_region_find(cur->as, cr2) : 0;
+          fl_s(&fl, " region=");
+          if (!fr) {
+            fl_s(&fl, "NONE");
+          } else {
+            fl_hex(&fl, fr->base);
+            fl_c(&fl, '+');
+            fl_hex(&fl, fr->len);
+            fl_s(&fl, " prot=");
+            fl_dec(&fl, (int)fr->prot);
+            fl_s(&fl, " kind=");
+            fl_dec(&fl, (int)fr->kind);
+          }
         }
+        {
+          uint64_t cur_cr3;
+          __asm__ volatile("mov %%cr3, %0" : "=r"(cur_cr3));
+          fl_s(&fl, " cr3frame=");
+          fl_hex(&fl, cur_cr3 & ~0xFFFULL);
+          fl_s(&fl, " asroot=");
+          fl_hex(&fl, cur->as ? cur->as->root_phys : cur->user_phys_base);
+        }
+        fl_s(&fl, " -> killed");
+        fl_c(&fl, '\n');
+        fl.b[fl.n] = 0;
+        uart_puts(fl.b);
       }
-      /* GB-068: the faulting VA is outside every user window (v1 0x44000000-0x46000000,
-         v2 >= 0x1000000000) and above the kernel load base, so a CPL3 store reached
-         kernel memory.  The store target is main_tls_block+image, which can only be in
-         the kernel range if the page tables in use are not the ones mapping the image.
-         Compare the live CR3's PML4 frame against the AS's root: equal => the tables
-         are right and the address is genuinely wild; different => wrong CR3. */
-      uart_puts(" cr3frame=");
-      {
-        uint64_t cur_cr3;
-        __asm__ volatile("mov %%cr3, %0" : "=r"(cur_cr3));
-        uart_print_hex(cur_cr3 & ~0xFFFULL);
-      }
-      uart_puts(" asroot=");
-      uart_print_hex(cur->as ? cur->as->root_phys : cur->user_phys_base);
-      uart_puts(" -> killed\n");
+
       process_fault_exit(tf, 11); /* SIGSEGV status byte */
       return;
     }
