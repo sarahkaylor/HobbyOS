@@ -1,0 +1,20 @@
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+ Volume in drive : has no label
+ Volume Serial Number is 6F24-4DCB
+Directory for ::/
+
+T4PROBE  BIN     19328 2026-10-20   1:42 
+        1 file               19 328 bytes
+                        710 803 456 bytes free
+
+=== T3 (intel): run (deadline 2700s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-e7636c48/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 767 console lines, 4 FAIL lines, 53 user memory faults, 63 programs exited, halted=1
+T3_intel: FAIL — 4 FAIL line(s); first 20:
+619:  FAIL: line startpoint
+620:  FAIL: line midpoint
+621:  FAIL: line endpoint
+632:GRAPHICS TESTS FAILED
+T3_intel EXIT=1
+T3_EXIT=1

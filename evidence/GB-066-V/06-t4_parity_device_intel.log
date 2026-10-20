@@ -1,0 +1,4 @@
+t4 host differential: A=0 B=0 cases=3
+t4 device (intel): ELF loader present — device leg not wired yet
+t4 device: SKIP (device-leg runner TBD; host differential is the gate today)
+t4_parity: PASS (host differential locked; device leg gated)

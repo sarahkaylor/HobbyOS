@@ -1,0 +1,18 @@
+make -n host_tests | grep t4_device:
+bash tools/gate/t4_device.sh --self-test
+
+wave stats for obj/t3_intel.log:
+  lines: 767
+  halted: 1
+  fatal kfault: 0
+  FAIL lines: 4
+  exited lines: 74
+  T4PROBE mentions: 0
+  t4-probe-arrived: 0
+
+T4 verdict line:
+T3_intel: FAIL — 4 FAIL line(s); first 20:
+T3_intel EXIT=1
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 767 console lines, 4 FAIL lines, 53 user memory faults, 63 programs exited, halted=1
+T3_intel: FAIL — 4 FAIL line(s); first 20:
