@@ -1325,7 +1325,7 @@ $(EDITOR_BIN): $(OBJ_DIR)/editor.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/editor.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/editor.elf $(EDITOR_BIN)
 
-$(EDITOR_T_BIN): $(OBJ_DIR)/user_editor_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
+$(EDITOR_T_BIN): $(OBJ_DIR)/user_editor_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/games_scan.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/editor_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/editor_test.elf $(EDITOR_T_BIN)
 
@@ -1339,7 +1339,7 @@ $(OBJ_DIR)/user_graphics_stats.o: src/user/graphics/graphics.c $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -DPAINT_STATS -c $< -o $@
 
-$(APPS_T_BIN): $(OBJ_DIR)/user_apps_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/user_graphics_stats.o $(OBJ_DIR)/user_window.o
+$(APPS_T_BIN): $(OBJ_DIR)/user_apps_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/games_scan.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/user_graphics_stats.o $(OBJ_DIR)/user_window.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/apps_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/apps_test.elf $(APPS_T_BIN)
 
@@ -1347,7 +1347,7 @@ FILEDIALOG_ARROW_T_BIN = $(OBJ_DIR)/FILEDIAL.BIN
 $(OBJ_DIR)/user_filedialog_arrow_test.o: src/user/filedialog_arrow_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
-$(FILEDIALOG_ARROW_T_BIN): $(OBJ_DIR)/user_filedialog_arrow_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
+$(FILEDIALOG_ARROW_T_BIN): $(OBJ_DIR)/user_filedialog_arrow_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/games_scan.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/filedialog_arrow_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/filedialog_arrow_test.elf $(FILEDIALOG_ARROW_T_BIN)
 
@@ -1360,7 +1360,7 @@ $(OBJ_DIR)/user_pong_test.o: src/user/pong_test.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -DPONG_TEST_WRAPPER -c $< -o $@
 
-$(PONG_T_BIN): $(OBJ_DIR)/user_pong_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
+$(PONG_T_BIN): $(OBJ_DIR)/user_pong_test.o $(OBJ_DIR)/user_desktop_test_wrapper.o $(OBJ_DIR)/games_scan.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/user_window.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/pong_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/pong_test.elf $(PONG_T_BIN)
 
@@ -3379,7 +3379,15 @@ cold_vs_cached:
 test_cache:
 	@bash tools/cache/cache_test.sh
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache $(GAMES_SCAN_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST)
+# GB-007 differential harness skeleton: build/capture/compare the `hello`
+# probe's {stdout, exit, errno} contract.  DoD: "hello diverges / lie detector
+# works" — the T1 self-test plants divergences and requires DIVERGE, never a
+# false pass.  (The HobbyOS-intel / QEMU target leg reuses the same harness.)
+DIFF_RUN = python3 tools/differential/diff_harness_test.py
+test_diff_harness:
+	$(HOST_RUN) $(DIFF_RUN)
+
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness $(GAMES_SCAN_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(GAMES_SCAN_TEST)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
@@ -3539,4 +3547,4 @@ parity_ci:
 test_parity_ci:
 	bash tools/gate/parity_ci_test.sh
 
-.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test parity_ci test_parity_ci bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest cache_setup cold_vs_cached test_cache
+.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test parity_ci test_parity_ci bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest cache_setup cold_vs_cached test_cache test_diff_harness
