@@ -147,7 +147,12 @@ def issue_by_id(gid):
     if not re.match(r"^(GB|PLAN|EPIC)-", gid) and not gid.startswith("EPIC"):
         gid = "GB-" + gid
     for it in all_issues():
-        if re.match(rf"^{re.escape(gid)}\b", it["title"]):
+        # (?![\w-]) is load-bearing: the re-plan loop mints `GB-nnn-V`
+        # verification tickets, and a bare `\b` after GB-nnn matches the hyphen.
+        # all_issues() returns NEWEST first, so `GB-016-V` would be found before
+        # `GB-016` — `move GB-016 Done` would then have laned and closed the
+        # verification ticket instead of the implementation one.
+        if re.match(rf"^{re.escape(gid)}(?![\w-])", it["title"]):
             return it
     return None
 
@@ -305,7 +310,7 @@ def cmd_lint(a):
         rc = 1
     for it in all_issues("open"):
         lab = [l["name"] for l in it["labels"]]
-        gid = (re.match(r"^(GB-\d+)", it["title"]) or [None, it["title"][:10]])[1]
+        gid = (re.match(r"^(GB-\d+(?:-V)?)", it["title"]) or [None, it["title"][:10]])[1]
         if lane_of(it) is None:
             print(f"LINT {gid}: no lane label")
             rc = 1
