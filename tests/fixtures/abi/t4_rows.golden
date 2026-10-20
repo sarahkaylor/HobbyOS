@@ -1,0 +1,39 @@
+# tests/fixtures/abi/t4_rows.golden — GB-073 shared row-name set.
+#
+# The ONE list both probes consume.  The M1 -V DoDs (GB-016-V, GB-017-V, ...)
+# name these rows; the device probe (src/user/t4_probe.c, leg A/Linux and
+# leg B/HobbyOS-intel) and the host model (src/host/t4_compat_probe.c) must each
+# carry EXACTLY this set.  A row the DoDs name but a probe cannot emit, or a
+# probe that emits a row the other does not, is a disagreement the --check must
+# FAIL — never a smaller diff that passes.  Deleting a row here or in a probe
+# fails the gate.
+#
+# One name per line, no trailing whitespace.  Auto-checked by
+# tools/gate/t4_device.sh --check.
+write3
+uname_rc
+uname_sysname_linux
+uname_machine_x86_64
+getrandom_16
+urandom_open
+urandom_read16
+null_open_w
+null_write3
+null_open_r
+null_read1
+pipe2
+poll_ready
+poll_ready_revents
+select_ready
+select_ready_fdset
+pselect6_ready
+pselect6_ready_fdset
+poll_badfd
+poll_badfd_revents
+sockpair
+sockpoll_ready
+sockpoll_revents
+sockselect_ready
+sockselect_fdset
+sockpselect_ready
+sockpselect_fdset

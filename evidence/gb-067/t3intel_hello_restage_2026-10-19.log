@@ -1,0 +1,20 @@
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+ Volume in drive : has no label
+ Volume Serial Number is FB12-2EFB
+Directory for ::/
+
+HELLO    BIN     45976 2026-10-20  20:31 
+        1 file               45 976 bytes
+                        705 724 416 bytes free
+
+[T3_STAGE] HELLO.BIN re-staged from host
+=== T3 (intel): run (deadline 2700s, log /home/sarah/Documents/GitHub/HobbyOS/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 922 console lines, 4 FAIL lines, 57 user memory faults, 62 programs exited, halted=1
+T3_intel: FAIL — 4 FAIL line(s); first 20:
+849:  FAIL: line startpoint
+850:  FAIL: line midpoint
+851:  FAIL: line endpoint
+862:GRAPHICS TESTS FAILED
+T3_intel EXIT=1

@@ -1848,6 +1848,11 @@ void sync_lower_handler_c(struct trap_frame *tf) {
 
   uint64_t syscall_num = tf->regs[0]; // rax
   core_in_syscall[get_cpuid()] = (int)syscall_num;
+  {
+    struct process *sc = current_process();
+    if (sc)
+      sc->last_syscall = (int64_t)syscall_num;
+  }
 
   if (syscall_num == 0xFF) {
     schedule(tf, 1);
@@ -2032,6 +2037,11 @@ void sync_lower_handler_c(struct trap_frame *tf) {
   } else {
     uart_puts("Unknown System Call Invoked!\n");
     tf->regs[0] = -ENOSYS;
+  }
+  {
+    struct process *sc = current_process();
+    if (sc)
+      sc->last_ret = (int64_t)tf->regs[0];
   }
   core_in_syscall[get_cpuid()] = 0;
 }
@@ -2288,6 +2298,39 @@ void lapic_send_eoi(void) {
   *(volatile uint32_t *)0xFEE000B0 = 0;
 }
 
+/* GB-068 (2026-10-19): a fault record must be ONE write.
+   `uart_puts` takes uart_lock for the whole string, so assembling the line in
+   a buffer and emitting it once makes the record atomic on the wire.  The
+   previous ~15 separate uart_puts/uart_print_hex calls each took and released
+   the lock, so under 8 CPUs the record interleaved at every call boundary and
+   ~43% of fault lines were unparseable -- which is how several wrong readings
+   of this fault survived: the evidence itself was being shredded. */
+struct fl_buf { char b[448]; int n; };
+static void fl_s(struct fl_buf *f, const char *s2) {
+  while (*s2 && f->n < (int)sizeof f->b - 1) f->b[f->n++] = *s2++;
+}
+static void fl_c(struct fl_buf *f, char c) {
+  if (f->n < (int)sizeof f->b - 1) f->b[f->n++] = c;
+}
+static void fl_hex(struct fl_buf *f, uint64_t v) {
+  static const char hx[] = "0123456789ABCDEF";
+  char t[16];
+  int k = 0, i2;
+  if (!v) { fl_s(f, "0x0000000000000000"); return; }
+  while (v && k < 16) { t[k++] = hx[v & 0xF]; v >>= 4; }
+  fl_s(f, "0x");
+  for (i2 = 0; i2 < 16 - k; i2++) fl_c(f, '0');
+  while (k) fl_c(f, t[--k]);
+}
+static void fl_dec(struct fl_buf *f, int v) {
+  char t[12];
+  int k = 0;
+  if (v < 0) { fl_c(f, '-'); v = -v; }
+  if (!v) { fl_c(f, '0'); return; }
+  while (v && k < 11) { t[k++] = (char)('0' + v % 10); v /= 10; }
+  while (k) fl_c(f, t[--k]);
+}
+
 void general_interrupt_handler(struct trap_frame *tf) {
   extern void gic_set_current_vector(uint32_t cpu, uint32_t vector);
   extern uint32_t gic_acknowledge_interrupt(void);
@@ -2397,20 +2440,56 @@ void general_interrupt_handler(struct trap_frame *tf) {
           vm_handle_fault(process_group(cur), cr2, pf_w, pf_x, &why) == 0) {
         return; /* mapping is live; iretq re-executes the instruction */
       }
-      uart_puts("[KERNEL] pid=");
-      print_int(cur->pid);
-      uart_puts(" (");
-      uart_puts(cur->name);
-      uart_puts(") memory fault VA=");
-      uart_print_hex(cr2);
-      uart_puts(" PC=");
-      uart_print_hex(tf->elr);
-      uart_puts(" rw=");
-      uart_puts(pf_w ? "w" : "r");
-      uart_puts(pf_x ? "x" : " ");
-      uart_puts(" in=");
-      uart_puts(why);
-      uart_puts(" -> killed\n");
+      {
+        struct fl_buf fl;
+        fl.n = 0;
+        fl_s(&fl, "[KERNEL] pid=");
+        fl_dec(&fl, cur->pid);
+        fl_s(&fl, " (");
+        fl_s(&fl, cur->name);
+        fl_s(&fl, ") memory fault VA=");
+        fl_hex(&fl, cr2);
+        fl_s(&fl, " PC=");
+        fl_hex(&fl, tf->elr);
+        fl_s(&fl, " rw=");
+        fl_c(&fl, pf_w ? 'w' : 'r');
+        fl_c(&fl, pf_x ? 'x' : ' ');
+        fl_s(&fl, " in=");
+        fl_s(&fl, why);
+        {
+          extern struct vm_region *vm_region_find(struct addr_space *as, uint64_t va);
+          struct vm_region *fr = cur->as ? vm_region_find(cur->as, cr2) : 0;
+          fl_s(&fl, " region=");
+          if (!fr) {
+            fl_s(&fl, "NONE");
+          } else {
+            fl_hex(&fl, fr->base);
+            fl_c(&fl, '+');
+            fl_hex(&fl, fr->len);
+            fl_s(&fl, " prot=");
+            fl_dec(&fl, (int)fr->prot);
+            fl_s(&fl, " kind=");
+            fl_dec(&fl, (int)fr->kind);
+          }
+        }
+        {
+          uint64_t cur_cr3;
+          __asm__ volatile("mov %%cr3, %0" : "=r"(cur_cr3));
+          fl_s(&fl, " cr3frame=");
+          fl_hex(&fl, cur_cr3 & ~0xFFFULL);
+          fl_s(&fl, " asroot=");
+          fl_hex(&fl, cur->as ? cur->as->root_phys : cur->user_phys_base);
+          fl_s(&fl, " sys=");
+          fl_dec(&fl, (int)cur->last_syscall);
+          fl_s(&fl, " ret=");
+          fl_hex(&fl, (uint64_t)cur->last_ret);
+        }
+        fl_s(&fl, " -> killed");
+        fl_c(&fl, '\n');
+        fl.b[fl.n] = 0;
+        uart_puts(fl.b);
+      }
+
       process_fault_exit(tf, 11); /* SIGSEGV status byte */
       return;
     }
@@ -2559,6 +2638,25 @@ void general_interrupt_handler(struct trap_frame *tf) {
       }
       uart_puts_raw(" pid=");
       print_int_raw(cur ? cur->pid : -1);
+      /* GB-069 discriminator: a #PF at cr2=0x1FC001008 lands INSIDE the 2 MiB page
+         cpu_pd7[480] installs (0x9B = P|RW|PWT|PCD|PS, VA 0x1FC000000-0x1FDFFFFF), so
+         "the mapping is too small" is excluded by arithmetic.  The three survivors are
+         PD-entry reuse, a wrong CR3, and a protection fault; these fields name which.
+         err bit0=P (0 = not present), bit1=W/R, bit2=U/S.  pd480 should still equal
+         (phys|0x9B) for the BAR page to exist in this table. */
+      uart_puts_raw(" err=");
+      print_int_raw((int)(tf->error_code & 7));
+      uart_puts_raw(" cr3=");
+      {
+        uint64_t fatal_cr3;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(fatal_cr3));
+        uart_print_hex_raw(fatal_cr3);
+      }
+      uart_puts_raw(" pd480=");
+      {
+        extern uint64_t cpu_pd7[512];
+        uart_print_hex_raw(cpu_pd7[480]);
+      }
       uart_puts_raw("\n");
       /* GB-060: same rule as the resume-return halt -- if this CPU is holding
          proc_lock, give it back before stopping, so the survivors are not left

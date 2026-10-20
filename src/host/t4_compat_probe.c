@@ -37,6 +37,7 @@
 #include <poll.h>
 #include <sys/select.h>
 #include <signal.h>
+#include <sys/socket.h> /* GB-018 socket remainder: socketpair/AF_UNIX */
 #include <stdint.h>
 #include <pthread.h>
 
@@ -57,6 +58,22 @@ static void on_sigusr1(int s) { (void)s; g_sigusr1 = 1; }
 #endif
 static _Atomic(int) g_counter = 0;
 static volatile int g_futex_val = 0;
+
+/* GB-022: per-thread TLS isolation.  __thread storage is backed by the FS base
+ * each thread's context switch must save/restore; a thread layer that reuses or
+ * shares one TLS block (or that never switches per-task FS) makes every thread
+ * see the LAST writer's value.  We give each thread a DISTINCT seed, have it
+ * write and read back its own __thread slot, then assert it saw its own value —
+ * a shared/missing FS base diverges on the read-back.  errno is likewise
+ * per-thread (thread-local): after each thread faults a call, main must see its
+ * own errno==0 untouched. */
+static __thread int g_tls_seed = -1;
+static void *thr_tlsprobe(void *p) {
+  long seed = (long)p;
+  g_tls_seed = (int)seed;
+  errno = (int)(seed + 1000);          /* per-thread errno store */
+  return (void *)(long)g_tls_seed;     /* must be THIS thread's seed */
+}
 static void *thr_worker(void *p) { long n = (long)p;
   for (long i = 0; i < n; i++) { g_counter++; }
   return (void *)(n * 2);
@@ -324,6 +341,41 @@ int main(void) {
     report("poll_badfd_revents", pf2[0].revents);
   }
 
+  /* GB-018 (socket remainder, coord 2026-10-20): stream-socket readiness is a
+   * DISTINCT wake path from the pipe above — it goes through the socket/ring
+   * buffer, and is the one the compat layer is most likely to get wrong.  A
+   * socketpair(AF_UNIX, SOCK_STREAM) gives two connected stream sockets; a peer
+   * write flips the other end readable.  poll/select/pselect6 must report
+   * readiness there too.  Deterministic on both legs (kernel: SYS_SOCKETPAIR,
+   * host: real socketpair). */
+  {
+    int sv[2];
+    errno = 0;
+    report("sockpair", socketpair(AF_UNIX, SOCK_STREAM, 0, sv));
+    if (write(sv[1], "s", 1) != 1) report("sock_write", -1);
+
+    struct pollfd spf[1];
+    spf[0].fd = sv[0]; spf[0].events = POLLIN; spf[0].revents = 0;
+    errno = 0;
+    report("sockpoll_ready", poll(spf, 1, 0));
+    report("sockpoll_revents", spf[0].revents);
+
+    fd_set srf; FD_ZERO(&srf); FD_SET(sv[0], &srf);
+    struct timeval stv; stv.tv_sec = 0; stv.tv_usec = 0;
+    errno = 0;
+    report("sockselect_ready", select(sv[0] + 1, &srf, NULL, NULL, &stv));
+    report("sockselect_fdset", FD_ISSET(sv[0], &srf) ? 1 : 0);
+
+    sigset_t sempt; sigemptyset(&sempt);
+    fd_set srf2; FD_ZERO(&srf2); FD_SET(sv[0], &srf2);
+    struct timespec sts; sts.tv_sec = 0; sts.tv_nsec = 0;
+    errno = 0;
+    report("sockpselect_ready", pselect(sv[0] + 1, &srf2, NULL, NULL, &sts, &sempt));
+    report("sockpselect_fdset", FD_ISSET(sv[0], &srf2) ? 1 : 0);
+
+    close(sv[0]); close(sv[1]);
+  }
+
   /* GB-023: real signal delivery.
    * sigaction installs on_sigusr1; raise(SIGUSR1) must have it fire
    * synchronously (g_sigusr1 == 1) — a shim that drops the frame or never
@@ -386,6 +438,27 @@ int main(void) {
     report("arch_fs_roundtrip", after == cur);
 #undef ARCH_SET_FS
 #undef ARCH_GET_FS
+  }
+
+  /* GB-022: per-thread TLS + errno isolation.  Two threads each write a
+   * DISTINCT seed into the SAME __thread var and read it back; if the TLS
+   * block (FS base) were shared or not switched per-task, every thread would
+   * read the last writer's value and the read-back diverges from its own seed.
+   * Each thread also stores a per-thread errno; after they run, main must see
+   * its own errno==0 (errno is thread-local, not a shared global). */
+  {
+    pthread_t a, b;
+    void *ra = NULL, *rb = NULL;
+    errno = 0;
+    report("tls_create_a", pthread_create(&a, NULL, thr_tlsprobe, (void *)101L));
+    report("tls_create_b", pthread_create(&b, NULL, thr_tlsprobe, (void *)202L));
+    int ja = pthread_join(a, &ra);
+    int jb = pthread_join(b, &rb);
+    report("tls_join_a", ja);
+    report("tls_join_b", jb);
+    report("tls_thread_a_seed", (long)ra);   /* must be 101 */
+    report("tls_thread_b_seed", (long)rb);   /* must be 202 */
+    report("tls_main_errno_untouched", errno); /* errno is per-thread: 0 */
   }
 
   /* GB-021: threads + futex.

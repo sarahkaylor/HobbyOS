@@ -38,6 +38,29 @@ case "$ARCH_ARG" in
   *) echo "usage: t3_tier.sh [arm|intel] | t3_tier.sh police <log> [arch]" >&2; exit 2 ;;
 esac
 
+# Host-tool preconditions.  Measured failure this exists for: a run reported
+# "T3_intel: BUILD FAILED" because `mkfs.fat` was not on PATH -- while it was
+# installed at /usr/sbin/mkfs.fat the whole time.  Debian/Ubuntu keep the
+# mkfs family in sbin, which a non-root PATH often omits, so the build died
+# with "mkfs.fat: No such file or directory" and the tier blamed the code.
+# An environment gap must never read as a code defect: fix the PATH, and if a
+# tool is then still absent, exit 2 (environment), never 1 (build).
+case ":$PATH:" in
+  *:/usr/sbin:*|*:/sbin:*) ;;
+  *) PATH="/usr/sbin:/sbin:$PATH"; export PATH ;;
+esac
+_missing=""
+for _t in mkfs.fat mcopy qemu-system-$([ "$ARCH" = intel ] && echo x86_64 || echo aarch64); do
+  command -v "$_t" >/dev/null 2>&1 || _missing="$_missing $_t"
+done
+if [ -n "$_missing" ]; then
+  echo "T3_${ARCH}: ENVIRONMENT FAILURE — required host tool(s) not found:$_missing"
+  echo "  This is NOT a build or code defect: the tier cannot construct or boot the image."
+  echo "  PATH=$PATH"
+  exit 2
+fi
+
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
@@ -55,8 +78,9 @@ if [ -n "$POLICE_ONLY" ]; then
   if [ "${T3_SKIP_HALT_CHECK:-0}" = "1" ]; then halted=1; fi
   FAIL_LINES=$(grep -ac "FAIL" "$LOG" || true)
   KFAULT=$(grep -ac "FATAL kernel-mode fault" "$LOG" || true)
+  MEMFAULTS=$(grep -ac "memory fault" "$LOG" || true)
   LINES=$(wc -l <"$LOG")
-  echo "T3_${ARCH} (police ${LOG}): ${LINES} lines, ${FAIL_LINES} FAIL lines, halted=${halted}, kfault=${KFAULT}"
+  echo "T3_${ARCH} (police ${LOG}): ${LINES} lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} user memory faults, halted=${halted}, kfault=${KFAULT}"
   rc=0
   [ "$halted" = "1" ] || { echo "T3_${ARCH}: FAIL — no halt line"; rc=1; }
   [ "$KFAULT" = "0" ] || { echo "T3_${ARCH}: FAIL — ${KFAULT} FATAL kernel-mode fault line(s): the guest halted because the kernel crashed"; rc=1; }
@@ -64,6 +88,13 @@ if [ -n "$POLICE_ONLY" ]; then
   if [ "$FAIL_LINES" != "0" ]; then
     echo "T3_${ARCH}: FAIL — ${FAIL_LINES} FAIL line(s); first 5:"
     grep -an "FAIL" "$LOG" | head -5
+    rc=1
+  fi
+  # GB-068 regression guard (mirrors the run path): fail if user memory faults
+  # exceed the documented baseline ceiling (default 60; see run-path comment).
+  USER_FAULT_ALLOW="${T3_USER_FAULT_ALLOW:-60}"
+  if [ "$MEMFAULTS" -gt "$USER_FAULT_ALLOW" ]; then
+    echo "T3_${ARCH}: FAIL — ${MEMFAULTS} user memory faults exceeds the documented baseline ceiling ${USER_FAULT_ALLOW} (GB-068 regression)"
     rc=1
   fi
   [ "$rc" -eq 0 ] && echo "T3_${ARCH}: PASS (0 FAIL lines, halted)"
@@ -76,9 +107,34 @@ LOG="${T3_LOG:-$ROOT/obj/t3_${ARCH}.log}"
 mkdir -p "$(dirname "$LOG")"
 
 echo "=== T3 ($ARCH): build ==="
+# Image integrity guard.  A QEMU killed at the deadline can leave disk.img's BPB
+# half-flushed (measured: bytes-per-sector 0 at offset 11 instead of 512), and
+# because the image is then NEWER than its prerequisites, every later `make` treats
+# it as up to date and boots the corrupt image -- which presents as
+# "FAT-16 initialization failed!" and 369 console lines, not as a filesystem bug.
+# Regenerate rather than debug a filesystem that was never mounted.
+if [ -f "$ROOT/disk.img" ]; then
+  BPS=$(od -An -tu2 -j 11 -N 2 "$ROOT/disk.img" 2>/dev/null | tr -d ' ')
+  if [ "$BPS" != "512" ]; then
+    echo "T3_${ARCH}: disk.img BPB is corrupt (bytes/sector='$BPS', want 512) - regenerating the image"
+    rm -f "$ROOT/disk.img"
+  fi
+fi
 make ARCH="$ARCH" MODE=test hobbyos.elf disk.img >"$LOG.build" 2>&1 || {
   echo "T3_${ARCH}: BUILD FAILED"; tail -40 "$LOG.build"; exit 1;
 }
+# Staging hook, added after two probes silently tested nothing: this build
+# REGENERATES disk.img, so a file mcopy'd onto it by hand before the tier ran was
+# wiped and the guest never saw it (the loader correctly reported -ENOENT and the
+# probe looked like a loader failure).  Anything a probe needs on the image must be
+# staged here, after the build and before QEMU starts:
+#   T3_STAGE='mcopy -o -i "$ROOT/disk.img" /tmp/pie_hello ::PIE.BIN' bash tools/t3_tier.sh intel
+# It runs in this shell, so $ROOT is available; a failing stage command is fatal
+# rather than silently booting an image without the fixture.
+if [ -n "${T3_STAGE:-}" ]; then
+  echo "=== T3 ($ARCH): stage ==="
+  ROOT="$ROOT" sh -c "$T3_STAGE" || { echo "T3_${ARCH}: STAGE FAILED - refusing to boot a stale image"; exit 2; }
+fi
 
 echo "=== T3 ($ARCH): run (deadline ${T3_TIMEOUT}s, log $LOG) ==="
 : >"$LOG"
@@ -126,7 +182,7 @@ if command -v fuser >/dev/null 2>&1 && fuser "$ROOT/disk.img" >/dev/null 2>&1; t
   exit 2
 fi
 
-make ARCH="$ARCH" MODE=test run QEMU_ARGS="-display none ${T3_QEMU_ARGS:-}" >>"$LOG" 2>&1 &
+make -o disk.img ARCH="$ARCH" MODE=test run QEMU_ARGS="-display none ${T3_QEMU_ARGS:-}" >>"$LOG" 2>&1 &
 MAKE_PID=$!
 cleanup() {
   pkill -P "$MAKE_PID" 2>/dev/null || true
@@ -191,7 +247,41 @@ if [ "$halted" != "1" ] && grep -aq "System halt" "$LOG"; then
 fi
 
 FAIL_LINES=$(grep -ac "FAIL" "$LOG" || true)
-echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, halted=${halted}"
+# Report the user-mode fault count beside the FAIL count, always.  On 2026-10-19 I
+# read "44 memory faults after the ELF process ran" as ELF-induced damage and wrote
+# two posts on it; the control (runs with no ELF process at all) showed 54 and 55.
+# The baseline fault rate had been invisible for the whole session because the tier's
+# verdict line only counted FAIL lines, and the fault lines use different wording
+# ("[KERNEL] pid=N (IMG) memory fault VA=" not "FATAL kernel-mode fault").  A count
+# printed without a baseline in the same line invites exactly that mistake.
+MEMFAULTS=$(grep -ac "memory fault" "$LOG" || true)
+PROGS_EXITED=$(grep -aoE "Process [0-9]+: [A-Z0-9_.]+\.BIN exited" "$LOG" 2>/dev/null \
+  | grep -oE "[A-Z][A-Z0-9_]{1,12}\.BIN" | sort -u | wc -l | tr -d ' ')
+echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} user memory faults, ${PROGS_EXITED} programs exited, halted=${halted}"
+
+# GB-068 regression guard: the intel wave carries a documented, long-standing
+# baseline of user-mode fatal faults (in=PROT) from legacy v1 flat binaries
+# (SUBPRB/SHTEST/SHTEST2) touching their stack-like low-VA region — measured
+# 44-55 on seven 2026-10-19 logs INCLUDING runs with no ELF process (54, 55),
+# so it predates GB-013/GB-066 and is a property of the v1 image programs, not
+# a regression here.  Evidence + mechanism: the surviving fault row is
+#   [KERNEL] pid=N (SHTEST.BIN) memory fault VA=0x00000000755xxxxx ... in=PROT
+#   -> the v1 flat loader (v1_map_image) leaves that low stack region with a
+#   non-writable / non-present guardish mapping, so the legacy program dies on
+#   first stack use every wave.  That is the negotiated baseline.
+#
+# Guard: FAIL the tier if the fault count REGRESSES above the allowed ceiling
+# (new faults = the tier was green before but a change added MORE user faults).
+# T3_USER_FAULT_ALLOW sets the ceiling (default 60 = the measured 44-55 max plus
+# headroom); a run at or below it is the known baseline, a run above it is a
+# regression and must fail.  Set T3_USER_FAULT_ALLOW=0 to demand the '0 user
+# memory faults' DoD literally once the v1 stack region is fixed.
+USER_FAULT_ALLOW="${T3_USER_FAULT_ALLOW:-60}"
+MEMREG=0
+if [ "$MEMFAULTS" -gt "$USER_FAULT_ALLOW" ]; then
+  echo "T3_${ARCH}: FAIL — ${MEMFAULTS} user memory faults exceeds the documented baseline ceiling ${USER_FAULT_ALLOW} (GB-068 regression); a change added user faults the wave did not previously carry"
+  MEMREG=1
+fi
 
 # An environment failure must never be reported as a hang (see the pre-flight
 # guard above): if QEMU never got the image, this run says nothing about the
@@ -215,18 +305,30 @@ fi
 # halted without doing its work is not a pass either.
 KFAULT=$(grep -ac "FATAL kernel-mode fault" "$LOG" || true)
 LINES=$(wc -l <"$LOG")
-MIN_LINES="${T3_MIN_LINES:-1000}"
+# Completeness is measured by PROGRAMS THAT EXITED, not by console lines.  The line
+# floor was calibrated when a healthy wave carried ~2,300 lines of [IDLESTUCK]/
+# [ALIVE-SET] chatter; once GB-057-a made the wave halt properly, that chatter (and
+# therefore the line count) collapsed, and three complete waves that reached the
+# suite's last test were failed as "too little work" at 984-1,011 lines.  Measured
+# separation: complete runs print `Process N: X.BIN exited` for 60-63 distinct
+# programs; a truncated boot prints 0.  The line floor stays only as a low backstop
+# for a wave that never got going.
+MIN_PROGRAMS="${T3_MIN_PROGRAMS:-55}"
+EXITED_PROGS=$(grep -aoE "Process [0-9]+: [A-Z0-9_.]+\.BIN exited" "$LOG" 2>/dev/null \
+  | grep -oE "[A-Z][A-Z0-9_]{1,12}\.BIN" | sort -u | wc -l | tr -d ' ')
+MIN_LINES="${T3_MIN_LINES:-300}"
 if [ "$KFAULT" != "0" ]; then
   echo "T3_${ARCH}: FAIL — ${KFAULT} FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed"; rc=1
 fi
-if [ "$halted" = "1" ] && [ "$LINES" -lt "$MIN_LINES" ]; then
-  echo "T3_${ARCH}: FAIL — halted after only ${LINES} console lines (floor ${MIN_LINES}): too little work for a complete wave, so this cannot be a pass"; rc=1
+if [ "$halted" = "1" ] && [ "$EXITED_PROGS" -lt "$MIN_PROGRAMS" ]; then
+  echo "T3_${ARCH}: FAIL — only ${EXITED_PROGS} programs exited (floor ${MIN_PROGRAMS}): too little work for a complete wave, so this cannot be a pass"; rc=1
 fi
 if [ "$FAIL_LINES" != "0" ]; then
   echo "T3_${ARCH}: FAIL — ${FAIL_LINES} FAIL line(s); first 20:"
   grep -an "FAIL" "$LOG" | head -20
   rc=1
 fi
+[ "$MEMREG" = "1" ] && rc=1
 [ "$rc" -eq 0 ] && echo "T3_${ARCH}: PASS (0 FAIL lines, halted, no kernel fault, ${LINES} lines)"
 echo "T3_${ARCH} EXIT=$rc"
 exit "$rc"
