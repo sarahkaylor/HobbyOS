@@ -179,7 +179,10 @@ def main():
     existing = {}
     if not a.dry_run:
         for it in board.all_issues("all"):
-            m = re.match(r"^(GB-\d{3})\b", it["title"])
+            # (?![\w-]) so `GB-016-V` (verification ticket, §4.2) is not read as
+            # `GB-016` — the upsert would otherwise rewrite the implementation
+            # ticket's body with the verification one's.
+            m = re.match(r"^(GB-\d{3})(?![\w-])", it["title"])
             if m:
                 existing[m.group(1)] = it
 
