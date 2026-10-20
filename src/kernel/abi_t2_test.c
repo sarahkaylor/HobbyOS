@@ -2,6 +2,7 @@
 
 #include "fb_pixel.h"
 #include "linux_joystick.h"
+#include "linux_uname.h" /* GB-016 */
 #include "unit_test.h"
 #include <stdint.h>
 
@@ -60,12 +61,43 @@ static void test_joystick_axes(void) {
   EXPECT_EQ(HB_JP_ABS_HAT0Y, 0x11);
 }
 
+/* GB-016: the uname identity a compat process must see.  sysname=="Linux" and
+ * machine==per-arch so SDL/games sniff the right codepath; the layout is the
+ * golden 390-byte struct (validated in linux_layout_test).  A wrong sysname or
+ * machine breaks the *-V uname rows; a wrong size breaks the layout lock. */
+static void test_uname_identity(void) {
+  uart_puts("  Running test_uname_identity...\n");
+  tests_run++;
+  linux_utsname_t u;
+  EXPECT_EQ(linux_fill_utsname(&u), 0);
+  EXPECT_EQ(sizeof u, 390u);
+  /* sysname == "Linux"  (the shim SDL sniffs) */
+  EXPECT_EQ((u.sysname[0] == 'L' && u.sysname[1] == 'i' &&
+             u.sysname[2] == 'n' && u.sysname[3] == 'u' &&
+             u.sysname[4] == 'x' && u.sysname[5] == '\0'), 1);
+  /* NUL-padded, not overflowing the 65-byte arrays */
+  EXPECT_EQ((u.sysname[64] == '\0'), 1);
+  /* machine matches the arch (x86_64 or aarch64) */
+#ifdef __x86_64__
+  EXPECT_EQ((u.machine[0] == 'x' && u.machine[1] == '8' &&
+             u.machine[2] == '6' && u.machine[3] == '_' &&
+             u.machine[4] == '6' && u.machine[5] == '4' &&
+             u.machine[6] == '\0'), 1);
+#else
+  EXPECT_EQ((u.machine[0] == 'a' && u.machine[1] == 'a' &&
+             u.machine[2] == 'r' && u.machine[3] == 'c' &&
+             u.machine[4] == 'h' && u.machine[5] == '6' &&
+             u.machine[6] == '4' && u.machine[7] == '\0'), 1);
+#endif
+}
+
 void abi_t2_test_suite(void) {
   uart_puts("abi_t2_test_suite:\n");
   test_fb_pixel_pack();
   test_fb_pixel_geometry();
   test_joystick_buttons();
   test_joystick_axes();
+  test_uname_identity(); /* GB-016 */
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */
