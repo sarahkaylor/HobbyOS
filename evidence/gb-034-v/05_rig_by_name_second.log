@@ -1,0 +1,5 @@
+$ python3 tools/evidence_rig.py --game DOOM --bin DOOM.BIN --slot 0 --arch intel   # SECOND sample
+[rig] booting intel QEMU, capturing to evidence/DOOM/20261020T032202Z
+[rig] DOOM.BIN slot: expected=0 found=None
+[rig] FATAL: DOOM.BIN not in start-menu dump
+EXIT=1

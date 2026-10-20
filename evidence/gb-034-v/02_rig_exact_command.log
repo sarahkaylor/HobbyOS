@@ -1,0 +1,7 @@
+$ python3 tools/evidence_rig.py --game DOOM --arch intel   # exactly as the DoD writes it
+usage: evidence_rig.py [-h] --game GAME --bin BIN --slot SLOT
+                       [--arch {arm,intel}] [--root ROOT]
+                       [--checkpoints CHECKPOINTS] [--run-seconds RUN_SECONDS]
+                       [--input INPUT]
+evidence_rig.py: error: the following arguments are required: --bin, --slot
+EXIT=2

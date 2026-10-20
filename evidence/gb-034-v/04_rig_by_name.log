@@ -1,0 +1,14 @@
+$ python3 tools/evidence_rig.py --game DOOM --bin DOOM.BIN --slot 0 --arch intel
+[rig] booting intel QEMU, capturing to evidence/DOOM/20261020T031834Z
+Traceback (most recent call last):
+  File "/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-7be048b7/tools/evidence_rig.py", line 279, in <module>
+    main()
+    ~~~~^^
+  File "/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-7be048b7/tools/evidence_rig.py", line 194, in main
+    q = boot(qemu_make, serial_log, qmp_sock, arch)
+  File "/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-7be048b7/tools/evidence_rig.py", line 119, in boot
+    q = QMP(qmp_sock)
+  File "/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-7be048b7/tools/evidence_rig.py", line 53, in __init__
+    raise RuntimeError("QMP socket never appeared: " + path)
+RuntimeError: QMP socket never appeared: /tmp/evidence-qmp-DOOM
+EXIT=1

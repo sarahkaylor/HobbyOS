@@ -1,0 +1,25 @@
+$ mdir -i disk.img ::/ | grep -i doom   # DOOM on the shipped image?
+grep EXIT=1 (1 = no match)
+
+$ mdir -i disk.img ::/ | wc -l
+177
+
+$ mdir -i disk.img ::/ | head -12 (game bins present)
+ Volume in drive : has no label
+ Volume Serial Number is C945-6971
+Directory for ::/
+
+EFI          <DIR>     2026-10-20   3:14 
+boot         <DIR>     2026-10-20   3:14 
+home         <DIR>     2026-10-20   3:14 
+nfs          <DIR>     2026-10-20   3:14 
+mnt          <DIR>     2026-10-20   3:14 
+TESTDIR      <DIR>     2026-10-20   3:14 
+tmp          <DIR>     2026-10-20   3:14 
+TOOLS        <DIR>     2026-10-20   3:14 
+PONG_T   BIN    562320 2026-10-20   3:14 
+PONG     BIN     69960 2026-10-20   3:14 
+STARDUST BIN     72536 2026-10-20   3:14 
+XNIBBLER BIN     88440 2026-10-20   3:14 
+XCRYPT   BIN    117184 2026-10-20   3:14 
+NES      BIN    173472 2026-10-20   3:14 
