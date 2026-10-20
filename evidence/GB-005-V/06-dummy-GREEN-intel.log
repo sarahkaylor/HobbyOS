@@ -1,0 +1,3 @@
+T3_intel (police obj/parity/drill/intel.log): 1101 lines, 0 FAIL lines, 0 user memory faults, halted=1, kfault=0
+T3_intel: PASS (0 FAIL lines, halted)
+T3_intel EXIT=0

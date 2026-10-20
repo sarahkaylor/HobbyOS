@@ -1,0 +1,10 @@
+=== RUN 1 (broken, 7ad7f53) ===
+=== PARITY SUMMARY ===
+  window: 0s   budget: 0s (0 = unbounded)
+  arm   exit: 0     (GREEN)
+  intel exit: 1   (RED)
+  sequential: 1
+  PARITY: intel is RED (log obj/parity/intel.log)
+
+PARITY: FAIL (two-arch parity: both arches must be green and within budget)
+RUN1_EXIT=1

@@ -1,0 +1,9 @@
+=== RUN 2 (fixed, 50ab94f) ===
+=== PARITY SUMMARY ===
+  window: 0s   budget: 0s (0 = unbounded)
+  arm   exit: 0     (GREEN)
+  intel exit: 0   (GREEN)
+  sequential: 1
+
+PARITY: PASS — both arches green (window 0s; no budget set)
+RUN2_EXIT=0

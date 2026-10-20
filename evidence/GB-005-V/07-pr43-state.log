@@ -1,0 +1,10 @@
+number = 43
+state = open
+merged = False
+mergeable = None
+mergeable_state = unknown
+draft = False
+head: ticket/05-merge-gate 51e033a7ac0e5b80624fde9a4bc3fd420735981a
+base: main 71645f7608f8a25c951da546d0b57555b9a3e5c4
+updated_at: 2026-10-20T00:30:26Z commits: 1 changed_files: 5
+title: tests(infra): merge-gate CI + branch/PR workflow (GB-005)
