@@ -1,0 +1,12 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-8d823e2d/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 880 console lines, 5 FAIL lines, 48 user memory faults, 63 programs exited, halted=1
+T3_intel: FAIL — 5 FAIL line(s); first 20:
+532:Graphics Validation: FAILED (Pixel mismatch!)
+806:  FAIL: line startpoint
+807:  FAIL: line midpoint
+808:  FAIL: line endpoint
+819:GRAPHICS TESTS FAILED
+T3_intel EXIT=1
+t3 intel EXIT=1
