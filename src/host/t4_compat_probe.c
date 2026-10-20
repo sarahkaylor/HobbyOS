@@ -57,6 +57,22 @@ static void on_sigusr1(int s) { (void)s; g_sigusr1 = 1; }
 #endif
 static _Atomic(int) g_counter = 0;
 static volatile int g_futex_val = 0;
+
+/* GB-022: per-thread TLS isolation.  __thread storage is backed by the FS base
+ * each thread's context switch must save/restore; a thread layer that reuses or
+ * shares one TLS block (or that never switches per-task FS) makes every thread
+ * see the LAST writer's value.  We give each thread a DISTINCT seed, have it
+ * write and read back its own __thread slot, then assert it saw its own value —
+ * a shared/missing FS base diverges on the read-back.  errno is likewise
+ * per-thread (thread-local): after each thread faults a call, main must see its
+ * own errno==0 untouched. */
+static __thread int g_tls_seed = -1;
+static void *thr_tlsprobe(void *p) {
+  long seed = (long)p;
+  g_tls_seed = (int)seed;
+  errno = (int)(seed + 1000);          /* per-thread errno store */
+  return (void *)(long)g_tls_seed;     /* must be THIS thread's seed */
+}
 static void *thr_worker(void *p) { long n = (long)p;
   for (long i = 0; i < n; i++) { g_counter++; }
   return (void *)(n * 2);
@@ -386,6 +402,27 @@ int main(void) {
     report("arch_fs_roundtrip", after == cur);
 #undef ARCH_SET_FS
 #undef ARCH_GET_FS
+  }
+
+  /* GB-022: per-thread TLS + errno isolation.  Two threads each write a
+   * DISTINCT seed into the SAME __thread var and read it back; if the TLS
+   * block (FS base) were shared or not switched per-task, every thread would
+   * read the last writer's value and the read-back diverges from its own seed.
+   * Each thread also stores a per-thread errno; after they run, main must see
+   * its own errno==0 (errno is thread-local, not a shared global). */
+  {
+    pthread_t a, b;
+    void *ra = NULL, *rb = NULL;
+    errno = 0;
+    report("tls_create_a", pthread_create(&a, NULL, thr_tlsprobe, (void *)101L));
+    report("tls_create_b", pthread_create(&b, NULL, thr_tlsprobe, (void *)202L));
+    int ja = pthread_join(a, &ra);
+    int jb = pthread_join(b, &rb);
+    report("tls_join_a", ja);
+    report("tls_join_b", jb);
+    report("tls_thread_a_seed", (long)ra);   /* must be 101 */
+    report("tls_thread_b_seed", (long)rb);   /* must be 202 */
+    report("tls_main_errno_untouched", errno); /* errno is per-thread: 0 */
   }
 
   /* GB-021: threads + futex.
