@@ -37,6 +37,7 @@
 #include <poll.h>
 #include <sys/select.h>
 #include <signal.h>
+#include <sys/socket.h> /* GB-018 socket remainder: socketpair/AF_UNIX */
 #include <stdint.h>
 #include <pthread.h>
 
@@ -338,6 +339,41 @@ int main(void) {
     errno = 0;
     report("poll_badfd", poll(pf2, 1, 0));
     report("poll_badfd_revents", pf2[0].revents);
+  }
+
+  /* GB-018 (socket remainder, coord 2026-10-20): stream-socket readiness is a
+   * DISTINCT wake path from the pipe above — it goes through the socket/ring
+   * buffer, and is the one the compat layer is most likely to get wrong.  A
+   * socketpair(AF_UNIX, SOCK_STREAM) gives two connected stream sockets; a peer
+   * write flips the other end readable.  poll/select/pselect6 must report
+   * readiness there too.  Deterministic on both legs (kernel: SYS_SOCKETPAIR,
+   * host: real socketpair). */
+  {
+    int sv[2];
+    errno = 0;
+    report("sockpair", socketpair(AF_UNIX, SOCK_STREAM, 0, sv));
+    if (write(sv[1], "s", 1) != 1) report("sock_write", -1);
+
+    struct pollfd spf[1];
+    spf[0].fd = sv[0]; spf[0].events = POLLIN; spf[0].revents = 0;
+    errno = 0;
+    report("sockpoll_ready", poll(spf, 1, 0));
+    report("sockpoll_revents", spf[0].revents);
+
+    fd_set srf; FD_ZERO(&srf); FD_SET(sv[0], &srf);
+    struct timeval stv; stv.tv_sec = 0; stv.tv_usec = 0;
+    errno = 0;
+    report("sockselect_ready", select(sv[0] + 1, &srf, NULL, NULL, &stv));
+    report("sockselect_fdset", FD_ISSET(sv[0], &srf) ? 1 : 0);
+
+    sigset_t sempt; sigemptyset(&sempt);
+    fd_set srf2; FD_ZERO(&srf2); FD_SET(sv[0], &srf2);
+    struct timespec sts; sts.tv_sec = 0; sts.tv_nsec = 0;
+    errno = 0;
+    report("sockpselect_ready", pselect(sv[0] + 1, &srf2, NULL, NULL, &sts, &sempt));
+    report("sockpselect_fdset", FD_ISSET(sv[0], &srf2) ? 1 : 0);
+
+    close(sv[0]); close(sv[1]);
   }
 
   /* GB-023: real signal delivery.
