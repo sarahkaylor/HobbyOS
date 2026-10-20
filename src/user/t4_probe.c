@@ -23,6 +23,9 @@
  */
 #include <unistd.h>
 #include <string.h>
+#include <fcntl.h>
+#include <sys/utsname.h>
+#include <sys/random.h>
 
 static void pstr(const char *s) {
   size_t n = 0; while (s[n]) n++;
@@ -68,6 +71,38 @@ int main(int argc, char **argv) {
     static const unsigned char msg[] = "hi\n";
     long r = write(1, msg, 3);
     prow("write3", r, (r < 0) ? (r == -1 ? 9 : (long)(-r)) : 0, msg, 3);
+  }
+
+  /* GB-073: emit every row the M1 -V DoDs name.  All but write3 were the
+   * defect's ground: uname/urandom/null/getrandom rows existed ONLY in the
+   * host model (t4_compat_probe.c), never in the guest probe — so GB-016-V /
+   * GB-017-V etc. were unmeasurable by construction.  Leg A (Linux) runs all
+   * of these through the real syscalls; leg B (HobbyOS-intel) does the same
+   * once the GB-014 dispatch lands.  rc/errno are the deterministic values
+   * (payloads deliberately not compared for the random rows). */
+  {
+    struct utsname u;
+    long urc = uname(&u);
+    prow("uname_rc", urc, urc < 0 ? (long)(-urc) : 0, NULL, 0);
+    prow("uname_sysname_linux", strcmp(u.sysname, "Linux") == 0, 0, NULL, 0);
+    prow("uname_machine_x86_64", strcmp(u.machine, "x86_64") == 0, 0, NULL, 0);
+  }
+  {
+    unsigned char rnd[16];
+    long gr = getrandom(rnd, sizeof rnd, 0);
+    prow("getrandom_16", gr, gr < 0 ? (long)(-gr) : 0, NULL, 0);
+    int ur = open("/dev/urandom", O_RDONLY);
+    prow("urandom_open", ur, ur < 0 ? 2 : 0, NULL, 0);
+    long urb = read(ur, rnd, sizeof rnd);
+    prow("urandom_read16", urb, urb < 0 ? 2 : 0, NULL, 0);
+    int nw = open("/dev/null", O_WRONLY);
+    prow("null_open_w", nw, nw < 0 ? 2 : 0, NULL, 0);
+    long nwb = write(nw, "abc", 3);
+    prow("null_write3", nwb, nwb < 0 ? 2 : 0, NULL, 0);
+    int nr = open("/dev/null", O_RDONLY);
+    prow("null_open_r", nr, nr < 0 ? 2 : 0, NULL, 0);
+    char c; long nrb = read(nr, &c, 1);
+    prow("null_read1", nrb, nrb < 0 ? 2 : 0, NULL, 0);
   }
 
   pstr("t4-probe-arrived\n");

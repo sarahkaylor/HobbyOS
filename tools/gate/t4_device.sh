@@ -32,6 +32,67 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LEGA="${T4_LEGA_OUT:-$ROOT/obj/t4_legA.out}"
 SERIAL="${T4_SERIAL:-$ROOT/obj/t3_intel.log}"
 TIMEOUT="${T4_TIMEOUT:-120}"
+GOLDEN="${T4_ROWS_GOLDEN:-$ROOT/tests/fixtures/abi/t4_rows.golden}"
+HOSTPROBE="${T4_HOST_PROBE:-$ROOT/src/host/t4_compat_probe.c}"
+DEVPROBE="${T4_DEV_PROBE:-$ROOT/src/user/t4_probe.c}"
+
+# ---------------------------------------------------------------------------
+# --check: GB-073.  Fail when the guest probe and the host model disagree on
+# the row-name set the M1 -V DoDs name.  Every golden row must be emitted by
+# BOTH probes, the device probe must carry no extra row, and deleting a row
+# here or in either probe must fail the gate.
+# Alias: the host model names its stdout-write row 'write_stdout' while the
+# device probe names the identical write 'write3' — they are the same logical
+# row, mapped below so the parity line agrees.
+host_alias() { [ "$1" = "write3" ] && echo write_stdout || echo "$1"; }
+# ---------------------------------------------------------------------------
+if [ "${1:-}" = "--check" ]; then
+  fail=0
+  echo "=== t4_device --check: row-name set parity (GB-073) ==="
+  [ -f "$GOLDEN" ]      || { echo "  FAIL: golden manifest '$GOLDEN' absent"; fail=1; }
+  [ -f "$DEVPROBE" ]    || { echo "  FAIL: device probe '$DEVPROBE' absent"; fail=1; }
+  [ -f "$HOSTPROBE" ]   || { echo "  FAIL: host model '$HOSTPROBE' absent"; fail=1; }
+  [ -v LEGA ] && [ -f "$LEGA" ] && [ -s "$LEGA" ] || {
+    echo "  fail: leg A ('$LEGA') absent — will skip emitted-row re-check (gate still checks source)"; }
+
+  # golden set
+  mapfile -t G < <(grep -v '^#' "$GOLDEN" 2>/dev/null | grep -v '^$')
+  echo "  golden rows: ${#G[@]}"
+  # device probe (guest) — from leg A if present, else from prow("...") in source
+  if [ -f "$LEGA" ] && [ -s "$LEGA" ]; then
+    mapfile -t A < <(grep '^row=' "$LEGA" | sed -E 's/^row=([^ ]+).*/\1/')
+  else
+    mapfile -t A < <(grep -o 'prow("[^"]*"' "$DEVPROBE" | sed -E 's/prow\("([^"]*)"/\1/')
+  fi
+  echo "  device probe rows: ${#A[@]}"
+  # host model — report("rowname", ...)
+  mapfile -t H < <(grep -o 'report("[^"]*"' "$HOSTPROBE" | sed -E 's/report\("([^"]*)"/\1/')
+
+  # every golden row must be emitted by BOTH (host name via alias)
+  for r in "${G[@]}"; do
+    inA=0; for x in "${A[@]}"; do [ "$x" = "$r" ] && inA=1; done
+    hr="$(host_alias "$r")"
+    inH=0; for x in "${H[@]}"; do [ "$x" = "$hr" ] && inH=1; done
+    if [ "$inA" = "1" ] && [ "$inH" = "1" ]; then
+      echo "  PASS row: $r (device+host)"
+    else
+      echo "  FAIL row: $r (device=$inA host=$inH) — a row the M1 -V DoD names is missing from a probe"
+      fail=1
+    fi
+  done
+  # device must not carry EXTRA rows outside the golden (a W0 device probe that
+  # emits a row the -V DoDs do not name is a row no DoD checks — a smaller,
+  # unchecked surface).  The host model is a SUPERSET compat probe (it also
+  # carries GB-019/021/022/023 rows), so it must CONTAIN every golden row but is
+  # allowed its own extra rows.
+  for x in "${A[@]}"; do
+    inG=0; for g in "${G[@]}"; do [ "$g" = "$x" ] && inG=1; done
+    [ "$inG" = "1" ] || { echo "  FAIL: device probe emits extra row '$x' not in golden"; fail=1; }
+  done
+  if [ "$fail" = "0" ]; then echo "t4_device --check: PASS — device probe carries exactly the golden row-name set, and the host model contains every golden row."; exit 0; fi
+  echo "t4_device --check: FAIL"
+  exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # --self-test: prove the gate can FAIL (clauses 2 and 3).  Uses synthetic
