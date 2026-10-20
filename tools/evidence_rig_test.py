@@ -92,11 +92,41 @@ def test_report_pointer():
         shutil.rmtree(d)
 
 
+def test_resolve_slot_by_name():
+    # GB-059: the rig must LAUNCH the slot it found by name, never a caller
+    # (magic) index.  This locks the XNIBBLER -> CONSOLE.BIN false-launch fix.
+    dump = ("[MENU] 0=CONSOLE.BIN\n"
+            "[MENU] 16=PONG.BIN\n"
+            "[MENU] 18=XNIBBLER.BIN\n"
+            "[MENU] 19=XCRYPT.BIN\n"
+            "[MENU] count=128\n")
+    with tempfile.NamedTemporaryFile("w", suffix=".log", delete=False) as f:
+        f.write(dump)
+        sp = f.name
+    try:
+        slot, warn = rig.resolve_launch_slot(sp, "XNIBBLER.BIN")
+        check(slot == 18 and warn == "", "resolve by name -> slot 18")
+        # magic/stale caller slot must NOT win: still launches by-name 18
+        slot, warn = rig.resolve_launch_slot(sp, "XNIBBLER.BIN", provided=0)
+        check(slot == 18 and "not the magic index" in warn,
+              "launches by name (18), ignores stale --slot 0 (false-launch fix)")
+        slot, warn = rig.resolve_launch_slot(sp, "PONG.BIN", provided=16)
+        check(slot == 16 and warn == "", "correct provided slot agrees, no warn")
+        slot, warn = rig.resolve_launch_slot(sp, "NOPE.BIN")
+        check(slot is None and "not in start-menu dump" in warn,
+              "unknown title -> None (FATAL path)")
+        check(rig.derive_bin("xnibbler") == "XNIBBLER.BIN", "derive_bin xnibbler")
+        check(rig.derive_bin("doom.bin") == "DOOM.BIN", "derive_bin already .BIN")
+    finally:
+        os.unlink(sp)
+
+
 if __name__ == "__main__":
     test_menu_parse()
+    test_resolve_slot_by_name()
     test_manifest_bundle()
     test_report_pointer()
-    print(f"\nTests run: {3}, failed: {len(FAILS)}")
+    print(f"\nTests run: {5}, failed: {len(FAILS)}")
     if FAILS:
         print("EVIDENCE RIG TEST FAILED")
         sys.exit(1)
