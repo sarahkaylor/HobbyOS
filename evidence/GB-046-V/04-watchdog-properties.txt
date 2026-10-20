@@ -1,0 +1,8 @@
+3 identical samples, window=4 -> observed=[False, False, False] frozen=False
+4 identical samples, window=4 -> observed=[False, False, False, True] frozen=True
+5 identical samples, window=4 -> observed=[False, False, False, True, True] frozen=True
+
+NES is run with hold=6 -> samples = max(2, 6//2) = 3
+XNIBBLER/XCRYPT with hold=8 -> samples = 4
+
+alternating two hashes (one pixel changed each frame) -> frozen = False

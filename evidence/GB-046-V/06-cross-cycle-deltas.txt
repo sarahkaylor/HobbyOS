@@ -1,0 +1,3 @@
+XNIBBLER.BIN   c0s0 vs c99-XNIBBLER.BIN-s3.ppm differing px: 2073437 (99.9921%)  bbox=(0, 0, 1919, 1079)
+XCRYPT.BIN     c0s0 vs c99-XCRYPT.BIN-s3.ppm  differing px: 2046580 (98.6970%)  bbox=(0, 0, 1919, 1079)
+NES.BIN        c0s0 vs c99-NES.BIN-s2.ppm     differing px: 2073600 (100.0000%)  bbox=(0, 0, 1919, 1079)

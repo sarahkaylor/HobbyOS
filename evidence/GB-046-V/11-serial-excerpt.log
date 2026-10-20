@@ -1,0 +1,163 @@
+ld.lld -T linker.ld -o hobbyos.elf obj/arm/boot.o obj/arm/fpu.o obj/arm/setjmp.o obj/arm/abi_t2_test.o obj/arm/blk_cache.o obj/arm/blk_cache_press_test.o obj/arm/blk_cache_test.o obj/arm/dhcp.o obj/arm/elf_image.o obj/arm/elf_loader.o obj/arm/evdev.o obj/arm/evdev_test.o obj/arm/fat16.o obj/arm/fat16_test.o obj/arm/fb_ioctl.o obj/arm/fb_ioctl_test.o obj/arm/fb_mmap.o obj/arm/fb_mmap_test.o obj/arm/frame.o obj/arm/frame_test.o obj/arm/fs.o obj/arm/fs_test.o obj/arm/input_node.o obj/arm/input_node_test.o obj/arm/iommu_vtd.o obj/arm/ipc_proto.o obj/arm/locks_test.o obj/arm/main.o obj/arm/math_test.o obj/arm/mmu_test.o obj/arm/net.o obj/arm/net_rdma.o obj/arm/net_rdma_test.o obj/arm/net_test.o obj/arm/nfs.o obj/arm/nfs_proto.o obj/arm/nfs_test.o obj/arm/pipe.o obj/arm/pipe_test.o obj/arm/process.o obj/arm/process_test.o obj/arm/program_loader.o obj/arm/program_loader_test.o obj/arm/test_fw_cfg.o obj/arm/test_smp.o obj/arm/time.o obj/arm/time_test.o obj/arm/timer_test.o obj/arm/trap_test.o obj/arm/unit_test.o obj/arm/unix.o obj/arm/unix_test.o obj/arm/vfs.o obj/arm/virtio_blk.o obj/arm/virtio_blk_test.o obj/arm/virtio_gpu.o obj/arm/virtio_gpu_test.o obj/arm/virtio_gpu_x64.o obj/arm/virtio_input.o obj/arm/virtio_input_test.o obj/arm/virtio_net.o obj/arm/virtio_net_test.o obj/arm/vm.o obj/arm/vm_test.o obj/arm/cpu.o obj/arm/gic.o obj/arm/locks.o obj/arm/mmu.o obj/arm/rtc.o obj/arm/smp.o obj/arm/timer.o obj/arm/trap.o obj/arm/uart.o
+[browser] third_party/webkit-hobbyos/cache/browser-arm.bin.xz (cache) -> obj/arm/browser.bin
+[tools] LLVM dist staging present
+# Startup disk: 1 GiB (user-requested floor; FAT16 tops out at 2 GiB).
+# mkfs.fat auto-picks the cluster size (32 KiB @ 1 GiB); the kernel
+# fat16.c layout math is BPB data-driven (bpb_sectors_per_cluster), so
+# no driver change is needed for the larger disk/clusters.
+dd if=/dev/zero of=disk.img bs=1M count=1024
+1024+0 records in
+1024+0 records out
+1073741824 bytes (1.1 GB, 1.0 GiB) copied, 0.334887 s, 3.2 GB/s
+mkfs.fat -F 16 disk.img
+mkfs.fat 4.2 (2021-01-31)
+mmd -i disk.img ::/EFI
+mmd -i disk.img ::/EFI/BOOT
+mmd -i disk.img ::/boot
+mmd -i disk.img ::/home
+mmd -i disk.img ::/nfs
+mmd -i disk.img ::/mnt
+mmd -i disk.img ::/TESTDIR
+mmd -i disk.img ::/tmp
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+# build-tools at their frozen /TOOLS/ paths (Makefile.hobbyos sketch).
+mmd -i disk.img ::/TOOLS
+# L3 (selfhost W-A): VFAT long-name build-payload fixture dirs (mtools-written).
+mmd -i disk.img ::/src
+mmd -i disk.img ::/src/kernel
+mmd -i disk.img ::/src/user_include
+mmd -i disk.img ::/src/user_include/graphics
+mmd -i disk.img ::/third_party
+mmd -i disk.img ::/third_party/libcxx-21.1.8
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include
+mcopy -i disk.img tests/fixtures/E2E.TXT ::/E2E.TXT
+mcopy -i disk.img tests/fixtures/DRAGME.TXT ::/DRAGME.TXT
+mcopy -i disk.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+mcopy -i disk.img bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
+# [inos-build-kernel] canonical ARM boot config from the repo file
+...
+[... 1,297,914 lines total; excerpt: head 40 + tail 120 ...]
+...
+  [ALIVE-SET] slot=14 pid=14 st=5 parent=1 claimed_by=-1 NES.BIN
+  [ALIVE-SET] slot=15 pid=15 st=5 parent=1 claimed_by=-1 XNIBBLER.BIN
+  [ALIVE-SET] slot=16 pid=16 st=5 parent=1 claimed_by=4 XCRYPT.BIN
+  [ALIVE-SET] slot=17 pid=17 st=5 parent=1 claimed_by=-1 NES.BIN
+  [ALIVE-SET] slot=18 pid=18 st=5 parent=1 claimed_by=-1 XNIBBLER.BIN
+  [ALIVE-SET] slot=19 pid=19 st=3 parent=1 claimed_by=0 XCRYPT.BIN
+  [ALIVE-SET] slot=20 pid=20 st=5 parent=1 claimed_by=-1 NES.BIN
+  [ALIVE-SET] slot=22 pid=22 st=3 parent=1 claimed_by=7 XCRYPT.BIN
+  [ALIVE-SET] slot=23 pid=23 st=5 parent=1 claimed_by=-1 NES.BIN
+  [ALIVE-SET] slot=25 pid=25 st=3 parent=1 claimed_by=5 XCRYPT.BIN
+  [ALIVE-SET] slot=26 pid=26 st=3 parent=1 claimed_by=2 XCRYPT.BIN
+  [ALIVE-SET] slot=28 pid=28 st=3 parent=1 claimed_by=3 XCRYPT.BIN
+  [ALIVE-SET] slot=29 pid=29 st=5 parent=1 claimed_by=-1 NES.BIN
+  [ALIVE-SET] slot=31 pid=31 st=3 parent=1 claimed_by=1 XCRYPT.BIN
+  [ALIVE-SET] slot=32 pid=32 st=5 parent=1 claimed_by=-1 NES.BIN
+v2 loader: PID=34 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+]V 1~[2J[1;1H[LAUNCH] NES.BIN
+Loading program for scheduler (v2 AS): NES.BIN
+/NES.BIN
+v2 loader: image mapped (lazy), bytes=173472 pages=43 first=in elap=1ms
+v2 loader: PID=35 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[DEBUG] Before eret, tf->regs[0] = 76597 ELR = 0x00000010000009CC
+[LAUNCH] XNIBBLER.BIN
+Loading program for scheduler (v2 AS): XNIBBLER.BIN
+/XNIBBLER.BIN
+v2 loader: image mapped (lazy), bytes=88440 pages=22 first=in elap=0ms
+v2 loader: PID=36 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[APP] XNIBBLER started
+]T xnibbler~]X 520;360~[KERNEL] Process 36: XNIBBLER.BIN exited unexpectedly or gracefully.
+[LAUNCH] XCRYPT.BIN
+Loading program for scheduler (v2 AS): XCRYPT.BIN
+/XCRYPT.BIN
+v2 loader: image mapped (lazy), bytes=117184 pages=29 first=in elap=3ms
+v2 loader: PID=37 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+]V 1~[2J[1;1H[LAUNCH] NES.BIN
+Loading program for scheduler (v2 AS): NES.BIN
+/NES.BIN
+v2 loader: image mapped (lazy), bytes=173472 pages=43 first=in elap=1ms
+v2 loader: PID=38 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[DEBUG] Before eret, tf->regs[0] = 76597 ELR = 0x00000010000009CC
+[LAUNCH] XNIBBLER.BIN
+Loading program for scheduler (v2 AS): XNIBBLER.BIN
+/XNIBBLER.BIN
+v2 loader: image mapped (lazy), bytes=88440 pages=22 first=in elap=1ms
+v2 loader: PID=39 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[APP] XNIBBLER started
+]T xnibbler~]X 520;360~[KERNEL] Process 39: XNIBBLER.BIN exited unexpectedly or gracefully.
+[LAUNCH] XCRYPT.BIN
+Loading program for scheduler (v2 AS): XCRYPT.BIN
+/XCRYPT.BIN
+v2 loader: image mapped (lazy), bytes=117184 pages=29 first=in elap=3ms
+v2 loader: PID=40 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+]V 1~[2J[1;1H[LAUNCH] NES.BIN
+Loading program for scheduler (v2 AS): NES.BIN
+/NES.BIN
+v2 loader: image mapped (lazy), bytes=173472 pages=43 first=in elap=0ms
+v2 loader: PID=41 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[DEBUG] Before eret, tf->regs[0] = 76597 ELR = 0x00000010000009CC
+[LAUNCH] STARDUST.BIN
+Loading program for scheduler (v2 AS): STARDUST.BIN
+/STARDUST.BIN
+v2 loader: image mapped (lazy), bytes=72536 pages=18 first=in elap=1ms
+v2 loader: PID=42 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+STARDUST: Starting...
+STARDUST: Dodge the meteors! Left/Right (or A/D) to move, R to reset, Q to quit.
+Stardust: Quitting.
+[KERNEL] Process 42: STARDUST.BIN exited unexpectedly or gracefully.
+[LAUNCH] XCRYPT.BIN
+Loading program for scheduler (v2 AS): XCRYPT.BIN
+/XCRYPT.BIN
+v2 loader: image mapped (lazy), bytes=117184 pages=29 first=in elap=7ms
+v2 loader: PID=43 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+]V 1~[2J[1;1H[LAUNCH] NES.BIN
+Loading program for scheduler (v2 AS): NES.BIN
+/NES.BIN
+v2 loader: image mapped (lazy), bytes=173472 pages=43 first=in elap=0ms
+v2 loader: PID=44 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[DEBUG] Before eret, tf->regs[0] = 76597 ELR = 0x00000010000009CC
+[LAUNCH] STARDUST.BIN
+Loading program for scheduler (v2 AS): STARDUST.BIN
+/STARDUST.BIN
+v2 loader: image mapped (lazy), bytes=72536 pages=18 first=in elap=1ms
+v2 loader: PID=45 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+STARDUST: Starting...
+STARDUST: Dodge the meteors! Left/Right (or A/D) to move, R to reset, Q to quit.
+Stardust: Quitting.
+[KERNEL] Process 45: STARDUST.BIN exited unexpectedly or gracefully.
+[LAUNCH] XCRYPT.BIN
+Loading program for scheduler (v2 AS): XCRYPT.BIN
+/XCRYPT.BIN
+v2 loader: image mapped (lazy), bytes=117184 pages=29 first=in elap=1ms
+v2 loader: PID=46 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+]V 1~[2J[1;1H[LAUNCH] NES.BIN
+Loading program for scheduler (v2 AS): NES.BIN
+/NES.BIN
+v2 loader: image mapped (lazy), bytes=173472 pages=43 first=in elap=0ms
+v2 loader: PID=47 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[DEBUG] Before eret, tf->regs[0] = 76597 ELR = 0x00000010000009CC
+[LAUNCH] XNIBBLER.BIN
+Loading program for scheduler (v2 AS): XNIBBLER.BIN
+/XNIBBLER.BIN
+v2 loader: image mapped (lazy), bytes=88440 pages=22 first=in elap=0ms
+v2 loader: PID=48 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+[APP] XNIBBLER started
+]T xnibbler~]X 520;360~[KERNEL] Process 48: XNIBBLER.BIN exited unexpectedly or gracefully.
+[LAUNCH] MILLIPED.BIN
+Loading program for scheduler (v2 AS): MILLIPED.BIN
+/MILLIPED.BIN
+v2 loader: image mapped (lazy), bytes=76904 pages=19 first=in elap=3ms
+v2 loader: PID=49 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=3
+Millipede: Starting...
+Millipede: Graphics initialized. Use arrow keys to move, Space to shoot.
+Millipede: Press Q to quit, R to restart.
+[GPUDIAG] gpu wait > 5 ms: ack=31465 used=31466
+[GPUDIAG] gpu wait > 4 ms: ack=52435 used=52436
+[GPUDIAG] gpu wait > 4 ms: ack=17075 used=17076
+[GPUDIAG] gpu wait > 4 ms: ack=38831 used=38832
+[GPUDIAG] gpu wait > 4 ms: ack=535 used=536
+[GPUDIAG] gpu wait > 4 ms: ack=44737 used=44738
+make: *** [Makefile:2328: run] Killed

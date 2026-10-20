@@ -1,0 +1,2709 @@
+{
+  "arch": "arm",
+  "games": "XNIBBLER.BIN:8,XCRYPT.BIN:8,NES.BIN",
+  "cycles": 100,
+  "results": [
+    {
+      "cycle": 0,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.12,
+      "mem_ok": true
+    },
+    {
+      "cycle": 0,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 0,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 1,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.01,
+      "mem_ok": true
+    },
+    {
+      "cycle": 1,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 1,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.02,
+      "mem_ok": true
+    },
+    {
+      "cycle": 2,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.01,
+      "mem_ok": true
+    },
+    {
+      "cycle": 2,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.04,
+      "mem_ok": true
+    },
+    {
+      "cycle": 2,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 3,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 3,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.01,
+      "mem_ok": true
+    },
+    {
+      "cycle": 3,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 4,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 4,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.01,
+      "mem_ok": true
+    },
+    {
+      "cycle": 4,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 5,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.01,
+      "mem_ok": true
+    },
+    {
+      "cycle": 5,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 5,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 6,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 6,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 6,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.02,
+      "mem_ok": true
+    },
+    {
+      "cycle": 7,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 7,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.02,
+      "mem_ok": true
+    },
+    {
+      "cycle": 7,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 8,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 8,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 8,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 9,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 9,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.02,
+      "mem_ok": true
+    },
+    {
+      "cycle": 9,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 10,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 10,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 10,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.04,
+      "mem_ok": true
+    },
+    {
+      "cycle": 11,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 11,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 11,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 12,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 12,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 12,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 13,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.12,
+      "mem_ok": true
+    },
+    {
+      "cycle": 13,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 13,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 14,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.02,
+      "mem_ok": true
+    },
+    {
+      "cycle": 14,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 14,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 15,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 15,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 15,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 16,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 16,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 16,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 17,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 17,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 17,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 18,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 18,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 18,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 19,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 19,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 19,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 20,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 20,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 20,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 21,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 21,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 21,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 22,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 22,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 22,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 23,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 23,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 23,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 24,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 24,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 24,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 25,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 25,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 25,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 26,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 26,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 26,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 27,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 27,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 27,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 28,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 28,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 28,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 29,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 29,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 29,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 30,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 30,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 30,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 31,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 31,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 31,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 32,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 32,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 32,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 33,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 33,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 33,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 34,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 34,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 34,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 35,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 35,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 35,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 36,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 36,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 36,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 37,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 37,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 37,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 38,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 38,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 38,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 39,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 39,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 39,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 40,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 40,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 40,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 41,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 41,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 41,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 42,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 42,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 42,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 43,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 43,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 43,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 44,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 44,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 44,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 45,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 45,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 45,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 46,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 46,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 46,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 47,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 47,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 47,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 48,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 48,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 48,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 49,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 49,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 49,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 50,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 50,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 50,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 51,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 51,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 51,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 52,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 52,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 52,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 53,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 53,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 53,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 54,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 54,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 54,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 55,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 55,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 55,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 56,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 56,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 56,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 57,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 57,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 57,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 58,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 58,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 58,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 59,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 59,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 59,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 60,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 60,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 60,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 61,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 61,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 61,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 62,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 62,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 62,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 63,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 63,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 63,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 64,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 64,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 64,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 65,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 65,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 65,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 66,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 66,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 66,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 67,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 67,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 67,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 68,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 68,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 68,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 69,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 69,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 69,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 70,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 70,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 70,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 71,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 71,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 71,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 72,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 72,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 72,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 73,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 73,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 73,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 74,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 74,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 74,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 75,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 75,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 75,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 76,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 76,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 76,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 77,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 77,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 77,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 78,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 78,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 78,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 79,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 79,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 79,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 80,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 80,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 80,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 81,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 81,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 81,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 82,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 82,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 82,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 83,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 83,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 83,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 84,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 84,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 84,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 85,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 85,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 85,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 86,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 86,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 86,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 87,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 87,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 87,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 88,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 88,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 88,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 89,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 89,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 89,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 90,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 90,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 90,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 91,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 91,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 91,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 92,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 92,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 92,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 93,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 93,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 93,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 94,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 94,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 94,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 95,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 95,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 95,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 96,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 96,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 96,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 97,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 97,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 97,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 98,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 98,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 98,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 99,
+      "game": "XNIBBLER.BIN",
+      "slot": 19,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 99,
+      "game": "XCRYPT.BIN",
+      "slot": 20,
+      "samples": 4,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    },
+    {
+      "cycle": 99,
+      "game": "NES.BIN",
+      "slot": 21,
+      "samples": 3,
+      "frozen": false,
+      "growth_mb": 0.0,
+      "mem_ok": true
+    }
+  ],
+  "summary": "PASS",
+  "captured_at": "2026-10-20T03:29:48.552874+00:00"
+}

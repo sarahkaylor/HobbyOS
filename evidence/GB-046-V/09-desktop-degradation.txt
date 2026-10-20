@@ -1,0 +1,6 @@
+image              size          unique dominant             share
+c0-XNIBBLER.BIN-s0.ppm 1920x1080         21 (16, 21, 32)         65.5%
+image              size          unique dominant             share
+c50-XNIBBLER.BIN-s0.ppm 1920x1080         11 (0, 0, 0)            97.2%
+image              size          unique dominant             share
+c99-XNIBBLER.BIN-s0.ppm 1920x1080          8 (0, 0, 0)            97.1%

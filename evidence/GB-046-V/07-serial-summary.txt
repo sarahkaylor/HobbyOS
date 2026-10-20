@@ -1,0 +1,16 @@
+LAUNCH lines: 31
+loader PID lines: 48
+distinct pids: 47
+max pid: 49
+=== launch names:
+      1 MILLIPED.BIN
+      9 NES.BIN
+      2 STARDUST.BIN
+     10 XCRYPT.BIN
+      8 XNIBBLER.BIN
+      1 [LAUNCH][ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+=== exits:
+      2 STARDUST.BIN exited unexpectedly or gracefully.
+      8 XNIBBLER.BIN exited unexpectedly or gracefully.
+=== [APP] started lines:
+7

@@ -1,0 +1,8 @@
+c0-NES.BIN-s0.ppm          vs c0-NES.BIN-s1.ppm        differing px:      20 (0.0010%)  first at (1889, 1063)
+c0-NES.BIN-s0.ppm          vs c0-NES.BIN-s2.ppm        differing px:      41 (0.0020%)  first at (1882, 1063)
+c0-XCRYPT.BIN-s0.ppm       vs c0-XCRYPT.BIN-s1.ppm     differing px:      25 (0.0012%)  first at (1889, 1063)
+c0-XCRYPT.BIN-s0.ppm       vs c0-XCRYPT.BIN-s2.ppm     differing px:       9 (0.0004%)  first at (1893, 1064)
+c0-XCRYPT.BIN-s0.ppm       vs c0-XCRYPT.BIN-s3.ppm     differing px:      36 (0.0017%)  first at (1882, 1063)
+c0-XNIBBLER.BIN-s0.ppm     vs c0-XNIBBLER.BIN-s1.ppm   differing px:      18 (0.0009%)  first at (1890, 1063)
+c0-XNIBBLER.BIN-s0.ppm     vs c0-XNIBBLER.BIN-s2.ppm   differing px:      25 (0.0012%)  first at (1889, 1063)
+c0-XNIBBLER.BIN-s0.ppm     vs c0-XNIBBLER.BIN-s3.ppm   differing px:      18 (0.0009%)  first at (1890, 1063)

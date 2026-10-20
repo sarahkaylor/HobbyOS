@@ -1,0 +1,5 @@
+samples: 216  window: 02:35:50 .. 03:29:47  (54.0 min)
+rss floor: 359.4 MB   peak: 367.1 MB   first: 359.4 MB   last: 367.1 MB
+growth first->last: 7.70 MB   max-min: 7.70 MB
+distinct rss values: 15
+sampler gaps >40s: 0
