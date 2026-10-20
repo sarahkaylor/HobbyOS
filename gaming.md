@@ -158,7 +158,7 @@ HobbyOS (QEMU: -M virt aarch64 / -M q35 x86_64)
 | Tier | Model | Endpoint | Used by | Policy |
 |---|---|---|---|---|
 | **FLASH (workhorse)** | DeepSeek **V4 Flash** | `http://llm.localdomain:8000/v1` (vLLM, RTX 6000 pair box) | **every** worker / reviewer / tester agent | **Default for ~all tickets.** Target >90% of fleet tokens. |
-| **DEEP (planner)** | DeepSeek **v4.1 Flash** (8× DGX Spark) | `http://dgx1.localdomain:8000/v1` (vLLM; alias `dgx-main`) | **Coordinator only** | Planning, re-planning, ABI/architecture design, blocked-root-cause after 1 FLASH retry, milestone reviews. |
+| **DEEP (planner)** | DeepSeek **v4.1 Flash** (8× DGX Spark) | `http://dgx1.localdomain:8000/v1` (vLLM; alias `dgx-main`) | **Coordinator + farm Verifiers** | Planning, re-planning, ABI/architecture design, blocked-root-cause after 1 FLASH retry, milestone reviews, **and verification/gate verdicts (`verify` tickets)**. |
 
 Measures behind us (Sept/Oct 2026 community benchmarks for exactly this class of hardware):
 ~156–241 tok/s aggregate on the 8-Spark v4.1 box; ~47 tok/s single-stream per RTX 6000 card;
@@ -170,6 +170,11 @@ cold prefill ~840–2,100 tok/s depending on context. Consequences coded into th
 - **Long-lived sessions, never churn.** Restarting a 300K-context agent costs minutes of
   prefill. Agents stay on their subsystem; new work = new ticket, not new session.
 - **Deterministic work stays in tools** (grep/sed/test/CI), never in model tokens.
+- **Verification is DEEP-class work.** Every `verify`-labeled gate ticket (T3 QEMU intel+arm, merge-gate,
+  device-tier) is run by a farm **Verifier** session on **DeepSeek v4.1 Flash (`dgx1`)** via
+  `--provider dgx -m deepseek-v4.1-flash --reasoning high` — never on the FLASH workhorse. A wrong verdict
+  is the costliest mistake a swarm can make, so gate judgment gets the stronger model; gates stay
+  scripted/deterministic, so DEEP stays ~10% of tokens even with verification parallelized.
 - Endpoints recorded and verified 2026-10-17 (GB-004), see §11.3 for the probe evidence. Mapping the
   tiers to the built infra: **FLASH = DeepSeek V4 on the RTX-6000 pair box** (workhorse),
   **DEEP = DeepSeek v4.1 on the 8× DGX Spark fleet** (planner/coordinator only).
@@ -182,7 +187,7 @@ cold prefill ~840–2,100 tok/s depending on context. Consequences coded into th
   ~3% (it is mostly parked — that is intended). The binding constraint is FLASH throughput:
   the RTX pair measures ~94–150 tok/s, which feeds only **~3–5 agents** at full clip (the
   8–11 named in §5 is optimistic). Before scaling agents past ~4–6, benchmark both endpoints
-  at GB-004 and cap concurrency at what FLASH sustains; keep DEEP reserved for planning.
+  at GB-004 and cap concurrency at what FLASH sustains; keep DEEP reserved for planning + verification verdicts.
 
 ### 3.2 QEMU focus (scope boundary)
 
@@ -254,8 +259,21 @@ skeleton as an issue header block (see `tools/board/README.md`).
 1. Worker claims a `Ready` ticket → sets `In Progress` → creates git branch `ticket/<id>-<slug>` (worktree mode, one per agent).
 2. Worker codes **and tests** (§6); runs the local gate; opens a merge request against `main`.
 3. Reviewer agent reviews (diff + DoD + tests) → `In Review`.
-4. Merge-gate CI (all test tiers + differential + both arches) must be green → `Merge Gate`.
-5. Coordinator merges (or escalates `decision` to Sarah) → closes ticket **with evidence link** → lane `Done`.
+4. **Verification is its own ticket** (`verify` + `deep` labels). When an implementation lands `In Review`
+   with evidence but no gate proof, the Coordinator mints `GB-nnn-V` (ticket skeleton per §4.1; DoD = the
+   exact gate command(s) + pass criteria per §6 + two-arch parity). Minting happens at every re-plan for the
+   `In Review` backlog, so gates run **in parallel** with new production tickets instead of queueing behind
+   a single verifier.
+5. A farm **Verifier** (DEEP session, §5.1) claims `GB-nnn-V` → `In Progress` → runs the gate on its own VM →
+   posts evidence + a **RED/GREEN** verdict on both the verification and the implementation ticket.
+   GREEN → the implementation ticket to `Merge Gate`; RED → back to `In Progress` with the failing output
+   quoted verbatim.
+6. Merge-gate CI (all test tiers + differential + both arches) must be green → `Merge Gate`.
+7. Coordinator merges (or escalates `decision` to Sarah) → closes ticket **with evidence link** → lane `Done`.
+
+- **Verifier honesty is law.** A Verifier never verifies its own just-finished implementation without the
+  Coordinator's sign-off (independence); no GREEN ever lands without a gate that can **provably fail**
+  (GB-066/GB-070 discipline) — a skipped, self-served, or "looks green" gate is not a verdict.
 
 ### 4.3 The re-plan loop (autonomy — this is how the swarm steers itself)
 
@@ -263,7 +281,7 @@ Triggers (whichever first): **every 24h** (cron on `swarm-coordinator`), every m
 
 The loop:
 1. Coordinator snapshots: board state, open MRs, gate results, evidence dir tree, `gaming.md`.
-2. Coordinator runs a **`deep` `PLAN` ticket** on **DeepSeek v4.1 Flash** only: re-assess plan vs reality, re-scope acceptance if reality demands, **mint new tickets** on the board, re-prioritize lanes, update `gaming.md` if facts changed.
+2. Coordinator runs a **`deep` `PLAN` ticket** on **DeepSeek v4.1 Flash** only: re-assess plan vs reality, re-scope acceptance if reality demands, **mint new tickets** on the board — including a `verify`+`deep` **verification ticket `GB-nnn-V` for every `In Review` ticket that lacks a gate verdict** — re-prioritize lanes, update `gaming.md` if facts changed.
 3. Coordinator posts the re-plan summary as a comment on the `PLAN` ticket and closes it.
 4. New tickets are `Ready` for workers by the next loop. The swarm therefore never waits for a human to discover what to do next — **autonomy is key**.
 
@@ -275,8 +293,9 @@ The loop:
 
 | Role | Count | Model | Where | Responsibility |
 |---|---|---|---|---|
-| **Coordinator** | 1 | DEEP | `swarm-coordinator` (.233) | plan + board + re-plan loop + merges + escalation; the only DEEP consumer |
+| **Coordinator** | 1 | DEEP | `swarm-coordinator` (.233) | plan + board + re-plan loop + merges + escalation; primary DEEP consumer |
 | **Worker** | 3–8 | FLASH | `swarm-farm-1..3` | claim tickets, branch, code+tests, MR — one long-lived session per subsystem |
+| **Verifier** | 3 (one per farm) | DEEP | `swarm-farm-1..3` | claim `verify`+`deep` tickets, run §6 gates on own VM, post RED/GREEN verdicts; gate-running is its own role so gates parallelize |
 | **Reviewer** | 1 | FLASH | coordinator/farms | contract/diff/DoD review; flags `decision` |
 | **Tester** | 1 | FLASH | `swarm-farm-1..3` | playthrough + stress harnesses, flaky triage |
 
@@ -286,6 +305,10 @@ The loop:
   `HERMES_HOME`; workers use `hermes -w` (worktree mode) so parallel agents never collide on
   files. Sessions under `tmux` on their VM; transcripts/evidence land on the shared NFS store so
   the Coordinator/planner can read them.
+- **Verifier session** = a second headless session on each farm running at the DEEP provider
+  (`--provider dgx -m deepseek-v4.1-flash --reasoning high`), same `~/.hermes`, its own worktree,
+  kept alive by a `swarm-verify@<agent>` systemd unit (clone of `swarm-driver@` carrying the DEEP
+  provider flags) — see §11.4/§11.5.
 - Re-plan cadence via `hermes cronjob` (daily) on `swarm-coordinator`.
 - `gaming.md`, `docs/linux-abi.md`, and this board are the only cross-agent interface points —
   no agent improvises ABI/architecture (that path is `decision`+user or the `deep` planner).
@@ -556,7 +579,7 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
     Default for every role; all routine work. Measured **57.7 tok/s** single-stream.
   - **DEEP — DeepSeek v4.1 Flash** = `http://dgx1.localdomain:8000/v1`, `GET /v1/models` →
     `["deepseek-v4.1-flash", "dgx-main"]` (root `/models/deepseek-v4.1-flash`), `max_model_len`
-    1048576. Coordinator only: planning/re-plan/review. Measured **40.5 tok/s** single-stream.
+    1048576. Coordinator + farm Verifiers: planning/re-plan/review/verification. Measured **40.5 tok/s** single-stream.
 - Verification (GB-004): `swarm-coordinator` resolved `model.default=deepseek-v4.1-flash`,
   `model.provider=dgx` → `hermes chat -q` answered (DEEP-LINK-OK); `swarm-farm-1..3` resolved
   `model.default=deepseek-v4-flash`, `model.provider=flash`, `model.base_url=http://llm.localdomain:8000/v1`
@@ -606,6 +629,10 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 - LLVM 21.1.8 dist-staging cached on farm-1.
 
 ### 11.8 Execution log (newest first, maintained by the Coordinator)
+
+**2026-10-19 — Policy (caretaker): verification is its own ticket (`verify`+`deep`), run by per-farm
+Verifier sessions on DeepSeek v4.1 Flash (dgx1); workers claim `verify` tickets directly; the re-plan mints
+`GB-nnn-V` for every un-gated `In Review` ticket, so gate work parallelizes with production.**
 
 **2026-10-19 — GB-068 characterised: two instruction families, and three instrument defects that hid them.**
 
