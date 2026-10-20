@@ -107,6 +107,47 @@ int file_open(struct process *cur, const char *filename, int flags) {
   struct file *f = file_alloc();
   if (!f) return -EMFILE;
 
+  /* GB-017: /dev/null and /dev/urandom are virtual device nodes served by
+   * the file layer (independent of GB-014's syscall-table routing, per the
+   * coordinator's 2026-10-18 note).  /dev/null: write-sink, EOF-on-read.
+   * /dev/urandom: entropy file backed by the F1.4 pool (net_get_random_bytes),
+   * never a silently-short read.  O_WRONLY/O_RDONLY are not enforced on the
+   * node itself; Linux tolerates either for these.  The kernel is
+   * freestanding, so the equality check is byte-wise (no libc strcmp). */
+  if (filename && filename[0] == '/' &&
+      filename[1] == 'd' && filename[2] == 'e' && filename[3] == 'v') {
+    const char *rest = filename + 4;
+    int isnull = (rest[0] == '/' && rest[1] == 'n' && rest[2] == 'u' &&
+                  rest[3] == 'l' && rest[4] == 'l' && rest[5] == '\0');
+    int isurand = (rest[0] == '/' && rest[1] == 'u' && rest[2] == 'r' &&
+                   rest[3] == 'a' && rest[4] == 'n' && rest[5] == 'd' &&
+                   rest[6] == 'o' && rest[7] == 'm' && rest[8] == '\0');
+    if (isnull) {
+      f->type = FILE_TYPE_DEVNULL;
+    } else if (isurand) {
+      f->type = FILE_TYPE_DEVURANDO;
+    } else {
+      f->type = FILE_TYPE_EMPTY;
+      f->ref_count = 0;
+      return -ENOENT;
+    }
+    int dfd = -1;
+    for (int i = 0; i < MAX_OPEN_FDS; i++) {
+      if (cur->open_fds[i] == -1) {
+        cur->open_fds[i] = get_global_fd(f);
+        cur->num_open_fds++;
+        dfd = i;
+        break;
+      }
+    }
+    if (dfd == -1) {
+      f->type = FILE_TYPE_EMPTY;
+      f->ref_count = 0;
+      return -EMFILE;
+    }
+    return dfd;
+  }
+
   /* Paths under an NFS mount are opened by the NFS client; everything
    * else falls through to FAT-16. */
   int routed = vfs_open_routed(filename, f);
@@ -1332,7 +1373,12 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
 
   struct file *f = &global_file_table[g_fd];
-  if (f->type == FILE_TYPE_FAT16) {
+  if (f->type == FILE_TYPE_DEVNULL) {
+    return 0; /* /dev/null reads always yield EOF (0 bytes) */
+  } else if (f->type == FILE_TYPE_DEVURANDO) {
+    if (size <= 0) return 0;
+    return net_get_random_bytes(buf, (uint32_t)size); /* never short */
+  } else if (f->type == FILE_TYPE_FAT16) {
     return fat16_read(f, buf, size);
   } else if (f->type == FILE_TYPE_NFS) {
     if (f->nfs.is_dir) return -1;               /* use read_dir for dirs */
@@ -1447,7 +1493,11 @@ int file_write(struct process *cur, int fd, const void *buf, int size, struct tr
   }
 
   struct file *f = &global_file_table[g_fd];
-  if (f->type == FILE_TYPE_FAT16) {
+  if (f->type == FILE_TYPE_DEVNULL) {
+    return size; /* /dev/null swallows any write, accepts it fully */
+  } else if (f->type == FILE_TYPE_DEVURANDO) {
+    return -EINVAL; /* writes to /dev/urandom are not supported (Linux EINVAL) */
+  } else if (f->type == FILE_TYPE_FAT16) {
     return fat16_write(f, buf, size);
   } else if (f->type == FILE_TYPE_NFS) {
     return -1;      /* NFS mounts are read-only */
