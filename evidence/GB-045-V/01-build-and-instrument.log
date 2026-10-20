@@ -1,0 +1,384 @@
+# GB-045-V gate @ 98247dd9eccbf9ec434a8841abb1b3b267dea5f5  2026-10-20T03:46:25Z  host=swarm-farm-2
+
+$ make obj/gfxbench.bin   (gate step 1, literal)
+make: *** No rule to make target 'obj/gfxbench.bin'.  Stop.
+exit=2
+
+$ make ARCH=arm obj/arm/gfxbench.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/user/gfxbench.c -o obj/arm/gfxbench.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/user/libc.c -o obj/arm/user_libc.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/user/malloc.c -o obj/arm/user_malloc.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/string.c -o obj/arm/libc_string.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/nano -c src/user/rogue/xcrypt.c -o obj/arm/xcrypt.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/nano -DHAVE_CONFIG_H -c src/user/nano/hb_curses.c -o obj/arm/nano_hb_curses.o
+src/user/nano/hb_curses.c:167:12: warning: unused function 'cell_index' [-Wunused-function]
+  167 | static int cell_index(int row, int col) { return row * scr_cols + col; }
+      |            ^~~~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/crt0.c -o obj/arm/crt0.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -std=c++17 -fno-exceptions -fno-rtti -nostdinc++ -c src/libc/src/cxxrt.cpp -o obj/arm/cxxrt.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/pthread.c -o obj/arm/libc_pthread.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/ctype.c -o obj/arm/libc_ctype.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/stdlib.c -o obj/arm/libc_stdlib.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/stdio.c -o obj/arm/libc_stdio.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/file.c -o obj/arm/libc_file.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/getopt.c -o obj/arm/libc_getopt.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/error.c -o obj/arm/libc_error.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/stat.c -o obj/arm/libc_stat.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/signal.c -o obj/arm/libc_signal.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/mman.c -o obj/arm/libc_mman.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/regex.c -o obj/arm/libc_regex.o
+In file included from src/libc/src/regex.c:90:
+src/libc/src/regcomp.c:519:50: warning: unused parameter 'preg' [-Wunused-parameter]
+  519 | regerror (int errcode, const regex_t *__restrict preg, char *__restrict errbuf,
+      |                                                  ^
+src/libc/src/regcomp.c:588:19: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  588 |     for (i = 0; i < dfa->nodes_len; ++i)
+      |                 ~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:591:17: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  591 |   for (i = 0; i < dfa->nodes_len; ++i)
+      |               ~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:606:19: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 're_hashval_t' (aka 'unsigned int') [-Wsign-compare]
+  606 |     for (i = 0; i <= dfa->state_hash_mask; ++i)
+      |                 ~ ^  ~~~~~~~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1181:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1181 |       for (i = 0; i < preg->re_nsub; i++)
+      |                   ~ ^ ~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1184:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1184 |       for (i = 0; i < preg->re_nsub; i++)
+      |                   ~ ^ ~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1187:13: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1187 |       if (i == preg->re_nsub)
+      |           ~ ^  ~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1404:18: warning: unused parameter 'extra' [-Wunused-parameter]
+ 1404 | calc_next (void *extra, bin_tree_t *node)
+      |                  ^
+src/libc/src/regcomp.c:1632:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1632 |   for (idx = 0; idx < dfa->nodes_len; ++idx)
+      |                 ~~~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1635:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1635 |   for (src = 0; src < dfa->nodes_len; ++src)
+      |                 ~~~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1663:20: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1663 |       if (node_idx == dfa->nodes_len)
+      |           ~~~~~~~~ ^  ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:2698:37: warning: unused parameter 'syntax' [-Wunused-parameter]
+ 2698 | build_range_exp (const reg_syntax_t syntax,
+      |                                     ^
+src/libc/src/regcomp.c:3394:54: warning: unused parameter 'dfa' [-Wunused-parameter]
+ 3394 |                        re_token_t *token, int token_len, re_dfa_t *dfa,
+      |                                                                    ^
+src/libc/src/regcomp.c:3869:18: warning: unused parameter 'extra' [-Wunused-parameter]
+ 3869 | free_tree (void *extra, bin_tree_t *node)
+      |                  ^
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:486:39: warning: comparison of integers of different signs: 'Idx' (aka 'int') and '__re_size_t' (aka 'unsigned int') [-Wsign-compare]
+  486 |       if (__glibc_unlikely (need_regs > regs->num_regs))
+      |                             ~~~~~~~~~ ^ ~~~~~~~~~~~~~~
+src/libc/src/gnu_compat.h:63:52: note: expanded from macro '__glibc_unlikely'
+   63 | #define __glibc_unlikely(cond) __builtin_expect(!!(cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:507:27: warning: comparison of integers of different signs: 'Idx' (aka 'int') and '__re_size_t' (aka 'unsigned int') [-Wsign-compare]
+  507 |       DEBUG_ASSERT (nregs <= regs->num_regs);
+      |                     ~~~~~ ^  ~~~~~~~~~~~~~~
+src/libc/src/regex_internal.h:42:34: note: expanded from macro 'DEBUG_ASSERT'
+   42 | # define DEBUG_ASSERT(x) assume (x)
+      |                                  ^
+src/libc/include/verify.h:286:22: note: expanded from macro 'assume'
+  286 | # define assume(R) ((R) ? (void) 0 : __builtin_unreachable ())
+      |                      ^
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:517:13: warning: comparison of integers of different signs: 'Idx' (aka 'int') and '__re_size_t' (aka 'unsigned int') [-Wsign-compare]
+  517 |   for ( ; i < regs->num_regs; ++i)
+      |           ~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regexec.c:656:9: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+  655 |       if (__glibc_unlikely ((MIN (IDX_MAX, SIZE_MAX / sizeof (re_dfastate_t *))
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  656 |                              <= mctx.input.bufs_len)))
+      |                              ^~~~~~~~~~~~~~~~~~~~~~~~
+src/libc/src/gnu_compat.h:63:52: note: expanded from macro '__glibc_unlikely'
+   63 | #define __glibc_unlikely(cond) __builtin_expect(!!(cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:837:33: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  837 |       for (reg_idx = 1; reg_idx < nmatch; ++reg_idx)
+      |                         ~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:858:33: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  858 |       for (reg_idx = 0; reg_idx < nmatch; ++reg_idx)
+      |                         ~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:886:32: warning: comparison of integers of different signs: 'int' and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  886 |         for (reg_idx = 0; reg_idx + 1 < nmatch; reg_idx++)
+      |                           ~~~~~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:920:4: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+  919 |   if (__glibc_unlikely (MIN (IDX_MAX, SIZE_MAX / sizeof (re_dfastate_t *))
+      |       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  920 |                         <= match_last))
+      |                         ^~~~~~~~~~~~~~
+src/libc/src/gnu_compat.h:63:52: note: expanded from macro '__glibc_unlikely'
+   63 | #define __glibc_unlikely(cond) __builtin_expect(!!(cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:1414:34: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1414 |               for (reg_idx = 0; reg_idx < nmatch; ++reg_idx)
+      |                                 ~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:1417:20: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1417 |               if (reg_idx == nmatch)
+      |                   ~~~~~~~ ^  ~~~~~~
+src/libc/src/regexec.c:2850:65: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+ 2850 |       if (__glibc_unlikely (SIZE_MAX / sizeof (re_dfastate_t *) < new_alloc))
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~
+src/libc/src/gnu_compat.h:63:52: note: expanded from macro '__glibc_unlikely'
+   63 | #define __glibc_unlikely(cond) __builtin_expect(!!(cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:3323:36: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'Idx' (aka 'int') [-Wsign-compare]
+ 3323 |   if (__glibc_unlikely (ndests_max < ndests))
+      |                         ~~~~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:4035:4: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+ 4034 |   if (__glibc_unlikely (MIN (IDX_MAX, SIZE_MAX / sizeof (re_dfastate_t *)) / 2
+      |       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 4035 |                         <= pstr->bufs_len))
+      |                         ^~~~~~~~~~~~~~~~~~
+src/libc/src/gnu_compat.h:63:52: note: expanded from macro '__glibc_unlikely'
+   63 | #define __glibc_unlikely(cond) __builtin_expect(!!(cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:4104:71: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+ 4104 |       if (__glibc_unlikely (MIN (IDX_MAX, SIZE_MAX / max_object_size) < n))
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~
+src/libc/src/gnu_compat.h:63:52: note: expanded from macro '__glibc_unlikely'
+   63 | #define __glibc_unlikely(cond) __builtin_expect(!!(cond), 0)
+      |                                                    ^~~~
+28 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/langinfo.c -o obj/arm/libc_langinfo.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/wchar.c -o obj/arm/libc_wchar.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/wctype.c -o obj/arm/libc_wctype.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/locale.c -o obj/arm/libc_locale.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/selinux.c -o obj/arm/libc_selinux.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/dirent.c -o obj/arm/libc_dirent.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/time.c -o obj/arm/libc_time.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/time_math.c -o obj/arm/libc_time_math.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/libgen.c -o obj/arm/libc_libgen.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/realpath.c -o obj/arm/libc_realpath.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/xlocale.c -o obj/arm/libc_xlocale.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/strtod.c -o obj/arm/libc_strtod.o
+src/libc/src/strtod.c:411:23: warning: shift count >= width of type [-Wshift-count-overflow]
+  411 |                 (f128 >> 64);
+      |                       ^  ~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/strftime.c -o obj/arm/libc_strftime.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -ffp-contract=off -c src/libc/src/math.c -o obj/arm/libc_math.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/pwd.c -o obj/arm/libc_pwd.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/setjmp.c -o obj/arm/libc_setjmp.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/dlfcn.c -o obj/arm/libc_dlfcn.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/resource.c -o obj/arm/libc_resource.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/statvfs.c -o obj/arm/libc_statvfs.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/syscall.c -o obj/arm/libc_syscall.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/ioctl.c -o obj/arm/libc_ioctl.o
+[fetch] downloading https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.8/llvm-project-21.1.8.src.tar.xz
+  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+                                 Dload  Upload  Total   Spent   Left   Speed
+  0      0   0      0   0      0      0      0                              0  0      0   0      0   0      0      0      0                              0  0      0   0      0   0      0      0      0                              0
+  0      0   0      0   0      0      0      0                              0 32 151.5M  32 49.27M   0      0 39.43M      0   00:03   00:01   00:02 49.27M 68 151.5M  68 103.9M   0      0 46.24M      0   00:03   00:02   00:01 52.01M100 151.5M 100 151.5M   0      0 47.27M      0   00:03   00:03         52.01M100 151.5M 100 151.5M   0      0 47.27M      0   00:03   00:03         52.01M100 151.5M 100 151.5M   0      0 47.27M      0   00:03   00:03         52.01M
+[fetch] container sha256 OK
+[fetch] extracting the needed subtrees into /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-b3ca2037/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src
+[fetch] verifying anchor manifest (the content gate)
+[fetch] OK: /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-b3ca2037/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src ready (libcxx + libcxxabi + libc/shared + compiler-rt builtins)
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/compiler-rt/lib/builtins/extenddftf2.c -o obj/arm/builtins/extenddftf2.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/compiler-rt/lib/builtins/trunctfdf2.c -o obj/arm/builtins/trunctfdf2.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/compiler-rt/lib/builtins/trunctfsf2.c -o obj/arm/builtins/trunctfsf2.o
+ar rcs obj/arm/libc.a obj/arm/user_libc.o obj/arm/user_malloc.o obj/arm/libc_string.o obj/arm/crt0.o obj/arm/cxxrt.o obj/arm/libc_pthread.o obj/arm/libc_ctype.o obj/arm/libc_stdlib.o obj/arm/libc_stdio.o obj/arm/libc_file.o obj/arm/libc_getopt.o obj/arm/libc_error.o obj/arm/libc_stat.o obj/arm/libc_signal.o obj/arm/libc_mman.o obj/arm/libc_regex.o obj/arm/libc_langinfo.o obj/arm/libc_wchar.o obj/arm/libc_wctype.o obj/arm/libc_locale.o obj/arm/libc_selinux.o obj/arm/libc_dirent.o obj/arm/libc_time.o obj/arm/libc_time_math.o obj/arm/libc_libgen.o obj/arm/libc_realpath.o obj/arm/libc_xlocale.o obj/arm/libc_strtod.o obj/arm/libc_strftime.o obj/arm/libc_math.o obj/arm/libc_pwd.o obj/arm/libc_setjmp.o obj/arm/libc_dlfcn.o obj/arm/libc_resource.o obj/arm/libc_statvfs.o obj/arm/libc_syscall.o obj/arm/libc_ioctl.o obj/arm/builtins/extenddftf2.o obj/arm/builtins/trunctfdf2.o obj/arm/builtins/trunctfsf2.o
+ld.lld -T src/user/linker.ld -e _start -o obj/arm/xcrypt.elf obj/arm/xcrypt.o obj/arm/nano_hb_curses.o obj/arm/libc.a
+llvm-objcopy -O binary obj/arm/xcrypt.elf obj/arm/xcrypt.bin
+ld.lld -T src/user/linker.ld -o obj/arm/gfxbench.elf obj/arm/gfxbench.o obj/arm/user_libc.o obj/arm/user_malloc.o obj/arm/libc_string.o
+llvm-objcopy -O binary obj/arm/gfxbench.elf obj/arm/gfxbench.bin
+exit=0
+
+$ make ARCH=intel obj/intel/gfxbench.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/user/gfxbench.c -o obj/intel/gfxbench.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/user/libc.c -o obj/intel/user_libc.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/user/malloc.c -o obj/intel/user_malloc.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/string.c -o obj/intel/libc_string.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/nano -c src/user/rogue/xcrypt.c -o obj/intel/xcrypt.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -Isrc/user/nano -DHAVE_CONFIG_H -c src/user/nano/hb_curses.c -o obj/intel/nano_hb_curses.o
+src/user/nano/hb_curses.c:167:12: warning: unused function 'cell_index' [-Wunused-function]
+  167 | static int cell_index(int row, int col) { return row * scr_cols + col; }
+      |            ^~~~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/crt0.c -o obj/intel/crt0.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -std=c++17 -fno-exceptions -fno-rtti -nostdinc++ -c src/libc/src/cxxrt.cpp -o obj/intel/cxxrt.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/pthread.c -o obj/intel/libc_pthread.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/ctype.c -o obj/intel/libc_ctype.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/stdlib.c -o obj/intel/libc_stdlib.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/stdio.c -o obj/intel/libc_stdio.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/file.c -o obj/intel/libc_file.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/getopt.c -o obj/intel/libc_getopt.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/error.c -o obj/intel/libc_error.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/stat.c -o obj/intel/libc_stat.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/signal.c -o obj/intel/libc_signal.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/mman.c -o obj/intel/libc_mman.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/regex.c -o obj/intel/libc_regex.o
+In file included from src/libc/src/regex.c:90:
+src/libc/src/regcomp.c:519:50: warning: unused parameter 'preg' [-Wunused-parameter]
+  519 | regerror (int errcode, const regex_t *__restrict preg, char *__restrict errbuf,
+      |                                                  ^
+src/libc/src/regcomp.c:588:19: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  588 |     for (i = 0; i < dfa->nodes_len; ++i)
+      |                 ~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:591:17: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  591 |   for (i = 0; i < dfa->nodes_len; ++i)
+      |               ~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:606:19: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 're_hashval_t' (aka 'unsigned int') [-Wsign-compare]
+  606 |     for (i = 0; i <= dfa->state_hash_mask; ++i)
+      |                 ~ ^  ~~~~~~~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1181:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1181 |       for (i = 0; i < preg->re_nsub; i++)
+      |                   ~ ^ ~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1184:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1184 |       for (i = 0; i < preg->re_nsub; i++)
+      |                   ~ ^ ~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1187:13: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1187 |       if (i == preg->re_nsub)
+      |           ~ ^  ~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1404:18: warning: unused parameter 'extra' [-Wunused-parameter]
+ 1404 | calc_next (void *extra, bin_tree_t *node)
+      |                  ^
+src/libc/src/regcomp.c:1632:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1632 |   for (idx = 0; idx < dfa->nodes_len; ++idx)
+      |                 ~~~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1635:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1635 |   for (src = 0; src < dfa->nodes_len; ++src)
+      |                 ~~~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1663:20: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1663 |       if (node_idx == dfa->nodes_len)
+      |           ~~~~~~~~ ^  ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:2698:37: warning: unused parameter 'syntax' [-Wunused-parameter]
+ 2698 | build_range_exp (const reg_syntax_t syntax,
+      |                                     ^
+src/libc/src/regcomp.c:3394:54: warning: unused parameter 'dfa' [-Wunused-parameter]
+ 3394 |                        re_token_t *token, int token_len, re_dfa_t *dfa,
+      |                                                                    ^
+src/libc/src/regcomp.c:3869:18: warning: unused parameter 'extra' [-Wunused-parameter]
+ 3869 | free_tree (void *extra, bin_tree_t *node)
+      |                  ^
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:486:39: warning: comparison of integers of different signs: 'Idx' (aka 'int') and '__re_size_t' (aka 'unsigned int') [-Wsign-compare]
+  486 |       if (__glibc_unlikely (need_regs > regs->num_regs))
+      |                             ~~~~~~~~~ ^ ~~~~~~~~~~~~~~
+src/libc/src/gnu_compat.h:63:52: note: expanded from macro '__glibc_unlikely'
+   63 | #define __glibc_unlikely(cond) __builtin_expect(!!(cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:507:27: warning: comparison of integers of different signs: 'Idx' (aka 'int') and '__re_size_t' (aka 'unsigned int') [-Wsign-compare]
+  507 |       DEBUG_ASSERT (nregs <= regs->num_regs);
+      |                     ~~~~~ ^  ~~~~~~~~~~~~~~
+src/libc/src/regex_internal.h:42:34: note: expanded from macro 'DEBUG_ASSERT'
+   42 | # define DEBUG_ASSERT(x) assume (x)
+      |                                  ^
+src/libc/include/verify.h:286:22: note: expanded from macro 'assume'
+  286 | # define assume(R) ((R) ? (void) 0 : __builtin_unreachable ())
+      |                      ^
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:517:13: warning: comparison of integers of different signs: 'Idx' (aka 'int') and '__re_size_t' (aka 'unsigned int') [-Wsign-compare]
+  517 |   for ( ; i < regs->num_regs; ++i)
+      |           ~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regexec.c:656:9: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+  655 |       if (__glibc_unlikely ((MIN (IDX_MAX, SIZE_MAX / sizeof (re_dfastate_t *))
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  656 |                              <= mctx.input.bufs_len)))
+      |                              ^~~~~~~~~~~~~~~~~~~~~~~~
+src/libc/src/gnu_compat.h:63:52: note: expanded from macro '__glibc_unlikely'
+   63 | #define __glibc_unlikely(cond) __builtin_expect(!!(cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:837:33: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  837 |       for (reg_idx = 1; reg_idx < nmatch; ++reg_idx)
+      |                         ~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:858:33: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  858 |       for (reg_idx = 0; reg_idx < nmatch; ++reg_idx)
+      |                         ~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:886:32: warning: comparison of integers of different signs: 'int' and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  886 |         for (reg_idx = 0; reg_idx + 1 < nmatch; reg_idx++)
+      |                           ~~~~~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:920:4: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+  919 |   if (__glibc_unlikely (MIN (IDX_MAX, SIZE_MAX / sizeof (re_dfastate_t *))
+      |       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  920 |                         <= match_last))
+      |                         ^~~~~~~~~~~~~~
+src/libc/src/gnu_compat.h:63:52: note: expanded from macro '__glibc_unlikely'
+   63 | #define __glibc_unlikely(cond) __builtin_expect(!!(cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:1414:34: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1414 |               for (reg_idx = 0; reg_idx < nmatch; ++reg_idx)
+      |                                 ~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:1417:20: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1417 |               if (reg_idx == nmatch)
+      |                   ~~~~~~~ ^  ~~~~~~
+src/libc/src/regexec.c:2850:65: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+ 2850 |       if (__glibc_unlikely (SIZE_MAX / sizeof (re_dfastate_t *) < new_alloc))
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~
+src/libc/src/gnu_compat.h:63:52: note: expanded from macro '__glibc_unlikely'
+   63 | #define __glibc_unlikely(cond) __builtin_expect(!!(cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:3323:36: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'Idx' (aka 'int') [-Wsign-compare]
+ 3323 |   if (__glibc_unlikely (ndests_max < ndests))
+      |                         ~~~~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:4035:4: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+ 4034 |   if (__glibc_unlikely (MIN (IDX_MAX, SIZE_MAX / sizeof (re_dfastate_t *)) / 2
+      |       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 4035 |                         <= pstr->bufs_len))
+      |                         ^~~~~~~~~~~~~~~~~~
+src/libc/src/gnu_compat.h:63:52: note: expanded from macro '__glibc_unlikely'
+   63 | #define __glibc_unlikely(cond) __builtin_expect(!!(cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:4104:71: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+ 4104 |       if (__glibc_unlikely (MIN (IDX_MAX, SIZE_MAX / max_object_size) < n))
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~
+src/libc/src/gnu_compat.h:63:52: note: expanded from macro '__glibc_unlikely'
+   63 | #define __glibc_unlikely(cond) __builtin_expect(!!(cond), 0)
+      |                                                    ^~~~
+28 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/langinfo.c -o obj/intel/libc_langinfo.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/wchar.c -o obj/intel/libc_wchar.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/wctype.c -o obj/intel/libc_wctype.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/locale.c -o obj/intel/libc_locale.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/selinux.c -o obj/intel/libc_selinux.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/dirent.c -o obj/intel/libc_dirent.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/time.c -o obj/intel/libc_time.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/time_math.c -o obj/intel/libc_time_math.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/libgen.c -o obj/intel/libc_libgen.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/realpath.c -o obj/intel/libc_realpath.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/xlocale.c -o obj/intel/libc_xlocale.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/strtod.c -o obj/intel/libc_strtod.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/strftime.c -o obj/intel/libc_strftime.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -ffp-contract=off -c src/libc/src/math.c -o obj/intel/libc_math.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/pwd.c -o obj/intel/libc_pwd.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/setjmp.c -o obj/intel/libc_setjmp.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/dlfcn.c -o obj/intel/libc_dlfcn.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/resource.c -o obj/intel/libc_resource.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/statvfs.c -o obj/intel/libc_statvfs.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/syscall.c -o obj/intel/libc_syscall.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/libc/src/ioctl.c -o obj/intel/libc_ioctl.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/compiler-rt/lib/builtins/extenddftf2.c -o obj/intel/builtins/extenddftf2.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/compiler-rt/lib/builtins/trunctfdf2.c -o obj/intel/builtins/trunctfdf2.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/compiler-rt/lib/builtins/trunctfsf2.c -o obj/intel/builtins/trunctfsf2.o
+ar rcs obj/intel/libc.a obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/crt0.o obj/intel/cxxrt.o obj/intel/libc_pthread.o obj/intel/libc_ctype.o obj/intel/libc_stdlib.o obj/intel/libc_stdio.o obj/intel/libc_file.o obj/intel/libc_getopt.o obj/intel/libc_error.o obj/intel/libc_stat.o obj/intel/libc_signal.o obj/intel/libc_mman.o obj/intel/libc_regex.o obj/intel/libc_langinfo.o obj/intel/libc_wchar.o obj/intel/libc_wctype.o obj/intel/libc_locale.o obj/intel/libc_selinux.o obj/intel/libc_dirent.o obj/intel/libc_time.o obj/intel/libc_time_math.o obj/intel/libc_libgen.o obj/intel/libc_realpath.o obj/intel/libc_xlocale.o obj/intel/libc_strtod.o obj/intel/libc_strftime.o obj/intel/libc_math.o obj/intel/libc_pwd.o obj/intel/libc_setjmp.o obj/intel/libc_dlfcn.o obj/intel/libc_resource.o obj/intel/libc_statvfs.o obj/intel/libc_syscall.o obj/intel/libc_ioctl.o obj/intel/builtins/extenddftf2.o obj/intel/builtins/trunctfdf2.o obj/intel/builtins/trunctfsf2.o
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/xcrypt.elf obj/intel/xcrypt.o obj/intel/nano_hb_curses.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/xcrypt.elf obj/intel/xcrypt.bin
+ld.lld -T src/user/linker.ld -o obj/intel/gfxbench.elf obj/intel/gfxbench.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/gfxbench.elf obj/intel/gfxbench.bin
+exit=0
+-rwxr-xr-x 1 sarah sarah 63456 Oct 20 03:46 obj/arm/gfxbench.bin
+-rwxr-xr-x 1 sarah sarah 60328 Oct 20 03:46 obj/intel/gfxbench.bin
+
+## the report GB-045 says it produced, on this sha:
+ls: cannot access 'perf-baseline-REPORT.md': No such file or directory
+(not tracked)
+
+## its instruments, on this sha:
+ls: cannot access 'tools/t5/boot_time.py': No such file or directory
+ls: cannot access 'tools/t5/perf_report.py': No such file or directory

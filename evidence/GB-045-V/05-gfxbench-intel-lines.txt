@@ -1,0 +1,13 @@
+# INTEL: every GFXBENCH-related line in the wave
+379:Loading program for scheduler (v2 AS): GFXBENCH.BIN
+380:/GFXBENCH.BIN
+574:  [ALIVE-SET] slot=52 pid=52 st=3 parent=-1 claimed_by=6 GFXBENCH.BIN
+603:[KERNEL] pid=52 (GFXBENCH.BIN) memory fault VA=0x000000007559DBC8 PC=0x000000100000A098 rw=w  in=PROT region=NONE cr3frame=0x0000000020DB0000 asroot=0x0000000020DB0000 -> killed
+604:[KERNEL] Process 52: GFXBENCH.BIN exited unexpectedly or gracefully.
+702:[IDLESTUCK] slot=52 pid=52 st=4 parent=-1 wake=0 rip=0x00000010000099E0 GFXBENCH.BIN
+758:[IDLESTUCK] slot=52 pid=52 st=4 parent=-1 wake=0 rip=0x00000010000099E0 GFXBENCH.BIN
+814:[IDLESTUCK] slot=52 pid=52 st=4 parent=-1 wake=0 rip=0x00000010000099E0 GFXBENCH.BIN
+892:[IDLESTUCK] slot=52 pid=52 st=4 parent=-1 wake=0 rip=0x00000010000099E0 GFXBENCH.BIN
+
+# count of 'GFXBENCH <phase>' rows on intel: 0
+# count on arm: 3

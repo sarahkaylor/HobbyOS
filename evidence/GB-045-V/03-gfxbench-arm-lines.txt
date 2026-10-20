@@ -1,0 +1,8 @@
+# ARM: GFXBENCH rows captured (wave stopped at ~10 min while STRESS.BIN still running — the tier verdict is not this ticket's DoD)
+Loading program for scheduler (v2 AS): GFXBENCH.BIN
+/GFXBENCH.BIN
+GFXBENCH full min=0 med=1000 mean=800 n=10
+  RTTI_T downcastGFXBENCH r256 min=0 med=0 mean=200 n=30
+GFXBENCH r64 min=0 med=0 mean=280 n=50
+GFXBENCH DONE
+[KERNEL] Process 7: GFXBENCH.BIN exited unexpectedly or gracefully.
