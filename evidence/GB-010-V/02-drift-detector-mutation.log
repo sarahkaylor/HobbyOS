@@ -1,0 +1,17 @@
+# DoD item 2 — drift detector must FIRE on a one-number change (scratch copy; tracked doc untouched) @ 0d381008f3c3626a5cd2d0a335a129ab3b13f78f
+
+## 1. baseline: regenerate scratch copy from the current probe, then --check it
+updated /home/sarah/.hermes/cache/scratch/abi-mutation.md (5 measured sections)
+docs/linux-abi.md matches a fresh ABI probe
+exit=0
+
+## 2. mutate ONE number: syscall table '  read                   0' -> '  read                   9'
+  read                   9
+
+## 3. --check the mutated copy (expect exit 1)
+docs/linux-abi.md is STALE — re-run tools/linux-abi/gen_abi_doc.py
+exit=1
+
+## 4. restore the number, --check again (expect exit 0)
+docs/linux-abi.md matches a fresh ABI probe
+exit=0
