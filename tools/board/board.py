@@ -21,6 +21,7 @@ Usage:
   board.py lint                       # lane hygiene / blocked-without-reason checks
 """
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -169,12 +170,18 @@ def set_lane(issue, lane, create=True):
     if lane not in LANES:
         raise SystemExit(f"unknown lane {lane!r}; lanes={LANES}")
     ki = issue["number"]
-    cur = lane_of(issue)
     if create:
         ensure_label(lane, LANE_COLORS[lane], "kanban lane (§4.1)")
-    if cur and cur != lane:
-        api_delete(f"/repos/{REPO}/issues/{ki}/labels/{urllib.parse.quote(cur)}")
-    api_post(f"/repos/{REPO}/issues/{ki}/labels", {"labels": [lane]})
+    # GB-074: act on the CURRENT server state, not the (possibly stale) issue
+    # object the caller read earlier, so a concurrent lane move is not clobbered
+    # and the observed transition is the one we really made.  The swap is a
+    # single atomic PUT of the whole label set (Forgejo serializes it
+    # server-side), instead of delete-then-add across two requests.
+    cur_it = api_get(f"/repos/{REPO}/issues/{ki}")
+    cur = lane_of(cur_it)
+    names = [l["name"] for l in cur_it.get("labels", []) if l["name"] not in LANES]
+    names.append(lane)
+    api_put_labels(ki, names)
     return cur
 
 
@@ -215,14 +222,43 @@ def comment(gid, text, lane=None, close=False):
 
 
 # ---------------------------------------------------------------- commands
+def claimant_of(index):
+    """Name the agent behind the first 'claimed by `X`' comment, if any (GB-074
+    loser detection: the loser must be able to say who won)."""
+    for c in api_get(f"/repos/{REPO}/issues/{index}/comments", "?limit=50"):
+        m = re.search(r"claimed by `([^`]+)`", c.get("body") or "")
+        if m:
+            return m.group(1)
+    return None
+
+
 def cmd_claim(a):
     it = issue_by_id(a.gid)
     if not it:
         raise SystemExit(f"no issue for {a.gid}")
     by = a.by or os.environ.get("BOARD_AGENT", "swarm-bot")
-    prev = set_lane(it, "In Progress")
-    msg = f"claimed by `{by}` on {a.host or 'swarm-coordinator'} — lane: {prev or 'Backlog'} → In Progress"
-    comment(a.gid, msg)
+    # GB-074 (claim race): serialize concurrent claims on a lock, then re-read
+    # the CURRENT lane before claiming.  A ticket already In Progress was claimed
+    # by someone else — refuse and name the winner; never run the gate on a
+    # double claim.  The lockfile must sit on the shared store for cross-VM
+    # exclusion; on a single host (and in CI) flock alone already serializes.
+    lock_path = os.environ.get("BOARD_LOCK", "/tmp/hobbyos-board-claim.lock")
+    lockf = open(lock_path, "a")
+    fcntl.flock(lockf, fcntl.LOCK_EX)
+    try:
+        cur = lane_of(api_get(f"/repos/{REPO}/issues/{it['number']}"))
+        if cur == "In Progress":
+            winner = claimant_of(it["number"])
+            raise SystemExit(
+                f"{a.gid} #{it['number']} already claimed by `{winner or 'another agent'}` "
+                "(lane already In Progress) — not re-claiming (GB-074); run no gate")
+        prev = set_lane(it, "In Progress")
+        msg = (f"claimed by `{by}` on {a.host or 'swarm-coordinator'} — "
+               f"lane: {prev or 'Backlog'} → In Progress")
+        comment(a.gid, msg)
+    finally:
+        fcntl.flock(lockf, fcntl.LOCK_UN)
+        lockf.close()
     print(f"{a.gid} #{it['number']} claimed by {by} (was {prev})")
 
 
