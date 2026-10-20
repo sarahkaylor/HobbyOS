@@ -1,0 +1,7 @@
+$ bash tools/gate/t4_device.sh --self-test
+[self-test] clause 2 (wrong shim must FAIL):
+  OK — wrong shim FAILED as required
+[self-test] clause 3 (absent probe must FAIL, not skip):
+  OK — absent probe FAILED as required
+self-test result: fail_count=0
+EXIT=0

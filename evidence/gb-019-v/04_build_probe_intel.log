@@ -1,0 +1,6 @@
+$ make ARCH=intel obj/intel/t4_probe.elf   # OBJ_DIR=obj/$(ARCH), ARCH defaults to arm
+EXIT=0
+-rwxr-xr-x 1 sarah sarah 23904 Oct 20 20:42 obj/intel/t4_probe.elf
+t4-probe
+hi
+row=write3 rc=3 errno=0 out=68690a

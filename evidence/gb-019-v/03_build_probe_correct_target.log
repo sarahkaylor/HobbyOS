@@ -1,0 +1,4 @@
+$ make obj/intel/t4_probe.elf   # the real target (OBJ_DIR=obj/$(ARCH))
+make: *** No rule to make target 'obj/intel/t4_probe.elf'.  Stop.
+EXIT=2
+ls: cannot access 'obj/intel/t4_probe.elf': No such file or directory
