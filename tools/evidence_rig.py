@@ -144,6 +144,29 @@ def find_menu_slot(serial_log, name):
     return None
 
 
+def derive_bin(game):
+    """Default launcher .BIN name for a game id (xnibbler -> XNIBBLER.BIN)."""
+    g = game.upper().strip()
+    return g if g.endswith(".BIN") else g + ".BIN"
+
+
+def resolve_launch_slot(serial_log, bin_name, provided=None):
+    """The authoritative launcher slot for bin_name, resolved BY NAME from the
+    [MENU] dump (GB-059: never a magic slot index).  A caller-provided --slot
+    is only a sanity check: if it disagrees with the observed slot, the
+    observed slot wins (the run must launch the title it actually found, not a
+    stale index — the XNIBBLER->CONSOLE.BIN false-launch bug)."""
+    found = find_menu_slot(serial_log, bin_name)
+    if found is None:
+        return None, f"{bin_name} not in start-menu dump"
+    warn = ""
+    if provided is not None and provided != found:
+        warn = (f"caller passed --slot {provided} but {bin_name} is at slot "
+                f"{found} on this tree; launching by name ({found}), not the "
+                "magic index")
+    return found, warn
+
+
 def launch_from_menu(q, slot, taskbar_y=H - 26):
     """Open the Apps menu and navigate down to the given slot, launching it."""
     q.click(38, taskbar_y + 13)
@@ -166,9 +189,12 @@ def convert_png(ppm_path, png_path):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--game", required=True, help="game name (e.g. xnibbler)")
-    ap.add_argument("--bin", required=True, help="menu name, e.g. XNIBBLER.BIN")
-    ap.add_argument("--slot", type=int, required=True, help="launcher slot index")
+    ap.add_argument("--game", required=True, help="game id, e.g. xnibbler")
+    ap.add_argument("--bin", default=None,
+                    help="menu name, e.g. XNIBBLER.BIN (default <GAME>.BIN)")
+    ap.add_argument("--slot", type=int, default=None,
+                    help="expected launcher slot (optional; the slot the rig "
+                         "FOUND by name always wins — never a magic index)")
     ap.add_argument("--arch", default="arm", choices=["arm", "intel"])
     ap.add_argument("--root", default=os.getcwd(), help="repo root (default cwd)")
     ap.add_argument("--checkpoints", default="boot,launch,gameplay",
@@ -194,11 +220,16 @@ def main():
     q = boot(qemu_make, serial_log, qmp_sock, arch)
 
     slot = args.slot
-    found = find_menu_slot(serial_log, args.bin)
-    print(f"[rig] {args.bin} slot: expected={slot} found={found}")
+    bin_name = args.bin or derive_bin(args.game)
+    found, warn = resolve_launch_slot(serial_log, bin_name, provided=args.slot)
+    if warn:
+        print(f"[rig] WARNING: {warn}")
     if found is None:
-        print(f"[rig] FATAL: {args.bin} not in start-menu dump")
+        print(f"[rig] FATAL: {bin_name} not in start-menu dump")
         sys.exit(1)
+    slot = found
+    print(f"[rig] {bin_name} slot: found by name = {found}"
+          f" (launching {found}, by name)")
 
     checkpoints = [c.strip() for c in args.checkpoints.split(",") if c.strip()]
     shots = {}
@@ -241,7 +272,7 @@ def main():
         if os.path.isfile(fp):
             artifacts[fn] = sha256(fp)
     manifest = {
-        "game": args.game, "bin": args.bin, "slot": slot, "arch": arch,
+        "game": args.game, "bin": bin_name, "slot": slot, "arch": arch,
         "captured_at": datetime.now(timezone.utc).isoformat(),
         "commit": commit, "root": args.root,
         "screendumps": {c: os.path.basename(p) for c, p in shots.items()},
@@ -255,7 +286,7 @@ def main():
     report = f"{args.game}-EVIDENCE-REPORT.md"
     with open(report, "w") as f:
         f.write(f"# {args.game} — GB-040 evidence bundle\n\n")
-        f.write(f"- Game: `{args.bin}` (launcher slot {slot}, {arch})\n")
+        f.write(f"- Game: `{bin_name}` (launcher slot {slot}, {arch})\n")
         f.write(f"- Commit: {commit}\n")
         f.write(f"- Captured: {manifest['captured_at']}\n\n")
         f.write("Assets landed in `evidence/{game}/<timestamp>/` (gitignored; "

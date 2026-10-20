@@ -72,12 +72,27 @@ int cpu_is_halted(uint32_t cpu) { return cpu < MAX_CPUS ? cpu_halted[cpu] : 0; }
    put the definition 1,200 lines below its first use, and the gate refused both
    arches for it. */
 static int alive_reported;
+/* GB-057-a: the wave-end predicate is a NEGATIVE test -- anything not
+   FREE/EXITED/ALLOCATED/THREAD_DONE counts as live work -- so PROC_STATE_BLOCKED
+   (5) is counted, and a process blocked with no possible waker keeps `any_alive`
+   true forever: `!any_alive` never fires, scheduler_finished() is never called,
+   and the wave never halts.  That is the 7-of-8 shape of this ticket (probe42:
+   `slot=12 pid=12 st=5 parent=-1 SPAWN.BIN`).  Rather than add BLOCKED to the
+   exclusion list -- which would truncate waves whose children wait legitimately
+   on a pipe -- stamp when the scheduler first observes the slot BLOCKED and
+   exclude it only after WAVE_BLOCK_BUDGET_MS, loudly, naming the slot.  The stamp
+   is lazy (one place, no park-site changes) and cleared the moment the state
+   leaves BLOCKED, so a reused slot never inherits an old wait. */
+#define WAVE_BLOCK_BUDGET_MS 60000ULL
+static uint64_t wait_since_ms[MAX_PROCESSES];
+static int orphan_reported[MAX_PROCESSES];
 /* GB-057: latch for the [NOAS] skip report (a user slot picked with no address
    space -- mid-exec), cleared with the other latches when work is found. */
 static int noas_reported;
 /* GB-057: count of implausible-frame picks reported (bounded -- this is a
    rare-event report, not a per-pick log). */
 volatile uint64_t sched_badelr_seen;
+
 
 static void resume_returned_halt(int pid, const struct trap_frame *tf) {
   extern void uart_puts_raw(const char *s);
@@ -146,6 +161,53 @@ extern void arch_fpu_reset(struct process *p);
 
 // Process table
 static struct process proc_table[MAX_PROCESSES];
+
+/* GB-057: bounded count for the [IDLECLAIM] report (a leaked per-CPU claim seen
+   on idle entry).  Rare-event report, not a per-idle log. */
+static int idleclaim_reported;
+
+/* GB-057: a CPU entering any idle/park path must not still claim a process.
+
+   `set_current_process_pid(cpu, -1)` is the documented "no claim" state
+   (process.c:261, "which slot claims `cpu` (-1 = none)"), and the claim guard in
+   schedule() refuses to hand a slot to a CPU that still claims it.  So a leaked
+   claim is two bugs at once: a slot nobody runs is counted alive (the wave never
+   halts), and that process can never be picked again.
+
+   Measured: probe32 `c4=16`, probe34 `c3=18`, probe35 `c4=17` -- always exactly
+   one CPU, always a pid it is not running, while the monitor showed every CPU
+   halted in safe_wfi.
+
+   This must be called at EVERY idle/park site, which is what my first attempt got
+   wrong: I instrumented only the schedule-idle loop (where the [IDLESTUCK] dump
+   lives), and the report never fired because the leaking CPU parks somewhere else
+   -- there are three `while(1) { safe_wfi(); }` loops in this file plus a bare
+   `safe_wfi()` at 2725, and a CPU that parks in any of them keeps its claim.
+
+   The pid range is the only condition; the slot's state is PRINTED rather than
+   used to decide, because the first version's "must not be RUNNING" filter was a
+   guess that silenced the report on a run where the leak was on screen two lines
+   above. */
+static void idle_claim_check(void) {
+  extern int current_pid_of_cpu(uint32_t cpu);
+  int leaked = current_pid_of_cpu(get_cpuid());
+  if (leaked >= 0 && leaked < MAX_PROCESSES && idleclaim_reported < 40) {
+    idleclaim_reported++;
+    uart_puts("[IDLECLAIM] cpu=");
+    print_int((int)get_cpuid());
+    uart_puts(" still claims pid=");
+    /* CORRECTION (GB-057): same misread as [ALIVE-SET] -- this reads under
+       proc_lock, so a plain read is correct; the `<torn:>` detector I added here
+       was based on a false premise and is removed. */
+    print_int(proc_table[leaked].pid);
+    uart_puts(" name=");
+    uart_puts(proc_table[leaked].name);
+    uart_puts(" state=");
+    print_int(proc_table[leaked].state);
+    uart_puts(" on idle entry\n");
+  }
+}
+
 int cpu_current_pids[MAX_CPUS];
 /* Per-CPU liveness heartbeat (ms), bumped by watchdog_tick on every timer
    IRQ and by the idle loop.  The lost-owner reaper treats a stale
@@ -796,6 +858,12 @@ static int process_create_internal_ver(int ver) {
     if (proc_table[i].state == PROC_STATE_FREE) {
       pid = i;
       proc_table[i].state = PROC_STATE_ALLOCATED;
+      /* GB-068 probe: -1 distinguishes "never called the kernel" from
+         "syscall 0", which 0 could not.  Not context[] -- zeroing the whole
+         register context was measured to change nothing (68 -> 58 records of
+         the same shape) and was reverted. */
+      proc_table[i].last_syscall = -1;
+      proc_table[i].last_ret = 0;
       break;
     }
   }
@@ -1541,14 +1609,51 @@ void schedule(struct trap_frame *tf, int is_yield) {
     }
 
     // No ready processes. Check if any are still alive.
+    // GB-057-a: a BLOCKED slot is alive only while it has a possible waker. Stamp
+    // the first observation, exclude after the budget, and say so by name -- a
+    // wave that loses a test silently is worse than a wave that halts.
     int any_alive = 0;
-    for (int i = 0; i < MAX_PROCESSES; i++) {
-      if (proc_table[i].state != PROC_STATE_FREE &&
-          proc_table[i].state != PROC_STATE_EXITED &&
-          proc_table[i].state != PROC_STATE_ALLOCATED &&
-          proc_table[i].state != PROC_STATE_THREAD_DONE) {
-        any_alive = 1;
-        break;
+    {
+      uint64_t now_l = timer_get_ms();
+      if (now_l == 0)
+        now_l = 1; /* a zero stamp means "never observed", so never stamp zero */
+      for (int i = 0; i < MAX_PROCESSES; i++) {
+        int st = proc_table[i].state;
+        if (st != PROC_STATE_BLOCKED) {
+          wait_since_ms[i] = 0;
+          orphan_reported[i] = 0;
+        } else {
+          if (wait_since_ms[i] == 0)
+            wait_since_ms[i] = now_l;
+          else if (now_l - wait_since_ms[i] >= WAVE_BLOCK_BUDGET_MS) {
+            if (!orphan_reported[i]) {
+              orphan_reported[i] = 1;
+              uart_puts("[ORPHAN-WAIT] slot=");
+              print_int(i);
+              uart_puts(" pid=");
+              print_int(proc_table[i].pid);
+              uart_puts(" name=");
+              uart_puts(proc_table[i].name);
+              uart_puts(" parent=");
+              print_int(proc_table[i].parent_pid);
+              uart_puts(" wake_ms=");
+              print_int((int)proc_table[i].wake_ms);
+              uart_puts(" waited_ms=");
+              print_int((int)(now_l - wait_since_ms[i]));
+              uart_puts(
+                  " -- blocked past the wave budget with no possible waker: "
+                  "excluded from the wave-end predicate (the slot is NOT reaped)\n");
+            }
+            continue; /* cannot make progress, so it is not live work */
+          }
+        }
+        if (proc_table[i].state != PROC_STATE_FREE &&
+            proc_table[i].state != PROC_STATE_EXITED &&
+            proc_table[i].state != PROC_STATE_ALLOCATED &&
+            proc_table[i].state != PROC_STATE_THREAD_DONE) {
+          any_alive = 1;
+          break;
+        }
       }
     }
 
@@ -1586,6 +1691,15 @@ void schedule(struct trap_frame *tf, int is_yield) {
         uart_puts("  [ALIVE-SET] slot=");
         print_int(i);
         uart_puts(" pid=");
+        /* CORRECTION (GB-057): I previously wrote here that this block reads
+           without proc_lock and added a double-read `<torn:a/b>` detector on that
+           basis.  That was wrong: schedule() acquires proc_lock at 1360 and the
+           only releases before this point are the pick branch at 1593 (which
+         iretqs and never falls through) and the halt branch at 1740.  So these
+           reads ARE protected, and probe54's `pid=62831` for slot 1 was a REAL
+           value in the table, not a torn read -- which is a more interesting
+           problem (stale or uninitialised slot state), not an instrument defect.
+           Simple reads, because the lock is held. */
         print_int(proc_table[i].pid);
         uart_puts(" st=");
         print_int(st);
@@ -1605,6 +1719,40 @@ void schedule(struct trap_frame *tf, int is_yield) {
     }
 
     if (!any_alive) {
+      /* GB-057-b: settle the mechanism before changing the predicate again.  If a
+         halt ever coincides with a slot in ALLOCATED (which the predicate EXCLUDES),
+         then a wave whose only live work is a slot being created declares itself
+         finished -- that is the one premature halt on record (probe54: 443 lines,
+         slot 6 ALLOCATED).  Costs one line per halt and refutes the idea if the
+         counts are all zero. */
+      {
+        int n_free = 0, n_alloc = 0, n_exit = 0, n_run = 0, n_blk = 0, n_other = 0;
+        for (int q = 0; q < MAX_PROCESSES; q++) {
+          switch (proc_table[q].state) {
+            case PROC_STATE_FREE: n_free++; break;
+            case PROC_STATE_ALLOCATED: n_alloc++; break;
+            case PROC_STATE_EXITED: n_exit++; break;
+            case PROC_STATE_RUNNING: n_run++; break;
+            case PROC_STATE_BLOCKED: n_blk++; break;
+            default: n_other++; break;
+          }
+        }
+        uart_puts("[HALT-CD] cpu=");
+        print_int((int)cpu);
+        uart_puts(" free=");
+        print_int(n_free);
+        uart_puts(" alloc=");
+        print_int(n_alloc);
+        uart_puts(" exited=");
+        print_int(n_exit);
+        uart_puts(" running=");
+        print_int(n_run);
+        uart_puts(" blocked=");
+        print_int(n_blk);
+        uart_puts(" other=");
+        print_int(n_other);
+        uart_puts("\n");
+      }
       set_current_process_pid(cpu, -1);
       /* P2.2 (S2): no user context will run here; never keep an AS (whose
          tables are about to be freed) as this CPU's translation. */
@@ -1619,6 +1767,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
         uart_puts(".\n");
         extern void halt(void);
         halt();
+        idle_claim_check();
         while (1) {
           // Enable IRQs, sleep, then disable. This allows idle cores to actually sleep
           // and process interrupts rather than spinning endlessly if an interrupt is pending.
@@ -2722,6 +2871,7 @@ void process_sleep(void) {
   } else {
     // If there is no current process (e.g. during early boot), just WFI
     spinlock_release_irqrestore(&proc_lock, flags);
+    idle_claim_check();
     safe_wfi();
   }
 }
@@ -2921,7 +3071,7 @@ void start_scheduler(void) {
     interrupts_enable();
     // Exit scheduler (tests finished)
     if (cpu == 0) return;
-    else while(1) { safe_wfi(); }
+    else { idle_claim_check(); while(1) { safe_wfi(); } }
   } else if (jmp_val == 2) {
     // A kernel thread exited on this CPU. The stack is now reset.
     // However, because the kernel thread was running in EL1t (using SP_EL0),
@@ -3317,6 +3467,18 @@ void start_scheduler(void) {
           print_int(proc_table[k].state);
           uart_puts(" parent=");
           print_int(proc_table[k].parent_pid);
+          /* GB-057: name the WAIT, do not infer it from the shape of the test.
+             Reading `st=5` only says "blocked"; the two things that say *what*
+             it is blocked on are whether a timer will ever release it (`wake_ms`,
+             0 = waiting on an event with no deadline) and where its saved return
+             address points (`context[31]`, the ELR both arches share).  I spent a
+             probe assuming a pipe from a comment in main.c about the spawn2
+             pattern, then cleared four pipe mechanisms by reading -- none of them
+             the bug, because the subject was assumed.  This prints the subject. */
+          uart_puts(" wake=");
+          print_int(proc_table[k].wake_ms);
+          uart_puts(" rip=");
+          uart_print_hex(proc_table[k].context[31]);
           uart_puts(" ");
           uart_puts(proc_table[k].name);
           uart_puts("\n");
@@ -3333,6 +3495,9 @@ void start_scheduler(void) {
       spinlock_release_irqrestore(&proc_lock, dflags);
     }
 
+    /* GB-057: any idle entry must not still hold a claim -- see
+       idle_claim_check() for why this is called at every park site. */
+    idle_claim_check();
     // Track idle time: record entry, WFI, accumulate on wake
     uint64_t idle_start = timer_get_ms();
     safe_wfi();

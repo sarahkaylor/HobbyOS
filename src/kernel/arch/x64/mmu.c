@@ -4,6 +4,7 @@
 #include "lock.h"
 #include "frame.h"
 #include "vm.h"
+#include "display_mode.h" /* DISPLAY_STRIDE_BYTES/HEIGHT: full fb size (GB-065) */
 
 extern uint32_t get_cpuid(void);
 
@@ -220,9 +221,22 @@ void mmu_switch_user_mapping(uint64_t phys_base) {
 void mmu_map_user_framebuffer(uint64_t phys_addr) {
   uint64_t flags = spinlock_acquire_irqsave(&mmu_lock);
 
+  /* GB-065: the framebuffer is 1920x1080x4 = ~8 MB, but this v1 path mapped
+     only two 2 MB huge pages (4 MB), leaving every pixel at y >= ~546
+     (beyond row 546) unmapped.  GRAPHICS.BIN's diagonal is drawn at
+     y = 600..700, so its startpoint/midpoint/endpoint all sat outside the
+     mapping (read/write of unmapped memory -> FAIL / no pixel), while the
+     rect validation at y = 100 worked.  Cover the whole screen: map enough
+     2 MB huge pages.  USER_FB_VIRT_BASE (0x60000000) has 1 GB of user space
+     above it and nothing else is mapped there, so this is collision-free. */
+  const uint64_t fb_bytes =
+      (uint64_t)DISPLAY_STRIDE_BYTES * (uint64_t)DISPLAY_HEIGHT;
+  const int hp = (int)((fb_bytes + 0x1FFFFF) / 0x200000); /* huge pages */
+
   for (int c = 0; c < MAX_CPUS; c++) {
-    cpu_pd1[c][USER_FB_L2_INDEX] = mmu_make_user_block_desc(phys_addr);
-    cpu_pd1[c][USER_FB_L2_INDEX + 1] = mmu_make_user_block_desc(phys_addr + 0x200000);
+    for (int i = 0; i < hp; i++)
+      cpu_pd1[c][USER_FB_L2_INDEX + i] =
+          mmu_make_user_block_desc(phys_addr + (uint64_t)i * 0x200000);
   }
 
   // Invalidate TLB across all cores (reloading CR3 locally on the current core is sufficient in QEMU virt)
@@ -624,6 +638,37 @@ void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
      CPU is executing in it). */
   if (v2_active_root[get_cpuid()] == root_phys)
     vm_arch_restore_kernel();
+  /* GB-057: the comment above says "the design's claim-drain guarantees no
+     other CPU is executing in it".  This ticket has MEASURED that guarantee to
+     be imperfect -- a claim leaked on an idle CPU (probe32: c4=16), and the
+     claim guard carries a documented block-to-schedule window -- so observe it
+     instead of trusting it.  If another CPU still translates through the root
+     we are freeing, every access it makes lands in frames about to be recycled,
+     and an interrupt handler's LAPIC EOI (0xFEE000B0) is simply the first one
+     that page-faults.
+
+     Reports and changes no behaviour: the fix is a shootdown-and-ack before
+     freeing (x64_send_ipi / x64_shootdown_acks already exist), and the first
+     step is knowing whether this ever happens.  Lock-free printing on purpose:
+     we may hold vm_lock here, and uart_puts can take a lock. */
+  {
+    extern void uart_puts_raw(const char *s);
+    extern void uart_print_hex_raw(uint64_t v);
+    static volatile uint64_t freerace_seen;
+    uint32_t me = get_cpuid();
+    for (uint32_t c = 0; c < MAX_CPUS; c++) {
+      if (c == me || v2_active_root[c] != root_phys)
+        continue;
+      if (freerace_seen >= 20)
+        break;
+      freerace_seen++;
+      uart_puts_raw("[FREERACE] freeing root=");
+      uart_print_hex_raw(root_phys);
+      uart_puts_raw(" while cpu=");
+      uart_print_hex_raw((uint64_t)c);
+      uart_puts_raw(" still translates through it\n");
+    }
+  }
   uint64_t *p4 = (uint64_t *)root_phys;
   uint64_t pdpt_pa = p4[0] & X64_OA_MASK;
   if (pdpt_pa) {

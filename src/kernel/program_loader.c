@@ -834,8 +834,18 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
 int load_and_run_program_v2(const char* filename, int stdin_fd,
                             int stdout_fd, int stderr_fd, int caller_pid,
                             const char *args) {
+  /* GB-072 remainder / GB-067 unblocker: one arrival line per wave program.
+   * A program that runs and a program that never loaded are otherwise the same
+   * console silence, which is what made earlier re-stage probes unreadable.
+   * Printed before and after the load so a failure to arrive is visible too. */
+  uart_puts("[WAVE-TRY] ");
+  uart_puts(filename ? filename : "(null)");
+  uart_puts("\n");
   int r = load_v2_internal(filename, stdin_fd, stdout_fd, stderr_fd,
                            caller_pid, args, 0);
+  uart_puts("[ARRIVED] ");
+  uart_puts(filename ? filename : "(null)");
+  uart_puts(r < 0 ? " rc<0\n" : " rc>0\n");
   return r < 0 ? -1 : r;
 }
 

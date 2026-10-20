@@ -3,6 +3,7 @@
 #include "libc.h"
 #include "window.h"
 #include "desktop_damage.h"
+#include "games_scan.h"
 #include <signal.h>
 #ifndef HOST_TEST
 #include "syscall.h"
@@ -811,7 +812,7 @@ static const char *const pinned_apps[] = {
 
 /* The games, pinned right below the apps so all twelve fit on screen. */
 static const char *const pinned_games[] = {
-  "PONG.BIN", "MILLIPED.BIN", "XNIBBLER.BIN", "XCRYPT.BIN", "NES.BIN",
+  "PONG.BIN", "MILLIPED.BIN", "STARDUST.BIN", "XNIBBLER.BIN", "XCRYPT.BIN", "NES.BIN",
 };
 #define NUM_PINNED_GAMES ((int)(sizeof(pinned_games) / sizeof(pinned_games[0])))
 
@@ -900,6 +901,33 @@ void load_menu(void) {
     copy_name(menu_items[num_menu_items], ent.name, 16);
     num_menu_items++;
   }
+
+  /* Pass 1b (GB-039, S2 launcher): also scan /GAMES (.BIN + ELF), so games
+   * installed under /GAMES surface regardless of the root pins and are never
+   * silently dropped at the 128 cap.  read_dir on a missing /GAMES returns <0
+   * -> no-op.  Launch of either kind is already handled by the kernel loader
+   * (program_loader.c dispatches 0x7fELF); this pass only makes them visible.
+   * Host build (HOST_TEST) skips the scan so the pure scan is tested by
+   * games_scan_test_host, not by the QEMU-less desktop tests. */
+#ifndef HOST_TEST
+  {
+    struct games_entry g[GAMES_MAX];
+    int ng = games_scan_dir(g, GAMES_MAX);
+    for (int i = 0; i < ng && num_menu_items < MAX_MENU_ITEMS; i++) {
+      int dup = 0;
+      for (int j = 0; j < num_menu_items && !dup; j++) {
+        int k = 0;
+        while (menu_items[j][k] && g[i].name[k] &&
+               menu_items[j][k] == g[i].name[k]) k++;
+        if (menu_items[j][k] == g[i].name[k]) dup = 1;
+      }
+      if (!dup) {
+        copy_name(menu_items[num_menu_items], g[i].name, 16);
+        num_menu_items++;
+      }
+    }
+  }
+#endif
 
   /* Pass 2: everything else, in directory order, until the cap. */
   for (int idx = 0; num_menu_items < MAX_MENU_ITEMS; idx++) {
