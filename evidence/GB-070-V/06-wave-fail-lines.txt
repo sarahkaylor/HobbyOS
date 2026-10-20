@@ -1,0 +1,4 @@
+623:  FAIL: line startpoint
+624:  FAIL: line midpoint
+625:  FAIL: line endpoint
+636:GRAPHICS TESTS FAILED

@@ -1,0 +1,12 @@
+lines: 779
+exited lines: 74
+halt lines: 1
+fatal kernel faults: 0
+FAIL lines: 4
+W0-ARRIVED lines: 0
+
+HELLO evidence from the wave:
+303:rLoading program for scheduler (v2 AS): HELLO.BIN
+308:/HELLO.BIN
+325:[KERNEL] pid=31 (HELLO.BIN) memory fault VA=0x00000000755DDBC8v2 loader: PID=33 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+331:P[KERNEL] Process 31: HELLO.BIN exited unexpectedly or gracefully.

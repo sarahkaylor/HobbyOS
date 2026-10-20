@@ -1,0 +1,12 @@
+=== T3 (intel): build ===
+T3_intel: disk.img BPB is corrupt (bytes/sector='0', want 512) - regenerating the image
+=== T3 (intel): run (deadline 2700s, log /home/sarah/.hermes/cache/scratch/verify-gb070b/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 779 console lines, 4 FAIL lines, 55 user memory faults, 63 programs exited, halted=1
+T3_intel: FAIL — 4 FAIL line(s); first 20:
+623:  FAIL: line startpoint
+624:  FAIL: line midpoint
+625:  FAIL: line endpoint
+636:GRAPHICS TESTS FAILED
+T3_intel EXIT=1
+T3_INTEL_EXIT=1

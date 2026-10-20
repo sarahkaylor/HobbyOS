@@ -1,0 +1,4 @@
+make -n host_tests | grep t4_w0:
+bash tools/gate/t4_w0.sh --self-test
+
+producers of [W0-ARRIVED] outside the gate:

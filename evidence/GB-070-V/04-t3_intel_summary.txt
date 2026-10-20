@@ -1,0 +1,9 @@
+sha: 0d381008f3c3626a5cd2d0a335a129ab3b13f78f
+date: Tue Oct 20 01:25:57 UTC 2026
+
+=== t3 intel verdict tail:
+T3_intel: disk.img BPB is corrupt (bytes/sector='0', want 512) - regenerating the image
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 779 console lines, 4 FAIL lines, 55 user memory faults, 63 programs exited, halted=1
+T3_intel: FAIL — 4 FAIL line(s); first 20:
+T3_intel EXIT=1
