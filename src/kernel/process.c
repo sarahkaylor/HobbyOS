@@ -65,6 +65,32 @@ void cpu_halt_record(uint32_t cpu) {
 
 int cpu_is_halted(uint32_t cpu) { return cpu < MAX_CPUS ? cpu_halted[cpu] : 0; }
 
+/* GB-068 (2026-10-19): a diagnostic record must be ONE write.  `uart_puts`
+   takes uart_lock across the whole string, but these records used to be ten or
+   more separate puts/print_int calls, each releasing the lock -- so another CPU
+   interleaved at every boundary and the records shredded each other.  Measured
+   on origin/main: 0 of 52 fault records parsed, with an `[ALIVE-SET]` line cut
+   in half *inside* a fault record.  The fault path was already fixed this way;
+   these two were the remaining shredders, and they were shredding the very
+   evidence GB-068 needs. */
+struct db_buf { char b[288]; int n; };
+static void db_s(struct db_buf *f, const char *s2) {
+  while (*s2 && f->n < (int)sizeof f->b - 1) f->b[f->n++] = *s2++;
+}
+static void db_i(struct db_buf *f, long v) {
+  char t[24]; int k = 0; int neg = 0;
+  if (v < 0) { neg = 1; v = -v; }
+  if (v == 0) t[k++] = '0';
+  while (v > 0 && k < 23) { t[k++] = (char)('0' + (v % 10)); v /= 10; }
+  if (neg) db_s(f, "-");
+  while (k > 0) { char c2 = t[--k]; int n2 = f->n; if (n2 < (int)sizeof f->b - 1) f->b[n2] = c2; f->n = n2 + 1; }
+}
+static void db_emit(struct db_buf *f) {
+  if (f->n < (int)sizeof f->b) f->b[f->n] = 0; else f->b[sizeof f->b - 1] = 0;
+  uart_puts(f->b);
+  f->n = 0;
+}
+
 /* GB-063: latch for the [ALIVE-SET] report (which live slots stop the wave from
    halting), one per idle stretch and cleared when work is found.  Declared up
    here because the end-of-wave branch that prints it lives near the top of
@@ -1675,6 +1701,8 @@ void schedule(struct trap_frame *tf, int is_yield) {
          Once per idle stretch (latched, cleared when work is found): probe20
          printed the same slot 1,185 times with a window-based limiter. */
       alive_reported = 1;
+      struct db_buf d;
+      d.n = 0;
       uart_puts(
           "[ALIVE-SET] no READY work, yet the scheduler counts live work (the "
           "predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no "
@@ -1688,9 +1716,9 @@ void schedule(struct trap_frame *tf, int is_yield) {
         for (int c = 0; c < MAX_CPUS; c++)
           if (cpu_current_pids[c] == i)
             claimer = c;
-        uart_puts("  [ALIVE-SET] slot=");
-        print_int(i);
-        uart_puts(" pid=");
+        db_s(&d, "  [ALIVE-SET] slot=");
+        db_i(&d, i);
+        db_s(&d, " pid=");
         /* CORRECTION (GB-057): I previously wrote here that this block reads
            without proc_lock and added a double-read `<torn:a/b>` detector on that
            basis.  That was wrong: schedule() acquires proc_lock at 1360 and the
@@ -1700,21 +1728,22 @@ void schedule(struct trap_frame *tf, int is_yield) {
            value in the table, not a torn read -- which is a more interesting
            problem (stale or uninitialised slot state), not an instrument defect.
            Simple reads, because the lock is held. */
-        print_int(proc_table[i].pid);
-        uart_puts(" st=");
-        print_int(st);
-        uart_puts(" parent=");
-        print_int(proc_table[i].parent_pid);
-        uart_puts(" claimed_by=");
-        print_int(claimer);
-        uart_puts(" ");
-        uart_puts(proc_table[i].name);
+        db_i(&d, proc_table[i].pid);
+        db_s(&d, " st=");
+        db_i(&d, st);
+        db_s(&d, " parent=");
+        db_i(&d, proc_table[i].parent_pid);
+        db_s(&d, " claimed_by=");
+        db_i(&d, claimer);
+        db_s(&d, " ");
+        db_s(&d, proc_table[i].name);
         if (st == PROC_STATE_RUNNING && claimer < 0)
-          uart_puts("  <-- RUNNING with NO cpu on it (stale claim)");
+          db_s(&d, "  <-- RUNNING with NO cpu on it (stale claim)");
         else if ((st == PROC_STATE_WAIT_SPAWN || st == PROC_STATE_WAIT_CHILD) &&
                  proc_table[i].parent_pid <= 0)
-          uart_puts("  <-- parked WAIT with no parent to deliver the wake");
-        uart_puts("\n");
+          db_s(&d, "  <-- parked WAIT with no parent to deliver the wake");
+        db_s(&d, "\n");
+        db_emit(&d);
       }
     }
 
@@ -1727,6 +1756,8 @@ void schedule(struct trap_frame *tf, int is_yield) {
          counts are all zero. */
       {
         int n_free = 0, n_alloc = 0, n_exit = 0, n_run = 0, n_blk = 0, n_other = 0;
+        struct db_buf d2;
+        d2.n = 0;
         for (int q = 0; q < MAX_PROCESSES; q++) {
           switch (proc_table[q].state) {
             case PROC_STATE_FREE: n_free++; break;
@@ -1737,21 +1768,16 @@ void schedule(struct trap_frame *tf, int is_yield) {
             default: n_other++; break;
           }
         }
-        uart_puts("[HALT-CD] cpu=");
-        print_int((int)cpu);
-        uart_puts(" free=");
-        print_int(n_free);
-        uart_puts(" alloc=");
-        print_int(n_alloc);
-        uart_puts(" exited=");
-        print_int(n_exit);
-        uart_puts(" running=");
-        print_int(n_run);
-        uart_puts(" blocked=");
-        print_int(n_blk);
-        uart_puts(" other=");
-        print_int(n_other);
-        uart_puts("\n");
+        db_s(&d2, "[HALT-CD] cpu=");
+        db_i(&d2, (long)cpu);
+        db_s(&d2, " free=");   db_i(&d2, n_free);
+        db_s(&d2, " alloc=");  db_i(&d2, n_alloc);
+        db_s(&d2, " exited="); db_i(&d2, n_exit);
+        db_s(&d2, " running=");db_i(&d2, n_run);
+        db_s(&d2, " blocked=");db_i(&d2, n_blk);
+        db_s(&d2, " other=");  db_i(&d2, n_other);
+        db_s(&d2, "\n");
+        db_emit(&d2);
       }
       set_current_process_pid(cpu, -1);
       /* P2.2 (S2): no user context will run here; never keep an AS (whose
