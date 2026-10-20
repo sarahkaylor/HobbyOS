@@ -1,0 +1,36 @@
+  PASS reject-nonload-only        -> no PT_LOAD segment
+  PASS reject-filesz-gt-memsz     -> p_filesz > p_memsz
+  PASS reject-overlap             -> PT_LOAD segments overlap
+  PASS reject-bad-entry           -> e_entry outside every executable segment
+  PASS reject-no-exec             -> no executable segment
+  SKIP real-binary parse (set ELF_REAL_BINARY=/path/to/static-x86_64)
+=== 82 checks, 0 failed ===
+ALL ELF IMAGE HOST TESTS PASSED
+=== Linux ABI table lock (GB-014/GB-015) ===
+  PASS SYS : all 114 golden rows match
+  PASS ERR : all 54 golden rows match
+  PASS no invented syscall rows (114 checked)
+  PASS no duplicate syscall numbers in the compat table
+  PASS compat read is 0 (native SYS_READ is 6)
+  PASS exit_group is 231
+  PASS arch_prctl is 158 (TLS path)
+  PASS ARCH_SET_FS is 0x1002
+  PASS L_SYS_MAX_KNOWN is the table bound
+  PASS EWOULDBLOCK == EAGAIN (11) — a shim must not use both
+  PASS ENOTSUP is 95 (== EOPNOTSUPP)
+  PASS ENOSYS is 38 — the required answer for an unimplemented compat syscall
+=== 12 checks, 0 failed ===
+ALL LINUX ABI TABLE TESTS PASSED
+  PASS all 99 layout golden rows match (sizes + offsets of linux_layout.h)
+=== 100 checks, 0 failed ===
+ALL LINUX LAYOUT TESTS PASSED
+  PASS all 65 constant golden rows match (L_* macros in linux_syscall.h)
+  PASS no invented constant rows (65 checked)
+=== 67 checks, 0 failed ===
+ALL LINUX ABI CONSTANTS TESTS PASSED
+[THRD_T] kernel threads + futex-lite + pthreads acceptance
+  THRD_T self-equal: PASS
+  THRD_T create-join-retval: PASS
+  THRD_T distinct-stacks: PASS
+  THRD_T mutex-counter: PASS
+  THRD_T mutex-recursive: PASS
