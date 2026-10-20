@@ -1,0 +1,26 @@
+# GB-018-V step 4 @ e2b8e932c933431467ce2225a94cb36c2ebb64ae  2026-10-20T02:56:33Z
+=== t4_device: leg A reference: obj/intel/t4_legA.out ===
+=== t4_device: capture leg B from serial 'obj/t3_intel.log' ===
+t4_device: FAIL — the probe never arrived in the guest (no 't4-probe-arrived'
+  in obj/t3_intel.log after 120s).  This is a FAIL, not a SKIP (DoD clause 3).
+  (tail of serial:)
+[IDLESTUCK] slot=49 pid=49 st=4 parent=-1 wake=0 rip=0x0000001000000000 POLLTST.BIN
+[IDLESTUCK] slot=50 pid=50 st=4 parent=-1 wake=0 rip=0x0000001000000000 RANDTST.BIN
+[IDLESTUCK] slot=51 pid=51 st=4 parent=-1 wake=0 rip=0x0000001000000000 SOCK2TST.BIN
+[IDLESTUCK] slot=52 pid=52 st=4 parent=-1 wake=0 rip=0x0000001000000000 FPU_T.BIN
+[IDLESTUCK] slot=53 pid=53 st=4 parent=-1 wake=0 rip=0x0000001000006C84 GFXBENCH.BIN
+[IDLESTUCK] slot=54 pid=54 st=4 parent=-1 wake=0 rip=0x0000001000000000 MATH_T.BIN
+[IDLESTUCK] slot=55 pid=55 st=4 parent=-1 wake=0 rip=0x0000001000000000 CXXSMOKE.BIN
+[IDLESTUCK] slot=56 pid=56 st=4 parent=-1 wake=0 rip=0x0000001000000000 DNSTST.BIN
+[IDLESTUCK] slot=57 pid=57 st=4 parent=-1 wake=0 rip=0x0000001000002C70 THRD_T.BIN
+[IDLESTUCK] slot=58 pid=58 st=4 parent=-1 wake=0 rip=0x0000001000000000 TLS_T.BIN
+[IDLESTUCK] slot=59 pid=59 st=4 parent=-1 wake=0 rip=0x000000100006F490 CXX_T.BIN
+[IDLESTUCK] slot=60 pid=60 st=4 parent=-1 wake=0 rip=0x00000010000030A5 RTTI_T.BIN
+[IDLESTUCK] slot=61 pid=61 st=4 parent=-1 wake=0 rip=0x0000001000003B15 IPC_T.BIN
+[IDLESTUCK] slot=62 pid=62 st=4 parent=-1 wake=0 rip=0x0000001000000030 MMTEST.BIN
+[IDLESTUCK] slot=63 pid=63 st=4 parent=-1 wake=0 rip=0x0000001000000000 ICUSMK.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=-1 c7=-1
+[ORPHAN-WAIT] slot=13 pid=13 name=SPAWN.BIN parent=-1 wake_ms=1973912 waited_ms=60002 -- blocked past the wave budget with no possible waker: excluded from the wave-end predicate (the slot is NOT reaped)
+[HALT-CD] cpu=1 free=9 alloc=0 exited=54 running=0 blocked=1 other=0
+System halt from CPU 1.
+[HALT-CD] cpu=2exit=1

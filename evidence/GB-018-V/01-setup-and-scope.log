@@ -1,0 +1,43 @@
+# GB-018-V gate @ e2b8e932c933431467ce2225a94cb36c2ebb64ae  2026-10-20T02:51:15Z  host=swarm-farm-2
+
+$ bash tools/gate/t4_device.sh --self-test
+[self-test] clause 2 (wrong shim must FAIL):
+  OK — wrong shim FAILED as required
+[self-test] clause 3 (absent probe must FAIL, not skip):
+  OK — absent probe FAILED as required
+self-test result: fail_count=0
+exit=0
+
+$ make obj/t4_probe.elf   (ticket step 2, literal)
+make: *** No rule to make target 'obj/t4_probe.elf'.  Stop.
+exit=2
+
+$ make ARCH=intel obj/intel/t4_probe.elf obj/intel/t4_legA.out   (working form)
+[t4-device] leg A captured -> obj/intel/t4_legA.out
+exit=0
+
+--- leg A ---
+t4-probe
+hi
+row=write3 rc=3 errno=0 out=68690a
+t4-probe-arrived
+probe-exit
+
+## device probe rows:
+70:    prow("write3", r, (r < 0) ? (r == -1 ? 9 : (long)(-r)) : 0, msg, 3);
+
+## DoD rows, host probe:
+299:    report("poll_ready", poll(pf, 1, 0));
+300:    report("poll_ready_revents", pf[0].revents);
+306:    report("select_ready", select(pfd[0] + 1, &rf, NULL, NULL, &tv));
+307:    report("select_ready_fdset", FD_ISSET(pfd[0], &rf) ? 1 : 0);
+323:    report("poll_badfd", poll(pf2, 1, 0));
+324:    report("poll_badfd_revents", pf2[0].revents);
+
+## DoD rows, device probe (occurrence counts):
+poll_ready           0
+poll_ready_revents   0
+select_ready         0
+select_ready_fdset   0
+poll_badfd           0
+poll_badfd_revents   0
