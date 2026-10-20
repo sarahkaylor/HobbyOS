@@ -79,6 +79,30 @@ def self_test():
     return 0 if bad == 0 else 1
 
 
+def fleet_live(hosts=("192.168.0.230", "192.168.0.231", "192.168.0.232")):
+    """Count live `hermes` agents on the farms.  Returns (total, per_host).
+
+    The stale-claim rule needs this: a quiet ticket while agents are running is
+    a worker mid-edit; the same ticket with ZERO agents up is an abandoned
+    claim.  Without the probe, the tool can only report age, and age alone must
+    never move a ticket (that is how a live claim gets demoted).
+    """
+    import subprocess
+    per, total = {}, 0
+    for h in hosts:
+        try:
+            r = subprocess.run(
+                ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", f"sarah@{h}",
+                 "pgrep -c hermes || true"],
+                capture_output=True, text=True, timeout=8)
+            n = int((r.stdout or "0").strip() or 0)
+        except Exception:                                     # noqa: BLE001
+            n = -1                                            # unreachable != zero
+        per[h] = n
+        total += max(n, 0)
+    return total, per
+
+
 def main():
     if "--self-test" in sys.argv:
         return self_test()
@@ -116,6 +140,19 @@ def main():
     print(f"stale (no activity on either the issue or its last comment): {len(stale)}")
     for n, t, ca, ia in sorted(stale, key=lambda r: -min(r[2], r[3])):
         print(f"  #{n:<4} last comment {ca:5.1f}h ago, issue updated {ia:5.1f}h ago   {t}")
+    if "--fleet" in sys.argv:
+        total, per = fleet_live()
+        unreachable = [h for h, v in per.items() if v < 0]
+        print(f"fleet live agents: {total}  "
+              + " ".join(f"{h.split('.')[-1]}={v}" for h, v in per.items()))
+        if unreachable:
+            print(f"  WARNING: {len(unreachable)} host(s) unreachable — "
+                  "unreachable is NOT the same as zero agents")
+        if total == 0 and not unreachable:
+            print("  => every stale claim above is abandoned (zero agents everywhere)")
+        elif total > 0:
+            print("  => agents are running; a stale ticket may be mid-edit. "
+                  "Do NOT move it on age alone.")
     return 0 if not stale else 1
 
 
