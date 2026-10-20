@@ -1,0 +1,18 @@
+$ bash tools/gate/parity_ci_test.sh   # sha 98247dd
+--- 1. both arches green -> PARITY PASS ---
+  PASS: two green arches -> PASS
+--- 2. arm red -> PARITY FAIL ---
+  PASS: arm red -> FAIL
+--- 3. intel red -> PARITY FAIL ---
+  PASS: intel red -> FAIL
+--- 4. window over budget -> PARITY FAIL ---
+  PASS: window over budget (2s > 1s) -> FAIL
+--- 5. concurrent window <= sequential window (run window < best) ---
+  parallel window=2s sequential window=4s
+  PASS: parallel (2s) <= sequential (4s)
+--- 6. real t3-verdict wiring (no QEMU) ---
+  PASS: clean log both arches -> PASS
+  PASS: intel over FAIL-injected log -> PARITY FAIL
+
+PARITY_CI_TEST: PASS — parity verdict + run-window budget behave correctly
+EXIT=0

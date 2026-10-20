@@ -1,0 +1,3 @@
+$ bash tools/gate/parity_ci.sh   # the CI entry point GB-044 is about, on this sha
+PARITY: no merge gate on this tree (land GB-005 first) and no PARITY_ARM_CMD/PARITY_INTEL_CMD supplied — refusing rather than silently passing.
+EXIT=2
