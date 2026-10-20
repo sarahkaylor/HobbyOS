@@ -21,3 +21,12 @@ null_open_w
 null_write3
 null_open_r
 null_read1
+pipe2
+poll_ready
+poll_ready_revents
+select_ready
+select_ready_fdset
+pselect6_ready
+pselect6_ready_fdset
+poll_badfd
+poll_badfd_revents
