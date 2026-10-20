@@ -858,6 +858,12 @@ static int process_create_internal_ver(int ver) {
     if (proc_table[i].state == PROC_STATE_FREE) {
       pid = i;
       proc_table[i].state = PROC_STATE_ALLOCATED;
+      /* GB-068 probe: -1 distinguishes "never called the kernel" from
+         "syscall 0", which 0 could not.  Not context[] -- zeroing the whole
+         register context was measured to change nothing (68 -> 58 records of
+         the same shape) and was reverted. */
+      proc_table[i].last_syscall = -1;
+      proc_table[i].last_ret = 0;
       break;
     }
   }

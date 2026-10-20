@@ -1848,6 +1848,11 @@ void sync_lower_handler_c(struct trap_frame *tf) {
 
   uint64_t syscall_num = tf->regs[0]; // rax
   core_in_syscall[get_cpuid()] = (int)syscall_num;
+  {
+    struct process *sc = current_process();
+    if (sc)
+      sc->last_syscall = (int64_t)syscall_num;
+  }
 
   if (syscall_num == 0xFF) {
     schedule(tf, 1);
@@ -2032,6 +2037,11 @@ void sync_lower_handler_c(struct trap_frame *tf) {
   } else {
     uart_puts("Unknown System Call Invoked!\n");
     tf->regs[0] = -ENOSYS;
+  }
+  {
+    struct process *sc = current_process();
+    if (sc)
+      sc->last_ret = (int64_t)tf->regs[0];
   }
   core_in_syscall[get_cpuid()] = 0;
 }
@@ -2469,6 +2479,10 @@ void general_interrupt_handler(struct trap_frame *tf) {
           fl_hex(&fl, cur_cr3 & ~0xFFFULL);
           fl_s(&fl, " asroot=");
           fl_hex(&fl, cur->as ? cur->as->root_phys : cur->user_phys_base);
+          fl_s(&fl, " sys=");
+          fl_dec(&fl, (int)cur->last_syscall);
+          fl_s(&fl, " ret=");
+          fl_hex(&fl, (uint64_t)cur->last_ret);
         }
         fl_s(&fl, " -> killed");
         fl_c(&fl, '\n');
