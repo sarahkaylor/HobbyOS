@@ -38,6 +38,29 @@ case "$ARCH_ARG" in
   *) echo "usage: t3_tier.sh [arm|intel] | t3_tier.sh police <log> [arch]" >&2; exit 2 ;;
 esac
 
+# Host-tool preconditions.  Measured failure this exists for: a run reported
+# "T3_intel: BUILD FAILED" because `mkfs.fat` was not on PATH -- while it was
+# installed at /usr/sbin/mkfs.fat the whole time.  Debian/Ubuntu keep the
+# mkfs family in sbin, which a non-root PATH often omits, so the build died
+# with "mkfs.fat: No such file or directory" and the tier blamed the code.
+# An environment gap must never read as a code defect: fix the PATH, and if a
+# tool is then still absent, exit 2 (environment), never 1 (build).
+case ":$PATH:" in
+  *:/usr/sbin:*|*:/sbin:*) ;;
+  *) PATH="/usr/sbin:/sbin:$PATH"; export PATH ;;
+esac
+_missing=""
+for _t in mkfs.fat mcopy qemu-system-$([ "$ARCH" = intel ] && echo x86_64 || echo aarch64); do
+  command -v "$_t" >/dev/null 2>&1 || _missing="$_missing $_t"
+done
+if [ -n "$_missing" ]; then
+  echo "T3_${ARCH}: ENVIRONMENT FAILURE — required host tool(s) not found:$_missing"
+  echo "  This is NOT a build or code defect: the tier cannot construct or boot the image."
+  echo "  PATH=$PATH"
+  exit 2
+fi
+
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
