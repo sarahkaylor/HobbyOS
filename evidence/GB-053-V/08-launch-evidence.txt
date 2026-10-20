@@ -1,0 +1,27 @@
+=== ARM run: every 'Loading program for scheduler' line (only 3 games load, all before the menu launch calls):
+325:Loading program for scheduler (v2 AS): DESKTOP.BIN
+470:Loading program for scheduler (v2 AS): PONG.BIN
+483:Loading program for scheduler (v2 AS): MILLIPED.BIN
+488:Loading program for scheduler (v2 AS): XNIBBLER.BIN
+
+=== ARM: menu slots for the pinned games:
+349:[MENU] 16=PONG.BIN
+350:[MENU] 17=MILLIPED.BIN
+351:[MENU] 18=STARDUST.BIN
+352:[MENU] 19=XNIBBLER.BIN
+353:[MENU] 20=XCRYPT.BIN
+354:[MENU] 21=NES.BIN
+
+=== ARM: mention counts (image staging + menu + process lines):
+  PONG: 97
+  MILLIPED: 95
+  XNIBBLER: 96
+  XCRYPT: 2
+  NES: 2
+
+=== INTEL run: desktop death and halt:
+382:[KERNEL] pid=1 (DESKTOP.BIN) memory fault VA=0x00000000755BDBC8 PC=0x0000001000008610 rw=r  in=PROT region=NONE cr3frame=0x0000000020C03000 asroot=0x0000000020C03000 -> killed
+383:[KERNEL] Process 1: DESKTOP.BIN exited unexpectedly or gracefully.
+385:System halt from CPU 4.
+
+=== INTEL: menu lines: 0, desktop-start lines: 0

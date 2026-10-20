@@ -1,0 +1,18 @@
+# S0/S1 Final Acceptance Run (GB-053)
+- arch: intel, pinned games: 5, at 2026-10-20T02:16:57.503250+00:00
+- verdict from each game's own screendump (live non-blank frame), not from 'it launched'.
+
+| game | slot | live frame | result |
+|---|---|---|---|
+| PONG.BIN | None | False | FAIL |
+| MILLIPED.BIN | None | False | FAIL |
+| XNIBBLER.BIN | None | False | FAIL |
+| XCRYPT.BIN | None | False | FAIL |
+| NES.BIN | None | False | FAIL |
+
+Summary: **FAIL**
+
+- intel leg gated on GB-057 (intel spawn deadlock); this run is ARM.
+- 'S0+S1 signed off' is the milestone judgment; this run is its evidence base.
+
+INTEL_EXIT=1

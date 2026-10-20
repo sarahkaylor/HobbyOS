@@ -1,0 +1,42 @@
+{
+  "arch": "intel",
+  "captured_at": "2026-10-20T02:16:57.503445+00:00",
+  "results": [
+    {
+      "game": "PONG.BIN",
+      "slot": null,
+      "live": false,
+      "ok": false,
+      "note": "not in [MENU] dump"
+    },
+    {
+      "game": "MILLIPED.BIN",
+      "slot": null,
+      "live": false,
+      "ok": false,
+      "note": "not in [MENU] dump"
+    },
+    {
+      "game": "XNIBBLER.BIN",
+      "slot": null,
+      "live": false,
+      "ok": false,
+      "note": "not in [MENU] dump"
+    },
+    {
+      "game": "XCRYPT.BIN",
+      "slot": null,
+      "live": false,
+      "ok": false,
+      "note": "not in [MENU] dump"
+    },
+    {
+      "game": "NES.BIN",
+      "slot": null,
+      "live": false,
+      "ok": false,
+      "note": "not in [MENU] dump"
+    }
+  ],
+  "summary": "FAIL"
+}

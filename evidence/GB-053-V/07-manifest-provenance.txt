@@ -1,0 +1,8 @@
+manifest arch: arm captured: 2026-10-20T02:08:53.250934+00:00
+evidence dir checked: evidence/acceptance/20261020T020759Z
+  PONG.BIN: manifest=e9a55f6088c7cd39 actual=e9a55f6088c7cd39 OK  live=True
+  MILLIPED.BIN: manifest=1f5437262b4dcabd actual=1f5437262b4dcabd OK  live=True
+  XNIBBLER.BIN: manifest=a32fc02c75cb156e actual=a32fc02c75cb156e OK  live=True
+  XCRYPT.BIN: manifest=9a9ef4f3b6571ada actual=9a9ef4f3b6571ada OK  live=True
+  NES.BIN: manifest=ebc92d75c82a7d29 actual=ebc92d75c82a7d29 OK  live=True
+mismatches: 0

@@ -1,0 +1,14 @@
+image              size          unique dominant             share
+MILLIPED.ppm       1920x1080          8 (0, 0, 0)            97.0%
+NES.ppm            1920x1080         13 (0, 0, 0)            97.0%
+PONG.ppm           1920x1080          3 (0, 0, 0)            99.8%
+XCRYPT.ppm         1920x1080          9 (0, 0, 0)            96.9%
+XNIBBLER.ppm       1920x1080          8 (0, 0, 0)            97.0%
+
+pairwise mean-abs-diff (0 = identical framebuffers):
+            MILLIPED.    NES.ppm   PONG.ppm  XCRYPT.pp  XNIBBLER.
+MILLIPED.p       0.00       0.46       0.90       0.45       0.37
+NES.ppm          0.46       0.00       0.97       0.15       0.23
+PONG.ppm         0.90       0.97       0.00       0.97       0.90
+XCRYPT.ppm       0.45       0.15       0.97       0.00       0.22
+XNIBBLER.p       0.37       0.23       0.90       0.22       0.00

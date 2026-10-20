@@ -1,0 +1,7 @@
+all black                          -> ppm_live = False
+50x50 white block at row 5         -> ppm_live = True
+50x50 white block at row 540       -> ppm_live = False
+50x50 white block at row 1000      -> ppm_live = False
+
+=> the check reads only the first 600000 bytes of pixels (top ~104 rows of
+   1920x1080); anything below that is invisible to it.
