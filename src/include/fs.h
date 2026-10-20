@@ -21,7 +21,9 @@ typedef enum {
   FILE_TYPE_SOCKET,   /**< Network socket */
   FILE_TYPE_NFS,      /**< Regular file on a mounted NFS export (read-only) */
   FILE_TYPE_UNIXSOCK, /**< P4: AF_UNIX socketpair end (struct usock) */
-  FILE_TYPE_MEMFD     /**< P2.4 (S4): memory file backed by a vm_object */
+  FILE_TYPE_MEMFD,    /**< P2.4 (S4): memory file backed by a vm_object */
+  FILE_TYPE_DEVNULL,  /**< GB-017: /dev/null — write-sink, EOF-on-read */
+  FILE_TYPE_DEVURANDO /**< GB-017: /dev/urandom — entropy file (F1.4 pool) */
 } file_type_t;
 
 struct vm_object;
