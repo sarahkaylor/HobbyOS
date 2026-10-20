@@ -1,0 +1,3 @@
+T3_arm (police evidence/GB-005-V/logs/dummy_clean.log): 1101 lines, 0 FAIL lines, 0 user memory faults, halted=1, kfault=0
+T3_arm: PASS (0 FAIL lines, halted)
+T3_arm EXIT=0

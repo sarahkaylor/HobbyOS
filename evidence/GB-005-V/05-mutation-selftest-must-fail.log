@@ -1,0 +1,18 @@
+# mutation test: is the self-test vacuously green? Blinded t3_tier.sh FAIL detector (FAIL_LINES=0) @ 2ffa3be3bd4c45c8d791f70c6755be2ccb06ab6e+mutation  2026-10-20T00:48:47Z
+--- 1. both arches green -> PARITY PASS ---
+  PASS: two green arches -> PASS
+--- 2. arm red -> PARITY FAIL ---
+  PASS: arm red -> FAIL
+--- 3. intel red -> PARITY FAIL ---
+  PASS: intel red -> FAIL
+--- 4. window over budget -> PARITY FAIL ---
+  PASS: window over budget (2s > 1s) -> FAIL
+--- 5. concurrent window <= sequential window (run window < best) ---
+  parallel window=2s sequential window=4s
+  PASS: parallel (2s) <= sequential (4s)
+--- 6. real t3-verdict wiring (no QEMU) ---
+  PASS: clean log both arches -> PASS
+  FAIL: FAIL-injected intel should make parity FAIL
+
+PARITY_CI_TEST: FAIL
+exit=1

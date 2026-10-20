@@ -1,0 +1,4 @@
+T3_intel (police evidence/GB-005-V/logs/dummy_broken.log): 1102 lines, 1 FAIL lines, 0 user memory faults, halted=1, kfault=0
+T3_intel: FAIL — 1 FAIL line(s); first 5:
+401:SHELLTEST FAIL: expected 42 got 7
+T3_intel EXIT=1

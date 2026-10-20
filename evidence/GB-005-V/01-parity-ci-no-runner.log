@@ -1,0 +1,4 @@
+# GB-005-V gate run — 2026-10-20T00:46:47Z — HEAD 2ffa3be3bd4c45c8d791f70c6755be2ccb06ab6e (== origin/main)
+$ bash tools/gate/parity_ci.sh   # no PARITY_*_CMD supplied
+PARITY: no merge gate on this tree (land GB-005 first) and no PARITY_ARM_CMD/PARITY_INTEL_CMD supplied — refusing rather than silently passing.
+exit=2

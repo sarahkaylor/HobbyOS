@@ -1,0 +1,27 @@
+# end-to-end dummy-branch demo (re-run capturing per-arch logs) @ 2ffa3be3bd4c45c8d791f70c6755be2ccb06ab6e  2026-10-20T00:48:24Z
+
+## BEFORE — break present: 'SHELLTEST FAIL: expected 42 got 7' injected into the intel log
+=== PARITY SUMMARY ===
+  window: 0s   budget: 0s (0 = unbounded)
+  arm   exit: 0     (GREEN)
+  intel exit: 1   (RED)
+  sequential: 1
+  PARITY: intel is RED (log obj/parity/intel.log)
+
+PARITY: FAIL (two-arch parity: both arches must be green and within budget)
+gate_exit=1
+--- obj/parity/intel.log (the named failing row) ---
+T3_intel (police evidence/GB-005-V/logs/dummy_broken.log): 1102 lines, 1 FAIL lines, 0 user memory faults, halted=1, kfault=0
+T3_intel: FAIL — 1 FAIL line(s); first 5:
+401:SHELLTEST FAIL: expected 42 got 7
+T3_intel EXIT=1
+
+## AFTER — break reverted
+=== PARITY SUMMARY ===
+  window: 0s   budget: 0s (0 = unbounded)
+  arm   exit: 0     (GREEN)
+  intel exit: 0   (GREEN)
+  sequential: 1
+
+PARITY: PASS — both arches green (window 0s; no budget set)
+gate_exit=0
