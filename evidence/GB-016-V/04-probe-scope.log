@@ -1,0 +1,22 @@
+# DoD rows vs the probe actually staged  @ 0d381008f3c3626a5cd2d0a335a129ab3b13f78f  2026-10-20T01:40:32Z
+
+$ grep -n 'prow(' src/user/t4_probe.c
+40:static void prow(const char *name, long rc, long err, const unsigned char *out, int outlen) {
+70:    prow("write3", r, (r < 0) ? (r == -1 ? 9 : (long)(-r)) : 0, msg, 3);
+
+$ grep -c uname src/user/t4_probe.c   -> 0   (the probe has no uname call)
+
+$ grep -c '^row=' obj/intel/t4_legA.out   -> 1   (leg A emits exactly one row)
+
+$ cat obj/intel/t4_legA.out
+t4-probe
+hi
+row=write3 rc=3 errno=0 out=68690a
+t4-probe-arrived
+probe-exit
+
+# GB-016-V DoD names rows uname_rc / uname_sysname_linux / release / machine, sourced from src/host/t4_compat_probe.c:
+278:    report("uname_rc", uname(&u));
+279:    report("uname_sysname_linux", strcmp(u.sysname, "Linux") == 0);
+280:    report("uname_machine_x86_64", strcmp(u.machine, "x86_64") == 0);
+# ...which is the HOST-mock probe (leg A vs host ho_* mocks), not the device probe staged into the guest.

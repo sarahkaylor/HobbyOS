@@ -1,0 +1,6 @@
+# $ date; musl-gcc: x86_64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+# $ make obj/t4_probe.elf   @ 0d381008f3c3626a5cd2d0a335a129ab3b13f78f
+make: *** No rule to make target 'obj/t4_probe.elf'.  Stop.
+make_exit=2
+ls: cannot access 'obj/t4_probe.elf': No such file or directory
+obj/t4_probe.elf: cannot open `obj/t4_probe.elf' (No such file or directory)

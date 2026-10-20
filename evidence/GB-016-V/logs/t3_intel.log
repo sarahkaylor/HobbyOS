@@ -1,0 +1,1428 @@
+ld.lld -T linker_x64.ld -o hobbyos.elf obj/intel/boot.o obj/intel/setjmp.o obj/intel/abi_t2_test.o obj/intel/blk_cache.o obj/intel/blk_cache_press_test.o obj/intel/blk_cache_test.o obj/intel/dhcp.o obj/intel/elf_image.o obj/intel/elf_loader.o obj/intel/evdev.o obj/intel/evdev_test.o obj/intel/fat16.o obj/intel/fat16_test.o obj/intel/fb_ioctl.o obj/intel/fb_ioctl_test.o obj/intel/fb_mmap.o obj/intel/fb_mmap_test.o obj/intel/frame.o obj/intel/frame_test.o obj/intel/fs.o obj/intel/fs_test.o obj/intel/input_node.o obj/intel/input_node_test.o obj/intel/iommu_vtd.o obj/intel/ipc_proto.o obj/intel/locks_test.o obj/intel/main.o obj/intel/math_test.o obj/intel/mmu_test.o obj/intel/net.o obj/intel/net_rdma.o obj/intel/net_rdma_test.o obj/intel/net_test.o obj/intel/nfs.o obj/intel/nfs_proto.o obj/intel/nfs_test.o obj/intel/pipe.o obj/intel/pipe_test.o obj/intel/process.o obj/intel/process_test.o obj/intel/program_loader.o obj/intel/program_loader_test.o obj/intel/test_fw_cfg.o obj/intel/test_smp.o obj/intel/time.o obj/intel/time_test.o obj/intel/timer_test.o obj/intel/trap_test.o obj/intel/unit_test.o obj/intel/unix.o obj/intel/unix_test.o obj/intel/vfs.o obj/intel/virtio_blk.o obj/intel/virtio_blk_test.o obj/intel/virtio_gpu.o obj/intel/virtio_gpu_test.o obj/intel/virtio_gpu_x64.o obj/intel/virtio_input.o obj/intel/virtio_input_test.o obj/intel/virtio_net.o obj/intel/virtio_net_test.o obj/intel/vm.o obj/intel/vm_test.o obj/intel/cpu.o obj/intel/fpu.o obj/intel/gic.o obj/intel/locks.o obj/intel/mmu.o obj/intel/rtc.o obj/intel/smp.o obj/intel/timer.o obj/intel/trap.o obj/intel/uart.o
+llvm-objcopy -I elf64-x86-64 -O elf32-i386 hobbyos.elf
+qemu-system-x86_64 -M q35 -smp 8 -m 12288M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56  -action shutdown=poweroff -display none 
+WARNING: Image format was not specified for '/home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd' and probing guessed raw.
+         Automatically detecting the format is dangerous for raw images, write operations on block 0 will be restricted.
+         Specify the 'raw' format explicitly to remove the restrictions.
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+BdsDxe: starting Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+[001;001H[001;001H[UART] lock @ 0x000000007557ebd8
+Booting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+VirtIO GPU: BGA
+VirtIO GPU successfully initialized.
+Original CCB: 0x0000000000000047
+Modified CCB: 0x0000000000000047
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1376256 total_mib=5376 reserved=0
+[KERNEL] Activating secondary cores via LAPIC IPIs...
+[KERNEL] smp_init: copying trampoline code...
+[KERNEL] smp_init: trampoline copied.
+[KERNEL] smp_init: Sending INIT IPI to core 1...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 1 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 2...
+[KERNEL] smp_init: Waiting after INIT IPI...
+start_scheduler called on CPU 1
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 2start_scheduler called on CPU  power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 3...
+[KERNEL] smp_init: Waiting after INIT IPI...
+2
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 3 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 4...
+[KERNEL] smp_init: Waiting after INIT IPI...
+start_scheduler called on CPU 3
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 4 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 5start_scheduler called on CPU ...
+4
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 5 power-on acknowledged.
+start_scheduler called on CPU [KERNEL] smp_init: Sending INIT IPI to core 6...
+[KERNEL] smp_init: Waiting after INIT IPI...
+5
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 6start_scheduler called on CPU 6
+ power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 7...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 7 power-on acknowledged.
+start_scheduler called on CPU 7
+[KERNEL] LAPIC timer rate: 63619 counts/ms, TSC rate: 2595764 ticks/ms (PIT-counter calibrated)
+Found NVMe controller on PCI bus!
+PCI Config Space of NVMe:
+0x0000000000101B36 0x0000000000100007 0x0000000001080202 0x0000000000000000 
+0x0000000081000004 0x0000000000000000 0x0000000000000000 0x0000000000000000 
+0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000011001AF4 
+0x0000000000000000 0x0000000000000040 0x0000000000000000 0x000000000000010B 
+NVMe BAR0 Phys: 0x0000000081000000 (Mapped to Virtual: 0x00000001FC000000)
+Resetting controller, waiting for CSTS.RDY = 0...
+Controller reset complete!
+Enabling controller... CC=0x0000000000460001 CSTS=0x0000000000000001
+Controller enabled successfully!
+Create IO CQ Status: 0x0000000000000000
+Create IO SQ Status: 0x0000000000000000
+NVMe driver initialized successfully!
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+[VIRTIO_NET] PCI Interrupt Line: 10 (Vector: 42)
+[VIRTIO_NET] MAC Address: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+[VIRTIO_NET] RX queue size: 256 rx_vq address: 0x00000000753F4000 PFN: 0x00000000000753F4
+[VIRTIO_NET] TX queue size: 256 tx_vq address: 0x00000000753F7000 PFN: 0x00000000000753F7
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP Discover sent
+DHCP initialization complete.
+[RDMA] Remote PCIe sharing is INACTIVE (no startup parameter).
+
+--- Parallel Program Loading ---
+Mode: TEST - Running automated tests...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=1
+Inside process_create: clearing memory at 0x0000000022000000
+Inside process_create: kmemset done.
+start_scheduler called on CPU 0
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+Loading program for scheduler (v2 AS): SUBPRB.BIN  [ALIVE-SET] slot=
+1 pid=1 st=3 parent=Inside process_create: acquiring lock...
+-1 claimed_by=6 
+Inside process_create: lock released. pid=2 block_idx=-1
+/SUBPRB.BIN
+v2 loader: image mapped (lazy), bytes=64920 pages=16 first=in elap=4ms
+v2 loader: PID=2 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): SHTEST.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=-1
+/SHTEST.BIN
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=3 parent=-1 claimed_by=6 
+  [ALIVE-SET] slot=2 pid=2 st=3 parent=-1 claimed_by=0 SUBPRB.BIN
+Loading program for scheduler (v2 AS): SHTEST2.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=-1
+/SHTEST2.BIN
+v2 loader: image mapped (lazy), bytes=62680 pages=16 first=in elap=3ms
+v2 loader: PID=3 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): SHTEST3.BIN
+/SHTEST3.BIN
+[KERNEL] pid=2 (SUBPRB.BIN) memory fault VA=0x00000000755FDBC8 PC=0x00000010000020D8 rw=w  in=PROT region=v2 loader: image mapped (lazy), bytes=62792 pages=16 first=in elap=1ms
+v2 loader: PID=4 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): CONSOLE.BIN
+/CONSOLE.BIN
+NONE cr3frame=0x0000000020C03000 asroot=0x0000000020C03000 -> killed
+v2 loader: image mapped (lazy), bytes=55288 pages=14 first=in elap=2ms
+v2 loader: PID=5 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): MEMTEST.BIN
+/MEMTEST.BIN
+[KERNEL] Process 2: SUBPRB.BIN exited unexpectedly or gracefully.
+v2 loader: image mapped (lazy), bytes=55288 pages=14 first=in elap=4ms
+v2 loader: PID=6 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+
+==========[KERNEL] pid=Loading program for scheduler (v2 AS): FILEIO.BIN
+==============4[KERNEL] pid= (SHTEST3.BIN) memory fault VA=0x00000000755FDBC8 PC=0x00000010000022E0 rw=r  in==3PROT region= (SHTEST2.BIN) memory fault VA=0x00000000755ADBC8 PC=0x00000010000021F0 rw=/FILEIO.BIN
+r  in=PROT region=NONE cr3frame=NONE0x0000000020C10000 asroot=0x0000000020C10000 -> killed
+[KERNEL] Process 3: SHTEST2.BIN exited unexpectedly or gracefully.
+=====
+Hello from isolated EL0 Space!
+==========v2 loader: image mapped (lazy), bytes=55560 pages=14 first=in elap=====================
+3ms
+ cr3frame=0x0000000020C1F000 asroot=v2 loader: PID=7 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=
+=============================40x0000000020C1F000=
+
+HobbLoading program for scheduler (v2 AS): BLKTEST.BIN
+ -> killed
+[KERNEL] Process 4: SHTEST3.BIN exited unexpectedly or gracefully.
+/BLKTEST.BINyOS User Program - Memory Test
+==============================
+
+Test 1: Writing to user space (should work):
+✓ Write to user space successful
+v2 loader: image mapped (lazy), bytes=75592 pages=19 first=in elap=3ms
+v2 loader: PID=8 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): FATBIG_T.BIN
+
+[FILEIO TEST/FATBIG_T.BIN
+] Starting File I/O Tests...
+[KERNEL] pid=8 (BLKTEST.BIN) memory fault VA=0x00000000755ADBC8 PC=0x0000001000005550 rw=r  in=PROT region=NONE cr3frame=0x0000000020C21000 asroot=0x0000000020C21000 -> killed
+[KERNEL] Process 8: BLKTEST.BIN exited unexpectedly or gracefully.
+v2 loader: image mapped (lazy), bytes=Computation finished. Exit47608 pages=12 first=in elap=6ms
+Test 2: Attemv2 loader: PID=9 entry=0x0000001000000000 sp=ing.
+0x0000001800000000 resident=pting 1 tables=4[KERNEL] Process 5: CONSOLE.BIN exited unexpectedly or gracefully.
+
+to write to kernel spacLoading program for scheduler (v2 AS): LFN_T.BIN
+e (should fail):
+[KERNEL] pid=6 (MEMTEST.BIN) memory fault VA=0x0000000040000000 PC=0x0000001000000051 rw=w  in=PROT region=NONE cr3frame=0x0000000020C30000 asroot=0x0000000020C30000 -> killed
+/LFN_T.BIN
+[KERNEL] Process 6: MEMTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=9 (FATBIG_T.BIN) memory fault VA=0x00000000755CDBE0 PC=0x0000001000001230 rw=r  in=PROT region=NONE cr3frame=0x0000000020C40000 asroot=0x0000000020C40000 -> killed
+[KERNEL] Process 9: FATBIG_T.BIN exited unexpectedly or gracefully.
+v2 loader: image mapped (lazy), bytes=57992 pages=15 first=in elap=4ms
+v2 loader: PID=10 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): HEAPTEST.BIN
+[FILEIO TEST] ERROR: Could not open TEST.TXT
+/HEAPTEST.BIN
+[KERNEL] Process 7: FILEIO.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=10 (LFN_T.BIN) memory fault VA=0x00000000755FDBC8 PC=0x0000001000003490 rw=r  in=PROT region=NONE cr3frame=0x0000000020C4E000 asroot=0x0000000020C4E000 -> killed
+[KERNEL] Process 10: LFN_T.BIN exited unexpectedly or gracefully.
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=[IDLESTUCK] cpu=47 rounds= rounds=20004 t=33737
+20004 t=33737
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=0 rounds=40004 t=62307
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=3 rounds=60000 t=90888
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=2 rounds=80004 t=119469
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=2 rounds=100002 t=148040
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=4 rounds=120002 t=176620
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=4 rounds=140001 t=205191
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=0 rounds=160001 t=233762
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=2 rounds=180001 t=262332
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=0 rounds=200003 t=290903
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=0 rounds=220005 t=319474
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=7 rounds=240004 t=348035
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=7 rounds=260002 t=376596
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=4 rounds=280004 t=405157
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=0 rounds=300005 t=433717
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=2 rounds=320001 t=462278
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=7 rounds=340003 t=490839
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=0 rounds=360001 t=519400
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=1 rounds=380004 t=547963
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=2 rounds=400003 t=576521
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=5 rounds=420002 t=605082
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=5 rounds=440003 t=633643
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=4 rounds=460002 t=662204
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=3 rounds=480005 t=690774
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=0 rounds=500003 t=719335
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=3 rounds=520000 t=747906
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=4 rounds=540002 t=776467
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=2 rounds=560002 t=805037
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=1 rounds=580000 t=833598
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=1 rounds=600002 t=862159
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=5 rounds=620002 t=890720
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=0 rounds=640000 t=919281
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=4 rounds=660001 t=947842
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=5 rounds=680005 t=976402
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=3 rounds=700001 t=1004963
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=4 rounds=720004 t=1033524
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=5 rounds=740007 t=1062095
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=1 rounds=760003 t=1090656
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=1 rounds=780001 t=1119217
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=1 rounds=800003 t=1147777
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=0 rounds=820001 t=1176338
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=2 rounds=840002 t=1204899
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=4 rounds=860002 t=1233460
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=1 rounds=880000 t=1262020
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=1 rounds=900000 t=1290581
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=5 rounds=920001 t=1319142
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=2 rounds=940000 t=1347703
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=4 rounds=960000 t=1376263
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=1 rounds=980001 t=1404824
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=7 rounds=1000002 t=1433385
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=1 rounds=1020001 t=1461946
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=5 rounds=1040002 t=1490507
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=1 rounds=1060000 t=1519067
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=1 rounds=1080001 t=1547628
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=4 rounds=1100005 t=1576189
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=0 rounds=1120000 t=1604749
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=7 rounds=1140000 t=1633300
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=7 rounds=1160003 t=1661871
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=0 rounds=1180001 t=1690432
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=3 rounds=1200002 t=1718993
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=4 rounds=1220004 t=1747554
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=1 rounds=1240001 t=1776115
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+[IDLESTUCK] cpu=0 rounds=1260002 t=1804675
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+qemu-system-x86_64: terminating on signal 15 from pid 186699 ()

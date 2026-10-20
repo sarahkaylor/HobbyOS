@@ -1,0 +1,27 @@
+# GB-016-V step 4 — $ T4_LEGA_OUT=obj/intel/t4_legA.out T4_SERIAL=obj/t3_intel.log bash tools/gate/t4_device.sh   @ 0d381008f3c3626a5cd2d0a335a129ab3b13f78f  2026-10-20T02:18:26Z
+=== t4_device: leg A reference: obj/intel/t4_legA.out ===
+=== t4_device: capture leg B from serial 'obj/t3_intel.log' ===
+t4_device: FAIL — the probe never arrived in the guest (no 't4-probe-arrived'
+  in obj/t3_intel.log after 120s).  This is a FAIL, not a SKIP (DoD clause 3).
+  (tail of serial:)
+[IDLESTUCK] cpu=0 rounds=1260002 t=1804675
+[IDLESTUCK] slot=1 pid=1 st=3 parent=-1 wake=0 rip=0x00000000700302B7 
+[IDLESTUCK] slot=2 pid=2 st=4 parent=-1 wake=0 rip=0x0000001000001EC0 SUBPRB.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST2.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x0000001000000000 SHTEST3.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x00000010000007B0 CONSOLE.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=-1 wake=0 rip=0x00000010000006F0 MEMTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x0000001000000750 FILEIO.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x0000001000000000 BLKTEST.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x0000001000001220 FATBIG_T.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000000000 LFN_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=1 parent=-1 wake=0 rip=0x0000000000000000 HEAPTEST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=1 c7=-1
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+
+[LOCKFOREVER] cpu=6 lock=0x0000000070200240 pc=0x0000000070001e49 pc2=0x0000000070003f28
+qemu-system-x86_64: terminating on signal 15 from pid 186699 ()
+exit=1

@@ -1,0 +1,26 @@
+# was the fixture actually on the image?  @ 2026-10-20T02:20:37Z
+$ mdir -i disk.img :: | grep -i T4PROBE
+TEST4    TXT         0 2026-10-20   1:47 
+T4PROBE  BIN     19328 2026-10-20   1:47 
+
+$ mdir -i disk.img :: | head -20
+ Volume in drive : has no label
+ Volume Serial Number is 824E-85B3
+Directory for ::/
+
+EFI          <DIR>     2026-10-20   1:47 
+boot         <DIR>     2026-10-20   1:47 
+home         <DIR>     2026-10-20   1:47 
+nfs          <DIR>     2026-10-20   1:47 
+mnt          <DIR>     2026-10-20   1:47 
+TESTDIR      <DIR>     2026-10-20   1:47 
+tmp          <DIR>     2026-10-20   1:47 
+TOOLS        <DIR>     2026-10-20   1:47 
+src          <DIR>     2026-10-20   1:47 
+THIRD_~1     <DIR>     2026-10-20   1:47  third_party
+E2E      TXT        44 2026-10-20   1:47 
+DRAGME   TXT         8 2026-10-20   1:47 
+MEMTEST  BIN     55288 2026-10-20   1:47 
+FILEIO   BIN     55560 2026-10-20   1:47 
+CONSOLE  BIN     55288 2026-10-20   1:47 
+FORKTEST BIN     56440 2026-10-20   1:47 
