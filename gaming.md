@@ -267,7 +267,11 @@ skeleton as an issue header block (see `tools/board/README.md`).
 5. A farm **Verifier** (DEEP session, §5.1) claims `GB-nnn-V` → `In Progress` → runs the gate on its own VM →
    posts evidence + a **RED/GREEN** verdict on both the verification and the implementation ticket.
    GREEN → the implementation ticket to `Merge Gate`; RED → back to `In Progress` with the failing output
-   quoted verbatim.
+   quoted verbatim. **This propagation is machine-checked:** `python3 tools/board/check_verdicts.py`
+   (and `--self-test`, which proves the check can fail) compares every posted verdict against its
+   parent's current lane and exits non-zero on a mismatch. It exists because the propagation was
+   missed twice in one loop — GB-010 and GB-070 both sat `In Review` with a RED already posted
+   against them, reading as "awaiting review" when a gate had been run and failed.
 6. Merge-gate CI (all test tiers + differential + both arches) must be green → `Merge Gate`.
 7. Coordinator merges (or escalates `decision` to Sarah) → closes ticket **with evidence link** → lane `Done`.
 
