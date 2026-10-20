@@ -220,6 +220,11 @@ struct process {
    *  exec, grows toward heap_top; the region is pre-mapped, so this is
    *  pure bookkeeping). */
   uint64_t heap_brk;
+  /* GB-068 probe: last syscall and its return.  -1 means "never entered the
+     dispatcher" -- 0 was ambiguous with syscall number 0 and made 58 of 68
+     fault records unreadable. */
+  int64_t last_syscall;
+  int64_t last_ret;
   /** Phase 4 (memory): anonymous mmap regions (first-fit carving from the
    *  pre-mapped region; entries are VAs into the anon area). */
   struct anon_region { uint64_t addr; uint64_t len; } anon_maps[8];
