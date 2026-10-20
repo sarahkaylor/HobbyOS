@@ -29,6 +29,7 @@
 #include <poll.h>
 #include <sys/select.h>
 #include <signal.h>
+#include <sys/socket.h> /* GB-018 socket remainder: socketpair/AF_UNIX */
 
 static void pstr(const char *s) {
   size_t n = 0; while (s[n]) n++;
@@ -147,6 +148,40 @@ int main(int argc, char **argv) {
     long pbr = poll(pf2, 1, 0);
     prow("poll_badfd", pbr, pbr < 0 ? 9 : 0, NULL, 0);
     prow("poll_badfd_revents", pf2[0].revents, 0, NULL, 0);
+  }
+
+  /* GB-018 (socket remainder, coord 2026-10-20): stream-socket readiness is a
+   * DISTINCT wake path from the pipe above (socket/ring buffer, not the pipe
+   * FIFO) — the one the compat layer is most likely to get wrong.  A
+   * socketpair(AF_UNIX, SOCK_STREAM) gives two connected stream sockets; the
+   * peer write flips the other end readable.  poll/select/pselect6 must report
+   * it.  Deterministic on both legs (kernel: SYS_SOCKETPAIR). */
+  {
+    int sv[2];
+    long spc = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+    prow("sockpair", spc, spc < 0 ? 9 : 0, NULL, 0);
+    if (write(sv[1], "s", 1) != 1) prow("sock_write", -1, 9, NULL, 0);
+
+    struct pollfd spf[1];
+    spf[0].fd = sv[0]; spf[0].events = POLLIN; spf[0].revents = 0;
+    long spr = poll(spf, 1, 0);
+    prow("sockpoll_ready", spr, spr < 0 ? 9 : 0, NULL, 0);
+    prow("sockpoll_revents", spf[0].revents, 0, NULL, 0);
+
+    fd_set srf; FD_ZERO(&srf); FD_SET(sv[0], &srf);
+    struct timeval stv; stv.tv_sec = 0; stv.tv_usec = 0;
+    long ssr = select(sv[0] + 1, &srf, NULL, NULL, &stv);
+    prow("sockselect_ready", ssr, ssr < 0 ? 9 : 0, NULL, 0);
+    prow("sockselect_fdset", FD_ISSET(sv[0], &srf) ? 1 : 0, 0, NULL, 0);
+
+    sigset_t sempt; sigemptyset(&sempt);
+    fd_set srf2; FD_ZERO(&srf2); FD_SET(sv[0], &srf2);
+    struct timespec sts; sts.tv_sec = 0; sts.tv_nsec = 0;
+    long sps = pselect(sv[0] + 1, &srf2, NULL, NULL, &sts, &sempt);
+    prow("sockpselect_ready", sps, sps < 0 ? 9 : 0, NULL, 0);
+    prow("sockpselect_fdset", FD_ISSET(sv[0], &srf2) ? 1 : 0, 0, NULL, 0);
+
+    close(sv[0]); close(sv[1]);
   }
 
   pstr("t4-probe-arrived\n");
