@@ -144,13 +144,18 @@ echo "=== T3 ($ARCH): run (deadline ${T3_TIMEOUT}s, log $LOG) ==="
 # Same QEMU invocation as `make run`, serial captured to the log.  A
 # background job + poll (not a bare `timeout make`) so we can distinguish
 # "guest halted" from "deadline hit" and report both honestly.
-# T3_QEMU_ARGS lets a caller add acceleration without editing the tier:
-#   T3_QEMU_ARGS="-enable-kvm" make test_intel
-# runs the intel wave near-native instead of under TCG (the fleet's VMs have
-# nested SVM and /dev/kvm, and a TCG 8-vCPU wave takes tens of minutes while
-# the same wave under KVM is minutes).  Never hardcoded here: KVM is not
-# available on every host, and a tier that silently changes its execution
-# mode is not reproducible.
+# Acceleration is the DEFAULT for intel, not opt-in: when this host has
+# /dev/kvm (the fleet VMs do -- nested SVM), the intel wave runs under
+# -enable-kvm, minutes instead of tens of minutes of TCG.  KVM is not
+# available on every host (e.g. macOS, or a host without nested virt), so:
+#   * the mode is chosen from /dev/kvm's presence, an environmental fact --
+#     the same host always runs the same mode, so reproducibility holds;
+#   * the mode actually used is PRINTED on the build line below, so a log
+#     can never hide which mode it ran under;
+#   * T3_SKIP_KVM=1 forces TCG for an explicit A/B (and on this fleet is
+#     the only way to run the slow path once a host has /dev/kvm).
+# T3_QEMU_ARGS still lets a caller append further args without editing the
+# tier (e.g. T3_MONITOR adds the monitor socket this way).
 # Post-freeze evidence: read the LIVE guest through QEMU's monitor before
 # cleanup kills it.
 #
@@ -164,6 +169,20 @@ echo "=== T3 ($ARCH): run (deadline ${T3_TIMEOUT}s, log $LOG) ==="
 #
 # Opt-in via T3_MONITOR=1: it changes the QEMU command line, and a tier that
 # silently changes its execution mode is not reproducible.
+# KVM acceleration default (intel only).  The fleet VMs have /dev/kvm
+# (nested SVM); a TCG intel wave is tens of minutes while the same wave
+# under KVM is minutes.  Default to KVM whenever the host offers it, print
+# the mode on the run line, and let T3_SKIP_KVM=1 force the slow path for
+# an explicit A/B.  ARM never gets KVM here (aarch64-on-x86 host has no
+# aarch64 KVM), so this is gated on ARCH, not just on the device.
+if [ "$ARCH" = "intel" ] && [ -e /dev/kvm ] && [ "${T3_SKIP_KVM:-0}" != "1" ]; then
+  ACCEL_ARGS="-enable-kvm"
+else
+  ACCEL_ARGS=""
+fi
+# T3_QEMU_ARGS still wins outright when the caller passes it explicitly.
+if [ -z "${T3_QEMU_ARGS:-}" ]; then T3_QEMU_ARGS="$ACCEL_ARGS"; fi
+
 MON_SOCK=""
 if [ "${T3_MONITOR:-0}" = "1" ]; then
   MON_SOCK="${T3_MONITOR_SOCK:-/tmp/t3_monitor_${ARCH}_$$.sock}"
