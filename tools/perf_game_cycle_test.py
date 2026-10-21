@@ -7,7 +7,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from perf_game_cycle import (FreezeWatchdog, rss_trend_growth, flag_freeze_free,
                              rss_floor_peak_growth, parse_ppm_header,
-                             crop_sha256, launch_seen)
+                             crop_sha256, launch_seen, launch_retry_needed)
 
 fails = 0
 def check(cond, msg):
@@ -110,6 +110,18 @@ check(launch_seen("boot...\n[LAUNCH] /GAMES/NES.BIN\n", "NES.BIN"),
       "sees a /GAMES-path launch in the new serial bytes")
 check(launch_seen("boot...nothing happened...", "XNIBBLER.BIN") is False,
       "missing launch -> False (no-op visit must FAIL)")
+
+print("launch_retry_needed (bounded retry; persistent no-op still FAILs)")
+check(launch_retry_needed(False, 0, 3) is True,
+      "first attempt missed -> keep retrying (0 of 3 used)")
+check(launch_retry_needed(False, 1, 3) is True,
+      "second attempt missed -> keep retrying (1 of 3 used)")
+check(launch_retry_needed(False, 2, 3) is False,
+      "last attempt (2 of 3) exhausted -> stop, must FAIL")
+check(launch_retry_needed(True, 0, 3) is False,
+      "launch seen -> stop, no retry")
+check(launch_retry_needed(False, 0, 1) is False,
+      "single-attempt config -> no retry after a miss")
 
 print("\nTests:", "ALL PASSED" if fails == 0 else f"{fails} FAILED")
 sys.exit(1 if fails else 0)
