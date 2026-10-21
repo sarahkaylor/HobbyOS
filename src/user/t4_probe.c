@@ -30,6 +30,14 @@
 #include <sys/select.h>
 #include <signal.h>
 #include <sys/socket.h> /* GB-018 socket remainder: socketpair/AF_UNIX */
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <sys/syscall.h>
+#include <dirent.h>
+#include <errno.h>
+#include <stdio.h>
+#include <sys/stat.h>
 
 static void pstr(const char *s) {
   size_t n = 0; while (s[n]) n++;
@@ -182,6 +190,68 @@ int main(int argc, char **argv) {
     prow("sockpselect_fdset", FD_ISSET(sv[0], &srf2) ? 1 : 0, 0, NULL, 0);
 
     close(sv[0]); close(sv[1]);
+  }
+
+  /* GB-076: fcntl/ioctl/dent rows the GB-019/020/021 -V DoDs name — must be in
+   * the shared golden + emitted by the guest probe so t4_device --check can
+   * fail on them (vacuous-pass closure).  Mirrors the host model: F_GETFL
+   * before/after F_SETFL(O_APPEND) + O_APPEND bit; TIOCGWINSZ/TCGETS on a
+   * non-tty (/dev/null) -> ENOTTY (25); getdents64 over a fixed 3-entry dir. */
+  {
+    int f = open("/tmp/ho_t4_ioctl_device", O_RDWR | O_CREAT, 0600);
+    long fgr = fcntl(f, F_GETFL);
+    prow("fcntl_getfl_rdwr", fgr, fgr < 0 ? 9 : 0, NULL, 0);
+    long fsa = fcntl(f, F_SETFL, O_APPEND);
+    prow("fcntl_setfl_append", fsa, fsa < 0 ? 9 : 0, NULL, 0);
+    long fga = fcntl(f, F_GETFL);
+    prow("fcntl_getfl_after", fga, fga < 0 ? 9 : 0, NULL, 0);
+    prow("fcntl_append_bit", (fga & O_APPEND) ? 1 : 0, 0, NULL, 0);
+    close(f);
+    int nt = open("/dev/null", O_RDWR);
+    struct winsize ws; memset(&ws, 0, sizeof ws);
+    long iw = ioctl(nt, TIOCGWINSZ, &ws);
+    prow("ioctl_tiocgwinsz_entty", iw < 0 ? (long)(errno) : 0, 0, NULL, 0);
+    struct termios ts; memset(&ts, 0, sizeof ts);
+    long it = ioctl(nt, TCGETS, &ts);
+    prow("ioctl_tcgets_entty", it < 0 ? (long)(errno) : 0, 0, NULL, 0);
+    close(nt);
+
+    const char *d = "/tmp/ho_t4_dent";
+    mkdir(d, 0700);
+    int created = 0;
+    char p[128];
+    snprintf(p, sizeof p, "%s/alpha", d);   FILE *fa = fopen(p, "w"); if (fa) { fputs("a", fa); fclose(fa); created++; }
+    snprintf(p, sizeof p, "%s/beta", d);    FILE *fb = fopen(p, "w"); if (fb) { fputs("b", fb); fclose(fb); created++; }
+    snprintf(p, sizeof p, "%s/charlie", d); FILE *fc = fopen(p, "w"); if (fc) { fputs("c", fc); fclose(fc); created++; }
+    prow("dent_created", created, 0, NULL, 0);
+    int dfd = open(d, O_RDONLY | O_DIRECTORY);
+    prow("dent_opendir", dfd, dfd < 0 ? 9 : 0, NULL, 0);
+    if (dfd >= 0) {
+      char buf[8192];
+      int saw_alpha = 0, saw_beta = 0, saw_charlie = 0, total = 0;
+      for (;;) {
+        long n = syscall(SYS_getdents64, dfd, buf, sizeof buf);
+        if (n <= 0) break;
+        long off = 0;
+        while (off < n) {
+          struct linux_dirent64 { unsigned long d_ino; long d_off; unsigned short d_reclen; unsigned char d_type; char d_name[]; } *e =
+            (struct linux_dirent64 *)(void *)(buf + off);
+          char *nm = e->d_name;
+          if (strcmp(nm, ".") && strcmp(nm, "..")) {
+            total++;
+            if (!strcmp(nm, "alpha"))   saw_alpha = 1;
+            else if (!strcmp(nm, "beta"))  saw_beta = 1;
+            else if (!strcmp(nm, "charlie")) saw_charlie = 1;
+          }
+          off += e->d_reclen;
+        }
+      }
+      prow("dent_total", total, 0, NULL, 0);
+      prow("dent_have_alpha", saw_alpha, 0, NULL, 0);
+      prow("dent_have_beta", saw_beta, 0, NULL, 0);
+      prow("dent_have_charlie", saw_charlie, 0, NULL, 0);
+      close(dfd);
+    }
   }
 
   pstr("t4-probe-arrived\n");
