@@ -110,7 +110,13 @@ done
 fail=0
 echo "=== t4_w0: W0 corpus gate over $LOG ==="
 for m in $MEMS; do
-  if grep -q "\[W0-ARRIVED\] $m" "$LOG"; then
+  # Arrival is proven by either marker: the [W0-ARRIVED] form the gate was
+  # written around, or the loader's own [ARRIVED] <name>.BIN line, which is
+  # what any real wave emits since the arrival instrument landed (2bab246).
+  # Without the second form this gate could never pass on a real wave: no
+  # program in the tree has ever printed [W0-ARRIVED], so a correct corpus was
+  # reported as "never ran".
+  if grep -q "\[W0-ARRIVED\] $m" "$LOG" || grep -q "\[ARRIVED\] $m\.BIN" "$LOG"; then
     echo "  PASS $m (arrived in guest)"
   else
     echo "  FAIL $m — not in the intel wave's exited-programs/arrival set (W0 corpus member never ran)"
@@ -118,12 +124,17 @@ for m in $MEMS; do
   fi
 done
 # DoD 3: a wave with no W0 arrival at all must fail, not skip
-if ! grep -q "\[W0-ARRIVED\]" "$LOG"; then
+if ! grep -q "\[W0-ARRIVED\]" "$LOG" && ! grep -qE "\[ARRIVED\] (HELLO|CAT|SH|LS)\.BIN" "$LOG"; then
   echo "t4_w0: FAIL — no W0 member arrived in the guest (absent probe is a failure, never a skip)"
   fail=1
 fi
 if [ "$fail" = "0" ]; then
-  echo "t4_w0: PASS — every W0 corpus member appears in the intel wave + output matched the Linux leg"
+  # NOTE: arrival only.  The output half of the DoD is compared in verdict()
+  # and exercised by --self-test, but the live path has no source for it yet:
+  # nothing in the tree emits the '[W0] <member> linux=<output>' marker that
+  # comparison needs.  The PASS text says what was actually checked.
+  echo "t4_w0: PASS — every W0 corpus member arrived in the intel wave (arrival only: the"
+  echo "               output half needs a '[W0] <member> linux=' marker, which no program emits yet)"
   exit 0
 fi
 echo "t4_w0: FAIL — W0 corpus incomplete"
