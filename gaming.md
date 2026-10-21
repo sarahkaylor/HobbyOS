@@ -237,7 +237,7 @@ boards in one, milestones and labels, light enough for a VM.
 
 - **Project:** `GAMING-BOARD` (kanban).
 - Lanes: `📋 Backlog` → `🟦 Ready` → `🟨 In Progress` → `🟧 In Review` → `🚦 Merge Gate` → `✅ Done`; plus `🧊 Icebox` (Program-2 vision epics).
-- Labels: `infra`, `abi`, `loader`, `libc`, `elf-compat`, `graphics`, `input`, `audio`, `native-port`, `game`, `tests`, `perf`, `docs`, `decision` (needs Sarah's sign-off), `deep` (DEEP-model required), `blocked`, `parity-ar` (ARM), `parity-x64`.
+- Labels: `infra`, `abi`, `loader`, `libc`, `elf-compat`, `graphics`, `input`, `audio`, `native-port`, `game`, `tests`, `perf`, `docs`, `decision` (needs Sarah's sign-off), `deep` (DEEP-model required), `blocked`, `debug` (DEEP root-cause / design-freeze work claimed by a farm Verifier only when no `verify` ticket is Ready — §5.1 debug reserve), `parity-ar` (ARM), `parity-x64`.
 - Milestones: `M0·infra` `M1·abi-core` `M2·devices-sdl` `M3·games` `M4·acceptance`.
 - Ticket skeleton: ID, workstream, weight S/M/L, depends-on, DoD + test, evidence link.
 - Bot user: `swarm-bot` (API token) — the Coordinator and workers move/annotate tickets through it. Webhook on the board posts to the Coordinator.
@@ -299,7 +299,7 @@ The loop:
 |---|---|---|---|---|
 | **Coordinator** | 1 | DEEP | `swarm-coordinator` (.233) | plan + board + re-plan loop + merges + escalation; primary DEEP consumer |
 | **Worker** | 3–8 | FLASH | `swarm-farm-1..3` | claim tickets, branch, code+tests, MR — one long-lived session per subsystem |
-| **Verifier** | 3 (one per farm) | DEEP | `swarm-farm-1..3` | claim `verify`+`deep` tickets, run §6 gates on own VM, post RED/GREEN verdicts; gate-running is its own role so gates parallelize |
+| **Verifier** | 3 (one per farm) | DEEP | `swarm-farm-1..3` | claim `verify`+`deep` tickets, run §6 gates on own VM, post RED/GREEN verdicts; gate-running is its own role so gates parallelize. **Debug reserve:** when no `verify`+`deep` Ready ticket exists, a farm Verifier may claim a Ready `debug`+`deep` ticket (root-cause / design-freeze work that is DEEP-class but not a gate, e.g. kernel-wall debugging, build-profile freezes) and work it — this keeps DEEP wall work from serializing on the Coordinator alone |
 | **Reviewer** | 1 | FLASH | coordinator/farms | contract/diff/DoD review; flags `decision` |
 | **Tester** | 1 | FLASH | `swarm-farm-1..3` | playthrough + stress harnesses, flaky triage |
 
