@@ -1942,6 +1942,22 @@ static void desktop_ignore_sigpipe(void) {
 #endif
 }
 
+/* Reap exited child processes (WNOHANG, any child) so their kernel slots are
+ * freed instead of accumulating as zombies.  Root cause of the GB-046 long-soak
+ * desktop death: close_window_now() killed game processes but never
+ * waitpid()ed them, so the process table filled ("no free process slots!
+ * zombies=23") and every later launch failed.  A long-lived parent reaps its
+ * children; this drains whatever has exited.  Guarded out of HOST_TEST (the
+ * reap is a kernel syscall; host desktop tests exercise windowing only). */
+void desktop_reap_children(void) {
+#ifndef HOST_TEST
+  int wst;
+  while (waitpid(0, &wst, 1) > 0) { }   /* WNOHANG: reap all exited, never block */
+#else
+  (void)0;
+#endif
+}
+
 int main(void) {
   desktop_ignore_sigpipe();
   print("Desktop starting...\n");
@@ -1963,6 +1979,12 @@ int main(void) {
   int last_clock_ms = -1000;
 
   while (1) {
+    /* Reap exited child processes (non-blocking) so their kernel slots free
+     * instead of accumulating as zombies — the GB-046 long soak died on
+     * "[KERNEL] process_create: no free process slots! zombies=23" because
+     * close_window_now() killed game processes but never waitpid()ed them.
+     * A long-lived parent reaps its children; drain was here. */
+    desktop_reap_children();
     /* Periodic redraw so the taskbar clock ticks (>= 1s). */
     int now_ms = sysinfo(1, 0, 0);
     if (now_ms - last_clock_ms >= 1000) {
