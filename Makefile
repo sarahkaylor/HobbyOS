@@ -2832,6 +2832,21 @@ obj/host_linux_abi_test.o: src/host/linux_abi_test.c src/include/linux_syscall.h
 	@mkdir -p obj
 	$(HOST_CC) $(HOST_CFLAGS) -Isrc/include -c $< -o $@
 
+# GB-016 (host T4 value differential): the kernel uname shim's VALUES must equal
+# real Linux uname() (sysname, machine, NUL-padding).  The existing host probe's
+# `uname sysname=Linux` line is real-musl vs real-glibc on the same host — both
+# are Linux, so it cannot catch a shim returning the wrong identity.  This runs
+# the merged linux_fill_utsname against the host's real uname() byte-for-byte.
+UNAME_PARITY = uname_parity_host
+$(UNAME_PARITY): obj/host_linux_uname_parity.o obj/host_linux_uname.o
+	$(HOST_CC) -o $@ $^
+obj/host_linux_uname_parity.o: src/host/linux_uname_parity.c src/include/linux_uname.h src/include/linux_layout.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/include -c $< -o $@
+obj/host_linux_uname.o: src/kernel/linux_uname.c src/include/linux_uname.h src/include/linux_layout.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/include -c $< -o $@
+
 # GB-015/014: struct-layout parity lock + L_* constant lock — asserted against
 # the same tests/fixtures/abi goldens (linux_layouts.golden, linux_constants.golden),
 # the "silent corruption" class a wrong layout/constant causes.  Kernel headers
@@ -3408,7 +3423,7 @@ DIFF_RUN = python3 tools/differential/diff_harness_test.py
 test_diff_harness:
 	$(HOST_RUN) $(DIFF_RUN)
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_diff_harness $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_diff_harness $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(UNAME_PARITY)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(GAMES_SCAN_TEST)
 	$(HOST_RUN) ./$(GFX_STATS_TEST)
@@ -3439,6 +3454,7 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_diff_harness $(GAMES_SCAN_TES
 	$(HOST_RUN) ./$(ERRNO_TEST)
 	$(HOST_RUN) ./$(ELF_IMAGE_TEST)
 	$(HOST_RUN) ./$(LINUX_ABI_TEST)
+	$(HOST_RUN) ./$(UNAME_PARITY)
 	$(HOST_RUN) ./$(LINUX_LAYOUT_TEST)
 	$(HOST_RUN) ./$(LINUX_ABI_CONSTANTS_TEST)
 	$(HOST_RUN) ./$(THRD_TEST_HOST)
@@ -3583,4 +3599,4 @@ parity_ci:
 test_parity_ci:
 	bash tools/gate/parity_ci_test.sh
 
-.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test merge_gate merge_gate_ci test_merge_gate parity_ci test_parity_ci cache_setup cold_vs_cached test_cache test_diff_harness bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest
+.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test merge_gate merge_gate_ci test_merge_gate parity_ci test_parity_ci cache_setup cold_vs_cached test_cache test_diff_harness bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest uname_parity_host
