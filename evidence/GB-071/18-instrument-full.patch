@@ -1,0 +1,49 @@
+diff --git a/src/kernel/arch/x64/trap.c b/src/kernel/arch/x64/trap.c
+index 4c850af..ea5b244 100755
+--- a/src/kernel/arch/x64/trap.c
++++ b/src/kernel/arch/x64/trap.c
+@@ -2449,6 +2449,44 @@ void general_interrupt_handler(struct trap_frame *tf) {
+         fl_s(&fl, cur->name);
+         fl_s(&fl, ") memory fault VA=");
+         fl_hex(&fl, cr2);
++        /* GB-071: name the CARRIER.  regs[0]=rax, [2]=rcx, [3]=rdx,
++           [4]=rsi, [5]=rdi, [7]=r8, [9]=r10 (trap.c's canonical map). */
++        fl_s(&fl, " rax="); fl_hex(&fl, tf->regs[0]);
++        fl_s(&fl, " rdi="); fl_hex(&fl, tf->regs[5]);
++        fl_s(&fl, " rsi="); fl_hex(&fl, tf->regs[4]);
++        fl_s(&fl, " rdx="); fl_hex(&fl, tf->regs[3]);
++        fl_s(&fl, " usp="); fl_hex(&fl, cur->context[33]);
++        /* GB-071: for a family-B read fault, the return address of the call
++           that reached print_console sits on the user stack.  The process's
++           own AS is active here (cr3frame == asroot on every family-B line),
++           so scanning up to 24 quadwords below the saved SP is safe (the
++           guard page is at the stack LIMIT, far below).  Print only the
++           values that look like code addresses in the user image window. */
++        if (pf_w == 0 && cr2 >= 0x70000000ULL) {
++          uint64_t usp0 = cur->context[33];
++          fl_s(&fl, " retaddr=");
++          for (int k = 1; k <= 24; k++) {
++            uint64_t v = *(volatile uint64_t *)(usp0 - 8u * (uint64_t)k);
++            if ((v >> 32) == 0x10000000ULL) { fl_hex(&fl, v); fl_c(&fl, ','); }
++          }
++          /* layout probe: is tf->ss the hardware SS slot, the saved RSP, or a
++             placeholder?  Print the two quadwords around it. */
++          fl_s(&fl, " ss="); fl_hex(&fl, tf->ss);
++          fl_s(&fl, " ss+8="); fl_hex(&fl, *(volatile uint64_t *)((char *)tf + __builtin_offsetof(struct trap_frame, ss) + 8));
++          fl_s(&fl, " ss-8="); fl_hex(&fl, *(volatile uint64_t *)((char *)tf + __builtin_offsetof(struct trap_frame, ss) - 8));
++          fl_s(&fl, " ss+16="); fl_hex(&fl, *(volatile uint64_t *)((char *)tf + __builtin_offsetof(struct trap_frame, ss) + 16));
++          fl_s(&fl, " ss+24="); fl_hex(&fl, *(volatile uint64_t *)((char *)tf + __builtin_offsetof(struct trap_frame, ss) + 24));
++          fl_s(&fl, " ss-16="); fl_hex(&fl, *(volatile uint64_t *)((char *)tf + __builtin_offsetof(struct trap_frame, ss) - 16));
++          /* ss-8=CS(0x1B), ss=SS(0x23), ss+8=RFLAGS, ss+16=saved user RSP.
++             The call that reached print_console pushed its return address at
++             [rsp]; print_console's prologue has not pushed anything yet. */
++          {
++            uint64_t rsp_saved = *(volatile uint64_t *)((char *)tf +
++                                  __builtin_offsetof(struct trap_frame, ss) + 16);
++            fl_s(&fl, " caller=");
++            if (rsp_saved >= USER_VA_BASE) fl_hex(&fl, *(volatile uint64_t *)rsp_saved);
++          }
++        }
+         fl_s(&fl, " PC=");
+         fl_hex(&fl, tf->elr);
+         fl_s(&fl, " rw=");
