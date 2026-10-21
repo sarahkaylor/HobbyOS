@@ -1588,6 +1588,24 @@ void schedule(struct trap_frame *tf, int is_yield) {
       extern char __stack_top;
       uint64_t target_sp = (uint64_t)&__stack_top - cpu * 0x10000 - 4096;
 #ifdef __x86_64__
+      /* GB-068 FIX: target_sp must be the RESUMED TASK's stack, not this CPU's.
+         It was initialised to the per-CPU kernel stack and only ever
+         `arch_set_user_sp(park)` was called in the kernel branch -- target_sp
+         itself was never reassigned. enter_user_space places the initial
+         argument block at target_sp and points rdi at it, so EVERY process was
+         handed a kernel stack address: measured [WINDUMP] rdi40=0x755DDBC8 with
+         tsp=0x755DDBF0 (rdi = tsp - 0x28) while c33 said the real user stack was
+         0x17FFFFFFF8. The program then dereferenced argv in the kernel stack,
+         which is not mapped in its CR3 -> the memory fault at VA in the 0x755..
+         range with rdi holding a kernel pointer. That is the whole of the
+         "context[31] kernel RIP with user CS" mystery: the frame was fine, the
+         STACK POINTER was not.
+         For a user process context[33] is the user stack top; for a kernel task
+         it is the interrupted RSP. Both cases want the same thing here. */
+      {
+        uint64_t own_sp = proc_table[next].context[33];
+        if (own_sp) target_sp = own_sp;
+      }
       /* Every kernel task resumes on its OWN stack: context[33] is the
          interrupted RSP for a preempted task (the frame's RSP slot,
          saved by save_context) and user_phys_base + USER_REGION_SIZE -
