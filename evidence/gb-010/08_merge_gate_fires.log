@@ -1,0 +1,13 @@
+injected: 'read 0' -> 'read 9'
+$ GATE_T1=0 bash tools/gate/merge_gate.sh   # mutated
+  [GATE] DOCS_abi: python3 tools/linux-abi/gen_abi_doc.py --check
+  [GATE] DOCS_abi: FAIL (exit 1) — log: obj/gate/DOCS_abi.log
+    DOCS_abi         FAIL
+  GATE: FAIL — at least one required tier failed. Logs in obj/gate/.
+  EXIT=1
+$ GATE_T1=0 bash tools/gate/merge_gate.sh   # restored
+  [GATE] DOCS_abi: python3 tools/linux-abi/gen_abi_doc.py --check
+  [GATE] DOCS_abi: PASS
+    DOCS_abi         PASS
+  GATE: PASS (no required tier failed; skipped tiers are reported above)
+  EXIT=0

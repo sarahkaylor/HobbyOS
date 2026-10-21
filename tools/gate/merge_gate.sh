@@ -5,6 +5,7 @@
 # project's test tiers and turns their output into a single verdict:
 #
 #   T1  host golden  : make host_tests   (host unit/golden suite + t4 parity)
+#   DOCS             : gen_abi_doc.py --check  (docs/linux-abi.md not stale vs probe)
 #   T2  kernel unit  : make unit_tests_{arm,intel}  (in-guest, QEMU)
 #   T3  integration  : tools/t3_tier.sh {arm,intel} (the GATE T3 tier — inherits
 #                      its real green criteria: no FATAL kernel-mode fault, a
@@ -71,6 +72,14 @@ run_tier() {  # run_tier <name> <cmd...>
 # --- T1: host golden suite (includes t4 parity, elf/linux-abi, gfx, evdev…) ---
 if [ "$GATE_T1" = "1" ]; then run_tier T1_host make host_tests; else RESULT[T1_host]=skip; fi
 
+# --- DOCS: measured-doc drift (GB-010).  docs/linux-abi.md is generated from
+#     tools/linux-abi/probe_abi.c; without this tier the doc sat three days stale
+#     after 8385989 extended the probe and nobody regenerated it (GB-010-V).
+#     Cheap (a compile-and-run of one probe), so it runs by default in every gate.
+if [ "${GATE_DOCS:-1}" = "1" ]; then
+  run_tier DOCS_abi python3 tools/linux-abi/gen_abi_doc.py --check
+else RESULT[DOCS_abi]=skip; fi
+
 # --- T2: kernel unit waves (in-guest, QEMU) ---
 if [ "$GATE_T2" = "1" ]; then
   run_tier T2_unit_arm   make unit_tests_arm
@@ -94,7 +103,7 @@ else RESULT[STYLE_check]=skip; RESULT[STYLE_test]=skip; fi
 # --- verdict ---
 echo
 echo "=== GATE SUMMARY ==="
-declare -a TIERS=(T1_host T2_unit_arm T2_unit_intel T3_int_arm T3_int_intel STYLE_check STYLE_test)
+declare -a TIERS=(T1_host DOCS_abi T2_unit_arm T2_unit_intel T3_int_arm T3_int_intel STYLE_check STYLE_test)
 fail=0
 for k in "${TIERS[@]}"; do
   v="${RESULT[$k]:-skip}"

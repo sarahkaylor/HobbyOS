@@ -1,0 +1,4 @@
+$ python3 tools/linux-abi/gen_abi_doc.py --check   # before
+      |                                                               %ld
+docs/linux-abi.md is STALE — re-run tools/linux-abi/gen_abi_doc.py
+EXIT=1

@@ -1,0 +1,24 @@
+$ python3 tools/linux-abi/gen_abi_doc.py   # regenerate
+      |                                                               %ld
+updated /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-65d64814/docs/linux-abi.md (5 measured sections)
+EXIT=0
+
+$ git diff --stat
+ docs/linux-abi.md | 3 +++
+ 1 file changed, 3 insertions(+)
+
+$ git diff docs/linux-abi.md
+diff --git a/docs/linux-abi.md b/docs/linux-abi.md
+index 7827d9b..2dfcb2a 100644
+--- a/docs/linux-abi.md
++++ b/docs/linux-abi.md
+@@ -459,6 +459,9 @@ EV_SYN=0 EV_KEY=1 EV_REL=2 EV_ABS=3 EV_MSC=4 EV_LED=17 EV_REP=20
+ BTN_LEFT=0x110 BTN_RIGHT=0x111 BTN_MIDDLE=0x112
+ ABS_X=0x0 ABS_Y=0x1 REL_X=0x0 REL_Y=0x1 REL_WHEEL=0x8
+ KEY_A=30 KEY_ENTER=28 KEY_ESC=1 KEY_SPACE=57
++GAMEPAD BTN_A=0x130 BTN_B=0x131 BTN_X=0x133 BTN_Y=0x134 BTN_TL=0x136 BTN_TR=0x137 BTN_TL2=0x138 BTN_TR2=0x139
++GAMEPAD BTN_SELECT=0x13a BTN_START=0x13b BTN_MODE=0x13c BTN_THUMBL=0x13d BTN_THUMBR=0x13e
++GAMEPAD ABS_X=0x0 ABS_Y=0x1 ABS_Z=0x2 ABS_RX=0x3 ABS_RY=0x4 ABS_RZ=0x5 ABS_HAT0X=0x10 ABS_HAT0Y=0x11
+ ```
+ <!-- /PROBE -->
+ 

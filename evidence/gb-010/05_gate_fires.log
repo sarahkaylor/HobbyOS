@@ -1,0 +1,7 @@
+injected: 'read 0' -> 'read 9' in docs/linux-abi.md
+$ make abi_doc_check   # with one number mutated
+  docs/linux-abi.md is STALE — re-run tools/linux-abi/gen_abi_doc.py
+EXIT=2
+$ make abi_doc_check   # restored
+  docs/linux-abi.md matches a fresh ABI probe
+EXIT=0
