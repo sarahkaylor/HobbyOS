@@ -1,0 +1,21 @@
+########## A. current claim.sh, CLEAN ticket GB-991 (expect: 1 winner, 1 refusal naming it) ##########
+alpha rc=1  beta rc=0
+--- alpha ---
+GB-991 #114 already claimed by `agent-beta` (lane already In Progress) — not re-claiming (GB-074); run no gate
+--- beta ---
+GB-991 #114 claimed by agent-beta (was Ready)
+
+########## B. PRE-FIX code (31d15c4^), CLEAN ticket GB-992 (expect: BOTH succeed = double claim) ##########
+0
+alpha rc=0  beta rc=0
+--- alpha ---
+GB-992 #115 claimed by agent-alpha (was Ready)
+--- beta ---
+GB-992 #115 claimed by agent-beta (was Ready)
+
+########## verdict count on each scratch ticket ##########
+GB-991 current #114: 1 claim comment(s)
+    claimed by `agent-beta` on swarm-farm-3 — lane: Ready → In Progress
+GB-992 pre-fix #115: 2 claim comment(s)
+    claimed by `agent-beta` on swarm-farm-3 — lane: Ready → In Progress
+    claimed by `agent-alpha` on swarm-farm-3 — lane: Ready → In Progress

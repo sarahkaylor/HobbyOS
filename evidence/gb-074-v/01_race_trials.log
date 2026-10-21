@@ -1,0 +1,18 @@
+########## TRIAL 1 (scratch ticket #113, board.py @ 31d15c4) ##########
+--- alpha ---
+GB-990 #113 already claimed by `agent-beta` (lane already In Progress) — not re-claiming (GB-074); run no gate
+--- beta ---
+GB-990 #113 claimed by agent-beta (was Ready)
+
+########## TRIAL 2 (scratch ticket #113, board.py @ 31d15c4) ##########
+--- alpha ---
+GB-990 #113 claimed by agent-alpha (was Ready)
+--- beta ---
+GB-990 #113 already claimed by `agent-beta` (lane already In Progress) — not re-claiming (GB-074); run no gate
+
+########## TRIAL 3 (scratch ticket #113, board.py @ 31d15c4) ##########
+--- alpha ---
+GB-990 #113 claimed by agent-alpha (was Ready)
+--- beta ---
+GB-990 #113 already claimed by `agent-beta` (lane already In Progress) — not re-claiming (GB-074); run no gate
+
