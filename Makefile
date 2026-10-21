@@ -379,6 +379,27 @@ ifneq ($(MODE),desktop)
   QEMU_ARGS += -display none
 endif
 
+# KVM acceleration is the default for ARCH=intel on hosts that have
+# /dev/kvm (the swarm farm VMs expose nested SVM).  Without it a TCG intel
+# wave is tens of minutes; with -enable-kvm it is minutes, and the ELF-compat
+# track (intel-only by design, gaming.md §2.1) depends on fast intel cycles.
+# The mode follows /dev/kvm's presence — an environmental fact, so the same
+# host always runs the same mode (reproducibility holds), and a host can
+# force the slow path for an A/B with SKIP_KVM=1.  macOS has no /dev/kvm, so
+# this block is a no-op there; ARM is unaffected (no aarch64 KVM on x86 host).
+# Tier wrappers (tools/t3_tier.sh, run_unit_tests_intel.sh) may already pass
+# -enable-kvm in QEMU_ARGS; the findstring guard keeps it from duplicating.
+ifeq ($(ARCH),intel)
+  KVM_DEV := $(shell test -e /dev/kvm && echo 1 || echo 0)
+  ifeq ($(KVM_DEV),1)
+    ifneq ($(SKIP_KVM),1)
+      ifeq ($(findstring -enable-kvm,$(QEMU_ARGS)),)
+        QEMU_ARGS += -enable-kvm
+      endif
+    endif
+  endif
+endif
+
 # --- GX (docs/graphics-accel.md §3-D5): resolve QEMU_GPU to the concrete
 # display/device pair referenced by the per-arch QEMU_CMD lines above.
 # This block must run AFTER the `-display none` append: non-desktop modes
