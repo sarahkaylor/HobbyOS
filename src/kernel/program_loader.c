@@ -811,7 +811,21 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
      is exactly what this contract needs. The v1 path never hit this because it
      maps the whole 32 MB region up front.
      Touch a full page below the top: the frame window is [TOP-320, TOP). */
-  if (child->as && vm_touch(child, USER_MAIN_STK_TOP_V2 - 4096, 4096, /*write=*/1) != 0) {
+  /* GB-068 follow-on 2: ONE page is not enough. -d int capture of the reset
+     showed the actual triple fault:
+       v=0e e=0002 i=0 cpl=0 IP=0008:700349ca SP=0010:17fffff9f0 CR2=17fffff9e8
+     IP 700349ca is `call get_cpuid` -- a CALL pushes its return address, and with
+     SP already at 0x17fffff9f0 the push writes exactly CR2. So the KERNEL was
+     running on the user stack, ~0x600 below the top, and descended onto a
+     demand-zero page it cannot fault in from CPL=0: #PF -> #DF -> triple fault ->
+     QEMU reboot. That is the 195-reboot loop.
+     The resume tail legitimately uses the user stack for the frame window and for
+     frames pushed before the iretq, so map the whole guard-sized span up front
+     rather than the single page the frame itself needs. USER_MAIN_STK_GUARD is
+     64 KiB and the region below it stays demand-zero. */
+  if (child->as &&
+      vm_touch(child, USER_MAIN_STK_TOP_V2 - USER_MAIN_STK_GUARD,
+               USER_MAIN_STK_GUARD, /*write=*/1) != 0) {
     uart_puts("v2 loader: stack prefault failed\n");
     process_free(pid);
     return -ENOMEM;
