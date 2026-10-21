@@ -1,0 +1,8 @@
+HOST=swarm-farm-1 REV=badc665 COLD rc=2 secs=57
+Local storage:
+  Cache size (GiB): 0.0 / 5.0 ( 0.00%)
+Compile requests                      0
+Compile requests executed             0
+Cache hits                            0
+Cache hits rate                       -
+Compilations                          0

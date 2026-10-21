@@ -1,0 +1,12 @@
+--- negative control (cache cleared):
+NEG rc=0 secs=47
+--- ccache-wired test (PATH=/usr/lib/ccache):
+  Hits:               2 / 136 ( 1.47%)
+  Misses:           134 / 136 (98.53%)
+  Hits:               2 / 136 ( 1.47%)
+  Misses:           134 / 136 (98.53%)
+WIRED2 secs=40
+  Hits:             126 / 272 (46.32%)
+  Misses:           146 / 272 (53.68%)
+  Hits:             126 / 272 (46.32%)
+  Misses:           146 / 272 (53.68%)

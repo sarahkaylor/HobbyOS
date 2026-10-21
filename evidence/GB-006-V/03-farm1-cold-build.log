@@ -1,0 +1,1604 @@
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/editor.c -o obj/host_user_editor.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/compat.c -o obj/host_compat.o
+src/host/compat.c:120:90: warning: unused parameter 'args' [-Wunused-parameter]
+  120 | int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args) {
+      |                                                                                          ^
+1 warning generated.
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/dialog.c -o obj/host_user_dialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/filedialog.c -o obj/host_user_filedialog.o
+clang -o EDITOR.BIN_host obj/host_user_editor.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/editor_test.c -o obj/host_editor_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Dmain=desktop_main -c src/user/desktop.c -o obj/host_user_desktop.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/graphics/graphics.c -o obj/host_user_graphics_graphics.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/graphics/window.c -o obj/host_user_graphics_window.o
+clang -o editor_test_host obj/host_editor_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+=== build + capture hello ===
+  PASS: hello built
+  PASS: capture ref run
+  PASS: capture re-run
+  PASS: stdout is the hello contract (hello line + errno line)
+  PASS: exit is 0
+  PASS: errno is ENOENT(=2)
+=== identical re-run -> MATCH ===
+  PASS: identical captures MATCH (MATCH)
+=== lie detector: planted divergences must be DIVERGE ===
+  PASS: wrong stdout -> DIVERGE (DIVERGE (stdout))
+  PASS: wrong exit -> DIVERGE (DIVERGE (exit))
+  PASS: wrong errno -> DIVERGE (DIVERGE (errno))
+
+Checks: 10, failed: 0
+DIFF HARNESS TEST PASSED
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/games_scan_test.c -o obj/host_games_scan_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/games_scan.c -o obj/host_user_games_scan.o
+clang -o games_scan_test_host obj/host_games_scan_test.o obj/host_user_games_scan.o obj/host_compat.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/gfx_stats_test.c -o obj/host_gfx_stats_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/gfx_stats.c -o obj/host_user_gfx_stats.o
+clang -o gfx_stats_test_host obj/host_gfx_stats_test.o obj/host_user_gfx_stats.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/desktop_menu_test.c -o obj/host_desktop_menu_test.o
+clang -o desktop_menu_test_host obj/host_desktop_menu_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/desktop_drag_test.c -o obj/host_desktop_drag_test.o
+clang -o desktop_drag_test_host obj/host_desktop_drag_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/desktop_damage_test.c -o obj/host_desktop_damage_test.o
+clang -o desktop_damage_test_host obj/host_desktop_damage_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/desktop_input_test.c -o obj/host_desktop_input_test.o
+clang -o desktop_input_test_host obj/host_desktop_input_test.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/desktop_term_test.c -o obj/host_desktop_term_test.o
+clang -o desktop_term_test_host obj/host_desktop_term_test.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/desktop_pixel_test.c -o obj/host_desktop_pixel_test.o
+src/host/desktop_pixel_test.c:360:7: warning: unused variable 'cw' [-Wunused-variable]
+  360 |   int cw = SCREEN_WIDTH - 4, ch = span_h - 36;   /* single-window content */
+      |       ^~
+1 warning generated.
+clang -o desktop_pixel_test_host obj/host_desktop_pixel_test.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/x11/include -Isrc/user/x11 -c src/host/x11_lib_test.c -o obj/host_x11_lib_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/x11/include -c src/user/x11/xlib_display.c -o obj/host_user_x11_xlib_display.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/x11/include -c src/user/x11/xlib_window.c -o obj/host_user_x11_xlib_window.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/x11/include -c src/user/x11/xlib_draw.c -o obj/host_user_x11_xlib_draw.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/x11/include -c src/user/x11/xlib_event.c -o obj/host_user_x11_xlib_event.o
+clang -o x11_lib_test_host obj/host_x11_lib_test.o obj/host_user_x11_xlib_display.o obj/host_user_x11_xlib_window.o obj/host_user_x11_xlib_draw.o obj/host_user_x11_xlib_event.o obj/host_user_graphics_graphics.o obj/host_compat.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/x11/include -Isrc/user/x11 -c src/host/xcalc_test.c -o obj/host_xcalc_test.o
+clang -o xcalc_test_host obj/host_xcalc_test.o obj/host_user_x11_xlib_display.o obj/host_user_x11_xlib_window.o obj/host_user_x11_xlib_draw.o obj/host_user_x11_xlib_event.o obj/host_user_graphics_graphics.o obj/host_compat.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/x11/include -Isrc/user/x11 -c src/host/antfarm_test.c -o obj/host_antfarm_test.o
+clang -o antfarm_test_host obj/host_antfarm_test.o obj/host_user_x11_xlib_display.o obj/host_user_x11_xlib_window.o obj/host_user_x11_xlib_draw.o obj/host_user_x11_xlib_event.o obj/host_user_graphics_graphics.o obj/host_compat.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/x11/include -Isrc/user/x11 -c src/host/xeyes_test.c -o obj/host_xeyes_test.o
+clang -o xeyes_test_host obj/host_xeyes_test.o obj/host_user_x11_xlib_display.o obj/host_user_x11_xlib_window.o obj/host_user_x11_xlib_draw.o obj/host_user_x11_xlib_event.o obj/host_user_graphics_graphics.o obj/host_compat.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/x11/include -Isrc/user/x11 -c src/host/xnibbler_test.c -o obj/host_xnibbler_test.o
+clang -o xnibbler_test_host obj/host_xnibbler_test.o obj/host_user_x11_xlib_display.o obj/host_user_x11_xlib_window.o obj/host_user_x11_xlib_draw.o obj/host_user_x11_xlib_event.o obj/host_user_graphics_graphics.o obj/host_compat.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/nano_term_test.c -o obj/host_nano_term_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/nano -c src/user/nano/hb_curses.c -o obj/nano_hb_curses_host.o
+src/user/nano/hb_curses.c:167:12: warning: unused function 'cell_index' [-Wunused-function]
+  167 | static int cell_index(int row, int col) { return row * scr_cols + col; }
+      |            ^~~~~~~~~~
+1 warning generated.
+clang -o nano_term_test_host obj/host_nano_term_test.o obj/nano_hb_curses_host.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/host/apps_suite_test.c src/host/compat.c src/user/gui.c src/user/dialog.c src/user/filedialog.c -o apps_suite_test_host
+src/host/compat.c:120:90: warning: unused parameter 'args' [-Wunused-parameter]
+  120 | int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args) {
+      |                                                                                          ^
+1 warning generated.
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/kernel/nfs_proto.c src/host/nfs_proto_test.c -o nfs_proto_test_host
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/user/resolv.c src/host/resolv_test.c -o resolv_test_host
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/time_math_test.c -o obj/host_time_math_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/time_math.c -o obj/host_hb_time_math.o
+clang -o time_math_test_host obj/host_time_math_test.o obj/host_hb_time_math.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/console_test.c -o obj/host_console_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/gui.c -o obj/host_user_gui.o
+clang -o console_test_host obj/host_console_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/pong_test.c -o obj/host_pong_test.o
+clang -o pong_test_host obj/host_pong_test.o obj/host_user_graphics_graphics.o obj/host_compat.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/stardust_test.c -o obj/host_stardust_test.o
+clang -o stardust_test_host obj/host_stardust_test.o obj/host_user_graphics_graphics.o obj/host_compat.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/dialog_arrow_test.c -o obj/host_dialog_arrow_test.o
+clang -o dialog_arrow_test_host obj/host_dialog_arrow_test.o obj/host_user_dialog.o obj/host_user_filedialog.o obj/host_compat.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/gui_test.c -o obj/host_gui_test.o
+clang -o gui_test_host obj/host_gui_test.o obj/host_compat.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/errno_test.c -o obj/host_errno_test.o
+clang -o errno_test_host obj/host_errno_test.o obj/host_compat.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/include -c src/host/elf_image_test.c -o obj/host_elf_image_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/include -c src/kernel/elf_image.c -o obj/host_elf_image.o
+python3 tools/linux-abi/gen_test_elf.py
+wrote tests/fixtures/elf/valid-x86_64-exec.elf (12288 bytes)
+wrote tests/fixtures/elf/valid-exec-bss.elf (8192 bytes)
+wrote tests/fixtures/elf/reject-bad-magic.elf (12288 bytes)
+wrote tests/fixtures/elf/reject-arm-machine.elf (12288 bytes)
+wrote tests/fixtures/elf/valid-static-pie.elf (12288 bytes)
+wrote tests/fixtures/elf/reject-dyn-interp.elf (16384 bytes)
+wrote tests/fixtures/elf/reject-truncated.elf (7680 bytes)
+wrote tests/fixtures/elf/reject-phoff-oob.elf (12288 bytes)
+wrote tests/fixtures/elf/reject-phnum-zero.elf (12288 bytes)
+wrote tests/fixtures/elf/reject-interp.elf (16384 bytes)
+wrote tests/fixtures/elf/reject-nonload-only.elf (8192 bytes)
+wrote tests/fixtures/elf/reject-class32.elf (12288 bytes)
+wrote tests/fixtures/elf/reject-bigendian.elf (12288 bytes)
+wrote tests/fixtures/elf/reject-filesz-gt-memsz.elf (8192 bytes)
+wrote tests/fixtures/elf/reject-overlap.elf (16384 bytes)
+wrote tests/fixtures/elf/reject-bad-entry.elf (12288 bytes)
+wrote tests/fixtures/elf/reject-no-exec.elf (8192 bytes)
+wrote tests/fixtures/elf/tour-exec-3seg.elf (16384 bytes)
+18 vectors
+clang -o elf_image_test_host obj/host_elf_image_test.o obj/host_elf_image.o tests/fixtures/elf/.generated
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/include -c src/host/linux_abi_test.c -o obj/host_linux_abi_test.o
+clang -o linux_abi_test_host obj/host_linux_abi_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -pthread -c src/user/thrd_test.c -o obj/host_thrd_test.o
+clang -o thrd_test_host obj/host_thrd_test.o obj/host_compat.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -pthread -c src/user/tls_test.c -o obj/host_tls_test.o
+clang -o tls_test_host obj/host_tls_test.o obj/host_compat.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -pthread -c src/user/wk1c_test.c -o obj/host_wk1c_test.o
+src/user/wk1c_test.c:82:19: warning: address of stack memory associated with local variable 'p' returned [-Wreturn-stack-address]
+   82 |   return (void *)&p;
+      |                   ^
+1 warning generated.
+clang -o wk1c_test_host obj/host_wk1c_test.o obj/host_compat.o
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/kernel/ipc_proto.c src/host/ipc_proto_test.c -o ipc_proto_test_host
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/ipc_test.c -o obj/host_ipc_test.o
+clang -o ipc_test_host obj/host_ipc_test.o obj/host_compat.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -pthread -c src/user/torture_test.c -o obj/host_torture_test.o
+clang -o torture_test_host obj/host_torture_test.o obj/host_compat.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/wsurf_test.c -o obj/host_wsurf_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/graphics/wsurf.c -o obj/host_user_graphics_wsurf.o
+clang -o wsurf_test_host obj/host_wsurf_test.o obj/host_user_graphics_wsurf.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/graphics_lib_test.c -o obj/host_graphics_lib_test.o
+clang -o graphics_lib_test_host obj/host_graphics_lib_test.o obj/host_compat.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/window_damage_test.c -o obj/host_window_damage_test.o
+clang -o window_damage_test_host obj/host_window_damage_test.o obj/host_compat.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/window_text_test.c -o obj/host_window_text_test.o
+clang -o window_text_test_host obj/host_window_text_test.o obj/host_compat.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_string_test.c -o obj/host_libc_string_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/string.c -o obj/host_hb_string.o
+clang -o libc_string_test_host obj/host_libc_string_test.o obj/host_hb_string.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_ctype_test.c -o obj/host_libc_ctype_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/ctype.c -o obj/host_hb_ctype.o
+clang -o libc_ctype_test_host obj/host_libc_ctype_test.o obj/host_hb_ctype.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_stdlib_test.c -o obj/host_libc_stdlib_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/stdlib.c -o obj/host_hb_stdlib.o
+clang -o libc_stdlib_test_host obj/host_libc_stdlib_test.o obj/host_hb_stdlib.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_setjmp_test.c -o obj/host_libc_setjmp_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/setjmp.c -o obj/host_hb_setjmp.o
+clang -o libc_setjmp_test_host obj/host_libc_setjmp_test.o obj/host_hb_setjmp.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_realloc_test.c -o obj/host_libc_realloc_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/malloc.c -o obj/host_malloc_hb.o
+clang -o libc_realloc_test_host obj/host_libc_realloc_test.o obj/host_malloc_hb.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_printf_test.c -o obj/host_libc_printf_test.o
+src/host/libc_printf_test.c:215:9: warning: unused variable 'star' [-Wunused-variable]
+  215 |     int star = 0;   /* star width/prec is exercised by star_suite,
+      |         ^~~~
+src/host/libc_printf_test.c:287:26: warning: format specifies type 'int *' but the argument has type 'void *' [-Wformat]
+  287 |   sprintf(tb, "abc%n%d", (void *)&b, 5);
+      |                   ~~     ^~~~~~~~~~
+src/host/libc_printf_test.c:290:29: warning: format specifies type 'int *' but the argument has type 'void *' [-Wformat]
+  290 |   sprintf(tb, "%sx%n", "q", (void *)&bb);
+      |                   ~~        ^~~~~~~~~~~
+src/host/libc_printf_test.c:92:8: warning: unused function 'run_sizet' [-Wunused-function]
+   92 | RUNNER(run_sizet, size_t)
+      |        ^~~~~~~~~
+4 warnings generated.
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/stdio.c -o obj/host_hb_stdio.o
+clang -o libc_printf_test_host obj/host_libc_printf_test.o obj/host_hb_stdio.o
+clang -Isrc/libc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_headers_test.c -o obj/host_libc_headers_test.o
+clang -o libc_headers_test_host obj/host_libc_headers_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -std=c++17 -fno-exceptions -fno-rtti -c src/host/cxxrt_test.cpp -o obj/host_cxxrt_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -std=c++17 -fno-exceptions -fno-rtti -Isrc/libc/include -c src/libc/src/cxxrt.cpp -o obj/host_cxxrt.o
+clang -o cxxrt_test_host obj/host_cxxrt_test.o obj/host_cxxrt.o obj/host_compat.o obj/host_malloc_hb.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -std=c++17 -fno-exceptions -fno-rtti -Isrc/libc/include -Isrc/include -c src/host/cxx_headers_test.cpp -o obj/host_cxx_headers_test.o
+clang -o cxx_headers_test_host obj/host_cxx_headers_test.o
+clang -Wall -Wextra -g -O2 -g -std=c++23 -fno-exceptions -frtti -nostdinc++ -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxxabi/include -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES -DLIBCXX_BUILDING_LIBCXXABI -D_LIBCXXABI_BUILDING_LIBRARY -c src/host/rtti_test.cpp -o obj/host_rtti_test.o
+[fetch] downloading https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.8/llvm-project-21.1.8.src.tar.xz
+  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+                                 Dload  Upload  Total   Spent   Left   Speed
+  0      0   0      0   0      0      0      0                              0  0      0   0      0   0      0      0      0                              0  0      0   0      0   0      0      0      0                              0
+  0      0   0      0   0      0      0      0                              0 18 151.5M  18 27.60M   0      0 22.78M      0   00:06   00:01   00:05 27.60M 35 151.5M  35 53.52M   0      0 24.21M      0   00:06   00:02   00:04 26.77M 53 151.5M  53 80.43M   0      0 25.05M      0   00:06   00:03   00:03 26.82M 68 151.5M  68 104.3M   0      0 24.80M      0   00:06   00:04   00:02 26.11M 83 151.5M  83 126.1M   0      0 24.22M      0   00:06   00:05   00:01 25.25M 97 151.5M  97 148.1M   0      0 23.86M      0   00:06   00:06         24.11M100 151.5M 100 151.5M   0      0 23.88M      0   00:06   00:06         24.11M100 151.5M 100 151.5M   0      0 23.88M      0   00:06   00:06         24.11M100 151.5M 100 151.5M   0      0 23.88M      0   00:06   00:06         24.11M
+[fetch] container sha256 OK
+[fetch] extracting the needed subtrees into /tmp/gb006v-f1/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src
+[fetch] verifying anchor manifest (the content gate)
+[fetch] OK: /tmp/gb006v-f1/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src ready (libcxx + libcxxabi + libc/shared + compiler-rt builtins)
+clang -O2 -g -std=c++23 -fno-exceptions -frtti -nostdinc++ -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxxabi/include -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES -DLIBCXX_BUILDING_LIBCXXABI -D_LIBCXXABI_BUILDING_LIBRARY -c third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxxabi/src/private_typeinfo.cpp -o obj/host_rtti_private_typeinfo.o
+clang -O2 -g -std=c++23 -fno-exceptions -frtti -nostdinc++ -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxxabi/include -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES -DLIBCXX_BUILDING_LIBCXXABI -D_LIBCXXABI_BUILDING_LIBRARY -c third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxxabi/src/stdlib_typeinfo.cpp -o obj/host_rtti_stdlib_typeinfo.o
+clang -O2 -g -std=c++23 -fno-exceptions -frtti -nostdinc++ -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxxabi/include -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES -DLIBCXX_BUILDING_LIBCXXABI -D_LIBCXXABI_BUILDING_LIBRARY -c third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxxabi/src/stdlib_exception.cpp -o obj/host_rtti_stdlib_exception.o
+clang -Wall -Wextra -g -O2 -g -std=c++23 -fno-exceptions -frtti -nostdinc++ -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxxabi/include -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES -DLIBCXX_BUILDING_LIBCXXABI -D_LIBCXXABI_BUILDING_LIBRARY -c src/host/rtti_test_support.cpp -o obj/host_rtti_test_support.o
+clang -nostdlib++ -o rtti_test_host obj/host_rtti_test.o obj/host_rtti_private_typeinfo.o obj/host_rtti_stdlib_typeinfo.o obj/host_rtti_stdlib_exception.o obj/host_rtti_test_support.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_getopt_test.c -o obj/host_libc_getopt_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/getopt.c -o obj/host_hb_getopt.o
+clang -o libc_getopt_test_host obj/host_libc_getopt_test.o obj/host_hb_getopt.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/host/libc_regex_test.c -o obj/host_libc_regex_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/libc/src/regex.c -o obj/host_hb_regex.o
+In file included from src/libc/src/regex.c:90:
+src/libc/src/regcomp.c:519:50: warning: unused parameter 'preg' [-Wunused-parameter]
+  519 | regerror (int errcode, const regex_t *__restrict preg, char *__restrict errbuf,
+      |                                                  ^
+src/libc/src/regcomp.c:588:19: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  588 |     for (i = 0; i < dfa->nodes_len; ++i)
+      |                 ~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:591:17: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  591 |   for (i = 0; i < dfa->nodes_len; ++i)
+      |               ~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:606:19: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 're_hashval_t' (aka 'unsigned int') [-Wsign-compare]
+  606 |     for (i = 0; i <= dfa->state_hash_mask; ++i)
+      |                 ~ ^  ~~~~~~~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1181:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1181 |       for (i = 0; i < preg->re_nsub; i++)
+      |                   ~ ^ ~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1184:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1184 |       for (i = 0; i < preg->re_nsub; i++)
+      |                   ~ ^ ~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1187:13: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1187 |       if (i == preg->re_nsub)
+      |           ~ ^  ~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1404:18: warning: unused parameter 'extra' [-Wunused-parameter]
+ 1404 | calc_next (void *extra, bin_tree_t *node)
+      |                  ^
+src/libc/src/regcomp.c:1632:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1632 |   for (idx = 0; idx < dfa->nodes_len; ++idx)
+      |                 ~~~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1635:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1635 |   for (src = 0; src < dfa->nodes_len; ++src)
+      |                 ~~~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1663:20: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1663 |       if (node_idx == dfa->nodes_len)
+      |           ~~~~~~~~ ^  ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:2698:37: warning: unused parameter 'syntax' [-Wunused-parameter]
+ 2698 | build_range_exp (const reg_syntax_t syntax,
+      |                                     ^
+src/libc/src/regcomp.c:3394:54: warning: unused parameter 'dfa' [-Wunused-parameter]
+ 3394 |                        re_token_t *token, int token_len, re_dfa_t *dfa,
+      |                                                                    ^
+src/libc/src/regcomp.c:3869:18: warning: unused parameter 'extra' [-Wunused-parameter]
+ 3869 | free_tree (void *extra, bin_tree_t *node)
+      |                  ^
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:486:39: warning: comparison of integers of different signs: 'Idx' (aka 'int') and '__re_size_t' (aka 'unsigned int') [-Wsign-compare]
+  486 |       if (__glibc_unlikely (need_regs > regs->num_regs))
+      |                             ~~~~~~~~~ ^ ~~~~~~~~~~~~~~
+/usr/include/x86_64-linux-gnu/sys/cdefs.h:681:52: note: expanded from macro '__glibc_unlikely'
+  681 | # define __glibc_unlikely(cond) __builtin_expect ((cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:507:27: warning: comparison of integers of different signs: 'Idx' (aka 'int') and '__re_size_t' (aka 'unsigned int') [-Wsign-compare]
+  507 |       DEBUG_ASSERT (nregs <= regs->num_regs);
+      |                     ~~~~~ ^  ~~~~~~~~~~~~~~
+src/libc/src/regex_internal.h:42:34: note: expanded from macro 'DEBUG_ASSERT'
+   42 | # define DEBUG_ASSERT(x) assume (x)
+      |                                  ^
+src/libc/include/verify.h:286:22: note: expanded from macro 'assume'
+  286 | # define assume(R) ((R) ? (void) 0 : __builtin_unreachable ())
+      |                      ^
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:517:13: warning: comparison of integers of different signs: 'Idx' (aka 'int') and '__re_size_t' (aka 'unsigned int') [-Wsign-compare]
+  517 |   for ( ; i < regs->num_regs; ++i)
+      |           ~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regexec.c:656:9: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+  655 |       if (__glibc_unlikely ((MIN (IDX_MAX, SIZE_MAX / sizeof (re_dfastate_t *))
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  656 |                              <= mctx.input.bufs_len)))
+      |                              ^~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/x86_64-linux-gnu/sys/cdefs.h:681:52: note: expanded from macro '__glibc_unlikely'
+  681 | # define __glibc_unlikely(cond) __builtin_expect ((cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:837:33: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  837 |       for (reg_idx = 1; reg_idx < nmatch; ++reg_idx)
+      |                         ~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:858:33: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  858 |       for (reg_idx = 0; reg_idx < nmatch; ++reg_idx)
+      |                         ~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:886:32: warning: comparison of integers of different signs: 'int' and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  886 |         for (reg_idx = 0; reg_idx + 1 < nmatch; reg_idx++)
+      |                           ~~~~~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:920:4: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+  919 |   if (__glibc_unlikely (MIN (IDX_MAX, SIZE_MAX / sizeof (re_dfastate_t *))
+      |       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  920 |                         <= match_last))
+      |                         ^~~~~~~~~~~~~~
+/usr/include/x86_64-linux-gnu/sys/cdefs.h:681:52: note: expanded from macro '__glibc_unlikely'
+  681 | # define __glibc_unlikely(cond) __builtin_expect ((cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:1414:34: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1414 |               for (reg_idx = 0; reg_idx < nmatch; ++reg_idx)
+      |                                 ~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:1417:20: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1417 |               if (reg_idx == nmatch)
+      |                   ~~~~~~~ ^  ~~~~~~
+src/libc/src/regexec.c:2850:65: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+ 2850 |       if (__glibc_unlikely (SIZE_MAX / sizeof (re_dfastate_t *) < new_alloc))
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~
+/usr/include/x86_64-linux-gnu/sys/cdefs.h:681:52: note: expanded from macro '__glibc_unlikely'
+  681 | # define __glibc_unlikely(cond) __builtin_expect ((cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:3323:36: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'Idx' (aka 'int') [-Wsign-compare]
+ 3323 |   if (__glibc_unlikely (ndests_max < ndests))
+      |                         ~~~~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:4035:4: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+ 4034 |   if (__glibc_unlikely (MIN (IDX_MAX, SIZE_MAX / sizeof (re_dfastate_t *)) / 2
+      |       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 4035 |                         <= pstr->bufs_len))
+      |                         ^~~~~~~~~~~~~~~~~~
+/usr/include/x86_64-linux-gnu/sys/cdefs.h:681:52: note: expanded from macro '__glibc_unlikely'
+  681 | # define __glibc_unlikely(cond) __builtin_expect ((cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:4104:71: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+ 4104 |       if (__glibc_unlikely (MIN (IDX_MAX, SIZE_MAX / max_object_size) < n))
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~
+/usr/include/x86_64-linux-gnu/sys/cdefs.h:681:52: note: expanded from macro '__glibc_unlikely'
+  681 | # define __glibc_unlikely(cond) __builtin_expect ((cond), 0)
+      |                                                    ^~~~
+28 warnings generated.
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/glibc_regex_layout.c -o obj/glibc_regex_layout.o
+clang -o libc_regex_test_host obj/host_libc_regex_test.o obj/host_hb_regex.o obj/glibc_regex_layout.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/host/libc_langinfo_test.c -o obj/host_libc_langinfo_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/libc/src/langinfo.c -o obj/host_hb_langinfo.o
+clang -o libc_langinfo_test_host obj/host_libc_langinfo_test.o obj/host_hb_langinfo.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_scanf_wprintf_test.c -o obj/host_libc_scanf_wprintf_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/stdio.c -o obj/host_hb_stdio_sp.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/wchar.c -o obj/host_hb_wchar_sp.o
+clang -o libc_scanf_wprintf_parity_run obj/host_libc_scanf_wprintf_test.o obj/host_hb_stdio_sp.o obj/host_hb_wchar_sp.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_num_parity_test.c -o obj/host_libc_num_parity_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -ffp-contract=off -c src/libc/src/math.c -o obj/host_hb_math_np.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/strtod.c -o obj/host_hb_strtod_np.o
+clang -o libc_num_parity_run obj/host_libc_num_parity_test.o obj/host_hb_math_np.o obj/host_hb_strtod_np.o -lm
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/math_transcend_test.c -o obj/host_math_transcend_test.o
+clang -o math_transcend_parity_run obj/host_math_transcend_test.o obj/host_hb_math_np.o -lm
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_wide_parity_test.c -o obj/host_libc_wide_parity_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/wchar.c -o obj/host_hb_wchar_wp.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/wctype.c -o obj/host_hb_wctype_wp.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/strftime.c -o obj/host_hb_strftime_wp.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/xlocale.c -o obj/host_hb_xlocale_wp.o
+src/libc/src/xlocale.c:47:9: warning: 'isdigit_l' macro redefined [-Wmacro-redefined]
+   47 | #define isdigit_l hb_isdigit_l
+      |         ^
+/usr/include/ctype.h:307:11: note: previous definition is here
+  307 | #  define isdigit_l(c,l)        __isdigit_l ((c), (l))
+      |           ^
+src/libc/src/xlocale.c:48:9: warning: 'isxdigit_l' macro redefined [-Wmacro-redefined]
+   48 | #define isxdigit_l hb_isxdigit_l
+      |         ^
+/usr/include/ctype.h:314:11: note: previous definition is here
+  314 | #  define isxdigit_l(c,l)       __isxdigit_l ((c), (l))
+      |           ^
+src/libc/src/xlocale.c:109:10: warning: incompatible pointer types returning 'struct __hb_locale *' from a function with result type 'locale_t' (aka 'struct __locale_struct *') [-Wincompatible-pointer-types]
+  109 |   return loc;
+      |          ^~~
+src/libc/src/xlocale.c:116:9: warning: incompatible pointer types assigning to 'locale_t' (aka 'struct __locale_struct *') from 'struct __hb_locale *' [-Wincompatible-pointer-types]
+  116 |     loc = &c_locale_object;
+      |         ^ ~~~~~~~~~~~~~~~~
+src/libc/src/xlocale.c:133:10: warning: incompatible pointer types returning 'struct __hb_locale *' from a function with result type 'locale_t' (aka 'struct __locale_struct *') [-Wincompatible-pointer-types]
+  133 |   return copy;
+      |          ^~~~
+5 warnings generated.
+clang -o libc_wide_parity_run obj/host_libc_wide_parity_test.o obj/host_hb_wchar_wp.o obj/host_hb_wctype_wp.o obj/host_hb_strftime_wp.o obj/host_hb_xlocale_wp.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/wc.c -o obj/host_wc.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/error.c -o obj/host_hb_error.o
+clang -o obj/wc_host obj/host_wc.o obj/host_hb_getopt.o obj/host_hb_error.o
+note: reference /usr/bin/wc is not GNU-layout; using layout-normalized
+      comparison (counts still byte-exact, padding relaxed)
+note: skipping --help/--version cases (2.1-lineage texts; run wc_parity_strict)
+wc parity: PASS (103 cases byte-exact vs /usr/bin/wc)
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/head_gnu.c -o obj/host_head.o
+clang -o obj/head_host obj/host_head.o obj/host_hb_getopt.o obj/host_hb_error.o
+note: reference /usr/bin/head is not GNU; using modern-coreutils wording
+      and skipping old-syntax (-Nl) cases it does not support
+note: skipping --help/--version cases (2.1-lineage texts; run head_parity_strict)
+head parity: PASS (95 cases byte-exact vs /usr/bin/head)
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/tail_gnu.c -o obj/host_tail.o
+src/user/tail_gnu.c:455:24: warning: misleading indentation; statement is not part of the previous 'if' [-Wmisleading-indentation]
+  455 |     offset = -offset;  {
+      |                        ^
+src/user/tail_gnu.c:454:3: note: previous statement is here
+  454 |   if (offset < 0)
+      |   ^
+src/user/tail_gnu.c:1058:27: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'off_t' (aka 'long') [-Wsign-compare]
+ 1058 |       if (bytes_remaining <= n_bytes) {
+      |           ~~~~~~~~~~~~~~~ ^  ~~~~~~~
+src/user/tail_gnu.c:171:26: warning: unused variable 'follow_mode_string' [-Wunused-const-variable]
+  171 | static char const *const follow_mode_string[] = {
+      |                          ^~~~~~~~~~~~~~~~~~
+src/user/tail_gnu.c:175:31: warning: unused variable 'follow_mode_map' [-Wunused-const-variable]
+  175 | static enum Follow_mode const follow_mode_map[] = {
+      |                               ^~~~~~~~~~~~~~~
+4 warnings generated.
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/hb_assert.c -o obj/host_hb_assert.o
+clang -o obj/tail_host obj/host_tail.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+note: reference is not GNU; skipping old-syntax and stderr wording
+note: skipping --help/--version cases (2.1-lineage texts; run tail_parity_strict)
+tail parity: PASS (166 cases byte-exact vs /usr/bin/tail)
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/cut_gnu.c -o obj/host_cut.o
+clang -o obj/cut_host obj/host_cut.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+note: skipping 1,,2 list cases (2.1 accepts, modern cut rejects)
+note: skipping --help/--version cases (modern text differs; strict ref races them)
+cut parity: PASS (89 cases byte-exact vs /usr/bin/cut)
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/tr_gnu.c -o obj/host_tr.o
+src/user/tr_gnu.c:996:34: warning: comparison of integers of different signs: 'long' and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  996 |             || d_end - digit_str != digit_str_len) {
+      |                ~~~~~~~~~~~~~~~~~ ^  ~~~~~~~~~~~~~
+src/user/tr_gnu.c:1621:24: warning: passing arguments to a function without a prototype is deprecated in all versions of C and is not supported in C23 [-Wdeprecated-non-prototype]
+ 1621 |         nr = (*reader) (buf, size, NULL);
+      |                        ^
+src/user/tr_gnu.c:1614:11: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'ssize_t' (aka 'long') [-Wsign-compare]
+ 1614 |     if (i >= nr) {
+      |         ~ ^  ~~
+src/user/tr_gnu.c:1644:16: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'ssize_t' (aka 'long') [-Wsign-compare]
+ 1644 |       for (; i < nr && !in_squeeze_set[buf[i]]; i += 2)
+      |              ~ ^ ~~
+src/user/tr_gnu.c:1650:13: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'ssize_t' (aka 'long') [-Wsign-compare]
+ 1650 |       if (i == nr && in_squeeze_set[buf[i - 1]])
+      |           ~ ^  ~~
+src/user/tr_gnu.c:1653:13: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'ssize_t' (aka 'long') [-Wsign-compare]
+ 1653 |       if (i >= nr)
+      |           ~ ^  ~~
+src/user/tr_gnu.c:1679:16: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'ssize_t' (aka 'long') [-Wsign-compare]
+ 1679 |       for (; i < nr && buf[i] == char_to_squeeze; i++)
+      |              ~ ^ ~~
+src/user/tr_gnu.c:1681:13: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'ssize_t' (aka 'long') [-Wsign-compare]
+ 1681 |       if (i < nr)
+      |           ~ ^ ~~
+src/user/tr_gnu.c:1724:19: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'ssize_t' (aka 'long') [-Wsign-compare]
+ 1724 |     for (i = 0; i < nr && !in_delete_set[buf[i]]; i++)
+      |                 ~ ^ ~~
+src/user/tr_gnu.c:1728:17: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'ssize_t' (aka 'long') [-Wsign-compare]
+ 1728 |     for (++i; i < nr; i++)
+      |               ~ ^ ~~
+src/user/tr_gnu.c:1758:17: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'ssize_t' (aka 'long') [-Wsign-compare]
+ 1758 |   for (i = 0; i < chars_read; i++)
+      |               ~ ^ ~~~~~~~~~~
+11 warnings generated.
+clang -o obj/tr_host obj/host_tr.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+tr parity: reference=/usr/bin/tr mode=loose
+note: skipping -t [:lower:] abc (2.1 rejects, modern tr translates)
+note: skipping --help/--version (modern tr text legitimately differs)
+note: skipping trailing-backslash cases (2.1 rejects, modern tr warns)
+tr parity: PASS (125 cases byte-exact vs /usr/bin/tr)
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/paste_gnu.c -o obj/host_paste.o
+clang -o obj/paste_host obj/host_paste.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+note: skipping (2.1-vs-modern divergence): paste  (f:noeol.txt f:a.txt)
+note: skipping (2.1-vs-modern divergence): paste  (f:a.txt f:noeol.txt)
+note: skipping (2.1-vs-modern divergence): paste  (f:noeol.txt f:noeol2.txt)
+note: skipping (2.1-vs-modern divergence): paste  (f:noeol.txt f:empty.txt)
+note: skipping (2.1-vs-modern divergence): paste  (f:c.txt f:noeol.txt)
+note: skipping (2.1-vs-modern divergence): paste  (f:- f:noeol.txt)
+note: skipping (2.1-vs-modern divergence): paste -s -s (f:a.txt f:b.txt)
+note: skipping (2.1-vs-modern divergence): paste -d , -d : (f:a.txt f:b.txt)
+note: skipping (2.1-vs-modern divergence): paste -s (f:a.txt f:nonexistent_xyz.txt)
+note: skipping (2.1-vs-modern divergence): paste -s (f:nonexistent_xyz.txt f:a.txt)
+note: skipping (2.1-vs-modern divergence): paste -s (f:adir)
+note: skipping --help/--version cases (2.1 text vs coreutils)
+paste parity: PASS (87 cases byte-exact vs /usr/bin/paste, loose mode)
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/fold_gnu.c -o obj/host_fold.o
+clang -o obj/fold_host obj/host_fold.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+note: skipping -w 0 / -w 2147483648 cases (uutils fold accepts 0 and loops, and clamps huge widths; 2.1/GNU reject)
+note: skipping 11 uutils-vs-2.1 divergence cases (tab/space-run break points incl. context-dependent output, -w ' 7', -- end-of-options, missing-operand continue)
+note: skipping --help/--version text and 200112-rejection cases (modern fold text differs)
+fold parity: PASS (122 cases byte-exact vs /usr/bin/fold)
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/nl_gnu.c -o obj/host_nl.o
+clang -o obj/nl_host obj/host_nl.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+note: skipped 52 textutils-2.1-only cases in loose mode (puts(print_no_line_fmt) extra newline for unnumbered fields, -i 0 / -l 0 / -v past INT_MAX, logical-page numbering, aborted-on-missing-file; see the comments on cmp_case_21)
+nl parity: PASS (55 cases byte-exact vs /usr/bin/nl)
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/comm_gnu.c -o obj/host_comm.o
+clang -o obj/comm_host obj/host_comm.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+note: skipping --help/--version cases (2.1 text vs modern coreutils)
+note: skipping unsorted-input cases (2.1 has no order check, modern comm exits 1)
+note: skipping 'comm - -' (2.1 double-fcloses stdin; modern comm hangs)
+comm parity: PASS (48 cases byte-exact vs /usr/bin/comm)
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/tsort_gnu.c -o obj/host_tsort.o
+clang -o obj/tsort_host obj/host_tsort.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+note: stdout order differs from the modern reference but is a valid topological order: tsort  [file:crlf.txt]
+note: '--help FILE'/'--version FILE' not compared (2.1 argc==2-only quirk, see port note)
+tsort parity: PASS (63 cases vs /usr/bin/tsort; 2 stdout+rc only; 12 modern-divergence skips; 1 valid-order notes)
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/expand_gnu.c -o obj/host_expand.o
+clang -o obj/expand_host obj/host_expand.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+note: reference accepts -4,8 too (its POSIX-200112 gate is off/absent)
+note: skipping --help/--version text cases (2.1 text vs modern coreutils)
+expand parity: PASS (171 cases byte-exact vs /usr/bin/expand)
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/unexpand_gnu.c -o obj/host_unexpand.o
+clang -o obj/unexpand_host obj/host_unexpand.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+note: gating lone-pending-blank cases (GNU prints a space where modern references emit a tab)
+note: gating tab-stop-list overshoot cases (modern references re-space past the last stop)
+note: gating long-option prefix matching (modern parsers reject prefixes)
+note: gating --help/--version text (belongs to each build's own version)
+note: gating the obsolete `-LIST' cases (2.1/port reject, modern references accept)
+unexpand parity: PASS (62/77 cases compared, 15 gated vs the loose reference: /usr/bin/unexpand)
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/cksum_gnu.c -o obj/host_cksum.o
+clang -o obj/cksum_host obj/host_cksum.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+note: skipping (strict-only): cksum uutils/GNU differ on the '-' operand name - — uutils/GNU differ on the '-' operand name
+note: skipping (strict-only): cksum uutils/GNU differ on the '-' operand name - — uutils/GNU differ on the '-' operand name
+note: skipping (strict-only): cksum uutils/GNU differ on the '-' operand name - — uutils/GNU differ on the '-' operand name
+note: skipping (strict-only): cksum uutils/GNU differ on the '-' operand name - - — uutils/GNU differ on the '-' operand name
+note: skipping (strict-only): cksum uutils/GNU differ on the '-' operand name /home/sarah/.hermes/cache/scratch/tmp.qcZ8fxullc/hello.txt - — uutils/GNU differ on the '-' operand name
+note: skipping (strict-only): cksum uutils/GNU differ on the '-' operand name - /home/sarah/.hermes/cache/scratch/tmp.qcZ8fxullc/hello.txt — uutils/GNU differ on the '-' operand name
+note: skipping (strict-only): cksum 2.1 vs modern --help text differs --help — 2.1 vs modern --help text differs
+note: skipping (strict-only): cksum 2.1 vs modern --version text differs --version — 2.1 vs modern --version text differs
+note: skipping (strict-only): cksum 2.1 vs modern --help text differs --hel — 2.1 vs modern --help text differs
+note: skipping (strict-only): cksum 2.1 vs modern --help text differs --help /home/sarah/.hermes/cache/scratch/tmp.qcZ8fxullc/hello.txt — 2.1 vs modern --help text differs
+cksum parity: PASS (30 cases byte-exact vs /usr/bin/cksum, loose mode)
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/md5sum_gnu.c -o obj/host_md5sum.o
+clang -o obj/md5sum_host obj/host_md5sum.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+note: reference is not GNU; skipping escaped-check-file and --status races
+note: skipping --string cases (2.1-only option)
+note: skipping --status-with-missing-file (uutils prints a FAILED line)
+note: skipping --help/--version (2.1 vs coreutils text differs)
+md5sum parity: PASS (89 cases byte-exact vs /usr/bin/md5sum)
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/tac_gnu.c -o obj/host_tac.o
+src/user/tac_gnu.c:284:57: warning: comparison of integers of different signs: 'ssize_t' (aka 'long') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  284 |   if (safe_read (input_fd, G_buffer, saved_record_size) != saved_record_size) {
+      |       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ^  ~~~~~~~~~~~~~~~~~
+src/user/tac_gnu.c:352:20: warning: comparison of integers of different signs: 'off_t' (aka 'long') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  352 |       if (file_pos >= read_size)
+      |           ~~~~~~~~ ^  ~~~~~~~~~
+src/user/tac_gnu.c:370:53: warning: comparison of integers of different signs: 'ssize_t' (aka 'long') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  370 |       if (safe_read (input_fd, G_buffer, read_size) != read_size) {
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ^  ~~~~~~~~~
+src/user/tac_gnu.c:453:47: warning: comparison of integers of different signs: 'unsigned long' and 'ssize_t' (aka 'long') [-Wsign-compare]
+  453 |     if (fwrite (G_buffer, 1, bytes_read, tmp) != bytes_read)
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ^  ~~~~~~~~~~
+src/user/tac_gnu.c:547:30: warning: comparison of integers of different signs: 'int' and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  547 |   while (sentinel_length * 2 >= read_size)
+      |          ~~~~~~~~~~~~~~~~~~~ ^  ~~~~~~~~~
+5 warnings generated.
+clang -o obj/tac_host obj/host_tac.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+note: 'tac -r -s .\|NL' (byte-reverse) exercised via the '[0-9]+' and 'x*' regex cases
+tac parity: PASS (62 cases vs /usr/bin/tac; 2 stdout+rc only; 8 modern-divergence skips)
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/cmp_gnu.c -o obj/host_cmp.o
+clang -o obj/cmp_host obj/host_cmp.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+build_diffutils_cmp_ref: ref sources: /tmp/gb006v-f1/obj/third_party/refs/diffutils-2.8.1
+built obj/arm/diffutils_cmp_ref
+cmp (GNU diffutils) 2.8.1
+
+cmp parity: 55/55 byte-exact PASS
+clang -O2 -g -Wall -Wextra -c src/host/tar_test.c -o obj/host_tar_test.o
+tar --format=ustar -cf obj/tar_fixture.tar -C tests/fixtures/tar .
+clang -o obj/tar_test obj/host_tar_test.o
+./obj/tar_test obj/tar_fixture.tar tests/fixtures/tar
+[TAR] error: truncated archive padding: /tmp/hobbyos-tar-test/out_trunc/PFX/DIR/PREFIX.TXT
+[TAR] error: bad header checksum at entry 1
+PASS: synthetic tar written
+[TAR] /tmp/hobbyos-tar-test/synthetic.tar -> /tmp/hobbyos-tar-test/out
+[TAR] done: files=5 dirs=2 bytes=1856 skipped=0 errors=0
+PASS: extract synthetic archive rc=0
+PASS: extracted GREET.TXT exists
+PASS: GREET.TXT content byte-equal
+PASS: BIG.TXT (1024B, 512-multiple) byte-equal
+PASS: ODD.BIN (777B, not 512-multiple) byte-equal
+PASS: GNU long-name entry extracted
+PASS: ustar prefix path assembled
+PASS: explicit directory entries created
+SUB
+SUB/DEEPER
+GREET.TXT
+BIG.TXT
+ODD.BIN
+LongName-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.TXT
+PFX/DIR/PREFIX.TXT
+[TAR] 9 entries
+PASS: list synthetic archive rc=0
+PASS: truncated tar written
+[TAR] /tmp/hobbyos-tar-test/trunc.tar -> /tmp/hobbyos-tar-test/out_trunc
+[TAR] done: files=4 dirs=2 bytes=1840 skipped=0 errors=1
+PASS: truncated archive reports failure
+PASS: corrupt tar written
+[TAR] /tmp/hobbyos-tar-test/corrupt.tar -> /tmp/hobbyos-tar-test/out_trunc
+[TAR] done: files=0 dirs=0 bytes=0 skipped=0 errors=1
+PASS: corrupt checksum reports failure
+Usage: tar xf ARCHIVE [DEST] | tar tf ARCHIVE
+PASS: usage error rc=2
+[TAR] obj/tar_fixture.tar -> /tmp/hobbyos-tar-test/real_out
+[TAR] done: files=6 dirs=2 bytes=1262 skipped=0 errors=0
+PASS: extract real GNU-tar archive rc=0
+PASS: real archive tree byte-identical to source
+PASS: real archive carried all fixture files
+INFO: real-archive files verified: 6
+TAR_TEST OK (18 checks)
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/files_test.c -o obj/host_files_test.o
+clang -o files_test_host obj/host_files_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/calc_test.c -o obj/host_calc_test.o
+clang -o calc_test_host obj/host_calc_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/clock_test.c -o obj/host_clock_test.o
+clang -o clock_test_host obj/host_clock_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/sysmon_test.c -o obj/host_sysmon_test.o
+clang -o sysmon_test_host obj/host_sysmon_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/hex_test.c -o obj/host_hex_test.o
+clang -o hex_test_host obj/host_hex_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/tasks_test.c -o obj/host_tasks_test.o
+clang -o tasks_test_host obj/host_tasks_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/find_test.c -o obj/host_find_test.o
+clang -o find_test_host obj/host_find_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/diff_test.c -o obj/host_diff_test.o
+clang -o diff_test_host obj/host_diff_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/notes_test.c -o obj/host_notes_test.o
+clang -o notes_test_host obj/host_notes_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/unit_test.c -o obj/host_unit_test.o
+clang -o unit_test_host obj/host_unit_test.o obj/host_compat.o obj/host_user_gui.o obj/host_user_dialog.o obj/host_user_filedialog.o
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/kernel/fb_ioctl.c src/host/fb_ioctl_test.c -o fb_ioctl_test_host
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/host/fb_pixel_test.c -o fb_pixel_test_host
+t4 host differential: A=0 B=0 cases=3
+t4_parity: PASS (host differential locked; device leg gated)
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/kernel/evdev.c src/host/evdev_test.c -o evdev_test_host
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/user/nano -Isrc/user_include -DHOST_TEST -c src/host/xcrypt_test.c -o obj/host_xcrypt_test.o
+src/host/xcrypt_test.c:129:7: warning: unused variable 'stairs_here' [-Wunused-variable]
+  129 |   int stairs_here = (px == stairs_x && py == stairs_y);
+      |       ^~~~~~~~~~~
+1 warning generated.
+clang -o xcrypt_test_host obj/host_xcrypt_test.o obj/nano_hb_curses_host.o obj/host_compat.o
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/host/joypad_test.c -o joypad_test_host
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/host/clockabi_test.c -o clockabi_test_host
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/host/memfd_test.c -o memfd_test_host
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/nes_test.c -o obj/host_nes_test.o
+clang -o nes_test_host obj/host_nes_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/include -c src/host/linux_layout_test.c -o obj/host_linux_layout_test.o
+clang -o linux_layout_test_host obj/host_linux_layout_test.o
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/host/linux_input_test.c -o linux_input_test_host
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/kernel/input_node.c src/host/input_node_test.c -o input_node_test_host
+src/host/input_node_test.c:91:10: warning: array index 34 is past the end of the array (that has type 'uint8_t[16]' (aka 'unsigned char[16]')) [-Warray-bounds]
+   91 |   check((keys[HB_BTN_LEFT >> 3] & (1u << (HB_BTN_LEFT & 7))) &&
+      |          ^    ~~~~~~~~~~~~~~~~
+src/host/input_node_test.c:88:3: note: array 'keys' declared here
+   88 |   uint8_t keys[16];
+      |   ^
+1 warning generated.
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/kernel/fb_mmap.c src/kernel/fb_ioctl.c src/host/fb_mmap_test.c -o fb_mmap_test_host
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/include -c src/host/linux_abi_constants_test.c -o obj/host_linux_abi_constants_test.o
+clang -o linux_abi_constants_test_host obj/host_linux_abi_constants_test.o
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/kernel/arch/x64/locks.c src/host/locksteal_test.c -o locksteal_test_host
+src/kernel/arch/x64/locks.c:104:40: warning: calling '__builtin_return_address' with a nonzero argument is unsafe [-Wframe-address]
+  104 |     lock_wait_caller2[cpu] = (uint64_t)__builtin_return_address(1);
+      |                                        ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/arch/x64/locks.c:114:39: warning: calling '__builtin_return_address' with a nonzero argument is unsafe [-Wframe-address]
+  114 |         scream_hex(" pc2=", (uint64_t)__builtin_return_address(1));
+      |                                       ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+2 warnings generated.
+clang -Isrc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST src/kernel/fb_ioctl.c src/kernel/fb_mmap.c src/host/m2_dev_contract_test.c -o m2_dev_contract_test_host
+[self-test] clause 2 (wrong shim must FAIL):
+  OK — wrong shim FAILED as required
+[self-test] clause 3 (absent probe must FAIL, not skip):
+  OK — absent probe FAILED as required
+self-test result: fail_count=0
+[t4-device] leg A captured -> obj/arm/t4_legA.out
+=== t4_device --check: row-name set parity (GB-073) ===
+  golden rows: 27
+  device probe rows: 27
+  PASS row: write3 (device+host)
+  PASS row: uname_rc (device+host)
+  PASS row: uname_sysname_linux (device+host)
+  PASS row: uname_machine_x86_64 (device+host)
+  PASS row: getrandom_16 (device+host)
+  PASS row: urandom_open (device+host)
+  PASS row: urandom_read16 (device+host)
+  PASS row: null_open_w (device+host)
+  PASS row: null_write3 (device+host)
+  PASS row: null_open_r (device+host)
+  PASS row: null_read1 (device+host)
+  PASS row: pipe2 (device+host)
+  PASS row: poll_ready (device+host)
+  PASS row: poll_ready_revents (device+host)
+  PASS row: select_ready (device+host)
+  PASS row: select_ready_fdset (device+host)
+  PASS row: pselect6_ready (device+host)
+  PASS row: pselect6_ready_fdset (device+host)
+  PASS row: poll_badfd (device+host)
+  PASS row: poll_badfd_revents (device+host)
+  PASS row: sockpair (device+host)
+  PASS row: sockpoll_ready (device+host)
+  PASS row: sockpoll_revents (device+host)
+  PASS row: sockselect_ready (device+host)
+  PASS row: sockselect_fdset (device+host)
+  PASS row: sockpselect_ready (device+host)
+  PASS row: sockpselect_fdset (device+host)
+t4_device --check: PASS — device probe carries exactly the golden row-name set, and the host model contains every golden row.
+[self-test] good wave (all members arrived):
+  OK — all W0 members PASS (matched Linux leg)
+[self-test] missing CAT (must FAIL):
+  OK — absent member FAILED as required
+[self-test] broken HELLO output (must FAIL):
+  OK — broken member FAILED as required
+self-test result: fails=0
+  OK — absent member correctly NOT found (FAIL path reachable)
+  OK — probe never dispatched -> gate FAILs (not a pass)
+self-test: pass=3 fail=0
+Desktop starting...
+[MENU] =EDITOR.BIN
+[MENU] =DESKTOP.BIN
+[MENU] =SH.BIN
+[MENU] =LS.BIN
+[MENU] =CAT.BIN
+[MENU] =TEST.TXT
+[MENU] =NOTES.TXT
+[MENU] count=
+[LAUNCH] EDITOR.BIN
+[TEST] Starting editor integration test...
+01234567[TEST] Injecting 'h' 'e' 'l' 'l' 'o'...
+[TEST] Found 'hello' in window 0!
+[TEST] Editor text content verified.
+[TEST] PASS: Editor accepts keyboard input and displays text.
+=== games_classify ===
+  PASS: DOOM.BIN -> BIN
+  PASS: star.bin (lower) -> BIN
+  PASS: GAME.EXE -> BIN
+  PASS: foo.ELF -> ELF
+  PASS: extension-less -> ELF candidate
+  PASS: map.wad -> OTHER (data)
+  PASS: NOTES.TXT -> OTHER
+  PASS: empty -> NONE
+=== games_order (pinned-first, then scanned, cap) ===
+  PASS: order surfaces 2 pinned + 3 launchable scanned (not OTHER)
+  PASS: pinned PONG first
+  PASS: pinned MILLIPED second
+  PASS: scanned BIN third
+  PASS: scanned ELF fourth
+  PASS: second scanned ELF fifth
+  PASS: compat_game keeps ELF kind
+  PASS: another_elf keeps ELF kind
+  PASS: cap: only 2 entries when max=2
+  PASS: cap keeps pinned first
+  PASS: no pinned -> 3 launchable scanned (cap 3)
+=== games_kind_str ===
+  PASS: kind label ELF
+  PASS: kind label BIN
+  PASS: out-of-range kind -> '---'
+
+Checks: 22, failed: 0
+GAMES SCAN TEST PASSED
+[TEST] gfxbench burst-per-flush stats (GB-045)
+  PASS: burst 32000us/32 -> 1000us per flush
+  PASS: burst 1000us/64 -> 15us per flush (floor div)
+  PASS: zero-duration burst -> 0 per flush
+  PASS: min over {800,1200,900,1000,1100} == 800
+  PASS: median (odd n=5) == 1000
+  PASS: mean (odd n=5) == 1000
+  PASS: min over {40,20,30,10} == 10
+  PASS: even n: median = s[n/2] = 30
+  PASS: mean (even n=4) == 25
+  PASS: burst-averaged spread: min=980 med=980 mean=984 (no 0us/1000us junk)
+  PASS: 0 -> "0"
+  PASS: 1000 -> "1000"
+  PASS: 984 -> "984"
+  PASS: UINT64_MAX renders fully (us precision never truncated)
+[TEST] gfx_stats: 14 checks, 0 failures
+[MENU] =UNIT.BIN
+[MENU] =FILES.BIN
+[MENU] =TASKS.BIN
+[MENU] =STRESS.BIN
+[MENU] =SHTEST.BIN
+[MENU] =NOTES.TXT
+[MENU] count=
+[MENU] =EDITOR.BIN
+[MENU] =DESKTOP.BIN
+[MENU] =SH.BIN
+[MENU] =LS.BIN
+[MENU] =CAT.BIN
+[MENU] =TEST.TXT
+[MENU] =NOTES.TXT
+[MENU] count=
+[TEST] desktop menu ordering (Apps pinned first)
+  PASS: apps then games pinned; CONSOLE terminal first; tier order kept
+  PASS: games alone pin to the front when no apps present
+  PASS: no pinned apps present -> order untouched
+  PASS: all pinned (apps + games) -> order untouched
+  PASS: "FILES.BIN" displays as "FILES"
+  PASS: "SYSMON.BIN" displays as "SYSMON"
+  PASS: non-".BIN" name unchanged
+  PASS: "SH.BIN" displays as "SH"
+  PASS: "PONG.BIN" displays as "PONG"
+  PASS: "MILLIPED.BIN" displays as "MILLIPED"
+  PASS: "browser.bin" (lowercase 8.3) displays as "browser"
+0123456  PASS: load_menu(): mock dir reordered, apps first
+01234567  PASS: default mock dir: EDITOR.BIN stays at menu index 0
+  PASS: scanned .BIN launches as /GAMES/DOOM.BIN
+  PASS: scanned ELF launches as /GAMES/pie
+  PASS: root entry launches unchanged (PONG.BIN)
+  PASS: root app launches unchanged (FILES.BIN)
+  PASS: scanned lowercase .bin keeps its /GAMES path
+  PASS: menu_apps_first(): /GAMES origin flag follows its entry
+  PASS: scanned ELF still /GAMES/HOBBIT.ELF after reorder
+  PASS: scanned .BIN still /GAMES/PIE.BIN after reorder
+[TEST] desktop menu: 21 checks, 0 failures
+[TEST] desktop drag & drop + run-in-window plumbing
+  PASS: press seq: zero cell
+  PASS: drag seq: single digits
+  PASS: release seq: two digits + btn 2
+  PASS: press seq: three-digit col
+  PASS: seq respects a small cap and stays NUL-terminated
+  PASS: window created for geometry
+  PASS: origin cell
+  PASS: cell edges inclusive
+  PASS: next cell starts at +8/+10
+  PASS: chrome clicks clamp to origin
+  PASS: screen corner clamps to origin
+  PASS: far corner clamps to the last cell
+  PASS: window removed
+  PASS: begin: session tracked, nothing sent
+  PASS: begin: buffer untouched
+  PASS: move within the same cell is silent
+  PASS: move to a new cell sends G
+  PASS: repeat motion in the cell stays silent
+  PASS: release sends R at the cell
+  PASS: release ends the session
+  PASS: stray release is ignored
+  PASS: stray motion is ignored
+  PASS: release outside clamps to last cell
+  PASS: clamped release still ends the session
+  PASS: cancel is silent
+  PASS: motion after window close cancels the session
+  PASS: begin replaces the session window
+  PASS: parse: editor + absolute path
+  PASS: parse: program without args
+  PASS: parse: absolute program path
+  PASS: parse: empty program rejected
+  PASS: parse: title sequence is not a run request
+  PASS: parse: menu sequence is not a run request
+  PASS: parse: respects small caps
+  PASS: parse: NULL rejected
+[TEST] 35 checks, 0 failed
+ALL DESKTOP DRAG TESTS PASSED
+desktop_damage_test
+  PASS: identical chrome: no damage
+  PASS: pointer move: two rects (old + new sprite)
+  PASS: old sprite rect
+  PASS: new sprite rect
+  PASS: pointer standing still: no damage
+  PASS: focus gain: window + taskbar
+  PASS: newly focused window repaints whole (shadow included)
+  PASS: taskbar focus highlight repaints
+  PASS: losing focus repaints the old window too
+  PASS: window opened: whole scene
+  PASS: window closed: whole scene
+  PASS: menu opens: new panel + taskbar (Apps highlight)
+  PASS: panel rect
+  PASS: Apps button highlight
+  PASS: selection move repaints the panel once
+  PASS: closed panel restored
+  PASS: right-click menu rect
+  PASS: dropdown close restores it
+  PASS: title change: window + taskbar
+  PASS: window chrome rect
+  PASS: taskbar label
+  PASS: open dropdown included
+  PASS: clock tick: one rect
+  PASS: clock cell rect
+  PASS: busy frame stays inside the rect budget
+Desktop starting...
+[MENU] =EDITOR.BIN
+[MENU] =DESKTOP.BIN
+[MENU] =SH.BIN
+[MENU] =LS.BIN
+[MENU] =CAT.BIN
+[MENU] =TEST.TXT
+[MENU] =NOTES.TXT
+[MENU] count=
+[LAUNCH] EDITOR.BIN
+01234567    PASS: first frame: full present, no rect flush
+    PASS: menu open: presents exactly the right-click menu rect
+    PASS: window launch: whole scene repaints -> full present
+    PASS: cursor move: old + new sprite rects only
+    PASS: clock tick: presents just the clock cell
+    PASS: row repair: presents the repaired band + re-stamped pointer
+    PASS: drag motion: presents the moved cursor region, no full flush
+    PASS: quiet frame: empty present (count 0), still no full flush
+    PASS: presented screen == framebuffer, byte for byte
+  === present frames: 9 checks, 0 failed ===
+  ALL FRAME PRESENT CHECKS PASSED
+  PASS: frame presents: rect flush == full flush, end to end
+=== 26 checks, 0 failed ===
+ALL DESKTOP DAMAGE TESTS PASSED
+=== Desktop input (Ctrl bytes + key auto-repeat) host tests ===
+  PASS: plain 'c' stays 'c'
+  PASS: plain 'q' stays 'q'
+  PASS: plain '1' stays '1'
+  PASS: shift 'c' is upper-case
+  PASS: Ctrl+C maps to 0x03
+  PASS: Ctrl+Q maps to 0x11
+  PASS: Ctrl+digit is left as the digit
+  PASS: Ctrl+Shift+C is still 0x03
+  PASS: arrows may repeat
+  PASS: 'w'/'s' may repeat
+  PASS: space may repeat
+  PASS: digits may repeat
+  PASS: Enter does not repeat
+  PASS: Tab does not repeat
+  PASS: Backspace does not repeat
+  PASS: F4 (unbound) does not repeat
+  PASS: Ctrl+C does not repeat
+  PASS: no repeat while Ctrl is held
+  PASS: no repeat before the 400 ms delay
+  PASS: first repeat fires after the delay as ESC [ C
+  PASS: no second repeat inside the period
+  PASS: repeat fires again after one period
+  PASS: released key never repeats
+  PASS: held letter repeats as its byte
+  PASS: held Up repeats as ESC [ A
+  PASS: no repeat while the Apps menu is open
+  PASS: no repeat while the right-click menu is open
+  PASS: no repeat without a focused window
+
+=== Desktop input v2 (K stamps, wheel, graceful close) ===
+  PASS: K 0 ~ built exactly
+  PASS: K 2 ~ built exactly
+  PASS: K 7 ~ (all three mods) built exactly
+  PASS: pixel key: K 0 then the byte, one write each
+  PASS: Shift sets bit 1 and picks the legend
+  PASS: Ctrl sets bit 2, byte stays 0x03
+  PASS: Alt sets bit 4, byte unchanged
+  PASS: all three mods OR to 7
+  PASS: arrows are stamped too
+  PASS: the stamp follows the live state, not the previous key
+  PASS: no payload: no K stamp
+  PASS: text window: Ctrl+C arrives as 0x03 alone
+  PASS: and nothing went to the pipe
+  PASS: a repeat tick is stamped like the press
+  PASS: the repeat carries the current mods
+  PASS: text repeat is the bare byte, unchanged
+  PASS: wheel up: one P/R pair with btn 4
+  PASS: wheel down: btn 5
+  PASS: a 2-detent event is two P/R pairs (4 writes)
+  PASS: a rogue 100 is capped at 8 pairs (16 writes)
+  PASS: a zero-delta event sends nothing
+  PASS: edge tick clamps to the last content pixel
+  PASS: tick outside any window is dropped
+  PASS: tick over the title bar is dropped
+  PASS: no tick without the pointer opt-in
+  PASS: no tick for a text window
+  PASS: the tick goes to the window under the pointer
+  PASS: the other window got nothing
+  PASS: close message is ESC [ D ~
+  PASS: close message respects a small cap
+  PASS: text window closes immediately
+  PASS: text window gone at once
+  PASS: no D message for a text window
+  PASS: nothing left pending
+[CLOSE] win=11: ESC [ D sent
+  PASS: pixel window starts the grace
+  PASS: close request sends ESC [ D ~ (one write)
+  PASS: window is still there during the grace
+  PASS: tick before the deadline keeps waiting
+  PASS: 249 ms is still inside the grace
+[CLOSE] win=11: grace expired, killing
+  PASS: at 250 ms the fallback closes the window
+  PASS: the fallback sends nothing more
+  PASS: the timer is cleared
+[CLOSE] win=12: ESC [ D sent
+  PASS: grace starts
+[CLOSE] win=12: exited within grace
+  PASS: no fallback after a graceful exit
+  PASS: the frame loop removes it, not the timer
+  PASS: and the timer stays clear
+[CLOSE] win=13: ESC [ D sent
+  PASS: first close pending
+[CLOSE] win=14: ESC [ D sent
+  PASS: second close pending
+  PASS: the first window's fallback fired, the second waits
+  PASS: second grace measured from its own request
+[CLOSE] win=14: grace expired, killing
+  PASS: second window closed at its deadline
+  PASS: drag session open
+[CLOSE] win=15: ESC [ D sent
+  PASS: a close request cancels the drag
+[CLOSE] win=15: grace expired, killing
+  PASS: fallback closes it
+
+=== 82 checks, 0 failed ===
+ALL DESKTOP INPUT TESTS PASSED
+=== Desktop terminal surface (ESC ] V / ] S + character grid) host tests ===
+  PASS: a fresh window is a text tail, not a terminal
+  PASS: ESC ] V 1 ~ switches the window into terminal mode
+  PASS: grid matches the window's content area (capped)
+  PASS: the app is answered with ESC ] S rows;cols ~
+  PASS: text lands at the home cell
+  PASS: the cursor advances with the text
+  PASS: ESC [ 3;5H lands on row 3 column 5
+  PASS: addressed writes do not smear along the row
+  PASS: ESC [ 7 m marks the cells reverse-video
+  PASS: ESC [ 0 m returns to plain text
+  PASS: text keeps flowing after an SGR reset
+  PASS: ESC [ K erases from the cursor to the end of the line
+  PASS: ESC [ 2 J blanks the whole grid
+  PASS: ESC [ 2 J homes the cursor
+  PASS: ESC [ ?25l hides the caret
+  PASS: ESC [ ?25h shows it again
+  PASS: nothing leaked into the text tail while in terminal mode
+  PASS: 'Z' fits the last cell
+  PASS: the next byte wraps to the start of the row
+  PASS: scroll-up moves the old second row up to the top
+  PASS: the bottom line slides up one row
+  PASS: the cursor stays on the bottom row after scrolling
+  PASS: the revealed bottom row starts blank
+  PASS: one window: wide columns
+  PASS: two windows: the grid narrows to half
+  PASS: the rows stay the same
+  PASS: the app is told the new size
+  PASS: closing the window restores the wide grid
+  PASS: and the app is told about that too
+  PASS: a text window still collects its output in the tail
+  PASS: backspace still edits the tail
+  PASS: ESC [ 2 J still clears the tail
+  PASS: \f still clears the tail
+  PASS: opting in without a pipe still switches modes
+
+=== 34 checks, 0 failed ===
+ALL DESKTOP TERMINAL TESTS PASSED
+[TEST] desktop pixel-mode surface (X11 support)
+  PASS: ESC ] X switches the window into pixel mode
+  PASS: ]X preferred size parsed
+  PASS: geometry delivered as ESC ] G <x>;<y>;<w>;<h> ~
+  PASS: opt-in queues a full repair
+  PASS: full repair delivered as ESC [ E ~
+  PASS: queue cleared after delivery
+  PASS: ESC ] F marks the pointer for re-stamping
+  PASS: ]X without a space parses
+  PASS: opt-in without a pipe still switches modes
+  PASS: flush without a pipe clears the queue
+  PASS: unspaced ]P1~ enables pointer events
+  PASS: spaced ]P 0~ disables them
+  PASS: spaced ]P 1~ enables them (X11 library)
+  PASS: bare ]P disables (no digit)
+  PASS: spaced ]T title has no leading space
+  PASS: repair queued content-relative
+  PASS: partial repair bytes exact
+  PASS: contained repair coalesced away
+  PASS: covering repair collapses to a full one
+  PASS: non-overlapping repair dropped
+  PASS: distinct repairs queue up
+  PASS: queue overflow collapses to a full repair
+  PASS: overflow delivered as a full repair
+  PASS: pixel-window content survives a full scene paint
+  PASS: text-window content is still repainted
+  PASS: row repair skips pixel windows
+  PASS: pixel windows keep no text bookkeeping
+  PASS: carve leaves every sampled content pixel untouched
+  PASS: carve repaints the wallpaper with the exact row colours
+  PASS: last wallpaper row above content exact
+  PASS: first content row untouched
+  PASS: middle of the content untouched
+  PASS: last content row untouched
+  PASS: first wallpaper row below content exact
+  PASS: left sliver repainted
+  PASS: right sliver repainted
+  PASS: ]F flag consumed
+  PASS: pointer sprite re-stamped over the content
+  PASS: re-stamp pushes a flush
+  PASS: no re-stamp while the pointer is outside the content
+  PASS: text windows are not serviced
+  PASS: content origin is pixel (0,0)
+  PASS: content pixels are 1:1
+  PASS: far corner clamps to the last content pixel
+  PASS: screen corner clamps to origin
+  PASS: wm_mouse_local dispatches to pixels
+  PASS: wm_mouse_local dispatches to cells
+  PASS: four-digit sequence bytes
+  PASS: sequence values cap at four digits
+  PASS: pixel motion sends a G event
+  PASS: same pixel stays silent
+  PASS: one-pixel step reports
+  PASS: release reports the pixel
+  PASS: release ends the session
+  PASS: a move reports T x;y~ to each opted-in pixel window
+  PASS: a still pointer stays silent
+  PASS: reports are throttled (20ms after the last send)
+  PASS: the throttled position lands on a later pass (never lost)
+  PASS: the drag window is skipped, the others still track
+  PASS: reflow re-sends the geometry
+  PASS: reflow queues a full repair
+  PASS: reflow repair delivered
+  PASS: repair under an open menu is held back
+  PASS: held-back repair leaves the queue
+  PASS: repair is clipped to the part outside the menu
+  PASS: full repair splits around the open menu
+  PASS: an app flush pushes a re-stamp flush
+  PASS: the menu is re-stamped over the app's pixels
+  PASS: the re-stamp is clipped to the menu rectangle
+  PASS: the pointer still re-stamps over the content
+  PASS: no tracking while a menu is open
+  PASS: the pointer moving under a menu stays silent
+  PASS: closing the menu reports the live position
+  PASS: then a still pointer stays silent again
+[TEST] 74 checks, 0 failed
+ALL DESKTOP PIXEL TESTS PASSED
+]P 1~=== 124 checks, 0 failed ===
+ALL X11 LIB TESTS PASSED
+=== 71 checks, 0 failed ===
+ALL XCALC TESTS PASSED
+=== 36 checks, 0 failed ===
+ALL ANTFARM TESTS PASSED
+=== 48 checks, 0 failed ===
+ALL XEYES TESTS PASSED
+Tests run: 22, passed 22, failed 0
+XNIBBLER host test PASSED.
+=== nano <-> desktop terminal integration (shim + real desktop surface) ===
+  PASS: initscr() returns a screen
+  PASS: the shim learned it has a real terminal surface (the ]V / ]S handshake)
+  PASS: the desktop window switched into terminal mode
+  PASS: LINES/COLS match the desktop grid exactly
+  PASS: one window: mode-sized surface
+  PASS: what curses draws shows up in the desktop's grid
+  PASS: newwin() works
+  PASS: a sub-window's text lands at its offset on the screen
+  PASS: the desktop caret follows wmove() (want 5,10; got 5,10)
+  PASS: A_REVERSE reaches the desktop as a reverse-video cell
+  PASS: turning the attribute off restores a plain cell
+  PASS: Ctrl+C arrives as the control byte 0x03
+  PASS: a plain key arrives as itself
+  PASS: ESC [ A arrives as KEY_UP
+  PASS: ESC [ 3 ~ arrives as KEY_DC (Delete)
+  PASS: ESC [ 5 ~ arrives as KEY_PPAGE
+  PASS: ESC O P arrives as KEY_F(1)
+  PASS: the reflow arrives as KEY_RESIZE (like a real SIGWINCH)
+  PASS: the new size is adopted
+  PASS: and it matches the desktop's re-flowed grid
+  PASS: drawing still works after the resize
+  PASS: closing it reflows back (KEY_RESIZE)
+  PASS: back to the wide grid
+  PASS: the edit window is created (63 rows below the title bar)
+  PASS: first keystroke paints into the grid
+  PASS: second keystroke paints into the grid (delta after delta)
+  PASS: a waddnstr burst after previous deltas paints all of it
+  PASS: the bottom status window paints in the same doupdate pass
+  PASS: line 2 of the edit window paints at grid row 2
+  PASS: curs_set(0) hides the desktop caret
+  PASS: curs_set(1) shows it again
+  PASS: endwin() marks the screen ended
+  PASS: endwin() restores a visible caret
+
+=== 33 checks, 0 failed ===
+ALL NANO TERMINAL INTEGRATION TESTS PASSED
+Tests run: 23, passed 23, failed 0
+XCRYPT host test PASSED.
+=== nfs_proto host tests (real nfsd fixtures) ===
+-- encoder golden test (real portmapper request captures)
+  PASS: getport args encode to 16 bytes
+  PASS: call length matches the real datagram
+  PASS: byte-for-byte identical to the datagram nfsd accepted
+  PASS: real reply parses as accepted
+  PASS: real getport reply yields a plausible port
+-- real nfsd reply parsing
+  PASS: MNT reply header parses
+  PASS: MNT yields a file handle
+  PASS: MNT offers AUTH_UNIX
+  PASS: GETATTR reply parses
+  PASS: GETATTR: root is a directory
+  PASS: GETATTR: mode is 0755
+  PASS: LOOKUP reply parses
+  PASS: LOOKUP: handle is 36 bytes (opaque nfs_fh3)
+  PASS: LOOKUP: HELLO.TXT is a 22-byte regular file
+  PASS: READ reply parses
+  PASS: READ: 22 bytes and EOF
+  PASS: READ: payload is exactly the fixture text
+  PASS: FSSTAT reply parses
+  PASS: FSSTAT: plausible sizes
+  PASS: READDIRPLUS status is 0
+  PASS: READDIRPLUS carries directory attributes
+  PASS: READDIRPLUS cookieverf
+  PASS: READDIRPLUS listing has the fixture entries
+  PASS: READDIRPLUS: names, types and sizes all match
+  PASS: READDIRPLUS: server includes . and .. (filtered by nfs.c)
+  PASS: READDIRPLUS: trailing eof word says the listing is complete
+  PASS: partial READDIRPLUS status is 0
+  PASS: partial READDIRPLUS dir attributes
+  PASS: partial READDIRPLUS cookieverf
+  PASS: partial READDIRPLUS returns a truncated batch
+  PASS: partial batch yields a continuation cookie
+  PASS: partial READDIRPLUS eof word is 0 (more entries remain)
+-- truncation fuzz over the real fixtures
+  PASS: no truncated real reply is accepted by any parser
+  PASS: short RPC envelopes never parse as accepted
+-- XDR writer/reader properties
+  PASS: writer accepts the message
+  PASS: round-trip with a non-aligned prefix consumes exactly
+  PASS: writer accepts the message
+  PASS: round-trip with a non-aligned prefix consumes exactly
+  PASS: writer accepts the message
+  PASS: round-trip with a non-aligned prefix consumes exactly
+  PASS: writer accepts the message
+  PASS: round-trip with a non-aligned prefix consumes exactly
+  PASS: u32 past the end sets err
+  PASS: string past the end sets err
+  PASS: opaque past the end sets err
+-- reply envelope rules
+  PASS: verifier padding is honored
+  PASS: wrong xid is reported as such
+  PASS: real fixture with wrong xid is rejected
+  PASS: denied replies are refused
+  PASS: accept_stat != SUCCESS is refused
+  PASS: oversized verifier is malformed
+
+=== Results: 51 checks run, 0 failed ===
+ALL NFS PROTO TESTS PASSED
+resolv_test: 218 checks, 0 failures
+PASS
+time_math_test: 314 checks, 0 failures
+PASS
+
+==============================
+Hello from isolated EL0 Space!
+==============================
+Computation finished. Exiting.
+HobbyOS console - close the window to end the session.
+HobbyOS console - close the window to end the session.
+console: failed to start the shell (SH.BIN)
+[TEST] console app host tests
+  PASS: smoke path runs and returns 0
+  PASS: shell path reports success when the spawn succeeds
+  PASS: spawns exactly SH.BIN
+  PASS: shell inherits the console's stdin/stdout/stderr
+  PASS: shell path reports failure when the spawn fails
+[TEST] console app: 5 checks, 0 failures
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+ > EDITOR.BIN                  
+   DESKTOP.BIN                 
+   SH.BIN                      
+   LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+   NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+   EDITOR.BIN                  
+ > DESKTOP.BIN                 
+   SH.BIN                      
+   LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+   NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+   EDITOR.BIN                  
+   DESKTOP.BIN                 
+ > SH.BIN                      
+   LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+   NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+ > EDITOR.BIN                  
+   DESKTOP.BIN                 
+   SH.BIN                      
+   LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+   NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+   EDITOR.BIN                  
+ > DESKTOP.BIN                 
+   SH.BIN                      
+   LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+   NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+   EDITOR.BIN                  
+   DESKTOP.BIN                 
+ > SH.BIN                      
+   LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+   NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+   EDITOR.BIN                  
+   DESKTOP.BIN                 
+   SH.BIN                      
+ > LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+   NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+   EDITOR.BIN                  
+   DESKTOP.BIN                 
+ > SH.BIN                      
+   LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+   NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+ > EDITOR.BIN                  
+   DESKTOP.BIN                 
+   SH.BIN                      
+   LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+   NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+ > EDITOR.BIN                  
+   DESKTOP.BIN                 
+   SH.BIN                      
+   LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+   NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+   EDITOR.BIN                  
+ > DESKTOP.BIN                 
+   SH.BIN                      
+   LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+   NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+   EDITOR.BIN                  
+   DESKTOP.BIN                 
+ > SH.BIN                      
+   LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+   NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+   EDITOR.BIN                  
+   DESKTOP.BIN                 
+   SH.BIN                      
+ > LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+   NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+   EDITOR.BIN                  
+   DESKTOP.BIN                 
+   SH.BIN                      
+   LS.BIN                      
+ > CAT.BIN                     
+   TEST.TXT                    
+   NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+   EDITOR.BIN                  
+   DESKTOP.BIN                 
+   SH.BIN                      
+   LS.BIN                      
+   CAT.BIN                     
+ > TEST.TXT                    
+   NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+   EDITOR.BIN                  
+   DESKTOP.BIN                 
+   SH.BIN                      
+   LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+ > NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+   EDITOR.BIN                  
+   DESKTOP.BIN                 
+   SH.BIN                      
+   LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+ > NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+   EDITOR.BIN                  
+   DESKTOP.BIN                 
+   SH.BIN                      
+   LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+ > NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+   EDITOR.BIN                  
+   DESKTOP.BIN                 
+   SH.BIN                      
+   LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+ > NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+   EDITOR.BIN                  
+   DESKTOP.BIN                 
+   SH.BIN                      
+   LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+ > NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+   EDITOR.BIN                  
+   DESKTOP.BIN                 
+   SH.BIN                      
+   LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+ > NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
++--------------------------------+
+| Open File                      |
++--------------------------------+
+  Files in root:
+   EDITOR.BIN                  
+   DESKTOP.BIN                 
+   SH.BIN                      
+   LS.BIN                      
+   CAT.BIN                     
+   TEST.TXT                    
+ > NOTES.TXT                   
++--------------------------------+
+Up/Down=Navigate Enter=Open ESC=Cancel
+=== Dialog Arrow Key Test Suite ===
+
+[TEST] DKEY constants...
+  PASS: DKEY_UP == 0x100
+  PASS: DKEY_DOWN == 0x101
+  PASS: DKEY_LEFT == 0x102
+  PASS: DKEY_RIGHT == 0x103
+  PASS: DKEY_ESC == 0x1B
+[TEST] Arrow key ESC sequence parsing...
+  PASS: DOWN arrow (ESC [ B) -> DKEY_DOWN
+  PASS: UP arrow (ESC [ A) -> DKEY_UP
+  PASS: RIGHT arrow (ESC [ C) -> DKEY_RIGHT
+  PASS: LEFT arrow (ESC [ D) -> DKEY_LEFT
+  PASS: ESC alone -> DKEY_ESC (cancel)
+  PASS: Regular char 'x' -> 'x'
+  PASS: Multiple arrows: DOWN, DOWN, UP
+[TEST] File open dialog arrow navigation...
+  PASS: file_open_dialog returns 1 after ENTER
+  PASS: Selected filename is non-empty
+  PASS: Selected 3rd file (SH.BIN) after 2 DOWNs
+[TEST] File open dialog UP navigation...
+  PASS: file_open_dialog returns 1 after UP+ENTER
+  PASS: UP navigation moved selection to SH.BIN
+[TEST] File open dialog ESC cancel...
+  PASS: file_open_dialog returns 0 on ESC cancel
+  PASS: Buffer empty on cancel
+[TEST] File open dialog lists ALL files, not just 2...
+  PASS: file_open_dialog returns 1 after navigating to last file
+  PASS: reached last file NOTES.TXT (all 7 entries listed, not just 2)
+
+=== Results ===
+Passed: 21
+Failed: 0
+
+ALL TESTS PASSED
+=== Pong Host Test ===
+Testing Pong game logic on host machine...
+
+  Test: graphics_init ... PASS
+  Test: reset_game ... PASS
+  Test: ball_movement ... PASS
+  Test: ball_wall_collision ... PASS
+  Test: paddle_collision ... PASS
+  Test: scoring ... PASS
+  Test: ai_movement ... PASS
+  Test: win_condition ... PASS
+  Test: render_no_crash ... PASS
+  Test: paddle_clamping ... PASS
+  Test: rng ... PASS
+  Test: check_collision ... PASS
+
+=== Test Results ===
+Tests run:    12
+Tests passed: 12
+Tests failed: 0
+
+✓ All tests PASSED!
+=== STARDUST Host Test ===
+Testing the original arcade game logic on host machine...
+
+  Test: graphics_init ... PASS
+  Test: reset_game ... PASS
+  Test: ship_movement_and_clamping ... PASS
+  Test: spawn_hazard_lane_bounds ... PASS
+  Test: spawn_table_full ... PASS
+  Test: meteor_fall_and_score ... PASS
+  Test: meteor_collision_loses_life ... PASS
+  Test: bbox_overlap ... PASS
+  Test: game_over_on_zero_lives ... PASS
+  Test: difficulty_ramp ... PASS
+  Test: render_no_crash ... PASS
+  Test: rng ... PASS
+
+=== Test Results ===
+Tests run:    12
+Tests passed: 12
+Tests failed: 0
+
+✓ All tests PASSED!
+[host] self-registering python host tests (GB-064)
+python3 tools/t5/run_t5_tests.py
+[host-tests] self-registering suite: 14 python tests
+  FAIL  tools/board/claim_race_test.py  (CLAIM_RACE_TEST: PASS — the read-then-move double claim is fixed)
+  PASS  tools/board/drift_check_test.py
+  PASS  tools/differential/diff_harness_test.py
+  PASS  tools/evidence_rig_test.py
+  PASS  tools/perf_game_cycle_test.py
+  FAIL  tools/t5/acceptance_gate_test.py  (ACCEPTANCE_GATE_TEST: PASS — the acceptance rig no longer fabricates PASS)
+  FAIL  tools/t5/acceptance_test.py  (Tests: 1 FAILED)
+  PASS  tools/t5/fatbig_tail_test.py
+  PASS  tools/t5/feasibility_doc_test.py
+  PASS  tools/t5/flaky_triage_test.py
+  PASS  tools/t5/game_docs_test.py
+  PASS  tools/t5/replay_test.py
+  PASS  tools/t5/retro_skill_test.py
+  PASS  tools/t5/selfreg_test.py
+[host-tests] done: 11/14 passed
+make: *** [Makefile:3415: host_tests] Error 3

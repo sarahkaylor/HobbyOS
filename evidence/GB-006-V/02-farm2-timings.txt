@@ -1,0 +1,18 @@
+HOST=swarm-farm-2 REV=badc665 COLD rc=2 secs=56
+Local storage:
+  Cache size (GiB): 0.0 / 5.0 ( 0.00%)
+Compile requests                      0
+Compile requests executed             0
+Cache hits                            0
+Cache hits rate                       -
+Compilations                          0
+WARM1 rc=2 secs=46
+WARM2 rc=2 secs=47
+--- stats:
+  Cache size (GiB): 0.0 / 5.0 ( 0.00%)
+Compile requests                      0
+Compile requests executed             0
+Cache hits                            0
+Cache hits rate                       -
+--- negative control:
+NEG secs=46
