@@ -1,0 +1,4 @@
+nes-0.ppm vs nes-3.ppm: bbox=(1881, 1063, 1895, 1070)
+nes-1.ppm vs nes-2.ppm: bbox=(1889, 1063, 1895, 1070)
+menu.ppm vs nes-0.ppm: bbox=(0, 0, 1920, 1078)
+differing px inside the game area (0..1820 x 0..1010) of nes-0 vs nes-3: 0

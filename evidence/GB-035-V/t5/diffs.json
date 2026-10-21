@@ -1,0 +1,47 @@
+[
+ {
+  "pair": "menu vs nes-0",
+  "diff_px": 506687,
+  "pct": 97.741
+ },
+ {
+  "pair": "menu vs nes-1",
+  "diff_px": 506692,
+  "pct": 97.742
+ },
+ {
+  "pair": "menu vs nes-2",
+  "diff_px": 506698,
+  "pct": 97.743
+ },
+ {
+  "pair": "menu vs nes-3",
+  "diff_px": 506693,
+  "pct": 97.742
+ },
+ {
+  "pair": "nes-0 vs nes-1",
+  "diff_px": 13,
+  "pct": 0.003
+ },
+ {
+  "pair": "nes-0 vs nes-2",
+  "diff_px": 15,
+  "pct": 0.003
+ },
+ {
+  "pair": "nes-0 vs nes-3",
+  "diff_px": 14,
+  "pct": 0.003
+ },
+ {
+  "pair": "nes-1 vs nes-2",
+  "diff_px": 6,
+  "pct": 0.001
+ },
+ {
+  "pair": "nes-2 vs nes-3",
+  "diff_px": 5,
+  "pct": 0.001
+ }
+]
