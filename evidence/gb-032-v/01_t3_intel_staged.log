@@ -1,0 +1,13 @@
+$ T3_STAGE='mcopy -o -i "$ROOT/disk.img" obj/intel/t4_probe.elf ::T4PROBE.BIN' bash tools/t3_tier.sh intel
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+=== T3 (intel): run (deadline 2700s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-95512599/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 924 console lines, 4 FAIL lines, 60 user memory fault records across 52 processes, 66 programs exited, halted=1
+T3_intel: FAIL — 4 FAIL line(s); first 20:
+848:  FAIL: line startpoint
+849:  FAIL: line midpoint
+850:  FAIL: line endpoint
+861:GRAPHICS TESTS FAILED
+T3_intel EXIT=1
+t3 intel EXIT=1
