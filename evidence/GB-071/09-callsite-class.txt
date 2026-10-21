@@ -1,0 +1,4 @@
+obj/intel/shtest.elf call sites: 27 {'literal': 25, 'from_memory': 0, 'no_rdi_set': 2, 'other': 0}
+obj/intel/shtest2.elf call sites: 0 {'literal': 0, 'from_memory': 0, 'no_rdi_set': 0, 'other': 0}
+obj/intel/blktest.elf call sites: 0 {'literal': 0, 'from_memory': 0, 'no_rdi_set': 0, 'other': 0}
+obj/intel/lfn_test.elf call sites: 1 {'literal': 0, 'from_memory': 0, 'no_rdi_set': 1, 'other': 0}

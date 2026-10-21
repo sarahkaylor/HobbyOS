@@ -1,2 +1,11 @@
 === T3 (intel): build ===
 === T3 (intel): run (deadline 1800s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-289f3b84/obj/t3_intel.log) ===
+T3_intel: 6369 console lines, 4 FAIL lines, 40 user memory fault records across 40 processes, 46 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 1800s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 4 FAIL line(s); first 20:
+620:  FAIL: line startpoint
+621:  FAIL: line midpoint
+622:  FAIL: line endpoint
+633:GRAPHICS TESTS FAILED
+T3_intel EXIT=1
+EXIT=1
