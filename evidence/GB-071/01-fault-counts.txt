@@ -1,0 +1,11 @@
+BASELINE (83ff46b, unpatched):
+T3_intel: 918 console lines, 4 FAIL lines, 60 user memory fault records across 50 processes, 66 programs exited, halted=1
+T3_intel: FAIL — 4 FAIL line(s); first 20:
+
+PATCH A (cli in enter_user_space only):
+T3_intel: 1259 console lines, 4 FAIL lines, 69 user memory fault records across 50 processes, 66 programs exited, halted=1
+T3_intel: FAIL — 4 FAIL line(s); first 20:
+
+PATCH A+B (cli in both trap-exit tails):
+T3_intel: 945 console lines, 4 FAIL lines, 60 user memory fault records across 52 processes, 66 programs exited, halted=1
+T3_intel: FAIL — 4 FAIL line(s); first 20:

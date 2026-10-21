@@ -1,0 +1,37 @@
+diff --git a/src/kernel/arch/x64/trap.c b/src/kernel/arch/x64/trap.c
+index 4c850af..01083d2 100755
+--- a/src/kernel/arch/x64/trap.c
++++ b/src/kernel/arch/x64/trap.c
+@@ -3041,6 +3041,14 @@ __asm__(
+ "    mov r15, [rsp + 112]\n"
+ "    \n"
+ "    /* 1. SS ([rsp + 288]) -> [rsp + 312] */\n"
++"    /* GB-071 family B: the syscall-return tail is the other place this\n"
++"       CPU sits at CPL0 with a frame that already says CS=0x1B, and the\n"
++"       tail itself computes &frame->cs in rdi for trap_exit_frame_check.\n"
++"       A timer tick taken between here and iretq captures that live\n"
++"       kernel pointer in a user-labelled frame.  Mask interrupts across\n"
++"       the exit; iretq restores RFLAGS (and therefore user IF) from the\n"
++"       frame. */\n"
++"    cli\n"
+ "    mov rax, [rsp + 288]\n"
+ "    mov [rsp + 312], rax\n"
+ "    \n"
+@@ -3101,6 +3109,17 @@ __asm__(
+ "    mov r12, rdi\n"
+ "    mov r13, rsi\n"
+ "    call restore_user_sp_helper\n"
++"    /* GB-071 family B: from here until iretq this CPU is at CPL0 while\n"
++"       the frame it assembles already says CS=0x1B (stamped below).  An\n"
++"       interrupt taken in that window is delivered onto the per-CPU\n"
++"       scratch buffer that IS the frame, and its save lands the live\n"
++"       kernel rdi -- by then &frame->cs / &frame->spsr from the trap-\n"
++"       exit tail -- into a frame labelled user, producing the torn\n"
++"       kernel-ELR + user-CS pair that resumes user code at CPL3 with\n"
++"       kernel registers.  Mask interrupts across the frame assembly;\n"
++"       iretq reloads RFLAGS from the frame, so user IF comes back from\n"
++"       the return itself. */\n"
++"    cli\n"
+ "    /* Same-privilege (kernel-mode) resume: common_trap_exit's iretq\n"
+ "       would pop only three words and leave RSP on this CPU's scratch\n"
+ "       buffer, severing the task from its live stack frames.  Relocate\n"
