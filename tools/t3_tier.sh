@@ -38,6 +38,29 @@ case "$ARCH_ARG" in
   *) echo "usage: t3_tier.sh [arm|intel] | t3_tier.sh police <log> [arch]" >&2; exit 2 ;;
 esac
 
+# Host-tool preconditions.  Measured failure this exists for: a run reported
+# "T3_intel: BUILD FAILED" because `mkfs.fat` was not on PATH -- while it was
+# installed at /usr/sbin/mkfs.fat the whole time.  Debian/Ubuntu keep the
+# mkfs family in sbin, which a non-root PATH often omits, so the build died
+# with "mkfs.fat: No such file or directory" and the tier blamed the code.
+# An environment gap must never read as a code defect: fix the PATH, and if a
+# tool is then still absent, exit 2 (environment), never 1 (build).
+case ":$PATH:" in
+  *:/usr/sbin:*|*:/sbin:*) ;;
+  *) PATH="/usr/sbin:/sbin:$PATH"; export PATH ;;
+esac
+_missing=""
+for _t in mkfs.fat mcopy qemu-system-$([ "$ARCH" = intel ] && echo x86_64 || echo aarch64); do
+  command -v "$_t" >/dev/null 2>&1 || _missing="$_missing $_t"
+done
+if [ -n "$_missing" ]; then
+  echo "T3_${ARCH}: ENVIRONMENT FAILURE — required host tool(s) not found:$_missing"
+  echo "  This is NOT a build or code defect: the tier cannot construct or boot the image."
+  echo "  PATH=$PATH"
+  exit 2
+fi
+
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
@@ -68,8 +91,9 @@ if [ -n "$POLICE_ONLY" ]; then
     rc=1
   fi
   # GB-068 regression guard (mirrors the run path): fail if user memory faults
-  # exceed the documented baseline ceiling (default 60; see run-path comment).
-  USER_FAULT_ALLOW="${T3_USER_FAULT_ALLOW:-60}"
+  # exceed the documented ceiling (default 75; see run-path comment for the
+  # measured 52/57 spread that rules out the old 60).
+  USER_FAULT_ALLOW="${T3_USER_FAULT_ALLOW:-75}"
   if [ "$MEMFAULTS" -gt "$USER_FAULT_ALLOW" ]; then
     echo "T3_${ARCH}: FAIL — ${MEMFAULTS} user memory faults exceeds the documented baseline ceiling ${USER_FAULT_ALLOW} (GB-068 regression)"
     rc=1
@@ -249,11 +273,17 @@ echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, ${ME
 #
 # Guard: FAIL the tier if the fault count REGRESSES above the allowed ceiling
 # (new faults = the tier was green before but a change added MORE user faults).
-# T3_USER_FAULT_ALLOW sets the ceiling (default 60 = the measured 44-55 max plus
-# headroom); a run at or below it is the known baseline, a run above it is a
-# regression and must fail.  Set T3_USER_FAULT_ALLOW=0 to demand the '0 user
-# memory faults' DoD literally once the v1 stack region is fixed.
-USER_FAULT_ALLOW="${T3_USER_FAULT_ALLOW:-60}"
+# T3_USER_FAULT_ALLOW sets the ceiling.  MEASURED 2026-10-19 on origin/main, two
+# consecutive runs with no instrumentation: 52 and 57 faults (1140 and 1075
+# console lines, 4 FAIL lines both).  So the run-to-run spread is ~5 and the old
+# default of 60 sat THREE above a legal reading -- it would have fired on noise.
+# The default is now 75: comfortably outside the observed band, still far below
+# the 104-fault outlier seen in one instrumented run, i.e. a real regression
+# still trips it.  This is a regression guard, not a precise measure; GB-068 is
+# the ticket that has to make the count meaningful.  Set
+# T3_USER_FAULT_ALLOW=0 to demand the '0 user memory faults' DoD literally once
+# the v1 stack region is fixed.
+USER_FAULT_ALLOW="${T3_USER_FAULT_ALLOW:-75}"
 MEMREG=0
 if [ "$MEMFAULTS" -gt "$USER_FAULT_ALLOW" ]; then
   echo "T3_${ARCH}: FAIL — ${MEMFAULTS} user memory faults exceeds the documented baseline ceiling ${USER_FAULT_ALLOW} (GB-068 regression); a change added user faults the wave did not previously carry"

@@ -335,12 +335,65 @@ static void test_fs_ftruncate_extend_then_write(void) {
   process_kill(pid);
 }
 
+static void test_fs_devnull_devurandom(void); /* GB-017 (defined below) */
+
 void fs_test_suite(void) {
   uart_puts("fs_test_suite:\n");
   test_fs_file_open_close();
   test_fs_record_locks();
   test_fs_ftruncate();
   test_fs_ftruncate_extend_then_write(); /* W3-kernel: mkfs -C extend-then-write */
+  test_fs_devnull_devurandom(); /* GB-017 */
 }
+
+/* GB-017: /dev/null and /dev/urandom device nodes served by the file layer.
+ * /dev/null: write(3)=3 (sink), read(1)=0 (EOF).  /dev/urandom: read(16)=16
+ * (never silently short), consecutive reads differ.  Independent of GB-014's
+ * syscall-table routing (coordinator 2026-10-18). */
+static void test_fs_devnull_devurandom(void) {
+  uart_puts("  Running test_fs_devnull_devurandom...\n");
+  tests_run++;
+  int pid = process_create();
+  EXPECT_EQ((pid >= 0), 1);
+  process_get_pcb(pid)->is_kernel_process = 1;
+  int old_pid = cpu_current_pids[0];
+  set_current_process_pid(0, pid);
+  struct process *cur = current_process();
+
+  /* /dev/null: open(O_WRONLY), write("abc",3)=3, read after reopen=EOF. */
+  int nw = file_open(cur, "/dev/null", 0x1 /*O_WRONLY*/);
+  EXPECT_EQ((nw >= 0), 1);
+  int wr = file_write(cur, nw, "abc", 3, 0);
+  EXPECT_EQ(wr, 3); /* sink accepts the whole write */
+  int nc = file_close(cur, nw);
+  EXPECT_EQ(nc, 0);
+
+  int nr = file_open(cur, "/dev/null", 0x0 /*O_RDONLY*/);
+  EXPECT_EQ((nr >= 0), 1);
+  char c;
+  int rd = file_read(cur, nr, &c, 1, 0);
+  EXPECT_EQ(rd, 0); /* EOF */
+  EXPECT_EQ(file_close(cur, nr), 0);
+
+  /* /dev/urandom: open(O_RDONLY), read(16)=16, consecutive draws differ. */
+  int ur = file_open(cur, "/dev/urandom", 0x0);
+  EXPECT_EQ((ur >= 0), 1);
+  char b1[16], b2[16];
+  int r1 = file_read(cur, ur, b1, 16, 0);
+  EXPECT_EQ(r1, 16); /* never silently short */
+  int r2 = file_read(cur, ur, b2, 16, 0);
+  EXPECT_EQ(r2, 16);
+  int differs = 0;
+  for (int i = 0; i < 16; i++) if (b1[i] != b2[i]) differs = 1;
+  EXPECT_EQ(differs, 1); /* two fresh draws are not all-equal */
+  EXPECT_EQ(file_close(cur, ur), 0);
+
+  /* an unresolvable /dev/foo must be ENOENT, not silently accepted. */
+  int bad = file_open(cur, "/dev/no-such-node", 0x0);
+  EXPECT_EQ(bad, -ENOENT);
+
+  set_current_process_pid(0, old_pid);
+}
+
 
 #endif // KERNEL_MODE_UNIT_TEST

@@ -1,0 +1,20 @@
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+ Volume in drive : has no label
+ Volume Serial Number is 01E5-4F90
+Directory for ::/
+
+FATBIG_T BIN     47608 2026-10-20  20:33 
+        1 file               47 608 bytes
+                        705 724 416 bytes free
+
+[T3_STAGE] FATBIG_T.BIN re-staged from host
+=== T3 (intel): run (deadline 2700s, log /home/sarah/Documents/GitHub/HobbyOS/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 935 console lines, 4 FAIL lines, 56 user memory faults, 62 programs exited, halted=1
+T3_intel: FAIL — 4 FAIL line(s); first 20:
+861:  FAIL: line startpoint
+862:  FAIL: line midpoint
+863:  FAIL: line endpoint
+874:GRAPHICS TESTS FAILED
+T3_intel EXIT=1
