@@ -80,7 +80,7 @@ if [ -n "$POLICE_ONLY" ]; then
   KFAULT=$(grep -ac "FATAL kernel-mode fault" "$LOG" || true)
   MEMFAULTS=$(grep -ac "memory fault" "$LOG" || true)
   MEMFAULT_PROCS=$(grep -aoE "\[KERNEL\] pid=[0-9]+ \([^)]*\) memory fault" "$LOG" 2>/dev/null \
-    | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u | wc -l | tr -d ' ')
+    | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u | wc -l | tr -d ' ' || true)
   LINES=$(wc -l <"$LOG")
   echo "T3_${ARCH} (police ${LOG}): ${LINES} lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} fault records across ${MEMFAULT_PROCS} processes, halted=${halted}, kfault=${KFAULT}"
   rc=0
@@ -267,9 +267,9 @@ MEMFAULTS=$(grep -ac "memory fault" "$LOG" || true)
 # 60 fired on some runs at 61-113 while the affected-process count sat still.
 # Both are printed; the guard below gates on the STABLE one.
 MEMFAULT_PROCS=$(grep -aoE "\[KERNEL\] pid=[0-9]+ \([^)]*\) memory fault" "$LOG" 2>/dev/null \
-  | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u | wc -l | tr -d ' ')
+  | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u | wc -l | tr -d ' ' || true)
 PROGS_EXITED=$(grep -aoE "Process [0-9]+: [A-Z0-9_.]+\.BIN exited" "$LOG" 2>/dev/null \
-  | grep -oE "[A-Z][A-Z0-9_]{1,12}\.BIN" | sort -u | wc -l | tr -d ' ')
+  | grep -oE "[A-Z][A-Z0-9_]{1,12}\.BIN" | sort -u | wc -l | tr -d ' ' || true)
 echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} user memory fault records across ${MEMFAULT_PROCS} processes, ${PROGS_EXITED} programs exited, halted=${halted}"
 
 # GB-068 regression guard: the intel wave carries a documented, long-standing
@@ -334,7 +334,7 @@ LINES=$(wc -l <"$LOG")
 # for a wave that never got going.
 MIN_PROGRAMS="${T3_MIN_PROGRAMS:-55}"
 EXITED_PROGS=$(grep -aoE "Process [0-9]+: [A-Z0-9_.]+\.BIN exited" "$LOG" 2>/dev/null \
-  | grep -oE "[A-Z][A-Z0-9_]{1,12}\.BIN" | sort -u | wc -l | tr -d ' ')
+  | grep -oE "[A-Z][A-Z0-9_]{1,12}\.BIN" | sort -u | wc -l | tr -d ' ' || true)
 MIN_LINES="${T3_MIN_LINES:-300}"
 if [ "$KFAULT" != "0" ]; then
   echo "T3_${ARCH}: FAIL — ${KFAULT} FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed"; rc=1
