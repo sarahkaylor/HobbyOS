@@ -1,4 +1,5 @@
 #include "program_loader.h"
+#include "kline.h"
 #include "fs.h"
 #include "setjmp.h"
 #include "process.h"
@@ -464,15 +465,20 @@ static int v2_map_image(struct addr_space *as, struct file *f, uint32_t fsize) {
   if (pref != 0)
     uart_puts("v2 loader: first-page prefill failed (fault-fill path)\n");
 
-  uart_puts("v2 loader: image mapped (lazy), bytes=");
-  print_int((int)fsize);
-  uart_puts(" pages=");
-  print_int((int)(img_len / FRAME_SIZE));
-  uart_puts(" first=");
-  uart_puts(pref == 0 ? "in" : "lazy");
-  uart_puts(" elap=");
-  print_int((int)(timer_get_ms() - t_load0));
-  uart_puts("ms\n");
+  {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "v2 loader: image mapped (lazy), bytes=");
+    kl_i(&kl, (long)fsize);
+    kl_s(&kl, " pages=");
+    kl_i(&kl, (long)(img_len / FRAME_SIZE));
+    kl_s(&kl, " first=");
+    kl_s(&kl, pref == 0 ? "in" : "lazy");
+    kl_s(&kl, " elap=");
+    kl_i(&kl, (long)(timer_get_ms() - t_load0));
+    kl_s(&kl, "ms\n");
+    kl_emit(&kl);
+  }
   return 0;
 }
 
