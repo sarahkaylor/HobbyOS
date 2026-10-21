@@ -3189,6 +3189,20 @@ void start_scheduler(void) {
 
         extern char __stack_top;
         uint64_t target_sp = (uint64_t)&__stack_top - cpu * 0x10000 - 4096;
+#ifdef __x86_64__
+        /* GB-068 (same fix as schedule(), second site -- this is the sibling
+           path that kept producing the tsp-0x28 fingerprint after the first one
+           was fixed, and it is why 6 faults survived): target_sp must be the
+           RESUMED TASK's stack. It defaults to this CPU's kernel stack and was
+           never reassigned here either, so enter_user_space put the initial
+           argument block -- and rdi -- on the kernel stack, unmapped in the
+           process's CR3. For a user process context[33] is the user stack top;
+           for a kernel task it is the interrupted RSP. */
+        {
+          uint64_t own_sp = proc_table[i].context[33];
+          if (own_sp) target_sp = own_sp;
+        }
+#endif
 
         struct trap_frame local_tf;
         restore_context(&proc_table[i], &local_tf);
