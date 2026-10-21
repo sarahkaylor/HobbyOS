@@ -115,7 +115,13 @@ if [ "$A" != "skip" ] && [ "$A" != "buildfail" ] && \
   cmp_out legA_musl legB_host
   echo "t4 host differential: A=$(cat "$TMP/runs/legA_musl.rc" 2>/dev/null || echo n/a) B=$(cat "$TMP/runs/legB_host.rc" 2>/dev/null || echo n/a) cases=$N"
 else
-  echo "t4 host differential: SKIPPED (missing toolchain: A=$A B=$B)"
+  # GB-066 (tier honesty, GB-075 law): a MISSING/ABSENT required leg must FAIL
+  # the tier, not skip-and-PASS.  If either the musl reference (A) or the
+  # HobbyOS compat surface (B) cannot be built/run, no differential was
+  # produced, so this is NOT a green.  (A real leg-B *device* run is a separate
+  # clause, gated on the ELF loader and handled below.)
+  echo "t4 host differential: SKIPPED (a required leg did not run: A=$A B=$B) — FAILING the tier per GB-066 (no false green)"
+  fail=1
 fi
 
 # ---- device leg (gated on ELF loader) -------------------------------------------
