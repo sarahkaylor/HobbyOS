@@ -3537,6 +3537,20 @@ style-diff:
 style-test:
 	python3 tools/test_cstyle.py
 
+# --- Merge gate (GB-005): one command to run the branch/PR gate -----------
+# merge_gate.sh aggregates the test tiers (T1 host golden always; heavy QEMU
+# T2/T3 tiers enabled via GATE_CI=1 / GATE_T2=1 / GATE_T3=1) into a single
+# verdict; merge_gate_test.sh proves the DoD "a dummy branch fails -> passes
+# the gate" (T3-verdict fail->pass + optional real T1 run).
+merge_gate:
+	bash tools/gate/merge_gate.sh
+
+merge_gate_ci:
+	GATE_CI=1 bash tools/gate/merge_gate.sh
+
+test_merge_gate:
+	bash tools/gate/merge_gate_test.sh
+
 # --- Two-arch parity CI (GB-044) ---
 # Runs the per-arch check on ARCH=arm AND ARCH=intel, requires both green
 # (gaming.md §2.3 parity), and enforces the GB-044 DoD "run window < best"
@@ -3548,4 +3562,4 @@ parity_ci:
 test_parity_ci:
 	bash tools/gate/parity_ci_test.sh
 
-.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test parity_ci test_parity_ci bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest test_diff_harness
+.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test merge_gate merge_gate_ci test_merge_gate parity_ci test_parity_ci cache_setup cold_vs_cached test_cache test_diff_harness bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest
