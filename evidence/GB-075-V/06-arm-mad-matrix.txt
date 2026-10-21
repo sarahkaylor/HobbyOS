@@ -1,0 +1,16 @@
+files: ['MILLIPED.ppm', 'NES.ppm', 'PONG.ppm', 'XCRYPT.ppm', 'XNIBBLER.ppm']
+stated margin GAME_DIFF_MARGIN = 0.004
+
+live + pairwise whole-frame MAD:
+  MILLIPED.ppm     live=True
+  NES.ppm          live=True
+  PONG.ppm         live=True
+  XCRYPT.ppm       live=True
+  XNIBBLER.ppm     live=True
+
+               MILLIPED   NES.ppm  PONG.ppm  XCRYPT.p  XNIBBLER
+MILLIPED.ppm     0.0000    0.0095    0.0006    0.0020    0.0017
+NES.ppm          0.0095    0.0000    0.0091    0.0097    0.0095
+PONG.ppm         0.0006    0.0091    0.0000    0.0017    0.0014
+XCRYPT.ppm       0.0020    0.0097    0.0017    0.0000    0.0007
+XNIBBLER.ppm     0.0017    0.0095    0.0014    0.0007    0.0000

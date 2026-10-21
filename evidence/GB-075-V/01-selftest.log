@@ -1,0 +1,14 @@
+  PASS: bottom-row content (row 1000) detected live
+  PASS: blank 1080-row frame is not live
+  PASS: desktop/menu-only frame FAILS the rig (title never loaded)
+  PASS: and the reason names 'never loaded'
+  PASS: never-loaded title FAILS even with a live frame
+  PASS: title_loaded True when serial shows the load line
+  PASS: frame a is live (a distinct white pixel)
+  PASS: frame c is live (a blue band)
+  PASS: a vs c differ above the stated margin
+  PASS: first real, loaded, live title PASSES
+  PASS: near-identical 'different' title FAILS the whole-frame margin
+  PASS: genuinely distinct second title PASSES
+
+ACCEPTANCE_GATE_TEST: PASS — the acceptance rig no longer fabricates PASS

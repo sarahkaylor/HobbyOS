@@ -1,0 +1,19 @@
+== clause 3: whole-frame liveness (the GB-053-V sampling bug) ==
+  OK: 50x50 block at row 5 reads live -> True  
+  OK: 50x50 block at row 540 reads live -> True  
+  OK: 50x50 block at row 1000 reads live -> True  
+
+== clause 1: a desktop-only (live, non-uniform) frame must FAIL ==
+  OK: desktop-only frame for XNIBBLER fails -> False  reasons=['never loaded (no serial load line / process)']
+
+== clause 2: staged + menu-listed but never loaded must FAIL ==
+  OK: XCRYPT staged+listed, never loaded, fails -> False  reasons=['never loaded (no serial load line / process)']
+
+== control: same frame, but the title really loaded -> PASS ==
+  OK: loaded + live frame passes (gate is not stuck red) -> True  reasons=[]
+
+== margin: near-identical frames FAIL, distinct frames PASS ==
+  OK: near-identical (mad=0.00001) fails margin 0.004 -> False  reasons=['frame changed only 0.000 < margin 0.004 (not a distinct rendered title)']
+  OK: distinct (mad=0.49879) passes margin -> True  reasons=[]
+
+INJECTION RESULT: 8/8 behaved as required
