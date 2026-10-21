@@ -51,6 +51,26 @@ def age_hours(ts, now):
     return (now - parse(ts)).total_seconds() / 3600.0
 
 
+def last_activity(issue, comments, now):
+    """Age (hours) of the last activity that is NOT the coordinator's own.
+
+    Coordinator comments must not count: asking "is this stalled?" stamps the
+    ticket and re-arms the very clock being measured.  GB-029 was correctly
+    flagged as stalled, my status question made it look active, and it stayed
+    In Progress with no work as a result.  Every coordinator comment carries
+    "(Coordinator" in its footer, so that is the discriminator.
+
+    The fallback is `created_at`, never `updated_at` -- posting any comment
+    bumps `updated_at`, so using it would reintroduce the same self-erasure
+    one level down.
+    """
+    human = [c for c in comments
+             if "Coordinator" not in (c.get("body") or "")]
+    if human:
+        return age_hours(human[-1]["created_at"], now)
+    return age_hours(issue.get("created_at") or issue["updated_at"], now)
+
+
 def classify(lane, comment_age_h, issue_age_h, hours):
     """Is this claim stale?  Isolated so --self-test can exercise it."""
     if lane != "In Progress":
@@ -131,7 +151,7 @@ def main():
             cs = api(f"/issues/{i['number']}/comments")
         except Exception:                                     # noqa: BLE001
             cs = []
-        comment_age = age_hours(cs[-1]["created_at"], now) if cs else issue_age
+        comment_age = last_activity(i, cs, now)
         if classify(lane, comment_age, issue_age, hours):
             stale.append((i["number"], (i.get("title") or "")[:56],
                           comment_age, issue_age))

@@ -26,6 +26,10 @@
 #include <fcntl.h>
 #include <sys/utsname.h>
 #include <sys/random.h>
+#include <poll.h>
+#include <sys/select.h>
+#include <signal.h>
+#include <sys/socket.h> /* GB-018 socket remainder: socketpair/AF_UNIX */
 
 static void pstr(const char *s) {
   size_t n = 0; while (s[n]) n++;
@@ -103,6 +107,81 @@ int main(int argc, char **argv) {
     prow("null_open_r", nr, nr < 0 ? 2 : 0, NULL, 0);
     char c; long nrb = read(nr, &c, 1);
     prow("null_read1", nrb, nrb < 0 ? 2 : 0, NULL, 0);
+  }
+
+  /* GB-018: poll/select/pselect6 under compat — socket+pipe cases.  The pipe
+   * write makes the read end ready; poll/select/pselect must report it (count=1,
+   * revents=POLLIN, fdset bit set).  A shim that never marks a readable pipe
+   * ready, or that reports readiness without the right event mask, diverges.
+   * poll_badfd: an invalid fd must report POLLNVAL (not hang, not count 0).
+   * All deterministic on both legs (fresh pipe, timeout 0). */
+  {
+    int pfd[2];
+    long prc = pipe(pfd);
+    prow("pipe2", prc, prc < 0 ? 9 : 0, NULL, 0);
+    if (write(pfd[1], "x", 1) != 1) prow("pipe_write", -1, 9, NULL, 0);
+
+    struct pollfd pf[1];
+    pf[0].fd = pfd[0]; pf[0].events = POLLIN; pf[0].revents = 0;
+    long pr = poll(pf, 1, 0);
+    prow("poll_ready", pr, pr < 0 ? 9 : 0, NULL, 0);
+    long pre = pf[0].revents;
+    prow("poll_ready_revents", pre, pre < 0 ? 9 : 0, NULL, 0);
+
+    fd_set rf; FD_ZERO(&rf); FD_SET(pfd[0], &rf);
+    struct timeval tv; tv.tv_sec = 0; tv.tv_usec = 0;
+    long sr = select(pfd[0] + 1, &rf, NULL, NULL, &tv);
+    prow("select_ready", sr, sr < 0 ? 9 : 0, NULL, 0);
+    prow("select_ready_fdset", FD_ISSET(pfd[0], &rf) ? 1 : 0, 0, NULL, 0);
+
+    sigset_t empt; sigemptyset(&empt);
+    fd_set rf2; FD_ZERO(&rf2); FD_SET(pfd[0], &rf2);
+    struct timespec ts; ts.tv_sec = 0; ts.tv_nsec = 0;
+    long ps6 = pselect(pfd[0] + 1, &rf2, NULL, NULL, &ts, &empt);
+    prow("pselect6_ready", ps6, ps6 < 0 ? 9 : 0, NULL, 0);
+    prow("pselect6_ready_fdset", FD_ISSET(pfd[0], &rf2) ? 1 : 0, 0, NULL, 0);
+
+    close(pfd[0]); close(pfd[1]);
+
+    struct pollfd pf2[1];
+    pf2[0].fd = 9999999; pf2[0].events = POLLIN; pf2[0].revents = 0;
+    long pbr = poll(pf2, 1, 0);
+    prow("poll_badfd", pbr, pbr < 0 ? 9 : 0, NULL, 0);
+    prow("poll_badfd_revents", pf2[0].revents, 0, NULL, 0);
+  }
+
+  /* GB-018 (socket remainder, coord 2026-10-20): stream-socket readiness is a
+   * DISTINCT wake path from the pipe above (socket/ring buffer, not the pipe
+   * FIFO) — the one the compat layer is most likely to get wrong.  A
+   * socketpair(AF_UNIX, SOCK_STREAM) gives two connected stream sockets; the
+   * peer write flips the other end readable.  poll/select/pselect6 must report
+   * it.  Deterministic on both legs (kernel: SYS_SOCKETPAIR). */
+  {
+    int sv[2];
+    long spc = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+    prow("sockpair", spc, spc < 0 ? 9 : 0, NULL, 0);
+    if (write(sv[1], "s", 1) != 1) prow("sock_write", -1, 9, NULL, 0);
+
+    struct pollfd spf[1];
+    spf[0].fd = sv[0]; spf[0].events = POLLIN; spf[0].revents = 0;
+    long spr = poll(spf, 1, 0);
+    prow("sockpoll_ready", spr, spr < 0 ? 9 : 0, NULL, 0);
+    prow("sockpoll_revents", spf[0].revents, 0, NULL, 0);
+
+    fd_set srf; FD_ZERO(&srf); FD_SET(sv[0], &srf);
+    struct timeval stv; stv.tv_sec = 0; stv.tv_usec = 0;
+    long ssr = select(sv[0] + 1, &srf, NULL, NULL, &stv);
+    prow("sockselect_ready", ssr, ssr < 0 ? 9 : 0, NULL, 0);
+    prow("sockselect_fdset", FD_ISSET(sv[0], &srf) ? 1 : 0, 0, NULL, 0);
+
+    sigset_t sempt; sigemptyset(&sempt);
+    fd_set srf2; FD_ZERO(&srf2); FD_SET(sv[0], &srf2);
+    struct timespec sts; sts.tv_sec = 0; sts.tv_nsec = 0;
+    long sps = pselect(sv[0] + 1, &srf2, NULL, NULL, &sts, &sempt);
+    prow("sockpselect_ready", sps, sps < 0 ? 9 : 0, NULL, 0);
+    prow("sockpselect_fdset", FD_ISSET(sv[0], &srf2) ? 1 : 0, 0, NULL, 0);
+
+    close(sv[0]); close(sv[1]);
   }
 
   pstr("t4-probe-arrived\n");

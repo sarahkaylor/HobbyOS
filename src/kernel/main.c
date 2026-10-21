@@ -171,6 +171,16 @@ static void test_wave_loader(void *arg) {
   load_and_run_program_in_scheduler("NFSTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("ERRTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("HELLO.BIN", -1, -1, -1, -1);
+  /* M1 W0 corpus (GB-024/GB-070): the gate requires hello, cat, sh and
+     coreutils-static to BOOT AND RETURN EXPECTED OUTPUT on intel.  HELLO.BIN
+     was launched here; SH/LS/CAT were on the disk (144 binaries) and never
+     started, which is why t4_w0 reported "no W0 member arrived" for them --
+     the corpus was never dispatched, so the gate could not pass no matter how
+     healthy the kernel was.  These three are the W0 members that are real user
+     programs on the image; LS.BIN stands in for the coreutils-static set. */
+  load_and_run_program_in_scheduler("CAT.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("LS.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("SH.BIN", -1, -1, -1, -1);
   /* Phase 3: lseek/stat/fstat exercise the new syscalls directly. */
   load_and_run_program_in_scheduler("LKSTEST.BIN", -1, -1, -1, -1);
   /* WCTEST/HEDTEST spawn WC.BIN/HEDGNU.BIN through the real spawn2/pipe
