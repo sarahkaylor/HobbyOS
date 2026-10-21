@@ -1,0 +1,34 @@
+# GB-046-V run tally  @ 79d14e7dc2ce166b1886aa93e7e2d6d21b49cc52  2026-10-21T04:39:02Z
+bundle: evidence/perf_cycle/20261021T034514Z/
+visits judged (cycle= lines): 12
+frozen=True: 12
+frozen=False: 0
+launch FAILs: 42
+total visits attempted: 18 cycles x 3 games = 54
+
+## RSS verdict line:
+[perf] whole-run RSS: floor=335.57 MB peak=363.34 MB growth=27.77 MB (bound 64 MB) -> PASS
+## final summary:
+[perf] summary: FAIL
+EXIT=1
+
+## unrelated apps launched by the rig's menu navigation (never requested by --games):
+      6 [LAUNCH] XCRYPT.BIN
+      4 [LAUNCH] XNIBBLER.BIN
+      4 [LAUNCH] NES.BIN
+      3 [LAUNCH] STARDUST.BIN
+      2 [LAUNCH] TASKS.BIN
+      1 [LAUNCH] [ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+      1 [LAUNCH] XN[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+      1 [LAUNCH] XEYES.BIN
+      1 [LAUNCH] PONG.BIN
+      1 [LAUNCH] N[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+
+## guest stopped producing serial output (last 6 lines):
+v2 loader: image mapped (lazy), bytes=84328 pages=21 first=in elap=1ms
+v2 loader: PID=46 entry=0x1000000000 sp=0x1800000000 resident=1 tables=3
+[ARRIVED] XEYES.BIN rc>0
+[APP] XEYES started
+]P 1~]T xeyes~]X 320;200~[KERNEL] Process 46: XEYES.BIN exited unexpectedly or gracefully.
+make: *** [Makefile:2337: run] Killed
+IDLESTUCK/LOCKFOREVER lines: 0

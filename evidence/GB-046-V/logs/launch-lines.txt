@@ -1,0 +1,26 @@
+[LAUNCH] XNIBBLER.BIN
+[LAUNCH] XCRYPT.BIN
+[LAUNCH] NES.BIN
+[LAUNCH] N[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+[LAUNCH] XN[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+[LAUNCH] XCRYPT.BIN
+[LAUNCH] XNIBBLER.BIN
+[LAUNCH] XCRYPT.BIN
+[LAUNCH] XNIBBLER.BIN
+[LAUNCH] XCRYPT.BIN
+[LAUNCH] NES.BIN
+[LAUNCH] NES.BIN
+[LAUNCH] NES.BIN
+[LAUNCH] STARDUST.BIN
+[LAUNCH] [ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+[LAUNCH] XCRYPT.BIN
+[LAUNCH] XCRYPT.BIN
+[LAUNCH] NES.B[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+[LAUNCH] MILLIPED.BIN
+[LAUNCH] STARDUST.BIN
+[LAUNCH] STARDUST.BIN
+[LAUNCH] TASKS.BIN
+[LAUNCH] XNIBBLER.BIN
+[LAUNCH] PONG.BIN
+[LAUNCH] TASKS.BIN
+[LAUNCH] XEYES.BIN

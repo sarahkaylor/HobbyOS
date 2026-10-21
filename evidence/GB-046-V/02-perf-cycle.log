@@ -1,0 +1,58 @@
+[perf] booting arm once; cycling games; bundle -> evidence/perf_cycle/20261021T034514Z
+[perf] cycle=0 game=XNIBBLER.BIN samples=25 frozen=True launched=True
+[perf] cycle=0 game=XCRYPT.BIN samples=25 frozen=True launched=True
+[perf] FAIL: NES.BIN (cycle 0) never appeared in serial (launch no-op) — new serial bytes [11065171] do not contain [LAUNCH] NES.BIN
+[perf] FAIL: XNIBBLER.BIN (cycle 1) never appeared in serial (launch no-op) — new serial bytes [10533430] do not contain [LAUNCH] XNIBBLER.BIN
+[perf] FAIL: XCRYPT.BIN (cycle 1) never appeared in serial (launch no-op) — new serial bytes [8897541] do not contain [LAUNCH] XCRYPT.BIN
+[perf] cycle=1 game=NES.BIN samples=25 frozen=True launched=True
+[perf] FAIL: XNIBBLER.BIN (cycle 2) never appeared in serial (launch no-op) — new serial bytes [10827800] do not contain [LAUNCH] XNIBBLER.BIN
+[perf] FAIL: XCRYPT.BIN (cycle 2) never appeared in serial (launch no-op) — new serial bytes [11078417] do not contain [LAUNCH] XCRYPT.BIN
+[perf] FAIL: NES.BIN (cycle 2) never appeared in serial (launch no-op) — new serial bytes [11310575] do not contain [LAUNCH] NES.BIN
+[perf] FAIL: XNIBBLER.BIN (cycle 3) never appeared in serial (launch no-op) — new serial bytes [11480430] do not contain [LAUNCH] XNIBBLER.BIN
+[perf] cycle=3 game=XCRYPT.BIN samples=25 frozen=True launched=True
+[perf] FAIL: NES.BIN (cycle 3) never appeared in serial (launch no-op) — new serial bytes [11987678] do not contain [LAUNCH] NES.BIN
+[perf] FAIL: XNIBBLER.BIN (cycle 4) never appeared in serial (launch no-op) — new serial bytes [12242733] do not contain [LAUNCH] XNIBBLER.BIN
+[perf] FAIL: XCRYPT.BIN (cycle 4) never appeared in serial (launch no-op) — new serial bytes [13334545] do not contain [LAUNCH] XCRYPT.BIN
+[perf] FAIL: NES.BIN (cycle 4) never appeared in serial (launch no-op) — new serial bytes [13020312] do not contain [LAUNCH] NES.BIN
+[perf] cycle=5 game=XNIBBLER.BIN samples=25 frozen=True launched=True
+[perf] cycle=5 game=XCRYPT.BIN samples=25 frozen=True launched=True
+[perf] FAIL: NES.BIN (cycle 5) never appeared in serial (launch no-op) — new serial bytes [13317656] do not contain [LAUNCH] NES.BIN
+[perf] cycle=6 game=XNIBBLER.BIN samples=25 frozen=True launched=True
+[perf] FAIL: XCRYPT.BIN (cycle 6) never appeared in serial (launch no-op) — new serial bytes [13230541] do not contain [LAUNCH] XCRYPT.BIN
+[perf] FAIL: NES.BIN (cycle 6) never appeared in serial (launch no-op) — new serial bytes [13034936] do not contain [LAUNCH] NES.BIN
+[perf] FAIL: XNIBBLER.BIN (cycle 7) never appeared in serial (launch no-op) — new serial bytes [12769817] do not contain [LAUNCH] XNIBBLER.BIN
+[perf] cycle=7 game=XCRYPT.BIN samples=25 frozen=True launched=True
+[perf] cycle=7 game=NES.BIN samples=25 frozen=True launched=True
+[perf] FAIL: XNIBBLER.BIN (cycle 8) never appeared in serial (launch no-op) — new serial bytes [13229915] do not contain [LAUNCH] XNIBBLER.BIN
+[perf] FAIL: XCRYPT.BIN (cycle 8) never appeared in serial (launch no-op) — new serial bytes [12661484] do not contain [LAUNCH] XCRYPT.BIN
+[perf] cycle=8 game=NES.BIN samples=25 frozen=True launched=True
+[perf] FAIL: XNIBBLER.BIN (cycle 9) never appeared in serial (launch no-op) — new serial bytes [12946020] do not contain [LAUNCH] XNIBBLER.BIN
+[perf] FAIL: XCRYPT.BIN (cycle 9) never appeared in serial (launch no-op) — new serial bytes [13195202] do not contain [LAUNCH] XCRYPT.BIN
+[perf] cycle=9 game=NES.BIN samples=25 frozen=True launched=True
+[perf] FAIL: XNIBBLER.BIN (cycle 10) never appeared in serial (launch no-op) — new serial bytes [12156372] do not contain [LAUNCH] XNIBBLER.BIN
+[perf] FAIL: XCRYPT.BIN (cycle 10) never appeared in serial (launch no-op) — new serial bytes [13533746] do not contain [LAUNCH] XCRYPT.BIN
+[perf] FAIL: NES.BIN (cycle 10) never appeared in serial (launch no-op) — new serial bytes [11956042] do not contain [LAUNCH] NES.BIN
+[perf] FAIL: XNIBBLER.BIN (cycle 11) never appeared in serial (launch no-op) — new serial bytes [12105881] do not contain [LAUNCH] XNIBBLER.BIN
+[perf] cycle=11 game=XCRYPT.BIN samples=25 frozen=True launched=True
+[perf] FAIL: NES.BIN (cycle 11) never appeared in serial (launch no-op) — new serial bytes [10586454] do not contain [LAUNCH] NES.BIN
+[perf] FAIL: XNIBBLER.BIN (cycle 12) never appeared in serial (launch no-op) — new serial bytes [690513] do not contain [LAUNCH] XNIBBLER.BIN
+[perf] FAIL: XCRYPT.BIN (cycle 12) never appeared in serial (launch no-op) — new serial bytes [396] do not contain [LAUNCH] XCRYPT.BIN
+[perf] FAIL: NES.BIN (cycle 12) never appeared in serial (launch no-op) — new serial bytes [397] do not contain [LAUNCH] NES.BIN
+[perf] FAIL: XNIBBLER.BIN (cycle 13) never appeared in serial (launch no-op) — new serial bytes [0] do not contain [LAUNCH] XNIBBLER.BIN
+[perf] FAIL: XCRYPT.BIN (cycle 13) never appeared in serial (launch no-op) — new serial bytes [0] do not contain [LAUNCH] XCRYPT.BIN
+[perf] FAIL: NES.BIN (cycle 13) never appeared in serial (launch no-op) — new serial bytes [458] do not contain [LAUNCH] NES.BIN
+[perf] FAIL: XNIBBLER.BIN (cycle 14) never appeared in serial (launch no-op) — new serial bytes [0] do not contain [LAUNCH] XNIBBLER.BIN
+[perf] FAIL: XCRYPT.BIN (cycle 14) never appeared in serial (launch no-op) — new serial bytes [0] do not contain [LAUNCH] XCRYPT.BIN
+[perf] FAIL: NES.BIN (cycle 14) never appeared in serial (launch no-op) — new serial bytes [410] do not contain [LAUNCH] NES.BIN
+[perf] FAIL: XNIBBLER.BIN (cycle 15) never appeared in serial (launch no-op) — new serial bytes [390] do not contain [LAUNCH] XNIBBLER.BIN
+[perf] FAIL: XCRYPT.BIN (cycle 15) never appeared in serial (launch no-op) — new serial bytes [0] do not contain [LAUNCH] XCRYPT.BIN
+[perf] FAIL: NES.BIN (cycle 15) never appeared in serial (launch no-op) — new serial bytes [0] do not contain [LAUNCH] NES.BIN
+[perf] FAIL: XNIBBLER.BIN (cycle 16) never appeared in serial (launch no-op) — new serial bytes [0] do not contain [LAUNCH] XNIBBLER.BIN
+[perf] FAIL: XCRYPT.BIN (cycle 16) never appeared in serial (launch no-op) — new serial bytes [0] do not contain [LAUNCH] XCRYPT.BIN
+[perf] FAIL: NES.BIN (cycle 16) never appeared in serial (launch no-op) — new serial bytes [0] do not contain [LAUNCH] NES.BIN
+[perf] FAIL: XNIBBLER.BIN (cycle 17) never appeared in serial (launch no-op) — new serial bytes [0] do not contain [LAUNCH] XNIBBLER.BIN
+[perf] FAIL: XCRYPT.BIN (cycle 17) never appeared in serial (launch no-op) — new serial bytes [507] do not contain [LAUNCH] XCRYPT.BIN
+[perf] FAIL: NES.BIN (cycle 17) never appeared in serial (launch no-op) — new serial bytes [392] do not contain [LAUNCH] NES.BIN
+[perf] whole-run RSS: floor=335.57 MB peak=363.34 MB growth=27.77 MB (bound 64 MB) -> PASS
+[perf] summary: FAIL
+EXIT=1

@@ -1,0 +1,8 @@
+bundle: evidence/perf_cycle/20261021T034514Z/
+full-frame diff bbox: (1865, 1063, 1895, 1070)
+differing px in crop 0,0,1820,1010: 0
+differing px in clock corner 1820,0,1920,1080: 29
+differing px in taskbar 0,1010,1920,1080: 29
+/home/sarah/.hermes/cache/scratch/ppm-XNIBBLER.BIN-s5.png
+/home/sarah/.hermes/cache/scratch/ppm-XCRYPT.BIN-s5.png
+/home/sarah/.hermes/cache/scratch/ppm-NES.BIN-s5.png
