@@ -1,0 +1,2780 @@
+[fetch] tree present + anchors verified; re-syncing config overlay
+[fetch] OK: /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-289f3b84/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src ready (marker llvmorg-21.1.8)
+ld.lld -T linker_x64.ld -o hobbyos.elf obj/intel/boot.o obj/intel/setjmp.o obj/intel/abi_t2_test.o obj/intel/blk_cache.o obj/intel/blk_cache_press_test.o obj/intel/blk_cache_test.o obj/intel/dhcp.o obj/intel/elf_image.o obj/intel/elf_loader.o obj/intel/evdev.o obj/intel/evdev_test.o obj/intel/fat16.o obj/intel/fat16_test.o obj/intel/fb_ioctl.o obj/intel/fb_ioctl_test.o obj/intel/fb_mmap.o obj/intel/fb_mmap_test.o obj/intel/frame.o obj/intel/frame_test.o obj/intel/fs.o obj/intel/fs_test.o obj/intel/input_node.o obj/intel/input_node_test.o obj/intel/iommu_vtd.o obj/intel/ipc_proto.o obj/intel/linux_uname.o obj/intel/locks_test.o obj/intel/main.o obj/intel/math_test.o obj/intel/mmu_test.o obj/intel/net.o obj/intel/net_rdma.o obj/intel/net_rdma_test.o obj/intel/net_test.o obj/intel/nfs.o obj/intel/nfs_proto.o obj/intel/nfs_test.o obj/intel/pipe.o obj/intel/pipe_test.o obj/intel/process.o obj/intel/process_test.o obj/intel/program_loader.o obj/intel/program_loader_test.o obj/intel/test_fw_cfg.o obj/intel/test_smp.o obj/intel/time.o obj/intel/time_test.o obj/intel/timer_test.o obj/intel/trap_test.o obj/intel/unit_test.o obj/intel/unix.o obj/intel/unix_test.o obj/intel/vfs.o obj/intel/virtio_blk.o obj/intel/virtio_blk_test.o obj/intel/virtio_gpu.o obj/intel/virtio_gpu_test.o obj/intel/virtio_gpu_x64.o obj/intel/virtio_input.o obj/intel/virtio_input_test.o obj/intel/virtio_net.o obj/intel/virtio_net_test.o obj/intel/vm.o obj/intel/vm_test.o obj/intel/cpu.o obj/intel/fpu.o obj/intel/gic.o obj/intel/locks.o obj/intel/mmu.o obj/intel/rtc.o obj/intel/smp.o obj/intel/timer.o obj/intel/trap.o obj/intel/uart.o
+llvm-objcopy -I elf64-x86-64 -O elf32-i386 hobbyos.elf
+qemu-system-x86_64 -M q35 -smp 8 -m 12288M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56  -action shutdown=poweroff -display none -enable-kvm
+WARNING: Image format was not specified for '/home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd' and probing guessed raw.
+         Automatically detecting the format is dangerous for raw images, write operations on block 0 will be restricted.
+         Specify the 'raw' format explicitly to remove the restrictions.
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+BdsDxe: starting Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+[001;001H[001;001H[UART] lock @ 0x000000007557ebd8
+Booting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+VirtIO GPU: BGA
+VirtIO GPU successfully initialized.
+Original CCB: 0x0000000000000047
+Modified CCB: 0x0000000000000047
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1376256 total_mib=5376 reserved=0
+[KERNEL] Activating secondary cores via LAPIC IPIs...
+[KERNEL] smp_init: copying trampoline code...
+[KERNEL] smp_init: trampoline copied.
+[KERNEL] smp_init: Sending INIT IPI to core 1...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU [KERNEL] Core 1 power-on acknowledged.
+1
+[KERNEL] smp_init: Sending INIT IPI to core 2...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU [KERNEL] Core 22 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 
+3...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 3 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 4...
+start_scheduler called on CPU [KERNEL] smp_init: Waiting after INIT IPI...
+3
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 4 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 5...
+start_scheduler called on CPU [KERNEL] smp_init: Waiting after INIT IPI...
+4
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 5 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 6...
+start_scheduler called on CPU 5
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU [KERNEL] Core 6 power-on acknowledged.
+6[KERNEL] smp_init: Sending INIT IPI to core 
+7...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 7 power-on acknowledged.
+start_scheduler called on CPU 7
+[KERNEL] LAPIC timer rate: 62552 counts/ms, TSC rate: 2596291 ticks/ms (PIT-counter calibrated)
+Found NVMe controller on PCI bus!
+PCI Config Space of NVMe:
+0x0000000000101B36 0x0000000000100007 0x0000000001080202 0x0000000000000000 
+0x0000000081000004 0x0000000000000000 0x0000000000000000 0x0000000000000000 
+0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000011001AF4 
+0x0000000000000000 0x0000000000000040 0x0000000000000000 0x000000000000010B 
+NVMe BAR0 Phys: 0x0000000081000000 (Mapped to Virtual: 0x00000001FC000000)
+Resetting controller, waiting for CSTS.RDY = 0...
+Controller reset complete!
+Enabling controller... CC=0x0000000000460001 CSTS=0x0000000000000001
+Controller enabled successfully!
+Create IO CQ Status: 0x0000000000000000
+Create IO SQ Status: 0x0000000000000000
+NVMe driver initialized successfully!
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+[VIRTIO_NET] PCI Interrupt Line: 10 (Vector: 42)
+[VIRTIO_NET] MAC Address: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+[VIRTIO_NET] RX queue size: 256 rx_vq address: 0x00000000753F4000 PFN: 0x00000000000753F4
+[VIRTIO_NET] TX queue size: 256 tx_vq address: 0x00000000753F7000 PFN: 0x00000000000753F7
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Discover sent
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP initialization complete.
+[RDMA] Remote PCIe sharing is INACTIVE (no startup parameter).
+
+--- Parallel Program Loading ---
+Mode: TEST - Running automated tests...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=1
+Inside process_create: clearing memory at 0x0000000022000000
+Inside process_create: kmemset done.
+start_scheduler called on CPU [ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+[WAVE-TRY]   [ALIVE-SET] slot=1 pid=1 st=3 parent=-1 claimed_by=2 
+SUBPRB.BIN
+Loading program for scheduler (v2 AS): 0SUBPRB.BIN
+
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=-1
+/SUBPRB.BIN
+v2 loader: image mapped (lazy), bytes=64920 pages=16 first=in elap=1ms
+v2 loader: PID=2 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] SUBPRB.BIN rc>0
+[WAVE-TRY] SHTEST.BIN
+Loading program for scheduler (v2 AS): [ENTRY-KBUF] pid=SHTEST.BIN2 rdi=0x0000000
+0Inside process_create: acquiring lock...
+7Inside process_create: lock released. pid=3 block_idx=-1
+55EDBE0/SHTEST.BIN
+ vec=14
+[ENTRY-KBUF] pid=v2 loader: image mapped (lazy), bytes=65496 pages=16 first=in elap=1ms
+2 rdi=0x000v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+00[ARRIVED] SHTEST.BIN rc>0
+0[WAVE-TRY] SHTEST2.BIN
+Loading program for scheduler (v2 AS): SHTEST2.BIN
+0Inside process_create: acquiring lock...
+075Inside process_create: lock released. pid=[ENTRY-KBUF] pid=5EDBC8 vec=3 rdi=0[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+x140
+  [ALIVE-SET] slot=1 pid=1 st=3 parent=-1 claimed_by=2 
+[ENTRY-KBUF] pid=  [ALIVE-SET] slot=2 pid=2 st=3 parent=-1 claimed_by=1 SUBPRB.BIN
+2  [ALIVE-SET] slot=3 pid=3 st=3 parent=-1 claimed_by=0 SHTEST.BIN
+0 rdi=000000755FDBE0 vec=0x00000000755EDBC8144 block_idx=-1
+
+ vec=129
+[ENTRY-KBUF] pid=/SHTEST2.BIN
+[ENTRY-KBUF] pid=3 rdi=0x0000000075v2 loader: image mapped (lazy), bytes=62680 pages=16 first=in elap=1ms
+2v2 loader: PID=4 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+ rdi=[ARRIVED] SHTEST2.BIN rc>0
+05FDBC8x00000000755EDBE0 vec=[WAVE-TRY] SHTEST3.BIN
+Loading program for scheduler (v2 AS): SHTEST3.BIN
+1 vec=/SHTEST3.BIN
+32
+4
+[ENTRY-KBUF] pid=4 rdi=v2 loader: image mapped (lazy), bytes=62792 pages=16 first=in elap=2ms
+[ENTRY-KBUF] pid=3 rdi=0x000000100000E26F vec=14
+v2 loader: PID=5 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=2 rdi=0x00000000755EDBC8 vec=129
+0[ENTRY-KBUF] pid=3 rdi=0x00000000755CDBC8 vec=14
+[ARRIVED] [ENTRY-KBUF] pid=[ENTRY-KBUF] pid=3 rdi=0x00000000755CDBC8 vec=14
+x00000000755FDBE0 vec=14
+5[ENTRY-KBUF] pid= rdi=SHTEST3.BIN rc>0
+[WAVE-TRY] CONSOLE.BIN
+Loading program for scheduler (v2 AS): CONSOLE.BIN
+4 rdi=0x00000000755FDBC8/CONSOLE.BIN
+ vec=320x000
+00000755EDBE0v2 loader: image mapped (lazy), bytes=55288 pages=14 first=in elap=1ms
+ vec=[ENTRY-KBUF] pid=2v2 loader: PID=6 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+14
+[ARRIVED] CONSOLE.BIN rc>0
+[ENTRY-KBUF] pid=5 rdi=0x00000000755EDBC8 vec=1[WAVE-TRY] 29
+MEMTEST.BIN
+Loading program for scheduler (v2 AS): MEMTEST.BIN
+[ENTRY-KBUF] pid=6 rdi=0x00000000755EDBE0 rdi=0x00000000755FDBC8 vec=32
+[ENTRY-KBUF] pid=[KERNEL] pid=3 (SHTEST.BIN) memory fault VA=0x00000000755CDBC8 rax=0x0000001000000020 rdi=0x00000000755CDBC8 rsi=0xFFFFFFFFFFFFFFFF rdx=0x0000000000000000 usp=0x00000017FFFFFFF8 retaddr= ss=0x0000000000000023 ss+8=0x0000000000010206 ss-8=0x000000000000001B ss+16=0x00000017FFFFEF58 ss+24=0x0000000000000023 ss-16=0x0000000000000005 caller=0x000000100000004A PC=0x00000010000029F0 rw=r  in=PROT region=NONE cr3frame=0x0000000020C0C000 asroot=0x00004 rdi=0x000000100000DE03 vec=14
+[KERNEL] Process 3: SHTEST.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=4 rdi=0x00000000755ADBC8 vec=129
+/MEMTEST.BIN[ENTRY-KBUF] pid=5 rdi=0x0[ENTRY-KBUF] pid=4 rdi=0x00000000755ADBE0 vec=14
+ vec=1[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=4 rdi=0x00000000755ADBC8 vec=14
+4
+
+2 rdi=0x0000[ENTRY-KBUF] pid=6 rdi=0x00000000755EDBC8v2 loader: image mapped (lazy), bytes=55288 pages=14 first=in elap=0ms
+ vec=1290
+v2 loader: PID=7 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=7 rdi=0x00000000755EDBE0[ARRIVED] MEMTEST.BIN rc>0
+[WAVE-TRY] FILEIO.BIN
+ vec=14
+Loading program for scheduler (v2 AS): [ENTRY-KBUF] pid=7 rdi=0x000000100000C05F vec=14
+FILEIO.BIN0
+0/FILEIO.BIN
+
+0=007559DBE0 vec=14
+===v2 loader: image mapped (lazy), bytes=55560 pages=14 first=in elap=1ms
+=============v2 loader: PID=8 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+=============
+Hobby[ENTRY-KBUF] pid=000100000DD72 rdi=0x00000010755ABD98OS User Program - Memo vec=14
+ry Test
+==============================
+[ENTRY-KBUF] pid=2 rdi=0x000000007559DBC8Test [KERNEL] pid=4 (SHTEST2.BIN) memory fault VA=0x00000000755ADBC8 rax=0x0000001000000020 rdi=0x00000000755ADBC8 rsi=0xFFFFFFFFFFFFFFFF rdx=0x0000000000000000 usp=0x00000017FFFFEC80 retaddr= ss=0x0000000000000023 ss+8=0x0000000000010202 ss-8=0x000000000000001B ss+16=0x00000017FFFFEC78 ss+24=0x0000000000000023 ss-16=0x0000000000000005 caller=0x000000100000004B PC=0x00000010000021F0 rw=r  in=PROT region=NONE cr3frame=0x0000000020C18000 asroot=0x000[ARRIVED] FILEIO.BIN rc>0
+[WAVE-TRY] BLKTEST.BIN
+Loading program for scheduler (v2 AS): BLKTEST.BIN
+ vec=1: Writi[KERNEL] Process 4: SHTEST2.BIN exited unexpectedly or gracefully.
+/BLKTEST.BIN
+ng [ENTRY-KBUF] pid=6 rdi=0x000000100000BEDE vec=14
+14v2 loader: image mapped (lazy), bytes=75592 pages=19 first=in elap=1ms
+to user space (should work):
+v2 loader: PID=9 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+✓ Write to user space successful
+[ARRIVED] BLKTEST.BIN[ENTRY-KBUF] pid=7 rdi=0x000000100000BEE0 rc>0
+[WAVE-TRY] FATBIG_T.BIN
+ vec=14
+
+Loading program for scheduler (v2 AS): FATBIG_T.BIN
+3 vec=14
+[KERNEL] pid=2 (SUBPRB.BIN) memory fault VA=0x000000007559DBC8 rax=0x000000100000E1B0 rdi=0x000000007559DBC8 rsi=0x000000100000E1B0 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x00000010000020D8 rw=w  in=PROT region=NONE cr3frame=0x0000000020C03000 asroot=0x0000000020C03000 sys=-1 ret=0x0000000000000000 -> killed
+/FATBIG_T.BIN
+[ENTRY-KBUF] pid=Test 2:[KERNEL] Process 2: SUBPRB.BIN exited unexpectedly or gracefully.
+v2 loader: image mapped (lazy), bytes=47608 pages=12 first=in elap=1ms
+ Attempting to write to ker[ENTRY-KBUF] pid=8 rdi=0x000000007559DBE0 vec=14nel space (sho
+v2 loader: PID=10 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+5 rdi=0x00000000755FDBC8 vec=32
+[ENTRY-KBUF] pid=8uld fail):
+[ARRIVED] [ENTRY-KBUF] pid=7 rdi=0x00000000755EDBC8 vec=129
+[ENTRY-KBUF] pid=9 rdi=0[ENTRY-KBUF] pid=7 rdi=x0FATBIG_T.BIN rc>0
+[WAVE-TRY] LFN_T.BIN
+x000000000 rdi=0x000000100000B0000000755EDBE0 vec=14
+Loading program for scheduler (v2 AS): LFN_T.BIN
+F13 vec=14
+[KERNEL] pid=7 (MEMTEST.BIN) memory fault VA=0x0000000040000000 rax=0x000000000000003B rdi=0x00000000755EDBE0 rsi=0x000000100000BEE0 rdx=0x000000000000003B usp=0x00000017FFFFFFA0 PC=0x0000001000000051 rw=w  in=PROT region=NONE cr3frame=0x0000000020C3E000 asroot=0x0000000020C3E000 sys=7 ret=0x000000000000003B -> killed
+[KERNEL] Process 7: MEMTEST.BIN exited unexpectedly or gracefully.
+/LFN_T.BIN
+755[ENTRY-KBUF] pid=8 rdi=0x000000007559DBC8 vec=FDBE0 vec=14
+1v2 loader: image mapped (lazy), bytes=57992 pages=15 first=in elap=1ms
+[ENTRY-KBUF] pid=9 rdi=0x00000000755FDBC8 vec=29
+32
+[ENTRY-KBUF] pid=11
+[FILEIO TEST] Starting File I/O Tests...
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=8 rdi=0x000000100000BFC4 vec=14
+ rdi=0x000000007559DBE0 vec=14
+[ENTRY-KBUF] pid=
+10 rdi=0x00000000755CDBE0 vec=14
+==============[ENTRY-KBUF] pid=10 rdi=0x=[ENTRY-KBUF] pid=11 rdi=0x000000007559DBC8 vec=129
+v2 loader: PID=11 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=8 rdi=0x00000000755EDBC8 vec=128
+[ARRIVED] LFN_T.BIN rc>0
+[WAVE-TRY] HEAPTEST.BIN
+Loading program for scheduler (v2 AS): HEAPTEST.BIN
+[ENTRY-KBUF] pid=11[ENTRY-KBUF] pid=8 rdi=0x00000000755EDBC8 vec=14
+/HEAPTEST.BIN
+ rdi=9 rdi=[ENTRY-KBUF] pid=8v2 loader: image mapped (lazy), bytes=57768 pages=15 first=in elap=1ms
+ rdi=0x000000x00v2 loader: PID=12 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+0x0000001000011187 vec=14
+000000100000CB83 vec=0755EDBC8[ENTRY-KBUF] pid= vec=9 rdi=0x014
+014
+000000755FDBC8 vec=32
+[ARRIVED] [ENTRY-KBUF] pid=8 rdi=0x00000000755EDBC8 vec=129
+[ENTRY-KBUF] pid=9[ENTRY-KBUF] pid=8 rdi=0x000000100000C670 vec=128
+[ENTRY-KBUF] pid=[FILEIO TEST] ERROR: Could not open TEST.TXT
+[ENTRY-KBUF] pid=11 rdi=[KERNEL] Process 8: FILEIO.BIN exited unexpectedly or gracefully.
+HEAPTEST.BIN rc>0
+[WAVE-TRY] SPAWN.BIN
+Loading program for scheduler (v2 AS): SPAWN.BIN
+ rdi=0x000000007558DBE0 vec=14
+/SPAWN.BIN
+12 rdi=0x00000000755FDBE0 vec=14
+0[KERNEL] pid=9 (BLKTEST.BIN) memory fault VA=0x000000007558DBE0 rax=0x0000000000000000 rdi=0x000000007558DBE0 rsi=0xFFFFFFFFFFFFFFFF rdx=0x0000000000000000 usp=0x00000017FFFFFDD8 retaddr= ss=0x0000000000000023 ss+8=0x0000000000010202 ss-8=0x000000000000001B ss+16=0x00000017FFFFFDD8 ss+24=0x0000000000000023 ss-16=0x0000000000000005 caller=0x000000100000002B PC=0x0000001000005550 rw=r  in=PROT region=NONE cr3frame=0x0000000020C52000 asroot=0x000v2 loader: image mapped (lazy), bytes=55432 pages=14 first=in elap=1ms
+x000000007559DBC8 vec=[ENTRY-KBUF] pid=12 rdi=0x00000000755FDBC8 vec=32
+[KERNEL] Process 9: BLKTEST.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=00000000755CDBC8 vec=129
+=[ENTRY-KBUF] pid===[ENTRY-KBUF] pid=5 rdi=0x00000000755BDBE0 vec=14
+14
+10== rdi===========
+Hello from isolated EL0 Space!
+=============0x00000000755CDBE0 vec=129
+==[ENTRY-KBUF] pid=5 rdi=0x00000000755BDBC8 vec=129
+v2 loader: PID=13 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=12 rdi=0x000000100000C932 vec=14
+13[ENTRY-KBUF] pid=5 rdi=0x00000000755BDBE0 vec=14
+[ENTRY-KBUF] pid=10 rdi=0x000000100000A6DA vec================
+14
+[ENTRY-KBUF] pid=6 rdi=0x00000000755ADBC8 vec=129
+[ENTRY-KBUF] pid=10 rdi=0x00000000755CDBC8 vec=14
+[ENTRY-KBUF] pid=6 rdi=0x000000100000C1C3 vec=14
+[ENTRY-KBUF] pid=10 rdi=0x00000000755CDBC8 vec=14
+C[KERNEL] pid=10 (FATBIG_T.BIN) memory fault VA=0x00000000755CDBC8 rax=0x0000000000000000 rdi=0x00000000755CDBC8 rsi=0xFFFFFFFFFFFFFFFF rdx=0x0000000000000000 usp=0x00000017FFFFFFF8 retaddr= ss=0x0000000000000023 ss+8=0x0000000000010206 ss-8=0x000000000000001B ss+16=0x00000017FFFFEF48 ss+24=0x0000000000000023 ss-16=0x0000000000000005 caller=0x000000100000002B PC=0x0000001000001230 rw=r  in=PROT region=NONE cr3frame=0x0000000020C5D000 asroot=0x0omputation [KERNEL] Process 10: FATBIG_T.BIN exited unexpectedly or gracefully.
+finished. Exiting.
+[KERNEL] pid=5 (SHTEST3.BIN) memory fault VA=0x00000000755BDBE0 rax=0x0000001000000020 rdi=0x00000000755BDBE0 rsi=0xFFFFFFFFFFFFFFFF rdx=0x0000000000000000 usp=0x00000017FFFFEC78 retaddr= ss=0x0000000000000023 ss+8=0x0000000000010202 ss-8=0x000000000000001B ss+16=0x00000017FFFFEC78 ss+24=0x0000000000000023 ss-16=0x0000000000000005 caller=0x000000100000004A PC=0x00000010000022E0 rw=r  in=PROT region=NONE cr3frame=0x0000000020C22000 asroot=0x000[KERNEL] Process 6: CONSOLE.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 5: SHTEST3.BIN exited unexpectedly or gracefully.
+[ARRIVED] SPAWN.BIN rc>0
+
+[WAVE-TRY] FORKTEST.BIN
+[KERNEL] pid=11 (LFN_T.BIN) memory fault VA=0x000000007559DBC8 rax=0x0000000000000000 rdi=0x000000007559DBC8 rsi=0xFFFFFFFFFFFFFFFF rdx=0x0000000000000000 usp=0x00000017FFFFFFF8 retaddr= ss=0x0000000000000023 ss+8=0x0000000000010206 ss-8=0x000000000000001B ss+16=0x00000017FFFFFF58 ss+24=0x0000000000000023 ss-16=0x0000000000000005 caller=0x0000001000000028 PC=0x0000001000003490 rw=r  in=PROT region=NONE cr3frame=0x0000000020C64000 asroot=0x0000-[KERNEL] Process 11: LFN_T.BIN exited unexpectedly or gracefully.
+-Loading program for scheduler (v2 AS): - rdi=FORKTEST.BIN
+0x/FORKTEST.BIN 
+H0e0a000000p7 5T5FeDsv2 loader: image mapped (lazy), bytes=56440 pages=14 first=in elap=1ms
+BE0v2 loader: PID=14 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+ vec=t14
+ S[ARRIVED] tFORKTEST.BIN rc>0
+ar[WAVE-TRY] SMPTEST.BIN
+Loading program for scheduler (v2 AS): SMPTEST.BIN
+t[ENTRY-KBUF] pid=e1d -/SMPTEST.BIN
+-3- rdi=
+0xA0l000000075v2 loader: image mapped (lazy), bytes=55432 pages=14 first=in elap=0ms
+5FDBC8lv2 loader: PID=15 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+ vec=o[ARRIVED] SMPTEST.BIN32
+c rc>0
+[ENTRY-KBUF] pid=15 rdi=0x00000000755BDBE0 vec=14
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=15 rdi=0x000000100000C3A8 vec=14
+14 rdi=0x0[ENTRY-KBUF] pid=13a0000000755FDBE0 vec=14
+[WAVE-TRY] PIPETEST.BIN
+Loading program for scheduler (v2 AS): PIPETEST.BIN
+--- HobbyOS SMP Verification ---
+ting 1MB...
+[ENTRY-KBUF] pid=14 rdi=0x00000000755FDBC8 vec=32
+[ENTRY-KBUF] pid=12 rdi=0x00000000755EDBC8 vec=129
+/PIPETEST.BIN[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=15 rdi=0x000000100000BFBE vec=14
+[ENTRY-KBUF] pid=14 rdi=0x000012 rdi=0x00000000755EDBE0 vec=129
+ rdi=0x0
+00000010000100000C2[ENTRY-KBUF] pid=v2 loader: image mapped (lazy), bytes=55560 pages=14 first=in elap=0ms
+00C127 vec=[ENTRY-KBUF] pid=15 rdi=0x00000000755BDBC8 vec=129
+v2 loader: PID=16 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+12 rdi=0x00000000755EDBC8 vec=14
+95[ARRIVED] PIPETEST.BIN rc>0
+[WAVE-TRY] GRAPHICS.BIN
+Loading program for scheduler (v2 AS): GRAPHICS.BIN
+14
+[ENTRY-KBUF] pid= vec=14
+/GRAPHICS.BIN
+12 rdi=0x00000000755EDBC8 vec=14
+v2 loader: image mapped (lazy), bytes=58576 pages=15 first=in elap=0ms
+[ENTRY-KBUF] pid=13 rdi=0x000000007559DBC8[ENTRY-KBUF] pid= vec=129
+v2 loader: PID=17 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+FSpawning 8 worker processes to saturate 4 cores...
+ailed to allocate 1MB!
+14 rdi=0x00000000755FDBC8 vec=32
+[ENTRY-KBUF] pid=Allocating 50MB...
+[ENTRY-KBUF] pid=17[ENTRY-KBUF] pid=12 rdi=0x00000000755EDBC8 vec=129
+[ARRIVED]  rdi=0x00000000755FDBE0 vec=14
+[ENTRY-KBUF] pid=12 rdi=0x00000000755EDBC8 vec=14
+GRAPHICS.BIN rc>0
+[WAVE-TRY] WSRF_T.BIN
+Loading program for scheduler (v2 AS): WSRF_T.BIN
+[KERNEL] pid=12 (HEAPTEST.BIN) memory fault VA=0x00000010B55EDBE8 rax=0x0000001040000000 rdi=0x00000000755EDBC8 rsi=0x000000003CDFFFC0 rdx=0x48424F424C4B4D47 usp=0x00000017FFFFFF80 PC=0x0000001000009B49 rw=w  in=HOLE region=NONE cr3frame=0x0000000020C75000 asroot=0x0000000020C75000 sys=7 ret=0x0000000000000013 -> killed
+/WSRF_T.BIN
+1[KERNEL] Process 12: HEAPTEST.BIN exited unexpectedly or gracefully.
+v2 loader: image mapped (lazy), bytes=376080 pages=92 first=in elap=1ms
+[ENTRY-KBUF] pid=17 rdi=0x00000000755FDBC8 vec=32
+v2 loader: PID=18 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+5[ENTRY-KBUF] pid=18 rdi=0x00000000755FDBE0[ENTRY-KBUF] pid=17 rdi=0x000000100000CD18 vec=14
+[ARRIVED]  rdi=0x000000007559DBC8 vec=14Graphics TesWSRF_T.BIN rc>0
+[WAVE-TRY] NETTEST.BIN
+Loading program for scheduler (v2 AS): NETTEST.BIN
+t
+ vec=14
+/NETTEST.BIN
+[ENTRY-KBUF] pid=15 Program Started
+ rdi=[ENTRY-KBUF] pid=17 rdi=0x00000000755EDBC8 vec=14
+[ENTRY-KBUF] pid=18[ENTRY-KBUF] pid=v2 loader: image mapped (lazy), bytes=55432 pages=14 first=in elap=1ms
+17 rdi=0x00000000755EDBC8 vec=14
+0v2 loader: PID=19 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+ rdi=0x00000000755FDBC8 vec=32[ENTRY-KBUF] pid=17 rdi=0x00000000755EDBC8 vec=14
+[ARRIVED] 
+S==========[ENTRY-KBUF] pid=16 rdi=0x00000000755BDBE0 vec=14
+p====================
+HobbyOS Fork Test
+===================[ENTRY-KBUF] pid=16 rdi=0x00000000755BDBC8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000755EDBC8 vec=14
+NETTEST.BIN rc>0
+[WAVE-TRY] TIMEOUT.BIN
+Loading program for scheduler (v2 AS): TIMEOUT.BIN
+[ENTRY-KBUF] pid=17 rdi=0x00000000755EDBC8 vec=14
+/TIMEOUT.BINx00
+
+0000007559DBC8[ENTRY-KBUF] pid=Graph vec=129
+ics initialized. Drawing...
+v2 loader: image mapped (lazy), bytes=55096 pages=14 first=in elap=1ms
+[ENTRY-KBUF] pid=16 rdi=0x000000100000C192 vec=[ENTRY-KBUF] pid=15 rdi=0x000000007559DBE0 vec=129
+18 rdi=0x000000100000D73E vec=14
+[ENTRY-KBUF] pid=20[ENTRY-KBUF] pid=14
+[ENTRY-KBUF] pid=18 rdi=0x000000007558DBC8 vec=129
+ rdi=0x000000007[ENTRY-KBUF] pid=16 rdi=0x00000000755DDBC8 vec=129
+v2 loader: PID=20 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+17 rdi=0x00000000755EDBC8 vec=129
+[ENTRY-KBUF] pid=18 rdi=0x00000000755DDBE0 vec=14
+[ARRIVED] [KERNEL] pid=18 (WSRF_T.BIN) memory fault VA=0x00000000755DDBE0 rax=0x0000000000000000 rdi=0x00000000755DDBE0 rsi=0x0000000000000000 rdx=0x0000000000000000 usp=0x00000017FFFFFF68 retaddr= ss=0x0000000000000023 ss+8=0x0000000000010202 ss-8=0x000000000000001B ss+16=0x00000017FFFFFF30 ss+24=0x0000000000000023 ss-16=0x0000000000000005 caller=0x0000000000000000 PC=0x0000001000003360 rw=r  in=PROT region=NONE cr3frame=0x0000000020CCC000 asroot=0x000[ENTRY-KBUF] pid=15 rdi=0x000000007558DBC8 vec=129
+[ENTRY-KBUF] pid=16 rdi=0x00000000755EDBE0 vec=129
+[KERNEL] Process 18: WSRF_T.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=21 rdi=0x00000000755EDBE0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000FF000080 vec=14
+559DBE0 vec=129Pip[ENTRY-KBUF] pid=15 rdi=0x00000000755DDBE0 vec=129
+e Test Starting...
+[ENTRY-KBUF] pid=21 rdi=0x00000000755DDBE0 vec=14
+
+[ENTRY-KBUF] pid=16 rdi=0x00000017FFFFFFD0 vec=14
+Gr[ENTRY-KBUF] pid=15 rdi=0x000000007559DBE0aphics Validation: SUCCESS (Pixel matches expected color)
+Process heart-beat from CPU:  vec=129
+Validating new graphics primitives...
+2[ENTRY-KBUF] pid=16 rdi=0x00000000755EDBC8 vec=128
+[ENTRY-KBUF] pid=20TIMEOUT.BIN[ENTRY-KBUF] pid= rc>0
+[ENTRY-KBUF] pid=17 rdi=0x00000000754A053D vec=129
+[ENTRY-KBUF] pid=19 rdi=0x00000000755BDBE0 vec=14
+ rdi=0x000000007559DBE0[ENTRY-KBUF] pid=15 rdi=0x000000007558DBE0 vec=129
+[WAVE-TRY] 
+16 rdi=0x00000 vec=14
+STRESS.BIN[ENTRY-KBUF] pid=19 rdi=0x00000000755BDBC8 vec=129
+[ENTRY-KBUF] pid=21 rdi=0x
+[ENTRY-KBUF] pid=20 rdi=0000000Loading program for scheduler (v2 AS): 000755DDBC8 vec=129
+STRESS.BIN0x000000007559DBC8 vec=[ENTRY-KBUF] pid=19 rdi=0x0000000
+[ENTRY-KBUF] pid=129
+0755DDBE0 vec=129
+[ENTRY-KBUF] pid=21 rdi=0x000000007559DBE0 vec=129
+/STRESS.BIN[ENTRY-KBUF] pid=19 rdi=0x000000100000C08C vec=14
+[ENTRY-KBUF] pid=0
+20 rdi=705[ENTRY-KBUF] pid=5xE19 rdi=0x000000007559DBC8 vec=129
+D[ENTRY-KBUF] pid=21 rdi=0x000000007559DBE0 vec=129
+00000000755DDBE0 vec=a=wn T==est: Sta===rting...
+=====[ENTRY-KBUF] pid=13 rdi=0x00000000755CDBC8 vec=129
+
+User net_testv2 loader: image mapped (lazy), bytes=62088 pages=16 first=in elap=1ms
+1B starting...
+v2 loader: PID=22 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=19 rdi=0x000000007559DBC8 vec=129
+29
+[ENTRY-KBUF] pid=22 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=P14 rdi=0x0000ro15 rdi=0x00000000755BDBE0 vec=129
+C[ENTRY-KBUF] pid=13 rdi=0x00000000755DDBE0 vec=129
+[ARRIVED] C8onnect0000755ce[ENTRY-KBUF] pid=20 rdi=0x00000000755BDBE0 vec=129
+ vec=STRESS.BINing to 1.1.11.11:80...
+7 rc>0
+[ENTRY-KBUF] pid=19 rdi=0x000000007559DBC8 rdi= vec=129
+4[ENTRY-KBUF] pid=20 rdi=0x000000007559DBE0 vec=10[WAVE-TRY] 29
+xMONITORT.BIN[ENTRY-KBUF] pid=13 rdi=0x000000007559DBE0 vec=129
+
+0[ENTRY-KBUF] pid=22 rdi=0x00000000755BDBE0 vec=129
+Ass heart-beat from 
+[ENTRY-KBUF] pid=Loading program for scheduler (v2 AS): [ENTRY-KBUF] pid=19 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=15 rdi=0x00000000755DDBC8 vec=129
+[ENTRY-KBUF] pid=20 rdi=0x000000007559DBE0[ENTRY-KBUF] pid=19 rdi=0x00000000755DDBC8 vec=128
+000000075563138[ARP] routing off-subnet: target=0x00000000755DDBC8 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=0x000000000202000A
+ vec=MONITORT.BIN129
+1[ENTRY-KBUF] pid=2
+2 rdi=0x6 rdi=0x000/MONITORT.BIN000000007558DBE0 vec=129
+
+[ENTRY-KBUF] pid=23 rdi=0x000000007558DBE0 vec=v2 loader: image mapped (lazy), bytes=56840 pages=14 first=in elap=1ms
+00000755EDBC8v2 loader: PID=24 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+129
+[ARRIVED] [ENTRY-KBUF] pid=24 rdi=0x000000007558DBE0 vec=129
+ vec=129
+MONITORT.BIN[ENTRY-KBUF] pid=15 rdi=0x000000007558DBE0 vec=129 vec=129
+ rc>0
+
+[WAVE-TRY] [ENTRY-KBUF] pid=17NFSTEST.BIN rdi=0x00000000755EDBE0 vec=129
+
+[ENTRY-KBUF] pid=16 rdi=0x00000000755[ENTRY-KBUF] pid=22 rdi=0x000000007559DBE0 vec=129
+Loading program for scheduler (v2 AS): [ENTRY-KBUF] pid=20 rdi=0x00000000755EDBE0 vec=1298DBENFSTEST.BIN0
+ vec=
+129/NFSTEST.BINCDBC8 vec=129
+PU: [ENTRY-KBUF] pid=[ENTRY-KBUF] pid=21 rdi=0x00000000755CDBC8 vec=129
+15 rdi=0x00000000755ADBE0 vec=129
+[ENTRY-KBUF] pid=24 rdi=0x00000000755CDBE0 vec=14
+
+
+[ENTRY-KBUF] pid=2[ENTRY-KBUF] pid=22 rdi=0x00000000755EDBE0 vec=129
+[ENTRY-KBUF] pid=v2 loader: image mapped (lazy), bytes=90360 pages=23 first=in elap=2ms
+0 rdi=0x0v2 loader: PID=25 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+23 rdi=0x0000000075000[ARRIVED] 0[ENTRY-KBUF] pid=14 rdi=0x00000000755EDBE0NFSTEST.BIN[ENTRY-KBUF] pid=13 rdi=0x00000000755BDBE0 vec=129
+ rc>0
+ vec=129
+000755[WAVE-TRY] 5[ENTRY-KBUF] pid=16ERRTEST.BIN rdi=0x00000000755EDBE0 vec=129
+
+8DBELoading program for scheduler (v2 AS): [ENTRY-KBUF] pid=[ENTRY-KBUF] pid=24 rdi=0x17 rdi=0x00000000000000100000C635 vec=14
+754D9B6D vec=129
+0 vec=ERRTEST.BIN129
+
+[ENTRY-KBUF] pid=/ERRTEST.BIN
+25 rdi=0x000000007558DBE09DBE0 vec=129
+v2 loader: image mapped (lazy), bytes=57224 pages=14 first=in elap=1ms
+Spawn Test: Spawning CONSOLE.BIN...
+v2 loader: PID=26 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=13 rdi=0x000000100000C341 vec=[ARRIVED] ERRTEST.BIN rc>0
+14
+ vec=1[ENTRY-KBUF] pid=21 rdi=0x00000000755EDBE0 vec=129
+[WAVE-TRY] HELLO.BIN
+[ENTRY-KBUF] pid=13 rdi=0x000000007558DB29
+[ENTRY-KBUF] pid=15 rdi=0x00000000755BDBE0 vec=129
+C8[ENTRY-KBUF] pid=Loading program for scheduler (v2 AS):  vec=129
+HELLO.BIN
+[ENTRY-KBUF] pid=/HELLO.BIN
+215 rdi=0x4 rdi=0x0[ENTRY-KBUF] pid=26 rdi=0x000000007559DBE0 vec=129
+00v2 loader: image mapped (lazy), bytes=45976 pages=12 first=in elap=1ms
+000007558DBE0 vec=129
+v2 loader: PID=27 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+00000000755EDBE0 vec=129
+[ARRIVED] HELLO.BIN rc>0
+[WAVE-TRY] CAT.BIN
+Loading program for scheduler (v2 AS): CAT.BIN
+[ENTRY-KBUF] pid=/CAT.BIN
+[ENTRY-KBUF] pid=26 rdi=0x00000000755EDBE0 vec=129v2 loader: image mapped (lazy), bytes=55416 pages=14 first=in elap=1ms
+15 rdi=0x000v2 loader: PID=28 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+
+[ARRIVED] CAT.BIN rc>0
+[ENTRY-KBUF] pid=27 rdi=0x00000000[WAVE-TRY] LS.BIN
+Loading program for scheduler (v2 AS): 0755EDBE0 vec=129
+LS.BIN
+[ENTRY-KBUF] pid=13 rdi=0x000000007559DBE0 vec=129[ENTRY-KBUF] pid=28/LS.BIN
+00 rdi=0x000000075v2 loader: image mapped (lazy), bytes=55256 pages=14 first=in elap=2ms
+000755EDBE0 vec=129
+58DBE0 vec=129[ENTRY-KBUF] pid=29
+ rdi=0x00000000755EDBE0 vec=
+v2 loader: PID=29 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=[ARRIVED] LS.BIN rc>0
+[WAVE-TRY] SH.BIN
+Loading program for scheduler (v2 AS): SH.BIN
+17 rdi=0x0/SH.BIN
+0[ENTRY-KBUF] pid=0014010007v2 loader: image mapped (lazy), bytes=223368 pages=55 first=in elap=1ms
+
+v2 loader: PID=30 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=29558DBE0 vec= rdi=0x00000000755EDBC8129
+[ARRIVED] SH.BIN rc>0
+[ENTRY-KBUF] pid=4 rdi=0x000000007559DBE0 vec=129
+20 rdi=0x00000000755[WAVE-TRY] 8[ENTRY-KBUF] pid=LKSTEST.BIN
+Loading program for scheduler (v2 AS): LKSTEST.BIN
+DBE0 vec=129 vec=129
+15 rdi=0x000000007559DBE0 vec=129
+
+/LKSTEST.BIN
+[ENTRY-KBUF] pid=16 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=v2 loader: image mapped (lazy), bytes=106328 pages=26 first=in elap=1ms
+1[ENTRY-KBUF] pid=30 rdi=0x00000000755EDBE0[ENTRY-KBUF] pid=v2 loader: PID=31 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+21 rdi=0x00[ARRIVED] 0000007558DBE0 vec=LKSTEST.BIN rc>0
+[WAVE-TRY] HEDTEST.BIN
+Loading program for scheduler (v2 AS): HEDTEST.BIN
+ vec=129
+/HEDTEST.BIN
+129
+[ENTRY-KBUF] pid=31 rdi=0x00000000755EDBE0 vec=129
+[ENTRY-KBUF] pid=23 rdi=0x000000007558DBE0 vec=v2 loader: image mapped (lazy), bytes=59864 pages=15 first=in elap=1ms
+129
+v2 loader: PID=32 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=25 rdi=0x000000007558DBE0 vec=129
+[ARRIVED] HEDTEST.BIN rc>0
+[WAVE-TRY] TAILTEST.BIN
+Loading program for scheduler (v2 AS): TAILTEST.BIN[ENTRY-KBUF] pid=26 rdi=0x000000007558DBE0 vec=14
+
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=20 rdi=0x00000000755BDBE0 vec=129
+26 rdi=0x000000007558DBC8 vec=129
+7 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=27 rdi=0x000000007558DBE0 vec=14
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=27 rdi=0x000000007558DBC8 vec=14
+13 rdi=0x000/TAILTEST.BIN[ENTRY-KBUF] pid=27 rdi=0x0000001075597[ENTRY-KBUF] pid=20428 vec=14
+
+[ENTRY-KBUF] pid=2 rdi=0x00000000v2 loader: image mapped (lazy), bytes=59880 pages=15 first=in elap=1ms
+00000755EDBE0 vec=1287 rdi=0x000000007558DBC8 vec=129
+v2 loader: PID=33 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+
+[ENTRY-KBUF] pid=28 rdi=0x000000007558DBE0 vec=14
+[ARRIVED] TAILTEST.BIN rc>0
+[ENTRY-KBUF] pid=13 rdi=0x00000000755EDBC8[ENTRY-KBUF] pid= vec=28 rdi=0x000000007558DBC8 vec=129
+129
+7559DBE0 vec=129
+[WAVE-TRY] [ENTRY-KBUF] pid=29 rdi=0x00000017FFFFFE10 vec=14
+[FO[ENTRY-KBUF] pid=23 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=29 rdi=[ENTRY-KBUF] pid=25 rdi=0x000000007559DBE0 vec=129
+0x000000007558DBC8 vec=129
+[ENTRY-KBUF] pid=RK TEST] Calling fork()...
+PROCTEST.BIN[ENTRY-KBUF] pid=14 rdi=0x00000000755EDBC8 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=26 rdi=0x000000007559DBE0 vec=14
+3
+015 rdi=0x00000000755EDBE0 vec=129
+ rdi=[ENTRY-KBUF] pid=16 rdi=0x000000100000C670 vec=128
+0x000000007558DBE0 vec=1After pipe call
+4
+Loading program for scheduler (v2 AS): [ENTRY-KBUF] pid=[ENTRY-KBUF] pid=16 rdi=0x00000000755EDBC8 vec=14
+30 rdi=0x0PROCTEST.BIN
+[ENTRY-KBUF] pid=26 rdi=0x000000007559DBC8 vec=129
+/PROCTEST.BIN
+000000075[ENTRY-KBUF] pid=58DB[ENTRY-KBUF] pid=16 rdi=0x00000000755EDBC8 vec=129
+v2 loader: image mapped (lazy), bytes=75896 pages=19 first=in elap=1ms
+[ENTRY-KBUF] pid=17C82 rdi=0x00000000755EDBE0 vec=129 vec=1
+29
+[ENTRY-KBUF] pid=20[ENTRY-KBUF] pid=31 rdi=v2 loader: PID=34 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+ rdi=0x000000100000BE68 vec=14
+0x07 rdi=000x[ARRIVED] PROCTEST.BIN rc>0
+[WAVE-TRY] WCTEST.BIN
+Loading program for scheduler (v2 AS): WCTEST.BIN
+[ENTRY-KBUF] pid=21 rdi=0x00000000755BDBE0 vec=129
+0[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=23 rdi=0x00000000755BDBE0 vec=129
+/WCTEST.BIN2000007558DBE000000007559DBE0 vec=129
+0 rdi=0x00000000755EDBC8 vec=129
+ vec=129[ENTRY-KBUF] pid=32 rdi=0x000000007558DBE0 vec=129
+
+
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=21 rdi=0x00000000755EDBE0 vec=12933 rdi=0x000000007558DBE0 vec=
+v2 loader: image mapped (lazy), bytes=60024 pages=15 first=in elap=1ms
+14
+[ENTRY-KBUF] pid=23[ENTRY-KBUF] pid= rdi=0x00000000755EDBE0 vec=14
+33 rdi=0x000000007558DBC8v2 loader: PID=35 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=23 vec=129[ARRIVED] WCTEST.BIN rc>0
+[WAVE-TRY] REGTEST.BIN
+Loading program for scheduler (v2 AS): REGTEST.BIN
+ rdi=0x00000000755EDBC8
+/REGTEST.BIN
+[ENTRY-KBUF] pid=28 rdi=0x000000007559DBE0[ENTRY-KBUF] pid= vec=129
+ vec=[ENTRY-KBUF] pid=2634 rdi= rdi=0x00000000755EDBE0 vec=1290x000000007558DBE0v2 loader: image mapped (lazy), bytes=141096 pages=35 first=in elap=0ms
+ vec=[ENTRY-KBUF] pid=24 rdi=0x00000000755CDBC8[ENTRY-KBUF] pid= vec=1[ENTRY-KBUF] pid=25 rdi=0x00000000755BDBE0 vec=14
+29
+22 rdi=0x00000000755ADBE0 vec=129
+[ENTRY-KBUF] pid=27 rdi=0x00000000755CDBE0 vec=129
+[ENTRY-KBUF] pid=23 rdi=0x00000000755ADBE0 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=25 rdi=0x00000000755BDBC8 vec=129
+v2 loader: PID=36 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+129[ARRIVED] REGTEST.BIN
+
+ rc>0
+[WAVE-TRY] SEDTEST.BIN
+Loading program for scheduler (v2 AS): SEDTEST.BIN
+129
+/SEDTEST.BIN
+[ENTRY-KBUF] pid=35 rdi=0x000000007558DBE0 vec=[ENTRY-KBUF] pid=30 rdi=0x00000000755EDBE0 vec=129
+129
+[ENTRY-KBUF] pid=32 rdi=0x00000000755EDBE0 vec=14
+v2 loader: image mapped (lazy), bytes=69192 pages=17 first=in elap=1ms
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=32 rdi=0x00000000755EDBC83 vec=146 rdi=
+0x000000007558DBE0 vec=14
+[ENTRY-KBUF] pid=31 rdi=0x000000007559DBE0 vec=129[ENTRY-KBUF] pid=36v2 loader: PID=37 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+ rdi=0x000000007558DBC8 vec=129
+[ENTRY-KBUF] pid=32 rdi=0x00000000755EDBC8 vec=129
+[ENTRY-KBUF] pid=37[ENTRY-KBUF] pid=33 rdi=0x00000000755EDBE0 vec=129
+
+ rdi=0x000000007558DBE0 vec=129[ARRIVED] SEDTEST.BIN rc>0
+[ENTRY-KBUF] pid=
+34 rdi=[ENTRY-KBUF] pid=27 rdi=0x00000000755BDBE0 vec=14
+[WAVE-TRY] [ENTRY-KBUF] pid=0x00000000755EDBE01 vec=4 rdi=0x000000007558DBE0 vec=14
+GREPTEST.BIN
+14Loading program for scheduler (v2 AS): 
+GREPTEST.BIN
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=34 rdi=0x00000000755EDBC8 vec=129
+/GREPTEST.BIN1[ENTRY-KBUF] pid=35 rdi=0x00000000755EDBE0 vec=144
+ rdi=0x000000007558DBC8 vec=129
+[ENTRY-KBUF] pid=
+[ENTRY-KBUF] pid=32 rdi=0x000000007559DBE0 vec=12935[ENTRY-KBUF] pid= rdi=0x00000000755EDBC8 vec=15
+ rdi=0x000000007558DBE0 vec=129
+1v2 loader: image mapped (lazy), bytes=69128 pages=17 first=in elap=1ms
+29
+v2 loader: PID=38 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=36 rdi=0x00000000755EDBE0 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=3733 rdi=0x000000007559DBE0 vec=129 rdi=0x00000000755EDBE0[ARRIVED]  vec=14
+
+[ENTRY-KBUF] pid=3GREPTEST.BIN rc>0
+[WAVE-TRY] CUTTEST.BIN
+Loading program for scheduler (v2 AS): CUTTEST.BIN
+[ENTRY-KBUF] pid=34 rdi=0x000000007559DBE0 vec=1297 rdi=0x00000000755EDBC8 vec=129
+
+[ENTRY-KBUF] pid=38[ENTRY-KBUF] pid=16 rdi=0x00000000755EDBE0 vec=14
+ rdi=0x000000007558DBC8 vec=129
+[ENTRY-KBUF] pid=38 rdi=0x00000000755EDBC8 vec=14
+/CUTTEST.BIN[ENTRY-KBUF] pid=35 rdi=0x000000007559DBE0[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=38 rdi=0x00000000755EDBC8 vec=12917 rdi=0x000000007548C192 vec=129
+ vec=14
+
+
+FUseor net_timrk reeoutturned: [ENTRY-KBUF] pid=35 rdi=0x000000007559DBC8 vec=129
+_test starting...
+[ENTRY-KBUF] pid=39 rdi=0x00000000755EDBC8 vec=129
+v2 loader: image mapped (lazy), bytes=61384 pages=15 first=in elap=1ms
+[ENTRY-KBUF] pid=20 rdi=0x000000007558DBC8 vec=129
+[ENTRY-KBUF] pid=363 rdi=0x0
+00000007559DBE0 vec=14v2 loader: PID=40 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+
+Pr[ARRIVED] CUTTEST.BIN rc>0
+[WAVE-TRY] TRTEST.BIN
+Loading program for scheduler (v2 AS): TRTEST.BIN[ENTRY-KBUF] pid=36 rdi=0x000000007559DBC8o
+cess/TRTEST.BIN
+ h vec=129eart-b
+eat from[KERNEL] pid=27 (HELLO.BIN) memory fault VA=0x00000000755BDBE0 rax=0x0000001000009840 rdi=0x00000000755BDBE0 rsi=0x0000001000009840 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x0000001000000728 rw=w  in=PROT region=NONE cr3frame=0x0000000020D49000 asroot=0x0000000020D49000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 27: HELLO.BIN exited unexpectedly or gracefully.
+ CPU: v2 loader: image mapped (lazy), bytes=61608 pages=16 first=in elap=1ms
+[ENTRY-KBUF] pid=21 rdi=0x000000007558DBC8 vec=[ENTRY-KBUF] pid=v2 loader: PID=42 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+129
+[ARRIVED] TRTEST.BIN rc>0
+[WAVE-TRY] PASTE_T.BIN
+Loading program for scheduler (v2 AS): PASTE_T.BIN
+[ENTRY-KBUF] pid=22 rdi=0x000000007558DBE0 vec=129
+14 rdi=0x00000000755EDBC8 vec=129
+Process heart-beat from CPU: [ENTRY-KBUF] pid=157 rdi=0x00000000755EDBE0
+/PASTE_T.BIN[ENTRY-KBUF] pid=37 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=23 rdi=0x000000007558DBC8 vec=129
+ vec=[ENTRY-KBUF] pid=38 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=25 rdi=0x000000100000F68C vec=14
+[ENTRY-KBUF] pid=39129
+[ENTRY-KBUF] pid=25[ENTRY-KBUF] pid= rdi=0x000000100000BF5F vec=14
+ rdi=0x000000007558DBC82[ENTRY-KBUF] pid=9 rdi=0x000
+0
+16 rdi=0x00000000755EDBE0 vec= vec=14
+129
+[KERNEL] pid=25 (NFSTEST.BIN) memory fault VA=0x000000007558DBC8 rax=0x0000000000000000 rdi=0x000000007558DBC8 rsi=0x0000000000000000 rdx=0x0000000000000000 usp=0x00000017FFFFFFF8 retaddr= ss=0x0000000000000023 ss+8=0x0000000000010206 ss-8=0x000000000000001B ss+16=0x00000017FFFFFC80 ss+24=0x0000000000000023 ss-16=0x0000000000000005 caller=0x0000000000000000 PC=0x00000010000036D0 rw=r  in=PROT region=NONE cr3frame=0x0000000020D34000 asroot=0x00[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=[KERNEL] Process 25: NFSTEST.BIN exited unexpectedly or gracefully.
+17 rdi=0x00000000755EDBE0[ENTRY-KBUF] pid=26 rdi=0x000000007558DBE0 vec=129
+ vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=2030 rdi= rdi=0x000000100000C17B vec=14
+0x03900[ENTRY-KBUF] pid=28 rdi=0x00000000755BDBE0 vec=129
+000007558DBE0 vec=14
+v2 loader: image mapped (lazy), bytes=62056 pages=16 first=in elap=1ms
+Connecting to 10.0.2.16:80 (expecting timeout)...
+v2 loader: PID=43 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=30 rdi=0x000000007558DBC8 vec=14
+ rdi=[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=31 rdi=0x00000000755BDBE0 vec=129
+2[ENTRY-KBUF] pid=32 rdi=0x00000000755BDBE0 vec=129
+0 rdi=[ENTRY-KBUF] pid=33 rdi=0x00000000755BDBE0 vec=14
+0x00000000755EDBC8 vec=129
+[ENTRY-KBUF] pid=33 rdi=0x[ENTRY-KBUF] pid=21 rdi=0x00000000755EDBE0 vec=00000010755CA9E8 vec=14
+0x000000007559DBC8 vec=129
+[ENTRY-KBUF] pid=30 rdi=0x[ARRIVED] [ENTRY-KBUF] pid=00000755CDBE0 vec=128
+24 rdi=[ENTRY-KBUF] pid=33 rdi=0x00000000755BDBC8 vec=120x00000000755ADBE0 vec=14
+[ENTRY-KBUF] pid=29 rdi=0x00000000755CDBC8 vec=129
+[KERNEL] pid=24 (MONITORT.BIN) memory fault VA=0x00000000755ADBE0 rax=0x0000000000000000 rdi=0x00000000755ADBE0 rsi=0xFFFFFFFFFFFFFFFF rdx=0x0000000000000000 usp=0x00000017FFFFFF88 retaddr= ss=0x0000000000000023 ss+8=0x0000000000010206 ss-8=0x000000000000001B ss+16=0x00000017FFFFFF88 ss+24=0x0000000000000023 ss-16=0x0000000000000005 caller=0x000000100000002B PC=0x0000001000001040 rw=r  in=PROT region=NONE cr3frame=0x0000000020D2D000 asroot=0x0[ENTRY-KBUF] pid=31 rdi=0x00000000755CDBE0 vec=14PASTE_T.BIN4000000007558DB rc>0
+C8 vec=129
+[WAVE-TRY] [ENTRY-KBUF] pid=32 rdi=0x0000000075580DBE0 vec=129
+ rdi=0x0[ENTRY-KBUF] pid=34 rdi=FOLDTEST.BIN0x0000000000000007559DBE0 vec=1
+Loading program for scheduler (v2 AS): FOLDTEST.BIN7558DBE0 vec=129
+29
+[ENTRY-KBUF] pid=35 rdi=0x000000007558DBE[ENTRY-KBUF] pid=41 rdi=0x000000009
+14
+[ENTRY-KBUF] pid=22 rdi=0x00000000755EDBE0 vec=129
+[KERNEL] pid=33 (TAILTEST.BIN) memory fault VA=0x00000000755BDBC8 rax=0x000000100000CDF0 rdi=0x00000000755BDBC8 rsi=0x000000100000CDF0 rdx=0x0000000000000000 usp=0x00000017FFFFFFF8 PC=0x0000001000000D08 rw=w  in=PROT region=NONE cr3frame=0x0000000020D79000 asroot=0x0000000020D79000 sys=-1 ret=0x0000000000000000 -> killed
+Proc[KERNEL] Process 24: MONITORT.BIN exited unexpectedly or gracefully.
+
+[ENTRY-KBUF] pid=26 rdi=0x00000000755ADBE0 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=28 rdi=0x00000017FFFFFC30 vec=14
+31 rdi=0x00000000755CDBC8 vec=129
+[ENTRY-KBUF] pid=28 rdi=0x00000000755ADBC8 vec=128
+[KERNEL] Process 33: TAILTEST.BIN exited unexpectedly or gracefully.
+ess he[ENTRY-KBUF] pid=34 rdi=0x00000000755BDBE0 vec=129
+ar[ENTRY-KBUF] pid=
+75590/FOLDTEST.BIN vec=36 rdi=0xt-be00000000755BDBE0 vec=14
+at from CPU: [ENTRY-KBUF] pid=[ENTRY-KBUF] pid=236 rdi=0x00000000755BDBC8 vec=129
+3 rdi=0x00000000755EDBC8 vec=129
+[ENTRY-KBUF] pid=37 rdi=0x00000000755BDBE0 vec=14
+[ENTRY-KBUF] pid=26 rdi=0x00000000755EDBE0 vec=14
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=26 rdi=0x37 rdi=0x00000000755BDBC8 vec=000000100000CCF0 vec=14
+128
+
+129
+DB[ENTRY-KBUF] pid=26 rdi=0x000000100000C65E vec=14
+[ENTRY-KBUF] pid=37 rdi=0x00000000755BDBC8 vec=129
+[ENTRY-KBUF] pid=2[ENTRY-KBUF] pid=38 rdi=0x00000000755BDBE06 rdi= vec=129
+0x00000000755EDBC8 vec=Chi129
+l[ENTRY-KBUF] pid=2d:9 rdi= closing0x00000017FFFFFE10 vec=14
+ write end
+[ENTRY-KBUF] pid=E036 rdi=0x000000007558DBE0 vec=12 vec=19v2 loader: image mapped (lazy), bytes=62760 pages=16 first=in elap=1ms
+
+v2 loader: PID=44 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=28 rdi=0x[ENTRY-KBUF] pid=32 rdi=0x00000010755DA9D8 vec=14
+00000017FFFFFC30 vec=14
+[ENTRY-KBUF] pid=32 rdi=0x[ENTRY-KBUF] pid=28 rdi=0x000000000000755CDBC8 vec=129
+0[ENTRY-KBUF] pid=304 rdi=0x00000000755ADBC[ARRIVED] [ENTRY-KBUF] pid=FOLDTEST.BIN rc>0
+[WAVE-TRY] NLTEST.BIN
+Loading program for scheduler (v2 AS): 29
+42 rdi=0x0[ENTRY-KBUF] pid=37 rdi=0x0000000000000007559DBE0 vec=129
+7558DBE0 vec=129
+[ENTRY-KBUF] pid=43 rdi=0x000000007559DBE0[ENTRY-KBUF] pid=38 vec=129
+ rdi=0x[ENTRY-KBUF] pid=44000000007558DBE0 vec=14
+NLTEST.BIN
+ rdi=0x/NLTEST.BIN000000007559DBE0[ENTRY-KBUF] pid= vec=1438 rdi=0x000000007558DBC8 vec=
+129
+
+[ENTRY-KBUF] pid=8 vec=129
+00755CDBE0 vec=14
+[ENTRY-KBUF] pid=30 rdi=[ENTRY-KBUF] pid=34 rdi=0x0000x0000000Child: [ENTRY-KBUF] pid=v2 loader: image mapped (lazy), bytes=61960 pages=16 first=in elap=1ms
+40 rdi=04v2 loader: PID=45 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+x000000007558DBE0 vec=14
+[ARRIVED] NLTEST.BIN rc>0
+[ENTRY-KBUF] pid=29 rdi=0x00000000755EDBC8 vec=14
+r[KERNEL] pid=29 (LS.BIN) memory fault VA=0x00000000755EDBC8 rax=0x0000001000006020 rdi=0x00000000755EDBC8 rsi=0x00000017FFFFFF10 rdx=0x0000000000000010 usp=0x00000017FFFFFE00 retaddr= ss=0x0000000000000023 ss+8=0x0000000000010246 ss-8=0x000000000000001B ss+16=0x00000017FFFFFE08 ss+24=0x0000000000000023 ss-16=0x0000000000000005 caller=0x000000100000006A PC=0x0000001000006020 rw=r  in=PROT region=NONE cr3frame=0x0000000020D57000 asroot=0x0000000ea[KERNEL] Process 29: LS.BIN exited unexpectedly or gracefully.
+d[ENTRY-KBUF] pid=31 rdi=0x00000000755EDBE0 vec=129
+ing[ENTRY-KBUF] pid=32 rdi=.0x00000000[ENTRY-KBUF] pid=40 rdi=0x000000007558DBC8 vec=129
+4[WAVE-TRY] [FORK TEST] Child: rdi=0x000000007559DBC8 I am755EDBE0 vec=14
+..
+[KERNEL] pid=32 (HEDTEST.BIN) memory fault VA=0x00000000755EDBE0 rax=0x000000100000CDE0 rdi=0x00000000755EDBE0 rsi=0x000000100000CDE0 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x0000001000000D08 rw=w  in=PROT region=NONE cr3frame=0x0000000020D6F000 asroot=0x0000000020D6F000 sys=-1 ret=0x0000000000000000 -> killed
+[ENTRY-KBUF] pid=[KERNEL] Process 32: HEDTEST.BIN exited unexpectedly or gracefully.
+39 rdi=0x00755ADBE0 vec=129
+00000755CDBC8 vec=[ENTRY-KBUF] pid=31 rdi=0x129
+00000000COMMTEST.BIN vec=129 th
+e foLoading program for scheduler (v2 AS): rked child!
+
+[ENTRY-KBUF] pid=41 rdi=0x[ENTRY-KBUF] pid=35 rdi=0x00000000755EDBE0 vec=129
+0000000755BDBC8 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=37 rdi=0x00000000755EDBE0 vec=129
+40 rdi=0x00000000755BDBE0 vec=[ENTRY-KBUF] pid=38 rdi=0x00000010755FCE20 vec=14
+129
+[ENTRY-KBUF] pid=38 rdi=0x00000000755EDBC8 vec=14
+[ENTRY-KBUF] pid=07[ENTRY-KBUF] pid=36 rdi=0x0000000075555ACOMMTEST.BIN00000007558DBC8 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=43 rdi=0x000000007558DBE0 vec=12945 rdi=0x000000007559
+DBE0
+CDBE0 vec=129
+DB[ENTRY-KBUF] pid=37 rdi=0x00000000755CDBE0 vec=129
+E0 vec=129
+Child:[ENTRY-KBUF] pid=44 rdi=0x000000007558DBE0 vec=14
+/COMMTEST.BIN vec= read returned
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=39 rdi=0x000000034 rdi=0x000755[KERNEL] pid=38 (GREPTEST.BIN) memory fault VA=0x00000000755EDBC8 rax=0x000000100000F210 rdi=0x00000000755EDBC8 rsi=0x000000100000F210 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x0000001000001948 rw=w  in=PROT region=NONE cr3frame=0x0000000020DCC000 asroot=0x0000000020DCC000 sys=-1 ret=0x0000000000000000 -> killed
+42 rdi=0x00000000755BDBE0 vec=14
+[KERNEL] Process 38: GREPTEST.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=42 rdi=0x00000000755BDBC8 vec=129
+[ENTRY-KBUF] pid=40 rdi=0x00000000755EDBE0 vec=CDBC8 vec=129
+0[FORK TEST]0000 Child tick 0755ADBE00 vec=129
+
+[ENTRY-KBUF] pid=35 rdi=0x00000000755ADBE0 vec=129
+[FORK TEST] Child[ENTRY-KBUF] pid=36 rdi= tick129
+129
+[ENTRY-KBUF] pid=43 rdi=0x00000000755BDBE0 vec=14
+[ENTRY-KBUF] pid=42 rdi=0x00000000755EDBE0 vec=14
+[ENTRY-KBUF] pid=43 rdi=0x00000[ENTRY-KBUF] pid=42 rdi=0x00000000755EDBC8 vec=14
+000755BDBC8 vec=14
+[ENTRY-KBUF] pid=42 rdi=0x00000010755FB0A8 vec=14
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=42 rdi=0x00000000755EDBC8 vec=14
+4[KERNEL] pid=42 (TRTEST.BIN) memory fault VA=0x00000000755EDBC8 rax=0x000000100000D4B0 rdi=0x00000000755EDBC8 rsi=0x000000100000D4B0 rdx=0x0000000000000000 usp=0x00000017FFFFFFF8 PC=0x0000001000001248 rw=w  in=PROT region=NONE cr3frame=0x0000000020DFE000 asroot=0x0000000020DFE000 sys=-1 ret=0x0000000000000000 -> killed
+3 rdi=0x00000000755BDBC8 vec=[KERNEL] Process 42: TRTEST.BIN exited unexpectedly or gracefully.
+14
+[ENTRY-KBUF] pid=45 rdi=0x00000000755EDBE0 vec=[ENTRY-KBUF] pid=43 rdi=0x00000010755CB268 vec=14
+ 0x0001000
+10755CE418 vec=14
+14
+[ENTRY-KBUF] pid=45 rdi=0x000000[ENTRY-KBUF] pid=43 rdi=0x00000000755BDBC8 vec=14
+00755EDBC8 vec=14
+[KERNEL] pid=43 (PASTE_T.BIN) memory fault VA=0x00000000755BDBC8 rax=0x000000100000D670 rdi=0x00000000755BDBC8 rsi=0x000000100000D670 rdx=0x0000000000000000 usp=0x00000017FFFFFFF8 PC=0x0000001000001138 rw=w  in=PROT region=NONE cr3frame=0x0000000020E08000 asroot=0x0000000020E08000 sys=-1 ret=0x0000000000000000 -> killed
+[ENTRY-KBUF] pid=45[KERNEL] Process 43: PASTE_T.BIN exited unexpectedly or gracefully.
+ rdi=0x00000000755EDBC8 vec=14
+[ENTRY-KBUF] pid=
+44 rdi=0x00[ENTRY-KBUF] pid=14 rdi=0x0v2 loader: image mapped (lazy), bytes=61560 pages=16 first=in elap=1ms
+000[FORK TEST] Ch[ENTRY-KBUF] pid=45 rdi=0x00000010755FB208 vec=14
+000000v2 loader: PID=46 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+00[ENTRY-KBUF] pid=36 rdi=0x000000ild tick 0[ENTRY-KBUF] pid=4107558DBC8 vec=129
+07559DBE0 vec=129
+ rdi=0x00000755A000075[ENTRY-KBUF] pid=45 rdi=0x00000000755EDBC8 vec=129
+[ENTRY-KBUF] pid=15 rdi=0x00000000755BDBC8 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755EDBE0 vec=129
+[ENTRY-KBUF] pid=[ARRIVED] [ENTRY-KBUF] pid=46 rdi=0x000000007558DBE0 vec=129
+16 rdi=COMMTEST.BIN0x000000007559DBE0[ENTRY-KBUF] pid=47 rdi=0x000000007558DBE0 vec=129
+ vec=129
+[ENTRY-KBUF] pid=15 rdi=0[ENTRY-KBUF] pid=20 rc>0
+x000000007558DBE0 vec=129
+ rdi=0x000000007559DBE0 vec=129
+[WAVE-TRY] [ENTRY-KBUF] pid=16 rdi=0x000000007558DBE0 vec=[ENTRY-KBUF] pid=21 rdi=0x000000007559DBE0 vec=129
+TSORT_T.BIN
+129
+Loading program for scheduler (v2 AS): [ENTRY-KBUF] pid=20 rdi=0x000000007558DBE0 vec=129
+TSORT_T.BIN
+[ENTRY-KBUF] pid=21 rdi=0x000000007558DBE0 vec=129
+/TSORT_T.BIN
+1[ENTRY-KBUF] pid=22 rdi=0x000000007559DBE0 vec=5CDDBC8BC8 vec= vec=129
+14
+129
+
+[ENTRY-KBUF] pid=26 rdi=0x0000v2 loader: image mapped (lazy), bytes=128008 pages=32 first=in elap=1ms
+00007559DBE0Process v2 loader: PID=48 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+he[ARRIVED] art- vec=129
+TSORT_T.BIN rc>0
+[WAVE-TRY] EXPAND_T.BIN
+beat[FO[ENTRY-KBUF] pid=17 rdi=0x000000007549777C vec=129
+RK TEST][ENTRY-KBUF] pid=20 rdi=0x00000000755BDBE0 vec=129
+ P[ENTRY-KBUF] pid= f[KERNEL] pid=36 (REGTEST.BIN) memory fault VA=0x00000000755ADBC8 rax=0x0000001000020820 rdi=0x00000000755ADBC8 rsi=0x0000001000020820 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x00000010000019A8 rw=w  in=PROT region=NONE cr3frame=0x0000000020DAB000 asroot=0x0000000020DAB000 sys=-1 ret=0x0000000000000000 -> killed
+[ENTRY-KBUF] pid=44 rdi=0x00000000755CDBE0 vec=129
+[KERNEL] Process 36: REGTEST.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=45 rdi=0x00000000755CDBE0 vec=129
+[ENTRY-KBUF] pid=37 rdi=0x00000000755ADBE0 vec=Loading program for scheduler (v2 AS): 2r8 rdi=0x000000007559DBE0 vec=1om C29
+PU: [ENTRY-KBUF] pid=EXPAND_T.BIN30 rdi=0x000000007559DBE0[ENTRY-KBUF] pid=23 rdi=0x000000007558DBC8 vec=129
+ vec=129[ENTRY-KBUF] pid=26 rdi=0x000000007558DBE0 vec=
+129
+
+/EXPAND_T.BIN[ENTRY-KBUF] pid=28 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=a7r[ENTRY-KBUF] pid=2ent: child1 rdi=0x000 PID 3301 rdi=0x000000007559DBE0 vec=129
+ rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=34[ENTRY-KBUF] pid=31 rdi=0x000000007558DBE0 vec=14
+
+ rdi=0x000000007559DBE0 vec=129[ENTRY-KBUF] pid=
+31 rdi=0x000000007558DBC8 vec=129
+[ENTRY-KBUF] pid=35 rdi=0x00000000v2 loader: image mapped (lazy), bytes=61224 pages=15 first=in elap=0ms
+75[ENTRY-KBUF] pid=34v2 loader: PID=49 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+59DB rdi=0x000000007558DBE0 vec=14
+E0 vec=[ARRIVED] 12EXPAND_T.BIN rc>0
+[ENTRY-KBUF] pid=34 rdi=09
+[WAVE-TRY] [ENTRY-KBUF] pid=UNEXPAND_T.BIN
+Loading program for scheduler (v2 AS): UNEXPAND_T.BINx000000007558DBC8 vec=129
+
+39 rdi=/UNEXPAND_T.BIN0x[ENTRY-KBUF] pid=35 rdi=
+00x0000000000=0000 0[ENTRY-KBUF] pid=1[ENTRY-KBUF] pid=00129
+46 rdi=0x00000000755CDBE0 vec=14 rdi=0x00000000755EDB755BDBC8 vec=129
+07559DBE0 vec=129
+07559AA78 vec=14
+C8 vec=[ENTRY-KBUF] pid=129
+14
+40 rdi=0x000[ENTRY-KBUF] pid=22 rdi=0x00000000755BDBE0 vec=129
+v2 loader: image mapped (lazy), bytes=61256 pages=15 first=in elap=2ms
+[ENTRY-KBUF] pid=v2 loader: PID=50 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=35 rdi=0x00[ENTRY-KBUF] pid=00000007558DBC8 vec=129
+41 rdi=[ARRIVED] UNEXPAND_T.BIN rc>0
+[ENTRY-KBUF] pid=0x07037 rdi=0x000000007558DBE0 vec=129
+[WAVE-TRY] Child got no d0ata or e0rCKSUM_T.BINror
+00007
+Loading program for scheduler (v2 AS): CKSUM_T.BIN
+559DBE0 vec=129[ENTRY-KBUF] pid=39 rdi=0x000000007558DBC8 vec=129
+
+/CKSUM_T.BIN
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=23 rdi=0x00000000755BDBC8 vec=129
+[ENTRY-KBUF] pid=44 rdi=0x000000007558DBE0 vec=14
+45 rdi=0xv2 loader: image mapped (lazy), bytes=62312 pages=16 first=in elap=1ms
+00v2 loader: PID=52 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=44 rdi=0x000000107559B528 vec=0[ARRIVED] 000007559DBE0 vec=14
+CKSUM_T.BIN[ENTRY-KBUF] pid=44 rdi=0x000000007558DBC8 vec=129
+[ENTRY-KBUF] pid=26 rdi=0x00000000755BDBE0 vec=129
+ rc>0
+1[ENTRY-KBUF] pid=[WAVE-TRY] MD5SUM_T.BIN
+Loading program for scheduler (v2 AS): MD5SUM_T.BIN
+29
+4/MD5SUM_T.BIN7 rdi=[ENTRY-KBUF] pid=
+0x0000040007558DBE0 vec=14
+[ENTRY-KBUF] pid=28 rdi=0x00000000755BDBE0 vec=129
+8 rdi=0x000000v2 loader: image mapped (lazy), bytes=61448 pages=16 first=in elap=2ms
+0075v2 loader: PID=53 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+59DBE0 vec=129
+[ARRIVED] MD5SUM_T.BIN rc>0
+[ENTRY-KBUF] pid=[WAVE-TRY] TACTEST.BIN
+Loading program for scheduler (v2 AS): 49 rdi=0x[ENTRY-KBUF] pid=30 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x000000007558DBC8 vec=129
+000000007559DBE0 vec=TACTEST.BIN129
+
+[ENTRY-KBUF] pid=50 rdi=/TACTEST.BIN
+0x000000007559DBE0 vec=12v2 loader: image mapped (lazy), bytes=289224 pages=71 first=in elap=1ms
+9
+v2 loader: PID=54 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=[ARRIVED] TACTEST.BIN51 rdi=0x000000007559DBE0 vec=[ENTRY-KBUF] pid=31 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=48 rdi=0x000000007558DBE0 vec=129
+ rc>0
+1[WAVE-TRY] CMPTEST.BIN
+Loading program for scheduler (v2 AS): CMPTEST.BIN
+4
+/CMPTEST.BIN
+[ENTRY-KBUF] pid=51 rdi=0x000000007559DBC8 vec=129
+v2 loader: image mapped (lazy), bytes=106232 pages=26 first=in elap=0ms
+[ENTRY-KBUF] pid=52 rdi=0x000000007559DBE0 vec=[ENTRY-KBUF] pid=34 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=46 rdi=0x00000000755CDBC8 vec=129
+15 rdi=0x00000000755EDBC8 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755CDBE0 vec=129
+[ENTRY-KBUF] pid=16 rdi=0x00000000755EDBE0 vec=129
+[ENTRY-KBUF] pid=48 rdi=0x00000v2 loader: PID=55 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+14
+[ARRIVED] [ENTRY-KBUF] pid=000755CDBE0 vec=14
+17 rdi=0x00000000754651EF vec=129
+0000755ADBE0 vec=129[ENTRY-KBUF] pid=20 rdi=0x00000000755EDBC8[ENTRY-KBUF] pid=49 rdi=0x000000007558DBE0 vec=129
+CMPTEST.BIN[ENTRY-KBUF] pid=52 rdi=0x000000007559DBC8 vec=129
+ rc>0
+[WAVE-TRY] POLLTST.BIN
+Loading program for scheduler (v2 AS): [ENTRY-KBUF] pid=53 rdi=0x0000000POLLTST.BIN
+07559DBE0 vec=129
+/POLLTST.BIN
+[ENTRY-KBUF] pid=54 rdi=0x000000007559DBE0 vec=129v2 loader: image mapped (lazy), bytes=61096 pages=15 first=in elap=1ms
+
+v2 loader: PID=56 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=55 rdi=0x[ARRIVED] POLLTST.BIN rc>0
+[WAVE-TRY] RANDTST.BIN
+000000007559Loading program for scheduler (v2 AS): RANDTST.BINDBE0 vec=14
+[ENTRY-KBUF] pid=50 rdi=0x000000007558DBE0 vec=129
+
+[ENTRY-KBUF] pid=55 rdi=0x000000007559DBC8/RANDTST.BIN vec=129
+
+[ENTRY-KBUF] pid=56 rdi=0x000000007559DBE0 vec=129
+v2 loader: image mapped (lazy), bytes=66312 pages=17 first=in elap=1ms
+41v2 loader: PID=57 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+
+[ARRIVED] RANDTST.BIN rc>0
+[WAVE-TRY] [FO
+[ENTRY-KBUF] pid=48 rdi=0x00000000755CDBC8 vec=129
+ vec=[ENTRY-KBUF] pid=41 rdi=0x0000000128
+[ENTRY-KBUF] pid=49 rdi=0x00000000755CDB0755ADBE0 vec=129
+E0 vec=129
+[ENTRY-KBUF] pid=44 rdi=0x00[ARP] routing off-subnet: target=0x00000000755EDBC8 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=0x000000000202000A
+[ENTRY-KBUF] pid=50 rdi=0[ENTRY-KBUF] pid=35 rdi=0x00000000755BDBE0 vec=129
+RK TEST] Parent tick SOCK2TST.BIN[ENTRY-KBUF] pid=14 rdi=0x000000007559DBC8 vec=129
+
+[ENTRY-KBUF] pid=Loading program for scheduler (v2 AS): 15 rdi=0x000000007559DBE0SOCK2TST.BIN vec=129
+
+[ENTRY-KBUF] pid=16/SOCK2TST.BIN
+ rdi=0x000000007559DBE0 vec=129
+v2 loader: image mapped (lazy), bytes=62536 pages=16 first=in elap=1ms
+[ENTRY-KBUF] pid=51 rdi=0x000000007558DBE0 vec=129
+0x00000000755CDBE0 vec=14
+00000755ADBE0 vec=14
+[ENTRY-KBUF] pid=50 rdi=[KERNEL] pid=44 (FOLDTEST.BIN) memory fault VA=0x00000000755ADBE0 rax=0x000000100000D930 rdi=0x00000000755ADBE0 rsi=0x000000100000D930 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x00000010000012B8 rw=w  in=PROT region=NONE cr3frame=0x0000000020E1A000 asroot=0x0000000020E1A000 sys=-1 ret=0x0000000000000000 -> killed
+0x[ENTRY-KBUF] pid=52 rdi=0x000000007558DBE0 vec=129
+[KERNEL] Process 44: FOLDTEST.BIN exited unexpectedly or gracefully.
+00000000755CDBC8 vec=[ENTRY-KBUF] pid=129
+45 rdi=0x00Proces0[ENTRY-KBUF] pid=v2 loader: PID=58 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+53 rdi=0x000000007558DBE0 vec=14
+00000755ADBE0 vec=129
+s[ENTRY-KBUF] pid=46 rdi=0[ENTRY-KBUF] pid=[ARRIVED] 17 rdi=0x00SOCK2TST.BIN000000749C4FB2 vec= rc>0
+[ENTRY-KBUF] pid=37 rdi=0x00000000755BDBE0 vec=129
+[WAVE-TRY] FPU_T.BIN
+129
+Loading program for scheduler (v2 AS): FPU_T.BIN
+[ENTRY-KBUF] pid=/FPU_T.BIN
+21 rdi=0x000000007559DBE0 vec=129
+v2 loader: image mapped (lazy), bytes=58344 pages=15 first=in elap=1ms
+[ENTRY-KBUF] pid=22 rdi=0x000000007559DBE0v2 loader: PID=59 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+ vec=14
+[ARRIVED] FPU_T.BIN rc>0
+[WAVE-TRY] GFXBENCH.BIN
+[ENTRY-KBUF] pid=22 rdi=0x000000007559DBC8Loading program for scheduler (v2 AS):  vec=129
+GFXBENCH.BIN[ENTRY-KBUF] pid=23 rdi=0x000000007559DBE0 vec=129
+
+[ENTRY-KBUF] pid=26 rdi=0x000000007559DBE0 vec=14
+/GFXBENCH.BIN
+[KERNEL] pid=26 (ERRTEST.BIN) memory fault VA=0x000000007559DBE0 rax=0x000000100000CCE0 rdi=0x000000007559DBE0 rsi=0xFFFFFFFFFFFFFFFF rdx=0x0000000000000000 usp=0x00000017FFFFFFB8 retaddr= ss=0x0000000000000023 ss+8=0x0000000000010246 ss-8=0x000000000000001B ss+16=0x00000017FFFFFFB8 ss+24=0x0000000000000023 ss-16=0x0000000000000005 caller=0x000000100000004A PC=0x00000010000013C0 rw=r  in=PROT region=NONE cr3frame=0x0000000020D40000 asroot=0x00v2 loader: image mapped (lazy), bytes=61112 pages=15 first=in elap=1ms
+[KERNEL] Process 26: ERRTEST.BIN exited unexpectedly or gracefully.
+v2 loader: PID=60 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=[ARRIVED] 28 rdi=GFXBENCH.BIN rc>0
+0x000000007559DBE0 vec=129
+[WAVE-TRY] [ENTRY-KBUF] pid=3MATH_T.BIN
+Loading program for scheduler (v2 AS): MATH_T.BIN
+0 rdi=0x000000007559DBE0/MATH_T.BIN
+ vec=129
+x 000000007hear55ADt-beat from CPU: BE0 vec=129
+[ENTRY-KBUF] pid=51 rdi=0x00000000755CDBC8 vec=129
+[ENTRY-KBUF] pid=47 rdi=0[ENTRY-KBUF] pid=52 rdi=0x00000000755CDBE0 vec=14
+x00000000755ADBE0 vec=129
+[ENTRY-KBUF] pid=52 rdi=0x00000000755CDBC8 vec=14
+[ENTRY-KBUF] pid=48 rdi=0x00000000755ADBE0 vec=14
+[ENTRY-KBUF] pid=52 rdi=0x00000010755DB368 vec=14
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=52 rdi=0x00000000755CDB[ENTRY-KBUF] pid=31v2 loader: image mapped (lazy), bytes=71320 pages=18 first=in elap=1ms
+ rdi=0x000000007559DBE0 vec=14
+v2 loader: PID=61 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=[ARRIVED] 31 rdi=0x000000007559DBC8 vec=129MATH_T.BIN rc>0
+[WAVE-TRY] CXXSMOKE.BIN
+Loading program for scheduler (v2 AS): 
+CXXSMOKE.BIN[ENTRY-KBUF] pid=34 rdi=0x000000007559DBE0
+ vec=129
+/CXXSMOKE.BIN
+[ENTRY-KBUF] pid=35 rdi=0x000000007559DBE0C8 vec=14
+4[KERNEL] pid=52 (CKSUM_T.BIN) memory fault VA=0x00000000755CDBC8 rax=0x000000100000D770 rdi=0x00000000755CDBC8 rsi=0x000000100000D770 rdx=0x0000000000000000 usp=0x00000017FFFFFFF8 PC=0x0000001000001358 rw=w  in=PROT region=NONE cr3frame=0x0000000020E9E000 asroot=0x0000000020E9E000 sys=-1 ret=0x0000000000000000 -> killed
+8 rdi=0x000000[ENTRY-KBUF] pid=53 rdi=0x000000007558DBC8 vec=129
+00755ADBC8 vec=14
+[KERNEL] Process 52: CKSUM_T.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=48 rdi=[ENTRY-KBUF] pid=0x00000000755ADBC8 vec=129
+53 rdi=0x00000000755CDBE0 vec=129
+[ENTRY-KBUF] pid=49 rdi=0x00000000755ADBE0 vec=[ENTRY-KBUF] pid=55 rdi=0x00000000755CDBE0 vec=14
+14
+[ENTRY-KBUF] pid=39 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=55 rdi=0x00000000755CDBC8 vec=14
+[ENTRY-KBUF] pid=49 rdi=0x00000000755A[ENTRY-KBUF] pid=55 rdi=0x00000010755E5EF8 vec=14
+DBC8 vec=14 vec=14
+v2 loader: image mapped (lazy), bytes=77512 pages=19 first=in elap=1ms
+[KERNEL] pid=35 (WCTEST.BIN) memory fault VA=0x000000007559DBE0 rax=0x000000100000CE80 rdi=0x000000007559DBE0 rsi=0x000000100000CE80 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x0000001000000D28 rw=w  in=PROT region=NONE cr3frame=0x0000000020DA0000 asroot=0x0000000020DA0000 sys=-1 ret=0x0000000000000000 -> killed
+v2 loader: PID=62 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[KERNEL] Process 35: WCTEST.BIN exited unexpectedly or gracefully.
+[ARRIVED] [ENTRY-KBUF] pid=CXXSMOKE.BIN37 rdi=0x rc>0
+000000007559DBE0 vec=129[WAVE-TRY] DNSTST.BIN
+
+[ENTRY-KBUF] pid=54 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=40 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=39 rdi=0x000000007559DBE0 vec=129
+Loading program for scheduler (v2 AS): [ENTRY-KBUF] pid=40 rdi=0x000000007559DBE0 vec=14
+DNSTST.BIN
+
+[ENTRY-KBUF] pid=55 rdi=0x00000[ENTRY-KBUF] pid=0049 rdi=0x0000755CDBC8 vec=14
+000[ENTRY-KBUF] pid=56 rdi=0x000000007558DBE0 vec=129
+00755ADBC8 vec=129
+[KERNEL] pid=55 (CMPTEST.BIN) memory fault VA=0x00000000755CDBC8 rax=0x000000100000E280 rdi=0x00000000755CDBC8 rsi=0x000000100000E280 rdx=0x0000000000000000 usp=0x00000017FFFFFFF8 PC=0x0000001000001D48 rw=w  in=PROT region=NONE cr3frame=0x0000000020EBE000 asroot=0x0000000020EBE000 sys=-1 ret=0x0000000000000000 -> killed
+[ENTRY-KBUF] pid=50 rdi=0x00000000755ADBE0 vec=14
+[KERNEL] Process 55: CMPTEST.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=50 rdi=0x00000000755ADBC8[ENTRY-KBUF] pid=40 rdi=0x000000007559DBC8 vec=1/DNSTST.BIN29
+
+[ENTRY-KBUF] pid=57 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=41 rdi=0x00000000755BDBE0 vec=129
+v2 loader: image mapped (lazy), bytes=59512 pages=15 first=in elap=0ms
+[ENTRY-KBUF] pid=v2 loader: PID=63 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+4[ARRIVED] DNSTST.BIN5 rdi=0x000000007559DBE0 vec=129 rc>0
+
+[WAVE-TRY] THRD_T.BIN
+[ENTRY-KBUF] pid=47Loading program for scheduler (v2 AS):  rdi=0x000000007559DBE0 vec=THRD_T.BIN
+129
+/THRD_T.BIN
+[ENTRY-KBUF] pid=48 rdi=0xv2 loader: image mapped (lazy), bytes=78120 pages=20 first=in elap=0ms
+000000007559DBE0 vec=129
+v2 loader: PID=2 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=49 rdi=[ARRIVED] THRD_T.BIN rc>0
+[WAVE-TRY] TLS_T.BIN
+Loading program for scheduler (v2 AS): TLS_T.BIN
+0x000000007559DBC8/TLS_T.BIN
+ vec=14
+[ENTRY-KBUF] pid=58 rdi=0x000000007558DBE0 vec=129
+ vec=14
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=50 rdi=0x00000000755ADBC8 vec=[ENTRY-KBUF] pid=59 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=49v2 loader: image mapped (lazy), bytes=71528 pages=18 first=in elap=0ms
+ rdi=0x000000007559DBC8 vec=129
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=51[ARRIVED] TLS_T.BIN rc>0
+ rdi=0x000000007559DBE0[WAVE-TRY] CXX_T.BIN
+ vec=129Loading program for scheduler (v2 AS): CXX_T.BIN
+
+/CXX_T.BIN
+[ENTRY-KBUF] pid=53 rdi=0x000000007559DBE0 vec=1[ENTRY-KBUF] pid=46 rdi=0x00000000755BDBE0 vec=129
+v2 loader: image mapped (lazy), bytes=667992 pages=164 first=in elap=0ms
+29
+v2 loader: PID=4 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=[ARRIVED] CXX_T.BIN rc>0
+[WAVE-TRY] RTTI_T.BIN
+5Loading program for scheduler (v2 AS): 4 rdi=0x000000007559DBE0RTTI_T.BIN
+ vec=1/RTTI_T.BIN
+29
+129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=60 rdi=0x000000007558DBE0 vec=14
+[ENTRY-KBUF] pid=56 rdi=0x000000[ENTRY-KBUF] pid=57 rdi=0x000000007559DBE0 vec=129v2 loader: image mapped (lazy), bytes=119864 pages=30 first=in elap=1ms
+
+[ENTRY-KBUF] pid=48 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=58v2 loader: PID=5 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+ rdi=0x000000007559DBE0 vec=129
+[ARRIVED] RTTI_T.BIN[ENTRY-KBUF] pid=59 rc>0
+[WAVE-TRY]  rdi=0x000000007559DBE0 vec=14
+IPC_T.BIN
+[ENTRY-KBUF] pid=59 rdi=0x000000007559DBC8 vec=1Loading program for scheduler (v2 AS): IPC_T.BIN29
+
+/IPC_T.BIN
+[ENTRY-KBUF] pid=v2 loader: image mapped (lazy), bytes=241560 pages=59 first=in elap=0ms
+61 rdi=0x000000007559DBE0 vec=v2 loader: PID=6 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+14[ENTRY-KBUF] pid=49 rdi=0x00000000755BDBE0 vec=129
+[ARRIVED] IPC_T.BIN rc>0
+
+[WAVE-TRY] MMTEST.BIN
+Loading program for scheduler (v2 AS): MMTEST.BIN
+[ENTRY-KBUF] pid=61/MMTEST.BIN
+ rdi=0x000000007559DBC8 vec=1[ENTRY-KBUF] pid=60 rdi=0x000000007558DBC8 vec=129
+00755CDBE0 vec=129
+29v2 loader: image mapped (lazy), bytes=9736 pages=3 first=in elap=0ms
+
+v2 loader: PID=7 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=[ARRIVED] MMTEST.BIN rc>0
+[WAVE-TRY] ICUSMK.BIN
+63 rdi=0x000000007559DBE0 vec=Loading program for scheduler (v2 AS): ICUSMK.BIN
+129
+/ICUSMK.BIN
+[ENTRY-KBUF] pid=2 rdi=v2 loader: image mapped (lazy), bytes=314592 pages=77 first=in elap=1ms
+0x0000000v2 loader: PID=8 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+07559DBE0[ARRIVED] ICUSMK.BIN rc>0
+[WAVE-TRY] SQLTEST.BIN
+ vec=1Loading program for scheduler (v2 AS): SQLTEST.BIN
+29
+/SQLTEST.BIN
+[ENTRY-KBUF] pid=3 rdi=0x0000v2 loader: image mapped (lazy), bytes=865528 pages=212 first=in elap=1ms
+00007559DBE0v2 loader: PID=9 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+ vec=[ARRIVED] SQLTEST.BIN rc>0
+129[WAVE-TRY] SIG_T.BIN
+
+Loading program for scheduler (v2 AS): SIG_T.BIN
+[ENTRY-KBUF] pid=/SIG_T.BIN4 rdi=0x000000007559DBE0 vec=129
+
+[ENTRY-KBUF] pid=5 rdi=v2 loader: image mapped (lazy), bytes=67240 pages=17 first=in elap=1ms
+[ENTRY-KBUF] pid=62 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=50 rdi=0x00000000755BDBE0 vec=129
+0x000000007559DBE0 vec=129
+v2 loader: PID=10 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ENTRY-KBUF] pid=[ARRIVED] 6 rdi=0xSIG_T.BIN rc>0
+00[WAVE-TRY] WK1C_T.BIN
+0000007559DBE0 vec=14
+Loading program for scheduler (v2 AS): WK1C_T.BIN[ENTRY-KBUF] pid=6 rdi=0x
+000000007559[ENTRY-KBUF] pid=53 rdi=0x00000000755BDBE0 vec=129
+51 rdi=0x00000000755ADBE0[ENTRY-KBUF] pid=57 rdi= vec=129
+0x[ENTRY-KBUF] pid=5300/WK1C_T.BIN
+DBC8 vec=129
+[ENTRY-KBUF] pid=54 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=v2 loader: image mapped (lazy), bytes=203480 pages=50 first=in elap=1ms
+7 rdi=0x00000v2 loader: PID=11 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+0007559DBE0 vec=129
+[ARRIVED] WK1C_T.BIN rc>0
+[ENTRY-KBUF] pid=8[WAVE-TRY] TORTURE.BIN
+ rdi=0x000000007559DBE0 vec=129Loading program for scheduler (v2 AS): 
+TORTURE.BIN
+[ENTRY-KBUF] pid=/TORTURE.BIN
+9 rdi=0x00000000 rdi=[ENTRY-KBUF] pid=56 rdi=0x00000000755BDBE0 vec=14
+[ENTRY-KBUF] pid=63 rdi=0x000000007558DBE0 vec=129
+0x000000000755CDBE0 vec=129
+00000755ADBE0 vec=129
+[ENTRY-KBUF] pid=58 rdi=0x00[ENTRY-KBUF] pid=54 rdi=0x00000000755ADBE0 vec=129
+000000755CDBE0 vec=129
+[ENTRY-KBUF] pid=2 rdi=0x000000007558DBE0 vec=129
+v2 loader: image mapped (lazy), bytes=84184 pages=21 first=in elap=1ms
+7559DBE0v2 loader: PID=12 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+ vec=129[ARRIVED] TORTURE.BIN rc>0
+
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=10 rdi=0x0002 rdi=0x000000000700559DB007E0 vec=129
+55[ENTRY-KBUF] pid=1F1 rdi=0x000000007559DBE0 vec=14DBE0
+ vec=14
+[ENTRY-KBUF] pid=11 rdi=0x000000007559DBC8 vec=14[ENTRY-KBUF] pid=
+2 rdi=0x00000000755FDBC8 vec=14
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=12 rdi=0x00000000755FDBC8 vec=32
+1 rdi=[ENTRY-KBUF] pid=40x000000007559DBC8 rdi=0x00000000755FDBE0 vec=[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=59 rdi=0x000000100000CAFD vec=14
+57 rdi=0x00000000[ENTRY-KBUF] pid=59 rdi=0x00000000755CDBC8 vec=755ADBE0 vec=14
+129
+[ENTRY-KBUF] pid=57 rdi=0x00000000755ADBC8 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=3 rdi=0x000000007558DBE0 vec=14
+[ENTRY-KBUF] pid=56 rdi=0x00000000755BDBC8 vec=129
+14
+ vec=14
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=14 rdi=0x00000000755FDBC8 vec=321 rdi=0x000000007559DBC8 vec=129
+
+[ENTRY-KBUF] pid=12[ENTRY-KBUF] pid=5 rdi=0x00000000755FDBE0 vec= rdi=0x000000007559DBE0 vec=14
+[ENTRY-KBUF] pid=58 rdi=0x00000000755ADBE0 vec=14
+[ENTRY-KBUF] pid=57 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=3 rdi=0x000000007558DBC8 vec=129
+[ENTRY-KBUF] pid=59 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=12 rdi=0x000000007559DBC8 vec=1[ENTRY-KBUF] pid=4 rdi=0x000000007558DBE0 vec=129
+60 rdi=[ENTRY-KBUF] pid=58 rdi=0x000029
+140
+
+[ENTRY-KBUF] pid=5 rdi=0x00000000755FDBC8[ vec=FO32
+RK T[ENTRY-KBUF] pid=7 rdi=0x00000000755FDBE0 vec=14
+E[ENTRY-KBUF] pid=61 rdi=0x00000000755BDBE0 vec=14
+[ENTRY-KBUF] pid=6 rdi=0x000000007558DBE0 vec=14
+0x0000000007500ST] P[ENTRY-KBUF] pid=7arent ti rdi=0x00000000755FDBC8ck  vec=32
+[ENTRY-KBUF] pid=14 rdi=[ENTRY-KBUF] pid=8 rdi=0x00000000755FDBE0 vec=420x000000007559DBC8
+ vec=129
+[ENTRY-KBUF] pid=0755ADBC8 vec=5CD129
+B[ENTRY-KBUF] pid=E0 vec=59 rdi=0x[ENTRY-KBUF] pid=8 rdi=0x1500000 rdi=[ENTRY-KBUF] pid=61 rdi=0x00000000755BDBC8 vec=129
+[ENTRY-KBUF] pid=6 rdi=0x000000007558DBC8 vec=129
+14
+00000000755ADBE0 vec=129
+[ENTRY-KBUF] pid=60 rdi=0x00000000755CDBC8 vec=129
+[ENTRY-KBUF] pid=61 rdi=0x00000000755ADBE0 vec=14[ENTRY-KBUF] pid=63 rdi=0x00000000755CDBE0 vec=14
+
+[ENTRY-KBUF] pid=63 rdi=0x000000100000D2EA vec=14
+[ENTRY-KBUF] pid=61 rdi=0x00000010755BD728 vec=14
+[ENTRY-KBUF] pid=63 rdi=0x00000000755CDBC8 vec=[ENTRY-KBUF] pid=7 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=62 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=9 rdi=0x000000007558DBE0 vec=14
+14
+[ENTRY-KBUF] pid=61 rdi=0x00000000755ADBC8 vec=14
+[KERNEL] pid=63 (DNSTST.BIN) memory fault VA=0x00000000755CDBC8 rax=0x0000000000000000 rdi=0x00000000755CDBC8 rsi=0xFFFFFFFFFFFFFFFF rdx=0x0000000000000000 usp=0x00000017FFFFFFF8 retaddr= ss=0x0000000000000023 ss+8=0x0000000000010206 ss-8=0x000000000000001B ss+16=0x00000017FFFFFF98 ss+24=0x0000000000000023 ss-16=0x0000000000000005 caller=0x0000001000000029 PC=0x0000001000001D20 rw=r  in=PROT region=NONE cr3frame=0x0000000020F22000 asroot=0x000[KERNEL] pid=61 (MATH_T.BIN) memory fault VA=0x00000000755ADBC8 rax=0x000000100000FB30 rdi=0x00000000755ADBC8 rsi=0x000000100000FB30 rdx=0x0000000000000000 usp=0x00000017FFFFFFB8 PC=0x0000001000001D18 rw=w  in=PROT region=NONE cr3frame=0x0000000020EFD000 asroot=0x0000000020EFD000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 63: DNSTST.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=2 rdi=0x00000000755BDBE0 vec=14
+[ENTRY-KBUF] pid=3 rdi=0x000000[ENTRY-KBUF] pid=2 rdi=0x00000010755CE4B8 vec=14
+00755CDBE0 vec=14
+[KERNEL] Process 61: MATH_T.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=3 rdi=0x00000000755CDBC8 vec=1[ENTRY-KBUF] pid=4
+62 rdi=[ENTRY-KBUF] pid=2 rdi=0x00000000755BDBC8 vec=14
+[ENTRY-KBUF] pid=9 rdi=0x000000007558DBC8 vec=14
+[KERNEL] pid=2 (THRD_T.BIN) memory fault VA=0x00000000755BDBC8 rax=0x0000001000010850 rdi=0x00000000755BDBC8 rsi=0x0000001000010850 rdx=0x0000000000000000 usp=0x00000017FFFFFFB8 PC=0x0000001000002D98 rw=w  in=PROT region=NONE cr3frame=0x0000000020F29000 asroot=0x0000000020F29000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 2: THRD_T.BIN exited unexpectedly or gracefully.
+00x00755FDBC8 vec=00000000755932
+DBE0[ENTRY-KBUF] pid=10 rdi=0x0000 vec=129
+0000755FDBE0 vec=14
+[ENTRY-KBUF] pid=16 rdi=0x00[ENTRY-KBUF] pid=10 rdi=0x00000000755FDBC8 vec=320000007559DBE0
+ vec=129
+[ENTRY-KBUF] pid=4 rdi=0x00000000755BDBE0 vec=14
+[ENTRY-KBUF] pid=3 rdi=0x00000010755DCAF80 vec=14
+x[ENTRY-KBUF] pid=3 rdi=0x0[ENTRY-KBUF] pid=11 rdi=0x0000[ENTRY-KBUF] pid=17 rdi=0x000000007559DBE0 vec=0129
+000755FDBC8 vec=32
+
+0000000755CDB00000000755ADBE0 vec=14
+C8 vec=1[ENTRY-KBUF] pid=62 rdi=0x20000009
+0075[ENTRY-KBUF] pid=5 rdi=0x00[ENTRY-KBUF] pid=9 rdi=0x000000007558DBC8 vec=14
+000000755CDBE0 vec=15ADB29
+C8 vec=129
+[ENTRY-KBUF] pid=6 rdi=0x00000000755CDBE0 vec=14
+[ENTRY-KBUF] pid=3 rdi=0x00000000755ADBE0 vec=14
+[ENTRY-KBUF] pid=6 rdi=0x0000001075606F98 vec=14
+[KERNEL] pid=3 (TLS_T.BIN) memory fault VA=0x00000000755ADBE0 rax=0x000000100000EEB0 rdi=0x00000000755ADBE0 rsi=0x0000000000000018 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x0000001000001528 rw=w  in=PROT region=NONE cr3frame=0x0000000020F32000 asroot=0x0000000020F32000 sys=-1 ret=0x0000000000000000 -> killed
+[ENTRY-KBUF] pid=6 rdi=0x00000000755CDBC8 vec=14
+[KERNEL] Process 3: TLS_T.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=6 (IPC_T.BIN) memory fault VA=0x00000000755CDBC8 rax=0x0000001000011550 rdi=0x00000000755CDBC8 rsi=0x0000001000011550 rdx=0x0000000000000000 usp=0x00000017FFFFFFB8 PC=0x0000001000003D18 rw=w  in=PROT region=NONE cr3frame=0x0000000020F51000 asroot=0x0000000020F51000 sys=2 ret=0x000000000000001F -> killed
+[KERNEL] Process 6: IPC_T.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=5 rdi=0x00[ENTRY-KBUF] pid=7 rdi=0x000000755ADBE000000[ENTRY-KBUF] pid=4 rdi=0x00000000755BDBC8 vec=129
+[ENTRY-KBUF] pid=12 rdi=0x00000000755FDBE0[ENTRY-KBUF] pid= vec=14
+21 rdi=0x000000007559DBC8 vec=[ENTRY-KBUF] pid=12 rdi=0x00000000755FDBC8 vec=32
+129
+1[ENTRY-KBUF] pid=22 rdi=0x000000007559DBE0 vec=[ENTRY-KBUF] pid=14 rdi=0x00000000755F129DBC8 vec=32
+
+
+[ENTRY-KBUF] pid=8 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=23 rdi=0x000000007559DBC8 vec=129
+[ENTRY-KBUF] pid=9 rdi=0x000000007558DBC8 vec=129
+[ENTRY-KBUF] pid=28 rdi=0x000000007559DBE0 vec=14
+ vec=000755CDBE0 vec=14
+[ENTRY-KBUF] pid=10 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=11 rdi=0x000000007558DBE0 vec=129
+14[ENTRY-KBUF] pid=
+7 rdi=0x00000000755CDBC8 vec=129
+[ENTRY-KBUF] pid=5 rdi=0x00000000755ADBC8 vec=129
+[ENTRY-KBUF] pid=8 rdi=0x00000000755CDBE0 vec=14
+[ENTRY-KBUF] pid=7 rdi=0x000000100000228C vec=128
+[ENTRY-KBUF] pid=8 rdi=0x
+==============================
+HobbyOS MMTEST - v2 addres00000000755CDBC8 vec=14
+s space acceptance
+==============================
+[ENTRY-KBUF] pid=8 rdi=0x000[ENTRY-KBUF] pid=7 rdi=0x000000100000238C vec=128
+00000755CDBC8 vec=14
+MMTEST: image at USER_IMG_BASE, text+r[ENTRY-KBUF] pid=8 rdi=0x0[ENTRY-KBUF] pid=15 rdi=0x[KERNEL] pid=28 (CAT.BIN) memory fault VA=0x000000007559DBE0 rax=0x00000010000060A0 rdi=0x000000007559DBE0 rsi=0x00000017FFFFFF30 rdx=0x0000000000000010 usp=0x00000017FFFFFC28 retaddr= ss=0x0000000000000023 ss+8=0x0000000000010246 ss-8=0x000000000000001B ss+16=0x00000017FFFFFC28 ss+24=0x0000000000000023 ss-16=0x0000000000000005 caller=0x000000100000006A PC=0x00000010000060A0 rw=r  in=PROT region=NONE cr3frame=0x0000000020D50000 asroot=0x00000000000000755FDBC8 vec=32
+[KERNEL] Process 28: CAT.BIN exited unexpectedly or gracefully.
+Fork returned[ENTRY-KBUF] pid=30 rdi=0x000000007559DBE0 vec=129
+: 
+[ENTRY-KBUF] pid=12 rdi=0x00000000755BDBE0 vec=14
+[ENTRY-KBUF] pid=16 rdi=0x00000000755FDBC8 vec=[ENTRY-KBUF] pid=32
+31 rdi=0x00000010755B5C48 vec=1[ENTRY-KBUF] pid=14 rdi=0x000000007558DBC8 vec=129
+[ENTRY-KBUF] pid=4
+17 rdi=0x[ENTRY-KBUF] pid=15 rdi=0x000000007558DBE0 vec=129
+000001075618048UNKNOWN_VALUE: 0000000[ENTRY-KBUF] pid=0755FA752 vec=32
+31 rdi=[ENTRY-KBUF] pid=0x000000007559DBC8 vec=12921 rdi=0x00000000755FDBE0 vec=32
+
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=34 rdi=0x000000007559DBE0 vec=129
+22 rdi=0x000000100000D85A vec=14
+ vec=14
+odata [ENTRY-KBUF] pid=8 rdi=0x00000000755CD[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=22 rdi=0x[ENTRY-KBUF] pid=12 rdi=0x00000000755BDBC8 vec=129
+0x0000000000000027ok
+BC8 vec=129
+[ENTRY-KBUF] pid=7 rdi=0x00000000755ADBC8 vec=129
+[ENTRY-KBUF] pid=37 rdi=0000009 rdi=0x00000000755CDBC8 vec=14
+[ENTRY-KBUF] pid=8 rdi=0x00000000755ADBE0 vec=14
+[ENTRY-KBUF] pid=9 rdi=0x000000107569E548 vec=14
+[KERNEL] pid=8 (ICUSMK.BIN) memory fault VA=0x00000000755ADBE0 rax=0x0000001000049760 rdi=0x00000000755ADBE0 rsi=0x0000001000049760 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x000000100001F528 rw=w  in=PROT region=NONE cr3frame=0x0000000020F62000 asroot=0x0000000020F62000 sys=2 ret=0x000000000000002D -> killed
+[ENTRY-KBUF] pid=9 rdi=0x00000000755CDBC8 vec=14
+[KERNEL] Process 8: ICUSMK.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=9 (SQLTEST.BIN) memory fault VA=0x00000000755CDBC8 rax=0x00000010000D0560 rdi=0x00000000755CDBC8 rsi=0x00000010000D0560 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x00000010000A2078 rw=w  in=PROT region=NONE cr3frame=0x0000000020F69000 asroot=0x0000000020F69000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 9: SQLTEST.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=10 rdi=0x00000000755ADBE0 vec=14
+[ENTRY-KBUF] pid=00705x00005F0D0B1075C[ENTRY-KBUF] pid=14 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=16 rdi=0x000000007558DBC8 vec=129
+5A8CE vec=432
+8 vec=14
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=10 rdi=011 rdi=0x0x0000000001007005507F5CE5A17 rdi=0x000000007554A25F vec=129
+D80 vec=B14
+C8 vec=[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=37 rdi=0x000000007559DBC8 vec=1[ENTRY-KBUF] pid=229
+3 rdi=0x00C0hild 0000exiting
+0755FDBE0 vec=32
+[KERNEL] Process 39: PIPETEST.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=30 rdi=0x0000000040755FDBC8 vec=32
+ rdi=0x000000007559DBE0 vec=1[ENTRY-KBUF] pid=31 rdi=0x00000029Process heart-beat from CPU: 
+00755FDBE0 vec=[ENTRY-KBUF] pid=414
+1 rdi=0x000000007559DBE0 vec=129
+[KERNEL] pid=31 (LKSTEST.BIN) memory fault VA=0x00000000755FDBE0 rax=0x0000001000018050 rdi=0x00000000755FDBE0 rsi=0x0000001000018050 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x0000001000001268 rw=w  in=PROT region=NONE cr3frame=0x0000000020D68000 asroot=0x0000000020D68000 sys=-1 ret=0x0000000000000000 -> killed
+[ENTRY-KBUF] pid=[KERNEL] Process 31: LKSTEST.BIN exited unexpectedly or gracefully.
+45 rdi=0x[ENTRY-KBUF] pid=34 rdi=0x00000000755FDBE0 vec=32
+0000[ENTRY-KBUF] pid=37 rdi=0x00000000755FDBE0 vec=100007559DB4
+E0[KERNEL] pid=37 (SEDTEST.BIN) memory fault VA=0x00000000755FDBE0 rax=0x000000100000F250 rdi=0x00000000755FDBE0 rsi=0x000000100000F250 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x0000001000001658 rw=w  in=PROT region=NONE cr3frame=0x0000000020DB5000 asroot=0x0000000020DB5000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 37: SEDTEST.BIN exited unexpectedly or gracefully.
+ vec=1[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=21 rdi=0x000000007558DBC8 vec=129
+15 rdi=0x00000000755BDBC8 vec=129
+[ENTRY-KBUF] pid=22 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=16 rdi=0x00000000755BDBE0 vec=129
+4
+[ENTRY-KBUF] pid=[KERNEL] pid=45 (NLTEST.BIN) memory fault VA=0x000000007559DBE0 rax=0x000000100000D610 rdi=0x000000007559DBE0 rsi=0x000000100000D610 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x0000001000001168 rw=w  in=PROT region=NONE cr3frame=0x0000000020E3B000 asroot=0x0000000020E3B000 sys=-1 ret=0x0000000000000000 -> killed
+40 rdi=0x000[KERNEL] Process 45: NLTEST.BIN exited unexpectedly or gracefully.
+0[ENTRY-KBUF] pid=46 rdi=0x000000007559DBE00000755FDBE0 vec= vec=129
+32
+Process heart-beat from CPU: Proces2s heart-beat fr[ENTRY-KBUF] pid=41 rdi=0x00000000755FDBC8 vec=32
+om[ENTRY-KBUF] pid=46 rdi=0x00000000755FDBE0 vec=14
+ CPU: [ENTRY-KBUF] pid=46 rdi=0x00000000755FDBC8 vec=32
+[ENTRY-KBUF] pid=47 rdi=0x000000007559DBC8 vec=[ENTRY-KBUF] pid=48 rdi=0x00000000755FDBC8 vec=129
+32
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=50 rdi=0x000000107560AF60 vec=14
+49 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=50 rdi=0x00000000755FDBC8 vec=32
+[ENTRY-KBUF] pid=51 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=53 rdi=0x00000000755FDBE0 vec=14
+[ENTRY-KBUF] pid=54 rdi=0x000000007559DBE0 vec=11 rdi=0x0001400000755CDBC8 vec=129
+
+[ENTRY-KBUF] pid=12 rdi=0x00000000755CDBE0 vec=129
+[ENTRY-KBUF] pid=10 rdi=0x00000000755ADBC8 vec=129[F
+[ENTRY-KBUF] pid=17 rdi=0x0000000074E78529 vec=129
+129
+[ENTRY-KBUF] pid=53 rdi=ORK TE[ENTRY-KBUF] pid=11 rdi=0x000S00000755ADBE0 vec=14
+T] Pa[ENTRY-KBUF] pid=56 rdi=0x000000100000D55B vec=14
+0x00000000755FDBC8 vec=32
+[ENTRY-KBUF] pid=56 rdi=0x000000007559DBC8 vec=14
+[ENTRY-KBUF] pid=[KERNEL] pid=56 (POLLTST.BIN) memory fault VA=0x000000007559DBC8 rax=0x0000000000000000 rdi=0x000000007559DBC8 rsi=0xFFFFFFFFFFFFFFFF rdx=0x0000000000000000 usp=0x00000017FFFFFFF8 retaddr= ss=0x0000000000000023 ss+8=0x0000000000010202 ss-8=0x000000000000001B ss+16=0x00000017FFFFFE18 ss+24=0x0000000000000023 ss-16=0x0000000000000005 caller=0x000000100000002B PC=0x0000001000001FA0 rw=r  in=PROT region=NONE cr3frame=0x0000000020ECE000 asroot=0x0054 rdi=[KERNEL] Process 56: POLLTST.BIN exited unexpectedly or gracefully.
+0x00000000755FDBE0 vec=[ENTRY-KBUF] pid=57 rdi=0x000000007559DBE0 vec=14
+129
+[ENTRY-KBUF] pid=54 rdi=0x[ENTRY-KBUF] pid=58 rdi=0x000000100000D2AC vec=14
+00000000755FDBC8 vec=32
+[ENTRY-KBUF] pid=58 rdi=0xr[KERNEL] pid=11 (WK1C_T.BIN) memory fault VA=0x00000000755ADBE0 rax=0x000000100000F270 rdi=0x00000000755ADBE0 rsi=0x000000100000F270 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x00000010000016A8 rw=w  in=PROT region=NONE cr3frame=0x0000000020F7A000 asroot=0x0000000020F7A000 sys=-1 ret=0x0000000000000000 -> killed
+e[KERNEL] Process 11: WK1C_T.BIN exited unexpectedly or gracefully.
+nt tick [ENTRY-KBUF] pid=12 rdi=0x00000000755ADBE0 vec=[ENTRY-KBUF] pid=14 rdi=0x00000000755CDBC8[ENTRY-KBUF] pid=21 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid= vec=129
+129
+23 rdi=0x000000007558DBC8 vec=129
+0[ENTRY-KBUF] pid=57 rdi=000000007559DBC8 vec=14
+x000000100000CDAD vec=14
+[KERNEL] pid=58 (SOCK2TST.BIN) memory fault VA=0x000000007559DBC8 rax=0x0000000000000000 rdi=0x000000007559DBC8 rsi=0xFFFFFFFFFFFFFFFF rdx=0x0000000000000000 usp=0x00000017FFFFFFF8 retaddr= ss=0x0000000000000023 ss+8=0x0000000000010206 ss-8=0x000000000000001B ss+16=0x00000017FFFFFEF8 ss+24=0x0000000000000023 ss-16=0x0000000000000005 caller=0x000000100000002B PC=0x0000001000002190 rw=r  in=PROT region=NONE cr3frame=0x0000000020EDF000 asroot=0x0[ENTRY-KBUF] pid=57 rdi=0x00000000755FDBC8 vec=[KERNEL] Process 58: SOCK2TST.BIN exited unexpectedly or gracefully.
+32
+2[ENTRY-KBUF] pid=22 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=60 rdi=0x000000007559DBE0 vec=[ENTRY-KBUF] pid=14 rdi=0x00000000755ADBC8 vec=129
+[ENTRY-KBUF] pid=30 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=59 rdi=0x00000000755FDBE0 vec=32
+129[ENTRY-KBUF] pid=62 rdi=0x00000000755FDBE0 vec=14
+
+[ENTRY-KBUF] pid=23 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=1 rdi=0x[ENTRY-KBUF] pid=60[ENTRY-KBUF] pid=30 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=34 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=40 rdi=0x00000000755BDBC8 vec=14
+002 rdi=0x0000000000755[ENTRY-KBUF] pid=15 rdi=0x
+00000000755CDBC8 vec=129
+[ENTRY-KBUF] pid=16 rdi=0x00000000755ADBC8 vec=129
+9DBE0 vec=129000755FDBC8 vec=32
+
+[ENTRY-KBUF] pid=2 rdi=0x00000000755FDBE0 vec=14
+[ENTRY-KBUF] pid=3 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=2 rdi=0x00000000755FDBC8 vec=[ENTRY-KBUF] pid=41 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=34 rdi=0x000000007559DBE0 vec=124
+
+[ENTRY-KBUF] pid=40 rdi=0x00000010755CAFC8 vec=14
+[ENTRY-KBUF] pid=46 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=4 rdi=0x000000007559DBC8 vec=129
+[ENTRY-KBUF] pid=3 rdi=0x[ENTRY-KBUF] pid=05 rdi=0x000000007559DBE0 vec=14
+0000000755FDBE0 vec=14
+[ENTRY-KBUF] pid=40 rdi=0x00000000755BDBC8 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x000000007558DBE0 vec=129
+7[ENTRY-KBUF] pid=17 rdi=0x
+[ENTRY-KBUF] pid=48 rdi=0x00000010755AB110 vec=14
+[ENTRY-KBUF] pid=5 rdi=0x00000010755B9128 vec=14
+[ENTRY-KBUF] pid=3 rdi=0x00000000755FDBC8 vec=[ENTRY-KBUF] pid=35 rdi=0x000000007559DBC8 vec=14
+2
+[KERNEL] pid=5 (RTTI_T.BIN) memory fault VA=0x000000007559DBC8 rax=0x000000100001B530 rdi=0x000000007559DBC8 rsi=0x000000100001B530 rdx=0x0000000000000000 usp=0x00000017FFFFFFB8 PC=0x00000010000032A8 rw=w  in=PROT region=NONE cr3frame=0x0000000020F44000 asroot=0x0000000020F44000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 5: RTTI_T.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=4 rdi=0x00000000755FDBC8 vec=32
+[ENTRY-KBUF] pid=6 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=7 rdi=0x00000017FFFFFEB0 vec=[ENTRY-KBUF] pid=10 rdi=0x000000007559DBE0 vec=129
+128
+[FORK TEST] Child tick [ENTRY-KBUF] pid=7 rdi=0x0[ENTRY-KBUF] pid=48 rdi=0x000000007558DBC8 vec=14
+[ENTRY-KBUF] pid=02000000075493C26 vec=129
+0000000755FDBC8 vec=32
+[ENTRY-KBUF] pid=12 rdi=0x000000007559DBC8 vec=14
+[ENTRY-KBUF] pid=41 rdi=0x00000000755BDBC8 vec=129
+[KERNEL] pid=48 (TSORT_T.BIN) memory fault VA=0x000000007558DBC8 rax=0x0000001000017240 rdi=0x000000007558DBC8 rsi=0x0000001000017240 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x0000001000001E18 rw=w  in=PROT region=NONE cr3frame=0x0000000020E78000 asroot=0x0000000020E78000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 48: TSORT_T.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=46 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=10 rdi=0x00000000755FDBC8 vec=32
+12 rdi=0x0000000
+07559DBC8 vec=129
+[ENTRY-KBUF] pid=14 rdi=0x00000000755FDBC8 vec=32
+[ENTRY-KBUF] pid=15 rdi=0x000000007559DBE0 vec=129
+P1 rdi=0x[ENTRY-KBUF] pid=22 rdi=0x0000000000755ADBC8 vec=129
+000[ENTRY-KBUF] pid=23 rdi=0x00000000755000755CDBE0 vec=129
+ADBE0 vec=129
+[ENTRY-KBUF] pid=30 rdi=0x00000000755CDarent: cl[ENTRY-KBUF] pid=17 rdi=0x000000007559DBE0 vec=o129
+s
+ing read end
+[ENTRY-KBUF] pid=49 rdi=0x000000007558DBE0 vec=129
+6[ENTRY-KBUF] pid=Process16 rdi=0x00000000755FDBC8 vec=32
+ heart-be[ENTRY-KBUF] pid=at f17 rdi=0x00000000755FB829 vec=32
+romB[ENTRY-KBUF] pid=34 rdi=0x00000010755BE568 vec=14
+E0 vec=129
+[ENTRY-KBUF] pid=34 rdi=0x00[ENTRY-KBUF] pid=40 rdi=0x00000000755CDBE0 vec=12000000755ADBC8 vec=19
+29
+3[ENTRY-KBUF] pid=40 rdi=0x00000000755ADBE0 vec=14
+
+[KERNEL] pid=40 (CUTTEST.BIN) memory fault VA=0x00000000755ADBE0 rax=0x000000100000D3D0 rdi=0x00000000755ADBE0 rsi=0x000000100000D3D0 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x00000010000010F8 rw=w  in=PROT region=NONE cr3frame=0x0000000020DE3000 asroot=0x0000000020DE3000 sys=-1 ret=0x0000000000000000 -> killed
+[[KERNEL] Process 40: CUTTEST.BIN exited unexpectedly or gracefully.
+FORK TEST] Child t[ENTRY-KBUF] pid=50 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=ick 46 rdi=0x00000000755ADBC8 vec=14
+4[ENTRY-KBUF] pid=47 rdi=0x00000000755BDBC8 vec=129
+ C[ENTRY-KBUF] pid=22 rdi=0x00000000755FDBE0 vec=14
+P[KERNEL] pid=22 (STRESS.BIN) memory fault VA=0x00000000755FDBE0 rax=0x00000010000022C0 rdi=0x00000000755FDBE0 rsi=0xFFFFFFFFFFFFFFFF rdx=0x0000000000000000 usp=0x00000017FFFFFF48 retaddr= ss=0x0000000000000023 ss+8=0x0000000000010206 ss-8=0x000000000000001B ss+16=0x00000017FFFFFF48 ss+24=0x0000000000000023 ss-16=0x0000000000000005 caller=0x0000001000000027 PC=0x00000010000022D0 rw=r  in=PROT region=NONE cr3frame=0x0000000020D14000 asroot=0x000U: [KERNEL] Process 22: STRESS.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=21 rdi=0x000000007559DBC8 vec=129
+[ENTRY-KBUF] pid=23 rdi=0x00000000755F[ENTRY-KBUF] pid=51 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=46 rdi=
+0x00000010755BB078 vec=14
+[ENTRY-KBUF] pid=49 rdi=0x00000000755BDBE0 vec=129
+DBE0 vec=[ENTRY-KBUF] pid=30 rdi=0x00000010755D31C0 vec=32
+14
+[ENTRY-KBUF] pid=34 rdi=0x00000000755FDBE0 vec=14
+[ENTRY-KBUF] pid=30 rdi=0x000000007559DBC8 vec=1[KERNEL] pid=34 (PROCTEST.BIN) memory fault VA=0x00000000755FDBE0 rax=0x0000001000010970 rdi=0x00000000755FDBE0 rsi=0x0000001000010970 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x0000001000001798 rw=w  in=PROT region=NONE cr3frame=0x0000000020D97000 asroot=0x0000000020D97000 sys=-1 ret=0x0000000000000000 -> killed
+29
+[KERNEL] Process 34: PROCTEST.BIN exited unexpectedly or gracefully.
+
+[ENTRY-KBUF] pid=49 rdi=0x00000000755FDBE0 vec=32
+[[ENTRY-KBUF] pid=46 rdi=0x00000000F[ENTRY-KBUF] pid=53 rdi=0x000000007558DBC8 vec=14
+755ADBC8 vec=[ENTRY-KBUF] pid=53 rdi=0x000000007558DBC8 vec=129
+14O
+RK TEST] Child ex[ENTRY-KBUF] pid=47 rdi=0x000000007559DBC8 vec=1293
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=50 rdi=0x00000000755BDBE0 vec=14
+[ENTRY-KBUF] pid=549 rdi=0x00000010755AAF40 vec=14
+1 rdi=0x00000000755FDBC8 vec=32
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=49 rdi=0x000000007559DBC8 vec=14
+53 rdi=0x000000107560B0[KERNEL] pid=49 (EXPAND_T.BIN) memory fault VA=0x000000007559DBC8 rax=0x000000100000D330 rdi=0x000000007559DBC8 rsi=0x000000100000D330 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x00000010000010B8 rw=w  in=PROT region=NONE cr3frame=0x0000000020E61000 asroot=0x0000000020E61000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] pid=46 (COMMTEST.BIN) memory fault VA=0x00000000755ADBC8 rax=0x000000100000D480 rdi=0x00000000755ADBC8 rsi=0x000000100000D480 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x0000001000001118 rw=w  in=PROT region=NONE cr3frame=0x0000000020E4F000 asroot=0x0000000020E4F000 sys=-1 ret=0x0000000000000000 -> killed
+iting.
+[KERNEL] Process 46: COMMTEST.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=47 rdi=0x0041 rdi=0x00000000000000755CDBC8 vec=129
+755ADBE0 vec=129
+
+[ENTRY-KBUF] pid=57 rdi=0x00000000755ADBE0 vec=14
+[KERNEL] Process 49: EXPAND_T.BIN exited unexpectedly or gracefully.
+20 vec=[ENTRY-KBUF] pid=59 rdi=0x000000007559DBE0 vec=129
+14
+Pro[KERNEL] pid=57 (RANDTST.BIN) memory fault VA=0x00000000755ADBE0 rax=0x0000000000000000 rdi=0x00000000755ADBE0 rsi=0xFFFFFFFFFFFFFFFF rdx=0x0000000000000000 usp=0x00000017FFFFFBA8 retaddr= ss=0x0000000000000023 ss+8=0x0000000000010202 ss-8=0x000000000000001B ss+16=0x00000017FFFFFBA8 ss+24=0x0000000000000023 ss-16=0x0000000000000005 caller=0x000000100000002B PC=0x0000001000001720 rw=r  in=PROT region=NONE cr3frame=0x0000000020ED8000 asroot=0x00c[KERNEL] Process 57: RANDTST.BIN exited unexpectedly or gracefully.
+ess hea[ENTRY-KBUF] pid=rt-59 rdi=0x0000000beat from CPU: 0755ADBE03 vec=14
+
+[ENTRY-KBUF] pid=53 rdi=0x00000000755FDBC8 vec=32
+[ENTRY-KBUF] pid=60 rdi=0x000000007559DBC8 vec=14
+[ENTRY-KBUF] pid=62 rdi=0x000[ENTRY-KBUF] pid=00000755FDBE0 vec=14
+60 rdi=0x000000007559DBC8 vec=129
+[ENTRY-KBUF] pid=62 rdi=0x00000000755FDBC8 vec=32
+[ENTRY-KBUF] pid=1 rdi=0x000000007559DBE0 vec=14
+[KERNEL] pid=50 (UNEXPAND_T.BIN) memory fault VA=0x00000000755BDBE0 rax=0x000000100000D350 rdi=0x00000000755BDBE0 rsi=0x000000100000D350 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x00000010000010F8 rw=w  in=PROT region=NONE cr3frame=0x0000000020E88000 asroot=0x0000000020E88000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] pid=59 (FPU_T.BIN) memory fault VA=0x00000000755ADBE0 rax=0x0000000000000000 rdi=0x00000000755ADBE0 rsi=0xFFFFFFFFFFFFFFFF rdx=0x0000000000000000 usp=0x00000017FFFFFF48 retaddr= ss=0x0000000000000023 ss+8=0x0000000000010206 ss-8=0x000000000000001B ss+16=0x00000017FFFFFF48 ss+24=0x0000000000000023 ss-16=0x0000000000000005 caller=0x0000001000000028 PC=0x00000010000017E0 rw=r  in=PROT region=NONE cr3frame=0x0000000020EEC000 asroot=0x0000[ENTRY-KBUF] pid=51 rdi=0x000000007[KERNEL] Process 59: FPU_T.BIN exited unexpectedly or gracefully.
+55CDBC8 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=53 rdi=0x00000000755CDBE0 vec=129
+60 rdi=0x00000000755ADBE0 vec=129
+[KERNEL] Process 50: UNEXPAND_T.BIN exited unexpectedly or gracefully.
+P[ENTRY-KBUF] pid=62 rdi=0x00000010755DE5A8 vec=14
+r[ENTRY-KBUF] pid=54 rdi=0x000000007558DBE0 vec=14
+[ENTRY-KBUF] pid=51 rdi=0x00000000755BDBE0 vec=129
+P[ENTRY-KBUF] pid=1 rdi=0[ENTRY-KBUF] pid=53 rdi=0x00000000755BDBE0 vec=14
+x[ENTRY-KBUF] pid=54 rdi=0x000000007558DBC8 vec=129
+[KERNEL] pid=53 (MD5SUM_T.BIN) memory fault VA=0x00000000755BDBE0 rax=0x000000100000D410 rdi=0x00000000755BDBE0 rsi=0x000000100000D410 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x00000010000010C8 rw=w  in=PROT region=NONE cr3frame=0x0000000020EAF000 asroot=0x0000000020EAF000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 53: MD5SUM_T.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=60 rdi=0x000000007558DBE0 vec=14
+oces[ENTRY-KBUF] pid=54 rdi=0x00000000755BDBE0 vec=14
+r0ocess0 hea00rt-be0a00[ENTRY-KBUF] pid=60 rdi=0x000000107559B7D8 vec=14
+[ENTRY-KBUF] pid=54 rdi=0x00000010756029C8 vec=14
+s heart-beat from CPU: [ENTRY-KBUF] pid=62 rdi=0x00000000755CDBC58 vec=14
+
+[KERNEL] pid=62 (CXXSMOKE.BIN) memory fault VA=0x00000000755CDBC8 rax=0x0000001000010970 rdi=0x00000000755CDBC8 rsi=0x0000001000010970 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x0000001000001488 rw=w  in=PROT region=NONE cr3frame=0x0000000020F11000 asroot=0x0000000020F11000 sys=-1 ret=0x0000000000000000 -> killed
+Process heart-bea[KERNEL] Process 62: CXXSMOKE.BIN exited unexpectedly or gracefully.
+t from CPU: [ENTRY-KBUF] pid=4 rdi=0x000000107566DBB0 vec=14
+5[ENTRY-KBUF] pid=4 rdi=0x000000[ENTRY-KBUF] pid=54 rdi=0x00000000755BDBC8 vec=14
+[ENTRY-KBUF] pid=60 rdi=0x000000007558DBC8 vec=14
+t07559DBC8 vec= f[KERNEL] pid=60 (GFXBENCH.BIN) memory fault VA=0x000000007558DBC8 rax=0x000000100000DBF0 rdi=0x000000007558DBC8 rsi=0x000000100000DBF0 rdx=0x0000000000000000 usp=0x00000017FFFFFDA0 PC=0x000000100000A3A8 rw=w  in=PROT region=NONE cr3frame=0x0000000020EF6000 asroot=0x0000000020EF6000 sys=10 ret=0x0000000000000000 -> killed
+[KERNEL] Process 60: GFXBENCH.BIN exited unexpectedly or gracefully.
+
+00755CDBC8 vec=14
+rom129
+ C[ENTRY-KBUF] pid=[KERNEL] pid=4 (CXX_T.BIN) memory fault VA=0x00000000755CDBC8 rax=0x000000100009EF90 rdi=0x00000000755CDBC8 rsi=0x000000100009EF90 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x000000100006F5B8 rw=w  in=PROT region=NONE cr3frame=0x0000000020F3D000 asroot=0x0000000020F3D000 sys=-1 ret=0x0000000000000000 -> killed
+Pro[KERNEL] pid=54 (TACTEST.BIN) memory fault VA=0x00000000755BDBC8 rax=0x000000100000E360 rdi=0x00000000755BDBC8 rsi=0x000000100000E360 rdx=0x0000000000000000 usp=0x00000017FFFFFFB8 PC=0x0000001000001FD8 rw=w  in=PROT region=NONE cr3frame=0x0000000020EB7000 asroot=0x0000000020EB7000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 54: TACTEST.BIN exited unexpectedly or gracefully.
+7 rdi=0x00000010000023BC vec=128
+PMU: MTEST: kernel wrote into us[ENTRY-KBUF] pid=er buf2 rdi=0x00000000755FDBC8 vec=32
+fer vi[ENTRY-KBUF] pid=10 rdi=0x000000107560C6C0 vec=14
+a v2 AS, n[ENTRY-KBUF] pid=10 rdi=0x00000000755FDBC8 vec=32
+ame=[ENTRY-KBUF] pid=12 rdi=0x000000107560FC80 vec=[ENTRY-KBUF] pid=7 rdi=0x000000007559DBC8 vec=129
+14
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=6 rdi=0x000000007558DBE0 vec=14
+Process heart-beat from CPU: [ENTRY-KBUF] pid=6 rdi=0x000000007558DBC8 vec=129
+[ENTRY-KBUF] pid=1 rdi=0x00000000755BDBC8 vec=129
+10 rdi=0x000000007559DBE0 vec=1412 rdi=0x00000000755FDBC8 vec=32
+
+c[KERNEL] Process 4: CXX_T.BIN exited unexpectedly or gracefully.
+ess heart-beat from CPU: [ENTRY-KBUF] pid=6 rdi=0x00000000755CDBE0 vec=129
+[ENTRY-KBUF] pid=3 rdi=0x00000000755ADBC8 vec=[ENTRY-KBUF] pid=129
+12 rdi=0xPr0000000075[KERNEL] pid=10 (SIG_T.BIN) memory fault VA=0x000000007559DBE0 rax=0x000000100000EA80 rdi=0x000000007559DBE0 rsi=0x000000100000EA80 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x0000001000001FB8 rw=w  in=PROT region=NONE cr3frame=0x0000000020F70000 asroot=0x0000000020F70000 sys=-1 ret=0x0000000000000000 -> killed
+[ENTRY-KBUF] pid=14 rdi=[KERNEL] Process 10: SIG_T.BIN exited unexpectedly or gracefully.
+0x00000000755FDBE0 vec=[ENTRY-KBUF] pid=15 rdi=0x000000007559DBE0 vec=129
+42
+Parent: writing...
+[ENTRY-KBUF] pid=14 rdi=0x00000000755FDBC8 vec=32
+Pa[ENTRY-KBUF] pid=15 rdi=0rexn000t:00000750 5FclDoBEsing0 wr[ENTRY-KBUF] pid=2 rdi=0x00000000755BDBC8 vec=129
+[ENTRY-KBUF] pid=7 rdi=0x00000017FFFFFEB0 vec=128
+5MMTEST.BIN
+it vec=e32
+ e[ENTRY-KBUF] pid=3 rdi=0x00000000755BDBC8 vec=129
+n[ENTRY-KBUF] pid=17d
+ rdi=0x00000000755FD718 vec=32[ENTRY-KBUF] pid=
+16 rdi=[ENTRY-KBUF] pid=21 rdi=0x000000000755FDBE0 vec=32
+x00[ENTRY-KBUF] pid=[FORK TEST] Parent tick o5CDcess heart-beat from CPU: BE0 vec=14
+[ENTRY-KBUF] pid=6 rdi=0x00000000755ADBC8 vec=129
+[KERNEL] pid=12 (TORTURE.BIN) memory fault VA=0x00000000755CDBE0 rax=0x0000001000011FF0 rdi=0x00000000755CDBE0 rsi=0x0000001000011FF0 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x0000001000004198 rw=w  in=PROT region=NONE cr3frame=0x0000000020F81000 asroot=0x0000000020F81000 sys=7 ret=0x0000000000000013 -> killed
+[KERNEL] Process 12: TORTURE.BIN exited unexpectedly or gracefully.
+23 rdi=0x00000000755F0000007559DBC8 vec=D[ENTRY-KBUF] pid=17 rdi=0x00000000755CDBE0 vec=129
+[ENTRY-KBUF] pid=7 rdi=0x000000007558DBC8 vec=129
+B129
+E0[ENTRY-KBUF] pid= vec=32
+30 rdi=0x000000[KERNEL] Process 41: FORKTEST.BIN exited unexpectedly or gracefully.
+007559DBE0 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=51 rdi=0x000000007559DBE0 vec=1294
+[ENTRY-KBUF] pid=1[ENTRY-KBUF] pid=2 rdi=0x000000007559DBE0 vec=129
+ rdi=0x00000000755FDBC8 vec=32
+[ENTRY-KBUF] pid=14 rdi=0x00000000755BDBC8 vec=129
+
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=2 rdi=0x00000000755FDBC8 vec=332
+ rdi=0x0000005007559DBE0 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=76 rdi=0x00000000755FD rdi=0x000000007559DBE0 vec=129
+BC83 vec=32
+
+[ENTRY-KBUF] pid=16 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=17 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=23 rdi=0x00000000755BDBE0 vec=129
+7 rdi=0x0[ENTRY-KBUF] pid=14 rdi=0x00000000000100000224E vec=007559DBC8 vec=129
+128
+PaProcess heart-beat from CPU: 
+re[ENTRY-KBUF] pid=7 rdi=0x00000000755FDBC8 vec=32
+nt exitin[ENTRY-KBUF] pid=15 rdi=0x00000000755ADBE0 vec=129
+6[ENTRY-KBUF] pid=17 rdi=0x00000000755ADBE0[ENTRY-KBUF] pid=30 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=14 rdi=0x00000000755FDBE0 vec=32
+g
+[ENTRY-KBUF] pid=1[ENTRY-KBUF] pid=16 rdi=0x0005 rdi=0x000000[ENTRY-KBUF] pid=51 rdi=0x000000007558DBE0 vec=129
+0000007559DBC8 vec=1290755FDBE0 vec=32
+
+ vec=129
+[ENTRY-KBUF] pid=21 rdi=0x00000000755CDBC8 vec=129
+[ENTRY-KBUF] pid=51 rdi=0x000[ENTRY-KBUF] pid=2 rdi=0x00000000755CDBE0 vec=129
+00000755ADBE0 vec=129
+7[ENTRY-KBUF] pid=30 rdi=0x0000000075[ENTRY-KBUF] pid=23 rdi=0x00000000755FDBC8 vec=59DBE0 vec=Process heartProcess heart-beat from CPU: -b32
+129
+[ENTRY-KBUF] pid=51 rdi=0x00000000755FDBE0 vec=[ENTRY-KBUF] pid=32
+6 rdi=[ENTRY-KBUF] pid=0x000000007559DBE0 vec=7 rdi=0x00000000755FD129
+BE0 vec=14
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=7 rdi=0x00000000755FDBC814 rdi=0x000000007559DBE0 vec= vec=129
+32
+[ENTRY-KBUF] pid=1 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=15 rdi=0x000000007559DBE0 vec=129
+14 rdi=0x00000000755F[KERNEL] Process 16: PIPETEST.BIN exited unexpectedly or gracefully.
+DBE0 vec=32
+4[ENTRY-KBUF] pid=6 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=15 rdi=0xeat fro[ENTRY-KBUF] pid=7 rdi=0x000000007558DBE0 vec=129
+00000000755FDBE0 vec=312
+7 rdi=0x000000007556DDF8 vec=129
+
+[ENTRY-KBUF] pid=21 rdi=0x00000000755FDBC8 vec=32
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=14 rdi=0x000000007558DBE0 vec=129
+30 rdi=0x00000000755FDBE0 vec=14
+23[KERNEL] pid=30 (SH.BIN) memory fault VA=0x00000000755FDBE0 rax=0x000000100001DFF0 rdi=0x00000000755FDBE0 rsi=0x000000100001DFF0 rdx=0x0000000000000000 usp=0x00000017FFFFFF90 PC=0x0000001000010748 rw=w  in=PROT region=NONE cr3frame=0x0000000020D5E000 asroot=0x0000000020D5E000 sys=-1 ret=0x0000000000000000 -> killed
+ rdi=0x000000007559DBE0[KERNEL] Process 30: SH.BIN exited unexpectedly or gracefully.
+ vec=[ENTRY-KBUF] pid=51 rdi=0x00000000755FDBE0 vec=32
+129
+m CPU: 3[ENTRY-KBUF] pid=2 rdi=0x00000000755ADBC8 vec=129
+[ENTRY-KBUF] pid=3 rdi=0x00000000755CDBC8 vec=129
+
+[ENTRY-KBUF] pid=7 rdi=0x0000001000002337 vec=128
+[ENTRY-KBUF] pid=47 rdi=0x00000000755BDBC8 vec=129
+[ENTRY-KBUF] pid=1 rdi=0x00000000755FDB
+C8 vec=32
+[ENTRY-KBUF] pid=547[ENTRY-KBUF] pid=2 rdi=0x00000000755FDBC8 vec=32
+ rdi=0x000000007559DBE0 vec=129
+
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=3 rdi=0x00000000755FDBC8 vec=32
+1 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=14 rdi=0x00000000755FDBE0 vec=[ENTRY-KBUF] pid=2 rdi=0x000000007559DBE032
+ vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000[ENTRY-KBUF] pid=3 rdi=0x000000007559DBE0 vec=0129
+0755FC717 vec=32
+[FOR[ENTRY-KBUF] pid=21 rdi=0x00K[ENTRY-KBUF] pid=51 rdi=0x00000000755BDBE0 vec=129
+0000007 55FDBE0 vec=32
+TE
+S[ENTRY-KBUF] pid=T] 23 rdi=0x0000000075Pa5FDBC8 vec=32
+rent
+ tick [ENTRY-KBUF] pid=[ENTRY-KBUF] pid=47 rdi=0x014 rdi=0x000000007559DBC8 vec=129
+0000000755FDBC8 vec=32
+MMTEST: stackPr[ENTRY-KBUF] pid=51 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=
+1[ENTRY-KBUF] pid=2 rdi=0x00000000755FDBC8 vec=32
+7 rdi=0x000000007554429D vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=21 rdi=0x000000007559DBE0 vec=1293 rdi=0x00000000755FDBE0 vec=
+32
+[ENTRY-KBUF] pid=15 rdi=0x000000007558DBE0 vec=129
+4[ENTRY-KBUF] pid=23 rdi=0x000000007559DBE0 vec=[ENTRY-KBUF] pid=14 rdi=0x00000000755FDBC8 vec=132
+29
+[ENTRY-KBUF] pid=1[ENTRY-KBUF] pid=475 rdi=o demand[ENTRY-KBUF] pid=17 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=1 rdi=0x00000000755BDBE0 vec=129
+ rdi=0x000000007559DBE0 vec=0x00000000755FD129
+BE0 vec=32
+[ENTRY-KBUF] pid=2 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=51 rdi=0x000000007559DBE0 vec=12917 rdi=0x00000000755FC656 vec=3
+2
+cess heart-beat from CPU: -zero growth at -128KiB ok
+[ENTRY-KBUF] pid=6 rdi=0x00000000755ADBC8 vec=129
+[ENTRY-KBUF] pid=7 rdi=0x00000000755CDBC8 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=1 rdi=0x000000007559DBE023 rdi=0x00000000755FDBE0 vec=32
+ vec=1[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=3 rdi=0x00000000755BDBE0 vec=129
+429
+7 rdi=0x0[ENTRY-KBUF] pid=20000000755FDBE0 vec=32
+ rdi=[ENTRY-KBUF] pid=0x000000007559DBE0 vec=51 rdi=0x129
+0[ENTRY-KBUF] pid=3 rdi=0x000000007559DBE00 vec=129000000755FDBE0
+ vec=[ENTRY-KBUF] pid=7 rdi=0x0000001080000000 vec=14
+
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=14 rdi=0x00000000755A15 rdi=0x00000000755CDBE0 vec=129
+DB[ENTRY-KBUF] pid=17 rdi=0x00000000755CDBE0 vec=129
+C8 vec=129
+32
+[ENTRY-KBUF] pid=7 rdi=0x000000007559DBC8 vec=14
+[ENTRY-KBUF] pid=1 rdi=0x00000000755FDBE0 vec=32
+[KERNEL] pid=7 (MMTEST.BIN) memory fault VA=0x000000007559DBC8 rax=0x00000000ABCDEF01 rdi=0x000000007559DBC8 rsi=0x0000000000010000 rdx=0x0000000000000003 usp=0x00000017FFFFFEB0 PC=0x00000010000008F0 rw=w  in=PROT region=NONE cr3frame=0x0000000020F5B000 asroot=0x0000000020F5B000 sys=62 ret=0x0000001080000000 -> killed
+[ENTRY-KBUF] pid=2 rdi=0x0000000075[KERNEL] Process 7: MMTEST.BIN exited unexpectedly or gracefully.
+5FDBE0 vec=32
+[ENTRY-KBUF] pid=14 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=3 rdi=0x[ENTRY-KBUF] pid=21 rdi=0x000000007558DBE0 vec=129
+0000000[ENTRY-KBUF] pid=0755FDBE0 vec=32
+17 rdi=0x000000007559[ENTRY-KBUF] pid=14 rdi=0x00000000755FDDBE0 vec=129
+BE0 vec=32
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=121 rdi=[ENTRY-KBUF] pid=6 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=14 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=51 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=70x rdi=00x0000000000000007559DBE0 vec=712955FC3E6 vec=32
+
+Process heart-beat from CPU: [ENTRY-KBUF] pid=51 rdi=0x000000007559DBE0[ENTRY-KBUF] pid=21 rdi=0x00000000755FDBE0 vec=32
+ vec=129
+[ENTRY-KBUF] pid=2 rdi=0x000000[ENTRY-KBUF] pid=3 rdi=0x0000000007559D0[ENTRY-KBUF] pid=47 rdi=0x00000000755BDBC8 vec=129
+[ENTRY-KBUF] pid=23 rdi=0x00000000755CDBE015 rdi=0 vec=755FDBE0 vec=32
+[ENTRY-KBUF] pid=51 rdi=0x00000000755BDBE0 vec=129
+5B[ENTRY-KBUF] pid=6 rdi=0x00000000755FDBC8 vec=32EProcess heart-beat from CPU: [ENTRY-KBUF] pid=2 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=1 rdi=0x000000007558DBC8 vec=129
+
+0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000755FC224 vec=32
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=21 rdi=0x00000000755FDBE0 vec=32
+6 rdi=0x000000007559DBE0 vec=1294
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=47 rdi=0x00000000755FDB17 rdi=0x000000007559DBE0C8 vec=32
+ vec=129[ENTRY-KBUF] pid=
+51 rdi=0x00000000755F[ENTRY-KBUF] pid=21 rdi=DBE0 vec=0x000000007559DBE0 vec=129
+32
+
+[FORK TEST] Parent exiting7[ENTRY-KBUF] pid=47 rdi=0x000000007559DBC8[ENTRY-KBUF] pid=1 rdi=0x00000000755FD vec=129BC8 vec=32
+
+.
+[ENTRY-KBUF] pid=3 rdi=0x00000000755FDBE0 vec=x129
+00000000755ADBE0 vec=[ENTRY-KBUF] pid=129
+47 rdi=0x[ENTRY-KBUF] pid=17 rdi=0x00000000755ADBE0 vec=129
+00000000755CDBE0 vec=129
+[ENTRY-KBUF] pid=14 rdi=0x00000000755BDBC8 vec=129
+32
+
+[KERNEL] Process 21: SMPTEST.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=2 rdi=0x000000007558DBE0 vec=129
+
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=6 rdi=0x00000000755FDBC8 vec=32
+51[KERNEL] Process 14: FORKTEST.BIN exited unexpectedly or gracefully.
+ rdi=0x0[ENTRY-KBUF] pid=17 rdi=0x00000000755FDBE0 vec=32
+0000000[ENTRY-KBUF] pid=47 rdi=075x59DB0E000 vec=12009
+0[ENTRY-KBUF] pid=2 rdi=0x0000075000007559DBE0 vec=129
+5FDBE0 vec=32
+[ENTRY-KBUF] pid=3 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=23 rdi=0x00000000755ADBE0 vec=129
+[ENTRY-KBUF] pid=1 rdi=0x0[ENTRY-KBUF] pid=47 rdi=0x00000000755ADBE0 vec=129
+0000000755CDBC8 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=51 rdi=0x00000000755FDBE0 vec=632
+ rdi=[ENTRY-KBUF] pid=1 rdi=0x0x00000000000755FDBE0 vec=32
+000007559DBE0[ENTRY-KBUF] pid=23 vec=129
+ rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=47[ENTRY-KBUF] pid=51 rdi= rdi=0x0000000x00000000755FDBE0 vec=32
+007559DBE0 vec=[ENTRY-KBUF] pid=11[ENTRY-KBUF] pid=17 rdi=0x000000007558DBE0 vec=129
+ rdi=0x00000000755FDBE0 vec=32
+29
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=6 rdi=0x00000000755FDBE051 rdi=0x000000007559DBE0 vec= vec=32
+129[ENTRY-KBUF] pid=
+17 rdi=0x00000000755FD948Process [ENTRY-KBUF] pid=3 rdi=0x00000000755CDBE0 vec=129
+heart[ENTRY-KBUF] pid=6 rdi=0x00000000755CDBE0 vec=129
+-beat from CPU: [ENTRY-KBUF] pid=23 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=2 rdi=0x00000000755ADBC8 vec=129
+Process heart-beat from CPU: [ENTRY-KBUF] pid=51 rdi=0x000000007558DBE0 vec=129
+ vec=32
+[ENTRY-KBUF] pid=1 rdi=[ENTRY-KBUF] pid=15 rdi=0x00000000755BDBE0 vec=129
+5[ENTRY-KBUF] pid=0x000000007559DB2[ENTRY-KBUF] pid=17 rdi=0x00000000755BDBE0 vec=129
+3 rdi=0x00000000755FD[ENTRY-KBUF] pid=2 rdi=0x000000007558DBC8 vec=129
+BE0E0 vec=3 vec=12923Process he
+
+
+[ENTRY-KBUF] pid=15 rdi=0x0000[ENTRY-KBUF] pid=00007552 rdi=0x00000000755FDBC8 vec=32
+9DBE[ENTRY-KBUF] pid=17 rdi=00 vec=x00000000755FC251 vec=32129
+
+[ENTRY-KBUF] pid=23[ENTRY-KBUF] pid= rdi=0x01 rdi=0x00000000755FDBE0 vec=32
+00000007559DBE0[ENTRY-KBUF] pid=2 rdi=0x00000000755FDBE0 vec=32
+ vec=129
+[ENTRY-KBUF] pid=15 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=1 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=47 rdi=0x00000000755CDBC8 vec=129
+art-beat from CPU: [ENTRY-KBUF] pid=1 rdi=0x00000000755CProcess heart-beat from CPU: [ENTRY-KBUF] pid=3 rdi=0x00000000755ADBC8 vec=129
+DBE0 vec=129
+[ENTRY-KBUF] pid=6 rdi=0x000000007558DBE0 vec=129
+51[ENTRY-KBUF] pid=7 rdi=0x000000[ENTRY-KBUF] pid=51 rdi=0x00000000755BDBC8 vec=129
+[ENTRY-KBUF] pid=23 rdi=0x000000007558DBE0 vec=129
+00755FCD1E vec=32
+2 rdi=0x000000007559DBE0 vec=129[ENTRY-KBUF] pid=
+23 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=6 rdi=0x0000000074559DBE0 vec=[ENTRY-KBUF] pid=51 rdi=0x00000000755FDBC8 vec=3129
+2[ENTRY-KBUF] pid=
+17 rdi=0x[ENTRY-KBUF] pid=2 rdi=0x00000000755FDBE0 vec=32
+000000007[ENTRY-KBUF] pid=6 rdi=0x00000000755FDBE0 vec=32
+559DBE0 vec=129
+[ENTRY-KBUF] pid=23 rdi=0x00000000755FDBE0 vec=[ENTRY-KBUF] pid=5132
+ rdi=0[ENTRY-KBUF] pid=2 rdi=0xx000000007559DBE0 vec=129
+00000000755FDBE0[ENTRY-KBUF] pid= vec=6 rdi=0x000000007559DBE0 vec=132
+29
+[ENTRY-KBUF] pid=17 rdi=0x00000000755FB7F2 vec=[ENTRY-KBUF] pid=32
+23 rdi=0x00000000
+7559DBE
+[ENTRY-KBUF] pid=51 rdi=0x00000000755FDBC8 vec=32
+0 vec=[ENTRY-KBUF] pid=2 rdi=0x000000010755FDBE0 vec=[ENTRY-KBUF] pid=47 rdi=0x000000007558DBC8 vec=129
+32
+29
+[ENTRY-KBUF] pid=6 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=47 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000755FCDB3 vec=32
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=S
+MP Verif[ENTRY-KBUF] pid=51 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=1 rdi=0x00000000755BDBE0 vec=129
+2[ENTRY-KBUF] pid=6 rdi=0x000000007558DBE0 vec=129
+3 rdi=0x00000000755FDBE0 vec=32
+2 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=51 rdi=0x00000000755FDBE0 vec=32[ENTRY-KBUF] pid=
+6 rdi=0x00[ENTRY-KBUF] pid=1 rdi=0x00000000755FDBE0 vec=32
+0000007559DBE0 vec=129[ENTRY-KBUF] pid=2 rdi=0x00000000755FDBE0 vec=32
+
+ication Test Complete.
+[ENTRY-KBUF] pid=3 rdi=0x0000[ENTRY-KBUF] pid=15 rdi=0x00000000755ADBC8 vec=129
+0000755CDBC8 vec=129
+Pr[ENTRY-KBUF] pid=17 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=523 rdi=0xoce[ENTRY-KBUF] pid=ss hea6 rdi=0x00000000755CDBE0 vec=129
+[ENTRY-KBUF] pid=3 rdi=0x000000007558DBE0 vec=129
+1 rdi=0000x0[ENTRY-KBUF] pid=2 rdi=0x00000000755BDBE0 vec=129
+Process heart-beat from CPU: 000000007559DBE0 vec=10000755FDBE0 vec=r[KERNEL] Process 15: SMPTEST.BIN exited unexpectedly or gracefully.
+t-beat from CPU: [KERNEL] Process 3: SMPTEST.BIN exited unexpectedly or gracefully.
+732
+29
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=23 rdi=0x000000007559DBE0 vec=122 rdi=0x00000000755FDBE0 vec=39
+2
+5[ENTRY-KBUF] pid=17 rdi=0x[ENTRY-KBUF] pid=1 rdi=0x00000000755ADBC8 vec=129
+000000007541BEA4 vec=129
+
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=51 rdi=0x000000007559DBE023 rdi=0x00000000755FDBE0 vec= vec=129
+32
+[ENTRY-KBUF] pid=6 rdi=0x000000007558DBC8 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=17 rdi=0x000000007558FBC7 vec=51 rdi=0x00000000755FDBE0 vec=12932
+
+[ENTRY-KBUF] pid=23 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=51 rdi=0x000000007559DBE0 vec=[ENTRY-KBUF] pid=6 rdi=0x00000000755FDBE0 vec=32
+129
+Process heart[ENTRY-KBUF] pid=1 rdi=0x00000000755CDBE0 vec=129
+-beat[ENTRY-KBUF] pid=51 rdi=0x00000000755CDBE0 vec=129
+ from CPU: 
+[ENTRY-KBUF] pid=2 rdi=0x00000000755ADBC8 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=6 rdi=0x000000007559DBE0 vec=129
+17 rdi=0x00000000755FC919 vec=532
+
+[ENTRY-KBUF] pid=6 rdi=0x[ENTRY-KBUF] pid=2 rdi=0x000000007559DBC8 vec=129
+00000000755FDBE0 vec=32
+Proces[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=23 rdi=0x00000000755BDBE0 vec=129
+s heart-beaProcess heat from CProcess heart-beat from CPU: [ENTRY-KBUF] pid=6 rdi=0x00000000755BDBE0 vec=129
+1[ENTRY-KBUF] pid=2 rdi=0x00000000755FDBE0 vec=32
+7 rdi=[ENTRY-KBUF] pid=6 rdi=0x00000000755FDBE0 vec=0x0000000075540AF3 vec=129
+3[ENTRY-KBUF] pid=2
+2 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=617 rdi=0x00000000755FC962 vec=32
+[ENTRY-KBUF] pid=47 rdi=0x000000007558DBC8 vec=129
+rt-beatPU:  [ENTRY-KBUF] pid=5[ENTRY-KBUF] pid=23 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=2 rdi=0x00000000755FDBE0 vec=32
+ rdi=0x000000007559DBE0[ENTRY-KBUF] pid= vec=129
+23 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=2 rdi=0x[ENTRY-KBUF] pid=000000007559DBE0 vec=129
+6 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=23 rdi=[ENTRY-KBUF] pid=2 rdi=0x00000000755FDBE00x000000007559DBE0 vec=129
+ vec=[ENTRY-KBUF] pid=1 rdi=0x00000000755ADBC8 vec=129
+from[ENTRY-KBUF] pid=23 rdi=0x00000000755ADBE0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007558DBE0 vec=129
+ 5CPU: 
+[ENTRY-KBUF] pid=1 rdi=0x00000000755CDBC8 vec=129
+[ENTRY-KBUF] pid=23 rdi=0x000000007558DBE0 vec=129
+6 rdi=0x000000007559DBE0 vec=129[ENTRY-KBUF] pid=47 rdi=0x00000000755BDBE0 vec=129
+3
+32
+7[ENTRY-KBUF] pid=Process heart-beat from CPU: 17 rdi=0x00000000753D5A86 vec=129
+[ENTRY-KBUF] pid=51 rdi=0x00000000755ADBC8 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x000000007559DBC8 vec=129
+[ENTRY-KBUF] pid=6 rdi=50x
+00000000755FDBE0 vec=32
+
+[ENTRY-KBUF] pid=51 rdi=0x000000007559DBC8 vec=129
+
+[ENTRY-KBUF] pid=1 rdi=0x000000007558DBC8 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBC8 vec=32
+Process hear[ENTRY-KBUF] pid=t-beat fr1 rdi=0x00000000755FDBE0 vec=32
+om CPU: [ENTRY-KBUF] pid=47 rdi=0x[ENTRY-KBUF] pid=23 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=6 rdi=0x000000007559DBC8 vec=1200000000755FDBE0 vec=32
+9
+[ENTRY-KBUF] pid=23 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=6[ENTRY-KBUF] pid=P17 rdi=0x0000000075400439roce[ENTRY-KBUF] pid=6 rdi=0x00000000755FDBC8 vec=32
+47 rdi=0x000000007559DBE0 vec=[ENTRY-KBUF] pid=129
+23 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=6 rdi=0x000000007559DBE0 vec=1[KERNEL] Process 51: SMPTEST.BIN exited unexpectedly or gracefully.
+29
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=6 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=6 rdi=0x000000007559DBE0 vec=[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+129
+[ENTRY-KBUF] pid=1 rdi=0x00000000755BDBE0 vec=129
+ss heart-beat from CPU:  vec=129
+[ENTRY-KBUF] pid=2 rdi=0x00000000755CDBC8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000755ADBE0 vec=129
+3[ENTRY-KBUF] pid=23 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=23 rdi=0x000000007558DBE0 vec=129
+
+[ENTRY-KBUF] pid=6 rdi=0x000000007559DBE0 vec=12947 rdi=0x00000000755FDBE0 vec=32
+
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+6 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=[ENTRY-KBUF] pid=1 rdi=0x00000000755BDBE0 vec=129
+32
+6 rdi=0x0000000[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+07559DBE0 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x[ENTRY-KBUF] pid=00000000755FDBE0Process heart-beat from CPU:  vec=32
+6 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=6 rdi=0x000000007559DBE0 vec=129[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=47 rdi=0x6 rdi=0x000000007559DBE0 vec=100000000755FDBE029
+ vec=32
+[ENTRY-KBUF] pid=6 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+6 rdi=0x000000007559DBE0 vec=[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+12[ENTRY-KBUF] pid=947 rdi=0x00000000755F
+DBE0 vec=32
+[ENTRY-KBUF] pid=6 rdi=0x000000007559DB[ENTRY-KBUF] pid=E0 vec=129
+47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=6 rdi=0x000000007559DBE0 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=[ENTRY-KBUF] pid=32
+6 rdi=0x000000007559[ENTRY-KBUF] pid=1 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=D4BE0 vec=7 rdi=0x00000000755FDBE0 vec=32
+129
+[ENTRY-KBUF] pid=47 rdi=0x000000007[ENTRY-KBUF] pid=1 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=6 rdi=0x000000007559DBE0 vec=129
+55FDBE0 vec=32
+
+[ENTRY-KBUF] pid=1 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=6 rdi=0x000000007559DBC8 vec=129
+47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=1 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=23 rdi=0x000000007558DBC8 vec=129
+[ENTRY-KBUF] pid=6 rdi=0x[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+000000[ENTRY-KBUF] pid=47 rdi=0x00000000755F00DBE0 vec=32
+7559DBE0 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00[ENTRY-KBUF] pid=6 rdi=0x0000000070005000755FDBE0 vec=32
+59DBE0[ENTRY-KBUF] pid=47 vec= rdi=0x00000000755FD1BE0 vec=3229
+
+[ENTRY-KBUF] pid=1 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=47 rdi=[ENTRY-KBUF] pid=6 rdi=0x[KERNEL] Process 2: SMPTEST.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=17 rdi=0x00000000752BC502 vec=129
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+[ENTRY-KBUF] pid=1 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=23 rdi=0x000000007558DBE0 vec=129
+  [ALIVE-SET] slot=1 pid=1 st=3 parent=15 claimed_by=4 SMPTEST.BIN
+0000000x00000000755FDBE0 vec=007559DBE0 vec=1329
+2
+  [ALIVE-SET] slot=6 pid=6 st=3 parent=15 claimed_by=6 SMPTEST.BIN
+  [ALIVE-SET] slot=13 pid=13 st=5 parent=-1 claimed_by=-1 SPAWN.BIN
+  [ALIVE-SET] slot=17 pid=17 st=3 parent=-1 claimed_by=5 GRAPHICS.BIN
+  [ALIVE-SET] slot=19 pid=19 st=3 parent=-1 claimed_by=2 NETTEST.BIN
+  [ALIVE-SET] slot=20 pid=20 st=3 parent=-1 claimed_by=1 TIMEOUT.BIN
+  [ALIVE-SET] slot=23 pid=23 st=3 parent=15 claimed_by=7 SMPTEST.BIN
+  [ALIVE-SET] slot=47 pid=47 st=3 parent=15 claimed_by=0 SMPTEST.BIN
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=47 rdi=0x006 rdi=0x000000007559DBE0 vec=129
+000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=1 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=23 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=6 rdi=0x000000007559DBE0 vec=129
+47 rdi=0x00000000755FDBE0 vec=32
+Process heart-beat from CPU[ENTRY-KBUF] pid=47 rdi=0x0000000075: [ENTRY-KBUF] pid=1 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=23 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=1 rdi=0x00000000755BDBE0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000755ADBE0 vec=129
+[ENTRY-KBUF] pid=23 rdi=0x000000007558DBE0 vec=129
+5[ENTRY-KBUF] pid=6 rdi=0x000000007559DBC8 vec=129
+F6DBE0
+ vec=32
+Process heart-beat from CPU: [ENTRY-KBUF] pid=[ENTRY-KBUF] pid=6 rdi=0x0[ENTRY-KBUF] pid=17 rdi=0x00000000755ADBE0 vec=129
+7[ENTRY-KBUF] pid=17 rdi=0x00000000755ADBE0 vec=129
+47 rdi=0x00000000755FDBE0 vec=32
+00000007559DBC8 vec=129
+[ENTRY-KBUF] pid=47[ENTRY-KBUF] pid=6 rdi=0x000000007559DBE rdi=0 vec=129
+0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=23 rdi=0x000000007558DBC8 vec=129
+[ENTRY-KBUF] pid=1 rdi=0x00000000755BDBC8 vec=129
+[ENTRY-KBUF] pid=23 rdi=0x000000007558DBE0 vec=129
+[ENTRY-KBUF] pid=1 rdi=0x00000000755BDBE0 vec=129
+
+[ENTRY-KBUF] pid=47[ENTRY-KBUF] pid=6 rdi=0x4 rdi=000000007559[ENTRY-KBUF] pid=17 rdi=0x00000000755345EA vec=129
+[KERNEL] Process 23: SMPTEST.BIN exited unexpectedly or gracefully.
+
+0xDBE000000 vec=129
+000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000755ADBE0 vec=129
+[ENTRY-KBUF] pid=1 rdi=0x00000000755BDBC8 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=6 rdi=0x00000[KERNEL] Process 1: SMPTEST.BIN exited unexpectedly or gracefully.
+47 rdi=[ENTRY-KBUF] pid=17 rdi=0x00000000755ADBE0 vec=129
+000075x590000D000075B5EF0D vec=1B2E90
+ vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754D0842 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=647 rdi=0x rdi=00x000000000000075059DB0E07 vec=515F2DBE09 vec=3
+2
+[ENTRY-KBUF] pid=17 rdi=0x0000000075406303 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=46 rdi=0x0007 rdi=000x0007559D000BE00 vec=10002907
+55FDBE0 vec=[KERNEL] Process 6: SMPTEST.BIN exited unexpectedly or gracefully.
+32
+[ENTRY-KBUF] pid=17 rdi=0x0000000075344E4A vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=42
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBC8 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x000000007543F5EE vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F0B11 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F4247 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F7CAA vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F7159 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F580D vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F44A4 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F53CC vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754DB6A9 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754C25D2 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F47D6 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F5B26 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F60F0 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F5B7C vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F62CB vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F5C5F vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F6A0A vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F805A vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F47FD vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F73D7 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F6499 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F6D56 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F6EE1 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754E4F68 vec=129
+[ENTRY-KBUF] pid=47 rdi=0x00000000755FDBE0 vec=32
+[ENTRY-KBUF] pid=17 rdi=0x00000000754EC7BE vec=129
+[KERNEL] Process 47: SMPTEST.BIN exited unexpectedly or gracefully.
+[ENTRY-KBUF] pid=17 rdi=0x00000000753EEB87 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527168A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273A50 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075270A0F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527278E vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527BFEB vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075277B10 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752741DE vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273D24 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075270AE7 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527A3E3 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075275F60 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274960 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075270AD5 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527D723 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274676 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527AA36 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527B404 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075277C35 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527BDCB vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075279A9C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276CEE vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752756EE vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526C601 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527C710 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075277BE7 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527C022 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527463F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075278962 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526A381 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007511F3FF vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075452565 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000753A7E24 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000753B09F0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752DBD58 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075359448 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007539B51C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752810EB vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075259DC9 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075278F6F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271C25 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526DEF7 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752743B6 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276F39 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007529577B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752B4391 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752739A1 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527A818 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276FBF vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526FEE1 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276C01 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527AB54 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075278B55 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274224 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752782F8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527976A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273649 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526E2E4 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752798C1 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075279D71 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752721F4 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075284F6B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271C68 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752746CC vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075280290 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075275231 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276485 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527A45A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276E57 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752754E6 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527668E vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527AC82 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752783CC vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075270F76 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526FED7 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271527 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273688 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526D7F0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527185D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273902 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274D3C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752696E8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075270C05 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271DCC vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075275A02 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752726E2 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075278C75 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271D50 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526EEBE vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752A2158 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526D22C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526F27B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075270948 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752722E8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007529C075 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752953A9 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274074 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526AC0E vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526B3E5 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752683AE vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752CCBAA vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075275C85 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526FE29 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527126D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271945 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276D01 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527AB8E vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274389 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752791C1 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274CD8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752710E0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527B380 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527A4C6 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752821E7 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752788C3 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527F5E9 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276158 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075278F03 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527998A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271728 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752774C2 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007528306D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527DFFB vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752758A6 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752770EF vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752761DA vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527845E vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752837A6 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527D488 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752CC75F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007528BB4D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007532481C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000753A7561 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075371AAE vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752828B4 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752B2790 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752D1AA7 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075261998 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007525E902 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526F2DC vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526F54C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527B2DF vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527737B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273315 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075277FFE vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273074 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527415E vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276F4B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752758E7 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752693D8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075277C49 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526CCB0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526FE70 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527275A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271BD2 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274004 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075275AE9 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752753BD vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752709A5 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271949 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274A98 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273B49 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526FC04 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272C58 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527580E vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752749DD vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271090 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752775A0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274B32 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752710A8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752708C8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272DB0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272F99 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075278893 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752755A7 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272F74 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272CDD vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526CA42 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752704F4 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527735B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273564 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075275B5D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527491F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273D02 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752903FF vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752838EF vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007528FA21 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527AD5E vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075257E05 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752CFBF1 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075281269 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075279174 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272264 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526FA6E vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752ADB91 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007529E36B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526DEA6 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075270737 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526F36F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526B358 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527EB66 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752711C2 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752729C1 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527219B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752724FA vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752708AA vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526D77C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526F096 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272657 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272952 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752719BB vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273EAF vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273FB6 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526EC11 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526EB07 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527F830 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272D8B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752855F7 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527732B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075270794 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527A4D1 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007528D80A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752808D6 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527F473 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527C840 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527014D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527875B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752AAB21 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075275FEF vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271D0C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075194787 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007545A424 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007536F47A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007531F43B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075291226 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007534781D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000753712B0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752A1993 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526A88F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007529C973 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075287F03 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527CE90 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752750F8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007528010B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075296960 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075289ADA vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075277BD8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075275B6C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075275117 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272132 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752755D3 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276246 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752738BE vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274B42 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274F1F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276AE7 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075278DD9 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527424C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273EBA vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075278084 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752728EB vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527A9C9 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752778AB vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752794DE vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527A189 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527DDCB vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075278D2A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527F9EB vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274879 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075277E5B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527A418 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527F0D8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752776FE vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527FE76 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527B1BB vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527A636 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527BA46 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752733CA vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075283569 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527C7B9 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075286BE4 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527D267 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752745A6 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075278B56 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075277136 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075277751 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272F2C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527B8AC vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007513E232 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000753C295D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272923 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527394C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527691C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075270B35 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007529A7B8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007528FE08 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526E84C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526E66D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272934 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007528686B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007528C07B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276E0F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273721 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526D117 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752720BC vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527225D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526CEAA vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271134 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752749B1 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527542F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075287951 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526E198 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271A89 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527099F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752756A0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272844 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752721F6 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752812DB vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272E3B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273771 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752708E9 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526F05C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527593E vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274803 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276887 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276B42 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075275ACA vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752790B7 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752716EF vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273871 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007524171E vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007534499C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000753A86BA vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000753B7ECB vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752B2CEF vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007534A569 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075365A65 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271594 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752287CB vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752A9ACB vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527353E vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527035E vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271A7F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075270CB9 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752A0F22 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075299629 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075291C44 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752709E1 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526E05A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075277403 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075279B61 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075277136 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271073 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526BBB9 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007528B805 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271C88 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752698D8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274828 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526DE36 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271EEF vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526BFDE vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075269BCA vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274438 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526DE35 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075259300 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007529A2FB vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752747BC vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272141 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752704FB vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526EF9F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526FB7B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527D125 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526EECE vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526FF53 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075270A07 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271A3A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526F710 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272E27 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075275CD5 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075275329 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273F49 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273AE0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000753089ED vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007532B94A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527D7C8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526CCC5 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527A208 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526D949 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075222733 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752C5EC8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075278269 vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=119 rdi=7 rdi=0x00000000075271778 vec=x1020090000075
+5DDBC8 vec=14
+[ENTRY-KBUF] pid=19 rdi=0x00000010755EA1A8 vec=14
+[ENTRY-KBUF] pid=19 rdi=0x00000000755DDBC8 vec=14
+[KERNEL] pid=19 (NETTEST.BIN) memory fault VA=0x00000000755DDBC8 rax=0x0000000000000005 rdi=0x00000000755DDBC8 rsi=0x0000000000000000 rdx=0x000000100000C5E0 usp=0x00000017FFFFFF20 PC=0x00000010000021AB rw=w  in=PROT region=NONE cr3frame=0x0000000020CC6000 asroot=0x0000000020CC6000 sys=18 ret=0xFFFFFFFFFFFFFFFB -> killed
+[ENTRY-KBUF] pid=[KERNEL] Process 19: NETTEST.BIN exited unexpectedly or gracefully.
+17 rdi=0x00000000752FB3A4 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000755ADBE0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000754F1216 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752BB04F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527969D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752735C5 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527337F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526BBC8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075284077 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075275953 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527DE55 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075279875 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527547D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527649E vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527D341 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007528D566 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752754F1 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007525D97E vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752A8CD5 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075277CF7 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527A3D0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526B06C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075280877 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752752CD vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274FF2 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526A846 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075291B30 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075279645 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075275F41 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274840 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527CBB2 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527BB6E vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075279AD4 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752855E0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752788D5 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527A262 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752712D2 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272B04 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007518291B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075431416 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007539FA7D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075395F82 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752B6BDD vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075369606 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007538876C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075296AB1 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752551FB vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526ECF4 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752631BA vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527047A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752763E9 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075277F30 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527278D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272E5E vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273159 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526B78D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752695B4 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752719DD vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527994B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075270CB6 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273D42 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075275566 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075227C8A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752C3E46 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527C97D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752736F8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276902 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526D405 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527252B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752796F4 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274EAA vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527396B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527665D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527546C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752780D4 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527B3E7 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752742B3 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752732A3 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276F7A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075277543 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075277E2C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752721E0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527A5EA vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527111A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274E58 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527868E vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752720B5 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527238A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075275E5C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276B9D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276A63 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752767D7 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273989 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273976 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075275D2F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007528022F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752767C1 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752829F9 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276DFD vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752730B4 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075277228 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075277904 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075279D0C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752797FF vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272CBB vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276115 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273809 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526BBEF vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527970B vec=129
+[ENTRY-KBUF] pid=[ENTRY-KBUF] pid=20 rdi=0x00000000755EDBC8 vec=14
+17 rdi=0x000000007526E505 vec=129
+[ENTRY-KBUF] pid=20 rdi=0x00000010755FA058 vec=14
+[ENTRY-KBUF] pid=20 rdi=0x00000000755EDBC8 vec=14
+[KERNEL] pid=20 (TIMEOUT.BIN) memory fault VA=0x00000000755EDBC8 rax=0x0000000000000005 rdi=0x00000000755EDBC8 rsi=0x0000000000000000 rdx=0x000000100000C490 usp=0x00000017FFFFFFA0 PC=0x00000010000020DB rw=w  in=PROT region=NONE cr3frame=0x0000000020CED000 asroot=0x0000000020CED000 sys=18 ret=0xFFFFFFFFFFFFFFFB -> killed
+[ENTRY-KBUF] pid=[KERNEL] Process 20: TIMEOUT.BIN exited unexpectedly or gracefully.
+17 rdi=0x00000000753D34CD vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000755ADBE0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000754C6485 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752A5C6B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007536861E vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007529AC8D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007529A1F7 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752BFF04 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007528A751 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752781CB vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075275BF9 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527107B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526F54D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752739F1 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526D4FF vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526FC3B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752AA5EE vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526BEF0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007528E520 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752800A7 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527F703 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075277F3A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527C7A6 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527D2B0 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075283762 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075285363 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007528701B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007528819D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075262640 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007534BEEA vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000753BA33F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007538302F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752CAEC5 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007538EEED vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075362D03 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752755D6 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007521E10C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752CF322 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075282A0F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527A198 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527B13F vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007528C77B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075289B0D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075297925 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527402A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527199A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527649A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752740C5 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274B0B vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075276C12 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752708D7 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752749CE vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075270ACD vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075275AF3 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527AB57 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752726F8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752871C3 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075281A6A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075274616 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273839 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075268093 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752722F8 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752720B4 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752B95D2 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007530FC74 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752719CE vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075271E89 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526EB8A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527441D vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075277013 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075273564 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075270212 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075272184 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526E166 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007527334C vec=129
+[ENTRY-KBUF] pid=17 rdi=0x0000000075270C2A vec=129
+[ENTRY-KBUF] pid=17 rdi=0x00000000752705E6 vec=129
+[ENTRY-KBUF] pid=17 rdi=0x000000007526CD21 vec=129
+  FAIL: line startpoint
+  FAIL: line midpoint
+  FAIL: line endpoint[ENTRY-KBUF] pid=17 rdi=0x00000000755ADBC8 vec=129
+
+  PASS: fill_circle center
+  PASS: fill_circle east edge
+  PASS: fill_circle north edge
+  PASS: draw_circle rim
+  PASS: draw_circle hollow
+  PASS: gradient top
+  PASS: gradient bottom
+  PASS: clip blocks outside
+[ENTRY-KBUF] pid=17 rdi=0x00000000755ADBC8 vec=129
+  PASS: clip allows inside
+  PASS: scaled text drew pixels
+GRAPHICS TESTS FAILED
+[KERNEL] Process 17: GRAPHICS.BIN exited unexpectedly or gracefully.
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070032456 pid=-1 age_ms=0 syscall=2
+  CPU1 rip=0x0000000070032456 pid=-1 age_ms=10
+  CPU2 rip=0x0000000070032456 pid=-1 age_ms=10
+  CPU3 rip=0x0000000070032456 pid=-1 age_ms=10 syscall=2
+  CPU4 rip=0x0000000070032456 pid=-1 age_ms=10 syscall=2
+  CPU5 rip=0x0000000070032456 pid=-1 age_ms=10 syscall=2
+  CPU6 rip=0x0000000070032456 pid=-1 age_ms=10 syscall=2
+  CPU7 rip=0x0000000070032456 pid=-1 age_ms=10 syscall=2
+[IDLESTUCK] cpu=2 rounds=20006 t=33629
+[IDLESTUCK] slot=1 pid=1 st=4 parent=15 wake=0 rip=0x0000001000000146 SMPTEST.BIN
+[IDLESTUCK] slot=2 pid=2 st=4 parent=15 wake=0 rip=0x00000010000008CC SMPTEST.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=15 wake=0 rip=0x00000010000008CC SMPTEST.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x000000100006F490 CXX_T.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x0000001000003090 RTTI_T.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=15 wake=0 rip=0x0000001000000146 SMPTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x00000010000006E4 MMTEST.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x000000100001F528 ICUSMK.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x00000010000A1E75 SQLTEST.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000001FB8 SIG_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=4 parent=-1 wake=0 rip=0x00000010000016A8 WK1C_T.BIN
+[IDLESTUCK] slot=12 pid=12 st=4 parent=-1 wake=0 rip=0x0000001000004198 TORTURE.BIN
+[IDLESTUCK] slot=13 pid=13 st=5 parent=-1 wake=1972322 rip=0x0000001000003304 SPAWN.BIN
+[IDLESTUCK] slot=14 pid=14 st=4 parent=-1 wake=0 rip=0x0000001000000BFC FORKTEST.BIN
+[IDLESTUCK] slot=15 pid=15 st=4 parent=-1 wake=0 rip=0x00000010000008CC SMPTEST.BIN
+[IDLESTUCK] slot=16 pid=16 st=4 parent=-1 wake=0 rip=0x000000100000088C PIPETEST.BIN
+[IDLESTUCK] slot=17 pid=17 st=4 parent=-1 wake=0 rip=0x0000001000000E3C GRAPHICS.BIN
+[IDLESTUCK] slot=18 pid=18 st=4 parent=-1 wake=0 rip=0x0000001000003340 WSRF_T.BIN
+[IDLESTUCK] slot=19 pid=19 st=4 parent=-1 wake=0 rip=0x000000100000080C NETTEST.BIN
+[IDLESTUCK] slot=20 pid=20 st=4 parent=-1 wake=0 rip=0x000000100000073C TIMEOUT.BIN
+[IDLESTUCK] slot=22 pid=22 st=4 parent=-1 wake=0 rip=0x00000010000022C0 STRESS.BIN
+[IDLESTUCK] slot=23 pid=23 st=4 parent=15 wake=0 rip=0x00000010000008CC SMPTEST.BIN
+[IDLESTUCK] slot=24 pid=24 st=4 parent=-1 wake=0 rip=0x0000001000001030 MONITORT.BIN
+[IDLESTUCK] slot=25 pid=25 st=4 parent=-1 wake=0 rip=0x0000001000000000 NFSTEST.BIN
+[IDLESTUCK] slot=26 pid=26 st=4 parent=-1 wake=0 rip=0x00000010000013B0 ERRTEST.BIN
+[IDLESTUCK] slot=27 pid=27 st=4 parent=-1 wake=0 rip=0x0000001000000728 HELLO.BIN
+[IDLESTUCK] slot=28 pid=28 st=4 parent=-1 wake=0 rip=0x00000010000060A0 CAT.BIN
+[IDLESTUCK] slot=29 pid=29 st=4 parent=-1 wake=0 rip=0x00000010000055E3 LS.BIN
+[IDLESTUCK] slot=30 pid=30 st=4 parent=-1 wake=0 rip=0x0000001000010748 SH.BIN
+[IDLESTUCK] slot=31 pid=31 st=4 parent=-1 wake=0 rip=0x0000001000001268 LKSTEST.BIN
+[IDLESTUCK] slot=32 pid=32 st=4 parent=-1 wake=0 rip=0x0000001000000D08 HEDTEST.BIN
+[IDLESTUCK] slot=33 pid=33 st=4 parent=-1 wake=0 rip=0x0000001000000000 TAILTEST.BIN
+[IDLESTUCK] slot=34 pid=34 st=4 parent=-1 wake=0 rip=0x0000001000001798 PROCTEST.BIN
+[IDLESTUCK] slot=35 pid=35 st=4 parent=-1 wake=0 rip=0x0000001000000D28 WCTEST.BIN
+[IDLESTUCK] slot=36 pid=36 st=4 parent=-1 wake=0 rip=0x00000010000017A5 REGTEST.BIN
+[IDLESTUCK] slot=37 pid=37 st=4 parent=-1 wake=0 rip=0x0000001000001658 SEDTEST.BIN
+[IDLESTUCK] slot=38 pid=38 st=4 parent=-1 wake=0 rip=0x0000001000001820 GREPTEST.BIN
+[IDLESTUCK] slot=40 pid=40 st=4 parent=-1 wake=0 rip=0x00000010000010F8 CUTTEST.BIN
+[IDLESTUCK] slot=42 pid=42 st=4 parent=-1 wake=0 rip=0x0000001000000000 TRTEST.BIN
+[IDLESTUCK] slot=43 pid=43 st=4 parent=-1 wake=0 rip=0x0000001000000000 PASTE_T.BIN
+[IDLESTUCK] slot=44 pid=44 st=4 parent=-1 wake=0 rip=0x00000010000012B8 FOLDTEST.BIN
+[IDLESTUCK] slot=45 pid=45 st=4 parent=-1 wake=0 rip=0x0000001000001168 NLTEST.BIN
+[IDLESTUCK] slot=46 pid=46 st=4 parent=-1 wake=0 rip=0x0000001000000F15 COMMTEST.BIN
+[IDLESTUCK] slot=47 pid=47 st=4 parent=15 wake=0 rip=0x0000001000000143 SMPTEST.BIN
+[IDLESTUCK] slot=48 pid=48 st=4 parent=-1 wake=0 rip=0x0000001000001CF0 TSORT_T.BIN
+[IDLESTUCK] slot=49 pid=49 st=4 parent=-1 wake=0 rip=0x00000010000010B5 EXPAND_T.BIN
+[IDLESTUCK] slot=50 pid=50 st=4 parent=-1 wake=0 rip=0x00000010000010F8 UNEXPAND_T.BIN
+[IDLESTUCK] slot=51 pid=51 st=4 parent=15 wake=0 rip=0x0000001000000146 SMPTEST.BIN
+[IDLESTUCK] slot=52 pid=52 st=4 parent=-1 wake=0 rip=0x0000001000000000 CKSUM_T.BIN
+[IDLESTUCK] slot=53 pid=53 st=4 parent=-1 wake=0 rip=0x00000010000010C8 MD5SUM_T.BIN
+[IDLESTUCK] slot=54 pid=54 st=4 parent=-1 wake=0 rip=0x0000001000001DC0 TACTEST.BIN
+[IDLESTUCK] slot=55 pid=55 st=4 parent=-1 wake=0 rip=0x0000001000000000 CMPTEST.BIN
+[IDLESTUCK] slot=56 pid=56 st=4 parent=-1 wake=0 rip=0x0000001000000000 POLLTST.BIN
+[IDLESTUCK] slot=57 pid=57 st=4 parent=-1 wake=0 rip=0x0000001000001710 RANDTST.BIN
+[IDLESTUCK] slot=58 pid=58 st=4 parent=-1 wake=0 rip=0x0000001000000000 SOCK2TST.BIN
+[IDLESTUCK] slot=59 pid=59 st=4 parent=-1 wake=0 rip=0x00000010000017D0 FPU_T.BIN
+[IDLESTUCK] slot=60 pid=60 st=4 parent=-1 wake=0 rip=0x0000001000009E59 GFXBENCH.BIN
+[IDLESTUCK] slot=61 pid=61 st=4 parent=-1 wake=0 rip=0x0000001000001B00 MATH_T.BIN
+[IDLESTUCK] slot=62 pid=62 st=4 parent=-1 wake=0 rip=0x0000001000001285 CXXSMOKE.BIN
+[IDLESTUCK] slot=63 pid=63 st=4 parent=-1 wake=0 rip=0x0000001000000000 DNSTST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=-1 c7=-1
+[IDLESTUCK] cpu=7 rounds=40003 t=58716
+[IDLESTUCK] slot=1 pid=1 st=4 parent=15 wake=0 rip=0x0000001000000146 SMPTEST.BIN
+[IDLESTUCK] slot=2 pid=2 st=4 parent=15 wake=0 rip=0x00000010000008CC SMPTEST.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 parent=15 wake=0 rip=0x00000010000008CC SMPTEST.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 parent=-1 wake=0 rip=0x000000100006F490 CXX_T.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 parent=-1 wake=0 rip=0x0000001000003090 RTTI_T.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 parent=15 wake=0 rip=0x0000001000000146 SMPTEST.BIN
+[IDLESTUCK] slot=7 pid=7 st=4 parent=-1 wake=0 rip=0x00000010000006E4 MMTEST.BIN
+[IDLESTUCK] slot=8 pid=8 st=4 parent=-1 wake=0 rip=0x000000100001F528 ICUSMK.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 parent=-1 wake=0 rip=0x00000010000A1E75 SQLTEST.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 parent=-1 wake=0 rip=0x0000001000001FB8 SIG_T.BIN
+[IDLESTUCK] slot=11 pid=11 st=4 parent=-1 wake=0 rip=0x00000010000016A8 WK1C_T.BIN
+[IDLESTUCK] slot=12 pid=12 st=4 parent=-1 wake=0 rip=0x0000001000004198 TORTURE.BIN
+[IDLESTUCK] slot=13 pid=13 st=5 parent=-1 wake=1972322 rip=0x0000001000003304 SPAWN.BIN
+[IDLESTUCK] slot=14 pid=14 st=4 parent=-1 wake=0 rip=0x0000001000000BFC FORKTEST.BIN
+[IDLESTUCK] slot=15 pid=15 st=4 parent=-1 wake=0 rip=0x00000010000008CC SMPTEST.BIN
+[IDLESTUCK] slot=16 pid=16 st=4 parent=-1 wake=0 rip=0x000000100000088C PIPETEST.BIN
+[IDLESTUCK] slot=17 pid=17 st=4 parent=-1 wake=0 rip=0x0000001000000E3C GRAPHICS.BIN
+[IDLESTUCK] slot=18 pid=18 st=4 parent=-1 wake=0 rip=0x0000001000003340 WSRF_T.BIN
+[IDLESTUCK] slot=19 pid=19 st=4 parent=-1 wake=0 rip=0x000000100000080C NETTEST.BIN
+[IDLESTUCK] slot=20 pid=20 st=4 parent=-1 wake=0 rip=0x000000100000073C TIMEOUT.BIN
+[IDLESTUCK] slot=22 pid=22 st=4 parent=-1 wake=0 rip=0x00000010000022C0 STRESS.BIN
+[IDLESTUCK] slot=23 pid=23 st=4 parent=15 wake=0 rip=0x00000010000008CC SMPTEST.BIN
+[IDLESTUCK] slot=24 pid=24 st=4 parent=-1 wake=0 rip=0x0000001000001030 MONITORT.BIN
+[IDLESTUCK] slot=25 pid=25 st=4 parent=-1 wake=0 rip=0x0000001000000000 NFSTEST.BIN
+[IDLESTUCK] slot=26 pid=26 st=4 parent=-1 wake=0 rip=0x00000010000013B0 ERRTEST.BIN
+[IDLESTUCK] slot=27 pid=27 st=4 parent=-1 wake=0 rip=0x0000001000000728 HELLO.BIN
+[IDLESTUCK] slot=28 pid=28 st=4 parent=-1 wake=0 rip=0x00000010000060A0 CAT.BIN
+[IDLESTUCK] slot=29 pid=29 st=4 parent=-1 wake=0 rip=0x00000010000055E3 LS.BIN
+[IDLESTUCK] slot=30 pid=30 st=4 parent=-1 wake=0 rip=0x0000001000010748 SH.BIN
+[IDLESTUCK] slot=31 pid=31 st=4 parent=-1 wake=0 rip=0x0000001000001268 LKSTEST.BIN
+[IDLESTUCK] slot=32 pid=32 st=4 parent=-1 wake=0 rip=0x0000001000000D08 HEDTEST.BIN
+[IDLESTUCK] slot=33 pid=33 st=4 parent=-1 wake=0 rip=0x0000001000000000 TAILTEST.BIN
+[IDLESTUCK] slot=34 pid=34 st=4 parent=-1 wake=0 rip=0x0000001000001798 PROCTEST.BIN
+[IDLESTUCK] slot=35 pid=35 st=4 parent=-1 wake=0 rip=0x0000001000000D28 WCTEST.BIN
+[IDLESTUCK] slot=36 pid=36 st=4 parent=-1 wake=0 rip=0x00000010000017A5 REGTEST.BIN
+[IDLESTUCK] slot=37 pid=37 st=4 parent=-1 wake=0 rip=0x0000001000001658 SEDTEST.BIN
+[IDLESTUCK] slot=38 pid=38 st=4 parent=-1 wake=0 rip=0x0000001000001820 GREPTEST.BIN
+[IDLESTUCK] slot=40 pid=40 st=4 parent=-1 wake=0 rip=0x00000010000010F8 CUTTEST.BIN
+[IDLESTUCK] slot=42 pid=42 st=4 parent=-1 wake=0 rip=0x0000001000000000 TRTEST.BIN
+[IDLESTUCK] slot=43 pid=43 st=4 parent=-1 wake=0 rip=0x0000001000000000 PASTE_T.BIN
+[IDLESTUCK] slot=44 pid=44 st=4 parent=-1 wake=0 rip=0x00000010000012B8 FOLDTEST.BIN
+[IDLESTUCK] slot=45 pid=45 st=4 parent=-1 wake=0 rip=0x0000001000001168 NLTEST.BIN
+[IDLESTUCK] slot=46 pid=46 st=4 parent=-1 wake=0 rip=0x0000001000000F15 COMMTEST.BIN
+[IDLESTUCK] slot=47 pid=47 st=4 parent=15 wake=0 rip=0x0000001000000143 SMPTEST.BIN
+[IDLESTUCK] slot=48 pid=48 st=4 parent=-1 wake=0 rip=0x0000001000001CF0 TSORT_T.BIN
+[IDLESTUCK] slot=49 pid=49 st=4 parent=-1 wake=0 rip=0x00000010000010B5 EXPAND_T.BIN
+[IDLESTUCK] slot=50 pid=50 st=4 parent=-1 wake=0 rip=0x00000010000010F8 UNEXPAND_T.BIN
+[IDLESTUCK] slot=51 pid=51 st=4 parent=15 wake=0 rip=0x0000001000000146 SMPTEST.BIN
+[IDLESTUCK] slot=52 pid=52 st=4 parent=-1 wake=0 rip=0x0000001000000000 CKSUM_T.BIN
+[IDLESTUCK] slot=53 pid=53 st=4 parent=-1 wake=0 rip=0x00000010000010C8 MD5SUM_T.BIN
+[IDLESTUCK] slot=54 pid=54 st=4 parent=-1 wake=0 rip=0x0000001000001DC0 TACTEST.BIN
+[IDLESTUCK] slot=55 pid=55 st=4 parent=-1 wake=0 rip=0x0000001000000000 CMPTEST.BIN
+[IDLESTUCK] slot=56 pid=56 st=4 parent=-1 wake=0 rip=0x0000001000000000 POLLTST.BIN
+[IDLESTUCK] slot=57 pid=57 st=4 parent=-1 wake=0 rip=0x0000001000001710 RANDTST.BIN
+[IDLESTUCK] slot=58 pid=58 st=4 parent=-1 wake=0 rip=0x0000001000000000 SOCK2TST.BIN
+[IDLESTUCK] slot=59 pid=59 st=4 parent=-1 wake=0 rip=0x00000010000017D0 FPU_T.BIN
+[IDLESTUCK] slot=60 pid=60 st=4 parent=-1 wake=0 rip=0x0000001000009E59 GFXBENCH.BIN
+[IDLESTUCK] slot=61 pid=61 st=4 parent=-1 wake=0 rip=0x0000001000001B00 MATH_T.BIN
+[IDLESTUCK] slot=62 pid=62 st=4 parent=-1 wake=0 rip=0x0000001000001285 CXXSMOKE.BIN
+[IDLESTUCK] slot=63 pid=63 st=4 parent=-1 wake=0 rip=0x0000001000000000 DNSTST.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=-1 c7=-1
+[ORPHAN-WAIT] slot=13 pid=13 name=SPAWN.BIN parent=-1 wake_ms=1972322 waited_ms=60002 -- blocked past the wave budget with no possible waker: excluded from the wave-end predicate (the slot is NOT reaped)
+[HALT-CD] cpu=1 free=4 alloc=0 exited=59 running=0 blocked=1 other=0
+System halt from CPU [HALT-CD] cpu=7 free=4 alloc=0 exited=59 running=0 blocked=1 other=0
+1.
+[

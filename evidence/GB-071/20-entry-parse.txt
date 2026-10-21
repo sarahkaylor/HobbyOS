@@ -1,0 +1,14 @@
+ENTRY-KBUF occurrences (raw tag count): 1870
+parsed with pid+rdi: 1495
+distinct rdi values: 751
+  rdi=0x000000007559dbe0  x99
+  rdi=0x00000000755bdbe0  x98
+  rdi=0x000000007558dbe0  x94
+  rdi=0x00000000755fdbe0  x88
+  rdi=0x00000000755fdbc8  x45
+  rdi=0x000000007559dbc8  x43
+  rdi=0x000000007558dbc8  x40
+  rdi=0x00000000755edbc8  x35
+pids seen: {'3': 25, '2': 30, '5': 11, '6': 43, '4': 9, '7': 21, '000100000': 1, '8': 10, '9': 7, '10': 11}
+family-B faults: 18 pids: ['3', '4', '5', '9', '10', '11', '18', '22', '24', '25', '26', '28']
+overlap: ['3', '4', '5', '9', '10', '11', '18', '22', '24', '25', '26', '28']
