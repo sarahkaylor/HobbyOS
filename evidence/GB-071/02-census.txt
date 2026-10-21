@@ -1,0 +1,33 @@
+raw 'memory fault VA=' occurrences: 60
+parsed lines with pid/PC/rw:        60
+parse coverage:                     100.0%
+
+family-B shape (rw=r, VA>=0x70000000, kernel range): 18
+family-A-ish (rw=w, region=NONE):                        42
+
+=== family B rows (pid, name, VA, PC, sys, ret) ===
+  pid=3   SHTEST.BIN     VA=0x0000755edbc8 PC=0x10000029f0 sys=None ret=0x000000000000  in=PROT
+  pid=4   SHTEST2.BIN    VA=0x0000755edbc8 PC=0x10000021f0 sys=None ret=0x000000000000  in=PROT
+  pid=5   SHTEST3.BIN    VA=0x0000755edbc8 PC=0x10000022e0 sys=None ret=0x000000000000  in=PROT
+  pid=9   BLKTEST.BIN    VA=0x0000755fdbe0 PC=0x1000005550 sys=None ret=0x000000000000  in=PROT
+  pid=10  FATBIG_T.BIN   VA=0x0000755fdbc8 PC=0x1000001230 sys=None ret=0x000000000000  in=PROT
+  pid=11  LFN_T.BIN      VA=0x0000755fdbc8 PC=0x1000003490 sys=None ret=0x000000000000  in=PROT
+  pid=20  WSRF_T.BIN     VA=0x0000755cdbc8 PC=0x1000003360 sys=None ret=0x000000000000  in=PROT
+  pid=24  STRESS.BIN     VA=0x0000755cdbc8 PC=0x10000022d0 sys=None ret=0x000000000000  in=PROT
+  pid=25  MONITORT.BIN   VA=0x0000755adbc8 PC=0x1000001040 sys=None ret=0x000000000000  in=PROT
+  pid=26  NFSTEST.BIN    VA=0x0000755bdbc8 PC=0x10000036d0 sys=None ret=0x000000000000  in=PROT
+  pid=27  ERRTEST.BIN    VA=0x0000755edbc8 PC=0x10000013c0 sys=75 ret=0x000000000000  in=PROT
+  pid=33  CAT.BIN        VA=0x00007558dbc8 PC=0x10000060a0 sys=20 ret=0xffffffffffffffff  in=PROT
+  pid=35  LS.BIN         VA=0x0000755edbc8 PC=0x1000006020 sys=20 ret=0xffffffffffffffff  in=PROT
+  pid=51  POLLTST.BIN    VA=0x0000755edbc8 PC=0x1000001fa0 sys=None ret=0x000000000000  in=PROT
+  pid=52  RANDTST.BIN    VA=0x0000755ddbc8 PC=0x1000001720 sys=None ret=0x000000000000  in=PROT
+  pid=53  SOCK2TST.BIN   VA=0x0000755edbc8 PC=0x1000002190 sys=None ret=0x000000000000  in=PROT
+  pid=54  FPU_T.BIN      VA=0x0000755ddbc8 PC=0x10000017e0 sys=None ret=0x000000000000  in=PROT
+  pid=58  DNSTST.BIN     VA=0x0000755edbc8 PC=0x1000001d20 sys=None ret=0x000000000000  in=PROT
+
+family B by syscall number: [(None, 15), (20, 2), (75, 1)]
+family B by process:        [('SHTEST.BIN', 1), ('SHTEST2.BIN', 1), ('SHTEST3.BIN', 1), ('BLKTEST.BIN', 1), ('FATBIG_T.BIN', 1), ('LFN_T.BIN', 1), ('WSRF_T.BIN', 1), ('STRESS.BIN', 1), ('MONITORT.BIN', 1), ('NFSTEST.BIN', 1), ('ERRTEST.BIN', 1), ('CAT.BIN', 1), ('LS.BIN', 1), ('POLLTST.BIN', 1), ('RANDTST.BIN', 1), ('SOCK2TST.BIN', 1), ('FPU_T.BIN', 1), ('DNSTST.BIN', 1)]
+
+family-B faults whose last syscall RETURN (ret) is a kernel address: 2
+  pid=33 CAT.BIN sys=20 ret=0xffffffffffffffff VA=0x7558dbc8
+  pid=35 LS.BIN sys=20 ret=0xffffffffffffffff VA=0x755edbc8

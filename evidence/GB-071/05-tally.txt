@@ -1,0 +1,5 @@
+fault lines: 40
+rw=r (family B shape): 13  rw=w: 27
+family-B lines where rdi == VA (the pointer is the argument): 13/13
+sys= histogram (last syscall before the fault): {'-1': 10, '75': 1, '20': 2}
+PC low-16 histogram: [('29F0', 1), ('21F0', 1), ('22E0', 1), ('5550', 1), ('1230', 1), ('3490', 1), ('1040', 1), ('36D0', 1)]
