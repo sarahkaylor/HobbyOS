@@ -1,0 +1,18 @@
+  PASS reject-bad-magic           -> bad ELF magic
+  PASS reject-class32             -> ELFCLASS32 unsupported (64-bit only)
+  PASS reject-bigendian           -> big-endian image
+  PASS reject-arm-machine         -> not EM_X86_64
+  PASS reject-dyn-interp          -> PT_INTERP present: dynamic binary
+  PASS reject-truncated           -> segment range outside file or wrapping
+  PASS reject-phoff-oob           -> program header table outside file
+  PASS reject-phnum-zero          -> no PT_LOAD segment
+  PASS reject-interp              -> PT_INTERP present: dynamic binary
+  PASS reject-nonload-only        -> no PT_LOAD segment
+  PASS reject-filesz-gt-memsz     -> p_filesz > p_memsz
+  PASS reject-overlap             -> PT_LOAD segments overlap
+  PASS reject-bad-entry           -> e_entry outside every executable segment
+  PASS reject-no-exec             -> no executable segment
+  PASS real binary /tmp/sdl2-repro/sdl2_static_test -> ok (entry 0x401ac0, 4 segs)
+  PASS real binary plan: 4 region(s), span 0x26b000, first off 0x0 fl 0x4
+=== 84 checks, 0 failed ===
+ALL ELF IMAGE HOST TESTS PASSED

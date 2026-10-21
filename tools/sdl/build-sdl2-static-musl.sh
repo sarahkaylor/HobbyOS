@@ -45,6 +45,7 @@ CC="clang --target=x86_64-linux-musl" ./configure --host=x86_64-pc-linux-musl \
   --disable-video-x11 --disable-video-wayland --disable-video-opengl \
   --disable-video-vulkan --disable-alsa --disable-pulseaudio --disable-audio \
   --disable-joystick --disable-haptic --disable-power --disable-filesystem \
+  CFLAGS="-O2 -ffile-prefix-map=$PWD=. -fdebug-prefix-map=$PWD=." \
   > configure.log
 
 make -j"$(nproc)" > make.log
@@ -55,7 +56,10 @@ sha256sum build/.libs/libSDL2.a | tee "$DEST/libSDL2.a.sha256"
 
 # Link the hello app as a static musl ELF.  -static gives a static link; the
 # app must also link as non-PIE for the HobbyOS loader (checked by `file`).
+# The prefix-map flags keep the source path out of the embedded DWARF so the
+# artifact hash depends on inputs only, not on where the tree was unpacked.
 clang --target=x86_64-linux-musl -static -no-pie \
+  -ffile-prefix-map="$PWD"=. -fdebug-prefix-map="$PWD"=. \
   -I include "${SDL2_STATIC_TEST_SRC:-$SCRIPT_DIR/sdl2_static_test.c}" \
   build/.libs/libSDL2.a -lm -lpthread -ldl -o "$DEST/sdl2_static_test"
 

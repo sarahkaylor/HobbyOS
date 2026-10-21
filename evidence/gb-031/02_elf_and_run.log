@@ -1,0 +1,6 @@
+$ readelf -h /tmp/sdl2-repro/sdl2_static_test | grep -E 'Type|Machine'
+  Type:                              EXEC (Executable file)
+  Machine:                           Advanced Micro Devices X86-64
+
+$ SDL_VIDEODRIVER=dummy timeout 10 /tmp/sdl2-repro/sdl2_static_test
+EXIT=0
