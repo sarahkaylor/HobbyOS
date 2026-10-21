@@ -168,6 +168,14 @@ def launch_seen(new_serial, spec):
             f"[LAUNCH] /GAMES/{spec}" in new_serial)
 
 
+def launch_retry_needed(launched, attempt, retries):
+    """Keep retrying while the launch has not appeared and attempts remain.
+    `retries` = total attempts allowed; GB-046-V: a persistent no-op (all
+    attempts exhausted unfired) still FAILs — retry only recovers transient
+    menu no-ops, it does not mask a launch that never happens."""
+    return (not launched) and (attempt < retries - 1)
+
+
 # --- QEMU plumbing (reused from evidence_rig) ---------------------------
 from evidence_rig import QMP, boot, find_menu_slot, launch_from_menu
 
@@ -209,6 +217,13 @@ def main():
                     help="QEMU RSS growth allowed over the WHOLE run (floor->peak)")
     ap.add_argument("--crop", default="0,0,1820,1010",
                     help="playfield crop x0,y0,x1,y1 (excludes desktop clock+taskbar)")
+    ap.add_argument("--launch-retries", type=int, default=3,
+                    help="bounded re-attempts per visit if [LAUNCH] <name> "
+                         "does not appear (recovers transient menu no-ops; "
+                         "a persistent no-op still FAILs the visit)")
+    ap.add_argument("--launch-retry-delay", type=float, default=1.5,
+                    help="seconds to wait after each launch attempt before "
+                         "checking the serial for [LAUNCH]")
     ap.add_argument("--arch", default="arm", choices=["arm", "intel"])
     ap.add_argument("--root", default=os.getcwd())
     args = ap.parse_args()
@@ -252,7 +267,33 @@ def main():
                 ok = False
                 continue
             ser_len = os.path.getsize(serial_log) if os.path.exists(serial_log) else 0
-            launch_from_menu(q, slot)
+
+            # Bounded launch retry (GB-046 launch-reliability): the desktop
+            # menu-click launch path intermittently no-ops (the QMP/desktop
+            # input path).  Retry until [LAUNCH] <spec> appears or attempts are
+            # exhausted; a persistent no-op still FAILs the visit.
+            launched = False
+            new_serial = ""
+            for attempt in range(args.launch_retries):
+                if attempt > 0:
+                    q.key("esc", 0.4)      # close anything the prior attempt opened
+                    time.sleep(1.0)
+                launch_from_menu(q, slot)
+                time.sleep(args.launch_retry_delay)
+                new_serial = ""
+                try:
+                    with open(serial_log, "rb") as f:
+                        f.seek(ser_len)
+                        new_serial = f.read().decode(errors="ignore")
+                except OSError:
+                    pass
+                if launch_seen(new_serial, spec):
+                    launched = True
+                    break
+                if not launch_retry_needed(launched, attempt, args.launch_retries):
+                    break
+                print(f"[perf] retry {spec} (cycle {cyc}) attempt "
+                      f"{attempt + 1}/{args.launch_retries}: [LAUNCH] not yet in serial")
             time.sleep(1.0)
 
             wd = FreezeWatchdog(args.freeze_window)
@@ -267,17 +308,6 @@ def main():
                 time.sleep(1.0)
             frozen = wd.frozen
 
-            # GB-046-V: a visit that never launched its game is a FAIL.  The
-            # desktop prints [LAUNCH] <name> to serial on a real spawn; check
-            # the serial bytes accumulated since this launch began.
-            new_serial = ""
-            try:
-                with open(serial_log, "rb") as f:
-                    f.seek(ser_len)
-                    new_serial = f.read().decode(errors="ignore")
-            except OSError:
-                pass
-            launched = launch_seen(new_serial, spec)
             if not launched:
                 print(f"[perf] FAIL: {spec} (cycle {cyc}) never appeared in "
                       f"serial (launch no-op) — new serial bytes "
