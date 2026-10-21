@@ -1,0 +1,9 @@
+$ bash tools/gate/t4_w0.sh --serial obj/t3_intel.log --members 'HELLO SH CAT LS'
+=== t4_w0: W0 corpus gate over obj/t3_intel.log ===
+  PASS HELLO (arrived in guest)
+  PASS SH (arrived in guest)
+  PASS CAT (arrived in guest)
+  PASS LS (arrived in guest)
+t4_w0: PASS — every W0 corpus member arrived in the intel wave (arrival only: the
+               output half needs a '[W0] <member> linux=' marker, which no program emits yet)
+EXIT=0
