@@ -814,17 +814,22 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
 #else
   process_set_entry(pid, USER_IMG_BASE, USER_MAIN_STK_TOP_V2);
 #endif
-  uart_puts("v2 loader: PID=");
-  print_int(pid);
-  uart_puts(" entry=");
-  uart_print_hex(is_elf ? elf_entry : USER_IMG_BASE);
-  uart_puts(" sp=");
-  uart_print_hex(USER_MAIN_STK_TOP_V2);
-  uart_puts(" resident=");
-  print_int((int)as->resident_frames);
-  uart_puts(" tables=");
-  print_int((int)as->table_frames);
-  uart_puts("\n");
+  {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "v2 loader: PID=");
+    kl_i(&kl, (long)pid);
+    kl_s(&kl, " entry=");
+    kl_hex(&kl, (unsigned long)(is_elf ? elf_entry : USER_IMG_BASE));
+    kl_s(&kl, " sp=");
+    kl_hex(&kl, (unsigned long)USER_MAIN_STK_TOP_V2);
+    kl_s(&kl, " resident=");
+    kl_i(&kl, (long)as->resident_frames);
+    kl_s(&kl, " tables=");
+    kl_i(&kl, (long)as->table_frames);
+    kl_s(&kl, "\n");
+    kl_emit(&kl);
+  }
 
   /* L9 (prefetch): with the process runnable (process_set_entry above),
      hand the rest of a large image to a background loader kernel task.
