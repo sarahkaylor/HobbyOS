@@ -170,6 +170,25 @@ int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
     return -ENOEXEC;
   }
 
+  /* GB-013: apply the static-PIE's R_*_RELATIVE relocations over the laid-out
+     image, before it is mapped.  Without this the program enters correctly (the
+     entry is e_entry, the segments are mapped) and then faults at the first
+     indirect call, because every GOT slot still holds a link-time value
+     relative to 0 -- measured as PC=0/VA=0, which reads like a null dereference
+     in user code.  A refusal here is a real refusal: elf_apply_relocations
+     returns ELF_ERR_RELOC rather than skipping a type it does not implement. */
+  {
+    int rrc = elf_apply_relocations(&img, (uint8_t *)stage, span, USER_IMG_BASE);
+    if (rrc != ELF_OK) {
+      uart_puts("elf loader: relocations: ");
+      uart_puts(elf_strerror(rrc));
+      uart_puts("\n");
+      for (uint64_t i = 0; i < stage_pages; i++)
+        frame_free(stage + i * FRAME_SIZE);
+      return -ENOEXEC;
+    }
+  }
+
   /* Insert one region per plan region at base + off, with its real
      protection, then eager-map it.  base is USER_IMG_BASE: a static-PIE's
      lowest PT_LOAD is at 0, so base+off = USER_IMG_BASE + off keeps the ELF's
