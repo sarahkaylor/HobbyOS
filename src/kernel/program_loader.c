@@ -800,6 +800,22 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
   }
 
 #ifdef __x86_64__
+  /* GB-068 follow-on: the stack is a DEMAND-ZERO region (VM_MAP_PRIVATE with
+     phys 0, inserted above), so its pages exist logically but not physically.
+     enter_user_space copies the 296-byte initial frame into the user stack FROM
+     KERNEL MODE (`rep movsq` to gs:[24]-320), and a kernel-mode write cannot be
+     demand-paged -- there is no user trap to service. Measured: after fixing
+     target_sp to the real stack top, the frame copy faulted at CR2=0x17FFFFFED0
+     (the last page of the stack, 0x18 into the copy) and triple-faulted the CPU.
+     vm_touch materializes the pages so the kernel may write them directly, which
+     is exactly what this contract needs. The v1 path never hit this because it
+     maps the whole 32 MB region up front.
+     Touch a full page below the top: the frame window is [TOP-320, TOP). */
+  if (child->as && vm_touch(child, USER_MAIN_STK_TOP_V2 - 4096, 4096, /*write=*/1) != 0) {
+    uart_puts("v2 loader: stack prefault failed\n");
+    process_free(pid);
+    return -ENOMEM;
+  }
   if (is_elf) {
     /* GB-013: the ELF mapper set the runtime entry (base+e_entry).  Mark the
        process Linux-ABI so its x86_64 syscall traps route to the compat table
