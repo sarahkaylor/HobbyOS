@@ -1,0 +1,3 @@
+mcopy -i disk.img obj/arm/xnibbler.bin ::/XNIBBLER.BIN
+[MENU] 19=XNIBBLER.BIN
+[LAUNCH] XNIBBLER.BIN

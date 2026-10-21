@@ -1,0 +1,7 @@
+boot      1920x1080  centre region: 70 distinct colours, 622080/622080 nonzero px (100.0%)
+launch    1920x1080  centre region: 5 distinct colours, 622080/622080 nonzero px (100.0%)
+gameplay  1920x1080  centre region: 5 distinct colours, 622080/622080 nonzero px (100.0%)
+
+boot -> launch: 2026751/2073600 pixels changed (97.74%)
+launch -> gameplay: 9748/2073600 pixels changed (0.47%)
+boot -> gameplay: 2026767/2073600 pixels changed (97.74%)

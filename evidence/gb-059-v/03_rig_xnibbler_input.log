@@ -1,0 +1,6 @@
+$ python3 tools/evidence_rig.py --game XNIBBLER --arch arm --input down,down,left --run-seconds 10
+[rig] booting arm QEMU, capturing to evidence/XNIBBLER/20261021T034901Z
+[rig] XNIBBLER.BIN slot: found by name = 19 (launching 19, by name)
+[rig] evidence bundle: evidence/XNIBBLER/20261021T034901Z
+[rig] report: XNIBBLER-EVIDENCE-REPORT.md
+EXIT=0
