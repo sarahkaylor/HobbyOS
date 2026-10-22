@@ -1253,8 +1253,30 @@ int file_close(struct process *cur, int fd) {
   cur = process_group(cur); /* P1 (D7): the fd table is group state */
   if (!cur || fd < 0 || fd >= MAX_OPEN_FDS) return -1;
 
-  int g_fd = cur->open_fds[fd];
-  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
+  /* SEC-9 (security-plan.md #9): claim the fd slot atomically before
+   * touching anything.  The old form read open_fds[fd], dropped the ref
+   * under f->lock, and only then wrote -1 — so two threads sharing the
+   * group (a sibling's close(), a racing teardown in process_kill_group_sig
+   * or group_teardown) could both snapshot the same g_fd and both run the
+   * whole release: double pipe_close/usock_close, ref_count driven below
+   * the true count, slot freed while other fds still referenced it.  The
+   * claim IS the "closing" flag the plan suggests: whoever swaps the slot
+   * to -1 under proc_lock owns the single release; every later close of
+   * that fd is a plain EBADF no-op (idempotent by construction). */
+  int g_fd;
+  {
+    uint64_t cflags = spinlock_acquire_irqsave(&proc_lock);
+    g_fd = cur->open_fds[fd];
+    if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) {
+      spinlock_release_irqrestore(&proc_lock, cflags);
+      return -1;
+    }
+    cur->open_fds[fd] = -1;
+    cur->fd_cloexec &= ~(1u << fd); /* P5 (D3.2): closing discards fd flags */
+    if (cur->num_open_fds > 0)
+      cur->num_open_fds--;
+    spinlock_release_irqrestore(&proc_lock, cflags);
+  }
 
   struct file *f = &global_file_table[g_fd];
   FS_SLOT_CHECK(f);
@@ -1288,9 +1310,6 @@ int file_close(struct process *cur, int fd) {
 
   if (lock_release) file_locks_release(cur->pid, lock_id);
 
-  cur->open_fds[fd] = -1;
-  cur->fd_cloexec &= ~(1u << fd); /* P5 (D3.2): closing discards fd flags */
-  cur->num_open_fds--;
   return 0;
 }
 

@@ -81,6 +81,45 @@ static void test_file_slot_sentinel(void) {
   process_kill(pid);
 }
 
+/* SEC-9 (security-plan.md #9): file_close must be idempotent — the fd slot
+ * is claimed under proc_lock at close time, so a second close of the same
+ * fd (the loser of a teardown/close race) is a plain no-op error and can
+ * never drive ref_count below the true count. */
+static void test_file_close_idempotent(void) {
+  tests_run++;
+  uart_puts("  Running test_file_close_idempotent...\n");
+
+  int pid = process_create();
+  EXPECT_EQ((pid >= 0), 1);
+  process_get_pcb(pid)->is_kernel_process = 1;
+  int old_pid = cpu_current_pids[0];
+  set_current_process_pid(0, pid);
+  struct process *cur = current_process();
+
+  int fd = file_open(cur, "/dev/null", 0);
+  EXPECT_EQ((fd >= 0), 1);
+  int gfd = cur->open_fds[fd];
+  int fd2 = file_dup(cur, fd); /* same slot, ref_count 2 */
+  EXPECT_EQ((fd2 >= 0 && fd2 != fd), 1);
+
+  /* First close drops one reference; the dup keeps the slot alive. */
+  EXPECT_EQ(file_close(cur, fd), 0);
+  EXPECT_EQ(fs_test_slot_type(gfd), (int)FILE_TYPE_DEVNULL);
+
+  /* Second close releases the last reference: slot returns to EMPTY. */
+  EXPECT_EQ(file_close(cur, fd2), 0);
+  EXPECT_EQ(fs_test_slot_type(gfd), (int)FILE_TYPE_EMPTY);
+
+  /* Repeat closes of both fds are no-op errors and leave the freed slot
+     alone — this is what a losing racer does after the winner closed. */
+  EXPECT_EQ(file_close(cur, fd), -1);
+  EXPECT_EQ(file_close(cur, fd2), -1);
+  EXPECT_EQ(fs_test_slot_type(gfd), (int)FILE_TYPE_EMPTY);
+
+  set_current_process_pid(0, old_pid);
+  process_kill(pid);
+}
+
 /* ---- P6.1 (browser.md section 6): record locks + ftruncate --------------
  *
  * The fcntl record-lock commands are driven through the same kernel entry
@@ -399,6 +438,7 @@ void fs_test_suite(void) {
 
   test_fs_file_open_close();
   test_file_slot_sentinel(); /* SEC-6: no stranded/untyped slots */
+  test_file_close_idempotent(); /* SEC-9: claim-once close semantics */
   test_fs_record_locks();
   test_fs_ftruncate();
   test_fs_ftruncate_extend_then_write(); /* W3-kernel: mkfs -C extend-then-write */

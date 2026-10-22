@@ -723,8 +723,9 @@ static void group_teardown(struct process *grp, uint64_t code) {
   grp->as = 0;
   spinlock_release_irqrestore(&proc_lock, flags);
 
-  /* Close the group's descriptors once.  file_close() re-checks each slot
-     under its own file lock, so even a racing path stays consistent. */
+  /* Close the group's descriptors once.  SEC-9 (security-plan.md #9):
+   * file_close() claims each fd slot under proc_lock, so a racing kill
+   * teardown or sibling close() releases every g_fd exactly once. */
   for (int i = 0; i < MAX_OPEN_FDS; i++) {
     if (grp->open_fds[i] != -1)
       file_close(grp, i);
@@ -2046,13 +2047,16 @@ void process_kill_group_sig(struct process *p, int sig) {
   reap_deliver_locked(p);
   spinlock_release_irqrestore(&proc_lock, flags);
 
-  // We close the global file descriptors directly to properly free resources
-  for (int i = 0; i < MAX_OPEN_FDS; i++) {
-    if (p->open_fds[i] != -1) {
-      fs_close_global(p->open_fds[i]);
-      p->open_fds[i] = -1;
-    }
-  }
+  /* SEC-9 (security-plan.md #9): close through file_close(), which claims
+   * each fd slot atomically under proc_lock.  The old loop snapshotted
+   * open_fds[i] and called fs_close_global() outside any lock, so a
+   * concurrent teardown (group_teardown on normal exit) or a sibling
+   * thread's close() could release the same g_fd twice — double
+   * pipe_close/usock_close and ref_count driven below the true count.
+   * The claim makes the loser of the race a plain no-op: exactly one
+   * release per fd, whichever path wins. */
+  for (int i = 0; i < MAX_OPEN_FDS; i++)
+    file_close(p, i);
   process_wake_all();
 }
 
