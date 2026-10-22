@@ -1,0 +1,11 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1800s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-289f3b84/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 9260 console lines, 4 FAIL lines, 60 user memory fault records across 54 processes, 66 programs exited, halted=1
+T3_intel: FAIL — 4 FAIL line(s); first 20:
+9107:  FAIL: line startpoint[ENTRY-KBUF] pid=16 rdi=0x00000000755EDBC8 vec=129
+9110:  FAIL: line midpoint
+9111:  FAIL: line endpoint
+9126:GRAPHICS TESTS FAILED
+T3_intel EXIT=1
+EXIT=1
