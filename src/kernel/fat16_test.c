@@ -1494,10 +1494,41 @@ static void test_fat16_mkdir_dup_atomic(void) {
   EXPECT_EQ(fat16_rmdir("/SECDIR1"), 0);
 }
 
+/* SEC-5: close-time write-back must refuse a slot that was recreated under
+   the open handle.  Old guard compared only the 11-byte name, so an
+   unlink+recreate of the SAME name let a stale cached copy overwrite the new
+   entry's cluster/size — silent corruption. */
+static void test_fat16_sync_clobber_guard(void) {
+  tests_run++;
+  uart_puts("  Running test_fat16_sync_clobber_guard...\n");
+
+  struct file f;
+  (void)fat16_unlink("/SECSYN.TXT");
+  EXPECT_EQ(fat16_open_ex("/SECSYN.TXT", &f, 0), 0);
+  EXPECT_EQ(fat16_write(&f, "AAAA", 4), 4); /* dirty handle; fd stays open */
+
+  /* Recreate the same name under the open handle. */
+  EXPECT_EQ(fat16_unlink("/SECSYN.TXT"), 0);
+  struct file g;
+  EXPECT_EQ(fat16_open_ex("/SECSYN.TXT", &g, 1), 0);
+  fat16_close(&g); /* fresh, empty entry — likely the very same slot */
+
+  /* The stale handle's write-back must be refused (nonzero). */
+  EXPECT_EQ((fat16_close(&f) != 0), 1);
+
+  /* The recreated file survived intact: still empty, not the stale 4 bytes. */
+  struct fat16_dir_entry e;
+  EXPECT_EQ(fat16_resolve_path("/SECSYN.TXT", &e, 0, 0), 0);
+  EXPECT_EQ(e.file_size, 0);
+
+  (void)fat16_unlink("/SECSYN.TXT");
+}
+
 void fat16_test_suite(void) {
   uart_puts("fat16_test_suite:\n");
   test_fat16_open_excl(); /* SEC-1: atomic O_CREAT|O_EXCL */
   test_fat16_mkdir_dup_atomic(); /* SEC-1: race-safe mkdir duplicate check */
+  test_fat16_sync_clobber_guard(); /* SEC-5: guarded dirent write-back */
   test_fat16_open_existing();
   test_fat16_open_nonexistent();
   test_fat16_created_entry_has_attr();
