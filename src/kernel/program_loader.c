@@ -342,25 +342,6 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
       child->open_fds[1] = parent->open_fds[stdout_fd];
       fs_reopen(child->open_fds[1]);
       child->num_open_fds++;
-    } else {
-      /* Default: inherit the parent's fd 1 when it is NOT a pipe, the same rule
-         and the same reason as the fd 2 default below.
-         GB-024 (2026-10-21): before this, a "-1 stdout" meant NO stdout at all,
-         and the boot wave calls every corpus program with -1/-1/-1/-1 -- so
-         hello, cat and ls ran correctly, exited cleanly, and printed into
-         nothing. Measured on ARM: 4 of 4 W0 members dispatched, arrived and
-         exited, 0 faults, clean halt, and not one byte of program output. The
-         same console output would have been produced by a correct corpus and a
-         broken one, which is why the gate's "expected output" clause could never
-         be satisfied. Wiring the console through here is what makes the corpus
-         audible; the pipe guard is kept because a duplicated pipe end is how
-         SH.BIN used to wedge on a full stdout pipe (see the fd 2 note). */
-      int gf1 = parent->open_fds[1];
-      if (gf1 != -1 && !file_gfd_is_pipe(gf1)) {
-        child->open_fds[1] = gf1;
-        fs_reopen(gf1);
-        child->num_open_fds++;
-      }
     }
     if (stderr_fd >= 0 && stderr_fd < MAX_OPEN_FDS && parent->open_fds[stderr_fd] != -1) {
       child->open_fds[2] = parent->open_fds[stderr_fd];
