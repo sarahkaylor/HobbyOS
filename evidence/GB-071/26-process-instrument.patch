@@ -1,0 +1,39 @@
+diff --git a/src/kernel/process.c b/src/kernel/process.c
+index 5f161af..9fc8ca8 100755
+--- a/src/kernel/process.c
++++ b/src/kernel/process.c
+@@ -6,6 +6,7 @@
+ #include "mmu.h"
+ #include "setjmp.h"
+ #include "arch/cpu.h"
++#include "kline.h"
+ #include "timer.h"
+ #include "errno.h"
+ #include "syscall.h"
+@@ -1165,6 +1166,26 @@ int process_create_kernel_nowait(void (*entry)(void*), void *arg) {
+ }
+ 
+ void save_context(struct process *p, struct trap_frame *tf) {
++  /* GB-071 probe: is a kernel-range user rdi being SAVED into context[5], and
++     from which privilege level did it come?  cs&3==0 (kernel-mode trap) would
++     implicate the C handler's `mov rdi,rsp` frame pointer; cs&3==3 would mean
++     the value was already in the user register (produced by the restore). */
++  if (tf->regs[5] >= 0x70000000ULL) {
++    /* ONE write (kline) — separate puts/print calls interleave across 8 CPUs
++       and shred the line, which is how earlier probes lost 43% of rows. */
++    struct kline kl;
++    kl_init(&kl);
++    kl_s(&kl, "[SAVECTX-KBUF] pid=");
++    kl_i(&kl, p->pid);
++    kl_s(&kl, " cs=");
++    kl_i(&kl, (long)(tf->cs & 3));
++    kl_s(&kl, " vec=");
++    kl_i(&kl, (long)tf->vector);
++    kl_s(&kl, " rdi=");
++    kl_hex(&kl, tf->regs[5]);
++    kl_s(&kl, "\n");
++    kl_emit(&kl);
++  }
+   for (int i = 0; i < 30; i++) {
+     p->context[i] = tf->regs[i];
+   }
