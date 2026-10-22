@@ -300,7 +300,7 @@ The loop:
 | **Coordinator** | 1 | DEEP | `swarm-coordinator` (.233) | plan + board + re-plan loop + merges + escalation; primary DEEP consumer |
 | **Worker** | 3–8 | FLASH | `swarm-farm-1..3` | claim tickets, branch, code+tests, MR — one long-lived session per subsystem |
 | **Verifier** | 3 (one per farm) | DEEP | `swarm-farm-1..3` | claim `verify`+`deep` tickets, run §6 gates on own VM, post RED/GREEN verdicts; gate-running is its own role so gates parallelize. **Debug reserve:** when no `verify`+`deep` Ready ticket exists, a farm Verifier may claim a Ready `debug`+`deep` ticket (root-cause / design-freeze work that is DEEP-class but not a gate, e.g. kernel-wall debugging, build-profile freezes) and work it — this keeps DEEP wall work from serializing on the Coordinator alone |
-| **Reviewer** | 1 | FLASH | coordinator/farms | contract/diff/DoD review; flags `decision` |
+| **Reviewer** | 1 (dedicated cross-lane loop `wrev`, FLASH, farm-3) | FLASH | farm-3 + any farm | contract/diff/DoD review of In-Review + In-Progress-with-PR cards across ALL workstreams; posts APPROVE/BOUNCE/FLAG verdicts; **mints missing `GB-nnn-V` gate tickets (§4.2 step 4) for gate-ready In-Review cards so farm Verifiers gate in parallel**; flags `decision`. Review verdicts are NOT gate verdicts — Verifiers own RED/GREEN |
 | **Tester** | 1 | FLASH | `swarm-farm-1..3` | playthrough + stress harnesses, flaky triage |
 
 ### 5.2 Agent mechanics (existing Hermes capabilities; no custom build)
@@ -639,6 +639,8 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 - LLVM 21.1.8 dist-staging cached on farm-1.
 
 ### 11.8 Execution log (newest first, maintained by the Coordinator)
+
+**2026-10-22 — dedicated cross-lane Reviewer loop `wrev` added (farm-3, FLASH).** Review was previously a Coordinator inline duty (the same DEEP session doing family-B debug/plan/merge), i.e. a serial wall: all 13 In-Review cards carried only Coordinator review comments. The loop reviews every workstream (In-Review + In-Progress-with-PR cards), posts APPROVE/BOUNCE/FLAG verdicts (never RED/GREEN — Verifiers own gates), and **mints missing `GB-nnn-V` gate tickets (§4.2 step 4) for gate-ready cards** so the 3 farm Verifiers gate in parallel. First run: APPROVE GB-031 + minted `GB-031-V` (#118, Ready/verify/deep) — gate fed to the Verifier fleet; then advanced to In-Progress-with-PR cards (GB-006, GB-032, GB-035). It is a distinct flock (`swarm-review@wrev`, unit `swarm-review@.service`, AGENT=wrev-review) so it never collides with wgames/wgames-verify on farm-3.
 
 **2026-10-19/21 — GB-013 CLOSED: static-PIE relocations implemented and proven by execution. The wall is now GB-068, which kills every program.**
 
