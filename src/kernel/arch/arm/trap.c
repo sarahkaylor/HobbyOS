@@ -13,6 +13,12 @@
 #include "vfs.h"
 #include "vm.h"
 #include "blk_cache.h"
+
+/* GB-027: /dev/input/event* ioctl + Linux-ABI event read (see x64 trap.c
+ * for the ABI contract; register convention is regs[0]=a0, regs[1]=a1). */
+#include "input_node.h"
+#include "virtio_input.h"
+#include "fb_mmap.h"
 #include <stdint.h>
 
 extern jmp_buf user_exit_context;
@@ -66,22 +72,14 @@ static void sys_write_console(struct trap_frame *tf) {
   uint64_t ptr = tf->regs[0];
   int len = (int)tf->regs[1]; /* WK-1 M3: honor the length */
   struct process *p = current_process();
-  int ret;
-  if (p && p->as)
-    ret = console_write_user(p, (const void *)ptr, len);
-  else {
-    /* No process context (kernel path): legacy range check, then emit at
-       most len bytes (NUL-stops before that — the buffer is kernel text). */
-    extern void uart_putc(char c);
-    const char *s = (const char *)ptr;
-    ret = 0;
-    if (ptr >= USER_VIRT_BASE && ptr < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-      for (int i = 0; i < len && s[i]; i++)
-        uart_putc(s[i]);
-      ret = len;
-    }
-  }
-  tf->regs[0] = (uint64_t)ret;
+  /* SEC-2 (security-plan.md #2): the legacy no-context branch range-checked
+     the raw user pointer and then read it byte-by-byte in kernel mode,
+     assuming everything inside the window was a valid mapped buffer.  With
+     an address space present, console_write_user now validates AND copies
+     atomically per page (vm_user_read); without one there is nothing to
+     validate against, so reject instead of guessing. */
+  tf->regs[0] =
+      (uint64_t)(p ? console_write_user(p, (const void *)ptr, len) : -EFAULT);
 }
 
 static void sys_exit(struct trap_frame *tf) { process_exit(tf); }
@@ -724,7 +722,10 @@ struct sys_spawn_args {
   char args[HO_FLAT_ARGS_LEN]; /* w5 (vi): flat args cap 1024 */
 };
 
-static struct sys_spawn_args spawn_args_pool[64];
+/* SEC-OBS-A (security-plan.md observation A): indexed by caller->pid, so
+ * it MUST be at least the whole PID space; a hardcoded size silently goes
+ * out of bounds the day MAX_PROCESSES grows past it. */
+static struct sys_spawn_args spawn_args_pool[MAX_PROCESSES];
 
 extern void kernel_exit(void);
 
@@ -763,6 +764,13 @@ static void sys_spawn(struct trap_frame *tf) {
 
   if (sys_user_range_ok((uint64_t)filename, 1)) {
 
+    /* SEC-OBS-A: pid indexes spawn_args_pool; refuse a corrupt/out-of-range
+     * pid before writing through it. */
+    if (caller->pid < 0 || caller->pid >= MAX_PROCESSES) {
+      tf->regs[0] = -1;
+      return;
+    }
+
     struct sys_spawn_args *args = &spawn_args_pool[caller->pid];
 
     int i = 0;
@@ -792,23 +800,51 @@ static void sys_spawn(struct trap_frame *tf) {
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     save_context(caller, tf);
     caller->spawn_retval = -1;  /* failure default until the worker reports */
+    {
+      extern uint64_t timer_get_ms(void);
+      /* GB-063: bound the parked wait -- see SPAWN_WAIT_BUDGET_MS. */
+      caller->spawn_deadline_ms = timer_get_ms() + SPAWN_WAIT_BUDGET_MS;
+    }
     caller->state = PROC_STATE_WAIT_SPAWN;
     spinlock_release_irqrestore(&proc_lock, flags);
 
     extern int process_create_kernel_nowait(void (*entry)(void*), void *arg);
     extern uint64_t timer_get_ms(void);
     int wpid = process_create_kernel_nowait(sys_spawn_worker, args);
-    /* The physical pool can be momentarily full (the boot wave, sibling
-       spawns).  The caller is parked in WAIT_SPAWN and shells/tests block
-       on the spawn result, so wait (bounded, ~30 min; the same poll the
-       loader uses) for the worker slot instead of failing the spawn —
-       a failed spawn deadlocks the caller's protocol. */
-    for (int attempt = 0; attempt < 18000 && wpid < 0; attempt++) {
+    /* GB-057: this used to retry the worker slot for up to ~30 minutes
+       (18000 x 100 ms) of HOT SPIN on the calling CPU.  Under the boot
+       test wave the process table is legitimately full, and every spawn
+       caller parks in WAIT_SPAWN holding a PCB slot while its worker
+       needs a free slot from that same table: waiting longer can never
+       fix that — it is a circular wait, and several cores burning it at
+       once wedges the guest (watchdog: "console silent for more than
+       20 s", 7 CPUs at age 350 s inside this syscall, loader starved).
+       Wait while the free-slot count is MOVING (other processes exiting
+       and freeing rows — the transient case), then take the failure path
+       below: its -1 is the documented retryable class, and spawn2 callers
+       retry it with usleep(), i.e. they yield the CPU instead of stealing
+       it. */
+    uint64_t t_start = timer_get_ms();
+    uint64_t last_progress = t_start;
+    int free_before = -1;
+    for (int attempt = 0; attempt < 500 && wpid < 0; attempt++) {
       uint64_t t0 = timer_get_ms();
-      for (volatile int spin = 0; spin < 4000000; spin++) {
-        if (timer_get_ms() - t0 >= 100u) break;
+      for (volatile int spin = 0; spin < 400000; spin++) {
+        if (timer_get_ms() - t0 >= 10u) break;
       }
       wpid = process_create_kernel_nowait(sys_spawn_worker, args);
+      if (wpid >= 0)
+        break;
+      int free_now = process_free_slots();
+      uint64_t now = timer_get_ms();
+      if (free_now != free_before) {
+        free_before = free_now;
+        last_progress = now;
+      } else if (now - last_progress >= 2000u) {
+        break; /* table stalled: waiting further cannot succeed */
+      }
+      if (now - t_start >= 5000u)
+        break;
     }
     if (wpid < 0) {
       /* no free process slot for the spawn worker: the caller must not
@@ -890,6 +926,13 @@ static void sys_spawn_ex(struct trap_frame *tf) {
     return;
   }
 
+  /* SEC-OBS-A: pid indexes spawn_ex_pool; refuse a corrupt/out-of-range
+   * pid before writing through it. */
+  if (caller->pid < 0 || caller->pid >= MAX_PROCESSES) {
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return;
+  }
+
   struct ho_spawn_ex *ex = &spawn_ex_pool[caller->pid];
   int i = 0;
   while (path[i] && i < 31) {
@@ -918,20 +961,40 @@ static void sys_spawn_ex(struct trap_frame *tf) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   save_context(caller, tf);
   caller->spawn_retval = -EAGAIN; /* failure default until the worker reports */
+  {
+    extern uint64_t timer_get_ms(void);
+    /* GB-063: bound the parked wait -- see SPAWN_WAIT_BUDGET_MS. */
+    caller->spawn_deadline_ms = timer_get_ms() + SPAWN_WAIT_BUDGET_MS;
+  }
   caller->state = PROC_STATE_WAIT_SPAWN;
   spinlock_release_irqrestore(&proc_lock, flags);
 
   extern int process_create_kernel_nowait(void (*entry)(void*), void *arg);
   extern uint64_t timer_get_ms(void);
   int wpid = process_create_kernel_nowait(sys_spawn_ex_worker, ex);
-  /* Same bounded worker-slot retry as sys_spawn: the caller is parked and
-     must never wait forever for a worker that cannot run. */
-  for (int attempt = 0; attempt < 18000 && wpid < 0; attempt++) {
+  /* GB-057: same circular wait as sys_spawn — see the comment there.
+     Wait while the free-slot count moves, give up on a stall or budget. */
+  uint64_t t_start = timer_get_ms();
+  uint64_t last_progress = t_start;
+  int free_before = -1;
+  for (int attempt = 0; attempt < 500 && wpid < 0; attempt++) {
     uint64_t t0 = timer_get_ms();
-    for (volatile int spin = 0; spin < 4000000; spin++) {
-      if (timer_get_ms() - t0 >= 100u) break;
+    for (volatile int spin = 0; spin < 400000; spin++) {
+      if (timer_get_ms() - t0 >= 10u) break;
     }
     wpid = process_create_kernel_nowait(sys_spawn_ex_worker, ex);
+    if (wpid >= 0)
+      break;
+    int free_now = process_free_slots();
+    uint64_t now = timer_get_ms();
+    if (free_now != free_before) {
+      free_before = free_now;
+      last_progress = now;
+    } else if (now - last_progress >= 2000u) {
+      break;
+    }
+    if (now - t_start >= 5000u)
+      break;
   }
   if (wpid < 0) {
     /* Release-on-worker-failure (D4.4): -EAGAIN, never a hang. */
@@ -978,6 +1041,8 @@ extern void virtio_gpu_flush(void);
  * handed to the driver. */
 struct virtio_gpu_xrect { int32_t x, y, w, h; };
 extern void virtio_gpu_flush_rects(const struct virtio_gpu_xrect *rects, int count);
+extern int virtio_gpu_flush_args_ok(const struct virtio_gpu_xrect *rects,
+                                    int count); /* SEC-7 */
 extern void mmu_map_user_framebuffer(uint64_t phys_addr);
 
 static void sys_map_fb(struct trap_frame *tf) {
@@ -994,6 +1059,26 @@ static void sys_map_fb(struct trap_frame *tf) {
   }
   mmu_map_user_framebuffer(phys_addr);
   tf->regs[0] = USER_FB_VIRT_BASE; // Return user virtual address
+}
+
+/* GB-025: /dev/fb0 ioctl (SYS_FB_IOCTL).  Registers: x0=req, x1=arg.
+ * FBIOGET_VSCREENINFO/FSCREENINFO copy a Linux-layout struct OUT to arg
+ * (validated first); FBIOBLANK takes a plain value.  0 | -1 | -EFAULT. */
+static void sys_fb_ioctl(struct trap_frame *tf) {
+  unsigned long req = (unsigned long)tf->regs[0];
+  void *arg = (void *)tf->regs[1];
+  uint64_t smem_start = (uint64_t)virtio_gpu_get_framebuffer();
+
+  size_t sz = hb_fb_ioctl_arg_size(req);
+  if (sz == (size_t)-1) {
+    tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
+    return;
+  }
+  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  tf->regs[0] = (uint64_t)(int64_t)hb_fb_ioctl_route(req, arg, smem_start);
 }
 
 static void sys_flush_fb(struct trap_frame *tf) {
@@ -1022,13 +1107,71 @@ static void sys_flush_fb_rects(struct trap_frame *tf) {
     return;
   }
   struct virtio_gpu_xrect krects[32];
-  for (int i = 0; i < count; i++)
-    krects[i] = urects[i];
+  /* SEC-7: atomic validate+copy.  The old loop read user pages after a
+     separate range check (validate-then-use TOCTOU) and handed raw
+     attacker-shaped rects straight to the driver; vm_user_read validates
+     each page under vm_lock as it copies, and nothing reaches
+     virtio_gpu_flush_rects until it has passed boundary validation. */
+  if (vm_user_read(current_process(), (uint64_t)urects, krects,
+                   count * (int)sizeof(struct virtio_gpu_xrect)) != 0) {
+    tf->regs[0] = (uint64_t)-EFAULT;
+    return;
+  }
+  if (!virtio_gpu_flush_args_ok(krects, count)) {
+    tf->regs[0] = (uint64_t)-EINVAL;
+    return;
+  }
   virtio_gpu_flush_rects(krects, count);
   tf->regs[0] = 0;
 }
 
-extern int virtio_input_get_events(void *buf, int max_events);
+/* GB-027: /dev/input/event* ioctl (SYS_INPUT_IOCTL).  a0=req, a1=arg.
+ * EVIOCGVERSION/NAME/GBIT/GABS copy their Linux-ABI reply OUT to arg. */
+static void sys_input_ioctl(struct trap_frame *tf) {
+  unsigned long req = (unsigned long)tf->regs[0];
+  void *arg = (void *)tf->regs[1];
+  size_t sz = hb_input_ioctl_arg_size(req);
+  if (sz == (size_t)-1) {
+    tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
+    return;
+  }
+  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  tf->regs[0] = (uint64_t)(int64_t)hb_input_ioctl_route(req, arg);
+}
+
+/* GB-027: non-blocking /dev/input/event* read (SYS_INPUT_READ).  a0=buf,
+ * a1=max.  Drains the virtio_input ring into up to max Linux-ABI (24 B)
+ * input_event records.  Returns count read (0 = none pending). */
+static void sys_input_read(struct trap_frame *tf) {
+  struct hb_input_event *ubuf = (struct hb_input_event *)tf->regs[0];
+  int max = (int)tf->regs[1];
+  if (max < 0) {
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return;
+  }
+  if (max == 0) {
+    tf->regs[0] = 0;
+    return;
+  }
+  if (sys_user_range((uint64_t)ubuf,
+                     (uint64_t)max * sizeof(struct hb_input_event), 1)) {
+    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+  extern uint64_t timer_get_ms(void);
+  struct virtio_input_event raw[32];
+  int want = max > 32 ? 32 : max;         /* bounded scratch: non-blocking */
+  int got = virtio_input_get_events(raw, want);
+  uint64_t t = timer_get_ms();
+  uint64_t sec = t / 1000u, usec = (t % 1000u) * 1000u;
+  for (int i = 0; i < got; i++)
+    hb_input_fill_event(&ubuf[i], raw[i].type, raw[i].code, raw[i].value,
+                        sec, usec);
+  tf->regs[0] = (uint64_t)got;
+}
 
 static void sys_get_events(struct trap_frame *tf) {
   void *buf = (void *)tf->regs[0];
@@ -1128,23 +1271,26 @@ static void sys_rmdir(struct trap_frame *tf) {
  * w8-torture: validate PER PAGE, not the whole cap up front — a short
  * string near the TOP of a mapped region was dropped wholesale once the
  * w6-run cap bump made the full-range check reach past the region end
- * (mirror of pl_strcpy in program_loader.c). */
-static int u_strcpy(const char *src, char *dst, int cap) {
+ * (mirror of pl_strcpy in program_loader.c).
+ * SEC-3 (security-plan.md #3): the per-page validate-then-read split was a
+ * TOCTOU — between validating page N and reading src[i] a peer could unmap
+ * it, faulting the kernel-mode read.  vm_user_read now validates AND reads
+ * each byte atomically under vm_lock; only the current byte's page is ever
+ * touched, so the w8-torture property (short strings near a region top)
+ * still holds. */
+int u_strcpy(const char *src, char *dst, int cap) {
   if (!src || cap <= 1)
     return 0;
-  int i = 0;
-  for (;;) {
-    if (i >= cap - 1)
-      break;
-    if (!sys_user_range_ok(((uint64_t)&src[i]) & ~0xFFFULL, 1))
+  struct process *p = current_process();
+  for (int i = 0; i < cap - 1; i++) {
+    char c;
+    if (vm_user_read(p, ((uint64_t)&src[i]), &c, 1) != 0)
       return 0;
-    char c = src[i];
     dst[i] = c;
     if (c == 0)
       return 1;
-    i++;
   }
-  dst[i] = '\0';
+  dst[cap - 1] = '\0';
   return 1;
 }
 
@@ -1669,6 +1815,13 @@ void sync_handler_c(struct trap_frame *tf) {
     }
   }
   spinlock_release_irqrestore(&fatal_lock, flags);
+  /* GB-060: record the halt before stopping -- a CPU waiting on any lock this one
+     still holds can then free it and carry on, instead of spinning forever behind
+     a core that will never run again.  Same rule as the x64 fatal path. */
+  {
+    extern void cpu_halt_record(uint32_t cpu);
+    cpu_halt_record(get_cpuid());
+  }
   while (1)
     ;
 }
@@ -1696,6 +1849,17 @@ void sync_handler_c(struct trap_frame *tf) {
  * syscall.  Any added arm/x64 syscall must append an else-if here. */
 
 void sync_lower_handler_c(struct trap_frame *tf) {
+  /* SEC-10 (security-plan.md #10): the kernel stacks are contiguous static
+     64 KiB per-CPU slices — an overflow faults nowhere, it corrupts the
+     adjacent core's stack or kernel data.  Refuse to run a handler when the
+     slice is already below the deepest-path margin; halt loudly instead of
+     continuing on a doomed stack. */
+  if (kernel_stack_low(8u * 1024u)) {
+    uart_puts("KERNEL PANIC: syscall entry with exhausted kernel stack (SEC-10)\n");
+    for (;;)
+      ;
+  }
+
   /* L9 liveness: any EL0->EL1 sync entry proves this core is executing,
      not wedged (syscall, page fault, or unknown-class trap alike).  A core
      running a long-lived user process spends huge stretches between
@@ -1764,12 +1928,18 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_flush_fb(tf);
     } else if (syscall_num == SYS_FLUSH_FB_RECTS) {
       sys_flush_fb_rects(tf);
+    } else if (syscall_num == SYS_FB_IOCTL) {
+      sys_fb_ioctl(tf);
     } else if (syscall_num == SYS_GET_CPUID) {
       sys_get_cpuid(tf);
     } else if (syscall_num == SYS_PIPE) {
       sys_pipe(tf);
     } else if (syscall_num == SYS_GET_EVENTS) {
       sys_get_events(tf);
+    } else if (syscall_num == SYS_INPUT_IOCTL) {
+      sys_input_ioctl(tf);
+    } else if (syscall_num == SYS_INPUT_READ) {
+      sys_input_read(tf);
     } else if (syscall_num == SYS_AVAILABLE) {
       sys_available(tf);
     } else if (syscall_num == SYS_READ_DIR) {
@@ -1926,6 +2096,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       uart_print_hex(far);
       uart_puts(" PC=");
       uart_print_hex(tf->elr);
+      uart_puts(" LR=");
+      uart_print_hex(tf->lr);
+      uart_puts(" FP=");
+      uart_print_hex(tf->regs[29]);
       uart_puts(" rw=");
       uart_puts(wnr ? "w" : "r");
       uart_puts(is_exec ? "x" : " ");
@@ -2032,7 +2206,24 @@ void sync_lower_handler_c(struct trap_frame *tf) {
  * @param tf Pointer to the trap frame representing the user state when the
  * interrupt occurred.
  */
+/* SEC-OBS-B debug hook: rank checks do not apply inside IRQ dispatch (see
+ * lock.h).  Wrapper keeps the asm-visible symbol; inner is the original
+ * handler body unchanged. */
+static void irq_dispatch_inner(struct trap_frame *tf);
+
 void irq_lower_handler_c(struct trap_frame *tf) {
+#ifdef KERNEL_MODE_UNIT_TEST
+  extern void lockdbg_irq_enter(void);
+  extern void lockdbg_irq_exit(void);
+  lockdbg_irq_enter();
+  irq_dispatch_inner(tf);
+  lockdbg_irq_exit();
+#else
+  irq_dispatch_inner(tf);
+#endif
+}
+
+static void irq_dispatch_inner(struct trap_frame *tf) {
   /* L9 liveness (mirrors x64 general_interrupt_handler -> watchdog_tick's
      refresh): EVERY IRQ entry — timer tick, virtio blk/net/input — proves
      this core is alive and dispatching.  Refresh the ownership heartbeat
@@ -2042,6 +2233,10 @@ void irq_lower_handler_c(struct trap_frame *tf) {
      cores.  Writes only; process.c owns the array. */
   extern uint64_t timer_get_ms(void);
   cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+
+  /* SEC-OBS-B: drain deferred lost-wakeup requests here rather than at
+   * the virtio-blk completion that raised them (see process.h). */
+  process_wake_all_drain();
 
   uint32_t intid = gic_acknowledge_interrupt();
 

@@ -31,6 +31,11 @@ int fat16_init(void);
 // Opens a file from the filesystem into a generic file structure.
 int fat16_open(const char* filename, struct file* f);
 
+/* SEC-1: excl != 0 gives atomic O_CREAT|O_EXCL semantics (create-if-absent
+   decided inside one fat_lock critical section). Returns 0 on success, -2 if
+   the name exists and excl was set (caller maps to EEXIST), -1 otherwise. */
+int fat16_open_ex(const char* filename, struct file* f, int excl);
+
 // Reads bytes from a FAT16 file.
 int fat16_read(struct file* f, void* buf, int size);
 int fat16_read_direct(struct file* f, uint64_t dest, int size);

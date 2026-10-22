@@ -19,7 +19,13 @@ static spinlock_t unix_pool_lock;
 
 extern spinlock_t proc_lock;
 
-void unix_init(void) { spinlock_init(&unix_pool_lock); }
+void unix_init(void) {
+  spinlock_init(&unix_pool_lock);
+#ifdef KERNEL_MODE_UNIT_TEST
+  lockdbg_register(&unix_pool_lock, "unix_pool_lock",
+                   LOCK_RANK_BACKEND); /* SEC-OBS-B */
+#endif
+}
 
 /* Wakes every pid in the mask.  MUST be called with no spinlock held:
  * process_wakeup() takes proc_lock and the global order is

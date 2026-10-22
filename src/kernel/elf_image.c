@@ -34,6 +34,10 @@ static uint64_t rd64(const uint8_t *p) {
   return (uint64_t)rd32(p) | ((uint64_t)rd32(p + 4) << 32);
 }
 
+static void wr64(uint8_t *p, uint64_t v) {
+  for (int i = 0; i < 8; i++) p[i] = (uint8_t)(v >> (8 * i));
+}
+
 /* --- header field extraction (offsets are the ELF64 spec's, not the host's) */
 
 #define E_TYPE_OFF 16
@@ -58,6 +62,7 @@ static uint64_t rd64(const uint8_t *p) {
 #define PHDR_SIZE 56
 #define PT_NULL 0
 #define PT_LOAD 1
+#define PT_DYNAMIC 2
 #define PT_INTERP 3
 #define ET_EXEC 2
 #define ET_DYN 3
@@ -112,6 +117,10 @@ int elf_parse(const void *buf, uint64_t len, struct elf_image *img) {
   img->is_pie = (e_type == ET_DYN);
   img->needs_low_window = 0;
   img->entry = rd64(b + E_ENTRY_OFF);
+  img->dyn_vaddr = 0;
+  img->dyn_size = 0;
+  img->phoff = phoff;
+  img->phent = phentsize;
 
   int have_interp = 0;
   uint64_t base = 0, end = 0;
@@ -123,6 +132,13 @@ int elf_parse(const void *buf, uint64_t len, struct elf_image *img) {
     if (type == PT_NULL) continue;
     if (type == PT_INTERP) {
       have_interp = 1;
+      continue;
+    }
+    if (type == PT_DYNAMIC) {
+      /* GB-013: record it so the loader can apply R_*_RELATIVE.  A static-PIE
+         is only position-independent once those are applied. */
+      img->dyn_vaddr = rd64(ph + P_VADDR_OFF);
+      img->dyn_size = rd64(ph + P_MEMSZ_OFF);
       continue;
     }
     if (type != PT_LOAD) continue;
@@ -210,6 +226,46 @@ int elf_copy_into(const struct elf_image *img, const void *buf, uint64_t len,
   return ELF_OK;
 }
 
+int elf_build_plan(const struct elf_image *img, struct elf_plan *plan) {
+  if (img == NULL || plan == NULL) return ELF_ERR_ARGS;
+  if (img->nsegs == 0 || img->vaddr_end <= img->vaddr_base) return ELF_ERR_ARGS;
+  plan->nreg = 0;
+  /* Regions are emitted in vaddr order (parser guarantees ascending, so we
+     can merge incrementally).  Two regions occupying the same or an
+     overlapping page merge into the weaker-protection union (per-page prot:
+     the loader cannot split a page, so a page shared by .text and .rodata
+     must be the union of both).  Offsets are image-relative. */
+  for (uint32_t i = 0; i < img->nsegs; i++) {
+    const struct elf_segment *s = &img->segs[i];
+    if (s->memsz == 0)
+      continue; /* zero-length PT_LOAD: nothing to map */
+    uint64_t lo = elf_page_down(s->vaddr - img->vaddr_base);
+    uint64_t hi = elf_page_up(s->vaddr + s->memsz - img->vaddr_base);
+    if (plan->nreg > 0) {
+      struct elf_plan_region *last = &plan->regs[plan->nreg - 1];
+      uint64_t last_hi = last->off + last->len;
+      if (lo < last_hi) { /* shares a page with the previous region -> merge */
+        if (hi > last_hi)
+          last->len = hi - last->off;
+        last->flags |= s->flags;
+        continue;
+      }
+    }
+    if (plan->nreg >= ELF_MAX_PLAN_REGIONS)
+      return ELF_ERR_TOOMANY;
+    struct elf_plan_region *r = &plan->regs[plan->nreg++];
+    r->off = lo;
+    r->len = hi - lo;
+    r->flags = s->flags;
+  }
+  uint64_t span = elf_image_span(img);
+  /* The plan span must cover [0, vaddr_end - vaddr_base).  A leading hole
+     before the first segment is fine (unmapped, demand-zeroed), but the plan
+     must not claim regions past the image span. */
+  plan->span = span;
+  return ELF_OK;
+}
+
 const char *elf_strerror(int err) {
   switch (err) {
     case ELF_OK: return "ok";
@@ -234,6 +290,71 @@ const char *elf_strerror(int err) {
     case ELF_ERR_NO_TEXT: return "no executable segment";
     case ELF_ERR_DST_RANGE: return "destination buffer too small";
     case ELF_ERR_ARGS: return "null argument";
+    case ELF_ERR_RELOC: return "unsupported relocation type or bad RELA table";
     default: return "unknown ELF error";
   }
+}
+
+
+/* GB-013 (2026-10-19): apply RELATIVE relocations over a laid-out image.
+ *
+ * A static-PIE (ET_DYN, no PT_INTERP) is position-independent only AFTER its
+ * R_*_RELATIVE entries are applied: at link time every GOT slot and pointer
+ * holds a value relative to 0, so an unrelocated image enters correctly (the
+ * entry is e_entry and the segments are mapped) and then faults at the first
+ * indirect call -- measured on a real musl static-PIE as PC=0/VA=0, which reads
+ * like a null-dereference in user code and is not.
+ *
+ * `stage` holds the image at vaddr_base-relative offsets, exactly as it will be
+ * mapped at `base`; patching it here is equivalent to patching memory.
+ *
+ * Refuses rather than guessing: an unsupported relocation type is an error, not
+ * a skip. A silently-skipped relocation is indistinguishable from a working one
+ * until the program jumps into the wrong place.
+ *
+ * Kernel-free: no allocation, no vm/fs/arch headers, byte-wise access only, so
+ * the same code runs in a T1 host test.
+ */
+int elf_apply_relocations(const struct elf_image *img, uint8_t *stage,
+                          uint64_t span, uint64_t base) {
+  if (!img || !stage) return ELF_ERR_ARGS;
+  if (img->dyn_vaddr == 0 || img->dyn_size == 0) return ELF_OK;  /* no dynamic */
+
+  const uint64_t vb = img->vaddr_base;
+  if (img->dyn_vaddr < vb) return ELF_ERR_RELOC;
+  const uint64_t dyn_off = img->dyn_vaddr - vb;
+  if (dyn_off >= span || img->dyn_size > span - dyn_off) return ELF_ERR_RELOC;
+  const uint8_t *dyn = stage + dyn_off;
+
+  uint64_t rela = 0, relasz = 0, relaent = 24;
+  for (uint64_t o = 0; o + 16 <= img->dyn_size; o += 16) {
+    const int64_t tag = (int64_t)rd64(dyn + o);
+    const uint64_t val = rd64(dyn + o + 8);
+    if (tag == 0) break;              /* DT_NULL */
+    if (tag == 7) rela = val;         /* DT_RELA   */
+    else if (tag == 8) relasz = val;  /* DT_RELASZ */
+    else if (tag == 9) relaent = val; /* DT_RELAENT */
+  }
+  if (rela == 0 || relasz == 0) return ELF_OK;   /* nothing to apply */
+  if (relaent != 24) return ELF_ERR_RELOC;       /* Elf64_Rela is 24 bytes */
+  if (rela < vb) return ELF_ERR_RELOC;
+  const uint64_t roff = rela - vb;
+  if (roff >= span || relasz > span - roff) return ELF_ERR_RELOC;
+
+  const uint64_t n = relasz / 24;
+  for (uint64_t i = 0; i < n; i++) {
+    const uint8_t *e = stage + roff + i * 24;
+    const uint64_t r_offset = rd64(e);
+    const uint64_t r_info = rd64(e + 8);
+    const uint64_t r_addend = rd64(e + 16);
+    const uint32_t type = (uint32_t)(r_info & 0xffffffffu);
+    if (type == 0) continue;                       /* R_*_NONE */
+    /* R_X86_64_RELATIVE = 8, R_AARCH64_RELATIVE = 1027: both mean base+addend. */
+    if (type != 8 && type != 1027) return ELF_ERR_RELOC;
+    if (r_offset < vb) return ELF_ERR_RELOC;
+    const uint64_t dst = r_offset - vb;
+    if (dst > span || span - dst < 8) return ELF_ERR_RELOC;
+    wr64(stage + dst, base + r_addend);
+  }
+  return ELF_OK;
 }

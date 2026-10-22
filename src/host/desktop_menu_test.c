@@ -15,6 +15,8 @@ extern int num_menu_items;
 extern void menu_apps_first(void);
 extern void menu_display_name(const char *raw, char *out, int max);
 extern void load_menu(void);
+extern char menu_in_games[128];
+extern void launcher_path_for(char *out, int max, const char *name, int in_games);
 
 /* compat.c mock read_dir override (same pattern as apps_suite_test.c). */
 extern int  mock_read_dir_count;
@@ -143,6 +145,66 @@ int main(void) {
     load_menu();
     check(num_menu_items == 7 && strcmp(menu_items[0], "EDITOR.BIN") == 0,
           "default mock dir: EDITOR.BIN stays at menu index 0");
+  }
+
+  /* 7) GB-039 (2nd half): launch path builder for both tracks.  A scanned
+   *    /GAMES title launches at its literal "/GAMES/<name>" path (works for
+   *    native .BIN and ELF alike); a root entry launches as-is. */
+  {
+    char out[24];
+    launcher_path_for(out, sizeof(out), "DOOM.BIN", 1);   /* scanned native */
+    check(strcmp(out, "/GAMES/DOOM.BIN") == 0,
+          "scanned .BIN launches as /GAMES/DOOM.BIN");
+    launcher_path_for(out, sizeof(out), "pie", 1);        /* scanned ELF */
+    check(strcmp(out, "/GAMES/pie") == 0,
+          "scanned ELF launches as /GAMES/pie");
+    launcher_path_for(out, sizeof(out), "PONG.BIN", 0);   /* root entry */
+    check(strcmp(out, "PONG.BIN") == 0,
+          "root entry launches unchanged (PONG.BIN)");
+    launcher_path_for(out, sizeof(out), "FILES.BIN", 0);
+    check(strcmp(out, "FILES.BIN") == 0,
+          "root app launches unchanged (FILES.BIN)");
+    launcher_path_for(out, sizeof(out), "STAR.BIN", 1);   /* lowercase .bin */
+    check(strcmp(out, "/GAMES/STAR.BIN") == 0,
+          "scanned lowercase .bin keeps its /GAMES path");
+  }
+
+  /* 8) GB-039: the /GAMES origin flag survives menu_apps_first's reorder, so
+   *    a scanned entry still launches as /GAMES/<name> after tiering.
+   *    CLOCK.BIN (pinned app) and PONG.BIN (pinned game) move to tier 1/2;
+   *    the two /GAMES-scanned titles sit in tier 3 with their flag intact. */
+  {
+    const char *in[] = { "SHTEST.BIN", "HOBBIT.ELF", "CLOCK.BIN",
+                         "PONG.BIN",   "PIE.BIN" };
+    /*                   root        /GAMES      root app   root game  /GAMES */
+    const int   fg[]  = { 0,          1,          0,
+                          0,           1 };
+    int n = 5;
+    num_menu_items = n;
+    for (int i = 0; i < n; i++) {
+      int k = 0;
+      while (in[i][k] && k < 15) { menu_items[i][k] = in[i][k]; k++; }
+      menu_items[i][k] = '\0';
+      menu_in_games[i] = fg[i];
+    }
+    menu_apps_first();
+    /* CLOCK.BIN (app) then PONG.BIN (game) then the rest in order. */
+    const char *want[] = { "CLOCK.BIN", "PONG.BIN", "SHTEST.BIN",
+                           "HOBBIT.ELF", "PIE.BIN" };
+    const int   wf[]   = { 0,          0,         0,
+                           1,           1 };
+    check(menu_is(want, n) && menu_in_games[0] == wf[0] &&
+          menu_in_games[1] == wf[1] && menu_in_games[2] == wf[2] &&
+          menu_in_games[3] == wf[3] && menu_in_games[4] == wf[4],
+          "menu_apps_first(): /GAMES origin flag follows its entry");
+    /* and the launch path for the scanned ones is still /GAMES/... */
+    char out[24];
+    launcher_path_for(out, sizeof(out), menu_items[3], menu_in_games[3]);
+    check(strcmp(out, "/GAMES/HOBBIT.ELF") == 0,
+          "scanned ELF still /GAMES/HOBBIT.ELF after reorder");
+    launcher_path_for(out, sizeof(out), menu_items[4], menu_in_games[4]);
+    check(strcmp(out, "/GAMES/PIE.BIN") == 0,
+          "scanned .BIN still /GAMES/PIE.BIN after reorder");
   }
 
   printf("[TEST] desktop menu: %d checks, %d failures\n", checks, fails);

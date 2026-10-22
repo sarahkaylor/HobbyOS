@@ -1,0 +1,114 @@
+diff --git a/HobbyOS/WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp b/HobbyOS/WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp
+index 831a1ae9d1..b825f8217d 100644
+--- a/HobbyOS/WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp
++++ b/HobbyOS/WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp
+@@ -387,7 +387,11 @@ static pthread_mutex_t s_wk5SendMu = PTHREAD_MUTEX_INITIALIZER;
+ 
+ static void wk5emit(const char* fmt, ...)
+ {
+-    char line[512];
++    // fs-r16 (census): the emit line buffer must hold a whole census line.
++    // The link census (cap 20) with full hrefs and rects comfortably exceeds
++    // the old 512-byte buffer, so long censuses were truncated mid-token
++    // (serial showed a baked `[WIN] links 230;…` tail that failed to parse).
++    char line[2048];
+     va_list ap;
+     va_start(ap, fmt);
+     vsnprintf(line, sizeof line, fmt, ap);
+@@ -3451,7 +3455,13 @@ void WK5State::enginePhaseTick()
+                 if (!dval.isEmpty()) {
+                     String dr = dval.toWTFString(localFrame->script().globalObject(
+                         wk5ScriptWorld()));
+-                    wk5emit("[WIN] doc title=%s", dr.isEmpty() ? "<empty>" : dr.utf8().data());
++                    // fs-r16: hold the utf8() CString for the whole wk5emit
++                    // call — passing a temporary CString's .data() through
++                    // varargs let the byte buffer die/reuse between the JS
++                    // evaluate and the %s read, splicing stale bytes into the
++                    // line (fs-r16 serial evidence: garbled Google census).
++                    CString drOut = dr.isEmpty() ? CString() : dr.utf8();
++                    wk5emit("[WIN] doc title=%s", (dr.isEmpty() ? "<empty>" : drOut.data()));
+                 }
+                 // fs-r4: link/layout census at load — every <a> with its
+                 // resolved href and getBoundingClientRect (viewport pixel
+@@ -3459,13 +3469,31 @@ void WK5State::enginePhaseTick()
+                 // real page sizes: the drive reads the rects off the serial
+                 // and clicks the exact rendered centre, so a nav row is a
+                 // byte-truth click, not a guess.
++                //
++                // fs-r16: the census must NOT list anchors a click at the
++                // reported rect centre cannot actually hit.  The drive aims
++                // with elementFromPoint exactly as the C++ click path does
++                // (WK5State::handleMouse -> Document::elementFromPoint, then
++                // walks up to the <a>), so the census applies the same test:
++                // skip zero-size and off-viewport boxes, and skip any anchor
++                // whose rect centre is covered by a non-descendant element
++                // (hidden nav overlays, off-canvas menus, TOC controls) — on
++                // Wikipedia the stale entries were exactly those anchors, and
++                // the drive's clicks at their declared centres landed on
++                // BODY or the TOC '#' element instead of the link.
+                 const char* lexpr =
+-                    "(function(){var L=document.querySelectorAll('a[href]');"
+-                    "var out=[];for(var i=0;i<L.length&&i<12;i++){"
+-                    "var r=L[i].getBoundingClientRect();"
+-                    "var h=L[i].getAttribute('href')||'';"
+-                    "out.push(h+'@'+Math.round(r.left)+','+Math.round(r.top)+':'"
+-                    "+Math.round(r.width)+'x'+Math.round(r.height));}"
++                    "(function(){var L=[].slice.call(document.querySelectorAll('a[href]'));"
++                    "var out=[];"
++                    "var vw=document.documentElement.clientWidth||innerWidth;"
++                    "var vh=document.documentElement.clientHeight||innerHeight;"
++                    "outer:for(var i=0;i<L.length&&i<200;i++){"
++                    "var a=L[i];var r=a.getBoundingClientRect();"
++                    "if(r.width<1||r.height<1)continue outer;"
++                    "if(r.right<=0||r.bottom<=0||r.left>=vw||r.top>=vh)continue outer;"
++                    "if(!a.contains(document.elementFromPoint(Math.round(r.left+r.width/2),Math.round(r.top+r.height/2))))continue outer;"
++                    "out.push((a.getAttribute('href')||'')+'@'+Math.round(r.left)+','+Math.round(r.top)+':'"
++                    "+Math.round(r.width)+'x'+Math.round(r.height));"
++                    "if(out.length>=20)break outer;}"
+                     "return ''+L.length+';'+out.join('|');})()";
+                 auto lval = localFrame->script().executeScriptInWorldIgnoringException(
+                     wk5ScriptWorld(), String::fromLatin1(lexpr),
+@@ -3473,7 +3501,8 @@ void WK5State::enginePhaseTick()
+                 if (!lval.isEmpty()) {
+                     String lr = lval.toWTFString(localFrame->script().globalObject(
+                         wk5ScriptWorld()));
+-                    wk5emit("[WIN] links %s", lr.isEmpty() ? "<empty>" : lr.utf8().data());
++                    CString lrOut = lr.isEmpty() ? CString() : lr.utf8();
++                    wk5emit("[WIN] links %s", (lr.isEmpty() ? "<empty>" : lrOut.data()));
+                 }
+                 // WK-8 (input-1): input census — the text/search <input>s
+                 // (and textareas) with their viewport rects, so the
+@@ -3496,7 +3525,8 @@ void WK5State::enginePhaseTick()
+                 if (!ival.isEmpty()) {
+                     String ir = ival.toWTFString(localFrame->script().globalObject(
+                         wk5ScriptWorld()));
+-                    wk5emit("[WIN] inputs %s", ir.isEmpty() ? "<empty>" : ir.utf8().data());
++                    CString irOut = ir.isEmpty() ? CString() : ir.utf8();
++                    wk5emit("[WIN] inputs %s", (ir.isEmpty() ? "<empty>" : irOut.data()));
+                 }
+                 // WK-8 (input-2): clickable-census — submit buttons and
+                 // <button>s with their viewport rects, so a driver can press
+@@ -3517,7 +3547,8 @@ void WK5State::enginePhaseTick()
+                 if (!bval.isEmpty()) {
+                     String br = bval.toWTFString(localFrame->script().globalObject(
+                         wk5ScriptWorld()));
+-                    wk5emit("[WIN] buttons %s", br.isEmpty() ? "<empty>" : br.utf8().data());
++                    CString brOut = br.isEmpty() ? CString() : br.utf8();
++                    wk5emit("[WIN] buttons %s", (br.isEmpty() ? "<empty>" : brOut.data()));
+                 }
+             }
+             imgCensus();
+@@ -3526,6 +3557,13 @@ void WK5State::enginePhaseTick()
+             m_stableTicks = 0;
+             bumpSettle();
+             paintAndBlit();
++            // fs-r16 (census): emit the scroll receipt once after the first
++            // paint of a freshly loaded page so the harness can distinguish
++            // "content starts at scroll 0" (receipt present) from "receipt
++            // missing" (page never painted/registered).  scrollReceipt() was
++            // only reached on the jump/scroll paths, so a clean first paint
++            // stayed silent until the first wheel input.
++            scrollReceipt();
+         } else if (m_loadTicks++ > 60) {
+             // fs-r10: tick gate lowered 60000 -> 60 so the completion-gate
+             // probe (below, wall-clock gated) fires early in diagnosis runs

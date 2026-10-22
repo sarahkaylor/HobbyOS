@@ -14,6 +14,7 @@ remote GPU-over-RDMA setup.
 | [`hobbyos-gui-test`](hobbyos-gui-test/SKILL.md) | Drive the desktop with synthetic QMP mouse/keyboard; validate the framebuffer; `qm sendkey` for VGA consoles. |
 | [`hobbyos-run-tests`](hobbyos-run-tests/SKILL.md) | The three test tiers (host golden / kernel unit / integration) + two-VM RDMA test; the 30 s deadlock rule. |
 | [`hobbyos-add-userland-program`](hobbyos-add-userland-program/SKILL.md) | Exact Makefile recipe to add a new user program + optional host test, with a completion checklist. |
+| [`hobbyos-gaming`](hobbyos-gaming/SKILL.md) | The native-games track: evidence rig + de-magic launching, evidence-before-close rules, T5 habits, and the platform blockers (full-screen input routing, intel GB-057, compat gating, disk-build gotchas). |
 | [`hobbyos-kernel-constraints`](hobbyos-kernel-constraints/SKILL.md) | ARM64 EL1 rules that prevent trap classes (alignment, no SIMD, byte-wise parsing, Device memory). |
 | [`hobbyos-graphics-acceleration`](hobbyos-graphics-acceleration/SKILL.md) | GPU acceleration program: virtio-gpu flush/FB path, `SYS_FLUSH_FB_RECTS` (89), `virtio_gpu_flush_rects`, driver split, `GFXBENCH.BIN`, QEMU GL launchers. See `references/graphics-pipe-map.md`. |
 | [`hobbyos-port-planning`](hobbyos-port-planning/SKILL.md) | Plan docs (browser.md / gnu-ports.md house style): survey→audit→pin-provenance→decompose; multi-lane execution design, frozen interfaces, gates. See `templates/plan-doc.md`. |

@@ -1,0 +1,701 @@
+ld.lld -T linker_x64.ld -o hobbyos.elf obj/intel/boot.o obj/intel/setjmp.o obj/intel/abi_t2_test.o obj/intel/blk_cache.o obj/intel/blk_cache_press_test.o obj/intel/blk_cache_test.o obj/intel/dhcp.o obj/intel/elf_image.o obj/intel/elf_loader.o obj/intel/evdev.o obj/intel/evdev_test.o obj/intel/fat16.o obj/intel/fat16_test.o obj/intel/fb_ioctl.o obj/intel/fb_ioctl_test.o obj/intel/fb_mmap.o obj/intel/fb_mmap_test.o obj/intel/frame.o obj/intel/frame_test.o obj/intel/fs.o obj/intel/fs_test.o obj/intel/input_node.o obj/intel/input_node_test.o obj/intel/iommu_vtd.o obj/intel/ipc_proto.o obj/intel/linux_uname.o obj/intel/locks_test.o obj/intel/main.o obj/intel/math_test.o obj/intel/mmu_test.o obj/intel/net.o obj/intel/net_rdma.o obj/intel/net_rdma_test.o obj/intel/net_test.o obj/intel/nfs.o obj/intel/nfs_proto.o obj/intel/nfs_test.o obj/intel/pipe.o obj/intel/pipe_test.o obj/intel/process.o obj/intel/process_test.o obj/intel/program_loader.o obj/intel/program_loader_test.o obj/intel/test_fw_cfg.o obj/intel/test_smp.o obj/intel/time.o obj/intel/time_test.o obj/intel/timer_test.o obj/intel/trap_test.o obj/intel/unit_test.o obj/intel/unix.o obj/intel/unix_test.o obj/intel/vfs.o obj/intel/virtio_blk.o obj/intel/virtio_blk_test.o obj/intel/virtio_gpu.o obj/intel/virtio_gpu_test.o obj/intel/virtio_gpu_x64.o obj/intel/virtio_input.o obj/intel/virtio_input_test.o obj/intel/virtio_net.o obj/intel/virtio_net_test.o obj/intel/vm.o obj/intel/vm_test.o obj/intel/cpu.o obj/intel/fpu.o obj/intel/gic.o obj/intel/locks.o obj/intel/mmu.o obj/intel/rtc.o obj/intel/smp.o obj/intel/timer.o obj/intel/trap.o obj/intel/uart.o
+llvm-objcopy -I elf64-x86-64 -O elf32-i386 hobbyos.elf
+qemu-system-x86_64 -M q35 -smp 1 -m 12288M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56  -action shutdown=poweroff -display none 
+WARNING: Image format was not specified for '/home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd' and probing guessed raw.
+         Automatically detecting the format is dangerous for raw images, write operations on block 0 will be restricted.
+         Specify the 'raw' format explicitly to remove the restrictions.
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+BdsDxe: starting Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+[001;001H[001;001H[UART] lock @ 0x000000007557ebd8
+Booting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+VirtIO GPU: BGA
+VirtIO GPU successfully initialized.
+Original CCB: 0x0000000000000047
+Modified CCB: 0x0000000000000047
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1376256 total_mib=5376 reserved=0
+[KERNEL] Activating secondary cores via LAPIC IPIs...
+[KERNEL] smp_init: copying trampoline code...
+[KERNEL] smp_init: trampoline copied.
+[KERNEL] smp_init: Sending INIT IPI to core 1...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 1 power-on timeout!
+[KERNEL] smp_init: Sending INIT IPI to core 2...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 2 power-on timeout!
+[KERNEL] smp_init: Sending INIT IPI to core 3...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 3 power-on timeout!
+[KERNEL] smp_init: Sending INIT IPI to core 4...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 4 power-on timeout!
+[KERNEL] smp_init: Sending INIT IPI to core 5...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 5 power-on timeout!
+[KERNEL] smp_init: Sending INIT IPI to core 6...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 6 power-on timeout!
+[KERNEL] smp_init: Sending INIT IPI to core 7...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 7 power-on timeout!
+[KERNEL] LAPIC timer rate: 63615 counts/ms, TSC rate: 2595772 ticks/ms (PIT-counter calibrated)
+Found NVMe controller on PCI bus!
+PCI Config Space of NVMe:
+0x0000000000101B36 0x0000000000100007 0x0000000001080202 0x0000000000000000 
+0x0000000081000004 0x0000000000000000 0x0000000000000000 0x0000000000000000 
+0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000011001AF4 
+0x0000000000000000 0x0000000000000040 0x0000000000000000 0x000000000000010B 
+NVMe BAR0 Phys: 0x0000000081000000 (Mapped to Virtual: 0x00000001FC000000)
+Resetting controller, waiting for CSTS.RDY = 0...
+Controller reset complete!
+Enabling controller... CC=0x0000000000460001 CSTS=0x0000000000000001
+Controller enabled successfully!
+Create IO CQ Status: 0x0000000000000000
+Create IO SQ Status: 0x0000000000000000
+NVMe driver initialized successfully!
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+[VIRTIO_NET] PCI Interrupt Line: 10 (Vector: 42)
+[VIRTIO_NET] MAC Address: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+[VIRTIO_NET] RX queue size: 256 rx_vq address: 0x00000000753F4000 PFN: 0x00000000000753F4
+[VIRTIO_NET] TX queue size: 256 tx_vq address: 0x00000000753F7000 PFN: 0x00000000000753F7
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Discover sent
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP initialization complete.
+[RDMA] Remote PCIe sharing is INACTIVE (no startup parameter).
+
+--- Parallel Program Loading ---
+Mode: TEST - Running automated tests...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=1
+Inside process_create: clearing memory at 0x0000000022000000
+Inside process_create: kmemset done.
+start_scheduler called on CPU 0
+[WAVE-TRY] SUBPRB.BIN
+Loading program for scheduler (v2 AS): SUBPRB.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=-1
+/SUBPRB.BIN
+v2 loader: image mapped (lazy), bytes=64920 pages=16 first=in elap=2ms
+v2 loader: PID=2 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] SUBPRB.BIN rc>0
+[WAVE-TRY] SHTEST.BIN
+Loading program for scheduler (v2 AS): SHTEST.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=-1
+/SHTEST.BIN
+v2 loader: image mapped (lazy), bytes=65496 pages=16 first=in elap=1ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] SHTEST.BIN rc>0
+[WAVE-TRY] SHTEST2.BIN
+Loading program for scheduler (v2 AS): SHTEST2.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=4 block_idx=-1
+/SHTEST2.BIN
+v2 loader: image mapped (lazy), bytes=62680 pages=16 first=in elap=0ms
+v2 loader: PID=4 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] SHTEST2.BIN rc>0
+[WAVE-TRY] SHTEST3.BIN
+Loading program for scheduler (v2 AS): SHTEST3.BIN
+/SHTEST3.BIN
+v2 loader: image mapped (lazy), bytes=62792 pages=16 first=in elap=0ms
+v2 loader: PID=5 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] SHTEST3.BIN rc>0
+[WAVE-TRY] CONSOLE.BIN
+Loading program for scheduler (v2 AS): CONSOLE.BIN
+/CONSOLE.BIN
+v2 loader: image mapped (lazy), bytes=55288 pages=14 first=in elap=0ms
+v2 loader: PID=6 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] CONSOLE.BIN rc>0
+[WAVE-TRY] MEMTEST.BIN
+Loading program for scheduler (v2 AS): MEMTEST.BIN
+/MEMTEST.BIN
+v2 loader: image mapped (lazy), bytes=55288 pages=14 first=in elap=1ms
+v2 loader: PID=7 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] MEMTEST.BIN rc>0
+[WAVE-TRY] FILEIO.BIN
+Loading program for scheduler (v2 AS): FILEIO.BIN
+/FILEIO.BIN
+v2 loader: image mapped (lazy), bytes=55560 pages=14 first=in elap=1ms
+v2 loader: PID=8 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] FILEIO.BIN rc>0
+[WAVE-TRY] BLKTEST.BIN
+Loading program for scheduler (v2 AS): BLKTEST.BIN
+/BLKTEST.BIN
+v2 loader: image mapped (lazy), bytes=75592 pages=19 first=in elap=1ms
+v2 loader: PID=9 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] BLKTEST.BIN rc>0
+[WAVE-TRY] FATBIG_T.BIN
+Loading program for scheduler (v2 AS): FATBIG_T.BIN
+/FATBIG_T.BIN
+v2 loader: image mapped (lazy), bytes=47608 pages=12 first=in elap=1ms
+v2 loader: PID=10 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] FATBIG_T.BIN rc>0
+[WAVE-TRY] LFN_T.BIN
+Loading program for scheduler (v2 AS): LFN_T.BIN
+/LFN_T.BIN
+v2 loader: image mapped (lazy), bytes=57992 pages=15 first=in elap=0ms
+v2 loader: PID=11 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] LFN_T.BIN rc>0
+[WAVE-TRY] HEAPTEST.BIN
+Loading program for scheduler (v2 AS): HEAPTEST.BIN
+/HEAPTEST.BIN
+v2 loader: image mapped (lazy), bytes=57768 pages=15 first=in elap=0ms
+v2 loader: PID=12 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] HEAPTEST.BIN rc>0
+[WAVE-TRY] SPAWN.BIN
+Loading program for scheduler (v2 AS): SPAWN.BIN
+/SPAWN.BIN
+v2 loader: image mapped (lazy), bytes=55432 pages=14 first=in elap=0ms
+v2 loader: PID=13 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] SPAWN.BIN rc>0
+[WAVE-TRY] FORKTEST.BIN
+Loading program for scheduler (v2 AS): FORKTEST.BIN
+/FORKTEST.BIN
+v2 loader: image mapped (lazy), bytes=56440 pages=14 first=in elap=0ms
+v2 loader: PID=14 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] FORKTEST.BIN rc>0
+[WAVE-TRY] SMPTEST.BIN
+Loading program for scheduler (v2 AS): SMPTEST.BIN
+/SMPTEST.BIN
+v2 loader: image mapped (lazy), bytes=55432 pages=14 first=in elap=0ms
+v2 loader: PID=15 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] SMPTEST.BIN rc>0
+[WAVE-TRY] PIPETEST.BIN
+Loading program for scheduler (v2 AS): PIPETEST.BIN
+/PIPETEST.BIN
+v2 loader: image mapped (lazy), bytes=55560 pages=14 first=in elap=0ms
+v2 loader: PID=16 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] PIPETEST.BIN rc>0
+[WAVE-TRY] GRAPHICS.BIN
+Loading program for scheduler (v2 AS): GRAPHICS.BIN
+/GRAPHICS.BIN
+v2 loader: image mapped (lazy), bytes=58576 pages=15 first=in elap=0ms
+v2 loader: PID=17 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] GRAPHICS.BIN rc>0
+[WAVE-TRY] WSRF_T.BIN
+Loading program for scheduler (v2 AS): WSRF_T.BIN
+/WSRF_T.BIN
+v2 loader: image mapped (lazy), bytes=376080 pages=92 first=in elap=0ms
+v2 loader: PID=18 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] WSRF_T.BIN rc>0
+[WAVE-TRY] NETTEST.BIN
+Loading program for scheduler (v2 AS): NETTEST.BIN
+/NETTEST.BIN
+v2 loader: image mapped (lazy), bytes=55432 pages=14 first=in elap=0ms
+v2 loader: PID=19 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] NETTEST.BIN rc>0
+[WAVE-TRY] TIMEOUT.BIN
+Loading program for scheduler (v2 AS): TIMEOUT.BIN
+/TIMEOUT.BIN
+v2 loader: image mapped (lazy), bytes=55096 pages=14 first=in elap=0ms
+v2 loader: PID=20 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] TIMEOUT.BIN rc>0
+[WAVE-TRY] STRESS.BIN
+Loading program for scheduler (v2 AS): STRESS.BIN
+/STRESS.BIN
+v2 loader: image mapped (lazy), bytes=62088 pages=16 first=in elap=0ms
+v2 loader: PID=21 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] STRESS.BIN rc>0
+[WAVE-TRY] MONITORT.BIN
+Loading program for scheduler (v2 AS): MONITORT.BIN
+/MONITORT.BIN
+v2 loader: image mapped (lazy), bytes=56840 pages=14 first=in elap=0ms
+v2 loader: PID=22 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] MONITORT.BIN rc>0
+[WAVE-TRY] NFSTEST.BIN
+Loading program for scheduler (v2 AS): NFSTEST.BIN
+/NFSTEST.BIN
+v2 loader: image mapped (lazy), bytes=90360 pages=23 first=in elap=0ms
+v2 loader: PID=23 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] NFSTEST.BIN rc>0
+[WAVE-TRY] ERRTEST.BIN
+Loading program for scheduler (v2 AS): ERRTEST.BIN
+/ERRTEST.BIN
+v2 loader: image mapped (lazy), bytes=57224 pages=14 first=in elap=0ms
+v2 loader: PID=24 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] ERRTEST.BIN rc>0
+[WAVE-TRY] HELLO.BIN
+Loading program for scheduler (v2 AS): HELLO.BIN
+/HELLO.BIN
+v2 loader: image mapped (lazy), bytes=45976 pages=12 first=in elap=0ms
+v2 loader: PID=25 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] HELLO.BIN rc>0
+[WAVE-TRY] CAT.BIN
+Loading program for scheduler (v2 AS): CAT.BIN
+/CAT.BIN
+v2 loader: image mapped (lazy), bytes=55416 pages=14 first=in elap=1ms
+v2 loader: PID=26 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] CAT.BIN rc>0
+[WAVE-TRY] LS.BIN
+Loading program for scheduler (v2 AS): LS.BIN
+/LS.BIN
+v2 loader: image mapped (lazy), bytes=55256 pages=14 first=in elap=1ms
+v2 loader: PID=27 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] LS.BIN rc>0
+[WAVE-TRY] SH.BIN
+Loading program for scheduler (v2 AS): SH.BIN
+/SH.BIN
+v2 loader: image mapped (lazy), bytes=223368 pages=55 first=in elap=0ms
+v2 loader: PID=28 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] SH.BIN rc>0
+[WAVE-TRY] LKSTEST.BIN
+Loading program for scheduler (v2 AS): LKSTEST.BIN
+/LKSTEST.BIN
+v2 loader: image mapped (lazy), bytes=106328 pages=26 first=in elap=0ms
+v2 loader: PID=29 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] LKSTEST.BIN rc>0
+[WAVE-TRY] HEDTEST.BIN
+Loading program for scheduler (v2 AS): HEDTEST.BIN
+/HEDTEST.BIN
+v2 loader: image mapped (lazy), bytes=59864 pages=15 first=in elap=0ms
+v2 loader: PID=30 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] HEDTEST.BIN rc>0
+[WAVE-TRY] TAILTEST.BIN
+Loading program for scheduler (v2 AS): TAILTEST.BIN
+/TAILTEST.BIN
+v2 loader: image mapped (lazy), bytes=59880 pages=15 first=in elap=0ms
+v2 loader: PID=31 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] TAILTEST.BIN rc>0
+[WAVE-TRY] PROCTEST.BIN
+Loading program for scheduler (v2 AS): PROCTEST.BIN
+/PROCTEST.BIN
+v2 loader: image mapped (lazy), bytes=75896 pages=19 first=in elap=0ms
+v2 loader: PID=32 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] PROCTEST.BIN rc>0
+[WAVE-TRY] WCTEST.BIN
+Loading program for scheduler (v2 AS): WCTEST.BIN
+/WCTEST.BIN
+v2 loader: image mapped (lazy), bytes=60024 pages=15 first=in elap=0ms
+v2 loader: PID=33 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] WCTEST.BIN rc>0
+[WAVE-TRY] REGTEST.BIN
+Loading program for scheduler (v2 AS): REGTEST.BIN
+/REGTEST.BIN
+v2 loader: image mapped (lazy), bytes=141096 pages=35 first=in elap=0ms
+v2 loader: PID=34 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] REGTEST.BIN rc>0
+[WAVE-TRY] SEDTEST.BIN
+Loading program for scheduler (v2 AS): SEDTEST.BIN
+/SEDTEST.BIN
+v2 loader: image mapped (lazy), bytes=69192 pages=17 first=in elap=0ms
+v2 loader: PID=35 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] SEDTEST.BIN rc>0
+[WAVE-TRY] GREPTEST.BIN
+Loading program for scheduler (v2 AS): GREPTEST.BIN
+/GREPTEST.BIN
+v2 loader: image mapped (lazy), bytes=69128 pages=17 first=in elap=0ms
+v2 loader: PID=36 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] GREPTEST.BIN rc>0
+[WAVE-TRY] CUTTEST.BIN
+Loading program for scheduler (v2 AS): CUTTEST.BIN
+/CUTTEST.BIN
+v2 loader: image mapped (lazy), bytes=61384 pages=15 first=in elap=0ms
+v2 loader: PID=37 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] CUTTEST.BIN rc>0
+[WAVE-TRY] TRTEST.BIN
+Loading program for scheduler (v2 AS): TRTEST.BIN
+/TRTEST.BIN
+v2 loader: image mapped (lazy), bytes=61608 pages=16 first=in elap=0ms
+v2 loader: PID=38 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] TRTEST.BIN rc>0
+[WAVE-TRY] PASTE_T.BIN
+Loading program for scheduler (v2 AS): PASTE_T.BIN
+/PASTE_T.BIN
+v2 loader: image mapped (lazy), bytes=62056 pages=16 first=in elap=0ms
+v2 loader: PID=39 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] PASTE_T.BIN rc>0
+[WAVE-TRY] FOLDTEST.BIN
+Loading program for scheduler (v2 AS): FOLDTEST.BIN
+/FOLDTEST.BIN
+v2 loader: image mapped (lazy), bytes=62760 pages=16 first=in elap=0ms
+v2 loader: PID=40 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] FOLDTEST.BIN rc>0
+[WAVE-TRY] NLTEST.BIN
+Loading program for scheduler (v2 AS): NLTEST.BIN
+/NLTEST.BIN
+v2 loader: image mapped (lazy), bytes=61960 pages=16 first=in elap=0ms
+v2 loader: PID=41 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] NLTEST.BIN rc>0
+[WAVE-TRY] COMMTEST.BIN
+Loading program for scheduler (v2 AS): COMMTEST.BIN
+/COMMTEST.BIN
+v2 loader: image mapped (lazy), bytes=61560 pages=16 first=in elap=0ms
+v2 loader: PID=42 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] COMMTEST.BIN rc>0
+[WAVE-TRY] TSORT_T.BIN
+Loading program for scheduler (v2 AS): TSORT_T.BIN
+/TSORT_T.BIN
+v2 loader: image mapped (lazy), bytes=128008 pages=32 first=in elap=0ms
+v2 loader: PID=43 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] TSORT_T.BIN rc>0
+[WAVE-TRY] EXPAND_T.BIN
+Loading program for scheduler (v2 AS): EXPAND_T.BIN
+/EXPAND_T.BIN
+v2 loader: image mapped (lazy), bytes=61224 pages=15 first=in elap=0ms
+v2 loader: PID=44 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] EXPAND_T.BIN rc>0
+[WAVE-TRY] UNEXPAND_T.BIN
+Loading program for scheduler (v2 AS): UNEXPAND_T.BIN
+/UNEXPAND_T.BIN
+v2 loader: image mapped (lazy), bytes=61256 pages=15 first=in elap=0ms
+v2 loader: PID=45 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] UNEXPAND_T.BIN rc>0
+[WAVE-TRY] CKSUM_T.BIN
+Loading program for scheduler (v2 AS): CKSUM_T.BIN
+/CKSUM_T.BIN
+v2 loader: image mapped (lazy), bytes=62312 pages=16 first=in elap=0ms
+v2 loader: PID=46 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] CKSUM_T.BIN rc>0
+[WAVE-TRY] MD5SUM_T.BIN
+Loading program for scheduler (v2 AS): MD5SUM_T.BIN
+/MD5SUM_T.BIN
+v2 loader: image mapped (lazy), bytes=61448 pages=16 first=in elap=0ms
+v2 loader: PID=47 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] MD5SUM_T.BIN rc>0
+[WAVE-TRY] TACTEST.BIN
+Loading program for scheduler (v2 AS): TACTEST.BIN
+/TACTEST.BIN
+v2 loader: image mapped (lazy), bytes=289224 pages=71 first=in elap=0ms
+v2 loader: PID=48 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] TACTEST.BIN rc>0
+[WAVE-TRY] CMPTEST.BIN
+Loading program for scheduler (v2 AS): CMPTEST.BIN
+/CMPTEST.BIN
+v2 loader: image mapped (lazy), bytes=106232 pages=26 first=in elap=0ms
+v2 loader: PID=49 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] CMPTEST.BIN rc>0
+[WAVE-TRY] POLLTST.BIN
+Loading program for scheduler (v2 AS): POLLTST.BIN
+/POLLTST.BIN
+v2 loader: image mapped (lazy), bytes=61096 pages=15 first=in elap=0ms
+v2 loader: PID=50 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] POLLTST.BIN rc>0
+[WAVE-TRY] RANDTST.BIN
+Loading program for scheduler (v2 AS): RANDTST.BIN
+/RANDTST.BIN
+v2 loader: image mapped (lazy), bytes=66312 pages=17 first=in elap=0ms
+v2 loader: PID=51 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] RANDTST.BIN rc>0
+[WAVE-TRY] SOCK2TST.BIN
+Loading program for scheduler (v2 AS): SOCK2TST.BIN
+/SOCK2TST.BIN
+v2 loader: image mapped (lazy), bytes=62536 pages=16 first=in elap=0ms
+v2 loader: PID=52 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] SOCK2TST.BIN rc>0
+[WAVE-TRY] FPU_T.BIN
+Loading program for scheduler (v2 AS): FPU_T.BIN
+/FPU_T.BIN
+v2 loader: image mapped (lazy), bytes=58344 pages=15 first=in elap=0ms
+v2 loader: PID=53 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] FPU_T.BIN rc>0
+[WAVE-TRY] GFXBENCH.BIN
+Loading program for scheduler (v2 AS): GFXBENCH.BIN
+/GFXBENCH.BIN
+v2 loader: image mapped (lazy), bytes=61112 pages=15 first=in elap=0ms
+v2 loader: PID=54 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] GFXBENCH.BIN rc>0
+[WAVE-TRY] MATH_T.BIN
+Loading program for scheduler (v2 AS): MATH_T.BIN
+/MATH_T.BIN
+v2 loader: image mapped (lazy), bytes=71320 pages=18 first=in elap=0ms
+v2 loader: PID=55 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] MATH_T.BIN rc>0
+[WAVE-TRY] CXXSMOKE.BIN
+Loading program for scheduler (v2 AS): CXXSMOKE.BIN
+/CXXSMOKE.BIN
+v2 loader: image mapped (lazy), bytes=77512 pages=19 first=in elap=0ms
+v2 loader: PID=56 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] CXXSMOKE.BIN rc>0
+[WAVE-TRY] DNSTST.BIN
+Loading program for scheduler (v2 AS): DNSTST.BIN
+/DNSTST.BIN
+v2 loader: image mapped (lazy), bytes=59512 pages=15 first=in elap=0ms
+v2 loader: PID=57 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] DNSTST.BIN rc>0
+[WAVE-TRY] THRD_T.BIN
+Loading program for scheduler (v2 AS): THRD_T.BIN
+/THRD_T.BIN
+v2 loader: image mapped (lazy), bytes=78120 pages=20 first=in elap=0ms
+v2 loader: PID=58 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] THRD_T.BIN rc>0
+[WAVE-TRY] TLS_T.BIN
+Loading program for scheduler (v2 AS): TLS_T.BIN
+/TLS_T.BIN
+v2 loader: image mapped (lazy), bytes=71528 pages=18 first=in elap=0ms
+v2 loader: PID=59 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] TLS_T.BIN rc>0
+[WAVE-TRY] CXX_T.BIN
+Loading program for scheduler (v2 AS): CXX_T.BIN
+/CXX_T.BIN
+v2 loader: image mapped (lazy), bytes=667960 pages=164 first=in elap=0ms
+v2 loader: PID=60 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] CXX_T.BIN rc>0
+[WAVE-TRY] RTTI_T.BIN
+Loading program for scheduler (v2 AS): RTTI_T.BIN
+/RTTI_T.BIN
+v2 loader: image mapped (lazy), bytes=119832 pages=30 first=in elap=0ms
+v2 loader: PID=61 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] RTTI_T.BIN rc>0
+[WAVE-TRY] IPC_T.BIN
+Loading program for scheduler (v2 AS): IPC_T.BIN
+/IPC_T.BIN
+v2 loader: image mapped (lazy), bytes=241560 pages=59 first=in elap=0ms
+v2 loader: PID=62 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] IPC_T.BIN rc>0
+[WAVE-TRY] MMTEST.BIN
+Loading program for scheduler (v2 AS): MMTEST.BIN
+/MMTEST.BIN
+v2 loader: image mapped (lazy), bytes=9736 pages=3 first=in elap=0ms
+v2 loader: PID=63 entry=0x1000000000 sp=0x1800000000 resident=1 tables=4
+[ARRIVED] MMTEST.BIN rc>0
+[WAVE-TRY] ICUSMK.BIN
+Loading program for scheduler (v2 AS): ICUSMK.BIN
+[KERNEL] process_create: no free process slots! zombies=0 exited=0
+[KERNEL] process_create: no free process slots! zombies=0 exited=0
+[KERNEL] process_create: no free process slots! zombies=0 exited=0
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070027135 pid=1 age_ms=0
+  CPU1 rip=0x0000000000000000 pid=0 age_ms=76000
+  CPU2 rip=0x0000000000000000 pid=0 age_ms=76000
+  CPU3 rip=0x0000000000000000 pid=0 age_ms=76000
+  CPU4 rip=0x0000000000000000 pid=0 age_ms=76000
+  CPU5 rip=0x0000000000000000 pid=0 age_ms=76000
+  CPU6 rip=0x0000000000000000 pid=0 age_ms=76000
+  CPU7 rip=0x0000000000000000 pid=0 age_ms=76000
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu5: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+Loader (v2) starved (slot pressure): ICUSMK.BIN
+[ARRIVED] ICUSMK.BIN rc<0
+[WAVE-TRY] SQLTEST.BIN
+Loading program for scheduler (v2 AS): SQLTEST.BIN
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070027135 pid=1 age_ms=0
+  CPU1 rip=0x0000000000000000 pid=0 age_ms=106000
+  CPU2 rip=0x0000000000000000 pid=0 age_ms=106000
+  CPU3 rip=0x0000000000000000 pid=0 age_ms=106000
+  CPU4 rip=0x0000000000000000 pid=0 age_ms=106000
+  CPU5 rip=0x0000000000000000 pid=0 age_ms=106000
+  CPU6 rip=0x0000000000000000 pid=0 age_ms=106000
+  CPU7 rip=0x0000000000000000 pid=0 age_ms=106000
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu5: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+Loader (v2) starved (slot pressure): SQLTEST.BIN
+[ARRIVED] SQLTEST.BIN rc<0
+[WAVE-TRY] SIG_T.BIN
+Loading program for scheduler (v2 AS): SIG_T.BIN
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070027135 pid=1 age_ms=0
+  CPU1 rip=0x0000000000000000 pid=0 age_ms=136000
+  CPU2 rip=0x0000000000000000 pid=0 age_ms=136000
+  CPU3 rip=0x0000000000000000 pid=0 age_ms=136000
+  CPU4 rip=0x0000000000000000 pid=0 age_ms=136000
+  CPU5 rip=0x0000000000000000 pid=0 age_ms=136000
+  CPU6 rip=0x0000000000000000 pid=0 age_ms=136000
+  CPU7 rip=0x0000000000000000 pid=0 age_ms=136000
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu5: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+Loader (v2) starved (slot pressure): SIG_T.BIN
+[ARRIVED] SIG_T.BIN rc<0
+[WAVE-TRY] WK1C_T.BIN
+Loading program for scheduler (v2 AS): WK1C_T.BIN
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070027135 pid=1 age_ms=0
+  CPU1 rip=0x0000000000000000 pid=0 age_ms=166000
+  CPU2 rip=0x0000000000000000 pid=0 age_ms=166000
+  CPU3 rip=0x0000000000000000 pid=0 age_ms=166000
+  CPU4 rip=0x0000000000000000 pid=0 age_ms=166000
+  CPU5 rip=0x0000000000000000 pid=0 age_ms=166000
+  CPU6 rip=0x0000000000000000 pid=0 age_ms=166000
+  CPU7 rip=0x0000000000000000 pid=0 age_ms=166000
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu5: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+Loader (v2) starved (slot pressure): WK1C_T.BIN
+[ARRIVED] WK1C_T.BIN rc<0
+[WAVE-TRY] TORTURE.BIN
+Loading program for scheduler (v2 AS): TORTURE.BIN
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070027135 pid=1 age_ms=0
+  CPU1 rip=0x0000000000000000 pid=0 age_ms=196000
+  CPU2 rip=0x0000000000000000 pid=0 age_ms=196000
+  CPU3 rip=0x0000000000000000 pid=0 age_ms=196000
+  CPU4 rip=0x0000000000000000 pid=0 age_ms=196000
+  CPU5 rip=0x0000000000000000 pid=0 age_ms=196000
+  CPU6 rip=0x0000000000000000 pid=0 age_ms=196000
+  CPU7 rip=0x0000000000000000 pid=0 age_ms=196000
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu5: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+Loader (v2) starved (slot pressure): TORTURE.BIN
+[ARRIVED] TORTURE.BIN rc<0
+[KERNEL] pid=2 (SUBPRB.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C03000 asroot=0x0000000020C03000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 2: SUBPRB.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=3 (SHTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C0C000 asroot=0x0000000020C0C000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 3: SHTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=4 (SHTEST2.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C13000 asroot=0x0000000020C13000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 4: SHTEST2.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=6 (CONSOLE.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C21000 asroot=0x0000000020C21000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 6: CONSOLE.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=7 (MEMTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C28000 asroot=0x0000000020C28000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 7: MEMTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=8 (FILEIO.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C2F000 asroot=0x0000000020C2F000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 8: FILEIO.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=9 (BLKTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C36000 asroot=0x0000000020C36000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 9: BLKTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=10 (FATBIG_T.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C3D000 asroot=0x0000000020C3D000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 10: FATBIG_T.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=11 (LFN_T.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C44000 asroot=0x0000000020C44000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 11: LFN_T.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=13 (SPAWN.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C52000 asroot=0x0000000020C52000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 13: SPAWN.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=14 (FORKTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C59000 asroot=0x0000000020C59000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 14: FORKTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=15 (SMPTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C60000 asroot=0x0000000020C60000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 15: SMPTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=16 (PIPETEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C67000 asroot=0x0000000020C67000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 16: PIPETEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=17 (GRAPHICS.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C6E000 asroot=0x0000000020C6E000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 17: GRAPHICS.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=18 (WSRF_T.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C75000 asroot=0x0000000020C75000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 18: WSRF_T.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=20 (TIMEOUT.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C84000 asroot=0x0000000020C84000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 20: TIMEOUT.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=21 (STRESS.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C8B000 asroot=0x0000000020C8B000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 21: STRESS.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=22 (MONITORT.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C92000 asroot=0x0000000020C92000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 22: MONITORT.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=23 (NFSTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C99000 asroot=0x0000000020C99000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 23: NFSTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=24 (ERRTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020CA0000 asroot=0x0000000020CA0000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 24: ERRTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=25 (HELLO.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020CA7000 asroot=0x0000000020CA7000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 25: HELLO.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=27 (LS.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020CB5000 asroot=0x0000000020CB5000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 27: LS.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=28 (SH.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020CBC000 asroot=0x0000000020CBC000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 28: SH.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=29 (LKSTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020CC4000 asroot=0x0000000020CC4000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 29: LKSTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=30 (HEDTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020CCB000 asroot=0x0000000020CCB000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 30: HEDTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=31 (TAILTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020CD2000 asroot=0x0000000020CD2000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 31: TAILTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=32 (PROCTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020CD9000 asroot=0x0000000020CD9000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 32: PROCTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=34 (REGTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020CE7000 asroot=0x0000000020CE7000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 34: REGTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=35 (SEDTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020CEE000 asroot=0x0000000020CEE000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 35: SEDTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=36 (GREPTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020CF5000 asroot=0x0000000020CF5000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 36: GREPTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=37 (CUTTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020CFC000 asroot=0x0000000020CFC000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 37: CUTTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=38 (TRTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D04000 asroot=0x0000000020D04000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 38: TRTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=39 (PASTE_T.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D0B000 asroot=0x0000000020D0B000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 39: PASTE_T.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=41 (NLTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D19000 asroot=0x0000000020D19000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 41: NLTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=42 (COMMTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D20000 asroot=0x0000000020D20000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 42: COMMTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=43 (TSORT_T.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D27000 asroot=0x0000000020D27000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 43: TSORT_T.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=44 (EXPAND_T.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D2E000 asroot=0x0000000020D2E000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 44: EXPAND_T.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=45 (UNEXPAND_T.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D35000 asroot=0x0000000020D35000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 45: UNEXPAND_T.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=46 (CKSUM_T.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D3C000 asroot=0x0000000020D3C000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 46: CKSUM_T.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=48 (TACTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D4B000 asroot=0x0000000020D4B000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 48: TACTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=49 (CMPTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D52000 asroot=0x0000000020D52000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 49: CMPTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=50 (POLLTST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D59000 asroot=0x0000000020D59000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 50: POLLTST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=51 (RANDTST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D60000 asroot=0x0000000020D60000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 51: RANDTST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=52 (SOCK2TST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D67000 asroot=0x0000000020D67000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 52: SOCK2TST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=53 (FPU_T.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D6E000 asroot=0x0000000020D6E000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 53: FPU_T.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=55 (MATH_T.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D7C000 asroot=0x0000000020D7C000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 55: MATH_T.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=56 (CXXSMOKE.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D84000 asroot=0x0000000020D84000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 56: CXXSMOKE.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=57 (DNSTST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D8B000 asroot=0x0000000020D8B000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 57: DNSTST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=58 (THRD_T.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D92000 asroot=0x0000000020D92000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 58: THRD_T.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=59 (TLS_T.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D99000 asroot=0x0000000020D99000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 59: TLS_T.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=60 (CXX_T.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020DA0000 asroot=0x0000000020DA0000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 60: CXX_T.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=62 (IPC_T.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020DAE000 asroot=0x0000000020DAE000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 62: IPC_T.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=63 (MMTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020DB5000 asroot=0x0000000020DB5000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 63: MMTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=5 (SHTEST3.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C1A000 asroot=0x0000000020C1A000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 5: SHTEST3.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=12 (HEAPTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C4B000 asroot=0x0000000020C4B000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 12: HEAPTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=19 (NETTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020C7C000 asroot=0x0000000020C7C000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 19: NETTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=33 (WCTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020CE0000 asroot=0x0000000020CE0000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 33: WCTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=40 (FOLDTEST.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D12000 asroot=0x0000000020D12000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 40: FOLDTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=47 (MD5SUM_T.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D44000 asroot=0x0000000020D44000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 47: MD5SUM_T.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=54 (GFXBENCH.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020D75000 asroot=0x0000000020D75000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 54: GFXBENCH.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=61 (RTTI_T.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020DA7000 asroot=0x0000000020DA7000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 61: RTTI_T.BIN exited unexpectedly or gracefully.
+[KERNEL] pid=26 (CAT.BIN) memory fault VA=0x0000000000000000 PC=0x0000001000000000 rw=r  in=PROT region=NONE cr3frame=0x0000000020CAE000 asroot=0x0000000020CAE000 sys=-1 ret=0x0000000000000000 -> killed
+[KERNEL] Process 26: CAT.BIN exited unexpectedly or gracefully.
+[HALT-CD] cpu=0 free=2 alloc=0 exited=62 running=0 blocked=0 other=0
+System halt.
