@@ -176,12 +176,18 @@ int file_open(struct process *cur, const char *filename, int flags) {
       f->ref_count = 0;
       return -ENOENT;
     }
-    if (exists && (flags & O_CREAT) && (flags & O_EXCL)) {
+    /* SEC-1: O_CREAT|O_EXCL must be decided atomically against concurrent
+       creators, so it is enforced inside fat16_open_ex (one fat_lock
+       critical section covers existence check + slot claim), not by this
+       probe.  The probe above stays as the cheap ENOENT fast path only. */
+    int orc = fat16_open_ex(filename, f,
+                            (flags & O_CREAT) && (flags & O_EXCL) ? 1 : 0);
+    if (orc == -2) {
       f->type = FILE_TYPE_EMPTY;
       f->ref_count = 0;
       return -EEXIST;
     }
-    if (fat16_open(filename, f) != 0) {
+    if (orc != 0) {
       f->type = FILE_TYPE_EMPTY;
       f->ref_count = 0;
       return -ENOENT;
