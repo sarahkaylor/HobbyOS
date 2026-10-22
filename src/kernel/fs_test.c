@@ -337,13 +337,36 @@ static void test_fs_ftruncate_extend_then_write(void) {
 
 static void test_fs_devnull_devurandom(void); /* GB-017 (defined below) */
 
+/* SEC-2 (security-plan.md #2): the console writer must never dereference a
+ * user pointer it cannot validate.  Rejection paths only — nothing is
+ * emitted to the serial log. */
+static void test_fs_console_write_user_guards(void) {
+  tests_run++;
+  uart_puts("  Running test_fs_console_write_user_guards...\n");
+
+  char buf[8] = "hello\n";
+
+  /* No process context: nothing to validate against -> -EFAULT (the old
+     code range-checked the raw pointer and read it in kernel mode). */
+  EXPECT_EQ(console_write_user(0, buf, 6), -EFAULT);
+
+  /* v1-style process without an address space: reads outside the legacy
+     window are rejected outright. */
+  struct process fake;
+  for (unsigned i = 0; i < sizeof(fake); i++)
+    ((unsigned char *)&fake)[i] = 0;
+  EXPECT_EQ(console_write_user(&fake, buf, 6), -EFAULT); /* kernel VA: not user memory */
+}
+
 void fs_test_suite(void) {
   uart_puts("fs_test_suite:\n");
+
   test_fs_file_open_close();
   test_fs_record_locks();
   test_fs_ftruncate();
   test_fs_ftruncate_extend_then_write(); /* W3-kernel: mkfs -C extend-then-write */
   test_fs_devnull_devurandom(); /* GB-017 */
+  test_fs_console_write_user_guards(); /* SEC-2 */
 }
 
 /* GB-017: /dev/null and /dev/urandom device nodes served by the file layer.

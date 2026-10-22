@@ -72,22 +72,14 @@ static void sys_write_console(struct trap_frame *tf) {
   uint64_t ptr = tf->regs[0];
   int len = (int)tf->regs[1]; /* WK-1 M3: honor the length */
   struct process *p = current_process();
-  int ret;
-  if (p && p->as)
-    ret = console_write_user(p, (const void *)ptr, len);
-  else {
-    /* No process context (kernel path): legacy range check, then emit at
-       most len bytes (NUL-stops before that — the buffer is kernel text). */
-    extern void uart_putc(char c);
-    const char *s = (const char *)ptr;
-    ret = 0;
-    if (ptr >= USER_VIRT_BASE && ptr < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-      for (int i = 0; i < len && s[i]; i++)
-        uart_putc(s[i]);
-      ret = len;
-    }
-  }
-  tf->regs[0] = (uint64_t)ret;
+  /* SEC-2 (security-plan.md #2): the legacy no-context branch range-checked
+     the raw user pointer and then read it byte-by-byte in kernel mode,
+     assuming everything inside the window was a valid mapped buffer.  With
+     an address space present, console_write_user now validates AND copies
+     atomically per page (vm_user_read); without one there is nothing to
+     validate against, so reject instead of guessing. */
+  tf->regs[0] =
+      (uint64_t)(p ? console_write_user(p, (const void *)ptr, len) : -EFAULT);
 }
 
 static void sys_exit(struct trap_frame *tf) { process_exit(tf); }
