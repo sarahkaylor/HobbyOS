@@ -1,0 +1,98 @@
+=== ELF image parser (GB-013) host tests ===
+  PASS elf_parse(NULL) -> ARGS
+  PASS elf_parse(img=NULL) -> ARGS
+  PASS 8-byte buffer -> HDR_SHORT
+  PASS 64-byte buffer -> PHOFF (no phdr table)
+  PASS every prefix of a valid image is rejected (no OOB read)
+  PASS valid-x86_64-exec parses
+  PASS two PT_LOAD segments
+  PASS phnum preserved
+  PASS e_entry == 0x401000
+  PASS vaddr_base page-aligned to 0x401000
+  PASS vaddr_end covers the last segment
+  PASS span == 0x2000
+  PASS elf_page_down
+  PASS elf_page_up
+  PASS segment 0 is R+X
+  PASS segment 1 is R+W
+  PASS ET_EXEC flagged not-PIE
+  PASS ET_EXEC at 0x400000 flagged needs_low_window (unmappable under the v2 window)
+  PASS elf_copy_into succeeds
+  PASS seg0 first byte copied to vaddr_base
+  PASS seg0 last byte copied
+  PASS seg1 first byte copied (0x00 fill)
+  PASS seg1 bss tail zeroed (filesz=0x10 memsz=0x30)
+  PASS seg1 last memsz byte zeroed
+  PASS inter-segment hole left untouched (caller pre-zeroes)
+  PASS page hole after the last segment untouched
+  PASS short dst -> DST_RANGE
+  PASS valid-exec-bss parses
+  PASS filesz < memsz recorded
+  PASS bss copy_into succeeds
+  PASS bss: file bytes present
+  PASS bss: tail zeroed
+  PASS bss: last memsz byte zeroed
+  PASS tour-exec-3seg parses
+  PASS three PT_LOAD segments
+  PASS span covers all three pages
+  PASS 3-seg copy_into succeeds
+  PASS seg0 @0x0
+  PASS seg1 @0x1000
+  PASS seg2 @0x2000 (zero fill)
+  PASS seg2 bss tail zeroed
+  PASS plan: parse valid-x86_64-exec
+  PASS plan builds
+  PASS plan: one region per PT_LOAD (two segments)
+  PASS plan: seg0 off (vaddr_base-relative)
+  PASS plan: seg0 len page-aligned
+  PASS plan: seg0 R+X
+  PASS plan: seg1 off
+  PASS plan: seg1 len
+  PASS plan: seg1 R+W
+  PASS plan: span
+  PASS plan: parse static-pie
+  PASS plan: is_pie
+  PASS plan: static-pie builds
+  PASS plan: static-pie seg0 at 0
+  PASS plan: static-pie seg0 exec
+  PASS plan: region cap respected
+  PASS plan merge builds
+  PASS plan: shared-page segments merge to one region
+  PASS plan: merged off (vaddr_base-rel)
+  PASS plan: merged len spans both pages
+  PASS plan: merged region carries weakest (union) protection
+  PASS plan adjacent builds
+  PASS plan: page-distinct segments stay separate
+  PASS plan: second region keeps its own narrower protection
+  PASS valid-static-pie (ET_DYN, no PT_INTERP) parses
+  PASS static PIE flagged is_pie
+  PASS static PIE needs no low window
+  PASS reject-bad-magic           -> bad ELF magic
+  PASS reject-class32             -> ELFCLASS32 unsupported (64-bit only)
+  PASS reject-bigendian           -> big-endian image
+  PASS reject-arm-machine         -> not EM_X86_64
+  PASS reject-dyn-interp          -> PT_INTERP present: dynamic binary
+  PASS reject-truncated           -> segment range outside file or wrapping
+  PASS reject-phoff-oob           -> program header table outside file
+  PASS reject-phnum-zero          -> no PT_LOAD segment
+  PASS reject-interp              -> PT_INTERP present: dynamic binary
+  PASS reject-nonload-only        -> no PT_LOAD segment
+  PASS reject-filesz-gt-memsz     -> p_filesz > p_memsz
+  PASS reject-overlap             -> PT_LOAD segments overlap
+  PASS reject-bad-entry           -> e_entry outside every executable segment
+  PASS reject-no-exec             -> no executable segment
+  PASS real binary /tmp/sdl2-A/sdl2_static_test -> ok (entry 0x401ac0, 4 segs)
+  PASS real binary plan: 4 region(s), span 0x26b000, first off 0x0 fl 0x4
+--- relocation pass ---
+  PASS RELATIVE: returns ELF_OK
+  PASS RELATIVE: slot becomes base+addend
+  PASS AARCH64_RELATIVE: accepted
+  PASS unsupported type: ELF_ERR_RELOC (refused)
+  PASS unsupported type: slot left unchanged
+  PASS RELA table past span: ELF_ERR_RELOC
+  PASS RELAENT != 24: ELF_ERR_RELOC
+  PASS no PT_DYNAMIC: ELF_OK (no-op)
+  PASS null image: ELF_ERR_ARGS
+=== 93 checks, 0 failed ===
+ALL ELF IMAGE HOST TESTS PASSED
+exit=0

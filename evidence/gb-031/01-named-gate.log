@@ -1,0 +1,11 @@
+# GB-031-V gate on 69f38936dda2b2a4c336a29f96a9ec119730fc44 (2026-10-22T00:48:26Z)
+$ bash evidence/gb-031/repro.sh
+bash: evidence/gb-031/repro.sh: No such file or directory
+exit=127
+
+$ git cat-file -e origin/main:evidence/gb-031/repro.sh
+fatal: path 'evidence/gb-031/repro.sh' does not exist in 'origin/main'
+exit=128
+
+# where a8ff1ac lives:
+  remotes/origin/hermes/hermes-5e4d816e

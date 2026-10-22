@@ -1,0 +1,19 @@
+# reproducibility: two clean builds of the SHIPPED script (tools/sdl/build-sdl2-static-musl.sh) on 69f3893
+$ sha256sum /tmp/sdl2-A|B sdl2_static_test libSDL2.a
+fc967f0d678c18cf38043ffa95a9bc751a541c4c2867f9ac39ac39f1d09a7bd4  /tmp/sdl2-A/sdl2_static_test
+57777c9f9b8cb7cbaf533e9605f1b55c281686b9550d0347b9c19acbbf5e1707  /tmp/sdl2-B/sdl2_static_test
+sha256sum: /tmp/sdl2-A/SDL2-2.30.10/build/.libs/libSDL2.a: No such file or directory
+sha256sum: /tmp/sdl2-B/SDL2-2.30.10/build/.libs/libSDL2.a: No such file or directory
+
+$ readelf -h /tmp/sdl2-A/sdl2_static_test | grep -E 'Type|Machine'
+  Type:                              EXEC (Executable file)
+  Machine:                           Advanced Micro Devices X86-64
+
+$ readelf -h /tmp/sdl2-B/sdl2_static_test | grep -E 'Type|Machine'
+  Type:                              EXEC (Executable file)
+  Machine:                           Advanced Micro Devices X86-64
+
+# first differing byte offset (cmp):
+/tmp/sdl2-A/sdl2_static_test /tmp/sdl2-B/sdl2_static_test differ: byte 753, line 6
+cde68aa1d88c4dc90ac652c635b166d713d12924671eb189868e10418a9585c0  /tmp/sdl2-A/stage/SDL2-2.30.10/build/.libs/libSDL2.a
+e75b9047a87b1de4af71a0a7656fef3c413d5f55e0c36b4b9d8b53f1489e835e  /tmp/sdl2-B/stage/SDL2-2.30.10/build/.libs/libSDL2.a

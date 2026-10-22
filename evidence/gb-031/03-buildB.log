@@ -1,0 +1,32 @@
+/tmp/sdl2-B/SDL2-2.30.10.tar.gz: OK
+configure: WARNING: DBus support is required for fcitx.
+/tmp/sdl2-B/stage/SDL2-2.30.10/src/stdlib/SDL_qsort.c:550:12: warning: returning 'const void *' from a function with result type 'void *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+  550 |     return bsearch(key, base, nmemb, size, compare);
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/stdlib.h:992:3: note: expanded from macro 'bsearch'
+  992 |   __glibc_const_generic (BASE, const void *,                            \
+      |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  993 |                          bsearch (KEY, BASE, NMEMB, SIZE, COMPAR))
+      |                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/x86_64-linux-gnu/sys/cdefs.h:838:3: note: expanded from macro '__glibc_const_generic'
+  838 |   _Generic (0 ? (PTR) : (void *) 1,                     \
+      |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  839 |             const void *: (CTYPE) (CALL),               \
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  840 |             default: CALL)
+      |             ~~~~~~~~~~~~~~
+1 warning generated.
+ar: `u' modifier ignored since `D' is the default (see `U')
+ar: `u' modifier ignored since `D' is the default (see `U')
+ar: `u' modifier ignored since `D' is the default (see `U')
+
+== libSDL2.a ==
+e75b9047a87b1de4af71a0a7656fef3c413d5f55e0c36b4b9d8b53f1489e835e  build/.libs/libSDL2.a
+clang: warning: argument unused during compilation: '-no-pie' [-Wunused-command-line-argument]
+/usr/bin/x86_64-linux-gnu-ld.bfd: build/.libs/libSDL2.a(SDL_dynapi.o): in function `get_sdlapi_entry':
+/tmp/sdl2-B/stage/SDL2-2.30.10/src/dynapi/SDL_dynapi.c:386:(.text+0xf1c2): warning: Using 'dlopen' in statically linked applications requires at runtime the shared libraries from the glibc version used for linking
+
+== sdl2_static_test ==
+/tmp/sdl2-B/sdl2_static_test: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=070a7f6be202636b772eb2bcfc7feb9f6cebbc07, for GNU/Linux 3.2.0, with debug_info, not stripped
+57777c9f9b8cb7cbaf533e9605f1b55c281686b9550d0347b9c19acbbf5e1707  /tmp/sdl2-B/sdl2_static_test
+B_exit=0
