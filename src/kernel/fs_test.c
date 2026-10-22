@@ -45,6 +45,42 @@ static void test_fs_file_open_close(void) {
   process_kill(pid);
 }
 
+/* SEC-6: allocation failure must not strand a slot claiming to be a real
+ * file.  Before the fix, file_alloc() defaulted every slot to FAT16, so any
+ * caller failing between alloc and type-set left a fake FAT16 with garbage
+ * start_cluster/cursor that later operations would act on.  Now slots are
+ * UNINIT until set, and no path may leave them stranded in either state. */
+extern int fs_test_slot_type(int gfd); /* test hook over global_file_table */
+
+static void test_file_slot_sentinel(void) {
+  tests_run++;
+  uart_puts("  Running test_file_slot_sentinel...\n");
+
+  int pid = process_create();
+  EXPECT_EQ((pid >= 0), 1);
+  process_get_pcb(pid)->is_kernel_process = 1;
+  int old_pid = cpu_current_pids[0];
+  set_current_process_pid(0, pid);
+  struct process *cur = current_process();
+
+  /* Allocates a slot, then fails after allocation (ENOENT). */
+  EXPECT_EQ(file_open(cur, "/dev/bogus", 0), -ENOENT);
+  /* A real open still works and reuses slots cleanly. */
+  int fd = file_open(cur, "TEST.TXT", 0);
+  EXPECT_EQ((fd >= 0), 1);
+  file_close(cur, fd);
+
+  /* No slot may be left UNINIT (abandoned) — every alloc path resets or
+     completes.  (And none may masquerade as FAT16: that was the bug.) */
+  int strayed = 0;
+  for (int g = 0; g < MAX_GLOBAL_FILES; g++)
+    if (fs_test_slot_type(g) == (int)FILE_TYPE_UNINIT) strayed++;
+  EXPECT_EQ(strayed, 0);
+
+  set_current_process_pid(0, old_pid);
+  process_kill(pid);
+}
+
 /* ---- P6.1 (browser.md section 6): record locks + ftruncate --------------
  *
  * The fcntl record-lock commands are driven through the same kernel entry
@@ -362,6 +398,7 @@ void fs_test_suite(void) {
   uart_puts("fs_test_suite:\n");
 
   test_fs_file_open_close();
+  test_file_slot_sentinel(); /* SEC-6: no stranded/untyped slots */
   test_fs_record_locks();
   test_fs_ftruncate();
   test_fs_ftruncate_extend_then_write(); /* W3-kernel: mkfs -C extend-then-write */
