@@ -3,6 +3,7 @@
 #include "libc.h"
 #include "window.h"
 #include "desktop_damage.h"
+#include "games_scan.h"
 #include <signal.h>
 #ifndef HOST_TEST
 #include "syscall.h"
@@ -30,6 +31,12 @@ static int shift_pressed = 0;
 #define MAX_MENU_ITEMS 128
 char menu_items[MAX_MENU_ITEMS][16];
 int num_menu_items = 0;
+/* GB-039 (2nd half): 1 when menu_items[i] is a /GAMES-scanned entry (not a
+ * root file).  Such entries must launch as the literal path /GAMES/<name>
+ * (the kernel loader resolves the spawn2() name as a root-relative path, so
+ * a bare name would look up root:/<name> and never find the file).  Kept in
+ * lockstep with menu_items through menu_apps_first's reorder. */
+char menu_in_games[MAX_MENU_ITEMS];
 
 int menu_open = 0;
 int menu_x = 0;
@@ -811,7 +818,7 @@ static const char *const pinned_apps[] = {
 
 /* The games, pinned right below the apps so all twelve fit on screen. */
 static const char *const pinned_games[] = {
-  "PONG.BIN", "MILLIPED.BIN",
+  "PONG.BIN", "MILLIPED.BIN", "STARDUST.BIN", "XNIBBLER.BIN", "XCRYPT.BIN", "NES.BIN",
 };
 #define NUM_PINNED_GAMES ((int)(sizeof(pinned_games) / sizeof(pinned_games[0])))
 
@@ -847,19 +854,22 @@ static void copy_name(char *dst, const char *src, int max) {
  * Non-static: exercised directly by the host test (desktop_menu_test.c). */
 void menu_apps_first(void) {
   char tmp[MAX_MENU_ITEMS][16];
+  char tg[MAX_MENU_ITEMS];           /* lockstep /GAMES origin of each entry */
   int w = 0;
   for (int i = 0; i < num_menu_items; i++) {
-    if (is_pinned_app(menu_items[i])) copy_name(tmp[w++], menu_items[i], 16);
+    if (is_pinned_app(menu_items[i])) { copy_name(tmp[w], menu_items[i], 16); tg[w] = menu_in_games[i]; w++; }
   }
   for (int i = 0; i < num_menu_items; i++) {
-    if (is_pinned_game(menu_items[i])) copy_name(tmp[w++], menu_items[i], 16);
+    if (is_pinned_game(menu_items[i])) { copy_name(tmp[w], menu_items[i], 16); tg[w] = menu_in_games[i]; w++; }
   }
   for (int i = 0; i < num_menu_items; i++) {
-    if (!is_pinned_app(menu_items[i]) && !is_pinned_game(menu_items[i]))
-      copy_name(tmp[w++], menu_items[i], 16);
+    if (!is_pinned_app(menu_items[i]) && !is_pinned_game(menu_items[i])) {
+      copy_name(tmp[w], menu_items[i], 16); tg[w] = menu_in_games[i]; w++;
+    }
   }
   for (int i = 0; i < num_menu_items; i++) {
     copy_name(menu_items[i], tmp[i], 16);
+    menu_in_games[i] = tg[i];
   }
 }
 
@@ -885,6 +895,7 @@ void menu_display_name(const char *raw, char *out, int max) {
 
 void load_menu(void) {
   num_menu_items = 0;
+  for (int i = 0; i < MAX_MENU_ITEMS; i++) menu_in_games[i] = 0;
 
   /* Pass 1: the pinned launcher entries, wherever they sit in the
    * directory.  A single scan stopped at MAX_MENU_ITEMS entries, so once
@@ -900,6 +911,34 @@ void load_menu(void) {
     copy_name(menu_items[num_menu_items], ent.name, 16);
     num_menu_items++;
   }
+
+  /* Pass 1b (GB-039, S2 launcher): also scan /GAMES (.BIN + ELF), so games
+   * installed under /GAMES surface regardless of the root pins and are never
+   * silently dropped at the 128 cap.  read_dir on a missing /GAMES returns <0
+   * -> no-op.  Launch of either kind is already handled by the kernel loader
+   * (program_loader.c dispatches 0x7fELF); this pass only makes them visible.
+   * Host build (HOST_TEST) skips the scan so the pure scan is tested by
+   * games_scan_test_host, not by the QEMU-less desktop tests. */
+#ifndef HOST_TEST
+  {
+    struct games_entry g[GAMES_MAX];
+    int ng = games_scan_dir(g, GAMES_MAX);
+    for (int i = 0; i < ng && num_menu_items < MAX_MENU_ITEMS; i++) {
+      int dup = 0;
+      for (int j = 0; j < num_menu_items && !dup; j++) {
+        int k = 0;
+        while (menu_items[j][k] && g[i].name[k] &&
+               menu_items[j][k] == g[i].name[k]) k++;
+        if (menu_items[j][k] == g[i].name[k]) dup = 1;
+      }
+      if (!dup) {
+        copy_name(menu_items[num_menu_items], g[i].name, 16);
+        menu_in_games[num_menu_items] = 1;   /* launch as /GAMES/<name> */
+        num_menu_items++;
+      }
+    }
+  }
+#endif
 
   /* Pass 2: everything else, in directory order, until the cap. */
   for (int idx = 0; num_menu_items < MAX_MENU_ITEMS; idx++) {
@@ -969,10 +1008,36 @@ static void launch_app_named(const char *bin, const char *args) {
   }
 }
 
+/* Absolute spawn2() path for a menu entry: a /GAMES-scanned title launches at
+ * its real location "/GAMES/<name>"; a root entry launches as-is.  Non-static:
+ * exercised directly by the host test for both a scanned .BIN and a scanned
+ * ELF (the two tracks GB-039 must launch). */
+void launcher_path_for(char *out, int max, const char *name, int in_games) {
+  int i = 0;
+  if (in_games) {
+    static const char pfx[] = "/GAMES/";
+    int k = 0;
+    while (pfx[k] && i < max - 1) out[i++] = pfx[k++];
+  }
+  int k = 0;
+  while (name[k] && i < max - 1) out[i++] = name[k++];
+  out[i] = '\0';
+}
+
 /* Launch menu item `idx` into a new tiled window. */
 static void launch_menu_item(int idx) {
   if (idx < 0 || idx >= num_menu_items) return;
-  launch_app_named(menu_items[idx], 0);
+  if (menu_in_games[idx]) {
+    /* /GAMES-scanned title: the loader treats the spawn2() name as a literal
+     * root-relative path, so launch it at its real location /GAMES/<name>
+     * (works for both native .BIN and ELF — the kernel loader dispatches on
+     * 0x7fELF magic). */
+    char path[24];
+    launcher_path_for(path, sizeof(path), menu_items[idx], 1);
+    launch_app_named(path, 0);
+  } else {
+    launch_app_named(menu_items[idx], 0);
+  }
 }
 
 /* ---- Right-click application menu (unchanged geometry; tests depend) ---- */
@@ -1877,6 +1942,22 @@ static void desktop_ignore_sigpipe(void) {
 #endif
 }
 
+/* Reap exited child processes (WNOHANG, any child) so their kernel slots are
+ * freed instead of accumulating as zombies.  Root cause of the GB-046 long-soak
+ * desktop death: close_window_now() killed game processes but never
+ * waitpid()ed them, so the process table filled ("no free process slots!
+ * zombies=23") and every later launch failed.  A long-lived parent reaps its
+ * children; this drains whatever has exited.  Guarded out of HOST_TEST (the
+ * reap is a kernel syscall; host desktop tests exercise windowing only). */
+void desktop_reap_children(void) {
+#ifndef HOST_TEST
+  int wst;
+  while (waitpid(0, &wst, 1) > 0) { }   /* WNOHANG: reap all exited, never block */
+#else
+  (void)0;
+#endif
+}
+
 int main(void) {
   desktop_ignore_sigpipe();
   print("Desktop starting...\n");
@@ -1898,6 +1979,12 @@ int main(void) {
   int last_clock_ms = -1000;
 
   while (1) {
+    /* Reap exited child processes (non-blocking) so their kernel slots free
+     * instead of accumulating as zombies — the GB-046 long soak died on
+     * "[KERNEL] process_create: no free process slots! zombies=23" because
+     * close_window_now() killed game processes but never waitpid()ed them.
+     * A long-lived parent reaps its children; drain was here. */
+    desktop_reap_children();
     /* Periodic redraw so the taskbar clock ticks (>= 1s). */
     int now_ms = sysinfo(1, 0, 0);
     if (now_ms - last_clock_ms >= 1000) {

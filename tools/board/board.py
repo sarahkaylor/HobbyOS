@@ -21,6 +21,7 @@ Usage:
   board.py lint                       # lane hygiene / blocked-without-reason checks
 """
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -129,12 +130,30 @@ def all_issues(state="all"):
 
 
 def issue_by_id(gid):
-    """Issue whose title starts with GB-nnn (the ticket id is in the title)."""
-    gid = gid.upper()
-    if not gid.startswith("GB-"):
+    """Issue whose title starts with the ticket id (GB-nnn, PLAN-nnn, EPIC-...).
+
+    The id is in the title.  PLAN/EPIC tickets were previously unaddressable
+    here (`no issue for PLAN-005`), which is how PLAN-003 was left open with no
+    lane — the tool could not name the ticket its own loop creates.  Any of the
+    three prefixes is accepted, and a bare number is read as GB-nnn.
+    """
+    gid = gid.upper().strip()
+    if gid.isdigit():
+        for it in all_issues():
+            if it["number"] == int(gid):
+                return it
+        return None
+    if gid.startswith("EPIC") and not re.match(r"^EPIC\b", gid):
+        gid = "EPIC"          # EPIC titles carry no number: "EPIC Program-2: …"
+    if not re.match(r"^(GB|PLAN|EPIC)-", gid) and not gid.startswith("EPIC"):
         gid = "GB-" + gid
     for it in all_issues():
-        if re.match(rf"^{re.escape(gid)}\b", it["title"]):
+        # (?![\w-]) is load-bearing: the re-plan loop mints `GB-nnn-V`
+        # verification tickets, and a bare `\b` after GB-nnn matches the hyphen.
+        # all_issues() returns NEWEST first, so `GB-016-V` would be found before
+        # `GB-016` — `move GB-016 Done` would then have laned and closed the
+        # verification ticket instead of the implementation one.
+        if re.match(rf"^{re.escape(gid)}(?![\w-])", it["title"]):
             return it
     return None
 
@@ -151,12 +170,18 @@ def set_lane(issue, lane, create=True):
     if lane not in LANES:
         raise SystemExit(f"unknown lane {lane!r}; lanes={LANES}")
     ki = issue["number"]
-    cur = lane_of(issue)
     if create:
         ensure_label(lane, LANE_COLORS[lane], "kanban lane (§4.1)")
-    if cur and cur != lane:
-        api_delete(f"/repos/{REPO}/issues/{ki}/labels/{urllib.parse.quote(cur)}")
-    api_post(f"/repos/{REPO}/issues/{ki}/labels", {"labels": [lane]})
+    # GB-074: act on the CURRENT server state, not the (possibly stale) issue
+    # object the caller read earlier, so a concurrent lane move is not clobbered
+    # and the observed transition is the one we really made.  The swap is a
+    # single atomic PUT of the whole label set (Forgejo serializes it
+    # server-side), instead of delete-then-add across two requests.
+    cur_it = api_get(f"/repos/{REPO}/issues/{ki}")
+    cur = lane_of(cur_it)
+    names = [l["name"] for l in cur_it.get("labels", []) if l["name"] not in LANES]
+    names.append(lane)
+    api_put_labels(ki, names)
     return cur
 
 
@@ -197,14 +222,43 @@ def comment(gid, text, lane=None, close=False):
 
 
 # ---------------------------------------------------------------- commands
+def claimant_of(index):
+    """Name the agent behind the first 'claimed by `X`' comment, if any (GB-074
+    loser detection: the loser must be able to say who won)."""
+    for c in api_get(f"/repos/{REPO}/issues/{index}/comments", "?limit=50"):
+        m = re.search(r"claimed by `([^`]+)`", c.get("body") or "")
+        if m:
+            return m.group(1)
+    return None
+
+
 def cmd_claim(a):
     it = issue_by_id(a.gid)
     if not it:
         raise SystemExit(f"no issue for {a.gid}")
     by = a.by or os.environ.get("BOARD_AGENT", "swarm-bot")
-    prev = set_lane(it, "In Progress")
-    msg = f"claimed by `{by}` on {a.host or 'swarm-coordinator'} — lane: {prev or 'Backlog'} → In Progress"
-    comment(a.gid, msg)
+    # GB-074 (claim race): serialize concurrent claims on a lock, then re-read
+    # the CURRENT lane before claiming.  A ticket already In Progress was claimed
+    # by someone else — refuse and name the winner; never run the gate on a
+    # double claim.  The lockfile must sit on the shared store for cross-VM
+    # exclusion; on a single host (and in CI) flock alone already serializes.
+    lock_path = os.environ.get("BOARD_LOCK", "/tmp/hobbyos-board-claim.lock")
+    lockf = open(lock_path, "a")
+    fcntl.flock(lockf, fcntl.LOCK_EX)
+    try:
+        cur = lane_of(api_get(f"/repos/{REPO}/issues/{it['number']}"))
+        if cur == "In Progress":
+            winner = claimant_of(it["number"])
+            raise SystemExit(
+                f"{a.gid} #{it['number']} already claimed by `{winner or 'another agent'}` "
+                "(lane already In Progress) — not re-claiming (GB-074); run no gate")
+        prev = set_lane(it, "In Progress")
+        msg = (f"claimed by `{by}` on {a.host or 'swarm-coordinator'} — "
+               f"lane: {prev or 'Backlog'} → In Progress")
+        comment(a.gid, msg)
+    finally:
+        fcntl.flock(lockf, fcntl.LOCK_UN)
+        lockf.close()
     print(f"{a.gid} #{it['number']} claimed by {by} (was {prev})")
 
 
@@ -272,6 +326,18 @@ def cmd_status(a):
         print(f"  {m['title']:<16} {done:>2}/{len(iss):<2} open={len(iss)-done:<3} {pct:5.1f}%")
 
 
+def _has_evidence_comment(body):
+    """True when a comment opens with the EVIDENCE marker.
+
+    The marker is a convention, not a token match on the raw bytes: comments
+    are written in markdown, so the overwhelmingly common shape is
+    ``**EVIDENCE — ...``.  Stripping leading emphasis/space is what makes the
+    lint say what it means (a real EVIDENCE comment was being flagged as
+    missing because of two asterisks).
+    """
+    return body.lstrip(" \t\r\n*_#").upper().startswith("EVIDENCE")
+
+
 def cmd_lint(a):
     rc = 0
     missing = ensure_lanes(create=False)
@@ -280,7 +346,7 @@ def cmd_lint(a):
         rc = 1
     for it in all_issues("open"):
         lab = [l["name"] for l in it["labels"]]
-        gid = (re.match(r"^(GB-\d+)", it["title"]) or [None, it["title"][:10]])[1]
+        gid = (re.match(r"^(GB-\d+(?:-V)?)", it["title"]) or [None, it["title"][:10]])[1]
         if lane_of(it) is None:
             print(f"LINT {gid}: no lane label")
             rc = 1
@@ -288,7 +354,7 @@ def cmd_lint(a):
             print(f"LINT {gid}: `blocked` label without a 'Blocked:' reason in the body")
             rc = 1
         if lane_of(it) in ("In Review", "Merge Gate") and not any(
-            c["body"].startswith("EVIDENCE") for c in api_get(f"/repos/{REPO}/issues/{it['number']}/comments", "?limit=50")
+            _has_evidence_comment(c["body"]) for c in api_get(f"/repos/{REPO}/issues/{it['number']}/comments", "?limit=50")
         ):
             print(f"LINT {gid}: in {lane_of(it)} without an EVIDENCE comment")
             rc = 1

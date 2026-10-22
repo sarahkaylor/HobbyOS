@@ -288,7 +288,7 @@ build_curl() {
 
     # libtool would try to link the .la with the non-libtool closure objects;
     # archives don't need them — strip (keep -T/-L switches).
-    find . \( -name Makefile -o -name '*.mk' \) -exec sed -i \
+    find . \( -name Makefile -o -name '*.mk' \) -exec sed -i.bak \
       "s#${CRT}# #g; s#${LIBC}# #g; s#${SETJMP}# #g; s#${GAPS_O}# #g; s#${GAPS_VARC_O}# #g; s#${MBEDTLS_ALT_O}# #g; s#${NETCOMPAT_O}# #g; s#${RESOLV_O}# #g" {} +
 
     # Library only (no programs/tests); lib/.libs/libcurl.a is the static archive.

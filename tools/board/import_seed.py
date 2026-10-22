@@ -40,6 +40,22 @@ WORKSTREAM = {
     "GB-043": ["tests"], "GB-044": ["tests", "infra"], "GB-045": ["perf"], "GB-046": ["perf", "tests"],
     "GB-047": ["docs", "tests"], "GB-048": ["infra"], "GB-049": ["infra"], "GB-050": ["tests"],
     "GB-051": ["audio", "tests"], "GB-052": ["docs"], "GB-053": ["tests"], "GB-054": ["docs"], "GB-055": ["docs"],
+    "GB-056": ["tests"],
+    "GB-057": ["abi", "tests"], "GB-058": ["abi", "tests"], "GB-059": ["tests"],
+    "GB-060": ["abi"], "GB-061": ["abi"],
+    "GB-062": ["tests"],
+    "GB-063": ["abi", "tests"], "GB-064": ["infra", "tests"], "GB-065": ["graphics"],
+    "GB-066": ["tests", "elf-compat"],
+    "GB-067": ["abi", "loader"],
+    "GB-068": ["abi", "tests"],
+    "GB-069": ["abi", "loader"],
+    "GB-070": ["abi", "tests"],
+    "GB-071": ["abi", "tests"],
+    "GB-072": ["loader", "abi", "tests"],
+    "GB-073": ["tests", "elf-compat"],
+    "GB-074": ["infra", "tests"],
+    "GB-075": ["tests", "perf"],
+    "GB-076": ["abi", "tests", "elf-compat"],
 }
 DEEP_IDS = {"GB-010", "GB-011", "GB-013", "GB-031", "GB-041", "GB-054"}
 
@@ -67,7 +83,7 @@ def parse_plan(path=PLAN):
             continue
         if not ms:
             continue
-        c = [x.strip() for x in line.strip().strip("|").split("|")] if line.startswith("|") else None
+        c = _cells(line) if line.startswith("|") else None
         if not c or len(c) < 5 or not re.match(r"^GB-\d{3}$", c[0]):
             continue
         gid = c[0]
@@ -79,7 +95,39 @@ def parse_plan(path=PLAN):
     return out, order
 
 
+def _cells(line):
+    """Split a markdown table row into cells, honouring `\\|` escapes.
+
+    A plan row may legitimately contain a literal pipe (e.g. a page-table
+    flag list `P|RW|PWT|PCD|PS`, written `P\\|RW\\|...` in the cell).  Splitting
+    on every `|` fragmented such rows into extra columns, so the importer
+    read the NEXT fields as weight/depends/DoD -- GB-069 landed on the board
+    with `Weight=RW\\`, `Depends on=PWT\\` and `DoD=PCD\\`.  Split on unescaped
+    pipes only, then unescape."""
+    s = line.strip()
+    if s.startswith("|"):
+        s = s[1:]
+    if s.endswith("|") and not s.endswith("\\|"):
+        s = s[:-1]
+    parts, cur, esc = [], [], False
+    for ch in s:
+        if esc:
+            cur.append(ch)
+            esc = False
+        elif ch == "\\":
+            esc = True
+            cur.append(ch)
+        elif ch == "|":
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    parts.append("".join(cur))
+    return [p.strip().replace("\\|", "|") for p in parts]
+
+
 def build_body(gid, t, lane=None):
+
     ws = WORKSTREAM.get(gid, [])
     deep = gid in DEEP_IDS
     tiers = MS_TIERS[t["ms"]]
@@ -140,7 +188,10 @@ def main():
     existing = {}
     if not a.dry_run:
         for it in board.all_issues("all"):
-            m = re.match(r"^(GB-\d{3})\b", it["title"])
+            # (?![\w-]) so `GB-016-V` (verification ticket, §4.2) is not read as
+            # `GB-016` — the upsert would otherwise rewrite the implementation
+            # ticket's body with the verification one's.
+            m = re.match(r"^(GB-\d{3})(?![\w-])", it["title"])
             if m:
                 existing[m.group(1)] = it
 

@@ -75,6 +75,122 @@ static int expect(const char *name, int want) {
   return 0;
 }
 
+/* --- GB-013 relocation pass ------------------------------------------------
+ *
+ * Built by hand rather than from a fixture: the pass is a pure function of
+ * (image description, staged bytes, base), so the test should not need a real
+ * binary to exercise the refusal paths -- and a hand-built table can express
+ * cases no compiler would emit (an unsupported relocation type, a table that
+ * runs past the mapping) which is exactly where a loader silently misbehaves.
+ */
+static void w64(uint8_t *p, uint64_t v) {
+  for (int i = 0; i < 8; i++) p[i] = (uint8_t)(v >> (8 * i));
+}
+
+/* stage layout, vaddr_base = 0x1000:
+ *   +0x0080  the slot to be relocated
+ *   +0x1000  dynamic array
+ *   +0x1100  RELA table
+ */
+#define R_VB      0x1000u
+#define R_SPAN    0x2000u
+#define R_SLOT    (0x0080u)
+#define R_DYN     (0x1000u)
+#define R_RELA    (0x1100u)
+#define R_BASE    0x1000000000ull
+
+static void reloc_case_setup(uint8_t *stage, struct elf_image *img,
+                             uint32_t reloc_type, uint64_t addend,
+                             uint64_t rela_vaddr, uint64_t relasz,
+                             uint64_t relaent) {
+  memset(stage, 0, R_SPAN);
+  memset(img, 0, sizeof *img);
+  img->vaddr_base = R_VB;
+  img->vaddr_end = R_VB + R_SPAN;
+  img->dyn_vaddr = R_VB + R_DYN;
+  img->dyn_size = 64;
+  uint8_t *dyn = stage + R_DYN;
+  w64(dyn + 0, 7);  w64(dyn + 8, rela_vaddr);   /* DT_RELA   */
+  w64(dyn + 16, 8); w64(dyn + 24, relasz);      /* DT_RELASZ */
+  w64(dyn + 32, 9); w64(dyn + 40, relaent);     /* DT_RELAENT */
+  w64(dyn + 48, 0); w64(dyn + 56, 0);           /* DT_NULL   */
+  uint8_t *r = stage + R_RELA;
+  w64(r + 0, R_VB + R_SLOT);                    /* r_offset  */
+  w64(r + 8, ((uint64_t)reloc_type));           /* r_info    */
+  w64(r + 16, addend);                          /* r_addend  */
+}
+
+static void test_relocations(void) {
+  static uint8_t stage[R_SPAN];
+  struct elf_image img;
+
+  printf("--- relocation pass ---\n");
+
+  /* 1. the case that unblocked the milestone: base + addend lands in the slot */
+  reloc_case_setup(stage, &img, 8 /* R_X86_64_RELATIVE */, 0x1234,
+                   R_VB + R_RELA, 24, 24);
+  CHECK_EQ(elf_apply_relocations(&img, stage, R_SPAN, R_BASE), ELF_OK,
+           "RELATIVE: returns ELF_OK");
+  uint64_t slot = 0;
+  for (int i = 0; i < 8; i++) slot |= (uint64_t)stage[R_SLOT + i] << (8 * i);
+  CHECK_EQ(slot, R_BASE + 0x1234, "RELATIVE: slot becomes base+addend");
+
+  /* 2. aarch64 RELATIVE is the same rule, and must not be refused */
+  reloc_case_setup(stage, &img, 1027 /* R_AARCH64_RELATIVE */, 0x40,
+                   R_VB + R_RELA, 24, 24);
+  CHECK_EQ(elf_apply_relocations(&img, stage, R_SPAN, R_BASE), ELF_OK,
+           "AARCH64_RELATIVE: accepted");
+
+  /* 3. an unimplemented type is REFUSED, not skipped: a silently-skipped
+        relocation looks like working code until it jumps elsewhere */
+  reloc_case_setup(stage, &img, 6 /* R_X86_64_GLOB_DAT */, 0,
+                   R_VB + R_RELA, 24, 24);
+  CHECK_EQ(elf_apply_relocations(&img, stage, R_SPAN, R_BASE), ELF_ERR_RELOC,
+           "unsupported type: ELF_ERR_RELOC (refused)");
+
+  /* 4. the slot must be untouched by the refusal */
+  reloc_case_setup(stage, &img, 6, 0, R_VB + R_RELA, 24, 24);
+  (void)elf_apply_relocations(&img, stage, R_SPAN, R_BASE);
+  slot = 0;
+  for (int i = 0; i < 8; i++) slot |= (uint64_t)stage[R_SLOT + i] << (8 * i);
+  CHECK_EQ(slot, 0, "unsupported type: slot left unchanged");
+
+  /* 5. a RELA table past the mapping is an error, not an overrun.
+        Getting this case to actually test the span guard took two attempts, both
+        found by mutation rather than by reading the code:
+          (a) RELASZ 0x1000 still fit the 0x1010 bytes remaining, so a later check
+              produced the error and the span guard could be deleted silently;
+          (b) making RELASZ huge only "passed" because the loop then read out of
+              bounds and tripped the r_offset guard instead.
+        So: a buffer LARGER than the declared span, holding zeroes. Without the
+        span guard the loop reads in-bounds padding, sees only type 0, and returns
+        ELF_OK -- with it, ELF_ERR_RELOC. Now only the guard under test can change
+        the result. */
+  static uint8_t pad[R_SPAN + 0x1000];
+  reloc_case_setup(pad, &img, 8, 0x10, R_VB + R_RELA, 24, 24);
+  img.dyn_vaddr = R_VB + R_DYN;
+  w64(pad + R_DYN + 8, R_VB + 0x1FF0);    /* DT_RELA at the last 16 bytes of span */
+  w64(pad + R_DYN + 24, 0x1000);          /* RELASZ runs past it, into the padding */
+  CHECK_EQ(elf_apply_relocations(&img, pad, R_SPAN, R_BASE), ELF_ERR_RELOC,
+           "RELA table past span: ELF_ERR_RELOC");
+
+  /* 6. Elf64_Rela is 24 bytes; any other stride is refused */
+  reloc_case_setup(stage, &img, 8, 0x10, R_VB + R_RELA, 48, 16);
+  CHECK_EQ(elf_apply_relocations(&img, stage, R_SPAN, R_BASE), ELF_ERR_RELOC,
+           "RELAENT != 24: ELF_ERR_RELOC");
+
+  /* 7. no dynamic section means nothing to do, and that is success */
+  memset(&img, 0, sizeof img);
+  img.vaddr_base = R_VB;
+  img.vaddr_end = R_VB + R_SPAN;
+  CHECK_EQ(elf_apply_relocations(&img, stage, R_SPAN, R_BASE), ELF_OK,
+           "no PT_DYNAMIC: ELF_OK (no-op)");
+
+  /* 8. null arguments are mistakes, not no-ops */
+  CHECK_EQ(elf_apply_relocations(NULL, stage, R_SPAN, R_BASE), ELF_ERR_ARGS,
+           "null image: ELF_ERR_ARGS");
+}
+
 int main(void) {
   printf("=== ELF image parser (GB-013) host tests ===\n");
 
@@ -183,6 +299,84 @@ int main(void) {
     }
   }
 
+  /* --- the loader plan (GB-013 mapper half): regions + union merge ------- */
+  {
+    uint64_t lp = 0;
+    uint8_t *bp = slurp("valid-x86_64-exec", &lp);
+    if (bp) {
+      struct elf_image ip;
+      struct elf_plan pl;
+      CHECK_EQ(elf_parse(bp, lp, &ip), ELF_OK, "plan: parse valid-x86_64-exec");
+      CHECK_EQ(elf_build_plan(&ip, &pl), ELF_OK, "plan builds");
+      CHECK_EQ(pl.nreg, 2, "plan: one region per PT_LOAD (two segments)");
+      CHECK_EQ(pl.regs[0].off, 0x0, "plan: seg0 off (vaddr_base-relative)");
+      CHECK_EQ(pl.regs[0].len, 0x1000, "plan: seg0 len page-aligned");
+      CHECK_EQ(pl.regs[0].flags, ELF_PF_R | ELF_PF_X, "plan: seg0 R+X");
+      CHECK_EQ(pl.regs[1].off, 0x1000, "plan: seg1 off");
+      CHECK_EQ(pl.regs[1].len, 0x1000, "plan: seg1 len");
+      CHECK_EQ(pl.regs[1].flags, ELF_PF_R | ELF_PF_W, "plan: seg1 R+W");
+      CHECK_EQ(pl.span, 0x2000, "plan: span");
+      free(bp);
+    }
+  }
+  /* valid-static-pie: build at vaddr_base 0, one exec + one data segment */
+  {
+    uint64_t lp = 0;
+    uint8_t *bp = slurp("valid-static-pie", &lp);
+    if (bp) {
+      struct elf_image ip;
+      struct elf_plan pl;
+      CHECK_EQ(elf_parse(bp, lp, &ip), ELF_OK, "plan: parse static-pie");
+      CHECK_EQ((int)ip.is_pie, 1, "plan: is_pie");
+      CHECK_EQ(elf_build_plan(&ip, &pl), ELF_OK, "plan: static-pie builds");
+      /* static-pie segment 0 starts at vaddr 0 (relocatable image) */
+      CHECK_EQ(pl.regs[0].off, 0x0, "plan: static-pie seg0 at 0");
+      CHECK_EQ((pl.regs[0].flags & (ELF_PF_R | ELF_PF_X)),
+               (ELF_PF_R | ELF_PF_X), "plan: static-pie seg0 exec");
+      CHECK(pl.nreg <= ELF_MAX_PLAN_REGIONS, "plan: region cap respected");
+      free(bp);
+    }
+  }
+  /* hand-built merge case: two segments sharing a page must become ONE
+     region with the weaker (union) protection across that page.  The parser
+     rejects overlapping images, so this proves the plan's merge logic in
+     isolation from elf_parse. */
+  {
+    struct elf_image mt;
+    memset(&mt, 0, sizeof mt);
+    mt.nsegs = 2;
+    mt.vaddr_base = 0x1000;
+    mt.vaddr_end = 0x3000;
+    mt.segs[0].vaddr = 0x1000; mt.segs[0].memsz = 0x1000;
+    mt.segs[0].flags = ELF_PF_R | ELF_PF_X;
+    mt.segs[1].vaddr = 0x1800; mt.segs[1].memsz = 0x1000; /* shares last page */
+    mt.segs[1].flags = ELF_PF_R | ELF_PF_W;
+    struct elf_plan pl;
+    CHECK_EQ(elf_build_plan(&mt, &pl), ELF_OK, "plan merge builds");
+    CHECK_EQ(pl.nreg, 1, "plan: shared-page segments merge to one region");
+    CHECK_EQ(pl.regs[0].off, 0x0, "plan: merged off (vaddr_base-rel)");
+    CHECK_EQ(pl.regs[0].len, 0x2000, "plan: merged len spans both pages");
+    CHECK_EQ(pl.regs[0].flags, ELF_PF_R | ELF_PF_W | ELF_PF_X,
+             "plan: merged region carries weakest (union) protection");
+  }
+  /* hand-built adjacent-but-not-overlapping: must stay SEPARATE regions */
+  {
+    struct elf_image mt;
+    memset(&mt, 0, sizeof mt);
+    mt.nsegs = 2;
+    mt.vaddr_base = 0x1000;
+    mt.vaddr_end = 0x3000;
+    mt.segs[0].vaddr = 0x1000; mt.segs[0].memsz = 0x1000;
+    mt.segs[0].flags = ELF_PF_R | ELF_PF_X;
+    mt.segs[1].vaddr = 0x2000; mt.segs[1].memsz = 0x1000; /* distinct page */
+    mt.segs[1].flags = ELF_PF_R | ELF_PF_W;
+    struct elf_plan pl;
+    CHECK_EQ(elf_build_plan(&mt, &pl), ELF_OK, "plan adjacent builds");
+    CHECK_EQ(pl.nreg, 2, "plan: page-distinct segments stay separate");
+    CHECK_EQ(pl.regs[1].flags, ELF_PF_R | ELF_PF_W,
+             "plan: second region keeps its own narrower protection");
+  }
+
   /* --- the reject classes (one vector each) ----------------------------- */
   /* the accept class also covers static PIE, and ET_EXEC's window flag */
   {
@@ -232,6 +426,20 @@ int main(void) {
         if (rc == ELF_OK || rc == ELF_ERR_INTERP || rc == ELF_ERR_TYPE) {
           printf("  PASS real binary %s -> %s (entry 0x%llx, %u segs)\n", real, elf_strerror(rc),
                  (unsigned long long)ri.entry, ri.nsegs);
+          /* mapper input: a parse-OK real binary must produce a valid plan */
+          if (rc == ELF_OK) {
+            struct elf_plan rp;
+            int prc = elf_build_plan(&ri, &rp);
+            checks++;
+            if (prc == ELF_OK && rp.nreg >= 1) {
+              printf("  PASS real binary plan: %u region(s), span 0x%llx, first off 0x%llx fl 0x%x\n",
+                     rp.nreg, (unsigned long long)rp.span,
+                     (unsigned long long)rp.regs[0].off, rp.regs[0].flags);
+            } else {
+              printf("  FAIL real binary %s -> plan rc=%d nreg=%u\n", real, prc, rp.nreg);
+              failures++;
+            }
+          }
         } else {
           printf("  FAIL real binary %s -> %s\n", real, elf_strerror(rc));
           failures++;
@@ -242,6 +450,8 @@ int main(void) {
       printf("  SKIP real-binary parse (set ELF_REAL_BINARY=/path/to/static-x86_64)\n");
     }
   }
+
+  test_relocations();
 
   printf("=== %d checks, %d failed ===\n", checks, failures);
   if (failures == 0) {

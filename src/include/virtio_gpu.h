@@ -121,6 +121,10 @@ void virtio_gpu_flush(void);
  */
 struct virtio_gpu_xrect { int32_t x, y, w, h; };
 void virtio_gpu_flush_rects(const struct virtio_gpu_xrect *rects, int count);
+/* SEC-7 (security-plan.md #7): syscall-boundary batch validation.  Returns
+ * 1 if every rect is non-degenerate and fully inside the framebuffer and
+ * the summed area is within the per-call cap; 0 means reject (-EINVAL). */
+int virtio_gpu_flush_args_ok(const struct virtio_gpu_xrect *rects, int count);
 
 /**
  * Returns the base address of the kernel's memory-mapped framebuffer.

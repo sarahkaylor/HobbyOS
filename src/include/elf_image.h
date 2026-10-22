@@ -64,7 +64,8 @@ enum {
   ELF_ERR_ENTRY = -18,       /* e_entry outside every executable PT_LOAD    */
   ELF_ERR_NO_TEXT = -19,     /* no executable segment                       */
   ELF_ERR_DST_RANGE = -20,   /* destination buffer can't hold the image     */
-  ELF_ERR_ARGS = -21         /* null pointer / zero length                  */
+  ELF_ERR_ARGS = -21,        /* null pointer / zero length                  */
+  ELF_ERR_RELOC = -22        /* unsupported relocation type / bad RELA table */
 };
 
 struct elf_segment {
@@ -84,6 +85,19 @@ struct elf_image {
   uint64_t vaddr_end;  /* page-aligned end of the highest PT_LOAD  */
   uint32_t nsegs;
   uint32_t phnum;      /* all program headers seen (incl. non-LOAD) */
+  /* GB-013: PT_DYNAMIC, needed to apply R_*_RELATIVE over the laid-out image.
+     A static-PIE is position-independent only after its relative relocations
+     are applied; without them every GOT/pointer slot still holds a link-time
+     address relative to 0 and the first indirect call lands at address 0.
+     Zero means the image has no dynamic section (a flat/fixed image). */
+  uint64_t dyn_vaddr;
+  uint64_t dyn_size;
+  /* GB-014: program-header table location, needed to fill AT_PHDR/AT_PHNUM/
+     AT_ENTRY in the startup auxv.  A Linux program reads its own program
+     headers to find PT_DYNAMIC and its entry, and without these the musl
+     startup dereferences small offsets (measured: fault at VA=0x210). */
+  uint64_t phoff;
+  uint32_t phent;
   struct elf_segment segs[ELF_MAX_LOAD_SEGMENTS];
 };
 
@@ -108,7 +122,55 @@ uint64_t elf_image_span(const struct elf_image *img);
 int elf_copy_into(const struct elf_image *img, const void *buf, uint64_t len,
                   uint8_t *dst, uint64_t dst_len);
 
+/* GB-013: apply R_*_RELATIVE relocations over a laid-out image (`stage` holds
+ * the image at vaddr_base-relative offsets, exactly as it will be mapped at
+ * `base`).  A static-PIE is position-independent only after this; without it the
+ * program enters correctly and faults at the first indirect call.  Returns
+ * ELF_OK (including "no dynamic section, nothing to do"), or ELF_ERR_RELOC for
+ * an unsupported relocation type or a malformed RELA/FILE table -- refused, never
+ * skipped, because a silently-skipped relocation looks like working code until
+ * it jumps into the wrong place. */
+int elf_apply_relocations(const struct elf_image *img, uint8_t *stage,
+                          uint64_t span, uint64_t base);
+
 /* Human-readable name for an ELF_ERR_* (for serial logs; never NULL). */
 const char *elf_strerror(int err);
+
+/* --- GB-013 loader plan (the mapper half) ------------------------------ *
+ * The parser decides *whether* a Linux binary may load; the plan decides
+ * *where* and *with what protections*.  This is the kernel's mapping input:
+ * a list of disjoint, page-aligned, per-page unioned-protection regions that
+ * the loader hands to vm_region_insert + the eager frame fill.  Kept pure
+ * (kernel-free, host-testable) for the same reason the parser is: the merge /
+ * union / alignment decision is the risky logic and must be proven on the
+ * host before any QEMU run.
+ *
+ * Region flags are ELF_PF_* (the parser's vocabulary) so this file stays
+ * free of vm.h; the kernel maps them to VM_PROT_* (ELF_PF_X->EXEC,
+ * ELF_PF_W->WRITE, ELF_PF_R->READ) at insert time.  Offsets are *page-aligned
+ * image-relative*: region->off = segment.vaddr - img->vaddr_base, rounded
+ * down to the page.  The loader adds its chosen base (USER_IMG_BASE for the
+ * W0 static-PIE corpus) to get runtime VAs. */
+
+#define ELF_MAX_PLAN_REGIONS (ELF_MAX_LOAD_SEGMENTS + 1)
+
+struct elf_plan_region {
+  uint64_t off;   /* page-aligned image-relative offset */
+  uint64_t len;   /* page-aligned bytes */
+  uint32_t flags; /* ELF_PF_* union over the segments this region covers */
+};
+
+struct elf_plan {
+  uint64_t span;      /* total page-aligned image span (bytes) */
+  uint32_t nreg;
+  struct elf_plan_region regs[ELF_MAX_PLAN_REGIONS];
+};
+
+/* Build the loader plan for a *successfully parsed* image: page-aligned
+ * regions, one per PT_LOAD, with any two regions that share a page merged
+ * into the weaker-protection (union) flags.  Callers must elf_parse() first.
+ * Returns ELF_OK, or ELF_ERR_ARGS (null / unparsed), ELF_ERR_TOOMANY (more
+ * merged regions than we support). */
+int elf_build_plan(const struct elf_image *img, struct elf_plan *plan);
 
 #endif /* ELF_IMAGE_H */
