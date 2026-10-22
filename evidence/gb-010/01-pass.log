@@ -1,0 +1,14 @@
+/tmp/gb010/tools/linux-abi/probe_abi.c: In function ‘main’:
+/tmp/gb010/tools/linux-abi/probe_abi.c:162:52: warning: format ‘%d’ expects argument of type ‘int’, but argument 4 has type ‘long int’ [-Wformat=]
+  162 |   printf("SS_ONSTACK=%d SS_DISABLE=%d MINSIGSTKSZ=%d SIGSTKSZ=%d\n", SS_ONSTACK, SS_DISABLE, MINSIGSTKSZ, SIGSTKSZ);
+      |                                                   ~^
+      |                                                    |
+      |                                                    int
+      |                                                   %ld
+/tmp/gb010/tools/linux-abi/probe_abi.c:162:64: warning: format ‘%d’ expects argument of type ‘int’, but argument 5 has type ‘long int’ [-Wformat=]
+  162 |   printf("SS_ONSTACK=%d SS_DISABLE=%d MINSIGSTKSZ=%d SIGSTKSZ=%d\n", SS_ONSTACK, SS_DISABLE, MINSIGSTKSZ, SIGSTKSZ);
+      |                                                               ~^
+      |                                                                |
+      |                                                                int
+      |                                                               %ld
+docs/linux-abi.md matches a fresh ABI probe

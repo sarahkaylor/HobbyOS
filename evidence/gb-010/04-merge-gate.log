@@ -1,0 +1,14 @@
+[GATE] DOCS_abi: python3 tools/linux-abi/gen_abi_doc.py --check
+[GATE] DOCS_abi: PASS
+
+=== GATE SUMMARY ===
+  T1_host          skip
+  DOCS_abi         PASS
+  T2_unit_arm      skip
+  T2_unit_intel    skip
+  T3_int_arm       skip
+  T3_int_intel     skip
+  STYLE_check      skip
+  STYLE_test       skip
+
+GATE: PASS (no required tier failed; skipped tiers are reported above)
