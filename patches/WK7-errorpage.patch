@@ -1,0 +1,199 @@
+--- a/HobbyOS/WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp	2026-10-21 09:40:23
++++ b/HobbyOS/WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp	2026-10-21 09:53:51
+@@ -1030,6 +1030,11 @@
+     bool m_pageMouseDown { false };
+ 
+     std::string m_current;
++    // WK7-errorpage: the failed URL while the current document is the
++    // in-browser error page (m_current holds the "about:error" marker).  The
++    // omnibox displays this instead of the marker so the user sees the URL
++    // they tried to reach.  Cleared on every successful load / tab switch.
++    std::string m_errorUrl;
+     // fs-r4: fragment ('#anchor') carried by the in-flight navigation,
+     // applied as a same-document scroll once the load reaches readyState
+     // complete (see tick()).  Cleared after application.
+@@ -1096,7 +1101,10 @@
+     st.addrActive = m_addrActive;
+     st.urlLen = m_urlLen;
+     snprintf(st.urlBuf, sizeof st.urlBuf, "%s", m_urlBuf);
+-    snprintf(st.current, sizeof st.current, "%s", m_current.c_str());
++    // WK7-errorpage: while an error page is current, the omnibox shows the
++    // attempted URL (m_current holds the "about:error" marker).
++    const char* dispUrl = m_errorUrl.empty() ? m_current.c_str() : m_errorUrl.c_str();
++    snprintf(st.current, sizeof st.current, "%s", dispUrl);
+     WK5TabState& tab = activeTabState();
+     st.canBack = tab.histIdx > 0;
+     st.canForward = tab.histIdx + 1 < tab.history.size();
+@@ -1332,6 +1340,7 @@
+         m_page = m_tabs[m_activeTab].page;
+         restoreActiveFrame();
+         m_current = m_tabs[m_activeTab].current;
++        m_errorUrl.clear();              // WK7-errorpage: different tab = no error marker
+         m_pendingFrag.clear();
+         m_phase = Phase::Stable;
+         m_stablePaints = 0;
+@@ -1358,6 +1367,7 @@
+     m_page = m_tabs[idx].page;
+     restoreActiveFrame();
+     m_current = m_tabs[idx].current;
++    m_errorUrl.clear();              // WK7-errorpage: different tab = no error marker
+     m_pendingFrag.clear();
+     m_addrActive = false;
+     m_urlMode = false;
+@@ -2470,6 +2480,7 @@
+     tab.history.push_back(nm);
+     tab.histIdx = tab.history.size() - 1;
+     tab.current = nm;
++    m_errorUrl.clear();              // WK7-errorpage: real page loaded
+     m_current = nm;
+     m_phase = Phase::Load;
+     m_loadTicks = 0;
+@@ -2509,6 +2520,7 @@
+     if (ok) {
+         m_current = href;
+         activeTabState().current = href;
++        m_errorUrl.clear();          // WK7-errorpage: real page loaded
+         m_pendingFrag = frag;
+         m_phase = Phase::Load;
+         m_loadTicks = 0;
+@@ -2577,18 +2589,103 @@
+         free(sink.body);
+         sink.body = nullptr;
+     }
+-    if (!okNet || sink.status < 200 || sink.status >= 300 || body.isEmpty()) {
++    // WK7-errorpage: a failed navigation renders a real in-browser error
++    // page through the SAME substitute-document path a successful load uses
++    // (file:///WNPAGE.HTM facade + <base> pin + substituteData), so the user
++    // sees why the page could not be reached instead of a silent stale page.
++    // Three classes: transport-level (TLS/CA verify, or unresolvable host /
++    // curl 6) and HTTP-error status (4xx/5xx).  A 2xx with an EMPTY body
++    // (e.g. 204 No Content) is NOT a failure — it is a legit empty response
++    // and the current page is kept (no error page, no navigation).
++    bool isError = false;
++    const char* errClass = "conn";
++    if (!okNet || sink.status < 200 || sink.status >= 300) {
+         wk5emit("[WIN] load open-fail url=%s status=%d bytes=%zu err=%s",
+             url, sink.status, body.size(), sink.error);
++        if (!okNet) {
++            const char* e = sink.error;
++            bool tls = e && (::strstr(e, "SSL") || ::strstr(e, "certificate")
++                || ::strstr(e, "CA") || ::strstr(e, "verify"));
++            bool dns = e && (::strstr(e, "resolve"));   // curl 6 family
++            errClass = tls ? "tls" : (dns ? "dns" : "conn");
++        } else
++            errClass = "http";
++        // Build the error document: self-contained HTML (the facade <base>
++        // pin is inert here — no relative refs).  Static title so the
++        // load-ok doc-title census is assertable.
++        auto htmlEsc = [](const char* t) -> std::string {
++            std::string o;
++            if (!t) return o;
++            for (const char* q = t; *q; ++q) {
++                switch (*q) {
++                case '&': o += "&amp;"; break;
++                case '<': o += "&lt;"; break;
++                case '>': o += "&gt;"; break;
++                case '"': o += "&quot;"; break;
++                case '\'': o += "&#39;"; break;
++                default: o += *q; break;
++                }
++            }
++            return o;
++        };
++        std::string escUrl = htmlEsc(url);
++        std::string escErr = htmlEsc(sink.error);
++        char stbuf[32];
++        snprintf(stbuf, sizeof stbuf, "%d", sink.status);
++        const char* reason = "Connection failed.";
++        if (!strcmp(errClass, "tls"))
++            reason = "Secure connection failed: TLS / CA certificate verification failed.";
++        else if (!strcmp(errClass, "dns"))
++            reason = "The server address could not be found (DNS could not resolve the hostname).";
++        else if (!strcmp(errClass, "http"))
++            reason = "The server returned an HTTP error status.";
++        std::string doc;
++        doc.reserve(256 + escUrl.size() + escErr.size());
++        doc += "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Can't reach this page</title></head>"
++               "<body style=\"font-family:sans-serif;background:#ffffff;color:#222222;"
++               "max-width:640px;margin:48px auto;padding:0 16px\">"
++               "<h1>Can't reach this page</h1>"
++               "<p><b>URL:</b> "; doc += escUrl; doc += "</p>"
++               "<p><b>Reason:</b> "; doc += reason; doc += "</p>";
++        if (errClass[0] && strcmp(errClass, "http") == 0) {
++            doc += "<p><b>HTTP status:</b> "; doc += stbuf; doc += "</p>";
++        } else if (!escErr.empty()) {
++            doc += "<p><b>Detail:</b> "; doc += escErr; doc += "</p>";
++        }
++        doc += "</body></html>";
++        body.clear();
++        body.appendRange(reinterpret_cast<const uint8_t*>(doc.data()),
++                         reinterpret_cast<const uint8_t*>(doc.data() + doc.size()));
++        wk5emit("[WIN] errpage url=%s status=%d bytes=%zu class=%s err=%s",
++            url, sink.status, body.size(), errClass, sink.error);
++        // Error-page chrome state: m_current becomes the about:error marker;
++        // the omnibox shows the attempted URL (buildChromeState prefers
++        // m_errorUrl).  phase=Load so the engine tick's completion poll
++        // paints the doc and emits the load-ok/doc-title census.
++        m_errorUrl = url;
++        m_current = "about:error";
++        activeTabState().current = "about:error";
++        m_phase = Phase::Load;
++        m_loadTicks = 0;
++        m_stallTicks = 0;
++        isError = true;
++    } else if (body.isEmpty()) {
++        // 2xx with an empty body (204 No Content): legit no-content response;
++        // keep the current page and the harness receipt.
++        wk5emit("[WIN] load open-fail url=%s status=%d bytes=0 err=%s",
++            url, sink.status, sink.error);
+         return false;
++    } else {
++        wk5emit("[WIN] load start url=%s (%zu B, effective=%s)",
++            url, body.size(), effective);
+     }
+-    wk5emit("[WIN] load start url=%s (%zu B, effective=%s)",
+-        url, body.size(), effective);
+ 
+     // Evidence: persist the exact fetched bytes to the guest disk so the
+     // runner can copy them back (real-site body proof: the page bytes were
+-    // really transferred on-device, byte-for-byte).
+-    {
++    // really transferred on-device, byte-for-byte).  WK7-errorpage: skipped
++    // for error-page bodies (the synthetic doc is not fetched evidence).
++    if (!isError) {
++        // (persist only real fetched bytes)
+         int pfd = ::open("/PAGE-NET.HTM", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+         if (pfd >= 0) {
+             size_t off = 0;
+@@ -2701,7 +2798,14 @@
+     wk5emit("[WINP] frame-load-end ms=%lld",
+         static_cast<long long>((MonotonicTime::now() - p3load0).milliseconds()));
+     s_wk5ShellLoadActive = false;
+-    return true;
++    if (isError) {
++        // WK7-errorpage: refresh the chrome (title strip + omnibox snapshot
++        // now that m_errorUrl/m_current are the error markers; the tick's
++        // load-ok census paints the error doc once readyState completes).
++        setTitlePrompt();
++        m_chromeDirty = true;
++    }
++    return !isError;
+ }
+ 
+ std::string WK5State::realOrigin()
+@@ -2908,10 +3012,13 @@
+ {
+     if (m_current.empty())
+         return;
+-    wk5emit("[WIN] reload target=%s", m_current.c_str());
++    // WK7-errorpage: on an error page (m_current == the "about:error" marker),
++    // re-attempt the ORIGINAL failed URL stored in m_errorUrl, not the marker.
++    const char* target = m_errorUrl.empty() ? m_current.c_str() : m_errorUrl.c_str();
++    wk5emit("[WIN] reload target=%s", target);
+     // fs-r4: dispatch on the stored form (network URL vs fixture name) so
+     // reload works for real-page URLs too, not just fixtures.
+-    loadForHistory(m_current);
++    loadForHistory(target);
+     m_phase = Phase::Load;
+     m_loadTicks = 0;
+     m_stallTicks = 0;
