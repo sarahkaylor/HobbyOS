@@ -1615,23 +1615,26 @@ static void sys_wait4(struct trap_frame *tf) {
  * w8-torture: validate PER PAGE, not the whole cap up front — a short
  * string near the TOP of a mapped region was dropped wholesale once the
  * w6-run cap bump made the full-range check reach past the region end
- * (mirror of pl_strcpy in program_loader.c + arch/arm/trap.c). */
-static int u_strcpy(const char *src, char *dst, int cap) {
+ * (mirror of pl_strcpy in program_loader.c + arch/arm/trap.c).
+ * SEC-3 (security-plan.md #3): the per-page validate-then-read split was a
+ * TOCTOU — between validating page N and reading src[i] a peer could unmap
+ * it, faulting the kernel-mode read.  vm_user_read now validates AND reads
+ * each byte atomically under vm_lock; only the current byte's page is ever
+ * touched, so the w8-torture property (short strings near a region top)
+ * still holds. */
+int u_strcpy(const char *src, char *dst, int cap) {
   if (!src || cap <= 1)
     return 0;
-  int i = 0;
-  for (;;) {
-    if (i >= cap - 1)
-      break;
-    if (!sys_user_range_ok(((uint64_t)&src[i]) & ~0xFFFULL, 1))
+  struct process *p = current_process();
+  for (int i = 0; i < cap - 1; i++) {
+    char c;
+    if (vm_user_read(p, ((uint64_t)&src[i]), &c, 1) != 0)
       return 0;
-    char c = src[i];
     dst[i] = c;
     if (c == 0)
       return 1;
-    i++;
   }
-  dst[i] = '\0';
+  dst[cap - 1] = '\0';
   return 1;
 }
 
