@@ -1828,6 +1828,17 @@ static void sys_getenv(struct trap_frame *tf) {
 static volatile int core_in_syscall[MAX_CPUS];
 
 void sync_lower_handler_c(struct trap_frame *tf) {
+  /* SEC-10 (security-plan.md #10): the kernel stacks are contiguous static
+     64 KiB per-CPU slices — an overflow faults nowhere, it corrupts the
+     adjacent core's stack or kernel data.  Refuse to run a handler when the
+     slice is already below the deepest-path margin; halt loudly instead of
+     continuing on a doomed stack. */
+  if (kernel_stack_low(8u * 1024u)) {
+    uart_puts("KERNEL PANIC: syscall entry with exhausted kernel stack (SEC-10)\n");
+    for (;;)
+      ;
+  }
+
   /* L9 liveness (the x64 lane's proven scratch fix): a syscall entry proves
      this core is executing, so refresh the ownership heartbeat at entry.
      Timeout-driven loads (the 86 MB WebProcess) make the owner core spend

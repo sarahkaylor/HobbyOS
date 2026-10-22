@@ -4185,3 +4185,37 @@ int process_futex(struct process *caller, struct trap_frame *tf, uint64_t uaddr,
 
   return -ENOSYS;
 }
+
+/* ---------------------------------------------------------------------------
+ * SEC-10 (security-plan.md #10): kernel-stack exhaustion check at syscall
+ * entry.  Kernel stacks are fixed 64 KiB per-CPU slices below __stack_top
+ * (boot.s / trap_init_core); they are contiguous, so an overflow does not
+ * fault — it walks silently into the adjacent core's stack or kernel data
+ * and corrupts control flow there.  The MMU cannot give these static
+ * carve-outs a guard page without reworking the early identity map, so the
+ * cheap structural defense is a depth check: every syscall entry verifies
+ * the remaining slice against a margin that covers the deepest handler
+ * path; below it we halt with a clear message instead of continuing on a
+ * doomed stack.  (Function-level canaries from SEC-4 backstop buffer
+ * overflows within a frame.)
+ * ------------------------------------------------------------------------- */
+
+#define KERNEL_STACK_BYTES (64u * 1024u)
+
+/* Bytes left between the current SP and this CPU's stack slice bottom. */
+uint64_t kernel_stack_remaining(void) {
+  extern char __stack_top; /* same symbol, same spelling as used above */
+  uint32_t cpu = get_cpuid();
+  if (cpu >= MAX_CPUS)
+    return KERNEL_STACK_BYTES; /* unknown core: assume fine, caller halts elsewhere */
+  uint64_t bottom =
+      (uint64_t)&__stack_top - (uint64_t)(cpu + 1) * KERNEL_STACK_BYTES;
+  uint64_t sp = (uint64_t)__builtin_frame_address(0);
+  return sp > bottom ? sp - bottom : 0;
+}
+
+/* 1 when the remaining slice is below `margin` — i.e. running this far
+ * into the stack and then executing a normal handler path would overflow. */
+int kernel_stack_low(uint64_t margin) {
+  return kernel_stack_remaining() < margin ? 1 : 0;
+}
