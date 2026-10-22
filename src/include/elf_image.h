@@ -92,6 +92,12 @@ struct elf_image {
      Zero means the image has no dynamic section (a flat/fixed image). */
   uint64_t dyn_vaddr;
   uint64_t dyn_size;
+  /* GB-014: program-header table location, needed to fill AT_PHDR/AT_PHNUM/
+     AT_ENTRY in the startup auxv.  A Linux program reads its own program
+     headers to find PT_DYNAMIC and its entry, and without these the musl
+     startup dereferences small offsets (measured: fault at VA=0x210). */
+  uint64_t phoff;
+  uint32_t phent;
   struct elf_segment segs[ELF_MAX_LOAD_SEGMENTS];
 };
 

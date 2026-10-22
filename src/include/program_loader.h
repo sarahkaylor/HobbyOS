@@ -7,7 +7,7 @@
  * live in elf_image.h.  See docs/elf-loader.md §2. */
 struct addr_space;
 int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
-                    uint64_t *entry_out);
+                    uint64_t *entry_out, uint64_t *phdr_out, uint32_t *phnum_out);
 
 /**
  * Loads a user program from the disk and executes it in the current context.

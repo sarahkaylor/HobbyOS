@@ -91,7 +91,7 @@ static int el_map_region(struct addr_space *as, uint64_t va, uint64_t len,
  * W0 corpus (a few hundred KiB) this eager copy is cheap and correct; it is
  * the design's "start eager" choice (docs/elf-loader.md §2.5). */
 int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
-                    uint64_t *entry_out) {
+                    uint64_t *entry_out, uint64_t *phdr_out, uint32_t *phnum_out) {
   if (!as || !entry_out || fsize == 0 || fsize > USER_IMG_SIZE)
     return -ENOEXEC;
 
@@ -220,5 +220,17 @@ int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
   /* Runtime entry: base + e_entry (never the raw e_entry — 0x78a0 is not a
      mapped address). */
   *entry_out = base + img.entry;
+  /* GB-014: report where the program headers are mapped and how many, so the
+     caller can put AT_PHDR/AT_PHNUM in the startup auxv.  For a PIE the phdrs
+     live inside the first PT_LOAD, so their runtime address is base plus the
+     offset of e_phoff within that segment. */
+  if (phdr_out) {
+    uint64_t pa = base;
+    if (img.nsegs > 0 && img.phoff >= img.segs[0].offset)
+      pa = base + (img.segs[0].vaddr - img.vaddr_base) +
+           (img.phoff - img.segs[0].offset);
+    *phdr_out = pa;
+  }
+  if (phnum_out) *phnum_out = img.phnum;
   return 0;
 }
