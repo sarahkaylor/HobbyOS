@@ -1238,6 +1238,7 @@ int fat16_open_ex(const char* filename, struct file* f, int excl) {
       }
       f->type = FILE_TYPE_FAT16;
       f->fat16.entry = entry;
+      f->fat16.disk_seen = entry; /* SEC-5 snapshot: exactly what the slot holds */
       f->fat16.dir_sector = sector;
       f->fat16.dir_offset = offset;
       f->fat16.cursor = 0;
@@ -1305,6 +1306,7 @@ int fat16_open_ex(const char* filename, struct file* f, int excl) {
 
     f->type = FILE_TYPE_FAT16;
     f->fat16.entry = new_entry;
+    f->fat16.disk_seen = new_entry; /* SEC-5: alloc just wrote these bytes */
     f->fat16.dir_sector = sector;
     f->fat16.dir_offset = offset;
     f->fat16.cursor = 0;
@@ -1976,77 +1978,65 @@ static int fat16_entry_eq(const struct fat16_dir_entry* a,
  * bounded verify pass follows as a belt-and-braces check; with the lock in
  * place it always succeeds on the first try.
  */
-static void fat16_dir_entry_write(uint32_t dir_sector, uint32_t dir_offset,
-                                  const struct fat16_dir_entry* entry) {
-  uint8_t buf[SECTOR_SIZE];
-  for (int attempt = 0; attempt < 4; attempt++) {
-    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
-    if (virtio_blk_read_sector(dir_sector, buf, 1) != 0) {
-      spinlock_release_irqrestore(&fat_lock, flags);
-      return;
-    }
-    ((struct fat16_dir_entry*)buf)[dir_offset] = *entry;
-    if (virtio_blk_write_sector(dir_sector, buf, 1) != 0) {
-      spinlock_release_irqrestore(&fat_lock, flags);
-      return;
-    }
-    spinlock_release_irqrestore(&fat_lock, flags);
-    if (virtio_blk_read_sector(dir_sector, buf, 1) != 0) {
-      return;
-    }
-    if (fat16_entry_eq(&((struct fat16_dir_entry*)buf)[dir_offset], entry)) {
-      return; /* our entry is on disk */
-    }
-  }
-}
-
-static void fat16_sync_entry(struct file* f) {
-  uint8_t buf[SECTOR_SIZE];
+/* SEC-5: guarded dirent write-back.  The slot may only be rewritten while it
+   still holds EXACTLY the bytes this handle last saw (snapshot taken at open
+   and refreshed after each of our own write-backs).  That blocks the W9
+   rename/reuse case AND the stronger one the old name-only guard missed: a
+   same-name unlink+recreate that swapped cluster/size under an open handle —
+   writing our stale cached copy there would silently point the new file at
+   the wrong clusters.  Check and write happen under ONE fat_lock critical
+   section, so no peer can slip between them (the old guard read the sector
+   unlocked).  Returns 0 written, -EIO skipped or failed. */
+static int fat16_sync_entry(struct file* f) {
   /* Only entries this handle actually changed may be written back: a
-     long-lived read descriptor (e.g. sed's input) must not clobber a
-     directory entry that was recreated/renamed under it by writing its
-     stale cached copy at close. */
+     long-lived read descriptor (e.g. sed's input) must not touch the slot. */
   if (!f->fat16.dirty) {
-    return;
+    return 0;
   }
   struct fat16_dir_entry entry = *(struct fat16_dir_entry*)&f->fat16.entry;
   if (f->fat16.dir_sector == 0) {
-    return; /* no real on-disk slot (synthetic root handle) */
+    return 0; /* no real on-disk slot (synthetic root handle) */
   }
-  /* W9 (selfhost S2): LLVM writes each object through a TempFile whose fd
-     stays OPEN across rename(temp -> final) and is closed AFTERWARDS.  The
-     rename marks the temp's dirent (and its 0x0F run) deleted and allocates
-     the final entry — often REUSING the just-freed slot.  Without a guard,
-     this close's dirty sync writes the stale cached temp dirent back over
-     that slot: the temp's mangled 8.3 alias (e.g. "CPU-09EF.O.T") resurfaces
-     as a twin AND, when the final entry reused the slot, the final entry is
-     CLOBBERED (the w7 "clean entry lost -> lld cannot open cpu.o" failure).
-     Verify the slot still holds THIS entry before writing it back: skip when
-     the slot was freed (0x00/0xE5) or now belongs to a different file. */
-  if (virtio_blk_read_sector(f->fat16.dir_sector, buf, 1) != 0) {
-    return;
-  }
-  struct fat16_dir_entry *on = &((struct fat16_dir_entry *)buf)[f->fat16.dir_offset];
-  unsigned char b0 = (unsigned char)on->name[0];
-  if (b0 == 0x00 || b0 == (char)0xE5) {
-    return; /* the entry was deleted under this open handle */
-  }
-  {
-    int same = 1;
-    for (int k = 0; k < 11; k++) {
-      if (on->name[k] != entry.name[k]) { same = 0; break; }
+
+  uint8_t buf[SECTOR_SIZE];
+  for (int attempt = 0; attempt < 4; attempt++) {
+    uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+    if (virtio_blk_read_sector(f->fat16.dir_sector, buf, 1) != 0) {
+      spinlock_release_irqrestore(&fat_lock, flags);
+      return -EIO;
     }
-    if (!same) {
-      return; /* the slot now holds a different file's entry */
+    struct fat16_dir_entry *on =
+        &((struct fat16_dir_entry *)buf)[f->fat16.dir_offset];
+    unsigned char b0 = (unsigned char)on->name[0];
+    if (b0 == 0x00 || b0 == (char)0xE5) {
+      spinlock_release_irqrestore(&fat_lock, flags);
+      return -EIO; /* the entry was deleted under this open handle */
+    }
+    if (!fat16_entry_eq(on, &f->fat16.disk_seen)) {
+      spinlock_release_irqrestore(&fat_lock, flags);
+      return -EIO; /* someone else renamed/recreated the slot: skip */
+    }
+    *on = entry;
+    if (virtio_blk_write_sector(f->fat16.dir_sector, buf, 1) != 0) {
+      spinlock_release_irqrestore(&fat_lock, flags);
+      return -EIO;
+    }
+    spinlock_release_irqrestore(&fat_lock, flags);
+    /* Belt-and-braces verify (mirrors the old dir_entry_write): with the
+       lock held across the RMW this passes first try. */
+    if (virtio_blk_read_sector(f->fat16.dir_sector, buf, 1) != 0) return -EIO;
+    if (fat16_entry_eq(&((struct fat16_dir_entry *)buf)[f->fat16.dir_offset],
+                       &entry)) {
+      f->fat16.disk_seen = entry; /* our write is the new baseline */
+      return 0;
     }
   }
-  fat16_dir_entry_write(f->fat16.dir_sector, f->fat16.dir_offset, &entry);
+  return -EIO;
 }
 
 int fat16_close(struct file* f) {
-  // Update directory entry dynamically on disk
-  fat16_sync_entry(f);
-  return 0;
+  // Update directory entry dynamically on disk (SEC-5: guarded).
+  return fat16_sync_entry(f);
 }
 
 /**

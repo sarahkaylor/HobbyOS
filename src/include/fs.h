@@ -43,6 +43,11 @@ struct file {
       uint32_t dir_offset;         /**< Offset within the sector */
       uint32_t cursor;             /**< Current read/write position */
       int dirty;                   /**< Entry changed since open; close must sync */
+      /* SEC-5: exact bytes this slot held at open / after our last write-back.
+         fat16_sync_entry() only rewrites the slot while it still matches this
+         snapshot — a rename/recreate by anyone else diverges it and blocks a
+         stale clobber of cluster/size fields we never touched. */
+      struct fat16_dir_entry disk_seen;
     } fat16;
     struct {
       struct pipe *ptr;            /**< Pointer to the pipe structure */
