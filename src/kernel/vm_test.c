@@ -929,6 +929,82 @@ static void test_vm_user_read(void) {
   EXPECT_EQ(frame_free_count(), free0);
 }
 
+/* SEC-8 (security-plan.md #8): vm_kwrite must self-validate per page —
+ * materialize, re-check region + write protection + leaf PTE under
+ * vm_lock, and only then store.  Holes reject, read-only ranges reject
+ * (the old form wrote through any resolvable PTE regardless of the
+ * region's current protection), and demand pages materialize on write. */
+static void test_vm_kwrite(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_kwrite...\n");
+
+  int free0 = frame_free_count();
+  struct addr_space *as = vm_as_create(VM_TEST_TAG);
+  EXPECT_EQ((as != 0), 1);
+  if (!as)
+    return;
+  EXPECT_EQ(vm_region_insert(as, USER_MMAP_BASE_V2, 0x2000,
+                             VM_PROT_READ | VM_PROT_WRITE, VMK_ANON,
+                             VM_MAP_PRIVATE, 0, 0),
+            0);
+  struct process fake;
+  for (unsigned i = 0; i < sizeof(fake); i++)
+    ((unsigned char *)&fake)[i] = 0;
+  fake.as = as;
+
+  unsigned char pat[80];
+  for (int i = 0; i < 80; i++)
+    pat[i] = (unsigned char)(i + 0x3C);
+
+  /* Fully lazy region: the write materializes page one on demand. */
+  EXPECT_EQ(vm_kwrite(&fake, USER_MMAP_BASE_V2, pat, 64), 0);
+  uint64_t leaf = 0;
+  EXPECT_EQ(vm_arch_walk(as, USER_MMAP_BASE_V2, &leaf), 0);
+  unsigned char *pa1 = (unsigned char *)vm_arch_leaf_phys(leaf);
+  int differs = 0;
+  for (int i = 0; i < 64; i++)
+    if (pa1[i] != pat[i])
+      differs = 1;
+  EXPECT_EQ(differs, 0);
+
+  /* Cross-page store lands on both pages. */
+  EXPECT_EQ(vm_kwrite(&fake, USER_MMAP_BASE_V2 + 0xFF8, pat, 16), 0);
+  for (int i = 0; i < 8; i++)
+    if (pa1[0xFF8 + i] != pat[i])
+      differs = 1;
+  uint64_t leaf2 = 0;
+  EXPECT_EQ(vm_arch_walk(as, USER_MMAP_BASE_V2 + 0x1000, &leaf2), 0);
+  unsigned char *pa2 = (unsigned char *)vm_arch_leaf_phys(leaf2);
+  for (int i = 0; i < 8; i++)
+    if (pa2[i] != pat[8 + i])
+      differs = 1;
+  EXPECT_EQ(differs, 0);
+
+  /* Holes reject with -1 instead of faulting or writing stale frames. */
+  EXPECT_EQ(vm_kwrite(&fake, USER_MMAP_BASE_V2 - 0x10, pat, 16), -1);
+  EXPECT_EQ(vm_kwrite(&fake, USER_MMAP_BASE_V2 + 0x2000, pat, 16), -1);
+
+  /* Protection change is honored at write time: vm_mprotect rewrites the
+     region (the same r->prot this primitive re-checks under lock).  The
+     pre-existing bytes must survive the rejected call untouched. */
+  EXPECT_EQ(vm_mprotect(&fake, USER_MMAP_BASE_V2, 0x1000, VM_PROT_READ), 0);
+  unsigned char before = pa1[0];
+  EXPECT_EQ(vm_kwrite(&fake, USER_MMAP_BASE_V2, pat, 8), -1);
+  EXPECT_EQ((int)pa1[0], (int)before);
+
+  /* v1 process (no address space): caller owns translation -> reject. */
+  struct process v1;
+  for (unsigned i = 0; i < sizeof(v1); i++)
+    ((unsigned char *)&v1)[i] = 0;
+  EXPECT_EQ(vm_kwrite(&v1, USER_MMAP_BASE_V2, pat, 4), -1);
+
+  /* Zero length is a no-op success (contract preserved). */
+  EXPECT_EQ(vm_kwrite(&fake, 0x12345678ULL, pat, 0), 0);
+
+  vm_as_teardown(as);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
 void vm_test_suite(void) {
   uart_puts("vm_test_suite:\n");
   test_vm_as_lifecycle();
@@ -945,6 +1021,7 @@ void vm_test_suite(void) {
   test_vm_as_clone_fork();
   test_vm_teardown_leak_cycles();
   test_vm_user_read(); /* SEC-2 */
+  test_vm_kwrite();    /* SEC-8 */
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */
