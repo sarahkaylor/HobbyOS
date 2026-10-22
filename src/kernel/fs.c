@@ -1574,8 +1574,26 @@ int console_write_user(struct process *p, const void *buf, int size) {
       n = (int)sizeof(chunk);
     if (vm_user_read(p, (uint64_t)(s + done), chunk, n) != 0)
       return -EFAULT;
-    for (int i = 0; i < n; i++)
-      uart_putc(chunk[i]);
+    /* GB-024 (2026-10-21): emit the chunk under ONE lock hold. uart_putc takes
+       uart_lock per CHARACTER, so with 8 CPUs writing, any two bytes of a
+       program's output could be split by another process's write. Measured in the
+       ARM W0 console:
+           HELHALLO.BIN]
+            mainTSORT.BIN
+           returned 0
+       -- which is "[HELLO] main returned 0" shredded by concurrent writers, and
+       is why the corpus looked silent: grep could not find a line that no longer
+       existed as a line. kline.h documents the same failure for kernel
+       diagnostics; this is the same rule for user stdout. The lock is taken AFTER
+       vm_user_read (which may fault) so no spinlock is held across a user copy. */
+    {
+      extern spinlock_t uart_lock;
+      extern void uart_putc_raw(char c);
+      uint64_t uflags = spinlock_acquire_irqsave(&uart_lock);
+      for (int i = 0; i < n; i++)
+        uart_putc_raw(chunk[i]);   /* raw: uart_putc would re-take uart_lock */
+      spinlock_release_irqrestore(&uart_lock, uflags);
+    }
     done += n;
   }
   return size;
