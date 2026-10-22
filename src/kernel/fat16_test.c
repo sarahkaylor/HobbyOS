@@ -1447,8 +1447,57 @@ static void test_fat16_rtc_mkdir_stamp(void) {
   EXPECT_EQ(fat16_rmdir("/W10D1"), 0);
 }
 
+/* SEC-1: O_CREAT|O_EXCL must be create-if-absent atomically.  The decision
+   now lives inside one fat_lock critical section (fat16_open_ex), so a peer
+   creator can never slip between probe and claim, and two creates can never
+   append duplicate entries for the same name. */
+static void test_fat16_open_excl(void) {
+  tests_run++;
+  uart_puts("  Running test_fat16_open_excl...\n");
+
+  struct file f;
+  (void)fat16_unlink("/SECEXCL.TXT"); /* clean slate across suite reruns */
+
+  /* Exclusive create of a fresh name wins. */
+  EXPECT_EQ(fat16_open_ex("/SECEXCL.TXT", &f, 1), 0);
+  fat16_close(&f);
+
+  /* A second exclusive open is refused with EEXIST (-2)... */
+  EXPECT_EQ(fat16_open_ex("/SECEXCL.TXT", &f, 1), -2);
+  /* ...while a plain open of the existing file still works. */
+  EXPECT_EQ(fat16_open_ex("/SECEXCL.TXT", &f, 0), 0);
+  fat16_close(&f);
+
+  /* Exactly ONE directory entry for that name — no duplicate was appended. */
+  int seen = 0;
+  char name[64];
+  for (int i = 0; i < 2048; i++) {
+    uint8_t attr;
+    uint32_t sz;
+    if (fat16_read_dir("/", i, name, &attr, &sz) != 0) break;
+    if (test_streq(name, "SECEXCL.TXT")) seen++;
+  }
+  EXPECT_EQ(seen, 1);
+
+  (void)fat16_unlink("/SECEXCL.TXT");
+}
+
+/* SEC-1: mkdir's duplicate rejection is now race-safe too — the collision
+   check runs inside the claim critical section, not only via the pre-probe. */
+static void test_fat16_mkdir_dup_atomic(void) {
+  tests_run++;
+  uart_puts("  Running test_fat16_mkdir_dup_atomic...\n");
+
+  (void)fat16_rmdir("/SECDIR1"); /* clean slate across suite reruns */
+  EXPECT_EQ(fat16_mkdir("/SECDIR1"), 0);
+  EXPECT_EQ(fat16_mkdir("/SECDIR1"), -1); /* duplicate rejected */
+  EXPECT_EQ(fat16_rmdir("/SECDIR1"), 0);
+}
+
 void fat16_test_suite(void) {
   uart_puts("fat16_test_suite:\n");
+  test_fat16_open_excl(); /* SEC-1: atomic O_CREAT|O_EXCL */
+  test_fat16_mkdir_dup_atomic(); /* SEC-1: race-safe mkdir duplicate check */
   test_fat16_open_existing();
   test_fat16_open_nonexistent();
   test_fat16_created_entry_has_attr();
