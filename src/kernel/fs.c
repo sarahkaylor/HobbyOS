@@ -47,6 +47,13 @@ void fs_init(void) {
     global_file_table[i].type = FILE_TYPE_EMPTY;
     global_file_table[i].ref_count = 0;
     spinlock_init(&global_file_table[i].lock);
+#ifdef KERNEL_MODE_UNIT_TEST
+    /* SEC-OBS-B: register the documented order (see lock.h) for the debug
+     * tracker.  file_locks_lock stays unregistered: it is a leaf taken only
+     * after f->lock drops, never nesting anything above. */
+    lockdbg_register(&fs_lock, "fs_lock", LOCK_RANK_FS);
+    lockdbg_register(&global_file_table[i].lock, "f->lock", LOCK_RANK_FILE);
+#endif
   }
 }
 
@@ -1286,12 +1293,24 @@ int file_close(struct process *cur, int fd) {
   int lock_release = (f->type == FILE_TYPE_FAT16);
   uint64_t lock_id = lock_release ? file_lock_id(f) : 0;
 
+  /* SEC-OBS-B (security-plan.md observation B): pipe/usock close wakes
+   * blocked peers, which takes proc_lock — and the documented order is
+   * proc -> file, so those calls must NOT run under f->lock.  Capture the
+   * backend handles here, release them below once the slot lock is gone.
+   * (Both backends are statically pooled with their own locks and per-ref
+   * accounting, so dropping a reference just after unlock is safe.) */
+  struct pipe *pp = 0;
+  struct usock *uu = 0;
+  int bend = 0;
+
   uint64_t flags = spinlock_acquire_irqsave(&f->lock);
 
   if (f->type == FILE_TYPE_PIPE) {
-    pipe_close(f->pipe.ptr, f->pipe.end);
+    pp = f->pipe.ptr;
+    bend = f->pipe.end;
   } else if (f->type == FILE_TYPE_UNIXSOCK) {
-    usock_close(f->usock.ptr, f->usock.end); /* P4: release this end's ref */
+    uu = f->usock.ptr; /* P4: release this end's ref */
+    bend = f->usock.end;
   }
 
   f->ref_count--;
@@ -1307,6 +1326,9 @@ int file_close(struct process *cur, int fd) {
     f->type = FILE_TYPE_EMPTY;
   }
   spinlock_release_irqrestore(&f->lock, flags);
+
+  if (pp) pipe_close(pp, bend);
+  else if (uu) usock_close(uu, bend);
 
   if (lock_release) file_locks_release(cur->pid, lock_id);
 
@@ -1386,6 +1408,12 @@ void fs_close_global(int g_fd) {
   struct file *f = &global_file_table[g_fd];
   FS_SLOT_CHECK(f);
 
+  /* SEC-OBS-B: see file_close — backend close wakes peers (proc_lock), so
+   * it runs after f->lock drops, never under it. */
+  struct pipe *pp = 0;
+  struct usock *uu = 0;
+  int bend = 0;
+
   uint64_t flags = spinlock_acquire_irqsave(&f->lock);
   if (f->type == FILE_TYPE_EMPTY) {
     spinlock_release_irqrestore(&f->lock, flags);
@@ -1393,9 +1421,11 @@ void fs_close_global(int g_fd) {
   }
 
   if (f->type == FILE_TYPE_PIPE) {
-    pipe_close(f->pipe.ptr, f->pipe.end);
+    pp = f->pipe.ptr;
+    bend = f->pipe.end;
   } else if (f->type == FILE_TYPE_UNIXSOCK) {
-    usock_close(f->usock.ptr, f->usock.end); /* P4 */
+    uu = f->usock.ptr; /* P4 */
+    bend = f->usock.end;
   }
 
   f->ref_count--;
@@ -1410,6 +1440,9 @@ void fs_close_global(int g_fd) {
     f->type = FILE_TYPE_EMPTY;
   }
   spinlock_release_irqrestore(&f->lock, flags);
+
+  if (pp) pipe_close(pp, bend);
+  else if (uu) usock_close(uu, bend);
 }
 
 /**

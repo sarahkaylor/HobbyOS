@@ -207,6 +207,9 @@ static void lfn_entry_display(const struct lfn_state *st,
  */
 int fat16_init(void) {
   spinlock_init(&fat_lock);
+#ifdef KERNEL_MODE_UNIT_TEST
+  lockdbg_register(&fat_lock, "fat_lock", LOCK_RANK_FAT); /* SEC-OBS-B */
+#endif
   spinlock_init(&fat_cache_lock);
   fat_cache_valid = 0;
   uint8_t buf[SECTOR_SIZE];

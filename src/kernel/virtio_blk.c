@@ -785,7 +785,9 @@ int virtio_blk_read_raw(uint64_t sector, void* buf, uint32_t count) {
   flags = spinlock_acquire_irqsave(&blk_request_lock);
   blk_in_use = 0;
   spinlock_release_irqrestore(&blk_request_lock, flags);
-  process_wake_all();
+  /* SEC-OBS-B: deferred — this completion runs inside fat_lock (FAT
+   * metadata I/O); proc_lock here would invert proc -> ... -> fat. */
+  process_wake_all_deferred();
   return res;
 }
 
@@ -826,7 +828,9 @@ int virtio_blk_write_raw(uint64_t sector, const void* buf, uint32_t count) {
   flags = spinlock_acquire_irqsave(&blk_request_lock);
   blk_in_use = 0;
   spinlock_release_irqrestore(&blk_request_lock, flags);
-  process_wake_all();
+  /* SEC-OBS-B: deferred — this completion runs inside fat_lock (FAT
+   * metadata I/O); proc_lock here would invert proc -> ... -> fat. */
+  process_wake_all_deferred();
   return res;
 }
 

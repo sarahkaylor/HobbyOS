@@ -2368,7 +2368,24 @@ static void fl_dec(struct fl_buf *f, int v) {
   while (k) fl_c(f, t[--k]);
 }
 
+/* SEC-OBS-B debug hook: rank checks do not apply inside IRQ dispatch (see
+ * lock.h).  Wrapper keeps the asm-visible symbol; inner is the original
+ * handler body unchanged. */
+static void general_interrupt_inner(struct trap_frame *tf);
+
 void general_interrupt_handler(struct trap_frame *tf) {
+#ifdef KERNEL_MODE_UNIT_TEST
+  extern void lockdbg_irq_enter(void);
+  extern void lockdbg_irq_exit(void);
+  lockdbg_irq_enter();
+  general_interrupt_inner(tf);
+  lockdbg_irq_exit();
+#else
+  general_interrupt_inner(tf);
+#endif
+}
+
+static void general_interrupt_inner(struct trap_frame *tf) {
   extern void gic_set_current_vector(uint32_t cpu, uint32_t vector);
   extern uint32_t gic_acknowledge_interrupt(void);
   extern void gic_end_interrupt(uint32_t intid);
@@ -2377,6 +2394,10 @@ void general_interrupt_handler(struct trap_frame *tf) {
   uint32_t cpu = get_cpuid();
   gic_set_current_vector(cpu, tf->vector);
   watchdog_tick(cpu, tf);
+
+  /* SEC-OBS-B: drain deferred lost-wakeup requests here rather than at
+   * the virtio-blk completion that raised them (see process.h). */
+  process_wake_all_drain();
 
   if (tf->vector == 32) {
     // PIT/LAPIC timer interrupt
