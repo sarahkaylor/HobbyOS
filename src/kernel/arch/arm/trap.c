@@ -1024,6 +1024,8 @@ extern void virtio_gpu_flush(void);
  * handed to the driver. */
 struct virtio_gpu_xrect { int32_t x, y, w, h; };
 extern void virtio_gpu_flush_rects(const struct virtio_gpu_xrect *rects, int count);
+extern int virtio_gpu_flush_args_ok(const struct virtio_gpu_xrect *rects,
+                                    int count); /* SEC-7 */
 extern void mmu_map_user_framebuffer(uint64_t phys_addr);
 
 static void sys_map_fb(struct trap_frame *tf) {
@@ -1088,8 +1090,20 @@ static void sys_flush_fb_rects(struct trap_frame *tf) {
     return;
   }
   struct virtio_gpu_xrect krects[32];
-  for (int i = 0; i < count; i++)
-    krects[i] = urects[i];
+  /* SEC-7: atomic validate+copy.  The old loop read user pages after a
+     separate range check (validate-then-use TOCTOU) and handed raw
+     attacker-shaped rects straight to the driver; vm_user_read validates
+     each page under vm_lock as it copies, and nothing reaches
+     virtio_gpu_flush_rects until it has passed boundary validation. */
+  if (vm_user_read(current_process(), (uint64_t)urects, krects,
+                   count * (int)sizeof(struct virtio_gpu_xrect)) != 0) {
+    tf->regs[0] = (uint64_t)-EFAULT;
+    return;
+  }
+  if (!virtio_gpu_flush_args_ok(krects, count)) {
+    tf->regs[0] = (uint64_t)-EINVAL;
+    return;
+  }
   virtio_gpu_flush_rects(krects, count);
   tf->regs[0] = 0;
 }
