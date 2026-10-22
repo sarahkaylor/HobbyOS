@@ -762,10 +762,13 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
   }
 #endif
   uint64_t elf_entry = 0;
+  uint64_t elf_phdr = 0;
+  uint32_t elf_phnum = 0;
   if (is_elf) {
     /* ELF mapper: parse + plan + map.  On success *elf_entry = base+e_entry
        and the process below is marked PROC_FLAG_LINUX_ABI. */
-    int erc = elf_loader_load(as, f.fat16.entry.start_cluster, fsize, &elf_entry);
+    int erc = elf_loader_load(as, f.fat16.entry.start_cluster, fsize, &elf_entry,
+                              &elf_phdr, &elf_phnum);
     fat16_close(&f);
     if (erc != 0) {
       process_free(pid);
@@ -856,16 +859,28 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     int nlen = 0;
     while (nm[nlen]) nlen++;
     uint64_t name_addr = (stk_top - 8 - (uint64_t)nlen) & ~(uint64_t)0xF;
-    /* argc, argv[0], argv NULL, envp NULL, AT_PAGESZ, 4096, AT_NULL, 0 */
-    uint64_t w[8];
+    /* argc, argv[0], argv NULL, envp NULL, AT_PAGESZ, 4096,
+       AT_PHDR, phdr, AT_PHNUM, phnum, AT_ENTRY, entry, AT_BASE, 0, AT_NULL, 0.
+       The first four pairs were the original block; musl's _start also reads
+       AT_PHDR/AT_PHNUM/AT_ENTRY to locate its own program headers, and with them
+       absent it dereferenced small offsets (measured: fault at VA=0x210). */
+    uint64_t w[16];
     w[0] = 1;
     w[1] = name_addr;
     w[2] = 0;
     w[3] = 0;
-    w[4] = 6;    /* AT_PAGESZ — musl's startup reads it */
+    w[4] = 6;                       /* AT_PAGESZ */
     w[5] = 4096;
-    w[6] = 0;    /* AT_NULL */
-    w[7] = 0;
+    w[6] = 3;                       /* AT_PHDR   */
+    w[7] = elf_phdr;
+    w[8] = 5;                       /* AT_PHNUM  */
+    w[9] = (uint64_t)elf_phnum;
+    w[10] = 9;                      /* AT_ENTRY  */
+    w[11] = elf_entry;
+    w[12] = 7;                      /* AT_BASE: 0 for a static image */
+    w[13] = 0;
+    w[14] = 0;                      /* AT_NULL */
+    w[15] = 0;
     uint64_t blk = (name_addr - (uint64_t)sizeof w) & ~(uint64_t)0xF;
     if (vm_kwrite(child, blk, w, (int)sizeof w) != 0 ||
         vm_kwrite(child, name_addr, nm, nlen + 1) != 0) {

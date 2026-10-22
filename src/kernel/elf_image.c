@@ -119,6 +119,8 @@ int elf_parse(const void *buf, uint64_t len, struct elf_image *img) {
   img->entry = rd64(b + E_ENTRY_OFF);
   img->dyn_vaddr = 0;
   img->dyn_size = 0;
+  img->phoff = phoff;
+  img->phent = phentsize;
 
   int have_interp = 0;
   uint64_t base = 0, end = 0;
