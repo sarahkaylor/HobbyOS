@@ -367,6 +367,10 @@ static void test_wave_loader(void *arg) {
 
 void main(void) {
   uart_init();
+  /* SEC-4 (security-plan.md #4): seed the stack canary before anything
+     instrumented runs; src/kernel/ssp.c. */
+  extern void ssp_init(void);
+  ssp_init();
   uart_puts("Booting AArch64 OS...\n");
 
   // Virtual Memory Protection

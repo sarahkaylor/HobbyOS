@@ -219,7 +219,7 @@ ifeq ($(ARCH),intel)
   # fxsave64/fxrstor64).  Userland, however, may use the FPU/SSE: the kernel
   # enables CR0.EM/MP/TS + CR4.OSFXSR/OSXMMEXCPT per core and carries each
   # process's 512-byte FXSAVE64 image across context switches (F1.5).
-  CFLAGS = -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
+  CFLAGS = -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global
   # Hermetic userland include path (P3).  clang's driver for x86_64-none-elf
   # appends the WORKSTATION's glibc dirs (/usr/include) because the target
   # arch matches the host's; the aarch64 target never gets aarch64 host
@@ -258,7 +258,7 @@ ifeq ($(ARCH),intel)
 else
   # Default to ARM
   QEMU = qemu-system-aarch64
-  CFLAGS = -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
+  CFLAGS = -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global
   # F1.5 (FPU): userland is free to use FP/SIMD — CPACR_EL1.FPEN=0b11 is
   # set per core in boot.s and the kernel saves/restores the FPSIMD
   # register file per process (src/kernel/arch/arm/fpu.s).  ONLY this user
