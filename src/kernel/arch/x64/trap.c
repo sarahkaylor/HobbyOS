@@ -864,7 +864,10 @@ struct sys_spawn_args {
   char args[HO_FLAT_ARGS_LEN]; /* w5 (vi): flat args cap 1024 */
 };
 
-static struct sys_spawn_args spawn_args_pool[64];
+/* SEC-OBS-A (security-plan.md observation A): indexed by caller->pid, so
+ * it MUST be at least the whole PID space; a hardcoded size silently goes
+ * out of bounds the day MAX_PROCESSES grows past it. */
+static struct sys_spawn_args spawn_args_pool[MAX_PROCESSES];
 extern void kernel_exit(void);
 
 static void sys_spawn_worker(void *arg) {
@@ -899,6 +902,13 @@ static void sys_spawn(struct trap_frame *tf) {
   }
 
   if (sys_user_range_ok((uint64_t)filename, 1)) {
+    /* SEC-OBS-A: pid indexes spawn_args_pool; refuse a corrupt/out-of-range
+     * pid before writing through it. */
+    if (caller->pid < 0 || caller->pid >= MAX_PROCESSES) {
+      tf->regs[0] = -1;
+      return;
+    }
+
     struct sys_spawn_args *args = &spawn_args_pool[caller->pid];
     int i = 0;
     while (filename[i] && i < 31) {
@@ -1051,6 +1061,13 @@ static void sys_spawn_ex(struct trap_frame *tf) {
   if (n > 0 &&
       (!fdmap || (fdm_addr & 3) || !sys_user_range(fdm_addr, (uint64_t)n * 8, 0))) {
     tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+    return;
+  }
+
+  /* SEC-OBS-A: pid indexes spawn_ex_pool; refuse a corrupt/out-of-range
+   * pid before writing through it. */
+  if (caller->pid < 0 || caller->pid >= MAX_PROCESSES) {
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
     return;
   }
 

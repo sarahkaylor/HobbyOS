@@ -498,6 +498,11 @@ static int v2_map_image(struct addr_space *as, struct file *f, uint32_t fsize) {
    trap layers, which marshal the caller's pointers into the caller's slot
    while still in the caller's context; the spawn worker consumes it). */
 struct ho_spawn_ex spawn_ex_pool[MAX_PROCESSES];
+/* SEC-OBS-A (security-plan.md observation A): every pool indexed by raw
+ * pid must cover the whole PID space; catch any future shrink at compile
+ * time rather than as an out-of-bounds write in trap dispatch. */
+_Static_assert(sizeof(spawn_ex_pool) / sizeof(spawn_ex_pool[0]) >= MAX_PROCESSES,
+               "pid-indexed spawn_ex_pool must be at least MAX_PROCESSES");
 
 /* D4.1: apply the spawn_ex fd semantics to a freshly created child:
    (1) child fd table = parent copy (fs_reopen per open slot -- this is
