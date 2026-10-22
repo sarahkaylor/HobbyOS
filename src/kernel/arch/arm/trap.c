@@ -2059,6 +2059,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       uart_print_hex(far);
       uart_puts(" PC=");
       uart_print_hex(tf->elr);
+      uart_puts(" LR=");
+      uart_print_hex(tf->lr);
+      uart_puts(" FP=");
+      uart_print_hex(tf->regs[29]);
       uart_puts(" rw=");
       uart_puts(wnr ? "w" : "r");
       uart_puts(is_exec ? "x" : " ");
