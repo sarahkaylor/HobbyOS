@@ -1465,11 +1465,24 @@ int console_write_user(struct process *p, const void *buf, int size) {
   extern void uart_putc(char c);
   if (size <= 0)
     return 0;
-  if (vm_range_ok(p, (uint64_t)buf, (uint64_t)size, 0) != 0)
-    return -EFAULT;
+  /* SEC-2: validate+read atomically per page via vm_user_read.  The old
+     code validated the whole range once with vm_range_ok and then read it
+     byte-by-byte in kernel mode — a peer unmapping mid-copy turned that
+     into a fault on a freed frame (and vm_range_ok rejected every v1
+     caller outright). */
   const char *s = (const char *)buf;
-  for (int i = 0; i < size; i++)
-    uart_putc(s[i]);
+  int done = 0;
+  while (done < size) {
+    char chunk[64];
+    int n = size - done;
+    if (n > (int)sizeof(chunk))
+      n = (int)sizeof(chunk);
+    if (vm_user_read(p, (uint64_t)(s + done), chunk, n) != 0)
+      return -EFAULT;
+    for (int i = 0; i < n; i++)
+      uart_putc(chunk[i]);
+    done += n;
+  }
   return size;
 }
 

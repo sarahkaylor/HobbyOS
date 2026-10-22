@@ -846,6 +846,89 @@ static void test_vm_walk_dead_as_safe(void) {
   }
 }
 
+/* SEC-2 (security-plan.md #2): vm_user_read must validate and copy
+ * atomically — never hand back a mapping it did not confirm under the same
+ * lock, and never fault on holes / protection changes. */
+static void test_vm_user_read(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_user_read...\n");
+
+  int free0 = frame_free_count();
+  struct addr_space *as = vm_as_create(VM_TEST_TAG);
+  EXPECT_EQ((as != 0), 1);
+  if (!as)
+    return;
+  EXPECT_EQ(vm_region_insert(as, USER_MMAP_BASE_V2, 0x2000,
+                             VM_PROT_READ | VM_PROT_WRITE, VMK_ANON,
+                             VM_MAP_PRIVATE, 0, 0),
+            0);
+  struct process fake;
+  for (unsigned i = 0; i < sizeof(fake); i++)
+    ((unsigned char *)&fake)[i] = 0;
+  fake.as = as;
+
+  /* Materialize page one and stamp a pattern into its frame. */
+  EXPECT_EQ(vm_touch(&fake, USER_MMAP_BASE_V2, 1, 1), 0);
+  uint64_t leaf = 0;
+  EXPECT_EQ(vm_arch_walk(as, USER_MMAP_BASE_V2, &leaf), 0);
+  unsigned char *pa = (unsigned char *)vm_arch_leaf_phys(leaf);
+  for (int i = 0; i < 64; i++)
+    pa[i] = (unsigned char)(i + 0xA0);
+
+  /* Read-back through the atomic primitive matches. */
+  unsigned char out[80];
+  EXPECT_EQ(vm_user_read(&fake, USER_MMAP_BASE_V2, out, 64), 0);
+  int differs = 0;
+  for (int i = 0; i < 64; i++)
+    if (out[i] != (unsigned char)(i + 0xA0))
+      differs = 1;
+  EXPECT_EQ(differs, 0);
+
+  /* Cross-page read materializes the second (lazy) page: succeeds. */
+  for (int i = 0; i < 80; i++)
+    out[i] = 0xFF;
+  EXPECT_EQ(vm_user_read(&fake, USER_MMAP_BASE_V2 + 0xFF8, out, 16), 0);
+  int nonzero = 0;
+  for (int i = 0; i < 16; i++)
+    if (out[i])
+      nonzero = 1; /* both pages are zero-filled anon */
+  EXPECT_EQ(nonzero, 0);
+
+  /* Holes reject with -1 instead of faulting. */
+  EXPECT_EQ(vm_user_read(&fake, USER_MMAP_BASE_V2 - 0x10, out, 16), -1);
+  EXPECT_EQ(vm_user_read(&fake, USER_MMAP_BASE_V2 + 0x2000, out, 16), -1);
+
+  /* Protection change is honored at read time: vm_mprotect rewrites the
+     region (the same r->prot this primitive re-checks under lock). */
+  EXPECT_EQ(vm_mprotect(&fake, USER_MMAP_BASE_V2, 0x1000, VM_PROT_WRITE), 0);
+  EXPECT_EQ(vm_user_read(&fake, USER_MMAP_BASE_V2, out, 8), -1);
+
+  /* Regression for the validate-then-use race: after a peer unmaps the
+     page, an atomic read must NOT return stale bytes from the freed frame
+     (the old pattern would have dereferenced it).  The anon region gets a
+     fresh zeroed remap instead. */
+  EXPECT_EQ(vm_mprotect(&fake, USER_MMAP_BASE_V2, 0x1000,
+                        VM_PROT_READ | VM_PROT_WRITE),
+            0);
+  EXPECT_EQ(vm_unmap_page(as, USER_MMAP_BASE_V2), 0);
+  for (int i = 0; i < 80; i++)
+    out[i] = 0xFF;
+  EXPECT_EQ(vm_user_read(&fake, USER_MMAP_BASE_V2, out, 64), 0);
+  nonzero = 0;
+  for (int i = 0; i < 64; i++)
+    if (out[i])
+      nonzero = 1; /* rematerialized zero page, never the old pattern */
+  EXPECT_EQ(nonzero, 0);
+
+  /* No process context: nothing to validate against -> reject. */
+  EXPECT_EQ(vm_user_read(0, USER_MMAP_BASE_V2, out, 4), -1);
+  /* Zero length is a no-op success. */
+  EXPECT_EQ(vm_user_read(&fake, 0x12345678ULL, out, 0), 0);
+
+  vm_as_teardown(as);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
 void vm_test_suite(void) {
   uart_puts("vm_test_suite:\n");
   test_vm_as_lifecycle();
@@ -861,6 +944,7 @@ void vm_test_suite(void) {
   test_vm_shared_objects();
   test_vm_as_clone_fork();
   test_vm_teardown_leak_cycles();
+  test_vm_user_read(); /* SEC-2 */
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */
