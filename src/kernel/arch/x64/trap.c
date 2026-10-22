@@ -1,4 +1,5 @@
 #include "trap.h"
+#include "kline.h"
 #include "fs.h"
 #include "net.h"
 #include "process.h"
@@ -1894,6 +1895,34 @@ void sync_lower_handler_c(struct trap_frame *tf) {
   if (syscall_num == 0xFF) {
     schedule(tf, 1);
     return;
+  }
+  /* GB-014 (2026-10-21): route a Linux-ABI process by translating its syscall
+     NUMBER to the HobbyOS number, then falling through to the existing handlers.
+     Arguments need no shuffle: the archive layout is regs[0]=rax, [3]=rdx,
+     [4]=rsi, [5]=rdi, so Linux's (rdi,rsi,rdx) already lands where the HobbyOS
+     handlers read their first three arguments.
+     This was the last joint in the ELF chain: PROC_FLAG_LINUX_ABI had six
+     references in the whole tree and exactly one of them was an assignment, so
+     nothing ever routed on it. A musl write(1,...) arrived as number 1 -- which
+     collides with SYS_WRITE_CONSOLE, a different calling convention -- and exit
+     arrived as 60, which matched nothing. Measured consequence: a static-pie
+     probe ran, exited cleanly and printed nothing.
+     Unknown Linux numbers return -ENOSYS (38) rather than falling through to a
+     HobbyOS handler that would do something unrelated. */
+  {
+    struct process *lp = current_process();
+    if (lp && (lp->abi_flags & PROC_FLAG_LINUX_ABI)) {
+      switch (syscall_num) {
+        case 0:  syscall_num = SYS_READ;  break;   /* read(fd, buf, n)   */
+        case 1:  syscall_num = SYS_WRITE; break;   /* write(fd, buf, n)  */
+        case 2:  syscall_num = SYS_OPEN;  break;   /* open(path, fl, md) */
+        case 3:  syscall_num = SYS_CLOSE; break;   /* close(fd)          */
+        case 60: syscall_num = SYS_EXIT;  break;   /* exit(code)         */
+        default:
+          tf->regs[0] = (uint64_t)(int64_t)(-38);  /* -ENOSYS */
+          return;
+      }
+    }
   }
   if (syscall_num == SYS_WRITE_CONSOLE) {
     sys_write_console(tf);
