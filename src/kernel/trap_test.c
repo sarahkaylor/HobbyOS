@@ -299,12 +299,53 @@ static void test_ssp_guard_seeded(void) {
   EXPECT_EQ((__stack_chk_guard != 0), 1);
 }
 
+/* SEC-10 (security-plan.md #10): the stack-depth guard must track real SP
+ * movement and report low against a margin.  Deliberately does NOT consume
+ * enough to trip the entry check itself — that would halt the suite; the
+ * margin parameter lets both directions be tested safely. */
+static uint64_t __attribute__((noinline)) stack_probe(void) {
+  return kernel_stack_remaining();
+}
+
+/* A genuinely deeper stack: C allocates frames at entry and clang happily
+ * collapses single-call buffer frames, but recursive levels cannot be
+ * merged — each level is a real SP subtraction. */
+static uint64_t __attribute__((noinline)) probe_recurse(int n) {
+  volatile int pad = n; /* forces a per-level frame */
+  if (n == 0)
+    return kernel_stack_remaining();
+  uint64_t v = probe_recurse(n - 1);
+  pad ^= (int)v; /* frame live across the call: blocks tail-call elision */
+  return v;
+}
+
+static void test_kernel_stack_guard(void) {
+  tests_run++;
+  uart_puts("  Running test_kernel_stack_guard...\n");
+
+  uint64_t r1 = stack_probe();
+  /* Sanity: we run on the 64 KiB slice, so remaining is in (0, 64KiB]. */
+  EXPECT_EQ((r1 > 0 && r1 <= 64u * 1024u), 1);
+
+  uint64_t r2 = probe_recurse(512);
+  /* Deeper stack -> strictly less remaining; 512 levels of >=32-byte
+     frames is a guaranteed >=16 KiB drop, so assert conservatively. */
+  EXPECT_EQ((r2 < r1), 1);
+  EXPECT_EQ((r1 - r2 >= 8u * 1024u), 1);
+
+  /* Both directions of the threshold at the current (unwound) depth: a
+     margin larger than what's left reports low; a small one does not. */
+  EXPECT_EQ(kernel_stack_low(r1 + 1), 1);
+  EXPECT_EQ(kernel_stack_low(4096), 0);
+}
+
 void trap_test_suite(void) {
   uart_puts("trap_test_suite:\n");
   test_trap_unknown_syscall();
   test_trap_sys_get_cpuid();
   test_u_strcpy_atomic(); /* SEC-3 */
   test_ssp_guard_seeded(); /* SEC-4 */
+  test_kernel_stack_guard(); /* SEC-10 */
 #ifdef __x86_64__
   test_watchdog_stack_scan_guard();
 #endif

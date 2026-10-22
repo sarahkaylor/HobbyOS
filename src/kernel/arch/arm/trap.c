@@ -1818,6 +1818,17 @@ void sync_handler_c(struct trap_frame *tf) {
  * syscall.  Any added arm/x64 syscall must append an else-if here. */
 
 void sync_lower_handler_c(struct trap_frame *tf) {
+  /* SEC-10 (security-plan.md #10): the kernel stacks are contiguous static
+     64 KiB per-CPU slices — an overflow faults nowhere, it corrupts the
+     adjacent core's stack or kernel data.  Refuse to run a handler when the
+     slice is already below the deepest-path margin; halt loudly instead of
+     continuing on a doomed stack. */
+  if (kernel_stack_low(8u * 1024u)) {
+    uart_puts("KERNEL PANIC: syscall entry with exhausted kernel stack (SEC-10)\n");
+    for (;;)
+      ;
+  }
+
   /* L9 liveness: any EL0->EL1 sync entry proves this core is executing,
      not wedged (syscall, page fault, or unknown-class trap alike).  A core
      running a long-lived user process spends huge stretches between
