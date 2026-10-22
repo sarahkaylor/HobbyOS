@@ -288,11 +288,23 @@ static void test_u_strcpy_atomic(void) {
   set_current_process_pid(get_cpuid(), -1);
 }
 
+/* SEC-4 (security-plan.md #4): the stack canary must be seeded non-zero at
+ * boot (a zero guard is invisible to memset-style smashes).  Detection
+ * itself is compiler-generated; the build check that instrumented functions
+ * reference __stack_chk_guard lives with the toolchain, not here. */
+static void test_ssp_guard_seeded(void) {
+  tests_run++;
+  uart_puts("  Running test_ssp_guard_seeded...\n");
+  extern uint64_t __stack_chk_guard;
+  EXPECT_EQ((__stack_chk_guard != 0), 1);
+}
+
 void trap_test_suite(void) {
   uart_puts("trap_test_suite:\n");
   test_trap_unknown_syscall();
   test_trap_sys_get_cpuid();
   test_u_strcpy_atomic(); /* SEC-3 */
+  test_ssp_guard_seeded(); /* SEC-4 */
 #ifdef __x86_64__
   test_watchdog_stack_scan_guard();
 #endif
