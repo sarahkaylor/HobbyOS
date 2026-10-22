@@ -2206,7 +2206,24 @@ void sync_lower_handler_c(struct trap_frame *tf) {
  * @param tf Pointer to the trap frame representing the user state when the
  * interrupt occurred.
  */
+/* SEC-OBS-B debug hook: rank checks do not apply inside IRQ dispatch (see
+ * lock.h).  Wrapper keeps the asm-visible symbol; inner is the original
+ * handler body unchanged. */
+static void irq_dispatch_inner(struct trap_frame *tf);
+
 void irq_lower_handler_c(struct trap_frame *tf) {
+#ifdef KERNEL_MODE_UNIT_TEST
+  extern void lockdbg_irq_enter(void);
+  extern void lockdbg_irq_exit(void);
+  lockdbg_irq_enter();
+  irq_dispatch_inner(tf);
+  lockdbg_irq_exit();
+#else
+  irq_dispatch_inner(tf);
+#endif
+}
+
+static void irq_dispatch_inner(struct trap_frame *tf) {
   /* L9 liveness (mirrors x64 general_interrupt_handler -> watchdog_tick's
      refresh): EVERY IRQ entry — timer tick, virtio blk/net/input — proves
      this core is alive and dispatching.  Refresh the ownership heartbeat
@@ -2216,6 +2233,10 @@ void irq_lower_handler_c(struct trap_frame *tf) {
      cores.  Writes only; process.c owns the array. */
   extern uint64_t timer_get_ms(void);
   cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+
+  /* SEC-OBS-B: drain deferred lost-wakeup requests here rather than at
+   * the virtio-blk completion that raised them (see process.h). */
+  process_wake_all_drain();
 
   uint32_t intid = gic_acknowledge_interrupt();
 

@@ -295,6 +295,9 @@ static void kmemset(void *dst, uint8_t val, uint64_t n) {
  */
 void process_init(void) {
   spinlock_init(&proc_lock);
+#ifdef KERNEL_MODE_UNIT_TEST
+  lockdbg_register(&proc_lock, "proc_lock", LOCK_RANK_PROC); /* SEC-OBS-B */
+#endif
   /* P2.2 (design section 2): the frame bitmap is the single source of
      truth for pool state; the 32 MiB block layer is layered on it. */
   frame_init();
@@ -2949,6 +2952,21 @@ void process_wake_all(void) {
     }
   }
   spinlock_release_irqrestore(&proc_lock, flags);
+}
+
+/* SEC-OBS-B: deferred lost-wakeup catch-all (see process.h).  The flag is
+ * a single volatile word: concurrent setters are idempotent, and the tick
+ * drain clears before waking so a wake racing in re-arms the next tick —
+ * same benign race the immediate call always had against blocking. */
+static volatile int wake_all_pending;
+
+void process_wake_all_deferred(void) { wake_all_pending = 1; }
+
+void process_wake_all_drain(void) {
+  if (!wake_all_pending)
+    return;
+  wake_all_pending = 0;
+  process_wake_all();
 }
 
 struct process *process_get_pcb(int pid) {

@@ -97,6 +97,9 @@ void spinlock_init(spinlock_t *lock) {
 }
 
 void spinlock_acquire(spinlock_t *lock) {
+#ifdef KERNEL_MODE_UNIT_TEST
+  lockdbg_precheck(lock); /* SEC-OBS-B: report inversion before we spin */
+#endif
   if (__atomic_test_and_set(&lock->locked, __ATOMIC_ACQUIRE)) {
     uint32_t cpu = get_cpuid();
     lock_wait_addr[cpu] = (uint64_t)lock;
@@ -171,9 +174,39 @@ void spinlock_acquire(spinlock_t *lock) {
      any use of the protected data, so a fatal path can ask "is this mine to
      give back?" without guessing. */
   lock->owner = get_cpuid() + 1;
+#ifdef KERNEL_MODE_UNIT_TEST
+  lockdbg_note_acquired(lock); /* SEC-OBS-B: push once held */
+#endif
+}
+
+/* SEC-OBS-B debug tracker support (src/kernel/lock_order.c): mask local
+ * interrupts around its per-CPU bookkeeping so an interrupting handler that
+ * takes its own registered lock cannot corrupt the stack mid-update. */
+uint64_t lockdbg_irq_disable(void) {
+  uint64_t flags;
+  __asm__ volatile(
+      "pushfq\n"
+      "pop %0\n"
+      "cli\n"
+      : "=r"(flags)
+      :
+      : "memory");
+  return flags;
+}
+
+void lockdbg_irq_restore(uint64_t flags) {
+  __asm__ volatile(
+      "push %0\n"
+      "popfq\n"
+      :
+      : "r"(flags)
+      : "memory");
 }
 
 void spinlock_release(spinlock_t *lock) {
+#ifdef KERNEL_MODE_UNIT_TEST
+  lockdbg_note_releasing(lock); /* SEC-OBS-B: pop before the HW clear */
+#endif
   /* Clear the owner BEFORE releasing: a CPU that finds the lock free must never
      see its own id still in it, and the release-store below is what publishes
      both fields to the next acquirer. */

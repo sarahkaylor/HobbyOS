@@ -48,6 +48,9 @@ static int vm_lock_ready;
 static void vm_lock_init_once(void) {
   if (!vm_lock_ready) {
     spinlock_init(&vm_lock);
+#ifdef KERNEL_MODE_UNIT_TEST
+    lockdbg_register(&vm_lock, "vm_lock", LOCK_RANK_VM); /* SEC-OBS-B */
+#endif
     vm_lock_ready = 1;
   }
 }
