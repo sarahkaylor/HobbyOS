@@ -431,7 +431,19 @@ void process_set_entry(int pid, uint64_t elr, uint64_t sp) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   proc_table[pid].context[31] = elr;        // ELR (entry point)
   proc_table[pid].context[33] = sp;         // SP_EL0 (stack pointer)
+#if defined(__x86_64__)
+  /* GB-014: on x64 this slot is RFLAGS, not ARM's SPSR. Zero is NOT a valid
+   * set of flags to iretq with: bit 1 is architecturally reserved and MUST be
+   * 1, so `iretq` with RFLAGS=0 raises #GP with error code 0 and the user
+   * process never executes a single instruction -- which is exactly what every
+   * staged ELF program did (measured: #GP vector 13, GP ERROR: 0x00000000,
+   * first fetch absent from a 199k-line in_asm capture). 0x202 = IF | bit1,
+   * the same value the normal x64 create path uses at context[32].
+   * On ARM this slot stays 0 (SPSR = EL0t, the correct EL0 state). */
+  proc_table[pid].context[32] = 0x202;
+#else
   proc_table[pid].context[32] = 0;          // SPSR = EL0t
+#endif
   proc_table[pid].context[34] = 0;          // x64: force is_kernel_process classification
   proc_table[pid].context[35] = 0;          //      (a fresh user program resumes as 0x1B/0x23)
   proc_table[pid].state = PROC_STATE_READY; // Mark as runnable!
