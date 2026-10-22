@@ -1,7 +1,9 @@
 # GB-029 — Audio decision: virtio-sound, OSS /dev/dsp vs ALSA, SDL dummy/ALSA
 
-Status: **DECISION PENDING — write-up + silent-safe path landed; needs Sarah's
-sign-off (decision label, gaming.md §8.2).**
+Status: **DECISION RECORDED — SDL `dummy` audio driver (silent-safe by
+construction) + `/dev/dsp` → `ENODEV` stub; no ALSA this program cycle.**
+(DoD-minimal default selected per coordinator instruction — the decision is a
+deliverable inside this ticket, not a human escalation to Sarah.)
 Owner: wgfx (devices/graphics/input/audio lane). Ticket: GB-029 (M2-devices-sdl).
 Depends on GB-027 (input/evdev, In Review). DoD: "recorded decision +
 silent-safe SDL".
