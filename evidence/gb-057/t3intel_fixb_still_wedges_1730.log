@@ -1,0 +1,1730 @@
+[fetch] tree present + anchors verified; re-syncing config overlay
+[fetch] OK: /tmp/mainmerge/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src ready (marker llvmorg-21.1.8)
+ld.lld -T linker_x64.ld -o hobbyos.elf obj/intel/boot.o obj/intel/setjmp.o obj/intel/abi_t2_test.o obj/intel/blk_cache.o obj/intel/blk_cache_press_test.o obj/intel/blk_cache_test.o obj/intel/dhcp.o obj/intel/elf_image.o obj/intel/elf_loader.o obj/intel/evdev.o obj/intel/evdev_test.o obj/intel/fat16.o obj/intel/fat16_test.o obj/intel/fb_ioctl.o obj/intel/fb_ioctl_test.o obj/intel/fb_mmap.o obj/intel/fb_mmap_test.o obj/intel/frame.o obj/intel/frame_test.o obj/intel/fs.o obj/intel/fs_test.o obj/intel/input_node.o obj/intel/input_node_test.o obj/intel/iommu_vtd.o obj/intel/ipc_proto.o obj/intel/locks_test.o obj/intel/main.o obj/intel/math_test.o obj/intel/mmu_test.o obj/intel/net.o obj/intel/net_rdma.o obj/intel/net_rdma_test.o obj/intel/net_test.o obj/intel/nfs.o obj/intel/nfs_proto.o obj/intel/nfs_test.o obj/intel/pipe.o obj/intel/pipe_test.o obj/intel/process.o obj/intel/process_test.o obj/intel/program_loader.o obj/intel/program_loader_test.o obj/intel/test_fw_cfg.o obj/intel/test_smp.o obj/intel/time.o obj/intel/time_test.o obj/intel/timer_test.o obj/intel/trap_test.o obj/intel/unit_test.o obj/intel/unix.o obj/intel/unix_test.o obj/intel/vfs.o obj/intel/virtio_blk.o obj/intel/virtio_blk_test.o obj/intel/virtio_gpu.o obj/intel/virtio_gpu_test.o obj/intel/virtio_gpu_x64.o obj/intel/virtio_input.o obj/intel/virtio_input_test.o obj/intel/virtio_net.o obj/intel/virtio_net_test.o obj/intel/vm.o obj/intel/vm_test.o obj/intel/cpu.o obj/intel/fpu.o obj/intel/gic.o obj/intel/locks.o obj/intel/mmu.o obj/intel/rtc.o obj/intel/smp.o obj/intel/timer.o obj/intel/trap.o obj/intel/uart.o
+llvm-objcopy -I elf64-x86-64 -O elf32-i386 hobbyos.elf
+[browser] third_party/webkit-hobbyos/cache/browser-x64.bin.xz (cache) -> obj/intel/browser.bin
+[tools] LLVM dist staging present
+# Startup disk: 1 GiB (user-requested floor; FAT16 tops out at 2 GiB).
+# mkfs.fat auto-picks the cluster size (32 KiB @ 1 GiB); the kernel
+# fat16.c layout math is BPB data-driven (bpb_sectors_per_cluster), so
+# no driver change is needed for the larger disk/clusters.
+dd if=/dev/zero of=disk.img bs=1M count=1024
+1024+0 records in
+1024+0 records out
+1073741824 bytes (1.1 GB, 1.0 GiB) copied, 0.512094 s, 2.1 GB/s
+mkfs.fat -F 16 disk.img
+mkfs.fat 4.2 (2021-01-31)
+mmd -i disk.img ::/EFI
+mmd -i disk.img ::/EFI/BOOT
+mmd -i disk.img ::/boot
+mmd -i disk.img ::/home
+mmd -i disk.img ::/nfs
+mmd -i disk.img ::/mnt
+mmd -i disk.img ::/TESTDIR
+mmd -i disk.img ::/tmp
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+# build-tools at their frozen /TOOLS/ paths (Makefile.hobbyos sketch).
+mmd -i disk.img ::/TOOLS
+# L3 (selfhost W-A): VFAT long-name build-payload fixture dirs (mtools-written).
+mmd -i disk.img ::/src
+mmd -i disk.img ::/src/kernel
+mmd -i disk.img ::/src/user_include
+mmd -i disk.img ::/src/user_include/graphics
+mmd -i disk.img ::/third_party
+mmd -i disk.img ::/third_party/libcxx-21.1.8
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include
+mcopy -i disk.img tests/fixtures/E2E.TXT ::/E2E.TXT
+mcopy -i disk.img tests/fixtures/DRAGME.TXT ::/DRAGME.TXT
+mcopy -i disk.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+mcopy -i disk.img bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
+mcopy -i disk.img obj/intel/limine.conf ::/boot/limine.conf
+mcopy -i disk.img hobbyos.elf ::/boot/hobbyos.elf
+mcopy -i disk.img obj/intel/memtest.bin ::/MEMTEST.BIN
+mcopy -i disk.img obj/intel/fileio_test.bin ::/FILEIO.BIN
+mcopy -i disk.img obj/intel/console.bin ::/CONSOLE.BIN
+mcopy -i disk.img obj/intel/fork_test.bin ::/FORKTEST.BIN
+mcopy -i disk.img obj/intel/heap_test.bin ::/HEAPTEST.BIN
+mcopy -i disk.img obj/intel/spawntest.bin ::/SPAWN.BIN
+mcopy -i disk.img obj/intel/graphics.bin ::/GRAPHICS.BIN
+mcopy -i disk.img obj/intel/wsurf_test.bin ::/WSRF_T.BIN
+mcopy -i disk.img obj/intel/smp_test.bin ::/SMPTEST.BIN
+mcopy -i disk.img obj/intel/pipetest.bin ::/PIPETEST.BIN
+mcopy -i disk.img obj/intel/nettest.bin ::/NETTEST.BIN
+mcopy -i disk.img obj/intel/timeout.bin ::/TIMEOUT.BIN
+mcopy -i disk.img obj/intel/nfstest.bin ::/NFSTEST.BIN
+mcopy -i disk.img obj/intel/desktop.bin ::/DESKTOP.BIN
+browser: obj/intel/browser.bin (resolved by the browser-staged completeness rule; installed as ::/BROWSER.BIN)
+mcopy -i disk.img obj/intel/editor.bin ::/EDITOR.BIN
+mcopy -i disk.img obj/intel/EDITOR_T.BIN ::/EDITOR_T.BIN
+mcopy -i disk.img obj/intel/APPS_T.BIN ::/APPS_T.BIN
+mcopy -i disk.img obj/intel/FILEDIAL.BIN ::/FILEDIAL.BIN
+mcopy -i disk.img obj/intel/DIALOG_T.BIN ::/DIALOG_T.BIN
+mcopy -i disk.img obj/intel/PONG_T.BIN ::/PONG_T.BIN
+mcopy -i disk.img obj/intel/stress.bin ::/STRESS.BIN
+mcopy -i disk.img obj/intel/fpu_test.bin ::/FPU_T.BIN
+mcopy -i disk.img obj/intel/gfxbench.bin ::/GFXBENCH.BIN
+mcopy -i disk.img obj/intel/math_test.bin ::/MATH_T.BIN
+mcopy -i disk.img obj/intel/errtest.bin ::/ERRTEST.BIN
+mcopy -i disk.img obj/intel/SOCK2TST.BIN ::/SOCK2TST.BIN
+mcopy -i disk.img obj/intel/POLLTST.BIN ::/POLLTST.BIN
+mcopy -i disk.img obj/intel/BLKTEST.BIN ::/BLKTEST.BIN
+mcopy -i disk.img obj/intel/RANDTST.BIN ::/RANDTST.BIN
+mcopy -i disk.img obj/intel/dns_test.bin ::/DNSTST.BIN
+mcopy -i disk.img obj/intel/netfix.bin ::/NETFIX.BIN
+mcopy -i disk.img obj/intel/cxx_smoke.bin ::/CXXSMOKE.BIN
+mcopy -i disk.img obj/intel/thrd_test.bin ::/THRD_T.BIN
+mcopy -i disk.img obj/intel/tls_test.bin ::/TLS_T.BIN
+mcopy -i disk.img obj/intel/WK1C_T.BIN ::/WK1C_T.BIN
+mcopy -i disk.img obj/intel/cxx_t.bin ::/CXX_T.BIN
+mcopy -i disk.img obj/intel/rtti_t.bin ::/RTTI_T.BIN
+mcopy -i disk.img obj/intel/ipc_test.bin ::/IPC_T.BIN
+mcopy -i disk.img obj/intel/mmtest.bin ::/MMTEST.BIN
+mcopy -i disk.img obj/intel/sqltest.bin ::/SQLTEST.BIN
+mcopy -i disk.img obj/intel/torture_test.bin ::/TORTURE.BIN
+mcopy -i disk.img obj/intel/big.bin ::/BIG.BIN
+mcopy -i disk.img obj/intel/hello.bin ::/HELLO.BIN
+mcopy -i disk.img obj/intel/selfhost.bin ::/SELFHOST.BIN
+mcopy -i disk.img obj/intel/sh.bin ::/SH.BIN
+mcopy -i disk.img obj/intel/ls.bin ::/LS.BIN
+mcopy -i disk.img obj/intel/cat.bin ::/CAT.BIN
+mcopy -i disk.img obj/intel/grep.bin ::/GREP.BIN
+mcopy -i disk.img obj/intel/less.bin ::/LESS.BIN
+mcopy -i disk.img obj/intel/tail.bin ::/TAIL.BIN
+mcopy -i disk.img obj/intel/head.bin ::/HEAD.BIN
+mcopy -i disk.img obj/intel/shtest.bin ::/SHTEST.BIN
+mcopy -i disk.img obj/intel/ps.bin ::/PS.BIN
+mcopy -i disk.img obj/intel/free.bin ::/FREE.BIN
+mcopy -i disk.img obj/intel/uptime.bin ::/UPTIME.BIN
+mcopy -i disk.img obj/intel/kill.bin ::/KILL.BIN
+mcopy -i disk.img obj/intel/basename.bin ::/BASENAME.BIN
+mcopy -i disk.img obj/intel/dirname.bin ::/DIRNAME.BIN
+mcopy -i disk.img obj/intel/seq.bin ::/SEQ.BIN
+mcopy -i disk.img obj/intel/expr.bin ::/EXPR.BIN
+mcopy -i disk.img obj/intel/testgnu.bin ::/TEST.BIN
+mcopy -i disk.img obj/intel/cp.bin ::/CP.BIN
+mcopy -i disk.img obj/intel/rm.bin ::/RM.BIN
+mcopy -i disk.img obj/intel/mv.bin ::/MV.BIN
+mcopy -i disk.img obj/intel/touch.bin ::/TOUCH.BIN
+mcopy -i disk.img obj/intel/wc.bin ::/WC.BIN
+mcopy -i disk.img obj/intel/sed.bin ::/SED.BIN
+mcopy -i disk.img obj/intel/make.bin ::/MAKE.BIN
+mcopy -i disk.img obj/intel/hedgnu.bin ::/HEDGNU.BIN
+mcopy -i disk.img obj/intel/tailgnu.bin ::/TAILGN.BIN
+mcopy -i disk.img obj/intel/cut.bin ::/CUT.BIN
+mcopy -i disk.img obj/intel/tr.bin ::/TR.BIN
+mcopy -i disk.img obj/intel/paste.bin ::/PASTE.BIN
+mcopy -i disk.img obj/intel/fold.bin ::/FOLD.BIN
+mcopy -i disk.img obj/intel/nl.bin ::/NL.BIN
+mcopy -i disk.img obj/intel/comm.bin ::/COMM.BIN
+mcopy -i disk.img obj/intel/tsort.bin ::/TSORT.BIN
+mcopy -i disk.img obj/intel/expand.bin ::/EXPAND.BIN
+mcopy -i disk.img obj/intel/unexpand.bin ::/UNEXPAND.BIN
+mcopy -i disk.img obj/intel/cksum.bin ::/CKSUM.BIN
+mcopy -i disk.img obj/intel/md5sum.bin ::/MD5SUM.BIN
+mcopy -i disk.img obj/intel/proc_child.bin ::/PROCCHLD.BIN
+mcopy -i disk.img obj/intel/spawnex_child.bin ::/SPAWNEX.BIN
+mcopy -i disk.img obj/intel/sig_test.bin ::/SIG_T.BIN
+mcopy -i disk.img obj/intel/head_test.bin ::/HEDTEST.BIN
+mcopy -i disk.img obj/intel/tail_test.bin ::/TAILTEST.BIN
+mcopy -i disk.img obj/intel/proc_test.bin ::/PROCTEST.BIN
+mcopy -i disk.img obj/intel/wc_test.bin ::/WCTEST.BIN
+mcopy -i disk.img obj/intel/cut_test.bin ::/CUTTEST.BIN
+mcopy -i disk.img obj/intel/tr_test.bin ::/TRTEST.BIN
+mcopy -i disk.img obj/intel/paste_test.bin ::/PASTE_T.BIN
+mcopy -i disk.img obj/intel/fold_test.bin ::/FOLDTEST.BIN
+mcopy -i disk.img obj/intel/nl_test.bin ::/NLTEST.BIN
+mcopy -i disk.img obj/intel/comm_test.bin ::/COMMTEST.BIN
+mcopy -i disk.img obj/intel/tsort_test.bin ::/TSORT_T.BIN
+mcopy -i disk.img obj/intel/expand_test.bin ::/EXPAND_T.BIN
+mcopy -i disk.img obj/intel/unexpand_test.bin ::/UNEXPAND_T.BIN
+mcopy -i disk.img obj/intel/fatbig_test.bin ::/FATBIG_T.BIN
+# L3 (selfhost W-A): VFAT long-name build-payload fixtures.  Content
+# markers must stay in sync with src/user/lfn_test.c.
+mcopy -i disk.img tests/fixtures/lfn/program_loader.c ::/src/kernel/program_loader.c
+mcopy -i disk.img tests/fixtures/lfn/window.h ::/src/user_include/graphics/window.h
+mcopy -i disk.img tests/fixtures/lfn/llvm-project-21.1.8.src-EXAMPLE.c ::/src/llvm-project-21.1.8.src-EXAMPLE.c
+mcopy -i disk.img tests/fixtures/lfn/upper_bound.h ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include/upper_bound.h
+mcopy -i disk.img tests/fixtures/lfn/longfilename.txt ::/longfilename.txt
+mcopy -i disk.img tests/fixtures/lfn/longfilename2.txt ::/longfilename2.txt
+mcopy -i disk.img tests/fixtures/lfn/longfil~1.txt ::/longfil~1.txt
+mcopy -i disk.img obj/intel/lfn_test.bin ::/LFN_T.BIN
+mcopy -i disk.img obj/intel/cksum_test.bin ::/CKSUM_T.BIN
+mcopy -i disk.img obj/intel/md5sum_test.bin ::/MD5SUM_T.BIN
+mcopy -i disk.img obj/intel/tac.bin ::/TAC.BIN
+mcopy -i disk.img obj/intel/tac_test.bin ::/TACTEST.BIN
+mcopy -i disk.img obj/intel/cmp.bin ::/CMP.BIN
+mcopy -i disk.img obj/intel/cmp_test.bin ::/CMPTEST.BIN
+mcopy -i disk.img obj/intel/regex_test.bin ::/REGTEST.BIN
+mcopy -i disk.img obj/intel/sed_test.bin ::/SEDTEST.BIN
+mcopy -i disk.img obj/intel/grep_test.bin ::/GREPTEST.BIN
+mcopy -i disk.img obj/intel/subprobe.bin ::/SUBPRB.BIN
+mcopy -i disk.img obj/intel/pipeprobe.bin ::/PIPEPRB.BIN
+mcopy -i disk.img obj/intel/lseek_test.bin ::/LKSTEST.BIN
+mcopy -i disk.img obj/intel/sort.bin ::/SORT.BIN
+mcopy -i disk.img obj/intel/uniq.bin ::/UNIQ.BIN
+mcopy -i disk.img obj/intel/ping.bin ::/PING.BIN
+mcopy -i disk.img obj/intel/nc.bin ::/NC.BIN
+mcopy -i disk.img obj/intel/ifconfig.bin ::/IFCONFIG.BIN
+mcopy -i disk.img obj/intel/shtest2.bin ::/SHTEST2.BIN
+mcopy -i disk.img obj/intel/mkdir.bin ::/MKDIR.BIN
+mcopy -i disk.img obj/intel/shtest3.bin ::/SHTEST3.BIN
+mcopy -i disk.img obj/intel/pong.bin ::/PONG.BIN
+mcopy -i disk.img obj/intel/millipede.bin ::/MILLIPED.BIN
+mcopy -i disk.img obj/intel/files.bin ::/FILES.BIN
+mcopy -i disk.img obj/intel/calc.bin ::/CALC.BIN
+mcopy -i disk.img obj/intel/xcalc.bin ::/XCALC.BIN
+mcopy -i disk.img obj/intel/antfarm.bin ::/ANTFARM.BIN
+mcopy -i disk.img obj/intel/xeyes.bin ::/XEYES.BIN
+mcopy -i disk.img obj/intel/xnibbler.bin ::/XNIBBLER.BIN
+mcopy -i disk.img obj/intel/clock.bin ::/CLOCK.BIN
+mcopy -i disk.img obj/intel/sysmon.bin ::/SYSMON.BIN
+mcopy -i disk.img obj/intel/hex.bin ::/HEX.BIN
+mcopy -i disk.img obj/intel/tasks.bin ::/TASKS.BIN
+mcopy -i disk.img obj/intel/find.bin ::/FIND.BIN
+mcopy -i disk.img obj/intel/diff.bin ::/DIFF.BIN
+mcopy -i disk.img obj/intel/notes.bin ::/NOTES.BIN
+mcopy -i disk.img obj/intel/unit.bin ::/UNIT.BIN
+mcopy -i disk.img obj/intel/nano.bin ::/NANO.BIN
+mcopy -i disk.img obj/intel/xcrypt.bin ::/XCRYPT.BIN
+mcopy -i disk.img obj/intel/nes.bin ::/NES.BIN
+# Selfhost W2 (mtools port): in-OS /TOOLS copies of the ported
+# build-tools (8.3 names, the frozen F1 layout).
+mcopy -i disk.img obj/intel/mcopy.bin ::/TOOLS/MCOPY.BIN
+mcopy -i disk.img obj/intel/mdel.bin ::/TOOLS/MDEL.BIN
+mcopy -i disk.img obj/intel/mmd.bin ::/TOOLS/MMD.BIN
+# Selfhost W2 (mkfs port): in-OS MKFSFAT (F1 layout).
+mcopy -i disk.img obj/intel/mkfsfat.bin ::/MKFSFAT.BIN
+# Selfhost W3 (tools): the in-OS toolchain on the startup image (frozen
+# F1 layout, selfhost.md §7.3).  tools/selfhost-stage.sh --tools stages
+# CLANG.BIN/LLD.BIN/LLVMAR.BIN/OBJCOPY.BIN from the wave-2 LLVM
+# distribution staging (obj/selfhost/dist-staging, or the persistent
+# third_party/llvm-21.1.8/dist-staging copy that survives `make clean`),
+# the ported build tools (MAKE/MCOPY/MDEL/MMD/MKFSFAT), and the RESDIR
+# header tree under /TOOLS — staged FAITHFULLY with long names (F8
+# decision, see docs/selfhost/llvm-bootstrap.md §6.2).  Soft dependency:
+# an absent dist-staging warns + skips, so trees without the LLVM
+# install still build a bootable image (build_kernel.sh then refuses
+# with instructions).  Override with STAGE_TOOLS=0 to skip.
+tools/selfhost-stage.sh --tools disk.img
+selfhost-stage: staging in-OS toolchain to ::/TOOLS (F1 layout)
+selfhost-stage:   CLANG.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/clang-21 (converted, 94194168 B)
+selfhost-stage:   LLD.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/lld (converted, 53252504 B)
+selfhost-stage:   LLVMAR.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/llvm-ar (converted, 8351072 B)
+selfhost-stage:   OBJCOPY.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/llvm-objcopy (converted, 4984544 B)
+selfhost-stage: WARNING: tool not built (obj/arm/make.bin) — ::/TOOLS/MAKE.BIN not staged (make obj/arm/make.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/mcopy.bin) — ::/TOOLS/MCOPY.BIN not staged (make obj/arm/mcopy.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/mdel.bin) — ::/TOOLS/MDEL.BIN not staged (make obj/arm/mdel.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/mmd.bin) — ::/TOOLS/MMD.BIN not staged (make obj/arm/mmd.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/mkfsfat.bin) — ::/TOOLS/MKFSFAT.BIN not staged (make obj/arm/mkfsfat.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/sh.bin) — ::/TOOLS/SH.BIN not staged (make obj/arm/sh.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/rm.bin) — ::/TOOLS/RM.BIN not staged (make obj/arm/rm.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/tar.bin) — ::/TOOLS/TAR.BIN not staged (make obj/arm/tar.bin)
+selfhost-stage: staged 276 files, 175509542 bytes into ::/TOOLS
+  --- ::/TOOLS (mdir) ---
+OBJCOPY  BIN   4984544 2026-10-17  20:34 
+RESDIR       <DIR>     2026-10-17  20:34 
+       10 files         161 430 552 bytes
+                        739 475 456 bytes free
+
+  --- ::/TOOLS/RESDIR/include count ---
+      295 files          14 727 254 bytes
+                        739 475 456 bytes free
+
+selfhost-stage: done
+# Selfhost W4 (src): the in-OS build-required source subset on the
+# startup image (frozen F2 /SRC flavor): kernel+user sources, headers,
+# Makefile.hobbyos, limine/EFI assets, the carried build products, and
+# the SELFHOST.RUN/SELFHOST.SH stage scripts.  tools/selfhost-stage.sh
+# --src; disable together with the tools step via STAGE_TOOLS=0.
+tools/selfhost-stage.sh --src disk.img
+selfhost-stage: STAGE_LIBCXX=0 — skipping C++ libcxx include subset
+selfhost-stage: staging BUILD-REQUIRED source subset to ::/SRC
+selfhost-stage: WARNING: carried build product not built (obj/arm/desktop.bin) — ::/SRC/bin/DESKTOP.BIN not staged (build the tree first)
+selfhost-stage: WARNING: carried build product not built (obj/arm/console.bin) — ::/SRC/bin/CONSOLE.BIN not staged (build the tree first)
+selfhost-stage: WARNING: carried build product not built (obj/arm/sh.bin) — ::/SRC/bin/SH.BIN not staged (build the tree first)
+
+selfhost-stage: staged BUILD-REQUIRED subset into disk.img
+  payload: 258 files, 4241759 bytes
+  --- ::/SRC (mdir) ---
+        3 files             315 392 bytes
+
+Total files listed:
+      332 files           4 241 828 bytes
+                        731 856 896 bytes free
+
+selfhost-stage: done
+# [inos-build-kernel] the source tarball + the in-OS build script:
+# SRC.TAR (ustar, assembled by tools/selfhost-src-tar.sh from the real
+# tree) lands at ::/SRC.TAR; build_kernel.sh at ::/BUILD_KERNEL.SH.
+# In-OS: `SH.BIN /BUILD_KERNEL.SH` extracts the tar and builds the
+# kernel from it (Makefile.hobbyos `all`) + assembles OUT.IMG.
+tools/selfhost-src-tar.sh obj/selfhost/SRC.TAR
+selfhost-src-tar: assembling obj/selfhost/SRC.TAR
+selfhost-src-tar: WARNING: carried build product not built (obj/arm/desktop.bin) — bin/DESKTOP.BIN not in SRC.TAR (build the tree first)
+selfhost-src-tar: WARNING: carried build product not built (obj/arm/console.bin) — bin/CONSOLE.BIN not in SRC.TAR (build the tree first)
+selfhost-src-tar: WARNING: carried build product not built (obj/arm/sh.bin) — bin/SH.BIN not in SRC.TAR (build the tree first)
+selfhost-src-tar: done — obj/selfhost/SRC.TAR
+  entries: 998 (files+dirs), size: 22517760 bytes
+  spot-checked members: src/kernel/main.c Makefile.hobbyos linker.ld limine.conf build_kernel.sh
+mcopy -i disk.img obj/selfhost/SRC.TAR ::/SRC.TAR
+mcopy -i disk.img src/user/selfhost/build_kernel.sh ::/BUILD_KERNEL.SH
+mcopy -i disk.img obj/intel/monitor.bin ::/MONITOR.BIN
+mcopy -i disk.img obj/intel/monitort.bin ::/MONITORT.BIN
+mcopy -i disk.img obj/intel/icusmk.bin ::/ICUSMK.BIN
+echo "HobbyOS Terminal Test File" > SHTEST.TXT
+echo "This is line number two." >> SHTEST.TXT
+echo "Line three is right here." >> SHTEST.TXT
+echo "Fourth line has some interesting keywords like hello world." >> SHTEST.TXT
+echo "Line five is the last line of this small test document." >> SHTEST.TXT
+touch TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT
+echo "orange" > SORT.TXT
+echo "apple" >> SORT.TXT
+echo "orange" >> SORT.TXT
+mcopy -i disk.img SHTEST.TXT ::/SHTEST.TXT
+mcopy -i disk.img SHTEST.TXT ::/home/SHTEST.TXT
+mcopy -i disk.img TEST1.TXT ::/TEST1.TXT
+mcopy -i disk.img TEST2.TXT ::/TEST2.TXT
+mcopy -i disk.img TEST3.TXT ::/TEST3.TXT
+mcopy -i disk.img TEST4.TXT ::/TEST4.TXT
+mcopy -i disk.img SORT.TXT ::/SORT.TXT
+rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT
+qemu-system-x86_64 -M q35 -smp 8 -m 12288M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56  -action shutdown=poweroff -display none -monitor unix:/tmp/gb057mon6,server,nowait
+WARNING: Image format was not specified for '/home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd' and probing guessed raw.
+         Automatically detecting the format is dangerous for raw images, write operations on block 0 will be restricted.
+         Specify the 'raw' format explicitly to remove the restrictions.
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+BdsDxe: starting Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+[001;001H[001;001H[UART] lock @ 0x000000007537ebc8
+Booting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+VirtIO GPU: BGA
+VirtIO GPU successfully initialized.
+Original CCB: 0x0000000000000047
+Modified CCB: 0x0000000000000047
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1376256 total_mib=5376 reserved=0
+[KERNEL] Activating secondary cores via LAPIC IPIs...
+[KERNEL] smp_init: copying trampoline code...
+[KERNEL] smp_init: trampoline copied.
+[KERNEL] smp_init: Sending INIT IPI to core 1...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 1 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 2...
+[KERNEL] smp_init: Waiting after INIT IPI...
+start_scheduler called on CPU 1
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 2 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 3...
+start_scheduler called on CPU 2
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 3 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 4...
+[KERNEL] smp_init: Waiting after INIT IPI...
+start_scheduler called on CPU 3
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 4 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 5...
+[KERNEL] smp_init: Waiting after INIT IPI...
+start_scheduler called on CPU 4
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 5start_scheduler called on CPU  power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 6...
+5
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core start_scheduler called on CPU 6
+6 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 7...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 7 power-on acknowledged.
+start_scheduler called on CPU 7
+[KERNEL] LAPIC timer rate: 62569 counts/ms, TSC rate: 2595952 ticks/ms (PIT-counter calibrated)
+Found NVMe controller on PCI bus!
+PCI Config Space of NVMe:
+0x0000000000101B36 0x0000000000100007 0x0000000001080202 0x0000000000000000 
+0x0000000081000004 0x0000000000000000 0x0000000000000000 0x0000000000000000 
+0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000011001AF4 
+0x0000000000000000 0x0000000000000040 0x0000000000000000 0x000000000000010B 
+NVMe BAR0 Phys: 0x0000000081000000 (Mapped to Virtual: 0x00000001FC000000)
+Resetting controller, waiting for CSTS.RDY = 0...
+Controller reset complete!
+Enabling controller... CC=0x0000000000460001 CSTS=0x0000000000000001
+Controller enabled successfully!
+Create IO CQ Status: 0x0000000000000000
+Create IO SQ Status: 0x0000000000000000
+NVMe driver initialized successfully!
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+[VIRTIO_NET] PCI Interrupt Line: 10 (Vector: 42)
+[VIRTIO_NET] MAC Address: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+[VIRTIO_NET] RX queue size: 256 rx_vq address: 0x00000000751F4000 PFN: 0x00000000000751F4
+[VIRTIO_NET] TX queue size: 256 tx_vq address: 0x00000000751F7000 PFN: 0x00000000000751F7
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Discover sent
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP initialization complete.
+[RDMA] Remote PCIe sharing is INACTIVE (no startup parameter).
+
+--- Parallel Program Loading ---
+Mode: TEST - Running automated tests...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=1
+Inside process_create: clearing memory at 0x0000000022000000
+Inside process_create: kmemset done.
+start_scheduler called on CPU 0
+Loading program for scheduler (v2 AS): SUBPRB.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=-1
+/SUBPRB.BIN
+v2 loader: image mapped (lazy), bytes=64920 pages=16 first=in elap=2ms
+v2 loader: PID=2 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): SHTEST.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=-1
+/SHTEST.BIN
+v2 loader: image mapped (lazy), bytes=65496 pages=16 first=in elap=1ms
+v2 loader: PID=3 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): SHTEST2.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=4 block_idx=-1
+/SHTEST2.BIN
+v2 loader: image mapped (lazy), bytes=62680 pages=16 first=in elap=1ms
+v2 loader: PID=4 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): SHTEST3.BIN
+/SHTEST3.BIN
+v2 loader: image mapped (lazy), bytes=62792 pages=16 first=in elap=2ms
+v2 loader: PID=5 entry=0x0000001000000000 sp=S0x0000001800000000 resident=1 tables=4
+hell Integration Test Starting...
+Loading program for scheduler (v2 AS): CONSOLE.BIN
+/CONSOLE.BIN
+v2 loader: image mapped (lazy), bytes=55288 pages=14 first=in elap=2ms
+v2 loader: PID=6 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): MEMTEST.BIN
+/MEMTEST.BIN
+
+==============================
+Hello from isolated EL0 Space!
+==========Shell Advanced Utilities IntegrationLoading program for scheduler (v2 AS): == Test v2 loader: image mapped (lazy), bytes=Shell =StartSH.BIN
+ing...
+=======55288 pages=14/SH.BIN
+======= first=in elap=8ms
+F===
+ov2 loader: PID=lders & Subdirec8 entry=0x0000001000000000 sp=tori0x0000001800000000 resident=2 tables=6Loading program for scheduler (v2 AS): v2 loader: image mapped (lazy), bytes=223368
+SH.BINLoading program for scheduler (v2 AS): FILEIO.BIN
+[SUBPRB] st/FILEIO.BIN
+ pages=55art
+es Integ
+============== first=in elap=4ms
+v2 loader: PID=ratio9 entry=0x0000001000000000 sp=0x0000001800000000 resident======
+1====/SH.BINn Testv2 loader: image mapped (lazy), bytes========
+HobbyOS User Pr
+o tables=55560 pages= Startg4in
+14 first=g...
+ram - Memory Test
+==============================
+in elap=3ms
+Test 1: v2 loader: PID=11 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Writing to user space (should work):
+Loading program for scheduler (v2 AS): ✓ Write to user space successful
+BLKTEST.BIN
+/BLKTEST.BIN
+Test 2: Attempting to write to kernel space (should fail):
+v2 loader: image mapped (lazy), bytes=[KERNEL] pid=8Loading program for scheduler (v2 AS): SH.BIN
+223368 pages=55 first=in elap=3ms
+ (/SH.BIN
+MEMTEST.BINv2 loader: PID=Computat
+[FILE) memory fault VA=I12 entry=0x0000000040000000 PC=O0x0000001000000051v2 loader: image mapped (lazy), bytes=i rw=223368 pages=55on fini0x0000001000000000 sp=0x0000001800000000 resident=6 tables= TEST] Starting File I/O Tests..6
+.
+wshed . Exit in=ing.
+PROT -> killed
+ first=[KERNEL] Process 6: CONSOLE.BIN exited unexpectedly or gracefully.
+A mkdir /SUB1 r=[KERNEL] Process 8: MEMTEST.BIN exited unexpectedly or gracefully.
+0in elap=11ms
+ errno=0 
+/TEST.TXT
+v2 loader: PID=14 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+v2 loader: image mapped (lazy), bytes=75592 pages=19 first=in elap=14ms
+v2 loader: PID=7 entry=0x0000001000000000 sp=0x0000001800000000 resident=2 tables=6
+A mkLoading program for scheduler (v2 AS): FATBIG_T.BIN
+dir /SUB1/FATBIG_T.BIN/SUB2 r=
+0 errno=0 
+BLKTEST: block-cache in-OS integration test
+[FILEIO TEST] Opened TEST.TXT successfully.
+BLKTEST cache: present
+  BLKTEST cache live (sysinfo(9)): PASS
+BLKTEST P1: 512 KiB integrity (write + vaA chdir r=ried-chu0[FILEIO TEnk r ST] Wroteerrno=v2 loader: image mapped (lazy), bytes=ead-back)
+0 data t 47592o fi pages=12 first=in elap=2ms
+ le.
+v2 loader: PID=16 entry=0x0000001000000000 sp=0x0000001800000000 resident=4 tables=6
+Loading progra[m WATCfoHDOG] r schcoednusleor (v2 AS)le s: Lilent foFN_rT more than .B20sIN
+/BL
+KT  CP1.TXUT
+
+[FA0 riTBI/LFp=N_T0x.000BIN000007
+002G]FC 7>9 1pid= MiB f1at1 age_6 ms=crea2te/
+ write/r eCopPU1en  rriound-trp=0ipx
+0000001000002950 pid=4 age_ms=27 syscall=3
+  CPU2 rip=0x000000007002F356 pid=-1 age_ms=2 syscall=6
+  CPU3 rip=0x0000001000001C1F pid=16 age_ms=-3 syscall=4 wait_lock=0x0000000/BI000000000G FILcalE.Bler=IN
+0x0000000000000000 caller2=[FIL0Ex0000000070IO 0T2E9ST] Cl865
+ose d  fCPiUle4 .r
+ip=0x000000100000284B pid=2 age_ms=0
+  CPU5 rip=0x0v2 l0o000010a0d0003er15: im0 pidage ma=3 apped (lazy), bytes=5ge_ms=37992 2 pages=sysca15 firll=3
+  Cst=in elapPU=6 ri3ms
+p=0x00000v2010 l00002A40o pid=a5der ag: PIeD_=/TEST.TXms=T1
+17 8 sysceantrll=3y
+  CPU7 ri=0x0p=0x00000010000052BD pid=07 age_ms=-0000103 sys00ca0ll=070 0w00 asp=0ix000t_0001lock800=00x0000000000 r0esident00702=1 20080 ctaables=ller4=0x00
+0Loading program for scheduler (v2 AS):000 0HEA07P0T0ES2TFC5E. callerBI2N
+/HEAPTE=0x00000000ST.BIN
+70029BA3
+[FILEIO TEST] Reopened TEST.TXT for reading.
+v2 loader: image mapped (lazy), bytes=57768 pages=15 first=in elap=2ms
+v2 loader: PID=18 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): SPAWN.BIN
+/SPAWN.BIN
+
+[LFN] VFAT long-name build-payload verification
+v2 loader: image mapped (lazy), bytes=55432 pages=14 first=in elap=3ms
+v2 loader: PID=19 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): 
+--- He/src/kernel/program_loader.c
+ap Test StarFORKTEST.BIN
+ted ---
+Allocating 1MB...
+/FORKTEST.BIN
+Spawn Test: Starting...
+[FILEIO TEST] Read data: Spawn TeHello H  CobbSyOTst: SpKa cwnpu2i: (ung nCONSOiniLEt.BIN.i..ali
+S Fizelesd kyststacemk!, ski
+p)[FI
+  CSLEIO TTKE STc] pFu3: (uilenini I/tiO Testalized ksst aComplcetk, sv2 lokip)
+ader  CSTK : cpu7:im ag(e mauninitialized kppedstack, ( laszy), bkipy)
+tes=56440 pages=14 first=inLoading program for scheduler (v2 AS): CONSOLE.BIN
+e. elap= Ecwd="xiti/CONSOLE.BIN7ms
+ng.v2 loader: PID=20 entry=0x0000001000000000 sp=0x0000001800000000 resident=/S
+1 tables=4
+UBLoading program for scheduler (v2 AS): SMPTEST.BIN
+1/SUB2/SMPTEST.BIN
+"[LFN]
+ PASS payload deep path src/kernel/program_loader.c
+v2 loader: image mapped (lazy), bytes=55432 pages=14 first=in elap=3ms
+v2 loader: PID=23/SUB1/SUB2/nested.txt
+/src/user_include/graphics/window.hB
+ entry=0x0000001000000000 sp= 0x0000001800000000c resident=1 tables=4
+rLoading program for scheduler (v2 AS): PIPETEST.BIN
+/PIPETEST.BIN
+eate fd=[KERNEL] Process 11: FILEIO.BIN exited unexpectedly or gracefully.
+v2 loader: image mapped (lazy), bytes=55560 pages=14 first=in elap=[LFN] PASS long Successfully allocated 1MB
+3dir + nested src/user_inms
+v2 loader: PID=
+24 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+---v2 loader: image mapped (lazy), bytes=55288 pages=14 first=in  elap=3ms
+cv2 loader: PID=22 entry=0x0000001000000000 sp=Hob0x0000001800000000 resident=1 tables=byOS SMP Ve4
+rification ---
+Loading program for scheduler (v2 AS): GRAPHICS.BIN
+l/GRAPHICS.BIN0
+u de/graerrno=phics0/ window.hSpawn Test: Successfully spawned CONSOLE.BIN with PID=22
+wrote=
+14===== =========================
+HobbyOS Fork 
+Test
+============
+=================[=KER
+NEL] FAT[FORK TESAL:T ] CaExllingc eptfioron ikn(). Ker.nel .
+M/oSUB1/deSU! B2Vector: /ne14 Esterrodr C.txtode: 0x00000
+0v000200 l0o0ad0e00r:
+ ima  RIPg:e ma ppe0x0d0 00000070028(l7azBCy ),  bytReSsP:=5 80x052080 00pag0007538De470
+s= 1 5 firsCSt=:  0x0in 00elap0=06ms
+0000000B re0re008  SS:  ad fd=0x00v000002 0load00e0r0: PID=210010 entry=0 x RFLAGS: 00x00000000000000001000100097000
+00   sp=R0AX: x0000x00000000000000001804500000000  r eRsBiXden:t=1  0tables=x00040000
+07Loa024ACding prD0og  RCXr: am0x00 000for 0scheduler (v020 0AS0)00:0 01E  RWDX: 0x0000S0RF00000000100
+  RDI_T.:BIN 
+0/0WxS00000R0100F_T.BIN
+000CFE2  RSI: 0x000000007538D730  RBP: 0x000000007538D5F0
+  ERR: 0x0000000000000000  R8:  0x000000000000001D  R9:  0x000000100000F000  R10: 0x0000000000000000
+  CPU: 7  pid: 17
+  STvA2CK [load0er: ]: 0x76image mapped (lazy), byte6Cs6C2F=376637208732F
+  STACK0 p[1]: a0gex6s3656A6F72702D6=D
+  S92 firsTt=ACK[i2n]: e 0x382E312El3ap=51m32s2D
+74
+  Sv2 loTadAerC: K[PID=3]: 26 en0x000t04r52yD6=0x372732E0000001000000000 sp=0x0000001800
+  STAC0K00000[4]: 0 resix0dent0000=010 000000000
+  STACKtables=4[5]:
+Loading pro 0x000000g0r00000am0 for s0ched00ul
+e r  (STACKv[6]: 2 A0Sx)0000000000000000
+  : NETSTACTKE[7S]T.BI:N 
+/NET0TxES00T.BIN0000
+Ve00000rif0i00ed 001MB wri
+  STAteCK[8]: s
+Allo0cx00a00ting 50M00B0...
+000000Succes000sf
+  STACKu[9lly] :a 0x000llocate0000000000000d 5
+  0MSB
+VTeArCified 50MBK [w1r0ites] :( sta0x00000000r00t and e0nd)
+0Fre0000e
+  STACiK[11]: 0ngx0 0001MB0...
+000Spawn T00000000
+e st: Fi nSTACKi[1sh2]:ed .0 x000Exi00000000000ti0ng0.
+
+  STA[CK[13]KER:NEL 0x0] Proces000s 000019000:0 SP0000
+AW N. BINSTAC exKit[e1d4 un]: 0x0expec0t0e0d00l00y or gr0aceful00000ly.0
+0
+  STACK[15]: 0x0000000000000000
+Graphics Test Program Started
+v2 loader: image mapped (lazy), bytes=55432 pages=14 first=in elap=6ms
+v2 loader: PID=27 entry=0x0000001000000000
+============= sp=0x0000001800000000=================
+Hello from isolated  resident=1 tables=4/src/llvm-project-21.1.8.src-EXAMPLE.c
+
+ELoading program for scheduler (v2 AS): TIMEOUT.BIN
+L0 Space!
+==============================
+/TIMEOUT.BIN
+Spawning 8 worker processes to saturate 4 cores...
+v2 loader: image mapped (lazy), bytes=55096 pages=14 first=in elap=2ms
+v2 loader: PID=28 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): STRESS.BIN
+Allocat/STRESS.BIN
+ing 2MB (should reuse space)...
+v2 loader: image mapped (lazy), bytes=62088 pages=16 first=in elap=1ms
+v2 loader: PID=30 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): MONITORT.BIN
+/MONITORT.BIN
+v2 loader: image mapped (lazy), bytes=56840 pages=14 first=in elap=2ms
+v2 loader: PID=31 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): NFSTEST.BIN
+/NFSTEST.BIN
+v2 loader: image mapped (lazy), bytes=90360 pages=23 first=in elap=1ms
+v2 loader: PID=32 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): ComputatioERRTEST.BIN
+n f/ERRTEST.BIN
+inished. Exiting.
+Pipe Test Starting...
+v2 loader: image mapped (lazy), bytes=57224 pages=14 first=in elap=2ms
+v2 loader: PID=33 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): HELLO.BIN
+/HELLO.BIN
+v2 loader: image mapped (lazy), bytes=45976 pages=12 first=in elap=2ms
+v2 loader: PID=35 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): LKSTEST.BIN
+/LKSTEST.BIN
+v2 loader: image mapped (lazy), bytes=106328 pages=26 first=in elap=2ms
+v2 loader: PID=36 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): HEDTEST.BIN
+/HEDTEST.BIN
+[KERNEL] Process 22: CONSOLE.BIN exited unexpectedly or gracefully.
+v2 loader: image mapped (lazy), bytes=59864 pages=15 first=in elap=2ms
+v2 loader: PID=37 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+[Loading program for scheduler (v2 AS): TAILTEST.BIN
+/TAILTEST.BINWSR
+F_T] wsurf render-confinement tests
+v2 loader: image mapped (lazy), bytes=59880 pages=15 first=inUser net_test sta elap=2rting...
+ms
+v2 loader: PID=38 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+ConLoading program for scheduler (v2 AS): necPROCTEST.BIN
+ting to 1.1.1.1:80.../PROCTEST.BIN
+
+[ARP] routing off-subnet: target=v2 loader: image mapped (lazy), bytes=0x0000000001010101 local_ip=75896 pages=19 first=in elap=2ms
+0x000000000F02000Av2 loader: PID=39 entry= mask=0x00000010000000000x0000000000FFFFFF sp= gateway=0x00000018000000000x000000000202000A
+ resident=1 tables=4
+Loading program for scheduler (v2 AS): WCTEST.BIN
+/WCTEST.BIN
+v2 loader: image mapped (lazy), bytes=60024 pages=15 first=in elap=1ms
+v2 loader: PID=40 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): REGTEST.BIN
+/REGTEST.BIN
+v2 loader: image mapped (lazy), bytes=141096 pages=35 first=in elap=2ms
+v2 loader: PID=41 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): SEDTEST.BIN
+/SEDTEST.BIN
+v2 loader: image mapped (lazy), bytes=69192 pages=17 first=in elap=2ms
+v2 loader: PID=42 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): GREPTEST.BIN
+/GREPTEST.BIN
+v2 loader: image mapped (lazy), bytes=69128 pages=17 first=in elap=2ms
+v2 loader: PID=43 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): CUTTEST.BIN
+/CUTTEST.BIN
+v2 loader: image mapped (lazy), bytes=61384 pages=15 first=in elap=1ms
+v2 loader: PID=44 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): TRTEST.BIN
+/TRTEST.BIN
+Connected! Sending HTTP GET...
+Request sent. Reading response...
+v2 loader: image mapped (lazy), bytes=61608 pages=16 first=in elap=2ms
+v2 loader: PID=45 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): PASTE_T.BIN
+/PASTE_T.BIN
+v2 loader: image mapped (lazy), bytes=62056 pages=16 first=in elap=1ms
+v2 loader: PID=46 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): FOLDTEST.BIN
+/FOLDTEST.BIN
+v2 loader: image mapped (lazy), bytes=62760 pages=16 first=in elap=2ms
+v2 loader: PID=47 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): NLTEST.BIN
+/NLTEST.BIN
+v2 loader: image mapped (lazy), bytes=61960 pages=16 first=in elap=2ms
+v2 loader: PID=48 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): COMMTEST.BIN
+/COMMTEST.BIN
+v2 loader: image mapped (lazy), bytes=61560 pages=16 first=in elap=1ms
+v2 loader: PID=49 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): TSORT_T.BIN
+/TSORT_T.BIN
+v2 loader: image mapped (lazy), bytes=128008 pages=32 first=in elap=1ms
+v2 loader: PID=50 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): EXPAND_T.BIN
+/EXPAND_T.BIN
+v2 loader: image mapped (lazy), bytes=61224 pages=15 first=in elap=1ms
+v2 loader: PID=51 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+ReceivedLoading program for scheduler (v2 AS):  data:
+UNEXPAND_T.BIN
+HTTP/1.1 301 Moved Permanently
+Server: c/UNEXPAND_T.BINloudflare
+Date: Sat, 17 Oct 2026 20:34:5
+5 GMT
+Content-Type: text/html
+Content-Lengt
+net_test success!
+v2 loader: image mapped (lazy), bytes=61256 pages=15 first=in elap=2ms
+v2 loader: PID=52 entry=0x0000001000000000 sp=User net_timeout_test starting...
+0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): ConnCKSUM_T.BINecti
+ng to 10.0.2./CKSUM_T.BIN
+16:80 (expecting timeout)...
+v2 loader: image mapped (lazy), bytes=62312 pages=16 first=in elap=3ms
+v2 loader: PID=53 entry=0x0000001000000000 sp=0x0000001800000000 resident=
+===============1 tables====4===================
+Loading program for scheduler (v2 AS): MD5SUM_T.BIN
+========/MD5SUM_T.BIN
+=====
+[STRESS TEST] Initiating multi-process stress test...
+=========================================v2 loader: image mapped (lazy), bytes=====61448 pages=16 first======in elap=2ms
+
+v2 loader: PID=54 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): TACTEST.BIN
+
+==============/TACTEST.BIN
+==========================
+System Monitor Test
+========================================
+v2 loader: image mapped (lazy), bytes=289224Test 1: pages=71 first=in elap=3ms
+v2 loader: PID=55  entry=0x0000001000000000s sp=0x0000001800000000ys resident=1 tables=4
+info(2) mLoading program for scheduler (v2 AS): CMPTEST.BIN
+emory info...
+/CMPTEST.BIN
+v2 loader: image mapped (lazy), bytes=106232 pages=26 first=in elap=3ms
+v2 loader: PID=56 entry=0x0000001000000000[N sp=0x0000001800000000 resident=1 tables=4
+FS] Loading program for scheduler (v2 AS): POLLTST.BIN
+nfs_te/POLLTST.BINst starting
+
+v2 loader: image mapped (lazy), bytes=61096 pages=15 first=in elap=2ms
+v2 loader: PID=57 entry=0x0000001000000000 sp=[NFS] 0x0000001800000000 resident=1 tables=4
+PLoading program for scheduler (v2 AS): RANDTST.BIN
+ASS /RANDTST.BIN
+v2 loader: image mapped (lazy), bytes=66312 pages=17 first=in elap=3ms
+v2 loader: PID=58 entry=0x0000001000000000 sp=0x0000001800000000 resident=  PASS 1 tables=errno starts at 04
+Loading program for scheduler (v2 AS): 
+SOCK2TST.BIN
+/SOCK2TST.BIN
+v2 loader: image mapped (lazy), bytes=62536 pages=16 first=in elap=3ms
+v2 loader: PID=59 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): FPU_T.BIN
+[/FPU_T.BIN
+HELLO] entering main
+[HELLO] argc=v2 loader: image mapped (lazy), bytes=58344 pages=15 first=in elap=2ms
+1v2 loader: PID=
+60 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): GFXBENCH.BIN
+[HELLO] argv[/GFXBENCH.BIN0
+v2 loader: image mapped (lazy), bytes=60328 pages=15 first=in elap=2ms
+v2 loader: PID=61 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): MATH_T.BIN
+/MATH_T.BIN
+v2 loader: image mapped (lazy), bytes=71320 pages=18 first=in elap=2ms
+v2 loader: PID=[62 entry=0x0000001000000000 sp=0x0000001800000000 resident=LKSTEST]1 tables= star4
+tiLoading program for scheduler (v2 AS): CXXSMOKE.BINn
+g
+/CXXSMOKE.BIN
+v2 loader: image mapped (lazy), bytes=77512 pages=19 first=in elap=2ms
+v2 loader: PID=63 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): DNSTST.BIN
+/DNSTST.BIN
+v2 loader: image mapped (lazy), bytes=59512 pages=15 first=in elap=2ms
+v2 loader: PID=6[HEDTEST] star entry=ting
+0x0000001000000000 sp=/HEDTEST.TXT
+0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): THRD_T.BIN
+/THRD_T.BIN
+v2 loader: image mapped (lazy), bytes=78120 pages=20 first=in elap=2ms
+v2 loader: PID=8 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4[TAILTEST] 
+starting
+Loading program for scheduler (v2 AS): /TLTEST1.TXTTLS_T.BIN
+/TLS_T.BIN
+
+v2 loader: image mapped (lazy), bytes=71528 pages=18 first=in elap=1ms
+v2 loader: PID=11 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): CXX_T.BIN
+/CXX_T.BIN
+[PROCTEST] startiv2 loader: image mapped (lazy), bytes=667944ng
+ pages=164 first=in elap=3ms
+v2 loader: PID=19 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): RTTI_T.BIN
+[KERNEL] process_create: no free process slots! zombies=1 exited=1
+[WCTEST] starting
+/WCTEST.TXT
+[KERNEL] process_create: no free process slots! zombies=[SEDTEST]1 exited=1
+ starting: [CUTTEST] starting
+/CUTTEST.TXT
+[KERNEL] process_create: no free process slots! zombies=1 exited=1
+[FOLDTEST] starting
+[UNEXPTEST] starting
+[CKSUMTEST] starting
+[MD5TEST] starting
+/CAPA.TXT
+POLLTST: F1.2 select() readiness/timeout/blocking checks
+  POLLTST select(nfds > FD_SETSIZE) -> -1/EINVAL: PASS
+RANDTST: F1.4 SYS_GETRANDOM entropy checks
+  RANDTST 16 consecutive 8-byte draws all differ: PASS
+  RANDTST first draw: 0x28F712C8F7485861
+  RANDTST getrandom(4096) returns 4096: PASS
+  RANDTST 4KiB page is not all zero: PASS
+  RANDTST no all-zero 8-byte window in the page: PASS
+  RANDTST byte values are diverse (>= 100 distinct)SOCK2TST: F1 socket/select acceptance (browser.md F1.1-F1.3)
+  SOCK2TST socket(AF_UNIX, SOCK_STREAM, 0) >= 0: PASS
+  SOCK2TST socket(AF_UNIX, SOCK_RAW, 0) -> -1/EPROTONOSUPPORT: PASS
+  SOCK2TST socket(STREAM,UDP) -> -1/EPROTONOSUPPORT: PASS
+  SOCK2TST socket(AF_INET,SOCK_STREAM,TCP) >= 0: PASS
+[FPU_T] floating-point bring-up test
+  FPU_T float-mul-add: PASS
+  FPU_T float-neg-mul: PASS
+  FPU_T float-loop: PASS
+  FPU_T double-consistent: PASS
+  FPU_T double-eighth: PASS
+  FPU_T double-precision-1: PASS
+  FPU_T double-precision-2: PASS
+[CXX_SMOKE] minimal C++ runtime acceptance (F2.4)
+  CXX_SMOKE init-array-before-main: PASS
+  CXX_SMOKE init-priority-first: PASS
+  CXX_SMOKE init-array-order errno=0 got=14  data="probe-content\n"
+/SUB1/SUB2/nested.txt
+C abs fd=0 errno=0 got=14 
+[TLS_T] per-thread TLS + errno isolation acceptance
+  TLS_T main-template: PASS
+[LFN] PASS 30+ char component llvm-project-21.1.8.src-EXAMPLE.c
+/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include/upper_bound.h
+[LFN] PASS deep nested libcxx-style path upper_bound.h
+/SRC/KERNEL/PROGRAM_LOADER.C
+[LFN] PASS case-insensitive path /SRC/KERNEL/PROGRAM_LOADER.C
+/longfilename.txt
+[LFN] PASS collision longfilename.txt
+/longfilename2.txt
+[LFN] PASS collision longfilename2.txt
+/longfil~1.txt
+[LFN] PASS collision longfil~1.txt
+Successfully allocated 2MB
+--- Realloc Section ---
+REALLOC: all checks PASSED
+--- Phase 4: memory syscalls ---
+sbrk growth verified
+mmap 1MB write/readback verified
+mmap non-overlap verified
+munmap OK
+PHASE4 MEM: all checks PASS[read_until] MATCHED: 'E=== Welcome to HobbyOS Shell ===
+TyD
+pe 'help' to see av--- Heap Test Completed ---
+ailable bui[KERNEL] Process 18: HEAPTEST.BIN exited unexpectedly or gracefully.
+ltins and syntax.
+
+user@hobbyos:/$ '
+[TEST3] Initial prompt read successfully.
+[TEST3] Creating directory /SUB1...
+Graphics initialized. Drawing...
+[DNSTST] DNS resolution test (example.com)
+[DNSTST] DHCP DNS server: 10.0.2.3
+[KERNEL] thread_create: no free slot (used=63/63 done=0) for pid=11
+[LFN] PASS read_dir /src/kernel lists program_loader.c
+Loading program for scheduler (v2 AS): CAT.BIN
+[THRD_T] kernel threads + futex-lite + pthreads acceptance
+[TEST2] Initial prompt read successfully.
+[TEST2] Testing 'ps'...
+  THRD_T self-equal: PASS
+[KERNEL] thread_create: no free slot (used=63/63 done=0) for pid=11
+[FORK TEST] Child: I am the forked child!
+[FORK TEST] Child tick 0
+[FORK TEST] Parent: child PID = 25
+[FORK TEST] Parent tick 0
+[LFN] PASS read_dir / lists longfilename.txt
+[STRESS TEST] Pipes created. Forking 4 worker processes...
+  PASS: total=5637144576 free=network came up (DHCP)
+[ARP] routing off-subnet: target=0x00000000010200C0 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=0x000000000202000A
+[KERNEL] thread_create: no free slot (used=63/63 done=0) for pid=8
+[FORK TEST] Child tick [FORK TEST] Parent tick 11
+
+Graphics Validation: SUCCESS (Pixel matches expected color)
+Validating new graphics primitives...
+  PASS: line startpoint
+  PASS: line midpoint
+  PASS: line endpoint
+  PASS: fill_circle center
+  PASS: fill_circle east edge
+  PASS: 5570035712
+Test 2: sysinfo(5) CPU info...
+  PASS: uptime=5s idle=0s cpus=1
+Test 3: sysinfo(1) uptime...
+  PASS: uptime=5s
+Test 4: CPU usage sanity check...
+[LFN]  PASS: idle time is sane
+ Test 5: Error handling - small buffer...
+PASS   PASS: small buffer rejected
+  PASS: small buffer rejected
+reTest 6: Verifying busy time accumulates...
+ad_dir / lists longfilename2.txt
+  PASS open(missing, 0) -> ENOENT
+/ERRNO9.TXT
+  PASS open(O_CREAT|O_EXCL) creates
+  PASS second O_CREAT|O_EXCL -> EEXIST
+/ERRNO9.TXT
+  PASS re-open of created file works
+  PASS close(-1) -> EBADF
+  PASS read(-1) -> EBADF
+  PASS ]="HELLO.BIN"
+[HELLO] main returned 0
+[KERNEL] Process 35: HELLO.BIN exited unexpectedly or gracefully.
+  CXX_T /LKSTEST.TXT
+vector_ops[LKSTEST] PASS  : PASS
+open fixture
+write(-1) -> EBADF
+  PASS close(31) [never opened] -> EBADF
+  PASS kill(999999,0) -> ESRCH
+/RTTI_T.BIN
+[FORK TEST] Parent tick 2
+v2 loader: image mapped (lazy), bytes=119800 pages=30 first=in elap=6ms
+/HEDTEST2.TXT
+fill_cirv2 loader: PID=35 entry=cle north edge
+0x0000001000000000 sp=0x0000001800000000 [LKSTEST resident= PASS: ]draw_circle PAS1 tables=4
+S  fLoading program for scheduler (v2 AS): ristaIPC_T.BINt okm
+
+[LKSTE
+ST] PASS  fstat size
+[ PASS: LKSTEST] PASS [FORK TEST] Child tick 2[PROCTEST] pid=
+39 ppid=-1
+[PROCTEST] PASS getpid != 0
+[REGTEST] sysroot GNU regex acceptance test
+/TLTEST2.TXT
+59 golden cases from GNU sed 4.8
+/WCTEST2.TXT
+[FORK TEST] Child tick 3
+  PASS [GREPTEST] starting: mkdir(ERRTEST) succeeds
+65 golden cases from GNU grep 2.5.4
+  PASS mkdir(ERRTEST) again -> EEXISTChild: reading...
+Child: read returned
+Child got data!
+After pipe call
+Fork returned: 0
+Child: closin/SEDT.IN
+g write end
+
+Child exiting
+[KERNEL] Process 34: PIPETEST.BIN exited unexpectedly or gracefully.
+  PASS: busy time did not decrease
+
+========================================
+ALL MONITOR TESTS PASSED SUCCESSFULLY!
+
+fstat S_ISREG
+[LKSTEST] PASS fstat mode perms
+[LKSTEST] PASS fstat blocks rounding[TRTEST] starting
+
+[LKSTEST] PASS   PASS cfstat nlink/GRT.IN
+hdir(missing) -> ENOENT
+
+[LKS  PASS TESgetcTwd(tin] PASy) -> ERS ANGE/TRTEST.TXT
+fstat blksize
+[PASTETEST] starting
+[LKSTEST/PSTA.TXT
+] PASS /FOLDTEST.TXT
+stat ok
+[LKSTEST] PASS stat size
+[LKSTEST] PASS stat S_ISREG
+[LKSTEST] PASS st_ino nonzero
+[LKSTEST] PASS fstat identity ok[NLTEST] starting
+[COMMTEST] starting
+/NLTEST.TXT
+/COML.TXT
+[TSORTTEST] starting
+[EXPANDTEST] starting
+/EXPTAB.TXT
+/TSTCH.TXT
+/UNEXPD.TXT
+/EXPLIST.TXT
+/UNEXP7.TXT
+/CKSEMPTY.TXT
+/MD5EMPTY.TXT
+/CKSA.TXT
+/MD5ABC.TXT
+/TACA.TXT
+[PIPE_WRITE_EPIPE] PID 24 pipe 0x00000000745295C8 reader_count is 0
+  POLLTST select(unopened fd) -> -1/EBADF: PASS
+: PASS
+  RANDTST consecutive 4KiB pages differ: PASS
+  SOCK2TST getsockopt(SO_TYPE) == SOCK_STREAM after socket()  RANDTST : PASS
+getrandom(flags != 0) -> -1/EINVAL  SOCK2TST getsockopt(SO_ERROR) == 0 on:  a PAfresh soScS
+ketProcess heart-beat from CPU: 4
+MATH_T.BIN: P3.2 transcendental acceptance (EL0, libc.a)
+MATH_SIN_ONE: PASS
+MATH_SIN_HALF: PASS
+MATH_SIN_NEG_P075: PASS
+MATH_COS_ONE: PASS
+MATH_COS_TWO: PASS
+MATH_COS_NEG_250: PASS
+MATH_COS_EIGHTH: PASS
+MATH_TAN_ONE: PASS
+MATH_TAN_HALF: PASS
+MATH_TAN_NEG_THREE: PASS
+MATH_SIN_1E6: PASS
+MATH_SIN_123456789: PASS
+MATH_COS_1E9: PASS
+MATH_IDENT_SIN2_COS2: PASS
+MATH_IDENT_TAN_RATIO: PASS
+MATH_ASIN_HALF: PASS
+MATH_ASIN_NEG_QTR: PASS
+MATH_ATAN_ONE: PASS
+MATH_ATAN_NEG_TWO: PASS
+=======  CXX_SMOKE =============global-ctors-born=: PASS
+===================
+[KERNEL] Process 31: MONITORT.BIN exited unexpectedly or gracefully.
+  CXX_SMOKE new-scalar: PASS
+
+Unknown System Call Invoked!
+  PASS raw syscall 999 -> -ENOSYS  CXX_SMOKE new-array
+[: PASS
+ERRNO] ALL TESTS PASSED  CXX_SMOKE 
+new-zero-size-nonnull[KERNEL] Process 33: ERRTEST.BIN exited unexpectedly or gracefully.
+: PASS
+  CXX_SMOKE delete-nullptr: PASS
+  CXX_SMOKE new-alignment-16: PASS
+  CXX_SMOKE new-delete-churn: PASS
+  CXX_SMOKE guard-first-acquire: PASS
+  CXX_SMOKE guard-second-acquire: PASS
+  CXX_SMOKE guard-abort-acquire: PASS
+  CXX_SMOKE guard-abort-retry: PASS
+  CXX_SMOKE local-static-init-once: PASS
+  CXX_SMOKE virtual-dispatch[TEST] Initial prompt read successfully.
+[TEST] Sending 'help' command...
+
+[LKSTEST] PASS fstat st_ino == stat st_ino
+/PSTB.TXT
+/FOLDSP.TXT
+/EXPMIX.TXT
+/UNEXP9.TXT
+/CKSAN.TXT
+/MD5MSG.TXT
+/CAPB.TXT
+: PASS
+MATH_ATAN2_1_1: PASS
+MATH_ATAN2_1_NEG1: PASS
+MATH_ATAN2_NEG1_NEG1: PASS
+MATH_ATAN2_3_NEG4: PASS
+MATH_IDENT_ASIN_SIN: PASS/TACB.TXT
+
+MATH_IDENT_ATAN2_ATAN: PASS
+MATH_LOG_TWO  POLLTST select(0, NULL x3, 5ms) == :0 PASS  RANDTST getrando: PAm(len 0) -> 0: PASS
+SS
+  CXX_SMOKE virtua  Rl-via-referenceANDT: PST getrandom(3ASS
+ bytes)   CXreturns 3 and touches the X_SMOKE bufvirtuferal-c: PASS
+all-  RANDTST through-hetwo ap: PASS
+back-to-back draws differ  : PASS
+CXX_SMOKE templaALL TESTS PASSED SUCCESSFte-iUnt-contaiLLY!ner: PASS
+
+  CXX_SMOKE[KERNEL] Process 58: RANDTST.BIN exited unexpectedly or gracefully.
+ template-ov: PASS
+erflow-rejected  SOCK2TST : PASS
+getsocko  CXX_SMOKE temppt(unknown olate-struct-containerption) -> -1/ENOPROTOOPT: PASS
+  : PASCXS
+X_SMOKE [DNSTST] example.com A = 104.20.23.154: PASS
+
+ALL TESTS PASSED SUCCESSFULLY!
+[KERNEL] Process 6: DNSTST.BIN exited unexpectedly or gracefully.
+  POLLTST empty pipe: select(read, 0) == 0 and mask cleared: PASS
+  POLLTST pipe with 1 byte queued: select(read, 0) == 1 and FD_ISSET: PASS
+Loading program for scheduler (v2 AS): HEDGNU.BIN
+/CUTTAB.TXT/HEDGNU.BIN
+
+
+MATH_LOG_TENv2 loader: image mapped (lazy), bytes=109240 pages=27 first=in elap=4ms
+v2 loader: PID=6 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=: PASS4
+
+MATH_LOG_HALF: PASS
+MATH_LOG_1E300operator-plus: PASS
+  CXX_SMOKE operator-minus-equals: PASS
+  CXX_SMOKE placement-new: PASS
+  CXX_SMOKE assert-macro-cpp: PASS
+  CXX_SMOKE sysroot-c-linkage: PASS
+  CXX_SMOKE global-object-constructed: PASS
+  CXX_SMOKE cxa_finalize-runs-dtors: PASS
+  CXX_SMOKE cxa_finalize-idempotent: PASS
+CXX_SMOKE checks: 29, failures: 0
+ALL TESTS PASSED SUCCESSFULLY!
+/TRDIG.TXT
+[LFN] PASS read_dir /src shows 30+ char name (31-char syscall cap)
+  CXX_T vector_string : PASS
+/lfn_newfile_created.txt
+/FOLDTAB.TXT
+  CXX_T string_ops : PASS
+[FORK draw_circle hollow
+TEST] Par  PASS: gradient topen
+t ti  PASS: ck gradient bottom
+  PASS: clip blocks outside
+  PASS: clip allo3w
+s inside
+  PASS: scaled text drew pixels
+Loading program for scheduler (v2 AS): WC.BIN
+[FORK TEST] Child tick 4
+Loading program for scheduler (v2 AS): GREP.BIN
+/COMR.TXT
+/TSTDM.TXT
+Process heart-beat from CPU: 2
+Loading program for scheduler (v2 AS): SED.BIN
+[RTTI_T] libc++abi RTTI acceptance (dynamic_cast/typeid)
+/EXPBLNK.TXT  
+RTTI_T upcast : PASS
+[LKSTES[ARP] routing off-subnet: target=0x00000000010200C0T] PASS  local_ip=0x000000000F02000A mask=stat repeat ok
+0x0000000000FFFFFF gateway=0x000000000202000A[LKSTEST] PASS st_ino st
+able across stats
+/LKSTEST2.TXT
+/CKSABC.TXT
+[REGTEST] PASS row 0 ()
+  CXX_T string_to_string : PASS
+  CXX_T map_ops : PASS
+/MD5OK.CHK
+/CUTCOL.TXT
+[FORK TEST] Parent tick 4
+Graphics Validation: SUCCESS (Pixel matches expected color)
+GRAPHICS ALL TESTS PASSED
+[KERNEL] Process 21: GRAPHICS.BIN exited unexpectedly or gracefully.
+/TRTAB.TXT
+/PSTC.TXT
+  POLLTST the queued byte reads back: PASS
+  POLLTST pipe write end with space: select(write, 0) == 1: PASS
+  POLLTST filled the pipe exactly (PIPE_SIZE 512): PASS
+  POLLTST pipe with no space: select(write, 0) == 0 and mask cleared: PASS
+  POLLTST drained pipe: not readable again: PASS
+[FORK TEST] Child exiting.
+  SOCK2TST [KERNEL] Process 25: FORKTEST.BIN exited unexpectedly or gracefully.
+getsockopt(bad level) -> -1/ENOPROTOOPT: PASS
+  SOCK2TST setsockopt(SO_REUSEADDR) accepted as a no-op: PASS
+  SOCK2TST fcntl(F_GETFL) == 0 on a fresh socket: PASS
+  SOCK2TST fcntl(F_SETFL, O_NONBLOCK) == 0: PASS
+  SOCK2TST fcntl(F_GETFL) == O_NONBLOCK after the set: PASS
+  SOCK2TST fcntl(F_SETFL, 0) clears O_NONBLOCK: PASS
+  SOCK2TST /UNEXP1.TXT
+[LKSTEST] PASS  ope RTTI_Tn seco nd fixture
+downcast : PASS
+[LKSTEST] PASS fstat second file
+[LKSTEST] PASS distinct files -> distinct st_ino
+[REGTEST] PASS row 1 (a)
+[LKSTEST] PASS stat missing -> ENOENT
+/CKSHELLO.TXT
+[LKSTEST] PASS lseek SEEK_SET 6
+[LK[REGTEST] PSTEST] PASS row A2 (a*SS)
+ lseek SEEK_CUR +5
+[REGTEST] PASS row 3 (a\+)
+[REGTEST] PASS row 4 (a\+)
+[REGTEST] PASS row 5 (a*$)
+[REGTEST] PASS row 6 (^$)
+[REGTEST] PASS row 7 (^$)
+[LKSTEST] P[REGTEST] PASS rowA 8S (a.c)
+S read 5 @11
+[LKSTEST] PASS read-back 'gamma'
+[LKSTEST] PASS lseek SEEK_END 0/MD5BAD.CHK
+/CUTCOL2.TXT
+/TRSPC.TXT
+/PSTEMPT.TXT
+/NLALL.TXT
+/FOLDA.TXT
+/NLBLANK.TXT
+/CAPC.TXT
+fcntl(unknown cmd) -> -1/EINVAL: PASS
+  SOCK2TST connect_fd(bad fd) -> -1/EBADF/COMLD.TXT
+: PASS
+/TSTCY.TXT
+  SOCK2TST fcntl(bad fd) -> -1/EBADF: PASS
+  SOCK2TST getsockopt(bad fd) -> -1/EBADF: PASS
+: PASS
+MATH_LOG_1E_M300: PASS
+MATH_LOG_E: PASS
+MATH_IDENT_LOG_POW2: PASS
+MATH_POW_2_HALF/UNEXP2.TXT
+: PASS
+MATH_POW_3_HALF: PASS
+MATH_POW_15_725: PASS
+MATH_POW_EXACT_10: PASS
+[KERNEL] Process 63: CXXSMOKE.BIN exited unexpectedly or gracefully.
+[TEST] 'help' output validated successfully.
+[TEST] Sending 'cd /home' command...
+MATH_POW_EXACT_NEG2: PASS
+MATH_POW_EXACT_1E3: PASS
+MATH_POW_NEGINT: PASSLoading program for scheduler (v2 AS): EXPAND.BIN
+  SOCK2TST connect_fd(non-socket) -> -1/ENOTSOCK: PASS
+  SOCK2TST FD_SET/FD_ISSET round-trip (3 and 255): PASS
+  SOCK2TST un/TACC.TXT
+set bits stay clear (4, 200): PASS
+  SOCK2TST FD_CLR clears only its bit: PASS
+  SOCK2TST fd_set is FD_SETSIZE/32 32-bit words/CKSALL.TXT
+: PASS
+  SOCK2TST select(nfds > FD_SETSIZE) -> -1/EINVAL: PASS
+  SOCK2TST select(unopened fd in the mask) -> -1/EBADF: PASS
+  SOCK2TST select(0, NULL, NULL, NULL, 0) == 0: PASS
+/PS.BIN
+/PS.BIN
+sh: fork failed
+/MKDIR.BIN
+  SOCK2TST sysinfo(4) with the pre-dns buffer size still su/MKDIR.BINcceeds
+
+MATH_POW_2_1000: PASS
+MATH_POW_OVERFLOW: PASS
+MATH_POW_UNDERFLOW: PASS
+MATH_SQRT_EXACT: PASS
+MATH_SQRT_TWO: PASS
+MATH_SQRT_TINY: PASS
+MATH_SQRT_ZERO: PASS
+MATH_MODF_IP: PASS
+MATH_MODF_FP: PASS
+MATH_MODF_NEG_IP: PASS
+MATH_MODF_NEG_FP: PASS
+MATH_MODF_INF_IP: PASS
+MATH_MODF_INF_FP: PASS
+MATH_EXPF_ONE: PASS
+MATH_EXPF_NEG10: PASS
+/lfn_newfile_created.txt
+sh: fork failed
+[LFN] PASS create+reopen long-name file in-OS
+/HEDTEST.TXT
+  BLKTEST P1 write 512 KiB: PASS
+[FORK TEST] Parent exiting.
+Loading program for scheduler (v2 AS): TAILGN.BIN
+  CXX_T unordered_map_ops : PASS
+[LFN] PASS created long-name file listed with long name
+/LFN_NEWF.TXT
+  CXX_T algorithm_sort_find : PASS
+[LFN] PASS 8.3 alias of in-OS long name resolves 
+ CXX_T algorithm_predicates/LFN_NEWFILE_CREATED.TXT
+ : PASS
+[KERNEL] Process 20: FORKTEST.BIN exited unexpectedly or gracefully.
+/CAPE.TXT
+/CAPN.TXT
+/CAPS.TXT
+  CXX_T Loading program for scheduler (v2 AS): MD5SUM.BIN
+memory_unique_ptr/MD5SUM.BIN
+ : PASS
+  CXX_T  memory_shared_ptrM POLLTST  : PASS
+eATmpty pipeH_ EXPF_H: select(timeALF CXX_T o: ut 100ms) == 0atomic_counterPASS : PASS
+
+: PAv2 loader: image mapped (lazy), bytes=116216SMAT pages=HS
+29 first=_  POLLTST Ttimeout tooANHF_ONEin elap=3ms
+: PASk >= 85ms and < 5000ms (elapsed seen)v2 loader: PID=S: PASS
+
+20 entry=0x0000001000000000M  PAOLLTSTTH_ : PASS
+  SOCK2TST sysinfo(4) extended: ip/mask match the old-size call: PASS
+  SOCK2TST iface ip=0x0x000000000F02000A dns=0x0x000000000302000A (DHCP option 6 stored)
+[ARP] routing off-subnet: target=0x0000000001010101 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=0x000000000202000A
+  SOCK2TST connect_fd() -> -1/EINPROGRESS (handshake started): PASS
+  FPU_T preemption-persistence: PASS
+[TEST] 'cd' prompt update validated successfully.
+[TEST] Sending 'cat SHTEST.TXT' command...
+Process heart-beat from CPU: 2
+[read_until] MATCHED: 'mkdir /SUB1
+user@hobbyos:/$ '
+[KERNEL] Process 6: HEDGNU.BIN exited unexpectedly or gracefully.
+/BLKT1.TXT
+  RTTI_T downcast_mid : PASS
+  RTTI_T downcast_nullptr_unrelated : PASS
+  RTTI_T downcast_nullptr_sibling : PASS
+  RTTI_T nullptr_source/CAT.BIN
+ : PASS
+  RTTI_T crosscast : PASS
+  RTTI_T crossca/CAT.BIN
+st_back : PASS
+  RTTI_T crosscast_nullptr : PASS
+  RTTI_T vbase_ups : PAh: fork failed
+SS
+  RTTI_T vbase_down : PASS
+  RTTI_T typeid_dynamic : PASS
+  RTTI_T typeid_neq : PAS/LS.BIN
+S
+  RTTI_T typeid_name/LS.BIN
+ : PASS
+  RTTI_T sh: fork failed
+typeid_static : PASS
+  RTTI_T typeid_vbase : PASS
+ALL TESTS PASSED SUCCESSFULLY!
+
+[LKSTEST] PASS lseek SEEK_END -4
+[LKSTEST] PASS read 4 @27
+[LKSTEST] PASS read-back 'lon\n'
+[LKSTEST] PASS lseek beyond EOF
+[LKSTEST] PASS read past EOF -> 0
+[LKSTEST] PASS lseek bad fd -> EBADF[HEDTEST] PASS 
+-n 3
+[LKSTEST] PASS lseek bad whe[LFN]nce -> EINVAL PA
+SS mixed-case reopen of created long name
+/lfn_rename_src.txt
+/LKSTEST.TXT
+ sp=0x0000001800000000 resident=7 tables=6
+[read_until] MATCHED: 'ls -l /
+user@hobbyos:/$ '
+[REGTEST] PASS row 9 ([[:digit:]]\+)
+[REGTEST] PASS row 10 (^a.*b$)
+[REGTEST] PASS row 11 (\w\+)
+[REGTEST] PASS row 12 (\s\+)
+[REGTEST] PASS row 13 (\<cat\>)
+[REGTEST] PASS row 14 (abc)
+/lfn_rename_src.txt new=/lfn_rename_dst.txt
+[LFN] PASS rename long name to long name rc
+/lfn_rename_dst.txt
+[LFN] PASS rename: new long name resolves with content
+/MD5EMPTY.TXT
+/PSTNONL.TXT
+TANHF_NEG_HALF: PASS
+MATH_TANHF_LARGE: PASS
+MATH_SIN_INF_NAN: PASS
+MATH_COS_INF_NAN: PASS
+MATH_TAN_NEGINF_NAN: PASS
+MATH_LOG_NEG_NAN: PASS
+MATH_LOG_ZERO_NEGINF: PASS
+MATH_ASIN_DOMAIN_NAN: PASS
+MATH_ATAN_INF: PASS
+MATH_ATAN2_00: PASS
+MATH_POW_DOMAIN_NAN: PASS
+MATH_EXPF_NEGINF: PASS
+MATH_TANHF_INF: PASS
+MATH_SIN_NEG_ZERO: PASS
+ALL TESTS PASSED SUCCESSFULLY!
+[KERNEL] Process 62: MATH_T.BIN exited unexpectedly or gracefully.
+/FOLDB.TXT
+/NLNOEOL.TXT
+Loading program for scheduler (v2 AS): CUT.BIN
+/COMRD.TXT
+[ARP] routing off-subnet: target=0x00000000010200C0 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=0x000000000202000A
+/UNEXP3.TXT
+[KERNEL] Process 20: MD5SUM.BIN exited unexpectedly or gracefully.
+/CKSPAT.TXT
+[MD5TEST] PASS empty file digest
+/TACD.TXT
+[KERNEL] Process 35: RTTI_T.BIN exited unexpectedly or gracefully.
+[LKSTEST] PASS fopen
+[CMPTEST] fixtures written
+[CMPTEST] run: /CAPA.TXT /CAPC.TXT
+[LKSTEST] PASS ftell init 0
+[LKSTEST] PASS fseek END 0
+[LKSTEST] PASS ftell at END
+[LKSTEST] PASS rewind
+[LKSTEST] PASS fgets line 1
+[LKSTEST] PASS line 1 contenttwo ready pipes: ready count == 2, both fds set
+: PASS
+[LKSTEST] PASS ftell after line 1
+[LKSTEST] PASS fseek SEEK_CU  POLLTST R +5
+[LKSTESreader-closed pipe: writable + except (POLLERR/HUP semantics)T: PASS
+] PASS ftell after +5
+[LKSTEST] PASS fseek SEEK_SET 23
+  SOCK2TST select() reports the connecting socket writable: PASS
+  SOCK2TST SO_ERROR == 0 after a completed non-blocking connect: PASS
+  SOCK2TST SO_TYPE still SOCK_STREAM after connect: PASS
+  SOCK2TST connect_fd(already connected) -> -1/EINVAL: PASS
+  SOCK2TST write(HTTP GET) == request length: PASS
+  WSRF_T set-rect-clamp-screen: PASS
+  WSRF_T set-rect-unchanged-returns-0: PASS
+  WSRF_T set-rect-change-returns-1: PASS
+  WSRF_T set-rect-negative-size-empty: PASS
+  WSRF_T set-rect-offscreen-empty: PASS
+  WSRF_T fill-inbounds-corners: PASS
+  WSRF_T fill-maps-to-screen: PASS
+  WSRF_T fill-left-canary: PASS
+  WSRF_T fill-right-canary: PASS
+  WSRF_T fill-top-canary: PASS
+  WSRF_T fill-bottom-canary: PASS
+  WSRF_T fill-fully-outside-noop: PASS
+  WSRF_T fill-nonpositive-noop: PASS
+  WSRF_T put-roundtrip: PASS
+  WSRF_T put-outside-noop: PASS
+  WSRF_T get-outside-zero: PASS
+  WSRF_T get-untouched-canary: PASS
+Process heart-beat from CPU: 7
+[LFN] PASS rename: old long name no longer listed
+Loading program for scheduler (v2 AS): CMP.BIN
+Loading program for scheduler (v2 AS): MD5SUM.BIN
+[LKSTEST] PASS fread 7 @23
+[LKSTEST] PASS fread 'epsilon'
+[LKSTEST] PASS ungetc
+[LKSTEST] PASS ungetc one-slot full (2nd rejected)
+[LKSTEST] PASS fgetc sees pushed back
+[LKSTEST] PASS rewind resets ftell
+[LKSTEST] PASS fclose ok
+[LKSTEST] ALL PASSED
+[KERNEL] Process 36: LKSTEST.BIN exited unexpectedly or gracefully.
+/IPC_T.BIN
+v2 loader: image mapped (lazy), bytes=241560 pages=59 first=in elap=2ms
+v2 loader: PID=36 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): MMTEST.BIN
+/TRRUN.TXT
+/TRTEST.TXT
+/PSTLONG.TXT
+  WSRF_T frame-edges: PASS
+  WSRF_T frame-interior-clear: PASS
+  WSRF_T frame-outside-canary: PASS
+  WSRF_T frame-partial-confined: PASS
+  WSRF_T blit-copy: PASS
+  WSRF_T blit-confined: PASS
+  WSRF_T blit-negative-origin-aligned: PASS
+  WSRF_T blit-larger-source: PASS
+  WSRF_T blit-edge-noop: PASS
+  WSRF_T scale-2x2-to-4x4: PASS
+  WSRF_T scale-1:1-identity: PASS
+  WSRF_T scale-noninteger-ratio: PASS
+  WSRF_T scale-negative-origin: PASS
+  WSRF_T scale-edge-noop: PASS
+  WSRF_T text-pen-advance: PASS
+  WSRF_T text-fg-bg-pixels: PASS
+  WSRF_T text-max-x-stops: PASS
+  WSRF_T text-newline: PASS
+  WSRF_T text-empty: PASS
+  WSRF_T text-null: PASS
+  WSRF_T text-edge-confined: PASS
+IPC_T: AF_UNIX socketpair + poll + SCM_RIGHTS acceptance
+[PROCTEST] parent waiting for child 6
+[PROCTEST] PASS child pid != parent
+[REGTEST] PASS row 15 (\(ab\)\1)
+/FOLDNOE.TXT
+[REGTEST] PASS row 16 (\(a\|b\)c)
+[REGTEST] PASS row 17 (\(a\)\(b\))
+[REGTEST] PASS row 18 (x)
+[REGTEST] PASS row 19 ([[:upper:]]\+)
+[REGTEST] PASS row 20 (b$)
+[REGTEST] PASS row 21 (^cd)
+/FOLDEMPTY.TXT
+[REGTEST] PASS row 22 (a.b)
+[REGTEST] PASS row 23 (a.b)
+/FOLDHI.TXT
+[REGTEST] PASS row 24 (xyz)
+[REGTEST] PASS row 25 (a|b)
+[REGTEST] PASS row 26 ((a|b)+c)
+[REGTEST] PASS row 27 (a{2,3})
+/FOLD80.TXT
+[REGTEST] PASS row 28 (^([0-9]+)-(\w+)$)
+/NLSEC.TXT
+/COMN1.TXT
+/COMN2.TXT/TSTOD.TXT
+
+/UNEXPMID.TXT
+/TACF.TXT
+/TACG.TXT
+/TACE.TXT
+  SOCK2TST select() reports the socket readable with a response pending: PASS
+  SOCK2TST response prefix: HTTP/1.1 301 Moved Permanently
+  SOCK2TST read() returned response bytes: PASS
+ALL TESTS PASSED SUCCESSFULLY!
+[KERNEL] Process 59: SOCK2TST.BIN exited unexpectedly or gracefully.
+[NFS] rpc: no reply from server
+[PROCTEST] child pre-exec pid=[NFS] mount: no mountd via portmap
+6
+[NFS] PASS tier1: unreachable server fails the mount
+/PROCCHLD.BIN
+[NFS] PASS tier1: no mounts after failure
+[NFS] mount: bad source (want A.B.C.D:/export)
+v2 loader: image mapped (lazy), bytes=[71048 pages=NFS] PASS 18 first=intier1:  elap=bad source refused2
+ms
+[NFS] mount: bad source (want A.B.C.D:/export)
+[NFS] PASS tier1: out-of-range IP refused
+[NFS] PASS tier1: mounting over / refused
+[NFS] PASS tier1: umount with no mount refused
+[NFS] PASS tier1: umount of unknown path refused
+[REGTEST] PASS row 29 ((x)?y)
+[REGTEST] PASS row 30 ([[:xdigit:]]+)
+[REGTEST] PASS row 31 ((a)|(b))
+[REGTEST] PASS row 32 ((ab)*)
+[REGTEST] PASS row 33 (colou?r)
+[REGTEST] PASS row 34 (a{2,})
+[REGTEST] PASS row 35 ((foo)+)
+[REGTEST] PASS row 36 (\bword\b)
+[REGTEST] PASS row 37 ((a)\1)
+[REGTEST] PASS row [LFN] PASS 3r8 (^b+ename: new$)
+ long name liste[REGTEST] PASS rod with w 39 (long name(a)(b*
+))
+[REGTEST] PASS row 40 ([) regcomp err code
+[REGTEST] PASS row 41 (\() regcomp err code
+[REGTEST] PASS row 42 (a\{2,1\}) regcomp err code
+[REGTEST] PASS row 43 ([z-a]) regcomp err code
+[REGTEST] PASS row /lfn_long_dir_created/INNER.TXT
+/FOLDLONG.TXT
+  WSRF_T damage-empty: PASS
+  WSRF_T damage-single-rect: PASS
+  WSRF_T damage-clears: PASS
+  WSRF_T damage-union: PASS
+  WSRF_T damage-union-overlap: PASS
+  WSRF_T damage-put: PASS
+  WSRF_T damage-prereck: PASS
+  WSRF_T damage-set-rect-returns-1: PASS
+  WSRF_T damage-clamped-after-set-rect: PASS
+ALL TESTS PASSED SUCCESSFULLY!
+[KERNEL] Process 26: WSRF_T.BIN exited unexpectedly or gracefully.
+/COMU1.TXT
+/TSTWS.TXT
+/TSTSL.TXT
+[NFS] PASS tier1: /nfs is an empty FAT dir before mounting
+[NFS] PASS tier1: chdir into a missing dir fails
+[TACTEST] run: /TACA.TXT
+/COMU2.TXT
+/COME.TXT
+[NFS] rpc: no reply from server
+[NFS] mount: no mountd via portmap
+[ARP] routing off-subnet: target=0x000000006900A8C0 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=0x000000000202000A
+/TSTDP.TXT
+/TSTEM.TXT
+[PROCCHLD] running
+[KERNEL] Process 6: PROCCHLD.BIN exited unexpectedly or gracefully.
+/CAT.BIN
+/CAT.BIN
+sh: fork failed
+/PS.BIN
+/PS.BIN
+sh: fork failed
+/MKDIR.BIN
+/MKDIR.BIN
+sh: fork failed
+/lfn_long_dir_created/INNER.TXT
+[LFN] PASS mkdir long dir + create file inside
+[read_until] MATCHED: 'mkdir /SUB1
+user@hobbyos:/$ '
+Loading program for scheduler (v2 AS): TSORT.BIN
+/LS.BIN
+/LS.BIN
+sh: fork failed
+[LFN] PASS long dir listed with long name
+[LFN] PASS unlink long-name file rc
+Loading program for scheduler (v2 AS): FOLD.BIN
+[KERNEL] Process 27: NETTEST.BIN exited unexpectedly or gracefully.
+[read_until] MATCHED: 'ls -l /
+user@hobbyos:/$ '
+Process heart-beat from CPU: 7
+[LFN] PASS unlinked long-name file not listed
+[LFN] PASS reopen-after-unlink fails (ENOENT)
+[LFN] ALL PASSED
+[KERNEL] Process 17: LFN_T.BIN exited unexpectedly or gracefully.
+Loading program for scheduler (v2 AS): COMM.BIN
+[PROCTEST] waitpid returned 6 status=10752
+[PROCTEST] PASS waitpid returns child
+[PROCTEST] PASS WIFEXITED
+[PROCTEST] PASS WEXITSTATUS == 42
+44 (\) regcomp err code
+[REGTEST] PASS row 45 ((a) regcomp err code
+[REGTEST] PASS row 46 (a{2,1}) regcomp err code
+[REGTEST] PASS regerror text
+[REGTEST] PASS regerror length
+[REGTEST] PASS regerror text
+[REGTEST] PASS regerror length
+[REGTEST] PASS regerror text
+[REGTEST] PASS regerror length
+[REGTEST] PASS regerror text
+[REGTEST] PASS regerror length
+[REGTEST] PASS regerror text
+[REGTEST] PASS regerror length
+[REGTEST] PASS regerror text
+[REGTEST] PASS regerror length
+[REGTEST] PASS re_compile_pattern(a+b)
+[REGTEST] PASS re_search finds a+b at offset 2
+[REGTEST] PASS re_search reports -1 when absent
+[REGTEST] PASS re_compile_pattern(a.b)
+[REGTEST] PASS dot does not match embedded NUL
+[REGTEST] PASS re_compile_pattern(a\0b)
+[REGTEST] PASS literal NUL in pattern matches
+[REGTEST] PASS re_compile_pattern(interval 512)
+[KERNEL] Process 29: SMPTEST.BIN exited unexpectedly or gracefully.
+[ARP] routing off-subnet: target=0x000000006900A8C0 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=0x000000000202000A
+GFXBENCH full min=8000 med=210000 mean=333900 n=10
+[KERNEL] Process 17: IPC_T.BIN exited unexpectedly or gracefully.
+Loader (v2) starved (slot pressure): CAT.BIN
+D spawn pid=-1 
+E start
+/TEMP.TXT
+E create fd=0 wrote=13 
+[ARP] routing off-subnet: target=0x000000006900A8C0 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=0x000000000202000A
+[NFS] rpc: no reply from server
+[NFS] mount: no mountd via portmap
+[NFS] SKIP e2e: no NFS server reachable at 10.0.2.2 or 192.168.0.105 - tier 2 not exercised
+[NFS] PASS chdir /
+  IPC_T STREAM fork write->read delivers 5 bytes: PASS
+  IPC_T STREAM payload intact across the two writes (in order): PASS
+  IPC_T STREAM child exit status 0  IPC_T STREAM EOF after both write ends closed (read -> 0)  IPC_T STREAM write on closed peer -> -1/EPIPE (no signal)  IPC_T STREAM sendmsg on closed peer -> -1/EPIPELoading program for scheduler (v2 AS): /MV.BIN
+Loading program for scheduler (v2 AS): HEDGNU.BIN
+/SH.BIN
+[NFS] PASS FAT file reads still work after NFS activity
+  IPC_T STREAM fill write returns a positive partial count: PASS
+  IPC_T STREAM partial write capped at the 64 KiB ring (65536): PASS
+[NFS] PASS sysinfo(7) reports FAT numbers at /
+[NFS] e2e tier skipped
+[NFS] ALL PASSED (13 checks)
+[KERNEL] Process 32: NFSTEST.BIN exited unexpectedly or gracefully.
+  IPC_T STREAM ring drains fully: PASS
+  IPC_T STREAM ring bytes intact: PASS
+  IPC_T STREAM EOF after sender close: PASS
+  IPC_T SEQPACKET sendmsg 1 byte -> 1: PASS
+  IPC_T SEQPACKET sendmsg 7000 bytes -> 7000: PASS
+  IPC_T SEQPACKET recv #1: message boundary (1 byte): PASS
+  IPC_T SEQPACKET recv #2: message boundary (7000 bytes): PASS
+  IPC_T SEQPACKET payload intact: PASS
+  IPC_T SEQPACKET empty recvmsg MSG_DONTWAIT -> -1/EAGAIN: PASS
+  IPC_T SEQPACKET resend for truncation -> 7000: PASS
+  IPC_T SEQPACKET short-buffer recv returns the copied countGFXBENCH r256 min=0 med=0 mean=6833 n=30
+Loading program for scheduler (v2 AS): UNEXPAND.BIN
+: PASS
+  IPC_T SEQPACKET short-buffer recv sets MSG_TRUNC: PASS
+  IPC_T SEQPACKET 8193-byte message -> -1/EMSGSIZE: PASS
+  IPC_T SEQPACKET zero-length message accepted: PASS
+  IPC_T SEQPACKET zero-length message received (0 bytes): PASS
+  IPC_T SEQPACKET recv after peer close -> 0 (EOF): PASS
+GFXBENCH r64 min=0 med=0 mean=2940 n=50
+GFXBENCH DONE
+[KERNEL] Process 61: GFXBENCH.BIN exited unexpectedly or gracefully.
+Loading program for scheduler (v2 AS): TR.BIN
+  BLKTEST P1 chunk 512: PASS
+/BLKT1.TXT
+  BLKTEST P1 chunk 4096: PASS
+/BLKT1.TXT
+/CAT.BIN
+/CAT.BIN
+sh: fork failed
+/PS.BIN
+/PS.BIN
+sh: fork failed
+/MKDIR.BIN
+/MKDIR.BIN
+sh: fork failed
+  BLKTEST P1 chunk 3333: PASS
+/BLKT1.TXT
+[read_until] MATCHED: 'mkdir /SUB1
+user@hobbyos:/$ '
+/LS.BIN
+/LS.BIN
+sh: fork failed
+  BLKTEST P1 chunk 65536: PASS
+  BLKTEST P1 cold (first) read ms=4421
+BLKTEST P2: hit accounting + cold/warm timing
+/BLKT1.TXT
+[read_until] MATCHED: 'ls -l /
+user@hobbyos:/$ '
+Loader (v2) starved (slot pressure): EXPAND.BIN
+Loading program for scheduler (v2 AS): TAC.BIN
+  BLKTEST P2 sectors=1024 hits_delta=1249 target=921 misses_delta=111
+  BLKTEST P2 warm re-read hits >= 90% of file sectors: PASS
+  BLKTEST P2 cold_ms=4421 warm_ms=132 speedup_x100=3349
+  BLKTEST P2 warm read not pathologically slower than cold: PASS
+BLKTEST P3: 3 readers + 1 writer over /BLKT1.TXT + /BLKT2.TXT
+/BLKT2.TXT
+Loader (v2) starved (slot pressure): TAILGN.BIN
+Loading program for scheduler (v2 AS): NL.BIN
+SMP Verification Test Complete.
+[KERNEL] Process 23: SMPTEST.BIN exited unexpectedly or gracefully.
+Loading program for scheduler (v2 AS): PASTE.BIN
+/PASTE.BIN
+[REGTEST] PASS re_match over 515-byte input
+v2 loader: image mapped (lazy), bytes=109304 pages=27 first=in elap=2ms
+v2 loader: PID=29 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): TAILGN.BIN
+/PSTA.TXT
+/PSTB.TXT
+[KERNEL] Process 29: PASTE.BIN exited unexpectedly or gracefully.
+[PASTETEST] PASS two files default TAB
+Loading program for scheduler (v2 AS): PASTE.BIN
+[KERNEL] resume call RETURNED (must never happen): cpu=0x24848B4800000120 pid=0x0000000000000021 -- halting this CPU
+/CKSBIG.TXT
+
+[LOCKFOREVER] cpu=4 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=7 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=6 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x0000000070032833
+
+[LOCKFOREVER] cpu=5 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=0 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001d2ce
+
+[LOCKFOREVER] cpu=4 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=2 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001d2ce
+
+[LOCKFOREVER] cpu=7 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=6 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x0000000070032833
+
+[LOCKFOREVER] cpu=5 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=4 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=6 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x0000000070032833
+
+[LOCKFOREVER] cpu=7 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=2 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001d2ce
+
+[LOCKFOREVER] cpu=5 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=0 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001d2ce
+
+[LOCKFOREVER] cpu=4 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=7 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=6 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x0000000070032833
+
+[LOCKFOREVER] cpu=5 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=4 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=2 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001d2ce
+
+[LOCKFOREVER] cpu=7 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=6 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x0000000070032833
+
+[LOCKFOREVER] cpu=0 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001d2ce
+
+[LOCKFOREVER] cpu=5 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=4 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=7 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=6 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x0000000070032833
+
+[LOCKFOREVER] cpu=2 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001d2ce
+
+[LOCKFOREVER] cpu=5 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=0 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001d2ce
+
+[LOCKFOREVER] cpu=4 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=7 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+
+[LOCKFOREVER] cpu=6 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x0000000070032833
+
+[LOCKFOREVER] cpu=5 lock=0x0000000074530c70 pc=0x000000007002fc5e pc2=0x000000007001e88e
+qemu-system-x86_64: terminating on signal 15 from pid 2245686 ()

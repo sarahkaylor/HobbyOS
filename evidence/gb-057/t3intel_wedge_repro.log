@@ -1,0 +1,2474 @@
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/blk_cache.c -o obj/intel/blk_cache.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/blk_cache_press_test.c -o obj/intel/blk_cache_press_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/blk_cache_test.c -o obj/intel/blk_cache_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/dhcp.c -o obj/intel/dhcp.o
+src/kernel/dhcp.c:42:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   42 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:82:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   82 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:135:19: warning: unused variable 'udp' [-Wunused-variable]
+  135 |   struct udp_hdr* udp = (struct udp_hdr*)(packet + sizeof(struct ipv4_hdr));
+      |                   ^~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/elf_image.c -o obj/intel/elf_image.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/evdev.c -o obj/intel/evdev.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/evdev_test.c -o obj/intel/evdev_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/fat16.c -o obj/intel/fat16.o
+src/kernel/fat16.c:1873:24: warning: result of comparison of constant -27 with expression of type 'unsigned char' is always false [-Wtautological-constant-out-of-range-compare]
+ 1873 |   if (b0 == 0x00 || b0 == (char)0xE5) {
+      |                     ~~ ^  ~~~~~~~~~~
+src/kernel/fat16.c:2000:25: warning: comparison of integers of different signs: 'int' and 'uint32_t' (aka 'unsigned int') [-Wsign-compare]
+ 2000 |       if ((int)old_size > f->fat16.cursor) f->fat16.cursor = (int)old_size;
+      |           ~~~~~~~~~~~~~ ^ ~~~~~~~~~~~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -Iobj/intel -c src/kernel/fat16_test.c -o obj/intel/fat16_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/fb_ioctl.c -o obj/intel/fb_ioctl.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/fb_ioctl_test.c -o obj/intel/fb_ioctl_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/frame.c -o obj/intel/frame.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/frame_test.c -o obj/intel/frame_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/fs.c -o obj/intel/fs.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/fs_test.c -o obj/intel/fs_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/iommu_vtd.c -o obj/intel/iommu_vtd.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/ipc_proto.c -o obj/intel/ipc_proto.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/locks_test.c -o obj/intel/locks_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/main.c -o obj/intel/main.o
+src/kernel/main.c:51:39: warning: unused parameter 'tf' [-Wunused-parameter]
+   51 | void irq_handler_c(struct trap_frame *tf) {
+      |                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/math_test.c -o obj/intel/math_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/mmu_test.c -o obj/intel/mmu_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/net.c -o obj/intel/net.o
+src/kernel/net.c:526:18: warning: variable 'stored' set but not used [-Wunused-but-set-variable]
+  526 |         uint32_t stored = 0;
+      |                  ^
+src/kernel/net.c:789:21: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+  789 |   for (int i = 0; i < sizeof(struct pseudo_hdr)/2; i++) {
+      |                   ~ ^ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/net.c:631:39: warning: unused function 'safe_print_int' [-Wunused-function]
+  631 | __attribute__((noinline)) static void safe_print_int(int val) {
+      |                                       ^~~~~~~~~~~~~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/net_rdma.c -o obj/intel/net_rdma.o
+src/kernel/net_rdma.c:774:12: warning: unused variable 'rx_count' [-Wunused-variable]
+  774 |   uint32_t rx_count = 0;
+      |            ^~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/net_rdma_test.c -o obj/intel/net_rdma_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/net_test.c -o obj/intel/net_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/nfs.c -o obj/intel/nfs.o
+src/kernel/nfs.c:157:12: warning: '/*' within block comment [-Wcomment]
+  157 |  * is *body/*body_len, valid until the next rpc_call (static buffer). */
+      |            ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/nfs_proto.c -o obj/intel/nfs_proto.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/nfs_test.c -o obj/intel/nfs_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/pipe.c -o obj/intel/pipe.o
+src/kernel/pipe.c:139:7: warning: unused variable 'i' [-Wunused-variable]
+  139 |   int i = 0;
+      |       ^
+src/kernel/pipe.c:136:68: warning: unused parameter 'tf' [-Wunused-parameter]
+  136 | int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
+      |                                                                    ^
+src/kernel/pipe.c:216:7: warning: unused variable 'i' [-Wunused-variable]
+  216 |   int i = 0;
+      |       ^
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/pipe_test.c -o obj/intel/pipe_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/process.c -o obj/intel/process.o
+src/kernel/process.c:1169:42: warning: unused parameter 'is_yield' [-Wunused-parameter]
+ 1169 | void schedule(struct trap_frame *tf, int is_yield) {
+      |                                          ^
+src/kernel/process.c:2997:50: warning: unused parameter 'prot' [-Wunused-parameter]
+ 2997 | int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags) {
+      |                                                  ^
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/process_test.c -o obj/intel/process_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/program_loader.c -o obj/intel/program_loader.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/program_loader_test.c -o obj/intel/program_loader_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/test_fw_cfg.c -o obj/intel/test_fw_cfg.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/test_smp.c -o obj/intel/test_smp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/time.c -o obj/intel/time.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/time_test.c -o obj/intel/time_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/timer_test.c -o obj/intel/timer_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/trap_test.c -o obj/intel/trap_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/unit_test.c -o obj/intel/unit_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/unix.c -o obj/intel/unix.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/unix_test.c -o obj/intel/unix_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/vfs.c -o obj/intel/vfs.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/virtio_blk.c -o obj/intel/virtio_blk.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/virtio_blk_test.c -o obj/intel/virtio_blk_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/virtio_gpu.c -o obj/intel/virtio_gpu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/virtio_gpu_test.c -o obj/intel/virtio_gpu_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/virtio_gpu_x64.c -o obj/intel/virtio_gpu_x64.o
+src/kernel/virtio_gpu_x64.c:586:12: warning: unused variable 'feat_lo' [-Wunused-variable]
+  586 |   uint32_t feat_lo = gpu_cc_r32(VPCI_CC_DEV_FEAT);
+      |            ^~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/virtio_input.c -o obj/intel/virtio_input.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/virtio_input_test.c -o obj/intel/virtio_input_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/virtio_net.c -o obj/intel/virtio_net.o
+src/kernel/virtio_net.c:552:7: warning: variable 'poll_processed' set but not used [-Wunused-but-set-variable]
+  552 |   int poll_processed = 0;
+      |       ^
+src/kernel/virtio_net.c:124:30: warning: unused variable 'tx_hdr' [-Wunused-variable]
+  124 | static struct virtio_net_hdr tx_hdr __attribute__((aligned(4096)));
+      |                              ^~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/virtio_net_test.c -o obj/intel/virtio_net_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/vm.c -o obj/intel/vm.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/vm_test.c -o obj/intel/vm_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/arch/x64/cpu.c -o obj/intel/cpu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/arch/x64/fpu.c -o obj/intel/fpu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/arch/x64/gic.c -o obj/intel/gic.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/arch/x64/locks.c -o obj/intel/locks.o
+src/kernel/arch/x64/locks.c:43:40: warning: calling '__builtin_return_address' with a nonzero argument is unsafe [-Wframe-address]
+   43 |     lock_wait_caller2[cpu] = (uint64_t)__builtin_return_address(1);
+      |                                        ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/arch/x64/locks.c:53:39: warning: calling '__builtin_return_address' with a nonzero argument is unsafe [-Wframe-address]
+   53 |         scream_hex(" pc2=", (uint64_t)__builtin_return_address(1));
+      |                                       ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/arch/x64/mmu.c -o obj/intel/mmu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/arch/x64/rtc.c -o obj/intel/rtc.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/arch/x64/smp.c -o obj/intel/smp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/arch/x64/timer.c -o obj/intel/timer.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/arch/x64/trap.c -o obj/intel/trap.o
+src/kernel/arch/x64/trap.c:62:13: warning: unused function 'dbg_resume' [-Wunused-function]
+   62 | static void dbg_resume(const char *tag, uint64_t v) {
+      |             ^~~~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -DKERNEL_MODE_TEST -c src/kernel/arch/x64/uart.c -o obj/intel/uart.o
+ld.lld -T linker_x64.ld -o hobbyos.elf obj/intel/boot.o obj/intel/setjmp.o obj/intel/blk_cache.o obj/intel/blk_cache_press_test.o obj/intel/blk_cache_test.o obj/intel/dhcp.o obj/intel/elf_image.o obj/intel/evdev.o obj/intel/evdev_test.o obj/intel/fat16.o obj/intel/fat16_test.o obj/intel/fb_ioctl.o obj/intel/fb_ioctl_test.o obj/intel/frame.o obj/intel/frame_test.o obj/intel/fs.o obj/intel/fs_test.o obj/intel/iommu_vtd.o obj/intel/ipc_proto.o obj/intel/locks_test.o obj/intel/main.o obj/intel/math_test.o obj/intel/mmu_test.o obj/intel/net.o obj/intel/net_rdma.o obj/intel/net_rdma_test.o obj/intel/net_test.o obj/intel/nfs.o obj/intel/nfs_proto.o obj/intel/nfs_test.o obj/intel/pipe.o obj/intel/pipe_test.o obj/intel/process.o obj/intel/process_test.o obj/intel/program_loader.o obj/intel/program_loader_test.o obj/intel/test_fw_cfg.o obj/intel/test_smp.o obj/intel/time.o obj/intel/time_test.o obj/intel/timer_test.o obj/intel/trap_test.o obj/intel/unit_test.o obj/intel/unix.o obj/intel/unix_test.o obj/intel/vfs.o obj/intel/virtio_blk.o obj/intel/virtio_blk_test.o obj/intel/virtio_gpu.o obj/intel/virtio_gpu_test.o obj/intel/virtio_gpu_x64.o obj/intel/virtio_input.o obj/intel/virtio_input_test.o obj/intel/virtio_net.o obj/intel/virtio_net_test.o obj/intel/vm.o obj/intel/vm_test.o obj/intel/cpu.o obj/intel/fpu.o obj/intel/gic.o obj/intel/locks.o obj/intel/mmu.o obj/intel/rtc.o obj/intel/smp.o obj/intel/timer.o obj/intel/trap.o obj/intel/uart.o
+llvm-objcopy -I elf64-x86-64 -O elf32-i386 hobbyos.elf
+ld.lld -T src/user/linker.ld -o obj/intel/memtest.elf obj/intel/mem_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/memtest.elf obj/intel/memtest.bin
+ld.lld -T src/user/linker.ld -o obj/intel/fileio_test.elf obj/intel/file_io_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/fileio_test.elf obj/intel/fileio_test.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DKERNEL_MODE_TEST -c src/user/console.c -o obj/intel/console.o
+ld.lld -T src/user/linker.ld -o obj/intel/console.elf obj/intel/console.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/console.elf obj/intel/console.bin
+ld.lld -T src/user/linker.ld -o obj/intel/fork_test.elf obj/intel/fork_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/fork_test.elf obj/intel/fork_test.bin
+ld.lld -T src/user/linker.ld -o obj/intel/heap_test.elf obj/intel/heap_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/libc_mman.o
+llvm-objcopy -O binary obj/intel/heap_test.elf obj/intel/heap_test.bin
+ld.lld -T src/user/linker.ld -o obj/intel/spawn_test.elf obj/intel/spawn_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/spawn_test.elf obj/intel/spawntest.bin
+ld.lld -T src/user/linker.ld -o obj/intel/graphics_test.elf obj/intel/graphics_test.o obj/intel/user_libc.o obj/intel/user_graphics.o
+llvm-objcopy -O binary obj/intel/graphics_test.elf obj/intel/graphics.bin
+ld.lld -T src/user/linker.ld -o obj/intel/wsurf_test.elf obj/intel/wsurf_test.o obj/intel/user_libc.o obj/intel/user_wsurf.o
+llvm-objcopy -O binary obj/intel/wsurf_test.elf obj/intel/wsurf_test.bin
+ld.lld -T src/user/linker.ld -o obj/intel/smp_test.elf obj/intel/smp_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/smp_test.elf obj/intel/smp_test.bin
+ld.lld -T src/user/linker.ld -o obj/intel/pipe_test.elf obj/intel/user_pipe_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/pipe_test.elf obj/intel/pipetest.bin
+ld.lld -T src/user/linker.ld -o obj/intel/net_test.elf obj/intel/user_net_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/net_test.elf obj/intel/nettest.bin
+ld.lld -T src/user/linker.ld -o obj/intel/net_timeout_test.elf obj/intel/user_net_timeout_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/net_timeout_test.elf obj/intel/timeout.bin
+ld.lld -T src/user/linker.ld -o obj/intel/nfs_test.elf obj/intel/user_nfs_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/nfs_test.elf obj/intel/nfstest.bin
+ld.lld -T src/user/linker.ld -o obj/intel/desktop_test.elf obj/intel/desktop.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_graphics.o obj/intel/user_window.o
+llvm-objcopy -O binary obj/intel/desktop_test.elf obj/intel/desktop.bin
+ld.lld -T src/user/linker.ld -o obj/intel/editor.elf obj/intel/editor.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/editor.elf obj/intel/editor.bin
+ld.lld -T src/user/linker.ld -o obj/intel/editor_test.elf obj/intel/user_editor_test.o obj/intel/user_desktop_test_wrapper.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_graphics.o obj/intel/user_window.o
+llvm-objcopy -O binary obj/intel/editor_test.elf obj/intel/EDITOR_T.BIN
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DKERNEL_MODE_TEST -c src/user/dialog_test.c -o obj/intel/user_dialog_test.o
+ld.lld -T src/user/linker.ld -o obj/intel/dialog_test.elf obj/intel/user_dialog_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/dialog_test.elf obj/intel/DIALOG_T.BIN
+ld.lld -T src/user/linker.ld -o obj/intel/pong_test.elf obj/intel/user_pong_test.o obj/intel/user_desktop_test_wrapper.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_graphics.o obj/intel/user_window.o
+llvm-objcopy -O binary obj/intel/pong_test.elf obj/intel/PONG_T.BIN
+ld.lld -T src/user/linker.ld -o obj/intel/stress.elf obj/intel/stress_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/stress.elf obj/intel/stress.bin
+ld.lld -T src/user/linker.ld -o obj/intel/fpu_test.elf obj/intel/fpu_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/fpu_test.elf obj/intel/fpu_test.bin
+ld.lld -T src/user/linker.ld -o obj/intel/gfxbench.elf obj/intel/gfxbench.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/gfxbench.elf obj/intel/gfxbench.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DKERNEL_MODE_TEST -c src/user/math_test.c -o obj/intel/user_math_test.o
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/math_test.elf obj/intel/user_math_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/math_test.elf obj/intel/math_test.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DKERNEL_MODE_TEST -c src/user/errno_test.c -o obj/intel/user_errno_test.o
+ld.lld -T src/user/linker.ld -o obj/intel/errno_test.elf obj/intel/user_errno_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/errno_test.elf obj/intel/errtest.bin
+ld.lld -T src/user/linker.ld -o obj/intel/sock2_test.elf obj/intel/sock2_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/sock2_test.elf obj/intel/SOCK2TST.BIN
+ld.lld -T src/user/linker.ld -o obj/intel/poll_test.elf obj/intel/poll_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/poll_test.elf obj/intel/POLLTST.BIN
+ld.lld -T src/user/linker.ld -o obj/intel/blktest.elf obj/intel/blktest.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/blktest.elf obj/intel/BLKTEST.BIN
+ld.lld -T src/user/linker.ld -o obj/intel/rand_test.elf obj/intel/rand_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/rand_test.elf obj/intel/RANDTST.BIN
+ld.lld -T src/user/linker.ld -o obj/intel/dns_test.elf obj/intel/user_dns_test.o obj/intel/user_resolv.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+ld.lld: warning: cannot find entry symbol _start; not setting start address
+llvm-objcopy -O binary obj/intel/dns_test.elf obj/intel/dns_test.bin
+ld.lld -T src/user/linker.ld -o obj/intel/netfix_test.elf obj/intel/user_netfix_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+ld.lld: warning: cannot find entry symbol _start; not setting start address
+llvm-objcopy -O binary obj/intel/netfix_test.elf obj/intel/netfix.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/cxx_smoke.elf obj/intel/cxx_smoke.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/cxx_smoke.elf obj/intel/cxx_smoke.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/hello.elf obj/intel/hello.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/hello.elf obj/intel/hello.bin
+ld.lld -T src/user/linker.ld -o obj/intel/sh.elf obj/intel/sh.o obj/intel/sh_aux.o obj/intel/crt0.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/sh.elf obj/intel/sh.bin
+ld.lld -T src/user/linker.ld -o obj/intel/ls.elf obj/intel/ls.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/ls.elf obj/intel/ls.bin
+ld.lld -T src/user/linker.ld -o obj/intel/cat.elf obj/intel/cat.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/cat.elf obj/intel/cat.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/grep.elf obj/intel/grep_grep.o obj/intel/grep_search.o obj/intel/grep_dfa.o obj/intel/grep_kwset.o obj/intel/grepg_alloca.o obj/intel/grepg_closeout.o obj/intel/grepg_error.o obj/intel/grepg_exclude.o obj/intel/grepg_fnmatch.o obj/intel/grepg_hard-locale.o obj/intel/grepg_isdir.o obj/intel/grepg_obstack.o obj/intel/grepg_quotearg.o obj/intel/grepg_regex.o obj/intel/grepg_savedir.o obj/intel/grepg_stpcpy.o obj/intel/grepg_xmalloc.o obj/intel/grepg_xstrtol.o obj/intel/grepg_xstrtoumax.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/grep.elf obj/intel/grep.bin
+ld.lld -T src/user/linker.ld -o obj/intel/less.elf obj/intel/less.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/less.elf obj/intel/less.bin
+ld.lld -T src/user/linker.ld -o obj/intel/tail.elf obj/intel/tail.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/tail.elf obj/intel/tail.bin
+ld.lld -T src/user/linker.ld -o obj/intel/head.elf obj/intel/head.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/head.elf obj/intel/head.bin
+ld.lld -T src/user/linker.ld -o obj/intel/shtest.elf obj/intel/shell_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/shtest.elf obj/intel/shtest.bin
+ld.lld -T src/user/linker.ld -o obj/intel/ps.elf obj/intel/ps.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/ps.elf obj/intel/ps.bin
+ld.lld -T src/user/linker.ld -o obj/intel/free.elf obj/intel/free.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/free.elf obj/intel/free.bin
+ld.lld -T src/user/linker.ld -o obj/intel/uptime.elf obj/intel/uptime.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/uptime.elf obj/intel/uptime.bin
+ld.lld -T src/user/linker.ld -o obj/intel/kill.elf obj/intel/kill.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/kill.elf obj/intel/kill.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/basename.elf obj/intel/basename.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/basename.elf obj/intel/basename.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/dirname.elf obj/intel/dirname.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/dirname.elf obj/intel/dirname.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/seq.elf obj/intel/seq.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/seq.elf obj/intel/seq.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/expr.elf obj/intel/expr.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/expr.elf obj/intel/expr.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/testgnu.elf obj/intel/testgnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/testgnu.elf obj/intel/testgnu.bin
+ld.lld -T src/user/linker.ld -o obj/intel/cp.elf obj/intel/cp.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/cp.elf obj/intel/cp.bin
+ld.lld -T src/user/linker.ld -o obj/intel/rm.elf obj/intel/rm.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/rm.elf obj/intel/rm.bin
+ld.lld -T src/user/linker.ld -o obj/intel/mv.elf obj/intel/mv.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/mv.elf obj/intel/mv.bin
+ld.lld -T src/user/linker.ld -o obj/intel/touch.elf obj/intel/touch.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/touch.elf obj/intel/touch.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/wc.elf obj/intel/wc.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/wc.elf obj/intel/wc.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/sed.elf obj/intel/sed_sed.o obj/intel/sed_compile.o obj/intel/sed_debug.o obj/intel/sed_execute.o obj/intel/sed_mbcs.o obj/intel/sed_regexp.o obj/intel/sed_utils.o obj/intel/sedg_acl-errno-valid.o obj/intel/sedg_acl-internal.o obj/intel/sedg_basename-lgpl.o obj/intel/sedg_c-ctype.o obj/intel/sedg_c-strcasecmp.o obj/intel/sedg_c-strncasecmp.o obj/intel/sedg_close-stream.o obj/intel/sedg_closeout.o obj/intel/sedg_copy-acl.o obj/intel/sedg_dfa.o obj/intel/sedg_dirname-lgpl.o obj/intel/sedg_exitfail.o obj/intel/sedg_get-permissions.o obj/intel/sedg_localcharset.o obj/intel/sedg_localeinfo.o obj/intel/sedg_obstack.o obj/intel/sedg_progname.o obj/intel/sedg_qcopy-acl.o obj/intel/sedg_qset-acl.o obj/intel/sedg_quotearg.o obj/intel/sedg_set-acl.o obj/intel/sedg_set-permissions.o obj/intel/sedg_strverscmp.o obj/intel/sedg_version-etc.o obj/intel/sedg_version-etc-fsf.o obj/intel/sedg_xalloc-die.o obj/intel/sedg_xmalloc.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/sed.elf obj/intel/sed.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/hedgnu.elf obj/intel/head_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/hedgnu.elf obj/intel/hedgnu.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/wc_test.elf obj/intel/wc_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/wc_test.elf obj/intel/wc_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/cut_test.elf obj/intel/cut_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/cut_test.elf obj/intel/cut_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tr.elf obj/intel/tr_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tr.elf obj/intel/tr.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tr_test.elf obj/intel/tr_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tr_test.elf obj/intel/tr_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/paste.elf obj/intel/paste_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/paste.elf obj/intel/paste.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/paste_test.elf obj/intel/paste_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/paste_test.elf obj/intel/paste_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/fold.elf obj/intel/fold_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/fold.elf obj/intel/fold.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/fold_test.elf obj/intel/fold_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/fold_test.elf obj/intel/fold_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/nl.elf obj/intel/nl_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/nl.elf obj/intel/nl.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/nl_test.elf obj/intel/nl_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/nl_test.elf obj/intel/nl_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/comm.elf obj/intel/comm_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/comm.elf obj/intel/comm.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/comm_test.elf obj/intel/comm_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/comm_test.elf obj/intel/comm_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tsort.elf obj/intel/tsort_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tsort.elf obj/intel/tsort.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tsort_test.elf obj/intel/tsort_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tsort_test.elf obj/intel/tsort_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/expand.elf obj/intel/expand_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/expand.elf obj/intel/expand.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/expand_test.elf obj/intel/expand_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/expand_test.elf obj/intel/expand_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/unexpand.elf obj/intel/unexpand_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/unexpand.elf obj/intel/unexpand.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/cksum.elf obj/intel/cksum_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/cksum.elf obj/intel/cksum.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/cksum_test.elf obj/intel/cksum_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/cksum_test.elf obj/intel/cksum_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/fatbig_test.elf obj/intel/fatbig_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/fatbig_test.elf obj/intel/fatbig_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/lfn_test.elf obj/intel/lfn_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/lfn_test.elf obj/intel/lfn_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/md5sum.elf obj/intel/md5sum_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/md5sum.elf obj/intel/md5sum.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/md5sum_test.elf obj/intel/md5sum_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/md5sum_test.elf obj/intel/md5sum_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tac.elf obj/intel/tac_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tac.elf obj/intel/tac.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tac_test.elf obj/intel/tac_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tac_test.elf obj/intel/tac_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/cmp.elf obj/intel/cmp_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/cmp.elf obj/intel/cmp.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/cmp_test.elf obj/intel/cmp_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/cmp_test.elf obj/intel/cmp_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/regex_test.elf obj/intel/regex_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/regex_test.elf obj/intel/regex_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/sed_test.elf obj/intel/sed_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/sed_test.elf obj/intel/sed_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/grep_test.elf obj/intel/grep_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/grep_test.elf obj/intel/grep_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/subprobe.elf obj/intel/subprobe.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/subprobe.elf obj/intel/subprobe.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/pipeprobe.elf obj/intel/pipeprobe.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/pipeprobe.elf obj/intel/pipeprobe.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/head_test.elf obj/intel/head_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/head_test.elf obj/intel/head_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tail_gnu.elf obj/intel/tail_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tail_gnu.elf obj/intel/tailgnu.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/cut.elf obj/intel/cut_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/cut.elf obj/intel/cut.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tail_test.elf obj/intel/tail_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tail_test.elf obj/intel/tail_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/proc_child.elf obj/intel/proc_child.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/proc_child.elf obj/intel/proc_child.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/proc_test.elf obj/intel/proc_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/proc_test.elf obj/intel/proc_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/lseek_test.elf obj/intel/lseek_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/lseek_test.elf obj/intel/lseek_test.bin
+ld.lld -T src/user/linker.ld -o obj/intel/sort.elf obj/intel/sort.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/sort.elf obj/intel/sort.bin
+ld.lld -T src/user/linker.ld -o obj/intel/uniq.elf obj/intel/uniq.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/uniq.elf obj/intel/uniq.bin
+ld.lld -T src/user/linker.ld -o obj/intel/ping.elf obj/intel/ping.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/ping.elf obj/intel/ping.bin
+ld.lld -T src/user/linker.ld -o obj/intel/nc.elf obj/intel/nc.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/nc.elf obj/intel/nc.bin
+ld.lld -T src/user/linker.ld -o obj/intel/ifconfig.elf obj/intel/ifconfig.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/ifconfig.elf obj/intel/ifconfig.bin
+ld.lld -T src/user/linker.ld -o obj/intel/shtest2.elf obj/intel/shell_test2.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/shtest2.elf obj/intel/shtest2.bin
+ld.lld -T src/user/linker.ld -o obj/intel/mkdir.elf obj/intel/mkdir.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/mkdir.elf obj/intel/mkdir.bin
+ld.lld -T src/user/linker.ld -o obj/intel/shtest3.elf obj/intel/shell_test3.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/shtest3.elf obj/intel/shtest3.bin
+ld.lld -T src/user/linker.ld -o obj/intel/pong.elf obj/intel/pong.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_graphics.o
+llvm-objcopy -O binary obj/intel/pong.elf obj/intel/pong.bin
+ld.lld -T src/user/linker.ld -o obj/intel/millipede.elf obj/intel/millipede.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_graphics.o
+llvm-objcopy -O binary obj/intel/millipede.elf obj/intel/millipede.bin
+ld.lld -T src/user/linker.ld -o obj/intel/filedialog_arrow_test.elf obj/intel/user_filedialog_arrow_test.o obj/intel/user_desktop_test_wrapper.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_graphics.o obj/intel/user_window.o
+llvm-objcopy -O binary obj/intel/filedialog_arrow_test.elf obj/intel/FILEDIAL.BIN
+ld.lld -T src/user/linker.ld -o obj/intel/monitor.elf obj/intel/monitor.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/monitor.elf obj/intel/monitor.bin
+ld.lld -T src/user/linker.ld -o obj/intel/monitor_test.elf obj/intel/monitor_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/monitor_test.elf obj/intel/monitort.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DKERNEL_MODE_TEST -c src/user/gui.c -o obj/intel/user_gui.o
+ld.lld -T src/user/linker.ld -o obj/intel/files.elf obj/intel/files.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/files.elf obj/intel/files.bin
+ld.lld -T src/user/linker.ld -o obj/intel/calc.elf obj/intel/calc.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/calc.elf obj/intel/calc.bin
+ld.lld -T src/user/linker.ld -o obj/intel/clock.elf obj/intel/clock.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/clock.elf obj/intel/clock.bin
+ld.lld -T src/user/linker.ld -o obj/intel/sysmon.elf obj/intel/sysmon.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/sysmon.elf obj/intel/sysmon.bin
+ld.lld -T src/user/linker.ld -o obj/intel/hex.elf obj/intel/hex.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/hex.elf obj/intel/hex.bin
+ld.lld -T src/user/linker.ld -o obj/intel/tasks.elf obj/intel/tasks.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/tasks.elf obj/intel/tasks.bin
+ld.lld -T src/user/linker.ld -o obj/intel/find.elf obj/intel/find.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/find.elf obj/intel/find.bin
+ld.lld -T src/user/linker.ld -o obj/intel/diff.elf obj/intel/diff.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/diff.elf obj/intel/diff.bin
+ld.lld -T src/user/linker.ld -o obj/intel/notes.elf obj/intel/notes.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/notes.elf obj/intel/notes.bin
+ld.lld -T src/user/linker.ld -o obj/intel/unit.elf obj/intel/unit.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/unit.elf obj/intel/unit.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/xcalc.elf obj/intel/xcalc_main.o obj/intel/x11_xlib_display.o obj/intel/x11_xlib_window.o obj/intel/x11_xlib_draw.o obj/intel/x11_xlib_event.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/xcalc.elf obj/intel/xcalc.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/antfarm.elf obj/intel/antfarm_main.o obj/intel/x11_xlib_display.o obj/intel/x11_xlib_window.o obj/intel/x11_xlib_draw.o obj/intel/x11_xlib_event.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/antfarm.elf obj/intel/antfarm.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/xeyes.elf obj/intel/xeyes_main.o obj/intel/x11_xlib_display.o obj/intel/x11_xlib_window.o obj/intel/x11_xlib_draw.o obj/intel/x11_xlib_event.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/xeyes.elf obj/intel/xeyes.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/nano.elf obj/intel/nano_browser.o obj/intel/nano_chars.o obj/intel/nano_color.o obj/intel/nano_cut.o obj/intel/nano_files.o obj/intel/nano_global.o obj/intel/nano_help.o obj/intel/nano_history.o obj/intel/nano_move.o obj/intel/nano_nano.o obj/intel/nano_prompt.o obj/intel/nano_rcfile.o obj/intel/nano_search.o obj/intel/nano_text.o obj/intel/nano_utils.o obj/intel/nano_winio.o obj/intel/nano_hb_curses.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/nano.elf obj/intel/nano.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/mkfsfat.elf obj/intel/mkfs_mkfs.fat.o obj/intel/mkfs_common.o obj/intel/mkfs_charconv.o obj/intel/mkfs_device_info.o obj/intel/mkfs_hb_blkdev.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/mkfsfat.elf obj/intel/mkfsfat.bin
+ld.lld -T src/user/linker.ld -o obj/intel/apps_test.elf obj/intel/user_apps_test.o obj/intel/user_desktop_test_wrapper.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_graphics_stats.o obj/intel/user_window.o
+llvm-objcopy -O binary obj/intel/apps_test.elf obj/intel/APPS_T.BIN
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/thrd_test.elf obj/intel/thrd_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/thrd_test.elf obj/intel/thrd_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tls_test.elf obj/intel/tls_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tls_test.elf obj/intel/tls_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/wk1c_test.elf obj/intel/wk1c_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/wk1c_test.elf obj/intel/WK1C_T.BIN
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/cxx_t.elf obj/intel/cxx_t.o obj/intel/libcxx.a obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/cxx_t.elf obj/intel/cxx_t.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/rtti_t.elf obj/intel/cxx_rtti_t.o obj/intel/libcxx.a obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/rtti_t.elf obj/intel/rtti_t.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/ipc_test.elf obj/intel/ipc_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/ipc_test.elf obj/intel/ipc_test.bin
+ld.lld -T src/user/linker.ld -e _start --gc-sections -o obj/intel/icusmk.elf obj/intel/icu_smoke.o obj/intel/crt0.o obj/intel/icu/libicuuc.a obj/intel/libcxx.a obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/icusmk.elf obj/intel/icusmk.bin
+ld.lld -T src/user/linker.ld -e _start --gc-sections -o obj/intel/sqltest.elf obj/intel/sqlite_test.o obj/intel/sqlite_os.o obj/intel/sqlite3.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/sqltest.elf obj/intel/sqltest.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/sig_test.elf obj/intel/sig_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/sig_test.elf obj/intel/sig_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/spawnex_child.elf obj/intel/spawnex_child.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/spawnex_child.elf obj/intel/spawnex_child.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/torture_test.elf obj/intel/torture_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/torture_test.elf obj/intel/torture_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/make.elf obj/intel/make_ar.o obj/intel/make_arscan.o obj/intel/make_commands.o obj/intel/make_default.o obj/intel/make_dir.o obj/intel/make_expand.o obj/intel/make_file.o obj/intel/make_function.o obj/intel/make_getopt.o obj/intel/make_getopt1.o obj/intel/make_guile.o obj/intel/make_hash.o obj/intel/make_implicit.o obj/intel/make_job.o obj/intel/make_load.o obj/intel/make_loadapi.o obj/intel/make_main.o obj/intel/make_misc.o obj/intel/make_output.o obj/intel/make_posixos.o obj/intel/make_read.o obj/intel/make_remake.o obj/intel/make_remote-stub.o obj/intel/make_rule.o obj/intel/make_shuffle.o obj/intel/make_signame.o obj/intel/make_strcache.o obj/intel/make_variable.o obj/intel/make_version.o obj/intel/make_vpath.o obj/intel/make_glob.o obj/intel/make_fnmatch.o obj/intel/make_hb_stubs.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/make.elf obj/intel/make.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tar.elf obj/intel/tar.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tar.elf obj/intel/tar.bin
+[browser] third_party/webkit-hobbyos/cache/browser-x64.bin.xz (cache) -> obj/intel/browser.bin
+[tools] LLVM dist staging present
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/selfhost.elf obj/intel/selfhost.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/selfhost.elf obj/intel/selfhost.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/mcopy.elf obj/intel/mtoolsm_mcopy.o obj/intel/mtools_buffer.o obj/intel/mtools_charsetConv.o obj/intel/mtools_codepages.o obj/intel/mtools_config.o obj/intel/mtools_copyfile.o obj/intel/mtools_device.o obj/intel/mtools_devices.o obj/intel/mtools_dirCache.o obj/intel/mtools_directory.o obj/intel/mtools_direntry.o obj/intel/mtools_dos2unix.o obj/intel/mtools_fat.o obj/intel/mtools_fat_free.o obj/intel/mtools_file.o obj/intel/mtools_file_name.o obj/intel/mtools_force_io.o obj/intel/mtools_hash.o obj/intel/mtools_init.o obj/intel/mtools_lba.o obj/intel/mtools_llong.o obj/intel/mtools_lockdev.o obj/intel/mtools_mainloop.o obj/intel/mtools_match.o obj/intel/mtools_mcopy.o obj/intel/mtools_mdel.o obj/intel/mtools_misc.o obj/intel/mtools_missFuncs.o obj/intel/mtools_mk_direntry.o obj/intel/mtools_mmd.o obj/intel/mtools_offset.o obj/intel/mtools_old_dos.o obj/intel/mtools_open_image.o obj/intel/mtools_partition.o obj/intel/mtools_patchlevel.o obj/intel/mtools_plain_io.o obj/intel/mtools_privileges.o obj/intel/mtools_remap.o obj/intel/mtools_signal.o obj/intel/mtools_stream.o obj/intel/mtools_streamcache.o obj/intel/mtools_strtonum.o obj/intel/mtools_swap.o obj/intel/mtools_tty.o obj/intel/mtools_unix2dos.o obj/intel/mtools_unixdir.o obj/intel/mtools_vfat.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/mcopy.elf obj/intel/mcopy.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/mdel.elf obj/intel/mtoolsm_mdel.o obj/intel/mtools_buffer.o obj/intel/mtools_charsetConv.o obj/intel/mtools_codepages.o obj/intel/mtools_config.o obj/intel/mtools_copyfile.o obj/intel/mtools_device.o obj/intel/mtools_devices.o obj/intel/mtools_dirCache.o obj/intel/mtools_directory.o obj/intel/mtools_direntry.o obj/intel/mtools_dos2unix.o obj/intel/mtools_fat.o obj/intel/mtools_fat_free.o obj/intel/mtools_file.o obj/intel/mtools_file_name.o obj/intel/mtools_force_io.o obj/intel/mtools_hash.o obj/intel/mtools_init.o obj/intel/mtools_lba.o obj/intel/mtools_llong.o obj/intel/mtools_lockdev.o obj/intel/mtools_mainloop.o obj/intel/mtools_match.o obj/intel/mtools_mcopy.o obj/intel/mtools_mdel.o obj/intel/mtools_misc.o obj/intel/mtools_missFuncs.o obj/intel/mtools_mk_direntry.o obj/intel/mtools_mmd.o obj/intel/mtools_offset.o obj/intel/mtools_old_dos.o obj/intel/mtools_open_image.o obj/intel/mtools_partition.o obj/intel/mtools_patchlevel.o obj/intel/mtools_plain_io.o obj/intel/mtools_privileges.o obj/intel/mtools_remap.o obj/intel/mtools_signal.o obj/intel/mtools_stream.o obj/intel/mtools_streamcache.o obj/intel/mtools_strtonum.o obj/intel/mtools_swap.o obj/intel/mtools_tty.o obj/intel/mtools_unix2dos.o obj/intel/mtools_unixdir.o obj/intel/mtools_vfat.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/mdel.elf obj/intel/mdel.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/mmd.elf obj/intel/mtoolsm_mmd.o obj/intel/mtools_buffer.o obj/intel/mtools_charsetConv.o obj/intel/mtools_codepages.o obj/intel/mtools_config.o obj/intel/mtools_copyfile.o obj/intel/mtools_device.o obj/intel/mtools_devices.o obj/intel/mtools_dirCache.o obj/intel/mtools_directory.o obj/intel/mtools_direntry.o obj/intel/mtools_dos2unix.o obj/intel/mtools_fat.o obj/intel/mtools_fat_free.o obj/intel/mtools_file.o obj/intel/mtools_file_name.o obj/intel/mtools_force_io.o obj/intel/mtools_hash.o obj/intel/mtools_init.o obj/intel/mtools_lba.o obj/intel/mtools_llong.o obj/intel/mtools_lockdev.o obj/intel/mtools_mainloop.o obj/intel/mtools_match.o obj/intel/mtools_mcopy.o obj/intel/mtools_mdel.o obj/intel/mtools_misc.o obj/intel/mtools_missFuncs.o obj/intel/mtools_mk_direntry.o obj/intel/mtools_mmd.o obj/intel/mtools_offset.o obj/intel/mtools_old_dos.o obj/intel/mtools_open_image.o obj/intel/mtools_partition.o obj/intel/mtools_patchlevel.o obj/intel/mtools_plain_io.o obj/intel/mtools_privileges.o obj/intel/mtools_remap.o obj/intel/mtools_signal.o obj/intel/mtools_stream.o obj/intel/mtools_streamcache.o obj/intel/mtools_strtonum.o obj/intel/mtools_swap.o obj/intel/mtools_tty.o obj/intel/mtools_unix2dos.o obj/intel/mtools_unixdir.o obj/intel/mtools_vfat.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/mmd.elf obj/intel/mmd.bin
+# Startup disk: 1 GiB (user-requested floor; FAT16 tops out at 2 GiB).
+# mkfs.fat auto-picks the cluster size (32 KiB @ 1 GiB); the kernel
+# fat16.c layout math is BPB data-driven (bpb_sectors_per_cluster), so
+# no driver change is needed for the larger disk/clusters.
+dd if=/dev/zero of=disk.img bs=1M count=1024
+1024+0 records in
+1024+0 records out
+1073741824 bytes (1.1 GB, 1.0 GiB) copied, 0.316984 s, 3.4 GB/s
+mkfs.fat -F 16 disk.img
+mkfs.fat 4.2 (2021-01-31)
+mmd -i disk.img ::/EFI
+mmd -i disk.img ::/EFI/BOOT
+mmd -i disk.img ::/boot
+mmd -i disk.img ::/home
+mmd -i disk.img ::/nfs
+mmd -i disk.img ::/mnt
+mmd -i disk.img ::/TESTDIR
+mmd -i disk.img ::/tmp
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+# build-tools at their frozen /TOOLS/ paths (Makefile.hobbyos sketch).
+mmd -i disk.img ::/TOOLS
+# L3 (selfhost W-A): VFAT long-name build-payload fixture dirs (mtools-written).
+mmd -i disk.img ::/src
+mmd -i disk.img ::/src/kernel
+mmd -i disk.img ::/src/user_include
+mmd -i disk.img ::/src/user_include/graphics
+mmd -i disk.img ::/third_party
+mmd -i disk.img ::/third_party/libcxx-21.1.8
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include
+mcopy -i disk.img tests/fixtures/E2E.TXT ::/E2E.TXT
+mcopy -i disk.img tests/fixtures/DRAGME.TXT ::/DRAGME.TXT
+mcopy -i disk.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+mcopy -i disk.img bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
+mcopy -i disk.img obj/intel/limine.conf ::/boot/limine.conf
+mcopy -i disk.img hobbyos.elf ::/boot/hobbyos.elf
+mcopy -i disk.img obj/intel/memtest.bin ::/MEMTEST.BIN
+mcopy -i disk.img obj/intel/fileio_test.bin ::/FILEIO.BIN
+mcopy -i disk.img obj/intel/console.bin ::/CONSOLE.BIN
+mcopy -i disk.img obj/intel/fork_test.bin ::/FORKTEST.BIN
+mcopy -i disk.img obj/intel/heap_test.bin ::/HEAPTEST.BIN
+mcopy -i disk.img obj/intel/spawntest.bin ::/SPAWN.BIN
+mcopy -i disk.img obj/intel/graphics.bin ::/GRAPHICS.BIN
+mcopy -i disk.img obj/intel/wsurf_test.bin ::/WSRF_T.BIN
+mcopy -i disk.img obj/intel/smp_test.bin ::/SMPTEST.BIN
+mcopy -i disk.img obj/intel/pipetest.bin ::/PIPETEST.BIN
+mcopy -i disk.img obj/intel/nettest.bin ::/NETTEST.BIN
+mcopy -i disk.img obj/intel/timeout.bin ::/TIMEOUT.BIN
+mcopy -i disk.img obj/intel/nfstest.bin ::/NFSTEST.BIN
+mcopy -i disk.img obj/intel/desktop.bin ::/DESKTOP.BIN
+browser: obj/intel/browser.bin (resolved by the browser-staged completeness rule; installed as ::/BROWSER.BIN)
+mcopy -i disk.img obj/intel/editor.bin ::/EDITOR.BIN
+mcopy -i disk.img obj/intel/EDITOR_T.BIN ::/EDITOR_T.BIN
+mcopy -i disk.img obj/intel/APPS_T.BIN ::/APPS_T.BIN
+mcopy -i disk.img obj/intel/FILEDIAL.BIN ::/FILEDIAL.BIN
+mcopy -i disk.img obj/intel/DIALOG_T.BIN ::/DIALOG_T.BIN
+mcopy -i disk.img obj/intel/PONG_T.BIN ::/PONG_T.BIN
+mcopy -i disk.img obj/intel/stress.bin ::/STRESS.BIN
+mcopy -i disk.img obj/intel/fpu_test.bin ::/FPU_T.BIN
+mcopy -i disk.img obj/intel/gfxbench.bin ::/GFXBENCH.BIN
+mcopy -i disk.img obj/intel/math_test.bin ::/MATH_T.BIN
+mcopy -i disk.img obj/intel/errtest.bin ::/ERRTEST.BIN
+mcopy -i disk.img obj/intel/SOCK2TST.BIN ::/SOCK2TST.BIN
+mcopy -i disk.img obj/intel/POLLTST.BIN ::/POLLTST.BIN
+mcopy -i disk.img obj/intel/BLKTEST.BIN ::/BLKTEST.BIN
+mcopy -i disk.img obj/intel/RANDTST.BIN ::/RANDTST.BIN
+mcopy -i disk.img obj/intel/dns_test.bin ::/DNSTST.BIN
+mcopy -i disk.img obj/intel/netfix.bin ::/NETFIX.BIN
+mcopy -i disk.img obj/intel/cxx_smoke.bin ::/CXXSMOKE.BIN
+mcopy -i disk.img obj/intel/thrd_test.bin ::/THRD_T.BIN
+mcopy -i disk.img obj/intel/tls_test.bin ::/TLS_T.BIN
+mcopy -i disk.img obj/intel/WK1C_T.BIN ::/WK1C_T.BIN
+mcopy -i disk.img obj/intel/cxx_t.bin ::/CXX_T.BIN
+mcopy -i disk.img obj/intel/rtti_t.bin ::/RTTI_T.BIN
+mcopy -i disk.img obj/intel/ipc_test.bin ::/IPC_T.BIN
+mcopy -i disk.img obj/intel/mmtest.bin ::/MMTEST.BIN
+mcopy -i disk.img obj/intel/sqltest.bin ::/SQLTEST.BIN
+mcopy -i disk.img obj/intel/torture_test.bin ::/TORTURE.BIN
+mcopy -i disk.img obj/intel/big.bin ::/BIG.BIN
+mcopy -i disk.img obj/intel/hello.bin ::/HELLO.BIN
+mcopy -i disk.img obj/intel/selfhost.bin ::/SELFHOST.BIN
+mcopy -i disk.img obj/intel/sh.bin ::/SH.BIN
+mcopy -i disk.img obj/intel/ls.bin ::/LS.BIN
+mcopy -i disk.img obj/intel/cat.bin ::/CAT.BIN
+mcopy -i disk.img obj/intel/grep.bin ::/GREP.BIN
+mcopy -i disk.img obj/intel/less.bin ::/LESS.BIN
+mcopy -i disk.img obj/intel/tail.bin ::/TAIL.BIN
+mcopy -i disk.img obj/intel/head.bin ::/HEAD.BIN
+mcopy -i disk.img obj/intel/shtest.bin ::/SHTEST.BIN
+mcopy -i disk.img obj/intel/ps.bin ::/PS.BIN
+mcopy -i disk.img obj/intel/free.bin ::/FREE.BIN
+mcopy -i disk.img obj/intel/uptime.bin ::/UPTIME.BIN
+mcopy -i disk.img obj/intel/kill.bin ::/KILL.BIN
+mcopy -i disk.img obj/intel/basename.bin ::/BASENAME.BIN
+mcopy -i disk.img obj/intel/dirname.bin ::/DIRNAME.BIN
+mcopy -i disk.img obj/intel/seq.bin ::/SEQ.BIN
+mcopy -i disk.img obj/intel/expr.bin ::/EXPR.BIN
+mcopy -i disk.img obj/intel/testgnu.bin ::/TEST.BIN
+mcopy -i disk.img obj/intel/cp.bin ::/CP.BIN
+mcopy -i disk.img obj/intel/rm.bin ::/RM.BIN
+mcopy -i disk.img obj/intel/mv.bin ::/MV.BIN
+mcopy -i disk.img obj/intel/touch.bin ::/TOUCH.BIN
+mcopy -i disk.img obj/intel/wc.bin ::/WC.BIN
+mcopy -i disk.img obj/intel/sed.bin ::/SED.BIN
+mcopy -i disk.img obj/intel/make.bin ::/MAKE.BIN
+mcopy -i disk.img obj/intel/hedgnu.bin ::/HEDGNU.BIN
+mcopy -i disk.img obj/intel/tailgnu.bin ::/TAILGN.BIN
+mcopy -i disk.img obj/intel/cut.bin ::/CUT.BIN
+mcopy -i disk.img obj/intel/tr.bin ::/TR.BIN
+mcopy -i disk.img obj/intel/paste.bin ::/PASTE.BIN
+mcopy -i disk.img obj/intel/fold.bin ::/FOLD.BIN
+mcopy -i disk.img obj/intel/nl.bin ::/NL.BIN
+mcopy -i disk.img obj/intel/comm.bin ::/COMM.BIN
+mcopy -i disk.img obj/intel/tsort.bin ::/TSORT.BIN
+mcopy -i disk.img obj/intel/expand.bin ::/EXPAND.BIN
+mcopy -i disk.img obj/intel/unexpand.bin ::/UNEXPAND.BIN
+mcopy -i disk.img obj/intel/cksum.bin ::/CKSUM.BIN
+mcopy -i disk.img obj/intel/md5sum.bin ::/MD5SUM.BIN
+mcopy -i disk.img obj/intel/proc_child.bin ::/PROCCHLD.BIN
+mcopy -i disk.img obj/intel/spawnex_child.bin ::/SPAWNEX.BIN
+mcopy -i disk.img obj/intel/sig_test.bin ::/SIG_T.BIN
+mcopy -i disk.img obj/intel/head_test.bin ::/HEDTEST.BIN
+mcopy -i disk.img obj/intel/tail_test.bin ::/TAILTEST.BIN
+mcopy -i disk.img obj/intel/proc_test.bin ::/PROCTEST.BIN
+mcopy -i disk.img obj/intel/wc_test.bin ::/WCTEST.BIN
+mcopy -i disk.img obj/intel/cut_test.bin ::/CUTTEST.BIN
+mcopy -i disk.img obj/intel/tr_test.bin ::/TRTEST.BIN
+mcopy -i disk.img obj/intel/paste_test.bin ::/PASTE_T.BIN
+mcopy -i disk.img obj/intel/fold_test.bin ::/FOLDTEST.BIN
+mcopy -i disk.img obj/intel/nl_test.bin ::/NLTEST.BIN
+mcopy -i disk.img obj/intel/comm_test.bin ::/COMMTEST.BIN
+mcopy -i disk.img obj/intel/tsort_test.bin ::/TSORT_T.BIN
+mcopy -i disk.img obj/intel/expand_test.bin ::/EXPAND_T.BIN
+mcopy -i disk.img obj/intel/unexpand_test.bin ::/UNEXPAND_T.BIN
+mcopy -i disk.img obj/intel/fatbig_test.bin ::/FATBIG_T.BIN
+# L3 (selfhost W-A): VFAT long-name build-payload fixtures.  Content
+# markers must stay in sync with src/user/lfn_test.c.
+mcopy -i disk.img tests/fixtures/lfn/program_loader.c ::/src/kernel/program_loader.c
+mcopy -i disk.img tests/fixtures/lfn/window.h ::/src/user_include/graphics/window.h
+mcopy -i disk.img tests/fixtures/lfn/llvm-project-21.1.8.src-EXAMPLE.c ::/src/llvm-project-21.1.8.src-EXAMPLE.c
+mcopy -i disk.img tests/fixtures/lfn/upper_bound.h ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include/upper_bound.h
+mcopy -i disk.img tests/fixtures/lfn/longfilename.txt ::/longfilename.txt
+mcopy -i disk.img tests/fixtures/lfn/longfilename2.txt ::/longfilename2.txt
+mcopy -i disk.img tests/fixtures/lfn/longfil~1.txt ::/longfil~1.txt
+mcopy -i disk.img obj/intel/lfn_test.bin ::/LFN_T.BIN
+mcopy -i disk.img obj/intel/cksum_test.bin ::/CKSUM_T.BIN
+mcopy -i disk.img obj/intel/md5sum_test.bin ::/MD5SUM_T.BIN
+mcopy -i disk.img obj/intel/tac.bin ::/TAC.BIN
+mcopy -i disk.img obj/intel/tac_test.bin ::/TACTEST.BIN
+mcopy -i disk.img obj/intel/cmp.bin ::/CMP.BIN
+mcopy -i disk.img obj/intel/cmp_test.bin ::/CMPTEST.BIN
+mcopy -i disk.img obj/intel/regex_test.bin ::/REGTEST.BIN
+mcopy -i disk.img obj/intel/sed_test.bin ::/SEDTEST.BIN
+mcopy -i disk.img obj/intel/grep_test.bin ::/GREPTEST.BIN
+mcopy -i disk.img obj/intel/subprobe.bin ::/SUBPRB.BIN
+mcopy -i disk.img obj/intel/pipeprobe.bin ::/PIPEPRB.BIN
+mcopy -i disk.img obj/intel/lseek_test.bin ::/LKSTEST.BIN
+mcopy -i disk.img obj/intel/sort.bin ::/SORT.BIN
+mcopy -i disk.img obj/intel/uniq.bin ::/UNIQ.BIN
+mcopy -i disk.img obj/intel/ping.bin ::/PING.BIN
+mcopy -i disk.img obj/intel/nc.bin ::/NC.BIN
+mcopy -i disk.img obj/intel/ifconfig.bin ::/IFCONFIG.BIN
+mcopy -i disk.img obj/intel/shtest2.bin ::/SHTEST2.BIN
+mcopy -i disk.img obj/intel/mkdir.bin ::/MKDIR.BIN
+mcopy -i disk.img obj/intel/shtest3.bin ::/SHTEST3.BIN
+mcopy -i disk.img obj/intel/pong.bin ::/PONG.BIN
+mcopy -i disk.img obj/intel/millipede.bin ::/MILLIPED.BIN
+mcopy -i disk.img obj/intel/files.bin ::/FILES.BIN
+mcopy -i disk.img obj/intel/calc.bin ::/CALC.BIN
+mcopy -i disk.img obj/intel/xcalc.bin ::/XCALC.BIN
+mcopy -i disk.img obj/intel/antfarm.bin ::/ANTFARM.BIN
+mcopy -i disk.img obj/intel/xeyes.bin ::/XEYES.BIN
+mcopy -i disk.img obj/intel/clock.bin ::/CLOCK.BIN
+mcopy -i disk.img obj/intel/sysmon.bin ::/SYSMON.BIN
+mcopy -i disk.img obj/intel/hex.bin ::/HEX.BIN
+mcopy -i disk.img obj/intel/tasks.bin ::/TASKS.BIN
+mcopy -i disk.img obj/intel/find.bin ::/FIND.BIN
+mcopy -i disk.img obj/intel/diff.bin ::/DIFF.BIN
+mcopy -i disk.img obj/intel/notes.bin ::/NOTES.BIN
+mcopy -i disk.img obj/intel/unit.bin ::/UNIT.BIN
+mcopy -i disk.img obj/intel/nano.bin ::/NANO.BIN
+# Selfhost W2 (mtools port): in-OS /TOOLS copies of the ported
+# build-tools (8.3 names, the frozen F1 layout).
+mcopy -i disk.img obj/intel/mcopy.bin ::/TOOLS/MCOPY.BIN
+mcopy -i disk.img obj/intel/mdel.bin ::/TOOLS/MDEL.BIN
+mcopy -i disk.img obj/intel/mmd.bin ::/TOOLS/MMD.BIN
+# Selfhost W2 (mkfs port): in-OS MKFSFAT (F1 layout).
+mcopy -i disk.img obj/intel/mkfsfat.bin ::/MKFSFAT.BIN
+# Selfhost W3 (tools): the in-OS toolchain on the startup image (frozen
+# F1 layout, selfhost.md §7.3).  tools/selfhost-stage.sh --tools stages
+# CLANG.BIN/LLD.BIN/LLVMAR.BIN/OBJCOPY.BIN from the wave-2 LLVM
+# distribution staging (obj/selfhost/dist-staging, or the persistent
+# third_party/llvm-21.1.8/dist-staging copy that survives `make clean`),
+# the ported build tools (MAKE/MCOPY/MDEL/MMD/MKFSFAT), and the RESDIR
+# header tree under /TOOLS — staged FAITHFULLY with long names (F8
+# decision, see docs/selfhost/llvm-bootstrap.md §6.2).  Soft dependency:
+# an absent dist-staging warns + skips, so trees without the LLVM
+# install still build a bootable image (build_kernel.sh then refuses
+# with instructions).  Override with STAGE_TOOLS=0 to skip.
+tools/selfhost-stage.sh --tools disk.img
+selfhost-stage: staging in-OS toolchain to ::/TOOLS (F1 layout)
+selfhost-stage:   CLANG.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/clang-21 (converted, 94194168 B)
+selfhost-stage:   LLD.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/lld (converted, 53252504 B)
+selfhost-stage:   LLVMAR.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/llvm-ar (converted, 8351072 B)
+selfhost-stage:   OBJCOPY.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/llvm-objcopy (converted, 4984544 B)
+selfhost-stage: staged 284 files, 176920718 bytes into ::/TOOLS
+  --- ::/TOOLS (mdir) ---
+TAR      BIN    144448 2026-10-17   8:14 
+RESDIR       <DIR>     2026-10-17   8:14 
+       15 files         162 193 464 bytes
+                        739 131 392 bytes free
+
+  --- ::/TOOLS/RESDIR/include count ---
+      295 files          14 727 254 bytes
+                        739 131 392 bytes free
+
+selfhost-stage: done
+# Selfhost W4 (src): the in-OS build-required source subset on the
+# startup image (frozen F2 /SRC flavor): kernel+user sources, headers,
+# Makefile.hobbyos, limine/EFI assets, the carried build products, and
+# the SELFHOST.RUN/SELFHOST.SH stage scripts.  tools/selfhost-stage.sh
+# --src; disable together with the tools step via STAGE_TOOLS=0.
+tools/selfhost-stage.sh --src disk.img
+selfhost-stage: STAGE_LIBCXX=0 — skipping C++ libcxx include subset
+selfhost-stage: staging BUILD-REQUIRED source subset to ::/SRC
+
+selfhost-stage: staged BUILD-REQUIRED subset into disk.img
+  payload: 249 files, 4966969 bytes
+  --- ::/SRC (mdir) ---
+        3 files             315 392 bytes
+
+Total files listed:
+      323 files           4 967 038 bytes
+                        730 923 008 bytes free
+
+selfhost-stage: done
+# [inos-build-kernel] the source tarball + the in-OS build script:
+# SRC.TAR (ustar, assembled by tools/selfhost-src-tar.sh from the real
+# tree) lands at ::/SRC.TAR; build_kernel.sh at ::/BUILD_KERNEL.SH.
+# In-OS: `SH.BIN /BUILD_KERNEL.SH` extracts the tar and builds the
+# kernel from it (Makefile.hobbyos `all`) + assembles OUT.IMG.
+tools/selfhost-src-tar.sh obj/selfhost/SRC.TAR
+selfhost-src-tar: assembling obj/selfhost/SRC.TAR
+selfhost-src-tar: done — obj/selfhost/SRC.TAR
+  entries: 962 (files+dirs), size: 23070720 bytes
+  spot-checked members: src/kernel/main.c Makefile.hobbyos linker.ld limine.conf build_kernel.sh
+mcopy -i disk.img obj/selfhost/SRC.TAR ::/SRC.TAR
+mcopy -i disk.img src/user/selfhost/build_kernel.sh ::/BUILD_KERNEL.SH
+mcopy -i disk.img obj/intel/monitor.bin ::/MONITOR.BIN
+mcopy -i disk.img obj/intel/monitort.bin ::/MONITORT.BIN
+mcopy -i disk.img obj/intel/icusmk.bin ::/ICUSMK.BIN
+echo "HobbyOS Terminal Test File" > SHTEST.TXT
+echo "This is line number two." >> SHTEST.TXT
+echo "Line three is right here." >> SHTEST.TXT
+echo "Fourth line has some interesting keywords like hello world." >> SHTEST.TXT
+echo "Line five is the last line of this small test document." >> SHTEST.TXT
+touch TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT
+echo "orange" > SORT.TXT
+echo "apple" >> SORT.TXT
+echo "orange" >> SORT.TXT
+mcopy -i disk.img SHTEST.TXT ::/SHTEST.TXT
+mcopy -i disk.img SHTEST.TXT ::/home/SHTEST.TXT
+mcopy -i disk.img TEST1.TXT ::/TEST1.TXT
+mcopy -i disk.img TEST2.TXT ::/TEST2.TXT
+mcopy -i disk.img TEST3.TXT ::/TEST3.TXT
+mcopy -i disk.img TEST4.TXT ::/TEST4.TXT
+mcopy -i disk.img SORT.TXT ::/SORT.TXT
+rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT
+qemu-system-x86_64 -M q35 -smp 8 -m 12288M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56  -action shutdown=poweroff -display none
+WARNING: Image format was not specified for '/home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd' and probing guessed raw.
+         Automatically detecting the format is dangerous for raw images, write operations on block 0 will be restricted.
+         Specify the 'raw' format explicitly to remove the restrictions.
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+BdsDxe: starting Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+[001;001H[001;001H[UART] lock @ 0x000000007537ebc8
+Booting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+VirtIO GPU: BGA
+VirtIO GPU successfully initialized.
+Original CCB: 0x0000000000000047
+Modified CCB: 0x0000000000000047
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1376256 total_mib=5376 reserved=0
+[KERNEL] Activating secondary cores via LAPIC IPIs...
+[KERNEL] smp_init: copying trampoline code...
+[KERNEL] smp_init: trampoline copied.
+[KERNEL] smp_init: Sending INIT IPI to core 1...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 1 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 2...
+[KERNEL] smp_init: Waiting after INIT IPI...
+start_scheduler called on CPU 1
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 2 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 3...
+[KERNEL] smp_init: Waiting after INIT IPI...
+start_scheduler called on CPU 2
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 3 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 4...
+[KERNEL] smp_init: Waiting after INIT IPI...
+start_scheduler called on CPU 3
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core start_scheduler called on CPU 4
+4 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 5...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU [KERNEL] Core 5
+5 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 6...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU [KERNEL] Core 6
+6 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 7...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core start_scheduler called on CPU 7
+7 power-on acknowledged.
+[KERNEL] LAPIC timer rate: 62628 counts/ms, TSC rate: 2596096 ticks/ms (PIT-counter calibrated)
+Found NVMe controller on PCI bus!
+PCI Config Space of NVMe:
+0x0000000000101B36 0x0000000000100007 0x0000000001080202 0x0000000000000000 
+0x0000000081000004 0x0000000000000000 0x0000000000000000 0x0000000000000000 
+0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000011001AF4 
+0x0000000000000000 0x0000000000000040 0x0000000000000000 0x000000000000010B 
+NVMe BAR0 Phys: 0x0000000081000000 (Mapped to Virtual: 0x00000001FC000000)
+Resetting controller, waiting for CSTS.RDY = 0...
+Controller reset complete!
+Enabling controller... CC=0x0000000000460001 CSTS=0x0000000000000001
+Controller enabled successfully!
+Create IO CQ Status: 0x0000000000000000
+Create IO SQ Status: 0x0000000000000000
+NVMe driver initialized successfully!
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+[VIRTIO_NET] PCI Interrupt Line: 10 (Vector: 42)
+[VIRTIO_NET] MAC Address: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+[VIRTIO_NET] RX queue size: 256 rx_vq address: 0x00000000751F4000 PFN: 0x00000000000751F4
+[VIRTIO_NET] TX queue size: 256 tx_vq address: 0x00000000751F7000 PFN: 0x00000000000751F7
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Discover sent
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP initialization complete.
+[RDMA] Remote PCIe sharing is INACTIVE (no startup parameter).
+
+--- Parallel Program Loading ---
+Mode: TEST - Running automated tests...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=1
+Inside process_create: clearing memory at 0x0000000022000000
+Inside process_create: kmemset done.
+start_scheduler called on CPU 0
+Loading program for scheduler (v2 AS): SUBPRB.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=-1
+/SUBPRB.BIN
+v2 loader: image mapped (lazy), bytes=64824 pages=16 first=in elap=2ms
+v2 loader: PID=2 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): SHTEST.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=-1
+/SHTEST.BIN
+v2 loader: image mapped (lazy), bytes=65400 pages=16 first=in elap=1ms
+v2 loader: PID=3 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): SHTEST2.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=4 block_idx=-1
+/SHTEST2.BIN
+v2 loader: image mapped (lazy), bytes=62584 pages=16 first=in elap=3ms
+v2 loader: PID=4 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): SHTEST3.BIN
+/SHTEST3.BIN
+Shv2 loader: image mapped (lazy), bytes=62696 pages=16 first=in elap=2ellms
+ Integratiov2 loader: PID=5 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+nLoading program for scheduler (v2 AS):  TeCONSOLE.BIN
+st /CONSOLE.BIN
+Starting...
+v2 loader: image mapped (lazy), bytes=55192 pages=14 first=in elap=2ms
+v2 loader: PID=6 entry=0x0000001000000000 sp=0x0000001800000000 resident=2 tables=6
+Loading program for scheduler (v2 AS): MEMTEST.BIN
+/MEMTEST.BIN
+
+==============================
+Hello from isolated EL0 Space!
+==============================
+v2 loader: image mapped (lazy), bytes=55192 pages=14 first=in elap=4ms
+v2 loader: PID=7 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): FILEIO.BINShell 
+Folders & Subdirectories Int/FILEIO.BIN
+egration Test Starting...
+Loading program for scheduler (v2 AS): SH.BIN
+Shell Advanced Utilities Integration Test Starting...
+/SH.BIN
+v2 loader: image mapped (lazy), bytes=55464 pages=14 first=in elap=4ms
+v2 loader: PID=9 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=v2 loader: image mapped (lazy), bytes=Loading program for scheduler (v2 AS): 223272 pages=55 first=in elap=5ms
+v2 loader: PID=10 entry=0x0000001000000000 sp=0x0000001800000000 resident=2SH.BIN
+
+/SH.BIN
+[SUBPRB4Computation finished. Exiting.] st======================
+[Fv2 loader: image mapped (lazy), bytes======
+art
+I==Loading program for scheduler (v2 AS): SH.BIN
+ tables=[KERNEL] Process 6: CONSOLE.BIN exited unexpectedly or gracefully.
+L=6
+
+HobbyOS223272EIO TEST] Sta /SH.BINrtingUse 
+rLoading program for scheduler (v2 AS): BLKTEST.BIN
+ PFirogle I/O Tram - Memoesry Testt
+====s...
+[sys_close Debug] CPU=========6=, PIDs=[8,==9====,2,=10==]====, caller_pid=/BLKTEST.BIN
+====
+3, fd= pages=55 first=in5, g_fd= elap=85
+ms
+
+v2 loader: PID=12 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=6
+[KERNEL Debug] sys_close: fd=5, ret=0
+Test 1:[sys_close Debug] CPU=6, PIDs=[7,10,2,5], caller_pid=3, fd=0, g_fd=0
+ Writing to [KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=6, PIDs=[7,10,2,5], caller_pid=3, fd=3, g_fd=3
+user space (should work):
+✓ Writ[KERNEL Debug] sys_close: fd=3, ret=0
+e to user space successful
+Test 2: Attempting to write to kernel space (should fail):
+[KERNEL] sys_fork: tf->regs[0] is now 8
+A mkdir /SUB1 r=0 [sys_close Debug] CPU=2, PIDs=[errno=13,10,8,12], caller_pid=8, fd=1, g_fd=1
+0[sys_close Debug] CPU=6[KERNEL Debug] sys_close: fd=, PIDs=[131 , ret=0
+[KERNEL] pid=,7 ([sys_close Debug] CPU=MEMTEST.BIN) memory fault VA=
+8,2,7], caller_pid=5, fd=5, g_fd=1, PIDs=[13,8,110x0000000040000000
+ PC=[KERNEL Debug] sys_close: fd=5, ret=0
+2v2 loader: image mapped ([WATClazyHDOG),] console  silentbyte s=22for 327mor2 pe taghan 20s
+  CPU0es=55  firrsip=t=0x000in e000007la0p02F=50C9 ms
+pid,=713] age_, callms=2er_pi d=8wai0tx_lo00c000010000000k=510v2x00 loa0000007537EBCder: PID=148 cal ler=e0xntry=00000000x000000000000000
+  C1PU1 ri0p=0x0000000000100000003691 pid=8 age00 rw=v2 loa_ms=d5 esyscalr: image l=5map wpaeidt _(lloazck=y)0x0,00 byt000es=0 s07537EBCp8 c=aller=0x00x00000000000070020F0AE 1c8aller2=000000000 rex000000s0ide0700nt36C87=
+  CPU2 ri, fd=2, pg=0_xfd=020010001 t000abl00741E pid=2 age_emss=3 s=4ys/TESTcall=.TX24
+T  CPU3 rip=0x0
+0000
+010000
+0005[KERNEL1 Debug] pi d=sy7 as_gcle_ose: fd=ms=6 wait2_l, roeckt=0=0x
+w0000  0i0n007537EBC=8 caPROllTer= -> 0xk0illed
+0000000007549000600 page0 calls=er2=019x0000 first=in[KERNE0L00070] 036CPr8oces7
+s 7 :  MECPMU4TEST.B riIN p=0xexi00000ted un01e0xpec0000t175Fedly  or pgraid=ce9f agully.e_
+ elap=16mms=s6 sysca
+ll=4
+  CPU5[sys_ rip=0x00000c0lo100se D0e002bF81ug] pid C=PU=65 age_msA mk=0
+dir /S U BC1PU/SUB2 r=, PID6 rs=[ip=01,x2,8,700000]0, cal0100l000e2Er_pid=4, fd9= 51, g_f pidd==4 age_v2 lms=-oa17 sdyer: sPcall=5 wait_lock=ID=10x0500000007537E eBC8 ntrcyaller=0x=0x000000000007002F0AE0 ca0ll0e10000r000002 sp=0x=e000r0rn0000o700=110CA
+0  CPx0U7 rip=0x000000100000005550 pid=15 age_ms=-20
+0001800000000[FILEIO TEST]170 Opened TEST.TXT succ
+  resident=BLKTES
+essfu[KERNEL Debug] sys_close: fd=T: b4 tables=6
+lly.
+5, ret=0Loading program for scheduler (v2 AS): 
+FATBIG_T.BIN
+lock-cache in-OS integra/FATBIG_T.BIN
+tion test
+[TEST] Initial prompt read successfully.
+[TEST] Sending 'help' command...
+[sys_close Debug] CPU=4, PIDs=[1,2,15,9], caller_pid=4, fd=0, g_fd=12
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=4, PIDs=[1,2,15,9], caller_pid=4, fd=3, g_fd=15
+[KERNEL Debug] sys_close: fd=BLKTEST cache: present
+3, ret=0
+  BLKTEST cv2 loader: image mapped (lazy), bytes=47496 pages=12 first=in elap=4ache lims
+ve (sysinfo(9)): PASS
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+[sys_close Debug] CPU=5, PIDs=[1,2,15,9], caller_pid=5, fd=0, g_fd=6
+[KERNEL Debug] sys_close: fd=0, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now 13
+v2 loader: PID=11 entry=0x0000001000000000 sp=0x0000001800000000 resident=[FILEIO TEST] Wrote data to fi3 tables=6
+[sys_close Debug] CPU=lA chdir r=Loading program for scheduler (v2 AS): 04 errno=e.
+LFN_T.BIN
+[sys_close Debug] CPU=1, PIDs=[1,9,4,8/LFN_T.BIN
+], caller_pid=9, fd=, PIDs=[1,9[sys_close Debug] CPU=00,, g_fd=5
+  3, PIDs=[41,9,4,,5], caller_pid=5, fd=3, g_fd=9
+[KERNEL Debug] sys_close: fd=3, ret=0
+
+[FATBIG] >1 MiB fat16 create/write/reopen round-trip
+5], caller_pid=13, fd=1, g_fd=13
+[KERNEL Debug] sys_close: fd=1, ret=0
+cwd="[KERNEL Debug] sys_close: fd=0/SUB1/SUB2, ret=0
+"
+/BIGFILE.BIN
+v2 loader: image mapped (lazy), bytes=57896 pages=15 first=in elap=4ms
+/SUB1/SUB2/nested.txt
+[KERNEL] sys_fork: tf->regs[0] is now 17
+v2 loader: PID=16 entry=0x0000001000000000 sp=0x0000001800000000[F[sys_close Debug] CPU=6, PIDs=[1,15[TEST2] Ini,BL resident=tiK2 tables=6
+TaI4,9]Loading program for scheduler (v2 AS): HEAPTEST.BIN
+, caller_pid=13/HEAPTEST.BINB create fd=EST P1: 512 K, fd=
+0i2, g_fd=14
+BL in tEIerrneo=l pr[sys_close Debug] CPU=O4, PIDs=[1,15,ompt4,9], caller_pid= TE 0gr ity (17, fd=SwrT][KERNEL Debug] sys_close: fd= re1a, g_fd=7
+[KERNEL Debug] sys_close: fd=1, ret=0
+2, ret=id 0tsuccesse +[sys_close Debug] CPU=4, PIDs=[1,15,Closed f
+ if4,lve.
+9], caller_pid=17, fd=2, g_fd=8
+[KERNEL Debug] sys_close: fd=2ullya, ret=.
+ri0
+ed-chunk r[TEST2] Testing 'ps'...
+ead-back)
+
+[LFN] VFAT long-name build-payload verifi[read_until] MATCHED: 'cation
+=== Welcome to HobbyOS Shell ===
+Type 'help' to see available builtins and syntax.
+
+user@hobbyos:/$ '
+[TEST3] Initial prompt read successfully.
+/BLKT1.TXT
+/TEST.TXT
+[TEST3] Creating dir/src/kernel/program_loader.c
+ectory /SUB1...
+v2 loader: image mapped (lazy), bytes=57672 pages=15 first=in elap=11ms
+v2 loader: PID=18 entry=0x0000001000000000 sp=0x0000001800000000 resident=1wrote= tables=4
+1Loading program for scheduler (v2 AS): SPAWN.BIN
+4 [sys_close Debug] CPU=4, PIDs=[1,16,5,14], caller_pid=2, fd=0, g_fd=5
+/SPAWN.BIN
+[KERNEL Debug] sys_close: fd=0, ret=
+--- Heap Test Started ---
+0
+Allocating 1MB...
+
+[FILEIO TEST] Reopened TEST.TXT for reading.
+[FILEIO TEST] Read data: Hello HobbyOS F[sys_close Debug] CPU=3, PIDs=[ile/SUB1/SUB2/nested.txt
+1,11,12,16], caller_pid=Successfully allocated 1MB
+system!16
+, fd=0, g_fd=17
+[sys_close Debug] CPU=v2 loader: image mapped (lazy), bytes=[KERNEL Debug] sys_close: fd=0, ret=B r5, PIDs=[/PS.BIN
+0er[sys_close Debug] CPU=2, PIDs=[1,18,
+ea114,16],18, caller_pid=55336 pages=14 first=in elap=14d9ms
+,14,3[TE fd], caller_pid=9ST] 'help' out=, fd=p, fd=2, g_fd=5
+0, g_fd=19
+[KERNEL Debug] sys_close: fd=Verified u[KERNEL Debug] sys_close: fd=0, ret=0
+t validated s2, ret=01MB writes
+uccessfull[LFN]y.
+ AlPASS [T
+locating 50MB...
+payload deep Successfully allocEST] Sated 50MB
+path src/kernel/program_loader.Verified 50MB writcending 'cd /home' com
+mand...
+es (start and end)
+v2 loader: PID=Freein[FIg 1MLEIO 19TB...
+ entry=0x0000001000000000 sp=0x0000001800000000 resident=2 tables=6
+EST] File I/O TeLoading program for scheduler (v2 AS): FORKTEST.BIN
+sts Compl/FORKTEST.BIN
+ete. Exiting.
+0 errno=0 Allocating 2MB (should reuse space)...
+Successfully allocated 2MB
+/src/user_include/graphics/window.h
+-got=-- Realloc Section ---
+/PS.BIN
+14 /MKDIR.BIN
+ data="[sys_close Debug] CPU=3, PIDs=[1,proSpawn Test: [sys_close Debug] CPU=2, PIDs=[1Stb2,16,12],v2 loader: image mapped (lazy), bytes=, caller_pid=12earting2,56344-cRE16, fd=[sys_close Debug] CPU=,12ALLO42C: a, g_fd=l], caller_pid= pages=14, PIDs=[l ch1,16eck, fd=s PASSE17D
+
+02,.16,12], caller_pid=14[KERNEL Debug] sys_close: fd=[TES..
+ first=, fd=in elap=13[KERNEL] Process 9: FILEIO.BIN exited unexpectedly or gracefully.
+o2, g_fd=--- Phase 5
+, g_fd=19
+4: m[KERNEL Debug] sys_close: fd=22, ret=T]emory syscall[KERNEL Debug] sys_close: fd=0, ret=0
+ms
+0
+, ret=0
+Spawn 'c s [Ld' prompt Test: v2 loader: PID=20 entry=0x0000001000000000-/MKDIR.BIN
+FN]--
+ PASS Slong dir + nested p sp=0x0000001800000000uawnipdsrc/use[sys_close Debug] CPU=2r_include/graphics/window.hng , PIDs=[1,18aCtON,12,16]SOLE.BIN...
+e v
+ resident=/src/llvm-project-21.1.8.src-EXAMPLE.c
+a, caller_pid=l1 tables=4
+iLoading program for scheduler (v2 AS): dSMPTEST.BIN
+12ate, fd=2, g_fd=5
+d [KERNEL Debug] sys_close: fd=2, ret=success0
+fully.
+[KERNEL] sys_fork: tf->regs[0] is now 21
+/SMPTEST.BIN
+[TEST] Sending 'cat SHTEST.TXT' command...
+v2 loader: image mapped (lazy), bytes=55336 pages=14 first=in elap=3ms
+[KERNEL] sys_fork: tf->regs[0] is now 23
+[sys_close Debug] CPU=2, PIDs=[1,ntent8,16,2], caller_pid=\n16, fd=0"[sys_close Debug] CPU=3, PIDs=[, g_fd=/PS.BIN
+v2 loader: PID=17
+22 entry=0x0000001000000000 sp=0x0000001800000000 resident=2 tables=6
+Loading program for scheduler (v2 AS): PIPETEST.BIN
+[KERNEL Debug] sys_close: fd=0/PIPETEST.BIN
+, ret=01,11,16,2], caller_pid=
+2, fd=0, g_fd=20
+[KERNEL Debug] sys_close: fd=0, ret=sbrk growt0
+h verified
+[LFN] PASS 30+ char component llvm-project-21.1.8.src-EXAMPmmap 1MB write/readLE.cback verified
+
+mmap no/MKDIR.BIN
+n-overlap verified
+munmap OK
+PHASE4 MEM: all checks PASSED
+--- Heap Test Completed ---
+[KERNEL] Process 18: HEAPTEST.BIN exited unexpectedly or gracefully.
+--- HobbyOS SMP Verifv2 loader: image mapped (lazy), bytes=55464 pages=ication ---
+
+=============Loading program for scheduler (v2 AS): CONSOLE.BIN========14 first=in elap=5ms
+
+==/CONSOLE.BIN
+v2 loader: PID===v2 loader: image mapped (lazy), bytes=====55128 pages==14v2 loader: image mapped (lazy), bytes=24 first= entry=0x000000100000000054936P pages=14 first=ipe Test Sint/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include/upper_bound.h
+arting...
+ elap=in elap=1417
+ sp=0x0000001800000000 resident=3 tables=6
+
+HobbyLoading program for scheduler (v2 AS): Oms
+S Fork Test
+=======GRAPHICS.BINms
+
+========/GRAPHICS.BIN
+===============
+Spawning 8 worker processes to saturate 4 cores...
+v2 loader: image mapped (lazy), bytes=55192 pages=14v2 loader: image mapped (lazy), bytes=58432 pages=15 first=in elap=4ms
+/SUB1/SUB2/nested.txt
+[KERNEL] sys_fork: tf->regs[0] is now 28
+[FORK TEST] Cal first=C abs fdling fork()...
+in elap=849ms
+v2 loader: PID=v2 loader: PID==27 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): WSRF_T.BIN
+/WSRF_T.BIN
+
+==============================
+Hello from isolated EL0 Space!
+==============================
+v2 loader: image mapped (lazy), bytes=375984 pages=92 first=in elap=3ms
+[KERNEL] sys_fork: tf->regs[0] is now 30
+[sys_close Debug] CPU=7, PIDs=[v2 loader: PID=1,25,20,11], caller_pid=16, fd=29 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): NETTEST.BIN0, g_fd=1726 entry=0x0000001000000000 sp=0x0000001800000000 resident=3 tables=6
+
+
+[KERNEL Debug] sys_close: fd=0, ret=0
+Process heart-beat from CPU: 5
+Computation finished. Exiting.
+[KERNEL] Process 26: CONSOLE.BIN exited unexpectedly or gracefully.
+Process heart-beat from CPU: 5
+[KERNEL] sys_fork: tf->regs[0] is now 31
+/NETTEST.BIN
+v2 loader: image mapped (lazy), bytes=55336 pages=14 first=in elap=3ms
+[KERNEL] sys_fork: tf->regs[0] is now 33
+v2 loader: PID=32 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): TIMEOUT.BIN
+Process heart-beat from CPU: 1
+Process heart-beat from CPU: 6
+Process heart-beat from CPU: 1
+[KERNEL] sys_fork: tf->regs[0] is now 34
+[FORK TEST] Pare/TIMEOUT.BIN
+nt: child PID = v2 loader: image mapped (lazy), bytes=55000 pages=14 first=in elap=2ms
+[KERNEL] sys_fork: tf->regs[0] is now 36
+0[FORK TEST] Child: I am thv2 loader: PID=35 entry=0x0000001000000000 sp=0x0000001800000000 resident=2 tables=e forked chil d!
+6
+Process heartLoading program for scheduler (v2 AS): STRESS.BIN
+User net_timeout_test starting...
+-beat from CPU: Connecting to 10.0.2.16:80 (expecting timeout)...
+7
+Process heart-beat from CPU: 7
+[KERNEL] sys_fork: tf->regs[0] is now 25
+Process heart-beat from CPU: /STRESS.BIN
+[FORK TEST] Child tick Process heart-beat f0User net_test 
+/CAT.BIN
+rom C[sys_close Debug] CPU=2, PIDs=[1,PU: 36,1
+10,25], caller_pid=10, fd=v2 loader: image mapped (lazy), bytes=starting...
+61992[ pages=WSRF[sys_close Debug] CPU=3, PIDs=[1Connecting to _2, g_fd=1.1.1.16 first=in21
+ elap=1:80...
+,[KERNEL Debug] sys_close: fd=2, ret=0T] wsurf 
+6ms
+render-con36,10,25], caller_pid=[ARP] routing off-subnet: target=v2 loader: PID=0x0000000001010101fin37 entry=0x0000001000000000/CAT.BIN
+ local_ip=eme0x000000000F02000An mask= sp=[sys_close Debug] CPU=2, PIDs=[1,36,t 10,25], caller_pid=10, fd=0x0000000000FFFFFF0x0000001800000000 resident=2 tables= gateway=0x000000000202000A2, g_fd=21
+125, fd=[KERNEL Debug] sys_close: fd=2, ret=0
+
+t
+
+===================6
+=Loading program for scheduler (v2 AS): ==============================
+[STRESS TESTests
+1, g_fd=20
+MONITORT.BIN] Initiating multi-process stress test.[KERNEL Debug] sys_close: fd=..
+==========================================Process heart-1, ret=========
+
+0
+beat from CPU: /MONITORT.BIN
+errno=0 got=14 [sys_close Debug] CPU=1, PIDs=[1,2,11,28], caller_pid=2, fd=0, g_fd=5
+[KERNEL Debug] sys_close: fd=0, ret=0
+
+[STRESS TEST] Pipes created. Forking 4 worker processes...
+[FORK TEST] Child tick 1
+v2 loader: image mapped (lazy), bytes=56744 pages=14 first=in elap=9ms
+[FORK TEST] Child tick 2
+[FORK TEST] Child tick 3
+[FORK TEST] Child tick 4
+[KERNEL] sys_fork: tf->regs[0] is now 39
+7v2 loader: PID=
+38 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): NFSTEST.BIN
+Connected! Sending HTTP GET...
+Request sent. Reading response...
+Process heart-beat from CPU: 7
+Process heart-beat from CPU: 3
+[KERNEL] sys_fork: tf->regs[0] is now 40
+[LFN]Spawn Test: Successfully spawned CONSOLE.BIN with PID=/NFSTEST.BIN
+26
+Process heart-beat from CPU: 3
+Received data:
+HTTP/1.1 301 Moved Permanently
+S/CAT.BINerver: cloudflare
+Date: Sat, 17 Oct
+ 2026 08:15:03 GMT
+Content-Type: text/html
+Content-Lengt
+[sys_close Debug] CPU=4, PIDs=[1,15,19,33], caller_pid=32, fd=0, g_fd=22v2 loader: image mapped (lazy), bytes=90264 pages=v2 loader: image mapped (lazy), bytes=55320 pages=1423 first=[FORK TESin
+ elap=6ms
+ first=in elap=T[KERNEL Debug] sys_close: fd=0, ret=05ms
+]
+ Child exiting.
+[KERNEL] sys_fork: tf->regs[0] is now 42
+v2 loader: PID=41 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): ERRTEST.BIN
+[sys_close Debug] CPU=6PProcess heart-beat from CPU: rocess heart-, PIDs=[1,19,21,363beat f
+/ERRTEST.BIN
+Sparom CPU: wn Test: Finis4
+hed. Exiting.
+], caller_pid=42, fd=5
+======, g_fd=28
+[KERNEL Debug] sys_close: fd=5, ret=0[KERNEL] Process 19: SPAWN.BIN exited unexpectedly or gracefully.
+
+==================================
+v2 loader: image mapped (lazy), bytes=57128 pages=14 first=in elap=1ms
+Process heart-beat from CPU: 4
+[KERNEL] sys_fork: tf->regs[0] is now [sys_close Debug] CPU=7, PIDs=[1,19,22,44
+37], caller_pid=39, fd=1, g_fd=24
+[KERNEL Debug] sys_close: fd=1, ret=0
+[sys_close Debug] CPU=7, PIDs=[1,19,22,37], caller_pid=39, fd=2, g_fd=25
+[KERNEL Debug] sys_close: fd=2, ret=0
+Process heart-beat from CPU: 4
+Process heart-beat from CPU: 4
+[KERNEL] sys_fork: tf->regs[0] is now 45
+[sys_close Debug] CPU=6, PIDs=[1,19,22,37], caller_pid=44, fd=9, g_fd=32
+[KERNEL Debug] sys_close: fd=9, ret=0
+[sys_close Debug] CPU=6, PIDs=[1,19,22,37], caller_pid=44, fd=10, g_fd=33
+[KERNEL Debug] sys_close: fd=10, ret=0
+/home/SHTEST.TXT
+[sys_close Debug] CPU=7, PIDs=[1,19,22,37], caller_pid=40, fd=2, g_fd=22
+[KERNEL Debug] sys_close: fd=2, ret=0
+[KERNEL] Process 40: cat exited unexpectedly or gracefully.
+[KERNEL] Process 36: SMPTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 46
+v2 loader: PID=43 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): HELLO.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 47
+System Monitor Test
+========================================
+/HELLO.BIN
+[sys_close Debug] CPU=2, PIDs=[Process heart-beat from CPU: [sys_close Debug] CPU=31,22,24,42]Test , caller_pid=1:24 sysinfo(2) mem, fd=0, g_fd=, PIDs=[v2 loader: image mapped (lazy), bytes=45880 pages=12 first=or19
+y 1info...
+[KERNEL Debug] sys_close: fd=0[KERNEL] Process 23: mkdir exited unexpectedly or gracefully.
+,23,24,42], caller_pid=42, fd=Child: reain6P elap=, ret=, g_fd=29
+0
+[KERNEL Debug] sys_close: fd=6ding..ms
+rocess he.
+6, ret=G[NFS] Child: read rneturned
+v2 loader: PID=art-beat 0
+from C26rhil entry=Cd fs_test stPgoapU: hics Test Pt 70x0000001000000000rogram Started
+ sp=data!
+After piparting0x0000001800000000
+e 
+ resident=1 tables=4
+call
+Fork returned: UNLoading program for scheduler (v2 AS): LKSTEST.BIN
+[sys_close Debug] CPU=K7, PIDs=[1,25,28,43], caller_pid=46, fd=13, g_fd=36
+[KERNEL Debug] sys_close: fd=13, ret=0
+/LKSTEST.BIN
+[sys_close Debug] CPU=7, PIDs=[1,25,28,47], caller_pid=46, fd=14, g_fd=37
+[KERNEL Debug] sys_close: fd=14, ret=0
+NOW  BN_VALUE: F6orLKTEST P1 writk reture 512 K
+ned: 0
+iB: PASS
+[sys_close Debug] CPU=[KERNEL] Process 28: SMPTEST.BIN exited unexpectedly or gracefully.
+6, PIDs=[1,26,28,47], caller_pid=15, fd=0, g_fd=18
+v2 loader: image mapped (lazy), bytes=[ PASS re106232 pages=ad[TEST] 26deep nested libcxx-sty'cat' l_until] MATCHe paE[KERNEL Debug] sys_close: fd=D: 'mkdir /Sfile ou first=in elap=9ms
+th uppetv2 loader: PID=r023 entry=0x0000001000000000 sp=0x0000001800000000 resident=1_bound.h, ret= tables=4
+
+p0
+UBut validated successfully.
+1
+/SRC/KERNEL/PROGRAM_LOADER.C
+Loading program for scheduler (v2 AS): HEDTEST.BIN[sys_close Debug] CPU=7mkdir: c, PIDs=[133,27,30,5]
+, caller_pid=ann
+[FOR16K TEST], fd= P[TEST] Seot 0arent, g_fd=18ndin/HEDTEST.BIN
+[KERNEL Debug] sys_close: fd=crea tick 
+00
+g, ret= piped 'cat SHTEST.TXT |te directory /SUB1
+user@hobbyos:/$ '
+ grep 0
+line' com[LGraphics initialmand...
+ized. DrawiFN]ng...
+ PASS case-insensitive pv2 loader: image mapped (lazy), bytes=59768 pages=15 first=in elap=3ms
+ath /SRC/KERNEL/PROGRAM_LOADER.CProcess heart-beat from CPU: 2
+[KERNEL] sys_fork: tf->regs[0] is now 49
+net_test success!
+v2 loader: PID=48 entry=0x0000001000000000[sys_close Debug] CPU=6, PIDs=[1,30,32,12], caller_pid=24, fd=1, g_fd=20
+[KERNEL Debug] sys_close: fd=1, ret=0
+Parent exiting
+[KERNEL] Process 24: PIPETEST.BIN exited unexpectedly or gracefully.
+Process heart-bea
+t from CPU: [sys_close Debug] CPU=6, PIDs=[1,30,32,12], caller_pid=25, fd=0, g_fd=19
+[KERNEL] Process 33: FORKTEST.BIN exited unexpectedly or gracefully.
+ sp=1[KERNEL Debug] sys_close: fd=
+0, ret=[sys_close Debug] CPU=2, PIDs=[1,31,37,12], caller_pid=0
+37, fd=0, g_fd=23
+[KERNEL Debug] sys_close: fd=0, ret=0
+Child exiting
+[sys_close Debug] CPU=2, PIDs=[1,31,37,[KERNEL] Process 25: PIPETEST.BIN exited unexpectedly or gracefully.
+15]Process heart-beat from CPU/LS.BIN, caller_pid=37, fd=3, g_fd=26/BLKT1.TXT0x0000001800000000
+
+ resident=1 tables=4
+[KERNEL Debug] sys_close: fd=3, ret=0
+Loading program for scheduler (v2 AS): 
+
+: TAILTEST.BIN
+/TAILTEST.BIN
+/longfilename.txt
+[sys_close Debug] CPU=4, PIDs=[1,34,38,20], caller_pid=16, fd=0, g_fd=20
+  PASS: total=[KERNEL Debug] sys_close: fd=0, ret=0
+v2 loader: image mapped (lazy), bytes=[LFN]59784 pages= PASS 15 first=in elap=3ms
+v2 loader: PID=50 entry=0x0000001000000000 sp=0x0000001800000000 resident=15637144576collision longfilename.txt free=5570035712
+ tables=4
+
+Loading program for scheduler (v2 AS): PROCTEST.BIN/longfilename2.txt1
+[sys_close Debug] CPU=Test 2: sysi
+1, PIDs=[1n
+f,37,o(38,5) CPU info.22], caller_pid=37, fd=4, g_fd=27
+..
+[KERNEL Debug] sys_close: fd=4, ret=0
+/PROCTEST.BIN
+Loading program for scheduler (v2 AS): CAT.BIN
+[sys_close Debug] CPU=/CAT.BIN
+1, PIDs=[1,37,40,22], caller_pid=37, fd=7, g_fd=30
+[KERNEL Debug] sys_close: fd=7v2 loader: image mapped (lazy), bytes=55320 pages=14 first=in elap=0ms
+, ret=0
+v2 loader: PID=52 entry=0x0000001000000000[sys_close Debug] CPU=1, PIDs=[1,37,40,22], caller_pid=37, fd=8, g_fd=v2 loader: image mapped (lazy), bytes=75800 pages=1931
+[KERNEL Debug] sys_close: fd=8, ret=0
+ first=in sp=0x0000001800000000 resident=1 tables=4 elap=2ms
+
+[sys_close Debug] CPU=1, PIDs=[1,37,2,22], caller_pid=D spawn pid=[FORK TEST] Parent tick 37, fd=11, g_fd=34v2 loader: PID=51
+[KERNEL Debug] sys_close: fd=11, ret=0
+52[sys_close Debug] CPU=1, PIDs=[1,37,2,221 entry=0x0000001000000000 sp=0x0000001800000000], caller_pid=37, fd=12, g_fd=35
+[KERNEL Debug] sys_close: fd= resident=
+12, ret=0
+1 tables=4
+ [sys_close Debug] CPU=1, PIDs=[1,37,2,22]Loading program for scheduler (v2 AS): 
+WCTEST.BIN
+[sys_close Debug] CPU=2, PIDs=[1,37, caller_pid=37, fd=,2/WCTEST.BIN
+15, g_fd=38
+,26], caller_pid=2, fd=[  PASS: 1, g_fd=21upt[KERNEL Debug] sys_close: fd=15, ret=0
+
+ime=[KERNEL Debug] sys_close: fd=1HELLO] enteri13, ret=0
+s idleng main
+=v2 loader: image mapped (lazy), bytes=59928 pages=15 first=in[HELLO] 0as cpus=rgc= elap=4ms
+1v2 loader: PID=40 entry=0x0000001000000000 sp=0x0000001800000000
+Test 3: sysinfo(1) uptime...
+  PASS: uptime=1 resident=113 tables=4
+s
+
+Loading program for scheduler (v2 AS): REGTEST.BIN
+Test 4: CPU usage s/REGTEST.BIN
+anit[HEy c[heck..LLO .
+] argv[ PASSTRESS TEST] Parent starting coordination ping-pong loop (120 iterations)...
+S [STRESS Terrno starts at 0v2 loader: image mapped (lazy), bytes=141000EST] Progress: Iteration
+ 1/120 pages=35 first=in elap=5ms
+
+  PASS open(missing, 0) -> ENOENT
+/ERRNO9.TXT
+  PASS open(O_CREAT|O_EXCL) creates
+  PASS second O_CREAT|O_EXCL -> EEXIST
+/ERRNO9.TXT
+  PASS re-open of created file works
+[sys_close Debug] CPU=1, PIDs=[1,43,10,27], caller_pid=43, fd=0, g_fd=40
+[KERNEL Debug] sys_close: fd=0, ret=[WCTEST] starting
+0
+[sys_close Debug] CPU=1, PIDs=[1,43,10,27], caller_pid=43, fd=1, g_fd=/WCTEST.TXT
+41
+[KERNEL Debug] sys_close: fd=1, ret=0
+[sys_close Debug] CPU=1, PIDs=[1,43,10,27], caller_pid=43, fd=-1, g_fd=[sys_close Debug] CPU=-1
+7[KERNEL Debug] sys_close: fd=, PIDs=[1,43-1, ret=-1
+,10,27], caller_pid=40, fd=0, g_fd=40
+  PASS close(-1) -> EBADF[KERNEL Debug] sys_close: fd=0, ret=0
+
+  PASS read(-1) -> EBADF/WCTEST2.TXT
+
+  PASS write(-1) -> EBADF
+[sys_close Debug] CPU=1, PIDs=[1,43,10,27], caller_pid=43, fd=31, g_fd=-1
+[KERNEL Debug] sys_close: fd=31, ret=-1
+  PASS close(31) [never opened] -> EBADF
+  PASS kill(999999,0) -> ESRCH
+[sys_close Debug] CPU=7, PIDs=[1,43,10,27], caller_pid=40, fd=0, g_fd=40
+[KERNEL Debug] sys_close: fd=0, ret=0
+  PASS mkdir(ERRTEST) succeeds
+  PASS mkdir(ERRTEST) again -> EEXIST
+[KERNEL] sys_fork: tf->regs[0] is now 54
+  PASS: idle time i0v2 loader: PID=s sane
+53 entry=0x0000001000000000 sp=0x0000001800000000 resident=Test 5: 1 tables=4
+Error handling - small buffLoading program for scheduler (v2 AS): SEDTEST.BIN
+er...
+/SEDTEST.BIN
+/TEST1.TXT
+v2 loader: image mapped (lazy), bytes=69096 pages=17 first=in elap=3ms
+v2 loader: PID=56 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): GREPTEST.BIN
+/GREPTEST.BIN
+[sys_close Debug] CPU=2, PIDs=[1,45,12,27], caller_pid=12, fd=2, g_fd=18
+[KERNEL Debug] sys_close: fd=2, ret=0
+[NFS] PASS network came up (DHCP)
+v2 loader: image mapped (lazy), bytes=69032 pages=17 first=in elap=2ms
+v2 loader: PID=57 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): CUTTEST.BIN
+/CUTTEST.BIN
+v2 loader: image mapped (lazy), bytes=61288 pages=15 first=[ARP] routing off-subnet: target=0x00000000010200C0  PASS in elap=3ms
+v2 loader: PID=58 entry=chdi local_ip=0x000000000F02000A0x0000001000000000r[sys_close Debug] CPU=2, PIDs=[(missing) -1,48,16,27 mask=>], caller_pid=16, fd=0, g_fd=20
+ ENOEN0x0000000000FFFFFF gateway=0x000000000202000A
+T sp=0x0000001800000000 resident=[KERNEL Debug] sys_close: fd=0, ret=0
+/TEST3.TXT
+1 tables=4
+[LFN]Loading program for scheduler (v2 AS): TRTEST.BIN
+ PASS collision longfilename2.txt/TRTEST.BIN
+
+  PASS: small buffer rejected
+  PASS: small buffer rejected
+Test 6: Verifying busy time accumulates...
+v2 loader: image mapped (lazy), bytes=61512 pages=16 first=Process heart-beat from CPU: in elap=2ms
+/longfil~1.txt
+v2 loader: PID=59 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): 1
+PASTE_T.BIN
+/PASTE_T.BIN
+v2 loader: image mapped (lazy), bytes=61960 pages=16 first=in elap=1ms
+v2 loader: PID=60 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): FOLDTEST.BIN
+/FOLDTEST.BIN
+v2 loader: image mapped (lazy), bytes=62664 pages=16 first=in elap=1ms
+v2 loader: PID=61 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): NLTEST.BIN
+/NLTEST.BIN
+v2 loader: image mapped (lazy), bytes=61864 pages=16 first=in elap=2ms
+v2 loader: PID=62 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=/TEST4.TXT
+[sys_close Debug] CPU=4, PIDs=[1,50,22,27], caller_pid=39, fd=1, g_fd=44
+4
+Loading program for scheduler (v2 AS): COMMTEST.BIN
+/COMMTEST.BIN
+[KERNEL Debug] sys_close: fd=1, ret=0
+[LKSTEST] starting
+/LKSTEST.TXT
+v2 loader: image mapped (lazy), bytes=61464 pages=16 first=in elap=[LKSTEST] PASS 3open fixture
+ms
+v2 loader: PID=63 entry=Process heart-beat 0x0000001000000000fr sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): TSORT_T.BIN
+om CPU: /TSORT_T.BIN
+/TEST1.TXT
+]="HELLO.BIN"
+[HELLO] main returned 0
+[KERNEL] Process 26: HELLO.BIN exited unexpectedly or gracefully.
+Gra/SUB1/SUB2/nested.txt
+[HEDTEST] starting
+/TEST2.TXT
+phics Validation: SUCCESS (Pixel matches expected color)
+Validating new graphics primitives...
+v2 loader: image mapped (lazy), bytes=127912 pages=32 first=in elap=5ms
+v2 loader: PID=6 entry=0x0000001000000000 sp=0x0000001800000000 resident=Process heart-beat from CPU: 3
+1 tables=4
+Loading program for scheduler (v2 AS): EXPAND_T.BIN
+
+/HEDTEST.TXT  PASS getcwd(tiny) -> ERANG
+/EXPAND_T.BIN
+E
+Unknown System Call Invoked!
+  PASS raw syscall 999 -> -ENOSYS
+[ERRNO] ALL TESTS PASSED
+[KERNEL] Process 43: ERRTEST.BIN exited unexpectedly or gracefully.
+[sys_close Debug] CPU=4, PIDs=[1,53,29,34], caller_pid=44, fd=9, g_fd=18
+[KERNEL Debug] sys_close: fd=9, ret=0
+3
+[sys_close Debug] CPU=1, PIDs=[1,54,30,38], caller_pid=54, fd=2, g_fd=22
+[KERNEL Debug] sys_close: fd=2, ret=0
+v2 loader: image mapped (lazy), bytes=61128 pages=15 first=in elap=2ms
+v2 loader: PID=7 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): UNEXPAND_T.BIN
+/UNEXPAND_T.BIN
+v2 loader: image mapped (lazy), bytes=61160 pages=15 first=in elap=1ms
+v2 loader: PID=9 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): CKSUM_T.BIN
+Loading program for scheduler (v2 AS): WC.BIN[sys_close Debug] CPU=
+4, PIDs=[1,55,[sys_close Debug] CPU=31/WC.BIN
+,39], caller_pid=46, fd=13, g_fd=45
+3, PIDs=[1/CKSUM_T.BIN
+,55,31,39], caller_pid=39, fd=1, g_fd=44
+[KERNEL Debug] sys_close: fd=[KERNEL] Process 31: SMPTEST.BIN exited unexpectedly or gracefully.
+1, ret=0
+v2 loader: image mapped (lazy), bytes=110712 pages=28 first=in elap=4ms
+[KERNEL Debug] sys_close: fd=13, ret=v2 loader: PID=19 entry=0x0000001000000000 sp=0x00000018000000000
+ resident=1 tables=4
+v2 loader: image mapped (lazy), bytes=62216 pages=16 first=in elap=3ms
+v2 loader: PID=18 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4/TEST4.TXT
+
+[sys_close Debug] CPU=2, PIDs=[1,7,40,44], caller_pid=40, fd=/TEST3.TXT[sys_close Debug] CPU=0, g_fd=7, PIDs=[1
+Loading program for scheduler (v2 AS): MD5SUM_T.BIN
+40
+[KERNEL Debug] sys_close: fd=0, ret=0
+,7/MD5SUM_T.BIN
+[sys_close Debug] CPU=2, PIDs=[1,7,40,45], caller_pid=52, fd=2, g_fd=,40,45], caller_pid=40, fd=1, g_fd=41
+[KERNEL Debug] sys_close: fd=1, ret=0
+47
+[KERNEL Debug] sys_close: fd=2, ret=0
+[sys_close Debug] CPU=2, PIDs=[1,7,40,45], caller_pid=40, fd=3, g_fd=43
+[KERNEL Debug] sys_close: fd=[KERNEL] Process 52: CAT.BIN exited unexpectedly or gracefully.
+v2 loader: image mapped (lazy), bytes=3, ret=0
+61352Process heart-beat from  pages=15[sys_close Debug] CPU=2 first=in elap=6ms
+CP, PIDs=[1,9,42,v2 loader: PID=U55 entry=0x0000001000000000 sp=45], caller_pid=42: /CAT.BIN
+, fd=5, g_fd=48
+0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): TACTEST.BIN
+/TACTEST.BIN
+[sys_close Debug] CPU=[KERNEL Debug] sys_close: fd=5, ret=0
+3, PIDs=[1,9,44,46], caller_pid=46[sys_close Debug] CPU=2, PIDs=[1,10,44,46], caller_pid=44, fd=9, fd=, g_fd=4413, g_fd=18
+[KERNEL Debug] sys_close: fd=
+13, ret=0
+[KERNEL Debug] sys_close: fd=9, ret=0v2 loader: image mapped (lazy), bytes=
+289128 pages=71 first=in elap=2ms
+[KERNEL] sys_fork: tf->regs[0] is now 26
+v2 loader: PID=24 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+[TAILTELoading program for scheduler (v2 AS): [sys_close Debug] CPU=ST] starCMPTEST.BIN3ting
+, PIDs=[1,11
+/CMPTEST.BIN
+,49,48], caller_pid=48, fd=0, g_fd=49
+[KERNEL Debug] sys_close: fd=0, ret=0
+/LS.BIN/TLTEST1.TXT
+
+[sys_close Debug] CPU=4, PIDs=[1,12,53,50], caller_pid=54, fd=2, g_fd=21
+[KERNEL Debug] sys_close: fd=2, ret=0
+v2 loader: image mapped (lazy), bytes=106136 pages=26 first=in elap=6ms
+v2 loader: PID=43 entry=0x0000001000000000 sp=0x0000001800000000 resident=/CAT.BIN
+1 tables=4
+Loading program for scheduler (v2 AS): POLLTST.BIN
+[KERNEL] process_create: no free process slots! zombies=[6 exited=6
+PROCTEST] starting
+[sys_close Debug] CPU=1, PIDs=[1[PROCTEST] pid=,16,55,51], caller_pid=16, fd=0, g_fd=20
+51[KERNEL Debug] sys_close: fd=0, ret=0
+ ppid=-1[LFN] PASS collision longfil~1.txt
+[sys_close Debug] CPU=3, PIDs=[1,19,57,54], caller_pid=54, fd=2, g_fd=21
+[KERNEL Debug] sys_close: fd=2, ret=0
+[KERNEL] process_create: no free process slots! zombies=6 exited=6
+[KERNEL] sys_fork: tf->regs[0] is now -11
+sh: fork failed
+[KERNEL] process_create: no free process slots! zombies=6 exited=6
+[PASTETEST] starting
+D cat got=14  out="probe-content\n"[sys_close Debug] CPU=7, PIDs=[1,22,61,56], caller_pid=2, fd=0, g_fd=5
+[KERNEL Debug] sys_close: fd=0, ret=0
+ code=2 
+E start
+/TEMP.TXT
+E create fd=0 [GREPTEST] starting: 65 golden cases from GNU grep 2.5.4
+[LKSTEST] PASS fstat ok
+[LKSTEST] PASS fstat size[CUTTEST] starting
+[TRTEST] starting
+wrote=13 [sys_close Debug] CPU=2, PIDs=[1,24,2,59], caller_pid=[sys_close Debug] CPU=7, PIDs=[1,24,2,59], caller_pid=10, fd=/POLLTST.BIN
+2, fd=0, g_fd=5
+2, g_fd=22
+[KERNEL Debug] sys_close: fd=2, ret=0
+[sys_close Debug] CPU=7, PIDs=[1,24,2,59], caller_pid=10, fd=3, g_fd=39
+[KERNEL Debug] sys_close: fd=3, ret=[KERNEL Debug] sys_close: fd=0, ret=0
+0
+
+[UNEXPTEST] starting
+/TRTEST.TXT[sys_close Debug] CPU=1, PIDs=[1,26,2,59], caller_pid=26, fd=3, g_fd=39
+[KERNEL Debug] sys_close: fd=3, ret=0
+[sys_close Debug] CPU=4, PIDs=[1,26,2,59], caller_pid=
+v2 loader: image mapped (lazy), bytes=12, fd=2, g_fd=18
+[KERNEL Debug] sys_close: fd=2, ret=61000 pages=15 first=in elap=6ms
+0
+v2 loader: PID=52 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=[KERNEL] sys_fork: tf->regs[0] is now /PSTA.TXT
+-11
+4
+Loading program for scheduler (v2 AS): RANDTST.BIN
+/GREP.BIN
+
+[FOLDTEST] starting
+  PASS: line startpoint
+  PASS: line midpoint/FOLDTEST.TXT
+[FORK TEST] Parent tick 2
+[COMMTEST] starting
+/COML.TXT
+[FORK TEST] Parent tick 3
+
+[LKSTEST] PASS fstat S_ISREG
+[LKSTEST] PASS fstat mode perms
+[LKSTEST] PASS fstat blocks rounding
+[LKSTEST] PASS fstat nlink
+[LKSTEST] PASS fstat blksize
+[LKSTEST] PASS stat ok
+[LKSTEST] PASS stat size
+[LKSTEST] PASS stat S_ISREG
+[LKSTEST] PASS st_ino nonzero
+[LKSTEST] PASS fstat identity ok
+[LKSTEST] PASS fstat st_ino == stat st_ino
+[sys_close Debug] CPU=7, PIDs=[1,38,2,6], caller_pid=26, fd=3, g_fd=5
+[KERNEL Debug] sys_close: fd=3, ret=0
+/GREP.BIN
+[sys_close Debug] CPU=7, PIDs=[1,38,2,6], caller_pid=26, fd=3, g_fd=5
+[KERNEL Debug] sys_close: fd=3, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now -11
+file_write: wrong pipe end: 0
+[KERNEL] Process 26: SH.BIN exited unexpectedly or gracefully.
+[TSORTT
+EST]  PASS: busy time did not decrease
+/TACA.TXT   PASS: starting
+
+
+========================================
+line endpoint
+  PASS: fill_circle center
+  PASS: fill_circle east edge
+  PASS: fill_circle north edge
+[EXPANDTEST] starting
+  PASS: draw_circle rim
+  PASS: draw_circle hollow
+  PASS: gradient top/TEST2.TXT
+/EXPTAB.TXT
+
+/UNEXPD.TXT
+ALL MONITOR TESTS PASSED SUCProcesCESSFULLY!
+s he=====art-beat from CPU: =============4====
+==================
+3
+[KERNEL] Process 38: MONITORT.BIN exited unexpectedly or gracefully.
+[sys_close Debug] CPU=7, PIDs=[1,45,2,11], caller_pid=42, fd=5, g_fd=22
+[KERNEL Debug] sys_close: fd=5, ret=0
+sh: fork failed
+Process heart-beat from CPU: 1
+/CAPA.TXT
+[LFN] PASS read_/HEDTEST2.TXT
+dir /src/kernel lists program_loader.c
+[sys_close Debug] CPU=7, PIDs=[1,49,2,16], caller_pid=48, fd=0, g_fd=48
+[KERNEL Debug] sys_close: fd=0, ret=0
+[LFN] PASS read_dir / lists longfilename.txt
+[PROCTEST] PASS getpid != 0[read_until] MATCHED: 'ls -l /
+user@hobbyos:/$ '
+
+[CKSUMTEST] starting
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[REGTEST] sysroot GNU regex acceptance test
+[KERNEL] Process 54: SH.BIN exited unexpectedly or gracefully.
+/CKSEMPTY.TXT
+[MD5TEST] starting
+/RANDTST.BIN
+POLLTST: F1.2 select() readiness/timeout/blocking checks
+[sys_close Debug] CPU=2, PIDs=[1,57,9,22], caller_pid=9, fd=0, g_fd=47
+v2 loader: image mapped (lazy), bytes=66216 pages=17[KERNEL Debug] sys_close: fd=0, ret=[LKSTEST] PASS  first=in elap=12stat repeat ok
+ms
+[LKSTEST] PASS st_ino stable across stats0v2 loader: PID=54 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=
+/MD5EMPTY.TXT
+
+4
+Loading program for scheduler (v2 AS): SOCK2TST.BIN
+/SOCK2TST.BIN
+/CUTTEST.TXT
+v2 loader: image mapped (lazy), bytes=62440 pages=16 first=in elap=4ms
+v2 loader: PID=26 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): FPU_T.BIN
+[SEDTE[sys_close Debug] CPU=4, PIDs=[1ST] starting: ,61,11,23], caller_pid=59, fd=0, g_fd=20
+59[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=/LKSTEST2.TXT4, PIDs=[1,
+62,15,23], caller_pid=60, fd=0, g_fd=18
+[NLTEST] starting
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=4, PIDs=[1,62,16,23], caller_pid=61, fd=0, g_fd=21
+[sys_close Debug] CPU=1, PIDs=[[LFN]1,63,16,24 PASS ], caller_pid=63, fd=0, g_fd=44
+[KERNEL Debug] sys_close: fd=0, ret=0
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=/NLTEST.TXT
+2, PIDs=[1,4,18,26], caller_pid=18, fd=0, g_fd=48
+[KERNEL Debug] sys_close: fd=0, ret=0
+/TRDIG.TXT
+SOCK2TST: F1 socket/select acceptance (browser.md F1.1-F1.3)
+  PASS: gradient bottom
+  PASS: /COMR.TXT
+clip blocks outside
+  PASS: clip allows inside
+/CKSA.TXT
+  PASS: scaled t/TSTCH.TXT
+ext drew pixels
+/PSTB.TXT
+[sys_close Debug] CPU=1, PIDs=[1,7,18,27], caller_pid=7, fd=0, g_fd=45
+[KERNEL Debug] sys_close: fd=0, ret=0
+/EXPLIST.TXT
+/FOLDSP.TXT
+/UNEXP7.TXT
+/WCTEST.TXT
+[sys_close Debug] CPU=7, PIDs=[1,11,19,27], caller_pid=62, fd=0, g_fd=18
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=7, PIDs=[1,11,19r,27], caller_pid=63, fd=0, g_fd=44
+ead_dir / lists longfilename2.txt
+[KERNEL Debug] sys_close: fd=0, ret=0
+[LFN] PASS /COMLD.TXT
+read_dir /src shows 30+ char name (31-char syscall cap)
+[ARP] routing off-subnet: target=0x00000000010200C0 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=[KERNEL] Process 21: ps exited unexpectedly or gracefully.
+0x000000000202000A
+/FPU_T.BIN
+v2 loader: image mapped (lazy), bytes=58248[LKSTEST] PASS open second f pages=15ixture first=in elap=2ms
+
+v2 loader: PID=21 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): GFXBENCH.BIN
+/lfn_newfile_created.txt
+[sys_close Debug] CPU=7, PIDs=[1,19,23,27], caller_pid=6, fd=0, g_fd=48
+[KERNEL Debug] sys_close: fd=0, ret=[sys_close Debug] CPU=2, PIDs=[1,20,24,27], caller_pid=24, fd=0
+0, g_fd=5
+[FORK TEST] Parent tick 4
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=4, PIDs=[1,21,24,27], caller_pid=18, fd=0, g_fd=21
+[KERNEL Debug] sys_close: fd=0, ret=0
+  SOCK2TST socket(AF_UNIX, SOCK_STREAM, 0) >= 0: PASS
+[sys_close Debug] CPU=2, PIDs=[1,22,26,27], caller_pid=26, fd=0, g_fd=5
+[KERNEL Debug] sys_close: fd=0, ret=0
+[LKSTEST] PASS fstat second file
+[LKSTEST] PASS distinct files -> distinct st_ino
+[sys_close Debug] CPU=1, PIDs=[1,23,26,29], caller_pid=23, fd=1, g_fd=49
+[KERNEL Debug] sys_close: fd=1, ret=0
+Graphics Validation: SUCCESS (Pixel matches expected color)
+GRAPHICS ALL TESTS PASSED
+[KERNEL] Process 27: GRAPHICS.BIN exited unexpectedly or gracefully.
+[FORK TEST] Parent exiting.
+[KERNEL] Process 20: FORKTEST.BIN exited unexpectedly or gracefully.
+/TACB.TXT
+Process heart-beat from CPU: 3
+[sys_close Debug] CPU=1, PIDs=[1,24,34,30], caller_pid=24, fd=0, g_fd=5
+[KERNEL Debug] sys_close: fd=0, ret=0
+/GFXBENCH.BIN
+/TACC.TXT
+[sys_close Debug] CPU=1, PIDs=[1,24[LKSTEST] Loading program for scheduler (v2 AS): /MV.BIN
+PASS ,stat missing -> ENOENT38/MV.BIN
+,37
+[LKST], caller_pid=24, fd=0, g_fd=5
+EST] PASS lseek SE[KERNEL Debug] sys_close: fd=0, ret=EK_SET 6
+0
+[LKSTEST] PASS lseek SEEK_CUR +5
+v2 loader: image mapped (lazy), bytes=60232 pages=15 first=in elap=9ms
+v2 loader: PID=33 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): MATH_T.BIN
+/MATH_T.BIN
+/CKSAN.TXT
+v2 loader: image mapped (lazy), bytes=71224 pages=18 first=in elap=2ms
+v2 loader: PID=27 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=Process heart-beat from CPU: 43
+
+Loading program for scheduler (v2 AS): CXXSMOKE.BIN
+/TACD.TXT
+  SOCK2TST socket(AF_UNIX, SOCK_RAW, 0) -> -1/EPROTONOSUPPORT: PASS
+  SOCK2TST socket(STREAM,UDP) -[sys_close Debug] CPU=7, PIDs=[1> -1/EPROTONOSUPPORT:,30,48,49], caller_pid=19, fd=2 P, g_fd=53
+[KERNEL Debug] sys_close: fd=2, ret=0AS
+S
+[KERNEL] Process 19: WC.BIN exited unexpectedly or gracefully.
+  SOCK2TST socket(AF_INET,SOCK_STRE[FAM,TPUCP)_T] floating-point  >bring-up test= 
+0[sys_close Debug] CPU=3, PIDs=[1,33,48,50], caller_pid=50, fd=0, g_fd=41
+[KERNEL Debug] sys_close: fd=0, ret=0
+/TLTEST2.TXT
+[LKSTEST] PASS read 5 @11
+[LKSTEST] PASS read-back 'gamma'
+[LKSTEST] PASS lseek SEEK_END 0
+[LKSTEST] PASS lseek SEEK_END -4
+[LKSTEST] PASS read 4 @27
+[LKSTEST] PASS read-back 'lon\n'
+[LKSTEST] PASS lseek beyond EOF
+[LKSTEST] PASS read past EOF -> [KERNEL] sys_fork: tf->regs[0] is now 0
+-11
+[LKSTEST] PASS lseek bad fd -> EBADF
+[LKSTEST] PASS lseek bad whence -> EINVAL
+[sys_close Debug] CPU=7, PIDs=[1,33,48,52], caller_pid=23, fd=0, g_fd=46
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=7, PIDs=[1,33,48,53], caller_pid=24, fd=0, g_fd=21
+[KERNEL Debug] sys_close: fd=0, ret=0
+: PASS
+  SOCK2TST getsockopt(SO_TYPE) == SOCRANDTST: F1.4 SYS_GK_ETRANDSTREAM after sockeOM entt()r: opy checPAks
+SS
+  SOCK2TST getsockopt(SO_ERROR) == 0 on a fresh socket: PASS
+  SOCK2TST getsockopt(unknown option) -> -1/ENOPROTOOPT: PASS
+  SOCK2TST getsockopt(bad level) -> -1/ENOPROTOOPT: PASS
+  SOCK2TST  setsockop Rt(ANSO_RDTEUSTSE AD16 consecDRut) ivaccee pt8-byedte d as a no-opra: wsPA allSS diffe
+r: PASS
+  RANDTST first draw:   SOCK2TST fcntl(F_GETFL0x5A) ==6E659164412E23 0 on a fres
+h socket: PASS
+  SOCK2TST fcntl(F_SETFL, O_NONBLOCK) == 0: PASS
+  SOCK2TST MATH_T.BIN: P3.2 transcendental acceptance (EL0, libc.a)
+[sys_close Debug] CPU=3, PIDs=[1,33,48,55], caller_pid=55, fd=0, g_fd=47
+[KERNEL Debug] sys_close: fd=0, ret=0
+v2 loader: image mapped (lazy), bytes=54920 pages=14 first=in elap=3ms
+/MD5ABC.TXT
+v2 loader: PID=20 entry=MATH_0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+SIN_ONE: PASS
+E spawn 0 MATH_/SIN_HALF: PASS
+MATH_SIN_NEG_P075: PASS
+MV.BIN piMATH_COS_ONE: PASS
+d=/CXXSMOKE.BIN
+ golden cases from GNU sed 4.8
+[TEST2] 'ps' validated successfully.
+[TEST2] Testing 'free'...
+v2 loader: image mapped (lazy), bytes=77416 pages=19 first=in elap=4ms
+v2 loader: PID=38 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): DNSTST.BIN
+[sys_close Debug] CPU=4, PIDs=[1,/GRT.IN
+33,48,57], caller_pid=7, fd=0, g_fd=45
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=3, PIDs=[1,33,48,57], caller_pid=57, fd=0[KERNEL] Process 30: SMPTEST.BIN exited unexpectedly or gracefully.
+, g_fd=41
+/EXPMIX.TXT
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=3, PIDs=[1,33,48,58], caller_pid=58, fd=0, g_fd=39
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=4, PIDs=[1,33,48,58], caller_pid=9, fd=0, g_fd=52
+[KERNEL Debug] sys_close: fd=0, ret=0/CUTTAB.TXT
+
+/TEST1.TXT
+[sys_close Debug] CPU=3, PIDs=[1,33,48,60], caller_pid=60, fd=0, g_fd=50
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=7, PIDs=[1,33,48,60], caller_pid=40, fd=2, g_fd=42
+/PSTC.TXT
+[KERNEL Debug] sys_close: fd=2, ret=0
+/FREE.BIN
+/TEST2.TXT
+/NLALL.TXT
+[sys_close Debug] CPU=7, PIDs=[1,34,48,62], caller_pid=43, fd=0, g_fd=22
+[sys_close Debug] CPU=4, PIDs=[1,38,48,62], caller_pid=16, fd=0, g_fd=44
+[KERNEL Debug] sys_close: fd=0[CXX_SMOKE], ret=0[sys_close Debug] CPU=3, PIDs=[
+ minimal C++ runtime acceptance (F2.4)
+1,38,[KERNEL Debug] sys_close: fd=0, ret=/TEST3.TXT
+0
+48,63], caller_pid=63, fd=0, g_fd=18
+  CXX_SMOKE [KERNEL Debug] sys_close: fd=0, ret=0
+init-array-before-main[sys_close Debug] CPU=1, PIDs=[1,39,48,63], caller_pid=39, fd=1, g_fd=41
+[KERNEL Debug] sys_close: fd=1, ret=0/lfn_newfile_created.txt
+
+/COMRD.TXT
+[WCTEST] PASS -l -w -c file
+Process heart-beat from CPU: Loading program for scheduler (v2 AS): WC.BIN
+20 /TEST4.TXT
+/TSTDM.TXT
+/CAPB.TXT
+/TEMP.TXT new=/TEMP2.TXT
+[sys_close Debug] CPU=1, PIDs=[1,44,48,9], caller_pid=44, fd=9, g_fd=22
+/UNEXP9.TXT
+[KERNEL Debug] sys_close: fd=9, ret=0
+  FPU_T float-mul-add: PASS
+  FPU_T float-neg-mul: PASS
+  FPU_T float-loop: PASS
+  FPU_T double-cons[sys_close Debug] CPU=7, PIDs=[1,44,48,9], caller_pid=50, fd=0is, g_fd=40
+tent[KERNEL Debug] sys_close: fd=0, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[sys_close Debug] CPU=3, PIDs=[1,44,48,14], caller_pid=14, fd=2, g_fd=45
+[KERNEL Debug] sys_close: fd=2, ret=0
+/TEST3.TXT
+/FREE.BIN
+/LKSTEST.TXT
+  RANDTST getrandom(4096) returns 4096: PASS
+  RANDTST 4KiB page is not all zero: PASS
+  RANDTST no all-zero 8-byte window in the page: PASS
+7
+/TACF.TXT
+  RANDTST byte values are diverse (>= 100 distinct): PASS
+fcntl(F_GETFL) == O_NONBLOCK a[sys_close Debug] CPU=3, PIDs=[1,46,[sys_close Debug] CPU=1fter the set48,16:, PIDs=[1,46,48,16] P, caller_pid=46, fd=13, g_fd=57ASS
+
+], caller_pid=16, fd=0, g_fd=[KERNEL Debug] sys_close: fd=13  [sys_close Debug] CPU=7, PIDs=[1,46,48,, ret=0
+16]44
+[KERNEL Debug] sys_close: fd=0, ret=0
+SOCK2[sys_close Debug] CPU=3, PIDs=[1,46,48,18], caller_pid=18, fd=0, g_fd=/TEST4.TXT
+TS, caller_pid=5T 
+55, fd=0, g_fd=21
+[KERNEL Debug] sys_close: fd=0, ret=0MATH_COS_TWO: 
+PA[KERNEL Debug] sys_close: fd=SS0, ret=0
+
+/CKSABC.TXT
+MATH_COS_NEG_250:Process hear PAtSS-beat from CPU: 1
+
+MATH_COS_EIGHTH: PASS
+[KERNEL] Process 20: /MV.BIN exited unexpectedly or gracefully.
+: PASS
+  FPU_T double-eighth: PASS
+  FPU_T double-precision-1: PASS
+  FPU_T double-precision-2: PASS
+[LKSTEST] PASS fopen
+[LKSTEST] PASS ftell init 0
+[LKSTEST] PASS fseek END 0
+[LKSTEST] PASS ftell at END
+[LKSTEST] PASS rewind
+[LKSTEST] PASS fgets line 1
+[LKSTEST] PASS line 1 content
+[LKSTEST] PASS ftell after line 1
+[LKSTEST] PASS fseek SEEK_CUR +5
+[LKSTEST] PASS ftell after +5
+[LKSTEST] PASS fseek SEEK_SET 23
+[LKSTEST] PASS fread 7 @23
+[LKSTEST] PASS fread 'epsilon'
+[LKSTEST] PASS ungetc
+[LKSTEST] PASS ungetc one-slot full (2nd rejected)
+[LKSTEST] PASS fgetc sees pushed back
+[LKSTEST] PASS rewind resets ftell
+[sys_close Debug] CPU=3, PIDs=[1,50,48,23], caller_pid=23, fd=0, g_fd=40
+[KERNEL Debug] sys_close: fd=0, ret=0
+[LKSTEST] PASS fclose ok
+[sys_close Debug] CPU=3, PIDs=[1,50,48,24], caller_pid=24, fd=0, g_fd=61
+[KERNEL Debug] sys_close: fd=0, ret=0
+/TACG.TXT
+[sys_close Debug] CPU=3, PIDs=[1,50,48,24], caller_pid=24, fd=0, g_fd=40
+[KERNEL Debug] sys_close: fd=0, ret=0
+fcntl(F_SETFL, 0) clears O_NONBLOCK: PASS
+  SOCK2TST fcntl(unknown cmd) -> -1/EINVAL: PASS
+  SOCK2TST connect_fd(bad fd) -> -1/EBADF: PASS
+  SOCK2TST fcntl(bad fd) -> -1/EBADF: PASS
+  SOCK2TST getsockopt(bad fd) -> -1/EBADF: PASS
+  SOCK2TST connect_fd(non-socket) -> -1/ENOTSOCK: PASS
+[sys_close Debug] CPU=3, PIDs=[1,50,48,26], caller_pid=26, fd=1, g_fd=40
+[KERNEL Debug] sys_close: fd=1, ret=0
+[sys_close Debug] CPU=3, PIDs=[1,50,48,26], caller_pid=26, fd=2, g_fd=61
+[KERNEL Debug] sys_close: fd=2, ret=0
+[sys_close Debug] CPU=3, PIDs=[1,50,48,26], caller_pid=26, fd=0, g_fd=53
+[KERNEL Debug] sys_close: fd=0, ret=0
+  SOCK2TST FD_SET/FD_ISSET round-trip (3 and 255): PASS
+  SOCK2TST unset bits stay clear (4, 200): PASS
+  SOCK2TST FD_CLR clears only its bitMATH_TAN_ONE: PASS
+MATH_TAN_HALF: PASS
+MATH_TAN_NEG_THREE: PASS
+MATH_SIN_1E6: PASS
+MATH_SIN_123456789: PASS
+MATH_COS_1E9: PASS
+MATH_IDENT_SIN2_COS2: PASS
+MATH_IDENT_TAN_RATIO: PASS
+MATH_ASIN_HALF: PASS
+MATH_ASIN_NEG_QTR: PASS
+MATH_ATAN_ONE: PASS
+MATH_ATAN_NEG_TWO: PASS
+MATH_ATAN2_1_1: PASS
+MATH_ATAN2_1_NEG1: PASS
+MATH_ATAN2_NEG1_NEG1: PASS
+MATH_ATAN2_3_NEG4: PASS
+MATH_IDENT_ASIN_SIN: PASS
+MATH_IDENT_ATAN2_ATAN: PASS
+MATH_LOG_TWO: PASS
+MATH_LOG_TEN: PASS
+MATH_LOG_HALF: PASS
+MATH_LOG_1E300: PASS
+MATH_LOG_1E_M300: PASS
+MATH_LOG_E: PASS
+[KERNEL] sys_fork: tf->regs[0] is now -11
+MATH_IDENT_LOG_POW2: PASS
+  POLLTST select(nfds > FD_SETSIZE) -> -1/EINVALMA: PASS
+TH_POW_2_HALF: PASS
+MATH_PO  POLLTST Wselect(unopened fd) -> -1/EBADF_3_: PASS
+HALF: PASS
+MATH_POW_15_725: PASS
+MATH_POW_EXACT_10: PASS  RANDTST consecutive 4KiB pages differ: PASS
+  RANDTST getrandom(flags != 0) -> -1/EINVAL: PASS
+  RANDTST   WSRF_T getrandom(len 0) -> 0set-: PASS
+rect-clamp-scr  RANDTST egetrandom(3 bytes) returns 3 and touches the bufferen: PASS
+: PASS
+  RANDTST  two back-to-back draws differ : PASS
+WSRF_T ALL TESTS PASSED SUCCESSFULLY!
+set-rect-unchanged-returns-0[KERNEL] Process 54: RANDTST.BIN exited unexpectedly or gracefully.
+: PASS
+  WSRF_T set-rect-change-returns-1: PASS
+  WSRF_T /MD5MSG.TXT
+[KERNEL] Process 34: SMPTEST.BIN exited unexpectedly or gracefully.
+: PASS
+  CXX_SMOKE init-priority-first: PASS
+  CXX_SMOKE init-array-order: PASS
+  CXX_SMOKE global-ctors-born: PASS
+  CXX_SMOKE new-scalar: PASS
+  CXX_SMOKE new-array: PASS
+  CXX_SMOKE new-zero-size-nonnull: PASS
+  CXX_SMOKE delete-nullptr: PASS
+/SEDT.IN
+  CXX_SMOKE new-alignment-16: PASS
+  CXX_SMOKE new-delete-churn: PASS
+  CXX_SMOKE guard-first-acquire: PASS
+  CXX_SMOKE guard-second-acquire: PASS
+  CXX_SMOKE guard-abort-acquire: PASS
+  CXX_SMOKE guard-abort-retry: PASS
+  CXX_SMOKE local-static-init-once[sys_close Debug] CPU=2, PIDs=[1,50,58,39], caller_pid=58, fd=0, g_fd=39/TEST1.TXT
+
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=2, PIDs=[1,50[sys_close Debug] CPU=3,59,42], caller_pid=59, fd=0, g_fd=20
+, PIDs=[1,50,59,42], caller_pid=42, fd=5, g_fd=42[KERNEL Debug] sys_close: fd=0, ret=0
+
+[KERNEL Debug] sys_close: fd=5, ret=0
+/TRTAB.TXT
+/TEST2.TXT
+[sys_close Debug] CPU=2, PIDs=[1,50,60,42], caller_pid=60, fd=0, g_fd=46
+[KERNEL Debug] sys_close: fd=0, ret=0
+/PSTEMPT.TXT
+[sys_close Debug] CPU=3, PIDs=[1,50,60[sys_close Debug] CPU=7,, PIDs=[143,], caller_pid=43, fd=0, g_fd=59
+[sys_close Debug] CPU=2, PIDs=[1,[KERNEL Debug] sys_close: fd=50,61,43]0, ret=50,, caller_pid=5961,43], fd=0, g_fd=20, caller_pid=610
+, fd=0, g_fd=51
+
+[KERNEL Debug] sys_close: fd=0, ret=0
+[KERNEL Debug] sys_close: fd=[sys_close Debug] CPU=3, PIDs=[1,50,610, ret=0
+/FOLDTAB.TXT
+,44[sys_close Debug] CPU=7, PIDs=[1,50,61,44], caller_pid=], caller_pid=44, fd=9, g_fd=22
+[KERNEL Debug] sys_close: fd=9, ret=0
+60, fd=0, g_fd=42
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=3, PIDs=[1,50,62,46], caller_pid=46, fd=13, g_fd=57
+[KERNEL Debug] sys_close: fd=13, ret=[sys_close Debug] CPU=/PSTNONL.TXT2, PIDs=[1,50,62,46], caller_pid=
+62, fd=00
+, g_fd=47
+[KERNEL Debug] sys_close: fd=0, ret=0
+: PASS
+  CXX_SMOKE virtual-d/NLBLANK.TXT
+[sys_close Debug] CPU=7, PIDs=[1,ispatch50,62,47], caller_pid=: PASS
+61, fd=0, g_fd=20
+  CXX_SMOKE virtual-via-reference: PASS
+ [KERNEL Debug] sys_close: fd=0, ret=0
+ CXX_SMOKE virtual-call-through-heap: PASS
+  CXX_SMOKE template-int-container[sys_close Debug] CPU=4, PIDs=[1,50,62,49], caller_pid=39, fd=1, g_fd=61
+[KERNEL Debug] sys_close: fd=1, ret=0
+Process heart-beat from CPU: 3
+[sys_close Debug] CPU=4, PIDs=[1,50[sys_close Debug] CPU=2, PIDs=[1,50,63,63,49], caller_pid=42, fd=5, g_fd=39
+,51], caller_pid=[KERNEL] sys_fork: tf->regs[0] is now [KERNEL Debug] sys_close: fd=5-11
+, ret=0
+63, fd=0, g_fd=/FOLDA.TXT
+18
+  POLLTST select(0, NULL [KERNEL Debug] sys_close: fd=x3, 5ms) == 0: PASS
+0, ret=0
+ code=2 
+  POLLTST empty pipe: select(read, 0) == 0 and mask cleared: PASS
+[sys_close Debug] CPU=7, PIDs=[1 /CAPC.TXT
+,50,2,52], caller_pid=62, fd=0 POLLTST , g_fd=42
+pipe with 1 byte queued: select(read, 0) == 1 and FD_ISSET[KERNEL Debug] sys_close: fd=0, ret=: P0
+ASS
+[ARP] routing off-subnet: target=0x00000000010200C0 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=0x000000000202000A
+/NLNOEOL.TXT
+Loading program for scheduler (v2 AS): GREP.BIN
+/COMN1.TXT
+[sys_close Debug] CPU=7, PIDs=[1,50,2,54], caller_pid=63, fd=0, g_fd=47
+[KERNEL Debug] sys_close: fd=0, ret=0
+/COMN2.TXT
+[sys_close Debug] CPU=3, PIDs=[1,50,2,55], caller_pid=55, fd=0, g_fd=40
+  POLLTST the queued byte reads back: PASS
+[KERNEL Debug] sys_close: fd=0, ret=0
+  POLLTST [sys_close Debug] CPU=7, PIDs=[1,50,2,56]pipe write end w[sys_close Debug] CPU=ith , caller_pid=7, fd=0, g_fd=433, PIDs=[sp1,ace: select(write, 0) == 150: P,2,56], caller_pid=56, fd=0, g_fd=53
+
+ASS
+  POLLTST filled the pipe exactly (PIPE_SIZE 512): PASS
+  POLLTST pipe with no space: select(write, 0) == 0 and mask c[KERNEL Debug] sys_close: fd=0, ret=0le
+[KERNEL Debug] sys_close: fd=0, ret=0
+ared: PASS
+  POLLTST drained pipe: not readable again: PASS
+[sys_close Debug] CPU=4, PIDs=[1,/EXPBLNK.TXT
+50,2,56], caller_pid=52, fd=0, g_fd=18
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=4, PIDs=[1,50,2,56], caller_pid=52, fd=1, g_fd=39
+[KERNEL Debug] sys_close: fd=1, ret=0
+[REGTEST] PASS row 0 ()
+[sys_close Debug] CPU=7, PIDs=[1,50,2,56], caller_pid=9, fd=0, g_fd=60
+[KERNEL Debug] sys_close: fd=[R0, ret=0
+EGTEST] PASS row 1 (a)
+/UNEXP1.TXT
+[REGTEST] PASS row [sys_close Debug] CPU=7, PIDs=[1,50,2,56], caller_pid=14, fd=2, g_fd=45
+/MD5OK.CHK
+[KERNEL Debug] sys_close: fd=2, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now -11
+sh: fork failed
+[LFN] PASS create+reopen long-name file in-OS
+/CUTCOL.TXT
+[sys_close Debug] CPU=4, PIDs=[1,50,2,56], caller_pid=58, fd=0, g_fd=45
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=7, PIDs=[1/CUTCOL2.TXT
+,50,2,56], caller_pid=18, fd=0, g_fd=5
+[KERNEL Debug] sys_close: fd=0, ret=0
+/TRSPC.TXT
+/CKSHELLO.TXT
+[sys_close Debug] CPU=4, PIDs=[1,50,2,56], caller_pid=60, fd=0, g_fd=22
+[KERNEL Debug] sys_close: fd=0, ret=0
+/PSTLONG.TXT
+Loading program for scheduler (v2 AS): HEDGNU.BIN
+[sys_close Debug] CPU=4, PIDs=[1,50,2,56], caller_pid=61, fd=0, g_fd=20
+[KERNEL Debug] sys_close: fd=0, ret=0
+/FOLDB.TXT
+[sys_close Debug] CPU=4, PIDs=[1,50,2,56], caller_pid=62, fd=0, g_fd=42
+[KERNEL Debug] sys_close: fd=0, ret=0
+/NLSEC.TXT
+[sys_close Debug] CPU=4, PIDs=[1,50,2,56], caller_pid=63, fd=0, g_fd=47
+[KERNEL Debug] sys_close: fd=0, ret=0
+[LKSTEST] ALL PASSED
+/COMU1.TXT
+[KERNEL] Process 23: LKSTEST.BIN exited unexpectedly or gracefully.
+: PASS
+  SOCK2TST fd_set is FD_SETSIZE/32 32-bit words: PASS
+  SOCK2TST select(nfds > FD_SETSIZE) -> -1/EINVAL: PASS
+  SOCK2TST select(unopened fd in the mask) -> -1/EBADF: PASS
+  SOCK2TST select(0, NULL, NULL, NULL, 0) == 0[sys_close Debug] CPU=: PASS
+4, PIDs=[1,50,2,56], caller_pid=6, fd=0, g_fd=58
+[KERNEL Debug] sys_close: fd=0, ret=0
+  SOCK2TST sysinfo(4) with the pre-dns buffer size still succeeds: PASS
+  SOCK2TST sysinfo(4) extended: ip/mask match the old/TSTCY.TXT
+-size call
+MATH_POW_EXACT_NEG2: PASS
+[sys_close Debug] CPU=4, PIDs=[1,50MATH_,2,56], caller_pid=7, fd=0, g_fd=57
+POW_EXACT_1E3: PASS
+MATH_POW_NEGINT: PASS
+[KERNEL Debug] sys_close: fd=0, ret=0
+MATH_POW_2_1000: PASS
+MATH_POW_OVERFLOW: PASS
+MATH_POW_UNDERFLOW: PASS
+MATH_SQRT_EXACT: PASS
+MATH_SQRT_TWO: PASS
+MATH_SQRT_TINY: PASS
+MATH_SQRT_ZERO: PASS
+MATH_MODF_IP: PASS
+MATH_MODF_FP: PASS
+MATH_MODF_NEG_IP: PASS
+MATH_MODF_NEG_FP: PASS
+MATH_MODF_INF_IP: PASS
+MATH_MODF_INF_FP: PASS
+[sys_close Debug] CPU=4MATH_, PIDs=[1,50,2,EXPF56], caller_pid=9, fd=0, g_fd=18
+_ONE: PASS
+MATH_EXPF_NEG10: PASS[KERNEL Debug] sys_close: fd=0, ret=0
+
+MATH_EXPF_HALF: PASS
+MATH_TANHF_ONE/UNEXP2.TXT
+: PASS
+MATH_TANHF_NEG_HALF: PASS
+MATH_TANHF_LARGE: PASS
+MATH_SIN_INF_NAN: PASSset-rect-negative-size-empty: PASS
+  WSRF_T set-rect-offscreen-empty: PASS
+  WSRF_T fill-inbounds-corners: PASS
+  WSRF_T fill-maps-to-screen: PASS
+  WSRF_T fill-left-canary: PASS
+  WSRF_T fill-right-canary: PASS
+  WSRF_T fill-top-canary: PASS
+  WSRF_T fill-bottom-canary: PASS
+  WSRF_T fill-fully-outside-noop: PASS
+  WSRF_T fill-nonpositive-noop: PASS
+  WSRF_T put-roundtrip: PASS
+  WSRF_T put-outside-noop: PASS
+  WSRF_T get-outside-zero: PASS
+  WSRF_T get-untouched-canary: PASS
+[LFN] PASS created long-name file listed with long name
+/LFN_NEWF.TXT
+[sys_close Debug] CPU=4, PIDs=[1,50,2,56], caller_pid=16, fd=0, g_fd=71
+[KERNEL Debug] sys_close: fd=0, ret=0
+[LFN] PASS 8.3 alias of in-OS long name resolves
+/LFN_NEWFILE_CREATED.TXT
+[sys_close Debug] CPU=4, PIDs=[1,50,2,56], caller_pid=16, fd=0, g_fd=71
+[KERNEL Debug] sys_close: fd=0, ret=0
+[LFN] PASS mixed-case reopen of created long name
+/lfn_rename_src.txt
+[sys_close Debug] CPU=4, PIDs=[1,50,2,56], caller_pid=18, fd=0, g_fd=5
+[KERNEL Debug] sys_close: fd=0, ret=0
+/CKSALL.TXT
+Loading program for scheduler (v2 AS): EXPAND.BIN
+/TACE.TXT
+[sys_close Debug] CPU=4, PIDs=[1,50,2,56], caller_pid=24, fd=0, g_fd=72
+[KERNEL Debug] sys_close: fd=0, ret=0
+[TACTEST] run: /TACA.TXT
+: PASS
+  SOCK2TST iface ip=0x0x000000000F02000A dns=0x0x000000000302000A (DHCP option 6 stored)
+[ARP] routing off-subnet: target=0x0000000001010101 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=0x000000000202000A
+  SOCK2TST connect_fd() -> -1/EINPROGRESS (handshake started): PASS
+
+MATH_COS_INF_NAN: PASS
+MATH_TAN_NEGINF_NAN: PASS
+MATH_LOG_NEG_NAN: PASS
+MATH_LOG_ZERO_NEGINF: PASS
+MATH_ASIN_DOMAIN_NAN: PASS
+MATH_ATAN_INF: PASS
+MATH_ATAN2_00: PASS
+MATH_POW_DOMAIN_NAN: PASS
+MATH_EXPF_NEGINF: PASS
+MATH_TANHF_INF: PASS
+MATH_SIN_NEG_ZERO: PASS
+ALL TESTS PASSED SUCCESSFULLY!
+[KERNEL] Process 27: MATH_T.BIN exited unexpectedly or gracefully.
+  WSRF_T frame-edges: PASS
+  WSRF_T frame-interior-clear: PASS
+  WSRF_T frame-outside-canary: PASS
+  WSRF_T frame-partial-confined: PASS
+: PASS
+  CXX_SMOKE template-overflow-rejected: PASS
+  CXX_SMOKE template-struct-container: PASS
+  CXX_SMOKE operator-plus: PASS
+  CXX_SMOKE operator-minus-equals: PASS
+  CXX_SMOKE placement-new: PASS
+  CXX_SMOKE assert-macro-cpp: PASS
+  CXX_SMOKE sysroot-c-linkage: PASS
+  CXX_SMOKE global-object-constructed: PASS
+  CXX_SMOKE cxa_finalize-runs-dtors: PASS
+  CXX_SMOKE cxa_finalize-idempotent: PASS
+CXX_SMOKE checks: 29, failures: 0
+ALL TESTS PASSED SUCCESSFULLY!
+[KERNEL] Process 38: CXXSMOKE.BIN exited unexpectedly or gracefully.
+[sys_close Debug] CPU=7, PIDs=[1,50,2,56], caller_pid=43, fd=0, g_fd=46
+[KERNEL Debug] sys_close: fd=0, ret=0
+/CAPE.TXT
+[sys_close Debug] CPU=7, PIDs=[1,50,2,56], caller_pid=43, fd=0, g_fd=46
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=2, PIDs=[1,50,9,56], caller_pid=9, fd=0, g_fd=18
+[KERNEL Debug] sys_close: fd=0, ret=0
+/UNEXP3.TXT
+Process heart-beat from CPU: 7
+[sys_close Debug] CPU=2, PIDs=[1,50,9,56], caller_pid=9, fd=0, g_fd=18
+[KERNEL Debug] sys_close: fd=0, ret=0
+/UNEXPMID.TXT
+[KERNEL] sys_fork: tf->regs[0] is now [sys_close Debug] CPU=2, PIDs=[1[NFS] rpc: no reply from server
+38
+,50,16,56], caller_pid=16, fd=0, g_fd=[NFS] mount: no mountd via portmap
+71
+[PROCTEST] child pre-exec pid=[KERNEL Debug] sys_close: fd=380, ret=0
+2
+ (/lfn_rename_src.txt new=/lfn_rename_dst.txt
+[NFS] PASS /PROCCHLD.BIN
+a*tier1: unreachable server fails the mount/CAPN.TXT
+v2 loader: image mapped (lazy), bytes=70952 pages=18 first=in elap=2ms
+
+[NFS] PASS tier1: no mounts after failure
+[NFS] mount: bad source (want A.B.C.D:/export)
+[sys_close Debug] CPU=2, PIDs=[1,50[sys_close Debug] CPU=7, PIDs=[,18,56], caller_pid=18, fd=0[sys_close Debug] CPU=4, PIDs=[, g_fd=51,50,18,
+56], caller_pid=55, fd=0, g_fd=39
+1,50,18,56], caller_pid=43, fd=0, g_fd=[KERNEL Debug] sys_close: fd=0, ret=0
+71
+[KERNEL Debug] sys_close: fd=0, ret=0
+[KERNEL Debug] sys_close: fd=0, ret=0
+/MD5BAD.CHK
+/CAPS.TXT
+Process heart-beat from CPU: 6
+[sys_close Debug] CPU=7, PIDs=[1,50,20,56], caller_pid=58, fd=0, g_fd=45
+[KERNEL Debug] sys_close: fd=0, ret=0
+[PROCTEST] parent waiting for child 38
+[PROCTEST] PASS child pid != parent
+)
+[REGTEST] PASS row 3 (a\+)
+[REGTEST] PASS row 4 (a\+)
+[REGTEST] PASS row 5 (a*$)
+[REGTEST] PASS row 6 (^$)
+[REGTEST] PASS row 7 (^$)
+[REGTEST] PASS row 8 (a.c)
+[REGTEST] PASS row 9 ([[:digit:]]\+)
+[REGTEST] PASS row 10 (^a.*b$)
+[REGTEST] PASS row 11 (\w\+)
+[REGTEST] PASS row 12 (\s\+)
+[REGTEST] PASS row 13 (\<cat\>)
+[REGTEST] PASS row 14 (abc)
+[REGTEST] PASS row 15 (\(ab\)\1)
+[REGTEST] PASS row 16 (\(a\|b\)c)
+[REGTEST] PASS row 17 ([sys_close Debug] CPU=4, PIDs=[1,50,24,[sys_close Debug] CPU=56], caller_pid=556, PIDs=[1,50,24,, fd=056, g_fd=5
+], caller_pid=59, fd=0, g_fd=59
+[KERNEL Debug] sys_close: fd=[KERNEL Debug] sys_close: fd=0, ret=0
+0, ret=0
+/TRRUN.TXT
+[sys_close Debug] CPU=6, PIDs=[1,50,24,56], caller_pid=60, fd=0, g_fd=22
+[KERNEL Debug] sys_close: fd=0, ret=0
+net_timeout_test success: connect timed out and returned error as expected.
+[KERNEL] Process 35: TIMEOUT.BIN exited unexpectedly or gracefully.
+[NFS] PASS tier1: bad source refused
+[NFS] mount: bad source (want A.B.C.D:/export)
+[NFS] PASS tier1: out-of-range IP refused
+[NFS] PASS tier1: mounting over / refused
+[NFS] PASS tier1: umount with no mount refused
+[NFS] PASS tier1: umount of unknown path refused
+[NFS] PASS tier1: /nfs is an empty FAT dir before mounting[sys_close Debug] CPU=5, PIDs=[1,50,24,56], caller_pid=43, fd=0, g_fd=39
+[KERNEL Debug] sys_close: fd=0, ret=0
+[CMPTEST] fixtures written
+[CMPTEST] run: /CAPA.TXT /CAPC.TXT
+\(a\)\(b\))
+Process heart-beat from CPU: 5
+[REGTEST] PASS row 18 (x)
+[REGTEST] PASS row 19 ([[:upper:]]\+)
+[REGTEST] PASS row 20 (b$)
+[REGTEST] PASS row 21 (^cd)
+[REGTEST] PASS row 22 (a.b)
+[REGTEST] PASS row 23 (a.b)
+[REGTEST] PASS row 24 (xyz)
+[REGTEST] PASS row 25 (a|b)
+[REGTEST] PASS row 26 ((a|b)+c)
+[REGTEST] PASS row 27 ([sys_close Debug] CPU=1, PIDs=[1,59,24,56], caller_pid=59, fd=0, g_fd=5
+[KERNEL Debug] sys_close: fd=0, ret=0
+/TRTEST.TXT
+[sys_close Debug] CPU=1, PIDs=[1,59,24,56], caller_pid=59, fd=0, g_fd=5
+[KERNEL Debug] sys_close: fd=0, ret=0
+  POLLTST empty pipe: select(timeout 100ms) == 0: PASS
+  POLLTST timeout took >= 85ms and < 5000ms (elapsed seen): PASS
+[sys_close Debug] CPU=5, PIDs=[1,59,24,56], caller_pid=52, fd=0, g_fd=46
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=5, PIDs=[1,59,24,56], caller_pid=52, fd=1, g_fd=73
+[KERNEL Debug] sys_close: fd=1, ret=0
+  POLLTST two ready pipes: ready count == 2, both fds set: PASS
+[sys_close Debug] CPU=5, PIDs=[1,59,24,56], caller_pid=52, fd=0, g_fd=46
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=5, PIDs=[1,59,24,56], caller_pid=52, fd=1, g_fd=73
+[KERNEL Debug] sys_close: fd=1, ret=0
+[sys_close Debug] CPU=5, PIDs=[1,59,24,56], caller_pid=52, fd=2, g_fd=89
+[KERNEL Debug] sys_close: fd=2, ret=0
+a{2,3})
+[REGTEST] PASS row 28 (^([0-9]+)-(\w+)$)
+[REGTEST] PASS row 29 ((x)?y)
+[REGTEST] PASS row 30 ([[:xdigit:]]+)
+[REGTEST] PASS row 31 ((a)|(b))
+[REGTEST] PASS row 32 ((ab)*)
+[REGTEST] PASS row 33 (colou?r)
+[REGTEST] PASS row 34 (a{2,})
+[REGTEST] PASS row 35 ((foo)+)
+[REGTEST] PASS row 36 (\bword\b)
+[REGTEST] PASS row [sys_close Debug] CPU=5, PIDs=[1,59,24,56], caller_pid=61, fd=0, g_fd=20
+[KERNEL Debug] sys_close: fd=0, ret=0
+/FOLDNOE.TXT
+[sys_close Debug] CPU=5, PIDs=[1,59,24,56], caller_pid=61, fd=0, g_fd=20
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=5, PIDs=[1,59,24,56], caller_pid=62, fd=0, g_fd=42
+[KERNEL Debug] sys_close: fd=0, ret=0
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070024095 pid=1 age_ms=0
+  CPU1 rip=0x0000001000005EA4 pid=59 age_ms=20051 syscall=8
+  CPU2 rip=0x0000001000006C34 pid=24 age_ms=24420 syscall=8
+  CPU3 rip=0x00000010000062B4 pid=56 age_ms=25165 syscall=8
+  CPU4 rip=0x0000001000005D24 pid=55 age_ms=24416 syscall=8
+  CPU5 rip=0x0000001000005DC4 pid=62 age_ms=20000 syscall=8
+  CPU6 rip=0x0000001000005D94 pid=60 age_ms=24406 syscall=8
+  CPU7 rip=0x0000001000005D54 pid=58 age_ms=24444 syscall=8
+Loader (v2) starved (slot pressure): DNSTST.BIN
+Loading program for scheduler (v2 AS): THRD_T.BIN
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070030910 pid=1 age_ms=0
+  CPU1 rip=0x0000001000005EA4 pid=59 age_ms=50052 syscall=8
+  CPU2 rip=0x0000001000006C34 pid=24 age_ms=54421 syscall=8
+  CPU3 rip=0x00000010000062B4 pid=56 age_ms=55166 syscall=8
+  CPU4 rip=0x0000001000005D24 pid=55 age_ms=54417 syscall=8
+  CPU5 rip=0x0000001000005DC4 pid=62 age_ms=50001 syscall=8
+  CPU6 rip=0x0000001000005D94 pid=60 age_ms=54407 syscall=8
+  CPU7 rip=0x0000001000005D54 pid=58 age_ms=54445 syscall=8
+Loader (v2) starved (slot pressure): THRD_T.BIN
+Loading program for scheduler (v2 AS): TLS_T.BIN
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070030910 pid=1 age_ms=0
+  CPU1 rip=0x0000001000005EA4 pid=59 age_ms=80053 syscall=8
+  CPU2 rip=0x0000001000006C34 pid=24 age_ms=84422 syscall=8
+  CPU3 rip=0x00000010000062B4 pid=56 age_ms=85167 syscall=8
+  CPU4 rip=0x0000001000005D24 pid=55 age_ms=84418 syscall=8
+  CPU5 rip=0x0000001000005DC4 pid=62 age_ms=80002 syscall=8
+  CPU6 rip=0x0000001000005D94 pid=60 age_ms=84408 syscall=8
+  CPU7 rip=0x0000001000005D54 pid=58 age_ms=84446 syscall=8
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu5: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+Loader (v2) starved (slot pressure): TLS_T.BIN
+Loading program for scheduler (v2 AS): CXX_T.BIN
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070030910 pid=1 age_ms=0
+  CPU1 rip=0x0000001000005EA4 pid=59 age_ms=110057 syscall=8
+  CPU2 rip=0x0000001000006C34 pid=24 age_ms=114426 syscall=8
+  CPU3 rip=0x00000010000062B4 pid=56 age_ms=115171 syscall=8
+  CPU4 rip=0x0000001000005D24 pid=55 age_ms=114422 syscall=8
+  CPU5 rip=0x0000001000005DC4 pid=62 age_ms=110006 syscall=8
+  CPU6 rip=0x0000001000005D94 pid=60 age_ms=114412 syscall=8
+  CPU7 rip=0x0000001000005D54 pid=58 age_ms=114450 syscall=8
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu5: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+Loader (v2) starved (slot pressure): CXX_T.BIN
+Loading program for scheduler (v2 AS): RTTI_T.BIN
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070030910 pid=1 age_ms=0
+  CPU1 rip=0x0000001000005EA4 pid=59 age_ms=140064 syscall=8
+  CPU2 rip=0x0000001000006C34 pid=24 age_ms=144433 syscall=8
+  CPU3 rip=0x00000010000062B4 pid=56 age_ms=145178 syscall=8
+  CPU4 rip=0x0000001000005D24 pid=55 age_ms=144429 syscall=8
+  CPU5 rip=0x0000001000005DC4 pid=62 age_ms=140013 syscall=8
+  CPU6 rip=0x0000001000005D94 pid=60 age_ms=144419 syscall=8
+  CPU7 rip=0x0000001000005D54 pid=58 age_ms=144457 syscall=8
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu5: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+Loader (v2) starved (slot pressure): RTTI_T.BIN
+Loading program for scheduler (v2 AS): IPC_T.BIN
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070024095 pid=1 age_ms=0
+  CPU1 rip=0x0000001000005EA4 pid=59 age_ms=170064 syscall=8
+  CPU2 rip=0x0000001000006C34 pid=24 age_ms=174433 syscall=8
+  CPU3 rip=0x00000010000062B4 pid=56 age_ms=175178 syscall=8
+  CPU4 rip=0x0000001000005D24 pid=55 age_ms=174429 syscall=8
+  CPU5 rip=0x0000001000005DC4 pid=62 age_ms=170013 syscall=8
+  CPU6 rip=0x0000001000005D94 pid=60 age_ms=174419 syscall=8
+  CPU7 rip=0x0000001000005D54 pid=58 age_ms=174457 syscall=8
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu5: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+Loader (v2) starved (slot pressure): IPC_T.BIN
+Loading program for scheduler (v2 AS): MMTEST.BIN
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070030910 pid=1 age_ms=0
+  CPU1 rip=0x0000001000005EA4 pid=59 age_ms=200067 syscall=8
+  CPU2 rip=0x0000001000006C34 pid=24 age_ms=204436 syscall=8
+  CPU3 rip=0x00000010000062B4 pid=56 age_ms=205181 syscall=8
+  CPU4 rip=0x0000001000005D24 pid=55 age_ms=204432 syscall=8
+  CPU5 rip=0x0000001000005DC4 pid=62 age_ms=200016 syscall=8
+  CPU6 rip=0x0000001000005D94 pid=60 age_ms=204422 syscall=8
+  CPU7 rip=0x0000001000005D54 pid=58 age_ms=204460 syscall=8
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu5: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+Loader (v2) starved (slot pressure): MMTEST.BIN
+Loading program for scheduler (v2 AS): ICUSMK.BIN
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070030910 pid=1 age_ms=0
+  CPU1 rip=0x0000001000005EA4 pid=59 age_ms=230071 syscall=8
+  CPU2 rip=0x0000001000006C34 pid=24 age_ms=234440 syscall=8
+  CPU3 rip=0x00000010000062B4 pid=56 age_ms=235185 syscall=8
+  CPU4 rip=0x0000001000005D24 pid=55 age_ms=234436 syscall=8
+  CPU5 rip=0x0000001000005DC4 pid=62 age_ms=230020 syscall=8
+  CPU6 rip=0x0000001000005D94 pid=60 age_ms=234426 syscall=8
+  CPU7 rip=0x0000001000005D54 pid=58 age_ms=234464 syscall=8
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu5: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+Loader (v2) starved (slot pressure): ICUSMK.BIN
+Loading program for scheduler (v2 AS): SQLTEST.BIN
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070030910 pid=1 age_ms=0
+  CPU1 rip=0x0000001000005EA4 pid=59 age_ms=260072 syscall=8
+  CPU2 rip=0x0000001000006C34 pid=24 age_ms=264441 syscall=8
+  CPU3 rip=0x00000010000062B4 pid=56 age_ms=265186 syscall=8
+  CPU4 rip=0x0000001000005D24 pid=55 age_ms=264437 syscall=8
+  CPU5 rip=0x0000001000005DC4 pid=62 age_ms=260021 syscall=8
+  CPU6 rip=0x0000001000005D94 pid=60 age_ms=264427 syscall=8
+  CPU7 rip=0x0000001000005D54 pid=58 age_ms=264465 syscall=8
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu5: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+Loader (v2) starved (slot pressure): SQLTEST.BIN
+Loading program for scheduler (v2 AS): SIG_T.BIN
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070030910 pid=1 age_ms=0
+  CPU1 rip=0x0000001000005EA4 pid=59 age_ms=290075 syscall=8
+  CPU2 rip=0x0000001000006C34 pid=24 age_ms=294444 syscall=8
+  CPU3 rip=0x00000010000062B4 pid=56 age_ms=295189 syscall=8
+  CPU4 rip=0x0000001000005D24 pid=55 age_ms=294440 syscall=8
+  CPU5 rip=0x0000001000005DC4 pid=62 age_ms=290024 syscall=8
+  CPU6 rip=0x0000001000005D94 pid=60 age_ms=294430 syscall=8
+  CPU7 rip=0x0000001000005D54 pid=58 age_ms=294468 syscall=8
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu5: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+Loader (v2) starved (slot pressure): SIG_T.BIN
+Loading program for scheduler (v2 AS): WK1C_T.BIN
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070030910 pid=1 age_ms=0
+  CPU1 rip=0x0000001000005EA4 pid=59 age_ms=320080 syscall=8
+  CPU2 rip=0x0000001000006C34 pid=24 age_ms=324449 syscall=8
+  CPU3 rip=0x00000010000062B4 pid=56 age_ms=325194 syscall=8
+  CPU4 rip=0x0000001000005D24 pid=55 age_ms=324445 syscall=8
+  CPU5 rip=0x0000001000005DC4 pid=62 age_ms=320029 syscall=8
+  CPU6 rip=0x0000001000005D94 pid=60 age_ms=324435 syscall=8
+  CPU7 rip=0x0000001000005D54 pid=58 age_ms=324473 syscall=8
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu5: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+Loader (v2) starved (slot pressure): WK1C_T.BIN
+Loading program for scheduler (v2 AS): TORTURE.BIN
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070030910 pid=1 age_ms=0
+  CPU1 rip=0x0000001000005EA4 pid=59 age_ms=350080 syscall=8
+  CPU2 rip=0x0000001000006C34 pid=24 age_ms=354449 syscall=8
+  CPU3 rip=0x00000010000062B4 pid=56 age_ms=355194 syscall=8
+  CPU4 rip=0x0000001000005D24 pid=55 age_ms=354445 syscall=8
+  CPU5 rip=0x0000001000005DC4 pid=62 age_ms=350029 syscall=8
+  CPU6 rip=0x0000001000005D94 pid=60 age_ms=354435 syscall=8
+  CPU7 rip=0x0000001000005D54 pid=58 age_ms=354473 syscall=8
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu5: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+Loader (v2) starved (slot pressure): TORTURE.BIN
+[sys_close Debug] CPU=0, PIDs=[9,59,24,56], caller_pid=9, fd=0, g_fd=18
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=1, PIDs=[9,63,24,56], caller_pid=63, fd=0, g_fd=47
+[KERNEL Debug] sys_close: fd=0, ret=0
+/COMU2.TXT
+[sys_close Debug] CPU=1, PIDs=[9,63,24,56], caller_pid=63, fd=0, g_fd=47
+[KERNEL Debug] sys_close: fd=0, ret=0
+/COME.TXT
+[sys_close Debug] CPU=1, PIDs=[9,63,24,56], caller_pid=63, fd=0, g_fd=47
+[KERNEL Debug] sys_close: fd=0, ret=0
+qemu-system-x86_64: terminating on signal 15 from pid 739504 ()
+EXIT=0

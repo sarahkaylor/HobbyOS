@@ -82,8 +82,22 @@ if [ -n "$POLICE_ONLY" ]; then
   MEMFAULT_PROCS=$(grep -aoE "\[KERNEL\] pid=[0-9]+ \([^)]*\) memory fault" "$LOG" 2>/dev/null \
     | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u | wc -l | tr -d ' ' || true)
   LINES=$(wc -l <"$LOG")
-  echo "T3_${ARCH} (police ${LOG}): ${LINES} lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} fault records across ${MEMFAULT_PROCS} processes, halted=${halted}, kfault=${KFAULT}"
+  # GB-068 follow-on: a guest that REBOOTS is not a guest that ran a long wave.
+  # After the input/stack fixes the intel guest began triple-faulting in
+  # vm_arch_teardown ~27 s into each boot and QEMU restarted it; the serial log
+  # then fills with repeated boot markers and the run ends on the harness
+  # TIMEOUT with no verdict at all (TIER=124), which reads like a hang instead of
+  # a crash. A triple fault has no handler, so the console cannot show it -- the
+  # only in-band evidence is that the machine booted more than once. One
+  # "Controller reset complete!" is the virtio-blk init of a single boot; more
+  # than two means the guest restarted.
+  BOOTS=$(grep -ac "Controller reset complete" "$LOG" || true)
+  echo "T3_${ARCH} (police ${LOG}): ${LINES} lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} fault records across ${MEMFAULT_PROCS} processes, halted=${halted}, kfault=${KFAULT}, boots=${BOOTS}"
   rc=0
+  if [ "${BOOTS:-0}" -gt 2 ]; then
+    echo "T3_${ARCH}: FAIL — the guest BOOTED ${BOOTS} times: it is resetting mid-run (a triple fault has no handler, so the console cannot show it; capture it with T3_QEMU_ARGS=\"-d int,cpu_reset -D /tmp/q.log\")"
+    rc=1
+  fi
   [ "$halted" = "1" ] || { echo "T3_${ARCH}: FAIL — no halt line"; rc=1; }
   [ "$KFAULT" = "0" ] || { echo "T3_${ARCH}: FAIL — ${KFAULT} FATAL kernel-mode fault line(s): the guest halted because the kernel crashed"; rc=1; }
   [ "$LINES" -ge "${T3_MIN_LINES:-1000}" ] || { echo "T3_${ARCH}: FAIL — only ${LINES} console lines (floor ${T3_MIN_LINES:-1000}): too little work for a complete wave"; rc=1; }

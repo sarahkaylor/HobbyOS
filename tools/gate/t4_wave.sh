@@ -34,7 +34,16 @@ read_manifest() { # $1 = @path or inline list -> echoes member names
   if [ "${1#@}" != "$1" ]; then
     grep -v '^#' "${1#@}" | grep -v '^$'
   else
-    printf '%s\\n' "$1"
+    # BUG FIX (GB-072, 2026-10-21): this was printf '%s\\n' "$1", which emits a
+    # literal backslash-n rather than a newline. The caller word-splits the
+    # output, so the LAST member of an inline list became "GHOST.BIN\n" and could
+    # never match any console line -- meaning --manifest always failed on its
+    # final entry, including when that entry had genuinely run. Measured:
+    #   --manifest "HELLO.BIN"        -> FAIL dispatch: HELLO.BIN\n   (had run)
+    #   --manifest "HELLO.BIN GHOST.BIN" -> PASS HELLO, FAIL GHOST.BIN\n
+    # In the second case the FAIL was the artifact, not a detection of the absent
+    # file: the gate was red for its own bug. One member per word, real newlines.
+    printf '%s\n' $1
   fi
 }
 
@@ -82,6 +91,29 @@ EOF
   LOG="$TMP/nocat.log"
   if arrived CAT.BIN; then echo "  UNEXPECTED PASS — nocat log had CAT"; fa=$((fa+1));
   else echo "  OK — CAT absent -> WAVE.CFG corpus member FAILs (no silent drop)"; ok=$((ok+1)); fi
+
+  # GB-072: read_manifest() itself was UNTESTED, which is how its inline branch
+  # shipped emitting a literal backslash-n and made --manifest fail on its last
+  # member even when that member had genuinely run. The self-test only ever
+  # exercised arrived(), so a broken parser looked like a working gate. Parse and
+  # match end to end here.
+  names=$(read_manifest "HELLO.BIN GHOST.BIN" | tr '\n' ' ')
+  if [ "$names" = "HELLO.BIN GHOST.BIN " ]; then
+    echo "  OK — inline manifest parses to clean names (no stray backslash-n)"; ok=$((ok+1))
+  else
+    echo "  UNEXPECTED PARSE — inline manifest yielded [$names]"; fa=$((fa+1))
+  fi
+  LOG="$TMP/inline.log"
+  cat >"$TMP/inline.log" <<'EOF'
+Parallel Program Loading
+Loading program for scheduler: HELLO.BIN
+Program HELLO exited
+EOF
+  if arrived "$(read_manifest "HELLO.BIN" | head -1)"; then
+    echo "  OK — a member named inline that DID run is matchable (the old bug: it was not)"; ok=$((ok+1))
+  else
+    echo "  UNEXPECTED FAIL — inline member that ran is not matchable"; fa=$((fa+1))
+  fi
 
   echo "self-test: pass=$ok fail=$fa"
   [ "$fa" = "0" ]; exit $?
