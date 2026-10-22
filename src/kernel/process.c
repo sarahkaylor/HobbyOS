@@ -1,4 +1,5 @@
 #include "process.h"
+#include "kline.h"
 #include "frame.h"
 #include "vm.h"
 #include "fs.h"
@@ -3267,6 +3268,29 @@ void start_scheduler(void) {
        cur->is_kernel_process; with the per-core LAPIC timers armed every
        idle AP hit that guard with a stale kernel-task claim and
        re-scheduled the wave loader → proc_lock wedge right after boot. */
+    /* GB-057 (2026-10-21): clearing the claim is right, but it left the
+       process's STATE at PROC_STATE_RUNNING. A process that is merely
+       unclaimed is runnable, not running; LOSTWAKE treats "RUNNING with no
+       claiming CPU" as a stale dead-owner claim and DISPOSES it. Measured on
+       ARM with a [CLAIMDROP] probe in set_current_process_pid():
+         [CLAIMDROP] cpu=3 pid1 -> -1 pid1_state=3 caller=start_scheduler+0xb3c
+       pid 1 owns test_wave_loader() and therefore the halt decision; after it
+       was reclaimed, no task ever evaluated !any_alive, [HALT-CD] never
+       printed, and every CPU spun in [IDLESTUCK] past 64,000 rounds. So the
+       wave could run to completion (4/4 exits) and still never finish.
+       Put an unclaimed-but-alive process back to READY so another CPU can pick
+       it up instead of the reaper killing it. The lock is re-taken here because
+       it was released above for the resume. */
+    {
+      int last_pid = cpu_current_pids[get_cpuid()];
+      if (last_pid >= 0 && last_pid < MAX_PROCESSES &&
+          proc_table[last_pid].state == PROC_STATE_RUNNING) {
+        uint64_t f2 = spinlock_acquire_irqsave(&proc_lock);
+        if (proc_table[last_pid].state == PROC_STATE_RUNNING)
+          proc_table[last_pid].state = PROC_STATE_READY;
+        spinlock_release_irqrestore(&proc_lock, f2);
+      }
+    }
     set_current_process_pid(get_cpuid(), -1);
 
     /* P2.2 (S2): this core no longer runs any process; do not keep a
