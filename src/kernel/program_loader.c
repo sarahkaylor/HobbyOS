@@ -838,11 +838,42 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
   if (is_elf) {
     /* GB-013: the ELF mapper set the runtime entry (base+e_entry).  Mark the
        process Linux-ABI so its x86_64 syscall traps route to the compat table
-       (GB-014).  The startup stack (argc/argv/envp/auxv) is laid down by the
-       mapper's caller-side contract (docs/linux-abi.md §1) before first run;
-       here we only set PC/SP to the v2 stack top. */
+       (GB-014). */
     child->abi_flags |= PROC_FLAG_LINUX_ABI;
-    process_set_entry(pid, elf_entry, USER_MAIN_STK_TOP_V2 - 8);
+    /* GB-078 (2026-10-21): a Linux program reads its arguments from the STACK,
+       per the SysV AMD64 process-initialization contract: at _start %rsp points
+       at argc, with argv[], a NULL, envp[], a NULL, and the auxv pairs above it.
+       This kernel never wrote that block -- argv lived only in the PCB
+       (proc_set_argv_array), which a HobbyOS program reaches via sys_readargv and
+       a musl binary cannot see. Measured: a real static-pie probe entered at
+       USER_IMG_BASE+0x1c18 and faulted at VA=0x1800000008, i.e. %rsp+0x10 (the
+       argv[0] slot), in a HOLE -- eight bytes above the top of the stack region.
+       So: lay the block down and point %rsp at argc. The stack is already
+       prefaulted above, and vm_kwrite self-validates each page, so this is a
+       placement rather than an allocation. */
+    uint64_t stk_top = USER_MAIN_STK_TOP_V2;
+    const char *nm = child->name[0] ? child->name : "PROGRAM";
+    int nlen = 0;
+    while (nm[nlen]) nlen++;
+    uint64_t name_addr = (stk_top - 8 - (uint64_t)nlen) & ~(uint64_t)0xF;
+    /* argc, argv[0], argv NULL, envp NULL, AT_PAGESZ, 4096, AT_NULL, 0 */
+    uint64_t w[8];
+    w[0] = 1;
+    w[1] = name_addr;
+    w[2] = 0;
+    w[3] = 0;
+    w[4] = 6;    /* AT_PAGESZ — musl's startup reads it */
+    w[5] = 4096;
+    w[6] = 0;    /* AT_NULL */
+    w[7] = 0;
+    uint64_t blk = (name_addr - (uint64_t)sizeof w) & ~(uint64_t)0xF;
+    if (vm_kwrite(child, blk, w, (int)sizeof w) != 0 ||
+        vm_kwrite(child, name_addr, nm, nlen + 1) != 0) {
+      uart_puts("v2 loader: startup block write failed\n");
+      process_free(pid);
+      return -EFAULT;
+    }
+    process_set_entry(pid, elf_entry, blk);
   } else {
     process_set_entry(pid, USER_IMG_BASE, USER_MAIN_STK_TOP_V2 - 8);
   }
