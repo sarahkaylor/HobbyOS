@@ -61,7 +61,13 @@ static struct file *file_alloc(void) {
   for (int i = 0; i < MAX_GLOBAL_FILES; i++) {
     if (global_file_table[i].type == FILE_TYPE_EMPTY) {
       global_file_table[i].ref_count = 1;
-      global_file_table[i].type = FILE_TYPE_FAT16; // Default to something non-empty
+      /* SEC-6: UNINIT, not FAT16.  A caller that fails between allocation
+         and setting the real type used to leave a slot claiming to be a
+         FAT16 file with garbage start_cluster/cursor — any later operation
+         on it read/wrote arbitrary disk sectors.  UNINIT is rejected by the
+         invariants in file_read/file_write/file_close/stat, so an abandoned
+         slot can only ever halt loudly, never corrupt. */
+      global_file_table[i].type = FILE_TYPE_UNINIT;
       spinlock_release_irqrestore(&fs_lock, flags);
       return &global_file_table[i];
     }
@@ -69,6 +75,25 @@ static struct file *file_alloc(void) {
   spinlock_release_irqrestore(&fs_lock, flags);
   return 0;
 }
+
+/* SEC-6: invariant violated — an fd reached a slot whose type is not one of
+ * the real file types.  UNINIT slots are unreachable through legitimate fds
+ * (the fd only becomes visible after the creator sets the real type), so
+ * hitting this means memory corruption or a new caller that publishes too
+ * early: halt with a clear message rather than act on garbage fields. */
+static void fs_slot_panic(const char *op) {
+  uart_puts("KERNEL BUG (SEC-6): file slot used before its type was set (");
+  uart_puts(op);
+  uart_puts(")\n");
+  for (;;)
+    ;
+}
+
+#define FS_SLOT_CHECK(f)                              \
+  do {                                                \
+    if ((f)->type == FILE_TYPE_UNINIT)                \
+      fs_slot_panic(__func__);                        \
+  } while (0)
 
 /**
  * Calculates the global file descriptor index for a given file structure pointer.
@@ -277,6 +302,7 @@ static struct file *f1_socket_file(struct process *p, int fd, int *errp) {
     return 0;
   }
   struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
   if (f->type != FILE_TYPE_SOCKET || !f->socket.pcb) {
     *errp = ENOTSOCK;
     return 0;
@@ -652,6 +678,7 @@ int file_ftruncate(struct process *p, int fd, int64_t length) {
   int g_fd = p->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
   struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_MEMFD) {
     if (length < 0 || (uint64_t)length > VM_OBJ_MAX_BYTES) return -EINVAL;
     return vm_object_truncate(f->memfd.obj, (uint64_t)length);
@@ -687,6 +714,7 @@ int file_fcntl(struct process *p, int fd, int cmd, uint64_t arg) {
   int g_fd = pg->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
   struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
 
   /* P6.1: record-lock commands (FAT16 regular files). */
   if (cmd == K_F_GETLK || cmd == K_F_SETLK || cmd == K_F_SETLKW)
@@ -734,6 +762,7 @@ static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e,
   int g_fd = p->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
   struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
 
   if (f->type == FILE_TYPE_PIPE) {
     struct pipe *pp = f->pipe.ptr;
@@ -1079,6 +1108,7 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
   int g_fd = p->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) { *errp = EBADF; return -1; }
   struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
 
   int64_t base, size;
   if (f->type == FILE_TYPE_FAT16) {
@@ -1154,6 +1184,7 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
   int g_fd = p->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) { *errp = EBADF; return -1; }
   struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
   switch (f->type) {
   case FILE_TYPE_FAT16: {
     k_stat_fill(st,
@@ -1226,6 +1257,7 @@ int file_close(struct process *cur, int fd) {
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
 
   struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
 
   /* P6.1: capture the record-lock identity before the type may be cleared;
    * closing ANY fd of a FAT16 file drops this process's locks on it. */
@@ -1269,6 +1301,7 @@ int file_dup(struct process *cur, int fd) {
   int g_fd = cur->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
   struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_EMPTY) return -EBADF;
   if (cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
   int newfd = -1;
@@ -1304,6 +1337,7 @@ int file_dup2(struct process *cur, int oldfd, int newfd) {
   int g_fd = cur->open_fds[oldfd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
   struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_EMPTY) return -EBADF;
   if (oldfd == newfd) return newfd;
   if (newfd < 0 || newfd >= MAX_OPEN_FDS) return -EINVAL;
@@ -1331,6 +1365,7 @@ void fs_close_global(int g_fd) {
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return;
 
   struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
 
   uint64_t flags = spinlock_acquire_irqsave(&f->lock);
   if (f->type == FILE_TYPE_EMPTY) {
@@ -1379,6 +1414,7 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
 
   struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_DEVNULL) {
     return 0; /* /dev/null reads always yield EOF (0 bytes) */
   } else if (f->type == FILE_TYPE_DEVURANDO) {
@@ -1428,6 +1464,7 @@ int file_available(struct process *cur, int fd) {
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -1;
 
   struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_FAT16) {
     // FAT16 files just return size minus cursor
     return f->fat16.entry.file_size - f->fat16.cursor;
@@ -1512,6 +1549,7 @@ int file_write(struct process *cur, int fd, const void *buf, int size, struct tr
   }
 
   struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_DEVNULL) {
     return size; /* /dev/null swallows any write, accepts it fully */
   } else if (f->type == FILE_TYPE_DEVURANDO) {
@@ -1866,6 +1904,7 @@ static struct file *f1_msg_socket(struct process *pg, int fd, int *errp) {
   int g_fd = pg->open_fds[fd];
   if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) { *errp = -EBADF; return 0; }
   struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
   if (f->type == FILE_TYPE_SOCKET) { *errp = -EOPNOTSUPP; return 0; }
   if (f->type != FILE_TYPE_UNIXSOCK || !f->usock.ptr) {
     *errp = -ENOTSOCK;
@@ -2014,3 +2053,13 @@ int file_recvmsg(struct process *p, int fd, uint64_t umsg, int flags) {
     return -EFAULT;
   return r; /* bytes copied (Linux AF_UNIX returns the copied count) */
 }
+
+#ifdef KERNEL_MODE_UNIT_TEST
+/* SEC-6 regression hook: expose a slot's type so tests can assert that no
+ * allocation path ever strands a slot in UNINIT (or, before this fix, as a
+ * fake FAT16 with garbage fields).  Test builds only. */
+int fs_test_slot_type(int gfd) {
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return -1;
+  return (int)global_file_table[gfd].type;
+}
+#endif
