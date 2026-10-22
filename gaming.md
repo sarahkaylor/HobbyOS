@@ -640,6 +640,28 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 
 ### 11.8 Execution log (newest first, maintained by the Coordinator)
 
+**2026-10-19/21 — GB-013 CLOSED: static-PIE relocations implemented and proven by execution. The wall is now GB-068, which kills every program.**
+
+| what | state |
+|---|---|
+| **Relocations were the missing half** | `elf_image.c` had **no relocation handling at all** (`grep -c reloc` → 0). A static-PIE is position-independent only *after* its `R_*_RELATIVE` entries are applied: without them every GOT slot holds a link-time value relative to 0, so the image maps, enters at the right address, and faults at the first indirect call — measured as `PC=0/VA=0`, which reads like a null dereference in user code and is not |
+| **Landed (`440eee5`)** | `PT_DYNAMIC` captured at parse (`dyn_vaddr`/`dyn_size`), plus `elf_apply_relocations()` over the laid-out stage before mapping: walk `DT_RELA`, apply `R_X86_64_RELATIVE` (8) / `R_AARCH64_RELATIVE` (1027) as `base + addend`, and **refuse anything else** with `ELF_ERR_RELOC`. A skipped relocation is indistinguishable from a working one until the program jumps into the wrong place, so unknown types are an error. Kernel-free and byte-wise, so it stays host-testable |
+| **Proof (not inference)** | Real musl `-static-pie` probe (`DYN`, entry `0x1c18`, 7 `R_X86_64_RELATIVE`, `DT_RELA 0x208 / RELASZ 168 / RELAENT 24`): `[ARRIVED] T4PROBE.BIN rc>0`, **no `relocations:` refusal**, and `PC=0x1000001C56` = `USER_IMG_BASE + 0x1C56` — the probe's own code, past its entry. Before the change the same fixture died at `PC=0` |
+| **DoD** | *"static-PIE binary maps+boot, entry set right"* — met, with a printed entry (`0x1000001000` for the 0x1000-entry fixture, `0x1000001C18` for the probe), printed resident segments, and execution past entry. **GB-013 → Done** |
+| **What still kills it** | `VA=0x7558DBC8` = `&tf->spsr` for the running CPU — **GB-068**, which every program hits regardless of build. The loader hands over a correct entry and correct relocations; the process then faults because `rdi` holds a kernel stack pointer. Falsifier if that reading is doubted: build any non-PIE program and it dies at the same VA with the same signature |
+| **Dependency chain, now explicit** | T4 device leg (GB-076's guest rows) → static-pie probe → loader relocations (**done**) → **GB-068**. The probe now loads and executes; it cannot finish until GB-068 is fixed |
+
+**2026-10-21 — GB-068 narrowed to one measured contradiction; three value-level probes came back negative.**
+
+| what | state |
+|---|---|
+| **Where the fault actually is** | Disassembling the recorded PCs named it: `print_console`'s **`strlen`** loop (`cmpb $0x0, 0x1(%rdi,%rsi)`), so `rdi` — a `char *` **argument** — holds a kernel stack address. The corruption is present **at or before user entry**, not acquired late in a run; that rules out every "accumulates during execution" theory |
+| **`restore_context` probe** | `[BADREG] pid=3 rdi=0x755FDBE0 ctx5=0x755FDBE0 elr=0x7003053B c34=0x1B`. `ctx5 == rdi` (value comes from the PCB); `elr` is a **kernel** address; `context[34]` says **user** CS. Resolved: `0x7003053B` = `v2_image_materialize`, `0x7003349E` = `spinlock_acquire_irqsave` — the resume PCs are **inside the loader**, with user selectors |
+| **Three negatives, each killing a theory** | (1) `save_context` never writes a user-CS + kernel-ELR pair — probe fired **0 times**; (2) PCB reuse cannot supply a stale selector — `process.c:1075` zeroes all 36 context slots on every create; (3) field normalisation cannot mix them — the wrapper reads each source before overwriting it, and a double pass would put `0x1B` in the ELR, not a kernel address |
+| **What survives** | The two fields are written at **different times by different paths**. Exactly one writer of `context[31]` does not write `context[34]`: `process_create_kernel_internal` (`process.c:1131`, kernel entry point). So the surviving hypothesis is a **lifetime** question — one PCB being both "kernel thread being created" and "user context being saved" — not a value question |
+| **Fault population is timing-chosen** | 8 CPUs: 61–113 fault *records* over 56 pids (retries inflate records); **1 CPU: 62 records / 62 pids / 62 CR3s — exactly one fault each, deterministic**. So the fault is not a race; the *victim set* is. Single-CPU is the right microscope but **3 of 4 single-CPU runs hang** (`TIER=124`) |
+| **Metric fixed** | The tier now gates on **processes carrying faults** (48–56, stable) rather than records (61–113, retry-inflated) |
+
 **2026-10-19/20 — M1 static-PIE: it now maps, enters and executes; the wall has moved to the syscall table. Plus two
 instrument defects of my own, one of which had been silently invalidating three loops of "measurements".**
 
@@ -820,7 +842,7 @@ long-lived `hermes -w` tmux sessions).**
 | Plan sync (GB-008) | `tools/board/sync_gaming_md.py` — IN SYNC, drift detection proven |
 | Baseline (GB-009) | T1 green (coordinator + farm-1); **T2 green arm + intel** (344/0 intel); **T3 ARM green (0 FAIL lines), T3 intel red-but-exit-0** (222 FAIL lines) → GB-057. The baseline is **not** complete on intel and no intel gate may cite T3 until it is |
 | ABI contract (GB-010) | `docs/linux-abi.md` v1 (measured; `gen_abi_doc.py --check` guards drift) — In Review |
-| ELF loader (GB-013) | parser + segment planner landed and host-tested (53 checks), linked into both kernel builds; **mapper PROVEN 2026-10-19**: a real musl `-static-pie` ELF maps all 4 `PT_LOAD` segments and enters at `USER_IMG_BASE + e_entry` (`0x1000001000`, printed); the program executes to `exit(60)`, which **returns `-EFAULT` instead of terminating** — the remaining wall is GB-014's dispatch |
+| ELF loader (GB-013) | **Done 2026-10-21.** Parser + segment planner + **relocation pass** (`elf_apply_relocations`, `R_X86_64_RELATIVE`/`R_AARCH64_RELATIVE` applied over the stage, unknown types refused). Proven by execution: a real musl `-static-pie` maps all `PT_LOAD`, enters at `USER_IMG_BASE + e_entry` (printed), and runs its own code past entry (`PC=0x1000001C56`). The program then dies of **GB-068**, which kills every program regardless of build |
 | Syscall table (GB-014) | 114 measured numbers + errno locked by goldens (T1); **shims + trap routing open** |
 | First worker MR | **GB-026 merged** (fb ABI surface, worker `wgfx`, branch `ticket/26-fb-ioctls`); gate = T1 + both kernel links |
 | Second worker MR | **GB-007 harness merged, In Review** (T4 differential host leg, worker `wabi`); device leg gated on GB-013 |
