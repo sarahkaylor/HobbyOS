@@ -27,10 +27,17 @@ check(ppm_live(black) is False, "a uniform black frame is NOT live")
 
 var = os.path.join(d, "var.ppm")
 hdr = b"P6\n4 4\n255\n"
-px = b"\xff\xff\xff\x00\x00\x00" * 4   # alternating -> 2 distinct pixels
+px = b"\xff\xff\xff\x00\x00\x00" * 8   # 8 pairs = 16 pixels = a full 4x4 frame
 with open(var, "wb") as f:
     f.write(hdr + px)
 check(ppm_live(var) is True, "a frame with distinct pixels IS live")
+
+# Regression guard for the fixture itself: a payload shorter than w*h*3 is a
+# truncated screendump and must read as NOT live (ppm_live's length check).
+short = os.path.join(d, "short.ppm")
+with open(short, "wb") as f:
+    f.write(hdr + px[:24])
+check(ppm_live(short) is False, "a truncated (short) frame is NOT live")
 
 print("\nTests:", "ALL PASSED" if fails == 0 else f"{fails} FAILED")
 sys.exit(1 if fails else 0)
