@@ -10,6 +10,18 @@
 #                      run inside QEMU on HobbyOS (ARCH=intel) once the ELF
 #                      loader lands (Coordinator ticket GB-013, [DEEP]).
 #
+# What leg B proves, and what it does not (GB-083).  Leg B proves that the
+# ho_* shim surface of compat.c, when actually exercised by the probe, returns
+# byte-identical syscall rows to a real static-musl binary on the same kernel:
+# it locks the MOCK CONTRACT — the ABI of the HobbyOS-compat layer that the
+# real guest dispatch will present — against Linux.  Because leg B runs on real
+# Linux (glibc), it DOES NOT prove HobbyOS's kernel implements those syscalls;
+# that is the device leg (gated on the ELF loader).  It is a host-verifiable
+# litmus: if the shim model and Linux disagree here, no guest can pass, so the
+# model is wrong before any kernel work starts.  Leg B is LIVE only because we
+# route the probe's core syscalls through ho_* (see --self-test): a flipped shim
+# must make the differential FAIL.
+#
 # The host leg (A vs B-on-host) is fully runnable today — HobbyOS's in-tree
 # errno.h uses Linux numbering and compat.c mirrors the wrapper contract, so
 # a musl binary and the HobbyOS host build must agree exactly.  The QEMU
@@ -34,6 +46,42 @@ if [ "$#" -ge 1 ] && [ "$1" = "--device" ]; then
   DEVICE="${2:-intel}"
 fi
 
+# ---------------------------------------------------------------------------
+# --self-test (GB-083): the "wrong shim must FAIL" criterion must be LIVE.
+# Flipping any single ho_* return in compat.c must make the differential
+# exit non-zero, and restoring it must return to PASS.  Before GB-083, leg B
+# linked compat.c but the probe called libc directly, so a flipped shim left
+# the verdict unchanged — the criterion was inert.  This runs the real harness
+# three times: clean PASS, flipped-FAIL, restored-PASS, by re-invoking itself.
+# ---------------------------------------------------------------------------
+if [ "${1:-}" = "--self-test" ]; then
+  COMPAT="$ROOT/src/host/compat.c"
+  R=""
+  bash "$0" --flip ho_open >/tmp/t4p.selftest 2>&1; R="$?"
+  # restore the flipped source by applying the inverse flip (in-shell, no git):
+  # the --flip run changed `host, mode) + 1000` — undo it to the faithful form.
+  sed -i 's/return open(filename, host, mode) + 1000;/return open(filename, host, mode);/' "$COMPAT"
+  if [ "$R" = "0" ]; then
+    echo "self-test: FAIL — flipping ho_open still PASSed (criterion inert); run=$R"; exit 1
+  fi
+  # clean restore must pass
+  bash "$0" >/tmp/t4p.selftest 2>&1; R="$?"
+  if [ "$R" != "0" ]; then
+    echo "self-test: FAIL — clean (unflipped) run returned $R; see /tmp/t4p.selftest"; exit 1
+  fi
+  echo "self-test: OK — flipping ho_open FAILs (rc=$R clean pass), restoring passes"
+  exit 0
+fi
+
+# --flip <name>: flip one ho_* return so the differential must FAIL (used by
+# --self-test).  Not a normal invocation.
+if [ "$#" -ge 1 ] && [ "$1" = "--flip" ]; then
+  case "${2:-}" in
+    ho_open) FLIP_SHIM=ho_open ;;
+    *) echo "unknown flip target: ${2:-}"; exit 2 ;;
+  esac
+fi
+
 fail=0
 N=0
 
@@ -54,10 +102,21 @@ fi
 
 # ---- build leg B: HobbyOS host compat surface ---------------------------------
 # Mirror the errno_test_host rule: host probe + compat.c ho_* mocks as glibc.
+# GB-083 --flip: break one ho_* shim so the differential MUST fail (the live
+# "wrong shim must FAIL" criterion).  Applied to compat.c before the build and
+# restored by the make target's shell (see the --self-test re-invocation: it
+# runs --flip then an unflipped run, so a leftover flip is restored by the
+# next clean invocation).
+if [ -n "${FLIP_SHIM:-}" ]; then
+  cp "$ROOT/src/host/compat.c" "$TMP/compat.orig"
+  case "$FLIP_SHIM" in
+    ho_open) sed -i 's/return open(filename, host, mode);/return open(filename, host, mode) + 1000;/' "$ROOT/src/host/compat.c" ;;
+  esac
+fi
 if command -v "${HOST_CC:-clang}" >/dev/null 2>&1 || command -v clang >/dev/null 2>&1; then
   HOST_CC="${HOST_CC:-clang}"
   HOST_CFLAGS="${HOST_CFLAGS:--Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST}"
-  if ! "$HOST_CC" $HOST_CFLAGS -Isrc/include \
+  if ! "$HOST_CC" $HOST_CFLAGS -Isrc/include -DLEG_B_SHIMS \
         src/host/t4_compat_probe.c src/host/compat.c \
         -o "$TMP/t4_probe.host" 2>"$TMP/buildB.log"; then
     echo "FAIL: leg B build (HobbyOS host compat)"; tail -20 "$TMP/buildB.log"; fail=1

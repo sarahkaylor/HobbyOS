@@ -41,6 +41,30 @@
 #include <stdint.h>
 #include <pthread.h>
 
+/* GB-083: leg B must actually EXERCISE compat.c's ho_* shims, not merely link
+ * them.  When t4_parity.sh builds leg B with -DLEG_B_SHIMS, the probe's core
+ * file syscalls route through compat.c's ho_* wrappers so that flipping any
+ * one of them changes a reported row and FAILs the differential (the "wrong
+ * shim must FAIL" criterion, which was inert because the probe called libc
+ * directly and never touched compat.c).  Declared here so the probe compiles
+ * without pulling in the implementation (compat.c is linked by the build). */
+#ifdef LEG_B_SHIMS
+extern int ho_open(const char *, int, ...);
+extern int ho_close(int);
+extern ssize_t ho_read(int, void *, size_t);
+extern ssize_t ho_write(int, const void *, size_t);
+extern int ho_dup(int);
+extern int ho_dup2(int, int);
+extern int ho_pipe(int[2]);
+#define open   ho_open
+#define close  ho_close
+#define read   ho_read
+#define write  ho_write
+#define dup    ho_dup
+#define dup2   ho_dup2
+#define pipe   ho_pipe
+#endif
+
 /* GB-017: /dev/urandom + getrandom return *random bytes* — the content is
  * non-deterministic and must never be diffed leg-to-leg.  Only the return
  * count (and errno) are part of the byte-meaningful contract. */
