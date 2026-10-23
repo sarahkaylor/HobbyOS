@@ -45,6 +45,20 @@ DEVPROBE="${T4_DEV_PROBE:-$ROOT/src/user/t4_probe.c}"
 # device probe names the identical write 'write3' — they are the same logical
 # row, mapped below so the parity line agrees.
 host_alias() { [ "$1" = "write3" ] && echo write_stdout || echo "$1"; }
+# Mode-independent row-name extraction (GB-079): given the device probe source,
+# return the row-name set a HEALTHY run emits.  The probe emits a couple of
+# diagnostic rows ONLY inside an error guard (if (write(...)!=1) prow(...) —
+# pipe_write / sock_write); a healthy leg-A capture never contains them, so the
+# source path must drop `if`-gated prow() lines or the two modes would disagree
+# on the same tree.
+dev_rows() { # $1 = '' (use emitted leg A) or 'source'
+  if [ -f "$LEGA" ] && [ -s "$LEGA" ]; then
+    grep '^row=' "$LEGA" | sed -E 's/^row=([^ ]+).*/\1/'
+  else
+    grep -vE '^[[:space:]]*if ' "$DEVPROBE" \
+      | grep -o 'prow("[^"]*"' | cut -d'"' -f2
+  fi
+}
 # ---------------------------------------------------------------------------
 if [ "${1:-}" = "--check" ]; then
   fail=0
@@ -53,20 +67,20 @@ if [ "${1:-}" = "--check" ]; then
   [ -f "$DEVPROBE" ]    || { echo "  FAIL: device probe '$DEVPROBE' absent"; fail=1; }
   [ -f "$HOSTPROBE" ]   || { echo "  FAIL: host model '$HOSTPROBE' absent"; fail=1; }
   [ -v LEGA ] && [ -f "$LEGA" ] && [ -s "$LEGA" ] || {
-    echo "  fail: leg A ('$LEGA') absent — will skip emitted-row re-check (gate still checks source)"; }
+    echo "  fail: leg A ('$LEGA') absent — will use source extraction (gate still checks source)"; }
 
   # golden set
   mapfile -t G < <(grep -v '^#' "$GOLDEN" 2>/dev/null | grep -v '^$')
   echo "  golden rows: ${#G[@]}"
-  # device probe (guest) — from leg A if present, else from prow("...") in source
-  if [ -f "$LEGA" ] && [ -s "$LEGA" ]; then
-    mapfile -t A < <(grep '^row=' "$LEGA" | sed -E 's/^row=([^ ]+).*/\1/')
-  else
-    mapfile -t A < <(grep -o 'prow("[^"]*"' "$DEVPROBE" | sed -E 's/prow\("([^"]*)"/\1/')
-  fi
-  echo "  device probe rows: ${#A[@]}"
+  # device probe (guest) — from leg A if present, else from prow("...") in source.
+  # The two extraction paths must agree (GB-079), so both exclude the probe's
+  # `if`-gated error-diagnostic rows.
+  MODE=emitted
+  if [ ! -f "$LEGA" ] || [ ! -s "$LEGA" ]; then MODE=source; fi
+  mapfile -t A < <(dev_rows)
+  echo "  device probe rows: ${#A[@]} (mode=$MODE)"
   # host model — report("rowname", ...)
-  mapfile -t H < <(grep -o 'report("[^"]*"' "$HOSTPROBE" | sed -E 's/report\("([^"]*)"/\1/')
+  mapfile -t H < <(grep -o 'report("[^"]*"' "$HOSTPROBE" | cut -d'"' -f2)
 
   # every golden row must be emitted by BOTH (host name via alias)
   for r in "${G[@]}"; do
@@ -89,8 +103,8 @@ if [ "${1:-}" = "--check" ]; then
     inG=0; for g in "${G[@]}"; do [ "$g" = "$x" ] && inG=1; done
     [ "$inG" = "1" ] || { echo "  FAIL: device probe emits extra row '$x' not in golden"; fail=1; }
   done
-  if [ "$fail" = "0" ]; then echo "t4_device --check: PASS — device probe carries exactly the golden row-name set, and the host model contains every golden row."; exit 0; fi
-  echo "t4_device --check: FAIL"
+  if [ "$fail" = "0" ]; then echo "t4_device --check: PASS (mode=$MODE) — device probe carries exactly the golden row-name set, and the host model contains every golden row."; exit 0; fi
+  echo "t4_device --check: FAIL (mode=$MODE)"
   exit 1
 fi
 

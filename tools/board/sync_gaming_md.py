@@ -102,7 +102,12 @@ def main():
 
     # board -> plan
     for gid, b in sorted(bd.items()):
-        if gid not in plan:
+        # A CLOSED ticket is not work, so it can never legitimately earn a §8 row
+        # (scratch tickets exist precisely to be closed and never planned). Counting
+        # those as orphans makes the check unable to pass for a legitimate case --
+        # the same defect as a test that cannot fail, and it trains people to ignore
+        # the lint. Only OPEN tickets can be orphans.
+        if gid not in plan and b.get("state") != "closed":
             problems.append(f"{gid}: on the board but NOT in gaming.md §8 (orphan #{b['number']}) — "
                             f"add it to §8 or close it")
 

@@ -1,0 +1,128 @@
+--- a/HobbyOS/WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp
++++ b/HobbyOS/WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp
+@@ -893,7 +893,7 @@
+     bool wk5ForwardNavKeyToPage(unsigned code);
+     void wk5FocusProbe(LocalFrame* localFrame);
+     void wk5ValueProbe(LocalFrame* localFrame);
+-    void scrollPage(int dir);
++    void scrollPage(int dir, bool pageStep = false);
+     void reload();
+     void back();
+     void forward();
+@@ -991,6 +991,7 @@
+     // model behind the same chrome.  m_current mirrors activeTabState().current.
+     struct WK5TabState {
+         std::string current;                  // displayed URL/name (mirrors m_current)
++        std::string docTitle;                 // live document.title at load ("" = not loaded)
+         std::vector<std::string> history;     // this tab's navigation stack
+         size_t histIdx { 0 };
+         // WK-7 phase 2 (tabs): one WebPage per tab (page pool) + the tab's
+@@ -1109,6 +1110,8 @@
+         st.tabs[i].active = (i == m_activeTab);
+         if (m_tabs[i].current.empty())
+             snprintf(st.tabs[i].title, WK5UI::TAB_TITLE_MAX, "New Tab");
++        else if (!m_tabs[i].docTitle.empty())
++            snprintf(st.tabs[i].title, WK5UI::TAB_TITLE_MAX, "%s", m_tabs[i].docTitle.c_str());
+         else
+             WK5UI::bkTitleFromUrl(m_tabs[i].current.c_str(), st.tabs[i].title, WK5UI::TAB_TITLE_MAX);
+     }
+@@ -1210,7 +1213,11 @@
+     if (m_current.empty())
+         return;
+     char title[WK5UI::BM_TITLE_MAX];
+-    WK5UI::bkTitleFromUrl(m_current.c_str(), title, sizeof title);
++    const std::string& live = activeTabState().docTitle;
++    if (!live.empty())
++        snprintf(title, sizeof title, "%s", live.c_str());
++    else
++        WK5UI::bkTitleFromUrl(m_current.c_str(), title, sizeof title);
+     if (WK5UI::bkContains(m_bookmarks, m_current.c_str())) {
+         WK5UI::bkRemove(m_bookmarks, m_current.c_str());
+         wk5emit("[WIN] bookmark del url=%s", m_current.c_str());
+@@ -1714,20 +1721,33 @@
+     }
+ }
+ 
+-void WK5State::scrollPage(int dir)
++void WK5State::scrollPage(int dir, bool pageStep)
+ {
+     auto* corePage = m_page->corePage();
+     auto* localFrame = dynamicDowncast<LocalFrame>(corePage->mainFrame());
+     if (!localFrame)
+         return;
++    // WK-7 ux (page-type scroll): PageDown/PageUp move ~0.9x the scrollable
++    // viewport height (the engine clamps to the document's range); wheel
++    // ticks keep the 40px notch.  visibleHeight() is the ScrollableArea
++    // viewport truth — same source the engine/layout uses.
++    int step = WK5_SCROLL_STEP;
++    if (pageStep && localFrame->view()) {
++        int vh = localFrame->view()->visibleHeight();
++        step = (vh * 9) / 10;
++        if (step < 1)
++            step = 1;
++    }
+     char buf[64];
+-    snprintf(buf, sizeof buf, "window.scrollBy(0, %d);", dir * WK5_SCROLL_STEP);
++    snprintf(buf, sizeof buf, "window.scrollBy(0, %d);", dir * step);
+     wk5emit("[WIN] scrollPage dir=%d", dir);
++    if (pageStep)
++        wk5emit("[WIN] scrollPage key-step=%d", step);
+     // fs-r4: engine-level scroll (no JS — the eval layer is unreliable
+     // under the shell script policy).  ScrollView::scrollBy clamps to the
+     // scrollable range and its position feeds the paint/blit path.
+     if (auto* view = localFrame->view())
+-        view->scrollBy({ 0, dir * WK5_SCROLL_STEP });
++        view->scrollBy({ 0, dir * step });
+     m_phase = Phase::Stable;
+     bumpSettle();
+     paintAndBlit();
+@@ -2008,11 +2028,11 @@
+         break;
+     case WK5_KEY_PGUP:
+         wk5emit("[WIN] key=pgup action=scroll-up");
+-        scrollPage(-1);
++        scrollPage(-1, true);
+         break;
+     case WK5_KEY_PGDN:
+         wk5emit("[WIN] key=pgdn action=scroll-down");
+-        scrollPage(1);
++        scrollPage(1, true);
+         break;
+     default:
+         break;
+@@ -2470,6 +2490,7 @@
+     tab.history.push_back(nm);
+     tab.histIdx = tab.history.size() - 1;
+     tab.current = nm;
++    tab.docTitle.clear();     // WK-7 ux: stale title must not leak into the new load
+     m_current = nm;
+     m_phase = Phase::Load;
+     m_loadTicks = 0;
+@@ -2509,6 +2530,7 @@
+     if (ok) {
+         m_current = href;
+         activeTabState().current = href;
++        activeTabState().docTitle.clear();  // WK-7 ux: clear stale title on every load (back/fwd/reload too)
+         m_pendingFrag = frag;
+         m_phase = Phase::Load;
+         m_loadTicks = 0;
+@@ -3441,6 +3463,19 @@
+             wk5emit("[WIN] load-ok url=%s ms=%lld", m_current.c_str(),
+                 static_cast<long long>((MonotonicTime::now() - m_start).milliseconds()));
+             if (localFrame) {
++                // WK-7 ux (doc-title tabs/bm): capture the LIVE document title
++                // at the load-completion latch so tab chips and bookmarks show
++                // the page's own name ("Cat - Wikipedia"), not the URL-derived
++                // label.  Pure C++ read — no JS eval — off the completed
++                // document.  bkTitleFromUrl stays as the unloaded-tab fallback.
++                if (auto* doc = localFrame->document()) {
++                    String t = doc->title();
++                    std::string ts = t.isEmpty() ? "" : t.utf8().data();
++                    if (!ts.empty()) {
++                        activeTabState().docTitle = ts;
++                        wk5emit("[WIN] doc-title store=%s", ts.c_str());
++                    }
++                }
+                 const char* dexpr =
+                     "(function(){var d=document,b=d.body?d.body.innerHTML.length:-1;"
+                     "return (d.title||'')+'|'+b+'|'+d.querySelectorAll('input').length+'|'"

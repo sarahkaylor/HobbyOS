@@ -1,4 +1,5 @@
 #include "process.h"
+#include "kline.h"
 #include "frame.h"
 #include "vm.h"
 #include "fs.h"
@@ -295,6 +296,9 @@ static void kmemset(void *dst, uint8_t val, uint64_t n) {
  */
 void process_init(void) {
   spinlock_init(&proc_lock);
+#ifdef KERNEL_MODE_UNIT_TEST
+  lockdbg_register(&proc_lock, "proc_lock", LOCK_RANK_PROC); /* SEC-OBS-B */
+#endif
   /* P2.2 (design section 2): the frame bitmap is the single source of
      truth for pool state; the 32 MiB block layer is layered on it. */
   frame_init();
@@ -427,7 +431,19 @@ void process_set_entry(int pid, uint64_t elr, uint64_t sp) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   proc_table[pid].context[31] = elr;        // ELR (entry point)
   proc_table[pid].context[33] = sp;         // SP_EL0 (stack pointer)
+#if defined(__x86_64__)
+  /* GB-014: on x64 this slot is RFLAGS, not ARM's SPSR. Zero is NOT a valid
+   * set of flags to iretq with: bit 1 is architecturally reserved and MUST be
+   * 1, so `iretq` with RFLAGS=0 raises #GP with error code 0 and the user
+   * process never executes a single instruction -- which is exactly what every
+   * staged ELF program did (measured: #GP vector 13, GP ERROR: 0x00000000,
+   * first fetch absent from a 199k-line in_asm capture). 0x202 = IF | bit1,
+   * the same value the normal x64 create path uses at context[32].
+   * On ARM this slot stays 0 (SPSR = EL0t, the correct EL0 state). */
+  proc_table[pid].context[32] = 0x202;
+#else
   proc_table[pid].context[32] = 0;          // SPSR = EL0t
+#endif
   proc_table[pid].context[34] = 0;          // x64: force is_kernel_process classification
   proc_table[pid].context[35] = 0;          //      (a fresh user program resumes as 0x1B/0x23)
   proc_table[pid].state = PROC_STATE_READY; // Mark as runnable!
@@ -723,8 +739,9 @@ static void group_teardown(struct process *grp, uint64_t code) {
   grp->as = 0;
   spinlock_release_irqrestore(&proc_lock, flags);
 
-  /* Close the group's descriptors once.  file_close() re-checks each slot
-     under its own file lock, so even a racing path stays consistent. */
+  /* Close the group's descriptors once.  SEC-9 (security-plan.md #9):
+   * file_close() claims each fd slot under proc_lock, so a racing kill
+   * teardown or sibling close() releases every g_fd exactly once. */
   for (int i = 0; i < MAX_OPEN_FDS; i++) {
     if (grp->open_fds[i] != -1)
       file_close(grp, i);
@@ -1588,6 +1605,24 @@ void schedule(struct trap_frame *tf, int is_yield) {
       extern char __stack_top;
       uint64_t target_sp = (uint64_t)&__stack_top - cpu * 0x10000 - 4096;
 #ifdef __x86_64__
+      /* GB-068 FIX: target_sp must be the RESUMED TASK's stack, not this CPU's.
+         It was initialised to the per-CPU kernel stack and only ever
+         `arch_set_user_sp(park)` was called in the kernel branch -- target_sp
+         itself was never reassigned. enter_user_space places the initial
+         argument block at target_sp and points rdi at it, so EVERY process was
+         handed a kernel stack address: measured [WINDUMP] rdi40=0x755DDBC8 with
+         tsp=0x755DDBF0 (rdi = tsp - 0x28) while c33 said the real user stack was
+         0x17FFFFFFF8. The program then dereferenced argv in the kernel stack,
+         which is not mapped in its CR3 -> the memory fault at VA in the 0x755..
+         range with rdi holding a kernel pointer. That is the whole of the
+         "context[31] kernel RIP with user CS" mystery: the frame was fine, the
+         STACK POINTER was not.
+         For a user process context[33] is the user stack top; for a kernel task
+         it is the interrupted RSP. Both cases want the same thing here. */
+      {
+        uint64_t own_sp = proc_table[next].context[33];
+        if (own_sp) target_sp = own_sp;
+      }
       /* Every kernel task resumes on its OWN stack: context[33] is the
          interrupted RSP for a preempted task (the frame's RSP slot,
          saved by save_context) and user_phys_base + USER_REGION_SIZE -
@@ -1847,6 +1882,19 @@ void process_exit(struct trap_frame *tf) {
 
   uart_puts(buf);
 
+  /* GB-014: name the last user PC we saw trapped, so a program that stops
+     silently reports where it got to instead of just its entry point. */
+  if (!cur->is_kernel_process) {
+    struct kline ku;
+    kl_init(&ku);
+    kl_s(&ku, "[EXITPC] pid=");
+    kl_i(&ku, (long)cur->pid);
+    kl_s(&ku, " last_user_pc=");
+    kl_hex(&ku, (unsigned long)cur->last_user_pc);
+    kl_s(&ku, "\n");
+    kl_emit(&ku);
+  }
+
   int code = (int)tf->regs[0];
 
   if (cur->is_kernel_process) {
@@ -2028,13 +2076,16 @@ void process_kill_group_sig(struct process *p, int sig) {
   reap_deliver_locked(p);
   spinlock_release_irqrestore(&proc_lock, flags);
 
-  // We close the global file descriptors directly to properly free resources
-  for (int i = 0; i < MAX_OPEN_FDS; i++) {
-    if (p->open_fds[i] != -1) {
-      fs_close_global(p->open_fds[i]);
-      p->open_fds[i] = -1;
-    }
-  }
+  /* SEC-9 (security-plan.md #9): close through file_close(), which claims
+   * each fd slot atomically under proc_lock.  The old loop snapshotted
+   * open_fds[i] and called fs_close_global() outside any lock, so a
+   * concurrent teardown (group_teardown on normal exit) or a sibling
+   * thread's close() could release the same g_fd twice — double
+   * pipe_close/usock_close and ref_count driven below the true count.
+   * The claim makes the loser of the race a plain no-op: exactly one
+   * release per fd, whichever path wins. */
+  for (int i = 0; i < MAX_OPEN_FDS; i++)
+    file_close(p, i);
   process_wake_all();
 }
 
@@ -2929,6 +2980,21 @@ void process_wake_all(void) {
   spinlock_release_irqrestore(&proc_lock, flags);
 }
 
+/* SEC-OBS-B: deferred lost-wakeup catch-all (see process.h).  The flag is
+ * a single volatile word: concurrent setters are idempotent, and the tick
+ * drain clears before waking so a wake racing in re-arms the next tick —
+ * same benign race the immediate call always had against blocking. */
+static volatile int wake_all_pending;
+
+void process_wake_all_deferred(void) { wake_all_pending = 1; }
+
+void process_wake_all_drain(void) {
+  if (!wake_all_pending)
+    return;
+  wake_all_pending = 0;
+  process_wake_all();
+}
+
 struct process *process_get_pcb(int pid) {
   if (pid < 0 || pid >= MAX_PROCESSES)
     return 0;
@@ -3171,6 +3237,20 @@ void start_scheduler(void) {
 
         extern char __stack_top;
         uint64_t target_sp = (uint64_t)&__stack_top - cpu * 0x10000 - 4096;
+#ifdef __x86_64__
+        /* GB-068 (same fix as schedule(), second site -- this is the sibling
+           path that kept producing the tsp-0x28 fingerprint after the first one
+           was fixed, and it is why 6 faults survived): target_sp must be the
+           RESUMED TASK's stack. It defaults to this CPU's kernel stack and was
+           never reassigned here either, so enter_user_space put the initial
+           argument block -- and rdi -- on the kernel stack, unmapped in the
+           process's CR3. For a user process context[33] is the user stack top;
+           for a kernel task it is the interrupted RSP. */
+        {
+          uint64_t own_sp = proc_table[i].context[33];
+          if (own_sp) target_sp = own_sp;
+        }
+#endif
 
         struct trap_frame local_tf;
         restore_context(&proc_table[i], &local_tf);
@@ -3213,6 +3293,29 @@ void start_scheduler(void) {
        cur->is_kernel_process; with the per-core LAPIC timers armed every
        idle AP hit that guard with a stale kernel-task claim and
        re-scheduled the wave loader → proc_lock wedge right after boot. */
+    /* GB-057 (2026-10-21): clearing the claim is right, but it left the
+       process's STATE at PROC_STATE_RUNNING. A process that is merely
+       unclaimed is runnable, not running; LOSTWAKE treats "RUNNING with no
+       claiming CPU" as a stale dead-owner claim and DISPOSES it. Measured on
+       ARM with a [CLAIMDROP] probe in set_current_process_pid():
+         [CLAIMDROP] cpu=3 pid1 -> -1 pid1_state=3 caller=start_scheduler+0xb3c
+       pid 1 owns test_wave_loader() and therefore the halt decision; after it
+       was reclaimed, no task ever evaluated !any_alive, [HALT-CD] never
+       printed, and every CPU spun in [IDLESTUCK] past 64,000 rounds. So the
+       wave could run to completion (4/4 exits) and still never finish.
+       Put an unclaimed-but-alive process back to READY so another CPU can pick
+       it up instead of the reaper killing it. The lock is re-taken here because
+       it was released above for the resume. */
+    {
+      int last_pid = cpu_current_pids[get_cpuid()];
+      if (last_pid >= 0 && last_pid < MAX_PROCESSES &&
+          proc_table[last_pid].state == PROC_STATE_RUNNING) {
+        uint64_t f2 = spinlock_acquire_irqsave(&proc_lock);
+        if (proc_table[last_pid].state == PROC_STATE_RUNNING)
+          proc_table[last_pid].state = PROC_STATE_READY;
+        spinlock_release_irqrestore(&proc_lock, f2);
+      }
+    }
     set_current_process_pid(get_cpuid(), -1);
 
     /* P2.2 (S2): this core no longer runs any process; do not keep a
@@ -3485,29 +3588,63 @@ void start_scheduler(void) {
       uint64_t dflags = spinlock_acquire_irqsave(&proc_lock);
       for (int k = 0; k < MAX_PROCESSES; k++) {
         if (proc_table[k].state != PROC_STATE_FREE) {
-          uart_puts("[IDLESTUCK] slot=");
-          print_int(k);
-          uart_puts(" pid=");
-          print_int(proc_table[k].pid);
-          uart_puts(" st=");
-          print_int(proc_table[k].state);
-          uart_puts(" parent=");
-          print_int(proc_table[k].parent_pid);
-          /* GB-057: name the WAIT, do not infer it from the shape of the test.
-             Reading `st=5` only says "blocked"; the two things that say *what*
-             it is blocked on are whether a timer will ever release it (`wake_ms`,
-             0 = waiting on an event with no deadline) and where its saved return
-             address points (`context[31]`, the ELR both arches share).  I spent a
-             probe assuming a pipe from a comment in main.c about the spawn2
-             pattern, then cleared four pipe mechanisms by reading -- none of them
-             the bug, because the subject was assumed.  This prints the subject. */
-          uart_puts(" wake=");
-          print_int(proc_table[k].wake_ms);
-          uart_puts(" rip=");
-          uart_print_hex(proc_table[k].context[31]);
-          uart_puts(" ");
-          uart_puts(proc_table[k].name);
-          uart_puts("\n");
+          /* One record, one uart_puts, one lock hold. This report was a dozen
+             separate calls, so under SMP it interleaved with other CPUs' output
+             and became unreadable -- the same defect that hid a real #GP in the
+             user-fault line before bcba3a6. A diagnostic nobody can read is
+             not a diagnostic, and this one is the only thing that names WHERE a
+             stuck process is. */
+          {
+            char lb[176];
+            int li = 0;
+            const char *h1 = "[IDLESTUCK] slot=";
+            while (*h1) lb[li++] = *h1++;
+            long v = k;
+            char tmp[24];
+            int ti = 0;
+            if (v == 0) tmp[ti++] = '0';
+            while (v > 0 && ti < 20) { tmp[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) lb[li++] = tmp[--ti];
+            const char *h2 = " pid=";
+            while (*h2) lb[li++] = *h2++;
+            v = proc_table[k].pid;
+            ti = 0;
+            if (v == 0) tmp[ti++] = '0';
+            while (v > 0 && ti < 20) { tmp[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) lb[li++] = tmp[--ti];
+            const char *h3 = " st=";
+            while (*h3) lb[li++] = *h3++;
+            v = proc_table[k].state;
+            ti = 0;
+            if (v == 0) tmp[ti++] = '0';
+            while (v > 0 && ti < 20) { tmp[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) lb[li++] = tmp[--ti];
+            const char *h4 = " wake=";
+            while (*h4) lb[li++] = *h4++;
+            v = proc_table[k].wake_ms;
+            ti = 0;
+            if (v == 0) tmp[ti++] = '0';
+            while (v > 0 && ti < 20) { tmp[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) lb[li++] = tmp[--ti];
+            const char *h5 = " rip=0x";
+            while (*h5) lb[li++] = *h5++;
+            {
+              uint64_t rv = proc_table[k].context[31];
+              int st2 = 0;
+              for (int sh = 60; sh >= 0 && li < 168; sh -= 4) {
+                unsigned d = (unsigned)((rv >> sh) & 0xF);
+                if (!d && !st2 && sh) continue;
+                st2 = 1;
+                lb[li++] = "0123456789abcdef"[d];
+              }
+            }
+            lb[li++] = ' ';
+            for (int ni = 0; proc_table[k].name[ni] && ni < 31 && li < 172; ni++)
+              lb[li++] = proc_table[k].name[ni];
+            lb[li++] = '\n';
+            lb[li] = 0;
+            uart_puts(lb);
+          }
         }
       }
       uart_puts("[IDLESTUCK] claims:");
@@ -4152,4 +4289,38 @@ int process_futex(struct process *caller, struct trap_frame *tf, uint64_t uaddr,
   }
 
   return -ENOSYS;
+}
+
+/* ---------------------------------------------------------------------------
+ * SEC-10 (security-plan.md #10): kernel-stack exhaustion check at syscall
+ * entry.  Kernel stacks are fixed 64 KiB per-CPU slices below __stack_top
+ * (boot.s / trap_init_core); they are contiguous, so an overflow does not
+ * fault — it walks silently into the adjacent core's stack or kernel data
+ * and corrupts control flow there.  The MMU cannot give these static
+ * carve-outs a guard page without reworking the early identity map, so the
+ * cheap structural defense is a depth check: every syscall entry verifies
+ * the remaining slice against a margin that covers the deepest handler
+ * path; below it we halt with a clear message instead of continuing on a
+ * doomed stack.  (Function-level canaries from SEC-4 backstop buffer
+ * overflows within a frame.)
+ * ------------------------------------------------------------------------- */
+
+#define KERNEL_STACK_BYTES (64u * 1024u)
+
+/* Bytes left between the current SP and this CPU's stack slice bottom. */
+uint64_t kernel_stack_remaining(void) {
+  extern char __stack_top; /* same symbol, same spelling as used above */
+  uint32_t cpu = get_cpuid();
+  if (cpu >= MAX_CPUS)
+    return KERNEL_STACK_BYTES; /* unknown core: assume fine, caller halts elsewhere */
+  uint64_t bottom =
+      (uint64_t)&__stack_top - (uint64_t)(cpu + 1) * KERNEL_STACK_BYTES;
+  uint64_t sp = (uint64_t)__builtin_frame_address(0);
+  return sp > bottom ? sp - bottom : 0;
+}
+
+/* 1 when the remaining slice is below `margin` — i.e. running this far
+ * into the stack and then executing a normal handler path would overflow. */
+int kernel_stack_low(uint64_t margin) {
+  return kernel_stack_remaining() < margin ? 1 : 0;
 }

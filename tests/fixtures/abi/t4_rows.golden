@@ -37,3 +37,15 @@ sockselect_ready
 sockselect_fdset
 sockpselect_ready
 sockpselect_fdset
+fcntl_getfl_rdwr
+fcntl_setfl_append
+fcntl_getfl_after
+fcntl_append_bit
+ioctl_tiocgwinsz_entty
+ioctl_tcgets_entty
+dent_created
+dent_opendir
+dent_total
+dent_have_alpha
+dent_have_beta
+dent_have_charlie

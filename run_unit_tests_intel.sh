@@ -6,12 +6,19 @@
 # the 20s budget covers the run, not the cold build, and the cleanup kills
 # this run's own process tree only).
 #
-# EXTRA_QEMU_ARGS lets CI add acceleration (e.g. "-enable-kvm"); default is
-# a plain headless TCG run.
-
+# Acceleration is the default here, not opt-in: the fleet VMs expose
+# /dev/kvm (nested SVM), so an intel unit wave runs under -enable-kvm —
+# minutes instead of tens of minutes of TCG.  The mode follows /dev/kvm's
+# presence (an environmental fact: the same host always runs the same mode,
+# so reproducibility holds), is printed below, and can be forced off with
+# SKIP_KVM=1 or overridden with EXTRA_QEMU_ARGS (which wins).
 rm -f qemu.log build.log
-EXTRA_QEMU_ARGS="${EXTRA_QEMU_ARGS:-}"
-
+if [ -e /dev/kvm ] && [ "${SKIP_KVM:-0}" != "1" ]; then
+  EXTRA_QEMU_ARGS="${EXTRA_QEMU_ARGS:--enable-kvm}"
+else
+  EXTRA_QEMU_ARGS="${EXTRA_QEMU_ARGS:-}"
+fi
+echo "Running unit tests with QEMU_ARGS: $EXTRA_QEMU_ARGS"
 echo "Building unit test image..."
 if ! make ARCH=intel MODE=unit_tests hobbyos.elf disk.img > build.log 2>&1; then
     echo "Build failed!"

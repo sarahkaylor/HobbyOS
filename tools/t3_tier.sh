@@ -79,9 +79,25 @@ if [ -n "$POLICE_ONLY" ]; then
   FAIL_LINES=$(grep -ac "FAIL" "$LOG" || true)
   KFAULT=$(grep -ac "FATAL kernel-mode fault" "$LOG" || true)
   MEMFAULTS=$(grep -ac "memory fault" "$LOG" || true)
+  MEMFAULT_PROCS=$(grep -aoE "\[KERNEL\] pid=[0-9]+ \([^)]*\) memory fault" "$LOG" 2>/dev/null \
+    | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u | wc -l | tr -d ' ' || true)
   LINES=$(wc -l <"$LOG")
-  echo "T3_${ARCH} (police ${LOG}): ${LINES} lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} user memory faults, halted=${halted}, kfault=${KFAULT}"
+  # GB-068 follow-on: a guest that REBOOTS is not a guest that ran a long wave.
+  # After the input/stack fixes the intel guest began triple-faulting in
+  # vm_arch_teardown ~27 s into each boot and QEMU restarted it; the serial log
+  # then fills with repeated boot markers and the run ends on the harness
+  # TIMEOUT with no verdict at all (TIER=124), which reads like a hang instead of
+  # a crash. A triple fault has no handler, so the console cannot show it -- the
+  # only in-band evidence is that the machine booted more than once. One
+  # "Controller reset complete!" is the virtio-blk init of a single boot; more
+  # than two means the guest restarted.
+  BOOTS=$(grep -ac "Controller reset complete" "$LOG" || true)
+  echo "T3_${ARCH} (police ${LOG}): ${LINES} lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} fault records across ${MEMFAULT_PROCS} processes, halted=${halted}, kfault=${KFAULT}, boots=${BOOTS}"
   rc=0
+  if [ "${BOOTS:-0}" -gt 2 ]; then
+    echo "T3_${ARCH}: FAIL — the guest BOOTED ${BOOTS} times: it is resetting mid-run (a triple fault has no handler, so the console cannot show it; capture it with T3_QEMU_ARGS=\"-d int,cpu_reset -D /tmp/q.log\")"
+    rc=1
+  fi
   [ "$halted" = "1" ] || { echo "T3_${ARCH}: FAIL — no halt line"; rc=1; }
   [ "$KFAULT" = "0" ] || { echo "T3_${ARCH}: FAIL — ${KFAULT} FATAL kernel-mode fault line(s): the guest halted because the kernel crashed"; rc=1; }
   [ "$LINES" -ge "${T3_MIN_LINES:-1000}" ] || { echo "T3_${ARCH}: FAIL — only ${LINES} console lines (floor ${T3_MIN_LINES:-1000}): too little work for a complete wave"; rc=1; }
@@ -94,8 +110,8 @@ if [ -n "$POLICE_ONLY" ]; then
   # exceed the documented ceiling (default 75; see run-path comment for the
   # measured 52/57 spread that rules out the old 60).
   USER_FAULT_ALLOW="${T3_USER_FAULT_ALLOW:-75}"
-  if [ "$MEMFAULTS" -gt "$USER_FAULT_ALLOW" ]; then
-    echo "T3_${ARCH}: FAIL — ${MEMFAULTS} user memory faults exceeds the documented baseline ceiling ${USER_FAULT_ALLOW} (GB-068 regression)"
+  if [ "${MEMFAULT_PROCS:-0}" -gt "$USER_FAULT_ALLOW" ]; then
+    echo "T3_${ARCH}: FAIL — ${MEMFAULT_PROCS} processes carry user memory faults, above the ceiling ${USER_FAULT_ALLOW} (GB-068 regression); ${MEMFAULTS} records in total"
     rc=1
   fi
   [ "$rc" -eq 0 ] && echo "T3_${ARCH}: PASS (0 FAIL lines, halted)"
@@ -142,13 +158,18 @@ echo "=== T3 ($ARCH): run (deadline ${T3_TIMEOUT}s, log $LOG) ==="
 # Same QEMU invocation as `make run`, serial captured to the log.  A
 # background job + poll (not a bare `timeout make`) so we can distinguish
 # "guest halted" from "deadline hit" and report both honestly.
-# T3_QEMU_ARGS lets a caller add acceleration without editing the tier:
-#   T3_QEMU_ARGS="-enable-kvm" make test_intel
-# runs the intel wave near-native instead of under TCG (the fleet's VMs have
-# nested SVM and /dev/kvm, and a TCG 8-vCPU wave takes tens of minutes while
-# the same wave under KVM is minutes).  Never hardcoded here: KVM is not
-# available on every host, and a tier that silently changes its execution
-# mode is not reproducible.
+# Acceleration is the DEFAULT for intel, not opt-in: when this host has
+# /dev/kvm (the fleet VMs do -- nested SVM), the intel wave runs under
+# -enable-kvm, minutes instead of tens of minutes of TCG.  KVM is not
+# available on every host (e.g. macOS, or a host without nested virt), so:
+#   * the mode is chosen from /dev/kvm's presence, an environmental fact --
+#     the same host always runs the same mode, so reproducibility holds;
+#   * the mode actually used is PRINTED on the build line below, so a log
+#     can never hide which mode it ran under;
+#   * T3_SKIP_KVM=1 forces TCG for an explicit A/B (and on this fleet is
+#     the only way to run the slow path once a host has /dev/kvm).
+# T3_QEMU_ARGS still lets a caller append further args without editing the
+# tier (e.g. T3_MONITOR adds the monitor socket this way).
 # Post-freeze evidence: read the LIVE guest through QEMU's monitor before
 # cleanup kills it.
 #
@@ -162,6 +183,20 @@ echo "=== T3 ($ARCH): run (deadline ${T3_TIMEOUT}s, log $LOG) ==="
 #
 # Opt-in via T3_MONITOR=1: it changes the QEMU command line, and a tier that
 # silently changes its execution mode is not reproducible.
+# KVM acceleration default (intel only).  The fleet VMs have /dev/kvm
+# (nested SVM); a TCG intel wave is tens of minutes while the same wave
+# under KVM is minutes.  Default to KVM whenever the host offers it, print
+# the mode on the run line, and let T3_SKIP_KVM=1 force the slow path for
+# an explicit A/B.  ARM never gets KVM here (aarch64-on-x86 host has no
+# aarch64 KVM), so this is gated on ARCH, not just on the device.
+if [ "$ARCH" = "intel" ] && [ -e /dev/kvm ] && [ "${T3_SKIP_KVM:-0}" != "1" ]; then
+  ACCEL_ARGS="-enable-kvm"
+else
+  ACCEL_ARGS=""
+fi
+# T3_QEMU_ARGS still wins outright when the caller passes it explicitly.
+if [ -z "${T3_QEMU_ARGS:-}" ]; then T3_QEMU_ARGS="$ACCEL_ARGS"; fi
+
 MON_SOCK=""
 if [ "${T3_MONITOR:-0}" = "1" ]; then
   MON_SOCK="${T3_MONITOR_SOCK:-/tmp/t3_monitor_${ARCH}_$$.sock}"
@@ -183,7 +218,13 @@ if command -v fuser >/dev/null 2>&1 && fuser "$ROOT/disk.img" >/dev/null 2>&1; t
   exit 2
 fi
 
-make -o disk.img ARCH="$ARCH" MODE=test run QEMU_ARGS="-display none ${T3_QEMU_ARGS:-}" >>"$LOG" 2>&1 &
+# T3_SMP lets a caller pin the CPU count (QEMU_SMP defaults to 8 in the
+# Makefile). This matters for concurrency questions: "does this fault happen
+# with one CPU?" is often the cheapest discriminator between a real logic bug
+# and a race, and before this passthrough there was no way to ask it -- passing
+# "-smp 1" inside T3_QEMU_ARGS does NOT work, because the Makefile's own
+# "-smp $(QEMU_SMP)" precedes it and QEMU honours the earlier one.
+make -o disk.img ARCH="$ARCH" MODE=test run ${T3_SMP:+QEMU_SMP=$T3_SMP} QEMU_ARGS="-display none ${T3_QEMU_ARGS:-}" >>"$LOG" 2>&1 &
 MAKE_PID=$!
 cleanup() {
   pkill -P "$MAKE_PID" 2>/dev/null || true
@@ -256,9 +297,19 @@ FAIL_LINES=$(grep -ac "FAIL" "$LOG" || true)
 # ("[KERNEL] pid=N (IMG) memory fault VA=" not "FATAL kernel-mode fault").  A count
 # printed without a baseline in the same line invites exactly that mistake.
 MEMFAULTS=$(grep -ac "memory fault" "$LOG" || true)
+# GB-068: the RECORD count is not the impact count.  Measured 2026-10-19 on
+# three runs of the same build: 61 records / 56 distinct pids, 112 / 56, and
+# 71 / 48.  The same processes appear every time; what varies is how many times
+# each one faults before dying (1 on a quick death, up to 4 when it keeps
+# re-entering the faulting path).  So the record count is retries, and gating on
+# it means gating on scheduling luck -- which is exactly why the old ceiling of
+# 60 fired on some runs at 61-113 while the affected-process count sat still.
+# Both are printed; the guard below gates on the STABLE one.
+MEMFAULT_PROCS=$(grep -aoE "\[KERNEL\] pid=[0-9]+ \([^)]*\) memory fault" "$LOG" 2>/dev/null \
+  | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u | wc -l | tr -d ' ' || true)
 PROGS_EXITED=$(grep -aoE "Process [0-9]+: [A-Z0-9_.]+\.BIN exited" "$LOG" 2>/dev/null \
-  | grep -oE "[A-Z][A-Z0-9_]{1,12}\.BIN" | sort -u | wc -l | tr -d ' ')
-echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} user memory faults, ${PROGS_EXITED} programs exited, halted=${halted}"
+  | grep -oE "[A-Z][A-Z0-9_]{1,12}\.BIN" | sort -u | wc -l | tr -d ' ' || true)
+echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, ${MEMFAULTS} user memory fault records across ${MEMFAULT_PROCS} processes, ${PROGS_EXITED} programs exited, halted=${halted}"
 
 # GB-068 regression guard: the intel wave carries a documented, long-standing
 # baseline of user-mode fatal faults (in=PROT) from legacy v1 flat binaries
@@ -285,8 +336,8 @@ echo "T3_${ARCH}: $(wc -l <"$LOG") console lines, ${FAIL_LINES} FAIL lines, ${ME
 # the v1 stack region is fixed.
 USER_FAULT_ALLOW="${T3_USER_FAULT_ALLOW:-75}"
 MEMREG=0
-if [ "$MEMFAULTS" -gt "$USER_FAULT_ALLOW" ]; then
-  echo "T3_${ARCH}: FAIL — ${MEMFAULTS} user memory faults exceeds the documented baseline ceiling ${USER_FAULT_ALLOW} (GB-068 regression); a change added user faults the wave did not previously carry"
+if [ "${MEMFAULT_PROCS:-0}" -gt "$USER_FAULT_ALLOW" ]; then
+  echo "T3_${ARCH}: FAIL — ${MEMFAULT_PROCS} processes carry user memory faults, above the ceiling ${USER_FAULT_ALLOW} (GB-068 regression); ${MEMFAULTS} records in total, which vary with per-process retries rather than with impact"
   MEMREG=1
 fi
 
@@ -322,7 +373,7 @@ LINES=$(wc -l <"$LOG")
 # for a wave that never got going.
 MIN_PROGRAMS="${T3_MIN_PROGRAMS:-55}"
 EXITED_PROGS=$(grep -aoE "Process [0-9]+: [A-Z0-9_.]+\.BIN exited" "$LOG" 2>/dev/null \
-  | grep -oE "[A-Z][A-Z0-9_]{1,12}\.BIN" | sort -u | wc -l | tr -d ' ')
+  | grep -oE "[A-Z][A-Z0-9_]{1,12}\.BIN" | sort -u | wc -l | tr -d ' ' || true)
 MIN_LINES="${T3_MIN_LINES:-300}"
 if [ "$KFAULT" != "0" ]; then
   echo "T3_${ARCH}: FAIL — ${KFAULT} FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed"; rc=1

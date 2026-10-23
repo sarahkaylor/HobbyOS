@@ -23,7 +23,12 @@ typedef enum {
   FILE_TYPE_UNIXSOCK, /**< P4: AF_UNIX socketpair end (struct usock) */
   FILE_TYPE_MEMFD,    /**< P2.4 (S4): memory file backed by a vm_object */
   FILE_TYPE_DEVNULL,  /**< GB-017: /dev/null — write-sink, EOF-on-read */
-  FILE_TYPE_DEVURANDO /**< GB-017: /dev/urandom — entropy file (F1.4 pool) */
+  FILE_TYPE_DEVURANDO,/**< GB-017: /dev/urandom — entropy file (F1.4 pool) */
+  /* SEC-6: freshly allocated slot whose real type the caller has not set
+     yet.  Distinct from FILE_TYPE_EMPTY (= free): an abandoned UNINIT slot
+     must never be mistaken for a usable FAT16 file with garbage fields.
+     Appended last so existing values do not shift. */
+  FILE_TYPE_UNINIT
 } file_type_t;
 
 struct vm_object;
@@ -43,6 +48,11 @@ struct file {
       uint32_t dir_offset;         /**< Offset within the sector */
       uint32_t cursor;             /**< Current read/write position */
       int dirty;                   /**< Entry changed since open; close must sync */
+      /* SEC-5: exact bytes this slot held at open / after our last write-back.
+         fat16_sync_entry() only rewrites the slot while it still matches this
+         snapshot — a rename/recreate by anyone else diverges it and blocks a
+         stale clobber of cluster/size fields we never touched. */
+      struct fat16_dir_entry disk_seen;
     } fat16;
     struct {
       struct pipe *ptr;            /**< Pointer to the pipe structure */
