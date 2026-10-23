@@ -87,7 +87,7 @@ static const char *pair_iter(const char *pos, const char **data) {
 }
 
 static int write_file(const char *path, const char *data) {
-  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC);
+  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   size_t len = strlen(data), off = 0;
   if (fd < 0) return -1;
   while (off < len) {
