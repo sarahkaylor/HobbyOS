@@ -541,6 +541,21 @@ void main(void) {
      the inline loads.  As a thread, the loader waits while the rest of
      the suite runs. */
   process_create_kernel_nowait(test_wave_loader, 0);
+#ifdef HB_GB013_EXEC_AVAILABLE
+  /* GB-013 compat exec leg merged: load and run the static-PIE SDL test app
+     and assert its drawn+echo output.  Wired by the GB-013 executor (no-op
+     until that lands; this branch is compiled out today). */
+  uart_puts("[GB-032] SDL test-app exec: START\n");
+  load_and_run_program_in_scheduler_args("SDLAPP.BIN", -1, -1, -1, -1, 0);
+#else
+  /* GB-013 compat exec leg is NOT open yet: a demonstrated SKIP with a
+     reason — never a silent or fabricated PASS.  The app and its static-PIE
+     ELF properties are already proven on the host (sdl_test_app_test_host,
+     in host_tests); only the exec leg (running it inside the OS) is gated. */
+  uart_puts("[GB-032] SDL test-app exec: SKIP (GB-013 compat exec leg not "
+            "open; app + static-PIE ELF props proven on host by "
+            "sdl_test_app_test_host)\n");
+#endif
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
   load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1, -1, -1);
