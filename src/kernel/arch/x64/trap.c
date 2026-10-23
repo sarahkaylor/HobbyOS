@@ -1936,6 +1936,22 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       switch (syscall_num) {
         case 0:  syscall_num = SYS_READ;  break;   /* read(fd, buf, n)   */
         case 1:  syscall_num = SYS_WRITE; break;   /* write(fd, buf, n)  */
+        /* GB-014: arch_prctl. musl's __init_tls ends with
+             call __set_thread_area ; test eax,eax ; js -> a_crash()
+           so a negative return is fatal: musl executes `hlt`, which at CPL=3
+           raises #GP and the process dies before main() -- measured as
+           RIP=0x1000003e6c (`f4`, inside __init_tls). ARCH_SET_FS is the only
+           opcode a static-pie startup needs; anything else gets -EINVAL, as
+           Linux returns. process_set_tls() validates the address and writes
+           IA32_FS_BASE. */
+        case 158: {                                /* arch_prctl(code, addr) */
+          uint64_t code = tf->regs[5];             /* rdi */
+          uint64_t addr = tf->regs[4];             /* rsi */
+          tf->regs[0] = (code == 0x1002ULL)        /* ARCH_SET_FS */
+                            ? (uint64_t)(int64_t)process_set_tls(lp, addr)
+                            : (uint64_t)(int64_t)(-22);
+          return;
+        }
         case 2:  syscall_num = SYS_OPEN;  break;   /* open(path, fl, md) */
         case 3:  syscall_num = SYS_CLOSE; break;   /* close(fd)          */
         case 60: syscall_num = SYS_EXIT;  break;   /* exit(code)         */
