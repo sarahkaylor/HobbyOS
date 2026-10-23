@@ -1,0 +1,23 @@
+[host-tests] self-registering suite: 15 python tests
+  PASS: good.py (exit 0 + stated verdict) -> grader said PASS, wanted PASS
+  PASS: lowercase.py (exit 0 + ': PASS' spelling (the case that reddened the tier)) -> grader said PASS, wanted PASS
+  PASS: lies.py (prints PASSED but exits 1 — the substring-only grader called this a pass) -> grader said FAIL, wanted FAIL
+  PASS: silent.py (exit 0 with no verdict statement — a silent skip is not a pass) -> grader said FAIL, wanted FAIL
+  PASS: crash.py (non-zero exit) -> grader said FAIL, wanted FAIL
+RUN_T5_TESTS_SELF_TEST: ALL PASSED
+  PASS  tools/board/claim_race_test.py
+  PASS  tools/board/drift_check_test.py
+  PASS  tools/differential/diff_harness_test.py
+  PASS  tools/evidence_rig_test.py
+  PASS  tools/perf_game_cycle_test.py
+  PASS  tools/t5/acceptance_gate_test.py
+  PASS  tools/t5/acceptance_test.py
+  PASS  tools/t5/evidence_pack_test.py
+  PASS  tools/t5/fatbig_tail_test.py
+  PASS  tools/t5/feasibility_doc_test.py
+  PASS  tools/t5/flaky_triage_test.py
+  PASS  tools/t5/game_docs_test.py
+  PASS  tools/t5/replay_test.py
+  PASS  tools/t5/retro_skill_test.py
+  PASS  tools/t5/selfreg_test.py
+[host-tests] done: 20/20 passed

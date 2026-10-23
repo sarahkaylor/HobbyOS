@@ -1,0 +1,6 @@
+  PASS: sha256 deterministic
+  PASS: find_reports picks up EVIDENCE-REPORT
+  PASS: resolve_marker finds rig
+  PASS: resolve_marker globs replay scripts
+
+Tests: ALL PASSED
