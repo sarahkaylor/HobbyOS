@@ -59,7 +59,7 @@ static char *append_int(char *p, int v) {
 }
 
 static void log_line(const char *text) {
-  int fd = open("PROBE.LOG", O_WRONLY | O_CREAT);
+  int fd = open("PROBE.LOG", O_WRONLY | O_CREAT, 0644);
   if (fd >= 0) {
     lseek(fd, 0, 2 /* SEEK_END */);
     write(fd, text, strlen(text));
@@ -69,7 +69,7 @@ static void log_line(const char *text) {
 }
 
 static void dump_file(const char *path, const char *data, size_t n) {
-  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC);
+  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (fd >= 0) {
     if (n) write(fd, data, n);
     close(fd);
@@ -77,7 +77,7 @@ static void dump_file(const char *path, const char *data, size_t n) {
 }
 
 static int write_file(const char *path, const char *data) {
-  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC);
+  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   size_t len = strlen(data), off = 0;
   if (fd < 0) return -1;
   while (off < len) {

@@ -45,7 +45,7 @@ void _start(void) {
   char chunk[4096];
 
   /* 1. Create through the kernel create path. */
-  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC);
+  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (fd < 0) {
     print_console("[FATBIG] FAIL open-create\n");
     exit(0);

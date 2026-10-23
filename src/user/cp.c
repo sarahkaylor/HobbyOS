@@ -26,7 +26,7 @@ int main(void) {
     print("\n");
     return 1;
   }
-  int dest_fd = open(argv[1], O_WRONLY | O_CREAT | O_TRUNC);
+  int dest_fd = open(argv[1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (dest_fd < 0) {
     print("cp: cannot open/create ");
     print(argv[1]);

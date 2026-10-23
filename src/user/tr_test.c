@@ -180,7 +180,7 @@ static void run_tr(const char *args, const char *stdin_data, char *out,
 }
 
 static void write_file(const char *path, const char *content) {
-  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC);
+  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (fd < 0) {
     print_console("[TRTEST] cannot create ");
     print_console(path);

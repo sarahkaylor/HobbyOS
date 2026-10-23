@@ -74,7 +74,7 @@ static void run_worker(int id, int p2c[2], int c2p[2], const char *filename) {
     }
 
     // 2. Perform File I/O
-    int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC);
+    int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) {
       print_console("[WORKER "); print_num(id); print_console("] ERROR: failed to open "); print_console(filename); print_console("\n");
       exit(1);
