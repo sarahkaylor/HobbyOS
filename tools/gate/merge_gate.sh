@@ -52,17 +52,27 @@ GATE_FAIL_TAIL="${GATE_FAIL_TAIL:-25}"
 
 # Missing tools are an ENVIRONMENT failure (exit 2), never a red verdict: the
 # gate must not report a code defect for a box that cannot run the tier.
-missing=()
-for t in mkfs.fat mcopy dd; do command -v "$t" >/dev/null 2>&1 || missing+=("$t"); done
+# GATE_TOOLS overrides the required set so the guard itself can be falsified:
+#   GATE_TOOLS="mkfs.fat definitely-not-a-tool" ./tools/gate/merge_gate.sh --check-env
+# must exit 2 and name the missing tool.
+required_tools=(mkfs.fat mcopy dd)
 if [ "$GATE_T2$GATE_T3" != "00" ]; then
-  command -v qemu-system-aarch64 >/dev/null 2>&1 || missing+=("qemu-system-aarch64")
-  command -v qemu-system-x86_64  >/dev/null 2>&1 || missing+=("qemu-system-x86_64")
+  required_tools+=(qemu-system-aarch64 qemu-system-x86_64)
+fi
+if [ -n "${GATE_TOOLS:-}" ]; then read -r -a required_tools <<<"$GATE_TOOLS"; fi
+missing=()
+for t in "${required_tools[@]}"; do command -v "$t" >/dev/null 2>&1 || missing+=("$t"); done
+if [ "${1:-}" = "--check-env" ]; then
+  echo "[GATE] env: PATH=$PATH"
+  echo "[GATE] required: ${required_tools[*]}"
+  echo "[GATE] missing: ${missing[*]:-none}"
 fi
 if [ "${#missing[@]}" -gt 0 ]; then
   echo "[GATE] ENVIRONMENT FAILURE (exit 2): missing tool(s): ${missing[*]}" >&2
   echo "[GATE] install them or drop the tier (GATE_T2=0 / GATE_T3=0); this is NOT a code verdict" >&2
   exit 2
 fi
+if [ "${1:-}" = "--check-env" ]; then echo "[GATE] ENVIRONMENT OK"; exit 0; fi
 
 # --- T3 verdict-only mode (fast; no QEMU): proxies tools/t3_tier.sh police ---
 if [ "${1:-}" = "police" ]; then
