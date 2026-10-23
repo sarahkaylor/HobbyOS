@@ -56,7 +56,7 @@ int main(void) {
   print_console("[LKSTEST] starting\n");
 
   /* fixture */
-  int fd = open("/LKSTEST.TXT", O_WRONLY | O_CREAT | O_TRUNC);
+  int fd = open("/LKSTEST.TXT", O_WRONLY | O_CREAT | O_TRUNC, 0644);
   CHECK("open fixture", fd >= 0);
   if (fd < 0) { print_console("[LKSTEST] cannot create fixture\n"); return 1; }
   if (write(fd, FIXTURE, FIXLEN) != FIXLEN) failures++;
@@ -87,7 +87,7 @@ int main(void) {
   CHECK("stat repeat ok", stat("/LKSTEST.TXT", &st) == 0);
   CHECK("st_ino stable across stats", st.st_ino == ino_self);
   {
-    int fd2 = open("/LKSTEST2.TXT", O_WRONLY | O_CREAT | O_TRUNC);
+    int fd2 = open("/LKSTEST2.TXT", O_WRONLY | O_CREAT | O_TRUNC, 0644);
     CHECK("open second fixture", fd2 >= 0);
     if (fd2 >= 0) {
       struct stat st2;

@@ -180,7 +180,7 @@ int tasks_load(struct task_state *st) {
   st->count = 0;
   st->status[0] = '\0';
 
-  int fd = tasks_store.open(TASKS_FILE, O_RDONLY | O_CREAT);
+  int fd = tasks_store.open(TASKS_FILE, O_RDONLY | O_CREAT, 0644);
   if (fd < 0) {
     st->load_error = 1;
     return -1;
@@ -205,7 +205,7 @@ int tasks_save(const struct task_state *st) {
   /* Recreate the file so a shorter list cannot leave a stale tail behind
    * (see the persistence note at the top of this file). */
   tasks_store.unlink(TASKS_FILE);
-  int fd = tasks_store.open(TASKS_FILE, O_WRONLY | O_CREAT | O_TRUNC);
+  int fd = tasks_store.open(TASKS_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (fd < 0) return -1;
 
   int w = 0;

@@ -186,7 +186,7 @@ static void run_file(void) {
   int a[2], b[2];
   char buf[256];
   int pid;
-  int fd = open("SEDT.IN", O_WRONLY | O_CREAT | O_TRUNC);
+  int fd = open("SEDT.IN", O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (fd >= 0) {
     write(fd, "alpha\nbeta\n", 12);
     close(fd);
@@ -353,7 +353,7 @@ static void run_one_status(const char *tag, const char *args) {
   int a[2], b[2];
   char buf[256];
   int pid;
-  int fd = open("SEDT.IN", O_WRONLY | O_CREAT | O_TRUNC);
+  int fd = open("SEDT.IN", O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (fd >= 0) {
     write(fd, "alpha\nbeta\ngamma\ndelta\n", 22);
     close(fd);
@@ -390,7 +390,7 @@ static void run_inplace(void) {
   int a[2], b[2];
   char buf[256];
   int pid;
-  int fd = open("SEDT.IN", O_WRONLY | O_CREAT | O_TRUNC);
+  int fd = open("SEDT.IN", O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (fd >= 0) {
     write(fd, "alpha\nbeta\ngamma\ndelta\n", 22);
     close(fd);
@@ -478,7 +478,7 @@ static void run_fat_repro(void) {
   pnum("K strlen=", (int)(sizeof payload - 1));
   print_console("\n");
   unlink("SEDT.RPR");
-  fd = open("SEDT.RPR", O_WRONLY | O_CREAT | O_TRUNC);
+  fd = open("SEDT.RPR", O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (fd < 0) {
     print_console("[PP] K create failed\n");
     return;

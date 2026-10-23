@@ -257,7 +257,7 @@ static int extract_file(const char *full, long size) {
   int ok = 1;
 
   make_parents(full);
-  fd = open(full, O_WRONLY | O_CREAT | O_TRUNC);
+  fd = open(full, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (fd < 0) {
     note_err("cannot create", full);
     if (!skip_exact(size)) {

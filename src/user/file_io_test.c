@@ -10,7 +10,7 @@ void _start(void) {
   char buffer[64];
 
   // 1. Open
-  int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC);
+  int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (fd < 0) {
     print("[FILEIO TEST] ERROR: Could not open TEST.TXT\n");
     exit(0);
