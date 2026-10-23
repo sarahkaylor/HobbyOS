@@ -1882,6 +1882,19 @@ void process_exit(struct trap_frame *tf) {
 
   uart_puts(buf);
 
+  /* GB-014: name the last user PC we saw trapped, so a program that stops
+     silently reports where it got to instead of just its entry point. */
+  if (!cur->is_kernel_process) {
+    struct kline ku;
+    kl_init(&ku);
+    kl_s(&ku, "[EXITPC] pid=");
+    kl_i(&ku, (long)cur->pid);
+    kl_s(&ku, " last_user_pc=");
+    kl_hex(&ku, (unsigned long)cur->last_user_pc);
+    kl_s(&ku, "\n");
+    kl_emit(&ku);
+  }
+
   int code = (int)tf->regs[0];
 
   if (cur->is_kernel_process) {

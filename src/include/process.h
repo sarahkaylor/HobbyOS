@@ -350,6 +350,13 @@ struct process {
    * (GB-014) instead of the native chain.  Group anchor state (the leader
    * marks it; threads inherit from the anchor).  PROC_FLAG_LINUX_ABI = 1. */
   uint32_t abi_flags;
+  /* GB-014: the last user PC observed on a trap into the kernel. A PCB's saved
+   * context is only written on a preemption/resume, so at exit it can still
+   * read as the entry point even when the program ran thousands of
+   * instructions. Latching the PC here makes the exit report name where the
+   * program actually got to, which is the first question asked of any program
+   * that stops silently. */
+  uint64_t last_user_pc;
 };
 
 /* Linux-compat process flag (GB-013): route syscalls through the Linux
