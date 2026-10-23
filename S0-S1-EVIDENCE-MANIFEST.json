@@ -1,0 +1,25 @@
+{
+  "generated": "2026-10-18T01:40:57Z",
+  "artifacts": {
+    "tools/evidence_rig.py": {
+      "kind": "evidence rig",
+      "sha16": "6dab53dfd02fa7cb"
+    },
+    "xnibbler-EVIDENCE-REPORT.md": {
+      "kind": "report",
+      "sha16": "f36463a426a1e5bc"
+    },
+    "THEME-DESKTOP-REPORT.md": {
+      "kind": "report",
+      "sha16": "939e412db750ec92"
+    },
+    "THEME-VERIFY-REPORT.md": {
+      "kind": "report",
+      "sha16": "ace9a3fab5f9141e"
+    },
+    "THEME-WINDOW-REPORT.md": {
+      "kind": "report",
+      "sha16": "18d28379ca63190c"
+    }
+  }
+}
