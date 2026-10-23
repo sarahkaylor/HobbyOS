@@ -692,6 +692,7 @@ MKDIR_BIN = $(OBJ_DIR)/mkdir.bin
 SHELL_TEST3_BIN = $(OBJ_DIR)/shtest3.bin
 PONG_BIN = $(OBJ_DIR)/pong.bin
 MILLIPEDE_BIN = $(OBJ_DIR)/millipede.bin
+DOOM_BIN = $(OBJ_DIR)/doom.bin
 STARDUST_BIN = $(OBJ_DIR)/stardust.bin
 
 # --- New desktop applications (10 GUI apps) ---
@@ -1940,6 +1941,72 @@ $(MILLIPEDE_BIN): $(OBJ_DIR)/millipede.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/millipede.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/millipede.elf $(MILLIPEDE_BIN)
 
+# --- DOOM (doomgeneric) — S0 native-track game port -------------------
+# Full-screen software raycaster as a user-space process on the HobbyOS ABI.
+# Engine = vendored doomgeneric (third_party/doomgeneric, GPLv2+); backend =
+# src/user/doom/doomgeneric_hobbyos.c (VirtIO GPU + input).  Linked against
+# the userland libc.a so stdio/printf/malloc resolve.  Installed on disk.img
+# as DOOM.BIN (launcher slot 12, right after PONG/MILLIPED).  Needs a
+# license-clean IWAD at runtime (see tools/fetch_doom_wad.sh + provenance).
+DOOM_CFLAGS = $(USER_CFLAGS) -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 \
+  -D_DEFAULT_SOURCE -include unistd.h -Isrc/user/doom -Ithird_party/doomgeneric
+# Engine sources = the upstream doomgeneric SRC_DOOM set (self-contained; the
+# platform backends and optional Allegro/OPL ports are deliberately excluded).
+DOOM_ENGINE_SRC = third_party/doomgeneric/am_map.c third_party/doomgeneric/doomdef.c \
+  third_party/doomgeneric/doomstat.c third_party/doomgeneric/dstrings.c \
+  third_party/doomgeneric/d_event.c third_party/doomgeneric/d_items.c \
+  third_party/doomgeneric/d_iwad.c third_party/doomgeneric/d_loop.c \
+  third_party/doomgeneric/d_main.c third_party/doomgeneric/d_mode.c \
+  third_party/doomgeneric/d_net.c third_party/doomgeneric/f_finale.c \
+  third_party/doomgeneric/f_wipe.c third_party/doomgeneric/g_game.c \
+  third_party/doomgeneric/hu_lib.c third_party/doomgeneric/hu_stuff.c \
+  third_party/doomgeneric/info.c third_party/doomgeneric/i_cdmus.c \
+  third_party/doomgeneric/i_endoom.c third_party/doomgeneric/i_joystick.c \
+  third_party/doomgeneric/i_scale.c third_party/doomgeneric/i_sound.c \
+  third_party/doomgeneric/i_system.c third_party/doomgeneric/i_timer.c \
+  third_party/doomgeneric/memio.c third_party/doomgeneric/m_argv.c \
+  third_party/doomgeneric/m_bbox.c third_party/doomgeneric/m_cheat.c \
+  third_party/doomgeneric/m_config.c third_party/doomgeneric/m_controls.c \
+  third_party/doomgeneric/m_fixed.c third_party/doomgeneric/m_menu.c \
+  third_party/doomgeneric/m_misc.c third_party/doomgeneric/m_random.c \
+  third_party/doomgeneric/p_ceilng.c third_party/doomgeneric/p_doors.c \
+  third_party/doomgeneric/p_enemy.c third_party/doomgeneric/p_floor.c \
+  third_party/doomgeneric/p_inter.c third_party/doomgeneric/p_lights.c \
+  third_party/doomgeneric/p_map.c third_party/doomgeneric/p_maputl.c \
+  third_party/doomgeneric/p_mobj.c third_party/doomgeneric/p_plats.c \
+  third_party/doomgeneric/p_pspr.c third_party/doomgeneric/p_saveg.c \
+  third_party/doomgeneric/p_setup.c third_party/doomgeneric/p_sight.c \
+  third_party/doomgeneric/p_spec.c third_party/doomgeneric/p_switch.c \
+  third_party/doomgeneric/p_telept.c third_party/doomgeneric/p_tick.c \
+  third_party/doomgeneric/p_user.c third_party/doomgeneric/r_bsp.c \
+  third_party/doomgeneric/r_data.c third_party/doomgeneric/r_draw.c \
+  third_party/doomgeneric/r_main.c third_party/doomgeneric/r_plane.c \
+  third_party/doomgeneric/r_segs.c third_party/doomgeneric/r_sky.c \
+  third_party/doomgeneric/r_things.c third_party/doomgeneric/sha1.c \
+  third_party/doomgeneric/sounds.c third_party/doomgeneric/statdump.c \
+  third_party/doomgeneric/st_lib.c third_party/doomgeneric/st_stuff.c \
+  third_party/doomgeneric/s_sound.c third_party/doomgeneric/tables.c \
+  third_party/doomgeneric/v_video.c third_party/doomgeneric/wi_stuff.c \
+  third_party/doomgeneric/w_checksum.c third_party/doomgeneric/w_file.c \
+  third_party/doomgeneric/w_main.c third_party/doomgeneric/w_wad.c \
+  third_party/doomgeneric/z_zone.c third_party/doomgeneric/w_file_stdc.c \
+  third_party/doomgeneric/i_input.c third_party/doomgeneric/i_video.c \
+  third_party/doomgeneric/doomgeneric.c third_party/doomgeneric/dummy.c
+DOOM_ENGINE_OBJ = $(patsubst third_party/doomgeneric/%.c,$(OBJ_DIR)/doom_engine/%.o,$(DOOM_ENGINE_SRC))
+$(OBJ_DIR)/doom_engine/%.o: third_party/doomgeneric/%.c $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)/doom_engine
+	$(CC) $(DOOM_CFLAGS) -c $< -o $@
+$(OBJ_DIR)/doom.o: src/user/doom/doom.c $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(DOOM_CFLAGS) -c $< -o $@
+$(OBJ_DIR)/doom_hobbyos.o: src/user/doom/doomgeneric_hobbyos.c $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(DOOM_CFLAGS) -c $< -o $@
+$(DOOM_BIN): $(OBJ_DIR)/doom.o $(OBJ_DIR)/doom_hobbyos.o $(DOOM_ENGINE_OBJ) $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/libc.a
+	$(LD) -T src/user/linker.ld -e _start -o $(OBJ_DIR)/doom.elf \
+	  $(OBJ_DIR)/doom.o $(OBJ_DIR)/doom_hobbyos.o $(DOOM_ENGINE_OBJ) \
+	  $(OBJ_DIR)/user_graphics.o $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/doom.elf $(DOOM_BIN)
 # --- STARDUST (GB-038, original arcade dodge game) ---
 $(OBJ_DIR)/stardust.o: src/user/stardust.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
@@ -2034,6 +2101,7 @@ SQLTEST_BIN = $(OBJ_DIR)/sqltest.bin
 # .EXTRA_PREREQS (GNU make >= 4.3) keeps it out of $^ -- a plain
 # prerequisite would be passed to ld.lld AS AN INPUT FILE by the
 # recipes' $^.  Names undefined in this config expand to nothing.
+$(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(SPAWN_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(NETFIX_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(APPS_T_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(DNSTST_BIN) $(CXXSMOKE_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(IPC_T_BIN) $(MMTEST_T_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(ICU_SMOKE_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(BLKTEST_BIN) $(RANDTST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(NANO_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(PIPEPROBE_BIN) $(SUBPRB_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(DOOM_BIN) $(FILES_BIN) $(CALC_BIN) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(XNIBBLER_BIN) $(CLOCK_BIN) $(SYSMON_BIN) $(HEX_BIN) $(TASKS_BIN) $(FIND_BIN) $(DIFF_BIN) $(NOTES_BIN) $(UNIT_BIN) $(WK1C_T_BIN) $(FILEDIALOG_ARROW_T_BIN) $(DIALOG_TEST_BIN) $(SQLTEST_BIN): .EXTRA_PREREQS += src/user/linker.ld $(XCRYPT_BIN)
 $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(SPAWN_TEST_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(NETFIX_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(APPS_T_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(DNSTST_BIN) $(CXXSMOKE_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(IPC_T_BIN) $(MMTEST_T_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(ICU_SMOKE_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(BLKTEST_BIN) $(RANDTST_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(NANO_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(PIPEPROBE_BIN) $(SUBPRB_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(STARDUST_BIN) $(FILES_BIN) $(CALC_BIN) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(XNIBBLER_BIN) $(CLOCK_BIN) $(SYSMON_BIN) $(HEX_BIN) $(TASKS_BIN) $(FIND_BIN) $(DIFF_BIN) $(NOTES_BIN) $(UNIT_BIN) $(WK1C_T_BIN) $(FILEDIALOG_ARROW_T_BIN) $(DIALOG_TEST_BIN) $(SQLTEST_BIN): .EXTRA_PREREQS += src/user/linker.ld $(XCRYPT_BIN)
 
 
@@ -2085,7 +2153,7 @@ disk.img: browser-staged tools-staged
 # bundle is missing the disk must not be built silently-https-broken.
 disk.img: certs/cacert.pem
 
-disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(BLKTEST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(STARDUST_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(XNIBBLER_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(SELFHOST_BIN) $(MODE_FILE) $(XCRYPT_BIN) $(NES_BIN)
+disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(BLKTEST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(STARDUST_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(XNIBBLER_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(SELFHOST_BIN) $(MODE_FILE) $(XCRYPT_BIN) $(NES_BIN) $(DOOM_BIN)
 
 # w2-mtools disk
 disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(BLKTEST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(STARDUST_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(XNIBBLER_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(MCOPY_BIN) $(MDEL_BIN) $(MMD_BIN) $(MODE_FILE) $(XCRYPT_BIN) # w2-mtools deps (union: MAKE_BIN + SELFHOST_BIN ride their own lines above)
@@ -2288,6 +2356,8 @@ endif
 	$(MCOPY) -i disk.img $(SHELL_TEST3_BIN) ::/SHTEST3.BIN
 	$(MCOPY) -i disk.img $(PONG_BIN) ::/PONG.BIN
 	$(MCOPY) -i disk.img $(MILLIPEDE_BIN) ::/MILLIPED.BIN
+	$(MCOPY) -i disk.img $(DOOM_BIN) ::/DOOM.BIN
+	@if [ -f doom1.wad ]; then $(MCOPY) -i disk.img doom1.wad ::/DOOM1.WAD && echo "[disk] IWAD doom1.wad -> ::/DOOM1.WAD"; else echo "[disk] note: no doom1.wad (run tools/fetch_doom_wad.sh) — DOOM will lack an IWAD"; fi
 	$(MCOPY) -i disk.img $(STARDUST_BIN) ::/STARDUST.BIN
 	$(MCOPY) -i disk.img $(FILES_BIN) ::/FILES.BIN
 	$(MCOPY) -i disk.img $(CALC_BIN) ::/CALC.BIN
