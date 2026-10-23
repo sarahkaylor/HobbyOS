@@ -1860,6 +1860,15 @@ static void sys_getenv(struct trap_frame *tf) {
 static volatile int core_in_syscall[MAX_CPUS];
 
 void sync_lower_handler_c(struct trap_frame *tf) {
+  /* GB-014: latch the user PC on every trap from user mode so the exit report
+     can name where a program actually got to. A silently-stopping program
+     otherwise reports its entry point as its last PC, because the PCB context
+     is only saved on preemption, not as user code runs. */
+  {
+    struct process *lp0 = current_process();
+    if (lp0 && !lp0->is_kernel_process && tf->elr >= 0x1000ULL)
+      lp0->last_user_pc = tf->elr;
+  }
   /* SEC-10 (security-plan.md #10): the kernel stacks are contiguous static
      64 KiB per-CPU slices — an overflow faults nowhere, it corrupts the
      adjacent core's stack or kernel data.  Refuse to run a handler when the
@@ -2597,11 +2606,33 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       return;
     }
     if (cur && !cur->is_kernel_process && (tf->cs & 3) == 3) {
-      uart_puts("[KERNEL] User process fault! Vector: ");
-      safe_print_int(tf->vector);
-      uart_puts(" RIP: ");
-      safe_print_hex(tf->elr);
-      uart_puts("\n");
+      /* Report in ONE uart_puts. This line was four separate calls, so under
+         SMP it interleaved with other CPUs' output and became unreadable --
+         an actual #GP read as "Vector: [ARRIVED] 13 RIP: 0T4PIE.BINx" and went
+         unnoticed for several sessions of investigation. One buffer, one lock
+         hold, one record. */
+      {
+        char fb[96];
+        int fi = 0;
+        const char *p1 = "[KERNEL] User process fault! Vector: ";
+        while (*p1 && fi < 60) fb[fi++] = *p1++;
+        unsigned v = (unsigned)tf->vector;
+        if (v >= 10) fb[fi++] = (char)('0' + v / 10);
+        fb[fi++] = (char)('0' + v % 10);
+        const char *p2 = " RIP: 0x";
+        while (*p2 && fi < 80) fb[fi++] = *p2++;
+        uint64_t rv = tf->elr;
+        int st = 0;
+        for (int sh = 60; sh >= 0 && fi < 88; sh -= 4) {
+          unsigned d = (unsigned)((rv >> sh) & 0xF);
+          if (!d && !st && sh) continue;
+          st = 1;
+          fb[fi++] = "0123456789abcdef"[d];
+        }
+        fb[fi++] = '\n';
+        fb[fi] = 0;
+        uart_puts(fb);
+      }
       /* w5 (ii): a user-mode exception (BRK/#UD/#GP/...) kills with a
          signal status, never a stale-x0 exit code (rc=0 false pass). */
       process_fault_exit(tf, 11); /* SIGSEGV status byte */
