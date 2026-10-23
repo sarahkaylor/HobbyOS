@@ -3588,29 +3588,63 @@ void start_scheduler(void) {
       uint64_t dflags = spinlock_acquire_irqsave(&proc_lock);
       for (int k = 0; k < MAX_PROCESSES; k++) {
         if (proc_table[k].state != PROC_STATE_FREE) {
-          uart_puts("[IDLESTUCK] slot=");
-          print_int(k);
-          uart_puts(" pid=");
-          print_int(proc_table[k].pid);
-          uart_puts(" st=");
-          print_int(proc_table[k].state);
-          uart_puts(" parent=");
-          print_int(proc_table[k].parent_pid);
-          /* GB-057: name the WAIT, do not infer it from the shape of the test.
-             Reading `st=5` only says "blocked"; the two things that say *what*
-             it is blocked on are whether a timer will ever release it (`wake_ms`,
-             0 = waiting on an event with no deadline) and where its saved return
-             address points (`context[31]`, the ELR both arches share).  I spent a
-             probe assuming a pipe from a comment in main.c about the spawn2
-             pattern, then cleared four pipe mechanisms by reading -- none of them
-             the bug, because the subject was assumed.  This prints the subject. */
-          uart_puts(" wake=");
-          print_int(proc_table[k].wake_ms);
-          uart_puts(" rip=");
-          uart_print_hex(proc_table[k].context[31]);
-          uart_puts(" ");
-          uart_puts(proc_table[k].name);
-          uart_puts("\n");
+          /* One record, one uart_puts, one lock hold. This report was a dozen
+             separate calls, so under SMP it interleaved with other CPUs' output
+             and became unreadable -- the same defect that hid a real #GP in the
+             user-fault line before bcba3a6. A diagnostic nobody can read is
+             not a diagnostic, and this one is the only thing that names WHERE a
+             stuck process is. */
+          {
+            char lb[176];
+            int li = 0;
+            const char *h1 = "[IDLESTUCK] slot=";
+            while (*h1) lb[li++] = *h1++;
+            long v = k;
+            char tmp[24];
+            int ti = 0;
+            if (v == 0) tmp[ti++] = '0';
+            while (v > 0 && ti < 20) { tmp[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) lb[li++] = tmp[--ti];
+            const char *h2 = " pid=";
+            while (*h2) lb[li++] = *h2++;
+            v = proc_table[k].pid;
+            ti = 0;
+            if (v == 0) tmp[ti++] = '0';
+            while (v > 0 && ti < 20) { tmp[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) lb[li++] = tmp[--ti];
+            const char *h3 = " st=";
+            while (*h3) lb[li++] = *h3++;
+            v = proc_table[k].state;
+            ti = 0;
+            if (v == 0) tmp[ti++] = '0';
+            while (v > 0 && ti < 20) { tmp[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) lb[li++] = tmp[--ti];
+            const char *h4 = " wake=";
+            while (*h4) lb[li++] = *h4++;
+            v = proc_table[k].wake_ms;
+            ti = 0;
+            if (v == 0) tmp[ti++] = '0';
+            while (v > 0 && ti < 20) { tmp[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) lb[li++] = tmp[--ti];
+            const char *h5 = " rip=0x";
+            while (*h5) lb[li++] = *h5++;
+            {
+              uint64_t rv = proc_table[k].context[31];
+              int st2 = 0;
+              for (int sh = 60; sh >= 0 && li < 168; sh -= 4) {
+                unsigned d = (unsigned)((rv >> sh) & 0xF);
+                if (!d && !st2 && sh) continue;
+                st2 = 1;
+                lb[li++] = "0123456789abcdef"[d];
+              }
+            }
+            lb[li++] = ' ';
+            for (int ni = 0; proc_table[k].name[ni] && ni < 31 && li < 172; ni++)
+              lb[li++] = proc_table[k].name[ni];
+            lb[li++] = '\n';
+            lb[li] = 0;
+            uart_puts(lb);
+          }
         }
       }
       uart_puts("[IDLESTUCK] claims:");
