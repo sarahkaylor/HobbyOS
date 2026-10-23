@@ -1,0 +1,35 @@
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+ Volume in drive : has no label
+ Volume Serial Number is 4A85-62A0
+Directory for ::/
+
+T4PROBE  BIN     61008 2026-10-23   3:29 
+        1 file               61 008 bytes
+                        695 812 096 bytes free
+
+=== T3 (intel): run (deadline 2700s, log /tmp/gb019/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 77155 console lines, 223 FAIL lines, 28 user memory fault records across 18 processes, 85 programs exited, halted=1
+T3_intel: FAIL — 223 FAIL line(s); first 20:
+2820:/TORTURE.BIN[SEDTEST] FAIL 
+3459:[SIGTEST] FAIL   CXX_T waitpid returns the childthreads_mutex got=/TSORT.BIN
+3723:[SEDTEST] FAIL /GRT.IN
+4644:[SEDTEST] FAIL /TEST4.TXT
+5449:[CKSUMTEST] PASS Loading program for scheduler (v2 AS): : FAIL
+5535:[WAVE-TRY] /BLKT2.TXTFPU_T FAILED: /PASTE.BIN
+5657:empty stdin[ARRIVED] /GRT.IN/TEST3.TXT[SEDTEST] FAIL 
+6074:[TACTEST] FAIL [WAITPID] ECHILD caller=26 CMPTEST.BIN want=-204 children=0
+6208:[TACTEST] FAIL empty separatorv2 loader: image mapped (lazy), bytes=108056 pages=27 first=in elap=0ms
+6390:[TACTEST] FAILURES: 4
+6481:[SEDTEST] FAIL /TSORT.BINTry `NL.BIN --help' for more information.
+6976:[TSORTTEST] FAIL 
+7003:/TEST4.TXT[SEDTEST] FAIL 
+7005:[TSORTTEST] FAIL [EXITPC] pid=1 last_user_pc=0x1000016D30
+7012:[TSORTTEST] FAIL chain from '-' operand (exit status -1 != 0)
+7013:[TSORTTEST] FAIL diamond from FILE[WAITPID] ECHILD caller=26 CMPTEST.BIN want=-204 children=0
+7158:ST] FAIL [WAITPID] ECHILD caller=/TEST4.TXT
+7182:[TSORTTEST] FAIL self-loop pair ignored[WAITPID] ECHILD caller=26 CMPTEST.BIN want=-204 children=0
+7295:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+7365:estar_match[SEDTEST] FAIL [WAITPID] ECHILD caller=26 CMPTEST.BIN want=-204 children=0
+T3_EXIT=141

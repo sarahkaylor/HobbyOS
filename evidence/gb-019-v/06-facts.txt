@@ -1,0 +1,21 @@
+revision: 46f19bbd2ef9bcf3ecdd892237463cf007c3d7a7
+date: Fri Oct 23 03:45:29 UTC 2026
+
+=== serial facts:
+  lines: 77155
+  t4-probe-arrived: 0
+  row= lines in guest: 0
+  programs exited: 2291
+  halted: 1
+
+=== image manifest:
+WAVE     CFG         0 2026-10-23   3:29 
+  WAVE.CFG bytes: 0
+
+=== probe ELF:
+  Type:                              EXEC (Executable file)
+  Entry point address:               0x401c18
+
+=== loader refusal + relocation support:
+124:    uart_puts("elf loader: ET_EXEC linked below the user window; a -static-pie "
+  R_X86_64_RELATIVE in elf_loader.c: 0
