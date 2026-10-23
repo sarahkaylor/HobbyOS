@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+=== T3 (intel): run (deadline 1800s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-9642df51/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 36735 console lines, 88 FAIL lines, 5 user memory fault records across 5 processes, 81 programs exited, halted=1
+T3_intel: FAIL — 88 FAIL line(s); first 20:
+3632:[SIGTEST] FAIL /TR.BIN
+4483:/BLKT2.TXT[SEDTEST] FAIL 
+4988:TSORT.BIN: FAIL
+5463:[EXPANDTEST] PASS [SEDTEST] FAIL /TR.BIN
+5646:/EXPAND.BIN: FAIL
+5688:4FPU_T FAILED: m2m
+6752:[SEDTEST] FAIL [KERNEL] Process 44: COMMTEST.BIN exited unexpectedly or gracefully.
+7061:/NO_SUCH_FOLD_FILETR.BIN: a[ARRIVED] : No such file or directoryTSORT.BIN: [TACTEST] FAIL lTry `NL.BIN --help' for more information.
+7106:Loading program for scheduler (v2 AS): GREP.BIN[TACTEST] FAIL TSORT.BIN: v2 loader: PID=27 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+7223:: No such file or directory[TACTEST] FAILURES: 
+7730:[TSORTTEST] FAIL v2 loader: image mapped (lazy), bytes=292072 pages=72 first=in elap=0ms
+7749:/BLKT2.TXT[TSORTTEST] FAIL /TEST2.TXT[WAITPID] ECHILD caller=25
+7764:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1)[WAITPID] ECHILD caller=25 CMPTEST.BIN want=-204 children=0
+7807:[TSORTTEST] FAIL cycle from stdin names '-' (exit status -1 != 1)
+7808:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+7886:A[TSCORKT[TE1ST]3 FAIL] :w h0itxes00pa0c0e/0ta0b 1va0ria0nt0s0 (e1x1it 7sDtBatus
+7895:[TSORTTEST] FAIL [KERNEL] Process 2: TORTURE.BIN exited unexpectedly or gracefully.
+7905:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+7925:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr)/TORTURE.BIN
+8004:[SEDTEST] FAIL amp (stdout)
+EXIT=141

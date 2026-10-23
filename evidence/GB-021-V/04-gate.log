@@ -1,0 +1,25 @@
+=== t4_device: leg A reference: obj/intel/t4_legA.out ===
+=== t4_device: capture leg B from serial 'obj/t3_intel.log' ===
+t4_device: FAIL — the probe never arrived in the guest (no 't4-probe-arrived'
+  in obj/t3_intel.log after 120s).  This is a FAIL, not a SKIP (DoD clause 3).
+  (tail of serial:)
+[CMPTEST] FAIL empty EOF message
+  stderr missing "cmp: EOF on /CAPE.TXT"; got ""
+[CMPTEST] FAIL missing file diagnostic
+  stderr missing "No such file or directory"; got ""
+[CMPTEST] PASS -n 5 within identical prefix
+[CMPTEST] PASS -n 9 stops before difference
+[CMPTEST] PASS -n 10 hits difference
+[CMPTEST] FAIL -i 4:0 skips prefix
+  exit status 1 != 0
+[CMPTEST] PASS - operand reads empty stdin
+[CMPTEST] FAIL - stdin EOF diagnostic
+  stderr missing "cmp: EOF on -"; got ""
+[CMPTEST] PASS --version full banner
+[CMPTEST] PASS --help usage text
+[CMPTEST] FAILURES: 5
+[KERNEL] Process 25: CMPTEST.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=25 last_user_pc=0x1000001EE0
+[HALT-CD] cpu=0 free=5 alloc=0 exited=13 running=0 blocked=0 other=46
+System halt.
+[
