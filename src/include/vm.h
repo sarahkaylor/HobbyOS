@@ -233,13 +233,26 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write);
 /* 0/-1 view of vm_touch for the legacy boolean call sites. */
 int vm_range_ok(struct process *p, uint64_t va, uint64_t len, int write);
 
+/* SEC-2 (security-plan.md #2): fault-safe user-memory read that closes the
+ * validate-then-use window.  Each page is materialized (vm_touch) and then
+ * re-validated AND copied out under vm_lock, so a peer cannot unmap or free
+ * the frame between validation and the copy; bytes are read through the
+ * kernel direct map like vm_kwrite's stores.  v1 processes keep the legacy
+ * always-resident window rule; with no process context at all there is
+ * nothing to validate against, so the read is rejected.  Returns 0 or -1
+ * (caller maps it to -EFAULT). */
+int vm_user_read(struct process *p, uint64_t va, void *dst, int len);
+
 /* P5 (D5.7): kernel-context write into process p's user memory when the
  * caller runs on ANOTHER process's context (the reap status write; the
- * S3 signal frame).  The range must already have been validated and
- * demand-materialized through vm_touch.  v2 only: v1 callers use the
- * user_phys_base translation.  Bytes go through the target's own page
- * tables and the kernel direct map (kernel VA == phys).  Returns 0 or -1
- * (mapping unresolvable). */
+ * S3 signal frame).  v2 only: v1 callers use the user_phys_base
+ * translation.  SEC-8 (security-plan.md #8): vm_kwrite is now
+ * self-validating — each page is materialized and re-validated (region,
+ * write protection, leaf PTE) under vm_lock immediately before the bytes
+ * are stored through the kernel direct map, so an earlier vm_touch by the
+ * caller is only a fast-fail optimization and a peer unmapping the target
+ * mid-call can no longer redirect stores into freed frames.  Returns 0 or
+ * -1 (range invalid, read-only, or unmapped mid-write). */
 int vm_kwrite(struct process *p, uint64_t va, const void *src, int len);
 
 /* P2.3 (design sections 5.1-5.5): the demand-fault face.  Called from

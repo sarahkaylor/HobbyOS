@@ -171,6 +171,38 @@ int virtio_gpu_rect_clamp(const struct virtio_gpu_xrect *in,
   return 1;
 }
 
+/* SEC-7 (security-plan.md #7): validation for the SYS_FLUSH_FB_RECTS
+ * boundary.  virtio_gpu_rect_clamp() is deliberately forgiving for
+ * internal callers, but that meant attacker-shaped rects were handed to
+ * the driver and only trimmed deep inside it — malformed values lived in
+ * kernel memory as candidate transfers.  At the syscall boundary we reject
+ * instead of clamp: every rect must be non-degenerate and lie wholly
+ * inside the framebuffer (int64 math so x+w/y+h cannot wrap), and the
+ * summed area is capped at eight full-screen flushes per call so one
+ * request cannot queue an unbounded host-side copy. */
+#define FLUSH_TOTAL_AREA_LIMIT (8ull * GPU_FB_W * GPU_FB_H)
+
+int virtio_gpu_flush_args_ok(const struct virtio_gpu_xrect *rects, int count) {
+  if (!rects || count < 0)
+    return 0;
+  uint64_t total_area = 0;
+  for (int i = 0; i < count; i++) {
+    const struct virtio_gpu_xrect *r = &rects[i];
+    if (r->w <= 0 || r->h <= 0)
+      return 0;
+    if (r->x < 0 || r->y < 0)
+      return 0;
+    int64_t x1 = (int64_t)r->x + r->w;
+    int64_t y1 = (int64_t)r->y + r->h;
+    if (x1 > GPU_FB_W || y1 > GPU_FB_H)
+      return 0;
+    total_area += (uint64_t)r->w * (uint64_t)r->h;
+    if (total_area > FLUSH_TOTAL_AREA_LIMIT)
+      return 0;
+  }
+  return 1;
+}
+
 /**
  * Byte offset of pixel (x,y) in the B8G8R8A8 framebuffer (stride = GPU_FB_W*4):
  * the TRANSFER_TO_HOST_2D source pointer QEMU's virtio-gpu walks row-wise

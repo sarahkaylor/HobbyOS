@@ -4,6 +4,7 @@
 #include "trap.h"
 #include "setjmp.h"
 #include "process.h"
+#include "vm.h"
 #include "errno.h"
 
 extern void sync_lower_handler_c(struct trap_frame *tf);
@@ -210,10 +211,141 @@ static void test_watchdog_stack_scan_guard(void) {
 }
 #endif
 
+/* SEC-3 (security-plan.md #3): u_strcpy must validate AND read each byte
+ * atomically — never dereference a user page it has not confirmed mapped
+ * under the same lock, and keep the w8-torture property (a short string at
+ * the very top of a region copies fine even when cap reaches past it).
+ * NOTE: deliberately NOT setup_mock_process() — that helper calls
+ * process_init(), which re-runs frame_init() and wipes the live frame
+ * bitmap; doing that a second time mid-suite strands every subsystem's
+ * allocated frames (observed: blk_cache reclaim stall downstream). The
+ * suite's first test already ran process_init, so process_create is safe. */
+static void test_u_strcpy_atomic(void) {
+  tests_run++;
+  uart_puts("  Running test_u_strcpy_atomic...\n");
+
+  int pid = process_create();
+  EXPECT_EQ((pid >= 0), 1);
+  if (pid < 0)
+    return;
+  struct process *p = process_get_pcb(pid);
+  p->is_kernel_process = 1;
+  set_current_process_pid(get_cpuid(), pid);
+
+  struct addr_space *as = vm_as_create(62); /* top range, torn down below */
+  EXPECT_EQ((as != 0), 1);
+  if (!as) {
+    set_current_process_pid(get_cpuid(), -1);
+    return;
+  }
+  p->as = as;
+
+  EXPECT_EQ(vm_region_insert(as, USER_MMAP_BASE_V2, 0x3000,
+                             VM_PROT_READ | VM_PROT_WRITE, VMK_ANON,
+                             VM_MAP_PRIVATE, 0, 0),
+            0);
+
+  /* "hi" in the first page (materialized + stamped through the direct map). */
+  EXPECT_EQ(vm_touch(p, USER_MMAP_BASE_V2, 1, 1), 0);
+  uint64_t leaf = 0;
+  EXPECT_EQ(vm_arch_walk(as, USER_MMAP_BASE_V2, &leaf), 0);
+  unsigned char *pa = (unsigned char *)vm_arch_leaf_phys(leaf);
+  pa[0] = 'h';
+  pa[1] = 'i';
+  pa[2] = 0;
+
+  char dst[64];
+  EXPECT_EQ(u_strcpy((const char *)USER_MMAP_BASE_V2, dst, sizeof(dst)), 1);
+  EXPECT_EQ(dst[0], 'h');
+  EXPECT_EQ(dst[1], 'i');
+  EXPECT_EQ(dst[2], 0);
+
+  /* w8-torture: string ending exactly at the region top; cap reaches past
+     it.  The copy stops at the NUL and never validates beyond — success. */
+  EXPECT_EQ(vm_touch(p, USER_MMAP_BASE_V2 + 0x2000, 1, 1), 0);
+  EXPECT_EQ(vm_arch_walk(as, USER_MMAP_BASE_V2 + 0x2000, &leaf), 0);
+  unsigned char *pa3 = (unsigned char *)vm_arch_leaf_phys(leaf);
+  pa3[0xFFC] = 'e';
+  pa3[0xFFD] = 'n';
+  pa3[0xFFE] = 'd';
+  pa3[0xFFF] = 0;
+  EXPECT_EQ(u_strcpy((const char *)(USER_MMAP_BASE_V2 + 0x2FFC), dst, 64), 1);
+  EXPECT_EQ(dst[0], 'e');
+  EXPECT_EQ(dst[3], 0);
+
+  /* Truncation at cap keeps NUL termination. */
+  pa[0] = 'a'; pa[1] = 'b'; pa[2] = 'c'; pa[3] = 'd'; pa[4] = 0;
+  EXPECT_EQ(u_strcpy((const char *)USER_MMAP_BASE_V2, dst, 4), 1);
+  EXPECT_EQ(dst[0], 'a');
+  EXPECT_EQ(dst[2], 'c');
+  EXPECT_EQ(dst[3], 0);
+
+  /* Hole: an unmapped source page rejects with 0 — no kernel dereference. */
+  EXPECT_EQ(u_strcpy((const char *)(USER_MMAP_BASE_V2 + 0x8000), dst, 8), 0);
+
+  p->as = 0;
+  vm_as_teardown(as);
+  set_current_process_pid(get_cpuid(), -1);
+}
+
+/* SEC-4 (security-plan.md #4): the stack canary must be seeded non-zero at
+ * boot (a zero guard is invisible to memset-style smashes).  Detection
+ * itself is compiler-generated; the build check that instrumented functions
+ * reference __stack_chk_guard lives with the toolchain, not here. */
+static void test_ssp_guard_seeded(void) {
+  tests_run++;
+  uart_puts("  Running test_ssp_guard_seeded...\n");
+  extern uint64_t __stack_chk_guard;
+  EXPECT_EQ((__stack_chk_guard != 0), 1);
+}
+
+/* SEC-10 (security-plan.md #10): the stack-depth guard must track real SP
+ * movement and report low against a margin.  Deliberately does NOT consume
+ * enough to trip the entry check itself — that would halt the suite; the
+ * margin parameter lets both directions be tested safely. */
+static uint64_t __attribute__((noinline)) stack_probe(void) {
+  return kernel_stack_remaining();
+}
+
+/* A genuinely deeper stack: C allocates frames at entry and clang happily
+ * collapses single-call buffer frames, but recursive levels cannot be
+ * merged — each level is a real SP subtraction. */
+static uint64_t __attribute__((noinline)) probe_recurse(int n) {
+  volatile int pad = n; /* forces a per-level frame */
+  if (n == 0)
+    return kernel_stack_remaining();
+  uint64_t v = probe_recurse(n - 1);
+  pad ^= (int)v; /* frame live across the call: blocks tail-call elision */
+  return v;
+}
+
+static void test_kernel_stack_guard(void) {
+  tests_run++;
+  uart_puts("  Running test_kernel_stack_guard...\n");
+
+  uint64_t r1 = stack_probe();
+  /* Sanity: we run on the 64 KiB slice, so remaining is in (0, 64KiB]. */
+  EXPECT_EQ((r1 > 0 && r1 <= 64u * 1024u), 1);
+
+  uint64_t r2 = probe_recurse(512);
+  /* Deeper stack -> strictly less remaining; 512 levels of >=32-byte
+     frames is a guaranteed >=16 KiB drop, so assert conservatively. */
+  EXPECT_EQ((r2 < r1), 1);
+  EXPECT_EQ((r1 - r2 >= 8u * 1024u), 1);
+
+  /* Both directions of the threshold at the current (unwound) depth: a
+     margin larger than what's left reports low; a small one does not. */
+  EXPECT_EQ(kernel_stack_low(r1 + 1), 1);
+  EXPECT_EQ(kernel_stack_low(4096), 0);
+}
+
 void trap_test_suite(void) {
   uart_puts("trap_test_suite:\n");
   test_trap_unknown_syscall();
   test_trap_sys_get_cpuid();
+  test_u_strcpy_atomic(); /* SEC-3 */
+  test_ssp_guard_seeded(); /* SEC-4 */
+  test_kernel_stack_guard(); /* SEC-10 */
 #ifdef __x86_64__
   test_watchdog_stack_scan_guard();
 #endif

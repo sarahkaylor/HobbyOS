@@ -459,6 +459,9 @@ EV_SYN=0 EV_KEY=1 EV_REL=2 EV_ABS=3 EV_MSC=4 EV_LED=17 EV_REP=20
 BTN_LEFT=0x110 BTN_RIGHT=0x111 BTN_MIDDLE=0x112
 ABS_X=0x0 ABS_Y=0x1 REL_X=0x0 REL_Y=0x1 REL_WHEEL=0x8
 KEY_A=30 KEY_ENTER=28 KEY_ESC=1 KEY_SPACE=57
+GAMEPAD BTN_A=0x130 BTN_B=0x131 BTN_X=0x133 BTN_Y=0x134 BTN_TL=0x136 BTN_TR=0x137 BTN_TL2=0x138 BTN_TR2=0x139
+GAMEPAD BTN_SELECT=0x13a BTN_START=0x13b BTN_MODE=0x13c BTN_THUMBL=0x13d BTN_THUMBR=0x13e
+GAMEPAD ABS_X=0x0 ABS_Y=0x1 ABS_Z=0x2 ABS_RX=0x3 ABS_RY=0x4 ABS_RZ=0x5 ABS_HAT0X=0x10 ABS_HAT0Y=0x11
 ```
 <!-- /PROBE -->
 
@@ -519,6 +522,13 @@ the ring into non-blocking 24-byte `input_event` records. The device-free logic 
 by `input_node_test_host` (T1/T4 differential) + the kernel `input_node_test_suite`.
 | `/dev/null`, `/dev/zero`, `/dev/urandom` | kernel shims | `read`, `mmap` (zero page) |
 | `/dev/tty` | console | `TCGETS`/`TCSETS`, `TIOCGWINSZ`, `isatty()` true |
+
+`/dev/dsp` (GB-029): the compat OSS node is a **silent-safe stub** that returns
+`ENODEV` on open until a real audio driver exists, so a program that probes OSS
+audio gets a clean "no audio device" rather than a hang or silent garbage, and
+SDL (which is silent-safe by design) falls back to its `dummy` driver and the
+game runs without sound. The audio decision (virtio-sound vs ALSA vs dummy) is
+recorded in `docs/audio.md`.
 
 `/dev/fb0` is the mmap'd HobbyOS framebuffer (GB-025). After an SDL fbcon probe reads
 `FBIOGET_VSCREENINFO` + `FBIOGET_FSCREENINFO` it does the equivalent of:

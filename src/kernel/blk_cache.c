@@ -517,6 +517,10 @@ static void fill_run_fallback(uint64_t u0, uint64_t run_units,
       missing = (uint8_t)(req & ~pre_valid);
       spinlock_release(&bucket_locks[b]);
       frame_free(frame);
+      spinlock_release(&fill_lock); /* WK-7: released in the other two
+                                       Phase-A branches; missing here leaked
+                                       fill_lock -> Phase C self-deadlock
+                                       (fill_run_fallback on intel boot) */
     } else {
       e = free_pop();
       if (e == BLK_CACHE_NIL) {

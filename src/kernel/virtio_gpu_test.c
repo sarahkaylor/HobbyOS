@@ -116,6 +116,49 @@ static void test_virtio_gpu_flush_rects_empty(void) {
 }
 #endif /* !__x86_64__ */
 
+/* SEC-7 (security-plan.md #7): syscall-boundary batch validation.  The
+ * helper exists on both arches (virtio_gpu.c / virtio_gpu_x64.c), so this
+ * runs in both unit-test builds. */
+static void test_virtio_gpu_flush_args_ok(void) {
+  uart_puts("  Running test_virtio_gpu_flush_args_ok...\n");
+  tests_run++;
+
+  struct virtio_gpu_xrect ok = {10, 20, 100, 50};
+  EXPECT_EQ(virtio_gpu_flush_args_ok(&ok, 1), 1);
+  EXPECT_EQ(virtio_gpu_flush_args_ok(0, 0), 0); /* NULL batch rejected */
+
+  struct virtio_gpu_xrect degenerate[] = {{0, 0, 0, 5}, {0, 0, 5, 0},
+                                          {-1, 0, 4, 4}, {0, -1, 4, 4}};
+  for (int i = 0; i < 4; i++)
+    EXPECT_EQ(virtio_gpu_flush_args_ok(&degenerate[i], 1), 0);
+
+  /* Past the frame edge, including int32-wrap attempts on x+w / y+h. */
+  struct virtio_gpu_xrect oob[] = {
+      {DISPLAY_WIDTH - 1, 0, 2, 1},
+      {0, DISPLAY_HEIGHT - 1, 1, 2},
+      {0x7FFFFFFF, 0, 1, 1},
+      {0, 0, 0x7FFFFFFF, 4}};
+  for (int i = 0; i < 4; i++)
+    EXPECT_EQ(virtio_gpu_flush_args_ok(&oob[i], 1), 0);
+
+  /* Total-area cap: eight full-screen flushes fit, nine do not. */
+  struct virtio_gpu_xrect full[] = {{0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT},
+                                    {0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT},
+                                    {0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT},
+                                    {0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT},
+                                    {0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT},
+                                    {0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT},
+                                    {0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT},
+                                    {0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT},
+                                    {0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT}};
+  EXPECT_EQ(virtio_gpu_flush_args_ok(full, 8), 1);
+  EXPECT_EQ(virtio_gpu_flush_args_ok(full, 9), 0);
+
+  /* One bad rect poisons the whole batch (reject-before-handoff). */
+  struct virtio_gpu_xrect mixed[] = {{0, 0, 4, 4}, {0, 0, -1, 4}};
+  EXPECT_EQ(virtio_gpu_flush_args_ok(mixed, 2), 0);
+}
+
 #ifdef __x86_64__
 extern uint32_t bga_framebuffer_phys;
 extern int virtio_gpu_x64_is_gpu_dev(uint16_t vendor, uint16_t device);
@@ -288,6 +331,7 @@ static void test_virtio_gpu_flush_smoke(void) {
 void virtio_gpu_test_suite(void) {
   uart_puts("virtio_gpu_test_suite:\n");
   test_virtio_gpu_get_framebuffer();
+  test_virtio_gpu_flush_args_ok(); /* SEC-7: both arches */
 #ifndef __x86_64__
   test_virtio_gpu_rect_clamp();
   test_virtio_gpu_rect_transfer_offset();

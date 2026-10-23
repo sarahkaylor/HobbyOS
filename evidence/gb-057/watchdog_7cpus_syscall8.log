@@ -1,0 +1,79 @@
+age_ms=260072 syscall=8
+  CPU2 rip=0x0000001000006C34 pid=24 age_ms=264441 syscall=8
+  CPU3 rip=0x00000010000062B4 pid=56 age_ms=265186 syscall=8
+  CPU4 rip=0x0000001000005D24 pid=55 age_ms=264437 syscall=8
+  CPU5 rip=0x0000001000005DC4 pid=62 age_ms=260021 syscall=8
+  CPU6 rip=0x0000001000005D94 pid=60 age_ms=264427 syscall=8
+  CPU7 rip=0x0000001000005D54 pid=58 age_ms=264465 syscall=8
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu5: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+Loader (v2) starved (slot pressure): SQLTEST.BIN
+Loading program for scheduler (v2 AS): SIG_T.BIN
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070030910 pid=1 age_ms=0
+  CPU1 rip=0x0000001000005EA4 pid=59 age_ms=290075 syscall=8
+  CPU2 rip=0x0000001000006C34 pid=24 age_ms=294444 syscall=8
+  CPU3 rip=0x00000010000062B4 pid=56 age_ms=295189 syscall=8
+  CPU4 rip=0x0000001000005D24 pid=55 age_ms=294440 syscall=8
+  CPU5 rip=0x0000001000005DC4 pid=62 age_ms=290024 syscall=8
+  CPU6 rip=0x0000001000005D94 pid=60 age_ms=294430 syscall=8
+  CPU7 rip=0x0000001000005D54 pid=58 age_ms=294468 syscall=8
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu5: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+Loader (v2) starved (slot pressure): SIG_T.BIN
+Loading program for scheduler (v2 AS): WK1C_T.BIN
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070030910 pid=1 age_ms=0
+  CPU1 rip=0x0000001000005EA4 pid=59 age_ms=320080 syscall=8
+  CPU2 rip=0x0000001000006C34 pid=24 age_ms=324449 syscall=8
+  CPU3 rip=0x00000010000062B4 pid=56 age_ms=325194 syscall=8
+  CPU4 rip=0x0000001000005D24 pid=55 age_ms=324445 syscall=8
+  CPU5 rip=0x0000001000005DC4 pid=62 age_ms=320029 syscall=8
+  CPU6 rip=0x0000001000005D94 pid=60 age_ms=324435 syscall=8
+  CPU7 rip=0x0000001000005D54 pid=58 age_ms=324473 syscall=8
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu5: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+Loader (v2) starved (slot pressure): WK1C_T.BIN
+Loading program for scheduler (v2 AS): TORTURE.BIN
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070030910 pid=1 age_ms=0
+  CPU1 rip=0x0000001000005EA4 pid=59 age_ms=350080 syscall=8
+  CPU2 rip=0x0000001000006C34 pid=24 age_ms=354449 syscall=8
+  CPU3 rip=0x00000010000062B4 pid=56 age_ms=355194 syscall=8
+  CPU4 rip=0x0000001000005D24 pid=55 age_ms=354445 syscall=8
+  CPU5 rip=0x0000001000005DC4 pid=62 age_ms=350029 syscall=8
+  CPU6 rip=0x0000001000005D94 pid=60 age_ms=354435 syscall=8
+  CPU7 rip=0x0000001000005D54 pid=58 age_ms=354473 syscall=8
+  CSTK cpu1: (uninitialized kstack, skip)
+  CSTK cpu2: (uninitialized kstack, skip)
+  CSTK cpu3: (uninitialized kstack, skip)
+  CSTK cpu4: (uninitialized kstack, skip)
+  CSTK cpu5: (uninitialized kstack, skip)
+  CSTK cpu6: (uninitialized kstack, skip)
+  CSTK cpu7: (uninitialized kstack, skip)
+Loader (v2) starved (slot pressure): TORTURE.BIN
+[sys_close Debug] CPU=0, PIDs=[9,59,24,56], caller_pid=9, fd=0, g_fd=18
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=1, PIDs=[9,63,24,56], caller_pid=63, fd=0, g_fd=47
+[KERNEL Debug] sys_close: fd=0, ret=0
+/COMU2.TXT
+[sys_close Debug] CPU=1, PIDs=[9,63,24,56], caller_pid=63, fd=0, g_fd=47
+[KERNEL Debug] sys_close: fd=0, ret=0
+/COME.TXT
+[sys_close Debug] CPU=1, PIDs=[9,63,24,56], caller_pid=63, fd=0, g_fd=47
+[KERNEL Debug] sys_close: fd=0, ret=0
