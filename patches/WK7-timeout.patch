@@ -1,0 +1,50 @@
+--- a/HobbyOS/WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp
++++ b/HobbyOS/WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp
+@@ -1303,6 +1303,7 @@
+     m_urlMode = false;
+     m_urlLen = 0;
+     memset(m_urlBuf, 0, sizeof m_urlBuf);
++    m_start = MonotonicTime::now();
+     m_phase = Phase::Load;
+     m_loadTicks = 0;
+     m_stallTicks = 0;
+@@ -2475,6 +2476,7 @@
+     tab.histIdx = tab.history.size() - 1;
+     tab.current = nm;
+     m_current = nm;
++    m_start = MonotonicTime::now();
+     m_phase = Phase::Load;
+     m_loadTicks = 0;
+     m_stallTicks = 0;
+@@ -2514,6 +2516,7 @@
+         m_current = href;
+         activeTabState().current = href;
+         m_pendingFrag = frag;
++        m_start = MonotonicTime::now();
+         m_phase = Phase::Load;
+         m_loadTicks = 0;
+         m_stallTicks = 0;
+@@ -2916,6 +2919,7 @@
+     // fs-r4: dispatch on the stored form (network URL vs fixture name) so
+     // reload works for real-page URLs too, not just fixtures.
+     loadForHistory(m_current);
++    m_start = MonotonicTime::now();
+     m_phase = Phase::Load;
+     m_loadTicks = 0;
+     m_stallTicks = 0;
+@@ -2932,6 +2936,7 @@
+     // fs-r4: dispatch on the stored form (network URL vs fixture name).
+     tab.histIdx = prev;
+     if (loadForHistory(target)) {
++        m_start = MonotonicTime::now();
+         m_phase = Phase::Load;
+         m_loadTicks = 0;
+         m_stallTicks = 0;
+@@ -2951,6 +2956,7 @@
+     wk5emit("[WIN] forward target=%s", target.c_str());
+     tab.histIdx = next;
+     if (loadForHistory(target)) {
++        m_start = MonotonicTime::now();
+         m_phase = Phase::Load;
+         m_loadTicks = 0;
+         m_stallTicks = 0;

@@ -1,0 +1,2373 @@
+ld.lld -T linker_x64.ld -o hobbyos.elf obj/intel/boot.o obj/intel/setjmp.o obj/intel/blk_cache.o obj/intel/blk_cache_press_test.o obj/intel/blk_cache_test.o obj/intel/dhcp.o obj/intel/elf_image.o obj/intel/evdev.o obj/intel/evdev_test.o obj/intel/fat16.o obj/intel/fat16_test.o obj/intel/fb_ioctl.o obj/intel/fb_ioctl_test.o obj/intel/frame.o obj/intel/frame_test.o obj/intel/fs.o obj/intel/fs_test.o obj/intel/iommu_vtd.o obj/intel/ipc_proto.o obj/intel/locks_test.o obj/intel/main.o obj/intel/math_test.o obj/intel/mmu_test.o obj/intel/net.o obj/intel/net_rdma.o obj/intel/net_rdma_test.o obj/intel/net_test.o obj/intel/nfs.o obj/intel/nfs_proto.o obj/intel/nfs_test.o obj/intel/pipe.o obj/intel/pipe_test.o obj/intel/process.o obj/intel/process_test.o obj/intel/program_loader.o obj/intel/program_loader_test.o obj/intel/test_fw_cfg.o obj/intel/test_smp.o obj/intel/time.o obj/intel/time_test.o obj/intel/timer_test.o obj/intel/trap_test.o obj/intel/unit_test.o obj/intel/unix.o obj/intel/unix_test.o obj/intel/vfs.o obj/intel/virtio_blk.o obj/intel/virtio_blk_test.o obj/intel/virtio_gpu.o obj/intel/virtio_gpu_test.o obj/intel/virtio_gpu_x64.o obj/intel/virtio_input.o obj/intel/virtio_input_test.o obj/intel/virtio_net.o obj/intel/virtio_net_test.o obj/intel/vm.o obj/intel/vm_test.o obj/intel/cpu.o obj/intel/fpu.o obj/intel/gic.o obj/intel/locks.o obj/intel/mmu.o obj/intel/rtc.o obj/intel/smp.o obj/intel/timer.o obj/intel/trap.o obj/intel/uart.o
+llvm-objcopy -I elf64-x86-64 -O elf32-i386 hobbyos.elf
+[browser] third_party/webkit-hobbyos/cache/browser-x64.bin.xz (cache) -> obj/intel/browser.bin
+[tools] LLVM dist staging present
+# Startup disk: 1 GiB (user-requested floor; FAT16 tops out at 2 GiB).
+# mkfs.fat auto-picks the cluster size (32 KiB @ 1 GiB); the kernel
+# fat16.c layout math is BPB data-driven (bpb_sectors_per_cluster), so
+# no driver change is needed for the larger disk/clusters.
+dd if=/dev/zero of=disk.img bs=1M count=1024
+1024+0 records in
+1024+0 records out
+1073741824 bytes (1.1 GB, 1.0 GiB) copied, 0.287008 s, 3.7 GB/s
+mkfs.fat -F 16 disk.img
+mkfs.fat 4.2 (2021-01-31)
+mmd -i disk.img ::/EFI
+mmd -i disk.img ::/EFI/BOOT
+mmd -i disk.img ::/boot
+mmd -i disk.img ::/home
+mmd -i disk.img ::/nfs
+mmd -i disk.img ::/mnt
+mmd -i disk.img ::/TESTDIR
+mmd -i disk.img ::/tmp
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+# build-tools at their frozen /TOOLS/ paths (Makefile.hobbyos sketch).
+mmd -i disk.img ::/TOOLS
+# L3 (selfhost W-A): VFAT long-name build-payload fixture dirs (mtools-written).
+mmd -i disk.img ::/src
+mmd -i disk.img ::/src/kernel
+mmd -i disk.img ::/src/user_include
+mmd -i disk.img ::/src/user_include/graphics
+mmd -i disk.img ::/third_party
+mmd -i disk.img ::/third_party/libcxx-21.1.8
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include
+mcopy -i disk.img tests/fixtures/E2E.TXT ::/E2E.TXT
+mcopy -i disk.img tests/fixtures/DRAGME.TXT ::/DRAGME.TXT
+mcopy -i disk.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+mcopy -i disk.img bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
+mcopy -i disk.img obj/intel/limine.conf ::/boot/limine.conf
+mcopy -i disk.img hobbyos.elf ::/boot/hobbyos.elf
+mcopy -i disk.img obj/intel/memtest.bin ::/MEMTEST.BIN
+mcopy -i disk.img obj/intel/fileio_test.bin ::/FILEIO.BIN
+mcopy -i disk.img obj/intel/console.bin ::/CONSOLE.BIN
+mcopy -i disk.img obj/intel/fork_test.bin ::/FORKTEST.BIN
+mcopy -i disk.img obj/intel/heap_test.bin ::/HEAPTEST.BIN
+mcopy -i disk.img obj/intel/spawntest.bin ::/SPAWN.BIN
+mcopy -i disk.img obj/intel/graphics.bin ::/GRAPHICS.BIN
+mcopy -i disk.img obj/intel/wsurf_test.bin ::/WSRF_T.BIN
+mcopy -i disk.img obj/intel/smp_test.bin ::/SMPTEST.BIN
+mcopy -i disk.img obj/intel/pipetest.bin ::/PIPETEST.BIN
+mcopy -i disk.img obj/intel/nettest.bin ::/NETTEST.BIN
+mcopy -i disk.img obj/intel/timeout.bin ::/TIMEOUT.BIN
+mcopy -i disk.img obj/intel/nfstest.bin ::/NFSTEST.BIN
+mcopy -i disk.img obj/intel/desktop.bin ::/DESKTOP.BIN
+browser: obj/intel/browser.bin (resolved by the browser-staged completeness rule; installed as ::/BROWSER.BIN)
+mcopy -i disk.img obj/intel/editor.bin ::/EDITOR.BIN
+mcopy -i disk.img obj/intel/EDITOR_T.BIN ::/EDITOR_T.BIN
+mcopy -i disk.img obj/intel/APPS_T.BIN ::/APPS_T.BIN
+mcopy -i disk.img obj/intel/FILEDIAL.BIN ::/FILEDIAL.BIN
+mcopy -i disk.img obj/intel/DIALOG_T.BIN ::/DIALOG_T.BIN
+mcopy -i disk.img obj/intel/PONG_T.BIN ::/PONG_T.BIN
+mcopy -i disk.img obj/intel/stress.bin ::/STRESS.BIN
+mcopy -i disk.img obj/intel/fpu_test.bin ::/FPU_T.BIN
+mcopy -i disk.img obj/intel/gfxbench.bin ::/GFXBENCH.BIN
+mcopy -i disk.img obj/intel/math_test.bin ::/MATH_T.BIN
+mcopy -i disk.img obj/intel/errtest.bin ::/ERRTEST.BIN
+mcopy -i disk.img obj/intel/SOCK2TST.BIN ::/SOCK2TST.BIN
+mcopy -i disk.img obj/intel/POLLTST.BIN ::/POLLTST.BIN
+mcopy -i disk.img obj/intel/BLKTEST.BIN ::/BLKTEST.BIN
+mcopy -i disk.img obj/intel/RANDTST.BIN ::/RANDTST.BIN
+mcopy -i disk.img obj/intel/dns_test.bin ::/DNSTST.BIN
+mcopy -i disk.img obj/intel/netfix.bin ::/NETFIX.BIN
+mcopy -i disk.img obj/intel/cxx_smoke.bin ::/CXXSMOKE.BIN
+mcopy -i disk.img obj/intel/thrd_test.bin ::/THRD_T.BIN
+mcopy -i disk.img obj/intel/tls_test.bin ::/TLS_T.BIN
+mcopy -i disk.img obj/intel/WK1C_T.BIN ::/WK1C_T.BIN
+mcopy -i disk.img obj/intel/cxx_t.bin ::/CXX_T.BIN
+mcopy -i disk.img obj/intel/rtti_t.bin ::/RTTI_T.BIN
+mcopy -i disk.img obj/intel/ipc_test.bin ::/IPC_T.BIN
+mcopy -i disk.img obj/intel/mmtest.bin ::/MMTEST.BIN
+mcopy -i disk.img obj/intel/sqltest.bin ::/SQLTEST.BIN
+mcopy -i disk.img obj/intel/torture_test.bin ::/TORTURE.BIN
+mcopy -i disk.img obj/intel/big.bin ::/BIG.BIN
+mcopy -i disk.img obj/intel/hello.bin ::/HELLO.BIN
+mcopy -i disk.img obj/intel/selfhost.bin ::/SELFHOST.BIN
+mcopy -i disk.img obj/intel/sh.bin ::/SH.BIN
+mcopy -i disk.img obj/intel/ls.bin ::/LS.BIN
+mcopy -i disk.img obj/intel/cat.bin ::/CAT.BIN
+mcopy -i disk.img obj/intel/grep.bin ::/GREP.BIN
+mcopy -i disk.img obj/intel/less.bin ::/LESS.BIN
+mcopy -i disk.img obj/intel/tail.bin ::/TAIL.BIN
+mcopy -i disk.img obj/intel/head.bin ::/HEAD.BIN
+mcopy -i disk.img obj/intel/shtest.bin ::/SHTEST.BIN
+mcopy -i disk.img obj/intel/ps.bin ::/PS.BIN
+mcopy -i disk.img obj/intel/free.bin ::/FREE.BIN
+mcopy -i disk.img obj/intel/uptime.bin ::/UPTIME.BIN
+mcopy -i disk.img obj/intel/kill.bin ::/KILL.BIN
+mcopy -i disk.img obj/intel/basename.bin ::/BASENAME.BIN
+mcopy -i disk.img obj/intel/dirname.bin ::/DIRNAME.BIN
+mcopy -i disk.img obj/intel/seq.bin ::/SEQ.BIN
+mcopy -i disk.img obj/intel/expr.bin ::/EXPR.BIN
+mcopy -i disk.img obj/intel/testgnu.bin ::/TEST.BIN
+mcopy -i disk.img obj/intel/cp.bin ::/CP.BIN
+mcopy -i disk.img obj/intel/rm.bin ::/RM.BIN
+mcopy -i disk.img obj/intel/mv.bin ::/MV.BIN
+mcopy -i disk.img obj/intel/touch.bin ::/TOUCH.BIN
+mcopy -i disk.img obj/intel/wc.bin ::/WC.BIN
+mcopy -i disk.img obj/intel/sed.bin ::/SED.BIN
+mcopy -i disk.img obj/intel/make.bin ::/MAKE.BIN
+mcopy -i disk.img obj/intel/hedgnu.bin ::/HEDGNU.BIN
+mcopy -i disk.img obj/intel/tailgnu.bin ::/TAILGN.BIN
+mcopy -i disk.img obj/intel/cut.bin ::/CUT.BIN
+mcopy -i disk.img obj/intel/tr.bin ::/TR.BIN
+mcopy -i disk.img obj/intel/paste.bin ::/PASTE.BIN
+mcopy -i disk.img obj/intel/fold.bin ::/FOLD.BIN
+mcopy -i disk.img obj/intel/nl.bin ::/NL.BIN
+mcopy -i disk.img obj/intel/comm.bin ::/COMM.BIN
+mcopy -i disk.img obj/intel/tsort.bin ::/TSORT.BIN
+mcopy -i disk.img obj/intel/expand.bin ::/EXPAND.BIN
+mcopy -i disk.img obj/intel/unexpand.bin ::/UNEXPAND.BIN
+mcopy -i disk.img obj/intel/cksum.bin ::/CKSUM.BIN
+mcopy -i disk.img obj/intel/md5sum.bin ::/MD5SUM.BIN
+mcopy -i disk.img obj/intel/proc_child.bin ::/PROCCHLD.BIN
+mcopy -i disk.img obj/intel/spawnex_child.bin ::/SPAWNEX.BIN
+mcopy -i disk.img obj/intel/sig_test.bin ::/SIG_T.BIN
+mcopy -i disk.img obj/intel/head_test.bin ::/HEDTEST.BIN
+mcopy -i disk.img obj/intel/tail_test.bin ::/TAILTEST.BIN
+mcopy -i disk.img obj/intel/proc_test.bin ::/PROCTEST.BIN
+mcopy -i disk.img obj/intel/wc_test.bin ::/WCTEST.BIN
+mcopy -i disk.img obj/intel/cut_test.bin ::/CUTTEST.BIN
+mcopy -i disk.img obj/intel/tr_test.bin ::/TRTEST.BIN
+mcopy -i disk.img obj/intel/paste_test.bin ::/PASTE_T.BIN
+mcopy -i disk.img obj/intel/fold_test.bin ::/FOLDTEST.BIN
+mcopy -i disk.img obj/intel/nl_test.bin ::/NLTEST.BIN
+mcopy -i disk.img obj/intel/comm_test.bin ::/COMMTEST.BIN
+mcopy -i disk.img obj/intel/tsort_test.bin ::/TSORT_T.BIN
+mcopy -i disk.img obj/intel/expand_test.bin ::/EXPAND_T.BIN
+mcopy -i disk.img obj/intel/unexpand_test.bin ::/UNEXPAND_T.BIN
+mcopy -i disk.img obj/intel/fatbig_test.bin ::/FATBIG_T.BIN
+# L3 (selfhost W-A): VFAT long-name build-payload fixtures.  Content
+# markers must stay in sync with src/user/lfn_test.c.
+mcopy -i disk.img tests/fixtures/lfn/program_loader.c ::/src/kernel/program_loader.c
+mcopy -i disk.img tests/fixtures/lfn/window.h ::/src/user_include/graphics/window.h
+mcopy -i disk.img tests/fixtures/lfn/llvm-project-21.1.8.src-EXAMPLE.c ::/src/llvm-project-21.1.8.src-EXAMPLE.c
+mcopy -i disk.img tests/fixtures/lfn/upper_bound.h ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include/upper_bound.h
+mcopy -i disk.img tests/fixtures/lfn/longfilename.txt ::/longfilename.txt
+mcopy -i disk.img tests/fixtures/lfn/longfilename2.txt ::/longfilename2.txt
+mcopy -i disk.img tests/fixtures/lfn/longfil~1.txt ::/longfil~1.txt
+mcopy -i disk.img obj/intel/lfn_test.bin ::/LFN_T.BIN
+mcopy -i disk.img obj/intel/cksum_test.bin ::/CKSUM_T.BIN
+mcopy -i disk.img obj/intel/md5sum_test.bin ::/MD5SUM_T.BIN
+mcopy -i disk.img obj/intel/tac.bin ::/TAC.BIN
+mcopy -i disk.img obj/intel/tac_test.bin ::/TACTEST.BIN
+mcopy -i disk.img obj/intel/cmp.bin ::/CMP.BIN
+mcopy -i disk.img obj/intel/cmp_test.bin ::/CMPTEST.BIN
+mcopy -i disk.img obj/intel/regex_test.bin ::/REGTEST.BIN
+mcopy -i disk.img obj/intel/sed_test.bin ::/SEDTEST.BIN
+mcopy -i disk.img obj/intel/grep_test.bin ::/GREPTEST.BIN
+mcopy -i disk.img obj/intel/subprobe.bin ::/SUBPRB.BIN
+mcopy -i disk.img obj/intel/pipeprobe.bin ::/PIPEPRB.BIN
+mcopy -i disk.img obj/intel/lseek_test.bin ::/LKSTEST.BIN
+mcopy -i disk.img obj/intel/sort.bin ::/SORT.BIN
+mcopy -i disk.img obj/intel/uniq.bin ::/UNIQ.BIN
+mcopy -i disk.img obj/intel/ping.bin ::/PING.BIN
+mcopy -i disk.img obj/intel/nc.bin ::/NC.BIN
+mcopy -i disk.img obj/intel/ifconfig.bin ::/IFCONFIG.BIN
+mcopy -i disk.img obj/intel/shtest2.bin ::/SHTEST2.BIN
+mcopy -i disk.img obj/intel/mkdir.bin ::/MKDIR.BIN
+mcopy -i disk.img obj/intel/shtest3.bin ::/SHTEST3.BIN
+mcopy -i disk.img obj/intel/pong.bin ::/PONG.BIN
+mcopy -i disk.img obj/intel/millipede.bin ::/MILLIPED.BIN
+mcopy -i disk.img obj/intel/files.bin ::/FILES.BIN
+mcopy -i disk.img obj/intel/calc.bin ::/CALC.BIN
+mcopy -i disk.img obj/intel/xcalc.bin ::/XCALC.BIN
+mcopy -i disk.img obj/intel/antfarm.bin ::/ANTFARM.BIN
+mcopy -i disk.img obj/intel/xeyes.bin ::/XEYES.BIN
+mcopy -i disk.img obj/intel/clock.bin ::/CLOCK.BIN
+mcopy -i disk.img obj/intel/sysmon.bin ::/SYSMON.BIN
+mcopy -i disk.img obj/intel/hex.bin ::/HEX.BIN
+mcopy -i disk.img obj/intel/tasks.bin ::/TASKS.BIN
+mcopy -i disk.img obj/intel/find.bin ::/FIND.BIN
+mcopy -i disk.img obj/intel/diff.bin ::/DIFF.BIN
+mcopy -i disk.img obj/intel/notes.bin ::/NOTES.BIN
+mcopy -i disk.img obj/intel/unit.bin ::/UNIT.BIN
+mcopy -i disk.img obj/intel/nano.bin ::/NANO.BIN
+# Selfhost W2 (mtools port): in-OS /TOOLS copies of the ported
+# build-tools (8.3 names, the frozen F1 layout).
+mcopy -i disk.img obj/intel/mcopy.bin ::/TOOLS/MCOPY.BIN
+mcopy -i disk.img obj/intel/mdel.bin ::/TOOLS/MDEL.BIN
+mcopy -i disk.img obj/intel/mmd.bin ::/TOOLS/MMD.BIN
+# Selfhost W2 (mkfs port): in-OS MKFSFAT (F1 layout).
+mcopy -i disk.img obj/intel/mkfsfat.bin ::/MKFSFAT.BIN
+# Selfhost W3 (tools): the in-OS toolchain on the startup image (frozen
+# F1 layout, selfhost.md §7.3).  tools/selfhost-stage.sh --tools stages
+# CLANG.BIN/LLD.BIN/LLVMAR.BIN/OBJCOPY.BIN from the wave-2 LLVM
+# distribution staging (obj/selfhost/dist-staging, or the persistent
+# third_party/llvm-21.1.8/dist-staging copy that survives `make clean`),
+# the ported build tools (MAKE/MCOPY/MDEL/MMD/MKFSFAT), and the RESDIR
+# header tree under /TOOLS — staged FAITHFULLY with long names (F8
+# decision, see docs/selfhost/llvm-bootstrap.md §6.2).  Soft dependency:
+# an absent dist-staging warns + skips, so trees without the LLVM
+# install still build a bootable image (build_kernel.sh then refuses
+# with instructions).  Override with STAGE_TOOLS=0 to skip.
+tools/selfhost-stage.sh --tools disk.img
+selfhost-stage: staging in-OS toolchain to ::/TOOLS (F1 layout)
+selfhost-stage:   CLANG.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/clang-21 (converted, 94194168 B)
+selfhost-stage:   LLD.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/lld (converted, 53252504 B)
+selfhost-stage:   LLVMAR.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/llvm-ar (converted, 8351072 B)
+selfhost-stage:   OBJCOPY.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/llvm-objcopy (converted, 4984544 B)
+selfhost-stage: staged 284 files, 176920718 bytes into ::/TOOLS
+  --- ::/TOOLS (mdir) ---
+TAR      BIN    144448 2026-10-17   8:37 
+RESDIR       <DIR>     2026-10-17   8:37 
+       15 files         162 193 464 bytes
+                        739 131 392 bytes free
+
+  --- ::/TOOLS/RESDIR/include count ---
+      295 files          14 727 254 bytes
+                        739 131 392 bytes free
+
+selfhost-stage: done
+# Selfhost W4 (src): the in-OS build-required source subset on the
+# startup image (frozen F2 /SRC flavor): kernel+user sources, headers,
+# Makefile.hobbyos, limine/EFI assets, the carried build products, and
+# the SELFHOST.RUN/SELFHOST.SH stage scripts.  tools/selfhost-stage.sh
+# --src; disable together with the tools step via STAGE_TOOLS=0.
+tools/selfhost-stage.sh --src disk.img
+selfhost-stage: STAGE_LIBCXX=0 — skipping C++ libcxx include subset
+selfhost-stage: staging BUILD-REQUIRED source subset to ::/SRC
+
+selfhost-stage: staged BUILD-REQUIRED subset into disk.img
+  payload: 249 files, 4967813 bytes
+  --- ::/SRC (mdir) ---
+        3 files             315 392 bytes
+
+Total files listed:
+      323 files           4 967 882 bytes
+                        730 923 008 bytes free
+
+selfhost-stage: done
+# [inos-build-kernel] the source tarball + the in-OS build script:
+# SRC.TAR (ustar, assembled by tools/selfhost-src-tar.sh from the real
+# tree) lands at ::/SRC.TAR; build_kernel.sh at ::/BUILD_KERNEL.SH.
+# In-OS: `SH.BIN /BUILD_KERNEL.SH` extracts the tar and builds the
+# kernel from it (Makefile.hobbyos `all`) + assembles OUT.IMG.
+tools/selfhost-src-tar.sh obj/selfhost/SRC.TAR
+selfhost-src-tar: assembling obj/selfhost/SRC.TAR
+selfhost-src-tar: done — obj/selfhost/SRC.TAR
+  entries: 963 (files+dirs), size: 23070720 bytes
+  spot-checked members: src/kernel/main.c Makefile.hobbyos linker.ld limine.conf build_kernel.sh
+mcopy -i disk.img obj/selfhost/SRC.TAR ::/SRC.TAR
+mcopy -i disk.img src/user/selfhost/build_kernel.sh ::/BUILD_KERNEL.SH
+mcopy -i disk.img obj/intel/monitor.bin ::/MONITOR.BIN
+mcopy -i disk.img obj/intel/monitort.bin ::/MONITORT.BIN
+mcopy -i disk.img obj/intel/icusmk.bin ::/ICUSMK.BIN
+echo "HobbyOS Terminal Test File" > SHTEST.TXT
+echo "This is line number two." >> SHTEST.TXT
+echo "Line three is right here." >> SHTEST.TXT
+echo "Fourth line has some interesting keywords like hello world." >> SHTEST.TXT
+echo "Line five is the last line of this small test document." >> SHTEST.TXT
+touch TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT
+echo "orange" > SORT.TXT
+echo "apple" >> SORT.TXT
+echo "orange" >> SORT.TXT
+mcopy -i disk.img SHTEST.TXT ::/SHTEST.TXT
+mcopy -i disk.img SHTEST.TXT ::/home/SHTEST.TXT
+mcopy -i disk.img TEST1.TXT ::/TEST1.TXT
+mcopy -i disk.img TEST2.TXT ::/TEST2.TXT
+mcopy -i disk.img TEST3.TXT ::/TEST3.TXT
+mcopy -i disk.img TEST4.TXT ::/TEST4.TXT
+mcopy -i disk.img SORT.TXT ::/SORT.TXT
+rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT
+qemu-system-x86_64 -M q35 -smp 8 -m 12288M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56  -action shutdown=poweroff -display none
+WARNING: Image format was not specified for '/home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd' and probing guessed raw.
+         Automatically detecting the format is dangerous for raw images, write operations on block 0 will be restricted.
+         Specify the 'raw' format explicitly to remove the restrictions.
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+BdsDxe: starting Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+[001;001H[001;001H[UART] lock @ 0x000000007537ebc8
+Booting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+VirtIO GPU: BGA
+VirtIO GPU successfully initialized.
+Original CCB: 0x0000000000000047
+Modified CCB: 0x0000000000000047
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1376256 total_mib=5376 reserved=0
+[KERNEL] Activating secondary cores via LAPIC IPIs...
+[KERNEL] smp_init: copying trampoline code...
+[KERNEL] smp_init: trampoline copied.
+[KERNEL] smp_init: Sending INIT IPI to core 1...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 1 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 2...
+[KERNEL] smp_init: Waiting after INIT IPI...
+start_scheduler called on CPU 1
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 2 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core start_scheduler called on CPU 2
+3...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 3 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 4...
+[KERNEL] smp_init: Waiting after INIT IPI...
+start_scheduler called on CPU 3
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU 4
+[KERNEL] Core 4 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 5...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 5 power-on acknowledged.
+start_scheduler called on CPU 5
+[KERNEL] smp_init: Sending INIT IPI to core 6...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU 6
+[KERNEL] Core 6 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 7...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 7 power-on acknowledged.
+start_scheduler called on CPU 7
+[KERNEL] LAPIC timer rate: 62627 counts/ms, TSC rate: 2596014 ticks/ms (PIT-counter calibrated)
+Found NVMe controller on PCI bus!
+PCI Config Space of NVMe:
+0x0000000000101B36 0x0000000000100007 0x0000000001080202 0x0000000000000000 
+0x0000000081000004 0x0000000000000000 0x0000000000000000 0x0000000000000000 
+0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000011001AF4 
+0x0000000000000000 0x0000000000000040 0x0000000000000000 0x000000000000010B 
+NVMe BAR0 Phys: 0x0000000081000000 (Mapped to Virtual: 0x00000001FC000000)
+Resetting controller, waiting for CSTS.RDY = 0...
+Controller reset complete!
+Enabling controller... CC=0x0000000000460001 CSTS=0x0000000000000001
+Controller enabled successfully!
+Create IO CQ Status: 0x0000000000000000
+Create IO SQ Status: 0x0000000000000000
+NVMe driver initialized successfully!
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+[VIRTIO_NET] PCI Interrupt Line: 10 (Vector: 42)
+[VIRTIO_NET] MAC Address: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+[VIRTIO_NET] RX queue size: 256 rx_vq address: 0x00000000751F4000 PFN: 0x00000000000751F4
+[VIRTIO_NET] TX queue size: 256 tx_vq address: 0x00000000751F7000 PFN: 0x00000000000751F7
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Discover sent
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP initialization complete.
+[RDMA] Remote PCIe sharing is INACTIVE (no startup parameter).
+
+--- Parallel Program Loading ---
+Mode: TEST - Running automated tests...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=1
+Inside process_create: clearing memory at 0x0000000022000000
+Inside process_create: kmemset done.
+start_scheduler called on CPU 0
+Loading program for scheduler (v2 AS): SUBPRB.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=-1
+/SUBPRB.BIN
+v2 loader: image mapped (lazy), bytes=64824 pages=16 first=in elap=3ms
+v2 loader: PID=2 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): SHTEST.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=-1
+/SHTEST.BIN
+v2 loader: image mapped (lazy), bytes=65400 pages=16 first=in elap=2ms
+v2 loader: PID=3 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): SHTEST2.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=4 block_idx=-1
+/SHTEST2.BIN
+v2 loader: image mapped (lazy), bytes=62584 pages=16 first=in elap=1ms
+v2 loader: PID=4 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): SHTEST3.BIN
+/SHTEST3.BIN
+v2 loader: image mapped (lazy), bytes=62696 pages=16 first=in elap=1ms
+v2 loader: PID=5 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): CONSOLE.BIN
+/CONSOLE.BIN
+v2 loader: image mapped (lazy), bytes=55192 pages=14 first=in elap=1ms
+v2 loader: PID=6 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): MEMTEST.BIN
+/MEMTEST.BIN
+v2 loader: image mapped (lazy), bytes=55192 pages=14 first=in elap=1ms
+v2 loader: PID=7 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): FILEIO.BIN
+/FILEIO.BIN
+v2 loader: image mapped (lazy), bytes=55464 pages=14 first=in elap=4ms
+v2 loader: PID=8 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): SBLKTEST.BIN
+h/BLKTEST.BIN
+
+ell Advanced Utiliti====es Integration Test Starting...
+
+===================================v2 loader: image mapped (lazy), bytes=75496 pages=19Shell Fo======== first=in elap=4l===
+HobbyOS Ude======rs & Subdsms
+v2 loader: PID=9i entry=reer= P===
+Hello from i0x0000001000000000cstor sp=0x0000001800000000 resident=2 tables=6
+ries IoLoading program for scheduler (v2 AS): Slohell Integration
+[FILEItegration FATBIG_T.BIN
+n Te/FATBIG_T.BIN
+O TEST] Startinst Starting...
+gram aTe- Mg File I/OeBLKTEST: block-c machst tory TTests...
+v2 loader: image mapped (lazy), bytes=47496eS pages=12 first=in elap=3ms
+taeev2 loader: PID= in-dOS integra tioEL0 Sprtst
+acen t11 entry=0x0000001000000000 sp=0x0000001800000000ing...
+== resident=!est
+1 tables=6
+
+==========================Loading program for scheduler (v2 AS): ======================
+==========LFN_T.BIN
+
+/LFN_T.BIN
+/TEST.TXT
+
+[FATBIG] >1 MiB fat16 create/write/reopen round-trip
+/BIGFILE.BIN
+BLKTEST cache: present
+  BLKTEST cache live (sysinfo(9)): PASS
+Loading program for scheduler (v2 AS): SH.BIN
+/SH.BIN
+v2 loader: image mapped (lazy), bytes=57896 pages=15 first=in elap=9ms
+v2 loader: PID=13 entry=0x0000001000000000 sp=0x0000001800000000 resident=2 tables=6
+Loading program for scheduler (v2 AS): HEAPTEST.BIN
+/HEAPTEST.BIN
+Test 1: Writing to user space (shouldBLKT workLoading program for scheduler (v2 AS): SH.BIN[
+EST P1: 51/SH.BIN2 KiB integr
+ity (write + variedSUBPRB][F): stILart
+-chunk reaEI
+d-back)
+O TESLoading program for scheduler (v2 AS): T] OpSH.BINe✓ Write to user spaceComp
+neutation fini s/SH.BIN
+successful
+d TEST.TXT successfully.hed. Exiting.
+
+Test 2: Attempting to write [KERNEL] Process 6: CONSOLE.BIN exited unexpectedly or gracefully.
+to kernel space (should fail):
+[KERNEL] pid=7 (MEMTEST.BIN) memory fault VA=0x0000000040000000 PC=0x0000001000000051 rw=w  in=PROT -> killed
+v2 loader: image mapped (lazy), bytes=[KERNEL] Process 7: MEMTEST.BIN exited unexpectedly or gracefully.
+
+[LFN] VFAT long-nav2 loader: image mapped (lazy), bytes=me build-payload verificatv2 loader: image mapped (lazy), bytes=57672 pages=15 first=in elap=A mion12ms
+v2 loader: image mapped (lazy), bytes=223272 pages=
+55 first=in elap=1ms
+v2 loader: PID=16 entry=0x0000001000000000 sp=0x0000001800000000v2 loader: PID=/BLKT1.TXT
+--- Hea17 resident=3 tables=6
+kd
+i entry=r223272Loading program for scheduler (v2 AS): 0x0000001000000000p SPAWN.BIN/src/kernel/program_loader.c sp=
+
+ /SUB1  pages=55 first=in elap=17ms
+/SPAWN.BIN223272
+v2 loader: PID=150x0000001800000000Test Started ---
+ entry= pages=55 first=in elap=9ms
+ resident=2 tables=6
+rv2 loader: PID=18 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+=[FILEIO TEST] Wrote data to file.
+[sys_close Debug] CPU=0 errno=1, PIDs=[0 4,8,Allo
+15,9], caller_pid=8, fd=catin0, g_fd=[sys_close Debug] CPU=512g , PIDs=[4,8,
+15,9], caller_pid=5, fd=5, g_fd=18
+1MB...
+[KERNEL Debug] sys_close: fd=5, ret=0
+[sys_close Debug] CPU=5, PIDs=[4,8,15,9], caller_pid=5, fd=0, g_fd=13
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=5, PIDs=[4,8,15,9], caller_pid=5, fd=3, g_fd=16
+[KERNEL Debug] sys_close: fd=3, ret=0
+[KERNEL Debug] sys_close: fd=0, ret=0
+A mk[FILEIOdir TES /SUB1/SUB2 r=T] Closed file.
+[KERNEL] sys_fork: tf->regs[0] is now 10
+Successfully allocated0x0000001000000000 1MB
+[sys_close Debug] CPU=6, PIDs=[9,11,17,13], caller_pid=100, fd= 1, g_fd=14
+errno=[sys_close Debug] CPU=0 
+4, PIDs=[9,11,17,[KERNEL Debug] sys_close: fd=113], caller_pid=4, ret=, fd=5, g_fd=5
+0
+[KERNEL Debug] sys_close: fd=5, ret=0
+ sp=0x0000001800000000 resident=4 tables=6
+[sys_close Debug] CPU=4, PIDs=[9,11,17,13], caller_pid=4, fd=0, g_fd=0
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=4, PIDs=[9,11,17,13], caller_pid=4, fd=3, g_fd=3
+[KERNEL Debug] sys_close: fd=3, ret=0
+[sys_close Debug] CPU=3, PIDs=[9,11,17,/TEST.TXT
+13], caller_pid=13, fd=0, g_fd=21
+A [KERNEL Debug] sys_close: fd=0, ret=0
+chdir r=[LFN]v2 loader: image mapped (lazy), bytes=55336 pages=140 first=in  elap=errno= PASS 0pa 5 yload deep path src/kernel/program_loader.cms
+
+cwd="/SUB1/SUB2"
+/SUB1/SUB2/nested.txt
+B crea/src/user_include/graphics/window.hte fd=0
+ errno=0 [sys_close Debug] CPU=3, PIDs=[9,11,17,13], caller_pid=13, fd=0, g_fd=5
+[KERNEL Debug] sys_close: fd=0, ret=0
+[LFN] PASS lwrote=ong di14r + nested s rc/user_include/gra[sys_close Debug] CPU=7, PIDs=[9phics/window.h
+,11,17,13]/src/llvm-project-21.1.8.src-EXAMPLE.c
+, caller_pid=2, fd=0, g_fd=18
+[sys_close Debug] CPU=3, PIDs=[[KERNEL Debug] sys_close: fd=0, ret=0
+9,11
+,17,13], caller_pid=13, fd=0, g_fd=5/SUB1/SUB2/nested.txt
+
+[KERNEL Debug] sys_close: fd=0, ret=0
+[LFN] PASS 30+ char component llvm-project-21.1.8.src-EXAMPLE.c
+B reread fd=0 errno=0 got=14  data="probe-co/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include/upper_bound.h
+ntent\n"[sys_close Debug] CPU=7, PIDs=[[sys_close Debug] CPU=3, PIDs=[9,11,9,11,17,13]17,, caller_pid=2, fd=0, g_fd=1813], caller_pid=13, fd=0, g_fd=5
+[KERNEL Debug] sys_close: fd=0, ret=0
+
+[KERNEL Debug] sys_close: fd=[LFN]0, ret=0
+ PA
+SS deep /SUB1/SUB2/nested.txt
+nested libcxx-style path upper_bound.h
+C abs fd=/SRC/KERNEL/PROGRAM_LOADER.C
+0[sys_close Debug] CPU=3, PIDs=[9,11,17,13], caller_pid=13, fd=0, g_fd=18
+[KERNEL Debug] sys_close: fd=0, ret=0
+ errn[LFN]o= PASS 0case-insensiti vegot= pat14h /SRC/KERNEL/PROGRAM_LOADE [sys_close Debug] CPU=7, PIDs=[9,11,17,13], caller_pid=2, fd=R.C0, g_fd=5
+[KERNEL] sys_fork: tf->regs[0] is now 12
+[sys_close Debug] CPU=5, PIDs=[9,[sys_close Debug] CPU=[KERNEL Debug] sys_close: fd=0, ret=0v2 loader: PID=
+1, PIDs=[91912,18,13
+
+], caller_pid=10, fd=,12,18 entry=,13], caller_pid=12, fd=1, g_fd=10x0000001000000000 sp=0x0000001800000000
+ resident=1 tables=[KERNEL Debug] sys_close: fd=1, ret=04
+
+2, g_fd=15
+/longfilename.txt[sys_close Debug] CPU=1, PIDs=[9,Loading program for scheduler (v2 AS): FORKTEST.BIN
+
+12,19,13], caller_pid=12, fd=[KERNEL Debug] sys_close: fd=/FORKTEST.BIN
+2, g_fd=2
+[KERNEL Debug] sys_close: fd=2, ret=0
+[read_until] MATCHED: '2Spawn Test: Starti=== W[sys_close Debug] CPU=, ret=0
+3, PIDs=[9elcome tv2 loader: image mapped (lazy), bytes=56344 pages=14 first=,12in elap=o HobbyOS S,[sys_close Debug] CPU=7, PIDs=[19,13], caller_pid=13, fd=0, g_fd=9,hell ===
+Ty5ms
+pe v2 loader: PID=21
+ng.15,19,13], caller_pid=3, fd=5, g_fd=14 entry='help' to see availab..
+11
+[KERNEL Debug] sys_close: fd=0, ret=0
+Spawn Test: Spawning CONSOLE.BIN...
+0x0000001000000000le built[LFN] P sp=0x0000001800000000 resident=1 tables=4ins and syntax[KERNEL Debug] sys_close: fd=5, ret=0
+ASS [sys_close Debug] CPU=7, PIDs=[9,16,19,13], caller_pid=.
+
+
+user@hobVerified 1MB writes
+3, fd=0, g_fd=Loading program for scheduler (v2 AS): SMPTEST.BIN
+6
+byos:/$ Allcolli'Loading program for scheduler (v2 AS): ocat/SMPTEST.BIN
+CAT.BIN
+
+ing 50[TEST/CAT.BIN
+3] Initialsion longfilename.t[KERNEL Debug] sys_close: fd=0, ret=0
+MB..xt
+[sys_close Debug] CPU=7, PIDs=[ prv2 loader: image mapped (lazy), bytes=om9pt read succ55320 pages=14 first=in.
+ elap=3ms
+v2 loader: PID=essfully.
+,16Successfully all,ocated 50MB
+20,13], caller_pid=3, fd=23 entry=0x0000001000000000 sp=Verified 50MB writes3, g_fd=9 (start0x0000001800000000 resident=1 tables=
+v2 loader: image mapped (lazy), bytes=55336 and[TEST3[KERNEL Debug] sys_close: fd=3, ret=0
+/longfilename2.txt
+] pages=14 first=in end)
+ Creating directory /4
+SUB1...
+ elap=9ms
+[sys_close Debug] CPU=3, PIDs=[9,16,20,13], caller_pid=Fre13, fd=0, g_fd=11
+[KERNEL Debug] sys_close: fd=0, ret=0
+ein[LFN] PASS g 1M[BWAT.CH..DOG] con
+soleA llocsilenat ftinogr m o2reM thB (san 20s
+hou  CPUld r0 reiup=se0 spax0ce0)..0.0
+00S1000ucc005essfu2BlDly  piallod=cated 2MB
+-9- - Raegale_ms=94 sysloc Secctiona --l-l=
+7 wait_lock=0x0000000000000000 caller=0x0000000000000000 caller2=0x00000000700085E4
+  CPU1 rip=0x000000100000A317 pid=16 age_ms=-4 wait_lock=0x00000000747F0004 caller=0x000000007002F0AE caller2=0x0000000070028CB5
+  CPU2 rip=0x00000010000052F4 pid=19 age_ms=18 syscall=8 wait_lock=0x0000000074530C70 caller=0x000000007002F0AE caller2=0x000000007003R6E68D
+  ALLOCC: PalU3 rl cheip=0cx0000ks 001P00000AS34AB pSED
+id=13 age_ms=0
+  CPU4 rip=0x0000001000007544 pid=5 age_ms=-3 syscall=21 wait_lock=0x0000000074530C70 caller=0x000000007002F0AE caller2=0x0000000070022659
+  CPU5 rip=0x0000001000000F8D pid=11 age_ms=-11 wait_lock=0x0000000074530C70 caller=0x000000007002F0AE caller2=0x000000007001DDDD
+  CPU6 rip=0x0000001000002F81 pid=10 age_ms=92 wait_lock=0x0000000074530C70 caller=0x000000007002F0AE caller2=0x000000007001C6C3
+  CPU7 rip=0x0000001000003150 pid=3 age_ms=4 syscall=3
+[KERNEL] sys_fork: tf->regs[0] is now 24
+D spawn pid=[FILEIO TEST] Reopened TEST.TX[TEST] InitiT for reading.
+al prompt read successfully.
+[TEST] Sending 'help' command...
+[FILEIO TEST] Read data: --- HobbyOS SMP VeHello HobbyOS Filesystem!rif
+=======ication =======================
+HobbyOS F---
+
+or[sys_close Debug] CPU=7, PIDs=[11,22,23k Test
+=========,13], caller_pid=8, fd=[TEST2] Initial prompt r0ead successfully.
+, g_fd=12[TEST2]
+[KERNEL Debug] sys_close: fd=0=============, ret=0
+ Tes[Fting /SUB1/SUB2/nested.txt
+Spawning 8[sys_close Debug] CPU=========
+'ps'...
+[F2, PIDs=[11,22I worker processes,23,13 toLEIO TEST]] FiORle K TES, caller_pid=23, fd=2, g_fd=saT] Ca11
+lli I/O ng fToturaete sts4 core Compls...
+ete. Exrk()...
+[KERNEL Debug] sys_close: fd=2[sys_close  Debug]  CPU=, reCSt=TK 0cpu11,:  (PIDs=[u1nini5ti,aliitized kstack, skip)
+  CSTK cpu2:
+-- - Phas(uninitialized ke 4sta: ckm, skip)emo
+  rCSTK cy syspu4call2:4,1,ng.
+s - (--uninitia
+li13],z calleed ksr_tack, skip)pid
+  CSTK cpu5: (u=ninitialize2d4 ,ksta fd=1sck, skbirp)k 
+gr  owt, gC_fd=v2 lSToK cpu6:a (uder: PID=22 entninitry=ialized 0kstxack, s00000kip)
+01000  00CSTK00007 cpu
+ 7:sp=0x0 (u0000018nini000t00ial0ize00 resident=4d kst ack, stakipbles=)6
+[KERNEL Debug] sys_close: fd=1, ret=0
+co
+Loading program for scheduler (v2 AS): l[sys_close Debug] CPU=l1, PIDs=[is2317,24h,2,13 i verifi
+], caller_pid=[sys_close Debug] CPU=2, PIDs=[17,24,2ed24, fd=
+2, g_fd=8
+,[KERNEL Debug] sys_close: fd=13], caller_pid=2, fd=2on l1, g_fd=18
+[KERNEL Debug] sys_close: fd=1, ret=0
+on, ret=0
+gfilenaPIPETEST.BIN
+me2.txt/PIPETEST.BIN
+[KERNEL] Process 8: FILEIO.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 25
+Loading program for scheduler (v2 AS): CONSOLE.BIN
+[KERNEL] Process 23: CAT.BIN exited unexpectedly or gracefully.
+[FORK TEST] Child: I am the
+/CONSOLE.BIN 
+forked child!
+[FORK TEST] Child tick 0
+/longfil~1.txt
+v2 loader: image mapped (lazy), bytes=55464 pages=v2 loader: image mapped (lazy), bytes=55192 pages=14 first=in elap=4ms
+[sys_close Debug] CPU=1, PIDs=[21,13,11,1], caller_pid=13, fd=140, g_fd=11
+ first=in elap=3ms
+[KERNEL Debug] sys_close: fd=0, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now 27
+v2 loader: PID=26 entry=0x0000001000000000 sp=0x0000001800000000 resident=1[FORK TEST] Parent: child P tables=4
+ID = 25
+v2 loader: PID=20 entry=0x0000001000000000[FOR sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): GRAPHICS.BIN
+K TEST] Par/GRAPHICS.BIN
+ent tick mmap 1MB write/readback verified
+mmap non-overlap verified
+munmap OK
+PHASE4 MEM: all checks PASSED
+--- Heap Test Completed ---
+[KERNEL] Process 16: HEAPTEST.BIN exited unexpectedly or gracefully.
+D cat got=
+=======Sp=======================
+Hawn Test: S1uccessfully spawne4Pipeello from isolated EL0  Test StaS rtin d COpace!
+g...
+NSOLE.BIN with PIoutD=="==============================
+v2 loader: image mapped (lazy), bytes=58432 pages=15 first=in elap=4ms
+[KERNEL] sys_fork: tf->regs[0] is now 28[LFN] PAS
+0S v2 loader: PID=21 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): WSRF_T.BIN
+Pr/WSRF_T.BIN
+ocess heart-beat [from CPU: FORK TE5S
+T] Child tick 1
+Process heart-beat from CPU: 26
+5probe-content\n"[sys_close Debug] CPU=5, PIDs=[1,26,21,20], caller_pid=2, fd=0, g_fd=5
+[KERNEL Debug] sys_close: fd=0, ret=0
+Graphics Test Program Started
+Cv2 loader: image mapped (lazy), bytes=
+Spawn Test: Finished. Exiting.
+omputation f[KERNEL] Process 19: SPAWN.BIN exited unexpectedly or gracefully.
+inished. Exiting.
+375984 pages=92 first=in elap=7ms
+[KERNEL] Process 26: CONSOLE.BIN exited unexpectedly or gracefully.
+Graphics initialized. Drawing...
+Process heart-beat from CPU: 4
+[KERNEL] sys_fork: tf->regs[0] is now 30
+ code=2v2 loader: PID=29 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): NETTEST.BIN
+[KERNEL] sys_fork: tf->regs[0] is now 23
+/NETTEST.BIN
+collision longfil~1.txt
+Pro[sys_close Debug] CPU=1, PIDs=[1,30,25,27], caller_pid=30, fd=1, g_fd=12
+[KERNEL Debug] sys_close: fd=1, ret=0
+cess heart-beat from CPU: Child: reading...
+6
+Child: read returned
+Child got data!
+After pipe call
+Fork returned: UNKNOWN_VALUE: Fork returned: 0
+
+[sys_close Debug] CPU=1, PIDs=[1,30,25,27], caller_pid=[FORK TEST] Child tick 30, fd=2
+0, g_fd=11
+[KERNEL Debug] sys_close: fd=0, ret=0
+Child exiting
+[KERNEL] Process 30: PIPETEST.BIN exited unexpectedly or gracefully.
+ 
+E start
+/TEMP.TXT
+
+v2 loader: image mapped (lazy), bytes=55336 pages=14 first=in elap=3ms
+v2 loader: PID=31 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4E create fd=
+/MKDIR.BIN
+0Loading program for scheduler (v2 AS): TIMEOUT.BIN 
+/TIMEOUT.BIN
+[FORK TEST] Child tick 3
+[WSRF_T] wsurf render-confinement tests
+[TEST] 'help' output validated successfully.
+[TEST] Sending 'cd /home' command...
+[sys_close Debug] CPU=7, PIDs=[1,11,29,13], caller_pid=20, fd=0, g_fd=11
+/PS.BIN
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=4, PIDs=[1,11,29,13], caller_pid=18, fd=2, g_fd=21
+[KERNEL Debug] sys_close: fd=2[LFN], ret=0
+Process heart-beat  frP[PIPE_WRITE_EPIPE] PID v2 loader: image mapped (lazy), bytes=/PS.BIN
+A20S55000 pages=o14 first=inSGrap pipe m0x00000000745297F0hics Validation: SUCCESS (Pi  elap=11ms
+v2 loader: PID=32 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables= reader_count is 0
+U4
+xLoading program for scheduler (v2 AS): STRESS.BIN
+eser net_ test l matches e/STRESS.BIN
+starting...
+CPU: [FORxpecteK TEST] Parent Connecd coting to 1.1.1.1:80...
+tick lor)
+1
+Validating new graphics primitives...
+[sys_close Debug] CPU=1, PIDs=[1,17,31,15], caller_pid=17, fd=2, g_fd=18
+[KERNEL Debug] sys_close: fd=2, ret=0
+v2 loader: image mapped (lazy), bytes=61992 pages=16 first=in elap=3ms
+/MKDIR.BIN
+[FORK TEST] Child tick 4
+[sys_close Debug] CPU=1, PIDs=[1,17,31,15], caller_pid=17, fd=2, g_fd=12
+[KERNEL Debug] sys_close: fd=2, ret=0
+[FORK TEST] Child exiting.
+[KERNEL] Process 25: FORKTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 34
+v2 loader: PID=33 entry=0x0000001000000000 sp=0x0000001800000000 resident=2 tables=6
+Loading program for scheduler (v2 AS): MONITORT.BIN
+
+==================================================
+[STRESS TEST] Initiating multi-process stress test...
+==================================================
+[STRESS TEST] Pipes created. Forking 4 worker processes...
+[KERNEL] sys_fork: tf->regs[0] is now 35
+[ARP] routing off-subnet: target=0x0000000001010101 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=0x000000000202000A
+Process heart-beat from CPU: 4
+Process heart-beat from CPU: 4
+[KERNEL] sys_fork: tf->regs[0] is now 36
+/MONITORT.BIN
+Connected! Sending HTTP GET...
+v2 loader: image mapped (lazy), bytes=Request sent. Reading response...
+56744 pages=14 first=in elap=2ms
+[KERNEL] sys_fork: tf->regs[0] is now 38
+6
+v2 loader: PID=37 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): NFSTEST.BIN
+/MKDIR.BIN
+v2 loader: image mapped (lazy), bytes=54936 pages=14 first=in elap=1ms
+[KERNEL] Process 35: mkdir exited unexpectedly or gracefully.
+Process heart-beat from CPU: 1
+Process heart-beat from CPU: 1
+[KERNEL] Process 27: SMPTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 39
+/NFSTEST.BIN
+Received data:
+HTTP/1.1 301 Moved Permanently
+Server: cloudread_dir /src/kernel listsflare prog
+Drama_loadete: r.Satc, 17 Oct 2026 08:37:16 GMT
+Content-Type: text/html
+Content-Lengtv2 loader: image mapped (lazy), bytes=90264 pages=23 first=in elap=6ms
+[KERNEL] sys_fork: tf->regs[0] is now 41
+
+[sys_close Debug] CPU=7, PIDs=[1,38,39,28], caller_pid=31, fd=0, g_fd=35v2 loader: PID=
+40 entry=wrote=[KERNEL Debug] sys_close: fd=0x0000001000000000 sp=0x0000001800000000 resident=User net_timeout_test starting...
+1 tables=4
+0, ret=0
+13Loading program for scheduler (v2 AS): ERRTEST.BIN[sys_close Debug] CPU=[sys_close Debug] CPU=1, PIDs=[1,41,2,[sys_close Debug] CPU=
+=
+532], caller_pid=41== 6, PIDs=[1===, fd=[sys_close Debug] CPU=, PIDs=[=====Connecting to 10.0.2.16:80 (expecting timeout)...
+1,41==,41===,2,,2,32], caller_pid=18, fd=2, g_fd=9, g_fd=32], caller_pid=382, PIDs=[1,41,112,32], caller_pid=2, fd=0, g_fd=5
+=======
+[KERNEL Debug] sys_close: fd====28
+, fd=5, g_fd=[KERNEL Debug] sys_close: fd======9, ret=0[KERNEL Debug] sys_close: fd=0==
+=224
+[sys_close Debug] CPU=[KERNEL Debug] sys_close: fd=====, ret=05, ret=
+=
+0
+=
+, ret=1, PIDs=[0
+Syst[sys_close Debug] CPU=6, PIDs=[11,41,,41,2,32], caller_pid=41, fd=10, g_fd=29
+[KERNEL Debug] sys_close: fd=102,32], caller_pid=38, fd=e, ret=0
+m Mo6, g_fd=25
+nitor Test
+[KERNEL Debug] sys_close: fd======6, ret=0
+===================================
+Test 1: sysinfo(2) memory info...
+  PASS: total=5637144576 free=5603590144
+Test 2: sysinfo(5) CPU info...
+[KERNEL] sys_fork: tf->regs[0] is now /ERRTEST.BIN
+42
+v2 loader: image mapped (lazy), bytes=57128 pages=14 first=in elap=2ms
+[KERNEL] sys_fork: tf->regs[0] is now v2 loader: PID=44
+43 entry=0x0000001000000000 sp=0x0000001800000000 resident=2[sys_close Debug] CPU=6, PIDs=[1,43,2,32], caller_pid=42, fd=13, g_fd=/PS.BIN32  PASS: 
+[sys_close Debug] CPU=li7
+ne st[KERNEL Debug] sys_close: fd=13, ret=0ar tables=  PASS tpointerrno sta, PIDs=[
+[sys_close Debug] CPU=v2 loader: image mapped (lazy), bytes=16rts at 06
+,3,255128 pages=, PIDs=[,14 first=in elap=
+Loading program for scheduler (v2 AS): HELLO.BIN
+1,3ms
+32], caller_pid=3,2,32], caller_pid=42, fd=14, g_fd=33
+[KERNEL Debug] sys_close: fd=14, ret=36, fd=1, g_fd=0
+18
+[KERNEL Debug] sys_close: fd=1, ret=0
+[TEST] 'cd' prompt update validated successfully.
+[TEST] Sending 'cat SHTEST.TXT' command...
+[KERNEL] sys_fork: tf->regs[0] is now 46
+/HELLO.BIN
+
+v2 loader: image mapped (lazy), bytes=Process heart-beat from CPU: Process heart7-beat from CPU: 45880
+ pages=124 first=in elap=4ms
+v2 loader: PID=47 entry=0x0000001000000000 sp=0x0000001800000000 resident=1
+ tables=4
+Loading program for scheduler (v2 AS): LKSTEST.BINLoading program for scheduler (v2 AS): /MV.BIN
+
+/MV.BIN
+/LKSTEST.BINProcess he
+art-beat from CPU: 
+v2 loader: image mapped (lazy), bytes=106232 pages=26 first=in elap=2ms
+v2 loader: PID=49 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): HEDTEST.BIN
+/HEDTEST.BIN
+  PASS open(missing, 0) -> ENOENT
+/ERRNO9.TXT
+  PASS open(O_CREAT|O_EXCL) creates
+v2 loader: image mapped (lazy), bytes=[FORK TE59768 pages=15 first=in elap=5ST] Pams
+v2 loader: PID=rent tick net_test success!
+50 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): TAILTEST.BIN
+[sys_close Debug] CPU=5, PIDs=[/TAILTEST.BIN1,9
+,11,32], caller_pid=33, fd=0, g_fd=12
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=5, PIDs=[1,9,13[HELLO] entering main
+,32], caller_pid=[HELLO] argc33, fd=3, g_fd=22
+[KERNEL Debug] sys_close: fd=3, ret==[LFN]0
+ PASS 2
+Process heart-beat from CPU: 5
+  PASS: line midpoint
+  PASS: line endpoint
+v2 loader: image mapped (lazy), bytes=  PASS:54920 pages=14 first=in elap=27ms
+v2 loader: image mapped (lazy), bytes=v2 loader: PID=48 entry=0x0000001000000000 sp=0x0000001800000000 resident=159784 pages=15 first=in elap=5ms
+v2 loader: PID=51 entry=0x0000001000000000 sp=0x0000001800000000 [sys_close Debug] CPU=5, PIDs=[1, tables=9,15,32], caller_pid=36, fd=2, g_fd=21
+[KERNEL Debug] sys_close: fd=2, ret=0
+ resident=1 tables=4
+Loading program for scheduler (v2 AS): PROCTEST.BIN
+/CAT.BIN
+[sys_close Debug] CPU=2, PIDs=[1,9,15,32], caller_pid=15, fd=2, g_fd=11
+[KERNEL Debug] sys_close: fd=2, ret=0
+/CAT.BIN
+[sys_close Debug] CPU=2, PIDs=[1,9,15,32], caller_pid=15, fd=2, g_fd=11
+[KERNEL Debug] sys_close: fd=2, ret=0
+[HEDTEST] starting
+/HEDTEST.TXT
+[sys_close Debug] CPU=6, PIDs=[1,9,15,32], caller_pid=50, fd=0, g_fd=11
+[KERNEL Debug] sys_close: fd=0, ret=0
+/HEDTEST2.TXT
+[sys_close Debug] CPU=6, PIDs=[1,9,15,32], caller_pid=50, fd=0, g_fd=11
+[KERNEL Debug] sys_close: fd=0, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now 35
+/PROCTEST.BIN
+v2 loader: image mapped (lazy), bytes=75800 pages=19 first=in elap=2ms
+[KERNEL] sys_fork: tf->regs[0] is now 53
+v2 loader: PID=52 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): WCTEST.BIN
+/TEMP.TXT new=/TEMP2.TXT
+[KERNEL] Process 48: /MV.BIN exited unexpectedly or gracefully.
+Process heart-beat from CPU: 5
+[KERNEL] sys_fork: tf->regs[0] is now 54
+/WCTEST.BIN
+[NFS] read_dir / lists longnfs_test startingfilename.txt
+
+[read_until] MATCHED: 'mkdir /SUB1
+mkdir: cannot create directory /SUB1
+user@hobbyos:/$ '
+[LFN] PASS 5
+[sys_close Debug] CPU=4, PIDs=[1,14,28,32]  PASS second O_CREAT|O_E, caller_pid=33, fd=4, g_fd=XCL -> EEXIST23
+
+[KERNEL Debug] sys_close: fd=4, ret=0
+[sys_close Debug] CPU=4, PIDs=[1,14,28,32], caller_pid=33, fd=7, g_fd=26
+[KERNEL Debug] sys_close: fd=7, ret=0
+[sys_close Debug] CPU=4, PIDs=[1,14/ERRNO9.TXT
+,28,32], caller_pid=33, fd=8, g_fd=  PASS 27
+[KERNEL Debug] sys_close: fd=8, ret=0
+re-open [sys_close Debug] CPU=4, PIDs=[1,14,[FOv2 loader: image mapped (lazy), bytes=of createdR59928 pages=15K  first=in elap=528,32], caller_pid=33TE, fd= file works11, g_fd=ST]30
+[KERNEL Debug] sys_close: fd=11/CAT.BIN
+ 0
+, ret=0
+E spawn v2 loader: image mapped (lazy), bytes=0Pms
+v2 loader: PID=55 entry=a0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+55320 Loading program for scheduler (v2 AS): REGTEST.BIN
+ pages=ren/REGTEST.BIN
+t 14 first=in elap=5ms
+/MV.BIN pid=tick 48  code=2 
+fill_circle center
+  PASS: fill_circle east edge
+  PASS: fill_circle north edgePr
+ocess heart-b[sys_close Debug] CPU=2, PIDs=[1,21e,33,32], caller_pid=33, fd=12  PASS: draw_circle rim, g_fd=31
+Process heart-beat from CPat from CPUU:
+[KERNEL Debug] sys_close: fd=12: v2 loader: image mapped (lazy), bytes= 4  PA, ret=0SS: 7draw_circle 
+141000
+hollow[sys_close Debug] CPU=2
+
+, PIDs=[1,21,33,32], caller_pid=33, fd=15, g_fd=34
+[KERNEL Debug] sys_close: fd= pages=35 first=in elap=8ms
+v2 loader: PID=45 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+15, ret=  Loading program for scheduler (v2 AS): SEDTEST.BIN
+  PASS: PA0
+/SEDTEST.BIN
+SS: uptime=10s idle=0s cpus=1
+Test 3: sysinfo(1) uptime...
+  PASS: uptime=12s
+Test 4: CPU usage sanity check...
+  PASS: idle time is sane
+Test 5: Error handling - small buffer...
+  PASS: small buffer rejected
+  PASS: small buffer rejected
+Test 6: Verifying busy time accumulates...
+Process heart-beat from CPU: Loading program for scheduler (v2 AS): HEDGNU.BIN1
+
+v2 loader: image mapped (lazy), bytes=69096read_dir / /HEDGNU.BIN pages=17 first=in elap=3ms
+v2 loader: PID=
+57 entry=lists longfilename2.txt
+0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+[LFN] PASS read_dir /src shows 30+ char name (31-charv2 loader: image mapped (lazy), bytes=109144 pages=Loading program for scheduler (v2 AS): 27 first=in elap=4ms
+Process heart-beat from CPU: 4
+GREPTEST.BIN sysv2 loader: PID=58 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=
+call cap)4
+
+/GREPTEST.BIN
+/lfn_newfile_created.txt
+v2 loader: image mapped (lazy), bytes=69032 pages=17 first=3[NFS] PASS 
+network came up (DHCP)
+in elap=6ms
+v2 loader: PID=59 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=
+4
+[sys_close Debug] CPU=4, PIDs=[1,29Loading program for scheduler (v2 AS): CUTTEST.BIN
+/CUTTEST.BIN
+,39,32], caller_pid=43, fd=0, g_fd=5
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=4, PIDs=[1,29,39,32], caller_pid=43, fd=1, g_fd=39
+[KERNEL Debug] sys_close: fd=1, ret=0
+[STRESS TEST] Parent starting coordination ping-pong loop (120 iterations)...
+[STRESS TEST] Progress: Iteration 1/120
+gradient top
+v2 loader: image mapped (lazy), bytes=61288 pages=15 first=in elap=3ms
+v2 loader: PID=56 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+[ARP] routing off-subnet: target=0x00000000010200C0 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=  PASS: 0x000000000202000A
+Loading program for scheduler (v2 AS): gradient bottomTRTEST.BIN
+
+/TRTEST.BIN
+  PASS: clip blocks outside
+  PASS: clip allows inside
+  PASS: scaled text drew pixels
+1
+[HELLO] argv[0]="HELLO.BIN"
+[HELLO] main returned 0
+[KERNEL] Process 47: HELLO.BIN exited unexpectedly or gracefully.
+/TEST1.TXT
+Loading program for scheduler (v2 AS): /CP.BIN
+/CP.BIN
+[sys_close Debug] CPU=6, PIDs=[1,36,40,32], caller_pid=13, fd=0, g_fd=40
+[KERNEL Debug] sys_close: fd=0, ret=0
+v2 loader: image mapped (lazy), bytes=61512 pages=16 first=in elap=5ms
+v2 loader: PID=60 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): PASTE_T.BIN
+/PASTE_T.BIN
+/lfn_newfile_created.txt
+Process heart-beat from CPU: 5
+v2 loader: image mapped (lazy), bytes=61960 pages=16 first=in[sys_close Debug] CPU=4 elap=3ms
+v2 loader: PID=62 entry=0x0000001000000000 sp=0x0000001800000000 resident=/TEST2.TXT
+1 tables=4/LS.BIN
+
+Loading program for scheduler (v2 AS): FOLDTEST.BIN
+/FOLDTEST.BIN
+, PIDs=[1,38,40,32], caller_pid=50, fd=0, g_fd=11
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=4, PIDs=[1,38,40,32], caller_pid=50, fd=1, g_fd=36
+[KERNEL Debug] sys_close: fd=1, ret=0
+[sys_close Debug] CPU=4, PIDs=[1,38,40,32], caller_pid=50, fd=3, g_fd=38
+[KERNEL Debug] sys_close: fd=3, ret=0
+Process heart-beat from CPU: 5
+v2 loader: image mapped (lazy), bytes=62664 pages=16 first=in elap=3ms
+v2 loader: PID=63 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): NLTEST.BIN
+[PROCTEST] starting
+/NLTEST.BIN
+Process heart-beat from CPU: 5
+/TEST3.TXT
+/home/SHTEST.TXT
+v2 loader: image mapped (lazy), bytes=61864 pages=16 first=in elap=2ms
+v2 loader: PID=6 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): COMMTEST.BIN
+/COMMTEST.BIN
+Process heart-beat from CPU: 6
+[sys_close Debug] CPU=1, PIDs=[1,41,40,32], caller_pid=41, fd=9, g_fd=36
+v2 loader: image mapped (lazy), bytes=61464 pages=16 first=in elap=2ms
+[sys_close Debug] CPU=5, PIDs=[1,41,40[KERNEL Debug] sys_close: fd=v2 loader: PID=7 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4,9
+32], ret=0
+Loading program for scheduler (v2 AS): TSORT_T.BIN
+, caller_pid=36, fd=1, g_fd=5
+/TSORT_T.BIN
+[KERNEL Debug] sys_close: fd=1, ret=0
+/TEST1.TXT
+v2 loader: image mapped (lazy), bytes=127912 pages=32 first=[sys_close Debug] CPU=5, PIDs=[1,42,40,in elap=2ms
+v2 loader: PID=328 entry=/TEST4.TXT
+0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4], caller_pid=36, fd=1, g_fd=5
+
+Loading program for scheduler (v2 AS): EXPAND_T.BIN
+[KERNEL Debug] sys_close: fd=1, ret=0
+/EXPAND_T.BIN
+v2 loader: image mapped (lazy), bytes=61128 pages=15 first=in elap=5ms
+[sys_close Debug] CPU=5, PIDs=[1,43,40,32], caller_pid=38, fd=5, g_fd=41
+v2 loader: PID=[sys_close Debug] CPU=[KERNEL Debug] sys_close: fd=5, ret=0
+1, PIDs=[1,43,40,32], caller_pid=4316 entry=, fd=0x0000001000000000 sp=0x0000001800000000-1, g_fd=-1
+ resident=1 tables=4
+/TEST2.TXT
+[KERNEL Debug] sys_close: fd=Loading program for scheduler (v2 AS): UNEXPAND_T.BIN
+-1, ret=-1
+/UNEXPAND_T.BIN
+[sys_close Debug] CPU=5, PIDs=[1,45,40,32], caller_pid=38, fd=5, g_fd=5
+[KERNEL Debug] sys_close: fd=5, ret=0
+v2 loader: image mapped (lazy), bytes=61160 pages=15 first=in elap=4ms
+v2 loader: PID=19 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): PrCKSUM_T.BIN
+/CKSUM_T.BIN
+ocess heart-beat from CPU: /TEST3.TXT
+v2 loader: image mapped (lazy), bytes=62216 pages=16 first=in elap=1ms
+v2 loader: PID=20 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+[sys_close Debug] CPU=5, PIDs=[1,46,40,32], caller_pid=41, fd=9, g_fd=5
+Loading program for scheduler (v2 AS): MD5SUM_T.BIN
+/MD5SUM_T.BIN
+[KERNEL Debug] sys_close: fd=9, ret=0
+[sys_close Debug] CPU=5, PIDs=[1,46,40,32], caller_pid=42, fd=13, g_fd=36
+v2 loader: image mapped (lazy), bytes=61352 pages=15 first=in elap=2ms
+v2 loader: PID=47 entry=0x0000001000000000 sp=0x0000001800000000 resident=[KERNEL Debug] sys_close: fd=13, ret=0
+P1 tables=4
+rocess heart-beat from CPU: Loading program for scheduler (v2 AS): TACTEST.BIN
+1
+[KERNEL] process_create: no free process slots! zombies=4 exited=/TEST4.TXT
+4
+  PASS close(-1) -> EBADF
+  PASS read(-1) -> EBADF
+  PASS write(-1) -> EBADF
+[sys_close Debug] CPU=5, PIDs=[1,47,40,32], caller_pid=43, fd=31, g_fd=-1
+[KERNEL Debug] sys_close: fd=31, ret=-1
+  PASS close(31) [never opened] -> EBADF
+  PASS kill(999999,0) -> ESRCH
+  PASS: busy time did not decrease
+
+========================================
+ALL MONITOR TESTS PASSED SUCCESSFULLY!
+========================================
+[KERNEL] Process 37: MONITORT.BIN exited unexpectedly or gracefully.
+5v2 loader: image mapped (lazy), bytes=55144 pages=14 first=in elap=97ms
+[sys_close Debug] CPU=v2 loader: PID=61 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+6, PIDs=[1,2,40,32], caller_pid=42, fd=13, g_fd=5
+E spawn 1 /CP.BIN pid=61 [KERNEL Debug] sys_close: fd=13, ret=0
+  PASS mkdir(ERRTEST) succeeds
+/TACTEST.BIN
+[LKSTEST] starting
+v2 loader: image mapped (lazy), bytes=289128 pages=71 first=in elap=3ms
+v2 loader: PID=48 entry=0x0000001000000000/TEMP2.TXT
+ sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): CMPTEST.BIN
+/CMPTEST.BIN
+[REGTEST] sysroot GNU regex acceptance test
+v2 loader: image mapped (lazy), bytes=106136 pages=26 first=in elap=4ms
+v2 loader: PID=37 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=  BLKTEST P1 write 512 KiB: PASS
+4
+Loading program for scheduler (v2 AS): POLLTST.BIN
+[KERNEL] process_create: no free process slots! zombies=4 exited=4
+[sys_close Debug] CPU=1, PIDs=[1,9,40,32], caller_pid=9, fd=0, g_fd=20
+[KERNEL Debug] sys_close: fd=0, ret=0
+[MD5TEST] starting
+[PROCTEST] pid=52 ppid=-1
+[PROCTEST] PASS getpid != 0
+[KERNEL] process_create: no free process slots! zombies=/MD5EMPTY.TXT
+4 exited=4
+[KERNEL] sys_fork: tf->regs[0] is now -11
+
+[sys_close Debug] CPU=1, PIDs=[1,13,40,[sys_close Debug] CPU=5, PIDs=[1,13,40,32], caller_pid=53, fd=2, g_fd=42
+[KERNEL Debug] sys_close: fd=2, ret=0
+32[KERNEL] Process 53: cat exited unexpectedly or gracefully.
+], caller_pid=13, fd=0, g_fd=39
+[KERNEL Debug] sys_close: fd=0, ret=0
+[LFN] PASS create+reopen long-name file in-OS
+  PASS mkdir(ERRTEST) again -> EEXIST
+[WCTEST] starting
+/WCTEST.TXT
+[FORK TEST] Parent tick 4
+/LKSTEST.TXT
+/POLLTST.BIN
+[sys_close Debug] CPU=1, PIDs=[1,17,40,32], caller_pid=17, fd=2, g_fd=40
+[KERNEL Debug] sys_close: fd=2, ret=0
+/LS.BIN
+v2 loader: image mapped (lazy), bytes=61000 pages=15 first=in elap=2ms
+v2 loader: PID=53 entry=0x0000001000000000 sp=0x0000001800000000/BLKT1.TXT
+ resident=[sys_close Debug] CPU=1, PIDs=[1,17,2 tables=6
+40,Loading program for scheduler (v2 AS): RANDTST.BIN
+32], caller_pid=17, fd=2, g_fd=40
+[KERNEL Debug] sys_close: fd=2, ret=0
+[sys_close Debug] CPU=6, PIDs=[1,20,40,32], caller_pid=55, fd=0, g_fd=39
+[sys_close Debug] CPU=7, PIDs=[1,20,40,32], caller_pid=47, fd=0, g_fd=20
+[KERNEL Debug] sys_close: fd=0, ret=0
+[KERNEL Debug] sys_close: fd=0, ret=0
+Graphics Validation: S/WCTEST2.TXT
+UCCESS (Pixel matches expected color)
+GRAPHICS ALL TE[CUTTEST] starting
+STS PASSED
+[KERNEL] Process 21: GRAPHICS.BIN exited unexpectedly or gracefully.
+/MD5ABC.TXT
+/CUTTEST.TXT
+[FORK TEST] Parent exiting.
+/RANDTST.BIN
+[SEDTEST] starting: 59 golden cases from GNU sed 4.8
+/TEMP3.TXT
+[KERNEL] sys_fork: tf->regs[0] is now -11
+sh: fork failed
+[LKSTEST] PASS Process hopen fixtureeart-beat from CPU: 1
+
+[GREPTEST] starting: 65 golden cases from GNU grep 2.5.4
+[TAILTEST] starting
+[TRTEST] starting
+v2 loader: image mapped (lazy), bytes=66216 pages=17 first=in elap=4ms
+v2 loader: PID=21 entry=0x0000001000000000 sp=0x0000001800000000 resident=2 tables=6
+Process hearLoading program for scheduler (v2 AS): t-beat from CPU: SOCK2TST.BIN
+1
+[NLTEST] starting
+/TLTEST1.TXT
+[KERNEL] sys_fork: tf->regs[0] is now -11
+POLLTST: F1.2 select() readiness/timeout/blocking checks
+/NLTEST.TXT
+[KERNEL] Process 23: SMPTEST.BIN exited unexpectedly or gracefully.
+[COMMTEST] starting
+[FOLDTEST] starting
+Process heart-beat from CPU: 7
+/COML.TXT
+  PASS chdir(missing) - > E WSRF_T NOENT
+set-  PASS getcwd(tiny) -> ERANGErect-c
+lamp-screenUnknown System Call Invoked!
+  PASS raw syscall 999 -> -: PASS
+  WSRF_T set-rect-unchanged-retuENOSYSrns
+-0: PASS[ERRNO] ALL TESTS
+  PASSE WSRF_T set-recD
+t-chang[KERNEL] Process 43: ERRTEST.BIN exited unexpectedly or gracefully.
+e-returns-1/FOLDTEST.TXT:
+ PASS
+[sys_close Debug] CPU=7, PIDs=[1,45  WSRF_T s,40,32], caller_pid=et-rect-neg55ative-, fd=size-0, g_fd=39
+empty[KERNEL Debug] sys_close: fd=0, ret=0
+[TEST] 'cat' file output validated successfully.
+[TEST] Sending piped 'cat SHTEST.TXT | grep line' command...
+Process heart-beat from CPU: [read_until] MATCHED: 'ls -l /
+user@hobbyos:/$ '
+/TEST1.TXT
+/SOCK2TST.BIN
+[sys_close Debug] CPU=6, PIDs=[1,48,40,32], caller_pid=7, fd=0, g_fd=45
+[KERNEL Debug] sys_close: fd=0, ret=0
+[TSORTTEST] starting
+v2 loader: image mapped (lazy), bytes=62440 pages=16[KERNEL] Process 14: FORKTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now -11
+ first=/TRTEST.TXT
+in elap=16ms
+v2 loader: PID=43 entry=0x0000001000000000 sp=0x0000001800000000 resident=[EXPANDTEST] starting
+/TEST2.TXT
+1 tables=4
+Loading program for scheduler (v2 AS): FPU_T.BIN
+/FPU_T.BIN
+[sys_close Debug] CPU=7, PIDs=[1,54,40,32], caller_pid=61, fd=0, g_fd=5
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=7, PIDs=[/EXPTAB.TXT
+1,55,40,[sys_close Debug] CPU=32], caller_pid=1, PIDs=[1,6156,40,32], caller_pid=56, fd=0, g_fd=, fd=1, g_fd=4240
+
+v2 loader: image mapped (lazy), bytes=58248 pages=15 first=in elap=[KERNEL Debug] sys_close: fd=1, ret=0
+[KERNEL Debug] sys_close: fd=3ms
+v2 loader: PID=25 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=[UNEXPTEST] s[PASTETEST] start0, ret=0
+4
+tarting
+[LFN]Loading program for scheduler (v2 AS): /CUTTAB.TXT
+ PAing
+SS GFXBENCH.BIN
+/TEST3.TXT
+Loading program for scheduler (v2 AS): WC.BIN
+[CKSUMTEST] starting
+[KERNEL] sys_fork: tf->regs[0] is now -11
+/CKSEMPTY.TXT
+[KERNEL] sys_fork: tf->regs[0] is now -11
+/TEST4.TXT
+[sys_close Debug] CPU=6, PIDs=[1,58,40,32], caller_pid=15, fd=2, g_fd=53
+[KERNEL Debug] sys_close: fd=2, ret=0
+[sys_close Debug] CPU=6, PIDs=[1,58,40,32], caller_pid=15, fd=3, g_fd=54
+[KERNEL Debug] sys_close: fd=3, ret=0
+[sys_close Debug] CPU=7, PIDs=[1,58,40,32], caller_pid=6, fd=0, g_fd=44
+RANDTST: F1.4 SYS_GETRANDOM entropy checks
+[KERNEL Debug] sys_close: fd=0, ret=0
+  RANDTST 16 consecutive 8-byte draws all differ: PASS
+/COMR.TXT
+  RANDTST first draw: 0x1BE65F9C3766F8F5
+SOCK2TST: F1 socket/select acceptance (browser.md F1.1-F1.3)
+/UNEXPD.TXT
+[KERNEL] Process 44: ps exited unexpectedly or gracefully.
+1
+/GFXBENCH.BIN
+[KERNEL] Process 61: /CP.BIN exited unexpectedly or gracefully.
+[sys_close Debug] CPU=6, PIDs=[1,62,40,32], caller_pid=20, fd=0, g_fd=52
+[KERNEL Debug] sys_close: fd=0, ret=0
+[FPU_T] floating-point bring-up test
+  FPU_T float-mul-add: PASS
+  FPU_T float-neg-mul: PASS
+  FPU_T float-loop: PASS
+/CKSA.TXT
+  FPU_T double-consistent: PASS
+  FPU_T double-eighth: PASS
+  FPU_T double-precision-1: PASS
+  FPU_T double-precision-2: PASS
+[sys_close Debug] CPU=4, PIDs=[1,62,40,v2 loader: image mapped (lazy), bytes=60232 pages=15 first=in elap=8ms
+v2 loader: PID=44 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+/PSTA.TXT
+  RANDTST getranLoading program for scheduler (v2 AS): MATH_T.BIN
+32], caller_pid=47, fd=/MATH_T.BIN
+dom(40960, g_fd=20
+) returns 4096: PASS
+  RANDTST 4KiB page is not all zero: PASS
+  RANDTST no all-zero 8-byte window in the page: PASS
+  RANDTST byte values are diverse (>= 100 d: PASS
+istinct)  WSRF_T set-rect-offscreen-empty: PASS
+[KERNEL Debug] sys_close: fd=0, ret=0
+  WSRF_T fill-inbounds-corners: PASS
+  WSRF_T fill-maps-to-screen: PASS
+  WSRF_T fill-left-canary: PASS
+  WSRF_T fill-right-canary: PASS
+  WSRF_T fill-top-canary: PASS
+created long-name file listed with long   WSRF_nameT 
+fill-bottom-canary: /TACA.TXT
+PASS
+  WSRF_T fill-fully-outside-noop: PASS
+  WSRF_T Process heart-beat from CPU: 5
+v2 loader: image mapped (lazy), bytes=71224 pages=18 first=in elap=6ms
+v2 loader: PID=61 entry=0x0000001000000000 sp=0x0000001800000000 code=2 
+ resident=1 tables=4
+Loading program for scheduler (v2 AS): CXXSMOKE.BIN
+/LFN_NEWF.TXT
+[LKSTEST] PASS fstat okfill-nonpositive-noop: PASS
+  WSRF_T put-roundtrip: PASS
+[sys_close Debug] CPU=4, PIDs=[1,2,40,32], caller_pid=51, fd=0, g_fd=  WSRF_T 43
+put-outside-noop[KERNEL Debug] sys_close: fd=: PA0, ret=0
+SS
+  WSRF_T get-outside-zero: PASS
+  WSRF_T get-untouched-canary/TLTEST2.TXT
+: PASS
+  WSRF_T frame-edges: PASS
+  WSRF_T frame-interior-clear: PASS
+  WSRF_T frame-outside-canary: PASS
+  WSRF_T frame-partial-confined: PASS
+[sys_close Debug] CPU=4, PIDs=[1,2,40,32], caller_pid=51, fd=0, g_fd=43
+[KERNEL Debug] sys_close: fd=0, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[ARP] routing off-subnet: target=0x00000000010200C0 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=0x000000000202000A
+Process heart-beat from CPU: 6
+/CAPA.TXT
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=19, fd=0, g_fd=44
+[sys_close Debug] CPU=6, PIDs=[1,2,40,32], caller_pid=36, fd=1, g_fd=39
+[KERNEL Debug] sys_close: fd=1, ret=0
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=20, fd=0, g_fd=52
+[sys_close Debug] CPU=4, PIDs=[1,2,40,32], caller_pid=56, fd=0, g_fd=40
+[KERNEL Debug] sys_close: fd=0, ret=0
+[KERNEL Debug] sys_close: fd=0, ret=0
+: PASS
+Process heart-beat from CPU: 5
+  RANDTST consecutive 4KiB pages differ/TEST1.TXT
+: PASS
+/SEDT.IN
+[sys_close Debug] CPU=6, PIDs=[1,2,40,32], caller_pid=[sys_close Debug] CPU=5, PIDs=[1,2,4038, fd=5, g_fd=45
+,32], caller_pid=41, fd=9, g_fd=42
+[KERNEL Debug] sys_close: fd=5, ret=0
+[KERNEL Debug] sys_close: fd=Process heart-beat from CPU: /HEDTEST.TXT7
+9, ret=0
+
+[sys_close Debug] CPU=5, PIDs=[1,2,40,32], caller_pid=42, fd=13, g_fd=55
+[KERNEL Debug] sys_close: fd=13, ret=0
+/TEST4.TXT
+[sys_close Debug] CPU=4, PIDs=[1,2,40,32], caller_pid=58, fd=2, g_fd=44
+[sys_close Debug] CPU=5[KERNEL Debug] sys_close: fd=, PIDs=[1,2,40,32], caller_pid=42, fd=13, g_fd=42
+[KERNEL Debug] sys_close: fd=13, ret=0
+2, ret=0
+[KERNEL] Process 58: HEDGNU.BIN exited unexpectedly or gracefully.
+/GRT.IN
+  SOCK2TST socket(AF_UNIX, SOCK_STREAM, 0) >= 0: PASS
+[sys_close Debug] CPU=5, PIDs=[1,2,40,32], caller_pid=43, fd=0, g_fd=38
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=4, PIDs=[1,2,40,32], caller_pid=60, fd=0, g_fd=47
+/TEST3.TXT
+  WSRF_T blit-[KERNEL Debug] sys_close: fd=0, ret=0
+copy: PASS
+  WSRF_T blit-confined: PASS
+  WSRF_T blit-negative-origin-aligned/TRDIG.TXT[sys_close Debug] CPU=6, PIDs=[
+1,2,40,32], caller_pid=41, fd=9, g_fd=38
+[KERNEL Debug] sys_close: fd=9, ret=0: PA
+SS
+  SOCK2TST socket(AF_UNIX, SOCK_RAW, 0) -> -1/EPROTONOSUPPORT: PASS
+  SOCK2TST socket(STREAM,UDP) -> -1/EPROTONOSUPPORT: PASS
+  SOCK2TST socket(AF_INET,SOCK_STREAM,TCP) >= 0: PASS
+[sys_close Debug] CPU=4, PIDs=[1,2,40,32], caller_pid=62, fd=0, g_fd=54
+[KERNEL Debug] sys_close: fd=0, ret=0
+/PSTB.TXT
+[sys_close Debug] CPU=7, PIDs=[1,[sys_close Debug] CPU=4, PIDs=[1,2,/MD5MSG.TXT
+2,40,32], caller_pid=36, fd=1, g_fd=40,32], caller_pid=63, fd=0, g_fd=46
+39
+[KERNEL Debug] sys_close: fd=1, ret=0
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=5, PIDs=[1,2,40,32], caller_pid=48, fd=0, g_fd=20
+/TEST2.TXT
+[KERNEL Debug] sys_close: fd=0, ret=0
+/TACB.TXT
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=38, fd=5, g_fd=39
+[KERNEL Debug] sys_close: fd=5, ret=0
+
+[LKSTEST] PASS fstat size
+/NLALL.TXT
+[LKSTEST] PASS fstat S_ISREG
+[LKSTEST] PASS fstat mode perms
+[LKSTEST] PASS fstat blocks rounding
+[LKSTEST] PASS fstat nlink
+[LKSTEST] PASS fstat blksize
+  SOCK2TST getsockopt(SO_TYPE) == SOCK_STREAM after socket(): PASS
+  SOCK2TST getsockopt(SO_ERROR) == 0 on a fresh socket: PASS
+  SOCK2TST getsockopt(unknown option) -> -1/ENOPROTOOPT: PASS
+  SOCK2TST getsockopt(bad level) -> -1/ENOPROTOOPT: PASS
+  SOCK2TST setsockopt(SO_REUSEADDR) accepted as a no-op: PASS
+[sys_close Debug] CPU=4, PIDs=[1,2,40,32], caller_pid=7, fd=0, g_fd=53
+  SOCK2TST fcntl(F_GETFL) == 0 on a f[KERNEL Debug] sys_close: fd=0, ret=0
+resh socket: PASS
+[sys_close Debug] CPU=5, PIDs=[1  ,2,40SOCK2TST,32] , caller_pid=/COMLD.TXT
+50, fd=2, g_fd=37
+[KERNEL Debug] sys_close: fd=2, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now -11
+  POLLTST select(nfds > FD_SETSIZE) -> -1/EINVAL: PASS
+  POLLTST select(unopened fd) -> -1/EBADF: PASS
+/TSTCH.TXT
+/CUTCOL.TXT
+Process heart-beat from CPU: 7
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=47[sys_close Debug] CPU=5, PIDs=[1,2,40,32], caller_pid=57, fd=0, g_fd=40
+, fd=0, g_fd=45
+[KERNEL Debug] sys_close: fd=0, ret=0
+[KERNEL Debug] sys_close: fd=0, ret=0
+/MD5OK.CHK
+[sys_close Debug] CPU=4, PIDs=[1,2,40,32], caller_pid=13, fd=0, g_fd=56
+[KERNEL Debug] sys_close: fd=0, ret=0
+[LFN] PASS 8.3 alias of in-OS long name resolves
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=48, fd=0, g_fd=20
+[KERNEL Debug] sys_close: fd=0, ret=0/LFN_NEWFILE_CREATED.TXT
+
+[sys_close Debug] CPU=4/TACC.TXT
+, PIDs=[1,2,40,32], caller_pid=13, fd=0, g_fd=55
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=7[LFN], PIDs=[1, PASS2,40,32], caller_pid=48, fd=0, g_fd=20
+[KERNEL Debug] sys_close: fd=0, ret=0
+ [LKSTEST] PASS stat ok
+[LKSTEST] PASS stat size
+[LKSTEST] PASS stat S_ISREG
+[LKSTEST] PASS st_ino nonzero
+[LKSTEST] PASS fstat identity ok
+[LKSTEST] PASS fstat st_ino == stat st_ino
+[LKSTEST] PASS stat repeat ok
+[LKSTEST] PASS st_ino stable across stats
+/LKSTEST2.TXT
+[LKSTEST] PASS open second fixture[REGTEST] PASS row 
+0 ()
+[sys_close Debug] CPU=4, PIDs=[1,2,40,32], caller_pid=16, fd=0, g_fd=48
+[KERNEL Debug] sys_close: fd=0, ret=0
+[HEDTEST] PASS -n 3/EXPLIST.TXT
+
+[KERNEL] sys_fork: tf->regs[0] is now -11
+  POLLTST select(0, NULL x3, 5ms) == 0: PASS
+Process heart-beat from CPU: 7
+[sys_close Debug] CPU=6, PIDs=[1,2,40,32], caller_pid=47, fd=0, g_fd=45
+/UNEXP7.TXT
+[KERNEL Debug] sys_close: fd=0, ret=0
+/MD5BAD.CHK
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=56, fd=0, g_fd=47
+[KERNEL Debug] sys_close: fd=0, ret=0
+/CUTCOL2.TXT
+/TACD.TXT
+/CKSAN.TXT
+Loading program for scheduler (v2 AS): TAILGN.BIN
+[LKSTEST] PASS fstat second file
+[LKSTEST] PASS distinct files -> distinct st_ino
+[sys_close Debug] CPU=6, PIDs=[1,2,40,32], caller_pid=  RANDTST 49, fd=1, g_fd=20
+getrandom(flags != 0) -> -1/EINVAL: PASS
+[KERNEL Debug] sys_close: fd=1, ret=0
+  RANDTST getrandom(len 0) -> 0: PASS
+  RANDTST getrandom(3 byte[LKSTEST] PASS stat missins)g -> ret EurNOnsENT
+ 3 and touc[LKShes tTESThe]  bPASS lseek SEEK_SET 6
+uffer[LKSTEST] : PAPASS lseek SEEK_CUSS
+R +5
+  RANDTST two back-to-back draws [LKSTEST] PASS dread 5 @11if
+fer: PASS
+[LKSTEST] PASS read-back 'gamma'
+ALL [LKSTEST] PATESTS PASSED SUCCESSFULLY!
+SS lseek SE[KERNEL] Process 21: RANDTST.BIN exited unexpectedly or gracefully.
+EK_END 0
+[LKSTEST] PASS lseek SEEK_END -4[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=59, fd=  POLLTST0, g_fd=11
+ empty pipe: selec[KERNEL Debug] sys_close: fd=0, ret=0
+t(read, 0) == 0 and mask cleared: PASS
+  POLLTST pipe with 1 byte queued: select(read, 0) == 1 and FD_ISSET: PASS
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=60, fd=0, g_fd=42
+  POLLTST [KERNEL Debug] sys_close: fd=0, ret=0the queued byte re
+ads back: PASS
+  POLLTST pipe write end with /TRTAB.TXT
+space: select(write, 0) == 1: PASS
+  POLLTST filled the pipe exactly (PIPE_SIZE 512): PASS
+  POLLTST pipe with no space: select(write, 0) == 0 and mask cleared: PASS
+  POLLTST drained pipe: not readable again: PASS
+[sys_close Debug] CPU=6, PIDs=[1,2,40,32], caller_pid=53, fd=0, g_fd=59
+[KERNEL Debug] sys_close: fd=  0, ret=0
+WSRF_T blit-larger-source: PASS
+  WSRF_T blit-edge-noop: PASS
+  WSRF_T scale-2x2-to-4x4: PASS
+  WSRF_T scale-1:1-identity: PASS
+  WSRF_T scale-noninteger-ratio: PASS
+  WSRF_T scale-negative-origin: PASS
+  WSRF_T scale-edge-noop: PASS
+MATH_T.BIN: P3.2 transcendenta  WSl acceptance (EL0, libc.a)
+RF_T text-pen-advance: PASS
+  WSRF_T text-fg-bg-pixels: PASS
+  WSRF_T text-max-x-stops: PASS
+  WSRF_T text-newline: PASS
+  WSRF_T text-empty: PASS
+  WSRF_T text-nullProcess heart-beat from CPU: 4
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=62, fd=0, g_fd=44
+[sys_close Debug] CPU=6, PIDs=[1,2,40[KERNEL Debug] sys_close: fd=0, ret=0
+,32], caller_pid=56, fd=0, g_fd=62
+[KERNEL Debug] sys_close: fd=0, ret=0
+/PSTC.TXT
+/FOLDSP.TXT
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=63, fd=0, g_fd=70
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=4, PIDs=[1,2,40,32], caller_pid=37, fd=0, g_fd=43
+[KERNEL Debug] sys_close: fd=0, ret=0
+/CAPB.TXT
+[TEST2] 'ps' validated successfully.
+[TEST2] Testing 'free'...
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=6, fd=0, g_fd=39
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=4, PIDs=[1,2,40,32], caller_pid=37, fd=0, g_fd=43
+/NLBLANK.TXT
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=7, fd=0, g_fd=46
+[KERNEL] Process 39: SMPTEST.BIN exited unexpectedly or gracefully.
+[KERNEL Debug] sys_close: fd=0, ret=fcntl(F_SETFL, O_NONBLOCK) == 00: PASS
+
+  SOCK2TST fcntl(F_GETFL) == O_NONBLOCK after the set: PASS
+  SOCK2/COMRD.TXT
+TST fcntl(F_SETFL, 0) clears O_NONBLOCK[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=8, fd=0, g_fd=37
+[KERNEL Debug] sys_close: fd=0, ret=0
+/TSTDM.TXT
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=8, fd=0, g_fd=37
+[KERNEL Debug] sys_close: fd=0, ret=0
+mixed-case reopen of created long name
+/lfn_rename_src.txt
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=13, fd=0, g_fd=37
+[KERNEL Debug] sys_close: fd=0, ret=0
+/lfn_rename_src.txt new=/lfn_rename_dst.txt
+[LFN] PASS rename long name to long name rc
+/lfn_rename_dst.txt
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=16, fd=0, g_fd=48
+[KERNEL Debug] sys_close: fd=0, ret=0
+/EXPMIX.TXT
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=16, fd=0, g_fd=46
+[KERNEL Debug] sys_close: fd=0, ret=0
+/EXPBLNK.TXT
+/FREE.BIN
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=18, fd=2, g_fd=48
+[KERNEL Debug] sys_close: fd=2, ret=0
+/FREE.BIN
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=18, fd=2, g_fd=48
+[KERNEL Debug] sys_close: fd=2, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now -11
+sh: fork failed
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=19, fd=0, g_fd=61
+[KERNEL Debug] sys_close: fd=0, ret=0
+/UNEXP9.TXT
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=20, fd=0, g_fd=47
+[KERNEL Debug] sys_close: fd=0, ret=0
+/CKSABC.TXT
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=20, fd=0, g_fd=47
+[KERNEL Debug] sys_close: fd=0, ret=0
+Loading program for scheduler (v2 AS): GREP.BIN
+[REGTEST] PASS row 1 (a)
+[REGTEST] PASS row 2 (a*)
+[REGTEST] PASS row 3 (a\+)
+[REGTEST] PASS row 4 (a\+)
+[REGTEST] PASS row 5 (a*$)
+[REGTEST] PASS row 6 (^$)
+[REGTEST] PASS row 7 (^$)
+[REGTEST] PASS row 8 (a.c)
+[REGTEST] PASS row 9 ([[:digit:]]\+)
+[KERNEL] Process 28: SMPTEST.BIN exited unexpectedly or gracefully.
+[sys_close Debug] CPU=4, PIDs=[1,2,40,32], caller_pid=47, fd=0, g_fd=45
+[KERNEL Debug] sys_close: fd=0, ret=0
+Process heart-beat from CPU: 7
+/CAPC.TXT
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=37, fd=0, g_fd=71
+[KERNEL Debug] sys_close: fd=0, ret=0
+/CAPE.TXT
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=37, fd=0, g_fd=71
+[KERNEL Debug] sys_close: fd=0, ret=0
+/CAPN.TXT
+: PASS
+  SOCK2TST fcntl(unknown cmd) -> -1/EINVAL: PASS
+  SOCK2TST connect_fd(bad fd) -> -1/EBADF: PASS
+  SOCK2TST fcntl(bad fd) -> -1/EBADF: PASS
+  SOCK2TST getsockopt(bad fd) -> -1/EBADF: PASS
+  SOCK2TST connect_fd(non-socket) -> -1/ENOTSOCK: PASS
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=43, fd=1, g_fd=72
+[KERNEL Debug] sys_close: fd=1, ret=0
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=43, fd=2, g_fd=73
+[KERNEL Debug] sys_close: fd=2, ret=0
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=43, fd=0, g_fd=38
+[KERNEL Debug] sys_close: fd=0, ret=0
+[ARP] routing off-subnet: target=0x00000000010200C0 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=0x000000000202000A
+[REGTEST] PASS row 10 (^a.*b$)
+[REGTEST] PASS row 11 (\w\+)
+[REGTEST] PASS row 12 (\s\+)
+[REGTEST] PASS row 13 (\<cat\>)
+[REGTEST] PASS row 14 (abc)
+Process heart-beat from CPU: 7
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=48, fd=0, g_fd=63
+[KERNEL Debug] sys_close: fd=0, ret=0
+/TACF.TXT
+
+[LKSTEST] PASS read 4 @27
+[LKSTEST] PASS read-back 'lon\n'
+[LKSTEST] PASS lseek beyond EOF
+[LKSTEST] PASS read past EOF -> 0
+[LKSTEST] PASS lseek bad fd -> EBADF
+[LKSTEST] PASS lseek bad whence -> EINVAL
+[sys_close Debug] CPU=7, PIDs=[1,2,40,32], caller_pid=49, fd=0, g_fd=36
+[KERNEL Debug] sys_close: fd=0, ret=0
+/LKSTEST.TXT
+[LKSTEST] PASS fopen
+[LKSTEST] PASS ftell init 0
+[LKSTEST] PASS fseek END 0
+[LKSTEST] PASS ftell at END
+[LKSTEST] PASS [sys_close Debug] CPU=1, PIDs=[1,7,40,32], caller_pid=7, fd=0, g_fd=43
+[KERNEL Debug] sys_close: fd=0, ret=0
+/COMN1.TXT
+/TSTCY.TXT
+[sys_close Debug] CPU=1, PIDs=[1,8,40,32], caller_pid=8, fd=0, g_fd=75
+[KERNEL Debug] sys_close: fd=0, ret=0
+/TSTOD.TXT
+[NFS] rpc: no reply from server
+[NFS] mount: no mountd via portmap
+[NFS] PASS tier1: unreachable [sys_close Debug] CPU=1, PIDs=[1,13,40,32], caller_pid=ser13, fd=0, g_fd=37
+ver fails t[KERNEL Debug] sys_close: fd=0, ret=0
+he mount
+[LFN] PASS [renaNFS] PASS me: new long name resolves with contenttier1: no mounts after failure
+
+[NFS] mount: bad source (want A.B.C.D:/export)
+[NFS] PASS tier1: bad source refused
+[NFS] mount: bad source (want A.B.C.D:/export)
+[NFS] PASS tier1: out-of-range IP refused
+[NFS] PASS tier1: mounting over / refused
+[NFS] PASS tier1: umount with no mount refused
+[NFS] PASS tier1: umount of unknown path refused
+[NFS] PASS tier1: /nfs is an empty FAT dir before mounting
+  SOCK2TST FD_SET/FD_ISSET round-trip (3 and 255): PASS
+  SOCK2TST unset bits stay clear (4, 200): PASS
+  SOCK2TST FD_CLR clears only its bit: PASS
+  SOCK2TST fd_set is FD_SETSIZE/32 32-bit words: PASS
+  SOCK2TST select(nfds > FD_SETSIZE) -> -1/EINVAL: PASS
+  SOCK2TST select(unopened fd in the mask) -> -1/EBADF: PASS
+  SOCK2TST select(0, NULL, NULL, NULL, 0) == 0: PASS
+  SOCK2TST sysinfo(4) with the pre-dns buffer size still succeeds: PASS
+  SOCK2TST sysinfo(4) extended: ip/mask match the old-size call: PASS
+  SOCK2TST iface ip=0x0x000000000F02000A dns=0x0x000000000302000A (DHCP option 6 stored)
+[ARP] routing off-subnet: target=0x0000000001010101 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=0x000000000202000A
+  SOCK2TST connect_fd() -> -1/EINPROGRESS (handshake started): PASS
+[sys_close Debug] CPU=1, PIDs=[1,16,45,32], caller_pid=16, fd=0, g_fd=46
+[KERNEL Debug] sys_close: fd=0, ret=0
+[REGTEST] PASS row 15 (\(ab\)\1)
+[REGTEST] PASS row 16 (\(a\|b\)c)
+[REGTEST] PASS row 17 (\(a\)\(b\))
+[REGTEST] PASS row 18 (x)
+[REGTEST] PASS row 19 ([[:upper:]]\+)
+[REGTEST] PASS row 20 (b$)
+[REGTEST] PASS row 21 (^cd)
+[REGTEST] PASS row 22 (a.b)
+[REGTEST] PASS row 23 (a.b)
+[REGTEST] PASS row 24 (xyz)
+[REGTEST] PASS row 25 (a|b)
+[REGTEST] PASS row 26 ((a|b)+c)
+[REGTEST] PASS row 27 (a{2,3})
+[REGTEST] PASS row 28 (^([0-9]+)-(\w+)$)
+[REGTEST] PASS row 29[sys_close Debug] CPU=2, PIDs=[1,16,48,32], caller_pid=48, fd=0, g_fd=38
+[KERNEL Debug] sys_close: fd=0, ret=0
+/TACG.TXT
+[sys_close Debug] CPU=2, PIDs=[1,16,48,32], caller_pid=48, fd=0, g_fd=38
+[KERNEL Debug] sys_close: fd=0, ret=0
+rewind
+[LKSTEST] PASS fgets line 1
+[LKSTEST] PASS line 1 content
+[LKSTEST] PASS ftell after line 1
+[LKSTEST] PASS fseek SEEK_CUR +5
+[LKSTEST] PASS ftell after +5
+[LKSTEST] PASS fseek SEEK_SET 23
+[LKSTEST] PASS fread 7 @23
+[LKSTEST] PASS fread 'epsilon'
+[LKSTEST] PASS ungetc
+[LKSTEST] PASS ungetc one-slot full (2nd rejected)
+[LKSTEST] PASS fgetc sees pushed back
+[LKSTEST] PASS rewind resets ftell
+[sys_close Debug] CPU=2, PIDs=[1,16,49,32], caller_pid=49, fd=0, g_fd=36
+[KERNEL Debug] sys_close: fd=0, ret=0
+[LKSTEST] PASS fclose ok
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[sys_close Debug] CPU=2, PIDs=[1,16,53,32], caller_pid=53, fd=1, g_fd=60
+[KERNEL Debug] sys_close: fd=1, ret=0
+[sys_close Debug] CPU=2, PIDs=[1,16,60,32], caller_pid=60, fd=0, g_fd=42
+[KERNEL Debug] sys_close: fd=0, ret=0
+/TRSPC.TXT
+[sys_close Debug] CPU=2, PIDs=[1,16,60,32], caller_pid=60, fd=0, g_fd=42
+[KERNEL Debug] sys_close: fd=0, ret=0
+/TRRUN.TXT
+MATH_SIN_ONE: PASS
+MATH_SIN_HALF: PASS
+MATH_SIN_NEG_P075: PASS
+MATH_COS_ONE: PASS
+MATH_COS_TWO: PASS
+MATH_COS_NEG_250: PASS
+MATH_COS_EIGHTH: PASS
+MATH_TAN_ONE: PASS
+MATH_TAN_HALF: PASS
+MATH_TAN_NEG_THREE: PASS
+MATH_SIN_1E6: PASS
+MATH_SIN_123456789: PASS
+MATH_COS_1E9: PASS
+MATH_IDENT_SIN2_COS2: PASS
+MATH_IDENT_TAN_RATIO: PASS
+MATH_ASIN_HALF: PASS
+MATH_ASIN_NEG_QTR: PASS
+MATH_ATAN_ONE: PASS
+MATH_ATAN_NEG_TWO: PASS
+MATH_ATAN2_1_1: PASS
+MATH_ATAN2_1_NEG1: PASS
+MATH_ATAN2_NEG1_NEG1[sys_close Debug] CPU=2, PIDs=[1,16,62,32], caller_pid=62, fd=0, g_fd=44
+[KERNEL Debug] sys_close: fd=0, ret=0
+/PSTEMPT.TXT
+[sys_close Debug] CPU=2, PIDs=[1,16,62,32], caller_pid=62, fd=0, g_fd=44
+[KERNEL Debug] sys_close: fd=0, ret=0
+/PSTNONL.TXT
+[sys_close Debug] CPU=2, PIDs=[1,16,62,32], caller_pid=62, fd=0, g_fd=44
+[KERNEL Debug] sys_close: fd=0, ret=0
+/PSTLONG.TXT
+/FOLDTAB.TXT
+[sys_close Debug] CPU=2, PIDs=[1,16,63,32], caller_pid=63, fd=0, g_fd=60
+[KERNEL Debug] sys_close: fd=0, ret=0
+/FOLDA.TXT
+[sys_close Debug] CPU=2, PIDs=[1,16,63,32], caller_pid=63, fd=0, g_fd=60
+[KERNEL Debug] sys_close: fd=0, ret=0
+E spawn 2 /RM.BIN pid=-1 
+[sys_close Debug] CPU=5, PIDs=[1,16,2,32], caller_pid=60, fd=0, g_fd=42
+[KERNEL Debug] sys_close: fd=0, ret=0
+/TRTEST.TXT
+[sys_close Debug] CPU=5, PIDs=[1,16,2,32], caller_pid=60, fd=0, g_fd=42
+[KERNEL Debug] sys_close: fd=0, ret=0
+: PASS
+MATH_ATAN2_3_NEG4: PASS
+MATH_IDENT_ASIN_SIN: PASS
+MATH_IDENT_ATAN2_ATAN: PASS
+MATH_LOG_TWO: PASS
+MATH_LOG_TEN: PASS
+MATH_LOG_HALF: PASS
+MATH_LOG_1E300: PASS
+MATH_LOG_1E_M300: PASS
+MATH_LOG_E: PASS
+MATH_IDENT_LOG_POW2: PASS
+MATH_POW_2_HALF: PASS
+MATH_POW_3_HALF: PASS
+MATH_POW_15_725: PASS
+MATH_POW_EXACT_10: PASS
+MATH_POW_EXACT_NEG2: PASS
+MATH_POW_EXACT_1E3: PASS
+MATH_POW_NEGINT: PASS
+MATH_POW_2_1000: PASS
+MATH_POW_OVERFLOW: PASS
+MATH_POW_UNDERFLOW: PASS
+MATH_SQRT_EXACT: PASS
+MATH_SQRT_TWO: PASS
+MATH_SQRT_TINY: PASS
+MATH_SQRT_ZERO: PASS
+MATH_MODF_IP: PASS
+MATH_MODF_FP: PASS
+MATH_MODF_NEG_IP: PASS
+MATH_MODF_NEG_FP: PASS
+MATH_MODF_INF_IP: PASS
+MATH_MODF_INF_FP: PASS
+MATH_EXPF_ONE: PASS
+MATH_EXPF_NEG10: PASS
+MATH_EXPF_HALF: PASS
+MATH_TANHF_ONE: PASS
+MATH_TANHF_NEG_HALF: PASS
+MATH_TANHF_LARGE[sys_close Debug] CPU=6, PIDs=[1,16,2,32], caller_pid=62, fd=0, g_fd=44
+[KERNEL Debug] sys_close: fd=0, ret=0
+[LKSTEST] ALL PASSED
+[KERNEL] Process 49: LKSTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 49
+Process heart-beat from CPU: 4
+: PASS
+MATH_SIN_INF_NAN: PASS
+MATH_COS_INF_NAN: PASS
+MATH_TAN_NEGINF_NAN: PASS
+MATH_LOG_NEG_NAN: PASS
+MATH_LOG_ZERO_NEGINF: PASS
+MATH_ASIN_DOMAIN_NAN: PASS
+MATH_ATAN_INF: PASS
+MATH_ATAN2_00: PASS
+MATH_POW_DOMAIN_NAN: PASS
+MATH_EXPF_NEGINF: PASS
+MATH_TANHF_INF: PASS
+MATH_SIN_NEG_ZERO: PASS
+ALL TESTS PASSED SUCCESSFULLY!
+[KERNEL] Process 61: MATH_T.BIN exited unexpectedly or gracefully.
+/FOLDB.TXT
+[sys_close Debug] CPU=4, PIDs=[1,16,2,32], caller_pid=6, fd=0, g_fd=39
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=2, PIDs=[1,16,8,32], caller_pid=8, fd=0, g_fd=75
+/NLNOEOL.TXT
+[KERNEL Debug] sys_close: fd=0, ret=0
+/TSTWS.TXT
+[sys_close Debug] CPU=4, PIDs=[1,16,9,32], caller_pid=7, fd=0, g_fd=43
+[KERNEL Debug] sys_close: fd=0, ret=0
+/COMN2.TXT
+[LFN] PASS rename: old long name no longer listed
+/MKDIR.BIN
+[sys_close Debug] CPU=2, PIDs=[1,16,17,32], caller_pid=17, fd=2, g_fd=85
+[KERNEL Debug] sys_close: fd=2, ret=0
+/MKDIR.BIN
+[sys_close Debug] CPU=2, PIDs=[1,16,17,32], caller_pid=17, fd=2, g_fd=85
+[KERNEL Debug] sys_close: fd=2, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now -11
+sh: fork failed
+[sys_close Debug] CPU=2, PIDs=[1,16,19,32], caller_pid=19, fd=[LFN]0 PASS , g_fd=48
+[KERNEL Debug] sys_close: fd=0, ret=0
+/CKSHELLO.TXT
+[sys_close Debug] CPU=2, PIDs=[1,16,20,32], caller_pid=20, fd=0, g_fd=48
+[KERNEL Debug] sys_close: fd=0, ret=0
+/CKSALL.TXT
+/UNEXP1.TXT
+[sys_close Debug] CPU=4, PIDs=[1,16,21,32], caller_pid=19, fd=0, g_fd=85
+[KERNEL Debug] sys_close: fd=0, ret=0
+/UNEXP2.TXT
+[sys_close Debug] CPU=4, PIDs=[1,16,22,32], caller_pid=20, fd=0, g_fd=48
+[KERNEL Debug] sys_close: fd=0, ret=0
+/CKSPAT.TXT
+: PASS
+  WSRF_T text-edge-confined: PASS
+  WSRF_T damage-empty: PASS
+  WSRF_T damage-single-rect: PASS
+  WSRF_T damage-clears: PASS
+  WSRF_T damage-union: PASS
+  WSRF_T damage-union-overlap: PASS
+  WSRF_T damage-put: PASS
+  WSRF_T damage-prereck: PASS
+  WSRF_T damage-set-rect-returns-1: PASS
+  WSRF_T damage-clamped-after-set-rect: PASS
+ALL TESTS PASSED SUCCESSFULLY!
+[KERNEL] Process 29: WSRF_T.BIN exited unexpectedly or gracefully.
+[KERNEL] Process 31: NETTEST.BIN exited unexpectedly or gracefully.
+[sys_close Debug] CPU=5, PIDs=[1,20,35,32], caller_pid=63, fd=0, g_fd=84
+[KERNEL Debug] sys_close: fd=0, ret=0
+Loading program for scheduler (v2 AS): TR.BIN
+/TEST1.TXT
+/FOLDNOE.TXT
+[sys_close Debug] CPU=2, PIDs=[1,21,36,32], caller_pid=36, fd=1, g_fd=86
+[KERNEL Debug] sys_close: fd=1, ret=0
+/TEST1.TXT
+Loading program for scheduler (v2 AS): [sys_close Debug] CPU=5EXPAND.BIN
+[sys_close Debug] CPU=2, PIDs=[1,22,37,32], caller_pid=37, fd=0, g_fd=, PIDs=[1,2271
+,37,32], caller_pid=6, fd=0, g_fd=39
+[KERNEL Debug] sys_close: fd=0, ret=0
+[KERNEL Debug] sys_close: fd=0, ret=0
+  POLLTST empty pipe: select(timeout 100ms) == 0: PASS
+  POLLTST timeout took >= 85ms and < 5000ms (elapsed se/CAPS.TXT/NLSEC.TXT
+en)
+: PASS
+[sys_close Debug] CPU=7, PIDs=[1,22,37,32], caller_pid=53, fd=0, g_fd=36
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=7, PIDs=[1,22,37,32], caller_pid=53, fd=1, g_fd=38
+[KERNEL Debug] sys_close: fd=1, ret=0
+[sys_close Debug] CPU=5, PIDs=[1,29,37,32], caller_pid=7, fd=0, g_fd=43
+[KERNEL Debug] sys_close: fd=0, ret=0
+/TEST2.TXT
+/COMU1.TXT
+Process heart-beat from CPU: 4
+[sys_close Debug] CPU=2, PIDs=[1,29,38,32], caller_pid=38, fd=5, g_fd=36
+[KERNEL Debug] sys_close: fd=5, ret=0
+/TEST2.TXT
+[sys_close Debug] CPU=5, PIDs=[1,31,38,32], caller_pid=8, fd=0, g_fd=75
+[NFS] PASS tier1: chdir into a missing dir fails
+[KERNEL Debug] sys_close: fd=0, ret=0
+/TSTSL.TXT
+[KERNEL] Process 35: SMPTEST.BIN exited unexpectedly or gracefully.
+[sys_close Debug] CPU=4, PIDs=[1,34,40,32], caller_pid=37, fd=0, g_fd=71
+[KERNEL Debug] sys_close: fd=0, ret=0
+[CMPTEST] fixtures written
+[CMPTEST] run: /CAPA.TXT /CAPC.TXT
+[sys_close Debug] CPU=1, PIDs=[1,36,40,32], caller_pid=36, fd=1, g_fd=86
+[KERNEL Debug] sys_close: fd=1, ret=0
+[sys_close Debug] CPU=1, PIDs=[1,38,40,32], caller_pid=38, fd=5, g_fd=36
+[KERNEL Debug] sys_close: fd=5, ret=0
+rename: new long name listed with long name
+/TEST3.TXT
+/lfn_long_dir_created/INNER.TXT
+/TEST4.TXT
+  SOCK2TST select() reports the connecting socket writable: PASS
+  SOCK2TST SO_ERROR == 0 after a completed non-blocking connect: PASS
+  SOCK2TST SO_TYPE still SOCK_STREAM after connect: PASS
+  SOCK2TST connect_fd(already connected) -> -1/EINVAL: PASS
+  SOCK2TST write(HTTP GET) == request length: PASS
+[sys_close Debug] CPU=5, PIDs=[1,44,40,32], caller_pid=19, fd=0, g_fd=85
+[KERNEL Debug] sys_close: fd=0, ret=0
+/UNEXP3.TXT
+[sys_close Debug] CPU=5, PIDs=[1,44,40,32], caller_pid=19, fd=0, g_fd=85
+[KERNEL Debug] sys_close: fd=0, ret=0
+/UNEXPMID.TXT
+[sys_close Debug] CPU=5, PIDs=[1,44,40,32], caller_pid=41, fd=9, g_fd=36
+[KERNEL Debug] sys_close: fd=9, ret=0
+/TEST3.TXT
+[sys_close Debug] CPU=5, PIDs=[1,44,40,32], caller_pid=41, fd=9, g_fd=36
+[KERNEL Debug] sys_close: fd=9, ret=0
+  SOCK2TST select() reports the socket readable with a response pending: PASS
+  SOCK2TST response prefix: HTTP/1.1 301 Moved Permanently
+  SOCK2TST read() returned response bytes: PASS
+[sys_close Debug] CPU=5, PIDs=[1,44,40,32], caller_pid=43, fd=0, g_fd=37
+[KERNEL Debug] sys_close: fd=0, ret=0
+ALL TESTS PASSED SUCCESSFULLY!
+[KERNEL] Process 43: SOCK2TST.BIN exited unexpectedly or gracefully.
+ ((x)?y)
+[REGTEST] PASS row 30 ([[:xdigit:]]+)
+[REGTEST] PASS row 31 ((a)|(b))
+[REGTEST] PASS row 32 ((ab)*)
+[REGTEST] PASS row 33 (colou?r)
+[REGTEST] PASS row 34 (a{2,})
+[REGTEST] PASS row 35 ((foo)+)
+[REGTEST] PASS row 36 (\bword\b)
+[REGTEST] PASS row 37 ((a)\1)
+[REGTEST] PASS row 38 (^b+$)
+[REGTEST] PASS row 39 ((a)(b*))
+[REGTEST] PASS row 40 ([) regcomp err code
+[REGTEST] PASS row 41 (\() regcomp err code
+[REGTEST] PASS row 42 (a\{2,1\}) regcomp err code
+[REGTEST] PASS row 43 ([z-a]) regcomp err code
+[REGTEST] PASS row 44 (\) regcomp err code
+[REGTEST] PASS row 45 ((a) regcomp err code
+[REGTEST] PASS row 46 (a{2,1}) regcomp err code
+[REGTEST] PASS regerror text
+[REGTEST] PASS regerror length
+[REGTEST] PASS regerror text
+[REGTEST] PASS regerror length
+[REGTEST] PASS reger[read_until] MATCror textHED: '[sys_close Debug] CPU=6, PIDs=[1,48,40,32], caller_pid=6, fd=0, g_fd=39
+[KERNEL Debug] sys_close: fd=0, ret=0
+[KERNEL] Process 46: SMPTEST.BIN exited unexpectedly or gracefully.
+[PROCTEST] child pre-exec pid=/TACE.TXT
+[PROCTEST] parent waiting for child 49
+[PROCTEST] PASS child pid != parent
+49
+/PROCCHLD.BIN
+  POLLTST two ready pipes: ready count == 2, both fds set: PASS
+[sys_close Debug] CPU=5, PIDs=[1,49,40,32], caller_pid=53, fd=0, g_fd=94
+[KERNEL Debug] sys_close: fd=0, ret=0
+v2 loader: image mapped (lazy), bytes=[sys_close Debug] CPU=5, PIDs=[1,70952 pages=18 first=in elap=3ms
+49,40,32], caller_pid=53, fd=1, g_fd=95
+[KERNEL Debug] sys_close: fd=1, ret=0
+[sys_close Debug] CPU=5, PIDs=[1,49,40,32], caller_pid=53, fd=2, g_fd=96
+[KERNEL Debug] sys_close: fd=2, ret=0
+[sys_close Debug] CPU=5, PIDs=[1,49,40,32], caller_pid=53, fd=3, g_fd=97
+[KERNEL Debug] sys_close: fd=3, ret=0
+[sys_close Debug] CPU=5, PIDs=[1,49,40,32], caller_pid=53, fd=0, g_fd=94
+[KERNEL Debug] sys_close: fd=0, ret=0
+  POLLTST reader-closed pipe: writable + except (POLLERR/HUP semantics): PASS
+[sys_close Debug] CPU=1, PIDs=[1,53,40,32], caller_pid=53, fd=1, g_fd=95
+[KERNEL Debug] sys_close: fd=1, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now -11
+Loading program for scheduler (v2 AS): /CAT.BIN
+[sys_close Debug] CPU=5, PIDs=[1,57,40,32], caller_pid=63, fd=0, g_fd=84
+[KERNEL Debug] sys_close: fd=0, ret=0
+/FOLDEMPTY.TXT
+[sys_close Debug] CPU=5, PIDs=[1,57,40,32], caller_pid=63, fd=0, g_fd=84
+[KERNEL Debug] sys_close: fd=0, ret=0
+/FOLDHI.TXT
+[sys_close Debug] CPU=5, PIDs=[1,57,40,32], caller_pid=63, fd=0, g_fd=84
+[KERNEL Debug] sys_close: fd=0, ret=0
+mkdir /SUB1
+user@hobbyos:/$ '
+[sys_close Debug] CPU=5, PIDs=[1,57,40,32], caller_pid=7, fd=0, g_fd=38
+[KERNEL Debug] sys_close: fd=0, ret=0
+/COMU2.TXT
+[sys_close Debug] CPU=5, PIDs=[1,57,40,32], caller_pid=7, fd=0, g_fd=38
+[KERNEL Debug] sys_close: fd=0, ret=0
+/COME.TXT
+[sys_close Debug] CPU=5, PIDs=[1,57,40,32], caller_pid=7, fd=0, g_fd=38
+[KERNEL Debug] sys_close: fd=0, ret=0
+/FOLD80.TXT
+[sys_close Debug] CPU=7, PIDs=[1,57,40,32], caller_pid=63, fd=0, g_fd=100
+[KERNEL Debug] sys_close: fd=0, ret=0
+/FOLDLONG.TXT
+[sys_close Debug] CPU=4, PIDs=[1,57,40,32], caller_pid=42, fd=[sys_close Debug] CPU=7, PIDs=[1,57,40,32], caller_pid=8, fd=0, g_fd=43
+13, g_fd=91
+[KERNEL Debug] sys_close: fd=[KERNEL Debug] sys_close: fd=0, ret=0
+13, ret=0
+/TEST4.TXT
+/TSTDP.TXT
+[sys_close Debug] CPU=4, PIDs=[1,57,40,32], caller_pid=42, fd=13, g_fd=43
+[KERNEL Debug] sys_close: fd=13, ret=0
+Loading program for scheduler (v2 AS): PASTE.BIN
+[sys_close Debug] CPU=7, PIDs=[1,57,40,32], caller_pid=13, fd=0, g_fd=86
+[KERNEL Debug] sys_close: fd=0, ret=0
+/lfn_long_dir_created/INNER.TXT
+[sys_close Debug] CPU=7, PIDs=[1,57,40,32], caller_pid=13, fd=0, g_fd=43
+[KERNEL Debug] sys_close: fd=0, ret=0
+[LFN] PASS mkdir long dir + create file inside
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[sys_close Debug] CPU=7, PIDs=[1,57,40,32], caller_pid=15, fd=2, g_fd=43
+[KERNEL Debug] sys_close: fd=2, ret=0
+[sys_close Debug] CPU=7, PIDs=[1,57,40,32], caller_pid=15, fd=3, g_fd=86
+[KERNEL Debug] sys_close: fd=3, ret=0
+/LS.BIN
+[sys_close Debug] CPU=7, PIDs=[1,57,40,32], caller_pid=17, fd=2, g_fd=43
+[KERNEL Debug] sys_close: fd=2, ret=0
+/LS.BIN
+[sys_close Debug] CPU=7, PIDs=[1,57,40,32], caller_pid=17, fd=2, g_fd=43
+[KERNEL Debug] sys_close: fd=2, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now -11
+sh: fork failed
+[sys_close Debug] CPU=7, PIDs=[1,57,40,32], caller_pid=19, fd=0, g_fd=85
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=1, PIDs=[1,63,40,32], caller_pid=63, fd=0, g_fd=100
+[KERNEL Debug] sys_close: fd=0, ret=0
+  FPU_T preemption-persistence: PASS
+[LFN] PASS long dir listed with long name
+[LFN] PASS unlink long-name file rc
+[KERNEL] Process 34: SMPTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now -11
+
+[REGTEST] PASS regerror length
+[REGTEST] PASS regerror text
+[REGTEST] PASS regerror length
+[REGTEST] PASS regerror text
+[REGTEST] PASS regerror length
+[REGTEST] PASS regerror text
+[REGTEST] PASS regerror length
+[REGTEST] PASS re_compile_pattern(a+b)
+[REGTEST] PASS re_search finds a+b at offset 2
+[REGTEST] PASS re_search reports -1 when absent
+[REGTEST] PASS re_compile_pattern(a.b)
+[REGTEST] PASS dot does not match embedded NUL
+[REGTEST] PASS re_compile_pattern(a\0b)
+[REGTEST] PASS literal NUL in pattern matches
+[REGTEST] PASS re_compile_pattern(interval 512)
+[sys_close Debug] CPU=6, PIDs=[1,63,40,32], caller_pid=48, fd=0, g_fd=93
+[KERNEL Debug] sys_close: fd=0, ret=0
+[TACTEST] run: /TACA.TXT
+[NFS] rpc: no reply from server
+[NFS] mount: no mountd via portmap
+[ARP] routing off-subnet: target=0x000000006900A8C0 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=0x000000000202000A
+[ARP] routing off-subnet: target=0x000000006900A8C0 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=0x000000000202000A
+[KERNEL] sys_fork: tf->regs[0] is now -11
+/TEST1.TXT
+[sys_close Debug] CPU=7, PIDs=[1,63,40,32], caller_pid=36, fd=1, g_fd=112
+[KERNEL Debug] sys_close: fd=1, ret=0
+/TEST1.TXT
+[sys_close Debug] CPU=7, PIDs=[1,63,40,32], caller_pid=36, fd=1, g_fd=112
+[KERNEL Debug] sys_close: fd=1, ret=0
+/TEST2.TXT
+/TEST3.TXT
+[sys_close Debug] CPU=7, PIDs=[1,63,40,32], caller_pid=41, fd=9, g_fd=113
+[KERNEL Debug] sys_close: fd=9, ret=0
+/TEST3.TXT
+[sys_close Debug] CPU=7, PIDs=[1,63,40,32], caller_pid=41, fd=9, g_fd=113
+[KERNEL Debug] sys_close: fd=9, ret=0
+/TEST4.TXT
+[read_until] MATCHED: 'ls -l /
+user@hobbyos:/$ '
+[sys_close Debug] CPU=1, PIDs=[1,8,40,32], caller_pid=8, fd=0, g_fd=91
+[KERNEL Debug] sys_close: fd=0, ret=0
+/TSTEM.TXT
+[sys_close Debug] CPU=1, PIDs=[1,8,40,32], caller_pid=8, fd=0, g_fd=91
+[KERNEL Debug] sys_close: fd=0, ret=0
+[PROCCHLD] running
+[KERNEL] Process 49: PROCCHLD.BIN exited unexpectedly or gracefully.
+[PROCTEST] waitpid returned [KERNEL] sys_fork: tf->regs[0] is now 49
+[ARP] routing off-subnet: target=0x000000006900A8C0 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=0x000000000202000A
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[sys_close Debug] CPU=1, PIDs=[1,38,40,32], caller_pid=38, fd=5, g_fd=112
+[KERNEL Debug] sys_close: fd=5, ret=0
+/TEST2.TXT
+[sys_close Debug] CPU=1, PIDs=[1,38,40,32], caller_pid=38, fd=5, g_fd=91
+[KERNEL Debug] sys_close: fd=5, ret=0
+[sys_close Debug] CPU=1, PIDs=[1,42,40,32], caller_pid=42, fd=13, g_fd=113
+[KERNEL Debug] sys_close: fd=13, ret=0
+/TEST4.TXT
+[sys_close Debug] CPU=1, PIDs=[1,42,40,32], caller_pid=42, fd=13, g_fd=91
+[KERNEL Debug] sys_close: fd=13, ret=0
+[sys_close Debug] CPU=1, PIDs=[1,49,40,32], caller_pid=49, fd=0, g_fd=94
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=1, PIDs=[1,49,40,32], caller_pid=49, fd=3, g_fd=97
+[KERNEL Debug] sys_close: fd=3, ret=0
+49 status=512
+[PROCTEST] PASS waitpid returns child
+[PROCTEST] PASS WIFEXITED
+[PROCTEST] FAIL WEXITSTATUS == 42 got=2 want=42
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[sys_close Debug] CPU=1, PIDs=[1,53,40,32], caller_pid=53, fd=1, g_fd=95
+[KERNEL Debug] sys_close: fd=1, ret=0
+[sys_close Debug] CPU=1, PIDs=[1,53,40,32], caller_pid=53, fd=2, g_fd=96
+[KERNEL Debug] sys_close: fd=2, ret=0
+[sys_close Debug] CPU=1, PIDs=[1,53,40,32], caller_pid=53, fd=3, g_fd=97
+[KERNEL Debug] sys_close: fd=3, ret=0
+Process heart-beat from CPU: 6
+[NFS] rpc: no reply from server
+[NFS] mount: no mountd via portmap
+[NFS] SKIP e2e: no NFS server reachable at 10.0.2.2 or 192.168.0.105 - tier 2 not exercised
+[NFS] PASS chdir /
+[sys_close Debug] CPU=2, PIDs=[1,56,49,32], caller_pid=49, fd=2, g_fd=96
+[KERNEL Debug] sys_close: fd=2, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[LFN] PASS unlinked long-name file not listed
+[LFN] PASS reopen-after-unlink fails (ENOENT)
+[LFN] ALL PASSED
+[KERNEL] Process 13: LFN_T.BIN exited unexpectedly or gracefully.
+/FREE.BIN
+[sys_close Debug] CPU=7, PIDs=[1,56,63,32], caller_pid=18, fd=2, g_fd=91
+[KERNEL Debug] sys_close: fd=2, ret=0
+/FREE.BIN
+[sys_close Debug] CPU=7, PIDs=[1,56,63,32], caller_pid=18, fd=2, g_fd=91
+[KERNEL Debug] sys_close: fd=2, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now -11
+sh: fork failed
+Loading program for scheduler (v2 AS): COMM.BIN
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[sys_close Debug] CPU=5, PIDs=[1,56,63,32], caller_pid=49, fd=1, g_fd=95
+[KERNEL Debug] sys_close: fd=1, ret=0
+[KERNEL] Process 49: POLLTST.BIN exited unexpectedly or gracefully.
+/SH.BIN
+[KERNEL] sys_fork: tf->regs[0] is now -11[sys_close Debug] CPU=7
+, PIDs=[1,56,63,32], caller_pid=  POLLTST 40, fd=0, g_fd=91
+select(timeout < [KERNEL Debug] sys_close: fd=0, ret=0
+0) blocks and wakes on data (child write)[KERNEL] Process 54: SMPTEST.BIN exited unexpectedly or gracefully.
+net_timeout_test success: connect timed out and returned error as expected.
+[KERNEL] Process 32: TIMEOUT.BIN exited unexpectedly or gracefully.
+/TEST1.TXT
+[KERNEL] sys_fork: tf->regs[0] is now -11
+Loading program for scheduler (v2 AS): FOLD.BIN
+[sys_close Debug] CPU=5, PIDs=[1,22,8,37], caller_pid=36, fd=1, g_fd=35
+[KERNEL Debug] sys_close: fd=1, ret=0
+/TEST1.TXT
+[sys_close Debug] CPU=5, PIDs=[1,22,8,37], caller_pid=36, fd=1, g_fd=35
+[KERNEL Debug] sys_close: fd=1, ret=0
+/TEST2.TXT
+[sys_close Debug] CPU=5, PIDs=[1,29,8,37], caller_pid=38, fd=5, g_fd=35
+[KERNEL Debug] sys_close: fd=5, ret=0
+[NFS] PASS FAT file reads still work after NFS activity
+/TEST2.TXT
+/TEST3.TXT
+[sys_close Debug] CPU=1, PIDs=[1,38,8,37], caller_pid=38, fd=5, g_fd=35
+[KERNEL Debug] sys_close: fd=5, ret=0
+[NFS] PASS sysinfo(7) re[sys_close Debug] CPU=5, PIDs=[1,40,8,37], caller_pid=41port, fd=9s FAT numbers at /, g_fd=114
+
+[NFS] e2e tier ski[KERNEL Debug] sys_close: fd=9, ret=0
+pped/TEST4.TXT
+/TEST3.TXT
+[sys_close Debug] CPU=5, PIDs=[1[sys_close Debug] CPU=1, PIDs=[1,41,8,37], caller_pid=41,41,8,37], caller_pid=42, fd=13, g_fd=114, fd=9, g_fd=35
+[KERNEL Debug] sys_close: fd=9, ret=
+0
+[KERNEL Debug] sys_close: fd=13, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now -11
+
+[NFS] ALL PASSED (13 checks)
+[KERNEL] Process 40: NFSTEST.BIN exited unexpectedly or gracefully.
+/TEST4.TXT
+[sys_close Debug] CPU=3, PIDs=[1,47,11,42], caller_pid=42, fd=13, g_fd=35
+[KERNEL Debug] sys_close: fd=13, ret=0
+: PASS
+  POLLTST the blocking wait's byte reads back: PASS
+[sys_close Debug] CPU=7, PIDs=[1,47,13,44], caller_pid=53, fd=0, g_fd=94
+[KERNEL Debug] sys_close: fd=0, ret=0
+ALL TESTS PASSED SUCCESSFULLY!
+[KERNEL] Process 53: POLLTST.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now -11
+Loading program for scheduler (v2 AS): MD5SUM.BIN
+Loading program for scheduler (v2 AS): NL.BIN
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[sys_close Debug] CPU=6, PIDs=[1,13,21,44], caller_pid=15, fd=2, g_fd=35
+[KERNEL Debug] sys_close: fd=2, ret=0
+[sys_close Debug] CPU=6, PIDs=[1,13,21,44], caller_pid=15, fd=3, g_fd=94
+[KERNEL Debug] sys_close: fd=3, ret=0
+/MKDIR.BIN
+[sys_close Debug] CPU=6, PIDs=[1,13,21,44], caller_pid=17, fd=2, g_fd=35
+[KERNEL Debug] sys_close: fd=2, ret=0
+/MKDIR.BIN
+[sys_close Debug] CPU=6, PIDs=[1,13,21,44], caller_pid=17, fd=2, g_fd=35
+[KERNEL Debug] sys_close: fd=2, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now -11
+sh: fork failed
+[KERNEL] sys_fork: tf->regs[0] is now -11
+Loading program for scheduler (v2 AS): TAC.BIN
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[read_until] MATCHED: 'mkdir /SUB1
+user@hobbyos:/$ '
+[KERNEL] sys_fork: tf->regs[0] is now -11
+/LS.BIN
+[sys_close Debug] CPU=1, PIDs=[1,17,57,8], caller_pid=17, fd=2, g_fd=35
+[KERNEL Debug] sys_close: fd=2, ret=0
+/LS.BIN
+[sys_close Debug] CPU=1, PIDs=[1,17,57,8], caller_pid=17, fd=2, g_fd=35
+[KERNEL Debug] sys_close: fd=2, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[KERNEL] sys_fork: tf->regs[0] is now -11
+/TEST1.TXT
+[sys_close Debug] CPU=5, PIDs=[1,32,57,8], caller_pid=36, fd=1, g_fd=35
+[KERNEL Debug] sys_close: fd=1, ret=0
+/TEST1.TXT
+[sys_close Debug] CPU=5, PIDs=[1,32,57,8], caller_pid=36, fd=1, g_fd=/TEST2.TXT35
+[KERNEL Debug] sys_close: fd=1
+, ret=0
+[sys_close Debug] CPU=1, PIDs=[1,38,57,8], caller_pid=38, fd=5, g_fd=94
+[KERNEL Debug] sys_close: fd=5, ret=0
+/TEST2.TXT
+[sys_close Debug] CPU=1, PIDs=[1,38,57,8], caller_pid=38, fd=5, g_fd=35
+[KERNEL Debug] sys_close: fd=5, ret=0
+/TEST3.TXT
+/TEST4.TXT
+[sys_close Debug] CPU=5, PIDs=[1,43,57,8], caller_pid=42, fd=13, g_fd=94
+[KERNEL Debug] sys_close: fd=13, ret=0
+GFXBENCH full min=124000 med=597000 mean=629300 n=10
+[KERNEL] sys_fork: tf->regs[0] is now -11
+sh: fork failed
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[sys_close Debug] CPU=5, PIDs=[1,40,57,8], caller_pid=41, fd=9, g_fd=35
+[KERNEL Debug] sys_close: fd=9, ret=0
+/TEST3.TXT
+[sys_close Debug] CPU=5, PIDs=[1,40,57,8], caller_pid=41, fd=9, g_fd=35
+[KERNEL Debug] sys_close: fd=9, ret=0
+/TEST4.TXT
+[sys_close Debug] CPU=5, PIDs=[1,40,57,8], caller_pid=42, fd=13, g_fd=35
+[KERNEL Debug] sys_close: fd=13, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[read_until] MATCHED: 'ls -l /
+user@hobbyos:/$ '
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[KERNEL] sys_fork: tf->regs[0] is now -11
+/TEST1.TXT
+[sys_close Debug] CPU=5, PIDs=[1,50,57,8], caller_pid=36, fd=1, g_fd=35
+[KERNEL Debug] sys_close: fd=1, ret=0
+/TEST1.TXT
+/TEST2.TXT
+[sys_close Debug] CPU=5, PIDs=[1,50,57,8], caller_pid=38, fd=5, g_fd=94
+[KERNEL Debug] sys_close: fd=5, ret=0
+/TEST2.TXT
+[sys_close Debug] CPU=5, PIDs=[1,50,57,8], caller_pid=38, fd=5, g_fd=94
+[KERNEL Debug] sys_close: fd=5, ret=0
+/TEST3.TXT
+[sys_close Debug] CPU=5, PIDs=[1,50,57,8], caller_pid=41, fd=9, g_fd=94
+[KERNEL Debug] sys_close: fd=9, ret=0
+/TEST3.TXT
+[sys_close Debug] CPU=5, PIDs=[1,50,57,8], caller_pid=41, fd=9, g_fd=94
+[KERNEL Debug] sys_close: fd=9, ret=0
+/TEST4.TXT
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[sys_close Debug] CPU=5, PIDs=[1,50,57,8], caller_pid=36, fd=1, g_fd=35
+[KERNEL Debug] sys_close: fd=1, ret=0
+[sys_close Debug] CPU=5, PIDs=[1,50,57,8], caller_pid=42, fd=13, g_fd=94
+[KERNEL Debug] sys_close: fd=13, ret=0
+/TEST4.TXT
+[sys_close Debug] CPU=5, PIDs=[1,50,57,8], caller_pid=42, fd=13, g_fd=35
+[KERNEL Debug] sys_close: fd=13, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now -11
+/FREE.BIN
+[sys_close Debug] CPU=4, PIDs=[1,50,57,8], caller_pid=18, fd=2, g_fd=35
+[KERNEL Debug] sys_close: fd=2, ret=0
+/FREE.BIN
+[sys_close Debug] CPU=4, PIDs=[1,50,57,8], caller_pid=18, fd=2, g_fd=35
+[KERNEL Debug] sys_close: fd=2, ret=0
+[KERNEL] sys_fork: tf->regs[0] is now -11
+sh: fork failed
+SMP Verification Test Complete.
+[KERNEL] Process 22: SMPTEST.BIN exited unexpectedly or gracefully.
+[KERNEL] sys_fork: tf->regs[0] is now 23
+/CXXSMOKE.BIN
+v2 loader: image mapped (lazy), bytes=77416 pages=19 first=in elap=3ms
+v2 loader: PID=28 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): DNSTST.BIN
+/DNSTST.BIN
+v2 loader: image mapped (lazy), bytes=59416 pages=15 first=in elap=3ms
+v2 loader: PID=46 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+[sys_close Debug] CPU=2, PIDs=[Loading program for scheduler (v2 AS): THRD_T.BIN1,9,
+[sys_close Debug] CPU=3, PIDs=[/THRD_T.BIN
+25,23], caller_pid=25, fd=1, g_fd=106
+[KERNEL Debug] sys_close: fd=1, ret=0
+1,9,27,23], caller_pid=23, fd=0, g_fd=105
+[KERNEL Debug] sys_close: fd=0, ret=0
+Loading program for scheduler (v2 AS): Loading program for scheduler (v2 AS): HEDGNU.BIN
+/HEDGNU.BIN
+v2 loader: image mapped (lazy), bytes=109144 pages=27 first=in elap=2ms
+v2 loader: PID=22 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+v2 loader: image mapped (lazy), bytes=78024 pages=20 first=in elap=9ms
+v2 loader: PID=54 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): TLS_T.BIN
+/TLS_T.BIN
+Loading program for scheduler (v2 AS): UNEXPAND.BIN
+TSORT.BIN
+/HEDTEST.TXT
+v2 loader: image mapped (lazy), bytes=/TEST1.TXT
+71432 pages=18 first=in elap=3ms
+v2 loader: PID=34 entry=0x0000001000000000 sp=0x0000001800000000 resident=1 tables=4
+Loading program for scheduler (v2 AS): CXX_T.BIN
+Loading program for scheduler (v2 AS): CUT.BIN
+/TEST2.TXT
+[sys_close Debug] CPU=1, PIDs=[1,22,37,39], caller_pid=22, fd=2, g_fd=35
+[KERNEL Debug] sys_close: fd=2, ret=0
+[KERNEL] Process 22: HEDGNU.BIN exited unexpectedly or gracefully.
+[sys_close Debug] CPU=6, PIDs=[1,28,37,40], caller_pid=36, fd=1, g_fd=94
+[KERNEL Debug] sys_close: fd=[CXX_SMOKE] minima1, ret=0
+l/TEST3.TXT
+ C++ runtime acceptance (F2.4)
+  CXX_SMOKE init-array-before-main: PASS
+[sys_close Debug] CPU=7, PIDs=[1,31,37,42], caller_pid=38, fd=5, g_fd=114
+[KERNEL Debug] sys_close: fd=5, ret=0
+/TEST1.TXT
+/TEST4.TXT
+/TEST2.TXT
+[sys_close Debug] CPU=6, PIDs=[1,32,37,43], caller_pid=38, fd=5, g_fd=114
+[KERNEL Debug] sys_close: fd=5, ret=0
+[sys_close Debug] CPU=6, PIDs=[1,34,37,45], caller_pid=41, fd=9, g_fd=35
+[KERNEL Debug] sys_close: fd=9, ret=0
+[TLS_T] per-thread TLS + errno [DNSTST]i/TEST3.TXTsolat
+ion a DNS resolution test (example.com)
+[sys_close Debug] CPU=6, PIDs=[cceptance
+1,34,37,45], caller_pid=41, fd=9, g_fd=35
+[KERNEL Debug] sys_close: fd=9  TLS_T , ret=0main-template
+: PASS
+[sys_close Debug] CPU=7, PIDs=[1,[sys_close Debug] CPU=[DNSTST] DHCP DNS server: 1, PIDs=[1,36,37,46], caller_pid=3610.0.2.3, fd=1, g_fd=94
+[KERNEL Debug] sys_close: fd=1, ret=36,37,460
+], caller_pid=42, fd=13, g_fd=115
+
+[KERNEL Debug] sys_close: fd=13, ret=0
+/TEST4.TXT
+[sys_close Debug] CPU=7, PIDs=[1,39,37,46], caller_pid=42, fd=13, g_fd=35
+[KERNEL Debug] sys_close: fd=13, ret=0
+[sys_close Debug] CPU=3, PIDs=[1,39,37,50], caller_pid=50, fd=0, g_fd=63
+[KERNEL Debug] sys_close: fd=0, ret=0
+[sys_close Debug] CPU=3, PIDs=[1,39,37,50], caller_pid=50, fd=1, g_fd=72
+[KERNEL Debug] sys_close: fd=[KERNEL] sys_fork: tf->regs[0] is now -11
+1, ret=0
+[THRD_T] kernel threads + futex-lite + pthreads acceptance
+[sys_close Debug] CPU=7, PIDs=[1,44,37,58], caller_pid=50, fd=3, g_fd=74
+[KERNEL Debug] sys_close: fd=3, ret=0
+[sys_close Debug] CPU=7, PIDs=[1,44,37,58], caller_pid=50, fd=2, g_fd=73
+[KERNEL Debug] sys_close: fd=2, ret=0
+[HEDTEST] PASS -c 6
+  THRD_T self-equal: PASS
+[REGTEST] PASS re_match over 515-byte input
+[KERNEL] thread_create: no free slot (used=63/63 done=0) for pid=54
+[sys_close Debug] CPU=6, PIDs=[1,49,43,61], caller_pid=9, fd=0, g_fd=41
+[KERNEL Debug] sys_close: fd=0, ret=0
+  BLKTEST P1 chunk 512: PASS
+/BLKT1.TXT
+GFXBENCH r256 min=3000 med=3000 mean=16000 n=30
+GFXBENCH r64 min=0 med=0 mean=20 n=50
+GFXBENCH DONE
+[KERNEL] Process 44: GFXBENCH.BIN exited unexpectedly or gracefully.
+[KERNEL] thread_create: no free slot (used=63/63 done=0) for pid=54
+[KERNEL] sys_fork: tf->regs[0] is now -11
+[KERNEL] thread_create: no free slot (used=63/63 done=0) for pid=54
+Loading program for scheduler (v2 AS): CMP.BIN
+  CXX_SMOKE init-priority-first: PASS
+  CXX_SMOKE init-array-order: PASS
+  CXX_SMOKE global-ctors-born: PASS
+  CXX_SMOKE new-scalar: PASS
+  CXX_SMOKE new-array: PASS
+  CXX_SMOKE new-zero-size-nonnull: PASS
+  CXX_SMOKE delete-nullptr: PASS
+  CXX_SMOKE [sys_close Debug] CPU=2, PIDs=[new-alignment-161,20,9,27], caller_pid=9, fd=0, g_fd=35
+[KERNEL Debug] sys_close: fd=0, ret=0
+: PASS  BLKTEST P1 ch
+unk 4096: PASS
+  CXX_SMOKE new-delete-churn: PASS
+  CXX_SMOKE guard-first-acquire: PASS
+  CXX_SMOKE guard-second-acquire: PASS
+  CXX_SMOKE /BLKT1.TXT
+guard-abort-acquire: PASS
+  CXX_SMOKE guard-abort-retry: PASS
+  CXX_SMOKE Loader (v2) starved (slot pressure): WC.BINl
+ocal-static-init-once: PASS
+  CXX_SMOKE /TEST1.TXT
+/TEST2.TXT
+/TEST3.TXT
+[sys_close Debug] CPU=6, PIDs=[1,22,21,31], caller_pid=41, fd=9, g_fd=72
+[KERNEL Debug] sys_close: fd=9, ret=0
+virtual-dispatch: PASS
+  CXX_SMOKE virtual-via-reference/TEST4.TXT:/TEST3.TXT
+
+ PASS
+  CXX_SMOKE virtual-call-through-heap: PASS
+  CXX_SMOKE template-int-container: PASS
+  CXX_SMOKE template-overflow-rejected: PASS
+  CXX_SMOKE template-struct-container: PASS
+  CXX_SMOKE operator-plus: PASS
+  CXX_SMOKE operator-minus-equals: PASS
+  CXX_SMOKE placement-new: PASS
+  CXX_SMOKE assert-macro-cpp: PASS
+[sys_close Debug] CPU=5  CXX_SMOKE , PIDs=[1,27,22,32sysroot], caller_pid=42, fd=-c-linkage13, g_fd=73
+: PASS
+[KERNEL Debug] sys_close: fd=  C[sys_close Debug] CPU=Loading program for scheduler (v2 AS): 7XX_SMOKE SED.BINgl, PIDs=[1
+,13, ret=0
+28,ob27,al-object-co35], caller_pid=41, fd=9, g_fd=72
+[KERNEL Debug] sys_close: fd=9, ret=0
+nstructed: PASS
+  CXX_SMOKE cxa_finalize-runs-dtors: PASS
+/TEST4.TXT
+  CXX_SMOKE cxa_finalize-idempotent[sys_close Debug] CPU=7, PIDs=[1,28,: 27,35], caller_pid=PASS
+42CXX_SMOKE checks: , fd=13, g_fd=72
+[KERNEL Debug] sys_close: fd=13, ret=0
+29, failures: 0
+ALL TESTS PASSED SUCCESSFULLY!
+[KERNEL] Process 28: CXXSMOKE.BIN exited unexpectedly or gracefully.
+[sys_close Debug] CPU=3, PIDs=[1,32,31,36], caller_pid=36, fd=1, g_fd=41
+[sys_close Debug] CPU=5, PIDs=[1,32,31,36[KERNEL Debug] sys_close: fd=1, ret=0], caller_pid=46
+, fd=0, g_fd=94
+[KERNEL Debug] sys_close: fd=0, ret=0
+[DNSTST] exam/TEST1.TXT
+ple.com A = 104.20.23.154[sys_close Debug] CPU=3, PIDs=[1,32,31,36], caller_pid=36, fd=1, g_fd=41
+[KERNEL Debug] sys_close: fd=1, ret=0
+
+[LOCKFOREVER] cpu=0 lock=0x0000000074530c70 pc=0x000000007002f0ae pc2=0x000000007001c81e
+
+[LOCKFOREVER] cpu=2 lock=0x0000000074530c70 pc=0x000000007002f0ae pc2=0x000000007001dddd
+
+[LOCKFOREVER] cpu=5 lock=0x0000000074530c70 pc=0x000000007002f0ae pc2=0x000000007001dddd
+
+[LOCKFOREVER] cpu=4 lock=0x0000000074530c70 pc=0x000000007002f0ae pc2=0x0000000070022fba
+
+[LOCKFOREVER] cpu=1 lock=0x0000000074530c70 pc=0x000000007002f0ae pc2=0x000000007001dddd
+
+[LOCKFOREVER] cpu=7 lock=0x0000000074530c70 pc=0x000000007002f0ae pc2=0x000000007001dddd
+
+[LOCKFOREVER] cpu=3 lock=0x0000000074530c70 pc=0x000000007002f0ae pc2=0x000000007001dddd
+
+[LOCKFOREVER] cpu=0 lock=0x0000000074530c70 pc=0x000000007002f0ae pc2=0x000000007001c81e
+
+[LOCKFOREVER] cpu=2 lock=0x0000000074530c70 pc=0x000000007002f0ae pc2=0x000000007001dddd
+
+[LOCKFOREVER] cpu=3 lock=0x0000000074530c70 pc=0x000000007002f0ae pc2=0x000000007001dddd
+
+[LOCKFOREVER] cpu=4 lock=0x0000000074530c70 pc=0x000000007002f0ae pc2=0x0000000070022fba
+
+[LOCKFOREVER] cpu=5 lock=0x0000000074530c70 pc=0x000000007002f0ae pc2=0x000000007001dddd
+
+[LOCKFOREVER] cpu=7 lock=0x0000000074530c70 pc=0x000000007002f0ae pc2=0x000000007001dddd
+
+[LOCKFOREVER] cpu=1 lock=0x0000000074530c70 pc=0x000000007002f0ae pc2=0x000000007001dddd

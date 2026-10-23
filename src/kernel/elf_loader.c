@@ -91,7 +91,7 @@ static int el_map_region(struct addr_space *as, uint64_t va, uint64_t len,
  * W0 corpus (a few hundred KiB) this eager copy is cheap and correct; it is
  * the design's "start eager" choice (docs/elf-loader.md §2.5). */
 int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
-                    uint64_t *entry_out) {
+                    uint64_t *entry_out, uint64_t *phdr_out, uint32_t *phnum_out) {
   if (!as || !entry_out || fsize == 0 || fsize > USER_IMG_SIZE)
     return -ENOEXEC;
 
@@ -170,6 +170,47 @@ int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
     return -ENOEXEC;
   }
 
+  /* GB-013: apply the static-PIE's R_*_RELATIVE relocations over the laid-out
+     image, before it is mapped.  Without this the program enters correctly (the
+     entry is e_entry, the segments are mapped) and then faults at the first
+     indirect call, because every GOT slot still holds a link-time value
+     relative to 0 -- measured as PC=0/VA=0, which reads like a null dereference
+     in user code.  A refusal here is a real refusal: elf_apply_relocations
+     returns ELF_ERR_RELOC rather than skipping a type it does not implement. */
+  {
+    int rrc = elf_apply_relocations(&img, (uint8_t *)stage, span, USER_IMG_BASE);
+    /* GB-013: the loader has just applied every R_*_RELATIVE itself, so the
+     * image is fully relocated before it is mapped. A static-pie nonetheless
+     * runs its own relocation loop over DT_RELA, and on this image that loop
+     * indexes the table at its LINK-TIME address (measured: reads
+     * rela[0].r_info at VA=0x210, i.e. DT_RELA=0x208 used literally, because
+     * startup derives a zero load bias). Zero the count entries so that loop
+     * has nothing to iterate: there is genuinely nothing left to do, and the
+     * alternative -- letting it walk a table at an address that is not mapped
+     * in the child -- kills the program before it reaches main().
+     * Change is confined to images we relocated (rrc == ELF_OK). */
+    if (rrc == ELF_OK && img.dyn_size >= 16) {
+      uint64_t dyn_off = img.dyn_vaddr - img.vaddr_base;
+      if (dyn_off + img.dyn_size <= span) {
+        uint64_t *d = (uint64_t *)(stage + dyn_off);
+        uint64_t n = img.dyn_size / 16;
+        for (uint64_t ei = 0; ei < n; ei++) {
+          if (d[ei * 2] == 8) d[ei * 2 + 1] = 0;               /* DT_RELASZ   */
+          if (d[ei * 2] == 0x6ffffff9ULL) d[ei * 2 + 1] = 0;   /* DT_RELACOUNT */
+          if (d[ei * 2] == 0) break;                           /* DT_NULL     */
+        }
+      }
+    }
+    if (rrc != ELF_OK) {
+      uart_puts("elf loader: relocations: ");
+      uart_puts(elf_strerror(rrc));
+      uart_puts("\n");
+      for (uint64_t i = 0; i < stage_pages; i++)
+        frame_free(stage + i * FRAME_SIZE);
+      return -ENOEXEC;
+    }
+  }
+
   /* Insert one region per plan region at base + off, with its real
      protection, then eager-map it.  base is USER_IMG_BASE: a static-PIE's
      lowest PT_LOAD is at 0, so base+off = USER_IMG_BASE + off keeps the ELF's
@@ -201,5 +242,17 @@ int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
   /* Runtime entry: base + e_entry (never the raw e_entry — 0x78a0 is not a
      mapped address). */
   *entry_out = base + img.entry;
+  /* GB-014: report where the program headers are mapped and how many, so the
+     caller can put AT_PHDR/AT_PHNUM in the startup auxv.  For a PIE the phdrs
+     live inside the first PT_LOAD, so their runtime address is base plus the
+     offset of e_phoff within that segment. */
+  if (phdr_out) {
+    uint64_t pa = base;
+    if (img.nsegs > 0 && img.phoff >= img.segs[0].offset)
+      pa = base + (img.segs[0].vaddr - img.vaddr_base) +
+           (img.phoff - img.segs[0].offset);
+    *phdr_out = pa;
+  }
+  if (phnum_out) *phnum_out = img.phnum;
   return 0;
 }

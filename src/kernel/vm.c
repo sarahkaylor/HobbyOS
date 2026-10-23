@@ -48,6 +48,9 @@ static int vm_lock_ready;
 static void vm_lock_init_once(void) {
   if (!vm_lock_ready) {
     spinlock_init(&vm_lock);
+#ifdef KERNEL_MODE_UNIT_TEST
+    lockdbg_register(&vm_lock, "vm_lock", LOCK_RANK_VM); /* SEC-OBS-B */
+#endif
     vm_lock_ready = 1;
   }
 }
@@ -729,31 +732,128 @@ int vm_range_ok(struct process *p, uint64_t va, uint64_t len, int write) {
   return vm_touch(p, va, len, write) == 0 ? 0 : -1;
 }
 
+/* SEC-2 (security-plan.md #2): atomic validate+read of user memory.
+ * The old syscall pattern was "validate the range once, then dereference
+ * byte-by-byte in kernel mode" — a peer thread that unmapped (or mprotected)
+ * mid-copy turned the kernel-mode read into a fault on a freed frame.
+ * This primitive closes that window: each page is demand-materialized with
+ * vm_touch (outside the lock, per the L9 contract), then re-validated AND
+ * copied out under vm_lock — the same lock every map/unmap/protect path
+ * takes — so no peer can pull the mapping or free the frame between the
+ * walk and the copy.  The bytes are read through the kernel direct map
+ * (kernel VA == phys, both arches), mirroring vm_kwrite's write side; this
+ * makes the copy safe in any context, not only with the target's tables
+ * active.  v1 processes (no address space) keep the legacy window rule:
+ * that RAM is statically direct-mapped and always resident, so a bounded
+ * read there cannot fault.  With no process context at all there is
+ * nothing to validate against — reject rather than guess. */
+int vm_user_read(struct process *p, uint64_t va, void *dst, int len) {
+  if (!dst || len <= 0)
+    return 0;
+  if (!p)
+    return -1; /* SEC-2: no context -> user memory is unvalidatable */
+  unsigned char *d = (unsigned char *)dst;
+
+  if (!p->as) {
+    /* v1 legacy window — same arithmetic as the arch sys_user_range
+       fallback.  Statically mapped: validate+read cannot race. */
+    if (va < USER_VIRT_BASE || (uint64_t)len > USER_REGION_SIZE)
+      return -1;
+    if (va - USER_VIRT_BASE > USER_REGION_SIZE - (uint64_t)len)
+      return -1;
+    for (int i = 0; i < len; i++)
+      d[i] = *(volatile unsigned char *)(va + (uint64_t)i);
+    return 0;
+  }
+
+  struct addr_space *as = p->as;
+  if (va < USER_VA_BASE || va + (uint64_t)len - 1 >= USER_VA_TOP)
+    return -1;
+
+  for (int i = 0; i < len;) {
+    uint64_t a = va + (uint64_t)i;
+    uint64_t page = a & ~(uint64_t)(FRAME_SIZE - 1);
+    int in_page = (int)(FRAME_SIZE - (a & (FRAME_SIZE - 1)));
+    if (in_page > len - i)
+      in_page = len - i;
+
+    /* Materialize a demand-paged page first (vm_touch validates region +
+       prot and maps; it must run without vm_lock — see L9 above). */
+    if (vm_touch(p, page, 1, 0) != 0)
+      return -1;
+
+    uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+    struct vm_region *r = vm_region_find(as, a);
+    uint64_t leaf = 0;
+    if (!r || !(r->prot & VM_PROT_READ) || (page + FRAME_SIZE > r->base + r->len) ||
+        vm_arch_walk(as, page, &leaf) != 0) {
+      spinlock_release_irqrestore(&vm_lock, fl);
+      return -1; /* peer unmapped/protected between touch and lock */
+    }
+    uint64_t pa = vm_arch_leaf_phys(leaf) + (a & (FRAME_SIZE - 1));
+    const volatile unsigned char *src = (const volatile unsigned char *)pa;
+    for (int k = 0; k < in_page; k++)
+      d[i + k] = src[k]; /* under vm_lock: frame cannot be freed/unmapped */
+    spinlock_release_irqrestore(&vm_lock, fl);
+    i += in_page;
+  }
+  return 0;
+}
+
 /* P5 (D5.7): cross-context write helper.  The caller has already run
  * vm_touch on the range (validated + demand-materialized); this resolves
  * each 4 KiB page through the target's own tables and stores the bytes
  * via the kernel direct map (kernel VA == phys, both arches).  v2 only --
- * a v1 group has no page tables and its callers use user_phys_base. */
+ * a v1 group has no page tables and its callers use user_phys_base.
+ *
+ * SEC-8 (security-plan.md #8): the old form walked each page once under
+ * vm_lock and then wrote OUTSIDE the lock for the rest of the page, so a
+ * peer unmapping/tearing down the target could free the frame between the
+ * caller's vm_touch and the stores — bytes would land in freed, possibly
+ * reused memory.  It now mirrors vm_user_read's write side: per-page
+ * materialize (vm_touch, outside the lock per the L9 contract), then
+ * re-validate region + write protection + leaf PTE under vm_lock — the
+ * same lock every map/unmap/protect path takes — and store through the
+ * direct map while still holding it.  Callers' earlier vm_touch is now
+ * only a fast-fail optimization; correctness no longer depends on the
+ * range staying stable across the call. */
 int vm_kwrite(struct process *p, uint64_t va, const void *src, int len) {
   if (!p || !src || len <= 0)
     return 0;
   if (!p->as)
     return -1; /* v1: the caller owns the translation */
   const unsigned char *s = (const unsigned char *)src;
-  uint64_t page_pa = 0;
-  for (int i = 0; i < len; i++) {
+
+  struct addr_space *as = p->as;
+  if (va < USER_VA_BASE || va + (uint64_t)len - 1 >= USER_VA_TOP)
+    return -1;
+
+  for (int i = 0; i < len;) {
     uint64_t a = va + (uint64_t)i;
-    if (i == 0 || (a & (FRAME_SIZE - 1)) == 0) {
-      uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
-      uint64_t leaf = 0;
-      int rc = vm_arch_walk(p->as, a & ~(uint64_t)(FRAME_SIZE - 1), &leaf);
-      if (rc == 0)
-        page_pa = vm_arch_leaf_phys(leaf);
+    uint64_t page = a & ~(uint64_t)(FRAME_SIZE - 1);
+    int in_page = (int)(FRAME_SIZE - (a & (FRAME_SIZE - 1)));
+    if (in_page > len - i)
+      in_page = len - i;
+
+    /* Materialize a demand-paged page first (vm_touch validates region +
+       write protection and maps; it must run without vm_lock — see L9). */
+    if (vm_touch(p, page, 1, 1) != 0)
+      return -1;
+
+    uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
+    struct vm_region *r = vm_region_find(as, a);
+    uint64_t leaf = 0;
+    if (!r || !(r->prot & VM_PROT_WRITE) || (page + FRAME_SIZE > r->base + r->len) ||
+        vm_arch_walk(as, page, &leaf) != 0) {
       spinlock_release_irqrestore(&vm_lock, fl);
-      if (rc != 0)
-        return -1; /* unmapped: the vm_touch contract was violated */
+      return -1; /* peer unmapped/protected between touch and lock */
     }
-    *(volatile unsigned char *)(page_pa + (a & (FRAME_SIZE - 1))) = s[i];
+    uint64_t pa = vm_arch_leaf_phys(leaf) + (a & (FRAME_SIZE - 1));
+    volatile unsigned char *dst = (volatile unsigned char *)pa;
+    for (int k = 0; k < in_page; k++)
+      dst[k] = s[i + k]; /* under vm_lock: frame cannot be freed/unmapped */
+    spinlock_release_irqrestore(&vm_lock, fl);
+    i += in_page;
   }
   return 0;
 }

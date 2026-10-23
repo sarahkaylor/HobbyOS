@@ -160,7 +160,35 @@ __attribute__((noinline)) static void spin_acquire_impl(spinlock_t *lock, uint64
 void spinlock_acquire(spinlock_t *lock) {
   uint64_t ra;
   __asm__ volatile("mov %0, x30" : "=r"(ra));
+#ifdef KERNEL_MODE_UNIT_TEST
+  lockdbg_precheck(lock); /* SEC-OBS-B: report inversion before we spin */
+#endif
   spin_acquire_impl(lock, ra);
+#ifdef KERNEL_MODE_UNIT_TEST
+  lockdbg_note_acquired(lock);
+#endif
+}
+
+/* SEC-OBS-B debug tracker support (src/kernel/lock_order.c): mask local
+ * interrupts around its per-CPU bookkeeping so an interrupting handler that
+ * takes its own registered lock cannot corrupt the stack mid-update. */
+uint64_t lockdbg_irq_disable(void) {
+  uint64_t flags;
+  __asm__ volatile(
+      "mrs %0, daif\n"
+      "msr daifset, #2\n"
+      : "=r"(flags)
+      :
+      : "memory");
+  return flags;
+}
+
+void lockdbg_irq_restore(uint64_t flags) {
+  __asm__ volatile(
+      "msr daif, %0\n"
+      :
+      : "r"(flags)
+      : "memory");
 }
 
 /**
@@ -168,6 +196,9 @@ void spinlock_acquire(spinlock_t *lock) {
  * memory operations are visible before the lock is freed.
  */
 void spinlock_release(spinlock_t *lock) {
+#ifdef KERNEL_MODE_UNIT_TEST
+  lockdbg_note_releasing(lock); /* SEC-OBS-B: pop before the HW clear */
+#endif
   /* GB-060: clear the owner BEFORE the release-store, so a CPU that finds the
      lock free never sees a stale holder. */
   lock->owner = 0;
@@ -207,7 +238,13 @@ uint64_t spinlock_acquire_irqsave(spinlock_t *lock) {
       :
       : "memory");
 
+#ifdef KERNEL_MODE_UNIT_TEST
+  lockdbg_precheck(lock); /* SEC-OBS-B: report inversion before we spin */
+#endif
   spin_acquire_impl(lock, ra);
+#ifdef KERNEL_MODE_UNIT_TEST
+  lockdbg_note_acquired(lock);
+#endif
   return flags;
 }
 

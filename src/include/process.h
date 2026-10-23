@@ -350,6 +350,13 @@ struct process {
    * (GB-014) instead of the native chain.  Group anchor state (the leader
    * marks it; threads inherit from the anchor).  PROC_FLAG_LINUX_ABI = 1. */
   uint32_t abi_flags;
+  /* GB-014: the last user PC observed on a trap into the kernel. A PCB's saved
+   * context is only written on a preemption/resume, so at exit it can still
+   * read as the entry point even when the program ran thousands of
+   * instructions. Latching the PC here makes the exit report name where the
+   * program actually got to, which is the first question asked of any program
+   * that stops silently. */
+  uint64_t last_user_pc;
 };
 
 /* Linux-compat process flag (GB-013): route syscalls through the Linux
@@ -595,6 +602,19 @@ void process_wakeup(int pid);
 
 // Wake up all kernel threads that are in the BLOCKED state.
 void process_wake_all(void);
+
+/* SEC-OBS-B (security-plan.md observation B): deferred variant of the
+ * lost-wakeup catch-all for callers that hold finer locks — specifically
+ * the virtio-blk completion path, which runs under fat_lock (and through
+ * it f->lock) when FAT metadata I/O completes.  process_wake_all() takes
+ * proc_lock; acquiring it there would invert the documented order
+ * (proc -> ... -> fat) and close a deadlock cycle against any proc_lock
+ * holder that does disk I/O.  The deferred call just marks the wake
+ * pending; the timer tick drains it at IRQ dispatch entry, where rank
+ * rules do not apply (see lock.h).  One-tick latency is acceptable for a
+ * recovery path whose normal counterpart (explicit wakes) stays immediate. */
+void process_wake_all_deferred(void);
+void process_wake_all_drain(void); /* tick only */
 
 // Get the PCB for a specific PID.
 struct process *process_get_pcb(int pid);

@@ -219,7 +219,7 @@ ifeq ($(ARCH),intel)
   # fxsave64/fxrstor64).  Userland, however, may use the FPU/SSE: the kernel
   # enables CR0.EM/MP/TS + CR4.OSFXSR/OSXMMEXCPT per core and carries each
   # process's 512-byte FXSAVE64 image across context switches (F1.5).
-  CFLAGS = -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx
+  CFLAGS = -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global
   # Hermetic userland include path (P3).  clang's driver for x86_64-none-elf
   # appends the WORKSTATION's glibc dirs (/usr/include) because the target
   # arch matches the host's; the aarch64 target never gets aarch64 host
@@ -258,7 +258,7 @@ ifeq ($(ARCH),intel)
 else
   # Default to ARM
   QEMU = qemu-system-aarch64
-  CFLAGS = -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only
+  CFLAGS = -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global
   # F1.5 (FPU): userland is free to use FP/SIMD — CPACR_EL1.FPEN=0b11 is
   # set per core in boot.s and the kernel saves/restores the FPSIMD
   # register file per process (src/kernel/arch/arm/fpu.s).  ONLY this user
@@ -377,6 +377,27 @@ endif
 
 ifneq ($(MODE),desktop)
   QEMU_ARGS += -display none
+endif
+
+# KVM acceleration is the default for ARCH=intel on hosts that have
+# /dev/kvm (the swarm farm VMs expose nested SVM).  Without it a TCG intel
+# wave is tens of minutes; with -enable-kvm it is minutes, and the ELF-compat
+# track (intel-only by design, gaming.md §2.1) depends on fast intel cycles.
+# The mode follows /dev/kvm's presence — an environmental fact, so the same
+# host always runs the same mode (reproducibility holds), and a host can
+# force the slow path for an A/B with SKIP_KVM=1.  macOS has no /dev/kvm, so
+# this block is a no-op there; ARM is unaffected (no aarch64 KVM on x86 host).
+# Tier wrappers (tools/t3_tier.sh, run_unit_tests_intel.sh) may already pass
+# -enable-kvm in QEMU_ARGS; the findstring guard keeps it from duplicating.
+ifeq ($(ARCH),intel)
+  KVM_DEV := $(shell test -e /dev/kvm && echo 1 || echo 0)
+  ifeq ($(KVM_DEV),1)
+    ifneq ($(SKIP_KVM),1)
+      ifeq ($(findstring -enable-kvm,$(QEMU_ARGS)),)
+        QEMU_ARGS += -enable-kvm
+      endif
+    endif
+  endif
 endif
 
 # --- GX (docs/graphics-accel.md §3-D5): resolve QEMU_GPU to the concrete
@@ -823,6 +844,11 @@ $(OBJ_DIR)/gfxbench.o: src/user/gfxbench.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
+# GB-045: pure burst-per-flush stats shared by GFXBENCH and its host test.
+$(OBJ_DIR)/gfx_stats.o: src/user/gfx_stats.c src/user/gfx_stats.h $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
 # P3.2: transcendental acceptance (crt0 + libc.a, the sysroot link path the
 # ICU probe uses).  USER_CFLAGS allows FP in user code since F1.5.
 # NOTE: user_math_test.o (not math_test.o) -- src/kernel/math_test.c owns
@@ -971,7 +997,7 @@ $(FPU_T_BIN): $(OBJ_DIR)/fpu_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_mallo
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/fpu_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/fpu_test.elf $(FPU_T_BIN)
 
-$(GFXBENCH_BIN): $(OBJ_DIR)/gfxbench.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
+$(GFXBENCH_BIN): $(OBJ_DIR)/gfxbench.o $(OBJ_DIR)/gfx_stats.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/gfxbench.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/gfxbench.elf $(GFXBENCH_BIN)
 
@@ -2055,6 +2081,10 @@ disk.img: $(TAR_BIN)
 # browser rules).
 disk.img: browser-staged tools-staged
 
+# The browser's TLS trust store is a disk input, not a build artefact: if the
+# bundle is missing the disk must not be built silently-https-broken.
+disk.img: certs/cacert.pem
+
 disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BIN) $(HEAP_TEST_BIN) $(SPAWN_TEST_BIN) $(GRAPHICS_TEST_BIN) $(WSRF_T_BIN) $(SMP_TEST_BIN) $(PIPETEST_BIN) $(NETTEST_BIN) $(TIMEOUT_BIN) $(NFSTEST_BIN) $(DESKTOP_BIN) $(EDITOR_BIN) $(EDITOR_T_BIN) $(DIALOG_TEST_BIN) $(PONG_T_BIN) $(STRESS_TEST_BIN) $(FPU_T_BIN) $(GFXBENCH_BIN) $(MATH_T_BIN) $(ERRNO_TEST_BIN) $(SOCK2TST_BIN) $(POLLTST_BIN) $(BLKTEST_BIN) $(RANDTST_BIN) $(DNSTST_BIN) $(NETFIX_BIN) $(CXXSMOKE_BIN) $(HELLO_BIN) $(SH_BIN) $(LS_BIN) $(CAT_BIN) $(GREP_BIN) $(LESS_BIN) $(TAIL_BIN) $(HEAD_BIN) $(SHELL_TEST_BIN) $(PS_BIN) $(FREE_BIN) $(UPTIME_BIN) $(KILL_BIN) $(BASENAME_BIN) $(DIRNAME_BIN) $(SEQ_BIN) $(EXPR_BIN) $(TESTGNU_BIN) $(CP_BIN) $(RM_BIN) $(MV_BIN) $(TOUCH_BIN) $(WC_BIN) $(SED_BIN) $(HEDGNU_BIN) $(WCTEST_BIN) $(CUTTEST_BIN) $(TR_BIN) $(TRTEST_BIN) $(PASTE_BIN) $(PASTE_T_BIN) $(FOLD_BIN) $(FOLDTEST_BIN) $(NL_BIN) $(NLTEST_BIN) $(COMM_BIN) $(COMMTEST_BIN) $(TSORT_BIN) $(TSORT_T_BIN) $(EXPAND_BIN) $(EXPAND_T_BIN) $(UNEXPAND_BIN) $(UNEXPAND_T_BIN) $(CKSUM_BIN) $(CKSUM_T_BIN) $(FATBIG_T_BIN) $(LFN_T_BIN) $(MD5SUM_BIN) $(MD5SUM_T_BIN) $(TAC_BIN) $(TACTEST_BIN) $(CMP_BIN) $(CMPTEST_BIN) $(REGTEST_BIN) $(SEDTEST_BIN) $(GREPTEST_BIN) $(SUBPRB_BIN) $(PIPEPROBE_BIN) $(HEDTEST_BIN) $(TAILGN_BIN) $(CUT_BIN) $(TAILTEST_BIN) $(PROCCHLD_BIN) $(PROCTEST_BIN) $(LKSTEST_BIN) $(SORT_BIN) $(UNIQ_BIN) $(PING_BIN) $(NC_BIN) $(IFCONFIG_BIN) $(SHELL_TEST2_BIN) $(MKDIR_BIN) $(SHELL_TEST3_BIN) $(PONG_BIN) $(MILLIPEDE_BIN) $(STARDUST_BIN) $(FILEDIALOG_ARROW_T_BIN) $(MONITOR_BIN) $(MONITOR_TEST_BIN) $(DESKTOP_APP_BINS) $(XCALC_BIN) $(ANTFARM_BIN) $(XEYES_BIN) $(XNIBBLER_BIN) $(NANO_BIN) $(APPS_T_BIN) $(THRD_T_BIN) $(TLS_T_BIN) $(WK1C_T_BIN) $(CXX_T_BIN) $(CXX_RTTI_T_BIN) $(MMTEST_T_BIN) $(IPC_T_BIN) $(ICU_SMOKE_BIN) $(SQLTEST_BIN) $(SIGTEST_BIN) $(SPAWNEXCHILD_BIN) $(TORTURE_T_BIN) $(BIG_BIN) $(SELFHOST_BIN) $(MODE_FILE) $(XCRYPT_BIN) $(NES_BIN)
 
 # w2-mtools disk
@@ -2071,6 +2101,12 @@ disk.img: $(TARGET) $(MEM_TEST_BIN) $(FILE_IO_BIN) $(CONSOLE_BIN) $(FORK_TEST_BI
 	$(MMD) -i disk.img ::/EFI/BOOT
 	$(MMD) -i disk.img ::/boot
 	$(MMD) -i disk.img ::/home
+	# CA roots for the browser's TLS stack (libcurl/mbedTLS): the driver pins
+	# /CERTS/CA.PEM (WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp).  Without
+	# this every https:// navigation fails at certificate verification and the
+	# user sees the previous page with no explanation.
+	$(MMD) -i disk.img ::/CERTS
+	$(MCOPY) -i disk.img certs/cacert.pem ::/CERTS/CA.PEM
 	$(MMD) -i disk.img ::/nfs
 	$(MMD) -i disk.img ::/mnt
 	$(MMD) -i disk.img ::/TESTDIR
@@ -2586,6 +2622,11 @@ GAMES_SCAN_TEST = games_scan_test_host
 $(GAMES_SCAN_TEST): obj/host_games_scan_test.o obj/host_user_games_scan.o obj/host_compat.o
 	$(HOST_CC) -o $@ $^
 
+# GB-045: GFXBENCH burst-per-flush stats host golden (gfx_stats.c is pure).
+GFX_STATS_TEST = gfx_stats_test_host
+$(GFX_STATS_TEST): obj/host_gfx_stats_test.o obj/host_user_gfx_stats.o
+	$(HOST_CC) -o $@ $^
+
 # Desktop keyboard input: Ctrl+letter control bytes and the software key
 # auto-repeat (map_key_char/key_may_repeat/key_repeat_tick in desktop.c).
 # The test includes src/user/desktop.c directly (file-scope state), so it
@@ -2729,6 +2770,14 @@ INPUT_NODE_TEST = input_node_test_host
 $(INPUT_NODE_TEST): src/host/input_node_test.c src/kernel/input_node.c src/include/input_node.h src/include/linux_input.h src/include/evdev.h
 	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/input_node.c src/host/input_node_test.c -o $@
 
+# GB-051 audio assert: device-free compat audio-surface decision (GB-029) —
+# /dev/dsp (OSS) open -> ENODEV + SDL dummy silent-safe path. Single-TU host
+# golden (src/kernel/audio_stub.c), T1 differential vs <errno.h>; runs in
+# host_tests (the in-OS T5 playthrough leg is the separately wall-gated gate).
+AUDIO_STUB_TEST = audio_stub_test_host
+$(AUDIO_STUB_TEST): src/host/audio_stub_test.c src/kernel/audio_stub.c src/include/audio_stub.h
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/audio_stub.c src/host/audio_stub_test.c -o $@
+
 # /dev/fb0 mmap translation + fb blank/activate ABI surface: pure single-TU
 # host golden tests (T1) for src/kernel/fb_mmap.c, the device-free mmap half
 # of the compat /dev/fb0 node (GB-025).  When <linux/fb.h> and a real /dev/fb0
@@ -2798,6 +2847,21 @@ LINUX_ABI_TEST = linux_abi_test_host
 $(LINUX_ABI_TEST): obj/host_linux_abi_test.o
 	$(HOST_CC) -o $@ $^
 obj/host_linux_abi_test.o: src/host/linux_abi_test.c src/include/linux_syscall.h src/include/errno.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/include -c $< -o $@
+
+# GB-016 (host T4 value differential): the kernel uname shim's VALUES must equal
+# real Linux uname() (sysname, machine, NUL-padding).  The existing host probe's
+# `uname sysname=Linux` line is real-musl vs real-glibc on the same host — both
+# are Linux, so it cannot catch a shim returning the wrong identity.  This runs
+# the merged linux_fill_utsname against the host's real uname() byte-for-byte.
+UNAME_PARITY = uname_parity_host
+$(UNAME_PARITY): obj/host_linux_uname_parity.o obj/host_linux_uname.o
+	$(HOST_CC) -o $@ $^
+obj/host_linux_uname_parity.o: src/host/linux_uname_parity.c src/include/linux_uname.h src/include/linux_layout.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/include -c $< -o $@
+obj/host_linux_uname.o: src/kernel/linux_uname.c src/include/linux_uname.h src/include/linux_layout.h
 	@mkdir -p obj
 	$(HOST_CC) $(HOST_CFLAGS) -Isrc/include -c $< -o $@
 
@@ -3387,9 +3451,10 @@ DIFF_RUN = python3 tools/differential/diff_harness_test.py
 test_diff_harness:
 	$(HOST_RUN) $(DIFF_RUN)
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness $(GAMES_SCAN_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness $(GAMES_SCAN_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(GFX_STATS_TEST) $(UNAME_PARITY) $(AUDIO_STUB_TEST)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(GAMES_SCAN_TEST)
+	$(HOST_RUN) ./$(GFX_STATS_TEST)
 	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
 	$(HOST_RUN) ./$(DESKTOP_DAMAGE_TEST)
@@ -3417,6 +3482,7 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness $(GAM
 	$(HOST_RUN) ./$(ERRNO_TEST)
 	$(HOST_RUN) ./$(ELF_IMAGE_TEST)
 	$(HOST_RUN) ./$(LINUX_ABI_TEST)
+	$(HOST_RUN) ./$(UNAME_PARITY)
 	$(HOST_RUN) ./$(LINUX_LAYOUT_TEST)
 	$(HOST_RUN) ./$(LINUX_ABI_CONSTANTS_TEST)
 	$(HOST_RUN) ./$(THRD_TEST_HOST)
@@ -3437,6 +3503,7 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness $(GAM
 	$(HOST_RUN) ./$(MEMFD_TEST)
 	$(HOST_RUN) ./$(LINUX_INPUT_TEST)
 	$(HOST_RUN) ./$(INPUT_NODE_TEST)
+	$(HOST_RUN) ./$(AUDIO_STUB_TEST)
 	$(HOST_RUN) ./$(FB_MMAP_TEST)
 	$(HOST_RUN) ./$(WINDOW_DAMAGE_TEST)
 	$(HOST_RUN) ./$(WINDOW_TEXT_TEST)
@@ -3536,6 +3603,20 @@ style-diff:
 style-test:
 	python3 tools/test_cstyle.py
 
+# --- Merge gate (GB-005): one command to run the branch/PR gate -----------
+# merge_gate.sh aggregates the test tiers (T1 host golden always; heavy QEMU
+# T2/T3 tiers enabled via GATE_CI=1 / GATE_T2=1 / GATE_T3=1) into a single
+# verdict; merge_gate_test.sh proves the DoD "a dummy branch fails -> passes
+# the gate" (T3-verdict fail->pass + optional real T1 run).
+merge_gate:
+	bash tools/gate/merge_gate.sh
+
+merge_gate_ci:
+	GATE_CI=1 bash tools/gate/merge_gate.sh
+
+test_merge_gate:
+	bash tools/gate/merge_gate_test.sh
+
 # --- Two-arch parity CI (GB-044) ---
 # Runs the per-arch check on ARCH=arm AND ARCH=intel, requires both green
 # (gaming.md §2.3 parity), and enforces the GB-044 DoD "run window < best"
@@ -3548,3 +3629,4 @@ test_parity_ci:
 	bash tools/gate/parity_ci_test.sh
 
 .PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test parity_ci test_parity_ci bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest cache_setup cold_vs_cached test_cache test_diff_harness
+.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test merge_gate merge_gate_ci test_merge_gate parity_ci test_parity_ci cache_setup cold_vs_cached test_cache test_diff_harness bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest uname_parity_host
