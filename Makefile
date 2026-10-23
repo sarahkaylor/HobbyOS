@@ -1010,6 +1010,19 @@ $(POLLTST_BIN): $(OBJ_DIR)/poll_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_ma
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/poll_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/poll_test.elf $(POLLTST_BIN)
 
+# GB-086: negative control variant of the POLLTST select-timeout check, built
+# with -DPOLLTST_BROKEN_SELECT (the 100ms timeout select is replaced by a
+# zero-timeout select that returns immediately, ~0ms).  The >=85ms elapsed
+# check MUST therefore FAIL — this proves the gate cannot be painted green by a
+# broken select.  wabi: measured in-guest, ARM T3_SMP=1 → elapsed_ms=0, FAIL.
+POLLTSTBRK_BIN = $(OBJ_DIR)/POLLTSTBRK.BIN
+$(OBJ_DIR)/poll_test_brk.o: src/user/poll_test.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -DPOLLTST_BROKEN_SELECT -c src/user/poll_test.c -o $@
+$(POLLTSTBRK_BIN): $(OBJ_DIR)/poll_test_brk.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/poll_test_brk.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/poll_test_brk.elf $(POLLTSTBRK_BIN)
+
 $(RANDTST_BIN): $(OBJ_DIR)/rand_test.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/rand_test.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/rand_test.elf $(RANDTST_BIN)
