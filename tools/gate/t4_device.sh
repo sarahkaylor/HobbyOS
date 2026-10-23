@@ -51,8 +51,8 @@ host_alias() { [ "$1" = "write3" ] && echo write_stdout || echo "$1"; }
 # pipe_write / sock_write); a healthy leg-A capture never contains them, so the
 # source path must drop `if`-gated prow() lines or the two modes would disagree
 # on the same tree.
-dev_rows() { # $1 = '' (use emitted leg A) or 'source'
-  if [ -f "$LEGA" ] && [ -s "$LEGA" ]; then
+dev_rows() { # $1 = '' (use emitted leg A if present) or 'source' (force source)
+  if [ "${1:-}" != "source" ] && [ -f "$LEGA" ] && [ -s "$LEGA" ]; then
     grep '^row=' "$LEGA" | sed -E 's/^row=([^ ]+).*/\1/'
   else
     grep -vE '^[[:space:]]*if ' "$DEVPROBE" \
@@ -60,51 +60,103 @@ dev_rows() { # $1 = '' (use emitted leg A) or 'source'
   fi
 }
 # ---------------------------------------------------------------------------
+# --check: GB-073 row-set parity, hardened by GB-079 (re-opened 2026-10-23).
+#
+# GB-079's original defect: the verdict depended on whether obj/t4_legA.out
+# happened to exist.  The first fix printed the mode and dropped `if`-gated
+# rows, which made the VERDICT mode-independent — but failure detection was
+# still artefact-bound: in the default mode (leg A present) the row set came
+# from that saved file, so an edit to the probe itself was invisible.  Measured
+# 2026-10-23 on origin/main: an injected unconditional prow() PASSED --check
+# with leg A present and FAILED only when leg A was removed.
+#
+# The check therefore now grades BOTH sets and requires BOTH to pass:
+#   * source  — what the probe's own text says it emits (catches probe edits
+#               without needing a build, a guest, or a fresh capture)
+#   * emitted — what a recorded leg-A run actually emitted (catches guest-side
+#               drift, which source text cannot know about)
+# and it refuses a disagreement between them: an emitted capture that does not
+# match the source is stale, and a stale capture must fail rather than answer.
+# ---------------------------------------------------------------------------
 if [ "${1:-}" = "--check" ]; then
   fail=0
-  echo "=== t4_device --check: row-name set parity (GB-073) ==="
+  echo "=== t4_device --check: row-name set parity (GB-073, GB-079) ==="
   [ -f "$GOLDEN" ]      || { echo "  FAIL: golden manifest '$GOLDEN' absent"; fail=1; }
   [ -f "$DEVPROBE" ]    || { echo "  FAIL: device probe '$DEVPROBE' absent"; fail=1; }
   [ -f "$HOSTPROBE" ]   || { echo "  FAIL: host model '$HOSTPROBE' absent"; fail=1; }
-  [ -v LEGA ] && [ -f "$LEGA" ] && [ -s "$LEGA" ] || {
-    echo "  fail: leg A ('$LEGA') absent — will use source extraction (gate still checks source)"; }
+  HAVE_LEGA=1
+  { [ -f "$LEGA" ] && [ -s "$LEGA" ]; } || HAVE_LEGA=0
 
   # golden set
   mapfile -t G < <(grep -v '^#' "$GOLDEN" 2>/dev/null | grep -v '^$')
   echo "  golden rows: ${#G[@]}"
-  # device probe (guest) — from leg A if present, else from prow("...") in source.
-  # The two extraction paths must agree (GB-079), so both exclude the probe's
-  # `if`-gated error-diagnostic rows.
-  MODE=emitted
-  if [ ! -f "$LEGA" ] || [ ! -s "$LEGA" ]; then MODE=source; fi
-  mapfile -t A < <(dev_rows)
-  echo "  device probe rows: ${#A[@]} (mode=$MODE)"
   # host model — report("rowname", ...)
   mapfile -t H < <(grep -o 'report("[^"]*"' "$HOSTPROBE" | cut -d'"' -f2)
 
-  # every golden row must be emitted by BOTH (host name via alias)
-  for r in "${G[@]}"; do
-    inA=0; for x in "${A[@]}"; do [ "$x" = "$r" ] && inA=1; done
-    hr="$(host_alias "$r")"
-    inH=0; for x in "${H[@]}"; do [ "$x" = "$hr" ] && inH=1; done
-    if [ "$inA" = "1" ] && [ "$inH" = "1" ]; then
-      echo "  PASS row: $r (device+host)"
-    else
-      echo "  FAIL row: $r (device=$inA host=$inH) — a row the M1 -V DoD names is missing from a probe"
+  # check_one <mode> — grade one extraction of the device row set.
+  check_one() {
+    local mode="$1" rc=0
+    local -a A
+    mapfile -t A < <(dev_rows "$mode")
+    echo "  --- mode=$mode: device probe rows: ${#A[@]}"
+    # every golden row must be emitted by BOTH (host name via alias)
+    for r in "${G[@]}"; do
+      local inA=0 inH=0 x hr
+      for x in "${A[@]}"; do [ "$x" = "$r" ] && inA=1; done
+      hr="$(host_alias "$r")"
+      for x in "${H[@]}"; do [ "$x" = "$hr" ] && inH=1; done
+      if [ "$inA" = "1" ] && [ "$inH" = "1" ]; then
+        echo "  PASS row: $r (device+host)"
+      else
+        echo "  FAIL row: $r (device=$inA host=$inH) [mode=$mode] — a row the M1 -V DoD names is missing from a probe"
+        rc=1
+      fi
+    done
+    # device must not carry EXTRA rows outside the golden (a W0 device probe that
+    # emits a row the -V DoDs do not name is a row no DoD checks — a smaller,
+    # unchecked surface).  The host model is a SUPERSET compat probe (it also
+    # carries GB-019/021/022/023 rows), so it must CONTAIN every golden row but is
+    # allowed its own extra rows.
+    for x in "${A[@]}"; do
+      local inG=0 g
+      for g in "${G[@]}"; do [ "$g" = "$x" ] && inG=1; done
+      [ "$inG" = "1" ] || { echo "  FAIL: device probe emits extra row '$x' not in golden [mode=$mode]"; rc=1; }
+    done
+    [ "$rc" = "0" ] && echo "  mode=$mode: PASS"
+    [ "$rc" = "0" ] || fail=1
+    return 0
+  }
+
+  check_one source
+  if [ "$HAVE_LEGA" = "1" ]; then
+    check_one emitted
+    # A recorded capture that disagrees with the probe's own source is STALE.
+    # Refusing it is the whole point: otherwise a probe edit is invisible until
+    # somebody happens to regenerate the capture.
+    TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
+    dev_rows source | sort -u >"$TMPD/src"
+    dev_rows emitted | sort -u >"$TMPD/emit"
+    if ! diff -q "$TMPD/src" "$TMPD/emit" >/dev/null 2>&1; then
+      echo "  FAIL: recorded leg A is STALE — it disagrees with the device probe's source:"
+      diff -u "$TMPD/src" "$TMPD/emit" | sed -n '3,20p' | sed 's/^/        /'
+      echo "        regenerate obj/t4_legA.out (make t4_legA) or delete it; a stale capture is not a verdict."
       fail=1
+    else
+      echo "  PASS: recorded leg A agrees with the probe source (${#G[@]} golden rows, no drift)"
     fi
-  done
-  # device must not carry EXTRA rows outside the golden (a W0 device probe that
-  # emits a row the -V DoDs do not name is a row no DoD checks — a smaller,
-  # unchecked surface).  The host model is a SUPERSET compat probe (it also
-  # carries GB-019/021/022/023 rows), so it must CONTAIN every golden row but is
-  # allowed its own extra rows.
-  for x in "${A[@]}"; do
-    inG=0; for g in "${G[@]}"; do [ "$g" = "$x" ] && inG=1; done
-    [ "$inG" = "1" ] || { echo "  FAIL: device probe emits extra row '$x' not in golden"; fail=1; }
-  done
-  if [ "$fail" = "0" ]; then echo "t4_device --check: PASS (mode=$MODE) — device probe carries exactly the golden row-name set, and the host model contains every golden row."; exit 0; fi
-  echo "t4_device --check: FAIL (mode=$MODE)"
+  else
+    echo "  note: leg A ('$LEGA') absent — emitted mode not graded (source mode is)"
+
+  fi
+  if [ "$fail" = "0" ]; then
+    if [ "$HAVE_LEGA" = "1" ]; then
+      echo "t4_device --check: PASS (mode=source+emitted) — both extractions carry exactly the golden row-name set and agree; the host model contains every golden row."
+    else
+      echo "t4_device --check: PASS (mode=source) — the probe source carries exactly the golden row-name set; the host model contains every golden row."
+    fi
+    exit 0
+  fi
+  if [ "$HAVE_LEGA" = "1" ]; then echo "t4_device --check: FAIL (mode=source+emitted)"; else echo "t4_device --check: FAIL (mode=source)"; fi
   exit 1
 fi
 
@@ -171,11 +223,47 @@ EOF
     echo "  OK — absent probe FAILED as required"; :
   fi
 
+  # (d) GB-079 re-open: the --check must catch a probe EDIT in the mode a
+  #     developer actually sees (leg A present), not only when it is absent.
+  #     Runs the real --check against synthetic fixtures: an unconditional row
+  #     added to the probe must FAIL with leg A present.
+  echo "[self-test] GB-079 (a probe edit must FAIL in both --check modes):"
+  mkdir -p "$TMP/c"
+  printf 'write3\nuname_rc\n' >"$TMP/c/golden"
+  printf 'row=write3 rc=3 errno=0\nrow=uname_rc rc=0 errno=0\n' >"$TMP/c/legA"
+  cat >"$TMP/c/probe_ok.c" <<'EOF'
+int main(void) { prow("write3", 3, 0); prow("uname_rc", 0, 0); return 0; }
+EOF
+  cat >"$TMP/c/probe_bad.c" <<'EOF'
+int main(void) { prow("bogus_unconditional", 7, 0); prow("write3", 3, 0); prow("uname_rc", 0, 0); return 0; }
+EOF
+  check_rc() { # $1 probe $2 legA-or-"" -> echoes exit code of --check
+    local probe="$1" lega="$2" rc
+    local lega_arg="$TMP/c/absent.out"
+    [ -n "$lega" ] && lega_arg="$lega"
+    T4_DEV_PROBE="$probe" T4_ROWS_GOLDEN="$TMP/c/golden" T4_LEGA_OUT="$lega_arg" \
+      bash "${BASH_SOURCE[0]}" --check >"$TMP/c/out.log" 2>&1
+    rc=$?
+    echo "$rc"
+  }
+  for lega_case in "" "$TMP/c/legA"; do
+    local_name=$([ -n "$lega_case" ] && echo "leg A present" || echo "leg A absent")
+    if [ "$(check_rc "$TMP/c/probe_ok.c" "$lega_case")" != "0" ]; then
+      echo "  UNEXPECTED FAIL — healthy probe rejected ($local_name)"; fail_count=$((fail_count+1))
+    else
+      echo "  OK — healthy probe PASSES ($local_name)"
+    fi
+    if [ "$(check_rc "$TMP/c/probe_bad.c" "$lega_case")" = "0" ]; then
+      echo "  UNEXPECTED PASS — injected probe row not caught ($local_name)"; fail_count=$((fail_count+1))
+    else
+      echo "  OK — injected probe row FAILS ($local_name)"
+    fi
+  done
+
   echo "self-test result: fail_count=$fail_count"
   [ "$fail_count" = "0" ]
   exit $?
 fi
-
 # ---------------------------------------------------------------------------
 # real device gate
 # ---------------------------------------------------------------------------
