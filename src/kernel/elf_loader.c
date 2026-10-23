@@ -179,6 +179,28 @@ int elf_loader_load(struct addr_space *as, uint16_t cluster, uint32_t fsize,
      returns ELF_ERR_RELOC rather than skipping a type it does not implement. */
   {
     int rrc = elf_apply_relocations(&img, (uint8_t *)stage, span, USER_IMG_BASE);
+    /* GB-013: the loader has just applied every R_*_RELATIVE itself, so the
+     * image is fully relocated before it is mapped. A static-pie nonetheless
+     * runs its own relocation loop over DT_RELA, and on this image that loop
+     * indexes the table at its LINK-TIME address (measured: reads
+     * rela[0].r_info at VA=0x210, i.e. DT_RELA=0x208 used literally, because
+     * startup derives a zero load bias). Zero the count entries so that loop
+     * has nothing to iterate: there is genuinely nothing left to do, and the
+     * alternative -- letting it walk a table at an address that is not mapped
+     * in the child -- kills the program before it reaches main().
+     * Change is confined to images we relocated (rrc == ELF_OK). */
+    if (rrc == ELF_OK && img.dyn_size >= 16) {
+      uint64_t dyn_off = img.dyn_vaddr - img.vaddr_base;
+      if (dyn_off + img.dyn_size <= span) {
+        uint64_t *d = (uint64_t *)(stage + dyn_off);
+        uint64_t n = img.dyn_size / 16;
+        for (uint64_t ei = 0; ei < n; ei++) {
+          if (d[ei * 2] == 8) d[ei * 2 + 1] = 0;               /* DT_RELASZ   */
+          if (d[ei * 2] == 0x6ffffff9ULL) d[ei * 2 + 1] = 0;   /* DT_RELACOUNT */
+          if (d[ei * 2] == 0) break;                           /* DT_NULL     */
+        }
+      }
+    }
     if (rrc != ELF_OK) {
       uart_puts("elf loader: relocations: ");
       uart_puts(elf_strerror(rrc));
