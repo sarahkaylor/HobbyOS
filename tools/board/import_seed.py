@@ -56,6 +56,10 @@ WORKSTREAM = {
     "GB-074": ["infra", "tests"],
     "GB-075": ["tests", "perf"],
     "GB-076": ["abi", "tests", "elf-compat"],
+    "GB-077": ["abi", "tests"],
+    "GB-078": ["loader", "abi"],
+    "GB-079": ["tests", "elf-compat"],
+    "GB-080": ["infra", "tests"],
 }
 DEEP_IDS = {"GB-010", "GB-011", "GB-013", "GB-031", "GB-041", "GB-054"}
 
