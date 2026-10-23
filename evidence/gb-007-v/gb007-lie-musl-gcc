@@ -1,0 +1,3 @@
+#!/bin/sh
+# GB-007-V: musl-gcc that links a wrong `close` into leg A only.
+exec /usr/bin/musl-gcc -Dclose=lie_close "$@" /tmp/gb007-lie.c

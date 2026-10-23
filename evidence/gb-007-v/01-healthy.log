@@ -1,0 +1,6 @@
+t4 host differential: A=0 B=0 cases=3
+t4_parity: PASS (host differential locked; device leg gated)
+
+real	0m1.423s
+user	0m0.287s
+sys	0m0.215s

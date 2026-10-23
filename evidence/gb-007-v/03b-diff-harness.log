@@ -1,0 +1,16 @@
+=== build + capture hello ===
+  PASS: hello built
+  PASS: capture ref run
+  PASS: capture re-run
+  PASS: stdout is the hello contract (hello line + errno line)
+  PASS: exit is 0
+  PASS: errno is ENOENT(=2)
+=== identical re-run -> MATCH ===
+  PASS: identical captures MATCH (MATCH)
+=== lie detector: planted divergences must be DIVERGE ===
+  PASS: wrong stdout -> DIVERGE (DIVERGE (stdout))
+  PASS: wrong exit -> DIVERGE (DIVERGE (exit))
+  PASS: wrong errno -> DIVERGE (DIVERGE (errno))
+
+Checks: 10, failed: 0
+DIFF HARNESS TEST PASSED

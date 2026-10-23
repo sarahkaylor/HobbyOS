@@ -1,0 +1,3 @@
+SKIP leg A: musl-gcc not found (install musl musl-tools)
+t4 host differential: SKIPPED (a required leg did not run: A=skip B=/home/sarah/.hermes/cache/scratch/tmp.3enlmJEuCh/t4_probe.host) — FAILING the tier per GB-066 (no false green)
+t4_parity: FAIL
