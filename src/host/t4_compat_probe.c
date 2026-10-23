@@ -377,6 +377,18 @@ int main(void) {
     report("pselect6_ready", pselect(pfd[0] + 1, &rf2, NULL, NULL, &ts, &empt));
     report("pselect6_ready_fdset", FD_ISSET(pfd[0], &rf2) ? 1 : 0);
 
+    /* GB-086: select(timeout) on an empty pipe must honor the timeout and
+     * return 0 (timeout), not an error and not an instant positive return.
+     * Both legs (real Linux + HobbyOS host shim) must agree on this semantics;
+     * the measured wall-time bound is verified in-guest (POLLTST at both CPU
+     * counts).  This row pins the deterministic rc=0 part of the property. */
+    fd_set rt;
+    FD_ZERO(&rt); FD_SET(pfd[0], &rt);
+    struct timeval tv2 = {0, 100}; /* 100ms */
+    errno = 0;
+    report("select_timeout_rc", select(pfd[0] + 1, &rt, NULL, NULL, &tv2));
+    report("select_timeout_fdset", FD_ISSET(pfd[0], &rt) ? 1 : 0);
+
     close(pfd[0]); close(pfd[1]);
 
     struct pollfd pf2[1];
