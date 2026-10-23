@@ -26,14 +26,18 @@
 # fixture with a known glued line and a known clean one.
 #
 # Env: T4_SERIAL   path to the serial log to scan (default obj/t3_<arch>.log)
+# Arg: <log>       same, and it WINS over T4_SERIAL.  (Coordinator 2026-10-23:
+#                  argv used to be ignored, so `t4_glued.sh some/log` silently
+#                  scanned the default path — and a missing file counted 0.)
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SERIAL="${T4_SERIAL:-$ROOT/obj/t3_intel.log}"
+SERIAL="${1:-${T4_SERIAL:-$ROOT/obj/t3_intel.log}}"
 
 # --- counter ---------------------------------------------------------------
 count_glued() { # $1 log -> prints count
   local log="$1"
-  [ -f "$log" ] || { echo 0; return 0; }
+  # An ABSENT log is not a clean log: the caller decides (see the real gate).
+  [ -f "$log" ] || return 1
   local l1 l2
   # P1: 2+ distinct bracketed tags on one line (dedupe within the line).
   l1=$(grep -aE '\[[A-Za-z0-9_-]+\].*\[[A-Za-z0-9_-]+' "$log" \
@@ -66,12 +70,22 @@ EOF
   cg=$(count_glued "$TMP/glued")
   cc=$(count_glued "$TMP/clean")
   echo "self-test: glued fixture count=$cg (want >0), clean fixture count=$cc (want 0)"
-  [ "${cg:-0}" -gt 0 ] && [ "${cc:-1}" = "0" ] && { echo "self-test: OK — counter can fail and stays 0 on clean"; exit 0; }
+  # (c) an ABSENT log must NOT be a pass — the defect class this gate exists for.
+  T4_MISSING_RC=0
+  bash "${BASH_SOURCE[0]}" "$TMP/does_not_exist.log" >"$TMP/missing.out" 2>&1 || T4_MISSING_RC=$?
+  echo "self-test: absent-log exit=$T4_MISSING_RC (want non-zero): $(tail -1 "$TMP/missing.out")"
+  [ "${cg:-0}" -gt 0 ] && [ "${cc:-1}" = "0" ] && [ "$T4_MISSING_RC" != "0" ] && {
+    echo "self-test: OK — counter can fail, stays 0 on clean, and refuses a missing log"; exit 0; }
   echo "self-test: FAIL"; exit 1
 fi
 
 # --- real gate -------------------------------------------------------------
-g=$(count_glued "$SERIAL")
+if [ ! -f "$SERIAL" ]; then
+  echo "t4_glued: FAIL (exit 2) — serial log '$SERIAL' absent. A missing log is not a"
+  echo "          clean log: 0 glued lines cannot be measured over nothing."
+  exit 2
+fi
+g=$(count_glued "$SERIAL") || { echo "t4_glued: FAIL (exit 2) — cannot read '$SERIAL'"; exit 2; }
 echo "t4_glued: $g glued console lines in '$SERIAL'"
 if [ "$g" = "0" ]; then
   echo "t4_glued: PASS — every console line is a single writer (whole-line atomic)."
