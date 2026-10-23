@@ -1,0 +1,35 @@
+From a53f26e06823660c690468bd2cc94aa52c95082b Mon Sep 17 00:00:00 2001
+From: DEEP Verifier <verifier@local>
+Date: Fri, 23 Oct 2026 23:55:44 +0000
+Subject: [PATCH] GB-087: the manifest wave loader must terminate the kernel
+ task, not return (1-CPU #GP vector 13 rip=0)
+
+---
+ src/kernel/main.c | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/src/kernel/main.c b/src/kernel/main.c
+index 823d0b6..11b56e5 100755
+--- a/src/kernel/main.c
++++ b/src/kernel/main.c
+@@ -181,7 +181,16 @@ static void test_wave_loader(void *arg) {
+           if (!nl) break;
+           p = e + 1;
+         }
+-        if (dispatched > 0) return;   /* manifest wins; literals are the default */
++        /* GB-087: the manifest wins and the literals are the default -- but the
++           loader must TERMINATE like the literal path does, not RETURN.  This
++           task is entered by iretq onto an empty kernel-task stack (no return
++           address, by construction), so `return` popped 0 and control went to
++           address 0: #GP vector 13, err 0, rip=0, rsp=kstack_top+8, pid 1, at
++           1 CPU as soon as the wave was a manifest. */
++        if (dispatched > 0) {
++          extern void kernel_exit(void);
++          kernel_exit(); /* never returns */
++        }
+       }
+     }
+   }
+-- 
+2.53.0
+

@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log /tmp/gb087/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 30869 console lines, 81 FAIL lines, 4 user memory fault records across 4 processes, 76 programs exited, halted=1
+T3_intel: FAIL — 81 FAIL line(s); first 20:
+2812:[REGTEST] PASS row [SEDTEST] FAIL basic_s (stdout)
+4424:[SEDTEST] FAIL s_g (stdout)
+5092:[SEDTEST] FAIL s_2nd (stdout)
+5682:[SEDTEST] FAIL s_p_n (stdout)
+6220:[SEDTEST] FAIL amp (stdout)
+6449:[TACTEST] FAIL missing file
+6451:[TACTEST] FAIL empty separator
+6493:[TACTEST] FAILURES: 4
+6548:[SEDTEST] FAIL backref (stdout)
+6753:[SEDTEST] FAIL empty_reuse (stdout)
+6928:[SEDTEST] FAIL case_I (stdout)
+7149:[SEDTEST] FAIL addr_line_d (stdout)
+7260:[TSORTTEST] FAIL chain from FILE (exit status -1 != 0)
+7261:[TSORTTEST] FAIL [WAITPID] ECHILD caller=49 CMPTEST.BIN want=-204 children=0
+7292:[SEDTEST] FAIL addr_range_d (stdout)
+7295:[TSORTTEST] FAIL chain from '-' operand (exit status -1 != 0)
+7297:[TSORTTEST] FAIL diamond from stdin (exit status -1 != 0)
+7313:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+7342:[TSORTTEST] FAIL cycle from stdin names '-' (exit status -1 != 1)
+7343:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+T3_intel EXIT=1
+TIER_DEFAULT_RC=1
