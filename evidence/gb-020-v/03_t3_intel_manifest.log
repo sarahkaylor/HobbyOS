@@ -1,0 +1,10 @@
+$ T3_STAGE='mcopy probe + WAVE.CFG' bash tools/t3_tier.sh intel   # GB-072 manifest dispatch
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+=== T3 (intel): run (deadline 2700s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-94c9830d/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 142 console lines, 0 FAIL lines, 0 user memory fault records across 0 processes, 0 programs exited, halted=1
+T3_intel: FAIL — 1 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — only 0 programs exited (floor 55): too little work for a complete wave, so this cannot be a pass
+T3_intel EXIT=1
+t3 intel EXIT=1

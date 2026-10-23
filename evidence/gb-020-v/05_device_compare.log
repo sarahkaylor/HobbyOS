@@ -1,0 +1,26 @@
+$ T4_LEGA_OUT=obj/t4_legA.out T4_SERIAL=obj/t3_intel.log bash tools/gate/t4_device.sh
+=== t4_device: leg A reference: obj/t4_legA.out ===
+=== t4_device: capture leg B from serial 'obj/t3_intel.log' ===
+t4_device: FAIL — the probe never arrived in the guest (no 't4-probe-arrived'
+  in obj/t3_intel.log after 120s).  This is a FAIL, not a SKIP (DoD clause 3).
+  (tail of serial:)
+  STACK[2]: 0x0000000000000000
+  STACK[3]: 0x0000000000000000
+  STACK[4]: 0x0000000000000000
+  STACK[5]: 0x0000000000000000
+  STACK[6]: 0x0000000000000000
+  STACK[7]: 0x0000000000000000
+  STACK[8]: 0x0000000000000000
+  STACK[9]: 0x0000000000000000
+  STACK[10]: 0x0000000000000000
+  STACK[11]: 0x0000000000000000
+  STACK[12]: 0x0000000000000000
+  STACK[13]: 0x0000000000000000
+  STACK[14]: 0x0000000000000000
+  STACK[15]: 0x0000000000000000
+[KERNEL] FATAL kernel-mode fault, halting this CPU: vector=13 rip=0x0000000000000000 cr2=0x0000000000000000 pid=1 err=0 cr3=0x0000000075512000 pd480=0x00000000810000FB
+[LOSTWAKE] disposing pid=1  (stale dead-owner claim, poisoned resume)
+[IDLESTUCK] cpu=0 rounds=1451 t=4535
+[HALT-CD] cpu=7 free=62 alloc=0 exited=2 running=0 blocked=0 other=0
+System halt from CPU 7.
+[EXIT=1
