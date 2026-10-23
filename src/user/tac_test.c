@@ -127,7 +127,7 @@ static int write_file(const char *path, const char *content, size_t len) {
   /* FAT16 has no truncate: drop any stale file first so a shorter rewrite
      cannot leave old bytes past the new end.  */
   unlink(path);
-  fd = open(path, O_WRONLY | O_CREAT | O_TRUNC);
+  fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (fd < 0)
     return -1;
   while (off < len) {

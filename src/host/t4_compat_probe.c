@@ -308,6 +308,27 @@ int main(void) {
     system(rm);
   }
 
+  /* GB-084: open()'s optional mode arg must be honored.  Create a file with
+   * O_CREAT and an explicit 0600 mode, then stat it: the mode read back must
+   * carry 0600 (S_IRUSR|S_IWUSR).  On leg B this routes through ho_open, which
+   * must not discard the supplied mode (a 2-arg rely-on-UB path would give a
+   * random/garbage mode).  Deterministic: a fresh path each run. */
+  {
+    const char *mp = "/tmp/t4_mode_probe_0600";
+    char scr[80]; snprintf(scr, sizeof scr, "rm -f %s", mp);
+    system(scr);
+    errno = 0;
+    int mfd = open(mp, O_CREAT | O_WRONLY | O_TRUNC, 0600);
+    report("mode_open_creat", mfd);
+    struct stat ms;
+    errno = 0;
+    int mst = stat(mp, &ms);
+    report("mode_stat", mst);
+    report("mode_is_0600", mst == 0 && (ms.st_mode & 0777) == 0600);
+    if (mfd >= 0) close(mfd);
+    system(scr);
+  }
+
   /* GB-016: uname.  Both legs run on the SAME host/kernel, so sysname,
    * release, machine (and nodename/version given a fixed host) must agree
    * byte-for-byte — a uname shim that reports a non-Linux sysname or a
