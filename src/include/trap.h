@@ -26,4 +26,17 @@ void irq_lower_handler_c(struct trap_frame *tf);
    must not dereference (top - 8) downwards). See trap.c. */
 int watchdog_stack_scan_ok(uint64_t top);
 
+/* SEC-3 (security-plan.md #3): fault-safe user-string copy shared by the
+ * arch syscall handlers (defined in each arch/trap.c). Validates AND reads
+ * every byte atomically via vm_user_read — no validate-then-use window.
+ * Returns 1 on success (dst NUL-terminated), 0 on bad/unmappable ptr. */
+int u_strcpy(const char *src, char *dst, int cap);
+
+/* SEC-10 (security-plan.md #10): kernel-stack exhaustion guard (defined in
+ * process.c). kernel_stack_remaining() = bytes between current SP and this
+ * CPU's 64 KiB stack slice bottom; kernel_stack_low(margin) answers the
+ * threshold question. sync_lower_handler_c halts when low at entry. */
+uint64_t kernel_stack_remaining(void);
+int kernel_stack_low(uint64_t margin);
+
 #endif // TRAP_H

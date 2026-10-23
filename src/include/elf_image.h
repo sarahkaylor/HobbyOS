@@ -64,7 +64,8 @@ enum {
   ELF_ERR_ENTRY = -18,       /* e_entry outside every executable PT_LOAD    */
   ELF_ERR_NO_TEXT = -19,     /* no executable segment                       */
   ELF_ERR_DST_RANGE = -20,   /* destination buffer can't hold the image     */
-  ELF_ERR_ARGS = -21         /* null pointer / zero length                  */
+  ELF_ERR_ARGS = -21,        /* null pointer / zero length                  */
+  ELF_ERR_RELOC = -22        /* unsupported relocation type / bad RELA table */
 };
 
 struct elf_segment {
@@ -84,6 +85,19 @@ struct elf_image {
   uint64_t vaddr_end;  /* page-aligned end of the highest PT_LOAD  */
   uint32_t nsegs;
   uint32_t phnum;      /* all program headers seen (incl. non-LOAD) */
+  /* GB-013: PT_DYNAMIC, needed to apply R_*_RELATIVE over the laid-out image.
+     A static-PIE is position-independent only after its relative relocations
+     are applied; without them every GOT/pointer slot still holds a link-time
+     address relative to 0 and the first indirect call lands at address 0.
+     Zero means the image has no dynamic section (a flat/fixed image). */
+  uint64_t dyn_vaddr;
+  uint64_t dyn_size;
+  /* GB-014: program-header table location, needed to fill AT_PHDR/AT_PHNUM/
+     AT_ENTRY in the startup auxv.  A Linux program reads its own program
+     headers to find PT_DYNAMIC and its entry, and without these the musl
+     startup dereferences small offsets (measured: fault at VA=0x210). */
+  uint64_t phoff;
+  uint32_t phent;
   struct elf_segment segs[ELF_MAX_LOAD_SEGMENTS];
 };
 
@@ -107,6 +121,17 @@ uint64_t elf_image_span(const struct elf_image *img);
 * loader relies on.  Returns ELF_OK or ELF_ERR_ARGS / ELF_ERR_DST_RANGE. */
 int elf_copy_into(const struct elf_image *img, const void *buf, uint64_t len,
                   uint8_t *dst, uint64_t dst_len);
+
+/* GB-013: apply R_*_RELATIVE relocations over a laid-out image (`stage` holds
+ * the image at vaddr_base-relative offsets, exactly as it will be mapped at
+ * `base`).  A static-PIE is position-independent only after this; without it the
+ * program enters correctly and faults at the first indirect call.  Returns
+ * ELF_OK (including "no dynamic section, nothing to do"), or ELF_ERR_RELOC for
+ * an unsupported relocation type or a malformed RELA/FILE table -- refused, never
+ * skipped, because a silently-skipped relocation looks like working code until
+ * it jumps into the wrong place. */
+int elf_apply_relocations(const struct elf_image *img, uint8_t *stage,
+                          uint64_t span, uint64_t base);
 
 /* Human-readable name for an ELF_ERR_* (for serial logs; never NULL). */
 const char *elf_strerror(int err);

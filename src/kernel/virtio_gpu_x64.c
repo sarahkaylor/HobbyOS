@@ -765,6 +765,29 @@ void virtio_gpu_flush(void) {
  * then presents each through the active path: per-rect
  * TRANSFER_TO_HOST_2D + RESOURCE_FLUSH on virtio-pci, row-wise copy into
  * the BGA LFB otherwise. */
+/* SEC-7 (security-plan.md #7): syscall-boundary validation, x64 twin of the
+ * ARM helper in virtio_gpu.c.  The driver clamps for internal callers; at
+ * the syscall boundary we reject instead: non-degenerate rects wholly
+ * inside the screen (int64 math so x+w/y+h cannot wrap) with summed area
+ * capped at eight full-screen flushes per call. */
+#define FLUSH_TOTAL_AREA_LIMIT (8ull * GPU_SCREEN_W * GPU_SCREEN_H)
+
+int virtio_gpu_flush_args_ok(const struct virtio_gpu_xrect* rects, int count) {
+  if (!rects || count < 0) return 0;
+  uint64_t total_area = 0;
+  for (int i = 0; i < count; i++) {
+    const struct virtio_gpu_xrect *r = &rects[i];
+    if (r->w <= 0 || r->h <= 0) return 0;
+    if (r->x < 0 || r->y < 0) return 0;
+    int64_t x1 = (int64_t)r->x + r->w;
+    int64_t y1 = (int64_t)r->y + r->h;
+    if (x1 > GPU_SCREEN_W || y1 > GPU_SCREEN_H) return 0;
+    total_area += (uint64_t)r->w * (uint64_t)r->h;
+    if (total_area > FLUSH_TOTAL_AREA_LIMIT) return 0;
+  }
+  return 1;
+}
+
 void virtio_gpu_flush_rects(const struct virtio_gpu_xrect* rects, int count) {
   if (!rects || count <= 0) return;
   if (count > VGPU_RECT_MAX) count = VGPU_RECT_MAX;

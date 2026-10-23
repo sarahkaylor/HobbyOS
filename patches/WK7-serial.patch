@@ -1,0 +1,94 @@
+diff --git a/src/kernel/fs.c b/src/kernel/fs.c
+index 3c25dbcb2b9ee0b65a0e205b199aeaac7c427d32..b017008a8e7d6f13ac9c349ef3b840ec547c8ef9 100755
+--- a/src/kernel/fs.c
++++ b/src/kernel/fs.c
+@@ -1459,17 +1459,28 @@
+  * a short buffer into an unmapped page faults the kernel) and broken for the
+  * write-count contract (fwrite stops after one chunk).  This emits exactly
+  * `size` bytes and returns the count; -EFAULT when the user range is
+- * invalid.  Byte-at-a-time uart_putc (not uart_puts) so no NUL assumption is
+- * made about the buffer. */
++ * invalid.  Byte-at-a-time emission so no NUL assumption is made about the
++ * buffer, but the whole user write now holds uart_lock (WK-7) so no kernel
++ * uart_puts / [ALIVE-SET] line can slice through it. */
+ int console_write_user(struct process *p, const void *buf, int size) {
+-  extern void uart_putc(char c);
++  extern spinlock_t uart_lock;
++  extern void uart_putc_raw(char c);
+   if (size <= 0)
+     return 0;
+   if (vm_range_ok(p, (uint64_t)buf, (uint64_t)size, 0) != 0)
+     return -EFAULT;
++  /* WK-7: own the ONE console lock (uart_lock) for the WHOLE write, not per
++     byte.  Per-byte uart_putc released the lock between chars, so the kernel
++     scheduler watchdog's whole-string uart_puts("[ALIVE-SET] ...\n") could
++     land mid-way through a browser print_console() line (measured: 424 mid-line
++     splices - 229 + 195 - across two wave logs; 0 corrupted ALIVE-SET lines).
++     uart_putc_raw is the lock-free body; holding uart_lock across it makes
++     this call atomic against every kernel console line. */
+   const char *s = (const char *)buf;
++  uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
+   for (int i = 0; i < size; i++)
+-    uart_putc(s[i]);
++    uart_putc_raw(s[i]);
++  spinlock_release_irqrestore(&uart_lock, flags);
+   return size;
+ }
+ 
+diff --git a/HobbyOS/WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp b/HobbyOS/WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp
+index 831a1ae9d150d12ab94667334ec0c016209db1ea..2b0248abe5b212b5b245a752dd6a9eca7647e201 100644
+--- a/HobbyOS/WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp
++++ b/HobbyOS/WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp
+@@ -373,28 +373,41 @@
+ 
+ 
+ // rp-f2 (D3): the driver is now two threads (UI/protocol pump + WebKit
+-// engine) so EVERY serial line and EVERY protocol write must be atomic
+-// against concurrent emission.  The guest kernel's console write is a
+-// byte-at-a-time uart loop with no per-write lock, so without these two
+-// user-side mutexes [WIN] marker lines from the UI thread and the engine
+-// thread could interleave byte-wise and tear the runners' needle strings.
+-// Lock ordering rule: acquire at most ONE of {emitMu, sendMu, snapMu
+-// (dispMu)} at a time, and never hold emitMu/sendMu while acquiring any
+-// other mutex (blit paths hold dispMu and call wk5send/wk5emit in
+-// sequence, releasing each before the next — no nesting).
++// engine), so s_wk5EmitMu orders the driver's OWN threads (two separate
++// print_console() calls of a logical line are separate SYS_WRITE_CONSOLEs, so
++// without the mutex two driver threads could interleave byte-wise).
++//
++// WK-7 lock ordering vs the kernel console (uart.c: uart_puts/uart_putc +
++// fs.c console_write_user): every kernel console writer holds the ONE kernel
++// spinlock uart_lock for a whole write, and the kernel NEVER acquires
++// s_wk5EmitMu (it is a user pthread mutex the kernel does not know about).
++// So the only nested order is s_wk5EmitMu (user) -> uart_lock (kernel,
++// taken inside the SYS_WRITE_CONSOLE syscall) — no cycle, no deadlock: the
++// kernel holder of uart_lock always releases it in bounded time and never
++// waits on s_wk5EmitMu.  Among the driver's own mutexes: acquire at most ONE
++// of {emitMu, sendMu, snapMu (dispMu)} at a time, never hold emitMu/sendMu
++// while acquiring any other mutex.
+ static pthread_mutex_t s_wk5EmitMu = PTHREAD_MUTEX_INITIALIZER;
+ static pthread_mutex_t s_wk5SendMu = PTHREAD_MUTEX_INITIALIZER;
+ 
+ static void wk5emit(const char* fmt, ...)
+ {
++    // WK-7: emit text + '\n' as ONE print_console() call, so a logical [WIN]
++    // line is one SYS_WRITE_CONSOLE = one kernel uart_lock region.  The old
++    // two-call pattern (line, then "\n") let the kernel's [ALIVE-SET]
++    // watchdog slip between the text and its trailing newline, splicing every
++    // runner's needle line: "[WIN] tick> n=47[ALIVE-SET] no READY work...\n".
+     char line[512];
+     va_list ap;
+     va_start(ap, fmt);
+-    vsnprintf(line, sizeof line, fmt, ap);
++    int n = vsnprintf(line, sizeof line, fmt, ap);
+     va_end(ap);
++    if (n < 0) n = 0;
++    if (n > (int)sizeof line - 2) n = (int)sizeof line - 2;
++    if (n == 0 || line[n - 1] != '\n') line[n++] = '\n';
++    line[n] = '\0';
+     pthread_mutex_lock(&s_wk5EmitMu);
+     print_console(line);
+-    print_console("\n");
+     pthread_mutex_unlock(&s_wk5EmitMu);
+ }
+ 

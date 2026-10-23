@@ -1,0 +1,50 @@
+# GB-076 --check negative proof, PLAN-010 re-plan 2026-10-23T03:05:37Z on 3621f1c
+# golden: real tests/fixtures/abi/t4_rows.golden with only the line dent_have_charlie removed
+
+=== t4_device --check: row-name set parity (GB-073) ===
+  fail: leg A ('/home/sarah/Documents/GitHub/HobbyOS/obj/t4_legA.out') absent — will skip emitted-row re-check (gate still checks source)
+  golden rows: 38
+  device probe rows: 41
+  PASS row: write3 (device+host)
+  PASS row: uname_rc (device+host)
+  PASS row: uname_sysname_linux (device+host)
+  PASS row: uname_machine_x86_64 (device+host)
+  PASS row: getrandom_16 (device+host)
+  PASS row: urandom_open (device+host)
+  PASS row: urandom_read16 (device+host)
+  PASS row: null_open_w (device+host)
+  PASS row: null_write3 (device+host)
+  PASS row: null_open_r (device+host)
+  PASS row: null_read1 (device+host)
+  PASS row: pipe2 (device+host)
+  PASS row: poll_ready (device+host)
+  PASS row: poll_ready_revents (device+host)
+  PASS row: select_ready (device+host)
+  PASS row: select_ready_fdset (device+host)
+  PASS row: pselect6_ready (device+host)
+  PASS row: pselect6_ready_fdset (device+host)
+  PASS row: poll_badfd (device+host)
+  PASS row: poll_badfd_revents (device+host)
+  PASS row: sockpair (device+host)
+  PASS row: sockpoll_ready (device+host)
+  PASS row: sockpoll_revents (device+host)
+  PASS row: sockselect_ready (device+host)
+  PASS row: sockselect_fdset (device+host)
+  PASS row: sockpselect_ready (device+host)
+  PASS row: sockpselect_fdset (device+host)
+  PASS row: fcntl_getfl_rdwr (device+host)
+  PASS row: fcntl_setfl_append (device+host)
+  PASS row: fcntl_getfl_after (device+host)
+  PASS row: fcntl_append_bit (device+host)
+  PASS row: ioctl_tiocgwinsz_entty (device+host)
+  PASS row: ioctl_tcgets_entty (device+host)
+  PASS row: dent_created (device+host)
+  PASS row: dent_opendir (device+host)
+  PASS row: dent_total (device+host)
+  PASS row: dent_have_alpha (device+host)
+  PASS row: dent_have_beta (device+host)
+  FAIL: device probe emits extra row 'pipe_write' not in golden
+  FAIL: device probe emits extra row 'sock_write' not in golden
+  FAIL: device probe emits extra row 'dent_have_charlie' not in golden
+t4_device --check: FAIL
+EXIT=1

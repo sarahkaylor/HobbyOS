@@ -1,0 +1,42 @@
+diff --git a/Source/WebKit/WebProcess/WebCoreSupport/WebFrameLoaderClient.cpp b/Source/WebKit/WebProcess/WebCoreSupport/WebFrameLoaderClient.cpp
+index e54f9c0..4a6870d 100644
+--- a/Source/WebKit/WebProcess/WebCoreSupport/WebFrameLoaderClient.cpp
++++ b/Source/WebKit/WebProcess/WebCoreSupport/WebFrameLoaderClient.cpp
+@@ -229,10 +229,33 @@ void WebFrameLoaderClient::dispatchDecidePolicyForNavigationAction(const Navigat
+     // Ignore) and loads the URL through its own fetch path on the next
+     // engine tick.  The hook is a weak symbol defined only by the windowed
+     // driver; headless probe binaries keep the auto-Use behavior below.
+-    if (&wk5EngineNavRequested && m_frame->isMainFrame()
+-        && wk5EngineNavRequested(request.url().string().utf8().data(), 1)) {
+-        m_frame->didReceivePolicyDecision(listenerID, PolicyDecision { std::nullopt, PolicyAction::Ignore, { }, std::nullopt });
+-        return;
++    // WK-7 (HobbyOS formpost): the shell fetch path is HTTP GET only
++    // (wk5NetFetch -> enableHttpGetRequest, no request body), so passing the
++    // bare action URL for a method=post form submit would fetch the action
++    // with every field value LOST (DuckDuckGo html search -> empty page).
++    // Here the policy request still carries the submitted data, so fold a
++    // urlencoded POST body into the action URL's query — the exact
++    // GET-equivalent URL WebCore would have produced for method=get — and
++    // claim THAT.  A faithful POST over the fetch path is follow-up.
++    if (&wk5EngineNavRequested && m_frame->isMainFrame()) {
++        URL claimedURL(request.url());
++        if (equalLettersIgnoringASCIICase(request.httpMethod(), "POST"_s)
++            && request.httpContentType().startsWith("application/x-www-form-urlencoded"_s)) {
++            if (RefPtr formData = request.httpBody()) {
++                String body = formData->flattenToString();
++                if (!body.isEmpty())
++                    claimedURL.setQuery(body);
++            }
++        }
++        {
++            char _p[320];
++            snprintf(_p, sizeof _p, "[POL] wt-nav claim url=%s", claimedURL.string().utf8().data());
++            print_console(_p); print_console("\n");
++        }
++        if (wk5EngineNavRequested(claimedURL.string().utf8().data(), 1)) {
++            m_frame->didReceivePolicyDecision(listenerID, PolicyDecision { std::nullopt, PolicyAction::Ignore, { }, std::nullopt });
++            return;
++        }
+     }
+ #endif
+ 
