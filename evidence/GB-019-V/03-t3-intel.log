@@ -1,0 +1,28 @@
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+=== T3 (intel): run (deadline 1800s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-9642df51/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 37463 console lines, 89 FAIL lines, 6 user memory fault records across 6 processes, 84 programs exited, halted=1
+T3_intel: FAIL — 89 FAIL line(s); first 20:
+2926:[SIGTEST] PASS 1MMTEST FAIL -w 5 file
+3405:Loading program for scheduler (v2 AS): [SIGTEST] FAIL waitpid returns the child got=16 want=4294964048
+3960:[SEDTEST] FAIL [EXITPC] pid=34 last_user_pc=0x1000001700
+5036:[SEDTEST] FAIL condvar_timedwait/MD5BAD.CHK
+5957:: FAIL
+6352:[SEDTEST] FAIL invalid number of columns: `abc'EXPAND.BIN
+6598:: FAIL
+6688:bad -i rcFPU_T FAILED: Try `TR.BIN --help' for more information.
+6797:UNEXPAND.BIN: [TACTEST] FAIL /NO_SUCH_UNEXPAND_FILEv2 loader: image mapped (lazy), bytes=109304 pages=27 first=in elap=0ms
+6837:[TACTEST] FAIL empty separator
+6926:[TACTEST] FAILURES: v2 loader: image mapped (lazy), bytes=108600 pages=27 first=in elap=0ms
+7247:[SEDTEST] FAIL /TEST3.TXT/TEST1.TXT
+7413:/TEST3.TXT[TSORTTEST] FAIL 
+7415:[TSORTTEST] FAIL   TORTURE socketpair-fdpass-fork: PASS
+7422:Loading program for scheduler (v2 AS): [TSORTTEST] FAIL SED.BIN[WAITPID] ECHILD caller=/TEST1.TXT22 
+7426:[TSORTTEST] FAIL diamond from stdin/TEST4.TXT
+7444:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1)/BLKT2.TXT (exit status 
+7450:[TSORTTEST] FAIL [WAITPID] ECHILD caller=22 CMPTEST.BIN want=-204 children=0
+7505:[TSORTTEST] FAIL cycle from stdin names '-' (exit status -1[WAITPID] ECHILD caller=22 CMPTEST.BIN want=-204 children=0
+7518:[TSORTTEST] FAIL [WAITPID] ECHILD caller=22 CMPTEST.BIN want=-204 children=0
+T3_intel EXIT=1
+EXIT=1
