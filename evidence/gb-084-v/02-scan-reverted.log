@@ -1,0 +1,3 @@
+open-mode scan: 1 two-argument O_CREAT open() calls in '/tmp/gb084/tools/gate/../../src'
+  /tmp/gb084/tools/gate/../../src/user/sh.c:59646
+make: *** [Makefile:3470: open_mode_scan] Error 1

@@ -1,0 +1,1 @@
+open-mode scan: 0 two-argument O_CREAT open() calls in '/tmp/gb084/tools/gate/../../src'
