@@ -425,7 +425,7 @@ final list.
 | GB-026 | `FBIOGET_VSCREENINFO`/`FBIOGET_FSCREENINFO` ioctls | S | GB-025 | T4 parity |
 | GB-027 | `/dev/input/event*` evdev ABI fed from virtio-input | M | GB-025 | SDL evdev sees moves/clicks |
 | GB-028 | `nanosleep`/`clock_gettime`/`gettimeofday` parity + timer precision | S | GB-024 | T4 timings within tolerance |
-| GB-029 | Audio: survey virtio-sound; stub `/dev/dsp`; SDL dummy/ALSA decision | L | GB-027 | recorded decision + silent-safe SDL |
+| GB-029 | Audio: survey virtio-sound; stub `/dev/dsp`; SDL dummy/ALSA decision | L | GB-027 | recorded decision (`docs/audio.md`) + silent-safe SDL |
 | GB-030 | `memfd_create` + shared-mem for SDL surfaces | M | GB-025 | T4 |
 | GB-031 | **[DEEP]** SDL2 static-musl build profile: fbcon + evdev drivers, no X11; freeze exact flag set | L | GB-027 | build reproducibly |
 | GB-032 | SDL test app (`surface`, 2D blit, input echo) under compat | M | GB-031 | draws + echoes input |
