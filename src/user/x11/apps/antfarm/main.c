@@ -1215,7 +1215,14 @@ static void write_world(const char *cf) {
   if (checkpoint_disabled) return;
 
   unlink(cf);                            /* no truncate: recreate it */
-  cp_fd = open(cf, O_WRONLY);
+  /* O_CREAT is not optional here: the unlink above is what makes the file
+     absent, so O_WRONLY alone can only ever fail with ENOENT.  This went
+     unnoticed because src/host/compat.c's ho_open used to force
+     O_RDWR|O_CREAT, i.e. the shim created the file the program never asked
+     for — GB-083 made ho_open faithful and the host test went red, which is
+     the shim doing its job.  (Linux/glibc behaves exactly as the old code
+     deserved: open(2) without O_CREAT on a missing path is ENOENT.) */
+  cp_fd = open(cf, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (cp_fd < 0) {
     print_console("antfarm: warning, can't write the checkpoint file\n");
     checkpoint_disabled = 1;
