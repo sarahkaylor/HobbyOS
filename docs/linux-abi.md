@@ -523,6 +523,13 @@ by `input_node_test_host` (T1/T4 differential) + the kernel `input_node_test_sui
 | `/dev/null`, `/dev/zero`, `/dev/urandom` | kernel shims | `read`, `mmap` (zero page) |
 | `/dev/tty` | console | `TCGETS`/`TCSETS`, `TIOCGWINSZ`, `isatty()` true |
 
+`/dev/dsp` (GB-029): the compat OSS node is a **silent-safe stub** that returns
+`ENODEV` on open until a real audio driver exists, so a program that probes OSS
+audio gets a clean "no audio device" rather than a hang or silent garbage, and
+SDL (which is silent-safe by design) falls back to its `dummy` driver and the
+game runs without sound. The audio decision (virtio-sound vs ALSA vs dummy) is
+recorded in `docs/audio.md`.
+
 `/dev/fb0` is the mmap'd HobbyOS framebuffer (GB-025). After an SDL fbcon probe reads
 `FBIOGET_VSCREENINFO` + `FBIOGET_FSCREENINFO` it does the equivalent of:
 
