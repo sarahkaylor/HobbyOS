@@ -108,11 +108,23 @@ void trap_exit_frame_check(uint64_t *frame) {
   uint64_t cs = frame[1];
   int implausible;
 
-  if ((cs & 3u) != 3u)
-    return; /* kernel-mode return: a kernel RIP here is correct */
-  implausible = (rip < 0x1000u) || (rip >= 0x70000000u && rip < USER_VA_BASE);
-  if (!implausible)
-    return;
+  if ((cs & 3u) != 3u) {
+    /* GB-061: a kernel-mode return can have a perfectly legal kernel RIP --
+       that is why the CS discriminator exists -- but it can never be below the
+       NULL page.  Kernel text lives above the kernel base, so `rip < 0x1000`
+       is poison for BOTH privilege levels.  Excluding kernel returns here (and
+       at the pick site) is exactly why the observed
+       `vector=13 rip=0x0 pid=1` halt went unreported while [LOSTWAKE] disposed
+       the same slot afterwards.  Judge kernel returns on the LOW bound only;
+       the upper range check stays user-only, because 0x70000000..USER_VA_BASE
+       is a legitimate kernel text window. */
+    if (rip >= 0x1000u)
+      return;
+  } else {
+    implausible = (rip < 0x1000u) || (rip >= 0x70000000u && rip < USER_VA_BASE);
+    if (!implausible)
+      return;
+  }
   if (trap_exit_bad_rip_seen >= 20)
     return;
   trap_exit_bad_rip_seen++;
