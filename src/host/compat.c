@@ -37,8 +37,19 @@ int ho_open(const char *filename, int flags, ...) {
      explicitly, so no implicit O_CREAT is needed to preserve them. A va_arg
      mode is only honoured when the caller sets O_CREAT. */
   int host = flags & (O_ACCMODE | O_DIRECTORY | O_TRUNC | O_APPEND | O_CREAT);
-  mode_t mode = 0666;
-  if (flags & O_CREAT) { va_list ap; va_start(ap, flags); mode = (mode_t)va_arg(ap, int); va_end(ap); }
+  /* Mode: do NOT read va_arg.  HobbyOS's own open() takes the mode optionally
+     (the kernel supplies a default) and **52 call sites in this tree** pass
+     O_CREAT with no third argument — measured 2026-10-23 with
+     tools/board/scan_open_mode.py.  A variadic C function cannot tell whether
+     an argument was supplied, so reading va_arg there is undefined and, on the
+     first build that tried it, created files with mode 0000 and turned eleven
+     `make host_tests` checks red (task list save/load, integration).
+     Default to 0644 and ignore any caller-supplied mode: this mirrors what the
+     HobbyOS kernel does for the 2-argument form, which is the behaviour the
+     tests were written against.  The real-Linux portability item (pass an
+     explicit mode everywhere) is its own ticket, because it is real: GNU/Linux
+     would create these files with whatever happened to be in the register. */
+  mode_t mode = 0644;
   return open(filename, host, mode);
 }
 
