@@ -1,0 +1,11 @@
+=== B. leg A truly absent (no musl-gcc anywhere on PATH) ===
+t4 host differential: A=0 B=0 cases=3
+t4_parity: PASS (host differential locked; device leg gated)
+EXIT=0
+
+=== C. leg A build failure (MUSL_GCC=/nonexistent/musl-gcc) ===
+FAIL: leg A build (static musl)
+src/host/t4_parity.sh: line 46: /nonexistent/musl-gcc: No such file or directory
+t4 host differential: SKIPPED (a required leg did not run: A=buildfail B=/home/sarah/.hermes/cache/scratch/tmp.rdp4cOwg0v/t4_probe.host) — FAILING the tier per GB-066 (no false green)
+t4_parity: FAIL
+EXIT=1

@@ -1,0 +1,9 @@
+farm contents (note: no musl-gcc):
+as basename bash cat cc clang cp cpp diff dirname env gcc grep head ld ld.bfd ld.lld mkdir mktemp rm sed sh tail timeout tr 
+musl-gcc visible on that PATH? -> NO
+
+$ env -u MUSL_GCC PATH=/tmp/t4-pathbin bash src/host/t4_parity.sh
+SKIP leg A: musl-gcc not found (install musl musl-tools)
+t4 host differential: SKIPPED (a required leg did not run: A=skip B=/home/sarah/.hermes/cache/scratch/tmp.zoVmyfrwWW/t4_probe.host) — FAILING the tier per GB-066 (no false green)
+t4_parity: FAIL
+EXIT=1

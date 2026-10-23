@@ -1,0 +1,4 @@
+$ MUSL_GCC=/home/sarah/toolchains/musl/musl-gcc make t4_compat_parity   # sha 5f6e3c3
+t4 host differential: A=0 B=0 cases=3
+t4_parity: PASS (host differential locked; device leg gated)
+EXIT=0

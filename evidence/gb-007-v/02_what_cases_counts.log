@@ -1,0 +1,14 @@
+=== what 'cases=3' counts (t4_parity.sh:80,95 increment N per harness step) ===
+80:  N=$((N+1))
+95:  N=$((N+1))
+
+=== the two legs, built by hand ===
+legA built
+src/host/compat.c:120:90: warning: unused parameter 'args' [-Wunused-parameter]
+  120 | int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args) {
+      |                                                                                          ^
+1 warning generated.
+legB built
+legA rc=0 rows=79
+legB rc=0 rows=79
+legA and legB byte-identical
