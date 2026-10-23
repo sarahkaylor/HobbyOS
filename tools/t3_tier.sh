@@ -218,7 +218,13 @@ if command -v fuser >/dev/null 2>&1 && fuser "$ROOT/disk.img" >/dev/null 2>&1; t
   exit 2
 fi
 
-make -o disk.img ARCH="$ARCH" MODE=test run QEMU_ARGS="-display none ${T3_QEMU_ARGS:-}" >>"$LOG" 2>&1 &
+# T3_SMP lets a caller pin the CPU count (QEMU_SMP defaults to 8 in the
+# Makefile). This matters for concurrency questions: "does this fault happen
+# with one CPU?" is often the cheapest discriminator between a real logic bug
+# and a race, and before this passthrough there was no way to ask it -- passing
+# "-smp 1" inside T3_QEMU_ARGS does NOT work, because the Makefile's own
+# "-smp $(QEMU_SMP)" precedes it and QEMU honours the earlier one.
+make -o disk.img ARCH="$ARCH" MODE=test run ${T3_SMP:+QEMU_SMP=$T3_SMP} QEMU_ARGS="-display none ${T3_QEMU_ARGS:-}" >>"$LOG" 2>&1 &
 MAKE_PID=$!
 cleanup() {
   pkill -P "$MAKE_PID" 2>/dev/null || true
