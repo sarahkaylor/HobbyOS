@@ -1,0 +1,20 @@
+revision: b3082f8d0091905114ab2bd3eea6499391e67450
+
+== .ELF titles on the built image:
+  (none — the only 'elf' substring in the listing is SELFHOST.BIN)
+
+== compat/ELF/Linux references in tools/evidence_rig.py:
+0
+
+== the four hand-rolled runners, tracked in git:
+0
+  (0 = none tracked)
+
+== magic slot/index literals in the rig:
+0
+  (0 = none)
+
+== by-name launch path:
+138:def find_menu_slot(serial_log, name):
+159:    found = find_menu_slot(serial_log, bin_name)
+231:    print(f"[rig] {bin_name} slot: found by name = {found}"

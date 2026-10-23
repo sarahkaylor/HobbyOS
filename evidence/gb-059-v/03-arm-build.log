@@ -1,0 +1,780 @@
+ld.lld -T linker.ld -o hobbyos.elf obj/arm/boot.o obj/arm/fpu.o obj/arm/setjmp.o obj/arm/abi_t2_test.o obj/arm/blk_cache.o obj/arm/blk_cache_press_test.o obj/arm/blk_cache_test.o obj/arm/dhcp.o obj/arm/elf_image.o obj/arm/elf_loader.o obj/arm/evdev.o obj/arm/evdev_test.o obj/arm/fat16.o obj/arm/fat16_test.o obj/arm/fb_ioctl.o obj/arm/fb_ioctl_test.o obj/arm/fb_mmap.o obj/arm/fb_mmap_test.o obj/arm/frame.o obj/arm/frame_test.o obj/arm/fs.o obj/arm/fs_test.o obj/arm/input_node.o obj/arm/input_node_test.o obj/arm/iommu_vtd.o obj/arm/ipc_proto.o obj/arm/linux_uname.o obj/arm/lock_order.o obj/arm/locks_test.o obj/arm/main.o obj/arm/math_test.o obj/arm/mmu_test.o obj/arm/net.o obj/arm/net_rdma.o obj/arm/net_rdma_test.o obj/arm/net_test.o obj/arm/nfs.o obj/arm/nfs_proto.o obj/arm/nfs_test.o obj/arm/pipe.o obj/arm/pipe_test.o obj/arm/process.o obj/arm/process_test.o obj/arm/program_loader.o obj/arm/program_loader_test.o obj/arm/ssp.o obj/arm/test_fw_cfg.o obj/arm/test_smp.o obj/arm/time.o obj/arm/time_test.o obj/arm/timer_test.o obj/arm/trap_test.o obj/arm/unit_test.o obj/arm/unix.o obj/arm/unix_test.o obj/arm/vfs.o obj/arm/virtio_blk.o obj/arm/virtio_blk_test.o obj/arm/virtio_gpu.o obj/arm/virtio_gpu_test.o obj/arm/virtio_gpu_x64.o obj/arm/virtio_input.o obj/arm/virtio_input_test.o obj/arm/virtio_net.o obj/arm/virtio_net_test.o obj/arm/vm.o obj/arm/vm_test.o obj/arm/cpu.o obj/arm/gic.o obj/arm/locks.o obj/arm/mmu.o obj/arm/rtc.o obj/arm/smp.o obj/arm/timer.o obj/arm/trap.o obj/arm/uart.o
+[browser] third_party/webkit-hobbyos/cache/browser-arm.bin.xz (cache) -> obj/arm/browser.bin
+[tools] LLVM dist staging present
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/user/selfhost/selfhost.c -o obj/arm/selfhost.o
+ld.lld -T src/user/linker.ld -e _start -o obj/arm/selfhost.elf obj/arm/selfhost.o obj/arm/libc.a
+llvm-objcopy -O binary obj/arm/selfhost.elf obj/arm/selfhost.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/nes -c src/user/nes/main.c -o obj/arm/nesmain.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/nes -c src/user/nes/nes.c -o obj/arm/nescore.o
+ld.lld -T src/user/linker.ld -e _start -o obj/arm/nes.elf obj/arm/nesmain.o obj/arm/nescore.o obj/arm/user_graphics.o obj/arm/libc.a
+llvm-objcopy -O binary obj/arm/nes.elf obj/arm/nes.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DMTOOLS_TOOL_mcopy -DSYSCONFDIR=\"/etc\" -c src/user/mtools/mtools_port.c -o obj/arm/mtoolsm_mcopy.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/buffer.c -o obj/arm/mtools_buffer.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/charsetConv.c -o obj/arm/mtools_charsetConv.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/codepages.c -o obj/arm/mtools_codepages.o
+src/user/mtools/codepages.c:41:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   41 |           "<C7><FC><E9><E2><E4><E0><E5><E7><EA><EB><E8><EF><EE><EC><C4><C5>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:42:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   42 |           "<C9><E6><C6><F4><F6><F2><FB><F9><FF><D6>ܢ<A3><A5>Pf"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ~~~~~~~~
+src/user/mtools/codepages.c:43:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   43 |           "<E1><ED><F3><FA><F1>Ѫ<BA><BF>r<AC><BD><BC><A1><AB><BB>"
+      |            ^~~~~~~~~~~~~~~~~~~~ ~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:44:20: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   44 |           "_______________<AC>"
+      |                           ^~~~
+src/user/mtools/codepages.c:47:11: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   47 |           "abgpSs<B5>tftod<F8><D8>_N"
+      |                  ^~~~     ~~~~~~~~
+src/user/mtools/codepages.c:48:6: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   48 |           "=<B1><>||<F7>~<B0><B7><B7>Vn<B2>__"
+      |             ^~~~    ~~~~ ~~~~~~~~~~~~  ~~~~
+src/user/mtools/codepages.c:54:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   54 |           "<A0><A1><A2><A3><A4><A5><A6><A7><A8><A9><AA><AB><AC><AD><AE><AF>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:55:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   55 |           "<B0><B1><B2><B3><B4><B5><B6><B7><B8><B9><BA><BB><BC><BD><BE><BF>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:56:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   56 |           "<C0><C1><C2><C3><C4><C5><C6><C7><C8><C9><CA><CB><CC><CD><CE><CF>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:57:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   57 |           "<D0><D1><D2><D3><D4><D5><D6><D7><D8><D9><DA><DB><DC><DD><DE><DF>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:58:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   58 |           "<E0><E1><E2><E3><E4><E5><E6><E7><E8><E9><EA><EB><EC><ED><EE><EF>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:59:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   59 |           "<F0><F1><F2><F3><F4><F5><F6><F7><F8><F9><FA><FB><FC><FD><FE><FF>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:63:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   63 |           "<C7><FC><E9><E2><E4><E0><E5><E7><EA><EB><E8><EF><EE><EC><C4><C5>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:64:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   64 |           "<C9><E6><C6><F4><F6><F2><FB><F9><FF><D6><DC><F8><A3><D8><D7>_"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:65:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   65 |           "<E1><ED><F3><FA><F1>Ѫ<BA><BF><AE><AC><BD><BC><A1><AB><BB>"
+      |            ^~~~~~~~~~~~~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:66:10: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   66 |           "_____<C1><C2><C0><A9>____<A2><A5><AC>"
+      |                 ^~~~~~~~~~~~~~~~    ~~~~~~~~~~~~
+src/user/mtools/codepages.c:67:11: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   67 |           "______<E3><C3>_______<A4>"
+      |                  ^~~~~~~~       ~~~~
+src/user/mtools/codepages.c:68:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   68 |           "<F0><D0><C9><CB><C8>i<CD><CE><CF>____|I_"
+      |            ^~~~~~~~~~~~~~~~~~~~ ~~~~~~~~~~~~
+src/user/mtools/codepages.c:69:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   69 |           "<D3><DF><D4><D2><F5>յ<FE><DE><DA><D9><FD><DD>ޯ<B4>"
+      |            ^~~~~~~~~~~~~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:70:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   70 |           "<AD><B1>_<BE><B6><A7><F7><B8><B0><A8><B7><B9><B3><B2>__"
+      |            ^~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:74:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   74 |           "<C7><FC><E9><E2><E4>uc<E7>l<EB><D5><F5><EE>Z<C4>C"
+      |            ^~~~~~~~~~~~~~~~~~~~  ~~~~ ~~~~~~~~~~~~~~~~ ~~~~
+src/user/mtools/codepages.c:75:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   75 |           "<C9>Ll<F4><F6>LlSs<D6><DC>TtL<D7>c"
+      |            ^~~~  ~~~~~~~~    ~~~~~~~~   ~~~~
+src/user/mtools/codepages.c:76:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   76 |           "<E1><ED><F3><FA>AaZzEe zCs<AB><BB>"
+      |            ^~~~~~~~~~~~~~~~          ~~~~~~~~
+src/user/mtools/codepages.c:77:10: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   77 |           "_____<C1><C2>ES____Zz<AC>"
+      |                 ^~~~~~~~        ~~~~
+src/user/mtools/codepages.c:78:20: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   78 |           "______Aa_______<A4>"
+      |                           ^~~~
+src/user/mtools/codepages.c:79:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   79 |           "<F0><D0>D<CB>d<D1><CD><CE>e_r__TU_"
+      |            ^~~~~~~~ ~~~~ ~~~~~~~~~~~~
+src/user/mtools/codepages.c:80:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   80 |           "<D3><DF><D4>Nn<F1>SsR<DA>rU<FD><DD>t<B4>"
+      |            ^~~~~~~~~~~~  ~~~~   ~~~~  ~~~~~~~~ ~~~~
+src/user/mtools/codepages.c:81:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   81 |           "<AD>~.~~<A7><F7><B8><B0><A8><B7><B9>uRr_"
+      |            ^~~~    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:85:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   85 |           "<C7><FC><E9><E2><E3><E0><E5><E7><EA><EB><E8><CD><F5><EC><C3><C2>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:86:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   86 |           "<C9><C0><C8><F4><F5><F2><DA><F9><CC><D5>ܢ<A3><D9>P<D3>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ~~~~~~~~ ~~~~
+src/user/mtools/codepages.c:87:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   87 |           "<E1><ED><F3><FA><F1>Ѫ<BA><BF>Ҭ<BD><BC><A1><AB><BB>"
+      |            ^~~~~~~~~~~~~~~~~~~~ ~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:88:20: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   88 |           "_______________<AC>"
+      |                           ^~~~
+src/user/mtools/codepages.c:91:11: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   91 |           "abgpSs<B5>tftod<F8><D8>_N"
+      |                  ^~~~     ~~~~~~~~
+src/user/mtools/codepages.c:92:6: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   92 |           "=<B1><>||<F7>~<B0><B7><B7>Vn<B2>__"
+      |             ^~~~    ~~~~ ~~~~~~~~~~~~  ~~~~
+src/user/mtools/codepages.c:96:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   96 |           "<C7><FC><E9><E2><C2><E0><B6><E7><EA><EB><E8><EF><EE>_<C0><A7>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ~~~~~~~~
+src/user/mtools/codepages.c:97:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   97 |           "<C9><C8><CA><F4><CB><CF><FB><F9><A4><D4>ܢ<A3><D9><DB>f"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ~~~~~~~~~~~~
+src/user/mtools/codepages.c:98:6: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   98 |           "|<B4><F3><FA><A8> <B3><AF><CE>r<AC><BD><BC><BE><AB><BB>"
+      |             ^~~~~~~~~~~~~~~~ ~~~~~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:99:20: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+   99 |           "_______________<AC>"
+      |                           ^~~~
+src/user/mtools/codepages.c:102:11: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  102 |           "abgpSs<B5>tftod<F8><D8>_N"
+      |                  ^~~~     ~~~~~~~~
+src/user/mtools/codepages.c:103:6: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  103 |           "=<B1><>||<F7>~<B0><B7><B7>Vn<B2>__"
+      |             ^~~~    ~~~~ ~~~~~~~~~~~~  ~~~~
+src/user/mtools/codepages.c:107:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  107 |           "<C7><FC><E9><E2><E4><E0><E5><E7><EA><EB><E8><EF><EE><EC><C4><C5>"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:108:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  108 |           "<C9><E6><C6><F4><F6><F2><FB><F9><FF><D6><DC><F8><A3><D8>Pf"
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:109:5: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  109 |           "<E1><ED><F3><FA><F1>Ѫ<BA><BF>r<AC><BD><BC><A1><AB><A4>"
+      |            ^~~~~~~~~~~~~~~~~~~~ ~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:110:20: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  110 |           "_______________<AC>"
+      |                           ^~~~
+src/user/mtools/codepages.c:113:11: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  113 |           "abgpSs<B5>tftod<F8><D8>_N"
+      |                  ^~~~     ~~~~~~~~
+src/user/mtools/codepages.c:114:6: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  114 |           "=<B1><>||<F7>~<B0><B7><B7>Vn<B2>__",
+      |             ^~~~    ~~~~ ~~~~~~~~~~~~  ~~~~
+src/user/mtools/codepages.c:119:4: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  119 |          "<80><81><82><83><84><85><86><87><88><89><8A><8B><8C><8D><8E><8F>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:120:4: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  120 |          "<90><91><92><93><94><95><96><97><98><99><9A><9B><9C><9D><9E><9F>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:121:4: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  121 |          "<A0><A1><A2><A3><A4><A5><A6><A7><A8><A9><AA><AB><AC><AD><AE><AF>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:122:4: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  122 |          "<B0><B1><B2><B3><B4><B5><B6><B7><B8><B9><BA><BB><BC><BD><BE><BF>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:123:4: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  123 |          "<C0><C1><C2><C3><C4><C5><C6><C7><C8><C9><CA><CB><CC><CD><CE><CF>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:124:4: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  124 |          "<D0><D1><D2><D3><D4><D5><D6><D7><D8><D9><DA><DB><DC><DD><DE><DF>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:125:4: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  125 |          "<E0><E1><E2><E3><E4><E5><E6><E7><E8><E9><EA><EB><EC><ED><EE><EF>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:126:4: warning: illegal character encoding in string literal [-Winvalid-source-encoding]
+  126 |          "<F0><F1><F2><F3><F4><F5><F6><F7><F8><F9><FA><FB><FC><FD><FE><FF>",
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:41:4: warning: initializer-string for character array is too long, array size is 128 but initializer has size 129 (including the null terminating character); did you mean to use the 'nonstring' attribute? [-Wunterminated-string-initialization]
+   41 |           "<C7><FC><E9><E2><E4><E0><E5><E7><EA><EB><E8><EF><EE><EC><C4><C5>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   42 |           "<C9><E6><C6><F4><F6><F2><FB><F9><FF><D6>ܢ<A3><A5>Pf"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   43 |           "<E1><ED><F3><FA><F1>Ѫ<BA><BF>r<AC><BD><BC><A1><AB><BB>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   44 |           "_______________<AC>"
+      |           ~~~~~~~~~~~~~~~~~~~~~
+   45 |           "________________"
+      |           ~~~~~~~~~~~~~~~~~~
+   46 |           "________________"
+      |           ~~~~~~~~~~~~~~~~~~
+   47 |           "abgpSs<B5>tftod<F8><D8>_N"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   48 |           "=<B1><>||<F7>~<B0><B7><B7>Vn<B2>__"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:52:4: warning: initializer-string for character array is too long, array size is 128 but initializer has size 129 (including the null terminating character); did you mean to use the 'nonstring' attribute? [-Wunterminated-string-initialization]
+   52 |           "________________"
+      |           ^~~~~~~~~~~~~~~~~~
+   53 |           "________________"
+      |           ~~~~~~~~~~~~~~~~~~
+   54 |           "<A0><A1><A2><A3><A4><A5><A6><A7><A8><A9><AA><AB><AC><AD><AE><AF>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   55 |           "<B0><B1><B2><B3><B4><B5><B6><B7><B8><B9><BA><BB><BC><BD><BE><BF>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   56 |           "<C0><C1><C2><C3><C4><C5><C6><C7><C8><C9><CA><CB><CC><CD><CE><CF>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   57 |           "<D0><D1><D2><D3><D4><D5><D6><D7><D8><D9><DA><DB><DC><DD><DE><DF>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   58 |           "<E0><E1><E2><E3><E4><E5><E6><E7><E8><E9><EA><EB><EC><ED><EE><EF>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   59 |           "<F0><F1><F2><F3><F4><F5><F6><F7><F8><F9><FA><FB><FC><FD><FE><FF>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:63:4: warning: initializer-string for character array is too long, array size is 128 but initializer has size 129 (including the null terminating character); did you mean to use the 'nonstring' attribute? [-Wunterminated-string-initialization]
+   63 |           "<C7><FC><E9><E2><E4><E0><E5><E7><EA><EB><E8><EF><EE><EC><C4><C5>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   64 |           "<C9><E6><C6><F4><F6><F2><FB><F9><FF><D6><DC><F8><A3><D8><D7>_"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   65 |           "<E1><ED><F3><FA><F1>Ѫ<BA><BF><AE><AC><BD><BC><A1><AB><BB>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   66 |           "_____<C1><C2><C0><A9>____<A2><A5><AC>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   67 |           "______<E3><C3>_______<A4>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   68 |           "<F0><D0><C9><CB><C8>i<CD><CE><CF>____|I_"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   69 |           "<D3><DF><D4><D2><F5>յ<FE><DE><DA><D9><FD><DD>ޯ<B4>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   70 |           "<AD><B1>_<BE><B6><A7><F7><B8><B0><A8><B7><B9><B3><B2>__"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:74:4: warning: initializer-string for character array is too long, array size is 128 but initializer has size 129 (including the null terminating character); did you mean to use the 'nonstring' attribute? [-Wunterminated-string-initialization]
+   74 |           "<C7><FC><E9><E2><E4>uc<E7>l<EB><D5><F5><EE>Z<C4>C"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   75 |           "<C9>Ll<F4><F6>LlSs<D6><DC>TtL<D7>c"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   76 |           "<E1><ED><F3><FA>AaZzEe zCs<AB><BB>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   77 |           "_____<C1><C2>ES____Zz<AC>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   78 |           "______Aa_______<A4>"
+      |           ~~~~~~~~~~~~~~~~~~~~~
+   79 |           "<F0><D0>D<CB>d<D1><CD><CE>e_r__TU_"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   80 |           "<D3><DF><D4>Nn<F1>SsR<DA>rU<FD><DD>t<B4>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   81 |           "<AD>~.~~<A7><F7><B8><B0><A8><B7><B9>uRr_"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:85:4: warning: initializer-string for character array is too long, array size is 128 but initializer has size 129 (including the null terminating character); did you mean to use the 'nonstring' attribute? [-Wunterminated-string-initialization]
+   85 |           "<C7><FC><E9><E2><E3><E0><E5><E7><EA><EB><E8><CD><F5><EC><C3><C2>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   86 |           "<C9><C0><C8><F4><F5><F2><DA><F9><CC><D5>ܢ<A3><D9>P<D3>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   87 |           "<E1><ED><F3><FA><F1>Ѫ<BA><BF>Ҭ<BD><BC><A1><AB><BB>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   88 |           "_______________<AC>"
+      |           ~~~~~~~~~~~~~~~~~~~~~
+   89 |           "________________"
+      |           ~~~~~~~~~~~~~~~~~~
+   90 |           "________________"
+      |           ~~~~~~~~~~~~~~~~~~
+   91 |           "abgpSs<B5>tftod<F8><D8>_N"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   92 |           "=<B1><>||<F7>~<B0><B7><B7>Vn<B2>__"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:96:4: warning: initializer-string for character array is too long, array size is 128 but initializer has size 129 (including the null terminating character); did you mean to use the 'nonstring' attribute? [-Wunterminated-string-initialization]
+   96 |           "<C7><FC><E9><E2><C2><E0><B6><E7><EA><EB><E8><EF><EE>_<C0><A7>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   97 |           "<C9><C8><CA><F4><CB><CF><FB><F9><A4><D4>ܢ<A3><D9><DB>f"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   98 |           "|<B4><F3><FA><A8> <B3><AF><CE>r<AC><BD><BC><BE><AB><BB>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   99 |           "_______________<AC>"
+      |           ~~~~~~~~~~~~~~~~~~~~~
+  100 |           "________________"
+      |           ~~~~~~~~~~~~~~~~~~
+  101 |           "________________"
+      |           ~~~~~~~~~~~~~~~~~~
+  102 |           "abgpSs<B5>tftod<F8><D8>_N"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  103 |           "=<B1><>||<F7>~<B0><B7><B7>Vn<B2>__"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:107:4: warning: initializer-string for character array is too long, array size is 128 but initializer has size 129 (including the null terminating character); did you mean to use the 'nonstring' attribute? [-Wunterminated-string-initialization]
+  107 |           "<C7><FC><E9><E2><E4><E0><E5><E7><EA><EB><E8><EF><EE><EC><C4><C5>"
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  108 |           "<C9><E6><C6><F4><F6><F2><FB><F9><FF><D6><DC><F8><A3><D8>Pf"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  109 |           "<E1><ED><F3><FA><F1>Ѫ<BA><BF>r<AC><BD><BC><A1><AB><A4>"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  110 |           "_______________<AC>"
+      |           ~~~~~~~~~~~~~~~~~~~~~
+  111 |           "________________"
+      |           ~~~~~~~~~~~~~~~~~~
+  112 |           "________________"
+      |           ~~~~~~~~~~~~~~~~~~
+  113 |           "abgpSs<B5>tftod<F8><D8>_N"
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  114 |           "=<B1><>||<F7>~<B0><B7><B7>Vn<B2>__",
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/user/mtools/codepages.c:119:3: warning: initializer-string for character array is too long, array size is 128 but initializer has size 129 (including the null terminating character); did you mean to use the 'nonstring' attribute? [-Wunterminated-string-initialization]
+  119 |          "<80><81><82><83><84><85><86><87><88><89><8A><8B><8C><8D><8E><8F>"
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  120 |          "<90><91><92><93><94><95><96><97><98><99><9A><9B><9C><9D><9E><9F>"
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  121 |          "<A0><A1><A2><A3><A4><A5><A6><A7><A8><A9><AA><AB><AC><AD><AE><AF>"
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  122 |          "<B0><B1><B2><B3><B4><B5><B6><B7><B8><B9><BA><BB><BC><BD><BE><BF>"
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  123 |          "<C0><C1><C2><C3><C4><C5><C6><C7><C8><C9><CA><CB><CC><CD><CE><CF>"
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  124 |          "<D0><D1><D2><D3><D4><D5><D6><D7><D8><D9><DA><DB><DC><DD><DE><DF>"
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  125 |          "<E0><E1><E2><E3><E4><E5><E6><E7><E8><E9><EA><EB><EC><ED><EE><EF>"
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  126 |          "<F0><F1><F2><F3><F4><F5><F6><F7><F8><F9><FA><FB><FC><FD><FE><FF>",
+      |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+62 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/config.c -o obj/arm/mtools_config.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/copyfile.c -o obj/arm/mtools_copyfile.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/device.c -o obj/arm/mtools_device.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/devices.c -o obj/arm/mtools_devices.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/dirCache.c -o obj/arm/mtools_dirCache.o
+src/user/mtools/dirCache.c:282:28: warning: passing 'unsigned char *' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  282 |                 entry->longName = wcsdup(longName);
+      |                                          ^~~~~~~~
+src/libc/include/string.h:60:28: note: passing argument to parameter 's' here
+   60 |   char *strdup(const char *s);
+      |                            ^
+src/user/mtools/dirCache.c:282:19: warning: assigning to 'unsigned char *' from 'char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  282 |                 entry->longName = wcsdup(longName);
+      |                                 ^ ~~~~~~~~~~~~~~~~
+src/user/mtools/dirCache.c:283:28: warning: passing 'unsigned char *' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  283 |         entry->shortName = wcsdup(shortName);
+      |                                   ^~~~~~~~~
+src/libc/include/string.h:60:28: note: passing argument to parameter 's' here
+   60 |   char *strdup(const char *s);
+      |                            ^
+src/user/mtools/dirCache.c:283:19: warning: assigning to 'unsigned char *' from 'char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  283 |         entry->shortName = wcsdup(shortName);
+      |                          ^ ~~~~~~~~~~~~~~~~~
+4 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/directory.c -o obj/arm/mtools_directory.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/direntry.c -o obj/arm/mtools_direntry.o
+src/user/mtools/direntry.c:81:24: warning: passing 'unsigned char[256]' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+   81 |                 length += 1 + wcslen(entry->name);
+      |                                      ^~~~~~~~~~~
+src/libc/include/string.h:17:29: note: passing argument to parameter 's' here
+   17 |   size_t strlen(const char *s);
+      |                             ^
+src/user/mtools/direntry.c:124:25: warning: passing 'unsigned char[256]' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  124 |                 if (escape && wcspbrk(entry->name, NEED_ESCAPE)) {
+      |                                       ^~~~~~~~~~~
+src/libc/include/string.h:53:29: note: passing argument to parameter 's' here
+   53 |   char *strpbrk(const char *s, const char *accept);
+      |                             ^
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/dos2unix.c -o obj/arm/mtools_dos2unix.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/fat.c -o obj/arm/mtools_fat.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/fat_free.c -o obj/arm/mtools_fat_free.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/file.c -o obj/arm/mtools_file.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/file_name.c -o obj/arm/mtools_file_name.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/force_io.c -o obj/arm/mtools_force_io.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/hash.c -o obj/arm/mtools_hash.o
+src/user/mtools/hash.c:110:7: warning: variable 'ctr' set but not used [-Wunused-but-set-variable]
+  110 |   int ctr;
+      |       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/init.c -o obj/arm/mtools_init.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/lba.c -o obj/arm/mtools_lba.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/llong.c -o obj/arm/mtools_llong.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/lockdev.c -o obj/arm/mtools_lockdev.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/mainloop.c -o obj/arm/mtools_mainloop.o
+src/user/mtools/mainloop.c:165:47: warning: passing 'const unsigned char *' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  165 |         return (lookupflags & NO_DOTS) && isSpecialW(name);
+      |                                                      ^~~~
+src/user/mtools/file_name.h:55:27: note: passing argument to parameter 'name' here
+   55 | int isSpecial(const char *name);
+      |                           ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/match.c -o obj/arm/mtools_match.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/mcopy.c -o obj/arm/mtools_mcopy.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/mdel.c -o obj/arm/mtools_mdel.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/misc.c -o obj/arm/mtools_misc.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/missFuncs.c -o obj/arm/mtools_missFuncs.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/mk_direntry.c -o obj/arm/mtools_mk_direntry.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/mmd.c -o obj/arm/mtools_mmd.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/offset.c -o obj/arm/mtools_offset.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/old_dos.c -o obj/arm/mtools_old_dos.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/open_image.c -o obj/arm/mtools_open_image.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/partition.c -o obj/arm/mtools_partition.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/patchlevel.c -o obj/arm/mtools_patchlevel.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/plain_io.c -o obj/arm/mtools_plain_io.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/privileges.c -o obj/arm/mtools_privileges.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/remap.c -o obj/arm/mtools_remap.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/signal.c -o obj/arm/mtools_signal.o
+src/user/mtools/signal.c:79:40: warning: unused parameter 'ss' [-Wunused-parameter]
+   79 | void allow_interrupts(saved_sig_state *ss)
+      |                                        ^
+src/user/mtools/signal.c:113:42: warning: unused parameter 'ss' [-Wunused-parameter]
+  113 | void restore_interrupts(saved_sig_state *ss)
+      |                                          ^
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/stream.c -o obj/arm/mtools_stream.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/streamcache.c -o obj/arm/mtools_streamcache.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/strtonum.c -o obj/arm/mtools_strtonum.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/swap.c -o obj/arm/mtools_swap.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/tty.c -o obj/arm/mtools_tty.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/unix2dos.c -o obj/arm/mtools_unix2dos.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/unixdir.c -o obj/arm/mtools_unixdir.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DSYSCONFDIR=\"/etc\" -c src/user/mtools/vfat.c -o obj/arm/mtools_vfat.o
+src/user/mtools/vfat.c:781:17: warning: passing 'unsigned char *' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  781 |                         (1 + (wcslen(longname) + VSE_NAMELEN - 1)/VSE_NAMELEN);
+      |                                      ^~~~~~~~
+src/libc/include/string.h:17:29: note: passing argument to parameter 's' here
+   17 |   size_t strlen(const char *s);
+      |                             ^
+src/user/mtools/vfat.c:873:21: warning: passing 'unsigned char *' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  873 |                                     !wcscasecmp(dce->longName, wlongname)) ||
+      |                                                 ^~~~~~~~~~~~~
+src/libc/include/strings.h:28:30: note: passing argument to parameter 's1' here
+   28 |   int strcasecmp(const char *s1, const char *s2);
+      |                              ^
+src/user/mtools/vfat.c:873:36: warning: passing 'unsigned char[257]' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  873 |                                     !wcscasecmp(dce->longName, wlongname)) ||
+      |                                                                ^~~~~~~~~
+src/libc/include/strings.h:28:46: note: passing argument to parameter 's2' here
+   28 |   int strcasecmp(const char *s1, const char *s2);
+      |                                              ^
+src/user/mtools/vfat.c:875:21: warning: passing 'unsigned char *' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  875 |                                     !wcscasecmp(dce->shortName, wlongname))) {
+      |                                                 ^~~~~~~~~~~~~~
+src/libc/include/strings.h:28:30: note: passing argument to parameter 's1' here
+   28 |   int strcasecmp(const char *s1, const char *s2);
+      |                              ^
+src/user/mtools/vfat.c:875:37: warning: passing 'unsigned char[257]' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  875 |                                     !wcscasecmp(dce->shortName, wlongname))) {
+      |                                                                 ^~~~~~~~~
+src/libc/include/strings.h:28:46: note: passing argument to parameter 's2' here
+   28 |   int strcasecmp(const char *s1, const char *s2);
+      |                                              ^
+src/user/mtools/vfat.c:888:21: warning: passing 'unsigned char[13]' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  888 |                                     !wcscasecmp(shortName, dce->shortName))
+      |                                                 ^~~~~~~~~
+src/libc/include/strings.h:28:30: note: passing argument to parameter 's1' here
+   28 |   int strcasecmp(const char *s1, const char *s2);
+      |                              ^
+src/user/mtools/vfat.c:888:32: warning: passing 'unsigned char *' to parameter of type 'const char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+  888 |                                     !wcscasecmp(shortName, dce->shortName))
+      |                                                            ^~~~~~~~~~~~~~
+src/libc/include/strings.h:28:46: note: passing argument to parameter 's2' here
+   28 |   int strcasecmp(const char *s1, const char *s2);
+      |                                              ^
+7 warnings generated.
+ld.lld -T src/user/linker.ld -e _start -o obj/arm/mcopy.elf obj/arm/mtoolsm_mcopy.o obj/arm/mtools_buffer.o obj/arm/mtools_charsetConv.o obj/arm/mtools_codepages.o obj/arm/mtools_config.o obj/arm/mtools_copyfile.o obj/arm/mtools_device.o obj/arm/mtools_devices.o obj/arm/mtools_dirCache.o obj/arm/mtools_directory.o obj/arm/mtools_direntry.o obj/arm/mtools_dos2unix.o obj/arm/mtools_fat.o obj/arm/mtools_fat_free.o obj/arm/mtools_file.o obj/arm/mtools_file_name.o obj/arm/mtools_force_io.o obj/arm/mtools_hash.o obj/arm/mtools_init.o obj/arm/mtools_lba.o obj/arm/mtools_llong.o obj/arm/mtools_lockdev.o obj/arm/mtools_mainloop.o obj/arm/mtools_match.o obj/arm/mtools_mcopy.o obj/arm/mtools_mdel.o obj/arm/mtools_misc.o obj/arm/mtools_missFuncs.o obj/arm/mtools_mk_direntry.o obj/arm/mtools_mmd.o obj/arm/mtools_offset.o obj/arm/mtools_old_dos.o obj/arm/mtools_open_image.o obj/arm/mtools_partition.o obj/arm/mtools_patchlevel.o obj/arm/mtools_plain_io.o obj/arm/mtools_privileges.o obj/arm/mtools_remap.o obj/arm/mtools_signal.o obj/arm/mtools_stream.o obj/arm/mtools_streamcache.o obj/arm/mtools_strtonum.o obj/arm/mtools_swap.o obj/arm/mtools_tty.o obj/arm/mtools_unix2dos.o obj/arm/mtools_unixdir.o obj/arm/mtools_vfat.o obj/arm/libc.a
+llvm-objcopy -O binary obj/arm/mcopy.elf obj/arm/mcopy.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DMTOOLS_TOOL_mdel -DSYSCONFDIR=\"/etc\" -c src/user/mtools/mtools_port.c -o obj/arm/mtoolsm_mdel.o
+ld.lld -T src/user/linker.ld -e _start -o obj/arm/mdel.elf obj/arm/mtoolsm_mdel.o obj/arm/mtools_buffer.o obj/arm/mtools_charsetConv.o obj/arm/mtools_codepages.o obj/arm/mtools_config.o obj/arm/mtools_copyfile.o obj/arm/mtools_device.o obj/arm/mtools_devices.o obj/arm/mtools_dirCache.o obj/arm/mtools_directory.o obj/arm/mtools_direntry.o obj/arm/mtools_dos2unix.o obj/arm/mtools_fat.o obj/arm/mtools_fat_free.o obj/arm/mtools_file.o obj/arm/mtools_file_name.o obj/arm/mtools_force_io.o obj/arm/mtools_hash.o obj/arm/mtools_init.o obj/arm/mtools_lba.o obj/arm/mtools_llong.o obj/arm/mtools_lockdev.o obj/arm/mtools_mainloop.o obj/arm/mtools_match.o obj/arm/mtools_mcopy.o obj/arm/mtools_mdel.o obj/arm/mtools_misc.o obj/arm/mtools_missFuncs.o obj/arm/mtools_mk_direntry.o obj/arm/mtools_mmd.o obj/arm/mtools_offset.o obj/arm/mtools_old_dos.o obj/arm/mtools_open_image.o obj/arm/mtools_partition.o obj/arm/mtools_patchlevel.o obj/arm/mtools_plain_io.o obj/arm/mtools_privileges.o obj/arm/mtools_remap.o obj/arm/mtools_signal.o obj/arm/mtools_stream.o obj/arm/mtools_streamcache.o obj/arm/mtools_strtonum.o obj/arm/mtools_swap.o obj/arm/mtools_tty.o obj/arm/mtools_unix2dos.o obj/arm/mtools_unixdir.o obj/arm/mtools_vfat.o obj/arm/libc.a
+llvm-objcopy -O binary obj/arm/mdel.elf obj/arm/mdel.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/mtools -DHAVE_CONFIG_H -DHOBBYOS_TARGET -DMTOOLS_TOOL_mmd -DSYSCONFDIR=\"/etc\" -c src/user/mtools/mtools_port.c -o obj/arm/mtoolsm_mmd.o
+ld.lld -T src/user/linker.ld -e _start -o obj/arm/mmd.elf obj/arm/mtoolsm_mmd.o obj/arm/mtools_buffer.o obj/arm/mtools_charsetConv.o obj/arm/mtools_codepages.o obj/arm/mtools_config.o obj/arm/mtools_copyfile.o obj/arm/mtools_device.o obj/arm/mtools_devices.o obj/arm/mtools_dirCache.o obj/arm/mtools_directory.o obj/arm/mtools_direntry.o obj/arm/mtools_dos2unix.o obj/arm/mtools_fat.o obj/arm/mtools_fat_free.o obj/arm/mtools_file.o obj/arm/mtools_file_name.o obj/arm/mtools_force_io.o obj/arm/mtools_hash.o obj/arm/mtools_init.o obj/arm/mtools_lba.o obj/arm/mtools_llong.o obj/arm/mtools_lockdev.o obj/arm/mtools_mainloop.o obj/arm/mtools_match.o obj/arm/mtools_mcopy.o obj/arm/mtools_mdel.o obj/arm/mtools_misc.o obj/arm/mtools_missFuncs.o obj/arm/mtools_mk_direntry.o obj/arm/mtools_mmd.o obj/arm/mtools_offset.o obj/arm/mtools_old_dos.o obj/arm/mtools_open_image.o obj/arm/mtools_partition.o obj/arm/mtools_patchlevel.o obj/arm/mtools_plain_io.o obj/arm/mtools_privileges.o obj/arm/mtools_remap.o obj/arm/mtools_signal.o obj/arm/mtools_stream.o obj/arm/mtools_streamcache.o obj/arm/mtools_strtonum.o obj/arm/mtools_swap.o obj/arm/mtools_tty.o obj/arm/mtools_unix2dos.o obj/arm/mtools_unixdir.o obj/arm/mtools_vfat.o obj/arm/libc.a
+llvm-objcopy -O binary obj/arm/mmd.elf obj/arm/mmd.bin
+# Startup disk: 1 GiB (user-requested floor; FAT16 tops out at 2 GiB).
+# mkfs.fat auto-picks the cluster size (32 KiB @ 1 GiB); the kernel
+# fat16.c layout math is BPB data-driven (bpb_sectors_per_cluster), so
+# no driver change is needed for the larger disk/clusters.
+dd if=/dev/zero of=disk.img bs=1M count=1024
+1024+0 records in
+1024+0 records out
+1073741824 bytes (1.1 GB, 1.0 GiB) copied, 0.581563 s, 1.8 GB/s
+mkfs.fat -F 16 disk.img
+mkfs.fat 4.2 (2021-01-31)
+mmd -i disk.img ::/EFI
+mmd -i disk.img ::/EFI/BOOT
+mmd -i disk.img ::/boot
+mmd -i disk.img ::/home
+# CA roots for the browser's TLS stack (libcurl/mbedTLS): the driver pins
+# /CERTS/CA.PEM (WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp).  Without
+# this every https:// navigation fails at certificate verification and the
+# user sees the previous page with no explanation.
+mmd -i disk.img ::/CERTS
+mcopy -i disk.img certs/cacert.pem ::/CERTS/CA.PEM
+mmd -i disk.img ::/nfs
+mmd -i disk.img ::/mnt
+mmd -i disk.img ::/TESTDIR
+mmd -i disk.img ::/tmp
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+# build-tools at their frozen /TOOLS/ paths (Makefile.hobbyos sketch).
+mmd -i disk.img ::/TOOLS
+# L3 (selfhost W-A): VFAT long-name build-payload fixture dirs (mtools-written).
+mmd -i disk.img ::/src
+mmd -i disk.img ::/src/kernel
+mmd -i disk.img ::/src/user_include
+mmd -i disk.img ::/src/user_include/graphics
+mmd -i disk.img ::/third_party
+mmd -i disk.img ::/third_party/libcxx-21.1.8
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include
+mcopy -i disk.img tests/fixtures/E2E.TXT ::/E2E.TXT
+mcopy -i disk.img tests/fixtures/DRAGME.TXT ::/DRAGME.TXT
+mcopy -i disk.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+mcopy -i disk.img bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
+# [inos-build-kernel] canonical ARM boot config from the repo file
+# (single source of truth; also what --src staging copies to
+# /SRC/limine.conf and what SRC.TAR carries).  Two entries: the boot
+# kernel + the previous one, which /BUILD_KERNEL.SH's install step
+# keeps at /boot/hobbyos.old.
+mcopy -i disk.img bootloader/limine-arm.conf ::/boot/limine.conf
+llvm-objcopy -O binary hobbyos.elf hobbyos.bin
+mcopy -i disk.img hobbyos.bin ::/boot/hobbyos.bin
+mcopy -i disk.img obj/arm/memtest.bin ::/MEMTEST.BIN
+mcopy -i disk.img obj/arm/fileio_test.bin ::/FILEIO.BIN
+mcopy -i disk.img obj/arm/console.bin ::/CONSOLE.BIN
+mcopy -i disk.img obj/arm/fork_test.bin ::/FORKTEST.BIN
+mcopy -i disk.img obj/arm/heap_test.bin ::/HEAPTEST.BIN
+mcopy -i disk.img obj/arm/spawntest.bin ::/SPAWN.BIN
+mcopy -i disk.img obj/arm/graphics.bin ::/GRAPHICS.BIN
+mcopy -i disk.img obj/arm/wsurf_test.bin ::/WSRF_T.BIN
+mcopy -i disk.img obj/arm/smp_test.bin ::/SMPTEST.BIN
+mcopy -i disk.img obj/arm/pipetest.bin ::/PIPETEST.BIN
+mcopy -i disk.img obj/arm/nettest.bin ::/NETTEST.BIN
+mcopy -i disk.img obj/arm/timeout.bin ::/TIMEOUT.BIN
+mcopy -i disk.img obj/arm/nfstest.bin ::/NFSTEST.BIN
+mcopy -i disk.img obj/arm/desktop.bin ::/DESKTOP.BIN
+browser: obj/arm/browser.bin (resolved by the browser-staged completeness rule; installed as ::/BROWSER.BIN)
+dejavu-2.37/AUTHORS: OK
+dejavu-2.37/BUGS: OK
+dejavu-2.37/fontconfig/20-unhint-small-dejavu-sans.conf: OK
+dejavu-2.37/fontconfig/20-unhint-small-dejavu-sans-mono.conf: OK
+dejavu-2.37/fontconfig/20-unhint-small-dejavu-serif.conf: OK
+dejavu-2.37/fontconfig/57-dejavu-sans.conf: OK
+dejavu-2.37/fontconfig/57-dejavu-sans-mono.conf: OK
+dejavu-2.37/fontconfig/57-dejavu-serif.conf: OK
+dejavu-2.37/langcover.txt: OK
+dejavu-2.37/LICENSE: OK
+dejavu-2.37/NEWS: OK
+dejavu-2.37/README.md: OK
+dejavu-2.37/status.txt: OK
+dejavu-2.37/ttf/DejaVuMathTeXGyre.ttf: OK
+dejavu-2.37/ttf/DejaVuSans-BoldOblique.ttf: OK
+dejavu-2.37/ttf/DejaVuSans-Bold.ttf: OK
+dejavu-2.37/ttf/DejaVuSansCondensed-BoldOblique.ttf: OK
+dejavu-2.37/ttf/DejaVuSansCondensed-Bold.ttf: OK
+dejavu-2.37/ttf/DejaVuSansCondensed-Oblique.ttf: OK
+dejavu-2.37/ttf/DejaVuSansCondensed.ttf: OK
+dejavu-2.37/ttf/DejaVuSans-ExtraLight.ttf: OK
+dejavu-2.37/ttf/DejaVuSansMono-BoldOblique.ttf: OK
+dejavu-2.37/ttf/DejaVuSansMono-Bold.ttf: OK
+dejavu-2.37/ttf/DejaVuSansMono-Oblique.ttf: OK
+dejavu-2.37/ttf/DejaVuSansMono.ttf: OK
+dejavu-2.37/ttf/DejaVuSans-Oblique.ttf: OK
+dejavu-2.37/ttf/DejaVuSans.ttf: OK
+dejavu-2.37/ttf/DejaVuSerif-BoldItalic.ttf: OK
+dejavu-2.37/ttf/DejaVuSerif-Bold.ttf: OK
+dejavu-2.37/ttf/DejaVuSerifCondensed-BoldItalic.ttf: OK
+dejavu-2.37/ttf/DejaVuSerifCondensed-Bold.ttf: OK
+dejavu-2.37/ttf/DejaVuSerifCondensed-Italic.ttf: OK
+dejavu-2.37/ttf/DejaVuSerifCondensed.ttf: OK
+dejavu-2.37/ttf/DejaVuSerif-Italic.ttf: OK
+dejavu-2.37/ttf/DejaVuSerif.ttf: OK
+dejavu-2.37/unicover.txt: OK
+mcopy -i disk.img obj/arm/editor.bin ::/EDITOR.BIN
+mcopy -i disk.img obj/arm/EDITOR_T.BIN ::/EDITOR_T.BIN
+mcopy -i disk.img obj/arm/APPS_T.BIN ::/APPS_T.BIN
+mcopy -i disk.img obj/arm/FILEDIAL.BIN ::/FILEDIAL.BIN
+mcopy -i disk.img obj/arm/DIALOG_T.BIN ::/DIALOG_T.BIN
+mcopy -i disk.img obj/arm/PONG_T.BIN ::/PONG_T.BIN
+mcopy -i disk.img obj/arm/stress.bin ::/STRESS.BIN
+mcopy -i disk.img obj/arm/fpu_test.bin ::/FPU_T.BIN
+mcopy -i disk.img obj/arm/gfxbench.bin ::/GFXBENCH.BIN
+mcopy -i disk.img obj/arm/math_test.bin ::/MATH_T.BIN
+mcopy -i disk.img obj/arm/errtest.bin ::/ERRTEST.BIN
+mcopy -i disk.img obj/arm/SOCK2TST.BIN ::/SOCK2TST.BIN
+mcopy -i disk.img obj/arm/POLLTST.BIN ::/POLLTST.BIN
+mcopy -i disk.img obj/arm/BLKTEST.BIN ::/BLKTEST.BIN
+mcopy -i disk.img obj/arm/RANDTST.BIN ::/RANDTST.BIN
+mcopy -i disk.img obj/arm/dns_test.bin ::/DNSTST.BIN
+mcopy -i disk.img obj/arm/netfix.bin ::/NETFIX.BIN
+mcopy -i disk.img obj/arm/cxx_smoke.bin ::/CXXSMOKE.BIN
+mcopy -i disk.img obj/arm/thrd_test.bin ::/THRD_T.BIN
+mcopy -i disk.img obj/arm/tls_test.bin ::/TLS_T.BIN
+mcopy -i disk.img obj/arm/WK1C_T.BIN ::/WK1C_T.BIN
+mcopy -i disk.img obj/arm/cxx_t.bin ::/CXX_T.BIN
+mcopy -i disk.img obj/arm/rtti_t.bin ::/RTTI_T.BIN
+mcopy -i disk.img obj/arm/ipc_test.bin ::/IPC_T.BIN
+mcopy -i disk.img obj/arm/mmtest.bin ::/MMTEST.BIN
+mcopy -i disk.img obj/arm/sqltest.bin ::/SQLTEST.BIN
+mcopy -i disk.img obj/arm/torture_test.bin ::/TORTURE.BIN
+mcopy -i disk.img obj/arm/big.bin ::/BIG.BIN
+mcopy -i disk.img obj/arm/hello.bin ::/HELLO.BIN
+mcopy -i disk.img obj/arm/selfhost.bin ::/SELFHOST.BIN
+mcopy -i disk.img obj/arm/sh.bin ::/SH.BIN
+mcopy -i disk.img obj/arm/ls.bin ::/LS.BIN
+mcopy -i disk.img obj/arm/cat.bin ::/CAT.BIN
+mcopy -i disk.img obj/arm/grep.bin ::/GREP.BIN
+mcopy -i disk.img obj/arm/less.bin ::/LESS.BIN
+mcopy -i disk.img obj/arm/tail.bin ::/TAIL.BIN
+mcopy -i disk.img obj/arm/head.bin ::/HEAD.BIN
+mcopy -i disk.img obj/arm/shtest.bin ::/SHTEST.BIN
+mcopy -i disk.img obj/arm/ps.bin ::/PS.BIN
+mcopy -i disk.img obj/arm/free.bin ::/FREE.BIN
+mcopy -i disk.img obj/arm/uptime.bin ::/UPTIME.BIN
+mcopy -i disk.img obj/arm/kill.bin ::/KILL.BIN
+mcopy -i disk.img obj/arm/basename.bin ::/BASENAME.BIN
+mcopy -i disk.img obj/arm/dirname.bin ::/DIRNAME.BIN
+mcopy -i disk.img obj/arm/seq.bin ::/SEQ.BIN
+mcopy -i disk.img obj/arm/expr.bin ::/EXPR.BIN
+mcopy -i disk.img obj/arm/testgnu.bin ::/TEST.BIN
+mcopy -i disk.img obj/arm/cp.bin ::/CP.BIN
+mcopy -i disk.img obj/arm/rm.bin ::/RM.BIN
+mcopy -i disk.img obj/arm/mv.bin ::/MV.BIN
+mcopy -i disk.img obj/arm/touch.bin ::/TOUCH.BIN
+mcopy -i disk.img obj/arm/wc.bin ::/WC.BIN
+mcopy -i disk.img obj/arm/sed.bin ::/SED.BIN
+mcopy -i disk.img obj/arm/make.bin ::/MAKE.BIN
+mcopy -i disk.img obj/arm/hedgnu.bin ::/HEDGNU.BIN
+mcopy -i disk.img obj/arm/tailgnu.bin ::/TAILGN.BIN
+mcopy -i disk.img obj/arm/cut.bin ::/CUT.BIN
+mcopy -i disk.img obj/arm/tr.bin ::/TR.BIN
+mcopy -i disk.img obj/arm/paste.bin ::/PASTE.BIN
+mcopy -i disk.img obj/arm/fold.bin ::/FOLD.BIN
+mcopy -i disk.img obj/arm/nl.bin ::/NL.BIN
+mcopy -i disk.img obj/arm/comm.bin ::/COMM.BIN
+mcopy -i disk.img obj/arm/tsort.bin ::/TSORT.BIN
+mcopy -i disk.img obj/arm/expand.bin ::/EXPAND.BIN
+mcopy -i disk.img obj/arm/unexpand.bin ::/UNEXPAND.BIN
+mcopy -i disk.img obj/arm/cksum.bin ::/CKSUM.BIN
+mcopy -i disk.img obj/arm/md5sum.bin ::/MD5SUM.BIN
+mcopy -i disk.img obj/arm/proc_child.bin ::/PROCCHLD.BIN
+mcopy -i disk.img obj/arm/spawnex_child.bin ::/SPAWNEX.BIN
+mcopy -i disk.img obj/arm/sig_test.bin ::/SIG_T.BIN
+mcopy -i disk.img obj/arm/head_test.bin ::/HEDTEST.BIN
+mcopy -i disk.img obj/arm/tail_test.bin ::/TAILTEST.BIN
+mcopy -i disk.img obj/arm/proc_test.bin ::/PROCTEST.BIN
+mcopy -i disk.img obj/arm/wc_test.bin ::/WCTEST.BIN
+mcopy -i disk.img obj/arm/cut_test.bin ::/CUTTEST.BIN
+mcopy -i disk.img obj/arm/tr_test.bin ::/TRTEST.BIN
+mcopy -i disk.img obj/arm/paste_test.bin ::/PASTE_T.BIN
+mcopy -i disk.img obj/arm/fold_test.bin ::/FOLDTEST.BIN
+mcopy -i disk.img obj/arm/nl_test.bin ::/NLTEST.BIN
+mcopy -i disk.img obj/arm/comm_test.bin ::/COMMTEST.BIN
+mcopy -i disk.img obj/arm/tsort_test.bin ::/TSORT_T.BIN
+mcopy -i disk.img obj/arm/expand_test.bin ::/EXPAND_T.BIN
+mcopy -i disk.img obj/arm/unexpand_test.bin ::/UNEXPAND_T.BIN
+mcopy -i disk.img obj/arm/fatbig_test.bin ::/FATBIG_T.BIN
+# L3 (selfhost W-A): VFAT long-name build-payload fixtures.  Content
+# markers must stay in sync with src/user/lfn_test.c.
+mcopy -i disk.img tests/fixtures/lfn/program_loader.c ::/src/kernel/program_loader.c
+mcopy -i disk.img tests/fixtures/lfn/window.h ::/src/user_include/graphics/window.h
+mcopy -i disk.img tests/fixtures/lfn/llvm-project-21.1.8.src-EXAMPLE.c ::/src/llvm-project-21.1.8.src-EXAMPLE.c
+mcopy -i disk.img tests/fixtures/lfn/upper_bound.h ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include/upper_bound.h
+mcopy -i disk.img tests/fixtures/lfn/longfilename.txt ::/longfilename.txt
+mcopy -i disk.img tests/fixtures/lfn/longfilename2.txt ::/longfilename2.txt
+mcopy -i disk.img tests/fixtures/lfn/longfil~1.txt ::/longfil~1.txt
+mcopy -i disk.img obj/arm/lfn_test.bin ::/LFN_T.BIN
+mcopy -i disk.img obj/arm/cksum_test.bin ::/CKSUM_T.BIN
+mcopy -i disk.img obj/arm/md5sum_test.bin ::/MD5SUM_T.BIN
+mcopy -i disk.img obj/arm/tac.bin ::/TAC.BIN
+mcopy -i disk.img obj/arm/tac_test.bin ::/TACTEST.BIN
+mcopy -i disk.img obj/arm/cmp.bin ::/CMP.BIN
+mcopy -i disk.img obj/arm/cmp_test.bin ::/CMPTEST.BIN
+mcopy -i disk.img obj/arm/regex_test.bin ::/REGTEST.BIN
+mcopy -i disk.img obj/arm/sed_test.bin ::/SEDTEST.BIN
+mcopy -i disk.img obj/arm/grep_test.bin ::/GREPTEST.BIN
+mcopy -i disk.img obj/arm/subprobe.bin ::/SUBPRB.BIN
+mcopy -i disk.img obj/arm/pipeprobe.bin ::/PIPEPRB.BIN
+mcopy -i disk.img obj/arm/lseek_test.bin ::/LKSTEST.BIN
+mcopy -i disk.img obj/arm/sort.bin ::/SORT.BIN
+mcopy -i disk.img obj/arm/uniq.bin ::/UNIQ.BIN
+mcopy -i disk.img obj/arm/ping.bin ::/PING.BIN
+mcopy -i disk.img obj/arm/nc.bin ::/NC.BIN
+mcopy -i disk.img obj/arm/ifconfig.bin ::/IFCONFIG.BIN
+mcopy -i disk.img obj/arm/shtest2.bin ::/SHTEST2.BIN
+mcopy -i disk.img obj/arm/mkdir.bin ::/MKDIR.BIN
+mcopy -i disk.img obj/arm/shtest3.bin ::/SHTEST3.BIN
+mcopy -i disk.img obj/arm/pong.bin ::/PONG.BIN
+mcopy -i disk.img obj/arm/millipede.bin ::/MILLIPED.BIN
+mcopy -i disk.img obj/arm/stardust.bin ::/STARDUST.BIN
+mcopy -i disk.img obj/arm/files.bin ::/FILES.BIN
+mcopy -i disk.img obj/arm/calc.bin ::/CALC.BIN
+mcopy -i disk.img obj/arm/xcalc.bin ::/XCALC.BIN
+mcopy -i disk.img obj/arm/antfarm.bin ::/ANTFARM.BIN
+mcopy -i disk.img obj/arm/xeyes.bin ::/XEYES.BIN
+mcopy -i disk.img obj/arm/xnibbler.bin ::/XNIBBLER.BIN
+mcopy -i disk.img obj/arm/clock.bin ::/CLOCK.BIN
+mcopy -i disk.img obj/arm/sysmon.bin ::/SYSMON.BIN
+mcopy -i disk.img obj/arm/hex.bin ::/HEX.BIN
+mcopy -i disk.img obj/arm/tasks.bin ::/TASKS.BIN
+mcopy -i disk.img obj/arm/find.bin ::/FIND.BIN
+mcopy -i disk.img obj/arm/diff.bin ::/DIFF.BIN
+mcopy -i disk.img obj/arm/notes.bin ::/NOTES.BIN
+mcopy -i disk.img obj/arm/unit.bin ::/UNIT.BIN
+mcopy -i disk.img obj/arm/nano.bin ::/NANO.BIN
+mcopy -i disk.img obj/arm/xcrypt.bin ::/XCRYPT.BIN
+mcopy -i disk.img obj/arm/nes.bin ::/NES.BIN
+# Selfhost W2 (mtools port): in-OS /TOOLS copies of the ported
+# build-tools (8.3 names, the frozen F1 layout).
+mcopy -i disk.img obj/arm/mcopy.bin ::/TOOLS/MCOPY.BIN
+mcopy -i disk.img obj/arm/mdel.bin ::/TOOLS/MDEL.BIN
+mcopy -i disk.img obj/arm/mmd.bin ::/TOOLS/MMD.BIN
+# Selfhost W2 (mkfs port): in-OS MKFSFAT (F1 layout).
+mcopy -i disk.img obj/arm/mkfsfat.bin ::/MKFSFAT.BIN
+# Selfhost W3 (tools): the in-OS toolchain on the startup image (frozen
+# F1 layout, selfhost.md §7.3).  tools/selfhost-stage.sh --tools stages
+# CLANG.BIN/LLD.BIN/LLVMAR.BIN/OBJCOPY.BIN from the wave-2 LLVM
+# distribution staging (obj/selfhost/dist-staging, or the persistent
+# third_party/llvm-21.1.8/dist-staging copy that survives `make clean`),
+# the ported build tools (MAKE/MCOPY/MDEL/MMD/MKFSFAT), and the RESDIR
+# header tree under /TOOLS — staged FAITHFULLY with long names (F8
+# decision, see docs/selfhost/llvm-bootstrap.md §6.2).  Soft dependency:
+# an absent dist-staging warns + skips, so trees without the LLVM
+# install still build a bootable image (build_kernel.sh then refuses
+# with instructions).  Override with STAGE_TOOLS=0 to skip.
+tools/selfhost-stage.sh --tools disk.img
+selfhost-stage: staging in-OS toolchain to ::/TOOLS (F1 layout)
+selfhost-stage:   CLANG.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/clang-21 (converted, 94194168 B)
+selfhost-stage:   LLD.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/lld (converted, 53252520 B)
+selfhost-stage:   LLVMAR.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/llvm-ar (converted, 8351072 B)
+selfhost-stage:   OBJCOPY.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/llvm-objcopy (converted, 4984544 B)
+selfhost-stage: staged 284 files, 176921502 bytes into ::/TOOLS
+  --- ::/TOOLS (mdir) ---
+TAR      BIN    144544 2026-10-23   4:52 
+RESDIR       <DIR>     2026-10-23   4:52 
+       15 files         162 194 248 bytes
+                        739 885 056 bytes free
+
+  --- ::/TOOLS/RESDIR/include count ---
+      295 files          14 727 254 bytes
+                        739 885 056 bytes free
+
+selfhost-stage: done
+# Selfhost W4 (src): the in-OS build-required source subset on the
+# startup image (frozen F2 /SRC flavor): kernel+user sources, headers,
+# Makefile.hobbyos, limine/EFI assets, the carried build products, and
+# the SELFHOST.RUN/SELFHOST.SH stage scripts.  tools/selfhost-stage.sh
+# --src; disable together with the tools step via STAGE_TOOLS=0.
+tools/selfhost-stage.sh --src disk.img
+selfhost-stage: STAGE_LIBCXX=0 — skipping C++ libcxx include subset
+selfhost-stage: staging BUILD-REQUIRED source subset to ::/SRC
+
+selfhost-stage: staged BUILD-REQUIRED subset into disk.img
+  payload: 266 files, 5204831 bytes
+  --- ::/SRC (mdir) ---
+        3 files             315 392 bytes
+
+Total files listed:
+      340 files           5 204 900 bytes
+                        731 283 456 bytes free
+
+selfhost-stage: done
+# [inos-build-kernel] the source tarball + the in-OS build script:
+# SRC.TAR (ustar, assembled by tools/selfhost-src-tar.sh from the real
+# tree) lands at ::/SRC.TAR; build_kernel.sh at ::/BUILD_KERNEL.SH.
+# In-OS: `SH.BIN /BUILD_KERNEL.SH` extracts the tar and builds the
+# kernel from it (Makefile.hobbyos `all`) + assembles OUT.IMG.
+tools/selfhost-src-tar.sh obj/selfhost/SRC.TAR
+selfhost-src-tar: assembling obj/selfhost/SRC.TAR
+selfhost-src-tar: done — obj/selfhost/SRC.TAR
+  entries: 1080 (files+dirs), size: 23869440 bytes
+  spot-checked members: src/kernel/main.c Makefile.hobbyos linker.ld limine.conf build_kernel.sh
+mcopy -i disk.img obj/selfhost/SRC.TAR ::/SRC.TAR
+mcopy -i disk.img src/user/selfhost/build_kernel.sh ::/BUILD_KERNEL.SH
+mcopy -i disk.img obj/arm/monitor.bin ::/MONITOR.BIN
+mcopy -i disk.img obj/arm/monitort.bin ::/MONITORT.BIN
+mcopy -i disk.img obj/arm/icusmk.bin ::/ICUSMK.BIN
+echo "HobbyOS Terminal Test File" > SHTEST.TXT
+echo "This is line number two." >> SHTEST.TXT
+echo "Line three is right here." >> SHTEST.TXT
+echo "Fourth line has some interesting keywords like hello world." >> SHTEST.TXT
+echo "Line five is the last line of this small test document." >> SHTEST.TXT
+touch TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT
+echo "orange" > SORT.TXT
+echo "apple" >> SORT.TXT
+echo "orange" >> SORT.TXT
+mcopy -i disk.img SHTEST.TXT ::/SHTEST.TXT
+mcopy -i disk.img SHTEST.TXT ::/home/SHTEST.TXT
+mcopy -i disk.img TEST1.TXT ::/TEST1.TXT
+mcopy -i disk.img TEST2.TXT ::/TEST2.TXT
+mcopy -i disk.img TEST3.TXT ::/TEST3.TXT
+mcopy -i disk.img TEST4.TXT ::/TEST4.TXT
+mcopy -i disk.img SORT.TXT ::/SORT.TXT
+rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT
+BUILD_RC=0

@@ -1,0 +1,15 @@
+[rig] booting arm QEMU, capturing to evidence/XNIBBLER/20261023T045216Z
+[rig] WARNING: XNIBBLER.BIN not in start-menu dump
+[rig] FATAL: XNIBBLER.BIN not in start-menu dump
+    main()
+    ~~~~^^
+  File "/tmp/gb059/tools/evidence_rig.py", line 220, in main
+    q = boot(qemu_make, serial_log, qmp_sock, arch)
+  File "/tmp/gb059/tools/evidence_rig.py", line 119, in boot
+    q = QMP(qmp_sock)
+  File "/tmp/gb059/tools/evidence_rig.py", line 54, in __init__
+    self.sock.recv(65536)
+    ~~~~~~~~~~~~~~^^^^^^^
+TimeoutError: timed out
+NATIVE_RC=1
+NATIVE_RC=1

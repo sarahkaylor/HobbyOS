@@ -1,0 +1,5 @@
+[rig] booting arm QEMU, capturing to evidence/XNIBBLER/20261023T045745Z
+[rig] XNIBBLER.BIN slot: found by name = 19 (launching 19, by name)
+[rig] evidence bundle: evidence/XNIBBLER/20261023T045745Z
+[rig] report: XNIBBLER-EVIDENCE-REPORT.md
+NATIVE2_RC=0
