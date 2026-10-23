@@ -1,0 +1,59 @@
+== golden rows: 39
+== dent_have_charlie in golden: 1
+
+########## CASE 0: --self-test at head
+self-test rc=0
+  OK — injected probe row FAILS (leg A present)
+self-test result: fail_count=0
+
+########## CASE 1: healthy / leg A absent  (want 0)
+rc=0
+  PASS row: dent_have_beta (device+host)
+  PASS row: dent_have_charlie (device+host)
+  mode=source: PASS
+t4_device --check: PASS (mode=source) — the probe source carries exactly the golden row-name set; the host model contains every golden row.
+
+########## CASE 2: healthy / leg A present  (want 0)
+  capture rows: 39
+rc=0
+  PASS row: dent_have_charlie (device+host)
+  mode=emitted: PASS
+  PASS: recorded leg A agrees with the probe source (39 golden rows, no drift)
+t4_device --check: PASS (mode=source+emitted) — both extractions carry exactly the golden row-name set and agree; the host model contains every golden row.
+
+########## CASE 3: INJECTED row / leg A present  (want NON-ZERO)  <-- THE GATE
+  injected: 1 line(s) in src/user/t4_probe.c
+rc=1
+  PASS row: dent_have_beta (device+host)
+  PASS row: dent_have_charlie (device+host)
+  mode=emitted: PASS
+  FAIL: recorded leg A is STALE — it disagrees with the device probe's source:
+        -bogus_unconditional
+t4_device --check: FAIL (mode=source+emitted)
+
+########## CASE 4: same injection / leg A absent  (want NON-ZERO)
+rc=1
+  PASS row: dent_total (device+host)
+  PASS row: dent_have_alpha (device+host)
+  PASS row: dent_have_beta (device+host)
+  PASS row: dent_have_charlie (device+host)
+  FAIL: device probe emits extra row 'bogus_unconditional' not in golden [mode=source]
+t4_device --check: FAIL (mode=source)
+
+########## CASE 5: probe restored / stale capture missing one row  (want NON-ZERO, STALE)
+  probe restored: 0 modified file(s)
+  stale capture rows: 38
+rc=1
+  PASS row: dent_total (device+host)
+  PASS row: dent_have_alpha (device+host)
+  PASS row: dent_have_beta (device+host)
+  FAIL row: dent_have_charlie (device=0 host=1) [mode=emitted] — a row the M1 -V DoD names is missing from a probe
+  FAIL: recorded leg A is STALE — it disagrees with the device probe's source:
+t4_device --check: FAIL (mode=source+emitted)
+
+########## CASE 6: everything restored  (want 0, fail_count=0)
+self-test rc=0
+  OK — injected probe row FAILS (leg A present)
+self-test result: fail_count=0
+
+== tree state: 0 modified/untracked file(s)
