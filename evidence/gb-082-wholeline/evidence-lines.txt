@@ -1,0 +1,67 @@
+# trimmed from obj/t3_arm_fixed.log (25479 console lines) — main + gb087 main.c fix + gb082 wholeline (c5e4add)
+# kept: every FAIL/FATAL line plus the MD5TEST/CMPTEST context
+
+[WAVE-TRY] CMPTEST.BIN
+Loading program for scheduler (v2 AS): CMPTEST.BIN
+/CMPTEST.BIN
+[ARRIVED] CMPTEST.BIN rc>0
+[MD5TEST] starting
+  SOCK2TST select(0, NULL, NULL, NULL, 0) == 0[CMPTEST] fixtures written
+[CMPTEST] run: /CAPA.TXT /CAPC.TXT
+CMPTEST.BIN
+[MD5TEST] PASS empty file digest
+[MD5TEST] pipe failed
+[MD5TEST] FAIL abc digest
+[CMPTEST] run: /CAPA.TXT /CAPB.TXT/tmp/tactagld3
+[MD5TEST] PASS message digest
+[MD5TEST] PASS multi-file order
+[CMPTEST] run: -b /CAPA.TXT /CAPB.TXT
+[CMPTEST] run: -l /CAPA.TXT /CAPB.TXT
+[CMPTEST] run: -l -b /CAPA.TXT /CAPB.TXT
+[CMPTEST] run: -s /CAPA.TXT /CAPB.TXT
+[CMPTEST] run: /CAPA.TXT /CAPN.TXT
+[MD5TEST] PASS -b binary marker
+[CMPTEST] run: /CAPE.TXT /CAPA.TXT
+/EXPAND.BIN[MD5TEST] PASS 
+[CMPTEST] run: /NOPE.TXT /CAPA.TXT
+[MD5TEST] PASS --string digest
+[CMPTEST] run: -n 5 /CAPA.TXT /CAPB.TXT
+[MD5TEST] PASS -c pass output
+[MD5TEST] PASS -c pass rc
+[CMPTEST] run: -n 9 /CAPA.TXT /CAPB.TXT
+[CMPTEST] run: -n 10 /CAPA.TXT /CAPB.TXT
+[MD5TEST] PASS --check long option
+[CMPTEST] run: -i 4:0 /CAPS.TXT /CAPA.TXT
+[CMPTEST] run: v2 loader: PID=42 entry=0x1000000000 sp=0x1800000000 resident=1 tables=3
+[MD5TEST] PASS -c fail output
+[MD5TEST] PASS -c fail rc
+[CMPTEST] run: --version
+[CMPTEST] run: --help
+[CMPTEST] FAIL identical files
+[CMPTEST] PASS differing files report
+[CMPTEST] PASS -b quotes differing bytes
+[CMPTEST] PASS -l lists all differing bytes
+[CMPTEST] PASS -l -b lists quoted bytes
+[CMPTEST] PASS -s prints nothing
+[CMPTEST] PASS EOF on shorter file
+[CMPTEST] PASS EOF message on stderr
+[CMPTEST] PASS empty vs nonempty
+[CMPTEST] PASS empty EOF message
+[CMPTEST] PASS missing file diagnostic
+[CMPTEST] PASS -n 5 within identical prefix
+[CMPTEST] PASS -n 9 stops before difference
+[CMPTEST] PASS -n 10 hits differenceEXPAND.BIN: tab size cannot be 0
+[CMPTEST] PASS -i 4:0 skips prefix
+[CMPTEST] PASS - operand reads empty stdin
+[CMPTEST] PASS - stdin EOF diagnostic
+[CMPTEST] PASS --version full banner
+[CMPTEST] PASS --help usage text
+[CMPTEST] FAILURES: 1
+[KERNEL] Process 59: CMPTEST.BIN exited unexpectedly or gracefully.
+[MD5TEST] PASS -c --status quiet
+[MD5TEST] PASS -c --status rc
+[MD5TEST] PASS missing file rc
+you must specify a list of bytes, characters, or fields[MD5TEST] PASS 
+[FOLDTEST] PASS [MD5TEST] FAILURES: empty file[KERNEL] Process 4: CUT.BIN exited unexpectedly or gracefully.
+SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST. Process table:
+System halt from CPU 3.

@@ -1,0 +1,13 @@
+=== T3 (intel): build ===
+T3_intel: disk.img BPB is corrupt (bytes/sector='0', want 512) - regenerating the image
+=== T3 (intel): stage ===
+[T3_STAGE] staged STAGE4K.BIN
+=== T3 (intel): run (deadline 2700s, log /home/sarah/Documents/GitHub/HobbyOS/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 885 console lines, 4 FAIL lines, 55 user memory faults, 61 programs exited, halted=1
+T3_intel: FAIL — 4 FAIL line(s); first 20:
+811:  FAIL: line startpoint
+812:  FAIL: line midpoint
+813:  FAIL: line endpoint
+824:GRAPHICS TESTS FAILED
+T3_intel EXIT=1

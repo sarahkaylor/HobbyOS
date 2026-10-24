@@ -31,13 +31,20 @@
 #include <string.h>
 
 #include "lock.h"
+#include "process.h" /* LOSTWAKE_DEAD_OWNER_MS: the program's one definition of a dead owner */
 
 /* --- the environment locks.c expects ---------------------------------- */
 static int host_cpu;
 static uint8_t host_halted[16];
+/* GB-060 second shape: the per-CPU liveness clock, as process.c defines it and
+   watchdog_tick refreshes it.  Fake here so a two-second grace period can be
+   tested in microseconds. */
+volatile uint64_t cpu_heartbeat_ms[16];
+static uint64_t host_now_ms;
 
 uint32_t get_cpuid(void) { return (uint32_t)host_cpu; }
 int cpu_is_halted(uint32_t cpu) { return cpu < 16 ? host_halted[cpu] : 0; }
+uint64_t timer_get_ms(void) { return host_now_ms; }
 
 /* Capture the console: the steal must be announced, never silent. */
 static char con[4096];
@@ -50,6 +57,7 @@ void uart_putc_raw(char c) {
 
 /* the units under test (defined in arch/x64/locks.c) */
 int lock_steal_ok(uint32_t owner_slot, uint32_t cpu);
+int lock_stallbreak_ok(uint32_t owner_slot, uint32_t cpu, uint64_t now_ms);
 void spinlock_acquire(spinlock_t *lock);
 void spinlock_release(spinlock_t *lock);
 
@@ -119,10 +127,74 @@ static void test_end_to_end_steal(void) {
   check(l.owner == 0, "release clears the owner (no stale holder)");
 }
 
+/* GB-060 second shape: the holder is RUNNING, not stopped, but has stopped taking
+   timer interrupts for the whole grace period.  The rule must be exact at the
+   boundary and must never fire on a fresh heartbeat -- that is the whole
+   difference between "wedged" and "slow", and why this is not a timeout on the
+   waiter.  probe19 measured the need: a live CPU re-acquired proc_lock after a
+   halted CPU released it, then looped while holding it. */
+static void test_stallbreak_table(void) {
+  host_cpu = 0;
+  memset(host_halted, 0, sizeof host_halted);
+  memset((void *)cpu_heartbeat_ms, 0, sizeof cpu_heartbeat_ms);
+  host_now_ms = 100000;
+  cpu_heartbeat_ms[1] = 100000; /* cpu1 alive right now */
+
+  check(lock_stallbreak_ok(0, 0, host_now_ms) == 0, "free lock: nothing to break");
+  check(lock_stallbreak_ok(1, 0, host_now_ms) == 0, "our own lock: never broken by itself");
+  check(lock_stallbreak_ok(99, 0, host_now_ms) == 0, "out-of-range owner: refused, not assumed");
+  check(lock_stallbreak_ok(2, 0, host_now_ms) == 0,
+        "LIVE holder with a fresh heartbeat: never broken, however long the waiter spins");
+  check(lock_stallbreak_ok(4, 0, host_now_ms) == 0,
+        "owner whose heartbeat was never seen: not this rule's call");
+
+  host_now_ms = 100000 + LOSTWAKE_DEAD_OWNER_MS - 1;
+  check(lock_stallbreak_ok(2, 0, host_now_ms) == 0,
+        "one ms inside the grace period: still protected");
+
+  host_now_ms = 100000 + LOSTWAKE_DEAD_OWNER_MS;
+  check(lock_stallbreak_ok(2, 0, host_now_ms) == 1,
+        "at the grace period: broken (>=, the same rule the lost-owner reaper uses)");
+
+  host_now_ms = 100000 + LOSTWAKE_DEAD_OWNER_MS * 10;
+  check(lock_stallbreak_ok(2, 0, host_now_ms) == 1, "long stale: still broken");
+
+  host_halted[1] = 1;
+  cpu_heartbeat_ms[1] = host_now_ms; /* fresh clock, halted cpu */
+  check(lock_stallbreak_ok(2, 0, host_now_ms) == 1,
+        "halted owner: broken immediately, despite a fresh heartbeat");
+  host_halted[1] = 0;
+}
+
+static void test_end_to_end_stallbreak(void) {
+  host_cpu = 0;
+  memset(host_halted, 0, sizeof host_halted);
+  memset(con, 0, sizeof con);
+  con_n = 0;
+  host_now_ms = 500000;
+  cpu_heartbeat_ms[1] = 500000 - (LOSTWAKE_DEAD_OWNER_MS * 3); /* wedged, not halted */
+
+  spinlock_t l;
+  l.locked = 1;
+  l.owner = 2; /* held by cpu1: running, but its clock has stopped */
+
+  spinlock_acquire(&l);
+
+  check(l.locked == 1, "after the stall break the lock is held, not left free");
+  check(l.owner == (uint32_t)(host_cpu + 1),
+        "after the stall break the owner is the waiter");
+  check(strstr(con, "[STALLBREAK]") != NULL,
+        "the break was announced on the console");
+  spinlock_release(&l);
+  check(l.locked == 0 && l.owner == 0, "and the lock behaves normally afterwards");
+}
+
 int main(void) {
-  printf("locksteal_test_host: GB-060 stale-owner steal\n");
+  printf("locksteal_test_host: GB-060 stale-owner steal + wedged-owner stall break\n");
   test_decision_table();
   test_end_to_end_steal();
+  test_stallbreak_table();
+  test_end_to_end_stallbreak();
   printf("locksteal_test_host: %d checks, %d failed\n", checks_run,
          checks_failed);
   return checks_failed == 0 ? 0 : 1;

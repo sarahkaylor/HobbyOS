@@ -1,0 +1,72 @@
+# ARM tier, -smp 8, origin/main 4fa985d, 2026-10-23 18:0xZ
+# extracted from obj/t3_arm.log (31990 console lines)
+
+## CMPTEST
+[WAVE-TRY] CMPTEST.BIN
+Loading program for scheduler (v2 AS): CMPTEST.BIN
+/CMPTEST.BIN
+[ARRIVED] CMPTEST.BIN rc>0
+/CXX_T.BINCMPTEST.BIN
+[CMPTEST] fixtures written
+[CMPTEST] run: /CAPA.TXT /CAPC.TXT
+[CMPTEST] run: /CAPA.TXT /CAPB.TXT
+[CMPTEST] run: -b /CAPA.TXT /CAPB.TXT
+[CMPTEST] run: -l /CAPA.TXT /CAPB.TXT
+[CMPTEST] run: -l -b /CAPA.TXT /CAPB.TXT
+[CMPTEST] run: -s /CAPA.TXT /CAPB.TXT
+[CMPTEST] run: /CAPA.TXT /CAPN.TXT
+[TACTEST] run: -b /TACB.TXT[CMPTEST] run: 
+[CMPTEST] run: /NOPE.TXT /CAPA.TXT
+[CMPTEST] run: -n 5 /CAPA.TXT /CAPB.TXTv2 loader: image mapped (lazy), bytes=184760 pages=46 first=in elap=0ms
+[CMPTEST] run: -n 9 /CAPA.TXT /CAPB.TXT
+[CMPTEST] run: -n 10 /CAPA.TXT /CAPB.TXT
+[CMPTEST] run: -i 4:0 /CAPS.TXT /CAPA.TXT
+[CMPTEST] run: /MD5SUM.BIN
+[CMPTEST] run: --version
+[CMPTEST] run: --help
+[ARRIVED] [CMPTEST] PASS SED.BINv2 loader: PID=15 entry=0x1000000000 sp=0x1800000000 resident=1 tables=3
+[CMPTEST] PASS [WAVE-TRY] differing files reportEXPAND.BIN
+[CMPTEST] FAIL /EXPAND.BIN-b quotes differing bytes
+[CMPTEST] PASS -l lists all differing bytes
+[CMPTEST] PASS -l -b lists quoted bytes
+[CMPTEST] FAIL -s prints nothing
+[CMPTEST] PASS EOF on shorter file
+[CMPTEST] PASS EOF message on stderr
+[CMPTEST] PASS empty vs nonempty
+[CMPTEST] PASS empty EOF message
+[CMPTEST] PASS missing file diagnostic
+[CMPTEST] PASS -n 5 within identical prefix
+[CMPTEST] PASS -n 9 stops before difference
+[CMPTEST] PASS -n 10 hits difference
+[CMPTEST] PASS -i 4:0 skips prefix
+[CMPTEST] PASS - operand reads empty stdin
+[CMPTEST] PASS - stdin EOF diagnostic
+[CMPTEST] PASS --version full banner
+
+## POLLTST
+[WAVE-TRY] POLLTST.BIN
+Loading program for scheduler (v2 AS): POLLTST.BIN
+/POLLTST.BIN
+[ARRIVED] POLLTST.BIN rc>0
+POLLTST.BIN
+POLLTST: F1.2 select() readiness/timeout/blocking checks
+  POLLTST select(nfds > FD_SETSIZE) -> -1/EINVAL: PASS
+  POLLTST select(unopened fd) -> -1/EBADF: PASS
+  POLLTST select(0, NULL x3, 5ms) == 0: PASS
+  POLLTST empty pipe: select(read, 0) == 0 and mask cleared: PASS
+  POLLTST pipe with 1 byte queued: select(read, 0) == 1 and FD_ISSET: PASS
+  POLLTST the queued byte reads back: PASS
+  POLLTST pipe write end with space: select(write, 0) == 1: PASS
+  POLLTST filled the pipe exactly (PIPE_SIZE 512): PASS
+  POLLTST pipe with no space: select(write, 0) == 0 and mask cleared: PASS
+  POLLTST drained pipe: not readable again: PASS
+  POLLTST empty pipe: select(timeout 100ms) == 0: PASS
+  POLLTST timeout took >= 85ms and < 5000ms (elapsed seen): PASS
+  POLLTST two ready pipes: ready count == 2, both fds set: PASS
+  POLLTST reader-closed pipe: writable + except (POLLERR/HUP semantics): PASS
+
+## FAIL lines
+[CMPTEST] FAIL /EXPAND.BIN-b quotes differing bytes
+[CMPTEST] FAIL -s prints nothing
+[CMPTEST] FAILURES: 2
+SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST. Process table:

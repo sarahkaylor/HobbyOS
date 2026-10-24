@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
@@ -27,14 +28,25 @@
  * needed here. The in-OS build gets `int errno` from src/user/libc.c. */
 
 int ho_open(const char *filename, int flags, ...) {
-  /* Keep the mock's create-on-demand semantics, but honor the flags the
-     shell needs for redirections: O_TRUNC replaces content, O_APPEND
-     appends (the original mock opened O_RDWR|O_CREAT with no truncation,
-     which broke `> file` parity against real shells). */
-  int host = O_RDWR | O_CREAT;
-  if (flags & O_TRUNC) host |= O_TRUNC;
-  if (flags & O_APPEND) host |= O_APPEND;
-  return open(filename, host, 0666);
+  /* Be FAITHFUL to the caller's flags: musl open(dir, O_RDONLY|O_DIRECTORY)
+     must behave exactly like Linux open(dir, O_RDONLY|O_DIRECTORY), which a
+     shim that forces O_RDWR|O_CREAT breaks (EISDIR).  GB-083 surfaced this
+     fidelity bug by routing leg B through the shims.  Pass through the
+     caller's mode and flags as-is (O_ACCMODE | O_DIRECTORY | O_TRUNC |
+     O_APPEND); the shell redirection tests already pass O_CREAT|O_TRUNC
+     explicitly, so no implicit O_CREAT is needed to preserve them. A va_arg
+     mode is only honoured when the caller sets O_CREAT. */
+  int host = flags & (O_ACCMODE | O_DIRECTORY | O_TRUNC | O_APPEND | O_CREAT);
+  /* Mode: honor the caller-supplied mode when O_CREAT.  This was previously
+     unsafe because the tree had *52* call sites passing O_CREAT with no third
+     argument — reading va_arg then was UB and created mode-0000 files.  GB-084
+     fixed every one of those sites to pass an explicit mode (open_mode_scan.sh
+     now FAILs on any 2-arg O_CREAT open), so the supplied mode is now always
+     present and always honored here.  This makes leg B agree with real Linux,
+     which honors the mode bit-for-bit (the differential's mode_is_0600 row). */
+  mode_t mode = 0644;
+  if (flags & O_CREAT) { va_list ap; va_start(ap, flags); mode = (mode_t)va_arg(ap, int); va_end(ap); }
+  return open(filename, host, mode);
 }
 
 int ho_dup(int fd) {

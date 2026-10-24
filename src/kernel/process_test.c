@@ -937,9 +937,28 @@ static void test_fault_kill_status_nonzero(void) {
   process_free(pid);
 }
 
+/* SEC-OBS-A (security-plan.md observation A): pid doubles as an index into
+ * fixed kernel pools (spawn_args_pool, spawn_ex_pool, select_wait, ...).
+ * The invariant that makes this safe: pid is a dense slot index — every
+ * proc_table slot has a pcb whose pid equals the slot number, and no
+ * lookup succeeds outside [0, MAX_PROCESSES). */
+static void test_pid_slot_invariant(void) {
+  tests_run++;
+  uart_puts("  Running test_pid_slot_invariant...\n");
+
+  for (int pid = 0; pid < MAX_PROCESSES; pid++) {
+    struct process *pcb = process_get_pcb(pid);
+    EXPECT_EQ((pcb != 0), 1);
+    if (pcb) EXPECT_EQ(pcb->pid, pid);
+  }
+  EXPECT_EQ((process_get_pcb(-1) == 0), 1);
+  EXPECT_EQ((process_get_pcb(MAX_PROCESSES) == 0), 1);
+}
+
 void process_test_suite(void) {
   uart_puts("process_test_suite:\n");
   test_process_init_and_create();
+  test_pid_slot_invariant(); /* SEC-OBS-A: pid == bounded slot index */
   test_process_set_entry();
   test_process_num_cpus();
   test_process_thread_group();

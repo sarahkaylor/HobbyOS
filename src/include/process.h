@@ -220,6 +220,11 @@ struct process {
    *  exec, grows toward heap_top; the region is pre-mapped, so this is
    *  pure bookkeeping). */
   uint64_t heap_brk;
+  /* GB-068 probe: last syscall and its return.  -1 means "never entered the
+     dispatcher" -- 0 was ambiguous with syscall number 0 and made 58 of 68
+     fault records unreadable. */
+  int64_t last_syscall;
+  int64_t last_ret;
   /** Phase 4 (memory): anonymous mmap regions (first-fit carving from the
    *  pre-mapped region; entries are VAs into the anon area). */
   struct anon_region { uint64_t addr; uint64_t len; } anon_maps[8];
@@ -240,6 +245,23 @@ struct process {
    * value survives regardless of how the caller got rescheduled.
    */
   int spawn_retval;
+
+  /**
+   * GB-063: deadline (ms) for a caller parked in PROC_STATE_WAIT_SPAWN.
+   *
+   * The caller parks before its worker exists and is resumed by that worker on
+   * completion -- so a worker that dies before unparking (measured: the loader
+   * #GP, GB-013) leaves the caller parked forever, and `any_alive` then keeps the
+   * whole wave from halting (probe20: 30,179 lines, no strand, no halt).
+   *
+   * The bound is owner-side on purpose: resuming the caller's own wait touches no
+   * other context's state, whereas the scheduler forcing a slot's state is what I
+   * tried and withdrew (the live spawn path re-parks it underneath you -- the same
+   * slot "reaped" 11 times in a row).  SPAWN_WAIT_BUDGET_MS must stay comfortably
+   * above the loader's own retry budget (LOAD_RETRY_CHILD_MS = 20 s) or a slow but
+   * legitimate load would be preempted; 0 means "not parked".
+   */
+  uint64_t spawn_deadline_ms;
 
   /**
    * F1.5 (FPU): per-process floating-point register image, saved on every
@@ -328,6 +350,13 @@ struct process {
    * (GB-014) instead of the native chain.  Group anchor state (the leader
    * marks it; threads inherit from the anchor).  PROC_FLAG_LINUX_ABI = 1. */
   uint32_t abi_flags;
+  /* GB-014: the last user PC observed on a trap into the kernel. A PCB's saved
+   * context is only written on a preemption/resume, so at exit it can still
+   * read as the entry point even when the program ran thousands of
+   * instructions. Latching the PC here makes the exit report name where the
+   * program actually got to, which is the first question asked of any program
+   * that stops silently. */
+  uint64_t last_user_pc;
 };
 
 /* Linux-compat process flag (GB-013): route syscalls through the Linux
@@ -542,6 +571,12 @@ int lostwake_stale_claim_reclaimable(int k);
 // drained).  Also used by the unit test to fabricate a stale claimer.
 #define LOSTWAKE_DEAD_OWNER_MS 2000
 
+/* GB-063: how long a spawn caller may sit parked in WAIT_SPAWN before the
+   scheduler resumes it with -EAGAIN.  Deliberately above the loader's own child
+   retry budget (LOAD_RETRY_CHILD_MS = 20 s in program_loader.c) so only a caller
+   whose worker will never report is released. */
+#define SPAWN_WAIT_BUDGET_MS 45000u
+
 // Mark the current process as EXITED and cleanup resources.
 // tf: The trap frame of the process calling exit.
 void process_exit(struct trap_frame *tf);
@@ -567,6 +602,19 @@ void process_wakeup(int pid);
 
 // Wake up all kernel threads that are in the BLOCKED state.
 void process_wake_all(void);
+
+/* SEC-OBS-B (security-plan.md observation B): deferred variant of the
+ * lost-wakeup catch-all for callers that hold finer locks — specifically
+ * the virtio-blk completion path, which runs under fat_lock (and through
+ * it f->lock) when FAT metadata I/O completes.  process_wake_all() takes
+ * proc_lock; acquiring it there would invert the documented order
+ * (proc -> ... -> fat) and close a deadlock cycle against any proc_lock
+ * holder that does disk I/O.  The deferred call just marks the wake
+ * pending; the timer tick drains it at IRQ dispatch entry, where rank
+ * rules do not apply (see lock.h).  One-tick latency is acceptable for a
+ * recovery path whose normal counterpart (explicit wakes) stays immediate. */
+void process_wake_all_deferred(void);
+void process_wake_all_drain(void); /* tick only */
 
 // Get the PCB for a specific PID.
 struct process *process_get_pcb(int pid);

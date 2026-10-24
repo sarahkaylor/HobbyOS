@@ -75,6 +75,122 @@ static int expect(const char *name, int want) {
   return 0;
 }
 
+/* --- GB-013 relocation pass ------------------------------------------------
+ *
+ * Built by hand rather than from a fixture: the pass is a pure function of
+ * (image description, staged bytes, base), so the test should not need a real
+ * binary to exercise the refusal paths -- and a hand-built table can express
+ * cases no compiler would emit (an unsupported relocation type, a table that
+ * runs past the mapping) which is exactly where a loader silently misbehaves.
+ */
+static void w64(uint8_t *p, uint64_t v) {
+  for (int i = 0; i < 8; i++) p[i] = (uint8_t)(v >> (8 * i));
+}
+
+/* stage layout, vaddr_base = 0x1000:
+ *   +0x0080  the slot to be relocated
+ *   +0x1000  dynamic array
+ *   +0x1100  RELA table
+ */
+#define R_VB      0x1000u
+#define R_SPAN    0x2000u
+#define R_SLOT    (0x0080u)
+#define R_DYN     (0x1000u)
+#define R_RELA    (0x1100u)
+#define R_BASE    0x1000000000ull
+
+static void reloc_case_setup(uint8_t *stage, struct elf_image *img,
+                             uint32_t reloc_type, uint64_t addend,
+                             uint64_t rela_vaddr, uint64_t relasz,
+                             uint64_t relaent) {
+  memset(stage, 0, R_SPAN);
+  memset(img, 0, sizeof *img);
+  img->vaddr_base = R_VB;
+  img->vaddr_end = R_VB + R_SPAN;
+  img->dyn_vaddr = R_VB + R_DYN;
+  img->dyn_size = 64;
+  uint8_t *dyn = stage + R_DYN;
+  w64(dyn + 0, 7);  w64(dyn + 8, rela_vaddr);   /* DT_RELA   */
+  w64(dyn + 16, 8); w64(dyn + 24, relasz);      /* DT_RELASZ */
+  w64(dyn + 32, 9); w64(dyn + 40, relaent);     /* DT_RELAENT */
+  w64(dyn + 48, 0); w64(dyn + 56, 0);           /* DT_NULL   */
+  uint8_t *r = stage + R_RELA;
+  w64(r + 0, R_VB + R_SLOT);                    /* r_offset  */
+  w64(r + 8, ((uint64_t)reloc_type));           /* r_info    */
+  w64(r + 16, addend);                          /* r_addend  */
+}
+
+static void test_relocations(void) {
+  static uint8_t stage[R_SPAN];
+  struct elf_image img;
+
+  printf("--- relocation pass ---\n");
+
+  /* 1. the case that unblocked the milestone: base + addend lands in the slot */
+  reloc_case_setup(stage, &img, 8 /* R_X86_64_RELATIVE */, 0x1234,
+                   R_VB + R_RELA, 24, 24);
+  CHECK_EQ(elf_apply_relocations(&img, stage, R_SPAN, R_BASE), ELF_OK,
+           "RELATIVE: returns ELF_OK");
+  uint64_t slot = 0;
+  for (int i = 0; i < 8; i++) slot |= (uint64_t)stage[R_SLOT + i] << (8 * i);
+  CHECK_EQ(slot, R_BASE + 0x1234, "RELATIVE: slot becomes base+addend");
+
+  /* 2. aarch64 RELATIVE is the same rule, and must not be refused */
+  reloc_case_setup(stage, &img, 1027 /* R_AARCH64_RELATIVE */, 0x40,
+                   R_VB + R_RELA, 24, 24);
+  CHECK_EQ(elf_apply_relocations(&img, stage, R_SPAN, R_BASE), ELF_OK,
+           "AARCH64_RELATIVE: accepted");
+
+  /* 3. an unimplemented type is REFUSED, not skipped: a silently-skipped
+        relocation looks like working code until it jumps elsewhere */
+  reloc_case_setup(stage, &img, 6 /* R_X86_64_GLOB_DAT */, 0,
+                   R_VB + R_RELA, 24, 24);
+  CHECK_EQ(elf_apply_relocations(&img, stage, R_SPAN, R_BASE), ELF_ERR_RELOC,
+           "unsupported type: ELF_ERR_RELOC (refused)");
+
+  /* 4. the slot must be untouched by the refusal */
+  reloc_case_setup(stage, &img, 6, 0, R_VB + R_RELA, 24, 24);
+  (void)elf_apply_relocations(&img, stage, R_SPAN, R_BASE);
+  slot = 0;
+  for (int i = 0; i < 8; i++) slot |= (uint64_t)stage[R_SLOT + i] << (8 * i);
+  CHECK_EQ(slot, 0, "unsupported type: slot left unchanged");
+
+  /* 5. a RELA table past the mapping is an error, not an overrun.
+        Getting this case to actually test the span guard took two attempts, both
+        found by mutation rather than by reading the code:
+          (a) RELASZ 0x1000 still fit the 0x1010 bytes remaining, so a later check
+              produced the error and the span guard could be deleted silently;
+          (b) making RELASZ huge only "passed" because the loop then read out of
+              bounds and tripped the r_offset guard instead.
+        So: a buffer LARGER than the declared span, holding zeroes. Without the
+        span guard the loop reads in-bounds padding, sees only type 0, and returns
+        ELF_OK -- with it, ELF_ERR_RELOC. Now only the guard under test can change
+        the result. */
+  static uint8_t pad[R_SPAN + 0x1000];
+  reloc_case_setup(pad, &img, 8, 0x10, R_VB + R_RELA, 24, 24);
+  img.dyn_vaddr = R_VB + R_DYN;
+  w64(pad + R_DYN + 8, R_VB + 0x1FF0);    /* DT_RELA at the last 16 bytes of span */
+  w64(pad + R_DYN + 24, 0x1000);          /* RELASZ runs past it, into the padding */
+  CHECK_EQ(elf_apply_relocations(&img, pad, R_SPAN, R_BASE), ELF_ERR_RELOC,
+           "RELA table past span: ELF_ERR_RELOC");
+
+  /* 6. Elf64_Rela is 24 bytes; any other stride is refused */
+  reloc_case_setup(stage, &img, 8, 0x10, R_VB + R_RELA, 48, 16);
+  CHECK_EQ(elf_apply_relocations(&img, stage, R_SPAN, R_BASE), ELF_ERR_RELOC,
+           "RELAENT != 24: ELF_ERR_RELOC");
+
+  /* 7. no dynamic section means nothing to do, and that is success */
+  memset(&img, 0, sizeof img);
+  img.vaddr_base = R_VB;
+  img.vaddr_end = R_VB + R_SPAN;
+  CHECK_EQ(elf_apply_relocations(&img, stage, R_SPAN, R_BASE), ELF_OK,
+           "no PT_DYNAMIC: ELF_OK (no-op)");
+
+  /* 8. null arguments are mistakes, not no-ops */
+  CHECK_EQ(elf_apply_relocations(NULL, stage, R_SPAN, R_BASE), ELF_ERR_ARGS,
+           "null image: ELF_ERR_ARGS");
+}
+
 int main(void) {
   printf("=== ELF image parser (GB-013) host tests ===\n");
 
@@ -334,6 +450,8 @@ int main(void) {
       printf("  SKIP real-binary parse (set ELF_REAL_BINARY=/path/to/static-x86_64)\n");
     }
   }
+
+  test_relocations();
 
   printf("=== %d checks, %d failed ===\n", checks, failures);
   if (failures == 0) {

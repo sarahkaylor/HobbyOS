@@ -1,4 +1,5 @@
 #include "process.h"
+#include "kline.h"
 #include "frame.h"
 #include "vm.h"
 #include "fs.h"
@@ -65,7 +66,62 @@ void cpu_halt_record(uint32_t cpu) {
 
 int cpu_is_halted(uint32_t cpu) { return cpu < MAX_CPUS ? cpu_halted[cpu] : 0; }
 
-static void resume_returned_halt(int pid) {
+/* GB-068 (2026-10-19): a diagnostic record must be ONE write.  `uart_puts`
+   takes uart_lock across the whole string, but these records used to be ten or
+   more separate puts/print_int calls, each releasing the lock -- so another CPU
+   interleaved at every boundary and the records shredded each other.  Measured
+   on origin/main: 0 of 52 fault records parsed, with an `[ALIVE-SET]` line cut
+   in half *inside* a fault record.  The fault path was already fixed this way;
+   these two were the remaining shredders, and they were shredding the very
+   evidence GB-068 needs. */
+struct db_buf { char b[288]; int n; };
+static void db_s(struct db_buf *f, const char *s2) {
+  while (*s2 && f->n < (int)sizeof f->b - 1) f->b[f->n++] = *s2++;
+}
+static void db_i(struct db_buf *f, long v) {
+  char t[24]; int k = 0; int neg = 0;
+  if (v < 0) { neg = 1; v = -v; }
+  if (v == 0) t[k++] = '0';
+  while (v > 0 && k < 23) { t[k++] = (char)('0' + (v % 10)); v /= 10; }
+  if (neg) db_s(f, "-");
+  while (k > 0) { char c2 = t[--k]; int n2 = f->n; if (n2 < (int)sizeof f->b - 1) f->b[n2] = c2; f->n = n2 + 1; }
+}
+static void db_emit(struct db_buf *f) {
+  if (f->n < (int)sizeof f->b) f->b[f->n] = 0; else f->b[sizeof f->b - 1] = 0;
+  uart_puts(f->b);
+  f->n = 0;
+}
+
+/* GB-063: latch for the [ALIVE-SET] report (which live slots stop the wave from
+   halting), one per idle stretch and cleared when work is found.  Declared up
+   here because the end-of-wave branch that prints it lives near the top of
+   schedule(): declaring it beside the other idle-path latches (as I first did)
+   put the definition 1,200 lines below its first use, and the gate refused both
+   arches for it. */
+static int alive_reported;
+/* GB-057-a: the wave-end predicate is a NEGATIVE test -- anything not
+   FREE/EXITED/ALLOCATED/THREAD_DONE counts as live work -- so PROC_STATE_BLOCKED
+   (5) is counted, and a process blocked with no possible waker keeps `any_alive`
+   true forever: `!any_alive` never fires, scheduler_finished() is never called,
+   and the wave never halts.  That is the 7-of-8 shape of this ticket (probe42:
+   `slot=12 pid=12 st=5 parent=-1 SPAWN.BIN`).  Rather than add BLOCKED to the
+   exclusion list -- which would truncate waves whose children wait legitimately
+   on a pipe -- stamp when the scheduler first observes the slot BLOCKED and
+   exclude it only after WAVE_BLOCK_BUDGET_MS, loudly, naming the slot.  The stamp
+   is lazy (one place, no park-site changes) and cleared the moment the state
+   leaves BLOCKED, so a reused slot never inherits an old wait. */
+#define WAVE_BLOCK_BUDGET_MS 60000ULL
+static uint64_t wait_since_ms[MAX_PROCESSES];
+static int orphan_reported[MAX_PROCESSES];
+/* GB-057: latch for the [NOAS] skip report (a user slot picked with no address
+   space -- mid-exec), cleared with the other latches when work is found. */
+static int noas_reported;
+/* GB-057: count of implausible-frame picks reported (bounded -- this is a
+   rare-event report, not a per-pick log). */
+volatile uint64_t sched_badelr_seen;
+
+
+static void resume_returned_halt(int pid, const struct trap_frame *tf) {
   extern void uart_puts_raw(const char *s);
   extern void uart_print_hex_raw(uint64_t v);
   uart_puts_raw("[KERNEL] resume call RETURNED (must never happen): cpu=");
@@ -77,6 +133,24 @@ static void resume_returned_halt(int pid) {
   uart_print_hex_raw((uint64_t)get_cpuid());
   uart_puts_raw(" pid=");
   uart_print_hex_raw((uint64_t)(uint32_t)pid);
+  /* GB-057: and the FRAME it failed to enter.  Returning from
+     enter_user_space means the iretq did not take -- which happens when the
+     frame is not a legal return (non-canonical RIP, bad CS/SS, nonsense RFLAGS).
+     Without these four fields the line says a CPU was lost but not what it was
+     handed, which is the difference between naming a bug and describing a
+     symptom (probe22 printed only cpu and pid, and I could not tell which). */
+  if (tf) {
+    uart_puts_raw(" frame.elr=");
+    uart_print_hex_raw(tf->elr);
+    uart_puts_raw(" frame.spsr=");
+    uart_print_hex_raw(tf->spsr);
+#ifdef __x86_64__
+    uart_puts_raw(" frame.cs=");
+    uart_print_hex_raw(tf->cs);
+    uart_puts_raw(" frame.ss=");
+    uart_print_hex_raw(tf->ss);
+#endif
+  }
   /* GB-060: a CPU that has to stop must not take the machine with it.  If this
      CPU is holding proc_lock, hand it back -- but ONLY if the lock records us as
      the owner, because clearing a lock somebody else holds would turn a stall
@@ -114,6 +188,53 @@ extern void arch_fpu_reset(struct process *p);
 
 // Process table
 static struct process proc_table[MAX_PROCESSES];
+
+/* GB-057: bounded count for the [IDLECLAIM] report (a leaked per-CPU claim seen
+   on idle entry).  Rare-event report, not a per-idle log. */
+static int idleclaim_reported;
+
+/* GB-057: a CPU entering any idle/park path must not still claim a process.
+
+   `set_current_process_pid(cpu, -1)` is the documented "no claim" state
+   (process.c:261, "which slot claims `cpu` (-1 = none)"), and the claim guard in
+   schedule() refuses to hand a slot to a CPU that still claims it.  So a leaked
+   claim is two bugs at once: a slot nobody runs is counted alive (the wave never
+   halts), and that process can never be picked again.
+
+   Measured: probe32 `c4=16`, probe34 `c3=18`, probe35 `c4=17` -- always exactly
+   one CPU, always a pid it is not running, while the monitor showed every CPU
+   halted in safe_wfi.
+
+   This must be called at EVERY idle/park site, which is what my first attempt got
+   wrong: I instrumented only the schedule-idle loop (where the [IDLESTUCK] dump
+   lives), and the report never fired because the leaking CPU parks somewhere else
+   -- there are three `while(1) { safe_wfi(); }` loops in this file plus a bare
+   `safe_wfi()` at 2725, and a CPU that parks in any of them keeps its claim.
+
+   The pid range is the only condition; the slot's state is PRINTED rather than
+   used to decide, because the first version's "must not be RUNNING" filter was a
+   guess that silenced the report on a run where the leak was on screen two lines
+   above. */
+static void idle_claim_check(void) {
+  extern int current_pid_of_cpu(uint32_t cpu);
+  int leaked = current_pid_of_cpu(get_cpuid());
+  if (leaked >= 0 && leaked < MAX_PROCESSES && idleclaim_reported < 40) {
+    idleclaim_reported++;
+    uart_puts("[IDLECLAIM] cpu=");
+    print_int((int)get_cpuid());
+    uart_puts(" still claims pid=");
+    /* CORRECTION (GB-057): same misread as [ALIVE-SET] -- this reads under
+       proc_lock, so a plain read is correct; the `<torn:>` detector I added here
+       was based on a false premise and is removed. */
+    print_int(proc_table[leaked].pid);
+    uart_puts(" name=");
+    uart_puts(proc_table[leaked].name);
+    uart_puts(" state=");
+    print_int(proc_table[leaked].state);
+    uart_puts(" on idle entry\n");
+  }
+}
+
 int cpu_current_pids[MAX_CPUS];
 /* Per-CPU liveness heartbeat (ms), bumped by watchdog_tick on every timer
    IRQ and by the idle loop.  The lost-owner reaper treats a stale
@@ -175,6 +296,9 @@ static void kmemset(void *dst, uint8_t val, uint64_t n) {
  */
 void process_init(void) {
   spinlock_init(&proc_lock);
+#ifdef KERNEL_MODE_UNIT_TEST
+  lockdbg_register(&proc_lock, "proc_lock", LOCK_RANK_PROC); /* SEC-OBS-B */
+#endif
   /* P2.2 (design section 2): the frame bitmap is the single source of
      truth for pool state; the 32 MiB block layer is layered on it. */
   frame_init();
@@ -307,7 +431,19 @@ void process_set_entry(int pid, uint64_t elr, uint64_t sp) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   proc_table[pid].context[31] = elr;        // ELR (entry point)
   proc_table[pid].context[33] = sp;         // SP_EL0 (stack pointer)
+#if defined(__x86_64__)
+  /* GB-014: on x64 this slot is RFLAGS, not ARM's SPSR. Zero is NOT a valid
+   * set of flags to iretq with: bit 1 is architecturally reserved and MUST be
+   * 1, so `iretq` with RFLAGS=0 raises #GP with error code 0 and the user
+   * process never executes a single instruction -- which is exactly what every
+   * staged ELF program did (measured: #GP vector 13, GP ERROR: 0x00000000,
+   * first fetch absent from a 199k-line in_asm capture). 0x202 = IF | bit1,
+   * the same value the normal x64 create path uses at context[32].
+   * On ARM this slot stays 0 (SPSR = EL0t, the correct EL0 state). */
+  proc_table[pid].context[32] = 0x202;
+#else
   proc_table[pid].context[32] = 0;          // SPSR = EL0t
+#endif
   proc_table[pid].context[34] = 0;          // x64: force is_kernel_process classification
   proc_table[pid].context[35] = 0;          //      (a fresh user program resumes as 0x1B/0x23)
   proc_table[pid].state = PROC_STATE_READY; // Mark as runnable!
@@ -603,8 +739,9 @@ static void group_teardown(struct process *grp, uint64_t code) {
   grp->as = 0;
   spinlock_release_irqrestore(&proc_lock, flags);
 
-  /* Close the group's descriptors once.  file_close() re-checks each slot
-     under its own file lock, so even a racing path stays consistent. */
+  /* Close the group's descriptors once.  SEC-9 (security-plan.md #9):
+   * file_close() claims each fd slot under proc_lock, so a racing kill
+   * teardown or sibling close() releases every g_fd exactly once. */
   for (int i = 0; i < MAX_OPEN_FDS; i++) {
     if (grp->open_fds[i] != -1)
       file_close(grp, i);
@@ -764,6 +901,12 @@ static int process_create_internal_ver(int ver) {
     if (proc_table[i].state == PROC_STATE_FREE) {
       pid = i;
       proc_table[i].state = PROC_STATE_ALLOCATED;
+      /* GB-068 probe: -1 distinguishes "never called the kernel" from
+         "syscall 0", which 0 could not.  Not context[] -- zeroing the whole
+         register context was measured to change nothing (68 -> 58 records of
+         the same shape) and was reverted. */
+      proc_table[i].last_syscall = -1;
+      proc_table[i].last_ret = 0;
       break;
     }
   }
@@ -1303,6 +1446,90 @@ void schedule(struct trap_frame *tf, int is_yield) {
       int idx = (current_search_pid + i) % MAX_PROCESSES;
       if (proc_table[idx].state != PROC_STATE_READY)
         continue;
+      /* GB-057: never pick a BROKEN user slot -- one with no address space AND no
+         physical base to overlay.
+
+         The exec path leaves the exec'ing process with no AS for a long window
+         (teardown + create + image map + region inserts, interrupts enabled), and
+         a pick in that window takes the `else` branch below --
+         mmu_switch_user_mapping with `user_phys_base` (0 for a v2 slot) -- and
+         restores into a frame built for physical 0, which is how a CPU ends up
+         executing at address 7 (probe22: `vector=6 rip=0x0000000000000007 pid=28
+         PIPETEST.BIN`; FORKTEST pid=25 took a wild RIP the same way).
+
+         BOTH conditions are required, and the second one matters: a **v1** process
+         legitimately has `as == 0` with a valid `user_phys_base`, and the overlay
+         branch below is the correct resume path for it.  Skipping on `as == 0`
+         alone would starve the entire native/v1 track -- a fix worse than the bug.
+         Only a slot with neither an AS nor a physical base is unrecoverable.
+
+         Skipping is self-clearing: the exec'ing process is not blocked (it
+         completes on its own CPU), so the slot becomes pickable as soon as its new
+         AS is installed.  Reported (latched) because a silent skip is
+         indistinguishable from a scheduling bug. */
+      if (!proc_table[idx].is_kernel_process && !proc_table[idx].as &&
+          proc_table[idx].user_phys_base == 0) {
+        if (!noas_reported) {
+          noas_reported = 1;
+          uart_puts("[NOAS] skipping USER slot with no address space: slot=");
+          print_int(idx);
+          uart_puts(" pid=");
+          print_int(proc_table[idx].pid);
+          uart_puts(" state=");
+          print_int((int)proc_table[idx].state);
+          uart_puts(" ");
+          uart_puts(proc_table[idx].name);
+          uart_puts(" -- mid-exec AS swap; will be pickable when its AS is back\n");
+        }
+        continue;
+      }
+      /* GB-057: is the frame we are about to hand this process a plausible one?
+
+         The resume sites are interrupt-atomic and that race is documented and
+         handled (a timer tick in the 296-byte window clobbers the copied frame and
+         "the iretq pops garbage"), so a garbage frame surviving to the resume is
+         not that bug -- it is upstream corruption of `context[]`, i.e. the
+         save/restore race the claim guard above describes ("torn cross-process
+         register frames").
+
+         Measured (probe24): SMPTEST.BIN took `vector=6 rip=0x0000000000000007`
+         with `age_ms=219005` and a frame whose stack slots were all zero -- a
+         process resumed into a frame that was never properly written, then stuck
+         for 3.6 minutes before the fault was noticed.
+
+         elr (context[31], the ARM-position field both arches share) is the field
+         that would be wrong: a user process must resume into its own image, so
+         anything below the first page or above the kernel base is nonsense. */
+      {
+        extern volatile uint64_t sched_badelr_seen;
+        uint64_t elr = proc_table[idx].context[31];
+        /* The gap between the x64 kernel's load base and the user VA base is
+           where no legal user entry point can live.  Getting this range wrong is
+           what my first version did: it used the kernel base as the upper bound
+           and so flagged EVERY healthy resume (elr=0x1000000000, the user image
+           base itself), burning the 20-line cap on false positives and going
+           blind exactly when the real one -- elr=0x7 -- occurred.  The same
+           failure mode as the holder reporter's lifetime cap: a noisy instrument
+           with a budget is worse than no instrument. */
+        int implausible = (elr < 0x1000u) ||
+                          (elr >= 0x70000000u && elr < USER_VA_BASE);
+        if (!proc_table[idx].is_kernel_process && implausible) {
+          if (sched_badelr_seen < 20) {
+            sched_badelr_seen++;
+            uart_puts("[BADELR] picking a user slot with an implausible frame.elr=");
+            uart_print_hex(elr);
+            uart_puts(" slot=");
+            print_int(idx);
+            uart_puts(" pid=");
+            print_int(proc_table[idx].pid);
+            uart_puts(" sp=");
+            uart_print_hex(proc_table[idx].context[33]);
+            uart_puts(" ");
+            uart_puts(proc_table[idx].name);
+            uart_puts("\n");
+          }
+        }
+      }
       /* Claim guard (the picking half of `taken_elsewhere` above): a
          READY process may still be EXECUTING on another CPU -- a waker
          flipped its parked state back to READY while its owner was still
@@ -1378,6 +1605,24 @@ void schedule(struct trap_frame *tf, int is_yield) {
       extern char __stack_top;
       uint64_t target_sp = (uint64_t)&__stack_top - cpu * 0x10000 - 4096;
 #ifdef __x86_64__
+      /* GB-068 FIX: target_sp must be the RESUMED TASK's stack, not this CPU's.
+         It was initialised to the per-CPU kernel stack and only ever
+         `arch_set_user_sp(park)` was called in the kernel branch -- target_sp
+         itself was never reassigned. enter_user_space places the initial
+         argument block at target_sp and points rdi at it, so EVERY process was
+         handed a kernel stack address: measured [WINDUMP] rdi40=0x755DDBC8 with
+         tsp=0x755DDBF0 (rdi = tsp - 0x28) while c33 said the real user stack was
+         0x17FFFFFFF8. The program then dereferenced argv in the kernel stack,
+         which is not mapped in its CR3 -> the memory fault at VA in the 0x755..
+         range with rdi holding a kernel pointer. That is the whole of the
+         "context[31] kernel RIP with user CS" mystery: the frame was fine, the
+         STACK POINTER was not.
+         For a user process context[33] is the user stack top; for a kernel task
+         it is the interrupted RSP. Both cases want the same thing here. */
+      {
+        uint64_t own_sp = proc_table[next].context[33];
+        if (own_sp) target_sp = own_sp;
+      }
       /* Every kernel task resumes on its OWN stack: context[33] is the
          interrupted RSP for a preempted task (the frame's RSP slot,
          saved by save_context) and user_phys_base + USER_REGION_SIZE -
@@ -1421,22 +1666,154 @@ void schedule(struct trap_frame *tf, int is_yield) {
          which is the same silence that made five GB-057 probe runs look like
          five different failures.  Report first, through the COM1 raw sink (it
          takes no lock, so it cannot deadlock the console it is reporting on). */
-      resume_returned_halt(proc_table[next].pid);
+      resume_returned_halt(proc_table[next].pid, &local_tf);
     }
 
     // No ready processes. Check if any are still alive.
+    // GB-057-a: a BLOCKED slot is alive only while it has a possible waker. Stamp
+    // the first observation, exclude after the budget, and say so by name -- a
+    // wave that loses a test silently is worse than a wave that halts.
     int any_alive = 0;
-    for (int i = 0; i < MAX_PROCESSES; i++) {
-      if (proc_table[i].state != PROC_STATE_FREE &&
-          proc_table[i].state != PROC_STATE_EXITED &&
-          proc_table[i].state != PROC_STATE_ALLOCATED &&
-          proc_table[i].state != PROC_STATE_THREAD_DONE) {
-        any_alive = 1;
-        break;
+    {
+      uint64_t now_l = timer_get_ms();
+      if (now_l == 0)
+        now_l = 1; /* a zero stamp means "never observed", so never stamp zero */
+      for (int i = 0; i < MAX_PROCESSES; i++) {
+        int st = proc_table[i].state;
+        if (st != PROC_STATE_BLOCKED) {
+          wait_since_ms[i] = 0;
+          orphan_reported[i] = 0;
+        } else {
+          if (wait_since_ms[i] == 0)
+            wait_since_ms[i] = now_l;
+          else if (now_l - wait_since_ms[i] >= WAVE_BLOCK_BUDGET_MS) {
+            if (!orphan_reported[i]) {
+              orphan_reported[i] = 1;
+              uart_puts("[ORPHAN-WAIT] slot=");
+              print_int(i);
+              uart_puts(" pid=");
+              print_int(proc_table[i].pid);
+              uart_puts(" name=");
+              uart_puts(proc_table[i].name);
+              uart_puts(" parent=");
+              print_int(proc_table[i].parent_pid);
+              uart_puts(" wake_ms=");
+              print_int((int)proc_table[i].wake_ms);
+              uart_puts(" waited_ms=");
+              print_int((int)(now_l - wait_since_ms[i]));
+              uart_puts(
+                  " -- blocked past the wave budget with no possible waker: "
+                  "excluded from the wave-end predicate (the slot is NOT reaped)\n");
+            }
+            continue; /* cannot make progress, so it is not live work */
+          }
+        }
+        if (proc_table[i].state != PROC_STATE_FREE &&
+            proc_table[i].state != PROC_STATE_EXITED &&
+            proc_table[i].state != PROC_STATE_ALLOCATED &&
+            proc_table[i].state != PROC_STATE_THREAD_DONE) {
+          any_alive = 1;
+          break;
+        }
+      }
+    }
+
+    if (any_alive && !alive_reported) {
+      /* GB-063: say WHAT keeps the wave alive, once per idle stretch.
+
+         The predicate below is a negative test -- "anything that is not
+         FREE/EXITED/ALLOCATED/THREAD_DONE is alive" -- so every state added to
+         the enum is silently counted as work by default.  That is how a wave can
+         run 30,179 console lines (probe20) with proc_lock free, no strand and no
+         kernel fault, and still never print `System halt`: a couple of parked
+         slots are enough to keep `!any_alive` false forever.
+
+         This does not change the predicate -- measuring first is the whole point
+         -- it prints the set and annotates the cases that cannot be woken, so the
+         next reader does not need to remember the enum:
+           st: 2=READY 3=RUNNING 4=EXITED 5=BLOCKED 6=WAIT_SPAWN 7=WAIT_CHILD
+               8=FUTEX 9=THREAD_DONE
+         Once per idle stretch (latched, cleared when work is found): probe20
+         printed the same slot 1,185 times with a window-based limiter. */
+      alive_reported = 1;
+      struct db_buf d;
+      d.n = 0;
+      uart_puts(
+          "[ALIVE-SET] no READY work, yet the scheduler counts live work (the "
+          "predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no "
+          "halt. Live slots:\n");
+      for (int i = 0; i < MAX_PROCESSES; i++) {
+        int st = proc_table[i].state;
+        if (st == PROC_STATE_FREE || st == PROC_STATE_EXITED ||
+            st == PROC_STATE_ALLOCATED || st == PROC_STATE_THREAD_DONE)
+          continue;
+        int claimer = -1;
+        for (int c = 0; c < MAX_CPUS; c++)
+          if (cpu_current_pids[c] == i)
+            claimer = c;
+        db_s(&d, "  [ALIVE-SET] slot=");
+        db_i(&d, i);
+        db_s(&d, " pid=");
+        /* CORRECTION (GB-057): I previously wrote here that this block reads
+           without proc_lock and added a double-read `<torn:a/b>` detector on that
+           basis.  That was wrong: schedule() acquires proc_lock at 1360 and the
+           only releases before this point are the pick branch at 1593 (which
+         iretqs and never falls through) and the halt branch at 1740.  So these
+           reads ARE protected, and probe54's `pid=62831` for slot 1 was a REAL
+           value in the table, not a torn read -- which is a more interesting
+           problem (stale or uninitialised slot state), not an instrument defect.
+           Simple reads, because the lock is held. */
+        db_i(&d, proc_table[i].pid);
+        db_s(&d, " st=");
+        db_i(&d, st);
+        db_s(&d, " parent=");
+        db_i(&d, proc_table[i].parent_pid);
+        db_s(&d, " claimed_by=");
+        db_i(&d, claimer);
+        db_s(&d, " ");
+        db_s(&d, proc_table[i].name);
+        if (st == PROC_STATE_RUNNING && claimer < 0)
+          db_s(&d, "  <-- RUNNING with NO cpu on it (stale claim)");
+        else if ((st == PROC_STATE_WAIT_SPAWN || st == PROC_STATE_WAIT_CHILD) &&
+                 proc_table[i].parent_pid <= 0)
+          db_s(&d, "  <-- parked WAIT with no parent to deliver the wake");
+        db_s(&d, "\n");
+        db_emit(&d);
       }
     }
 
     if (!any_alive) {
+      /* GB-057-b: settle the mechanism before changing the predicate again.  If a
+         halt ever coincides with a slot in ALLOCATED (which the predicate EXCLUDES),
+         then a wave whose only live work is a slot being created declares itself
+         finished -- that is the one premature halt on record (probe54: 443 lines,
+         slot 6 ALLOCATED).  Costs one line per halt and refutes the idea if the
+         counts are all zero. */
+      {
+        int n_free = 0, n_alloc = 0, n_exit = 0, n_run = 0, n_blk = 0, n_other = 0;
+        struct db_buf d2;
+        d2.n = 0;
+        for (int q = 0; q < MAX_PROCESSES; q++) {
+          switch (proc_table[q].state) {
+            case PROC_STATE_FREE: n_free++; break;
+            case PROC_STATE_ALLOCATED: n_alloc++; break;
+            case PROC_STATE_EXITED: n_exit++; break;
+            case PROC_STATE_RUNNING: n_run++; break;
+            case PROC_STATE_BLOCKED: n_blk++; break;
+            default: n_other++; break;
+          }
+        }
+        db_s(&d2, "[HALT-CD] cpu=");
+        db_i(&d2, (long)cpu);
+        db_s(&d2, " free=");   db_i(&d2, n_free);
+        db_s(&d2, " alloc=");  db_i(&d2, n_alloc);
+        db_s(&d2, " exited="); db_i(&d2, n_exit);
+        db_s(&d2, " running=");db_i(&d2, n_run);
+        db_s(&d2, " blocked=");db_i(&d2, n_blk);
+        db_s(&d2, " other=");  db_i(&d2, n_other);
+        db_s(&d2, "\n");
+        db_emit(&d2);
+      }
       set_current_process_pid(cpu, -1);
       /* P2.2 (S2): no user context will run here; never keep an AS (whose
          tables are about to be freed) as this CPU's translation. */
@@ -1451,6 +1828,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
         uart_puts(".\n");
         extern void halt(void);
         halt();
+        idle_claim_check();
         while (1) {
           // Enable IRQs, sleep, then disable. This allows idle cores to actually sleep
           // and process interrupts rather than spinning endlessly if an interrupt is pending.
@@ -1503,6 +1881,19 @@ void process_exit(struct trap_frame *tf) {
   buf[len] = '\0';
 
   uart_puts(buf);
+
+  /* GB-014: name the last user PC we saw trapped, so a program that stops
+     silently reports where it got to instead of just its entry point. */
+  if (!cur->is_kernel_process) {
+    struct kline ku;
+    kl_init(&ku);
+    kl_s(&ku, "[EXITPC] pid=");
+    kl_i(&ku, (long)cur->pid);
+    kl_s(&ku, " last_user_pc=");
+    kl_hex(&ku, (unsigned long)cur->last_user_pc);
+    kl_s(&ku, "\n");
+    kl_emit(&ku);
+  }
 
   int code = (int)tf->regs[0];
 
@@ -1685,13 +2076,16 @@ void process_kill_group_sig(struct process *p, int sig) {
   reap_deliver_locked(p);
   spinlock_release_irqrestore(&proc_lock, flags);
 
-  // We close the global file descriptors directly to properly free resources
-  for (int i = 0; i < MAX_OPEN_FDS; i++) {
-    if (p->open_fds[i] != -1) {
-      fs_close_global(p->open_fds[i]);
-      p->open_fds[i] = -1;
-    }
-  }
+  /* SEC-9 (security-plan.md #9): close through file_close(), which claims
+   * each fd slot atomically under proc_lock.  The old loop snapshotted
+   * open_fds[i] and called fs_close_global() outside any lock, so a
+   * concurrent teardown (group_teardown on normal exit) or a sibling
+   * thread's close() could release the same g_fd twice — double
+   * pipe_close/usock_close and ref_count driven below the true count.
+   * The claim makes the loser of the race a plain no-op: exactly one
+   * release per fd, whichever path wins. */
+  for (int i = 0; i < MAX_OPEN_FDS; i++)
+    file_close(p, i);
   process_wake_all();
 }
 
@@ -2368,12 +2762,28 @@ static int process_wait_common(struct trap_frame *tf, uint64_t rusage_va) {
     }
   }
   if (!has_child) {
-    /* Diagnostic: no reapable child at all.  Show what the wanted pid's
-       slot (if any) currently looks like, then report ECHILD. */
+    /* Diagnostic: no reapable child at all.  Name the caller and state the child
+       count explicitly, then (for a positive want) show what the wanted slot
+       looks like.
+
+       The slot dump used to be gated on `want_pid > 0`, which made the exact case
+       measured in probe20 -- caller=57, want=-204, looping 15,858 times -- print
+       only the two numbers, so the obvious question ("what does this caller
+       actually have?") had no answer in the log.  Fourth instrument on this
+       ticket that could not speak at the moment it was needed; the rule is to
+       print state, not to confirm a theory.
+
+       `children=0` is the load-bearing field: an ECHILD to a caller with no
+       children is POSIX-correct behaviour, so the line now points at the caller
+       (a test looping on a wait that can never be satisfied) instead of leaving a
+       reader to suspect the kernel. */
     uart_puts("[WAITPID] ECHILD caller=");
     print_int(caller->pid);
+    uart_puts(" ");
+    uart_puts(caller->name);
     uart_puts(" want=");
     print_int(want_pid);
+    uart_puts(" children=0");
     if (want_pid > 0) {
       for (int i = 0; i < MAX_PROCESSES; i++) {
         if (proc_table[i].pid == want_pid) {
@@ -2538,6 +2948,7 @@ void process_sleep(void) {
   } else {
     // If there is no current process (e.g. during early boot), just WFI
     spinlock_release_irqrestore(&proc_lock, flags);
+    idle_claim_check();
     safe_wfi();
   }
 }
@@ -2569,6 +2980,21 @@ void process_wake_all(void) {
   spinlock_release_irqrestore(&proc_lock, flags);
 }
 
+/* SEC-OBS-B: deferred lost-wakeup catch-all (see process.h).  The flag is
+ * a single volatile word: concurrent setters are idempotent, and the tick
+ * drain clears before waking so a wake racing in re-arms the next tick —
+ * same benign race the immediate call always had against blocking. */
+static volatile int wake_all_pending;
+
+void process_wake_all_deferred(void) { wake_all_pending = 1; }
+
+void process_wake_all_drain(void) {
+  if (!wake_all_pending)
+    return;
+  wake_all_pending = 0;
+  process_wake_all();
+}
+
 struct process *process_get_pcb(int pid) {
   if (pid < 0 || pid >= MAX_PROCESSES)
     return 0;
@@ -2585,9 +3011,11 @@ static int last_idlestuck_div;
    reclaimable and no state change.  Separate divisor so the two rate limits do
    not consume each other. */
 static int last_quiet_div;
-/* GB-057: rate limiter for the parked-WAIT reporter (one line per 512 idle
-   rounds, per slot), so a stuck set is visible without flooding the UART. */
-static int reap_rounds;
+/* GB-057: one-shot flag for the parked-WAIT reporter, cleared whenever work is
+   found.  probe20 printed the same slot 1,185 times because the limiter was a
+   window (one line per 512 idle rounds) rather than a per-stretch latch: saying
+   1,185 times what once would have said is noise wearing the evidence costume. */
+static int reap_reported;
 /* L9: one pending lostwake-dispose candidate per idle CPU.  A stale-claim
    sighting is ARMED here and only confirmed when the very same heartbeat
    is still present on the NEXT reaper pass (~1.4 s later).  Under MTTCG a
@@ -2735,7 +3163,7 @@ void start_scheduler(void) {
     interrupts_enable();
     // Exit scheduler (tests finished)
     if (cpu == 0) return;
-    else while(1) { safe_wfi(); }
+    else { idle_claim_check(); while(1) { safe_wfi(); } }
   } else if (jmp_val == 2) {
     // A kernel thread exited on this CPU. The stack is now reset.
     // However, because the kernel thread was running in EL1t (using SP_EL0),
@@ -2750,6 +3178,24 @@ void start_scheduler(void) {
     for (int i = 0; i < MAX_PROCESSES; i++) {
       if (proc_table[i].state != PROC_STATE_READY)
         continue;
+      /* GB-057: same rule as the pick in schedule() -- never hand a frame to a
+         BROKEN user slot (no AS *and* no physical base; a v1 process has `as == 0`
+         with a valid base and must still be picked).  Reported through the same
+         latch so whichever site fires first is the one that speaks. */
+      if (!proc_table[i].is_kernel_process && !proc_table[i].as &&
+          proc_table[i].user_phys_base == 0) {
+        if (!noas_reported) {
+          noas_reported = 1;
+          uart_puts("[NOAS] skipping USER slot with no address space: slot=");
+          print_int(i);
+          uart_puts(" pid=");
+          print_int(proc_table[i].pid);
+          uart_puts(" ");
+          uart_puts(proc_table[i].name);
+          uart_puts(" -- mid-exec AS swap\n");
+        }
+        continue;
+      }
       /* Same claim guard as in schedule(): never pick a READY process
          another CPU still claims (wake raced its block-to-schedule gap;
          its live frame is not saved yet).  See the long comment there. */
@@ -2773,14 +3219,38 @@ void start_scheduler(void) {
            each time: probe v15 produced 18 dumps (~540 console lines) of a
            single idle stretch.  One dump per stretch is the intent. */
         last_quiet_div = 0;
+        /* ...and the parked-WAIT latch with it, for the same reason: the report
+           is per idle stretch, not per window. */
+        reap_reported = 0;
+        /* ...and the [ALIVE-SET] latch: a new stretch deserves a fresh report. */
+        alive_reported = 0;
+        noas_reported = 0;
 
         if (proc_table[i].as)
           vm_arch_switch(proc_table[i].as);
         else
+          /* Reached only by kernel threads now: a user slot with no AS is
+             skipped at the pick site above ([NOAS]), which is the decision point.
+             Keeping the report there rather than here means one instrument in the
+             place that decides, instead of two where one is dead code. */
           mmu_switch_user_mapping(proc_table[i].user_phys_base);
 
         extern char __stack_top;
         uint64_t target_sp = (uint64_t)&__stack_top - cpu * 0x10000 - 4096;
+#ifdef __x86_64__
+        /* GB-068 (same fix as schedule(), second site -- this is the sibling
+           path that kept producing the tsp-0x28 fingerprint after the first one
+           was fixed, and it is why 6 faults survived): target_sp must be the
+           RESUMED TASK's stack. It defaults to this CPU's kernel stack and was
+           never reassigned here either, so enter_user_space put the initial
+           argument block -- and rdi -- on the kernel stack, unmapped in the
+           process's CR3. For a user process context[33] is the user stack top;
+           for a kernel task it is the interrupted RSP. */
+        {
+          uint64_t own_sp = proc_table[i].context[33];
+          if (own_sp) target_sp = own_sp;
+        }
+#endif
 
         struct trap_frame local_tf;
         restore_context(&proc_table[i], &local_tf);
@@ -2811,7 +3281,7 @@ void start_scheduler(void) {
 
         /* Same rule as schedule()'s resume boundary: if this returns, the CPU
            is lost, so say so before going quiet. */
-        resume_returned_halt(proc_table[i].pid);
+        resume_returned_halt(proc_table[i].pid, &local_tf);
       }
     }
     spinlock_release_irqrestore(&proc_lock, flags);
@@ -2823,6 +3293,29 @@ void start_scheduler(void) {
        cur->is_kernel_process; with the per-core LAPIC timers armed every
        idle AP hit that guard with a stale kernel-task claim and
        re-scheduled the wave loader → proc_lock wedge right after boot. */
+    /* GB-057 (2026-10-21): clearing the claim is right, but it left the
+       process's STATE at PROC_STATE_RUNNING. A process that is merely
+       unclaimed is runnable, not running; LOSTWAKE treats "RUNNING with no
+       claiming CPU" as a stale dead-owner claim and DISPOSES it. Measured on
+       ARM with a [CLAIMDROP] probe in set_current_process_pid():
+         [CLAIMDROP] cpu=3 pid1 -> -1 pid1_state=3 caller=start_scheduler+0xb3c
+       pid 1 owns test_wave_loader() and therefore the halt decision; after it
+       was reclaimed, no task ever evaluated !any_alive, [HALT-CD] never
+       printed, and every CPU spun in [IDLESTUCK] past 64,000 rounds. So the
+       wave could run to completion (4/4 exits) and still never finish.
+       Put an unclaimed-but-alive process back to READY so another CPU can pick
+       it up instead of the reaper killing it. The lock is re-taken here because
+       it was released above for the resume. */
+    {
+      int last_pid = cpu_current_pids[get_cpuid()];
+      if (last_pid >= 0 && last_pid < MAX_PROCESSES &&
+          proc_table[last_pid].state == PROC_STATE_RUNNING) {
+        uint64_t f2 = spinlock_acquire_irqsave(&proc_lock);
+        if (proc_table[last_pid].state == PROC_STATE_RUNNING)
+          proc_table[last_pid].state = PROC_STATE_READY;
+        spinlock_release_irqrestore(&proc_lock, f2);
+      }
+    }
     set_current_process_pid(get_cpuid(), -1);
 
     /* P2.2 (S2): this core no longer runs any process; do not keep a
@@ -2966,9 +3459,9 @@ void start_scheduler(void) {
          use-after-free -- the exact class of fault this ticket has spent the
          night chasing.  So the scheduler names the stuck set and the fix belongs
          in the spawn worker that parks it, where the ownership actually is. */
-      int reap_window = (reap_rounds != sched_idle_rounds / 512);
+      int reap_window = !reap_reported;
       if (reap_window)
-        reap_rounds = sched_idle_rounds / 512;
+        reap_reported = 1;
       for (int k = 1; k < MAX_PROCESSES; k++) {
         int st = proc_table[k].state;
         if (st != PROC_STATE_WAIT_SPAWN && st != PROC_STATE_WAIT_CHILD)
@@ -3002,6 +3495,48 @@ void start_scheduler(void) {
         uart_puts(proc_table[k].name);
         uart_puts(" -- no state change attempted; see GB-057\n");
       }
+      /* GB-063: release a spawn caller whose worker will never report.
+
+         Owner-side on purpose (see struct process.spawn_deadline_ms): resuming a
+         caller's own bounded wait touches no other context's state, whereas the
+         scheduler forcing a slot's state is what I tried and withdrew -- the live
+         spawn path re-parks the slot underneath you.
+
+         Three guards, all necessary: the slot must be parked in WAIT_SPAWN (its
+         own state), past a deadline that sits above the loader's own 20 s retry
+         budget (so a slow but legitimate load is never preempted), and claimed by
+         no CPU (so a worker that is genuinely still working is left alone).  It
+         reports, because a release we cannot explain later is indistinguishable
+         from corruption. */
+      {
+        extern uint64_t timer_get_ms(void);
+        uint64_t now_ms = timer_get_ms();
+        for (int k = 1; k < MAX_PROCESSES; k++) {
+          if (proc_table[k].state != PROC_STATE_WAIT_SPAWN)
+            continue;
+          if (proc_table[k].spawn_deadline_ms == 0 ||
+              now_ms < proc_table[k].spawn_deadline_ms)
+            continue;
+          int claimed = 0;
+          for (int c = 0; c < MAX_CPUS; c++)
+            if (cpu_current_pids[c] == k)
+              claimed = 1;
+          if (claimed)
+            continue; /* a worker is still on it: leave it alone */
+          uart_puts("[SPAWNTIME] releasing spawn caller slot=");
+          print_int(k);
+          uart_puts(" pid=");
+          print_int(proc_table[k].pid);
+          uart_puts(" ");
+          uart_puts(proc_table[k].name);
+          uart_puts(" -> -EAGAIN (its worker never reported)\n");
+          proc_table[k].spawn_retval = -EAGAIN;
+          proc_table[k].context[0] = (uint64_t)(int64_t)-EAGAIN;
+          proc_table[k].state = PROC_STATE_READY;
+          proc_table[k].spawn_deadline_ms = 0;
+        }
+      }
+
       spinlock_release_irqrestore(&proc_lock, wflags);
 
       /* Dispose a lost-owner slot OUTSIDE proc_lock (group_teardown takes
@@ -3053,17 +3588,63 @@ void start_scheduler(void) {
       uint64_t dflags = spinlock_acquire_irqsave(&proc_lock);
       for (int k = 0; k < MAX_PROCESSES; k++) {
         if (proc_table[k].state != PROC_STATE_FREE) {
-          uart_puts("[IDLESTUCK] slot=");
-          print_int(k);
-          uart_puts(" pid=");
-          print_int(proc_table[k].pid);
-          uart_puts(" st=");
-          print_int(proc_table[k].state);
-          uart_puts(" parent=");
-          print_int(proc_table[k].parent_pid);
-          uart_puts(" ");
-          uart_puts(proc_table[k].name);
-          uart_puts("\n");
+          /* One record, one uart_puts, one lock hold. This report was a dozen
+             separate calls, so under SMP it interleaved with other CPUs' output
+             and became unreadable -- the same defect that hid a real #GP in the
+             user-fault line before bcba3a6. A diagnostic nobody can read is
+             not a diagnostic, and this one is the only thing that names WHERE a
+             stuck process is. */
+          {
+            char lb[176];
+            int li = 0;
+            const char *h1 = "[IDLESTUCK] slot=";
+            while (*h1) lb[li++] = *h1++;
+            long v = k;
+            char tmp[24];
+            int ti = 0;
+            if (v == 0) tmp[ti++] = '0';
+            while (v > 0 && ti < 20) { tmp[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) lb[li++] = tmp[--ti];
+            const char *h2 = " pid=";
+            while (*h2) lb[li++] = *h2++;
+            v = proc_table[k].pid;
+            ti = 0;
+            if (v == 0) tmp[ti++] = '0';
+            while (v > 0 && ti < 20) { tmp[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) lb[li++] = tmp[--ti];
+            const char *h3 = " st=";
+            while (*h3) lb[li++] = *h3++;
+            v = proc_table[k].state;
+            ti = 0;
+            if (v == 0) tmp[ti++] = '0';
+            while (v > 0 && ti < 20) { tmp[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) lb[li++] = tmp[--ti];
+            const char *h4 = " wake=";
+            while (*h4) lb[li++] = *h4++;
+            v = proc_table[k].wake_ms;
+            ti = 0;
+            if (v == 0) tmp[ti++] = '0';
+            while (v > 0 && ti < 20) { tmp[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) lb[li++] = tmp[--ti];
+            const char *h5 = " rip=0x";
+            while (*h5) lb[li++] = *h5++;
+            {
+              uint64_t rv = proc_table[k].context[31];
+              int st2 = 0;
+              for (int sh = 60; sh >= 0 && li < 168; sh -= 4) {
+                unsigned d = (unsigned)((rv >> sh) & 0xF);
+                if (!d && !st2 && sh) continue;
+                st2 = 1;
+                lb[li++] = "0123456789abcdef"[d];
+              }
+            }
+            lb[li++] = ' ';
+            for (int ni = 0; proc_table[k].name[ni] && ni < 31 && li < 172; ni++)
+              lb[li++] = proc_table[k].name[ni];
+            lb[li++] = '\n';
+            lb[li] = 0;
+            uart_puts(lb);
+          }
         }
       }
       uart_puts("[IDLESTUCK] claims:");
@@ -3077,6 +3658,9 @@ void start_scheduler(void) {
       spinlock_release_irqrestore(&proc_lock, dflags);
     }
 
+    /* GB-057: any idle entry must not still hold a claim -- see
+       idle_claim_check() for why this is called at every park site. */
+    idle_claim_check();
     // Track idle time: record entry, WFI, accumulate on wake
     uint64_t idle_start = timer_get_ms();
     safe_wfi();
@@ -3705,4 +4289,38 @@ int process_futex(struct process *caller, struct trap_frame *tf, uint64_t uaddr,
   }
 
   return -ENOSYS;
+}
+
+/* ---------------------------------------------------------------------------
+ * SEC-10 (security-plan.md #10): kernel-stack exhaustion check at syscall
+ * entry.  Kernel stacks are fixed 64 KiB per-CPU slices below __stack_top
+ * (boot.s / trap_init_core); they are contiguous, so an overflow does not
+ * fault — it walks silently into the adjacent core's stack or kernel data
+ * and corrupts control flow there.  The MMU cannot give these static
+ * carve-outs a guard page without reworking the early identity map, so the
+ * cheap structural defense is a depth check: every syscall entry verifies
+ * the remaining slice against a margin that covers the deepest handler
+ * path; below it we halt with a clear message instead of continuing on a
+ * doomed stack.  (Function-level canaries from SEC-4 backstop buffer
+ * overflows within a frame.)
+ * ------------------------------------------------------------------------- */
+
+#define KERNEL_STACK_BYTES (64u * 1024u)
+
+/* Bytes left between the current SP and this CPU's stack slice bottom. */
+uint64_t kernel_stack_remaining(void) {
+  extern char __stack_top; /* same symbol, same spelling as used above */
+  uint32_t cpu = get_cpuid();
+  if (cpu >= MAX_CPUS)
+    return KERNEL_STACK_BYTES; /* unknown core: assume fine, caller halts elsewhere */
+  uint64_t bottom =
+      (uint64_t)&__stack_top - (uint64_t)(cpu + 1) * KERNEL_STACK_BYTES;
+  uint64_t sp = (uint64_t)__builtin_frame_address(0);
+  return sp > bottom ? sp - bottom : 0;
+}
+
+/* 1 when the remaining slice is below `margin` — i.e. running this far
+ * into the stack and then executing a normal handler path would overflow. */
+int kernel_stack_low(uint64_t margin) {
+  return kernel_stack_remaining() < margin ? 1 : 0;
 }

@@ -37,12 +37,81 @@
 #include <poll.h>
 #include <sys/select.h>
 #include <signal.h>
+#include <sys/socket.h> /* GB-018 socket remainder: socketpair/AF_UNIX */
+#include <stdint.h>
+#include <pthread.h>
+
+/* GB-083: leg B must actually EXERCISE compat.c's ho_* shims, not merely link
+ * them.  When t4_parity.sh builds leg B with -DLEG_B_SHIMS, the probe's core
+ * file syscalls route through compat.c's ho_* wrappers so that flipping any
+ * one of them changes a reported row and FAILs the differential (the "wrong
+ * shim must FAIL" criterion, which was inert because the probe called libc
+ * directly and never touched compat.c).  Declared here so the probe compiles
+ * without pulling in the implementation (compat.c is linked by the build). */
+#ifdef LEG_B_SHIMS
+extern int ho_open(const char *, int, ...);
+extern int ho_close(int);
+extern ssize_t ho_read(int, void *, size_t);
+extern ssize_t ho_write(int, const void *, size_t);
+extern int ho_dup(int);
+extern int ho_dup2(int, int);
+extern int ho_pipe(int[2]);
+#define open   ho_open
+#define close  ho_close
+#define read   ho_read
+#define write  ho_write
+#define dup    ho_dup
+#define dup2   ho_dup2
+#define pipe   ho_pipe
+#endif
 
 /* GB-017: /dev/urandom + getrandom return *random bytes* — the content is
  * non-deterministic and must never be diffed leg-to-leg.  Only the return
  * count (and errno) are part of the byte-meaningful contract. */
 
 /* Normalized line: "<op> rc=<r> errno=<e>" — errno read only when rc<0. */
+static volatile sig_atomic_t g_sigusr1 = 0;
+static void on_sigusr1(int s) { (void)s; g_sigusr1 = 1; }
+
+/* GB-021: thread + futex shared state. */
+#ifndef FUTEX_WAIT
+#define FUTEX_WAIT 0
+#endif
+#ifndef FUTEX_WAKE
+#define FUTEX_WAKE 1
+#endif
+static _Atomic(int) g_counter = 0;
+static volatile int g_futex_val = 0;
+
+/* GB-022: per-thread TLS isolation.  __thread storage is backed by the FS base
+ * each thread's context switch must save/restore; a thread layer that reuses or
+ * shares one TLS block (or that never switches per-task FS) makes every thread
+ * see the LAST writer's value.  We give each thread a DISTINCT seed, have it
+ * write and read back its own __thread slot, then assert it saw its own value —
+ * a shared/missing FS base diverges on the read-back.  errno is likewise
+ * per-thread (thread-local): after each thread faults a call, main must see its
+ * own errno==0 untouched. */
+static __thread int g_tls_seed = -1;
+static void *thr_tlsprobe(void *p) {
+  long seed = (long)p;
+  g_tls_seed = (int)seed;
+  errno = (int)(seed + 1000);          /* per-thread errno store */
+  return (void *)(long)g_tls_seed;     /* must be THIS thread's seed */
+}
+static void *thr_worker(void *p) { long n = (long)p;
+  for (long i = 0; i < n; i++) { g_counter++; }
+  return (void *)(n * 2);
+}
+static void *thr_futexwaiter(void *p) {
+  volatile int *v = p;
+  /* wait until *v != 0 (raw futex wait loop, timeout-bounded) */
+  for (int spin = 0; spin < 200000; spin++) {
+    if (__atomic_load_n(v, __ATOMIC_ACQUIRE) != 0) return (void *)0;    /* woken */
+    struct timespec ts; ts.tv_sec = 0; ts.tv_nsec = 50000; /* 50us */
+    syscall(SYS_futex, (int *)v, FUTEX_WAIT, 0, &ts, NULL, 0);
+  }
+  return (void *)1; /* timeout path (shouldn't happen when waker fires) */
+}
 static void report(const char *op, long r) {
   if (r < 0) {
     printf("%s rc=%ld errno=%d\n", op, r, errno);
@@ -239,6 +308,27 @@ int main(void) {
     system(rm);
   }
 
+  /* GB-084: open()'s optional mode arg must be honored.  Create a file with
+   * O_CREAT and an explicit 0600 mode, then stat it: the mode read back must
+   * carry 0600 (S_IRUSR|S_IWUSR).  On leg B this routes through ho_open, which
+   * must not discard the supplied mode (a 2-arg rely-on-UB path would give a
+   * random/garbage mode).  Deterministic: a fresh path each run. */
+  {
+    const char *mp = "/tmp/t4_mode_probe_0600";
+    char scr[80]; snprintf(scr, sizeof scr, "rm -f %s", mp);
+    system(scr);
+    errno = 0;
+    int mfd = open(mp, O_CREAT | O_WRONLY | O_TRUNC, 0600);
+    report("mode_open_creat", mfd);
+    struct stat ms;
+    errno = 0;
+    int mst = stat(mp, &ms);
+    report("mode_stat", mst);
+    report("mode_is_0600", mst == 0 && (ms.st_mode & 0777) == 0600);
+    if (mfd >= 0) close(mfd);
+    system(scr);
+  }
+
   /* GB-016: uname.  Both legs run on the SAME host/kernel, so sysname,
    * release, machine (and nodename/version given a fixed host) must agree
    * byte-for-byte — a uname shim that reports a non-Linux sysname or a
@@ -287,6 +377,18 @@ int main(void) {
     report("pselect6_ready", pselect(pfd[0] + 1, &rf2, NULL, NULL, &ts, &empt));
     report("pselect6_ready_fdset", FD_ISSET(pfd[0], &rf2) ? 1 : 0);
 
+    /* GB-086: select(timeout) on an empty pipe must honor the timeout and
+     * return 0 (timeout), not an error and not an instant positive return.
+     * Both legs (real Linux + HobbyOS host shim) must agree on this semantics;
+     * the measured wall-time bound is verified in-guest (POLLTST at both CPU
+     * counts).  This row pins the deterministic rc=0 part of the property. */
+    fd_set rt;
+    FD_ZERO(&rt); FD_SET(pfd[0], &rt);
+    struct timeval tv2 = {0, 100}; /* 100ms */
+    errno = 0;
+    report("select_timeout_rc", select(pfd[0] + 1, &rt, NULL, NULL, &tv2));
+    report("select_timeout_fdset", FD_ISSET(pfd[0], &rt) ? 1 : 0);
+
     close(pfd[0]); close(pfd[1]);
 
     struct pollfd pf2[1];
@@ -294,6 +396,173 @@ int main(void) {
     errno = 0;
     report("poll_badfd", poll(pf2, 1, 0));
     report("poll_badfd_revents", pf2[0].revents);
+  }
+
+  /* GB-018 (socket remainder, coord 2026-10-20): stream-socket readiness is a
+   * DISTINCT wake path from the pipe above — it goes through the socket/ring
+   * buffer, and is the one the compat layer is most likely to get wrong.  A
+   * socketpair(AF_UNIX, SOCK_STREAM) gives two connected stream sockets; a peer
+   * write flips the other end readable.  poll/select/pselect6 must report
+   * readiness there too.  Deterministic on both legs (kernel: SYS_SOCKETPAIR,
+   * host: real socketpair). */
+  {
+    int sv[2];
+    errno = 0;
+    report("sockpair", socketpair(AF_UNIX, SOCK_STREAM, 0, sv));
+    if (write(sv[1], "s", 1) != 1) report("sock_write", -1);
+
+    struct pollfd spf[1];
+    spf[0].fd = sv[0]; spf[0].events = POLLIN; spf[0].revents = 0;
+    errno = 0;
+    report("sockpoll_ready", poll(spf, 1, 0));
+    report("sockpoll_revents", spf[0].revents);
+
+    fd_set srf; FD_ZERO(&srf); FD_SET(sv[0], &srf);
+    struct timeval stv; stv.tv_sec = 0; stv.tv_usec = 0;
+    errno = 0;
+    report("sockselect_ready", select(sv[0] + 1, &srf, NULL, NULL, &stv));
+    report("sockselect_fdset", FD_ISSET(sv[0], &srf) ? 1 : 0);
+
+    sigset_t sempt; sigemptyset(&sempt);
+    fd_set srf2; FD_ZERO(&srf2); FD_SET(sv[0], &srf2);
+    struct timespec sts; sts.tv_sec = 0; sts.tv_nsec = 0;
+    errno = 0;
+    report("sockpselect_ready", pselect(sv[0] + 1, &srf2, NULL, NULL, &sts, &sempt));
+    report("sockpselect_fdset", FD_ISSET(sv[0], &srf2) ? 1 : 0);
+
+    close(sv[0]); close(sv[1]);
+  }
+
+  /* GB-023: real signal delivery.
+   * sigaction installs on_sigusr1; raise(SIGUSR1) must have it fire
+   * synchronously (g_sigusr1 == 1) — a shim that drops the frame or never
+   * delivers diverges here.  rt_sigprocmask(SIG_BLOCK) on SIGUSR1, then
+   * kill(getpid(), SIGUSR1) must NOT run the handler while blocked (blocked
+   * row 0) and must instead show up in sigpending; after SIG_UNBLOCK the
+   * pending one is delivered to the (still-installed) handler, which is
+   * non-lethal. The handler is never reset to SIG_DFL, so the probe never
+   * dies on a pending signal. */
+  {
+    struct sigaction sa, old;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = on_sigusr1;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    errno = 0;
+    report("sigaction_install", sigaction(SIGUSR1, &sa, &old));
+
+    g_sigusr1 = 0;
+    errno = 0;
+    report("raise_sigusr1", raise(SIGUSR1));
+    report("sigusr1_delivered", g_sigusr1);
+
+    sigset_t block, oset, pend;
+    sigemptyset(&block); sigaddset(&block, SIGUSR1);
+    errno = 0;
+    report("sigprocmask_block", sigprocmask(SIG_BLOCK, &block, &oset));
+    g_sigusr1 = 0;
+    errno = 0;
+    report("kill_self_while_blocked", kill(getpid(), SIGUSR1));
+    report("sigusr1_fired_while_blocked", g_sigusr1);
+
+    sigemptyset(&pend);
+    errno = 0;
+    sigpending(&pend);
+    report("sigusr1_pending", sigismember(&pend, SIGUSR1) ? 1 : 0);
+
+    errno = 0;
+    report("sigprocmask_unblock", sigprocmask(SIG_UNBLOCK, &block, NULL));
+    report("sigusr1_delivered_after_unblock", g_sigusr1);
+  }
+
+  /* GB-022: TLS ABI — arch_prctl(ARCH_SET_FS/ARCH_GET_FS) round-trips FS base.
+   * The FS/GS base is the x86_64 thread-local pointer a context switch must
+   * save/restore.  We READ the current FS base, then SET it back to that same
+   * (valid) value and read it again — exercising both syscalls without ever
+   * pointing FS at invalid memory (which would break TLS-relative libc and
+   * crash the probe).  rc + round-trip equality is the locked surface. */
+  {
+#define ARCH_SET_FS 0x1002
+#define ARCH_GET_FS 0x1003
+    uintptr_t cur = 0, after = 0;
+    errno = 0;
+    report("arch_get_fs_rc", syscall(SYS_arch_prctl, ARCH_GET_FS, &cur));
+    report("arch_get_fs_nonzero", cur != 0);
+    errno = 0;
+    report("arch_set_fs_rc", syscall(SYS_arch_prctl, ARCH_SET_FS, cur));
+    errno = 0;
+    syscall(SYS_arch_prctl, ARCH_GET_FS, &after);
+    report("arch_fs_roundtrip", after == cur);
+#undef ARCH_SET_FS
+#undef ARCH_GET_FS
+  }
+
+  /* GB-022: per-thread TLS + errno isolation.  Two threads each write a
+   * DISTINCT seed into the SAME __thread var and read it back; if the TLS
+   * block (FS base) were shared or not switched per-task, every thread would
+   * read the last writer's value and the read-back diverges from its own seed.
+   * Each thread also stores a per-thread errno; after they run, main must see
+   * its own errno==0 (errno is thread-local, not a shared global). */
+  {
+    pthread_t a, b;
+    void *ra = NULL, *rb = NULL;
+    errno = 0;
+    report("tls_create_a", pthread_create(&a, NULL, thr_tlsprobe, (void *)101L));
+    report("tls_create_b", pthread_create(&b, NULL, thr_tlsprobe, (void *)202L));
+    int ja = pthread_join(a, &ra);
+    int jb = pthread_join(b, &rb);
+    report("tls_join_a", ja);
+    report("tls_join_b", jb);
+    report("tls_thread_a_seed", (long)ra);   /* must be 101 */
+    report("tls_thread_b_seed", (long)rb);   /* must be 202 */
+    report("tls_main_errno_untouched", errno); /* errno is per-thread: 0 */
+  }
+
+  /* GB-021: threads + futex.
+   * pthread_create/join with a fixed per-thread increment must yield an exact
+   * final counter (every thread really ran and joined) and the thread's exit
+   * value (2*N) must be observable — a thread layer that skips/duplicates work
+   * diverges.  The futex handshake proves FUTEX_WAIT/FUTEX_WAKE parity: a
+   * waiter blocks on g_futex_val==0, the main thread stores 1 and FUTEX_WAKE, so
+   * the waiter must return woken (0), not the timeout path (1). */
+  {
+    pthread_t t[4];
+    g_counter = 0;
+    for (long i = 0; i < 4; i++) {
+      errno = 0;
+      report("thread_create", pthread_create(&t[i], NULL, thr_worker, (void *)1000L));
+    }
+    long sum = 0;
+    for (int i = 0; i < 4; i++) {
+      void *ret = NULL;
+      pthread_join(t[i], &ret);
+      sum += (long)ret;
+    }
+    report("thread_join_sum", sum);          /* 4 * (2*1000) = 8000 */
+    report("thread_counter", g_counter);       /* 4000 */
+
+    /* futex handshake */
+    g_futex_val = 0;
+    pthread_t w;
+    pthread_create(&w, NULL, thr_futexwaiter, (void *)&g_futex_val);
+    /* give the waiter a moment to enter FUTEX_WAIT, then wake it */
+    for (int k = 0; k < 2000 && __atomic_load_n(&g_futex_val, __ATOMIC_RELAXED)==0; k++) { usleep(200); }
+    __atomic_store_n(&g_futex_val, 1, __ATOMIC_RELEASE);
+    /* GB-021/coordinator: the RETURN VALUE of FUTEX_WAKE is not a contract and
+     * must not be diffed leg-to-leg.  It is the number of waiters actually
+     * parked at that instant, which cannot be observed without a race: whether
+     * the waiter has entered FUTEX_WAIT yet depends on host scheduling, so one
+     * leg returns 1 (a waiter was parked) and the other 0 (it had not parked --
+     * which is CORRECT, since it then sees *v != 0 and never waits).  Observed as
+     * a 1-in-3 failure of `make host_tests` on main, with every other row
+     * byte-identical.  Same rule as the GB-017 random rows: report what is
+     * deterministic, and keep the assertion that carries meaning.  The suite's
+     * contract here is `futex_waiter_woken` below -- the waiter must return
+     * *woken*, not the timeout path -- and that one is deterministic. */
+    report("futex_wake_ok", syscall(SYS_futex, &g_futex_val, FUTEX_WAKE, 1, NULL, NULL, 0) >= 0);
+    void *wret = NULL;
+    pthread_join(w, &wret);
+    report("futex_waiter_woken", (long)wret == 0);   /* 1 = woken, not timeout */
   }
 
   /* exit status is part of the diff: 0 here means every leg reached the

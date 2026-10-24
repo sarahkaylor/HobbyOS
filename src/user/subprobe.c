@@ -99,7 +99,7 @@ int main(void) {
 
   /* B: relative create + immediate reread (the shell's redirect flow). */
   errno = 0;
-  fd = open("nested.txt", O_WRONLY | O_CREAT | O_TRUNC);
+  fd = open("nested.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
   pnum("B create fd=", fd);
   pnum("errno=", errno);
   if (fd >= 0) {
@@ -188,7 +188,7 @@ int main(void) {
     if (chdir("/") != 0) {
       print_console("E chdir / failed\n");
     }
-    fd = open("/TEMP.TXT", O_WRONLY | O_CREAT | O_TRUNC);
+    fd = open("/TEMP.TXT", O_WRONLY | O_CREAT | O_TRUNC, 0644);
     pnum("E create fd=", fd);
     if (fd >= 0) {
       n = (int)write(fd, content, strlen(content));

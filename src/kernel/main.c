@@ -1,4 +1,5 @@
 #include "fat16.h"
+#include "kline.h"
 #include "fs.h"
 #include "gic.h"
 #include "mmu.h"
@@ -139,6 +140,51 @@ void uart_print_hex_raw(uint64_t val) {
  * waiting cannot wedge the suite the way the old inline loop did). */
 static void test_wave_loader(void *arg) {
   (void)arg;
+  /* GB-072: if a manifest is on disk, the wave IS that manifest. Before this,
+     the wave was the hardcoded list below, so nothing added to disk.img could
+     ever run -- which is why the M1 gate could not even dispatch its own W0
+     corpus (WAVE.CFG names HELLO/CAT/SH/LS and none of them ever appeared).
+     Adding program N is now one `::WAVE.CFG` line and no .c edit; the literals
+     below remain only as the no-manifest default, exactly as the DoD requires.
+     A manifest that names an absent file is NOT silently ignored: the load
+     reports [ARRIVED] rc<0 and tools/gate/t4_wave.sh --manifest fails on
+     "requested but never ran". */
+  {
+    static char mf[2048];
+    struct file mfile;
+    if (fat16_open("WAVE.CFG", &mfile) == 0) {
+      int n = fat16_read(&mfile, mf, sizeof mf - 1);
+      fat16_close(&mfile);
+      if (n > 0) {
+        mf[n] = '\0';
+        int dispatched = 0;
+        char *p = mf;
+        while (*p) {
+          char *e = p;
+          while (*e && *e != '\n') e++;
+          char nl = *e;
+          *e = '\0';
+          /* trim CR and surrounding spaces */
+          int len = (int)(e - p);
+          while (len > 0 && (p[len - 1] == '\r' || p[len - 1] == ' ')) p[--len] = '\0';
+          while (*p == ' ' || *p == '\t') { p++; len--; }
+          if (len > 0 && *p != '#') {
+            struct kline kl;
+            kl_init(&kl);
+            kl_s(&kl, "[WAVE-MANIFEST] ");
+            kl_s(&kl, p);
+            kl_s(&kl, "\n");
+            kl_emit(&kl);
+            load_and_run_program_in_scheduler(p, -1, -1, -1, -1);
+            dispatched++;
+          }
+          if (!nl) break;
+          p = e + 1;
+        }
+        if (dispatched > 0) return;   /* manifest wins; literals are the default */
+      }
+    }
+  }
   /* Diagnostic probe for the subdirectory create/spawn/cat flow that
      shell_test3 exercises.  Runs first so its console output is intact. */
   load_and_run_program_in_scheduler("SUBPRB.BIN", -1, -1, -1, -1);
@@ -171,6 +217,16 @@ static void test_wave_loader(void *arg) {
   load_and_run_program_in_scheduler("NFSTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("ERRTEST.BIN", -1, -1, -1, -1);
   load_and_run_program_in_scheduler("HELLO.BIN", -1, -1, -1, -1);
+  /* M1 W0 corpus (GB-024/GB-070): the gate requires hello, cat, sh and
+     coreutils-static to BOOT AND RETURN EXPECTED OUTPUT on intel.  HELLO.BIN
+     was launched here; SH/LS/CAT were on the disk (144 binaries) and never
+     started, which is why t4_w0 reported "no W0 member arrived" for them --
+     the corpus was never dispatched, so the gate could not pass no matter how
+     healthy the kernel was.  These three are the W0 members that are real user
+     programs on the image; LS.BIN stands in for the coreutils-static set. */
+  load_and_run_program_in_scheduler("CAT.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("LS.BIN", -1, -1, -1, -1);
+  load_and_run_program_in_scheduler("SH.BIN", -1, -1, -1, -1);
   /* Phase 3: lseek/stat/fstat exercise the new syscalls directly. */
   load_and_run_program_in_scheduler("LKSTEST.BIN", -1, -1, -1, -1);
   /* WCTEST/HEDTEST spawn WC.BIN/HEDGNU.BIN through the real spawn2/pipe
@@ -357,6 +413,10 @@ static void test_wave_loader(void *arg) {
 
 void main(void) {
   uart_init();
+  /* SEC-4 (security-plan.md #4): seed the stack canary before anything
+     instrumented runs; src/kernel/ssp.c. */
+  extern void ssp_init(void);
+  ssp_init();
   uart_puts("Booting AArch64 OS...\n");
 
   // Virtual Memory Protection
@@ -481,6 +541,21 @@ void main(void) {
      the inline loads.  As a thread, the loader waits while the rest of
      the suite runs. */
   process_create_kernel_nowait(test_wave_loader, 0);
+#ifdef HB_GB013_EXEC_AVAILABLE
+  /* GB-013 compat exec leg merged: load and run the static-PIE SDL test app
+     and assert its drawn+echo output.  Wired by the GB-013 executor (no-op
+     until that lands; this branch is compiled out today). */
+  uart_puts("[GB-032] SDL test-app exec: START\n");
+  load_and_run_program_in_scheduler_args("SDLAPP.BIN", -1, -1, -1, -1, 0);
+#else
+  /* GB-013 compat exec leg is NOT open yet: a demonstrated SKIP with a
+     reason — never a silent or fabricated PASS.  The app and its static-PIE
+     ELF properties are already proven on the host (sdl_test_app_test_host,
+     in host_tests); only the exec leg (running it inside the OS) is gated. */
+  uart_puts("[GB-032] SDL test-app exec: SKIP (GB-013 compat exec leg not "
+            "open; app + static-PIE ELF props proven on host by "
+            "sdl_test_app_test_host)\n");
+#endif
 #elif defined(KERNEL_MODE_DESKTOP_TEST)
   uart_puts("Mode: DESKTOP_TEST - Launching desktop in test mode...\n");
   load_and_run_program_in_scheduler("EDITOR_T.BIN", -1, -1, -1, -1);

@@ -1,0 +1,92 @@
+diff --git a/HobbyOS/WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp b/HobbyOS/WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp
+index 831a1ae9d1..760d291ad2 100644
+--- a/HobbyOS/WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp
++++ b/HobbyOS/WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp
+@@ -3172,16 +3172,34 @@ void WK5State::paintAndBlit()
+     // content is stable — stop the post-load settle repaints (this also
+     // bounds the CPU cost of the settle loop at a full-res render).
+     if (m_lastChecksum && sum == m_lastChecksum)
+         m_contentSettled = true;
+     else
+         m_lastChecksum = sum;
+     wk5emit("[WIN] frame view=%dx%d nonZero=%zu checksum=0x%08x", w, h, nonZero, sum);
+ 
++    // WK7-repaint: never commit an all-blank frame while the parser is still
++    // running.  The bookmark/reload/back/forward ui-click path repaints
++    // unconditionally right after kicking off a heavy load; the new document
++    // is mid-parse and not yet laid out, so that render comes back all-zero
++    // (nonZero=0, dom=0x000000) and BLITS OVER the last real frame, leaving
++    // the window blank for the rest of the serialized subresource drain.
++    // Keep the previous (real) frame on screen — the load-ok paint, which
++    // forces layout, publishes the real page once parsing completes.
++    if (nonZero == 0 && localFrame) {
++        if (auto* doc = localFrame->document()) {
++            if (doc->parsing()) {
++                wk5emit("[WIN] frame-skip-blank nonZero=0 parsing=1 rt=%d",
++                    static_cast<int>(doc->readyState()));
++                return;
++            }
++        }
++    }
++
+     // rp-f2 (D3): publish the fresh surface + commit the blit in ONE
+     // critical section (identical-pixel reblits and the UI-thread [E/]G
+     // catch-ups serialize against it, so a blit never sees a half-updated
+     // frame).  The long render above holds NO lock.
+     int pgx = 0, pgy = 0, pcw = 0, pch = 0;
+     long long paintMs = 0, blitMs = 0, totalMs = 0;
+     {
+         pthread_mutex_lock(&m_dispMu);
+@@ -3435,16 +3453,30 @@ void WK5State::enginePhaseTick()
+             if (!m_pendingFrag.empty()) {
+                 std::string f = m_pendingFrag;
+                 m_pendingFrag.clear();
+                 wk5emit("[WIN] load-ok pending-frag=%s", f.c_str());
+                 jumpToFragment(f.c_str());
+             }
+             wk5emit("[WIN] load-ok url=%s ms=%lld", m_current.c_str(),
+                 static_cast<long long>((MonotonicTime::now() - m_start).milliseconds()));
++            // WK7-repaint: PUBLISH the styled frame NOW, before the censuses.
++            // The census chain (doc-title / links / inputs / buttons script
++            // evals + imgCensus over the whole DOM) runs on this same engine
++            // thread and is expensive on a heavy page; gating the
++            // load-complete paint behind it meant a finished page could sit
++            // showing the previous (or a blank) frame until every census
++            // drained.  This restores the documented fs-r7 "PAINT FIRST"
++            // contract — the post-load census receipts still follow in this
++            // same tick, after the frame reaches the window.
++            m_phase = Phase::Stable;
++            m_stablePaints = 0;
++            m_stableTicks = 0;
++            bumpSettle();
++            paintAndBlit();
+             if (localFrame) {
+                 const char* dexpr =
+                     "(function(){var d=document,b=d.body?d.body.innerHTML.length:-1;"
+                     "return (d.title||'')+'|'+b+'|'+d.querySelectorAll('input').length+'|'"
+                     "+d.querySelectorAll('a[href]').length+'|'+d.querySelectorAll('img').length;})()";
+                 auto dval = localFrame->script().executeScriptInWorldIgnoringException(
+                     wk5ScriptWorld(), String::fromLatin1(dexpr),
+                     JSC::SourceTaintedOrigin::Untainted);
+@@ -3516,21 +3548,16 @@ void WK5State::enginePhaseTick()
+                     JSC::SourceTaintedOrigin::Untainted);
+                 if (!bval.isEmpty()) {
+                     String br = bval.toWTFString(localFrame->script().globalObject(
+                         wk5ScriptWorld()));
+                     wk5emit("[WIN] buttons %s", br.isEmpty() ? "<empty>" : br.utf8().data());
+                 }
+             }
+             imgCensus();
+-            m_phase = Phase::Stable;
+-            m_stablePaints = 0;
+-            m_stableTicks = 0;
+-            bumpSettle();
+-            paintAndBlit();
+         } else if (m_loadTicks++ > 60) {
+             // fs-r10: tick gate lowered 60000 -> 60 so the completion-gate
+             // probe (below, wall-clock gated) fires early in diagnosis runs
+             // regardless of tick rate.
+             // R1b: widen the load budget for the full-skin page.  With the
+             // base-href + in-process subresource service fixes the article now
+             // REALLY loads ~36 sequential HTTPS subresources (CSS bundle,
+             // thumbnails, icons) — each a fresh TLS handshake under TCG — so

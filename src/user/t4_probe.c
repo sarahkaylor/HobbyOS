@@ -1,0 +1,260 @@
+/* src/user/t4_probe.c — GB-066 T4 device-leg probe (W0 row set).
+ *
+ * ONE source, two hosts, through the REAL syscall path on both:
+ *
+ *   leg A  reference : x86_64-linux-musl static ELF, run on real Linux.
+ *   leg B  HobbyOS   : the SAME musl-built static ELF, staged onto disk.img,
+ *                      loaded by HobbyOS's ELF loader (GB-013) and run inside
+ *                      the guest.  PROC_FLAG_LINUX_ABI routes its write()
+ *                      traps through the Linux-compat dispatch (GB-014) to the
+ *                      console/serial.  This tests the kernel, never a host
+ *                      shim.
+ *
+ * Output contract (byte-identical on both legs; the diff is on stdout):
+ *   t4-probe
+ *   row=<name> rc=<n> errno=<n> out=<hex>
+ *   t4-probe-arrived     <- sentinel printed by the probe itself: existence
+ *                           of this line PROVES the probe ran in the guest
+ *                           (an image listing is never the proof).
+ *   probe-exit
+ *
+ * Standard C + write() only, so the same object builds with musl-gcc -static
+ * for both legs.  A tiny itoa avoids relying on printf differences.
+ */
+#include <unistd.h>
+#include <string.h>
+#include <fcntl.h>
+#include <sys/utsname.h>
+#include <sys/random.h>
+#include <poll.h>
+#include <sys/select.h>
+#include <signal.h>
+#include <sys/socket.h> /* GB-018 socket remainder: socketpair/AF_UNIX */
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <sys/syscall.h>
+#include <dirent.h>
+#include <errno.h>
+#include <stdio.h>
+#include <sys/stat.h>
+
+static void pstr(const char *s) {
+  size_t n = 0; while (s[n]) n++;
+  (void)write(1, s, n);
+}
+
+static int itoa_dec(unsigned long v, char *dst) {
+  char tmp[24]; int n = 0;
+  if (v == 0) { dst[0] = '0'; return 1; }
+  while (v > 0) { tmp[n++] = (char)('0' + (v % 10)); v /= 10; }
+  for (int i = 0; i < n; i++) dst[i] = tmp[n - 1 - i];
+  return n;
+}
+
+static void prow(const char *name, long rc, long err, const unsigned char *out, int outlen) {
+  static const char hex[] = "0123456789abcdef";
+  char buf[64]; int n = 0;
+  /* "row=<name> rc=<rc> errno=<err> out=<hex>\n" */
+  const char *p = "row="; while (*p) buf[n++] = *p++;
+  p = name; while (*p) buf[n++] = *p++;
+  p = " rc="; while (*p) buf[n++] = *p++;
+  if (rc < 0) buf[n++] = '-';
+  n += itoa_dec((unsigned long)(rc >= 0 ? rc : -rc), buf + n);
+  p = " errno="; while (*p) buf[n++] = *p++;
+  n += itoa_dec((unsigned long)(err >= 0 ? err : -err), buf + n);
+  if (outlen > 0) {
+    p = " out="; while (*p) buf[n++] = *p++;
+    for (int i = 0; i < outlen; i++) {
+      buf[n++] = hex[(out[i] >> 4) & 0xf];
+      buf[n++] = hex[out[i] & 0xf];
+    }
+  }
+  buf[n++] = '\n';
+  (void)write(1, buf, (size_t)n);
+}
+
+int main(int argc, char **argv) {
+  (void)argc; (void)argv;
+  pstr("t4-probe\n");
+
+  /* Row 1: write(1, "hi\n", 3) -> rc=3, errno=0, out=68690a. */
+  {
+    static const unsigned char msg[] = "hi\n";
+    long r = write(1, msg, 3);
+    prow("write3", r, (r < 0) ? (r == -1 ? 9 : (long)(-r)) : 0, msg, 3);
+  }
+
+  /* GB-073: emit every row the M1 -V DoDs name.  All but write3 were the
+   * defect's ground: uname/urandom/null/getrandom rows existed ONLY in the
+   * host model (t4_compat_probe.c), never in the guest probe — so GB-016-V /
+   * GB-017-V etc. were unmeasurable by construction.  Leg A (Linux) runs all
+   * of these through the real syscalls; leg B (HobbyOS-intel) does the same
+   * once the GB-014 dispatch lands.  rc/errno are the deterministic values
+   * (payloads deliberately not compared for the random rows). */
+  {
+    struct utsname u;
+    long urc = uname(&u);
+    prow("uname_rc", urc, urc < 0 ? (long)(-urc) : 0, NULL, 0);
+    prow("uname_sysname_linux", strcmp(u.sysname, "Linux") == 0, 0, NULL, 0);
+    prow("uname_machine_x86_64", strcmp(u.machine, "x86_64") == 0, 0, NULL, 0);
+  }
+  {
+    unsigned char rnd[16];
+    long gr = getrandom(rnd, sizeof rnd, 0);
+    prow("getrandom_16", gr, gr < 0 ? (long)(-gr) : 0, NULL, 0);
+    int ur = open("/dev/urandom", O_RDONLY);
+    prow("urandom_open", ur, ur < 0 ? 2 : 0, NULL, 0);
+    long urb = read(ur, rnd, sizeof rnd);
+    prow("urandom_read16", urb, urb < 0 ? 2 : 0, NULL, 0);
+    int nw = open("/dev/null", O_WRONLY);
+    prow("null_open_w", nw, nw < 0 ? 2 : 0, NULL, 0);
+    long nwb = write(nw, "abc", 3);
+    prow("null_write3", nwb, nwb < 0 ? 2 : 0, NULL, 0);
+    int nr = open("/dev/null", O_RDONLY);
+    prow("null_open_r", nr, nr < 0 ? 2 : 0, NULL, 0);
+    char c; long nrb = read(nr, &c, 1);
+    prow("null_read1", nrb, nrb < 0 ? 2 : 0, NULL, 0);
+  }
+
+  /* GB-018: poll/select/pselect6 under compat — socket+pipe cases.  The pipe
+   * write makes the read end ready; poll/select/pselect must report it (count=1,
+   * revents=POLLIN, fdset bit set).  A shim that never marks a readable pipe
+   * ready, or that reports readiness without the right event mask, diverges.
+   * poll_badfd: an invalid fd must report POLLNVAL (not hang, not count 0).
+   * All deterministic on both legs (fresh pipe, timeout 0). */
+  {
+    int pfd[2];
+    long prc = pipe(pfd);
+    prow("pipe2", prc, prc < 0 ? 9 : 0, NULL, 0);
+    if (write(pfd[1], "x", 1) != 1) prow("pipe_write", -1, 9, NULL, 0);
+
+    struct pollfd pf[1];
+    pf[0].fd = pfd[0]; pf[0].events = POLLIN; pf[0].revents = 0;
+    long pr = poll(pf, 1, 0);
+    prow("poll_ready", pr, pr < 0 ? 9 : 0, NULL, 0);
+    long pre = pf[0].revents;
+    prow("poll_ready_revents", pre, pre < 0 ? 9 : 0, NULL, 0);
+
+    fd_set rf; FD_ZERO(&rf); FD_SET(pfd[0], &rf);
+    struct timeval tv; tv.tv_sec = 0; tv.tv_usec = 0;
+    long sr = select(pfd[0] + 1, &rf, NULL, NULL, &tv);
+    prow("select_ready", sr, sr < 0 ? 9 : 0, NULL, 0);
+    prow("select_ready_fdset", FD_ISSET(pfd[0], &rf) ? 1 : 0, 0, NULL, 0);
+
+    sigset_t empt; sigemptyset(&empt);
+    fd_set rf2; FD_ZERO(&rf2); FD_SET(pfd[0], &rf2);
+    struct timespec ts; ts.tv_sec = 0; ts.tv_nsec = 0;
+    long ps6 = pselect(pfd[0] + 1, &rf2, NULL, NULL, &ts, &empt);
+    prow("pselect6_ready", ps6, ps6 < 0 ? 9 : 0, NULL, 0);
+    prow("pselect6_ready_fdset", FD_ISSET(pfd[0], &rf2) ? 1 : 0, 0, NULL, 0);
+
+    close(pfd[0]); close(pfd[1]);
+
+    struct pollfd pf2[1];
+    pf2[0].fd = 9999999; pf2[0].events = POLLIN; pf2[0].revents = 0;
+    long pbr = poll(pf2, 1, 0);
+    prow("poll_badfd", pbr, pbr < 0 ? 9 : 0, NULL, 0);
+    prow("poll_badfd_revents", pf2[0].revents, 0, NULL, 0);
+  }
+
+  /* GB-018 (socket remainder, coord 2026-10-20): stream-socket readiness is a
+   * DISTINCT wake path from the pipe above (socket/ring buffer, not the pipe
+   * FIFO) — the one the compat layer is most likely to get wrong.  A
+   * socketpair(AF_UNIX, SOCK_STREAM) gives two connected stream sockets; the
+   * peer write flips the other end readable.  poll/select/pselect6 must report
+   * it.  Deterministic on both legs (kernel: SYS_SOCKETPAIR). */
+  {
+    int sv[2];
+    long spc = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+    prow("sockpair", spc, spc < 0 ? 9 : 0, NULL, 0);
+    if (write(sv[1], "s", 1) != 1) prow("sock_write", -1, 9, NULL, 0);
+
+    struct pollfd spf[1];
+    spf[0].fd = sv[0]; spf[0].events = POLLIN; spf[0].revents = 0;
+    long spr = poll(spf, 1, 0);
+    prow("sockpoll_ready", spr, spr < 0 ? 9 : 0, NULL, 0);
+    prow("sockpoll_revents", spf[0].revents, 0, NULL, 0);
+
+    fd_set srf; FD_ZERO(&srf); FD_SET(sv[0], &srf);
+    struct timeval stv; stv.tv_sec = 0; stv.tv_usec = 0;
+    long ssr = select(sv[0] + 1, &srf, NULL, NULL, &stv);
+    prow("sockselect_ready", ssr, ssr < 0 ? 9 : 0, NULL, 0);
+    prow("sockselect_fdset", FD_ISSET(sv[0], &srf) ? 1 : 0, 0, NULL, 0);
+
+    sigset_t sempt; sigemptyset(&sempt);
+    fd_set srf2; FD_ZERO(&srf2); FD_SET(sv[0], &srf2);
+    struct timespec sts; sts.tv_sec = 0; sts.tv_nsec = 0;
+    long sps = pselect(sv[0] + 1, &srf2, NULL, NULL, &sts, &sempt);
+    prow("sockpselect_ready", sps, sps < 0 ? 9 : 0, NULL, 0);
+    prow("sockpselect_fdset", FD_ISSET(sv[0], &srf2) ? 1 : 0, 0, NULL, 0);
+
+    close(sv[0]); close(sv[1]);
+  }
+
+  /* GB-076: fcntl/ioctl/dent rows the GB-019/020/021 -V DoDs name — must be in
+   * the shared golden + emitted by the guest probe so t4_device --check can
+   * fail on them (vacuous-pass closure).  Mirrors the host model: F_GETFL
+   * before/after F_SETFL(O_APPEND) + O_APPEND bit; TIOCGWINSZ/TCGETS on a
+   * non-tty (/dev/null) -> ENOTTY (25); getdents64 over a fixed 3-entry dir. */
+  {
+    int f = open("/tmp/ho_t4_ioctl_device", O_RDWR | O_CREAT, 0600);
+    long fgr = fcntl(f, F_GETFL);
+    prow("fcntl_getfl_rdwr", fgr, fgr < 0 ? 9 : 0, NULL, 0);
+    long fsa = fcntl(f, F_SETFL, O_APPEND);
+    prow("fcntl_setfl_append", fsa, fsa < 0 ? 9 : 0, NULL, 0);
+    long fga = fcntl(f, F_GETFL);
+    prow("fcntl_getfl_after", fga, fga < 0 ? 9 : 0, NULL, 0);
+    prow("fcntl_append_bit", (fga & O_APPEND) ? 1 : 0, 0, NULL, 0);
+    close(f);
+    int nt = open("/dev/null", O_RDWR);
+    struct winsize ws; memset(&ws, 0, sizeof ws);
+    long iw = ioctl(nt, TIOCGWINSZ, &ws);
+    prow("ioctl_tiocgwinsz_entty", iw < 0 ? (long)(errno) : 0, 0, NULL, 0);
+    struct termios ts; memset(&ts, 0, sizeof ts);
+    long it = ioctl(nt, TCGETS, &ts);
+    prow("ioctl_tcgets_entty", it < 0 ? (long)(errno) : 0, 0, NULL, 0);
+    close(nt);
+
+    const char *d = "/tmp/ho_t4_dent";
+    mkdir(d, 0700);
+    int created = 0;
+    char p[128];
+    snprintf(p, sizeof p, "%s/alpha", d);   FILE *fa = fopen(p, "w"); if (fa) { fputs("a", fa); fclose(fa); created++; }
+    snprintf(p, sizeof p, "%s/beta", d);    FILE *fb = fopen(p, "w"); if (fb) { fputs("b", fb); fclose(fb); created++; }
+    snprintf(p, sizeof p, "%s/charlie", d); FILE *fc = fopen(p, "w"); if (fc) { fputs("c", fc); fclose(fc); created++; }
+    prow("dent_created", created, 0, NULL, 0);
+    int dfd = open(d, O_RDONLY | O_DIRECTORY);
+    prow("dent_opendir", dfd, dfd < 0 ? 9 : 0, NULL, 0);
+    if (dfd >= 0) {
+      char buf[8192];
+      int saw_alpha = 0, saw_beta = 0, saw_charlie = 0, total = 0;
+      for (;;) {
+        long n = syscall(SYS_getdents64, dfd, buf, sizeof buf);
+        if (n <= 0) break;
+        long off = 0;
+        while (off < n) {
+          struct linux_dirent64 { unsigned long d_ino; long d_off; unsigned short d_reclen; unsigned char d_type; char d_name[]; } *e =
+            (struct linux_dirent64 *)(void *)(buf + off);
+          char *nm = e->d_name;
+          if (strcmp(nm, ".") && strcmp(nm, "..")) {
+            total++;
+            if (!strcmp(nm, "alpha"))   saw_alpha = 1;
+            else if (!strcmp(nm, "beta"))  saw_beta = 1;
+            else if (!strcmp(nm, "charlie")) saw_charlie = 1;
+          }
+          off += e->d_reclen;
+        }
+      }
+      prow("dent_total", total, 0, NULL, 0);
+      prow("dent_have_alpha", saw_alpha, 0, NULL, 0);
+      prow("dent_have_beta", saw_beta, 0, NULL, 0);
+      prow("dent_have_charlie", saw_charlie, 0, NULL, 0);
+      close(dfd);
+    }
+  }
+
+  pstr("t4-probe-arrived\n");
+  pstr("probe-exit\n");
+  return 0;
+}

@@ -140,7 +140,7 @@ static void check_inos_writes(void) {
   {
     const char *path = "/lfn_newfile_created.txt";
     const char *body = "L3LFN-inos-create-1\n";
-    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC);
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd >= 0) {
       (void)write(fd, body, slen(body));
       close(fd);
@@ -170,7 +170,7 @@ static void check_inos_writes(void) {
     const char *src = "/lfn_rename_src.txt";
     const char *dst = "/lfn_rename_dst.txt";
     const char *body = "L3LFN-inos-rename-src\n";
-    int fd = open(src, O_WRONLY | O_CREAT | O_TRUNC);
+    int fd = open(src, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd >= 0) {
       (void)write(fd, body, slen(body));
       close(fd);
@@ -194,7 +194,7 @@ static void check_inos_writes(void) {
     const char *inner = "/lfn_long_dir_created/INNER.TXT";
     const char *body = "L3LFN-inos-inner\n";
     (void)mkdir(dir); /* tolerate EEXIST (no rmdir; fresh disk each gate) */
-    int fd = open(inner, O_WRONLY | O_CREAT | O_TRUNC);
+    int fd = open(inner, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd >= 0) {
       (void)write(fd, body, slen(body));
       close(fd);

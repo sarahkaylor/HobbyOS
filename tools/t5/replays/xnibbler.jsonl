@@ -1,0 +1,25 @@
+{"t": "click", "x": 38, "y": 1067, "b": "left"}
+{"t": "key", "k": "home"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "ret"}
+{"t": "key", "k": "left", "pause": 0.2}
+{"t": "key", "k": "up", "pause": 0.2}
+{"t": "key", "k": "left", "pause": 0.2}
+{"t": "key", "k": "up", "pause": 0.2}
