@@ -461,6 +461,10 @@ static void sys_poll(struct trap_frame *tf) {
   if (r == -2) {
     tf->elr -= 4; // Restart the syscall when the slice expires
     schedule(tf, 0);
+    /* GB-057 diagnostic: reaching here means schedule() returned WITHOUT a
+       switch -- the same counter as x64/trap.c; see poll_park_returns in
+       process.c for why that is the wedge's signature. */
+    { extern int poll_park_returns; poll_park_returns++; }
   } else {
     tf->regs[0] = (uint64_t)r;
   }
