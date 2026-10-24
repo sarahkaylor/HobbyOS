@@ -34,19 +34,50 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SERIAL="${1:-${T4_SERIAL:-$ROOT/obj/t3_intel.log}}"
 
 # --- counter ---------------------------------------------------------------
+# A line is glued only if it carries TWO OR MORE *record tags*.  A record tag is
+# an uppercase bracket group of 3+ characters ([KERNEL], [WAVE-TRY], [MD5TEST])
+# that is not preceded by an identifier character, so a C array subscript such as
+# `tf->regs[0]` (or `arr[IDX]`) is never mistaken for one.
+#
+# GB-092 (2026-10-24): the previous P1/P2 greps matched `\[[A-Za-z0-9_-]+\]`
+# anywhere, so 453 of 470 "glued" lines in the ARM branch serial were
+# `[DEBUG] Before eret, tf->regs[0] = …` — one record tag plus a subscript.  The
+# counter was 96% false positives, which is why every number quoted about this
+# defect (540 on main, 470 on the fix branch) was meaningless.  With the rule
+# below the same two logs measure 93 and 22 two-record lines.
+#
+# Known-benign two-record lines: the wave harness prints "[WAVE-TRY] " WITHOUT a
+# newline and the program's own "[ARRIVED] ..." then lands on the same line (12
+# such lines on the ARM main serial, 0 after the whole-line fix).  They are
+# counted, because the gate's purpose is that a serial line carries one record;
+# subtract them by eye if you are auditing the number.
 count_glued() { # $1 log -> prints count
   local log="$1"
   # An ABSENT log is not a clean log: the caller decides (see the real gate).
   [ -f "$log" ] || return 1
-  local l1 l2
-  # P1: 2+ distinct bracketed tags on one line (dedupe within the line).
-  l1=$(grep -aE '\[[A-Za-z0-9_-]+\].*\[[A-Za-z0-9_-]+' "$log" \
-         | grep -avc 'STACK\[' || true)
-  # P2: a record end fused straight into another (no whitespace): `]<LETTER`
-  # or `]0x` mid-line — the classic two-writers-one-line fusion.
-  l2=$(grep -aE '\][A-Za-z0-9_].*\[[A-Za-z0-9_-]+\]' "$log" \
-         | grep -avc 'STACK\[' || true)
-  echo $(( ${l1:-0} + ${l2:-0} ))
+  awk '
+    function is_tag_at(s, i,    prev) {
+      # s[i..] starts with "["; return 1 when the bracket group is a record tag
+      if (substr(s, i, 1) != "[") return 0
+      if (i > 1) {
+        prev = substr(s, i - 1, 1)
+        if (prev ~ /[A-Za-z0-9_>.]/) return 0     # subscript: regs[0], p->f[1]
+      }
+      rest = substr(s, i + 1)
+      if (!match(rest, /^[A-Z][A-Z0-9_-]{2,}\]/)) return 0
+      return 1
+    }
+    {
+      line = $0
+      if (index(line, "STACK[") > 0) next
+      n = 0
+      for (i = 1; i <= length(line); i++) {
+        if (substr(line, i, 1) == "[" && is_tag_at(line, i)) n++
+      }
+      if (n >= 2) count++
+    }
+    END { print count + 0 }
+  ' "$log"
 }
 
 # --- self-test -------------------------------------------------------------
@@ -60,12 +91,17 @@ if [ "${1:-}" = "--self-test" ]; then
 [WAVE-TRY] [ALIVE-SET] no READY work
 [KERNEL] pid=28 memory fault VA=0x17FFFFFE5C
 [ARRIVED] /BLKT2.TXT
+[NFS] PASS [KERNEL] Process 24: PIPETEST.BIN exited unexpectedly or gracefully.
+[LFN][TEST] Sending 'cat SHTEST.TXT' command...
 EOF
-  # (b) a clean line — one tag per line.
+  # (b) a clean line — one tag per line.  GB-092: array subscripts must NOT count;
+  #     `tf->regs[0]` was 453 of 470 "glued" lines before this rule.
   cat >"$TMP/clean" <<'EOF'
 [MD5TEST] PASS multi-file order
 [KERNEL] pid=3 exited gracefully
 [ARRIVED] HELLO.BIN
+[DEBUG] Before eret, tf->regs[0] = 68719570547 ELR = 0x1000000AB0
+[KERNEL] sys_fork: tf->regs[0] is now 7
 EOF
   cg=$(count_glued "$TMP/glued")
   cc=$(count_glued "$TMP/clean")
