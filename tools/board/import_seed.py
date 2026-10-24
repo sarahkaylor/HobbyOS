@@ -68,8 +68,12 @@ WORKSTREAM = {
     "GB-086": ["abi", "tests"],
     "GB-087": ["abi", "tests"],
     "GB-088": ["graphics", "input"],
+    "GB-089": ["tests", "abi"],
+    "GB-090": ["tests", "abi", "debug"],
+    "GB-091": ["game", "tests"],
+    "GB-092": ["tests", "abi"],
 }
-DEEP_IDS = {"GB-010", "GB-011", "GB-013", "GB-031", "GB-041", "GB-054"}
+DEEP_IDS = {"GB-010", "GB-011", "GB-013", "GB-031", "GB-041", "GB-054", "GB-090"}
 
 MS_KEY = {"M0": "M0-infra", "M1": "M1-abi-core", "M2": "M2-devices-sdl", "M3": "M3-games", "M4": "M4-acceptance"}
 MS_TIERS = {
