@@ -1,0 +1,14 @@
+=== T3 (arm): build ===
+=== T3 (arm): run (deadline 2700s, log /tmp/gb086/obj/t3_arm.log) ===
+T3_arm: note — halt marker found after make exited (poll raced the exit)
+T3_arm: 19910 console lines, 7 FAIL lines, 5 user memory fault records across 3 processes, 84 programs exited, halted=1
+T3_arm: FAIL — 7 FAIL line(s); first 20:
+2495:[SIGTEST] FAIL pipe() for the SIGCHLD handler got=-1 want=0
+2766:[SIGTEST] FAIL handler wrote the pipe (GLib pattern) got=-1 want=1
+2767:[SIGTEST] FAIL pipe() for the poll park got=-1 want=0
+2923:[SIGTEST] FAIL poll() revents POLLIN got=0 want=1
+3484:[SIGTEST] TESTS FINISHED WITH FAILURES
+6401:[PASTETEST] FAILURES: 1
+17592:SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST. Process[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+T3_arm EXIT=1
+rc=1

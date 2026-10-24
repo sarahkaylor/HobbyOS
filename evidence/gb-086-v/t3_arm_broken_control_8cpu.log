@@ -1,0 +1,108 @@
+ld.lld -T linker.ld -o hobbyos.elf obj/arm/boot.o obj/arm/fpu.o obj/arm/setjmp.o obj/arm/abi_t2_test.o obj/arm/audio_stub.o obj/arm/blk_cache.o obj/arm/blk_cache_press_test.o obj/arm/blk_cache_test.o obj/arm/dhcp.o obj/arm/elf_image.o obj/arm/elf_loader.o obj/arm/evdev.o obj/arm/evdev_test.o obj/arm/fat16.o obj/arm/fat16_test.o obj/arm/fb_ioctl.o obj/arm/fb_ioctl_test.o obj/arm/fb_mmap.o obj/arm/fb_mmap_test.o obj/arm/frame.o obj/arm/frame_test.o obj/arm/fs.o obj/arm/fs_test.o obj/arm/input_node.o obj/arm/input_node_test.o obj/arm/iommu_vtd.o obj/arm/ipc_proto.o obj/arm/linux_uname.o obj/arm/lock_order.o obj/arm/locks_test.o obj/arm/main.o obj/arm/math_test.o obj/arm/mmu_test.o obj/arm/net.o obj/arm/net_rdma.o obj/arm/net_rdma_test.o obj/arm/net_test.o obj/arm/nfs.o obj/arm/nfs_proto.o obj/arm/nfs_test.o obj/arm/pipe.o obj/arm/pipe_test.o obj/arm/process.o obj/arm/process_test.o obj/arm/program_loader.o obj/arm/program_loader_test.o obj/arm/ssp.o obj/arm/test_fw_cfg.o obj/arm/test_smp.o obj/arm/time.o obj/arm/time_test.o obj/arm/timer_test.o obj/arm/trap_test.o obj/arm/unit_test.o obj/arm/unix.o obj/arm/unix_test.o obj/arm/vfs.o obj/arm/virtio_blk.o obj/arm/virtio_blk_test.o obj/arm/virtio_gpu.o obj/arm/virtio_gpu_test.o obj/arm/virtio_gpu_x64.o obj/arm/virtio_input.o obj/arm/virtio_input_test.o obj/arm/virtio_net.o obj/arm/virtio_net_test.o obj/arm/vm.o obj/arm/vm_test.o obj/arm/cpu.o obj/arm/gic.o obj/arm/locks.o obj/arm/mmu.o obj/arm/rtc.o obj/arm/smp.o obj/arm/timer.o obj/arm/trap.o obj/arm/uart.o
+qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 8 -m 16384M -accel tcg,thread=multi -bios /home/sarah/.local/share/AAVMF/AAVMF_CODE.fd -display gtk -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff -display none 
+UEFI firmware (version 2025.11-3ubuntu7.3 built at 15:40:26 on Sep 23 2026)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+BdsDxe: starting Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+[001;001H[001;001H[001;001Hl[001;002Hi[001;003Hn[001;004Hu[001;005Hx[001;006H:[001;007H [001;008HL[001;009Ho[001;010Ha[001;011Hd[001;012Hi[001;013Hn[001;014Hg[001;015H [001;016Hk[001;017He[001;018Hr[001;019Hn[001;020He[001;021Hl[001;022H [001;023H`[001;024Hb[001;025Ho[001;026Ho[001;027Ht[001;028H([001;029H)[001;030H:[001;031H/[001;032Hb[001;033Ho[001;034Ho[001;035Ht[001;036H/[001;037Hh[001;038Ho[001;039Hb[001;040Hb[001;041Hy[001;042Ho[001;043Hs[001;044H.[001;045Hb[001;046Hi[001;047Hn[001;048H`[001;049H.[001;050H.[001;051H.[001;052H[001;001H[002;001HBooting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+[GPUDIAG] gpu wait > 8 ms: ack=3 used=4 (park off)
+[GPU] virtio-gpu mmio irq=78
+VirtIO GPU successfully initialized.
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1900544 total_mib=7424 reserved=0
+[KERNEL] Activating secondary cores via PSCI...
+[KERNEL] Core 1 power-on requested.
+[KERNEL] Core 2 power-on requested.
+[KERNEL] Core 3 power-on requested.
+[KERNEL] Core 4 power-on requested.
+start_scheduler called on CPU start_scheduler called on CPU start_scheduler called on CPU [KERNEL] Core 14start_scheduler called on CPU 2
+5
+ power-on requested.
+
+start_scheduler called on CPU [KERNEL] Core 365start_scheduler called on CPU 
+6 power-on requested.
+
+
+[KERNEL] Core 7 power-on requested.
+start_scheduler called on CPU 7
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+virtio-net MAC: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP Discover sent
+DHCP initialization complete.
+
+--- Parallel Program Loading ---
+Mode: TEST - Running automated tests...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=1
+Inside process_create: clearing memory at 0x0000000072000000
+Inside process_create: kmemset done.
+[GB-032] SDL test-app exec: SKIP (GB-013 compat exec leg not open; app + static-PIE ELF props proven on host by sdl_test_app_test_host)
+start_scheduler called on CPU 0
+/WAVE.CFG
+[WAVE-MANIFEST] POLLTSTBRK.BIN
+[WAVE-TRY] POLLTSTBRK.BIN
+Loading program for scheduler (v2 AS): POLLTSTBRK.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=-1
+/POLLTSTBRK.BIN
+[ARRIVED] POLLTSTBRK.BIN rc<0
+
+[KERNEL] FATAL: CPU 0x0000000000000001 Synchronous Exception in EL1! ESR: 0x000000008600000E EC: 0x0000000000000021 ISS: 0x000000000000000E, FAR: 0x0000000000000000, ELR: 0x0000000000000000, PROC pid=1 name=, SPSR: 0x0000000060000004, LR: 0x0000000000000000, TFP: 0x000000043F6ADB50
+[KERNEL] bytes@ELR:
+[LOSTWAKE] disposing pid=1  (stale dead-owner claim, poisoned resume)
+[LOSTWAKE] reclaiming pid=1  from RUNNING with no claiming CPU
+[IDLESTUCK] cpu=2 rounds=1408 t=8178
+/WAVE.CFG
+[IDLESTUCK] slot=1 pid=1 st=4 wake=0 rip=0x43a696240 
+[IDLESTUCK] claims: c0=-1 c1=[WAVE-MANIFEST] POLLTSTBRK.BIN
+-1[WAVE-TRY]  cPOLLTSTBRK.BIN2
+=Loading program for scheduler (v2 AS): -1POLLTSTBRK.BIN c
+3=-1 c4=-1Inside process_create: acquiring lock...
+ c5=-1 c6=-1 c7=1
+Inside process_create: lock released. pid=2 block_idx=-1
+/POLLTSTBRK.BIN
+[ARRIVED] POLLTSTBRK.BIN rc<0
+
+[KERNEL] FATAL: CPU 0x0000000000000007 Synchronous Exception in EL1! ESR: 0x000000008600000E EC: 0x0000000000000021 ISS: 0x000000000000000E, FAR: 0x0000000000000000, ELR: 0x0000000000000000, PROC pid=1 name=, SPSR: 0x0000000060000004, LR: 0x0000000000000000, TFP: 0x000000043F64DB50
+[KERNEL] bytes@ELR:
+[IDLESTUCK] cpu=0 rounds=20000 t=41950
+[IDLESTUCK] slot=1 pid=1 st=4 wake=0 rip=0x43a696240 
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=-1 c7=1
+[IDLESTUCK] cpu=2 rounds=40000 t=75712
+[IDLESTUCK] slot=1 pid=1 st=4 wake=0 rip=0x43a696240 
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=-1 c7=1
+[IDLESTUCK] cpu=2 rounds=60000 t=109480
+[IDLESTUCK] slot=1 pid=1 st=4 wake=0 rip=0x43a696240 
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=-1 c7=1
+[IDLESTUCK] cpu=3 rounds=80000 t=143229
+[IDLESTUCK] slot=1 pid=1 st=4 wake=0 rip=0x43a696240 
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=-1 c7=1
+[IDLESTUCK] cpu=3 rounds=100000 t=176960
+[IDLESTUCK] slot=1 pid=1 st=4 wake=0 rip=0x43a696240 
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=-1 c7=1
+[IDLESTUCK] cpu=2 rounds=120000 t=210730
+[IDLESTUCK] slot=1 pid=1 st=4 wake=0 rip=0x43a696240 
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=-1 c7=1
+[IDLESTUCK] cpu=3 rounds=140000 t=244500
+[IDLESTUCK] slot=1 pid=1 st=4 wake=0 rip=0x43a696240 
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=-1 c7=1
+[IDLESTUCK] cpu=3 rounds=160000 t=278302
+[IDLESTUCK] slot=1 pid=1 st=4 wake=0 rip=0x43a696240 
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=-1 c7=1
+[IDLESTUCK] cpu=3 rounds=180000 t=312093
+[IDLESTUCK] slot=1 pid=1 st=4 wake=0 rip=0x43a696240 
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=-1 c7=1
+[IDLESTUCK] cpu=5 rounds=200004 t=345889
+[IDLESTUCK] slot=1 pid=1 st=4 wake=0 rip=0x43a696240 
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=-1 c7=1
+[IDLESTUCK] cpu=2 rounds=220000 t=379646
+[IDLESTUCK] slot=1 pid=1 st=4 wake=0 rip=0x43a696240 
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=-1 c3=-1 c4=-1 c5=-1 c6=-1 c7=1

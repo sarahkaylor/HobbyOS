@@ -1,0 +1,10 @@
+=== T3 (arm): build ===
+=== T3 (arm): run (deadline 2700s, log /tmp/gb086/obj/t3_arm.log) ===
+T3_arm: note — halt marker found after make exited (poll raced the exit)
+T3_arm: 11147 console lines, 3 FAIL lines, 4 user memory fault records across 2 processes, 77 programs exited, halted=1
+T3_arm: FAIL — 3 FAIL line(s); first 20:
+1654:  POLLTST timeout took >= 85ms and < 5000ms (elapsed seen): FAIL
+2166:POLLTST FAILED: 1 check(s)
+11120:SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST. Process table:
+T3_arm EXIT=1
+rc=1
