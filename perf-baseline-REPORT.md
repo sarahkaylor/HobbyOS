@@ -77,3 +77,22 @@ rebuild in the timed path).
 
 `evidence/gb045gfx2/20261020T233422Z/`: serial.log (GFXBENCH lines), boot/launch screendumps
 (boot.ppm/launch.ppm + .png), replay.jsonl, manifest.json (sha256 of every artifact).
+
+---
+
+## Game-cycling (GB-046): freeze + host-RSS growth
+
+_Measured 2026-10-18 by wgames on ARM; folded into this report 2026-10-24 by the Coordinator when resolving the merge of `ticket/45-perf-report`, because it is data the 2026-10-20 pass above did not cover (per-game-cycle freeze state and host RSS, not boot or gfxbench)._
+
+| game | cycle | frozen | growth_mb |
+|---|---|---|---|
+| XNIBBLER.BIN | 0 | False | 0.19 |
+| XCRYPT.BIN | 0 | False | 0.0 |
+| XNIBBLER.BIN | 1 | False | 0.0 |
+| XCRYPT.BIN | 1 | False | 0.0 |
+| XNIBBLER.BIN | 0 | False | 0.27 |
+| XCRYPT.BIN | 0 | False | 0.02 |
+| XNIBBLER.BIN | 1 | False | 0.0 |
+| XCRYPT.BIN | 1 | False | 0.0 |
+
+- freezes: False; max game-cycle RSS growth: **0.27 MB** (bound 64 MB) -> PASS
