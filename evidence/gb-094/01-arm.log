@@ -1,0 +1,20 @@
+=== T3 (arm): build ===
+=== T3 (arm): run (deadline 2400s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-9642df51/obj/t3_arm.log) ===
+T3_arm: note — halt marker found after make exited (poll raced the exit)
+T3_arm: 39023 console lines, 13 FAIL lines, 2 user memory fault records across 1 processes, 84 programs exited, halted=1
+T3_arm: FAIL — 13 FAIL line(s); first 20:
+1865:[SIGTEST] FAIL pipe() for the SIGCHLD handler got=-1 want=0
+2193:MMTEST FAIL 12
+2376:  IPC_T fd-passing setup (pipes + socketpair): FAIL
+2377:  IPC_T poll setup: FAIL
+2378:  IPC_T park socketpair: FAIL
+2380:  IPC_T error-path setup: FAIL
+2381:  IPC_T select socketpair: FAIL
+2382:IPC_T FAILED: 
+3598:[SIGTEST] FAIL handler wrote the pipe (GLib pattern) got=-1 want=1
+3733:  TORTURE threads-churn-64: FAIL
+4553:[SIGTEST] TESTS FINISHED WITH FAILURES
+6108:TORTURE FAILED: 1
+27783:SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST. Process table:
+T3_arm EXIT=1
+EXIT=1

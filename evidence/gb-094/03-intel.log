@@ -1,0 +1,28 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2400s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-9642df51/obj/t3_intel.log) ===
+T3_intel: 19279 console lines, 88 FAIL lines, 6 user memory fault records across 5 processes, 82 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 2400s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 1 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 88 FAIL line(s); first 20:
+3343:[SEDTEST] FAIL basic_s (stdout)
+3364:[SIGTEST] FAIL waitpid returns the child got=30 want=4294964048
+3794:[TEST] DIRECT-ext-cat FAIL
+4407:[SEDTEST] FAIL s_g (stdout)
+4919:[SEDTEST] FAIL s_2nd (stdout)
+5586:/COMU1.TXT[SEDTEST] FAIL s_p_n (stdout)
+5722:[CMPTEST] FAIL EOF message on stderr
+5730:[CMPTEST] FAIL empty EOF message
+5735:[CMPTEST] FAIL missing file diagnostic
+5790:[CMPTEST] FAIL -i 4:0 skips prefix
+5809:  FPU_T torture-child: FAIL
+5848:[CMPTEST] FAIL - stdin EOF diagnostic
+5880:[CMPTEST] FAILURES: 5
+6095:[SEDTEST] FAIL amp (stdout)
+6260:CUT.BIN: [TACTEST] FAIL missing file
+6263:[TACTEST] FAIL empty separator
+6272:/TEST3.TXT[TACTEST] FAILURES: 4
+6410:[WAVE-TRY] FPU_T FAILED: 2
+6437:  TORTURE threads-churn-64: FAIL
+6717:[SEDTEST] FAIL backref (stdout)
+T3_intel EXIT=1
+EXIT=1

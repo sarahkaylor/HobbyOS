@@ -1,0 +1,14 @@
+two-record lines: 89
+leading tag histogram:
+    40  [ARRIVED]  (kernel)
+    27  [DEBUG]  (kernel)
+    14  [WAVE-TRY]  (kernel)
+     5  [KERNEL]  (kernel)
+     1  [LFN]  (USER-PROGRAM)
+     1  [TORTURE]  (USER-PROGRAM)
+     1  [PIPE_WRITE_EPIPE]  (USER-PROGRAM)
+
+lines led by a user-program tag: 3
+  L723 [LFN] [LFN] PASS read_dir /src shows 30+ char name (31-char syscall ca[LKSTEST] PASS stat ok
+  L3726 [TORTURE] [TORTURE] note: churn cycles skipped (create budget), skipped=56[PASTETEST] PASS --serial long option
+  L5746 [PIPE_WRITE_EPIPE] [PIPE_WRITE_EPIPE] PID [WAVE-TRY] 38SED.BIN pipe
