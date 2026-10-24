@@ -1,0 +1,33 @@
+log: obj/t3_intel_post087.log  (PARTIAL — the tier wedged and was stopped)
+FAIL lines: 86
+
+REAL_ASSERT          51
+ARTIFACT_FOREIGN     30
+ARTIFACT_SPLIT        3
+ARTIFACT_FRAGMENT     2
+
+artifacts 35 / real 51
+
+--- ARTIFACT_FOREIGN
+   [SIGTEST] [SIGTEST] FAIL [WAVE-TRY] waitpid returns the childFOLD.BIN got=   <foreign: WAVE-TRY>
+   [SEDTEST] [SEDTEST] FAIL v2 loader: image mapped (lazy), bytes=108056 pages=27 first=in elap=0ms
+   [(untagged)] FPU_T [WAITPID] ECHILD caller=torture-child21 : FAIL   <foreign: WAITPID>
+   [SEDTEST] [SEDTEST] FAIL v2 loader: PID=35 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+--- ARTIFACT_SPLIT
+   [(untagged)] : FAIL
+   [(untagged)] : FAIL
+   [(untagged)] : FAIL
+--- REAL_ASSERT
+   [SEDTEST] [SEDTEST] FAIL /TACD.TXTbasic_s
+   [(untagged)] FPU_T FAILED: /GRT.IN
+   [SEDTEST] [SEDTEST] FAIL Try `PASTE.BIN --help' for more information.
+   [SEDTEST] [SEDTEST] FAIL Loading program for scheduler (v2 AS): ampTSORT.BIN (stdout)
+--- REAL_RC
+
+--- by tag (artifacts / real):
+  SEDTEST      total= 57  artifacts= 22  real= 35
+  (untagged)   total= 12  artifacts=  9  real=  3
+  TSORTTEST    total=  8  artifacts=  1  real=  7
+  CMPTEST      total=  6  artifacts=  0  real=  6
+  TACTEST      total=  2  artifacts=  2  real=  0
+  SIGTEST      total=  1  artifacts=  1  real=  0

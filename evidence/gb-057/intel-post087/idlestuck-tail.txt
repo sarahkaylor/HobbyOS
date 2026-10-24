@@ -1,0 +1,25 @@
+[IDLESTUCK] slot=37 pid=37 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=38 pid=38 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=39 pid=39 st=9 wake=0 rip=0x1000005a04 THRD_T.BIN
+[IDLESTUCK] slot=40 pid=40 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=41 pid=41 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=42 pid=42 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=43 pid=43 st=3 wake=0 rip=0x1000000000 PROCCHLD.BIN
+[IDLESTUCK] slot=44 pid=44 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=45 pid=45 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=46 pid=46 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] slot=47 pid=47 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=48 pid=48 st=4 wake=0 rip=0x1000001dcb SEDTEST.BIN
+[IDLESTUCK] slot=49 pid=49 st=4 wake=0 rip=0x10000020bb GREPTEST.BIN
+[IDLESTUCK] slot=51 pid=51 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] slot=53 pid=53 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] slot=54 pid=54 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] slot=55 pid=55 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=56 pid=56 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] slot=57 pid=57 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=58 pid=58 st=3 wake=0 rip=0x1000000000 cat
+[IDLESTUCK] slot=59 pid=59 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] slot=61 pid=61 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] slot=62 pid=62 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] slot=63 pid=63 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] claims: c0=-1 c1=-1 c2=58 c3=-1 c4=-1 c5=-1 c6=43 c7=-1
