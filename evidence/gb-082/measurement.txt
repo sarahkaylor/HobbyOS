@@ -1,0 +1,16 @@
+obj/t3_arm_fixed.log
+  counter says 470, subscript-only 453, two-record 17
+    REAL: [NFS] PASS [KERNEL] Process 24: PIPETEST.BIN exited unexpectedly or gracefully.
+    REAL: [HELLO] argc=[KERNEL] Process 35: CAT.BIN exited unexpectedly or gracefully.
+    REAL: [LKSTEST] PASS [FPU_T] floating-point bring-up test
+    REAL: [LFN][TEST] Sending 'cat SHTEST.TXT' command...
+    REAL: [GREPTEST] starting: [KERNEL] Process 19: NETTEST.BIN exited unexpectedly or gracefully.
+    REAL: [LKSTEST] PASS [EXITPC] pid=10 last_user_pc=0x0
+obj/t3_arm.log
+  counter says 540, subscript-only 504, two-record 36
+    REAL: [WAVE-TRY] [ARRIVED] [KERNEL] Process 13: CAT.BIN exited unexpectedly or gracefully.
+    REAL: [GPUDIAG] gpu wait > [GPU] irq handled (status=41 ms: ack=)
+    REAL: [NFS] PASS sysinfo(7) reports FAT numbers at /[KERNEL] Process 41: LKSTEST.BIN exited unexpectedly or gracefully.
+    REAL: [NFS] ALL PASSED ([KERNEL] sys_fork: tf->regs[0] is now 13-11 checks)
+    REAL: [DEBUG] Before eret, tf->regs[0] = [KERNEL] Process 35: NFSTEST.BIN exited unexpectedly or gracefully.
+    REAL: [EXPANDTEST] PASS [KERNEL] Process 6: ICUSMK.BIN exited unexpectedly or gracefully.
