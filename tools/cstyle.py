@@ -80,6 +80,22 @@ EXCLUDE_PREFIXES = {
                          # files (config.h, mtools_port.c) are formatter-scope
                          # and are kept cstyle-clean.
     "src/user/mkfs/",
+    "src/user/grep/gnulib/",  # GB-095: the grep port's vendored gnulib copies
+                              # (error.c, obstack.[ch], posix/regex.h, regex.c,
+                              # strtol.c) are byte-identical upstream GNU code.
+                              # cstyle refuses to format them — "formatting
+                              # changed the token stream" — which turned the
+                              # STYLE tier red on main for every PR.  Same rule
+                              # as the sed tree: transcribed sources stay out of
+                              # scope, first-party grep files stay in.
+    "src/user/grep/dfa.c",    # GB-095: also upstream GNU grep, and not merely
+    "src/user/grep/grep.c",   # unformatted — cstyle is NOT IDEMPOTENT on them:
+                              # formatting twice gives different comment
+                              # indentation around the `|| tok == ENDWORD`
+                              # block, so `make format` would churn them on
+                              # every run.  Excluded by file, not by tree, so a
+                              # first-party file added beside them stays in
+                              # scope.
 }
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

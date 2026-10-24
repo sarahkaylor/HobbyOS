@@ -686,6 +686,31 @@ class TestVendoredExclusions(unittest.TestCase):
             self.skipTest("vendored sed source absent")
         self.assertEqual(cstyle.find_files([path]), [])
 
+    def test_grep_upstream_sources_are_out_of_scope_but_first_party_stays(self):
+        """GB-095: the grep port's upstream files broke the STYLE tier on main.
+
+        `src/user/grep/gnulib/*` made cstyle raise ("formatting changed the token
+        stream") and `dfa.c`/`grep.c` were non-idempotent (formatting twice gave
+        different comment indentation around the `|| tok == ENDWORD` block), so
+        the sweep failed for every PR.  They are transcribed GNU sources; the
+        port's own files stay in scope.
+        """
+        grep_dir = os.path.join(REPO, "src/user/grep")
+        if not os.path.isdir(grep_dir):
+            self.skipTest("no src/user/grep tree next to tools/")
+        found = {os.path.relpath(p, REPO).replace(os.sep, "/")
+                 for p in cstyle.find_files([grep_dir])}
+        for rel in ("src/user/grep/dfa.c",
+                    "src/user/grep/grep.c",
+                    "src/user/grep/gnulib/regex.c",
+                    "src/user/grep/gnulib/obstack.h"):
+            if os.path.exists(os.path.join(REPO, rel)):
+                self.assertNotIn(rel, found, f"{rel} is vendored and must be skipped")
+        # first-party files beside them are still formatted
+        for rel in ("src/user/grep/search.c", "src/user/grep/kwset.c"):
+            if os.path.exists(os.path.join(REPO, rel)):
+                self.assertIn(rel, found, f"{rel} is first-party and must stay in scope")
+
 
 class TestCorpusSweep(unittest.TestCase):
     """Format every file in the real src/ tree: tokens preserved, idempotent."""
