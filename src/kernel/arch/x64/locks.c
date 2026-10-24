@@ -113,6 +113,12 @@ void spinlock_acquire(spinlock_t *lock) {
            IRQs-off pileup is still visible on the console. */
         scream_dec("\n[LOCKFOREVER] cpu=", cpu);
         scream_hex(" lock=", (uint64_t)lock);
+        /* GB-057: name the HOLDER, not just the address.  spinlock_t already
+           carries owner = cpu+1 (GB-060), so one field turns "someone holds
+           this" into "CPU n holds this" -- and that CPU's own RIP is then the
+           answer.  Measured need: a 4-minute stall in mmu_switch_user_mapping
+           with two CPUs spinning on mmu_lock and nothing naming the holder. */
+        scream_dec(" owner=", (int)lock->owner);
         scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
         scream_hex(" pc2=", (uint64_t)__builtin_return_address(1));
         uart_putc_raw('\n');
