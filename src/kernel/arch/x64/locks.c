@@ -8,6 +8,25 @@
    console goes silent.  A core spinning with interrupts off freezes these
    in place, which is exactly what makes a wedged lock visible. */
 volatile uint64_t lock_wait_addr[MAX_CPUS];
+/* GB-057 (Coordinator, 2026-10-24): the held-lock table the tier's post-freeze
+ * monitor probe has always expected -- it prints "no held-lock table in this
+ * build (probe scaffolding absent)" because these symbols never existed.  With
+ * them, a stalled guest can be asked "which CPU holds which lock, taken from
+ * where" over the QEMU monitor, with no guest cooperation and no new hypothesis:
+ * the probe reads held_locks (8 CPUs x 8 slots), held_lock_pc (the acquire site
+ * for each), and sched_stage.
+ *
+ * A depth stack, not a single word, because the interesting questions are about
+ * nesting: mmu_lock taken under proc_lock reads differently from the reverse.
+ * Cost is two stores on acquire and two on release, both to per-CPU memory that
+ * is already hot, and nothing here feeds a decision -- it is observation only. */
+#define HELD_LOCK_SLOTS 8
+volatile uint64_t held_locks[MAX_CPUS][HELD_LOCK_SLOTS];
+volatile uint64_t held_lock_pc[MAX_CPUS][HELD_LOCK_SLOTS];
+static volatile uint8_t held_lock_depth[MAX_CPUS];
+/* Coarse "what is this CPU doing" marker, for the same probe: 0 = normal,
+ * 1 = inside the scheduler switch, 2 = parked in enter_user_space. */
+volatile uint8_t sched_stage[MAX_CPUS];
 /* GB-060: a CPU that has taken a fatal fault and stopped.  Declared here (not in
    a header) to keep the mechanism reviewable in the two files that implement it:
    process.c records it at the halt, and this file reads it to decide whether a
@@ -194,6 +213,18 @@ void spinlock_acquire(spinlock_t *lock) {
      any use of the protected data, so a fatal path can ask "is this mine to
      give back?" without guessing. */
   lock->owner = get_cpuid() + 1;
+  /* GB-057: push onto this CPU's held-lock stack (observation only). */
+  {
+    uint32_t hcpu = get_cpuid();
+    if (hcpu < MAX_CPUS) {
+      uint32_t d = held_lock_depth[hcpu];
+      if (d < HELD_LOCK_SLOTS) {
+        held_locks[hcpu][d] = (uint64_t)lock;
+        held_lock_pc[hcpu][d] = (uint64_t)__builtin_return_address(0);
+        held_lock_depth[hcpu] = (uint8_t)(d + 1);
+      }
+    }
+  }
 #ifdef KERNEL_MODE_UNIT_TEST
   lockdbg_note_acquired(lock); /* SEC-OBS-B: push once held */
 #endif
@@ -227,6 +258,24 @@ void spinlock_release(spinlock_t *lock) {
 #ifdef KERNEL_MODE_UNIT_TEST
   lockdbg_note_releasing(lock); /* SEC-OBS-B: pop before the HW clear */
 #endif
+  /* GB-057: pop this CPU's held-lock stack (observation only).  Pop by
+     searching for the lock rather than assuming strict LIFO: a fatal path may
+     release out of order, and a table that lies is worse than no table. */
+  {
+    uint32_t hcpu = get_cpuid();
+    if (hcpu < MAX_CPUS) {
+      uint32_t d = held_lock_depth[hcpu];
+      while (d > 0) {
+        d--;
+        if (held_locks[hcpu][d] == (uint64_t)lock) {
+          held_locks[hcpu][d] = 0;
+          held_lock_pc[hcpu][d] = 0;
+          held_lock_depth[hcpu] = (uint8_t)d;
+          break;
+        }
+      }
+    }
+  }
   /* Clear the owner BEFORE releasing: a CPU that finds the lock free must never
      see its own id still in it, and the release-store below is what publishes
      both fields to the next acquirer. */
