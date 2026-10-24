@@ -1,0 +1,10 @@
+7003a31f:	f3 48 a5             	rep movsq (%rsi),(%rdi)
+7003a322:	48 8d a7 d8 fe ff ff 	lea    -0x128(%rdi),%rsp
+7003a329:	49 8b 84 24 f0 00 00 	mov    0xf0(%r12),%rax
+7003a330:	00 
+7003a331:	48 89 84 24 30 01 00 	mov    %rax,0x130(%rsp)
+7003a338:	00 
+7003a339:	48                   	rex.W
+7003a33a:	c7                   	.byte 0xc7
+7003a33b:	84 24 18             	test   %ah,(%rax,%rbx,1)
+7003a33e:	01 00                	add    %eax,(%rax)
