@@ -1566,35 +1566,56 @@ int console_write_user(struct process *p, const void *buf, int size) {
      into a fault on a freed frame (and vm_range_ok rejected every v1
      caller outright). */
   const char *s = (const char *)buf;
+  /* GB-082 (2026-10-24): whole-write atomicity.  The previous code read the
+     user buffer in fixed 64-byte chunks and took uart_lock PER CHUNK, so a
+     single write(1)/printf line longer than 64 bytes was split into several
+     lock holds and another program's console bytes interleaved between them —
+     the measured glued line `[NLTEST] PASS UNEXPAND.BINmulti-file ...
+     CMPTEST.BIN` is two programs' records fused on one serial line because the
+     first writer's line was chunked mid-record.  Fix: stage the whole user
+     buffer into a kernel buffer FIRST (no lock held across the user copy),
+     then emit it under ONE uart_lock hold, splitting oversized writes only at
+     a newline so complete lines are never broken by another writer. */
+  enum { STAGE_CAP = 8192 };
+  char stage[STAGE_CAP];
   int done = 0;
   while (done < size) {
-    char chunk[64];
     int n = size - done;
-    if (n > (int)sizeof(chunk))
-      n = (int)sizeof(chunk);
-    if (vm_user_read(p, (uint64_t)(s + done), chunk, n) != 0)
+    if (n > STAGE_CAP)
+      n = STAGE_CAP;
+    if (vm_user_read(p, (uint64_t)(s + done), stage, n) != 0)
       return -EFAULT;
-    /* GB-024 (2026-10-21): emit the chunk under ONE lock hold. uart_putc takes
-       uart_lock per CHARACTER, so with 8 CPUs writing, any two bytes of a
-       program's output could be split by another process's write. Measured in the
-       ARM W0 console:
-           HELHALLO.BIN]
-            mainTSORT.BIN
-           returned 0
-       -- which is "[HELLO] main returned 0" shredded by concurrent writers, and
-       is why the corpus looked silent: grep could not find a line that no longer
-       existed as a line. kline.h documents the same failure for kernel
-       diagnostics; this is the same rule for user stdout. The lock is taken AFTER
-       vm_user_read (which may fault) so no spinlock is held across a user copy. */
+    /* Emit this window under one lock hold.  Avoid splitting a record: if the
+       window does not end exactly at the user buffer's end, only emit up to
+       the last newline in the window so a partial line is carried to the next
+       window (which will then be contiguous under its own single lock hold). */
+    int emit = n;
+    if (done + n < size) {
+      int lastnl = -1;
+      for (int i = 0; i < n; i++)
+        if (stage[i] == '\n')
+          lastnl = i;
+      if (lastnl >= 0)
+        emit = lastnl + 1;
+      else
+        emit = n; /* one record spans the whole window (a >8KB line with no
+                     newline): emit it whole under the lock rather than drop
+                     or re-stage it — a console line longer than STAGE_CAP is
+                     pathological, but dropping bytes is never acceptable */
+    }
     {
       extern spinlock_t uart_lock;
       extern void uart_putc_raw(char c);
       uint64_t uflags = spinlock_acquire_irqsave(&uart_lock);
-      for (int i = 0; i < n; i++)
-        uart_putc_raw(chunk[i]);   /* raw: uart_putc would re-take uart_lock */
+      for (int i = 0; i < emit; i++)
+        uart_putc_raw(stage[i]);   /* raw: uart_putc would re-take uart_lock */
       spinlock_release_irqrestore(&uart_lock, uflags);
     }
-    done += n;
+    /* Advance by the completed (emitted) bytes of this window.  A partial
+       trailing line (emit stopped at the last newline, before the window's
+       end) is left in the user buffer and re-staged by the next iteration,
+       where it is emitted contiguously under its own single lock hold. */
+    done += emit;
   }
   return size;
 }
