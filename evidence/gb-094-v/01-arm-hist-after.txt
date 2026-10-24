@@ -1,0 +1,7 @@
+glued_lines=70
+leading_tag_histogram:
+  [ARRIVED] 24
+  [DEBUG] 23
+  [WAVE-TRY] 21
+  [KERNEL] 2
+user_tag_glued=0

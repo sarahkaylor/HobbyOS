@@ -1,0 +1,18 @@
+log: obj/t3_intel.log  (PARTIAL — the tier wedged and was stopped)
+FAIL lines: 3
+
+REAL_ASSERT           3
+
+artifacts 0 / real 3
+
+--- ARTIFACT_FOREIGN
+--- ARTIFACT_SPLIT
+--- REAL_ASSERT
+   [SEDTEST] [SEDTEST] FAIL basic_s (stdout)
+   [SIGTEST] [SIGTEST] FAIL waitpid returns the child got=43 want=4294964048
+   [SEDTEST] [SEDTEST] FAIL s_g (stdout)
+--- REAL_RC
+
+--- by tag (artifacts / real):
+  SEDTEST      total=  2  artifacts=  0  real=  2
+  SIGTEST      total=  1  artifacts=  0  real=  1

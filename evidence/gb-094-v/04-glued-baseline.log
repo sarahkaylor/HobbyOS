@@ -1,0 +1,7 @@
+t4_glued: 79 glued console lines in 'obj/t3_arm.log'
+t4_glued: FAIL — 79 glued lines (writes not whole-line atomic); the next
+          GB-057 FAIL-attribution ratio cannot be trusted until this is 0.
+  sample glued lines:
+A chdir r=0 errno=0  [DEBUG] Before eret, tf->regs[0] = 93811 ELR = 0x0000001000000AB0
+[DEBUG] Before eret, tf->regs[0] = 93811 ELR = 0x0000001000000AC8
+[DEBUG] Before eret, tf->regs[0] = [WAVE-TRY] 93811FATBIG_T.BIN0

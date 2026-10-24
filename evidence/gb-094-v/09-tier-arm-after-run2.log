@@ -1,0 +1,8 @@
+=== T3 (arm): build ===
+=== T3 (arm): run (deadline 2700s, log /tmp/gb094/obj/t3_arm.log) ===
+T3_arm: note — halt marker found after make exited (poll raced the exit)
+T3_arm: 24533 console lines, 1 FAIL lines, 5 user memory fault records across 4 processes, 84 programs exited, halted=1
+T3_arm: FAIL — 1 FAIL line(s); first 20:
+17217:SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST. Process[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+T3_arm EXIT=1
+ARM2_RC=1

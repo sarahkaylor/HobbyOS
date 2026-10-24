@@ -1,0 +1,32 @@
+glued_lines=79
+leading_tag_histogram:
+  [WAVE-TRY] 22
+  [ARRIVED] 18
+  [DEBUG] 14
+  [SIGTEST] 4
+  [CKSUMTEST] 4
+  [SEDTEST] 3
+  [NLTEST] 3
+  [KERNEL] 2
+  [LFN] 1
+  [REGTEST] 1
+  [NFS] 1
+  [LKSTEST] 1
+  [UNEXPTEST] 1
+  [GREPTEST] 1
+  [(no leading tag)] 1
+  [PASTETEST] 1
+  [FOLDTEST] 1
+user_tag_glued=14
+  USER: [REGTEST] PASS row 3 (a\+[GREPTEST] starting: 65 golden cases from GNU grep 2.5.4
+  USER: [SEDTEST] PASS [GREPTEST] PASS s_p_ncount_c
+  USER: [NLTEST] PASS [EXITPC] pid=46 last_user_pc=0x0
+  USER: [GREPTEST] PASS [PASTETEST] PASS count_c_neg-d : file and stdin
+  USER: [PASTETEST] PASS [WAVE-TRY] missing file rcCMP.BIN
+  USER: [FOLDTEST] PASS [ARRIVED] multi-fileMD5SUM.BIN
+  USER: [NLTEST] PASS [EXITPC] pid=7 last_user_pc=0x0
+  USER: [NLTEST] PASS [ARRIVED] GREP.BIN rc>0
+  USER: [SEDTEST] PASS   [ALIVE-SET] slot=3 pid=3 st=5 parent=-1 claimed_by=-1 SHTEST.BIN
+  USER: [SEDTEST] PASS   [ALIVE-SET] slot=17 pid=17 st=5 parent=22 claimed_by=-1 STRESS.BIN
+  USER: [CKSUMTEST] PASS [ARRIVED] 'abc\n' (4 bytes)SED.BIN rc>0
+  USER: [CKSUMTEST] PASS   [ALIVE-SET] slot=15 pid=15 st=3 parent=-1 claimed_by=0 BLKTEST.BIN
