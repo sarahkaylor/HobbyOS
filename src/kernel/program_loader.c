@@ -929,15 +929,25 @@ int load_and_run_program_v2(const char* filename, int stdin_fd,
   /* GB-072 remainder / GB-067 unblocker: one arrival line per wave program.
    * A program that runs and a program that never loaded are otherwise the same
    * console silence, which is what made earlier re-stage probes unreadable.
-   * Printed before and after the load so a failure to arrive is visible too. */
-  uart_puts("[WAVE-TRY] ");
-  uart_puts(filename ? filename : "(null)");
-  uart_puts("\n");
+   * Printed before and after the load so a failure to arrive is visible too.
+   * GB-082: each line is built with kline and emitted as ONE uart_puts so it
+   * cannot be fused mid-line with another core's record on SMP. */
+  {
+    struct kline k; kl_init(&k);
+    kl_s(&k, "[WAVE-TRY] ");
+    kl_s(&k, filename ? filename : "(null)");
+    kl_c(&k, '\n');
+    kl_emit(&k);
+  }
   int r = load_v2_internal(filename, stdin_fd, stdout_fd, stderr_fd,
                            caller_pid, args, 0);
-  uart_puts("[ARRIVED] ");
-  uart_puts(filename ? filename : "(null)");
-  uart_puts(r < 0 ? " rc<0\n" : " rc>0\n");
+  {
+    struct kline k; kl_init(&k);
+    kl_s(&k, "[ARRIVED] ");
+    kl_s(&k, filename ? filename : "(null)");
+    kl_s(&k, r < 0 ? " rc<0\n" : " rc>0\n");
+    kl_emit(&k);
+  }
   return r < 0 ? -1 : r;
 }
 

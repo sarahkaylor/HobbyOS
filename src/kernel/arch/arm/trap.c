@@ -1,4 +1,5 @@
 #include "trap.h"
+#include "kline.h"
 
 #include "fs.h"
 #include "net.h"
@@ -52,11 +53,16 @@ int sys_user_range_ok(uint64_t ptr, uint64_t len);
  */
 void debug_print_tf(struct trap_frame *tf) {
   if (tf->regs[8] == 3) { // SYS_FORK is 3
-    uart_puts("[DEBUG] Before eret, tf->regs[0] = ");
-    print_int((int)tf->regs[0]);
-    uart_puts(" ELR = ");
-    uart_print_hex(tf->elr);
-    uart_puts("\n");
+    /* GB-082: whole-line atomicity.  The old four calls each took uart_lock,
+       so on SMP other cores' bytes interleaved between "regs[0] = " and the
+       value.  Build the record with kline and emit as ONE uart_puts. */
+    struct kline k; kl_init(&k);
+    kl_s(&k, "[DEBUG] Before eret, tf->regs[0] = ");
+    kl_i(&k, (long)tf->regs[0]);
+    kl_s(&k, " ELR = ");
+    kl_hex(&k, (unsigned long)tf->elr);
+    kl_c(&k, '\n');
+    kl_emit(&k);
   }
 }
 
