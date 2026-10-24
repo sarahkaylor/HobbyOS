@@ -235,11 +235,33 @@ int pipe_write(struct pipe *p, const void *buf, int n, struct trap_frame *tf) {
       static int epipe_reports = 0;
       if (epipe_reports < 5) {
         epipe_reports++;
-        uart_puts("[PIPE_WRITE_EPIPE] PID ");
-        if (cur) print_int(cur->pid);
-        uart_puts(" pipe ");
-        uart_print_hex((uint64_t)p);
-        uart_puts(" reader_count is 0\n");
+        /* GB-082: ONE uart_puts for the whole record (see process.c, same fix):
+           four calls let a peer CPU fuse a record onto this line. */
+        char pb[96];
+        int pi = 0;
+        const char *ppre = "[PIPE_WRITE_EPIPE] PID ";
+        while (*ppre && pi < 30) pb[pi++] = *ppre++;
+        {
+          char td[12];
+          int ti = 0;
+          int v = cur ? cur->pid : 0;
+          if (v < 0) { pb[pi++] = '-'; v = -v; }
+          if (v == 0) td[ti++] = '0';
+          while (v > 0 && ti < 11) { td[ti++] = (char)('0' + (v % 10)); v /= 10; }
+          while (ti > 0 && pi < 40) pb[pi++] = td[--ti];
+        }
+        const char *pmid = " pipe 0x";
+        while (*pmid && pi < 50) pb[pi++] = *pmid++;
+        {
+          static const char hx[] = "0123456789ABCDEF";
+          uint64_t v = (uint64_t)p;
+          for (int sh = 60; sh >= 0 && pi < 66; sh -= 4)
+            pb[pi++] = hx[(v >> sh) & 0xF];
+        }
+        const char *pend = " reader_count is 0\n";
+        while (*pend && pi < 94) pb[pi++] = *pend++;
+        pb[pi] = 0;
+        uart_puts(pb);
       }
       if (signal_epipe(cur ? process_group(cur) : 0)) {
         /* Default disposition: the writer's group was just killed and its
