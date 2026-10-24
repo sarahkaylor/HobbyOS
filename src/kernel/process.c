@@ -3007,6 +3007,17 @@ static jmp_buf scheduler_return_ctx[MAX_CPUS];
  * process runs; drives the [IDLESTUCK] diagnostic in the idle loop. */
 static int sched_idle_rounds;
 static int last_idlestuck_div;
+/* GB-057 (Coordinator, 2026-10-24): the counter above is GLOBAL, so with 8 CPUs
+ * it measures "how much idle the machine has seen", not "how long THIS CPU has
+ * been idle".  The wedge this card tracks showed two CPUs holding claims (c2,
+ * c6) that never appeared in any [IDLESTUCK] dump while six others dumped
+ * repeatedly -- and because the counter is shared, a reader cannot tell from
+ * the serial whether those two CPUs were idle-but-not-dumping or never idle at
+ * all.  This per-CPU shadow fixes the reading without touching any scheduling
+ * decision: it is incremented in the idle loop, reset where the global resets,
+ * and printed in the claims line.  A CPU claimed to a process with a small
+ * per-CPU count is a CPU that never came back to idle. */
+static volatile int sched_idle_rounds_cpu[MAX_CPUS];
 /* GB-057: the same dump, for the quiet case -- a wave that ends with nothing
    reclaimable and no state change.  Separate divisor so the two rate limits do
    not consume each other. */
@@ -3212,6 +3223,7 @@ void start_scheduler(void) {
         set_current_process_pid(cpu, i);
         proc_table[i].state = PROC_STATE_RUNNING;
         sched_idle_rounds = 0;
+        if (cpu >= 0 && cpu < MAX_CPUS) sched_idle_rounds_cpu[cpu] = 0;
         /* GB-057: work was found, so this idle stretch is over -- reset the
            quiet-dump divider with it.  Without this the divider (which is only
            meaningful within one stretch) survives the reset, so a long run
@@ -3341,6 +3353,7 @@ void start_scheduler(void) {
        forever, so without the heartbeat the reaper would never reclaim
        its RUNNING process and every CPU would IDLESTUCK-cycle forever. */
     sched_idle_rounds++;
+    { int _c = (int)get_cpuid(); if (_c >= 0 && _c < MAX_CPUS) sched_idle_rounds_cpu[_c]++; }
     int acted = 0;   /* w5 (v): this pass RECLAIMED or DISPOSED a slot */
     if (sched_idle_rounds >= 500) {
       uint64_t wflags = spinlock_acquire_irqsave(&proc_lock);
@@ -3648,12 +3661,20 @@ void start_scheduler(void) {
         }
       }
       uart_puts("[IDLESTUCK] claims:");
+      /* GB-057: `c<N>=<pid>/<idle_rounds>`.  The second field is this CPU's own
+         idle-round count, so a claim held by a CPU that never returns to idle
+         is visible at a glance: a small count beside a live pid means that CPU
+         stopped idling, i.e. it is spinning somewhere with the claim pinned. */
       for (int c = 0; c < MAX_CPUS; c++) {
         uart_puts(" c");
         print_int(c);
         uart_puts("=");
         print_int(cpu_current_pids[c]);
+        uart_puts("/");
+        print_int(sched_idle_rounds_cpu[c]);
       }
+      uart_puts(" lock_owner=");
+      print_int((int)proc_lock.owner);
       uart_puts("\n");
       spinlock_release_irqrestore(&proc_lock, dflags);
     }
