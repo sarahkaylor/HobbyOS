@@ -69,6 +69,11 @@ extern "C" {
   void print_hex(long val);
   void print_dec(long val);
   void exit(int status);
+  /* GB-094: flush buffered (incomplete) stdout to the console now.  Newline-less
+   * prompts (sh's "$ ") call this before blocking on read so the prompt is
+   * visible even though nothing has a newline yet.  Device builds line-buffer
+   * fd 1; host builds are already immediate (no-op). */
+  void hb_stdout_flush(void);
   int fork(void);
 
   int kill(int pid, int sig);
