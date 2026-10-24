@@ -19,6 +19,9 @@ extern spinlock_t proc_lock;
  */
 void pipes_init(void) {
   spinlock_init(&pipes_lock);
+#ifdef KERNEL_MODE_UNIT_TEST
+  lockdbg_register(&pipes_lock, "pipes_lock", LOCK_RANK_BACKEND); /* SEC-OBS-B */
+#endif
   for (int i = 0; i < MAX_GLOBAL_FILES / 2; i++) {
     pipes[i].reader_count = 0;
     pipes[i].writer_count = 0;

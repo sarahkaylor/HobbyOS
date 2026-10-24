@@ -2210,8 +2210,8 @@ static int apply_redirs(struct node *n, int *lin, int *lout, int *lerr) {
       fields_free(&f);
       continue;
     }
-    if (r->mode == 0) fd = open(fname, O_WRONLY | O_CREAT | O_TRUNC);
-    else if (r->mode == 1) fd = open(fname, O_WRONLY | O_CREAT | O_APPEND);
+    if (r->mode == 0) fd = open(fname, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    else if (r->mode == 1) fd = open(fname, O_WRONLY | O_CREAT | O_APPEND, 0644);
     else fd = open(fname, O_RDONLY);
     if (fd < 0) {
       out2("sh: cannot open ");

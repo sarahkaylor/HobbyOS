@@ -26,6 +26,14 @@
 
 static int fails;
 
+/* GB-086/GB-082: emit a single console line as ONE atomic write so the tag and
+ * its value (e.g. "elapsed_ms=NNN") cannot be shredded by other cores' output
+ * between character writes.  po_puts hands a NUL-terminated buffer to the
+ * console in one SYS_WRITE_CONSOLE call (same path as print_console). */
+static void po_puts(const char *s) {
+  print_console(s);
+}
+
 static void check(const char *name, int ok) {
   print_console("  POLLTST ");
   print_console(name);
@@ -157,7 +165,16 @@ static void test_timeout_accounting(void) {
   FD_ZERO(&rd);
   FD_SET(pfd[0], &rd);
   uint64_t t0 = now_ms();
+#ifdef POLLTST_BROKEN_SELECT
+  /* GB-086 negative control: a deliberately-broken select *returns immediately*
+   * instead of honoring the 100ms timeout (modelled honestly as a zero-timeout
+   * select: the fd stays unread and select comes straight back, ~0ms).  The
+   * >=85ms check must then FAIL — this proves the gate cannot be painted green
+   * by a broken select.  Built as POLLTSTBRK.BIN. */
+  int r = select(pfd[0] + 1, &rd, 0, 0, 0);
+#else
   int r = select(pfd[0] + 1, &rd, 0, 0, 100);
+#endif
   uint64_t elapsed = now_ms() - t0;
   check("empty pipe: select(timeout 100ms) == 0",
         r == 0 && !FD_ISSET(pfd[0], &rd));
@@ -168,10 +185,25 @@ static void test_timeout_accounting(void) {
    * timeout-ignoring one blocks until the deadlock rule fires). */
   check("timeout took >= 85ms and < 5000ms (elapsed seen)",
         elapsed >= 85 && elapsed < 5000);
-  if (elapsed < 85 || elapsed >= 5000) {
-    print_console("  POLLTST elapsed_ms=");
-    print_dec((long)elapsed);
-    print_console("\n");
+  /* GB-086/GB-082: always emit the measured elapsed so the distribution is
+   * quotable at every run (DoD: "prints elapsed_ms=<digits> on every run"),
+   * as ONE atomic console write so cross-core interleaving cannot shred the
+   * digits. */
+  {
+    char line[64]; int li = 0;
+    const char *tag = "  POLLTST elapsed_ms=";
+    while (*tag && li < 62) line[li++] = *tag++;
+    long ev = elapsed;
+    if (ev < 0) { line[li++] = '-'; ev = -ev; }
+    if (ev == 0) { line[li++] = '0'; }
+    else {
+      char tmp[16]; int ti = 0;
+      while (ev > 0 && ti < 15) { tmp[ti++] = (char)('0' + ev % 10); ev /= 10; }
+      while (ti > 0 && li < 62) line[li++] = tmp[--ti];
+    }
+    line[li++] = '\n';
+    line[li] = '\0';
+    po_puts(line);
   }
 
   close(pfd[0]);

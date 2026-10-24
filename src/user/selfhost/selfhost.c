@@ -275,7 +275,7 @@ int main(int argc, char **argv) {
    * create needs O_CREAT — file_open() returns ENOENT for a missing target
    * otherwise (create-on-open is no longer implicit). */
   unlink("/SRC/OUT.LOG");
-  log_fd = open("/SRC/OUT.LOG", O_CREAT);
+  log_fd = open("/SRC/OUT.LOG", O_CREAT, 0644);
   if (log_fd < 0) {
     log_fd = -1;
     emit("[SELFHOST] WARN out-log unavailable (open /SRC/OUT.LOG failed)\n");

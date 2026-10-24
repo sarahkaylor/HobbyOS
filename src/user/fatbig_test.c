@@ -45,7 +45,7 @@ void _start(void) {
   char chunk[4096];
 
   /* 1. Create through the kernel create path. */
-  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC);
+  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (fd < 0) {
     print_console("[FATBIG] FAIL open-create\n");
     exit(0);
@@ -92,7 +92,11 @@ void _start(void) {
     int bad = 0;
     for (int i = 0; i < rn; i++) {
       int p = TARGET - 4096 + i;
-      if ((chunk[i] & 0xFF) != (char)((p >> 8) ^ (p & 0xFF))) bad++;
+      /* GB-062: compare as unsigned bytes. `(char)` is signed on x86_64 and
+     unsigned on ARM, so the original comparison sign-extended every pattern
+     byte with bit 7 set (exactly half the tail) and never matched -- which is
+     the whole of the intel-only `bad = 0x800`, not a block-device fault. */
+    if ((unsigned char)chunk[i] != (unsigned char)((p >> 8) ^ (p & 0xFF))) bad++;
     }
     check("tail checksum clean", bad, 0);
   }

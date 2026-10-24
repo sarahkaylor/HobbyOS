@@ -174,7 +174,7 @@ static void run_cksum(const char *args, const char *stdin_data, char *out,
 }
 
 static void write_file(const char *path, const char *content) {
-  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC);
+  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (fd < 0) {
     print_console("[CKSUMTEST] cannot create ");
     print_console(path);
@@ -189,7 +189,7 @@ static void write_file(const char *path, const char *content) {
 /* Write UNIT repeated REPS times to PATH (keeps the 70 KB fixture off the
    stack and out of a single string literal). */
 static void write_pattern(const char *path, const char *unit, int reps) {
-  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC);
+  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   size_t len = strlen(unit);
   int i;
 
@@ -218,7 +218,7 @@ int main(void) {
   write_file("/CKSABC.TXT", "abc\n");               /* 4 bytes   */
   write_file("/CKSHELLO.TXT", "hello world\n");     /* 12 bytes  */
   {
-    int fd = open("/CKSALL.TXT", O_WRONLY | O_CREAT | O_TRUNC);
+    int fd = open("/CKSALL.TXT", O_WRONLY | O_CREAT | O_TRUNC, 0644);
     char bytes[256];
     int j;
     if (fd < 0) {

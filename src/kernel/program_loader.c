@@ -1,4 +1,5 @@
 #include "program_loader.h"
+#include "kline.h"
 #include "fs.h"
 #include "setjmp.h"
 #include "process.h"
@@ -464,15 +465,20 @@ static int v2_map_image(struct addr_space *as, struct file *f, uint32_t fsize) {
   if (pref != 0)
     uart_puts("v2 loader: first-page prefill failed (fault-fill path)\n");
 
-  uart_puts("v2 loader: image mapped (lazy), bytes=");
-  print_int((int)fsize);
-  uart_puts(" pages=");
-  print_int((int)(img_len / FRAME_SIZE));
-  uart_puts(" first=");
-  uart_puts(pref == 0 ? "in" : "lazy");
-  uart_puts(" elap=");
-  print_int((int)(timer_get_ms() - t_load0));
-  uart_puts("ms\n");
+  {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "v2 loader: image mapped (lazy), bytes=");
+    kl_i(&kl, (long)fsize);
+    kl_s(&kl, " pages=");
+    kl_i(&kl, (long)(img_len / FRAME_SIZE));
+    kl_s(&kl, " first=");
+    kl_s(&kl, pref == 0 ? "in" : "lazy");
+    kl_s(&kl, " elap=");
+    kl_i(&kl, (long)(timer_get_ms() - t_load0));
+    kl_s(&kl, "ms\n");
+    kl_emit(&kl);
+  }
   return 0;
 }
 
@@ -492,6 +498,11 @@ static int v2_map_image(struct addr_space *as, struct file *f, uint32_t fsize) {
    trap layers, which marshal the caller's pointers into the caller's slot
    while still in the caller's context; the spawn worker consumes it). */
 struct ho_spawn_ex spawn_ex_pool[MAX_PROCESSES];
+/* SEC-OBS-A (security-plan.md observation A): every pool indexed by raw
+ * pid must cover the whole PID space; catch any future shrink at compile
+ * time rather than as an out-of-bounds write in trap dispatch. */
+_Static_assert(sizeof(spawn_ex_pool) / sizeof(spawn_ex_pool[0]) >= MAX_PROCESSES,
+               "pid-indexed spawn_ex_pool must be at least MAX_PROCESSES");
 
 /* D4.1: apply the spawn_ex fd semantics to a freshly created child:
    (1) child fd table = parent copy (fs_reopen per open slot -- this is
@@ -751,10 +762,13 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
   }
 #endif
   uint64_t elf_entry = 0;
+  uint64_t elf_phdr = 0;
+  uint32_t elf_phnum = 0;
   if (is_elf) {
     /* ELF mapper: parse + plan + map.  On success *elf_entry = base+e_entry
        and the process below is marked PROC_FLAG_LINUX_ABI. */
-    int erc = elf_loader_load(as, f.fat16.entry.start_cluster, fsize, &elf_entry);
+    int erc = elf_loader_load(as, f.fat16.entry.start_cluster, fsize, &elf_entry,
+                              &elf_phdr, &elf_phnum);
     fat16_close(&f);
     if (erc != 0) {
       process_free(pid);
@@ -794,31 +808,109 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
   }
 
 #ifdef __x86_64__
+  /* GB-068 follow-on: the stack is a DEMAND-ZERO region (VM_MAP_PRIVATE with
+     phys 0, inserted above), so its pages exist logically but not physically.
+     enter_user_space copies the 296-byte initial frame into the user stack FROM
+     KERNEL MODE (`rep movsq` to gs:[24]-320), and a kernel-mode write cannot be
+     demand-paged -- there is no user trap to service. Measured: after fixing
+     target_sp to the real stack top, the frame copy faulted at CR2=0x17FFFFFED0
+     (the last page of the stack, 0x18 into the copy) and triple-faulted the CPU.
+     vm_touch materializes the pages so the kernel may write them directly, which
+     is exactly what this contract needs. The v1 path never hit this because it
+     maps the whole 32 MB region up front.
+     Touch a full page below the top: the frame window is [TOP-320, TOP). */
+  /* GB-068 follow-on 2: ONE page is not enough. -d int capture of the reset
+     showed the actual triple fault:
+       v=0e e=0002 i=0 cpl=0 IP=0008:700349ca SP=0010:17fffff9f0 CR2=17fffff9e8
+     IP 700349ca is `call get_cpuid` -- a CALL pushes its return address, and with
+     SP already at 0x17fffff9f0 the push writes exactly CR2. So the KERNEL was
+     running on the user stack, ~0x600 below the top, and descended onto a
+     demand-zero page it cannot fault in from CPL=0: #PF -> #DF -> triple fault ->
+     QEMU reboot. That is the 195-reboot loop.
+     The resume tail legitimately uses the user stack for the frame window and for
+     frames pushed before the iretq, so map the whole guard-sized span up front
+     rather than the single page the frame itself needs. USER_MAIN_STK_GUARD is
+     64 KiB and the region below it stays demand-zero. */
+  if (child->as &&
+      vm_touch(child, USER_MAIN_STK_TOP_V2 - USER_MAIN_STK_GUARD,
+               USER_MAIN_STK_GUARD, /*write=*/1) != 0) {
+    uart_puts("v2 loader: stack prefault failed\n");
+    process_free(pid);
+    return -ENOMEM;
+  }
   if (is_elf) {
     /* GB-013: the ELF mapper set the runtime entry (base+e_entry).  Mark the
        process Linux-ABI so its x86_64 syscall traps route to the compat table
-       (GB-014).  The startup stack (argc/argv/envp/auxv) is laid down by the
-       mapper's caller-side contract (docs/linux-abi.md §1) before first run;
-       here we only set PC/SP to the v2 stack top. */
+       (GB-014). */
     child->abi_flags |= PROC_FLAG_LINUX_ABI;
-    process_set_entry(pid, elf_entry, USER_MAIN_STK_TOP_V2 - 8);
+    /* GB-078 (2026-10-21): a Linux program reads its arguments from the STACK,
+       per the SysV AMD64 process-initialization contract: at _start %rsp points
+       at argc, with argv[], a NULL, envp[], a NULL, and the auxv pairs above it.
+       This kernel never wrote that block -- argv lived only in the PCB
+       (proc_set_argv_array), which a HobbyOS program reaches via sys_readargv and
+       a musl binary cannot see. Measured: a real static-pie probe entered at
+       USER_IMG_BASE+0x1c18 and faulted at VA=0x1800000008, i.e. %rsp+0x10 (the
+       argv[0] slot), in a HOLE -- eight bytes above the top of the stack region.
+       So: lay the block down and point %rsp at argc. The stack is already
+       prefaulted above, and vm_kwrite self-validates each page, so this is a
+       placement rather than an allocation. */
+    uint64_t stk_top = USER_MAIN_STK_TOP_V2;
+    const char *nm = child->name[0] ? child->name : "PROGRAM";
+    int nlen = 0;
+    while (nm[nlen]) nlen++;
+    uint64_t name_addr = (stk_top - 8 - (uint64_t)nlen) & ~(uint64_t)0xF;
+    /* argc, argv[0], argv NULL, envp NULL, AT_PAGESZ, 4096,
+       AT_PHDR, phdr, AT_PHNUM, phnum, AT_ENTRY, entry, AT_BASE, 0, AT_NULL, 0.
+       The first four pairs were the original block; musl's _start also reads
+       AT_PHDR/AT_PHNUM/AT_ENTRY to locate its own program headers, and with them
+       absent it dereferenced small offsets (measured: fault at VA=0x210). */
+    uint64_t w[16];
+    w[0] = 1;
+    w[1] = name_addr;
+    w[2] = 0;
+    w[3] = 0;
+    w[4] = 6;                       /* AT_PAGESZ */
+    w[5] = 4096;
+    w[6] = 3;                       /* AT_PHDR   */
+    w[7] = elf_phdr;
+    w[8] = 5;                       /* AT_PHNUM  */
+    w[9] = (uint64_t)elf_phnum;
+    w[10] = 9;                      /* AT_ENTRY  */
+    w[11] = elf_entry;
+    w[12] = 7;                      /* AT_BASE: 0 for a static image */
+    w[13] = 0;
+    w[14] = 0;                      /* AT_NULL */
+    w[15] = 0;
+    uint64_t blk = (name_addr - (uint64_t)sizeof w) & ~(uint64_t)0xF;
+    if (vm_kwrite(child, blk, w, (int)sizeof w) != 0 ||
+        vm_kwrite(child, name_addr, nm, nlen + 1) != 0) {
+      uart_puts("v2 loader: startup block write failed\n");
+      process_free(pid);
+      return -EFAULT;
+    }
+    process_set_entry(pid, elf_entry, blk);
   } else {
     process_set_entry(pid, USER_IMG_BASE, USER_MAIN_STK_TOP_V2 - 8);
   }
 #else
   process_set_entry(pid, USER_IMG_BASE, USER_MAIN_STK_TOP_V2);
 #endif
-  uart_puts("v2 loader: PID=");
-  print_int(pid);
-  uart_puts(" entry=");
-  uart_print_hex(is_elf ? elf_entry : USER_IMG_BASE);
-  uart_puts(" sp=");
-  uart_print_hex(USER_MAIN_STK_TOP_V2);
-  uart_puts(" resident=");
-  print_int((int)as->resident_frames);
-  uart_puts(" tables=");
-  print_int((int)as->table_frames);
-  uart_puts("\n");
+  {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "v2 loader: PID=");
+    kl_i(&kl, (long)pid);
+    kl_s(&kl, " entry=");
+    kl_hex(&kl, (unsigned long)(is_elf ? elf_entry : USER_IMG_BASE));
+    kl_s(&kl, " sp=");
+    kl_hex(&kl, (unsigned long)USER_MAIN_STK_TOP_V2);
+    kl_s(&kl, " resident=");
+    kl_i(&kl, (long)as->resident_frames);
+    kl_s(&kl, " tables=");
+    kl_i(&kl, (long)as->table_frames);
+    kl_s(&kl, "\n");
+    kl_emit(&kl);
+  }
 
   /* L9 (prefetch): with the process runnable (process_set_entry above),
      hand the rest of a large image to a background loader kernel task.
@@ -834,8 +926,18 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
 int load_and_run_program_v2(const char* filename, int stdin_fd,
                             int stdout_fd, int stderr_fd, int caller_pid,
                             const char *args) {
+  /* GB-072 remainder / GB-067 unblocker: one arrival line per wave program.
+   * A program that runs and a program that never loaded are otherwise the same
+   * console silence, which is what made earlier re-stage probes unreadable.
+   * Printed before and after the load so a failure to arrive is visible too. */
+  uart_puts("[WAVE-TRY] ");
+  uart_puts(filename ? filename : "(null)");
+  uart_puts("\n");
   int r = load_v2_internal(filename, stdin_fd, stdout_fd, stderr_fd,
                            caller_pid, args, 0);
+  uart_puts("[ARRIVED] ");
+  uart_puts(filename ? filename : "(null)");
+  uart_puts(r < 0 ? " rc<0\n" : " rc>0\n");
   return r < 0 ? -1 : r;
 }
 

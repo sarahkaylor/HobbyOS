@@ -72,22 +72,14 @@ static void sys_write_console(struct trap_frame *tf) {
   uint64_t ptr = tf->regs[0];
   int len = (int)tf->regs[1]; /* WK-1 M3: honor the length */
   struct process *p = current_process();
-  int ret;
-  if (p && p->as)
-    ret = console_write_user(p, (const void *)ptr, len);
-  else {
-    /* No process context (kernel path): legacy range check, then emit at
-       most len bytes (NUL-stops before that — the buffer is kernel text). */
-    extern void uart_putc(char c);
-    const char *s = (const char *)ptr;
-    ret = 0;
-    if (ptr >= USER_VIRT_BASE && ptr < (USER_VIRT_BASE + USER_REGION_SIZE)) {
-      for (int i = 0; i < len && s[i]; i++)
-        uart_putc(s[i]);
-      ret = len;
-    }
-  }
-  tf->regs[0] = (uint64_t)ret;
+  /* SEC-2 (security-plan.md #2): the legacy no-context branch range-checked
+     the raw user pointer and then read it byte-by-byte in kernel mode,
+     assuming everything inside the window was a valid mapped buffer.  With
+     an address space present, console_write_user now validates AND copies
+     atomically per page (vm_user_read); without one there is nothing to
+     validate against, so reject instead of guessing. */
+  tf->regs[0] =
+      (uint64_t)(p ? console_write_user(p, (const void *)ptr, len) : -EFAULT);
 }
 
 static void sys_exit(struct trap_frame *tf) { process_exit(tf); }
@@ -730,7 +722,10 @@ struct sys_spawn_args {
   char args[HO_FLAT_ARGS_LEN]; /* w5 (vi): flat args cap 1024 */
 };
 
-static struct sys_spawn_args spawn_args_pool[64];
+/* SEC-OBS-A (security-plan.md observation A): indexed by caller->pid, so
+ * it MUST be at least the whole PID space; a hardcoded size silently goes
+ * out of bounds the day MAX_PROCESSES grows past it. */
+static struct sys_spawn_args spawn_args_pool[MAX_PROCESSES];
 
 extern void kernel_exit(void);
 
@@ -769,6 +764,13 @@ static void sys_spawn(struct trap_frame *tf) {
 
   if (sys_user_range_ok((uint64_t)filename, 1)) {
 
+    /* SEC-OBS-A: pid indexes spawn_args_pool; refuse a corrupt/out-of-range
+     * pid before writing through it. */
+    if (caller->pid < 0 || caller->pid >= MAX_PROCESSES) {
+      tf->regs[0] = -1;
+      return;
+    }
+
     struct sys_spawn_args *args = &spawn_args_pool[caller->pid];
 
     int i = 0;
@@ -798,6 +800,11 @@ static void sys_spawn(struct trap_frame *tf) {
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
     save_context(caller, tf);
     caller->spawn_retval = -1;  /* failure default until the worker reports */
+    {
+      extern uint64_t timer_get_ms(void);
+      /* GB-063: bound the parked wait -- see SPAWN_WAIT_BUDGET_MS. */
+      caller->spawn_deadline_ms = timer_get_ms() + SPAWN_WAIT_BUDGET_MS;
+    }
     caller->state = PROC_STATE_WAIT_SPAWN;
     spinlock_release_irqrestore(&proc_lock, flags);
 
@@ -919,6 +926,13 @@ static void sys_spawn_ex(struct trap_frame *tf) {
     return;
   }
 
+  /* SEC-OBS-A: pid indexes spawn_ex_pool; refuse a corrupt/out-of-range
+   * pid before writing through it. */
+  if (caller->pid < 0 || caller->pid >= MAX_PROCESSES) {
+    tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
+    return;
+  }
+
   struct ho_spawn_ex *ex = &spawn_ex_pool[caller->pid];
   int i = 0;
   while (path[i] && i < 31) {
@@ -947,6 +961,11 @@ static void sys_spawn_ex(struct trap_frame *tf) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   save_context(caller, tf);
   caller->spawn_retval = -EAGAIN; /* failure default until the worker reports */
+  {
+    extern uint64_t timer_get_ms(void);
+    /* GB-063: bound the parked wait -- see SPAWN_WAIT_BUDGET_MS. */
+    caller->spawn_deadline_ms = timer_get_ms() + SPAWN_WAIT_BUDGET_MS;
+  }
   caller->state = PROC_STATE_WAIT_SPAWN;
   spinlock_release_irqrestore(&proc_lock, flags);
 
@@ -1022,6 +1041,8 @@ extern void virtio_gpu_flush(void);
  * handed to the driver. */
 struct virtio_gpu_xrect { int32_t x, y, w, h; };
 extern void virtio_gpu_flush_rects(const struct virtio_gpu_xrect *rects, int count);
+extern int virtio_gpu_flush_args_ok(const struct virtio_gpu_xrect *rects,
+                                    int count); /* SEC-7 */
 extern void mmu_map_user_framebuffer(uint64_t phys_addr);
 
 static void sys_map_fb(struct trap_frame *tf) {
@@ -1086,8 +1107,20 @@ static void sys_flush_fb_rects(struct trap_frame *tf) {
     return;
   }
   struct virtio_gpu_xrect krects[32];
-  for (int i = 0; i < count; i++)
-    krects[i] = urects[i];
+  /* SEC-7: atomic validate+copy.  The old loop read user pages after a
+     separate range check (validate-then-use TOCTOU) and handed raw
+     attacker-shaped rects straight to the driver; vm_user_read validates
+     each page under vm_lock as it copies, and nothing reaches
+     virtio_gpu_flush_rects until it has passed boundary validation. */
+  if (vm_user_read(current_process(), (uint64_t)urects, krects,
+                   count * (int)sizeof(struct virtio_gpu_xrect)) != 0) {
+    tf->regs[0] = (uint64_t)-EFAULT;
+    return;
+  }
+  if (!virtio_gpu_flush_args_ok(krects, count)) {
+    tf->regs[0] = (uint64_t)-EINVAL;
+    return;
+  }
   virtio_gpu_flush_rects(krects, count);
   tf->regs[0] = 0;
 }
@@ -1238,23 +1271,26 @@ static void sys_rmdir(struct trap_frame *tf) {
  * w8-torture: validate PER PAGE, not the whole cap up front — a short
  * string near the TOP of a mapped region was dropped wholesale once the
  * w6-run cap bump made the full-range check reach past the region end
- * (mirror of pl_strcpy in program_loader.c). */
-static int u_strcpy(const char *src, char *dst, int cap) {
+ * (mirror of pl_strcpy in program_loader.c).
+ * SEC-3 (security-plan.md #3): the per-page validate-then-read split was a
+ * TOCTOU — between validating page N and reading src[i] a peer could unmap
+ * it, faulting the kernel-mode read.  vm_user_read now validates AND reads
+ * each byte atomically under vm_lock; only the current byte's page is ever
+ * touched, so the w8-torture property (short strings near a region top)
+ * still holds. */
+int u_strcpy(const char *src, char *dst, int cap) {
   if (!src || cap <= 1)
     return 0;
-  int i = 0;
-  for (;;) {
-    if (i >= cap - 1)
-      break;
-    if (!sys_user_range_ok(((uint64_t)&src[i]) & ~0xFFFULL, 1))
+  struct process *p = current_process();
+  for (int i = 0; i < cap - 1; i++) {
+    char c;
+    if (vm_user_read(p, ((uint64_t)&src[i]), &c, 1) != 0)
       return 0;
-    char c = src[i];
     dst[i] = c;
     if (c == 0)
       return 1;
-    i++;
   }
-  dst[i] = '\0';
+  dst[cap - 1] = '\0';
   return 1;
 }
 
@@ -1813,6 +1849,17 @@ void sync_handler_c(struct trap_frame *tf) {
  * syscall.  Any added arm/x64 syscall must append an else-if here. */
 
 void sync_lower_handler_c(struct trap_frame *tf) {
+  /* SEC-10 (security-plan.md #10): the kernel stacks are contiguous static
+     64 KiB per-CPU slices — an overflow faults nowhere, it corrupts the
+     adjacent core's stack or kernel data.  Refuse to run a handler when the
+     slice is already below the deepest-path margin; halt loudly instead of
+     continuing on a doomed stack. */
+  if (kernel_stack_low(8u * 1024u)) {
+    uart_puts("KERNEL PANIC: syscall entry with exhausted kernel stack (SEC-10)\n");
+    for (;;)
+      ;
+  }
+
   /* L9 liveness: any EL0->EL1 sync entry proves this core is executing,
      not wedged (syscall, page fault, or unknown-class trap alike).  A core
      running a long-lived user process spends huge stretches between
@@ -2049,6 +2096,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       uart_print_hex(far);
       uart_puts(" PC=");
       uart_print_hex(tf->elr);
+      uart_puts(" LR=");
+      uart_print_hex(tf->lr);
+      uart_puts(" FP=");
+      uart_print_hex(tf->regs[29]);
       uart_puts(" rw=");
       uart_puts(wnr ? "w" : "r");
       uart_puts(is_exec ? "x" : " ");
@@ -2155,7 +2206,24 @@ void sync_lower_handler_c(struct trap_frame *tf) {
  * @param tf Pointer to the trap frame representing the user state when the
  * interrupt occurred.
  */
+/* SEC-OBS-B debug hook: rank checks do not apply inside IRQ dispatch (see
+ * lock.h).  Wrapper keeps the asm-visible symbol; inner is the original
+ * handler body unchanged. */
+static void irq_dispatch_inner(struct trap_frame *tf);
+
 void irq_lower_handler_c(struct trap_frame *tf) {
+#ifdef KERNEL_MODE_UNIT_TEST
+  extern void lockdbg_irq_enter(void);
+  extern void lockdbg_irq_exit(void);
+  lockdbg_irq_enter();
+  irq_dispatch_inner(tf);
+  lockdbg_irq_exit();
+#else
+  irq_dispatch_inner(tf);
+#endif
+}
+
+static void irq_dispatch_inner(struct trap_frame *tf) {
   /* L9 liveness (mirrors x64 general_interrupt_handler -> watchdog_tick's
      refresh): EVERY IRQ entry — timer tick, virtio blk/net/input — proves
      this core is alive and dispatching.  Refresh the ownership heartbeat
@@ -2165,6 +2233,10 @@ void irq_lower_handler_c(struct trap_frame *tf) {
      cores.  Writes only; process.c owns the array. */
   extern uint64_t timer_get_ms(void);
   cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+
+  /* SEC-OBS-B: drain deferred lost-wakeup requests here rather than at
+   * the virtio-blk completion that raised them (see process.h). */
+  process_wake_all_drain();
 
   uint32_t intid = gic_acknowledge_interrupt();
 
