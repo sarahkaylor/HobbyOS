@@ -1,0 +1,9 @@
+=== t3_pollbrk (arm, T3_SMP=1): build + boot broken-select control ===
+=== tier exited 1 (its wave-floor FAIL for a 1-program manifest is expected) ===
+  halted=1 loaded=1 timeout_FAIL=1 elapsed0=1 failed=1 kfatal=0
+  sample:
+  POLLTST timeout took >= 85ms and < 5000ms (elapsed seen): FAIL
+  POLLTST elapsed_ms=0
+  POLLTST two ready pipes: ready count == 2, both fds set: PASS
+t3_pollbrk: PASS — broken-select control FAILed the >=85ms check (gate not paintable green).
+gate rc=0

@@ -1,0 +1,27 @@
+POLLTST.BIN
+[WAVE-TRY] POLLTST.BIN
+Loading program for scheduler (v2 AS): POLLTST.BIN
+/POLLTST.BIN
+======================POLLTST.BIN============================
+POLLTST: F1.2 select() readiness/timeout/blocking checks
+  POLLTST select(nfds > FD_SETSIZE) -> -1/EINVAL: PASS
+  POLLTST select(unopened fd) -> -1/EBADF: PASS
+  POLLTST select(0, NULL x3, 5ms) == 0: PASS
+  POLLTST empty pipe: select(read, 0) == 0 and mask cleared: PASS
+  POLLTST pipe with 1 byte queued: select(read, 0) == 1 and FD_ISSET: PASS
+  POLLTST the queued byte reads back: PASS
+  POLLTST pipe write end with space: select(write, 0) == 1: PASS
+  POLLTST filled the pipe exactly (PIPE_SIZE 512)[LKSTEST] PASS : PASS
+open second fixture  POLLTST 
+  POLLTST drained pipe: not readable again: PASS
+  POLLTST empty pipe: select(timeout 100ms) == 0: PASS
+  POLLTST timeout took >= 85ms and < 5000ms (elapsed seen): PASS
+  POLLTST elapsed_ms=2207
+  POLLTST two ready pipes: ready count == 2, both fds setno all-zero 8-byte window in the page: PASS
+  POLLTST reader-closed pipe: writable + except (POLLERR/HUP semantics): PASS
+[KERNEL] Process 37: POLLTST.BIN exited unexpectedly or gracefully.
+  POLLTST select(timeout < 0) blocks and wakes on data (child write)/IFCONFIG.BIN: PASS
+  POLLTST /IFCONFIG.BINthe blocking wait's byte reads back
+[KERNEL] Process 61: POLLTST.BIN exited unexpectedly or gracefully.
+T3_arm EXIT=1
+tier rc=1
