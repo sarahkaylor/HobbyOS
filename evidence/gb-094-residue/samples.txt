@@ -1,0 +1,6 @@
+[ARRIVED] [EXITPC] pid=35 last_user_pc=0x0
+[DEBUG] Before eret, tf->regs[0] = [DEBUG] Before eret, tf->regs[0] = 2835 ELR =  ELR = 0x00000010000022780x0000001000002238
+[ARRIVED] [ARRIVED] WC.BINSED.BIN rc>0
+[ARRIVED] PASTE.BIN[KERNEL] Process 32: CUT.BIN exited unexpectedly or gracefully.
+[ARRIVED] [ARRIVED] ICUSMK.BINTAC.BIN rc>0
+[ARRIVED] [ARRIVED] TAILGN.BINHEDGNU.BIN rc>0

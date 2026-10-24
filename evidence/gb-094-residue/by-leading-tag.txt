@@ -1,0 +1,7 @@
+obj/t3_094c.log  total=40
+    [ARRIVED]        17
+    [DEBUG]          12
+    [WAVE-TRY]        8
+    [ARP]             1
+    [KERNEL]          1
+    [WAITPID]         1
