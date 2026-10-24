@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 480s, log /tmp/gb096/obj/t3_intel.log) ===
+T3_intel: 18820 console lines, 95 FAIL lines, 5 user memory fault records across 5 processes, 84 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 480s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 95 FAIL line(s); first 20:
+2925:/TSORT.BIN[SIGTEST] FAIL waitpid returns the child got=32 want=4294964048
+3094:MMTEST FAIL COMM.BIN[ARRIVED] EXPAND.BIN rc<0
+3970:[SEDTEST] FAIL basic_s (stdout)
+4865:[SEDTEST] FAIL s_g (stdout)
+5079:  FPU_T torture-child: FAIL
+5648:[SEDTEST] FAIL s_2nd (stdout)
+5866:  FPU_T fork-inherit: FAIL
+5903:FPU_T FAILED: 2
+5914:/CKSNOPE.TXT[CMPTEST] FAIL EOF message on stderr
+5933:[CMPTEST] FAIL empty EOF message
+5941:[CMPTEST] FAIL missing file diagnostic
+5951:[CMPTEST] FAIL -i 4:0 skips prefix
+5957:[CMPTEST] FAIL - stdin EOF diagnostic
+5971:[CMPTEST] FAILURES: 5
+6120:UNEXPAND.BIN: [TEST] DIRECT-bultin-echo FAIL
+6327:[SEDTEST] FAIL s_p_n (stdout)
+6333:[TACTEST] FAIL missing file
+6339:[TACTEST] FAIL empty separator
+6351:[TACTEST] FAILURES: 4
+6852:[SEDTEST] FAIL amp (stdout)
+T3_intel EXIT=1
+BASE2_RC=1

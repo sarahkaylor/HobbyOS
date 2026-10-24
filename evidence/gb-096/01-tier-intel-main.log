@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log /tmp/gb096/obj/t3_intel.log) ===
+T3_intel: 57876 console lines, 227 FAIL lines, 31 user memory fault records across 20 processes, 85 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 2700s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 2 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 227 FAIL line(s); first 20:
+3169:[SIGTEST] FAIL waitpid returns the child got=13 want=4294964048
+3919:[SEDTEST] FAIL basic_s (stdout)
+4230:  FPU_T torture-child: FAIL
+4715:[SEDTEST] FAIL s_g (stdout)
+4816:  FPU_T fork-inherit: FAIL
+4869:FPU_T FAILED: 2
+5140:[SEDTEST] FAIL s_2nd (stdout)
+5794:[CMPTEST] FAIL EOF message on stderr
+5913:[CMPTEST] FAIL empty EOF message
+5953:[CMPTEST] FAIL missing file diagnostic
+6032:[CMPTEST] FAIL -i 4:0 skips prefix
+6036:[MD5TEST] FAILURES: 1
+6051:[CMPTEST] FAIL - stdin EOF diagnostic
+6094:[CMPTEST] FAILURES: 5
+6150:tab sizes must be ascending[TEST] DIRECT-ext-cat FAIL
+9400:[SIGTEST] FAIL waitpid returns the child got=32 want=4294964048
+9461:[SEDTEST] FAIL basic_s (stdout)
+10590:[SEDTEST] FAIL s_g (stdout)
+11377:/CKSPAT.TXT[SEDTEST] FAIL s_2nd (stdout)
+11695:[CMPTEST] FAIL EOF message on stderr
+INTEL_RC=141
