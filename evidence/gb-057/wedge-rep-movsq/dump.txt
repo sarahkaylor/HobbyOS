@@ -1,0 +1,12 @@
+  CPU5 rip=0x0000000070037326 pid=-1 age_ms=10 syscall=19
+  CPU6 rip=0x0000000070037326 pid=-1 age_ms=10 syscall=19
+  CPU7 rip=0x000000007003A31F pid=25 age_ms=588934
+[IDLESTUCK] claims: c0=-1/33505 c1=-1/33600 c2=-1/33603 c3=2/0 c4=-1/35569 c5=-1/38955 c6=-1/38495 c7=25/0 lock_owner=3 park_returns=0
+  CPU0 rip=0x0000000070037326 pid=-1 age_ms=0 syscall=19
+  CPU1 rip=0x0000000070037326 pid=-1 age_ms=9 syscall=19
+  CPU2 rip=0x0000000070037326 pid=-1 age_ms=9 syscall=2
+  CPU3 rip=0x000000007003A31F pid=2 age_ms=560073 syscall=8
+  CPU4 rip=0x0000000070037326 pid=-1 age_ms=9 syscall=19
+  CPU5 rip=0x0000000070037326 pid=-1 age_ms=9 syscall=19
+  CPU6 rip=0x0000000070037326 pid=-1 age_ms=9 syscall=19
+  CPU7 rip=0x000000007003A31F pid=25 age_ms=622355
