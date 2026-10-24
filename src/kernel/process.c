@@ -960,11 +960,33 @@ static int process_create_internal_ver(int ver) {
       static int slotflood_count;
       if (slotflood_count < 3) {
         slotflood_count++;
-        uart_puts("[KERNEL] process_create: no free process slots! zombies=");
-        print_int(zombies);
-        uart_puts(" exited=");
-        print_int(exited);
-        uart_puts("\n");
+        /* GB-082: ONE uart_puts for the whole record.  Five separate calls let a
+           peer CPU's output land between them and fuse two records on one line:
+             [KERNEL] process_create: no free process slots! zombies=[LKSTEST] PASS fstat S_ISREG
+           uart_puts holds uart_lock for the whole string, so build first, emit once. */
+        char sb[64];
+        int si = 0;
+        const char *spre = "[KERNEL] process_create: no free process slots! zombies=";
+        while (*spre && si < 52) sb[si++] = *spre++;
+        int vals[2];
+        vals[0] = zombies;
+        vals[1] = exited;
+        for (int k = 0; k < 2; k++) {
+          char td[12];
+          int ti = 0;
+          int v = vals[k] < 0 ? -vals[k] : vals[k];
+          if (vals[k] < 0 && si < 60) sb[si++] = '-';
+          if (v == 0) td[ti++] = '0';
+          while (v > 0 && ti < 11) { td[ti++] = (char)('0' + (v % 10)); v /= 10; }
+          while (ti > 0 && si < 60) sb[si++] = td[--ti];
+          if (k == 0) {
+            const char *sep = " exited=";
+            while (*sep && si < 60) sb[si++] = *sep++;
+          }
+        }
+        sb[si++] = '\n';
+        sb[si] = 0;
+        uart_puts(sb);
       }
       return -1;
     }
