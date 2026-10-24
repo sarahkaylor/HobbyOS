@@ -1,0 +1,2 @@
+7711:[SEDTEST] FAIL s_p_n (stdout)
+7742:[TSORTTEST] FAIL cycle from stdin names '-'[WAVE-TRY]  (exit status /TEST3.TXTv2 loader: image mapped (lazy), bytes=108248 pages=27 first=in elap=0ms
