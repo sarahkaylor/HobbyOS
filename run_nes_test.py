@@ -14,17 +14,24 @@ to the other pinned games). Needs a built boot image (`make disk.img`).
 Usage: ARCH=arm python3 run_nes_test.py   (ARCH in {arm, intel})
 Result: exit 0 on success.
 """
-import json, os, re, socket, subprocess, sys, time
+import json, os, re, socket, subprocess, sys, tempfile, time
 
-ROOT = os.environ.get("HOBBYOS_ROOT",
-                      "/home/sarah/Documents/GitHub/HobbyOS/.worktrees/wgames-gb035")
+# Default to THIS checkout (the script lives at the repo root), not the worktree it
+# was authored in: the old default was an absolute path into
+# .worktrees/wgames-gb035, so the harness could not run anywhere else — it failed
+# with FileNotFoundError on a clean clone and would have failed in the gate too.
+ROOT = os.environ.get("HOBBYOS_ROOT", os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
 print(f"[TEST] HOBBYOS_ROOT={ROOT}", flush=True)
 ARCH = os.environ.get("ARCH", "arm")
 W, H = 1920, 1080
-SHOT_DIR = "/tmp/hobbyos_nes"
-SER = "/tmp/nes_test_serial.log"
-QMP = "/tmp/qmp-nes-test"
+# Per-run scratch under TMPDIR: fixed /tmp names let two concurrent runs corrupt
+# each other (the GB-085 defect class), and $TMPDIR is where the fleet expects
+# scratch to land.
+_RUN = tempfile.mkdtemp(prefix="hobbyos_nes_", dir=os.environ.get("TMPDIR") or None)
+SHOT_DIR = os.path.join(_RUN, "shots")
+SER = os.path.join(_RUN, "serial.log")
+QMP = os.path.join(_RUN, "qmp")
 MAX_WAIT_S = 30
 TASKBAR_Y = H - 26
 # NES buffer is 256x240 at 4x = 1024x960, centred on 1920x1080:
