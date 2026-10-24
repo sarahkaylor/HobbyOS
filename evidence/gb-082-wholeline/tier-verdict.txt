@@ -1,0 +1,11 @@
+=== T3 (arm): build ===
+=== T3 (arm): run (deadline 1800s, log /home/sarah/Documents/GitHub/HobbyOS/obj/t3_arm_fixed.log) ===
+T3_arm: note — halt marker found after make exited (poll raced the exit)
+T3_arm: 25473 console lines, 5 FAIL lines, 5 user memory fault records across 4 processes, 84 programs exited, halted=1
+T3_arm: FAIL — 5 FAIL line(s); first 20:
+2292:[MD5TEST] FAIL abc digest
+5257:[CMPTEST] FAIL identical files
+5313:[CMPTEST] FAILURES: 1
+5979:[FOLDTEST] PASS [MD5TEST] FAILURES: empty file[KERNEL] Process 4: CUT.BIN exited unexpectedly or gracefully.
+14515:SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST. Process table:
+T3_arm EXIT=1
