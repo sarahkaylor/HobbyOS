@@ -608,6 +608,13 @@ static void sys_poll(struct trap_frame *tf) {
     }
     save_context(caller, tf);
     schedule(tf, 0);
+    /* GB-057 diagnostic: reaching here means schedule() returned WITHOUT a
+       switch, so the trap handler will fall through with elr still on the
+       syscall and re-execute poll in kernel context, never idling.  Counted,
+       not fixed, here -- see the comment on poll_park_returns.  (Deliberately
+       no return-value assignment: changing what a park returns is a behaviour
+       change and belongs with the fix, once the counter says the loop is real.) */
+    { extern int poll_park_returns; poll_park_returns++; }
   } else {
     tf->regs[0] = (uint64_t)r;
   }
