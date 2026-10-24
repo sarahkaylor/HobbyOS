@@ -1382,10 +1382,6 @@ volatile int scheduler_started = 0;
  */
 /* GB-057: defined below the idle loop; declared here because the switch paths
    above call them.  See resume_target_unmapped() for what they report. */
-static int resume_target_unmapped(struct process *p, uint64_t target_sp, int user_frame);
-static int tf_is_user_frame(const struct trap_frame *tf);
-static void report_resume_target(int pid, uint64_t target_sp);
-
 void schedule(struct trap_frame *tf, int is_yield) {
   if (!scheduler_started) return;
 
@@ -1665,8 +1661,6 @@ void schedule(struct trap_frame *tf, int is_yield) {
       process_signal_resume_deliver(&proc_table[next], &local_tf);
 
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
-      if (resume_target_unmapped(&proc_table[next], target_sp, tf_is_user_frame(&local_tf)))
-        report_resume_target(proc_table[next].pid, target_sp);
       enter_user_space(&local_tf, target_sp);
       /* GB-060 (cheap half): a resume call that returns is a defect --
          enter_user_space iretqs into the target and must never come back.  The
@@ -3011,62 +3005,6 @@ struct process *process_get_pcb(int pid) {
 
 static jmp_buf scheduler_return_ctx[MAX_CPUS];
 
-/* GB-057 (Coordinator, 2026-10-24): name an unmappable resume target BEFORE the
- * switch copies the frame onto it.  The wedge this card tracks is a pair of CPUs
- * parked forever at the `rep movsq` inside enter_user_space, which copies the
- * 296-byte frame to [target_sp-320, target_sp).  A rep-string instruction that
- * stores into an absent page faults, and the fault path re-executes it, so the
- * copy restarts forever and the CPU never returns: claim pinned, process still
- * at its entry point, per-CPU idle count frozen (measured: both stuck CPUs at
- * the same address inside enter_user_space, `park_returns=0`, `proc_lock` free).
- *
- * Printing the victim from the scheduler turns that silence into a record: pid,
- * target_sp and the destination range that failed the mapping test.  This is a
- * DIAGNOSTIC -- it does not refuse the switch, because refusing changes when a
- * process dies and that decision belongs with the fix, not with the instrument.
- * Returns 1 when the destination is not mapped writable in the target's AS. */
-static int tf_is_user_frame(const struct trap_frame *tf) {
-#ifdef __x86_64__
-  return (tf->cs & 3) == 3;
-#else
-  return (tf->spsr & 0xF) == 0;   /* EL0t: a user frame */
-#endif
-}
-
-static int resume_target_unmapped(struct process *p, uint64_t target_sp, int user_frame) {
-  if (!p || p->is_kernel_process) return 0;
-  /* enter_user_space branches on the FRAME's mode, not on the process kind: a
-     process blocked inside a syscall resumes through the kernel-mode path,
-     which copies to the task's own stack and never touches target_sp.  Checking
-     the user destination for those frames fires on every parked syscall
-     (measured: 5,480 lines in one run, with target_sp=0) and says nothing. */
-  if (!user_frame) return 0;
-  if (target_sp < 320) return 1;
-  return !vm_range_ok(p, target_sp - 320, 320, 1);
-}
-
-static void report_resume_target(int pid, uint64_t target_sp) {
-  /* One uart_puts for the whole record: the multi-call version interleaved with
-     other CPUs and produced unreadable lines (the defect GB-082 tracks). */
-  char lb[160];
-  int li = 0;
-  const char *pre = "[RESUME-UNMAPPED] pid=";
-  while (*pre && li < 140) lb[li++] = *pre++;
-  char tmp[20]; int ti = 0;
-  int v = pid;
-  if (v == 0) tmp[ti++] = '0';
-  while (v > 0 && ti < 19) { tmp[ti++] = (char)('0' + (v % 10)); v /= 10; }
-  while (ti > 0 && li < 148) lb[li++] = tmp[--ti];
-  const char *mid = " target_sp=0x";
-  while (*mid && li < 150) lb[li++] = *mid++;
-  for (int sh = 60; sh >= 0 && li < 158; sh -= 4)
-    lb[li++] = "0123456789abcdef"[(int)((target_sp >> sh) & 0xF)];
-  const char *tail = " (user frame; enter_user_space copies onto target_sp-320)\n";
-  while (*tail && li < 158) lb[li++] = *tail++;
-  lb[li] = 0;
-  uart_puts(lb);
-}
-
 /* Consecutive scheduler idle rounds with no READY process.  Reset when a
  * process runs; drives the [IDLESTUCK] diagnostic in the idle loop. */
 static int sched_idle_rounds;
@@ -3365,8 +3303,6 @@ void start_scheduler(void) {
         process_signal_resume_deliver(&proc_table[i], &local_tf);
 
         extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
-        if (resume_target_unmapped(&proc_table[i], target_sp, tf_is_user_frame(&local_tf)))
-          report_resume_target(proc_table[i].pid, target_sp);
         enter_user_space(&local_tf, target_sp);
 
         /* Same rule as schedule()'s resume boundary: if this returns, the CPU
