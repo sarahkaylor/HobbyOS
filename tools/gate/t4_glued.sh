@@ -1,98 +1,133 @@
 #!/usr/bin/env bash
-# tools/gate/t4_glued.sh — GB-082 glued-console-line counter.
+# tools/gate/t4_glued.sh — GB-082 glued-console-line counter (v2, GB-092).
 #
 # A "glued console line" is one serial line carrying output from TWO different
-# writers with no separ~-newline between them — the observable of non-atomic
+# writers with no separator-newline between them — the observable of non-atomic
 # console writes.  Measured (2026-10-23): the intel full-wave serial contains
 # lines like `21 [NLTEST] PASS UNEXPAND.BINmulti-file numbering/COMM.TXT
 # CMPTEST.BIN` — two programs' records fused on one line — so writes are
 # per-call atomic but not whole-line atomic.
 #
-# This gate COUNTS glued lines in a captured serial log and FAILs (exit 1) when
-# any exist, because a tier that gets interleaved records cannot cleanly
-# attribute a FAIL to the tag in front of it (the DoD's third clause).  It is
-# the instrument the ticket names; the kernel whole-line-atomicity fix is the
-# other half (gated on the counter, exactly like GB-079's two halves).
+# v2 (GB-092): v1 counted its OWN syntax as a defect.  P1's `\[[A-Za-z0-9_-]+\]`
+# treated the array subscript in `tf->regs[0]` as a second bracketed RECORD TAG,
+# so a SINGLE record line
+#     [DEBUG] Before eret, tf->regs[0] = 13 ELR = 0x...
+# was counted glued.  Of ARM's 417 "glued" lines, 379 were this [0]-subscript
+# false positive.  The discriminating rule (per the GB-092 dispatch):
 #
-# Detection rule — a serial line is "glued" if it contains TWO OR MORE
-# distinct bracketed record tags, i.e. 2+ matches of [TAG_PREFIX] in
-# identifiable record-start positions, OR text fuses two records with no
-# newline (a soft separator like "multi-file" appearing mid-line after a tag's
-# output).  Concretely we count two predicates and require 0 total:
-#   P1: 2+ distinct `[...]` tags on one line (e.g. [KERNEL]...[KERNEL]).
-#   P2: one tag followed (not after whitespace) by a second record start, seen
-#       as `]<letter>` or `]0x` immediately after a closing bracket mid-line.
-# Both are host-cheap greps; the DoD's "can-fail self-test" uses a synthetic
-# fixture with a known glued line and a known clean one.
+#   A RECORD TAG is a LETTER-LED bracketed identifier — [KERNEL], [WAVE-TRY],
+#   [ARRIVED], [ALIVE-SET], ...  An array subscript ([0],[1],...) is DIGIT-led
+#   and is NOT a tag.
+#
+# Two fused-writer shapes are counted:
+#   P1  two+ letter-led record tags on one line
+#       ([ARRIVED] ... [ALIVE-SET], [WAVE-TRY][ALIVE-SET], ...)
+#   P2  a letter-led record tag that is NOT at a record start — immediately
+#       preceded by non-space text from another writer (BLKTEST.BIN[ARRIVED],
+#       HEL[ARRIVED]...,  ...]X.BIN[KERNEL]...).  A lone [0] subscript never
+#       triggers this because it is digit-led and so is not a record tag.
+#
+# We report TWO numbers:
+#   raw     the v1 superset: any line with 2+ bracketed items (record tags OR
+#           [0]-style subscripts) OR any 1-bracket fusion.  Retained for
+#           continuity; includes the [0]-subscript FPs v1 miscounted.
+#   genuine the GB-092 measurement: only record-tag fusions (P1+P2 above).
+# GB-082's DoD is graded on the GENUINE count (dispatch rule: publishing both,
+# and grading on the genuine one, is the fix — never making the number fall).
 #
 # Env: T4_SERIAL   path to the serial log to scan (default obj/t3_<arch>.log)
-# Arg: <log>       same, and it WINS over T4_SERIAL.  (Coordinator 2026-10-23:
-#                  argv used to be ignored, so `t4_glued.sh some/log` silently
-#                  scanned the default path — and a missing file counted 0.)
+# Arg: <log>       same, and it WINS over T4_SERIAL.
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SERIAL="${1:-${T4_SERIAL:-$ROOT/obj/t3_intel.log}}"
 
-# --- counter ---------------------------------------------------------------
-count_glued() { # $1 log -> prints count
+# --- core detector (awk) ------------------------------------------------------
+# Per line, classify every bracketed token: letter-led = record tag, digit-led =
+# subscript.  Emit two flags:
+#   fused_any  = 2+ bracketed tokens, OR any token (tag or subscript) not at a
+#                record start (preceded by non-space text) => raw superset
+#   fused_tag  = 2+ record tags, OR a record tag not at a record start => genuine
+# At-EOF, print both totals as "raw genuine".
+AWK_PROG='
+function scanline(line,   n,i,ch,pre,presp,tok,is_tag,ntags,nbr,anyfl_tag,anyfl_br,fl) {
+  n=0
+  while (match(line, /\[[A-Za-z0-9_][A-Za-z0-9_-]*\]/)) {
+    tok=substr(line,RSTART,RLENGTH)
+    ch=substr(tok,2,1)
+    is_tag=(ch ~ /[A-Za-z]/)
+    pre=(RSTART>1)?substr(line,RSTART-1,1):""
+    presp=(pre=="" || pre ~ /[[:space:]]/)
+    # fusion: this token is not at a record start
+    jo=!presp
+    if (is_tag) { ntags++; if (jo) anyfl_tag=1 }
+    if (jo) anyfl_br=1
+    nbr++
+    line=substr(line,RSTART+RLENGTH)
+  }
+  fused_any = (nbr>=2 || anyfl_br) ? 1 : 0
+  fused_tag = (ntags>=2 || anyfl_tag) ? 1 : 0
+}
+{
+  scanline($0)
+  R += fused_any
+  G += fused_tag
+}
+END { print R, G }
+'
+
+detect() { # $1 log -> prints "raw genuine" on one line
   local log="$1"
-  # An ABSENT log is not a clean log: the caller decides (see the real gate).
   [ -f "$log" ] || return 1
-  local l1 l2
-  # P1: 2+ distinct bracketed tags on one line (dedupe within the line).
-  l1=$(grep -aE '\[[A-Za-z0-9_-]+\].*\[[A-Za-z0-9_-]+' "$log" \
-         | grep -avc 'STACK\[' || true)
-  # P2: a record end fused straight into another (no whitespace): `]<LETTER`
-  # or `]0x` mid-line — the classic two-writers-one-line fusion.
-  l2=$(grep -aE '\][A-Za-z0-9_].*\[[A-Za-z0-9_-]+\]' "$log" \
-         | grep -avc 'STACK\[' || true)
-  echo $(( ${l1:-0} + ${l2:-0} ))
+  awk "$AWK_PROG" "$log"
 }
 
-# --- self-test -------------------------------------------------------------
+# --- self-test ---------------------------------------------------------------
 if [ "${1:-}" = "--self-test" ]; then
   TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-  # (a) a glued line — two writers' records fused on one line (measured shape:
-  #     `[ARRIVED] [TEST] 'help'...` and `[WAVE-TRY][ALIVE-SET]` both appear in
-  #     the real intel serial, i.e. two distinct bracket tags back-to-back).
+  # (a) genuinely glued — two RECORD tags fused on one line.
   cat >"$TMP/glued" <<'EOF'
 [ARRIVED] [TEST] 'help' output validated successfully.
 [WAVE-TRY] [ALIVE-SET] no READY work
-[KERNEL] pid=28 memory fault VA=0x17FFFFFE5C
-[ARRIVED] /BLKT2.TXT
 EOF
-  # (b) a clean line — one tag per line.
+  # (b) CLEAN — one record tag per line, INCLUDING the v1-false-positive
+  # /regs[0]/ shape that GB-092 demotes (a single [DEBUG] record whose body
+  # carries an array subscript is NOT glued).
   cat >"$TMP/clean" <<'EOF'
 [MD5TEST] PASS multi-file order
+[DEBUG] Before eret, tf->regs[0] = 13 ELR = 0x0000001000002A78
 [KERNEL] pid=3 exited gracefully
 [ARRIVED] HELLO.BIN
 EOF
-  cg=$(count_glued "$TMP/glued")
-  cc=$(count_glued "$TMP/clean")
-  echo "self-test: glued fixture count=$cg (want >0), clean fixture count=$cc (want 0)"
-  # (c) an ABSENT log must NOT be a pass — the defect class this gate exists for.
+  # (c) injected two-writer fusions exactly as the DoD names them.
+  printf 'HEL[ARRIVED] X.BIN\n' >"$TMP/fusion"
+  printf '  PASS [WAVE-TRY]  CXXSMOKE.BIN[KERNEL] process_create\n' >"$TMP/fusion2"
+  cg=$(detect "$TMP/glued"); cc=$(detect "$TMP/clean")
+  cf=$(detect "$TMP/fusion"); cf2=$(detect "$TMP/fusion2")
+  echo "self-test: glued=[$cg] clean=[$cc] fusion=[$cf] fusion2=[$cf2] (want glue>0 / 0,0 / >=1 / >=1)"
   T4_MISSING_RC=0
   bash "${BASH_SOURCE[0]}" "$TMP/does_not_exist.log" >"$TMP/missing.out" 2>&1 || T4_MISSING_RC=$?
-  echo "self-test: absent-log exit=$T4_MISSING_RC (want non-zero): $(tail -1 "$TMP/missing.out")"
-  [ "${cg:-0}" -gt 0 ] && [ "${cc:-1}" = "0" ] && [ "$T4_MISSING_RC" != "0" ] && {
-    echo "self-test: OK — counter can fail, stays 0 on clean, and refuses a missing log"; exit 0; }
+  echo "self-test: absent-log exit=$T4_MISSING_RC (want non-zero)"
+  g1=$(echo "$cg"|awk '{print $2}'); c1=$(echo "$cc"|awk '{print $2}')
+  f1=$(echo "$cf"|awk '{print $2}'); f21=$(echo "$cf2"|awk '{print $2}')
+  [ "${g1:-0}" -gt 0 ] && [ "${c1:-9}" = "0" ] && [ "${f1:-0}" -ge 1 ] && [ "${f21:-0}" -ge 1 ] && [ "$T4_MISSING_RC" != "0" ] && {
+    echo "self-test: OK — genuine FAILs on glue, 0 on clean (incl [0]-subscript single records), catches injected fusions, refuses a missing log"; exit 0; }
   echo "self-test: FAIL"; exit 1
 fi
 
-# --- real gate -------------------------------------------------------------
+# --- real gate ---------------------------------------------------------------
 if [ ! -f "$SERIAL" ]; then
-  echo "t4_glued: FAIL (exit 2) — serial log '$SERIAL' absent. A missing log is not a"
-  echo "          clean log: 0 glued lines cannot be measured over nothing."
+  echo "t4_glued: FAIL (exit 2) — serial log '$SERIAL' absent. A missing log is not a clean log: 0 glued lines cannot be measured over nothing."
   exit 2
 fi
-g=$(count_glued "$SERIAL") || { echo "t4_glued: FAIL (exit 2) — cannot read '$SERIAL'"; exit 2; }
-echo "t4_glued: $g glued console lines in '$SERIAL'"
-if [ "$g" = "0" ]; then
+DG=$(detect "$SERIAL") || { echo "t4_glued: FAIL (exit 2) — cannot read '$SERIAL'"; exit 2; }
+RAW=$(echo "$DG"|awk '{print $1}')
+GEN=$(echo "$DG"|awk '{print $2}')
+echo "t4_glued: raw=$RAW genuine=$GEN glued lines in '$SERIAL'"
+echo "          (GB-092: GB-082 DoD is graded on the GENUINE count; RAW is the v1"
+echo "           superset incl. [0]-array-subscript single records v1 misread.)"
+if [ "$GEN" = "0" ]; then
   echo "t4_glued: PASS — every console line is a single writer (whole-line atomic)."
   exit 0
 fi
-echo "t4_glued: FAIL — $g glued lines (writes not whole-line atomic); the next"
-echo "          GB-057 FAIL-attribution ratio cannot be trusted until this is 0."
-echo "  sample glued lines:"
-grep -aE '\[[A-Za-z0-9_]+\].*\[[A-Za-z0-9_]+' "$SERIAL" 2>/dev/null | grep -av 'STACK\[' | head -3
+echo "t4_glued: FAIL — $GEN genuine glued lines (writes not whole-line atomic)."
 exit 1
