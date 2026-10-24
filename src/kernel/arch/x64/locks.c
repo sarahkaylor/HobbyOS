@@ -119,6 +119,20 @@ void spinlock_acquire(spinlock_t *lock) {
            answer.  Measured need: a 4-minute stall in mmu_switch_user_mapping
            with two CPUs spinning on mmu_lock and nothing naming the holder. */
         scream_dec(" owner=", (int)lock->owner);
+        /* GB-057: the owner's heartbeat age decides whether [STALLBREAK] will
+           ever fire.  lock_stallbreak_ok() refuses when hb == 0 ("never seen
+           alive"), so a CPU that took this lock before its first timer IRQ can
+           strand every other CPU with no break and no explanation.  Printing the
+           age (or -1 for "never seen") makes that visible in the same record. */
+        {
+          uint32_t own_cpu = lock->owner;
+          int hb_age = -1;
+          if (own_cpu >= 1 && own_cpu - 1 < MAX_CPUS) {
+            uint64_t hb = cpu_heartbeat_ms[own_cpu - 1];
+            if (hb != 0) hb_age = (int)(timer_get_ms() - hb);
+          }
+          scream_dec(" owner_hb_age=", hb_age);
+        }
         scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
         scream_hex(" pc2=", (uint64_t)__builtin_return_address(1));
         uart_putc_raw('\n');
