@@ -252,16 +252,39 @@ static int arp_resolve(uint32_t ip, uint8_t* mac_out) {
       static int route_dbg_count = 0;
       if (route_dbg_count < 10) {
         extern void uart_puts(const char* s);
-        extern void uart_print_hex(uint64_t val);
-        uart_puts("[ARP] routing off-subnet: target=");
-        uart_print_hex(ip);
-        uart_puts(" local_ip=");
-        uart_print_hex(local_ip);
-        uart_puts(" mask=");
-        uart_print_hex(local_netmask);
-        uart_puts(" gateway=");
-        uart_print_hex(local_gateway);
-        uart_puts("\n");
+        /* GB-082: ONE uart_puts for the whole record.  This was seven calls, so a
+           peer CPU's uart_puts landed between them and fused two records on one
+           line -- measured as the LAST two-record line in the ARM tier after the
+           userland buffering and the sys_fork fix landed:
+             [ARP] routing off-subnet: target=[ARRIVED] SH.BIN rc>0
+           uart_puts holds uart_lock for the whole string, so build the line and
+           emit it once. */
+        char lb[160];
+        int li = 0;
+        const char *pre = "[ARP] routing off-subnet: target=0x";
+        while (*pre && li < 50) lb[li++] = *pre++;
+        static const char hx[] = "0123456789ABCDEF";
+        uint64_t v = ip;
+        for (int sh = 60; sh >= 0 && li < 66; sh -= 4)
+          lb[li++] = hx[(v >> sh) & 0xF];
+        const char *mid1 = " local_ip=0x";
+        while (*mid1 && li < 82) lb[li++] = *mid1++;
+        v = local_ip;
+        for (int sh = 60; sh >= 0 && li < 98; sh -= 4)
+          lb[li++] = hx[(v >> sh) & 0xF];
+        const char *mid2 = " mask=0x";
+        while (*mid2 && li < 110) lb[li++] = *mid2++;
+        v = local_netmask;
+        for (int sh = 60; sh >= 0 && li < 126; sh -= 4)
+          lb[li++] = hx[(v >> sh) & 0xF];
+        const char *mid3 = " gateway=0x";
+        while (*mid3 && li < 140) lb[li++] = *mid3++;
+        v = local_gateway;
+        for (int sh = 60; sh >= 0 && li < 156; sh -= 4)
+          lb[li++] = hx[(v >> sh) & 0xF];
+        lb[li++] = '\n';
+        lb[li] = 0;
+        uart_puts(lb);
         route_dbg_count++;
       }
       ip = local_gateway;

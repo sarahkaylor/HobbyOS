@@ -184,9 +184,29 @@ static void sys_fork(struct trap_frame *tf) {
   int pid = process_fork(tf);
   tf->regs[0] = pid < 0 ? (uint64_t)-EAGAIN : (uint64_t)pid;
 #if TRAP_SYSCALL_DEBUG
-  uart_puts("[KERNEL] sys_fork: tf->regs[0] is now ");
-  print_int((int)tf->regs[0]);
-  uart_puts("\n");
+  /* GB-082: ONE uart_puts for the whole record.  This was three calls
+     ("... is now ", the number, "\n"), so a peer CPU's uart_puts could land
+     between them and fuse two records on one line -- measured as the last two
+     two-record lines in the ARM tier after the userland buffering landed:
+       [KERNEL] sys_fork: tf->regs[0] is now [WAVE-TRY] TAC.BIN
+     uart_puts holds uart_lock for the whole string, so building the line first
+     and emitting once is the whole fix. */
+  {
+    char b[64];
+    int li = 0;
+    const char *pre = "[KERNEL] sys_fork: tf->regs[0] is now ";
+    while (*pre && li < 40) b[li++] = *pre++;
+    int v = (int)tf->regs[0];
+    if (v < 0) { b[li++] = '-'; v = -v; }
+    char t[12];
+    int ti = 0;
+    if (v == 0) t[ti++] = '0';
+    while (v > 0 && ti < 11) { t[ti++] = (char)('0' + (v % 10)); v /= 10; }
+    while (ti > 0 && li < 62) b[li++] = t[--ti];
+    b[li++] = '\n';
+    b[li] = 0;
+    uart_puts(b);
+  }
 #endif
 }
 
