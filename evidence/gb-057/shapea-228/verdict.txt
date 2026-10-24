@@ -1,0 +1,1 @@
+T3_intel: 14319 console lines, 228 FAIL lines, 4 user memory fault records across 4 processes, 78 programs exited, halted=1
