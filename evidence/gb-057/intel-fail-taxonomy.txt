@@ -1,0 +1,32 @@
+log: /home/sarah/Documents/GitHub/HobbyOS/obj/t3_intel_fresh.log  (74416 lines, PARTIAL — the tier stalled and was stopped)
+FAIL lines: 164
+
+REAL_ASSERT           150
+ARTIFACT_INTERLEAVE     6
+ARTIFACT_SPLIT          5
+ARTIFACT_FRAGMENT       2
+REAL_RC                 1
+
+--- ARTIFACT_INTERLEAVE
+   [SEDTEST] FAIL [KERNEL] Process 50: COMM.BIN exited unexpectedly or gracefully.
+   [TACTEST] FAILURES: [WAVE-TRY] [KERNEL] pid=18 (TORTURE.BIN) memory fault VA=0x0000001080001000 PC=0x000
+   [SEDTEST] FAIL [KERNEL] Process 19: GREP.BIN exited unexpectedly or gracefully.
+--- ARTIFACT_SPLIT
+   : No such file or directory[SEDTEST] FAIL PASTE.BIN
+   : FAIL
+   : FAIL
+--- REAL_RC
+   [TACTEST] FAIL TSORT.BIN rc>0
+--- REAL_ASSERT
+   [SIGTEST] FAIL waitpid returns the child got=28 want=4294964048
+   [SEDTEST] FAIL basic_s (stdout)
+   [TACTEST] FAIL empty separator
+
+--- by tag (artifacts / real):
+  SEDTEST        total=102  artifacts=  2  real=100
+  (untagged)     total= 27  artifacts=  8  real= 19
+  TSORTTEST      total= 20  artifacts=  2  real= 18
+  CMPTEST        total=  8  artifacts=  0  real=  8
+  TACTEST        total=  4  artifacts=  1  real=  3
+  SIGTEST        total=  2  artifacts=  0  real=  2
+  WAITPID        total=  1  artifacts=  0  real=  1
