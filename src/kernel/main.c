@@ -181,7 +181,16 @@ static void test_wave_loader(void *arg) {
           if (!nl) break;
           p = e + 1;
         }
-        if (dispatched > 0) return;   /* manifest wins; literals are the default */
+        /* GB-087: the manifest wins and the literals are the default -- but the
+           loader must TERMINATE like the literal path does, not RETURN.  This
+           task is entered by iretq onto an empty kernel-task stack (no return
+           address, by construction), so `return` popped 0 and control went to
+           address 0: #GP vector 13, err 0, rip=0, rsp=kstack_top+8, pid 1, at
+           1 CPU as soon as the wave was a manifest. */
+        if (dispatched > 0) {
+          extern void kernel_exit(void);
+          kernel_exit(); /* never returns */
+        }
       }
     }
   }
