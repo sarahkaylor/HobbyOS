@@ -1,0 +1,8 @@
+=== T3 (arm): build ===
+=== T3 (arm): run (deadline 2400s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-9642df51/obj/t3_arm.log) ===
+T3_arm: note — halt marker found after make exited (poll raced the exit)
+T3_arm: 24526 console lines, 1 FAIL lines, 5 user memory fault records across 4 processes, 83 programs exited, halted=1
+T3_arm: FAIL — 1 FAIL line(s); first 20:
+11513:SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST. Process table:
+T3_arm EXIT=1
+EXIT=1
