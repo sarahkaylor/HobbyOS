@@ -233,23 +233,26 @@ cleanup() {
 }
 trap cleanup EXIT
 
-deadline=$(( $(date +%s) + T3_TIMEOUT ))
-halted=0
-while kill -0 "$MAKE_PID" 2>/dev/null; do
-  if grep -aq "System halt" "$LOG"; then halted=1; break; fi
-  if [ "$(date +%s)" -ge "$deadline" ]; then break; fi
-  sleep 2
-done
-# Let QEMU/make wind down once the guest has halted.
-for _ in $(seq 1 30); do kill -0 "$MAKE_PID" 2>/dev/null || break; sleep 1; done
-
-# If the console never reached its halt marker while a monitor was attached, read
-# the live guest NOW -- cleanup below kills it, and on a freeze this is the only
-# evidence that will ever exist.
-if [ -n "$MON_SOCK" ] && [ -S "$MON_SOCK" ] && ! grep -aq "System halt" "$LOG"; then
+# GB-057 (Coordinator 2026-10-24): the post-freeze sample as a FUNCTION, called
+# the moment a stall marker appears -- on a freeze QEMU is still alive then, and
+# by the end of the wait loop it usually is not (measured: three passes of a
+# held-lock table that was never read).  It also never returns silently: an
+# absent instrument is a FAILED instrument, so no monitor or no socket prints an
+# explicit line instead of nothing at all.
+probe_guest() { # $1 = why we are sampling
+  if [ -z "${MON_SOCK:-}" ]; then
+    { echo ""; echo "=== T3 guest sample: SKIPPED — no monitor attached (T3_MONITOR not set; $1) ==="; } >>"$LOG"
+    return 0
+  fi
+  if [ ! -S "$MON_SOCK" ]; then
+    { echo ""; echo "=== T3 guest sample: ABSENT — monitor socket '$MON_SOCK' gone ($1) ===";
+      echo "    no CR2, no held-lock table: the instrument did not run."; } >>"$LOG"
+    return 0
+  fi
   {
     echo ""
-    echo "=== T3 post-freeze guest sample (QEMU monitor $MON_SOCK) ==="
+    echo "=== T3 guest sample (QEMU monitor $MON_SOCK; $1) ==="
+    echo ""
     echo "--- all CPUs (control registers included: CR2 names the fault address) ---"
     printf 'info registers -a\n' | timeout 20 socat - "UNIX-CONNECT:$MON_SOCK" 2>/dev/null \
       | tr -d '\r' | grep -av '^(qemu)' || echo "(monitor read failed)"
@@ -275,6 +278,33 @@ if [ -n "$MON_SOCK" ] && [ -S "$MON_SOCK" ] && ! grep -aq "System halt" "$LOG"; 
     fi
     echo "=== end guest sample ==="
   } >>"$LOG" 2>&1
+}
+
+deadline=$(( $(date +%s) + T3_TIMEOUT ))
+halted=0
+probed=0
+while kill -0 "$MAKE_PID" 2>/dev/null; do
+  if grep -aq "System halt" "$LOG"; then halted=1; break; fi
+  # First stall marker seen: sample the guest NOW, while it is frozen and
+  # still reachable.  One sample per run; the markers repeat thousands of
+  # times and the guest does not change.
+  if [ "$probed" = 0 ] && \
+     grep -aqE "\[LOCKFOREVER\]|\[IDLESTUCK\]|\[STALLBREAK\]|\[RESUME-" "$LOG"; then
+    probe_guest "first stall marker in the serial"
+    probed=1
+  fi
+  if grep -aq "System halt" "$LOG"; then halted=1; break; fi
+  if [ "$(date +%s)" -ge "$deadline" ]; then break; fi
+  sleep 2
+done
+# Let QEMU/make wind down once the guest has halted.
+for _ in $(seq 1 30); do kill -0 "$MAKE_PID" 2>/dev/null || break; sleep 1; done
+
+
+# Fallback: a run that ended without a halt marker and never showed a stall
+# marker (deadline hit with a silent guest) still deserves a sample.
+if [ "$probed" = 0 ] && ! grep -aq "System halt" "$LOG"; then
+  probe_guest "run ended without a halt marker"
 fi
 
 cleanup
