@@ -283,8 +283,26 @@ probe_guest() { # $1 = why we are sampling
 deadline=$(( $(date +%s) + T3_TIMEOUT ))
 halted=0
 probed=0
+# GB-057: a SILENT freeze prints no marker at all -- the markers are console
+# output, so a CPU that is stuck (or a console lock that is dead) cannot report
+# them.  Measured: an intel run froze at 12,821 lines with zero markers, no
+# sample and no verdict for 18 minutes, leaving the parked CPU's RIP unknown.
+# So also sample when the serial has stopped GROWING: that is the one signal a
+# frozen guest still gives, because it is an absence rather than a message.
+silence_secs="${T3_SILENCE_SECS:-60}"
+last_size=-1
+last_growth=$(date +%s)
 while kill -0 "$MAKE_PID" 2>/dev/null; do
   if grep -aq "System halt" "$LOG"; then halted=1; break; fi
+  # Silence detector: probe once, the first time the log stops growing.
+  cur_size=$(wc -c <"$LOG" 2>/dev/null || echo 0)
+  if [ "$cur_size" != "$last_size" ]; then
+    last_size=$cur_size
+    last_growth=$(date +%s)
+  elif [ "$probed" = 0 ] && [ $(( $(date +%s) - last_growth )) -ge "$silence_secs" ]; then
+    probe_guest "serial silent for ${silence_secs}s with no stall marker"
+    probed=1
+  fi
   # First stall marker seen: sample the guest NOW, while it is frozen and
   # still reachable.  One sample per run; the markers repeat thousands of
   # times and the guest does not change.
