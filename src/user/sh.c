@@ -3355,8 +3355,10 @@ static int sh_interactive(void) {
   out1("user@hobbyos:");
   out1(curdir);
   out1("$ ");
+  hb_stdout_flush();   /* GB-094: prompt has no newline; show it before read */
   while (!g_exit_requested) {
     char c;
+    hb_stdout_flush();   /* GB-094: prompt & char echo are newline-less; drain */
     int r = read(0, &c, 1);
     if (r > 0) {
       if (c == '\n') {

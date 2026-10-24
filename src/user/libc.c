@@ -238,11 +238,110 @@ void print(const char *s) {
   }
 }
 
+/* --- Line-buffered console (GB-094). -------------------------------------
+ * The console's atomic unit is a *complete `write()`*: console_write_user
+ * emits a whole user window under one uart_lock hold, and uart_puts takes the
+ * lock once per string (GB-082).  A program that composes one logical line
+ * from several calls — `print("...=")` + `print_dec(n)` + `print("\n")`, or
+ * `print_console("[EXPANDTEST] PASS ")` + `print_console(what)` + \n — makes
+ * several atomic writes that a peer on another core can interleave BETWEEN
+ * (`[HELLO] argc=[KERNEL] Process 35: ...`).  Nothing is wrong at the kernel;
+ * atomicity is per write, composition is per program.
+ *
+ * The fix is to make the program's logical line a single write: accumulate
+ * the console into a small per-process buffer and emit one complete line per
+ * SYS_WRITE_CONSOLE.  Both print_console() and (when fd 1 is the console)
+ * write(1,...) go through this buffer; devbuilds (HOST_TEST) stay immediate.
+ * A redirected fd 1 (pipe/file) never enters it — SYS_WRITE keeps its stream.
+ *
+ * Three hazards are handled (all part of the DoD):
+ *   1. exit()/_exit() flush, so a last partial line (no trailing '\n') is not
+ *      lost — "a program that exits without a trailing newline still has its
+ *      output on the serial".
+ *   2. newline-less prompts flush explicitly via hb_stdout_flush() — sh's
+ *      "$ " appears before it reads.
+ *   3. buffer-full flushes even without a newline, and the buffer is small,
+ *      so a crash cannot lose more than one pending line half.
+ */
+#ifndef HOST_TEST
+#define HB_STDOUT_BUF 512
+static char hb_stdout[HB_STDOUT_BUF];
+static size_t hb_stdout_len = 0;
+
+/* Emit everything currently buffered to the console in one SYS_WRITE_CONSOLE.
+ * Never splits a line. */
+static void hb_stdout_emit_all(void) {
+  if (hb_stdout_len == 0)
+    return;
+  ho_syscall4(SYS_WRITE_CONSOLE, (long)hb_stdout, hb_stdout_len, 0, 0);
+  hb_stdout_len = 0;
+}
+
+/* Public flush: drain any incomplete line to the console now.  Newline-less
+ * prompts (sh's "$ ") call this before they block on read. */
+void hb_stdout_flush(void) {
+  hb_stdout_emit_all();
+}
+
+/* Is fd 1 the CONSOLE (vs a pipe/file the program was redirected to)?
+ * The kernel's console is the *unset* fd: a default wave program's
+ * open_fds[1] is -1, so write(1) routes to console_write_user and SYS_FSTAT(1)
+ * fails with EBADF.  A redirected stdout puts a real global file at fd 1 and
+ * fstat(1) succeeds.  Line-buffering must apply ONLY to the console: a pipe
+ * consumer reads streaming and a redirected file must get bytes as written.
+ * Cached: a program's fd-1 target is fixed for its lifetime here. */
+static int hb_stdout_console = -1;   /* -1 unknown, 0 pipe/file, 1 console */
+static int hb_stdout_is_console(void) {
+  if (hb_stdout_console != -1)
+    return hb_stdout_console;
+  unsigned char st[256];
+  long r = ho_syscall4(SYS_FSTAT, 1, (long)st, 0, 0);
+  hb_stdout_console = (r < 0) ? 1 : 0;   /* EBADF -> unset -> console */
+  return hb_stdout_console;
+}
+
+/* Append `len` bytes to the console buffer; every time a '\n' completes a
+ * line, flush the whole buffered line as one SYS_WRITE_CONSOLE.  Buffer-full
+ * without a newline flushes what is there (hazard 3); a single line longer
+ * than the buffer is emitted whole rather than wrapped.  Accepts every byte
+ * (the buffer is just a grouping delay), matching the immediate path. */
+static void hb_stdout_put(const char *p, size_t size) {
+  const char *end = p + size;
+  while (p < end) {
+    const char *nl = NULL;
+    for (const char *q = p; q < end; q++)
+      if (*q == '\n') { nl = q; break; }
+    size_t take = (nl ? (size_t)(nl - p + 1) : (size_t)(end - p));
+    if (take > HB_STDOUT_BUF - hb_stdout_len && hb_stdout_len > 0)
+      hb_stdout_emit_all();                 /* full: drain (hazard 3) */
+    if (take > HB_STDOUT_BUF - hb_stdout_len) {
+      ho_syscall4(SYS_WRITE_CONSOLE, (long)p, take, 0, 0);   /* huge line */
+      p += take;
+      continue;
+    }
+    for (size_t i = 0; i < take; i++)
+      hb_stdout[hb_stdout_len + i] = p[i];
+    hb_stdout_len += take;
+    p += take;
+    if (nl)
+      hb_stdout_emit_all();                 /* complete line -> one write */
+  }
+}
+#else
+void hb_stdout_flush(void) { }
+static void hb_stdout_put(const char *p, size_t size) {
+  ho_syscall4(SYS_WRITE_CONSOLE, (long)p, size, 0, 0);
+}
+#endif /* !HOST_TEST */
+
 void print_console(const char *s) {
   int len = 0;
   while (s[len])
     len++;
-  ho_syscall4(SYS_WRITE_CONSOLE, (long)s, len, 0, 0);
+  /* GB-094: a program's *logical* console line is often several print_console
+     calls ([EXPANDTEST] PASS + value + "\n"); emit one SYS_WRITE_CONSOLE per
+     complete line so a peer cannot land between the parts. */
+  hb_stdout_put(s, len);
 }
 
 void print_hex(long val) {
@@ -304,6 +403,9 @@ void exit(int status) {
   extern int fflush(FILE *) __attribute__((weak));
   if (fflush)
     fflush(0);
+  /* GB-094: flush any incomplete buffered stdout line (no trailing '\n') so a
+     program that exits without a trailing newline still reaches the serial. */
+  hb_stdout_flush();
   ho_syscall4(SYS_EXIT, (long)status, 0, 0, 0);
   while (1)
     ; // Wait for the kernel to halt us safely
@@ -330,7 +432,20 @@ ssize_t read(int fd, void *buf, size_t size) {
   return (ssize_t)errno_ret(ho_syscall4(SYS_READ, (long)fd, (long)buf, (long)size, 0));
 }
 
+/* NOTE: the line-buffered console helper (hb_stdout_put, hb_stdout_flush,
+ * hb_stdout_is_console) lives above print_console() so both print_console and
+ * write(fd 1) share it.  write() below funnels console fd 1 through it and
+ * passes every other fd (files, pipes, sockets) straight to SYS_WRITE. */
+
 ssize_t write(int fd, const void *buf, size_t size) {
+#ifndef HOST_TEST
+  if (fd == 1 && hb_stdout_is_console()) {
+    /* Console: make the program's logical line a single SYS_WRITE_CONSOLE.
+       Accept every byte; the buffer is only a grouping delay. */
+    hb_stdout_put((const char *)buf, size);
+    return (ssize_t)size;
+  }
+#endif
   return (ssize_t)errno_ret(ho_syscall4(SYS_WRITE, (long)fd, (long)buf, (long)size, 0));
 }
 
@@ -676,6 +791,7 @@ long readlink(const char *path, char *buf, unsigned long bufsiz) {
 }
 
 void _exit(int status) {
+  hb_stdout_flush();   /* GB-094: drain an incomplete buffered line */
   ho_syscall4(SYS_EXIT, (long)status, 0, 0, 0);
   while (1)
     ; /* the kernel stops us */
