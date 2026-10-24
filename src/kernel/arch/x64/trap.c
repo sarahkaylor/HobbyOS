@@ -1914,7 +1914,38 @@ void sync_lower_handler_c(struct trap_frame *tf) {
      slice is already below the deepest-path margin; halt loudly instead of
      continuing on a doomed stack. */
   if (kernel_stack_low(8u * 1024u)) {
-    uart_puts("KERNEL PANIC: syscall entry with exhausted kernel stack (SEC-10)\n");
+    /* GB-057: this panic must be able to SPEAK FROM A DOOMED STACK.  The
+       ordinary uart_puts takes uart_lock, and when two cores reach here at
+       once (measured: CPU#3 and CPU#7 both at the 'jmp $' below) neither can
+       print, so the machine halts in total silence -- which is why this shape
+       went unidentified for a week.  Use the lock-free raw path, and name the
+       syscall that overran: elr is the user PC that made the call, pid says
+       which process, and the depth says how far past the margin we are. */
+    char pb[160];
+    int pi = 0;
+    const char *pre = "[KPANIC] SEC-10 exhausted kernel stack at syscall entry: pid=";
+    while (*pre && pi < 110) pb[pi++] = *pre++;
+    {
+      struct process *kp = current_process();
+      int v = (kp ? (int)kp->pid : -1);
+      if (v < 0) { pb[pi++] = '-'; v = -v; }
+      char td[12];
+      int ti = 0;
+      if (v == 0) td[ti++] = '0';
+      while (v > 0 && ti < 11) { td[ti++] = (char)('0' + (v % 10)); v /= 10; }
+      while (ti > 0 && pi < 126) pb[pi++] = td[--ti];
+    }
+    const char *mid = " elr=0x";
+    while (*mid && pi < 134) pb[pi++] = *mid++;
+    {
+      static const char hx[] = "0123456789ABCDEF";
+      uint64_t v = tf->elr;
+      for (int sh = 60; sh >= 0 && pi < 150; sh -= 4)
+        pb[pi++] = hx[(v >> sh) & 0xF];
+    }
+    pb[pi++] = '\n';
+    pb[pi] = 0;
+    uart_puts_raw(pb);
     for (;;)
       ;
   }
