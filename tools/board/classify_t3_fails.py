@@ -6,9 +6,9 @@ the message body — another test's tag, [WAITPID], [KERNEL], [ALIVE-SET] — me
 console glued a foreign record into the middle of this line, so the message is
 evidence about the console, not about the program under test.
 """
-import collections, re
+import collections, re, sys
 
-PATH = "/home/sarah/Documents/GitHub/HobbyOS/obj/t3_intel_fresh.log"
+PATH = sys.argv[1] if len(sys.argv) > 1 else "/home/sarah/Documents/GitHub/HobbyOS/obj/t3_intel_fresh.log"
 lines = [l.replace("\r", "") for l in open(PATH, errors="replace")]
 fails = [l for l in lines if "FAIL" in l and "PASS" not in l]
 
