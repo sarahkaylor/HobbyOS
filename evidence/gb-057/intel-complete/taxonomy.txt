@@ -1,0 +1,34 @@
+log: obj/t3_intel_instr.log  (PARTIAL — the tier wedged and was stopped)
+FAIL lines: 91
+
+REAL_ASSERT          50
+ARTIFACT_FOREIGN     36
+ARTIFACT_FRAGMENT     3
+ARTIFACT_SPLIT        1
+REAL_RC               1
+
+artifacts 40 / real 51
+
+--- ARTIFACT_FOREIGN
+   [TACTEST] [TACTEST] FAIL v2 loader: image mapped (lazy), bytes=108248 pages=27 first=in elap=0ms
+   [TACTEST] [TACTEST] FAIL /empty separator[ARRIVED] TSORT.BIN rc>0   <foreign: ARRIVED>
+   [TACTEST] [TACTEST] FAILURES: [EXITPC] pid=57 last_user_pc=0x1000001300   <foreign: EXITPC>
+   [TSORTTEST] [TSORTTEST] FAIL [KERNEL] Process 7: SED.BIN exited unexpectedly or gracefully.   <foreign: KERNEL>
+--- ARTIFACT_SPLIT
+   [(untagged)] : FAIL
+--- REAL_ASSERT
+   [SIGTEST] [SIGTEST] FAIL waitpid returns the child got=45 want=4294964048
+   [(untagged)] FPU_T torture-child: FAIL
+   [SEDTEST] [SEDTEST] FAIL basic_s (stdout)
+   [(untagged)] FPU_T FAILED: /TEST1.TXT
+--- REAL_RC
+   [SEDTEST] [SEDTEST] FAIL  rc>0
+
+--- by tag (artifacts / real):
+  SEDTEST      total= 58  artifacts= 19  real= 39
+  TSORTTEST    total= 12  artifacts= 10  real=  2
+  (untagged)   total=  9  artifacts=  6  real=  3
+  CMPTEST      total=  6  artifacts=  0  real=  6
+  TACTEST      total=  3  artifacts=  3  real=  0
+  WAITPID      total=  2  artifacts=  2  real=  0
+  SIGTEST      total=  1  artifacts=  0  real=  1
