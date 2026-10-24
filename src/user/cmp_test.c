@@ -195,11 +195,21 @@ static int run_attempt(const char *args, char *out, size_t outsize, char *err,
     int ws = 0;
     int w;
     int guard = 0;
+    int no_such_child = 0;
     while ((w = waitpid(pid, &ws, 0)) != pid && guard < 1000) {
+      /* GB-057: ECHILD means "this process has no such child *any more*" -- the
+         child was already reaped (or never ours), so retrying cannot succeed.
+         The old loop burned the full 1000-iteration guard on every case, and
+         the kernel logs a [WAITPID] ECHILD line per call: one intel run
+         produced 10,906 of them from this site alone (caller=50 was 93% of all
+         WAITPID records in an 8.3 MB serial), which filled the log and ate the
+         tier's deadline so the run never reached its halt marker.  Fail the
+         reap immediately instead of shouting for a second. */
+      if (w < 0 && errno == ECHILD) { no_such_child = 1; break; }
       usleep(1000);
       guard++;
     }
-    *status = WIFEXITED(ws) ? WEXITSTATUS(ws) : -1;
+    *status = no_such_child ? -1 : (WIFEXITED(ws) ? WEXITSTATUS(ws) : -1);
   }
   return 0;
 }
