@@ -1,0 +1,4 @@
+[WAITPID] ECHILD caller=56 PROCTEST.BIN want=-1 children=0
+[WAITPID] ECHILD caller=34 PROCTEST.BIN want=-1 children=0
+System halt from CPU [HALT-CD] cpu=5 free=12 alloc=0 exited=11 running=0 blocked=0 other=41
+2System halt from CPU .
