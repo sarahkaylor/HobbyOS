@@ -1,0 +1,3 @@
+self-test: glued=[2 2] clean=[1 0] fusion=[1 1] fusion2=[1 1] (want glue>0 / 0,0 / >=1 / >=1)
+self-test: absent-log exit=2 (want non-zero)
+self-test: OK — genuine FAILs on glue, 0 on clean (incl [0]-subscript single records), catches injected fusions, refuses a missing log

@@ -1,0 +1,4 @@
+t4_glued: raw=276 genuine=5 glued lines in '/tmp/arm_smp1.log'
+          (GB-092: GB-082 DoD is graded on the GENUINE count; RAW is the v1
+           superset incl. [0]-array-subscript single records v1 misread.)
+t4_glued: FAIL — 5 genuine glued lines (writes not whole-line atomic).

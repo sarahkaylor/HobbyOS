@@ -1,0 +1,4 @@
+t4_glued: raw=2 genuine=0 glued lines in 'obj/t3_arm.log'
+          (GB-092: GB-082 DoD is graded on the GENUINE count; RAW is the v1
+           superset incl. [0]-array-subscript single records v1 misread.)
+t4_glued: PASS — every console line is a single writer (whole-line atomic).
