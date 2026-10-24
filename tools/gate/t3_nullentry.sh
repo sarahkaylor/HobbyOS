@@ -56,6 +56,17 @@ fi
 [ "$STATE" = unfixed ] && [ "$TREE_FIXED" = 1 ] && { echo "t3_nullentry: FAIL — STATE=unfixed but tree HAS kernel_exit; run against plain main"; exit 2; }
 
 echo "=== t3_nullentry ($ARCH, SMP=$SMP, program=$PROG, state=$STATE) ==="
+# Preconditions, stated instead of dying on a redirect: the script stages onto an
+# EXISTING disk.img and writes under obj/, so a clean checkout must be built
+# first.  (Coordinator 2026-10-24: on a fresh worktree this failed with
+# "serial missing" because `: > obj/...` could not create the log — which reads
+# like a gate failure when it is a missing build.)
+mkdir -p "$ROOT/obj"
+if [ ! -f "$ROOT/disk.img" ]; then
+  echo "t3_nullentry: FAIL (exit 2) — '$ROOT/disk.img' absent: build first (make disk.img ARCH=$ARCH)."
+  echo "               A missing image is not a clean run, and an absent serial is not a passing gate."
+  exit 2
+fi
 LOG="$ROOT/obj/t3_${ARCH}_nullentry.log"
 : > "$LOG"
 printf '%s\n' "$PROG" > "$ROOT/obj/${ARCH}_nullentry.wave"
