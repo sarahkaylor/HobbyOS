@@ -1,0 +1,7 @@
+t4_glued: 2 glued console lines in 'obj/t3_intel.log'
+t4_glued: FAIL — 2 glued lines (writes not whole-line atomic); the next
+          GB-057 FAIL-attribution ratio cannot be trusted until this is 0.
+  sample glued lines:
+[KERNEL] FATA[L:A RERIxVcEeDp] tiBLoKTn EiSn TKe.rBnIelN M odre!c V>e0cto
+n e wS=T/ATCEKM[P42].:T X0Tx0[0E0X00ITP0C00] p75id=57 la6stD_1uC8se
+ST T A CSwKT[i1A]Ct:Kh  0[nx1o0] 0:p0 0a00r0ex00n00t0 0000t000o0 0000d0e

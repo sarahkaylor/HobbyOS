@@ -1,0 +1,5 @@
+== clause 4 record presence (ARM serial)
+\[ARP\]                                    8
+sys_fork: tf->regs\[0\] is now             143
+Before eret                                232
+irq handled                                3

@@ -1,0 +1,14 @@
+=== T3 (arm): build ===
+=== T3 (arm): run (deadline 2700s, log /tmp/gb082v/obj/t3_arm.log) ===
+T3_arm: note — halt marker found after make exited (poll raced the exit)
+T3_arm: 20950 console lines, 7 FAIL lines, 6 user memory fault records across 5 processes, 84 programs exited, halted=1
+T3_arm: FAIL — 7 FAIL line(s); first 20:
+2320:  IPC_T fd-passing setup (pipes + socketpair): FAIL
+2321:  IPC_T poll setup: FAIL
+2322:  IPC_T park socketpair: FAIL
+2324:  IPC_T error-path setup: FAIL
+2325:  IPC_T select socketpair: FAIL
+2326:IPC_T FAILED: 
+14098:SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST. Process table:
+T3_arm EXIT=1
+ARM_RC=1

@@ -1,0 +1,7 @@
+t4_glued: 2 glued console lines in 'obj/t3_arm.log'
+t4_glued: FAIL — 2 glued lines (writes not whole-line atomic); the next
+          GB-057 FAIL-attribution ratio cannot be trusted until this is 0.
+  sample glued lines:
+[DEBUG] Before eret, tf->regs[0] = 68719570611 ELR = 0x1000000AB0
+[DEBUG] Before eret, tf->regs[0] = 68719570611 ELR = 0x1000000AC8
+[DEBUG] Before eret, tf->regs[0] = 68719570611 ELR = 0x1000000AB0

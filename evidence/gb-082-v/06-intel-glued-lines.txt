@@ -1,0 +1,2 @@
+'[KERNEL] process_create: no free process slots! zombies=[CKSUMTEST] starting'
+'[WAITPID] ECHILD caller=[ARRIVED] CUT.BIN rc<0'
