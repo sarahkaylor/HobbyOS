@@ -1,0 +1,6 @@
+[IDLESTUCK] claims: c0=-1/11440 c1=-1/11439 c2=-1/11463 c3=-1/11489 c4=-1/0 c5=-1/11873 c6=-1/11814 c7=-1/11578 lock_owner=1 park_returns=0
+[IDLESTUCK] cpu=7 rounds=100000 t=186756
+[IDLESTUCK] claims: c0=-1/14300 c1=-1/14300 c2=-1/14324 c3=-1/14346 c4=-1/0 c5=-1/14731 c6=-1/14673 c7=-1/14434 lock_owner=8 park_returns=0
+[IDLESTUCK] cpu=2 rounds=120005 t=215331
+[IDLESTUCK] claims: c0=-1/17163 c1=-1/17159 c2=-1/17181 c3=-1/17205 c4=-1/0 c5=-1/17590 c6=-1/17532 c7=-1/17293 lock_owner=3 park_returns=0
+[HALT-CD] cpu=3 free=13 alloc=0 exited=16 running=0 blocked=3 other=32
