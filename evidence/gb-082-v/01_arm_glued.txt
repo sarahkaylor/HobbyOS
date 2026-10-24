@@ -1,0 +1,18 @@
+$ bash tools/gate/t4_glued.sh t3_arm_9f89a23.log
+t4_glued: 1 glued console lines in 't3_arm_9f89a23.log'
+t4_glued: FAIL — 1 glued lines (writes not whole-line atomic); the next
+          GB-057 FAIL-attribution ratio cannot be trusted until this is 0.
+  sample glued lines:
+[DEBUG] Before eret, tf->regs[0] = 68719570611 ELR = 0x1000000AB0
+[DEBUG] Before eret, tf->regs[0] = 68719570611 ELR = 0x1000000AC8
+[DEBUG] Before eret, tf->regs[0] = 68719570611 ELR = 0x1000000AB0
+rc=1
+LINE 1 tags=2: [KERNEL] pid=[ARRIVED] SH.BIN rc>0
+   tag positions: [0, 13]
+total glued: 1
+--- context (the fault record sliced across lines):
+[KERNEL] pid=[ARRIVED] SH.BIN rc>0
+7[WAVE-TRY] SMPTEST.BIN
+ (Loading program for scheduler (v2 AS): MEMTEST.BINSMPTEST.BIN) memory fault VA=
+0x0000000040000000/SMPTEST.BIN PC=
+0x0000001000000054 LR=0x0000001000000044 FP=0x00000017FFFFFFF0 rw=w  in=PROT -> killed

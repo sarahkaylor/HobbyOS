@@ -1,0 +1,10 @@
+regression probe - each moved record still prints (ARM serial t3_arm_9f89a23.log):
+  sys_fork       169
+  \[ARP\]        8
+  Before eret    258
+  memory fault   5
+
+samples:
+[ARP] routing off-subnet: target=0x0000000001010101 local_ip=0x000000000F02000A mask=0x0000000000FFFFFF gateway=0x000000000202000A
+[KERNEL] sys_fork: tf->regs[0] is now 10
+[KERNEL] sys_fork: tf->regs[0] is now 11

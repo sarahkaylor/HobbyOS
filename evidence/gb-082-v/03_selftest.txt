@@ -1,0 +1,5 @@
+$ bash tools/gate/t4_glued.sh --self-test
+self-test: glued fixture count=4 (want >0), clean fixture count=0 (want 0)
+self-test: absent-log exit=2 (want non-zero):           clean log: 0 glued lines cannot be measured over nothing.
+self-test: OK — counter can fail, stays 0 on clean, and refuses a missing log
+rc=0

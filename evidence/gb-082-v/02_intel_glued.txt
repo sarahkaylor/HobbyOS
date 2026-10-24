@@ -1,0 +1,23 @@
+$ bash tools/gate/t4_glued.sh t3_intel_9f89a23.log
+t4_glued: 2 glued console lines in 't3_intel_9f89a23.log'
+t4_glued: FAIL — 2 glued lines (writes not whole-line atomic); the next
+          GB-057 FAIL-attribution ratio cannot be trusted until this is 0.
+  sample glued lines:
+ o CKgS[rTamA_Cl7oKa][d3e:r.c] :
+KS[T1C2]:o An0CnKexct0[10i0n50g 0]:0t10o4 1 .00010x.1004.70010:0
+ [SLTFANC]K [P3A]S:S  03x00+0 0c0h0a0r0 0c0o0m0p0o0n0e9n3t 
+rc=1
+
+$ python3 glued_lines.py t3_intel_9f89a23.log
+LINE 1 tags=2:  [SLTFANC]K [P3A]S:S  03x00+0 0c0h0a0r0 0c0o0m0p0o0n0e9n3t 
+   tag positions: [1, 12]
+LINE 2 tags=2: [PIPE_WRITE_EPIPE] PID [KERNEL] Process 39: HEDGNU.BIN exited unexpectedly or gracefully.
+   tag positions: [0, 23]
+total glued: 2
+
+--- writer 1 source: src/kernel/pipe.c:238
+238:        uart_puts("[PIPE_WRITE_EPIPE] PID ");
+--- writer 2 decoded (char-interleave):
+raw : ' [SLTFANC]K [P3A]S:S  03x00+0 0c0h0a0r0 0c0o0m0p0o0n0e9n3t\r '
+evens: ' STACK[3]: 0x0000000000000093\r'
+odds : '[LFN] PASS 30+ char component '
