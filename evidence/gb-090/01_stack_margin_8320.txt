@@ -1,0 +1,2 @@
+[STKMARGIN] entry size=8320 remaining_before=52704
+[STKMARGIN] after_frame size=8320 remaining_after=52704

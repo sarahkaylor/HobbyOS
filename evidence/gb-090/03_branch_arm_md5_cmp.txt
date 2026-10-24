@@ -1,0 +1,8 @@
+branch ticket/082-wholeline @ c5e4add - ARM tier, this VM, 2026-10-24
+run 1: full wave, probe build (instrumented console_write_user)
+  MD5TEST lines=18  CMPTEST lines=43  FAIL lines=0
+run 2: full wave, clean branch (no probe); T3_arm EXIT=1 = SHELLTEST watchdog (GB-058)
+  MD5TEST lines=18  CMPTEST lines=43  FAIL lines=0
+run 3: CAPWR-only wave (single 8320-byte console write)
+  region bytes: 8320 expected: 8320 -> byte-exact: True
+SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST. Process table:

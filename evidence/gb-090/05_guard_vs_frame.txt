@@ -1,0 +1,4 @@
+branch c5e4add:
+1579:  enum { STAGE_CAP = 8192 };
+syscall entry guard:
+1863:  if (kernel_stack_low(8u * 1024u)) {
