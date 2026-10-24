@@ -3018,6 +3018,18 @@ static int last_idlestuck_div;
  * and printed in the claims line.  A CPU claimed to a process with a small
  * per-CPU count is a CPU that never came back to idle. */
 static volatile int sched_idle_rounds_cpu[MAX_CPUS];
+/* GB-057 (Coordinator, 2026-10-24): how many times a *blocking* syscall asked
+ * schedule() to switch and schedule() returned into the same C frame instead.
+ * A context switch never returns here -- the process resumes at the rewound
+ * syscall instruction via iretq/eret -- so any execution of the statement after
+ * the call means "no switch happened".  sys_poll's park path rewinds elr and
+ * hands control to schedule(); if that returns, the trap handler falls through
+ * with elr pointing at the syscall and no return value set, which re-executes
+ * poll immediately, in kernel trap context, without ever reaching the idle loop
+ * (the shape the [IDLESTUCK] dump shows: a claim pinned to a process that never
+ * runs, and a per-CPU idle count frozen at 0-1).  Counting it costs one
+ * increment and settles the question on the next wedged run. */
+int poll_park_returns;
 /* GB-057: the same dump, for the quiet case -- a wave that ends with nothing
    reclaimable and no state change.  Separate divisor so the two rate limits do
    not consume each other. */
@@ -3675,6 +3687,8 @@ void start_scheduler(void) {
       }
       uart_puts(" lock_owner=");
       print_int((int)proc_lock.owner);
+      uart_puts(" park_returns=");
+      print_int(poll_park_returns);
       uart_puts("\n");
       spinlock_release_irqrestore(&proc_lock, dflags);
     }
