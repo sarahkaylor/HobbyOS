@@ -289,8 +289,16 @@ while kill -0 "$MAKE_PID" 2>/dev/null; do
   # still reachable.  One sample per run; the markers repeat thousands of
   # times and the guest does not change.
   if [ "$probed" = 0 ] && \
-     grep -aqE "\[LOCKFOREVER\]|\[IDLESTUCK\]|\[STALLBREAK\]|\[RESUME-" "$LOG"; then
+     grep -aqE "\[LOCKFOREVER\]|\[IDLESTUCK\]|\[STALLBREAK\]" "$LOG"; then
     probe_guest "first stall marker in the serial"
+    probed=1
+  fi
+  # GB-057: a SILENT stall -- deadline reached with no marker at all -- also
+  # needs a sample, and it must be taken BEFORE the deadline kill takes QEMU
+  # away.  Measured: a run that ended with no halt and no markers produced
+  # 'ABSENT -- monitor socket gone' because the fallback probed after cleanup.
+  if [ "$probed" = 0 ] && [ "$(date +%s)" -ge $((deadline - 30)) ]; then
+    probe_guest "deadline approaching with no halt marker"
     probed=1
   fi
   if grep -aq "System halt" "$LOG"; then halted=1; break; fi
