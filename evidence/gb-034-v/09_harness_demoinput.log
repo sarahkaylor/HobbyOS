@@ -1,0 +1,31 @@
+[harness] booting intel -> evidence/gb-034-v/run_demoinput
+[harness] DOOM.BIN slot by name = 18
+[harness] screendump 00_boot
+[harness] [LAUNCH] DOOM.BIN in serial: True
+[harness] screendump 01_launch
+[harness] screendump 02_baseline
+[harness] screendump 11_after_esc
+[harness] sent input-send-event key 'esc'
+[harness] screendump 12_after_esc
+[harness] sent input-send-event key 'esc'
+[harness] screendump 13_after_ret
+[harness] sent input-send-event key 'ret'
+[harness] screendump 14_after_up
+[harness] sent input-send-event key 'up'
+[harness] screendump 03_final
+[harness] DOOM/LAUNCH serial lines: 24
+      [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+      [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+      [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+      [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+      [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+      [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+      [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+      [ALIVE-SET] 000sl0ot=3 pid=3 0s2t4=6 pid=3 par3ent=1 claimed_by=0  DOOMre.sBumIeN_p
+      [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+      [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+      [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+      [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+      [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+      [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+      [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN

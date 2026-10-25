@@ -1,0 +1,18 @@
+mcopy -i disk.img obj/intel/doom.bin ::/DOOM.BIN
+[disk] IWAD doom1.wad -> ::/DOOM1.WAD
+[MENU] 18=DOOM.BIN
+[LAUNCH] DOOM.BIN
+[WAVE-TRY] DOOM.BIN
+Loading program for scheduler (v2 AS): DOOM.BIN
+/DOOM.BIN
+[ARRIVED] DOOM.BIN rc>0
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=3 DOOM.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
