@@ -1,0 +1,36 @@
+/tmp/gb031-a/SDL2-2.30.10.tar.gz: OK
+configure: WARNING: DBus support is required for fcitx.
+/tmp/gb031-a/stage/SDL2-2.30.10/src/stdlib/SDL_qsort.c:550:12: warning: returning 'const void *' from a function with result type 'void *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+  550 |     return bsearch(key, base, nmemb, size, compare);
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/stdlib.h:992:3: note: expanded from macro 'bsearch'
+  992 |   __glibc_const_generic (BASE, const void *,                            \
+      |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  993 |                          bsearch (KEY, BASE, NMEMB, SIZE, COMPAR))
+      |                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/x86_64-linux-gnu/sys/cdefs.h:838:3: note: expanded from macro '__glibc_const_generic'
+  838 |   _Generic (0 ? (PTR) : (void *) 1,                     \
+      |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  839 |             const void *: (CTYPE) (CALL),               \
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  840 |             default: CALL)
+      |             ~~~~~~~~~~~~~~
+1 warning generated.
+ar: `u' modifier ignored since `D' is the default (see `U')
+ar: `u' modifier ignored since `D' is the default (see `U')
+ar: `u' modifier ignored since `D' is the default (see `U')
+
+== libSDL2.a ==
+ab62f66e1197f3a4e5bd63497c2547551bdbf8334c43dcafa3ca92f2ef36efb7  build/.libs/libSDL2.a
+clang: warning: argument unused during compilation: '-no-pie' [-Wunused-command-line-argument]
+/usr/bin/x86_64-linux-gnu-ld.bfd: build/.libs/libSDL2.a(SDL_dynapi.o): in function `get_sdlapi_entry':
+/tmp/gb031-a/stage/SDL2-2.30.10/src/dynapi/SDL_dynapi.c:386:(.text+0xf1c2): warning: Using 'dlopen' in statically linked applications requires at runtime the shared libraries from the glibc version used for linking
+
+== sdl2_static_test ==
+/tmp/gb031-a/sdl2_static_test: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=72a56a2ae588753f04fbc5fd31e80a8014103705, for GNU/Linux 3.2.0, with debug_info, not stripped
+4dee2e8f1249edd85895fa3c0a67fcb54a7c213531190780b3124848dd918942  /tmp/gb031-a/sdl2_static_test
+
+real	0m28.410s
+user	1m22.761s
+sys	0m23.814s
+BUILD_A_EXIT=0
