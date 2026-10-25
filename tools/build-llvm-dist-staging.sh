@@ -178,9 +178,24 @@ cp -a obj/arm/crt0.o obj/arm/libc.a obj/arm/libcxx.a "$WORK/sysroot/lib/"
 # resolve the -l flags with no members, leaving the whole closure to resolve
 # from libc.a/libcxx.a (llvm-bootstrap.md §6.1 blockers — the exact gap).
 # Idempotent.
+# Resolve an archiver for the stubs.  They are EMPTY archives whose only job
+# is to satisfy -ldl/-lrt/-lpthreads/-lm, so any ar works.  macOS/Homebrew
+# puts `llvm-ar` on PATH; Debian/Ubuntu ship it suffixed (llvm-ar-N, or
+# unsuffixed under /usr/lib/llvm-<ver>/bin) and the Makefile's Linux branch
+# uses GNU `ar` — fall through the whole ladder before giving up.
+AR_TOOL=""
+for c in llvm-ar ar; do
+  if command -v "$c" >/dev/null 2>&1; then AR_TOOL="$c"; break; fi
+done
+if [ -z "$AR_TOOL" ]; then
+  for d in /usr/lib/llvm-*/bin; do
+    [ -x "$d/llvm-ar" ] && { AR_TOOL="$d/llvm-ar"; break; }
+  done
+fi
+[ -n "$AR_TOOL" ] || die "no archiver (llvm-ar / ar) on PATH — cannot stub the host -l flags"
 mkdir -p "$WORK/sysroot/lib/stubs"
 for l in pthreads rt dl m; do
-  [ -f "$WORK/sysroot/lib/stubs/lib$l.a" ] || llvm-ar rcs "$WORK/sysroot/lib/stubs/lib$l.a"
+  [ -f "$WORK/sysroot/lib/stubs/lib$l.a" ] || "$AR_TOOL" rcs "$WORK/sysroot/lib/stubs/lib$l.a"
 done
 
 # ---- 5) cross configure (§6; reconfigure in place when warm) ---------
