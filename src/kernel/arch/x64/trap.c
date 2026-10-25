@@ -2314,7 +2314,18 @@ void watchdog_stack_arena(uint64_t *lo, uint64_t *hi) {
    effects -- unlike vm_range_ok/vm_touch, which materialise the page and would
    destroy the very measurement we want.  The kernel direct-maps physical memory,
    so a page-table frame address is usable as a pointer. */
+int kpml_present(uint64_t va);
+uint64_t kpml_pte(uint64_t va);
+
 int kpml_present(uint64_t va) {
+  return (kpml_pte(va) & 1) ? 1 : 0;
+}
+
+/* GB-057: the PTE itself, because "present" is not "usable": measured
+   pte_before=0 -> pte_after=1 with the same cr2 faulting again means the retry is
+   refused by the ENTRY, not by its absence.  Bit 1 is RW: if the write fault gets
+   a read-only PTE installed, the retry writes, faults, and loops for ever. */
+uint64_t kpml_pte(uint64_t va) {
   uint64_t cr3;
   __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
   uint64_t *pml4 = (uint64_t *)(cr3 & ~0xFFFULL);
@@ -2326,16 +2337,15 @@ int kpml_present(uint64_t va) {
   if (!(e & 1))
     return 0;
   if (e & (1ULL << 7))
-    return 1; /* 1 GiB page */
+    return e; /* 1 GiB page */
   uint64_t *pd = (uint64_t *)(e & ~0xFFFULL);
   e = pd[(va >> 21) & 511];
   if (!(e & 1))
     return 0;
   if (e & (1ULL << 7))
-    return 1; /* 2 MiB page */
+    return e; /* 2 MiB page */
   uint64_t *pt = (uint64_t *)(e & ~0xFFFULL);
-  e = pt[(va >> 12) & 511];
-  return (e & 1) ? 1 : 0;
+  return pt[(va >> 12) & 511];
 }
 
 static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
@@ -2972,10 +2982,14 @@ static void general_interrupt_inner(struct trap_frame *tf) {
                CR3 before and after the handler; a direct walk has no side
                effects, unlike vm_range_ok which would materialise the page and
                destroy the measurement. */
-            extern int kpml_present(uint64_t va);
-            int pte_before = kpml_present(kcr2);
+            extern uint64_t kpml_pte(uint64_t va);
+            uint64_t pb = kpml_pte(kcr2);
+            int pte_before = (pb & 1) ? 1 : 0;
             int kh = vm_handle_fault(process_group(cur), kcr2, 1, 0, &why);
-            int pte_after = kpml_present(kcr2);
+            uint64_t pa = kpml_pte(kcr2);
+            int pte_after = (pa & 1) ? 1 : 0;
+            int rw_before = (pb >> 1) & 1;
+            int rw_after = (pa >> 1) & 1;
             {
               static int kpf_diag;
               if (kpf_diag < 5) {
@@ -2998,6 +3012,15 @@ static void general_interrupt_inner(struct trap_frame *tf) {
                 const char *q4 = " pte_after=";
                 while (*q4 && di < 72) db[di++] = *q4++;
                 db[di++] = pte_after ? '1' : '0';
+                const char *q4b = " rw=";
+                while (*q4b && di < 78) db[di++] = *q4b++;
+                db[di++] = rw_before ? '1' : '0';
+                db[di++] = '-';
+                db[di++] = rw_after ? '1' : '0';
+                const char *q4c = " pte=0x";
+                while (*q4c && di < 92) db[di++] = *q4c++;
+                for (int sh = 60; sh >= 0 && di < 108; sh -= 4)
+                  db[di++] = hx2[(pa >> sh) & 0xF];
                 const char *q5 = " why=";
                 while (*q5 && di < 80) db[di++] = *q5++;
                 while (*why && di < 138) db[di++] = *why++;
