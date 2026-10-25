@@ -254,6 +254,24 @@ int main(int argc, char **argv) {
     }
   }
 
+  /* GB-020: /proc/self/fd — a virtual directory of this process's own fds.
+     Deterministic across legs: opendir(2) must succeed (dfd >= 0) on both
+     real Linux and HobbyOS.  The fd contents differ per-leg (process state),
+     so only the open-and-isdir contract is asserted, not the fd list. */
+  {
+    int fd_p = open("/proc/self/fd", O_RDONLY | O_DIRECTORY);
+    prow("procfd_opendir", fd_p >= 0 ? 0 : -1, fd_p < 0 ? (long)(errno) : 0, NULL, 0);
+    /* getdents64 over it must yield at least "." and fd entries -> bytes > 0 */
+    long selfn = 0;
+    if (fd_p >= 0) {
+      char sb[8192];
+      long nn = syscall(SYS_getdents64, fd_p, sb, sizeof sb);
+      selfn = nn;
+      close(fd_p);
+    }
+    prow("procfd_read", selfn > 0 ? 1 : 0, selfn == 0 ? 9 : 0, NULL, 0);
+  }
+
   pstr("t4-probe-arrived\n");
   pstr("probe-exit\n");
   return 0;

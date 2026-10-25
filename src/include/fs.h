@@ -33,7 +33,12 @@ typedef enum {
      FILE_TYPE_FAT16 so readers/writers refuse it (a dir has no data read
      path) and so O_TRUNC can never reach fat16_truncate on it.  Appended
      after UNINIT: never shifts the values above. */
-  FILE_TYPE_FAT16DIR
+  FILE_TYPE_FAT16DIR,
+  /* GB-020: virtual /proc/<pid>/fd directory.  getdents64 lists the
+     process's open fds; read/write refuse it.  Distinct from FAT16DIR
+     because there is no on-disk dir entry.  Appended last so the values
+     above never shift. */
+  FILE_TYPE_PROCFD
 } file_type_t;
 
 struct vm_object;
