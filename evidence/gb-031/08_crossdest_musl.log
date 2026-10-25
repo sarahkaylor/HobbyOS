@@ -1,0 +1,42 @@
+########## clean build at /tmp/g-musl-a ##########
+/tmp/g-musl-a/SDL2-2.30.10.tar.gz: OK
+configure: WARNING: DBus support is required for fcitx.
+ar: `u' modifier ignored since `D' is the default (see `U')
+ar: `u' modifier ignored since `D' is the default (see `U')
+ar: `u' modifier ignored since `D' is the default (see `U')
+
+== libSDL2.a ==
+e09876b411799963a8db82413bf9579168c20d53108751532e74bb9e3540db3d  build/.libs/libSDL2.a
+
+== sdl2_static_test ==
+/tmp/g-musl-a/sdl2_static_test: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, with debug_info, not stripped
+6674931d12d1f2ccdeea5994cce976cb82113ee9ce8f1f6352a8c49aafca8141  /tmp/g-musl-a/sdl2_static_test
+--- hashes (/tmp/g-musl-a) ---
+e09876b411799963a8db82413bf9579168c20d53108751532e74bb9e3540db3d  /tmp/g-musl-a/stage/SDL2-2.30.10/build/.libs/libSDL2.a
+6674931d12d1f2ccdeea5994cce976cb82113ee9ce8f1f6352a8c49aafca8141  /tmp/g-musl-a/sdl2_static_test
+########## clean build at /tmp/g-musl-b ##########
+/tmp/g-musl-b/SDL2-2.30.10.tar.gz: OK
+configure: WARNING: DBus support is required for fcitx.
+ar: `u' modifier ignored since `D' is the default (see `U')
+ar: `u' modifier ignored since `D' is the default (see `U')
+ar: `u' modifier ignored since `D' is the default (see `U')
+
+== libSDL2.a ==
+e09876b411799963a8db82413bf9579168c20d53108751532e74bb9e3540db3d  build/.libs/libSDL2.a
+
+== sdl2_static_test ==
+/tmp/g-musl-b/sdl2_static_test: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, with debug_info, not stripped
+6674931d12d1f2ccdeea5994cce976cb82113ee9ce8f1f6352a8c49aafca8141  /tmp/g-musl-b/sdl2_static_test
+--- hashes (/tmp/g-musl-b) ---
+e09876b411799963a8db82413bf9579168c20d53108751532e74bb9e3540db3d  /tmp/g-musl-b/stage/SDL2-2.30.10/build/.libs/libSDL2.a
+6674931d12d1f2ccdeea5994cce976cb82113ee9ce8f1f6352a8c49aafca8141  /tmp/g-musl-b/sdl2_static_test
+########## cross-dest comparison ##########
+libSDL2.a: IDENTICAL across different dests (e09876b411799963a8db82413bf9579168c20d53108751532e74bb9e3540db3d)
+sdl2_static_test: IDENTICAL across different dests (6674931d12d1f2ccdeea5994cce976cb82113ee9ce8f1f6352a8c49aafca8141)
+########## musl + ELF shape ##########
+glibc __libc_start_main_impl count: 0
+musl libc_start_main_stage2 count:  1
+  Type:                              EXEC (Executable file)
+  Machine:                           Advanced Micro Devices X86-64
+/tmp/g-musl-a/sdl2_static_test: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, with debug_info, not stripped
+GATE_EXIT=0
