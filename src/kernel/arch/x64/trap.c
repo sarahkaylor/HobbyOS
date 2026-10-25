@@ -2244,6 +2244,7 @@ static void safe_print_hex(uint64_t val) {
 
 static volatile uint64_t wd_last_seen_ms[MAX_CPUS];
 static volatile uint64_t wd_last_seen_rip[MAX_CPUS];
+static volatile uint64_t wd_last_seen_rflags[MAX_CPUS];
 static volatile int wd_last_seen_pid[MAX_CPUS];
 static volatile uint64_t wd_next_report_ms = 0;
 /* Full last frame per core (copied at every tick) so the stall dump can
@@ -2329,6 +2330,12 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
 
   wd_last_seen_ms[cpu] = now;
   wd_last_seen_rip[cpu] = tf->elr;
+  /* GB-057: RFLAGS at the last tick.  A core that stops taking timer interrupts
+     while sitting in kernel asm cannot be diagnosed from RIP alone: if IF is
+     clear here, the timer could not have preempted it and 'stuck in the frame
+     copy' is a scheduling/masking defect, not a memory one.  Measured (intel,
+     parked cores) the only way to tell the two apart without a monitor. */
+  wd_last_seen_rflags[cpu] = tf->spsr;
   wd_last_seen_pid[cpu] = cur ? cur->pid : -1;
   wd_last_frame[cpu] = *tf;
   wd_last_tfp[cpu] = (uint64_t)tf;
@@ -2347,6 +2354,8 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
     print_int_raw((int)c);
     uart_puts_raw(" rip=");
     uart_print_hex_raw(wd_last_seen_rip[c]);
+    uart_puts_raw(" rflags=");
+    uart_print_hex_raw(wd_last_seen_rflags[c]);
     uart_puts_raw(" pid=");
     print_int_raw(wd_last_seen_pid[c]);
     /* GB-057: the resume mark the CPU itself wrote immediately before
