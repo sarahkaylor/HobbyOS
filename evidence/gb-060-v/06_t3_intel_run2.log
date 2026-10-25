@@ -1,2 +1,27 @@
 === T3 (intel): build ===
 === T3 (intel): run (deadline 2700s, log obj/t3_intel_gb060v_run2.log) ===
+T3_intel: 15279 console lines, 92 FAIL lines, 5 user memory fault records across 5 processes, 84 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 2700s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 92 FAIL line(s); first 20:
+2552:[SIGTEST] FAIL waitpid returns the child got=17 want=4294964048
+3444:[SEDTEST] FAIL basic_s (stdout)
+3763:  TORTURE threads-churn-64: FAIL
+4188:[SEDTEST] FAIL s_g (stdout)
+5037:: No such file or directory[SEDTEST] FAIL s_2nd (stdout)
+5158:  FPU_T fork-inherit: FAIL
+5192:FPU_T FAILED: 2
+5628:[CMPTEST] FAIL -b quotes differing bytes
+5632:[CMPTEST] FAIL -l lists all differing bytes
+5637:: No such file or directory[CMPTEST] FAIL EOF on shorter file
+5641:[CMPTEST] FAIL EOF message on stderr
+5647:[CMPTEST] FAIL empty EOF message
+5651:[CMPTEST] FAIL missing file diagnostic
+5654:CUT.BIN: [CMPTEST] FAIL -n 5 within identical prefix
+5656:: No such file or directory[CMPTEST] FAIL -n 9 stops before difference
+5660:[CMPTEST] FAIL -n 10 hits difference
+5664:[CMPTEST] FAIL -i 4:0 skips prefix
+5666:[SEDTEST] FAIL s_p_n (stdout)
+5669:[CMPTEST] FAIL - stdin EOF diagnostic
+5679:[CMPTEST] FAILURES: 11
+T3_intel EXIT=1
+T3_EXIT=1
