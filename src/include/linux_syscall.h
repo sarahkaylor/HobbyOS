@@ -97,6 +97,8 @@
 #define L_SYS_sched_setaffinity 203
 #define L_SYS_sched_getaffinity 204
 #define L_SYS_epoll_create 213
+/* GB-020: getdents64(fd, dirp, count) — the x86_64 Linux dirent64 reader. */
+#define L_SYS_getdents64 217
 #define L_SYS_fadvise64 221
 #define L_SYS_clock_gettime 228
 #define L_SYS_clock_getres 229

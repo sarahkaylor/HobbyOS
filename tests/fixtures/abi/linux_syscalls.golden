@@ -75,6 +75,7 @@ futex 202
 sched_setaffinity 203
 sched_getaffinity 204
 epoll_create 213
+getdents64 217
 fadvise64 221
 clock_gettime 228
 clock_getres 229

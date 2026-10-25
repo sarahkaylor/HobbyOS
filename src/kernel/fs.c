@@ -131,6 +131,12 @@ static int get_global_fd(struct file *f) {
 #define O_EXCL  0x80
 #define O_TRUNC 0x200
 #endif
+/* GB-020: Linux open(2) flag for directories.  Gets routed to a directory-fd
+ * (FILE_TYPE_FAT16DIR) instead of the regular file path; getdents64 reads it.
+ * 0200000 octal = 0x10000, the Linux O_DIRECTORY value the compat sysroot uses. */
+#ifndef O_DIRECTORY
+#define O_DIRECTORY 0x10000
+#endif
 
 int file_open(struct process *cur, const char *filename, int flags) {
   cur = process_group(cur); /* P1 (D7): fd table + cwd are group state */
@@ -159,6 +165,32 @@ int file_open(struct process *cur, const char *filename, int flags) {
     } else if (isurand) {
       f->type = FILE_TYPE_DEVURANDO;
     } else {
+      f->type = FILE_TYPE_EMPTY;
+      f->ref_count = 0;
+      return -ENOENT;
+    }
+    int dfd = -1;
+    for (int i = 0; i < MAX_OPEN_FDS; i++) {
+      if (cur->open_fds[i] == -1) {
+        cur->open_fds[i] = get_global_fd(f);
+        cur->num_open_fds++;
+        dfd = i;
+        break;
+      }
+    }
+    if (dfd == -1) {
+      f->type = FILE_TYPE_EMPTY;
+      f->ref_count = 0;
+      return -EMFILE;
+    }
+    return dfd;
+  }
+
+  /* GB-020: O_DIRECTORY opens a directory fd (getdents64).  Route it before
+   * the regular FAT16 file path so a directory never reaches the file open
+   * (which refuses dirs for boot-sector safety).  Missing target => ENOENT. */
+  if (flags & O_DIRECTORY) {
+    if (fat16_open_dir(filename, f) != 0) {
       f->type = FILE_TYPE_EMPTY;
       f->ref_count = 0;
       return -ENOENT;
@@ -1220,10 +1252,29 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
   case FILE_TYPE_UNIXSOCK: /* P4: F_GETFD-probing tools stat caches use this */
     k_stat_fill(st, 0, K_S_IFSOCK | 0600, 0);
     return 0;
+  case FILE_TYPE_FAT16DIR: /* GB-020: a directory fd stats as a directory */
+    k_stat_fill(st, fat16_synth_ino(f->fat16.dir_sector, f->fat16.dir_offset),
+                K_S_IFDIR | 0755, 0);
+    return 0;
   default:
     *errp = EBADF;
     return -1;
   }
+}
+
+/* GB-020: getdents64 over an open directory fd (FILE_TYPE_FAT16DIR). */
+int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
+  p = process_group(p); /* P1 (D7): the fd table is group state */
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
+  int g_fd = p->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
+  struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
+  if (f->type != FILE_TYPE_FAT16DIR) return -ENOTDIR;
+  if (!ubuf || bufsize <= 0) return -EINVAL;
+  int rc = fat16_getdents64(f, f->fat16.cursor, ubuf, bufsize);
+  if (rc < 0) return -EIO;
+  return rc;
 }
 
 int file_stat_path(struct process *p, const char *path, struct k_stat *st,

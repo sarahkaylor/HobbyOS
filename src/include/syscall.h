@@ -212,8 +212,12 @@
 #define SYS_INPUT_IOCTL   (93)
 #define SYS_INPUT_READ    (94)
 
+/* GB-020: getdents64 for Linux-ABI directories.  (fd, dirp, count) ->
+ * bytes written | -errno.  Native number 95 (next free above 94). */
+#define SYS_GETDENTS64    (95)
+
 /* Highest defined syscall number. Dispatch tables are sized SYS_MAX + 1.
  * 90/91 were the next FREE numbers above the previous SYS_MAX (89). */
-#define SYS_MAX           (94)
+#define SYS_MAX           (95)
 
 #endif /* SYSCALL_H */

@@ -1440,6 +1440,21 @@ static void sys_read_dir(struct trap_frame *tf) {
   }
 }
 
+static void sys_getdents64(struct trap_frame *tf) {
+  int fd = (int)tf->regs[5];             // rdi = fd
+  void *buf = (void *)tf->regs[4];       // rsi = dirp
+  int count = (int)tf->regs[3];          // rdx = count
+
+  struct process *caller = current_process();
+  if (sys_user_range((uint64_t)buf, count > 0 ? (uint64_t)count : 0, 1)) {
+    extern int file_getdents64(struct process *p, int fd, void *ubuf, int n);
+    int ret = file_getdents64(caller, fd, buf, count);
+    tf->regs[0] = (uint64_t)ret;         /* bytes (>=0) or negative errno */
+  } else {
+    tf->regs[0] = -EFAULT;
+  }
+}
+
 static void sys_mkdir(struct trap_frame *tf) {
   const char *path = (const char *)tf->regs[5]; // rdi
   struct process *caller = current_process();
@@ -2013,6 +2028,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         case 2:  syscall_num = SYS_OPEN;  break;   /* open(path, fl, md) */
         case 3:  syscall_num = SYS_CLOSE; break;   /* close(fd)          */
         case 60: syscall_num = SYS_EXIT;  break;   /* exit(code)         */
+        /* GB-020: getdents64(fd, dirp, count).  Linux number 217. */
+        case 217: syscall_num = SYS_GETDENTS64; break;
         default:
           tf->regs[0] = (uint64_t)(int64_t)(-38);  /* -ENOSYS */
           return;
@@ -2063,6 +2080,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_available(tf);
   } else if (syscall_num == SYS_READ_DIR) {
     sys_read_dir(tf);
+  } else if (syscall_num == SYS_GETDENTS64) {
+    sys_getdents64(tf);
   } else if (syscall_num == SYS_KILL) {
     sys_kill(tf);
   } else if (syscall_num == SYS_YIELD) {
