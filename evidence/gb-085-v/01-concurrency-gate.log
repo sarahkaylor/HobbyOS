@@ -1,0 +1,69 @@
+[gb085] building host_tests once (serial)...
+[gb085] serial build green.
+[gb085] starting two make host_tests simultaneously...
+FAIL: concurrent runs not both green (A rc=2 ok=False ; B rc=0 ok=True)
+---- A tail ----
+  PASS  tools/evidence_rig_test.py
+  PASS  tools/perf_game_cycle_test.py
+  PASS  tools/t5/acceptance_gate_test.py
+  PASS  tools/t5/acceptance_test.py
+  PASS  tools/t5/evidence_pack_test.py
+  PASS  tools/t5/fatbig_tail_test.py
+  PASS  tools/t5/feasibility_doc_test.py
+  PASS  tools/t5/flaky_triage_test.py
+  PASS  tools/t5/game_docs_test.py
+  PASS  tools/t5/perf_report_test.py
+  FAIL  tools/t5/replay_test.py  (FileNotFoundError: [Errno 2] No such file or directory: '/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-9642df51/tools/t5/replays/_bad_tmp.jsonl')
+  PASS  tools/t5/retro_skill_test.py
+  PASS  tools/t5/selfreg_test.py
+[host-tests] done: 20/21 passed
+make: *** [Makefile:3623: host_tests] Error 1
+---- A FAIL lines ----
+  OK — absent probe FAILED as required
+[self-test] GB-079 (a probe edit must FAIL in both --check modes):
+  OK — injected probe row FAILS (leg A absent)
+  OK — injected probe row FAILS (leg A present)
+[self-test] missing CAT (must FAIL):
+  OK — absent member FAILED as required
+[self-test] broken HELLO output (must FAIL):
+  OK — broken member FAILED as required
+  OK — probe never dispatched -> gate FAILs (not a pass)
+  OK — CAT absent -> WAVE.CFG corpus member FAILs (no silent drop)
+self-test: OK — flipping ho_open FAILs (rc=0 clean pass), restoring passes
+  PASS: lies.py (prints PASSED but exits 1 — the substring-only grader called this a pass) -> grader said FAIL, wanted FAIL
+  PASS: silent.py (exit 0 with no verdict statement — a silent skip is not a pass) -> grader said FAIL, wanted FAIL
+  PASS: crash.py (non-zero exit) -> grader said FAIL, wanted FAIL
+  FAIL  tools/t5/replay_test.py  (FileNotFoundError: [Errno 2] No such file or directory: '/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-9642df51/tools/t5/replays/_bad_tmp.jsonl')
+---- B tail ----
+  PASS notes(e2e): NOTES.TXT holds the '### title' and the edited body
+  PASS notes(e2e): the parent reloads the saved note
+  PASS notes(e2e): delete asks for confirmation in the real dialog
+  PASS notes(e2e): the confirmed delete leaves no note data behind
+  PASS notes(e2e): NOTES.TXT parses back to zero notes
+
+-- suite self-checks
+  PASS the suite covers all ten desktop applications
+  PASS every app has its own identity banner in the table
+
+=== Test Results ===
+Checks run:    482
+Checks failed: 0
+ALL APPS SUITE TESTS PASSED
+TEST EXIT: 0
+---- B FAIL lines ----
+[self-test] clause 3 (absent probe must FAIL, not skip):
+  OK — absent probe FAILED as required
+[self-test] GB-079 (a probe edit must FAIL in both --check modes):
+  OK — injected probe row FAILS (leg A absent)
+  OK — injected probe row FAILS (leg A present)
+[self-test] missing CAT (must FAIL):
+  OK — absent member FAILED as required
+[self-test] broken HELLO output (must FAIL):
+  OK — broken member FAILED as required
+  OK — probe never dispatched -> gate FAILs (not a pass)
+  OK — CAT absent -> WAVE.CFG corpus member FAILs (no silent drop)
+self-test: OK — flipping ho_open FAILs (rc=0 clean pass), restoring passes
+  PASS: lies.py (prints PASSED but exits 1 — the substring-only grader called this a pass) -> grader said FAIL, wanted FAIL
+  PASS: silent.py (exit 0 with no verdict statement — a silent skip is not a pass) -> grader said FAIL, wanted FAIL
+  PASS: crash.py (non-zero exit) -> grader said FAIL, wanted FAIL
+EXIT=1
