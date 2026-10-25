@@ -281,7 +281,7 @@ skeleton as an issue header block (see `tools/board/README.md`).
 
 ### 4.3 The re-plan loop (autonomy — this is how the swarm steers itself)
 
-Triggers (whichever first): **every 6h** (cron on `swarm-coordinator`: `0 */6 * * *` — 00/06/12/18 UTC; a daily cadence left every worker lane drained for hours between plans), every milestone gate, `>3 tickets blocked`, `>30% red on latest gate`, **claimable-Ready in a worker lane hits 0**, or acceptance evidence landed.
+Triggers (whichever first): **every 12h** (cron on `swarm-coordinator`: `0 */12 * * *` — 00/12 UTC; was every 6h, but a 2.5 h pass at 6h is a 42% planning duty cycle — 12h keeps the plan fresh at ~21%), every milestone gate, `>3 tickets blocked`, `>30% red on latest gate`, **claimable-Ready in a worker lane hits 0**, or acceptance evidence landed.
 
 The loop:
 1. Coordinator snapshots: board state, open MRs, gate results, evidence dir tree, `gaming.md`.
@@ -314,7 +314,7 @@ The loop:
   (`--provider dgx -m deepseek-v4.1-flash --reasoning high`), same `~/.hermes`, its own worktree,
   kept alive by a `swarm-verify@<agent>` systemd unit (clone of `swarm-driver@` carrying the DEEP
   provider flags) — see §11.4/§11.5.
-- Re-plan cadence via `hermes cronjob` (every 6 h) on `swarm-coordinator`.
+- Re-plan cadence via `hermes cronjob` (every 12 h) on `swarm-coordinator`.
 - **Session rotation:** an agent session is cleared at a **ticket boundary once it is older than 2 days**. The charter has the agent record each finished ticket with `printf '%s %s\n' "$(date -u +%FT%TZ)" "<TICKET-ID>" >> ~/.swarm/<agent>.ticketclose`; the driver (`ROTATE_DAYS=2`) sees a marker newer than its last launch plus a session age > 2 days, archives the old session id to `<agent>.sessions.log` and starts a fresh session from the charter on the next tick. Never rotate mid-ticket (no marker = no rotation). This keeps one ticket's working context but stops an eight-day session from re-prefeeding thousands of stale messages on every 25-minute resume.
 - `gaming.md`, `docs/linux-abi.md`, and this board are the only cross-agent interface points —
   no agent improvises ABI/architecture (that path is `decision`+user or the `deep` planner).
