@@ -1,0 +1,91 @@
+rev: 41ec7080aa5daeec44effb77d2d985ca5001f935  date: 2026-10-25T13:03:47Z
+########## INTEL T3 RUN 1 ##########
+start: 2026-10-25T13:03:47Z
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 900s, log /home/sarah/wt/gb057/evidence/gb-057-v/01-t3-intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 10687 console lines, 84 FAIL lines, 5 user memory fault records across 5 processes, 80 programs exited, halted=1
+T3_intel: FAIL — 84 FAIL line(s); first 20:
+2712:Loading program for scheduler (v2 AS): [SIGTEST] FAIL waitpid returns the child got=14 want=4294964048
+3038:[SEDTEST] FAIL basic_s (stdout)
+3807:[SEDTEST] FAIL s_g (stdout)
+4884:Loading program for scheduler (v2 AS): CUT.BIN: TR.BIN: [SEDTEST] FAIL s_2nd (stdout)
+5112:Loading program for scheduler (v2 AS): Loading program for scheduler (v2 AS):   FPU_T torture-child: FAIL
+5462:[SEDTEST] FAIL s_p_n (stdout)
+5656:FPU_T FAILED: 2
+5786:[CMPTEST] FAIL EOF message on stderr
+5870:[CMPTEST] FAIL empty EOF message
+6066:Loading program for scheduler (v2 AS): [CMPTEST] FAIL - stdin EOF diagnostic
+6078:[TACTEST] FAIL missing file
+6086:Loading program for scheduler (v2 AS): [CMPTEST] FAILURES: 5
+6095:[TACTEST] FAIL empty separator
+6159:/FOLD.BINLoading program for scheduler (v2 AS): [SEDTEST] FAIL amp (stdout)
+6695:[SEDTEST] FAIL backref (stdout)
+7110:[TSORTTEST] FAIL cycle from stdin names '-' (exit status -1 != 1)
+7112:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+7125:[TSORTTEST] FAIL odd token count (2.1: no diagnostic) (exit status -1 != 0)
+7127:[TSORTTEST] FAIL self-loop pair ignored (exit status -1 != 0)
+7128:/TEST2.TXT[TSORTTEST] FAIL repeated edges (exit status -1 != 0)
+T3_intel EXIT=1
+run1 rc=1
+end: 2026-10-25T13:04:33Z
+########## INTEL T3 RUN 2 ##########
+start: 2026-10-25T13:04:33Z
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 900s, log /home/sarah/wt/gb057/evidence/gb-057-v/02-t3-intel.log) ===
+T3_intel: 18246 console lines, 280 FAIL lines, 9 user memory fault records across 9 processes, 86 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 900s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 280 FAIL line(s); first 20:
+2785:MMTEST FAIL [WAVE-TRY] TAILGN.BIN
+3013:[SEDTEST] FAIL basic_s (stdout)
+3164:[COMMTEST] FAIL -2 suppress right-unique
+3206:[COMMTEST] FAIL -3 suppress shared
+3248:[COMMTEST] FAIL -12 shared only
+3370:/NL.BIN  FPU_T torture-child: FAIL
+3397:  FPU_T fork-pipe: FAIL
+3442:FPU_T FAILED: 2
+3464:COMM.BIN: MD5SUM.BIN: /COML.TXT/MD5ABC.TXT[SEDTEST] FAIL s_g (cannot write fixtures)
+3479:[SEDTEST] FAIL s_2nd (cannot write fixtures)
+3484:FOLD.BIN: [SEDTEST] FAIL s_p_n (cannot write fixtures)
+3494:[SEDTEST] FAIL amp (cannot write fixtures)
+3505:[MD5TEST] FAIL -b binary marker
+3549:[UNEXPTEST] FAIL default 9 blanks -> tab+space
+3635:[GREPTEST] FAIL invert_v (cannot write fixtures)
+3656:[SEDTEST] FAIL backref (cannot write fixtures)
+3672:[CUTTEST] FAIL -f 2 default TAB
+3697:[TAILTEST] FAILURES: 2
+3702:[MD5TEST] FAIL --string digest
+3739:[CUTTEST] FAIL -f 2-3 default TAB
+T3_intel EXIT=1
+run2 rc=1
+end: 2026-10-25T13:20:06Z
+########## INTEL T3 RUN 3 ##########
+start: 2026-10-25T13:20:06Z
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 900s, log /home/sarah/wt/gb057/evidence/gb-057-v/03-t3-intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 16085 console lines, 93 FAIL lines, 11 user memory fault records across 11 processes, 83 programs exited, halted=1
+T3_intel: FAIL — 93 FAIL line(s); first 20:
+2519:[SIGTEST] FAIL waitpid returns the child got=40 want=4294964048
+2935:[SEDTEST] FAIL basic_s (stdout)
+3768:/BLKT2.TXT  FPU_T torture-child: FAIL
+4019:[SEDTEST] FAIL s_g (stdout)
+4741:  FPU_T fork-inherit: FAIL
+4840:FPU_T FAILED: 2
+8103:[SIGTEST] FAIL waitpid returns the child got=34 want=4294964048
+8511:[SEDTEST] FAIL basic_s (stdout)
+9137:[SEDTEST] FAIL s_g (stdout)
+9910:  FPU_T torture-child: FAIL
+10028:[SEDTEST] FAIL s_2nd (stdout)
+10550:  FPU_T fork-inherit: FAIL
+10599:FPU_T FAILED: 2
+10627:[TACTEST] FAIL missing file
+10631:[TACTEST] FAIL empty separator
+10813:[CMPTEST] FAIL EOF message on stderr
+10814:/NO_SUCH_NL_FILE[SEDTEST] FAIL s_p_n (stdout)
+10870:[CMPTEST] FAIL empty EOF message
+10954:[CMPTEST] FAIL -i 4:0 skips prefix
+10962:[CMPTEST] FAIL - stdin EOF diagnostic
+T3_intel EXIT=1
+run3 rc=1
+end: 2026-10-25T13:21:13Z

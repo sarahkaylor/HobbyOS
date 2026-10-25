@@ -1,0 +1,13 @@
+--- run2 ordering: stall markers vs the extra FAIL clusters ---
+total lines: 18246
+first [IDLESTUCK] line: 16795
+first [GREPTEST] FAIL line: 3635
+first [COMMTEST] FAIL line: 3164
+first SEDTEST FAIL line: 3013
+last line: qemu-system-x86_64: terminating on signal 15 from pid 1602927 ()
+
+--- sample GREPTEST FAILs in run2 ---
+[GREPTEST] FAIL invert_v (cannot write fixtures)
+[GREPTEST] FAIL ignore_case (spawn GREP.BIN failed)
+[GREPTEST] FAIL word_w_miss (cannot write fixtures)
+[GREPTEST] FAIL word_w_hit (cannot write fixtures)

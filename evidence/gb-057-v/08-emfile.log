@@ -1,0 +1,8 @@
+--- "Too many open files" / EMFILE across the three runs ---
+run1 (halted=1): 'Too many open files' = 0   'pipe failed' = 0   'cannot write fixtures' = 0
+run2 (halted=0): 'Too many open files' = 15   'pipe failed' = 255   'cannot write fixtures' = 49
+run3 (halted=1): 'Too many open files' = 0   'pipe failed' = 0   'cannot write fixtures' = 0
+
+--- run2: first EMFILE occurrence ---
+2985:/CAPA.TXT: Too many open files
+3396:SED.BIN: can't read SEDT.IN: Too many open files

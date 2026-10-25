@@ -1,0 +1,22 @@
+--- run2 (stalled): infra-failure classes and their first occurrence ---
+  cannot write fixtures : count=49 first_line=3464
+  spawn .* failed : count=39 first_line=3946
+  ENOSPC : count=0 first_line=none
+  No space : count=0 first_line=none
+  disk full : count=0 first_line=none
+  out of memory : count=0 first_line=none
+  OOM : count=2 first_line=1958
+  cannot create : count=2 first_line=787
+
+--- same classes in the halting runs ---
+run1:
+  cannot write fixtures : 0
+  spawn .* failed : 0
+run3:
+  cannot write fixtures : 0
+  spawn .* failed : 0
+
+--- run2: first 3 spawn failures with their line context ---
+3946:[SEDTEST] FAIL empty_reuse (spawn SED.BIN failed)
+3949:[GREPTEST] FAIL ignore_case (spawn GREP.BIN failed)
+4547:  (spawn CMP.BIN failed)

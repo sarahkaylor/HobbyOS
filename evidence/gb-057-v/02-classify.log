@@ -1,0 +1,106 @@
+########## classify run 1 ##########
+log: evidence/gb-057-v/01-t3-intel.log  (PARTIAL — the tier wedged and was stopped)
+FAIL lines: 84
+
+REAL_ASSERT          75
+ARTIFACT_FOREIGN      8
+ARTIFACT_FRAGMENT     1
+
+artifacts 9 / real 75
+
+--- ARTIFACT_FOREIGN
+   [(untagged)] Loading program for scheduler (v2 AS): [SIGTEST] FAIL waitpid returns the child got=14 want=42949640   <foreign: SIGTEST>
+   [(untagged)] Loading program for scheduler (v2 AS): CUT.BIN: TR.BIN: [SEDTEST] FAIL s_2nd (stdout)   <foreign: SEDTEST>
+   [(untagged)] Loading program for scheduler (v2 AS): [CMPTEST] FAIL - stdin EOF diagnostic   <foreign: CMPTEST>
+   [(untagged)] Loading program for scheduler (v2 AS): [CMPTEST] FAILURES: 5   <foreign: CMPTEST>
+--- ARTIFACT_SPLIT
+--- REAL_ASSERT
+   [SEDTEST] [SEDTEST] FAIL basic_s (stdout)
+   [SEDTEST] [SEDTEST] FAIL s_g (stdout)
+   [(untagged)] Loading program for scheduler (v2 AS): Loading program for scheduler (v2 AS):   FPU_T torture-child:
+   [SEDTEST] [SEDTEST] FAIL s_p_n (stdout)
+--- REAL_RC
+
+--- by tag (artifacts / real):
+  SEDTEST      total= 55  artifacts=  0  real= 55
+  (untagged)   total= 17  artifacts=  9  real=  8
+  TSORTTEST    total=  8  artifacts=  0  real=  8
+  CMPTEST      total=  2  artifacts=  0  real=  2
+  TACTEST      total=  2  artifacts=  0  real=  2
+
+########## classify run 2 ##########
+log: evidence/gb-057-v/02-t3-intel.log  (PARTIAL — the tier wedged and was stopped)
+FAIL lines: 280
+
+REAL_ASSERT         256
+ARTIFACT_FOREIGN     18
+ARTIFACT_FRAGMENT     6
+
+artifacts 24 / real 256
+
+--- ARTIFACT_FOREIGN
+   [(untagged)] MMTEST FAIL [WAVE-TRY] TAILGN.BIN   <foreign: WAVE-TRY>
+   [(untagged)] COMM.BIN: MD5SUM.BIN: /COML.TXT/MD5ABC.TXT[SEDTEST] FAIL s_g (cannot write fixtures)   <foreign: SEDTEST>
+   [(untagged)] FOLD.BIN: [SEDTEST] FAIL s_p_n (cannot write fixtures)   <foreign: SEDTEST>
+   [(untagged)] /BLKT2.TXT[PASTETEST] FAIL -d comma   <foreign: PASTETEST>
+--- ARTIFACT_SPLIT
+--- REAL_ASSERT
+   [SEDTEST] [SEDTEST] FAIL basic_s (stdout)
+   [COMMTEST] [COMMTEST] FAIL -2 suppress right-unique
+   [COMMTEST] [COMMTEST] FAIL -3 suppress shared
+   [COMMTEST] [COMMTEST] FAIL -12 shared only
+--- REAL_RC
+
+--- by tag (artifacts / real):
+  SEDTEST      total= 78  artifacts=  0  real= 78
+  (untagged)   total= 36  artifacts= 23  real= 13
+  GREPTEST     total= 23  artifacts=  0  real= 23
+  CMPTEST      total= 23  artifacts=  0  real= 23
+  TSORTTEST    total= 16  artifacts=  0  real= 16
+  TACTEST      total= 15  artifacts=  1  real= 14
+  COMMTEST     total= 11  artifacts=  0  real= 11
+  UNEXPTEST    total= 11  artifacts=  0  real= 11
+  FOLDTEST     total= 10  artifacts=  0  real= 10
+  MD5TEST      total=  8  artifacts=  0  real=  8
+  CUTTEST      total=  8  artifacts=  0  real=  8
+  NLTEST       total=  8  artifacts=  0  real=  8
+  SIGTEST      total=  7  artifacts=  0  real=  7
+  PASTETEST    total=  7  artifacts=  0  real=  7
+  EXPANDTEST   total=  6  artifacts=  0  real=  6
+  TRTEST       total=  5  artifacts=  0  real=  5
+  WCTEST       total=  4  artifacts=  0  real=  4
+  HEDTEST      total=  2  artifacts=  0  real=  2
+  TAILTEST     total=  1  artifacts=  0  real=  1
+  TEST         total=  1  artifacts=  0  real=  1
+
+########## classify run 3 ##########
+log: evidence/gb-057-v/03-t3-intel.log  (PARTIAL — the tier wedged and was stopped)
+FAIL lines: 93
+
+REAL_ASSERT          83
+ARTIFACT_FOREIGN      6
+ARTIFACT_FRAGMENT     4
+
+artifacts 10 / real 83
+
+--- ARTIFACT_FOREIGN
+   [(untagged)] /NO_SUCH_NL_FILE[SEDTEST] FAIL s_p_n (stdout)   <foreign: SEDTEST>
+   [(untagged)] /BLKT2.TXT[SEDTEST] FAIL amp (stdout)   <foreign: SEDTEST>
+   [(untagged)] /TEST4.TXT[SEDTEST] FAIL empty_reuse (stdout2)   <foreign: SEDTEST>
+   [(untagged)] /GRT.IN[SEDTEST] FAIL addr_last_d (stdout)   <foreign: SEDTEST>
+--- ARTIFACT_SPLIT
+--- REAL_ASSERT
+   [SIGTEST] [SIGTEST] FAIL waitpid returns the child got=40 want=4294964048
+   [SEDTEST] [SEDTEST] FAIL basic_s (stdout)
+   [(untagged)] /BLKT2.TXT  FPU_T torture-child: FAIL
+   [SEDTEST] [SEDTEST] FAIL s_g (stdout)
+--- REAL_RC
+
+--- by tag (artifacts / real):
+  SEDTEST      total= 54  artifacts=  0  real= 54
+  (untagged)   total= 19  artifacts= 10  real=  9
+  TSORTTEST    total= 11  artifacts=  0  real= 11
+  CMPTEST      total=  5  artifacts=  0  real=  5
+  SIGTEST      total=  2  artifacts=  0  real=  2
+  TACTEST      total=  2  artifacts=  0  real=  2
+

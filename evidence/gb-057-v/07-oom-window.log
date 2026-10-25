@@ -1,0 +1,23 @@
+--- the OOM / cannot-create lines in run2 ---
+1958:DOOM.BIN
+8043:DOOM.BIN
+787:mkdir: cannot create directory /SUB1
+7359:mkdir: cannot create directory /SUB1
+
+--- first 6 lines of the degradation window (3400-3500) ---
+
+[UNEXPTEST] pipe failed
+v2 loader: image mapped (lazy), bytes=116648 pages=29 first=in elap=1ms
+v2 loader: PID=29 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+
+EXPAND.BIN
+v2 loader: image mapped (lazy), bytes=108504 pages=27 first=in elap=0ms
+v2 loader: image mapped (lazy), bytes=115208 pages=29 first=in elap=4ms
+v2 loader: PID=19 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+COMM.BIN: MD5SUM.BIN: /COML.TXT/MD5ABC.TXT[SEDTEST] FAIL s_g (cannot write fixtures)
+: Too many open files: Too many open files[CUTTEST] pipe failed
+v2 loader: PID=41 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] COMM.BIN rc>0
+[ARRIVED] FOLD.BIN rc>0
+[UNEXPTEST] pipe failed
+
