@@ -1,0 +1,15 @@
+run2 'User process fault!' records: 0
+run2 'FATAL: Exception in Kernel Mode' records: 10
+run2 'FATAL kernel-mode fault, halting this CPU' records: 0
+
+--- what the watchdog prints for each CPU: live frame or a stored one? ---
+2246:static volatile uint64_t wd_last_seen_rip[MAX_CPUS];
+2247:static volatile uint64_t wd_last_seen_rflags[MAX_CPUS];
+2255:static struct trap_frame wd_last_frame[MAX_CPUS];
+2332:  wd_last_seen_rip[cpu] = tf->elr;
+2338:  wd_last_seen_rflags[cpu] = tf->spsr;
+2340:  wd_last_frame[cpu] = *tf;
+2356:    uart_print_hex_raw(wd_last_seen_rip[c]);
+2358:    uart_print_hex_raw(wd_last_seen_rflags[c]);
+
+--- run2: any User-process-fault lines at all, and where ---

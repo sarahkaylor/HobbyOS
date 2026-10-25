@@ -1,0 +1,30 @@
+--- run2: last 20 resume/instrument records (any pid) ---
+131:[RESUME-DIAG] pid=3 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1
+133:[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFC48 covers=1
+6339:start_scheduler called on CPU [RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
+6345:[RESUME-SPSR] pid=1 spsr=0x00000297 IF=1
+6350:[RESUME-SPSR] pid=1 spsr=0x00000212 IF=1
+6355:Loading program for scheduler (v2 AS): [RESUME-SPSR] pid=2 spsr=0x00000202 IF=1
+6356:[RESUME-SPSR] pid=1 spsr=0x00000206 IF=1
+6358:[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1
+6360:[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFE50 covers=1
+6364:[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFC48 covers=1
+6368:[RESUME-DIAG] pid=3 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1
+6378:[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFC48 covers=1
+
+--- run2: how many resume records total, and how many in the last 1000 lines ---
+total: 10
+tail(last 1000 lines, from 17246): 0
+
+--- run2: any activity at all after the last IDLESTUCK dump began (line 18177)? ---
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=18 resume_sp=0x00000017FFFFEC48 age_ms=0 syscall=2
+  CPU1 rip=0x0000000070043CA2 rflags=0x0000000000010006 vec=13 err=0x0000000000000000 cr2=0x00000017FFFFEFB8 pid=15 resume_pid=15 resume_sp=
+  CPU2 rip=0x000000007003BEDF rflags=0x0000000000010046 vec=14 err=0x0000000000000002 cr2=0x00000017FFFFFCB8 pid=7 resume_pid=7 resume_sp=0x
+  CPU3 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=9 resume_sp=0x00000017FFFFD5B8 age_ms=10 syscall=76
+  CPU4 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=9 resume_sp=0x00000017FFFFD5B8 age_ms=10 syscall=76
+  CPU5 rip=0x000000007003BFCD rflags=0x0000000000010002 vec=13 err=0x0000000000000000 cr2=0x00000017FFFFEFB8 pid=12 resume_pid=12 resume_sp=
+  CPU6 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=9 resume_sp=0x00000017FFFFD5B8 age_ms=10 syscall=76
+  CPU7 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=9 resume_sp=0x00000017FFFFD5B8 age_ms=10 syscall=76
+  CSTK cpu1: 0x000000007003BDA5 0x00000000700484E8 0x0000000070040ADE 0x000000007003C8D2 0x000000007003D2AB 0x0000000070043400 0x00000000700
+(total non-IDLESTUCK lines after 18177: 16)

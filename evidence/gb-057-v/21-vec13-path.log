@@ -1,0 +1,25 @@
+--- how are user-mode (CPL3) non-#PF faults routed? ---
+293:         CPL0, which is a #GP (silent triple-fault -> reboot loop). */
+874:         only for a user-mode return (kernel-mode CPL0 `syscall` = #GP). */
+2000:           raises #GP and the process dies before main() -- measured as
+2652:       executing .bss and RIP=0x7009, common_trap_exit #GPs).  The timer
+2751:      process_fault_exit(tf, 11); /* SIGSEGV status byte */
+2757:         an actual #GP read as "Vector: [ARRIVED] 13 RIP: 0T4PIE.BINx" and went
+2782:      /* w5 (ii): a user-mode exception (BRK/#UD/#GP/...) kills with a
+2784:      process_fault_exit(tf, 11); /* SIGSEGV status byte */
+2789:         death looked like a silent triple fault).  In a #GP/#PF the frame
+2924:          process_fault_exit(tf, 11); /* SIGSEGV status byte */
+2925:          /* process_fault_exit -> process_exit -> schedule() never
+3493:"       leftover stack value makes the selector load #GP.  SS comes from\n"
+
+--- user-fault diagnostic: is it #PF-only? ---
+12:  } else if (tf->vector == 0x82) {
+19:  } else if (tf->vector < 32) {
+22:    /* P2.3 (S3, design section 5.2): a v2 process's user #PF is either a
+25:    if (tf->vector == 14 && cur && cur->as && (tf->cs & 3) == 3) {
+39:        fl_s(&fl, "[KERNEL] pid=");
+41:        fl_s(&fl, " (");
+42:        fl_s(&fl, cur->name);
+43:        fl_s(&fl, ") memory fault VA=");
+45:        fl_s(&fl, " PC=");
+47:        fl_s(&fl, " rw=");

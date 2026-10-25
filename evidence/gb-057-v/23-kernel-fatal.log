@@ -1,0 +1,33 @@
+--- run2: all 10 kernel-mode FATAL exception records ---
+1127:[KERNEL] FATAL: Exception in Kernel Mode! Vectsohr::  f1o4 rEkr rfora iCloedde:
+7068:[KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0000000000000002SR
+7718:[KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0000000000000002
+12531:[KERNEL] FATAL: Exception in Kernel Mode! Vector: 1/T4E SErTr4.ToXTr 
+12972:[KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0000000000000002
+13016:[KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0000000000000002
+13058:[KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0000000000000002
+13204:[KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x00/0T00E0S00T4000.T0X000T2
+13407:EL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code/:G R0Ex0P00.B0I000N
+13516: FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0000000000000002
+
+--- their vectors/rips (line + next 3 lines, compact) ---
+  RIP: 0x000000007003BEDF  RSP: 0x000000007558E848
+[KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0000000000000002SR
+[KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0000000000000002
+  RIP: 0x000000007003BEDF  RSP: 0x00000000755AE848
+[KERNEL] FATAL: Exception in Kernel Mode! Vector: 1/T4E SErTr4.ToXTr 
+[KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0000000000000002
+  RIP: 0x000000007003BEDF/ B RLSKPT2:. TX0Tx0
+[KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0000000000000002
+[KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0000000000000002
+  RIP: 0x[K0ER0N00E00L]0 07Pro0cess0 35B2:E TDSFOR T .RBISN P:ex 0itxed 00un00ex0p0e0c07t5e5dlBy Eor84 g8racef
+[KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x00/0T00E0S00T4000.T0X000T2
+  RIP: 0x000000007003BEDF  RSP: 0x00000000755CE7/58T
+EL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code/:G R0Ex0P00.B0I000N
+  RIP: 0x000000007003BEDvF  R2 SPlo:ad e0rx:000 i000m0a0ge 75ma5pFpEe7d1 8(la
+ FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0000000000000002
+  RIP: 0x0000000/07B0LK0T23BE.DFT  XRSTP:
+
+--- same in run1 and run3 (halting runs) ---
+run1: 4
+run3: 5

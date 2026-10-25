@@ -1,0 +1,17 @@
+--- run2: watchdog rounds and per-CPU repeat counts (whole run) ---
+watchdog 'console silent' records: 22
+identical CPU2 lines (vec=14 cr2=0x17FFFFFCB8 pid=7): 22
+CPU1 #GP lines (vec=13 cr2=0x17FFFFEFB8 pid=15): 22
+CPU5 #GP lines (vec=13 pid=12): 22
+any 'Kernel-mode #PF in user address space': 0
+any [KPFLOOP]: 0
+
+--- run2: the distinct per-CPU state across all watchdog rounds (uniq by line) ---
+     22   CPU7 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=9 
+     22   CPU6 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=9 
+     22   CPU5 rip=0x000000007003BFCD rflags=0x0000000000010002 vec=13 err=0x0000000000000000 cr2=0x00000017FFFFEFB8 pid=12 resume_pid=12 
+     22   CPU4 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=9 
+     22   CPU3 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=9 
+     22   CPU2 rip=0x000000007003BEDF rflags=0x0000000000010046 vec=14 err=0x0000000000000002 cr2=0x00000017FFFFFCB8 pid=7 resume_pid=7 
+     22   CPU1 rip=0x0000000070043CA2 rflags=0x0000000000010006 vec=13 err=0x0000000000000000 cr2=0x00000017FFFFEFB8 pid=15 resume_pid=15 
+     22   CPU0 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=18 

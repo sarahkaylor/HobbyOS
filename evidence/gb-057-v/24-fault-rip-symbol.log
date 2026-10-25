@@ -1,0 +1,45 @@
+--- symbol at RIP 0x7003BEDF (kernel link base 0x70000000) ---
+0x7003BEDF -> addr2line: DWARF error: mangled line number section (bad file number)
+addr2line: DWARF error: mangled line number section (bad file number)
+addr2line: DWARF error: mangled line number section (bad file number)
+enter_user_space ??:?
+0x7003BDA5 -> addr2line: DWARF error: mangled line number section (bad file number)
+addr2line: DWARF error: mangled line number section (bad file number)
+addr2line: DWARF error: mangled line number section (bad file number)
+common_trap_wrapper trap.c:?
+0x70038A16 -> addr2line: DWARF error: mangled line number section (bad file number)
+addr2line: DWARF error: mangled line number section (bad file number)
+addr2line: DWARF error: mangled line number section (bad file number)
+safe_wfi /home/sarah/wt/gb057b/src/kernel/arch/x64/cpu.c:44
+0x70043CA2 -> addr2line: DWARF error: mangled line number section (bad file number)
+addr2line: DWARF error: mangled line number section (bad file number)
+addr2line: DWARF error: mangled line number section (bad file number)
+uart_putc_raw /home/sarah/wt/gb057b/src/kernel/arch/x64/uart.c:96
+0x7003BFCD -> addr2line: DWARF error: mangled line number section (bad file number)
+addr2line: DWARF error: mangled line number section (bad file number)
+addr2line: DWARF error: mangled line number section (bad file number)
+enter_user_space ??:?
+
+--- nearest symbols ---
+
+--- disassembly around the faulting instruction ---
+7003bec6:	8d a7 d8 fe ff ff    	lea    -0x128(%edi),%esp
+7003becc:	eb 43                	jmp    7003bf11 <enter_user_space+0x86>
+7003bece:	49                   	dec    %ecx
+7003becf:	8d bd c0 fe ff ff    	lea    -0x140(%ebp),%edi
+7003bed5:	4c                   	dec    %esp
+7003bed6:	89 e6                	mov    %esp,%esi
+7003bed8:	48                   	dec    %eax
+7003bed9:	c7 c1 25 00 00 00    	mov    $0x25,%ecx
+7003bedf:	f3 48                	repz dec %eax
+7003bee1:	a5                   	movsl  %ds:(%esi),%es:(%edi)
+7003bee2:	48                   	dec    %eax
+7003bee3:	8d a7 d8 fe ff ff    	lea    -0x128(%edi),%esp
+7003bee9:	49                   	dec    %ecx
+7003beea:	8b 84 24 f0 00 00 00 	mov    0xf0(%esp),%eax
+7003bef1:	48                   	dec    %eax
+7003bef2:	89 84 24 30 01 00 00 	mov    %eax,0x130(%esp)
+7003bef9:	48                   	dec    %eax
+7003befa:	c7                   	.byte 0xc7
+7003befb:	84 24 18             	test   %ah,(%eax,%ebx,1)
+7003befe:	01 00                	add    %eax,(%eax)

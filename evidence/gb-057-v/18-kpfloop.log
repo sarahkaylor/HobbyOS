@@ -1,0 +1,12 @@
+run1: KPFLOOP=0  'Kernel-mode #PF in user address space'=0  user-fault-killed=5
+run2: KPFLOOP=0  'Kernel-mode #PF in user address space'=0  user-fault-killed=9
+run3: KPFLOOP=0  'Kernel-mode #PF in user address space'=0  user-fault-killed=11
+
+--- any KPFLOOP lines anywhere in run2 ---
+
+--- user-mode fault records in run2 (the "[KERNEL] pid=" killed family) ---
+227:[KERNEL] pid=14 (MEMTEST.BIN) memory fault VA=0x0000000040000000 PC=0x0000001000000051 rw=w  in=PROT region=NONE cr3frame=0x0000000020D69000 asroot=0x0000000020D69000
+2776:[KERNEL] pid=41 (MMTEST.BIN) memory fault VA=0x0000001080019000 PC=0x0000001000001E92 rw=r  in=HOLE region=NONE cr3frame=0x0000000038953000 asroot=0x0000000038953000
+3568:EXPAND.BIN: [KERNEL] pid=26 (IPC_T.BIN) memory fault VA=0x00000017FFFFFE5C PC=0x00000017FFFFFE5C rw=rx in=PROT region=0x00000017FF800000+0x0000000000800000 prot=3 ki
+4602:[KERNEL] pid=38 (TORTURE.BIN) memory fault VA=0x0000001080001000 PC=0x00000010000024A2 rw=w  in=PROT region=0x0000001080001000+0x0000000000001000 prot=0 kind=3 cr3fr
+6481:[KERNEL] pid=11 (MEMTEST.BIN) memory fault VA=0x0000000040000000 PC=0x0000001000000051 rw=w  in=PROT region=NONE cr3frame=0x0000000020D3F000 asroot=0x0000000020D3F00
