@@ -1,0 +1,20 @@
+=== gate 3a: board.py lint
+LINT GB-099: in In Review without an EVIDENCE comment
+LINT GB-099: [unverified-in-review] in 'In Review' but gate GB-099-V has not posted GREEN
+LINT GB-098: [unverified-in-review] in 'In Review' but gate GB-098-V has not posted GREEN
+LINT GB-061: [unverified-in-review] in 'In Review' but gate GB-061-V has not posted GREEN
+LINT GB-049: [unverified-in-review] in 'In Review' but gate GB-049-V has not posted GREEN
+LINT GB-039: [unverified-in-review] in 'In Review' but gate GB-039-V has not posted GREEN
+LINT GB-031: [unverified-in-review] in 'In Review' but gate GB-031-V has not posted GREEN
+exit=1
+
+=== gate 3b: groom.py
+groom: 168 board tickets
+  [unverified-in-review] GB-099: in 'In Review' but gate GB-099-V has not posted GREEN
+  [unverified-in-review] GB-098: in 'In Review' but gate GB-098-V has not posted GREEN
+  [unverified-in-review] GB-061: in 'In Review' but gate GB-061-V has not posted GREEN
+  [unverified-in-review] GB-049: in 'In Review' but gate GB-049-V has not posted GREEN
+  [unverified-in-review] GB-039: in 'In Review' but gate GB-039-V has not posted GREEN
+  [unverified-in-review] GB-031: in 'In Review' but gate GB-031-V has not posted GREEN
+groom: report only -- this tool never closes or re-lanes a card.
+exit=1

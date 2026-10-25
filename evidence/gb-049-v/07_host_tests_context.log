@@ -1,0 +1,27 @@
+=== context (not this gate): make host_tests attempt
+src/host/libc_printf_test.c:287:26: warning: format specifies type 'int *' but the argument has type 'void *' [-Wformat]
+  287 |   sprintf(tb, "abc%n%d", (void *)&b, 5);
+      |                   ~~     ^~~~~~~~~~
+src/host/libc_printf_test.c:290:29: warning: format specifies type 'int *' but the argument has type 'void *' [-Wformat]
+  290 |   sprintf(tb, "%sx%n", "q", (void *)&bb);
+      |                   ~~        ^~~~~~~~~~~
+src/host/libc_printf_test.c:92:8: warning: unused function 'run_sizet' [-Wunused-function]
+   92 | RUNNER(run_sizet, size_t)
+      |        ^~~~~~~~~
+4 warnings generated.
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/libc/src/stdio.c -o obj/host_hb_stdio.o
+clang -o libc_printf_test_host obj/host_libc_printf_test.o obj/host_hb_stdio.o
+clang -Isrc/libc/include -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/libc_headers_test.c -o obj/host_libc_headers_test.o
+clang -o libc_headers_test_host obj/host_libc_headers_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -std=c++17 -fno-exceptions -fno-rtti -c src/host/cxxrt_test.cpp -o obj/host_cxxrt_test.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -std=c++17 -fno-exceptions -fno-rtti -Isrc/libc/include -c src/libc/src/cxxrt.cpp -o obj/host_cxxrt.o
+clang -o cxxrt_test_host obj/host_cxxrt_test.o obj/host_cxxrt.o obj/host_compat.o obj/host_malloc_hb.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -std=c++17 -fno-exceptions -fno-rtti -Isrc/libc/include -Isrc/include -c src/host/cxx_headers_test.cpp -o obj/host_cxx_headers_test.o
+clang -o cxx_headers_test_host obj/host_cxx_headers_test.o
+clang -Wall -Wextra -g -O2 -g -std=c++23 -fno-exceptions -frtti -nostdinc++ -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/src/include -Ithird_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxxabi/include -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES -DLIBCXX_BUILDING_LIBCXXABI -D_LIBCXXABI_BUILDING_LIBRARY -c src/host/rtti_test.cpp -o obj/host_rtti_test.o
+src/host/rtti_test.cpp:29:10: fatal error: 'typeinfo' file not found
+   29 | #include <typeinfo>
+      |          ^~~~~~~~~~
+1 error generated.
+make: *** [Makefile:3399: obj/host_rtti_test.o] Error 1
+exit=2

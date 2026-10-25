@@ -1,0 +1,3 @@
+=== baseline: main's board.py lint (no GB-049 wiring)
+LINT GB-099: in In Review without an EVIDENCE comment
+exit=1

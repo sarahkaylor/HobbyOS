@@ -1,0 +1,18 @@
+=== negative control A: unverified-in-review detection removed -> self-test must FAIL
+  PASS: acyclic dependencies find no cycle
+  PASS: two-ticket dependency cycle is detected
+  PASS: reported cycle is closed (A -> B -> A)
+  PASS: an edge to a ticket not in the open set cannot close a cycle
+  PASS: compact shorthand GB-044/45/46 expands to three ids
+  PASS: compact shorthand GB-003/004 expands to two ids
+  PASS: a non-GB dependency token is ignored, not guessed
+  PASS: a review card with a GREEN gate is not flagged unverified
+  FAIL: a review-lane card whose gate has no GREEN is flagged unverified-in-review
+  PASS: the green-gated card stays out of the findings
+  PASS: a -V with no parent on the board is flagged orphan-verify
+  PASS: an open -V whose parent is closed is flagged stale-verify
+  PASS: numeric-threshold DoD without EVIDENCE is refused a Done close (GB-068 shape)
+  PASS: the same DoD is allowed once an EVIDENCE comment quotes 0
+  PASS: a descriptive (non-numeric) DoD is not gated
+groom self-test: 15 checks, 1 failed -- FAILED
+mutant exit=1

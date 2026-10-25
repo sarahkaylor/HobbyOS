@@ -1,0 +1,5 @@
+=== negative control B: mutant groom.py against the LIVE board (detection removed)
+groom: 168 board tickets
+groom: clean -- no unverified, stale, orphan, deadlocked, or un-evidenced-threshold cards
+groom: report only -- this tool never closes or re-lanes a card.
+mutant exit=0
