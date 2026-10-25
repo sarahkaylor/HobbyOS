@@ -1,0 +1,6 @@
+=== precondition: mdir -i disk.img ::/ | grep -iE 'DOOM|IWAD'
+DOOM     BIN    893464 2026-10-25   7:01 
+grep exit=0
+
+=== full root listing count
+180

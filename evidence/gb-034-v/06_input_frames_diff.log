@@ -1,0 +1,9 @@
+evidence/gb-034-v/run_input/02_baseline.ppm
+  vs evidence/gb-034-v/run_input/11_after_ret.ppm
+  changed pixels: 12/2073600 (0.001%)  max channel-sum delta: 467
+evidence/gb-034-v/run_input/11_after_ret.ppm
+  vs evidence/gb-034-v/run_input/12_after_ret.ppm
+  changed pixels: 6/2073600 (0.000%)  max channel-sum delta: 467
+evidence/gb-034-v/run_input/02_baseline.ppm
+  vs evidence/gb-034-v/run_input/03_final.ppm
+  changed pixels: 19/2073600 (0.001%)  max channel-sum delta: 467
