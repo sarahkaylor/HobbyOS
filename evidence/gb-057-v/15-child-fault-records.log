@@ -1,0 +1,36 @@
+--- run2: every kernel/user fault record mentioning pid=7 or cr2=0x17FFFFFCB8 ---
+4042:  [ALIVE-SET] slot=7 pid=7 st=5 parent=4 claimed_by=-1 SHTEST2.BIN
+5367:  [ALIVE-SET] slot=7 pid=7 st=5 parent=4 claimed_by=-1 SHTEST2.BIN
+6461:[EXITPC] pid=7 last_user_pc=0x10000007AF
+7136:[EXITPC] pid=7 last_user_pc=0x100000076F
+7220:E spawn 2 /RM.BIN pid=7  code=0 
+7453:[EXITPC] pid=7 last_user_pc=0x100000178F
+8587:[EXITPC] pid=7 last_user_pc=0x1000001E90
+8866:[EXITPC] pid=7 last_user_pc=0x100000264F
+8952:[EXITPC] pid=7 last_user_pc=0x1000003FAF
+9343:[EXITPC] pid=7 last_user_pc=0x100000141F
+9412:[EXITPC] pid=7 last_user_pc=0x100000169F
+9878:[EXITPC] pid=7 last_user_pc=0x100000194F
+10101:[EXITPC] pid=7 last_user_pc=0x1000016D5F
+10400:[EXITPC] pid=7 last_user_pc=0x100000194F
+10565:[EXITPC] pid=7 last_user_pc=0x100000194F
+10965:Loading program for scheduler (v2 AS): UNEXPAND.BIN[EXITPC] pid=7 last_user_pc=0x10000019BF
+11311:/GRT.IN[EXITPC] pid=7 last_user_pc=0x10000022CF
+11441:[EXITPC] pid=7 last_user_pc=0x100001715F
+11742:[EXITPC] pid=7 last_user_pc=0x10000010AF
+11949:invalid line number increment: `x'[EXITPC] pid=7 last_user_pc=0x100000172F
+
+--- run2: count of "[KERNEL] pid=7" and "-> killed" ---
+0
+9
+
+--- run2: all distinct fault-record cr2 values with counts (top 10) ---
+     44 cr2=0x00000017FFFFEFB8
+     22 cr2=0x00000017FFFFFCB8
+
+--- run2: EXITPC lines for pid 7 ---
+6461:[EXITPC] pid=7 last_user_pc=0x10000007AF
+7136:[EXITPC] pid=7 last_user_pc=0x100000076F
+7453:[EXITPC] pid=7 last_user_pc=0x100000178F
+8587:[EXITPC] pid=7 last_user_pc=0x1000001E90
+8866:[EXITPC] pid=7 last_user_pc=0x100000264F
