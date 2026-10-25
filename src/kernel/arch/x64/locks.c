@@ -46,7 +46,16 @@ int lock_stallbreak_ok(uint32_t owner_slot, uint32_t cpu, uint64_t now_ms);
    asserts the whole truth table (free, ours, live owner, halted owner).  The
    rule is deliberately narrow -- a lock is only freed when its recorded owner is
    a CPU this kernel has recorded as halted, never because time passed. */
+/* GB-057: the breaker's mark.  A lock being freed by a thief/breaker must NOT
+   look like "no owner" -- that state is what made a wedged lock unbreakable and
+   silent: `locked=1, owner=0` is refused by both predicates, so nothing can ever
+   free it and nothing ever reports it.  This sentinel is distinct, means
+   "mid-free, re-contend", and is accepted by both predicates. */
+#define LOCK_OWNER_FREEING 0xFFFFFFFFu
+
 int lock_steal_ok(uint32_t owner_slot, uint32_t cpu) {
+  if (owner_slot == LOCK_OWNER_FREEING)
+    return 1; /* mid-free: the holder is gone by construction, re-contend */
   if (owner_slot == 0)
     return 0; /* free / unowned: nothing to steal */
   if ((owner_slot - 1) == cpu)
@@ -75,6 +84,8 @@ int lock_steal_ok(uint32_t owner_slot, uint32_t cpu) {
    is already a defect on its own.  `now_ms` is injected and the threshold is
    the shared constant, so both are testable without waiting two seconds. */
 int lock_stallbreak_ok(uint32_t owner_slot, uint32_t cpu, uint64_t now_ms) {
+  if (owner_slot == LOCK_OWNER_FREEING)
+    return 1; /* mid-free by a breaker: re-contend (GB-057) */
   if (owner_slot == 0)
     return 0; /* unowned */
   if ((owner_slot - 1) == cpu)
@@ -178,14 +189,34 @@ void spinlock_acquire(spinlock_t *lock) {
          price of surviving at all; announced, never silent. */
       if ((spins & 0xFFFFFFull) == 0xFFFFFFull) {
         uint32_t own = lock->owner;
-        if (lock_steal_ok(own, cpu)) {
+        if (own == 0) {
+          /* GB-057: `locked=1, owner=0` is the state that killed every run on
+             this card: the lock is held but nobody claims it, so BOTH escape
+             predicates above refuse (owner==0 means "nothing to break") and the
+             waiter spins for ever.  Measured live: 826 [LOCKFOREVER] records
+             with owner=0 on one bucket lock, seven CPUs queued, no [STALLBREAK]
+             ever.  The only way into this state is the two-instruction window
+             between a releaser's owner=0 and its release-store, or a breaker
+             stamping over a fresh holder -- both of which require this waiter
+             to have ALREADY spun 16M pauses, so no live holder can be inside
+             that window now.  Free it and re-contend, loudly. */
+          scream_dec("\n[UNOWNED-FREED] cpu=", cpu);
+          scream_hex(" lock=", (uint64_t)lock);
+          scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
+          uart_putc_raw('\n');
+          __atomic_clear(&lock->locked, __ATOMIC_RELEASE);
+        } else if (lock_steal_ok(own, cpu)) {
           scream_dec("\n[STOLEN] cpu=", cpu);
           scream_hex(" lock=", (uint64_t)lock);
           scream_dec(" from halted cpu=", own - 1);
           scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
           uart_putc_raw('\n');
-          lock->owner = 0;
+          lock->owner = LOCK_OWNER_FREEING;
           __atomic_clear(&lock->locked, __ATOMIC_RELEASE);
+          /* Only clear the mark if nobody acquired in the window: otherwise the
+             new holder's id is already there and must not be overwritten. */
+          if (lock->owner == LOCK_OWNER_FREEING)
+            lock->owner = 0;
           /* fall through and contend for it like any other waiter */
         } else if (lock_stallbreak_ok(own, cpu, timer_get_ms())) {
           /* The holder is running but has stopped taking timer interrupts for
@@ -200,8 +231,12 @@ void spinlock_acquire(spinlock_t *lock) {
           scream_dec(" stale_ms=", age);
           scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
           uart_putc_raw('\n');
-          lock->owner = 0;
+          lock->owner = LOCK_OWNER_FREEING;
           __atomic_clear(&lock->locked, __ATOMIC_RELEASE);
+          /* Only clear the mark if nobody acquired in the window: otherwise the
+             new holder's id is already there and must not be overwritten. */
+          if (lock->owner == LOCK_OWNER_FREEING)
+            lock->owner = 0;
         }
       }
     }
@@ -278,7 +313,9 @@ void spinlock_release(spinlock_t *lock) {
   }
   /* Clear the owner BEFORE releasing: a CPU that finds the lock free must never
      see its own id still in it, and the release-store below is what publishes
-     both fields to the next acquirer. */
+     both fields to the next acquirer.  (The resulting `locked=1, owner=0`
+     window is two instructions long and is recovered by the unowned-lock case
+     in the acquire loop -- see GB-057 there.) */
   lock->owner = 0;
   __atomic_clear(&lock->locked, __ATOMIC_RELEASE);
 }
