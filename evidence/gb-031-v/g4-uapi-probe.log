@@ -1,0 +1,14 @@
+### G4 UAPI probe (diagnosis, read-only) 2026-10-25T08:36:11Z
+$ musl-gcc -fsyntax-only gb031v_uapi_probe.c   # includes linux/input.h + linux/fb.h
+gb031v_uapi_probe.c:3:10: fatal error: linux/input.h: No such file or directory
+
+$ musl-gcc -I/usr/include -fsyntax-only ...
+/usr/include/features-time64.h:20:10: fatal error: bits/wordsize.h: No such file or directory
+
+$ musl-gcc -idirafter /usr/include -idirafter /usr/include/x86_64-linux-gnu -fsyntax-only ...
+rc=0
+
+$ grep -nE 'SDL_VIDEO_DRIVER_FBCON|SDL_INPUT_LINUXEV' /tmp/g-probe/SDL2-2.30.10/include/SDL_config.h
+318:#define SDL_INPUT_LINUXEV 1
+$ grep -i 'checking for linux/input.h' /tmp/g-probe/configure.log
+checking for linux/input.h... yes

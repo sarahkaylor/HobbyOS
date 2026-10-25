@@ -1,0 +1,13 @@
+### G3 CONTROL retry (correct src path): PRE-FIX profile from origin/main 2026-10-25T08:31:20Z
+build-rc=0
+--- glibc __libc_start_main_impl count (expect >0):
+1
+--- musl libc_start_main_stage2 count:
+0
+--- musl strings:
+0
+--- ELF shape:
+  Type:                              EXEC (Executable file)
+  Machine:                           Advanced Micro Devices X86-64
+-rwxr-xr-x 1 sarah sarah 5283664 Oct 25 08:31 /tmp/g-glibc-a/sdl2_static_test
+DONE
