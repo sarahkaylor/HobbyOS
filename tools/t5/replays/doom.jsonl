@@ -1,0 +1,27 @@
+{"t": "click", "x": 38, "y": 1067, "b": "left"}
+{"t": "key", "k": "home"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "down"}
+{"t": "key", "k": "ret"}
+{"t": "key", "k": "ret", "pause": 0.8}
+{"t": "key", "k": "ret", "pause": 0.8}
+{"t": "key", "k": "ret", "pause": 0.8}
+{"t": "key", "k": "up", "pause": 0.25}
+{"t": "key", "k": "right", "pause": 0.25}
+{"t": "key", "k": "up", "pause": 0.25}
+{"t": "key", "k": "right", "pause": 0.25}
