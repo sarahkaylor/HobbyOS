@@ -1,0 +1,7 @@
+=== t4_w0: W0 corpus gate over /tmp/gb024v-ev-serial-intel.log ===
+  PASS HELLO (arrived in guest)
+  FAIL HELLO — guest output marker 'entered-main:main-returned' != Linux-leg 'WRONG-BYTE' (writes expected output: NO)
+  PASS SH (arrived in guest)
+  PASS CAT (arrived in guest)
+  PASS LS (arrived in guest)
+t4_w0: FAIL — W0 corpus incomplete or output mismatch

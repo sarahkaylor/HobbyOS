@@ -1,0 +1,9 @@
+=== t4_w0: W0 corpus gate over /tmp/gb024v-ev-serial-intel.log ===
+  PASS HELLO (arrived in guest)
+  PASS HELLO output — guest 'entered-main:main-returned' == Linux-leg ''
+  PASS SH (arrived in guest)
+  PASS CAT (arrived in guest)
+  PASS LS (arrived in guest)
+t4_w0: PASS — every W0 corpus member arrived in the intel wave; members emitting a
+               '[W0] <member> linux=' marker had their output verified against the
+               Linux-leg .ref corpus (a mismatched marker FAILs).

@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log /tmp/gb024v/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 17762 console lines, 257 FAIL lines, 11 user memory fault records across 10 processes, 86 programs exited, halted=1
+T3_intel: FAIL — 257 FAIL line(s); first 20:
+3156:[SEDTEST] FAIL basic_s (stdout)
+3607:[SIGTEST] FAIL waitpid returns the child got=38 want=4294964048
+4225:[SEDTEST] FAIL s_g (stdout)
+4869:/CMP.BINLoading program for scheduler (v2 AS): [SEDTEST] FAIL s_2nd (stdout)
+5092:  FPU_T torture-child: FAIL
+5297:[TEST] DIRECT-ext-cat FAIL
+8294:[SIGTEST] FAIL waitpid returns the child got=36 want=4294964048
+8371:  SQLTEST create-table: FAIL
+8373:  SQLTEST insert-prepare: FAIL
+8374:  SQLTEST insert-rows: FAIL
+8375:  SQLTEST journal-exists-in-txn: FAIL
+8380:  SQLTEST select-prepare: FAIL
+8381:  SQLTEST select-rows: FAIL
+8382:  SQLTEST aggregate: FAIL
+8385:  SQLTEST update: FAIL
+8386:  SQLTEST delete-none: FAIL
+8389:  SQLTEST insert-wide: FAIL
+8391:  SQLTEST delete-wide: FAIL
+8404:[UNEXPTEST] FAIL default 7 blanks kept
+8412:[UNEXPTEST] FAIL default 9 blanks -> tab+space
+T3_intel EXIT=1
+INTEL_RC=1

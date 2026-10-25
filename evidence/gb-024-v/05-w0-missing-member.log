@@ -1,0 +1,7 @@
+=== t4_w0: W0 corpus gate over /tmp/gb024v-serial-noSH.log ===
+  PASS HELLO (arrived in guest)
+  PASS HELLO output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  FAIL SH — not in the intel wave's exited-programs/arrival set (W0 corpus member never ran)
+  PASS CAT (arrived in guest)
+  PASS LS (arrived in guest)
+t4_w0: FAIL — W0 corpus incomplete or output mismatch
