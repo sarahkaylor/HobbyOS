@@ -44,6 +44,25 @@ extern volatile uint64_t cpu_heartbeat_ms[];
 static int sys_user_range(uint64_t ptr, uint64_t len, int write);
 int sys_user_range_ok(uint64_t ptr, uint64_t len);
 
+/* GB-099 (from GB-057's instrumentation, 25f8512): process.c — shared by both
+   arches — calls resume_mark(pid, sp) unconditionally immediately before
+   enter_user_space, so the watchdog can compare "what this core is resuming"
+   against the trap frame it last recorded.  x64 defined it; ARM did not, so
+   `make ARCH=arm hobbyos.elf` failed to link (undefined symbol) and every ARM
+   gate went dark.  This is the arch-appropriate ARM definition (not a silent
+   stub): it emits the SAME record shape as x64 (per-CPU pid/sp), so GB-057's
+   ARM resume diagnosis is not blinded.  Observation only. */
+volatile int64_t resume_mark_pid[MAX_CPUS];
+volatile uint64_t resume_mark_sp[MAX_CPUS];
+
+void resume_mark(int pid, uint64_t target_sp) {
+  uint32_t c = get_cpuid();
+  if (c < MAX_CPUS) {
+    resume_mark_pid[c] = pid;
+    resume_mark_sp[c] = target_sp;
+  }
+}
+
 /**
  * Prints the state of a trap frame for debugging purposes.
  * Triggers specifically when a certain syscall (like SYS_FORK) is invoked to
