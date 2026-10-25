@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Host (T1) self-test for replay.py's ReplayParser + replay scripts (GB-043)."""
-import sys, os, json, glob
+import sys, os, json, glob, tempfile, shutil
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "t5"))
 from replay import ReplayParser
 
@@ -31,15 +31,20 @@ for rp in replays:
     except Exception as ex:
         check(False, os.path.basename(rp) + f" FAILED: {ex}")
 
-# schema errors must raise
-bad = os.path.join(rep_dir, "_bad_tmp.jsonl")
-open(bad, "w").write(json.dumps({"t": "teleport"}) + "\n")
+# schema errors must raise (GB-085: per-process fixture -- two concurrent
+# `make host_tests` must not share a path, or one unlinks _bad.jsonl while the
+# other is parsing it and the loser throws FileNotFoundError)
+_bad_dir = tempfile.mkdtemp(prefix="gb085_replay_")
 try:
-    ReplayParser(bad).validate()
-    check(False, "unknown event type rejected")
-except ValueError:
-    check(True, "unknown event type rejected")
-os.remove(bad)
+    bad = os.path.join(_bad_dir, "_bad.jsonl")
+    open(bad, "w").write(json.dumps({"t": "teleport"}) + "\n")
+    try:
+        ReplayParser(bad).validate()
+        check(False, "unknown event type rejected")
+    except ValueError:
+        check(True, "unknown event type rejected")
+finally:
+    shutil.rmtree(_bad_dir, ignore_errors=True)
 
 print("\nTests:", "ALL PASSED" if fails == 0 else f"{fails} FAILED")
 sys.exit(1 if fails else 0)
