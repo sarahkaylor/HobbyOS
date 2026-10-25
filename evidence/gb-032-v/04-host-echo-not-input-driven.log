@@ -1,0 +1,12 @@
+$ ./obj/sdl_test_app_pie   # host control: stdin=/dev/null, no input device driven
+sdl test app: drew 64x48 window, blitted 8x8 tile @(10,10)
+sdl test app echo: KEY 1e=1
+sdl test app echo: ABS 00=512
+rc=0
+
+$ grep -n "static uint32_t fb\\|struct hb_input_event key\\|sdl_echo_input(&key" tools/sdl/sdl_test_app.c
+81:  static uint32_t fb[64 * 48];           /* demo window, maps the same API */
+98:  struct hb_input_event key = {0, 0, HB_EV_KEY, 30, 1};   /* KEY_A down */
+99:  struct hb_input_event abs = {0, 0, HB_EV_ABS, 0, 512};  /* ABS_X pos */
+100:  sdl_echo_input(&key, line, sizeof line);
+102:  sdl_echo_input(&abs, line, sizeof line);
