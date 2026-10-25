@@ -1,0 +1,6 @@
+### G3c F1 NEGATIVE CONTROL: the state=open filter disabled (22f0300) 2026-10-25T07:35:23Z
+checked 44 in-progress tickets, threshold 12h (stale clock = last non-coordinator comment; updated_at NOT used)
+stale (no comment or lane-move on the card past threshold): 24
+  #100  last comment  36.2h ago, issue updated   7.2h ago   GB-074 tools/board/claim.sh is read-then-move, so two ag
+--- check_stale_test.py still:
+CHECK_STALE_TEST: PASS -- comment-only stale clock, independent case table green

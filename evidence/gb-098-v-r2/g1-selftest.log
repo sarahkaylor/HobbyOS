@@ -1,0 +1,12 @@
+### G1 self-test @ 22f0300 (main 30178e5 x PR#157 7b2d613)  2026-10-25T07:33:16Z
+  [OK  ] lane=In Progress comment_age=20.0  issue_age=30.0  -> stale=True (want True)
+  [OK  ] lane=In Progress comment_age=1.0   issue_age=1.0   -> stale=False (want False)
+  [OK  ] lane=In Progress comment_age=13.0  issue_age=40.0  -> stale=True (want True)
+  [OK  ] lane=Ready       comment_age=99.0  issue_age=99.0  -> stale=False (want False)
+  [OK  ] lane=In Review   comment_age=99.0  issue_age=99.0  -> stale=False (want False)
+  [OK  ] lane=In Progress comment_age=11.9  issue_age=11.9  -> stale=False (want False)
+  [OK  ] lane=In Progress comment_age=40.0  issue_age=0.1   -> stale=True (want True)
+  [OK  ] lane=In Progress comment_age=0.5   issue_age=99.0  -> stale=False (want False)
+  [OK  ] lane=In Progress comment_age=0.5   issue_age=0.1   -> stale=False (want False)
+self-test result: fails=0
+rc=0

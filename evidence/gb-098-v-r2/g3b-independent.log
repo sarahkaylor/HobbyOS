@@ -1,0 +1,5 @@
+### G3b independent state=open read 2026-10-25T07:33:43Z
+independent read: 44 In Progress cards, threshold 12h
+stale by last non-coordinator comment (comment/created_at clock): 24
+stale by raw issue updated_at (the OLD clock GB-098 removed): 0
+  #53   last comment  124.4h ago, updated_at    7.2h ago  GB-053 Final acceptance run, both arches, full evidence arch

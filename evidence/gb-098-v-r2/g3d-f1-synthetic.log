@@ -1,0 +1,8 @@
+### G3d F1 synthetic control (offline; no board mutation) 2026-10-25T07:35:56Z
+synthetic board: #9001 open+old comment (a real stale claim), #9002 CLOSED+old comment (not a claim), both with a bulk-touched updated_at
+[shipped tool (state=open filter present)] rc=1
+   checked 1 in-progress tickets, threshold 12h (stale clock = last non-coordinator comment; updated_at NOT used)
+   stale (no comment or lane-move on the card past threshold): 1
+[filter disabled (F1 regression)] rc=1
+   checked 2 in-progress tickets, threshold 12h (stale clock = last non-coordinator comment; updated_at NOT used)
+   stale (no comment or lane-move on the card past threshold): 2

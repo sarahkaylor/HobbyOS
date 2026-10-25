@@ -1,0 +1,9 @@
+### G3e live closed-card check 2026-10-25T07:36:02Z
+comment-clock stale over state=all : 24  (cards examined 44)
+comment-clock stale over state=open: 24  (cards examined 44)
+in state=all read but NOT in open read:
+per-card state for every card in either stale set:
+  #7    state=open
+  #11   state=open
+  #17   state=open
+  #18   state=open
