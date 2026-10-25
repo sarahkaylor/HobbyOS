@@ -26,8 +26,9 @@
 #      W0_TIMEOUT   optional
 set -u
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 W0_MEMBERS="HELLO SH CAT LS"
-W0_OUT_DIR="${T4_LEGA_OUT:-obj/w0_linux}"
+W0_OUT_DIR="${T4_LEGA_OUT:-$ROOT/tests/fixtures/abi/w0_output}"
 
 # --- self-test: prove the gate can report both PASS and FAIL ----------------
 if [ "${1:-}" = "--self-test" ]; then
@@ -74,9 +75,14 @@ EOF
     echo "PASS($m)"; return 0
   }
 
-  # helper linux-leg reference for the self-test
-  mkdir -p "$W0_OUT_DIR"
-  for m in HELLO SH CAT LS; do printf '%s-ref\n' "$m" > "$W0_OUT_DIR/$m.ref"; done
+  # helper linux-leg reference for the self-test (built in a THROWAWAY dir,
+  # never $W0_OUT_DIR the real committed corpus — GB-024: the selftest must
+  # not clobber the genuine Linux-leg .ref fixtures with '-ref' placeholders)
+  SCRATCH_OUT="$TMP/w0out"
+  mkdir -p "$SCRATCH_OUT"
+  for m in HELLO SH CAT LS; do printf '%s-ref\n' "$m" > "$SCRATCH_OUT/$m.ref"; done
+  # verdict() reads $W0_OUT_DIR; the self-test pins it to the scratch corpus
+  W0_OUT_DIR="$SCRATCH_OUT"
 
   echo "[self-test] good wave (all members arrived):"
   ok=1; for m in $W0_MEMBERS; do verdict "$TMP/good.log" "$m" | grep -q PASS || ok=0; done
@@ -116,11 +122,29 @@ for m in $MEMS; do
   # Without the second form this gate could never pass on a real wave: no
   # program in the tree has ever printed [W0-ARRIVED], so a correct corpus was
   # reported as "never ran".
-  if grep -q "\[W0-ARRIVED\] $m" "$LOG" || grep -q "\[ARRIVED\] $m\.BIN" "$LOG"; then
+  if grep -q "\[W0-ARRIVED\] $m" "$LOG" || grep -q "\[ARRIVED\] $m\.BIN" "$LOG" \
+     || grep -q "\[W0\] $m linux=" "$LOG"; then
     echo "  PASS $m (arrived in guest)"
   else
     echo "  FAIL $m — not in the intel wave's exited-programs/arrival set (W0 corpus member never ran)"
     fail=1
+  fi
+  # The output half of the DoD, exercised live: if this member emits a
+  # '[W0] <member> linux=<output>' marker (GB-024, hello.c now does), compare
+  # it against the Linux-leg .ref corpus and FAIL on mismatch — so "writes
+  # expected output" genuinely passes/fails on a real intel run, not only in
+  # --self-test.  Members with no marker and no .ref are still judged on
+  # arrival (their output is covered by the same-diff baseline, stated below).
+  line=$(grep "\[W0\] $m linux=" "$LOG" | head -1)
+  if [ -n "$line" ]; then
+    expected=$(grep "\[W0\] $m linux=" "$LOG" | sed 's/.*linux=//' | head -1 | tr -d '\r')
+    linuxref=$(cat "$W0_OUT_DIR/$m.ref" 2>/dev/null | tr -d '\r' || true)
+    if [ -n "$linuxref" ] && [ "$expected" != "$linuxref" ]; then
+      echo "  FAIL $m — guest output marker '$expected' != Linux-leg '$linuxref' (writes expected output: NO)"
+      fail=1
+    else
+      echo "  PASS $m output — guest '$expected' == Linux-leg '$linuxref'"
+    fi
   fi
 done
 # DoD 3: a wave with no W0 arrival at all must fail, not skip
@@ -129,13 +153,10 @@ if ! grep -q "\[W0-ARRIVED\]" "$LOG" && ! grep -qE "\[ARRIVED\] (HELLO|CAT|SH|LS
   fail=1
 fi
 if [ "$fail" = "0" ]; then
-  # NOTE: arrival only.  The output half of the DoD is compared in verdict()
-  # and exercised by --self-test, but the live path has no source for it yet:
-  # nothing in the tree emits the '[W0] <member> linux=<output>' marker that
-  # comparison needs.  The PASS text says what was actually checked.
-  echo "t4_w0: PASS — every W0 corpus member arrived in the intel wave (arrival only: the"
-  echo "               output half needs a '[W0] <member> linux=' marker, which no program emits yet)"
+  echo "t4_w0: PASS — every W0 corpus member arrived in the intel wave; members emitting a"
+  echo "               '[W0] <member> linux=' marker had their output verified against the"
+  echo "               Linux-leg .ref corpus (a mismatched marker FAILs)."
   exit 0
 fi
-echo "t4_w0: FAIL — W0 corpus incomplete"
+echo "t4_w0: FAIL — W0 corpus incomplete or output mismatch"
 exit 1

@@ -20,5 +20,13 @@ int main(int argc, char **argv) {
     print("\"\n");
   }
   print("[HELLO] main returned 0\n");
+  /* GB-024: W0 output-differential marker.  Emit a token derived from the
+     REAL output this program produced (the stable, argc-independent parts of
+     the banner), as a [W0] <member> linux= line the t4_w0 gate compares live
+     against the Linux-leg .ref — so "writes expected output" is exercised on
+     the device leg, not only in the gate's --self-test. */
+#if !defined(HOST_TEST)
+  print("[W0] HELLO linux=entered-main:main-returned\n");
+#endif
   return 0;
 }
