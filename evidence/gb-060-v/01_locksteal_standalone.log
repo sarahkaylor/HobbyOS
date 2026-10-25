@@ -1,0 +1,38 @@
+=== gate 1a: build + run locksteal_test_host standalone
+      |                                        ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/arch/x64/locks.c:167:39: warning: calling '__builtin_return_address' with a nonzero argument is unsafe [-Wframe-address]
+  167 |         scream_hex(" pc2=", (uint64_t)__builtin_return_address(1));
+      |                                       ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+2 warnings generated.
+make rc=0
+
+locksteal_test_host: GB-060 stale-owner steal + wedged-owner stall break
+  PASS: free lock (owner=0): nothing to steal
+  PASS: own lock, even from a halted CPU: never freed by itself
+  PASS: LIVE owner (cpu1): never stolen -- this is the safety property
+  PASS: live owner stays live across calls
+  PASS: halted owner (cpu1): freed
+  PASS: any waiter may free a halted owner's lock
+  PASS: a different live owner is still protected
+  PASS: boundary: cpu7 halted, owner slot 8
+  PASS: out-of-range owner: refused, not assumed
+  PASS: after the steal the lock is held, not left free
+  PASS: after the steal the owner is the waiter
+  PASS: the steal was announced on the console
+  PASS: release frees it
+  PASS: release clears the owner (no stale holder)
+  PASS: free lock: nothing to break
+  PASS: our own lock: never broken by itself
+  PASS: out-of-range owner: refused, not assumed
+  PASS: LIVE holder with a fresh heartbeat: never broken, however long the waiter spins
+  PASS: owner whose heartbeat was never seen: not this rule's call
+  PASS: one ms inside the grace period: still protected
+  PASS: at the grace period: broken (>=, the same rule the lost-owner reaper uses)
+  PASS: long stale: still broken
+  PASS: halted owner: broken immediately, despite a fresh heartbeat
+  PASS: after the stall break the lock is held, not left free
+  PASS: after the stall break the owner is the waiter
+  PASS: the break was announced on the console
+  PASS: and the lock behaves normally afterwards
+locksteal_test_host: 27 checks, 0 failed
+RUN_EXIT=0

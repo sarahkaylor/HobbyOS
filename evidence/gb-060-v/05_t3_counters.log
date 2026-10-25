@@ -1,0 +1,19 @@
+=== T3 intel wave: lock-strand counters (obj/t3_intel_gb060v.log)
+23335 obj/t3_intel_gb060v.log
+STALLBREAK   1
+HOLDER       0
+LOCKFOREVER  0
+STOLEN       0
+IDLESTUCK    464
+
+-- tier summary line(s)
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 23335 console lines, 165 FAIL lines, 11 user memory fault records across 8 processes, 85 programs exited, halted=1
+T3_intel: FAIL — 165 FAIL line(s); first 20:
+
+-- halt lines
+System halt from CPU 3[HALT-CD] cpu=6 free=8 alloc=0 exited=12 running=0 blocked=4 other=40
+System halt from CPU .
+
+-- any [STALLBREAK]/[HOLDER] lines
+[STALLBREAK] cpu=6 lock=0x0000000070200248 owner_cpu=2 stale_ms=2054 pc=0x0000000070000603
