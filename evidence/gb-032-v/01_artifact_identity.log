@@ -1,0 +1,12 @@
+=== artifact under test
+-rwxr-xr-x 1 sarah sarah 862760 Oct 25 07:32 obj/sdl_test_app_pie
+obj/sdl_test_app_pie: ELF 64-bit LSB pie executable, x86-64, version 1 (GNU/Linux), static-pie linked, BuildID[sha1]=7b1cc7ae49d8017aa80fde600892dfaec6d66592, for GNU/Linux 3.2.0, not stripped
+  Type:                              DYN (Position-Independent Executable file)
+  Machine:                           Advanced Micro Devices X86-64
+
+=== libc identity
+8
+Fatal glibc error: Cannot allocate TLS block
+Fatal glibc error: %s:%s (%s): assertion failed: %s
+Fatal glibc error: Internal __libc_message error. Too many arguments.
+0
