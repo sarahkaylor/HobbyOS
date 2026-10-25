@@ -1,0 +1,11 @@
+$ cp HELLO.ref /tmp/w0_bad2/ ; printf X >> /tmp/w0_bad2/HELLO.ref
+$ T4_LEGA_OUT=/tmp/w0_bad2 bash tools/gate/t4_w0.sh --serial t3_intel_6b6f8a2.log
+=== t4_w0: W0 corpus gate over t3_intel_6b6f8a2.log ===
+  PASS HELLO (arrived in guest)
+  FAIL HELLO — guest output marker 'entered-main:main-returned' != Linux-leg 'entered-main:main-returned
+X' (writes expected output: NO)
+  PASS SH (arrived in guest)
+  PASS CAT (arrived in guest)
+  PASS LS (arrived in guest)
+t4_w0: FAIL — W0 corpus incomplete or output mismatch
+rc=1

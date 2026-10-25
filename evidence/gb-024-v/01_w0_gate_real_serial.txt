@@ -1,0 +1,19 @@
+$ bash tools/gate/t4_w0.sh --serial t3_intel_6b6f8a2.log
+=== t4_w0: W0 corpus gate over t3_intel_6b6f8a2.log ===
+  PASS HELLO (arrived in guest)
+  PASS HELLO output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  PASS SH (arrived in guest)
+  PASS CAT (arrived in guest)
+  PASS LS (arrived in guest)
+t4_w0: PASS — every W0 corpus member arrived in the intel wave; members emitting a
+               '[W0] <member> linux=' marker had their output verified against the
+               Linux-leg .ref corpus (a mismatched marker FAILs).
+rc=0
+
+$ for m in HELLO SH CAT LS: count of "[W0] $m linux=" markers
+  HELLO: 3
+  SH: 0
+  CAT: 0
+  LS: 0
+  .ref files:
+  HELLO.ref

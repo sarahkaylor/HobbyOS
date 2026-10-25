@@ -1,0 +1,11 @@
+ARM T3 @ 6b6f8a2 — build fails before any boot:
+ld.lld: error: undefined symbol: resume_mark
+>>> referenced by process.c:1687 (/tmp/gb024v/src/kernel/process.c:1687)
+>>>               obj/arm/process.o:(schedule)
+>>> referenced by process.c:3331 (/tmp/gb024v/src/kernel/process.c:3331)
+>>>               obj/arm/process.o:(start_scheduler)
+
+resume_mark definitions:
+/tmp/gb024v/src/kernel/process.c:1686:      extern void resume_mark(int pid, uint64_t target_sp);
+/tmp/gb024v/src/kernel/process.c:3330:        extern void resume_mark(int pid, uint64_t target_sp);
+/tmp/gb024v/src/kernel/arch/x64/trap.c:2274:void resume_mark(int pid, uint64_t target_sp) {

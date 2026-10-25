@@ -1,0 +1,20 @@
+$ grep -av "ARRIVED] CAT.BIN" serial > /tmp/w0_nocat2.log
+$ t4_w0.sh --serial /tmp/w0_nocat2.log
+=== t4_w0: W0 corpus gate over /tmp/w0_nocat2.log ===
+  PASS HELLO (arrived in guest)
+  PASS HELLO output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  PASS SH (arrived in guest)
+  FAIL CAT — not in the intel wave's exited-programs/arrival set (W0 corpus member never ran)
+  PASS LS (arrived in guest)
+t4_w0: FAIL — W0 corpus incomplete or output mismatch
+rc=1
+
+$ : > /tmp/w0_empty.log ; t4_w0.sh --serial /tmp/w0_empty.log
+=== t4_w0: W0 corpus gate over /tmp/w0_empty.log ===
+  FAIL HELLO — not in the intel wave's exited-programs/arrival set (W0 corpus member never ran)
+  FAIL SH — not in the intel wave's exited-programs/arrival set (W0 corpus member never ran)
+  FAIL CAT — not in the intel wave's exited-programs/arrival set (W0 corpus member never ran)
+  FAIL LS — not in the intel wave's exited-programs/arrival set (W0 corpus member never ran)
+t4_w0: FAIL — no W0 member arrived in the guest (absent probe is a failure, never a skip)
+t4_w0: FAIL — W0 corpus incomplete or output mismatch
+rc=1

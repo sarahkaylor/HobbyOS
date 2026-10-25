@@ -1,0 +1,9 @@
+$ bash tools/gate/t4_w0.sh --self-test
+[self-test] good wave (all members arrived):
+  OK — all W0 members PASS (matched Linux leg)
+[self-test] missing CAT (must FAIL):
+  OK — absent member FAILED as required
+[self-test] broken HELLO output (must FAIL):
+  OK — broken member FAILED as required
+self-test result: fails=0
+rc=0

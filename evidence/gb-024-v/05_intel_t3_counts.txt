@@ -1,0 +1,8 @@
+intel T3 @ 6b6f8a2 (T3_LOG=t3_intel_6b6f8a2.log):
+  System halt      = 1
+  FAIL lines       = 165
+  user mem faults  = 0
+t4_glued: 0 glued console lines in 't3_intel_6b6f8a2.log'
+t4_glued: PASS — every console line is a single writer (whole-line atomic).
+T3_intel EXIT=1
+tier rc=1
