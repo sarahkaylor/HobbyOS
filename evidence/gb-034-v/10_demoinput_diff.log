@@ -1,0 +1,15 @@
+evidence/gb-034-v/run_demoinput/02_baseline.ppm
+  vs evidence/gb-034-v/run_demoinput/11_after_esc.ppm
+  changed pixels: 797477/2073600 (38.459%)  max channel-sum delta: 697
+evidence/gb-034-v/run_demoinput/11_after_esc.ppm
+  vs evidence/gb-034-v/run_demoinput/12_after_esc.ppm
+  changed pixels: 827529/2073600 (39.908%)  max channel-sum delta: 669
+evidence/gb-034-v/run_demoinput/12_after_esc.ppm
+  vs evidence/gb-034-v/run_demoinput/13_after_ret.ppm
+  changed pixels: 821111/2073600 (39.598%)  max channel-sum delta: 669
+evidence/gb-034-v/run_demoinput/13_after_ret.ppm
+  vs evidence/gb-034-v/run_demoinput/14_after_up.ppm
+  changed pixels: 789197/2073600 (38.059%)  max channel-sum delta: 741
+evidence/gb-034-v/run_demoinput/02_baseline.ppm
+  vs evidence/gb-034-v/run_demoinput/03_final.ppm
+  changed pixels: 793350/2073600 (38.260%)  max channel-sum delta: 625
