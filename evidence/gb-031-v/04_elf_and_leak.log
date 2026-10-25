@@ -1,0 +1,12 @@
+=== clause 2: ELF shape of the shipped app
+  Type:                              EXEC (Executable file)
+  Machine:                           Advanced Micro Devices X86-64
+/tmp/gb031-a/sdl2_static_test: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=72a56a2ae588753f04fbc5fd31e80a8014103705, for GNU/Linux 3.2.0, with debug_info, not stripped
+
+=== libc identity (is it musl?)
+11
+0
+
+=== does the difference carry the dest path? (DWARF leak check)
+534
+534

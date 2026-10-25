@@ -1,0 +1,17 @@
+=== clause 3: tools/sdl/README.md records the profile?
+1:# SDL2 static-musl build profile (GB-031)
+3:Reproducible recipe that produces a **static-musl SDL2** library and a
+6:musl SDL2 app, plus the profile recorded where M2 can cite it. Gate: a build
+7:from a clean tree succeeds twice in a row with the same artifact hash, and the
+13:tools/sdl/build-sdl2-static-musl.sh <dest_dir>
+16:Pins SDL2 `release-2.30.10` (archive SHA256
+17:`f59adf36...661196aa`) and builds with `clang --target=x86_64-linux-musl`,
+21:musl `sdl2_static_test` ELF.
+26:same canonical build path hash identically:
+29:libSDL2.a  sha256 = 54827f3bec3c24733dfec0849eaf91541ac5319d00348a24141c9a38613aed0d  (run 1)
+30:libSDL2.a  sha256 = 54827f3bec3c24733dfec0849eaf91541ac5319d00348a24141c9a38613aed0d  (run 2)
+37:paths and hash differently. The gate (clean tree, stable profile dir) is met;
+38:fully dest-independent hashing is a strip/`-fdebug-prefix-map` follow-on,
+
+-- README hash pins present?
+0

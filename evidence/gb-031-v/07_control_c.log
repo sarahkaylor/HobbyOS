@@ -1,0 +1,31 @@
+/tmp/gb031-c/SDL2-2.30.10.tar.gz: OK
+configure: WARNING: DBus support is required for fcitx.
+/tmp/gb031-c/stage/SDL2-2.30.10/src/stdlib/SDL_qsort.c:550:12: warning: returning 'const void *' from a function with result type 'void *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+  550 |     return bsearch(key, base, nmemb, size, compare);
+      |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/stdlib.h:992:3: note: expanded from macro 'bsearch'
+  992 |   __glibc_const_generic (BASE, const void *,                            \
+      |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  993 |                          bsearch (KEY, BASE, NMEMB, SIZE, COMPAR))
+      |                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/x86_64-linux-gnu/sys/cdefs.h:838:3: note: expanded from macro '__glibc_const_generic'
+  838 |   _Generic (0 ? (PTR) : (void *) 1,                     \
+      |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  839 |             const void *: (CTYPE) (CALL),               \
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  840 |             default: CALL)
+      |             ~~~~~~~~~~~~~~
+1 warning generated.
+ar: `u' modifier ignored since `D' is the default (see `U')
+ar: `u' modifier ignored since `D' is the default (see `U')
+ar: `u' modifier ignored since `D' is the default (see `U')
+
+== libSDL2.a ==
+f10186fe0499b29cf75caacb0f150b5d58f38db3383313345fc3d6e49aea977c  build/.libs/libSDL2.a
+clang: warning: argument unused during compilation: '-no-pie' [-Wunused-command-line-argument]
+/usr/bin/x86_64-linux-gnu-ld.bfd: build/.libs/libSDL2.a(SDL_dynapi.o): in function `get_sdlapi_entry':
+./././src/dynapi/SDL_dynapi.c:386:(.text+0xf1c2): warning: Using 'dlopen' in statically linked applications requires at runtime the shared libraries from the glibc version used for linking
+
+== sdl2_static_test ==
+/tmp/gb031-c/sdl2_static_test: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=8619df26e18df32449fd636373332935eeaf099c, for GNU/Linux 3.2.0, with debug_info, not stripped
+f6a75204fafb001f1dcb3173939a28bd8cf6d6a3f8ac40ae92848939a272d07a  /tmp/gb031-c/sdl2_static_test
