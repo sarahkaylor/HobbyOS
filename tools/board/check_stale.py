@@ -60,9 +60,16 @@ def last_activity(issue, comments, now):
     In Progress with no work as a result.  Every coordinator comment carries
     "(Coordinator" in its footer, so that is the discriminator.
 
-    The fallback is `created_at`, never `updated_at` -- posting any comment
-    bumps `updated_at`, so using it would reintroduce the same self-erasure
-    one level down.
+    Staleness is measured from COMMENTS ONLY (GB-098): every lane transition
+    is itself a comment (board.py move posts "GB-xxx: lane A -> B"), so a
+    comment's `created_at` captures both real activity AND every lane move.
+    The issue object's raw `updated_at` is NEVER used -- a board-wide sync
+    (import_seed / sync_gaming_md / a label sweep) bumps `updated_at` on every
+    issue at once, so a fresh `updated_at` carries no information about a
+    single card's activity and must not re-arm its stall clock.
+
+    When a card has no human/agent comments at all, fall back to `created_at`
+    (creation is itself an activity event that bulk writes never touch).
     """
     human = [c for c in comments
              if "Coordinator" not in (c.get("body") or "")]
@@ -71,25 +78,42 @@ def last_activity(issue, comments, now):
     return age_hours(issue.get("created_at") or issue["updated_at"], now)
 
 
-def classify(lane, comment_age_h, issue_age_h, hours):
-    """Is this claim stale?  Isolated so --self-test can exercise it."""
+def classify(lane, comment_age_h, hours):
+    """Is this claim stale?  Isolated so --self-test can exercise it.
+
+    The ONLY clock is the last non-coordinator comment's age (which, because
+    every lane move is a comment, is the lane-transition clock too).  The
+    issue's `updated_at` deliberately plays no part -- see last_activity.
+    """
     if lane != "In Progress":
         return False
-    return min(comment_age_h, issue_age_h) > hours
+    return comment_age_h > hours
 
 
 def self_test():
+    # Each case is (lane, comment_age_h, issue_age_h, expected_stale).
+    # issue_age_h is only used to print the "issue clock" so a reader can SEE
+    # that it no longer drives the verdict — the stale decision must be the
+    # comment clock alone (GB-098).  The case that fails today:
+    #   old comment + fresh updated_at must STILL be stale (it was not before),
+    #   proving updated_at no longer erases a genuinely parked card.
     cases = [
+        # (lane, comment_age, issue_age) -> stale
         ("In Progress", 20.0, 30.0, True),
         ("In Progress", 1.0, 1.0, False),
         ("In Progress", 13.0, 40.0, True),
         ("Ready", 99.0, 99.0, False),
         ("In Review", 99.0, 99.0, False),
         ("In Progress", 11.9, 11.9, False),
+        # GB-098: old last comment, FRESH updated_at (a bulk touch) -> STALE.
+        ("In Progress", 40.0, 0.10, True),
+        # fresh comment always clears, whatever updated_at says.
+        ("In Progress", 0.50, 99.0, False),
+        ("In Progress", 0.50, 0.10, False),
     ]
     bad = 0
     for lane, c, i, want in cases:
-        got = classify(lane, c, i, DEFAULT_HOURS)
+        got = classify(lane, c, DEFAULT_HOURS)
         ok = got == want
         if not ok:
             bad += 1
@@ -141,25 +165,40 @@ def main():
 
     now = datetime.now(timezone.utc)
     stale = []
+    checked = 0
+    comment_ages = []          # distribution of last-comment age for In-Progress cards
     for i in issues:
         labels = {l["name"] for l in i["labels"]}
         lane = next((x for x in LANES if x in labels), None)
         if lane != "In Progress":
             continue
+        checked += 1
+        # Display-only issue clock: what the raw updated_at says.  It MUST NOT
+        # drive the stale verdict (GB-098) -- a board-wide sync bumps it on
+        # every issue at once.  We print it so 3 and 37 can never be confused.
         issue_age = age_hours(i["updated_at"], now)
         try:
             cs = api(f"/issues/{i['number']}/comments")
         except Exception:                                     # noqa: BLE001
             cs = []
         comment_age = last_activity(i, cs, now)
-        if classify(lane, comment_age, issue_age, hours):
+        comment_ages.append(comment_age)
+        if classify(lane, comment_age, hours):
             stale.append((i["number"], (i.get("title") or "")[:56],
                           comment_age, issue_age))
 
-    print(f"in-progress tickets checked, threshold {hours:g}h")
-    print(f"stale (no activity on either the issue or its last comment): {len(stale)}")
+    print(f"checked {checked} in-progress tickets, threshold {hours:g}h "
+          f"(stale clock = last non-coordinator comment; updated_at NOT used)")
+    print(f"stale (no comment or lane-move on the card past threshold): {len(stale)}")
     for n, t, ca, ia in sorted(stale, key=lambda r: -min(r[2], r[3])):
         print(f"  #{n:<4} last comment {ca:5.1f}h ago, issue updated {ia:5.1f}h ago   {t}")
+    if comment_ages:
+        import statistics
+        comment_ages.sort()
+        print(f"comment-age distribution across the {len(comment_ages)} in-progress cards: "
+              f"min={comment_ages[0]:.1f}h "
+              f"median={statistics.median(comment_ages):.1f}h "
+              f"max={comment_ages[-1]:.1f}h")
     if "--fleet" in sys.argv:
         total, per = fleet_live()
         unreachable = [h for h, v in per.items() if v < 0]
