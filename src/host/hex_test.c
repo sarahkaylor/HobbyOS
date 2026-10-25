@@ -20,6 +20,7 @@
 
 #include "../user_include/libc.h"
 #include "../user_include/gui.h"
+#include "ho_scratch.h"
 
 #define main hex_app_main
 #include "../user/hex.c"
@@ -540,11 +541,13 @@ static void test_events(void) {
 
 /* ---- real file loading ---- */
 
-#define TMPFILE "/tmp/hex_test_data.bin"
+#define TMPFILE ho_scratch_path("hex_test_data.bin")
 
 static void test_file_loading(void) {
   unsigned char data[64];
   char out[HEX_SCREEN_MAX];
+  char file_line[640];
+  snprintf(file_line, sizeof file_line, "File: %s", TMPFILE);
 
   for (int i = 0; i < 64; i++) data[i] = (unsigned char)('A' + (i % 26));
 
@@ -557,7 +560,7 @@ static void test_file_loading(void) {
   check(hex_top_row == 0, "hex_load resets the scroll position");
   hex_render(out, sizeof(out));
   check(strstr(out, "(20 bytes)") != NULL, "render shows the loaded byte count");
-  check(strncmp(out + 19 + strlen("File: " TMPFILE), "  (20 bytes)\n", 13) == 0,
+  check(strncmp(out + 19 + strlen(file_line), "  (20 bytes)\n", 13) == 0,
         "render file line ends with the byte count");
 
   check(hex_load("/no/such/dir/hex_missing.bin") == 0, "hex_load fails on a missing path");
@@ -579,7 +582,7 @@ static void test_file_loading(void) {
         "32769 bytes is truncated at 32768");
   hex_render(out, sizeof(out));
   check(strstr(out, "  (truncated at 32768)\n") != NULL, "render shows the truncation");
-  check(strstr(out, "File: " TMPFILE) != NULL, "render shows the full file name");
+  check(strstr(out, file_line) != NULL, "render shows the full file name");
 
   /* Empty file. */
   write_file(TMPFILE, NULL, 0);

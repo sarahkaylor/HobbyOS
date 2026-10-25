@@ -23,6 +23,7 @@
 
 #include "../user_include/libc.h"
 #include "../user_include/gui.h"
+#include "ho_scratch.h"
 
 #define main notes_app_main
 #include "../user/notes.c"
@@ -34,10 +35,19 @@ extern int dup(int oldfd);
 extern int dup2(int oldfd, int newfd);
 extern long syscall(long number, ...);   /* used for a real chdir() */
 
-#define SCRATCH_DIR  "/tmp/notes_host_e2e"
-#define SCRATCH_FILE SCRATCH_DIR "/NOTES.TXT"
-#define CAP_PATH     "/tmp/notes_host_render.txt"
+#define SCRATCH_DIR  ho_scratch_path("notes_host_e2e")
+#define SCRATCH_FILE ho_scratch_path("notes_host_e2e/NOTES.TXT")
+#define CAP_PATH     ho_scratch_path("notes_host_render.txt")
 #define CAP_MAX      4096
+
+/* Run a shell command built from the scratch file / dir path (GB-085).
+ * ho_scratch macros expand to calls, so system() string-concat no longer
+ * compiles; these build the command at runtime. */
+static int sys_on_scratch_file(const char *fmt) {
+  char cmd[520];
+  snprintf(cmd, sizeof cmd, fmt, (const char *)SCRATCH_FILE, (const char *)SCRATCH_FILE);
+  return system(cmd);
+}
 
 /* ---- Tiny check framework ----------------------------------------- */
 
@@ -926,7 +936,7 @@ static void test_files(void) {
   notes_add("Keep", "k");
   n = notes_count;
   check_int("warning: NOTES.TXT made inaccessible",
-            system("rm -f " SCRATCH_FILE "; mkdir " SCRATCH_FILE), 0);
+            sys_on_scratch_file("rm -f '%s'; mkdir '%s'"), 0);
   check_int("warning: load fails -> 0", notes_load(), 0);
   check_int("warning: load failure raises the flag", notes_warn, 1);
   check_int("warning: save fails -> 0", notes_save(), 0);
@@ -938,7 +948,7 @@ static void test_files(void) {
   check(line_eq(cap, 3, "  Zulu"), "warning: list still rendered while failing");
 
   check_int("warning: NOTES.TXT restored",
-            system("rmdir " SCRATCH_FILE), 0);
+            sys_on_scratch_file("rmdir '%s'"), 0);
   check_int("warning: save succeeds again", notes_save(), 1);
   check_int("warning: flag cleared after recovery", notes_warn, 0);
   notes_reset();
@@ -976,7 +986,11 @@ int main(void) {
   /* Leave no residue behind. */
   if (file_env_ok) {
     syscall(SYS_chdir, "/");
-    system("rm -rf " SCRATCH_DIR);
+    {
+      char cmd[520];
+      snprintf(cmd, sizeof cmd, "rm -rf '%s'", (const char *)SCRATCH_DIR);
+      system(cmd);
+    }
   }
   remove(CAP_PATH);
 
