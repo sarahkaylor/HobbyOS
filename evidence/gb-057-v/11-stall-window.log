@@ -1,0 +1,114 @@
+--- run2: last 120 lines BEFORE the first IDLESTUCK (16795) ---
+  pid=7 ppid=35 state=3 TORTURE.BIN
+  pid=9 ppid=-1 state=5 SHTEST3.BIN
+  pid=10 ppid=3 state=3 SHTEST.BIN
+  pid=12 ppid=16 state=3 cat
+  pid=15 ppid=6 state=3 cat
+  pid=16 ppid=9 state=7 SH.BIN
+  pid=17 ppid=-1 state=4 BLKTEST.BIN
+  pid=18 ppid=9 state=3 SHTEST3.BIN
+  pid=34 ppid=-1 state=4 STRESS.BIN
+  pid=35 ppid=-1 state=7 TORTURE.BIN
+  pid=49 ppid=-1 state=4 SEDTEST.BIN
+  pid=50 ppid=-1 state=4 GREPTEST.BIN
+  pid=60 ppid=-1 state=4 CKSUM_T.BIN
+[KERNEL] Process 10: SHTEST.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=10 last_user_pc=0x100000245F
+SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST. Process table:
+  pid=3 ppid=-1 state=4 SHTEST.BIN
+  pid=4 ppid=5 state=4 SHTEST2.BIN
+  pid=5 ppid=-1 state=4 SHTEST2.BIN
+  pid=6 ppid=3 state=4 SH.BIN
+  pid=7 ppid=35 state=3 TORTURE.BIN
+  pid=9 ppid=-1 state=5 SHTEST3.BIN
+  pid=10 ppid=3 state=4 SHTEST.BIN
+  pid=12 ppid=16 state=3 cat
+  pid=15 ppid=6 state=3 cat
+  pid=16 ppid=9 state=7 SH.BIN
+  pid=17 ppid=-1 state=4 BLKTEST.BIN
+  pid=18 ppid=9 state=3 SHTEST3.BIN
+  pid=34 ppid=-1 state=4 STRESS.BIN
+  pid=35 ppid=-1 state=7 TORTURE.BIN
+  pid=49 ppid=-1 state=4 SEDTEST.BIN
+  pid=50 ppid=-1 state=4 GREPTEST.BIN
+  pid=60 ppid=-1 state=4 CKSUM_T.BIN
+[KERNEL] Process 18: SHTEST3.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=18 last_user_pc=0x1000001D4F
+[KERNEL] parked WAIT slot with no parent to wake it: slot=35 pid=35 st=7 parent=-1 TORTURE.BIN -- no state change attempted; see GB-057
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=18 resume_sp=0x00000017FFFFEC48 age_ms=0 syscall=2
+  CPU1 rip=0x0000000070043CA2 rflags=0x0000000000010006 vec=13 err=0x0000000000000000 cr2=0x00000017FFFFEFB8 pid=15 resume_pid=15 resume_sp=0x00000017
+  CPU2 rip=0x000000007003BEDF rflags=0x0000000000010046 vec=14 err=0x0000000000000002 cr2=0x00000017FFFFFCB8 pid=7 resume_pid=7 resume_sp=0x00000017FF
+  CPU3 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=9 resume_sp=0x00000017FFFFD5B8 age_ms=10 syscall=76
+  CPU4 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=9 resume_sp=0x00000017FFFFD5B8 age_ms=10 syscall=76
+  CPU5 rip=0x000000007003BFCD rflags=0x0000000000010002 vec=13 err=0x0000000000000000 cr2=0x00000017FFFFEFB8 pid=12 resume_pid=12 resume_sp=0x00000017
+  CPU6 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=9 resume_sp=0x00000017FFFFD5B8 age_ms=10 syscall=76
+  CPU7 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=9 resume_sp=0x00000017FFFFD5B8 age_ms=10 syscall=76
+
+--- the IDLESTUCK block itself (16795..16860) ---
+[IDLESTUCK] cpu=4 rounds=20003 t=77777
+[IDLESTUCK] slot=2 pid=2 st=9 wake=0 rip=0x1000002ea4 THRD_T.BIN
+[IDLESTUCK] slot=3 pid=3 st=4 wake=0 rip=0x100000641b SHTEST.BIN
+[IDLESTUCK] slot=4 pid=4 st=4 wake=0 rip=0x1000004904 SHTEST2.BIN
+[IDLESTUCK] slot=5 pid=5 st=4 wake=0 rip=0x1000002226 SHTEST2.BIN
+[IDLESTUCK] slot=6 pid=6 st=4 wake=0 rip=0x10000173d0 SH.BIN
+[IDLESTUCK] slot=7 pid=7 st=3 wake=0 rip=0x1000000000 TORTURE.BIN
+[IDLESTUCK] slot=9 pid=9 st=4 wake=0 rip=0x1000005d0b SHTEST3.BIN
+[IDLESTUCK] slot=10 pid=10 st=4 wake=0 rip=0x1000002a26 SHTEST.BIN
+[IDLESTUCK] slot=12 pid=12 st=3 wake=0 rip=0x1000001a7f cat
+[IDLESTUCK] slot=15 pid=15 st=3 wake=0 rip=0x1000001a7f cat
+[IDLESTUCK] slot=16 pid=16 st=4 wake=0 rip=0x10000173d0 SH.BIN
+[IDLESTUCK] slot=17 pid=17 st=4 wake=0 rip=0x1000005586 BLKTEST.BIN
+[IDLESTUCK] slot=18 pid=18 st=4 wake=0 rip=0x1000002316 SHTEST3.BIN
+[IDLESTUCK] slot=19 pid=19 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] slot=21 pid=21 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] slot=22 pid=22 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] slot=23 pid=23 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=24 pid=24 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=25 pid=25 st=9 wake=0 rip=0x1000002ea4 THRD_T.BIN
+[IDLESTUCK] slot=26 pid=26 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] slot=27 pid=27 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=28 pid=28 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] slot=30 pid=30 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=31 pid=31 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=32 pid=32 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=34 pid=34 st=4 wake=0 rip=0x1000002306 STRESS.BIN
+[IDLESTUCK] slot=35 pid=35 st=7 wake=0 rip=0x100000adf0 TORTURE.BIN
+[IDLESTUCK] slot=36 pid=36 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=39 pid=39 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=41 pid=41 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=42 pid=42 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=43 pid=43 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=44 pid=44 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=45 pid=45 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=46 pid=46 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=47 pid=47 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=48 pid=48 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=49 pid=49 st=4 wake=0 rip=0x10000064b4 SEDTEST.BIN
+[IDLESTUCK] slot=50 pid=50 st=4 wake=0 rip=0x10000031eb GREPTEST.BIN
+[IDLESTUCK] slot=51 pid=51 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=52 pid=52 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] slot=53 pid=53 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=54 pid=54 st=9 wake=0 rip=0x1000002ea4 THRD_T.BIN
+[IDLESTUCK] slot=55 pid=55 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] slot=56 pid=56 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] slot=57 pid=57 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] slot=58 pid=58 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=59 pid=59 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] slot=60 pid=60 st=4 wake=0 rip=0x1000001b06 CKSUM_T.BIN
+[IDLESTUCK] slot=61 pid=61 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] slot=62 pid=62 st=9 wake=0 rip=0x10000001b4 THRD_T.BIN
+[IDLESTUCK] slot=63 pid=63 st=9 wake=0 rip=0x10000042a4 TORTURE.BIN
+[IDLESTUCK] claims: c0=-1/4010 c1=15/0 c2=7/0 c3=-1/4084 c4=-1/4261 c5=12/0 c6=-1/4336 c7=-1/4075 lock_owner=5 park_returns=0
+
+=== T3 guest sample: SKIPPED — no monitor attached (T3_MONITOR not set; first stall marker in the serial) ===
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=18 resume_sp=0x00000017FFFFEC48 age_ms=0 syscall=2
+  CPU1 rip=0x0000000070043CA2 rflags=0x0000000000010006 vec=13 err=0x0000000000000000 cr2=0x00000017FFFFEFB8 pid=15 resume_pid=15 resume_sp=0x00000017
+  CPU2 rip=0x000000007003BEDF rflags=0x0000000000010046 vec=14 err=0x0000000000000002 cr2=0x00000017FFFFFCB8 pid=7 resume_pid=7 resume_sp=0x00000017FF
+  CPU3 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=9 resume_sp=0x00000017FFFFD5B8 age_ms=10 syscall=76
+  CPU4 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=9 resume_sp=0x00000017FFFFD5B8 age_ms=10 syscall=76
+  CPU5 rip=0x000000007003BFCD rflags=0x0000000000010002 vec=13 err=0x0000000000000000 cr2=0x00000017FFFFEFB8 pid=12 resume_pid=12 resume_sp=0x00000017
+  CPU6 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=9 resume_sp=0x00000017FFFFD5B8 age_ms=10 syscall=76
+  CPU7 rip=0x0000000070038A16 rflags=0x0000000000000212 pid=-1 resume_pid=9 resume_sp=0x00000017FFFFD5B8 age_ms=10 syscall=76
+  CSTK cpu1: 0x000000007003BDA5 0x00000000700484E8 0x0000000070040ADE 0x000000007003C8D2 0x000000007003D2AB 0x0000000070043400 0x0000000070031CB9 0x00

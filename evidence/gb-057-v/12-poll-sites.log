@@ -1,0 +1,15 @@
+--- poll()/select() call sites in the shell test programs (timeout values) ---
+src/user/ipc_test.c:5: * SEQPACKET (framing/truncation/EMSGSIZE), poll() multiplexing + timeouts +
+src/user/ipc_test.c:22: * message cap, STREAM+control EOPNOTSUPP, poll(nfds > 256), recvmsg with
+src/user/ipc_test.c:422:    int pr = poll(&dp, 1, 10000);
+src/user/ipc_test.c:443:    int pr = poll(&up_pf, 1, 10000);
+src/user/ipc_test.c:527:    r = poll(&pf, 1, 0);
+src/user/ipc_test.c:540:/* ---- 4. poll(): multiplexing, exactness, timeouts, -1 wait ------------- */
+src/user/ipc_test.c:542:static void t_poll(void) {
+src/user/ipc_test.c:560:  int r = poll(fds, 3, 0);
+src/user/ipc_test.c:569:  r = poll(fds, 1, 0);
+src/user/ipc_test.c:579:  r = poll(&cl, 1, 0);
+
+--- SYS_POLL dispatch: timeout handling in x64 trap.c ---
+606:/* SYS_POLL (76): (struct pollfd *fds, int nfds, int timeout_ms) -> count. */
+2190:  } else if (syscall_num == SYS_POLL) {

@@ -1,0 +1,23 @@
+--- loader starvation / failed arrivals per run ---
+run1: starved=19  ARRIVED-rc<0=19  ARRIVED-rc>0=562  lines=10687
+run2: starved=51  ARRIVED-rc<0=52  ARRIVED-rc>0=792  lines=18246
+run3: starved=55  ARRIVED-rc<0=54  ARRIVED-rc>0=813  lines=16085
+
+--- run2: which programs were starved / failed to load (first 20) ---
+Loader (v2) starved (slot pressure):   SOCK2TST getsockopt(bad fd) -> -1/EBADF: PASS
+Loader (v2) starved (slot pressure): EXPAND.BIN
+Loader (v2) starved (slot pressure): COMM.BIN
+Loader (v2) starved (slot pressure): CMP.BIN
+Loader (v2) starved (slot pressure): UNEXPAND.BIN
+Loader (v2) starved (slot pressure): EXPAND.BIN
+Loader (v2) starved (slot pressure): TAC.BIN
+Loader (v2) starved (slot pressure): FOLD.BIN
+...
+[ARRIVED] SED.BIN rc<0
+[ARRIVED] WC.BIN rc<0
+[ARRIVED] COMM.BIN rc<0
+[ARRIVED] CMP.BIN rc<0
+[ARRIVED] UNEXPAND.BIN rc<0
+[ARRIVED] EXPAND.BIN rc<0
+[ARRIVED] TAC.BIN rc<0
+[ARRIVED] FOLD.BIN rc<0
