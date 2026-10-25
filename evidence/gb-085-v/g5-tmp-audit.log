@@ -1,0 +1,15 @@
+### G5 stronger /tmp audit (all /tmp mentions in host tests) 2026-10-25T08:03:46Z
+src/host/apps_suite_test.c:45: *         src/user/filedialog.c -o /tmp/apps_suite
+src/host/diff_test.c:699:  CHECK(write_fixture(fa, "one\ntwo\nthree\n") == 1, "fixture written to /tmp");
+src/host/hex_test.c:11: * against real files under /tmp.
+src/host/notes_test.c:12: * the *real* process cwd to a scratch directory under /tmp first (compat's
+src/host/tasks_test.c:17: *   - one real end-to-end save/load cycle in /tmp
+src/host/tasks_test.c:24: * Requires the host working directory to be writable for the /tmp tests;
+src/host/tasks_test.c:218:/* ---- real file helpers (absolute paths: /tmp) ---- */
+src/host/tasks_test.c:861:  /* ---------------- real file I/O in /tmp ---------------- */
+src/host/tasks_test.c:862:  printf("\n-- persistence (real files in /tmp) --\n");
+src/host/tasks_test.c:863:  CHECK(have_tmp, "chdir(/tmp) for the real-file tests");
+src/host/tasks_test.c:1042:    printf("  FAIL: cannot chdir to /tmp - file tests skipped\n");
+count=11
+--- ho_scratch usage:
+7

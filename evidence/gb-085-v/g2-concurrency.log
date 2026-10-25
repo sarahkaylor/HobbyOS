@@ -1,0 +1,9 @@
+### G2 make host_concurrency_gate @ 67d8913 2026-10-25T07:55:58Z
+python3 tools/host/host_concurrency_gate.py
+[gb085] building host_tests once (serial)...
+[gb085] serial build green.
+[gb085] starting two make host_tests simultaneously...
+PASS: two concurrent make host_tests runs both green (A rc=0, B rc=0)
+CONCURRENCY_GATE: PASS
+rc=0
+DONE

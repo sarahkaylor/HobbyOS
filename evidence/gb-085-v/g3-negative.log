@@ -1,0 +1,10 @@
+### G3 make host_concurrency_gate_negative @ 67d8913 2026-10-25T07:59:25Z
+python3 tools/host/host_concurrency_gate.py --negative
+[gb085] building host_tests once (serial)...
+[gb085] serial build green.
+[gb085] NEGATIVE mode: HO_TEST_SHARED_DIR=/home/sarah/.hermes/cache/scratch/gb085_gate_mmbvoun7/SHARED
+[gb085] starting two make host_tests simultaneously...
+PASS (negative): shared path made the pair-run fail (A rc=2 ok=False ; B rc=2 ok=False)
+CONCURRENCY_GATE: PASS (negative control)
+rc=0
+DONE
