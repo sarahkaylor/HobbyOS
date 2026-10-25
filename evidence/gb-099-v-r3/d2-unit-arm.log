@@ -1,0 +1,1122 @@
+### D2: make ARCH=arm unit_tests_arm (PATH includes /usr/sbin — GB-080 §11.2b #5) @ 96ba7d2 2026-10-25T13:59:03Z
+/usr/sbin/mkfs.fat
+make ARCH=arm MODE=unit_tests run
+make[1]: Entering directory '/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-443f0e7c'
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/abi_t2_test.c -o obj/arm/abi_t2_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/audio_stub.c -o obj/arm/audio_stub.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/blk_cache.c -o obj/arm/blk_cache.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/blk_cache_press_test.c -o obj/arm/blk_cache_press_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/blk_cache_test.c -o obj/arm/blk_cache_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/dhcp.c -o obj/arm/dhcp.o
+src/kernel/dhcp.c:42:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   42 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:82:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   82 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:135:19: warning: unused variable 'udp' [-Wunused-variable]
+  135 |   struct udp_hdr* udp = (struct udp_hdr*)(packet + sizeof(struct ipv4_hdr));
+      |                   ^~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/elf_image.c -o obj/arm/elf_image.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/elf_loader.c -o obj/arm/elf_loader.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/evdev.c -o obj/arm/evdev.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/evdev_test.c -o obj/arm/evdev_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fat16.c -o obj/arm/fat16.o
+src/kernel/fat16.c:2151:25: warning: comparison of integers of different signs: 'int' and 'uint32_t' (aka 'unsigned int') [-Wsign-compare]
+ 2151 |       if ((int)old_size > f->fat16.cursor) f->fat16.cursor = (int)old_size;
+      |           ~~~~~~~~~~~~~ ^ ~~~~~~~~~~~~~~~
+1 warning generated.
+[fetch] tree present + anchors verified; re-syncing config overlay
+[fetch] OK: /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-443f0e7c/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src ready (marker llvmorg-21.1.8)
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -Iobj/arm -c src/kernel/fat16_test.c -o obj/arm/fat16_test.o
+src/kernel/fat16_test.c:1146:64: warning: taking address of packed member 'file_size' of class or structure 'fat16_dir_entry' may result in an unaligned pointer value [-Waddress-of-packed-member]
+ 1146 |   EXPECT_EQ(fat16_read_dir(dir, 0, (char *)names[0], &e.attr, &e.file_size) == 0, 1);
+      |                                                                ^~~~~~~~~~~
+src/kernel/unit_test.h:23:19: note: expanded from macro 'EXPECT_EQ'
+   23 |         int _a = (a); \
+      |                   ^
+src/kernel/fat16_test.c:26:22: warning: unused function 'test_lfn_checksum' [-Wunused-function]
+   26 | static unsigned char test_lfn_checksum(const char *name) {
+      |                      ^~~~~~~~~~~~~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fb_ioctl.c -o obj/arm/fb_ioctl.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fb_ioctl_test.c -o obj/arm/fb_ioctl_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fb_mmap.c -o obj/arm/fb_mmap.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fb_mmap_test.c -o obj/arm/fb_mmap_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/frame.c -o obj/arm/frame.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/frame_test.c -o obj/arm/frame_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fs.c -o obj/arm/fs.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fs_test.c -o obj/arm/fs_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/input_node.c -o obj/arm/input_node.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/input_node_test.c -o obj/arm/input_node_test.o
+src/kernel/input_node_test.c:44:47: warning: implicit conversion from 'size_t' (aka 'unsigned long') to 'int' changes value from 18446744073709551615 to -1 [-Wconstant-conversion]
+   44 |   EXPECT_EQ(hb_input_ioctl_arg_size(0x4600u), (size_t)-1);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~
+src/kernel/unit_test.h:24:19: note: expanded from macro 'EXPECT_EQ'
+   24 |         int _b = (b); \
+      |             ~~    ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/iommu_vtd.c -o obj/arm/iommu_vtd.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/ipc_proto.c -o obj/arm/ipc_proto.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/linux_uname.c -o obj/arm/linux_uname.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/lock_order.c -o obj/arm/lock_order.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/locks_test.c -o obj/arm/locks_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/main.c -o obj/arm/main.o
+src/kernel/main.c:52:39: warning: unused parameter 'tf' [-Wunused-parameter]
+   52 | void irq_handler_c(struct trap_frame *tf) {
+      |                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/math_test.c -o obj/arm/math_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/mmu_test.c -o obj/arm/mmu_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/net.c -o obj/arm/net.o
+src/kernel/net.c:552:18: warning: variable 'stored' set but not used [-Wunused-but-set-variable]
+  552 |         uint32_t stored = 0;
+      |                  ^
+src/kernel/net.c:815:21: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+  815 |   for (int i = 0; i < sizeof(struct pseudo_hdr)/2; i++) {
+      |                   ~ ^ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/net.c:657:39: warning: unused function 'safe_print_int' [-Wunused-function]
+  657 | __attribute__((noinline)) static void safe_print_int(int val) {
+      |                                       ^~~~~~~~~~~~~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/net_rdma.c -o obj/arm/net_rdma.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/net_rdma_test.c -o obj/arm/net_rdma_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/net_test.c -o obj/arm/net_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/nfs.c -o obj/arm/nfs.o
+src/kernel/nfs.c:157:12: warning: '/*' within block comment [-Wcomment]
+  157 |  * is *body/*body_len, valid until the next rpc_call (static buffer). */
+      |            ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/nfs_proto.c -o obj/arm/nfs_proto.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/nfs_test.c -o obj/arm/nfs_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/pipe.c -o obj/arm/pipe.o
+src/kernel/pipe.c:142:7: warning: unused variable 'i' [-Wunused-variable]
+  142 |   int i = 0;
+      |       ^
+src/kernel/pipe.c:139:68: warning: unused parameter 'tf' [-Wunused-parameter]
+  139 | int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
+      |                                                                    ^
+src/kernel/pipe.c:219:7: warning: unused variable 'i' [-Wunused-variable]
+  219 |   int i = 0;
+      |       ^
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/pipe_test.c -o obj/arm/pipe_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/process.c -o obj/arm/process.o
+src/kernel/process.c:1415:42: warning: unused parameter 'is_yield' [-Wunused-parameter]
+ 1415 | void schedule(struct trap_frame *tf, int is_yield) {
+      |                                          ^
+src/kernel/process.c:3990:50: warning: unused parameter 'prot' [-Wunused-parameter]
+ 3990 | int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags) {
+      |                                                  ^
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/process_test.c -o obj/arm/process_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/program_loader.c -o obj/arm/program_loader.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/program_loader_test.c -o obj/arm/program_loader_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/ssp.c -o obj/arm/ssp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/test_fw_cfg.c -o obj/arm/test_fw_cfg.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/test_smp.c -o obj/arm/test_smp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/time.c -o obj/arm/time.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/time_test.c -o obj/arm/time_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/timer_test.c -o obj/arm/timer_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/trap_test.c -o obj/arm/trap_test.o
+src/kernel/trap_test.c:60:25: warning: implicit conversion from 'uint64_t' (aka 'unsigned long') to 'int' changes value from 18446744073709551578 to -38 [-Wconstant-conversion]
+   60 |   EXPECT_EQ(tf.regs[0], (uint64_t)-ENOSYS); /* negative-errno convention */
+      |   ~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~
+src/kernel/unit_test.h:24:19: note: expanded from macro 'EXPECT_EQ'
+   24 |         int _b = (b); \
+      |             ~~    ^
+src/kernel/trap_test.c:92:25: warning: implicit conversion from 'uint64_t' (aka 'unsigned long') to 'int' changes value from 18446744073709551602 to -14 [-Wconstant-conversion]
+   92 |   EXPECT_EQ(tf.regs[0], (uint64_t)-EFAULT); /* invalid user ptr -> -EFAULT */
+      |   ~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~
+src/kernel/unit_test.h:24:19: note: expanded from macro 'EXPECT_EQ'
+   24 |         int _b = (b); \
+      |             ~~    ^
+src/kernel/trap_test.c:81:13: warning: unused function 'test_trap_sys_open_invalid_ptr' [-Wunused-function]
+   81 | static void test_trap_sys_open_invalid_ptr(void) {
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/trap_test.c:95:13: warning: unused function 'test_trap_sys_open_valid_ptr' [-Wunused-function]
+   95 | static void test_trap_sys_open_valid_ptr(void) {
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/trap_test.c:125:13: warning: unused function 'test_trap_sys_write_console' [-Wunused-function]
+  125 | static void test_trap_sys_write_console(void) {
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/trap_test.c:142:13: warning: unused function 'test_trap_sys_pipe' [-Wunused-function]
+  142 | static void test_trap_sys_pipe(void) {
+      |             ^~~~~~~~~~~~~~~~~~
+src/kernel/trap_test.c:170:13: warning: unused function 'test_trap_data_abort' [-Wunused-function]
+  170 | static void test_trap_data_abort(void) {
+      |             ^~~~~~~~~~~~~~~~~~~~
+7 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/unit_test.c -o obj/arm/unit_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/unix.c -o obj/arm/unix.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/unix_test.c -o obj/arm/unix_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/vfs.c -o obj/arm/vfs.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/virtio_blk.c -o obj/arm/virtio_blk.o
+src/kernel/virtio_blk.c:656:12: warning: unused variable 'desc_idx' [-Wunused-variable]
+  656 |   uint16_t desc_idx = 0;
+      |            ^~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/virtio_blk_test.c -o obj/arm/virtio_blk_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/virtio_gpu.c -o obj/arm/virtio_gpu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/virtio_gpu_test.c -o obj/arm/virtio_gpu_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/virtio_gpu_x64.c -o obj/arm/virtio_gpu_x64.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/virtio_input.c -o obj/arm/virtio_input.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/virtio_input_test.c -o obj/arm/virtio_input_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/virtio_net.c -o obj/arm/virtio_net.o
+src/kernel/virtio_net.c:699:20: warning: unused function 'reg_write8' [-Wunused-function]
+  699 | static inline void reg_write8(uint32_t offset, uint8_t val) {
+      |                    ^~~~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/virtio_net_test.c -o obj/arm/virtio_net_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/vm.c -o obj/arm/vm.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/vm_test.c -o obj/arm/vm_test.o
+src/kernel/vm_test.c:611:40: warning: implicit conversion from 'unsigned long long' to 'int' changes value from 1229801703532086340 to 858997828 [-Wconstant-conversion]
+  611 |   EXPECT_EQ(*(volatile uint64_t *)lo2, 0x1111222233334444ULL);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~
+src/kernel/unit_test.h:24:19: note: expanded from macro 'EXPECT_EQ'
+   24 |         int _b = (b); \
+      |             ~~    ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/arch/arm/cpu.c -o obj/arm/cpu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/arch/arm/gic.c -o obj/arm/gic.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/arch/arm/locks.c -o obj/arm/locks.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/arch/arm/mmu.c -o obj/arm/mmu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/arch/arm/rtc.c -o obj/arm/rtc.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/arch/arm/smp.c -o obj/arm/smp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/arch/arm/timer.c -o obj/arm/timer.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/arch/arm/trap.c -o obj/arm/trap.o
+src/kernel/arch/arm/trap.c:1802:16: warning: unused variable 'l2idx' [-Wunused-variable]
+ 1802 |       uint32_t l2idx = ((uint64_t)tf->elr >> 21) & 0x1FF;
+      |                ^~~~~
+src/kernel/arch/arm/trap.c:1807:22: warning: array index 512 is past the end of the array (that has type 'uint64_t[512]' (aka 'unsigned long[512]')) [-Warray-bounds]
+ 1807 |       uart_print_hex(l2_table_1[cp][0x200]);
+      |                      ^              ~~~~~
+src/kernel/arch/arm/trap.c:1801:7: note: array 'l2_table_1' declared here
+ 1801 |       extern uint64_t l2_table_1[][512];
+      |       ^
+src/kernel/arch/arm/trap.c:1809:22: warning: array index 544 is past the end of the array (that has type 'uint64_t[512]' (aka 'unsigned long[512]')) [-Warray-bounds]
+ 1809 |       uart_print_hex(l2_table_1[cp][0x220]);
+      |                      ^              ~~~~~
+src/kernel/arch/arm/trap.c:1801:7: note: array 'l2_table_1' declared here
+ 1801 |       extern uint64_t l2_table_1[][512];
+      |       ^
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/arch/arm/uart.c -o obj/arm/uart.o
+ld.lld -T linker.ld -o hobbyos.elf obj/arm/boot.o obj/arm/fpu.o obj/arm/setjmp.o obj/arm/abi_t2_test.o obj/arm/audio_stub.o obj/arm/blk_cache.o obj/arm/blk_cache_press_test.o obj/arm/blk_cache_test.o obj/arm/dhcp.o obj/arm/elf_image.o obj/arm/elf_loader.o obj/arm/evdev.o obj/arm/evdev_test.o obj/arm/fat16.o obj/arm/fat16_test.o obj/arm/fb_ioctl.o obj/arm/fb_ioctl_test.o obj/arm/fb_mmap.o obj/arm/fb_mmap_test.o obj/arm/frame.o obj/arm/frame_test.o obj/arm/fs.o obj/arm/fs_test.o obj/arm/input_node.o obj/arm/input_node_test.o obj/arm/iommu_vtd.o obj/arm/ipc_proto.o obj/arm/linux_uname.o obj/arm/lock_order.o obj/arm/locks_test.o obj/arm/main.o obj/arm/math_test.o obj/arm/mmu_test.o obj/arm/net.o obj/arm/net_rdma.o obj/arm/net_rdma_test.o obj/arm/net_test.o obj/arm/nfs.o obj/arm/nfs_proto.o obj/arm/nfs_test.o obj/arm/pipe.o obj/arm/pipe_test.o obj/arm/process.o obj/arm/process_test.o obj/arm/program_loader.o obj/arm/program_loader_test.o obj/arm/ssp.o obj/arm/test_fw_cfg.o obj/arm/test_smp.o obj/arm/time.o obj/arm/time_test.o obj/arm/timer_test.o obj/arm/trap_test.o obj/arm/unit_test.o obj/arm/unix.o obj/arm/unix_test.o obj/arm/vfs.o obj/arm/virtio_blk.o obj/arm/virtio_blk_test.o obj/arm/virtio_gpu.o obj/arm/virtio_gpu_test.o obj/arm/virtio_gpu_x64.o obj/arm/virtio_input.o obj/arm/virtio_input_test.o obj/arm/virtio_net.o obj/arm/virtio_net_test.o obj/arm/vm.o obj/arm/vm_test.o obj/arm/cpu.o obj/arm/gic.o obj/arm/locks.o obj/arm/mmu.o obj/arm/rtc.o obj/arm/smp.o obj/arm/timer.o obj/arm/trap.o obj/arm/uart.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/user/console.c -o obj/arm/console.o
+ld.lld -T src/user/linker.ld -o obj/arm/console.elf obj/arm/console.o obj/arm/user_libc.o obj/arm/user_malloc.o obj/arm/libc_string.o
+llvm-objcopy -O binary obj/arm/console.elf obj/arm/console.bin
+[browser] third_party/webkit-hobbyos/cache/browser-arm.bin.xz (cache) -> obj/arm/browser.bin
+[tools] LLVM dist staging present
+# Startup disk: 1 GiB (user-requested floor; FAT16 tops out at 2 GiB).
+# mkfs.fat auto-picks the cluster size (32 KiB @ 1 GiB); the kernel
+# fat16.c layout math is BPB data-driven (bpb_sectors_per_cluster), so
+# no driver change is needed for the larger disk/clusters.
+dd if=/dev/zero of=disk.img bs=1M count=1024
+1024+0 records in
+1024+0 records out
+1073741824 bytes (1.1 GB, 1.0 GiB) copied, 0.324658 s, 3.3 GB/s
+mkfs.fat -F 16 disk.img
+mkfs.fat 4.2 (2021-01-31)
+mmd -i disk.img ::/EFI
+mmd -i disk.img ::/EFI/BOOT
+mmd -i disk.img ::/boot
+mmd -i disk.img ::/home
+# CA roots for the browser's TLS stack (libcurl/mbedTLS): the driver pins
+# /CERTS/CA.PEM (WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp).  Without
+# this every https:// navigation fails at certificate verification and the
+# user sees the previous page with no explanation.
+mmd -i disk.img ::/CERTS
+mcopy -i disk.img certs/cacert.pem ::/CERTS/CA.PEM
+mmd -i disk.img ::/nfs
+mmd -i disk.img ::/mnt
+mmd -i disk.img ::/TESTDIR
+mmd -i disk.img ::/tmp
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+# build-tools at their frozen /TOOLS/ paths (Makefile.hobbyos sketch).
+mmd -i disk.img ::/TOOLS
+# L3 (selfhost W-A): VFAT long-name build-payload fixture dirs (mtools-written).
+mmd -i disk.img ::/src
+mmd -i disk.img ::/src/kernel
+mmd -i disk.img ::/src/user_include
+mmd -i disk.img ::/src/user_include/graphics
+mmd -i disk.img ::/third_party
+mmd -i disk.img ::/third_party/libcxx-21.1.8
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include
+mcopy -i disk.img tests/fixtures/E2E.TXT ::/E2E.TXT
+mcopy -i disk.img tests/fixtures/DRAGME.TXT ::/DRAGME.TXT
+mcopy -i disk.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+mcopy -i disk.img bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
+# [inos-build-kernel] canonical ARM boot config from the repo file
+# (single source of truth; also what --src staging copies to
+# /SRC/limine.conf and what SRC.TAR carries).  Two entries: the boot
+# kernel + the previous one, which /BUILD_KERNEL.SH's install step
+# keeps at /boot/hobbyos.old.
+mcopy -i disk.img bootloader/limine-arm.conf ::/boot/limine.conf
+llvm-objcopy -O binary hobbyos.elf hobbyos.bin
+mcopy -i disk.img hobbyos.bin ::/boot/hobbyos.bin
+mcopy -i disk.img obj/arm/memtest.bin ::/MEMTEST.BIN
+mcopy -i disk.img obj/arm/fileio_test.bin ::/FILEIO.BIN
+mcopy -i disk.img obj/arm/console.bin ::/CONSOLE.BIN
+mcopy -i disk.img obj/arm/fork_test.bin ::/FORKTEST.BIN
+mcopy -i disk.img obj/arm/heap_test.bin ::/HEAPTEST.BIN
+mcopy -i disk.img obj/arm/spawntest.bin ::/SPAWN.BIN
+mcopy -i disk.img obj/arm/graphics.bin ::/GRAPHICS.BIN
+mcopy -i disk.img obj/arm/wsurf_test.bin ::/WSRF_T.BIN
+mcopy -i disk.img obj/arm/smp_test.bin ::/SMPTEST.BIN
+mcopy -i disk.img obj/arm/pipetest.bin ::/PIPETEST.BIN
+mcopy -i disk.img obj/arm/nettest.bin ::/NETTEST.BIN
+mcopy -i disk.img obj/arm/timeout.bin ::/TIMEOUT.BIN
+mcopy -i disk.img obj/arm/nfstest.bin ::/NFSTEST.BIN
+mcopy -i disk.img obj/arm/desktop.bin ::/DESKTOP.BIN
+browser: obj/arm/browser.bin (resolved by the browser-staged completeness rule; installed as ::/BROWSER.BIN)
+dejavu-2.37/AUTHORS: OK
+dejavu-2.37/BUGS: OK
+dejavu-2.37/fontconfig/20-unhint-small-dejavu-sans.conf: OK
+dejavu-2.37/fontconfig/20-unhint-small-dejavu-sans-mono.conf: OK
+dejavu-2.37/fontconfig/20-unhint-small-dejavu-serif.conf: OK
+dejavu-2.37/fontconfig/57-dejavu-sans.conf: OK
+dejavu-2.37/fontconfig/57-dejavu-sans-mono.conf: OK
+dejavu-2.37/fontconfig/57-dejavu-serif.conf: OK
+dejavu-2.37/langcover.txt: OK
+dejavu-2.37/LICENSE: OK
+dejavu-2.37/NEWS: OK
+dejavu-2.37/README.md: OK
+dejavu-2.37/status.txt: OK
+dejavu-2.37/ttf/DejaVuMathTeXGyre.ttf: OK
+dejavu-2.37/ttf/DejaVuSans-BoldOblique.ttf: OK
+dejavu-2.37/ttf/DejaVuSans-Bold.ttf: OK
+dejavu-2.37/ttf/DejaVuSansCondensed-BoldOblique.ttf: OK
+dejavu-2.37/ttf/DejaVuSansCondensed-Bold.ttf: OK
+dejavu-2.37/ttf/DejaVuSansCondensed-Oblique.ttf: OK
+dejavu-2.37/ttf/DejaVuSansCondensed.ttf: OK
+dejavu-2.37/ttf/DejaVuSans-ExtraLight.ttf: OK
+dejavu-2.37/ttf/DejaVuSansMono-BoldOblique.ttf: OK
+dejavu-2.37/ttf/DejaVuSansMono-Bold.ttf: OK
+dejavu-2.37/ttf/DejaVuSansMono-Oblique.ttf: OK
+dejavu-2.37/ttf/DejaVuSansMono.ttf: OK
+dejavu-2.37/ttf/DejaVuSans-Oblique.ttf: OK
+dejavu-2.37/ttf/DejaVuSans.ttf: OK
+dejavu-2.37/ttf/DejaVuSerif-BoldItalic.ttf: OK
+dejavu-2.37/ttf/DejaVuSerif-Bold.ttf: OK
+dejavu-2.37/ttf/DejaVuSerifCondensed-BoldItalic.ttf: OK
+dejavu-2.37/ttf/DejaVuSerifCondensed-Bold.ttf: OK
+dejavu-2.37/ttf/DejaVuSerifCondensed-Italic.ttf: OK
+dejavu-2.37/ttf/DejaVuSerifCondensed.ttf: OK
+dejavu-2.37/ttf/DejaVuSerif-Italic.ttf: OK
+dejavu-2.37/ttf/DejaVuSerif.ttf: OK
+dejavu-2.37/unicover.txt: OK
+mcopy -i disk.img obj/arm/editor.bin ::/EDITOR.BIN
+mcopy -i disk.img obj/arm/EDITOR_T.BIN ::/EDITOR_T.BIN
+mcopy -i disk.img obj/arm/APPS_T.BIN ::/APPS_T.BIN
+mcopy -i disk.img obj/arm/FILEDIAL.BIN ::/FILEDIAL.BIN
+mcopy -i disk.img obj/arm/DIALOG_T.BIN ::/DIALOG_T.BIN
+mcopy -i disk.img obj/arm/PONG_T.BIN ::/PONG_T.BIN
+mcopy -i disk.img obj/arm/stress.bin ::/STRESS.BIN
+mcopy -i disk.img obj/arm/fpu_test.bin ::/FPU_T.BIN
+mcopy -i disk.img obj/arm/gfxbench.bin ::/GFXBENCH.BIN
+mcopy -i disk.img obj/arm/math_test.bin ::/MATH_T.BIN
+mcopy -i disk.img obj/arm/errtest.bin ::/ERRTEST.BIN
+mcopy -i disk.img obj/arm/SOCK2TST.BIN ::/SOCK2TST.BIN
+mcopy -i disk.img obj/arm/POLLTST.BIN ::/POLLTST.BIN
+mcopy -i disk.img obj/arm/POLLBRK.BIN ::/POLLBRK.BIN
+mcopy -i disk.img obj/arm/BLKTEST.BIN ::/BLKTEST.BIN
+mcopy -i disk.img obj/arm/RANDTST.BIN ::/RANDTST.BIN
+mcopy -i disk.img obj/arm/dns_test.bin ::/DNSTST.BIN
+mcopy -i disk.img obj/arm/netfix.bin ::/NETFIX.BIN
+mcopy -i disk.img obj/arm/cxx_smoke.bin ::/CXXSMOKE.BIN
+mcopy -i disk.img obj/arm/thrd_test.bin ::/THRD_T.BIN
+mcopy -i disk.img obj/arm/tls_test.bin ::/TLS_T.BIN
+mcopy -i disk.img obj/arm/WK1C_T.BIN ::/WK1C_T.BIN
+mcopy -i disk.img obj/arm/cxx_t.bin ::/CXX_T.BIN
+mcopy -i disk.img obj/arm/rtti_t.bin ::/RTTI_T.BIN
+mcopy -i disk.img obj/arm/ipc_test.bin ::/IPC_T.BIN
+mcopy -i disk.img obj/arm/mmtest.bin ::/MMTEST.BIN
+mcopy -i disk.img obj/arm/sqltest.bin ::/SQLTEST.BIN
+mcopy -i disk.img obj/arm/torture_test.bin ::/TORTURE.BIN
+mcopy -i disk.img obj/arm/big.bin ::/BIG.BIN
+mcopy -i disk.img obj/arm/hello.bin ::/HELLO.BIN
+mcopy -i disk.img obj/arm/selfhost.bin ::/SELFHOST.BIN
+mcopy -i disk.img obj/arm/sh.bin ::/SH.BIN
+mcopy -i disk.img obj/arm/ls.bin ::/LS.BIN
+mcopy -i disk.img obj/arm/cat.bin ::/CAT.BIN
+mcopy -i disk.img obj/arm/grep.bin ::/GREP.BIN
+mcopy -i disk.img obj/arm/less.bin ::/LESS.BIN
+mcopy -i disk.img obj/arm/tail.bin ::/TAIL.BIN
+mcopy -i disk.img obj/arm/head.bin ::/HEAD.BIN
+mcopy -i disk.img obj/arm/shtest.bin ::/SHTEST.BIN
+mcopy -i disk.img obj/arm/ps.bin ::/PS.BIN
+mcopy -i disk.img obj/arm/free.bin ::/FREE.BIN
+mcopy -i disk.img obj/arm/uptime.bin ::/UPTIME.BIN
+mcopy -i disk.img obj/arm/kill.bin ::/KILL.BIN
+mcopy -i disk.img obj/arm/basename.bin ::/BASENAME.BIN
+mcopy -i disk.img obj/arm/dirname.bin ::/DIRNAME.BIN
+mcopy -i disk.img obj/arm/seq.bin ::/SEQ.BIN
+mcopy -i disk.img obj/arm/expr.bin ::/EXPR.BIN
+mcopy -i disk.img obj/arm/testgnu.bin ::/TEST.BIN
+mcopy -i disk.img obj/arm/cp.bin ::/CP.BIN
+mcopy -i disk.img obj/arm/rm.bin ::/RM.BIN
+mcopy -i disk.img obj/arm/mv.bin ::/MV.BIN
+mcopy -i disk.img obj/arm/touch.bin ::/TOUCH.BIN
+mcopy -i disk.img obj/arm/wc.bin ::/WC.BIN
+mcopy -i disk.img obj/arm/sed.bin ::/SED.BIN
+mcopy -i disk.img obj/arm/make.bin ::/MAKE.BIN
+mcopy -i disk.img obj/arm/hedgnu.bin ::/HEDGNU.BIN
+mcopy -i disk.img obj/arm/tailgnu.bin ::/TAILGN.BIN
+mcopy -i disk.img obj/arm/cut.bin ::/CUT.BIN
+mcopy -i disk.img obj/arm/tr.bin ::/TR.BIN
+mcopy -i disk.img obj/arm/paste.bin ::/PASTE.BIN
+mcopy -i disk.img obj/arm/fold.bin ::/FOLD.BIN
+mcopy -i disk.img obj/arm/nl.bin ::/NL.BIN
+mcopy -i disk.img obj/arm/comm.bin ::/COMM.BIN
+mcopy -i disk.img obj/arm/tsort.bin ::/TSORT.BIN
+mcopy -i disk.img obj/arm/expand.bin ::/EXPAND.BIN
+mcopy -i disk.img obj/arm/unexpand.bin ::/UNEXPAND.BIN
+mcopy -i disk.img obj/arm/cksum.bin ::/CKSUM.BIN
+mcopy -i disk.img obj/arm/md5sum.bin ::/MD5SUM.BIN
+mcopy -i disk.img obj/arm/proc_child.bin ::/PROCCHLD.BIN
+mcopy -i disk.img obj/arm/spawnex_child.bin ::/SPAWNEX.BIN
+mcopy -i disk.img obj/arm/sig_test.bin ::/SIG_T.BIN
+mcopy -i disk.img obj/arm/head_test.bin ::/HEDTEST.BIN
+mcopy -i disk.img obj/arm/tail_test.bin ::/TAILTEST.BIN
+mcopy -i disk.img obj/arm/proc_test.bin ::/PROCTEST.BIN
+mcopy -i disk.img obj/arm/wc_test.bin ::/WCTEST.BIN
+mcopy -i disk.img obj/arm/cut_test.bin ::/CUTTEST.BIN
+mcopy -i disk.img obj/arm/tr_test.bin ::/TRTEST.BIN
+mcopy -i disk.img obj/arm/paste_test.bin ::/PASTE_T.BIN
+mcopy -i disk.img obj/arm/fold_test.bin ::/FOLDTEST.BIN
+mcopy -i disk.img obj/arm/nl_test.bin ::/NLTEST.BIN
+mcopy -i disk.img obj/arm/comm_test.bin ::/COMMTEST.BIN
+mcopy -i disk.img obj/arm/tsort_test.bin ::/TSORT_T.BIN
+mcopy -i disk.img obj/arm/expand_test.bin ::/EXPAND_T.BIN
+mcopy -i disk.img obj/arm/unexpand_test.bin ::/UNEXPAND_T.BIN
+mcopy -i disk.img obj/arm/fatbig_test.bin ::/FATBIG_T.BIN
+# L3 (selfhost W-A): VFAT long-name build-payload fixtures.  Content
+# markers must stay in sync with src/user/lfn_test.c.
+mcopy -i disk.img tests/fixtures/lfn/program_loader.c ::/src/kernel/program_loader.c
+mcopy -i disk.img tests/fixtures/lfn/window.h ::/src/user_include/graphics/window.h
+mcopy -i disk.img tests/fixtures/lfn/llvm-project-21.1.8.src-EXAMPLE.c ::/src/llvm-project-21.1.8.src-EXAMPLE.c
+mcopy -i disk.img tests/fixtures/lfn/upper_bound.h ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include/upper_bound.h
+mcopy -i disk.img tests/fixtures/lfn/longfilename.txt ::/longfilename.txt
+mcopy -i disk.img tests/fixtures/lfn/longfilename2.txt ::/longfilename2.txt
+mcopy -i disk.img tests/fixtures/lfn/longfil~1.txt ::/longfil~1.txt
+mcopy -i disk.img obj/arm/lfn_test.bin ::/LFN_T.BIN
+mcopy -i disk.img obj/arm/cksum_test.bin ::/CKSUM_T.BIN
+mcopy -i disk.img obj/arm/md5sum_test.bin ::/MD5SUM_T.BIN
+mcopy -i disk.img obj/arm/tac.bin ::/TAC.BIN
+mcopy -i disk.img obj/arm/tac_test.bin ::/TACTEST.BIN
+mcopy -i disk.img obj/arm/cmp.bin ::/CMP.BIN
+mcopy -i disk.img obj/arm/cmp_test.bin ::/CMPTEST.BIN
+mcopy -i disk.img obj/arm/regex_test.bin ::/REGTEST.BIN
+mcopy -i disk.img obj/arm/sed_test.bin ::/SEDTEST.BIN
+mcopy -i disk.img obj/arm/grep_test.bin ::/GREPTEST.BIN
+mcopy -i disk.img obj/arm/subprobe.bin ::/SUBPRB.BIN
+mcopy -i disk.img obj/arm/pipeprobe.bin ::/PIPEPRB.BIN
+mcopy -i disk.img obj/arm/lseek_test.bin ::/LKSTEST.BIN
+mcopy -i disk.img obj/arm/sort.bin ::/SORT.BIN
+mcopy -i disk.img obj/arm/uniq.bin ::/UNIQ.BIN
+mcopy -i disk.img obj/arm/ping.bin ::/PING.BIN
+mcopy -i disk.img obj/arm/nc.bin ::/NC.BIN
+mcopy -i disk.img obj/arm/ifconfig.bin ::/IFCONFIG.BIN
+mcopy -i disk.img obj/arm/shtest2.bin ::/SHTEST2.BIN
+mcopy -i disk.img obj/arm/mkdir.bin ::/MKDIR.BIN
+mcopy -i disk.img obj/arm/shtest3.bin ::/SHTEST3.BIN
+mcopy -i disk.img obj/arm/pong.bin ::/PONG.BIN
+mcopy -i disk.img obj/arm/millipede.bin ::/MILLIPED.BIN
+mcopy -i disk.img obj/arm/doom.bin ::/DOOM.BIN
+[disk] note: no doom1.wad (run tools/fetch_doom_wad.sh) — DOOM will lack an IWAD
+mcopy -i disk.img obj/arm/stardust.bin ::/STARDUST.BIN
+mcopy -i disk.img obj/arm/files.bin ::/FILES.BIN
+mcopy -i disk.img obj/arm/calc.bin ::/CALC.BIN
+mcopy -i disk.img obj/arm/xcalc.bin ::/XCALC.BIN
+mcopy -i disk.img obj/arm/antfarm.bin ::/ANTFARM.BIN
+mcopy -i disk.img obj/arm/xeyes.bin ::/XEYES.BIN
+mcopy -i disk.img obj/arm/xnibbler.bin ::/XNIBBLER.BIN
+mcopy -i disk.img obj/arm/clock.bin ::/CLOCK.BIN
+mcopy -i disk.img obj/arm/sysmon.bin ::/SYSMON.BIN
+mcopy -i disk.img obj/arm/hex.bin ::/HEX.BIN
+mcopy -i disk.img obj/arm/tasks.bin ::/TASKS.BIN
+mcopy -i disk.img obj/arm/find.bin ::/FIND.BIN
+mcopy -i disk.img obj/arm/diff.bin ::/DIFF.BIN
+mcopy -i disk.img obj/arm/notes.bin ::/NOTES.BIN
+mcopy -i disk.img obj/arm/unit.bin ::/UNIT.BIN
+mcopy -i disk.img obj/arm/nano.bin ::/NANO.BIN
+mcopy -i disk.img obj/arm/xcrypt.bin ::/XCRYPT.BIN
+mcopy -i disk.img obj/arm/nes.bin ::/NES.BIN
+# Selfhost W2 (mtools port): in-OS /TOOLS copies of the ported
+# build-tools (8.3 names, the frozen F1 layout).
+mcopy -i disk.img obj/arm/mcopy.bin ::/TOOLS/MCOPY.BIN
+mcopy -i disk.img obj/arm/mdel.bin ::/TOOLS/MDEL.BIN
+mcopy -i disk.img obj/arm/mmd.bin ::/TOOLS/MMD.BIN
+# Selfhost W2 (mkfs port): in-OS MKFSFAT (F1 layout).
+mcopy -i disk.img obj/arm/mkfsfat.bin ::/MKFSFAT.BIN
+# Selfhost W3 (tools): the in-OS toolchain on the startup image (frozen
+# F1 layout, selfhost.md §7.3).  tools/selfhost-stage.sh --tools stages
+# CLANG.BIN/LLD.BIN/LLVMAR.BIN/OBJCOPY.BIN from the wave-2 LLVM
+# distribution staging (obj/selfhost/dist-staging, or the persistent
+# third_party/llvm-21.1.8/dist-staging copy that survives `make clean`),
+# the ported build tools (MAKE/MCOPY/MDEL/MMD/MKFSFAT), and the RESDIR
+# header tree under /TOOLS — staged FAITHFULLY with long names (F8
+# decision, see docs/selfhost/llvm-bootstrap.md §6.2).  Soft dependency:
+# an absent dist-staging warns + skips, so trees without the LLVM
+# install still build a bootable image (build_kernel.sh then refuses
+# with instructions).  Override with STAGE_TOOLS=0 to skip.
+tools/selfhost-stage.sh --tools disk.img
+selfhost-stage: staging in-OS toolchain to ::/TOOLS (F1 layout)
+selfhost-stage:   CLANG.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/clang-21 (converted, 94194168 B)
+selfhost-stage:   LLD.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/lld (converted, 53252520 B)
+selfhost-stage:   LLVMAR.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/llvm-ar (converted, 8351072 B)
+selfhost-stage:   OBJCOPY.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/llvm-objcopy (converted, 4984544 B)
+selfhost-stage: staged 284 files, 176926286 bytes into ::/TOOLS
+  --- ::/TOOLS (mdir) ---
+TAR      BIN    145128 2026-10-25  13:59 
+RESDIR       <DIR>     2026-10-25  13:59 
+       15 files         162 199 032 bytes
+                        738 525 184 bytes free
+
+  --- ::/TOOLS/RESDIR/include count ---
+      295 files          14 727 254 bytes
+                        738 525 184 bytes free
+
+selfhost-stage: done
+# Selfhost W4 (src): the in-OS build-required source subset on the
+# startup image (frozen F2 /SRC flavor): kernel+user sources, headers,
+# Makefile.hobbyos, limine/EFI assets, the carried build products, and
+# the SELFHOST.RUN/SELFHOST.SH stage scripts.  tools/selfhost-stage.sh
+# --src; disable together with the tools step via STAGE_TOOLS=0.
+tools/selfhost-stage.sh --src disk.img
+selfhost-stage: STAGE_LIBCXX=0 — skipping C++ libcxx include subset
+selfhost-stage: staging BUILD-REQUIRED source subset to ::/SRC
+
+selfhost-stage: staged BUILD-REQUIRED subset into disk.img
+  payload: 268 files, 5253712 bytes
+  --- ::/SRC (mdir) ---
+        3 files             315 392 bytes
+
+Total files listed:
+      342 files           5 253 781 bytes
+                        729 808 896 bytes free
+
+selfhost-stage: done
+# [inos-build-kernel] the source tarball + the in-OS build script:
+# SRC.TAR (ustar, assembled by tools/selfhost-src-tar.sh from the real
+# tree) lands at ::/SRC.TAR; build_kernel.sh at ::/BUILD_KERNEL.SH.
+# In-OS: `SH.BIN /BUILD_KERNEL.SH` extracts the tar and builds the
+# kernel from it (Makefile.hobbyos `all`) + assembles OUT.IMG.
+tools/selfhost-src-tar.sh obj/selfhost/SRC.TAR
+selfhost-src-tar: assembling obj/selfhost/SRC.TAR
+selfhost-src-tar: done — obj/selfhost/SRC.TAR
+  entries: 1115 (files+dirs), size: 24094720 bytes
+  spot-checked members: src/kernel/main.c Makefile.hobbyos linker.ld limine.conf build_kernel.sh
+mcopy -i disk.img obj/selfhost/SRC.TAR ::/SRC.TAR
+mcopy -i disk.img src/user/selfhost/build_kernel.sh ::/BUILD_KERNEL.SH
+mcopy -i disk.img obj/arm/monitor.bin ::/MONITOR.BIN
+mcopy -i disk.img obj/arm/monitort.bin ::/MONITORT.BIN
+mcopy -i disk.img obj/arm/icusmk.bin ::/ICUSMK.BIN
+echo "HobbyOS Terminal Test File" > SHTEST.TXT
+echo "This is line number two." >> SHTEST.TXT
+echo "Line three is right here." >> SHTEST.TXT
+echo "Fourth line has some interesting keywords like hello world." >> SHTEST.TXT
+echo "Line five is the last line of this small test document." >> SHTEST.TXT
+touch TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT
+echo "orange" > SORT.TXT
+echo "apple" >> SORT.TXT
+echo "orange" >> SORT.TXT
+mcopy -i disk.img SHTEST.TXT ::/SHTEST.TXT
+mcopy -i disk.img SHTEST.TXT ::/home/SHTEST.TXT
+mcopy -i disk.img TEST1.TXT ::/TEST1.TXT
+mcopy -i disk.img TEST2.TXT ::/TEST2.TXT
+mcopy -i disk.img TEST3.TXT ::/TEST3.TXT
+mcopy -i disk.img TEST4.TXT ::/TEST4.TXT
+mcopy -i disk.img SORT.TXT ::/SORT.TXT
+rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT
+qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 8 -m 16384M -accel tcg,thread=multi -bios /home/sarah/.local/share/AAVMF/AAVMF_CODE.fd -display gtk -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff -display none
+UEFI firmware (version 2025.11-3ubuntu7.3 built at 15:40:26 on Sep 23 2026)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+BdsDxe: starting Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+[001;001H[001;001H[001;001Hl[001;002Hi[001;003Hn[001;004Hu[001;005Hx[001;006H:[001;007H [001;008HL[001;009Ho[001;010Ha[001;011Hd[001;012Hi[001;013Hn[001;014Hg[001;015H [001;016Hk[001;017He[001;018Hr[001;019Hn[001;020He[001;021Hl[001;022H [001;023H`[001;024Hb[001;025Ho[001;026Ho[001;027Ht[001;028H([001;029H)[001;030H:[001;031H/[001;032Hb[001;033Ho[001;034Ho[001;035Ht[001;036H/[001;037Hh[001;038Ho[001;039Hb[001;040Hb[001;041Hy[001;042Ho[001;043Hs[001;044H.[001;045Hb[001;046Hi[001;047Hn[001;048H`[001;049H.[001;050H.[001;051H.[001;052H[001;001H[002;001HBooting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+[GPUDIAG] gpu wait > 11 ms: ack=3 used=4 (park off)
+[GPU] virtio-gpu mmio irq=78
+VirtIO GPU successfully initialized.
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1900544 total_mib=7424 reserved=0
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+virtio-net MAC: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+VirtIO Network successfully initialized.
+
+--- Parallel Program Loading ---
+Mode: UNIT_TEST - Running Kernel Unit Tests...
+
+==================================
+    RUNNING KERNEL UNIT TESTS     
+==================================
+frame_test_suite:
+  Running test_frame_counts...
+  Running test_frame_alloc_free_delta...
+  Running test_frame_reuse...
+  Running test_frame_alloc_zeroed...
+  Running test_frame_block_layer...
+  Running test_frame_exhaustion_path...
+  Running test_frame_image_reserved...
+  [imgrsv] iters=929 high=0x000000023F800000 last=0x0000000070000000 inside=0 wrapped=1
+fat16_test_suite:
+  Running test_fat16_open_excl...
+/SECEXCL.TXT
+/SECEXCL.TXT
+/SECEXCL.TXT
+  Running test_fat16_mkdir_dup_atomic...
+  Running test_fat16_sync_clobber_guard...
+/SECSYN.TXT
+/SECSYN.TXT
+  Running test_fat16_open_existing...
+/TEST.TXT
+  Running test_fat16_open_nonexistent...
+/NOSUCHDIR/MISSING.TXT
+  Running test_fat16_created_entry_has_attr...
+/ATTR_CHECK.TXT
+/ATTR_CHECK.TXT
+  Running test_fat16_read_file...
+/TEST.TXT
+  Running test_fat16_move_across_dirs...
+/MOVE.TXT
+/MOVE.TXT new=/MOVEDIR/MOVE.TXT
+/MOVEDIR/MOVE.TXT new=/MOVEDIR/RENAMED.TXT
+/CLOB1.TXT
+/MOVEDIR/CLOB2.TXT
+/CLOB1.TXT new=/MOVEDIR/CLOB2.TXT
+/SAME1.TXT
+/SAME2.TXT
+/SAME1.TXT new=/SAME2.TXT
+/TRUNC.TXT
+/TRUNC.TXT
+/TRUNC.TXT
+/MOVESUB new=/MOVEDIR2/MOVESUB
+/MOVEDIR2/MOVESUB/INNER.TXT
+/MOVEDIR2 new=/MOVEDIR2/MOVESUB/MOVEDIR2
+/NO-SUCH-FILE.TXT new=/X.TXT
+/CLOB1.TXT new=/NO-SUCH-DIR/X.TXT
+  Running test_fat16_lfn_names...
+/UNEXPAND_T.BIN
+/LONG_FILENAME_TEST.TXT
+/LONG_FILENAME_TEST.TXT
+/ABCDEFGH.TXT
+/ABCDEFGH_LONG.TXT
+  Running test_fat16_large_create_write...
+/BIG1M.BIN
+/BIG1M.BIN
+  Running test_fat16_large_lfn_create_write...
+/BIG_LONGFILE_1MB.BIN
+/BIG_LONGFILE_1MB.BIN
+  Running test_fat16_lfn_case_and_alias...
+/Mixed_Case_LongName.TXT
+  Running test_fat16_lfn_collision_unique...
+/COLLIDE_SAME_ALIAS_A.TXT
+/COLLIDE_SAME_ALIAS_B.TXT
+/COLLIDE_SAME_ALIAS_A.TXT
+/COLLIDE_SAME_ALIAS_B.TXT
+  Running test_fat16_lfn_read_dir_listing...
+/LISTING_LONG_NAME.TXT
+  Running test_fat16_lfn_mkdir_long...
+/LFN_MKDIR_LONG_NAME/INNER.BIN
+  Running test_fat16_lfn_rename_long...
+/LFN_RENAME_SRC_NAME.TXT
+/LFN_RENAME_SRC_NAME.TXT new=/LFN_RENAME_DST_NAME.TXT
+/LFN_RENAME_DST_NAME.TXT
+/LFN_RENAME_DST_NAME.TXT new=/LFN_RENAME_THIRD_NAME.TXT
+  Running test_fat16_clang_temp_rename_no_twins...
+/WB9OBJ/CPU.O
+/WB9OBJ/CPU-C0FFEE.O.TMP
+/WB9OBJ/CPU-C0FFEE.O.TMP new=/WB9OBJ/CPU.O
+/WB9OBJ/NFS_TEST-C0FFEE.O.TMP
+/WB9OBJ/NFS_TEST-C0FFEE.O.TMP new=/WB9OBJ/NFS_TEST.O
+/WB9OBJ/NFS.O
+/WB9OBJ/NFS-C0FFEE.O.TMP
+/WB9OBJ/NFS-C0FFEE.O.TMP new=/WB9OBJ/NFS.O
+/WB9OBJ/MAIN-C0FFEE.O.TMP
+/WB9OBJ/MAIN-C0FFEE.O.TMP new=/WB9OBJ/MAIN.O
+/WB9OBJ/FS.O
+/WB9OBJ/FS-C0FFEE.O.TMP
+/WB9OBJ/FS-C0FFEE.O.TMP new=/WB9OBJ/FS.O
+/WB9OBJ/NET-C0FFEE.O.TMP
+/WB9OBJ/NET-C0FFEE.O.TMP new=/WB9OBJ/NET.O
+/WB9OBJ/VFS.O
+/WB9OBJ/VFS-C0FFEE.O.TMP
+/WB9OBJ/VFS-C0FFEE.O.TMP new=/WB9OBJ/VFS.O
+/WB9OBJ/DHCP-C0FFEE.O.TMP
+/WB9OBJ/DHCP-C0FFEE.O.TMP new=/WB9OBJ/DHCP.O
+/WB9OBJ/FRAME.O
+/WB9OBJ/FRAME-C0FFEE.O.TMP
+/WB9OBJ/FRAME-C0FFEE.O.TMP new=/WB9OBJ/FRAME.O
+/WB9OBJ/PIPE-C0FFEE.O.TMP
+/WB9OBJ/PIPE-C0FFEE.O.TMP new=/WB9OBJ/PIPE.O
+/WB9OBJ/LOCKS.O
+/WB9OBJ/LOCKS-C0FFEE.O.TMP
+/WB9OBJ/LOCKS-C0FFEE.O.TMP new=/WB9OBJ/LOCKS.O
+/WB9OBJ/MMU-C0FFEE.O.TMP
+/WB9OBJ/MMU-C0FFEE.O.TMP new=/WB9OBJ/MMU.O
+/WB9OBJ/RTC.O
+/WB9OBJ/RTC-C0FFEE.O.TMP
+/WB9OBJ/RTC-C0FFEE.O.TMP new=/WB9OBJ/RTC.O
+/WB9OBJ/SMP-C0FFEE.O.TMP
+/WB9OBJ/SMP-C0FFEE.O.TMP new=/WB9OBJ/SMP.O
+/WB9OBJ/TIMER.O
+/WB9OBJ/TIMER-C0FFEE.O.TMP
+/WB9OBJ/TIMER-C0FFEE.O.TMP new=/WB9OBJ/TIMER.O
+/WB9OBJ/TRAP-C0FFEE.O.TMP
+/WB9OBJ/TRAP-C0FFEE.O.TMP new=/WB9OBJ/TRAP.O
+/WB9OBJ/UART.O
+/WB9OBJ/UART-C0FFEE.O.TMP
+/WB9OBJ/UART-C0FFEE.O.TMP new=/WB9OBJ/UART.O
+/WB9OBJ/GIC-C0FFEE.O.TMP
+/WB9OBJ/GIC-C0FFEE.O.TMP new=/WB9OBJ/GIC.O
+/WB9OBJ/BOOT.O
+/WB9OBJ/BOOT-C0FFEE.O.TMP
+/WB9OBJ/BOOT-C0FFEE.O.TMP new=/WB9OBJ/BOOT.O
+/WB9OBJ/FPU-C0FFEE.O.TMP
+/WB9OBJ/FPU-C0FFEE.O.TMP new=/WB9OBJ/FPU.O
+/WB9OBJ/SETJMP.O
+/WB9OBJ/SETJMP-C0FFEE.O.TMP
+/WB9OBJ/SETJMP-C0FFEE.O.TMP new=/WB9OBJ/SETJMP.O
+/WB9OBJ/TIME-C0FFEE.O.TMP
+/WB9OBJ/TIME-C0FFEE.O.TMP new=/WB9OBJ/TIME.O
+/WB9OBJ/VIRTIO_B.O
+/WB9OBJ/VIRTIO_B-C0FFEE.O.TMP
+/WB9OBJ/VIRTIO_B-C0FFEE.O.TMP new=/WB9OBJ/VIRTIO_B.O
+/WB9OBJ/VIRTIO_G-C0FFEE.O.TMP
+/WB9OBJ/VIRTIO_G-C0FFEE.O.TMP new=/WB9OBJ/VIRTIO_G.O
+/WB9OBJ/VIRTIO_N.O
+/WB9OBJ/VIRTIO_N-C0FFEE.O.TMP
+/WB9OBJ/VIRTIO_N-C0FFEE.O.TMP new=/WB9OBJ/VIRTIO_N.O
+/WB9OBJ/VM-C0FFEE.O.TMP
+/WB9OBJ/VM-C0FFEE.O.TMP new=/WB9OBJ/VM.O
+/WB9OBJ/FS_TEST.O
+/WB9OBJ/FS_TEST-C0FFEE.O.TMP
+/WB9OBJ/FS_TEST-C0FFEE.O.TMP new=/WB9OBJ/FS_TEST.O
+/WB9OBJ/MMU_TEST-C0FFEE.O.TMP
+/WB9OBJ/MMU_TEST-C0FFEE.O.TMP new=/WB9OBJ/MMU_TEST.O
+/WB9OBJ/NET_TEST.O
+/WB9OBJ/NET_TEST-C0FFEE.O.TMP
+/WB9OBJ/NET_TEST-C0FFEE.O.TMP new=/WB9OBJ/NET_TEST.O
+/WB9OBJ/TEST_SMP-C0FFEE.O.TMP
+/WB9OBJ/TEST_SMP-C0FFEE.O.TMP new=/WB9OBJ/TEST_SMP.O
+/WB9OBJ/VM_TEST.O
+/WB9OBJ/VM_TEST-C0FFEE.O.TMP
+/WB9OBJ/VM_TEST-C0FFEE.O.TMP new=/WB9OBJ/VM_TEST.O
+/WB9OBJ/FAT16_TE-C0FFEE.O.TMP
+/WB9OBJ/FAT16_TE-C0FFEE.O.TMP new=/WB9OBJ/FAT16_TE.O
+/WB9OBJ/PIPE_TES.O
+/WB9OBJ/PIPE_TES-C0FFEE.O.TMP
+/WB9OBJ/PIPE_TES-C0FFEE.O.TMP new=/WB9OBJ/PIPE_TES.O
+/WB9OBJ/TIME_TES-C0FFEE.O.TMP
+/WB9OBJ/TIME_TES-C0FFEE.O.TMP new=/WB9OBJ/TIME_TES.O
+/WB9OBJ/UNIX_TES.O
+/WB9OBJ/UNIX_TES-C0FFEE.O.TMP
+/WB9OBJ/UNIX_TES-C0FFEE.O.TMP new=/WB9OBJ/UNIX_TES.O
+/WB9OBJ/IOMMU_VT-C0FFEE.O.TMP
+/WB9OBJ/IOMMU_VT-C0FFEE.O.TMP new=/WB9OBJ/IOMMU_VT.O
+/WB9OBJ/NFS_PROT.O
+/WB9OBJ/NFS_PROT-C0FFEE.O.TMP
+/WB9OBJ/NFS_PROT-C0FFEE.O.TMP new=/WB9OBJ/NFS_PROT.O
+/WB9OBJ/IPC_PROT-C0FFEE.O.TMP
+/WB9OBJ/IPC_PROT-C0FFEE.O.TMP new=/WB9OBJ/IPC_PROT.O
+/WB9OBJ/MATH_TES.O
+/WB9OBJ/MATH_TES-C0FFEE.O.TMP
+/WB9OBJ/MATH_TES-C0FFEE.O.TMP new=/WB9OBJ/MATH_TES.O
+/WB9OBJ/TRAP_TES-C0FFEE.O.TMP
+/WB9OBJ/TRAP_TES-C0FFEE.O.TMP new=/WB9OBJ/TRAP_TES.O
+/WB9OBJ/UNIT_TES.O
+/WB9OBJ/UNIT_TES-C0FFEE.O.TMP
+/WB9OBJ/UNIT_TES-C0FFEE.O.TMP new=/WB9OBJ/UNIT_TES.O
+/WB9OBJ/TIMER_TE-C0FFEE.O.TMP
+/WB9OBJ/TIMER_TE-C0FFEE.O.TMP new=/WB9OBJ/TIMER_TE.O
+/WB9OBJ/LOCKS_TE.O
+/WB9OBJ/LOCKS_TE-C0FFEE.O.TMP
+/WB9OBJ/LOCKS_TE-C0FFEE.O.TMP new=/WB9OBJ/LOCKS_TE.O
+/WB9OBJ/FRAME_TE-C0FFEE.O.TMP
+/WB9OBJ/FRAME_TE-C0FFEE.O.TMP new=/WB9OBJ/FRAME_TE.O
+/WB9OBJ/TEST_FW_.O
+/WB9OBJ/TEST_FW_-C0FFEE.O.TMP
+/WB9OBJ/TEST_FW_-C0FFEE.O.TMP new=/WB9OBJ/TEST_FW_.O
+/WB9OBJ/PROCESS_-C0FFEE.O.TMP
+/WB9OBJ/PROCESS_-C0FFEE.O.TMP new=/WB9OBJ/PROCESS_.O
+/WB9OBJ/PROGRAM_.O
+/WB9OBJ/PROGRAM_-C0FFEE.O.TMP
+/WB9OBJ/PROGRAM_-C0FFEE.O.TMP new=/WB9OBJ/PROGRAM_.O
+/WB9OBJ/CPU.O
+/WB9OBJ/NFS_TEST.O
+/WB9OBJ/NFS.O
+/WB9OBJ/MAIN.O
+/WB9OBJ/FS.O
+/WB9OBJ/NET.O
+/WB9OBJ/VFS.O
+/WB9OBJ/DHCP.O
+/WB9OBJ/FRAME.O
+/WB9OBJ/PIPE.O
+/WB9OBJ/LOCKS.O
+/WB9OBJ/MMU.O
+/WB9OBJ/RTC.O
+/WB9OBJ/SMP.O
+/WB9OBJ/TIMER.O
+/WB9OBJ/TRAP.O
+/WB9OBJ/UART.O
+/WB9OBJ/GIC.O
+/WB9OBJ/BOOT.O
+/WB9OBJ/FPU.O
+/WB9OBJ/SETJMP.O
+/WB9OBJ/TIME.O
+/WB9OBJ/VIRTIO_B.O
+/WB9OBJ/VIRTIO_G.O
+/WB9OBJ/VIRTIO_N.O
+/WB9OBJ/VM.O
+/WB9OBJ/FS_TEST.O
+/WB9OBJ/MMU_TEST.O
+/WB9OBJ/NET_TEST.O
+/WB9OBJ/TEST_SMP.O
+/WB9OBJ/VM_TEST.O
+/WB9OBJ/FAT16_TE.O
+/WB9OBJ/PIPE_TES.O
+/WB9OBJ/TIME_TES.O
+/WB9OBJ/UNIX_TES.O
+/WB9OBJ/IOMMU_VT.O
+/WB9OBJ/NFS_PROT.O
+/WB9OBJ/IPC_PROT.O
+/WB9OBJ/MATH_TES.O
+/WB9OBJ/TRAP_TES.O
+/WB9OBJ/UNIT_TES.O
+/WB9OBJ/TIMER_TE.O
+/WB9OBJ/LOCKS_TE.O
+/WB9OBJ/FRAME_TE.O
+/WB9OBJ/TEST_FW_.O
+/WB9OBJ/PROCESS_.O
+/WB9OBJ/PROGRAM_.O
+[W9] obj CPU.O
+[W9] obj NFS.O
+[W9] obj MAIN.O
+[W9] obj FS.O
+[W9] obj NFS_TEST.O
+[W9] obj VFS.O
+[W9] obj DHCP.O
+[W9] obj FRAME.O
+[W9] obj NET.O
+[W9] obj LOCKS.O
+[W9] obj MMU.O
+[W9] obj RTC.O
+[W9] obj PIPE.O
+[W9] obj TIMER.O
+[W9] obj UART.O
+[W9] obj GIC.O
+[W9] obj BOOT.O
+[W9] obj SMP.O
+[W9] obj TRAP.O
+[W9] obj SETJMP.O
+[W9] obj TIME.O
+[W9] obj VIRTIO_B.O
+[W9] obj FPU.O
+[W9] obj VIRTIO_N.O
+[W9] obj VM.O
+[W9] obj FS_TEST.O
+[W9] obj VIRTIO_G.O
+[W9] obj NET_TEST.O
+[W9] obj TEST_SMP.O
+[W9] obj VM_TEST.O
+[W9] obj MMU_TEST.O
+[W9] obj PIPE_TES.O
+[W9] obj TIME_TES.O
+[W9] obj UNIX_TES.O
+[W9] obj FAT16_TE.O
+[W9] obj NFS_PROT.O
+[W9] obj IPC_PROT.O
+[W9] obj MATH_TES.O
+[W9] obj IOMMU_VT.O
+[W9] obj UNIT_TES.O
+[W9] obj TIMER_TE.O
+[W9] obj LOCKS_TE.O
+[W9] obj TRAP_TES.O
+[W9] obj TEST_FW_.O
+[W9] obj PROCESS_.O
+[W9] obj PROGRAM_.O
+[W9] obj FRAME_TE.O
+  Running test_fat16_83_alias_collision_lookup...
+/WB9C/ABCDEFGH.O
+/WB9C/ABCDEFGH_MORE.O
+/WB9C/ABCDEFGH.O
+/WB9C/ABCDEFGH_MORE.O
+  Running test_fat16_lfn_checksum_reject...
+/LF_CSUM_TARGET.TXT
+  Running test_fat16_lfn_truncated_run...
+/LF_TRUNC_TARGET.TXT
+  Running test_fat16_rmdir_semantics...
+/RMDIR2/JUNK.TXT
+/RMDIRFILE.TXT
+  Running test_fat16_ftruncate_extend_then_write...
+/W3F16.IMG
+/W3F16.IMG
+  Running test_fat16_read_dir_multiple...
+/W3RDDIR/AAA.TXT
+/W3RDDIR/BBB.BIN
+/W3RDDIR/LONG_FILENAME_IN_DIR.TXT
+/W3RDDIR/SUBDIR
+[fat16_read_dir] attr not directory
+  Running test_fat16_alloc_hint_chain...
+/W4HINT.IMG
+/W4HINT.IMG
+  Running test_fat16_rtc_create_stamp...
+/W10T1.TXT
+  Running test_fat16_rtc_write_updates_mtime...
+/W10T2.TXT
+/W10T2.TXT
+  Running test_fat16_rtc_stat_readback...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=0
+Inside process_create: clearing memory at 0x0000000070000000
+Inside process_create: kmemset done.
+/W10T3.TXT
+/W10T3.TXT
+  Running test_fat16_rtc_mkdir_stamp...
+locks_test_suite:
+  Running test_spinlock_init...
+  Running test_lock_order_debug...
+LOCK-ORDER VIOLATION: holding test_fine acquiring test_coarse [cpu 0 depth 1] test_fine
+LOCK-ORDER VIOLATION: holding test_coarse acquiring test_same [cpu 0 depth 1] test_coarse
+  Running test_spinlock_acquire_release...
+pipe_test_suite:
+  Running test_pipe_alloc...
+  Running test_pipe_read_write...
+  Running test_pipe_reopen_and_close...
+  Running test_pipe_available...
+unix_test_suite:
+  Running test_unix_pair_alloc_close...
+  Running test_unix_stream_basic...
+  Running test_unix_stream_eof_epipe...
+  Running test_unix_msg_framing...
+  Running test_unix_park_marks...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=0
+Inside process_create: clearing memory at 0x0000000070000000
+Inside process_create: kmemset done.
+  Running test_ipc_poll_map_table...
+  Running test_ipc_cmsg_codec...
+  Running test_file_poll_engine...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=0
+Inside process_create: clearing memory at 0x0000000070000000
+Inside process_create: kmemset done.
+  Running test_unix_fd_message_machine...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=4 block_idx=0
+Inside process_create: clearing memory at 0x0000000070000000
+Inside process_create: kmemset done.
+  Running test_fd_cloexec_flags...
+fs_test_suite:
+  Running test_fs_file_open_close...
+/TEST.TXT
+  Running test_file_slot_sentinel...
+/TEST.TXT
+  Running test_file_close_idempotent...
+  Running test_fs_record_locks...
+/TEST.TXT
+/TEST.TXT
+  Running test_fs_ftruncate...
+/P6TR.TMP
+  Running test_fs_ftruncate_extend_then_write...
+/W3FTX.IMG
+/W3FTX.IMG
+/W3FTX.IMG
+  Running test_fs_devnull_devurandom...
+  Running test_fs_console_write_user_guards...
+mmu_test_suite:
+  Running test_mmu_make_user_block_desc...
+  Running test_mmu_switch_user_mapping...
+  Running test_mmu_map_user_framebuffer...
+vm_test_suite:
+  Running test_vm_as_lifecycle...
+  Running test_vm_region_list...
+  Running test_vm_map_grow_commit...
+  Running test_vm_windows_distinct...
+  Running test_vm_hole_find...
+  Running test_vm_demand_fault...
+  Running test_v2_image_first_page...
+/BIG.BIN
+  Running test_v2_image_prefetch...
+/BIG.BIN
+  Running test_vm_walk_dead_as_safe...
+  Running test_vm_mmap_family...
+  Running test_vm_shared_objects...
+  Running test_vm_as_clone_fork...
+  Running test_vm_teardown_leak_cycles...
+  Running test_vm_user_read...
+  Running test_vm_kwrite...
+process_test_suite:
+  Running test_process_init_and_create...
+  Running test_pid_slot_invariant...
+  Running test_process_set_entry...
+  Running test_process_num_cpus...
+  [process] reported CPUs=8
+  Running test_process_thread_group...
+  Running test_process_thread_validation...
+  Running test_process_thread_slot_reclaim...
+[KERNEL] process_create: no free process slots! zomb0 exited
+  Running test_loader_fail_fast_full_table...
+[WAVE-TRY] NOPE.BIN
+Loading program for scheduler (v2 AS): NOPE.BIN
+/NOPE.BIN
+[ARRIVED] NOPE.BIN rc<0
+  Running test_lostwake_stale_claim_reclaim...
+  Running test_process_futex_machine...
+  Running test_process_set_tls...
+  Running test_p5_sigaction_storage...
+  Running test_p5_kill_semantics...
+  Running test_p5_sigpipe_semantics...
+  Running test_fault_kill_status_nonzero...
+  Running test_p5_env_readback...
+  Running test_p5_reap_delivery_on_kill...
+  Running test_p5_waitpid_validation...
+[WAITPID] ECHILD caller=1  want=-1 children=0
+[WAITPID] ECHILD caller=1  want=-1 children=0
+  Running test_p5_wait4_rusage...
+  Running test_w2_argv_envelope...
+  Running test_p5_exec_env_and_apply...
+/TEST.TXT
+/TEST.TXT
+program_loader_test_suite:
+  Running test_load_and_run_missing_file...
+[WAVE-TRY] MISSING.BIN
+Loading program for scheduler (v2 AS): MISSING.BIN
+/MISSING.BIN
+[ARRIVED] MISSING.BIN rc<0
+  Running test_load_and_run_success...
+[WAVE-TRY] CONSOLE.BIN
+Loading program for scheduler (v2 AS): CONSOLE.BIN
+/CONSOLE.BIN
+v2 loader: image mapped (lazy), bytes=45688 pages=12 first=in elap=1ms
+v2 loader: PID=1 entry=0x1000000000 sp=0x1800000000 resident=1 tables=3
+[ARRIVED] CONSOLE.BIN rc>0
+trap_test_suite:
+  Running test_trap_unknown_syscall...
+Unknown System Call Invoked!
+  Running test_trap_sys_get_cpuid...
+  Running test_u_strcpy_atomic...
+  Running test_ssp_guard_seeded...
+  Running test_kernel_stack_guard...
+virtio_blk_test_suite:
+  Running test_virtio_blk_read...
+blk_cache_test_suite:
+  Running test_blk_cache_read_fill_then_hit...
+  Running test_blk_cache_multi_sector_run...
+  Running test_blk_cache_invalidate_refill...
+  Running test_blk_cache_evict_reclaims_frames...
+  Running test_blk_cache_write_coherence...
+/BLKCACHE.TXT
+/BLKCACHE.TXT
+/BLKCACHE.TXT
+/BLKCACHE.TXT
+blk_cache_press_suite:
+  Running test_blkc_oracle_matrix...
+  Running test_blkc_accounting...
+  Running test_blkc_write_coherence...
+/BLCK1.TXT
+/BLCK1.TXT
+/BLCK1.TXT
+/BLCK1.TXT
+  Running test_blkc_eviction...
+  Running test_blkc_pressure...
+  Running test_blkc_reclaim_helpers...
+  Running test_blkc_boundaries...
+  Running test_blkc_contract_read0...
+virtio_gpu_test_suite:
+  Running test_virtio_gpu_get_framebuffer...
+  Running test_virtio_gpu_flush_args_ok...
+  Running test_virtio_gpu_rect_clamp...
+  Running test_virtio_gpu_rect_transfer_offset...
+  Running test_virtio_gpu_flush_rects_empty...
+    rect-flush no-op paths survived
+virtio_input_test_suite:
+  Running test_virtio_input_get_events...
+fb_ioctl_test_suite:
+  Running test_fb_var_fill...
+  Running test_fb_fix_fill...
+  Running test_fb_ioctl_dispatch...
+evdev_test_suite:
+  Running test_evdev_kbd_a...
+  Running test_evdev_mouse_overflow_drop...
+  Running test_evdev_mouse_clamp...
+input_node_test_suite:
+  Running test_input_fill_event...
+  Running test_input_ioctl_version...
+  Running test_input_ioctl_abs...
+  Running test_input_ioctl_unknown...
+fb_mmap_test_suite:
+  Running test_smem_len...
+  Running test_translate_valid...
+  Running test_translate_invalid...
+  Running test_blank_ioctl...
+  Running test_route...
+abi_t2_test_suite:
+  Running test_fb_pixel_pack...
+  Running test_fb_pixel_geometry...
+  Running test_joystick_buttons...
+  Running test_joystick_axes...
+  Running test_uname_identity...
+Running virtio_net tests...
+Running net stack tests...
+  Running test_net_socket_fd_table...
+/TEST.TXT
+  Running test_net_connect_state...
+  Running test_net_select_engine...
+  Running test_net_getrandom...
+  Running test_net_ether_padding...
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+net_rdma_test_suite (arch-independent subset):
+  Running test_rdma_crc32_golden...
+    PASS
+nfs_test_suite:
+  Running test_xdr_roundtrip...
+  Running test_xdr_bounds...
+  Running test_rpc_build_call...
+  Running test_rpc_parse_reply...
+  Running test_parse_attrs_and_handles...
+  Running test_parse_replies...
+  Running test_parse_readdirplus...
+  Running test_vfs_path_cleaning...
+  Running test_vfs_mount_validation...
+[NFS] mount: bad source (want A.B.C.D:/export)
+  Running test_vfs_fat_dispatch...
+timer_test_suite:
+  Running test_timer_reload...
+smp_test_suite:
+  Running test_get_cpuid...
+time_test_suite:
+  Running test_epoch_zero...
+  Running test_known_dates...
+  Running test_make_epoch_roundtrip...
+  Running test_leap_years...
+  Running test_days_from_civil...
+  Running test_fat16_stats...
+  [stats] total=1023MB free=667MB
+  Running test_rtc_read...
+  [rtc] epoch=1792936825 -> 2026-10-25 14:0:25
+  Running math_test_suite (integer-only transcendental dispatch)...
+  MATH classes: PASS
+  MATH trig-specials: PASS
+  MATH atan-specials: PASS
+  MATH log-specials: PASS
+  MATH asin-specials: PASS
+  MATH float-specials: PASS
+  MATH modf-specials: PASS
+  MATH isint-odd: PASS
+  MATH pow-specials: PASS
+  MATH atan2-specials: PASS
+==================================
+Tests run:    369
+Tests failed: 0
+UNIT TESTS PASSED
+==================================
+make[1]: Leaving directory '/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-443f0e7c'
+rc=0
+DONE

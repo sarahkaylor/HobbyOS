@@ -1,0 +1,7 @@
+### C: nm @ 2026-10-25T13:50:22Z
+$ nm obj/arm/trap.o | grep -w resume_mark
+0000000000000000 T resume_mark
+$ nm obj/arm/process.o | grep -w resume_mark
+                 U resume_mark
+$ nm hobbyos.elf | grep -w resume_mark
+7003f4f0 T resume_mark
