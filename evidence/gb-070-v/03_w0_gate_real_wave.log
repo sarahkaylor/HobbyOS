@@ -1,0 +1,33 @@
+=== clause 1: the W0 gate over a REAL intel wave (obj/t3_intel_gb070v.log, 17662 lines)
+=== t4_w0: W0 corpus gate over obj/t3_intel_gb070v.log ===
+  PASS HELLO (arrived in guest)
+  PASS HELLO output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  PASS SH (arrived in guest)
+  PASS SH output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  PASS CAT (arrived in guest)
+  FAIL CAT — guest output marker 'entered-main:main-returned\n" code=0 ' != Linux-leg 'entered-main:main-returned' (writes expected output: NO)
+  PASS LS (arrived in guest)
+  PASS LS output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+t4_w0: FAIL — W0 corpus incomplete or output mismatch
+W0_GATE_EXIT=1
+
+--- the [W0] output markers the wave emitted
+[W0] SH linux=entered-main:main-returned
+[W0] SH linux=entered-main:main-returned
+[W0] SH linux=entered-main:main-returned
+D cat got=56  out="probe-content\n[W0] CAT linux=entered-main:main-returned\n" code=0 
+[W0] CAT linux=entered-main:main-returned
+[W0] SH linux=entered-main:main-returned
+[W0] HELLO linux=entered-main:main-returned
+[W0] CAT linux=entered-main:main-returned
+
+--- arrivals
+HELLO  [ARRIVED] HELLO.BIN -> 2
+CAT    [ARRIVED] CAT.BIN -> 4
+SH     [ARRIVED] SH.BIN -> 8
+LS     [ARRIVED] LS.BIN -> 2
+
+--- tier summary (does the wiring fire?)
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 17662 console lines, 100 FAIL lines, 11 user memory fault records across 9 processes, 84 programs exited, halted=1
+T3_intel: FAIL — 100 FAIL line(s); first 20:
