@@ -1,0 +1,4 @@
+70010bb0 <console_write_user>:
+70010bb0:	55                   	push   %ebp
+70010bb1:	48                   	dec    %eax
+70010bb2:	89 e5                	mov    %esp,%ebp
