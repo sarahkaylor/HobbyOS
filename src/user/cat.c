@@ -47,9 +47,17 @@ int main(void) {
   /* GB-070: W0 output-differential marker (same shape as HELLO's).  A real
      wave runs CAT with empty stdin, so the observable output is that main was
      entered and returned; the t4_w0 gate compares this token against the
-     Linux-leg .ref, so a CAT that exits early or crashes FAILs live. */
+     Linux-leg .ref, so a CAT that exits early or crashes FAILs live.
+     Emitted to stderr (fd 2), not stdout: cat's stdout is a harness pipe, so
+     a stdout marker would be swallowed into that pipe's framing; the gate
+     reads the serial console, which stderr reaches. */
 #if !defined(HOST_TEST)
-  print("[W0] CAT linux=entered-main:main-returned\n");
+  {
+    const char *m = "[W0] CAT linux=entered-main:main-returned\n";
+    size_t ml = 0;
+    while (m[ml]) ml++;
+    (void)!write(2, m, ml);
+  }
 #endif
   return 0;
 }
