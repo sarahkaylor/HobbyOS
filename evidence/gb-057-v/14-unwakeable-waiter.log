@@ -1,0 +1,12 @@
+--- run2: the LAST process-table dump (pid/ppid/state/name) ---
+16765:SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST. Process table:
+
+--- run2: every "parked WAIT slot with no parent" line ---
+16785:[KERNEL] parked WAIT slot with no parent to wake it: slot=35 pid=35 st=7 parent=-1 TORTURE.BIN -- no state change attempted; see GB-057
+
+--- run2: TORTURE.BIN WAIT_CHILD records ---
+16622:  [ALIVE-SET] slot=7 pid=7 st=3 parent=35 claimed_by=2 TORTURE.BIN
+16629:  [ALIVE-SET] slot=35 pid=35 st=7 parent=-1 claimed_by=-1 TORTURE.BIN  <-- parked WAIT with no parent to deliver the wake
+16737:  [ALIVE-SET] slot=7 pid=7 st=3 parent=35 claimed_by=2 TORTURE.BIN
+16744:  [ALIVE-SET] slot=35 pid=35 st=7 parent=-1 claimed_by=-1 TORTURE.BIN  <-- parked WAIT with no parent to deliver the wake
+16785:[KERNEL] parked WAIT slot with no parent to wake it: slot=35 pid=35 st=7 parent=-1 TORTURE.BIN -- no state change attempted; see GB-057

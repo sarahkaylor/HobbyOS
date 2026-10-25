@@ -1,0 +1,21 @@
+--- run2: liveness-predicate lines near the end ---
+16091:[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+16617:[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+16734:[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+
+--- run2: last IDLESTUCK claims/lock lines ---
+18092:[IDLESTUCK] claims: c0=-1/76069 c1=15/0 c2=7/0 c3=-1/76139 c4=-1/76306 c5=12/0 c6=-1/76392 c7=-1/76122 lock_owner=5 park_returns=0
+18161:[IDLESTUCK] claims: c0=-1/80074 c1=15/0 c2=7/0 c3=-1/80145 c4=-1/80312 c5=12/0 c6=-1/80398 c7=-1/80128 lock_owner=1 park_returns=0
+18230:[IDLESTUCK] claims: c0=-1/84073 c1=15/0 c2=7/0 c3=-1/84151 c4=-1/84318 c5=12/0 c6=-1/84404 c7=-1/84134 lock_owner=8 park_returns=0
+
+--- run2: state census in the LAST 40 IDLESTUCK slot lines ---
+      5 st=4
+      1 st=7
+     34 st=9
+
+--- run2: was there ever a System halt line? ---
+0
+
+--- run1/run3 for comparison: "no READY work" count and halt ---
+run1: no-READY-work=7 halt=2
+run3: no-READY-work=8 halt=1
