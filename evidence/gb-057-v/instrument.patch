@@ -1,0 +1,41 @@
+diff --git a/.arch-stamp b/.arch-stamp
+index 78504ba..b6fce24 100644
+--- a/.arch-stamp
++++ b/.arch-stamp
+@@ -1 +1 @@
+-arm
+\ No newline at end of file
++intel
+\ No newline at end of file
+diff --git a/src/kernel/arch/x64/trap.c b/src/kernel/arch/x64/trap.c
+index 3d6224e..f8f3c27 100755
+--- a/src/kernel/arch/x64/trap.c
++++ b/src/kernel/arch/x64/trap.c
+@@ -2851,6 +2851,27 @@ static void general_interrupt_inner(struct trap_frame *tf) {
+       uart_puts_raw(" Error Code: ");
+       uart_print_hex_raw(tf->error_code);
+       uart_puts_raw("\n");
++      /* GB-057 verifier instrument (measurement only, not a fix): the generic
++         kernel-mode dump is reached with no attribution, and the repairable
++         #PF branch above needs `cur` to attribute.  These four fields decide
++         whether the ten enter_user_space faults per run arrive with cur==NULL. */
++      uart_puts_raw("[GB057-PFCTX] cur_pid=");
++      print_int_raw(cur ? (int)cur->pid : -1);
++      uart_puts_raw(" has_as=");
++      print_int_raw((cur && cur->as) ? 1 : 0);
++      uart_puts_raw(" cr3=");
++      {
++        uint64_t _c3;
++        __asm__ volatile("mov %%cr3, %0" : "=r"(_c3));
++        uart_print_hex_raw(_c3);
++      }
++      uart_puts_raw(" cr2=");
++      {
++        uint64_t _c2;
++        __asm__ volatile("mov %%cr2, %0" : "=r"(_c2));
++        uart_print_hex_raw(_c2);
++      }
++      uart_puts_raw("\n");
+       uart_puts_raw("  RIP: ");
+       uart_print_hex_raw(tf->elr);
+       uart_puts_raw("  RSP: ");
