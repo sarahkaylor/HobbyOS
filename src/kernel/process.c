@@ -1683,6 +1683,8 @@ void schedule(struct trap_frame *tf, int is_yield) {
       process_signal_resume_deliver(&proc_table[next], &local_tf);
 
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
+      extern void resume_mark(int pid, uint64_t target_sp);
+      resume_mark(proc_table[next].pid, target_sp);
       enter_user_space(&local_tf, target_sp);
       /* GB-060 (cheap half): a resume call that returns is a defect --
          enter_user_space iretqs into the target and must never come back.  The
@@ -3325,6 +3327,8 @@ void start_scheduler(void) {
         process_signal_resume_deliver(&proc_table[i], &local_tf);
 
         extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
+        extern void resume_mark(int pid, uint64_t target_sp);
+        resume_mark(proc_table[i].pid, target_sp);
         enter_user_space(&local_tf, target_sp);
 
         /* Same rule as schedule()'s resume boundary: if this returns, the CPU

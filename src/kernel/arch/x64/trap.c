@@ -2264,6 +2264,20 @@ static volatile uint64_t wd_ticks[MAX_CPUS];     /* interrupt count per core */
 int watchdog_stack_scan_ok(uint64_t top);
 void watchdog_stack_arena(uint64_t *lo, uint64_t *hi);
 
+/* GB-057: written by the CPU itself, immediately before enter_user_space, so the
+   watchdog can compare "what this core is resuming" against the trap frame it
+   last recorded.  Observation only. */
+volatile int64_t resume_mark_pid[MAX_CPUS];
+volatile uint64_t resume_mark_sp[MAX_CPUS];
+
+void resume_mark(int pid, uint64_t target_sp) {
+  uint32_t c = get_cpuid();
+  if (c < MAX_CPUS) {
+    resume_mark_pid[c] = pid;
+    resume_mark_sp[c] = target_sp;
+  }
+}
+
 int watchdog_stack_scan_ok(uint64_t top) {
   /* GB-057: the old bounds were hardcoded and BOTH were wrong, so this scan
      never once ran.  Measured on this build:
@@ -2335,6 +2349,16 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
     uart_print_hex_raw(wd_last_seen_rip[c]);
     uart_puts_raw(" pid=");
     print_int_raw(wd_last_seen_pid[c]);
+    /* GB-057: the resume mark the CPU itself wrote immediately before
+       enter_user_space.  If this names a different pid than the watchdog's
+       `pid=`, the RIP above is a stale trap frame and every "parked in the
+       frame copy" conclusion drawn from it is an artefact. */
+    if (resume_mark_pid[c] != 0) {
+      uart_puts_raw(" resume_pid=");
+      print_int_raw((int)resume_mark_pid[c]);
+      uart_puts_raw(" resume_sp=");
+      uart_print_hex_raw(resume_mark_sp[c]);
+    }
     uart_puts_raw(" age_ms=");
     print_int_raw((int)(now - wd_last_seen_ms[c]));
     if (core_in_syscall[c] != 0) {
