@@ -2310,6 +2310,34 @@ void watchdog_stack_arena(uint64_t *lo, uint64_t *hi) {
   *lo = top - (uint64_t)(MAX_CPUS * 64 * 1024 + 4096);
 }
 
+/* GB-057: is this VA present in the CURRENT page tables?  A direct walk, no side
+   effects -- unlike vm_range_ok/vm_touch, which materialise the page and would
+   destroy the very measurement we want.  The kernel direct-maps physical memory,
+   so a page-table frame address is usable as a pointer. */
+int kpml_present(uint64_t va) {
+  uint64_t cr3;
+  __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+  uint64_t *pml4 = (uint64_t *)(cr3 & ~0xFFFULL);
+  uint64_t e = pml4[(va >> 39) & 511];
+  if (!(e & 1))
+    return 0;
+  uint64_t *pdpt = (uint64_t *)(e & ~0xFFFULL);
+  e = pdpt[(va >> 30) & 511];
+  if (!(e & 1))
+    return 0;
+  if (e & (1ULL << 7))
+    return 1; /* 1 GiB page */
+  uint64_t *pd = (uint64_t *)(e & ~0xFFFULL);
+  e = pd[(va >> 21) & 511];
+  if (!(e & 1))
+    return 0;
+  if (e & (1ULL << 7))
+    return 1; /* 2 MiB page */
+  uint64_t *pt = (uint64_t *)(e & ~0xFFFULL);
+  e = pt[(va >> 12) & 511];
+  return (e & 1) ? 1 : 0;
+}
+
 static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
   extern volatile uint64_t uart_last_activity_ms;
   extern volatile uint64_t lock_wait_addr[MAX_CPUS];
@@ -2937,7 +2965,48 @@ static void general_interrupt_inner(struct trap_frame *tf) {
                write to a read-only page must keep faulting -> kill). */
             const char *why = "PROT";
             int pf_w = (int)((tf->error_code >> 1) & 1);
-            if (vm_handle_fault(process_group(cur), kcr2, 1, 0, &why) == 0 ||
+            /* GB-057: ground truth for the resume #PF.
+               inside a WRITABLE, covering region (prot=3, covers=1) and the page
+               is simply not materialised, so this is ordinary demand paging that
+               is not being resolved.  Read the PTE straight out of the current
+               CR3 before and after the handler; a direct walk has no side
+               effects, unlike vm_range_ok which would materialise the page and
+               destroy the measurement. */
+            extern int kpml_present(uint64_t va);
+            int pte_before = kpml_present(kcr2);
+            int kh = vm_handle_fault(process_group(cur), kcr2, 1, 0, &why);
+            int pte_after = kpml_present(kcr2);
+            {
+              static int kpf_diag;
+              if (kpf_diag < 5) {
+                extern void uart_puts(const char *s);
+                kpf_diag++;
+                char db[144];
+                int di = 0;
+                const char *q1 = "[KPF-DIAG] cr2=0x";
+                while (*q1 && di < 12) db[di++] = *q1++;
+                static const char hx2[] = "0123456789ABCDEF";
+                uint64_t xq = kcr2;
+                for (int sh = 60; sh >= 0 && di < 30; sh -= 4)
+                  db[di++] = hx2[(xq >> sh) & 0xF];
+                const char *q2 = " pte_before=";
+                while (*q2 && di < 45) db[di++] = *q2++;
+                db[di++] = pte_before ? '1' : '0';
+                const char *q3 = " handled=";
+                while (*q3 && di < 58) db[di++] = *q3++;
+                db[di++] = kh ? '0' : '1'; /* handled == (ret == 0) */
+                const char *q4 = " pte_after=";
+                while (*q4 && di < 72) db[di++] = *q4++;
+                db[di++] = pte_after ? '1' : '0';
+                const char *q5 = " why=";
+                while (*q5 && di < 80) db[di++] = *q5++;
+                while (*why && di < 138) db[di++] = *why++;
+                db[di++] = '\n';
+                db[di] = 0;
+                uart_puts(db);
+              }
+            }
+            if (kh == 0 ||
                 (!pf_w && vm_handle_fault(process_group(cur), kcr2, 0, 0,
                                           &why) == 0)) {
               return; /* PTE live; iretq retries the faulting instruction */

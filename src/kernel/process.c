@@ -1693,6 +1693,69 @@ void schedule(struct trap_frame *tf, int is_yield) {
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
       extern void resume_mark(int pid, uint64_t target_sp);
       resume_mark(proc_table[next].pid, target_sp);
+      /* GB-057 (measurement only, no behaviour change): the resume copy writes
+         296 bytes to [target_sp-320, target_sp) and that page was measured NOT
+         PRESENT (vec=14 err=0x2 cr2=target_sp-0x140).  The open question is WHY:
+         is there no region covering that address (HOLE), or is the region there
+         with a protection that excludes writes (PROT)?  That distinction decides
+         the fix, and it is one lookup under proc_lock -- which schedule() holds.
+         Capped at 5 reports and emitted as ONE buffered line (GB-097). */
+      {
+        extern struct vm_region *vm_region_find(struct addr_space *as, uint64_t va);
+        static int rdiag_n;
+        struct addr_space *tas = proc_table[next].as;
+        if (tas && rdiag_n < 5) {
+          uint64_t dv = target_sp - 320;
+          struct vm_region *rr = vm_region_find(tas, dv);
+          rdiag_n++;
+          {
+            /* GB-097: uart_puts_raw takes NO lock, so a single buffered write
+               through it is still not atomic -- measured: this very line came
+               out as "[RESUME-3D IbAlGoc]k _piiddx==2- 1r\re" interleaved with
+               process_create's output.  "Build the record, emit it once" only
+               buys atomicity on the LOCKED sink.  This diagnostic can afford to
+               block, so it uses uart_puts. */
+            extern void uart_puts(const char *s);
+            char rb[120];
+            int ri = 0;
+            const char *p1 = "[RESUME-DIAG] pid=";
+            while (*p1 && ri < 28) rb[ri++] = *p1++;
+            char td[12];
+            int ti = 0, v = proc_table[next].pid;
+            if (v < 0) { rb[ri++] = '-'; v = -v; }
+            if (v == 0) td[ti++] = '0';
+            while (v > 0 && ti < 11) { td[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) rb[ri++] = td[--ti];
+            const char *p2 = rr ? " region=yes prot=" : " region=NONE (HOLE)";
+            while (*p2 && ri < 60) rb[ri++] = *p2++;
+            if (rr) {
+              v = (int)rr->prot;
+              char pd[8];
+              int pi = 0;
+              if (v == 0) pd[pi++] = '0';
+              while (v > 0 && pi < 7) { pd[pi++] = (char)('0' + (v % 10)); v /= 10; }
+              while (pi > 0) rb[ri++] = pd[--pi];
+            }
+            const char *p3 = " dest=0x";
+            while (*p3 && ri < 76) rb[ri++] = *p3++;
+            {
+              static const char hx[] = "0123456789ABCDEF";
+              uint64_t x = dv;
+              for (int sh = 60; sh >= 0 && ri < 94; sh -= 4)
+                rb[ri++] = hx[(x >> sh) & 0xF];
+            }
+            if (rr) {
+              const char *p4 = " covers=";
+              while (*p4 && ri < 104) rb[ri++] = *p4++;
+              int cov = (dv >= rr->base && dv + 8 <= rr->base + rr->len);
+              rb[ri++] = cov ? '1' : '0';
+            }
+            rb[ri++] = '\n';
+            rb[ri] = 0;
+            uart_puts(rb);
+          }
+        }
+      }
       enter_user_space(&local_tf, target_sp);
       /* GB-060 (cheap half): a resume call that returns is a defect --
          enter_user_space iretqs into the target and must never come back.  The
