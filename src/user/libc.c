@@ -289,11 +289,19 @@ void hb_stdout_flush(void) {
  * fails with EBADF.  A redirected stdout puts a real global file at fd 1 and
  * fstat(1) succeeds.  Line-buffering must apply ONLY to the console: a pipe
  * consumer reads streaming and a redirected file must get bytes as written.
- * Cached: a program's fd-1 target is fixed for its lifetime here. */
+ *
+ * The verdict may NOT be latched forever when it is "console": a process
+ * that starts with NO stdio fds (the desktop is launched that way) gets
+ * pipe() == 0,1,2,3, so a window's app-input pipe can BE fd 1 -- the first
+ * write(1) happens before that pipe exists and latched "console", after
+ * which every WM -> app message (geometry, repairs, keys, pointer) went to
+ * the serial console instead of the app.  A "not console" verdict (a real
+ * global file sits at fd 1) is stable and stays cached; a "console" verdict
+ * is re-probed, because fd 1 may have been opened since. */
 static int hb_stdout_console = -1;   /* -1 unknown, 0 pipe/file, 1 console */
 static int hb_stdout_is_console(void) {
-  if (hb_stdout_console != -1)
-    return hb_stdout_console;
+  if (hb_stdout_console == 0)
+    return 0;
   unsigned char st[256];
   long r = ho_syscall4(SYS_FSTAT, 1, (long)st, 0, 0);
   hb_stdout_console = (r < 0) ? 1 : 0;   /* EBADF -> unset -> console */
