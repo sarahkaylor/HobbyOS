@@ -1,0 +1,19 @@
+### PR #171 head d6480cd script, two dests
+G_EXIT=0
+H_EXIT=0
+=== PR #171 head: cross-dest identity
+141e47ccb2a54914141f43d59304f88ba65490dbf5b0420bf9a87b718a2ba35a  /tmp/gb031-g/stage/SDL2-2.30.10/build/.libs/libSDL2.a
+141e47ccb2a54914141f43d59304f88ba65490dbf5b0420bf9a87b718a2ba35a  /tmp/gb031-h-other/stage/SDL2-2.30.10/build/.libs/libSDL2.a
+dee38e40f70ec82b2aadecb4f215cd59e42d6d7c15f80bfb81e1a054f5ee2f99  /tmp/gb031-g/sdl2_static_test
+dee38e40f70ec82b2aadecb4f215cd59e42d6d7c15f80bfb81e1a054f5ee2f99  /tmp/gb031-h-other/sdl2_static_test
+
+=== PR #171 head: libc identity + ELF
+0
+2
+  Type:                              EXEC (Executable file)
+  Machine:                           Advanced Micro Devices X86-64
+
+=== PR #171 head: loader acceptance
+  PASS null image: ELF_ERR_ARGS
+=== 93 checks, 0 failed ===
+ALL ELF IMAGE HOST TESTS PASSED
