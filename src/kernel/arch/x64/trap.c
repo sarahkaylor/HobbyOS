@@ -2245,6 +2245,9 @@ static void safe_print_hex(uint64_t val) {
 static volatile uint64_t wd_last_seen_ms[MAX_CPUS];
 static volatile uint64_t wd_last_seen_rip[MAX_CPUS];
 static volatile uint64_t wd_last_seen_rflags[MAX_CPUS];
+static volatile uint64_t wd_last_vector[MAX_CPUS];
+static volatile uint64_t wd_last_err[MAX_CPUS];
+static volatile uint64_t wd_last_cr2[MAX_CPUS];
 static volatile int wd_last_seen_pid[MAX_CPUS];
 static volatile uint64_t wd_next_report_ms = 0;
 /* Full last frame per core (copied at every tick) so the stall dump can
@@ -2336,6 +2339,18 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
      copy' is a scheduling/masking defect, not a memory one.  Measured (intel,
      parked cores) the only way to tell the two apart without a monitor. */
   wd_last_seen_rflags[cpu] = tf->spsr;
+  /* GB-057: the fault that put this core where it is.  A parked core whose
+     RFLAGS carries RF (0x10000) is being RE-RUN after a fault, and RIP alone
+     cannot say which fault: measured rflags=0x10046 on three parked cores with
+     IF clear, i.e. a retry loop with interrupts masked.  Vector/error/CR2 name
+     the class without another hypothesis. */
+  wd_last_vector[cpu] = tf->vector;
+  wd_last_err[cpu] = tf->error_code;
+  if (tf->vector == 14) {
+    uint64_t cr2v;
+    __asm__ volatile("mov %%cr2, %0" : "=r"(cr2v));
+    wd_last_cr2[cpu] = cr2v;
+  }
   wd_last_seen_pid[cpu] = cur ? cur->pid : -1;
   wd_last_frame[cpu] = *tf;
   wd_last_tfp[cpu] = (uint64_t)tf;
@@ -2356,6 +2371,16 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
     uart_print_hex_raw(wd_last_seen_rip[c]);
     uart_puts_raw(" rflags=");
     uart_print_hex_raw(wd_last_seen_rflags[c]);
+    if (wd_last_seen_pid[c] >= 0 && wd_last_vector[c] != 0) {
+      uart_puts_raw(" vec=");
+      print_int_raw((int)wd_last_vector[c]);
+      uart_puts_raw(" err=");
+      uart_print_hex_raw(wd_last_err[c]);
+      if (wd_last_cr2[c]) {
+        uart_puts_raw(" cr2=");
+        uart_print_hex_raw(wd_last_cr2[c]);
+      }
+    }
     uart_puts_raw(" pid=");
     print_int_raw(wd_last_seen_pid[c]);
     /* GB-057: the resume mark the CPU itself wrote immediately before
