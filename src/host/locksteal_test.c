@@ -60,6 +60,11 @@ int lock_steal_ok(uint32_t owner_slot, uint32_t cpu);
 int lock_stallbreak_ok(uint32_t owner_slot, uint32_t cpu, uint64_t now_ms);
 void spinlock_acquire(spinlock_t *lock);
 void spinlock_release(spinlock_t *lock);
+void lock_print_counters(void);
+extern volatile uint64_t lock_cnt_lockforever;
+extern volatile uint64_t lock_cnt_stolen;
+extern volatile uint64_t lock_cnt_stallbreak;
+extern volatile uint64_t lock_cnt_unownedfreed;
 
 static int checks_run;
 static int checks_failed;
@@ -189,12 +194,38 @@ static void test_end_to_end_stallbreak(void) {
   check(l.locked == 0 && l.owner == 0, "and the lock behaves normally afterwards");
 }
 
+static void test_lockcnt_summary(void) {
+  /* GB-060 gate: the [LOCKCNT] end-of-run summary must print the real
+     counter values machine-readably.  The counters were bumped by the
+     end-to-end tests above (which provoked real [STOLEN] and [STALLBREAK]
+     events on the real locks.c), so this is a true end-to-end cross-check:
+     what the markers counted is what lock_print_counters() prints. */
+  memset(con, 0, sizeof con);
+  con_n = 0;
+  lock_print_counters();
+  char needle[128];
+  snprintf(needle, sizeof needle, "[LOCKCNT] STALLBREAK=%llu STOLEN=%llu LOCKFOREVER=%llu UNOWNED-FREED=%llu",
+           (unsigned long long)lock_cnt_stallbreak,
+           (unsigned long long)lock_cnt_stolen,
+           (unsigned long long)lock_cnt_lockforever,
+           (unsigned long long)lock_cnt_unownedfreed);
+  check(strstr(con, "[LOCKCNT] STALLBREAK=") != NULL,
+        "end-of-run [LOCKCNT] summary is printed");
+  check(strstr(con, needle) != NULL,
+        "the summary prints the exact counter values (STALLBREAK/STOLEN counted by real events)");
+  /* The wedged/stopped shapes provoked at least one STOLEN and one STALLBREAK,
+     so the printed STOLEN and STALLBREAK counts must be nonzero. */
+  check(lock_cnt_stolen > 0, "STOLEN counter incremented by a real steal");
+  check(lock_cnt_stallbreak > 0, "STALLBREAK counter incremented by a real break");
+}
+
 int main(void) {
   printf("locksteal_test_host: GB-060 stale-owner steal + wedged-owner stall break\n");
   test_decision_table();
   test_end_to_end_steal();
   test_stallbreak_table();
   test_end_to_end_stallbreak();
+  test_lockcnt_summary();
   printf("locksteal_test_host: %d checks, %d failed\n", checks_run,
          checks_failed);
   return checks_failed == 0 ? 0 : 1;
