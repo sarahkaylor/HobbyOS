@@ -1,0 +1,9 @@
+$ nm obj/arm/trap.o | grep -w resume_mark
+0000000000000000 T resume_mark
+rc=0
+
+$ nm obj/arm/process.o | grep -w resume_mark
+                 U resume_mark
+
+$ nm obj/arm/hobbyos.elf | grep -w resume_mark
+00000000400bba30 T resume_mark
