@@ -1,0 +1,4 @@
+mcopy -i disk.img obj/intel/doom.bin ::/DOOM.BIN
+[disk] IWAD doom1.wad -> ::/DOOM1.WAD
+[MENU] 18=DOOM.BIN
+[LAUNCH] CONSOLE.BIN
