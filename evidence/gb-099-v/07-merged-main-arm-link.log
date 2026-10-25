@@ -1,0 +1,308 @@
+Sun Oct 25 06:45:25 UTC 2026
+rev: 9c632ea = merge of origin/main b874d54 x PR#155 d7c3c5e (clean, ort)
+$ make ARCH=arm hobbyos.elf
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/arch/arm/boot.s -o obj/arm/boot.o
+clang: warning: argument unused during compilation: '-O2' [-Wunused-command-line-argument]
+clang: warning: argument unused during compilation: '-ffreestanding' [-Wunused-command-line-argument]
+clang: warning: argument unused during compilation: '-fstack-protector-strong' [-Wunused-command-line-argument]
+clang: warning: argument unused during compilation: '-mstack-protector-guard=global' [-Wunused-command-line-argument]
+clang: warning: argument unused during compilation: '-D KERNEL_MODE_DESKTOP' [-Wunused-command-line-argument]
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/arch/arm/fpu.s -o obj/arm/fpu.o
+clang: warning: argument unused during compilation: '-O2' [-Wunused-command-line-argument]
+clang: warning: argument unused during compilation: '-ffreestanding' [-Wunused-command-line-argument]
+clang: warning: argument unused during compilation: '-fstack-protector-strong' [-Wunused-command-line-argument]
+clang: warning: argument unused during compilation: '-mstack-protector-guard=global' [-Wunused-command-line-argument]
+clang: warning: argument unused during compilation: '-D KERNEL_MODE_DESKTOP' [-Wunused-command-line-argument]
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/arch/arm/setjmp.s -o obj/arm/setjmp.o
+clang: warning: argument unused during compilation: '-O2' [-Wunused-command-line-argument]
+clang: warning: argument unused during compilation: '-ffreestanding' [-Wunused-command-line-argument]
+clang: warning: argument unused during compilation: '-fstack-protector-strong' [-Wunused-command-line-argument]
+clang: warning: argument unused during compilation: '-mstack-protector-guard=global' [-Wunused-command-line-argument]
+clang: warning: argument unused during compilation: '-D KERNEL_MODE_DESKTOP' [-Wunused-command-line-argument]
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/abi_t2_test.c -o obj/arm/abi_t2_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/audio_stub.c -o obj/arm/audio_stub.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/blk_cache.c -o obj/arm/blk_cache.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/blk_cache_press_test.c -o obj/arm/blk_cache_press_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/blk_cache_test.c -o obj/arm/blk_cache_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/dhcp.c -o obj/arm/dhcp.o
+src/kernel/dhcp.c:42:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   42 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:82:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   82 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:135:19: warning: unused variable 'udp' [-Wunused-variable]
+  135 |   struct udp_hdr* udp = (struct udp_hdr*)(packet + sizeof(struct ipv4_hdr));
+      |                   ^~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/elf_image.c -o obj/arm/elf_image.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/elf_loader.c -o obj/arm/elf_loader.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/evdev.c -o obj/arm/evdev.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/evdev_test.c -o obj/arm/evdev_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/fat16.c -o obj/arm/fat16.o
+src/kernel/fat16.c:2151:25: warning: comparison of integers of different signs: 'int' and 'uint32_t' (aka 'unsigned int') [-Wsign-compare]
+ 2151 |       if ((int)old_size > f->fat16.cursor) f->fat16.cursor = (int)old_size;
+      |           ~~~~~~~~~~~~~ ^ ~~~~~~~~~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/user/unexpand_test.c -o obj/arm/unexpand_test.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/user/libc.c -o obj/arm/user_libc.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/user/malloc.c -o obj/arm/user_malloc.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/string.c -o obj/arm/libc_string.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/crt0.c -o obj/arm/crt0.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -std=c++17 -fno-exceptions -fno-rtti -nostdinc++ -c src/libc/src/cxxrt.cpp -o obj/arm/cxxrt.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/pthread.c -o obj/arm/libc_pthread.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/ctype.c -o obj/arm/libc_ctype.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/stdlib.c -o obj/arm/libc_stdlib.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/stdio.c -o obj/arm/libc_stdio.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/file.c -o obj/arm/libc_file.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/getopt.c -o obj/arm/libc_getopt.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/error.c -o obj/arm/libc_error.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/stat.c -o obj/arm/libc_stat.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/signal.c -o obj/arm/libc_signal.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/mman.c -o obj/arm/libc_mman.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/regex.c -o obj/arm/libc_regex.o
+In file included from src/libc/src/regex.c:90:
+src/libc/src/regcomp.c:519:50: warning: unused parameter 'preg' [-Wunused-parameter]
+  519 | regerror (int errcode, const regex_t *__restrict preg, char *__restrict errbuf,
+      |                                                  ^
+src/libc/src/regcomp.c:588:19: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  588 |     for (i = 0; i < dfa->nodes_len; ++i)
+      |                 ~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:591:17: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  591 |   for (i = 0; i < dfa->nodes_len; ++i)
+      |               ~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:606:19: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 're_hashval_t' (aka 'unsigned int') [-Wsign-compare]
+  606 |     for (i = 0; i <= dfa->state_hash_mask; ++i)
+      |                 ~ ^  ~~~~~~~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1181:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1181 |       for (i = 0; i < preg->re_nsub; i++)
+      |                   ~ ^ ~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1184:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1184 |       for (i = 0; i < preg->re_nsub; i++)
+      |                   ~ ^ ~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1187:13: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1187 |       if (i == preg->re_nsub)
+      |           ~ ^  ~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1404:18: warning: unused parameter 'extra' [-Wunused-parameter]
+ 1404 | calc_next (void *extra, bin_tree_t *node)
+      |                  ^
+src/libc/src/regcomp.c:1632:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1632 |   for (idx = 0; idx < dfa->nodes_len; ++idx)
+      |                 ~~~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1635:21: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1635 |   for (src = 0; src < dfa->nodes_len; ++src)
+      |                 ~~~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:1663:20: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1663 |       if (node_idx == dfa->nodes_len)
+      |           ~~~~~~~~ ^  ~~~~~~~~~~~~~~
+src/libc/src/regcomp.c:2698:37: warning: unused parameter 'syntax' [-Wunused-parameter]
+ 2698 | build_range_exp (const reg_syntax_t syntax,
+      |                                     ^
+src/libc/src/regcomp.c:3394:54: warning: unused parameter 'dfa' [-Wunused-parameter]
+ 3394 |                        re_token_t *token, int token_len, re_dfa_t *dfa,
+      |                                                                    ^
+src/libc/src/regcomp.c:3869:18: warning: unused parameter 'extra' [-Wunused-parameter]
+ 3869 | free_tree (void *extra, bin_tree_t *node)
+      |                  ^
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:486:39: warning: comparison of integers of different signs: 'Idx' (aka 'int') and '__re_size_t' (aka 'unsigned int') [-Wsign-compare]
+  486 |       if (__glibc_unlikely (need_regs > regs->num_regs))
+      |                             ~~~~~~~~~ ^ ~~~~~~~~~~~~~~
+src/libc/src/gnu_compat.h:63:52: note: expanded from macro '__glibc_unlikely'
+   63 | #define __glibc_unlikely(cond) __builtin_expect(!!(cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:507:27: warning: comparison of integers of different signs: 'Idx' (aka 'int') and '__re_size_t' (aka 'unsigned int') [-Wsign-compare]
+  507 |       DEBUG_ASSERT (nregs <= regs->num_regs);
+      |                     ~~~~~ ^  ~~~~~~~~~~~~~~
+src/libc/src/regex_internal.h:42:34: note: expanded from macro 'DEBUG_ASSERT'
+   42 | # define DEBUG_ASSERT(x) assume (x)
+      |                                  ^
+src/libc/include/verify.h:286:22: note: expanded from macro 'assume'
+  286 | # define assume(R) ((R) ? (void) 0 : __builtin_unreachable ())
+      |                      ^
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:517:13: warning: comparison of integers of different signs: 'Idx' (aka 'int') and '__re_size_t' (aka 'unsigned int') [-Wsign-compare]
+  517 |   for ( ; i < regs->num_regs; ++i)
+      |           ~ ^ ~~~~~~~~~~~~~~
+src/libc/src/regexec.c:656:9: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+  655 |       if (__glibc_unlikely ((MIN (IDX_MAX, SIZE_MAX / sizeof (re_dfastate_t *))
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  656 |                              <= mctx.input.bufs_len)))
+      |                              ^~~~~~~~~~~~~~~~~~~~~~~~
+src/libc/src/gnu_compat.h:63:52: note: expanded from macro '__glibc_unlikely'
+   63 | #define __glibc_unlikely(cond) __builtin_expect(!!(cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:837:33: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  837 |       for (reg_idx = 1; reg_idx < nmatch; ++reg_idx)
+      |                         ~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:858:33: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  858 |       for (reg_idx = 0; reg_idx < nmatch; ++reg_idx)
+      |                         ~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:886:32: warning: comparison of integers of different signs: 'int' and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+  886 |         for (reg_idx = 0; reg_idx + 1 < nmatch; reg_idx++)
+      |                           ~~~~~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:920:4: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+  919 |   if (__glibc_unlikely (MIN (IDX_MAX, SIZE_MAX / sizeof (re_dfastate_t *))
+      |       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  920 |                         <= match_last))
+      |                         ^~~~~~~~~~~~~~
+src/libc/src/gnu_compat.h:63:52: note: expanded from macro '__glibc_unlikely'
+   63 | #define __glibc_unlikely(cond) __builtin_expect(!!(cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:1414:34: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1414 |               for (reg_idx = 0; reg_idx < nmatch; ++reg_idx)
+      |                                 ~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:1417:20: warning: comparison of integers of different signs: 'Idx' (aka 'int') and 'size_t' (aka 'unsigned long') [-Wsign-compare]
+ 1417 |               if (reg_idx == nmatch)
+      |                   ~~~~~~~ ^  ~~~~~~
+src/libc/src/regexec.c:2850:65: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+ 2850 |       if (__glibc_unlikely (SIZE_MAX / sizeof (re_dfastate_t *) < new_alloc))
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~
+src/libc/src/gnu_compat.h:63:52: note: expanded from macro '__glibc_unlikely'
+   63 | #define __glibc_unlikely(cond) __builtin_expect(!!(cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:3323:36: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned long') and 'Idx' (aka 'int') [-Wsign-compare]
+ 3323 |   if (__glibc_unlikely (ndests_max < ndests))
+      |                         ~~~~~~~~~~ ^ ~~~~~~
+src/libc/src/regexec.c:4035:4: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+ 4034 |   if (__glibc_unlikely (MIN (IDX_MAX, SIZE_MAX / sizeof (re_dfastate_t *)) / 2
+      |       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 4035 |                         <= pstr->bufs_len))
+      |                         ^~~~~~~~~~~~~~~~~~
+src/libc/src/gnu_compat.h:63:52: note: expanded from macro '__glibc_unlikely'
+   63 | #define __glibc_unlikely(cond) __builtin_expect(!!(cond), 0)
+      |                                                    ^~~~
+In file included from src/libc/src/regex.c:91:
+src/libc/src/regexec.c:4104:71: warning: comparison of integers of different signs: 'unsigned long' and 'Idx' (aka 'int') [-Wsign-compare]
+ 4104 |       if (__glibc_unlikely (MIN (IDX_MAX, SIZE_MAX / max_object_size) < n))
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~
+src/libc/src/gnu_compat.h:63:52: note: expanded from macro '__glibc_unlikely'
+   63 | #define __glibc_unlikely(cond) __builtin_expect(!!(cond), 0)
+      |                                                    ^~~~
+28 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/langinfo.c -o obj/arm/libc_langinfo.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/wchar.c -o obj/arm/libc_wchar.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/wctype.c -o obj/arm/libc_wctype.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/locale.c -o obj/arm/libc_locale.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/selinux.c -o obj/arm/libc_selinux.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/dirent.c -o obj/arm/libc_dirent.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/time.c -o obj/arm/libc_time.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/time_math.c -o obj/arm/libc_time_math.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/libgen.c -o obj/arm/libc_libgen.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/realpath.c -o obj/arm/libc_realpath.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/xlocale.c -o obj/arm/libc_xlocale.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/strtod.c -o obj/arm/libc_strtod.o
+src/libc/src/strtod.c:411:23: warning: shift count >= width of type [-Wshift-count-overflow]
+  411 |                 (f128 >> 64);
+      |                       ^  ~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/strftime.c -o obj/arm/libc_strftime.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -ffp-contract=off -c src/libc/src/math.c -o obj/arm/libc_math.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/pwd.c -o obj/arm/libc_pwd.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/setjmp.c -o obj/arm/libc_setjmp.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/dlfcn.c -o obj/arm/libc_dlfcn.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/resource.c -o obj/arm/libc_resource.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/statvfs.c -o obj/arm/libc_statvfs.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/syscall.c -o obj/arm/libc_syscall.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/ioctl.c -o obj/arm/libc_ioctl.o
+[fetch] downloading https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.8/llvm-project-21.1.8.src.tar.xz
+  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+                                 Dload  Upload  Total   Spent   Left   Speed
+  0      0   0      0   0      0      0      0                              0  0      0   0      0   0      0      0      0                              0  0      0   0      0   0      0      0      0                              0
+  0      0   0      0   0      0      0      0                              0 44 151.5M  44 66.92M   0      0 54.95M      0   00:02   00:01   00:01 66.92M 88 151.5M  88 133.7M   0      0 60.33M      0   00:02   00:02         66.92M100 151.5M 100 151.5M   0      0 60.04M      0   00:02   00:02         66.92M100 151.5M 100 151.5M   0      0 60.04M      0   00:02   00:02         66.92M100 151.5M 100 151.5M   0      0 60.04M      0   00:02   00:02         66.92M
+[fetch] container sha256 OK
+[fetch] extracting the needed subtrees into /home/sarah/wt/gb099v-merged/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src
+[fetch] verifying anchor manifest (the content gate)
+[fetch] OK: /home/sarah/wt/gb099v-merged/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src ready (libcxx + libcxxabi + libc/shared + compiler-rt builtins)
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/compiler-rt/lib/builtins/extenddftf2.c -o obj/arm/builtins/extenddftf2.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/compiler-rt/lib/builtins/trunctfdf2.c -o obj/arm/builtins/trunctfdf2.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/compiler-rt/lib/builtins/trunctfsf2.c -o obj/arm/builtins/trunctfsf2.o
+ar rcs obj/arm/libc.a obj/arm/user_libc.o obj/arm/user_malloc.o obj/arm/libc_string.o obj/arm/crt0.o obj/arm/cxxrt.o obj/arm/libc_pthread.o obj/arm/libc_ctype.o obj/arm/libc_stdlib.o obj/arm/libc_stdio.o obj/arm/libc_file.o obj/arm/libc_getopt.o obj/arm/libc_error.o obj/arm/libc_stat.o obj/arm/libc_signal.o obj/arm/libc_mman.o obj/arm/libc_regex.o obj/arm/libc_langinfo.o obj/arm/libc_wchar.o obj/arm/libc_wctype.o obj/arm/libc_locale.o obj/arm/libc_selinux.o obj/arm/libc_dirent.o obj/arm/libc_time.o obj/arm/libc_time_math.o obj/arm/libc_libgen.o obj/arm/libc_realpath.o obj/arm/libc_xlocale.o obj/arm/libc_strtod.o obj/arm/libc_strftime.o obj/arm/libc_math.o obj/arm/libc_pwd.o obj/arm/libc_setjmp.o obj/arm/libc_dlfcn.o obj/arm/libc_resource.o obj/arm/libc_statvfs.o obj/arm/libc_syscall.o obj/arm/libc_ioctl.o obj/arm/builtins/extenddftf2.o obj/arm/builtins/trunctfdf2.o obj/arm/builtins/trunctfsf2.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/nano -c src/user/rogue/xcrypt.c -o obj/arm/xcrypt.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -Isrc/user/nano -DHAVE_CONFIG_H -c src/user/nano/hb_curses.c -o obj/arm/nano_hb_curses.o
+src/user/nano/hb_curses.c:167:12: warning: unused function 'cell_index' [-Wunused-function]
+  167 | static int cell_index(int row, int col) { return row * scr_cols + col; }
+      |            ^~~~~~~~~~
+1 warning generated.
+ld.lld -T src/user/linker.ld -e _start -o obj/arm/xcrypt.elf obj/arm/xcrypt.o obj/arm/nano_hb_curses.o obj/arm/libc.a
+llvm-objcopy -O binary obj/arm/xcrypt.elf obj/arm/xcrypt.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/arm/unexpand_test.elf obj/arm/unexpand_test.o obj/arm/libc.a
+llvm-objcopy -O binary obj/arm/unexpand_test.elf obj/arm/unexpand_test.bin
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -Iobj/arm -c src/kernel/fat16_test.c -o obj/arm/fat16_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/fb_ioctl.c -o obj/arm/fb_ioctl.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/fb_ioctl_test.c -o obj/arm/fb_ioctl_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/fb_mmap.c -o obj/arm/fb_mmap.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/fb_mmap_test.c -o obj/arm/fb_mmap_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/frame.c -o obj/arm/frame.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/frame_test.c -o obj/arm/frame_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/fs.c -o obj/arm/fs.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/fs_test.c -o obj/arm/fs_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/input_node.c -o obj/arm/input_node.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/input_node_test.c -o obj/arm/input_node_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/iommu_vtd.c -o obj/arm/iommu_vtd.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/ipc_proto.c -o obj/arm/ipc_proto.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/linux_uname.c -o obj/arm/linux_uname.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/lock_order.c -o obj/arm/lock_order.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/locks_test.c -o obj/arm/locks_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/main.c -o obj/arm/main.o
+src/kernel/main.c:52:39: warning: unused parameter 'tf' [-Wunused-parameter]
+   52 | void irq_handler_c(struct trap_frame *tf) {
+      |                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/math_test.c -o obj/arm/math_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/mmu_test.c -o obj/arm/mmu_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/net.c -o obj/arm/net.o
+src/kernel/net.c:552:18: warning: variable 'stored' set but not used [-Wunused-but-set-variable]
+  552 |         uint32_t stored = 0;
+      |                  ^
+src/kernel/net.c:815:21: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+  815 |   for (int i = 0; i < sizeof(struct pseudo_hdr)/2; i++) {
+      |                   ~ ^ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/net.c:657:39: warning: unused function 'safe_print_int' [-Wunused-function]
+  657 | __attribute__((noinline)) static void safe_print_int(int val) {
+      |                                       ^~~~~~~~~~~~~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/net_rdma.c -o obj/arm/net_rdma.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/net_rdma_test.c -o obj/arm/net_rdma_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/net_test.c -o obj/arm/net_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/nfs.c -o obj/arm/nfs.o
+src/kernel/nfs.c:157:12: warning: '/*' within block comment [-Wcomment]
+  157 |  * is *body/*body_len, valid until the next rpc_call (static buffer). */
+      |            ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/nfs_proto.c -o obj/arm/nfs_proto.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/nfs_test.c -o obj/arm/nfs_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/pipe.c -o obj/arm/pipe.o
+src/kernel/pipe.c:142:7: warning: unused variable 'i' [-Wunused-variable]
+  142 |   int i = 0;
+      |       ^
+src/kernel/pipe.c:139:68: warning: unused parameter 'tf' [-Wunused-parameter]
+  139 | int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
+      |                                                                    ^
+src/kernel/pipe.c:219:7: warning: unused variable 'i' [-Wunused-variable]
+  219 |   int i = 0;
+      |       ^
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/pipe_test.c -o obj/arm/pipe_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/process.c -o obj/arm/process.o
+src/kernel/process.c:1827:27: error: use of undeclared identifier 'cpu_locals'
+ 1827 |           int live_pid = (cpu_locals[cl].current_proc)
+      |                           ^~~~~~~~~~
+src/kernel/process.c:1828:32: error: use of undeclared identifier 'cpu_locals'
+ 1828 |                              ? cpu_locals[cl].current_proc->pid
+      |                                ^~~~~~~~~~
+src/kernel/process.c:1415:42: warning: unused parameter 'is_yield' [-Wunused-parameter]
+ 1415 | void schedule(struct trap_frame *tf, int is_yield) {
+      |                                          ^
+src/kernel/process.c:3888:50: warning: unused parameter 'prot' [-Wunused-parameter]
+ 3888 | int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags) {
+      |                                                  ^
+2 warnings and 2 errors generated.
+make: *** [Makefile:744: obj/arm/process.o] Error 1
+rc=2
+$ nm obj/arm/trap.o | grep -w resume_mark
+nm: 'obj/arm/trap.o': No such file
