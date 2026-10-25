@@ -48,7 +48,7 @@ CC=musl-gcc ./configure --host=x86_64-pc-linux-musl \
   --disable-video-x11 --disable-video-wayland --disable-video-opengl \
   --disable-video-vulkan --disable-alsa --disable-pulseaudio --disable-audio \
   --disable-joystick --disable-haptic --disable-power --disable-filesystem \
-  CFLAGS="-O2 -ffile-prefix-map=$PWD=. -fdebug-prefix-map=$PWD=." \
+  CFLAGS="-O2 -ffile-prefix-map=$PWD=. -fdebug-prefix-map=$PWD=. -idirafter /usr/include -idirafter /usr/include/x86_64-linux-gnu" \
   > configure.log
 
 make -j"$(nproc)" > make.log
@@ -77,6 +77,15 @@ if [ "$(nm "$DEST/sdl2_static_test" 2>/dev/null | grep -c '__libc_start_main_imp
 fi
 if [ "$(nm "$DEST/sdl2_static_test" 2>/dev/null | grep -c 'libc_start_main_stage2')" -eq 0 ]; then
   echo "FATAL: linked app shows no musl libc_start_main_stage2" >&2
+  exit 1
+fi
+
+# Assert the Linux evdev input driver is enabled.  SDL's configure writes
+# SDL_INPUT_LINUXEV into include/SDL_config.h when it finds linux/input.h.
+# musl-gcc's default search path omits the kernel UAPI under /usr/include, so
+# the -idirafter flags above are what let it find the header; assert it took.
+if ! grep -q "SDL_INPUT_LINUXEV" include/SDL_config.h 2>/dev/null; then
+  echo "FATAL: SDL_INPUT_LINUXEV not enabled — evdev input driver missing" >&2
   exit 1
 fi
 
