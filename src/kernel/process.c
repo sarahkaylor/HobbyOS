@@ -1693,6 +1693,61 @@ void schedule(struct trap_frame *tf, int is_yield) {
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
       extern void resume_mark(int pid, uint64_t target_sp);
       resume_mark(proc_table[next].pid, target_sp);
+      /* GB-057: make the frame copy's DESTINATION present before the copy.
+         Measured (intel, vec=14 err=0x2 cr2=0x17FFFFF388): enter_user_space's
+         `rep movsq` writes 296 bytes to [target_sp-320, target_sp) and that page
+         is NOT PRESENT, so the store faults with interrupts masked, RFLAGS gets
+         RF, the CPU retries the instruction and faults again -- for ever.  The
+         pre-existing [RESUME-UNMAPPED] check accepted the range because it
+         validates the region description, not the page tables.  Materialising
+         the page here, through the same path a real fault would take, is the
+         smallest fix that makes the copy legal. */
+      {
+        extern int vm_handle_fault(struct process *grp, uint64_t va, int write,
+                                   int exec, const char **why);
+        const char *why = "PROT";
+        if (vm_handle_fault(process_group(&proc_table[next]), target_sp - 320, 1, 0,
+                            &why) != 0) {
+          /* GB-097 discipline: ONE buffered write.  The first version of this
+             line used five uart_puts_raw calls and produced byte soup
+             ("[ RpEiSdU=M6E -UdNeMsAt=PP0ExD0]") interleaved with other writers
+             -- the very defect GB-097 was minted for, committed by the
+             diagnostic that reports on it. */
+          extern void uart_puts_raw(const char *s);
+          static int rum_reports;
+          if (rum_reports >= 5)
+            goto rum_done;
+          rum_reports++;
+          char rb[96];
+          int ri = 0;
+          const char *rp = "[RESUME-UNMAPPED] pid=";
+          while (*rp && ri < 30) rb[ri++] = *rp++;
+          {
+            char td[12];
+            int ti = 0;
+            int v = proc_table[next].pid;
+            if (v < 0) { rb[ri++] = '-'; v = -v; }
+            if (v == 0) td[ti++] = '0';
+            while (v > 0 && ti < 11) { td[ti++] = (char)('0' + (v % 10)); v /= 10; }
+            while (ti > 0) rb[ri++] = td[--ti];
+          }
+          const char *rp2 = " dest=0x";
+          while (*rp2 && ri < 44) rb[ri++] = *rp2++;
+          {
+            static const char hx[] = "0123456789ABCDEF";
+            uint64_t v = target_sp - 320;
+            for (int sh = 60; sh >= 0 && ri < 62; sh -= 4)
+              rb[ri++] = hx[(v >> sh) & 0xF];
+          }
+          const char *rp3 = " why=";
+          while (*rp3 && ri < 70) rb[ri++] = *rp3++;
+          while (*why && ri < 90) rb[ri++] = *why++;
+          rb[ri++] = '\n';
+          rb[ri] = 0;
+          uart_puts_raw(rb);
+        }
+      rum_done:;
+      }
       enter_user_space(&local_tf, target_sp);
       /* GB-060 (cheap half): a resume call that returns is a defect --
          enter_user_space iretqs into the target and must never come back.  The
