@@ -1800,6 +1800,24 @@ void schedule(struct trap_frame *tf, int is_yield) {
         db_s(&d, proc_table[i].name);
         if (st == PROC_STATE_RUNNING && claimer < 0)
           db_s(&d, "  <-- RUNNING with NO cpu on it (stale claim)");
+        else if (st == PROC_STATE_RUNNING && claimer >= 0 && claimer < MAX_CPUS) {
+          /* GB-057: the other half of the same contradiction -- RUNNING *with* a
+             cpu claim, where that cpu's own record says it is running something
+             else (or nothing).  Measured ending: two slots marked RUNNING and
+             claimed by cpus 2 and 0 while the machine had produced no output for
+             minutes, and 'resume call RETURNED' never appeared in that log, so the
+             claim itself is the thing that lies.  Printing both sides turns the
+             contradiction into a named record instead of a mystifying quiet stop. */
+          uint32_t cl = (uint32_t)claimer;
+          int live_pid = (cpu_locals[cl].current_proc)
+                             ? cpu_locals[cl].current_proc->pid
+                             : -1;
+          if (live_pid != proc_table[i].pid) {
+            db_s(&d, "  <-- RUNNING claimed by a cpu that is running pid=");
+            db_i(&d, live_pid);
+            db_s(&d, " (stale claim)");
+          }
+        }
         else if ((st == PROC_STATE_WAIT_SPAWN || st == PROC_STATE_WAIT_CHILD) &&
                  proc_table[i].parent_pid <= 0)
           db_s(&d, "  <-- parked WAIT with no parent to deliver the wake");
