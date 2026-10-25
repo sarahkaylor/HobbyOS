@@ -1,0 +1,64 @@
+########## BUILD 1 ##########
+  992 |   __glibc_const_generic (BASE, const void *,                            \
+      |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  993 |                          bsearch (KEY, BASE, NMEMB, SIZE, COMPAR))
+      |                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/x86_64-linux-gnu/sys/cdefs.h:838:3: note: expanded from macro '__glibc_const_generic'
+  838 |   _Generic (0 ? (PTR) : (void *) 1,                     \
+      |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  839 |             const void *: (CTYPE) (CALL),               \
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  840 |             default: CALL)
+      |             ~~~~~~~~~~~~~~
+1 warning generated.
+ar: `u' modifier ignored since `D' is the default (see `U')
+ar: `u' modifier ignored since `D' is the default (see `U')
+ar: `u' modifier ignored since `D' is the default (see `U')
+
+== libSDL2.a ==
+82e72c095e0f4ee773dfcc5313284f2a8e726faf3d6f543596b65f2ac0428d53  build/.libs/libSDL2.a
+clang: warning: argument unused during compilation: '-no-pie' [-Wunused-command-line-argument]
+/usr/bin/x86_64-linux-gnu-ld.bfd: build/.libs/libSDL2.a(SDL_dynapi.o): in function `SDL_InitDynamicAPI':
+SDL_dynapi.c:(.text+0xf1b2): warning: Using 'dlopen' in statically linked applications requires at runtime the shared libraries from the glibc version used for linking
+
+== sdl2_static_test ==
+/tmp/sdl2-repro/sdl2_static_test: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=eeb6cf2312549c193b06cda8bd404ee56469060b, for GNU/Linux 3.2.0, not stripped
+c9f6c35126ebf9b533cffabd120c0d4a354340314212e559b837ac763f4a77ab  /tmp/sdl2-repro/sdl2_static_test
+--- artifacts (build 1) ---
+82e72c095e0f4ee773dfcc5313284f2a8e726faf3d6f543596b65f2ac0428d53  /tmp/sdl2-repro/stage/SDL2-2.30.10/build/.libs/libSDL2.a
+c9f6c35126ebf9b533cffabd120c0d4a354340314212e559b837ac763f4a77ab  /tmp/sdl2-repro/sdl2_static_test
+/tmp/sdl2-repro/sdl2_static_test: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=eeb6cf2312549c193b06cda8bd404ee56469060b, for GNU/Linux 3.2.0, not stripped
+
+########## BUILD 2 ##########
+  992 |   __glibc_const_generic (BASE, const void *,                            \
+      |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  993 |                          bsearch (KEY, BASE, NMEMB, SIZE, COMPAR))
+      |                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/x86_64-linux-gnu/sys/cdefs.h:838:3: note: expanded from macro '__glibc_const_generic'
+  838 |   _Generic (0 ? (PTR) : (void *) 1,                     \
+      |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  839 |             const void *: (CTYPE) (CALL),               \
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  840 |             default: CALL)
+      |             ~~~~~~~~~~~~~~
+1 warning generated.
+ar: `u' modifier ignored since `D' is the default (see `U')
+ar: `u' modifier ignored since `D' is the default (see `U')
+ar: `u' modifier ignored since `D' is the default (see `U')
+
+== libSDL2.a ==
+82e72c095e0f4ee773dfcc5313284f2a8e726faf3d6f543596b65f2ac0428d53  build/.libs/libSDL2.a
+clang: warning: argument unused during compilation: '-no-pie' [-Wunused-command-line-argument]
+/usr/bin/x86_64-linux-gnu-ld.bfd: build/.libs/libSDL2.a(SDL_dynapi.o): in function `SDL_InitDynamicAPI':
+SDL_dynapi.c:(.text+0xf1b2): warning: Using 'dlopen' in statically linked applications requires at runtime the shared libraries from the glibc version used for linking
+
+== sdl2_static_test ==
+/tmp/sdl2-repro/sdl2_static_test: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=eeb6cf2312549c193b06cda8bd404ee56469060b, for GNU/Linux 3.2.0, not stripped
+c9f6c35126ebf9b533cffabd120c0d4a354340314212e559b837ac763f4a77ab  /tmp/sdl2-repro/sdl2_static_test
+--- artifacts (build 2) ---
+82e72c095e0f4ee773dfcc5313284f2a8e726faf3d6f543596b65f2ac0428d53  /tmp/sdl2-repro/stage/SDL2-2.30.10/build/.libs/libSDL2.a
+c9f6c35126ebf9b533cffabd120c0d4a354340314212e559b837ac763f4a77ab  /tmp/sdl2-repro/sdl2_static_test
+/tmp/sdl2-repro/sdl2_static_test: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=eeb6cf2312549c193b06cda8bd404ee56469060b, for GNU/Linux 3.2.0, not stripped
+
+########## COMPARISON ##########
+REPRODUCIBLE: the two clean builds produced identical hashes
