@@ -144,7 +144,16 @@ extern "C" {
    * send; paranoia about spaces belongs to the decoder only.
    *
    * Every message above is one write() to the app's stdin -- the atomicity
-   * rule the wire protocol has always followed. */
+   * rule the wire protocol has always followed.  That write() must land in
+   * the PIPE.  The desktop is launched with no open fds, so its first
+   * pipe() hands out 0/1/2/3 and a window's stdin pipe is routinely fd 1;
+   * libc's write(1) console special case (the GB-094 line buffering) must
+   * therefore classify fd 1 per call and never latch "console" for the
+   * process lifetime.  A latched verdict sent every ESC ] G geometry, ESC [
+   * E repair and forwarded key to the serial console instead of the app:
+   * pixel apps then rendered at their compiled default size in the window's
+   * top-left corner, never repainted the pointer cell (a cursor trail) and
+   * never saw keyboard or mouse input. */
 #define PIX_MAX_EXPOSE 8
 
   /* A rectangle in screen (or content-relative) pixels. */
