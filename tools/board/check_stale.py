@@ -168,6 +168,13 @@ def main():
     checked = 0
     comment_ages = []          # distribution of last-comment age for In-Progress cards
     for i in issues:
+        # Count only OPEN claims (RED-F1, GB-098): a closed card that still
+        # carries a stale `In Progress` label is not a parked claim, and a
+        # board-wide `state=all` read was inflating `checked`/`stale` past an
+        # independent `state=open` read.  Closed scratch cards must never move
+        # the stale number a farm decides on.
+        if i.get("state") != "open":
+            continue
         labels = {l["name"] for l in i["labels"]}
         lane = next((x for x in LANES if x in labels), None)
         if lane != "In Progress":
