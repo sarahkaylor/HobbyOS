@@ -1,0 +1,12 @@
+/tmp/gb031-h-other/SDL2-2.30.10.tar.gz: OK
+configure: WARNING: DBus support is required for fcitx.
+ar: `u' modifier ignored since `D' is the default (see `U')
+ar: `u' modifier ignored since `D' is the default (see `U')
+ar: `u' modifier ignored since `D' is the default (see `U')
+
+== libSDL2.a ==
+141e47ccb2a54914141f43d59304f88ba65490dbf5b0420bf9a87b718a2ba35a  build/.libs/libSDL2.a
+
+== sdl2_static_test ==
+/tmp/gb031-h-other/sdl2_static_test: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, with debug_info, not stripped
+dee38e40f70ec82b2aadecb4f215cd59e42d6d7c15f80bfb81e1a054f5ee2f99  /tmp/gb031-h-other/sdl2_static_test
