@@ -33,6 +33,7 @@
 
 #include "../user_include/libc.h"
 #include "../user_include/gui.h"
+#include "ho_scratch.h"
 
 #define main tasks_app_main
 #include "../user/tasks.c"
@@ -261,10 +262,10 @@ int main(void) {
   printf("Unit tests for src/user/tasks.c\n");
 
   /* The app saves with the relative name TODO.TXT, so move the real process
-   * cwd to /tmp before anything can write (compat's chdir() is an inert
-   * in-memory mock). Everything after this point keeps files in /tmp. */
-  have_tmp = (real_chdir("/tmp") == 0);
-  remove("/tmp/TODO.TXT");
+   * cwd to the scratch dir before anything can write (compat's chdir() is an inert
+   * in-memory mock). Everything after this point keeps files in the scratch dir. */
+  have_tmp = (real_chdir(ho_scratch_dir()) == 0);
+  remove(ho_scratch_path("TODO.TXT"));
 
   /* ---------------- parse_line ---------------- */
   printf("\n-- tasks_parse_line --\n");
@@ -863,7 +864,7 @@ int main(void) {
 
   if (have_tmp) {
     /* load an existing file with malformed lines mixed in */
-    write_file("/tmp/TODO.TXT",
+    write_file(ho_scratch_path("TODO.TXT"),
                "[ ] buy milk\njunk line\n[x] ship it\n[  ] broken\n[ ] trail  \n");
     state_init(&st);
     CHECK(tasks_load(&st) == 3 && st.count == 3 && st.load_error == 0 &&
@@ -879,13 +880,13 @@ int main(void) {
           "load: reload replaces the in-memory list and clears status");
 
     /* empty file is not an error */
-    write_file("/tmp/TODO.TXT", "");
+    write_file(ho_scratch_path("TODO.TXT"), "");
     state_init(&st);
     CHECK(tasks_load(&st) == 0 && st.count == 0 && st.load_error == 0,
           "load: empty file -> empty list, no warning");
 
     /* only malformed content is not an error either */
-    write_file("/tmp/TODO.TXT", "nope\nnope\n");
+    write_file(ho_scratch_path("TODO.TXT"), "nope\nnope\n");
     state_init(&st);
     CHECK(tasks_load(&st) == 0 && st.count == 0 && st.load_error == 0,
           "load: all-malformed file -> empty list, no warning");
@@ -895,12 +896,12 @@ int main(void) {
     tasks_add(&st, "alpha");
     tasks_add(&st, "beta");
     tasks_toggle(&st, 1);
-    remove("/tmp/TODO.TXT");
+    remove(ho_scratch_path("TODO.TXT"));
     CHECK(tasks_save(&st) == 0, "save: returns 0 on success");
     {
       char file[256];
       file[0] = '\0';
-      int fn = read_file("/tmp/TODO.TXT", file, (int)sizeof(file));
+      int fn = read_file(ho_scratch_path("TODO.TXT"), file, (int)sizeof(file));
       CHECK(fn == 19 && strcmp(file, "[ ] alpha\n[x] beta\n") == 0,
             "save: TODO.TXT contains exactly the serialized list");
       CHECK(fn == 10 + 9,
@@ -933,14 +934,14 @@ int main(void) {
     {
       char file[256];
       file[0] = '\0';
-      read_file("/tmp/TODO.TXT", file, (int)sizeof(file));
+      read_file(ho_scratch_path("TODO.TXT"), file, (int)sizeof(file));
       CHECK(strcmp(file, "[x] beta\n[ ] gamma\n") == 0,
             "save: shorter list leaves no stale bytes behind");
     }
 
     /* open failure path -> warning state */
-    remove("/tmp/TODO.TXT");
-    write_file("/tmp/TODO.TXT", "[ ] keep me\n");
+    remove(ho_scratch_path("TODO.TXT"));
+    write_file(ho_scratch_path("TODO.TXT"), "[ ] keep me\n");
     state_init(&st);
     add_n(&st, 4);
     ops_save();
@@ -985,7 +986,7 @@ int main(void) {
           "save: failed action save sets 'Save failed!' status");
 
     /* menu Reload replaces the in-memory list from disk */
-    write_file("/tmp/TODO.TXT", "[x] from disk\n[ ] also disk\n");
+    write_file(ho_scratch_path("TODO.TXT"), "[x] from disk\n[ ] also disk\n");
     state_init(&st);
     add_n(&st, 7);
     list_init(&list);
@@ -999,7 +1000,7 @@ int main(void) {
           "menu: Reload replaces the list from TODO.TXT");
 
     /* 'r' key reload path */
-    write_file("/tmp/TODO.TXT", "[ ] three\n[ ] four\n[ ] five\n");
+    write_file(ho_scratch_path("TODO.TXT"), "[ ] three\n[ ] four\n[ ] five\n");
     ev.type = GUI_EV_CHAR;
     ev.ch = 'r';
     tasks_handle_event(&st, &list, &ev);
@@ -1017,7 +1018,7 @@ int main(void) {
           "event: failed reload empties the list with a message");
 
     /* a full add/save cycle through the key handler */
-    remove("/tmp/TODO.TXT");
+    remove(ho_scratch_path("TODO.TXT"));
     state_init(&st);
     list_init(&list);
     tasks_list_sync(&st, &list);
@@ -1028,7 +1029,7 @@ int main(void) {
     {
       char file[256];
       file[0] = '\0';
-      read_file("/tmp/TODO.TXT", file, (int)sizeof(file));
+      read_file(ho_scratch_path("TODO.TXT"), file, (int)sizeof(file));
       CHECK(strcmp(file, "[ ] written by 'a'\n") == 0,
             "integration: 'a' writes the new item straight to TODO.TXT");
     }
@@ -1036,7 +1037,7 @@ int main(void) {
     CHECK(tasks_load(&st) == 1 && strcmp(st.items[0].text, "written by 'a'") == 0,
           "integration: reload sees the item added through the UI");
 
-    remove("/tmp/TODO.TXT");
+    remove(ho_scratch_path("TODO.TXT"));
   } else {
     printf("  FAIL: cannot chdir to /tmp - file tests skipped\n");
     checks_failed++;

@@ -30,11 +30,13 @@
 #include <dirent.h>
 #include <errno.h>
 
+#include "ho_scratch.h"
+
 #define main tar_main
 #include "../user/tar.c"
 #undef main
 
-#define TB_TMP "/tmp/hobbyos-tar-test"
+#define TB_TMP ho_scratch_dir()
 #define TB_BUF (1 << 16)
 
 static int tb_fail;

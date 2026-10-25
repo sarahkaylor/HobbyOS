@@ -22,6 +22,7 @@
 
 #include "../user_include/libc.h"
 #include "../user_include/gui.h"
+#include "ho_scratch.h"
 
 #define main diff_app_main
 #include "../user/diff.c"
@@ -688,8 +689,8 @@ static void test_caps_and_fallback(void) {
 static void test_loading_and_notes(void) {
   char slot[DIFF_SLOT_MAX];
   char line2[DIFF_LINE2_MAX + 1];
-  const char *fa = "/tmp/diff_test_a.txt";
-  const char *fb = "/tmp/diff_test_big.txt";
+  const char *fa = ho_scratch_path("diff_test_a.txt");
+  const char *fb = ho_scratch_path("diff_test_big.txt");
 
   section("file loading, 16 KB cap and truncation notes");
 
@@ -726,7 +727,7 @@ static void test_loading_and_notes(void) {
         "status line falls back to the hint after invalidate");
 
   /* failure path: bad directory -> slot emptied, shown as (none) */
-  CHECK(diff_load_slot(0, "/tmp/diff_no_such_dir_zz/x.txt") == 0,
+  CHECK(diff_load_slot(0, ho_scratch_path("diff_no_such_dir_zz/x.txt")) == 0,
         "load_slot returns 0 when the file cannot be opened");
   CHECK(a_file.loaded == 0 && a_file.name[0] == '\0' && a_file.count == 0,
         "failed load empties the slot");
@@ -735,16 +736,16 @@ static void test_loading_and_notes(void) {
   CHECK(diff_valid == 0, "failed load also invalidates the diff");
 
   /* empty file loads as 0 lines */
-  CHECK(write_fixture("/tmp/diff_test_empty.txt", "") == 1, "empty fixture written");
-  CHECK(diff_load_slot(1, "/tmp/diff_test_empty.txt") == 1 &&
+  CHECK(write_fixture(ho_scratch_path("diff_test_empty.txt"), "") == 1, "empty fixture written");
+  CHECK(diff_load_slot(1, ho_scratch_path("diff_test_empty.txt")) == 1 &&
         b_file.loaded == 1 && b_file.count == 0,
         "empty file loads successfully with 0 lines");
   diff_format_slot(slot, 'B', &b_file);
   CHECK(strstr(slot, "(0 lines)") != NULL, "empty file slot shows (0 lines)");
 
   /* CRLF fixture end to end */
-  CHECK(write_fixture("/tmp/diff_test_crlf.txt", "aa\r\nbb\r\n") == 1, "CRLF fixture");
-  CHECK(diff_load_slot(0, "/tmp/diff_test_crlf.txt") == 1 &&
+  CHECK(write_fixture(ho_scratch_path("diff_test_crlf.txt"), "aa\r\nbb\r\n") == 1, "CRLF fixture");
+  CHECK(diff_load_slot(0, ho_scratch_path("diff_test_crlf.txt")) == 1 &&
         b_file.count == 0 && a_file.count == 2 &&
         strcmp(a_file.lines[1].text, "bb") == 0,
         "CRLF file loads as 2 clean lines");
@@ -755,8 +756,8 @@ static void test_loading_and_notes(void) {
     int len = 0, i;
     for (i = 1; i <= 401; i++)
       len += snprintf(buf + len, sizeof(buf) - len, "L%d\n", i);
-    CHECK(write_fixture("/tmp/diff_test_401.txt", buf) == 1, "401-line fixture");
-    CHECK(diff_load_slot(0, "/tmp/diff_test_401.txt") == 1 &&
+    CHECK(write_fixture(ho_scratch_path("diff_test_401.txt"), buf) == 1, "401-line fixture");
+    CHECK(diff_load_slot(0, ho_scratch_path("diff_test_401.txt")) == 1 &&
           a_file.count == 400 && a_file.total == 401 && a_file.dropped == 1,
           "401-line file: 400 kept, 1 dropped");
     CHECK(strcmp(a_file.lines[399].text, "L400") == 0,
@@ -772,8 +773,8 @@ static void test_loading_and_notes(void) {
     memset(buf, 'w', 150);
     buf[150] = '\n';
     buf[151] = '\0';
-    CHECK(write_fixture("/tmp/diff_test_long.txt", buf) == 1, "long-line fixture");
-    CHECK(diff_load_slot(0, "/tmp/diff_test_long.txt") == 1 &&
+    CHECK(write_fixture(ho_scratch_path("diff_test_long.txt"), buf) == 1, "long-line fixture");
+    CHECK(diff_load_slot(0, ho_scratch_path("diff_test_long.txt")) == 1 &&
           a_file.long_cut == 1 && (int)strlen(a_file.lines[0].text) == 100,
           "150-char line cut to 100 at load time");
     diff_format_slot(slot, 'A', &a_file);
@@ -854,7 +855,7 @@ static void test_loading_and_notes(void) {
 
   /* file loaded but never compared: rows are blank, hint shown */
   reset_app_state();
-  CHECK(write_fixture("/tmp/diff_test_a.txt", "one\ntwo\nthree\n") == 1, "re-write fixture");
+  CHECK(write_fixture(ho_scratch_path("diff_test_a.txt"), "one\ntwo\nthree\n") == 1, "re-write fixture");
   CHECK(diff_load_slot(0, fa) == 1 && diff_load_slot(1, fa) == 1, "both slots load");
   {
     char screen[DIFF_SCREEN_MAX];
