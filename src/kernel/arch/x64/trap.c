@@ -2843,7 +2843,37 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         uint64_t kcr2;
         __asm__ volatile("mov %%cr2, %0" : "=r"(kcr2));
         if (kcr2 >= USER_VA_BASE) {
-          if (cur->as) {
+          /* GB-057: a kernel-mode #PF at the SAME address that keeps being
+             "handled" is a retry loop, not a fix: measured live, a CPU sat on
+             the `rep movsq` inside enter_user_space (RIP 0x7003B1CF) for 14
+             MINUTES re-executing it, with vm_handle_fault returning success each
+             time.  Nothing counted the repeats, so nothing ever reported it.
+             Cap it here and turn the silence into one record plus a kill. */
+          static uint64_t kpf_last_cr2[MAX_CPUS];
+          static uint32_t kpf_repeats[MAX_CPUS];
+          uint32_t kc = get_cpuid();
+          if (kc >= MAX_CPUS)
+            kc = 0;
+          uint32_t kpf_n;
+          if (kcr2 == kpf_last_cr2[kc]) {
+            kpf_n = ++kpf_repeats[kc];
+          } else {
+            kpf_last_cr2[kc] = kcr2;
+            kpf_n = kpf_repeats[kc] = 1;
+          }
+          int kpf_looping = (kpf_n > 8);
+          if (kpf_n == 9) {
+            uart_puts_raw("[KPFLOOP] kernel-mode #PF repeating: cpu=");
+            print_int_raw((int)kc);
+            uart_puts_raw(" cr2=");
+            uart_print_hex_raw(kcr2);
+            uart_puts_raw(" rip=");
+            uart_print_hex_raw(tf->elr);
+            uart_puts_raw(" pid=");
+            print_int_raw(cur ? (int)cur->pid : -1);
+            uart_puts_raw(" -> killing, the mapping is not advancing\n");
+          }
+          if (cur->as && !kpf_looping) {
             /* vm_handle_fault may do device I/O; the write-fallback to a
                read-only materialization is gated on a read fault (a real
                write to a read-only page must keep faulting -> kill). */
