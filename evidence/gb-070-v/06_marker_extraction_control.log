@@ -1,0 +1,14 @@
+=== control: what the CAT marker actually is, anchored at line start vs anywhere
+-- the line the gate picked (first substring match), log line 224:
+D cat got=56  out="probe-content\n[W0] CAT linux=entered-main:main-returned\n" code=0 
+-- CAT's own marker line, log line 483:
+[W0] CAT linux=entered-main:main-returned
+-- anchored extraction (^\[W0\]) matches the Linux-leg .ref:
+guest=entered-main:main-returned
+ref  =entered-main:main-returned
+equal=YES
+
+-- the probe line's origin
+15: *   row=<name> rc=<n> errno=<n> out=<hex>
+58:  /* "row=<name> rc=<rc> errno=<err> out=<hex>\n" */
+67:    p = " out="; while (*p) buf[n++] = *p++;

@@ -1,0 +1,11 @@
+=== clause 2b: remove LS from the healthy wave (real log, LS arrival+marker lines stripped)
+=== t4_w0: W0 corpus gate over /tmp/gb070_no_ls.log ===
+  PASS HELLO (arrived in guest)
+  PASS HELLO output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  PASS SH (arrived in guest)
+  PASS SH output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  PASS CAT (arrived in guest)
+  FAIL CAT — guest output marker 'entered-main:main-returned\n" code=0 ' != Linux-leg 'entered-main:main-returned' (writes expected output: NO)
+  FAIL LS — not in the intel wave's exited-programs/arrival set (W0 corpus member never ran)
+t4_w0: FAIL — W0 corpus incomplete or output mismatch
+STRIPPED_GATE_EXIT=1
