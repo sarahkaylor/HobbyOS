@@ -107,3 +107,23 @@ post-fix digests (`82e72c09`, `c9f6c351`, `e09876b4`, `6674931d`, and this run's
 2. the musl-gcc profile (PR #169) plus an assertion that the artifact is musl
    (`strings | grep -q musl`), so the card title is true of the artifact;
 3. a README that records the **cross-dest** hashes actually produced by the shipped script.
+
+## Re-measured at the gated sha (no reliance on a same-blob argument)
+
+The script blob is identical at the worktree HEAD and at `origin/main` (`760dd91c10b84131…` both), but the
+whole tree was not, so the two-dest test was re-run after rebasing onto `origin/main` `96ba7d2`
+(tree `4cd1135` = `96ba7d2` + this evidence). Same result, produced on the gated tree:
+
+```
+dest E = /tmp/gb031-e              build rc=0
+dest F = /tmp/gb031-f-other-dest   build rc=0
+
+834e06ca1b6d3407f58825fec8c09cb2a13398a278a3d0a81840359d4cb73239  /tmp/gb031-e/.../libSDL2.a
+c4ab28c6898bd0b42b9915cf1a93a6f542317acd6dbf60957bb35e7525507226  /tmp/gb031-f-other-dest/.../libSDL2.a
+d26e52bf327f3c1689d11a32cba0e5114ae3088964a67ba1f1eeb16ae7363414  /tmp/gb031-e/sdl2_static_test
+137487827167b236c3cdb96cb9dc5eb32b42f94d7abba28ceb191eaf0ece0ded  /tmp/gb031-f-other-dest/sdl2_static_test
+```
+
+Clause 1 FAIL stands at `96ba7d2`. (Digests differ from the A/B pair above because the dest path is
+embedded — which is the defect — so every dest yields a different digest; that is the observation, not a
+noise source to be averaged away.)
