@@ -31,6 +31,10 @@ int fat16_init(void);
 // Opens a file from the filesystem into a generic file structure.
 int fat16_open(const char* filename, struct file* f);
 
+/* GB-020: open a DIRECTORY (for getdents64).  Returns 0 and fills f (typed
+ * FILE_TYPE_FAT16DIR by the caller) on success, -1 if not a directory. */
+int fat16_open_dir(const char* path, struct file* f);
+
 /* SEC-1: excl != 0 gives atomic O_CREAT|O_EXCL semantics (create-if-absent
    decided inside one fat_lock critical section). Returns 0 on success, -2 if
    the name exists and excl was set (caller maps to EEXIST), -1 otherwise. */
@@ -79,6 +83,13 @@ int fat16_chdir(const char *path, char *out_new_cwd);
 
 // Reads a directory entry at the specified index.
 int fat16_read_dir(const char* path, int index, char* out_name, uint8_t* out_attr, uint32_t* out_size);
+
+/* GB-020: getdents64 backend for an open DIRECTORY fd.  Enumerates the
+ * directory (from f->fat16.entry.start_cluster) into linux_dirent64 records,
+ * starting at resume index start_index (= f->fat16.cursor on the first call),
+ * and stores the next resume index back into f->fat16.cursor.  Returns the
+ * number of bytes written to ubuf (0 at end of dir), -1 on read error. */
+int fat16_getdents64(struct file *f, int start_index, void *ubuf, int bufsize);
 
 // Computes volume statistics for the data area.
 // total_bytes = total data cluster bytes; free_bytes = free cluster bytes.
