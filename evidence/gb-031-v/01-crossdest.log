@@ -1,0 +1,34 @@
+rev: 5e22da3cbdc00fd4979a5fd59da928b63a7e3b3a
+date: 2026-10-25T07:23:22Z
+$ bash evidence/gb-031/crossdest_verify.sh   # card says tools/gate/evidence/gb-031/crossdest_verify.sh, which does not exist
+########## clean build at /tmp/sdl-a ##########
+/usr/bin/x86_64-linux-gnu-ld.bfd: build/.libs/libSDL2.a(SDL_dynapi.o): in function `SDL_InitDynamicAPI':
+SDL_dynapi.c:(.text+0xf1b2): warning: Using 'dlopen' in statically linked applications requires at runtime the shared libraries from the glibc version used for linking
+
+== sdl2_static_test ==
+/tmp/sdl-a/sdl2_static_test: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=eeb6cf2312549c193b06cda8bd404ee56469060b, for GNU/Linux 3.2.0, not stripped
+c9f6c35126ebf9b533cffabd120c0d4a354340314212e559b837ac763f4a77ab  /tmp/sdl-a/sdl2_static_test
+--- hashes ---
+82e72c095e0f4ee773dfcc5313284f2a8e726faf3d6f543596b65f2ac0428d53  /tmp/sdl-a/stage/SDL2-2.30.10/build/.libs/libSDL2.a
+c9f6c35126ebf9b533cffabd120c0d4a354340314212e559b837ac763f4a77ab  /tmp/sdl-a/sdl2_static_test
+########## clean build at /tmp/sdl-b ##########
+/usr/bin/x86_64-linux-gnu-ld.bfd: build/.libs/libSDL2.a(SDL_dynapi.o): in function `SDL_InitDynamicAPI':
+SDL_dynapi.c:(.text+0xf1b2): warning: Using 'dlopen' in statically linked applications requires at runtime the shared libraries from the glibc version used for linking
+
+== sdl2_static_test ==
+/tmp/sdl-b/sdl2_static_test: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=eeb6cf2312549c193b06cda8bd404ee56469060b, for GNU/Linux 3.2.0, not stripped
+c9f6c35126ebf9b533cffabd120c0d4a354340314212e559b837ac763f4a77ab  /tmp/sdl-b/sdl2_static_test
+--- hashes ---
+82e72c095e0f4ee773dfcc5313284f2a8e726faf3d6f543596b65f2ac0428d53  /tmp/sdl-b/stage/SDL2-2.30.10/build/.libs/libSDL2.a
+c9f6c35126ebf9b533cffabd120c0d4a354340314212e559b837ac763f4a77ab  /tmp/sdl-b/sdl2_static_test
+########## cross-dest comparison ##########
+libSDL2.a: IDENTICAL across different dests (82e72c095e0f4ee773dfcc5313284f2a8e726faf3d6f543596b65f2ac0428d53)
+sdl2_static_test: IDENTICAL across different dests (c9f6c35126ebf9b533cffabd120c0d4a354340314212e559b837ac763f4a77ab)
+########## ELF shape + loader acceptance ##########
+  Type:                              EXEC (Executable file)
+  Machine:                           Advanced Micro Devices X86-64
+/tmp/sdl-a/sdl2_static_test: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=eeb6cf2312549c193b06cda8bd404ee56469060b, for GNU/Linux 3.2.0, not stripped
+  PASS null image: ELF_ERR_ARGS
+=== 93 checks, 0 failed ===
+ALL ELF IMAGE HOST TESTS PASSED
+rc=0

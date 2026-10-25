@@ -1,0 +1,38 @@
+--- driver/input config in the built tree ---
+318:#define SDL_INPUT_LINUXEV 1
+378:#define SDL_VIDEO_DRIVER_DUMMY 1
+387:/* #undef SDL_VIDEO_DRIVER_X11 */
+394:#define SDL_VIDEO_DRIVER_OFFSCREEN 1
+395:/* #undef SDL_VIDEO_DRIVER_X11_DYNAMIC */
+396:/* #undef SDL_VIDEO_DRIVER_X11_DYNAMIC_XEXT */
+397:/* #undef SDL_VIDEO_DRIVER_X11_DYNAMIC_XCURSOR */
+398:/* #undef SDL_VIDEO_DRIVER_X11_DYNAMIC_XINPUT2 */
+399:/* #undef SDL_VIDEO_DRIVER_X11_DYNAMIC_XFIXES */
+400:/* #undef SDL_VIDEO_DRIVER_X11_DYNAMIC_XRANDR */
+401:/* #undef SDL_VIDEO_DRIVER_X11_DYNAMIC_XSS */
+402:/* #undef SDL_VIDEO_DRIVER_X11_XCURSOR */
+403:/* #undef SDL_VIDEO_DRIVER_X11_XDBE */
+404:/* #undef SDL_VIDEO_DRIVER_X11_XINPUT2 */
+405:/* #undef SDL_VIDEO_DRIVER_X11_XINPUT2_SUPPORTS_MULTITOUCH */
+406:/* #undef SDL_VIDEO_DRIVER_X11_XFIXES */
+407:/* #undef SDL_VIDEO_DRIVER_X11_XRANDR */
+408:/* #undef SDL_VIDEO_DRIVER_X11_XSCRNSAVER */
+409:/* #undef SDL_VIDEO_DRIVER_X11_XSHAPE */
+410:/* #undef SDL_VIDEO_DRIVER_X11_SUPPORTS_GENERIC_EVENTS */
+
+--- configure line as actually run ---
+configure: creating ./config.status
+
+--- libSDL2.a member libc markers ---
+
+--- clang link line for the app build (musl target) ---
+"-L/lib/x86_64-linux-gnu"
+"-L/usr/lib/gcc/x86_64-linux-gnu/15"
+"-L/usr/lib/gcc/x86_64-linux-gnu/15/../../../../lib64"
+"-L/usr/lib/x86_64-linux-gnu"
+"/lib/x86_64-linux-gnu/crt1.o"
+"/lib/x86_64-linux-gnu/crti.o"
+"/lib/x86_64-linux-gnu/crtn.o"
+"/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginT.o"
+"/usr/lib/gcc/x86_64-linux-gnu/15/crtend.o"
+x86_64-unknown-linux-musl
