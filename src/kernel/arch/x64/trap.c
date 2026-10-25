@@ -2261,8 +2261,35 @@ static volatile uint64_t wd_ticks[MAX_CPUS];     /* interrupt count per core */
    negative addresses and fault the watchdog itself (x64 KVM Vector 14 at
    CR2 = -8 while a long v2 load keeps the console silent).  Mirrors the
    guard already applied to wd_last_tfp below. */
+int watchdog_stack_scan_ok(uint64_t top);
+void watchdog_stack_arena(uint64_t *lo, uint64_t *hi);
+
 int watchdog_stack_scan_ok(uint64_t top) {
-  return top >= 0x70000000ULL && top < 0x75000000ULL;
+  /* GB-057: the old bounds were hardcoded and BOTH were wrong, so this scan
+     never once ran.  Measured on this build:
+       __stack_top      = 0x755ffbf0     -> guard demanded top < 0x75000000
+       last .text addr  = 0x70042cc0     -> scan demanded v   < 0x7001c000
+     i.e. every CPU's stack was rejected as "uninitialized" while it was
+     perfectly initialised, and had the guard passed, the frame filter would
+     have discarded every return address past 0x1c000.  Derive the arena from
+     the linker symbol instead of guessing it, so a layout change cannot make
+     the instrument silently blind again. */
+  uint64_t lo, hi;
+  watchdog_stack_arena(&lo, &hi);
+  if (top == 0)
+    return 0; /* core never powered on */
+  return top <= hi && top >= lo;
+}
+
+/* The arena, in one place, so the unit test can assert the guard's contract
+   (accept the arena, reject its neighbours) instead of hardcoding addresses
+   that a linker-script change invalidates -- which is exactly how the previous
+   bounds became wrong and stayed wrong. */
+void watchdog_stack_arena(uint64_t *lo, uint64_t *hi) {
+  extern uint64_t __stack_top;
+  uint64_t top = (uint64_t)&__stack_top;
+  *hi = top;
+  *lo = top - (uint64_t)(MAX_CPUS * 64 * 1024 + 4096);
 }
 
 static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
@@ -2395,7 +2422,7 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
     if (watchdog_stack_scan_ok(top)) {
       for (uint64_t a = top - 8; a > (top - 24576) && hits < 20; a -= 8) {
         uint64_t v = *(volatile uint64_t *)a;
-        if (v >= 0x70000000ULL && v < 0x7001c000ULL) {
+        if (v >= 0x70000000ULL && v < 0x70080000ULL) {
           uart_puts_raw2(" ");
           uart_print_hex_raw2(v);
           hits++;
@@ -2426,7 +2453,7 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
     uart_puts_raw(":");
     for (uint64_t a = top - 8; a > (top - 24576) && hits < 16; a -= 8) {
       uint64_t v = *(volatile uint64_t *)a;
-      if (v >= 0x70000000ULL && v < 0x7001c000ULL) {
+      if (v >= 0x70000000ULL && v < 0x70080000ULL) {
         uart_puts_raw(" ");
         uart_print_hex_raw(v);
         last_hit = a;
