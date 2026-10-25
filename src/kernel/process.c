@@ -1693,6 +1693,43 @@ void schedule(struct trap_frame *tf, int is_yield) {
       extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
       extern void resume_mark(int pid, uint64_t target_sp);
       resume_mark(proc_table[next].pid, target_sp);
+      /* GB-057: the parked cores were recorded with rflags=0x10046 -- IF (0x200)
+         CLEAR -- in the frame that iretq restores.  A user process resumed with
+         IF=0 can never be preempted by the timer: age_ms climbs for ever, the
+         watchdog cannot see the core, and there is no fault, no lock and no
+         panic to report.  Print the frame's flags and force IF on, because a
+         user-mode resume frame must always allow interrupts. */
+      {
+        extern void uart_puts(const char *s);
+        static int spsr_n;
+        if (spsr_n < 5) {
+          spsr_n++;
+          char sb[96];
+          int si = 0;
+          const char *p1 = "[RESUME-SPSR] pid=";
+          while (*p1 && si < 22) sb[si++] = *p1++;
+          char td[12];
+          int ti = 0, v = proc_table[next].pid;
+          if (v == 0) td[ti++] = '0';
+          while (v > 0 && ti < 11) { td[ti++] = (char)('0' + (v % 10)); v /= 10; }
+          while (ti > 0) sb[si++] = td[--ti];
+          const char *p2 = " spsr=0x";
+          while (*p2 && si < 34) sb[si++] = *p2++;
+          static const char hx3[] = "0123456789ABCDEF";
+          for (int sh = 28; sh >= 0 && si < 50; sh -= 4)
+            sb[si++] = hx3[((uint64_t)local_tf.spsr >> sh) & 0xF];
+          const char *p3 = " IF=";
+          while (*p3 && si < 56) sb[si++] = *p3++;
+          sb[si++] = (local_tf.spsr & 0x200) ? '1' : '0';
+          sb[si++] = '\n';
+          sb[si] = 0;
+          uart_puts(sb);
+        }
+        /* The fix, applied unconditionally: user-mode resume always runs with
+           interrupts enabled.  RF is cleared too -- it suppresses breakpoints and
+           has no business in a restored user frame. */
+        local_tf.spsr = (local_tf.spsr | 0x200) & ~0x10000ULL;
+      }
       /* GB-057 (measurement only, no behaviour change): the resume copy writes
          296 bytes to [target_sp-320, target_sp) and that page was measured NOT
          PRESENT (vec=14 err=0x2 cr2=target_sp-0x140).  The open question is WHY:
