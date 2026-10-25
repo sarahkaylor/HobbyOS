@@ -11,17 +11,22 @@
  *   4. Draw a dark top band now (32 nametable cells = tile 1 at PPUADDR=$2000),
  *      so the default boot frame is a bright field with a dark top band and a
  *      visible sprite — demonstrating background + OAM sprite rendering.
- *   5. In a tight loop, read the NES controller ($4016 strobe + serial read):
+ *   5. In a tight loop (main), read the NES controller ($4016 strobe + serial):
  *      - A released -> (re)draw the dark band (the resting frame);
  *      - A pressed  -> clear it (write tile 0 = bright over the band).
  *      So the ROM visibly responds to the A button — "boots and plays a ROM".
+ *   6. Every loop iteration also toggles a single nametable cell ($2000+0x34,
+ *      row 1, col 20, outside the band and sprite) between tile dark / bright.
+ *      This makes the ROM ANIMATE ON ITS OWN — the rendered frame changes each
+ *      pass with NO input — so a T5 screendump pair 2 s apart differs in the
+ *      game area (GB-035-V's "advance a frame on its own" green path).
  *
  * License: MIT, swarm-authored, license-clean (no copyrighted NES BIOS/ROM).
  */
 #ifndef NES_HOMEBREW_ROM_H
 #define NES_HOMEBREW_ROM_H
 
-#define HOME_ROM_LEN 139
+#define HOME_ROM_LEN 161
 static const unsigned char home_rom[HOME_ROM_LEN] = {
   /* tile0 = solid bright (16 bytes of $FF at PPUADDR=$1000) */
   0xA9, 0x10,             /* LDA #$10                 $8000 */
@@ -65,10 +70,10 @@ static const unsigned char home_rom[HOME_ROM_LEN] = {
   0x29, 0x01,             /* AND #$01                 $8052 */
   0xD0, 0x06,             /* BNE a_down               $8054 */
   0x20, 0x61, 0x80,       /* JSR band_dark            $8055 */
-  0x4C, 0x44, 0x80,       /* JMP main                 $8058 */
+  0x4C, 0x8B, 0x80,       /* JMP blink                $8058 (was JMP main) */
                           /* a_down: */
   0x20, 0x76, 0x80,       /* JSR band_bright          $805B */
-  0x4C, 0x44, 0x80,       /* JMP main                 $805E */
+  0x4C, 0x8B, 0x80,       /* JMP blink                $805E (was JMP main) */
   /* band_dark ($8061): write 32 cells of $01 at PPUADDR=$2000 */
   0xA9, 0x20, 0x8D, 0x06, 0x20,
   0xA9, 0x00, 0x8D, 0x06, 0x20,
@@ -80,7 +85,18 @@ static const unsigned char home_rom[HOME_ROM_LEN] = {
   0xA9, 0x00, 0x8D, 0x06, 0x20,
   0xA2, 0x20, 0xA9, 0x00,
                           /* bb: */
-  0x8D, 0x07, 0x20, 0xCA, 0xD0, 0xFA, 0x60
+  0x8D, 0x07, 0x20, 0xCA, 0xD0, 0xFA, 0x60,
+  /* blink ($808B): toggle nametable cell $2000+0x34 between tile $01 and $00,
+     then jump back to main.  Called every loop iteration (self-animation). */
+  0xA9, 0x20,             /* LDA #$20  (PPUADDR hi)   $808B */
+  0x8D, 0x06, 0x20,       /* STA $2006                $808D */
+  0xA9, 0x34,             /* LDA #$34  (0x2000+0x34)  $8090 */
+  0x8D, 0x06, 0x20,       /* STA $2006                $8092 */
+  0xA5, 0x01,             /* LDA $01   (blink ctx)    $8095 */
+  0x49, 0x01,             /* EOR #$01                 $8097 */
+  0x85, 0x01,             /* STA $01                  $8099 */
+  0x8D, 0x07, 0x20,       /* STA $2007  (write cell)  $809B */
+  0x4C, 0x44, 0x80        /* JMP main                 $809E */
 };
 
 #endif

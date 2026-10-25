@@ -163,6 +163,30 @@ int main(void){
     CHECK(band == 32, "homebrew: A pressed clears the band (ROM responds to input)");
   }
 
+  /* ---- self-advance: the ROM animates on its own (GB-035-V red path) ------ */
+  {
+    int i;
+    /* With NO input at all, the blink nametable cell ($2000+0x34) must toggle
+       between tile dark and bright across the run, i.e. the rendered frame
+       advances by itself — the "make the ROM animate on its own" green path. */
+    nes_machine m3; memset(&m3, 0, sizeof(m3));
+    for (i = 0; i < HOME_ROM_LEN; i++) m3.prg[i] = home_rom[i];
+    m3.prg[0x7FFC] = 0x00; m3.prg[0x7FFD] = 0x80;
+    nes_reset(&m3);
+    m3.joy = 0;
+    int see0 = 0, see1 = 0, changes = 0, last = -1;
+    for (i = 0; i < 400; i++) {
+      nes_run(&m3, 300);
+      u8 c = m3.ppu.vram[0x2034 & (NES_VRAM_SIZE - 1)];
+      if (c == 0) see0 = 1;
+      if (c == 1) see1 = 1;
+      if (last != -1 && c != last) changes++;
+      last = c;
+    }
+    CHECK(see0 && see1 && changes > 0,
+          "homebrew self-advances: blink cell toggles across frames with no input");
+  }
+
   /* ---- additional 6502 instructions (shifts, branches, ind-jmp, stack) - */
   {
     /* shifts/rotates: 0x86 ASL->(0x0C,C1) LSR->0x06 ROL->0x0C ROR->0x06 */
