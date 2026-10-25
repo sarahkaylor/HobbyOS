@@ -1721,6 +1721,10 @@ void schedule(struct trap_frame *tf, int is_yield) {
           const char *p3 = " IF=";
           while (*p3 && si < 56) sb[si++] = *p3++;
           sb[si++] = (local_tf.spsr & 0x200) ? '1' : '0';
+          const char *p4 = " elr=0x";
+          while (*p4 && si < 68) sb[si++] = *p4++;
+          for (int sh = 36; sh >= 0 && si < 84; sh -= 4)
+            sb[si++] = hx3[((uint64_t)local_tf.elr >> sh) & 0xF];
           sb[si++] = '\n';
           sb[si] = 0;
           uart_puts(sb);
@@ -3463,6 +3467,38 @@ void start_scheduler(void) {
         extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
         extern void resume_mark(int pid, uint64_t target_sp);
         resume_mark(proc_table[i].pid, target_sp);
+        /* GB-057: second resume site, instrumented for the first time.  Every
+           measurement so far came from schedule()'s pick; if the bad frame is
+           built here (process.c rescan), none of those could have seen it. */
+        {
+          extern void uart_puts(const char *s);
+          static int spsr2_n;
+          if (spsr2_n < 5) {
+            spsr2_n++;
+            char sb2[96];
+            int s2 = 0;
+            const char *r1 = "[RESUME-SPSR2] pid=";
+            while (*r1 && s2 < 24) sb2[s2++] = *r1++;
+            char td3[12];
+            int ti3 = 0, v3 = proc_table[i].pid;
+            if (v3 == 0) td3[ti3++] = '0';
+            while (v3 > 0 && ti3 < 11) { td3[ti3++] = (char)('0' + (v3 % 10)); v3 /= 10; }
+            while (ti3 > 0) sb2[s2++] = td3[--ti3];
+            const char *r2 = " spsr=0x";
+            while (*r2 && s2 < 36) sb2[s2++] = *r2++;
+            static const char hx4[] = "0123456789ABCDEF";
+            for (int sh = 28; sh >= 0 && s2 < 52; sh -= 4)
+              sb2[s2++] = hx4[((uint64_t)local_tf.spsr >> sh) & 0xF];
+            const char *r3 = " elr=0x";
+            while (*r3 && s2 < 64) sb2[s2++] = *r3++;
+            for (int sh = 36; sh >= 0 && s2 < 80; sh -= 4)
+              sb2[s2++] = hx4[((uint64_t)local_tf.elr >> sh) & 0xF];
+            sb2[s2++] = '\n';
+            sb2[s2] = 0;
+            uart_puts(sb2);
+          }
+          local_tf.spsr = (local_tf.spsr | 0x200) & ~0x10000ULL;
+        }
         enter_user_space(&local_tf, target_sp);
 
         /* Same rule as schedule()'s resume boundary: if this returns, the CPU
