@@ -1,0 +1,17 @@
+### B: merged tree (origin/main 30178e5 + PR #155 d7c3c5e) — make ARCH=arm hobbyos.elf  2026-10-25T07:03:54Z
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/process.c -o obj/arm/process.o
+src/kernel/process.c:1827:27: error: use of undeclared identifier 'cpu_locals'
+ 1827 |           int live_pid = (cpu_locals[cl].current_proc)
+      |                           ^~~~~~~~~~
+src/kernel/process.c:1828:32: error: use of undeclared identifier 'cpu_locals'
+ 1828 |                              ? cpu_locals[cl].current_proc->pid
+      |                                ^~~~~~~~~~
+src/kernel/process.c:1415:42: warning: unused parameter 'is_yield' [-Wunused-parameter]
+ 1415 | void schedule(struct trap_frame *tf, int is_yield) {
+      |                                          ^
+src/kernel/process.c:3888:50: warning: unused parameter 'prot' [-Wunused-parameter]
+ 3888 | int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags) {
+      |                                                  ^
+2 warnings and 2 errors generated.
+make: *** [Makefile:744: obj/arm/process.o] Error 1
+rc=2

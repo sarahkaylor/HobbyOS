@@ -1,0 +1,10 @@
+### C: nm on the merged tree's ARM objects 2026-10-25T07:04:03Z
+$ nm obj/arm/trap.o | grep -w resume_mark
+nm: 'obj/arm/trap.o': No such file
+$ nm obj/arm/process.o | grep -w resume_mark
+$ grep -n 'resume_mark' src/kernel/process.c | head
+1694:      extern void resume_mark(int pid, uint64_t target_sp);
+1695:      resume_mark(proc_table[next].pid, target_sp);
+3364:        extern void resume_mark(int pid, uint64_t target_sp);
+3365:        resume_mark(proc_table[i].pid, target_sp);
+0000000000000000 T resume_mark

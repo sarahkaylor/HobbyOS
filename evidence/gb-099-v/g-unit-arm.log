@@ -1,0 +1,119 @@
+### G: merged tree (unmodified) — make ARCH=arm unit_tests_arm  2026-10-25T07:08:24Z
+make ARCH=arm MODE=unit_tests run
+make[1]: Entering directory '/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-de27f562'
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/abi_t2_test.c -o obj/arm/abi_t2_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/audio_stub.c -o obj/arm/audio_stub.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/blk_cache.c -o obj/arm/blk_cache.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/blk_cache_press_test.c -o obj/arm/blk_cache_press_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/blk_cache_test.c -o obj/arm/blk_cache_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/dhcp.c -o obj/arm/dhcp.o
+src/kernel/dhcp.c:42:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   42 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:82:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   82 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:135:19: warning: unused variable 'udp' [-Wunused-variable]
+  135 |   struct udp_hdr* udp = (struct udp_hdr*)(packet + sizeof(struct ipv4_hdr));
+      |                   ^~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/elf_image.c -o obj/arm/elf_image.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/elf_loader.c -o obj/arm/elf_loader.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/evdev.c -o obj/arm/evdev.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/evdev_test.c -o obj/arm/evdev_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fat16.c -o obj/arm/fat16.o
+src/kernel/fat16.c:2151:25: warning: comparison of integers of different signs: 'int' and 'uint32_t' (aka 'unsigned int') [-Wsign-compare]
+ 2151 |       if ((int)old_size > f->fat16.cursor) f->fat16.cursor = (int)old_size;
+      |           ~~~~~~~~~~~~~ ^ ~~~~~~~~~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -Iobj/arm -c src/kernel/fat16_test.c -o obj/arm/fat16_test.o
+src/kernel/fat16_test.c:1146:64: warning: taking address of packed member 'file_size' of class or structure 'fat16_dir_entry' may result in an unaligned pointer value [-Waddress-of-packed-member]
+ 1146 |   EXPECT_EQ(fat16_read_dir(dir, 0, (char *)names[0], &e.attr, &e.file_size) == 0, 1);
+      |                                                                ^~~~~~~~~~~
+src/kernel/unit_test.h:23:19: note: expanded from macro 'EXPECT_EQ'
+   23 |         int _a = (a); \
+      |                   ^
+src/kernel/fat16_test.c:26:22: warning: unused function 'test_lfn_checksum' [-Wunused-function]
+   26 | static unsigned char test_lfn_checksum(const char *name) {
+      |                      ^~~~~~~~~~~~~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fb_ioctl.c -o obj/arm/fb_ioctl.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fb_ioctl_test.c -o obj/arm/fb_ioctl_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fb_mmap.c -o obj/arm/fb_mmap.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fb_mmap_test.c -o obj/arm/fb_mmap_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/frame.c -o obj/arm/frame.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/frame_test.c -o obj/arm/frame_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fs.c -o obj/arm/fs.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fs_test.c -o obj/arm/fs_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/input_node.c -o obj/arm/input_node.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/input_node_test.c -o obj/arm/input_node_test.o
+src/kernel/input_node_test.c:44:47: warning: implicit conversion from 'size_t' (aka 'unsigned long') to 'int' changes value from 18446744073709551615 to -1 [-Wconstant-conversion]
+   44 |   EXPECT_EQ(hb_input_ioctl_arg_size(0x4600u), (size_t)-1);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~
+src/kernel/unit_test.h:24:19: note: expanded from macro 'EXPECT_EQ'
+   24 |         int _b = (b); \
+      |             ~~    ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/iommu_vtd.c -o obj/arm/iommu_vtd.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/ipc_proto.c -o obj/arm/ipc_proto.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/linux_uname.c -o obj/arm/linux_uname.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/lock_order.c -o obj/arm/lock_order.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/locks_test.c -o obj/arm/locks_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/main.c -o obj/arm/main.o
+src/kernel/main.c:52:39: warning: unused parameter 'tf' [-Wunused-parameter]
+   52 | void irq_handler_c(struct trap_frame *tf) {
+      |                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/math_test.c -o obj/arm/math_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/mmu_test.c -o obj/arm/mmu_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/net.c -o obj/arm/net.o
+src/kernel/net.c:552:18: warning: variable 'stored' set but not used [-Wunused-but-set-variable]
+  552 |         uint32_t stored = 0;
+      |                  ^
+src/kernel/net.c:815:21: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+  815 |   for (int i = 0; i < sizeof(struct pseudo_hdr)/2; i++) {
+      |                   ~ ^ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/net.c:657:39: warning: unused function 'safe_print_int' [-Wunused-function]
+  657 | __attribute__((noinline)) static void safe_print_int(int val) {
+      |                                       ^~~~~~~~~~~~~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/net_rdma.c -o obj/arm/net_rdma.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/net_rdma_test.c -o obj/arm/net_rdma_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/net_test.c -o obj/arm/net_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/nfs.c -o obj/arm/nfs.o
+src/kernel/nfs.c:157:12: warning: '/*' within block comment [-Wcomment]
+  157 |  * is *body/*body_len, valid until the next rpc_call (static buffer). */
+      |            ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/nfs_proto.c -o obj/arm/nfs_proto.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/nfs_test.c -o obj/arm/nfs_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/pipe.c -o obj/arm/pipe.o
+src/kernel/pipe.c:142:7: warning: unused variable 'i' [-Wunused-variable]
+  142 |   int i = 0;
+      |       ^
+src/kernel/pipe.c:139:68: warning: unused parameter 'tf' [-Wunused-parameter]
+  139 | int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
+      |                                                                    ^
+src/kernel/pipe.c:219:7: warning: unused variable 'i' [-Wunused-variable]
+  219 |   int i = 0;
+      |       ^
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/pipe_test.c -o obj/arm/pipe_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/process.c -o obj/arm/process.o
+src/kernel/process.c:1827:27: error: use of undeclared identifier 'cpu_locals'
+ 1827 |           int live_pid = (cpu_locals[cl].current_proc)
+      |                           ^~~~~~~~~~
+src/kernel/process.c:1828:32: error: use of undeclared identifier 'cpu_locals'
+ 1828 |                              ? cpu_locals[cl].current_proc->pid
+      |                                ^~~~~~~~~~
+src/kernel/process.c:1415:42: warning: unused parameter 'is_yield' [-Wunused-parameter]
+ 1415 | void schedule(struct trap_frame *tf, int is_yield) {
+      |                                          ^
+src/kernel/process.c:3888:50: warning: unused parameter 'prot' [-Wunused-parameter]
+ 3888 | int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags) {
+      |                                                  ^
+2 warnings and 2 errors generated.
+make[1]: *** [Makefile:744: obj/arm/process.o] Error 1
+make[1]: Leaving directory '/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-de27f562'
+make: *** [Makefile:3694: unit_tests_arm] Error 2
+rc=2

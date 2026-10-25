@@ -1,0 +1,17 @@
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/arch/arm/trap.c -o obj/arm/trap.o
+src/kernel/arch/arm/trap.c:1802:16: warning: unused variable 'l2idx' [-Wunused-variable]
+ 1802 |       uint32_t l2idx = ((uint64_t)tf->elr >> 21) & 0x1FF;
+      |                ^~~~~
+src/kernel/arch/arm/trap.c:1807:22: warning: array index 512 is past the end of the array (that has type 'uint64_t[512]' (aka 'unsigned long[512]')) [-Warray-bounds]
+ 1807 |       uart_print_hex(l2_table_1[cp][0x200]);
+      |                      ^              ~~~~~
+src/kernel/arch/arm/trap.c:1801:7: note: array 'l2_table_1' declared here
+ 1801 |       extern uint64_t l2_table_1[][512];
+      |       ^
+src/kernel/arch/arm/trap.c:1809:22: warning: array index 544 is past the end of the array (that has type 'uint64_t[512]' (aka 'unsigned long[512]')) [-Warray-bounds]
+ 1809 |       uart_print_hex(l2_table_1[cp][0x220]);
+      |                      ^              ~~~~~
+src/kernel/arch/arm/trap.c:1801:7: note: array 'l2_table_1' declared here
+ 1801 |       extern uint64_t l2_table_1[][512];
+      |       ^
+3 warnings generated.
