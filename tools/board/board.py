@@ -358,6 +358,23 @@ def cmd_lint(a):
         ):
             print(f"LINT {gid}: in {lane_of(it)} without an EVIDENCE comment")
             rc = 1
+    # GB-049 / PLAN-006 / blockers deadlock: the verify-lane and dependency
+    # checks live in the grooming bot (tools/board/groom.py) and run here so the
+    # canonical lint reports the gate debt and any dependency deadlock.  These
+    # can provably fail (self-test); a review-lane card whose gate has not
+    # posted GREEN is exactly the "lane lies about the gate" case §4.2 step 5
+    # exists to catch.
+    try:
+        import groom
+        all_iss = all_issues("all")
+        gfind = groom.board_state_lint(
+            all_iss,
+            lambda n: api_get(f"/repos/{REPO}/issues/{n}/comments", "?limit=100"))
+        for kind, gid, detail in gfind:
+            print(f"LINT {gid}: [{kind}] {detail}")
+            rc = 1
+    except ImportError:
+        pass
     if rc == 0:
         print("LINT clean")
     return rc
