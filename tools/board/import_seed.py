@@ -76,6 +76,7 @@ WORKSTREAM = {
     "GB-094": ["abi", "tests"],
     "GB-095": ["abi", "tests"],
     "GB-096": ["abi", "debug"],
+    "GB-097": ["tests", "debug"],
 }
 DEEP_IDS = {"GB-010", "GB-011", "GB-013", "GB-031", "GB-041", "GB-054", "GB-090"}
 
