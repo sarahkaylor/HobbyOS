@@ -1915,6 +1915,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
         db_s(&d, proc_table[i].name);
         if (st == PROC_STATE_RUNNING && claimer < 0)
           db_s(&d, "  <-- RUNNING with NO cpu on it (stale claim)");
+#ifdef __x86_64__
         else if (st == PROC_STATE_RUNNING && claimer >= 0 && claimer < MAX_CPUS) {
           /* GB-057: the other half of the same contradiction -- RUNNING *with* a
              cpu claim, where that cpu's own record says it is running something
@@ -1933,6 +1934,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
             db_s(&d, " (stale claim)");
           }
         }
+#endif /* __x86_64__ */
         else if ((st == PROC_STATE_WAIT_SPAWN || st == PROC_STATE_WAIT_CHILD) &&
                  proc_table[i].parent_pid <= 0)
           db_s(&d, "  <-- parked WAIT with no parent to deliver the wake");
