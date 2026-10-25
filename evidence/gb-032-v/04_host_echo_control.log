@@ -1,0 +1,5 @@
+=== host control: the same artifact under Linux, stdin=/dev/null (no input source)
+sdl test app: drew 64x48 window, blitted 8x8 tile @(10,10)
+sdl test app echo: KEY 1e=1
+sdl test app echo: ABS 00=512
+rc=0
