@@ -44,5 +44,12 @@ int main(void) {
       }
     }
   }
+  /* GB-070: W0 output-differential marker (same shape as HELLO's).  A real
+     wave runs CAT with empty stdin, so the observable output is that main was
+     entered and returned; the t4_w0 gate compares this token against the
+     Linux-leg .ref, so a CAT that exits early or crashes FAILs live. */
+#if !defined(HOST_TEST)
+  print("[W0] CAT linux=entered-main:main-returned\n");
+#endif
   return 0;
 }

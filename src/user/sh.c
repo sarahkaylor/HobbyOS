@@ -3441,5 +3441,11 @@ int main(int argc, char **argv) {
     int st = sh_run_text(script);
     return st;
   }
+  /* GB-070: W0 output-differential marker.  The wave runs SH with no script
+     (argc=0 -> interactive), which reads EOF from stdin and returns here.  See
+     cat.c / hello.c for the marker contract; t4_w0 compares token vs .ref. */
+#ifndef HOST_TEST
+  out2("[W0] SH linux=entered-main:main-returned\n");
+#endif
   return sh_interactive();
 }
