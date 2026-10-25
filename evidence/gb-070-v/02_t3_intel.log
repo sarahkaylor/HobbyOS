@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log obj/t3_intel_gb070v.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 17662 console lines, 100 FAIL lines, 11 user memory fault records across 9 processes, 84 programs exited, halted=1
+T3_intel: FAIL — 100 FAIL line(s); first 20:
+2441:[SIGTEST] FAIL waitpid returns the child got=18 want=4294964048
+2884:[SEDTEST] FAIL basic_s (stdout)
+3918:/TEST3.TXT/TEST4.TXT[SEDTEST] FAIL s_g (stdout)
+4547:[SEDTEST] FAIL s_2nd (stdout)
+4561:[CMPTEST] FAIL EOF message on stderr
+4568:[CMPTEST] FAIL empty EOF message
+4572:[CMPTEST] FAIL missing file diagnostic
+4602:[CMPTEST] FAIL -i 4:0 skips prefix
+4609:[CMPTEST] FAIL - stdin EOF diagnostic
+4618:[CMPTEST] FAILURES: 5
+4917:  FPU_T torture-child: FAIL
+5007:[SEDTEST] FAIL s_p_n (stdout)
+5387:[SEDTEST] FAIL amp (stdout)
+5509:  FPU_T fork-inherit: FAIL
+5551:FPU_T FAILED: 2
+6101:[SEDTEST] FAIL backref (stdout)
+6136:[TACTEST] FAILURES: 4
+6470:Loading program for scheduler (v2 AS): [SEDTEST] FAIL empty_reuse (stdout)
+9658:[SEDTEST] FAIL basic_s (stdout)
+9856:[SIGTEST] FAIL waitpid returns the child got=35 want=4294964048
+T3_intel EXIT=1
+T3_EXIT=1
