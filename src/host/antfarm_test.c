@@ -30,6 +30,7 @@
 
 #include "graphics/graphics.h"
 #include "xlib_internal.h"
+#include "ho_scratch.h"
 
 static int checks_pass = 0;
 static int checks_fail = 0;
@@ -239,7 +240,7 @@ static void test_poke(void) {
 /* ---- 3. the checkpoint file ------------------------------------------- */
 
 static void test_checkpoint(void) {
-  const char *path = "/tmp/ANTFARM.TST";
+  const char *path = ho_scratch_path("ANTFARM.TST");
 
   fresh_world(160, 60, 42);         /* a 40x15 grid */
   /* A known pattern: sand in a diagonal band, air in a hole. */

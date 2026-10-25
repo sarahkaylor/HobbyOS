@@ -29,14 +29,17 @@ check("tools/evidence_rig_test.py" in base, "discover() includes evidence_rig_te
 check("tools/run_selfhost_build_test.py" not in base,
       "heavy standalone selfhost test stays out of host_tests")
 
-# self-registration: a NEW tools/t5/_test.py joins the suite with no Makefile edit
-tmp = os.path.join(R.ROOT, "tools", "t5", "zz_new_test.py")
+# self-registration: a NEW tools/t5/_test.py joins the suite with no Makefile edit.
+# The temp name is per-process (pid), NOT the fixed zz_new_test.py, so two
+# concurrent host_tests runs (GB-085) cannot collide on the same fixture file.
+tmp = os.path.join(R.ROOT, "tools", "t5", "zz_new_%d_test.py" % os.getpid())
+rel = os.path.relpath(tmp, R.ROOT)
 with open(tmp, "w") as f:
     f.write('print("Tests: ALL PASSED")\n')
 try:
-    check("tools/t5/zz_new_test.py" in R.discover(),
+    check(rel in R.discover(),
           "new tools/t5/*_test.py auto-registers (no Makefile edit)")
-    ok, last = R.run_one("tools/t5/zz_new_test.py", R.ROOT)
+    ok, last = R.run_one(rel, R.ROOT)
     check(ok, "runner runs the new test and sees its own PASSED line")
 finally:
     os.remove(tmp)

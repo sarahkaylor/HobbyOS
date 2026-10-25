@@ -59,9 +59,22 @@
 #include <sys/select.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <sys/syscall.h>
 
 #include "../user_include/libc.h"
 #include "../user_include/gui.h"
+#include "ho_scratch.h"
+
+/* Real chdir: compat.c's chdir() mock only updates an in-memory string, so
+ * the suite's relative TODO.TXT / NOTES.TXT / fixture writes must be rooted
+ * in the per-process scratch dir via the raw syscall (GB-085). */
+static int real_chdir(const char *path) {
+#if defined(SYS_chdir)
+  return (int)syscall(SYS_chdir, path);
+#else
+  (void)path; return -1;
+#endif
+}
 
 /* ====================================================================== */
 /* The ten application sources (entry points renamed)                     */
@@ -435,13 +448,13 @@ static void reset_unit(void) { unit_reset(); }
 
 /* ---- fixtures shared by the wire runs --------------------------------- */
 
-#define HEX_FIXTURE   "/tmp/apps_suite_hex.bin"
-#define HEX_EMPTY     "/tmp/apps_suite_hex_empty.bin"
-#define DIFF_A        "/tmp/as_a.txt"
-#define DIFF_B        "/tmp/as_b.txt"
-#define DIFF_B2       "/tmp/as_b2.txt"
-#define DIFF_LONG_A   "/tmp/as_long_a.txt"
-#define DIFF_LONG_B   "/tmp/as_long_b.txt"
+#define HEX_FIXTURE   ho_scratch_path("apps_suite_hex.bin")
+#define HEX_EMPTY     ho_scratch_path("apps_suite_hex_empty.bin")
+#define DIFF_A        ho_scratch_path("as_a.txt")
+#define DIFF_B        ho_scratch_path("as_b.txt")
+#define DIFF_B2       ho_scratch_path("as_b2.txt")
+#define DIFF_LONG_A   ho_scratch_path("as_long_a.txt")
+#define DIFF_LONG_B   ho_scratch_path("as_long_b.txt")
 #define TASKS_FIXTURE "TODO.TXT"
 #define NOTES_FIXTURE "NOTES.TXT"
 
@@ -1258,8 +1271,11 @@ static void suite_hex_interaction(void) {
   CHECK(hex_load(HEX_FIXTURE) == 1 && hex_len == 20 && hex_loaded == 1,
         "hex: loads a 20-byte stream");
   hex_render(out, (int)sizeof out);
-  CHECK(has(out, "File: " HEX_FIXTURE "  (20 bytes)"),
-        "hex: the header shows the name and byte count");
+  {
+    char expect[700];
+    snprintf(expect, sizeof expect, "File: %s  (20 bytes)", (const char *)HEX_FIXTURE);
+    CHECK(has(out, expect), "hex: the header shows the name and byte count");
+  }
   CHECK(has(out, "00000000  48 65 6C 6C 6F 20 57 6F 72 6C 64 21 0A 42 43 44"),
         "hex: row 0 renders the bytes as uppercase hex");
   CHECK(has(out, "|Hello World!.BCD|"),
@@ -1505,8 +1521,13 @@ static void suite_diff_interaction(void) {
   diff_render_count(out, (int)sizeof out);
   CHECK(has(out, " - one"), "diff: the A-only line renders with the ' - ' marker");
   CHECK(has(out, " + uno"), "diff: the B-only line renders with the ' + ' marker");
-  CHECK(has(out, "A: " DIFF_A " (1 lines)"),
-        "diff: header slot A carries the name and line count");
+  {
+    char expect[700];
+    /* The app clips the rendered name to DIFF_NAME_SHOW (18) chars, so the
+     * header assertion must match what it actually draws, not the full path. */
+    snprintf(expect, sizeof expect, "A: %.18s (1 lines)", (const char *)DIFF_A);
+    CHECK(has(out, expect), "diff: header slot A carries the name and line count");
+  }
   CHECK(has(out, "+1 -1"), "diff: the status line reports +added -removed");
 
   /* Identical files: no change rows at all. */
@@ -1786,6 +1807,13 @@ static void suite_notes_dialogs(void) {
 int main(void) {
   printf("=== Apps Suite Host Tests (10 desktop apps) ===\n");
   printf("cross-app invariants + wire protocol + per-app interactions\n");
+
+  /* GB-085: root the suite's relative TODO.TXT/NOTES.TXT writes in the
+   * per-process scratch dir (real syscall; compat's chdir is a mock), so
+   * two concurrent suite runs can never share the same file. */
+  if (real_chdir(ho_scratch_dir()) != 0) {
+    printf("NOTE: real chdir(%s) failed\n", ho_scratch_dir());
+  }
 
   /* Deterministic fixtures first: the forked runs inherit them. */
   write_tasks_fixture();

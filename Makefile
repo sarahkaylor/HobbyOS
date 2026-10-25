@@ -2614,7 +2614,13 @@ apps_test:
 HOST_CC = clang
 HOST_CFLAGS = -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST
 
-obj/host_%.o: src/host/%.c src/user_include/*.h src/user_include/graphics/*.h
+# GB-085 make-dependency fix: every host test object and binary that links
+# compat (the shared filesystem-mock layer) must rebuild when compat.c or
+# the shared scratch-dir header changes -- a stale obj/host_compat.o was the
+# second cause of the recurring "phantom 11" failures (see GB-085).
+HOST_TEST_COMMON_DEPS = src/host/compat.c src/host/ho_scratch.h
+
+obj/host_%.o: src/host/%.c src/user_include/*.h src/user_include/graphics/*.h $(HOST_TEST_COMMON_DEPS)
 	@mkdir -p obj
 	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
 
@@ -2766,7 +2772,7 @@ obj/host_desktop_input_test.o obj/host_desktop_term_test.o obj/host_nano_term_te
 # sources), so it is built directly from src/host/apps_suite_test.c.
 # Run from a scratch cwd: tasks/notes persist TODO.TXT / NOTES.TXT there.
 APPS_SUITE_TEST = apps_suite_test_host
-$(APPS_SUITE_TEST): src/host/apps_suite_test.c src/host/compat.c src/user/gui.c src/user/dialog.c src/user/filedialog.c
+$(APPS_SUITE_TEST): src/host/apps_suite_test.c src/host/compat.c src/user/gui.c src/user/dialog.c src/user/filedialog.c $(HOST_TEST_COMMON_DEPS)
 	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/host/apps_suite_test.c src/host/compat.c src/user/gui.c src/user/dialog.c src/user/filedialog.c -o $@
 
 # NFS protocol codecs against real nfsd fixtures (src/host/nfs_fixtures.h,
@@ -3675,6 +3681,13 @@ host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness $(GAM
 	$(HOST_RUN) ./unit_test_host
 	@mkdir -p obj/host_scratch
 	@cd obj/host_scratch && sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 120 "../../$(APPS_SUITE_TEST)"; else exec "../../$(APPS_SUITE_TEST)"; fi'
+
+# GB-085 concurrency gate: two `make host_tests` at once must both pass
+# (per-process scratch dirs), and a shared-path override must FAIL it.
+host_concurrency_gate:
+	python3 tools/host/host_concurrency_gate.py
+host_concurrency_gate_negative:
+	python3 tools/host/host_concurrency_gate.py --negative
 
 # --- Architecture Specific Targets ---
 
