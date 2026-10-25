@@ -1,0 +1,19 @@
+$ strings -a /tmp/sdl-a/sdl2_static_test | grep -icE "musl"
+0
+$ strings -a /tmp/sdl-a/sdl2_static_test | grep -E "GNU C Library|glibc|GLIBC_2\.[0-9]+" | sort -u | head -6
+ glibc: .bss
+ glibc: getrandom
+ glibc: getrandom states
+ glibc: malloc
+ glibc: malloc arena
+ glibc: pthread stack: %u
+$ nm /tmp/sdl-a/sdl2_static_test | grep -E "__libc_start_main|__libc_csu_init|_dl_relocate_static_pie" 
+00000000004e28e0 T __libc_start_main
+00000000004e28e0 T __libc_start_main_impl
+0000000000401af0 T _dl_relocate_static_pie
+$ readelf -p .comment /tmp/sdl-a/sdl2_static_test
+
+String dump of section '.comment':
+  [     0]  GCC: (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+  [    26]  Ubuntu clang version 21.1.8 (6ubuntu1)
+
