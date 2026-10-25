@@ -1,0 +1,5 @@
+[rig] booting intel QEMU, capturing to evidence/DOOM/20261025T070320Z
+[rig] DOOM.BIN slot: found by name = 18 (launching 18, by name)
+[rig] evidence bundle: evidence/DOOM/20261025T070320Z
+[rig] report: DOOM-EVIDENCE-REPORT.md
+RIG_EXIT=0
