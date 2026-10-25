@@ -1,0 +1,6 @@
+Sun Oct 25 06:48:16 UTC 2026
+rev: 9c632ea = main b874d54 + PR #155 d7c3c5e
+$ make ARCH=intel hobbyos.elf
+rc=0
+0
+llvm-objcopy -I elf64-x86-64 -O elf32-i386 hobbyos.elf
