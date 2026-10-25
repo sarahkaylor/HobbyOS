@@ -1,0 +1,9 @@
+[disk] IWAD doom1.wad -> ::/DOOM1.WAD
+[WAVE-TRY] DESKTOP.BIN
+Loading program for scheduler (v2 AS): DESKTOP.BIN
+[ARRIVED] DESKTOP.BIN rc>0
+[LAUNCH] DOOM.BIN
+[WAVE-TRY] DOOM.BIN
+Loading program for scheduler (v2 AS): DOOM.BIN
+[ARRIVED] DOOM.BIN rc>0
+  [ALIVE-SET] 000sl0ot=3 pid=3 0s2t4=6 pid=3 par3ent=1 claimed_by=0  DOOMre.sBumIeN_p
