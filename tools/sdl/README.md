@@ -13,9 +13,17 @@ The verifier's RED (#166) caught the previous profile producing a **glibc**
 artifact: `clang --target=x86_64-linux-musl` does not locate a musl sysroot on
 this toolchain and silently falls back to the host `x86_64-linux-gnu-ld.bfd`,
 so `libSDL2.a` carried `__libc_start_main_impl` (a glibc symbol). The profile
-now drives **`musl-gcc`** (musl-tools) end to end and **asserts musl in the
-build**: the script fails if `strings libSDL2.a` lacks `musl` or if
-`nm libSDL2.a` shows `__libc_start_main_impl`.
+now drives **`musl-gcc`** (musl-tools) end to end and asserts, on the **linked
+binary**, that it is genuine musl: `nm` shows musl's `libc_start_main_stage2`
+and **no** `__libc_start_main_impl`.
+
+**evdev (round-3 fix):** switching to musl-gcc exposed that its default search
+path omits the kernel UAPI under `/usr/include`, so SDL configured
+`SDL_INPUT_LINUXEV` OFF. The configure CFLAGS now add
+`-idirafter /usr/include -idirafter /usr/include/x86_64-linux-gnu` (idirafter,
+not -I, so musl's own headers still win over glibc's `features.h`), which lets
+configure find `linux/input.h`; the script asserts `SDL_INPUT_LINUXEV` appears
+in the generated `include/SDL_config.h`.
 
 ## Recipe
 
@@ -39,10 +47,10 @@ identically:
 
 ```
 (libSDL2.a and sdl2_static_test sha256 — recorded from the gate run below)
-libSDL2.a         sha256 = e09876b411799963a8db82413bf9579168c20d53108751532e74bb9e3540db3d  (dest A)
-libSDL2.a         sha256 = e09876b411799963a8db82413bf9579168c20d53108751532e74bb9e3540db3d  (dest B, identical)
-sdl2_static_test  sha256 = 6674931d12d1f2ccdeea5994cce976cb82113ee9ce8f1f6352a8c49aafca8141  (dest A)
-sdl2_static_test  sha256 = 6674931d12d1f2ccdeea5994cce976cb82113ee9ce8f1f6352a8c49aafca8141  (dest B, identical)
+libSDL2.a         sha256 = 141e47ccb2a54914141f43d59304f88ba65490dbf5b0420bf9a87b718a2ba35a  (dest A)
+libSDL2.a         sha256 = 141e47ccb2a54914141f43d59304f88ba65490dbf5b0420bf9a87b718a2ba35a  (dest B, identical)
+sdl2_static_test  sha256 = dee38e40f70ec82b2aadecb4f215cd59e42d6d7c15f80bfb81e1a054f5ee2f99  (dest A)
+sdl2_static_test  sha256 = dee38e40f70ec82b2aadecb4f215cd59e42d6d7c15f80bfb81e1a054f5ee2f99  (dest B, identical)
 ```
 
 `file` on the linked app: `ELF 64-bit LSB executable, x86-64, statically linked`.
