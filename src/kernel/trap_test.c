@@ -203,11 +203,24 @@ static void test_watchdog_stack_scan_guard(void) {
   EXPECT_EQ(watchdog_stack_scan_ok(0x100000ULL), 0);
   EXPECT_EQ(watchdog_stack_scan_ok(0x6FFFFFFFULL), 0);
   /* Above the kernel/stack region -> must NOT scan. */
-  EXPECT_EQ(watchdog_stack_scan_ok(0x75000000ULL), 0);
   EXPECT_EQ(watchdog_stack_scan_ok(0xFFFFFFFFFFFFFFFFULL), 0);
-  /* Booted cores: tops live inside the kernel region -> scan allowed. */
-  EXPECT_EQ(watchdog_stack_scan_ok(0x70000000ULL), 1);
-  EXPECT_EQ(watchdog_stack_scan_ok(0x74F08BF0ULL), 1);
+  /* GB-057: assert the CONTRACT against the arena itself, not against
+     hardcoded addresses.  The previous version of this test asserted
+     watchdog_stack_scan_ok(0x70000000) == 1 and 0x74F08BF0 == 1 -- values that
+     had nothing to do with where the linker actually puts the stacks
+     (__stack_top = 0x755ffbf0), so the "guard" rejected every real stack and
+     the caller-chain scan never ran.  A test that encodes the same guess as
+     the code cannot catch a wrong guess. */
+  {
+    extern void watchdog_stack_arena(uint64_t *lo, uint64_t *hi);
+    uint64_t lo = 0, hi = 0;
+    watchdog_stack_arena(&lo, &hi);
+    EXPECT_EQ(watchdog_stack_scan_ok(hi), 1);
+    EXPECT_EQ(watchdog_stack_scan_ok(lo), 1);
+    EXPECT_EQ(watchdog_stack_scan_ok(hi - 64 * 1024), 1);
+    EXPECT_EQ(watchdog_stack_scan_ok(hi + 8), 0);
+    EXPECT_EQ(watchdog_stack_scan_ok(lo - 8), 0);
+  }
 }
 #endif
 
