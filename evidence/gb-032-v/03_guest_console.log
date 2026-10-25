@@ -1,0 +1,13 @@
+=== guest console for the single-program manifest (obj/t3_intel_sdlapp.log)
+[WAVE-MANIFEST] SDLAPP.BIN
+[WAVE-TRY] SDLAPP.BIN
+Loading program for scheduler (v2 AS): SDLAPP.BIN
+[ARRIVED] SDLAPP.BIN rc>0
+Fatal glibc error: Cannot allocate TLS block
+[KERNEL] pid=2 (SDLAPP.BIN) memory fault VA=0x0000000000000CF8 PC=0x000000100000A997 rw=w  in=PROT region=NONE cr3frame=0x0000000020C06000 asroot=0x0000000020C06000 sys=231 ret=0x000000000000002D rbx=0x00000000000003C0 rdi=0x00000000000003C8 rsi=0x00000000000003C0 rbp=0x00000017FFFFFEF0 rbp0=0x00000017FFFFFF40 ret=0x000000100000A66B -> killed
+[KERNEL] Process 2: SDLAPP.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=2 last_user_pc=0x100000AA44
+[HALT-CD] cpu=1 free=63 alloc=0 exited=1 running=0 blocked=0 other=0
+System halt from CPU 1.
+
+=== full console line count: 119
