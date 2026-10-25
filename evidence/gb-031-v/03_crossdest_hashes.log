@@ -1,0 +1,17 @@
+=== clause 1: cross-dest reproducibility (two clean builds, DIFFERENT dest dirs)
+dest A = /tmp/gb031-a
+dest B = /tmp/gb031-b-other-dest
+
+-- libSDL2.a
+ab62f66e1197f3a4e5bd63497c2547551bdbf8334c43dcafa3ca92f2ef36efb7  /tmp/gb031-a/stage/SDL2-2.30.10/build/.libs/libSDL2.a
+73e671209c260a2790ac5aa998d7a2d45bf801e8f0fc56cda657218ee46f794c  /tmp/gb031-b-other-dest/stage/SDL2-2.30.10/build/.libs/libSDL2.a
+
+-- sdl2_static_test
+4dee2e8f1249edd85895fa3c0a67fcb54a7c213531190780b3124848dd918942  /tmp/gb031-a/sdl2_static_test
+458cc25826a1ca6394948345ce5350138cb6e6311ac91448676b4e3f09d3a77e  /tmp/gb031-b-other-dest/sdl2_static_test
+
+-- committed .sha256 files from each build
+ab62f66e1197f3a4e5bd63497c2547551bdbf8334c43dcafa3ca92f2ef36efb7  build/.libs/libSDL2.a
+4dee2e8f1249edd85895fa3c0a67fcb54a7c213531190780b3124848dd918942  /tmp/gb031-a/sdl2_static_test
+73e671209c260a2790ac5aa998d7a2d45bf801e8f0fc56cda657218ee46f794c  build/.libs/libSDL2.a
+458cc25826a1ca6394948345ce5350138cb6e6311ac91448676b4e3f09d3a77e  /tmp/gb031-b-other-dest/sdl2_static_test

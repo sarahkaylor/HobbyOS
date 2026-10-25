@@ -1,0 +1,9 @@
+=== clause 2b: host ELF-image validator on the real artifact
+make: 'elf_image_test_host' is up to date.
+  PASS RELA table past span: ELF_ERR_RELOC
+  PASS RELAENT != 24: ELF_ERR_RELOC
+  PASS no PT_DYNAMIC: ELF_OK (no-op)
+  PASS null image: ELF_ERR_ARGS
+=== 93 checks, 0 failed ===
+ALL ELF IMAGE HOST TESTS PASSED
+EXIT=0

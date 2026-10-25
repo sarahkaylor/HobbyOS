@@ -1,0 +1,13 @@
+C_EXIT=1
+D_EXIT=1
+C_EXIT=0
+D_EXIT=0
+=== CONTROL: same two-dest test with -ffile-prefix-map/-fdebug-prefix-map added (PR #161's one-line fix)
+f10186fe0499b29cf75caacb0f150b5d58f38db3383313345fc3d6e49aea977c  /tmp/gb031-c/stage/SDL2-2.30.10/build/.libs/libSDL2.a
+f10186fe0499b29cf75caacb0f150b5d58f38db3383313345fc3d6e49aea977c  /tmp/gb031-d-other/stage/SDL2-2.30.10/build/.libs/libSDL2.a
+f6a75204fafb001f1dcb3173939a28bd8cf6d6a3f8ac40ae92848939a272d07a  /tmp/gb031-c/sdl2_static_test
+f6a75204fafb001f1dcb3173939a28bd8cf6d6a3f8ac40ae92848939a272d07a  /tmp/gb031-d-other/sdl2_static_test
+
+-- dest path still embedded in the archives?
+0
+0
