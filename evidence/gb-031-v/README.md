@@ -127,3 +127,30 @@ d26e52bf327f3c1689d11a32cba0e5114ae3088964a67ba1f1eeb16ae7363414  /tmp/gb031-e/s
 Clause 1 FAIL stands at `96ba7d2`. (Digests differ from the A/B pair above because the dest path is
 embedded — which is the defect — so every dest yields a different digest; that is the observation, not a
 noise source to be averaged away.)
+
+## The mergeable candidate, gated identically: PR #171 (`ticket/31-musl-v2` @ `d6480cd`)
+
+The card gates `main`; `main` is RED. So that the RED is actionable rather than just a restatement, the
+same three clauses were run against the PR the reviewer approved on 2026-10-25 08:57Z
+(`ticket/31-musl-v2` @ `d6480cd`, superseding #169), using that branch's own script at two dests:
+
+```
+-- cross-dest identity, clause 1
+141e47ccb2a54914141f43d59304f88ba65490dbf5b0420bf9a87b718a2ba35a  /tmp/gb031-g/.../libSDL2.a
+141e47ccb2a54914141f43d59304f88ba65490dbf5b0420bf9a87b718a2ba35a  /tmp/gb031-h-other/.../libSDL2.a
+dee38e40f70ec82b2aadecb4f215cd59e42d6d7c15f80bfb81e1a054f5ee2f99  /tmp/gb031-g/sdl2_static_test
+dee38e40f70ec82b2aadecb4f215cd59e42d6d7c15f80bfb81e1a054f5ee2f99  /tmp/gb031-h-other/sdl2_static_test
+
+-- musl, clause 2 (the card's title, which main does not meet)
+strings ... | grep -cE "GNU C Library|GLIBC_PRIVATE|Fatal glibc error"  -> 0
+strings ... | grep -ciE "musl"                                          -> 2
+readelf -h ... | grep Type  ->  Type: EXEC (Executable file)
+ELF_REAL_BINARY=/tmp/gb031-g/sdl2_static_test ./elf_image_test_host -> 93 checks, 0 failed
+
+-- README, clause 3: records exactly 141e47cc… and dee38e40… for dest A and B (identical)
+```
+
+These are the digests that branch's README records, so the documentation and the artifact agree — measured
+here, not copied from the PR. **On `main` all three clauses are RED; on #171's head all three are GREEN.**
+The card cannot flip until #171 merges (and the `decision` label on GB-031's fbcon half is Sarah's, not
+this gate's, to clear).
