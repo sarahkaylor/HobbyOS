@@ -1,0 +1,21 @@
+### G4 falsifier: GB-098's new test vs the PRE-FIX tool (main @ b874d54) 2026-10-25T06:39:47Z
+--- old tool --self-test:
+  [OK  ] lane=In Progress comment_age=20.0  issue_age=30.0  -> stale=True (want True)
+  [OK  ] lane=In Progress comment_age=1.0   issue_age=1.0   -> stale=False (want False)
+  [OK  ] lane=In Progress comment_age=13.0  issue_age=40.0  -> stale=True (want True)
+  [OK  ] lane=Ready       comment_age=99.0  issue_age=99.0  -> stale=False (want False)
+  [OK  ] lane=In Review   comment_age=99.0  issue_age=99.0  -> stale=False (want False)
+  [OK  ] lane=In Progress comment_age=11.9  issue_age=11.9  -> stale=False (want False)
+self-test result: fails=0
+old-tool-exit=0
+--- new test driving the old tool:
+check_stale.py --self-test: PASS (comment-clock stale detector)
+  [OK  ] lane=In Progress comment_age=20.0  issue_age=30.0  -> stale=True (want True)
+  [OK  ] lane=In Progress comment_age=1.0   issue_age=1.0   -> stale=False (want False)
+  [OK  ] lane=In Progress comment_age=13.0  issue_age=40.0  -> stale=True (want True)
+  [OK  ] lane=Ready       comment_age=99.0  issue_age=99.0  -> stale=False (want False)
+  [OK  ] lane=In Review   comment_age=99.0  issue_age=99.0  -> stale=False (want False)
+  [OK  ] lane=In Progress comment_age=11.9  issue_age=11.9  -> stale=False (want False)
+self-test result: fails=0
+
+test-exit=0

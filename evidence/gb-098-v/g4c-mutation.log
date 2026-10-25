@@ -1,0 +1,10 @@
+### G4c POSITIVE CONTROL: in-file regression (classify -> return False) in the BRANCH tool 2026-10-25T06:48:37Z
+-- self-test:
+  [OK  ] lane=In Progress comment_age=0.5   issue_age=99.0  -> stale=False (want False)
+  [OK  ] lane=In Progress comment_age=0.5   issue_age=0.1   -> stale=False (want False)
+self-test result: fails=3
+self-test-exit=1
+-- check_stale_test.py:
+self-test result: fails=3
+
+test-exit=1

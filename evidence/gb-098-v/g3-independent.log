@@ -1,0 +1,29 @@
+
+### G3 independent comment-clock read (second implementation) 2026-10-25T06:39:29Z
+independent read: 40 In Progress cards, threshold 12h
+stale by last non-coordinator comment (comment/created_at clock): 24
+stale by raw issue updated_at (the OLD clock GB-098 removed): 0
+  #53   last comment  123.5h ago, updated_at    6.3h ago  GB-053 Final acceptance run, both arches, full evidence arch
+  #76   last comment  107.0h ago, updated_at    1.0h ago  GB-067 Host-staged files are read as ABSENT by the FAT16 dri
+  #79   last comment   98.0h ago, updated_at    6.3h ago  GB-070 The M1 gate names a corpus the harness never runs: th
+  #46   last comment   97.7h ago, updated_at    6.3h ago  GB-046 Memory/leak pass under 30-min game cycling (freeze wa
+  #99   last comment   74.8h ago, updated_at    6.3h ago  GB-071 Family B delivery: a user process holds a kernel-rang
+  #77   last comment   74.2h ago, updated_at    6.3h ago  GB-068 M1 BLOCKER, highest priority (§4.3, 2026-10-19): 48 d
+  #19   last comment   51.5h ago, updated_at    6.3h ago  GB-018 poll/select/pselect6 under compat
+  #18   last comment   51.5h ago, updated_at    6.3h ago  GB-017 /dev/null, /dev/urandom, getrandom shims
+  #17   last comment   51.5h ago, updated_at    6.3h ago  GB-016 uname shim reporting Linux-ish identity (SDL/games sn
+  #61   last comment   51.5h ago, updated_at    6.3h ago  GB-059 Port the four hand-rolled T5 harnesses (run_doom_test
+  #44   last comment   51.5h ago, updated_at    6.3h ago  GB-044 Two-arch parity CI per farm VM on every merge
+  #74   last comment   51.5h ago, updated_at    6.3h ago  GB-066 T4's device leg does not exist — the M1 gate has neve
+  #22   last comment   47.5h ago, updated_at    6.3h ago  GB-021 Threads under compat: clone → HobbyOS threads; futex 
+  #20   last comment   47.5h ago, updated_at    6.3h ago  GB-019 ioctl subset: TIOCGWINSZ, F_GETFL/SETFL, TCGETS
+  #7    last comment   37.5h ago, updated_at    6.3h ago  GB-014 Linux x86_64 syscall translation table: core set (ope
+  #59   last comment   36.6h ago, updated_at    6.3h ago  GB-058 ARCH=arm T3 carries one real failure the exit-status-
+  #121  last comment   36.2h ago, updated_at    6.3h ago  GB-077 Harness programs corrupt their own stacks: 5 execute-
+  #11   last comment   36.2h ago, updated_at    6.3h ago  GB-006 Shared build cache: sccache/ccache + the prebuilt cla
+  #100  last comment   35.3h ago, updated_at    6.3h ago  GB-074 tools/board/claim.sh is read-then-move, so two agents
+  #47   last comment   34.9h ago, updated_at    6.3h ago  GB-047 Acceptance evidence pack for S0/S1: logs, screenshots
+  #45   last comment   28.0h ago, updated_at    6.3h ago  GB-045 Performance pass: gfxbench baseline vs post; boot-tim
+  #142  last comment   25.8h ago, updated_at    6.3h ago  GB-089 GB-087's 10-line fix cannot merge because nothing can
+  #139  last comment   24.6h ago, updated_at    6.3h ago  GB-087 Single-CPU intel takes a kernel general-protection fa
+  #137  last comment   21.9h ago, updated_at    6.3h ago  GB-086 POLLTST's select-timeout assertion passes at 8 CPUs a
