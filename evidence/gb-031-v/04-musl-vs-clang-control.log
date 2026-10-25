@@ -1,0 +1,12 @@
+$ musl-gcc -static -o /tmp/hello_musl hello_min.c && strings | grep -c musl && nm | grep __libc_start_main
+musl-string-count: 2
+0000000000401440 T __libc_start_main
+
+$ clang --target=x86_64-linux-musl -static -o /tmp/hello_clang hello_min.c  (+ same checks)
+musl-string-count: 0
+0000000000404140 T __libc_start_main
+0000000000404140 T __libc_start_main_impl
+
+$ file /tmp/hello_musl /tmp/hello_clang
+/tmp/hello_musl:  ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, with debug_info, not stripped
+/tmp/hello_clang: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=b8974c57225a2f26c55fbc5ce6563a715608b972, for GNU/Linux 3.2.0, not stripped
