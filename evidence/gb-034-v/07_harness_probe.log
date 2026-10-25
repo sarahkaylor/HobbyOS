@@ -1,0 +1,23 @@
+[harness] booting intel -> evidence/gb-034-v/run_probe
+[harness] DOOM.BIN slot by name = 18
+[harness] screendump 00_boot
+[harness] [LAUNCH] DOOM.BIN in serial: True
+[harness] screendump 01_launch
+[harness] screendump 02_baseline
+[harness] screendump 11_after_esc
+[harness] sent input-send-event key 'esc'
+[harness] screendump 12_after_f4
+[harness] sent input-send-event key 'f4'
+[harness] screendump 03_final
+[harness] DOOM/LAUNCH serial lines: 11
+    mcopy -i disk.img obj/intel/doom.bin ::/DOOM.BIN
+    [disk] IWAD doom1.wad -> ::/DOOM1.WAD
+    [MENU] 18=DOOM.BIN
+    [LAUNCH] DOOM.BIN
+    [WAVE-TRY] DOOM.BIN
+    Loading program for scheduler (v2 AS): DOOM.BIN
+    /DOOM.BIN
+    [ARRIVED] DOOM.BIN rc>0
+      [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+      [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
+      [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=0 DOOM.BIN
