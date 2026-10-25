@@ -1,0 +1,14 @@
+[harness] booting intel -> evidence/gb-034-v/run_console
+[harness] CONSOLE.BIN slot by name = 0
+[harness] screendump 00_boot
+[harness] [LAUNCH] CONSOLE.BIN in serial: True
+[harness] screendump 01_launch
+[harness] screendump 02_baseline
+[harness] screendump 11_after_l
+[harness] sent input-send-event key 'l'
+[harness] screendump 12_after_s
+[harness] sent input-send-event key 's'
+[harness] screendump 13_after_ret
+[harness] sent input-send-event key 'ret'
+[harness] screendump 03_final
+[harness] DOOM/LAUNCH serial lines: 4

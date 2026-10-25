@@ -1,0 +1,11 @@
+[disk] IWAD doom1.wad -> ::/DOOM1.WAD
+[WAVE-TRY] DESKTOP.BIN
+Loading program for scheduler (v2 AS): DESKTOP.BIN
+[ARRIVED] DESKTOP.BIN rc>0
+[LAUNCH] CONSOLE.BIN
+[WAVE-TRY] CONSOLE.BIN
+Loading program for scheduler (v2 AS): CONSOLE.BIN
+[ARRIVED] CONSOLE.BIN rc>0
+[WAVE-TRY] SH.BIN
+Loading program for scheduler (v2 AS): SH.BIN
+[ARRIVED] SH.BIN rc>0
