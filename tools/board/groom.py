@@ -155,8 +155,20 @@ def dependency_cycles(open_issues):
 
 
 def newest_verdict(comments):
-    """Newest GREEN/RED verdict body marker from a comment list (newest last)."""
-    for c in reversed(comments or []):
+    """Newest GREEN/RED verdict body marker from a comment list.
+
+    Ordering matters and the API's is not guaranteed: Forgejo returns comments
+    newest-first, so `reversed()` yields OLDEST-first and a re-verified card
+    resolves to its FIRST verdict.  Measured: GB-085-V round 1 was RED, round 2
+    was GREEN, the gate card was closed -- and `board.py lint` reported
+    'gate GB-085-V has not posted GREEN' while GB-085 sat in Merge Gate
+    correctly.  Sort by created_at when present, and fall back to the caller's
+    order otherwise.
+    """
+    cs = list(comments or [])
+    if cs and all(c.get("created_at") for c in cs):
+        cs.sort(key=lambda c: c["created_at"])
+    for c in reversed(cs):
         body = (c.get("body") or "").replace("\r", "")
         m = re.search(r"VERDICT[^\n]{0,40}?\b(GREEN|RED)\b", body, re.I)
         if m:
@@ -172,7 +184,17 @@ def verify_lint_findings(issues, comment_fn):
     canned comment lists in a self-test).  Returns a list of
     (kind, gid, detail) findings.
     """
-    by_title = {base_id(i.get("title")): i for i in issues}
+    by_title = {}
+    for i in issues:
+        k = base_id(i.get("title"))
+        prev = by_title.get(k)
+        # Duplicate ids happen: a re-verification mints a second card titled
+        # "GB-nnn-V ..." (GB-085-V round 1 RED, round 2 GREEN).  Keeping
+        # whichever came last in list order picked the stale round and reported
+        # "gate has not posted GREEN" for a card that had -- prefer the highest
+        # issue number, which is the newest round.
+        if prev is None or (i.get("number") or 0) > (prev.get("number") or 0):
+            by_title[k] = i
     findings = []
 
     # unverified-in-review: a review-lane impl whose -V gate posted no GREEN.
