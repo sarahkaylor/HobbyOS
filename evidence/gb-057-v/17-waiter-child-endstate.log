@@ -1,0 +1,42 @@
+--- run2: every IDLESTUCK slot line for slot 7 and slot 35 (final dumps) ---
+18045:[IDLESTUCK] slot=7 pid=7 st=3 wake=0 rip=0x1000000000 TORTURE.BIN
+18066:[IDLESTUCK] slot=35 pid=35 st=7 wake=0 rip=0x100000adf0 TORTURE.BIN
+18114:[IDLESTUCK] slot=7 pid=7 st=3 wake=0 rip=0x1000000000 TORTURE.BIN
+18135:[IDLESTUCK] slot=35 pid=35 st=7 wake=0 rip=0x100000adf0 TORTURE.BIN
+18183:[IDLESTUCK] slot=7 pid=7 st=3 wake=0 rip=0x1000000000 TORTURE.BIN
+18204:[IDLESTUCK] slot=35 pid=35 st=7 wake=0 rip=0x100000adf0 TORTURE.BIN
+
+--- run2: what the last [ALIVE-SET] block says about slot 7 / 35 ---
+16096:  [ALIVE-SET] slot=7 pid=7 st=3 parent=35 claimed_by=2 TORTURE.BIN
+16104:  [ALIVE-SET] slot=35 pid=35 st=7 parent=-1 claimed_by=-1 TORTURE.BIN  <-- parked WAIT with no parent to deliver the wake
+16622:  [ALIVE-SET] slot=7 pid=7 st=3 parent=35 claimed_by=2 TORTURE.BIN
+16629:  [ALIVE-SET] slot=35 pid=35 st=7 parent=-1 claimed_by=-1 TORTURE.BIN  <-- parked WAIT with no parent to deliver the wake
+16737:  [ALIVE-SET] slot=7 pid=7 st=3 parent=35 claimed_by=2 TORTURE.BIN
+16744:  [ALIVE-SET] slot=35 pid=35 st=7 parent=-1 claimed_by=-1 TORTURE.BIN  <-- parked WAIT with no parent to deliver the wake
+
+--- run2: any 7 / 35 exit records after line 16600 ---
+22:  [ALIVE-SET] slot=7 pid=7 st=3 parent=35 claimed_by=2 TORTURE.BIN
+29:  [ALIVE-SET] slot=35 pid=35 st=7 parent=-1 claimed_by=-1 TORTURE.BIN  <-- parked WAIT with no parent to deliver the wake
+137:  [ALIVE-SET] slot=7 pid=7 st=3 parent=35 claimed_by=2 TORTURE.BIN
+144:  [ALIVE-SET] slot=35 pid=35 st=7 parent=-1 claimed_by=-1 TORTURE.BIN  <-- parked WAIT with no parent to deliver the wake
+150:  pid=7 ppid=35 state=3 TORTURE.BIN
+159:  pid=35 ppid=-1 state=7 TORTURE.BIN
+170:  pid=7 ppid=35 state=3 TORTURE.BIN
+179:  pid=35 ppid=-1 state=7 TORTURE.BIN
+185:[KERNEL] parked WAIT slot with no parent to wake it: slot=35 pid=35 st=7 parent=-1 TORTURE.BIN -- no state change attempted; see GB-057
+189:  CPU2 rip=0x000000007003BEDF rflags=0x0000000000010046 vec=14 err=0x0000000000000002 cr2=0x00000017FFFFFCB8 pid=7 resume_pid=7 resume_s
+
+--- run2: final state census of slots 7 and 35 across the last 3 IDLESTUCK dumps ---
+dump at line 18039:
+[IDLESTUCK] slot=7 pid=7 st=3 wake=0 rip=0x1000000000 TORTURE.BIN
+[IDLESTUCK] slot=35 pid=35 st=7 wake=0 rip=0x100000adf0 TORTURE.BIN
+[IDLESTUCK] slot=7 pid=7 st=3 wake=0 rip=0x1000000000 TORTURE.BIN
+[IDLESTUCK] slot=35 pid=35 st=7 wake=0 rip=0x100000adf0 TORTURE.BIN
+dump at line 18108:
+[IDLESTUCK] slot=7 pid=7 st=3 wake=0 rip=0x1000000000 TORTURE.BIN
+[IDLESTUCK] slot=35 pid=35 st=7 wake=0 rip=0x100000adf0 TORTURE.BIN
+[IDLESTUCK] slot=7 pid=7 st=3 wake=0 rip=0x1000000000 TORTURE.BIN
+[IDLESTUCK] slot=35 pid=35 st=7 wake=0 rip=0x100000adf0 TORTURE.BIN
+dump at line 18177:
+[IDLESTUCK] slot=7 pid=7 st=3 wake=0 rip=0x1000000000 TORTURE.BIN
+[IDLESTUCK] slot=35 pid=35 st=7 wake=0 rip=0x100000adf0 TORTURE.BIN

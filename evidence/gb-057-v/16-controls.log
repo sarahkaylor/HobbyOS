@@ -1,0 +1,30 @@
+########## run1 (HALTED) ##########
+  last ALIVE-SET idle line: 10641
+  st=7/WAIT slots seen in ALIVE-SET: 8
+  'RUNNING with NO cpu' lines: 0
+  'stale claim' lines: 0
+  slots with rip=0x1000000000 in ALIVE-SET: 0
+  last 3 ALIVE-SET slots:
+       [ALIVE-SET] slot=11 pid=11 st=7 parent=4 claimed_by=-1 SH.BIN
+       [ALIVE-SET] slot=13 pid=13 st=5 parent=3 claimed_by=-1 SHTEST.BIN
+       [ALIVE-SET] slot=27 pid=27 st=3 parent=11 claimed_by=2 rm
+
+########## run3 (HALTED) ##########
+  last ALIVE-SET idle line: 16060
+  st=7/WAIT slots seen in ALIVE-SET: 4
+  'RUNNING with NO cpu' lines: 0
+  'stale claim' lines: 0
+  slots with rip=0x1000000000 in ALIVE-SET: 0
+  last 3 ALIVE-SET slots:
+       [ALIVE-SET] slot=3 pid=3 st=3 parent=-1 claimed_by=0 SHTEST.BIN
+       [ALIVE-SET] slot=5 pid=5 st=5 parent=3 claimed_by=-1 SHTEST.BIN
+       [ALIVE-SET] slot=6 pid=6 st=5 parent=3 claimed_by=-1 SH.BIN
+
+########## run2 (STALLED) ##########
+  st=7 lines: 49
+  'RUNNING with NO cpu': 0
+  'stale claim': 0
+  last 3 ALIVE-SET slots:
+       [ALIVE-SET] slot=16 pid=16 st=7 parent=9 claimed_by=-1 SH.BIN
+       [ALIVE-SET] slot=18 pid=18 st=5 parent=9 claimed_by=-1 SHTEST3.BIN
+       [ALIVE-SET] slot=35 pid=35 st=7 parent=-1 claimed_by=-1 TORTURE.BIN  <-- parked WAIT with no parent to deliver th
