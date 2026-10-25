@@ -1,0 +1,15 @@
+### G5 DoD drill RUN2: same tree, dummy reverted 2026-10-25T09:02:26Z
+[GATE] T1_host: make host_tests
+[GATE] T1_host: PASS
+
+=== GATE SUMMARY ===
+  T1_host          PASS
+  T2_unit_arm      skip
+  T2_unit_intel    skip
+  T3_int_arm       skip
+  T3_int_intel     skip
+  STYLE_check      skip
+  STYLE_test       skip
+
+GATE: PASS (ran: T1_host; skipped: T2_unit_arm T2_unit_intel T3_int_arm T3_int_intel STYLE_check STYLE_test)
+rc=0

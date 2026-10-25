@@ -1,0 +1,40 @@
+### G5 DoD drill RUN1: dummy branch (one injected failing host check) 2026-10-25T09:01:39Z
+[GATE] T1_host: make host_tests
+[GATE] T1_host: FAIL (exit 2) — log: obj/gate/T1_host.log
+      PASS: arg size: EVIOCGABS(ABS_X) == sizeof(input_absinfo) == 24
+      PASS: arg size: FBIOGET_VSCREENINFO (0x4600) is not an EVIOCG -> -1
+      PASS: route: EVIOCGVERSION returns EV_VERSION 0x010001
+      PASS: route: EVIOCGNAME(64) returns 'hobbyos-input'
+      PASS: route: EVIOCGBIT(EV_SYN) advertises KEY|REL|ABS event types
+      PASS: route: EVIOCGBIT(EV_KEY) advertises A/ESC/BTN_LEFT
+      PASS: route: EVIOCGABS(ABS_X) returns 0..32767 axis
+      PASS: route: unknown request (FBIOGET_VSCREENINFO) -> -1
+      PASS: diff: hb input_event size == Linux input_event
+      PASS: diff: hb input_event field offsets == Linux
+      PASS: diff: EVIOCGVERSION matches Linux
+      PASS: diff: EVIOCGNAME(64) matches Linux
+      PASS: diff: EVIOCGBIT(EV_KEY,16) matches Linux
+      PASS: diff: EVIOCGABS(ABS_X) matches Linux
+      PASS: diff: EVIOCGVERSION arg size == _IOC_SIZE
+      PASS: diff: EVIOCGABS arg size == _IOC_SIZE
+    input_node_test_host: 23 checks, 0 failed
+    === GB-051 audio assert: silent-safe SDL + /dev/dsp ENODEV ===
+      PASS: compat /dev/dsp open -> -ENODEV (clean no-device)
+      PASS: compat /dev/dsp open is an error, not a hang / not garbage
+      PASS: silent-safe SDL path is the dummy driver
+      PASS: diff: HB_ENODEV matches host <errno.h> ENODEV
+      FAIL: GB-005 DoD dummy: deliberately failing check (injected, reverted)
+    audio_stub_test_host: 5 checks, 1 failed
+    make: *** [Makefile:3650: host_tests] Error 1
+
+=== GATE SUMMARY ===
+  T1_host          FAIL
+  T2_unit_arm      skip
+  T2_unit_intel    skip
+  T3_int_arm       skip
+  T3_int_intel     skip
+  STYLE_check      skip
+  STYLE_test       skip
+
+GATE: FAIL — at least one required tier failed. Logs in obj/gate/.
+rc=1

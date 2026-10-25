@@ -1,0 +1,14 @@
+Part A: T3 gate verdict over a captured log (no QEMU)
+  PASS: clean log -> GREEN
+  PASS: dummy (FAIL-injected) log -> RED
+  PASS: dummy (FATAL fault) log -> RED
+Part C: verdict completeness (what ran is named; a merge gate may not drop a tier)
+  PASS: all-skip run names every skipped tier
+  PASS: no bare PASS line on a run with skips
+  PASS: GATE_CI=1 with a dropped core tier -> RED (names the tier)
+Part B: real gate, T1 tier (make host_tests)
+  PASS: merge_gate.sh (T1) -> GREEN
+    [GATE] T1_host: PASS
+    GATE: PASS (ran: T1_host; skipped: T2_unit_arm T2_unit_intel T3_int_arm T3_int_intel STYLE_check STYLE_test)
+
+MERGE_GATE_TEST: PASS — a dummy branch fails, a clean branch passes

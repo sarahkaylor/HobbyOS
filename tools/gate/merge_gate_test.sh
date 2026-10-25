@@ -48,6 +48,36 @@ DUMMYK="obj/gate/test/t3_fatal.log"
 bash tools/gate/merge_gate.sh police intel "$DUMMYK" >/dev/null 2>&1
 [ $? -ne 0 ] && pass "dummy (FATAL fault) log -> RED" || fail "FATAL-fault log should be RED"
 
+# ---- Part C: the verdict names what ran (GB-005, 2026-10-25) -------------
+# The Coordinator refused a run that printed `GATE: PASS` while T2/T3 read
+# `skip` (PR #43, 2026-10-18).  Two properties are asserted here, both fast and
+# both real runs of the shipped script:
+#   C1 every tier disabled -> exit 0, and the verdict NAMES the skipped tiers;
+#   C2 a merge-gate run (GATE_CI=1) that drops a core tier -> exit 1, refusing
+#      before it does any work, rather than passing over the absence.
+echo "Part C: verdict completeness (what ran is named; a merge gate may not drop a tier)"
+GATE_T1=0 GATE_T2=0 GATE_T3=0 GATE_STYLE=0 bash tools/gate/merge_gate.sh \
+    >obj/gate/test/gate_allskip.log 2>&1
+if [ $? -eq 0 ] && grep -q "GATE: PASS (ran: none; skipped: .*T1_host.*T3_int_intel" \
+    obj/gate/test/gate_allskip.log; then
+  pass "all-skip run names every skipped tier"
+else
+  fail "all-skip run must PASS and name the skipped tiers"
+  tail -6 obj/gate/test/gate_allskip.log | sed 's/^/    /'
+fi
+if grep -q "GATE: PASS (no required tier failed" obj/gate/test/gate_allskip.log; then
+  fail "the old bare 'GATE: PASS (no required tier failed…)' line is back"
+else
+  pass "no bare PASS line on a run with skips"
+fi
+GATE_CI=1 GATE_T1=0 bash tools/gate/merge_gate.sh >obj/gate/test/gate_drop.log 2>&1
+if [ $? -ne 0 ] && grep -q "may not drop a core tier: T1_host" obj/gate/test/gate_drop.log; then
+  pass "GATE_CI=1 with a dropped core tier -> RED (names the tier)"
+else
+  fail "GATE_CI=1 with T1 dropped must refuse, naming the tier"
+  tail -6 obj/gate/test/gate_drop.log | sed 's/^/    /'
+fi
+
 # ---- Part B (optional): real T1 gate on this tree -----------------------
 if [ "${TEST_RUN_T1:-0}" = "1" ]; then
   echo "Part B: real gate, T1 tier (make host_tests)"

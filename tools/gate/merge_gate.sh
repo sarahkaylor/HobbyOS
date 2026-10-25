@@ -74,6 +74,24 @@ if [ "${#missing[@]}" -gt 0 ]; then
 fi
 if [ "${1:-}" = "--check-env" ]; then echo "[GATE] ENVIRONMENT OK"; exit 0; fi
 
+# --- merge-gate completeness (GB-005, 2026-10-25) -------------------------
+# The verdict WORD is what a merge comment quotes (Coordinator on PR #43: a run
+# printed `GATE: PASS` while T2 both arches and T3 intel read `skip`).  Two
+# rules close that: a merge-gate run may not DROP a core tier, and the verdict
+# line NAMES the tiers that ran and those that did not.  A skipped tier is not
+# a pass; at most it is a named absence.
+if [ "${GATE_CI:-0}" = "1" ]; then
+  dropped=()
+  [ "$GATE_T1" = "1" ] || dropped+=(T1_host)
+  [ "$GATE_T2" = "1" ] || dropped+=(T2_unit_arm T2_unit_intel)
+  [ "$GATE_T3" = "1" ] || dropped+=(T3_int_arm T3_int_intel)
+  if [ "${#dropped[@]}" -gt 0 ]; then
+    echo "GATE: FAIL — GATE_CI=1 is a merge-gate run and may not drop a core tier: ${dropped[*]}" >&2
+    echo "GATE: for a host-only run use the light default (no GATE_CI) — that verdict names what ran." >&2
+    exit 1
+  fi
+fi
+
 # --- T3 verdict-only mode (fast; no QEMU): proxies tools/t3_tier.sh police ---
 if [ "${1:-}" = "police" ]; then
   ARCH="${2:?usage: merge_gate.sh police <arch> <log>}"
@@ -166,9 +184,12 @@ echo
 echo "=== GATE SUMMARY ==="
 declare -a TIERS=(T1_host T2_unit_arm T2_unit_intel T3_int_arm T3_int_intel STYLE_check STYLE_test)
 fail=0
+ran=()
+skipped=()
 for k in "${TIERS[@]}"; do
   v="${RESULT[$k]:-skip}"
   printf "  %-16s %s\n" "$k" "$v"
+  if [ "$v" = "skip" ]; then skipped+=("$k"); else ran+=("$k"); fi
   [ "$v" = "FAIL" ] && fail=1
 done
 # A tier that was required but left in an unknown state is a failure too.
@@ -177,5 +198,12 @@ if [ "$fail" = "1" ]; then
   echo "GATE: FAIL — at least one required tier failed. Logs in obj/gate/."
   exit 1
 fi
-echo "GATE: PASS (no required tier failed; skipped tiers are reported above)"
+# GB-005: the verdict names what ran.  `GATE: PASS` over an unstated skip is the
+# line the Coordinator refused on PR #43 (2026-10-18), and it is what a merge
+# comment quotes, so it may never again be a bare PASS.
+if [ "${#skipped[@]}" -eq 0 ]; then
+  echo "GATE: PASS (ran: ${ran[*]}; skipped: none)"
+else
+  echo "GATE: PASS (ran: ${ran[*]:-none}; skipped: ${skipped[*]})"
+fi
 exit 0

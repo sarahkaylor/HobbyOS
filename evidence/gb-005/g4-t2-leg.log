@@ -1,0 +1,43 @@
+### G4 T2 leg (both arches) through the gate 2026-10-25T08:57:01Z
+[GATE] T2_unit_arm: make unit_tests_arm
+[GATE] T2_unit_arm: FAIL (exit 2) — log: obj/gate/T2_unit_arm.log
+    src/kernel/pipe.c:139:68: warning: unused parameter 'tf' [-Wunused-parameter]
+      139 | int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
+          |                                                                    ^
+    src/kernel/pipe.c:219:7: warning: unused variable 'i' [-Wunused-variable]
+      219 |   int i = 0;
+          |       ^
+    3 warnings generated.
+    clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/pipe_test.c -o obj/arm/pipe_test.o
+    clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/process.c -o obj/arm/process.o
+    src/kernel/process.c:1882:27: error: use of undeclared identifier 'cpu_locals'
+     1882 |           int live_pid = (cpu_locals[cl].current_proc)
+          |                           ^~~~~~~~~~
+    src/kernel/process.c:1883:32: error: use of undeclared identifier 'cpu_locals'
+     1883 |                              ? cpu_locals[cl].current_proc->pid
+          |                                ^~~~~~~~~~
+    src/kernel/process.c:1415:42: warning: unused parameter 'is_yield' [-Wunused-parameter]
+     1415 | void schedule(struct trap_frame *tf, int is_yield) {
+          |                                          ^
+    src/kernel/process.c:3943:50: warning: unused parameter 'prot' [-Wunused-parameter]
+     3943 | int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags) {
+          |                                                  ^
+    2 warnings and 2 errors generated.
+    make[1]: *** [Makefile:744: obj/arm/process.o] Error 1
+    make[1]: Leaving directory '/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-ae371739'
+    make: *** [Makefile:3707: unit_tests_arm] Error 2
+[GATE] T2_unit_intel: make unit_tests_intel
+[GATE] T2_unit_intel: PASS
+
+=== GATE SUMMARY ===
+  T1_host          skip
+  T2_unit_arm      FAIL
+  T2_unit_intel    PASS
+  T3_int_arm       skip
+  T3_int_intel     skip
+  STYLE_check      skip
+  STYLE_test       skip
+
+GATE: FAIL — at least one required tier failed. Logs in obj/gate/.
+rc=1
+DONE
