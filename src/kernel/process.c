@@ -99,6 +99,14 @@ static void db_emit(struct db_buf *f) {
    put the definition 1,200 lines below its first use, and the gate refused both
    arches for it. */
 static int alive_reported;
+/* GB-057: the latch alone does not bound this report.  Measured: 398 full
+   [ALIVE-SET] dumps (6,246 slot lines, a fifth of a 31k-line serial) in one run,
+   because the latch is cleared whenever the scheduler finds any work -- and in
+   the end-of-wave thrash it finds work, runs nothing, and comes straight back.
+   Each dump takes the console lock and pushes ~16 lines down a slow UART, which
+   is exactly the kind of load that turns an idle loop into a stalled one.  A
+   time floor bounds it whatever the scheduler does. */
+static uint64_t alive_last_ms;
 /* GB-057-a: the wave-end predicate is a NEGATIVE test -- anything not
    FREE/EXITED/ALLOCATED/THREAD_DONE counts as live work -- so PROC_STATE_BLOCKED
    (5) is counted, and a process blocked with no possible waker keeps `any_alive`
@@ -1762,6 +1770,13 @@ void schedule(struct trap_frame *tf, int is_yield) {
          Once per idle stretch (latched, cleared when work is found): probe20
          printed the same slot 1,185 times with a window-based limiter. */
       alive_reported = 1;
+      {
+        uint64_t nowms = timer_get_ms();
+        /* GB-057: at most one full dump every 2 s, latch or no latch. */
+        if (alive_last_ms != 0 && nowms - alive_last_ms < 2000)
+          goto alive_dump_done;
+        alive_last_ms = nowms;
+      }
       struct db_buf d;
       d.n = 0;
       uart_puts(
@@ -1825,6 +1840,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
         db_emit(&d);
       }
     }
+  alive_dump_done:;
 
     if (!any_alive) {
       /* GB-057-b: settle the mechanism before changing the predicate again.  If a
