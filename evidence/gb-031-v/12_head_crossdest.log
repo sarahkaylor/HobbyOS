@@ -1,0 +1,6 @@
+E_EXIT=0
+F_EXIT=0
+834e06ca1b6d3407f58825fec8c09cb2a13398a278a3d0a81840359d4cb73239  /tmp/gb031-e/stage/SDL2-2.30.10/build/.libs/libSDL2.a
+c4ab28c6898bd0b42b9915cf1a93a6f542317acd6dbf60957bb35e7525507226  /tmp/gb031-f-other-dest/stage/SDL2-2.30.10/build/.libs/libSDL2.a
+d26e52bf327f3c1689d11a32cba0e5114ae3088964a67ba1f1eeb16ae7363414  /tmp/gb031-e/sdl2_static_test
+137487827167b236c3cdb96cb9dc5eb32b42f94d7abba28ceb191eaf0ece0ded  /tmp/gb031-f-other-dest/sdl2_static_test
