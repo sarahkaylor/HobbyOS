@@ -1,0 +1,11 @@
+console_shred: 113 byte-interleaved record(s) in 'evidence/gb-082v/01b-intel-serial.log'
+  L487 [breaks 'Error Code:'] d/es! rcVe/cketorr: n14el Er/rporr oCogradme_: l0oxa0de00r0.c0
+  L564 [breaks 'Exception in Kernel Mode'] v2 loader:[ PIKEDRN=E2L2]  eFntArTALy:=0 xE1x0ce00pt0i0o0n 00in0  Kseprne=0l xM18o0d0e0!0 0V0e0c0t or:r es1id4e nEtr=r1or7 C odtaeb:l 0exs00=060
+  L662 [breaks 'Exception in Kernel Mode'] [KLEFNR]NE PLA]SS  lFAoTnAg L:di Exr +ce ptinoens teidn s Krce/rnuelse rM_oincdleu!d Veec/gtroarp:h i1c4 s/wErirnodro wCod.eh:
+  L959 [breaks 'Exception in Kernel Mode'] [KERNEL] FATAL: Exception in Kve2r nelloa Mdoerd:e!  Vimeagctoer : m14 aEprrpoerd C od(el: 0azx0y00)0, 00b00yt00e00s000=26
+  L1136 [breaks 'Exception in Kernel Mode'] [[SKEEDRTNEESLT]]  stFaArtTAinLg::  E5x9c egpotlidoenn  icna seKse rfnerlo mM oGdNeU!  seVde c4t.o8r
+  L1381 [breaks 'Exception in Kernel Mode'] L[oaKERNdiEngL]  FAprTAogLr: aEm xfcoer pstciohned uilne rK e(rvn2e lA SM)o:d e[! PVReOcCtToErS:T ]1 4p iEdr=r4o8r  pCpoidde=:- 10
+  L1476 [breaks 'Error Code:'] e[ptKiEoRnN EiLn]  Kperronceels s_Mcordee!at eV:e ncoto rf:r ee14  pErrroocerss  Cslodotes! :z 0omx0b0i0es0=030 e0x0it0e0d=30
+  L1559 [breaks 'Error Code:']  [MKoERdNe!E LVe]c Ptororc:e s1s4  3E8r:r oHrE LCLoOd.e:B 0IxN0 0e0x0i00te0d0 0u000ne0x0p0e2c
+  L1784 [breaks 'Exception in Kernel Mode'] ATAL:[KE ERxNcELep]t ioPnr oicens s K1e7r:n GeRl EMPo.dBeI!N  Vexeictteodr :u n1e4x pEercrtoerd lCyo doer:  g0rxa0c0e0f0u0l0l0y0.0
+  L2915 [breaks 'Error Code:']   IPC_T STREAM child exit status 0  IPC_T STREAM EOF after both write ends closed (read -> 0)  IPC_T STREAM write on closed peer -> -1/EPIPE (no signa
