@@ -113,10 +113,22 @@ def main():
         by_id.setdefault(base_id(i.get("title") or ""), i)
 
     checked = mismatched = orphan = 0
-    for vid, vi in sorted(by_id.items()):
-        if not vid.endswith("-V"):
+    # A parent can accumulate several gates over its life: GB-nnn-V, then GB-nnn-V2 when
+    # the DoD is re-scoped or the head changes under a standing RED. The newest gate is the
+    # one that governs, so group by parent and keep the highest ordinal. (Before this,
+    # only ids ending in exactly "-V" were scanned, so a V2 gate was silently ignored and
+    # the superseded V's verdict kept being graded against the parent's lane.)
+    gates = {}
+    for vid, vi in by_id.items():
+        m = re.fullmatch(r"(GB-\d+)-V(\d*)", vid)
+        if not m:
             continue
-        parent_id = vid[:-2]
+        ordinal = int(m.group(2) or 1)
+        parent_id = m.group(1)
+        if parent_id not in gates or ordinal > gates[parent_id][0]:
+            gates[parent_id] = (ordinal, vid, vi)
+
+    for parent_id, (_ordinal, vid, vi) in sorted(gates.items()):
         parent = by_id.get(parent_id)
         if parent is None:
             print(f"  [{vid}] no parent ticket {parent_id} on the board")
