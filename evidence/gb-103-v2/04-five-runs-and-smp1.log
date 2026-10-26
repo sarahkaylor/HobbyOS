@@ -1,0 +1,25 @@
+rev: 7de6dde  date: 2026-10-26T14:15:55Z
+########## MONITORED ARM RUN 1 ##########
+run 1 exit=1
+T3_arm: 9214 console lines, 1 FAIL lines, 5 user memory fault records across 5 processes, 85 programs exited, halted=1
+T3_arm EXIT=1
+########## MONITORED ARM RUN 2 ##########
+run 2 exit=1
+T3_arm: 9199 console lines, 1 FAIL lines, 5 user memory fault records across 3 processes, 84 programs exited, halted=1
+T3_arm EXIT=1
+########## MONITORED ARM RUN 3 ##########
+run 3 exit=1
+T3_arm: 9079 console lines, 1 FAIL lines, 5 user memory fault records across 4 processes, 85 programs exited, halted=1
+T3_arm EXIT=1
+########## MONITORED ARM RUN 4 ##########
+run 4 exit=1
+T3_arm: 9293 console lines, 1 FAIL lines, 5 user memory fault records across 2 processes, 84 programs exited, halted=1
+T3_arm EXIT=1
+########## MONITORED ARM RUN 5 ##########
+run 5 exit=1
+T3_arm: 9359 console lines, 1 FAIL lines, 5 user memory fault records across 2 processes, 84 programs exited, halted=1
+T3_arm EXIT=1
+########## T3_SMP=1 RUN ##########
+smp1 exit=1
+T3_arm: 8624 console lines, 3 FAIL lines, 4 user memory fault records across 2 processes, 78 programs exited, halted=1
+T3_arm EXIT=1

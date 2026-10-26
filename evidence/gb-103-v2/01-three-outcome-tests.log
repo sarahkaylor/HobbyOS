@@ -1,0 +1,14 @@
+rev: 7de6dde4f3f29f53541b21fd1cd0a290168879a9  date: 2026-10-26T14:08:45Z
+$ python3 tools/t3/t3_three_outcome_test.py
+  PASS: clean run -> EXIT 0 PASS
+  PASS: genuine tier red -> EXIT 1 FAIL (FAIL line quoted)
+  PASS: instrument failure -> EXIT 4 INSTRUMENT-FAILURE (distinct, got rc=4)
+T3_THREE_OUTCOME_TEST: PASS - clean=PASS, tier-red=FAIL, instrument=INSTRUMENT-FAILURE
+rc=0
+
+$ python3 tools/t3/t3_instrument_failure_test.py
+  PASS: mid-sample monitor close -> INSTRUMENT-FAILURE status fires (INSTRUMENT-FAILURE-fired)
+  PASS: socket present through the sample -> no INSTRUMENT-FAILURE (INSTRUMENT-FAILURE-absent)
+  PASS: probe failure cannot abort grading (the gate is an annotation, not a return)
+T3_INSTRUMENT_FAILURE_TEST: PASS - INSTRUMENT-FAILURE is reachable on a mid-sample monitor close
+rc=0

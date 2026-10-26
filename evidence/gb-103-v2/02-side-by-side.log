@@ -1,0 +1,14 @@
+=== A) tier red, monitor healthy -> must be FAIL, not INSTRUMENT-FAILURE ===
+rc=1
+T3_intel (police /tmp/gb103v2_red.log): 1262 lines, 1 FAIL lines, 0 fault records across 0 processes, halted=1, kfault=0, boots=0
+T3_intel: FAIL — 1 FAIL line(s); first 5:
+1261:SOMETEST: FAIL injected genuine red
+T3_intel EXIT=1
+
+=== B) same red log + forced instrument failure -> both visible ===
+rc=4
+T3_intel (police /tmp/gb103v2_red.log): 1262 lines, 1 FAIL lines, 0 fault records across 0 processes, halted=1, kfault=0, boots=0
+T3_intel: FAIL — 1 FAIL line(s); first 5:
+1261:SOMETEST: FAIL injected genuine red
+T3_intel: INSTRUMENT-FAILURE — forced (T3_FORCE_INSTRUMENT_FAIL) — neither PASS nor a tier FAIL
+T3_intel EXIT=4

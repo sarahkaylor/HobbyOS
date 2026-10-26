@@ -1,0 +1,8 @@
+SIGTERM -> qemu 212723 at 307.2 s
+tier rc = 4
+sample header present: True
+INSTRUMENT-FAILURE in serial log: True
+INSTRUMENT-FAILURE in tier stdout: True
+  > 8706:=== T3 guest sample: INSTRUMENT-FAILURE — monitor read ended abnormally (rc=0; deadline approaching with no halt marker) — sample truncated; tier verdict still graded below ===
+  > T3_arm: INSTRUMENT-FAILURE — the monitor could not produce a sample (DoD clause 3); this is neither PASS nor a tier FAIL
+  > T3_arm EXIT=4

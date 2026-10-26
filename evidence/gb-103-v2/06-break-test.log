@@ -1,0 +1,18 @@
+=== classifier deliberately broken (no-verdict -> PASS) — tests MUST fail ===
+  PASS: clean run -> EXIT 0 PASS
+  PASS: genuine tier red -> EXIT 1 FAIL (FAIL line quoted)
+  PASS: instrument failure -> EXIT 4 INSTRUMENT-FAILURE (distinct, got rc=4)
+T3_THREE_OUTCOME_TEST: PASS - clean=PASS, tier-red=FAIL, instrument=INSTRUMENT-FAILURE
+three_outcome rc=0
+  PASS: mid-sample monitor close -> INSTRUMENT-FAILURE status fires (INSTRUMENT-FAILURE-fired)
+  PASS: socket present through the sample -> no INSTRUMENT-FAILURE (INSTRUMENT-FAILURE-absent)
+  PASS: probe failure cannot abort grading (the gate is an annotation, not a return)
+T3_INSTRUMENT_FAILURE_TEST: PASS - INSTRUMENT-FAILURE is reachable on a mid-sample monitor close
+instrument_failure rc=0
+
+=== restore ===
+=== after restore: must pass ===
+  PASS: instrument failure -> EXIT 4 INSTRUMENT-FAILURE (distinct, got rc=4)
+T3_THREE_OUTCOME_TEST: PASS - clean=PASS, tier-red=FAIL, instrument=INSTRUMENT-FAILURE
+  PASS: probe failure cannot abort grading (the gate is an annotation, not a return)
+T3_INSTRUMENT_FAILURE_TEST: PASS - INSTRUMENT-FAILURE is reachable on a mid-sample monitor close

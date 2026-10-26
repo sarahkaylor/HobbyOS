@@ -1,0 +1,6 @@
+=== which runner executes the new tests? ===
+$ python3 tools/t5/run_t5_tests.py | grep -i "t3_\|host-tests"
+[host-tests] self-registering suite: 20 python tests
+  PASS  tools/t3/t3_instrument_failure_test.py
+  PASS  tools/t3/t3_three_outcome_test.py
+[host-tests] done: 25/25 passed

@@ -1,0 +1,10 @@
+=== break 2: police force-hook mapped to PASS — does the three-outcome test notice? ===
+  PASS: clean run -> EXIT 0 PASS
+  PASS: genuine tier red -> EXIT 1 FAIL (FAIL line quoted)
+  FAIL: instrument failure -> EXIT 4 INSTRUMENT-FAILURE (distinct, got rc=0)
+T3_THREE_OUTCOME_TEST: FAIL (1)
+three_outcome rc=1
+
+=== restore ===
+  PASS: instrument failure -> EXIT 4 INSTRUMENT-FAILURE (distinct, got rc=4)
+T3_THREE_OUTCOME_TEST: PASS - clean=PASS, tier-red=FAIL, instrument=INSTRUMENT-FAILURE
