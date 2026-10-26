@@ -386,7 +386,7 @@ final list.
 | GB-002 | Forgejo already deployed (§11.2, `swarm-ticketing` .234:3000, repo `sarah/gaming-program`, admin `sarah`, `swarm-bot` token) — finish: `GAMING-BOARD` project, labels, milestones, repo mirrors | M | GB-001 | board visible; bot token works via API |
 | GB-003 | Board automation: webhook board→Coordinator; `swarm-bot` lane-move + comment scripts | S | GB-002 | moving a ticket posts to coordinator |
 | GB-004 | Hermes fleet: profile per role, endpoints (`FLASH` default, `DEEP` coordinator-only), tmux supervisors, session-store on NFS | M | GB-001 | every worker `GET /models` shows FLASH; coordinator shows DEEP |
-| GB-005 | Git workflow + merge-gate CI: branch-per-ticket, MR template, gate = T1+T2+T3 both arches + parity | M | GB-001/002 | a dummy branch fails→passes the gate |
+| GB-005 | Git workflow + merge gate: branch-per-ticket, and **the local gate is the only merge authority** (GitHub Actions is not a gate — 2026-10-26 CI policy) | M | GB-001/002 | the **merge path consults the posted verdict**: a card cannot reach `Merge Gate` without a GREEN from its `-V`, and a merge that bypasses it is detectable after the fact; `tools/gate/merge_gate_test.sh` proves a dummy branch fails→passes (`MERGE_GATE_TEST: PASS`) |
 | GB-006 | Shared build cache: sccache/ccache + the prebuilt clang 21.1.8 cross toolchain; seed from farm-1 (LLVM dist-staging already built there → rsync `third_party/llvm-21.1.8/dist-staging` to farms 2/3 + coordinator) | M | GB-001 | cold vs cached build time measured |
 | GB-007 | Differential harness skeleton: builder image (x86_64-musl cross on Linux) + run-on-HobbyOS-intel + stdout/exit/errno compare | M | GB-005 | `hello` diverges/lie detector works |
 | GB-008 | `gaming.md`↔board sync script (tickets must match plan §1/§7) | S | GB-002 | lint passes |
@@ -489,7 +489,7 @@ final list.
 | ID | Ticket | Wt | Depends | DoD |
 |---|---|---|---|---|
 | GB-043 | Long-duration **playthrough harness** per game (QMP input scripting + screendump assert; ≤30 s rule; auto-fail) | M | GB-040 | each game has ≥1 replay script |
-| GB-044 | Two-arch parity CI per farm VM on every merge | M | GB-005 | run window < best |
+| GB-044 | Two-arch parity enforced by the **local gate on every farm VM** before a merge (GitHub Actions is not a gate — 2026-10-26 CI policy) | M | GB-005 | each farm VM runs the both-arch gate for its own merges; an injected single-arch regression is refused by name; run window recorded per host |
 | GB-045 | Performance pass: `gfxbench` baseline vs post; boot-time + framerate budget | M | — | numbers + report |
 | GB-046 | Memory/leak pass under 30-min game cycling (freeze watchdogs) | M | GB-043 | no unbounded growth |
 | GB-047 | Acceptance evidence pack for S0/S1: logs, screenshots, replays, gate history | M | GB-044/45/46 | archive on NAS |
