@@ -207,6 +207,10 @@ static void test_wave_loader(void *arg) {
   /* L7 (fat16 large-file lane): >1 MiB create/write/reopen round-trip.
      Proves the pre-existing fat16 create-path defect live in the wave. */
   load_and_run_program_in_scheduler("FATBIG_T.BIN", -1, -1, -1, -1);
+  /* GB-067: byte-exact read-back of a HOST-STAGED 4 KiB file (/STAGE4K.BIN,
+     staged post-build via T3_STAGE).  Reads the full 4096 bytes back and
+     compares against the staged pattern. */
+  load_and_run_program_in_scheduler("STAGE4K_T.BIN", -1, -1, -1, -1);
   /* L3 (selfhost W-A): VFAT long-name build-payload acceptance — mcopy
      tree with long names, collision family, in-OS create/rename/mkdir/
      unlink of long names.  Spawns nothing. */
