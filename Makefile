@@ -3525,13 +3525,22 @@ $(OPEN_MODE_SCAN): tools/gate/open_mode_scan.py
 # T3 device tier and is gated on GB-014's full linux dispatch (coordinator); the
 # instrument itself — probe + gate + self-test proving it can fail — is host-side
 # and runs here.
+#
+# GB-066-V2 (re-gate): the probe must be a static-PIE (ET_DYN).  The v2 loader
+# refuses a fixed low-VA ET_EXEC (elf_loader.c:120, "ET_EXEC linked below the
+# user window; a -static-pie build is required"), and musl-gcc's default `-static`
+# produces exactly that (entry ~0x401cc1 < USER_VA_BASE).  Build with -static-pie
+# and ASSERT the result is ET_DYN (readelf -h Type: DYN) so a regression to
+# -static fails the build loudly instead of silently shipping a probe the guest
+# rejects (the GB-066-V2 RED's clause-1 failure).
 T4_DEVICE_GATE = t4_device_gate
 T4_DEVICE_SELFTEST = t4_device_selftest
 T4_DEVICE_CHECK = t4_device_check
 T4_LEGA_OUT = $(OBJ_DIR)/t4_legA.out
 T4_PROBE_ELF = $(OBJ_DIR)/t4_probe.elf
 $(T4_PROBE_ELF): src/user/t4_probe.c
-	@musl-gcc -static -O2 -Wall src/user/t4_probe.c -o $(T4_PROBE_ELF)
+	@musl-gcc -static-pie -fPIE -O2 -Wall src/user/t4_probe.c -o $(T4_PROBE_ELF)
+	@readelf -h $(T4_PROBE_ELF) | grep -q 'Type: *DYN' || ( echo "t4_probe: build is not ET_DYN/static-PIE — the v2 ELF loader rejects it (GB-066-V2)"; readelf -h $(T4_PROBE_ELF) | head -4; exit 1 )
 $(T4_LEGA_OUT): $(T4_PROBE_ELF)
 	@./$(T4_PROBE_ELF) > $(T4_LEGA_OUT) && echo "[t4-device] leg A captured -> $(T4_LEGA_OUT)"
 $(T4_DEVICE_GATE): tools/gate/t4_device.sh $(T4_LEGA_OUT)
