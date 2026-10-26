@@ -1,0 +1,4 @@
+### T4a: make t4_compat_parity @ 4dff4d1 2026-10-26T05:31:05Z
+t4 host differential: A=0 B=0 cases=3
+t4_parity: PASS (host differential locked; device leg gated)
+rc=0

@@ -1,0 +1,51 @@
+### T3 intel: T4PROBE.BIN manifest-only wave @ 4dff4d1 2026-10-26T05:33:03Z
+make: *** No rule to make target 'obj/intel/t4_probe.elf'.  Stop.
+probe-build-rc=2
+=== T3 (intel): build ===
+T3_intel: BUILD FAILED
+[290/316] Building CXX object utils/TableGen/CMakeFiles/llvm-tblgen.dir/AsmWriterEmitter.cpp.o
+[291/316] Linking CXX executable bin/clang-tblgen
+[292/316] Building CXX object utils/TableGen/Common/CMakeFiles/obj.LLVMTableGenCommon.dir/CodeGenInstruction.cpp.o
+[293/316] Building CXX object utils/TableGen/Common/CMakeFiles/obj.LLVMTableGenCommon.dir/GlobalISel/GlobalISelMatchTableExecutorEmitter.cpp.o
+[294/316] Building CXX object utils/TableGen/CMakeFiles/llvm-tblgen.dir/FastISelEmitter.cpp.o
+[295/316] Building CXX object utils/TableGen/CMakeFiles/llvm-tblgen.dir/InstrInfoEmitter.cpp.o
+[296/316] Building CXX object utils/TableGen/CMakeFiles/llvm-tblgen.dir/CompressInstEmitter.cpp.o
+[297/316] Building CXX object utils/TableGen/Common/CMakeFiles/obj.LLVMTableGenCommon.dir/Utils.cpp.o
+[298/316] Building CXX object utils/TableGen/Common/CMakeFiles/obj.LLVMTableGenCommon.dir/PredicateExpander.cpp.o
+[299/316] Building CXX object utils/TableGen/Common/CMakeFiles/obj.LLVMTableGenCommon.dir/InfoByHwMode.cpp.o
+[300/316] Building CXX object utils/TableGen/Common/CMakeFiles/obj.LLVMTableGenCommon.dir/GlobalISel/Patterns.cpp.o
+[301/316] Building CXX object utils/TableGen/Common/CMakeFiles/obj.LLVMTableGenCommon.dir/CodeGenInstAlias.cpp.o
+[302/316] Building CXX object utils/TableGen/CMakeFiles/llvm-tblgen.dir/SearchableTableEmitter.cpp.o
+[303/316] Building CXX object utils/TableGen/Common/CMakeFiles/obj.LLVMTableGenCommon.dir/SubtargetFeatureInfo.cpp.o
+[304/316] Building CXX object utils/TableGen/Common/CMakeFiles/obj.LLVMTableGenCommon.dir/DAGISelMatcher.cpp.o
+[305/316] Building CXX object utils/TableGen/CMakeFiles/llvm-tblgen.dir/SubtargetEmitter.cpp.o
+[306/316] Building CXX object utils/TableGen/Common/CMakeFiles/obj.LLVMTableGenCommon.dir/CodeGenTarget.cpp.o
+[307/316] Building CXX object utils/TableGen/Common/CMakeFiles/obj.LLVMTableGenCommon.dir/VarLenCodeEmitterGen.cpp.o
+[308/316] Building CXX object utils/TableGen/CMakeFiles/llvm-tblgen.dir/RegisterInfoEmitter.cpp.o
+[309/316] Building CXX object utils/TableGen/CMakeFiles/llvm-tblgen.dir/GlobalISelCombinerEmitter.cpp.o
+/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-b6dce8e3/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/llvm/utils/TableGen/GlobalISelCombinerEmitter.cpp: In member function ‘bool {anonymous}::CombineRuleBuilder::emitCXXMatchApply(llvm::CodeExpansions&, llvm::gi::RuleMatcher&, llvm::ArrayRef<llvm::gi::CXXPattern*>)’:
+/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-b6dce8e3/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/llvm/utils/TableGen/GlobalISelCombinerEmitter.cpp:1941:15: warning: possibly dangling reference to a temporary [-Wdangling-reference]
+ 1941 |   const auto &Code = CXXPredicateCode::getCustomActionCode(CodeStr);
+      |               ^~~~
+/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-b6dce8e3/third_party/llvm-21.1.8/src/llvm-project-21.1.8.src/llvm/utils/TableGen/GlobalISelCombinerEmitter.cpp:1941:59: note: ‘std::string’ {aka ‘std::__cxx11::basic_string<char>’} temporary created here
+ 1941 |   const auto &Code = CXXPredicateCode::getCustomActionCode(CodeStr);
+      |                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~
+[310/316] Building CXX object utils/TableGen/CMakeFiles/llvm-tblgen.dir/AsmMatcherEmitter.cpp.o
+[311/316] Building CXX object utils/TableGen/Common/CMakeFiles/obj.LLVMTableGenCommon.dir/CodeGenSchedule.cpp.o
+[312/316] Building CXX object utils/TableGen/Common/CMakeFiles/obj.LLVMTableGenCommon.dir/GlobalISel/GlobalISelMatchTable.cpp.o
+[313/316] Building CXX object utils/TableGen/CMakeFiles/llvm-tblgen.dir/GlobalISelEmitter.cpp.o
+[314/316] Building CXX object utils/TableGen/Common/CMakeFiles/obj.LLVMTableGenCommon.dir/CodeGenDAGPatterns.cpp.o
+[315/316] Building CXX object utils/TableGen/Common/CMakeFiles/obj.LLVMTableGenCommon.dir/CodeGenRegisters.cpp.o
+[316/316] Linking CXX executable bin/llvm-tblgen
+[llvm-dist] re-staging the sysroot closure (obj/selfhost/sysroot)
+make[1]: Entering directory '/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-b6dce8e3'
+make[1]: *** No rule to make target 'obj/arm/libc.a'.  Stop.
+make[1]: Leaving directory '/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-b6dce8e3'
+[tools] ERROR: build did not produce third_party/llvm-21.1.8/dist-staging
+make: *** [Makefile:167: tools-staged] Error 1
+tier-rc=1
+--- T4 rows in guest:
+grep: obj/t3_intel_gb020.log: No such file or directory
+grep: obj/t3_intel_gb020.log: No such file or directory
+--- halt=
+DONE

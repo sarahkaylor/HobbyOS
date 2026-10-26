@@ -1,0 +1,3 @@
+### T4b: make t4_compat_selftest @ 4dff4d1 2026-10-26T05:31:41Z
+self-test: OK — flipping ho_open FAILs (rc=0 clean pass), restoring passes
+rc=0

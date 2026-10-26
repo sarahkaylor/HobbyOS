@@ -1,0 +1,17 @@
+row=dent_created rc=0 errno=0
+row=dent_opendir rc=-1 errno=9
+row=fcntl_append_bit rc=1 errno=0
+row=fcntl_getfl_after rc=-1 errno=9
+row=fcntl_getfl_rdwr rc=-1 errno=9
+row=fcntl_setfl_append rc=-1 errno=9
+row=getrandom_16 rc=-1 errno=1
+row=ioctl_tcgets_entty rc=38 errno=0
+row=ioctl_tiocgwinsz_entty rc=38 errno=0
+row=procfd_opendir rc=0 errno=0
+row=procfd_read rc=1 errno=0
+row=uname_machine_x86_64 rc=0 errno=0
+row=uname_rc rc=-1 errno=1
+row=uname_sysname_linux rc=0 errno=0
+row=urandom_open rc=0 errno=0
+row=urandom_read16 rc=16 errno=0
+row=write3 rc=3 errno=0 out=68690a
