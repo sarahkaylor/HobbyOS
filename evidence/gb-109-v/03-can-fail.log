@@ -1,0 +1,33 @@
+=== full-equality (correct sha, retry — my first paste dropped the "e") ===
+[merge_pr] PR #204: ok: graded prefix 3da727c.. matches current head 3da727ce691c.. — merge allowed
+[merge_pr] MERGE ALLOWED (guard only; run with --merge to perform it)
+rc=0
+
+=== BREAK A: prefix comparison replaced by exact equality ===
+mode=a applied
+  FAIL: graded 7-char prefix of head -> ALLOW (REFUSE: graded aaaaaaa..)
+MERGE_PR_SELFTEST: FAIL (1)
+selftest rc=0
+
+--- live: a real 7-char prefix must now be REFUSED ---
+[merge_pr] PR #204: REFUSE: graded 3da727c.. is not a prefix of the current head 3da727ce691c.. — refusing to merge a tree that was not graded
+[merge_pr] NOT MERGED (fail closed)
+rc=1
+
+=== BREAK B: the vacuous --head flag re-introduced ===
+Traceback (most recent call last):
+  File "/home/sarah/.hermes/cache/scratch/gb109_break.py", line 21, in <module>
+    assert "args.head or fetch_head" in out, "fetch_head call site not patched"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: fetch_head call site not patched
+  PASS: main() rejects --head (the vacuous flag call is inexpressible)
+MERGE_PR_SELFTEST: FAIL (1)
+
+--- live: a forced --head now passed the parser ---
+                   [--override OVERRIDE] [--card CARD] [--merge] [--self-test]
+merge_pr.py: error: unrecognized arguments: --head 3da727ce691c08c0f46c2d69db24a03e10516fa9
+
+=== RESTORE ===
+mode=restore applied
+ M tools/board/merge_pr.py
+MERGE_PR_SELFTEST: FAIL (1)

@@ -1,0 +1,26 @@
+=== 3) live guard on PR #204 (head 3da727c…) ===
+$ --graded 3da727c   (7-char prefix of head)
+[merge_pr] PR #204: ok: graded prefix 3da727c.. matches current head 3da727ce691c.. — merge allowed
+[merge_pr] MERGE ALLOWED (guard only; run with --merge to perform it)
+rc=0
+
+$ --graded ffffff    (6 chars -> too short)
+[merge_pr] PR #204: REFUSE: graded sha too short (6<7) — cannot be a verified prefix
+[merge_pr] NOT MERGED (fail closed)
+rc=1
+
+$ --graded 3da727c691c08c0f46c2d69db24a03e10516fa9  (full)
+[merge_pr] PR #204: REFUSE: graded 3da727c.. is not a prefix of the current head 3da727ce691c.. — refusing to merge a tree that was not graded
+[merge_pr] NOT MERGED (fail closed)
+rc=1
+
+$ --graded 3da727d   (7-char NON-prefix)
+[merge_pr] PR #204: REFUSE: graded 3da727d.. is not a prefix of the current head 3da727ce691c.. — refusing to merge a tree that was not graded
+[merge_pr] NOT MERGED (fail closed)
+rc=1
+
+$ --head x           (vacuous flag call)
+usage: merge_pr.py [-h] [--repo REPO] [--pr PR] [--graded GRADED]
+                   [--override OVERRIDE] [--card CARD] [--merge] [--self-test]
+merge_pr.py: error: unrecognized arguments: --head x
+rc=2

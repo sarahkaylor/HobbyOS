@@ -1,0 +1,20 @@
+$ git status (must be clean before the break)
+(empty = clean)
+
+=== BREAK B: the vacuous --head flag re-introduced ===
+break B applied: --head flag added and honoured in main()
+--- self-test must now FAIL on the --head clause ---
+selftest rc=0
+  PASS: main() rejects --head (the vacuous flag call is inexpressible)
+MERGE_PR_SELFTEST: PASS - fail-closed rule + override + #194 goes red
+
+--- live: a forced --head is now ACCEPTED by the parser and can force the head ---
+[merge_pr] PR #204: ok: graded prefix 3da727c.. matches current head 3da727ce691c.. — merge allowed
+[merge_pr] MERGE ALLOWED (guard only; run with --merge to perform it)
+rc=0
+
+=== RESTORE ===
+restored from the pre-break original
+(empty = clean)
+self-test rc=0
+MERGE_PR_SELFTEST: PASS - fail-closed rule + override + #194 goes red
