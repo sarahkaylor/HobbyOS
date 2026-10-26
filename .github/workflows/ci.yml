@@ -5,6 +5,9 @@ concurrency:
   group: mac-ci-main
   cancel-in-progress: false
 
+env:
+  PATH: /opt/homebrew/bin:/opt/homebrew/opt/llvm/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
 jobs:
   arm:
     runs-on: [self-hosted, mac-studio]
