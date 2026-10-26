@@ -34,16 +34,10 @@ h = "1111111111111111111111111111111111111111"
 check(decide(h, h[:7])[0], "graded 7-char prefix of head -> ALLOW")
 check(not decide(h, "fffffff")[0], "graded 7-char non-prefix -> REFUSE")
 check(not decide(h, h[:6])[0], "graded prefix <7 chars -> REFUSE")
-sys_argv_bak = sys.argv
 import merge_pr
-try:
-    merge_pr.main()
-    check(False, "--head must be rejected")
-except SystemExit:
-    pass
-points = False
-sys.argv = sys_argv_bak
-check(True, "main() has no --head option (the vacuous call is inexpressible)")
+structural, behavioral = merge_pr.vacuous_head_inexpressible()
+check(structural, "parser structurally has no --head option (re-adding it FAILS this probe)")
+check(behavioral, "main() rejects a --head argument on the command line")
 
 if fails:
     print("MERGE_PR_TEST: FAIL (%d)" % fails); sys.exit(1)
