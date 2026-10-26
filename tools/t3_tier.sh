@@ -250,21 +250,22 @@ probe_guest() { # $1 = why we are sampling
   # verdict.  Isolating the sample means a dead instrument can never abort the
   # tier; the named line below says so.  A failed sample is an instrument
   # failure, not a verdict.
-  local why="${1:-sample}"
+  local why="${1:-sample}" st=0 started=0
+  # If no monitor was ever attached, or the socket is already gone at entry, that
+  # is the (named) ABSENT/SKIPPED case, not a mid-sample failure.
+  if [ -z "${MON_SOCK:-}" ]; then
+    { echo ""; echo "=== T3 guest sample: SKIPPED — no monitor attached (T3_MONITOR not set; $why) ==="; } >>"$LOG"
+    return 0
+  fi
+  if [ ! -S "$MON_SOCK" ]; then
+    { echo ""; echo "=== T3 guest sample: ABSENT — monitor socket '$MON_SOCK' gone ($why) ===";
+      echo "    no CR2, no held-lock table: the instrument did not run."; } >>"$LOG"
+    return 0
+  fi
+  started=1
   (
     set +e
     set +o pipefail
-    if [ -z "${MON_SOCK:-}" ]; then
-      echo ""
-      echo "=== T3 guest sample: SKIPPED — no monitor attached (T3_MONITOR not set; $why) ==="
-      return 0
-    fi
-    if [ ! -S "$MON_SOCK" ]; then
-      echo ""
-      echo "=== T3 guest sample: ABSENT — monitor socket '$MON_SOCK' gone ($why) ==="
-      echo "    no CR2, no held-lock table: the instrument did not run."
-      return 0
-    fi
     echo ""
     echo "=== T3 guest sample (QEMU monitor $MON_SOCK; $why) ==="
     echo ""
@@ -294,10 +295,12 @@ probe_guest() { # $1 = why we are sampling
     echo "=== end guest sample ==="
   ) >>"$LOG" 2>&1
   local st=$?
-  if [ "$st" != "0" ]; then
-    # A monitor that died mid-sample must be a NAMED instrument failure, so a
-    # truncated sample is never a silent abort (GB-103).  Grading is untouched --
-    # this only annotates the log, it does not set rc.
+  # DoD clause 3: NAME the instrument failure when a started sample did not
+  # survive -- the subshell ended abnormally, OR the monitor socket is now gone
+  # because QEMU died/was killed mid-read (measured RED: SIGTERM the live qemu at
+  # the sample header and the socket leaves with it).  Grading is untouched --
+  # this only annotates the log, it does not set rc.
+  if [ "$started" = "1" ] && { [ "$st" != "0" ] || [ ! -S "$MON_SOCK" ]; }; then
     { echo ""; echo "=== T3 guest sample: INSTRUMENT-FAILURE — monitor read ended abnormally (rc=$st; $why) — sample truncated; tier verdict still graded below ==="; } >>"$LOG"
   fi
   return 0   # probe failure must NEVER abort the tier
