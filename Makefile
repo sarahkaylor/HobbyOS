@@ -2991,7 +2991,11 @@ obj/host_linux_abi_constants_test.o: src/host/linux_abi_constants_test.c src/inc
 	$(HOST_CC) $(HOST_CFLAGS) -Isrc/include -c $< -o $@
 
 ELF_IMAGE_TEST = elf_image_test_host
-$(ELF_IMAGE_TEST): obj/host_elf_image_test.o obj/host_elf_image.o $(ELF_FIXTURES)
+# .generated is an ORDER-ONLY prerequisite: it orders fixture generation before
+# the link but must never appear in $^ (Apple ld hard-errors "file is empty";
+# GNU ld silently ignores it — the macOS symptom is a link failure naming
+# tests/fixtures/elf/.generated).
+$(ELF_IMAGE_TEST): obj/host_elf_image_test.o obj/host_elf_image.o | $(ELF_FIXTURES)
 	$(HOST_CC) -o $@ $^
 obj/host_elf_image_test.o: src/host/elf_image_test.c src/include/elf_image.h
 	@mkdir -p obj
@@ -3018,13 +3022,13 @@ $(WK1C_TEST_HOST): obj/host_wk1c_test.o obj/host_compat.o
 
 obj/host_thrd_test.o: src/user/thrd_test.c src/user_include/*.h
 	@mkdir -p obj
-	$(HOST_CC) $(HOST_CFLAGS) -pthread -c $< -o $@
+	$(HOST_CC) $(HOST_CFLAGS) -pthread -include src/host/host_pthread_compat.h -c $< -o $@
 obj/host_tls_test.o: src/user/tls_test.c src/user_include/*.h
 	@mkdir -p obj
 	$(HOST_CC) $(HOST_CFLAGS) -pthread -c $< -o $@
 obj/host_wk1c_test.o: src/user/wk1c_test.c src/user_include/*.h
 	@mkdir -p obj
-	$(HOST_CC) $(HOST_CFLAGS) -pthread -c $< -o $@
+	$(HOST_CC) $(HOST_CFLAGS) -pthread -include src/host/host_pthread_compat.h -c $< -o $@
 
 # P4: the AF_UNIX acceptance test also runs its logic on glibc
 # (-DHOST_TEST; it includes native headers, not libc.h), and the pure
