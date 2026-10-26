@@ -1,0 +1,23 @@
+=== clause 3 on the FIXED head 7c0175b
+=== before
+.worktrees/dirty/
+.worktrees/live/
+.worktrees/orphan/
+dirty work.txt bytes: 31
+
+=== running the PR's pruner
+PRUNE-STALE-WORKTREES: REFUSED .worktrees/dirty — holds uncommitted/untracked work; NOT deleted (GB-104)
+PRUNE-STALE-WORKTREES: REFUSED .worktrees/orphan — holds uncommitted/untracked work; NOT deleted (GB-104)
+PRUNE-STALE-WORKTREES: ready (git pruned; removed=0 stale worktree dirs, refused=2 carrying work)
+pruner exit=0
+
+=== after
+a) live worktree dir present:      YES
+a) live worktree LIVE.txt present: YES
+b) orphan dir present:             YES
+c) dirty dir present:              YES
+c) dirty work.txt present:         YES
+
+=== git worktree list
+/tmp/gb104-scratch2                 79637f4 [master]
+/tmp/gb104-scratch2/.worktrees/live 79637f4 [livebranch]

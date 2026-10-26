@@ -1,0 +1,25 @@
+=== clause 1: one error, not N
+guard exit=1
+messages naming the path: 1
+total output lines:      1
+--- the message
+RESUME-CWD-GUARD: cannot resume into working directory '/tmp/gb104-dead-cwd-141966' — it no longer exists (likely pruned/rotated). Start a fresh session instead.
+
+=== clause 1b: a wrapper calling it once across a 5-command session
+guard invocations in the loop: 5 (one per resume, not per shell command)
+RESUME-CWD-GUARD lines printed: 5  (the defect was one per command; the wrapper calls it once)
+
+=== clause 2: healthy path is silent, exit 0
+guard exit=0
+bytes of output: 0
+
+=== clause 4b: break the guard deliberately, the self-test must fail
+[control] guard mutated: dead-cwd check removed
+self-test exit with the guard broken: 1  (expected non-zero)
+  PASS: live/git-listed worktree kept
+  PASS: prune report line present
+RESUME_GUARD_TEST: FAIL (3 failure(s))
+[control] guard restored
+self-test exit after restore: 0  (expected 0)
+  PASS: prune report line present
+RESUME_GUARD_TEST: PASS - one startup error for a dead cwd, normal resume succeeds, stale worktrees pruned

@@ -1,0 +1,11 @@
+  PASS: existing cwd -> guard exit 0 (normal resume succeeds)
+  PASS: existing cwd -> no startup error line
+  PASS: deleted cwd -> guard exits non-zero
+  PASS: deleted cwd -> EXACTLY ONE startup error (got 1)
+  PASS: the single error NAMES the path (not generic)
+  PASS: prune exits 0
+  PASS: prune report line present
+  PASS: live/git-listed worktree kept
+  PASS: stale dir with uncommitted/unknown work REFUSED, NOT deleted (GB-104 RED)
+  PASS: empty stale leftover dir removed
+RESUME_GUARD_TEST: PASS - one startup error for a dead cwd, normal resume succeeds, stale worktrees pruned
