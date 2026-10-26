@@ -58,24 +58,33 @@ int get_events(void *buf, int max_events) {
   return count;
 }
 
+/* Fake root directory: the two launch targets the state machine clicks, in the
+ * order it expects (index 0 = NETTEST, 1 = EDITOR -- the menu renders read_dir
+ * order).  Both are real names on the boot disk, so the menu's launch actually
+ * resolves; the editor's own Open dialog reads the REAL disk, because the menu
+ * spawns EDITOR.BIN (the production binary) rather than this harness.
+ * `path` is honoured rather than ignored: the GB-039 launcher also scans
+ * "/GAMES", which this fake disk does not have (and the real FAT-16 driver
+ * answers -1 for a path that does not resolve).  Ignoring the path made that
+ * scan "find" NETTEST.BIN/EDITOR.BIN, mark them /GAMES-resident and launch
+ * "/GAMES/NETTEST.BIN" -- a name no disk carries.  No window ever opened,
+ * num_windows stayed 0, and the run died on "Timeout waiting for
+ * SCREENSHOT_READY" (CI desktop tier, 2026-10-26). */
+static const char *const fake_root[] = {
+  "NETTEST.BIN", "EDITOR.BIN",
+};
+#define FAKE_ROOT_COUNT ((int)(sizeof(fake_root) / sizeof(fake_root[0])))
+
 int read_dir(const char *path, int index, struct sys_dirent *ent) {
-  (void)path;
-  if (index == 0) {
-    ent->name[0] = 'N'; ent->name[1] = 'E'; ent->name[2] = 'T'; ent->name[3] = 'T';
-    ent->name[4] = 'E'; ent->name[5] = 'S'; ent->name[6] = 'T'; ent->name[7] = '.';
-    ent->name[8] = 'B'; ent->name[9] = 'I'; ent->name[10] = 'N'; ent->name[11] = '\0';
-    ent->attr = 0;
-    ent->size = 0;
-    return 0;
-  } else if (index == 1) {
-    ent->name[0] = 'E'; ent->name[1] = 'D'; ent->name[2] = 'I'; ent->name[3] = 'T';
-    ent->name[4] = 'O'; ent->name[5] = 'R'; ent->name[6] = '.'; ent->name[7] = 'B';
-    ent->name[8] = 'I'; ent->name[9] = 'N'; ent->name[10] = '\0';
-    ent->attr = 0;
-    ent->size = 0;
-    return 0;
-  }
-  return -1;
+  if (!path || path[0] != '/' || path[1] != '\0') return -1;
+  if (index < 0 || index >= FAKE_ROOT_COUNT) return -1;
+  const char *src = fake_root[index];
+  int i = 0;
+  while (src[i] && i < (int)sizeof(ent->name) - 1) { ent->name[i] = src[i]; i++; }
+  ent->name[i] = '\0';
+  ent->attr = 0x20;   /* ATTR_ARCHIVE — a regular file, as mcopy writes it */
+  ent->size = 0;
+  return 0;
 }
 
 // Basic key mapping for US keyboard reverse lookup
@@ -114,6 +123,18 @@ static int test_state = 0;
 #define STATE_WAIT_EDITOR_LAUNCH 3
 #define STATE_CLICK_FILE_MENU 4
 #define STATE_WAIT_FINISH 6
+
+/* Substring search over the window text.  The state machine used to spell each
+ * assertion out as a chain of byte compares; a helper keeps them readable and
+ * makes "look for this text" vs "look for that text" a one-line change. */
+static int text_has(const char *text, const char *needle) {
+  for (int i = 0; text[i]; i++) {
+    int k = 0;
+    while (needle[k] && text[i + k] == needle[k]) k++;
+    if (!needle[k]) return 1;
+  }
+  return 0;
+}
 
 /* One presented frame ticks the test state machine.  The desktop presents
  * whole-scene frames with SYS_FLUSH_FB (10) and damage frames with the GX
@@ -218,23 +239,24 @@ static void editor_test_tick(void) {
   }
   if (test_state == STATE_WAIT_FINISH) {
     /* Clicking File->Open must make the editor render its file open
-     * dialog, listing real entries read from the FAT-16 disk. Verify
-     * the dialog title and at least one real file name appear in the
-     * window text. */
-    int found_title = 0;
-    int found_entry = 0;
+     * dialog, listing real entries read from the FAT-16 disk.
+     *
+     * What proves it: the title, the listing header -- "Files in root:" is
+     * printed only on the branch that got entries (the empty branch prints
+     * "No files found. Type name:") -- and EFI, the directory the disk recipe
+     * creates first, so read_dir lists it first.
+     *
+     * This used to look for "MEMTES" (MEMTEST.BIN).  That name rotted: the
+     * boot disk grew eleven directories at the head of its root, the dialog
+     * renders ten rows, and MEMTEST.BIN fell past the visible page -- so the
+     * assertion could never succeed again and the run sat here until the
+     * harness timed out (CI desktop tier, 2026-10-26).  Assert on the listing,
+     * not on a position inside it. */
     char *text = windows[0].text;
-    for (int i = 0; text[i] != '\0'; i++) {
-      if (text[i] == 'O' && text[i+1] == 'p' && text[i+2] == 'e' &&
-          text[i+3] == 'n' && text[i+4] == ' ' && text[i+5] == 'F') {
-        found_title = 1;
-      }
-      if (text[i] == 'M' && text[i+1] == 'E' && text[i+2] == 'M' &&
-          text[i+3] == 'T' && text[i+4] == 'E' && text[i+5] == 'S') {
-        found_entry = 1;
-      }
-    }
-    if (found_title && found_entry) {
+    int found_title = text_has(text, "Open File");
+    int found_listing = text_has(text, "Files in root:");
+    int found_entry = text_has(text, "EFI");
+    if (found_title && found_listing && found_entry) {
       print_console("[TEST] Open File dialog rendered with disk entries! SCREENSHOT_READY\n");
       while(1);
     }
