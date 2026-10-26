@@ -112,7 +112,7 @@ def main():
     for i in issues:
         by_id.setdefault(base_id(i.get("title") or ""), i)
 
-    checked = mismatched = 0
+    checked = mismatched = orphan = 0
     for vid, vi in sorted(by_id.items()):
         if not vid.endswith("-V"):
             continue
@@ -135,7 +135,31 @@ def main():
             print(f"           verdict line: {line}")
 
     print(f"verdicts checked: {checked}, mismatched parents: {mismatched}")
-    return 0 if mismatched == 0 else 1
+
+    # A gate verdict can also be posted on the PARENT card rather than on a -V ticket,
+    # and the -V scan above cannot see those. 'Merge Gate' is GREEN-only, so a parent in
+    # that lane whose newest verdict line says RED is a mismatch in its own right.
+    # (Guard, not a diagnosis: when I added it I wrongly believed GB-067 had no -V ticket
+    # because GET /issues/GB-067-V 404s -- that call takes an index, not a title, and the
+    # gate was #175, GREEN. The scan stays because the shape is real even though that
+    # instance was not.)
+    gated = {vid[:-2] for vid in by_id if vid.endswith("-V")}
+    for pid, pi in sorted(by_id.items()):
+        if pid in gated or pid.endswith("-V"):
+            continue
+        if lane_of(pi) != "Merge Gate":
+            continue
+        verdict, line = verdict_of(pi["number"])
+        if verdict != "RED":
+            continue
+        orphan += 1
+        print(f"  MISMATCH {pid}#{pi['number']} is in 'Merge Gate' carrying a RED "
+              f"and has no -V ticket")
+        print(f"           verdict line: {line}")
+
+    print(f"verdicts checked: {checked}, mismatched parents: {mismatched}, "
+          f"orphaned REDs in Merge Gate: {orphan}")
+    return 0 if mismatched == 0 and orphan == 0 else 1
 
 
 if __name__ == "__main__":
