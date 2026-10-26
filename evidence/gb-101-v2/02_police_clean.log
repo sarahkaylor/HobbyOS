@@ -1,0 +1,5 @@
+=== baseline: police on the real 0-FAIL halted wave
+T3_intel (police evidence/gb-101-v2/clean_wave.log): 130 lines, 0 FAIL lines, 0 fault records across 0 processes, halted=1, kfault=0, boots=1
+T3_intel: PASS (0 FAIL lines, halted)
+T3_intel EXIT=0
+EXIT=0

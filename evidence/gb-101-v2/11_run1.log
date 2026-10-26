@@ -1,0 +1,28 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1500s, log obj/t3_gb101v2_run1.log) ===
+T3_intel: 31377 console lines, 135 FAIL lines, 20 user memory fault records across 18 processes, 84 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 1500s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 1 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 135 FAIL line(s); first 20:
+3291:[SEDTEST] FAIL basic_s (stdout)
+7076:[SIGTEST] FAIL waitpid returns the child got=62 want=4294964048
+7542:[SEDTEST] FAIL basic_s (stdout)
+7643:[COMMTEST] FAIL -2 suppress right-unique
+8035:[COMMTEST] FAIL -3 suppress shared
+8326:[SEDTEST] FAIL s_g (stdout)
+8591:[COMMTEST] FAIL -23 left-unique only
+9152:[SEDTEST] FAIL s_2nd (stdout)
+11959:[SEDTEST] FAIL basic_s (stdout)
+12244:[SIGTEST] FAIL waitpid returns the child got=39 want=4294964048
+12760:  FPU_T torture-child: FAIL
+13576:Loading program for scheduler (v2 AS): [SEDTEST] FAIL s_g (stdout)
+13726:  FPU_T fork-inherit: FAIL
+13776:FPU_T FAILED: 2
+14272:[SEDTEST] FAIL s_2nd (stdout)
+14329:[TEST] DIRECT-ext-cat FAIL
+14605:[CMPTEST] FAIL EOF message on stderr
+14703:[CMPTEST] FAIL empty EOF message
+14722:[CMPTEST] FAIL missing file diagnostic
+14744:[CMPTEST] FAIL -i 4:0 skips prefix
+T3_intel EXIT=1
+RUN1_EXIT=1

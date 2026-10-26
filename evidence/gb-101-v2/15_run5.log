@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1500s, log obj/t3_gb101v2_run5.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 11513 console lines, 116 FAIL lines, 6 user memory fault records across 6 processes, 83 programs exited, halted=1
+T3_intel: FAIL — 116 FAIL line(s); first 20:
+3393:[SEDTEST] FAIL basic_s (stdout)
+3546:[SIGTEST] FAIL waitpid returns the child got=30 want=4294964048
+4804:[SEDTEST] FAIL s_g (stdout)
+4853:/TAC.BIN  FPU_T torture-child: FAIL
+5909:[SEDTEST] FAIL s_2nd (stdout)
+6081:EXPAND.BIN: /TEST1.TXT  FPU_T fork-inherit: FAIL
+6186:FPU_T FAILED: 2
+6582:[SEDTEST] FAIL s_p_n (stdout)
+6822:[CMPTEST] FAIL empty EOF message
+6832:[CMPTEST] FAIL missing file diagnostic
+6874:[CMPTEST] FAIL -i 4:0 skips prefix
+6878:: No such file or directory[CMPTEST] FAIL - operand reads empty stdin
+6890:[CMPTEST] FAIL - stdin EOF diagnostic
+6891:[CKSUMTEST] FAIL 'a\n' (2 bytes)
+6907:/PSTEMPT.TXT[CMPTEST] FAILURES: 6
+6983:[PASTETEST] FAIL empty file first
+7009:/COMM.BIN[SEDTEST] FAIL amp (stdout)
+7128:/NO_SUCH_UNEXPAND_FILE[TACTEST] FAIL missing file
+7134:[TACTEST] FAIL empty separator
+7145:[TACTEST] FAIL 10 KB file crosses read-size boundary
+T3_intel EXIT=1
+RUN5_EXIT=1
