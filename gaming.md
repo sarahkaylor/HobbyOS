@@ -668,6 +668,19 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 
 ### 11.8 Execution log (newest first, maintained by the Coordinator)
 
+**2026-10-26 — session pass (after a session reset): GB-057's mechanism measured live and split into three named defects; M0 clauses 1–2 re-verified; two CPU-killers minted.**
+
+| | |
+|---|---|
+| **Board snapshot** | 168 → **167** open + 112 closed. `sync_gaming_md.py` **IN SYNC (101 plan / 105 board)**, `check_verdicts.py` **39 / 0 mismatched**. Ready 7 · In Progress 43 · Backlog 12 · Icebox 3 · Merge Gate 1 |
+| **GB-057 was never a lock** | Live `T3_MONITOR=1` intel run on `a42ade1` (KVM, 8 CPUs) sampled at the freeze: **`proc_lock` = 0**, no `[LOCKFOREVER]`, no `[STALLBREAK]`; six CPUs in `safe_wfi`, two at `resume_returned_halt+0xd0` with `IF=0`, slot claims frozen at `/0`. Seven earlier passes on that card chased lock strands; that reading is retired **as retired**, on the record, not quietly dropped |
+| **The halt was a predicate, not a hang** | `enter_user_space()` returned instead of iretq-ing; `resume_returned_halt()` records the halt and stops the CPU but never releases its slot claim, so the negative wave-end predicate (anything not FREE/EXITED/ALLOCATED/THREAD_DONE is live work) can never go false. Fix **PR #184**: `slot_claimed_only_by_halted_cpus()` — GB-060's halted-owner rule applied to slots — plus one bounded `[DEADCLAIM]` line, no state mutated. **intel 374/374 · ARM 370/370 unit tiers PASS** |
+| **One card, three defects — split on measurement** | **GB-100** (`enter_user_space` returns; two frame kinds — user `cs=0x1B elr=0x1000007C64`, kernel `cs=0x08 elr=0x70043400`) · **GB-101** (kernel-mode fatal reads a **corrupted trap frame**: `vector=20000 rip=0x97 err=3`, four CPUs dead in one run, monitor shows all four at the `jmp` after `cpu_halt_record`) · GB-057 keeps only the halt predicate and the tier verdict |
+| **Mint discipline** | **2 minted, both from a measurement** (in the DoD text, with the reproduction command); 0 minted to fill a lane. Merged the plan rows as PR #185 (plan-only) so plan↔board stayed in sync across the mint |
+| **M0 gate** | Re-verified, not re-asserted: GB-008 sync + GB-009 baseline (evidence on disk) = MET; **still OPEN on the three named exceptions**. Exception 2 narrowed by a new fact: `main` **does** have CI (`mac-ci`, on push, both arches) — what remains is that it runs per-push, not per-PR, and never invokes `merge_gate.sh` |
+| **What the lanes actually were** | The 5 `Ready` cards were not "unclaimed through inattention": GB-093/GB-095 are genuinely kernel-gated (*wabi's own diagnosis*: tsort/sed are correct, the intel kernel pipe path is not), and GB-053/GB-046 sit behind the M4 acceptance rig. Un-gating them would have produced duplicate work, not throughput — so the lane was filled by **new, measured** kernel work instead of by relabelling |
+| **PR queue** | #184 (new), #182 GB-067, #175 GB-060, #166 GB-020, #163 GB-035 — all five RED-gated on named clauses, **none waiting on a verifier**. No merge on "the code looks right" |
+
 **2026-10-25 (second pass) — §4.3 re-plan (PLAN-014): two RED verdicts were governing parents that sat `In Review`, and in both cases the RED's ground had already been removed — while the reviewer's "wall-gated, no re-mint" rule was closing a lane §4.3 says to fill.** Snapshot on `origin/main` `b874d54`; six open PRs, none merged this pass.
 
 | | |
