@@ -127,31 +127,105 @@ def self_test():
     sys.exit(0)
 
 
+def post_to_card(issue_number, body, env=None):
+    """Post a comment to a board card (Forgejo).  env carries FORGEJO_URL/TOKEN."""
+    env = env or os.environ
+    url = env.get("FORGEJO_URL") or "http://192.168.0.234:3000"
+    tok = env.get("FORGEJO_TOKEN")
+    if not tok:
+        print("[merge_pr] WARNING: FORGEJO_TOKEN absent — could not post to card; comment not delivered")
+        return None
+    import json as _j
+    import urllib.request
+    repo = env.get("BOARD_REPO") or "sarah/gaming-program"
+    req = urllib.request.Request(
+        f"{url}/api/v1/repos/{repo}/issues/{issue_number}/comments",
+        method="POST",
+        headers={"Authorization": "token " + tok, "Content-Type": "application/json"},
+        data=_j.dumps({"body": body}).encode())
+    try:
+        d = _j.load(urllib.request.urlopen(req))
+        return d.get("id")
+    except Exception as e:
+        print(f"[merge_pr] WARNING: card post failed: {e}")
+        return None
+
+
+def merge_pr_github(repo, pr, head_sha, env=None):
+    """Perform the GitHub merge for PR `pr` at `head_sha`.  The guard caller only
+    reaches this when decide() allowed.  Returns (ok, message)."""
+    import json as _j
+    import urllib.request
+    env = env or os.environ
+    tok = env.get("GITHUB_TOKEN")
+    if not tok:
+        return False, "GITHUB_TOKEN absent — cannot merge"
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{repo}/pulls/{pr}/merge", method="PUT",
+        headers={"Authorization": "Bearer " + tok, "Accept": "application/vnd.github+json",
+                 "Content-Type": "application/json"},
+        data=_j.dumps({"merge_method": "merge", "head_sha": head_sha}).encode())
+    try:
+        d = _j.load(urllib.request.urlopen(req))
+        return True, d.get("sha") or d.get("message", "merged")
+    except Exception as e:
+        return False, f"merge API error: {e}"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default="sarahkaylor/HobbyOS")
     ap.add_argument("--pr", type=int)
     ap.add_argument("--head", default=None, help="current PR head 40-hex (default: git HEAD)")
     ap.add_argument("--graded", default=None, help="graded sha named by the GREEN (default: obj/gate/graded-<pr>.sha)")
-    ap.add_argument("--override", default=None, help="written reason to merge through a failing guard")
+    ap.add_argument("--override", default=None,
+                    help="written reason; runs decide() first, NAMES the graded!=head pair, records it and posts it to the card (--card)")
+    ap.add_argument("--card", type=int, default=None, help="board issue number to post the override/verdict comment to")
+    ap.add_argument("--merge", action="store_true",
+                    help="PRODUCTION verb: the merge path a merge wrapper calls — guard, then merge only on allow")
     ap.add_argument("--self-test", action="store_true")
     a = ap.parse_args()
     if a.self_test:
         self_test(); return
-    if a.pr and a.override is None:
+
+    if a.override is not None:
+        # Clause 4: run decide() FIRST so the offending pair is visible and named.
+        head = a.head or head_of_pr(a.pr)
+        graded = a.graded or graded_sha_of(a.pr)
+        allow, reason = decide(head, graded)
+        pair = f"graded {graded} != head {head}" if (graded and head and graded != head) else (reason)
+        note = (f"merge_pr override for PR #{a.pr}: {pair} — reason: {a.override}")
+        path = record_override(a.pr, a.override)
+        card_msg = f"**merge_pr override recorded** ({path})\n\n{note}"
+        cid = post_to_card(a.card, card_msg) if a.card else None
+        print(f"[merge_pr] OVERRIDE recorded ({path}) — {pair}")
+        if a.card:
+            print(f"[merge_pr] override posted to card #{a.card} (comment {cid})")
+        print("[merge_pr] MERGE ALLOWED (written override)")
+        sys.exit(0)
+
+    if a.pr and a.merge:
+        # Clause 5: the production merge path / call site.
         head = a.head or head_of_pr(a.pr)
         graded = a.graded or graded_sha_of(a.pr)
         allow, reason = decide(head, graded)
         print(f"[merge_pr] PR #{a.pr}: {reason}")
-        if allow:
-            print(f"[merge_pr] MERGE ALLOWED"); sys.exit(0)
-        print(f"[merge_pr] NOT MERGED (fail closed)")
-        sys.exit(1)
-    if a.override:
-        path = record_override(a.pr, a.override)
-        print(f"[merge_pr] OVERRIDE recorded ({path}); merge allowed")
-        sys.exit(0)
-    ap.error("need --pr (+ --head/--override) or --self-test")
+        if not allow:
+            print("[merge_pr] REFUSED TO MERGE (fail closed)")
+            sys.exit(1)
+        ok, msg = merge_pr_github(a.repo, a.pr, head)
+        print(f"[merge_pr] MERGED #{a.pr}: {msg}" if ok else f"[merge_pr] MERGE FAILED: {msg}")
+        sys.exit(0 if ok else 1)
+
+    if a.pr:
+        head = a.head or head_of_pr(a.pr)
+        graded = a.graded or graded_sha_of(a.pr)
+        allow, reason = decide(head, graded)
+        print(f"[merge_pr] PR #{a.pr}: {reason}")
+        print("[merge_pr] MERGE ALLOWED (guard only; run with --merge to perform it)" if allow else "[merge_pr] NOT MERGED (fail closed)")
+        sys.exit(0 if allow else 1)
+
+    ap.error("need --pr (with --head/--merge/--override) or --self-test")
 
 
 if __name__ == "__main__":
