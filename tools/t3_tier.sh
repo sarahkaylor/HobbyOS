@@ -211,7 +211,9 @@ fi
 # false hang verdict is worse than no verdict, since "a hang is a defect" is only
 # useful while an environment failure cannot masquerade as one.  Refuse to start,
 # with a distinct exit code, and say why.
-if command -v fuser >/dev/null 2>&1 && fuser "$ROOT/disk.img" >/dev/null 2>&1; then
+if { command -v lsof >/dev/null 2>&1 && [ -n "$(lsof -t "$ROOT/disk.img" 2>/dev/null)" ]; } || \
+   { ! command -v lsof >/dev/null 2>&1 && command -v fuser >/dev/null 2>&1 && \
+     [ -n "$(fuser "$ROOT/disk.img" 2>/dev/null | tr -cd '0-9')" ]; }; then
   echo "T3_${ARCH}: REFUSING TO START — $ROOT/disk.img is in use by another QEMU."
   echo "T3_${ARCH}: a stale frozen guest must be killed first (its monitor socket is usually /tmp/t3_monitor_*.sock)"
   echo "T3_${ARCH} EXIT=2 (environment, not a tier result)"
