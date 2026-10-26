@@ -1,0 +1,19 @@
+### G1: merge_pr.py --self-test @ ba15b4e 2026-10-26T23:38:15Z
+usage: merge_pr [-h] [--repo REPO] [--pr PR] [--graded GRADED]
+                [--override OVERRIDE] [--card CARD] [--merge] [--self-test]
+merge_pr: error: unrecognized arguments: --head deadbeef
+  PASS: graded==head -> allow (ok: graded prefix aa)
+  PASS: graded!=head -> refuse (REFUSE: graded bbbbb)
+  PASS: no graded sha -> FAILS CLOSED (REFUSE: GREEN names )
+  PASS: no head -> refuse (REFUSE: no current h)
+  PASS: parses a 40-hex sha from a VERDICT/graded line
+  PASS: no sha in VERDICT -> empty (fails closed upstream)
+  PASS: today's #194 incident shape (graded 7de6dde.., merged e8c7dc8..) -> RED for the mismatch (REFUSE: graded 7de6dde.. is not a prefix of )
+  PASS: graded 7-char prefix of head -> ALLOW (ok: graded prefix aaaaaa)
+  PASS: graded 7-char prefix that is NOT a prefix -> REFUSE (REFUSE: graded fffffff..)
+  PASS: graded prefix <7 chars -> REFUSE (REFUSE: graded sha too short (6<7))
+  PASS: graded <7 chars (h[:5]) -> REFUSE (REFUSE: graded aaaaaaa.. is not a )
+  PASS: parser structurally has no --head option (re-adding it FAILS this probe)
+  PASS: main() rejects a --head argument on the command line
+MERGE_PR_SELFTEST: PASS - fail-closed rule + override + #194 goes red
+rc=0

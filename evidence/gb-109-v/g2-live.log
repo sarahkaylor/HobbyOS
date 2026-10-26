@@ -1,0 +1,18 @@
+### G2: live guard against the real PR 204 head (3da727ce691c08c0f46c2d69db24a03e10516fa9) 2026-10-26T23:38:26Z
+--- (a) 7-char prefix of the head:
+[merge_pr] PR #204: ok: graded prefix 3da727c.. matches current head 3da727ce691c.. — merge allowed
+[merge_pr] MERGE ALLOWED (guard only; run with --merge to perform it)
+rc=0
+--- (b) too short (6 chars):
+[merge_pr] PR #204: REFUSE: graded sha too short (6<7) — cannot be a verified prefix
+[merge_pr] NOT MERGED (fail closed)
+rc=1
+--- (c) the vacuous flag:
+usage: merge_pr.py [-h] [--repo REPO] [--pr PR] [--graded GRADED]
+                   [--override OVERRIDE] [--card CARD] [--merge] [--self-test]
+merge_pr.py: error: unrecognized arguments: --head x
+rc=2
+--- (d) 7-char NON-prefix of the head:
+[merge_pr] PR #204: REFUSE: graded ffffff0.. is not a prefix of the current head 3da727ce691c.. — refusing to merge a tree that was not graded
+[merge_pr] NOT MERGED (fail closed)
+rc=1

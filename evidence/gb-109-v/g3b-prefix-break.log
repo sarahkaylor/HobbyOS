@@ -1,0 +1,6 @@
+### G3b: DELIBERATE BREAK — prefix compare forced to equality 2026-10-26T23:38:42Z
+    if head == graded:
+  PASS: no graded sha -> FAILS CLOSED (REFUSE: GREEN names )
+  FAIL: graded 7-char prefix of head -> ALLOW (REFUSE: graded aaaaaaa..)
+  PASS: parser structurally has no --head option (re-adding it FAILS this probe)
+MERGE_PR_SELFTEST: FAIL (1)

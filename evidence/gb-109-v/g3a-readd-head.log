@@ -1,0 +1,8 @@
+### G3a: DELIBERATE BREAK — re-add --head to the parser (the vacuous path) 2026-10-26T23:38:35Z
+205:    ap.add_argument("--head", default=None, help="(deliberately re-added break)")
+  PASS: graded <7 chars (h[:5]) -> REFUSE (REFUSE: graded aaaaaaa.. is not a )
+[merge_pr] PR #1: REFUSE: GREEN names no graded sha — cannot confirm the graded tree is the current head
+[merge_pr] NOT MERGED (fail closed)
+  FAIL: parser structurally has no --head option (re-adding it FAILS this probe)
+  PASS: main() rejects a --head argument on the command line
+MERGE_PR_SELFTEST: FAIL (1)
