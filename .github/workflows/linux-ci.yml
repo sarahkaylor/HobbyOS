@@ -19,6 +19,13 @@ concurrency:
 # and every checkout fails (this exact bug bit the mac runner).
 env:
   PATH: /usr/lib/llvm-21/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  # The in-OS LLVM /TOOLS staging is a multi-hour cold build and no test tier
+  # uses it (same policy as mac-ci). The runner also keeps a prebuilt copy at
+  # /srv/ci/llvm-dist-staging and installs it below, so this is the fallback
+  # for a missing/stale cache rather than the normal path.
+  TOOLS_SKIP: "1"
+  # TCG (ARM guest) boots slower than the 30 s default.
+  DESKTOP_TEST_TIMEOUT: "120"
 
 jobs:
   arm:
@@ -36,11 +43,14 @@ jobs:
         run: |
           set -euo pipefail
           src=/srv/ci/llvm-dist-staging
-          [ -d "$src" ] || { echo "::error::missing prebuilt LLVM staging at $src"; exit 1; }
+          if [ ! -d "$src" ]; then
+            echo "::warning::no prebuilt LLVM staging at $src; TOOLS_SKIP=1 keeps the build going without /TOOLS"
+            exit 0
+          fi
           anchor="$(sha256sum third_party/llvm-21.1.8/anchors.sha256 | cut -d' ' -f1)"
           if [ -f "$src/SOURCE_ANCHOR" ] && [ "$(cat "$src/SOURCE_ANCHOR")" != "$anchor" ]; then
-            echo "::error::stale LLVM staging cache (anchor mismatch); rebuild it with tools/build-llvm-dist-staging.sh"
-            exit 1
+            echo "::warning::stale LLVM staging cache (anchor mismatch); not installing it (rebuild via tools/build-llvm-dist-staging.sh)"
+            exit 0
           fi
           cp -a "$src" third_party/llvm-21.1.8/dist-staging
       - name: 'ARM tier 1: host golden tests (native, no QEMU)'
@@ -83,11 +93,14 @@ jobs:
         run: |
           set -euo pipefail
           src=/srv/ci/llvm-dist-staging
-          [ -d "$src" ] || { echo "::error::missing prebuilt LLVM staging at $src"; exit 1; }
+          if [ ! -d "$src" ]; then
+            echo "::warning::no prebuilt LLVM staging at $src; TOOLS_SKIP=1 keeps the build going without /TOOLS"
+            exit 0
+          fi
           anchor="$(sha256sum third_party/llvm-21.1.8/anchors.sha256 | cut -d' ' -f1)"
           if [ -f "$src/SOURCE_ANCHOR" ] && [ "$(cat "$src/SOURCE_ANCHOR")" != "$anchor" ]; then
-            echo "::error::stale LLVM staging cache (anchor mismatch); rebuild it with tools/build-llvm-dist-staging.sh"
-            exit 1
+            echo "::warning::stale LLVM staging cache (anchor mismatch); not installing it"
+            exit 0
           fi
           cp -a "$src" third_party/llvm-21.1.8/dist-staging
       - name: 'Fresh OVMF NVRAM (the intel -pflash file doubles as the vars store)'
