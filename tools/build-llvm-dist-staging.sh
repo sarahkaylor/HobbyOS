@@ -168,7 +168,11 @@ mkdir -p "$WORK/sysroot/include/libc-include" "$WORK/sysroot/include/kernel-incl
 cp -a src/libc/include/. "$WORK/sysroot/include/libc-include/"
 cp -a src/include/.      "$WORK/sysroot/include/kernel-include/"
 cp -a src/user_include/. "$WORK/sysroot/include/user-include/"
-make obj/arm/libc.a obj/arm/crt0.o obj/arm/libcxx.a -j"$JOBS" 2>&1 | tee -a "$LOG"
+# ARCH=arm is explicit: the in-OS (selfhost) toolchain is an ARM product, and
+# the parent make's command-line ARCH (e.g. ARCH=intel from an x64 CI job)
+# propagates through MAKEFLAGS — without this override the obj/arm/* targets
+# have no rule under ARCH=intel and tools-staged dies.
+make ARCH=arm obj/arm/libc.a obj/arm/crt0.o obj/arm/libcxx.a -j"$JOBS" 2>&1 | tee -a "$LOG"
 cp -a obj/arm/crt0.o obj/arm/libc.a obj/arm/libcxx.a "$WORK/sysroot/lib/"
 
 # Empty stub archives for the host-style -l flags LLVM's configure adds
