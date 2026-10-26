@@ -1,0 +1,80 @@
+{
+  "arch": "arm",
+  "games": "PONG.BIN:10,XNIBBLER.BIN:10,XCRYPT.BIN:10,NES.BIN:8",
+  "cycles": 2,
+  "crop": "0,0,1820,1010",
+  "freeze_window": 4,
+  "results": [
+    {
+      "cycle": 0,
+      "game": "PONG.BIN",
+      "slot": 16,
+      "samples": 10,
+      "frozen": false,
+      "launched": true
+    },
+    {
+      "cycle": 0,
+      "game": "XNIBBLER.BIN",
+      "slot": 20,
+      "samples": 10,
+      "frozen": true,
+      "launched": true
+    },
+    {
+      "cycle": 0,
+      "game": "XCRYPT.BIN",
+      "slot": 21,
+      "samples": 10,
+      "frozen": true,
+      "launched": true
+    },
+    {
+      "cycle": 0,
+      "game": "NES.BIN",
+      "slot": 22,
+      "samples": 8,
+      "frozen": false,
+      "launched": false
+    },
+    {
+      "cycle": 1,
+      "game": "PONG.BIN",
+      "slot": 16,
+      "samples": 10,
+      "frozen": false,
+      "launched": false
+    },
+    {
+      "cycle": 1,
+      "game": "XNIBBLER.BIN",
+      "slot": 20,
+      "samples": 10,
+      "frozen": false,
+      "launched": false
+    },
+    {
+      "cycle": 1,
+      "game": "XCRYPT.BIN",
+      "slot": 21,
+      "samples": 10,
+      "frozen": false,
+      "launched": false
+    },
+    {
+      "cycle": 1,
+      "game": "NES.BIN",
+      "slot": 22,
+      "samples": 8,
+      "frozen": false,
+      "launched": false
+    }
+  ],
+  "rss_floor_mb": 335.64,
+  "rss_peak_mb": 381.39,
+  "rss_full_run_samples": 77,
+  "rss_growth_mb": 45.76,
+  "rss_ok": true,
+  "summary": "FAIL",
+  "captured_at": "2026-10-26T15:51:52.156772+00:00"
+}
