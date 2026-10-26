@@ -45,6 +45,7 @@
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/random.h> /* getentropy() — macOS declares it only here */
 
 /* Host shims from src/host/compat.c. */
 void print_console(const char *s);
@@ -296,13 +297,15 @@ int main(void) {
   test_isatty();
 #endif
   test_main_stack_bounds();
-  test_thread_stack_bounds();
 #if !(defined(__APPLE__) && defined(HOST_TEST))
+  test_thread_stack_bounds();
   test_custom_stack_thread();
 #else
-  /* Darwin has no pthread_attr_setstack; host_pthread_compat.h returns
-   * ENOTSUP and this case is covered by the Linux host/device runs. */
-  print_console("SKIP: custom-stack case (no pthread_attr_setstack on Darwin)\n");
+  /* Darwin's BSDthreads do not round-trip a live thread's stack region
+   * through pthread_attr_getstack(), and there is no pthread_attr_setstack
+   * semantics for caller stacks; both cases are covered by Linux/device
+   * runs. */
+  print_console("SKIP: thread stack-bounds + custom-stack cases (Darwin BSDthreads)\n");
 #endif
 
   if (fails) {
