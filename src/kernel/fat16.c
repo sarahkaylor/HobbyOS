@@ -1322,6 +1322,33 @@ int fat16_open(const char* filename, struct file* f) {
   return fat16_open_ex(filename, f, 0);
 }
 
+/* GB-020: open a DIRECTORY for getdents64.  Resolves `path`, requires it to be
+ * an actual directory (attr 0x10) and not the synthetic root (which has no
+ * on-disk entry - dir_sector 0), and fills the file with the directory's own
+ * entry so fat16_getdents64 can read its children.  The resulting fd is typed
+ * FILE_TYPE_FAT16DIR by the caller, which keeps O_TRUNC / data-read paths off
+ * it (a directory has no data path, and truncating one must never reach
+ * fat16_truncate).  Returns 0 on success, -1 on error (ENOTDIR/ENOENT). */
+int fat16_open_dir(const char* path, struct file* f) {
+  if (!path || !f) return -1;
+  char abs_path[256];
+  fat16_absolute_path(path, abs_path);
+
+  struct fat16_dir_entry entry;
+  uint32_t sector = 0, offset = 0;
+  if (fat16_resolve_path(abs_path, &entry, &sector, &offset) != 0) return -1;
+  if (!(entry.attr & 0x10)) return -1;      /* not a directory */
+  if (sector == 0) return -1;               /* synthetic root: no children fd */
+
+  f->type = FILE_TYPE_FAT16DIR;
+  f->fat16.entry = entry;                   /* the directory's own entry */
+  f->fat16.dir_sector = sector;
+  f->fat16.dir_offset = offset;
+  f->fat16.cursor = 0;                      /* getdents resume index */
+  f->fat16.dirty = 0;
+  return 0;
+}
+
 int fat16_read_dir(const char* path, int index, char* out_name, uint8_t* out_attr, uint32_t* out_size) {
   char abs_path[256];
   fat16_absolute_path(path, abs_path);
@@ -2513,4 +2540,134 @@ int fat16_stats(uint64_t *out_total, uint64_t *out_free) {
   *out_total = (uint64_t)total_clusters * cluster_size;
   *out_free = free_clusters * cluster_size;
   return 0;
+}
+
+/* GB-020: getdents64 backend.  For an open directory fd, enumerate the
+ * directory's children by cluster into linux_dirent64 records (x86_64 layout:
+ * d_ino@0 u64, d_off@8 s64, d_reclen@16 u16, d_type@18 u8, d_name@19).  The
+ * two literal "." and ".." entries are synthesized first (Linux opendir
+ * present them; musl/getdents callers skip them by name).  dir_cluster==0
+ * means the root directory (fixed region).
+ */
+int fat16_getdents64(struct file *f, int start_index, void *ubuf, int bufsize) {
+  if (!f || !ubuf || bufsize <= 0) return -1;
+
+  uint64_t flags = spinlock_acquire_irqsave(&fat_lock);
+  uint16_t cluster = f->fat16.entry.start_cluster;
+  uint8_t buf[SECTOR_SIZE];
+  struct lfn_state st;
+  lfn_reset(&st);
+
+  int used = 0;
+  /* Real children occupy logical entry indices 2,3,... ("."=0, ".."=1). */
+  int current_idx = (start_index < 2) ? 0 : 2;
+
+  /* "." and ".." are implicit in every FAT directory.  They occupy logical
+   * entry indices 0 and 1.  Provide them when the resume index allows. */
+  if (start_index < 2) {
+    static const char *const selves[2] = {".", ".."};
+    for (int s = 0; s < 2 && used < bufsize; s++) {
+      if (current_idx < start_index) { current_idx++; continue; }
+      int nlen = (int)(selves[s] ? 2 : 1) - 1;
+      /* nlen is the string length: "."=>1 ".."=>2 */
+      nlen = (s == 0) ? 1 : 2;
+      int reclen = (19 + nlen + 1 + 7) & ~7;
+      if (used + reclen > bufsize) break;
+      uint8_t *p = (uint8_t *)ubuf + used;
+      uint64_t ino = 4096u + (uint64_t)(current_idx + 1);
+      uint64_t off = (uint64_t)(current_idx + 1);
+      for (int k = 0; k < 8; k++) p[k] = (uint8_t)(ino >> (k * 8));
+      for (int k = 0; k < 8; k++) p[8 + k] = (uint8_t)(off >> (k * 8));
+      p[16] = (uint8_t)(reclen & 0xFF); p[17] = (uint8_t)((reclen >> 8) & 0xFF);
+      p[18] = 4; /* DT_DIR */
+      for (int n = 0; n < nlen; n++) p[19 + n] = (uint8_t)selves[s][n];
+      p[19 + nlen] = 0;
+      used += reclen;
+      current_idx++;
+    }
+  }
+
+  /* Walk the real children. */
+  int stopped = 0;
+  if (cluster == 0) {
+    /* root directory: fixed region of root_dir_sectors sectors */
+    for (uint32_t i = 0; i < root_dir_sectors && !stopped; i++) {
+      uint32_t sector_num = root_dir_sector + i;
+      spinlock_release_irqrestore(&fat_lock, flags);
+      if (virtio_blk_read_sector(sector_num, buf, 1) != 0) {
+        spinlock_acquire_irqsave(&fat_lock);
+        return used > 0 ? used : -1;
+      }
+      flags = spinlock_acquire_irqsave(&fat_lock);
+      struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
+      for (unsigned int j = 0; j < SECTOR_SIZE / 32 && !stopped; j++) {
+        if (entries[j].name[0] == 0x00) { stopped = 1; break; }
+        if (entries[j].name[0] == (char)0xE5) { lfn_reset(&st); continue; }
+        if (entries[j].attr == 0x0F) { lfn_add_chunk(&st, (const unsigned char *)&entries[j]); continue; }
+        if (entries[j].attr & 0x08) { lfn_reset(&st); continue; }
+        if (current_idx < start_index) { current_idx++; lfn_reset(&st); continue; }
+        /* pack */
+        char name[32];
+        lfn_entry_display(&st, &entries[j], name, sizeof name);
+        int nlen = 0; while (name[nlen] && nlen < 255) nlen++;
+        int reclen = (19 + nlen + 1 + 7) & ~7;
+        if (used + reclen > bufsize) { stopped = 1; break; }
+        uint8_t *p = (uint8_t *)ubuf + used;
+        uint64_t ino = 4096u + (uint64_t)(current_idx + 1);
+        uint64_t off = (uint64_t)(current_idx + 1);
+        for (int k = 0; k < 8; k++) p[k] = (uint8_t)(ino >> (k * 8));
+        for (int k = 0; k < 8; k++) p[8 + k] = (uint8_t)(off >> (k * 8));
+        p[16] = (uint8_t)(reclen & 0xFF); p[17] = (uint8_t)((reclen >> 8) & 0xFF);
+        p[18] = (entries[j].attr & 0x10) ? 4 : 8;
+        for (int n = 0; n < nlen; n++) p[19 + n] = (uint8_t)name[n];
+        p[19 + nlen] = 0;
+        used += reclen;
+        current_idx++;
+        lfn_reset(&st);
+      }
+    }
+  } else {
+    uint16_t c = cluster;
+    while (c != 0 && c < 0xFFF0 && !stopped) {
+      for (uint32_t s = 0; s < bpb_sectors_per_cluster && !stopped; s++) {
+        uint32_t sector_num = data_sector + (c - 2) * bpb_sectors_per_cluster + s;
+        spinlock_release_irqrestore(&fat_lock, flags);
+        if (virtio_blk_read_sector(sector_num, buf, 1) != 0) {
+          spinlock_acquire_irqsave(&fat_lock);
+          return used > 0 ? used : -1;
+        }
+        flags = spinlock_acquire_irqsave(&fat_lock);
+        struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
+        for (unsigned int j = 0; j < SECTOR_SIZE / 32 && !stopped; j++) {
+          if (entries[j].name[0] == 0x00) { stopped = 1; break; }
+          if (entries[j].name[0] == (char)0xE5) { lfn_reset(&st); continue; }
+          if (entries[j].attr == 0x0F) { lfn_add_chunk(&st, (const unsigned char *)&entries[j]); continue; }
+          if (entries[j].attr & 0x08) { lfn_reset(&st); continue; }
+          if (current_idx < start_index) { current_idx++; lfn_reset(&st); continue; }
+          char name[32];
+          lfn_entry_display(&st, &entries[j], name, sizeof name);
+          int nlen = 0; while (name[nlen] && nlen < 255) nlen++;
+          int reclen = (19 + nlen + 1 + 7) & ~7;
+          if (used + reclen > bufsize) { stopped = 1; break; }
+          uint8_t *p = (uint8_t *)ubuf + used;
+          uint64_t ino = 4096u + (uint64_t)(current_idx + 1);
+          uint64_t off = (uint64_t)(current_idx + 1);
+          for (int k = 0; k < 8; k++) p[k] = (uint8_t)(ino >> (k * 8));
+          for (int k = 0; k < 8; k++) p[8 + k] = (uint8_t)(off >> (k * 8));
+          p[16] = (uint8_t)(reclen & 0xFF); p[17] = (uint8_t)((reclen >> 8) & 0xFF);
+          p[18] = (entries[j].attr & 0x10) ? 4 : 8;
+          for (int n = 0; n < nlen; n++) p[19 + n] = (uint8_t)name[n];
+          p[19 + nlen] = 0;
+          used += reclen;
+          current_idx++;
+          lfn_reset(&st);
+        }
+      }
+      c = read_fat(c);
+    }
+  }
+
+  spinlock_release_irqrestore(&fat_lock, flags);
+  f->fat16.cursor = current_idx; /* resume position for a subsequent call */
+  return used;
 }

@@ -28,7 +28,17 @@ typedef enum {
      yet.  Distinct from FILE_TYPE_EMPTY (= free): an abandoned UNINIT slot
      must never be mistaken for a usable FAT16 file with garbage fields.
      Appended last so existing values do not shift. */
-  FILE_TYPE_UNINIT
+  FILE_TYPE_UNINIT,
+  /* GB-020: an OPEN DIRECTORY fd (getdents64 reads it).  Distinct from
+     FILE_TYPE_FAT16 so readers/writers refuse it (a dir has no data read
+     path) and so O_TRUNC can never reach fat16_truncate on it.  Appended
+     after UNINIT: never shifts the values above. */
+  FILE_TYPE_FAT16DIR,
+  /* GB-020: virtual /proc/<pid>/fd directory.  getdents64 lists the
+     process's open fds; read/write refuse it.  Distinct from FAT16DIR
+     because there is no on-disk dir entry.  Appended last so the values
+     above never shift. */
+  FILE_TYPE_PROCFD
 } file_type_t;
 
 struct vm_object;
@@ -295,6 +305,10 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
 int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp);
 int file_stat_path(struct process *p, const char *path, struct k_stat *st,
                    int *errp);
+
+/* GB-020: getdents64 over an open directory fd.  (p, fd, ubuf, bufsize) ->
+ * bytes written (0 at end) | negative errno (-EBADF/-ENOTDIR/-EINVAL). */
+int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize);
 
 /* --- P4 (docs/browser/p4-ipc-design.md; freeze consented 2026-09-30) ----- */
 

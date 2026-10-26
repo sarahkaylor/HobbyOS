@@ -49,3 +49,5 @@ dent_total
 dent_have_alpha
 dent_have_beta
 dent_have_charlie
+procfd_opendir
+procfd_read
