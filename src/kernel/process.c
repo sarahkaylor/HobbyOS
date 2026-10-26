@@ -1812,6 +1812,11 @@ void schedule(struct trap_frame *tf, int is_yield) {
       uint64_t now_l = timer_get_ms();
       if (now_l == 0)
         now_l = 1; /* a zero stamp means "never observed", so never stamp zero */
+      /* GB-057 (Coordinator, 2026-10-26): bounded report for [DEADCLAIM] below.
+         A slot excluded every idle iteration would otherwise flood the console
+         it is reporting on; eight lines is enough to name every offender on an
+         8-CPU machine. */
+      static int deadclaim_reported;
       for (int i = 0; i < MAX_PROCESSES; i++) {
         int st = proc_table[i].state;
         if (st != PROC_STATE_BLOCKED) {
@@ -1846,6 +1851,43 @@ void schedule(struct trap_frame *tf, int is_yield) {
             proc_table[i].state != PROC_STATE_EXITED &&
             proc_table[i].state != PROC_STATE_ALLOCATED &&
             proc_table[i].state != PROC_STATE_THREAD_DONE) {
+          /* GB-057 (Coordinator, 2026-10-26): a RUNNING slot whose ONLY claimer
+             is a CPU that recorded its own halt can never run again, so counting
+             it as live work makes the wave-end predicate unreachable.  Measured
+             on origin/main a42ade1, intel T3, 8 CPUs: CPUs 2 and 6 each printed
+             `resume call RETURNED (must never happen)` -- the resume path then
+             stopped them via cpu_halt_record() -- and the two slots they still
+             claimed (pids 15 and 20) sat RUNNING for the rest of the run while
+             the other six CPUs idled in safe_wfi.  [IDLESTUCK] showed exactly
+             that: `c2=15/0 c6=20/0 ... c0=-1/3344` (two claim counters frozen at
+             /0, six climbing), and the tier never printed `System halt`.
+
+             This is the same rule GB-060 already applies to LOCKS -- a halted
+             owner's resource is not live -- applied to process slots, and it
+             keys on a POSITIVE record (cpu_halt_record is written immediately
+             before the CPU stops), never on a timeout or a guess.  It cannot
+             cause the probe54 premature halt: a slot with a live claimer, or
+             with no claimer at all, still counts as live work exactly as before.
+             No state is mutated here, so nothing is double-run or reaped. */
+          if (proc_table[i].state == PROC_STATE_RUNNING &&
+              slot_claimed_only_by_halted_cpus(i)) {
+            if (deadclaim_reported < 8) {
+              deadclaim_reported++;
+              struct db_buf dd;
+              dd.n = 0;
+              db_s(&dd, "[DEADCLAIM] slot=");
+              db_i(&dd, i);
+              db_s(&dd, " pid=");
+              db_i(&dd, proc_table[i].pid);
+              db_s(&dd, " name=");
+              db_s(&dd, proc_table[i].name);
+              db_s(&dd, " claimed only by halted cpus -- excluded from the "
+                        "wave-end predicate (no CPU can run it; the resume path "
+                        "halted that CPU)\n");
+              db_emit(&dd);
+            }
+            continue; /* cannot make progress, so it is not live work */
+          }
           any_alive = 1;
           break;
         }
@@ -3308,6 +3350,35 @@ int lostwake_stale_claim_reclaimable_at(int k, uint64_t now_ms) {
    per candidate under proc_lock. */
 int lostwake_stale_claim_reclaimable(int k) {
   return lostwake_stale_claim_reclaimable_at(k, timer_get_ms());
+}
+
+/* GB-057 (Coordinator, 2026-10-26): is `k` claimed ONLY by CPUs that recorded
+   their own halt?  A CPU that ran resume_returned_halt() (or any fatal halt
+   path) called cpu_halt_record() immediately before stopping and will never run
+   the slot again, so such a claim is dead by construction -- unlike a stale
+   heartbeat, which is an inference about time.
+
+   Called by the scheduler's wave-end predicate: counting a slot claimed only by
+   halted CPUs as live work is what made `System halt` unreachable on the intel
+   tier (measured: two halted CPUs, two RUNNING slots, six cores idling in
+   safe_wfi, no halt for the rest of the run).
+
+   Returns 0 when the slot has no claimer at all: that case belongs to the
+   no-claimer reaper, not to this test, and widening it here would change the
+   halt predicate for a state this function cannot judge.  Caller holds
+   proc_lock. */
+int slot_claimed_only_by_halted_cpus(int k) {
+  if (k < 0 || k >= MAX_PROCESSES)
+    return 0;
+  int claimers = 0;
+  for (int c = 0; c < MAX_CPUS; c++) {
+    if (cpu_current_pids[c] != k)
+      continue;
+    claimers++;
+    if (!cpu_is_halted((uint32_t)c))
+      return 0; /* a live claimer: the slot is genuinely running */
+  }
+  return claimers > 0;
 }
 
 /**

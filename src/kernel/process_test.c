@@ -890,6 +890,72 @@ static void test_lostwake_stale_claim_reclaim(void) {
   }
 }
 
+/* GB-057 (Coordinator, 2026-10-26): the wave-end predicate must not count a
+ * RUNNING slot that only a HALTED CPU claims as live work.  Measured on the
+ * intel T3 tier: two CPUs printed `resume call RETURNED (must never happen)`,
+ * called cpu_halt_record() and stopped, still claiming pids 15 and 20; those two
+ * slots then kept `any_alive` true for the rest of the run while six cores idled
+ * in safe_wfi, so the tier never reached `System halt`.
+ *
+ * The rule is deliberately narrow and keys on the POSITIVE halt record, not on a
+ * timeout: a slot with any live claimer, or with no claimer at all, is live work
+ * exactly as before (the no-claimer case belongs to the LOSTWAKE reaper). */
+static void test_halted_claimer_is_not_live_work(void) {
+  tests_run++;
+  uart_puts("  Running test_halted_claimer_is_not_live_work...\n");
+  extern volatile uint8_t cpu_halted[];
+  const int k = 7;
+  int saved_state[MAX_PROCESSES];
+  int saved_claims[MAX_CPUS];
+  uint8_t saved_halted[MAX_CPUS];
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *q = process_get_pcb(i);
+    saved_state[i] = q ? q->state : PROC_STATE_FREE;
+  }
+  for (int c = 0; c < MAX_CPUS; c++) {
+    saved_claims[c] = cpu_current_pids[c];
+    saved_halted[c] = cpu_halted[c];
+    cpu_current_pids[c] = -1;
+    cpu_halted[c] = 0;
+  }
+  process_get_pcb(k)->state = PROC_STATE_RUNNING;
+
+  /* Case 1: no claimer -- not this function's case (the reaper owns it). */
+  EXPECT_EQ(slot_claimed_only_by_halted_cpus(k), 0);
+
+  /* Case 2: one claimer, alive: genuine live work. */
+  cpu_current_pids[3] = k;
+  EXPECT_EQ(slot_claimed_only_by_halted_cpus(k), 0);
+
+  /* Case 3: that claimer recorded its halt: dead by construction. */
+  cpu_halted[3] = 1;
+  EXPECT_EQ(slot_claimed_only_by_halted_cpus(k), 1);
+
+  /* Case 4: a second, LIVE claimer appears: live work again (the halt of one
+     CPU must not let the wave end under a CPU that is still running the slot). */
+  cpu_current_pids[5] = k;
+  EXPECT_EQ(slot_claimed_only_by_halted_cpus(k), 0);
+
+  /* Case 5: both claimers halted: dead. */
+  cpu_halted[5] = 1;
+  EXPECT_EQ(slot_claimed_only_by_halted_cpus(k), 1);
+
+  /* Case 6: bounds. */
+  EXPECT_EQ(slot_claimed_only_by_halted_cpus(-1), 0);
+  EXPECT_EQ(slot_claimed_only_by_halted_cpus(MAX_PROCESSES), 0);
+
+  /* Restore. */
+  for (int i = 0; i < MAX_PROCESSES; i++) {
+    struct process *q = process_get_pcb(i);
+    if (q)
+      q->state = saved_state[i];
+  }
+  for (int c = 0; c < MAX_CPUS; c++) {
+    cpu_current_pids[c] = saved_claims[c];
+    cpu_halted[c] = saved_halted[c];
+  }
+}
+
 /* w5 (ii): a fault-killed child must NEVER report status 0.  The trap
  * fault paths (EC=0x00/0x3C/generic) used to call process_exit(tf), which
  * reaped the stale x0 left in the frame -- a crash could false-pass as
@@ -966,6 +1032,7 @@ void process_test_suite(void) {
   test_process_thread_slot_reclaim();
   test_loader_fail_fast_full_table();
   test_lostwake_stale_claim_reclaim();
+  test_halted_claimer_is_not_live_work(); /* GB-057 */
   test_process_futex_machine();
   test_process_set_tls();
   test_p5_sigaction_storage();
