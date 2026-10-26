@@ -1,0 +1,9 @@
+### G4: absent probe in the capture must FAIL, not SKIP 2026-10-26T22:21:46Z
+=== t4_device: leg A reference: /tmp/gb066_legA.out ===
+=== t4_device: capture leg B from serial '/tmp/gb066v3_noprope.log' ===
+t4_device: FAIL — the probe never arrived in the guest (no 't4-probe-arrived'
+  in /tmp/gb066v3_noprope.log after 120s).  This is a FAIL, not a SKIP (DoD clause 3).
+  (tail of serial:)
+no probe here
+System halt
+rc=1

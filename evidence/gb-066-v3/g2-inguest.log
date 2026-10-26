@@ -1,0 +1,16 @@
+### G2: dispatch + in-guest run @ 357b871 2026-10-26T22:18:20Z
+probe-rebuild-rc=0
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+=== T3 (intel): run (deadline 300s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-bbfc7fc4/obj/t3_intel_gb066v3.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 121 console lines, 0 FAIL lines, 0 user memory fault records across 0 processes, 0 programs exited, halted=1
+T3_intel: FAIL — only 0 programs exited (floor 55): too little work for a complete wave, so this cannot be a pass
+T3_intel EXIT=1
+tier-rc=1
+--- dispatch + arrival:
+[WAVE-MANIFEST] T4PROBE.BIN
+[WAVE-TRY] T4PROBE.BIN
+[ARRIVED] T4PROBE.BIN rc<0
+--- row count: 0
+DONE

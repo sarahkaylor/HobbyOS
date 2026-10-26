@@ -1,0 +1,6 @@
+### G1: build the probe + image class @ 357b871 2026-10-26T22:17:45Z
+build-rc=0
+  Type:                              DYN (Position-Independent Executable file)
+  Entry point address:               0x1cc1
+USER_VA_BASE:
+src/include/vm.h:27:#define USER_VA_BASE 0x1000000000ULL /* 64 GiB */

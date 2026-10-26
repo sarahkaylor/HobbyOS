@@ -1,0 +1,9 @@
+### G5: make host_tests on the gate tree in a clean worktree @ 357b871 2026-10-26T23:00:43Z
+host_tests-rc=0
+
+=== Test Results ===
+Checks run:    482
+Checks failed: 0
+ALL APPS SUITE TESTS PASSED
+TEST EXIT: 0
+DONE
