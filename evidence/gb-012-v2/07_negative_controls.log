@@ -1,0 +1,16 @@
+=== control A: the carry-over diff check can be non-empty (older sha 5b3159d)
+ src/kernel/process.c      | 207 ++++++++++++++++++++++++++++++++++++++++++++++
+ src/kernel/process_test.c |  67 +++++++++++++++
+ 2 files changed, 274 insertions(+)
+
+=== control B: a presence grep for an absent symbol returns 0 (the grep discriminates)
+epoll_ctl in process.c: 0
+futex in process.c: 20
+
+=== T2 exit logic (a non-zero failed count must exit non-zero)
+26:    exit 1
+35:    exit 1
+59:    elif grep -q "UNIT TESTS FAILED" qemu.log; then
+60:        echo "Tests failed!"
+63:        exit 1
+72:exit 1
