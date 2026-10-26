@@ -1,0 +1,22 @@
+=== before
+.worktrees/dirty/
+.worktrees/live/
+.worktrees/orphan/
+dirty work.txt bytes: 31
+
+=== running the PR's pruner
+PRUNE-STALE-WORKTREES: removed stale worktree .worktrees/dirty
+PRUNE-STALE-WORKTREES: removed stale worktree .worktrees/orphan
+PRUNE-STALE-WORKTREES: ready (git pruned; removed=2 stale worktree dirs)
+pruner exit=0
+
+=== after
+a) live worktree dir present:      YES
+a) live worktree LIVE.txt present: YES
+b) orphan dir present:             NO
+c) dirty dir present:              NO
+c) dirty work.txt present:         NO
+
+=== git worktree list
+/tmp/gb104-scratch                 ae69027 [master]
+/tmp/gb104-scratch/.worktrees/live ae69027 [livebranch]
