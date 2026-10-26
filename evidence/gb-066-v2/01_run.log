@@ -1,0 +1,28 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 300s, log obj/t4_legB.log) ===
+T3_intel: 31795 console lines, 341 FAIL lines, 22 user memory fault records across 18 processes, 87 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 300s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 1 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 341 FAIL line(s); first 20:
+2880:[SEDTEST] FAIL basic_s (stdout)
+3109:[SIGTEST] FAIL waitpid returns the child got=25 want=4294964048
+3196:MMTEST FAIL /CAT.BIN
+3368:  TLS_T errno-isolation: FAIL
+3529:[MD5TEST] FAIL abc digest
+3566:[EXPANDTEST] FAIL default tabs (8) on file
+3591:[EXPANDTEST] FAIL -t 4 file
+3621:[EXPANDTEST] FAIL -t 1 file
+3659:[EXPANDTEST] FAIL -t 4,8 list + past last stop
+3694:[SEDTEST] FAIL s_g (stdout)
+3706:[UNEXPTEST] FAIL default 9 blanks -> tab+space
+3715:[EXPANDTEST] FAIL -t 4 mid-line tabs
+3760:/HEDGNU.BIN  FPU_T torture-child: FAIL
+3761:  FPU_T fork-pipe: FAIL
+3775:[EXPANDTEST] FAIL -i keeps tabs after text
+3776:FPU_T FAILED: 2
+3788:[CUTTEST] FAIL -c 5- file
+3855:[COMMTEST] FAIL -2 suppress right-unique
+3861:[CUTTEST] FAIL -b 2,4 file
+3910:[TAILTEST] FAIL -c 8
+T3_intel EXIT=1
+TIER_EXIT=1
