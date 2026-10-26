@@ -330,6 +330,29 @@ log, and confirm every unmatched name is a `!= 0` guard.
   complete; `System halt.` present): `SHELLTEST WATCHDOG: protocol stalled
   25 s`, `shell_test3: FAILED ls -l /SUB1`, `[NFS] rpc: no reply from
   server` -> `[NFS] FAILED (1 of 60)`.
+- **A per-call kernel diagnostic on a hot path is a console DoS.** The
+  `[WAITPID] ECHILD` line used to print once per failed waitpid; a parent that
+  reaps in its main loop (`desktop_reap_children()`) made that the steady
+  state, and one ARM T3 run measured 811,548 of them — 99.97% of the serial
+  (the desktop tier alone: 498,662). The UART is ~11 KB/s, so the writer
+  blocks holding the console and every other process's output starves. That
+  is what produced the "ambient" `SHELLTEST WATCHDOG: protocol stalled` and
+  the desktop tier's "Timeout waiting for SCREENSHOT_READY": the shell and the
+  screenshot were fine, the console was not. Fixed by latching the line once
+  per PCB (`process.echild_logged`). Before blaming a test or a driver for a
+  timeout, check the serial for ONE diagnostic repeated millions of times
+  (`sort | uniq -c | sort -rn | head`), and never add a print to a syscall
+  path without a rate limit.
+- **The tier's own log is now uploaded with the failure.** `ci.yml` publishes
+  `obj/t3_<arch>.log`, so a red run's console is in the artifact bundle; the
+  old bundle only carried the root `qemu.log`, which is build output. Read the
+  uploaded log before re-running locally.
+- **`SHELLTEST WATCHDOG` patience must outlast the test's own retry budget.**
+  The watchdog is a liveness backstop for the unbounded `read_until(..., 0)`
+  calls, not a latency bound: at 25 s it preempted the verdict of the 5e2 loop
+  (10 attempts x (8 s + 8 s + 2 s) = 180 s), so a slow wave went red for a
+  stall the test classifies SKIP. `SHTEST_WD_PATIENCE_MS` (240 s) is above
+  every bounded wait in the file and far inside the 2700 s tier deadline.
 
 ## Common Pitfalls
 
@@ -352,6 +375,7 @@ log, and confirm every unmatched name is a `!= 0` guard.
 4. **Wrong ARCH.** RDMA/PCIe/GPU tests are x86_64-only; running them on ARM silently no-ops.
 5. **Stale `disk.img` / zombie QEMU.** If results look impossible, `make clean` (kills qemu, wipes artifacts) and re-run. QEMU takes a write lock on `disk.img`, so a leftover ARM/x64 QEMU makes the other arch's run die instantly with `Failed to get "write" lock` — kill the old VM, don't rebuild.
 6. **Only one QEMU at a time.** ARM and x86_64 runs share `disk.img` and cannot run concurrently; sequence them (or use `make clean` between).
+7. **Never hand-count the length in a shell-protocol `write()`.** `write(fd, "wc -c OUT7.TXT\n", 14)` sent 14 bytes of a 15-byte literal: the newline never arrived, the shell glued the next command onto that line (`wc -c OUT7.TXTmake --version > M.TXT`), wc honoured the borrowed `--version`, and its version banner landed in M.TXT. The visible failure was two steps away and said nothing about the cause: `shell_test: FAILED make redirect banner check. cat saw: wc (textutils) 2.1`, with no `MAKE.BIN` load anywhere in the console. Use `send_line()`/`s_len` so the string states its own length, and when a shell-protocol check fails, grep the serial for the *previous* command's program load — a missing newline shows up as two commands fused in the loader's path lines.
 
 ## Verification Checklist
 
