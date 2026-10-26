@@ -1,0 +1,8 @@
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+[stage] T4PROBE.BIN + WAVE.CFG staged
+=== T3 (intel): run (deadline 300s, log obj/t4_legB2.log) ===
+T3_intel: REFUSING TO START — /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-d3f64ee8/disk.img is in use by another QEMU.
+T3_intel: a stale frozen guest must be killed first (its monitor socket is usually /tmp/t3_monitor_*.sock)
+T3_intel EXIT=2 (environment, not a tier result)
+TIER_EXIT=2
