@@ -31,7 +31,7 @@ CCACHE_DIR="${CCACHE_DIR:-$HOME/.cache/hobbyos-ccache}"
 mkdir -p "$CCACHE_DIR"
 
 # Smoke test: ccache must be able to compile with $CC before we wrap anything.
-probe="$(mktemp --suffix=.c)"
+probe="$(mktemp "${TMPDIR:-/tmp}/ccache-probe.XXXXXX.c")"
 printf 'int probe(void){return 42;}\n' > "$probe"
 if ! "$CCACHE_BIN" "$CC" -c "$probe" -o "${probe%.c}.o" >/dev/null 2>&1; then
   echo "setup_ccache.sh: '$CCACHE_BIN $CC' smoke compile failed." >&2

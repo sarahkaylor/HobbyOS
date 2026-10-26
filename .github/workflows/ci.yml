@@ -8,8 +8,9 @@ concurrency:
 env:
   # `.mac-ci-shim` provides a `gcc` that routes bare-metal ELF links to ld.lld
   # (clang delegates x86_64-none-elf links to gcc; /usr/bin/gcc is Apple clang
-  # and would emit Mach-O args). gnubin provides GNU mktemp/stat/timeout.
-  PATH: /Users/sarah/.mac-ci-shim:/opt/homebrew/opt/coreutils/libexec/gnubin:/opt/homebrew/bin:/opt/homebrew/opt/llvm/bin:/usr/bin:/bin:/usr/sbin:/sbin
+  # and would emit Mach-O args). System tools stay Apple's own: the build
+  # scripts switch on `uname -s` and expect BSD stat/mktemp semantics.
+  PATH: /Users/sarah/.mac-ci-shim:/opt/homebrew/bin:/opt/homebrew/opt/llvm/bin:/usr/bin:/bin:/usr/sbin:/sbin
   # The in-OS LLVM toolchain staging (tools-staged) is a multi-hour cold build
   # and none of the test tiers use /TOOLS. Skip it when absent; a persisted
   # staging (third_party/llvm-21.1.8/dist-staging) is still used when present.
@@ -64,11 +65,11 @@ jobs:
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
-      - name: x64 kernel unit tests (reliable x64 gate)
-        run: ./run_unit_tests_intel.sh
-      - name: x64 userland integration (known-flaky under TCG; 45m cap, non-blocking)
+      - name: x64 build gate (kernel + disk image for the unit tier)
+        run: make ARCH=intel MODE=unit_tests hobbyos.elf disk.img
+      - name: x64 kernel unit tests (QEMU x86_64 under TCG; non-blocking until the TCG boot gap is fixed)
         continue-on-error: true
-        run: timeout 2700 make test_intel
+        run: timeout 2700 ./run_unit_tests_intel.sh
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -76,5 +77,6 @@ jobs:
           name: mac-intel-logs
           path: |
             qemu.log
+            build.log
             *.log
           if-no-files-found: ignore

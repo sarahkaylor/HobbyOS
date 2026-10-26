@@ -27,7 +27,7 @@ if ! command -v "$CC" >/dev/null 2>&1; then
 fi
 
 echo "=== cache_test: cold vs cached build time ==="
-probe="$(mktemp --suffix=.c)"
+probe="$(mktemp "${TMPDIR:-/tmp}/cachetest.XXXXXX.c")"
 printf '#include <stdio.h>\nint probe(void){printf("probe\\n");return 42;}\n' > "$probe"
 obj="${probe%.c}.o"
 
