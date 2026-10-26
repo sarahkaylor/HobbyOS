@@ -242,22 +242,35 @@ trap cleanup EXIT
 # absent instrument is a FAILED instrument, so no monitor or no socket prints an
 # explicit line instead of nothing at all.
 probe_guest() { # $1 = why we are sampling
-  if [ -z "${MON_SOCK:-}" ]; then
-    { echo ""; echo "=== T3 guest sample: SKIPPED — no monitor attached (T3_MONITOR not set; $1) ==="; } >>"$LOG"
-    return 0
-  fi
-  if [ ! -S "$MON_SOCK" ]; then
-    { echo ""; echo "=== T3 guest sample: ABSENT — monitor socket '$MON_SOCK' gone ($1) ===";
-      echo "    no CR2, no held-lock table: the instrument did not run."; } >>"$LOG"
-    return 0
-  fi
-  {
+  # Run the whole sample in an ISOLATED subshell with errexit/pipefail OFF
+  # (GB-103): the sample reads the QEMU monitor over a unix socket, and when
+  # the guest is being torn down mid-read (cleanup SIGTERMs QEMU, or the guest
+  # froze hard) a socat/pipe can die of SIGPIPE.  Under `set -euo pipefail`
+  # that aborts the tier BEFORE the verdict code below runs -> exit 141, no
+  # verdict.  Isolating the sample means a dead instrument can never abort the
+  # tier; the named line below says so.  A failed sample is an instrument
+  # failure, not a verdict.
+  local why="${1:-sample}"
+  (
+    set +e
+    set +o pipefail
+    if [ -z "${MON_SOCK:-}" ]; then
+      echo ""
+      echo "=== T3 guest sample: SKIPPED — no monitor attached (T3_MONITOR not set; $why) ==="
+      return 0
+    fi
+    if [ ! -S "$MON_SOCK" ]; then
+      echo ""
+      echo "=== T3 guest sample: ABSENT — monitor socket '$MON_SOCK' gone ($why) ==="
+      echo "    no CR2, no held-lock table: the instrument did not run."
+      return 0
+    fi
     echo ""
-    echo "=== T3 guest sample (QEMU monitor $MON_SOCK; $1) ==="
+    echo "=== T3 guest sample (QEMU monitor $MON_SOCK; $why) ==="
     echo ""
     echo "--- all CPUs (control registers included: CR2 names the fault address) ---"
     printf 'info registers -a\n' | timeout 20 socat - "UNIX-CONNECT:$MON_SOCK" 2>/dev/null \
-      | tr -d '\r' | grep -av '^(qemu)' || echo "(monitor read failed)"
+      | tr -d '\r' | grep -av '^(qemu)' || echo "(monitor read failed: socket closed mid-sample?)"
     ELF="obj/$ARCH/hobbyos.elf"
     [ -f "$ELF" ] || ELF="hobbyos.elf"
     NMB="$(command -v llvm-nm || command -v nm || true)"
@@ -279,7 +292,15 @@ probe_guest() { # $1 = why we are sampling
       fi
     fi
     echo "=== end guest sample ==="
-  } >>"$LOG" 2>&1
+  ) >>"$LOG" 2>&1
+  local st=$?
+  if [ "$st" != "0" ]; then
+    # A monitor that died mid-sample must be a NAMED instrument failure, so a
+    # truncated sample is never a silent abort (GB-103).  Grading is untouched --
+    # this only annotates the log, it does not set rc.
+    { echo ""; echo "=== T3 guest sample: INSTRUMENT-FAILURE — monitor read ended abnormally (rc=$st; $why) — sample truncated; tier verdict still graded below ==="; } >>"$LOG"
+  fi
+  return 0   # probe failure must NEVER abort the tier
 }
 
 deadline=$(( $(date +%s) + T3_TIMEOUT ))
