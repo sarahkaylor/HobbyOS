@@ -272,7 +272,20 @@ skeleton as an issue header block (see `tools/board/README.md`).
    parent's current lane and exits non-zero on a mismatch. It exists because the propagation was
    missed twice in one loop — GB-010 and GB-070 both sat `In Review` with a RED already posted
    against them, reading as "awaiting review" when a gate had been run and failed.
-6. Merge-gate CI (all test tiers + differential + both arches) must be green → `Merge Gate`.
+6. Merge gate = the **local** gate is green (all test tiers + differential + both arches, §6) → `Merge Gate`.
+   **GitHub Actions CI is NOT this gate** — see the CI policy below.
+
+> **CI POLICY (in force 2026-10-26, set by Sarah; supersedes every earlier CI/checks reference in this
+> document): the swarm IGNORES GitHub Actions CI.** `.github/workflows/{ci,linux-ci}.yml` is brand new
+> and not yet trustworthy, so no lane may wait for, poll, cite, quote, or gate on check/status results
+> (`gh pr checks`, `statusCheckRollup`, `check-runs`, "checkable", "waiting for CI"). A red or pending
+> run is not evidence of a defect; a green run is not evidence of correctness; neither may appear in a
+> review, a RED/GREEN verdict, an evidence block, or a merge decision. A PR with red checks is treated
+> exactly as if it had none. The authoritative gate is unchanged: the §6 tier commands run on a farm VM
+> by a Verifier, output quoted verbatim — that local gate still decides `Merge Gate` / RED / GREEN. The
+> same text is prepended to every agent charter (`/opt/swarm-charters/*.txt`, canonical copy at
+> `/opt/swarm/CI-POLICY.txt` on each VM), and the healthcheck's merge rule now keys on a recorded
+> local-gate GREEN, not on check state. Lift this policy explicitly when CI is stable.
 7. Coordinator merges (or escalates `decision` to Sarah) → closes ticket **with evidence link** → lane `Done`.
 
 - **Verifier honesty is law.** A Verifier never verifies its own just-finished implementation without the
@@ -998,4 +1011,6 @@ long-lived `hermes -w` tmux sessions).**
 Merge path for workers (no GitHub token on the farms): push `ticket/<n>-<slug>` to `origin`, post an
 `EVIDENCE` comment on the ticket, and the Coordinator merges from `origin` after running the gate.
 The automated merge-gate CI is GB-005 — until it exists the Coordinator runs the gate by hand and
-records the output on the ticket.
+records the output on the ticket. **As of 2026-10-26 GitHub Actions is not a gate at all (§4.2 CI
+policy): neither the Coordinator nor a Verifier may wait on, cite, or be blocked by check state. The
+hand-run local gate is the only merge authority.**
