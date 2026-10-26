@@ -1,0 +1,11 @@
+=== memfd coverage at its own tier (T1 host)
+make: 'memfd_test_host' is up to date.
+memfd_test_host:
+  PASS: memfd_create: syscall 319 creates an fd
+  PASS: flags: MFD_CLOEXEC -> FD_CLOEXEC set on the fd
+  PASS: flags: F_GET_SEALS == 0 on a fresh ALLOW_SEALING memfd
+  PASS: flags: F_ADD_SEALS(SEAL|WRITE) succeeds
+  PASS: flags: F_GET_SEALS reflects added SEAL|WRITE
+  PASS: shm: child MAP_SHARED mapping sees the parent's write (after fork)
+memfd_test_host: 6 checks, 0 failed
+MEMFD_HOST_EXIT=0
