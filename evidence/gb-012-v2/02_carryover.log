@@ -1,0 +1,5 @@
+=== carry-over claim: git diff --stat 9ed2059 origin/main -- src/kernel/{process,vm,fs}.c src/kernel/{process,vm}_test.c
+EXIT=0 (empty output above = claim holds)
+
+-- and vs this gate tree
+EXIT=0
