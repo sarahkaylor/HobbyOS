@@ -1,0 +1,33 @@
+=== BREAK A: prefix comparison -> exact equality ===
+mode=A applied
+selftest rc=1
+  PASS: no graded sha -> FAILS CLOSED (REFUSE: GREEN names )
+  FAIL: graded 7-char prefix of head -> ALLOW (REFUSE: graded aaaaaaa..)
+  PASS: parser structurally has no --head option (re-adding it FAILS this probe)
+MERGE_PR_SELFTEST: FAIL (1)
+
+=== BREAK B: the vacuous --head flag honoured again ===
+mode=B applied
+selftest rc=1
+  PASS: no graded sha -> FAILS CLOSED (REFUSE: GREEN names )
+  FAIL: parser structurally has no --head option (re-adding it FAILS this probe)
+MERGE_PR_SELFTEST: FAIL (1)
+--- live: does a forced --head now permit the merge? ---
+[merge_pr] PR #204: REFUSE: graded 0000000.. is not a prefix of the current head 3da727ce691c.. — refusing to merge a tree that was not graded
+[merge_pr] NOT MERGED (fail closed)
+rc=0
+
+=== BREAK C (residual-gap probe): a DIFFERENTLY-NAMED flag honouring the head ===
+mode=C applied
+selftest rc=0
+  PASS: no graded sha -> FAILS CLOSED (REFUSE: GREEN names )
+  PASS: parser structurally has no --head option (re-adding it FAILS this probe)
+MERGE_PR_SELFTEST: PASS - fail-closed rule + override + #194 goes red
+--- live: --forced-head can force the head ---
+[merge_pr] PR #204: REFUSE: graded 0000000.. is not a prefix of the current head 3da727ce691c.. — refusing to merge a tree that was not graded
+[merge_pr] NOT MERGED (fail closed)
+
+=== RESTORED ===
+(empty = clean)
+selftest rc=0
+MERGE_PR_SELFTEST: PASS - fail-closed rule + override + #194 goes red

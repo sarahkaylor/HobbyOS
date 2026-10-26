@@ -1,0 +1,10 @@
+=== BREAK C (corrected): a differently-named flag that sets head == graded ===
+mode=C applied
+selftest rc=0
+MERGE_PR_SELFTEST: PASS - fail-closed rule + override + #194 goes red
+--- live: invented sha on both sides -> ALLOW (the vacuous call, by another name) ---
+[merge_pr] PR #204: REFUSE: graded 0000000.. is not a prefix of the current head 3da727ce691c.. — refusing to merge a tree that was not graded
+[merge_pr] NOT MERGED (fail closed)
+rc=1
+
+=== (this is a residual weakness, outside the card clause: only the literal --head is probed) ===
