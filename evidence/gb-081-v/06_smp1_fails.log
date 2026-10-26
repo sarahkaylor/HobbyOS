@@ -1,0 +1,10 @@
+=== SMP=1 run: the 3 FAIL lines, verbatim
+1481:  POLLTST timeout took >= 85ms and < 5000ms (elapsed seen): FAIL
+2234:1POLLTST FAILED:  check(s)
+7637:SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST. Process table:
+
+=== CMPTEST lines in this run
+[CMPTEST] all 16 cases passed
+[KERNEL] Process 49: CMPTEST.BIN exited unexpectedly or gracefully.
+  pid=49 ppid=-1 state=4 CMPTEST.BIN
+CMPTEST FAIL lines: 0
