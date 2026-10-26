@@ -135,16 +135,12 @@ def self_test():
         ok, r = decide(h[:5], h); check(not ok, "graded <7 chars (h[:5]) -> REFUSE (%s)" % r[:34])
     except Exception as e:
         check(True, "graded <7 chars -> REFUSE (guard rejects too-short)" )
-    # GB-109: the vacuous call (a --head flag forcing head==graded) is INEXPRESSIBLE:
-    # main()'s parser has NO --head option, so it exits on "unrecognized".
-    sysargv, sys.argv = sys.argv, ["merge_pr", "--pr", "1", "--head", "ff"]
-    try:
-        main()
-        check(False, "--head must be rejected by main()")
-    except SystemExit:
-        check(True, "main() rejects --head (the vacuous flag call is inexpressible)")
-    finally:
-        sys.argv = sysargv
+    # GB-109: the vacuous call (a --head flag forcing head==graded) is INEXPRESSIBLE.
+    # Real check: build_parser() structurally has NO --head option AND main() rejects one
+    # on the command line.  Re-introducing --head fails the structural probe.
+    structural, behavioral = vacuous_head_inexpressible()
+    check(structural, "parser structurally has no --head option (re-adding it FAILS this probe)")
+    check(behavioral, "main() rejects a --head argument on the command line")
     if fails:
         print("MERGE_PR_SELFTEST: FAIL (%d)" % fails); sys.exit(1)
     print("MERGE_PR_SELFTEST: PASS - fail-closed rule + override + #194 goes red")
@@ -196,7 +192,7 @@ def merge_pr_github(repo, pr, head_sha, env=None):
         return False, f"merge API error: {e}"
 
 
-def main():
+def build_parser():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default="sarahkaylor/HobbyOS")
     ap.add_argument("--pr", type=int)
@@ -209,7 +205,30 @@ def main():
     ap.add_argument("--merge", action="store_true",
                     help="PRODUCTION verb: the merge path a merge wrapper calls — guard, then merge only on allow")
     ap.add_argument("--self-test", action="store_true")
-    a = ap.parse_args()
+    return ap
+
+
+def vacuous_head_inexpressible():
+    """Real, not-just-asserted check that the guard's parser has NO --head option and
+    rejects one on the command line.  If a future edit re-adds an honoured --head, the
+    structural probe FAILS (the option is back) AND the behavioral call no longer exits
+    with a parse error."""
+    parser = build_parser()
+    opts = parser._option_string_actions
+    structural = "--head" not in opts and "-H" not in opts
+    sys.argv_saved, sys.argv = sys.argv, ["merge_pr", "--pr", "1", "--head", "deadbeef"]
+    try:
+        main()
+        behavioral = False      # main() parsed --head and ran -> the vacuous path exists
+    except SystemExit:
+        behavioral = True       # main() rejected the unrecognized --head
+    finally:
+        sys.argv = sys.argv_saved
+    return (structural, behavioral)
+
+
+def main():
+    a = build_parser().parse_args()
     if a.self_test:
         self_test(); return
 
@@ -250,7 +269,7 @@ def main():
         print("[merge_pr] MERGE ALLOWED (guard only; run with --merge to perform it)" if allow else "[merge_pr] NOT MERGED (fail closed)")
         sys.exit(0 if allow else 1)
 
-    ap.error("need --pr (with --head/--merge/--override) or --self-test")
+    build_parser().error("need --pr (with --head/--merge/--override) or --self-test")
 
 
 if __name__ == "__main__":
