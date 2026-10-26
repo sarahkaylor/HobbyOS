@@ -1,0 +1,15 @@
+### G5b: live monitored capture retry @ 509d9ce 2026-10-26T21:59:41Z
+build-rc=0
+  Type:                              DYN (Position-Independent Executable file)
+  Entry point address:               0x1cc1
+-rwxr-xr-x 1 sarah sarah 69456 Oct 26 21:59 obj/intel/t4_probe_pie
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+=== T3 (intel): run (deadline 420s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-2192a712/obj/t3_intel_gb107b.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 150 console lines, 0 FAIL lines, 0 user memory fault records across 0 processes, 1 programs exited, halted=1
+T3_intel: FAIL — only 1 programs exited (floor 55): too little work for a complete wave, so this cannot be a pass
+T3_intel EXIT=1
+tier-rc=1
+arrived=1 probe-exit=1 rows=17
+DONE

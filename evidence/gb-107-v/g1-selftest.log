@@ -1,0 +1,12 @@
+### G1: serial_classifier_test.py @ 509d9ce 2026-10-26T21:51:52Z
+  PASS: full log (end marker) -> FULL (got FULL)
+  PASS: mid-cut log (guest alive, no end marker) -> TRUNCATED (got TRUNCATED)
+  PASS: TRUNCATED is a DISTINCT verdict from GUEST_STOPPED
+  PASS: early-death log (guest not alive) -> GUEST_STOPPED (got GUEST_STOPPED)
+  PASS: monitored-run record carries lines (SERIAL-TRUNCATED lines=18 bytes=604 alive-at-cutoff=1 end-marker=0 (expected 43) 18 lines (expected 43), guest ALIVE at cutoff, no end marker: capture cut mid-stream)
+  PASS: monitored-run record carries bytes (SERIAL-TRUNCATED lines=18 bytes=604 alive-at-cutoff=1 end-marker=0 (expected 43) 18 lines (expected 43), guest ALIVE at cutoff, no end marker: capture cut mid-stream)
+  PASS: monitored-run record carries guest_alive_at_cutoff (SERIAL-TRUNCATED lines=18 bytes=604 alive-at-cutoff=1 end-marker=0 (expected 43) 18 lines (expected 43), guest ALIVE at cutoff, no end marker: capture cut mid-stream)
+  PASS: monitored-run record carries end_marker (SERIAL-TRUNCATED lines=18 bytes=604 alive-at-cutoff=1 end-marker=0 (expected 43) 18 lines (expected 43), guest ALIVE at cutoff, no end marker: capture cut mid-stream)
+  PASS: a broken classifier (live-cut -> GUEST_STOPPED) FAILS the mid-cut case (got GUEST_STOPPED)
+SERIAL_CLASSIFIER_TEST: PASS - full/mid-cut/early-death classified; broken classifier caught
+rc=0

@@ -1,0 +1,12 @@
+### G4: t4_device.sh --self-test @ 509d9ce 2026-10-26T21:52:22Z
+[self-test] clause 2 (wrong shim must FAIL):
+  OK — wrong shim FAILED as required
+[self-test] clause 3 (absent probe must FAIL, not skip):
+  OK — absent probe FAILED as required
+[self-test] GB-079 (a probe edit must FAIL in both --check modes):
+  OK — healthy probe PASSES (leg A absent)
+  OK — injected probe row FAILS (leg A absent)
+  OK — healthy probe PASSES (leg A present)
+  OK — injected probe row FAILS (leg A present)
+self-test result: fail_count=0
+rc=0

@@ -1,0 +1,6 @@
+### G5c: the annotation on the REAL capture (FULL) 2026-10-26T22:06:13Z
+t4_device: probe ARRIVED in guest (t4-probe-arrived present).
+t4_device: SERIAL-FULL lines-captured-end-marker (probe-exit seen)
+t4_device: row count A=41 B=17
+t4_device: FAIL — row count differs (A=41 B=17)
+t4_device: FAIL — differential mismatch.  Guest rows:

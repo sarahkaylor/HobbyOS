@@ -1,0 +1,41 @@
+### G5: real monitored capture for the device annotation @ 509d9ce 2026-10-26T21:52:47Z
+/usr/bin/x86_64-linux-gnu-ld.bfd: cannot open output file obj/intel/t4_probe_pie: No such file or directory
+collect2: error: ld returned 1 exit status
+legA rows=0
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-2192a712/obj/intel/t4_probe_pie: No such file or directory
+=== T3 (intel): run (deadline 300s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-2192a712/obj/t3_intel_gb107.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 117 console lines, 0 FAIL lines, 0 user memory fault records across 0 processes, 0 programs exited, halted=1
+T3_intel: FAIL — only 0 programs exited (floor 55): too little work for a complete wave, so this cannot be a pass
+T3_intel EXIT=1
+tier-rc=1
+arrived=0 probe-exit=0
+--- t4_device.sh against that capture:
+=== t4_device: leg A reference: /tmp/gb107_legA.out ===
+=== t4_device: capture leg B from serial '/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-2192a712/obj/t3_intel_gb107.log' ===
+t4_device: FAIL — the probe never arrived in the guest (no 't4-probe-arrived'
+  in /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-2192a712/obj/t3_intel_gb107.log after 120s).  This is a FAIL, not a SKIP (DoD clause 3).
+  (tail of serial:)
+Inside process_create: clearing memory at 0x0000000022000000
+Inside process_create: kmemset done.
+[GB-032] SDL test-app exec: SKIP (GB-013 compat exec leg not open; app + static-PIE ELF props proven on host by sdl_test_app_test_host)
+start_scheduler called on CPU 0
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+[RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
+  [ALIVE-SET] slot=1 pid=1 st=3 parent=-1 claimed_by=1 
+/WAVE.CFG[RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
+
+[WAVE-MANIFEST] T4PROBE.BIN
+[WAVE-TRY] T4PROBE.BIN
+Loading program for scheduler (v2 AS): [RESUME-SPSR] pid=1 spsr=0x00000206 IF=1
+T4PROBE.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=-1
+/T4PROBE.BIN
+[ARRIVED] T4PROBE.BIN rc<0
+[HALT-CD] cpu=1 free=64 alloc=0 exited=0 running=0 blocked=0 other=0
+System halt from CPU 1.
+[device-rc=1
+DONE

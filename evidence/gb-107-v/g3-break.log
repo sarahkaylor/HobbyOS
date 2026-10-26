@@ -1,0 +1,12 @@
+### G3: DELIBERATE BREAK — live-cut branch flipped to GUEST_STOPPED (my edit, not the test's) 2026-10-26T21:52:16Z
+  PASS: full log (end marker) -> FULL (got FULL)
+  FAIL: mid-cut log (guest alive, no end marker) -> TRUNCATED (got GUEST_STOPPED)
+  PASS: TRUNCATED is a DISTINCT verdict from GUEST_STOPPED
+  PASS: early-death log (guest not alive) -> GUEST_STOPPED (got GUEST_STOPPED)
+  PASS: monitored-run record carries lines (SERIAL-GUEST_STOPPED lines=18 bytes=604 alive-at-cutoff=1 end-marker=0 (expected 43) 18 lines (expected 43), guest ALIVE at cutoff, no end marker: capture cut mid-stream)
+  PASS: monitored-run record carries bytes (SERIAL-GUEST_STOPPED lines=18 bytes=604 alive-at-cutoff=1 end-marker=0 (expected 43) 18 lines (expected 43), guest ALIVE at cutoff, no end marker: capture cut mid-stream)
+  PASS: monitored-run record carries guest_alive_at_cutoff (SERIAL-GUEST_STOPPED lines=18 bytes=604 alive-at-cutoff=1 end-marker=0 (expected 43) 18 lines (expected 43), guest ALIVE at cutoff, no end marker: capture cut mid-stream)
+  PASS: monitored-run record carries end_marker (SERIAL-GUEST_STOPPED lines=18 bytes=604 alive-at-cutoff=1 end-marker=0 (expected 43) 18 lines (expected 43), guest ALIVE at cutoff, no end marker: capture cut mid-stream)
+  PASS: a broken classifier (live-cut -> GUEST_STOPPED) FAILS the mid-cut case (got GUEST_STOPPED)
+SERIAL_CLASSIFIER_TEST: FAIL (1)
+rc=1

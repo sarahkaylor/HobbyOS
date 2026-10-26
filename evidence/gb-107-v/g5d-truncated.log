@@ -1,0 +1,2 @@
+### G5d: same capture cut before probe-exit (TRUNCATED) 2026-10-26T22:06:13Z
+t4_device: FAIL — the probe never arrived in the guest (no 't4-probe-arrived'

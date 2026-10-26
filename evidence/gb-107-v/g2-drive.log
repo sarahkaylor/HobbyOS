@@ -1,0 +1,9 @@
+### G2: classifier driven directly on my own synthetic logs 2026-10-26T21:52:07Z
+full (end marker):
+   SERIAL-FULL lines=41 bytes=322 alive-at-cutoff=0 end-marker=1 (expected 40) 41 lines, end marker seen: complete capture
+mid-cut (guest alive, no marker):
+   SERIAL-TRUNCATED lines=18 bytes=134 alive-at-cutoff=1 end-marker=0 (expected 40) 18 lines (expected 40), guest ALIVE at cutoff, no end marker: capture cut mid-stream
+early death (guest not alive):
+   SERIAL-GUEST_STOPPED lines=3 bytes=21 alive-at-cutoff=0 end-marker=0 (expected 40) 3 lines, guest not alive at cutoff, no end marker: guest stopped writing
+
+TRUNCATED != GUEST_STOPPED: TRUNCATED vs GUEST_STOPPED -> True

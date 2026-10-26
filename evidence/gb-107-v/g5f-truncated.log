@@ -1,0 +1,5 @@
+### G5f: capture cut exactly at the arrival line (alive, no end marker) 2026-10-26T22:08:27Z
+t4_device: probe ARRIVED in guest (t4-probe-arrived present).
+t4_device: SERIAL-TRUNCATED lines=145 bytes=8984 alive-at-cutoff=1 end-marker=0 (expected 43) 145 lines (expected 43), guest ALIVE at cutoff, no end marker: capture cut mid-stream
+t4_device: FAIL — row count differs (A=41 B=17)
+t4_device: FAIL — differential mismatch.  Guest rows:
