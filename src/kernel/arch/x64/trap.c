@@ -2865,6 +2865,22 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       extern void uart_puts_raw(const char *s);
       extern void uart_print_hex_raw(uint64_t v);
       extern void print_int_raw(int val);
+      /* GB-101: a TORN trap frame.  The x86 IDT has 256 gates (vectors
+         0-31 exceptions, 32-255 IRQ/syscall); `vector` values above 0xFF
+         (measured: vector=20000, rip=0x97) cannot have been pushed by the
+         CPU, so the frame being read is corrupt.  The DoD wants this to
+         FAIL THE TIER BY NAME rather than halt silently: print a line
+         containing "FAIL" (the tier's FAIL-line grep) that names the torn
+         frame, then let the existing GB-060 halt-record + stop run. */
+      if ((uint64_t)tf->vector > 0xFFu) {
+        uart_puts_raw("[TORNFRAME] FAIL - kernel-mode fatal fault read an impossible ");
+        uart_puts_raw("vector=");
+        print_int_raw((int)(uint64_t)tf->vector);
+        uart_puts_raw(" (x86 IDT has 256 gates; >0xFF means the trap frame is ");
+        uart_puts_raw("corrupt, not a real exception) rip=");
+        uart_print_hex_raw((uint64_t)tf->elr);
+        uart_puts_raw("\n");
+      }
       uart_puts_raw("[KERNEL] FATAL: Exception in Kernel Mode! Vector: ");
       print_int_raw((int)tf->vector);
       uart_puts_raw(" Error Code: ");
