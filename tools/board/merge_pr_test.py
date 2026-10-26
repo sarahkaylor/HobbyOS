@@ -28,6 +28,17 @@ head194 = "e8c7dc89bc0156157930e4a90ba54d1845c0a147"
 ok, r = decide(head194, graded194)
 check(not ok and graded194 != head194, f"today's #194 incident (graded 7de6dde.., merged e8c7dc8..) -> RED for the mismatch ({r[:40]})")
 
+# GB-109: abbreviated graded shas compare as PREFIXES (>=7 chars); <7 refuses; and the
+# vacuous --head flag call is inexpressible (main() has no --head option).
+h = "1111111111111111111111111111111111111111"
+check(decide(h, h[:7])[0], "graded 7-char prefix of head -> ALLOW")
+check(not decide(h, "fffffff")[0], "graded 7-char non-prefix -> REFUSE")
+check(not decide(h, h[:6])[0], "graded prefix <7 chars -> REFUSE")
+import merge_pr
+structural, behavioral = merge_pr.vacuous_head_inexpressible()
+check(structural, "parser structurally has no --head option (re-adding it FAILS this probe)")
+check(behavioral, "main() rejects a --head argument on the command line")
+
 if fails:
     print("MERGE_PR_TEST: FAIL (%d)" % fails); sys.exit(1)
 print("MERGE_PR_TEST: PASS - fail-closed guard rule + #194 goes red")
