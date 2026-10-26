@@ -50,6 +50,15 @@ jobs:
       - name: Automated desktop/framebuffer test (guest hangs at current tip — non-blocking)
         continue-on-error: true
         run: make desktop_test
+      - name: Reap stale QEMU before the integration tier
+        if: always()
+        run: |
+          # The quarantined desktop_test can leave a frozen guest holding
+          # disk.img; the T3 harness then refuses to start ("in use by another
+          # QEMU") and reports an environment failure instead of a tier result.
+          pkill -f 'qemu-system-aarch64' 2>/dev/null || true
+          pkill -f 'qemu-system-x86_64' 2>/dev/null || true
+          sleep 2
       - name: ARM userland integration suite
         run: make test
       - name: Upload logs on failure
