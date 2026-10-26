@@ -36,7 +36,7 @@ process = subprocess.Popen(
 )
 
 ready = False
-timeout = 30
+timeout = int(os.environ.get("DESKTOP_TEST_TIMEOUT", "30"))
 start_time = time.time()
 line_buf = ""
 

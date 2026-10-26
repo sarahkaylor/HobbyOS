@@ -15,6 +15,8 @@ env:
   # and none of the test tiers use /TOOLS. Skip it when absent; a persisted
   # staging (third_party/llvm-21.1.8/dist-staging) is still used when present.
   TOOLS_SKIP: "1"
+  # TCG (no KVM on Apple Silicon) boots slower than the 30 s default.
+  DESKTOP_TEST_TIMEOUT: "120"
 
 jobs:
   # Host golden tests: this tier carries the remaining macOS porting debt
