@@ -27,7 +27,7 @@ typedef struct {
   pthread_mutex_t m;
   pthread_cond_t c;
   unsigned total, waiting, generation;
-} host_pthread_barrier_t;
+} pthread_barrier_t;
 
 typedef struct { unsigned dummy; } pthread_barrierattr_t;
 

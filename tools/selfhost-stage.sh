@@ -425,9 +425,9 @@ count_83_excess() {
 
 payload_files=0
 payload_bytes=0
-add_payload() {  # add_payload <files> <bytes>
-  payload_files=$((payload_files + $1))
-  payload_bytes=$((payload_bytes + $2))
+add_payload() {  # add_payload <files> <bytes>  (0 when a count is unavailable)
+  payload_files=$((payload_files + ${1:-0}))
+  payload_bytes=$((payload_bytes + ${2:-0}))
 }
 
 # ---- stage the tree (payload mode; --src exits earlier, below) ----
