@@ -1,0 +1,9 @@
+=== the motivating incident, replayed through the shipped rule
+PR #194: gate graded 7de6dde, merge landed e8c7dc89
+[merge_pr] PR #194: REFUSE: graded sha 7de6dde00000 != current head e8c7dc890000 — refusing to merge a tree that was not graded
+[merge_pr] NOT MERGED (fail closed)
+EXIT=1
+
+--- and does the fixture list name those shas at all?
+tools/board/merge_pr.py:0
+tools/board/merge_pr_test.py:0
