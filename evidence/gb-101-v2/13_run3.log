@@ -1,0 +1,3 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1500s, log obj/t3_gb101v2_run3.log) ===
+RUN3_EXIT=141

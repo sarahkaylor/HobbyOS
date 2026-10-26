@@ -1,0 +1,19 @@
+run1 (shipped tier, completed): lines=31377 TORNFRAME=0 halt=0 FATAL=1
+FATAL kernel-mode fault, halting this CPU: vecto
+T3_intel: 31377 console lines, 135 FAIL lines, 20 user memory fault records across 18 processes, 84 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 1500s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 1 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+run4 (probe-hardened copy, completed): lines=17560 TORNFRAME=0 halt=1 FATAL=1
+[KERNEL] FATAL kernel-mode fault, halting this CPU: vector=6 rip=0x0000000000000007 cr2=0x00000010000D2B30 pid=55 err=0 cr3=0x000000002159A000 pd480=0
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 17560 console lines, 138 FAIL lines, 12 user memory fault records across 11 processes, 83 programs exited, halted=1
+T3_intel: FAIL — 1 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+run5 (probe-hardened copy, completed — the clean halting wave):
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 11513 console lines, 116 FAIL lines, 6 user memory fault records across 6 processes, 83 programs exited, halted=1
+T3_intel: FAIL — 116 FAIL line(s); first 20:
+torn=0 halt=1 fatal=0
+run6 (probe-hardened, completed):
+[KERNEL] FATAL kernel-mode fault, halting this CPU: vector=6 rip=0x0000000025FFE5C0 cr2=0x000000100000FCB0 pid=48 err=0 cr3=0x0000000075510000 pd480=0x000000008
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 26276 console lines, 147 FAIL lines, 17 user memory fault records across 15 processes, 86 programs exited, halted=1
