@@ -74,6 +74,7 @@ int sysinfo(int cmd, void *buf, int size);
 /* compat.c sysinfo memory overrides (used by mem-highwater-monotonic). */
 extern int mock_sysinfo_mem_enabled;
 extern unsigned long long mock_sysinfo_mem_total, mock_sysinfo_mem_free;
+
 #else
 #include "libc.h"
 #include <fcntl.h>
@@ -87,6 +88,17 @@ extern unsigned long long mock_sysinfo_mem_total, mock_sysinfo_mem_free;
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#endif
+
+/* MSG_CMSG_CLOEXEC is a Linux recvmsg flag and macOS has no such constant:
+   the Mac host build died here with "use of undeclared identifier".  The fd
+   transfer below is what this round proves, so pass 0 where the platform has
+   no flag; the CLOEXEC bit itself is asserted on device (and on Linux hosts,
+   where the constant exists and the real flag is used). */
+#ifndef MSG_CMSG_CLOEXEC
+#define TORTURE_RECV_CMSG_CLOEXEC 0
+#else
+#define TORTURE_RECV_CMSG_CLOEXEC MSG_CMSG_CLOEXEC
 #endif
 
 /* ---- modes ------------------------------------------------------------- */
@@ -461,7 +473,7 @@ static int fdpass_round(void) {
     rm.msg_iovlen = 1;
     rm.msg_control = rctl;
     rm.msg_controllen = sizeof rctl;
-    ssize_t r = recvmsg(sv[1], &rm, MSG_CMSG_CLOEXEC | MSG_DONTWAIT);
+    ssize_t r = recvmsg(sv[1], &rm, TORTURE_RECV_CMSG_CLOEXEC | MSG_DONTWAIT);
     if (r != 2 || rpayload[0] != 'o' || rpayload[1] != 'k')
       ok = 0;
     got = (r == 2) ? cmsg_fd(&rm) : -1;
