@@ -1,0 +1,3 @@
+=== clause 4a: is resume_guard_test discovered and run by the suite?
+  PASS  tools/swarm/resume_guard_test.py
+[host-tests] done: 24/24 passed
