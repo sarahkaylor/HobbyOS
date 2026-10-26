@@ -103,12 +103,26 @@ static void *cxxrt_alloc_aligned(size_t size) {
  * (w5-nothrow VA=0x48424F424C4B4D3F). */
 static void cxxrt_free_aligned(void *ptr) { free(ptr); }
 
-__attribute__((section("__lcxx_override"))) void *
+/* __lcxx_override is an ELF mechanism (see the w6-run note above): libc++'s
+ * weak operators live in that section and these strong ones are placed there
+ * so the nothrow-override check finds them INSIDE it.  Mach-O rejects a bare
+ * section name -- it requires "segment,section" -- which broke the macOS host
+ * build of this TU (src/libc/src/cxxrt.cpp:106, :111, "section specifier
+ * requires a segment and section separated by a comma").  The host build's
+ * operators are ordinary host definitions and nothing inspects their section
+ * there, so the attribute is dropped for Apple targets only. */
+#if defined(__APPLE__)
+#define CXXRT_OVERRIDE_SECTION
+#else
+#define CXXRT_OVERRIDE_SECTION __attribute__((section("__lcxx_override")))
+#endif
+
+CXXRT_OVERRIDE_SECTION void *
 operator new(size_t size) {
   return cxxrt_alloc_aligned(size);
 }
 
-__attribute__((section("__lcxx_override"))) void *
+CXXRT_OVERRIDE_SECTION void *
 operator new[](size_t size) {
   return cxxrt_alloc_aligned(size);
 }
