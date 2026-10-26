@@ -1,0 +1,10 @@
+### G2 two-arch local parity @ bba4e5e 2026-10-26T06:24:14Z
+=== PARITY SUMMARY ===
+  window: 59s   budget: 0s (0 = unbounded)
+  arm   exit: 0     (GREEN)
+  intel exit: 0   (GREEN)
+  sequential: 0
+
+PARITY: PASS — both arches green (window 59s; no budget set)
+rc=0
+DONE
