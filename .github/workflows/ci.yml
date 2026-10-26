@@ -10,6 +10,10 @@ env:
   # (clang delegates x86_64-none-elf links to gcc; /usr/bin/gcc is Apple clang
   # and would emit Mach-O args). gnubin provides GNU mktemp/stat/timeout.
   PATH: /Users/sarah/.mac-ci-shim:/opt/homebrew/opt/coreutils/libexec/gnubin:/opt/homebrew/bin:/opt/homebrew/opt/llvm/bin:/usr/bin:/bin:/usr/sbin:/sbin
+  # The in-OS LLVM toolchain staging (tools-staged) is a multi-hour cold build
+  # and none of the test tiers use /TOOLS. Skip it when absent; a persisted
+  # staging (third_party/llvm-21.1.8/dist-staging) is still used when present.
+  TOOLS_SKIP: "1"
 
 jobs:
   # Host golden tests: this tier carries the remaining macOS porting debt
