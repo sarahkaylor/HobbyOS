@@ -77,6 +77,10 @@ jobs:
         # mask the hard gates above. Flip to blocking (drop continue-on-error)
         # once the tier is green on repeated runs at a fixed tip.
         continue-on-error: true
+        env:
+          # Bound the runner occupancy: a wedged wave otherwise burns the full
+          # default 2700 s deadline and blocks the next queued job.
+          T3_TIMEOUT: "1200"
         run: make test
       - name: Upload logs (always — the ARM wave is non-blocking, its evidence is the point)
         if: always()
@@ -127,6 +131,8 @@ jobs:
         # wave must not mask a green ARM/build result. Promote this to a hard
         # gate only when the tier itself goes green on repeated runs.
         continue-on-error: true
+        env:
+          T3_TIMEOUT: "900"
         run: make test_intel
       - name: Upload logs (always — the x64 wave is non-blocking, its evidence is the point)
         if: always()
