@@ -1,0 +1,8 @@
+  PASS: graded==head -> allow (ok: graded sha aaaaa)
+  FAIL: graded!=head -> refuse (ok: MUTANT allows a )
+  PASS: no graded sha -> FAILS CLOSED (REFUSE: GREEN names )
+  PASS: no head -> refuse (REFUSE: no current h)
+  PASS: parses a 40-hex sha from a VERDICT/graded line
+  PASS: no sha in VERDICT -> empty (fails closed upstream)
+  PASS: today's PR #194 has no recorded graded sha -> RED/fail-closed (REFUSE: GREEN names no graded )
+MERGE_PR_SELFTEST: FAIL (1)

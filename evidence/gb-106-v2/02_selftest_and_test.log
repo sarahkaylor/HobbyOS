@@ -1,0 +1,16 @@
+=== clause 3: the #194 fixture (graded 7de6dde, merged e8c7dc8) must be a failing case
+  PASS: no sha in VERDICT -> empty (fails closed upstream)
+  PASS: today's PR #194 has no recorded graded sha -> RED/fail-closed (REFUSE: GREEN names no graded )
+MERGE_PR_SELFTEST: PASS - fail-closed rule + override + #194 goes red
+SELFTEST_EXIT=0
+
+=== the worker's own test file
+  PASS: graded == head -> allow
+  PASS: graded != head -> refuse
+  PASS: GREEN names no sha -> FAILS CLOSED (refuse)
+  PASS: no head supplied -> refuse
+  PASS: parses a 40-hex graded sha from a VERDICT line
+  PASS: a VERDICT with no sha -> empty (fails closed upstream)
+  PASS: today's PR #194 has no confirming graded sha -> RED/fail-closed (REFUSE: GREEN names no graded sha )
+MERGE_PR_TEST: PASS - fail-closed guard rule + #194 goes red
+TEST_EXIT=0
