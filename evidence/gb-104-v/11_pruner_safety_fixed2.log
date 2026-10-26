@@ -1,0 +1,25 @@
+=== clause 3 on the FIXED head 7c0175b (card-shaped cases)
+=== before
+  .worktrees/dirty/
+  .worktrees/empty_orphan/
+  .worktrees/live/
+  .worktrees/untracked/
+
+=== running the pruner (head 7c0175b)
+PRUNE-STALE-WORKTREES: REFUSED .worktrees/dirty — holds uncommitted/untracked work; NOT deleted (GB-104)
+PRUNE-STALE-WORKTREES: removed stale (clean) worktree .worktrees/empty_orphan
+PRUNE-STALE-WORKTREES: REFUSED .worktrees/untracked — holds uncommitted/untracked work; NOT deleted (GB-104)
+PRUNE-STALE-WORKTREES: ready (git pruned; removed=1 stale worktree dirs, refused=2 carrying work)
+pruner exit=0
+
+=== after
+  (a) live worktree present:      YES
+  (a) live worktree LIVE.txt:     YES
+  (b) empty orphan present:       NO  (want NO)
+  (c) dirty dir present:          YES  (want YES)
+  (c) dirty work.txt present:     YES  (want YES)
+  (d) untracked dir present:      YES  (want YES)
+
+=== git worktree list
+/tmp/gb104-scratch3                 cf55a29 [master]
+/tmp/gb104-scratch3/.worktrees/live cf55a29 [livebranch]
