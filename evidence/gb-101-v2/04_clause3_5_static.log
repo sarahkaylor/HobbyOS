@@ -1,0 +1,28 @@
+=== clause 5a: does the PR touch any ARM file?
+(none — no arch/arm file in the diff)
+
+=== clause 5b: arm trap.o hash before/after is moot (untouched); the intel trap.o is what changes:
+.github/workflows/ci.yml
+.github/workflows/linux-ci.yml
+Makefile
+gaming.md
+run_desktop_test.py
+src/host/apps_suite_test.c
+src/host/host_pthread_compat.h
+src/kernel/arch/x64/trap.c
+src/user/wk1c_test.c
+tools/board/import_seed.py
+tools/build-llvm-dist-staging.sh
+tools/cache/cache_test.sh
+tools/cache/measure_build.sh
+tools/cache/setup_ccache.sh
+tools/selfhost-stage.sh
+
+=== clause 3a: does the gate judge SS/RSP?
+12:+     corrupt.  This alone misses the family's below-32 garbage vectors (measured:
+28:+    uint64_t frame_cs = tf->cs;
+30:+    int bad_cs  = (frame_cs != 0x08u && frame_cs != 0x1Bu);
+31:+    if (bad_vec || bad_cs) {
+35:+      uart_puts_raw(" cs=");   uart_print_hex_raw(frame_cs);
+36:+      uart_puts_raw(" (impossible vector="); print_int_raw((int)(uint64_t)tf->vector);
+37:+      uart_puts_raw(" or invalid cs; a real gate entry pushes cs 0x08/0x1B\n");

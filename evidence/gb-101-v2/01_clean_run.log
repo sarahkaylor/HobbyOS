@@ -1,0 +1,15 @@
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+=== T3 (intel): run (deadline 2700s, log obj/t3_gb101v2_clean.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 130 console lines, 0 FAIL lines, 0 user memory fault records across 0 processes, 1 programs exited, halted=1
+T3_intel: PASS (0 FAIL lines, halted, no kernel fault, 130 lines)
+=== t4_w0: W0 corpus gate over obj/t3_gb101v2_clean.log ===
+  PASS HELLO (arrived in guest)
+  PASS HELLO output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  FAIL SH — not in the intel wave's exited-programs/arrival set (W0 corpus member never ran)
+  FAIL CAT — not in the intel wave's exited-programs/arrival set (W0 corpus member never ran)
+  FAIL LS — not in the intel wave's exited-programs/arrival set (W0 corpus member never ran)
+t4_w0: FAIL — W0 corpus incomplete or output mismatch
+T3_intel: FAIL - W0 corpus gate
+T3_intel EXIT=1
