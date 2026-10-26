@@ -1,0 +1,28 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1500s, log obj/t3_gb101v_run1.log) ===
+T3_intel: 21837 console lines, 71 FAIL lines, 15 user memory fault records across 12 processes, 77 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 1500s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 1 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 71 FAIL line(s); first 20:
+2252:[SEDTEST] FAIL basic_s (stdout)
+2872:[SIGTEST] FAIL waitpid returns the child got=41 want=4294964048
+4023:[SEDTEST] FAIL s_g (stdout)
+5423:[CMPTEST] FAIL EOF message on stderr
+5508:[CMPTEST] FAIL missing file diagnostic
+5566:[CMPTEST] FAIL -i 4:0 skips prefix
+5587:[CMPTEST] FAIL - stdin EOF diagnostic
+5618:[CMPTEST] FAILURES: 5
+5819:[SEDTEST] FAIL s_p_n (stdout)
+5999:  FPU_T fork-inherit: FAIL
+6009:/BLKT2.TXT[TACTEST] FAIL missing file
+6019:[TACTEST] FAIL empty separator
+6036:FPU_T FAILED: 2
+6056:[TACTEST] FAILURES: 4
+6162:/TEST3.TXT[SEDTEST] FAIL amp (stdout)
+6523:[SEDTEST] FAIL backref (stdout)
+7203:[SEDTEST] FAIL case_I (stdout)
+7205:[TSORTTEST] FAIL chain from FILE (exit status -1 != 0)
+7207:[TSORTTEST] FAIL chain from stdin (exit status -1 != 0)
+7213:[TSORTTEST] FAIL chain from '-' operand (exit status -1 != 0)
+T3_intel EXIT=1
+RUN1_EXIT=1
