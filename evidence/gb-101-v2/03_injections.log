@@ -1,0 +1,23 @@
+=== below32
+POLICE_EXIT=1
+T3_intel (police evidence/gb-101-v2/inj_below32.log): 132 lines, 1 FAIL lines, 0 fault records across 0 processes, halted=1, kfault=0, boots=1
+130:[TORNFRAME] FAIL - interrupt/fault handler read a torn frame: vector=6 rip=0x7 cs=0x0
+T3_intel EXIT=1
+
+=== above32_4E20
+POLICE_EXIT=1
+T3_intel (police evidence/gb-101-v2/inj_4E20.log): 132 lines, 1 FAIL lines, 0 fault records across 0 processes, halted=1, kfault=0, boots=1
+130:[TORNFRAME] FAIL - interrupt/fault handler read a torn frame: vector=20000 rip=0x97 cs=0x08
+T3_intel EXIT=1
+
+=== above32_7703A33E
+POLICE_EXIT=1
+T3_intel (police evidence/gb-101-v2/inj_7703A33E.log): 132 lines, 1 FAIL lines, 0 fault records across 0 processes, halted=1, kfault=0, boots=1
+130:[TORNFRAME] FAIL - interrupt/fault handler read a torn frame: vector=1996485438 rip=0x7003A33E cs=0x08
+T3_intel EXIT=1
+
+=== baseline_again
+POLICE_EXIT=0
+T3_intel (police evidence/gb-101-v2/clean_wave.log): 130 lines, 0 FAIL lines, 0 fault records across 0 processes, halted=1, kfault=0, boots=1
+T3_intel EXIT=0
+
