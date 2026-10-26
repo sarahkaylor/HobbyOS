@@ -111,8 +111,25 @@ static void test_gettimeofday(void) {
   }
   check("gettimeofday success", tv.tv_sec >= 0);
   check("tv_usec in range", tv.tv_usec >= 0 && tv.tv_usec < 1000000L);
-  /* Thin wrapper over the same clock: within a second of realtime. */
+  /* Thin wrapper over the same clock: the two reads must agree to within a
+     second.  Re-read a few times before failing: the pair is two syscalls
+     apart and the caller can be preempted between them for longer than the
+     tolerance on a loaded wave (measured 2026-10-26 on the ARM tier: this
+     check, POLLTST's elapsed bound and shell_test's wc round trip all failed
+     in the same run and all passed on the runs either side).  A wrapper that
+     returns the wrong clock misses on every attempt; a starved caller misses
+     once. */
   long drift = ts.tv_sec - tv.tv_sec;
+  for (int attempt = 0; attempt < 3 && (drift < -1 || drift > 1); attempt++) {
+    usleep(2000);
+    if (gettimeofday(&tv, 0) == 0 && clock_gettime(CLOCK_REALTIME, &ts) == 0)
+      drift = ts.tv_sec - tv.tv_sec;
+  }
+  if (drift < -1 || drift > 1) {
+    print_console("  WK1C_T realtime drift_s=");
+    print_dec(drift);
+    print_console("\n");
+  }
   check("gettimeofday tracks realtime", drift >= -1 && drift <= 1);
 }
 
