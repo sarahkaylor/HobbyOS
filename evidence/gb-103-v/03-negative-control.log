@@ -1,0 +1,4 @@
+rev: 92e999f  NEGATIVE CONTROL: kill QEMU while probe_guest samples
+start: 2026-10-26T12:11:25Z
+tier exit=1
+end: 2026-10-26T12:13:43Z

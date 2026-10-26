@@ -1,0 +1,18 @@
+=== T3 (arm): build ===
+=== T3 (arm): run (deadline 150s, log /home/sarah/wt/gb103v/evidence/gb-103-v/neg-sample.log) ===
+T3_arm: 8740 console lines, 12 FAIL lines, 5 user memory fault records across 3 processes, 84 programs exited, halted=0
+T3_arm: FAIL — the console has no 'System halt' line (idle/hung wave, or the 150s deadline hit; a hang is a defect, not a flake)
+T3_arm: FAIL — 12 FAIL line(s); first 20:
+2727:[SIGTEST] FAIL pipe() for the SIGCHLD handler got=-1 want=0
+3114:[PROCTEST] FAIL FD_CLOEXEC swept, plain fd kept got=5 want=0
+3535:[SIGTEST] FAIL handler wrote the pipe (GLib pattern) got=-1 want=1
+4001:  TORTURE threads-churn-64: FAIL
+4051:[SIGTEST] TESTS FINISHED WITH FAILURES
+4342:[PROCTEST] FAILURES: 1
+5061:[TSORTTEST] FAIL diamond from FILE (spawn TSORT.BIN failed)
+5062:[TSORTTEST] FAIL diamond from stdin (spawn TSORT.BIN failed)
+5211:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (spawn TSORT.BIN failed)
+5224:[TSORTTEST] FAILURES: 3
+6655:TORTURE FAILED: 1
+6924:SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST. Process table:
+T3_arm EXIT=1

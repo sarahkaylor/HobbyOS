@@ -1,0 +1,42 @@
+rev: 92e999f  date: 2026-10-26T11:54:37Z
+NOTE: card says tools/gate/t3_tier.sh (absent); running tools/t3_tier.sh
+########## MONITORED ARM RUN 1 ##########
+start: 2026-10-26T11:54:37Z
+run 1 exit=1
+T3_arm: note — halt marker found after make exited (poll raced the exit)
+T3_arm: 9068 console lines, 1 FAIL lines, 5 user memory fault records across 3 processes, 84 programs exited, halted=1
+T3_arm: FAIL — 1 FAIL line(s); first 20:
+T3_arm EXIT=1
+end: 2026-10-26T12:00:03Z
+########## MONITORED ARM RUN 2 ##########
+start: 2026-10-26T12:00:03Z
+run 2 exit=1
+T3_arm: note — halt marker found after make exited (poll raced the exit)
+T3_arm: 9099 console lines, 1 FAIL lines, 5 user memory fault records across 3 processes, 84 programs exited, halted=1
+T3_arm: FAIL — 1 FAIL line(s); first 20:
+T3_arm EXIT=1
+end: 2026-10-26T12:02:15Z
+########## MONITORED ARM RUN 3 ##########
+start: 2026-10-26T12:02:15Z
+run 3 exit=1
+T3_arm: note — halt marker found after make exited (poll raced the exit)
+T3_arm: 9394 console lines, 1 FAIL lines, 5 user memory fault records across 4 processes, 84 programs exited, halted=1
+T3_arm: FAIL — 1 FAIL line(s); first 20:
+T3_arm EXIT=1
+end: 2026-10-26T12:04:46Z
+########## MONITORED ARM RUN 4 ##########
+start: 2026-10-26T12:04:46Z
+run 4 exit=1
+T3_arm: note — halt marker found after make exited (poll raced the exit)
+T3_arm: 9346 console lines, 4 FAIL lines, 5 user memory fault records across 3 processes, 85 programs exited, halted=1
+T3_arm: FAIL — 4 FAIL line(s); first 20:
+T3_arm EXIT=1
+end: 2026-10-26T12:07:00Z
+########## MONITORED ARM RUN 5 ##########
+start: 2026-10-26T12:07:00Z
+run 5 exit=1
+T3_arm: note — halt marker found after make exited (poll raced the exit)
+T3_arm: 9022 console lines, 1 FAIL lines, 5 user memory fault records across 3 processes, 84 programs exited, halted=1
+T3_arm: FAIL — 1 FAIL line(s); first 20:
+T3_arm EXIT=1
+end: 2026-10-26T12:09:07Z

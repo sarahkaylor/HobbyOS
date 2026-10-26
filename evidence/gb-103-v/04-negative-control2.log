@@ -1,0 +1,6 @@
+SIGTERM -> 138050 at 123.6 s
+tier rc = 1  killed: True
+sample header present: True
+'end guest sample' present: True
+INSTRUMENT-FAILURE present: False
+verdict line present: True

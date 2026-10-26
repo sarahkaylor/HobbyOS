@@ -1,0 +1,13 @@
+rev: 92e999f  date: 2026-10-26T11:49:11Z
+$ bash tools/t3/t3_monitor_grading_test.sh
+== police on CLEAN log ==
+T3_intel (police /tmp/t3_clean.log): 1151 lines, 0 FAIL lines, 0 fault records across 0 processes, halted=1, kfault=0, boots=0
+T3_intel: PASS (0 FAIL lines, halted)
+T3_intel EXIT=0
+clean-exit=0
+== police on INJECTED-FAIL log ==
+T3_intel: FAIL — 1 FAIL line(s); first 5:
+1152:SOMETEST: FAIL injected failure
+T3_intel EXIT=1
+fail-exit=1
+rc=0
