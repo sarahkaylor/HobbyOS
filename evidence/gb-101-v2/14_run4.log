@@ -1,0 +1,28 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1500s, log obj/t3_gb101v2_run4.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 17560 console lines, 138 FAIL lines, 12 user memory fault records across 11 processes, 83 programs exited, halted=1
+T3_intel: FAIL — 1 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 138 FAIL line(s); first 20:
+2876:  SQLTEST create-table: FAIL
+2882:  SQLTEST insert-prepare: FAIL
+2883:  SQLTEST insert-rows: FAIL
+2894:  SQLTEST journal-exists-in-txn: FAIL
+2897:  SQLTEST select-prepare: FAIL
+2898:  SQLTEST select-rows: FAIL
+2899:  SQLTEST aggregate: FAIL
+2902:  SQLTEST update: FAIL
+2911:  SQLTEST delete-none: FAIL
+2912:  SQLTEST insert-wide: FAIL
+2914:  SQLTEST delete-wide: FAIL
+2950:  TLS_T errno-isolation: FAIL
+3049:  SQLTEST cross-process-BUSY: FAIL
+3137:[SIGTEST] FAIL waitpid returns the child got=1 want=4294964048
+3289:  SQLTEST persist-after-reopen: FAIL
+3302:SQLTEST FAILED: 13
+3697:Loading program for scheduler (v2 AS): [SEDTEST] FAIL basic_s (stdout)
+4077:TLS_T FAILED: 1
+5264:[SEDTEST] FAIL s_2nd (stdout)
+5659:[CMPTEST] FAIL EOF message on stderr
+T3_intel EXIT=1
+RUN4_EXIT=1

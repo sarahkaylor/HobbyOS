@@ -1,0 +1,28 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1500s, log obj/t3_gb101v2_run6.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 26276 console lines, 147 FAIL lines, 17 user memory fault records across 15 processes, 86 programs exited, halted=1
+T3_intel: FAIL — 1 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 147 FAIL line(s); first 20:
+3115:[SEDTEST] FAIL basic_s (stdout)
+3993:[SIGTEST] FAIL waitpid returns the child got=1 want=4294964048
+4164:  FPU_T torture-child: FAIL
+4475:  FPU_T fork-inherit: FAIL
+4481:FPU_T FAILED: 2
+5034:[SEDTEST] FAIL s_g (stdout)
+6140:/TEST1.TXT[SEDTEST] FAIL s_2nd (stdout)
+6386:[CMPTEST] FAIL EOF message on stderr
+6393:[CMPTEST] FAIL empty EOF message
+6408:[CMPTEST] FAIL missing file diagnostic
+6462:[CMPTEST] FAIL -i 4:0 skips prefix
+6468:/TSORT.BIN[CMPTEST] FAIL - stdin EOF diagnostic
+6536:[CMPTEST] FAILURES: 5
+6543:[SEDTEST] FAIL s_p_n (stdout)
+7027:[TACTEST] FAIL missing file
+7031:[TACTEST] FAIL empty separator
+7042:/CKSNOPE.TXT[TACTEST] FAILURES: 4
+7135:[SEDTEST] FAIL amp (stdout)
+7388:[SEDTEST] FAIL backref (stdout)
+7616:Loading program for scheduler (v2 AS): [SEDTEST] FAIL empty_reuse (stdout)
+T3_intel EXIT=1
+RUN6_EXIT=1

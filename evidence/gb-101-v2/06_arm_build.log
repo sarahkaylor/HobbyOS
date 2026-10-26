@@ -1,0 +1,4 @@
+=== clause 5: ARM unit_tests link
+ARM_LINK_EXIT=0
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protecto
+ld.lld -T linker.ld -o hobbyos.elf obj/arm/boot.o obj/arm/fpu.o obj/arm/setjmp.o obj/arm/abi_t2_test.o obj/arm/audio_stub.o obj/arm/blk_cache.o obj/arm/blk_cach
