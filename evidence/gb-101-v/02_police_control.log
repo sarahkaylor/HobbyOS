@@ -1,0 +1,23 @@
+=== clean
+EXIT=0
+T3_intel (police evidence/gb-101-v/ctl_base.log): 1202 lines, 0 FAIL lines, 0 fault records across 0 processes, halted=1, kfault=0, boots=1
+T3_intel EXIT=0
+
+=== torn_4E20
+EXIT=1
+T3_intel (police evidence/gb-101-v/ctl_torn_4E20.log): 1203 lines, 1 FAIL lines, 0 fault records across 0 processes, halted=1, kfault=0, boots=1
+1202:[TORNFRAME] FAIL - interrupt/fault handler read an impossible vector=20000 (x86 IDT has 256 gates; >0xFF means the trap frame is corrupt, not a real exception) rip=0x97
+T3_intel EXIT=1
+
+=== torn_7703A33E
+EXIT=1
+T3_intel (police evidence/gb-101-v/ctl_torn_7703A33E.log): 1203 lines, 1 FAIL lines, 0 fault records across 0 processes, halted=1, kfault=0, boots=1
+1202:[TORNFRAME] FAIL - interrupt/fault handler read an impossible vector=1996485438 (x86 IDT has 256 gates; >0xFF means the trap frame is corrupt, not a real exception) rip=0x7003A33E
+T3_intel EXIT=1
+
+=== torn_v6_BELOW32
+EXIT=1
+T3_intel (police evidence/gb-101-v/ctl_torn_v6.log): 1203 lines, 1 FAIL lines, 0 fault records across 0 processes, halted=1, kfault=0, boots=1
+1202:[TORNFRAME] FAIL - interrupt/fault handler read an impossible vector=6 (x86 IDT has 256 gates; >0xFF means the trap frame is corrupt, not a real exception) rip=0x7
+T3_intel EXIT=1
+
