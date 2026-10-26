@@ -1,0 +1,17 @@
+=== mutation 1: a GREEN with NO graded sha is allowed (the fail-open bug)
+  [mutant] applied
+  mutant 'no_sha_allowed': self-test exit=1  (want non-zero)
+  FAIL: no graded sha -> FAILS CLOSED (ok: MUTANT allows a )
+  FAIL: today's PR #194 has no recorded graded sha -> RED/fail-closed (ok: MUTANT allows a GREEN with)
+MERGE_PR_SELFTEST: FAIL (2)
+
+=== mutation 2: a mismatched graded sha is allowed
+  [mutant] applied
+  mutant 'mismatch_allowed': self-test exit=1  (want non-zero)
+  FAIL: graded!=head -> refuse (ok: MUTANT allows a )
+  PASS: no graded sha -> FAILS CLOSED (REFUSE: GREEN names )
+MERGE_PR_SELFTEST: FAIL (1)
+
+=== restored
+  self-test exit after restore=0  (want 0)
+MERGE_PR_SELFTEST: PASS - fail-closed rule + override + #194 goes red
