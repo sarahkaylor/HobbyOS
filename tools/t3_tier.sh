@@ -114,6 +114,9 @@ if [ -n "$POLICE_ONLY" ]; then
     echo "T3_${ARCH}: FAIL — ${MEMFAULT_PROCS} processes carry user memory faults, above the ceiling ${USER_FAULT_ALLOW} (GB-068 regression); ${MEMFAULTS} records in total"
     rc=1
   fi
+  # GB-103 DoD clause 3 driven in police too: T3_FORCE_INSTRUMENT_FAIL=1 forces the
+  # distinct instrument-failure outcome (clean=PASS, tier-red=FAIL, instr=rc4).
+  [ "${T3_FORCE_INSTRUMENT_FAIL:-0}" = "1" ] && { echo "T3_${ARCH}: INSTRUMENT-FAILURE — forced (T3_FORCE_INSTRUMENT_FAIL) — neither PASS nor a tier FAIL"; echo "T3_${ARCH} EXIT=4"; exit 4; }
   [ "$rc" -eq 0 ] && echo "T3_${ARCH}: PASS (0 FAIL lines, halted)"
   echo "T3_${ARCH} EXIT=$rc"
   exit "$rc"
@@ -302,6 +305,7 @@ probe_guest() { # $1 = why we are sampling
   # this only annotates the log, it does not set rc.
   if [ "$started" = "1" ] && { [ "$st" != "0" ] || [ ! -S "$MON_SOCK" ]; }; then
     { echo ""; echo "=== T3 guest sample: INSTRUMENT-FAILURE — monitor read ended abnormally (rc=$st; $why) — sample truncated; tier verdict still graded below ==="; } >>"$LOG"
+    INSTRUMENT_FAILED=1   # a distinguishable third outcome, not PASS and not FAIL
   fi
   return 0   # probe failure must NEVER abort the tier
 }
@@ -309,6 +313,7 @@ probe_guest() { # $1 = why we are sampling
 deadline=$(( $(date +%s) + T3_TIMEOUT ))
 halted=0
 probed=0
+INSTRUMENT_FAILED=0
 # GB-057: a SILENT freeze prints no marker at all -- the markers are console
 # output, so a CPU that is stuck (or a console lock that is dead) cannot report
 # them.  Measured: an intel run froze at 12,821 lines with zero markers, no
@@ -469,7 +474,20 @@ if [ "$FAIL_LINES" != "0" ]; then
   rc=1
 fi
 [ "$MEMREG" = "1" ] && rc=1
-[ "$rc" -eq 0 ] && echo "T3_${ARCH}: PASS (0 FAIL lines, halted, no kernel fault, ${LINES} lines)"
+# Diagnostic/force hook: T3_FORCE_INSTRUMENT_FAIL=1 lets a test/verifier force the
+# instrument-failure outcome deterministically (GB-103 three-outcome table).
+[ "${T3_FORCE_INSTRUMENT_FAIL:-0}" = "1" ] && INSTRUMENT_FAILED=1
+# GB-103 DoD clause 3: the three-outcome judgement.  If the instrument could not
+# provide a sample (forced monitor failure), the verdict is a distinct
+# INSTRUMENT-FAILURE -- neither PASS nor a tier FAIL -- because "tier was red"
+# and "instrument broke" must be distinguishable.  rc=0 PASS, rc=1 tier FAIL,
+# rc=2 env, rc=4 = INSTRUMENT-FAILURE.
+if [ "$INSTRUMENT_FAILED" = "1" ]; then
+  echo "T3_${ARCH}: INSTRUMENT-FAILURE — the monitor could not produce a sample (DoD clause 3); this is neither PASS nor a tier FAIL"
+  rc=4
+else
+  [ "$rc" -eq 0 ] && echo "T3_${ARCH}: PASS (0 FAIL lines, halted, no kernel fault, ${LINES} lines)"
+fi
 # GB-070: W0 corpus gate, live. The DoD names the corpus-vs-Linux-leg
 # differential as part of the intel tier; run t4_w0 over this wave's own serial
 # so arrival + (where the member emits it) the [W0] output marker are judged,
