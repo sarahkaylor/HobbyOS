@@ -1,0 +1,5 @@
+### G2b: executed by the self-registering suite 2026-10-26T19:38:58Z
+  PASS  tools/t3/t3_classifier_coupling_test.py
+  PASS  tools/t3/t3_instrument_failure_test.py
+  PASS  tools/t3/t3_three_outcome_test.py
+[host-tests] done: 27/27 passed

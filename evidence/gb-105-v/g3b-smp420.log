@@ -1,0 +1,5 @@
+### G3b SMP=1 retry with a 420s budget (the 200s run hit the deadline, which is a budget artifact, not a verdict) 2026-10-26T19:25:23Z
+rc=0
+T3_arm: PASS (0 FAIL lines, halted, no kernel fault, 8701 lines)
+T3_arm EXIT=0
+DONE

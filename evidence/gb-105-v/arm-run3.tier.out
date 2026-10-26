@@ -1,0 +1,8 @@
+=== T3 (arm): build ===
+=== T3 (arm): run (deadline 200s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-36c16b0a/obj/t3_arm_gb105_r3.log) ===
+T3_arm: 8848 console lines, 2 FAIL lines, 5 user memory fault records across 4 processes, 83 programs exited, halted=0
+T3_arm: FAIL — the console has no 'System halt' line (idle/hung wave, or the 200s deadline hit; a hang is a defect, not a flake)
+T3_arm: FAIL — 2 FAIL line(s); first 20:
+2365:  SQLTEST insert-wide: FAIL
+2789:SQLTEST FAILED: 1
+T3_arm EXIT=1

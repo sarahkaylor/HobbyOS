@@ -1,0 +1,5 @@
+=== T3 (arm): build ===
+=== T3 (arm): run (deadline 200s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-36c16b0a/obj/t3_arm_gb105_smp.log) ===
+T3_arm: 1994 console lines, 0 FAIL lines, 1 user memory fault records across 1 processes, 38 programs exited, halted=0
+T3_arm: FAIL — the console has no 'System halt' line (idle/hung wave, or the 200s deadline hit; a hang is a defect, not a flake)
+T3_arm EXIT=1

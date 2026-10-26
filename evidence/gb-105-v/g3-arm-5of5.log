@@ -1,0 +1,12 @@
+### G3 ARM 5/5 + SMP @ 9572b52 2026-10-26T19:00:52Z
+=== ARM monitor 5/5 ===
+run 1: rc=0  T3_arm: PASS (0 FAIL lines, halted, no kernel fault, 9506 lines)  T3_arm EXIT=0  lines=9506
+run 2: rc=0  T3_arm: PASS (0 FAIL lines, halted, no kernel fault, 9275 lines)  T3_arm EXIT=0  lines=9275
+run 3: rc=1  T3_arm: FAIL — 2 FAIL line(s); first 20:  T3_arm EXIT=1  lines=8848
+run 4: rc=0  T3_arm: PASS (0 FAIL lines, halted, no kernel fault, 9492 lines)  T3_arm EXIT=0  lines=9492
+run 5: rc=0  T3_arm: PASS (0 FAIL lines, halted, no kernel fault, 9409 lines)  T3_arm EXIT=0  lines=9409
+ARM_VERDICTS: 5/5
+=== T3_SMP=1 ===
+smp: rc=1  T3_arm: FAIL — the console has no 'System halt' line (idle/hung wave, or the 200s deadline hit; a hang is a defect, not a flake)  T3_arm EXIT=1
+ARM_SMP_DONE
+DONE

@@ -1,0 +1,18 @@
+=== T3 (arm): build ===
+=== T3 (arm): run (deadline 200s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-36c16b0a/obj/t3_arm_gb105_r1.log) ===
+T3_arm: note — halt marker found after make exited (poll raced the exit)
+T3_arm: 9506 console lines, 0 FAIL lines, 5 user memory fault records across 4 processes, 85 programs exited, halted=1
+T3_arm: PASS (0 FAIL lines, halted, no kernel fault, 9506 lines)
+=== t4_w0: W0 corpus gate over /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-36c16b0a/obj/t3_arm_gb105_r1.log ===
+  PASS HELLO (arrived in guest)
+  PASS HELLO output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  PASS SH (arrived in guest)
+  PASS SH output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  PASS CAT (arrived in guest)
+  PASS CAT output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  PASS LS (arrived in guest)
+  PASS LS output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+t4_w0: PASS — every W0 corpus member arrived in the intel wave; members emitting a
+               '[W0] <member> linux=' marker had their output verified against the
+               Linux-leg .ref corpus (a mismatched marker FAILs).
+T3_arm EXIT=0

@@ -1,0 +1,18 @@
+### G1-3: the three shipped tests @ 9572b52 2026-10-26T18:58:21Z
+--- t3_classifier_coupling_test
+  PASS: REAL classifier + FORCE -> rc=4 (got 4)
+  PASS: BROKEN classifier + FORCE -> rc=0 PASS, NOT 4 (got 0) — forced case feeds the real classifier
+T3_CLASSIFIER_COUPLING_TEST: PASS - forced case is coupled to instrument_failure_evident
+rc=0
+--- t3_three_outcome_test
+  PASS: clean run -> EXIT 0 PASS
+  PASS: genuine tier red -> EXIT 1 FAIL (FAIL line quoted)
+  PASS: instrument failure -> EXIT 4 INSTRUMENT-FAILURE (distinct, got rc=4)
+T3_THREE_OUTCOME_TEST: PASS - clean=PASS, tier-red=FAIL, instrument=INSTRUMENT-FAILURE
+rc=0
+--- t3_instrument_failure_test
+  PASS: mid-sample monitor close -> INSTRUMENT-FAILURE status fires (INSTRUMENT-FAILURE-fired)
+  PASS: socket present through the sample -> no INSTRUMENT-FAILURE (INSTRUMENT-FAILURE-absent)
+  PASS: probe failure cannot abort grading (the gate is an annotation, not a return)
+T3_INSTRUMENT_FAILURE_TEST: PASS - INSTRUMENT-FAILURE is reachable on a mid-sample monitor close
+rc=0

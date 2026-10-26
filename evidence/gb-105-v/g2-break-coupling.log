@@ -1,0 +1,8 @@
+### G2: DELIBERATE COUPLING BREAK (police force path hardcoded again) 2026-10-26T18:59:54Z
+--- line changed:
+143:  if [ "${T3_FORCE_INSTRUMENT_FAIL:-0}" = "1" ]; then
+--- coupling test:
+  PASS: REAL classifier + FORCE -> rc=4 (got 4)
+  FAIL: BROKEN classifier + FORCE -> rc=0 PASS, NOT 4 (got 4) — forced case feeds the real classifier
+T3_CLASSIFIER_COUPLING_TEST: FAIL (1)
+rc=1
