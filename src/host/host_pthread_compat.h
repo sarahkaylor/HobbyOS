@@ -67,29 +67,18 @@ static inline int pthread_barrier_wait(pthread_barrier_t *b) {
 
 /* ---- glibc stack-bounds extensions -------------------------------------- */
 /* Darwin's pthread_get_stackaddr_np() returns the TOP of the stack (stacks
- * grow down); glibc's pthread_attr_getstack() reports the LOW address. */
+ * grow down); glibc's pthread_attr_getstack() reports the LOW address.
+ * macOS 27's SDK already declares pthread_attr_getstack/setstack, so only
+ * getattr_np needs a shim — it fills the attr via the SDK's setstack so the
+ * system getstack round-trips the real thread stack. */
 static inline int pthread_getattr_np(pthread_t t, pthread_attr_t *a) {
   (void)t;
-  return pthread_attr_init(a);
-}
-
-static inline int pthread_attr_getstack(const pthread_attr_t *a,
-                                        void **addr, size_t *size) {
-  (void)a;
+  int rc = pthread_attr_init(a);
+  if (rc) return rc;
   void *top = pthread_get_stackaddr_np(pthread_self());
   size_t sz = pthread_get_stacksize_np(pthread_self());
   if (!top || !sz) return EINVAL;
-  *addr = (char *)top - sz;
-  *size = sz;
-  return 0;
-}
-
-/* Moving a live thread to a caller-provided stack is not expressible on
- * Darwin; the test skips the custom-stack case when this returns ENOTSUP. */
-static inline int pthread_attr_setstack(pthread_attr_t *a, void *addr,
-                                        size_t size) {
-  (void)a; (void)addr; (void)size;
-  return ENOTSUP;
+  return pthread_attr_setstack(a, (char *)top - sz, sz);
 }
 
 #endif /* __APPLE__ && HOST_TEST */
