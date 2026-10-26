@@ -1,0 +1,55 @@
+name: mac-ci
+on: [push, workflow_dispatch]
+
+concurrency:
+  group: mac-ci-main
+  cancel-in-progress: false
+
+env:
+  PATH: /opt/homebrew/bin:/opt/homebrew/opt/llvm/bin:$PATH
+
+jobs:
+  arm:
+    runs-on: [self-hosted, mac-studio]
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - name: 'Build + run all ARM tiers (host golden, kernel unit, desktop, integration)'
+        run: |
+          # Tier 1: native host golden tests (no QEMU, seconds)
+          make host_tests
+          # Tier 2: kernel unit tests (20s-bounded, greps UNIT TESTS PASSED/FAILED)
+          ./run_unit_tests.sh
+          # Tier 3: automated desktop/framebuffer test (self-shuts down)
+          make desktop_test
+          # Tier 3: userland integration suite (boots MODE=test, halts QEMU)
+          make test
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-arm-logs
+          path: |
+            qemu.log
+            *.log
+            desktop_test*.png
+          if-no-files-found: ignore
+
+  intel:
+    runs-on: [self-hosted, mac-studio]
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - name: 'Build + run x86_64 tiers (unit + integration, bounded)'
+        run: |
+          ./run_unit_tests_intel.sh
+          make test_intel
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-intel-logs
+          path: |
+            qemu.log
+            *.log
+          if-no-files-found: ignore
