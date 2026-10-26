@@ -1,0 +1,25 @@
+=== t4_device: leg A reference: obj/intel/t4_legA.out ===
+=== t4_device: capture leg B from serial 'obj/t4_legB3.log' ===
+t4_device: FAIL — the probe never arrived in the guest (no 't4-probe-arrived'
+  in obj/t4_legB3.log after 3s).  This is a FAIL, not a SKIP (DoD clause 3).
+  (tail of serial:)
+start_scheduler called on CPU [ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+[RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
+  [ALIVE-SET] slot=1 pid=1 st=3 parent=-1 claimed_by=5 
+0
+/WAVE.CFG[RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
+
+[WAVE-MANIFEST] T4PROBE.BIN
+[WAVE-TRY] T4PROBE.BIN
+Loading program for scheduler (v2 AS): T4PROBE.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=[RESUME-SPSR] pid=1 spsr=0x00000293 IF=1
+2 block_idx=-1
+/T4PROBE.BIN
+[RESUME-SPSR] pid=1 spsr=0x00000212 IF=1
+elf loader: ET_EXEC linked below the user window; a -static-pie build is required (docs/elf-loader.md §1)
+[RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
+[ARRIVED] T4PROBE.BIN rc<0
+[HALT-CD] cpu=1 free=64 alloc=0 exited=0 running=0 blocked=0 other=0
+System halt from CPU 1.
+[
