@@ -64,13 +64,26 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# GB-105: THE single source of truth for the instrument-failure decision.  Both the
+# real probe_guest() sample (run path) AND the T3_FORCE_INSTRUMENT_FAIL hook
+# (police mode) route through this classifier.  Routing the forced case through it
+# means breaking the classifier breaks the forced case too: map the failure away
+# and the forced run falls through to ordinary grading (a PASS), so the forced
+# short-CI can no longer stay green while the real classifier is broken.
+#   $1 = sampler exit status, $2 = monitor socket, $3 = was a sample STARTED (0/1)
+instrument_failure_evident() {
+  [ "$3" = "1" ] && { [ "$1" != "0" ] || [ ! -S "$2" ]; }
+}
+
 if [ -n "$POLICE_ONLY" ]; then
   LOG="$POLICE_ONLY"
   # GB-103 DoD clause 3, forced deterministically: T3_FORCE_INSTRUMENT_FAIL=1 on a
-  # police run MUST yield the distinct instrument-failure outcome (rc=4) no matter
-  # what the log says -- short-circuit before grading so a verifier's forced
-  # reproduction is never masked by the ordinary clean/red outcome.
-  if [ "${T3_FORCE_INSTRUMENT_FAIL:-0}" = "1" ]; then
+  # police run MUST yield the distinct instrument-failure outcome (rc=4) ...  GB-105:
+  # the force feeds the SAME classifier as the real sample (a forced-failed sampler,
+  # st=1); if that classifier is broken it maps the failure away and this falls
+  # through to normal grading (a PASS), which is exactly the coupling the DoD asks
+  # to show.
+  if [ "${T3_FORCE_INSTRUMENT_FAIL:-0}" = "1" ] && instrument_failure_evident 1 "" 1; then
     echo "T3_${ARCH} (police ${LOG}): INSTRUMENT-FAILURE — forced (T3_FORCE_INSTRUMENT_FAIL) — neither PASS nor a tier FAIL"
     echo "T3_${ARCH} EXIT=4"
     exit 4
@@ -125,7 +138,11 @@ if [ -n "$POLICE_ONLY" ]; then
   fi
   # GB-103 DoD clause 3 driven in police too: T3_FORCE_INSTRUMENT_FAIL=1 forces the
   # distinct instrument-failure outcome (clean=PASS, tier-red=FAIL, instr=rc4).
-  [ "${T3_FORCE_INSTRUMENT_FAIL:-0}" = "1" ] && { echo "T3_${ARCH}: INSTRUMENT-FAILURE — forced (T3_FORCE_INSTRUMENT_FAIL) — neither PASS nor a tier FAIL"; echo "T3_${ARCH} EXIT=4"; exit 4; }
+  # GB-105: judged by the shared classifier (single source of truth), so a broken
+  # classifier cannot produce a forced rc=4.
+  if [ "${T3_FORCE_INSTRUMENT_FAIL:-0}" = "1" ] && instrument_failure_evident 1 "" 1; then
+    echo "T3_${ARCH}: INSTRUMENT-FAILURE — forced (T3_FORCE_INSTRUMENT_FAIL) — neither PASS nor a tier FAIL"; echo "T3_${ARCH} EXIT=4"; exit 4
+  fi
   [ "$rc" -eq 0 ] && echo "T3_${ARCH}: PASS (0 FAIL lines, halted)"
   echo "T3_${ARCH} EXIT=$rc"
   exit "$rc"
@@ -311,8 +328,9 @@ probe_guest() { # $1 = why we are sampling
   # survive -- the subshell ended abnormally, OR the monitor socket is now gone
   # because QEMU died/was killed mid-read (measured RED: SIGTERM the live qemu at
   # the sample header and the socket leaves with it).  Grading is untouched --
-  # this only annotates the log, it does not set rc.
-  if [ "$started" = "1" ] && { [ "$st" != "0" ] || [ ! -S "$MON_SOCK" ]; }; then
+  # this only annotates the log, it does not set rc.  GB-105: judged by the
+  # shared classifier (single source of truth).
+  if instrument_failure_evident "$st" "$MON_SOCK" "$started"; then
     { echo ""; echo "=== T3 guest sample: INSTRUMENT-FAILURE — monitor read ended abnormally (rc=$st; $why) — sample truncated; tier verdict still graded below ==="; } >>"$LOG"
     INSTRUMENT_FAILED=1   # a distinguishable third outcome, not PASS and not FAIL
   fi
@@ -485,7 +503,13 @@ fi
 [ "$MEMREG" = "1" ] && rc=1
 # Diagnostic/force hook: T3_FORCE_INSTRUMENT_FAIL=1 lets a test/verifier force the
 # instrument-failure outcome deterministically (GB-103 three-outcome table).
-[ "${T3_FORCE_INSTRUMENT_FAIL:-0}" = "1" ] && INSTRUMENT_FAILED=1
+# GB-105: the force routes through the SAME classifier as the real sample
+# (instrument_failure_evident) with a forced-failed sampler (st=1), so breaking
+# that classifier breaks the forced case too -- it cannot stay green while the
+# real run-path classifier is wrong.
+if [ "${T3_FORCE_INSTRUMENT_FAIL:-0}" = "1" ]; then
+  instrument_failure_evident 1 "" 1 && INSTRUMENT_FAILED=1
+fi
 # GB-103 DoD clause 3: the three-outcome judgement.  If the instrument could not
 # provide a sample (forced monitor failure), the verdict is a distinct
 # INSTRUMENT-FAILURE -- neither PASS nor a tier FAIL -- because "tier was red"
