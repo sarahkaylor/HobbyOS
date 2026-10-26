@@ -340,6 +340,15 @@ The loop:
 - The 30-second deadlock rule from `hobbyos-run-tests` stays law: hang = defect, investigate,
   don't re-run.
 - The two-arch parity rule stays law — no feature lands grey on either arch.
+- **A directive has an expiry.** Any ownership or hands-off instruction written on a card
+  ("`wabi` must not take it", "gated on X", "hold for a re-gate") must name the **premise** it rests
+  on, and is void when that premise dies. Measured cost of not doing this (2026-10-26): a sentence
+  from 2026-10-23 — "`wabi` is on GB-077/GB-057 and must not take it" — kept the busiest lane
+  concluding "no claimable work" for hours after **both** tickets closed, and a `-V` card's `Done`
+  (which meant *the RED verdict was delivered*) was read as *the card was re-graded*, leaving a
+  finished fix ungraded. Both look identical to a live instruction on the board. So: state the
+  premise, and when the premise lands, **edit or replace the directive on the card** rather than
+  leaving the next reader to rediscover it.
 
 ---
 
