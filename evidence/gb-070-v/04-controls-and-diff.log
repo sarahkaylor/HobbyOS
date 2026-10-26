@@ -1,0 +1,27 @@
+=== CONTROL: real wave + one member that is not in it (must FAIL, not skip) ===
+$ bash tools/gate/t4_w0.sh --serial <log> --members "HELLO SH CAT LS PIE"
+=== t4_w0: W0 corpus gate over evidence/gb-070-v/02-t3-intel.log ===
+  PASS HELLO (arrived in guest)
+  PASS HELLO output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  PASS SH (arrived in guest)
+  PASS SH output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  PASS CAT (arrived in guest)
+  PASS CAT output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  PASS LS (arrived in guest)
+  PASS LS output — guest 'entered-main:main-returned' == Linux-leg 'entered-main:main-returned'
+  FAIL PIE — not in the intel wave's exited-programs/arrival set (W0 corpus member never ran)
+t4_w0: FAIL — W0 corpus incomplete or output mismatch
+rc=1
+
+=== clause 3: predicate unchanged vs base ===
+$ git diff origin/main...309e049 -- tools/gate/t4_w0.sh
+(empty above = unchanged; rc=0)
+$ git diff --stat origin/main...309e049
+ src/user/cat.c                       | 15 +++++++++++++++
+ src/user/ls.c                        |  6 ++++++
+ src/user/sh.c                        |  6 ++++++
+ tests/fixtures/abi/w0_output/CAT.ref |  1 +
+ tests/fixtures/abi/w0_output/LS.ref  |  1 +
+ tests/fixtures/abi/w0_output/SH.ref  |  1 +
+ tools/t3_tier.sh                     |  7 +++++++
+ 7 files changed, 37 insertions(+)

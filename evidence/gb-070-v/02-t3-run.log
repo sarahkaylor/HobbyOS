@@ -1,0 +1,29 @@
+rev: 309e04924674e37f4f3e0fbdaaef5c260c93e968  date: 2026-10-25T18:43:29Z
+$ T3_LOG=... bash tools/t3_tier.sh intel
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 900s, log /home/sarah/wt/gb070v/evidence/gb-070-v/02-t3-intel.log) ===
+T3_intel: 11611 console lines, 94 FAIL lines, 6 user memory fault records across 6 processes, 81 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 900s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 94 FAIL line(s); first 20:
+2726:[SIGTEST] FAIL waitpid returns the child got=29 want=4294964048
+2788:[SIGTEST] FAIL open cloexec fd got=0 want=1
+3774:[SEDTEST] FAIL basic_s (stdout)
+5155:Loading program for scheduler (v2 AS):   FPU_T torture-child: FAIL
+5205:[CMPTEST] FAIL EOF message on stderr
+5215:[CMPTEST] FAIL empty EOF message
+5219:Loading program for scheduler (v2 AS): [CMPTEST] FAIL missing file diagnostic
+5261:[CMPTEST] FAIL -i 4:0 skips prefix
+5267:[CMPTEST] FAIL - stdin EOF diagnostic
+5297:[CMPTEST] FAILURES: 5
+5581:[TACTEST] FAIL missing file
+5610:[TACTEST] FAIL empty separator
+5632:[TACTEST] FAILURES: 4
+5706:/NO_SUCH_COMM_FILELoading program for scheduler (v2 AS):   FPU_T fork-inherit: FAIL
+5774:FPU_T FAILED: 2
+5979:[SEDTEST] FAIL s_p_n (stdout)
+6315:[SEDTEST] FAIL amp (stdout)
+6599:[SEDTEST] FAIL backref (stdout)
+6608:[TSORTTEST] FAIL chain from stdin (exit status -1 != 0)
+6612:[TSORTTEST] FAIL chain from '-' operand (exit status -1 != 0)
+T3_intel EXIT=1
+rc=1
