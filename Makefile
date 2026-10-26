@@ -3808,6 +3808,15 @@ style-test:
 merge_gate:
 	bash tools/gate/merge_gate.sh
 
+# --- Merge PR guard (GB-106): the production merge path calls the fail-closed
+# guard before merging.  `make merge-pr PR=204` = run
+# tools/board/merge_pr.sh (guard --merge; refuses to merge a PR whose GREEN graded
+# sha is absent or != its current head, unless a written override is recorded and
+# posted to the card).
+.PHONY: merge-pr
+merge-pr: FORCE_ARCH
+	bash tools/board/merge_pr.sh $(PR)
+
 merge_gate_ci:
 	GATE_CI=1 bash tools/gate/merge_gate.sh
 
