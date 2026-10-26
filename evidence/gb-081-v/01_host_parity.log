@@ -1,0 +1,4 @@
+=== clause 1: host parity
+PARITY_EXIT=0
+
+cmp parity: 55/55 byte-exact PASS
