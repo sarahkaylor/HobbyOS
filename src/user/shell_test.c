@@ -641,10 +641,35 @@ int main(void) {
       if (peak >= 55 || timed_out) {
         print_console("shell_test: SKIP 2>&1 dup check (slot pressure)\n");
       } else {
-        print_console("shell_test: FAILED 2>&1 dup redirect byte count. wc saw: ");
-        print_console(buf);
-        print_console("\n");
-        return 1;
+        /* No wc report and no fork-failure sentinel.  Before failing, read the
+           redirect target with this test's OWN open(): if it holds exactly the
+           194-byte fixture, the redirect worked and only wc's report was lost
+           to a child the wave never scheduled -- the documented slot-pressure
+           class, not a shell regression.  A wrong size IS the regression this
+           step exists to catch, so it stays a hard FAIL and now names the size
+           it saw.  Measured 2026-10-26 on the ARM tier: this failed with no
+           sentinel in the same run as POLLTST's elapsed bound and WK1C_T's
+           realtime drift, and passed on the runs either side. */
+        int pfd = open("OUT7.TXT", 0);
+        int psz = -1;
+        if (pfd >= 0) {
+          char pbuf[256];
+          int pn = read(pfd, pbuf, (int)sizeof pbuf);
+          close(pfd);
+          psz = pn;
+        }
+        if (psz == 194) {
+          print_console("shell_test: SKIP 2>&1 dup check (redirect file is "
+                        "byte-correct; wc's report was starved)\n");
+        } else {
+          print_console("shell_test: FAILED 2>&1 dup redirect byte count. "
+                        "OUT7.TXT size=");
+          print_dec(psz);
+          print_console(" (want 194). wc saw: ");
+          print_console(buf);
+          print_console("\n");
+          return 1;
+        }
       }
     } else {
       print_console("[TEST] 2>&1 dup redirect byte assertion passed.\n");

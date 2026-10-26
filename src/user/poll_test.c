@@ -183,8 +183,17 @@ static void test_timeout_accounting(void) {
    * and the park; the discriminating property is "no instant return and
    * the timeout is honored" (a broken select returns ~0ms; a
    * timeout-ignoring one blocks until the deadlock rule fires). */
-  check("timeout took >= 85ms and < 5000ms (elapsed seen)",
-        elapsed >= 85 && elapsed < 5000);
+  check("timeout took >= 85ms and < 30000ms (elapsed seen)",
+        elapsed >= 85 && elapsed < 30000);
+  /* The upper bound is a "the timeout was honoured, not ignored" guard, not a
+   * latency SLA: `elapsed` is the GUEST's wall clock, so a caller preempted
+   * between the select() return and now_ms() charges the wait to this number.
+   * Measured 2026-10-26 on the ARM tier: one wave run failed this at >= 5000ms
+   * together with two other load-sensitive checks (WK1C_T's realtime drift and
+   * shell_test's wc round trip) and passed on the runs either side, i.e. the
+   * spike was the machine, not the timeout.  A select that ignores the timeout
+   * still fails (it blocks far past 30 s and trips the tier deadline), and a
+   * broken select that returns instantly still fails the >= 85ms floor. */
   /* GB-086/GB-082: always emit the measured elapsed so the distribution is
    * quotable at every run (DoD: "prints elapsed_ms=<digits> on every run"),
    * as ONE atomic console write so cross-core interleaving cannot shred the
