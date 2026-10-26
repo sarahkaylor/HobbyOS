@@ -1,0 +1,16 @@
+=== clause 1: guard against a deleted cwd (simulated resume) ===
+--- guard output (stderr) ---
+RESUME-CWD-GUARD: cannot resume into working directory '/tmp/gb104-dead-cwd-170305' — it no longer exists (likely pruned/rotated). Start a fresh session instead.
+guard exit=1
+cmd1 ok
+cmd2 ok
+cmd3 ok
+cmd4 ok
+cmd5 ok
+--- count of RESUME-CWD-GUARD lines across the whole session ---
+1
+
+=== clause 2: healthy path (existing cwd) must be silent and exit 0 ===
+guard exit=0
+output bytes=0
+--- output (should be empty) ---

@@ -1,0 +1,23 @@
+=== before ===
+worktree /tmp/gb104-scratch
+worktree /tmp/gb104-scratch/.worktrees/live
+.worktrees/dirty/
+.worktrees/live/
+.worktrees/orphan/
+dirty file present: YES
+
+=== run pruner ===
+PRUNE-STALE-WORKTREES: removed stale worktree .worktrees/dirty
+PRUNE-STALE-WORKTREES: removed stale worktree .worktrees/orphan
+PRUNE-STALE-WORKTREES: ready (git pruned; removed=2 stale worktree dirs)
+pruner rc=0
+
+=== after ===
+worktree /tmp/gb104-scratch
+worktree /tmp/gb104-scratch/.worktrees/live
+.worktrees/live/
+a) live worktree dir present:      YES
+a) live worktree LIVE.txt present: YES
+b) orphan dir present:             NO
+c) dirty dir present:              NO
+c) dirty work.txt present:         NO

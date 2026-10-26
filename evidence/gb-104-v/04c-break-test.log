@@ -1,0 +1,19 @@
+=== guard broken (dead-cwd check removed) — self-test MUST fail ===
+  PASS: existing cwd -> guard exit 0 (normal resume succeeds)
+  PASS: existing cwd -> no startup error line
+  FAIL: deleted cwd -> guard exits non-zero
+  FAIL: deleted cwd -> EXACTLY ONE startup error (got 0)
+  FAIL: the single error NAMES the path (not generic)
+  PASS: prune exits 0
+  PASS: stale (orphaned) worktree dir removed
+  PASS: live/git-listed worktree kept
+  PASS: prune report line present
+RESUME_GUARD_TEST: FAIL (3 failure(s))
+self-test rc=1
+
+=== restore guard ===
+=== self-test after restore MUST pass ===
+  PASS: live/git-listed worktree kept
+  PASS: prune report line present
+RESUME_GUARD_TEST: PASS - one startup error for a dead cwd, normal resume succeeds, stale worktrees pruned
+self-test rc=0

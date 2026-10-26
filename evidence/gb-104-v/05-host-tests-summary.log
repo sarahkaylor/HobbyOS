@@ -1,0 +1,9 @@
+$ git worktree list | wc -l  (before)
+15
+$ make host_tests
+host_tests rc=2
+      |          ^~~~~~~~~~
+1 error generated.
+make: *** [Makefile:3409: obj/host_rtti_test.o] Error 1
+$ git worktree list | wc -l  (after)
+15

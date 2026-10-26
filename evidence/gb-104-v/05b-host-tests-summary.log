@@ -1,0 +1,9 @@
+NOTE: my worktree was missing the third_party/libcxx-21.1.8/src symlink on the first attempt (typeinfo not found); symlink added, rerun below.
+$ make host_tests
+host_tests rc=0
+Checks run:    482
+Checks failed: 0
+ALL APPS SUITE TESTS PASSED
+TEST EXIT: 0
+$ git worktree list | wc -l
+15

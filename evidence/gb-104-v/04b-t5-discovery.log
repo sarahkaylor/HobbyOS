@@ -1,0 +1,5 @@
+$ python3 tools/t5/run_t5_tests.py 2>&1 | grep -iE "resume_guard|swarm|TOTAL|PASSED|FAILED"
+  PASS: lies.py (prints PASSED but exits 1 — the substring-only grader called this a pass) -> grader said FAIL, wanted FAIL
+RUN_T5_TESTS_SELF_TEST: ALL PASSED
+  PASS  tools/swarm/resume_guard_test.py
+[host-tests] done: 24/24 passed
