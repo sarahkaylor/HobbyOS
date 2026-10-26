@@ -1,0 +1,4 @@
+=== clause 2b: mismatch (graded != head)
+[merge_pr] PR #202: REFUSE: graded sha bbbbbbbbbbbb != current head d706c8cd0714 — refusing to merge a tree that was not graded
+[merge_pr] NOT MERGED (fail closed)
+EXIT=1

@@ -1,0 +1,11 @@
+=== clause 3: override writes a durable record, then allows
+[merge_pr] OVERRIDE recorded (/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-d3f64ee8/tools/board/../../obj/gate/merge_pr_override/pr-202.reason.json); merge allowed
+EXIT=0
+--- the record:
+{
+  "pr": 202,
+  "reason": "gate check: manual re-run confirms head d706c8c (GB-106-V)",
+  "by": "sarah",
+  "at": "2026-10-26T19:01:16.037998+00:00",
+  "head": "81a2eaee10f4a62f7fe3c15bdc1c21abf4e93e57"
+}
