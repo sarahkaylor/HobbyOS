@@ -54,6 +54,23 @@ void print_dec(long val);
 #include <sys/uio.h>
 #endif
 
+/* MSG_CMSG_CLOEXEC is a Linux recvmsg flag.  macOS has no such constant --
+   `make host_tests` on the Mac died with "use of undeclared identifier
+   'MSG_CMSG_CLOEXEC'" at both recvmsg sites below, which red-lit the whole
+   host tier for a flag the platform simply does not define.
+
+   Where the platform has no flag, pass 0 (the receive path is still fully
+   checked) and compile the CLOEXEC assertions out: they assert flag
+   semantics that cannot exist there.  On Linux hosts and on device the
+   constant exists and every assertion runs unchanged. */
+#ifdef MSG_CMSG_CLOEXEC
+#define IPC_RECV_CMSG_CLOEXEC MSG_CMSG_CLOEXEC
+#define IPC_HAVE_CMSG_CLOEXEC 1
+#else
+#define IPC_RECV_CMSG_CLOEXEC 0
+#define IPC_HAVE_CMSG_CLOEXEC 0
+#endif
+
 static int fails;
 
 static void check(const char *name, int ok) {
@@ -442,15 +459,17 @@ static void t_fd_passing(void) {
     up_pf.revents = 0;
     int pr = poll(&up_pf, 1, 10000);
     errno = 0;
-    r = (pr == 1) ? (int)recvmsg(sv[0], &um, MSG_CMSG_CLOEXEC) : -1;
+    r = (pr == 1) ? (int)recvmsg(sv[0], &um, IPC_RECV_CMSG_CLOEXEC) : -1;
   }
   check("SCM_RIGHTS child->parent recvmsg -> 2 bytes, no cmsg truncation",
         r == 2 && udata[0] == 'u' && !(um.msg_flags & MSG_CTRUNC));
   int ufd = cmsg_fd(&um);
   check("child->parent fd arrived in the control block", ufd >= 0);
   if (ufd >= 0) {
+#if IPC_HAVE_CMSG_CLOEXEC
     check("MSG_CMSG_CLOEXEC set FD_CLOEXEC on the received fd",
           fcntl(ufd, F_GETFD, 0) == FD_CLOEXEC);
+#endif
     struct stat st;
     check("fstat(received fd) reports a FIFO",
           fstat(ufd, &st) == 0 && S_ISFIFO(st.st_mode));
@@ -499,10 +518,15 @@ static void t_fd_passing(void) {
     um.msg_iovlen = 1;
     um.msg_control = ucbuf;
     um.msg_controllen = sizeof ucbuf;
-    r = (r == 4) ? (int)recvmsg(sv[1], &um, MSG_CMSG_CLOEXEC) : -1;
+    r = (r == 4) ? (int)recvmsg(sv[1], &um, IPC_RECV_CMSG_CLOEXEC) : -1;
     int g2 = (r == 4) ? cmsg_fd(&um) : -1;
+#if IPC_HAVE_CMSG_CLOEXEC
     check("MSG_CMSG_CLOEXEC transfer sets the bit on the new fd",
           g2 >= 0 && fcntl(g2, F_GETFD, 0) == FD_CLOEXEC);
+#else
+    check("SCM_RIGHTS transfer delivered an fd (no platform CLOEXEC flag)",
+          g2 >= 0);
+#endif
     if (g2 >= 0) close(g2);
 
     /* (c) control truncation: no control buffer at all -> MSG_CTRUNC and
