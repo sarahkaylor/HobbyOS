@@ -28,6 +28,27 @@ def kill_qemu():
 
 log("Starting QEMU for desktop test...")
 arch = os.environ.get("ARCH", "arm")
+
+# Build BEFORE starting the guest clock.  DESKTOP_TEST_TIMEOUT bounds how long
+# the guest may take to reach SCREENSHOT_READY; if the build shares that budget
+# a cold copy can spend all of it compiling (ICU alone is minutes) and the tier
+# reports a guest timeout for a guest that never booted.  Measured on linuxci
+# 2026-10-26: a 120 s budget expired mid-build, so every fresh checkout was
+# red regardless of the desktop's behaviour.
+log("Building the desktop test image (build time is not part of the guest budget)...")
+build = subprocess.run(
+    ["make", "desktop_test_build", f"ARCH={arch}"],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
+    text=True,
+)
+build_lines = build.stdout.splitlines()
+for line in build_lines[-40:]:
+    log(line)
+if build.returncode != 0:
+    log(f"[TEST] desktop_test_build failed (rc={build.returncode}); not starting the guest")
+    sys.exit(1)
+
 process = subprocess.Popen(
     ["make", "desktop_test_run", f"ARCH={arch}", "QEMU_ARGS=-display none -qmp unix:./qmp-sock,server,nowait"],
     stdout=subprocess.PIPE,
