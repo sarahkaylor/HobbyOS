@@ -1,0 +1,64 @@
+=== t4_device: leg A reference: obj/intel/t4_legA.out ===
+=== t4_device: capture leg B from serial 'obj/t4_legB_pr200.log' ===
+t4_device: probe ARRIVED in guest (t4-probe-arrived present).
+t4_device: row count A=41 B=17
+t4_device: FAIL — row count differs (A=41 B=17)
+  FAIL row=write3 rc=3 errno=0 out=68690a  (not present in guest output; see B rows below)
+  FAIL row=uname_rc rc=0 errno=0  (not present in guest output; see B rows below)
+  FAIL row=uname_sysname_linux rc=1 errno=0  (not present in guest output; see B rows below)
+  FAIL row=uname_machine_x86_64 rc=1 errno=0  (not present in guest output; see B rows below)
+  FAIL row=getrandom_16 rc=16 errno=0  (not present in guest output; see B rows below)
+  FAIL row=urandom_open rc=3 errno=0  (not present in guest output; see B rows below)
+  FAIL row=urandom_read16 rc=16 errno=0  (not present in guest output; see B rows below)
+  FAIL row=null_open_w rc=4 errno=0  (not present in guest output; see B rows below)
+  FAIL row=null_write3 rc=3 errno=0  (not present in guest output; see B rows below)
+  FAIL row=null_open_r rc=5 errno=0  (not present in guest output; see B rows below)
+  FAIL row=null_read1 rc=0 errno=0  (not present in guest output; see B rows below)
+  FAIL row=pipe2 rc=0 errno=0  (not present in guest output; see B rows below)
+  FAIL row=poll_ready rc=1 errno=0  (not present in guest output; see B rows below)
+  FAIL row=poll_ready_revents rc=1 errno=0  (not present in guest output; see B rows below)
+  FAIL row=select_ready rc=1 errno=0  (not present in guest output; see B rows below)
+  FAIL row=select_ready_fdset rc=1 errno=0  (not present in guest output; see B rows below)
+  FAIL row=pselect6_ready rc=1 errno=0  (not present in guest output; see B rows below)
+  FAIL row=pselect6_ready_fdset rc=1 errno=0  (not present in guest output; see B rows below)
+  FAIL row=poll_badfd rc=1 errno=0  (not present in guest output; see B rows below)
+  FAIL row=poll_badfd_revents rc=32 errno=0  (not present in guest output; see B rows below)
+  FAIL row=sockpair rc=0 errno=0  (not present in guest output; see B rows below)
+  FAIL row=sockpoll_ready rc=1 errno=0  (not present in guest output; see B rows below)
+  FAIL row=sockpoll_revents rc=1 errno=0  (not present in guest output; see B rows below)
+  FAIL row=sockselect_ready rc=1 errno=0  (not present in guest output; see B rows below)
+  FAIL row=sockselect_fdset rc=1 errno=0  (not present in guest output; see B rows below)
+  FAIL row=sockpselect_ready rc=1 errno=0  (not present in guest output; see B rows below)
+  FAIL row=sockpselect_fdset rc=1 errno=0  (not present in guest output; see B rows below)
+  FAIL row=fcntl_getfl_rdwr rc=32770 errno=0  (not present in guest output; see B rows below)
+  FAIL row=fcntl_setfl_append rc=0 errno=0  (not present in guest output; see B rows below)
+  FAIL row=fcntl_getfl_after rc=33794 errno=0  (not present in guest output; see B rows below)
+  FAIL row=fcntl_append_bit rc=1 errno=0  (not present in guest output; see B rows below)
+  FAIL row=ioctl_tiocgwinsz_entty rc=25 errno=0  (not present in guest output; see B rows below)
+  FAIL row=ioctl_tcgets_entty rc=25 errno=0  (not present in guest output; see B rows below)
+  FAIL row=dent_created rc=3 errno=0  (not present in guest output; see B rows below)
+  FAIL row=dent_opendir rc=6 errno=0  (not present in guest output; see B rows below)
+  FAIL row=dent_total rc=3 errno=0  (not present in guest output; see B rows below)
+  FAIL row=dent_have_alpha rc=1 errno=0  (not present in guest output; see B rows below)
+  FAIL row=dent_have_beta rc=1 errno=0  (not present in guest output; see B rows below)
+  FAIL row=dent_have_charlie rc=1 errno=0  (not present in guest output; see B rows below)
+  FAIL row=procfd_opendir rc=0 errno=0  (not present in guest output; see B rows below)
+  FAIL row=procfd_read rc=1 errno=0  (not present in guest output; see B rows below)
+t4_device: FAIL — differential mismatch.  Guest rows:
+row=write3 rc=3 errno=0 out=68690a
+row=uname_rc rc=-1 errno=1
+row=uname_sysname_linux rc=0 errno=0
+row=uname_machine_x86_64 rc=0 errno=0
+row=getrandom_16 rc=-1 errno=1
+row=urandom_open rc=0 errno=0
+row=urandom_read16 rc=16 errno=0
+row=fcntl_getfl_rdwr rc=-1 errno=9
+row=fcntl_setfl_append rc=-1 errno=9
+row=fcntl_getfl_after rc=-1 errno=9
+row=fcntl_append_bit rc=1 errno=0
+row=ioctl_tiocgwinsz_entty rc=38 errno=0
+row=ioctl_tcgets_entty rc=38 errno=0
+row=dent_created rc=0 errno=0
+row=dent_opendir rc=-1 errno=9
+row=procfd_opendir rc=0 errno=0
+row=procfd_read rc=1 errno=0
