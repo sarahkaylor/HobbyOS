@@ -562,6 +562,9 @@ void save_context(struct process *p, struct trap_frame *tf);
 // double-run a live process.  `now_ms` is injected for deterministic unit
 // tests.  Caller holds proc_lock.  Unit-tested in process_test.c.
 int lostwake_stale_claim_reclaimable_at(int k, uint64_t now_ms);
+/* GB-057 (2026-10-26): RUNNING slot `k` whose only claimers are CPUs that
+   recorded their own halt -- dead by construction, not live work. */
+int slot_claimed_only_by_halted_cpus(int k);
 int lostwake_stale_claim_reclaimable(int k);
 
 // Owner-liveness grace, ms: the per-CPU heartbeat bumps on every timer IRQ
