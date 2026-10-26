@@ -1,0 +1,10 @@
+=== clause 3: does the harness FAIL on an induced wrong probe?
+[self-test] clause 3 (absent probe must FAIL, not skip):
+  OK — absent probe FAILED as required
+[self-test] GB-079 (a probe edit must FAIL in both --check modes):
+  OK — healthy probe PASSES (leg A absent)
+  OK — injected probe row FAILS (leg A absent)
+  OK — healthy probe PASSES (leg A present)
+  OK — injected probe row FAILS (leg A present)
+self-test result: fail_count=0
+SELFTEST_EXIT=0

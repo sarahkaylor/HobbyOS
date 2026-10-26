@@ -1,0 +1,3 @@
+=== t4_device: leg A reference: /tmp/fake_legA_0rows.out ===
+t4_device: FATAL — leg A reference '/tmp/fake_legA_0rows.out' absent/empty. Build leg A first:
+  musl-gcc -static -O2 src/user/t4_probe.c -o $TMP/t4.elf && $TMP/t4.elf > '/tmp/fake_legA_0rows.out'
