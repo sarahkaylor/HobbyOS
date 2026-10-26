@@ -1,0 +1,32 @@
+--- serial context around T4PROBE ---
+108:[WAVE-MANIFEST] T4PROBE.BIN
+109:[WAVE-TRY] T4PROBE.BIN
+111:Loading program for scheduler (v2 AS): T4PROBE.BIN
+114:/T4PROBE.BIN
+117:[ARRIVED] T4PROBE.BIN rc<0
+
+start_scheduler called on CPU [ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. L
+0
+[RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
+  [ALIVE-SET] slot=1 pid=1 st=3 parent=-1 claimed_by=4 
+/WAVE.CFG[RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
+
+[WAVE-MANIFEST] T4PROBE.BIN
+[WAVE-TRY] T4PROBE.BIN
+[RESUME-SPSR] pid=1 spsr=0x00000297 IF=1
+Loading program for scheduler (v2 AS): T4PROBE.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=-1
+/T4PROBE.BIN
+[RESUME-SPSR] pid=1 spsr=0x00000212 IF=1
+elf loader: ET_EXEC linked below the user window; a -static-pie build is required (docs/elf-loader.md §1)
+[ARRIVED] T4PROBE.BIN rc<0
+[HALT-CD] cpu=1 free=64 alloc=0 exited=0 running=0 blocked=0 other=0
+System halt from CPU 1.
+[
+
+--- ELF shape of the staged probe ---
+obj/intel/t4_probe.elf: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, with debug_info, not stripped
+  Type:                              EXEC (Executable file)
+  Machine:                           Advanced Micro Devices X86-64
+  Entry point address:               0x401cc1

@@ -1,0 +1,11 @@
+--- the gate verdict lines on the real leg-B serial ---
+=== t4_device: leg A reference: obj/intel/t4_legA.out ===
+=== t4_device: capture leg B from serial 'evidence/gb-066-v2/02-intel.log' ===
+t4_device: FAIL — the probe never arrived in the guest (no 't4-probe-arrived'
+  in evidence/gb-066-v2/02-intel.log after 120s).  This is a FAIL, not a SKIP (DoD clause 3).
+
+$ make host_tests
+host_tests rc=0
+Checks failed: 0
+ALL APPS SUITE TESTS PASSED
+TEST EXIT: 0

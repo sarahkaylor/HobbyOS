@@ -1,0 +1,25 @@
+=== A) gate on the REAL leg-B serial (0 rows from the guest) ===
+rc=1
+[RESUME-SPSR] pid=1 spsr=0x00000212 IF=1
+elf loader: ET_EXEC linked below the user window; a -static-pie build is required (docs/elf-loader.md §1)
+[ARRIVED] T4PROBE.BIN rc<0
+[HALT-CD] cpu=1 free=64 alloc=0 exited=0 running=0 blocked=0 other=0
+System halt from CPU 1.
+[
+=== B) --self-test (induced wrong shim + absent probe, synthetic) ===
+rc=0
+[self-test] clause 3 (absent probe must FAIL, not skip):
+  OK — absent probe FAILED as required
+[self-test] GB-079 (a probe edit must FAIL in both --check modes):
+  OK — healthy probe PASSES (leg A absent)
+  OK — injected probe row FAILS (leg A absent)
+  OK — healthy probe PASSES (leg A present)
+  OK — injected probe row FAILS (leg A present)
+self-test result: fail_count=0
+
+=== C) --check (probe/host row-name parity) ===
+rc=0
+  PASS row: procfd_read (device+host)
+  mode=emitted: PASS
+  PASS: recorded leg A agrees with the probe source (41 golden rows, no drift)
+t4_device --check: PASS (mode=source+emitted) — both extractions carry exactly the golden row-name set and agree; the host model contains every golden row.
