@@ -49,14 +49,20 @@ def graded_sha_of(pr, env=None):
 
 
 def decide(head, graded):
-    """(allow, reason).  head/graded are 40-hex (or None)."""
+    """(allow, reason).  GB-106 fail-closed guard, hardened by GB-109:
+    - graded shas compare as PREFIXES of the head (a real verdict posts an
+      abbreviated sha, e.g. `7de6dde`); a graded prefix <7 chars refuses.
+    - head must be the PR's API head (None = unreachable API) -> refuse.
+      There is NO flag path that can force head==graded (the vacuous call)."""
     if not head:
-        return False, "REFUSE: no current head sha supplied — must name the tree that would merge"
+        return False, "REFUSE: no current head (API unreachable?) — cannot name the tree that would merge"
     if not graded:
-        return False, f"REFUSE: GREEN names no graded sha — cannot confirm the graded tree is the current head {head[:12]}"
-    if graded != head:
-        return False, f"REFUSE: graded sha {graded[:12]} != current head {head[:12]} — refusing to merge a tree that was not graded"
-    return True, f"ok: graded sha {graded[:12]} equals current head — merge allowed"
+        return False, "REFUSE: GREEN names no graded sha — cannot confirm the graded tree is the current head"
+    if len(graded) < 7:
+        return False, f"REFUSE: graded sha too short ({len(graded)}<7) — cannot be a verified prefix"
+    if head.startswith(graded):
+        return True, f"ok: graded prefix {graded[:7]}.. matches current head {head[:12]}.. — merge allowed"
+    return False, f"REFUSE: graded {graded[:7]}.. is not a prefix of the current head {head[:12]}.. — refusing to merge a tree that was not graded"
 
 
 def record_override(pr, reason, env=None):
@@ -121,6 +127,24 @@ def self_test():
     ok, r = decide(head194, graded194)
     check(not ok and graded194 != head194,
           f"today's #194 incident shape (graded 7de6dde.., merged e8c7dc8..) -> RED for the mismatch ({r[:44]})")
+    # GB-109: abbreviated graded shas compare as PREFIXES (>=7 chars)
+    ok, r = decide(h, h[:7]); check(ok, "graded 7-char prefix of head -> ALLOW (%s)" % r[:24])
+    ok, r = decide(h, "fffffff"); check(not ok, "graded 7-char prefix that is NOT a prefix -> REFUSE (%s)" % r[:24])
+    ok, r = decide(h, h[:6]); check(not ok, "graded prefix <7 chars -> REFUSE (%s)" % r[:34])
+    try:
+        ok, r = decide(h[:5], h); check(not ok, "graded <7 chars (h[:5]) -> REFUSE (%s)" % r[:34])
+    except Exception as e:
+        check(True, "graded <7 chars -> REFUSE (guard rejects too-short)" )
+    # GB-109: the vacuous call (a --head flag forcing head==graded) is INEXPRESSIBLE:
+    # main()'s parser has NO --head option, so it exits on "unrecognized".
+    sysargv, sys.argv = sys.argv, ["merge_pr", "--pr", "1", "--head", "ff"]
+    try:
+        main()
+        check(False, "--head must be rejected by main()")
+    except SystemExit:
+        check(True, "main() rejects --head (the vacuous flag call is inexpressible)")
+    finally:
+        sys.argv = sysargv
     if fails:
         print("MERGE_PR_SELFTEST: FAIL (%d)" % fails); sys.exit(1)
     print("MERGE_PR_SELFTEST: PASS - fail-closed rule + override + #194 goes red")
@@ -176,8 +200,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default="sarahkaylor/HobbyOS")
     ap.add_argument("--pr", type=int)
-    ap.add_argument("--head", default=None, help="current PR head 40-hex (default: git HEAD)")
-    ap.add_argument("--graded", default=None, help="graded sha named by the GREEN (default: obj/gate/graded-<pr>.sha)")
+    ap.add_argument("--graded", default=None,
+                    help="graded sha (abbreviated, >=7 chars) named by the GREEN (default: obj/gate/graded-<pr>.sha); "
+                         "the HEAD comes only from the GitHub API — never a flag, so the vacuous call is inexpressible")
     ap.add_argument("--override", default=None,
                     help="written reason; runs decide() first, NAMES the graded!=head pair, records it and posts it to the card (--card)")
     ap.add_argument("--card", type=int, default=None, help="board issue number to post the override/verdict comment to")
@@ -190,10 +215,10 @@ def main():
 
     if a.override is not None:
         # Clause 4: run decide() FIRST so the offending pair is visible and named.
-        head = a.head or head_of_pr(a.pr)
+        head = head_of_pr(a.pr)          # API-only head (never a flag)
         graded = a.graded or graded_sha_of(a.pr)
         allow, reason = decide(head, graded)
-        pair = f"graded {graded} != head {head}" if (graded and head and graded != head) else (reason)
+        pair = reason
         note = (f"merge_pr override for PR #{a.pr}: {pair} — reason: {a.override}")
         path = record_override(a.pr, a.override)
         card_msg = f"**merge_pr override recorded** ({path})\n\n{note}"
@@ -205,8 +230,8 @@ def main():
         sys.exit(0)
 
     if a.pr and a.merge:
-        # Clause 5: the production merge path / call site.
-        head = a.head or head_of_pr(a.pr)
+        # Clause 5: the production merge path / call site.  Head is API-only.
+        head = head_of_pr(a.pr)
         graded = a.graded or graded_sha_of(a.pr)
         allow, reason = decide(head, graded)
         print(f"[merge_pr] PR #{a.pr}: {reason}")
@@ -218,7 +243,7 @@ def main():
         sys.exit(0 if ok else 1)
 
     if a.pr:
-        head = a.head or head_of_pr(a.pr)
+        head = head_of_pr(a.pr)
         graded = a.graded or graded_sha_of(a.pr)
         allow, reason = decide(head, graded)
         print(f"[merge_pr] PR #{a.pr}: {reason}")
