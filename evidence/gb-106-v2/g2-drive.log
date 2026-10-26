@@ -1,0 +1,32 @@
+### G2: guard driven directly @ cf235c5 2026-10-26T20:36:47Z
+== clause 1: both directions ==
+  decide(head=cf235c500000, graded=cf235c500000) -> allow=True
+     ok: graded sha cf235c500000 equals current head — merge allowed
+  decide(head=7de6dde00000, graded=cf235c500000) -> allow=False
+     REFUSE: graded sha cf235c500000 != current head 7de6dde00000 — refusing to merge a tree that was not graded
+
+== clause 2: fails closed on silence ==
+  decide(head=cf235c500000, graded=None) -> allow=False
+     REFUSE: GREEN names no graded sha — cannot confirm the graded tree is the current head cf235c500000
+
+== clause 3: the #194 shape (graded 7de6dde.. vs merged e8c7dc8..) ==
+  decide(head=merged e8c7dc800000, graded=7de6dde00000) -> allow=False
+     REFUSE: graded sha 7de6dde00000 != current head e8c7dc800000 — refusing to merge a tree that was not graded
+  both shas named in the reason: True
+
+== clause 4: --override behaviour ==
+  (a) empty reason through the CLI:
+     rc=2; output: usage: merge_pr.py [-h] [--repo REPO] [--pr PR] [--head HEAD]
+                   [--graded GRADED] [--override OVERRIDE] [--self-test]
+merge_pr.py: error: need --pr (+ --head/--override) or --self-tes
+  (b) written reason through the CLI:
+     rc=0; output:
+[merge_pr] OVERRIDE recorded (/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-3a5e810f/tools/board/../../obj/gate/merge_pr_override/pr-194.reason.json); merge allowed
+     override record exists: True
+     {
+       "pr": 194,
+       "reason": "re-tested the merged tree by hand",
+       "by": "sarah",
+       "at": "2026-10-26T20:36:47.923880+00:00",
+       "head": "cf235c580cf37deabd374407b3c063206b3d933a"
+     }

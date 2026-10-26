@@ -1,0 +1,10 @@
+### G-all: merge_pr_test.py as shipped @ cf235c5 2026-10-26T20:36:11Z
+  PASS: graded == head -> allow
+  PASS: graded != head -> refuse
+  PASS: GREEN names no sha -> FAILS CLOSED (refuse)
+  PASS: no head supplied -> refuse
+  PASS: parses a 40-hex graded sha from a VERDICT line
+  PASS: a VERDICT with no sha -> empty (fails closed upstream)
+  PASS: today's #194 incident (graded 7de6dde.., merged e8c7dc8..) -> RED for the mismatch (REFUSE: graded sha 7de6dde4f3f2 != curre)
+MERGE_PR_TEST: PASS - fail-closed guard rule + #194 goes red
+rc=0

@@ -1,0 +1,10 @@
+### G6: DELIBERATE BREAK — comparison forced equal 2026-10-26T20:37:31Z
+  PASS: graded == head -> allow
+  FAIL: graded != head -> refuse
+  PASS: GREEN names no sha -> FAILS CLOSED (refuse)
+  PASS: no head supplied -> refuse
+  PASS: parses a 40-hex graded sha from a VERDICT line
+  PASS: a VERDICT with no sha -> empty (fails closed upstream)
+  FAIL: today's #194 incident (graded 7de6dde.., merged e8c7dc8..) -> RED for the mismatch (ok: graded sha 7de6dde4f3f2 equals curre)
+MERGE_PR_TEST: FAIL (2)
+rc=1
