@@ -1,0 +1,12 @@
+$ du -sh ~/.cache/hobbyos-ccache; CCACHE_DIR=~/.cache/hobbyos-ccache ccache -s | head -8
+11M	/home/sarah/.cache/hobbyos-ccache
+Cacheable calls:    141 / 151 (93.38%)
+  Hits:               0 / 141 ( 0.00%)
+    Direct:           0
+    Preprocessed:     0
+  Misses:           141 / 141 (100.0%)
+Uncacheable calls:   10 / 151 ( 6.62%)
+Local storage:
+  Cache size (GiB): 0.0 / 5.0 ( 0.05%)
+  Hits:               0 / 141 ( 0.00%)
+  Misses:           141 / 141 (100.0%)

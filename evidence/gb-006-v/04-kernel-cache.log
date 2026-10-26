@@ -1,0 +1,5 @@
+$ ccache -z; (obj/intel removed); HOBBYOS_USE_CCACHE=1 make ARCH=intel hobbyos.elf; ccache -s
+Statistics zeroed
+build rc=0
+--- Makefile wiring line ---
+HOBBYOS_USE_CCACHE=1: real build routed through /usr/lib/ccache (CCACHE_DIR=/home/sarah/.cache/hobbyos-ccache CCACHE_BASEDIR=/home/sarah/wt/gb006v)

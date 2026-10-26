@@ -1,0 +1,41 @@
+$ bash tools/cache/measure_build.sh --negative
+GB-006 REAL-build measurement  (HOBBYOS_USE_CCACHE=1  CCACHE_DIR=/home/sarah/.cache/hobbyos-ccache)
+  TARGET='cxxrt_test_host errno_test_host rtti_test_host libc_string_test_host libc_ctype_test_host libc_printf_test_host libc_stdlib_test_host thrd_test_host tls_test_host torture_test_host'
+  COLD (make clean + make 'cxxrt_test_host errno_test_host rtti_test_host libc_string_test_host libc_ctype_test_host libc_printf_test_host libc_stdlib_test_host thrd_test_host tls_test_host torture_test_host'): 3s
+  [ccache after COLD]
+    Hits:               0 /  21 ( 0.00%)
+    Misses:            21 /  21 (100.0%)
+    Hits:               0 /  21 ( 0.00%)
+    Misses:            21 /  21 (100.0%)
+  WARM (make clean + make 'cxxrt_test_host errno_test_host rtti_test_host libc_string_test_host libc_ctype_test_host libc_printf_test_host libc_stdlib_test_host thrd_test_host tls_test_host torture_test_host'): 1s
+  [ccache after WARM]
+    Hits:              21 /  42 (50.00%)
+    Misses:            21 /  42 (50.00%)
+    Hits:              21 /  42 (50.00%)
+    Misses:            21 /  42 (50.00%)
+  NEGATIVE (cache cleared) (make clean + make 'cxxrt_test_host errno_test_host rtti_test_host libc_string_test_host libc_ctype_test_host libc_printf_test_host libc_stdlib_test_host thrd_test_host tls_test_host torture_test_host'): 3s
+  [ccache after NEGATIVE]
+    Hits:               0 /  21 ( 0.00%)
+    Misses:            21 /  21 (100.0%)
+    Hits:               0 /  21 ( 0.00%)
+    Misses:            21 /  21 (100.0%)
+----
+PASS: real build (not a probe) served >=1 ccache hit (warm hits=42)
+GB-006 real-build measurement done.
+rc=0
+
+=== clause 3a: make test_cache ===
+cold_ms=83 warm_ms=10
+ccache stats: hits~2 misses~2
+  PASS: warm compile is a ccache HIT (hits=2)
+  PASS: warm <= cold (cached build not slower)
+=== cache_test DoD: cold vs cached build time measured (real numbers above) ===
+CACHE TEST PASSED
+rc=0
+
+=== clause 3b: make host_tests ===
+host_tests rc=0
+Checks run:    482
+Checks failed: 0
+ALL APPS SUITE TESTS PASSED
+TEST EXIT: 0

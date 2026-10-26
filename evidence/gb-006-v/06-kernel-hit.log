@@ -1,0 +1,9 @@
+$ (obj/intel removed again) HOBBYOS_USE_CCACHE=1 make ARCH=intel hobbyos.elf ; CCACHE_DIR=hobbyos-ccache ccache -s
+Statistics zeroed
+build rc=0
+Cacheable calls:    120 / 120 (100.0%)
+  Hits:             120 / 120 (100.0%)
+    Direct:         120 / 120 (100.0%)
+    Preprocessed:     0 / 120 ( 0.00%)
+  Misses:             0 / 120 ( 0.00%)
+Local storage:
