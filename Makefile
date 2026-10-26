@@ -3580,6 +3580,26 @@ HOST_RUN = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 40 "
 # GB-006 shared build cache: wrap the compiler in ccache and measure the DoD
 # "cold vs cached build time".  cache_test.sh (T1) proves a real Miss->Hit
 # transition and emits cold/warm ms.
+# ---- GB-006: opt-in read/write build cache for the REAL build ----
+# A plain `make` is unchanged (a fresh clone builds with no surprises and the
+# cache can never fail a correctness gate).  A worker/farm that wants the build
+# cache exports HOBBYOS_USE_CCACHE=1; the C/C++ recipes call `clang`/`clang++`
+# by short name, so prepending /usr/lib/ccache on PATH routes them through the
+# ccache shim.  CCACHE_BASEDIR is set to the tree so the same tree on two VMs
+# hashes identically (that is what makes a seeded cache usable on farm-2/farm-3,
+# not just the box that built it).  A cache miss is a normal, correct build.
+ifdef HOBBYOS_USE_CCACHE
+  CCACHE_DIR ?= $(HOME)/.cache/hobbyos-ccache
+  CCACHE_BASEDIR ?= $(CURDIR)
+  export CCACHE_DIR CCACHE_BASEDIR
+  PATH := /usr/lib/ccache:$(PATH)
+  export PATH
+  $(info HOBBYOS_USE_CCACHE=1: real build routed through /usr/lib/ccache (CCACHE_DIR=$(CCACHE_DIR) CCACHE_BASEDIR=$(CCACHE_BASEDIR)))
+endif
+cache_measure:
+	@bash tools/cache/measure_build.sh
+cache_measure_negative:
+	@bash tools/cache/measure_build.sh --negative
 cache_setup:
 	@bash tools/cache/setup_ccache.sh
 cold_vs_cached:
