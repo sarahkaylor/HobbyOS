@@ -66,6 +66,15 @@ cd "$ROOT"
 
 if [ -n "$POLICE_ONLY" ]; then
   LOG="$POLICE_ONLY"
+  # GB-103 DoD clause 3, forced deterministically: T3_FORCE_INSTRUMENT_FAIL=1 on a
+  # police run MUST yield the distinct instrument-failure outcome (rc=4) no matter
+  # what the log says -- short-circuit before grading so a verifier's forced
+  # reproduction is never masked by the ordinary clean/red outcome.
+  if [ "${T3_FORCE_INSTRUMENT_FAIL:-0}" = "1" ]; then
+    echo "T3_${ARCH} (police ${LOG}): INSTRUMENT-FAILURE — forced (T3_FORCE_INSTRUMENT_FAIL) — neither PASS nor a tier FAIL"
+    echo "T3_${ARCH} EXIT=4"
+    exit 4
+  fi
   # A log whose guest never booted must not be judged as a hang (see the run
   # path's guard): "a hang is a defect" only holds while an environment failure
   # cannot wear its clothes.
@@ -114,6 +123,9 @@ if [ -n "$POLICE_ONLY" ]; then
     echo "T3_${ARCH}: FAIL — ${MEMFAULT_PROCS} processes carry user memory faults, above the ceiling ${USER_FAULT_ALLOW} (GB-068 regression); ${MEMFAULTS} records in total"
     rc=1
   fi
+  # GB-103 DoD clause 3 driven in police too: T3_FORCE_INSTRUMENT_FAIL=1 forces the
+  # distinct instrument-failure outcome (clean=PASS, tier-red=FAIL, instr=rc4).
+  [ "${T3_FORCE_INSTRUMENT_FAIL:-0}" = "1" ] && { echo "T3_${ARCH}: INSTRUMENT-FAILURE — forced (T3_FORCE_INSTRUMENT_FAIL) — neither PASS nor a tier FAIL"; echo "T3_${ARCH} EXIT=4"; exit 4; }
   [ "$rc" -eq 0 ] && echo "T3_${ARCH}: PASS (0 FAIL lines, halted)"
   echo "T3_${ARCH} EXIT=$rc"
   exit "$rc"
@@ -242,22 +254,36 @@ trap cleanup EXIT
 # absent instrument is a FAILED instrument, so no monitor or no socket prints an
 # explicit line instead of nothing at all.
 probe_guest() { # $1 = why we are sampling
+  # Run the whole sample in an ISOLATED subshell with errexit/pipefail OFF
+  # (GB-103): the sample reads the QEMU monitor over a unix socket, and when
+  # the guest is being torn down mid-read (cleanup SIGTERMs QEMU, or the guest
+  # froze hard) a socat/pipe can die of SIGPIPE.  Under `set -euo pipefail`
+  # that aborts the tier BEFORE the verdict code below runs -> exit 141, no
+  # verdict.  Isolating the sample means a dead instrument can never abort the
+  # tier; the named line below says so.  A failed sample is an instrument
+  # failure, not a verdict.
+  local why="${1:-sample}" st=0 started=0
+  # If no monitor was ever attached, or the socket is already gone at entry, that
+  # is the (named) ABSENT/SKIPPED case, not a mid-sample failure.
   if [ -z "${MON_SOCK:-}" ]; then
-    { echo ""; echo "=== T3 guest sample: SKIPPED — no monitor attached (T3_MONITOR not set; $1) ==="; } >>"$LOG"
+    { echo ""; echo "=== T3 guest sample: SKIPPED — no monitor attached (T3_MONITOR not set; $why) ==="; } >>"$LOG"
     return 0
   fi
   if [ ! -S "$MON_SOCK" ]; then
-    { echo ""; echo "=== T3 guest sample: ABSENT — monitor socket '$MON_SOCK' gone ($1) ===";
+    { echo ""; echo "=== T3 guest sample: ABSENT — monitor socket '$MON_SOCK' gone ($why) ===";
       echo "    no CR2, no held-lock table: the instrument did not run."; } >>"$LOG"
     return 0
   fi
-  {
+  started=1
+  (
+    set +e
+    set +o pipefail
     echo ""
-    echo "=== T3 guest sample (QEMU monitor $MON_SOCK; $1) ==="
+    echo "=== T3 guest sample (QEMU monitor $MON_SOCK; $why) ==="
     echo ""
     echo "--- all CPUs (control registers included: CR2 names the fault address) ---"
     printf 'info registers -a\n' | timeout 20 socat - "UNIX-CONNECT:$MON_SOCK" 2>/dev/null \
-      | tr -d '\r' | grep -av '^(qemu)' || echo "(monitor read failed)"
+      | tr -d '\r' | grep -av '^(qemu)' || echo "(monitor read failed: socket closed mid-sample?)"
     ELF="obj/$ARCH/hobbyos.elf"
     [ -f "$ELF" ] || ELF="hobbyos.elf"
     NMB="$(command -v llvm-nm || command -v nm || true)"
@@ -279,12 +305,24 @@ probe_guest() { # $1 = why we are sampling
       fi
     fi
     echo "=== end guest sample ==="
-  } >>"$LOG" 2>&1
+  ) >>"$LOG" 2>&1
+  local st=$?
+  # DoD clause 3: NAME the instrument failure when a started sample did not
+  # survive -- the subshell ended abnormally, OR the monitor socket is now gone
+  # because QEMU died/was killed mid-read (measured RED: SIGTERM the live qemu at
+  # the sample header and the socket leaves with it).  Grading is untouched --
+  # this only annotates the log, it does not set rc.
+  if [ "$started" = "1" ] && { [ "$st" != "0" ] || [ ! -S "$MON_SOCK" ]; }; then
+    { echo ""; echo "=== T3 guest sample: INSTRUMENT-FAILURE — monitor read ended abnormally (rc=$st; $why) — sample truncated; tier verdict still graded below ==="; } >>"$LOG"
+    INSTRUMENT_FAILED=1   # a distinguishable third outcome, not PASS and not FAIL
+  fi
+  return 0   # probe failure must NEVER abort the tier
 }
 
 deadline=$(( $(date +%s) + T3_TIMEOUT ))
 halted=0
 probed=0
+INSTRUMENT_FAILED=0
 # GB-057: a SILENT freeze prints no marker at all -- the markers are console
 # output, so a CPU that is stuck (or a console lock that is dead) cannot report
 # them.  Measured: an intel run froze at 12,821 lines with zero markers, no
@@ -445,7 +483,20 @@ if [ "$FAIL_LINES" != "0" ]; then
   rc=1
 fi
 [ "$MEMREG" = "1" ] && rc=1
-[ "$rc" -eq 0 ] && echo "T3_${ARCH}: PASS (0 FAIL lines, halted, no kernel fault, ${LINES} lines)"
+# Diagnostic/force hook: T3_FORCE_INSTRUMENT_FAIL=1 lets a test/verifier force the
+# instrument-failure outcome deterministically (GB-103 three-outcome table).
+[ "${T3_FORCE_INSTRUMENT_FAIL:-0}" = "1" ] && INSTRUMENT_FAILED=1
+# GB-103 DoD clause 3: the three-outcome judgement.  If the instrument could not
+# provide a sample (forced monitor failure), the verdict is a distinct
+# INSTRUMENT-FAILURE -- neither PASS nor a tier FAIL -- because "tier was red"
+# and "instrument broke" must be distinguishable.  rc=0 PASS, rc=1 tier FAIL,
+# rc=2 env, rc=4 = INSTRUMENT-FAILURE.
+if [ "$INSTRUMENT_FAILED" = "1" ]; then
+  echo "T3_${ARCH}: INSTRUMENT-FAILURE — the monitor could not produce a sample (DoD clause 3); this is neither PASS nor a tier FAIL"
+  rc=4
+else
+  [ "$rc" -eq 0 ] && echo "T3_${ARCH}: PASS (0 FAIL lines, halted, no kernel fault, ${LINES} lines)"
+fi
 # GB-070: W0 corpus gate, live. The DoD names the corpus-vs-Linux-leg
 # differential as part of the intel tier; run t4_w0 over this wave's own serial
 # so arrival + (where the member emits it) the [W0] output marker are judged,
