@@ -1,0 +1,16 @@
+=== clause 1: presence by name (tree 3314507)
+-- futex in process.c
+20
+-- memfd_create / MAP_SHARED in vm.c
+185: * It backs a memfd (fd-backed MAP_SHARED mapping) or a
+186: * MAP_SHARED|MAP_ANONYMOUS region (no fd).  refs counts the owners: one
+686:       (memfd / MAP_SHARED anon) materializes from the object and maps the
+1344:  if ((flags & VM_MAP_SHARED) && (flags & VM_MAP_PRIVATE))
+1348:  uint32_t fl2 = flags & (VM_MAP_SHARED | VM_MAP_PRIVATE | VM_MAP_FIXED |
+-- ARCH_SET_FS in x64/trap.c
+2001:           RIP=0x1000003e6c (`f4`, inside __init_tls). ARCH_SET_FS is the only
+2008:          tf->regs[0] = (code == 0x1002ULL)        /* ARCH_SET_FS */
+-- sigreturn
+src/kernel/arch/x64/trap.c:2187:    process_sigreturn(tf);
+src/kernel/process.c:2551:      /* A real handler needs a valid in-region sigreturn trampoline (D7;
+src/kernel/process.c:2782:int process_sigreturn(struct trap_frame *tf) {
