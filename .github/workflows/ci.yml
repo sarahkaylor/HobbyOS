@@ -1,5 +1,12 @@
 name: mac-ci
-on: [push, workflow_dispatch]
+on:
+  push:
+  workflow_dispatch:
+  # Nightly: the ARM integration tier runs ~30 min, longer than the gap
+  # between pushes during active waves (superseded runs get cancelled to free
+  # the single runner), so give the full battery a quiet window.
+  schedule:
+    - cron: '0 6 * * *'
 
 concurrency:
   group: mac-ci-main
