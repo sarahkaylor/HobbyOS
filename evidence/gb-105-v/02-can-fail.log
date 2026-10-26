@@ -1,0 +1,13 @@
+=== force path HARDCODED (classifier bypassed) — coupling test MUST fail ===
+  PASS: REAL classifier + FORCE -> rc=4 (got 4)
+  FAIL: BROKEN classifier + FORCE -> rc=0 PASS, NOT 4 (got 4) — forced case feeds the real classifier
+T3_CLASSIFIER_COUPLING_TEST: FAIL (1)
+coupling rc=1
+
+=== restore ===
+=== after restore ===
+  PASS: BROKEN classifier + FORCE -> rc=0 PASS, NOT 4 (got 0) — forced case feeds the real classifier
+T3_CLASSIFIER_COUPLING_TEST: PASS - forced case is coupled to instrument_failure_evident
+
+=== shell syntax check on the restored tree ===
+bash -n rc=0
