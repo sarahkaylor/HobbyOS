@@ -1,0 +1,28 @@
+### GB-100 repro: T3_MONITOR=1 intel wave @ 527670f 2026-10-26T05:04:39Z
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1500s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-fff9a765/obj/t3_intel_dbg.log) ===
+tier-rc=141
+--- resume records:
+[RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
+[RESUME-SPSR] pid=1 spsr=0x00000246 IF=1
+[RESUME-SPSR] pid=1 spsr=0x00000297 IF=1
+[RESUME-SPSR] pid=1 spsr=0x00000297 IF=1
+[RESUME-SPSR] pid=2 spsr=0x00000202 IF=1
+Inside process_create: lock released. pid=[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFE50 covers=1
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFC78 covers=1
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFC78 covers=1
+[RESUME-DIAG] pid=3 region=yes prot=3 dest=0x00000017FFFFEE18 covers=1
+[SIGTEST] PASS SIGCHLD handler ran at the resume boundary
+start_scheduler called on CPU [RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
+[RESUME-SPSR] pid=1 spsr=0x00000297 IF=1
+[RESUME-SPSR] pid=1 spsr=0x00000203 IF=1
+[RESUME-SPSR] pid=1 spsr=0x00000293 IF=1
+[RESUME-SPSR] pid=2 spsr=0x00000246 IF=1
+Loading program for scheduler (v2 AS): [RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFC48 covers=1
+Inside process_create: lock released. pid=[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFC78 covers=1
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFC78 covers=1
+[RESUME-DIAG] pid=3 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1
+bash: [46783: 1 (255)] tcsetattr: Inappropriate ioctl for device
+--- halt=0 idlestuck=0
+DONE
