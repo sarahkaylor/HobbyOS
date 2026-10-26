@@ -297,7 +297,13 @@ int main(void) {
 #endif
   test_main_stack_bounds();
   test_thread_stack_bounds();
+#if !(defined(__APPLE__) && defined(HOST_TEST))
   test_custom_stack_thread();
+#else
+  /* Darwin has no pthread_attr_setstack; host_pthread_compat.h returns
+   * ENOTSUP and this case is covered by the Linux host/device runs. */
+  print_console("SKIP: custom-stack case (no pthread_attr_setstack on Darwin)\n");
+#endif
 
   if (fails) {
     print_console("WK1C_T FAILED: ");
