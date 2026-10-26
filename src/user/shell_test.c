@@ -211,6 +211,25 @@ static int run_cmd_check(int in, int out, const char *cmd,
   return 0;
 }
 
+/* Patience of the stall watchdog below.  This is a LIVENESS backstop for a
+   wait that can never return -- the unbounded read_until(..., 0) calls in this
+   test -- NOT a latency bound on a slow shell.
+
+   At 25 s it preempted the test's own verdict instead.  The 5e2 dup loop
+   tolerates 10 attempts x (8 s + 8 s of prompt deadlines + 2 s drain) = 180 s,
+   and a shell that misses a prompt inside its 8 s deadline is classified SKIP
+   (the documented slot-pressure class, see run_cmd_check) by the caller.
+   Measured 2026-10-26: every ARM T3 run ended
+   "SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST" while the wave was
+   merely slow (32 live processes on 8 TCG vCPUs, table at half capacity), so
+   the tier went red for a stall the test itself would have excused -- and the
+   process-table dump the watchdog prints was the only evidence a reader got.
+
+   240 s outlasts every bounded wait in this file and is still far inside the
+   tier's 2700 s deadline, so a genuine wedge is still caught and still names
+   the live set.  Keep it above the largest `attempt < N` budget here. */
+#define SHTEST_WD_PATIENCE_MS 240000
+
 /* Stall watchdog: fork a helper that fails this test loudly instead of
    letting a shell-protocol deadlock wedge the whole boot suite (seen
    under memory pressure when a shell's answer to a command never
@@ -234,8 +253,8 @@ static void start_watchdog(int in_w, int out_r, const char *test_name) {
   close(in_w);
   close(out_r);
 
-  for (int i = 0; i < 250; i++) {
-    usleep(100000); /* 100 ms; total patience 25 s */
+  for (int i = 0; i < SHTEST_WD_PATIENCE_MS / 100; i++) {
+    usleep(100000); /* 100 ms */
     if (kill(getppid(), 0) != 0)
       exit(0); /* the test finished normally */
   }
@@ -262,11 +281,13 @@ static void start_watchdog(int in_w, int out_r, const char *test_name) {
      non-thread process count as its result. */
   int saturated = (n >= 55);
   if (saturated) {
-    print_console("SHELLTEST SKIP (slot pressure): shell protocol stalled "
-                  "25 s with the process table saturated.\n");
+    print_console("SHELLTEST SKIP (slot pressure): shell protocol stalled ");
+    print_dec(SHTEST_WD_PATIENCE_MS / 1000);
+    print_console(" s with the process table saturated.\n");
   } else {
-    print_console("SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST. "
-                  "Process table:\n");
+    print_console("SHELLTEST WATCHDOG: protocol stalled ");
+    print_dec(SHTEST_WD_PATIENCE_MS / 1000);
+    print_console(" s; FAILING TEST. Process table:\n");
     for (int i = 0; i < n; i++) {
       print_console("  pid=");
       print_dec(procs[i].pid);

@@ -537,9 +537,21 @@ static void test_p5_waitpid_validation(void) {
   /* no children at all -> -ECHILD; WUNTRACED is accepted (ignored) */
   tf.regs[1] = USER_VIRT_BASE + 0x200;
   tf.regs[2] = 1;
+  struct process *wcaller = process_get_pcb(ppid);
+  EXPECT_EQ(wcaller->echild_logged, 0); /* diagnostic not yet spoken */
   EXPECT_EQ(process_waitpid(&tf), -ECHILD);
+  /* CI 2026-10-26: the ECHILD diagnostic must speak ONCE per PCB.  A
+     long-lived parent polls waitpid() in its main loop (desktop_reap_
+     children() every iteration), so ECHILD-with-no-children is its steady
+     state: one line per CALL produced 811k lines in a 12-minute ARM T3 run
+     (99.97% of the serial), saturated the UART, and starved the shell test
+     into a false "SHELLTEST WATCHDOG: protocol stalled 25 s" FAIL.  The
+     latch is the observable here -- a unit test cannot capture the console --
+     and it is what makes the second and every later call silent. */
+  EXPECT_EQ(wcaller->echild_logged, 1);
   tf.regs[2] = 1 | 2;
   EXPECT_EQ(process_waitpid(&tf), -ECHILD);
+  EXPECT_EQ(wcaller->echild_logged, 1); /* still one, not a running count */
 
   /* an EXITED child reaps via WNOHANG (status ptr NULL: the write itself
      is covered by the kill-path test above and by PROC_T on device) */

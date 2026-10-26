@@ -9,7 +9,13 @@ on:
     - cron: '0 6 * * *'
 
 concurrency:
-  group: mac-ci-main
+  # One slot per REF, not one global group.  The runner is a single machine, so
+  # jobs serialise on it anyway -- but with one fixed group every branch shared
+  # one queue, and GitHub cancels the older PENDING run when a third run is
+  # queued for the same group.  Measured 2026-10-26: main's runs were cancelled
+  # by later pushes (five runs in a row ended `cancelled` with no jobs at all),
+  # so main could stay red for hours while branch pushes held the slot.
+  group: mac-ci-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -73,9 +79,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mac-arm-logs
+          # obj/t3_arm.log is the tier's OWN console capture and the only place
+          # the verdict evidence lives (FAIL lines with their console context,
+          # the guest sample, the completeness counts).  Without it a red run
+          # reports "1 FAIL line(s)" and nothing else -- measured 2026-10-26,
+          # when three failing runs each needed a local re-run to see what the
+          # failing line was.
           path: |
             qemu.log
             *.log
+            obj/t3_arm.log
+            obj/t3_arm.log.build
             desktop_test*.png
           if-no-files-found: ignore
 
@@ -98,4 +112,6 @@ jobs:
             qemu.log
             build.log
             *.log
+            obj/t3_intel.log
+            obj/t3_intel.log.build
           if-no-files-found: ignore

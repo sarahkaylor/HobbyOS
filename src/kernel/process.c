@@ -1084,6 +1084,7 @@ static int process_create_internal_ver(int ver) {
   p->thread_ret = 0;
   p->as = 0;
   p->fd_cloexec = 0;
+  p->echild_logged = 0; /* fresh PCB: the ECHILD diagnostic speaks once */
   /* P5 (D7/D3.1): fresh signal/env state — a recycled slot must never
      leak the previous occupant's dispositions, pending bits or env. */
   p->env[0] = '\0';
@@ -2980,27 +2981,38 @@ static int process_wait_common(struct trap_frame *tf, uint64_t rusage_va) {
        `children=0` is the load-bearing field: an ECHILD to a caller with no
        children is POSIX-correct behaviour, so the line now points at the caller
        (a test looping on a wait that can never be satisfied) instead of leaving a
-       reader to suspect the kernel. */
-    uart_puts("[WAITPID] ECHILD caller=");
-    print_int(caller->pid);
-    uart_puts(" ");
-    uart_puts(caller->name);
-    uart_puts(" want=");
-    print_int(want_pid);
-    uart_puts(" children=0");
-    if (want_pid > 0) {
-      for (int i = 0; i < MAX_PROCESSES; i++) {
-        if (proc_table[i].pid == want_pid) {
-          uart_puts(" slotstate=");
-          print_int((int)proc_table[i].state);
-          uart_puts(" slotparent=");
-          print_int(proc_table[i].parent_pid);
-          uart_puts(" slotexit=");
-          print_int(proc_table[i].exit_status);
+       reader to suspect the kernel.
+
+       ONCE PER PROCESS, not once per call.  A long-lived parent polls waitpid()
+       in its main loop (desktop_reap_children() runs every iteration, WNOHANG),
+       so "no children left" is its steady state: printing per call produced
+       811k lines in a 12-minute ARM T3 run -- 99.97% of the serial -- and the
+       UART saturation starved the shell test's console into a false
+       "SHELLTEST WATCHDOG: protocol stalled 25 s" FAIL.  The first line per PCB
+       carries every field a reader needs; repeats carry none. */
+    if (!caller->echild_logged) {
+      caller->echild_logged = 1;
+      uart_puts("[WAITPID] ECHILD caller=");
+      print_int(caller->pid);
+      uart_puts(" ");
+      uart_puts(caller->name);
+      uart_puts(" want=");
+      print_int(want_pid);
+      uart_puts(" children=0");
+      if (want_pid > 0) {
+        for (int i = 0; i < MAX_PROCESSES; i++) {
+          if (proc_table[i].pid == want_pid) {
+            uart_puts(" slotstate=");
+            print_int((int)proc_table[i].state);
+            uart_puts(" slotparent=");
+            print_int(proc_table[i].parent_pid);
+            uart_puts(" slotexit=");
+            print_int(proc_table[i].exit_status);
+          }
         }
       }
+      uart_puts(" (further ECHILD diagnostics for this process are suppressed)\n");
     }
-    uart_puts("\n");
     spinlock_release_irqrestore(&proc_lock, flags);
     return -ECHILD;
   }
