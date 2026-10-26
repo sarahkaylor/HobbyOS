@@ -60,12 +60,15 @@ with tempfile.TemporaryDirectory() as repo:
     # remove the metadata so git no longer lists wt_stale, leaving the dir behind
     import shutil
     shutil.rmtree(os.path.join(repo, ".git", "worktrees", "wt_stale"), ignore_errors=True)
+    empty = os.path.join(wtroot, "wt_empty"); os.makedirs(empty)  # truly-empty leftover
     pre_live = "wt_live" in run(["git", "-C", repo, "worktree", "list"]).stdout
     pr = run(["bash", PRUNE, repo])
     check(pr.returncode == 0, "prune exits 0")
-    check(not os.path.isdir(stale), "stale (orphaned) worktree dir removed")
-    check(os.path.isdir(live), "live/git-listed worktree kept")
     check("PRUNE-STALE-WORKTREES" in pr.stdout, "prune report line present")
+    check(os.path.isdir(live), "live/git-listed worktree kept")
+    check(os.path.isdir(stale) and "REFUSED" in pr.stdout,
+          "stale dir with uncommitted/unknown work REFUSED, NOT deleted (GB-104 RED)")
+    check(not os.path.isdir(empty), "empty stale leftover dir removed")
 
 # --- verdict ----------------------------------------------------------------
 if fails:
