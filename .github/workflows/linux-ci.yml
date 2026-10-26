@@ -53,6 +53,12 @@ jobs:
             exit 0
           fi
           cp -a "$src" third_party/llvm-21.1.8/dist-staging
+      - name: 'Prefetch the libcxx vendor tree (host golden tests include its headers)'
+        # A clean checkout has no third_party/libcxx-21.1.8/src tree: the host
+        # rtti_test compiles with -I…/libcxx/include but is NOT wired to the
+        # fetch rule, so on a pristine clone it dies with
+        # "fatal error: 'typeinfo' file not found". Observed in run 40279994056.
+        run: make third_party/libcxx-21.1.8/.fetched-ok
       - name: 'ARM tier 1: host golden tests (native, no QEMU)'
         # Serial on purpose: on a fresh checkout the vendor fetch.sh scripts
         # race each other under -j (the observed CI failure was
