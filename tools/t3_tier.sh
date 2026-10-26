@@ -66,6 +66,15 @@ cd "$ROOT"
 
 if [ -n "$POLICE_ONLY" ]; then
   LOG="$POLICE_ONLY"
+  # GB-103 DoD clause 3, forced deterministically: T3_FORCE_INSTRUMENT_FAIL=1 on a
+  # police run MUST yield the distinct instrument-failure outcome (rc=4) no matter
+  # what the log says -- short-circuit before grading so a verifier's forced
+  # reproduction is never masked by the ordinary clean/red outcome.
+  if [ "${T3_FORCE_INSTRUMENT_FAIL:-0}" = "1" ]; then
+    echo "T3_${ARCH} (police ${LOG}): INSTRUMENT-FAILURE — forced (T3_FORCE_INSTRUMENT_FAIL) — neither PASS nor a tier FAIL"
+    echo "T3_${ARCH} EXIT=4"
+    exit 4
+  fi
   # A log whose guest never booted must not be judged as a hang (see the run
   # path's guard): "a hang is a defect" only holds while an environment failure
   # cannot wear its clothes.
