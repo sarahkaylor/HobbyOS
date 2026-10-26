@@ -113,12 +113,14 @@ def self_test():
     check(40 in [len(s) for s in graded_shas_in("VERDICT GREEN graded sha " + "c" * 40)],
           "parses a 40-hex sha from a VERDICT/graded line")
     check(graded_shas_in("VERDICT GREEN") == [], "no sha in VERDICT -> empty (fails closed upstream)")
-    # -> W0-case: #194 (GB-103) merged today with a GREEN that named no graded sha
-    merged = [194]  # today's GB-103 merge (actual PR #194)
-    for m in merged:
-        grad = graded_sha_of(m)
-        ok, r = decide("DEADBEEF", grad)
-        check(not ok, f"today's PR #{m} has no recorded graded sha -> RED/fail-closed ({r[:30]})")
+    # -> W0-case: #194 (GB-103) merged 2026-10-26 graded 7de6dde.. but merged e8c7dc8..
+    #    (a GREEN that named a tree DIFFERENT from the head that merged).  The
+    #    fixture must go red FOR THIS MISMATCH, not for silence.
+    graded194 = "7de6dde4f3f29f53541b21fd1cd0a290168879a9"
+    head194 = "e8c7dc89bc0156157930e4a90ba54d1845c0a147"
+    ok, r = decide(head194, graded194)
+    check(not ok and graded194 != head194,
+          f"today's #194 incident shape (graded 7de6dde.., merged e8c7dc8..) -> RED for the mismatch ({r[:44]})")
     if fails:
         print("MERGE_PR_SELFTEST: FAIL (%d)" % fails); sys.exit(1)
     print("MERGE_PR_SELFTEST: PASS - fail-closed rule + override + #194 goes red")

@@ -21,13 +21,12 @@ check(not decide(None, h)[0], "no head supplied -> refuse")
 check(40 in [len(s) for s in graded_shas_in("VERDICT GREEN graded sha " + "c" * 40)], "parses a 40-hex graded sha from a VERDICT line")
 check(graded_shas_in("VERDICT GREEN") == [], "a VERDICT with no sha -> empty (fails closed upstream)")
 
-# DoD self-test anchor: today's merged PR #194 (GB-103) graded with no recorded sha
-# (its GREEN named no graded tree that equals a current head the guard can confirm),
-# so the guard MUST refuse it.
-import merge_pr
-grad = merge_pr.graded_sha_of(194)
-ok, r = decide("DEADBEEF" * 5, grad)   # any head; graded absent/mismatched
-check(not ok, f"today's PR #194 has no confirming graded sha -> RED/fail-closed ({r[:34]})")
+# DoD self-test anchor: today's PR #194 (GB-103) was graded at 7de6dde.. but merged at
+# e8c7dc8.. -- the guard must refuse it FOR THE MISMATCH (not for silence).
+graded194 = "7de6dde4f3f29f53541b21fd1cd0a290168879a9"
+head194 = "e8c7dc89bc0156157930e4a90ba54d1845c0a147"
+ok, r = decide(head194, graded194)
+check(not ok and graded194 != head194, f"today's #194 incident (graded 7de6dde.., merged e8c7dc8..) -> RED for the mismatch ({r[:40]})")
 
 if fails:
     print("MERGE_PR_TEST: FAIL (%d)" % fails); sys.exit(1)
