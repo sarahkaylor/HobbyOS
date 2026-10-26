@@ -1,0 +1,17 @@
+dent_created
+dent_opendir
+fcntl_append_bit
+fcntl_getfl_after
+fcntl_getfl_rdwr
+fcntl_setfl_append
+getrandom_16
+ioctl_tcgets_entty
+ioctl_tiocgwinsz_entty
+procfd_opendir
+procfd_read
+uname_machine_x86_64
+uname_rc
+uname_sysname_linux
+urandom_open
+urandom_read16
+write3
