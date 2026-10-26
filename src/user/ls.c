@@ -51,5 +51,11 @@ int main(void) {
     }
     index++;
   }
+  /* GB-070: W0 output-differential marker (see cat.c / hello.c).  LS lists the
+     root dir; in the wave it runs with no start-path so it reaches here with
+     RC 0.  The t4_w0 gate compares this token against the Linux-leg .ref. */
+#if !defined(HOST_TEST)
+  print("[W0] LS linux=entered-main:main-returned\n");
+#endif
   return 0;
 }

@@ -444,5 +444,12 @@ if [ "$FAIL_LINES" != "0" ]; then
 fi
 [ "$MEMREG" = "1" ] && rc=1
 [ "$rc" -eq 0 ] && echo "T3_${ARCH}: PASS (0 FAIL lines, halted, no kernel fault, ${LINES} lines)"
+# GB-070: W0 corpus gate, live. The DoD names the corpus-vs-Linux-leg
+# differential as part of the intel tier; run t4_w0 over this wave's own serial
+# so arrival + (where the member emits it) the [W0] output marker are judged,
+# not a manual post-hoc step. Disable per-run with W0_GATE=0.
+if [ "$rc" -eq 0 ] && [ "x${W0_GATE:-1}" != "x0" ] && [ -f "$ROOT/tools/gate/t4_w0.sh" ]; then
+  (cd "$ROOT" && bash tools/gate/t4_w0.sh --serial "$LOG") || { echo "T3_${ARCH}: FAIL - W0 corpus gate"; rc=1; }
+fi
 echo "T3_${ARCH} EXIT=$rc"
 exit "$rc"
