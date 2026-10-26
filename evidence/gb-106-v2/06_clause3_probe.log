@@ -1,0 +1,21 @@
+clean: self-test exit=0  (want 0)
+  PASS: today's PR #194 has no recorded graded sha -> RED/fail-closed (REFUSE: GREEN names no graded )
+MERGE_PR_SELFTEST: PASS - fail-closed rule + override + #194 goes red
+
+=== mutation: a MISMATCHED graded sha is allowed (the incident's shape)
+[mutant] mismatch now allowed
+mutant: self-test exit=1  (want non-zero)
+--- every assertion under the mutant:
+      PASS: graded==head -> allow (ok: graded sha aaaaa)
+      FAIL: graded!=head -> refuse (ok: MUTANT allows a )
+      PASS: no graded sha -> FAILS CLOSED (REFUSE: GREEN names )
+      PASS: no head -> refuse (REFUSE: no current h)
+      PASS: parses a 40-hex sha from a VERDICT/graded line
+      PASS: no sha in VERDICT -> empty (fails closed upstream)
+      PASS: today's PR #194 has no recorded graded sha -> RED/fail-closed (REFUSE: GREEN names no graded )
+    MERGE_PR_SELFTEST: FAIL (1)
+
+=== restored: exit=0
+--- does either file name the incident's shas?
+tools/board/merge_pr.py:0
+tools/board/merge_pr_test.py:0
