@@ -1,0 +1,17 @@
+sample header seen in obj/t3_gb103v_sample.log at 12:36:35
+SIGTERM -> qemu pid none at 12:36:36
+tier rc = 1
+grep: obj/t3_gb103v_sample.log: No such file or directory
+sample header present:      False
+grep: obj/t3_gb103v_sample.log: No such file or directory
+'end guest sample' present: False
+grep: obj/t3_gb103v_sample.log: No such file or directory
+INSTRUMENT-FAILURE present: False
+verdict line present:       True
+
+--- verdict lines
+T3_arm: note — halt marker found after make exited (poll raced the exit)
+T3_arm: 9378 console lines, 1 FAIL lines, 5 user memory fault records across 2 processes, 84 programs exited, halted=1
+T3_arm: FAIL — 1 FAIL line(s); first 20:
+--- any INSTRUMENT-FAILURE line
+grep: obj/t3_gb103v_sample.log: No such file or directory
