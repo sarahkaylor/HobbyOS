@@ -54,7 +54,10 @@ jobs:
           fi
           cp -a "$src" third_party/llvm-21.1.8/dist-staging
       - name: 'ARM tier 1: host golden tests (native, no QEMU)'
-        run: make host_tests -j"$(nproc)"
+        # Serial on purpose: on a fresh checkout the vendor fetch.sh scripts
+        # race each other under -j (the observed CI failure was
+        # 'mv: cannot stat … .part' right after the libcxx fetch, exit 2).
+        run: make host_tests
       - name: 'ARM tier 2: kernel unit tests (20 s-bounded PASS/FAIL marker)'
         run: ./run_unit_tests.sh
       - name: 'ARM tier 3: automated desktop/framebuffer test (QMP screendump)'
