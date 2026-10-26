@@ -1,0 +1,23 @@
+[control] mutant written: first %3o -> %o in the -b first-diff printf
+$ make cmp_parity_strict
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/cmp_gnu.c -o obj/host_cmp.o
+clang -o obj/cmp_host obj/host_cmp.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+case 14 FAIL (differ binary -b): stdout differs
+1c1
+< /home/sarah/.hermes/cache/scratch/tmp.MOR5EL6ysA/bin1 /home/sarah/.hermes/cache/scratch/tmp.MOR5EL6ysA/bin2 differ: byte 3, line 1 is 3 ^C   4 ^D
+---
+> /home/sarah/.hermes/cache/scratch/tmp.MOR5EL6ysA/bin1 /home/sarah/.hermes/cache/scratch/tmp.MOR5EL6ysA/bin2 differ: byte 3, line 1 is   3 ^C   4 ^D
+
+cmp parity: 54/55 passed, 1 FAILED
+(exit 2)
+
+[control] expected above: NOT 55/55 (3 FAILED or equivalent)
+
+[control] file restored from git; diff should be empty:
+(empty)
+$ make cmp_parity_strict
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Isrc/libc/include -c src/user/cmp_gnu.c -o obj/host_cmp.o
+clang -o obj/cmp_host obj/host_cmp.o obj/host_hb_assert.o obj/host_hb_getopt.o obj/host_hb_error.o
+
+cmp parity: 55/55 byte-exact PASS
+(exit 0)
