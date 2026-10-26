@@ -1,0 +1,24 @@
+########## INTEL RUN 1 (staged 4 KiB) ##########
+start: 2026-10-26T12:25:51Z
+run 1 exit=1
+STAGE4~1 BIN     47304 2026-10-26  12:28  STAGE4K_T.BIN
+STAGE4K  BIN      4096 2026-10-26  12:28 
+T3_intel: 11132 console lines, 90 FAIL lines, 7 user memory fault records across 7 processes, 82 programs exited, halted=1
+T3_intel EXIT=1
+end: 2026-10-26T12:32:26Z
+########## INTEL RUN 2 (staged 4 KiB) ##########
+start: 2026-10-26T12:32:26Z
+run 2 exit=1
+STAGE4~1 BIN     47304 2026-10-26  12:32  STAGE4K_T.BIN
+STAGE4K  BIN      4096 2026-10-26  12:32 
+T3_intel: 32829 console lines, 138 FAIL lines, 25 user memory fault records across 20 processes, 86 programs exited, halted=1
+T3_intel EXIT=1
+end: 2026-10-26T12:35:12Z
+########## INTEL RUN 3 (staged 4 KiB) ##########
+start: 2026-10-26T12:35:12Z
+run 3 exit=1
+STAGE4~1 BIN     47304 2026-10-26  12:35  STAGE4K_T.BIN
+STAGE4K  BIN      4096 2026-10-26  12:35 
+T3_intel: 12822 console lines, 33 FAIL lines, 8 user memory fault records across 8 processes, 80 programs exited, halted=0
+T3_intel EXIT=1
+end: 2026-10-26T12:37:09Z

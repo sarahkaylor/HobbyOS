@@ -1,0 +1,66 @@
+########## run1 ##########
+  [WAVE-TRY] STAGE4K_T.BIN
+  Loading program for scheduler (v2 AS): STAGE4K_T.BIN
+  /STAGE4K_T.BIN
+  [ARRIVED] STAGE4K_T.BIN rc>0
+  /STAGE4K.BIN
+  [STAGE4K] PASS size == 4096
+  [STAGE4K] PASS read full 4096 bytes
+  [STAGE4K] PASS byte-exact content (0 mismatches)
+  [STAGE4K] ALL PASSED
+  /HEAPTEST.BIN[KERNEL] Process 18: STAGE4K_T.BIN exited unexpectedly or gracefully.
+  [WAVE-TRY] STAGE4K_T.BIN
+  Loading program for scheduler (v2 AS): STAGE4K_T.BIN
+  /STAGE4K_T.BIN
+  [ARRIVED] STAGE4K_T.BIN rc>0
+  /STAGE4K.BIN
+  [STAGE4K] PASS size == 4096
+  [STAGE4K] PASS read full 4096 bytes
+  [STAGE4K] PASS byte-exact content (0 mismatches)
+  [STAGE4K] ALL PASSED
+  [KERNEL] Process 18: STAGE4K_T.BIN exited unexpectedly or gracefully.
+
+########## run2 ##########
+  [WAVE-TRY] STAGE4K_T.BIN
+  Loading program for scheduler (v2 AS): STAGE4K_T.BIN
+  /STAGE4K_T.BIN
+  [ARRIVED] STAGE4K_T.BIN rc>0
+  /STAGE4K.BIN
+  [STAGE4K] PASS size == 4096
+  [STAGE4K] PASS read full 4096 bytes
+  [STAGE4K] PASS byte-exact content (0 mismatches)
+  [STAGE4K] ALL PASSED
+  [KERNEL] Process 13: STAGE4K_T.BIN exited unexpectedly or gracefully.
+  STAGE4K_T.BIN
+  STAGE4K.BIN
+  [WAVE-TRY] STAGE4K_T.BIN
+  Loading program for scheduler (v2 AS): STAGE4K_T.BIN
+  /STAGE4K_T.BIN
+  [ARRIVED] STAGE4K_T.BIN rc>0
+  /STAGE4K.BIN
+  [STAGE4K] PASS size == 4096
+  [STAGE4K] PASS read full 4096 bytes
+  [STAGE4K] PASS byte-exact content (0 mismatches)
+
+########## run3 ##########
+  [WAVE-TRY] STAGE4K_T.BIN
+  Loading program for scheduler (v2 AS): STAGE4K_T.BIN
+  /STAGE4K_T.BIN
+  [ARRIVED] STAGE4K_T.BIN rc>0
+  /STAGE4K.BIN
+  Loading program for scheduler (v2 AS): [STAGE4K] PASS size == 4096
+  /src/llvm-project-21.1.8.src-EXAMPLE.c[STAGE4K] PASS read full 4096 bytes
+  [STAGE4K] PASS byte-exact content (0 mismatches)
+  [STAGE4K] ALL PASSED
+  SMPTEST.BIN[KERNEL] Process 15: STAGE4K_T.BIN exited unexpectedly or gracefully.
+  STAGE4K_T.BIN
+  STAGE4K.BIN
+  - 4096 STAGE4K.BIN
+  [WAVE-TRY] STAGE4K_T.BIN
+  Loading program for scheduler (v2 AS): STAGE4K_T.BIN
+  /STAGE4K_T.BIN
+  [ARRIVED] STAGE4K_T.BIN rc>0
+  /STAGE4K.BIN
+  [STAGE4K] PASS size == 4096
+  [STAGE4K] PASS read full 4096 bytes
+

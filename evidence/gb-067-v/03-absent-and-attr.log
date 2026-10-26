@@ -1,0 +1,13 @@
+--- exact matches for absent/open-failure in run1 ---
+2284:[REGTEST] PASS re_search reports -1 when absent
+
+--- STAGE4K PASS/FAIL counts per run ---
+run1: PASS=6 FAIL=0 ALLPASSED=2
+run2: PASS=15 FAIL=0 ALLPASSED=5
+run3: PASS=6 FAIL=0 ALLPASSED=2
+
+--- clause 3: attr assignment on this tree ---
+1273:    new_entry.attr = 0x20; /* ATTR_ARCHIVE, same as host-written regular files */
+
+$ make fat16_test_host && ./fat16_test_host
+/usr/bin/bash: line 5: ./obj/fat16_test_host: No such file or directory
