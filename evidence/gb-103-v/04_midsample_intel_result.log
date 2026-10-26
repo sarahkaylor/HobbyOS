@@ -1,0 +1,14 @@
+sample header seen in obj/t3_gb103v_sample_intel.log at 12:45:00
+SIGTERM -> qemu pid 135742 at 12:45:00
+tier rc = 1
+qemu was alive at the sample: True
+sample header present:      True
+'end guest sample' present: True
+INSTRUMENT-FAILURE present: False
+verdict line present:       True
+
+--- verdict lines
+T3_intel: 10049 console lines, 20 FAIL lines, 7 user memory fault records across 7 processes, 67 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 240s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 20 FAIL line(s); first 20:
+--- INSTRUMENT-FAILURE lines (log then tier output)
