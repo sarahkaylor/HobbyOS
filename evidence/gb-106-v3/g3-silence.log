@@ -1,0 +1,6 @@
+### G3: clause 2 measured without a pipe 2026-10-26T21:27:21Z
+[merge_pr] PR #204: REFUSE: GREEN names no graded sha — cannot confirm the graded tree is the current head bab2bb28b576
+[merge_pr] NOT MERGED (fail closed)
+silence-rc=1
+
+### G6: deliberate break (comparison forced equal)

@@ -1,0 +1,52 @@
+### G2-5: clauses 1-5 @ bab2bb2 2026-10-26T21:27:12Z
+=== clause 1/2/3: decide() via the CLI (no --merge, so nothing is merged) ===
+--- graded == head (this tree):
+[merge_pr] PR #204: ok: graded sha bab2bb28b576 equals current head — merge allowed
+[merge_pr] MERGE ALLOWED (guard only; run with --merge to perform it)
+rc=0
+--- graded != head:
+[merge_pr] PR #204: REFUSE: graded sha 7de6dde4f3f2 != current head bab2bb28b576 — refusing to merge a tree that was not graded
+[merge_pr] NOT MERGED (fail closed)
+rc=1
+--- silence (no graded sha):
+[merge_pr] PR #204: REFUSE: GREEN names no graded sha — cannot confirm the graded tree is the current head bab2bb28b576
+[merge_pr] NOT MERGED (fail closed)
+rc=0
+--- the #194 shape (merged e8c7dc8.., graded 7de6dde..):
+[merge_pr] PR #194: REFUSE: graded sha 7de6dde4f3f2 != current head e8c7dc89abcd — refusing to merge a tree that was not graded
+[merge_pr] NOT MERGED (fail closed)
+rc=1
+
+=== clause 5: the production verb refuses without merging ===
+[merge_pr] PR #194: REFUSE: graded sha 7de6dde4f3f2 != current head e8c7dc89abcd — refusing to merge a tree that was not graded
+[merge_pr] REFUSED TO MERGE (fail closed)
+rc=1
+
+=== clause 4: --override names the pair and posts it to a card ===
+[merge_pr] OVERRIDE recorded (/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-db0a2555/tools/board/../../obj/gate/merge_pr_override/pr-194.reason.json) — graded 7de6dde4f3f20000000000000000000000000000 != head e8c7dc89abcd0000000000000000000000000000
+[merge_pr] override posted to card #203 (comment 10531)
+[merge_pr] MERGE ALLOWED (written override)
+rc=0
+--- override record:
+{
+  "pr": 194,
+  "reason": "verifier exercise of the override path (GB-106-V2 gate, no real merge intent)",
+  "by": "sarah",
+  "at": "2026-10-26T21:27:13.034805+00:00",
+  "head": "bab2bb28b5767f95580436c2ab0d0627e01d99da"
+}
+=== clause 5: the call site in the tree ===
+3813:# tools/board/merge_pr.sh (guard --merge; refuses to merge a PR whose GREEN graded
+3818:	bash tools/board/merge_pr.sh $(PR)
+#!/usr/bin/env bash
+# tools/board/merge_pr.sh — the PRODUCTION call site for the GB-106 merge guard.
+#   merge_pr.sh <pr> [--head <sha> ...]
+# Runs `merge_pr.py --merge` (which FAILS CLOSED when the GREEN's graded sha does not
+# match the PR's current head, or names no sha) and ONLY proceeds to merge on a pass.
+# A failed guard exits non-zero HERE so an automation calling this wrapper never
+# merges a tree that was not graded.  Overrides go through `--override <reason> --card <n>`.
+set -euo pipefail
+[ $# -ge 1 ] || { echo "usage: merge_pr.sh <pr> [--head <sha> --graded <sha> | --override <reason> --card <n>]"; exit 2; }
+pr="$1"; shift
+self=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+set -a; [ -f "$HOME/.hermes/.env" ] && . "$HOME/.hermes/.env"; set +a
