@@ -1,0 +1,66 @@
+### RUN2: staged wave, T3_TIMEOUT=1200 (second sample for the ABSENT clause) 2026-10-25T18:37:08Z
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+=== T3 (intel): run (deadline 1200s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-2251c302/obj/t3_intel_run2.log) ===
+T3_intel: 25769 console lines, 140 FAIL lines, 14 user memory fault records across 14 processes, 86 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 1200s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 140 FAIL line(s); first 20:
+2821:[SEDTEST] FAIL basic_s (stdout)
+2924:[SIGTEST] FAIL waitpid returns the child got=30 want=4294964048
+3652:[SIGTEST] FAIL open cloexec fd got=0 want=1
+3670:[HEDTEST] FAIL stdin '-' with pipe data
+3676:[HEDTEST] FAILURES: 4
+3770:/UNEXPAND.BIN[SEDTEST] FAIL s_g (stdout)
+3896:[COMMTEST] FAIL default 3-column
+4194:[COMMTEST] FAIL -2 suppress right-unique
+4427:[SEDTEST] FAIL s_2nd (stdout)
+4574:[COMMTEST] FAIL -3 suppress shared
+5017:[SEDTEST] FAIL s_p_n (stdout)
+5248:[COMMTEST] FAIL -23 left-unique only
+5519:[SEDTEST] FAIL amp (stdout)
+5691:[CMPTEST] FAIL EOF message on stderr
+5702:[CMPTEST] FAIL empty EOF message
+5706:[CMPTEST] FAIL missing file diagnostic
+5725:[CMPTEST] FAIL -i 4:0 skips prefix
+5747:[CMPTEST] FAIL - stdin EOF diagnostic
+5780:[CMPTEST] FAILURES: 5
+5851:[TACTEST] FAIL missing file
+T3_intel EXIT=1
+tier-rc=1
+--- STAGE4K lines:
+[WAVE-TRY] STAGE4K_T.BIN
+STAGE4K_T.BIN[KERNEL] Process 12: FILEIO.BIN exited unexpectedly or gracefully.
+/STAGE4K_T.BIN/BLKT1.TXT[KERNEL] Process 18: /CP.BIN exited unexpectedly or gracefully.
+[ARRIVED] STAGE4K_T.BIN rc>0
+/STAGE4K.BIN
+[STAGE4K] PASS size == 4096
+[STAGE4K] PASS read full 4096 bytes
+[STAGE4K] PASS byte-exact content (0 mismatches)
+/HEAPTEST.BIN[STAGE4K] ALL PASSED
+[KERNEL] Process 15: STAGE4K_T.BIN exited unexpectedly or gracefully.
+STAGE4K_T.BIN
+STAGE4K.BIN
+[WAVE-TRY] STAGE4K_T.BIN
+STAGE4K_T.BIN[FATBIG] >1 MiB fat16 create/write/reopen round-trip
+/STAGE4K_T.BIN
+[ARRIVED] STAGE4K_T.BIN rc>0
+/STAGE4K.BIN
+[STAGE4K] PASS size == 4096
+Loading program for scheduler (v2 AS): [STAGE4K] PASS read full 4096 bytes
+[STAGE4K] PASS byte-exact content (0 mismatches)
+[STAGE4K] ALL PASSED
+[KERNEL] Process 18: STAGE4K_T.BIN exited unexpectedly or gracefully.
+STAGE4K_T.BIN
+STAGE4K.BIN
+[WAVE-TRY] STAGE4K_T.BIN
+Loading program for scheduler (v2 AS): STAGE4K_T.BIN
+/STAGE4K_T.BIN
+[STAGE4K] PASS read full 4096 bytes
+/RM.BIN[STAGE4K] PASS byte-exact content (0 mismatches)
+[STAGE4K] ALL PASSED
+[KERNEL] Process 19: STAGE4K_T.BIN exited unexpectedly or gracefully.
+- 4096 STAGE4K.BIN
+STAGE4K_T.BIN
+STAGE4K.BIN
+--- halt=0 idlestuck=550
+DONE

@@ -1,0 +1,39 @@
+### RUN4: PR tree fcdf8ae, NO stage (entry runs, file ABSENT), T3_TIMEOUT=1200 2026-10-26T02:45:04Z
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1200s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-2251c302/obj/t3_intel_run4_nostage_pr.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 10496 console lines, 89 FAIL lines, 6 user memory fault records across 6 processes, 83 programs exited, halted=1
+T3_intel: FAIL — 89 FAIL line(s); first 20:
+268:[STAGE4K] FAIL open /STAGE4K.BIN
+270:[STAGE4K] FAILED
+2529:MMTEST FAIL 13
+3630:[SEDTEST] FAIL basic_s (stdout)
+3768:[SIGTEST] FAIL waitpid returns the child got=1 want=4294964048
+4347:[SEDTEST] FAIL s_g (stdout)
+4501:  FPU_T torture-child: FAIL
+4956:[SEDTEST] FAIL s_2nd (stdout)
+5205:UNEXPAND.BIN: [TACTEST] FAIL missing file
+5216:[TACTEST] FAIL empty separator
+5246:[CMPTEST] FAIL EOF message on stderr
+5268:[CMPTEST] FAIL empty EOF message
+5275:[CMPTEST] FAIL missing file diagnostic
+5291:  FPU_T fork-inherit: FAIL
+5292:[TACTEST] FAILURES: 4
+5335:/EXPAND.BINFPU_T FAILED: 2
+5339:[CMPTEST] FAIL -i 4:0 skips prefix
+5378:[CMPTEST] FAIL - stdin EOF diagnostic
+5418:[CMPTEST] FAILURES: 5
+5504:[SEDTEST] FAIL s_p_n (stdout)
+T3_intel EXIT=1
+tier-rc=1
+--- STAGE4K lines:
+[WAVE-TRY] STAGE4K_T.BIN
+STAGE4K_T.BIN
+/STAGE4K_T.BIN
+[ARRIVED] STAGE4K_T.BIN rc>0
+[STAGE4K] FAIL open /STAGE4K.BIN
+[STAGE4K] FAILED
+[KERNEL] Process 17: STAGE4K_T.BIN exited unexpectedly or gracefully.
+STAGE4K_T.BIN
+--- halt=1 idlestuck=0
+DONE

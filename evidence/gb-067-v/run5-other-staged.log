@@ -1,0 +1,38 @@
+### RUN5 control: PR tree, stage an UNRELATED 4 KiB file ::OTHER4K.BIN (STAGE4K.BIN absent), T3_TIMEOUT=1200 2026-10-26T02:52:16Z
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+=== T3 (intel): run (deadline 1200s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-2251c302/obj/t3_intel_run5_other.log) ===
+T3_intel: 28331 console lines, 361 FAIL lines, 17 user memory fault records across 15 processes, 88 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 1200s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 361 FAIL line(s); first 20:
+290:[STAGE4K] FAIL open /STAGE4K.BIN
+293:[STAGE4K] FAILED
+2769:[SEDTEST] FAIL basic_s (stdout)
+3102:[SIGTEST] FAIL waitpid returns the child got=34 want=4294964048
+3535:[SEDTEST] FAIL s_g (stdout)
+4271:[SEDTEST] FAIL s_2nd (stdout)
+5332:[SEDTEST] FAIL s_p_n (stdout)
+6062:[SEDTEST] FAIL amp (stdout)
+6159:  FPU_T fork-inherit: FAIL
+6218:FPU_T FAILED: 2
+6385:[CMPTEST] FAIL EOF message on stderr
+6396:[TACTEST] FAIL missing file
+6405:[CMPTEST] FAIL empty EOF message
+6412:[CMPTEST] FAIL missing file diagnostic
+6440:/COMM.BIN[TACTEST] FAIL empty separator
+6442:[CMPTEST] FAIL -i 4:0 skips prefix
+6483:[CMPTEST] FAIL - stdin EOF diagnostic
+6522:[TACTEST] FAILURES: 4
+6527:[CMPTEST] FAILURES: 5
+6534:[SEDTEST] FAIL backref (stdout)
+T3_intel EXIT=1
+tier-rc=1
+--- STAGE4K lines:
+[WAVE-TRY] STAGE4K_T.BIN
+STAGE4K_T.BIN
+/PS.BIN/STAGE4K_T.BIN
+[ARRIVED] STAGE4K_T.BIN rc>0
+[STAGE4K] FAIL open /STAGE4K.BIN
+[STAGE4K] FAILED
+--- halt=0 idlestuck=1512
+DONE

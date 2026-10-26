@@ -1,0 +1,48 @@
+### RUN1b: T3 intel with staged /STAGE4K.BIN (fcdf8ae) 2026-10-25T17:19:05Z
+fixture: d67c656e01756650d77717b0839985a056ec28ffe174601d690fc407a2ceffca  /tmp/stage4k.bin
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+=== T3 (intel): run (deadline 2700s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-2251c302/obj/t3_intel_run1.log) ===
+T3_intel: 14934 console lines, 92 FAIL lines, 6 user memory fault records across 5 processes, 80 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 2700s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 1 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 92 FAIL line(s); first 20:
+2788:[SIGTEST] FAIL waitpid returns the child got=18 want=4294964048
+4204:Loading program for scheduler (v2 AS): [SEDTEST] FAIL basic_s (stdout)
+4953:/TAC.BIN[SEDTEST] FAIL s_g (stdout)
+5068:[CMPTEST] FAIL EOF message on stderr
+5100:[CMPTEST] FAIL empty EOF message
+5116:[CMPTEST] FAIL missing file diagnostic
+5208:EXPAND.BIN: [CMPTEST] FAIL -i 4:0 skips prefix
+5246:[CMPTEST] FAIL - stdin EOF diagnostic
+5266:[CMPTEST] FAILURES: 5
+5369:  FPU_T torture-child: FAIL
+5402:[SEDTEST] FAIL s_2nd (stdout)
+5832:[SEDTEST] FAIL s_p_n (stdout)
+5968:[TACTEST] FAIL missing file
+5972:[TACTEST] FAIL empty separator
+5996:[TACTEST] FAILURES: 4
+6035:  FPU_T fork-inherit: FAIL
+6322:[SEDTEST] FAIL amp (stdout)
+6557:[TSORTTEST] FAIL chain from FILE (exit status -1 != 0)
+6559:[TSORTTEST] FAIL chain from stdin (exit status -1 != 0)
+6560:[TSORTTEST] FAIL chain from '-' operand (exit status -1 != 0)
+T3_intel EXIT=1
+tier-rc=1
+--- STAGE4K lines:
+[WAVE-TRY] STAGE4K_T.BIN
+Loading program for scheduler (v2 AS): STAGE4K_T.BIN
+/STAGE4K_T.BIN
+[ARRIVED] STAGE4K_T.BIN rc>0
+/STAGE4K.BIN
+[STAGE4K] PASS size == 4096
+[STAGE4K] PASS read full 4096 bytes
+[STAGE4K] PASS byte-exact content (0 mismatches)
+/HEAPTEST.BIN[STAGE4K] ALL PASSED
+[KERNEL] Process 17: STAGE4K_T.BIN exited unexpectedly or gracefully.
+STAGE4K_T.BIN
+STAGE4K.BIN
+--- mdir:
+STAGE4~1 BIN     47304 2026-10-25  17:19  STAGE4K_T.BIN
+STAGE4K  BIN      4096 2026-10-25  17:19 
+DONE
