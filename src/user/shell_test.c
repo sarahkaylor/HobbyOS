@@ -129,6 +129,21 @@ static void drain_pending(int fd) {
   }
 }
 
+/* Write one command line to the shell.  The length is the string's own, never a
+   hand-counted constant: the 5e2 loop below used to send "wc -c OUT7.TXT\n" as
+   14 bytes when it is 15, so the shell glued the NEXT command onto that
+   unterminated line ("wc -c OUT7.TXTmake --version > M.TXT").  wc honoured the
+   borrowed `--version` and wrote its banner into M.TXT, which surfaced two
+   steps later as "shell_test: FAILED make redirect banner check. cat saw:
+   wc (textutils) 2.1" -- every wave, on both arches, with no MAKE.BIN load in
+   the console to explain it.  Counting bytes by hand is the defect; let the
+   string say how long it is. */
+static void send_line(int fd, const char *line) {
+  int n = 0;
+  while (line[n]) n++;
+  write(fd, line, n);
+}
+
 /* Builtin-command check (echo/clear/...): drain stale output, send the
    command, read the next prompt, require the needle.  Builtins never fork,
    so under pressure the only failure modes are a wedged shell (deadline ->
@@ -558,11 +573,11 @@ int main(void) {
       err_has_fork_failed();
       drain_pending(out_p[0]);
       sample_peak(&peak);
-      write(in_p[1], "cat SHTEST.TXT > OUT7.TXT 2>&1\n", 31);
+      send_line(in_p[1], "cat SHTEST.TXT > OUT7.TXT 2>&1\n");
       sample_peak(&peak);
       if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000, &peak) < 0)
         timed_out = 1;
-      write(in_p[1], "wc -c OUT7.TXT\n", 14);
+      send_line(in_p[1], "wc -c OUT7.TXT\n");
       sample_peak(&peak);
       if (read_until(out_p[0], buf, sizeof(buf), "$ ", 8000, &peak) < 0)
         timed_out = 1;
@@ -594,7 +609,7 @@ int main(void) {
      report): `make --version > M.TXT` must put the GNU Make banner into
      the file, proving the exact selfhost workflow the w2 smoke deferred. */
   drain_pending(out_p[0]);
-  write(in_p[1], "make --version > M.TXT\n", 23);
+  send_line(in_p[1], "make --version > M.TXT\n");
   read_until(out_p[0], buf, sizeof(buf), "$ ", 8000, 0);
   {
     const char *ndls[] = { "GNU Make" };
