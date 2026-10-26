@@ -1,0 +1,33 @@
+########## classify run 1 ##########
+FAIL lines: 162
+artifacts 16 / real 146
+--- by tag (artifacts / real):
+  SEDTEST      total= 71  artifacts=  0  real= 71
+  TSORTTEST    total= 35  artifacts=  0  real= 35
+  CMPTEST      total= 16  artifacts=  0  real= 16
+  TACTEST      total=  7  artifacts=  0  real=  7
+  SIGTEST      total=  5  artifacts=  0  real=  5
+  TEST         total=  1  artifacts=  0  real=  1
+
+########## classify run 2 ##########
+FAIL lines: 43
+artifacts 7 / real 36
+--- by tag (artifacts / real):
+  SEDTEST      total= 11  artifacts=  0  real= 11
+  TSORTTEST    total= 10  artifacts=  0  real= 10
+  CMPTEST      total=  6  artifacts=  0  real=  6
+  SIGTEST      total=  1  artifacts=  0  real=  1
+  TACTEST      total=  1  artifacts=  0  real=  1
+
+########## classify run 3 ##########
+FAIL lines: 94
+artifacts 3 / real 91
+--- by tag (artifacts / real):
+  SEDTEST      total= 59  artifacts=  0  real= 59
+  TSORTTEST    total= 10  artifacts=  0  real= 10
+  COMMTEST     total=  5  artifacts=  0  real=  5
+  CMPTEST      total=  5  artifacts=  0  real=  5
+  TACTEST      total=  3  artifacts=  0  real=  3
+  SIGTEST      total=  1  artifacts=  0  real=  1
+  TEST         total=  1  artifacts=  0  real=  1
+

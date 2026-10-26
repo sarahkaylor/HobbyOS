@@ -1,0 +1,93 @@
+rev: c71cb8754558f28266d695056bf911ad9662e8f0 + RESCNT instrument   date: 2026-10-26T05:32:07Z
+build rc=0
+########## INTEL T3 RUN 1 ##########
+start: 2026-10-26T05:35:12Z
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 900s, log /home/sarah/wt/gb057e/evidence/gb-057-v/11-t3-intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 30599 console lines, 162 FAIL lines, 22 user memory fault records across 18 processes, 85 programs exited, halted=1
+T3_intel: FAIL — 2 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 162 FAIL line(s); first 20:
+2935:[SIGTEST] FAIL waitpid returns the child got=35 want=4294964048
+4230:  FPU_T torture-child: FAIL
+4462:[SEDTEST] FAIL basic_s (stdout)
+4798:/PSTB.TXT  FPU_T fork-inherit: FAIL
+4838:FPU_T FAILED: 2
+5114:UNEXPAND.BIN[SEDTEST] FAIL s_g (stdout)
+7728:[SIGTEST] FAIL waitpid returns the child got=1 want=4294964048
+8244:[SEDTEST] FAIL basic_s (stdout)
+10038:[SEDTEST] FAIL s_2nd (stdout)
+10588:[TACTEST] FAIL missing file
+10592:[TACTEST] FAIL empty separator
+10642:[TACTEST] FAILURES: 4
+10657:[CMPTEST] FAIL EOF message on stderr
+10665:[CMPTEST] FAIL empty EOF message
+10671:[CMPTEST] FAIL missing file diagnostic
+10682:[CMPTEST] FAIL -i 4:0 skips prefix
+10688:[CMPTEST] FAIL - stdin EOF diagnostic
+10698:[CMPTEST] FAILURES: 5
+11057:[SEDTEST] FAIL s_p_n (stdout)
+11601:[SEDTEST] FAIL amp (stdout)
+T3_intel EXIT=1
+run1 rc=1
+end: 2026-10-26T05:38:03Z
+########## INTEL T3 RUN 2 ##########
+start: 2026-10-26T05:38:03Z
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 900s, log /home/sarah/wt/gb057e/evidence/gb-057-v/12-t3-intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 9423 console lines, 43 FAIL lines, 5 user memory fault records across 5 processes, 81 programs exited, halted=1
+T3_intel: FAIL — 43 FAIL line(s); first 20:
+2788:[SIGTEST] FAIL waitpid returns the child got=15 want=4294964048
+3251:[SEDTEST] FAIL basic_s (stdout)
+4085:[SEDTEST] FAIL s_g (stdout)
+4834:[SEDTEST] FAIL s_2nd (stdout)
+5234:[CMPTEST] FAIL EOF message on stderr
+5240:[CMPTEST] FAIL empty EOF message
+5244:[CMPTEST] FAIL missing file diagnostic
+5282:[CMPTEST] FAIL -i 4:0 skips prefix
+5312:[CMPTEST] FAIL - stdin EOF diagnostic
+5345:[CMPTEST] FAILURES: 5
+5346:[SEDTEST] FAIL s_p_n (stdout)
+5736:  FPU_T torture-child: FAIL
+5902:[SEDTEST] FAIL amp (stdout)
+6160:/PASTE.BIN[TACTEST] FAIL missing file
+6164:[TACTEST] FAIL empty separator
+6207:UNEXPAND.BIN: [TACTEST] FAILURES: 4
+6294:[SEDTEST] FAIL backref (stdout)
+6313:  FPU_T fork-inherit: FAIL
+6337:/NO_SUCH_UNEXPAND_FILE: No such file or directoryTSORT.BIN: FPU_T FAILED: 2
+6777:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+T3_intel EXIT=1
+run2 rc=1
+end: 2026-10-26T05:38:47Z
+########## INTEL T3 RUN 3 ##########
+start: 2026-10-26T05:38:47Z
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 900s, log /home/sarah/wt/gb057e/evidence/gb-057-v/13-t3-intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 10594 console lines, 94 FAIL lines, 7 user memory fault records across 7 processes, 81 programs exited, halted=1
+T3_intel: FAIL — 94 FAIL line(s); first 20:
+2851:[SIGTEST] FAIL waitpid returns the child got=22 want=4294964048
+3002:[COMMTEST] FAIL default 3-column
+3230:  FPU_T torture-child: FAIL
+3424:[COMMTEST] FAIL -2 suppress right-unique
+3434:[SEDTEST] FAIL basic_s (stdout)
+3767:[COMMTEST] FAIL -3 suppress shared
+4161:[COMMTEST] FAIL -23 left-unique only
+4377:[SEDTEST] FAIL s_g (stdout)
+4467:  FPU_T fork-inherit: FAIL
+4497:FPU_T FAILED: 2
+5147:[TEST] DIRECT-bultin-echo FAIL
+5191:[SEDTEST] FAIL s_2nd (stdout)
+5676:[SEDTEST] FAIL s_p_n (stdout)
+5959:[CMPTEST] FAIL EOF message on stderr
+5965:[CMPTEST] FAIL empty EOF message
+5973:[CMPTEST] FAIL missing file diagnostic
+5982:[CMPTEST] FAIL -i 4:0 skips prefix
+5988:[CMPTEST] FAIL - stdin EOF diagnostic
+6000:UNEXPAND.BIN: [CMPTEST] FAILURES: 5
+6072:[SEDTEST] FAIL amp (stdout)
+T3_intel EXIT=1
+run3 rc=1
+end: 2026-10-26T05:43:33Z

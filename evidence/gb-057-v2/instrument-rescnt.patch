@@ -1,0 +1,43 @@
+diff --git a/src/kernel/arch/x64/trap.c b/src/kernel/arch/x64/trap.c
+index 3d6224e..bdda316 100755
+--- a/src/kernel/arch/x64/trap.c
++++ b/src/kernel/arch/x64/trap.c
+@@ -2280,6 +2280,38 @@ void resume_mark(int pid, uint64_t target_sp) {
+     resume_mark_pid[c] = pid;
+     resume_mark_sp[c] = target_sp;
+   }
++  /* GB-057 verifier instrument (measurement only, not a fix): per-CPU counter
++     of CONSECUTIVE resumes of the same pid.  A count that climbs for a slot
++     that never retires an instruction is a repeat-resume livelock; a CPU that
++     was halted after enter_user_space returned shows one resume and then
++     nothing.  Re-reading the frozen slot table cannot tell those apart --
++     this can.  Prints at 64 / 256 / 1024 consecutive resumes, then stops. */
++  {
++    extern void uart_puts_raw(const char *s);
++    extern void print_int_raw(int val);
++    extern void uart_print_hex_raw(uint64_t v);
++    static volatile int last_pid[MAX_CPUS];
++    static volatile uint32_t same[MAX_CPUS];
++    if (c < MAX_CPUS) {
++      if (pid == last_pid[c]) {
++        uint32_t n = ++same[c];
++        if (n == 64 || n == 256 || n == 1024 || n == 4096) {
++          uart_puts_raw("[RESCNT] cpu=");
++          print_int_raw((int)c);
++          uart_puts_raw(" pid=");
++          print_int_raw(pid);
++          uart_puts_raw(" consecutive_resumes=");
++          print_int_raw((int)n);
++          uart_puts_raw(" sp=");
++          uart_print_hex_raw(target_sp);
++          uart_puts_raw("\n");
++        }
++      } else {
++        last_pid[c] = pid;
++        same[c] = 1;
++      }
++    }
++  }
+ }
+ 
+ int watchdog_stack_scan_ok(uint64_t top) {
