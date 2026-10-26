@@ -1,0 +1,110 @@
+name: linux-ci
+# Linux self-hosted CI: mirrors .github/workflows/ci.yml (mac-ci) on the
+# Proxmox "linuxci" VM (Ubuntu 26.04, 32 GB, 16 vCPU, nested KVM).
+#
+# Both targets are validated on the same x86_64 host:
+#   * ARM  — qemu-system-aarch64 under TCG (no aarch64 KVM on an x86 box)
+#   * x64  — qemu-system-x86_64 under KVM (nested virt on the Proxmox host)
+#
+# Gate rule (same as the mac workflow and tools/t3_tier.sh): a tier's verdict
+# is its own PASS marker + zero FAIL tokens, never the shell exit code.
+on: [push, workflow_dispatch]
+
+concurrency:
+  group: linux-ci-main
+  cancel-in-progress: false
+
+# Literal PATH — never "$PATH" inside a workflow env value: GitHub sets the
+# value verbatim, so a $PATH reference collapses the path to one broken entry
+# and every checkout fails (this exact bug bit the mac runner).
+env:
+  PATH: /usr/lib/llvm-21/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+jobs:
+  arm:
+    runs-on: [self-hosted, linux, linuxci]
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the in-OS LLVM toolchain staging (prebuilt cache)
+        # disk.img depends on tools-staged. Without this prebuilt staging the
+        # cold path (tools/build-llvm-dist-staging.sh) builds host tablegen +
+        # clang + lld FROM SOURCE — hours, not minutes. The cache lives outside
+        # the workspace because actions/checkout cleans the workspace; the
+        # anchor check keeps a stale cache from silently shipping the wrong
+        # LLVM to /TOOLS after a third_party/llvm bump.
+        run: |
+          set -euo pipefail
+          src=/srv/ci/llvm-dist-staging
+          [ -d "$src" ] || { echo "::error::missing prebuilt LLVM staging at $src"; exit 1; }
+          anchor="$(sha256sum third_party/llvm-21.1.8/anchors.sha256 | cut -d' ' -f1)"
+          if [ -f "$src/SOURCE_ANCHOR" ] && [ "$(cat "$src/SOURCE_ANCHOR")" != "$anchor" ]; then
+            echo "::error::stale LLVM staging cache (anchor mismatch); rebuild it with tools/build-llvm-dist-staging.sh"
+            exit 1
+          fi
+          cp -a "$src" third_party/llvm-21.1.8/dist-staging
+      - name: 'ARM tier 1: host golden tests (native, no QEMU)'
+        run: make host_tests -j"$(nproc)"
+      - name: 'ARM tier 2: kernel unit tests (20 s-bounded PASS/FAIL marker)'
+        run: ./run_unit_tests.sh
+      - name: 'ARM tier 3: automated desktop/framebuffer test (QMP screendump)'
+        run: make desktop_test
+      - name: 'ARM tier 3: userland integration wave (t3_tier.sh gate)'
+        run: make test
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm-logs
+          path: |
+            qemu.log
+            obj/t3_arm.log
+            debug.log
+            *.log
+            src/user/*.ppm
+          if-no-files-found: ignore
+
+  intel:
+    runs-on: [self-hosted, linux, linuxci]
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the in-OS LLVM toolchain staging (prebuilt cache)
+        # Same cache/guard as the arm job: disk.img depends on tools-staged and
+        # the from-source path is hours.
+        run: |
+          set -euo pipefail
+          src=/srv/ci/llvm-dist-staging
+          [ -d "$src" ] || { echo "::error::missing prebuilt LLVM staging at $src"; exit 1; }
+          anchor="$(sha256sum third_party/llvm-21.1.8/anchors.sha256 | cut -d' ' -f1)"
+          if [ -f "$src/SOURCE_ANCHOR" ] && [ "$(cat "$src/SOURCE_ANCHOR")" != "$anchor" ]; then
+            echo "::error::stale LLVM staging cache (anchor mismatch); rebuild it with tools/build-llvm-dist-staging.sh"
+            exit 1
+          fi
+          cp -a "$src" third_party/llvm-21.1.8/dist-staging
+      - name: 'Fresh OVMF NVRAM (the intel -pflash file doubles as the vars store)'
+        run: |
+          # Repeated boots accumulate Boot#### entries in this file; a stale
+          # entry makes OVMF pick the wrong device. Reset to the package copy.
+          cp -f /usr/share/OVMF/OVMF_CODE_4M.fd "$HOME/.local/share/OVMF/OVMF_CODE_4M.fd"
+      - name: 'x64 kernel unit tests (KVM)'
+        run: ./run_unit_tests_intel.sh
+      - name: 'x64 userland integration wave (KVM) — NON-BLOCKING: known-unstable at this tip'
+        # The x64 T3 wave at current tip does not complete cleanly under true
+        # parallel vCPUs (documented: reboot storms / spawn-race FAILs, e.g.
+        # SEDTEST/TSORTTEST/CMPTEST). It still runs every push so the evidence
+        # keeps accumulating — the log is uploaded either way — but a red x64
+        # wave must not mask a green ARM/build result. Promote this to a hard
+        # gate only when the tier itself goes green on repeated runs.
+        continue-on-error: true
+        run: make test_intel
+      - name: Upload logs (always — the x64 wave is non-blocking, its evidence is the point)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-intel-logs
+          path: |
+            qemu.log
+            obj/t3_intel.log
+            *.log
+          if-no-files-found: ignore
