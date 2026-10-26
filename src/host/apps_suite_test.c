@@ -59,6 +59,13 @@
 #include <sys/select.h>
 #include <sys/wait.h>
 #include <unistd.h>
+/* POSIX headers the included app sources pull in must be processed BEFORE
+ * libc.h defines the open/read/close -> ho_* macros below: macOS declares
+ * open() with __DARWIN_ALIAS_C, and that asm label cannot be applied to a
+ * function whose name was macro-rewritten first (FCNTL.H:619). */
+#include <fcntl.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 
 #include "../user_include/libc.h"
