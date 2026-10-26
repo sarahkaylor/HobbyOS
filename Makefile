@@ -2592,6 +2592,15 @@ filedialog_test:
 desktop_test:
 	python3 ./run_desktop_test.py
 
+# Build everything `desktop_test` boots (kernel, userland apps, disk.img) without
+# starting QEMU.  run_desktop_test.py runs this first so DESKTOP_TEST_TIMEOUT
+# measures GUEST time only: the timeout is anchored at the harness start, and on
+# a cold copy the build alone can exceed it -- the tier then reports "Timeout
+# waiting for SCREENSHOT_READY" for a guest that never booted (linuxci,
+# 2026-10-26: 120 s budget, still compiling ICU when it expired).
+desktop_test_build:
+	$(MAKE) MODE=desktop_test disk.img
+
 desktop_apps_test:
 	python3 ./run_desktop_apps_test.py
 
@@ -3807,4 +3816,4 @@ parity_ci:
 test_parity_ci:
 	bash tools/gate/parity_ci_test.sh
 
-.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test merge_gate merge_gate_ci test_merge_gate parity_ci test_parity_ci cache_setup cold_vs_cached test_cache test_diff_harness bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest t4_glued_selftest t4_compat_selftest open_mode_scan uname_parity_host t3_pollbrk t3_nullentry
+.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test desktop_test_build host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test merge_gate merge_gate_ci test_merge_gate parity_ci test_parity_ci cache_setup cold_vs_cached test_cache test_diff_harness bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest t4_glued_selftest t4_compat_selftest open_mode_scan uname_parity_host t3_pollbrk t3_nullentry
