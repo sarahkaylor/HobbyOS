@@ -1,0 +1,28 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1500s, log obj/t3_gb101v_run2.log) ===
+T3_intel: 39288 console lines, 329 FAIL lines, 25 user memory fault records across 18 processes, 87 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 1500s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 1 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 329 FAIL line(s); first 20:
+2559:[SIGTEST] FAIL waitpid returns the child got=12 want=4294964048
+2775:[SEDTEST] FAIL basic_s (stdout)
+3387:[SIGTEST] FAIL poll() woke, restarted and returned 1 got=0 want=1
+3388:[SIGTEST] FAIL poll() revents POLLIN got=0 want=1
+3389:[SIGTEST] FAIL SIGCHLD handler ran during the poll park got=0 want=1
+3632:[SEDTEST] FAIL s_g (stdout)
+3906:/NL.BIN[CMPTEST] FAIL EOF message on stderr
+3911:[CMPTEST] FAIL empty EOF message
+3949:[CMPTEST] FAIL missing file diagnostic
+3966:[CMPTEST] FAIL -i 4:0 skips prefix
+4007:[CMPTEST] FAIL - stdin EOF diagnostic
+4034:[CMPTEST] FAILURES: 5
+4475:[SEDTEST] FAIL s_2nd (stdout)
+4537:[TEST] DIRECT-ext-cat FAIL
+4547:  FPU_T torture-child: FAIL
+5123:[SEDTEST] FAIL s_p_n (stdout)
+5237:Loading program for scheduler (v2 AS):   FPU_T fork-inherit: FAIL
+5272:FPU_T FAILED: 2
+5447:UNEXPAND.BIN: COMM.BIN[TACTEST] FAIL missing file
+5450:/NO_SUCH_UNEXPAND_FILE[TACTEST] FAIL empty separator
+T3_intel EXIT=1
+RUN2_EXIT=1
