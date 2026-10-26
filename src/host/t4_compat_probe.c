@@ -308,6 +308,22 @@ int main(void) {
     system(rm);
   }
 
+  /* GB-020: /proc/self/fd virtual dir — opendir + getdents64 must succeed on
+     real Linux (this leg) and the HobbyOS kernel (device leg).  Row pair is
+     deterministic across legs. */
+  {
+    int fd_p = open("/proc/self/fd", O_RDONLY | O_DIRECTORY);
+    report("procfd_opendir", fd_p >= 0 ? 0 : -1);
+    long selfn = 0;
+    if (fd_p >= 0) {
+      char sb[8192];
+      long nn = syscall(SYS_getdents64, fd_p, sb, sizeof sb);
+      selfn = nn;
+      close(fd_p);
+    }
+    report("procfd_read", selfn > 0 ? 1 : 0);
+  }
+
   /* GB-084: open()'s optional mode arg must be honored.  Create a file with
    * O_CREAT and an explicit 0600 mode, then stat it: the mode read back must
    * carry 0600 (S_IRUSR|S_IWUSR).  On leg B this routes through ho_open, which

@@ -131,6 +131,12 @@ static int get_global_fd(struct file *f) {
 #define O_EXCL  0x80
 #define O_TRUNC 0x200
 #endif
+/* GB-020: Linux open(2) flag for directories.  Gets routed to a directory-fd
+ * (FILE_TYPE_FAT16DIR) instead of the regular file path; getdents64 reads it.
+ * 0200000 octal = 0x10000, the Linux O_DIRECTORY value the compat sysroot uses. */
+#ifndef O_DIRECTORY
+#define O_DIRECTORY 0x10000
+#endif
 
 int file_open(struct process *cur, const char *filename, int flags) {
   cur = process_group(cur); /* P1 (D7): fd table + cwd are group state */
@@ -159,6 +165,58 @@ int file_open(struct process *cur, const char *filename, int flags) {
     } else if (isurand) {
       f->type = FILE_TYPE_DEVURANDO;
     } else {
+      f->type = FILE_TYPE_EMPTY;
+      f->ref_count = 0;
+      return -ENOENT;
+    }
+    int dfd = -1;
+    for (int i = 0; i < MAX_OPEN_FDS; i++) {
+      if (cur->open_fds[i] == -1) {
+        cur->open_fds[i] = get_global_fd(f);
+        cur->num_open_fds++;
+        dfd = i;
+        break;
+      }
+    }
+    if (dfd == -1) {
+      f->type = FILE_TYPE_EMPTY;
+      f->ref_count = 0;
+      return -EMFILE;
+    }
+    return dfd;
+  }
+
+  /* GB-020: virtual /proc/self/fd.  `ls /proc/self/fd` / sh readdir over it
+     enumerate this process's own open fds.  Requires O_DIRECTORY (Linux
+     opendir opens it O_RDONLY|O_DIRECTORY).  /proc/self resolves to the
+     current process; named /proc/self (the only form an ls/sh-class binary
+     reaches for in-tree). */
+  if (filename && filename[0] == '/' && filename[1] == 'p' &&
+      filename[2] == 'r' && filename[3] == 'o' && filename[4] == 'c' &&
+      filename[5] == '/' && filename[6] == 's' && filename[7] == 'e' &&
+      filename[8] == 'l' && filename[9] == 'f' && filename[10] == '/' &&
+      filename[11] == 'f' && filename[12] == 'd' && filename[13] == '\0') {
+    if (!(flags & O_DIRECTORY)) { f->type = FILE_TYPE_EMPTY; f->ref_count = 0; return -EINVAL; }
+    f->type = FILE_TYPE_PROCFD;
+    f->fat16.cursor = 0;
+    int pdfd = -1;
+    for (int i = 0; i < MAX_OPEN_FDS; i++) {
+      if (cur->open_fds[i] == -1) {
+        cur->open_fds[i] = get_global_fd(f);
+        cur->num_open_fds++;
+        pdfd = i;
+        break;
+      }
+    }
+    if (pdfd == -1) { f->type = FILE_TYPE_EMPTY; f->ref_count = 0; return -EMFILE; }
+    return pdfd;
+  }
+
+  /* GB-020: O_DIRECTORY opens a directory fd (getdents64).  Route it before
+   * the regular FAT16 file path so a directory never reaches the file open
+   * (which refuses dirs for boot-sector safety).  Missing target => ENOENT. */
+  if (flags & O_DIRECTORY) {
+    if (fat16_open_dir(filename, f) != 0) {
       f->type = FILE_TYPE_EMPTY;
       f->ref_count = 0;
       return -ENOENT;
@@ -1220,10 +1278,62 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
   case FILE_TYPE_UNIXSOCK: /* P4: F_GETFD-probing tools stat caches use this */
     k_stat_fill(st, 0, K_S_IFSOCK | 0600, 0);
     return 0;
+  case FILE_TYPE_FAT16DIR: /* GB-020: a directory fd stats as a directory */
+    k_stat_fill(st, fat16_synth_ino(f->fat16.dir_sector, f->fat16.dir_offset),
+                K_S_IFDIR | 0755, 0);
+    return 0;
   default:
     *errp = EBADF;
     return -1;
   }
+}
+
+/* GB-020: getdents64 over an open directory fd (FILE_TYPE_FAT16DIR or
+ * the virtual FILE_TYPE_PROCFD self-fd directory). */
+int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
+  p = process_group(p); /* P1 (D7): the fd table is group state */
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
+  int g_fd = p->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) return -EBADF;
+  struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
+  if (f->type != FILE_TYPE_FAT16DIR && f->type != FILE_TYPE_PROCFD)
+    return -ENOTDIR;
+  if (!ubuf || bufsize <= 0) return -EINVAL;
+
+  if (f->type == FILE_TYPE_PROCFD) {
+    /* /proc/<pid>/fd: list this process's open user fds (0..n).  Reuses the
+       same dirent64 record layout the FAT16 path emits. */
+    int used = 0;
+    int from = f->fat16.cursor; /* resume index (an fd number) */
+    for (int q = from; q < MAX_OPEN_FDS && used < bufsize; q++) {
+      if (p->open_fds[q] == -1)
+        continue;
+      /* entry name = decimal fd */
+      char nm[16];
+      int nl = 0, v = q;
+      if (v == 0) { nm[nl++] = '0'; }
+      else { char tmp[16]; int ti = 0; while (v > 0 && ti < 14) { tmp[ti++] = '0' + (v % 10); v /= 10; } while (ti > 0) nm[nl++] = tmp[--ti]; }
+      int reclen = (19 + nl + 1 + 7) & ~7;
+      if (used + reclen > bufsize) break;
+      uint8_t *pb = (uint8_t *)ubuf + used;
+      uint64_t ino = 4096u + (uint64_t)(q + 1);
+      uint64_t off = (uint64_t)(q + 1);
+      for (int k = 0; k < 8; k++) pb[k] = (uint8_t)(ino >> (k * 8));
+      for (int k = 0; k < 8; k++) pb[8 + k] = (uint8_t)(off >> (k * 8));
+      pb[16] = (uint8_t)(reclen & 0xFF); pb[17] = (uint8_t)((reclen >> 8) & 0xFF);
+      pb[18] = 8; /* DT_LNK -> DT_REG-ish; ls renders fine either way */
+      for (int n = 0; n < nl; n++) pb[19 + n] = (uint8_t)nm[n];
+      pb[19 + nl] = 0;
+      used += reclen;
+      f->fat16.cursor = q + 1;
+    }
+    return used;
+  }
+
+  int rc = fat16_getdents64(f, f->fat16.cursor, ubuf, bufsize);
+  if (rc < 0) return -EIO;
+  return rc;
 }
 
 int file_stat_path(struct process *p, const char *path, struct k_stat *st,
