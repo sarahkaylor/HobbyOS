@@ -2450,7 +2450,16 @@ endif
 	$(MCOPY) -i disk.img TEST3.TXT ::/TEST3.TXT
 	$(MCOPY) -i disk.img TEST4.TXT ::/TEST4.TXT
 	$(MCOPY) -i disk.img SORT.TXT ::/SORT.TXT
-	rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT
+	# GB-067 fixture: 4096 bytes, byte[i] = i % 251 (the pattern STAGE4K_T.BIN
+	# byte-compares).  Staged HERE, by the host, because the DoD under test is
+	# "a host-staged 4 KiB file reads back byte-exact in the guest" -- if the
+	# guest wrote it, the test would be exercising the writer.  Until this
+	# landed the fixture came from a hand-run `T3_STAGE` probe, so every CI
+	# wave failed `[STAGE4K] FAIL open /STAGE4K.BIN` while passing locally
+	# for whoever remembered to stage it.
+	perl -e 'print chr($$_ % 251) for (0..4095)' > STAGE4K.BIN
+	$(MCOPY) -i disk.img STAGE4K.BIN ::/STAGE4K.BIN
+	rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT STAGE4K.BIN
 
 # Target to run the OS inside QEMU
 run: $(TARGET) disk.img
