@@ -126,7 +126,12 @@ static void test_getentropy(void) {
   if (getentropy(buf, 257) != -1)
     too_big = 0;
   else
+#if defined(__APPLE__) && defined(HOST_TEST)
+    /* Darwin rejects >256 with EINVAL (glibc/Linux uses EIO). */
+    too_big = (errno == EINVAL);
+#else
     too_big = (errno == EIO);
+#endif
   check("getentropy 32B", ok32);
   check("getentropy 256B", ok256);
   check("getentropy 0B", ok0);
@@ -151,6 +156,11 @@ static void test_sched(void) {
   check("priority_min <= max", sched_get_priority_min(SCHED_OTHER) <=
                                sched_get_priority_max(SCHED_OTHER));
 #endif
+  #if defined(__APPLE__) && defined(HOST_TEST)
+  /* Darwin's sched_get_priority_min/max ignore an invalid policy and return
+   * the SCHED_OTHER range; the -1/EINVAL contract is Linux/device-only. */
+  print_console("SKIP: invalid-policy errno contract (Darwin sched_* do not validate)\n");
+#else
   errno = 0;
   int bad = 0;
   if (sched_get_priority_min(999) == -1 && errno == EINVAL)
@@ -159,6 +169,7 @@ static void test_sched(void) {
   if (sched_get_priority_max(999) == -1 && errno == EINVAL)
     bad++;
   check("invalid policy -> -1/EINVAL", bad == 2);
+#endif
 }
 
 #ifndef HOST_TEST
