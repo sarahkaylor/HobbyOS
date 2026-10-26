@@ -357,6 +357,19 @@ struct process {
    * program actually got to, which is the first question asked of any program
    * that stops silently. */
   uint64_t last_user_pc;
+
+  /* --- ECHILD diagnostic rate limit (CI, 2026-10-26) ------------------ *
+   * 1 once process_wait_common has printed this PCB's [WAITPID] ECHILD
+   * diagnostic.  ECHILD with children=0 is POSIX-correct for a long-lived
+   * parent that polls waitpid() in its main loop (desktop_reap_children()
+   * runs every iteration), so the line is a diagnostic, not a defect --
+   * and one line per CALL is a console firehose: measured 811k lines in a
+   * 12-minute ARM T3 run, 99.97% of the serial, which saturated the UART,
+   * starved every other console writer, and surfaced as
+   * "SHELLTEST WATCHDOG: protocol stalled 25 s" (a stall the shell never
+   * caused).  One line per process keeps the diagnostic and drops the
+   * storm.  Appended at the END so parallel lanes merge additively. */
+  uint32_t echild_logged;
 };
 
 /* Linux-compat process flag (GB-013): route syscalls through the Linux

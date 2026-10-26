@@ -179,6 +179,12 @@ static int run_cmd_check(int in, int out, const char *cmd,
   return 0;
 }
 
+/* Same liveness backstop as shell_test.c's watchdog: the 25 s window used to
+   preempt the test's own bounded retries (a stalled prompt is classified SKIP
+   by the caller), red-lighting the tier for a merely slow wave.  See the
+   rationale at SHTEST_WD_PATIENCE_MS in shell_test.c. */
+#define SHTEST_WD_PATIENCE_MS 240000
+
 /* Stall watchdog: fork a helper that fails this test loudly instead of
    letting a shell-protocol deadlock wedge the whole boot suite (seen
    under memory pressure when a shell's answer to a command never
@@ -202,8 +208,8 @@ static void start_watchdog(int in_w, int out_r, const char *test_name) {
   close(in_w);
   close(out_r);
 
-  for (int i = 0; i < 250; i++) {
-    usleep(100000); /* 100 ms; total patience 25 s */
+  for (int i = 0; i < SHTEST_WD_PATIENCE_MS / 100; i++) {
+    usleep(100000); /* 100 ms */
     if (kill(getppid(), 0) != 0)
       exit(0); /* the test finished normally */
   }
@@ -230,11 +236,13 @@ static void start_watchdog(int in_w, int out_r, const char *test_name) {
      non-thread process count as its result. */
   int saturated = (n >= 55);
   if (saturated) {
-    print_console("SHELLTEST SKIP (slot pressure): shell protocol stalled "
-                  "25 s with the process table saturated.\n");
+    print_console("SHELLTEST SKIP (slot pressure): shell protocol stalled ");
+    print_dec(SHTEST_WD_PATIENCE_MS / 1000);
+    print_console(" s with the process table saturated.\n");
   } else {
-    print_console("SHELLTEST WATCHDOG: protocol stalled 25 s; FAILING TEST. "
-                  "Process table:\n");
+    print_console("SHELLTEST WATCHDOG: protocol stalled ");
+    print_dec(SHTEST_WD_PATIENCE_MS / 1000);
+    print_console(" s; FAILING TEST. Process table:\n");
     for (int i = 0; i < n; i++) {
       print_console("  pid=");
       print_dec(procs[i].pid);
