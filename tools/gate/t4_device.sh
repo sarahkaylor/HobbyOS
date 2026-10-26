@@ -299,6 +299,24 @@ if [ "$arrived" != "1" ]; then
 fi
 echo "t4_device: probe ARRIVED in guest (t4-probe-arrived present)."
 
+# GB-107: record every monitored run's serial shape and classify TRUNCATED vs
+# GUEST_STOPPED vs FULL.  "alive at cutoff" = the probe ARRIVED but the log lacks
+# the probe's own end marker at cutoff (the guest was still writing when the
+# capture ended) -> TRUNCATED; a log that never shows an end marker with the guest
+# gone is GUEST-STOPPED.  This is the verdict distinct from a plain diff PASS.
+_GUEST_EXPECTED="${T4_ROWS_EXPECTED:-43}"
+if command -v python3 >/dev/null 2>&1 && [ -f "$ROOT/tools/t3/serial_classifier.py" ]; then
+  if grep -q "probe-exit" "$SERIAL"; then
+    echo "t4_device: SERIAL-FULL lines-captured-end-marker (probe-exit seen)"
+  else
+    python3 "$ROOT/tools/t3/serial_classifier.py" "$SERIAL" \
+      --alive 1 --expected-lines "$_GUEST_EXPECTED" 2>/dev/null \
+      | sed 's/^/t4_device: /' \
+      || true   # classification is a recorded annotation, never a hard gate here
+  fi
+fi
+
+
 # Per-row diff of rc/errno/stdout against leg A.
 fail=0
 NA=$(grep -c "^row=" "$LEGA"); NB=$(grep -c "^row=" "$SERIAL")
