@@ -1,0 +1,5 @@
+$ python3 tools/board/groom.py --self-test   # 8d14d88
+groom self-test: 26 checks, 0 failed -- ALL PASSED
+
+$ python3 tools/board/board.py lint   # 8d14d88, 2026-10-27T17:12:49Z
+LINT clean

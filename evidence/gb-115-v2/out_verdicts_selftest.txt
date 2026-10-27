@@ -1,0 +1,3 @@
+  [OK  ] verdict=RED   parent in 'In Review'   -> ok=False (expected False, want-lane 'In Progress')
+  [OK  ] verdict=RED   parent in 'In Progress' -> ok=True (expected True, want-lane 'In Progress')
+  [OK  ] verdict=RED   parent in 'Done'        -> ok=False (expected False, want-lane 'In Progress')

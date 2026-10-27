@@ -1,0 +1,18 @@
+GB-115 #231 lane labels: ['In Review', 'infra', 'tests', 'wt-S']
+GB-115-V2 #233 created_at: 2026-10-27T17:06:05Z
+
+comments on #231 that mention 'lane':
+  2026-10-27T17:04:42Z  lines= 1 len=   36  'GB-115: lane Backlog → **In Review**'
+  2026-10-27T17:04:55Z  lines=38 len= 1943  '**EVIDENCE — `GB-115` (satisfies the "in In Review without an EVIDENCE comment" lint line).**'
+  2026-10-27T17:10:27Z  lines=10 len= 1383  "REVIEW — APPROVE (wrev, reviewer loop, §4.2 step 3). PR #225 (games/gb115) satisfies GB-115's DoD; card stays "
+
+lane_entry_time  OLD -> 2026-10-27T17:04:55Z
+lane_entry_time  NEW -> 2026-10-27T17:04:42Z
+
+gate #232 (GB-115-V) created_at 2026-10-27T17:04:42Z
+  gate_is_pending  OLD -> False
+  gate_is_pending  NEW -> True
+
+gate #233 (GB-115-V2) created_at 2026-10-27T17:06:05Z
+  gate_is_pending  OLD -> True
+  gate_is_pending  NEW -> True

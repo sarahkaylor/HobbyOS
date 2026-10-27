@@ -1,0 +1,2 @@
+$ python3 tools/board/board.py lint   # cb27a8b (main), 2026-10-27T17:12:50Z
+LINT clean

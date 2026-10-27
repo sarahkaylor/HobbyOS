@@ -1,0 +1,9 @@
+fixture: lane move at 2026-10-27T17:04:42Z / gate created at 2026-10-27T17:04:42Z / gate posted RED at 17:04:47Z
+  gate_is_pending -> True
+  findings        -> []
+
+control: gate created at T, RED posted at 17:09:00Z (4 min later)
+  findings        -> []
+
+control 2: gate created one second BEFORE the move (17:04:41Z)
+  findings        -> [('unverified-in-review', 'GB-900', "in 'In Review' but gate GB-900-V has not posted GREEN")]
