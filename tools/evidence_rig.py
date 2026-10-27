@@ -167,7 +167,7 @@ def resolve_launch_slot(serial_log, bin_name, provided=None):
     return found, warn
 
 
-def launch_from_menu(q, slot, taskbar_y=H - 26, arch="arm", gesture="auto"):
+def launch_from_menu(q, slot, taskbar_y=H - 26, arch="arm", gesture="keys"):
     """Open the Apps menu and navigate down to the given slot, launching it.
 
     GB-116: on intel the pointer click below cannot work.  `src/user/desktop.c`
@@ -195,6 +195,12 @@ def launch_from_menu(q, slot, taskbar_y=H - 26, arch="arm", gesture="auto"):
     elif gesture == "click":
         q.click(38, taskbar_y + 13)
         time.sleep(0.8)
+    else:
+        # A dead default is worse than a loud one: `perf_game_cycle.py` and
+        # `t5/acceptance_run.py` both call this with no gesture, so an unknown
+        # value here silently opens nothing and the launch fails for a reason
+        # that is not in the log (GB-116-V2 clause 6).
+        raise ValueError("launch_from_menu: unknown gesture %r (want 'keys' or 'click')" % (gesture,))
     q.key("home", 0.3)
     for _ in range(slot):
         q.key("down", 0.06)
