@@ -1,0 +1,27 @@
+file: tsort_fixed_intel.log
+total lines: 327   halted=True
+TSORTTEST summary lines: 1 -> ['[TSORTTEST] FAILURES: 4']
+TSORTTEST checks: PASS=12 FAIL=4
+  FAIL with 'exit status': 0 (the SIGPIPE/decode family)
+wait-word lines: 12
+  word histogram: {'0x0': 12}
+  clean exits (0x00000000): 12
+  signal deaths (low7 != 0): 0
+
+--- first 8 wait-word lines with their preceding check line ---
+283: prev='[TSORTTEST] PASS chain from FILE' -> [raw=0x00000000]
+285: prev='[TSORTTEST] PASS chain from stdin' -> [raw=0x00000000]
+287: prev="[TSORTTEST] PASS chain from '-' operand" -> [raw=0x00000000]
+289: prev='[TSORTTEST] PASS diamond from FILE' -> [raw=0x00000000]
+291: prev='[TSORTTEST] PASS diamond from stdin' -> [raw=0x00000000]
+300: prev='[TSORTTEST] PASS odd token count (2.1: no diagnostic)' -> [raw=0x00000000]
+302: prev='[TSORTTEST] PASS whitespace/tab variants' -> [raw=0x00000000]
+304: prev='[TSORTTEST] PASS self-loop pair ignored' -> [raw=0x00000000]
+
+--- every FAIL line (check-level) ---
+[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+
+--- every exit-status FAIL line ---

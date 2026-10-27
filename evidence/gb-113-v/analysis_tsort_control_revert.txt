@@ -1,0 +1,51 @@
+file: ../../../wt-gb113v-revert/evidence/gb-113-v/tsort_revert_intel.log
+total lines: 421   halted=True
+TSORTTEST summary lines: 1 -> ['[TSORTTEST] FAILURES: 14']
+TSORTTEST checks: PASS=2 FAIL=16
+  FAIL with 'exit status': 12 (the SIGPIPE/decode family)
+wait-word lines: 14
+  word histogram: {'0x0': 2, '0xd': 12}
+  clean exits (0x00000000): 2
+  signal deaths (low7 != 0): 12
+
+--- first 8 wait-word lines with their preceding check line ---
+385: prev='[EXITPC] pid=3 last_user_pc=0x100000169F' -> [TSORTTEST] FAIL chain from FILE (exit status -1 != 0, raw=0x0000000d)
+386: prev='[TSORTTEST] FAIL chain from FILE (exit status -1 != 0, raw=0x0000000d)' -> [TSORTTEST] FAIL chain from stdin (exit status -1 != 0, raw=0x0000000d)
+387: prev='[TSORTTEST] FAIL chain from stdin (exit status -1 != 0, raw=0x0000000d)' -> [TSORTTEST] FAIL chain from '-' operand (exit status -1 != 0, raw=0x0000000d)
+388: prev="[TSORTTEST] FAIL chain from '-' operand (exit status -1 != 0, raw=0x0000000d)" -> [TSORTTEST] FAIL diamond from FILE (exit status -1 != 0, raw=0x0000000d)
+389: prev='[TSORTTEST] FAIL diamond from FILE (exit status -1 != 0, raw=0x0000000d)' -> [TSORTTEST] FAIL diamond from stdin (exit status -1 != 0, raw=0x0000000d)
+390: prev='[TSORTTEST] FAIL diamond from stdin (exit status -1 != 0, raw=0x0000000d)' -> [TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (exit status -1 != 1, raw=0x0000000d)
+394: prev='stderr want: "TSORT.BIN: /TSTCY.TXT: input contains a loop:\\nTSORT.BIN: a\\nTSORT.BIN: b\\nTSORT.BIN: c\\n"' -> [TSORTTEST] FAIL cycle from stdin names '-' (exit status -1 != 1, raw=0x0000000d)
+399: prev='[TSORTTEST] note: odd token count -> 2.1 behavior (no diagnostic, rc 0)' -> [TSORTTEST] FAIL odd token count (2.1: no diagnostic) (exit status -1 != 0, raw=0x0000000d)
+
+--- every FAIL line (check-level) ---
+[TSORTTEST] FAIL chain from FILE (exit status -1 != 0, raw=0x0000000d)
+[TSORTTEST] FAIL chain from stdin (exit status -1 != 0, raw=0x0000000d)
+[TSORTTEST] FAIL chain from '-' operand (exit status -1 != 0, raw=0x0000000d)
+[TSORTTEST] FAIL diamond from FILE (exit status -1 != 0, raw=0x0000000d)
+[TSORTTEST] FAIL diamond from stdin (exit status -1 != 0, raw=0x0000000d)
+[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (exit status -1 != 1, raw=0x0000000d)
+[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+[TSORTTEST] FAIL cycle from stdin names '-' (exit status -1 != 1, raw=0x0000000d)
+[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+[TSORTTEST] FAIL odd token count (2.1: no diagnostic) (exit status -1 != 0, raw=0x0000000d)
+[TSORTTEST] FAIL whitespace/tab variants (exit status -1 != 0, raw=0x0000000d)
+[TSORTTEST] FAIL self-loop pair ignored (exit status -1 != 0, raw=0x0000000d)
+[TSORTTEST] FAIL repeated edges (exit status -1 != 0, raw=0x0000000d)
+[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+[TSORTTEST] FAIL --version prints the 2.1 banner (exit status -1 != 0, raw=0x0000000d)
+
+--- every exit-status FAIL line ---
+[TSORTTEST] FAIL chain from FILE (exit status -1 != 0, raw=0x0000000d)
+[TSORTTEST] FAIL chain from stdin (exit status -1 != 0, raw=0x0000000d)
+[TSORTTEST] FAIL chain from '-' operand (exit status -1 != 0, raw=0x0000000d)
+[TSORTTEST] FAIL diamond from FILE (exit status -1 != 0, raw=0x0000000d)
+[TSORTTEST] FAIL diamond from stdin (exit status -1 != 0, raw=0x0000000d)
+[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (exit status -1 != 1, raw=0x0000000d)
+[TSORTTEST] FAIL cycle from stdin names '-' (exit status -1 != 1, raw=0x0000000d)
+[TSORTTEST] FAIL odd token count (2.1: no diagnostic) (exit status -1 != 0, raw=0x0000000d)
+[TSORTTEST] FAIL whitespace/tab variants (exit status -1 != 0, raw=0x0000000d)
+[TSORTTEST] FAIL self-loop pair ignored (exit status -1 != 0, raw=0x0000000d)
+[TSORTTEST] FAIL repeated edges (exit status -1 != 0, raw=0x0000000d)
+[TSORTTEST] FAIL --version prints the 2.1 banner (exit status -1 != 0, raw=0x0000000d)

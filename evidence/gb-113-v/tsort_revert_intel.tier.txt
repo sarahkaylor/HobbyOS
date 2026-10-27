@@ -1,0 +1,25 @@
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+=== T3 (intel): run (deadline 1200s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/wt-gb113v-revert/evidence/gb-113-v/tsort_revert_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 420 console lines, 17 FAIL lines, 0 user memory fault records across 0 processes, 2 programs exited, halted=1
+T3_intel: FAIL — only 2 programs exited (floor 55): too little work for a complete wave, so this cannot be a pass
+T3_intel: FAIL — 17 FAIL line(s); first 20:
+385:[TSORTTEST] FAIL chain from FILE (exit status -1 != 0, raw=0x0000000d)
+386:[TSORTTEST] FAIL chain from stdin (exit status -1 != 0, raw=0x0000000d)
+387:[TSORTTEST] FAIL chain from '-' operand (exit status -1 != 0, raw=0x0000000d)
+388:[TSORTTEST] FAIL diamond from FILE (exit status -1 != 0, raw=0x0000000d)
+389:[TSORTTEST] FAIL diamond from stdin (exit status -1 != 0, raw=0x0000000d)
+390:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (exit status -1 != 1, raw=0x0000000d)
+391:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+394:[TSORTTEST] FAIL cycle from stdin names '-' (exit status -1 != 1, raw=0x0000000d)
+395:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+399:[TSORTTEST] FAIL odd token count (2.1: no diagnostic) (exit status -1 != 0, raw=0x0000000d)
+400:[TSORTTEST] FAIL whitespace/tab variants (exit status -1 != 0, raw=0x0000000d)
+401:[TSORTTEST] FAIL self-loop pair ignored (exit status -1 != 0, raw=0x0000000d)
+402:[TSORTTEST] FAIL repeated edges (exit status -1 != 0, raw=0x0000000d)
+405:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+408:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+411:[TSORTTEST] FAIL --version prints the 2.1 banner (exit status -1 != 0, raw=0x0000000d)
+414:[TSORTTEST] FAILURES: 14
+T3_intel EXIT=1

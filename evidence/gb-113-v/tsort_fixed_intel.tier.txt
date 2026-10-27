@@ -1,0 +1,13 @@
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+=== T3 (intel): run (deadline 1200s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/wt-gb113v/evidence/gb-113-v/tsort_fixed_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 326 console lines, 5 FAIL lines, 0 user memory fault records across 0 processes, 2 programs exited, halted=1
+T3_intel: FAIL — only 2 programs exited (floor 55): too little work for a complete wave, so this cannot be a pass
+T3_intel: FAIL — 5 FAIL line(s); first 20:
+292:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+295:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+309:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+312:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+319:[TSORTTEST] FAILURES: 4
+T3_intel EXIT=1

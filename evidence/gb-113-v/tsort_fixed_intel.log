@@ -1,0 +1,327 @@
+ld.lld -T linker_x64.ld -o hobbyos.elf obj/intel/boot.o obj/intel/setjmp.o obj/intel/abi_t2_test.o obj/intel/audio_stub.o obj/intel/blk_cache.o obj/intel/blk_cache_press_test.o obj/intel/blk_cache_test.o obj/intel/dhcp.o obj/intel/elf_image.o obj/intel/elf_loader.o obj/intel/evdev.o obj/intel/evdev_test.o obj/intel/fat16.o obj/intel/fat16_test.o obj/intel/fb_ioctl.o obj/intel/fb_ioctl_test.o obj/intel/fb_mmap.o obj/intel/fb_mmap_test.o obj/intel/frame.o obj/intel/frame_test.o obj/intel/fs.o obj/intel/fs_test.o obj/intel/input_node.o obj/intel/input_node_test.o obj/intel/iommu_vtd.o obj/intel/ipc_proto.o obj/intel/linux_uname.o obj/intel/lock_order.o obj/intel/locks_test.o obj/intel/main.o obj/intel/math_test.o obj/intel/mmu_test.o obj/intel/net.o obj/intel/net_rdma.o obj/intel/net_rdma_test.o obj/intel/net_test.o obj/intel/nfs.o obj/intel/nfs_proto.o obj/intel/nfs_test.o obj/intel/pipe.o obj/intel/pipe_test.o obj/intel/process.o obj/intel/process_test.o obj/intel/program_loader.o obj/intel/program_loader_test.o obj/intel/ssp.o obj/intel/test_fw_cfg.o obj/intel/test_smp.o obj/intel/time.o obj/intel/time_test.o obj/intel/timer_test.o obj/intel/trap_test.o obj/intel/unit_test.o obj/intel/unix.o obj/intel/unix_test.o obj/intel/vfs.o obj/intel/virtio_blk.o obj/intel/virtio_blk_test.o obj/intel/virtio_gpu.o obj/intel/virtio_gpu_test.o obj/intel/virtio_gpu_x64.o obj/intel/virtio_input.o obj/intel/virtio_input_test.o obj/intel/virtio_net.o obj/intel/virtio_net_test.o obj/intel/vm.o obj/intel/vm_test.o obj/intel/cpu.o obj/intel/fpu.o obj/intel/gic.o obj/intel/locks.o obj/intel/mmu.o obj/intel/rtc.o obj/intel/smp.o obj/intel/timer.o obj/intel/trap.o obj/intel/uart.o
+llvm-objcopy -I elf64-x86-64 -O elf32-i386 hobbyos.elf
+qemu-system-x86_64 -M q35 -smp 8 -m 12288M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56  -action shutdown=poweroff -display none -enable-kvm
+WARNING: Image format was not specified for '/home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd' and probing guessed raw.
+         Automatically detecting the format is dangerous for raw images, write operations on block 0 will be restricted.
+         Specify the 'raw' format explicitly to remove the restrictions.
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+BdsDxe: starting Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+[001;001H[001;001H[UART] lock @ 0x000000007557fdc8
+Booting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+VirtIO GPU: BGA
+VirtIO GPU successfully initialized.
+Original CCB: 0x0000000000000047
+Modified CCB: 0x0000000000000047
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1376256 total_mib=5376 reserved=0
+[KERNEL] Activating secondary cores via LAPIC IPIs...
+[KERNEL] smp_init: copying trampoline code...
+[KERNEL] smp_init: trampoline copied.
+[KERNEL] smp_init: Sending INIT IPI to core 1...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 1 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 2...
+start_scheduler called on CPU 1
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 2 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 3...
+start_scheduler called on CPU 2
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 3 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 4...
+start_scheduler called on CPU 3
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 4 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 5...
+start_scheduler called on CPU 4
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 5 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 6...
+start_scheduler called on CPU 5
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 6 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 7...
+start_scheduler called on CPU 6
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 7 power-on acknowledged.
+start_scheduler called on CPU 7
+[KERNEL] LAPIC timer rate: 62568 counts/ms, TSC rate: 2596292 ticks/ms (PIT-counter calibrated)
+Found NVMe controller on PCI bus!
+PCI Config Space of NVMe:
+0x0000000000101B36 0x0000000000100007 0x0000000001080202 0x0000000000000000 
+0x0000000081000004 0x0000000000000000 0x0000000000000000 0x0000000000000000 
+0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000011001AF4 
+0x0000000000000000 0x0000000000000040 0x0000000000000000 0x000000000000010B 
+NVMe BAR0 Phys: 0x0000000081000000 (Mapped to Virtual: 0x00000001FC000000)
+Resetting controller, waiting for CSTS.RDY = 0...
+Controller reset complete!
+Enabling controller... CC=0x0000000000460001 CSTS=0x0000000000000001
+Controller enabled successfully!
+Create IO CQ Status: 0x0000000000000000
+Create IO SQ Status: 0x0000000000000000
+NVMe driver initialized successfully!
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+[VIRTIO_NET] PCI Interrupt Line: 10 (Vector: 42)
+[VIRTIO_NET] MAC Address: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+[VIRTIO_NET] RX queue size: 256 rx_vq address: 0x00000000753F4000 PFN: 0x00000000000753F4
+[VIRTIO_NET] TX queue size: 256 tx_vq address: 0x00000000753F7000 PFN: 0x00000000000753F7
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Discover sent
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP initialization complete.
+[RDMA] Remote PCIe sharing is INACTIVE (no startup parameter).
+
+--- Parallel Program Loading ---
+Mode: TEST - Running automated tests...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=1
+Inside process_create: clearing memory at 0x0000000022000000
+Inside process_create: kmemset done.
+[GB-032] SDL test-app exec: SKIP (GB-013 compat exec leg not open; app + static-PIE ELF props proven on host by sdl_test_app_test_host)
+start_scheduler called on CPU [RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+/WAVE.CFG  [ALIVE-SET] slot=1 pid=1 st=3 parent=-1 claimed_by=5 
+0
+
+[RESUME-SPSR] pid=1 spsr=0x00000212 IF=1
+[RESUME-SPSR] pid=1 spsr=0x00000212 IF=1
+[WAVE-MANIFEST] TSORT_T.BIN
+[WAVE-TRY] TSORT_T.BIN
+Loading program for scheduler (v2 AS): TSORT_T.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=[RESUME-SPSR] pid=1 spsr=0x00000212 IF=1
+-1
+/TSORT_T.BIN
+v2 loader: image mapped (lazy), bytes=129880 pages=32 first=in elap=1ms
+v2 loader: PID=2 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] TSORT_T.BIN rc>0
+[RESUME-SPSR] pid=2 spsr=0x00010202 IF=1
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFE78 covers=1
+[TSORTTEST] starting
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFE38 covers=1
+/TSTCH.TXT
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFD00 covers=1
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFD00 covers=1
+/TSTDM.TXT
+/TSTCY.TXT
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFD00 covers=1
+/TSTOD.TXT
+/TSTWS.TXT
+/TSTSL.TXT
+/TSTDP.TXT
+/TSTEM.TXT
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=1
+Inside process_create: clearing memory at 0x0000000022000000
+Inside process_create: kmemset done.
+[WAVE-TRY] TSORT.BIN
+Loading program for scheduler (v2 AS): TSORT.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=-1
+/TSORT.BIN
+v2 loader: image mapped (lazy), bytes=109928 pages=27 first=in elap=1ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] TSORT.BIN rc>0
+/TSTCH.TXT
+[KERNEL] Process 3: TSORT.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=3 last_user_pc=0x100000169F
+[WAVE-TRY] TSORT.BIN
+Loading program for scheduler (v2 AS): TSORT.BIN
+/TSORT.BIN
+v2 loader: image mapped (lazy), bytes=109928 pages=27 first=in elap=0ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] TSORT.BIN rc>0
+[KERNEL] Process 3: TSORT.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=3 last_user_pc=0x100000169F
+[WAVE-TRY] TSORT.BIN
+Loading program for scheduler (v2 AS): TSORT.BIN
+/TSORT.BIN
+v2 loader: image mapped (lazy), bytes=109928 pages=27 first=in elap=0ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] TSORT.BIN rc>0
+[KERNEL] Process 3: TSORT.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=3 last_user_pc=0x100000169F
+[WAVE-TRY] TSORT.BIN
+Loading program for scheduler (v2 AS): TSORT.BIN
+/TSORT.BIN
+v2 loader: image mapped (lazy), bytes=109928 pages=27 first=in elap=0ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] TSORT.BIN rc>0
+/TSTDM.TXT
+[KERNEL] Process 3: TSORT.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=3 last_user_pc=0x100000169F
+[WAVE-TRY] TSORT.BIN
+Loading program for scheduler (v2 AS): TSORT.BIN
+/TSORT.BIN
+v2 loader: image mapped (lazy), bytes=109928 pages=27 first=in elap=0ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] TSORT.BIN rc>0
+[KERNEL] Process 3: TSORT.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=3 last_user_pc=0x100000169F
+[WAVE-TRY] TSORT.BIN
+Loading program for scheduler (v2 AS): TSORT.BIN
+/TSORT.BIN
+v2 loader: image mapped (lazy), bytes=109928 pages=27 first=in elap=0ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+/TSTCY.TXT
+[ARRIVED] TSORT.BIN rc>0
+[KERNEL] Process 3: TSORT.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=3 last_user_pc=0x100000169F
+[WAVE-TRY] TSORT.BIN
+Loading program for scheduler (v2 AS): TSORT.BIN
+/TSORT.BIN
+v2 loader: image mapped (lazy), bytes=109928 pages=27 first=in elap=0ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] TSORT.BIN rc>0
+TSORT.BIN: -: input contains a loop:
+TSORT.BIN: a
+TSORT.BIN: b
+TSORT.BIN: c
+[KERNEL] Process 3: TSORT.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=3 last_user_pc=0x100000169F
+[WAVE-TRY] TSORT.BIN
+Loading program for scheduler (v2 AS): TSORT.BIN
+/TSORT.BIN
+v2 loader: image mapped (lazy), bytes=109928 pages=27 first=in elap=0ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] TSORT.BIN rc>0
+[KERNEL] Process 3: TSORT.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=3 last_user_pc=0x100000169F
+[WAVE-TRY] TSORT.BIN
+Loading program for scheduler (v2 AS): TSORT.BIN
+/TSORT.BIN
+v2 loader: image mapped (lazy), bytes=109928 pages=27 first=in elap=0ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] TSORT.BIN rc>0
+/TSTWS.TXT
+[KERNEL] Process 3: TSORT.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=3 last_user_pc=0x100000169F
+[WAVE-TRY] TSORT.BIN
+Loading program for scheduler (v2 AS): TSORT.BIN
+/TSORT.BIN
+v2 loader: image mapped (lazy), bytes=109928 pages=27 first=in elap=0ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] TSORT.BIN rc>0
+/TSTSL.TXT
+[KERNEL] Process 3: TSORT.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=3 last_user_pc=0x100000169F
+[WAVE-TRY] TSORT.BIN
+Loading program for scheduler (v2 AS): TSORT.BIN
+/TSORT.BIN
+v2 loader: image mapped (lazy), bytes=109928 pages=27 first=in elap=0ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] TSORT.BIN rc>0
+/TSTDP.TXT
+[KERNEL] Process 3: TSORT.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=3 last_user_pc=0x100000169F
+[WAVE-TRY] TSORT.BIN
+Loading program for scheduler (v2 AS): TSORT.BIN
+/TSORT.BIN
+v2 loader: image mapped (lazy), bytes=109928 pages=27 first=in elap=0ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] TSORT.BIN rc>0
+/TSTEM.TXT
+[KERNEL] Process 3: TSORT.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=3 last_user_pc=0x100000169F
+[WAVE-TRY] TSORT.BIN
+Loading program for scheduler (v2 AS): TSORT.BIN
+/TSORT.BIN
+v2 loader: image mapped (lazy), bytes=109928 pages=27 first=in elap=0ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+TSORT.BIN: /TSTMIS.TXT[ARRIVED] TSORT.BIN rc>0
+: No such file or directory
+[KERNEL] Process 3: TSORT.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=3 last_user_pc=0x100000169F
+[WAVE-TRY] TSORT.BIN
+Loading program for scheduler (v2 AS): TSORT.BIN
+/TSORT.BIN
+v2 loader: image mapped (lazy), bytes=109928 pages=27 first=in elap=0ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] TSORT.BIN rc>0
+TSORT.BIN: only one argument may be specified
+Try `TSORT.BIN --help' for more information.
+[KERNEL] Process 3: TSORT.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=3 last_user_pc=0x100000169F
+[WAVE-TRY] TSORT.BIN
+Loading program for scheduler (v2 AS): TSORT.BIN
+/TSORT.BIN
+v2 loader: image mapped (lazy), bytes=109928 pages=27 first=in elap=0ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] TSORT.BIN rc>0
+[KERNEL] Process 3: TSORT.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=3 last_user_pc=0x100000169F
+[WAVE-TRY] TSORT.BIN
+Loading program for scheduler (v2 AS): TSORT.BIN
+/TSORT.BIN
+v2 loader: image mapped (lazy), bytes=109928 pages=27 first=in elap=0ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[KERNEL] Process 3: TSORT.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=3 last_user_pc=0x100000169F
+[ARRIVED] TSORT.BIN rc>0
+[TSORTTEST] PASS chain from FILE
+ [raw=0x00000000]
+[TSORTTEST] PASS chain from stdin
+ [raw=0x00000000]
+[TSORTTEST] PASS chain from '-' operand
+ [raw=0x00000000]
+[TSORTTEST] PASS diamond from FILE
+ [raw=0x00000000]
+[TSORTTEST] PASS diamond from stdin
+ [raw=0x00000000]
+[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+  stderr got:  ""
+  stderr want: "TSORT.BIN: /TSTCY.TXT: input contains a loop:\nTSORT.BIN: a\nTSORT.BIN: b\nTSORT.BIN: c\n"
+[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+  stderr got:  ""
+  stderr want: "TSORT.BIN: -: input contains a loop:\nTSORT.BIN: a\nTSORT.BIN: b\nTSORT.BIN: c\n"
+[TSORTTEST] note: odd token count -> 2.1 behavior (no diagnostic, rc 0)
+[TSORTTEST] PASS odd token count (2.1: no diagnostic)
+ [raw=0x00000000]
+[TSORTTEST] PASS whitespace/tab variants
+ [raw=0x00000000]
+[TSORTTEST] PASS self-loop pair ignored
+ [raw=0x00000000]
+[TSORTTEST] PASS repeated edges
+ [raw=0x00000000]
+[TSORTTEST] PASS empty input
+ [raw=0x00000000]
+[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+  stderr got:  ""
+  stderr want: "TSORT.BIN: /TSTMIS.TXT: No such file or directory\n"
+[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+  stderr got:  ""
+  stderr want: "TSORT.BIN: only one argument may be specified\nTry `TSORT.BIN --help' for more information.\n"
+[TSORTTEST] PASS --version prints the 2.1 banner
+ [raw=0x00000000]
+[TSORTTEST] PASS --help prints the 2.1 usage
+ [raw=0x00000000]
+[TSORTTEST] FAILURES: 4
+[KERNEL] Process 2: TSORT_T.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=2 last_user_pc=0x100000251F
+[HALT-CD] cpu=0 free=63 alloc=0 exited=1 running=0 blocked=0 other=0
+
+[LOCKCNT] STALLBREAK=0 STOLEN=0 LOCKFOREVER=0 UNOWNED-FREED=0
+[HALT-CD] cpu=4 free=63 alloc=0 exited=1 running=0 blocked=0 other=0
+System halt.
+[

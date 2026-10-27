@@ -1,0 +1,26 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log evidence/gb-113-v/t3_intel_fix.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 41168 console lines, 192 FAIL lines, 30 user memory fault records across 22 processes, 86 programs exited, halted=1
+T3_intel: FAIL — 192 FAIL line(s); first 20:
+2517:[SEDTEST] FAIL basic_s (stdout)
+2758:MMTEST FAIL v2 loader: image mapped (lazy), bytes=112328 pages=28 first=in elap=0ms
+3016:[SIGTEST] FAIL waitpid returns the child got=24 want=4294964048
+3304:[SEDTEST] FAIL s_g (stdout)
+3915:[SEDTEST] FAIL s_2nd (stdout)
+4035:  FPU_T torture-child: FAIL
+4293:  FPU_T fork-inherit: FAIL
+4339:FPU_T FAILED: 2
+4523:[SEDTEST] FAIL s_p_n (stdout)
+5272:[SEDTEST] FAIL amp (stdout)
+5525:[CMPTEST] FAIL EOF message on stderr
+5545:[CMPTEST] FAIL empty EOF message
+5564:[CMPTEST] FAIL missing file diagnostic
+5568:GREP.BIN/NL.BINshell_test3: FAILED attributes of nested.txt. Output was:
+5626:[CMPTEST] FAIL -i 4:0 skips prefix
+5643:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+5665:[CMPTEST] FAIL - stdin EOF diagnostic
+5742:[CMPTEST] FAILURES: 5
+5747:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+5753:[TEST] DIRECT-ext-cat FAIL (empty target, no load failure)
+T3_intel EXIT=1

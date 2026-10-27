@@ -1,0 +1,36 @@
+file: t3_intel_fix.log
+total lines: 44659   halted=True
+TSORTTEST summary lines: 3 -> ['[TSORTTEST] FAILURES: 4', '[TSORTTEST] FAILURES: 4', '/TR.BIN[TSORTTEST] FAILURES: 4']
+TSORTTEST checks: PASS=47 FAIL=13
+  FAIL with 'exit status': 0 (the SIGPIPE/decode family)
+wait-word lines: 45
+  word histogram: {'0x0': 45}
+  clean exits (0x00000000): 45
+  signal deaths (low7 != 0): 0
+
+--- first 8 wait-word lines with their preceding check line ---
+5736: prev='ls -l' -> [raw=0x00000000]
+5740: prev='[KERNEL] Process 33: FOLD.BIN exited unexpectedly or gracefully.' -> [raw=0x00000000]
+5745: prev='' -> [raw=0x00000000]
+5766: prev='[PIPE_WRITE_EPIPE] PID 12 pipe 0x00000000745391B0 reader_count is 0' -> [raw=0x00000000]
+5795: prev='Loading program for scheduler (v2 AS): v2 loader: PID=15 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6' -> [raw=0x00000000]
+6004: prev='[TSORTTEST] PASS odd token count (2.1: no diagnostic)' -> [raw=0x00000000]
+6039: prev='/MD5OK.CHK' -> [raw=0x00000000]
+6060: prev='[TSORTTEST] PASS self-loop pair ignored' -> [raw=0x00000000]
+
+--- every FAIL line (check-level) ---
+[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+FOLD.BIN: [TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+COMM.BIN: [TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+
+--- every exit-status FAIL line ---
