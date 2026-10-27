@@ -19,6 +19,9 @@ check(not decide(h, "2222222222222222222222222222222222222222")[0], "graded != h
 check(not decide(h, None)[0], "GREEN names no sha -> FAILS CLOSED (refuse)")
 check(not decide(None, h)[0], "no head supplied -> refuse")
 check(40 in [len(s) for s in graded_shas_in("VERDICT GREEN graded sha " + "c" * 40)], "parses a 40-hex graded sha from a VERDICT line")
+# GB-110-V2 clause 5: a real verdict body names an ABBREVIATED prefix (7-40 hex)
+check("deadbeefe0" in graded_shas_in("## VERDICT: GREEN\n**Tree that would merge:** deadbeefe0\n"),
+      "reads an abbreviated (10-char-prefix) sha from a real GREEN body")
 check(graded_shas_in("VERDICT GREEN") == [], "a VERDICT with no sha -> empty (fails closed upstream)")
 
 # DoD self-test anchor: today's PR #194 (GB-103) was graded at 7de6dde.. but merged at
@@ -57,6 +60,46 @@ mp.graded_sha_from_board = lambda pr, env=None: None                 # board has
 check(mp.graded_sha_of(9) is None, "no GREEN on the board (or unreachable) -> FAIL CLOSED even with a local file")
 os.remove(cache)
 mp.graded_sha_from_board = _orig_fb
+# GB-110-V clauses 3+4: graded_shas_in must parse the canonical real-green line and the
+# sha for THIS head is selected (not blindly shas[0] in a multi-sha / two-GREEN verdict).
+check(40 in [len(s) for s in mp.graded_shas_in("**Tree that would merge:** " + "a" * 40)],
+      "parses a 40-hex sha on the canonical 'Tree that would merge:' line")
+head = board_sha
+other = "9999999999999999999999999999999999999999"
+_o_head, _o_fj, _o_gb = mp.head_of_pr, mp._forgejo, mp.pr_gb_id
+mp.head_of_pr = lambda pr, env=None: head
+mp.pr_gb_id = lambda pr, env=None: "110"
+def _fk(api, env=None):
+    if "comments" in api:
+        return [{"body": "## VERDICT: GREEN\n**Tree that would merge:** " + other + "\n**Tree that would merge:** " + head + "\n"}]
+    return [{"number": 7, "title": "GB-110-V"}, {"number": 8, "title": "GB-110"}]
+mp._forgejo = _fk
+sel = mp.graded_sha_from_board(209)
+check(sel == head, "selects the sha naming THIS head (not shas[0]) in a multi-sha GREEN (got %s)" % (sel[:8] if sel else None))
+mp.head_of_pr, mp._forgejo, mp.pr_gb_id = _o_head, _o_fj, _o_gb
+# GB-110-V3 clause 2: a MERGED PR's closed-card GREEN must still be FOUND (returned),
+# and decide() refuses naming the mismatch — never a silent None / "no GREEN".
+head_merged = "9" * 40                              # PR merged at a head that moved ON
+mp.head_of_pr = lambda pr, env=None: head_merged
+mp._forgejo = lambda api, env=None: ([{"body": "## VERDICT: GREEN\n**Tree that would merge:** " + "a" * 40 + "\n"}]
+                                     if "comments" in api else [{"number": 7, "title": "GB-110-V"}])
+mp.pr_gb_id = lambda pr, env=None: "110"
+found = mp.graded_sha_from_board(209)
+ok, r = mp.decide(head_merged, found)
+check(found is not None, "closed card's GREEN is FOUND for a merged PR (got %s)" % (found[:7] if found else None))
+check(not ok and found and found != head_merged, "decide() then REFUSES naming the graded/mismatch (%s)" % r[:50])
+mp.head_of_pr, mp._forgejo, mp.pr_gb_id = _o_head, _o_fj, _o_gb
+# GB-110-V3 clause 2: the HIGHEST-ORDINAL gate governs (never the first match). A
+# superseded GB-106-V whose GREEN names a stale sha must NOT beat GB-106-V2 naming the head.
+ord_head = board_sha
+stale = "e" * 40
+mp.head_of_pr = lambda pr, env=None: ord_head
+mp.pr_gb_id = lambda pr, env=None: "106"
+mp._forgejo = lambda api, env=None: ([{"body": "## VERDICT: GREEN\n**Tree that would merge:** " + (ord_head if "/203/comments" in api else stale) + "\n"}]
+                                     if "comments" in api else [{"number": 201, "title": "GB-106: owner card "}, {"number": 202, "title": "GB-106-V Re-gate the guard "}, {"number": 203, "title": "GB-106-V2 Re-gate: #194 must go red "}])
+chosen = mp.graded_sha_from_board(204)
+check(chosen == ord_head, "the HIGHEST-ordinal gate's GREEN (GB-106-V2) wins over the superseded V (got %s)" % (chosen[:8] if chosen else None))
+mp.head_of_pr, mp._forgejo, mp.pr_gb_id = _o_head, _o_fj, _o_gb
 
 if fails:
     print("MERGE_PR_TEST: FAIL (%d)" % fails); sys.exit(1)
