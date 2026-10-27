@@ -193,6 +193,44 @@ def newest_verdict(comments):
             return m.group(1).upper()
     return None
 
+def lane_entry_time(it, comment_fn):
+    """created_at of the newest comment moving the card INTO a review lane.
+
+    Used to tell "the gate ran and was not green" apart from "the gate was
+    minted a moment ago and has not run yet".  The lane-move comments are
+    written by tools/board/lane-move.sh as `"<id>: lane <old> -> **<new>**"`,
+    with either an ASCII arrow or U+2192 depending on who wrote it, so both
+    are accepted.
+    """
+    best = None
+    for c in comment_fn(it.get("number")) or []:
+        body = (c.get("body") or "").replace("\r", "")
+        ts = c.get("created_at")
+        if not ts or "lane" not in body:
+            continue
+        if not any(("-> **" + l + "**") in body or (u"\u2192 **" + l + "**") in body
+                   for l in REVIEW_LANES):
+            continue
+        if best is None or ts > best:
+            best = ts
+    return best
+
+
+def gate_is_pending(it, gate, comment_fn):
+    """True when `gate` was minted after the card entered its review lane.
+
+    A re-verification is normal: GB-047-V RED'd on criterion 2, the fix landed
+    and a reviewer posted APPROVE, and a fresh gate ticket was minted seconds
+    later.  At that instant the newest gate has posted no verdict at all, and
+    the plain "has not posted GREEN" rule calls the card unverified -- which
+    invites a lane bounce that throws away a correct review.  Only a gate that
+    predates the lane move is evidence that the card is in a review lane
+    without verification.
+    """
+    minted = gate.get("created_at")
+    entry = lane_entry_time(it, comment_fn)
+    return bool(minted and entry and minted > entry)
+
 
 def verify_lint_findings(issues, comment_fn):
     """The three PLAN-006 verify-lane checks.
@@ -225,6 +263,8 @@ def verify_lint_findings(issues, comment_fn):
         v = newest_gate(gid, by_title)
         verdict = newest_verdict(comment_fn(v["number"])) if v else None
         if verdict != "GREEN":
+            if v is not None and gate_is_pending(it, v, comment_fn):
+                continue
             which = v["title"].split()[0] if v else None
             detail = (f"in {lane!r} but gate {which} has not posted GREEN"
                       if v else f"in {lane!r} with no {gid}-V gate ticket")
@@ -420,6 +460,31 @@ def self_test():
           "a review-lane card whose gate has no GREEN is flagged unverified-in-review")
     check(all(k != "unverified-in-review" for k, g, _ in f if g == "GB-030"),
           "the green-gated card stays out of the findings")
+
+    # verify-lint: a re-verify gate minted AFTER the lane move is pending, not
+    # a violation.  Measured on GB-047 (2026-10-27): reviewer posted APPROVE at
+    # 10:41:38 and minted GB-047-V #223 at 10:41:41; lint then called the card
+    # unverified while the new gate had simply not run yet.
+    issues_rv = [
+        {"title": "GB-047 impl", "state": "open", "created_at": "2026-10-27T09:00:00Z",
+         "labels": [{"name": "In Review"}], "number": 47},
+        {"title": "GB-047-V2 gate", "state": "open", "created_at": "2026-10-27T10:41:41Z",
+         "labels": [{"name": "Ready"}], "number": 223},
+    ]
+    cm_rv = {47: [{"created_at": "2026-10-27T10:41:38Z",
+                   "body": "47: lane In Progress -> **In Review**"}],
+             223: [{"created_at": "2026-10-27T10:42:00Z", "body": "started the run"}]}
+    check(not any(k == "unverified-in-review" for k, g, _ in
+                  verify_lint_findings(issues_rv, lambda n: cm_rv.get(n, []))),
+          "a gate minted after the lane move is pending, not unverified")
+
+    # ... but a gate that predates the lane move is still a violation.
+    cm_rv_old = {47: [{"created_at": "2026-10-27T11:00:00Z",
+                       "body": "47: lane In Progress -> **In Review**"}],
+                 223: [{"created_at": "2026-10-27T10:41:41Z", "body": "started"}]}
+    check(any(k == "unverified-in-review" for k, g, _ in
+              verify_lint_findings(issues_rv, lambda n: cm_rv_old.get(n, []))),
+          "a gate older than the lane move is still flagged")
 
     # verify-lint: orphan -V with no parent.
     orphan = [{"title": "GB-040-V gate", "state": "open",
