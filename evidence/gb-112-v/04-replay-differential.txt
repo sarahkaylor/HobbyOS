@@ -1,0 +1,24 @@
+board: 225 issues (state=all, as board.py does)
+
+== A. live board as it is now (GB-047 in In Progress after the #223 RED) ==
+  unpatched findings: [('unverified-in-review', 'GB-112')]
+  patched   findings: [('unverified-in-review', 'GB-112')]
+  identical=True  cleared_by_patch=[]  added=[]
+  GB-047 unpatched=[] patched=[]
+
+== B. real records, #47 lane restored to In Review (the 10:45Z state) ==
+  unpatched findings: [('unverified-in-review', 'GB-047'), ('unverified-in-review', 'GB-112')]
+  patched   findings: [('unverified-in-review', 'GB-112')]
+  identical=False  cleared_by_patch=[('unverified-in-review', 'GB-047')]  added=[]
+  GB-047 unpatched=[('unverified-in-review', 'GB-047')] patched=[]
+
+  #47 lane_entry_time (newest machine-readable move INTO a review lane) = 2026-10-23T19:38:25Z
+  #223 GB-047-V created_at = 2026-10-27T10:41:33Z, state=closed
+  #223 newest verdict (patched groom.newest_verdict) = RED
+  gate_is_pending(#47, #223) = True
+
+== C. same as B, but #223 already posted its RED verdict (the 10:46:34Z state) ==
+  unpatched findings: [('unverified-in-review', 'GB-047'), ('unverified-in-review', 'GB-112')]
+  patched   findings: [('unverified-in-review', 'GB-112')]
+  identical=False  cleared_by_patch=[('unverified-in-review', 'GB-047')]  added=[]
+  GB-047 unpatched=[('unverified-in-review', 'GB-047')] patched=[]
