@@ -234,11 +234,21 @@ def lane_entry_time(it, comment_fn):
     """
     best = None
     for c in comment_fn(it.get("number")) or []:
-        body = (c.get("body") or "").replace("\r", "")
+        raw = (c.get("body") or "").replace("\r", "").strip()
         ts = c.get("created_at")
-        if not ts or "lane" not in body:
+        if not ts:
             continue
-        if not any(("-> **" + l + "**") in body or (u"\u2192 **" + l + "**") in body
+        # A lane move is ONE short line written by lane-move.sh:
+        #   "<id>: lane <old> -> **<new>**"   (or with U+2192)
+        # Quoting that line inside prose must NOT count as a move.  Measured on GB-115
+        # (2026-10-27): an EVIDENCE comment quoted GB-114's lane line while explaining the
+        # same-second edge, and this detector then took the quote as GB-115's own entry into
+        # the lane -- which un-pended its freshly minted gate and flagged the card.
+        if "\n" in raw or len(raw) > 160:
+            continue
+        if not re.match(r"^\W*[A-Za-z0-9_.-]+\s*:\s*lane\b", raw):
+            continue
+        if not any(("-> **" + l + "**") in raw or (u"\u2192 **" + l + "**") in raw
                    for l in REVIEW_LANES):
             continue
         if best is None or ts > best:
@@ -551,6 +561,20 @@ def self_test():
     check(not any(k == "unverified-in-review" for k, g, _ in
                   verify_lint_findings(issues_eq, lambda n: cm_rv_eq.get(n, []))),
           "a gate minted in the SAME second as the lane move is pending")
+
+    # ... and a lane-move line QUOTED inside prose is not a move.  Measured on GB-115:
+    # its EVIDENCE comment quoted GB-114's lane line, the detector took the quote as
+    # GB-115's own entry, and the freshly minted gate stopped being "pending".
+    cm_rv_quote = {47: [{"created_at": "2026-10-27T16:13:03Z",
+                         "body": "47: lane In Progress -> **In Review**"},
+                        {"created_at": "2026-10-27T17:20:00Z",
+                         "body": "EVIDENCE -- quoting an earlier move:\n\n"
+                                 "```\n47: lane In Progress -> **In Review**\n```\n\n"
+                                 "and some prose that makes this a paragraph, not a lane move."}],
+                   223: [{"created_at": "2026-10-27T16:13:09Z", "body": "started"}]}
+    check(not any(k == "unverified-in-review" for k, g, _ in
+                  verify_lint_findings(issues_eq, lambda n: cm_rv_quote.get(n, []))),
+          "a lane-move line quoted inside prose does not move the card")
 
     # ... but a gate that predates the lane move is still a violation.
     cm_rv_old = {47: [{"created_at": "2026-10-27T11:00:00Z",
