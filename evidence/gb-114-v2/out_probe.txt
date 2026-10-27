@@ -1,0 +1,24 @@
+== clause 1: prose must NOT be a verdict ==
+  None   <- the exact falsifier: 'Green light to merge at 86f8473c0ffee - the diff is small.'
+  None   <- Green eggs and ham: 'Green eggs and ham'
+  None   <- RED herring: 'RED herring'
+  None   <- Greenfield is not a verdict: 'Greenfield is not a verdict'
+  None   <- mid-line green: 'the build is green today'
+
+== clause 2: real verdict shapes must still resolve ==
+  GREEN  <- GB-113-V opening (want GREEN)
+  RED    <- my own RED opening (want RED)
+  RED    <- ## VERDICT: **RED** (GB-112-V) (want RED)
+  GREEN  <- ## VERDICT: **GREEN** (GB-113-V) (want GREEN)
+  GREEN  <- bare **GREEN** (want GREEN)
+
+== beyond the card's list (reported, not required) ==
+  None   <- bold marker then parenthetical: '**GREEN** (GB-113-V) — Merge Gate'
+  GREEN  <- bold marker, em dash inside bold: '**GREEN — GB-113-V**'
+  GREEN  <- heading, no delimiter: '## GREEN'
+  GREEN  <- marker with colon: 'GREEN: GB-113-V'
+  None   <- lowercase template: 'verdict: green'
+
+== the merge-authorising sentence, end to end ==
+  verdict_in            -> None
+  graded_shas_in        -> ['86f8473c0ffee']

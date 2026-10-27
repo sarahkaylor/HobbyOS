@@ -1,0 +1,7 @@
+$ python3 tools/board/merge_pr.py --pr {222,218,194}
+PR 222 rc=0 :: [merge_pr] PR #222: ok: graded prefix d21759c.. matches current head d21759c84acc.. — merge allowed
+[merge_pr] MERGE ALLOWED (guard only; run with --merge to perform it)
+PR 218 rc=0 :: [merge_pr] PR #218: ok: graded prefix c7f1d9f.. matches current head c7f1d9f04204.. — merge allowed
+[merge_pr] MERGE ALLOWED (guard only; run with --merge to perform it)
+PR 194 rc=1 :: [merge_pr] PR #194: REFUSE: graded 13ddb2d.. is not a prefix of the current head e8c7dc89bc01.. — refusing to merge a tree that was not graded
+[merge_pr] NOT MERGED (fail closed)

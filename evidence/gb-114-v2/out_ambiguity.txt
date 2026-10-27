@@ -1,0 +1,4 @@
+  (None, 'ambiguous:112=branch,113=title') <- branch gb112 + title GB-113 (ambiguous)
+  ('112', 'branch')                        <- branch gb112 + title GB-112 (agree)
+  ('113', 'title')                         <- PR #222's real shape (ticket/NN + title)
+  (None, None)                             <- no id anywhere

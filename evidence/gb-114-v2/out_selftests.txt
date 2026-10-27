@@ -1,0 +1,9 @@
+$ python3 tools/board/groom.py --self-test
+groom self-test: 24 checks, 0 failed -- ALL PASSED
+$ python3 tools/board/merge_pr_test.py
+MERGE_PR_TEST: PASS - fail-closed guard rule + #194 goes red
+$ python3 tools/board/check_verdicts.py --self-test
+self-test result: fails=0
+$ python3 tools/board/check_verdicts.py   # 899d2a8
+verdicts checked: 51, mismatched parents: 0
+verdicts checked: 51, mismatched parents: 0, orphaned REDs in Merge Gate: 0
