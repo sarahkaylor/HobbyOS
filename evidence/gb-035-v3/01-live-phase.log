@@ -1,0 +1,62 @@
+rev: ee98d31f40ab8645f8356cca15749e520f105709   2026-10-27T04:57:58Z
+########## A) LIVE: ROM runs, digest every frame, 780s ##########
+mode=live applied
+llvm-objcopy -O binary obj/intel/nes.elf obj/intel/nes.bin
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+=== T3 (intel): run (deadline 780s, log /home/sarah/wt/gb035v3/evidence/gb-035-v3/live.log) ===
+T3_intel: 361 console lines, 0 FAIL lines, 0 user memory fault records across 0 processes, 0 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 780s deadline hit; a hang is a defect, not a flake)
+T3_intel EXIT=1
+tier rc=1
+--- live digests ---
+[NES] boot: rom_len=161 reset_pc=0x0x0000000000008000
+[NES] frame=1 digest=0x000000009E1ED9C5
+[NES] frame=2 digest=0x000000009E1ED9C5
+[NES] frame=3 digest=0x000000009E1ED9C5
+[NES] frame=4 digest=0x00000000460CEDC5
+[NES] frame=5 digest=0x00000000460CEDC5
+[NES] frame=6 digest=0x00000000460CEDC5
+[NES] frame=7 digest=0x00000000460CEDC5
+[NES] frame=8 digest=0x00000000460CEDC5
+[NES] frame=9 digest=0x00000000460CEDC5
+[NES] frame=10 digest=0x00000000460CEDC5
+[NES] frame=11 digest=0x00000000460CEDC5
+[NES] frame=12 digest=0x00000000460CEDC5
+[NES] frame=13 digest=0x000000009E1ED9C5
+[NES] frame=14 digest=0x000000009E1ED9C5
+[NES] frame=15 digest=0x000000009E1ED9C5
+[NES] frame=16 digest=0x000000009E1ED9C5
+[NES] frame=17 digest=0x000000009E1ED9C5
+[NES] frame=18 digest=0x000000009E1ED9C5
+[NES] frame=19 digest=0x000000009E1ED9C5
+[NES] frame=20 digest=0x000000009E1ED9C5
+[NES] frame=21 digest=0x000000009E1ED9C5
+[NES] frame=22 digest=0x000000009E1ED9C5
+[NES] frame=23 digest=0x00000000460CEDC5
+[NES] frame=24 digest=0x00000000460CEDC5
+[NES] frame=25 digest=0x00000000460CEDC5
+[NES] frame=26 digest=0x00000000460CEDC5
+[NES] frame=27 digest=0x00000000460CEDC5
+[NES] frame=28 digest=0x00000000460CEDC5
+[NES] frame=29 digest=0x00000000460CEDC5
+[NES] frame=30 digest=0x00000000460CEDC5
+[NES] frame=31 digest=0x00000000460CEDC5
+[NES] frame=32 digest=0x000000009E1ED9C5
+[NES] frame=33 digest=0x000000009E1ED9C5
+[NES] frame=34 digest=0x000000009E1ED9C5
+[NES] frame=35 digest=0x000000009E1ED9C5
+[NES] frame=36 digest=0x000000009E1ED9C5
+[NES] frame=37 digest=0x000000009E1ED9C5
+[NES] frame=38 digest=0x000000009E1ED9C5
+[NES] frame=39 digest=0x000000009E1ED9C5
+[NES] frame=40 digest=0x000000009E1ED9C5
+[NES] frame=41 digest=0x000000009E1ED9C5
+frames: 41   distinct: 2
+--- run-length encoding of the digest sequence ---
+      3 0x000000009E1ED9C5
+      9 0x00000000460CEDC5
+     10 0x000000009E1ED9C5
+      9 0x00000000460CEDC5
+     10 0x000000009E1ED9C5
+tree restored: 0 modifications (0 = clean)

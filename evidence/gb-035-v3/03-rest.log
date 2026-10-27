@@ -1,0 +1,24 @@
+=== clause 7: make host_tests on ee98d31 ===
+rc=0
+Checks failed: 0
+ALL APPS SUITE TESTS PASSED
+TEST EXIT: 0
+
+=== the NES host test ===
+  PASS: background (no sprite there) stays dark at (40,10)
+
+Tests: passed=34 failed=0 -> ALL PASSED
+nes_test rc=0
+
+=== clause 5: licence/provenance, in this tree ===
+/*
+ * homebrew_rom.h — a small hand-authored NES (NROM) homebrew, as raw PRG bytes
+ * (added to a 32 KiB cart at $8000; reset vector is set to $8000 by main.c).
+ *
+ */
+#ifndef NES_HOMEBREW_ROM_H
+#define NES_HOMEBREW_ROM_H
+
+=== clause 6: ARM wall, in this tree ===
+src/kernel/process.c:1827:27: error: use of undeclared identifier 'cpu_locals'
+src/kernel/process.c:1828:32: error: use of undeclared identifier 'cpu_locals'
