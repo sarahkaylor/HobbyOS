@@ -55,6 +55,7 @@ static int failures = 0;
 static char run_out[R_N][1024];
 static char run_err[R_N][512];
 static int run_rc[R_N];
+static int run_raw[R_N]; /* the raw wait status word (before WIE decoders) */
 static int run_ok[R_N];
 
 /* tiny signed-int console printer (no libc/sysroot dependency) */
@@ -75,6 +76,22 @@ static void con_int(int v) {
   if (neg)
     b[i--] = '-';
   print_console(&b[i + 1]);
+}
+
+/* raw wait-status word printer: `raw=0xHHHHHHHH` (GB-113 — the intel status
+   word must be quoted, not just the decoded code, to pick the mechanism). */
+static void con_raw(int v) {
+  static const char dig[] = "0123456789abcdef";
+  char b[9];
+  unsigned u = (unsigned)v;
+  int i;
+  for (i = 7; i >= 0; i--) {
+    b[i] = dig[u & 0xf];
+    u >>= 4;
+  }
+  b[8] = '\0';
+  print_console("raw=0x");
+  print_console(b);
 }
 
 static void fail_head(const char *what) {
@@ -251,6 +268,7 @@ static void run_slot(int slot, const char *args, const char *stdin_data,
       return;
     }
     run_ok[slot] = 1;
+    run_raw[slot] = status;
     run_rc[slot] = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
     if (!expect_nonempty || run_out[slot][0] != '\0')
       break;
@@ -289,6 +307,8 @@ static void check_run(int slot, const char *what, const char *want_out,
     con_int(run_rc[slot]);
     print_console(" != ");
     con_int(want_rc);
+    print_console(", ");
+    con_raw(run_raw[slot]);
     print_console(")\n");
     bad = 1;
   }
@@ -336,6 +356,8 @@ static void check_run_has(int slot, const char *what, const char *sub1,
     con_int(run_rc[slot]);
     print_console(" != ");
     con_int(want_rc);
+    print_console(", ");
+    con_raw(run_raw[slot]);
     print_console(")\n");
     bad = 1;
   }
