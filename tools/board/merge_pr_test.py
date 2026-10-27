@@ -77,6 +77,18 @@ mp._forgejo = _fk
 sel = mp.graded_sha_from_board(209)
 check(sel == head, "selects the sha naming THIS head (not shas[0]) in a multi-sha GREEN (got %s)" % (sel[:8] if sel else None))
 mp.head_of_pr, mp._forgejo, mp.pr_gb_id = _o_head, _o_fj, _o_gb
+# GB-110-V3 clause 2: a MERGED PR's closed-card GREEN must still be FOUND (returned),
+# and decide() refuses naming the mismatch — never a silent None / "no GREEN".
+head_merged = "9" * 40                              # PR merged at a head that moved ON
+mp.head_of_pr = lambda pr, env=None: head_merged
+mp._forgejo = lambda api, env=None: ([{"body": "## VERDICT: GREEN\n**Tree that would merge:** " + "a" * 40 + "\n"}]
+                                     if "comments" in api else [{"number": 7, "title": "GB-110-V"}])
+mp.pr_gb_id = lambda pr, env=None: "110"
+found = mp.graded_sha_from_board(209)
+ok, r = mp.decide(head_merged, found)
+check(found is not None, "closed card's GREEN is FOUND for a merged PR (got %s)" % (found[:7] if found else None))
+check(not ok and found and found != head_merged, "decide() then REFUSES naming the graded/mismatch (%s)" % r[:50])
+mp.head_of_pr, mp._forgejo, mp.pr_gb_id = _o_head, _o_fj, _o_gb
 
 if fails:
     print("MERGE_PR_TEST: FAIL (%d)" % fails); sys.exit(1)
