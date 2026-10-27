@@ -172,6 +172,28 @@ def dependency_cycles(open_issues):
     return seen
 
 
+def verdict_in(body):
+    """GREEN/RED status from a verdict comment body, accepting BOTH phrasings.
+
+    GB-114: the tools required the literal template `VERDICT: GREEN`.  Real verdicts
+    also open with `**GREEN — GB-113-V, verified on this VM …**`, which every reader
+    recognises and no tool could see: the merge guard reported "GREEN names no graded
+    sha" for PR #222 whose gate had GREEN'd 20 minutes earlier, and the lint would have
+    called the same card unverified.  A status marker at the start of a line counts,
+    and so does the template form.  Returns "GREEN", "RED" or None.
+    """
+    m = VERDICT_RE.search(body or "")
+    if not m:
+        return None
+    return (m.group(1) or m.group(2)).upper()
+
+
+VERDICT_RE = re.compile(
+    r"(?:VERDICT[^\n]{0,50}?\b(GREEN|RED)\b)"        # VERDICT: **GREEN** / VERDICT GREEN
+    r"|(?:^\s*(?:#+\s*)?\**\s*(GREEN|RED)\b)",       # **GREEN —** / ## GREEN / RED:
+    re.I | re.M)
+
+
 def newest_verdict(comments):
     """Newest GREEN/RED verdict body marker from a comment list.
 
@@ -188,9 +210,9 @@ def newest_verdict(comments):
         cs.sort(key=lambda c: c["created_at"])
     for c in reversed(cs):
         body = (c.get("body") or "").replace("\r", "")
-        m = re.search(r"VERDICT[^\n]{0,40}?\b(GREEN|RED)\b", body, re.I)
-        if m:
-            return m.group(1).upper()
+        v = verdict_in(body)
+        if v:
+            return v
     return None
 
 def lane_entry_time(it, comment_fn):
@@ -435,6 +457,18 @@ def self_test():
           "compact shorthand GB-003/004 expands to two ids")
     check(deps_of("| Depends on | turtles |") == set(),
           "a non-GB dependency token is ignored, not guessed")
+
+    # GB-114: both verdict phrasings resolve.  Measured on GB-113-V #227 (2026-10-27):
+    # the body opens `**GREEN — GB-113-V, verified on this VM …**`, which the template-only
+    # regex could not see -- the merge guard then reported "GREEN names no graded sha" for a
+    # correctly-graded PR, and this same helper is what the lint uses.
+    check(verdict_in("**GREEN — GB-113-V, verified on this VM (DEEP verifier `wgfx-verify`), "
+                     "code PR #222 @ `d21759c`.**") == "GREEN",
+          "a `**GREEN — ...**` verdict resolves as GREEN (GB-113-V's real shape)")
+    check(verdict_in("## VERDICT: **RED** (GB-112-V) -> GB-112 goes to In Progress") == "RED",
+          "the template `VERDICT: **RED**` still resolves as RED")
+    check(verdict_in("Greenfield is not a verdict") is None,
+          "a non-verdict line beginning 'Green...' is not read as GREEN")
 
     # verify-lint: a green-gated review card is not flagged.
     issues_good = [

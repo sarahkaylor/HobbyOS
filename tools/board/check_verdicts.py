@@ -56,15 +56,24 @@ def base_id(title):
 
 
 def verdict_of(number):
-    """Newest GREEN/RED verdict posted on a verification ticket."""
+    """Newest GREEN/RED verdict posted on a verification ticket.
+
+    GB-114: accepts `**GREEN — …**` as well as `VERDICT: GREEN` (shared with groom.py so
+    the lint and this check cannot disagree about what a verdict looks like).
+    """
     cs = api(f"/issues/{number}/comments")
     for c in reversed(cs):
         body = (c.get("body") or "").replace("\r", "")
-        m = re.search(r"VERDICT[^\n]{0,40}?\b(GREEN|RED)\b", body, re.I)
-        if m:
+        try:
+            from groom import verdict_in
+            v = verdict_in(body)
+        except Exception:
+            m = re.search(r"VERDICT[^\n]{0,40}?\b(GREEN|RED)\b", body, re.I)
+            v = m.group(1).upper() if m else None
+        if v:
             line = next((ln.strip() for ln in body.split("\n")
-                         if re.search(r"VERDICT", ln, re.I)), "")
-            return m.group(1).upper(), line[:160]
+                         if re.search(r"VERDICT|\bGREEN\b|\bRED\b", ln, re.I)), "")
+            return v, line[:160]
     return None, None
 
 

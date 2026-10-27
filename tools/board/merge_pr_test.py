@@ -101,6 +101,23 @@ chosen = mp.graded_sha_from_board(204)
 check(chosen == ord_head, "the HIGHEST-ordinal gate's GREEN (GB-106-V2) wins over the superseded V (got %s)" % (chosen[:8] if chosen else None))
 mp.head_of_pr, mp._forgejo, mp.pr_gb_id = _o_head, _o_fj, _o_gb
 
+# GB-114: the guard resolves a PR to its ticket from the branch FIRST, then the
+# title/body, because the fleet opens PRs as `ticket/NN-slug` with the id only in the
+# title ("GB-113 ...").  Measured 2026-10-27: PR #222 (branch `ticket/113-waitstatus`,
+# title "GB-113 ...") was refused with "GREEN names no graded sha" -- a parse failure
+# that had not happened; the ticket simply could not be named.
+from merge_pr import ticket_from
+check(ticket_from("ticket/113-waitstatus", "", "") == (None, None),
+      "a branch with no gbNNN and no title/body id -> unresolved (None)")
+check(ticket_from("ticket/113-waitstatus", "GB-113 the wait word", "") == ("113", "title"),
+      "a `ticket/NN-slug` branch resolves from the PR title (#222's real shape)")
+check(ticket_from("games/gb112", "GB-112 board: lint ...", "") == ("112", "branch"),
+      "branch and title agreeing -> resolved from the branch")
+check(ticket_from("games/gb112", "GB-113 unrelated", "")[0] is None,
+      "branch and title naming DIFFERENT tickets -> ambiguous, refuse")
+check(ticket_from("", "fix: no ticket id here", "no id in body either") == (None, None),
+      "no id anywhere -> unresolved, refuse")
+
 if fails:
     print("MERGE_PR_TEST: FAIL (%d)" % fails); sys.exit(1)
 print("MERGE_PR_TEST: PASS - fail-closed guard rule + #194 goes red")

@@ -34,7 +34,11 @@ def graded_shas_in(text):
     clauses 3-5: the 40-hex-only parse missed real 7-char-prefix verdicts)."""
     out = []
     for ln in text.splitlines():
-        if re.search(r"(VERDICT|graded|grading|tested|head|merge|tree)", ln, re.I):
+        # GB-114: the vocabulary real verdicts use.  Measured: `**GREEN — GB-113-V, verified
+        # on this VM (DEEP verifier …), code PR #222 @ d21759c**` names the tree with no
+        # VERDICT/head/graded keyword, so the guard saw a GREEN "with no sha" and refused a
+        # correctly-graded PR.  Selection by head-prefix keeps the wider net safe.
+        if re.search(r"(VERDICT|graded|grading|tested|head|merge|tree|verif|sha|commit|@)", ln, re.I):
             out += re.findall(r"\b[0-9a-f]{7,40}\b", ln)
     return out
 
@@ -55,10 +59,36 @@ def _forgejo(api_path, env=None):
         return None
 
 
+def ticket_from(ref, title, body):
+    """Board ticket id for a PR, from the head branch FIRST, then title, then body.
+
+    GB-114: the branch convention is `games/gbNNN`, but workers open PRs as
+    `ticket/NN-slug` with the id only in the title/body ("GB-113 ...").  Reading the
+    branch alone made every such PR unmergeable — the guard refused #222 with
+    "GREEN names no graded sha", which describes a parse failure that had not
+    happened.  Sources are tried in order of authority; if two of them name
+    DIFFERENT tickets the PR is ambiguous and the caller must refuse.  Returns
+    (gb, source) or (None, None).
+    """
+    seen = []
+    for src, text in (("branch", ref or ""), ("title", title or ""), ("body", body or "")):
+        m = re.search(r"gb-?(\d{3})", text, re.I)
+        if m and m.group(1) not in [s[0] for s in seen]:
+            seen.append((m.group(1), src))
+    if not seen:
+        return None, None
+    if len(seen) > 1:
+        return None, "ambiguous:" + ",".join("%s=%s" % (g, s) for g, s in seen)
+    return seen[0][0], seen[0][1]
+
+
 def pr_gb_id(pr, env=None):
-    """Map a GitHub PR to its board ticket id (GB-nnn) via the pull request head
-    branch name (games/gbNNN).  None if not resolvable -> the guard cannot know
-    which GREEN to read, so it fails closed upstream."""
+    """Map a GitHub PR to its board ticket id (GB-nnn).  None if not resolvable ->
+    the guard cannot know which GREEN to read, so it fails closed upstream.
+
+    GB-114: branch name first (`games/gbNNN`), then the PR title/body, because the
+    fleet's actual branch convention is `ticket/NN-slug`.  Ambiguity refuses.
+    """
     import json as _j
     import urllib.request
     env = env or os.environ
@@ -70,9 +100,9 @@ def pr_gb_id(pr, env=None):
         headers={"Authorization": "Bearer " + tok, "Accept": "application/vnd.github+json"})
     try:
         d = _j.load(urllib.request.urlopen(req))
-        ref = (d.get("head") or {}).get("ref", "")
-        m = re.search(r"gb-?(\d+)", ref, re.I)
-        return m.group(1) if m else None
+        gb, _src = ticket_from((d.get("head") or {}).get("ref", ""),
+                               d.get("title", ""), d.get("body", ""))
+        return gb
     except Exception:
         return None
 
@@ -83,8 +113,10 @@ def pr_gb_id(pr, env=None):
 # the shape real card titles have.
 try:
     from groom import newest_gate as _newest_gate
+    from groom import verdict_in as _verdict_in
 except Exception:
     _newest_gate = None
+    _verdict_in = None
 
 
 def graded_sha_from_board(pr, env=None):
@@ -130,7 +162,10 @@ def graded_sha_from_board(pr, env=None):
         cs = _forgejo(f"/repos/{base}/issues/{num}/comments?limit=100", env) or []
         for c in reversed(cs):
             body = (c.get("body") or "").replace("\r", "")
-            if re.search(r"VERDICT[^\n]{0,50}\bGREEN\b", body, re.I):
+            # GB-114: recognise a GREEN phrased `**GREEN — …**` as well as `VERDICT: GREEN`.
+            is_green = ((_verdict_in(body) == "GREEN") if _verdict_in
+                        else bool(re.search(r"VERDICT[^\n]{0,50}\bGREEN\b", body, re.I)))
+            if is_green:
                 shas = graded_shas_in(body)
                 if not shas:
                     return None            # a GREEN present but names no sha -> fail closed
@@ -371,6 +406,15 @@ def main():
     if a.pr and a.merge:
         # Clause 5: the production merge path / call site.  Head is API-only.
         head = head_of_pr(a.pr)
+        # GB-114: say WHICH failure this is.  "GREEN names no graded sha" was printed
+        # for a PR the guard could not even tie to a ticket (branch `ticket/113-...`,
+        # no gbNNN anywhere), which sent the reader hunting the verdict text.
+        if pr_gb_id(a.pr) is None:
+            print(f"[merge_pr] PR #{a.pr}: REFUSE: cannot resolve this PR to a board ticket "
+                  f"(no gbNNN in the head branch, title or body) — the guard cannot know "
+                  f"which GREEN governs it")
+            print("[merge_pr] REFUSED TO MERGE (fail closed)")
+            sys.exit(1)
         graded = a.graded or graded_sha_of(a.pr)
         allow, reason = decide(head, graded)
         print(f"[merge_pr] PR #{a.pr}: {reason}")
