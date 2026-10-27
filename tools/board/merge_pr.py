@@ -77,6 +77,16 @@ def pr_gb_id(pr, env=None):
         return None
 
 
+# Reuse groom.py's authoritative "highest ordinal governs" gate selection (GB-110-V4
+# clause 4): a parent accumulates gates; the highest ORDINAL wins.  groom newest_gate()
+# matches GATE_RE on BARE-id keys (title.split()[0], e.g. "GB-106-V2"), which is exactly
+# the shape real card titles have.
+try:
+    from groom import newest_gate as _newest_gate
+except Exception:
+    _newest_gate = None
+
+
 def graded_sha_from_board(pr, env=None):
     """Newest GREEN verdict's graded sha for PR `pr`, read over the Forgejo API using
     graded_shas_in().  Picks the sha that names THIS PR's current head (GB-110-V clause 4:
@@ -103,21 +113,19 @@ def graded_sha_from_board(pr, env=None):
         page += 1
     if not issues:
         return None                       # board unreachable (or empty) -> fail closed
-    gb_v_re = re.compile(r"^GB-(\d{3})-V(\d*)$")
-    gate_orders = []
+    by_title = {}
     owner = None
     for it in issues:
-        t = it.get("title") or ""
-        m = gb_v_re.match(t)
-        if m and m.group(1) == gb:
-            gate_orders.append((int(m.group(2) or 1), it["number"]))  # (ordinal, num)
-        elif t.startswith(f"GB-{gb} "):
+        t = (it.get("title") or "").strip()
+        k = t.split()[0] if t else ""
+        if re.match(r"^GB-\d{3}-V\d*$", k):
+            by_title[k] = it                    # bare-id key, e.g. "GB-106-V2"
+        elif k == f"GB-{gb}":
             owner = it["number"]
-    # GB-110-V3 clause 2: a parent accumulates gates; the HIGHEST ORDINAL governs (same
-    # lesson groom.py's newest_gate() encodes).  Never take the first match — a superseded
-    # GB-106-V must not beat the current GB-106-V2.
-    gate_orders.sort(reverse=True)
-    order = [num for (_ord, num) in gate_orders] + ([owner] if owner else [])
+    # newest_gate(gid, by_title): highest ORDINAL gate for gid ("GB-106"), applied to
+    # bare-id keys (where groom's GATE_RE works on real titles).  Never the first match.
+    gate = _newest_gate(f"GB-{gb}", by_title) if _newest_gate else None
+    order = ([gate["number"]] if gate else []) + ([owner] if owner else [])
     for num in order:
         cs = _forgejo(f"/repos/{base}/issues/{num}/comments?limit=100", env) or []
         for c in reversed(cs):

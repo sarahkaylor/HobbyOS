@@ -96,7 +96,7 @@ stale = "e" * 40
 mp.head_of_pr = lambda pr, env=None: ord_head
 mp.pr_gb_id = lambda pr, env=None: "106"
 mp._forgejo = lambda api, env=None: ([{"body": "## VERDICT: GREEN\n**Tree that would merge:** " + (ord_head if "/203/comments" in api else stale) + "\n"}]
-                                     if "comments" in api else [{"number": 201, "title": "GB-106: owner "}, {"number": 202, "title": "GB-106-V"}, {"number": 203, "title": "GB-106-V2"}])
+                                     if "comments" in api else [{"number": 201, "title": "GB-106: owner card "}, {"number": 202, "title": "GB-106-V Re-gate the guard "}, {"number": 203, "title": "GB-106-V2 Re-gate: #194 must go red "}])
 chosen = mp.graded_sha_from_board(204)
 check(chosen == ord_head, "the HIGHEST-ordinal gate's GREEN (GB-106-V2) wins over the superseded V (got %s)" % (chosen[:8] if chosen else None))
 mp.head_of_pr, mp._forgejo, mp.pr_gb_id = _o_head, _o_fj, _o_gb
