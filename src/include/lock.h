@@ -75,6 +75,11 @@ uint64_t spinlock_acquire_irqsave(spinlock_t *lock);
  */
 void spinlock_release_irqrestore(spinlock_t *lock, uint64_t flags);
 
+/* GB-060 gate: print the end-of-run lock-strand counter summary (STALLBREAK /
+ * STOLEN / LOCKFOREVER / UNOWNED-FREED). Called from the CPU-0 halt path so the
+ * tier can read the real marker counts instead of hand-grepping the console. */
+void lock_print_counters(void);
+
 #include "arch/cpu.h"
 
 /* Canonical lock ranks (SEC-OBS-B): acquiring a lock while holding one of

@@ -5,6 +5,15 @@ extern void uart_puts_raw(const char *s);
 extern void uart_print_hex_raw(uint64_t v);
 extern uint32_t get_cpuid(void);
 
+/* GB-060 gate counters (mirror of arch/x64/locks.c): the tier must be able to
+   count lock-strand markers from a real end-of-run [LOCKCNT] summary instead of
+   hand-grepping the console.  Plain volatile uint64_t; one CPU in a marker at a
+   time, summary printed at quiesce. */
+volatile uint64_t lock_cnt_lockforever = 0;   /* [LOCKFOREVER]  spin shout    */
+volatile uint64_t lock_cnt_unownedfreed = 0;  /* [UNOWNED-FREED] locked=1,o=0 */
+volatile uint64_t lock_cnt_stolen = 0;        /* [STOLEN]       halted owner  */
+volatile uint64_t lock_cnt_stallbreak = 0;    /* [STALLBREAK]   wedged owner  */
+
 /**
  * Initializes a spinlock structure to the unlocked state.
  */
@@ -108,6 +117,7 @@ __attribute__((noinline)) static void spin_slow(spinlock_t *lock, uint64_t ra) {
           uart_puts_raw(" from halted cpu=");
           uart_print_hex_raw(own - 1);
           uart_puts_raw("\n");
+          lock_cnt_stolen++;
           lock->owner = 0;
           __asm__ volatile("stlr wzr, [%0]\n" ::"r"(&lock->locked) : "memory");
         } else {
@@ -124,6 +134,7 @@ __attribute__((noinline)) static void spin_slow(spinlock_t *lock, uint64_t ra) {
             uart_puts_raw(" stale_ms=");
             uart_print_hex_raw(now - cpu_heartbeat_ms[own - 1]);
             uart_puts_raw("\n");
+            lock_cnt_stallbreak++;
             lock->owner = 0;
             __asm__ volatile("stlr wzr, [%0]\n" ::"r"(&lock->locked) : "memory");
           }
@@ -263,4 +274,18 @@ void spinlock_release_irqrestore(spinlock_t *lock, uint64_t flags) {
       :
       : "r"(flags)
       : "memory");
+}
+
+/* GB-060 gate: print the end-of-run lock-strand counter summary (mirror of the
+   x64 version; same [LOCKCNT] line both arches). */
+void lock_print_counters(void) {
+  uart_puts_raw("\n[LOCKCNT] STALLBREAK=");
+  uart_print_hex_raw(lock_cnt_stallbreak);
+  uart_puts_raw(" STOLEN=");
+  uart_print_hex_raw(lock_cnt_stolen);
+  uart_puts_raw(" LOCKFOREVER=");
+  uart_print_hex_raw(lock_cnt_lockforever);
+  uart_puts_raw(" UNOWNED-FREED=");
+  uart_print_hex_raw(lock_cnt_unownedfreed);
+  uart_puts_raw("\n");
 }
