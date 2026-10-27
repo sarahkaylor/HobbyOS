@@ -259,7 +259,12 @@ def gate_is_pending(it, gate, comment_fn):
     """
     minted = gate.get("created_at")
     entry = lane_entry_time(it, comment_fn)
-    return bool(minted and entry and minted > entry)
+    # `>=`, not `>`: minting a gate in the SAME second as the lane move is the normal
+    # case when a coordinator moves the card and mints its gate in one pass (both are one
+    # API call apart), and such a gate has provably not run yet.  Measured on GB-114
+    # (2026-10-27): lane entry 16:13:03Z, `GB-114-V2` created 16:13:03Z -- the strict `>`
+    # read it as "not pending" and flagged a correctly-ordered card as unverified.
+    return bool(minted and entry and minted >= entry)
 
 
 def verify_lint_findings(issues, comment_fn):
@@ -531,6 +536,21 @@ def self_test():
     check(not any(k == "unverified-in-review" for k, g, _ in
                   verify_lint_findings(issues_rv, lambda n: cm_rv.get(n, []))),
           "a gate minted after the lane move is pending, not unverified")
+
+    # ... and the SAME SECOND counts as pending.  Measured in production on GB-114
+    # (2026-10-27): lane entry 16:13:03Z, gate created 16:13:03Z; the strict `>` flagged it.
+    cm_rv_eq = {47: [{"created_at": "2026-10-27T16:13:03Z",
+                      "body": "47: lane In Progress -> **In Review**"}],
+                223: [{"created_at": "2026-10-27T16:13:09Z", "body": "started"}]}
+    issues_eq = [
+        {"title": "GB-047 impl", "state": "open", "created_at": "2026-10-27T09:00:00Z",
+         "labels": [{"name": "In Review"}], "number": 47},
+        {"title": "GB-047-V2 gate", "state": "open", "created_at": "2026-10-27T16:13:03Z",
+         "labels": [{"name": "Ready"}], "number": 223},
+    ]
+    check(not any(k == "unverified-in-review" for k, g, _ in
+                  verify_lint_findings(issues_eq, lambda n: cm_rv_eq.get(n, []))),
+          "a gate minted in the SAME second as the lane move is pending")
 
     # ... but a gate that predates the lane move is still a violation.
     cm_rv_old = {47: [{"created_at": "2026-10-27T11:00:00Z",
