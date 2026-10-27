@@ -1,0 +1,21 @@
+### G6: candidate order + new tests 2026-10-27T05:10:25Z
+GB-106 candidate order: [(201, 'GB-106-V Verify merge_pr.py fail-close'), (202, 'GB-106-V Verify the fail-closed merge '), (203, 'GB-106-V2 Re-gate the merge guard: #19'), (200, 'GB-106 A gate verdict names a tree, a ')]
+GB-111 candidate order: [(215, 'GB-111-V Verify t4 probe guards socket'), (214, 'GB-111 The T4 probe uses uninitialised')]
+
+note: issues arrive newest-first; every -V match is inserted at index 0,
+so with >1 verify card the OLDEST verify card ends up first in the walk.
+
+--- new test lines in 9435ad2:
++++ b/tools/board/merge_pr_test.py
++# GB-110-V3 clause 2: a MERGED PR's closed-card GREEN must still be FOUND (returned),
++# and decide() refuses naming the mismatch — never a silent None / "no GREEN".
++head_merged = "9" * 40                              # PR merged at a head that moved ON
++mp.head_of_pr = lambda pr, env=None: head_merged
++mp._forgejo = lambda api, env=None: ([{"body": "## VERDICT: GREEN\n**Tree that would merge:** " + "a" * 40 + "\n"}]
++                                     if "comments" in api else [{"number": 7, "title": "GB-110-V"}])
++mp.pr_gb_id = lambda pr, env=None: "110"
++found = mp.graded_sha_from_board(209)
++ok, r = mp.decide(head_merged, found)
++check(found is not None, "closed card's GREEN is FOUND for a merged PR (got %s)" % (found[:7] if found else None))
++check(not ok and found and found != head_merged, "decide() then REFUSES naming the graded/mismatch (%s)" % r[:50])
++mp.head_of_pr, mp._forgejo, mp.pr_gb_id = _o_head, _o_fj, _o_gb

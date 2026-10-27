@@ -1,0 +1,9 @@
+### G1: THE ONE COMMAND @ 9435ad2 2026-10-27T05:09:44Z
+[merge_pr] PR #213: ok: graded prefix d245ead.. matches current head d245eadf140b.. — merge allowed
+[merge_pr] MERGE ALLOWED (guard only; run with --merge to perform it)
+rc=0
+
+### G2: the re-minted-card PR (204: #201/#202/#203, closed)
+[merge_pr] PR #204: REFUSE: graded 68982dc.. is not a prefix of the current head 3da727ce691c.. — refusing to merge a tree that was not graded
+[merge_pr] NOT MERGED (fail closed)
+rc=1
