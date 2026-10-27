@@ -1,0 +1,15 @@
+[harness] booted; opening the menu (F1) and launching NES.BIN
+[harness] serial: [LAUNCH] NES.BIN=True  [ARRIVED] NES.BIN=True
+[harness] frame 00 digest 5fba8aed6e74
+[harness] frame 01 digest 5fba8aed6e74
+[harness] frame 02 digest 5fba8aed6e74
+[harness] frame 03 digest 5fba8aed6e74
+[harness] frame 04 digest 5fba8aed6e74
+[harness] frame 05 digest 5fba8aed6e74
+[harness] frame 06 digest 5fba8aed6e74
+[harness] frame 07 digest 5fba8aed6e74
+[harness] frame 08 digest 5fba8aed6e74
+[harness] frame 09 digest 5fba8aed6e74
+
+[harness] frames=10 distinct=1 -> ['5fba8aed6e74']
+FRAMES_EXIT=1
