@@ -1,0 +1,34 @@
+{
+  "bin": "XNIBBLER.BIN",
+  "arch": "arm",
+  "slot": 20,
+  "samples": [
+    {
+      "i": 0,
+      "at_s": 1.5,
+      "sha256": "b35a14b92c8718dfeff5cf485c6a6e1d9ea16ac5dd100f59096b926731d6dca7",
+      "distinct_colors": 21,
+      "bytes": 6220817
+    },
+    {
+      "i": 1,
+      "at_s": 3.0,
+      "sha256": "c5bfafb5928bbd9f44d62cd4d22e5a80c6ed5c89e52feacd5ca556d2c8c093a9",
+      "distinct_colors": 21,
+      "bytes": 6220817
+    },
+    {
+      "i": 2,
+      "at_s": 6.0,
+      "sha256": "a2847503376b30361c3a9366c30614d2783dc6ec2be3ad31a01daf608b13e538",
+      "distinct_colors": 21,
+      "bytes": 6220817
+    }
+  ],
+  "distinct_digests": 3,
+  "n_samples": 3,
+  "launch_line": true,
+  "arrived_line": true,
+  "captured_at": "2026-10-27T08:29:12.156446+00:00",
+  "commit": "b4e4524f26096dacea398da1d1e810a6b663e0cd"
+}

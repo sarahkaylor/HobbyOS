@@ -1,0 +1,8 @@
+[probe] boot arm: make run ARCH=arm QEMU_ARGS=-display none -qmp unix:/tmp/gb059v-qmp-xnibbler,server,nowait
+[probe] resolve_launch_slot(XNIBBLER.BIN) -> 20 warn=''
+[probe] frame0: sha256=b35a14b92c8718df colors=21
+[probe] frame1: sha256=c5bfafb5928bbd9f colors=21
+[probe] frame2: sha256=a2847503376b3036 colors=21
+[probe] RESULT bin=XNIBBLER.BIN slot=20 distinct_frame_digests=3/3 launch_line=True arrived_line=True
+[probe] evidence: evidence/gb-059-v/liveness-xnibbler
+RC=0

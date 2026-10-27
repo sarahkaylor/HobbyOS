@@ -1,0 +1,8 @@
+[rig] booting intel QEMU, capturing to evidence/SDLAPP/20261027T083601Z
+[rig] WARNING: SDLAPP.ELF not in start-menu dump
+[rig] FATAL: SDLAPP.ELF not in start-menu dump
+
+real	0m16.604s
+user	0m0.059s
+sys	0m0.041s
+RC=1

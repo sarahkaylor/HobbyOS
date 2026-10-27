@@ -1,0 +1,8 @@
+[probe] boot arm: make run ARCH=arm QEMU_ARGS=-display none -qmp unix:/tmp/gb059v-qmp-static-control,server,nowait
+[probe] resolve_launch_slot(XNIBBLER.BIN) -> 20 warn=''
+[probe] frame0: sha256=724def397493d557 colors=105
+[probe] frame1: sha256=6e0b02d556e2726f colors=105
+[probe] frame2: sha256=b864cad3ff20d53b colors=105
+[probe] CONTROL (no launch) bin=XNIBBLER.BIN distinct_frame_digests=3/3 -> UNEXPECTED: screen changed without a launch
+[probe] evidence: evidence/gb-059-v/liveness-static-control
+RC=4

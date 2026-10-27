@@ -1,0 +1,10 @@
+STAGED=1
+[rig] booting intel QEMU, capturing to evidence/SDLAPP/20261027T083705Z
+[rig] WARNING: SDLAPP.ELF not in start-menu dump
+[rig] FATAL: SDLAPP.ELF not in start-menu dump
+
+real	0m11.609s
+user	0m0.054s
+sys	0m0.038s
+RC=1
+mdir: File "::/GAMES" not found
