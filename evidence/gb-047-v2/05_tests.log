@@ -1,0 +1,9 @@
+=== clause 3: the landed tests
+  PASS: resolve_marker finds rig
+  PASS: resolve_marker globs replay scripts
+
+Tests: ALL PASSED
+evidence_pack_test exit=0
+
+python3: can't open file '/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-d3f64ee8/tools/t5/evidence_rig_test.py': [Errno 2] No such file or directory
+evidence_rig_test exit=0

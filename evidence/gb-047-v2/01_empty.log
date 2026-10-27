@@ -1,0 +1,5 @@
+=== clause 1: empty tree must FAIL CLOSED (PR #215 ed53eca)
+
+[pack] wrote /tmp/PACK-EMPTY.md + S0-S1-EVIDENCE-MANIFEST.json (0 artifacts)
+[pack] FAIL: zero artifacts found under --root /tmp/emptytree — an empty tree is not an acceptance evidence pack (GB-047-V criterion 2: this must not exit 0)
+exit=1

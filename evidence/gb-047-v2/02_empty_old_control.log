@@ -1,0 +1,4 @@
+=== control: the SAME command on the OLD (origin/main) version — the RED
+
+[pack] wrote /tmp/PACK-EMPTY-OLD.md + S0-S1-EVIDENCE-MANIFEST.json (1 artifacts)
+exit=0  (0 = the old bug: an empty tree passed)

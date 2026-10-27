@@ -1,0 +1,25 @@
+=== fresh empty dir: /tmp/gb047v2_fresh_348503
+--- run 1 (new code)
+[pack] wrote /tmp/gb047v2_p1.md + S0-S1-EVIDENCE-MANIFEST.json (0 artifacts)
+[pack] FAIL: zero artifacts found under --root /tmp/gb047v2_fresh_348503 — an empty tree is not an acceptance evidence pack (GB-047-V criterion 2: this must not exit 0)
+run1 exit=1  (want 1)
+--- what the run left in the tree:
+    total 4
+    drwxr-xr-x  2 sarah sarah   60 Oct 27 10:44 .
+    drwxrwxrwt 25 root  root  2280 Oct 27 10:44 ..
+    -rw-r--r--  1 sarah sarah   60 Oct 27 10:44 S0-S1-EVIDENCE-MANIFEST.json
+--- run 2, same tree, same code
+
+[pack] wrote /tmp/gb047v2_p2.md + S0-S1-EVIDENCE-MANIFEST.json (1 artifacts)
+run2 exit=0  (want 1 — an empty tree is still an empty tree)
+
+=== and a third time, to be sure it is not a one-off
+# S0/S1 acceptance evidence pack (GB-047)
+- generated: 2026-10-27T10:44:54Z
+run3 exit=0
+
+=== is the manifest itself one of the scan's markers?
+11:  python3 tools/t5/evidence_pack.py --root <repo> --out S0-S1-EVIDENCE-PACK.md
+61:    ap.add_argument("--out", default="S0-S1-EVIDENCE-PACK.md")
+98:    with open(os.path.join(root, "S0-S1-EVIDENCE-MANIFEST.json"), "w") as f:
+104:    print(f"[pack] wrote {args.out} + S0-S1-EVIDENCE-MANIFEST.json "
