@@ -74,6 +74,21 @@ static void prow(const char *name, long rc, long err, const unsigned char *out, 
   (void)write(1, buf, (size_t)n);
 }
 
+/* GB-111: a deterministic SKIP row for a whole block we could not run because the
+ * primitives (socketpair/pipe2) failed — WITHOUT touching the uninitialised fds.
+ * The reason is explicit so the row is never a silent omission.  Same bytes on
+ * both legs when both fail (byte-identical), and only on the failing leg when one
+ * of them succeeds (that asymmetry is the real differential, not a hang/UB). */
+static void prow_skip(const char *name, const char *why) {
+  char buf[80]; int n = 0; const char *p = "row=";
+  while (*p) buf[n++] = *p++;
+  p = name; while (*p) buf[n++] = *p++;
+  p = " rc=-1 errno=9 SKIP reason="; while (*p) buf[n++] = *p++;
+  p = why; while (*p) buf[n++] = *p++;
+  buf[n++] = '\n';
+  (void)write(1, buf, (size_t)n);
+}
+
 int main(int argc, char **argv) {
   (void)argc; (void)argv;
   pstr("t4-probe\n");
@@ -127,29 +142,41 @@ int main(int argc, char **argv) {
     int pfd[2];
     long prc = pipe(pfd);
     prow("pipe2", prc, prc < 0 ? 9 : 0, NULL, 0);
-    if (write(pfd[1], "x", 1) != 1) prow("pipe_write", -1, 9, NULL, 0);
+    if (prc == 0) {
+      if (write(pfd[1], "x", 1) != 1) prow("pipe_write", -1, 9, NULL, 0);
 
-    struct pollfd pf[1];
-    pf[0].fd = pfd[0]; pf[0].events = POLLIN; pf[0].revents = 0;
-    long pr = poll(pf, 1, 0);
-    prow("poll_ready", pr, pr < 0 ? 9 : 0, NULL, 0);
-    long pre = pf[0].revents;
-    prow("poll_ready_revents", pre, pre < 0 ? 9 : 0, NULL, 0);
+      struct pollfd pf[1];
+      pf[0].fd = pfd[0]; pf[0].events = POLLIN; pf[0].revents = 0;
+      long pr = poll(pf, 1, 0);
+      prow("poll_ready", pr, pr < 0 ? 9 : 0, NULL, 0);
+      long pre = pf[0].revents;
+      prow("poll_ready_revents", pre, pre < 0 ? 9 : 0, NULL, 0);
 
-    fd_set rf; FD_ZERO(&rf); FD_SET(pfd[0], &rf);
-    struct timeval tv; tv.tv_sec = 0; tv.tv_usec = 0;
-    long sr = select(pfd[0] + 1, &rf, NULL, NULL, &tv);
-    prow("select_ready", sr, sr < 0 ? 9 : 0, NULL, 0);
-    prow("select_ready_fdset", FD_ISSET(pfd[0], &rf) ? 1 : 0, 0, NULL, 0);
+      fd_set rf; FD_ZERO(&rf); FD_SET(pfd[0], &rf);
+      struct timeval tv; tv.tv_sec = 0; tv.tv_usec = 0;
+      long sr = select(pfd[0] + 1, &rf, NULL, NULL, &tv);
+      prow("select_ready", sr, sr < 0 ? 9 : 0, NULL, 0);
+      prow("select_ready_fdset", FD_ISSET(pfd[0], &rf) ? 1 : 0, 0, NULL, 0);
 
-    sigset_t empt; sigemptyset(&empt);
-    fd_set rf2; FD_ZERO(&rf2); FD_SET(pfd[0], &rf2);
-    struct timespec ts; ts.tv_sec = 0; ts.tv_nsec = 0;
-    long ps6 = pselect(pfd[0] + 1, &rf2, NULL, NULL, &ts, &empt);
-    prow("pselect6_ready", ps6, ps6 < 0 ? 9 : 0, NULL, 0);
-    prow("pselect6_ready_fdset", FD_ISSET(pfd[0], &rf2) ? 1 : 0, 0, NULL, 0);
+      sigset_t empt; sigemptyset(&empt);
+      fd_set rf2; FD_ZERO(&rf2); FD_SET(pfd[0], &rf2);
+      struct timespec ts; ts.tv_sec = 0; ts.tv_nsec = 0;
+      long ps6 = pselect(pfd[0] + 1, &rf2, NULL, NULL, &ts, &empt);
+      prow("pselect6_ready", ps6, ps6 < 0 ? 9 : 0, NULL, 0);
+      prow("pselect6_ready_fdset", FD_ISSET(pfd[0], &rf2) ? 1 : 0, 0, NULL, 0);
 
-    close(pfd[0]); close(pfd[1]);
+      close(pfd[0]); close(pfd[1]);
+    } else {
+      /* GB-111: report the readiness block as SKIP with a reason instead of
+       * running write/poll/select/pselect on the UNINITIALISED pfd[] fds. */
+      prow_skip("pipe_write", "no-pipe");
+      prow_skip("poll_ready", "no-pipe");
+      prow_skip("poll_ready_revents", "no-pipe");
+      prow_skip("select_ready", "no-pipe");
+      prow_skip("select_ready_fdset", "no-pipe");
+      prow_skip("pselect6_ready", "no-pipe");
+      prow_skip("pselect6_ready_fdset", "no-pipe");
+    }
 
     struct pollfd pf2[1];
     pf2[0].fd = 9999999; pf2[0].events = POLLIN; pf2[0].revents = 0;
@@ -168,28 +195,40 @@ int main(int argc, char **argv) {
     int sv[2];
     long spc = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
     prow("sockpair", spc, spc < 0 ? 9 : 0, NULL, 0);
-    if (write(sv[1], "s", 1) != 1) prow("sock_write", -1, 9, NULL, 0);
+    if (spc == 0) {
+      if (write(sv[1], "s", 1) != 1) prow("sock_write", -1, 9, NULL, 0);
 
-    struct pollfd spf[1];
-    spf[0].fd = sv[0]; spf[0].events = POLLIN; spf[0].revents = 0;
-    long spr = poll(spf, 1, 0);
-    prow("sockpoll_ready", spr, spr < 0 ? 9 : 0, NULL, 0);
-    prow("sockpoll_revents", spf[0].revents, 0, NULL, 0);
+      struct pollfd spf[1];
+      spf[0].fd = sv[0]; spf[0].events = POLLIN; spf[0].revents = 0;
+      long spr = poll(spf, 1, 0);
+      prow("sockpoll_ready", spr, spr < 0 ? 9 : 0, NULL, 0);
+      prow("sockpoll_revents", spf[0].revents, 0, NULL, 0);
 
-    fd_set srf; FD_ZERO(&srf); FD_SET(sv[0], &srf);
-    struct timeval stv; stv.tv_sec = 0; stv.tv_usec = 0;
-    long ssr = select(sv[0] + 1, &srf, NULL, NULL, &stv);
-    prow("sockselect_ready", ssr, ssr < 0 ? 9 : 0, NULL, 0);
-    prow("sockselect_fdset", FD_ISSET(sv[0], &srf) ? 1 : 0, 0, NULL, 0);
+      fd_set srf; FD_ZERO(&srf); FD_SET(sv[0], &srf);
+      struct timeval stv; stv.tv_sec = 0; stv.tv_usec = 0;
+      long ssr = select(sv[0] + 1, &srf, NULL, NULL, &stv);
+      prow("sockselect_ready", ssr, ssr < 0 ? 9 : 0, NULL, 0);
+      prow("sockselect_fdset", FD_ISSET(sv[0], &srf) ? 1 : 0, 0, NULL, 0);
 
-    sigset_t sempt; sigemptyset(&sempt);
-    fd_set srf2; FD_ZERO(&srf2); FD_SET(sv[0], &srf2);
-    struct timespec sts; sts.tv_sec = 0; sts.tv_nsec = 0;
-    long sps = pselect(sv[0] + 1, &srf2, NULL, NULL, &sts, &sempt);
-    prow("sockpselect_ready", sps, sps < 0 ? 9 : 0, NULL, 0);
-    prow("sockpselect_fdset", FD_ISSET(sv[0], &srf2) ? 1 : 0, 0, NULL, 0);
+      sigset_t sempt; sigemptyset(&sempt);
+      fd_set srf2; FD_ZERO(&srf2); FD_SET(sv[0], &srf2);
+      struct timespec sts; sts.tv_sec = 0; sts.tv_nsec = 0;
+      long sps = pselect(sv[0] + 1, &srf2, NULL, NULL, &sts, &sempt);
+      prow("sockpselect_ready", sps, sps < 0 ? 9 : 0, NULL, 0);
+      prow("sockpselect_fdset", FD_ISSET(sv[0], &srf2) ? 1 : 0, 0, NULL, 0);
 
-    close(sv[0]); close(sv[1]);
+      close(sv[0]); close(sv[1]);
+    } else {
+      /* GB-111: report the whole readiness block as SKIP with a reason instead of
+       * running write/poll/select/pselect on the UNINITIALISED sv[] fds. */
+      prow_skip("sock_write", "no-socketpair");
+      prow_skip("sockpoll_ready", "no-socketpair");
+      prow_skip("sockpoll_revents", "no-socketpair");
+      prow_skip("sockselect_ready", "no-socketpair");
+      prow_skip("sockselect_fdset", "no-socketpair");
+      prow_skip("sockpselect_ready", "no-socketpair");
+      prow_skip("sockpselect_fdset", "no-socketpair");
+    }
   }
 
   /* GB-076: fcntl/ioctl/dent rows the GB-019/020/021 -V DoDs name — must be in
