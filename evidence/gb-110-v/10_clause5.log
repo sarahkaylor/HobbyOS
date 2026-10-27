@@ -1,0 +1,15 @@
+=== as shipped
+  merge_pr_test.py exit=0  (want 0)
+MERGE_PR_TEST: PASS - fail-closed guard rule + #194 goes red
+
+=== mutation: graded_sha_of() returns the LOCAL FILE (the bug GB-110 exists to kill)
+  [mutant] silent fallback to the local file installed
+  merge_pr_test.py exit=1  (want non-zero)
+  PASS: GREEN names no sha -> FAILS CLOSED (refuse)
+  PASS: parser structurally has no --head option (re-adding it FAILS this probe)
+  PASS: a FORGED local cache disagreeing with the board -> FAIL CLOSED
+  FAIL: no GREEN on the board (or unreachable) -> FAIL CLOSED even with a local file
+MERGE_PR_TEST: FAIL (1)
+
+=== restored
+  merge_pr_test.py exit=0  (want 0)

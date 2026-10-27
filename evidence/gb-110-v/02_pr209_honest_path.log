@@ -1,0 +1,4 @@
+=== clause 3 (honest path) against a real GREEN: PR #209
+[merge_pr] PR #209: REFUSE: GREEN names no graded sha — cannot confirm the graded tree is the current head
+[merge_pr] NOT MERGED (fail closed)
+EXIT=1

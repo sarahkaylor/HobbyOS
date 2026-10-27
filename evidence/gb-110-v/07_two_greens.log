@@ -1,0 +1,15 @@
+GREENs on #210: 2  (API order = oldest first)
+
+[0] 2026-10-26T23:39:30Z  OLDEST
+    graded_shas_in -> ['ef3673fc8e847ebc313a78155e2ab18e071e1032', 'b3540e58569fbbd1ac9de77680e8dcbfb78d9486']
+    names: **Tree that would merge:** `b3540e58569fbbd1ac9de77680e8dcbfb78d9486` (PR #209 head at gate time). Host-side T1 only; no
+[1] 2026-10-26T23:39:37Z  NEWEST <- the tool stops here
+    graded_shas_in -> []  <-- no sha, so the tool returns None
+    names: **VERDICT — GREEN (GB-109-V, round 2).** Round 1's finding — *"the vacuous `--head` call is inexpressible"* was only **a
+    names: **Process note.** `tools/board/claim.sh` refused me: its "already claimed" check still saw `wverify-deep`'s round-1 clai
+
+the loop in graded_sha_from_board():
+    for c in reversed(cs):        # newest first
+        if VERDICT...GREEN: shas = graded_shas_in(body); return shas[0] if shas else None
+  -> it stops at the NEWEST GREEN and gives up, never falling back to the older
+     GREEN that does name the tree, and never accepts a 7-char prefix (GB-109's form).
