@@ -57,6 +57,23 @@ mp.graded_sha_from_board = lambda pr, env=None: None                 # board has
 check(mp.graded_sha_of(9) is None, "no GREEN on the board (or unreachable) -> FAIL CLOSED even with a local file")
 os.remove(cache)
 mp.graded_sha_from_board = _orig_fb
+# GB-110-V clauses 3+4: graded_shas_in must parse the canonical real-green line and the
+# sha for THIS head is selected (not blindly shas[0] in a multi-sha / two-GREEN verdict).
+check(40 in [len(s) for s in mp.graded_shas_in("**Tree that would merge:** " + "a" * 40)],
+      "parses a 40-hex sha on the canonical 'Tree that would merge:' line")
+head = board_sha
+other = "9999999999999999999999999999999999999999"
+_o_head, _o_fj, _o_gb = mp.head_of_pr, mp._forgejo, mp.pr_gb_id
+mp.head_of_pr = lambda pr, env=None: head
+mp.pr_gb_id = lambda pr, env=None: "110"
+def _fk(api, env=None):
+    if "comments" in api:
+        return [{"body": "## VERDICT: GREEN\n**Tree that would merge:** " + other + "\n**Tree that would merge:** " + head + "\n"}]
+    return [{"number": 7, "title": "GB-110-V"}, {"number": 8, "title": "GB-110"}]
+mp._forgejo = _fk
+sel = mp.graded_sha_from_board(209)
+check(sel == head, "selects the sha naming THIS head (not shas[0]) in a multi-sha GREEN (got %s)" % (sel[:8] if sel else None))
+mp.head_of_pr, mp._forgejo, mp.pr_gb_id = _o_head, _o_fj, _o_gb
 
 if fails:
     print("MERGE_PR_TEST: FAIL (%d)" % fails); sys.exit(1)

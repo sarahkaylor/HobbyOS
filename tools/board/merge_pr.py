@@ -28,10 +28,13 @@ OVERRIDE_DIR = os.path.join(TREE, "obj", "gate", "merge_pr_override")
 
 
 def graded_shas_in(text):
-    """Every 40-hex sha on lines mentioning the graded tree / a VERDICT."""
+    """Every 40-hex sha on lines that NAME the graded tree: a real GREEN verdict marks
+    it on variants of `**Tree that would merge:** <sha>` or a VERDICT/graded/tested/head
+    line (GB-110-V clause 3: the previous keyword set missed the "Tree that would merge" /
+    "merge"/"tree" lines, so it read only 19/96 real verdicts)."""
     out = []
     for ln in text.splitlines():
-        if re.search(r"(VERDICT|graded|grading|tested|head)", ln, re.I):
+        if re.search(r"(VERDICT|graded|grading|tested|head|merge|tree)", ln, re.I):
             out += re.findall(r"\b[0-9a-f]{40}\b", ln)
     return out
 
@@ -76,10 +79,12 @@ def pr_gb_id(pr, env=None):
 
 def graded_sha_from_board(pr, env=None):
     """Newest GREEN verdict's graded sha for PR `pr`, read over the Forgejo API using
-    graded_shas_in().  None => fail closed (no resolvable GB, no GREEN, GREEN with no
-    sha, or unreachable board)."""
+    graded_shas_in().  Picks the sha that names THIS PR's current head (GB-110-V clause 4:
+    not blindly shas[0], which may be another tree in a two-GREEN/multi-sha verdict).  None
+    => fail closed (no resolvable GB, no GREEN, no GREEN naming this head, or unreachable board)."""
     env = env or os.environ
     gb = pr_gb_id(pr, env)
+    head = head_of_pr(pr, env)
     if not gb:
         return None
     base = env.get("BOARD_REPO") or "sarah/gaming-program"
@@ -100,9 +105,11 @@ def graded_sha_from_board(pr, env=None):
         for c in reversed(cs):
             body = (c.get("body") or "").replace("\r", "")
             if re.search(r"VERDICT[^\n]{0,50}\bGREEN\b", body, re.I):
-                shas = graded_shas_in(body)
-                return shas[0] if shas else None   # GREEN with no sha -> fail closed
-    return None                                   # no GREEN verdict found
+                for sha in graded_shas_in(body):
+                    if head and head.startswith(sha):
+                        return sha        # the GREEN that names THIS head
+                return None               # a GREEN present but none names this head -> fail closed
+    return None                           # no GREEN verdict found
 
 
 def graded_sha_of(pr, env=None):
@@ -195,6 +202,8 @@ def self_test():
     check(40 in [len(s) for s in graded_shas_in("VERDICT GREEN graded sha " + "c" * 40)],
           "parses a 40-hex sha from a VERDICT/graded line")
     check(graded_shas_in("VERDICT GREEN") == [], "no sha in VERDICT -> empty (fails closed upstream)")
+    check(40 in [len(s) for s in graded_shas_in("**Tree that would merge:** " + "c" * 40)],
+          "parses the canonical real-GREEN 'Tree that would merge:' line (GB-110-V clause 3)")
     # -> W0-case: #194 (GB-103) merged 2026-10-26 graded 7de6dde.. but merged e8c7dc8..
     #    (a GREEN that named a tree DIFFERENT from the head that merged).  The
     #    fixture must go red FOR THIS MISMATCH, not for silence.
