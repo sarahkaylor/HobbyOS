@@ -1,0 +1,11 @@
+### G1d: what the open-issue scan actually returns 2026-10-27T02:11:36Z
+issues returned for limit=300: 50
+first three: [(216, 'GB-110-V2 Post-merge gate: does the guar'), (213, 'GB-110-V Verify merge guard graded sha f'), (211, "GB-110 The merge guard's graded sha come")]
+last three:  [(45, 'GB-045 Performance pass: gfxbench baseli'), (41, 'GB-041 [DEEP] Doom as static-musl ELF un'), (39, 'GB-039 Game launcher desktop app: scans ')]
+  #200 present in scan: False
+  #203 present in scan: False
+  #214 present in scan: False
+  #215 present in scan: False
+page 2 (limit=50): 13 issues; first #35
+page 3 (limit=50): 0 issues; first #-
+total open per API (paging sum): 63

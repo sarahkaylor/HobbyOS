@@ -1,0 +1,14 @@
+### G1: honest path, real board, merged PR 213 @ edd60fd 2026-10-27T02:10:48Z
+[merge_pr] PR #213: REFUSE: GREEN names no graded sha — cannot confirm the graded tree is the current head
+[merge_pr] NOT MERGED (fail closed)
+rc=1
+
+### G2: forged local cache naming a DIFFERENT tree
+[merge_pr] PR #213: REFUSE: GREEN names no graded sha — cannot confirm the graded tree is the current head
+[merge_pr] NOT MERGED (fail closed)
+rc=1
+
+### G3: board unreachable (matching local file present)
+[merge_pr] PR #213: REFUSE: GREEN names no graded sha — cannot confirm the graded tree is the current head
+[merge_pr] NOT MERGED (fail closed)
+rc=1

@@ -1,0 +1,41 @@
+### G4-6 2026-10-27T02:11:55Z
+=== clause 4: a GREEN body naming base, head and merge-tree ===
+graded_shas_in -> ['2222222222222222222222222222222222222222']
+guard returns shas[0] = 2222222222222222222222222222222222222222 | that is the BASE sha
+
+=== clause 5: the self-test fixture ===
+    ok, r = decide(h, h); check(ok, "graded==head -> allow (%s)" % r[:20])
+    ok, r = decide(h, "b" * 40); check(not ok, "graded!=head -> refuse (%s)" % r[:20])
+    ok, r = decide(h, None); check(not ok, "no graded sha -> FAILS CLOSED (%s)" % r[:20])
+    ok, r = decide(None, h); check(not ok, "no head -> refuse (%s)" % r[:20])
+    # graded_shas_in parse
+    check(40 in [len(s) for s in graded_shas_in("VERDICT GREEN graded sha " + "c" * 40)],
+    "parses a 40-hex sha from a VERDICT/graded line")
+    check(graded_shas_in("VERDICT GREEN") == [], "no sha in VERDICT -> empty (fails closed upstream)")
+    # -> W0-case: #194 (GB-103) merged 2026-10-26 graded 7de6dde.. but merged e8c7dc8..
+    f"today's #194 incident shape (graded 7de6dde.., merged e8c7dc8..) -> RED for the mismatch ({r[:44]})")
+    ok, r = decide(h, h[:7]); check(ok, "graded 7-char prefix of head -> ALLOW (%s)" % r[:24])
+    ok, r = decide(h, "fffffff"); check(not ok, "graded 7-char prefix that is NOT a prefix -> REFUSE (%s)" % r[:24])
+    ok, r = decide(h, h[:6]); check(not ok, "graded prefix <7 chars -> REFUSE (%s)" % r[:34])
+    ok, r = decide(h[:5], h); check(not ok, "graded <7 chars (h[:5]) -> REFUSE (%s)" % r[:34])
+    check(True, "graded <7 chars -> REFUSE (guard rejects too-short)" )
+
+=== clause 6: any fallback from the board to the local file? ===
+def graded_sha_of(pr, env=None):
+    """The graded sha a GREEN graded for PR `pr`.  Source of truth = the NEWEST GREEN
+    verdict comment on the board (Forgejo API); the local obj/gate/graded-<pr>.sha file
+    is only a CACHE and MUST match the board.  A forged local file that disagrees with
+    the board returns None -> the guard refuses.  None => fail closed."""
+    env = env or os.environ
+    board = graded_sha_from_board(pr, env)
+    if board is None:
+        return None                       # no GREEN / GREEN-no-sha / board unreachable
+    local = None
+    p = os.path.join(TREE, "obj", "gate", f"graded-{pr}.sha")
+    if os.path.exists(p):
+        s = open(p).read().strip()
+        local = s if re.fullmatch(r"[0-9a-f]{40}", s) else None
+    if local is not None and local != board:
+        return None                       # forged cache that contradicts the board -> refuse
+    return board
+

@@ -1,0 +1,10 @@
+### G4b: graded_shas_in() on REAL board verdict bodies 2026-10-27T02:12:17Z
+issue #203 GREEN comment 2026-10-26T21:28:25Z: 0 sha(s) parsed -> []
+   real line: [merge_pr] PR #204: ok: graded sha bab2bb28b576 equals current head — merge allowed            rc=0
+   real line: [merge_pr] PR #204: REFUSE: graded sha 7de6dde4f3f2 != current head bab2bb28b576 — refusing to merge a tree that was not
+   guard would use shas[0] = None
+
+issue #74 GREEN comment 2026-10-26T23:08:14Z: 0 sha(s) parsed -> []
+   real line: The wave's own `FAIL — only 1 programs exited (floor 55)` is the corpus shortfall (one staged program is not a complete 
+   guard would use shas[0] = None
+
