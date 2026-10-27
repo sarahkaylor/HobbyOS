@@ -1,0 +1,12 @@
+[rig] booting arm QEMU, capturing to evidence/XNIBBLER/20261027T192917Z
+Traceback (most recent call last):
+  File "/home/sarah/Documents/GitHub/HobbyOS/.worktrees/wt-gb116v/tools/evidence_rig.py", line 334, in <module>
+    main()
+    ~~~~^^
+  File "/home/sarah/Documents/GitHub/HobbyOS/.worktrees/wt-gb116v/tools/evidence_rig.py", line 244, in main
+    q = boot(qemu_make, serial_log, qmp_sock, arch)
+  File "/home/sarah/Documents/GitHub/HobbyOS/.worktrees/wt-gb116v/tools/evidence_rig.py", line 119, in boot
+    q = QMP(qmp_sock)
+  File "/home/sarah/Documents/GitHub/HobbyOS/.worktrees/wt-gb116v/tools/evidence_rig.py", line 53, in __init__
+    raise RuntimeError("QMP socket never appeared: " + path)
+RuntimeError: QMP socket never appeared: /tmp/evidence-qmp-XNIBBLER
