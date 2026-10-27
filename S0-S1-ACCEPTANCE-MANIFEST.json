@@ -1,42 +1,55 @@
 {
   "arch": "arm",
-  "captured_at": "2026-10-18T03:52:48.915257+00:00",
+  "captured_at": "2026-10-27T10:59:29.684699+00:00",
   "results": [
     {
       "game": "PONG.BIN",
       "slot": 16,
       "live": true,
       "ok": true,
-      "sha16": "e9c7e32b224f067c"
+      "reasons": [],
+      "sha16": "37c5824b2ebeb66c"
     },
     {
       "game": "MILLIPED.BIN",
       "slot": 17,
       "live": true,
-      "ok": true,
-      "sha16": "3d182dead51569b0"
+      "ok": false,
+      "reasons": [
+        "never loaded (no serial load line / process)"
+      ],
+      "sha16": "1986d34d9a74a4a8"
     },
     {
       "game": "XNIBBLER.BIN",
-      "slot": 18,
+      "slot": 20,
       "live": true,
-      "ok": true,
-      "sha16": "f5d2854ee8f91c25"
+      "ok": false,
+      "reasons": [
+        "never loaded (no serial load line / process)"
+      ],
+      "sha16": "a2562a349420f50d"
     },
     {
       "game": "XCRYPT.BIN",
-      "slot": 19,
+      "slot": 21,
       "live": true,
-      "ok": true,
-      "sha16": "c589f54ac707bf16"
+      "ok": false,
+      "reasons": [
+        "never loaded (no serial load line / process)"
+      ],
+      "sha16": "a72e7aff5bd8cb46"
     },
     {
       "game": "NES.BIN",
-      "slot": 20,
+      "slot": 22,
       "live": true,
-      "ok": true,
-      "sha16": "8ee2c41bb9bb4be5"
+      "ok": false,
+      "reasons": [
+        "never loaded (no serial load line / process)"
+      ],
+      "sha16": "b9240986729ff432"
     }
   ],
-  "summary": "PASS"
+  "summary": "FAIL"
 }
