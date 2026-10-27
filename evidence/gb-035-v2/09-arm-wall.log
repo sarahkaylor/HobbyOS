@@ -1,0 +1,12 @@
+=== the ARM kernel build error (full) ===
+src/kernel/process.c:1827:27: error: use of undeclared identifier 'cpu_locals'
+ 1827 |           int live_pid = (cpu_locals[cl].current_proc)
+      |                           ^~~~~~~~~~
+src/kernel/process.c:1828:32: error: use of undeclared identifier 'cpu_locals'
+ 1828 |                              ? cpu_locals[cl].current_proc->pid
+      |                                ^~~~~~~~~~
+src/kernel/process.c:1415:42: warning: unused parameter 'is_yield' [-Wunused-parameter]
+
+=== is this pre-existing on origin/main (not this PR)? ===
+(empty = the file is untouched by PR #163)
+(empty = PR #163 changes no kernel source)

@@ -1,0 +1,31 @@
+=== clause 6: make host_tests (is the new NES test executed and passing?) ===
+host_tests rc=0
+clang -o nes_test_host obj/host_nes_test.o
+Checks failed: 0
+Checks failed: 0
+Checks failed: 0
+Checks failed: 0
+Checks failed: 0
+Checks failed: 0
+TEST EXIT: 0
+
+=== the NES host test run directly ===
+built
+  PASS: 6502 PHA push / PLA pull restores A and balances the stack
+  PASS: OAMDATA ($2004) reads back the written y
+  PASS: sprite glyph blits over the background at (20,10)
+  PASS: background (no sprite there) stays dark at (40,10)
+
+Tests: passed=34 failed=0 -> ALL PASSED
+nes_test rc=0
+
+=== clause 5: ARM — can NES.BIN be built for ARM? ===
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/syscall.c -o obj/arm/libc_syscall.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c src/libc/src/ioctl.c -o obj/arm/libc_ioctl.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/compiler-rt/lib/builtins/extenddftf2.c -o obj/arm/builtins/extenddftf2.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/compiler-rt/lib/builtins/trunctfdf2.c -o obj/arm/builtins/trunctfdf2.o
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -c third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/compiler-rt/lib/builtins/trunctfsf2.c -o obj/arm/builtins/trunctfsf2.o
+ar rcs obj/arm/libc.a obj/arm/user_libc.o obj/arm/user_malloc.o obj/arm/libc_string.o obj/arm/crt0.o obj/arm/cxxrt.o obj/arm/libc_pthread.o obj/arm/libc_ctype.o obj/arm/libc_stdlib.o obj/arm/libc_stdio.o obj/arm/libc_file.o obj/arm/libc_getopt.o obj/arm/libc_error.o obj/arm/libc_stat.o obj/arm/libc_signal.o obj/arm/libc_mman.o obj/arm/libc_regex.o obj/arm/libc_langinfo.o obj/arm/libc_wchar.o obj/arm/libc_wctype.o obj/arm/libc_locale.o obj/arm/libc_selinux.o obj/arm/libc_dirent.o obj/arm/libc_time.o obj/arm/libc_time_math.o obj/arm/libc_libgen.o obj/arm/libc_realpath.o obj/arm/libc_xlocale.o obj/arm/libc_strtod.o obj/arm/libc_strftime.o obj/arm/libc_math.o obj/arm/libc_pwd.o obj/arm/libc_setjmp.o obj/arm/libc_dlfcn.o obj/arm/libc_resource.o obj/arm/libc_statvfs.o obj/arm/libc_syscall.o obj/arm/libc_ioctl.o obj/arm/builtins/extenddftf2.o obj/arm/builtins/trunctfdf2.o obj/arm/builtins/trunctfsf2.o
+ld.lld -T src/user/linker.ld -e _start -o obj/arm/nes.elf obj/arm/nesmain.o obj/arm/nescore.o obj/arm/user_graphics.o obj/arm/libc.a
+llvm-objcopy -O binary obj/arm/nes.elf obj/arm/nes.bin
+arm nes rc=0

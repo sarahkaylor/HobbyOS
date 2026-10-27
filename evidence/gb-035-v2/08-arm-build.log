@@ -1,0 +1,8 @@
+=== clause 5: can the ARM kernel + disk even be built on this tree? ===
+      |                                          ^
+src/kernel/process.c:3888:50: warning: unused parameter 'prot' [-Wunused-parameter]
+ 3888 | int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags) {
+      |                                                  ^
+2 warnings and 2 errors generated.
+make: *** [Makefile:744: obj/arm/process.o] Error 1
+arm elf rc=0

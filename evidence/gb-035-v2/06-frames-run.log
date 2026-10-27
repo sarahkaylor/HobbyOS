@@ -1,0 +1,27 @@
+=== instrument: boot line + a digest for each of the first 8 frames ===
+instrumented: boot line + a digest for each of the first 8 frames
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/nes.elf obj/intel/nesmain.o obj/intel/nescore.o obj/intel/user_graphics.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/nes.elf obj/intel/nes.bin
+
+=== T3 intel, NES only, 300s ===
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+=== T3 (intel): run (deadline 300s, log /home/sarah/wt/gb035v2/evidence/gb-035-v2/06-nes-frames.log) ===
+T3_intel: 216 console lines, 0 FAIL lines, 0 user memory fault records across 0 processes, 0 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 300s deadline hit; a hang is a defect, not a flake)
+T3_intel EXIT=1
+tier rc=1
+
+--- [NES] lines from INSIDE the guest ---
+[NES] boot: rom_len=161 reset_pc=0x0x0000000000008000
+[NES] frame=1 digest=0x000000009E1ED9C5
+[NES] frame=2 digest=0x000000009E1ED9C5
+[NES] frame=3 digest=0x000000009E1ED9C5
+[NES] frame=4 digest=0x00000000460CEDC5
+[NES] frame=5 digest=0x00000000460CEDC5
+[NES] frame=6 digest=0x00000000460CEDC5
+[NES] frame=7 digest=0x00000000460CEDC5
+[NES] frame=8 digest=0x00000000460CEDC5
+
+frame lines: 8
+distinct digests: 2

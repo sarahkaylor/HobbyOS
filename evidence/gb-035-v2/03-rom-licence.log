@@ -1,0 +1,35 @@
+=== ROM provenance / licence (homebrew_rom.h header) ===
+/*
+ * homebrew_rom.h — a small hand-authored NES (NROM) homebrew, as raw PRG bytes
+ * (added to a 32 KiB cart at $8000; reset vector is set to $8000 by main.c).
+ *
+ * Program (hand-assembled 6502):
+ *   1. Pattern tile 0 = solid bright (write 16 bytes of $FF at PPUADDR=$1000);
+ *      tile 1 stays dark ($00).
+ *   2. Pattern tile 3 = solid mid-grey ($FF hi bytes at PPUADDR=$1038) for the
+ *      demo sprite's glyph.
+ *   3. Place one sprite via OAM ($2003/$2004): tile 3 at (x=12, y=12).
+ *   4. Draw a dark top band now (32 nametable cells = tile 1 at PPUADDR=$2000),
+ *      so the default boot frame is a bright field with a dark top band and a
+ *      visible sprite — demonstrating background + OAM sprite rendering.
+ *   5. In a tight loop (main), read the NES controller ($4016 strobe + serial):
+ *      - A released -> (re)draw the dark band (the resting frame);
+ *      - A pressed  -> clear it (write tile 0 = bright over the band).
+ *      So the ROM visibly responds to the A button — "boots and plays a ROM".
+ *   6. Every loop iteration also toggles a single nametable cell ($2000+0x34,
+ *      row 1, col 20, outside the band and sprite) between tile dark / bright.
+ *      This makes the ROM ANIMATE ON ITS OWN — the rendered frame changes each
+ *      pass with NO input — so a T5 screendump pair 2 s apart differs in the
+ *      game area (GB-035-V's "advance a frame on its own" green path).
+ *
+ * License: MIT, swarm-authored, license-clean (no copyrighted NES BIOS/ROM).
+ */
+#ifndef NES_HOMEBREW_ROM_H
+#define NES_HOMEBREW_ROM_H
+
+#define HOME_ROM_LEN 161
+static const unsigned char home_rom[HOME_ROM_LEN] = {
+
+=== is the new test wired into the suite? ===
+2915:NES_TEST = nes_test_host
+2916:$(NES_TEST): obj/host_nes_test.o
