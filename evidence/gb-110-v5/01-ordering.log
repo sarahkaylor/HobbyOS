@@ -1,0 +1,38 @@
+rev: 6e9cbd24ec77e667502932bb3c36a6c47409a00a  2026-10-27T06:42:36Z
+
+=== clause 1: the cards, as they appear on the board (full titles) ===
+  #203  state=closed  bare_id=GB-106-V2  title='GB-106-V2 Re-gate the merge guard: #194 must go red for the MISMATCH (e8c7dc89'
+  #202  state=closed  bare_id=GB-106-V   title='GB-106-V Verify the fail-closed merge guard: mismatch refused, no-sha refused,'
+  #201  state=closed  bare_id=GB-106-V   title='GB-106-V Verify merge_pr.py fail-closed guard: graded tree must equal current '
+  #200  state=closed  bare_id=GB-106     title='GB-106 A gate verdict names a tree, a PR names a head, and nothing here makes '
+
+  by_title keys built: ['GB-005-V', 'GB-006-V', 'GB-007-V', 'GB-010-V', 'GB-012-V', 'GB-012-V2', 'GB-016-V', 'GB-017-V', 'GB-018-V', 'GB-019-V', 'GB-020-V', 'GB-021-V', 'GB-024-V', 'GB-031-V', 'GB-032-V', 'GB-034-V', 'GB-035-V', 'GB-035-V2', 'GB-035-V3', 'GB-039-V', 'GB-044-V', 'GB-045-V', 'GB-046-V', 'GB-046-V2', 'GB-047-V', 'GB-049-V', 'GB-053-V', 'GB-059-V', 'GB-060-V', 'GB-060-V2', 'GB-061-V', 'GB-066-V', 'GB-066-V2', 'GB-066-V3', 'GB-067-V', 'GB-070-V', 'GB-074-V', 'GB-075-V', 'GB-079-V', 'GB-081-V', 'GB-082-V', 'GB-084-V', 'GB-085-V', 'GB-086-V', 'GB-090-V', 'GB-092-V', 'GB-094-V', 'GB-098-V', 'GB-099-V', 'GB-100-V', 'GB-101-V', 'GB-101-V2', 'GB-103-V', 'GB-103-V2', 'GB-104-V', 'GB-105-V', 'GB-106-V', 'GB-106-V2', 'GB-107-V', 'GB-109-V', 'GB-110-V', 'GB-110-V2', 'GB-110-V3', 'GB-110-V4', 'GB-110-V5', 'GB-111-V']
+  owner card for GB-106: #200
+  groom.newest_gate('GB-106', by_title) -> #203 'GB-106-V2'
+
+=== clause 1b: does V3 beat V2 on real titles? (GB-110 carries V, V2, V3, V4, V5) ===
+  keys for GB-110: ['GB-110-V', 'GB-110-V2', 'GB-110-V3', 'GB-110-V4', 'GB-110-V5']
+  newest_gate('GB-110') -> #222 'GB-110-V5'
+
+=== clause 2/3: which cards the guard actually queries, and the verdict ===
+  PR #204: candidates=[203]  sha=3da727c  allow=True
+          ok: graded prefix 3da727c.. matches current head 3da727ce691c.. — merge allowed
+  PR #213: candidates=[215]  sha=d245eadf140b0a1f88c57354e40b815e8ee21275  allow=True
+          ok: graded prefix d245ead.. matches current head d245eadf140b.. — merge allowed
+
+=== live CLI ===
+$ merge_pr.py --pr 204
+[merge_pr] PR #204: ok: graded prefix 3da727c.. matches current head 3da727ce691c.. — merge allowed
+[merge_pr] MERGE ALLOWED (guard only; run with --merge to perform it)
+rc=0
+
+$ merge_pr.py --pr 213
+[merge_pr] PR #213: ok: graded prefix d245ead.. matches current head d245eadf140b.. — merge allowed
+[merge_pr] MERGE ALLOWED (guard only; run with --merge to perform it)
+rc=0
+
+$ merge_pr.py --pr 209
+[merge_pr] PR #209: ok: graded prefix b3540e5.. matches current head b3540e58569f.. — merge allowed
+[merge_pr] MERGE ALLOWED (guard only; run with --merge to perform it)
+rc=0
+

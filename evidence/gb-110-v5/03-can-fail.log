@@ -1,0 +1,17 @@
+=== can-fail: put V4 bug back (match the whole title) — the suite MUST now catch it ===
+break applied: the bare-id normalisation removed (titles matched whole, as in 1b2fc86)
+selftest rc=1
+  PASS: no GREEN on the board (or unreachable) -> FAIL CLOSED even with a local file
+  FAIL: the HIGHEST-ordinal gate's GREEN (GB-106-V2) wins over the superseded V (got None)
+MERGE_PR_TEST: FAIL (1)
+
+--- and the live guard degrades to the owner card, exactly as V4 measured ---
+[merge_pr] PR #204: REFUSE: GREEN names no graded sha — cannot confirm the graded tree is the current head
+[merge_pr] NOT MERGED (fail closed)
+rc=1
+
+=== restore ===
+restored
+(empty = clean)
+restored rc=0
+MERGE_PR_TEST: PASS - fail-closed guard rule + #194 goes red

@@ -1,0 +1,21 @@
+=== clause 3 (sharpened): where ordinal order and ISSUE-NUMBER order disagree ===
+  parents where the two orders disagree: 0
+  (coincidence for every other parent is why 'sorts by issue number' would look right)
+
+=== clause 5: security half ===
+  forged local (= head) vs board 2222…  -> None (None = refused)
+  honest local (= board)                -> 2222222222222222222222222222222222222222
+  dead board + matching local file      -> None
+  no token + matching local file        -> None
+
+=== residual: what happens if the groom import fails? ===
+  _newest_gate is None ->  order = [owner] only, silently: the V4 bug returns
+  current: _newest_gate = <function newest_gate at 0x79de903c9dd0>
+
+=== the shipped self-test (real-title fixtures) ===
+  PASS: selects the sha naming THIS head (not shas[0]) in a multi-sha GREEN (got abcdef12)
+  PASS: closed card's GREEN is FOUND for a merged PR (got aaaaaaa)
+  PASS: decide() then REFUSES naming the graded/mismatch (REFUSE: graded aaaaaaa.. is not a prefix of the cu)
+  PASS: the HIGHEST-ordinal gate's GREEN (GB-106-V2) wins over the superseded V (got abcdef12)
+MERGE_PR_TEST: PASS - fail-closed guard rule + #194 goes red
+rc=0

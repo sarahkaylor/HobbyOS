@@ -1,0 +1,7 @@
+=== clause 3: ordinal vs issue number, where they disagree (in-memory case) ===
+by_title ordinals vs numbers: {'GB-999-V2': 400, 'GB-999-V': 500, 'GB-999': 300}
+newest_gate('GB-999') -> 400 GB-999-V2
+  ordinal order would pick #400 (V2); issue-number order would pick #500 (V)
+  verdict: ORDINAL
+
+GATE_RE on a bare key: True / on a full title: False
