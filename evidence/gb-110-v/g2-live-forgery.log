@@ -1,0 +1,15 @@
+### G2: live guard, honest path (PR 204, head 3da727c) 2026-10-27T00:29:24Z
+[merge_pr] PR #204: ok: graded prefix 3da727c.. matches current head 3da727ce691c.. — merge allowed
+[merge_pr] MERGE ALLOWED (guard only; run with --merge to perform it)
+rc=0
+
+### G3: FORGED local cache naming a DIFFERENT tree (44d3cbb…), board still names 3da727c
+44d3cbb0000000000000000000000000000000000
+[merge_pr] PR #204: ok: graded prefix 3da727c.. matches current head 3da727ce691c.. — merge allowed
+[merge_pr] MERGE ALLOWED (guard only; run with --merge to perform it)
+rc=0
+
+### G4: forged cache naming the head itself, board names another tree
+[merge_pr] PR #204: REFUSE: graded 44d3cbb.. is not a prefix of the current head 3da727ce691c.. — refusing to merge a tree that was not graded
+[merge_pr] NOT MERGED (fail closed)
+rc=1

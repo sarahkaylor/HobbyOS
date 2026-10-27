@@ -1,0 +1,7 @@
+### G8: DELIBERATE BREAK — board read returns the local file 2026-10-27T00:30:08Z
+  PASS: GREEN names no sha -> FAILS CLOSED (refuse)
+  PASS: parser structurally has no --head option (re-adding it FAILS this probe)
+  PASS: a FORGED local cache disagreeing with the board -> FAIL CLOSED
+  PASS: no GREEN on the board (or unreachable) -> FAIL CLOSED even with a local file
+MERGE_PR_TEST: PASS - fail-closed guard rule + #194 goes red
+test-rc= 0
