@@ -103,15 +103,21 @@ def graded_sha_from_board(pr, env=None):
         page += 1
     if not issues:
         return None                       # board unreachable (or empty) -> fail closed
-    gb_v = f"GB-{gb}-V"
-    gb_t = f"GB-{gb}"
-    order = []
+    gb_v_re = re.compile(r"^GB-(\d{3})-V(\d*)$")
+    gate_orders = []
+    owner = None
     for it in issues:
         t = it.get("title") or ""
-        if t.startswith(gb_v):
-            order.insert(0, it["number"])       # the -V ticket first
-        elif t.startswith(gb_t):
-            order.append(it["number"])
+        m = gb_v_re.match(t)
+        if m and m.group(1) == gb:
+            gate_orders.append((int(m.group(2) or 1), it["number"]))  # (ordinal, num)
+        elif t.startswith(f"GB-{gb} "):
+            owner = it["number"]
+    # GB-110-V3 clause 2: a parent accumulates gates; the HIGHEST ORDINAL governs (same
+    # lesson groom.py's newest_gate() encodes).  Never take the first match — a superseded
+    # GB-106-V must not beat the current GB-106-V2.
+    gate_orders.sort(reverse=True)
+    order = [num for (_ord, num) in gate_orders] + ([owner] if owner else [])
     for num in order:
         cs = _forgejo(f"/repos/{base}/issues/{num}/comments?limit=100", env) or []
         for c in reversed(cs):
