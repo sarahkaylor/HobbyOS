@@ -28,11 +28,14 @@ OVERRIDE_DIR = os.path.join(TREE, "obj", "gate", "merge_pr_override")
 
 
 def graded_shas_in(text):
-    """Every 40-hex sha on lines mentioning the graded tree / a VERDICT."""
+    """Every sha token (7-40 hex: full and ABBREVIATED prefixes — GB-109's rule, which
+    decide() already enforces) on lines that NAME the graded tree: a real GREEN marks it on
+    `**Tree that would merge:** <sha>` or a VERDICT/graded/tested/head line (GB-110-V
+    clauses 3-5: the 40-hex-only parse missed real 7-char-prefix verdicts)."""
     out = []
     for ln in text.splitlines():
-        if re.search(r"(VERDICT|graded|grading|tested|head)", ln, re.I):
-            out += re.findall(r"\b[0-9a-f]{40}\b", ln)
+        if re.search(r"(VERDICT|graded|grading|tested|head|merge|tree)", ln, re.I):
+            out += re.findall(r"\b[0-9a-f]{7,40}\b", ln)
     return out
 
 
@@ -76,33 +79,61 @@ def pr_gb_id(pr, env=None):
 
 def graded_sha_from_board(pr, env=None):
     """Newest GREEN verdict's graded sha for PR `pr`, read over the Forgejo API using
-    graded_shas_in().  None => fail closed (no resolvable GB, no GREEN, GREEN with no
-    sha, or unreachable board)."""
+    graded_shas_in().  Picks the sha that names THIS PR's current head (GB-110-V clause 4:
+    not blindly shas[0], which may be another tree in a two-GREEN/multi-sha verdict).  None
+    => fail closed (no resolvable GB, no GREEN, no GREEN naming this head, or unreachable board)."""
     env = env or os.environ
     gb = pr_gb_id(pr, env)
+    head = head_of_pr(pr, env)
     if not gb:
         return None
     base = env.get("BOARD_REPO") or "sarah/gaming-program"
-    issues = _forgejo(f"/repos/{base}/issues?state=open&limit=300", env) or []
+    # GB-110-V2(a): Forgejo caps issues at 50/page despite limit=300, so PAGE; and use
+    # state=all so a verify card that has been CLOSED (Moved to Done after its GREEN) still
+    # keeps its GREEN findable.
+    issues = []
+    page = 1
+    while True:
+        chunk = _forgejo(f"/repos/{base}/issues?state=all&limit=50&page={page}", env)
+        if not chunk:
+            break
+        issues += chunk
+        if len(chunk) < 50:
+            break
+        page += 1
     if not issues:
         return None                       # board unreachable (or empty) -> fail closed
-    gb_v = f"GB-{gb}-V"
-    gb_t = f"GB-{gb}"
-    order = []
+    gb_v_re = re.compile(r"^GB-(\d{3})-V(\d*)$")
+    gate_orders = []
+    owner = None
     for it in issues:
         t = it.get("title") or ""
-        if t.startswith(gb_v):
-            order.insert(0, it["number"])       # the -V ticket first
-        elif t.startswith(gb_t):
-            order.append(it["number"])
+        m = gb_v_re.match(t)
+        if m and m.group(1) == gb:
+            gate_orders.append((int(m.group(2) or 1), it["number"]))  # (ordinal, num)
+        elif t.startswith(f"GB-{gb} "):
+            owner = it["number"]
+    # GB-110-V3 clause 2: a parent accumulates gates; the HIGHEST ORDINAL governs (same
+    # lesson groom.py's newest_gate() encodes).  Never take the first match — a superseded
+    # GB-106-V must not beat the current GB-106-V2.
+    gate_orders.sort(reverse=True)
+    order = [num for (_ord, num) in gate_orders] + ([owner] if owner else [])
     for num in order:
         cs = _forgejo(f"/repos/{base}/issues/{num}/comments?limit=100", env) or []
         for c in reversed(cs):
             body = (c.get("body") or "").replace("\r", "")
             if re.search(r"VERDICT[^\n]{0,50}\bGREEN\b", body, re.I):
                 shas = graded_shas_in(body)
-                return shas[0] if shas else None   # GREEN with no sha -> fail closed
-    return None                                   # no GREEN verdict found
+                if not shas:
+                    return None            # a GREEN present but names no sha -> fail closed
+                for sha in shas:
+                    if head and head.startswith(sha):
+                        return sha        # the GREEN that names THIS head
+                return shas[0]            # GB-110-V3 clause 2: the card's GREEN IS found even
+                                          # when the (merged) head no longer prefix-matches — return
+                                          # its sha so decide() refuses naming the mismatch, never
+                                          # a silent "no GREEN"
+    return None                           # no GREEN verdict found
 
 
 def graded_sha_of(pr, env=None):
@@ -191,10 +222,15 @@ def self_test():
     ok, r = decide(h, "b" * 40); check(not ok, "graded!=head -> refuse (%s)" % r[:20])
     ok, r = decide(h, None); check(not ok, "no graded sha -> FAILS CLOSED (%s)" % r[:20])
     ok, r = decide(None, h); check(not ok, "no head -> refuse (%s)" % r[:20])
-    # graded_shas_in parse
-    check(40 in [len(s) for s in graded_shas_in("VERDICT GREEN graded sha " + "c" * 40)],
-          "parses a 40-hex sha from a VERDICT/graded line")
-    check(graded_shas_in("VERDICT GREEN") == [], "no sha in VERDICT -> empty (fails closed upstream)")
+    # graded_shas_in parse — GB-110-V2 clause 5: use a REAL verdict body, not a synthetic
+    # line, and cover abbreviated (prefix) shas that real verdicts name.
+    real_verdict = ("## VERDICT: GREEN\nGate run on origin/main, gate tree `cf235c5`\n"
+                    "**Tree that would merge:** abcde12345\n")
+    check("c" * 40 in graded_shas_in("**Tree that would merge:** " + "c" * 40),
+          "parses a full 40-hex sha on the canonical 'Tree that would merge:' line")
+    check("abcde12345" in graded_shas_in(real_verdict),
+          "reads an abbreviated (10-char-prefix) sha from a real GREEN body (GB-109 prefix rule in the parser)")
+    check(graded_shas_in("VERDICT GREEN") == [], "a VERDICT with no sha -> empty (fails closed upstream)")
     # -> W0-case: #194 (GB-103) merged 2026-10-26 graded 7de6dde.. but merged e8c7dc8..
     #    (a GREEN that named a tree DIFFERENT from the head that merged).  The
     #    fixture must go red FOR THIS MISMATCH, not for silence.
