@@ -150,6 +150,8 @@ u8 nes_read(nes_machine *m, u16 addr){
         m->ppu.status &= (u8)~0x80;          /* reading clears bit 7 */
         return (u8)(s | 0x20);               /* + unused bits */
       }
+      case 4:
+        return m->ppu.oam[m->ppu.oam_addr & 0xFF];   /* OAMDATA read */
       case 7: {
         u8 v = m->ppu.vram[m->ppu.vram_addr & (NES_VRAM_SIZE-1)];
         m->ppu.vram_addr = (u16)(m->ppu.vram_addr + (m->ppu.ctrl & 4 ? 32 : 1));
@@ -171,6 +173,10 @@ void nes_write(nes_machine *m, u16 addr, u8 val){
       case 0: m->ppu.ctrl = val; return;
       case 1: m->ppu.mask = val; return;
       case 3: m->ppu.oam_addr = val; return;
+      case 4:                              /* OAMDATA write (auto-increment) */
+        m->ppu.oam[m->ppu.oam_addr & 0xFF] = val;
+        m->ppu.oam_addr++;
+        return;
       case 5:
         m->ppu.vram_latch = (u16)((m->ppu.vram_latch & 0xFF00) | val); return;
       case 6: {                               /* two-stage $2006 latch */
@@ -210,6 +216,28 @@ void nes_ppu_render(nes_machine *m){
           u8 shade = (u8)(pal * 64 + 8);
           m->ppu.fb[(ty*8+py)*NES_SCREEN_W + (tx*8+px)] = shade;
         }
+      }
+    }
+  }
+  /* Sprites (OAM): up to 8, 8x8 glyphs blitted over the background.  A sprite
+   * pixel of palette 0 is transparent (the background shows through).  OAM row
+   * per sprite: y(+1), tile, attribute, x.  Drawn in list order so a later
+   * sprite wins ties (compact priority). */
+  for (int s = 0; s < 8; s++) {
+    const u8 *o = &m->ppu.oam[s * 4];
+    int sy = (int)o[0] - 1, tile = o[1], sx = (int)o[3];
+    if (o[0] == 0 || sy >= NES_SCREEN_H || sx >= NES_SCREEN_W) continue;
+    for (int py = 0; py < 8; py++) {
+      u16 pat = (u16)(0x1000 + tile*16 + py);
+      u8 lo = m->ppu.vram[pat & (NES_VRAM_SIZE-1)];
+      u8 hi = m->ppu.vram[(pat+8) & (NES_VRAM_SIZE-1)];
+      if (sy + py < 0 || sy + py >= NES_SCREEN_H) continue;
+      for (int px = 0; px < 8; px++) {
+        u8 pal = (u8)(((lo >> (7-px)) & 1) | (((hi >> (7-px)) & 1) << 1));
+        if (pal == 0) continue;              /* transparent */
+        int dx = sx + px;
+        if (dx < 0 || dx >= NES_SCREEN_W) continue;
+        m->ppu.fb[(sy+py)*NES_SCREEN_W + dx] = (u8)(pal * 64 + 8);
       }
     }
   }

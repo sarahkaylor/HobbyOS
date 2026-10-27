@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "../user/nes/nes.h"
+#include "../user/nes/homebrew_rom.h"
 #include "../user/nes/nes.c"
 
 static int passed = 0, failed = 0;
@@ -122,6 +123,129 @@ int main(void){
     u8 b1 = nes_read(&m, 0x4016);
     CHECK((b0 & 1) == 1, "controller bit0 read back set");
     CHECK((b1 & 1) == 0, "controller bit1 (0 in joy) reads 0");
+  }
+
+  /* ---- homebrew ROM responds to the controller (GB-035 "plays a ROM") - */
+  {
+    int i, band;
+    /* A released -> dark top band stays present (cells 0..31 = tile 1) */
+    nes_machine m;
+    memset(&m, 0, sizeof(m));
+    for (i = 0; i < HOME_ROM_LEN; i++) m.prg[i] = home_rom[i];
+    m.prg[0x7FFC] = 0x00; m.prg[0x7FFD] = 0x80;
+    nes_reset(&m);
+    m.joy = 0;
+    nes_run(&m, 60000);
+    CHECK(m.ppu.vram[0x1000] == 0xFF, "homebrew boots: pattern tile 0 solid bright");
+    band = 0;
+    for (i = 0; i < 32; i++)
+      if (m.ppu.vram[(0x2000 + i) & (NES_VRAM_SIZE - 1)] == 1) band++;
+    CHECK(band == 32, "homebrew: A released keeps the dark top band (resting frame)");
+    /* the boot frame also places an OAM sprite: tile 3 (mid-grey) at (12,12) */
+    CHECK(m.ppu.vram[0x1038] == 0xFF && m.ppu.oam[0] == 13 && m.ppu.oam[1] == 3,
+          "homebrew: sprite tile 3 written and OAM[0] = (y=12,tile=3,x=12)");
+    nes_ppu_render(&m);
+    CHECK(m.ppu.fb[12*NES_SCREEN_W + 12] == 136 &&
+          m.ppu.fb[10*NES_SCREEN_W + 40] == 200,
+          "homebrew: rendered sprite pixel at (12,12) mid-grey over bright field");
+
+    /* A pressed -> the ROM clears the band (picture visibly changes) */
+    nes_machine m2;
+    memset(&m2, 0, sizeof(m2));
+    for (i = 0; i < HOME_ROM_LEN; i++) m2.prg[i] = home_rom[i];
+    m2.prg[0x7FFC] = 0x00; m2.prg[0x7FFD] = 0x80;
+    nes_reset(&m2);
+    m2.joy = 0x01;                       /* A = controller bit 0 */
+    nes_run(&m2, 60000);
+    band = 0;
+    for (i = 0; i < 32; i++)
+      if (m2.ppu.vram[(0x2000 + i) & (NES_VRAM_SIZE - 1)] == 0) band++;
+    CHECK(band == 32, "homebrew: A pressed clears the band (ROM responds to input)");
+  }
+
+  /* ---- self-advance: the ROM animates on its own (GB-035-V red path) ------ */
+  {
+    int i;
+    /* With NO input at all, the blink nametable cell ($2000+0x34) must toggle
+       between tile dark and bright across the run, i.e. the rendered frame
+       advances by itself — the "make the ROM animate on its own" green path. */
+    nes_machine m3; memset(&m3, 0, sizeof(m3));
+    for (i = 0; i < HOME_ROM_LEN; i++) m3.prg[i] = home_rom[i];
+    m3.prg[0x7FFC] = 0x00; m3.prg[0x7FFD] = 0x80;
+    nes_reset(&m3);
+    m3.joy = 0;
+    int see0 = 0, see1 = 0, changes = 0, last = -1;
+    for (i = 0; i < 400; i++) {
+      nes_run(&m3, 300);
+      u8 c = m3.ppu.vram[0x2034 & (NES_VRAM_SIZE - 1)];
+      if (c == 0) see0 = 1;
+      if (c == 1) see1 = 1;
+      if (last != -1 && c != last) changes++;
+      last = c;
+    }
+    CHECK(see0 && see1 && changes > 0,
+          "homebrew self-advances: blink cell toggles across frames with no input");
+  }
+
+  /* ---- additional 6502 instructions (shifts, branches, ind-jmp, stack) - */
+  {
+    /* shifts/rotates: 0x86 ASL->(0x0C,C1) LSR->0x06 ROL->0x0C ROR->0x06 */
+    static const u8 p1[] = {0xA9,0x86, 0x0A, 0x4A, 0x2A, 0x6A, 0x85,0x10,
+                            0x4C,0x08,0x80};
+    nes_machine m; memset(&m, 0, sizeof(m));
+    memcpy(&m.prg[0], p1, sizeof(p1)); m.prg[0x7FFC]=0; m.prg[0x7FFD]=0x80;
+    nes_reset(&m); nes_run(&m, 300);
+    CHECK(m.cpu.a == 0x06, "6502 ASL/LSR/ROL/ROR chain yields A==0x06");
+    CHECK((m.cpu.p & 0x01) == 0, "shift chain leaves Carry clear");
+    CHECK(m.ram[0x10] == 0x06, "STA $10 (absolute,zero-page) stores the shift result");
+
+    /* branches: SEC -> BCC falls through (INX), BCS taken (skips INY) */
+    static const u8 p2[] = {0x38, 0x90,0x01, 0xE8, 0xB0,0x01, 0x88, 0x4C,0x07,0x80};
+    nes_machine m2; memset(&m2, 0, sizeof(m2));
+    memcpy(&m2.prg[0], p2, sizeof(p2)); m2.prg[0x7FFC]=0; m2.prg[0x7FFD]=0x80;
+    nes_reset(&m2); nes_run(&m2, 300);
+    CHECK(m2.cpu.x == 1 && m2.cpu.y == 0,
+          "6502 BCC falls through / BCS taken (X=1, INY skipped)");
+
+    /* indirect JMP ($0030): [0x30]=0x40 [0x31]=0x80 -> 0x8040 sets X=0x55 */
+    nes_machine m3; memset(&m3, 0, sizeof(m3));
+    static const u8 p3[] = {0xA9,0x40,0x85,0x30, 0xA9,0x80,0x85,0x31, 0x6C,0x30,0x00};
+    memcpy(&m3.prg[0], p3, sizeof(p3));
+    m3.prg[0x40]=0xA2; m3.prg[0x41]=0x55;          /* LDX #$55 @ $8040 */
+    m3.prg[0x42]=0x4C; m3.prg[0x43]=0x42; m3.prg[0x44]=0x80; /* JMP $8042 self */
+    m3.prg[0x7FFC]=0; m3.prg[0x7FFD]=0x80;
+    nes_reset(&m3); nes_run(&m3, 300);
+    CHECK(m3.cpu.x == 0x55, "6502 JMP ($xxxx) indirect takes the pointer target");
+
+    /* stack: PHA push / PLA pull round-trips A and balances the stack */
+    static const u8 p4[] = {0xA9,0x77, 0x48, 0xA9,0x22, 0x68, 0x4C,0x06,0x80};
+    nes_machine m4; memset(&m4, 0, sizeof(m4));
+    memcpy(&m4.prg[0], p4, sizeof(p4)); m4.prg[0x7FFC]=0; m4.prg[0x7FFD]=0x80;
+    nes_reset(&m4); nes_run(&m4, 300);
+    CHECK(m4.cpu.a == 0x77 && m4.cpu.sp == 0xFD,
+          "6502 PHA push / PLA pull restores A and balances the stack");
+  }
+
+  /* ---- sprite (OAM) rendering (GB-035 PPU) ----------------------------- */
+  {
+    nes_machine m; memset(&m, 0, sizeof(m));
+    /* pattern tile 5, row 0: bit7 set -> palette 1 (shade 72) */
+    m.ppu.vram[0x1000 + 5*16] = 0x80;
+    /* place sprite 0 at (x=20, y=10) via $2003/$2004 (auto-increment) */
+    nes_write(&m, 0x2003, 0);
+    nes_write(&m, 0x2004, 11);   /* y = 10 => OAM stores y+1 */
+    nes_write(&m, 0x2004, 5);    /* tile = 5 */
+    nes_write(&m, 0x2004, 0);    /* attribute */
+    nes_write(&m, 0x2004, 20);   /* x = 20 */
+    /* $2004 read-back of the first OAM byte */
+    nes_write(&m, 0x2003, 0);
+    CHECK(nes_read(&m, 0x2004) == 11, "OAMDATA ($2004) reads back the written y");
+    /* background is left all-dark (palette 0 / shade 8) */
+    nes_ppu_render(&m);
+    CHECK(m.ppu.fb[10*NES_SCREEN_W + 20] == 72,
+          "sprite glyph blits over the background at (20,10)");
+    CHECK(m.ppu.fb[10*NES_SCREEN_W + 40] == 8,
+          "background (no sprite there) stays dark at (40,10)");
   }
 
   printf("\nTests: passed=%d failed=%d -> %s\n",
