@@ -1,0 +1,3 @@
+gesture='auto': ValueError(launch_from_menu: unknown gesture 'auto' (want 'keys' or 'click'))  events_before_raise=[]
+gesture='keyz': ValueError(launch_from_menu: unknown gesture 'keyz' (want 'keys' or 'click'))  events_before_raise=[]
+gesture=None: ValueError(launch_from_menu: unknown gesture None (want 'keys' or 'click'))  events_before_raise=[]

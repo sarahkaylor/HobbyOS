@@ -1,0 +1,5 @@
+usage: evidence_rig.py [-h] --game GAME [--bin BIN] [--slot SLOT]
+                       [--arch {arm,intel}] [--root ROOT]
+                       [--checkpoints CHECKPOINTS] [--run-seconds RUN_SECONDS]
+                       [--input INPUT] [--gesture {keys,click}]
+evidence_rig.py: error: argument --gesture: invalid choice: 'auto' (choose from 'keys', 'click')

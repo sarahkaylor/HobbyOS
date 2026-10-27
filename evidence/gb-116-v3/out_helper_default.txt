@@ -1,0 +1,10 @@
+signature: (q, slot, taskbar_y=1054, arch='arm', gesture='keys')
+
+launch_from_menu(q, 3)            <- what acceptance_run.py / perf_game_cycle.py do
+  f1=1  clicks=0  events=[('key', 'f1'), ('key', 'home'), ('key', 'down'), ('key', 'down'), ('key', 'down'), ('key', 'ret')]
+
+launch_from_menu(q, 3, gesture='keys')
+  f1=1  clicks=0  events=[('key', 'f1'), ('key', 'home'), ('key', 'down'), ('key', 'down'), ('key', 'down'), ('key', 'ret')]
+
+launch_from_menu(q, 3, gesture='click')
+  f1=0  clicks=1  events=[('click', 38, 1067), ('key', 'home'), ('key', 'down'), ('key', 'down'), ('key', 'down'), ('key', 'ret')]

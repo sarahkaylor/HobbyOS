@@ -1,0 +1,3 @@
+gaming.md
+tools/board/import_seed.py
+tools/evidence_rig.py
