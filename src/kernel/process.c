@@ -2026,6 +2026,11 @@ void schedule(struct trap_frame *tf, int is_yield) {
       spinlock_release_irqrestore(&proc_lock, flags);
       if (cpu == 0) {
         extern void scheduler_finished(void);
+        /* GB-060: print the end-of-run lock-strand counters here, on CPU 0,
+           before the machine actually halts, so the [LOCKCNT] line is real
+           console output the tier greps (not a hand-derived zero). */
+        extern void lock_print_counters(void);
+        lock_print_counters();
         scheduler_finished();
       } else {
         uart_puts("System halt from CPU ");
