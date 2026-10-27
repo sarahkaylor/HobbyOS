@@ -1,0 +1,35 @@
+=== BREAK (clean, compiles): "if (spc == 0)" -> "if (spc == 0 || 1)" ===
+mode=break applied
+--- guard test ---
+  FAIL: socketpair block guarded on success (if (spc == 0))
+  PASS: pipe block guarded on success (if (prc == 0))
+  PASS: socketpair failure -> SKIP with reason
+  PASS: pipe failure -> SKIP with reason
+  FAIL: write(sv[1]) occurs inside the socketpair guard
+  PASS: write(pfd[1]) occurs inside the pipe guard
+  PASS: host leg A: socketpair succeeds (real rows, byte-identical)
+  PASS: host leg A: no SKIP rows on success
+  PASS: guard-removed variant is structurally detectable (check fails when the guard is removed)
+T4_PROBE_GUARD_TEST: FAIL (2)
+guard test rc=1
+
+--- the broken probe still compiles; run it on the FAILURE path ---
+cc rc=0
+run rc=0
+row=sockpair rc=-1 errno=9
+row=sockpoll_ready rc=1 errno=0
+row=sockpoll_revents rc=1 errno=0
+row=sockselect_ready rc=1 errno=0
+row=sockselect_fdset rc=1 errno=0
+row=sockpselect_ready rc=1 errno=0
+row=sockpselect_fdset rc=1 errno=0
+SKIP rows: 7
+
+=== RESTORE ===
+mode=restore applied
+(empty = clean)
+T4_PROBE_GUARD_TEST: PASS - blocks guarded; failure->SKIP+reason; success byte-identical; guard removal detected
+
+=== healthy tree: 41 rows, no SKIP (byte-identical to leg A) ===
+rows=41 skips=0
+identical to the earlier healthy run

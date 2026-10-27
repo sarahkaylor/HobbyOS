@@ -1,0 +1,31 @@
+=== BREAK: remove the "if (spc == 0)" guard from the real probe ===
+mode=break applied
+--- their guard test must now FAIL ---
+  FAIL: socketpair block guarded on success (if (spc == 0))
+  PASS: pipe block guarded on success (if (prc == 0))
+  PASS: socketpair failure -> SKIP with reason
+  PASS: pipe failure -> SKIP with reason
+  FAIL: write(sv[1]) occurs inside the socketpair guard
+  PASS: write(pfd[1]) occurs inside the pipe guard
+  FAIL: t4_probe.c compiles: v/tools/t3/../../src/user/t4_probe.c: In function ‘main’:
+/home/sarah/wt/gb111v/tools/t3/../../src/user/t4_probe.c:221:7: error: ‘else’ without a previous ‘if’
+  221 |     } else {
+      |       ^~~~
+
+  PASS: guard-removed variant is structurally detectable (check fails when the guard is removed)
+T4_PROBE_GUARD_TEST: FAIL (3)
+guard test rc=1
+
+--- and the failure path now touches uninitialised fds: cc + run under the same ulimit ---
+src/user/t4_probe.c: In function ‘main’:
+src/user/t4_probe.c:221:7: error: ‘else’ without a previous ‘if’
+  221 |     } else {
+      |       ^~~~
+run rc=127
+--- rows emitted around the broken block (note: no SKIP, and the fds are garbage) ---
+SKIP rows: 0
+
+=== RESTORE ===
+mode=restore applied
+(empty = clean)
+T4_PROBE_GUARD_TEST: PASS - blocks guarded; failure->SKIP+reason; success byte-identical; guard removal detected

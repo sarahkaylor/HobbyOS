@@ -1,0 +1,20 @@
+rev: d245eadf140b0a1f88c57354e40b815e8ee21275  date: 2026-10-27T00:54:09Z
+
+=== 1) t4_probe_guard_test.py ===
+  PASS: socketpair block guarded on success (if (spc == 0))
+  PASS: pipe block guarded on success (if (prc == 0))
+  PASS: socketpair failure -> SKIP with reason
+  PASS: pipe failure -> SKIP with reason
+  PASS: write(sv[1]) occurs inside the socketpair guard
+  PASS: write(pfd[1]) occurs inside the pipe guard
+  PASS: host leg A: socketpair succeeds (real rows, byte-identical)
+  PASS: host leg A: no SKIP rows on success
+  PASS: guard-removed variant is structurally detectable (check fails when the guard is removed)
+T4_PROBE_GUARD_TEST: PASS - blocks guarded; failure->SKIP+reason; success byte-identical; guard removal detected
+rc=0
+
+=== 2) leg A on the host: cc -Wall, 41 rows, real rc, no SKIP ===
+cc rc=0
+run rc=0
+row= lines: 41
+row=pipe2 rc=0 errno=0

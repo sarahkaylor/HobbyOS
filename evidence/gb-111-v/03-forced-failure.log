@@ -1,0 +1,22 @@
+=== healthy host: the socketpair + pipe2 rows ===
+row=pipe2 rc=0 errno=0
+row=sockpair rc=0 errno=0
+
+=== FORCED failure: ulimit -n 5 (one free fd; socketpair and pipe2 both fail EMFILE) ===
+run rc=0
+row= lines: 39
+
+--- the failure-path rows, verbatim ---
+row=pipe2 rc=-1 errno=9
+row=pipe_write rc=-1 errno=9 SKIP reason=no-pipe
+row=sockpair rc=-1 errno=9
+row=sock_write rc=-1 errno=9 SKIP reason=no-socketpair
+row=sockpoll_ready rc=-1 errno=9 SKIP reason=no-socketpair
+row=sockpoll_revents rc=-1 errno=9 SKIP reason=no-socketpair
+row=sockselect_ready rc=-1 errno=9 SKIP reason=no-socketpair
+row=sockselect_fdset rc=-1 errno=9 SKIP reason=no-socketpair
+row=sockpselect_ready rc=-1 errno=9 SKIP reason=no-socketpair
+row=sockpselect_fdset rc=-1 errno=9 SKIP reason=no-socketpair
+
+--- count of SKIP rows ---
+14
