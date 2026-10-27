@@ -1,0 +1,23 @@
+### G3/G5: ordering + security @ 2bde146 2026-10-27T06:00:54Z
+=== clause 3a: the real board's candidate order for GB-106 (V, V2 + owner) ===
+  (ordinal, issue) sorted: []
+  walk order: [200]
+
+=== clause 3b: a hypothetical V3 beats V2 (ordinal, not issue number) ===
+  sorted: [(3, 300), (2, 202), (1, 201)] -> highest ordinal first: (3, 300)
+  with V3 numbered below V2: [(3, 90), (2, 202), (1, 201)] -> still ordinal-first: (3, 90)
+
+=== clause 5: security half ===
+  forged cache 'f'*40 -> graded_sha_of(204) = None
+  unreachable board   -> None
+  head from API only  -> 3da727ce691c08c0f46c2d69db24a03e10516fa9
+
+### G6: the self-test as shipped
+  PASS: a FORGED local cache disagreeing with the board -> FAIL CLOSED
+  PASS: no GREEN on the board (or unreachable) -> FAIL CLOSED even with a local file
+  PASS: parses a 40-hex sha on the canonical 'Tree that would merge:' line
+  PASS: selects the sha naming THIS head (not shas[0]) in a multi-sha GREEN (got abcdef12)
+  PASS: closed card's GREEN is FOUND for a merged PR (got aaaaaaa)
+  PASS: decide() then REFUSES naming the graded/mismatch (REFUSE: graded aaaaaaa.. is not a prefix of the cu)
+  PASS: the HIGHEST-ordinal gate's GREEN (GB-106-V2) wins over the superseded V (got abcdef12)
+MERGE_PR_TEST: PASS - fail-closed guard rule + #194 goes red

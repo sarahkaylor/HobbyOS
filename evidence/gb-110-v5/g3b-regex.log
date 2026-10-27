@@ -1,0 +1,17 @@
+### G3b: regex vs real titles, and the shipped walk 2026-10-27T06:01:20Z
+=== the shipped regex vs REAL titles ===
+  '^GB-(\\d{3})-V(\\d*)$'  <-  'GB-106-V Verify merge_pr.py fail-close'  match=False
+  '^GB-(\\d{3})-V(\\d*)$'  <-  'GB-106-V2 Re-gate the merge guard: #194 must'  match=False
+  '^GB-(\\d{3})-V(\\d*)$'  <-  'GB-111-V Verify t4 probe guards socketpair/p'  match=False
+  '^GB-(\\d{3})-V(\\d*)$'  <-  'GB-106 A gate verdict names a tree'  match=False
+=== vs bare titles (what the unit test uses) ===
+  'GB-106-V' -> match=True ordinal=1
+  'GB-106-V2' -> match=True ordinal=2
+
+=== the walk the shipped code builds, instrumented ===
+  GB-106: gate_orders=[]  owner=200  walk=[200]
+  GB-111: gate_orders=[]  owner=214  walk=[214]
+
+=== does the parent card carry a GREEN that names the head? ===
+  #200 GB-106 parent: 2 GREEN comment(s) 2026-10-26T21:28:26Z
+  #214 GB-111 parent: 1 GREEN comment(s) 2026-10-27T00:55:53Z
