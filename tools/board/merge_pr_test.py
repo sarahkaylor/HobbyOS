@@ -89,6 +89,17 @@ ok, r = mp.decide(head_merged, found)
 check(found is not None, "closed card's GREEN is FOUND for a merged PR (got %s)" % (found[:7] if found else None))
 check(not ok and found and found != head_merged, "decide() then REFUSES naming the graded/mismatch (%s)" % r[:50])
 mp.head_of_pr, mp._forgejo, mp.pr_gb_id = _o_head, _o_fj, _o_gb
+# GB-110-V3 clause 2: the HIGHEST-ORDINAL gate governs (never the first match). A
+# superseded GB-106-V whose GREEN names a stale sha must NOT beat GB-106-V2 naming the head.
+ord_head = board_sha
+stale = "e" * 40
+mp.head_of_pr = lambda pr, env=None: ord_head
+mp.pr_gb_id = lambda pr, env=None: "106"
+mp._forgejo = lambda api, env=None: ([{"body": "## VERDICT: GREEN\n**Tree that would merge:** " + (ord_head if "/203/comments" in api else stale) + "\n"}]
+                                     if "comments" in api else [{"number": 201, "title": "GB-106: owner "}, {"number": 202, "title": "GB-106-V"}, {"number": 203, "title": "GB-106-V2"}])
+chosen = mp.graded_sha_from_board(204)
+check(chosen == ord_head, "the HIGHEST-ordinal gate's GREEN (GB-106-V2) wins over the superseded V (got %s)" % (chosen[:8] if chosen else None))
+mp.head_of_pr, mp._forgejo, mp.pr_gb_id = _o_head, _o_fj, _o_gb
 
 if fails:
     print("MERGE_PR_TEST: FAIL (%d)" % fails); sys.exit(1)
