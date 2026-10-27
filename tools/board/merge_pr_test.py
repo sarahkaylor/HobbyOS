@@ -19,6 +19,9 @@ check(not decide(h, "2222222222222222222222222222222222222222")[0], "graded != h
 check(not decide(h, None)[0], "GREEN names no sha -> FAILS CLOSED (refuse)")
 check(not decide(None, h)[0], "no head supplied -> refuse")
 check(40 in [len(s) for s in graded_shas_in("VERDICT GREEN graded sha " + "c" * 40)], "parses a 40-hex graded sha from a VERDICT line")
+# GB-110-V2 clause 5: a real verdict body names an ABBREVIATED prefix (7-40 hex)
+check("deadbeefe0" in graded_shas_in("## VERDICT: GREEN\n**Tree that would merge:** deadbeefe0\n"),
+      "reads an abbreviated (10-char-prefix) sha from a real GREEN body")
 check(graded_shas_in("VERDICT GREEN") == [], "a VERDICT with no sha -> empty (fails closed upstream)")
 
 # DoD self-test anchor: today's PR #194 (GB-103) was graded at 7de6dde.. but merged at
@@ -57,6 +60,23 @@ mp.graded_sha_from_board = lambda pr, env=None: None                 # board has
 check(mp.graded_sha_of(9) is None, "no GREEN on the board (or unreachable) -> FAIL CLOSED even with a local file")
 os.remove(cache)
 mp.graded_sha_from_board = _orig_fb
+# GB-110-V clauses 3+4: graded_shas_in must parse the canonical real-green line and the
+# sha for THIS head is selected (not blindly shas[0] in a multi-sha / two-GREEN verdict).
+check(40 in [len(s) for s in mp.graded_shas_in("**Tree that would merge:** " + "a" * 40)],
+      "parses a 40-hex sha on the canonical 'Tree that would merge:' line")
+head = board_sha
+other = "9999999999999999999999999999999999999999"
+_o_head, _o_fj, _o_gb = mp.head_of_pr, mp._forgejo, mp.pr_gb_id
+mp.head_of_pr = lambda pr, env=None: head
+mp.pr_gb_id = lambda pr, env=None: "110"
+def _fk(api, env=None):
+    if "comments" in api:
+        return [{"body": "## VERDICT: GREEN\n**Tree that would merge:** " + other + "\n**Tree that would merge:** " + head + "\n"}]
+    return [{"number": 7, "title": "GB-110-V"}, {"number": 8, "title": "GB-110"}]
+mp._forgejo = _fk
+sel = mp.graded_sha_from_board(209)
+check(sel == head, "selects the sha naming THIS head (not shas[0]) in a multi-sha GREEN (got %s)" % (sel[:8] if sel else None))
+mp.head_of_pr, mp._forgejo, mp.pr_gb_id = _o_head, _o_fj, _o_gb
 
 if fails:
     print("MERGE_PR_TEST: FAIL (%d)" % fails); sys.exit(1)
