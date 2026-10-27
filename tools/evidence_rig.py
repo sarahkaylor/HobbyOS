@@ -167,10 +167,40 @@ def resolve_launch_slot(serial_log, bin_name, provided=None):
     return found, warn
 
 
-def launch_from_menu(q, slot, taskbar_y=H - 26):
-    """Open the Apps menu and navigate down to the given slot, launching it."""
-    q.click(38, taskbar_y + 13)
-    time.sleep(0.8)
+def launch_from_menu(q, slot, taskbar_y=H - 26, arch="arm", gesture="keys"):
+    """Open the Apps menu and navigate down to the given slot, launching it.
+
+    GB-116: on intel the pointer click below cannot work.  `src/user/desktop.c`
+    maps **F1 (evdev 59) to open the start menu** for exactly that reason, with
+    the comment: "on x64 the kernel's PS/2 input path does not deliver mouse
+    buttons (browser.md, WF1B), so an F1 map keeps the menu launchable on both
+    arches".  `Makefile:257` has no pointer device at all, so a QMP absolute
+    click has nowhere to land and the [LAUNCH] line never appears -- measured as
+    `[LAUNCH] = 0` on GB-059-V's intel run.
+
+    `gesture`:
+      keys  -- F1 opens the menu, then Home + Down*s + Enter (the default: measured
+               to launch on BOTH arches -- intel 1, arm 1)
+      click -- the pre-GB-116 behaviour, kept only to reproduce the intel failure
+               (measured: intel 0, arm 1)
+
+    Do NOT press the click *after* F1: the Apps button toggles the same menu shut
+    (`desktop.c:2218` gates F1 on `!start_menu_open && !app_menu_open`), so an
+    "F1 then click" gesture measures 0 on intel *and* 0 on ARM -- GB-116-V’s RED,
+    which is why the first cut of this card (`--gesture auto`) was withdrawn.
+    """
+    if gesture == "keys":
+        q.key("f1", 0.4)          # desktop.c: EV_KEY 59 opens the start menu
+        time.sleep(0.4)
+    elif gesture == "click":
+        q.click(38, taskbar_y + 13)
+        time.sleep(0.8)
+    else:
+        # A dead default is worse than a loud one: `perf_game_cycle.py` and
+        # `t5/acceptance_run.py` both call this with no gesture, so an unknown
+        # value here silently opens nothing and the launch fails for a reason
+        # that is not in the log (GB-116-V2 clause 6).
+        raise ValueError("launch_from_menu: unknown gesture %r (want 'keys' or 'click')" % (gesture,))
     q.key("home", 0.3)
     for _ in range(slot):
         q.key("down", 0.06)
@@ -202,6 +232,11 @@ def main():
     ap.add_argument("--run-seconds", type=int, default=8,
                     help="seconds to hold the game open after launch")
     ap.add_argument("--input", default="", help="optional key sequence, e.g. up,left,up,left")
+    ap.add_argument("--gesture", default="keys", choices=["keys", "click"],
+                    help="how to open the Apps menu: keys = F1 (works on intel AND arm; "
+                         "intel has no pointer device, so the click cannot work there), "
+                         "click = the pre-GB-116 behaviour, for reproducing that failure. "
+                         "Do not combine them: the Apps button toggles the F1 menu shut.")
     args = ap.parse_args()
 
     os.chdir(args.root)
@@ -243,7 +278,7 @@ def main():
 
     if "boot" in checkpoints:
         snap("boot")
-    launch_from_menu(q, slot)
+    launch_from_menu(q, slot, arch=args.arch, gesture=args.gesture)
     if "launch" in checkpoints:
         snap("launch")
 
