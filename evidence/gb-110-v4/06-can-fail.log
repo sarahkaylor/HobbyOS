@@ -1,0 +1,12 @@
+=== can-fail: reverse the ordinal sort (V would beat V2) ===
+break applied: ordinal sort reversed (V would beat V2)
+selftest rc=1
+  PASS: no GREEN on the board (or unreachable) -> FAIL CLOSED even with a local file
+  FAIL: the HIGHEST-ordinal gate's GREEN (GB-106-V2) wins over the superseded V (got eeeeeeee)
+MERGE_PR_TEST: FAIL (1)
+
+=== restore ===
+restored
+(empty = clean)
+restored rc=0
+MERGE_PR_TEST: PASS - fail-closed guard rule + #194 goes red

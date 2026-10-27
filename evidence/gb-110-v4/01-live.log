@@ -1,0 +1,16 @@
+rev: 1b2fc862a37a17c131812c7a914d91291e869f63  2026-10-27T05:51:17Z
+
+=== clause 1: --pr 204 (GB-106 carries GB-106-V and GB-106-V2) ===
+[merge_pr] PR #204: ok: graded prefix 3da727c.. matches current head 3da727ce691c.. — merge allowed
+[merge_pr] MERGE ALLOWED (guard only; run with --merge to perform it)
+rc=0
+
+=== clause 2: --pr 213 must still allow on d245ead ===
+[merge_pr] PR #213: ok: graded prefix d245ead.. matches current head d245eadf140b.. — merge allowed
+[merge_pr] MERGE ALLOWED (guard only; run with --merge to perform it)
+rc=0
+
+=== clause 2b: --pr 209 (GB-109-V, my GREEN) ===
+[merge_pr] PR #209: ok: graded prefix b3540e5.. matches current head b3540e58569f.. — merge allowed
+[merge_pr] MERGE ALLOWED (guard only; run with --merge to perform it)
+rc=0

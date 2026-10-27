@@ -1,0 +1,27 @@
+=== does the ordinal selector ever engage on REAL titles? ===
+issues returned by state=all: 221
+
+--- does the selector's regex match real verify-card titles? ---
+  #221  match=False title='GB-110-V4 Verify gate-ordinal selection: --pr 204 must ALLOW on the V2 v'
+  #220  match=False title='GB-035-V3 Verify NES plays: 2 states A→B→A + a held-CPU control (correct'
+  #219  match=False title='GB-110-V3 Verify the guard works: --pr 213 must ALLOW, pagination reache'
+  #218  match=False title='GB-035-V2 Verify the NES emulator boots and plays a license-clean ROM in'
+  #217  match=False title='GB-060-V2 Verify both holder shapes recover (stopped and wedged) on the '
+  #216  match=False title='GB-110-V2 Post-merge gate: does the guard as landed (0633743) read real '
+  #215  match=False title='GB-111-V Verify t4 probe guards socketpair/pipe blocks (no uninitialised'
+  #213  match=False title='GB-110-V Verify merge guard graded sha from newest GREEN (board API); fo'
+
+--- AND groom.GATE_RE (the shared rule the card points at)? ---
+  #221  GATE_RE(full title)=False GATE_RE(base_id)=True   base_id='GB-110-V4'
+
+--- which cards were considered for PR #204 / #211 (traced) ---
+  PR #204: cards queried=[200]  chosen sha=3da727c
+  PR #211: cards queried=[211]  chosen sha=d245ead
+
+--- what those cards are ---
+  #221 state=open    title='GB-110-V4 Verify gate-ordinal selection: --pr 204 must ALLOW on '
+  #213 state=open    title='GB-110-V Verify merge guard graded sha from newest GREEN (board '
+  #212 state=closed  title='GB-110-V Verify the board-sourced graded sha: a forged local fil'
+  #211 state=open    title="GB-110 The merge guard's graded sha comes from a writable local "
+  #202 state=closed  title='GB-106-V Verify the fail-closed merge guard: mismatch refused, n'
+  #200 state=closed  title='GB-106 A gate verdict names a tree, a PR names a head, and nothi'

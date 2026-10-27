@@ -1,0 +1,20 @@
+=== clause 3: candidate order, traced on real board data ===
+PR #211 -> GB-110  head=0633743f8475…
+  candidate order actually queried: [211]
+  board sha chosen: d245ead
+  decide: allow=False  REFUSE: graded d245ead.. is not a prefix of the current head 0633743f8475.. — refusing to 
+
+PR #204 -> GB-106  head=3da727ce691c…
+  candidate order actually queried: [200]
+  board sha chosen: 3da727c
+  decide: allow=True  ok: graded prefix 3da727c.. matches current head 3da727ce691c.. — merge allowed
+
+GB-106: (ordinal, issue#, state) = []
+  ordinal order -> []
+  issue# order  -> []
+GB-109: (ordinal, issue#, state) = []
+  ordinal order -> []
+  issue# order  -> []
+GB-110: (ordinal, issue#, state) = []
+  ordinal order -> []
+  issue# order  -> []

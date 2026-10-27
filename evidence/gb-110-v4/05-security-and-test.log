@@ -1,0 +1,26 @@
+=== clauses 5 + 6 + the constructive probe ===
+=== clause 5a: forged local cache contradicting the board ===
+  local (forged, = head): 3da727ce691c   board says: 111111111111
+  graded_sha_of -> None (None = refused)
+  local (honest, = board) -> 1111111111111111111111111111111111111111
+
+=== clause 5b: board unreachable / no token, with a matching local file ===
+  graded_sha_of(dead port)  -> None
+  graded_sha_of(no token)   -> None
+
+=== clause 6: does the self-test's multi-gate case use REAL titles? ===
+  fixture titles: 'GB-106-V' and 'GB-106-V2' (exact ids, no description)
+  real titles   : 'GB-106-V Verify the fail-closed merge guard: …'  -> regex match=False
+
+=== constructive probe: if the title were reduced to its leading token ===
+  GB-106: ordinal-ordered candidates with base_id = [203, 202, 201]
+  GB-110: ordinal-ordered candidates with base_id = [221, 219, 216, 213, 212]
+
+=== the shipped self-test ===
+  PASS: parses a 40-hex sha on the canonical 'Tree that would merge:' line
+  PASS: selects the sha naming THIS head (not shas[0]) in a multi-sha GREEN (got abcdef12)
+  PASS: closed card's GREEN is FOUND for a merged PR (got aaaaaaa)
+  PASS: decide() then REFUSES naming the graded/mismatch (REFUSE: graded aaaaaaa.. is not a prefix of the cu)
+  PASS: the HIGHEST-ordinal gate's GREEN (GB-106-V2) wins over the superseded V (got abcdef12)
+MERGE_PR_TEST: PASS - fail-closed guard rule + #194 goes red
+rc=0
