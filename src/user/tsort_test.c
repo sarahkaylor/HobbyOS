@@ -214,29 +214,42 @@ static int run_attempt(const char *args, const char *stdin_data, char *out,
   }
   close(in_p[1]);
 
-  /* stderr first (the cycle diagnostic), then stdout: every case's output
-     is far below the pipe capacity, so neither read can wedge. */
+  /* Reap the child so its process slot is recycled for the next spawn.
+   * GB-113 SIGPIPE fix: drain out_p[0] and err_p[0] CONCURRENTLY (select),
+   * and close each read end only on its own EOF, so a child that is still
+   * writing when the other pipe empties is observed via a short read, never
+   * killed by SIGPIPE (the raw word said `raw=0x0000000d` on a clean-exit
+   * child: the harness had closed the pipe's reader while the child still
+   * wrote).  With the reader held until EOF the child's late write is
+   * buffered, not fatal, and waitpid() last observes the real exit status.
+   * The max output is far below pipe capacity, so select cannot wedge. */
+  close(out_p[1]);
   close(err_p[1]);
-  while (en + 1 < errsize) {
-    int r = read(err_p[0], err + en, errsize - en - 1);
-    if (r <= 0)
+  int out_open = 1, err_open = 1;
+  while (out_open || err_open) {
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    int nfds = 0;
+    if (out_open) { FD_SET(out_p[0], &rfds); if (out_p[0] >= nfds) nfds = out_p[0] + 1; }
+    if (err_open) { FD_SET(err_p[0], &rfds); if (err_p[0] >= nfds) nfds = err_p[0] + 1; }
+    if (select(nfds, &rfds, 0, 0, 0) < 0)
       break;
-    en += (size_t)r;
+    if (out_open && FD_ISSET(out_p[0], &rfds) && n + 1 < outsize) {
+      int r = (int)read(out_p[0], out + n, outsize - n - 1);
+      if (r <= 0) { close(out_p[0]); out_open = 0; }
+      else n += (size_t)r;
+    }
+    if (err_open && FD_ISSET(err_p[0], &rfds) && en + 1 < errsize) {
+      int r = (int)read(err_p[0], err + en, errsize - en - 1);
+      if (r <= 0) { close(err_p[0]); err_open = 0; }
+      else en += (size_t)r;
+    }
   }
-  close(err_p[0]);
+  if (out_open) close(out_p[0]);
+  if (err_open) close(err_p[0]);
+  out[n] = '\0';
   err[en] = '\0';
 
-  close(out_p[1]);
-  while (n + 1 < outsize) {
-    int r = read(out_p[0], out + n, outsize - n - 1);
-    if (r <= 0)
-      break; /* EOF once the child exits and its pipe fd closes */
-    n += (size_t)r;
-  }
-  close(out_p[0]);
-  out[n] = '\0';
-
-  /* Reap the child so its process slot is recycled for the next spawn. */
   {
     int ws = 0;
     waitpid(pid, &ws, 0);
@@ -324,8 +337,12 @@ static void check_run(int slot, const char *what, const char *want_out,
   }
   if (bad)
     failures++;
-  else
+  else {
     pass(what);
+    print_console(" [");
+    con_raw(run_raw[slot]);
+    print_console("]\n");
+  }
 }
 
 /* Same as check_run, but the stdout must contain SUB1 (and SUB2 when
@@ -363,8 +380,12 @@ static void check_run_has(int slot, const char *what, const char *sub1,
   }
   if (bad)
     failures++;
-  else
+  else {
     pass(what);
+    print_console(" [");
+    con_raw(run_raw[slot]);
+    print_console("]\n");
+  }
 }
 
 /* The diagnostics' leading "<program name>: " prefix, learned from the
