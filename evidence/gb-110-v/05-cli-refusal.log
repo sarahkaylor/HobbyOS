@@ -1,0 +1,9 @@
+$ python3 tools/board/merge_pr.py --pr 209   (guard only, no --merge)
+[merge_pr] PR #209: REFUSE: GREEN names no graded sha — cannot confirm the graded tree is the current head
+[merge_pr] NOT MERGED (fail closed)
+rc=1
+
+$ python3 tools/board/merge_pr.py --pr 209 --graded b3540e5   (explicit real 7-char GREEN sha)
+[merge_pr] PR #209: ok: graded prefix b3540e5.. matches current head b3540e58569f.. — merge allowed
+[merge_pr] MERGE ALLOWED (guard only; run with --merge to perform it)
+rc=0

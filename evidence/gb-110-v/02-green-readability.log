@@ -1,0 +1,12 @@
+=== can graded_shas_in() read a sha from REAL GREEN verdicts on the board? ===
+GREEN verdict comments scanned: 96
+  graded_shas_in found a sha : 19
+  graded_shas_in found NOTHING: 77
+  unreadable e.g. card #211 2026-10-26T23:49:22Z: 'Implementation: `graded_sha_of()` = `graded_sha_from_board()` (Forgejo API: PR->GB via head branch, '
+  unreadable e.g. card #211 2026-10-27T00:08:00Z: "  Forgejo API -> PR->GB via head branch -> newest 'VERDICT GREEN' comment"
+  unreadable e.g. card #211 2026-10-27T00:08:05Z: "- `graded_sha_from_board(pr, env)`: resolves the PR's GB id from its head branch (`gb-?<n>` in the b"
+  unreadable e.g. card #210 2026-10-26T23:39:37Z: '**VERDICT — GREEN (GB-109-V, round 2).** Round 1\'s finding — *"the vacuous `--head` call is inexpres'
+
+--- the exact comment the guard must read for GB-109-V (#210) ---
+GREEN header line: **VERDICT — GREEN (GB-109-V, round 2).** Round 1's finding — *"the vacuous `--head` call is inexpressible"* was only **a
+graded_shas_in -> []

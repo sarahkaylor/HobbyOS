@@ -1,0 +1,33 @@
+rev: 0633743f8475412d68ac90b6eebb8847d6e93e7c  date: 2026-10-27T00:29:09Z
+=== self-test (merge_pr_test.py) ===
+usage: merge_pr [-h] [--repo REPO] [--pr PR] [--graded GRADED]
+                [--override OVERRIDE] [--card CARD] [--merge] [--self-test]
+merge_pr: error: unrecognized arguments: --head deadbeef
+  PASS: graded == head -> allow
+  PASS: graded != head -> refuse
+  PASS: GREEN names no sha -> FAILS CLOSED (refuse)
+  PASS: no head supplied -> refuse
+  PASS: parses a 40-hex graded sha from a VERDICT line
+  PASS: a VERDICT with no sha -> empty (fails closed upstream)
+  PASS: today's #194 incident (graded 7de6dde.., merged e8c7dc8..) -> RED for the mismatch (REFUSE: graded 7de6dde.. is not a prefix)
+  PASS: graded 7-char prefix of head -> ALLOW
+  PASS: graded 7-char non-prefix -> REFUSE
+  PASS: graded prefix <7 chars -> REFUSE
+  PASS: parser structurally has no --head option (re-adding it FAILS this probe)
+  PASS: main() rejects a --head argument on the command line
+  PASS: graded sha read from the board-ish GREEN (cache matches)
+  PASS: a FORGED local cache disagreeing with the board -> FAIL CLOSED
+  PASS: no GREEN on the board (or unreachable) -> FAIL CLOSED even with a local file
+MERGE_PR_TEST: PASS - fail-closed guard rule + #194 goes red
+rc=0
+
+=== live probe: board-sourced graded sha for real PRs ===
+PR #211: branch->GB=110 head=0633743f8475412d68ac90b6eebb8847d6e93e7c board_sha=None graded_sha_of=None
+        decide -> allow=False  REFUSE: GREEN names no graded sha — cannot confirm the graded tree is the current head
+
+PR #209: branch->GB=109 head=b3540e58569fbbd1ac9de77680e8dcbfb78d9486 board_sha=None graded_sha_of=None
+        decide -> allow=False  REFUSE: GREEN names no graded sha — cannot confirm the graded tree is the current head
+
+PR #204: branch->GB=106 head=3da727ce691c08c0f46c2d69db24a03e10516fa9 board_sha=None graded_sha_of=None
+        decide -> allow=False  REFUSE: GREEN names no graded sha — cannot confirm the graded tree is the current head
+

@@ -1,0 +1,14 @@
+=== clause 5: break the board read so it falls back to the local file ===
+mode=break applied
+merge_pr_test rc=1
+  PASS: GREEN names no sha -> FAILS CLOSED (refuse)
+  PASS: parser structurally has no --head option (re-adding it FAILS this probe)
+  PASS: a FORGED local cache disagreeing with the board -> FAIL CLOSED
+  FAIL: no GREEN on the board (or unreachable) -> FAIL CLOSED even with a local file
+MERGE_PR_TEST: FAIL (1)
+
+=== restore ===
+mode=restore applied
+(empty = clean)
+restored rc=0
+MERGE_PR_TEST: PASS - fail-closed guard rule + #194 goes red

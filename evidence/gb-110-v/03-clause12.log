@@ -1,0 +1,24 @@
+rev: 0633743f8475412d68ac90b6eebb8847d6e93e7c
+=== clause 1 (unit, board read STUBBED to a known sha) ===
+  local file (forged, = head): b3540e58569fbbd1ac9de77680e8dcbfb78d9486
+  board green names         : 1111111111111111111111111111111111111111
+  graded_sha_of -> None    (None = refused)
+  decide() -> (False, 'REFUSE: GREEN names no graded sha — cannot confirm the graded tree is the current head')
+
+  local file (honest, = board): 1111111111111111111111111111111111111111
+  graded_sha_of -> 1111111111111111111111111111111111111111
+  decide() -> (False, 'REFUSE: graded 1111111.. is not a prefix of the current head b3540e58569f.. — refusing to merge a tree that was not graded')
+
+=== clause 2 (LIVE, Forgejo pointed at a dead port) ===
+  local file present and matching the head: b3540e58569fbbd1ac9de77680e8dcbfb78d9486
+  graded_sha_from_board(dead) -> None
+  graded_sha_of(dead)         -> None
+  decide()                    -> (False, 'REFUSE: GREEN names no graded sha — cannot confirm the graded tree is the current head')
+
+=== clause 2b (LIVE, no FORGEJO_TOKEN at all) ===
+  graded_sha_of(no token) -> None
+
+=== clause 6: is there any branch where a missing board falls back to the file? ===
+  code: `board = graded_sha_from_board(pr, env)` then `if board is None: return None`
+        the local file is read ONLY after that, and only to compare (must match).
+rc=0
