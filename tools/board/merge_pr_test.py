@@ -19,6 +19,9 @@ check(not decide(h, "2222222222222222222222222222222222222222")[0], "graded != h
 check(not decide(h, None)[0], "GREEN names no sha -> FAILS CLOSED (refuse)")
 check(not decide(None, h)[0], "no head supplied -> refuse")
 check(40 in [len(s) for s in graded_shas_in("VERDICT GREEN graded sha " + "c" * 40)], "parses a 40-hex graded sha from a VERDICT line")
+# GB-110-V2 clause 5: a real verdict body names an ABBREVIATED prefix (7-40 hex)
+check("deadbeefe0" in graded_shas_in("## VERDICT: GREEN\n**Tree that would merge:** deadbeefe0\n"),
+      "reads an abbreviated (10-char-prefix) sha from a real GREEN body")
 check(graded_shas_in("VERDICT GREEN") == [], "a VERDICT with no sha -> empty (fails closed upstream)")
 
 # DoD self-test anchor: today's PR #194 (GB-103) was graded at 7de6dde.. but merged at
