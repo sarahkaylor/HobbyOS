@@ -117,10 +117,16 @@ def graded_sha_from_board(pr, env=None):
         for c in reversed(cs):
             body = (c.get("body") or "").replace("\r", "")
             if re.search(r"VERDICT[^\n]{0,50}\bGREEN\b", body, re.I):
-                for sha in graded_shas_in(body):
+                shas = graded_shas_in(body)
+                if not shas:
+                    return None            # a GREEN present but names no sha -> fail closed
+                for sha in shas:
                     if head and head.startswith(sha):
                         return sha        # the GREEN that names THIS head
-                return None               # a GREEN present but none names this head -> fail closed
+                return shas[0]            # GB-110-V3 clause 2: the card's GREEN IS found even
+                                          # when the (merged) head no longer prefix-matches — return
+                                          # its sha so decide() refuses naming the mismatch, never
+                                          # a silent "no GREEN"
     return None                           # no GREEN verdict found
 
 
