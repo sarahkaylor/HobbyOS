@@ -167,10 +167,29 @@ def resolve_launch_slot(serial_log, bin_name, provided=None):
     return found, warn
 
 
-def launch_from_menu(q, slot, taskbar_y=H - 26):
-    """Open the Apps menu and navigate down to the given slot, launching it."""
-    q.click(38, taskbar_y + 13)
-    time.sleep(0.8)
+def launch_from_menu(q, slot, taskbar_y=H - 26, arch="arm", gesture="auto"):
+    """Open the Apps menu and navigate down to the given slot, launching it.
+
+    GB-116: on intel the pointer click below cannot work.  `src/user/desktop.c`
+    maps **F1 (evdev 59) to open the start menu** for exactly that reason, with
+    the comment: "on x64 the kernel's PS/2 input path does not deliver mouse
+    buttons (browser.md, WF1B), so an F1 map keeps the menu launchable on both
+    arches".  `Makefile:257` has no pointer device at all, so a QMP absolute
+    click has nowhere to land and the [LAUNCH] line never appears -- measured as
+    `[LAUNCH] = 0` on GB-059-V's intel run.
+
+    `gesture`:
+      auto  -- F1 first, then the click as a best-effort (works on both arches;
+               the click is a no-op where there is no pointer device)
+      click -- the old behaviour, for reproducing the intel failure
+      keys  -- F1 only, no pointer traffic at all
+    """
+    if gesture in ("auto", "keys"):
+        q.key("f1", 0.4)          # desktop.c: EV_KEY 59 opens the start menu
+        time.sleep(0.4)
+    if gesture in ("auto", "click"):
+        q.click(38, taskbar_y + 13)
+        time.sleep(0.8)
     q.key("home", 0.3)
     for _ in range(slot):
         q.key("down", 0.06)
@@ -202,6 +221,11 @@ def main():
     ap.add_argument("--run-seconds", type=int, default=8,
                     help="seconds to hold the game open after launch")
     ap.add_argument("--input", default="", help="optional key sequence, e.g. up,left,up,left")
+    ap.add_argument("--gesture", default="auto", choices=["auto", "click", "keys"],
+                    help="how to open the Apps menu: auto = F1 then a best-effort click (GB-116; "
+                         "intel has no pointer device, so the click cannot work there), "
+                         "click = the pre-GB-116 behaviour for reproducing that failure, "
+                         "keys = F1 only")
     args = ap.parse_args()
 
     os.chdir(args.root)
@@ -243,7 +267,7 @@ def main():
 
     if "boot" in checkpoints:
         snap("boot")
-    launch_from_menu(q, slot)
+    launch_from_menu(q, slot, arch=args.arch, gesture=args.gesture)
     if "launch" in checkpoints:
         snap("launch")
 
