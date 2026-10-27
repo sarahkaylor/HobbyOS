@@ -1,0 +1,782 @@
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/abi_t2_test.c -o obj/intel/abi_t2_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/audio_stub.c -o obj/intel/audio_stub.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/blk_cache.c -o obj/intel/blk_cache.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/blk_cache_press_test.c -o obj/intel/blk_cache_press_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/blk_cache_test.c -o obj/intel/blk_cache_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/dhcp.c -o obj/intel/dhcp.o
+src/kernel/dhcp.c:42:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   42 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:82:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   82 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:135:19: warning: unused variable 'udp' [-Wunused-variable]
+  135 |   struct udp_hdr* udp = (struct udp_hdr*)(packet + sizeof(struct ipv4_hdr));
+      |                   ^~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/elf_image.c -o obj/intel/elf_image.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/elf_loader.c -o obj/intel/elf_loader.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/evdev.c -o obj/intel/evdev.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/evdev_test.c -o obj/intel/evdev_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/fat16.c -o obj/intel/fat16.o
+src/kernel/fat16.c:2041:26: warning: result of comparison of constant -27 with expression of type 'unsigned char' is always false [-Wtautological-constant-out-of-range-compare]
+ 2041 |     if (b0 == 0x00 || b0 == (char)0xE5) {
+      |                       ~~ ^  ~~~~~~~~~~
+src/kernel/fat16.c:2178:25: warning: comparison of integers of different signs: 'int' and 'uint32_t' (aka 'unsigned int') [-Wsign-compare]
+ 2178 |       if ((int)old_size > f->fat16.cursor) f->fat16.cursor = (int)old_size;
+      |           ~~~~~~~~~~~~~ ^ ~~~~~~~~~~~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -std=c++17 -fno-exceptions -fno-rtti -nostdinc++ -c src/libc/src/cxxrt.cpp -o obj/intel/cxxrt.o
+ar rcs obj/intel/libc.a obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/crt0.o obj/intel/cxxrt.o obj/intel/libc_pthread.o obj/intel/libc_ctype.o obj/intel/libc_stdlib.o obj/intel/libc_stdio.o obj/intel/libc_file.o obj/intel/libc_getopt.o obj/intel/libc_error.o obj/intel/libc_stat.o obj/intel/libc_signal.o obj/intel/libc_mman.o obj/intel/libc_regex.o obj/intel/libc_langinfo.o obj/intel/libc_wchar.o obj/intel/libc_wctype.o obj/intel/libc_locale.o obj/intel/libc_selinux.o obj/intel/libc_dirent.o obj/intel/libc_time.o obj/intel/libc_time_math.o obj/intel/libc_libgen.o obj/intel/libc_realpath.o obj/intel/libc_xlocale.o obj/intel/libc_strtod.o obj/intel/libc_strftime.o obj/intel/libc_math.o obj/intel/libc_pwd.o obj/intel/libc_setjmp.o obj/intel/libc_dlfcn.o obj/intel/libc_resource.o obj/intel/libc_statvfs.o obj/intel/libc_syscall.o obj/intel/libc_ioctl.o obj/intel/builtins/extenddftf2.o obj/intel/builtins/trunctfdf2.o obj/intel/builtins/trunctfsf2.o
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/xcrypt.elf obj/intel/xcrypt.o obj/intel/nano_hb_curses.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/xcrypt.elf obj/intel/xcrypt.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/unexpand_test.elf obj/intel/unexpand_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/unexpand_test.elf obj/intel/unexpand_test.bin
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -Iobj/intel -c src/kernel/fat16_test.c -o obj/intel/fat16_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/fb_ioctl.c -o obj/intel/fb_ioctl.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/fb_ioctl_test.c -o obj/intel/fb_ioctl_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/fb_mmap.c -o obj/intel/fb_mmap.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/fb_mmap_test.c -o obj/intel/fb_mmap_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/frame.c -o obj/intel/frame.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/frame_test.c -o obj/intel/frame_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/fs.c -o obj/intel/fs.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/fs_test.c -o obj/intel/fs_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/input_node.c -o obj/intel/input_node.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/input_node_test.c -o obj/intel/input_node_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/iommu_vtd.c -o obj/intel/iommu_vtd.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/ipc_proto.c -o obj/intel/ipc_proto.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/linux_uname.c -o obj/intel/linux_uname.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/lock_order.c -o obj/intel/lock_order.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/locks_test.c -o obj/intel/locks_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/main.c -o obj/intel/main.o
+src/kernel/main.c:52:39: warning: unused parameter 'tf' [-Wunused-parameter]
+   52 | void irq_handler_c(struct trap_frame *tf) {
+      |                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/math_test.c -o obj/intel/math_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/mmu_test.c -o obj/intel/mmu_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/net.c -o obj/intel/net.o
+src/kernel/net.c:552:18: warning: variable 'stored' set but not used [-Wunused-but-set-variable]
+  552 |         uint32_t stored = 0;
+      |                  ^
+src/kernel/net.c:815:21: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+  815 |   for (int i = 0; i < sizeof(struct pseudo_hdr)/2; i++) {
+      |                   ~ ^ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/net.c:657:39: warning: unused function 'safe_print_int' [-Wunused-function]
+  657 | __attribute__((noinline)) static void safe_print_int(int val) {
+      |                                       ^~~~~~~~~~~~~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/net_rdma.c -o obj/intel/net_rdma.o
+src/kernel/net_rdma.c:774:12: warning: unused variable 'rx_count' [-Wunused-variable]
+  774 |   uint32_t rx_count = 0;
+      |            ^~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/net_rdma_test.c -o obj/intel/net_rdma_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/net_test.c -o obj/intel/net_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/nfs.c -o obj/intel/nfs.o
+src/kernel/nfs.c:157:12: warning: '/*' within block comment [-Wcomment]
+  157 |  * is *body/*body_len, valid until the next rpc_call (static buffer). */
+      |            ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/nfs_proto.c -o obj/intel/nfs_proto.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/nfs_test.c -o obj/intel/nfs_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/pipe.c -o obj/intel/pipe.o
+src/kernel/pipe.c:142:7: warning: unused variable 'i' [-Wunused-variable]
+  142 |   int i = 0;
+      |       ^
+src/kernel/pipe.c:139:68: warning: unused parameter 'tf' [-Wunused-parameter]
+  139 | int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
+      |                                                                    ^
+src/kernel/pipe.c:219:7: warning: unused variable 'i' [-Wunused-variable]
+  219 |   int i = 0;
+      |       ^
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/pipe_test.c -o obj/intel/pipe_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/process.c -o obj/intel/process.o
+src/kernel/process.c:1416:42: warning: unused parameter 'is_yield' [-Wunused-parameter]
+ 1416 | void schedule(struct trap_frame *tf, int is_yield) {
+      |                                          ^
+src/kernel/process.c:4073:50: warning: unused parameter 'prot' [-Wunused-parameter]
+ 4073 | int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags) {
+      |                                                  ^
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/process_test.c -o obj/intel/process_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/program_loader.c -o obj/intel/program_loader.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/program_loader_test.c -o obj/intel/program_loader_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/ssp.c -o obj/intel/ssp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/test_fw_cfg.c -o obj/intel/test_fw_cfg.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/test_smp.c -o obj/intel/test_smp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/time.c -o obj/intel/time.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/time_test.c -o obj/intel/time_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/timer_test.c -o obj/intel/timer_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/trap_test.c -o obj/intel/trap_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/unit_test.c -o obj/intel/unit_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/unix.c -o obj/intel/unix.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/unix_test.c -o obj/intel/unix_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/vfs.c -o obj/intel/vfs.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/virtio_blk.c -o obj/intel/virtio_blk.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/virtio_blk_test.c -o obj/intel/virtio_blk_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/virtio_gpu.c -o obj/intel/virtio_gpu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/virtio_gpu_test.c -o obj/intel/virtio_gpu_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/virtio_gpu_x64.c -o obj/intel/virtio_gpu_x64.o
+src/kernel/virtio_gpu_x64.c:586:12: warning: unused variable 'feat_lo' [-Wunused-variable]
+  586 |   uint32_t feat_lo = gpu_cc_r32(VPCI_CC_DEV_FEAT);
+      |            ^~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/virtio_input.c -o obj/intel/virtio_input.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/virtio_input_test.c -o obj/intel/virtio_input_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/virtio_net.c -o obj/intel/virtio_net.o
+src/kernel/virtio_net.c:552:7: warning: variable 'poll_processed' set but not used [-Wunused-but-set-variable]
+  552 |   int poll_processed = 0;
+      |       ^
+src/kernel/virtio_net.c:124:30: warning: unused variable 'tx_hdr' [-Wunused-variable]
+  124 | static struct virtio_net_hdr tx_hdr __attribute__((aligned(4096)));
+      |                              ^~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/virtio_net_test.c -o obj/intel/virtio_net_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/vm.c -o obj/intel/vm.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/vm_test.c -o obj/intel/vm_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/arch/x64/cpu.c -o obj/intel/cpu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/arch/x64/fpu.c -o obj/intel/fpu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/arch/x64/gic.c -o obj/intel/gic.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/arch/x64/locks.c -o obj/intel/locks.o
+src/kernel/arch/x64/locks.c:137:40: warning: calling '__builtin_return_address' with a nonzero argument is unsafe [-Wframe-address]
+  137 |     lock_wait_caller2[cpu] = (uint64_t)__builtin_return_address(1);
+      |                                        ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/arch/x64/locks.c:167:39: warning: calling '__builtin_return_address' with a nonzero argument is unsafe [-Wframe-address]
+  167 |         scream_hex(" pc2=", (uint64_t)__builtin_return_address(1));
+      |                                       ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/arch/x64/mmu.c -o obj/intel/mmu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/arch/x64/rtc.c -o obj/intel/rtc.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/arch/x64/smp.c -o obj/intel/smp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/arch/x64/timer.c -o obj/intel/timer.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/arch/x64/trap.c -o obj/intel/trap.o
+src/kernel/arch/x64/trap.c:1963:5: warning: use of out-of-scope declaration of 'uart_puts_raw' [-Wout-of-scope-function]
+ 1963 |     uart_puts_raw(pb);
+      |     ^
+src/kernel/arch/x64/trap.c:105:15: note: previous declaration is here
+  105 |   extern void uart_puts_raw(const char *s);
+      |               ^
+src/kernel/arch/x64/trap.c:81:13: warning: unused function 'dbg_resume' [-Wunused-function]
+   81 | static void dbg_resume(const char *tag, uint64_t v) {
+      |             ^~~~~~~~~~
+src/kernel/arch/x64/trap.c:2229:13: warning: unused function 'safe_print_int' [-Wunused-function]
+ 2229 | static void safe_print_int(int val) {
+      |             ^~~~~~~~~~~~~~
+src/kernel/arch/x64/trap.c:2248:13: warning: unused function 'safe_print_hex' [-Wunused-function]
+ 2248 | static void safe_print_hex(uint64_t val) {
+      |             ^~~~~~~~~~~~~~
+4 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/arch/x64/uart.c -o obj/intel/uart.o
+ld.lld -T linker_x64.ld -o hobbyos.elf obj/intel/boot.o obj/intel/setjmp.o obj/intel/abi_t2_test.o obj/intel/audio_stub.o obj/intel/blk_cache.o obj/intel/blk_cache_press_test.o obj/intel/blk_cache_test.o obj/intel/dhcp.o obj/intel/elf_image.o obj/intel/elf_loader.o obj/intel/evdev.o obj/intel/evdev_test.o obj/intel/fat16.o obj/intel/fat16_test.o obj/intel/fb_ioctl.o obj/intel/fb_ioctl_test.o obj/intel/fb_mmap.o obj/intel/fb_mmap_test.o obj/intel/frame.o obj/intel/frame_test.o obj/intel/fs.o obj/intel/fs_test.o obj/intel/input_node.o obj/intel/input_node_test.o obj/intel/iommu_vtd.o obj/intel/ipc_proto.o obj/intel/linux_uname.o obj/intel/lock_order.o obj/intel/locks_test.o obj/intel/main.o obj/intel/math_test.o obj/intel/mmu_test.o obj/intel/net.o obj/intel/net_rdma.o obj/intel/net_rdma_test.o obj/intel/net_test.o obj/intel/nfs.o obj/intel/nfs_proto.o obj/intel/nfs_test.o obj/intel/pipe.o obj/intel/pipe_test.o obj/intel/process.o obj/intel/process_test.o obj/intel/program_loader.o obj/intel/program_loader_test.o obj/intel/ssp.o obj/intel/test_fw_cfg.o obj/intel/test_smp.o obj/intel/time.o obj/intel/time_test.o obj/intel/timer_test.o obj/intel/trap_test.o obj/intel/unit_test.o obj/intel/unix.o obj/intel/unix_test.o obj/intel/vfs.o obj/intel/virtio_blk.o obj/intel/virtio_blk_test.o obj/intel/virtio_gpu.o obj/intel/virtio_gpu_test.o obj/intel/virtio_gpu_x64.o obj/intel/virtio_input.o obj/intel/virtio_input_test.o obj/intel/virtio_net.o obj/intel/virtio_net_test.o obj/intel/vm.o obj/intel/vm_test.o obj/intel/cpu.o obj/intel/fpu.o obj/intel/gic.o obj/intel/locks.o obj/intel/mmu.o obj/intel/rtc.o obj/intel/smp.o obj/intel/timer.o obj/intel/trap.o obj/intel/uart.o
+llvm-objcopy -I elf64-x86-64 -O elf32-i386 hobbyos.elf
+ld.lld -T src/user/linker.ld -o obj/intel/memtest.elf obj/intel/mem_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/memtest.elf obj/intel/memtest.bin
+ld.lld -T src/user/linker.ld -o obj/intel/fileio_test.elf obj/intel/file_io_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/fileio_test.elf obj/intel/fileio_test.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/user/console.c -o obj/intel/console.o
+ld.lld -T src/user/linker.ld -o obj/intel/console.elf obj/intel/console.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/console.elf obj/intel/console.bin
+ld.lld -T src/user/linker.ld -o obj/intel/fork_test.elf obj/intel/fork_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/fork_test.elf obj/intel/fork_test.bin
+ld.lld -T src/user/linker.ld -o obj/intel/heap_test.elf obj/intel/heap_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/libc_mman.o
+llvm-objcopy -O binary obj/intel/heap_test.elf obj/intel/heap_test.bin
+ld.lld -T src/user/linker.ld -o obj/intel/spawn_test.elf obj/intel/spawn_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/spawn_test.elf obj/intel/spawntest.bin
+ld.lld -T src/user/linker.ld -o obj/intel/graphics_test.elf obj/intel/graphics_test.o obj/intel/user_libc.o obj/intel/user_graphics.o
+llvm-objcopy -O binary obj/intel/graphics_test.elf obj/intel/graphics.bin
+ld.lld -T src/user/linker.ld -o obj/intel/wsurf_test.elf obj/intel/wsurf_test.o obj/intel/user_libc.o obj/intel/user_wsurf.o
+llvm-objcopy -O binary obj/intel/wsurf_test.elf obj/intel/wsurf_test.bin
+ld.lld -T src/user/linker.ld -o obj/intel/smp_test.elf obj/intel/smp_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/smp_test.elf obj/intel/smp_test.bin
+ld.lld -T src/user/linker.ld -o obj/intel/pipe_test.elf obj/intel/user_pipe_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/pipe_test.elf obj/intel/pipetest.bin
+ld.lld -T src/user/linker.ld -o obj/intel/net_test.elf obj/intel/user_net_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/net_test.elf obj/intel/nettest.bin
+ld.lld -T src/user/linker.ld -o obj/intel/net_timeout_test.elf obj/intel/user_net_timeout_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/net_timeout_test.elf obj/intel/timeout.bin
+ld.lld -T src/user/linker.ld -o obj/intel/nfs_test.elf obj/intel/user_nfs_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/nfs_test.elf obj/intel/nfstest.bin
+ld.lld -T src/user/linker.ld -o obj/intel/desktop_test.elf obj/intel/desktop.o obj/intel/games_scan.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_graphics.o obj/intel/user_window.o
+llvm-objcopy -O binary obj/intel/desktop_test.elf obj/intel/desktop.bin
+ld.lld -T src/user/linker.ld -o obj/intel/editor.elf obj/intel/editor.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/editor.elf obj/intel/editor.bin
+ld.lld -T src/user/linker.ld -o obj/intel/editor_test.elf obj/intel/user_editor_test.o obj/intel/user_desktop_test_wrapper.o obj/intel/games_scan.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_graphics.o obj/intel/user_window.o
+llvm-objcopy -O binary obj/intel/editor_test.elf obj/intel/EDITOR_T.BIN
+ld.lld -T src/user/linker.ld -o obj/intel/dialog_test.elf obj/intel/user_dialog_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/dialog_test.elf obj/intel/DIALOG_T.BIN
+ld.lld -T src/user/linker.ld -o obj/intel/pong_test.elf obj/intel/user_pong_test.o obj/intel/user_desktop_test_wrapper.o obj/intel/games_scan.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_graphics.o obj/intel/user_window.o
+llvm-objcopy -O binary obj/intel/pong_test.elf obj/intel/PONG_T.BIN
+ld.lld -T src/user/linker.ld -o obj/intel/stress.elf obj/intel/stress_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/stress.elf obj/intel/stress.bin
+ld.lld -T src/user/linker.ld -o obj/intel/fpu_test.elf obj/intel/fpu_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/fpu_test.elf obj/intel/fpu_test.bin
+ld.lld -T src/user/linker.ld -o obj/intel/gfxbench.elf obj/intel/gfxbench.o obj/intel/gfx_stats.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/gfxbench.elf obj/intel/gfxbench.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/user/math_test.c -o obj/intel/user_math_test.o
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/math_test.elf obj/intel/user_math_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/math_test.elf obj/intel/math_test.bin
+ld.lld -T src/user/linker.ld -o obj/intel/errno_test.elf obj/intel/user_errno_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/errno_test.elf obj/intel/errtest.bin
+ld.lld -T src/user/linker.ld -o obj/intel/sock2_test.elf obj/intel/sock2_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/sock2_test.elf obj/intel/SOCK2TST.BIN
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/user/poll_test.c -o obj/intel/poll_test.o
+ld.lld -T src/user/linker.ld -o obj/intel/poll_test.elf obj/intel/poll_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/poll_test.elf obj/intel/POLLTST.BIN
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -DPOLLTST_BROKEN_SELECT -c src/user/poll_test.c -o obj/intel/poll_test_brk.o
+ld.lld -T src/user/linker.ld -o obj/intel/poll_test_brk.elf obj/intel/poll_test_brk.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/poll_test_brk.elf obj/intel/POLLBRK.BIN
+ld.lld -T src/user/linker.ld -o obj/intel/blktest.elf obj/intel/blktest.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/blktest.elf obj/intel/BLKTEST.BIN
+ld.lld -T src/user/linker.ld -o obj/intel/rand_test.elf obj/intel/rand_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/rand_test.elf obj/intel/RANDTST.BIN
+ld.lld -T src/user/linker.ld -o obj/intel/dns_test.elf obj/intel/user_dns_test.o obj/intel/user_resolv.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+ld.lld: warning: cannot find entry symbol _start; not setting start address
+llvm-objcopy -O binary obj/intel/dns_test.elf obj/intel/dns_test.bin
+ld.lld -T src/user/linker.ld -o obj/intel/netfix_test.elf obj/intel/user_netfix_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+ld.lld: warning: cannot find entry symbol _start; not setting start address
+llvm-objcopy -O binary obj/intel/netfix_test.elf obj/intel/netfix.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/cxx_smoke.elf obj/intel/cxx_smoke.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/cxx_smoke.elf obj/intel/cxx_smoke.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/hello.elf obj/intel/hello.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/hello.elf obj/intel/hello.bin
+ld.lld -T src/user/linker.ld -o obj/intel/sh.elf obj/intel/sh.o obj/intel/sh_aux.o obj/intel/crt0.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/sh.elf obj/intel/sh.bin
+ld.lld -T src/user/linker.ld -o obj/intel/ls.elf obj/intel/ls.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/ls.elf obj/intel/ls.bin
+ld.lld -T src/user/linker.ld -o obj/intel/cat.elf obj/intel/cat.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/cat.elf obj/intel/cat.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/grep.elf obj/intel/grep_grep.o obj/intel/grep_search.o obj/intel/grep_dfa.o obj/intel/grep_kwset.o obj/intel/grepg_alloca.o obj/intel/grepg_closeout.o obj/intel/grepg_error.o obj/intel/grepg_exclude.o obj/intel/grepg_fnmatch.o obj/intel/grepg_hard-locale.o obj/intel/grepg_isdir.o obj/intel/grepg_obstack.o obj/intel/grepg_quotearg.o obj/intel/grepg_regex.o obj/intel/grepg_savedir.o obj/intel/grepg_stpcpy.o obj/intel/grepg_xmalloc.o obj/intel/grepg_xstrtol.o obj/intel/grepg_xstrtoumax.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/grep.elf obj/intel/grep.bin
+ld.lld -T src/user/linker.ld -o obj/intel/less.elf obj/intel/less.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/less.elf obj/intel/less.bin
+ld.lld -T src/user/linker.ld -o obj/intel/tail.elf obj/intel/tail.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/tail.elf obj/intel/tail.bin
+ld.lld -T src/user/linker.ld -o obj/intel/head.elf obj/intel/head.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/head.elf obj/intel/head.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/user/shell_test.c -o obj/intel/shell_test.o
+ld.lld -T src/user/linker.ld -o obj/intel/shtest.elf obj/intel/shell_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/shtest.elf obj/intel/shtest.bin
+ld.lld -T src/user/linker.ld -o obj/intel/ps.elf obj/intel/ps.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/ps.elf obj/intel/ps.bin
+ld.lld -T src/user/linker.ld -o obj/intel/free.elf obj/intel/free.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/free.elf obj/intel/free.bin
+ld.lld -T src/user/linker.ld -o obj/intel/uptime.elf obj/intel/uptime.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/uptime.elf obj/intel/uptime.bin
+ld.lld -T src/user/linker.ld -o obj/intel/kill.elf obj/intel/kill.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/kill.elf obj/intel/kill.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/basename.elf obj/intel/basename.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/basename.elf obj/intel/basename.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/dirname.elf obj/intel/dirname.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/dirname.elf obj/intel/dirname.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/seq.elf obj/intel/seq.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/seq.elf obj/intel/seq.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/expr.elf obj/intel/expr.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/expr.elf obj/intel/expr.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/testgnu.elf obj/intel/testgnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/testgnu.elf obj/intel/testgnu.bin
+ld.lld -T src/user/linker.ld -o obj/intel/cp.elf obj/intel/cp.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/cp.elf obj/intel/cp.bin
+ld.lld -T src/user/linker.ld -o obj/intel/rm.elf obj/intel/rm.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/rm.elf obj/intel/rm.bin
+ld.lld -T src/user/linker.ld -o obj/intel/mv.elf obj/intel/mv.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/mv.elf obj/intel/mv.bin
+ld.lld -T src/user/linker.ld -o obj/intel/touch.elf obj/intel/touch.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/touch.elf obj/intel/touch.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/wc.elf obj/intel/wc.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/wc.elf obj/intel/wc.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/sed.elf obj/intel/sed_sed.o obj/intel/sed_compile.o obj/intel/sed_debug.o obj/intel/sed_execute.o obj/intel/sed_mbcs.o obj/intel/sed_regexp.o obj/intel/sed_utils.o obj/intel/sedg_acl-errno-valid.o obj/intel/sedg_acl-internal.o obj/intel/sedg_basename-lgpl.o obj/intel/sedg_c-ctype.o obj/intel/sedg_c-strcasecmp.o obj/intel/sedg_c-strncasecmp.o obj/intel/sedg_close-stream.o obj/intel/sedg_closeout.o obj/intel/sedg_copy-acl.o obj/intel/sedg_dfa.o obj/intel/sedg_dirname-lgpl.o obj/intel/sedg_exitfail.o obj/intel/sedg_get-permissions.o obj/intel/sedg_localcharset.o obj/intel/sedg_localeinfo.o obj/intel/sedg_obstack.o obj/intel/sedg_progname.o obj/intel/sedg_qcopy-acl.o obj/intel/sedg_qset-acl.o obj/intel/sedg_quotearg.o obj/intel/sedg_set-acl.o obj/intel/sedg_set-permissions.o obj/intel/sedg_strverscmp.o obj/intel/sedg_version-etc.o obj/intel/sedg_version-etc-fsf.o obj/intel/sedg_xalloc-die.o obj/intel/sedg_xmalloc.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/sed.elf obj/intel/sed.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/hedgnu.elf obj/intel/head_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/hedgnu.elf obj/intel/hedgnu.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/wc_test.elf obj/intel/wc_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/wc_test.elf obj/intel/wc_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/cut_test.elf obj/intel/cut_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/cut_test.elf obj/intel/cut_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tr.elf obj/intel/tr_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tr.elf obj/intel/tr.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tr_test.elf obj/intel/tr_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tr_test.elf obj/intel/tr_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/paste.elf obj/intel/paste_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/paste.elf obj/intel/paste.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/paste_test.elf obj/intel/paste_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/paste_test.elf obj/intel/paste_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/fold.elf obj/intel/fold_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/fold.elf obj/intel/fold.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/fold_test.elf obj/intel/fold_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/fold_test.elf obj/intel/fold_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/nl.elf obj/intel/nl_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/nl.elf obj/intel/nl.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/nl_test.elf obj/intel/nl_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/nl_test.elf obj/intel/nl_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/comm.elf obj/intel/comm_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/comm.elf obj/intel/comm.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/comm_test.elf obj/intel/comm_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/comm_test.elf obj/intel/comm_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tsort.elf obj/intel/tsort_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tsort.elf obj/intel/tsort.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tsort_test.elf obj/intel/tsort_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tsort_test.elf obj/intel/tsort_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/expand.elf obj/intel/expand_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/expand.elf obj/intel/expand.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/expand_test.elf obj/intel/expand_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/expand_test.elf obj/intel/expand_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/unexpand.elf obj/intel/unexpand_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/unexpand.elf obj/intel/unexpand.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/cksum.elf obj/intel/cksum_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/cksum.elf obj/intel/cksum.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/cksum_test.elf obj/intel/cksum_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/cksum_test.elf obj/intel/cksum_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/fatbig_test.elf obj/intel/fatbig_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/fatbig_test.elf obj/intel/fatbig_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/stage4k_test.elf obj/intel/stage4k_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/stage4k_test.elf obj/intel/stage4k_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/lfn_test.elf obj/intel/lfn_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/lfn_test.elf obj/intel/lfn_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/md5sum.elf obj/intel/md5sum_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/md5sum.elf obj/intel/md5sum.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/md5sum_test.elf obj/intel/md5sum_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/md5sum_test.elf obj/intel/md5sum_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tac.elf obj/intel/tac_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tac.elf obj/intel/tac.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tac_test.elf obj/intel/tac_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tac_test.elf obj/intel/tac_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/cmp.elf obj/intel/cmp_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/cmp.elf obj/intel/cmp.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/cmp_test.elf obj/intel/cmp_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/cmp_test.elf obj/intel/cmp_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/regex_test.elf obj/intel/regex_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/regex_test.elf obj/intel/regex_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/sed_test.elf obj/intel/sed_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/sed_test.elf obj/intel/sed_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/grep_test.elf obj/intel/grep_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/grep_test.elf obj/intel/grep_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/subprobe.elf obj/intel/subprobe.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/subprobe.elf obj/intel/subprobe.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/pipeprobe.elf obj/intel/pipeprobe.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/pipeprobe.elf obj/intel/pipeprobe.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/head_test.elf obj/intel/head_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/head_test.elf obj/intel/head_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tail_gnu.elf obj/intel/tail_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tail_gnu.elf obj/intel/tailgnu.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/cut.elf obj/intel/cut_gnu.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/cut.elf obj/intel/cut.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tail_test.elf obj/intel/tail_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tail_test.elf obj/intel/tail_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/proc_child.elf obj/intel/proc_child.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/proc_child.elf obj/intel/proc_child.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/proc_test.elf obj/intel/proc_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/proc_test.elf obj/intel/proc_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/lseek_test.elf obj/intel/lseek_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/lseek_test.elf obj/intel/lseek_test.bin
+ld.lld -T src/user/linker.ld -o obj/intel/sort.elf obj/intel/sort.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/sort.elf obj/intel/sort.bin
+ld.lld -T src/user/linker.ld -o obj/intel/uniq.elf obj/intel/uniq.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/uniq.elf obj/intel/uniq.bin
+ld.lld -T src/user/linker.ld -o obj/intel/ping.elf obj/intel/ping.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/ping.elf obj/intel/ping.bin
+ld.lld -T src/user/linker.ld -o obj/intel/nc.elf obj/intel/nc.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/nc.elf obj/intel/nc.bin
+ld.lld -T src/user/linker.ld -o obj/intel/ifconfig.elf obj/intel/ifconfig.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/ifconfig.elf obj/intel/ifconfig.bin
+ld.lld -T src/user/linker.ld -o obj/intel/shtest2.elf obj/intel/shell_test2.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/shtest2.elf obj/intel/shtest2.bin
+ld.lld -T src/user/linker.ld -o obj/intel/mkdir.elf obj/intel/mkdir.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/mkdir.elf obj/intel/mkdir.bin
+ld.lld -T src/user/linker.ld -o obj/intel/shtest3.elf obj/intel/shell_test3.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/shtest3.elf obj/intel/shtest3.bin
+ld.lld -T src/user/linker.ld -o obj/intel/pong.elf obj/intel/pong.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_graphics.o
+llvm-objcopy -O binary obj/intel/pong.elf obj/intel/pong.bin
+ld.lld -T src/user/linker.ld -o obj/intel/millipede.elf obj/intel/millipede.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_graphics.o
+llvm-objcopy -O binary obj/intel/millipede.elf obj/intel/millipede.bin
+ld.lld -T src/user/linker.ld -o obj/intel/stardust.elf obj/intel/stardust.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_graphics.o
+llvm-objcopy -O binary obj/intel/stardust.elf obj/intel/stardust.bin
+ld.lld -T src/user/linker.ld -o obj/intel/filedialog_arrow_test.elf obj/intel/user_filedialog_arrow_test.o obj/intel/user_desktop_test_wrapper.o obj/intel/games_scan.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_graphics.o obj/intel/user_window.o
+llvm-objcopy -O binary obj/intel/filedialog_arrow_test.elf obj/intel/FILEDIAL.BIN
+ld.lld -T src/user/linker.ld -o obj/intel/monitor.elf obj/intel/monitor.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/monitor.elf obj/intel/monitor.bin
+ld.lld -T src/user/linker.ld -o obj/intel/monitor_test.elf obj/intel/monitor_test.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/monitor_test.elf obj/intel/monitort.bin
+ld.lld -T src/user/linker.ld -o obj/intel/files.elf obj/intel/files.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/files.elf obj/intel/files.bin
+ld.lld -T src/user/linker.ld -o obj/intel/calc.elf obj/intel/calc.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/calc.elf obj/intel/calc.bin
+ld.lld -T src/user/linker.ld -o obj/intel/clock.elf obj/intel/clock.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/clock.elf obj/intel/clock.bin
+ld.lld -T src/user/linker.ld -o obj/intel/sysmon.elf obj/intel/sysmon.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/sysmon.elf obj/intel/sysmon.bin
+ld.lld -T src/user/linker.ld -o obj/intel/hex.elf obj/intel/hex.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/hex.elf obj/intel/hex.bin
+ld.lld -T src/user/linker.ld -o obj/intel/tasks.elf obj/intel/tasks.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/tasks.elf obj/intel/tasks.bin
+ld.lld -T src/user/linker.ld -o obj/intel/find.elf obj/intel/find.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/find.elf obj/intel/find.bin
+ld.lld -T src/user/linker.ld -o obj/intel/diff.elf obj/intel/diff.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/diff.elf obj/intel/diff.bin
+ld.lld -T src/user/linker.ld -o obj/intel/notes.elf obj/intel/notes.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/notes.elf obj/intel/notes.bin
+ld.lld -T src/user/linker.ld -o obj/intel/unit.elf obj/intel/unit.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_gui.o obj/intel/user_dialog.o obj/intel/user_filedialog.o
+llvm-objcopy -O binary obj/intel/unit.elf obj/intel/unit.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/xcalc.elf obj/intel/xcalc_main.o obj/intel/x11_xlib_display.o obj/intel/x11_xlib_window.o obj/intel/x11_xlib_draw.o obj/intel/x11_xlib_event.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/xcalc.elf obj/intel/xcalc.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/antfarm.elf obj/intel/antfarm_main.o obj/intel/x11_xlib_display.o obj/intel/x11_xlib_window.o obj/intel/x11_xlib_draw.o obj/intel/x11_xlib_event.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/antfarm.elf obj/intel/antfarm.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/xeyes.elf obj/intel/xeyes_main.o obj/intel/x11_xlib_display.o obj/intel/x11_xlib_window.o obj/intel/x11_xlib_draw.o obj/intel/x11_xlib_event.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/xeyes.elf obj/intel/xeyes.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/xnibbler.elf obj/intel/xnibbler_main.o obj/intel/x11_xlib_display.o obj/intel/x11_xlib_window.o obj/intel/x11_xlib_draw.o obj/intel/x11_xlib_event.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/xnibbler.elf obj/intel/xnibbler.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/nano.elf obj/intel/nano_browser.o obj/intel/nano_chars.o obj/intel/nano_color.o obj/intel/nano_cut.o obj/intel/nano_files.o obj/intel/nano_global.o obj/intel/nano_help.o obj/intel/nano_history.o obj/intel/nano_move.o obj/intel/nano_nano.o obj/intel/nano_prompt.o obj/intel/nano_rcfile.o obj/intel/nano_search.o obj/intel/nano_text.o obj/intel/nano_utils.o obj/intel/nano_winio.o obj/intel/nano_hb_curses.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/nano.elf obj/intel/nano.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/mkfsfat.elf obj/intel/mkfs_mkfs.fat.o obj/intel/mkfs_common.o obj/intel/mkfs_charconv.o obj/intel/mkfs_device_info.o obj/intel/mkfs_hb_blkdev.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/mkfsfat.elf obj/intel/mkfsfat.bin
+ld.lld -T src/user/linker.ld -o obj/intel/apps_test.elf obj/intel/user_apps_test.o obj/intel/user_desktop_test_wrapper.o obj/intel/games_scan.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o obj/intel/user_graphics_stats.o obj/intel/user_window.o
+llvm-objcopy -O binary obj/intel/apps_test.elf obj/intel/APPS_T.BIN
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/thrd_test.elf obj/intel/thrd_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/thrd_test.elf obj/intel/thrd_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tls_test.elf obj/intel/tls_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tls_test.elf obj/intel/tls_test.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/user/wk1c_test.c -o obj/intel/wk1c_test.o
+src/user/wk1c_test.c:83:19: warning: address of stack memory associated with local variable 'p' returned [-Wreturn-stack-address]
+   83 |   return (void *)&p;
+      |                   ^
+1 warning generated.
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/wk1c_test.elf obj/intel/wk1c_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/wk1c_test.elf obj/intel/WK1C_T.BIN
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/cxx_t.elf obj/intel/cxx_t.o obj/intel/libcxx.a obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/cxx_t.elf obj/intel/cxx_t.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/rtti_t.elf obj/intel/cxx_rtti_t.o obj/intel/libcxx.a obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/rtti_t.elf obj/intel/rtti_t.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -mcmodel=large -c src/user/mmtest.c -o obj/intel/mmtest.o
+ld.lld -T src/user/linker_v2.ld -e _start -o obj/intel/mmtest.elf obj/intel/mmtest.o
+llvm-objcopy -O binary obj/intel/mmtest.elf obj/intel/mmtest.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/user/ipc_test.c -o obj/intel/ipc_test.o
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/ipc_test.elf obj/intel/ipc_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/ipc_test.elf obj/intel/ipc_test.bin
+ld.lld -T src/user/linker.ld -e _start --gc-sections -o obj/intel/icusmk.elf obj/intel/icu_smoke.o obj/intel/crt0.o obj/intel/icu/libicuuc.a obj/intel/libcxx.a obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/icusmk.elf obj/intel/icusmk.bin
+ld.lld -T src/user/linker.ld -e _start --gc-sections -o obj/intel/sqltest.elf obj/intel/sqlite_test.o obj/intel/sqlite_os.o obj/intel/sqlite3.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/sqltest.elf obj/intel/sqltest.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/sig_test.elf obj/intel/sig_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/sig_test.elf obj/intel/sig_test.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/spawnex_child.elf obj/intel/spawnex_child.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/spawnex_child.elf obj/intel/spawnex_child.bin
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/user/torture_test.c -o obj/intel/torture_test.o
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/torture_test.elf obj/intel/torture_test.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/torture_test.elf obj/intel/torture_test.bin
+mkdir -p obj/intel/
+python3 -c "import sys; sys.stdout.buffer.write(b'HO_BIGLOAD_30MB\n' * 1885440)" > obj/intel/big.bin
+built obj/intel/big.bin: 30167040 bytes
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/make.elf obj/intel/make_ar.o obj/intel/make_arscan.o obj/intel/make_commands.o obj/intel/make_default.o obj/intel/make_dir.o obj/intel/make_expand.o obj/intel/make_file.o obj/intel/make_function.o obj/intel/make_getopt.o obj/intel/make_getopt1.o obj/intel/make_guile.o obj/intel/make_hash.o obj/intel/make_implicit.o obj/intel/make_job.o obj/intel/make_load.o obj/intel/make_loadapi.o obj/intel/make_main.o obj/intel/make_misc.o obj/intel/make_output.o obj/intel/make_posixos.o obj/intel/make_read.o obj/intel/make_remake.o obj/intel/make_remote-stub.o obj/intel/make_rule.o obj/intel/make_shuffle.o obj/intel/make_signame.o obj/intel/make_strcache.o obj/intel/make_variable.o obj/intel/make_version.o obj/intel/make_vpath.o obj/intel/make_glob.o obj/intel/make_fnmatch.o obj/intel/make_hb_stubs.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/make.elf obj/intel/make.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/tar.elf obj/intel/tar.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/tar.elf obj/intel/tar.bin
+[browser] third_party/webkit-hobbyos/cache/browser-x64.bin.xz (cache) -> obj/intel/browser.bin
+[tools] LLVM dist staging present
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/selfhost.elf obj/intel/selfhost.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/selfhost.elf obj/intel/selfhost.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/nes.elf obj/intel/nesmain.o obj/intel/nescore.o obj/intel/user_graphics.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/nes.elf obj/intel/nes.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/doom.elf \
+  obj/intel/doom.o obj/intel/doom_hobbyos.o obj/intel/doom_engine/am_map.o obj/intel/doom_engine/doomdef.o obj/intel/doom_engine/doomstat.o obj/intel/doom_engine/dstrings.o obj/intel/doom_engine/d_event.o obj/intel/doom_engine/d_items.o obj/intel/doom_engine/d_iwad.o obj/intel/doom_engine/d_loop.o obj/intel/doom_engine/d_main.o obj/intel/doom_engine/d_mode.o obj/intel/doom_engine/d_net.o obj/intel/doom_engine/f_finale.o obj/intel/doom_engine/f_wipe.o obj/intel/doom_engine/g_game.o obj/intel/doom_engine/hu_lib.o obj/intel/doom_engine/hu_stuff.o obj/intel/doom_engine/info.o obj/intel/doom_engine/i_cdmus.o obj/intel/doom_engine/i_endoom.o obj/intel/doom_engine/i_joystick.o obj/intel/doom_engine/i_scale.o obj/intel/doom_engine/i_sound.o obj/intel/doom_engine/i_system.o obj/intel/doom_engine/i_timer.o obj/intel/doom_engine/memio.o obj/intel/doom_engine/m_argv.o obj/intel/doom_engine/m_bbox.o obj/intel/doom_engine/m_cheat.o obj/intel/doom_engine/m_config.o obj/intel/doom_engine/m_controls.o obj/intel/doom_engine/m_fixed.o obj/intel/doom_engine/m_menu.o obj/intel/doom_engine/m_misc.o obj/intel/doom_engine/m_random.o obj/intel/doom_engine/p_ceilng.o obj/intel/doom_engine/p_doors.o obj/intel/doom_engine/p_enemy.o obj/intel/doom_engine/p_floor.o obj/intel/doom_engine/p_inter.o obj/intel/doom_engine/p_lights.o obj/intel/doom_engine/p_map.o obj/intel/doom_engine/p_maputl.o obj/intel/doom_engine/p_mobj.o obj/intel/doom_engine/p_plats.o obj/intel/doom_engine/p_pspr.o obj/intel/doom_engine/p_saveg.o obj/intel/doom_engine/p_setup.o obj/intel/doom_engine/p_sight.o obj/intel/doom_engine/p_spec.o obj/intel/doom_engine/p_switch.o obj/intel/doom_engine/p_telept.o obj/intel/doom_engine/p_tick.o obj/intel/doom_engine/p_user.o obj/intel/doom_engine/r_bsp.o obj/intel/doom_engine/r_data.o obj/intel/doom_engine/r_draw.o obj/intel/doom_engine/r_main.o obj/intel/doom_engine/r_plane.o obj/intel/doom_engine/r_segs.o obj/intel/doom_engine/r_sky.o obj/intel/doom_engine/r_things.o obj/intel/doom_engine/sha1.o obj/intel/doom_engine/sounds.o obj/intel/doom_engine/statdump.o obj/intel/doom_engine/st_lib.o obj/intel/doom_engine/st_stuff.o obj/intel/doom_engine/s_sound.o obj/intel/doom_engine/tables.o obj/intel/doom_engine/v_video.o obj/intel/doom_engine/wi_stuff.o obj/intel/doom_engine/w_checksum.o obj/intel/doom_engine/w_file.o obj/intel/doom_engine/w_main.o obj/intel/doom_engine/w_wad.o obj/intel/doom_engine/z_zone.o obj/intel/doom_engine/w_file_stdc.o obj/intel/doom_engine/i_input.o obj/intel/doom_engine/i_video.o obj/intel/doom_engine/doomgeneric.o obj/intel/doom_engine/dummy.o \
+  obj/intel/user_graphics.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/doom.elf obj/intel/doom.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/mcopy.elf obj/intel/mtoolsm_mcopy.o obj/intel/mtools_buffer.o obj/intel/mtools_charsetConv.o obj/intel/mtools_codepages.o obj/intel/mtools_config.o obj/intel/mtools_copyfile.o obj/intel/mtools_device.o obj/intel/mtools_devices.o obj/intel/mtools_dirCache.o obj/intel/mtools_directory.o obj/intel/mtools_direntry.o obj/intel/mtools_dos2unix.o obj/intel/mtools_fat.o obj/intel/mtools_fat_free.o obj/intel/mtools_file.o obj/intel/mtools_file_name.o obj/intel/mtools_force_io.o obj/intel/mtools_hash.o obj/intel/mtools_init.o obj/intel/mtools_lba.o obj/intel/mtools_llong.o obj/intel/mtools_lockdev.o obj/intel/mtools_mainloop.o obj/intel/mtools_match.o obj/intel/mtools_mcopy.o obj/intel/mtools_mdel.o obj/intel/mtools_misc.o obj/intel/mtools_missFuncs.o obj/intel/mtools_mk_direntry.o obj/intel/mtools_mmd.o obj/intel/mtools_offset.o obj/intel/mtools_old_dos.o obj/intel/mtools_open_image.o obj/intel/mtools_partition.o obj/intel/mtools_patchlevel.o obj/intel/mtools_plain_io.o obj/intel/mtools_privileges.o obj/intel/mtools_remap.o obj/intel/mtools_signal.o obj/intel/mtools_stream.o obj/intel/mtools_streamcache.o obj/intel/mtools_strtonum.o obj/intel/mtools_swap.o obj/intel/mtools_tty.o obj/intel/mtools_unix2dos.o obj/intel/mtools_unixdir.o obj/intel/mtools_vfat.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/mcopy.elf obj/intel/mcopy.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/mdel.elf obj/intel/mtoolsm_mdel.o obj/intel/mtools_buffer.o obj/intel/mtools_charsetConv.o obj/intel/mtools_codepages.o obj/intel/mtools_config.o obj/intel/mtools_copyfile.o obj/intel/mtools_device.o obj/intel/mtools_devices.o obj/intel/mtools_dirCache.o obj/intel/mtools_directory.o obj/intel/mtools_direntry.o obj/intel/mtools_dos2unix.o obj/intel/mtools_fat.o obj/intel/mtools_fat_free.o obj/intel/mtools_file.o obj/intel/mtools_file_name.o obj/intel/mtools_force_io.o obj/intel/mtools_hash.o obj/intel/mtools_init.o obj/intel/mtools_lba.o obj/intel/mtools_llong.o obj/intel/mtools_lockdev.o obj/intel/mtools_mainloop.o obj/intel/mtools_match.o obj/intel/mtools_mcopy.o obj/intel/mtools_mdel.o obj/intel/mtools_misc.o obj/intel/mtools_missFuncs.o obj/intel/mtools_mk_direntry.o obj/intel/mtools_mmd.o obj/intel/mtools_offset.o obj/intel/mtools_old_dos.o obj/intel/mtools_open_image.o obj/intel/mtools_partition.o obj/intel/mtools_patchlevel.o obj/intel/mtools_plain_io.o obj/intel/mtools_privileges.o obj/intel/mtools_remap.o obj/intel/mtools_signal.o obj/intel/mtools_stream.o obj/intel/mtools_streamcache.o obj/intel/mtools_strtonum.o obj/intel/mtools_swap.o obj/intel/mtools_tty.o obj/intel/mtools_unix2dos.o obj/intel/mtools_unixdir.o obj/intel/mtools_vfat.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/mdel.elf obj/intel/mdel.bin
+ld.lld -T src/user/linker.ld -e _start -o obj/intel/mmd.elf obj/intel/mtoolsm_mmd.o obj/intel/mtools_buffer.o obj/intel/mtools_charsetConv.o obj/intel/mtools_codepages.o obj/intel/mtools_config.o obj/intel/mtools_copyfile.o obj/intel/mtools_device.o obj/intel/mtools_devices.o obj/intel/mtools_dirCache.o obj/intel/mtools_directory.o obj/intel/mtools_direntry.o obj/intel/mtools_dos2unix.o obj/intel/mtools_fat.o obj/intel/mtools_fat_free.o obj/intel/mtools_file.o obj/intel/mtools_file_name.o obj/intel/mtools_force_io.o obj/intel/mtools_hash.o obj/intel/mtools_init.o obj/intel/mtools_lba.o obj/intel/mtools_llong.o obj/intel/mtools_lockdev.o obj/intel/mtools_mainloop.o obj/intel/mtools_match.o obj/intel/mtools_mcopy.o obj/intel/mtools_mdel.o obj/intel/mtools_misc.o obj/intel/mtools_missFuncs.o obj/intel/mtools_mk_direntry.o obj/intel/mtools_mmd.o obj/intel/mtools_offset.o obj/intel/mtools_old_dos.o obj/intel/mtools_open_image.o obj/intel/mtools_partition.o obj/intel/mtools_patchlevel.o obj/intel/mtools_plain_io.o obj/intel/mtools_privileges.o obj/intel/mtools_remap.o obj/intel/mtools_signal.o obj/intel/mtools_stream.o obj/intel/mtools_streamcache.o obj/intel/mtools_strtonum.o obj/intel/mtools_swap.o obj/intel/mtools_tty.o obj/intel/mtools_unix2dos.o obj/intel/mtools_unixdir.o obj/intel/mtools_vfat.o obj/intel/libc.a
+llvm-objcopy -O binary obj/intel/mmd.elf obj/intel/mmd.bin
+# Startup disk: 1 GiB (user-requested floor; FAT16 tops out at 2 GiB).
+# mkfs.fat auto-picks the cluster size (32 KiB @ 1 GiB); the kernel
+# fat16.c layout math is BPB data-driven (bpb_sectors_per_cluster), so
+# no driver change is needed for the larger disk/clusters.
+dd if=/dev/zero of=disk.img bs=1M count=1024
+1024+0 records in
+1024+0 records out
+1073741824 bytes (1.1 GB, 1.0 GiB) copied, 0.333902 s, 3.2 GB/s
+mkfs.fat -F 16 disk.img
+mkfs.fat 4.2 (2021-01-31)
+mmd -i disk.img ::/EFI
+mmd -i disk.img ::/EFI/BOOT
+mmd -i disk.img ::/boot
+mmd -i disk.img ::/home
+# CA roots for the browser's TLS stack (libcurl/mbedTLS): the driver pins
+# /CERTS/CA.PEM (WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp).  Without
+# this every https:// navigation fails at certificate verification and the
+# user sees the previous page with no explanation.
+mmd -i disk.img ::/CERTS
+mcopy -i disk.img certs/cacert.pem ::/CERTS/CA.PEM
+mmd -i disk.img ::/nfs
+mmd -i disk.img ::/mnt
+mmd -i disk.img ::/TESTDIR
+mmd -i disk.img ::/tmp
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+# build-tools at their frozen /TOOLS/ paths (Makefile.hobbyos sketch).
+mmd -i disk.img ::/TOOLS
+# L3 (selfhost W-A): VFAT long-name build-payload fixture dirs (mtools-written).
+mmd -i disk.img ::/src
+mmd -i disk.img ::/src/kernel
+mmd -i disk.img ::/src/user_include
+mmd -i disk.img ::/src/user_include/graphics
+mmd -i disk.img ::/third_party
+mmd -i disk.img ::/third_party/libcxx-21.1.8
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include
+mcopy -i disk.img tests/fixtures/E2E.TXT ::/E2E.TXT
+mcopy -i disk.img tests/fixtures/DRAGME.TXT ::/DRAGME.TXT
+mcopy -i disk.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+mcopy -i disk.img bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
+mcopy -i disk.img obj/intel/limine.conf ::/boot/limine.conf
+mcopy -i disk.img hobbyos.elf ::/boot/hobbyos.elf
+mcopy -i disk.img obj/intel/memtest.bin ::/MEMTEST.BIN
+mcopy -i disk.img obj/intel/fileio_test.bin ::/FILEIO.BIN
+mcopy -i disk.img obj/intel/console.bin ::/CONSOLE.BIN
+mcopy -i disk.img obj/intel/fork_test.bin ::/FORKTEST.BIN
+mcopy -i disk.img obj/intel/heap_test.bin ::/HEAPTEST.BIN
+mcopy -i disk.img obj/intel/spawntest.bin ::/SPAWN.BIN
+mcopy -i disk.img obj/intel/graphics.bin ::/GRAPHICS.BIN
+mcopy -i disk.img obj/intel/wsurf_test.bin ::/WSRF_T.BIN
+mcopy -i disk.img obj/intel/smp_test.bin ::/SMPTEST.BIN
+mcopy -i disk.img obj/intel/pipetest.bin ::/PIPETEST.BIN
+mcopy -i disk.img obj/intel/nettest.bin ::/NETTEST.BIN
+mcopy -i disk.img obj/intel/timeout.bin ::/TIMEOUT.BIN
+mcopy -i disk.img obj/intel/nfstest.bin ::/NFSTEST.BIN
+mcopy -i disk.img obj/intel/desktop.bin ::/DESKTOP.BIN
+browser: obj/intel/browser.bin (resolved by the browser-staged completeness rule; installed as ::/BROWSER.BIN)
+mcopy -i disk.img obj/intel/editor.bin ::/EDITOR.BIN
+mcopy -i disk.img obj/intel/EDITOR_T.BIN ::/EDITOR_T.BIN
+mcopy -i disk.img obj/intel/APPS_T.BIN ::/APPS_T.BIN
+mcopy -i disk.img obj/intel/FILEDIAL.BIN ::/FILEDIAL.BIN
+mcopy -i disk.img obj/intel/DIALOG_T.BIN ::/DIALOG_T.BIN
+mcopy -i disk.img obj/intel/PONG_T.BIN ::/PONG_T.BIN
+mcopy -i disk.img obj/intel/stress.bin ::/STRESS.BIN
+mcopy -i disk.img obj/intel/fpu_test.bin ::/FPU_T.BIN
+mcopy -i disk.img obj/intel/gfxbench.bin ::/GFXBENCH.BIN
+mcopy -i disk.img obj/intel/math_test.bin ::/MATH_T.BIN
+mcopy -i disk.img obj/intel/errtest.bin ::/ERRTEST.BIN
+mcopy -i disk.img obj/intel/SOCK2TST.BIN ::/SOCK2TST.BIN
+mcopy -i disk.img obj/intel/POLLTST.BIN ::/POLLTST.BIN
+mcopy -i disk.img obj/intel/POLLBRK.BIN ::/POLLBRK.BIN
+mcopy -i disk.img obj/intel/BLKTEST.BIN ::/BLKTEST.BIN
+mcopy -i disk.img obj/intel/RANDTST.BIN ::/RANDTST.BIN
+mcopy -i disk.img obj/intel/dns_test.bin ::/DNSTST.BIN
+mcopy -i disk.img obj/intel/netfix.bin ::/NETFIX.BIN
+mcopy -i disk.img obj/intel/cxx_smoke.bin ::/CXXSMOKE.BIN
+mcopy -i disk.img obj/intel/thrd_test.bin ::/THRD_T.BIN
+mcopy -i disk.img obj/intel/tls_test.bin ::/TLS_T.BIN
+mcopy -i disk.img obj/intel/WK1C_T.BIN ::/WK1C_T.BIN
+mcopy -i disk.img obj/intel/cxx_t.bin ::/CXX_T.BIN
+mcopy -i disk.img obj/intel/rtti_t.bin ::/RTTI_T.BIN
+mcopy -i disk.img obj/intel/ipc_test.bin ::/IPC_T.BIN
+mcopy -i disk.img obj/intel/mmtest.bin ::/MMTEST.BIN
+mcopy -i disk.img obj/intel/sqltest.bin ::/SQLTEST.BIN
+mcopy -i disk.img obj/intel/torture_test.bin ::/TORTURE.BIN
+mcopy -i disk.img obj/intel/big.bin ::/BIG.BIN
+mcopy -i disk.img obj/intel/hello.bin ::/HELLO.BIN
+mcopy -i disk.img obj/intel/selfhost.bin ::/SELFHOST.BIN
+mcopy -i disk.img obj/intel/sh.bin ::/SH.BIN
+mcopy -i disk.img obj/intel/ls.bin ::/LS.BIN
+mcopy -i disk.img obj/intel/cat.bin ::/CAT.BIN
+mcopy -i disk.img obj/intel/grep.bin ::/GREP.BIN
+mcopy -i disk.img obj/intel/less.bin ::/LESS.BIN
+mcopy -i disk.img obj/intel/tail.bin ::/TAIL.BIN
+mcopy -i disk.img obj/intel/head.bin ::/HEAD.BIN
+mcopy -i disk.img obj/intel/shtest.bin ::/SHTEST.BIN
+mcopy -i disk.img obj/intel/ps.bin ::/PS.BIN
+mcopy -i disk.img obj/intel/free.bin ::/FREE.BIN
+mcopy -i disk.img obj/intel/uptime.bin ::/UPTIME.BIN
+mcopy -i disk.img obj/intel/kill.bin ::/KILL.BIN
+mcopy -i disk.img obj/intel/basename.bin ::/BASENAME.BIN
+mcopy -i disk.img obj/intel/dirname.bin ::/DIRNAME.BIN
+mcopy -i disk.img obj/intel/seq.bin ::/SEQ.BIN
+mcopy -i disk.img obj/intel/expr.bin ::/EXPR.BIN
+mcopy -i disk.img obj/intel/testgnu.bin ::/TEST.BIN
+mcopy -i disk.img obj/intel/cp.bin ::/CP.BIN
+mcopy -i disk.img obj/intel/rm.bin ::/RM.BIN
+mcopy -i disk.img obj/intel/mv.bin ::/MV.BIN
+mcopy -i disk.img obj/intel/touch.bin ::/TOUCH.BIN
+mcopy -i disk.img obj/intel/wc.bin ::/WC.BIN
+mcopy -i disk.img obj/intel/sed.bin ::/SED.BIN
+mcopy -i disk.img obj/intel/make.bin ::/MAKE.BIN
+mcopy -i disk.img obj/intel/hedgnu.bin ::/HEDGNU.BIN
+mcopy -i disk.img obj/intel/tailgnu.bin ::/TAILGN.BIN
+mcopy -i disk.img obj/intel/cut.bin ::/CUT.BIN
+mcopy -i disk.img obj/intel/tr.bin ::/TR.BIN
+mcopy -i disk.img obj/intel/paste.bin ::/PASTE.BIN
+mcopy -i disk.img obj/intel/fold.bin ::/FOLD.BIN
+mcopy -i disk.img obj/intel/nl.bin ::/NL.BIN
+mcopy -i disk.img obj/intel/comm.bin ::/COMM.BIN
+mcopy -i disk.img obj/intel/tsort.bin ::/TSORT.BIN
+mcopy -i disk.img obj/intel/expand.bin ::/EXPAND.BIN
+mcopy -i disk.img obj/intel/unexpand.bin ::/UNEXPAND.BIN
+mcopy -i disk.img obj/intel/cksum.bin ::/CKSUM.BIN
+mcopy -i disk.img obj/intel/md5sum.bin ::/MD5SUM.BIN
+mcopy -i disk.img obj/intel/proc_child.bin ::/PROCCHLD.BIN
+mcopy -i disk.img obj/intel/spawnex_child.bin ::/SPAWNEX.BIN
+mcopy -i disk.img obj/intel/sig_test.bin ::/SIG_T.BIN
+mcopy -i disk.img obj/intel/head_test.bin ::/HEDTEST.BIN
+mcopy -i disk.img obj/intel/tail_test.bin ::/TAILTEST.BIN
+mcopy -i disk.img obj/intel/proc_test.bin ::/PROCTEST.BIN
+mcopy -i disk.img obj/intel/wc_test.bin ::/WCTEST.BIN
+mcopy -i disk.img obj/intel/cut_test.bin ::/CUTTEST.BIN
+mcopy -i disk.img obj/intel/tr_test.bin ::/TRTEST.BIN
+mcopy -i disk.img obj/intel/paste_test.bin ::/PASTE_T.BIN
+mcopy -i disk.img obj/intel/fold_test.bin ::/FOLDTEST.BIN
+mcopy -i disk.img obj/intel/nl_test.bin ::/NLTEST.BIN
+mcopy -i disk.img obj/intel/comm_test.bin ::/COMMTEST.BIN
+mcopy -i disk.img obj/intel/tsort_test.bin ::/TSORT_T.BIN
+mcopy -i disk.img obj/intel/expand_test.bin ::/EXPAND_T.BIN
+mcopy -i disk.img obj/intel/unexpand_test.bin ::/UNEXPAND_T.BIN
+mcopy -i disk.img obj/intel/fatbig_test.bin ::/FATBIG_T.BIN
+mcopy -i disk.img obj/intel/stage4k_test.bin ::/STAGE4K_T.BIN
+# L3 (selfhost W-A): VFAT long-name build-payload fixtures.  Content
+# markers must stay in sync with src/user/lfn_test.c.
+mcopy -i disk.img tests/fixtures/lfn/program_loader.c ::/src/kernel/program_loader.c
+mcopy -i disk.img tests/fixtures/lfn/window.h ::/src/user_include/graphics/window.h
+mcopy -i disk.img tests/fixtures/lfn/llvm-project-21.1.8.src-EXAMPLE.c ::/src/llvm-project-21.1.8.src-EXAMPLE.c
+mcopy -i disk.img tests/fixtures/lfn/upper_bound.h ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include/upper_bound.h
+mcopy -i disk.img tests/fixtures/lfn/longfilename.txt ::/longfilename.txt
+mcopy -i disk.img tests/fixtures/lfn/longfilename2.txt ::/longfilename2.txt
+mcopy -i disk.img tests/fixtures/lfn/longfil~1.txt ::/longfil~1.txt
+mcopy -i disk.img obj/intel/lfn_test.bin ::/LFN_T.BIN
+mcopy -i disk.img obj/intel/cksum_test.bin ::/CKSUM_T.BIN
+mcopy -i disk.img obj/intel/md5sum_test.bin ::/MD5SUM_T.BIN
+mcopy -i disk.img obj/intel/tac.bin ::/TAC.BIN
+mcopy -i disk.img obj/intel/tac_test.bin ::/TACTEST.BIN
+mcopy -i disk.img obj/intel/cmp.bin ::/CMP.BIN
+mcopy -i disk.img obj/intel/cmp_test.bin ::/CMPTEST.BIN
+mcopy -i disk.img obj/intel/regex_test.bin ::/REGTEST.BIN
+mcopy -i disk.img obj/intel/sed_test.bin ::/SEDTEST.BIN
+mcopy -i disk.img obj/intel/grep_test.bin ::/GREPTEST.BIN
+mcopy -i disk.img obj/intel/subprobe.bin ::/SUBPRB.BIN
+mcopy -i disk.img obj/intel/pipeprobe.bin ::/PIPEPRB.BIN
+mcopy -i disk.img obj/intel/lseek_test.bin ::/LKSTEST.BIN
+mcopy -i disk.img obj/intel/sort.bin ::/SORT.BIN
+mcopy -i disk.img obj/intel/uniq.bin ::/UNIQ.BIN
+mcopy -i disk.img obj/intel/ping.bin ::/PING.BIN
+mcopy -i disk.img obj/intel/nc.bin ::/NC.BIN
+mcopy -i disk.img obj/intel/ifconfig.bin ::/IFCONFIG.BIN
+mcopy -i disk.img obj/intel/shtest2.bin ::/SHTEST2.BIN
+mcopy -i disk.img obj/intel/mkdir.bin ::/MKDIR.BIN
+mcopy -i disk.img obj/intel/shtest3.bin ::/SHTEST3.BIN
+mcopy -i disk.img obj/intel/pong.bin ::/PONG.BIN
+mcopy -i disk.img obj/intel/millipede.bin ::/MILLIPED.BIN
+mcopy -i disk.img obj/intel/doom.bin ::/DOOM.BIN
+[disk] IWAD doom1.wad -> ::/DOOM1.WAD
+mcopy -i disk.img obj/intel/stardust.bin ::/STARDUST.BIN
+mcopy -i disk.img obj/intel/files.bin ::/FILES.BIN
+mcopy -i disk.img obj/intel/calc.bin ::/CALC.BIN
+mcopy -i disk.img obj/intel/xcalc.bin ::/XCALC.BIN
+mcopy -i disk.img obj/intel/antfarm.bin ::/ANTFARM.BIN
+mcopy -i disk.img obj/intel/xeyes.bin ::/XEYES.BIN
+mcopy -i disk.img obj/intel/xnibbler.bin ::/XNIBBLER.BIN
+mcopy -i disk.img obj/intel/clock.bin ::/CLOCK.BIN
+mcopy -i disk.img obj/intel/sysmon.bin ::/SYSMON.BIN
+mcopy -i disk.img obj/intel/hex.bin ::/HEX.BIN
+mcopy -i disk.img obj/intel/tasks.bin ::/TASKS.BIN
+mcopy -i disk.img obj/intel/find.bin ::/FIND.BIN
+mcopy -i disk.img obj/intel/diff.bin ::/DIFF.BIN
+mcopy -i disk.img obj/intel/notes.bin ::/NOTES.BIN
+mcopy -i disk.img obj/intel/unit.bin ::/UNIT.BIN
+mcopy -i disk.img obj/intel/nano.bin ::/NANO.BIN
+mcopy -i disk.img obj/intel/xcrypt.bin ::/XCRYPT.BIN
+mcopy -i disk.img obj/intel/nes.bin ::/NES.BIN
+# Selfhost W2 (mtools port): in-OS /TOOLS copies of the ported
+# build-tools (8.3 names, the frozen F1 layout).
+mcopy -i disk.img obj/intel/mcopy.bin ::/TOOLS/MCOPY.BIN
+mcopy -i disk.img obj/intel/mdel.bin ::/TOOLS/MDEL.BIN
+mcopy -i disk.img obj/intel/mmd.bin ::/TOOLS/MMD.BIN
+# Selfhost W2 (mkfs port): in-OS MKFSFAT (F1 layout).
+mcopy -i disk.img obj/intel/mkfsfat.bin ::/MKFSFAT.BIN
+# Selfhost W3 (tools): the in-OS toolchain on the startup image (frozen
+# F1 layout, selfhost.md §7.3).  tools/selfhost-stage.sh --tools stages
+# CLANG.BIN/LLD.BIN/LLVMAR.BIN/OBJCOPY.BIN from the wave-2 LLVM
+# distribution staging (obj/selfhost/dist-staging, or the persistent
+# third_party/llvm-21.1.8/dist-staging copy that survives `make clean`),
+# the ported build tools (MAKE/MCOPY/MDEL/MMD/MKFSFAT), and the RESDIR
+# header tree under /TOOLS — staged FAITHFULLY with long names (F8
+# decision, see docs/selfhost/llvm-bootstrap.md §6.2).  Soft dependency:
+# an absent dist-staging warns + skips, so trees without the LLVM
+# install still build a bootable image (build_kernel.sh then refuses
+# with instructions).  Override with STAGE_TOOLS=0 to skip.
+tools/selfhost-stage.sh --tools disk.img
+selfhost-stage: staging in-OS toolchain to ::/TOOLS (F1 layout)
+selfhost-stage:   CLANG.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/clang-21 (converted, 94194168 B)
+selfhost-stage:   LLD.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/lld (converted, 53252520 B)
+selfhost-stage:   LLVMAR.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/llvm-ar (converted, 8351072 B)
+selfhost-stage:   OBJCOPY.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/llvm-objcopy (converted, 4984544 B)
+selfhost-stage: staged 284 files, 176926350 bytes into ::/TOOLS
+  --- ::/TOOLS (mdir) ---
+TAR      BIN    145128 2026-10-27   4:19 
+RESDIR       <DIR>     2026-10-27   4:19 
+       15 files         162 199 096 bytes
+                        694 173 696 bytes free
+
+  --- ::/TOOLS/RESDIR/include count ---
+      295 files          14 727 254 bytes
+                        694 173 696 bytes free
+
+selfhost-stage: done
+# Selfhost W4 (src): the in-OS build-required source subset on the
+# startup image (frozen F2 /SRC flavor): kernel+user sources, headers,
+# Makefile.hobbyos, limine/EFI assets, the carried build products, and
+# the SELFHOST.RUN/SELFHOST.SH stage scripts.  tools/selfhost-stage.sh
+# --src; disable together with the tools step via STAGE_TOOLS=0.
+tools/selfhost-stage.sh --src disk.img
+selfhost-stage: STAGE_LIBCXX=0 — skipping C++ libcxx include subset
+selfhost-stage: staging BUILD-REQUIRED source subset to ::/SRC
+
+selfhost-stage: staged BUILD-REQUIRED subset into disk.img
+  payload: 268 files, 5279937 bytes
+  --- ::/SRC (mdir) ---
+        3 files             315 392 bytes
+
+Total files listed:
+      342 files           5 280 006 bytes
+                        685 441 024 bytes free
+
+selfhost-stage: done
+# [inos-build-kernel] the source tarball + the in-OS build script:
+# SRC.TAR (ustar, assembled by tools/selfhost-src-tar.sh from the real
+# tree) lands at ::/SRC.TAR; build_kernel.sh at ::/BUILD_KERNEL.SH.
+# In-OS: `SH.BIN /BUILD_KERNEL.SH` extracts the tar and builds the
+# kernel from it (Makefile.hobbyos `all`) + assembles OUT.IMG.
+tools/selfhost-src-tar.sh obj/selfhost/SRC.TAR
+selfhost-src-tar: assembling obj/selfhost/SRC.TAR
+selfhost-src-tar: done — obj/selfhost/SRC.TAR
+  entries: 1150 (files+dirs), size: 25231360 bytes
+  spot-checked members: src/kernel/main.c Makefile.hobbyos linker.ld limine.conf build_kernel.sh
+mcopy -i disk.img obj/selfhost/SRC.TAR ::/SRC.TAR
+mcopy -i disk.img src/user/selfhost/build_kernel.sh ::/BUILD_KERNEL.SH
+mcopy -i disk.img obj/intel/monitor.bin ::/MONITOR.BIN
+mcopy -i disk.img obj/intel/monitort.bin ::/MONITORT.BIN
+mcopy -i disk.img obj/intel/icusmk.bin ::/ICUSMK.BIN
+echo "HobbyOS Terminal Test File" > SHTEST.TXT
+echo "This is line number two." >> SHTEST.TXT
+echo "Line three is right here." >> SHTEST.TXT
+echo "Fourth line has some interesting keywords like hello world." >> SHTEST.TXT
+echo "Line five is the last line of this small test document." >> SHTEST.TXT
+touch TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT
+echo "orange" > SORT.TXT
+echo "apple" >> SORT.TXT
+echo "orange" >> SORT.TXT
+mcopy -i disk.img SHTEST.TXT ::/SHTEST.TXT
+mcopy -i disk.img SHTEST.TXT ::/home/SHTEST.TXT
+mcopy -i disk.img TEST1.TXT ::/TEST1.TXT
+mcopy -i disk.img TEST2.TXT ::/TEST2.TXT
+mcopy -i disk.img TEST3.TXT ::/TEST3.TXT
+mcopy -i disk.img TEST4.TXT ::/TEST4.TXT
+mcopy -i disk.img SORT.TXT ::/SORT.TXT
+# GB-067 fixture: 4096 bytes, byte[i] = i % 251 (the pattern STAGE4K_T.BIN
+# byte-compares).  Staged HERE, by the host, because the DoD under test is
+# "a host-staged 4 KiB file reads back byte-exact in the guest" -- if the
+# guest wrote it, the test would be exercising the writer.  Until this
+# landed the fixture came from a hand-run `T3_STAGE` probe, so every CI
+# wave failed `[STAGE4K] FAIL open /STAGE4K.BIN` while passing locally
+# for whoever remembered to stage it.
+perl -e 'print chr($_ % 251) for (0..4095)' > STAGE4K.BIN
+mcopy -i disk.img STAGE4K.BIN ::/STAGE4K.BIN
+rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT STAGE4K.BIN
