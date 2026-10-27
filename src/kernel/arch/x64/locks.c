@@ -39,6 +39,19 @@ extern volatile uint64_t cpu_heartbeat_ms[];
 extern uint64_t timer_get_ms(void);
 int lock_stallbreak_ok(uint32_t owner_slot, uint32_t cpu, uint64_t now_ms);
 
+/* GB-060 gate counters: the tier must be able to count the lock-strand markers
+   from a REAL end-of-run summary, not by hand-grepping the raw console and
+   deriving a "zero" that the gate then trusts (my earlier "STALLBREAK = 0" was
+   exactly that kind of hand-derived value, and it missed a real break).  Each
+   marker site below bumps its own counter; the CPU-0 halt path calls
+   lock_print_counters() so the console carries a single machine-readable line.
+   Plain volatile uint64_t under the same IRQ-off / per-CPU assumptions as the
+   markers: one CPU in a marker branch at a time, summary printed at quiesce. */
+volatile uint64_t lock_cnt_lockforever = 0;   /* [LOCKFOREVER]  spin shout    */
+volatile uint64_t lock_cnt_unownedfreed = 0;  /* [UNOWNED-FREED] locked=1,o=0 */
+volatile uint64_t lock_cnt_stolen = 0;        /* [STOLEN]       halted owner  */
+volatile uint64_t lock_cnt_stallbreak = 0;    /* [STALLBREAK]   wedged owner  */
+
 /* GB-060: the steal decision, in ONE place.
 
    It lives in a function of its own so it can be tested directly, without
@@ -166,6 +179,7 @@ void spinlock_acquire(spinlock_t *lock) {
         scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
         scream_hex(" pc2=", (uint64_t)__builtin_return_address(1));
         uart_putc_raw('\n');
+        lock_cnt_lockforever++;
       }
       /* GB-060: break the strand when the holder is provably gone.  A CPU that
          took a fatal fault halts holding whatever it held (the halt paths give
@@ -204,6 +218,7 @@ void spinlock_acquire(spinlock_t *lock) {
           scream_hex(" lock=", (uint64_t)lock);
           scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
           uart_putc_raw('\n');
+          lock_cnt_unownedfreed++;
           __atomic_clear(&lock->locked, __ATOMIC_RELEASE);
         } else if (lock_steal_ok(own, cpu)) {
           scream_dec("\n[STOLEN] cpu=", cpu);
@@ -211,6 +226,7 @@ void spinlock_acquire(spinlock_t *lock) {
           scream_dec(" from halted cpu=", own - 1);
           scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
           uart_putc_raw('\n');
+          lock_cnt_stolen++;
           lock->owner = LOCK_OWNER_FREEING;
           __atomic_clear(&lock->locked, __ATOMIC_RELEASE);
           /* Only clear the mark if nobody acquired in the window: otherwise the
@@ -231,6 +247,7 @@ void spinlock_acquire(spinlock_t *lock) {
           scream_dec(" stale_ms=", age);
           scream_hex(" pc=", (uint64_t)__builtin_return_address(0));
           uart_putc_raw('\n');
+          lock_cnt_stallbreak++;
           lock->owner = LOCK_OWNER_FREEING;
           __atomic_clear(&lock->locked, __ATOMIC_RELEASE);
           /* Only clear the mark if nobody acquired in the window: otherwise the
@@ -335,6 +352,18 @@ int spinlock_release_if_held_by_me(spinlock_t *lock) {
     return 0;
   spinlock_release(lock);
   return 1;
+}
+
+/* GB-060 gate: print a single machine-readable end-of-run counter line so the
+   tier reads the real marker counts instead of hand-deriving a "zero" from the
+   raw console (which is how a real STALLBREAK=1 was missed).  Called from the
+   CPU-0 halt path after the wave quiesces. */
+void lock_print_counters(void) {
+  scream_dec("\n[LOCKCNT] STALLBREAK=", lock_cnt_stallbreak);
+  scream_dec(" STOLEN=", lock_cnt_stolen);
+  scream_dec(" LOCKFOREVER=", lock_cnt_lockforever);
+  scream_dec(" UNOWNED-FREED=", lock_cnt_unownedfreed);
+  uart_putc_raw('\n');
 }
 
 uint64_t spinlock_acquire_irqsave(spinlock_t *lock) {
