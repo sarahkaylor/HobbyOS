@@ -189,9 +189,17 @@ def verdict_in(body):
 
 
 VERDICT_RE = re.compile(
-    r"(?:VERDICT[^\n]{0,50}?\b(GREEN|RED)\b)"        # VERDICT: **GREEN** / VERDICT GREEN
-    r"|(?:^\s*(?:#+\s*)?\**\s*(GREEN|RED)\b)",       # **GREEN —** / ## GREEN / RED:
-    re.I | re.M)
+    # template: `VERDICT: **GREEN**` / `VERDICT GREEN` anywhere on a line
+    r"(?:(?i:VERDICT)[^\n]{0,50}?\b(GREEN|RED)\b)"
+    # marker: the line OPENS with the status and nothing but a separator after it.
+    # Case-sensitive on purpose: `Green eggs and ham` is prose, `**GREEN — …**` is a
+    # verdict.  Requiring `[—–-:]` or end-of-line after the word is what stops
+    # "Green light to merge at <sha>" from being read as a GREEN (GB-114-V clause 4:
+    # with a permissive `\b` after an re.I match it was, and graded_shas_in() takes
+    # shas from any line containing `merge`, so one sentence could pair a GREEN with
+    # a sha and authorise a merge).
+    r"|(?:^\s*(?:#+\s*)?\**\s*(GREEN|RED)\**\s*(?:[\u2014\u2013:-]|$))",
+    re.M)
 
 
 def newest_verdict(comments):
@@ -469,6 +477,18 @@ def self_test():
           "the template `VERDICT: **RED**` still resolves as RED")
     check(verdict_in("Greenfield is not a verdict") is None,
           "a non-verdict line beginning 'Green...' is not read as GREEN")
+    # GB-114-V clause 4's falsifier: prose must not become a verdict.  Measured against
+    # the first cut of this patch, which read "Green light to merge at <sha>" as GREEN --
+    # and graded_shas_in() takes shas from any line containing `merge`, so one sentence
+    # could pair a GREEN with a sha and authorise a merge.
+    check(verdict_in("Green eggs and ham") is None,
+          "prose beginning 'Green eggs' is not a verdict")
+    check(verdict_in("Green light to merge at 86f8473c0ffee - the diff is small.") is None,
+          "the 'Green light to merge at <sha>' sentence is NOT a GREEN (the clause-4 falsifier)")
+    check(verdict_in("RED herring") is None,
+          "prose beginning 'RED herring' is not a verdict")
+    check(verdict_in("**GREEN**") == "GREEN",
+          "a bare bold `**GREEN**` marker still resolves")
 
     # verify-lint: a green-gated review card is not flagged.
     issues_good = [
