@@ -1,0 +1,31 @@
+### G2-5: live probe 2026-10-27T04:18:58Z
+=== clause 2a: the paged scan reaches every open issue ===
+  page 1: 50 issues (#219 … #170)
+  page 2: 50 issues (#169 … #120)
+  page 3: 50 issues (#119 … #70)
+  page 4: 50 issues (#69 … #20)
+  page 5: 19 issues (#19 … #1)
+  total scanned: 219
+  #200 present: True  state=closed  GB-106 A gate verdict names a tree, a PR nam
+  #203 present: True  state=closed  GB-106-V2 Re-gate the merge guard: #194 must
+  #214 present: True  state=closed  GB-111 The T4 probe uses uninitialised fds a
+  #215 present: True  state=closed  GB-111-V Verify t4 probe guards socketpair/p
+
+=== clause 2b: a CLOSED verify card's GREEN is still found (PR 204 -> GB-106 -> #203 Done) ===
+  graded_sha_from_board(204) = None
+  graded_sha_of(204)         = None
+
+=== clause 3: the 7-char sha in a REAL verdict body ===
+  graded_shas_in(#203 GREEN) -> ['3da727c', 'bab2bb2', '66f16bd', '3da727c']
+  PR 204 head = 3da727ce691c08c0f46c2d69db24a03e10516fa9
+  head.startswith(each): [True, False, False, True, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False]
+  decide(head, shas[0]) -> allow=True  ok: graded prefix 3da727c.. matches current head 3da727ce691c.. — merge allowed
+
+=== clause 4: multi-sha GREEN picks the HEAD, not shas[0] ===
+  graded_shas_in -> ['3da727ce691c08c0f46c2d69db24a03e10516fa9', '3333333333333333333333333333333333333333']
+  the sha the guard would take (head-prefix rule): ['3da727ce691c08c0f46c2d69db24a03e10516fa9']
+
+=== clause 5: security half ===
+  forged cache 'f'*40 vs board -> graded_sha_of(204) = None
+  unreachable board -> None
+  no fallback: graded_sha_of returns None when the board is None (code path above).

@@ -1,0 +1,33 @@
+### G6: the fixture 2026-10-27T04:19:55Z
+# GB-110-V2 clause 5: a real verdict body names an ABBREVIATED prefix (7-40 hex)
+check("deadbeefe0" in graded_shas_in("## VERDICT: GREEN\n**Tree that would merge:** deadbeefe0\n"),
+      "reads an abbreviated (10-char-prefix) sha from a real GREEN body")
+check(graded_shas_in("VERDICT GREEN") == [], "a VERDICT with no sha -> empty (fails closed upstream)")
+
+# DoD self-test anchor: today's PR #194 (GB-103) was graded at 7de6dde.. but merged at
+# e8c7dc8.. -- the guard must refuse it FOR THE MISMATCH (not for silence).
+graded194 = "7de6dde4f3f29f53541b21fd1cd0a290168879a9"
+head194 = "e8c7dc89bc0156157930e4a90ba54d1845c0a147"
+ok, r = decide(head194, graded194)
+check(not ok and graded194 != head194, f"today's #194 incident (graded 7de6dde.., merged e8c7dc8..) -> RED for the mismatch ({r[:40]})")
+
+# GB-109: abbreviated graded shas compare as PREFIXES (>=7 chars); <7 refuses; and the
+# vacuous --head flag call is inexpressible (main() has no --head option).
+h = "1111111111111111111111111111111111111111"
+check(decide(h, h[:7])[0], "graded 7-char prefix of head -> ALLOW")
+check(not decide(h, "fffffff")[0], "graded 7-char non-prefix -> REFUSE")
+check(not decide(h, h[:6])[0], "graded prefix <7 chars -> REFUSE")
+import merge_pr
+structural, behavioral = merge_pr.vacuous_head_inexpressible()
+check(structural, "parser structurally has no --head option (re-adding it FAILS this probe)")
+check(behavioral, "main() rejects a --head argument on the command line")
+
+# GB-110: the graded sha comes from the NEWEST GREEN verdict on the board (Forgejo API);
+# the local obj/gate/graded-<pr>.sha file is only a cache and MUST match; a forged file
+# (one disagreeing with the board) cannot permit a merge.
+import merge_pr as mp
+board_sha = "abcdef1234567890abcdef1234567890abcdef12"
+_orig_fb = mp.graded_sha_from_board
+mp.graded_sha_from_board = lambda pr, env=None: board_sha          # board GREEN names a sha
+os.makedirs(os.path.join(mp.TREE, "obj", "gate"), exist_ok=True)
+cache = os.path.join(mp.TREE, "obj", "gate", "graded-9.sha")

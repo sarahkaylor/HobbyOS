@@ -1,0 +1,22 @@
+### G2b: diagnosing PR 204 on the paged+state=all tree 2026-10-27T04:19:43Z
+pr_gb_id=106 head=3da727ce691c08c0f46c2d69db24a03e10516fa9
+order: [201, 202, 203, 200]
+
+#201: 4 comments, 1 matching 'VERDICT … GREEN'
+   2026-10-26T19:03:46Z  first='## VERDICT: GREEN — GB-106-V, PR #204 head `68982dc` (2026-10-26 ~19:00–19:05Z)'
+      shas=['68982dc', 'd706c8cd0714', 'd706c8c', 'bbbbbbbbbbbb']  any head-prefix=[False, False, False, False]
+   -> guard would read the NEWEST GREEN (2026-10-26T19:03:46Z) and NOT find this head
+
+#202: 6 comments, 0 matching 'VERDICT … GREEN'
+
+#203: 11 comments, 1 matching 'VERDICT … GREEN'
+   2026-10-26T21:28:25Z  first='**VERDICT — GREEN (GB-106-V2, round 2).** Re-gated on the new head **`3da727c`** (branch `'
+      shas=['3da727c', 'bab2bb2', '66f16bd', '3da727c']  any head-prefix=[True, False, False, True]
+   -> guard would read the NEWEST GREEN (2026-10-26T21:28:25Z) and find this head
+
+#200: 28 comments, 2 matching 'VERDICT … GREEN'
+   2026-10-26T19:03:46Z  first='## VERDICT: GREEN — GB-106-V, PR #204 head `68982dc` (2026-10-26 ~19:00–19:05Z)'
+      shas=['68982dc', 'd706c8cd0714', 'd706c8c', 'bbbbbbbbbbbb']  any head-prefix=[False, False, False, False]
+   2026-10-26T21:28:26Z  first='**VERDICT — GREEN (GB-106-V2, round 2).** Re-gated on the new head **`3da727c`** (branch `'
+      shas=['3da727c', 'bab2bb2', '66f16bd', '3da727c']  any head-prefix=[True, False, False, True]
+   -> guard would read the NEWEST GREEN (2026-10-26T21:28:26Z) and find this head
