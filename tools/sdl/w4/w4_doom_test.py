@@ -28,9 +28,13 @@ def main():
         check(f"build script runs (exit 0)", r.returncode == 0 and os.path.exists(elf))
         head = run(["readelf", "-h", elf]).stdout
         check("ELF64 x86-64 (Machine Advanced Micro Devices X86-64)", "Machine:" in head and "X86-64" in head)
+        check("loader-accepted class: static-PIE (Type DYN)",
+              "DYN (Position-Independent Executable" in head)
+        interp = run(["readelf", "-l", elf]).stdout
+        check("no PT_INTERP (static: no dynamic loader dependency)", "INTERP" not in interp)
         file = run(["file", elf]).stdout
-        check("static musl ELF (statically linked, not a dynamic executable)",
-              "statically linked" in file)
+        check("static musl ELF (no dynamic loader; static-pie linked)",
+              "static-pie linked" in file or "statically linked" in file)
         nm = run(["llvm-nm", elf]).stdout
         for sym in ["main", "doomgeneric_Create", "DG_Init", "DG_DrawFrame"]:
             check(f"port surface symbol {sym} present", f" {sym}" in nm)

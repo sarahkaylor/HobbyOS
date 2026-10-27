@@ -19,7 +19,7 @@ mkdir -p "$DEST"
 cd "$ROOT"
 
 ENG="$ROOT/third_party/doomgeneric"
-CFLAGS="--target=x86_64-linux-musl -O2 -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -I $ENG"
+CFLAGS="--target=x86_64-linux-musl -O2 -fPIE -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -D_DEFAULT_SOURCE -include unistd.h -I $ENG"
 
 # Engine module set, trimmed to the real .c files in SRC_DOOM (never a wildcard:
 # upstream pulls in _sdl/_xlib platform backends).
@@ -29,7 +29,7 @@ for n in "${SRC[@]}"; do
   clang $CFLAGS -c "$ENG/$n.c" -o "$DEST/$n.o"
 done
 clang $CFLAGS -c "$ROOT/tools/sdl/w4/doomgeneric_w4backend.c" -o "$DEST/doomgeneric_w4backend.o"
-clang --target=x86_64-linux-musl -static -no-pie "$DEST"/*.o -lm -o "$DEST/DoomW4.elf"
+clang --target=x86_64-linux-musl -static-pie -fPIE "$DEST"/*.o -lm -o "$DEST/DoomW4.elf"
 
 echo
 echo "== DoomW4.elf =="
