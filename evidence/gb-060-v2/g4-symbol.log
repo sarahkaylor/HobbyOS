@@ -1,0 +1,10 @@
+### G4: one symbol, both rules 2026-10-27T03:01:37Z
+src/include/process.h:572:// claimer has a stale heartbeat (>= LOSTWAKE_DEAD_OWNER_MS at `now_ms`), be
+src/include/process.h:588:#define LOSTWAKE_DEAD_OWNER_MS 2000
+src/kernel/arch/x64/locks.c:89:   reaper with exactly the same threshold -- LOSTWAKE_DEAD_OWNER_MS, process.h.
+src/kernel/arch/x64/locks.c:113:  return (now_ms - hb) >= LOSTWAKE_DEAD_OWNER_MS;
+src/kernel/arch/arm/locks.c:2:#include "process.h" /* MAX_CPUS + LOSTWAKE_DEAD_OWNER_MS: the shared definition of a dead owner (GB-060) */
+src/kernel/arch/arm/locks.c:55:   stopped taking timer interrupts for LOSTWAKE_DEAD_OWNER_MS (the same constant
+src/kernel/arch/arm/locks.c:71:  return (now_ms - hb) >= LOSTWAKE_DEAD_OWNER_MS;
+src/kernel/process.c:3267:   LOSTWAKE_DEAD_OWNER_MS while a peer core idles — its clock freezes, so
+--- the stall-break threshold in x64 locks.c:

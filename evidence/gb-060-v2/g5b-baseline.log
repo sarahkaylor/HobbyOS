@@ -1,0 +1,32 @@
+### G5b: BASELINE T3 intel on origin/main (no GB-060 patch) @ edd60fd 2026-10-27T03:14:40Z
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 420s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-d340674c/obj/t3_intel_main_baseline.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 15851 console lines, 95 FAIL lines, 10 user memory fault records across 9 processes, 84 programs exited, halted=1
+T3_intel: FAIL — 95 FAIL line(s); first 20:
+2529:MMTEST FAIL 13
+2765:[SIGTEST] FAIL waitpid returns the child got=42 want=4294964048
+3134:[TEST] DIRECT-ext-cat FAIL (empty target, no load failure)
+3211:[SEDTEST] FAIL basic_s (stdout)
+3613:  FPU_T torture-child: FAIL
+4029:[SEDTEST] FAIL s_g (stdout)
+4333:  FPU_T fork-inherit: FAIL
+4346:FPU_T FAILED: 2
+7463:[SIGTEST] FAIL waitpid returns the child got=29 want=4294964048
+7893:MMTEST FAIL 13/GREP.BIN
+8225:[SEDTEST] FAIL basic_s (stdout)
+8529:  FPU_T torture-child: FAIL
+9279:[SEDTEST] FAIL s_g (stdout)
+9363:  FPU_T fork-inherit: FAIL
+9373:Loading program for scheduler (v2 AS): FPU_T FAILED: 2
+9901:[SEDTEST] FAIL s_2nd (stdout)
+10566:[CMPTEST] FAIL EOF message on stderr
+10612:[CMPTEST] FAIL empty EOF message
+10627:/GREP.BIN[CMPTEST] FAIL missing file diagnostic
+10661:[CMPTEST] FAIL -i 4:0 skips prefix
+T3_intel EXIT=1
+tier-rc=1
+--- STALLBREAK/STOLEN/LOCKCNT:
+0
+--- kernel faults: 13
+DONE

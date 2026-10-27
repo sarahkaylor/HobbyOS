@@ -1,0 +1,36 @@
+### G5: T3 intel, full wave @ 832342f 2026-10-27T03:02:14Z
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 420s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-110v2/obj/t3_intel_gb060v2.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 11854 console lines, 91 FAIL lines, 6 user memory fault records across 6 processes, 85 programs exited, halted=1
+T3_intel: FAIL — 1 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 91 FAIL line(s); first 20:
+2814:MMTEST FAIL 1/CMP.BIN
+3042:[SEDTEST] FAIL basic_s (stdout)
+3141:[SIGTEST] FAIL waitpid returns the child got=31 want=4294964048
+4448:[SEDTEST] FAIL s_g (stdout)
+4552:[TEST] DIRECT-ext-cat FAIL (empty target, no load failure)
+4779:  FPU_T torture-child: FAIL
+5021:[SEDTEST] FAIL s_2nd (stdout)
+5434:  FPU_T fork-inherit: FAIL
+5451:FPU_T FAILED: 2
+5464:/GREP.BIN[SEDTEST] FAIL s_p_n (stdout)
+5823:[SEDTEST] FAIL amp (stdout)
+6116:[CMPTEST] FAIL EOF message on stderr
+6144:[CMPTEST] FAIL empty EOF message
+6163:/COMM.BIN[CMPTEST] FAIL missing file diagnostic
+6167:[SEDTEST] FAIL backref (stdout)
+6222:/TEST4.TXT[CMPTEST] FAIL -i 4:0 skips prefix
+6261:Loading program for scheduler (v2 AS): [CMPTEST] FAIL - stdin EOF diagnostic
+6295:[CMPTEST] FAILURES: 5
+6499:[TACTEST] FAIL missing file
+6502:[SEDTEST] FAIL empty_reuse (stdout)
+T3_intel EXIT=1
+tier-rc=1
+--- halt / stall / fail summary:
+System halt.
+--- [STALLBREAK] lines with stale age: 2
+[STALLBREAK] cpu=5 lock=0x0000000070200250 owner_cpu=7 stale_ms=2052 pc=0x000000007000149c
+--- [LOCKCNT]:
+[LOCKCNT] STALLBREAK=1 STOLEN=1 LOCKFOREVER=1 UNOWNED-FREED=0
+DONE

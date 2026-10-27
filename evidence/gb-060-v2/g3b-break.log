@@ -1,0 +1,6 @@
+### G3b: DELIBERATE BREAK of the rule itself: '>=' -> '>' in the x64 stall break 2026-10-27T03:01:55Z
+  return (now_ms - hb) > LOSTWAKE_DEAD_OWNER_MS;
+      |                                       ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+2 warnings generated.
+  FAIL: at the grace period: broken (>=, the same rule the lost-owner reaper uses)
+locksteal_test_host: 31 checks, 1 failed

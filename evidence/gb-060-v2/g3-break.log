@@ -1,0 +1,6 @@
+### G3: DELIBERATE BREAK — grace shifted 2000 -> 1995 ms 2026-10-27T03:01:42Z
+#define LOSTWAKE_DEAD_OWNER_MS 1995
+make: 'locksteal_test_host' is up to date.
+  PASS: one ms inside the grace period: still protected
+  PASS: at the grace period: broken (>=, the same rule the lost-owner reaper uses)
+locksteal_test_host: 31 checks, 0 failed
