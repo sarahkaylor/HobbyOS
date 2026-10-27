@@ -1,0 +1,23 @@
+comments scanned:            2000
+GREEN verdict comments:      23
+  parser yields a sha:       6
+  parser yields NOTHING:     17
+  read rate:                 26%
+
+--- first 8 GREENs the parser cannot read (issue, date, first line):
+  #    9  2026-10-17  **GATE VERDICT — NOT MERGED. T1 green; T5 on intel is RED and the fail
+  #   48  2026-10-18  READY — promoted (Coordinator, 2026-10-18). Deps satisfied (GB-003/GB-
+  #  111  2026-10-21  **EVIDENCE + VERDICT: GREEN (instrument) — GB-075-V (verifier: DEEP, D
+  #  103  2026-10-21  **VERDICT: GREEN — GB-075 (acceptance rig cannot fabricate PASS), from
+  #   72  2026-10-21  **Verifier pass (DEEP, dgx1) — 2026-10-21 06:16 UTC — nothing Ready; n
+  #  119  2026-10-22  **EVIDENCE + VERDICT: GREEN — GB-010-V (verifier: DEEP, DeepSeek v4.1 
+  #   14  2026-10-22  **VERDICT: GREEN — GB-010 (docs/linux-abi.md + drift gate), from verif
+  #   72  2026-10-22  **Verifier pass (DEEP, dgx1) — 2026-10-22 05:33 UTC — no Ready verify 
+
+--- GREENs with a sha, showing which sha and whether it looks like a head:
+  #  128  ca5f80e578b5  (1 sha)
+  #  123  ca5f80e578b5  (1 sha)
+  #  132  c53071662540  (1 sha)
+  #   12  c53071662540  (1 sha)
+  #  138  633987fdf205  (1 sha)
+  #  135  633987fdf205  (1 sha)

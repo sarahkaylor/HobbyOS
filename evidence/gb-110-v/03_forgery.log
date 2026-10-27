@@ -1,0 +1,5 @@
+=== clause 1+2: forged local cache naming the CURRENT head of PR #209, board has no readable sha
+b3540e58569fbbd1ac9de77680e8dcbfb78d9486
+[merge_pr] PR #209: REFUSE: GREEN names no graded sha — cannot confirm the graded tree is the current head
+[merge_pr] NOT MERGED (fail closed)
+EXIT=1

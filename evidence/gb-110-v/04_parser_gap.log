@@ -1,0 +1,15 @@
+GREEN verdicts on #210: 2
+newest GREEN at: 2026-10-26T23:39:30Z
+
+--- the line that names PR #209's head:
+   **Tree that would merge:** `b3540e58569fbbd1ac9de77680e8dcbfb78d9486` (PR #209 head at gate time). Host-side T1 only; no CI consulted.
+
+graded_shas_in(body) -> ['ef3673fc8e847ebc313a78155e2ab18e071e1032', 'b3540e58569fbbd1ac9de77680e8dcbfb78d9486']   (len=2)
+
+--- the parser's own regex, against the same line:
+   40-hex matches on this line: ['b3540e58569fbbd1ac9de77680e8dcbfb78d9486']
+   the sha as written: ['b3540e58569fbbd1ac9de77680e8dcbfb78d9486']
+
+--- a GREEN naming the same head as a 40-hex sha WOULD parse:
+   ['b3540e58569fbbd1ac9de77680e8dcbfb78d9486']
+   40-hex sha on a NON-keyword line: []
