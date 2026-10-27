@@ -1,0 +1,11 @@
+$ python3 tools/board/groom.py --self-test
+  PASS: the same DoD is allowed once an EVIDENCE comment quotes 0
+  PASS: a descriptive (non-numeric) DoD is not gated
+groom self-test: 20 checks, 0 failed -- ALL PASSED
+$ python3 tools/board/merge_pr_test.py
+  PASS: no id anywhere -> unresolved, refuse
+MERGE_PR_TEST: PASS - fail-closed guard rule + #194 goes red
+
+$ python3 tools/board/check_verdicts.py --self-test
+  [OK  ] verdict=RED   parent in 'Done'        -> ok=False (expected False, want-lane 'In Progress')
+self-test result: fails=0
