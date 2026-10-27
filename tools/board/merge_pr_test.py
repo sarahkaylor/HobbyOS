@@ -39,6 +39,25 @@ structural, behavioral = merge_pr.vacuous_head_inexpressible()
 check(structural, "parser structurally has no --head option (re-adding it FAILS this probe)")
 check(behavioral, "main() rejects a --head argument on the command line")
 
+# GB-110: the graded sha comes from the NEWEST GREEN verdict on the board (Forgejo API);
+# the local obj/gate/graded-<pr>.sha file is only a cache and MUST match; a forged file
+# (one disagreeing with the board) cannot permit a merge.
+import merge_pr as mp
+board_sha = "abcdef1234567890abcdef1234567890abcdef12"
+_orig_fb = mp.graded_sha_from_board
+mp.graded_sha_from_board = lambda pr, env=None: board_sha          # board GREEN names a sha
+os.makedirs(os.path.join(mp.TREE, "obj", "gate"), exist_ok=True)
+cache = os.path.join(mp.TREE, "obj", "gate", "graded-9.sha")
+open(cache, "w").write(board_sha)
+check(mp.graded_sha_of(9) == board_sha, "graded sha read from the board-ish GREEN (cache matches)")
+open(cache, "w").write("9" * 40)                                    # forged local cache
+check(mp.graded_sha_of(9) is None, "a FORGED local cache disagreeing with the board -> FAIL CLOSED")
+open(cache, "w").write("f" * 40)
+mp.graded_sha_from_board = lambda pr, env=None: None                 # board has no GREEN / unreachable
+check(mp.graded_sha_of(9) is None, "no GREEN on the board (or unreachable) -> FAIL CLOSED even with a local file")
+os.remove(cache)
+mp.graded_sha_from_board = _orig_fb
+
 if fails:
     print("MERGE_PR_TEST: FAIL (%d)" % fails); sys.exit(1)
 print("MERGE_PR_TEST: PASS - fail-closed guard rule + #194 goes red")

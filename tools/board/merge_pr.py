@@ -36,16 +36,92 @@ def graded_shas_in(text):
     return out
 
 
+def _forgejo(api_path, env=None):
+    env = env or os.environ
+    url = env.get("FORGEJO_URL") or "http://192.168.0.234:3000"
+    tok = env.get("FORGEJO_TOKEN")
+    if not tok:
+        return None
+    import urllib.request
+    req = urllib.request.Request(f"{url}/api/v1{api_path}",
+                                headers={"Authorization": "token " + tok})
+    try:
+        import json as _j
+        return _j.load(urllib.request.urlopen(req))
+    except Exception:
+        return None
+
+
+def pr_gb_id(pr, env=None):
+    """Map a GitHub PR to its board ticket id (GB-nnn) via the pull request head
+    branch name (games/gbNNN).  None if not resolvable -> the guard cannot know
+    which GREEN to read, so it fails closed upstream."""
+    import json as _j
+    import urllib.request
+    env = env or os.environ
+    tok = env.get("GITHUB_TOKEN")
+    if not tok:
+        return None
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/sarahkaylor/HobbyOS/pulls/{pr}",
+        headers={"Authorization": "Bearer " + tok, "Accept": "application/vnd.github+json"})
+    try:
+        d = _j.load(urllib.request.urlopen(req))
+        ref = (d.get("head") or {}).get("ref", "")
+        m = re.search(r"gb-?(\d+)", ref, re.I)
+        return m.group(1) if m else None
+    except Exception:
+        return None
+
+
+def graded_sha_from_board(pr, env=None):
+    """Newest GREEN verdict's graded sha for PR `pr`, read over the Forgejo API using
+    graded_shas_in().  None => fail closed (no resolvable GB, no GREEN, GREEN with no
+    sha, or unreachable board)."""
+    env = env or os.environ
+    gb = pr_gb_id(pr, env)
+    if not gb:
+        return None
+    base = env.get("BOARD_REPO") or "sarah/gaming-program"
+    issues = _forgejo(f"/repos/{base}/issues?state=open&limit=300", env) or []
+    if not issues:
+        return None                       # board unreachable (or empty) -> fail closed
+    gb_v = f"GB-{gb}-V"
+    gb_t = f"GB-{gb}"
+    order = []
+    for it in issues:
+        t = it.get("title") or ""
+        if t.startswith(gb_v):
+            order.insert(0, it["number"])       # the -V ticket first
+        elif t.startswith(gb_t):
+            order.append(it["number"])
+    for num in order:
+        cs = _forgejo(f"/repos/{base}/issues/{num}/comments?limit=100", env) or []
+        for c in reversed(cs):
+            body = (c.get("body") or "").replace("\r", "")
+            if re.search(r"VERDICT[^\n]{0,50}\bGREEN\b", body, re.I):
+                shas = graded_shas_in(body)
+                return shas[0] if shas else None   # GREEN with no sha -> fail closed
+    return None                                   # no GREEN verdict found
+
+
 def graded_sha_of(pr, env=None):
-    """Graded sha named by the PR's own -V verdict is not available from just a PR
-    number here, so we accept it two ways: read a `GRADED_SHA=<40hex>` recorded by
-    the gate (obj/gate/merge_pr_override/) or expose the raw comment parse for the
-    caller/test to supply.  Returns the sha or None (None => fail closed)."""
+    """The graded sha a GREEN graded for PR `pr`.  Source of truth = the NEWEST GREEN
+    verdict comment on the board (Forgejo API); the local obj/gate/graded-<pr>.sha file
+    is only a CACHE and MUST match the board.  A forged local file that disagrees with
+    the board returns None -> the guard refuses.  None => fail closed."""
+    env = env or os.environ
+    board = graded_sha_from_board(pr, env)
+    if board is None:
+        return None                       # no GREEN / GREEN-no-sha / board unreachable
+    local = None
     p = os.path.join(TREE, "obj", "gate", f"graded-{pr}.sha")
     if os.path.exists(p):
         s = open(p).read().strip()
-        return s if re.fullmatch(r"[0-9a-f]{40}", s) else None
-    return None
+        local = s if re.fullmatch(r"[0-9a-f]{40}", s) else None
+    if local is not None and local != board:
+        return None                       # forged cache that contradicts the board -> refuse
+    return board
 
 
 def decide(head, graded):
