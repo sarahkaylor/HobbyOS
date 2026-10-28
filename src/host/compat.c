@@ -285,7 +285,7 @@ int available(int fd) {
  * mock_read_dir_attr OR mock_read_dir_attrs[index] (so a test can make a
  * single entry a directory by setting one slot to 0x10); the size is
  * mock_read_dir_size when non-zero, else mock_read_dir_sizes[index]. */
-#define MOCK_READ_DIR_MAX 40
+#define MOCK_READ_DIR_MAX 200
 int mock_read_dir_count = 0;                     /* 0 = default 7 files */
 char mock_read_dir_names[MOCK_READ_DIR_MAX][32];
 uint8_t mock_read_dir_attr = 0;                  /* attr shared by all entries */
