@@ -29,7 +29,10 @@ Falsifiability of the kind-classifier (clause 7): the borderline case is a
 content wrapped in a claim header, and the code names it as the thing a
 reasonable person might classify the other way; `_is_bookkeeping` treats it as
 ACTIVITY so a worker who claims a card and posts its DoD plan is not marked stale
-the instant they claim.  A bare claim/retraction notch is bookkeeping.
+the instant they claim.  A bare claim/retraction notch is bookkeeping.  A lane
+move is recognized ONLY as a move-shaped one-liner (``<id>: lane ... → ...``
+anchored at the head); a worker EVIDENCE/VERDICT that quotes a lane move in prose
+is ACTIVITY (GB-117-V3 #242 RED).
 
 
 Why not filter by authorship (GB-117-V round-1 RED): every comment on the board
@@ -56,6 +59,7 @@ instead of the live board.
 """
 import json
 import os
+import re
 import sys
 import urllib.request
 from datetime import datetime, timezone
@@ -135,11 +139,17 @@ def _is_bookkeeping(c):
     # a bare claim/retraction notch
     if up.startswith(_BOOKKEEPING_MARK):
         return True
-    # a lane-transition notch: "<id>: lane ... → ...", "<id>: lane Ready → **In Progress**"
-    # (board.py's lane-move comment) or "NNN: lane → **In Progress**"
-    if "LANE" in up and ("→" in body or "->" in body):
-        return True
-    if up.startswith("RETRACTION"):
+    # a lane-transition notch -- MOVE-SHAPED, anchored to the start of the line:
+    #    "GB-117: lane In Progress → **In Review**"
+    #    "GB-117-V2: lane - → **Ready**"
+    #    "238: lane → **In Progress**"
+    #    "GB-026: lane Ready → **In Progress**"
+    # The regex anchors the optional <id>: and 'lane' to the head so a worker
+    # EVIDENCE/VERDICT that merely QUOTES a lane move in prose is NOT caught
+    # (GB-117-V3 #242 RED): "**EVIDENCE — ... the lane move `GB-117: lane
+    # Backlog → **Ready**` ..." starts 'EVIDENCE', not '<id>: lane', so it is
+    # ACTIVITY.  Only the board.py lane-move one-liner matches.
+    if re.match(r"^\W*(?:[0-9A-Za-z-]+:)?\s*lane\b.*(?:→|->)", head):
         return True
     return False                # worker content => activity
 
@@ -217,7 +227,7 @@ def report(issues, comments, now, oldest_n):
         any_fresh += 0 if stale(ac) else 1
         rows.append({
             "n": i["number"], "title": (i.get("title") or "")[:52],
-            "lane": lane or "?", "ca": wc, "ia": max(0.0, age_hours(i["updated_at"], now)),
+            "lane": lane or "?", "ca": wc, "aa": ac, "ia": max(0.0, age_hours(i["updated_at"], now)),
             "stale": is_stale, "dec": bool(labels & {"decision", "blocked"}),
         })
         if is_stale:
@@ -243,12 +253,27 @@ def report(issues, comments, now, oldest_n):
     print(f"  -> DoD number as a pair: {{any-comment {any_stale}/{any_fresh}, "
           f"working {stale_cnt}/{nonstale_cnt}}} (produced by: `{cmd}`)")
 
-    print(f"\noldest {oldest_n} by Clock-B comment age (ids, stale only):")
+    print(f"\noldest {oldest_n} by Clock-B comment age (ids, stale only) -- each row "
+          f"names BOTH clocks (ClockA=any-comment, ClockB=working-attempt):")
     oldest = sorted([r for r in rows if r["stale"]],
                    key=lambda r: (r["ca"] is None, -1 if r["ca"] is None else -r["ca"]))
     for r in oldest[:oldest_n]:
         ca = "no-comments" if r["ca"] is None else f"{r['ca']:.1f}h"
-        print(f"  #{r['n']:<4} {r['lane']:<11} comment {ca}  {r['title']}")
+        aa = "no-comments" if r["aa"] is None else f"{r['aa']:.1f}h"
+        print(f"  #{r['n']:<4} {r['lane']:<11} ClockA={aa}  ClockB={ca}{' STALE' if r['stale'] else ''}"
+              f"  {r['title']}")
+
+    # 2b. cards where the two clocks DISAGREE -- the round-1 case, one line naming both.
+    disagree = sorted([r for r in rows if stale(r["aa"]) != stale(r["ca"])],
+                     key=lambda r: r["n"])
+    print("\nclocks disagree (Clock A fresh / Clock B stale, or the mirror) -- "
+          "each names both clocks on one line:")
+    for r in disagree:
+        aa = "no-comments" if r["aa"] is None else f"{r['aa']:.1f}h"
+        ca = "no-comments" if r["ca"] is None else f"{r['ca']:.1f}h"
+        print(f"  #{r['n']:<4} {r['lane']:<11} ClockA={aa}"
+              f"{'' if stale(r['aa']) else ' (fresh)'}  ClockB={ca}"
+              f"{'' if not stale(r['ca']) else ' (STALE)'}  {r['title']}")
 
     # 3. updated_at-fresh but Clock-B-old MUST be stale (sweep does not reset age).
     sweep_proven = 0
@@ -350,6 +375,10 @@ def self_test():
         # (8) worker EVIDENCE post that mentions 'Coordinator' (2h) -> activity ($#142)
         {"number": 8, "state": "open", "title": "evidence-mentions-coord",
          "updated_at": "2026-10-27T10:00:00Z", "labels": [{"name": "In Progress"}]},
+        # (9) worker EVIDENCE that QUOTES a lane move in prose (3h) -> ACTIVITY,
+        #     NOT bookkeeping (GB-117-V3 #242 RED: the lane rule must be move-shaped).
+        {"number": 9, "state": "open", "title": "evidence-quotes-lane",
+         "updated_at": "2026-10-27T09:00:00Z", "labels": [{"name": "In Progress"}]},
         {"number": 6, "state": "closed", "title": "closed-ignored", "updated_at": "2026-10-27T00:00:00Z",
          "labels": [{"name": "In Progress"}]},                # closed -> skipped
     ]
@@ -362,6 +391,8 @@ def self_test():
         7: [{"body": "GB-026: lane Ready → **In Progress**", "created_at": com(1)},
             {"body": "EVIDENCE — GB-026 DoD delivered.", "created_at": com(30)}],
         8: [{"body": "EVIDENCE — Coordinator asked; the sweep re-arm probe.", "created_at": com(2)}],
+        9: [{"body": "**EVIDENCE — the lane move `GB-117: lane Backlog → **Ready**` is "
+                 "bookkeeping; here is the run.**", "created_at": com(3)}],
         6: [{"created_at": com(5)}],
     }
     import io
@@ -372,10 +403,10 @@ def self_test():
     out = buf.getvalue()
     fails = []
     # working clock on the fixture: (1)stale(48h) (2)fresh(1h) (3)stale(no) (4)stale(30)
-    #   (5)stale(coord-only) (7)stale(30h work) (8)fresh(2h EVIDENCE)
-    #   -> stale=4 (1,3,4,5,7)=5, fresh=3 (2,8)=2  ... recount: stale {1,3,4,5,7}=5, fresh {2,8}=2
-    if stale_cnt != 5 or nonstale != 2:
-        fails.append(f"working-clock expected 5 stale / 2 fresh, got {stale_cnt}/{nonstale}")
+    #   (5)stale(coord-only) (7)stale(30h work) (8)fresh(2h EVIDENCE) (9)fresh(3h EVIDENCE)
+    #   -> stale {1,3,4,5,7}=5, fresh {2,8,9}=3
+    if stale_cnt != 5 or nonstale != 3:
+        fails.append(f"working-clock expected 5 stale / 3 fresh, got {stale_cnt}/{nonstale}")
     # both clocks present + labelled
     if "CLOCK A -- any-comment" not in out or "CLOCK B -- working-attempt" not in out:
         fails.append("both labelled clocks missing")
@@ -385,13 +416,24 @@ def self_test():
         fails.append("Clock B definition missing")
     if "-> DoD number as a pair" not in out:
         fails.append("DoD-pair line missing")
+    # GB-117-V3 #242 RED clause 6: a worker EVIDENCE that QUOTES a lane move is
+    # ACTIVITY (card 9), and the per-card rows + disagree block name BOTH clocks.
+    if not _is_bookkeeping({"body": "**EVIDENCE — the lane move `GB-117: lane "
+                            "Backlog → **Ready**` is bookkeeping; here is the run.**"}):
+        pass  # card 9 is fresh on Clock B (its EVIDENCE is activity)
+    else:
+        fails.append("quoted-lane EVIDENCE wrongly classified bookkeeping (V3 #242 clause 6)")
+    if "names BOTH clocks" not in out and "ClockA=" not in out:
+        fails.append("per-card rows do not name both clocks (V3 #242 clause 2)")
+    if "clocks disagree" not in out or "#7" not in out:
+        fails.append("disagree block (round-1 case naming both clocks) missing")
     # Clock B buckets (the *second* buckets line, after "CLOCK B"): 1>24h,2<6h,3no,
-    # 4>24h,5no,7>24h,8<6h -> over24h=3, under6h=2, nocomments=2
+    # 4>24h,5no,7>24h,8<6h,9<6h -> over24h=3, under6h=3, nocomments=2
     wb = [l for l in out.splitlines() if l.startswith("  buckets:")]
     wb = wb[-1]
     has = dict(kv.split("=") for kv in [p for p in wb.replace("  buckets: ", "").split(" ") if p])
     has = {k: int(v.rstrip(",")) for k, v in has.items()}
-    if has != {"under6h": 2, "6-12h": 0, "12-24h": 0, "over24h": 3, "nocomments": 2}:
+    if has != {"under6h": 3, "6-12h": 0, "12-24h": 0, "over24h": 3, "nocomments": 2}:
         fails.append(f"Clock B buckets wrong: {has}")
     # sweep falsifier fires
     if "cards STALE on Clock B despite fresh updated_at (<24h)" not in out:
