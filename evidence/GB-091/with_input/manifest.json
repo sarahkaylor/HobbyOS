@@ -1,0 +1,26 @@
+{
+  "game": "doom",
+  "bin": "DOOM.BIN",
+  "slot": 18,
+  "arch": "intel",
+  "captured_at": "2026-10-28T09:21:58.110726+00:00",
+  "commit": "32cbbdb50339e26fe2cc92a8959ddff5b7d156fd",
+  "root": "/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-e046ff70",
+  "screendumps": {
+    "boot": "boot.ppm",
+    "launch": "launch.ppm",
+    "gameplay": "gameplay.ppm"
+  },
+  "inputs": "right,up,right,up",
+  "run_seconds": 5,
+  "artifacts_sha256": {
+    "boot.png": "fea125663d765b87319794a53ec2dcf14dc2d12e62326f223f6d5a19e7e42fef",
+    "boot.ppm": "c2dd5b8448560a095afeafeda1d05190fa0fe6ba5e4e5a34cb4908aad649fef5",
+    "gameplay.png": "a832d1a6632b76e578e2f1a518bddb49f91cf03e63b153f64a93456669140544",
+    "gameplay.ppm": "605c6bc2253a751535f53ebb676f600b6d72582d986593a84c4f6464cb09d5e3",
+    "launch.png": "05237a429f828d2069db80f99ec0d8f3b6555c6bcaca887124390fb920887834",
+    "launch.ppm": "7ad1b307f1911c6d4dd3a8f3f2f66a2f1ab44b04d71575e8d347385b131f952b",
+    "replay.jsonl": "db0f352bd08be622eb71c8271accc90b920674bf498baa3ec7e8bacd842616ef",
+    "serial.log": "052294674d8ad58c99cdd9e3e04d4c44cad7fec85e0bdf1ee8342766a6e4e793"
+  }
+}
