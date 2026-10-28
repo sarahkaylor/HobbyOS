@@ -207,6 +207,45 @@ def launch_from_menu(q, slot, taskbar_y=H - 26, arch="arm", gesture="keys"):
     q.key("ret", 0.3)
 
 
+def build_stage_cmd(host_src, guest_dest, root):
+    """Stage `host_src` -> `guest_dest` as the exact `T3_STAGE`/`RUN_STAGE` shape.
+
+    GB-118: the evidence rig must put a fixture on the image through the SAME
+    mechanism as the T3 tier (a `mcopy` after the build, before QEMU), so rig and
+    tier agree on the result for the same fixture -- one boot path, not two.
+
+    Path safety (off-by-default hygiene the DoD demands):
+      - `host_src` must live under `root` (the repo) -- a path outside the repo
+        is refused (a stage that reads an arbitrary host file is not a board
+        fixture).
+      - `guest_dest` must be a plain FAT guest name: no leading '/', no '..'
+        (a guest path escaping the image root is refused), no drive-letter / '::'.
+    Returns the shell command string (to set as RUN_STAGE / T3_STAGE).  Raises
+    ValueError with the refusal message on an unsafe path.
+    """
+    root = os.path.realpath(root)
+    src = os.path.realpath(host_src)
+    if not os.path.isfile(src):
+        raise ValueError(f"stage: host path does not exist or is not a file: {host_src!r}")
+    if not (src == root or src.startswith(root + os.sep)):
+        raise ValueError(
+            f"stage: host source outside the repo root is refused: {host_src!r} "
+            f"(root={root!r})")
+    g = guest_dest
+    if g.startswith("/"):
+        raise ValueError(f"stage: guest path must be a relative FAT name, not an "
+                         f"absolute path that escapes the image root: {g!r}")
+    if g.startswith("::"):
+        raise ValueError(f"stage: guest path must not carry a drive specifier: {g!r}")
+    if ".." in g.replace("\\", "/").split("/"):
+        raise ValueError(f"stage: guest path traversal refused: {g!r}")
+    if not g or os.path.basename(g) != g:
+        raise ValueError(f"stage: guest path must be a single FAT filename, not a "
+                         f"nested path: {g!r}")
+    # The tier's stage is:  mcopy -o -i "$ROOT/disk.img" "$HOSTSRC" ::GUEST
+    return f"mcopy -o -i \"$ROOT/disk.img\" \"{src}\" \"::{g}\""
+
+
 def convert_png(ppm_path, png_path):
     try:
         from PIL import Image
@@ -216,7 +255,9 @@ def convert_png(ppm_path, png_path):
         return False
 
 
-def main():
+def build_arg_parser():
+    """The rig's argparse parser, module-level so tests assert the real defaults
+    (GB-118: `--stage` is off by default)."""
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--game", required=True, help="game id, e.g. xnibbler")
@@ -237,6 +278,18 @@ def main():
                          "intel has no pointer device, so the click cannot work there), "
                          "click = the pre-GB-116 behaviour, for reproducing that failure. "
                          "Do not combine them: the Apps button toggles the F1 menu shut.")
+    ap.add_argument("--stage", default=None, metavar="HOSTSRC:GUESTDEST",
+                    help="stage HOSTSRC onto the image at GUESTDEST before QEMU starts, "
+                         "using the SAME mechanism as the T3 tier (RUN_STAGE/T3_STAGE, "
+                         "off by default).  HOSTSRC must be a file under --root; GUESTDEST "
+                         "must be a single FAT filename (no '/', '..', or '::').  A "
+                         "refused path aborts before boot; the guest proves the fixture "
+                         "is present on the serial line.")
+    return ap
+
+
+def main():
+    ap = build_arg_parser()
     args = ap.parse_args()
 
     os.chdir(args.root)
@@ -250,6 +303,22 @@ def main():
     # serial flags) and point QMP at our socket.
     qemu_make = ["make", "run", f"ARCH={arch}",
                  f"QEMU_ARGS=-display none -qmp unix:{qmp_sock},server,nowait"]
+
+    # GB-118: optional staging, on the tier's terms.  --stage HOSTSRC:GUESTDEST
+    # becomes the Makefile RUN_STAGE hook (the exact T3_STAGE contract): it runs
+    # AFTER `make run` rebuilds disk.img and BEFORE QEMU starts.  Off by default.
+    if args.stage:
+        host_src, _, guest_dest = args.stage.rpartition(":")
+        if not host_src or not guest_dest:
+            print(f"[rig] FATAL: --stage wants HOSTSRC:GUESTDEST, got {args.stage!r}")
+            sys.exit(1)
+        try:
+            stage_cmd = build_stage_cmd(host_src, guest_dest, args.root)
+        except ValueError as e:
+            print(f"[rig] STAGE REFUSED - refusing to boot a stale image: {e}")
+            sys.exit(2)
+        os.environ["RUN_STAGE"] = stage_cmd
+        print(f"[rig] stage (RUN_STAGE): {stage_cmd}")
 
     print(f"[rig] booting {arch} QEMU, capturing to {path}")
     q = boot(qemu_make, serial_log, qmp_sock, arch)
