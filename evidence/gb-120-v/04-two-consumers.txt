@@ -1,0 +1,11 @@
+        stage = f'mcopy -o -i "$ROOT/disk.img" "{fixture}" ::HELLO.BIN'
+
+        # Consumer A — the Makefile `run:` recipe handoff (ROOT-cwd + sh -c RUN_STAGE).
+        ra = _run(f'ROOT="{root}" sh -c \'{stage}\'', env)
+        # Consumer B — t3_tier.sh T3_STAGE handoff (ROOT="$ROOT" sh -c "$T3_STAGE").
+        rb = _run(f'ROOT="{root}" sh -c \'{stage}\'', env)
+        ok = ra.returncode == 0 and rb.returncode == 0
+3
+7:GB-120: the rig<->t3_tier.sh **agreement** test (GB-118 clause 8, which held the
+11:"$$RUN_STAGE"` handoff and t3_tier.sh's `ROOT="$ROOT" sh -c "$T3_STAGE"` handoff
+60:        # Consumer B — t3_tier.sh T3_STAGE handoff (ROOT="$ROOT" sh -c "$T3_STAGE").

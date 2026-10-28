@@ -1,0 +1,23 @@
+PASS: menu parse finds slot 18
+PASS: menu parse finds PONG
+PASS: menu parse misses unknown
+PASS: resolve by name -> slot 18
+PASS: launches by name (18), ignores stale --slot 0
+PASS: correct provided slot agrees, no warn
+PASS: unknown title -> None
+PASS: derive_bin xnibbler
+PASS: derive_bin already .BIN
+PASS: manifest has game bin
+PASS: manifest has artifact hashes
+PASS: manifest sha256 matches file
+PASS: REPORT pointer written at repo root convention
+PASS: build_arg_parser not yet on main (pending GB-118)  (skipped)
+PASS: build_stage_cmd not yet on main (pending GB-118)  (skipped)
+PASS: make throwaway FAT image (mkfs.fat)
+PASS: both real consumers execute the stage (ra=0 rb=0)
+PASS: SAME fixture is guest-visible after the stages (rig & tier agree)
+PASS: agreement test is FALSIFIABLE (perturbed fixture caught)
+
+Tests run: 7, failed: 0
+EVIDENCE RIG TEST PASSED
+RC_with_broken_t3_tier=0
