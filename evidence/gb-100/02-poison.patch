@@ -1,0 +1,22 @@
+diff --git a/.arch-stamp b/.arch-stamp
+index 78504ba..b6fce24 100644
+--- a/.arch-stamp
++++ b/.arch-stamp
+@@ -1 +1 @@
+-arm
+\ No newline at end of file
++intel
+\ No newline at end of file
+diff --git a/src/kernel/arch/x64/trap.c b/src/kernel/arch/x64/trap.c
+index 2e0804f..371c9c4 100755
+--- a/src/kernel/arch/x64/trap.c
++++ b/src/kernel/arch/x64/trap.c
+@@ -3569,6 +3569,8 @@ __asm__(
+ "       [r13-296] spilled the +304/+312 slots at/above r13, and on a fresh\n"
+ "       ELF process (r13 = stack top - 8, kernel-mode write) that hit an\n"
+ "       absent page -> kernel-mode #PF and the task was killed. */\n"
++"    /* GB-100 throwaway: poison the resume destination (cannot enter target). */\n"
++"    mov r13, 0x40000000\n"
+ "    lea rdi, [r13 - 320]\n"
+ "    mov rsi, r12\n"
+ "    mov rcx, 37\n"

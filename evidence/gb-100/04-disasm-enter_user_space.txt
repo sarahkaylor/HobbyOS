@@ -1,0 +1,85 @@
+
+evidence/gb-100/enter_user_space.bin:     file format binary
+
+
+Disassembly of section .data:
+
+0000000000000000 <.data>:
+   0:	49 89 fc             	mov    r12,rdi
+   3:	49 89 f5             	mov    r13,rsi
+   6:	e8 4a 02 00 00       	call   0x255
+   b:	49 8b 84 24 18 01 00 	mov    rax,QWORD PTR [r12+0x118]
+  12:	00 
+  13:	48 83 e0 03          	and    rax,0x3
+  17:	48 83 f8 03          	cmp    rax,0x3
+  1b:	74 26                	je     0x43
+  1d:	65 48 8b 04 25 18 00 	mov    rax,QWORD PTR gs:0x18
+  24:	00 00 
+  26:	48 8d b8 c0 fe ff ff 	lea    rdi,[rax-0x140]
+  2d:	4c 89 e6             	mov    rsi,r12
+  30:	48 c7 c1 25 00 00 00 	mov    rcx,0x25
+  37:	f3 48 a5             	rep movs QWORD PTR [rdi],QWORD PTR [rsi]
+  3a:	48 8d a7 d8 fe ff ff 	lea    rsp,[rdi-0x128]
+  41:	eb 4a                	jmp    0x8d
+  43:	49 c7 c5 00 00 00 40 	mov    r13,0x40000000
+  4a:	49 8d bd c0 fe ff ff 	lea    rdi,[r13-0x140]
+  51:	4c 89 e6             	mov    rsi,r12
+  54:	48 c7 c1 25 00 00 00 	mov    rcx,0x25
+  5b:	f3 48 a5             	rep movs QWORD PTR [rdi],QWORD PTR [rsi]
+  5e:	48 8d a7 d8 fe ff ff 	lea    rsp,[rdi-0x128]
+  65:	49 8b 84 24 f0 00 00 	mov    rax,QWORD PTR [r12+0xf0]
+  6c:	00 
+  6d:	48 89 84 24 30 01 00 	mov    QWORD PTR [rsp+0x130],rax
+  74:	00 
+  75:	48 c7 84 24 18 01 00 	mov    QWORD PTR [rsp+0x118],0x1b
+  7c:	00 1b 00 00 00 
+  81:	48 c7 84 24 20 01 00 	mov    QWORD PTR [rsp+0x120],0x23
+  88:	00 23 00 00 00 
+  8d:	48 8b 5c 24 08       	mov    rbx,QWORD PTR [rsp+0x8]
+  92:	48 8b 4c 24 10       	mov    rcx,QWORD PTR [rsp+0x10]
+  97:	48 8b 54 24 18       	mov    rdx,QWORD PTR [rsp+0x18]
+  9c:	48 8b 74 24 20       	mov    rsi,QWORD PTR [rsp+0x20]
+  a1:	48 8b 7c 24 28       	mov    rdi,QWORD PTR [rsp+0x28]
+  a6:	48 8b 6c 24 30       	mov    rbp,QWORD PTR [rsp+0x30]
+  ab:	4c 8b 44 24 38       	mov    r8,QWORD PTR [rsp+0x38]
+  b0:	4c 8b 4c 24 40       	mov    r9,QWORD PTR [rsp+0x40]
+  b5:	4c 8b 54 24 48       	mov    r10,QWORD PTR [rsp+0x48]
+  ba:	4c 8b 5c 24 50       	mov    r11,QWORD PTR [rsp+0x50]
+  bf:	4c 8b 64 24 58       	mov    r12,QWORD PTR [rsp+0x58]
+  c4:	4c 8b 6c 24 60       	mov    r13,QWORD PTR [rsp+0x60]
+  c9:	4c 8b 74 24 68       	mov    r14,QWORD PTR [rsp+0x68]
+  ce:	4c 8b 7c 24 70       	mov    r15,QWORD PTR [rsp+0x70]
+  d3:	48 8b 84 24 20 01 00 	mov    rax,QWORD PTR [rsp+0x120]
+  da:	00 
+  db:	48 89 84 24 38 01 00 	mov    QWORD PTR [rsp+0x138],rax
+  e2:	00 
+  e3:	65 48 8b 04 25 18 00 	mov    rax,QWORD PTR gs:0x18
+  ea:	00 00 
+  ec:	48 89 84 24 30 01 00 	mov    QWORD PTR [rsp+0x130],rax
+  f3:	00 
+  f4:	48 8b 84 24 00 01 00 	mov    rax,QWORD PTR [rsp+0x100]
+  fb:	00 
+  fc:	48 89 84 24 28 01 00 	mov    QWORD PTR [rsp+0x128],rax
+ 103:	00 
+ 104:	48 8b 84 24 18 01 00 	mov    rax,QWORD PTR [rsp+0x118]
+ 10b:	00 
+ 10c:	48 89 84 24 20 01 00 	mov    QWORD PTR [rsp+0x120],rax
+ 113:	00 
+ 114:	48 8b 84 24 f8 00 00 	mov    rax,QWORD PTR [rsp+0xf8]
+ 11b:	00 
+ 11c:	48 89 84 24 18 01 00 	mov    QWORD PTR [rsp+0x118],rax
+ 123:	00 
+ 124:	48 8b 04 24          	mov    rax,QWORD PTR [rsp]
+ 128:	48 81 c4 08 01 00 00 	add    rsp,0x108
+ 12f:	48 83 c4 10          	add    rsp,0x10
+ 133:	50                   	push   rax
+ 134:	51                   	push   rcx
+ 135:	48 8d 7c 24 10       	lea    rdi,[rsp+0x10]
+ 13a:	e8 36 00 00 00       	call   0x175
+ 13f:	59                   	pop    rcx
+ 140:	58                   	pop    rax
+ 141:	48 8b bc 24 10 ff ff 	mov    rdi,QWORD PTR [rsp-0xf0]
+ 148:	ff 
+ 149:	48 cf                	iretq
+ 14b:	66 2e 0f 1f 84 00 00 	cs nop WORD PTR [rax+rax*1+0x0]
+ 152:	00 00 00 

@@ -1,0 +1,28 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 900s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb100/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 22362 console lines, 137 FAIL lines, 17 user memory fault records across 16 processes, 87 programs exited, halted=1
+T3_intel: FAIL — 2 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 137 FAIL line(s); first 20:
+2472:  SQLTEST create-table: FAIL
+2476:  SQLTEST insert-prepare: FAIL
+2477:  SQLTEST insert-rows: FAIL
+2478:  SQLTEST journal-exists-in-txn: FAIL
+2481:  SQLTEST select-prepare: FAIL
+2482:  SQLTEST select-rows: FAIL
+2483:  SQLTEST aggregate: FAIL
+2486:  SQLTEST update: FAIL
+2487:  SQLTEST delete-none: FAIL
+2488:  SQLTEST insert-wide: FAIL
+2490:  SQLTEST delete-wide: FAIL
+2531:[SIGTEST] FAIL waitpid returns the child got=28 want=4294964048
+2542:[SIGTEST] FAIL pipe() for the poll park got=-1 want=0
+2555:MMTEST FAIL 13
+2838:  SQLTEST cross-process-BUSY: FAIL
+2920:[SEDTEST] FAIL basic_s (stdout)
+2952:  SQLTEST persist-after-reopen: FAIL
+2956:SQLTEST FAILED: 13
+3464:Loading program for scheduler (v2 AS):   FPU_T torture-child: FAIL
+3575:/GRT.IN[SEDTEST] FAIL s_g (stdout)
+T3_intel EXIT=1
+RC=1

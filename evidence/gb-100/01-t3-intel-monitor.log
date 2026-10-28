@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 900s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb100/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 10883 console lines, 83 FAIL lines, 6 user memory fault records across 6 processes, 85 programs exited, halted=1
+T3_intel: FAIL — 83 FAIL line(s); first 20:
+2320:MMTEST FAIL [WAVE-TRY] SIG_T.BIN
+3044:[SEDTEST] FAIL basic_s (stdout)
+3408:/NL.BIN[SIGTEST] FAIL waitpid returns the child got=41 want=4294964048
+3517:[SEDTEST] FAIL s_g (stdout)
+4464:[SEDTEST] FAIL s_2nd (stdout)
+4841:  FPU_T torture-child: FAIL
+4951:[SEDTEST] FAIL s_p_n (stdout)
+5097:/FOLD.BIN[CMPTEST] FAIL EOF message on stderr
+5124:[CMPTEST] FAIL empty EOF message
+5149:Loading program for scheduler (v2 AS): UNEXPAND.BIN[CMPTEST] FAIL missing file diagnostic
+5187:[CMPTEST] FAIL -i 4:0 skips prefix
+5309:[CMPTEST] FAILURES: 5
+5328:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+5374:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+5519:  FPU_T fork-inherit: FAIL
+5532:invalid line number increment: `x'/TAC.BIN[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+5544:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+5558:[TSORTTEST] FAILURES: 4
+5612:FPU_T FAILED: 2
+5761:[TACTEST] FAIL missing file
+T3_intel EXIT=1
+RC=1
