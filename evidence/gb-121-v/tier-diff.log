@@ -1,0 +1,12 @@
+fixture 'clean.log'        (60 exited + 1101 lines + halt, NO fatal)
+fixture 'shredded_only.log' (identical + ONE shredded FATAL banner, no intact line)
+
+NEW tier (85d8b5c, kernel_fatal_count):
+  new_clean: rc=0  tier_reports_FATAL_line=no  old_exact_grep_count=0
+  new_shredded: rc=1  tier_reports_FATAL_line=yes  old_exact_grep_count=0
+
+PRE-FIX tier (4626084, exact-substring grep):
+  old_clean: rc=0  tier_reports_FATAL_line=no  old_exact_grep_count=0
+  old_shredded: rc=0  tier_reports_FATAL_line=no  old_exact_grep_count=0
+
+restored: 0 modified files under tools/t3_tier.sh (0 = restored)

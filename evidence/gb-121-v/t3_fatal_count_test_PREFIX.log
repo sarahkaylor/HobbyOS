@@ -1,0 +1,9 @@
+PASS: x64 reporter keeps both fatal banners (fragment source of record; raw sink stays)
+FAIL: live kernel_fatal_count() matches the stable fragments (shred-proof)
+PASS: the REAL tier FAILs on a shredded fatal (counted via stable fragments) (rc=1 kfault line present=True)
+PASS: the OLD exact-substring counter undercounts the shredded fatal (old counted 1/2 (the shred was lost to the old recognizer))
+PASS: two intact FATAL kernel-mode fault lines -> tier FAILs (count 2)
+PASS: clean wave reports 0 fatal (no false positives) (rc=0)
+
+[t3_fatal_count_test] 3/4 passed
+T3 FATAL COUNT TEST FAILED
