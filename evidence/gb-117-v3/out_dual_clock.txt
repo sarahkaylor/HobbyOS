@@ -1,0 +1,27 @@
+open cards: 61   clocks disagree on: 5
+  #77   clockA=   3.2h (fresh)  clockB= 134.8h (STALE)  both-ages-in-report=False  GB-068 M1 BLOCKER, highest priority (§4.3, 202
+  #33   clockA=   8.3h (fresh)  clockB=  67.7h (STALE)  both-ages-in-report=False  GB-032 SDL test app (surface, 2D blit, input e
+  #206  clockA=  11.7h (fresh)  clockB=  25.2h (STALE)  both-ages-in-report=False  GB-108 The T4 device differential passes on th
+  #178  clockA=  12.5h (fresh)  clockB=  44.2h (STALE)  both-ages-in-report=False  GB-100 enter_user_space RETURNS instead of ire
+  #179  clockA=  17.4h (fresh)  clockB=  39.2h (STALE)  both-ages-in-report=False  GB-101 A kernel-mode fatal fault reads a CORRU
+
+Live report lines that name a card id and an age (per-card rows):
+  #59   In Progress comment 145.0h  GB-058 ARCH=arm T3 carries one real failure the exit
+  #99   In Progress comment 141.9h  GB-071 Family B delivery: a user process holds a ker
+  #77   In Progress comment 134.7h  GB-068 M1 BLOCKER, highest priority (§4.3, 2026-10-1
+  #19   In Progress comment 118.5h  GB-018 poll/select/pselect6 under compat
+  #18   In Progress comment 118.5h  GB-017 /dev/null, /dev/urandom, getrandom shims
+  #17   In Progress comment 118.5h  GB-016 uname shim reporting Linux-ish identity (SDL/
+  #22   In Progress comment 114.6h  GB-021 Threads under compat: clone → HobbyOS threads
+  #20   In Progress comment 114.6h  GB-019 ioctl subset: TIOCGWINSZ, F_GETFL/SETFL, TCGE
+  #7    In Progress comment 106.1h  GB-014 Linux x86_64 syscall translation table: core
+  #121  In Progress comment 103.7h  GB-077 Harness programs corrupt their own stacks: 5
+  #91   Backlog     comment   4.8h  fresh  GB-059-V Verify GB-059: one rig runs a native and a
+  #105  Done        comment  94.3h  STALE  DECISION-001: release stale In Progress claims when
+  #130  Backlog     comment no-comments  STALE  DECISION-003: evidence store — SMB mount on .56, or
+  #131  Backlog     comment  42.4h  STALE  PLAN-011: M0 gate OPEN with three named exceptions +
+  #149  Backlog     comment  70.3h  STALE  DECISION-004: branch retirement — 90 unmerged heads
+  #167  Backlog     comment no-comments  STALE  GB-061-V Verify GB-061: the x64 resume-path stack is
+  #168  Backlog     comment no-comments  STALE  GB-039-V Verify GB-039: the launcher scans /GAMES an
+  #173  Backlog     comment  56.7h  STALE  DECISION-005: GB-031 has failed verification 3 times
+  #174  Backlog     comment no-comments  STALE  DECISION-006: In Progress has no claim lease — 34 of

@@ -1,0 +1,21 @@
+== synthetic probes ==
+  ACTIVITY     <- claim-of-work with DoD (docstring's borderline)
+  BOOKKEEPING  <- bare claim notch
+  BOOKKEEPING  <- lane move
+  BOOKKEEPING  <- worker EVIDENCE that QUOTES a lane move
+  BOOKKEEPING  <- worker VERDICT that mentions a lane and an arrow
+
+== live board: worker-content comments classified bookkeeping by the lane rule ==
+  #242  2026-10-28T01:33:35Z  'GB-117-V3: lane - → **Ready**'
+  #240  2026-10-28T00:43:01Z  'GB-117-V2: lane - → **Ready**'
+  #240  2026-10-28T01:13:19Z  '**VERDICT — RED (GB-117-V2).** Gate on PR #228 head `3a55959` (`claim_age.py` +307, `cla'
+  #238  2026-10-27T23:27:45Z  'GB-117: lane Backlog → **Ready**'
+  #238  2026-10-27T23:50:55Z  'GB-117: lane Ready → **In Progress**'
+  #238  2026-10-27T23:57:10Z  'GB-117: lane In Progress → **In Review**'
+  #238  2026-10-28T00:16:29Z  '238: lane → **In Progress**'
+  #238  2026-10-28T00:29:51Z  '**EVIDENCE — GB-117 re-delivery after GB-117-V RED (00:16Z). PR #228 head `3a55959`.**'
+  #238  2026-10-28T00:29:51Z  'GB-117: lane In Progress → **In Review**'
+  #238  2026-10-28T00:43:03Z  'REVIEW — APPROVE the re-delivery increment (wrev, reviewer loop, §4.2 step 3). PR #228 h'
+  #238  2026-10-28T01:02:10Z  '**RED — GB-117-V2, verified on this VM (DEEP verifier `wgfx-verify`), code PR #228 @ `3a'
+  #238  2026-10-28T01:02:14Z  'GB-117: lane In Review → **In Progress**'
+  count: 314
