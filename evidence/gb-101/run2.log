@@ -1,0 +1,26 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 900s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb100/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 11280 console lines, 79 FAIL lines, 4 user memory fault records across 2 processes, 81 programs exited, halted=1
+T3_intel: FAIL — 79 FAIL line(s); first 20:
+2827:MMTEST FAIL /HEDGNU.BIN1
+3318:[SIGTEST] FAIL waitpid returns the child got=29 want=4294964048
+3762:[SEDTEST] FAIL basic_s (stdout)
+4596:[SEDTEST] FAIL s_g (stdout)
+4972:  FPU_T torture-child: FAIL
+5410:[SEDTEST] FAIL s_2nd (stdout)
+5413:[CMPTEST] FAIL empty EOF message
+5421:/SUB1/SUB2/nested.txt[CMPTEST] FAIL missing file diagnostic
+5434:[CMPTEST] FAIL -i 4:0 skips prefix
+5448:only one string may be given when deleting without squeezing repeats[CMPTEST] FAIL - stdin EOF diagnostic
+5465:[CMPTEST] FAILURES: 5
+5616:[TACTEST] FAIL missing file
+5637:  FPU_T fork-inherit: FAIL
+5642:[TACTEST] FAIL empty separator
+5645:: No such file or directoryFPU_T FAILED: 2
+5702:/TR.BIN/TEST3.TXT[TACTEST] FAILURES: 4
+5874:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+5879:tab size cannot be 0[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+5918:/TEST1.TXT[SEDTEST] FAIL s_p_n (stdout)
+5984:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+T3_intel EXIT=1

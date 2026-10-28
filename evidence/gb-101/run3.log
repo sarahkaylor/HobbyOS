@@ -1,0 +1,26 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 900s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb100/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 11763 console lines, 83 FAIL lines, 8 user memory fault records across 7 processes, 81 programs exited, halted=1
+T3_intel: FAIL — 83 FAIL line(s); first 20:
+2814:[SEDTEST] FAIL basic_s (stdout)
+3138:MMTEST FAIL /TEST1.TXT
+3968:[SEDTEST] FAIL s_g (stdout)
+4012:[SIGTEST] FAIL waitpid returns the child got=56 want=4294964048
+4600:  FPU_T torture-child: FAIL
+4747:[SEDTEST] FAIL s_2nd (stdout)
+5336:  FPU_T fork-inherit: FAIL
+5359:FPU_T FAILED: 2
+5623:[CMPTEST] FAIL EOF message on stderr
+5631:[CMPTEST] FAIL empty EOF message
+5635:[CMPTEST] FAIL missing file diagnostic
+5677:[CMPTEST] FAIL -i 4:0 skips prefix
+5695:[CMPTEST] FAIL - stdin EOF diagnostic
+5700:[CMPTEST] FAILURES: 5
+6158:invalid line number increment: `x'[TACTEST] FAIL missing file
+6162:[TACTEST] FAIL empty separator
+6172:[TACTEST] FAILURES: 4
+6207:[SEDTEST] FAIL amp (stdout)
+6517:[SEDTEST] FAIL backref (stdout)
+6681:[SEDTEST] FAIL empty_reuse (stdout)
+T3_intel EXIT=1

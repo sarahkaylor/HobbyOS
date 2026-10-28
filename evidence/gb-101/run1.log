@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 900s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb100/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 57922 console lines, 350 FAIL lines, 46 user memory fault records across 31 processes, 87 programs exited, halted=1
+T3_intel: FAIL — 2 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 350 FAIL line(s); first 20:
+2666:[SIGTEST] FAIL waitpid returns the child got=12 want=4294964048
+2678:MMTEST FAIL 13
+2913:[SEDTEST] FAIL basic_s (stdout)
+3064:[HEDTEST] FAIL multi-file headers
+3126:[NLTEST] FAIL -i3 increment
+3142:[NLTEST] FAIL -v10 start
+3159:[NLTEST] FAIL -w3 width
+3173:[NLTEST] FAIL -nrz -w3 right zero filled
+3195:[NLTEST] FAIL -s: -w2 separator
+3214:/BLKT2.TXT[HEDTEST] FAILURES: 4
+3468:  FPU_T torture-child: FAIL
+4038:  FPU_T fork-inherit: FAIL
+4059:FPU_T FAILED: 2
+4124:[SEDTEST] FAIL s_g (stdout)
+4858:FOLD.BIN[SEDTEST] FAIL s_2nd (stdout)
+5159:/SED.BIN/TAC.BIN[CMPTEST] FAIL -l lists all differing bytes
+5191:Loading program for scheduler (v2 AS): [CMPTEST] FAIL EOF message on stderr
+5225:[CMPTEST] FAIL empty EOF message
+5296:[CMPTEST] FAIL -i 4:0 skips prefix
+5307:[CMPTEST] FAIL - stdin EOF diagnostic
+T3_intel EXIT=1

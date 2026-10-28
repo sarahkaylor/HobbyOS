@@ -1,0 +1,6 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 600s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb100/obj/t3_intel.log) ===
+T3_intel: 18337 console lines, 0 FAIL lines, 0 user memory fault records across 0 processes, 0 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 600s deadline hit; a hang is a defect, not a flake)
+T3_intel EXIT=1
+RC=0
