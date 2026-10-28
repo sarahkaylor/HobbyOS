@@ -2465,15 +2465,17 @@ endif
 # RUN_STAGE: optional staging hook, run AFTER disk.img is (re)built and BEFORE
 # QEMU starts -- the exact contract of t3_tier.sh's T3_STAGE (GB-118).  A fixture
 # (or wave manifest) the guest must see is placed on the image here, after the
-# build that would have wiped it.  It runs in this recipe's shell, so $ROOT is
-# available; a failing stage is fatal rather than booting an image without the
-# fixture:
-#   RUN_STAGE='mcopy -o -i "$(PWD)/disk.img" /tmp/pie_hello ::HELLO.BIN' make run
+# build that would have wiped it.  The recipe sets ROOT and hands the command to
+# the shell via $$RUN_STAGE (GNU make would otherwise eat `$ROOT` -> `$R`+`OOT`
+# in the value -- GB-118-V RED, 2026-10-28), the same `ROOT="$ROOT" sh -c "$T3_STAGE"`
+# shape t3_tier.sh uses.  A failing stage is fatal rather than booting an image
+# without the fixture:
+#   RUN_STAGE='mcopy -o -i "$ROOT/disk.img" /tmp/pie_hello ::HELLO.BIN' make run
 # Off by default -- an unset/empty RUN_STAGE changes nothing.
 # The evidence rig shares this same hook (evidence_rig.py --stage), so the rig and
 # the T3 tier put a fixture on the image by one mechanism, not two (GB-118).
 run: $(TARGET) disk.img
-	$(if $(RUN_STAGE),@echo "=== run: stage ==="; $(SHELL) -c '$(RUN_STAGE)' || { echo "run: STAGE FAILED - refusing to boot a stale image"; exit 2; },)
+	$(if $(RUN_STAGE),@echo "=== run: stage ==="; ROOT="$(CURDIR)" $(SHELL) -c "$$RUN_STAGE" || { echo "run: STAGE FAILED - refusing to boot a stale image"; exit 2; },)
 	$(QEMU_CMD)
 
 # GX (docs/graphics-accel.md §3-D5): probe this host for a working

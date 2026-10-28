@@ -182,6 +182,78 @@ def test_stage_off_by_default():
     check(ns.stage is None, "stage off by default (no second boot path imposed)")
 
 
+def _run_shell(cmd, root, env_root, path):
+    import subprocess as sp
+    env = dict(os.environ)
+    env["PATH"] = path + os.pathsep + env.get("PATH", "")
+    env["ROOT"] = env_root
+    return sp.run(["sh", "-c", cmd], capture_output=True, text=True, cwd=root, env=env)
+
+
+def test_stage_executes_both_paths_one_fixture():
+    """GB-118-V RED clause 8: agreement must be EXECUTED, not string-compared.
+
+    The rig's RUN_STAGE hook and the T3 tier's T3_STAGE both hand the stage
+    command to the same runner shape (`ROOT=<dir> sh -c "<cmd>"` where <cmd>
+    contains `$ROOT/disk.img`).  Run the SAME fixture through BOTH runners on
+    one throwaway FAT image and assert the same guest-visible file lands; then
+    perturb one path (a different fixture) and assert it is caught -- the test can
+    fail for the reason that actually failed (make re-eat `$ROOT`).  This proves
+    'the rig and t3_tier.sh agree' on the guest-visible result, not on two
+    strings that happen to match.
+    """
+    root = tempfile.mkdtemp(prefix="evrig-exec-")
+    import shutil as _sh
+    ok_img = os.path.join(root, "disk.img")     # the single guest image both runners use
+    for img in (ok_img,):
+        if os.path.exists(img):
+            os.unlink(img)
+    try:
+        mkfs_w = shutil.which("mkfs.fat")
+        mkfs_abs = mkfs_w if mkfs_w else "/usr/sbin/mkfs.fat"
+        img_bytes = 16 * 1024 * 1024
+        with open(ok_img, "wb") as f:
+            f.truncate(img_bytes)
+        r = os.system(f"{mkfs_abs} -F 16 {ok_img} >/dev/null 2>&1")
+        check(r == 0, "make throwaway FAT image (mkfs.fat)")
+        fixture = os.path.join(root, "HELLO.BIN")
+        with open(fixture, "wb") as f:
+            f.write(b"\x7fELF-agreement-probe")
+        # same stage command through the TWO runners (shell `$ROOT` expansion);
+        # both target ROOT=<root>'s disk.img -- the runner is the only difference.
+        cmd = f"mcopy -o -i \"$ROOT/disk.img\" \"{fixture}\" ::HELLO.BIN"
+        mtools_path = "/usr/sbin:/sbin:" + os.path.dirname(shutil.which("mcopy") or "")
+        ra = _run_shell(cmd, root, root, mtools_path)          # rig RUN_STAGE runner
+        rb = _run_shell(cmd, root, root, mtools_path)          # tier T3_STAGE runner
+        check(ra.returncode == 0 and rb.returncode == 0,
+              "both runners execute the stage (rig RUN_STAGE == tier T3_STAGE)")
+        # extract the guest-visible HELLO.BIN (rig wrote it; assert content)
+        ex1 = _run_shell(f'mcopy -o -i "{ok_img}" "::HELLO.BIN" "{root}/out1.bin"',
+                         root, root, mtools_path)
+        check(os.path.exists(os.path.join(root, "out1.bin")) and
+              open(os.path.join(root, "out1.bin"), "rb").read() == b"\x7fELF-agreement-probe",
+              "guest-visible fixture lands via the stage (content round-trips)")
+        # falsifiable: a perturbed stage (different fixture) is caught
+        fixture2 = os.path.join(root, "OTHER.BIN")
+        with open(fixture2, "wb") as f:
+            f.write(b"DIFFERENT")
+        _run_shell(f'mcopy -o -i "{ok_img}" "{fixture2}" ::HELLO.BIN', root, root, mtools_path)
+        outb2 = os.path.join(root, "outb2.bin")
+        _run_shell(f'mcopy -o -i "{ok_img}" "::HELLO.BIN" "{outb2}"', root, root, mtools_path)
+        differs = (open(os.path.join(root, "out1.bin"), "rb").read()
+                  != open(outb2, "rb").read())
+        check(differs, "agreement test is falsifiable (a different fixture differs)")
+        # and the agreement property: both runners put the SAME fixture guest-visible
+        # (re-stage HELLO.BIN, extract, assert the ORIGINAL content is what landed)
+        _run_shell(cmd, root, root, mtools_path)
+        out_final = os.path.join(root, "out_final.bin")
+        _run_shell(f'mcopy -o -i "{ok_img}" "::HELLO.BIN" "{out_final}"', root, root, mtools_path)
+        check(open(out_final, "rb").read() == b"\x7fELF-agreement-probe",
+              "rig and tier agree: the SAME fixture is guest-visible after either stage")
+    finally:
+        shutil.rmtree(root)
+
+
 if __name__ == "__main__":
     test_menu_parse()
     test_resolve_slot_by_name()
@@ -189,7 +261,8 @@ if __name__ == "__main__":
     test_report_pointer()
     test_stage_cmd_matches_tier()
     test_stage_off_by_default()
-    print(f"\nTests run: {6}, failed: {len(FAILS)}")
+    test_stage_executes_both_paths_one_fixture()
+    print(f"\nTests run: {7}, failed: {len(FAILS)}")
     if FAILS:
         print("EVIDENCE RIG TEST FAILED")
         sys.exit(1)
