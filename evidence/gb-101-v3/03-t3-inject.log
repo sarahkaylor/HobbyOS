@@ -1,0 +1,8 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 600s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/verify-gb101v3/obj/t3_intel.log) ===
+T3_intel: 414 console lines, 1 FAIL lines, 0 user memory fault records across 0 processes, 0 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 600s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 1 FAIL line(s); first 20:
+64:[TORNFRAME] FAIL - interrupt/fault handler read a torn frame: vector=131072 rip=0x0000000000000097 cs=0x0000000000000008 (impossible vector=131072 or invalid cs; a real gate entry pushes cs 0x08/0x1B
+T3_intel EXIT=1
+TIER_RC=0

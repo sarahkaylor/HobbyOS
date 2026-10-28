@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 300s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/verify-gb101v3/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 26895 console lines, 129 FAIL lines, 18 user memory fault records across 15 processes, 86 programs exited, halted=1
+T3_intel: FAIL — 129 FAIL line(s); first 20:
+4729:[SIGTEST] FAIL waitpid returns the child got=17 want=4294964048
+4732:MMTEST FAIL [WAVE-TRY] MD5SUM.BIN
+5277:[TEST] DIRECT-ext-cat FAIL (empty target, no load failure)
+5382:[COMMTEST] FAIL -2 suppress right-unique
+5869:[COMMTEST] FAIL -3 suppress shared
+6047:[SEDTEST] FAIL basic_s (stdout)
+6568:[COMMTEST] FAIL -23 left-unique only
+6966:[SEDTEST] FAIL s_g (stdout)
+7454:Loading program for scheduler (v2 AS): Loading program for scheduler (v2 AS): [SEDTEST] FAIL s_2nd (stdout)
+7486:[TACTEST] FAIL missing file
+7537:[TACTEST] FAIL empty separator
+7547:[TACTEST] FAILURES: 4
+7554:[CMPTEST] FAIL EOF message on stderr
+7561:[CMPTEST] FAIL empty EOF message
+7565:[CMPTEST] FAIL missing file diagnostic
+7573:/CKSNOPE.TXT[CMPTEST] FAIL -i 4:0 skips prefix
+7578:[CMPTEST] FAIL - stdin EOF diagnostic
+7587:[CMPTEST] FAILURES: 5
+7845:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+7885:[SEDTEST] FAIL s_p_n (stdout)
+T3_intel EXIT=1
+TIER_RC=0

@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 480s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/verify-gb101v3/obj/t3_intel.log) ===
+T3_intel: 13999 console lines, 77 FAIL lines, 6 user memory fault records across 5 processes, 85 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 480s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 77 FAIL line(s); first 20:
+4464:MMTEST FAIL /SQLTEST.DB
+4969:[SIGTEST] FAIL waitpid returns the child got=55 want=4294964048
+5333:[SEDTEST] FAIL basic_s (stdout)
+5433:[TEST] DIRECT-ext-cat FAIL (empty target, no load failure)
+6146:/CUT.BIN[SEDTEST] FAIL s_g (stdout)
+6440:  FPU_T torture-child: FAIL
+6965:  FPU_T fork-inherit: FAIL
+7084:FPU_T FAILED: 2
+7557:[CMPTEST] FAIL EOF message on stderr
+7562:/MD5NOPE.XXX[CMPTEST] FAIL empty EOF message
+7570:[CMPTEST] FAIL missing file diagnostic
+7707:[CMPTEST] FAILURES: 5
+7961:/FOLDEMPTY.TXT[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+7967:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+8115:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+8127:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+8140:[TSORTTEST] FAILURES: 4
+8485:only one string may be given when deleting without squeezing repeats[SEDTEST] FAIL amp (stdout)
+8665:[TACTEST] FAILURES: 4
+8913:CUT.BIN[SEDTEST] FAIL backref (stdout)
+T3_intel EXIT=1
+TIER_RC=0

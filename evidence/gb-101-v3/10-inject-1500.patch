@@ -1,0 +1,35 @@
+diff --git a/.arch-stamp b/.arch-stamp
+index 78504ba..b6fce24 100644
+--- a/.arch-stamp
++++ b/.arch-stamp
+@@ -1 +1 @@
+-arm
+\ No newline at end of file
++intel
+\ No newline at end of file
+diff --git a/src/kernel/arch/x64/trap.c b/src/kernel/arch/x64/trap.c
+index 9658c02..ec2a753 100755
+--- a/src/kernel/arch/x64/trap.c
++++ b/src/kernel/arch/x64/trap.c
+@@ -2642,6 +2642,21 @@ void general_interrupt_handler(struct trap_frame *tf) {
+ }
+ 
+ static void general_interrupt_inner(struct trap_frame *tf) {
++  /* GB-101-V3 clause 4 (throwaway build, NOT for commit): inject the carded
++     torn frame after 20,000 dispatcher entries, so the wave is running and the
++     other CPUs are live when the detector stops this one. */
++  {
++    static int gb101v3_injected;
++    static int gb101v3_count;
++    extern void uart_puts_raw(const char *s);
++    if (!gb101v3_injected && ++gb101v3_count > 1500) {
++      gb101v3_injected = 1;
++      tf->vector = 0x20000;
++      tf->elr = 0x97;
++      tf->error_code = 3;
++      uart_puts_raw("[GB101V3-INJECT] torn frame mid-wave (1500 traps in): vector=20000 rip=0x97 err=3\n");
++    }
++  }
+   extern void gic_set_current_vector(uint32_t cpu, uint32_t vector);
+   extern uint32_t gic_acknowledge_interrupt(void);
+   extern void gic_end_interrupt(uint32_t intid);

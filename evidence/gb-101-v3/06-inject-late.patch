@@ -1,0 +1,25 @@
+diff --git a/src/kernel/arch/x64/trap.c b/src/kernel/arch/x64/trap.c
+index 9658c02..2c78ff9 100755
+--- a/src/kernel/arch/x64/trap.c
++++ b/src/kernel/arch/x64/trap.c
+@@ -2642,6 +2642,20 @@ void general_interrupt_handler(struct trap_frame *tf) {
+ }
+ 
+ static void general_interrupt_inner(struct trap_frame *tf) {
++  /* GB-101-V3 clause 4 (throwaway build, NOT for commit): inject the carded
++     torn frame on the FIRST SYSCALL, so the wave is already running and the
++     other CPUs are live when the detector stops this one. */
++  {
++    static int gb101v3_injected;
++    extern void uart_puts_raw(const char *s);
++    if (!gb101v3_injected && tf->vector == 0x80) {
++      gb101v3_injected = 1;
++      tf->vector = 0x20000;
++      tf->elr = 0x97;
++      tf->error_code = 3;
++      uart_puts_raw("[GB101V3-INJECT] torn frame at first syscall: vector=20000 rip=0x97 err=3\n");
++    }
++  }
+   extern void gic_set_current_vector(uint32_t cpu, uint32_t vector);
+   extern uint32_t gic_acknowledge_interrupt(void);
+   extern void gic_end_interrupt(uint32_t intid);
