@@ -121,12 +121,75 @@ def test_resolve_slot_by_name():
         os.unlink(sp)
 
 
+def test_stage_cmd_matches_tier():
+    """GB-118: the rig's staging is the TIER's staging, not a second scheme.
+
+    build_stage_cmd(HOSTSRC, GUEST, root) must emit the same mcopy shape the
+    T3 tier uses (tools/t3_tier.sh's T3_STAGE contract: `mcopy -o -i
+    "$ROOT/disk.img" "$SRC" "::GUEST"`), so the rig and t3_tier.sh agree on the
+    result for the same fixture.  Path refusals (host outside repo, guest
+    escaping the image) must fire with a quoted reason.  Off by default: no
+    --stage -> no RUN_STAGE.
+    """
+    root = tempfile.mkdtemp(prefix="evrig-stage-")
+    try:
+        fixture = os.path.join(root, "HELLO.BIN")
+        with open(fixture, "wb") as f:
+            f.write(b"\x7fELF-fake")
+        cmd = rig.build_stage_cmd(fixture, "HELLO.BIN", root)
+        want = f"mcopy -o -i \"$ROOT/disk.img\" \"{os.path.realpath(fixture)}\" \"::HELLO.BIN\""
+        check(cmd == want, "stage cmd is the tier's mcopy shape (rig & t3_tier agree)",
+              cmd)
+        # the tier's own shape (t3_tier.sh:181 comment + t4_proctest.sh style)
+        tier_style = f"mcopy -o -i $ROOT/disk.img {fixture} ::HELLO.BIN"
+        check("mcopy -o -i" in cmd and "::HELLO.BIN" in cmd and "$ROOT/disk.img" in cmd,
+              "stage shape carries the tier's $ROOT/disk.img + ::GUEST tokens")
+
+        # guest-path traversal / escape refused
+        for bad, why in [("/etc/passwd", "absolute"),
+                         ("../MAGIC.BIN", "traversal"),
+                         ("SUB/DIR.BIN", "nested")]:
+            try:
+                rig.build_stage_cmd(fixture, bad, root)
+                check(False, f"refuse guest path {bad}", why)
+            except ValueError as e:
+                check("refused" in str(e) or "single FAT filename" in str(e)
+                      or "escapes" in str(e) or "traversal" in str(e),
+                      f"refuse guest path {bad}", why)
+        # host path outside the repo root refused
+        outside = tempfile.mkstemp(prefix="outside-")[1]
+        try:
+            rig.build_stage_cmd(outside, "X.BIN", root)
+            check(False, "refuse host path outside root")
+        except ValueError as e:
+            check("outside the repo root" in str(e), "refuse host path outside root")
+        os.unlink(outside)
+        # guest path must exist as a file
+        try:
+            rig.build_stage_cmd(os.path.join(root, "NOPE.BIN"), "X.BIN", root)
+            check(False, "refuse nonexistent host")
+        except ValueError as e:
+            check("does not exist" in str(e), "refuse nonexistent host")
+    finally:
+        shutil.rmtree(root)
+
+
+def test_stage_off_by_default():
+    """GB-118: the rig adds RUN_STAGE ONLY when --stage is given (no behaviour
+    change for existing callers).  Assert the real parser's default is None."""
+    p = rig.build_arg_parser()
+    ns = p.parse_args(["--game", "xnibbler", "--arch", "arm"])
+    check(ns.stage is None, "stage off by default (no second boot path imposed)")
+
+
 if __name__ == "__main__":
     test_menu_parse()
     test_resolve_slot_by_name()
     test_manifest_bundle()
     test_report_pointer()
-    print(f"\nTests run: {5}, failed: {len(FAILS)}")
+    test_stage_cmd_matches_tier()
+    test_stage_off_by_default()
+    print(f"\nTests run: {6}, failed: {len(FAILS)}")
     if FAILS:
         print("EVIDENCE RIG TEST FAILED")
         sys.exit(1)
