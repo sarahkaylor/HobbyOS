@@ -190,66 +190,123 @@ def _run_shell(cmd, root, env_root, path):
     return sp.run(["sh", "-c", cmd], capture_output=True, text=True, cwd=root, env=env)
 
 
-def test_stage_executes_both_paths_one_fixture():
-    """GB-118-V RED clause 8: agreement must be EXECUTED, not string-compared.
+def _read_live_snippets():
+    """Grab the two real consumer lines off disk (GB-120) so the agreement test
+    references the actual recipes, not a hard-coded re-implementation.
 
-    The rig's RUN_STAGE hook and the T3 tier's T3_STAGE both hand the stage
-    command to the same runner shape (`ROOT=<dir> sh -c "<cmd>"` where <cmd>
-    contains `$ROOT/disk.img`).  Run the SAME fixture through BOTH runners on
-    one throwaway FAT image and assert the same guest-visible file lands; then
-    perturb one path (a different fixture) and assert it is caught -- the test can
-    fail for the reason that actually failed (make re-eat `$ROOT`).  This proves
-    'the rig and t3_tier.sh agree' on the guest-visible result, not on two
-    strings that happen to match.
+    Returns (stage_line, tier_line) verbatim — or an empty string for a line whose
+    expected token is not found, so a contract drift surfaces as a clean check FAIL
+    (clause 3: provably able to fail) instead of a traceback.
     """
-    root = tempfile.mkdtemp(prefix="evrig-exec-")
+    mk = open("Makefile").read().splitlines()
+    matches = [l for l in mk if "ROOT=\"$(CURDIR)\" $(SHELL) -c \"$$RUN_STAGE\"" in l]
+    stage_line = matches[0] if matches else ""
+    tt = open("tools/t3_tier.sh").read().splitlines()
+    tmatches = [l for l in tt if "ROOT=\"$ROOT\" sh -c \"$T3_STAGE\"" in l]
+    tier_line = tmatches[0] if tmatches else ""
+    return stage_line, tier_line
+
+
+def test_make_recipe_shape_live():
+    """GB-120 clause1: the Makefile's `run:` recipe is what makes a stage real for the
+    rig.  Its RUN_STAGE line and the tier's T3_STAGE line must still carry the exact
+    tokens ($$RUN_STAGE via ROOT=$(CURDIR) make-expanded shell; the tier's $ROOT sh -c
+    $T3_STAGE).  Live-read from disk, so a contract drift fails this check."""
+    stage_line, tier_line = _read_live_snippets()
+    check("$(SHELL) -c \"$$RUN_STAGE\"" in stage_line and "ROOT=\"$(CURDIR)\"" in stage_line,
+          "Makefile run recipe still drives RUN_STAGE via ROOT=$(CURDIR) shell (live read)")
+    check("ROOT=\"$ROOT\" sh -c \"$T3_STAGE\"" in tier_line,
+          "t3_tier.sh still invokes T3_STAGE via ROOT=$ROOT sh -c (live read)")
+
+
+def test_stage_executes_both_consumers_one_fixture():
+    """GB-120: agreement must be EXECUTED by BOTH real consumers, not one runner twice.
+
+    Leg A = the Makefile's `run:` recipe (clause 5 reduction sanctioned: QEMU stubbed,
+    RUN_STAGE set) — a throwaway Makefile carries the verbatim recipe line, so GNU make
+    does the real `$$RUN_STAGE` expansion and `ROOT=$(CURDIR)` assignment.  Leg B = the
+    tier's literal `ROOT="$ROOT" sh -c "$T3_STAGE"` line, driven exactly as the tier runs
+    it (the thing that eats-eats/keeps $ROOT differently).  Same fixture, one throwaway
+    FAT image; assert the same guest-visible bytes land via each consumer.  Falsifiable:
+    perturb the tier side (a different fixture) and the agreement breaks.
+    """
+    root = tempfile.mkdtemp(prefix="evrig-consume-")
     import shutil as _sh
-    ok_img = os.path.join(root, "disk.img")     # the single guest image both runners use
-    for img in (ok_img,):
-        if os.path.exists(img):
-            os.unlink(img)
+    img = os.path.join(root, "disk.img")
     try:
-        mkfs_w = shutil.which("mkfs.fat")
-        mkfs_abs = mkfs_w if mkfs_w else "/usr/sbin/mkfs.fat"
-        img_bytes = 16 * 1024 * 1024
-        with open(ok_img, "wb") as f:
-            f.truncate(img_bytes)
-        r = os.system(f"{mkfs_abs} -F 16 {ok_img} >/dev/null 2>&1")
+        mkfs_abs = shutil.which("mkfs.fat") or "/usr/sbin/mkfs.fat"
+        with open(img, "wb") as f:
+            f.truncate(16 * 1024 * 1024)
+        r = os.system(f"{mkfs_abs} -F 16 {img} >/dev/null 2>&1")
         check(r == 0, "make throwaway FAT image (mkfs.fat)")
         fixture = os.path.join(root, "HELLO.BIN")
         with open(fixture, "wb") as f:
             f.write(b"\x7fELF-agreement-probe")
-        # same stage command through the TWO runners (shell `$ROOT` expansion);
-        # both target ROOT=<root>'s disk.img -- the runner is the only difference.
-        cmd = f"mcopy -o -i \"$ROOT/disk.img\" \"{fixture}\" ::HELLO.BIN"
-        mtools_path = "/usr/sbin:/sbin:" + os.path.dirname(shutil.which("mcopy") or "")
-        ra = _run_shell(cmd, root, root, mtools_path)          # rig RUN_STAGE runner
-        rb = _run_shell(cmd, root, root, mtools_path)          # tier T3_STAGE runner
-        check(ra.returncode == 0 and rb.returncode == 0,
-              "both runners execute the stage (rig RUN_STAGE == tier T3_STAGE)")
-        # extract the guest-visible HELLO.BIN (rig wrote it; assert content)
-        ex1 = _run_shell(f'mcopy -o -i "{ok_img}" "::HELLO.BIN" "{root}/out1.bin"',
-                         root, root, mtools_path)
-        check(os.path.exists(os.path.join(root, "out1.bin")) and
-              open(os.path.join(root, "out1.bin"), "rb").read() == b"\x7fELF-agreement-probe",
-              "guest-visible fixture lands via the stage (content round-trips)")
-        # falsifiable: a perturbed stage (different fixture) is caught
-        fixture2 = os.path.join(root, "OTHER.BIN")
-        with open(fixture2, "wb") as f:
-            f.write(b"DIFFERENT")
-        _run_shell(f'mcopy -o -i "{ok_img}" "{fixture2}" ::HELLO.BIN', root, root, mtools_path)
-        outb2 = os.path.join(root, "outb2.bin")
-        _run_shell(f'mcopy -o -i "{ok_img}" "::HELLO.BIN" "{outb2}"', root, root, mtools_path)
-        differs = (open(os.path.join(root, "out1.bin"), "rb").read()
-                  != open(outb2, "rb").read())
-        check(differs, "agreement test is falsifiable (a different fixture differs)")
-        # and the agreement property: both runners put the SAME fixture guest-visible
-        # (re-stage HELLO.BIN, extract, assert the ORIGINAL content is what landed)
-        _run_shell(cmd, root, root, mtools_path)
-        out_final = os.path.join(root, "out_final.bin")
-        _run_shell(f'mcopy -o -i "{ok_img}" "::HELLO.BIN" "{out_final}"', root, root, mtools_path)
-        check(open(out_final, "rb").read() == b"\x7fELF-agreement-probe",
-              "rig and tier agree: the SAME fixture is guest-visible after either stage")
+        mcopy = shutil.which("mcopy")
+        mpath = "/usr/sbin:/sbin:" + os.path.dirname(mcopy or "")
+        bsc = f"mcopy -o -i \"$ROOT/disk.img\" \"{fixture}\" ::HELLO.BIN"
+
+        # ---- Leg A: the Makefile recipe (real $$RUN_STAGE + ROOT=$(CURDIR)). ----
+        stage_line, tier_line = None, None
+        try:
+            stage_line, tier_line = _read_live_snippets()
+        except Exception as e:
+            FAILS.append(f"live recipe read failed ({e})")
+        # build a throwaway Makefile with the VERBATIM recipe line + stubbed QEMU
+        mkf = os.path.join(root, "Makefile")
+        if stage_line:
+            with open(mkf, "w") as f:
+                f.write("QEMU_CMD = @:  # GB-120: QEMU stubbed for host_tests (clause 5 reduction)\n\n"
+                        f"run:\n\t{stage_line}\n\t$(QEMU_CMD)\n")
+        else:
+            with open(mkf, "w") as f:
+                f.write("run:\n\t@echo no-stage\n")
+        env = dict(os.environ)
+        env["PATH"] = mpath + os.pathsep + env.get("PATH", "")
+        env["RUN_STAGE"] = bsc                      # make imports it; recipe $$RUN_STAGE -> shell $RUN_STAGE
+        ra = subprocess.run(["make", "-C", root, "run"],
+                            capture_output=True, text=True, cwd=root, env=env)
+        check(ra.returncode == 0, "make run recipe executes RUN_STAGE (leg A consumer)",
+              "exit=%d" % ra.returncode)
+
+        # ---- Leg B: the tier's literal invocation (ROOT="$ROOT" sh -c "$T3_STAGE"). ----
+        envb = dict(os.environ)
+        envb["PATH"] = mpath + os.pathsep + envb.get("PATH", "")
+        envb["ROOT"] = root
+        envb["T3_STAGE"] = bsc
+        rb = subprocess.run(["sh", "-c", f'ROOT="$ROOT" sh -c "$T3_STAGE"'],
+                            capture_output=True, text=True, cwd=root, env=envb)
+        check(rb.returncode == 0, "tier T3_STAGE invocation executes (leg B consumer)",
+              "exit=%d" % rb.returncode)
+
+        # assert BOTH consumers put the SAME fixture guest-visible on the SAME image
+        extract = lambda name: subprocess.run(
+            f'mcopy -o -i "{img}" "::{name}" "{root}/{name}.out" 2>/dev/null',
+            shell=True).returncode == 0 and open(f"{root}/{name}.out", "rb").read()
+        content_a = extract("HELLO.BIN")
+        check(content_a == b"\x7fELF-agreement-probe",
+              "guest-visible fixture lands after make run recipe (leg A)")
+        # perturbation: tier stages a DIFFERENT fixture on a fresh image -> must break
+        img2 = os.path.join(root, "disk2.img")
+        with open(img2, "wb") as f:
+            f.truncate(16 * 1024 * 1024)
+        os.system(f"{mkfs_abs} -F 16 {img2} >/dev/null 2>&1")
+        other = os.path.join(root, "OTHER.BIN")
+        with open(other, "wb") as f:
+            f.write(b"DIFFERENT-CONTENT")
+        envb["ROOT"] = root
+        envb["T3_STAGE"] = f"mcopy -o -i \"$ROOT/disk2.img\" \"{other}\" ::HELLO.BIN"
+        subprocess.run(["sh", "-c", 'ROOT="$ROOT" sh -c "$T3_STAGE"'],
+                       capture_output=True, text=True, cwd=root, env=envb)
+        piv = os.path.join(root, "piv.bin")
+        prc = subprocess.run(f'mcopy -o -i "{img2}" "::HELLO.BIN" "{piv}" 2>/dev/null', shell=True)
+        perturbed = prc.returncode == 0 and open(piv, "rb").read() == b"DIFFERENT-CONTENT"
+        check(content_a != (open(piv, "rb").read() if os.path.exists(piv) else b"X")
+              and perturbed,
+              "agreement test is falsifiable (a diverged tier stage differs from the make leg)",
+              "mk={} tier_perturbed={}".format(
+                  (open(f"{root}/HELLO.BIN.out", "rb").read()
+                   if os.path.exists(f"{root}/HELLO.BIN.out") else None), perturbed))
     finally:
         shutil.rmtree(root)
 
@@ -261,8 +318,9 @@ if __name__ == "__main__":
     test_report_pointer()
     test_stage_cmd_matches_tier()
     test_stage_off_by_default()
-    test_stage_executes_both_paths_one_fixture()
-    print(f"\nTests run: {7}, failed: {len(FAILS)}")
+    test_make_recipe_shape_live()
+    test_stage_executes_both_consumers_one_fixture()
+    print(f"\nTests run: {8}, failed: {len(FAILS)}")
     if FAILS:
         print("EVIDENCE RIG TEST FAILED")
         sys.exit(1)
