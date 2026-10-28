@@ -28,7 +28,14 @@ char shift_keymap[128] = {0,    27,  '!', '@',  '#',  '$',  '%', '^', '&',  '*',
 
 static int shift_pressed = 0;
 
-#define MAX_MENU_ITEMS 128
+/* GB-119: the [MENU] dump cap must cover the whole image root or a NEW staged
+ * fixture is truncated out of the listing and the evidence rig (which proves a
+ * fixture by finding its name in the guest's own [MENU] dump) cannot see it.
+ * Measured root counts (2026-10-28, MODE=test disk.img): arm=176, intel=158.
+ * 256 is a bounded headroom above both; the tables are 256x16=4KiB + 256 bytes,
+ * and the dump stays bounded (no truncation lie).  The menu is still capped, so
+ * the console/UI budget is unchanged-in-kind. */
+#define MAX_MENU_ITEMS 256
 char menu_items[MAX_MENU_ITEMS][16];
 int num_menu_items = 0;
 /* GB-039 (2nd half): 1 when menu_items[i] is a /GAMES-scanned entry (not a
