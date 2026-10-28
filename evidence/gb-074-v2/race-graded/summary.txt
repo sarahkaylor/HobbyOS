@@ -1,0 +1,15 @@
+TRIAL 1  scratch=#248  alpha rc=0  beta rc=1
+  alpha: 248 #248 claimed by agent-alpha (was Ready)
+  beta:  248 #248 already claimed by `agent-alpha` (lane already In Progress) — not re-claiming (GB-074); run no gate
+  board: lane=[In Progress] claim_comments=1 '→ In Progress'=1 related_comments=1
+  issues/248
+TRIAL 2  scratch=#249  alpha rc=1  beta rc=0
+  alpha: 249 #249 already claimed by `agent-beta` (lane already In Progress) — not re-claiming (GB-074); run no gate
+  beta:  249 #249 claimed by agent-beta (was Ready)
+  board: lane=[In Progress] claim_comments=1 '→ In Progress'=1 related_comments=1
+  issues/249
+TRIAL 3  scratch=#250  alpha rc=0  beta rc=1
+  alpha: 250 #250 claimed by agent-alpha (was Ready)
+  beta:  250 #250 already claimed by `agent-alpha` (lane already In Progress) — not re-claiming (GB-074); run no gate
+  board: lane=[In Progress] claim_comments=1 '→ In Progress'=1 related_comments=1
+  issues/250

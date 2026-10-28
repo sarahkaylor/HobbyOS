@@ -1,0 +1,15 @@
+TRIAL 1  scratch=#254  alpha rc=0  beta rc=0
+  alpha: 254 #254 claimed by agent-alpha (was Ready)
+  beta:  254 #254 claimed by agent-beta (was Ready)
+  board: lane=[In Progress] claim_comments=2 '→ In Progress'=2 related_comments=2
+  issues/254
+TRIAL 2  scratch=#255  alpha rc=0  beta rc=0
+  alpha: 255 #255 claimed by agent-alpha (was Ready)
+  beta:  255 #255 claimed by agent-beta (was Ready)
+  board: lane=[In Progress] claim_comments=2 '→ In Progress'=2 related_comments=2
+  issues/255
+TRIAL 3  scratch=#256  alpha rc=0  beta rc=0
+  alpha: 256 #256 claimed by agent-alpha (was Ready)
+  beta:  256 #256 claimed by agent-beta (was Ready)
+  board: lane=[In Progress] claim_comments=2 '→ In Progress'=2 related_comments=2
+  issues/256

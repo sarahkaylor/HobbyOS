@@ -1,0 +1,23 @@
+  PASS: OLD read-then-move: both agents 'win' (double claim reproduced)
+  PASS: OLD produced two claim comments (the measured double-DEEP-gate cost)
+GB-074 #1 claimed by agent1 (was Ready)
+  PASS: NEW claim (run 1): exactly one of two wins
+  PASS: NEW claim (run 1): loser names the winner
+  PASS: NEW claim (run 1): exactly one claim comment (one gate)
+  PASS: NEW claim (run 1): ticket ends In Progress
+  PASS: NEW claim (run 1): only the winner ran a gate
+GB-074 #1 claimed by agent1 (was Ready)
+  PASS: NEW claim (run 2): exactly one of two wins
+  PASS: NEW claim (run 2): loser names the winner
+  PASS: NEW claim (run 2): exactly one claim comment (one gate)
+  PASS: NEW claim (run 2): ticket ends In Progress
+  PASS: NEW claim (run 2): only the winner ran a gate
+GB-074 #1 claimed by agent1 (was Ready)
+  PASS: NEW claim (run 3): exactly one of two wins
+  PASS: NEW claim (run 3): loser names the winner
+  PASS: NEW claim (run 3): exactly one claim comment (one gate)
+  PASS: NEW claim (run 3): ticket ends In Progress
+  PASS: NEW claim (run 3): only the winner ran a gate
+  PASS: claimant_of returns the CURRENT (last) claim, not the first (GB-074-V FAIL)
+
+CLAIM_RACE_TEST: PASS — the read-then-move double claim is fixed

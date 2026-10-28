@@ -1,0 +1,24 @@
+HISTORY TRIAL 1  scratch=#251  prior-claim=agent-old  alpha rc=1  beta rc=0
+  move:   251 #251: In Progress -> Ready 
+  old:    251 #251 claimed by agent-old (was Ready)
+  alpha:  251 #251 already claimed by `agent-beta` (lane already In Progress) — not re-claiming (GB-074); run no gate
+  beta:   251 #251 claimed by agent-beta (was Ready)
+GATE-RAN beta
+  board:  lane=[In Progress] claim_comments=2 (prior agent-old + current winner) gates_run=1
+  issues/251
+HISTORY TRIAL 2  scratch=#252  prior-claim=agent-old  alpha rc=0  beta rc=1
+  move:   252 #252: In Progress -> Ready 
+  old:    252 #252 claimed by agent-old (was Ready)
+  alpha:  252 #252 claimed by agent-alpha (was Ready)
+GATE-RAN alpha
+  beta:   252 #252 already claimed by `agent-alpha` (lane already In Progress) — not re-claiming (GB-074); run no gate
+  board:  lane=[In Progress] claim_comments=2 (prior agent-old + current winner) gates_run=1
+  issues/252
+HISTORY TRIAL 3  scratch=#253  prior-claim=agent-old  alpha rc=1  beta rc=0
+  move:   253 #253: In Progress -> Ready 
+  old:    253 #253 claimed by agent-old (was Ready)
+  alpha:  253 #253 already claimed by `agent-beta` (lane already In Progress) — not re-claiming (GB-074); run no gate
+  beta:   253 #253 claimed by agent-beta (was Ready)
+GATE-RAN beta
+  board:  lane=[In Progress] claim_comments=2 (prior agent-old + current winner) gates_run=1
+  issues/253

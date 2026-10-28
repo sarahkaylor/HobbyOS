@@ -1,0 +1,28 @@
+  PASS: OLD read-then-move: both agents 'win' (double claim reproduced)
+  PASS: OLD produced two claim comments (the measured double-DEEP-gate cost)
+GB-074 #1 claimed by agent1 (was Ready)
+GB-074 #1 claimed by agent2 (was Ready)
+  FAIL: NEW claim (run 1): exactly one of two wins
+  FAIL: NEW claim (run 1): loser names the winner
+  FAIL: NEW claim (run 1): exactly one claim comment (one gate)
+  FAIL: NEW claim (run 1): ticket ends In Progress
+  FAIL: NEW claim (run 1): only the winner ran a gate
+GB-074 #1 claimed by agent1 (was Ready)
+GB-074 #1 claimed by agent2 (was Ready)
+  FAIL: NEW claim (run 2): exactly one of two wins
+  FAIL: NEW claim (run 2): loser names the winner
+  FAIL: NEW claim (run 2): exactly one claim comment (one gate)
+  FAIL: NEW claim (run 2): ticket ends In Progress
+  FAIL: NEW claim (run 2): only the winner ran a gate
+GB-074 #1 claimed by agent1 (was Ready)
+GB-074 #1 claimed by agent2 (was Ready)
+  FAIL: NEW claim (run 3): exactly one of two wins
+  FAIL: NEW claim (run 3): loser names the winner
+  FAIL: NEW claim (run 3): exactly one claim comment (one gate)
+  FAIL: NEW claim (run 3): ticket ends In Progress
+  FAIL: NEW claim (run 3): only the winner ran a gate
+Traceback (most recent call last):
+  File "/home/sarah/Documents/GitHub/HobbyOS/.worktrees/verify-gb074-prefix/tools/board/claim_race_test.py", line 163, in <module>
+    cur = board.claimant_of(1)
+          ^^^^^^^^^^^^^^^^^
+AttributeError: module 'board' has no attribute 'claimant_of'
