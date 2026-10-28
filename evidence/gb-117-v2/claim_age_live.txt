@@ -1,0 +1,28 @@
+claim-age report (clock = NEWEST activity comment; coordinator bookkeeping + lane notches do NOT re-arm it; updated_at NOT used): 61 open cards
+buckets: under6h=8, 6-12h=2, 12-24h=5, over24h=42, nocomments=4
+STALE (comment age >= 24h, or no comments): 46   FRESH: 15   split=46/15
+
+oldest 10 by comment age (ids, stale only):
+  #67   Icebox      comment 213.7h  EPIC Program-2: Dyson Sphere Program (Unity 3D)
+  #66   Icebox      comment 213.7h  EPIC Program-2: RimWorld (Mono CLR on HobbyOS)
+  #68   Icebox      comment 213.7h  EPIC Program-2: Total Annihilation / Spring RTS (C++
+  #99   In Progress comment 141.0h  GB-071 Family B delivery: a user process holds a ker
+  #77   In Progress comment 133.9h  GB-068 M1 BLOCKER, highest priority (§4.3, 2026-10-1
+  #19   In Progress comment 117.7h  GB-018 poll/select/pselect6 under compat
+  #18   In Progress comment 117.7h  GB-017 /dev/null, /dev/urandom, getrandom shims
+  #17   In Progress comment 117.7h  GB-016 uname shim reporting Linux-ish identity (SDL/
+  #22   In Progress comment 113.8h  GB-021 Threads under compat: clone → HobbyOS threads
+  #20   In Progress comment 113.8h  GB-019 ioctl subset: TIOCGWINSZ, F_GETFL/SETFL, TCGE
+cards STALE despite fresh updated_at (<24h): 46 (a bulk sweep cannot re-arm them)
+
+decision/blocked cards (9):
+  #91   Backlog     comment   4.0h  fresh  GB-059-V Verify GB-059: one rig runs a native and a 
+  #105  Done        comment  92.8h  STALE  DECISION-001: release stale In Progress claims when 
+  #130  Backlog     comment 102.4h  STALE  DECISION-003: evidence store — SMB mount on .56, or 
+  #131  Backlog     comment  41.6h  STALE  PLAN-011: M0 gate OPEN with three named exceptions +
+  #149  Backlog     comment  69.5h  STALE  DECISION-004: branch retirement — 90 unmerged heads 
+  #167  Backlog     comment no-comments  STALE  GB-061-V Verify GB-061: the x64 resume-path stack is
+  #168  Backlog     comment no-comments  STALE  GB-039-V Verify GB-039: the launcher scans /GAMES an
+  #173  Backlog     comment  55.9h  STALE  DECISION-005: GB-031 has failed verification 3 times
+  #174  Backlog     comment no-comments  STALE  DECISION-006: In Progress has no claim lease — 34 of
+ordinary cards (52): 38 stale / 14 fresh

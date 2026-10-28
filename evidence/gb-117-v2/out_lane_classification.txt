@@ -1,0 +1,34 @@
+open cards: 61   now=2026-10-28T00:53:21.895693+00:00
+
+== shipped classification of representative comments ==
+  ACTIVITY     <- lane move: 'GB-117-V2: lane - → **Ready**'
+  ACTIVITY     <- lane move: 'GB-117: lane Backlog → **Ready**'
+  ACTIVITY     <- worker content: '## VERDICT: **RED** (GB-117-V) → GB-117 returns to **In Progress**'
+  ACTIVITY     <- worker content: '**EVIDENCE — GB-117 re-delivery after GB-117-V RED (00:16Z). PR #228 h'
+  ACTIVITY     <- worker content: '**VERDICT — GREEN (GB-107-V).** Gate run by the DEEP Verifier on `swar'
+  ACTIVITY     <- worker content: "EVIDENCE — pointer to the owner's measurement on this card, recorded h"
+
+== cards whose newest ACTIVITY comment is a lane move (shipped rule) ==
+  #240  newest 'activity' is a lane move at    0.2h   GB-117-V2 Re-gate: two labelled clocks, a kind-class
+  #152  newest 'activity' is a lane move at   12.5h   GB-095 TSORTTEST fails on intel and passes on ARM — 
+  #47   newest 'activity' is a lane move at   14.1h   GB-047 Acceptance evidence pack for S0/S1: logs, scr
+  #46   newest 'activity' is a lane move at   33.0h   GB-046 Memory/leak pass under 30-min game cycling (f
+  #178  newest 'activity' is a lane move at   43.3h   GB-100 enter_user_space RETURNS instead of iretq-ing
+  #51   newest 'activity' is a lane move at   43.7h   GB-051 Audio acceptance (if GB-029 lands)
+  #78   newest 'activity' is a lane move at   60.1h   GB-069 Kernel #PF at cr2=0x1FC001008 (NVMe BAR windo
+  #63   newest 'activity' is a lane move at   60.1h   GB-061 x64 resume-path exception: general_interrupt_
+  #9    newest 'activity' is a lane move at   65.5h   GB-034 DOOM native port (doomgeneric, GPL): full-scr
+  #25   newest 'activity' is a lane move at   66.8h   GB-024 M1 gate: W0 corpus (hello, cat, sh, coreutils
+  #143  newest 'activity' is a lane move at   69.2h   GB-090 [DEEP] GB-082's whole-line branch moves the g
+  #130  newest 'activity' is a lane move at  102.4h   DECISION-003: evidence store — SMB mount on .56, or 
+  #121  newest 'activity' is a lane move at  102.4h   GB-077 Harness programs corrupt their own stacks: 5 
+  #59   newest 'activity' is a lane move at  102.8h   GB-058 ARCH=arm T3 carries one real failure the exit
+  #68   newest 'activity' is a lane move at  213.7h   EPIC Program-2: Total Annihilation / Spring RTS (C++
+  #67   newest 'activity' is a lane move at  213.7h   EPIC Program-2: Dyson Sphere Program (Unity 3D)
+  #66   newest 'activity' is a lane move at  213.7h   EPIC Program-2: RimWorld (Mono CLR on HobbyOS)
+  count: 17
+
+shipped rule          : buckets={'under6h': 8, '6-12h': 2, '12-24h': 5, 'over24h': 42, 'nocomments': 4} stale=46 fresh=15
+lane move = bookkeeping: buckets={'under6h': 7, '6-12h': 2, '12-24h': 5, 'over24h': 38, 'nocomments': 9} stale=47 fresh=14
+
+delta stale: +1   delta fresh: -1
