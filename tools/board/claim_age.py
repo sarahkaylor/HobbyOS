@@ -7,11 +7,14 @@ DECISION-006 cannot be sized because the board cannot report how long an
 measured 2026-10-27, nine unrelated cards sharing two timestamps inside one
 minute -- so a fresh `updated_at` carries no per-card signal.
 
-The ONLY clock here is the age of the card's NEWEST non-coordinator comment
-(GB-098): every real activity *and* every lane transition posts a comment, and
-coordinator "is this stalled?" probes are excluded because asking re-arms the
-very clock being measured.  A card whose `updated_at` is recent but whose
-comments are old is counted STALE; a seeded sweep must never reset the age.
+The ONLY clock here is the age of the card's NEWEST activity comment (GB-098):
+every real activity *and* every lane transition posts a comment, and coordinator
+"is this stalled?" probes are excluded (they re-arm the very clock being
+measured), while worker content posts count even when they mention the word
+"Coordinator" (GB-117-V RED).  All board comments post under one bot account,
+so the exclusion is by the comment's **kind** (see `_is_bookkeeping`), not by a
+body substring.  A card whose `updated_at` is recent but whose comments are old
+is counted STALE; a seeded sweep must never reset the age.
 
 Report layout (DoD verbatim):
   1. per open card, the newest-comment age in buckets
@@ -62,16 +65,51 @@ def bucket_for(comment_age):
     return "over24h"
 
 
-def newest_comment_age(comments, now):
-    """Age (h) of the newest non-coordinator comment; None when none exist.
+def _is_bookkeeping(c):
+    """Is comment ``c`` coordinator bookkeeping (does NOT re-arm the stall clock)?
 
-    Coordinator comments are excluded (they re-arm the stall clock by asking).
-    Falls back to None -> 'no-comments' bucket.  `updated_at` never enters.
+    Authority is the comment's **kind**, not the word "Coordinator".  All board
+    comments post under one bot account, so a login filter cannot separate
+    coordinator from worker.  A post is **bookkeeping** (no activity) when it is
+    a lane transition/claim/status/kickoff/orientation/mint/plan/caretaker
+    record.  A post is **activity** when it carries worker content — EVIDENCE,
+    VERDICT, DEBUG, MEASURED, findings, a worker's claim-of-work — and stays
+    activity even when the body happens to mention the word "Coordinator"
+    (the substring test the GB-117-V verifier rejected).  Unknown shapes count
+    bookkeeping defensively: a shape we can't call activity must not re-arm the
+    stall clock.
     """
-    human = [c for c in comments if "Coordinator" not in (c.get("body") or "")]
-    if not human:
+    body = (c.get("body") or "")
+    head = body.lstrip("*# \t\n")
+    up = head.upper()
+    bookkeeping = up.startswith(("COORDINATOR", "SWARM HEALTH", "CARETAKER",
+                               "VERIFICATION MINTED", "RE-GATE MINTED",
+                               "SWARM-HEALTH", "VERDICT-"))
+    if bookkeeping:
+        return True
+    return False                # EVIDENCE/VERDICT/MEASURED/findings/claim => activity
+
+
+
+def newest_comment_age(comments, now):
+    """Age (h) of the newest *activity* comment; None when none exist.
+
+    `updated_at` never enters the clock.  A comment counts as *activity* unless
+    it is coordinator **bookkeeping** (a lane transition, a claim/claim-retraction
+    notification, a swarm-health/caretaker status post, a coordinator kickoff,
+    mint note, or status/measurement post).  Worker content posts (EVIDENCE,
+    VERDICT, DEBUG findings, a worker's claim-of-work) count as activity even
+    when the body happens to mention the word "Coordinator".
+
+    GB-117-V RED (00:16Z): the first cut keyed the exclusion on the substring
+    ``"Coordinator" in body``, which (a) was not the rule the doD states and
+    (b) dropped worker EVIDENCE posts that merely mention the word.  Replaced
+    by this explicit-predicate-authority classification.
+    """
+    activity = [c for c in comments if not _is_bookkeeping(c)]
+    if not activity:
         return None
-    return max(0.0, age_hours(human[-1]["created_at"], now))
+    return max(0.0, age_hours(activity[-1]["created_at"], now))
 
 
 def stale(comment_age):
@@ -133,8 +171,9 @@ def report(issues, comments, now, oldest_n):
         else:
             nonstale_cnt += 1
 
-    print(f"claim-age report (clock = NEWEST non-coordinator comment; "
-          f"updated_at NOT used): {len(rows)} open cards")
+    print(f"claim-age report (clock = NEWEST activity comment; coordinator "
+          f"bookkeeping + lane notches do NOT re-arm it; updated_at NOT used): "
+          f"{len(rows)} open cards")
     print("buckets: " + ", ".join(f"{k}={buckets[k]}" for k in BUCKETS_ORDER))
     print(f"STALE (comment age >= {STALE_HOURS:g}h, or no comments): {stale_cnt}   "
           f"FRESH: {nonstale_cnt}   split={stale_cnt}/{nonstale_cnt}")
