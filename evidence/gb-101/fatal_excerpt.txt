@@ -1,0 +1,13 @@
+0MA0TH0_0C0O0S0_EIG
+HTH[: KPEASRSNE
+L] FATAL kernel-mode fault, halting this CPU: vector=1879291950 rip=0x000000002BFFE928 cr2=0x00000017FFFFF2F8 pid=23 err=7 cr3=0x0000000021A20000 pd480=0x00000000810000FB
+[KERNEL] Process 35: /CP.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=35 last_user_pc=0x100000081F
+[WAVE-TRY] WC.BIN
+Loading program for scheduler (v2 AS): WC.BIN
+sh: fork failed
+[KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0000000000000002
+  RIP: 0x000000007003D8DF  RSP: 0x00000000755AFC18
+  CS:  0x0000000000000008  [KSES:RN E L0x]0 0Pro0c0e00ss0 0200:0 0C0K00S1U0 M .RBFLINAG eSx:i t0xe00d0 00u0n0ex0p0e0ct0e1dl0y0 o4r6 
+g  RArX:a ce0xfu00l0l000y.000
+0/0TE0S0T30.0T3X T R
