@@ -3127,6 +3127,33 @@ int process_fork(struct trap_frame *tf) {
   /* Frame-carried RSP (see save_context): the child inherits the parent's
      user RSP from THIS trap frame, not from the per-CPU slot. */
   child->context[33] = tf->lr;
+  /* GB-077 discriminator: does tf->lr at fork hold the real user RSP the
+     child will resume with?  Fault shows child resumes at fork+0x10 with a
+     deep RSP; log the fork frame here (bounded) to compare. */
+  {
+    extern void uart_puts(const char *s);
+    static int gb077_n;
+    if (gb077_n < 6) {
+      gb077_n++;
+      char sb[120];
+      int si = 0;
+      const char *p1 = "[FORKDBG] pid=";
+      while (*p1 && si < 14) sb[si++] = *p1++;
+      char td[12]; int ti = 0, v = group->pid;
+      if (v == 0) td[ti++] = '0';
+      while (v > 0 && ti < 11) { td[ti++] = (char)('0' + (v % 10)); v /= 10; }
+      while (ti > 0) sb[si++] = td[--ti];
+      const char *p2 = " lr="; while (*p2 && si < 22) sb[si++] = *p2++;
+      static const char hx[] = "0123456789abcdef";
+      for (int sh = 60; sh >= 0 && si < 46; sh -= 4) sb[si++] = hx[((uint64_t)tf->lr >> sh) & 0xF];
+      const char *p3 = " elr="; while (*p3 && si < 55) sb[si++] = *p3++;
+      for (int sh = 60; sh >= 0 && si < 79; sh -= 4) sb[si++] = hx[((uint64_t)tf->elr >> sh) & 0xF];
+      const char *p4 = " cs="; while (*p4 && si < 87) sb[si++] = *p4++;
+      for (int sh = 60; sh >= 0 && si < 93; sh -= 4) sb[si++] = hx[((uint64_t)tf->cs >> sh) & 0xF];
+      sb[si++] = '\n'; sb[si] = 0;
+      uart_puts(sb);
+    }
+  }
 #else
   child->context[33] = arch_get_user_sp();
 #endif
