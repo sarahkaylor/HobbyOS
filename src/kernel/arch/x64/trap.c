@@ -2824,6 +2824,16 @@ static void general_interrupt_inner(struct trap_frame *tf) {
             fl_hex(&fl, ursp);
             fl_s(&fl, " cs=");
             fl_hex(&fl, tf->cs);
+            fl_s(&fl, " rax=");
+            fl_hex(&fl, tf->regs[0]);
+            fl_s(&fl, " r12=");
+            fl_hex(&fl, tf->regs[2]);
+            fl_s(&fl, " r13=");
+            fl_hex(&fl, tf->regs[3]);
+            fl_s(&fl, " r14=");
+            fl_hex(&fl, tf->regs[7]);
+            fl_s(&fl, " r15=");
+            fl_hex(&fl, tf->regs[8]);
             if (ursp >= 0x17FF800000ULL && ursp < 0x1800000000ULL) {
               volatile uint64_t *sp = (volatile uint64_t *)ursp;
               fl_s(&fl, " sp0=");
