@@ -1,0 +1,5 @@
+open cards: 60
+literal  buckets: under6h=10 6-12h=6 12-24h=4 over24h=39 nocomments=1  -> split=40/20
+shipped  buckets: under6h=8 6-12h=3 12-24h=4 over24h=42 nocomments=3  -> split=45/15
+
+deviation moves over24h by +3 cards and stale by +5

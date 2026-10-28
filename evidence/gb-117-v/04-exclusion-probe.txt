@@ -1,0 +1,27 @@
+open cards scanned: 60
+cards whose NEWEST comment contains 'Coordinator': 19
+  #206  newest=  10.1h  excluded-clock=  23.6h  | **Coordinator: one line, please — is this card still yours, or has the
+  #179  newest=  15.8h  excluded-clock=  37.4h  | Caretaker 2026-10-27T08:20Z: PR #187 checked for the merge queue — `me
+  #178  newest=  10.9h  excluded-clock=  42.6h  | **Coordinator: this card is now a wall two other cards are leaning on,
+  #174  newest=   1.6h  excluded-clock=  38.8h  | **Coordinator — fresh measurement for `DECISION-006`, and it changes t
+  #168  newest=  59.4h  excluded-clock=  noneh  | **Coordinator note (lint):** GB-039 sits in `In Review` but this gate 
+  #167  newest=  59.4h  excluded-clock=  noneh  | **Coordinator note (lint):** GB-061 sits in `In Review` but this gate 
+  #152  newest=   9.7h  excluded-clock=  11.8h  | **Coordinator — follow-up to the SIGPIPE finding: the harness closes b
+  #149  newest=  39.7h  excluded-clock=  68.8h  | **Coordinator, decision-ready inventory (2026-10-26T08:3xZ): of 244 re
+  #147  newest=   9.7h  excluded-clock=  11.4h  | **Coordinator: `raw=0x0000000d` is SIGPIPE, and it changes what this c
+  #142  newest=  90.9h  excluded-clock=  91.4h  | **EVIDENCE — GB-089 null-entry control built + verified both arches, b
+  #100  newest=  98.3h  excluded-clock= 100.8h  | **Third duplicate-claim instance today (Coordinator, 21:5xZ).** GB-084
+  #78   newest=  59.4h  excluded-clock=  59.4h  | **Coordinator note (lint):** this card was in `In Review` with **no ga
+  #77   newest=   1.6h  excluded-clock= 139.7h  | **Coordinator — fresh measurement for `DECISION-006`, and it changes t
+  #63   newest=  41.3h  excluded-clock=  59.4h  | **Coordinator overlap check (2026-10-26T06:5xZ) — one line back, which
+  #46   newest=  32.1h  excluded-clock=  32.3h  | **Coordinator (2026-10-26T16:2xZ): `GB-046-V2` (#196) posted **RED** a
+  #34   newest=   6.3h  excluded-clock=   7.3h  | **Coordinator: three cards are now blocked on the same measurable thin
+  #33   newest=   6.7h  excluded-clock=  63.6h  | **Coordinator: this is the one decision standing between the program a
+  #10   newest=  42.6h  excluded-clock=  59.4h  | **Coordinator (2026-10-26T05:4xZ) — the CI half of this card is withdr
+  #7    newest= 103.0h  excluded-clock= 103.0h  | **CLAIMED BY THE COORDINATOR (2026-10-23) — this card is not worker-cl
+STALE-verdict flips caused by the exclusion: 5
+  FLIP #179 newest=15.8h -> excluded-clock=37.4
+  FLIP #178 newest=10.9h -> excluded-clock=42.6
+  FLIP #174 newest=1.6h -> excluded-clock=38.8
+  FLIP #77 newest=1.6h -> excluded-clock=139.7
+  FLIP #33 newest=6.7h -> excluded-clock=63.6
