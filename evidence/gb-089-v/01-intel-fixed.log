@@ -1,0 +1,10 @@
+t3_nullentry: tree has the a53f26e fix (STATE=fixed)
+=== t3_nullentry (intel, SMP=1, program=HELLO.BIN, state=fixed) ===
+tools/gate/t3_nullentry.sh: line 102: 800363 Killed                     ( cd "$ROOT" && T3_SMP=$SMP T3_LOG="$LOG" T3_STAGE="$STAGE" T3_TIMEOUT=900 bash tools/t3_tier.sh "$ARCH" > "$ROOT/obj/t3_${ARCH}_nullentry.tier.out" 2>&1 )
+  halted=1 fault_lines=0 (expecting vector=13 on unfixed)
+t3_nullentry: PASS — fixed run halted cleanly (a53f26e verified).
+
+real	0m32.124s
+user	0m0.049s
+sys	0m0.082s
+RC=0

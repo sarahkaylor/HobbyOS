@@ -1,0 +1,3 @@
+t3_nullentry: FAIL — STATE=unfixed but tree HAS kernel_exit; run against plain main
+make: *** [Makefile:3608: t3_nullentry] Error 2
+RC=2

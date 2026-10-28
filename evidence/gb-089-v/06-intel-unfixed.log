@@ -1,0 +1,6 @@
+t3_nullentry: tree is unfixed (STATE=unfixed)
+=== t3_nullentry (intel, SMP=1, program=HELLO.BIN, state=unfixed) ===
+tools/gate/t3_nullentry.sh: line 102: 829712 Killed                     ( cd "$ROOT" && T3_SMP=$SMP T3_LOG="$LOG" T3_STAGE="$STAGE" T3_TIMEOUT=900 bash tools/t3_tier.sh "$ARCH" > "$ROOT/obj/t3_${ARCH}_nullentry.tier.out" 2>&1 )
+  halted=0 fault_lines=1 (expecting vector=13 on unfixed)
+t3_nullentry: PASS — unfixed run provoked the vector=13 fault (GB-087 confirmed)
+RC=0

@@ -1,0 +1,16 @@
+diff --git a/src/kernel/main.c b/src/kernel/main.c
+index 1fec7a8..9368245 100755
+--- a/src/kernel/main.c
++++ b/src/kernel/main.c
+@@ -188,8 +188,9 @@ static void test_wave_loader(void *arg) {
+            address 0: #GP vector 13, err 0, rip=0, rsp=kstack_top+8, pid 1, at
+            1 CPU as soon as the wave was a manifest. */
+         if (dispatched > 0) {
+-          extern void kernel_exit(void);
+-          kernel_exit(); /* never returns */
++          /* GB-089 CONTROL LEG ONLY: the pre-a53f26e behaviour, reverted by hand in a
++             throwaway worktree to prove the gate discriminates.  Not for commit. */
++          return;
+         }
+       }
+     }

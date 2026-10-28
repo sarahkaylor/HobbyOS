@@ -1,0 +1,8 @@
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb089-unfixed/obj/intel/HELLO.BIN: No such file or directory
+=== T3 (intel): run (deadline 900s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb089-unfixed/obj/t3_intel_nullentry.log) ===
+T3_intel: 134 console lines, 0 FAIL lines, 0 user memory fault records across 0 processes, 0 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 900s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 1 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel EXIT=1
