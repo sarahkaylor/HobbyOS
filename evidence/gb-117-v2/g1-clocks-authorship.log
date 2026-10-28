@@ -1,0 +1,22 @@
+### G1-G7 probe @ 3a55959 2026-10-28T01:07:32Z
+=== clause 1: every comment posts under ONE login (two different cards) ===
+  #240: 2 comments, logins=['sarah']
+     2026-10-28T00:43:01Z  sarah     'GB-117-V2: lane - → **Ready**'
+     2026-10-28T01:02:10Z  sarah     'Duplicate gate: `GB-117-V2` is on the board twice — this card (#240, C'
+  #238: 19 comments, logins=['sarah']
+     2026-10-27T23:27:44Z  sarah     "**Coordinator kickoff — `Ready`. The caretaker's own line is why this "
+     2026-10-27T23:27:45Z  sarah     'GB-117: lane Backlog → **Ready**'
+
+=== clause 7: what the classifier does with the board's ordinary prose ===
+  #240 ACTIVITY (re-arms) 'GB-117-V2: lane - → **Ready**'
+  #238 ACTIVITY (re-arms) 'GB-117: lane Backlog → **Ready**'
+  #238 ACTIVITY (re-arms) 'GB-117: lane Ready → **In Progress**'
+  #238 ACTIVITY (re-arms) 'GB-117 delivered — PR #228 (head 86c9dce): tools/board/claim_age.py + claim_ag'
+  #238 ACTIVITY (re-arms) 'GB-117: lane In Progress → **In Review**'
+  #238 ACTIVITY (re-arms) 'GB-117: lane In Progress → **In Review**'
+  #238 ACTIVITY (re-arms) 'GB-117: lane In Review → **In Progress**'
+
+=== clause 2: what the report prints as its clock ===
+  (the header of a live run, verbatim)
+  claim-age report (clock = NEWEST activity comment; coordinator bookkeeping + lane notches do NOT re-arm it; updated_at NOT used): 60 open cards
+  lines mentioning a second clock / any-comment: ['claim-age report (clock = NEWEST activity comment; coordinator bookkeeping + lane notches do NOT re-arm it; updated_at NOT used): 60 open cards']

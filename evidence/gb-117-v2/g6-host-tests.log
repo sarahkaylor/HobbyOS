@@ -1,0 +1,10 @@
+### G6: make host_tests @ 3a55959 2026-10-28T01:07:52Z
+registration in the target: 0 occurrences of 'claim_age' in Makefile
+make -n host_tests mentions claim_age: 0
+host_tests-rc=0
+=== Test Results ===
+Checks run:    482
+Checks failed: 0
+ALL APPS SUITE TESTS PASSED
+TEST EXIT: 0
+DONE

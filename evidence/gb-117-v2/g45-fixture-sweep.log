@@ -1,0 +1,18 @@
+### G45: the fixture question and the sweep falsifier 2026-10-28T01:07:56Z
+--- the self-test's cases (grep of the shipped file):
+30:Deterministic for tests: `--snapshot FILE.json` reads an on-disk snapshot
+122:    with urllib.request.urlopen(req, timeout=30) as r:
+126:def load_snapshot(path):
+218:        if any(a.startswith("--snapshot=") for a in sys.argv[1:]):
+220:                        if a.startswith("--snapshot=")][0]
+221:            data = load_snapshot(snap_path)
+227:        print(f"claim_age: cannot read board/snapshot: {e}")
+234:    """Deterministic snapshot-driven checks (drives report() directly + a file).
+262:        4: [{"created_at": com(30)}],
+298:    print(f"  {'PASS' if not fails else 'FAIL'}: b1 sweep-proof stale  b2 bucket map  "
+302:    print("CLAIM_AGE_TEST:", "ALL PASSED" if not fails else f"{len(fails)} FAILED")
+
+--- live sweep line from the report:
+claim-age report (clock = NEWEST activity comment; coordinator bookkeeping + lane notches do NOT re-arm it; updated_at NOT used): 60 open cards
+STALE (comment age >= 24h, or no comments): 46   FRESH: 14   split=46/14
+cards STALE despite fresh updated_at (<24h): 46 (a bulk sweep cannot re-arm them)
