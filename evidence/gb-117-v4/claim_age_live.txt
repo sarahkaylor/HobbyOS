@@ -1,0 +1,35 @@
+claim-age report: 61 open cards   (command: claim_age.py   updated_at NEVER the clock)
+
+CLOCK A -- any-comment: newest comment by ANYONE; lane moves, claims, coordinator posts INCLUDED
+  buckets: under6h=12, 6-12h=3, 12-24h=6, over24h=39, nocomments=1
+  GET older 'activity'? no.  stale/fresh @ 24h = 40/21
+
+CLOCK B -- working-attempt: newest NON-bookkeeping comment; coordinator status / kickoff / mint / caretaker posts AND lane-transition / claim / retraction notches EXCLUDED; worker content (EVIDENCE, VERDICT, MEASURED, DEBUG, findings) INCLUDED even when it mentions 'Coordinator'
+  buckets: under6h=9, 6-12h=1, 12-24h=4, over24h=37, nocomments=10
+  STALE (comment age >= 24h, or no comments on Clock B): 47   FRESH: 14   split=47/14
+  -> DoD number as a pair: {any-comment 40/21, working 47/14} (produced by: `claim_age.py `)
+
+oldest 10 by Clock-B comment age (ids, stale only):
+  #59   In Progress comment 145.4h  GB-058 ARCH=arm T3 carries one real failure the exit
+  #99   In Progress comment 142.3h  GB-071 Family B delivery: a user process holds a ker
+  #77   In Progress comment 135.1h  GB-068 M1 BLOCKER, highest priority (§4.3, 2026-10-1
+  #19   In Progress comment 118.9h  GB-018 poll/select/pselect6 under compat
+  #18   In Progress comment 118.9h  GB-017 /dev/null, /dev/urandom, getrandom shims
+  #17   In Progress comment 118.9h  GB-016 uname shim reporting Linux-ish identity (SDL/
+  #22   In Progress comment 115.0h  GB-021 Threads under compat: clone → HobbyOS threads
+  #20   In Progress comment 115.0h  GB-019 ioctl subset: TIOCGWINSZ, F_GETFL/SETFL, TCGE
+  #7    In Progress comment 106.5h  GB-014 Linux x86_64 syscall translation table: core 
+  #121  In Progress comment 104.2h  GB-077 Harness programs corrupt their own stacks: 5 
+cards STALE on Clock B despite fresh updated_at (<24h): 47 (a bulk sweep cannot re-arm them)
+
+decision/blocked cards (9):
+  #91   Backlog     comment   5.2h  fresh  GB-059-V Verify GB-059: one rig runs a native and a 
+  #105  Done        comment  94.7h  STALE  DECISION-001: release stale In Progress claims when 
+  #130  Backlog     comment no-comments  STALE  DECISION-003: evidence store — SMB mount on .56, or 
+  #131  Backlog     comment  42.8h  STALE  PLAN-011: M0 gate OPEN with three named exceptions +
+  #149  Backlog     comment  70.7h  STALE  DECISION-004: branch retirement — 90 unmerged heads 
+  #167  Backlog     comment no-comments  STALE  GB-061-V Verify GB-061: the x64 resume-path stack is
+  #168  Backlog     comment no-comments  STALE  GB-039-V Verify GB-039: the launcher scans /GAMES an
+  #173  Backlog     comment  57.1h  STALE  DECISION-005: GB-031 has failed verification 3 times
+  #174  Backlog     comment no-comments  STALE  DECISION-006: In Progress has no claim lease — 34 of
+ordinary cards (52): 39 stale / 13 fresh

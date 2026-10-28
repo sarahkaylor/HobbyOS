@@ -1,0 +1,20 @@
+open cards: 61
+shipped Clock B : stale/fresh = 47/14
+narrow  Clock B : stale/fresh = 47/14
+
+cards whose Clock-B age changes: 15
+  #240  shipped=        1.1h  narrow=        0.9h  GB-117-V2 Re-gate: two labelled clocks, a ki
+  #238  shipped=        1.1h  narrow=        0.0h  GB-117 The board cannot report claim age, so
+  #205  shipped= None(stale)  narrow=       28.0h  GB-107-V Verify TRUNCATED vs GUEST-STOPPED s
+  #179  shipped=       39.5h  narrow=       39.4h  GB-101 A kernel-mode fatal fault reads a COR
+  #137  shipped=       91.7h  narrow=       89.4h  GB-086 POLLTST's select-timeout assertion pa
+  #121  shipped=      104.2h  narrow=      103.7h  GB-077 Harness programs corrupt their own st
+  #105  shipped=       94.7h  narrow=       94.1h  DECISION-001: release stale In Progress clai
+  #59   shipped=      145.4h  narrow=      104.1h  GB-058 ARCH=arm T3 carries one real failure 
+  #51   shipped=       68.5h  narrow=       67.4h  GB-051 Audio acceptance (if GB-029 lands)
+  #47   shipped=       15.5h  narrow=       15.4h  GB-047 Acceptance evidence pack for S0/S1: l
+  #46   shipped=       34.3h  narrow=       34.2h  GB-046 Memory/leak pass under 30-min game cy
+  #33   shipped=       68.0h  narrow=       65.6h  GB-032 SDL test app (surface, 2D blit, input
+  #25   shipped=       68.2h  narrow=       68.0h  GB-024 M1 gate: W0 corpus (hello, cat, sh, c
+  #10   shipped=       64.8h  narrow=       45.3h  GB-005 Git workflow + merge gate: branch-per
+  #9    shipped=       68.5h  narrow=       66.7h  GB-034 DOOM native port (doomgeneric, GPL): 
