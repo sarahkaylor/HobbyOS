@@ -2648,6 +2648,44 @@ static void general_interrupt_inner(struct trap_frame *tf) {
   extern int virtio_net_irq;
 
   uint32_t cpu = get_cpuid();
+  /* GB-101: a TORN trap frame read by the handler.  The x86 IDT has 256 gates
+     (vectors 0-31 exceptions, 32-255 IRQ/syscall); a `vector` > 0xFF (measured:
+     vector=20000, rip=0x97) cannot have been pushed by the CPU, so the frame is
+     corrupt.  This alone misses the family's below-32 garbage vectors (measured:
+     vector=6 rip=0x7, vector=13 rip=0x7009, vector=6 rip=0x1000007) whose frames
+     are also torn.  The GB-101-V gate's fix direction: a FRAME-COHERENCE test,
+     not a wider threshold.  A real x86-64 entry ALWAYS has the CPU push CS (0x08
+     kernel / 0x1B user -- SS/RSP are only pushed on a privilege change, so SS is
+     NOT authoritative on same-privilege kernel traps and must not be judged here);
+     a torn/overwritten frame that a garbage vector rode in on carries a garbage
+     CS slot.  Never dispatch on garbage: emit a line containing "FAIL" (the
+     tier's FAIL-line grep names it), halt-record (GB-060, so a lock a stopped
+     CPU held is recoverable and other cores don't spin behind it forever), and
+     stop THIS CPU rather than run an unknown-vector path on a bogus frame. */
+  {
+    extern void uart_puts_raw(const char *s);
+    extern void uart_print_hex_raw(uint64_t v);
+    extern void print_int_raw(int val);
+    extern void cpu_halt_record(uint32_t cpu);
+    uint64_t frame_cs = tf->cs;
+    int bad_vec = ((uint64_t)tf->vector > 0xFFu);
+    int bad_cs  = (frame_cs != 0x08u && frame_cs != 0x1Bu);
+    if (bad_vec || bad_cs) {
+      uart_puts_raw("[TORNFRAME] FAIL - interrupt/fault handler read a torn frame: vector=");
+      print_int_raw((int)(uint64_t)tf->vector);
+      uart_puts_raw(" rip="); uart_print_hex_raw((uint64_t)tf->elr);
+      uart_puts_raw(" cs=");   uart_print_hex_raw(frame_cs);
+      uart_puts_raw(" (impossible vector="); print_int_raw((int)(uint64_t)tf->vector);
+      uart_puts_raw(" or invalid cs; a real gate entry pushes cs 0x08/0x1B\n");
+      uart_puts_raw("\n");
+      cpu_halt_record(cpu);
+      extern int spinlock_release_if_held_by_me(spinlock_t *lock);
+      extern spinlock_t proc_lock;
+      if (spinlock_release_if_held_by_me(&proc_lock))
+        uart_puts_raw("[KERNEL] released proc_lock before halting (GB-060)\n");
+      while (1);
+    }
+  }
   gic_set_current_vector(cpu, tf->vector);
   watchdog_tick(cpu, tf);
 
