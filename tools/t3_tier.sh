@@ -75,6 +75,17 @@ instrument_failure_evident() {
   [ "$3" = "1" ] && { [ "$1" != "0" ] || [ ! -S "$2" ]; }
 }
 
+# GB-121: kernel-mode FATAL banner count.  The x64 reporter writes through the
+# lock-free raw sink (uart_puts_raw, src/kernel/arch/x64/trap.c:3052), so a second
+# CPU can interleave the "FATAL kernel-mode fault" line and the old exact-substring
+# grep ("FATAL kernel-mode fault") silently lost the shredded fatalities (the card's
+# measurement: 28 of 30 missed).  Match the banner's STABLE fragments ("FATAL
+# kernel-m" survives char-level interleave; "Exception in Kernel Mode" is the mode
+# fatal banner) — a clean wave prints neither, so this stays 0 on a healthy run.
+kernel_fatal_count() {
+  grep -acE "FATAL kernel-m|Exception in Kernel Mode" "$1" || true
+}
+
 if [ -n "$POLICE_ONLY" ]; then
   LOG="$POLICE_ONLY"
   # GB-103 DoD clause 3, forced deterministically: T3_FORCE_INSTRUMENT_FAIL=1 on a
@@ -99,7 +110,7 @@ if [ -n "$POLICE_ONLY" ]; then
   halted=0; grep -aq "System halt" "$LOG" && halted=1
   if [ "${T3_SKIP_HALT_CHECK:-0}" = "1" ]; then halted=1; fi
   FAIL_LINES=$(grep -ac "FAIL" "$LOG" || true)
-  KFAULT=$(grep -ac "FATAL kernel-mode fault" "$LOG" || true)
+  KFAULT=$(kernel_fatal_count "$LOG")
   MEMFAULTS=$(grep -ac "memory fault" "$LOG" || true)
   MEMFAULT_PROCS=$(grep -aoE "\[KERNEL\] pid=[0-9]+ \([^)]*\) memory fault" "$LOG" 2>/dev/null \
     | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u | wc -l | tr -d ' ' || true)
@@ -475,7 +486,7 @@ fi
 # called it a PASS -- a verdict on a wreck.  Two structural criteria fix that, both
 # measured rather than assumed: a kernel fault is never a pass, and a wave that
 # halted without doing its work is not a pass either.
-KFAULT=$(grep -ac "FATAL kernel-mode fault" "$LOG" || true)
+  KFAULT=$(kernel_fatal_count "$LOG")
 LINES=$(wc -l <"$LOG")
 # Completeness is measured by PROGRAMS THAT EXITED, not by console lines.  The line
 # floor was calibrated when a healthy wave carried ~2,300 lines of [IDLESTUCK]/
