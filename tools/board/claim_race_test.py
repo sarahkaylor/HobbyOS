@@ -11,6 +11,11 @@ Reproduces the race and proves the fix, on the host (no real Forgejo):
        winner.  Two concurrent claims -> exactly one wins, the loser's message
        names the winner, and exactly ONE gate runs.
 
+  PLUS GB-074-V #110 (2026-10-21): claimant_of() must name the CURRENT (last)
+       claim, not the first — a re-claimed ticket's first claim comment is a
+       stale winner (2/3 trials misnamed on 31d15c4).  C proves it against the
+       same fake.
+
 Self-registering: run_t5_tests.py (GB-064) auto-discovers tools/*/*_test.py,
 so this needs no edit to the shared Makefile host_tests line.
 """
@@ -147,6 +152,19 @@ for attempt in range(3):  # must ALWAYS be exactly one winner
     check(f"NEW claim (run {attempt+1}): only the winner ran a gate",
           loser_msgs and len(st["comments"][1]) == 1)
 
+# ---- C. claimant_of names the LAST (current) claim, not the first (GB-074-V #110
+#      FAIL: on a re-claimed ticket the first 'claimed by' is a stale winner). ---
+st = make_fake()
+st["issues"][1]["labels"] = [{"name": "In Progress", "id": 100}]
+st["comments"][1] = [
+    {"body": "claimed by `stale-agent` — lane: Ready → In Progress"},   # older claim
+    {"body": "claimed by `current-agent` — lane: Ready → In Progress"},  # current
+]
+cur = board.claimant_of(1)
+check("claimant_of returns the CURRENT (last) claim, not the first (GB-074-V FAIL)",
+      cur == "current-agent")
+
+# ---- D. final report -------------------------------------------------------
 print()
 if fails:
     print(f"CLAIM_RACE_TEST: FAIL — {len(fails)}")
