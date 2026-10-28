@@ -1,0 +1,33 @@
+PASS: menu parse finds slot 18
+PASS: menu parse finds PONG
+PASS: menu parse misses unknown
+PASS: resolve by name -> slot 18
+PASS: launches by name (18), ignores stale --slot 0 (false-launch fix)
+PASS: correct provided slot agrees, no warn
+PASS: unknown title -> None (FATAL path)
+PASS: derive_bin xnibbler
+PASS: derive_bin already .BIN
+PASS: manifest has game bin
+PASS: manifest has artifact hashes
+PASS: manifest sha256 matches file
+PASS: bundle dir is the evidence home
+PASS: REPORT pointer written at repo root convention
+PASS: stage cmd is the tier's mcopy shape (rig & t3_tier agree) (mcopy -o -i "$ROOT/disk.img" "/home/sarah/.hermes/cache/scratch/evrig-stage-u4gqrme9/HELLO.BIN" "::HELLO.BIN")
+PASS: stage shape carries the tier's $ROOT/disk.img + ::GUEST tokens
+PASS: refuse guest path /etc/passwd (absolute)
+PASS: refuse guest path ../MAGIC.BIN (traversal)
+PASS: refuse guest path SUB/DIR.BIN (nested)
+PASS: refuse host path outside root
+PASS: refuse nonexistent host
+PASS: stage off by default (no second boot path imposed)
+PASS: Makefile run recipe still drives RUN_STAGE via ROOT=$(CURDIR) shell (live read)
+PASS: t3_tier.sh still invokes T3_STAGE via ROOT=$ROOT sh -c (live read)
+PASS: make throwaway FAT image (mkfs.fat)
+PASS: make run recipe executes RUN_STAGE (leg A consumer) (exit=0)
+PASS: tier T3_STAGE invocation executes (leg B consumer) (exit=0)
+PASS: guest-visible fixture lands after make run recipe (leg A)
+PASS: agreement test is falsifiable (a diverged tier stage differs from the make leg) (mk=b'\x7fELF-agreement-probe' tier_perturbed=True)
+
+Tests run: 8, failed: 0
+EVIDENCE RIG TEST PASSED
+RC=0

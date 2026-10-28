@@ -1,0 +1,10 @@
+LEG A recipe line (read live from Makefile):
+  $(if $(RUN_STAGE),@echo "=== run: stage ==="; ROOT="$(CURDIR)" $(SHELL) -c "$$RUN_STAGE" || { echo "run: STAGE FAILED - refusing to boot a stale image"; exit 2; },)
+LEG A runner: subprocess.run(['make', '-C', <tmp> 'run']) with that line in a throwaway Makefile
+             (QEMU_CMD = '@:' — stubbed), RUN_STAGE exported in env
+
+LEG B line (tier invocation):
+  ROOT="$ROOT" sh -c "$T3_STAGE" || { echo "T3_${ARCH}: STAGE FAILED - refusing to boot a stale image"; exit 2; }
+LEG B runner: subprocess.run(['sh', '-c', 'ROOT="$ROOT" sh -c "$T3_STAGE"'])
+
+tier file line 183: fi
