@@ -33,5 +33,19 @@ The specific expression: **`sed_test.c:168`'s read loop keeps reading `out_p[0]`
 Deliverable-now: **classification + root cause named** (the DoD's explicit non-metric clause, which stays meaningful "while GB-082 and GB-092 are open").
 Gated: the DoD's "**0 failures on a run that reaches halted=1**" requires a *clean* intel halt; this wave halted with `halted=1` but carried 1 FATAL kernel fault → the clean-halt leg is GB-100's (abm holder, In Progress). ARM stays 0. Card kept **In Progress** accordingly.
 
+## ARM leg — CLOSED (2026-10-28)
+
+Re-ran the ARM tier on the rebased branch (origin/main merged, incl. GB-113 wait-decode). `tools/t3_tier.sh arm` (T3_SMP=8):
+
+```
+T3_arm: 9349 console lines, 0 FAIL lines, 5 user memory fault records across 4 processes, 84 programs exited, halted=1
+T3_arm: PASS (0 FAIL lines, halted, no kernel fault, 9349 lines)
+[SEDTEST] ALL PASSED (59 checks)
+```
+
+**ARM SEDTEST: 59/59 PASS, 0 FAILs** — the DoD's "ARM stays at 0" clause is now evidenced on this tree (raw log: t3_arm_gb093.log.xz). The DoD's remaining leg is the intel clean-halt (still GB-100-gated; this intel wave carried a kernel fault).
+
 ## Files
-- raw tier log: /tmp/t3_intel_gb093.log (25237 lines)
+- raw tier log: /tmp/t3_intel_gb093.log (25237 lines) → t3_intel_gb093.log.xz
+- ARM tier log: t3_arm_gb093.log.xz
+
