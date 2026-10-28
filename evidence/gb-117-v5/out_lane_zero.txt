@@ -1,0 +1,5 @@
+open cards: 61
+shipped Clock B : stale/fresh = 47/14
+narrow  Clock B : stale/fresh = 47/14
+
+cards whose Clock-B age changes: 0

@@ -1,0 +1,44 @@
+claim-age report: 61 open cards   (command: claim_age.py   updated_at NEVER the clock)
+
+CLOCK A -- any-comment: newest comment by ANYONE; lane moves, claims, coordinator posts INCLUDED
+  buckets: under6h=12, 6-12h=2, 12-24h=7, over24h=39, nocomments=1
+  GET older 'activity'? no.  stale/fresh @ 24h = 40/21
+
+CLOCK B -- working-attempt: newest NON-bookkeeping comment; coordinator status / kickoff / mint / caretaker posts AND lane-transition / claim / retraction notches EXCLUDED; worker content (EVIDENCE, VERDICT, MEASURED, DEBUG, findings) INCLUDED even when it mentions 'Coordinator'
+  buckets: under6h=9, 6-12h=1, 12-24h=4, over24h=38, nocomments=9
+  STALE (comment age >= 24h, or no comments on Clock B): 47   FRESH: 14   split=47/14
+  -> DoD number as a pair: {any-comment 40/21, working 47/14} (produced by: `claim_age.py `)
+
+oldest 10 by Clock-B comment age (ids, stale only) -- each row names BOTH clocks (ClockA=any-comment, ClockB=working-attempt):
+  #99   In Progress ClockA=142.7h  ClockB=142.7h STALE  GB-071 Family B delivery: a user process holds a ker
+  #77   In Progress ClockA=4.0h  ClockB=135.6h STALE  GB-068 M1 BLOCKER, highest priority (§4.3, 2026-10-1
+  #19   In Progress ClockA=119.3h  ClockB=119.3h STALE  GB-018 poll/select/pselect6 under compat
+  #18   In Progress ClockA=119.3h  ClockB=119.3h STALE  GB-017 /dev/null, /dev/urandom, getrandom shims
+  #17   In Progress ClockA=119.3h  ClockB=119.3h STALE  GB-016 uname shim reporting Linux-ish identity (SDL/
+  #22   In Progress ClockA=115.4h  ClockB=115.4h STALE  GB-021 Threads under compat: clone → HobbyOS threads
+  #20   In Progress ClockA=115.4h  ClockB=115.4h STALE  GB-019 ioctl subset: TIOCGWINSZ, F_GETFL/SETFL, TCGE
+  #7    In Progress ClockA=105.4h  ClockB=106.9h STALE  GB-014 Linux x86_64 syscall translation table: core 
+  #59   In Progress ClockA=104.5h  ClockB=104.5h STALE  GB-058 ARCH=arm T3 carries one real failure the exit
+  #121  In Progress ClockA=104.1h  ClockB=104.1h STALE  GB-077 Harness programs corrupt their own stacks: 5 
+
+clocks disagree (Clock A fresh / Clock B stale, or the mirror) -- each names both clocks on one line:
+  #33   In Progress ClockA=9.1h (fresh)  ClockB=66.0h (STALE)  GB-032 SDL test app (surface, 2D blit, input echo) u
+  #77   In Progress ClockA=4.0h (fresh)  ClockB=135.6h (STALE)  GB-068 M1 BLOCKER, highest priority (§4.3, 2026-10-1
+  #174  Backlog     ClockA=4.0h (fresh)  ClockB=no-comments (STALE)  DECISION-006: In Progress has no claim lease — 34 of
+  #178  In Progress ClockA=13.3h (fresh)  ClockB=45.0h (STALE)  GB-100 enter_user_space RETURNS instead of iretq-ing
+  #179  In Progress ClockA=18.2h (fresh)  ClockB=39.8h (STALE)  GB-101 A kernel-mode fatal fault reads a CORRUPTED t
+  #206  In Progress ClockA=12.5h (fresh)  ClockB=26.0h (STALE)  GB-108 The T4 device differential passes on the W0 c
+  #244  In Progress ClockA=0.0h (fresh)  ClockB=no-comments (STALE)  GB-117-V5 Gate the head that would merge (7cfaa75): 
+cards STALE on Clock B despite fresh updated_at (<24h): 47 (a bulk sweep cannot re-arm them)
+
+decision/blocked cards (9):
+  #91   Backlog     comment   5.7h  fresh  GB-059-V Verify GB-059: one rig runs a native and a 
+  #105  Done        comment  94.5h  STALE  DECISION-001: release stale In Progress claims when 
+  #130  Backlog     comment no-comments  STALE  DECISION-003: evidence store — SMB mount on .56, or 
+  #131  Backlog     comment  43.2h  STALE  PLAN-011: M0 gate OPEN with three named exceptions +
+  #149  Backlog     comment  71.1h  STALE  DECISION-004: branch retirement — 90 unmerged heads 
+  #167  Backlog     comment no-comments  STALE  GB-061-V Verify GB-061: the x64 resume-path stack is
+  #168  Backlog     comment no-comments  STALE  GB-039-V Verify GB-039: the launcher scans /GAMES an
+  #173  Backlog     comment  57.5h  STALE  DECISION-005: GB-031 has failed verification 3 times
+  #174  Backlog     comment no-comments  STALE  DECISION-006: In Progress has no claim lease — 34 of
+ordinary cards (52): 39 stale / 13 fresh

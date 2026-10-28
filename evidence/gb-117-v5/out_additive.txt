@@ -1,0 +1,10 @@
+recomputed: A buckets={'under6h': 12, '6-12h': 2, '12-24h': 7, 'over24h': 39, 'nocomments': 1}  A split=40/21
+recomputed: B buckets={'under6h': 9, '6-12h': 1, '12-24h': 4, 'over24h': 38, 'nocomments': 9}  B split=47/14
+printed   : A buckets=under6h=12, 6-12h=2, 12-24h=7, over24h=39, nocomments=1  A split=40/21
+printed   : B buckets=under6h=9, 6-12h=1, 12-24h=4, over24h=38, nocomments=9  B split=47/14
+
+buckets additive: A=True  B=True
+splits additive: A=40/21 vs 40/21 -> True   B=47/14 vs 47/14 -> True
+
+per-card rows checked against recomputation:
+  rows checked; mismatches: 0

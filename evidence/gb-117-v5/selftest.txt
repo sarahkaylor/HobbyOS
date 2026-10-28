@@ -1,0 +1,2 @@
+  PASS: b1 sweep-proof  b2 both clocks  b3 lane-move=bookkeeping  b4 clause-4 split  b5 decision sep  b6 login-impossibility -> split=5/3
+CLAIM_AGE_TEST: ALL PASSED
