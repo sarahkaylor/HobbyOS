@@ -1,0 +1,5 @@
+[rig] stage (RUN_STAGE): mcopy -o -i "$ROOT/disk.img" "/home/sarah/Documents/GitHub/HobbyOS/.worktrees/verify-gb118v2/obj/arm/hello.bin" "::RIGFIX.BIN"
+[rig] booting arm QEMU, capturing to evidence/RIGFIX/20261028T093108Z
+[rig] WARNING: RIGFIX.BIN not in start-menu dump
+[rig] FATAL: RIGFIX.BIN not in start-menu dump
+RC=1

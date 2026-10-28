@@ -1,0 +1,2 @@
+[rig] STAGE REFUSED - refusing to boot a stale image: stage: host source outside the repo root is refused: '/etc/hostname' (root='/home/sarah/Documents/GitHub/HobbyOS/.worktrees/verify-gb118v2')
+RC=2

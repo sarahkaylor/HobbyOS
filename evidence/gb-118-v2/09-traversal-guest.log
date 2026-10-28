@@ -1,0 +1,2 @@
+[rig] STAGE REFUSED - refusing to boot a stale image: stage: guest path traversal refused: '../EVIL.BIN'
+RC=2

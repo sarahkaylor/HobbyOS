@@ -1,0 +1,517 @@
+ld.lld -T linker.ld -o hobbyos.elf obj/arm/boot.o obj/arm/fpu.o obj/arm/setjmp.o obj/arm/abi_t2_test.o obj/arm/audio_stub.o obj/arm/blk_cache.o obj/arm/blk_cache_press_test.o obj/arm/blk_cache_test.o obj/arm/dhcp.o obj/arm/elf_image.o obj/arm/elf_loader.o obj/arm/evdev.o obj/arm/evdev_test.o obj/arm/fat16.o obj/arm/fat16_test.o obj/arm/fb_ioctl.o obj/arm/fb_ioctl_test.o obj/arm/fb_mmap.o obj/arm/fb_mmap_test.o obj/arm/frame.o obj/arm/frame_test.o obj/arm/fs.o obj/arm/fs_test.o obj/arm/input_node.o obj/arm/input_node_test.o obj/arm/iommu_vtd.o obj/arm/ipc_proto.o obj/arm/linux_uname.o obj/arm/lock_order.o obj/arm/locks_test.o obj/arm/main.o obj/arm/math_test.o obj/arm/mmu_test.o obj/arm/net.o obj/arm/net_rdma.o obj/arm/net_rdma_test.o obj/arm/net_test.o obj/arm/nfs.o obj/arm/nfs_proto.o obj/arm/nfs_test.o obj/arm/pipe.o obj/arm/pipe_test.o obj/arm/process.o obj/arm/process_test.o obj/arm/program_loader.o obj/arm/program_loader_test.o obj/arm/ssp.o obj/arm/test_fw_cfg.o obj/arm/test_smp.o obj/arm/time.o obj/arm/time_test.o obj/arm/timer_test.o obj/arm/trap_test.o obj/arm/unit_test.o obj/arm/unix.o obj/arm/unix_test.o obj/arm/vfs.o obj/arm/virtio_blk.o obj/arm/virtio_blk_test.o obj/arm/virtio_gpu.o obj/arm/virtio_gpu_test.o obj/arm/virtio_gpu_x64.o obj/arm/virtio_input.o obj/arm/virtio_input_test.o obj/arm/virtio_net.o obj/arm/virtio_net_test.o obj/arm/vm.o obj/arm/vm_test.o obj/arm/cpu.o obj/arm/gic.o obj/arm/locks.o obj/arm/mmu.o obj/arm/rtc.o obj/arm/smp.o obj/arm/timer.o obj/arm/trap.o obj/arm/uart.o
+[browser] third_party/webkit-hobbyos/cache/browser-arm.bin.xz (cache) -> obj/arm/browser.bin
+[tools] LLVM dist staging present
+# Startup disk: 1 GiB (user-requested floor; FAT16 tops out at 2 GiB).
+# mkfs.fat auto-picks the cluster size (32 KiB @ 1 GiB); the kernel
+# fat16.c layout math is BPB data-driven (bpb_sectors_per_cluster), so
+# no driver change is needed for the larger disk/clusters.
+dd if=/dev/zero of=disk.img bs=1M count=1024
+1024+0 records in
+1024+0 records out
+1073741824 bytes (1.1 GB, 1.0 GiB) copied, 0.350863 s, 3.1 GB/s
+mkfs.fat -F 16 disk.img
+mkfs.fat 4.2 (2021-01-31)
+mmd -i disk.img ::/EFI
+mmd -i disk.img ::/EFI/BOOT
+mmd -i disk.img ::/boot
+mmd -i disk.img ::/home
+# CA roots for the browser's TLS stack (libcurl/mbedTLS): the driver pins
+# /CERTS/CA.PEM (WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp).  Without
+# this every https:// navigation fails at certificate verification and the
+# user sees the previous page with no explanation.
+mmd -i disk.img ::/CERTS
+mcopy -i disk.img certs/cacert.pem ::/CERTS/CA.PEM
+mmd -i disk.img ::/nfs
+mmd -i disk.img ::/mnt
+mmd -i disk.img ::/TESTDIR
+mmd -i disk.img ::/tmp
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+# build-tools at their frozen /TOOLS/ paths (Makefile.hobbyos sketch).
+mmd -i disk.img ::/TOOLS
+# L3 (selfhost W-A): VFAT long-name build-payload fixture dirs (mtools-written).
+mmd -i disk.img ::/src
+mmd -i disk.img ::/src/kernel
+mmd -i disk.img ::/src/user_include
+mmd -i disk.img ::/src/user_include/graphics
+mmd -i disk.img ::/third_party
+mmd -i disk.img ::/third_party/libcxx-21.1.8
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include
+mcopy -i disk.img tests/fixtures/E2E.TXT ::/E2E.TXT
+mcopy -i disk.img tests/fixtures/DRAGME.TXT ::/DRAGME.TXT
+mcopy -i disk.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+mcopy -i disk.img bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
+# [inos-build-kernel] canonical ARM boot config from the repo file
+# (single source of truth; also what --src staging copies to
+# /SRC/limine.conf and what SRC.TAR carries).  Two entries: the boot
+# kernel + the previous one, which /BUILD_KERNEL.SH's install step
+# keeps at /boot/hobbyos.old.
+mcopy -i disk.img bootloader/limine-arm.conf ::/boot/limine.conf
+llvm-objcopy -O binary hobbyos.elf hobbyos.bin
+mcopy -i disk.img hobbyos.bin ::/boot/hobbyos.bin
+mcopy -i disk.img obj/arm/memtest.bin ::/MEMTEST.BIN
+mcopy -i disk.img obj/arm/fileio_test.bin ::/FILEIO.BIN
+mcopy -i disk.img obj/arm/console.bin ::/CONSOLE.BIN
+mcopy -i disk.img obj/arm/fork_test.bin ::/FORKTEST.BIN
+mcopy -i disk.img obj/arm/heap_test.bin ::/HEAPTEST.BIN
+mcopy -i disk.img obj/arm/spawntest.bin ::/SPAWN.BIN
+mcopy -i disk.img obj/arm/graphics.bin ::/GRAPHICS.BIN
+mcopy -i disk.img obj/arm/wsurf_test.bin ::/WSRF_T.BIN
+mcopy -i disk.img obj/arm/smp_test.bin ::/SMPTEST.BIN
+mcopy -i disk.img obj/arm/pipetest.bin ::/PIPETEST.BIN
+mcopy -i disk.img obj/arm/nettest.bin ::/NETTEST.BIN
+mcopy -i disk.img obj/arm/timeout.bin ::/TIMEOUT.BIN
+mcopy -i disk.img obj/arm/nfstest.bin ::/NFSTEST.BIN
+mcopy -i disk.img obj/arm/desktop.bin ::/DESKTOP.BIN
+browser: obj/arm/browser.bin (resolved by the browser-staged completeness rule; installed as ::/BROWSER.BIN)
+mcopy -i disk.img obj/arm/editor.bin ::/EDITOR.BIN
+mcopy -i disk.img obj/arm/EDITOR_T.BIN ::/EDITOR_T.BIN
+mcopy -i disk.img obj/arm/APPS_T.BIN ::/APPS_T.BIN
+mcopy -i disk.img obj/arm/FILEDIAL.BIN ::/FILEDIAL.BIN
+mcopy -i disk.img obj/arm/DIALOG_T.BIN ::/DIALOG_T.BIN
+mcopy -i disk.img obj/arm/PONG_T.BIN ::/PONG_T.BIN
+mcopy -i disk.img obj/arm/stress.bin ::/STRESS.BIN
+mcopy -i disk.img obj/arm/fpu_test.bin ::/FPU_T.BIN
+mcopy -i disk.img obj/arm/gfxbench.bin ::/GFXBENCH.BIN
+mcopy -i disk.img obj/arm/math_test.bin ::/MATH_T.BIN
+mcopy -i disk.img obj/arm/errtest.bin ::/ERRTEST.BIN
+mcopy -i disk.img obj/arm/SOCK2TST.BIN ::/SOCK2TST.BIN
+mcopy -i disk.img obj/arm/POLLTST.BIN ::/POLLTST.BIN
+mcopy -i disk.img obj/arm/POLLBRK.BIN ::/POLLBRK.BIN
+mcopy -i disk.img obj/arm/BLKTEST.BIN ::/BLKTEST.BIN
+mcopy -i disk.img obj/arm/RANDTST.BIN ::/RANDTST.BIN
+mcopy -i disk.img obj/arm/dns_test.bin ::/DNSTST.BIN
+mcopy -i disk.img obj/arm/netfix.bin ::/NETFIX.BIN
+mcopy -i disk.img obj/arm/cxx_smoke.bin ::/CXXSMOKE.BIN
+mcopy -i disk.img obj/arm/thrd_test.bin ::/THRD_T.BIN
+mcopy -i disk.img obj/arm/tls_test.bin ::/TLS_T.BIN
+mcopy -i disk.img obj/arm/WK1C_T.BIN ::/WK1C_T.BIN
+mcopy -i disk.img obj/arm/cxx_t.bin ::/CXX_T.BIN
+mcopy -i disk.img obj/arm/rtti_t.bin ::/RTTI_T.BIN
+mcopy -i disk.img obj/arm/ipc_test.bin ::/IPC_T.BIN
+mcopy -i disk.img obj/arm/mmtest.bin ::/MMTEST.BIN
+mcopy -i disk.img obj/arm/sqltest.bin ::/SQLTEST.BIN
+mcopy -i disk.img obj/arm/torture_test.bin ::/TORTURE.BIN
+mcopy -i disk.img obj/arm/big.bin ::/BIG.BIN
+mcopy -i disk.img obj/arm/hello.bin ::/HELLO.BIN
+mcopy -i disk.img obj/arm/selfhost.bin ::/SELFHOST.BIN
+mcopy -i disk.img obj/arm/sh.bin ::/SH.BIN
+mcopy -i disk.img obj/arm/ls.bin ::/LS.BIN
+mcopy -i disk.img obj/arm/cat.bin ::/CAT.BIN
+mcopy -i disk.img obj/arm/grep.bin ::/GREP.BIN
+mcopy -i disk.img obj/arm/less.bin ::/LESS.BIN
+mcopy -i disk.img obj/arm/tail.bin ::/TAIL.BIN
+mcopy -i disk.img obj/arm/head.bin ::/HEAD.BIN
+mcopy -i disk.img obj/arm/shtest.bin ::/SHTEST.BIN
+mcopy -i disk.img obj/arm/ps.bin ::/PS.BIN
+mcopy -i disk.img obj/arm/free.bin ::/FREE.BIN
+mcopy -i disk.img obj/arm/uptime.bin ::/UPTIME.BIN
+mcopy -i disk.img obj/arm/kill.bin ::/KILL.BIN
+mcopy -i disk.img obj/arm/basename.bin ::/BASENAME.BIN
+mcopy -i disk.img obj/arm/dirname.bin ::/DIRNAME.BIN
+mcopy -i disk.img obj/arm/seq.bin ::/SEQ.BIN
+mcopy -i disk.img obj/arm/expr.bin ::/EXPR.BIN
+mcopy -i disk.img obj/arm/testgnu.bin ::/TEST.BIN
+mcopy -i disk.img obj/arm/cp.bin ::/CP.BIN
+mcopy -i disk.img obj/arm/rm.bin ::/RM.BIN
+mcopy -i disk.img obj/arm/mv.bin ::/MV.BIN
+mcopy -i disk.img obj/arm/touch.bin ::/TOUCH.BIN
+mcopy -i disk.img obj/arm/wc.bin ::/WC.BIN
+mcopy -i disk.img obj/arm/sed.bin ::/SED.BIN
+mcopy -i disk.img obj/arm/make.bin ::/MAKE.BIN
+mcopy -i disk.img obj/arm/hedgnu.bin ::/HEDGNU.BIN
+mcopy -i disk.img obj/arm/tailgnu.bin ::/TAILGN.BIN
+mcopy -i disk.img obj/arm/cut.bin ::/CUT.BIN
+mcopy -i disk.img obj/arm/tr.bin ::/TR.BIN
+mcopy -i disk.img obj/arm/paste.bin ::/PASTE.BIN
+mcopy -i disk.img obj/arm/fold.bin ::/FOLD.BIN
+mcopy -i disk.img obj/arm/nl.bin ::/NL.BIN
+mcopy -i disk.img obj/arm/comm.bin ::/COMM.BIN
+mcopy -i disk.img obj/arm/tsort.bin ::/TSORT.BIN
+mcopy -i disk.img obj/arm/expand.bin ::/EXPAND.BIN
+mcopy -i disk.img obj/arm/unexpand.bin ::/UNEXPAND.BIN
+mcopy -i disk.img obj/arm/cksum.bin ::/CKSUM.BIN
+mcopy -i disk.img obj/arm/md5sum.bin ::/MD5SUM.BIN
+mcopy -i disk.img obj/arm/proc_child.bin ::/PROCCHLD.BIN
+mcopy -i disk.img obj/arm/spawnex_child.bin ::/SPAWNEX.BIN
+mcopy -i disk.img obj/arm/sig_test.bin ::/SIG_T.BIN
+mcopy -i disk.img obj/arm/head_test.bin ::/HEDTEST.BIN
+mcopy -i disk.img obj/arm/tail_test.bin ::/TAILTEST.BIN
+mcopy -i disk.img obj/arm/proc_test.bin ::/PROCTEST.BIN
+mcopy -i disk.img obj/arm/wc_test.bin ::/WCTEST.BIN
+mcopy -i disk.img obj/arm/cut_test.bin ::/CUTTEST.BIN
+mcopy -i disk.img obj/arm/tr_test.bin ::/TRTEST.BIN
+mcopy -i disk.img obj/arm/paste_test.bin ::/PASTE_T.BIN
+mcopy -i disk.img obj/arm/fold_test.bin ::/FOLDTEST.BIN
+mcopy -i disk.img obj/arm/nl_test.bin ::/NLTEST.BIN
+mcopy -i disk.img obj/arm/comm_test.bin ::/COMMTEST.BIN
+mcopy -i disk.img obj/arm/tsort_test.bin ::/TSORT_T.BIN
+mcopy -i disk.img obj/arm/expand_test.bin ::/EXPAND_T.BIN
+mcopy -i disk.img obj/arm/unexpand_test.bin ::/UNEXPAND_T.BIN
+mcopy -i disk.img obj/arm/fatbig_test.bin ::/FATBIG_T.BIN
+mcopy -i disk.img obj/arm/stage4k_test.bin ::/STAGE4K_T.BIN
+# L3 (selfhost W-A): VFAT long-name build-payload fixtures.  Content
+# markers must stay in sync with src/user/lfn_test.c.
+mcopy -i disk.img tests/fixtures/lfn/program_loader.c ::/src/kernel/program_loader.c
+mcopy -i disk.img tests/fixtures/lfn/window.h ::/src/user_include/graphics/window.h
+mcopy -i disk.img tests/fixtures/lfn/llvm-project-21.1.8.src-EXAMPLE.c ::/src/llvm-project-21.1.8.src-EXAMPLE.c
+mcopy -i disk.img tests/fixtures/lfn/upper_bound.h ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include/upper_bound.h
+mcopy -i disk.img tests/fixtures/lfn/longfilename.txt ::/longfilename.txt
+mcopy -i disk.img tests/fixtures/lfn/longfilename2.txt ::/longfilename2.txt
+mcopy -i disk.img tests/fixtures/lfn/longfil~1.txt ::/longfil~1.txt
+mcopy -i disk.img obj/arm/lfn_test.bin ::/LFN_T.BIN
+mcopy -i disk.img obj/arm/cksum_test.bin ::/CKSUM_T.BIN
+mcopy -i disk.img obj/arm/md5sum_test.bin ::/MD5SUM_T.BIN
+mcopy -i disk.img obj/arm/tac.bin ::/TAC.BIN
+mcopy -i disk.img obj/arm/tac_test.bin ::/TACTEST.BIN
+mcopy -i disk.img obj/arm/cmp.bin ::/CMP.BIN
+mcopy -i disk.img obj/arm/cmp_test.bin ::/CMPTEST.BIN
+mcopy -i disk.img obj/arm/regex_test.bin ::/REGTEST.BIN
+mcopy -i disk.img obj/arm/sed_test.bin ::/SEDTEST.BIN
+mcopy -i disk.img obj/arm/grep_test.bin ::/GREPTEST.BIN
+mcopy -i disk.img obj/arm/subprobe.bin ::/SUBPRB.BIN
+mcopy -i disk.img obj/arm/pipeprobe.bin ::/PIPEPRB.BIN
+mcopy -i disk.img obj/arm/lseek_test.bin ::/LKSTEST.BIN
+mcopy -i disk.img obj/arm/sort.bin ::/SORT.BIN
+mcopy -i disk.img obj/arm/uniq.bin ::/UNIQ.BIN
+mcopy -i disk.img obj/arm/ping.bin ::/PING.BIN
+mcopy -i disk.img obj/arm/nc.bin ::/NC.BIN
+mcopy -i disk.img obj/arm/ifconfig.bin ::/IFCONFIG.BIN
+mcopy -i disk.img obj/arm/shtest2.bin ::/SHTEST2.BIN
+mcopy -i disk.img obj/arm/mkdir.bin ::/MKDIR.BIN
+mcopy -i disk.img obj/arm/shtest3.bin ::/SHTEST3.BIN
+mcopy -i disk.img obj/arm/pong.bin ::/PONG.BIN
+mcopy -i disk.img obj/arm/millipede.bin ::/MILLIPED.BIN
+mcopy -i disk.img obj/arm/doom.bin ::/DOOM.BIN
+[disk] note: no doom1.wad (run tools/fetch_doom_wad.sh) — DOOM will lack an IWAD
+mcopy -i disk.img obj/arm/stardust.bin ::/STARDUST.BIN
+mcopy -i disk.img obj/arm/files.bin ::/FILES.BIN
+mcopy -i disk.img obj/arm/calc.bin ::/CALC.BIN
+mcopy -i disk.img obj/arm/xcalc.bin ::/XCALC.BIN
+mcopy -i disk.img obj/arm/antfarm.bin ::/ANTFARM.BIN
+mcopy -i disk.img obj/arm/xeyes.bin ::/XEYES.BIN
+mcopy -i disk.img obj/arm/xnibbler.bin ::/XNIBBLER.BIN
+mcopy -i disk.img obj/arm/clock.bin ::/CLOCK.BIN
+mcopy -i disk.img obj/arm/sysmon.bin ::/SYSMON.BIN
+mcopy -i disk.img obj/arm/hex.bin ::/HEX.BIN
+mcopy -i disk.img obj/arm/tasks.bin ::/TASKS.BIN
+mcopy -i disk.img obj/arm/find.bin ::/FIND.BIN
+mcopy -i disk.img obj/arm/diff.bin ::/DIFF.BIN
+mcopy -i disk.img obj/arm/notes.bin ::/NOTES.BIN
+mcopy -i disk.img obj/arm/unit.bin ::/UNIT.BIN
+mcopy -i disk.img obj/arm/nano.bin ::/NANO.BIN
+mcopy -i disk.img obj/arm/xcrypt.bin ::/XCRYPT.BIN
+mcopy -i disk.img obj/arm/nes.bin ::/NES.BIN
+# Selfhost W2 (mtools port): in-OS /TOOLS copies of the ported
+# build-tools (8.3 names, the frozen F1 layout).
+mcopy -i disk.img obj/arm/mcopy.bin ::/TOOLS/MCOPY.BIN
+mcopy -i disk.img obj/arm/mdel.bin ::/TOOLS/MDEL.BIN
+mcopy -i disk.img obj/arm/mmd.bin ::/TOOLS/MMD.BIN
+# Selfhost W2 (mkfs port): in-OS MKFSFAT (F1 layout).
+mcopy -i disk.img obj/arm/mkfsfat.bin ::/MKFSFAT.BIN
+# Selfhost W3 (tools): the in-OS toolchain on the startup image (frozen
+# F1 layout, selfhost.md §7.3).  tools/selfhost-stage.sh --tools stages
+# CLANG.BIN/LLD.BIN/LLVMAR.BIN/OBJCOPY.BIN from the wave-2 LLVM
+# distribution staging (obj/selfhost/dist-staging, or the persistent
+# third_party/llvm-21.1.8/dist-staging copy that survives `make clean`),
+# the ported build tools (MAKE/MCOPY/MDEL/MMD/MKFSFAT), and the RESDIR
+# header tree under /TOOLS — staged FAITHFULLY with long names (F8
+# decision, see docs/selfhost/llvm-bootstrap.md §6.2).  Soft dependency:
+# an absent dist-staging warns + skips, so trees without the LLVM
+# install still build a bootable image (build_kernel.sh then refuses
+# with instructions).  Override with STAGE_TOOLS=0 to skip.
+tools/selfhost-stage.sh --tools disk.img
+selfhost-stage: staging in-OS toolchain to ::/TOOLS (F1 layout)
+selfhost-stage:   CLANG.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/clang-21 (converted, 94194296 B)
+selfhost-stage:   LLD.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/lld (converted, 53252632 B)
+selfhost-stage:   LLVMAR.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/llvm-ar (converted, 8351200 B)
+selfhost-stage:   OBJCOPY.BIN <- third_party/llvm-21.1.8/dist-staging/usr/local/bin/llvm-objcopy (converted, 4984672 B)
+selfhost-stage: staged 284 files, 176926846 bytes into ::/TOOLS
+  --- ::/TOOLS (mdir) ---
+TAR      BIN    145128 2026-10-28   9:33 
+RESDIR       <DIR>     2026-10-28   9:33 
+       15 files         162 199 592 bytes
+                        738 754 560 bytes free
+
+  --- ::/TOOLS/RESDIR/include count ---
+      295 files          14 727 254 bytes
+                        738 754 560 bytes free
+
+selfhost-stage: done
+# Selfhost W4 (src): the in-OS build-required source subset on the
+# startup image (frozen F2 /SRC flavor): kernel+user sources, headers,
+# Makefile.hobbyos, limine/EFI assets, the carried build products, and
+# the SELFHOST.RUN/SELFHOST.SH stage scripts.  tools/selfhost-stage.sh
+# --src; disable together with the tools step via STAGE_TOOLS=0.
+tools/selfhost-stage.sh --src disk.img
+selfhost-stage: STAGE_LIBCXX=0 — skipping C++ libcxx include subset
+selfhost-stage: staging BUILD-REQUIRED source subset to ::/SRC
+
+selfhost-stage: staged BUILD-REQUIRED subset into disk.img
+  payload: 268 files, 5283238 bytes
+  --- ::/SRC (mdir) ---
+        3 files             315 392 bytes
+
+Total files listed:
+      342 files           5 283 307 bytes
+                        730 021 888 bytes free
+
+selfhost-stage: done
+# [inos-build-kernel] the source tarball + the in-OS build script:
+# SRC.TAR (ustar, assembled by tools/selfhost-src-tar.sh from the real
+# tree) lands at ::/SRC.TAR; build_kernel.sh at ::/BUILD_KERNEL.SH.
+# In-OS: `SH.BIN /BUILD_KERNEL.SH` extracts the tar and builds the
+# kernel from it (Makefile.hobbyos `all`) + assembles OUT.IMG.
+tools/selfhost-src-tar.sh obj/selfhost/SRC.TAR
+selfhost-src-tar: assembling obj/selfhost/SRC.TAR
+selfhost-src-tar: done — obj/selfhost/SRC.TAR
+  entries: 1135 (files+dirs), size: 24299520 bytes
+  spot-checked members: src/kernel/main.c Makefile.hobbyos linker.ld limine.conf build_kernel.sh
+mcopy -i disk.img obj/selfhost/SRC.TAR ::/SRC.TAR
+mcopy -i disk.img src/user/selfhost/build_kernel.sh ::/BUILD_KERNEL.SH
+mcopy -i disk.img obj/arm/monitor.bin ::/MONITOR.BIN
+mcopy -i disk.img obj/arm/monitort.bin ::/MONITORT.BIN
+mcopy -i disk.img obj/arm/icusmk.bin ::/ICUSMK.BIN
+echo "HobbyOS Terminal Test File" > SHTEST.TXT
+echo "This is line number two." >> SHTEST.TXT
+echo "Line three is right here." >> SHTEST.TXT
+echo "Fourth line has some interesting keywords like hello world." >> SHTEST.TXT
+echo "Line five is the last line of this small test document." >> SHTEST.TXT
+touch TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT
+echo "orange" > SORT.TXT
+echo "apple" >> SORT.TXT
+echo "orange" >> SORT.TXT
+mcopy -i disk.img SHTEST.TXT ::/SHTEST.TXT
+mcopy -i disk.img SHTEST.TXT ::/home/SHTEST.TXT
+mcopy -i disk.img TEST1.TXT ::/TEST1.TXT
+mcopy -i disk.img TEST2.TXT ::/TEST2.TXT
+mcopy -i disk.img TEST3.TXT ::/TEST3.TXT
+mcopy -i disk.img TEST4.TXT ::/TEST4.TXT
+mcopy -i disk.img SORT.TXT ::/SORT.TXT
+# GB-067 fixture: 4096 bytes, byte[i] = i % 251 (the pattern STAGE4K_T.BIN
+# byte-compares).  Staged HERE, by the host, because the DoD under test is
+# "a host-staged 4 KiB file reads back byte-exact in the guest" -- if the
+# guest wrote it, the test would be exercising the writer.  Until this
+# landed the fixture came from a hand-run `T3_STAGE` probe, so every CI
+# wave failed `[STAGE4K] FAIL open /STAGE4K.BIN` while passing locally
+# for whoever remembered to stage it.
+perl -e 'print chr($_ % 251) for (0..4095)' > STAGE4K.BIN
+mcopy -i disk.img STAGE4K.BIN ::/STAGE4K.BIN
+rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT STAGE4K.BIN
+=== run: stage ===
+qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 8 -m 16384M -accel tcg,thread=multi -bios /home/sarah/.local/share/AAVMF/AAVMF_CODE.fd -display gtk -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff -display none -qmp unix:/tmp/evidence-qmp-XNIBBLER,server,nowait
+UEFI firmware (version 2025.11-3ubuntu7.3 built at 15:40:26 on Sep 23 2026)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+BdsDxe: starting Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+[001;001H[001;001H[001;001Hl[001;002Hi[001;003Hn[001;004Hu[001;005Hx[001;006H:[001;007H [001;008HL[001;009Ho[001;010Ha[001;011Hd[001;012Hi[001;013Hn[001;014Hg[001;015H [001;016Hk[001;017He[001;018Hr[001;019Hn[001;020He[001;021Hl[001;022H [001;023H`[001;024Hb[001;025Ho[001;026Ho[001;027Ht[001;028H([001;029H)[001;030H:[001;031H/[001;032Hb[001;033Ho[001;034Ho[001;035Ht[001;036H/[001;037Hh[001;038Ho[001;039Hb[001;040Hb[001;041Hy[001;042Ho[001;043Hs[001;044H.[001;045Hb[001;046Hi[001;047Hn[001;048H`[001;049H.[001;050H.[001;051H.[001;052H[001;001H[002;001HBooting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+[GPUDIAG] gpu wait > 7 ms: ack=3 used=4 (park off)
+[GPU] virtio-gpu mmio irq=78
+VirtIO GPU successfully initialized.
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1900544 total_mib=7424 reserved=0
+[KERNEL] Activating secondary cores via PSCI...
+[KERNEL] Core 1 power-on requested.
+[KERNEL] Core 2 power-on requested.
+[KERNEL] Core 3 power-on requested.
+[KERNEL] Core 4 power-on requested.
+[KERNEL] Core 5 power-on requested.
+[KERNEL] Core 6 power-on requested.
+[KERNEL] Core 7 power-on requested.
+start_scheduler called on CPU start_scheduler called on CPU start_scheduler called on CPU start_scheduler called on CPU start_scheduler called on CPU 156
+
+start_scheduler called on CPU 
+2start_scheduler called on CPU 74
+
+
+3
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+virtio-net MAC: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP Discover sent
+DHCP initialization complete.
+
+--- Parallel Program Loading ---
+Mode: DESKTOP - Launching desktop...
+[WAVE-TRY] DESKTOP.BIN
+Loading program for scheduler (v2 AS): DESKTOP.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=-1
+/DESKTOP.BIN
+v2 loader: image mapped (lazy), bytes=557480 pages=137 first=in elap=2ms
+v2 loader: PID=1 entry=0x1000000000 sp=0x1800000000 resident=1 tables=3
+[ARRIVED] DESKTOP.BIN rc>0
+start_scheduler called on CPU 0
+[RESUME-SPSR] pid=1 spsr=0x00000000 IF=0
+[RESUME-DIAG] pid=1 region=NONE (HOLE) dest=0x000000043F69DBA0
+Desktop starting...
+[RESUME-SPSR] pid=1 spsr=0x60000200 IF=1
+[RESUME-DIAG] pid=1 region=NONE (HOLE) dest=0x000000043F69DBA0
+[fat16_read_dir] resolve failed
+[RESUME-SPSR] pid=1 spsr=0x60000200 IF=1
+[RESUME-DIAG] pid=1 region=NONE (HOLE) dest=0x000000043F69DBA0
+[MENU] 0=CONSOLE.BIN
+[MENU] 1=BROWSER.BIN
+[MENU] 2=FILES.BIN
+[MENU] 3=CALC.BIN
+[MENU] 4=XCALC.BIN
+[MENU] 5=ANTFARM.BIN
+[MENU] 6=XEYES.BIN
+[MENU] 7=CLOCK.BIN
+[MENU] 8=SYSMON.BIN
+[MENU] 9=HEX.BIN
+[MENU] 10=TASKS.BIN
+[MENU] 11=FIND.BIN
+[MENU] 12=DIFF.BIN
+[MENU] 13=NOTES.BIN
+[MENU] 14=UNIT.BIN
+[MENU] 15=NANO.BIN
+[MENU] 16=PONG.BIN
+[MENU] 17=MILLIPED.BIN
+[MENU] 18=DOOM.BIN
+[MENU] 19=STARDUST.BIN
+[MENU] 20=XNIBBLER.BIN
+[MENU] 21=XCRYPT.BIN
+[MENU] 22=NES.BIN
+[MENU] 23=EFI
+[MENU] 24=BOOT
+[MENU] 25=HOME
+[MENU] 26=CERTS
+[MENU] 27=NFS
+[MENU] 28=MNT
+[MENU] 29=TESTDIR
+[MENU] 30=TMP
+[MENU] 31=TOOLS
+[MENU] 32=SRC
+[MENU] 33=third_party
+[MENU] 34=E2E.TXT
+[MENU] 35=DRAGME.TXT
+[MENU] 36=MEMTEST.BIN
+[MENU] 37=FILEIO.BIN
+[MENU] 38=FORKTEST.BIN
+[MENU] 39=HEAPTEST.BIN
+[MENU] 40=SPAWN.BIN
+[MENU] 41=GRAPHICS.BIN
+[MENU] 42=WSRF_T.BIN
+[MENU] 43=SMPTEST.BIN
+[MENU] 44=PIPETEST.BIN
+[MENU] 45=NETTEST.BIN
+[MENU] 46=TIMEOUT.BIN
+[MENU] 47=NFSTEST.BIN
+[MENU] 48=DESKTOP.BIN
+[MENU] 49=HOME.HTM
+[MENU] 50=TALL.HTM
+[MENU] 51=DEJAVU.TTF
+[MENU] 52=EDITOR.BIN
+[MENU] 53=EDITOR_T.BIN
+[MENU] 54=APPS_T.BIN
+[MENU] 55=FILEDIAL.BIN
+[MENU] 56=DIALOG_T.BIN
+[MENU] 57=PONG_T.BIN
+[MENU] 58=STRESS.BIN
+[MENU] 59=FPU_T.BIN
+[MENU] 60=GFXBENCH.BIN
+[MENU] 61=MATH_T.BIN
+[MENU] 62=ERRTEST.BIN
+[MENU] 63=SOCK2TST.BIN
+[MENU] 64=POLLTST.BIN
+[MENU] 65=POLLBRK.BIN
+[MENU] 66=BLKTEST.BIN
+[MENU] 67=RANDTST.BIN
+[MENU] 68=DNSTST.BIN
+[MENU] 69=NETFIX.BIN
+[MENU] 70=CXXSMOKE.BIN
+[MENU] 71=THRD_T.BIN
+[MENU] 72=TLS_T.BIN
+[MENU] 73=WK1C_T.BIN
+[MENU] 74=CXX_T.BIN
+[MENU] 75=RTTI_T.BIN
+[MENU] 76=IPC_T.BIN
+[MENU] 77=MMTEST.BIN
+[MENU] 78=SQLTEST.BIN
+[MENU] 79=TORTURE.BIN
+[MENU] 80=BIG.BIN
+[MENU] 81=HELLO.BIN
+[MENU] 82=SELFHOST.BIN
+[MENU] 83=SH.BIN
+[MENU] 84=LS.BIN
+[MENU] 85=CAT.BIN
+[MENU] 86=GREP.BIN
+[MENU] 87=LESS.BIN
+[MENU] 88=TAIL.BIN
+[MENU] 89=HEAD.BIN
+[MENU] 90=SHTEST.BIN
+[MENU] 91=PS.BIN
+[MENU] 92=FREE.BIN
+[MENU] 93=UPTIME.BIN
+[MENU] 94=KILL.BIN
+[MENU] 95=BASENAME.BIN
+[MENU] 96=DIRNAME.BIN
+[MENU] 97=SEQ.BIN
+[MENU] 98=EXPR.BIN
+[MENU] 99=TEST.BIN
+[MENU] 100=CP.BIN
+[MENU] 101=RM.BIN
+[MENU] 102=MV.BIN
+[MENU] 103=TOUCH.BIN
+[MENU] 104=WC.BIN
+[MENU] 105=SED.BIN
+[MENU] 106=MAKE.BIN
+[MENU] 107=HEDGNU.BIN
+[MENU] 108=TAILGN.BIN
+[MENU] 109=CUT.BIN
+[MENU] 110=TR.BIN
+[MENU] 111=PASTE.BIN
+[MENU] 112=FOLD.BIN
+[MENU] 113=NL.BIN
+[MENU] 114=COMM.BIN
+[MENU] 115=TSORT.BIN
+[MENU] 116=EXPAND.BIN
+[MENU] 117=UNEXPAND.BIN
+[MENU] 118=CKSUM.BIN
+[MENU] 119=MD5SUM.BIN
+[MENU] 120=PROCCHLD.BIN
+[MENU] 121=SPAWNEX.BIN
+[MENU] 122=SIG_T.BIN
+[MENU] 123=HEDTEST.BIN
+[MENU] 124=TAILTEST.BIN
+[MENU] 125=PROCTEST.BIN
+[MENU] 126=WCTEST.BIN
+[MENU] 127=CUTTEST.BIN
+[MENU] count=128
+[WAITPID] ECHILD caller=1 DESKTOP.BIN want=0 children=0 (further ECHILD diagnostics for this process are suppressed)
+[RESUME-SPSR] pid=1 spsr=0x20000200 IF=1
+[RESUME-DIAG] pid=1 region=NONE (HOLE) dest=0x000000043F69DBA0
+[RESUME-SPSR] pid=1 spsr=0x20000200 IF=1
+[RESUME-DIAG] pid=1 region=NONE (HOLE) dest=0x000000043F69DBA0
+[GPUDIAG] gpu wait > 4 ms: ack=5 used=6
+[GPU] irq handled (status=1)
+[GPU] irq handled (status=1)
+[GPU] irq handled (status=1)
+[LAUNCH] XNIBBLER.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=1
+Inside process_create: clearing memory at 0x0000000072000000
+Inside process_create: kmemset done.
+[WAVE-TRY] XNIBBLER.BIN
+Loading program for scheduler (v2 AS): XNIBBLER.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=-1
+/XNIBBLER.BIN
+v2 loader: image mapped (lazy), bytes=38120 pages=10 first=in elap=1ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=1 tables=3
+[ARRIVED] XNIBBLER.BIN rc>0
+[KERNEL] Process 3: XNIBBLER.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=3 last_user_pc=0x0
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+  [ALIVE-SET] slot=1 pid=1 st=3 parent=-1 claimed_by=2 DESKTOP.BIN
+make: *** [Makefile:2479: run] Killed
