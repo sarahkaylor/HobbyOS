@@ -1,0 +1,340 @@
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+BdsDxe: starting Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+[001;001H[001;001H[UART] lock @ 0x000000007557fdc8
+Booting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+VirtIO GPU: BGA
+VirtIO GPU successfully initialized.
+Original CCB: 0x0000000000000047
+Modified CCB: 0x0000000000000047
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1376256 total_mib=5376 reserved=0
+[KERNEL] Activating secondary cores via LAPIC IPIs...
+[KERNEL] smp_init: copying trampoline code...
+[KERNEL] smp_init: trampoline copied.
+[KERNEL] smp_init: Sending INIT IPI to core 1...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 1 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 2...
+[KERNEL] smp_init: Waiting after INIT IPI...
+start_scheduler called on CPU 1
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 2 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 3...
+start_scheduler called on CPU 2
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 3 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core start_scheduler called on CPU 4...
+[KERNEL] smp_init: Waiting after INIT IPI...
+3
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 4 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core start_scheduler called on CPU 4
+5...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU 5
+[KERNEL] Core 5 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 6...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core start_scheduler called on CPU 6
+6 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 7...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU 7
+[KERNEL] Core 7 power-on acknowledged.
+[KERNEL] LAPIC timer rate: 62657 counts/ms, TSC rate: 2597143 ticks/ms (PIT-counter calibrated)
+Found NVMe controller on PCI bus!
+PCI Config Space of NVMe:
+0x0000000000101B36 0x0000000000100007 0x0000000001080202 0x0000000000000000 
+0x0000000081000004 0x0000000000000000 0x0000000000000000 0x0000000000000000 
+0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000011001AF4 
+0x0000000000000000 0x0000000000000040 0x0000000000000000 0x000000000000010B 
+NVMe BAR0 Phys: 0x0000000081000000 (Mapped to Virtual: 0x00000001FC000000)
+Resetting controller, waiting for CSTS.RDY = 0...
+Controller reset complete!
+Enabling controller... CC=0x0000000000460001 CSTS=0x0000000000000001
+Controller enabled successfully!
+Create IO CQ Status: 0x0000000000000000
+Create IO SQ Status: 0x0000000000000000
+NVMe driver initialized successfully!
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+[VIRTIO_NET] PCI Interrupt Line: 10 (Vector: 42)
+[VIRTIO_NET] MAC Address: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+[VIRTIO_NET] RX queue size: 256 rx_vq address: 0x00000000753F4000 PFN: 0x00000000000753F4
+[VIRTIO_NET] TX queue size: 256 tx_vq address: 0x00000000753F7000 PFN: 0x00000000000753F7
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Discover sent
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP initialization complete.
+[RDMA] Remote PCIe sharing is INACTIVE (no startup parameter).
+
+--- Parallel Program Loading ---
+Mode: DESKTOP - Launching desktop...
+[WAVE-TRY] DESKTOP.BIN
+Loading program for scheduler (v2 AS): DESKTOP.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=-1
+/DESKTOP.BIN
+v2 loader: image mapped (lazy), bytes=559144 pages=137 first=in elap=3ms
+v2 loader: PID=1 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] DESKTOP.BIN rc>0
+start_scheduler called on CPU 0
+[ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+[RESUME-SPSR] pid=1 spsr=0x00010202 IF=1
+[RESUME-DIAG] pid=1 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1
+  [ALIVE-SET] slot=1 pid=1 st=3 parent=-1 claimed_by=1 DESKTOP.BIN
+[RESUME-SPSR] pid=1 spsr=0x00010202 IF=1
+[RESUME-DIAG] pid=1 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1
+[RESUME-SPSR] pid=1 spsr=0x00010202 IF=1
+[RESUME-DIAG] pid=1 region=yes prot=3 dest=0x00000017FFFFF788 covers=1
+Desktop starting...
+[RESUME-SPSR] pid=1 spsr=0x00010202 IF=1
+[RESUME-DIAG] pid=1 region=yes prot=3 dest=0x00000017FFFFEF00 covers=1
+[fat16_read_dir] resolve failed
+[RESUME-SPSR] pid=1 spsr=0x00010246 IF=1
+[RESUME-DIAG] pid=1 region=yes prot=3 dest=0x00000017FFFFEEF0 covers=1
+[MENU] 0=CONSOLE.BIN
+[MENU] 1=BROWSER.BIN
+[MENU] 2=FILES.BIN
+[MENU] 3=CALC.BIN
+[MENU] 4=XCALC.BIN
+[MENU] 5=ANTFARM.BIN
+[MENU] 6=XEYES.BIN
+[MENU] 7=CLOCK.BIN
+[MENU] 8=SYSMON.BIN
+[MENU] 9=HEX.BIN
+[MENU] 10=TASKS.BIN
+[MENU] 11=FIND.BIN
+[MENU] 12=DIFF.BIN
+[MENU] 13=NOTES.BIN
+[MENU] 14=UNIT.BIN
+[MENU] 15=NANO.BIN
+[MENU] 16=PONG.BIN
+[MENU] 17=MILLIPED.BIN
+[MENU] 18=DOOM.BIN
+[MENU] 19=STARDUST.BIN
+[MENU] 20=XNIBBLER.BIN
+[MENU] 21=XCRYPT.BIN
+[MENU] 22=NES.BIN
+[MENU] 23=EFI
+[MENU] 24=BOOT
+[MENU] 25=HOME
+[MENU] 26=CERTS
+[MENU] 27=NFS
+[MENU] 28=MNT
+[MENU] 29=TESTDIR
+[MENU] 30=TMP
+[MENU] 31=TOOLS
+[MENU] 32=SRC
+[MENU] 33=third_party
+[MENU] 34=E2E.TXT
+[MENU] 35=DRAGME.TXT
+[MENU] 36=MEMTEST.BIN
+[MENU] 37=FILEIO.BIN
+[MENU] 38=FORKTEST.BIN
+[MENU] 39=HEAPTEST.BIN
+[MENU] 40=SPAWN.BIN
+[MENU] 41=GRAPHICS.BIN
+[MENU] 42=WSRF_T.BIN
+[MENU] 43=SMPTEST.BIN
+[MENU] 44=PIPETEST.BIN
+[MENU] 45=NETTEST.BIN
+[MENU] 46=TIMEOUT.BIN
+[MENU] 47=NFSTEST.BIN
+[MENU] 48=DESKTOP.BIN
+[MENU] 49=HOME.HTM
+[MENU] 50=TALL.HTM
+[MENU] 51=DEJAVU.TTF
+[MENU] 52=EDITOR.BIN
+[MENU] 53=EDITOR_T.BIN
+[MENU] 54=APPS_T.BIN
+[MENU] 55=FILEDIAL.BIN
+[MENU] 56=DIALOG_T.BIN
+[MENU] 57=PONG_T.BIN
+[MENU] 58=STRESS.BIN
+[MENU] 59=FPU_T.BIN
+[MENU] 60=GFXBENCH.BIN
+[MENU] 61=MATH_T.BIN
+[MENU] 62=ERRTEST.BIN
+[MENU] 63=SOCK2TST.BIN
+[MENU] 64=POLLTST.BIN
+[MENU] 65=POLLBRK.BIN
+[MENU] 66=BLKTEST.BIN
+[MENU] 67=RANDTST.BIN
+[MENU] 68=DNSTST.BIN
+[MENU] 69=NETFIX.BIN
+[MENU] 70=CXXSMOKE.BIN
+[MENU] 71=THRD_T.BIN
+[MENU] 72=TLS_T.BIN
+[MENU] 73=WK1C_T.BIN
+[MENU] 74=CXX_T.BIN
+[MENU] 75=RTTI_T.BIN
+[MENU] 76=IPC_T.BIN
+[MENU] 77=MMTEST.BIN
+[MENU] 78=SQLTEST.BIN
+[MENU] 79=TORTURE.BIN
+[MENU] 80=BIG.BIN
+[MENU] 81=HELLO.BIN
+[MENU] 82=SELFHOST.BIN
+[MENU] 83=SH.BIN
+[MENU] 84=LS.BIN
+[MENU] 85=CAT.BIN
+[MENU] 86=GREP.BIN
+[MENU] 87=LESS.BIN
+[MENU] 88=TAIL.BIN
+[MENU] 89=HEAD.BIN
+[MENU] 90=SHTEST.BIN
+[MENU] 91=PS.BIN
+[MENU] 92=FREE.BIN
+[MENU] 93=UPTIME.BIN
+[MENU] 94=KILL.BIN
+[MENU] 95=BASENAME.BIN
+[MENU] 96=DIRNAME.BIN
+[MENU] 97=SEQ.BIN
+[MENU] 98=EXPR.BIN
+[MENU] 99=TEST.BIN
+[MENU] 100=CP.BIN
+[MENU] 101=RM.BIN
+[MENU] 102=MV.BIN
+[MENU] 103=TOUCH.BIN
+[MENU] 104=WC.BIN
+[MENU] 105=SED.BIN
+[MENU] 106=MAKE.BIN
+[MENU] 107=HEDGNU.BIN
+[MENU] 108=TAILGN.BIN
+[MENU] 109=CUT.BIN
+[MENU] 110=TR.BIN
+[MENU] 111=PASTE.BIN
+[MENU] 112=FOLD.BIN
+[MENU] 113=NL.BIN
+[MENU] 114=COMM.BIN
+[MENU] 115=TSORT.BIN
+[MENU] 116=EXPAND.BIN
+[MENU] 117=UNEXPAND.BIN
+[MENU] 118=CKSUM.BIN
+[MENU] 119=MD5SUM.BIN
+[MENU] 120=PROCCHLD.BIN
+[MENU] 121=SPAWNEX.BIN
+[MENU] 122=SIG_T.BIN
+[MENU] 123=HEDTEST.BIN
+[MENU] 124=TAILTEST.BIN
+[MENU] 125=PROCTEST.BIN
+[MENU] 126=WCTEST.BIN
+[MENU] 127=CUTTEST.BIN
+[MENU] 128=TRTEST.BIN
+[MENU] 129=PASTE_T.BIN
+[MENU] 130=FOLDTEST.BIN
+[MENU] 131=NLTEST.BIN
+[MENU] 132=COMMTEST.BIN
+[MENU] 133=TSORT_T.BIN
+[MENU] 134=EXPAND_T.BIN
+[MENU] 135=UNEXPAND_T.BIN
+[MENU] 136=FATBIG_T.BIN
+[MENU] 137=STAGE4K_T.BIN
+[MENU] 138=longfilename.tx
+[MENU] 139=longfilename2.t
+[MENU] 140=longfil~1.txt
+[MENU] 141=LFN_T.BIN
+[MENU] 142=CKSUM_T.BIN
+[MENU] 143=MD5SUM_T.BIN
+[MENU] 144=TAC.BIN
+[MENU] 145=TACTEST.BIN
+[MENU] 146=CMP.BIN
+[MENU] 147=CMPTEST.BIN
+[MENU] 148=REGTEST.BIN
+[MENU] 149=SEDTEST.BIN
+[MENU] 150=GREPTEST.BIN
+[MENU] 151=SUBPRB.BIN
+[MENU] 152=PIPEPRB.BIN
+[MENU] 153=LKSTEST.BIN
+[MENU] 154=SORT.BIN
+[MENU] 155=UNIQ.BIN
+[MENU] 156=PING.BIN
+[MENU] 157=NC.BIN
+[MENU] 158=IFCONFIG.BIN
+[MENU] 159=SHTEST2.BIN
+[MENU] 160=MKDIR.BIN
+[MENU] 161=SHTEST3.BIN
+[MENU] 162=MKFSFAT.BIN
+[MENU] 163=SRC.TAR
+[MENU] 164=BUILD_KERNEL.SH
+[MENU] 165=MONITOR.BIN
+[MENU] 166=MONITORT.BIN
+[MENU] 167=ICUSMK.BIN
+[MENU] 168=SHTEST.TXT
+[MENU] 169=TEST1.TXT
+[MENU] 170=TEST2.TXT
+[MENU] 171=TEST3.TXT
+[MENU] 172=TEST4.TXT
+[MENU] 173=SORT.TXT
+[MENU] 174=STAGE4K.BIN
+[MENU] 175=NvVars
+[MENU] 176=RIGFIX.BIN
+[MENU] count=177
+[WAITPID] ECHILD caller=1 DESKTOP.BIN want=0 children=0 (further ECHILD diagnostics for this process are suppressed)
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=0
+  CPU1 rip=0x000000100000E533 rflags=0x0000000000000246 vec=128 err=0x0000000000000000 cr2=0x00000010000136D0 pid=1 resume_pid=1 resume_sp=0x00000017FFFFFA20 age_ms=0
+  CPU2 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=0
+  CPU3 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=0
+  CPU4 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=0
+  CPU5 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=0
+  CPU6 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=0
+  CPU7 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=0
+[IDLESTUCK] cpu=0 rounds=20006 t=32696
+[IDLESTUCK] slot=1 pid=1 st=3 wake=0 rip=0x100000e533 DESKTOP.BIN
+[IDLESTUCK] claims: c0=-1/2882 c1=1/0 c2=-1/2854 c3=-1/2854 c4=-1/2854 c5=-1/2854 c6=-1/2854 c7=-1/2854 lock_owner=1 park_returns=0
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=5
+  CPU1 rip=0x000000100000E9B4 rflags=0x0000000000000246 vec=128 err=0x0000000000000000 cr2=0x00000010000136D0 pid=1 resume_pid=1 resume_sp=0x00000017FFFFFA70 age_ms=0
+  CPU2 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=5
+  CPU3 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=5
+  CPU4 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=5
+  CPU5 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=5
+  CPU6 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=5
+  CPU7 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=5
+[IDLESTUCK] cpu=5 rounds=40000 t=61232
+[IDLESTUCK] slot=1 pid=1 st=3 wake=0 rip=0x100000e533 DESKTOP.BIN
+[IDLESTUCK] claims: c0=-1/5740 c1=1/0 c2=-1/5710 c3=-1/5710 c4=-1/5710 c5=-1/5710 c6=-1/5710 c7=-1/5710 lock_owner=6 park_returns=0
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=1
+  CPU1 rip=0x000000100000E533 rflags=0x0000000000000246 vec=128 err=0x0000000000000000 cr2=0x00000010000136D0 pid=1 resume_pid=1 resume_sp=0x00000017FFFFFA70 age_ms=0
+  CPU2 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=1
+  CPU3 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=1
+  CPU4 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=1
+  CPU5 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=1
+  CPU6 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=1
+  CPU7 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=1
+[IDLESTUCK] cpu=7 rounds=60000 t=89778
+[IDLESTUCK] slot=1 pid=1 st=3 wake=0 rip=0x100000e9b4 DESKTOP.BIN
+[IDLESTUCK] claims: c0=-1/8600 c1=1/0 c2=-1/8567 c3=-1/8567 c4=-1/8567 c5=-1/8567 c6=-1/8567 c7=-1/8567 lock_owner=8 park_returns=0
+[WATCHDOG] console silent for more than 20s
+  CPU0 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=7
+  CPU1 rip=0x000000100000E4C3 rflags=0x0000000000000246 vec=128 err=0x0000000000000000 cr2=0x00000010000136D0 pid=1 resume_pid=1 resume_sp=0x00000017FFFFFA20 age_ms=0
+  CPU2 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=7
+  CPU3 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=6
+  CPU4 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=6
+  CPU5 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=6
+  CPU6 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=6
+  CPU7 rip=0x00000000700394D6 rflags=0x0000000000010246 pid=-1 age_ms=7
+[IDLESTUCK] cpu=0 rounds=80003 t=118324
+[IDLESTUCK] slot=1 pid=1 st=3 wake=0 rip=0x100000e9b4 DESKTOP.BIN
+[IDLESTUCK] claims: c0=-1/11461 c1=1/0 c2=-1/11424 c3=-1/11424 c4=-1/11424 c5=-1/11424 c6=-1/11424 c7=-1/11424 lock_owner=1 park_returns=0

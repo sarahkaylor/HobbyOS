@@ -1,0 +1,83 @@
+diff --git a/src/host/compat.c b/src/host/compat.c
+index c60a8b5..4f5a8cb 100755
+--- a/src/host/compat.c
++++ b/src/host/compat.c
+@@ -285,7 +285,7 @@ int available(int fd) {
+  * mock_read_dir_attr OR mock_read_dir_attrs[index] (so a test can make a
+  * single entry a directory by setting one slot to 0x10); the size is
+  * mock_read_dir_size when non-zero, else mock_read_dir_sizes[index]. */
+-#define MOCK_READ_DIR_MAX 40
++#define MOCK_READ_DIR_MAX 200
+ int mock_read_dir_count = 0;                     /* 0 = default 7 files */
+ char mock_read_dir_names[MOCK_READ_DIR_MAX][32];
+ uint8_t mock_read_dir_attr = 0;                  /* attr shared by all entries */
+diff --git a/src/host/desktop_menu_test.c b/src/host/desktop_menu_test.c
+index 9327e09..a92de51 100755
+--- a/src/host/desktop_menu_test.c
++++ b/src/host/desktop_menu_test.c
+@@ -10,12 +10,12 @@
+ #include <stdint.h>
+ #include "../user_include/libc.h"
+ 
+-extern char menu_items[80][16];
++extern char menu_items[256][16];
+ extern int num_menu_items;
+ extern void menu_apps_first(void);
+ extern void menu_display_name(const char *raw, char *out, int max);
+ extern void load_menu(void);
+-extern char menu_in_games[128];
++extern char menu_in_games[256];
+ extern void launcher_path_for(char *out, int max, const char *name, int in_games);
+ 
+ /* compat.c mock read_dir override (same pattern as apps_suite_test.c). */
+@@ -207,6 +207,30 @@ int main(void) {
+           "scanned .BIN still /GAMES/PIE.BIN after reorder");
+   }
+ 
++  /* 9) GB-119: a staged fixture whose root index is beyond the OLD 128 [MENU]
++   * cap must now be listed (old MAX_MENU_ITEMS truncated the dump at 128, so a
++   * NEW name staged onto a >128-entry root was invisible to the evidence rig).
++   * Inject 176 non-pinned root names; a name at index >=128 must be in menu_items
++   * with the raised (256) cap, and would be absent at 128.  Falsifiable: bailing
++   * the cap back to 128 drops INDEX175.BIN. */
++  {
++    mock_read_dir_reset();
++    mock_read_dir_count = 176;
++    char late[32];
++    for (int i = 0; i < 176; i++)
++      snprintf(mock_read_dir_names[i], sizeof mock_read_dir_names[i], "F%03d.BIN", i);
++    num_menu_items = 0;
++    load_menu();
++    int found_late = 0;
++    for (int i = 0; i < num_menu_items; i++)
++      if (strcmp(menu_items[i], "F175.BIN") == 0) found_late = 1;
++    check(num_menu_items >= 176 && found_late,
++          "a root name at index 175 is listed (256 cap covers the 176-entry root; old 128 dropped it)");
++    check(num_menu_items <= 256,
++          "menu dump stays bounded (no unbounded growth / no truncation lie)");
++    mock_read_dir_reset();
++  }
++
+   printf("[TEST] desktop menu: %d checks, %d failures\n", checks, fails);
+   return fails ? 1 : 0;
+ }
+diff --git a/src/user/desktop.c b/src/user/desktop.c
+index 35035f8..d4659d4 100755
+--- a/src/user/desktop.c
++++ b/src/user/desktop.c
+@@ -28,7 +28,14 @@ char shift_keymap[128] = {0,    27,  '!', '@',  '#',  '$',  '%', '^', '&',  '*',
+ 
+ static int shift_pressed = 0;
+ 
+-#define MAX_MENU_ITEMS 128
++/* GB-119: the [MENU] dump cap must cover the whole image root or a NEW staged
++ * fixture is truncated out of the listing and the evidence rig (which proves a
++ * fixture by finding its name in the guest's own [MENU] dump) cannot see it.
++ * Measured root counts (2026-10-28, MODE=test disk.img): arm=176, intel=158.
++ * 256 is a bounded headroom above both; the tables are 256x16=4KiB + 256 bytes,
++ * and the dump stays bounded (no truncation lie).  The menu is still capped, so
++ * the console/UI budget is unchanged-in-kind. */
++#define MAX_MENU_ITEMS 256
+ char menu_items[MAX_MENU_ITEMS][16];
+ int num_menu_items = 0;
+ /* GB-039 (2nd half): 1 when menu_items[i] is a /GAMES-scanned entry (not a

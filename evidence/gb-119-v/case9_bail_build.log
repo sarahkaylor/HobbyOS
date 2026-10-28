@@ -1,0 +1,16 @@
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/desktop_menu_test.c -o obj/host_desktop_menu_test.o
+src/host/desktop_menu_test.c:219:10: warning: unused variable 'late' [-Wunused-variable]
+  219 |     char late[32];
+      |          ^~~~
+1 warning generated.
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -Dmain=desktop_main -c src/user/desktop.c -o obj/host_user_desktop.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/graphics/graphics.c -o obj/host_user_graphics_graphics.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/graphics/window.c -o obj/host_user_graphics_window.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/host/compat.c -o obj/host_compat.o
+src/host/compat.c:132:90: warning: unused parameter 'args' [-Wunused-parameter]
+  132 | int spawn2(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, const char *args) {
+      |                                                                                          ^
+1 warning generated.
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/dialog.c -o obj/host_user_dialog.o
+clang -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -DHOST_TEST -c src/user/filedialog.c -o obj/host_user_filedialog.o
+clang -o desktop_menu_test_host obj/host_desktop_menu_test.o obj/host_user_desktop.o obj/host_user_graphics_graphics.o obj/host_user_graphics_window.o obj/host_compat.o obj/host_user_dialog.o obj/host_user_filedialog.o
