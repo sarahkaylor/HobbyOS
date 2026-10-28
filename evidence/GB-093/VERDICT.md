@@ -45,7 +45,20 @@ T3_arm: PASS (0 FAIL lines, halted, no kernel fault, 9349 lines)
 
 **ARM SEDTEST: 59/59 PASS, 0 FAILs** — the DoD's "ARM stays at 0" clause is now evidenced on this tree (raw log: t3_arm_gb093.log.xz). The DoD's remaining leg is the intel clean-halt (still GB-100-gated; this intel wave carried a kernel fault).
 
+## Intel confirmation on merged main (2026-10-28)
+
+Re-ran the intel T3 on the SAME merged tree (origin/main incl. GB-113). Root cause reproduces identically — it is independent of the wait-decode fix:
+
+```
+T3_intel: 8989 console lines, 79 FAIL lines, 19 user memory faults / 16 procs, 83 exited, halted=1 (but 4 kernel faults -> NOT a clean halt; GB-100-class)
+[SEDTEST] FAILURES: 59     (ARM: 59/59 PASS on the identical tree)
+[SEDTEST] FAIL amp (stdout)
+  got:  "x<1> y22 z333\n\x00Zmma\ndeltZZ\n\x00\x00..."    <- same pipe-read-overrun signature
+```
+Confirms: intel SEDTEST = 59 content FAILs (pipe read returns bytes past the SED writer's extent), ARM = 0, on one tree. So the bug is arch-specific and GB-113's wait-decode did not touch it. Remaining DoD leg is the intel clean-halt, still gated on GB-100 (kernel fault, no artifact). Raw log: t3_intel_gb093_v2.log.xz.
+
 ## Files
 - raw tier log: /tmp/t3_intel_gb093.log (25237 lines) → t3_intel_gb093.log.xz
 - ARM tier log: t3_arm_gb093.log.xz
+- intel re-run (merged main): t3_intel_gb093_v2.log.xz
 
