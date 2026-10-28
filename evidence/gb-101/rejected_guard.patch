@@ -1,0 +1,68 @@
+diff --git a/.arch-stamp b/.arch-stamp
+index 78504ba..b6fce24 100644
+--- a/.arch-stamp
++++ b/.arch-stamp
+@@ -1 +1 @@
+-arm
+\ No newline at end of file
++intel
+\ No newline at end of file
+diff --git a/src/kernel/arch/x64/trap.c b/src/kernel/arch/x64/trap.c
+index 2e0804f..6175082 100755
+--- a/src/kernel/arch/x64/trap.c
++++ b/src/kernel/arch/x64/trap.c
+@@ -106,7 +106,9 @@ void trap_exit_frame_check(uint64_t *frame) {
+   extern void uart_print_hex_raw(uint64_t v);
+   uint64_t rip = frame[0];
+   uint64_t cs = frame[1];
++  uint64_t rsp = frame[3];
+   int implausible;
++  int mixed = 0;
+ 
+   if ((cs & 3u) != 3u) {
+     /* GB-061: a kernel-mode return can have a perfectly legal kernel RIP --
+@@ -117,9 +119,19 @@ void trap_exit_frame_check(uint64_t *frame) {
+        `vector=13 rip=0x0 pid=1` halt went unreported while [LOSTWAKE] disposed
+        the same slot afterwards.  Judge kernel returns on the LOW bound only;
+        the upper range check stays user-only, because 0x70000000..USER_VA_BASE
+-       is a legitimate kernel text window. */
+-    if (rip >= 0x1000u)
++       is a legitimate kernel text window.
++
++       GB-101: RIP alone cannot discriminate a kernel return, but RSP can.  A
++       kernel-mode iretq pops RIP/CS/RFLAGS only, so RSP is never reloaded --
++       which means a frame that carries kernel CS with a USER RSP iretqs at
++       CPL0 onto the user stack and the next fault reads its "vector" out of
++       user text (observed: `vector=0x7003B82E`, then
++       `CS=0x08 SS=0x0000 RIP=0x7003D8DF RSP=0x755AFC18`).  Kernel stacks stay
++       below 0x75000000 (see the guard at the top of this file), so a kernel
++       return at or above that bound is a mixed frame, not a return. */
++    if (rip >= 0x1000u && rsp < 0x75000000u)
+       return;
++    mixed = (rip >= 0x1000u);
+   } else {
+     implausible = (rip < 0x1000u) || (rip >= 0x70000000u && rip < USER_VA_BASE);
+     if (!implausible)
+@@ -128,6 +140,22 @@ void trap_exit_frame_check(uint64_t *frame) {
+   if (trap_exit_bad_rip_seen >= 20)
+     return;
+   trap_exit_bad_rip_seen++;
++  if (mixed) {
++    /* Named distinctly so a tier run can count it without mistaking it for an
++       implausible USER rip: this is a kernel return carrying a user RSP. */
++    uart_puts_raw("[TORNFRAME] kernel CS with user RSP: rip=");
++    uart_print_hex_raw(rip);
++    uart_puts_raw(" cs=");
++    uart_print_hex_raw(cs);
++    uart_puts_raw(" rsp=");
++    uart_print_hex_raw(rsp);
++    uart_puts_raw(" eflags=");
++    uart_print_hex_raw(frame[2]);
++    uart_puts_raw(" cpu=");
++    uart_print_hex_raw((uint64_t)get_cpuid());
++    uart_puts_raw("\n");
++    return;
++  }
+   uart_puts_raw("[BADIRET] about to return to an implausible user RIP=");
+   uart_print_hex_raw(rip);
+   uart_puts_raw(" cs=");
