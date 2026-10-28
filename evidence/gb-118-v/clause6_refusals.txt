@@ -1,0 +1,12 @@
+$ --stage /tmp/outside_fixture.bin:X.BIN
+[rig] STAGE REFUSED - refusing to boot a stale image: stage: host source outside the repo root is refused: '/tmp/outside_fixture.bin' (root='/home/sarah/Documents/GitHub/HobbyOS/.worktrees/wt-gb118v')
+   rc=2
+
+$ --stage evidence/gb-118-v/GBFIX.BIN:../X.BIN
+[rig] STAGE REFUSED - refusing to boot a stale image: stage: guest path traversal refused: '../X.BIN'
+   rc=2
+
+$ --stage evidence/gb-118-v/GBFIX.BIN:/abs/X.BIN
+[rig] STAGE REFUSED - refusing to boot a stale image: stage: guest path must be a relative FAT name, not an absolute path that escapes the image root: '/abs/X.BIN'
+   rc=2
+

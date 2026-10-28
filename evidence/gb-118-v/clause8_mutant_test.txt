@@ -1,0 +1,25 @@
+PASS: menu parse finds slot 18
+PASS: menu parse finds PONG
+PASS: menu parse misses unknown
+PASS: resolve by name -> slot 18
+PASS: launches by name (18), ignores stale --slot 0 (false-launch fix)
+PASS: correct provided slot agrees, no warn
+PASS: unknown title -> None (FATAL path)
+PASS: derive_bin xnibbler
+PASS: derive_bin already .BIN
+PASS: manifest has game bin
+PASS: manifest has artifact hashes
+PASS: manifest sha256 matches file
+PASS: bundle dir is the evidence home
+PASS: REPORT pointer written at repo root convention
+FAIL: stage cmd is the tier's mcopy shape (rig & t3_tier agree) (mcopy -i "$ROOT/disk.img" "/home/sarah/.hermes/cache/scratch/evrig-stage-85gbns9t/HELLO.BIN" "::HELLO.BIN")
+FAIL: stage shape carries the tier's $ROOT/disk.img + ::GUEST tokens ()
+PASS: refuse guest path /etc/passwd (absolute)
+PASS: refuse guest path ../MAGIC.BIN (traversal)
+PASS: refuse guest path SUB/DIR.BIN (nested)
+PASS: refuse host path outside root
+PASS: refuse nonexistent host
+PASS: stage off by default (no second boot path imposed)
+
+Tests run: 6, failed: 2
+EVIDENCE RIG TEST FAILED
