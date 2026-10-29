@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # build.sh — build the HobbyOS browser (WebProcess) FROM THE VENDORED WebKit
-# fork source in this directory (third_party/webkit-hobbyos/, browser/rp-f
-# @ e9a040c5b4).  Source-first: everything needed to build is in the repo
+# fork source in this directory (third_party/webkit-hobbyos/, browser-usability
+# @ 34e52e12b2).  Source-first: everything needed to build is in the repo
 # snapshot; the committed cache/ binaries are optional shortcuts, never
 # required.
 #
