@@ -1,0 +1,101 @@
+diff --git a/.arch-stamp b/.arch-stamp
+index 78504ba..b6fce24 100644
+--- a/.arch-stamp
++++ b/.arch-stamp
+@@ -1 +1 @@
+-arm
+\ No newline at end of file
++intel
+\ No newline at end of file
+diff --git a/src/kernel/process.c b/src/kernel/process.c
+index 3c47bc3..7ffd418 100755
+--- a/src/kernel/process.c
++++ b/src/kernel/process.c
+@@ -1742,7 +1742,20 @@ void schedule(struct trap_frame *tf, int is_yield) {
+         extern struct vm_region *vm_region_find(struct addr_space *as, uint64_t va);
+         static int rdiag_n;
+         struct addr_space *tas = proc_table[next].as;
+-        if (tas && rdiag_n < 5) {
++        /* GB-101 clause 1: the five-probe sample always printed a healthy
++           mapping (region=yes prot=3 covers=1 cr3==as pte=1 w=1) because it
++           probes the FIRST five resumes, not the resues that fault.  Probe
++           every resume and print ONLY the anomaly, so the wave reports the
++           bad destination instead of a healthy prefix. */
++        int anom = 0;
++        if (tas) {
++          uint64_t dvp = target_sp - 320;
++          struct vm_region *rrp = vm_region_find(tas, dvp);
++          uint64_t leafp = 0;
++          int ptep = (vm_arch_walk(tas, dvp, &leafp) == 0);
++          anom = !(rrp && dvp >= rrp->base && dvp + 8 <= rrp->base + rrp->len && ptep);
++        }
++        if (tas && rdiag_n < 20 && anom) {
+           uint64_t dv = target_sp - 320;
+           struct vm_region *rr = vm_region_find(tas, dv);
+           rdiag_n++;
+@@ -1754,7 +1767,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
+                buys atomicity on the LOCKED sink.  This diagnostic can afford to
+                block, so it uses uart_puts. */
+             extern void uart_puts(const char *s);
+-            char rb[120];
++            char rb[190];
+             int ri = 0;
+             const char *p1 = "[RESUME-DIAG] pid=";
+             while (*p1 && ri < 28) rb[ri++] = *p1++;
+@@ -1788,6 +1801,56 @@ void schedule(struct trap_frame *tf, int is_yield) {
+               int cov = (dv >= rr->base && dv + 8 <= rr->base + rr->len);
+               rb[ri++] = cov ? '1' : '0';
+             }
++            /* GB-101 clause 1: the copy faults (vec=14 err=0x2) even though the
++               region is present and writable in this AS.  Heres the discriminator
++               between "no mapping in the AS" and "the AS is not the one the CPU
++               is running on": compare the AS root frame with the live CR3. */
++#ifdef __x86_64__
++            {
++              uint64_t cur_cr3;
++              __asm__ volatile("mov %%cr3, %0" : "=r"(cur_cr3));
++              cur_cr3 &= ~0xFFFULL;
++              {
++                const char *p5 = " cr3=0x";
++                while (*p5 && ri < 114) rb[ri++] = *p5++;
++              }
++              {
++                static const char hx5[] = "0123456789ABCDEF";
++                for (int sh = 60; sh >= 0 && ri < 130; sh -= 4)
++                  rb[ri++] = hx5[(cur_cr3 >> sh) & 0xF];
++              }
++              {
++                const char *p6 = " as=0x";
++                while (*p6 && ri < 138) rb[ri++] = *p6++;
++              }
++              {
++                static const char hx6[] = "0123456789ABCDEF";
++                uint64_t a = tas->root_phys & ~0xFFFULL;
++                for (int sh = 60; sh >= 0 && ri < 154; sh -= 4)
++                  rb[ri++] = hx6[(a >> sh) & 0xF];
++              }
++              {
++                const char *p7 = " match=";
++                while (*p7 && ri < 164) rb[ri++] = *p7++;
++              }
++              rb[ri++] = (cur_cr3 == (tas->root_phys & ~0xFFFULL)) ? '1' : '0';
++              /* GB-101 clause 1, second half: region_find only reads the region
++                 LIST.  The hardware faults on the PAGE TABLE, so ask the walk
++                 what the PTE actually says at the copy destination. */
++              {
++                uint64_t leaf = 0;
++                int present = (vm_arch_walk(tas, dv, &leaf) == 0);
++                const char *p8 = " pte=";
++                while (*p8 && ri < 172) rb[ri++] = *p8++;
++                rb[ri++] = present ? '1' : '0';
++                if (present) {
++                  const char *p9 = " w=";
++                  while (*p9 && ri < 180) rb[ri++] = *p9++;
++                  rb[ri++] = (leaf & 0x2ULL) ? '1' : '0';
++                }
++              }
++            }
++#endif
+             rb[ri++] = '\n';
+             rb[ri] = 0;
+             uart_puts(rb);

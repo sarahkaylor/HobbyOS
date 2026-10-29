@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log evidence/gb-101-clause1/t3_cr3.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 26173 console lines, 155 FAIL lines, 19 user memory fault records across 15 processes, 86 programs exited, halted=1
+T3_intel: FAIL — 8 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 155 FAIL line(s); first 20:
+2989:[SIGTEST] FAIL waitpid returns the child got=43 want=4294964048
+3108:MMTEST FAIL Loader (v2) starved (slot pressure): [WAVE-TRY] NL.BIN
+3313:[SEDTEST] FAIL basic_s (spawn SED.BIN failed)
+3314:[SEDTEST] FAIL s_g (cannot write fixtures)
+3315:[SEDTEST] FAIL s_2nd (cannot write fixtures)
+3316:[SEDTEST] FAIL s_p_n (cannot write fixtures)
+3357:[SEDTEST] FAIL amp (spawn SED.BIN failed)
+3358:  TLS_T errno-isolation: FAIL
+3375:[SEDTEST] FAIL backref (cannot write fixtures)
+3376:[SEDTEST] FAIL empty_reuse (cannot write fixtures)
+3377:[SEDTEST] FAIL case_I (cannot write fixtures)
+3378:[SEDTEST] FAIL addr_line_d (cannot write fixtures)
+3379:[SEDTEST] FAIL addr_range_d (cannot write fixtures)
+3380:[SEDTEST] FAIL addr_last_d (cannot write fixtures)
+3381:[SEDTEST] FAIL addr_not (cannot write fixtures)
+3382:[SEDTEST] FAIL addr_re (cannot write fixtures)
+3383:[SEDTEST] FAIL addr_re_range (cannot write fixtures)
+3389:[SEDTEST] FAIL print_all_n (cannot write fixtures)
+3390:[SEDTEST] FAIL print_last_n (cannot write fixtures)
+3391:[SEDTEST] FAIL hold_hg (cannot write fixtures)
+T3_intel EXIT=1

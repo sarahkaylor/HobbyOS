@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log evidence/gb-101-clause1/t3_pte.log) ===
+T3_intel: 12441 console lines, 81 FAIL lines, 6 user memory fault records across 6 processes, 85 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 2700s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 5 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 81 FAIL line(s); first 20:
+2879:MMTEST FAIL 13
+3139:[SEDTEST] FAIL basic_s (stdout)
+3831:[SEDTEST] FAIL s_g (stdout)
+3901:[SIGTEST] FAIL waitpid returns the child got=31 want=4294964048
+4485:[SEDTEST] FAIL s_2nd (stdout)
+5011:[SEDTEST] FAIL s_p_n (stdout)
+5357:NL.BIN: [TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+5460:[CMPTEST] FAIL EOF message on stderr
+5489:  FPU_T torture-child: FAIL
+5526:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+5533:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+5543:[TSORTTEST] FAILURES: 4
+5558:[CMPTEST] FAIL empty EOF message
+5560:[CMPTEST] FAIL missing file diagnostic
+5565:[CMPTEST] FAIL -i 4:0 skips prefix
+5568:[CMPTEST] FAIL - stdin EOF diagnostic
+5573:[CMPTEST] FAILURES: 5
+5872:[TACTEST] FAIL missing file
+5880:[TACTEST] FAIL empty separator
+5955:[TACTEST] FAILURES: 4
+T3_intel EXIT=1

@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log evidence/gb-101-clause1/t3_intel_c1.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 32165 console lines, 136 FAIL lines, 20 user memory fault records across 16 processes, 86 programs exited, halted=1
+T3_intel: FAIL — 37 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 136 FAIL line(s); first 20:
+2958:[SEDTEST] FAIL basic_s (stdout)
+2975:MMTEST FAIL [TACTEST] run: -b /TACB.TXT
+3269:[SEDTEST] FAIL s_g (stdout)
+3374:[SIGTEST] FAIL waitpid returns the child got=22 want=4294964048
+3942:[SEDTEST] FAIL s_2nd (stdout)
+7271:[SEDTEST] FAIL basic_s (stdout)
+7420:MMTEST FAIL 13
+7874:[SIGTEST] FAIL waitpid returns the child got=32 want=4294964048
+9080:FOLD.BIN/MD5SUM.BIN[SEDTEST] FAIL s_2nd (stdout)
+9280:Loading program for scheduler (v2 AS):   FPU_T torture-child: FAIL
+9981:  FPU_T fork-inherit: FAIL
+9995:/TAC.BINFPU_T FAILED: 2
+10008:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+10028:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+10112:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+10121:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+10183:/UNEXPAND.BIN[TSORTTEST] FAILURES: 4
+10323:[TACTEST] FAIL missing file
+10327:[TACTEST] FAIL empty separator
+10344:[TACTEST] FAILURES: 4
+T3_intel EXIT=1

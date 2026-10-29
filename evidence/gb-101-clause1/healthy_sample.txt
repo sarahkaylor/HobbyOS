@@ -1,0 +1,5 @@
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1 cr3=0x0000000020C04000 as=0x0000000020C04000 match=1 pte=1 w=1
+Inside process_create: lock released. pid=[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1 cr3=0x0000000020C04000 as=0x0000000020C04000 match=1 pte=1 w=1
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFE50 covers=1 cr3=0x0000000020C04000 as=0x0000000020C04000 match=1 pte=1 w=1
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFE48 covers=1 cr3=0x0000000020C04000 as=0x0000000020C04000 match=1 pte=1 w=1
+[RESUME-DIAG] pid=3 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1 cr3=0x0000000020C20000 as=0x0000000020C20000 match=1 pte=1 w=1
