@@ -106,6 +106,19 @@ static int focused_window = -1;
 static int mouse_x = SCREEN_WIDTH / 2;
 static int mouse_y = SCREEN_HEIGHT / 2;
 
+/* EV_ABS [0, 0x7FFF] -> screen pixel [0, dim-1].  Every absolute source
+ * (QEMU virtio-tablet / vmmouse, the x86 PS/2 integrator) encodes a pixel
+ * as floor(px * 0x7FFF / dim), so the inverse is the CEILING: flooring
+ * here put the pointer one pixel up/left of the host pointer for most
+ * positions, and 0x7FFF itself mapped one past the last pixel. */
+int desktop_abs_to_px(uint32_t value, int dim) {
+  if (value > 0x7FFF) value = 0x7FFF;
+  int px = (int)(((uint64_t)value * (uint64_t)dim + 0x7FFE) / 0x7FFF);
+  if (px > dim - 1) px = dim - 1;
+  if (px < 0) px = 0;
+  return px;
+}
+
 /* ---- Pointer drag support (drag & drop) ------------------------------
  * A press in the content area of a window that opted into mouse events
  * (ESC ] P 1 ~) opens a "drag session" for that window. While the button is
@@ -1586,6 +1599,15 @@ int desktop_damage(const struct desktop_chrome *prev,
 
 static void present_add(struct fb_rect *out, int *n, int max, int x, int y,
                         int w, int h) {
+  /* Clip to the screen: the kernel rejects the WHOLE present call when any
+   * rect pokes outside the framebuffer (SEC-7 boundary validation), and the
+   * pointer cell (hotspot - 1 .. + 10x14) does exactly that at the screen
+   * edges -- the frame's restore of the old sprite was then never shown,
+   * leaving a ghost cursor (typically top-left after a big move). */
+  if (x < 0) { w += x; x = 0; }
+  if (y < 0) { h += y; y = 0; }
+  if (x + w > SCREEN_WIDTH) w = SCREEN_WIDTH - x;
+  if (y + h > SCREEN_HEIGHT) h = SCREEN_HEIGHT - y;
   if (w <= 0 || h <= 0) return;
   for (int i = 0; i < *n; i++) {
     if (out[i].x == x && out[i].y == y && out[i].w == w && out[i].h == h)
@@ -2251,10 +2273,10 @@ int main(void) {
         }
       } else if (ev->type == EV_ABS) {
         if (ev->code == ABS_X) {
-          mouse_x = (ev->value * SCREEN_WIDTH) / 0x7FFF;
+          mouse_x = desktop_abs_to_px(ev->value, SCREEN_WIDTH);
           needs_redraw = 1;
         } else if (ev->code == ABS_Y) {
-          mouse_y = (ev->value * SCREEN_HEIGHT) / 0x7FFF;
+          mouse_y = desktop_abs_to_px(ev->value, SCREEN_HEIGHT);
           needs_redraw = 1;
         }
         /* Pointer motion during a drag session is forwarded to the window. */
