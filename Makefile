@@ -254,7 +254,12 @@ ifeq ($(ARCH),intel)
   # misbehaves on a host, plain `-device virtio-gpu-pci -vga none` is the
   # lane-G2-verified equivalent (the driver negotiates VIRTIO_F_VERSION_1
   # only, so the gl variant's virgl capability is simply not negotiated).
-  QEMU_CMD = $(QEMU) -M q35 -smp $(QEMU_SMP) -m 12288M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 $(GX_X64_GPU_DEV) -action shutdown=poweroff $(QEMU_ARGS)
+  # Pointer: vmport=on (q35's default, made explicit) exposes the VMware
+  # backdoor "vmmouse" the kernel switches to absolute mode
+  # (src/kernel/virtio_input.c), so the GTK window needs no pointer grab and
+  # the guest cursor sits exactly under the host pointer; the PS/2 mouse
+  # (IntelliMouse, wheel) remains the fallback when vmport is off.
+  QEMU_CMD = $(QEMU) -M q35,vmport=on -smp $(QEMU_SMP) -m 12288M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 $(GX_X64_GPU_DEV) -action shutdown=poweroff $(QEMU_ARGS)
 else
   # Default to ARM
   QEMU = qemu-system-aarch64
