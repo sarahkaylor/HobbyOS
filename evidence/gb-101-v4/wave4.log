@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 300s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/verify-gb101v4/obj/t3_intel.log) ===
+T3_intel: 46676 console lines, 192 FAIL lines, 33 user memory fault records across 23 processes, 83 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 300s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 31 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 192 FAIL line(s); first 20:
+2776:MMTEST FAIL 13
+3261:[SIGTEST] FAIL waitpid returns the child got=42 want=4294964048
+3458:[SEDTEST] FAIL basic_s (stdout)
+4195:[SEDTEST] FAIL s_g (stdout)
+5064:[SEDTEST] FAIL s_2nd (stdout)
+7594:MMTEST FAIL 13
+8440:[SEDTEST] FAIL basic_s (stdout)
+8793:[SIGTEST] FAIL waitpid returns the child got=15 want=4294964048
+8846:[SEDTEST] FAIL s_g (stdout)
+8899:[TEST] DIRECT-ext-cat FAIL (empty target, no load failure)
+9486:[SEDTEST] FAIL s_2nd (stdout)
+9905:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+9928:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+9959:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+9965:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+10012:[TSORTTEST] FAILURES: 4
+10053:/MD5SUM.BIN[SEDTEST] FAIL s_p_n (stdout)
+10285:[CMPTEST] FAIL EOF message on stderr
+10308:[CMPTEST] FAIL empty EOF message
+10312:[CMPTEST] FAIL missing file diagnostic
+T3_intel EXIT=1

@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 300s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/verify-gb101v4/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 15153 console lines, 86 FAIL lines, 11 user memory fault records across 11 processes, 87 programs exited, halted=1
+T3_intel: FAIL — 11 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 86 FAIL line(s); first 20:
+2280:MMTEST FAIL 13
+2873:[SIGTEST] FAIL waitpid returns the child got=50 want=4294964048
+3494:[SEDTEST] FAIL basic_s (stdout)
+3830:TAC.BIN  FPU_T torture-child: FAIL
+4167:[SEDTEST] FAIL s_g (stdout)
+6837:MMTEST FAIL 13
+7374:[SIGTEST] FAIL waitpid returns the child got=27 want=4294964048
+7756:[SEDTEST] FAIL basic_s (stdout)
+8267:Loading program for scheduler (v2 AS): [SEDTEST] FAIL s_g (stdout)
+8417:  FPU_T torture-child: FAIL
+9029:[SEDTEST] FAIL s_2nd (stdout)
+9090:  FPU_T fork-inherit: FAIL
+10179:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+10240:[CMPTEST] FAIL EOF message on stderr
+10268:[CMPTEST] FAIL empty EOF message
+10316:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+10320:[CMPTEST] FAIL missing file diagnostic
+10325:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+10351:[TSORTTEST] FAILURES: 4
+10355:[CMPTEST] FAIL -i 4:0 skips prefix
+T3_intel EXIT=1

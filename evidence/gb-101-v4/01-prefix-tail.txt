@@ -1,0 +1,9 @@
+== PRE-FIX-98fc494: common_trap_exit 0x7003d7bc..0x7003d88b (207 bytes)
+   add rsp,+264   rsp now frame+264
+   add rsp,+16    rsp now frame+280
+   push rax/rcx     store lands at frame+272
+   push rax/rcx     store lands at frame+264
+   lea rdi,[rsp+0x10]  -> &frame argument = frame+280
+   call 0x234    return address lands at frame+256
+   iretq
+

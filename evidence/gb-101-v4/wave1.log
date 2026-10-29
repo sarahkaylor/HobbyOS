@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 300s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/verify-gb101v4/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 15955 console lines, 97 FAIL lines, 11 user memory fault records across 9 processes, 83 programs exited, halted=1
+T3_intel: FAIL — 12 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 97 FAIL line(s); first 20:
+2418:MMTEST FAIL 13
+2873:[SEDTEST] FAIL basic_s (stdout)
+2891:[SIGTEST] FAIL waitpid returns the child got=23 want=4294964048
+3309:  FPU_T torture-child: FAIL
+3987:/PASTE.BIN[SEDTEST] FAIL s_g (stdout)
+4373:  FPU_T fork-inherit: FAIL
+4418:FPU_T FAILED: 2
+4437:/GREP.BIN[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+4446:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+4619:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+4627:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+4663:[TSORTTEST] FAILURES: 4
+5036:: No such file or directory[TEST] DIRECT-ext-cat FAIL (empty target, no load failure)
+5261:[CMPTEST] FAIL empty EOF message
+5265:[CMPTEST] FAIL missing file diagnostic
+5326:[CMPTEST] FAIL -i 4:0 skips prefix
+5354:FOLD.BIN[CMPTEST] FAIL - stdin EOF diagnostic
+5362:[CMPTEST] FAILURES: 5
+7903:[SIGTEST] FAIL waitpid returns the child got=20 want=4294964048
+8151:MMTEST FAIL /CMP.BIN
+T3_intel EXIT=1

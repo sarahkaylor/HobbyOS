@@ -1,0 +1,9 @@
+== FIXED-d50be85: common_trap_exit 0x7003ccec..0x7003cdbe (210 bytes)
+   push rax/rcx     store lands at frame-8
+   push rax/rcx     store lands at frame-16
+   lea rdi,[rsp+0x128]  -> &frame argument = frame+280
+   call 0x244    return address lands at frame-24
+   add rsp,+264   rsp now frame+240
+   add rsp,+16    rsp now frame+256
+   iretq
+

@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 300s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/verify-gb101v4/obj/t3_intel.log) ===
+T3_intel: 19961 console lines, 105 FAIL lines, 11 user memory fault records across 9 processes, 86 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 300s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 22 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 105 FAIL line(s); first 20:
+2647:[SIGTEST] FAIL waitpid returns the child got=36 want=4294964048
+2655:MMTEST FAIL v2 loader: PID=36 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+3288:Loading program for scheduler (v2 AS): [SEDTEST] FAIL basic_s (stdout)
+3893:  FPU_T torture-child: FAIL
+4167:/GREP.BIN[SEDTEST] FAIL s_g (stdout)
+4491:/MD5ABC.TXT  FPU_T fork-inherit: FAIL
+4568:FPU_T FAILED: 2
+4765:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+4816:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+4887:[SEDTEST] FAIL s_2nd (stdout)
+4945:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+4956:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (st[dKEerRNrE)L]
+5175:[TSORTTEST] FAILURES: 4
+5265:[CMPTEST] FAIL EOF message on stderr
+6784:/PASTE.BIN[SEDTEST] FAIL backref (stdout)
+10541:[SIGTEST] FAIL waitpid returns the child got=17 want=4294964048
+10592:MMTEST FAIL 13
+11069:[SEDTEST] FAIL basic_s (stdout)
+11970:[SEDTEST] FAIL s_g (stdout)
+12445:[TEST] DIRECT-ext-cat FAIL (empty target, no load failure)
+T3_intel EXIT=1
