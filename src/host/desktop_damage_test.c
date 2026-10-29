@@ -266,7 +266,8 @@ static void pc_bail(const char *msg) {
 }
 
 /* The desktop's pointer math, so the expectations cannot drift. */
-static int pc_absx(uint32_t raw) { return (int)((raw * SCREEN_WIDTH) / 0x7FFF); }
+/* Mirrors desktop_abs_to_px: the ceiling inverse of floor(px*0x7FFF/W). */
+static int pc_absx(uint32_t raw) { return (int)((raw * SCREEN_WIDTH + 0x7FFE) / 0x7FFF); }
 
 static int pc_has_rect(int x, int y, int w, int h) {
   for (int i = 0; i < mock_flush_rect_count; i++) {
@@ -276,11 +277,24 @@ static int pc_has_rect(int x, int y, int w, int h) {
   return 0;
 }
 
+static int pc_rejected_presents = 0;
+
 /* Apply the just-recorded present to the presented-screen shadow. */
 static void pc_apply_present(void) {
   if (mock_flush_last_full) {
     memcpy(pc_shadow, pc_fb, sizeof pc_shadow);
     return;
+  }
+  /* Model the kernel: SYS_FLUSH_FB_RECTS rejects the WHOLE call when any
+   * rect lies (even partly) outside the framebuffer (virtio_gpu_flush_args_ok)
+   * -- nothing of that frame reaches the screen. */
+  for (int i = 0; i < mock_flush_rect_count; i++) {
+    const struct fb_rect *r = &mock_flush_rects[i];
+    if (r->x < 0 || r->y < 0 || r->w <= 0 || r->h <= 0 ||
+        r->x + r->w > SCREEN_WIDTH || r->y + r->h > SCREEN_HEIGHT) {
+      pc_rejected_presents++;
+      return;
+    }
   }
   for (int i = 0; i < mock_flush_rect_count; i++) {
     int x0 = mock_flush_rects[i].x, y0 = mock_flush_rects[i].y;
@@ -307,6 +321,8 @@ enum {
   PC_CLOCK,         /* frame 5: clock tick           -> clock cell        */
   PC_ROW,           /* frame 6: text repair          -> band + pointer    */
   PC_DRAG,          /* frame 7: drag motion          -> cursor rects      */
+  PC_CORNER,        /* frame 8: pointer at (0,0)     -> clipped rects     */
+  PC_LEAVE,         /* frame 9: pointer leaves corner-> old sprite erased */
   PC_CONVERGE       /* frame 8: quiet frame          -> empty present     */
 };
 
@@ -407,12 +423,32 @@ static void pc_recorder(void) {
       /* Release: the next frame paints nothing; the presented screen built
        * from the recorded presents must now equal the framebuffer. */
       inject_mock_event(EV_KEY, 0x110, 0);
-      pc_state = PC_CONVERGE;
+      /* Ghost-cursor regression: park the pointer in the top-left corner.
+       * Its sprite cell (hotspot-1 .. +10x14) pokes off-screen there. */
+      inject_mock_event(EV_ABS, ABS_X, 0);
+      inject_mock_event(EV_ABS, ABS_Y, 0);
+      pc_state = PC_CORNER;
       break;
     }
 
+  case PC_CORNER:
+    pc_check(pc_rejected_presents == 0 && mock_flush_rect_count >= 1 &&
+             pc_has_rect(0, 0, 9, 13),
+             "corner pointer: present rects clipped to the screen (not rejected)");
+    inject_mock_event(EV_ABS, ABS_X, PC_MOVE1_RAW);
+    inject_mock_event(EV_ABS, ABS_Y, 0x4000);
+    pc_state = PC_LEAVE;
+    break;
+
+  case PC_LEAVE:
+    pc_check(pc_rejected_presents == 0 && pc_has_rect(0, 0, 9, 13),
+             "leaving the corner: the old sprite cell is presented (no ghost)");
+    inject_mock_event(EV_ABS, ABS_Y, 0x4000);  /* same spot: a quiet frame */
+    pc_state = PC_CONVERGE;
+    break;
+
   case PC_CONVERGE:
-    pc_check(mock_flush_full_count == 2 && mock_flush_rect_calls == 6 &&
+    pc_check(mock_flush_full_count == 2 && mock_flush_rect_calls == 8 &&
              !mock_flush_last_full && mock_flush_rect_count == 0,
              "quiet frame: empty present (count 0), still no full flush");
     pc_check(memcmp(pc_shadow, pc_fb, sizeof pc_shadow) == 0,
