@@ -1,0 +1,28 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/wabi-gb101/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 10930 console lines, 82 FAIL lines, 6 user memory fault records across 6 processes, 83 programs exited, halted=1
+T3_intel: FAIL — 15 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 82 FAIL line(s); first 20:
+2629:MMTEST FAIL 13
+2741:[SIGTEST] FAIL waitpid returns the child got=44 want=4294964048
+3177:[SEDTEST] FAIL basic_s (stdout)
+4042:[SEDTEST] FAIL s_g (stdout)
+4244:  FPU_T torture-child: FAIL
+4911:  FPU_T fork-inherit: FAIL
+4928:FPU_T FAILED: 2
+5149:[CMPTEST] FAIL EOF message on stderr
+5157:[CMPTEST] FAIL empty EOF message
+5166:[CMPTEST] FAIL missing file diagnostic
+5197:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+5202:/SEDT.IN[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+5337:[CMPTEST] FAIL -i 4:0 skips prefix
+5363:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+5371:[CMPTEST] FAIL - stdin EOF diagnostic
+5405:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+5407:[CMPTEST] FAILURES: 5
+5448:[SEDTEST] FAIL s_p_n (stdout)
+5477:[TSORTTEST] FAILURES: 4
+5630:[TACTEST] FAIL missing file
+T3_intel EXIT=1
+EXIT=1
