@@ -1,0 +1,24 @@
+
+hobbyos.elf:     file format elf32-i386
+
+
+Disassembly of section .text:
+
+7003d85c <common_trap_exit+0xa0>:
+7003d85c:	48 89 84 24 18 01 00 	mov    %rax,0x118(%rsp)
+7003d863:	00 
+7003d864:	48 8b 04 24          	mov    (%rsp),%rax
+7003d868:	48 81 c4 08 01 00 00 	add    $0x108,%rsp
+7003d86f:	48 83 c4 10          	add    $0x10,%rsp
+7003d873:	50                   	push   %rax
+7003d874:	51                   	push   %rcx
+7003d875:	48 8d 7c 24 10       	lea    0x10(%rsp),%rdi
+7003d87a:	e8 71 01 00 00       	call   7003d9f0 <trap_exit_frame_check>
+7003d87f:	59                   	pop    %rcx
+7003d880:	58                   	pop    %rax
+7003d881:	48 8b bc 24 10 ff ff 	mov    -0xf0(%rsp),%rdi
+7003d888:	ff 
+7003d889:	48 cf                	iretq
+
+7003d88b <enter_user_space>:
+7003d88b:	49                   	rex.WB
