@@ -1,0 +1,69 @@
+diff --git a/src/kernel/arch/x64/trap.c b/src/kernel/arch/x64/trap.c
+index 9658c02..8f9d18c 100755
+--- a/src/kernel/arch/x64/trap.c
++++ b/src/kernel/arch/x64/trap.c
+@@ -2265,6 +2265,14 @@ static volatile uint64_t wd_last_seen_ms[MAX_CPUS];
+ static volatile uint64_t wd_last_seen_rip[MAX_CPUS];
+ static volatile uint64_t wd_last_seen_rflags[MAX_CPUS];
+ static volatile uint64_t wd_last_vector[MAX_CPUS];
++/* GB-123: the trap frame's vector/cs/ss slots as they were AT ENTRY, per CPU.
++   The card's claim is that the frame is torn after entry by the exit path's own
++   return-address pushes; comparing these against what the fatal print reads
++   proves or falsifies it for the frame that actually died. */
++static volatile uint64_t gb123_entry_vector[MAX_CPUS];
++static volatile uint64_t gb123_entry_cs[MAX_CPUS];
++static volatile uint64_t gb123_entry_ss[MAX_CPUS];
++static volatile uint64_t gb123_entry_tf[MAX_CPUS];
+ static volatile uint64_t wd_last_err[MAX_CPUS];
+ static volatile uint64_t wd_last_cr2[MAX_CPUS];
+ static volatile int wd_last_seen_pid[MAX_CPUS];
+@@ -2662,6 +2670,20 @@ static void general_interrupt_inner(struct trap_frame *tf) {
+      tier's FAIL-line grep names it), halt-record (GB-060, so a lock a stopped
+      CPU held is recoverable and other cores don't spin behind it forever), and
+      stop THIS CPU rather than run an unknown-vector path on a bogus frame. */
++  {
++    /* GB-123 clause 1: snapshot the frame slots AT ENTRY, so the fatal print can
++       prove whether the corruption happened after the handler took the frame
++       (the card's claim) or before.  Per-CPU, indexed by cpu, overwritten on
++       every entry -- only read when the fatal path runs, i.e. immediately. */
++    extern uint32_t get_cpuid(void);
++    {
++      uint32_t c0 = get_cpuid() & (MAX_CPUS - 1);
++      gb123_entry_vector[c0] = (uint64_t)tf->vector;
++      gb123_entry_cs[c0] = (uint64_t)tf->cs;
++      gb123_entry_ss[c0] = (uint64_t)tf->ss;
++      gb123_entry_tf[c0] = (uint64_t)(uintptr_t)tf;
++    }
++  }
+   {
+     extern void uart_puts_raw(const char *s);
+     extern void uart_print_hex_raw(uint64_t v);
+@@ -3091,6 +3113,28 @@ static void general_interrupt_inner(struct trap_frame *tf) {
+       print_int_raw((int)tf->vector);
+       uart_puts_raw(" rip=");
+       uart_print_hex_raw((uint64_t)tf->elr);
++      /* GB-123: was this frame coherent when the handler took it?  Same-CPU
++         snapshot from the top of this function.  A mismatch here is an observed
++         in-place tear BETWEEN entry and this print -- the card's claim.  A match
++         with a garbage vector means the CPU pushed that frame itself. */
++      {
++        uint32_t c1 = get_cpuid() & (MAX_CPUS - 1);
++        uint64_t ev = gb123_entry_vector[c1], ecs = gb123_entry_cs[c1], ess = gb123_entry_ss[c1];
++        if (gb123_entry_tf[c1] == (uint64_t)(uintptr_t)tf) {
++          uart_puts_raw(" | GB123 entry: vector=");
++          print_int_raw((int)ev);
++          uart_puts_raw(" cs=");
++          uart_print_hex_raw(ecs);
++          uart_puts_raw(" ss=");
++          uart_print_hex_raw(ess);
++          uart_puts_raw(" now: cs=");
++          uart_print_hex_raw((uint64_t)tf->cs);
++          uart_puts_raw(" ss=");
++          uart_print_hex_raw((uint64_t)tf->ss);
++          uart_puts_raw((ev != (uint64_t)tf->vector || ecs != (uint64_t)tf->cs ||
++                         ess != (uint64_t)tf->ss) ? " TEAR=yes" : " TEAR=no");
++        }
++      }
+       uart_puts_raw(" cr2=");
+       {
+         uint64_t fatal_cr2;
