@@ -1,0 +1,9 @@
+PASS: both exit tails still call the frame check (2 site(s))
+FAIL: tail 1: rsp is NOT advanced past the frame before the check
+FAIL: tail 1: the check gets [rsp + 296] (frame+280) from a rsp below the frame (lea@+-1 early_lea@+872)
+FAIL: tail 1: the frame is still consumed before iretq
+FAIL: tail 2: rsp is NOT advanced past the frame before the check
+FAIL: tail 2: the check gets [rsp + 296] (frame+280) from a rsp below the frame (lea@+-1 early_lea@+872)
+FAIL: tail 2: the frame is still consumed before iretq
+
+TRAP_EXIT_FRAME_ORDER_TEST: FAIL — 6
