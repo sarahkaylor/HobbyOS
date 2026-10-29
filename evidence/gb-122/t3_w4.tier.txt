@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log evidence/gb-122/t3_w4.log) ===
+T3_intel: 15079 console lines, 30 FAIL lines, 6 user memory fault records across 5 processes, 85 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 2700s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 2 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 30 FAIL line(s); first 20:
+2367:MMTEST FAIL /EXPAND.BIN
+2654:[SIGTEST] FAIL waitpid returns the child got=39 want=4294964048
+2716:[SEDTEST] FAIL basic_s (stdout)
+3007:  FPU_T torture-child: FAIL
+3344:  FPU_T fork-inherit: FAIL
+3351:FPU_T FAILED: 2
+4077:[SEDTEST] FAIL s_g (stdout)
+4674:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+4695:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+4738:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+4745:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+4848:[SEDTEST] FAIL s_2nd (stdout)
+4863:[TSORTTEST] FAILURES: 4
+5116:/TEST1.TXT[CMPTEST] FAIL EOF message on stderr
+5126:[CMPTEST] FAIL empty EOF message
+5130:[CMPTEST] FAIL missing file diagnostic
+5141:[CMPTEST] FAIL -i 4:0 skips prefix
+5147:/TEST3.TXT[CMPTEST] FAIL - stdin EOF diagnostic
+5155:/COMM.BIN[CMPTEST] FAILURES: 5
+5350:[SEDTEST] FAIL s_p_n (stdout)
+T3_intel EXIT=1

@@ -1756,7 +1756,13 @@ void schedule(struct trap_frame *tf, int is_yield) {
          (b'): materialise the stack's top page at AS build), and this site
          keeps only the read-only complement: walk the PTE and refuse to iretq
          into a page that is not there, naming the process. */
-      int user_dest = (target_sp - 320) >= USER_VA_BASE && (target_sp - 320) < USER_VA_TOP;
+      /* Only resumes that land in the stack's TOP page can be this defect --
+         measured destinations were 0x17FFFFF388 / 0x17FFFFF2F8 / 0x17FFFFFDF8.
+         Scoping the walk this way keeps it off the per-resume path: a walk on
+         every user resume measured the wave out to the 2700s deadline (17294
+         lines, halted=0), which is its own regression. */
+      int user_dest = (target_sp - 320) >= USER_VA_BASE && (target_sp - 320) < USER_VA_TOP &&
+                      (target_sp - 320) >= (USER_MAIN_STK_TOP_V2 - FRAME_SIZE);
       if (user_dest && vm_arch_walk(proc_table[next].as, target_sp - 320, 0) != 0) {
         /* (c) as a complement: a destination the AS refuses to materialise is a
            stale/torn target_sp.  Name it and do not iretq into it -- a halt
