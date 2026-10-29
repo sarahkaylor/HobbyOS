@@ -1,0 +1,28 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/wabi-gb101/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 11338 console lines, 77 FAIL lines, 5 user memory fault records across 5 processes, 81 programs exited, halted=1
+T3_intel: FAIL — 13 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 77 FAIL line(s); first 20:
+2183:MMTEST FAIL 13
+3406:[SIGTEST] FAIL waitpid returns the child got=24 want=4294964048
+3566:  FPU_T torture-child: FAIL
+3679:[SEDTEST] FAIL basic_s (stdout)
+4407:Loading program for scheduler (v2 AS): /FOLD.BIN[SEDTEST] FAIL s_g (stdout)
+4679:  FPU_T fork-inherit: FAIL
+4697:FPU_T FAILED: 2
+5380:[SEDTEST] FAIL s_2nd (stdout)
+5591:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+5680:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+5718:/FOLD.BIN[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+5731:Loading program for scheduler (v2 AS): COMM.BIN[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+5884:[TSORTTEST] FAILURES: 4
+6306:EXPAND.BIN[CMPTEST] FAIL EOF message on stderr
+6335:[CMPTEST] FAIL empty EOF message
+6344:[CMPTEST] FAIL missing file diagnostic
+6372:[CMPTEST] FAIL -i 4:0 skips prefix
+6381:Loading program for scheduler (v2 AS): [CMPTEST] FAIL - stdin EOF diagnostic
+6420:[CMPTEST] FAILURES: 5
+6444:[TACTEST] FAIL missing file
+T3_intel EXIT=1
+EXIT=1
