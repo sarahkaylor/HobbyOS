@@ -1,0 +1,14 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1800s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb125-verify/evidence/gb-122/39-both-wave.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 735 console lines, 0 FAIL lines, 0 user memory fault records across 0 processes, 68 programs exited, halted=1
+T3_intel: PASS (0 FAIL lines, halted, no kernel fault, 735 lines)
+=== t4_w0: W0 corpus gate over /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb125-verify/evidence/gb-122/39-both-wave.log ===
+  PASS HELLO (arrived in guest)
+  PASS SH (arrived in guest)
+  PASS CAT (arrived in guest)
+  PASS LS (arrived in guest)
+t4_w0: PASS — every W0 corpus member arrived in the intel wave; members emitting a
+               '[W0] <member> linux=' marker had their output verified against the
+               Linux-leg .ref corpus (a mismatched marker FAILs).
+T3_intel EXIT=0

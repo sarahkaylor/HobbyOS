@@ -1,0 +1,738 @@
+ld.lld -T linker_x64.ld -o hobbyos.elf obj/intel/boot.o obj/intel/setjmp.o obj/intel/abi_t2_test.o obj/intel/audio_stub.o obj/intel/blk_cache.o obj/intel/blk_cache_press_test.o obj/intel/blk_cache_test.o obj/intel/dhcp.o obj/intel/elf_image.o obj/intel/elf_loader.o obj/intel/evdev.o obj/intel/evdev_test.o obj/intel/fat16.o obj/intel/fat16_test.o obj/intel/fb_ioctl.o obj/intel/fb_ioctl_test.o obj/intel/fb_mmap.o obj/intel/fb_mmap_test.o obj/intel/frame.o obj/intel/frame_test.o obj/intel/fs.o obj/intel/fs_test.o obj/intel/input_node.o obj/intel/input_node_test.o obj/intel/iommu_vtd.o obj/intel/ipc_proto.o obj/intel/linux_uname.o obj/intel/lock_order.o obj/intel/locks_test.o obj/intel/main.o obj/intel/math_test.o obj/intel/mmu_test.o obj/intel/net.o obj/intel/net_rdma.o obj/intel/net_rdma_test.o obj/intel/net_test.o obj/intel/nfs.o obj/intel/nfs_proto.o obj/intel/nfs_test.o obj/intel/pipe.o obj/intel/pipe_test.o obj/intel/process.o obj/intel/process_test.o obj/intel/program_loader.o obj/intel/program_loader_test.o obj/intel/ssp.o obj/intel/test_fw_cfg.o obj/intel/test_smp.o obj/intel/time.o obj/intel/time_test.o obj/intel/timer_test.o obj/intel/trap_test.o obj/intel/unit_test.o obj/intel/unix.o obj/intel/unix_test.o obj/intel/vfs.o obj/intel/virtio_blk.o obj/intel/virtio_blk_test.o obj/intel/virtio_gpu.o obj/intel/virtio_gpu_test.o obj/intel/virtio_gpu_x64.o obj/intel/virtio_input.o obj/intel/virtio_input_test.o obj/intel/virtio_net.o obj/intel/virtio_net_test.o obj/intel/vm.o obj/intel/vm_test.o obj/intel/cpu.o obj/intel/fpu.o obj/intel/gic.o obj/intel/locks.o obj/intel/mmu.o obj/intel/rtc.o obj/intel/smp.o obj/intel/timer.o obj/intel/trap.o obj/intel/uart.o
+llvm-objcopy -I elf64-x86-64 -O elf32-i386 hobbyos.elf
+qemu-system-x86_64 -M q35 -smp 8 -m 12288M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56  -action shutdown=poweroff -display none -enable-kvm
+WARNING: Image format was not specified for '/home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd' and probing guessed raw.
+         Automatically detecting the format is dangerous for raw images, write operations on block 0 will be restricted.
+         Specify the 'raw' format explicitly to remove the restrictions.
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+BdsDxe: starting Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+[001;001H[001;001H[UART] lock @ 0x000000007557fdc8
+Booting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+VirtIO GPU: BGA
+VirtIO GPU successfully initialized.
+Original CCB: 0x0000000000000047
+Modified CCB: 0x0000000000000047
+VirtIO Input devices successfully initialized.
+[FRAME] frames=1376256 total_mib=5376 reserved=0
+[KERNEL] Activating secondary cores via LAPIC IPIs...
+[KERNEL] smp_init: copying trampoline code...
+[KERNEL] smp_init: trampoline copied.
+[KERNEL] smp_init: Sending INIT IPI to core 1...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 1 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 2...
+start_scheduler called on CPU [KERNEL] smp_init: Waiting after INIT IPI...
+1
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 2 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 3...
+start_scheduler called on CPU [KERNEL] smp_init: Waiting after INIT IPI...
+2
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU [KERNEL] Core 3
+3 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 4...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 4 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 5...
+start_scheduler called on CPU 4
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU [KERNEL] Core 55 power-on acknowledged.
+
+[KERNEL] smp_init: Sending INIT IPI to core 6...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 6 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 7...
+start_scheduler called on CPU [KERNEL] smp_init: Waiting after INIT IPI...
+6
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 7 power-on acknowledged.
+start_scheduler called on CPU 7
+[KERNEL] LAPIC timer rate: 62566 counts/ms, TSC rate: 2596273 ticks/ms (PIT-counter calibrated)
+Found NVMe controller on PCI bus!
+PCI Config Space of NVMe:
+0x0000000000101B36 0x0000000000100007 0x0000000001080202 0x0000000000000000 
+0x0000000081000004 0x0000000000000000 0x0000000000000000 0x0000000000000000 
+0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000011001AF4 
+0x0000000000000000 0x0000000000000040 0x0000000000000000 0x000000000000010B 
+NVMe BAR0 Phys: 0x0000000081000000 (Mapped to Virtual: 0x00000001FC000000)
+Resetting controller, waiting for CSTS.RDY = 0...
+Controller reset complete!
+Enabling controller... CC=0x0000000000460001 CSTS=0x0000000000000001
+Controller enabled successfully!
+Create IO CQ Status: 0x0000000000000000
+Create IO SQ Status: 0x0000000000000000
+NVMe driver initialized successfully!
+VirtIO Block successfully initialized.
+FAT-16 filesystem successfully initialized.
+[VIRTIO_NET] PCI Interrupt Line: 10 (Vector: 42)
+[VIRTIO_NET] MAC Address: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+[VIRTIO_NET] RX queue size: 256 rx_vq address: 0x00000000753F4000 PFN: 0x00000000000753F4
+[VIRTIO_NET] TX queue size: 256 tx_vq address: 0x00000000753F7000 PFN: 0x00000000000753F7
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Discover sent
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP initialization complete.
+[RDMA] Remote PCIe sharing is INACTIVE (no startup parameter).
+
+--- Parallel Program Loading ---
+Mode: TEST - Running automated tests...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=1
+Inside process_create: clearing memory at 0x0000000022000000
+Inside process_create: kmemset done.
+[GB-032] SDL test-app exec: SKIP (GB-013 compat exec leg not open; app + static-PIE ELF props proven on host by sdl_test_app_test_host)
+start_scheduler called on CPU [ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+0
+  [ALIVE-SET] slot=1 pid=1 st=3 parent=-1 claimed_by=3 
+[RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
+[RESUME-SPSR] pid=1 spsr=0x00000202 IF=1
+/WAVE.CFG
+[WAVE-TRY] SUBPRB.BIN
+Loading program for scheduler (v2 AS): SUBPRB.BIN
+Inside process_create: acquiring lock...
+[RESUME-SPSR] pid=1 spsr=0x00000293 IF=1
+Inside process_create: lock released. pid=2 block_idx=-1
+/SUBPRB.BIN
+v2 loader: image mapped (lazy), bytes=65352 pages=16 first=in elap=1ms
+[RESUME-SPSR] pid=1 spsr=0x00000297 IF=1
+v2 loader: PID=2 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] SUBPRB.BIN rc>0
+[WAVE-TRY] SHTEST.BIN
+Loading program for scheduler (v2 AS): SHTEST.BIN
+Inside process_create: acquiring lock...
+[RESUME-NOMAP] refusing to resume pid=2 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[RESUME-SPSR] pid=1 spsr=0x00000297 IF=1
+Inside process_create: lock released. pid=3 block_idx=-1
+[KERNEL] Process 2: SUBPRB.BIN exited unexpectedly or gracefully.
+/SHTEST.BIN[EXITPC] pid=2 last_user_pc=0x0
+
+v2 loader: image mapped (lazy), bytes=68328 pages=17 first=in elap=1ms
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] SHTEST.BIN rc>0
+[WAVE-TRY] SHTEST2.BIN
+[RESUME-DIAG] pid=3 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1
+Loading program for scheduler (v2 AS): SHTEST2.BIN
+[RESUME-NOMAP] refusing to resume pid=3 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+Inside process_create: acquiring lock...
+[KERNEL] Process 3: SHTEST.BIN exited unexpectedly or gracefully.
+Inside process_create: lock released. pid=4 block_idx=-1
+/SHTEST2.BIN
+[EXITPC] pid=3 last_user_pc=0x0
+v2 loader: image mapped (lazy), bytes=63160 pages=16 first=in elap=1ms
+v2 loader: PID=4 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] SHTEST2.BIN rc>0
+[WAVE-TRY] SHTEST3.BIN
+Loading program for scheduler (v2 AS): SHTEST3.BIN
+/SHTEST3.BIN
+v2 loader: image mapped (lazy), bytes=63288 pages=16 first=in elap=1ms
+[RESUME-DIAG] pid=4 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1
+v2 loader: PID=5 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=4 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[RESUME-DIAG] pid=5 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1
+[KERNEL] Process 4: SHTEST2.BIN exited unexpectedly or gracefully.
+[RESUME-NOMAP] refusing to resume pid=5 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[EXITPC] pid=4 last_user_pc=0x0
+[KERNEL] Process 5: SHTEST3.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=5 last_user_pc=0x0
+[ARRIVED] SHTEST3.BIN rc>0
+[WAVE-TRY] CONSOLE.BIN
+Loading program for scheduler (v2 AS): CONSOLE.BIN
+/CONSOLE.BIN
+v2 loader: image mapped (lazy), bytes=55720 pages=14 first=in elap=1ms
+v2 loader: PID=6 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] CONSOLE.BIN rc>0
+[WAVE-TRY] MEMTEST.BIN
+Loading program for scheduler (v2 AS): MEMTEST.BIN
+/MEMTEST.BIN
+v2 loader: image mapped (lazy), bytes=55720 pages=14 first=in elap=1ms
+[RESUME-DIAG] pid=6 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1
+v2 loader: PID=7 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=6 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[RESUME-DIAG] pid=7 region=yes prot=3 dest=0x00000017FFFFFEB8 covers=1
+[KERNEL] Process 6: CONSOLE.BIN exited unexpectedly or gracefully.
+[RESUME-NOMAP] refusing to resume pid=7 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[EXITPC] pid=6 last_user_pc=0x0
+[KERNEL] Process 7: MEMTEST.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=7 last_user_pc=0x0
+[ARRIVED] MEMTEST.BIN rc>0
+[WAVE-TRY] FILEIO.BIN
+Loading program for scheduler (v2 AS): FILEIO.BIN
+/FILEIO.BIN
+v2 loader: image mapped (lazy), bytes=55992 pages=14 first=in elap=1ms
+v2 loader: PID=8 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] FILEIO.BIN rc>0
+[WAVE-TRY] BLKTEST.BIN
+Loading program for scheduler (v2 AS): BLKTEST.BIN
+/BLKTEST.BIN
+v2 loader: image mapped (lazy), bytes=76024 pages=19 first=in elap=1ms
+[RESUME-NOMAP] refusing to resume pid=8 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[KERNEL] Process 8: FILEIO.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=8 last_user_pc=0x0
+v2 loader: PID=9 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=9 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[ARRIVED] BLKTEST.BIN rc>0
+[WAVE-TRY] FATBIG_T.BIN
+Loading program for scheduler (v2 AS): FATBIG_T.BIN[KERNEL] Process 9: BLKTEST.BIN exited unexpectedly or gracefully.
+
+[EXITPC] pid=9 last_user_pc=0x0
+/FATBIG_T.BIN
+v2 loader: image mapped (lazy), bytes=48040 pages=12 first=in elap=1ms
+v2 loader: PID=10 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=10 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[KERNEL] Process 10: FATBIG_T.BIN exited unexpectedly or gracefully.
+[ARRIVED] FATBIG_T.BIN rc>0
+[EXITPC] pid=10 last_user_pc=0x0
+[WAVE-TRY] STAGE4K_T.BIN
+Loading program for scheduler (v2 AS): STAGE4K_T.BIN
+/STAGE4K_T.BIN
+v2 loader: image mapped (lazy), bytes=47304 pages=12 first=in elap=1ms
+v2 loader: PID=11 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] STAGE4K_T.BIN rc>0
+[RESUME-NOMAP] refusing to resume pid=11 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[WAVE-TRY] LFN_T.BIN
+Loading program for scheduler (v2 AS): LFN_T.BIN
+[KERNEL] Process 11: STAGE4K_T.BIN exited unexpectedly or gracefully.
+/LFN_T.BIN
+[EXITPC] pid=11 last_user_pc=0x0
+v2 loader: image mapped (lazy), bytes=58440 pages=15 first=in elap=1ms
+v2 loader: PID=12 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] LFN_T.BIN rc>0
+[WAVE-TRY] HEAPTEST.BIN
+Loading program for scheduler (v2 AS): [RESUME-NOMAP] refusing to resume pid=12 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[KERNEL] Process 12: LFN_T.BIN exited unexpectedly or gracefully.
+HEAPTEST.BIN
+[EXITPC] pid=12 last_user_pc=0x0
+/HEAPTEST.BIN
+v2 loader: image mapped (lazy), bytes=58200 pages=15 first=in elap=1ms
+v2 loader: PID=13 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] HEAPTEST.BIN rc>0
+[WAVE-TRY] SPAWN.BIN
+Loading program for scheduler (v2 AS): SPAWN.BIN
+/SPAWN.BIN
+[RESUME-NOMAP] refusing to resume pid=13 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[KERNEL] Process 13: HEAPTEST.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=13 last_user_pc=0x0
+v2 loader: image mapped (lazy), bytes=55864 pages=14 first=in elap=1ms
+v2 loader: PID=14 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] SPAWN.BIN rc>0
+[WAVE-TRY] FORKTEST.BIN
+Loading program for scheduler (v2 AS): FORKTEST.BIN
+/FORKTEST.BIN
+v2 loader: image mapped (lazy), bytes=56872 pages=14 first=in elap=1ms
+[RESUME-NOMAP] refusing to resume pid=14 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[KERNEL] Process 14: SPAWN.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=14 last_user_pc=0x0
+v2 loader: PID=15 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=15 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[ARRIVED] FORKTEST.BIN rc>0
+[WAVE-TRY] SMPTEST.BIN
+Loading program for scheduler (v2 AS): SMPTEST.BIN
+[KERNEL] Process 15: FORKTEST.BIN exited unexpectedly or gracefully.
+/SMPTEST.BIN[EXITPC] pid=15 last_user_pc=0x0
+
+v2 loader: image mapped (lazy), bytes=55864 pages=14 first=in elap=1ms
+v2 loader: PID=16 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] SMPTEST.BIN rc>0
+[WAVE-TRY] PIPETEST.BIN
+Loading program for scheduler (v2 AS): [RESUME-NOMAP] refusing to resume pid=16 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[KERNEL] Process 16: SMPTEST.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=16 last_user_pc=0x0
+PIPETEST.BIN
+/PIPETEST.BIN
+v2 loader: image mapped (lazy), bytes=55992 pages=14 first=in elap=2ms
+v2 loader: PID=17 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] PIPETEST.BIN rc>0
+[WAVE-TRY] GRAPHICS.BIN
+Loading program for scheduler (v2 AS): GRAPHICS.BIN
+/GRAPHICS.BIN[RESUME-NOMAP] refusing to resume pid=17 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[KERNEL] Process 17: PIPETEST.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=17 last_user_pc=0x0
+
+v2 loader: image mapped (lazy), bytes=59072 pages=15 first=in elap=1ms
+v2 loader: PID=18 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] GRAPHICS.BIN rc>0
+[WAVE-TRY] WSRF_T.BIN
+Loading program for scheduler (v2 AS): WSRF_T.BIN
+/WSRF_T.BIN
+[RESUME-NOMAP] refusing to resume pid=18 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[KERNEL] Process 18: GRAPHICS.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=18 last_user_pc=0x0
+v2 loader: image mapped (lazy), bytes=376528 pages=92 first=in elap=1ms
+v2 loader: PID=19 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] WSRF_T.BIN rc>0
+[WAVE-TRY] NETTEST.BIN
+Loading program for scheduler (v2 AS): NETTEST.BIN
+/NETTEST.BIN
+v2 loader: image mapped (lazy), bytes=55864 pages=14 first=in elap=1ms
+[RESUME-NOMAP] refusing to resume pid=19 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[KERNEL] Process 19: WSRF_T.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=19 last_user_pc=0x0
+v2 loader: PID=20 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=20 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[KERNEL] Process 20: NETTEST.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=20 last_user_pc=0x0
+[ARRIVED] NETTEST.BIN rc>0
+[WAVE-TRY] TIMEOUT.BIN
+Loading program for scheduler (v2 AS): TIMEOUT.BIN
+/TIMEOUT.BIN
+v2 loader: image mapped (lazy), bytes=55528 pages=14 first=in elap=1ms
+v2 loader: PID=21 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=21 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[ARRIVED] TIMEOUT.BIN rc>0
+[WAVE-TRY] STRESS.BIN
+Loading program for scheduler (v2 AS): STRESS.BIN
+[KERNEL] Process 21: TIMEOUT.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=21 last_user_pc=0x0
+/STRESS.BIN
+v2 loader: image mapped (lazy), bytes=62520 pages=16 first=in elap=1ms
+v2 loader: PID=22 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] STRESS.BIN rc>0
+[RESUME-NOMAP] refusing to resume pid=22 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[WAVE-TRY] MONITORT.BIN
+[KERNEL] Process 22: STRESS.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=22 last_user_pc=0x0
+Loading program for scheduler (v2 AS): MONITORT.BIN
+/MONITORT.BIN
+v2 loader: image mapped (lazy), bytes=57272 pages=14 first=in elap=1ms
+v2 loader: PID=23 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] MONITORT.BIN rc>0
+[WAVE-TRY] NFSTEST.BIN
+[RESUME-NOMAP] refusing to resume pid=23 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+Loading program for scheduler (v2 AS): NFSTEST.BIN
+/NFSTEST.BIN
+[KERNEL] Process 23: MONITORT.BIN exited unexpectedly or gracefully.
+v2 loader: image mapped (lazy), bytes=90792 pages=23 first=in elap=1ms
+[EXITPC] pid=23 last_user_pc=0x0
+v2 loader: PID=24 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=24 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[KERNEL] Process 24: NFSTEST.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=24 last_user_pc=0x0
+[ARRIVED] NFSTEST.BIN rc>0
+[WAVE-TRY] ERRTEST.BIN
+Loading program for scheduler (v2 AS): ERRTEST.BIN
+/ERRTEST.BIN
+v2 loader: image mapped (lazy), bytes=57656 pages=15 first=in elap=2ms
+v2 loader: PID=25 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] ERRTEST.BIN rc>0
+[WAVE-TRY] HELLO.BIN
+Loading program for scheduler (v2 AS): HELLO.BIN
+/HELLO.BIN
+[RESUME-NOMAP] refusing to resume pid=25 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+v2 loader: image mapped (lazy), bytes=46488 pages=12 first=in elap=1ms
+[KERNEL] Process 25: ERRTEST.BIN exited unexpectedly or gracefully.
+v2 loader: PID=26 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[EXITPC] pid=25 last_user_pc=0x0
+[ARRIVED] HELLO.BIN rc>0
+[WAVE-TRY] CAT.BIN
+[RESUME-NOMAP] refusing to resume pid=26 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+Loading program for scheduler (v2 AS): CAT.BIN[KERNEL] Process 26: HELLO.BIN exited unexpectedly or gracefully.
+
+/CAT.BIN[EXITPC] pid=26 last_user_pc=0x0
+
+v2 loader: image mapped (lazy), bytes=55896 pages=14 first=in elap=1ms
+v2 loader: PID=27 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=27 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[ARRIVED] CAT.BIN rc>0
+[KERNEL] Process 27: CAT.BIN exited unexpectedly or gracefully.
+[WAVE-TRY] LS.BIN
+[EXITPC] pid=27 last_user_pc=0x0
+Loading program for scheduler (v2 AS): LS.BIN
+/LS.BIN
+v2 loader: image mapped (lazy), bytes=55752 pages=14 first=in elap=1ms
+v2 loader: PID=28 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] LS.BIN rc>0
+[WAVE-TRY] SH.BIN
+Loading program for scheduler (v2 AS): [RESUME-NOMAP] refusing to resume pid=28 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+SH.BIN[KERNEL] Process 28: LS.BIN exited unexpectedly or gracefully.
+
+[EXITPC] pid=28 last_user_pc=0x0
+/SH.BIN
+v2 loader: image mapped (lazy), bytes=223928 pages=55 first=in elap=1ms
+v2 loader: PID=29 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] SH.BIN rc>0
+[WAVE-TRY] LKSTEST.BIN
+Loading program for scheduler (v2 AS): LKSTEST.BIN
+/LKSTEST.BIN
+[RESUME-NOMAP] refusing to resume pid=29 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+v2 loader: image mapped (lazy), bytes=106792 pages=27 first=in elap=2ms
+[KERNEL] Process 29: SH.BIN exited unexpectedly or gracefully.
+v2 loader: PID=30 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=30 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[EXITPC] pid=29 last_user_pc=0x0
+[KERNEL] Process 30: LKSTEST.BIN exited unexpectedly or gracefully.
+[ARRIVED] LKSTEST.BIN rc>0
+[EXITPC] pid=30 last_user_pc=0x0
+[WAVE-TRY] HEDTEST.BIN
+Loading program for scheduler (v2 AS): HEDTEST.BIN
+/HEDTEST.BIN
+v2 loader: image mapped (lazy), bytes=60296 pages=15 first=in elap=1ms
+v2 loader: PID=31 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=31 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[ARRIVED] HEDTEST.BIN rc>0
+[KERNEL] Process 31: HEDTEST.BIN exited unexpectedly or gracefully.
+[WAVE-TRY] TAILTEST.BIN
+[EXITPC] pid=31 last_user_pc=0x0
+Loading program for scheduler (v2 AS): TAILTEST.BIN
+/TAILTEST.BIN
+v2 loader: image mapped (lazy), bytes=60312 pages=15 first=in elap=1ms
+v2 loader: PID=32 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] TAILTEST.BIN rc>0
+[WAVE-TRY] PROCTEST.BIN
+[RESUME-NOMAP] refusing to resume pid=32 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+Loading program for scheduler (v2 AS): [KERNEL] Process 32: TAILTEST.BIN exited unexpectedly or gracefully.
+PROCTEST.BIN[EXITPC] pid=32 last_user_pc=0x0
+
+/PROCTEST.BIN
+v2 loader: image mapped (lazy), bytes=76344 pages=19 first=in elap=1ms
+v2 loader: PID=33 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] PROCTEST.BIN rc>0
+[WAVE-TRY] WCTEST.BIN
+Loading program for scheduler (v2 AS): WCTEST.BIN
+/WCTEST.BIN
+[RESUME-NOMAP] refusing to resume pid=33 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+v2 loader: image mapped (lazy), bytes=60456 pages=15 first=in elap=1ms
+[KERNEL] Process 33: PROCTEST.BIN exited unexpectedly or gracefully.
+v2 loader: PID=34 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[EXITPC] pid=33 last_user_pc=0x0
+[RESUME-NOMAP] refusing to resume pid=34 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[ARRIVED] WCTEST.BIN rc>0
+[KERNEL] Process 34: WCTEST.BIN exited unexpectedly or gracefully.
+[WAVE-TRY] REGTEST.BIN
+Loading program for scheduler (v2 AS): [EXITPC] pid=34 last_user_pc=0x0
+REGTEST.BIN
+/REGTEST.BIN
+v2 loader: image mapped (lazy), bytes=141528 pages=35 first=in elap=1ms
+v2 loader: PID=35 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=35 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[KERNEL] Process 35: REGTEST.BIN exited unexpectedly or gracefully.
+[ARRIVED] REGTEST.BIN rc>0
+[EXITPC] pid=35 last_user_pc=0x0
+[WAVE-TRY] SEDTEST.BIN
+Loading program for scheduler (v2 AS): SEDTEST.BIN
+/SEDTEST.BIN
+v2 loader: image mapped (lazy), bytes=69624 pages=17 first=in elap=1ms
+v2 loader: PID=36 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] SEDTEST.BIN rc>0
+[WAVE-TRY] GREPTEST.BIN
+[RESUME-NOMAP] refusing to resume pid=36 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+Loading program for scheduler (v2 AS): [KERNEL] Process 36: SEDTEST.BIN exited unexpectedly or gracefully.
+GREPTEST.BIN
+[EXITPC] pid=36 last_user_pc=0x0
+/GREPTEST.BIN
+v2 loader: image mapped (lazy), bytes=69560 pages=17 first=in elap=1ms
+v2 loader: PID=37 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] GREPTEST.BIN rc>0
+[WAVE-TRY] CUTTEST.BIN
+Loading program for scheduler (v2 AS): CUTTEST.BIN
+/CUTTEST.BIN
+[RESUME-NOMAP] refusing to resume pid=37 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+v2 loader: image mapped (lazy), bytes=61816 pages=16 first=in elap=1ms
+[KERNEL] Process 37: GREPTEST.BIN exited unexpectedly or gracefully.
+v2 loader: PID=38 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[EXITPC] pid=37 last_user_pc=0x0
+[RESUME-NOMAP] refusing to resume pid=38 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[KERNEL] Process 38: CUTTEST.BIN exited unexpectedly or gracefully.
+[ARRIVED] CUTTEST.BIN rc>0
+[EXITPC] pid=38 last_user_pc=0x0
+[WAVE-TRY] TRTEST.BIN
+Loading program for scheduler (v2 AS): TRTEST.BIN
+/TRTEST.BIN
+v2 loader: image mapped (lazy), bytes=62040 pages=16 first=in elap=1ms
+v2 loader: PID=39 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] TRTEST.BIN rc>0
+[WAVE-TRY] PASTE_T.BIN
+[RESUME-NOMAP] refusing to resume pid=39 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+Loading program for scheduler (v2 AS): [KERNEL] Process 39: TRTEST.BIN exited unexpectedly or gracefully.
+PASTE_T.BIN
+[EXITPC] pid=39 last_user_pc=0x0
+/PASTE_T.BIN
+v2 loader: image mapped (lazy), bytes=62488 pages=16 first=in elap=1ms
+v2 loader: PID=40 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] PASTE_T.BIN rc>0
+[WAVE-TRY] FOLDTEST.BIN
+Loading program for scheduler (v2 AS): FOLDTEST.BIN
+/FOLDTEST.BIN
+v2 loader: image mapped (lazy), bytes=63192 pages=16 first=in elap=0ms
+[RESUME-NOMAP] refusing to resume pid=40 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+v2 loader: PID=41 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[KERNEL] Process 40: PASTE_T.BIN exited unexpectedly or gracefully.
+[ARRIVED] FOLDTEST.BIN rc>0
+[EXITPC] pid=40 last_user_pc=0x0
+[WAVE-TRY] NLTEST.BIN
+Loading program for scheduler (v2 AS): NLTEST.BIN
+[RESUME-NOMAP] refusing to resume pid=41 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+/NLTEST.BIN
+[KERNEL] Process 41: FOLDTEST.BIN exited unexpectedly or gracefully.
+v2 loader: image mapped (lazy), bytes=62392 pages=16 first=in elap=2ms
+[EXITPC] pid=41 last_user_pc=0x0
+v2 loader: PID=42 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=42 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[ARRIVED] NLTEST.BIN rc>0
+[KERNEL] Process 42: NLTEST.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=42 last_user_pc=0x0
+[WAVE-TRY] COMMTEST.BIN
+Loading program for scheduler (v2 AS): COMMTEST.BIN
+/COMMTEST.BIN
+v2 loader: image mapped (lazy), bytes=61992 pages=16 first=in elap=1ms
+v2 loader: PID=43 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] COMMTEST.BIN rc>0
+[WAVE-TRY] TSORT_T.BIN
+Loading program for scheduler (v2 AS): TSORT_T.BIN
+/TSORT_T.BIN
+v2 loader: image mapped (lazy), bytes=129880 pages=32 first=in elap=1ms
+[RESUME-NOMAP] refusing to resume pid=43 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+v2 loader: PID=44 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[KERNEL] Process 43: COMMTEST.BIN exited unexpectedly or gracefully.
+[ARRIVED] TSORT_T.BIN rc>0
+[EXITPC] pid=43 last_user_pc=0x0
+[RESUME-NOMAP] refusing to resume pid=44 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[WAVE-TRY] EXPAND_T.BIN
+Loading program for scheduler (v2 AS): [KERNEL] Process 44: TSORT_T.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=44 last_user_pc=0x0
+EXPAND_T.BIN
+/EXPAND_T.BIN
+v2 loader: image mapped (lazy), bytes=61656 pages=16 first=in elap=1ms
+v2 loader: PID=45 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] EXPAND_T.BIN rc>0
+[WAVE-TRY] UNEXPAND_T.BIN
+[RESUME-NOMAP] refusing to resume pid=45 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+Loading program for scheduler (v2 AS): UNEXPAND_T.BIN[KERNEL] Process 45: EXPAND_T.BIN exited unexpectedly or gracefully.
+
+[EXITPC] pid=45 last_user_pc=0x0
+/UNEXPAND_T.BIN
+v2 loader: image mapped (lazy), bytes=61688 pages=16 first=in elap=1ms
+v2 loader: PID=46 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] UNEXPAND_T.BIN rc>0
+[WAVE-TRY] CKSUM_T.BIN
+Loading program for scheduler (v2 AS): CKSUM_T.BIN
+/CKSUM_T.BIN
+[RESUME-NOMAP] refusing to resume pid=46 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+v2 loader: image mapped (lazy), bytes=62776 pages=16 first=in elap=1ms
+[KERNEL] Process 46: UNEXPAND_T.BIN exited unexpectedly or gracefully.
+v2 loader: PID=47 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=47 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[ARRIVED] CKSUM_T.BIN rc>0
+[EXITPC] pid=46 last_user_pc=0x0
+[WAVE-TRY] MD5SUM_T.BIN
+[KERNEL] Process 47: CKSUM_T.BIN exited unexpectedly or gracefully.
+Loading program for scheduler (v2 AS): [EXITPC] pid=47 last_user_pc=0x0
+MD5SUM_T.BIN
+/MD5SUM_T.BIN
+v2 loader: image mapped (lazy), bytes=61880 pages=16 first=in elap=0ms
+v2 loader: PID=48 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] MD5SUM_T.BIN rc>0
+[RESUME-NOMAP] refusing to resume pid=48 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[WAVE-TRY] TACTEST.BIN
+Loading program for scheduler (v2 AS): [KERNEL] Process 48: MD5SUM_T.BIN exited unexpectedly or gracefully.
+TACTEST.BIN
+[EXITPC] pid=48 last_user_pc=0x0
+/TACTEST.BIN
+v2 loader: image mapped (lazy), bytes=289672 pages=71 first=in elap=1ms
+v2 loader: PID=49 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] TACTEST.BIN rc>0
+[WAVE-TRY] CMPTEST.BIN
+Loading program for scheduler (v2 AS): CMPTEST.BIN
+/CMPTEST.BIN[RESUME-NOMAP] refusing to resume pid=49 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+
+[KERNEL] Process 49: TACTEST.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=49 last_user_pc=0x0
+v2 loader: image mapped (lazy), bytes=106696 pages=27 first=in elap=1ms
+v2 loader: PID=50 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] CMPTEST.BIN rc>0
+[WAVE-TRY] POLLTST.BIN
+Loading program for scheduler (v2 AS): POLLTST.BIN
+/POLLTST.BIN
+v2 loader: image mapped (lazy), bytes=61864 pages=16 first=in elap=1ms
+[RESUME-NOMAP] refusing to resume pid=50 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+v2 loader: PID=51 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[KERNEL] Process 50: CMPTEST.BIN exited unexpectedly or gracefully.
+[ARRIVED] POLLTST.BIN rc>0
+[EXITPC] pid=50 last_user_pc=0x0
+[WAVE-TRY] RANDTST.BIN
+[RESUME-NOMAP] refusing to resume pid=51 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[KERNEL] Process 51: POLLTST.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=51 last_user_pc=0x0
+Loading program for scheduler (v2 AS): RANDTST.BIN
+/RANDTST.BIN
+v2 loader: image mapped (lazy), bytes=66744 pages=17 first=in elap=1ms
+v2 loader: PID=52 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] RANDTST.BIN rc>0
+[WAVE-TRY] SOCK2TST.BIN
+Loading program for scheduler (v2 AS): SOCK2TST.BIN
+/SOCK2TST.BIN[RESUME-NOMAP] refusing to resume pid=52 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+
+[KERNEL] Process 52: RANDTST.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=52 last_user_pc=0x0
+v2 loader: image mapped (lazy), bytes=62968 pages=16 first=in elap=1ms
+v2 loader: PID=53 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] SOCK2TST.BIN rc>0
+[WAVE-TRY] FPU_T.BIN
+Loading program for scheduler (v2 AS): FPU_T.BIN
+/FPU_T.BIN
+v2 loader: image mapped (lazy), bytes=58776 pages=15 first=in elap=1ms
+v2 loader: PID=54 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=53 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[ARRIVED] FPU_T.BIN rc>0
+[KERNEL] Process 53: SOCK2TST.BIN exited unexpectedly or gracefully.
+[RESUME-NOMAP] refusing to resume pid=54 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[EXITPC] pid=53 last_user_pc=0x0
+[WAVE-TRY] GFXBENCH.BIN
+Loading program for scheduler (v2 AS): [KERNEL] Process 54: FPU_T.BIN exited unexpectedly or gracefully.
+GFXBENCH.BIN[EXITPC] pid=54 last_user_pc=0x0
+
+/GFXBENCH.BIN
+v2 loader: image mapped (lazy), bytes=61544 pages=16 first=in elap=1ms
+v2 loader: PID=55 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=55 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[KERNEL] Process 55: GFXBENCH.BIN exited unexpectedly or gracefully.
+[ARRIVED] GFXBENCH.BIN rc>0
+[EXITPC] pid=55 last_user_pc=0x0
+[WAVE-TRY] MATH_T.BIN
+Loading program for scheduler (v2 AS): MATH_T.BIN
+/MATH_T.BIN
+v2 loader: image mapped (lazy), bytes=71768 pages=18 first=in elap=1ms
+v2 loader: PID=56 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] MATH_T.BIN rc>0
+[WAVE-TRY] CXXSMOKE.BIN
+Loading program for scheduler (v2 AS): [RESUME-NOMAP] refusing to resume pid=56 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+CXXSMOKE.BIN[KERNEL] Process 56: MATH_T.BIN exited unexpectedly or gracefully.
+
+/CXXSMOKE.BIN[EXITPC] pid=56 last_user_pc=0x0
+
+v2 loader: image mapped (lazy), bytes=77944 pages=20 first=in elap=1ms
+v2 loader: PID=57 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] CXXSMOKE.BIN rc>0
+[WAVE-TRY] DNSTST.BIN
+Loading program for scheduler (v2 AS): DNSTST.BIN
+/DNSTST.BIN
+v2 loader: image mapped (lazy), bytes=59944 pages=15 first=in elap=1ms
+[RESUME-NOMAP] refusing to resume pid=57 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[KERNEL] Process 57: CXXSMOKE.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=57 last_user_pc=0x0
+v2 loader: PID=58 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=58 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[ARRIVED] DNSTST.BIN rc>0
+[WAVE-TRY] THRD_T.BIN
+[KERNEL] Process 58: DNSTST.BIN exited unexpectedly or gracefully.
+Loading program for scheduler (v2 AS): [EXITPC] pid=58 last_user_pc=0x0
+THRD_T.BIN
+/THRD_T.BIN
+v2 loader: image mapped (lazy), bytes=78552 pages=20 first=in elap=1ms
+v2 loader: PID=59 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] THRD_T.BIN rc>0
+[WAVE-TRY] TLS_T.BIN
+Loading program for scheduler (v2 AS): [RESUME-NOMAP] refusing to resume pid=59 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+TLS_T.BIN[KERNEL] Process 59: THRD_T.BIN exited unexpectedly or gracefully.
+
+/TLS_T.BIN[EXITPC] pid=59 last_user_pc=0x0
+
+v2 loader: image mapped (lazy), bytes=71960 pages=18 first=in elap=1ms
+v2 loader: PID=60 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] TLS_T.BIN rc>0
+[WAVE-TRY] CXX_T.BIN
+Loading program for scheduler (v2 AS): CXX_T.BIN
+/CXX_T.BIN
+[RESUME-NOMAP] refusing to resume pid=60 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+v2 loader: image mapped (lazy), bytes=668408 pages=164 first=in elap=1ms
+[KERNEL] Process 60: TLS_T.BIN exited unexpectedly or gracefully.
+v2 loader: PID=61 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[EXITPC] pid=60 last_user_pc=0x0
+[ARRIVED] CXX_T.BIN rc>0
+[RESUME-NOMAP] refusing to resume pid=61 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[WAVE-TRY] RTTI_T.BIN
+[KERNEL] Process 61: CXX_T.BIN exited unexpectedly or gracefully.
+Loading program for scheduler (v2 AS): RTTI_T.BIN[EXITPC] pid=61 last_user_pc=0x0
+
+/RTTI_T.BIN
+v2 loader: image mapped (lazy), bytes=120280 pages=30 first=in elap=1ms
+v2 loader: PID=62 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=62 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[ARRIVED] RTTI_T.BIN rc>0
+[KERNEL] Process 62: RTTI_T.BIN exited unexpectedly or gracefully.
+[WAVE-TRY] IPC_T.BIN
+[EXITPC] pid=62 last_user_pc=0x0
+Loading program for scheduler (v2 AS): IPC_T.BIN
+/IPC_T.BIN
+v2 loader: image mapped (lazy), bytes=241992 pages=60 first=in elap=1ms
+v2 loader: PID=63 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] IPC_T.BIN rc>0
+[WAVE-TRY] MMTEST.BIN
+Loading program for scheduler (v2 AS): [RESUME-NOMAP] refusing to resume pid=63 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+MMTEST.BIN[KERNEL] Process 63: IPC_T.BIN exited unexpectedly or gracefully.
+
+/MMTEST.BIN[EXITPC] pid=63 last_user_pc=0x0
+
+v2 loader: image mapped (lazy), bytes=11096 pages=3 first=in elap=1ms
+v2 loader: PID=2 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] MMTEST.BIN rc>0
+[WAVE-TRY] ICUSMK.BIN
+Loading program for scheduler (v2 AS): ICUSMK.BIN
+/ICUSMK.BIN
+[RESUME-NOMAP] refusing to resume pid=2 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+v2 loader: image mapped (lazy), bytes=315040 pages=77 first=in elap=2ms
+[KERNEL] Process 2: MMTEST.BIN exited unexpectedly or gracefully.
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=3 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[ARRIVED] ICUSMK.BIN rc>0
+[KERNEL] Process 3: ICUSMK.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=2 last_user_pc=0x0
+[WAVE-TRY] SQLTEST.BIN
+Loading program for scheduler (v2 AS): [EXITPC] pid=3 last_user_pc=0x0
+SQLTEST.BIN
+/SQLTEST.BIN
+v2 loader: image mapped (lazy), bytes=865976 pages=212 first=in elap=1ms
+v2 loader: PID=2 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[RESUME-NOMAP] refusing to resume pid=2 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[ARRIVED] SQLTEST.BIN rc>0
+[KERNEL] Process 2: SQLTEST.BIN exited unexpectedly or gracefully.
+[WAVE-TRY] SIG_T.BIN
+Loading program for scheduler (v2 AS): [EXITPC] pid=2 last_user_pc=0x0
+SIG_T.BIN
+/SIG_T.BIN
+v2 loader: image mapped (lazy), bytes=67672 pages=17 first=in elap=1ms
+v2 loader: PID=2 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] SIG_T.BIN rc>0
+[WAVE-TRY] WK1C_T.BIN
+Loading program for scheduler (v2 AS): [RESUME-NOMAP] refusing to resume pid=2 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+WK1C_T.BIN[KERNEL] Process 2: SIG_T.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=2 last_user_pc=0x0
+
+/WK1C_T.BIN
+v2 loader: image mapped (lazy), bytes=204104 pages=50 first=in elap=1ms
+v2 loader: PID=2 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[ARRIVED] WK1C_T.BIN rc>0
+[WAVE-TRY] TORTURE.BIN
+Loading program for scheduler (v2 AS): TORTURE.BIN
+/TORTURE.BIN
+v2 loader: image mapped (lazy), bytes=84632 pages=21 first=in elap=1ms
+[RESUME-NOMAP] refusing to resume pid=2 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+v2 loader: PID=3 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+[KERNEL] Process 2: WK1C_T.BIN exited unexpectedly or gracefully.
+[RESUME-NOMAP] refusing to resume pid=3 target_sp=0x17FFFFFFF8 dest=0x17FFFFFEB8 reason=absent-or-ro at resume
+[EXITPC] pid=2 last_user_pc=0x0
+[ARRIVED] TORTURE.BIN rc>0
+[KERNEL] Process 3: TORTURE.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=3 last_user_pc=0x0
+[HALT-CD] cpu=0 free=2 alloc=0 exited=62 running=0 blocked=0 other=0
+
+[LOCKCNT] STALLBREAK=0 STOLEN=0 LOCKFOREVER=0 UNOWNED-FREED=0
+System halt.
+[

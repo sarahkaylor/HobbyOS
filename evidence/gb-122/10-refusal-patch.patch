@@ -1,0 +1,187 @@
+diff --git a/src/kernel/arch/x64/trap.c b/src/kernel/arch/x64/trap.c
+index a1f5728..aa0b092 100755
+--- a/src/kernel/arch/x64/trap.c
++++ b/src/kernel/arch/x64/trap.c
+@@ -3556,6 +3556,44 @@ __asm__(
+ ".att_syntax prefix\n"
+ );
+ 
++/* GB-122: refuse a kernel-mode resume whose 296-byte frame copy would land in
++ * an absent (or read-only) page, instead of faulting into it.
++ *
++ * The copy is `mov rax,gs:[24]; lea rdi,[rax-320]; rep movsq` -- 296 bytes
++ * ending exactly AT the stack top.  When that page has no leaf PTE the store
++ * takes #PF at CPL0 mid-copy (measured on unmodified main: `Vector: 14
++ * Error Code: 0x2`, RDI == dest == gs:[24]-0x140, RCX == 0x25), the process
++ * is killed and the frame is left half-written.
++ *
++ * Route (2) of the card, deliberately NOT GB-125's shape: the check is a
++ * few instructions of inline page-table read on the normal path -- no call,
++ * no stack frame, no allocation, no lock.  GB-125's guard called a C
++ * function whose 256-byte frame landed inside [gs:[24]-320, gs:[24]), the
++ * very window this copy writes, and GB-132 measured that build producing
++ * family-B banners that do not occur without it (6 banners in 2/2 guarded
++ * waves, 0 in 5 unguarded).  Nothing on this normal path may touch the
++ * stack for that reason.
++ *
++ * On refusal we take the same landing pad the #PF path already uses:
++ * process_fault_exit() -> process_exit() -> schedule(), which never returns
++ * and resumes another task.  A refusal must not halt the CPU: on T3_SMP=1
++ * that costs the whole wave, which is worse than the kill it replaces.
++ */
++void resume_nomap_refuse(struct trap_frame *tf) {
++  struct kline k;
++  uint64_t sp = arch_get_user_sp();
++  kl_init(&k);
++  kl_s(&k, "[RESUME-NOMAP] refusing to resume pid=");
++  kl_i(&k, current_process() ? (long)current_process()->pid : -1);
++  kl_s(&k, " target_sp=");
++  kl_hex(&k, sp);
++  kl_s(&k, " dest=");
++  kl_hex(&k, sp - 320);
++  kl_s(&k, " reason=absent-or-ro at resume\n");
++  kl_emit(&k);
++  process_fault_exit(tf, 11); /* SIGSEGV; schedule() inside never returns */
++}
++
+ __asm__(
+ ".intel_syntax noprefix\n"
+ ".global enter_user_space\n"
+@@ -3588,6 +3626,71 @@ __asm__(
+ "       exactly at that RSP: dest = RSP - 320 writes nothing at or above\n"
+ "       the task's live stack pointer, and the popped RSP slot (filled\n"
+ "       in the tail) then resumes the task with RSP == gs:[24]. */\n"
++"    /* GB-122: read the leaf for the copy's destination page straight out\n"
++"       of CR3 before writing 296 bytes into it.  Normal path: no call, no\n"
++"       stack, no lock, no allocation -- see resume_nomap_refuse. */\n"
++"    /* Scope first: only resumes landing in the USER stack window are\n"
++"       checked.  The initial entry resumes a kernel task at a low\n"
++"       identity-mapped target_sp (0x23FFF000 measured), where the copy is\n"
++"       legitimate -- an unscoped check refuses pid=1 and the guest dies\n"
++"       before the wave (GB-122 w1's finding, reproduced here). */\n"
++"    mov rdx, gs:[24]\n"
++"    mov rax, 0x1800000000\n"
++"    cmp rdx, rax\n"
++"    jae 6f\n"
++"    mov rax, 0x1780000000\n"
++"    cmp rdx, rax\n"
++"    jb 6f\n"
++"    sub rdx, 320\n"
++"    and rdx, -4096\n"
++"    mov rax, cr3\n"
++"    shl rax, 12\n"
++"    shr rax, 12\n"
++"    mov rcx, rdx\n"
++"    shr rcx, 39\n"
++"    and ecx, 511\n"
++"    mov rax, [rax + rcx*8]\n"
++"    test al, 1\n"
++"    jz 5f\n"
++"    shl rax, 12\n"
++"    shr rax, 12\n"
++"    mov rcx, rdx\n"
++"    shr rcx, 30\n"
++"    and ecx, 511\n"
++"    mov rax, [rax + rcx*8]\n"
++"    test al, 1\n"
++"    jz 5f\n"
++"    bt rax, 7\n"
++"    jc 6f\n"
++"    shl rax, 12\n"
++"    shr rax, 12\n"
++"    mov rcx, rdx\n"
++"    shr rcx, 21\n"
++"    and ecx, 511\n"
++"    mov rax, [rax + rcx*8]\n"
++"    test al, 1\n"
++"    jz 5f\n"
++"    bt rax, 7\n"
++"    jc 6f\n"
++"    shl rax, 12\n"
++"    shr rax, 12\n"
++"    mov rcx, rdx\n"
++"    shr rcx, 12\n"
++"    and ecx, 511\n"
++"    mov rax, [rax + rcx*8]\n"
++"    test al, 3\n"
++"    cmp al, 3\n"
++"    je 6f\n"
++"5:\n"
++"    /* Absent or read-only: refuse.  Same landing pad as the #PF path --\n"
++"       the process is killed and the scheduler takes another task. */\n"
++"    mov rdi, r12\n"
++"    call resume_nomap_refuse\n"
++"    cli\n"
++"1:\n"
++"    hlt\n"
++"    jmp 1b\n"
++"6:\n"
+ "    mov rax, gs:[24]\n"
+ "    lea rdi, [rax - 320]\n"
+ "    mov rsi, r12\n"
+@@ -3606,6 +3709,65 @@ __asm__(
+ "       [r13-296] spilled the +304/+312 slots at/above r13, and on a fresh\n"
+ "       ELF process (r13 = stack top - 8, kernel-mode write) that hit an\n"
+ "       absent page -> kernel-mode #PF and the task was killed. */\n"
++"    /* GB-122: the same refusal for the USER branch, where the measured\n"
++"       #PF actually lands (26 x `Vector: 14` in one wave with only the\n"
++"       kernel branch guarded, RDI == r13-320).  Same shape: no call, no\n"
++"       stack, no lock; scoped to the user stack window. */\n"
++"    mov rdx, r13\n"
++"    mov rax, 0x1800000000\n"
++"    cmp rdx, rax\n"
++"    jae 4f\n"
++"    mov rax, 0x1780000000\n"
++"    cmp rdx, rax\n"
++"    jb 4f\n"
++"    sub rdx, 320\n"
++"    and rdx, -4096\n"
++"    mov rax, cr3\n"
++"    shl rax, 12\n"
++"    shr rax, 12\n"
++"    mov rcx, rdx\n"
++"    shr rcx, 39\n"
++"    and ecx, 511\n"
++"    mov rax, [rax + rcx*8]\n"
++"    test al, 1\n"
++"    jz 3f\n"
++"    shl rax, 12\n"
++"    shr rax, 12\n"
++"    mov rcx, rdx\n"
++"    shr rcx, 30\n"
++"    and ecx, 511\n"
++"    mov rax, [rax + rcx*8]\n"
++"    test al, 1\n"
++"    jz 3f\n"
++"    bt rax, 7\n"
++"    jc 4f\n"
++"    shl rax, 12\n"
++"    shr rax, 12\n"
++"    mov rcx, rdx\n"
++"    shr rcx, 21\n"
++"    and ecx, 511\n"
++"    mov rax, [rax + rcx*8]\n"
++"    test al, 1\n"
++"    jz 3f\n"
++"    bt rax, 7\n"
++"    jc 4f\n"
++"    shl rax, 12\n"
++"    shr rax, 12\n"
++"    mov rcx, rdx\n"
++"    shr rcx, 12\n"
++"    and ecx, 511\n"
++"    mov rax, [rax + rcx*8]\n"
++"    test al, 3\n"
++"    cmp al, 3\n"
++"    je 4f\n"
++"3:\n"
++"    mov rdi, r12\n"
++"    call resume_nomap_refuse\n"
++"    cli\n"
++"2:\n"
++"    hlt\n"
++"    jmp 2b\n"
++"4:\n"
+ "    lea rdi, [r13 - 320]\n"
+ "    mov rsi, r12\n"
+ "    mov rcx, 37\n"
