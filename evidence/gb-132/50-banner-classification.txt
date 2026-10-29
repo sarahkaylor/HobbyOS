@@ -1,0 +1,22 @@
+== 11-base-wave-run1.log
+   old-format #PF dumps=3  banners: OK=0 NONSENSE=0 BADVEC=0 TORN=0
+== 12-base-wave-run2.log
+   old-format #PF dumps=11  banners: OK=0 NONSENSE=0 BADVEC=0 TORN=0
+== 13-base-wave-run3-STALLED.log
+   old-format #PF dumps=6  banners: OK=0 NONSENSE=0 BADVEC=0 TORN=0
+== 20-t3-intel-wave.log
+   old-format #PF dumps=36  banners: OK=1 NONSENSE=2 BADVEC=1 TORN=2
+   BADVEC   vector=2124482397 rip=0x31FFE938 cr2=0x17FFFFEFB8 pid=50 err=0 cr3=0x338FF000
+   NONSENSE vector=6 rip=0x7 cr2=0x1000006130 pid=33 err=0 cr3=0x75515000
+   NONSENSE vector=6 rip=0x7 cr2=0x10400012B0 pid=32 err=0 cr3=0x7550F000
+   OK       vector=13 rip=0x7003CDDC cr2=0x100000FE20 pid=48 err=0 cr3=0x7550F000
+== 21-t3-intel-baseline-215b79b.log
+   old-format #PF dumps=14  banners: OK=0 NONSENSE=0 BADVEC=0 TORN=0
+== 22-t3-intel-guard-run2.log
+   old-format #PF dumps=43  banners: OK=2 NONSENSE=0 BADVEC=0 TORN=0
+   OK       vector=6 rip=0x31FFE5C0 cr2=0x1000009070 pid=32 err=0 cr3=0x75511000
+   OK       vector=6 rip=0x29FFE5C0 cr2=0x1000025C3D pid=37 err=0 cr3=0x7550F000
+== 23-t3-intel-baseline-run2.log
+   old-format #PF dumps=22  banners: OK=0 NONSENSE=0 BADVEC=0 TORN=0
+
+TOTAL {'TORN': 2, 'NONSENSE': 2, 'BADVEC': 1, 'OK': 3, 'OLDD': 135}

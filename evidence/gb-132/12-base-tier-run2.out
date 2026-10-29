@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2400s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb125-verify/evidence/gb-132/12-base-wave-run2.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 12113 console lines, 88 FAIL lines, 7 user memory fault records across 6 processes, 83 programs exited, halted=1
+T3_intel: FAIL — 11 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 88 FAIL line(s); first 20:
+3113:[SIGTEST] FAIL waitpid returns the child got=27 want=4294964048
+3859:MMTEST FAIL /UNEXPAND.BIN
+3986:  CXX_T condvar_wait_notify : FAIL
+4326:Loading program for scheduler (v2 AS): EXPAND.BINCXX_T FAILURES
+5181:Loading program for scheduler (v2 AS): GREP.BIN[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+5219:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+5262:[CMPTEST] FAIL EOF message on stderr
+5306:[CMPTEST] FAIL empty EOF message
+5330:[CMPTEST] FAIL missing file diagnostic
+5378:[CMPTEST] FAIL -i 4:0 skips prefix
+5389:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+5421:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+5430:[CMPTEST] FAIL - stdin EOF diagnostic
+5458:[CMPTEST] FAILURES: 5
+5482:[TSORTTEST] FAILURES: 4
+5944:[TACTEST] FAIL missing file
+5949:[TACTEST] FAIL empty separator
+5957:[TACTEST] FAILURES: 4
+5966:  FPU_T torture-child: FAIL
+6411:  FPU_T fork-inherit: FAIL
+T3_intel EXIT=1
