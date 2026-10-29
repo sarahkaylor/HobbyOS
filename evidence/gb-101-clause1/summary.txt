@@ -1,0 +1,17 @@
+=== run1 (98fc494) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 39043 console lines, 190 FAIL lines, 34 user memory fault records across 25 processes, 82 programs exited, halted=1
+T3_intel: FAIL — 32 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 190 FAIL line(s); first 20:
+
+=== run2 (98fc494) ===
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/wabi-gb101/obj/t3_intel.log) ===
+EXIT=124
+guest lines: 17332
+
+=== run3 (98fc494) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 10930 console lines, 82 FAIL lines, 6 user memory fault records across 6 processes, 83 programs exited, halted=1
+T3_intel: FAIL — 15 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 82 FAIL line(s); first 20:
