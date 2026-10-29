@@ -1,0 +1,6 @@
+run1 rc=1 fatals=3 :: T3_intel: 19342 console lines, 114 FAIL lines, 14 user memory fault records across 13 processes, 86 programs exited, halted=0
+run2 rc=1 fatals=9 :: T3_intel: note — halt marker found after make exited (poll raced the exit)
+run3 rc=1 fatals=0 :: T3_intel: 8088 console lines, 29 FAIL lines, 6 user memory fault records across 6 processes, 85 programs exited, halted=0
+run4 rc=1 fatals=0 :: T3_intel: 1630 console lines, 0 FAIL lines, 1 user memory fault records across 1 processes, 24 programs exited, halted=0
+run5 rc=1 fatals=0 :: T3_intel: 9699 console lines, 85 FAIL lines, 6 user memory fault records across 6 processes, 82 programs exited, halted=0
+DONE

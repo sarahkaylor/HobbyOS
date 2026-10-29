@@ -1,0 +1,28 @@
+diff --git a/src/kernel/process.c b/src/kernel/process.c
+index 3c47bc3..9214eb3 100755
+--- a/src/kernel/process.c
++++ b/src/kernel/process.c
+@@ -1788,6 +1788,23 @@ void schedule(struct trap_frame *tf, int is_yield) {
+               int cov = (dv >= rr->base && dv + 8 <= rr->base + rr->len);
+               rb[ri++] = cov ? '1' : '0';
+             }
++            /* GB-122 probe: does the destination page have a leaf PTE right
++               now?  region=yes covers=1 with pte=0 is the defect this card
++               repairs: the region says the page exists, the page table says
++               it does not, and a kernel store cannot demand-page it. */
++            if (tas) {
++              extern int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf);
++              uint64_t leaf = 0;
++              int present = (vm_arch_walk(tas, dv & ~0xFFFULL, &leaf) == 0 && leaf != 0);
++              const char *p5 = " pte=";
++              while (*p5 && ri < 112) rb[ri++] = *p5++;
++              rb[ri++] = present ? '1' : '0';
++              if (present) {
++                const char *p6 = " w=";
++                while (*p6 && ri < 118) rb[ri++] = *p6++;
++                rb[ri++] = (leaf & 2u) ? '1' : (char)'0';
++              }
++            }
+             rb[ri++] = '\n';
+             rb[ri] = 0;
+             uart_puts(rb);

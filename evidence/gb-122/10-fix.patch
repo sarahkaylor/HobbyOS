@@ -1,0 +1,63 @@
+diff --git a/src/kernel/process.c b/src/kernel/process.c
+index 3c47bc3..ad0ff06 100755
+--- a/src/kernel/process.c
++++ b/src/kernel/process.c
+@@ -1788,12 +1788,40 @@ void schedule(struct trap_frame *tf, int is_yield) {
+               int cov = (dv >= rr->base && dv + 8 <= rr->base + rr->len);
+               rb[ri++] = cov ? '1' : '0';
+             }
++            /* GB-122 probe: does the destination page have a leaf PTE right
++               now?  region=yes covers=1 with pte=0 is the defect this card
++               repairs: the region says the page exists, the page table says
++               it does not, and a kernel store cannot demand-page it. */
++            if (tas) {
++              extern int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf);
++              uint64_t leaf = 0;
++              int present = (vm_arch_walk(tas, dv & ~0xFFFULL, &leaf) == 0 && leaf != 0);
++              const char *p5 = " pte=";
++              while (*p5 && ri < 112) rb[ri++] = *p5++;
++              rb[ri++] = present ? '1' : '0';
++              if (present) {
++                const char *p6 = " w=";
++                while (*p6 && ri < 118) rb[ri++] = *p6++;
++                rb[ri++] = (leaf & 2u) ? '1' : (char)'0';
++              }
++            }
+             rb[ri++] = '\n';
+             rb[ri] = 0;
+             uart_puts(rb);
+           }
+         }
+       }
++      /* GB-122: the 296-byte frame copy inside enter_user_space writes
++         [target_sp-320, target_sp) from CPL0, and a kernel store cannot
++         demand-page a lazy stack page -- it takes #PF(err=2) at CPL0 and halts
++         the CPU (measured on this tier: cr2=0x17FFFFF388 / 0x17FFFFF2F8, both
++         the top stack page).  Materialise the window first.  Safe here:
++         proc_lock was released above, and the only lock vm_touch takes is
++         vm_lock, per page, with no yield and no sleep (frame_alloc_zeroed +
++         vm_arch_map).  User resumes only -- a kernel-task resume iretqs onto
++         its own already-resident stack. */
++      if ((local_tf.cs & 3u) == 3u && proc_table[next].as)
++        (void)vm_touch(&proc_table[next], target_sp - 1024, 1024, 1);
+       enter_user_space(&local_tf, target_sp);
+       /* GB-060 (cheap half): a resume call that returns is a defect --
+          enter_user_space iretqs into the target and must never come back.  The
+@@ -3553,6 +3581,17 @@ void start_scheduler(void) {
+         extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
+         extern void resume_mark(int pid, uint64_t target_sp);
+         resume_mark(proc_table[i].pid, target_sp);
++        /* GB-122: the 296-byte frame copy inside enter_user_space writes
++           [target_sp-320, target_sp) from CPL0, and a kernel store cannot
++           demand-page a lazy stack page -- it takes #PF(err=2) at CPL0 and
++           halts the CPU (measured on this tier: cr2=0x17FFFFF388 /
++           0x17FFFFF2F8, both the top stack page).  Materialise the window
++           first.  This site is safe for it: proc_lock was released above and
++           the only lock vm_touch takes is vm_lock, per page, with no yield and
++           no sleep (frame_alloc_zeroed + vm_arch_map).  User resumes only --
++           a kernel-task resume iretqs onto its own already-resident stack. */
++        if ((local_tf.cs & 3u) == 3u && proc_table[i].as)
++          (void)vm_touch(&proc_table[i], target_sp - 1024, 1024, 1);
+         enter_user_space(&local_tf, target_sp);
+ 
+         /* Same rule as schedule()'s resume boundary: if this returns, the CPU

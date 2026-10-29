@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 300s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb122/obj/t3_intel.log) ===
+T3_intel: 8088 console lines, 29 FAIL lines, 6 user memory fault records across 6 processes, 85 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 300s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 2 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 29 FAIL line(s); first 20:
+2647:MMTEST FAIL 13
+2841:[SIGTEST] FAIL waitpid returns the child got=21 want=4294964048
+3596:[TEST] DIRECT-ext-cat FAIL (empty target, no load failure)
+3666:Loading program for scheduler (v2 AS):   FPU_T torture-child: FAIL
+3971:[SEDTEST] FAIL basic_s (stdout)
+4271:  FPU_T fork-inherit: FAIL
+4302:FPU_T FAILED: 2
+4597:[SEDTEST] FAIL s_g (stdout)
+5276:[SEDTEST] FAIL s_2nd (stdout)
+5427:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+5484:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+5632:/CKSNOPE.TXTLoading program for scheduler (v2 AS): [TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+5642:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+5688:[TSORTTEST] FAILURES: 4
+5753:[SEDTEST] FAIL s_p_n (stdout)
+5891:[TACTEST] FAIL missing file
+5895:[TACTEST] FAIL empty separator
+5937:[TACTEST] FAILURES: 4
+5959:[CMPTEST] FAIL EOF message on stderr
+5963:[CMPTEST] FAIL empty EOF message
+T3_intel EXIT=1

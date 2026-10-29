@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 300s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb122/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 47802 console lines, 308 FAIL lines, 38 user memory fault records across 26 processes, 87 programs exited, halted=1
+T3_intel: FAIL — 14 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 308 FAIL line(s); first 20:
+2297:MMTEST FAIL 13
+2629:[SEDTEST] FAIL basic_s (stdout)
+4737:[CMPTEST] FAIL EOF message on stderr
+4743:[CMPTEST] FAIL empty EOF message
+4747:[CMPTEST] FAIL missing file diagnostic
+4757:[CMPTEST] FAIL -i 4:0 skips prefix
+4758:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+4763:[CMPTEST] FAIL - stdin EOF diagnostic
+4764:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+4771:[CMPTEST] FAILURES: 5
+4792:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+4798:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+4813:[TSORTTEST] FAILURES: 4
+4851:  FPU_T torture-child: FAIL
+4919:[TEST] DIRECT-ext-cat FAIL (empty target, no load failure)
+5033:  FPU_T fork-inherit: FAIL
+5113:FPU_T FAILED: 2
+5369:[TACTEST] FAIL missing file
+5396:FOLD.BIN: [TACTEST] FAIL empty separator
+5418:[TACTEST] FAILURES: 4
+T3_intel EXIT=1
