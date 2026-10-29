@@ -159,6 +159,7 @@ static struct window *find_window(int id);   /* window lookup, defined below */
 
 static int ctrl_pressed = 0;
 static int alt_pressed = 0;
+static int caps_lock_on = 0;   /* toggled by KEY_CAPSLOCK (58) presses */
 
 /* Modifier bits reported to pixel-mode windows (ESC [ K <mods> ~, the
  * F1.8 input-v2 addition -- see window.h): 1=Shift 2=Ctrl 4=Alt, OR-ed.
@@ -190,6 +191,10 @@ static int held_key_last_ms = 0;
 static char map_key_char(int code) {
   if (code < 0 || code >= 128) return 0;
   char c = shift_pressed ? shift_keymap[code] : keymap[code];
+  /* Caps Lock inverts the case of letters only (Shift+letter with Caps Lock
+   * on gives lowercase, as on every desktop). */
+  if (caps_lock_on && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')))
+    c = (char)(c ^ 0x20);
   if (ctrl_pressed && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')))
     c = (char)(c & 0x1f);
   return c;
@@ -200,7 +205,7 @@ static char map_key_char(int code) {
  * nothing repeats while Ctrl is held -- a held Ctrl+C must fire once. */
 static int key_may_repeat(int code) {
   if (ctrl_pressed) return 0;
-  if (code >= 103 && code <= 108) return 1;          /* arrows */
+  if (code == 103 || code == 105 || code == 106 || code == 108) return 1; /* arrows */
   char c = map_key_char(code);
   return c >= 0x20 && c != 0x7f;
 }
@@ -209,7 +214,11 @@ static int key_may_repeat(int code) {
  * length, or 0 when there is nothing to forward (unknown key, or one the
  * desktop consumes itself such as F4). */
 static int key_payload(int code, char *out) {
-  if (code >= 103 && code <= 108) {                  /* arrows */
+  /* Arrows are 103/105/106/108 only: 104 (PgUp) and 107 (End) sit inside
+   * that range but are NOT arrows -- matching them here left out[2]
+   * uninitialized and sent ESC [ <stack garbage>, so End and PgUp never
+   * reached any window. */
+  if (code == 103 || code == 105 || code == 106 || code == 108) { /* arrows */
     out[0] = 27; out[1] = '[';
     if (code == 103) out[2] = 'A';                   /* Up */
     if (code == 108) out[2] = 'B';                   /* Down */
@@ -2008,6 +2017,10 @@ int main(void) {
         }
         if (ev->code == 56 || ev->code == 100) {  /* Alt (left / right) */
           alt_pressed = ev->value;
+          continue;
+        }
+        if (ev->code == 58) {                     /* Caps Lock: toggle on press */
+          if (ev->value == 1) caps_lock_on = !caps_lock_on;
           continue;
         }
         if (ev->value == 0 && ev->code != 0x110) {
