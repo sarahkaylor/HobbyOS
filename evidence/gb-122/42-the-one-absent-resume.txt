@@ -1,0 +1,1 @@
+[GB122] pid=15 parent=6 sp=0x17FFFFF4C8 dest=0x17FFFFF388 pte=0 w=0 cr3=0x20F1A000 root=0x20F1A000 if=3

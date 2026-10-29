@@ -1,0 +1,49 @@
+diff --git a/src/kernel/process.c b/src/kernel/process.c
+index 3c47bc3..bb3685c 100755
+--- a/src/kernel/process.c
++++ b/src/kernel/process.c
+@@ -1794,6 +1794,44 @@ void schedule(struct trap_frame *tf, int is_yield) {
+           }
+         }
+       }
++      {
++        /* GB-122 DIAGNOSTIC (not shipped): sample EVERY resume landing in the
++           user stack window and print whether the copy's destination page has
++           a leaf, plus CR3 vs the AS root and the parent pid.  Answers "absent
++           at resume, and is the table we walk the one in use". */
++        extern int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *l);
++        uint64_t leaf = 0;
++        if (proc_table[next].as && target_sp >= USER_MAIN_STK_LIMIT_V2 &&
++            target_sp <= USER_MAIN_STK_TOP_V2) {
++          uint64_t dest = target_sp - 320;
++          int present = (vm_arch_walk(proc_table[next].as, dest & ~0xFFFULL,
++                                      &leaf) == 0);
++          uint64_t cr3;
++          __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
++          struct kline kl;
++          kl_init(&kl);
++          kl_s(&kl, "[GB122] pid=");
++          kl_i(&kl, proc_table[next].pid);
++          kl_s(&kl, " parent=");
++          kl_i(&kl, proc_table[next].parent_pid);
++          kl_s(&kl, " sp=");
++          kl_hex(&kl, target_sp);
++          kl_s(&kl, " dest=");
++          kl_hex(&kl, dest);
++          kl_s(&kl, " pte=");
++          kl_c(&kl, present ? '1' : '0');
++          kl_s(&kl, " w=");
++          kl_c(&kl, (present && (leaf & 2)) ? '1' : '0');
++          kl_s(&kl, " cr3=");
++          kl_hex(&kl, cr3 & 0x000FFFFFFFFFF000ULL);
++          kl_s(&kl, " root=");
++          kl_hex(&kl, proc_table[next].as->root_phys);
++          kl_s(&kl, " if=");
++          kl_c(&kl, local_tf.cs & 3 ? '3' : '0');
++          kl_s(&kl, "\n");
++          kl_emit(&kl);
++        }
++      }
+       enter_user_space(&local_tf, target_sp);
+       /* GB-060 (cheap half): a resume call that returns is a defect --
+          enter_user_space iretqs into the target and must never come back.  The
