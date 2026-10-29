@@ -1,0 +1,163 @@
+diff --git a/src/kernel/arch/x64/trap.c b/src/kernel/arch/x64/trap.c
+index a1f5728..6013ee8 100755
+--- a/src/kernel/arch/x64/trap.c
++++ b/src/kernel/arch/x64/trap.c
+@@ -32,6 +32,12 @@
+ #ifndef TRAP_SYSCALL_DEBUG
+ #define TRAP_SYSCALL_DEBUG 0
+ #endif
++/* GB-125 control build: set to 1 to force the resume-guard refusal path so
++   it can be observed (evidence/gb-125/10-control-refusal-serial.log).  0 in
++   every shipped tree. */
++#ifndef GB125_PROVE_GUARD
++#define GB125_PROVE_GUARD 0
++#endif
+ #include "errno.h"
+ #include "vfs.h"
+ #include "vm.h"
+@@ -3556,6 +3562,124 @@ __asm__(
+ ".att_syntax prefix\n"
+ );
+ 
++/* GB-125: guard the kernel-mode resume copy inside enter_user_space.
++ *
++ * That branch does `mov rax, gs:[24]; lea rdi,[rax-320]; rep movsq` (37
++ * qwords = 296 bytes ending at gs:[24]) with NO page check.  A CPL0 store
++ * into an absent page does not demand-page and does not return an error: it
++ * takes #PF (vector=14, cr2 on the stack-top page -- family A), and the
++ * iretq that follows then pops its five words out of the frame the fault
++ * interrupted, i.e. out of memory that was never written (vector=20000 /
++ * 15154 / 6, rip ~= 0x1 -- family B).  One event, two signatures.
++ *
++ * This guard runs immediately before `rep movsq` and refuses the resume
++ * instead of faulting into a frame that does not exist.  It is a REFUSAL,
++ * not a skip: on failure it emits one bounded record and the stub halts
++ * this CPU, so a refusal can never be mistaken for a clean resume.
++ *
++ * It walks the LIVE tables from CR3 rather than calling vm_arch_walk():
++ * the v2 walk in arch/x64/mmu.c only serves the 64..96 GiB window
++ * (`i3 < 64 || i3 > 95 -> 0`), so for the 0x17FFFFF... stack addresses
++ * this guard exists to judge it would report "absent" for a page that is
++ * present -- a false refusal on every kernel-task resume. */
++static uint64_t gb125_cr3(void) {
++  uint64_t v;
++  __asm__ volatile("mov %%cr3, %0" : "=r"(v));
++  return v;
++}
++
++/* 0 + *leaf when the 4 KiB leaf covering va is present in the table rooted
++   at cr3; -1 when any level is absent (or on a leaf kind this kernel does
++   not build). */
++static int gb125_leaf_at(uint64_t cr3, uint64_t va, uint64_t *leaf) {
++  const uint64_t OA = 0x000FFFFFFFFFF000ULL;
++  uint64_t *p4 = (uint64_t *)(cr3 & OA);
++  if (!p4)
++    return -1;
++  uint64_t e = p4[(va >> 39) & 0x1FF];
++  if (!(e & 1))
++    return -1;
++  if (e & 0x80)
++    return -1; /* 1 GiB leaf at PML4: not produced by this kernel */
++  uint64_t *pdpt = (uint64_t *)(e & OA);
++  e = pdpt[(va >> 30) & 0x1FF];
++  if (!(e & 1))
++    return -1;
++  if (e & 0x80) { /* 1 GiB page */
++    *leaf = e;
++    return 0;
++  }
++  uint64_t *pd = (uint64_t *)(e & OA);
++  e = pd[(va >> 21) & 0x1FF];
++  if (!(e & 1))
++    return -1;
++  if (e & 0x80) { /* 2 MiB page */
++    *leaf = e;
++    return 0;
++  }
++  uint64_t *pt = (uint64_t *)(e & OA);
++  e = pt[(va >> 12) & 0x1FF];
++  if (!(e & 1))
++    return -1;
++  *leaf = e;
++  return 0;
++}
++
++/* 1 = the 296-byte kernel-mode frame copy may proceed.  0 = refused, after
++   emitting the [RESUME-NOMAP] record.  Reads gs:[24] itself, so the stub
++   calls it with no arguments and no caller-saved register depends on it. */
++int resume_kernel_copy_guard(void) {
++  uint64_t sp = arch_get_user_sp();
++#if GB125_PROVE_GUARD
++  /* CONTROL BUILD ONLY (GB-125 evidence, not shipped): force the guarded
++     condition so the refusal path can be observed on hardware instead of
++     being argued from the source.  0x17FF0FF000 sits inside the user stack
++     window and is absent from both tables. */
++  sp = 0x17FF0FF000ULL;
++#endif
++  uint64_t dest = sp - 320;
++  uint64_t end = dest + 296;
++  uint64_t cr3 = gb125_cr3();
++  uint64_t bad = 0;
++  const char *why = 0;
++
++  for (uint64_t a = dest & ~0xFFFULL; a < end; a += 0x1000) {
++    uint64_t leaf = 0;
++    if (gb125_leaf_at(cr3, a, &leaf) != 0) {
++      bad = a;
++      why = "absent";
++      break;
++    }
++    if (!(leaf & 2)) {
++      bad = a;
++      why = "read-only";
++      break;
++    }
++  }
++  if (!why)
++    return 1;
++
++  struct kline k;
++  kl_init(&k);
++  kl_s(&k, "[RESUME-NOMAP] kernel-mode resume refused: reason=");
++  kl_s(&k, why);
++  kl_s(&k, " pid=");
++  kl_i(&k, (long)current_process() ? (long)current_process()->pid : -1);
++  kl_s(&k, " target_sp=");
++  kl_hex(&k, sp);
++  kl_s(&k, " range=[");
++  kl_hex(&k, dest);
++  kl_s(&k, ",");
++  kl_hex(&k, end);
++  kl_s(&k, ") page=");
++  kl_hex(&k, bad);
++  kl_s(&k, " cr3=");
++  kl_hex(&k, cr3);
++  kl_s(&k, "\n");
++  kl_emit(&k);
++  return 0;
++}
++
+ __asm__(
+ ".intel_syntax noprefix\n"
+ ".global enter_user_space\n"
+@@ -3588,6 +3712,20 @@ __asm__(
+ "       exactly at that RSP: dest = RSP - 320 writes nothing at or above\n"
+ "       the task's live stack pointer, and the popped RSP slot (filled\n"
+ "       in the tail) then resumes the task with RSP == gs:[24]. */\n"
++"    /* GB-125: refuse the resume when the 296-byte copy would land in an\n"
++"       absent or read-only page.  Without this the `rep movsq` takes #PF\n"
++"       at CPL0 and the iretq below pops five words out of the frame the\n"
++"       fault interrupted -- the \"torn frame\" (vector=20000/15154/6,\n"
++"       rip~=0x1).  The guard reports one [RESUME-NOMAP] record and halts\n"
++"       this CPU: a refusal, never a silent skip. */\n"
++"    call resume_kernel_copy_guard\n"
++"    test eax, eax\n"
++"    jne 8f\n"
++"    cli\n"
++"6:\n"
++"    hlt\n"
++"    jmp 6b\n"
++"8:\n"
+ "    mov rax, gs:[24]\n"
+ "    lea rdi, [rax - 320]\n"
+ "    mov rsi, r12\n"

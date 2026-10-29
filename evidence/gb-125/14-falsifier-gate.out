@@ -1,0 +1,5 @@
+t3_nullentry: tree has the a53f26e fix (STATE=fixed)
+=== t3_nullentry (intel, SMP=1, program=HELLO.BIN, state=fixed) ===
+  halted=1 fault_lines=0 (expecting vector=13 on unfixed)
+t3_nullentry: PASS — fixed run halted cleanly (a53f26e verified).
+GATE_EXIT=0

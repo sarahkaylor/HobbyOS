@@ -1,0 +1,28 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2400s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb125-verify/evidence/gb-125/21-t3-intel-baseline-215b79b.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 18973 console lines, 110 FAIL lines, 11 user memory fault records across 8 processes, 87 programs exited, halted=1
+T3_intel: FAIL — 18 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 110 FAIL line(s); first 20:
+2455:Loading program for scheduler (v2 AS): MMTEST FAIL 13
+2654:[SEDTEST] FAIL basic_s (stdout)
+3153:[SIGTEST] FAIL waitpid returns the child got=17 want=4294964048
+3613:[SEDTEST] FAIL s_g (stdout)
+4408:[SEDTEST] FAIL s_2nd (stdout)
+4697:[CMPTEST] FAIL EOF message on stderr
+4749:/TEST2.TXT[CMPTEST] FAIL empty EOF message
+4774:[CMPTEST] FAIL missing file diagnostic
+4780:[CMPTEST] FAIL -i 4:0 skips prefix
+4783:/TEST4.TXT[CMPTEST] FAIL - stdin EOF diagnostic
+4790:[CMPTEST] FAILURES: 5
+5036:: No such file or directoryUNEXPAND.BIN:   FPU_T fork-inherit: FAIL
+5087:SED.BINFPU_T FAILED: 2
+5160:[SEDTEST] FAIL s_p_n (stdout)
+5266:[TEST] DIRECT-ext-cat FAIL (empty target, no load failure)
+5449:[TACTEST] FAIL missing file
+5463:[TACTEST] FAIL empty separator
+5500:[TACTEST] FAILURES: 4
+5588:[SEDTEST] FAIL amp (stdout)
+5947:[SEDTEST] FAIL backref (stdout)
+T3_intel EXIT=1
+TIER_EXIT=1

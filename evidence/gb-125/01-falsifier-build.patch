@@ -1,0 +1,17 @@
+diff --git a/src/kernel/arch/x64/trap.c b/src/kernel/arch/x64/trap.c
+index a1f5728..a7699d5 100755
+--- a/src/kernel/arch/x64/trap.c
++++ b/src/kernel/arch/x64/trap.c
+@@ -3588,6 +3588,12 @@ __asm__(
+ "       exactly at that RSP: dest = RSP - 320 writes nothing at or above\n"
+ "       the task's live stack pointer, and the popped RSP slot (filled\n"
+ "       in the tail) then resumes the task with RSP == gs:[24]. */\n"
++"    /* GB-125 FALSIFIER BUILD (not shipped): force the guarded condition on\n"
++"       the UNGUARDED head -- same absent page the control build asked the\n"
++"       guard to judge -- so the pre-fix outcome for that exact input can be\n"
++"       quoted instead of assumed. */\n"
++"    mov rax, 0x17FF0FF000\n"
++"    mov gs:[24], rax\n"
+ "    mov rax, gs:[24]\n"
+ "    lea rdi, [rax - 320]\n"
+ "    mov rsi, r12\n"
