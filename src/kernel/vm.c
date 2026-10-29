@@ -97,11 +97,17 @@ struct addr_space *vm_as_create(uint64_t tgid) {
   struct addr_space *as = &vm_as_pool[tgid];
   if (as->ver == AS_V2) {
     spinlock_release_irqrestore(&vm_lock, flags);
+    /* GB-124: distinguish a pid-reuse AS collision from frame OOM — the idle
+       reaper / slot reuse can hand us a pid whose AS pool entry is still
+       AS_V2 (its teardown raced or never ran), which is a different defect
+       from running out of frames. */
+    { static int c_old; if (c_old<3){c_old++; uart_puts("[GB124-AS] fail: pid AS_V2 collision\n");} }
     return 0;
   }
   uint64_t arr = frame_alloc_zeroed();
   if (!arr) {
     spinlock_release_irqrestore(&vm_lock, flags);
+    { static int c_oom; if (c_oom<3){c_oom++; uart_puts("[GB124-AS] fail: frame OOM\n");} }
     return 0;
   }
   as->ver = AS_V2;
@@ -125,6 +131,7 @@ struct addr_space *vm_as_create(uint64_t tgid) {
     as->cap = 0;
     frame_free(arr);
     spinlock_release_irqrestore(&vm_lock, flags);
+    { static int c_root; if (c_root<3){c_root++; uart_puts("[GB124-AS] fail: root alloc\n");} }
     return 0;
   }
   as->root_phys = root;
