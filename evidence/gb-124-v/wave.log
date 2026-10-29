@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/verify-gb124v/obj/t3_intel.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 11014 console lines, 79 FAIL lines, 6 user memory fault records across 6 processes, 83 programs exited, halted=1
+T3_intel: FAIL — 17 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 79 FAIL line(s); first 20:
+2339:MMTEST FAIL [EXITPC] pid=24 last_user_pc=0x10000012AF
+3009:[SIGTEST] FAIL waitpid returns the child got=29 want=4294964048
+3029:[SEDTEST] FAIL basic_s (stdout)
+3755:[SEDTEST] FAIL s_g (stdout)
+4424:[SEDTEST] FAIL s_2nd (stdout)
+5070:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+5206:[SEDTEST] FAIL s_p_n (stdout)
+5292:TAC.BIN/FOLD.BIN[CMPTEST] FAIL EOF message on stderr
+5305:Loading program for scheduler (v2 AS): [TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+5315:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+5343:[CMPTEST] FAIL empty EOF message
+5347:[CMPTEST] FAIL missing file diagnostic
+5359:[CMPTEST] FAIL -i 4:0 skips prefix
+5365:TR.BIN: [CMPTEST] FAIL - stdin EOF diagnostic
+5372:[CMPTEST] FAILURES: 5
+5485:[TSORTTEST] FAILURES: 4
+5939:[SEDTEST] FAIL amp (stdout)
+6280:[TACTEST] FAIL missing file
+6289:Loading program for scheduler (v2 AS): [TACTEST] FAIL empty separator
+6311:[TACTEST] FAILURES: 4
+T3_intel EXIT=1

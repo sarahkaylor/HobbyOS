@@ -1,0 +1,8 @@
+graded head: d0cd95077e80c931f19bd3d340b315c83b171cb8
+intel build rc: 0 (evidence/gb-124-v/build-intel.log)
+arm build rc: 0 (evidence/gb-124-v/build-arm.log)
+host_tests: Checks run:    482 / Checks failed: 0 / TEST EXIT: 0
+wave: T3_intel: 11014 console lines, 79 FAIL lines, 6 user memory fault records across 6 processes, 83 programs exited, halted=1
+no address space: 0
+[GB124-AS]: 0
+halted marker lines: 1

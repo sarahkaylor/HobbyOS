@@ -1,0 +1,8 @@
+=== build intel ===
+intel rc=0
+=== build arm ===
+arm rc=0
+=== host_tests ===
+host_tests rc=0
+=== intel T3 wave ===
+wave rc=1
