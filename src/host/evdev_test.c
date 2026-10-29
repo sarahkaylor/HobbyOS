@@ -102,6 +102,27 @@ static void test_kbd_e0_arrows(void) {
   evdev_kbd_byte(&d, 0xC8, cap_emit, &c); /* UP release (0x80|0x48) */
   check(c.n == 2 && c.code[0] == 103 && c.value[0] == 0,
         "kbd: E0 release maps to KEY_UP(103,0)");
+
+  CAP_RESET(c);
+  evdev_kbd_byte(&d, 0xE0, cap_emit, &c);
+  evdev_kbd_byte(&d, 0x53, cap_emit, &c); /* DELETE */
+  check(c.n == 2 && c.code[0] == 111 && c.value[0] == 1,
+        "kbd: E0 0x53 maps to KEY_DELETE(111)");
+
+  CAP_RESET(c);
+  evdev_kbd_byte(&d, 0xE0, cap_emit, &c);
+  evdev_kbd_byte(&d, 0x52, cap_emit, &c); /* INSERT */
+  check(c.n == 2 && c.code[0] == 110, "kbd: E0 0x52 maps to KEY_INSERT(110)");
+
+  CAP_RESET(c);
+  evdev_kbd_byte(&d, 0xE0, cap_emit, &c);
+  evdev_kbd_byte(&d, 0x1D, cap_emit, &c); /* RIGHT CTRL */
+  check(c.n == 2 && c.code[0] == 97, "kbd: E0 0x1D maps to KEY_RIGHTCTRL(97)");
+
+  CAP_RESET(c);
+  evdev_kbd_byte(&d, 0xE0, cap_emit, &c);
+  evdev_kbd_byte(&d, 0xAA, cap_emit, &c); /* fake shift release */
+  check(c.n == 0, "kbd: E0 0xAA (fake shift) emits nothing");
 }
 
 /* A bare 0xE0 with no follow-up key must not emit anything (stalls the
