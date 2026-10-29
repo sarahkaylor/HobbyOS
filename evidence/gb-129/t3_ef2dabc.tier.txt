@@ -1,0 +1,2 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log evidence/gb-129/t3_ef2dabc.log) ===

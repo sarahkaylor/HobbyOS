@@ -1,0 +1,26 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log evidence/gb-129/t3_8fccec7.log) ===
+T3_intel: 108667 console lines, 140 FAIL lines, 10 user memory fault records across 9 processes, 84 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 2700s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 1 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 140 FAIL line(s); first 20:
+1485:/HEDGNU.BIN[W[AKVEER-TNREY]L ]T FAILGANTA.BLI:N E
+3203:[COMMTEST] FAIL [EXITPC] pid=34 last_user_pc=0x1000001990
+3277:[SEDTEST] FAIL basic_s/TR.BIN
+4357:[SIGTEST] FAIL v2 loader: image mapped (lazy), bytes=109304 pages=27 first=in elap=0ms
+4485:[SEDTEST] FAIL NL.BIN
+4699:: FAIL
+5151:[SEDTEST] FAIL s_2nd (stdout)
+5251:fork-inherit/TSORT.BIN: FAIL
+5278:FPU_T FAILED: COMM.BIN
+5795:[SEDTEST] FAIL v2 loader: PID=26 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+6032:14 CMPTEST.BIN[COMMTEST] FAILURES:  want=-204 children=06v2 loader: image mapped (lazy), bytes=108248 pages=27 first=in elap=0ms
+6350:[SEDTEST] FAIL [ARRIVED] EXPAND.BIN rc>0
+6681:[WAITPID] ECHILD caller=14 CMPTEST.BIN want=-204 children=0[CKSUMTEST] PASS [SEDTEST] FAIL 
+6853:[TSORTTEST] FAIL [KERNEL] Process 25: SED.BIN exited unexpectedly or gracefully.
+6864:14[TSORTTEST] FAIL  CMPTEST.BIN want=-204chain from stdininvalid number of columns: `0' children=0 (exit status 
+6877:[GREPTEST] PASS [TSORTTEST] FAIL anchors_dollarchain from '-' operand
+6887:[TSORTTEST] FAIL Loading program for scheduler (v2 AS): diamond from stdinGREP.BIN (exit status 
+6899:[TSORTTEST] FAIL [WAITPID] ECHILD caller=14 CMPTEST.BIN want=-204 children=0
+6908:14[TSORTTEST] FAIL  cycle from FILE (stderr + rc 1)CMPTEST.BIN (stderr)
+7064:[TSORTTEST] FAIL v2 loader: image mapped (lazy), bytes=292072 pages=72 first=in elap=0ms

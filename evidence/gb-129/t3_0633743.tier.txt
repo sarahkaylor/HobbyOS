@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log evidence/gb-129/t3_0633743.log) ===
+T3_intel: 46623 console lines, 240 FAIL lines, 29 user memory fault records across 20 processes, 87 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 2700s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 1 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 240 FAIL line(s); first 20:
+1978:MMTEST FAIL [TEST] Sending 'echo redirected > OUT.TXT' command...
+3180:[SIGTEST] FAIL waitpid returns the child got=44 want=4294964048
+3266:  FPU_T torture-child: FAIL
+3887:[TEST] DIRECT-ext-cat FAIL (empty target, no load failure)
+3995:  FPU_T fork-inherit: FAIL
+4010:FPU_T FAILED: 2
+4110:[SEDTEST] FAIL basic_s (stdout)
+4844:[SEDTEST] FAIL s_g (stdout)
+5325:[SEDTEST] FAIL s_2nd (stdout)
+5696:[CMPTEST] FAIL EOF message on stderr
+5771:[[CKMEPRTNESETL]]  FAFAILT AeLm:p tEyx cEeOpF tmieosns aigne K
+5825:[CMPTEST] FAIL -i 4:0 skips prefix
+5829:/CUT.BIN[CMPTEST] FAIL - stdin EOF diagnostic
+5839:[CMPTEST] FAILURES: 5
+5925:[SEDTEST] FAIL s_p_n (stdout)
+6275:tab size cannot be 0[SEDTEST] FAIL amp (stdout)
+6690:[TACTEST] FAIL missing file
+6864:[SEDTEST] FAIL backref (stdout)
+7407:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (exit status -1 != 1)
+7409:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+T3_intel EXIT=1

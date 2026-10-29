@@ -1,0 +1,12 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log evidence/gb-129/t3_18bb542.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 1377 console lines, 5 FAIL lines, 79 user memory faults, 62 programs exited, halted=1
+T3_intel: FAIL — 79 user memory faults exceeds the documented baseline ceiling 75 (GB-068 regression); a change added user faults the wave did not previously carry
+T3_intel: FAIL — 5 FAIL line(s); first 20:
+1125:Graphics Validation: FAILED (Pixel mismatch!)
+1303:  FAIL: line startpoint
+1304:  FAIL: line midpoint
+1305:  FAIL: line endpoint
+1316:GRAPHICS TESTS FAILED
+T3_intel EXIT=1

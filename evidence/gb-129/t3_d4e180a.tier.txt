@@ -1,0 +1,25 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log evidence/gb-129/t3_d4e180a.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 34624 console lines, 86 FAIL lines, 6 user memory fault records across 6 processes, 82 programs exited, halted=1
+T3_intel: FAIL — 86 FAIL line(s); first 20:
+3380:[SIGTEST] FAIL /TAILGN.BIN
+3694:/EXPAND.BIN/WC.BIN[SEDTEST] FAIL [KERNEL] Process 43: IPC_T.BIN exited unexpectedly or gracefully.
+5089:[SEDTEST] FAIL v2 loader: PID=30 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6
+5559:: FAIL
+5915:[SEDTEST] FAIL NL.BIN
+6095:COMM.BIN: : FAIL
+6104:FPU_T FAILED: [KERNEL] Process 28: CKSUM.BIN exited unexpectedly or gracefully.
+6274:NL.BIN[TACTEST] FAIL  rc>0
+6421:: No such file or directory[TACTEST] FAIL /EXPMISS.TXTempty separator/CUT.BIN/GRT.IN
+6553:[TACTEST] FAILURES: /FOLD.BIN
+6593:[SEDTEST] FAIL /TSTSL.TXT[WAITPID] ECHILD caller=CKSUM.BIN32 CMPTEST.BIN
+7163:[SEDTEST] FAIL [GREPTEST] PASS [KERNEL] Process 10: CKSUM.BIN exited unexpectedly or gracefully.
+8277:[SEDTEST] FAIL [ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+8505:[TSORTTEST] FAIL [ALIVE-SET] no READY work, yet the scheduler counts live work (the predicate: anything not FREE/EXITED/ALLOCATED/THREAD_DONE), so no halt. Live slots:
+8585:l[TSORTTEST] FAIL [WAITPID] ECHILD caller=32 CMPTEST.BIN want=-204 children=0
+8591:a[TSORTTEST] FAIL \n[WAITPID] ECHILD caller=32 CMPTEST.BIN want=-204 children=0
+8595:\n[TSORTTEST] FAIL dediamond from stdinlt (exit status a-1\n\x00 != 0Z)
+8598:\x00\x00\x00\x00\x00\x00\x00[TSORTTEST] FAIL \x00cycle from FILE (stderr + rc 1)\x00 (stderr)
+8725:[TSORTTEST] FAIL [WAVE-TRY] GREP.BIN[WAITPID] ECHILD caller=32 CMPTEST.BIN want=-204 children=0
+8736:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
