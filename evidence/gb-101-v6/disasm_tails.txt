@@ -1,0 +1,184 @@
+
+hobbyos.elf:     file format elf32-i386
+
+
+Disassembly of section .text:
+
+7003cc90 <common_trap_wrapper+0x166>:
+7003cc90:	24 18                	and    al,0x18
+7003cc92:	01 00                	add    DWORD PTR [rax],eax
+7003cc94:	00 48 89             	add    BYTE PTR [rax-0x77],cl
+7003cc97:	84 24 f8             	test   BYTE PTR [rax+rdi*8],ah
+7003cc9a:	00 00                	add    BYTE PTR [rax],al
+7003cc9c:	00 48 8b             	add    BYTE PTR [rax-0x75],cl
+7003cc9f:	84 24 28             	test   BYTE PTR [rax+rbp*1],ah
+7003cca2:	01 00                	add    DWORD PTR [rax],eax
+7003cca4:	00 48 89             	add    BYTE PTR [rax-0x77],cl
+7003cca7:	84 24 00             	test   BYTE PTR [rax+rax*1],ah
+7003ccaa:	01 00                	add    DWORD PTR [rax],eax
+7003ccac:	00 48 8b             	add    BYTE PTR [rax-0x75],cl
+7003ccaf:	84 24 20             	test   BYTE PTR [rax+riz*1],ah
+7003ccb2:	01 00                	add    DWORD PTR [rax],eax
+7003ccb4:	00 48 89             	add    BYTE PTR [rax-0x77],cl
+7003ccb7:	84 24 18             	test   BYTE PTR [rax+rbx*1],ah
+7003ccba:	01 00                	add    DWORD PTR [rax],eax
+7003ccbc:	00 48 8b             	add    BYTE PTR [rax-0x75],cl
+7003ccbf:	84 24 38             	test   BYTE PTR [rax+rdi*1],ah
+7003ccc2:	01 00                	add    DWORD PTR [rax],eax
+7003ccc4:	00 48 89             	add    BYTE PTR [rax-0x77],cl
+7003ccc7:	84 24 20             	test   BYTE PTR [rax+riz*1],ah
+7003ccca:	01 00                	add    DWORD PTR [rax],eax
+7003cccc:	00 48 89             	add    BYTE PTR [rax-0x77],cl
+7003cccf:	e7 e8                	out    0xe8,eax
+7003ccd1:	1b 44 00 00          	sbb    eax,DWORD PTR [rax+rax*1+0x0]
+7003ccd5:	48 8b 84 24 18 01 00 	mov    rax,QWORD PTR [rsp+0x118]
+7003ccdc:	00 
+7003ccdd:	48 83 e0 03          	and    rax,0x3
+7003cce1:	48 83 f8 03          	cmp    rax,0x3
+7003cce5:	75 05                	jne    7003ccec <common_trap_exit>
+7003cce7:	e8 24 03 00 00       	call   7003d010 <restore_user_sp_helper>
+
+7003ccec <common_trap_exit>:
+7003ccec:	48 8b 5c 24 08       	mov    rbx,QWORD PTR [rsp+0x8]
+7003ccf1:	48 8b 4c 24 10       	mov    rcx,QWORD PTR [rsp+0x10]
+7003ccf6:	48 8b 54 24 18       	mov    rdx,QWORD PTR [rsp+0x18]
+7003ccfb:	48 8b 74 24 20       	mov    rsi,QWORD PTR [rsp+0x20]
+7003cd00:	48 8b 7c 24 28       	mov    rdi,QWORD PTR [rsp+0x28]
+7003cd05:	48 8b 6c 24 30       	mov    rbp,QWORD PTR [rsp+0x30]
+7003cd0a:	4c 8b 44 24 38       	mov    r8,QWORD PTR [rsp+0x38]
+7003cd0f:	4c 8b 4c 24 40       	mov    r9,QWORD PTR [rsp+0x40]
+7003cd14:	4c 8b 54 24 48       	mov    r10,QWORD PTR [rsp+0x48]
+7003cd19:	4c 8b 5c 24 50       	mov    r11,QWORD PTR [rsp+0x50]
+7003cd1e:	4c 8b 64 24 58       	mov    r12,QWORD PTR [rsp+0x58]
+7003cd23:	4c 8b 6c 24 60       	mov    r13,QWORD PTR [rsp+0x60]
+7003cd28:	4c 8b 74 24 68       	mov    r14,QWORD PTR [rsp+0x68]
+7003cd2d:	4c 8b 7c 24 70       	mov    r15,QWORD PTR [rsp+0x70]
+7003cd32:	48 8b 84 24 20 01 00 	mov    rax,QWORD PTR [rsp+0x120]
+7003cd39:	00 
+7003cd3a:	48 89 84 24 38 01 00 	mov    QWORD PTR [rsp+0x138],rax
+7003cd41:	00 
+7003cd42:	48 8b 84 24 18 01 00 	mov    rax,QWORD PTR [rsp+0x118]
+7003cd49:	00 
+7003cd4a:	48 83 e0 03          	and    rax,0x3
+7003cd4e:	48 83 f8 03          	cmp    rax,0x3
+7003cd52:	75 10                	jne    7003cd64 <common_trap_exit+0x78>
+7003cd54:	48 8b 84 24 f0 00 00 	mov    rax,QWORD PTR [rsp+0xf0]
+7003cd5b:	00 
+7003cd5c:	48 89 84 24 30 01 00 	mov    QWORD PTR [rsp+0x130],rax
+7003cd63:	00 
+7003cd64:	48 8b 84 24 00 01 00 	mov    rax,QWORD PTR [rsp+0x100]
+7003cd6b:	00 
+7003cd6c:	48 89 84 24 28 01 00 	mov    QWORD PTR [rsp+0x128],rax
+7003cd73:	00 
+7003cd74:	48 8b 84 24 18 01 00 	mov    rax,QWORD PTR [rsp+0x118]
+7003cd7b:	00 
+7003cd7c:	48 89 84 24 20 01 00 	mov    QWORD PTR [rsp+0x120],rax
+7003cd83:	00 
+7003cd84:	48 8b 84 24 f8 00 00 	mov    rax,QWORD PTR [rsp+0xf8]
+7003cd8b:	00 
+7003cd8c:	48 89 84 24 18 01 00 	mov    QWORD PTR [rsp+0x118],rax
+7003cd93:	00 
+7003cd94:	48 8b 04 24          	mov    rax,QWORD PTR [rsp]
+7003cd98:	50                   	push   rax
+7003cd99:	51                   	push   rcx
+7003cd9a:	48 8d bc 24 28 01 00 	lea    rdi,[rsp+0x128]
+7003cda1:	00 
+7003cda2:	e8 89 01 00 00       	call   7003cf30 <trap_exit_frame_check>
+7003cda7:	59                   	pop    rcx
+7003cda8:	58                   	pop    rax
+7003cda9:	48 81 c4 08 01 00 00 	add    rsp,0x108
+7003cdb0:	48 83 c4 10          	add    rsp,0x10
+7003cdb4:	48 8b bc 24 10 ff ff 	mov    rdi,QWORD PTR [rsp-0xf0]
+7003cdbb:	ff 
+7003cdbc:	48 cf                	iretq
+
+7003cdbe <enter_user_space>:
+7003cdbe:	49 89 fc             	mov    r12,rdi
+7003cdc1:	49 89 f5             	mov    r13,rsi
+7003cdc4:	e8 47 02 00 00       	call   7003d010 <restore_user_sp_helper>
+7003cdc9:	49 8b 84 24 18 01 00 	mov    rax,QWORD PTR [r12+0x118]
+7003cdd0:	00 
+7003cdd1:	48 83 e0 03          	and    rax,0x3
+7003cdd5:	48 83 f8 03          	cmp    rax,0x3
+7003cdd9:	74 26                	je     7003ce01 <enter_user_space+0x43>
+7003cddb:	65 48 8b 04 25 18 00 	mov    rax,QWORD PTR gs:0x18
+7003cde2:	00 00 
+7003cde4:	48 8d b8 c0 fe ff ff 	lea    rdi,[rax-0x140]
+7003cdeb:	4c 89 e6             	mov    rsi,r12
+7003cdee:	48 c7 c1 25 00 00 00 	mov    rcx,0x25
+7003cdf5:	f3 48 a5             	rep movs QWORD PTR [rdi],QWORD PTR [rsi]
+7003cdf8:	48 8d a7 d8 fe ff ff 	lea    rsp,[rdi-0x128]
+7003cdff:	eb 43                	jmp    7003ce44 <enter_user_space+0x86>
+7003ce01:	49 8d bd c0 fe ff ff 	lea    rdi,[r13-0x140]
+7003ce08:	4c 89 e6             	mov    rsi,r12
+7003ce0b:	48 c7 c1 25 00 00 00 	mov    rcx,0x25
+7003ce12:	f3 48 a5             	rep movs QWORD PTR [rdi],QWORD PTR [rsi]
+7003ce15:	48 8d a7 d8 fe ff ff 	lea    rsp,[rdi-0x128]
+7003ce1c:	49 8b 84 24 f0 00 00 	mov    rax,QWORD PTR [r12+0xf0]
+7003ce23:	00 
+7003ce24:	48 89 84 24 30 01 00 	mov    QWORD PTR [rsp+0x130],rax
+7003ce2b:	00 
+7003ce2c:	48 c7 84 24 18 01 00 	mov    QWORD PTR [rsp+0x118],0x1b
+7003ce33:	00 1b 00 00 00 
+7003ce38:	48 c7 84 24 20 01 00 	mov    QWORD PTR [rsp+0x120],0x23
+7003ce3f:	00 23 00 00 00 
+7003ce44:	48 8b 5c 24 08       	mov    rbx,QWORD PTR [rsp+0x8]
+7003ce49:	48 8b 4c 24 10       	mov    rcx,QWORD PTR [rsp+0x10]
+7003ce4e:	48 8b 54 24 18       	mov    rdx,QWORD PTR [rsp+0x18]
+7003ce53:	48 8b 74 24 20       	mov    rsi,QWORD PTR [rsp+0x20]
+7003ce58:	48 8b 7c 24 28       	mov    rdi,QWORD PTR [rsp+0x28]
+7003ce5d:	48 8b 6c 24 30       	mov    rbp,QWORD PTR [rsp+0x30]
+7003ce62:	4c 8b 44 24 38       	mov    r8,QWORD PTR [rsp+0x38]
+7003ce67:	4c 8b 4c 24 40       	mov    r9,QWORD PTR [rsp+0x40]
+7003ce6c:	4c 8b 54 24 48       	mov    r10,QWORD PTR [rsp+0x48]
+7003ce71:	4c 8b 5c 24 50       	mov    r11,QWORD PTR [rsp+0x50]
+7003ce76:	4c 8b 64 24 58       	mov    r12,QWORD PTR [rsp+0x58]
+7003ce7b:	4c 8b 6c 24 60       	mov    r13,QWORD PTR [rsp+0x60]
+7003ce80:	4c 8b 74 24 68       	mov    r14,QWORD PTR [rsp+0x68]
+7003ce85:	4c 8b 7c 24 70       	mov    r15,QWORD PTR [rsp+0x70]
+7003ce8a:	48 8b 84 24 20 01 00 	mov    rax,QWORD PTR [rsp+0x120]
+7003ce91:	00 
+7003ce92:	48 89 84 24 38 01 00 	mov    QWORD PTR [rsp+0x138],rax
+7003ce99:	00 
+7003ce9a:	65 48 8b 04 25 18 00 	mov    rax,QWORD PTR gs:0x18
+7003cea1:	00 00 
+7003cea3:	48 89 84 24 30 01 00 	mov    QWORD PTR [rsp+0x130],rax
+7003ceaa:	00 
+7003ceab:	48 8b 84 24 00 01 00 	mov    rax,QWORD PTR [rsp+0x100]
+7003ceb2:	00 
+7003ceb3:	48 89 84 24 28 01 00 	mov    QWORD PTR [rsp+0x128],rax
+7003ceba:	00 
+7003cebb:	48 8b 84 24 18 01 00 	mov    rax,QWORD PTR [rsp+0x118]
+7003cec2:	00 
+7003cec3:	48 89 84 24 20 01 00 	mov    QWORD PTR [rsp+0x120],rax
+7003ceca:	00 
+7003cecb:	48 8b 84 24 f8 00 00 	mov    rax,QWORD PTR [rsp+0xf8]
+7003ced2:	00 
+7003ced3:	48 89 84 24 18 01 00 	mov    QWORD PTR [rsp+0x118],rax
+7003ceda:	00 
+7003cedb:	48 8b 04 24          	mov    rax,QWORD PTR [rsp]
+7003cedf:	50                   	push   rax
+7003cee0:	51                   	push   rcx
+7003cee1:	48 8d bc 24 28 01 00 	lea    rdi,[rsp+0x128]
+7003cee8:	00 
+7003cee9:	e8 42 00 00 00       	call   7003cf30 <trap_exit_frame_check>
+7003ceee:	59                   	pop    rcx
+7003ceef:	58                   	pop    rax
+7003cef0:	48 81 c4 08 01 00 00 	add    rsp,0x108
+7003cef7:	48 83 c4 10          	add    rsp,0x10
+7003cefb:	48 8b bc 24 10 ff ff 	mov    rdi,QWORD PTR [rsp-0xf0]
+7003cf02:	ff 
+7003cf03:	48 cf                	iretq
+7003cf05:	66 66 2e 0f 1f 84 00 	data16 cs nop WORD PTR [rax+rax*1+0x0]
+7003cf0c:	00 00 00 00 
+
+7003cf10 <save_user_sp_helper>:
+7003cf10:	55                   	push   rbp
+7003cf11:	48 89 e5             	mov    rbp,rsp
+7003cf14:	e8 87 c5 ff ff       	call   700394a0 <get_cpuid>
+7003cf19:	89 c0                	mov    eax,eax
+7003cf1b:	48 8d 04 40          	lea    rax,[rax+rax*2]
+7003cf1f:	48 c1 e0 04          	shl    rax,0x4
+7003cf23:	48 8b b8 98 d0 56 75 	mov    rdi,QWORD PTR [rax+0x7556d098]
+7003cf2a:	5d                   	pop    rbp
+7003cf2b:	e9 30 c6 ff ff       	jmp    70039560 <arch_set_user_sp>
