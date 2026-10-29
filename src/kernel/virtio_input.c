@@ -6,10 +6,22 @@
 
 #ifdef __x86_64__
 
+/* x86_64 input: i8042 PS/2 keyboard + mouse, plus the VMware-backdoor
+ * absolute pointer ("vmmouse", exposed by QEMU's pc/q35 machines with
+ * vmport=on -- the default).  With vmmouse active QEMU treats the guest
+ * pointer as absolute: a QEMU GTK/SDL/VNC window no longer has to grab
+ * the host pointer, and the guest cursor sits exactly under the host one.
+ * Without it (vmport=off, real hardware) the PS/2 relative stream is the
+ * fallback.  Both feed the shared evdev decoder (src/kernel/evdev.c) and
+ * the same kernel event ring the desktop reads with get_events(). */
+
+#include "display_mode.h"
+#include "timer.h"
+
 extern void uart_puts(const char *s);
 extern void uart_print_hex(uint64_t val);
 
-#define EVENT_RING_SIZE 256
+#define EVENT_RING_SIZE 1024
 static struct virtio_input_event event_ring[EVENT_RING_SIZE];
 static int ring_head = 0;
 static int ring_tail = 0;
@@ -25,27 +37,142 @@ static inline uint8_t inb(uint16_t port) {
   return ret;
 }
 
-static void push_event(uint16_t type, uint16_t code, uint32_t value) {
-  int next_head = (ring_head + 1) % EVENT_RING_SIZE;
-  if (next_head != ring_tail) {
-    event_ring[ring_head].type = type;
-    event_ring[ring_head].code = code;
-    event_ring[ring_head].value = value;
-    ring_head = next_head;
-  }
+static int ring_free(void) {
+  return (ring_tail - ring_head - 1 + EVENT_RING_SIZE) % EVENT_RING_SIZE;
+}
+
+static void ring_put(uint16_t type, uint16_t code, uint32_t value) {
+  event_ring[ring_head].type = type;
+  event_ring[ring_head].code = code;
+  event_ring[ring_head].value = value;
+  ring_head = (ring_head + 1) % EVENT_RING_SIZE;
 }
 
 /* The PS/2 -> evdev decode (scancodes, mouse packets, the overflow-drop
-   rule, absolute-position clamp) lives in src/kernel/evdev.c, shared with
-   the host golden suite (src/host/evdev_test.c) so the driver's exact
-   translator is pinned on the host tier.  Here we bridge its events into
-   the kernel's event ring. */
-static struct evdev_decoder input_decoder;
+   rule, resync, vmmouse packets) lives in src/kernel/evdev.c, shared with
+   the host golden suite (src/host/evdev_test.c).  Here we bridge its
+   events into the kernel's event ring.
+
+   Events are committed one SYN-terminated packet at a time: a full ring
+   never splits a packet (which used to drop e.g. ABS_X but keep ABS_Y, or
+   lose a button release).  A motion-only packet that does not fit is
+   coalesced into a pending position that is re-emitted once there is
+   room, so the cursor always ends up where the device says it is. */
+#define STAGE_MAX 16
+static struct virtio_input_event stage[STAGE_MAX];
+static int stage_n = 0;
+static int pending_abs = 0;
+static uint32_t pending_x = 0, pending_y = 0;
+static uint32_t dropped_packets = 0;
+
+static void flush_pending_abs(void) {
+  if (pending_abs && ring_free() >= 3) {
+    ring_put(EV_ABS, ABS_X, pending_x);
+    ring_put(EV_ABS, ABS_Y, pending_y);
+    ring_put(EV_SYN, 0, 0);
+    pending_abs = 0;
+  }
+}
 
 static void decoder_emit(void *ctx, uint16_t type, uint16_t code,
                          uint32_t value) {
   (void)ctx;
-  push_event(type, code, value);
+  if (stage_n < STAGE_MAX) {
+    stage[stage_n].type = type;
+    stage[stage_n].code = code;
+    stage[stage_n].value = value;
+    stage_n++;
+  }
+  if (type != EV_SYN) return;
+
+  flush_pending_abs();
+  int motion_only = 1;
+  for (int i = 0; i < stage_n; i++) {
+    if (stage[i].type == EV_ABS) {
+      if (stage[i].code == ABS_X) pending_x = stage[i].value;
+      else if (stage[i].code == ABS_Y) pending_y = stage[i].value;
+    } else if (stage[i].type != EV_SYN) {
+      motion_only = 0;
+    }
+  }
+  if (!pending_abs && ring_free() >= stage_n) {
+    for (int i = 0; i < stage_n; i++)
+      ring_put(stage[i].type, stage[i].code, stage[i].value);
+  } else if (motion_only) {
+    pending_abs = 1; /* pending_x/y already hold the newest position */
+  } else {
+    dropped_packets++;
+  }
+  stage_n = 0;
+}
+
+static struct evdev_decoder input_decoder;
+
+/* ---- VMware backdoor (vmmouse) ----------------------------------------- */
+#define VMW_MAGIC 0x564D5868u
+#define VMW_PORT 0x5658
+#define VMW_CMD_GETVERSION 10
+#define VMW_CMD_ABSPOINTER_DATA 39
+#define VMW_CMD_ABSPOINTER_STATUS 40
+#define VMW_CMD_ABSPOINTER_COMMAND 41
+#define VMMOUSE_CMD_READ_ID 0x45414552u
+#define VMMOUSE_CMD_DISABLE 0x000000F5u
+#define VMMOUSE_CMD_REQUEST_ABSOLUTE 0x53424152u
+#define VMMOUSE_VERSION_ID 0x3442554Au
+#define VMMOUSE_ERROR 0xFFFF0000u
+
+static int vmmouse_present = 0;
+static uint32_t vmmouse_packets = 0;
+
+struct vmw_regs { uint32_t eax, ebx, ecx, edx, esi, edi; };
+
+static void vmw_call(uint32_t cmd, uint32_t arg, struct vmw_regs *r) {
+  uint32_t a = VMW_MAGIC, b = arg, c = cmd, d = VMW_PORT, si = 0, di = 0;
+  __asm__ volatile("inl %%dx, %%eax"
+                   : "+a"(a), "+b"(b), "+c"(c), "+d"(d), "+S"(si), "+D"(di)
+                   :
+                   : "memory");
+  r->eax = a; r->ebx = b; r->ecx = c; r->edx = d; r->esi = si; r->edi = di;
+}
+
+/* Detect the backdoor, read the vmmouse ID and switch it to absolute.
+   Returns 1 when the absolute pointer is live. */
+static int vmmouse_enable(void) {
+  struct vmw_regs r;
+  vmw_call(VMW_CMD_GETVERSION, ~VMW_MAGIC, &r);
+  if (r.ebx != VMW_MAGIC || r.eax == 0xFFFFFFFFu) return 0;
+
+  vmw_call(VMW_CMD_ABSPOINTER_COMMAND, VMMOUSE_CMD_READ_ID, &r);
+  vmw_call(VMW_CMD_ABSPOINTER_STATUS, 0, &r);
+  if ((r.eax & VMMOUSE_ERROR) == VMMOUSE_ERROR || (r.eax & 0xFFFF) == 0)
+    return 0;
+  vmw_call(VMW_CMD_ABSPOINTER_DATA, 1, &r);
+  if (r.eax != VMMOUSE_VERSION_ID) return 0;
+
+  vmw_call(VMW_CMD_ABSPOINTER_COMMAND, VMMOUSE_CMD_REQUEST_ABSOLUTE, &r);
+  return 1;
+}
+
+/* Drain queued vmmouse packets (4 words each).  Under input_lock. */
+static void vmmouse_drain_nolock(void) {
+  if (!vmmouse_present) return;
+  for (int guard = 0; guard < 64; guard++) {
+    struct vmw_regs r;
+    vmw_call(VMW_CMD_ABSPOINTER_STATUS, 0, &r);
+    if ((r.eax & VMMOUSE_ERROR) == VMMOUSE_ERROR) {
+      /* Device reset / queue error: re-arm absolute mode. */
+      vmw_call(VMW_CMD_ABSPOINTER_COMMAND, VMMOUSE_CMD_DISABLE, &r);
+      vmmouse_present = vmmouse_enable();
+      return;
+    }
+    uint32_t queued = r.eax & 0xFFFF;
+    if (queued < 4) return;
+    vmw_call(VMW_CMD_ABSPOINTER_DATA, 4, &r);
+    vmmouse_packets++;
+    /* QEMU (and VMware) report x/y in 0..0xFFFF. */
+    evdev_vmmouse_packet(&input_decoder, r.eax, r.ebx, r.ecx, r.edx, 0xFFFF,
+                         decoder_emit, 0);
+  }
 }
 
 /* Drain any bytes the i8042 has for us.  Runs under input_lock.  The
@@ -54,16 +181,24 @@ static void decoder_emit(void *ctx, uint16_t type, uint16_t code,
    next input event and it lands LATE — the integrated absolute position is
    then read before the motion arrives, so clicks land off-target.  The
    desktop polls get_events() on every loop, so draining here too keeps the
-   queue empty (packets stay in order, none deferred) without any IRQ work. */
+   queue empty (packets stay in order, none deferred) without any IRQ work.
+
+   With vmmouse live, its queue is drained before each PS/2 mouse byte is
+   decoded: QEMU queues the vmmouse packet BEFORE injecting the fake PS/2
+   packet that raises IRQ 12, so the decoder always knows a fake is due by
+   the time it sees one (and swallows it). */
 static void input_drain_nolock(void) {
-  while (1) {
+  vmmouse_drain_nolock();
+  for (int guard = 0; guard < 4096; guard++) {
     uint8_t status = inb(0x64);
     if (!(status & 1)) {
       break;
     }
     uint8_t data = inb(0x60);
     if (status & 0x20) {
-      evdev_mouse_byte(&input_decoder, data, decoder_emit, 0);
+      vmmouse_drain_nolock();
+      evdev_mouse_byte_at(&input_decoder, data, timer_get_ms(), decoder_emit,
+                          0);
     } else {
       evdev_kbd_byte(&input_decoder, data, decoder_emit, 0);
     }
@@ -79,25 +214,31 @@ void virtio_input_handle_irq(int irq) {
 
 int virtio_input_get_events(struct virtio_input_event *buf, int max_events) {
   uint64_t flags = spinlock_acquire_irqsave(&input_lock);
-#ifdef __x86_64__
   input_drain_nolock();
-#endif
   int count = 0;
   while (ring_tail != ring_head && count < max_events) {
     buf[count] = event_ring[ring_tail];
     ring_tail = (ring_tail + 1) % EVENT_RING_SIZE;
     count++;
   }
+  flush_pending_abs();
   spinlock_release_irqrestore(&input_lock, flags);
   return count;
 }
 
-static void ps2_wait_write(void) {
-  while (inb(0x64) & 2);
+/* ---- i8042 setup -------------------------------------------------------- */
+#define PS2_SPIN 2000000
+
+static int ps2_wait_write(void) {
+  for (int i = 0; i < PS2_SPIN; i++)
+    if (!(inb(0x64) & 2)) return 0;
+  return -1;
 }
 
-static void ps2_wait_read(void) {
-  while (!(inb(0x64) & 1));
+static int ps2_wait_read(void) {
+  for (int i = 0; i < PS2_SPIN; i++)
+    if (inb(0x64) & 1) return 0;
+  return -1;
 }
 
 static void ps2_write_cmd(uint8_t cmd) {
@@ -110,22 +251,41 @@ static void ps2_write_data(uint8_t data) {
   outb(0x60, data);
 }
 
-static uint8_t ps2_read_data(void) {
-  ps2_wait_read();
+/* Returns the byte, or -1 on timeout (no device). */
+static int ps2_read_data(void) {
+  if (ps2_wait_read() != 0) return -1;
   return inb(0x60);
 }
 
-static void ps2_write_mouse(uint8_t data) {
+static void ps2_flush_output(void) {
+  for (int i = 0; i < 64 && (inb(0x64) & 1); i++) (void)inb(0x60);
+}
+
+static int ps2_write_mouse(uint8_t data) {
   ps2_write_cmd(0xD4);
   ps2_write_data(data);
-  uint8_t ack = ps2_read_data();
-  (void)ack;
+  return ps2_read_data(); /* 0xFA = ACK */
+}
+
+/* IntelliMouse knock: sample rates 200, 100, 80, then GET ID == 3 means
+   the 4-byte (wheel) protocol is on. */
+static int ps2_mouse_enable_wheel(void) {
+  static const uint8_t knock[3] = {200, 100, 80};
+  for (int i = 0; i < 3; i++) {
+    ps2_write_mouse(0xF3);
+    ps2_write_mouse(knock[i]);
+  }
+  if (ps2_write_mouse(0xF2) != 0xFA) return 0;
+  int id = ps2_read_data();
+  return id == 3;
 }
 
 int virtio_input_init(void) {
   spinlock_init(&input_lock);
   evdev_decoder_init(&input_decoder);
+  evdev_decoder_set_screen(&input_decoder, DISPLAY_WIDTH, DISPLAY_HEIGHT);
 
+  ps2_flush_output();
   // Enable mouse
   ps2_write_cmd(0xA8);
   // Enable keyboard
@@ -133,7 +293,8 @@ int virtio_input_init(void) {
 
   // Read Controller Command Byte
   ps2_write_cmd(0x20);
-  uint8_t ccb = ps2_read_data();
+  int ccbr = ps2_read_data();
+  uint8_t ccb = ccbr < 0 ? 0x47 : (uint8_t)ccbr;
   uart_puts("Original CCB: ");
   uart_print_hex(ccb);
   uart_puts("\n");
@@ -152,7 +313,19 @@ int virtio_input_init(void) {
 
   // Configure mouse
   ps2_write_mouse(0xF6); // Set defaults
+  int wheel = ps2_mouse_enable_wheel();
+  ps2_write_mouse(0xF3); // back to 100 samples/s
+  ps2_write_mouse(100);
+  evdev_mouse_set_packet_len(&input_decoder, wheel ? 4 : 3);
   ps2_write_mouse(0xF4); // Enable data reporting
+  ps2_flush_output();
+  uart_puts(wheel ? "[INPUT] PS/2 mouse: IntelliMouse (wheel, 4-byte)\n"
+                  : "[INPUT] PS/2 mouse: standard 3-byte\n");
+
+  vmmouse_present = vmmouse_enable();
+  uart_puts(vmmouse_present
+                ? "[INPUT] vmmouse absolute pointer enabled\n"
+                : "[INPUT] vmmouse not present: PS/2 relative pointer\n");
 
   extern void gic_enable_interrupt(uint32_t intid);
   gic_enable_interrupt(33); // Keyboard IRQ 1

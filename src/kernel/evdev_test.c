@@ -52,14 +52,14 @@ static void test_evdev_mouse_overflow_drop(void) {
   cap.n = 0;
 
   /* X-overflow sets 0x40 + left-down 0x01 + alignment 0x08: dx dropped,
-     x stays 16384, left button edge fires. */
+     x stays at the centre pixel, left button edge fires. */
   evdev_mouse_byte(&d, 0x08 | 0x40 | 0x01, cap_emit, &d);
   evdev_mouse_byte(&d, 0x50, cap_emit, &d);
   evdev_mouse_byte(&d, 0x00, cap_emit, &d);
 
   EXPECT_EQ(cap.n, 4);
   EXPECT_EQ(cap.type[0], EVDEV_EV_ABS);
-  EXPECT_EQ(cap.value[0], 16384); /* no dx jump */
+  EXPECT_EQ(cap.value[0], evdev_abs_from_px(960, 1920)); /* no dx jump */
   EXPECT_EQ(cap.type[2], EVDEV_EV_KEY);
   EXPECT_EQ(cap.code[2], EVDEV_BTN_LEFT);
   EXPECT_EQ(cap.value[2], 1);
@@ -73,8 +73,8 @@ static void test_evdev_mouse_clamp(void) {
   evdev_decoder_init(&d);
   cap.n = 0;
 
-  /* Runaway -dx from the 16384 center must clamp at 0, not go negative. */
-  for (int i = 0; i < 4; i++) {
+  /* Runaway -dx from the centre must clamp at 0, not go negative. */
+  for (int i = 0; i < 10; i++) {
     evdev_mouse_byte(&d, 0x08 | 0x10, cap_emit, &d);
     evdev_mouse_byte(&d, 0x80, cap_emit, &d);
     evdev_mouse_byte(&d, 0x00, cap_emit, &d);
@@ -82,11 +82,39 @@ static void test_evdev_mouse_clamp(void) {
   EXPECT_EQ(cap.value[cap.n - 3], 0);
 }
 
+static void test_evdev_wheel_vmmouse(void) {
+  uart_puts("  Running test_evdev_wheel_vmmouse...\n");
+  tests_run++;
+  struct evdev_decoder d;
+  evdev_decoder_init(&d);
+  evdev_mouse_set_packet_len(&d, 4);
+  cap.n = 0;
+  /* IntelliMouse z=-1 (wheel up) -> REL_WHEEL +1. */
+  evdev_mouse_byte(&d, 0x08, cap_emit, &d);
+  evdev_mouse_byte(&d, 0x00, cap_emit, &d);
+  evdev_mouse_byte(&d, 0x00, cap_emit, &d);
+  evdev_mouse_byte(&d, 0xFF, cap_emit, &d);
+  EXPECT_EQ(cap.n, 4);
+  EXPECT_EQ(cap.type[2], EVDEV_EV_REL);
+  EXPECT_EQ(cap.code[2], EVDEV_REL_WHEEL);
+  EXPECT_EQ(cap.value[2], 1);
+  /* vmmouse left press at QEMU's encoding of pixel (100, 200). */
+  cap.n = 0;
+  evdev_vmmouse_packet(&d, EVDEV_VMMOUSE_LEFT, ((100 * 32767) / 1920) << 1,
+                       ((200 * 32767) / 1080) << 1, 0, 0xFFFF, cap_emit, &d);
+  EXPECT_EQ(cap.value[0], (100 * 32767) / 1920);
+  EXPECT_EQ(cap.code[2], EVDEV_BTN_LEFT);
+  EXPECT_EQ(cap.value[2], 1);
+  EXPECT_EQ(d.px_x, 100);
+  EXPECT_EQ(d.px_y, 200);
+}
+
 void evdev_test_suite(void) {
   uart_puts("evdev_test_suite:\n");
   test_evdev_kbd_a();
   test_evdev_mouse_overflow_drop();
   test_evdev_mouse_clamp();
+  test_evdev_wheel_vmmouse();
 }
 
 #endif // KERNEL_MODE_UNIT_TEST
