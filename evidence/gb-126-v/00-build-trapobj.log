@@ -1,0 +1,18 @@
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/arch/x64/trap.c -o obj/intel/trap.o
+src/kernel/arch/x64/trap.c:1963:5: warning: use of out-of-scope declaration of 'uart_puts_raw' [-Wout-of-scope-function]
+ 1963 |     uart_puts_raw(pb);
+      |     ^
+src/kernel/arch/x64/trap.c:105:15: note: previous declaration is here
+  105 |   extern void uart_puts_raw(const char *s);
+      |               ^
+src/kernel/arch/x64/trap.c:81:13: warning: unused function 'dbg_resume' [-Wunused-function]
+   81 | static void dbg_resume(const char *tag, uint64_t v) {
+      |             ^~~~~~~~~~
+src/kernel/arch/x64/trap.c:2229:13: warning: unused function 'safe_print_int' [-Wunused-function]
+ 2229 | static void safe_print_int(int val) {
+      |             ^~~~~~~~~~~~~~
+src/kernel/arch/x64/trap.c:2248:13: warning: unused function 'safe_print_hex' [-Wunused-function]
+ 2248 | static void safe_print_hex(uint64_t val) {
+      |             ^~~~~~~~~~~~~~
+4 warnings generated.
+OBJ_RC=0

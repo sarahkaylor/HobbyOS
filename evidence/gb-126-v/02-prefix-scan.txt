@@ -1,0 +1,54 @@
+  PASS vector   0: NO_ERR matches architecture
+  PASS vector   1: NO_ERR matches architecture
+  PASS vector   2: NO_ERR matches architecture
+  PASS vector   3: NO_ERR matches architecture
+  PASS vector   4: NO_ERR matches architecture
+  PASS vector   5: NO_ERR matches architecture
+  PASS vector   6: NO_ERR matches architecture
+  PASS vector   7: NO_ERR matches architecture
+  PASS vector   8: ERR matches architecture
+  PASS vector   9: NO_ERR matches architecture
+  PASS vector  10: ERR matches architecture
+  PASS vector  11: ERR matches architecture
+  PASS vector  12: ERR matches architecture
+  PASS vector  13: ERR matches architecture
+  PASS vector  14: ERR matches architecture
+  PASS vector  15: NO_ERR matches architecture
+  PASS vector  16: NO_ERR matches architecture
+  PASS vector  17: ERR matches architecture
+  PASS vector  18: NO_ERR matches architecture
+  PASS vector  19: NO_ERR matches architecture
+  PASS vector  20: NO_ERR matches architecture
+  FAIL vector  21: stub pushes a dummy 0, architecture needs an error code
+  PASS vector  22: NO_ERR matches architecture
+  PASS vector  23: NO_ERR matches architecture
+  PASS vector  24: NO_ERR matches architecture
+  PASS vector  25: NO_ERR matches architecture
+  PASS vector  26: NO_ERR matches architecture
+  PASS vector  27: NO_ERR matches architecture
+  PASS vector  28: NO_ERR matches architecture
+  FAIL vector  29: stub pushes a dummy 0, architecture needs an error code
+  FAIL vector  30: stub pushes a dummy 0, architecture needs an error code
+  PASS vector  31: NO_ERR matches architecture
+  PASS vector  32: NO_ERR matches architecture
+  PASS vector  33: NO_ERR matches architecture
+  PASS vector  34: NO_ERR matches architecture
+  PASS vector  35: NO_ERR matches architecture
+  PASS vector  36: NO_ERR matches architecture
+  PASS vector  37: NO_ERR matches architecture
+  PASS vector  38: NO_ERR matches architecture
+  PASS vector  39: NO_ERR matches architecture
+  PASS vector  40: NO_ERR matches architecture
+  PASS vector  41: NO_ERR matches architecture
+  PASS vector  42: NO_ERR matches architecture
+  PASS vector  43: NO_ERR matches architecture
+  PASS vector  44: NO_ERR matches architecture
+  PASS vector  45: NO_ERR matches architecture
+  PASS vector  46: NO_ERR matches architecture
+  PASS vector  47: NO_ERR matches architecture
+  PASS vector 129: NO_ERR matches architecture
+  PASS vector 130: NO_ERR matches architecture
+  FAIL vector 21: GB-126 requires EXCEPTION_ERR
+  FAIL vector 29: GB-126 requires EXCEPTION_ERR
+  FAIL vector 30: GB-126 requires EXCEPTION_ERR
+vector_shape_scan: 53 checks, 6 FAIL
