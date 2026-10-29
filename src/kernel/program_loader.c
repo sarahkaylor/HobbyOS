@@ -792,6 +792,20 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     process_free(pid);
     return -ENOMEM;
   }
+  /* GB-122 (b'): the FIRST writer of the stack top page is the KERNEL --
+     enter_user_space copies the 37-quad resume frame to [target_sp-0x140,
+     target_sp).  A kernel store does not demand-page: it takes a #PF at CPL0
+     (vec=14 err=0x2) and halts the CPU, which is GB-101's clause-1 fatal
+     (measured: pte=0 on 25 of 25 anomalies, all in 0x17FFFFFxxx).  The other
+     candidate fix -- vm_touch at the resume site inside schedule() -- was
+     measured to HANG the guest (wave stalled, monitor sampled the CPUs), so the
+     page is committed here, at AS build, before the process can be scheduled:
+     one page per process, not the whole 8 MiB reserve. */
+  if (vm_touch(child, USER_MAIN_STK_TOP_V2 - FRAME_SIZE, FRAME_SIZE, 1) != 0) {
+    uart_puts("v2 loader: stack top page commit failed\n");
+    process_free(pid);
+    return -ENOMEM;
+  }
   /* P2.5 (S5 flip): the heap slot, demand-zero (the user malloc's arena). */
   if (v2_insert_heap(as) != 0) {
     process_free(pid);

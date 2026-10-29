@@ -1,0 +1,10 @@
+evidence/gb-122/t3_w1.tier.txt:T3_intel: note — halt marker found after make exited (poll raced the exit)
+evidence/gb-122/t3_w1.tier.txt:T3_intel: 110 console lines, 0 FAIL lines, 0 user memory fault records across 0 processes, 0 programs exited, halted=1
+evidence/gb-122/t3_w1.tier.txt:T3_intel: FAIL — only 0 programs exited (floor 55): too little work for a complete wave, so this cannot be a pass
+evidence/gb-122/t3_w2.tier.txt:T3_intel: 7003 console lines, 52 FAIL lines, 6 user memory fault records across 6 processes, 79 programs exited, halted=0
+evidence/gb-122/t3_w2.tier.txt:T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 2700s deadline hit; a hang is a defect, not a flake)
+evidence/gb-122/t3_w2.tier.txt:T3_intel: FAIL — 5 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+evidence/gb-122/t3_w2.tier.txt:T3_intel: FAIL — 52 FAIL line(s); first 20:
+evidence/gb-122/t3_w3.tier.txt:T3_intel: 17294 console lines, 85 FAIL lines, 4 user memory fault records across 3 processes, 83 programs exited, halted=0
+evidence/gb-122/t3_w3.tier.txt:T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 2700s deadline hit; a hang is a defect, not a flake)
+evidence/gb-122/t3_w3.tier.txt:T3_intel: FAIL — 85 FAIL line(s); first 20:

@@ -1731,6 +1731,61 @@ void schedule(struct trap_frame *tf, int is_yield) {
            has no business in a restored user frame. */
         local_tf.spsr = (local_tf.spsr | 0x200) & ~0x10000ULL;
       }
+      /* GB-122 (a): the 37-quad copy inside enter_user_space is a KERNEL store
+         into the user stack top page.  A kernel store does not fault a lazy
+         page in; it takes the #PF at CPL0 (vec=14 err=0x2) and halts the CPU.
+         GB-101 measured that page absent on 25 of 25 anomalies, all at
+         0x17FFFFFxxx, while the region list said present+RW.  Materialise it
+         here, where the failure is still reportable.
+
+         Lock order is the reason this is legal under proc_lock: vm.c's header
+         states proc_lock -> vm_lock -> frame_lock, and "vm.c itself never takes
+         proc_lock so a caller may hold it" -- the fault path is itself such a
+         caller.  This is the documented order, not an assertion. */
+      /* The initial entry of a process resumes on a low (identity-mapped)
+         target_sp, not a user VA -- measured: pid=1 first resume is
+         target_sp=0x23FFF000.  Only a USER-WINDOW destination can be the lazy
+         stack page this fix is about; anything else keeps the old path. */
+      /* Measured: doing the materialisation HERE (vm_touch under proc_lock in
+         schedule()) HANGS the guest -- the wave stalled at 7002 console lines
+         with no halt and the monitor had to sample the CPU state.  vm_touch
+         allocates a frame, and frame_lock is below proc_lock in the documented
+         order only when the caller is not already inside the scheduler's
+         critical path; another CPU holding frame_lock and reaching for
+         proc_lock closes the cycle.  So the fix moved to the loader (GB-122
+         (b'): materialise the stack's top page at AS build), and this site
+         keeps only the read-only complement: walk the PTE and refuse to iretq
+         into a page that is not there, naming the process. */
+      int user_dest = (target_sp - 320) >= USER_VA_BASE && (target_sp - 320) < USER_VA_TOP;
+      if (user_dest && vm_arch_walk(proc_table[next].as, target_sp - 320, 0) != 0) {
+        /* (c) as a complement: a destination the AS refuses to materialise is a
+           stale/torn target_sp.  Name it and do not iretq into it -- a halt
+           here is the silent CPU loss this whole thread is about. */
+        extern void uart_puts(const char *s);
+        static const char hxr[] = "0123456789ABCDEF";
+        char nb[96];
+        int ni = 0;
+        const char *q1 = "[RESUME-NOMAP] refusing to resume pid=";
+        while (*q1 && ni < 40) nb[ni++] = *q1++;
+        {
+          int v = proc_table[next].pid;
+          char td[12];
+          int ti = 0;
+          if (v < 0) { nb[ni++] = '-'; v = -v; }
+          if (v == 0) td[ti++] = '0';
+          while (v > 0 && ti < 11) { td[ti++] = (char)('0' + (v % 10)); v /= 10; }
+          while (ti > 0) nb[ni++] = td[--ti];
+        }
+        const char *q2 = " target_sp=0x";
+        while (*q2 && ni < 58) nb[ni++] = *q2++;
+        for (int sh = 60; sh >= 0 && ni < 74; sh -= 4)
+          nb[ni++] = hxr[(target_sp >> sh) & 0xF];
+        nb[ni++] = '\n';
+        nb[ni] = 0;
+        uart_puts(nb);
+        proc_table[next].state = PROC_STATE_EXITED;
+        continue;
+      }
       /* GB-057 (measurement only, no behaviour change): the resume copy writes
          296 bytes to [target_sp-320, target_sp) and that page was measured NOT
          PRESENT (vec=14 err=0x2 cr2=target_sp-0x140).  The open question is WHY:
@@ -1742,10 +1797,26 @@ void schedule(struct trap_frame *tf, int is_yield) {
         extern struct vm_region *vm_region_find(struct addr_space *as, uint64_t va);
         static int rdiag_n;
         struct addr_space *tas = proc_table[next].as;
-        if (tas && rdiag_n < 5) {
+        /* GB-101 clause 1: the five-probe sample always printed a healthy
+           mapping (region=yes prot=3 covers=1 cr3==as pte=1 w=1) because it
+           probes the FIRST five resumes, not the resues that fault.  Probe
+           every resume and print ONLY the anomaly, so the wave reports the
+           bad destination instead of a healthy prefix. */
+        int anom = 0;
+        if (tas) {
+          uint64_t dvp = target_sp - 320;
+          struct vm_region *rrp = vm_region_find(tas, dvp);
+          uint64_t leafp = 0;
+          int ptep = (vm_arch_walk(tas, dvp, &leafp) == 0);
+          anom = !(rrp && dvp >= rrp->base && dvp + 8 <= rrp->base + rrp->len && ptep);
+        }
+        static int rdiag_ok; /* GB-122: first healthy resumes, so the same line
+                                shows pte=1 w=1 AFTER the fix, not only pte=0
+                                before it. */
+        if (tas && ((anom && rdiag_n < 20) || (!anom && rdiag_ok < 2))) {
           uint64_t dv = target_sp - 320;
           struct vm_region *rr = vm_region_find(tas, dv);
-          rdiag_n++;
+          if (anom) rdiag_n++; else rdiag_ok++;
           {
             /* GB-097: uart_puts_raw takes NO lock, so a single buffered write
                through it is still not atomic -- measured: this very line came
@@ -1754,7 +1825,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
                buys atomicity on the LOCKED sink.  This diagnostic can afford to
                block, so it uses uart_puts. */
             extern void uart_puts(const char *s);
-            char rb[120];
+            char rb[190];
             int ri = 0;
             const char *p1 = "[RESUME-DIAG] pid=";
             while (*p1 && ri < 28) rb[ri++] = *p1++;
@@ -1788,6 +1859,56 @@ void schedule(struct trap_frame *tf, int is_yield) {
               int cov = (dv >= rr->base && dv + 8 <= rr->base + rr->len);
               rb[ri++] = cov ? '1' : '0';
             }
+            /* GB-101 clause 1: the copy faults (vec=14 err=0x2) even though the
+               region is present and writable in this AS.  Heres the discriminator
+               between "no mapping in the AS" and "the AS is not the one the CPU
+               is running on": compare the AS root frame with the live CR3. */
+#ifdef __x86_64__
+            {
+              uint64_t cur_cr3;
+              __asm__ volatile("mov %%cr3, %0" : "=r"(cur_cr3));
+              cur_cr3 &= ~0xFFFULL;
+              {
+                const char *p5 = " cr3=0x";
+                while (*p5 && ri < 114) rb[ri++] = *p5++;
+              }
+              {
+                static const char hx5[] = "0123456789ABCDEF";
+                for (int sh = 60; sh >= 0 && ri < 130; sh -= 4)
+                  rb[ri++] = hx5[(cur_cr3 >> sh) & 0xF];
+              }
+              {
+                const char *p6 = " as=0x";
+                while (*p6 && ri < 138) rb[ri++] = *p6++;
+              }
+              {
+                static const char hx6[] = "0123456789ABCDEF";
+                uint64_t a = tas->root_phys & ~0xFFFULL;
+                for (int sh = 60; sh >= 0 && ri < 154; sh -= 4)
+                  rb[ri++] = hx6[(a >> sh) & 0xF];
+              }
+              {
+                const char *p7 = " match=";
+                while (*p7 && ri < 164) rb[ri++] = *p7++;
+              }
+              rb[ri++] = (cur_cr3 == (tas->root_phys & ~0xFFFULL)) ? '1' : '0';
+              /* GB-101 clause 1, second half: region_find only reads the region
+                 LIST.  The hardware faults on the PAGE TABLE, so ask the walk
+                 what the PTE actually says at the copy destination. */
+              {
+                uint64_t leaf = 0;
+                int present = (vm_arch_walk(tas, dv, &leaf) == 0);
+                const char *p8 = " pte=";
+                while (*p8 && ri < 172) rb[ri++] = *p8++;
+                rb[ri++] = present ? '1' : '0';
+                if (present) {
+                  const char *p9 = " w=";
+                  while (*p9 && ri < 180) rb[ri++] = *p9++;
+                  rb[ri++] = (leaf & 0x2ULL) ? '1' : '0';
+                }
+              }
+            }
+#endif
             rb[ri++] = '\n';
             rb[ri] = 0;
             uart_puts(rb);

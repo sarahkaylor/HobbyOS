@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log evidence/gb-122/t3_w2.log) ===
+T3_intel: 7003 console lines, 52 FAIL lines, 6 user memory fault records across 6 processes, 79 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 2700s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 5 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 52 FAIL line(s); first 20:
+2336:[SIGTEST] FAIL waitpid returns the child got=13 want=4294964048
+2387:  SQLTEST create-table: FAIL
+2389:  SQLTEST insert-prepare: FAIL
+2390:  SQLTEST insert-rows: FAIL
+2391:  SQLTEST journal-exists-in-txn: FAIL
+2394:  SQLTEST select-prepare: FAIL
+2395:  SQLTEST select-rows: FAIL
+2396:  SQLTEST aggregate: FAIL
+2428:  SQLTEST update: FAIL
+2430:  SQLTEST delete-none: FAIL
+2432:  SQLTEST insert-wide: FAIL
+2455:  SQLTEST delete-wide: FAIL
+2616:[TRTEST] FAIL -d 0-9 range
+2622:[WCTEST] FAIL -wcL file
+2631:[TRTEST] FAIL -s [:blank:] class
+2638:[WCTEST] FAIL stdin '-'
+2651:[TRTEST] FAIL -s a-z range
+2657:[WCTEST] FAIL multi-file total
+2668:[TRTEST] FAIL -cd complement delete
+2672:[WCTEST] FAIL long opts
+T3_intel EXIT=1

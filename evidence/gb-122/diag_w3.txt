@@ -1,0 +1,2 @@
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFC78 covers=1 cr3=0x0000000020C04000 as=0x0000000020C04000 match=1 pte=1 w=1
+[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFC78 covers=1 cr3=0x0000000020C04000 as=0x0000000020C04000 match=1 pte=1 w=1
