@@ -73,6 +73,12 @@ void evdev_kbd_byte(evdev_decoder_t *d, uint8_t data, evdev_emit_fn emit,
     else if (base == 0x4F) code = 107; // KEY_END (E0)
     else if (base == 0x50) code = 108; // KEY_DOWN
     else if (base == 0x51) code = 109; // KEY_PAGEDOWN (E0)
+    else if (base == 0x52) code = 110; // KEY_INSERT (E0)
+    else if (base == 0x53) code = 111; // KEY_DELETE (E0)
+    else if (base == 0x1D) code = 97;  // KEY_RIGHTCTRL (E0)
+    else if (base == 0x38) code = 100; // KEY_RIGHTALT (E0)
+    // E0 2A / E0 AA (the "fake shift" i8042 wraps around nav keys) stay
+    // unmapped on purpose: mapping them would toggle the real Shift state.
 
     if (code != 0) {
       value = is_release ? 0 : 1;
