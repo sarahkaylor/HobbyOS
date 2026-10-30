@@ -725,6 +725,26 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
         child->num_open_fds++;
       }
     }
+    /* GB-095 probe (rate-limited): was a harness-spawned child's stderr pipe
+       (fd2) actually installed, or dropped?  When load_v2_internal receives a
+       stderr_fd that the MAX_OPEN_FDS/open table guard rejects, child->open_fds[2]
+       stays unset and the child's error() diagnostics (rc>0 cases) are written
+       to a dead fd 2 and lost — measured as pipeinstall=0, fd2=0xFFFFFFFF. */
+    {
+      static int gb095_n;
+      if (gb095_n < 40) {
+        int ispipe = (stderr_fd >= 0 && stderr_fd < MAX_OPEN_FDS
+                      && parent->open_fds[stderr_fd] != -1);
+        struct kline k; kl_init(&k);
+        kl_s(&k, "[GB095-FD] ");
+        kl_s(&k, filename ? filename : "(null)");
+        kl_s(&k, " stderr_fd="); kl_i(&k, stderr_fd);
+        kl_s(&k, " pipeinstall="); kl_i(&k, ispipe ? 1 : 0);
+        kl_s(&k, " fd2="); kl_hex(&k, child->open_fds[2]);
+        kl_s(&k, "\n"); kl_emit(&k);
+        gb095_n++;
+      }
+    }
   }
 
   struct file f;
