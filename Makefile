@@ -3619,6 +3619,13 @@ T4_GLUED_SELFTEST = t4_glued_selftest
 $(T4_GLUED_SELFTEST): tools/gate/t4_glued.sh
 	@bash tools/gate/t4_glued.sh --self-test
 
+# GB-122 clause-5 gate: the resume-copy #PF invariant.  Host-only self-test; the
+# gate itself takes a T3 serial path (`bash tools/gate/t3_resume_page.sh <log>`),
+# deliberately NOT wired into t3_tier.sh in this change.
+T3_RESUME_PAGE_SELFTEST = t3_resume_page_selftest
+$(T3_RESUME_PAGE_SELFTEST): tools/gate/t3_resume_page.sh
+	@bash tools/gate/t3_resume_page.sh --self-test
+
 # GB-086 clause-3 gate: boot the broken-select control (POLLBRK.BIN) and assert
 # the >=85ms select-timeout check FAILs (elapsed_ms=0, POLLTST FAILED) with the
 # guest halted.  A control that PASSES fails the gate — proves the gate cannot
