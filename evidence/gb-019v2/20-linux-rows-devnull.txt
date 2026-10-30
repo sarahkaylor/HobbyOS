@@ -1,0 +1,5 @@
+TCGETS on /dev/null                fd=3   req=0x5401 -> rc=-1 errno=25 (Inappropriate ioctl for device)
+TIOCGWINSZ on /dev/null            fd=3   req=0x5413 -> rc=-1 errno=25 (Inappropriate ioctl for device)
+FIONREAD on /dev/null              fd=3   req=0x541b -> rc=-1 errno=25 (Inappropriate ioctl for device)
+req 3 on /dev/null                 fd=3   req=0x0003 -> rc=-1 errno=25 (Inappropriate ioctl for device)
+(no tty available for the supported-request leg)

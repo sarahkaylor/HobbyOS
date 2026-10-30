@@ -1,0 +1,3 @@
+TCGETS on a pty slave             fd=4 -> rc=0 errno=0 (ok)
+TIOCGWINSZ on a pty slave         fd=4 -> rc=0 errno=0 (ok) rows=0 cols=0
+isatty(pty slave)=1
