@@ -931,6 +931,12 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     kl_i(&kl, (long)as->resident_frames);
     kl_s(&kl, " tables=");
     kl_i(&kl, (long)as->table_frames);
+    /* GB-138 (clause 2): prove the Linux-ABI flag at runtime, not by trusting the
+       source.  An ELF member shows PROC_FLAG_LINUX_ABI (0x1) set; a native .bin
+       shows 0 -- so a W0 gate can read the flag straight from the log instead of
+       re-deriving whether the member went through elf_loader_load. */
+    kl_s(&kl, " abi=");
+    kl_hex(&kl, (unsigned long)child->abi_flags);
     kl_s(&kl, "\n");
     kl_emit(&kl);
   }
