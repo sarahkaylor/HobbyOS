@@ -1,4 +1,4 @@
-# IceWM on HobbyOS — secondary desktop environment (plan v1, 2026-10-30)
+# IceWM on HobbyOS — the default desktop environment (plan v1, 2026-10-30)
 
 Status: **v1 integrated (2026-10-30)** on `icewm-port`: M0-M6 done on intel, M7 done on ARM (TCG boot + same
 checklist). Interfaces frozen in §4 (M0). Owner: the swarm coordinator. Lanes in §7. Status table: §3a.
@@ -252,6 +252,22 @@ Known limits: text apps open 800x560 (resizable; the desktop tiles them full-scr
 the window reads as 0); the game view scales with nearest-neighbour; a game window may need
 a click before IceWM gives it the keyboard; the first start-menu open takes a few seconds
 (fontconfig scan, pre-existing).
+
+## 10. IceWM becomes the default desktop (2026-10-30)
+
+After hands-on testing, IceWM replaced the native desktop as the default for `make run`.
+- `Makefile`: `DESKTOP ?= icewm` when `MODE=desktop` (the interactive boot), `DESKTOP ?= hobby`
+  for every other `MODE`. The original desktop is `make run DESKTOP=hobby`.
+- Test tiers keep their old behaviour: `test`, `unit_tests`, `desktop_test`, `apps_test`,
+  `pong_test`, `filedialog_test`, `soak`, `selfhost` etc. recurse with their own `MODE`, so they
+  resolve to `hobby` and never need the X stack (CI unchanged).
+- The QMP harnesses that drive the native desktop through `make run` (`run_{antfarm,games,nes,
+  console,xeyes,files_nav,xcalc,desktop_apps,nano}_test.py`, `capture_screenshots.py`,
+  `tools/evidence_rig.py`, `tools/perf_game_cycle.py`) pass `DESKTOP=hobby` explicitly.
+- `DESKTOP.BIN` stays on every disk: XSESSION.BIN still falls back to it, and IceWM's Logout
+  still drops to it.
+- The §0 rule "plain `make run` must not change" is retired; `DESKTOP=hobby` is now the
+  byte-identical-to-before configuration.
 
 ## 8. Fix log (newest first)
 - 2026-10-30 lane apps (branch `icewm-apps`, §9):

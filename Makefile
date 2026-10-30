@@ -84,19 +84,29 @@ QEMU_GLFIX_X64 := $(wildcard $(QEMU_GLFIX_DIR)/qemu-system-x86_64)
 OBJ_DIR = obj/$(ARCH)
 MODE_FILE = $(OBJ_DIR)/.mode
 
-# IceWM secondary desktop (icewm.md §4.5).  DESKTOP selects what the kernel
+# Desktop selection (icewm.md §4.5, §10).  DESKTOP selects what the kernel
 # launches in the default (MODE=desktop) branch:
-#   hobby (default): DESKTOP.BIN, the native HobbyOS desktop — unchanged.
-#   icewm:           XSESSION.BIN (src/user/x11sess/), which starts the X
-#                    server XHOBBY.BIN + IceWM and falls back to DESKTOP.BIN
-#                    if the X session dies.  The disk additionally gets the
-#                    X binaries (icewm.md §4.3) and data tree (§4.4) from
+#   icewm (default for MODE=desktop, i.e. `make run`): XSESSION.BIN
+#                    (src/user/x11sess/), which starts the X server
+#                    XHOBBY.BIN + IceWM and falls back to DESKTOP.BIN if the
+#                    X session dies.  The disk additionally gets the X
+#                    binaries (icewm.md §4.3) and data tree (§4.4) from
 #                    $(X11_BUILD_DIR), built by third_party/x11/build.sh
-#                    when missing.  `make run DESKTOP=icewm [ARCH=arm]`.
+#                    when missing.
+#   hobby:           DESKTOP.BIN, the original native HobbyOS desktop.
+#                    `make run DESKTOP=hobby [ARCH=arm]`.
+# Every other MODE (test, unit_tests, desktop_test, apps_test, ...) defaults
+# to hobby: those tiers boot DESKTOP.BIN or no desktop at all, so they never
+# need the X stack (and CI never builds it).  The native-desktop QMP
+# harnesses (run_*_test.py) pass DESKTOP=hobby explicitly.
 # DESKTOP_FILE is the knob's stamp (like MODE_FILE): switching DESKTOP
 # rebuilds main.o and disk.img.  DESKTOP=hobby adds no compiler flag and no
 # disk file (verified by diffing kernel build lines + mdir listings, M5).
+ifeq ($(MODE),desktop)
+DESKTOP ?= icewm
+else
 DESKTOP ?= hobby
+endif
 DESKTOP_FILE = $(OBJ_DIR)/.desktop
 X11_BUILD_DIR ?= third_party/x11/build/$(ARCH)
 
@@ -239,7 +249,7 @@ endif
 
 # Same tracker for the DESKTOP knob (icewm.md §4.5).
 ifeq ($(filter hobby icewm,$(DESKTOP)),)
-$(error DESKTOP must be 'hobby' (default) or 'icewm', got '$(DESKTOP)')
+$(error DESKTOP must be 'icewm' (default for make run) or 'hobby', got '$(DESKTOP)')
 endif
 CURRENT_DESKTOP := $(shell [ -f $(DESKTOP_FILE) ] && cat $(DESKTOP_FILE) || echo none)
 ifneq ($(CURRENT_DESKTOP),$(DESKTOP))
@@ -2295,6 +2305,7 @@ x11-staged: $(OBJ_DIR)/libc.a $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libcxx.a
 	  echo "[x11]        and third_party/x11/build.sh is not in this tree yet (icewm.md §4.2)."; \
 	  echo "[x11]        Point X11_BUILD_DIR at a prebuilt tree, or try the launcher with stubs:"; \
 	  echo "[x11]          make ARCH=$(ARCH) icewm-stubs && make ARCH=$(ARCH) DESKTOP=icewm X11_BUILD_DIR=$(X11STUB_DIR) run"; \
+	  echo "[x11]        Or boot the original native desktop:  make ARCH=$(ARCH) DESKTOP=hobby run"; \
 	  exit 1; fi; \
 	echo "[x11] missing:$$missing - building the X11 stack from source (third_party/x11/build.sh --arch $(ARCH) --stage all)"; \
 	bash third_party/x11/build.sh --arch $(ARCH) --stage all -j $(or $(X11_JOBS),8); \
@@ -2826,7 +2837,7 @@ antfarm_test:
 xeyes_test:
 	python3 ./run_xeyes_test.py
 
-# IceWM secondary desktop (icewm.md §4.5): headless DESKTOP=icewm boot with
+# IceWM desktop (icewm.md §4.5): headless DESKTOP=icewm boot with
 # QMP screenshots.  M5 stub scenario: make icewm_test ICEWM_TEST_ARGS=--stubs
 icewm_test:
 	python3 ./run_icewm_test.py --arch $(ARCH) $(ICEWM_TEST_ARGS)

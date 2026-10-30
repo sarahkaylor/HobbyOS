@@ -301,7 +301,7 @@ def main():
     qmp_sock = f"/tmp/evidence-qmp-{args.game}"
     # Boot via `make run` (the proven path; it supplies the right UEFI/CPU/
     # serial flags) and point QMP at our socket.
-    qemu_make = ["make", "run", f"ARCH={arch}",
+    qemu_make = ["make", "run", "DESKTOP=hobby", f"ARCH={arch}",
                  f"QEMU_ARGS=-display none -qmp unix:{qmp_sock},server,nowait"]
 
     # GB-118: optional staging, on the tier's terms.  --stage HOSTSRC:GUESTDEST

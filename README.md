@@ -105,17 +105,25 @@ This launches QEMU with:
 When running in nographic mode:
 - Press `Ctrl+A`, then `X` to exit QEMU
 
-### IceWM desktop (secondary, `DESKTOP=icewm`)
+### Desktop: IceWM (default) or the original HobbyOS desktop (`DESKTOP=hobby`)
 
-HobbyOS can boot into an X11 session managed by
-[IceWM](https://github.com/bbidulock/icewm) instead of its own desktop. It is
-opt-in; plain `make run` (`DESKTOP=hobby`, the default) is unchanged. The
-plan and status are in `icewm.md`.
+`make run` boots into an X11 session managed by
+[IceWM](https://github.com/bbidulock/icewm). The original native HobbyOS
+desktop is still available with `DESKTOP=hobby`. The plan and status are in
+`icewm.md`.
 
 ```bash
-make run DESKTOP=icewm              # intel (default ARCH)
-make run DESKTOP=icewm ARCH=arm     # ARM64 (TCG, slow)
+make run                            # IceWM, intel (default ARCH)
+make run ARCH=arm                   # IceWM, ARM64 (TCG, slow)
+make run DESKTOP=hobby              # the original HobbyOS desktop
+make run DESKTOP=hobby ARCH=arm
 ```
+
+`DESKTOP` only matters for the interactive desktop boot (`MODE=desktop`, the
+default). The test tiers (`make test`, `unit_tests`, `desktop_test`,
+`apps_test`, ...) default to `DESKTOP=hobby`, and the native-desktop QMP
+harnesses (`run_*_test.py`) pass `DESKTOP=hobby` themselves, so none of them
+needs the X stack.
 
 With `DESKTOP=icewm`:
 - the kernel is built with `-DKERNEL_DESKTOP_ICEWM` and launches `XSESSION.BIN`
@@ -149,7 +157,7 @@ IceWM's Logout ends the session and drops you to the HobbyOS desktop.
 
 First build: `third_party/x11/build.sh` downloads the pinned X.Org/IceWM/fontconfig
 tarballs into `third_party/x11/dl/` and checks each sha256 (`third_party/x11/sums/`).
-This is the only extra network access `DESKTOP=icewm` needs (the default build already
+This is the only extra network access the IceWM desktop needs (the build already
 fetches the llvm-project and ICU sources the same way on a fresh checkout). Host tools:
 meson, ninja, cmake, xkbcomp and xkb-data.
 
@@ -164,7 +172,7 @@ Headless test (QMP screenshots in `/tmp/hobbyos_icewm_<arch>/`):
 ```bash
 make icewm_test                                   # real X stack: taskbar, start menu, CONSOLE + XCALC via HBHOST
 make icewm_test ICEWM_TEST_ARGS=--stubs           # launcher + fallback with stub X binaries
-make icewm-stubs && make run DESKTOP=icewm X11_BUILD_DIR=obj/intel/x11stub
+make icewm-stubs && make run X11_BUILD_DIR=obj/intel/x11stub
 ```
 
 ## Graphics acceleration

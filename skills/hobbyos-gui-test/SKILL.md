@@ -39,7 +39,8 @@ make desktop_test_intel    # x86_64
 Boot with a QMP socket, then script the interaction. Coordinates are **absolute** (the VM uses `virtio-tablet`), origin top-left, in screen pixels.
 
 ```bash
-make run QEMU_ARGS="-display none -serial file:serial.log -qmp unix:./qmp-sock,server,nowait"
+make run DESKTOP=hobby QEMU_ARGS="-display none -serial file:serial.log -qmp unix:./qmp-sock,server,nowait"
+# DESKTOP=hobby: the native desktop these click recipes target (plain `make run` boots IceWM)
 ```
 
 Event vocabulary (send as one JSON object per line after `qmp_capabilities`):

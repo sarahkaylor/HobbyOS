@@ -126,7 +126,7 @@ subprocess.run(["pkill","-9","-f","qemu-system[-]" + ("aarch64" if ARCH=="arm" e
 for f in (SER, QMP):
     if os.path.exists(f): os.remove(f)
 qemu = "qemu-system-aarch64" if ARCH == "arm" else "qemu-system-x86_64"
-subprocess.Popen(["stdbuf","-oL","make","run",f"ARCH={ARCH}",
+subprocess.Popen(["stdbuf","-oL","make","run","DESKTOP=hobby",f"ARCH={ARCH}",
                   f"QEMU_ARGS=-display none -qmp unix:{QMP},server,nowait"],
                  stdout=open(SER,"w"), stderr=subprocess.STDOUT)
 q = Q(QMP)
