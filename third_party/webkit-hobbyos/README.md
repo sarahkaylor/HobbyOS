@@ -11,7 +11,7 @@ not built anything yet — never a requirement.
 
 | Path | Role |
 |---|---|
-| `webkit-hobbyos-bu-34e52e12b2.tar.xz.part-00/01` | The fork snapshot (split tarball; parts are sha-verified) |
+| `webkit-hobbyos-bu-2148171ff6.tar.xz.part-00/01` | The fork snapshot (split tarball; parts are sha-verified) |
 | `extract.sh` | Reassemble the parts → verify sha256 → extract to `src/` |
 | `build.sh` | Build `WebProcess` from the vendored source → `build/<arch>/browser.bin` |
 | `rebuild_browser.sh` | Regenerate the optional caches (`cache/browser-{arm,x64}.bin.xz`) from the vendored source |
@@ -36,14 +36,15 @@ sanity check), and `--deps-only` just builds the cross-deps prefix.
 
 - Fork origin: `https://github.com/WebKit/WebKit.git` (clone; base = tag
   `webkitgtk-2.54.0` @ `5220e80b97a253c60ed899361654142ab5021998`).
-- Snapshot ref: **`browser-usability` @ `34e52e12b2`** (2026-10-29), on top
+- Snapshot ref: **`browser-usability` @ `2148171ff6`** (2026-10-29), on top
   of `ci-on-main` @ `acb77fd6a9` — the browser usability integration: real
   address-bar editing + omnibox search + browser shortcuts (addrbar), engine-
   driven page mouse with hover/wheel/drag-select/`<select>` popup/visible form
   controls (pagemouse), complete page keyboard input with modifiers, Tab focus
   ring and clipboard (pagekeys), real form POST, http→https, gzip/deflate,
   cookies across redirects, in-memory localStorage and opt-in page timers
-  (netcompat), and failed navigations recorded in tab history.  The previous
+  (netcompat), failed navigations recorded in tab history, and the WK5Alloc
+  malloc(0) size-class fix (cnn.com crash).  The previous
   snapshot was `browser/rp-f` @ `e9a040c5b4` (2026-10-08).  Port content is
   grouped under `HobbyOS/` in the tree (AD-11).
 - Exclusions (and why):
@@ -61,16 +62,16 @@ sanity check), and `--deps-only` just builds the cross-deps prefix.
     they are meta, not build inputs.  `Source/ThirdParty/{skia,ANGLE,capstone,...}`
     are KEPT (skia is on the port's link graph; ANGLE/capstone mirror the
     upstream release-tarball composition).
-- Contents: 55,167 files; raw tar 865,628,160 B; xz 173,832,140 B over two parts.
+- Contents: 55,169 files; raw tar 865,628,160 B; xz 173,840,972 B over two parts.
 
 SHA256 (canonical list in `SHA256SUMS`):
 
 | Artifact | SHA256 |
 |---|---|
-| reassembled snapshot `.tar.xz` | `a44de4ba356d32072a9e94fc9a2aaac7d1b1650d5bc6cc2189ba265e9de7fa18` |
-| `...part-00` | `86141b705350840b51d31eddf95965337dd54dab64f9d857d4a3213145fd9d88` |
-| `...part-01` | `8ba9abbf84f1c4f3839036c4bf262f0d0f1e811a375f4fabd835e52cf5c12f34` |
-| raw tar (reference) | `ed34e376d43596b42de91bedefaba133ab84fb85b1bfed482da86c58b43930ae` |
+| reassembled snapshot `.tar.xz` | `b848d0c70c92ae17c47372b4d9a9e990452ee524b742a8fa3eb9fdc0972dc245` |
+| `...part-00` | `3b54e0e20c1599b6c8b5c3b95c01325fc8faf0961d6fecc4131ecfa06c8e6123` |
+| `...part-01` | `b73cb894004c558dcb424e1c46773e289252774c25ec6cb241188620a8215116` |
+| raw tar (reference) | `c9ed59ae7d83a24164de9e88b99b70ab4fea2d9dbd1f1413cebca72c77417195` |
 
 Refreshing the snapshot when the fork moves (run in the fork clone, from the
 desired ref; then re-split with `split -b 90000000 -d`, update `SHA256SUMS`
@@ -167,8 +168,8 @@ committed cache carries the two known-good flat images:
 
 | Cache file | Flat sha256 (decompressed) | Size | Built from |
 |---|---|---|---|
-| `cache/browser-arm.bin.xz` | `b98e943aea14a0924d86f1a80098508bfb95f09702b1d6432e6b3fdcfb931fe5` | 87,860,448 B | from-source build of this snapshot (`34e52e12b2`; `build/arm/browser.bin`, ELF `701ae5cf…`), 2026-10-29 |
-| `cache/browser-x64.bin.xz` | `683bba7aae5112cc639ec64b35a5495097402633174dc433ecb0e90563dd827c` | 105,698,048 B | from-source build of this snapshot (`34e52e12b2`; `build/intel/browser.bin`, ELF `064c4167…`), 2026-10-29 |
+| `cache/browser-arm.bin.xz` | `879e9c2ad95a81c83aba93f1df80ba07be6b10905d6eb988f83e0c055389b6d1` | 87,860,448 B | from-source build of this snapshot (`2148171ff6`; `build/arm/browser.bin`, ELF `c185bd0d…`), 2026-10-29 |
+| `cache/browser-x64.bin.xz` | `9c915e154c0e4165f6a55eeef99d9dfaf9b5e7b3084cf8e801143a01d3ca5b66` | 105,698,048 B | from-source build of this snapshot (`2148171ff6`; `build/intel/browser.bin`, ELF `89c5b353…`), 2026-10-29 |
 
 `make disk.img` uses a cache file only when neither a `BROWSER_BIN` file
 (explicit override or a local fork/worktree build) nor a vendored-source
