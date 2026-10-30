@@ -1,0 +1,4 @@
+# Downloaded upstream tarballs (fetch.sh verifies them against sums/).
+dl/
+# Per-arch extraction + build trees + default prefix + flat bins/disk tree.
+build/
