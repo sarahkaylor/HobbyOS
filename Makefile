@@ -1,5 +1,5 @@
 # Default architecture
-ARCH ?= arm
+ARCH ?= intel
 
 # --- OS Detection ---
 # Detect whether we are on macOS (Homebrew) or Linux (system packages)
@@ -62,6 +62,12 @@ QEMU_SMP ?= 8
 #     resolves to soft, so every headless tier (test/unit_tests/desktop_test
 #     modes, the run_*.py E2E overrides, CI) keeps its exact current
 #     behavior: plain 2D device + `-display none`.
+#     ARCH=intel: auto always resolves to soft (plain `gtk`, BGA).  On this
+#     workstation (QEMU 10.2.1 3.3, KDE Wayland, 2026-10-29) `gtk,gl=on`
+#     starts but every frame logs "Gdk-WARNING: eglMakeCurrent failed" and
+#     the window never gets a surface, so the desktop stays blank; the guest
+#     only negotiates VIRTIO_F_VERSION_1 (no virgl), so GL buys nothing.
+#     QEMU_GPU=gl still opts in.
 #   gl:   force the GL path.  NOTE: combining QEMU_GPU=gl with a
 #     `-display none` override fails by design — QEMU rejects
 #     virtio-gpu-gl-device when the display backend has no OpenGL support
@@ -254,7 +260,12 @@ ifeq ($(ARCH),intel)
   # misbehaves on a host, plain `-device virtio-gpu-pci -vga none` is the
   # lane-G2-verified equivalent (the driver negotiates VIRTIO_F_VERSION_1
   # only, so the gl variant's virgl capability is simply not negotiated).
-  QEMU_CMD = $(QEMU) -M q35 -smp $(QEMU_SMP) -m 12288M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 $(GX_X64_GPU_DEV) -action shutdown=poweroff $(QEMU_ARGS)
+  # Pointer: vmport=on (q35's default, made explicit) exposes the VMware
+  # backdoor "vmmouse" the kernel switches to absolute mode
+  # (src/kernel/virtio_input.c), so the GTK window needs no pointer grab and
+  # the guest cursor sits exactly under the host pointer; the PS/2 mouse
+  # (IntelliMouse, wheel) remains the fallback when vmport is off.
+  QEMU_CMD = $(QEMU) -M q35,vmport=on -smp $(QEMU_SMP) -m 12288M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 $(GX_X64_GPU_DEV) -action shutdown=poweroff $(QEMU_ARGS)
 else
   # Default to ARM
   QEMU = qemu-system-aarch64
@@ -409,7 +420,9 @@ ifeq ($(QEMU_GPU),auto)
   ifeq ($(MODE),desktop)
     ifneq ($(DISPLAY),)
       ifeq ($(findstring -display none,$(QEMU_ARGS)),)
-        GX_GPU_GL := 1
+        ifneq ($(ARCH),intel)
+          GX_GPU_GL := 1
+        endif
       endif
     endif
   endif
@@ -2523,7 +2536,7 @@ gpu-check:
 	      qemu-system-x86_64 -M q35 -m 512M -display gtk,gl=on -device virtio-gpu-gl-pci -vga none -S -monitor none -serial none -nodefaults && GLX64=1 || true; \
 	  else echo "  (qemu-system-x86_64 not on PATH)"; fi; \
 	  if [ "$$GLX64" = "1" ]; then \
-	    echo "  => x64 verdict: GL OK — auto picks virtio-gpu-gl-pci + -vga none + gtk,gl=on for interactive desktop boots"; \
+	    echo "  => x64 verdict: gtk,gl=on starts — but auto stays soft on x64 (paused probes cannot see the runtime eglMakeCurrent failure); opt in with QEMU_GPU=gl"; \
 	  else \
 	    echo "  => x64 verdict: gtk,gl=on unavailable — auto falls back to plain gtk (no virtio device; guest uses BGA/std-VGA)"; \
 	  fi; \
