@@ -1,0 +1,1 @@
+lane-move: REFUSED to move GB-005 to Merge Gate: REFUSE: GB-005 has no GREEN verdict - a card cannot reach Merge Gate without a GREEN from its -V (GB-005); use --force with a written reason to bypass
