@@ -1,0 +1,29 @@
+diff --git a/src/kernel/process.c b/src/kernel/process.c
+index 3c47bc3..a110c77 100755
+--- a/src/kernel/process.c
++++ b/src/kernel/process.c
+@@ -3102,6 +3102,24 @@ int process_fork(struct trap_frame *tf) {
+       uart_puts("[KERNEL] fork: AS clone failed\n");
+       return -1;
+     }
++    /* GB-122: the clone copies "holes stay holes", so a child that resumes on
++       a stack page its parent never touched lands the 296-byte resume frame on
++       a hole -- and a CPL0 store cannot demand-page it (measured: 1 absent
++       resume in 375, always a forked child, dest 0x17FFFFF388/sp
++       0x17FFFFF4C8).  Give the child the same prefault the loader gives every
++       created process (USER_MAIN_STK_GUARD below the stack top) so fork is not
++       a path that produces a hole the resume path cannot fill.
++
++       This is the card's "alternate" route, chosen deliberately over
++       commit-on-resume: a commit at the resume site fires on ordinary stack
++       growth too (measured 157 times in one wave, because every deeper resume
++       lands on a fresh demand-zero page), which is exactly the "fires on normal
++       resumes" RED clause.  Prefault at fork cannot perturb the resume path at
++       all -- the lesson from GB-125 -- and costs one page range per fork. */
++    if (vm_touch(child, USER_MAIN_STK_TOP_V2 - USER_MAIN_STK_GUARD,
++                 USER_MAIN_STK_GUARD, /*write=*/1) != 0) {
++      uart_puts("[KERNEL] fork: stack prefault failed\n");
++    }
+   } else {
+     kmemcpy((void *)child->user_phys_base, (void *)group->user_phys_base,
+             USER_INITIAL_CLEAR_SIZE);
