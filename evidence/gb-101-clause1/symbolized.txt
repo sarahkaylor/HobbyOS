@@ -1,0 +1,8 @@
+enter_user_space
+??:0
+schedule
+/home/sarah/Documents/GitHub/HobbyOS/.worktrees/wabi-gb101/src/kernel/process.c:1804
+??
+??:0
+restore_user_sp_helper
+/home/sarah/Documents/GitHub/HobbyOS/.worktrees/wabi-gb101/src/kernel/arch/x64/trap.c:152

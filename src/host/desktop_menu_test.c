@@ -10,12 +10,12 @@
 #include <stdint.h>
 #include "../user_include/libc.h"
 
-extern char menu_items[80][16];
+extern char menu_items[256][16];
 extern int num_menu_items;
 extern void menu_apps_first(void);
 extern void menu_display_name(const char *raw, char *out, int max);
 extern void load_menu(void);
-extern char menu_in_games[128];
+extern char menu_in_games[256];
 extern void launcher_path_for(char *out, int max, const char *name, int in_games);
 
 /* compat.c mock read_dir override (same pattern as apps_suite_test.c). */
@@ -205,6 +205,30 @@ int main(void) {
     launcher_path_for(out, sizeof(out), menu_items[4], menu_in_games[4]);
     check(strcmp(out, "/GAMES/PIE.BIN") == 0,
           "scanned .BIN still /GAMES/PIE.BIN after reorder");
+  }
+
+  /* 9) GB-119: a staged fixture whose root index is beyond the OLD 128 [MENU]
+   * cap must now be listed (old MAX_MENU_ITEMS truncated the dump at 128, so a
+   * NEW name staged onto a >128-entry root was invisible to the evidence rig).
+   * Inject 176 non-pinned root names; a name at index >=128 must be in menu_items
+   * with the raised (256) cap, and would be absent at 128.  Falsifiable: bailing
+   * the cap back to 128 drops INDEX175.BIN. */
+  {
+    mock_read_dir_reset();
+    mock_read_dir_count = 176;
+    char late[32];
+    for (int i = 0; i < 176; i++)
+      snprintf(mock_read_dir_names[i], sizeof mock_read_dir_names[i], "F%03d.BIN", i);
+    num_menu_items = 0;
+    load_menu();
+    int found_late = 0;
+    for (int i = 0; i < num_menu_items; i++)
+      if (strcmp(menu_items[i], "F175.BIN") == 0) found_late = 1;
+    check(num_menu_items >= 176 && found_late,
+          "a root name at index 175 is listed (256 cap covers the 176-entry root; old 128 dropped it)");
+    check(num_menu_items <= 256,
+          "menu dump stays bounded (no unbounded growth / no truncation lie)");
+    mock_read_dir_reset();
   }
 
   printf("[TEST] desktop menu: %d checks, %d failures\n", checks, fails);

@@ -167,14 +167,83 @@ def resolve_launch_slot(serial_log, bin_name, provided=None):
     return found, warn
 
 
-def launch_from_menu(q, slot, taskbar_y=H - 26):
-    """Open the Apps menu and navigate down to the given slot, launching it."""
-    q.click(38, taskbar_y + 13)
-    time.sleep(0.8)
+def launch_from_menu(q, slot, taskbar_y=H - 26, arch="arm", gesture="keys"):
+    """Open the Apps menu and navigate down to the given slot, launching it.
+
+    GB-116: on intel the pointer click below cannot work.  `src/user/desktop.c`
+    maps **F1 (evdev 59) to open the start menu** for exactly that reason, with
+    the comment: "on x64 the kernel's PS/2 input path does not deliver mouse
+    buttons (browser.md, WF1B), so an F1 map keeps the menu launchable on both
+    arches".  `Makefile:257` has no pointer device at all, so a QMP absolute
+    click has nowhere to land and the [LAUNCH] line never appears -- measured as
+    `[LAUNCH] = 0` on GB-059-V's intel run.
+
+    `gesture`:
+      keys  -- F1 opens the menu, then Home + Down*s + Enter (the default: measured
+               to launch on BOTH arches -- intel 1, arm 1)
+      click -- the pre-GB-116 behaviour, kept only to reproduce the intel failure
+               (measured: intel 0, arm 1)
+
+    Do NOT press the click *after* F1: the Apps button toggles the same menu shut
+    (`desktop.c:2218` gates F1 on `!start_menu_open && !app_menu_open`), so an
+    "F1 then click" gesture measures 0 on intel *and* 0 on ARM -- GB-116-V’s RED,
+    which is why the first cut of this card (`--gesture auto`) was withdrawn.
+    """
+    if gesture == "keys":
+        q.key("f1", 0.4)          # desktop.c: EV_KEY 59 opens the start menu
+        time.sleep(0.4)
+    elif gesture == "click":
+        q.click(38, taskbar_y + 13)
+        time.sleep(0.8)
+    else:
+        # A dead default is worse than a loud one: `perf_game_cycle.py` and
+        # `t5/acceptance_run.py` both call this with no gesture, so an unknown
+        # value here silently opens nothing and the launch fails for a reason
+        # that is not in the log (GB-116-V2 clause 6).
+        raise ValueError("launch_from_menu: unknown gesture %r (want 'keys' or 'click')" % (gesture,))
     q.key("home", 0.3)
     for _ in range(slot):
         q.key("down", 0.06)
     q.key("ret", 0.3)
+
+
+def build_stage_cmd(host_src, guest_dest, root):
+    """Stage `host_src` -> `guest_dest` as the exact `T3_STAGE`/`RUN_STAGE` shape.
+
+    GB-118: the evidence rig must put a fixture on the image through the SAME
+    mechanism as the T3 tier (a `mcopy` after the build, before QEMU), so rig and
+    tier agree on the result for the same fixture -- one boot path, not two.
+
+    Path safety (off-by-default hygiene the DoD demands):
+      - `host_src` must live under `root` (the repo) -- a path outside the repo
+        is refused (a stage that reads an arbitrary host file is not a board
+        fixture).
+      - `guest_dest` must be a plain FAT guest name: no leading '/', no '..'
+        (a guest path escaping the image root is refused), no drive-letter / '::'.
+    Returns the shell command string (to set as RUN_STAGE / T3_STAGE).  Raises
+    ValueError with the refusal message on an unsafe path.
+    """
+    root = os.path.realpath(root)
+    src = os.path.realpath(host_src)
+    if not os.path.isfile(src):
+        raise ValueError(f"stage: host path does not exist or is not a file: {host_src!r}")
+    if not (src == root or src.startswith(root + os.sep)):
+        raise ValueError(
+            f"stage: host source outside the repo root is refused: {host_src!r} "
+            f"(root={root!r})")
+    g = guest_dest
+    if g.startswith("/"):
+        raise ValueError(f"stage: guest path must be a relative FAT name, not an "
+                         f"absolute path that escapes the image root: {g!r}")
+    if g.startswith("::"):
+        raise ValueError(f"stage: guest path must not carry a drive specifier: {g!r}")
+    if ".." in g.replace("\\", "/").split("/"):
+        raise ValueError(f"stage: guest path traversal refused: {g!r}")
+    if not g or os.path.basename(g) != g:
+        raise ValueError(f"stage: guest path must be a single FAT filename, not a "
+                         f"nested path: {g!r}")
+    # The tier's stage is:  mcopy -o -i "$ROOT/disk.img" "$HOSTSRC" ::GUEST
+    return f"mcopy -o -i \"$ROOT/disk.img\" \"{src}\" \"::{g}\""
 
 
 def convert_png(ppm_path, png_path):
@@ -186,7 +255,9 @@ def convert_png(ppm_path, png_path):
         return False
 
 
-def main():
+def build_arg_parser():
+    """The rig's argparse parser, module-level so tests assert the real defaults
+    (GB-118: `--stage` is off by default)."""
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--game", required=True, help="game id, e.g. xnibbler")
@@ -202,6 +273,23 @@ def main():
     ap.add_argument("--run-seconds", type=int, default=8,
                     help="seconds to hold the game open after launch")
     ap.add_argument("--input", default="", help="optional key sequence, e.g. up,left,up,left")
+    ap.add_argument("--gesture", default="keys", choices=["keys", "click"],
+                    help="how to open the Apps menu: keys = F1 (works on intel AND arm; "
+                         "intel has no pointer device, so the click cannot work there), "
+                         "click = the pre-GB-116 behaviour, for reproducing that failure. "
+                         "Do not combine them: the Apps button toggles the F1 menu shut.")
+    ap.add_argument("--stage", default=None, metavar="HOSTSRC:GUESTDEST",
+                    help="stage HOSTSRC onto the image at GUESTDEST before QEMU starts, "
+                         "using the SAME mechanism as the T3 tier (RUN_STAGE/T3_STAGE, "
+                         "off by default).  HOSTSRC must be a file under --root; GUESTDEST "
+                         "must be a single FAT filename (no '/', '..', or '::').  A "
+                         "refused path aborts before boot; the guest proves the fixture "
+                         "is present on the serial line.")
+    return ap
+
+
+def main():
+    ap = build_arg_parser()
     args = ap.parse_args()
 
     os.chdir(args.root)
@@ -215,6 +303,22 @@ def main():
     # serial flags) and point QMP at our socket.
     qemu_make = ["make", "run", f"ARCH={arch}",
                  f"QEMU_ARGS=-display none -qmp unix:{qmp_sock},server,nowait"]
+
+    # GB-118: optional staging, on the tier's terms.  --stage HOSTSRC:GUESTDEST
+    # becomes the Makefile RUN_STAGE hook (the exact T3_STAGE contract): it runs
+    # AFTER `make run` rebuilds disk.img and BEFORE QEMU starts.  Off by default.
+    if args.stage:
+        host_src, _, guest_dest = args.stage.rpartition(":")
+        if not host_src or not guest_dest:
+            print(f"[rig] FATAL: --stage wants HOSTSRC:GUESTDEST, got {args.stage!r}")
+            sys.exit(1)
+        try:
+            stage_cmd = build_stage_cmd(host_src, guest_dest, args.root)
+        except ValueError as e:
+            print(f"[rig] STAGE REFUSED - refusing to boot a stale image: {e}")
+            sys.exit(2)
+        os.environ["RUN_STAGE"] = stage_cmd
+        print(f"[rig] stage (RUN_STAGE): {stage_cmd}")
 
     print(f"[rig] booting {arch} QEMU, capturing to {path}")
     q = boot(qemu_make, serial_log, qmp_sock, arch)
@@ -243,7 +347,7 @@ def main():
 
     if "boot" in checkpoints:
         snap("boot")
-    launch_from_menu(q, slot)
+    launch_from_menu(q, slot, arch=args.arch, gesture=args.gesture)
     if "launch" in checkpoints:
         snap("launch")
 

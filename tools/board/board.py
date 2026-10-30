@@ -223,13 +223,17 @@ def comment(gid, text, lane=None, close=False):
 
 # ---------------------------------------------------------------- commands
 def claimant_of(index):
-    """Name the agent behind the first 'claimed by `X`' comment, if any (GB-074
-    loser detection: the loser must be able to say who won)."""
+    """Name the agent behind the LAST 'claimed by `X`' comment, if any (GB-074
+    loser detection: the loser must be able to say who won).  The comments list is
+    ascending (oldest first), so the LAST claim comment is the current claim; the
+    first would name a stale winner on a ticket that was reclaimed after being
+    moved back to Ready/Backlog (GB-074-V #110 FAIL, 2026-10-21)."""
+    claimant = None
     for c in api_get(f"/repos/{REPO}/issues/{index}/comments", "?limit=50"):
         m = re.search(r"claimed by `([^`]+)`", c.get("body") or "")
         if m:
-            return m.group(1)
-    return None
+            claimant = m.group(1)
+    return claimant
 
 
 def cmd_claim(a):

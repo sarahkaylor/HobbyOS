@@ -2475,7 +2475,20 @@ endif
 	rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT STAGE4K.BIN
 
 # Target to run the OS inside QEMU
+# RUN_STAGE: optional staging hook, run AFTER disk.img is (re)built and BEFORE
+# QEMU starts -- the exact contract of t3_tier.sh's T3_STAGE (GB-118).  A fixture
+# (or wave manifest) the guest must see is placed on the image here, after the
+# build that would have wiped it.  The recipe sets ROOT and hands the command to
+# the shell via $$RUN_STAGE (GNU make would otherwise eat `$ROOT` -> `$R`+`OOT`
+# in the value -- GB-118-V RED, 2026-10-28), the same `ROOT="$ROOT" sh -c "$T3_STAGE"`
+# shape t3_tier.sh uses.  A failing stage is fatal rather than booting an image
+# without the fixture:
+#   RUN_STAGE='mcopy -o -i "$ROOT/disk.img" /tmp/pie_hello ::HELLO.BIN' make run
+# Off by default -- an unset/empty RUN_STAGE changes nothing.
+# The evidence rig shares this same hook (evidence_rig.py --stage), so the rig and
+# the T3 tier put a fixture on the image by one mechanism, not two (GB-118).
 run: $(TARGET) disk.img
+	$(if $(RUN_STAGE),@echo "=== run: stage ==="; ROOT="$(CURDIR)" $(SHELL) -c "$$RUN_STAGE" || { echo "run: STAGE FAILED - refusing to boot a stale image"; exit 2; },)
 	$(QEMU_CMD)
 
 # GX (docs/graphics-accel.md §3-D5): probe this host for a working
@@ -3523,6 +3536,13 @@ T4_COMPAT_SELFTEST = t4_compat_selftest
 $(T4_COMPAT_SELFTEST): src/host/t4_parity.sh src/host/t4_compat_probe.c
 	@bash src/host/t4_parity.sh --self-test
 
+# GB-126: x86 exception stubs must push the right frame shape — EXCEPTION_ERR for
+# #CP/#VC/#SX (21/29/30), not EXCEPTION_NO_ERR. Table-driven over the dispatcher,
+# so a future exception cannot get the wrong macro in silence. Host-side, no QEMU.
+VECTOR_SHAPE_SCAN = vector_shape_scan
+$(VECTOR_SHAPE_SCAN): tools/gate/vector_shape_scan.py
+	@python3 tools/gate/vector_shape_scan.py
+
 # GB-084: open() must always pass its mode when O_CREAT — the in-suite scan
 # FAILs if any two-argument O_CREAT open() is (re)introduced.
 OPEN_MODE_SCAN = open_mode_scan
@@ -3538,13 +3558,22 @@ $(OPEN_MODE_SCAN): tools/gate/open_mode_scan.py
 # T3 device tier and is gated on GB-014's full linux dispatch (coordinator); the
 # instrument itself — probe + gate + self-test proving it can fail — is host-side
 # and runs here.
+#
+# GB-066-V2 (re-gate): the probe must be a static-PIE (ET_DYN).  The v2 loader
+# refuses a fixed low-VA ET_EXEC (elf_loader.c:120, "ET_EXEC linked below the
+# user window; a -static-pie build is required"), and musl-gcc's default `-static`
+# produces exactly that (entry ~0x401cc1 < USER_VA_BASE).  Build with -static-pie
+# and ASSERT the result is ET_DYN (readelf -h Type: DYN) so a regression to
+# -static fails the build loudly instead of silently shipping a probe the guest
+# rejects (the GB-066-V2 RED's clause-1 failure).
 T4_DEVICE_GATE = t4_device_gate
 T4_DEVICE_SELFTEST = t4_device_selftest
 T4_DEVICE_CHECK = t4_device_check
 T4_LEGA_OUT = $(OBJ_DIR)/t4_legA.out
 T4_PROBE_ELF = $(OBJ_DIR)/t4_probe.elf
 $(T4_PROBE_ELF): src/user/t4_probe.c
-	@musl-gcc -static -O2 -Wall src/user/t4_probe.c -o $(T4_PROBE_ELF)
+	@musl-gcc -static-pie -fPIE -O2 -Wall src/user/t4_probe.c -o $(T4_PROBE_ELF)
+	@readelf -h $(T4_PROBE_ELF) | grep -q 'Type: *DYN' || ( echo "t4_probe: build is not ET_DYN/static-PIE — the v2 ELF loader rejects it (GB-066-V2)"; readelf -h $(T4_PROBE_ELF) | head -4; exit 1 )
 $(T4_LEGA_OUT): $(T4_PROBE_ELF)
 	@./$(T4_PROBE_ELF) > $(T4_LEGA_OUT) && echo "[t4-device] leg A captured -> $(T4_LEGA_OUT)"
 $(T4_DEVICE_GATE): tools/gate/t4_device.sh $(T4_LEGA_OUT)
@@ -3653,7 +3682,7 @@ DIFF_RUN = python3 tools/differential/diff_harness_test.py
 test_diff_harness:
 	$(HOST_RUN) $(DIFF_RUN)
 
-host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST)
+host_tests: $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(GAMES_SCAN_TEST)
 	$(HOST_RUN) ./$(GFX_STATS_TEST)
@@ -3820,6 +3849,15 @@ style-test:
 # the gate" (T3-verdict fail->pass + optional real T1 run).
 merge_gate:
 	bash tools/gate/merge_gate.sh
+
+# --- Merge PR guard (GB-106): the production merge path calls the fail-closed
+# guard before merging.  `make merge-pr PR=204` = run
+# tools/board/merge_pr.sh (guard --merge; refuses to merge a PR whose GREEN graded
+# sha is absent or != its current head, unless a written override is recorded and
+# posted to the card).
+.PHONY: merge-pr
+merge-pr: FORCE_ARCH
+	bash tools/board/merge_pr.sh $(PR)
 
 merge_gate_ci:
 	GATE_CI=1 bash tools/gate/merge_gate.sh

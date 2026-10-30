@@ -1,0 +1,8 @@
+=== T3 (intel): build ===
+=== T3 (intel): stage ===
+/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-e046ff70/obj/intel/HELLO.BIN: No such file or directory
+=== T3 (intel): run (deadline 900s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-e046ff70/obj/t3_intel_nullentry.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 120 console lines, 0 FAIL lines, 0 user memory fault records across 0 processes, 1 programs exited, halted=1
+T3_intel: FAIL — only 1 programs exited (floor 55): too little work for a complete wave, so this cannot be a pass
+T3_intel EXIT=1
