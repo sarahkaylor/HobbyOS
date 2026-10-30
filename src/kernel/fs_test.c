@@ -473,6 +473,12 @@ static void test_fs_devnull_devurandom(void) {
   char c;
   int rd = file_read(cur, nr, &c, 1, 0);
   EXPECT_EQ(rd, 0); /* EOF */
+  /* GB-019: F_GETFL on a NON-socket returns the O_* flags it was opened with
+     (Linux semantics), not -ENOTSOCK.  This is what a compat ioctl/fcntl
+     F_GETFL must answer on a regular/device fd. */
+  EXPECT_EQ(file_fcntl(cur, nr, K_F_GETFL, 0), 0x0);  /* opened O_RDONLY=0 */
+  EXPECT_EQ(file_fcntl(cur, nr, K_F_SETFL, K_O_NONBLOCK), 0);  /* set O_NONBLOCK */
+  EXPECT_EQ(file_fcntl(cur, nr, K_F_GETFL, 0), K_O_NONBLOCK);  /* now reflects it */
   EXPECT_EQ(file_close(cur, nr), 0);
 
   /* /dev/urandom: open(O_RDONLY), read(16)=16, consecutive draws differ. */
