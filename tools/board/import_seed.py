@@ -96,8 +96,36 @@ WORKSTREAM = {
     "GB-116": ["infra", "tests", "game"],
     "GB-117": ["infra", "tests"],
     "GB-118": ["infra", "tests"],
+    "GB-119": ["infra", "tests"],
+    "GB-120": ["infra", "tests"],
+    "GB-121": ["infra", "tests"],
+    "GB-122": ["abi", "debug"],
+    "GB-123": ["abi", "debug"],
+    "GB-124": ["abi", "loader"],
+    "GB-125": ["abi", "debug"],
+    "GB-126": ["abi", "tests"],
+    "GB-127": ["infra", "tests"],
+    "GB-128": ["tests"],
+    "GB-129": ["abi", "debug", "tests"],
+    "GB-130": ["abi", "debug", "tests"],
+    "GB-131": ["abi", "debug"],
+    "GB-132": ["abi", "debug"],
+    "GB-133": ["abi"],
+    "GB-134": ["abi", "loader"],
+    "GB-135": ["infra", "tests"],
+    "GB-136": ["infra", "tests"],
 }
-DEEP_IDS = {"GB-010", "GB-011", "GB-013", "GB-031", "GB-041", "GB-054", "GB-090"}
+# A ticket whose §8 row is missing from WORKSTREAM used to lose EVERY label it
+# carried, because the upsert replaced the label set with `expected`. On
+# 2026-10-30 a `--fix` run did exactly that to the 16 rows added hours earlier:
+# GB-122 lost `abi,debug,deep`, GB-134 lost `abi,blocked,debug,loader`. So the
+# upsert now *preserves* any label it does not manage (`blocked`, `verify`,
+# `parity-*`, `decision`, ...) and only ever replaces the managed set.
+WORKSTREAM_MANAGED = {"abi", "loader", "libc", "elf-compat", "graphics", "input", "audio",
+                      "native-port", "game", "tests", "perf", "docs", "infra",
+                      "wt-S", "wt-M", "wt-L", "deep"}
+DEEP_IDS = {"GB-010", "GB-011", "GB-013", "GB-031", "GB-041", "GB-054", "GB-090",
+            "GB-122", "GB-123", "GB-125", "GB-132", "GB-133", "GB-134"}
 
 MS_KEY = {"M0": "M0-infra", "M1": "M1-abi-core", "M2": "M2-devices-sdl", "M3": "M3-games", "M4": "M4-acceptance"}
 MS_TIERS = {
@@ -249,6 +277,10 @@ def main():
         cur = existing.get(gid)
         if cur:
             labs.append(board.lane_of(cur) or LANE_DEFAULT)
+            # Never drop a label this importer does not own: `blocked`, `verify`,
+            # `parity-*`, `decision` and friends are set by agents, not by §8.
+            labs += [l["name"] for l in cur["labels"]
+                     if l["name"] not in WORKSTREAM_MANAGED and l["name"] not in board.LANES]
         else:
             labs.append(LANE_DEFAULT)
         if a.dry_run:
