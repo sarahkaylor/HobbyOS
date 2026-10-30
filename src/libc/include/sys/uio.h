@@ -13,6 +13,7 @@
 #else
 
 #include <stddef.h>
+#include <sys/types.h> /* ssize_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,6 +23,14 @@ extern "C" {
     void *iov_base;
     size_t iov_len;
   };
+
+#ifndef IOV_MAX
+#define IOV_MAX 1024
+#endif
+  /* icewm.md M2 (src/libc/src/uio.c): sockets via sendmsg/recvmsg (one
+   * syscall), other fds via a read/write loop. */
+  ssize_t readv(int fd, const struct iovec *iov, int iovcnt);
+  ssize_t writev(int fd, const struct iovec *iov, int iovcnt);
 
 #ifdef __cplusplus
 }

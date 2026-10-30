@@ -130,6 +130,10 @@ extern "C" {
   char *getcwd(char *buf, size_t size);
   int chdir(const char *path);
 
+  /* icewm.md M2: fixed native identity ($HOSTNAME or "hobbyos"),
+   * src/libc/src/utsname.c. */
+  int gethostname(char *name, size_t len);
+
 #define F_OK 0
 #define R_OK 4
 #define W_OK 2
