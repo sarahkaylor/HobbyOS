@@ -131,12 +131,24 @@ With `DESKTOP=icewm`:
   server or IceWM exits, or never starts, it falls back to the normal HobbyOS
   desktop. The serial log shows each step on lines starting with `[XSESS]`.
 
+What you get: the X.Org-based server `XHOBBY.BIN` (hw/hobbyos DDX), IceWM 4.1.0 with its
+taskbar, start menu, toolbar and workspaces, and two real-Xlib demo clients (XEyes,
+XCalc). Programs launched from IceWM's menus are the `.BIN` images on the disk root.
+The children's stdout/stderr appear on the serial console as `[X] ...` lines.
+IceWM's Logout ends the session and drops you to the HobbyOS desktop.
+
+First build: `third_party/x11/build.sh` downloads the pinned X.Org/IceWM/fontconfig
+tarballs into `third_party/x11/dl/` and checks each sha256 (`third_party/x11/sums/`).
+This is the only extra network access `DESKTOP=icewm` needs (the default build already
+fetches the llvm-project and ICU sources the same way on a fresh checkout). Host tools:
+meson, ninja, cmake, xkbcomp and xkb-data.
+
 Switching `DESKTOP` rebuilds the kernel's `main.o` and `disk.img`
 (stamp file `obj/<arch>/.desktop`).
 
 Headless test (QMP screenshots in `/tmp/hobbyos_icewm_<arch>/`):
 ```bash
-make icewm_test                                   # real X stack (M6)
+make icewm_test                                   # real X stack: taskbar + start-menu click (M6)
 make icewm_test ICEWM_TEST_ARGS=--stubs           # launcher + fallback with stub X binaries
 make icewm-stubs && make run DESKTOP=icewm X11_BUILD_DIR=obj/intel/x11stub
 ```
