@@ -18,8 +18,12 @@ Scenarios:
   default  (M6) the real X stack from X11_BUILD_DIR (default
            third_party/x11/build/<arch>): the server must become ready, the
            session must stay up (no FALLBACK) for --settle seconds and the
-           screen must not be black.  IceWM-specific pixel checks (taskbar,
-           start menu) belong to the integ lane once IceWM draws.
+           screen must not be black; IceWM's taskbar shows and the start
+           menu opens; then (icewm.md §9, skip with --no-apps) CONSOLE (a
+           text app) and XCALC (a pixel app) are launched from the start
+           menu's Apps submenu through HBHOST.BIN: typed input must render
+           in CONSOLE, clicks (2 ENTER 3 +) must change XCALC's display,
+           and F4 / the IceWM close button must close each window.
 
 Usage:
   python3 run_icewm_test.py --stubs            # or: make icewm_test ICEWM_TEST_ARGS=--stubs
@@ -211,6 +215,122 @@ class Serial:
         return -1
 
 
+# ------------------------------------------------------- HBHOST (§9) ---
+# The generated /ICEWM/menu (src/user/x11sess/gen-icewm-menu.sh) puts
+# "Apps" first; on the 1920x1080 screen with the default theme its
+# submenu rows are 21 px apart starting at y=750 (BROWSER, CONSOLE, FILES,
+# CALC, XCALC, ...), the same order as desktop.c's pinned_apps[].
+START_BTN = (25, H - 13)
+APPS_ROW = (60, 835)
+def apps_item_y(i):
+    return 750 + 21 * i
+
+
+def region_changed(a_ppm, b_ppm, x0, y0, x1, y1, step=3):
+    a, aw, _ = ppm_pixels(a_ppm)
+    b, _, _ = ppm_pixels(b_ppm)
+    if not a or not b:
+        return 0
+    n = 0
+    for y in range(y0, y1, step):
+        for x in range(x0, x1, step):
+            o = (y * aw + x) * 3
+            if a[o:o + 3] != b[o:o + 3]:
+                n += 1
+    return n
+
+
+def hbhost_checks(args, qmp, ser, proc, shot, absmove, button, failures, deadline_scale=1):
+    """Launch a text app (CONSOLE) and a pixel app (XCALC) from IceWM's start
+    menu: each must come up in an IceWM-managed window through HBHOST.BIN,
+    take input, and close cleanly."""
+    def click(x, y):
+        absmove(x, y); time.sleep(0.3)
+        button(True); time.sleep(0.1); button(False)
+
+    def key(q):
+        qmp.cmd("send-key", {"keys": [{"type": "qcode", "data": k} for k in q.split("+")]})
+        time.sleep(0.15 * deadline_scale)
+
+    def launch(i, name):
+        click(*START_BTN)
+        time.sleep(3 * deadline_scale)
+        absmove(*APPS_ROW)
+        time.sleep(2 * deadline_scale)
+        click(200, apps_item_y(i))
+        start = len(ser.text())
+        dl = time.time() + 60 * deadline_scale
+        i = ser.wait(f"[HBHOST] {name} pid=", dl, proc, start)
+        if i < 0:
+            failures.append(f"HBHOST did not start {name} from the start menu")
+            log(f"[TEST] FAIL {name} not launched from the Apps submenu")
+            return False
+        log(f"[TEST] ok   {name} launched from the start menu through HBHOST.BIN")
+        return True
+
+    def closed(name, how):
+        start = 0
+        dl = time.time() + 20 * deadline_scale
+        if ser.wait(f"[HBHOST] {name} exited, closing window", dl, proc, start) < 0:
+            failures.append(f"{name} window did not close after {how}")
+        else:
+            log(f"[TEST] ok   {name} closed ({how})")
+
+    # The start-menu check above leaves the menu open: dismiss it first.
+    key("esc"); key("esc")
+    time.sleep(1 * deadline_scale)
+
+    # Text app: CONSOLE -> the shell; typed command output must render.
+    if launch(1, "CONSOLE.BIN"):
+        time.sleep(5 * deadline_scale)
+        shot("4-console")
+        before = os.path.join(args.out_dir, "4-console.ppm")
+        for ch in "echo hbhost":
+            key({" ": "spc"}.get(ch, ch))
+        key("ret")
+        time.sleep(4 * deadline_scale)
+        shot("5-console-typed")
+        after = os.path.join(args.out_dir, "5-console-typed.ppm")
+        n = region_changed(before, after, 330, 40, 1130, 580)
+        if n > 30:   # two new text rows (step-3 sampling): ~70 px
+            log(f"[TEST] ok   typed command rendered in the CONSOLE window ({n} px)")
+        else:
+            failures.append(f"CONSOLE did not render typed input ({n} px changed)")
+        key("f4")
+        closed("CONSOLE.BIN", "F4")
+        time.sleep(2 * deadline_scale)
+
+    # Pixel app: XCALC (ESC ] X) -> clicks reach it, the display changes.
+    if launch(4, "XCALC.BIN"):
+        time.sleep(6 * deadline_scale)
+        shot("6-xcalc")
+        before = os.path.join(args.out_dir, "6-xcalc.ppm")
+        a, aw, _ = ppm_pixels(before)
+        dark = 0
+        for y in range(60, 500, 10):
+            for x in range(340, 640, 10):
+                o = (y * aw + x) * 3
+                if a and a[o:o + 3] == b"\x00\x00\x00":
+                    dark += 1
+        if dark < 300:
+            failures.append(f"XCALC window content not painted ({dark} black samples)")
+        for (x, y) in ((453, 405), (531, 469), (531, 405), (609, 277)):   # 2 ENTER 3 +
+            click(x, y)
+            time.sleep(1 * deadline_scale)
+        time.sleep(3 * deadline_scale)
+        shot("7-xcalc-clicked")
+        after = os.path.join(args.out_dir, "7-xcalc-clicked.ppm")
+        n = region_changed(before, after, 334, 40, 650, 118, step=1)
+        if n > 4:   # the stack's last line: one 8x8 glyph, "0" -> "5"
+            log(f"[TEST] ok   XCALC display changed after clicks ({n} px)")
+        else:
+            failures.append(f"XCALC display did not change after clicks ({n} px)")
+        click(641, 13)          # IceWM close button -> WM_DELETE_WINDOW -> ESC [ D
+        closed("XCALC.BIN", "the IceWM close button")
+    if "[KERNEL] FATAL" in ser.text():
+        failures.append("kernel FATAL exception during the HBHOST checks (see serial log)")
+
+
 # ----------------------------------------------------------------- main ---
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
@@ -226,12 +346,15 @@ def main():
     ap.add_argument("--settle", type=int, default=20,
                     help="real scenario: seconds the session must stay up")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--no-apps", action="store_true",
+                    help="skip the HBHOST checks (native apps launched from the start menu)")
     args = ap.parse_args()
     if args.stubs and not args.x11_build_dir:
         args.x11_build_dir = f"obj/{args.arch}/x11stub"
     boot_to = args.timeout or (120 if args.arch == "intel" else 900)
     out = args.out or f"/tmp/hobbyos_icewm_{args.arch}"
     os.makedirs(out, exist_ok=True)
+    args.out_dir = out
 
     if not args.no_build:
         build(args)
@@ -351,6 +474,9 @@ def main():
                     log(f"[TEST] ok   start menu opened ({changed} sampled pixels changed)")
                 else:
                     failures.append(f"start menu did not open ({changed} sampled pixels changed)")
+                if not args.no_apps:
+                    hbhost_checks(args, qmp, ser, proc, shot, absmove, button,
+                                  failures, deadline_scale=(1 if args.arch == "intel" else 8))
             text = ser.text()
             for proc_name in ("XHOBBY.BIN", "ICEWM.BIN", "XSESSION.BIN"):
                 if f"({'/' if proc_name != 'XSESSION.BIN' else ''}{proc_name}) memory fault" in text:
