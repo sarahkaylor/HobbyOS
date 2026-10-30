@@ -37,6 +37,7 @@ struct vdisp_slot {
   uint32_t reads;
   uint64_t last_read_ms;
   int ever_read;
+  uint64_t next_frame_ms;  /* flush pacing: earliest next unblocked present */
 };
 
 static struct vdisp_slot slots[VDISP_MAX];
@@ -72,6 +73,7 @@ int vdisp_core_alloc(int owner_pid, void *obj) {
     s->reads = 0;
     s->last_read_ms = 0;
     s->ever_read = 0;
+    s->next_frame_ms = 0;
     return i + 1;
   }
   return 0;
@@ -153,6 +155,25 @@ void vdisp_core_damage(int id, int x, int y, int w, int h) {
     if (x1 > s->dx1) s->dx1 = x1;
     if (y1 > s->dy1) s->dy1 = y1;
   }
+}
+
+/* Present pacing.  A real present costs a GPU transfer; a virtual one is
+ * just a damage record, so a game whose main loop is "update; render;
+ * flush; yield" would otherwise run thousands of frames a second (STARDUST
+ * was over before its window appeared).  Each flush books the next frame
+ * VDISP_FRAME_MS later; a flush that arrives early is told how long to wait
+ * (the caller sleeps), which caps an attached app at ~60 presents/s. */
+int vdisp_core_pace(int id, uint64_t now_ms) {
+  struct vdisp_slot *s = slot_of(id);
+  if (!s) return 0;
+  int wait = 0;
+  if (s->next_frame_ms > now_ms) {
+    uint64_t w = s->next_frame_ms - now_ms;
+    wait = w > VDISP_FRAME_MS ? VDISP_FRAME_MS : (int)w;
+  }
+  uint64_t base = s->next_frame_ms > now_ms ? s->next_frame_ms : now_ms;
+  s->next_frame_ms = base + VDISP_FRAME_MS;
+  return wait;
 }
 
 void vdisp_core_mapped(int id) {
@@ -329,6 +350,13 @@ void vdisp_flush(int id, int x, int y, int w, int h) {
   uint64_t f = vlock();
   vdisp_core_damage(id, x, y, w, h);
   vunlock(f);
+}
+
+int vdisp_flush_pace(int id) {
+  uint64_t f = vlock();
+  int w = vdisp_core_pace(id, timer_get_ms());
+  vunlock(f);
+  return w;
 }
 
 int vdisp_get_events(int id, struct vdisp_event *out, int max) {

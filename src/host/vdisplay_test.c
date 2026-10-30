@@ -37,6 +37,11 @@ int main(void) {
   CHECK(st.read_age_ms == 250 && st.reads == 1 && st.queued == 0);
   vdisp_core_status(a, &st, 1250);
   CHECK(st.dw == 0);
+  /* present pacing: first flush free, then one frame slot per flush */
+  CHECK(vdisp_core_pace(a, 5000) == 0);
+  CHECK(vdisp_core_pace(a, 5001) == VDISP_FRAME_MS - 1);
+  CHECK(vdisp_core_pace(a, 5100) == 0);          /* late: no wait, rebased */
+  CHECK(vdisp_core_pace(a, 5100) == VDISP_FRAME_MS);
   CHECK(vdisp_core_free(a) == &o);
   CHECK(!vdisp_core_valid(a, g));
   int b = vdisp_core_alloc(4, &o);
