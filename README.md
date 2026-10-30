@@ -105,6 +105,42 @@ This launches QEMU with:
 When running in nographic mode:
 - Press `Ctrl+A`, then `X` to exit QEMU
 
+### IceWM desktop (secondary, `DESKTOP=icewm`)
+
+HobbyOS can boot into an X11 session managed by
+[IceWM](https://github.com/bbidulock/icewm) instead of its own desktop. It is
+opt-in; plain `make run` (`DESKTOP=hobby`, the default) is unchanged. The
+plan and status are in `icewm.md`.
+
+```bash
+make run DESKTOP=icewm              # intel (default ARCH)
+make run DESKTOP=icewm ARCH=arm     # ARM64 (TCG, slow)
+```
+
+With `DESKTOP=icewm`:
+- the kernel is built with `-DKERNEL_DESKTOP_ICEWM` and launches `XSESSION.BIN`
+  (`src/user/x11sess/`) instead of `DESKTOP.BIN`;
+- the disk also gets the X server `XHOBBY.BIN`, `ICEWM.BIN`, `ICEWMBG.BIN` and
+  the `/X11`, `/ICEWM` data trees from `X11_BUILD_DIR` (default
+  `third_party/x11/build/<arch>`). If those binaries are missing, the build runs
+  `third_party/x11/build.sh --arch <arch> --stage all` (this takes a while the
+  first time). `X11_BUILD_DIR=<dir>` uses a prebuilt tree instead.
+- `XSESSION.BIN` sets `DISPLAY=:0`, `HOME`, `FONTCONFIG_FILE=/X11/FONTS.CNF` and
+  `PATH`, plus any `KEY=VALUE` lines in `/X11/XSESSION.ENV`. It starts the X
+  server, waits for it (with a time limit), and then starts IceWM. If the X
+  server or IceWM exits, or never starts, it falls back to the normal HobbyOS
+  desktop. The serial log shows each step on lines starting with `[XSESS]`.
+
+Switching `DESKTOP` rebuilds the kernel's `main.o` and `disk.img`
+(stamp file `obj/<arch>/.desktop`).
+
+Headless test (QMP screenshots in `/tmp/hobbyos_icewm_<arch>/`):
+```bash
+make icewm_test                                   # real X stack (M6)
+make icewm_test ICEWM_TEST_ARGS=--stubs           # launcher + fallback with stub X binaries
+make icewm-stubs && make run DESKTOP=icewm X11_BUILD_DIR=obj/intel/x11stub
+```
+
 ## Graphics acceleration
 
 QEMU launches through a single `QEMU_GPU` switch (see the launcher design in
