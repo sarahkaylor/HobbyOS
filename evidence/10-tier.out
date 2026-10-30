@@ -1,0 +1,4 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1800s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb097/evidence/10-wave.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+TIER_EXIT=1

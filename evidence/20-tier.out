@@ -1,0 +1,28 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1800s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb097/evidence/20-wave.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 12629 console lines, 68 FAIL lines, 8 user memory fault records across 8 processes, 85 programs exited, 33 shredded, halted=1
+T3_intel: FAIL — 8 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 68 FAIL line(s); first 20:
+4300:Loader (v2) starved (slot pressure): TSORT.BINMMTEST FAIL 
+4588:Loader (v2) starved (slot pressure): [SIGTEST] FAIL waitpid returns the child got=27 want=4294964048
+4946:[SEDTEST] FAIL basic_s (stdout)
+5619:  FPU_T torture-child: FAIL
+5707:[SEDTEST] FAIL s_g (stdout)
+6311:  FPU_T fork-inherit: FAIL
+6333:FPU_T FAILED: 2
+7150:[SEDTEST] FAIL s_p_n (stdout)
+7688:tab sizes must be ascending[SEDTEST] FAIL amp (stdout)
+8181:[SEDTEST] FAIL backref (stdout)
+9055:/BLKT2.TXT[SEDTEST] FAIL addr_line_d (stdout)
+9143:  THRD_T exit-group-any-thread: FAIL
+9145:THRD_T FAILED: 1
+9254:[SEDTEST] FAIL addr_range_d (stdout)
+9520:[SEDTEST] FAIL addr_last_d (stdout)
+9597:  TORTURE exec-wait-cycles: FAIL
+9599:  TORTURE poll-many-fds: FAIL
+9606:/GRT.INTORTURE FAILED: 2
+9721:[SEDTEST] FAIL addr_not (stdout)
+9850:[SEDTEST] FAIL addr_re (stdout)
+T3_intel EXIT=1
+TIER_EXIT=1
