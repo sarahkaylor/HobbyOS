@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 2700s, log evidence/gb-122-v/t3-intel-wave.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 17062 console lines, 333 FAIL lines, 14 user memory fault records across 11 processes, 88 programs exited, halted=1
+T3_intel: FAIL — 333 FAIL line(s); first 20:
+2648:MMTEST FAIL 13
+5313:[SIGTEST] FAIL waitpid returns the child got=18 want=4294964048
+5393:MMTEST FAIL 13
+6297:[SEDTEST] FAIL basic_s (stdout)
+6699:[TEST] DIRECT-ext-cat FAIL (empty target, no load failure)
+7225:/MD5SUM.BIN[SEDTEST] FAIL s_g (stdout)
+7837:[CMPTEST] FAIL EOF message on stderr
+7854:[CMPTEST] FAIL empty EOF message
+7858:[CMPTEST] FAIL missing file diagnostic
+7885:[CMPTEST] FAIL -i 4:0 skips prefix
+7934:[CMPTEST] FAIL - stdin EOF diagnostic
+7946:[SEDTEST] FAIL s_2nd (stdout)
+7960:[CMPTEST] FAILURES: 5
+8069:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+8075:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+8161:/PASTE.BIN[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+8191:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+8242:[TSORTTEST] FAILURES: 4
+8299:[TACTEST] FAIL missing file
+8302:SED.BIN[TACTEST] FAIL empty separator
+T3_intel EXIT=1
+wave_rc=1
