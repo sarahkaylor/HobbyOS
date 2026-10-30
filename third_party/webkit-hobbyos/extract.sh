@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # extract.sh — reassemble + verify + extract the vendored WebKit fork snapshot
-# (third_party/webkit-hobbyos/, fork ref browser-usability @ 34e52e12b2).
+# (third_party/webkit-hobbyos/, fork ref browser-usability @ 2148171ff6).
 #
 #   bash third_party/webkit-hobbyos/extract.sh [--dest DIR] [--check]
 #
@@ -11,7 +11,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-XZ_NAME="webkit-hobbyos-bu-34e52e12b2.tar.xz"
+XZ_NAME="webkit-hobbyos-bu-2148171ff6.tar.xz"
 DEST=""
 CHECK_ONLY=""
 
