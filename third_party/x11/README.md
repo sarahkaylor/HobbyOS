@@ -170,6 +170,73 @@ is the vendored tarball (same sha256 as its `.sha256` file).
 
 Other lanes append their own `pins/<stage>.txt` + `sums/` + a table here.
 
+## Pins (icewm stage, lane icewm)
+
+| Tarball | Source | sha256 |
+|---|---|---|
+| icewm-4.1.0.tar.gz | https://github.com/bbidulock/icewm/archive/refs/tags/4.1.0.tar.gz (tag 4.1.0 = commit 3a19fee0b5c9) | 224a8636af6b7749b2b9e324709323068db96ccb94e1682a170d4f66bd3baeb7 |
+
+IceWM 4.1.0 (2026-08-06) is the newest release as of 2026-10-30.  The
+project's release tarballs are `.tar.lz` files on github.com/ice-wm/icewm;
+the host has no lzip, so the pin is GitHub's archive of the same tag in the
+bbidulock/icewm repo (the CMake build needs no generated files).
+
+### Build (`build-icewm.sh`)
+
+`bash third_party/x11/build.sh --arch arm|intel --stage icewm --prefix <P> -j 8`
+(needs clientlibs + extlibs in the prefix) produces, in `build/<arch>/`:
+
+* `bin/ICEWM.BIN`, `bin/ICEWMBG.BIN`, `bin/ICESH.BIN`, `bin/ICEWMHNT.BIN`
+  (IceWM's CMake targets `icewm icewmbg icesh icewmhint`, ELF kept in
+  `obj/icewm/`, `llvm-objcopy -O binary` like every repo program).
+* `bin/XEYESR.BIN`, `bin/XCALCR.BIN` -- the "clients" sub-step: the shim demo
+  sources `src/user/x11/apps/{xeyes,xcalc}/main.c`, unchanged, compiled and
+  linked against the real libX11 (xcalc gets `-include X11/Xutil.h`).
+* `disk/ICEWM/` -- LIBDIR = CFGDIR = DATADIR = `/ICEWM`: HobbyOS
+  `preferences menu toolbar programs keys theme` (from `icewm/data/`) +
+  upstream `icons ledclock mailbox taskbar` + themes `icedesert` (default)
+  and `win95`.  Upstream long mixed-case names are kept (FAT16 LFN is read
+  and written by the kernel, case-insensitively).
+
+`--only icewm|icewm-data|clients|icewm-hosttest` runs one sub-step.
+
+Configuration: XPM + libpng + libjpeg loaders, Xft (+ core fonts), Xrandr,
+Xinerama, shape; off: imlib2, gdk-pixbuf, SVG, NLS/I18N, session (SM/ICE),
+sound, fribidi, XRes, fdo menus (`icewm-menu-fdo` needs C++ exceptions).
+C++ is `-fno-exceptions -frtti` against the repo libc++ (+ libcxxabi's
+`cxxabi.h` for `__cxa_demangle`).  The toolchain's static-library
+`try_compile` makes CMake's link probes always succeed, so every
+`HAVE_*` probe result is passed explicitly.
+
+HobbyOS adaptations:
+
+* `patches/icewm/0001` -- icesh's `throw <exit code>` / `catch` becomes
+  `IceSh::bail()` (same cleanup as `~IceSh`, then `exit`).
+* `patches/icewm/0002` -- the `sh -c` fallback is `ICE_BINSH` (= `/SH.BIN`).
+* `patches/icewm/0003` -- `isExeFile()` accepts any regular file: FAT has no
+  execute bits (files stat 0644), so menu `prog` lookups would all fail.
+* `patches/icewm/0004` -- pixmap resource scan matches file names
+  case-insensitively: the FAT driver returns 8.3 names that mtools stored
+  lower-case (`taskbar/start.xpm`, `mailbox/mail.xpm`, `ledclock/*.xpm`) in
+  upper case, so the start button image was never found.
+* `icewm/include/hb_icewm_compat.h` (force-included): declarations missing
+  from the repo headers, the `.BIN` program names (`ICEWMEXE`=ICEWM.BIN,
+  `ICEWMBGEXE`=ICEWMBG.BIN, ...), C linkage for `main` (`-ffreestanding`
+  C++), and `O_CLOEXEC/O_NOCTTY/O_DIRECTORY/O_NOFOLLOW` hints.
+* `icewm/include/` + `icewm/compat/` -> `libhbicecompat.a`: fnmatch, glob,
+  wordexp (no command substitution -> IceWM falls back to `/SH.BIN -c`),
+  execl/execlp, `dirfd`/`rewinddir`/`openat`/`fstatat`/`faccessat` over a
+  pseudo-fd -> path table (the repo DIR is path based), popen/pclose/
+  system/mkdtemp via `/SH.BIN -c`, nftw, `<net/if.h>` with an empty
+  `if_nameindex()`, getloadavg (ENOSYS), tzset, nice/getpriority, memmem,
+  fpathconf, daemon, getprogname.  All lane-local: the default build never
+  sees them.  `icewm/test/compat_host_test.c` checks fnmatch/wordexp/glob
+  against glibc on every build (`icewm-hosttest`).
+* Program launching: menu/toolbar/keys entries name flat images
+  (`XEYESR.BIN`); IceWM `fork()`s and `execvp()`s them with `PATH=/`.
+* `/proc`/sysctl applets (CPU, memory, network, battery, mailbox) are compiled
+  but switched off in `/ICEWM/preferences`; Run/Help/address bar hidden.
+
 ## Adding a stage / package
 
 1. `pins/<stage>.txt`: add `<tarball> <url>`; run `fetch.sh --stage <stage> --record`,
