@@ -1,0 +1,54 @@
+HobbyOS xserver patch (lane xserver, icewm.md M3).
+meson: add -Dhobbyos (hw/hobbyos DDX, sources copied in by build-server.sh) 
+and -Dhobbyos_link_args; no BUSFAULT on host system 'hobbyos' (no si_addr, 
+SA_SIGINFO handlers never run).
+
+diff --git a/hw/meson.build b/hw/meson.build
+index f8bd28a..9491048 100644
+--- a/hw/meson.build
++++ b/hw/meson.build
+@@ -2,6 +2,10 @@ if get_option('xephyr')
+     subdir('kdrive')
+ endif
+ 
++if get_option('hobbyos')
++    subdir('hobbyos')
++endif
++
+ if get_option('xvfb')
+     subdir('vfb')
+ endif
+diff --git a/include/meson.build b/include/meson.build
+index bda84bd..c19d69d 100644
+--- a/include/meson.build
++++ b/include/meson.build
+@@ -181,7 +181,13 @@ conf_data.set('HAVE_VASPRINTF', cc.has_function('vasprintf') ? '1' : false)
+ conf_data.set('HAVE_VSNPRINTF', cc.has_function('vsnprintf') ? '1' : false)
+ conf_data.set('HAVE_WALKCONTEXT', cc.has_function('walkcontext') ? '1' : false)
+ 
+-conf_data.set('BUSFAULT', conf_data.get('HAVE_SIGACTION'))
++# HobbyOS: siginfo_t carries no si_addr and SA_SIGINFO handlers are never
++# invoked, so the SIGBUS shm-fault tracker (os/busfault.c) cannot work.
++if host_machine.system() == 'hobbyos'
++    conf_data.set('BUSFAULT', false)
++else
++    conf_data.set('BUSFAULT', conf_data.get('HAVE_SIGACTION'))
++endif
+ 
+ # Don't let X dependencies typedef 'pointer'
+ conf_data.set('_XTYPEDEF_POINTER', '1')
+diff --git a/meson_options.txt b/meson_options.txt
+index 536e15d..627eeb0 100644
+--- a/meson_options.txt
++++ b/meson_options.txt
+@@ -6,6 +6,10 @@ option('glamor', type: 'combo', choices: ['true', 'false', 'auto'], value: 'auto
+        description: 'Enable glamor (default yes for Xorg builds)')
+ option('xnest', type: 'combo', choices: ['true', 'false', 'auto'], value: 'auto',
+        description: 'Enable Xnest nested X server')
++option('hobbyos', type: 'boolean', value: false,
++       description: 'Build the HobbyOS framebuffer server (hw/hobbyos)')
++option('hobbyos_link_args', type: 'array', value: [],
++       description: 'Extra link arguments for the HobbyOS server (compat archives)')
+ option('xvfb', type: 'boolean', value: true,
+        description: 'Enable Xvfb X server')
+ option('xwin', type: 'combo', choices: ['true', 'false', 'auto'], value: 'auto',

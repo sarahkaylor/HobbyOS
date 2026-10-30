@@ -1,0 +1,49 @@
+HobbyOS xserver patch (lane xserver, icewm.md M3).
+os: HobbyOS portability. No si_addr in siginfo_t (osinit.c), no F_DUPFD 
+(os_move_fd keeps the fd), <sys/utsname.h> for DefineSelf (access.c).
+
+diff --git a/os/access.c b/os/access.c
+index bf8e961..1bf67fe 100644
+--- a/os/access.c
++++ b/os/access.c
+@@ -120,7 +120,7 @@ SOFTWARE.
+ #include <sys/un.h>
+ #endif
+ 
+-#if defined(SVR4) ||  (defined(SYSV) && defined(__i386__)) || defined(__GNU__)
++#if defined(SVR4) ||  (defined(SYSV) && defined(__i386__)) || defined(__GNU__) || defined(__hobbyos__)
+ #include <sys/utsname.h>
+ #endif
+ #if defined(SYSV) &&  defined(__i386__)
+diff --git a/os/osinit.c b/os/osinit.c
+index 8575319..d8cd852 100644
+--- a/os/osinit.c
++++ b/os/osinit.c
+@@ -145,7 +145,12 @@ OsSigHandler(int signo)
+         case SIGBUS:
+         case SIGILL:
+         case SIGFPE:
++#ifdef __hobbyos__
++            /* HobbyOS siginfo_t has no si_addr */
++            ErrorFSigSafe("%s\n", strsignal(signo));
++#else
+             ErrorFSigSafe("%s at address %p\n", strsignal(signo), sip->si_addr);
++#endif
+         }
+     }
+ #endif
+diff --git a/os/utils.c b/os/utils.c
+index 79b36b7..9ec5736 100644
+--- a/os/utils.c
++++ b/os/utils.c
+@@ -2204,6 +2204,10 @@ os_move_fd(int fd)
+ {
+     int newfd;
+ 
++#ifdef __hobbyos__
++    /* No F_DUPFD on HobbyOS: keep the descriptor where it is. */
++    return fd;
++#endif
+ #ifdef F_DUPFD_CLOEXEC
+     newfd = fcntl(fd, F_DUPFD_CLOEXEC, MAXCLIENTS);
+ #else

@@ -1,0 +1,62 @@
+HobbyOS xserver patch (lane xserver, icewm.md M3).
+xkb: no xkbcomp on HobbyOS. XkbDDXLoadKeymapByNames answers every request 
+from one host-compiled keymap (/X11/US.XKM, evdev/pc105/us; 
+XkbHobbyKeymapFile, DDX option -xkm) and never unlinks it.
+
+diff --git a/xkb/ddxLoad.c b/xkb/ddxLoad.c
+index f9b7b06..c7dffb7 100644
+--- a/xkb/ddxLoad.c
++++ b/xkb/ddxLoad.c
+@@ -358,6 +358,40 @@ LoadXKM(unsigned want, unsigned need, const char *keymap, XkbDescPtr *xkbRtrn)
+     return (need | want) & (~missing);
+ }
+ 
++#ifdef __hobbyos__
++/*
++ * HobbyOS: there is no xkbcomp to exec.  Every keymap request is answered
++ * from one keymap compiled on the build host (evdev rules, pc105, us:
++ * third_party/x11/ddx/keymap/us.xkb -> /X11/US.XKM).  The DDX may point
++ * XkbHobbyKeymapFile elsewhere (-xkm option).  Never unlinked.
++ */
++const char *XkbHobbyKeymapFile = "/X11/US.XKM";
++
++static unsigned
++LoadFixedXKM(unsigned want, unsigned need, XkbDescPtr *xkbRtrn,
++             char *nameRtrn, int nameRtrnLen)
++{
++    FILE *file;
++    unsigned missing;
++
++    *xkbRtrn = NULL;
++    file = fopen(XkbHobbyKeymapFile, "rb");
++    if (file == NULL) {
++        LogMessage(X_ERROR, "XKB: cannot open keymap %s\n", XkbHobbyKeymapFile);
++        return 0;
++    }
++    missing = XkmReadFile(file, need, want, xkbRtrn);
++    fclose(file);
++    if (*xkbRtrn == NULL) {
++        LogMessage(X_ERROR, "XKB: error loading keymap %s\n", XkbHobbyKeymapFile);
++        return 0;
++    }
++    if (nameRtrn && nameRtrnLen > 0)
++        strlcpy(nameRtrn, XkbHobbyKeymapFile, nameRtrnLen);
++    return (need | want) & (~missing);
++}
++#endif
++
+ unsigned
+ XkbDDXLoadKeymapByNames(DeviceIntPtr keybd,
+                         XkbComponentNamesPtr names,
+@@ -373,6 +407,11 @@ XkbDDXLoadKeymapByNames(DeviceIntPtr keybd,
+         xkb = NULL;
+     else
+         xkb = keybd->key->xkbInfo->desc;
++#ifdef __hobbyos__
++    (void) xkb;
++    (void) names;
++    return LoadFixedXKM(want, need, xkbRtrn, nameRtrn, nameRtrnLen);
++#endif
+     if ((names->keycodes == NULL) && (names->types == NULL) &&
+         (names->compat == NULL) && (names->symbols == NULL) &&
+         (names->geometry == NULL)) {
