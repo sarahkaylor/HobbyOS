@@ -266,6 +266,14 @@ skeleton as an issue header block (see `tools/board/README.md`).
    a single verifier.
 5. A farm **Verifier** (DEEP session, §5.1) claims `GB-nnn-V` → `In Progress` → runs the gate on its own VM →
    posts evidence + a **RED/GREEN** verdict on both the verification and the implementation ticket.
+   **Verdict format (binding from 2026-10-30, ruled on GB-139 after GB-139-V's census):** the verdict is one line
+   `VERDICT: GREEN sha=<7–40 hex>` or `VERDICT: RED sha=<hex>|none`, optionally inside an HTML comment
+   (`<!-- VERDICT: GREEN sha=… -->`); a markdown prefix (`>`, `-`, `**`) is fine, code spans are not. **A GREEN
+   without a `sha=` is not a verdict.** The reason is measured, not stylistic: `check_verdicts.py` went through
+   seven gates reading prose, and 16 lines on the board are byte-identical to a verdict while being DoD text
+   (`GREEN → this ticket to Merge Gate. RED → back to In Progress …`), so any rule that reads English is a bet.
+   Older shapes are still accepted by a **legacy fallback** whose output is tagged `(legacy)`, so history is
+   kept and the board shows which cards still need a marker; no back-fill is required.
    GREEN → the implementation ticket to `Merge Gate`; RED → back to `In Progress` with the failing output
    quoted verbatim. **This propagation is machine-checked:** `python3 tools/board/check_verdicts.py`
    (and `--self-test`, which proves the check can fail) compares every posted verdict against its
