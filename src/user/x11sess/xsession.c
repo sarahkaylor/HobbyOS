@@ -34,36 +34,30 @@
 #include "libc.h"
 #include "syscall.h"
 #include "xsess_probe.h"
+#include <poll.h>
 
-/* x86_64 kernel defect workaround (found by this lane, 2026-10-30):
- * src/kernel/arch/x64/trap.c sys_waitpid()/sys_wait4() remap the x64 args
- * onto the canonical regs[0..3] slots IN THE USER TRAP FRAME, and on x64
- * regs[1] is the caller's rbx (callee-saved) — so every waitpid() returns
- * with rbx = the status pointer (and the blocking path resumes with it
- * too).  Compiled code that keeps a value in rbx across the call (clang
- * -mcmodel=large hoists function addresses there) then jumps to the status
- * variable: XSESSION.BIN died with "memory fault PC=<&status> sys=39".
- * Until the kernel is fixed, XSESSION issues the syscall itself with rbx
- * (and the other remapped registers) declared clobbered.  ARM is
- * unaffected (regs[1..3] are x1..x3, caller-saved). */
-#if defined(__x86_64__)
-static int xs_waitpid(int pid, int *status, int options) {
-  long ret = SYS_WAITPID;
-  long a0 = pid, a1 = (long)status, a2 = options;
-  register long r10 __asm__("r10") = 0;
-  __asm__ volatile("syscall"
-                   : "+a"(ret), "+D"(a0), "+S"(a1), "+d"(a2), "+r"(r10)
-                   :
-                   : "rbx", "rcx", "r8", "r9", "r11", "memory");
-  if (ret < 0) {
-    errno = (int)-ret;
-    return -1;
-  }
-  return (int)ret;
+/* Console output.  XSESSION's own fds 1/2 become the children's log pipe
+ * (setup_stdio below), so its own lines go straight to SYS_WRITE_CONSOLE
+ * through print_console(), never through write(1). */
+static void xs_print_dec(long v) {
+  char buf[24];
+  int i = (int)sizeof(buf) - 1;
+  int neg = v < 0;
+  unsigned long u = neg ? (unsigned long)(-(v + 1)) + 1 : (unsigned long)v;
+  buf[i] = 0;
+  do {
+    buf[--i] = (char)('0' + u % 10);
+    u /= 10;
+  } while (u && i > 1);
+  if (neg) buf[--i] = '-';
+  print_console(buf + i);
 }
-#else
+#define print print_console
+#define print_dec xs_print_dec
+
+/* The x86_64 waitpid rbx clobber this file once worked around is fixed in
+ * the kernel (sys_waitpid/sys_wait4 no longer rewrite the user frame). */
 #define xs_waitpid waitpid
-#endif
 
 /* ---- tables (edit here; coordinate server args with lane xserver) ---- */
 
@@ -77,6 +71,7 @@ static const char *const kServerPath = "/XHOBBY.BIN";
  * -dumbSched: no SIGALRM/setitimer scheduler (icewm.md §6). */
 static char *const kServerArgs[] = {
     "XHOBBY.BIN", XSESS_DISPLAY, "-nolisten", "tcp", "-noreset", "-dumbSched",
+    "-s", "0",
     NULL};
 
 static const char *const kBgPath = "/ICEWMBG.BIN";
@@ -179,6 +174,94 @@ static void env_build(void) {
   log_sd("env: ", added, " line(s) from " XSESS_ENV_FILE);
 }
 
+/* ---- stdio for the session's children ----
+ *
+ * The kernel starts XSESSION with NO fds; an unset fd 1/2 means "console"
+ * to HobbyOS libc, but POSIX open()/socket()/pipe() return the lowest free
+ * fd.  Children inherit the empty table, so their first descriptors landed
+ * on 0-2: ICEWM.BIN's X connection became fd 2, and every IceWM warning on
+ * stderr was written INTO the X protocol stream (the server then waited for
+ * the rest of a garbage "request" -- IceWM froze mid-move with the server
+ * grabbed).  So before spawning anything: fd 0 = /dev/null, fds 1 and 2 =
+ * the write end of a pipe whose read end (close-on-exec) XSESSION drains to
+ * the serial console as "[X] ..." lines. */
+static int g_relay_fd = -1;
+
+/* libc.a's dup2() is a deliberate ENOSYS stub (src/libc/src/file.c); the
+ * kernel's SYS_DUP2 is real, so call it directly. */
+static int xs_dup2(int oldfd, int newfd) {
+  long r = syscall(SYS_DUP2, (long)oldfd, (long)newfd);
+  if (r < 0) {
+    errno = (int)-r;
+    return -1;
+  }
+  return (int)r;
+}
+
+static void setup_stdio(void) {
+  int fd = open("/dev/null", O_RDWR);
+  if (fd != 0) {
+    log_sd("WARN /dev/null did not land on fd 0 (got ", fd, ")");
+    if (fd > 0) {
+      xs_dup2(fd, 0);
+      close(fd);
+    }
+  }
+  int p[2];
+  if (pipe(p) != 0) {
+    log_sd("WARN pipe() failed errno=", errno, "; children's stdio -> /dev/null");
+    for (int i = 1; i <= 2; i++) xs_dup2(0, i);
+    return;
+  }
+  /* Move the read end to a fixed fd above 2 (libc has no dup),
+     then make 1 and 2 the write end. */
+  const int rd = 9;
+  if (xs_dup2(p[0], rd) != rd) {
+    log_sd("WARN xs_dup2(relay) failed errno=", errno, "; children's stdio -> /dev/null");
+    close(p[0]);
+    close(p[1]);
+    for (int i = 1; i <= 2; i++) xs_dup2(0, i);
+    return;
+  }
+  if (p[0] > 2) close(p[0]);
+  for (int i = 1; i <= 2; i++)
+    if (p[1] != i) xs_dup2(p[1], i);
+  if (p[1] > 2) close(p[1]);
+  fcntl(rd, F_SETFD, FD_CLOEXEC);
+  fcntl(rd, F_SETFL, fcntl(rd, F_GETFL) | O_NONBLOCK);
+  g_relay_fd = rd;
+  log_sd("children's stdout/stderr relayed to the console (pipe fd ", rd, ")");
+}
+
+/* Drain the relay pipe for up to timeout_ms; emits whole lines as "[X] ". */
+static char g_relay_line[512];
+static int g_relay_len;
+static void relay_pump(int timeout_ms) {
+  if (g_relay_fd < 0) {
+    if (timeout_ms > 0) usleep(timeout_ms * 1000);
+    return;
+  }
+  struct pollfd pfd = {g_relay_fd, POLLIN, 0};
+  if (poll(&pfd, 1, timeout_ms) <= 0) return;
+  char buf[256];
+  for (int rounds = 0; rounds < 64; rounds++) {
+    int n = (int)read(g_relay_fd, buf, sizeof(buf));
+    if (n <= 0) break;
+    for (int i = 0; i < n; i++) {
+      char c = buf[i];
+      if (c == '\n' || g_relay_len == (int)sizeof(g_relay_line) - 1) {
+        g_relay_line[g_relay_len] = 0;
+        print("[X] ");
+        print(g_relay_line);
+        print("\n");
+        g_relay_len = 0;
+        if (c == '\n') continue;
+      }
+      g_relay_line[g_relay_len++] = c;
+    }
+  }
+}
+
 /* ---- filesystem prep ---- */
 
 static void ensure_dir(const char *path) {
@@ -251,7 +334,7 @@ static void stop_child(const char *what, int pid) {
       describe_exit(what, pid, status);
       return;
     }
-    usleep(XSESS_POLL_MS * 1000);
+    relay_pump(XSESS_POLL_MS);
   }
   kill(pid, SIGKILL);
   for (int t = 0; t < XSESS_TERM_MS; t += XSESS_POLL_MS) {
@@ -259,7 +342,7 @@ static void stop_child(const char *what, int pid) {
       describe_exit(what, pid, status);
       return;
     }
-    usleep(XSESS_POLL_MS * 1000);
+    relay_pump(XSESS_POLL_MS);
   }
   log_sd("WARN child did not die after SIGKILL pid=", pid, " (abandoned)");
 }
@@ -281,7 +364,7 @@ static int wait_server(int server, int *status) {
       log_sd("server ready after ~", t, " ms");
       return 1;
     }
-    usleep(XSESS_POLL_MS * 1000);
+    relay_pump(XSESS_POLL_MS);
   }
   if (xs_waitpid(server, status, WNOHANG) == server) return 0;
   if (!have_probe) {
@@ -295,6 +378,12 @@ static void fallback(const char *why) {
   log_ss("session over: ", why);
   log_s("FALLBACK: launching " "/DESKTOP.BIN");
   char *const argv[] = {"DESKTOP.BIN", NULL};
+  /* Give the desktop the kernel's start state: no fds (unset 1/2 = the
+     console).  An inherited log pipe nobody drains would block its writes. */
+  relay_pump(0);
+  for (int fd = 0; fd <= 2; fd++) close(fd);
+  if (g_relay_fd >= 0) close(g_relay_fd);
+  g_relay_fd = -1;
   /* Replace this process: the HobbyOS desktop takes over the framebuffer
      exactly as when the kernel launches it directly.  The desktop gets the
      kernel's (empty) environment, not the X session's. */
@@ -313,6 +402,7 @@ static void fallback(const char *why) {
 
 int main(void) {
   log_s("IceWM session launcher starting");
+  setup_stdio();
   env_build();
   ensure_dir("/tmp");
   ensure_dir("/tmp/.X11-unix");
@@ -346,7 +436,11 @@ int main(void) {
   /* Reap until the server or the WM goes; others just get logged. */
   const char *why = "reap loop ended";
   for (;;) {
-    int pid = xs_waitpid(-1, &status, 0);
+    int pid = xs_waitpid(-1, &status, WNOHANG);
+    if (pid == 0) {
+      relay_pump(250);   /* bounded: the reap check runs >= 4x a second */
+      continue;
+    }
     if (pid < 0) {
       if (errno == EINTR) continue;
       log_sd("ERROR waitpid failed errno=", errno, "");
