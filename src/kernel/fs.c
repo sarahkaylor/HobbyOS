@@ -380,7 +380,7 @@ static struct file *f1_socket_file(struct process *p, int fd, int *errp) {
  * EPROTONOSUPPORT (no ESOCKTNOSUPPORT in the frozen errno set, matching the
  * existing IP branch's documented v1 choice); stray bits are EINVAL. */
 static int unix_type_of(int type) {
-  if (type & ~(0xF | K_SOCK_CLOEXEC)) return -EINVAL;
+  if (type & ~(0xF | K_SOCK_CLOEXEC | K_SOCK_NONBLOCK)) return -EINVAL;
   switch (type & 0xF) {
   case K_SOCK_STREAM:
     return K_UNIX_STREAM;
@@ -430,7 +430,8 @@ int file_socket(struct process *p, int domain, int type, int protocol) {
       f->ref_count = 0;
       return -EMFILE;
     }
-    if (type & K_SOCK_CLOEXEC) p->fd_cloexec |= 1u << fd;
+    if (type & K_SOCK_CLOEXEC) p->fd_cloexec |= 1ull << fd;
+    if (type & K_SOCK_NONBLOCK) usock_set_nonblock(u, 0, 1);
     return fd;
   }
 
@@ -770,9 +771,9 @@ int file_fcntl(struct process *p, int fd, int cmd, uint64_t arg) {
   if (cmd == K_F_SETFD) {
     /* Replaces the whole flag word (only FD_CLOEXEC exists). */
     if (arg & K_FD_CLOEXEC)
-      pg->fd_cloexec |= 1u << fd;
+      pg->fd_cloexec |= 1ull << fd;
     else
-      pg->fd_cloexec &= ~(1u << fd);
+      pg->fd_cloexec &= ~(1ull << fd);
     return 0;
   }
 
@@ -1096,10 +1097,28 @@ int file_socket_getopt(struct process *p, int fd, int level, int optname,
         struct file *uf = &global_file_table[g];
         if (level != K_SOL_SOCKET) return -ENOPROTOOPT;
         if (!val || !len) return -EINVAL;
+        if (optname == K_SO_PEERCRED) {
+          /* IceWM M1 (4.1): struct ucred, zeroed (single-user OS: uid/gid
+           * 0; pid 0 = "unknown"). */
+          if (*len < K_UCRED_SIZE) return -EINVAL;
+          for (int i = 0; i < K_UCRED_SIZE; i++) ((uint8_t *)val)[i] = 0;
+          *len = K_UCRED_SIZE;
+          return 0;
+        }
         if (*len < (int)sizeof(int)) return -EINVAL;
         int value;
         switch (optname) {
         case K_SO_ERROR:
+          value = 0;
+          break;
+        case K_SO_SNDBUF: /* IceWM M1: the per-direction ring */
+        case K_SO_RCVBUF:
+          value = K_UNIX_RING;
+          break;
+        case K_SO_ACCEPTCONN:
+          value = usock_is_listening(uf->usock.ptr) ? 1 : 0;
+          break;
+        case K_SO_PASSCRED:
           value = 0;
           break;
         case K_SO_TYPE:
@@ -1153,6 +1172,28 @@ int file_socket_setopt(struct process *p, int fd, int level, int optname,
                        const void *val, int len) {
   (void)val;
   (void)len;
+  /* IceWM M1: unix endpoints accept the buffer/credential knobs X
+   * transports set (Xtrans raises SO_SNDBUF) as no-ops. */
+  {
+    struct process *pg = process_group(p);
+    if (pg && fd >= 0 && fd < MAX_OPEN_FDS) {
+      int g = pg->open_fds[fd];
+      if (g >= 0 && g < MAX_GLOBAL_FILES &&
+          global_file_table[g].type == FILE_TYPE_UNIXSOCK) {
+        if (level != K_SOL_SOCKET) return -ENOPROTOOPT;
+        switch (optname) {
+        case K_SO_SNDBUF:
+        case K_SO_RCVBUF:
+        case K_SO_PASSCRED:
+        case K_SO_REUSEADDR:
+        case K_SO_KEEPALIVE:
+          return 0;
+        default:
+          return -ENOPROTOOPT;
+        }
+      }
+    }
+  }
   int err = 0;
   struct file *f = f1_socket_file(p, fd, &err);
   if (!f) return -err;
@@ -1389,7 +1430,7 @@ int file_close(struct process *cur, int fd) {
       return -1;
     }
     cur->open_fds[fd] = -1;
-    cur->fd_cloexec &= ~(1u << fd); /* P5 (D3.2): closing discards fd flags */
+    cur->fd_cloexec &= ~(1ull << fd); /* P5 (D3.2): closing discards fd flags */
     if (cur->num_open_fds > 0)
       cur->num_open_fds--;
     spinlock_release_irqrestore(&proc_lock, cflags);
@@ -1475,7 +1516,7 @@ int file_dup(struct process *cur, int fd) {
     usock_reopen(f->usock.ptr, f->usock.end); /* P4: same ref discipline */
   spinlock_release_irqrestore(&f->lock, flags);
   cur->open_fds[newfd] = g_fd;
-  cur->fd_cloexec &= ~(1u << newfd); /* P5 (D3.2): dup clears CLOEXEC */
+  cur->fd_cloexec &= ~(1ull << newfd); /* P5 (D3.2): dup clears CLOEXEC */
   cur->num_open_fds++;
   return newfd;
 }
@@ -1507,7 +1548,7 @@ int file_dup2(struct process *cur, int oldfd, int newfd) {
     usock_reopen(f->usock.ptr, f->usock.end); /* P4 */
   spinlock_release_irqrestore(&f->lock, flags);
   cur->open_fds[newfd] = g_fd;
-  cur->fd_cloexec &= ~(1u << newfd); /* P5 (D3.2): dup2 clears CLOEXEC */
+  cur->fd_cloexec &= ~(1ull << newfd); /* P5 (D3.2): dup2 clears CLOEXEC */
   cur->num_open_fds++;
   return newfd;
 }
@@ -1641,6 +1682,10 @@ int file_available(struct process *cur, int fd) {
   } else if (f->type == FILE_TYPE_SOCKET) {
     uint32_t avail = f->socket.pcb->rx_tail - f->socket.pcb->rx_head;
     return avail;
+  } else if (f->type == FILE_TYPE_UNIXSOCK) {
+    /* IceWM M1: FIONREAD on a unix socket (Xtrans BytesReadable). */
+    int a = usock_available(f->usock.ptr, f->usock.end);
+    return a < 0 ? 0 : a;
   }
   return -1;
 }
@@ -1908,7 +1953,7 @@ int file_memfd_create(struct process *cur, const char *name, int flags) {
   cur->open_fds[ufd] = get_global_fd(f);
   cur->num_open_fds++;
   if (flags & K_MFD_CLOEXEC)
-    cur->fd_cloexec |= (1u << ufd); /* recorded; P5's exec sweep consumes */
+    cur->fd_cloexec |= (1ull << ufd); /* recorded; P5's exec sweep consumes */
   return ufd;
 }
 
@@ -2041,7 +2086,11 @@ int file_socketpair(struct process *p, int domain, int type, int proto,
   p->open_fds[fd0] = get_global_fd(f0);
   p->open_fds[fd1] = get_global_fd(f1);
   p->num_open_fds += 2;
-  if (type & K_SOCK_CLOEXEC) p->fd_cloexec |= (1u << fd0) | (1u << fd1);
+  if (type & K_SOCK_CLOEXEC) p->fd_cloexec |= (1ull << fd0) | (1ull << fd1);
+  if (type & K_SOCK_NONBLOCK) {
+    usock_set_nonblock(u, 0, 1);
+    usock_set_nonblock(u, 1, 1);
+  }
   ufds[0] = fd0;
   ufds[1] = fd1;
   return 0;
@@ -2253,6 +2302,221 @@ int file_recvmsg(struct process *p, int fd, uint64_t umsg, int flags) {
                    sizeof ctl64))
     return -EFAULT;
   return r; /* bytes copied (Linux AF_UNIX returns the copied count) */
+}
+
+/* --- IceWM M1 (icewm.md section 4.1): named AF_UNIX stream sockets ------
+ * bind/listen/accept4/connect/getsockname/getpeername/shutdown over the
+ * unix.c name table.  Kernel-buffer forms first (unit-testable), then the
+ * user-pointer wrappers the trap layer calls. */
+
+/* Resolve a socket fd: the unix file, or NULL with *errp = -EBADF (not
+ * open), -EOPNOTSUPP (INET socket: these ops are unix-only in 4.1), or
+ * -ENOTSOCK (anything else). */
+static struct file *f1_unix_file(struct process *pg, int fd, int *errp) {
+  if (!pg || fd < 0 || fd >= MAX_OPEN_FDS) { *errp = -EBADF; return 0; }
+  int g_fd = pg->open_fds[fd];
+  if (g_fd < 0 || g_fd >= MAX_GLOBAL_FILES) { *errp = -EBADF; return 0; }
+  struct file *f = &global_file_table[g_fd];
+  FS_SLOT_CHECK(f);
+  if (f->type == FILE_TYPE_SOCKET) { *errp = -EOPNOTSUPP; return 0; }
+  if (f->type != FILE_TYPE_UNIXSOCK || !f->usock.ptr) {
+    *errp = -ENOTSOCK;
+    return 0;
+  }
+  return f;
+}
+
+int file_bind(struct process *p, int fd, const uint8_t *sa, int salen) {
+  struct process *pg = process_group(p);
+  int err = 0;
+  struct file *f = f1_unix_file(pg, fd, &err);
+  if (!f) return err;
+  struct usock_name n;
+  int r = usock_name_parse(sa, salen, &n);
+  if (r == -EAFNOSUPPORT) return -EINVAL; /* Linux unix_mkname */
+  if (r != 0) return r;
+  return usock_bind(f->usock.ptr, f->usock.end, &n);
+}
+
+int file_listen(struct process *p, int fd, int backlog) {
+  struct process *pg = process_group(p);
+  int err = 0;
+  struct file *f = f1_unix_file(pg, fd, &err);
+  if (!f) return err;
+  return usock_listen(f->usock.ptr, f->usock.end, backlog);
+}
+
+int file_accept(struct process *p, int fd, int flags, uint8_t *sa_out,
+                int *salen_out) {
+  struct process *pg = process_group(p);
+  int err = 0;
+  struct file *lf = f1_unix_file(pg, fd, &err);
+  if (!lf) return err;
+  if (flags & ~(K_SOCK_CLOEXEC | K_SOCK_NONBLOCK)) return -EINVAL;
+  struct usock *l = lf->usock.ptr;
+  if (!usock_is_listening(l)) return -EINVAL;
+  if (pg->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
+
+  /* Reserve the file slot BEFORE dequeuing so a popped connection can
+   * always be installed (nothing is lost on ENFILE). */
+  struct file *nf = file_alloc();
+  if (!nf) return -ENFILE;
+  struct usock *c = 0;
+  int r = usock_accept(l, lf->usock.end, 0, &c);
+  if (r < 0) {
+    nf->type = FILE_TYPE_EMPTY;
+    nf->ref_count = 0;
+    return r; /* -EAGAIN / -EINVAL / -2 (parked) */
+  }
+  int nfd = -1;
+  for (int i = 0; i < MAX_OPEN_FDS; i++) {
+    if (pg->open_fds[i] == -1) { nfd = i; break; }
+  }
+  if (nfd < 0) { /* raced with a sibling thread filling the table */
+    usock_close(c, 1);
+    nf->type = FILE_TYPE_EMPTY;
+    nf->ref_count = 0;
+    return -EMFILE;
+  }
+  nf->usock.ptr = c;
+  nf->usock.end = 1; /* the queue's end-1 reference transfers to this fd */
+  nf->type = FILE_TYPE_UNIXSOCK;
+  if (flags & K_SOCK_NONBLOCK) usock_set_nonblock(c, 1, 1);
+  pg->open_fds[nfd] = get_global_fd(nf);
+  pg->num_open_fds++;
+  if (flags & K_SOCK_CLOEXEC) pg->fd_cloexec |= 1ull << nfd;
+  else pg->fd_cloexec &= ~(1ull << nfd);
+
+  if (sa_out && salen_out) {
+    struct usock_name pn;
+    usock_getname(c, 1, 1, &pn); /* the client's bound name, if any */
+    *salen_out = usock_name_format(&pn, sa_out);
+  }
+  return nfd;
+}
+
+int file_connect_sa(struct process *p, int fd, const uint8_t *sa, int salen) {
+  struct process *pg = process_group(p);
+  if (!sa || salen < 2) return -EINVAL;
+  uint16_t fam = (uint16_t)(sa[0] | ((uint16_t)sa[1] << 8));
+  int err = 0;
+  struct file *f = f1_unix_file(pg, fd, &err);
+  if (!f) {
+    if (err != -EOPNOTSUPP) return err;
+    /* INET fd: the POSIX shape over the frozen connect_fd path.  The
+     * sockaddr_in fields are already in network order in memory. */
+    if (fam != K_AF_INET) return -EAFNOSUPPORT;
+    if (salen < 8) return -EINVAL;
+    uint16_t port_be = (uint16_t)(sa[2] | ((uint16_t)sa[3] << 8));
+    uint32_t ip_be = (uint32_t)sa[4] | ((uint32_t)sa[5] << 8) |
+                     ((uint32_t)sa[6] << 16) | ((uint32_t)sa[7] << 24);
+    return file_socket_connect(p, fd, ip_be, port_be);
+  }
+  struct usock_name n;
+  int r = usock_name_parse(sa, salen, &n);
+  if (r == -EAFNOSUPPORT) return -EINVAL;
+  if (r != 0) return r;
+  if (n.len == 0) return -EINVAL;
+  return usock_connect(f->usock.ptr, f->usock.end, &n, 0);
+}
+
+int file_sockname(struct process *p, int fd, int peer, uint8_t *sa_out,
+                  int *salen_out) {
+  struct process *pg = process_group(p);
+  int err = 0;
+  struct file *f = f1_unix_file(pg, fd, &err);
+  if (!f) return err;
+  struct usock_name n;
+  int r = usock_getname(f->usock.ptr, f->usock.end, peer ? 1 : 0, &n);
+  if (r != 0) return r;
+  *salen_out = usock_name_format(&n, sa_out);
+  return 0;
+}
+
+int file_shutdown(struct process *p, int fd, int how) {
+  struct process *pg = process_group(p);
+  int err = 0;
+  struct file *f = f1_unix_file(pg, fd, &err);
+  if (!f) return err;
+  return usock_shutdown(f->usock.ptr, f->usock.end, how);
+}
+
+/* --- user-pointer wrappers ------------------------------------------- */
+
+/* Copy a user sockaddr of salen bytes into a K_UNIX_SUN_LEN scratch. */
+static int f1_sa_copy_in(uint8_t *dst, uint64_t usa, int salen) {
+  if (salen < 0 || salen > K_UNIX_SUN_LEN) return -EINVAL;
+  if (salen > 0 && (!usa || !fs_copy_in(dst, usa, (uint64_t)salen)))
+    return -EFAULT;
+  return 0;
+}
+
+int file_bind_user(struct process *p, int fd, uint64_t usa, int salen) {
+  uint8_t sa[K_UNIX_SUN_LEN];
+  int r = f1_sa_copy_in(sa, usa, salen);
+  if (r != 0) return r;
+  return file_bind(p, fd, sa, salen);
+}
+
+int file_connect_user(struct process *p, int fd, uint64_t usa, int salen) {
+  uint8_t sa[K_UNIX_SUN_LEN];
+  /* sockaddr_in callers may pass sizeof(struct sockaddr_storage) (128). */
+  if (salen > K_UNIX_SUN_LEN && salen <= 128) {
+    uint8_t fam[2];
+    if (!usa || !fs_copy_in(fam, usa, 2)) return -EFAULT;
+    if (fam[0] == K_AF_INET && fam[1] == 0) salen = 16;
+  }
+  int r = f1_sa_copy_in(sa, usa, salen);
+  if (r != 0) return r;
+  return file_connect_sa(p, fd, sa, salen);
+}
+
+/* Value-result address out: write min(actual, *ulenp) bytes and the
+ * actual length (Linux truncation semantics). */
+static int f1_sa_copy_out(uint64_t usa, uint64_t ulenp, const uint8_t *sa,
+                          int len) {
+  uint32_t cap;
+  if (!fs_copy_in(&cap, ulenp, sizeof cap)) return -EFAULT;
+  uint32_t n = (uint32_t)len < cap ? (uint32_t)len : cap;
+  if (n > 0 && !fs_copy_out(usa, sa, n)) return -EFAULT;
+  uint32_t out = (uint32_t)len;
+  if (!fs_copy_out(ulenp, &out, sizeof out)) return -EFAULT;
+  return 0;
+}
+
+/* Validate the value-result pair up front (before any state change). */
+static int f1_sa_out_ok(uint64_t usa, uint64_t ulenp) {
+  if (!usa) return 0;
+  uint32_t cap;
+  if (!ulenp || !fs_copy_in(&cap, ulenp, sizeof cap)) return -EFAULT;
+  if ((int32_t)cap < 0) return -EINVAL;
+  if (cap > 0 && !sys_user_range_ok(usa, cap > K_UNIX_SUN_LEN
+                                              ? K_UNIX_SUN_LEN : cap))
+    return -EFAULT;
+  return 0;
+}
+
+int file_accept_user(struct process *p, int fd, uint64_t usa, uint64_t ulenp,
+                     int flags) {
+  int v = f1_sa_out_ok(usa, ulenp);
+  if (v != 0) return v;
+  uint8_t sa[K_UNIX_SUN_LEN];
+  int salen = 0;
+  int r = file_accept(p, fd, flags, usa ? sa : 0, usa ? &salen : 0);
+  if (r >= 0 && usa) f1_sa_copy_out(usa, ulenp, sa, salen); /* pre-checked */
+  return r;
+}
+
+int file_sockname_user(struct process *p, int fd, int peer, uint64_t usa,
+                       uint64_t ulenp) {
+  if (!usa || !ulenp) return -EFAULT;
+  int v = f1_sa_out_ok(usa, ulenp);
+  if (v != 0) return v;
+  uint8_t sa[K_UNIX_SUN_LEN];
+  int salen = 0;
+  int r = file_sockname(p, fd, peer, sa, &salen);
+  if (r != 0) return r;
+  return f1_sa_copy_out(usa, ulenp, sa, salen);
 }
 
 #ifdef KERNEL_MODE_UNIT_TEST

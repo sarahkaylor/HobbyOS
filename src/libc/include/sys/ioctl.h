@@ -31,6 +31,12 @@ extern "C" {
   };
 #define TIOCGWINSZ 0x5413
 
+  /* IceWM M1: socket ioctls (Linux numbers).  FIONREAD = bytes queued for
+   * reading (pipes, AF_UNIX/INET sockets, files); FIONBIO = set/clear
+   * O_NONBLOCK.  Everything else stays ENOTTY. */
+#define FIONREAD 0x541B
+#define FIONBIO  0x5421
+
 #ifdef __cplusplus
 }
 #endif
