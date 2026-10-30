@@ -1,0 +1,4 @@
+self-test clean:        resume=0 unattributable=0 total_vector14=0
+self-test violation:    resume=1 unattributable=0 total_vector14=1
+self-test shredded:     resume=0 unattributable=1 total_vector14=1
+t3_resume_page: SELF-TEST PASS — clean=0, resume-page fault identified, shredded counted as unattributable, absent log is not a pass

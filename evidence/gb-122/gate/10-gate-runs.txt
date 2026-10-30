@@ -1,0 +1,29 @@
+self-test clean:        resume=0 unattributable=0 total_vector14=0
+self-test violation:    resume=1 unattributable=0 total_vector14=1
+self-test shredded:     resume=0 unattributable=1 total_vector14=1
+t3_resume_page: SELF-TEST PASS — clean=0, resume-page fault identified, shredded counted as unattributable, absent log is not a pass
+---
+== evidence/gb-125/21-t3-intel-baseline-215b79b.log
+t3_resume_page: resume=10 unattributable=9 total_vector14=19 in 'evidence/gb-125/21-t3-intel-baseline-215b79b.log'
+t3_resume_page: FAIL — resume-copy #PF invariant violated (or unconfirmable: see unattributable count)
+== evidence/gb-125/23-t3-intel-baseline-run2.log
+t3_resume_page: resume=17 unattributable=18 total_vector14=35 in 'evidence/gb-125/23-t3-intel-baseline-run2.log'
+t3_resume_page: FAIL — resume-copy #PF invariant violated (or unconfirmable: see unattributable count)
+== evidence/gb-132/12-base-wave-run2.log
+t3_resume_page: resume=6 unattributable=8 total_vector14=14 in 'evidence/gb-132/12-base-wave-run2.log'
+t3_resume_page: FAIL — resume-copy #PF invariant violated (or unconfirmable: see unattributable count)
+== evidence/gb-122/91-bothfix-wave.log
+t3_resume_page: resume=0 unattributable=0 total_vector14=0 in 'evidence/gb-122/91-bothfix-wave.log'
+t3_resume_page: PASS — no resume-copy #PF and no unattributable Vector: 14
+== evidence/gb-122/92-bothfix-wave.log
+t3_resume_page: resume=0 unattributable=1 total_vector14=1 in 'evidence/gb-122/92-bothfix-wave.log'
+t3_resume_page: FAIL — resume-copy #PF invariant violated (or unconfirmable: see unattributable count)
+== evidence/gb-122/A1-pagewatch-wave.log
+t3_resume_page: resume=0 unattributable=0 total_vector14=0 in 'evidence/gb-122/A1-pagewatch-wave.log'
+t3_resume_page: PASS — no resume-copy #PF and no unattributable Vector: 14
+== evidence/gb-122/C4-mask-wave.log
+t3_resume_page: resume=0 unattributable=0 total_vector14=0 in 'evidence/gb-122/C4-mask-wave.log'
+t3_resume_page: PASS — no resume-copy #PF and no unattributable Vector: 14
+== evidence/gb-122/C5-mask-wave.log
+t3_resume_page: resume=0 unattributable=0 total_vector14=0 in 'evidence/gb-122/C5-mask-wave.log'
+t3_resume_page: PASS — no resume-copy #PF and no unattributable Vector: 14
