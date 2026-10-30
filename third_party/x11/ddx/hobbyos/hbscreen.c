@@ -181,6 +181,12 @@ static Bool
 hbCloseScreen(ScreenPtr pScreen)
 {
     pScreen->CloseScreen = hbScreen.closeScreen;
+    /* shadowCloseScreen (wrapped below us) unregisters the shadow damage
+     * from the screen pixmap; do it while that pixmap is still alive, or
+     * DamageUnregister walks freed memory on every server exit (SIGTERM at
+     * session teardown crashed in shadowRemove). */
+    if (pScreen->devPrivate)
+        shadowRemove(pScreen, pScreen->devPrivate);
     if (pScreen->devPrivate)
         (*pScreen->DestroyPixmap) (pScreen->devPrivate);
     pScreen->devPrivate = NULL;

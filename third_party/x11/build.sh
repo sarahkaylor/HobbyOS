@@ -228,6 +228,15 @@ hb_link_flat() {
 # The repo sysroot pieces every stage links against.
 hb_run libc make -C "$HB_REPO" ARCH="$HB_ARCH" -j"$HB_JOBS" "obj/$HB_ARCH/libc.a" "obj/$HB_ARCH/crt0.o"
 
+# hb_runtime_key: hash of what every flat .BIN links last (crt0.o, libc.a,
+# libcxx.a when present, the linker script).  Final-link stamps (XHOBBY,
+# IceWM) fold it in, so a libc fix relinks them; the prefix's static
+# libraries do not depend on it and are not rebuilt.
+hb_runtime_key() {
+  cat "$HB_OBJ/crt0.o" "$HB_OBJ/libc.a" "$HB_REPO/src/user/linker.ld" \
+      $( [ -f "$HB_OBJ/libcxx.a" ] && echo "$HB_OBJ/libcxx.a") | sha256sum | cut -c1-16
+}
+
 ALL_STAGES="clientlibs extlibs server icewm clients"
 if [ "$STAGE" = all ]; then
   stages=""

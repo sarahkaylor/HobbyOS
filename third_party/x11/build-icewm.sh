@@ -57,7 +57,8 @@ _iw_compat() {
 _iw_key() {
   local extra
   extra="$( (cd "$HB_X11_DIR/icewm" && find include compat -type f | LC_ALL=C sort | xargs cat) | sha256sum | cut -c1-16)"
-  hb_key icewm "$IW_TB" "$IW_REV $extra $(sha256sum "$HB_X11_DIR/build-icewm.sh" | cut -c1-16)"
+  hb_need_libcxx
+  hb_key icewm "$IW_TB" "$IW_REV $extra $(sha256sum "$HB_X11_DIR/build-icewm.sh" | cut -c1-16) rt=$(hb_runtime_key)"
 }
 
 _iw_build() {
