@@ -115,7 +115,7 @@ _sv_xserver() {
   local ddxh key stamp="$HB_BUILD/.stamp-xserver" out="$HB_BIN_DIR/XHOBBY.BIN"
   ddxh="$(cd "$HB_X11_DIR/ddx" && find hobbyos compat -type f | LC_ALL=C sort | xargs cat | sha256sum | cut -c1-16)"
   # Deps' stamps fold in, so a rebuilt pixman/xfont2/... relinks the server.
-  key="$(hb_key xserver "$SV_XSERVER_TB" "$SV_SALT ddx=$ddxh $(cat "$HB_PREFIX/.stamps/"{pixman,libfontenc,libXfont2,libxkbfile,libsha1,libX11,libxcb} 2>/dev/null | sha256sum | cut -c1-16) ${margs[*]}")"
+  key="$(hb_key xserver "$SV_XSERVER_TB" "$SV_SALT ddx=$ddxh $(cat "$HB_PREFIX/.stamps/"{pixman,libfontenc,libXfont2,libxkbfile,libsha1,libX11,libxcb} 2>/dev/null | sha256sum | cut -c1-16) rt=$(hb_runtime_key) ${margs[*]}")"
   if [ "$HB_FORCE" != 1 ] && [ -f "$out" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$key" ] &&
      { [ -z "$HB_ONLY" ] || ! hb_want $pkg; }; then
     hb_log "$pkg: cached ($out)"; return 0
