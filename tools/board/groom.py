@@ -63,25 +63,7 @@ REVIEW_LANES = ("In Review", "Merge Gate")
 # states, and the shorthand right-hand ids are not corrupted by it (see
 # expand_dep_field).
 GB_RE = re.compile(r"\bGB-(\d{3})\b")
-V_RE = re.compile(r"^GB-\d{3}-V\d*\b")
-# A parent accumulates gates over its life: GB-nnn-V, then GB-nnn-V2 when its DoD is
-# re-scoped or its head changes under a standing RED. The newest gate governs, so lint
-# must resolve by ordinal rather than looking up the literal `GB-nnn-V` key -- which
-# silently ignored every V2 and kept grading a superseded RED.
-GATE_RE = re.compile(r"^(GB-\d{3})-V(\d*)$")
-
-
-def newest_gate(gid, by_title):
-    """The highest-ordinal gate ticket for `gid`, or None."""
-    best = None
-    for k in by_title:
-        m = GATE_RE.match(k)
-        if not m or m.group(1) != gid:
-            continue
-        ordinal = int(m.group(2) or 1)
-        if best is None or ordinal > best[0]:
-            best = (ordinal, k)
-    return by_title[best[1]] if best else None
+V_RE = re.compile(r"^GB-\d{3}-V\b")
 
 
 # ---------------------------------------------------------------- pure core
@@ -222,10 +204,10 @@ def verify_lint_findings(issues, comment_fn):
         lane = lane_of(it)
         if lane not in REVIEW_LANES:
             continue
-        v = newest_gate(gid, by_title)
+        v = by_title.get(gid + "-V")
         verdict = newest_verdict(comment_fn(v["number"])) if v else None
         if verdict != "GREEN":
-            which = v["title"].split()[0] if v else None
+            which = gid + "-V" if v else "no gate ticket"
             detail = (f"in {lane!r} but gate {which} has not posted GREEN"
                       if v else f"in {lane!r} with no {gid}-V gate ticket")
             findings.append(("unverified-in-review", gid, detail))
@@ -236,15 +218,13 @@ def verify_lint_findings(issues, comment_fn):
             continue
         if it.get("state") == "closed":
             continue
-        gm = GATE_RE.match(gid)
-        parent_gid = gm.group(1) if gm else gid[:-2]
-        parent = by_title.get(parent_gid)
+        parent = by_title.get(gid[:-2])
         if parent is None:
             findings.append(("orphan-verify", gid,
-                             "parent " + parent_gid + " does not exist on the board"))
+                             "parent " + gid[:-2] + " does not exist on the board"))
         elif parent.get("state") == "closed" or lane_of(parent) == "Done":
             findings.append(("stale-verify", gid,
-                             "parent " + parent_gid + " is already "
+                             "parent " + gid[:-2] + " is already "
                              + ("closed" if parent.get("state") == "closed" else "Done")))
     return findings
 
