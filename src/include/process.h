@@ -343,6 +343,9 @@ struct process {
    * cross-context before waking the parked parent, then clears it.
    * Appended at the END so parallel lanes merge additively. */
   uint64_t wait4_rusage;
+  /* Blocking waitpid/wait4 status out-pointer (0 = none).  Kept out of
+   * context[1] because on x64 that slot is the caller's rbx. */
+  uint64_t wait_status_va;
 
   /* --- GB-013 (linux-abi.md §2): compat-process flag ----------------- *
    * Set by the ELF loader for a Linux-ABI image so the trap path routes
@@ -408,6 +411,9 @@ void process_free(int pid);
 // Blocking waitpid: reaps an exited child (returns its pid + status),
 // returns 0 with WNOHANG when children are running, -ECHILD when none.
 int process_waitpid(struct trap_frame *tf);
+/* Same core with explicit args; does not rewrite tf (x64 trap handler). */
+int process_wait_args(struct trap_frame *tf, int want_pid, int *status,
+                      int options, uint64_t rusage_va);
 
 /* W2-5 (selfhost, os-gap-audit.md §§4/12): kernel-side rusage blob.
  * Byte layout mirrors the sysroot's Linux-shaped `struct rusage`

@@ -687,7 +687,8 @@ static void reap_deliver_locked(struct process *grp) {
     if (want > 0 && want != grp->pid)
       continue;
     parent->context[0] = grp->pid;         /* waitpid return value */
-    uint64_t stp = (uint64_t)parent->context[1]; /* saved arg1 */
+    uint64_t stp = parent->wait_status_va; /* saved status pointer */
+    parent->wait_status_va = 0;
     if (stp) {
       /* D5.7/OQ5: route the user-range check through P2's helper
          (materializes for v2), then write cross-context. */
@@ -783,7 +784,7 @@ static void group_teardown(struct process *grp, uint64_t code) {
 
   /* Wake a parent blocked in waitpid() and deliver the reap result.  The
      parent's saved context still holds the syscall args (context[0] = the
-     requested pid, context[1] = the status pointer), so a pid-specific wait
+     requested pid; the status pointer is in wait_status_va), so a pid-specific wait
      is matched and the user status is filled in place -- through the
      PARENT'S mapping (this runs on the dying group's context, so a
      user-virtual write would land in the wrong block).  P5 (D5.3/D5.4):
@@ -2891,14 +2892,25 @@ int sys_readenv(struct process *p, int idx, char *buf, int size) {
  * PROC_STATE_WAIT_CHILD until a matching child exits.
  *
  * Blocking delivery: the parent's saved context (context[0] = pid return,
- * context[1] = the still-saved status pointer) is filled by the unified
+ * wait_status_va = the status pointer) is filled by the unified
  * reap_deliver_locked() helper (D5.3) when the child dies -- whether the
  * death is a normal exit or a kill -- exactly like the spawn worker fills
  * context[0].
  */
-static int process_wait_common(struct trap_frame *tf, uint64_t rusage_va);
+static int process_wait_common(struct trap_frame *tf, int want_pid,
+                               int *status, int options, uint64_t rusage_va);
 int process_waitpid(struct trap_frame *tf) {
-  return process_wait_common(tf, 0);
+  return process_wait_common(tf, (int)tf->regs[0], (int *)tf->regs[1],
+                             (int)tf->regs[2], 0);
+}
+
+/* icewm.md fix log: explicit-argument entry for arches whose syscall args
+ * do not sit in the canonical regs[0..3] (x64: rdi/rsi/rdx/r10).  The
+ * caller's trap frame is NOT rewritten, so callee-saved user registers
+ * (x64 rbx = regs[1]) survive both the immediate and the blocking path. */
+int process_wait_args(struct trap_frame *tf, int want_pid, int *status,
+                      int options, uint64_t rusage_va) {
+  return process_wait_common(tf, want_pid, status, options, rusage_va);
 }
 
 /* W2-5 (selfhost): SYS_WAIT4 -- waitpid(2) plus a rusage out-param.
@@ -2910,14 +2922,13 @@ int process_waitpid(struct trap_frame *tf) {
  * ru_maxrss).  Blocking waits store the rusage pointer in
  * caller->wait4_rusage so reap_deliver_locked() fills it cross-context. */
 int process_wait4(struct trap_frame *tf) {
-  return process_wait_common(tf, (uint64_t)tf->regs[3]);
+  return process_wait_common(tf, (int)tf->regs[0], (int *)tf->regs[1],
+                             (int)tf->regs[2], (uint64_t)tf->regs[3]);
 }
 
 /* Shared wait core.  rusage_va != 0 selects wait4 semantics. */
-static int process_wait_common(struct trap_frame *tf, uint64_t rusage_va) {
-  int want_pid = (int)tf->regs[0];
-  int *status = (int *)tf->regs[1];
-  int options = (int)tf->regs[2];
+static int process_wait_common(struct trap_frame *tf, int want_pid,
+                               int *status, int options, uint64_t rusage_va) {
   int want_rusage = rusage_va != 0;
   struct process *caller = current_process();
 
@@ -3050,7 +3061,9 @@ static int process_wait_common(struct trap_frame *tf, uint64_t rusage_va) {
      caller->wait4_rusage field for the delivery to fill. */
   save_context(caller, tf);
   caller->context[0] = (uint64_t)want_pid;
-  caller->context[1] = (uint64_t)status;
+  /* The status pointer rides its own PCB field, never context[1]: on x64
+     context[1] is the caller's rbx, which must come back unchanged. */
+  caller->wait_status_va = (uint64_t)status;
   if (want_rusage)
     caller->wait4_rusage = rusage_va;
   caller->state = PROC_STATE_WAIT_CHILD;

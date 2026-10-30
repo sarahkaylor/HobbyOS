@@ -1179,7 +1179,7 @@ static void sys_fb_ioctl(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
     return;
   }
-  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+  if (sz != 0 && !sys_user_range((uint64_t)arg, sz, 1)) { /* 1 = ok */
     tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
     return;
   }
@@ -1240,7 +1240,7 @@ static void sys_input_ioctl(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
     return;
   }
-  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+  if (sz != 0 && !sys_user_range((uint64_t)arg, sz, 1)) { /* 1 = ok */
     tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
     return;
   }
@@ -1261,7 +1261,7 @@ static void sys_input_read(struct trap_frame *tf) {
     tf->regs[0] = 0;
     return;
   }
-  if (sys_user_range((uint64_t)ubuf,
+  if (!sys_user_range((uint64_t)ubuf, /* returns 1 when the range is OK */
                      (uint64_t)max * sizeof(struct hb_input_event), 1)) {
     tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
     return;
