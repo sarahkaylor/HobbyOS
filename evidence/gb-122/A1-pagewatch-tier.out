@@ -1,0 +1,26 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1500s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb125-verify/evidence/gb-122/A1-pagewatch-wave.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 18576 console lines, 132 FAIL lines, 13 user memory fault records across 11 processes, 86 programs exited, halted=1
+T3_intel: FAIL — 132 FAIL line(s); first 20:
+2295:MMTEST FAIL [WAVE-TRY] PASTE.BIN
+2608:[SIGTEST] FAIL waitpid returns the child got=16 want=4294964048
+3290:[SEDTEST] FAIL basic_s (stdout)
+3489:  FPU_T torture-child: FAIL
+3996:[SEDTEST] FAIL s_g (stdout)
+4741:  FPU_T fork-inherit: FAIL
+4921:FPU_T FAILED: 2
+4959:[CMPTEST] FAIL EOF message on stderr
+4994:[CMPTEST] FAIL empty EOF message
+4998:[CMPTEST] FAIL missing file diagnostic
+5025:[CMPTEST] FAIL -i 4:0 skips prefix
+5052:/TEST1.TXT[CMPTEST] FAIL - stdin EOF diagnostic
+5090:[CMPTEST] FAILURES: 5
+5129:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+5138:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+5222:[SEDTEST] FAIL s_2nd (stdout)
+5256:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+5309:/MD5SUM.BIN[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+5398:[TSORTTEST] FAILURES: 4
+5712:[SEDTEST] FAIL s_p_n (stdout)
+T3_intel EXIT=1
