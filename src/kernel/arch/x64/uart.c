@@ -90,8 +90,51 @@ static void uart_putc_body(char c) {
   outb(COM1_PORT, c);
 }
 
-/** Raw single character — lock-free, for deadlock diagnostics only. */
-void uart_putc_raw(char c) {
+/* ---- GB-097: the raw sink is for NON-RETURNING paths only.
+
+   The rename to panic_* makes a returning caller implausible; this makes it
+   DETECTED.  panic_enter()/panic_leave() bracket the fatal printer, which is
+   the only legitimate user of the raw sink while the console lock is held or
+   wedged.  Reaching the sink from anywhere else increments a counter and
+   reports ONE record per boot on COM2 -- COM2 is a dedicated port that nothing
+   else writes, so the violation report cannot itself shred COM1 (and taking
+   uart_lock here would be the deadlock the raw sink exists to avoid). */
+volatile int panic_depth = 0;
+static volatile int panic_sink_violations = 0;
+
+void panic_puts2(const char *s); /* COM2 sink, defined below */
+
+void panic_enter(void) { panic_depth++; }
+void panic_leave(void) {
+  if (panic_depth > 0) panic_depth--;
+}
+
+static void panic_sink_violation(const char *what, const char *s) {
+  static volatile int reporting = 0;
+  if (panic_sink_violations >= 3 || reporting) return;
+  reporting = 1;
+  panic_sink_violations++;
+  /* COM1, not COM2: the T3 harness captures only stdio (`-serial stdio`), so a
+     report on COM2 is a report nobody reads -- measured, 0 violations visible
+     with the COM2 reporter while 70 records shredded.  Writing byte-wise here
+     can itself shred one line, which is accepted: it is capped at 3 per boot
+     and the alternative is an instrument that cannot be observed. */
+  const char *tag = "[PANIC-SINK-VIOLATION] ";
+  for (const char *p = tag; *p; p++) uart_putc_body(*p);
+  for (const char *p = what; *p; p++) uart_putc_body(*p);
+  const char *mid = " from a returning path";
+  for (const char *p = mid; *p; p++) uart_putc_body(*p);
+  if (s) {
+    for (const char *p = ": "; *p; p++) uart_putc_body(*p);
+    for (int i = 0; s[i] && i < 48; i++) uart_putc_body(s[i]);
+  }
+  uart_putc_body('\n');
+  reporting = 0;
+}
+
+/** Raw single character — lock-free, for NON-RETURNING paths only (GB-097). */
+void panic_putc(char c) {
+  if (!panic_depth) panic_sink_violation("panic_putc", 0);
   uart_putc_body(c);
 }
 
@@ -122,7 +165,7 @@ void com2_init(void) {
   com2_outb(COM2_PORT + 4, 0x0B);
 }
 
-void uart_putc_raw2(char c) {
+void panic_putc2(char c) {
   if (c == '\n') {
     while (!com2_tx_empty()) {}
     com2_outb(COM2_PORT, '\r');
@@ -131,29 +174,29 @@ void uart_putc_raw2(char c) {
   com2_outb(COM2_PORT, c);
 }
 
-void uart_puts_raw2(const char *s) {
+void panic_puts2(const char *s) {
   while (*s != '\0') {
-    uart_putc_raw2(*s);
+    panic_putc2(*s);
     s++;
   }
 }
 
-void uart_print_hex_raw2(uint64_t val) {
+void panic_print_hex2(uint64_t val) {
   static const char hex_chars[] = "0123456789ABCDEF";
-  uart_putc_raw2('0');
-  uart_putc_raw2('x');
+  panic_putc2('0');
+  panic_putc2('x');
   for (int i = 60; i >= 0; i -= 4) {
-    uart_putc_raw2(hex_chars[(val >> i) & 0xF]);
+    panic_putc2(hex_chars[(val >> i) & 0xF]);
   }
 }
 
 void print_int_raw2(int val) {
   if (val < 0) {
-    uart_putc_raw2('-');
+    panic_putc2('-');
     val = -val;
   }
   if (val == 0) {
-    uart_putc_raw2('0');
+    panic_putc2('0');
     return;
   }
   char buf[16];
@@ -163,11 +206,12 @@ void print_int_raw2(int val) {
     val /= 10;
   }
   while (idx > 0)
-    uart_putc_raw2(buf[--idx]);
+    panic_putc2(buf[--idx]);
 }
 
-/** Raw string — lock-free, for deadlock diagnostics only. */
-void uart_puts_raw(const char *s) {
+/** Raw string — lock-free, for NON-RETURNING paths only (GB-097). */
+void panic_puts(const char *s) {
+  if (!panic_depth) panic_sink_violation("panic_puts", s);
   while (*s != '\0') {
     uart_putc_body(*s);
     s++;
