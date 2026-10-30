@@ -83,7 +83,7 @@ rebuilds get new names (§4.3).
 | M3 | done (xserver) | same build logs (XHOBBY.BIN both arches) |
 | M4 | done (icewm) | same build logs (ICEWM/ICEWMBG/ICESH/ICEWMHNT + XEYESR/XCALCR) |
 | M5 | done | `default-{main,integ}-intel.mdir.txt`: same 911 file names; size deltas all explained (§8); kernel compile flags identical (`kernel-flags-*`) |
-| M6 | done, intel | `m6-intel-headless-*` (QMP) and `m6-intel-gtk-*` (GTK window + host XTEST): taskbar, start-menu click, XCalc from menu, typing reaches XCalc, title-bar drag, click-to-focus, close via Kill Client, XEyes from toolbar, Logout -> clean server exit -> DESKTOP.BIN fallback |
+| M6 | done, intel | `m6-intel-headless-*` (QMP) and `m6-intel-gtk-*` (GTK window + host XTEST): taskbar, start-menu click, XCalc from menu, typing reaches XCalc, title-bar drag, click-to-focus, close via Kill Client, XEyes from toolbar, Logout -> clean server exit -> DESKTOP.BIN fallback; `make icewm_test` PASS; a bounded `make run DESKTOP=icewm` reached `[XSESS] session running` (`make-run-intel-icewm.log`); a fresh worktree at HEAD built the whole X stack in-tree (default build dir) and passed `run_icewm_test.py` (`fresh-intel-icewm-build.log`, `icewm_test_intel_fresh.log`) |
 | M7 | done, arm (TCG) | `m7-arm-*`: the same checklist, all steps pass; host qemu-system-aarch64 ran fine headless |
 
 Known gaps: see §8 "open items".
