@@ -1,0 +1,22 @@
+  MISMATCH GB-005-V#80 = RED but GB-005#10 is in 'Done' (want 'In Progress')
+           verdict line: **EVIDENCE + VERDICT: RED — GB-005-V (verifier: DEEP, DeepSeek v4.1 Flash on dgx1, 2026-10-20)**
+  MISMATCH GB-035-V#109 = RED but GB-035#35 is in 'Done' (want 'In Progress')
+           verdict line: **VERDICT: RED** — GB-035 (#35) returns to **In Progress**.
+  MISMATCH GB-060-V#170 = RED but GB-060#62 is in 'Done' (want 'In Progress')
+           verdict line: ## VERDICT: RED — GB-060-V (gate run 2026-10-25, `main` @ `9db1388`, host swarm-farm-2)
+  MISMATCH GB-066-V#96 = RED but GB-066#74 is in 'Done' (want 'In Progress')
+           verdict line: **EVIDENCE + VERDICT: RED — GB-066-V (verifier: DEEP, DeepSeek v4.1 Flash on dgx1, 2026-10-20 01:53 UTC)**
+  MISMATCH GB-071-V#284 = RED but GB-071#99 is in 'Done' (want 'In Progress')
+           verdict line: Tier verdict, base run, verbatim:
+  MISMATCH GB-074-V#110 = RED but GB-074#100 is in 'Done' (want 'In Progress')
+           verdict line: ## VERDICT: RED — GB-074-V (gate run 2026-10-21, `origin/main` @ `6636741`, `board.py` @ `31d15c4`)
+  MISMATCH GB-106-V#202 = RED but GB-106#200 is in 'Done' (want 'In Progress')
+           verdict line: ## VERDICT: RED — GB-106-V (#202), PR #204 head `68982dc` (2026-10-26 ~19:25–19:35Z)
+  MISMATCH GB-110-V#213 = RED but GB-110#211 is in 'Done' (want 'In Progress')
+           verdict line: **VERDICT — RED (GB-110-V).** Gate tree `04bc956` = `origin/main` `44d3cbb` × `games/gb110` `0633743` (`merge_pr.py` +88, `merge_pr_test.py` +19). Local only (T
+  MISMATCH GB-117-V#239 = RED but GB-117#238 is in 'Done' (want 'In Progress')
+           verdict line: ## VERDICT: **RED** (GB-117-V) → GB-117 returns to **In Progress**
+  MISMATCH GB-120-V#263 = RED but GB-120#261 is in 'Done' (want 'In Progress')
+           verdict line: Closing as a **duplicate of #262**, which was minted two minutes earlier (11:23Z vs my 11:25Z) and carried the verdict: **RED** at `2271d1c`. My card is withdra
+verdicts checked: 62, mismatched parents: 10
+verdicts checked: 62, mismatched parents: 10, orphaned REDs in Merge Gate: 0
