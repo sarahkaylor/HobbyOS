@@ -2648,6 +2648,44 @@ static void general_interrupt_inner(struct trap_frame *tf) {
   extern int virtio_net_irq;
 
   uint32_t cpu = get_cpuid();
+  /* GB-101: a TORN trap frame read by the handler.  The x86 IDT has 256 gates
+     (vectors 0-31 exceptions, 32-255 IRQ/syscall); a `vector` > 0xFF (measured:
+     vector=20000, rip=0x97) cannot have been pushed by the CPU, so the frame is
+     corrupt.  This alone misses the family's below-32 garbage vectors (measured:
+     vector=6 rip=0x7, vector=13 rip=0x7009, vector=6 rip=0x1000007) whose frames
+     are also torn.  The GB-101-V gate's fix direction: a FRAME-COHERENCE test,
+     not a wider threshold.  A real x86-64 entry ALWAYS has the CPU push CS (0x08
+     kernel / 0x1B user -- SS/RSP are only pushed on a privilege change, so SS is
+     NOT authoritative on same-privilege kernel traps and must not be judged here);
+     a torn/overwritten frame that a garbage vector rode in on carries a garbage
+     CS slot.  Never dispatch on garbage: emit a line containing "FAIL" (the
+     tier's FAIL-line grep names it), halt-record (GB-060, so a lock a stopped
+     CPU held is recoverable and other cores don't spin behind it forever), and
+     stop THIS CPU rather than run an unknown-vector path on a bogus frame. */
+  {
+    extern void uart_puts_raw(const char *s);
+    extern void uart_print_hex_raw(uint64_t v);
+    extern void print_int_raw(int val);
+    extern void cpu_halt_record(uint32_t cpu);
+    uint64_t frame_cs = tf->cs;
+    int bad_vec = ((uint64_t)tf->vector > 0xFFu);
+    int bad_cs  = (frame_cs != 0x08u && frame_cs != 0x1Bu);
+    if (bad_vec || bad_cs) {
+      uart_puts_raw("[TORNFRAME] FAIL - interrupt/fault handler read a torn frame: vector=");
+      print_int_raw((int)(uint64_t)tf->vector);
+      uart_puts_raw(" rip="); uart_print_hex_raw((uint64_t)tf->elr);
+      uart_puts_raw(" cs=");   uart_print_hex_raw(frame_cs);
+      uart_puts_raw(" (impossible vector="); print_int_raw((int)(uint64_t)tf->vector);
+      uart_puts_raw(" or invalid cs; a real gate entry pushes cs 0x08/0x1B\n");
+      uart_puts_raw("\n");
+      cpu_halt_record(cpu);
+      extern int spinlock_release_if_held_by_me(spinlock_t *lock);
+      extern spinlock_t proc_lock;
+      if (spinlock_release_if_held_by_me(&proc_lock))
+        uart_puts_raw("[KERNEL] released proc_lock before halting (GB-060)\n");
+      while (1);
+    }
+  }
   gic_set_current_vector(cpu, tf->vector);
   watchdog_tick(cpu, tf);
 
@@ -3299,9 +3337,9 @@ EXCEPTION_NO_ERR(4); EXCEPTION_NO_ERR(5); EXCEPTION_NO_ERR(6); EXCEPTION_NO_ERR(
 EXCEPTION_ERR(8);    EXCEPTION_NO_ERR(9); EXCEPTION_ERR(10);   EXCEPTION_ERR(11);
 EXCEPTION_ERR(12);   EXCEPTION_ERR(13);   EXCEPTION_ERR(14);   EXCEPTION_NO_ERR(15);
 EXCEPTION_NO_ERR(16);EXCEPTION_ERR(17);   EXCEPTION_NO_ERR(18);EXCEPTION_NO_ERR(19);
-EXCEPTION_NO_ERR(20);EXCEPTION_NO_ERR(21);EXCEPTION_NO_ERR(22);EXCEPTION_NO_ERR(23);
+EXCEPTION_NO_ERR(20);EXCEPTION_ERR(21);   EXCEPTION_NO_ERR(22);EXCEPTION_NO_ERR(23);
 EXCEPTION_NO_ERR(24);EXCEPTION_NO_ERR(25);EXCEPTION_NO_ERR(26);EXCEPTION_NO_ERR(27);
-EXCEPTION_NO_ERR(28);EXCEPTION_NO_ERR(29);EXCEPTION_NO_ERR(30);EXCEPTION_NO_ERR(31);
+EXCEPTION_NO_ERR(28);EXCEPTION_ERR(29);   EXCEPTION_ERR(30);   EXCEPTION_NO_ERR(31);
 
 // PIT timer
 EXCEPTION_NO_ERR(32);
@@ -3495,21 +3533,20 @@ __asm__(
 "    mov rax, [rsp + 0]\n"
 "    \n"
 "    /* Pop regs, lr, elr, spsr */\n"
-"    add rsp, 264\n"
 "    \n"
-"    /* Pop Vector and Error Code (16 bytes) */\n"
-"    add rsp, 16\n"
-"    \n"
-"    /* GB-057: before the iretq, ask whether the frame about to be consumed\n"
-"       is a legal return.  rsp points at the hardware frame; rax/rcx are\n"
-"       scratch and are preserved, and the two pushes keep the stack\n"
-"       16-byte aligned for the call. */\n"
+"    /* GB-123: the frame check must not push into the frame it inspects.\n"
+"       Its two saves and the call's return address used to land at\n"
+"       [rsp+264]/[rsp+272]/[rsp+256] -- the vector, error and spsr slots\n"
+"       (measured live: [EXITFRAME] spsr_slot=0x7003D87F).  Push below the\n"
+"       frame, run the check, then advance past the frame. */\n"
 "    push rax\n"
 "    push rcx\n"
-"    lea rdi, [rsp + 16]\n"
+"    lea rdi, [rsp + 296]\n"
 "    call trap_exit_frame_check\n"
 "    pop rcx\n"
 "    pop rax\n"
+"    add rsp, 264\n"
+"    add rsp, 16\n"
 "    /* restore the process's rdi from its saved slot: the frame_check\n"\
 "       call above clobbered rdi to &frame, and iretq hands the user that\n"\
 "       kernel-frame address (kstack_top-0x28) unless reloaded -> user\n"\
@@ -3626,18 +3663,16 @@ __asm__(
 "    mov [rsp + 280], rax\n"
 "    /* Restore the original rax */\n"
 "    mov rax, [rsp]\n"
-"    add rsp, 264\n"
-"    add rsp, 16\n"
-"    /* GB-057: before the iretq, ask whether the frame about to be consumed\n"
-"       is a legal return.  rsp points at the hardware frame; rax/rcx are\n"
-"       scratch and are preserved, and the two pushes keep the stack\n"
-"       16-byte aligned for the call. */\n"
+"    /* GB-123: see the common_trap_exit note -- the check pushes below the\n"
+"       frame, never into it; advance past the frame only afterwards. */\n"
 "    push rax\n"
 "    push rcx\n"
-"    lea rdi, [rsp + 16]\n"
+"    lea rdi, [rsp + 296]\n"
 "    call trap_exit_frame_check\n"
 "    pop rcx\n"
 "    pop rax\n"
+"    add rsp, 264\n"
+"    add rsp, 16\n"
 "    /* restore the process's rdi from its saved slot: the frame_check\n"\
 "       call above clobbered rdi to &frame, and iretq hands the user that\n"\
 "       kernel-frame address (kstack_top-0x28) unless reloaded -> user\n"\

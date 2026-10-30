@@ -1120,6 +1120,20 @@ static int process_create_internal_ver(int ver) {
       uart_puts("Inside process_create: kmemset done.\n");
   }
 
+  /* GB-071 (family-B bootstrap): a fresh create shall start with rdi=0 (context[5]
+     is zeroed next), so a non-zero high-band value HERE means this slot arrived with
+     a stale kernel/stack-band context[5] that the next statement wipes — that
+     arrival is the unnamed bootstrap.  One kline write. */
+  if (p->context[5] >= 0x70000000ULL) {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[GB071-CREATE] pid=");
+    kl_i(&kl, pid);
+    kl_s(&kl, " ctx5=");
+    kl_hex(&kl, p->context[5]);
+    kl_s(&kl, "\n");
+    kl_emit(&kl);
+  }
   for (int i = 0; i < 36; i++) {
     p->context[i] = 0;
   }
@@ -2026,6 +2040,11 @@ void schedule(struct trap_frame *tf, int is_yield) {
       spinlock_release_irqrestore(&proc_lock, flags);
       if (cpu == 0) {
         extern void scheduler_finished(void);
+        /* GB-060: print the end-of-run lock-strand counters here, on CPU 0,
+           before the machine actually halts, so the [LOCKCNT] line is real
+           console output the tier greps (not a hand-derived zero). */
+        extern void lock_print_counters(void);
+        lock_print_counters();
         scheduler_finished();
       } else {
         uart_puts("System halt from CPU ");
@@ -3117,8 +3136,23 @@ int process_fork(struct trap_frame *tf) {
 
   save_context(child, tf);
   child->context[0] = 0; // x0 = 0 for child
-
 #ifdef __x86_64__
+  /* GB-071 (family-B bootstrap, #2): fork gives the child the parent's rdi.  If
+     the fork's trap frame was taken in KERNEL mode (cs&3==0) the child starts a
+     USER child holding a kernel-origin rdi — one candidate bootstrap.  Report
+     only the high-band case, one kline write. */
+  if ((tf->cs & 3) == 0 || child->context[5] >= 0x70000000ULL) {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[GB071-FORK] childpid=");
+    kl_i(&kl, child->pid);
+    kl_s(&kl, " cs=");
+    kl_i(&kl, (long)(tf->cs & 3));
+    kl_s(&kl, " ctx5=");
+    kl_hex(&kl, child->context[5]);
+    kl_s(&kl, "\n");
+    kl_emit(&kl);
+  }
   /* Frame-carried RSP (see save_context): the child inherits the parent's
      user RSP from THIS trap frame, not from the per-CPU slot. */
   child->context[33] = tf->lr;

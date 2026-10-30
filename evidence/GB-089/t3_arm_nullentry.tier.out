@@ -1,0 +1,8 @@
+=== T3 (arm): build ===
+=== T3 (arm): stage ===
+/home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-e046ff70/obj/arm/HELLO.BIN: No such file or directory
+=== T3 (arm): run (deadline 900s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/hermes-e046ff70/obj/t3_arm_nullentry.log) ===
+T3_arm: note — halt marker found after make exited (poll raced the exit)
+T3_arm: 66 console lines, 0 FAIL lines, 0 user memory fault records across 0 processes, 1 programs exited, halted=1
+T3_arm: FAIL — only 1 programs exited (floor 55): too little work for a complete wave, so this cannot be a pass
+T3_arm EXIT=1
