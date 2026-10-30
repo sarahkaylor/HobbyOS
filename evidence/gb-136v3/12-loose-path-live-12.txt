@@ -1,0 +1,63 @@
+  SUPERSEDED GB-005-V#80 = RED, overtaken by GB-005-V2 (successor sha None) for GB-005#10
+  SUPERSEDED GB-006-V#107 = RED, overtaken by GB-006 (successor sha None) for GB-006#11
+  SUPERSEDED GB-007-V#81 = RED, overtaken by GB-007 (successor sha None) for GB-007#12
+  SUPERSEDED GB-010-V#82 = RED, overtaken by GB-010 (successor sha None) for GB-010#14
+  SUPERSEDED GB-020-V#88 = RED, overtaken by GB-020 (successor sha None) for GB-020#21
+  SUPERSEDED GB-031-V#166 = RED, overtaken by GB-031 (successor sha None) for GB-031#32
+  SUPERSEDED GB-031-V#118 = RED, overtaken by GB-031 (successor sha None) for GB-031#32
+  MISMATCH GB-031 = GREEN but GB-031#32 is in 'Backlog' (want 'Merge Gate')
+           verdict line: (loose match)
+  SUPERSEDED GB-035-V2#218 = RED, overtaken by GB-035 (successor sha None) for GB-035#35
+  SUPERSEDED GB-035-V#109 = RED, overtaken by GB-035 (successor sha None) for GB-035#35
+  MISMATCH GB-039 = GREEN but GB-039#39 is in 'Backlog' (want 'Merge Gate')
+           verdict line: (loose match)
+  SUPERSEDED GB-044-V#92 = RED, overtaken by GB-044 (successor sha None) for GB-044#44
+  SUPERSEDED GB-053-V#95 = RED, overtaken by GB-053 (successor sha None) for GB-053#53
+  MISMATCH GB-053 = GREEN but GB-053#53 is in 'In Progress' (want 'Merge Gate')
+           verdict line: (loose match)
+  SUPERSEDED GB-060-V#170 = RED, overtaken by GB-060 (successor sha None) for GB-060#62
+  MISMATCH GB-061 = GREEN but GB-061#63 is in 'In Progress' (want 'Merge Gate')
+           verdict line: (loose match)
+  SUPERSEDED GB-066-V2#195 = RED, overtaken by GB-066 (successor sha None) for GB-066#74
+  SUPERSEDED GB-066-V#96 = RED, overtaken by GB-066 (successor sha None) for GB-066#74
+  SUPERSEDED GB-070-V#176 = RED, overtaken by GB-070 (successor sha None) for GB-070#79
+  SUPERSEDED GB-070-V#97 = RED, overtaken by GB-070 (successor sha None) for GB-070#79
+  MISMATCH GB-071 = RED but GB-071#99 is in 'Done' (want 'In Progress')
+           verdict line: (loose match)
+  SUPERSEDED GB-074-V#110 = RED, overtaken by GB-074 (successor sha None) for GB-074#100
+  SUPERSEDED GB-079-V#125 = RED, overtaken by GB-079 (successor sha None) for GB-079#123
+  SUPERSEDED GB-082-V#155 = RED, overtaken by GB-082 (successor sha None) for GB-082#129
+  MISMATCH GB-082 = GREEN but GB-082#129 is in 'In Progress' (want 'Merge Gate')
+           verdict line: (loose match)
+  SUPERSEDED GB-085-V#162 = RED, overtaken by GB-085 (successor sha None) for GB-085#136
+  SUPERSEDED GB-098-V#163 = RED, overtaken by GB-098 (successor sha None) for GB-098#159
+  SUPERSEDED GB-101-V5#271 = RED, overtaken by GB-101-V6 (successor sha 1dd7160) for GB-101#179
+  SUPERSEDED GB-101-V2#187 = RED, overtaken by GB-101-V6 (successor sha 1dd7160) for GB-101#179
+  SUPERSEDED GB-101-V#182 = RED, overtaken by GB-101-V6 (successor sha 1dd7160) for GB-101#179
+  SUPERSEDED GB-101#179 = RED, overtaken by GB-101-V6 (successor sha 1dd7160) for GB-101#179
+  MISMATCH GB-101-V6 = GREEN but GB-101#179 is in 'Backlog' (want 'Merge Gate')
+           verdict line: **GREEN** for GB-123 items 3-4 at `1dd7160`: both exit tails push below the frame they inspect, the regression test is a real falsifier (pre-fix FAIL — 6, head 
+  MISMATCH GB-103 = RED but GB-103#189 is in 'Done' (want 'In Progress')
+           verdict line: (loose match)
+  MISMATCH GB-104 = RED but GB-104#191 is in 'Done' (want 'In Progress')
+           verdict line: (loose match)
+  SUPERSEDED GB-105-V#199 = RED, overtaken by GB-105 (successor sha None) for GB-105#197
+  SUPERSEDED GB-106-V#202 = RED, overtaken by GB-106 (successor sha None) for GB-106#200
+  SUPERSEDED GB-110-V4#221 = RED, overtaken by GB-110 (successor sha None) for GB-110#211
+  SUPERSEDED GB-110-V3#219 = RED, overtaken by GB-110 (successor sha None) for GB-110#211
+  SUPERSEDED GB-110-V2#216 = RED, overtaken by GB-110 (successor sha None) for GB-110#211
+  SUPERSEDED GB-110-V#213 = RED, overtaken by GB-110 (successor sha None) for GB-110#211
+  SUPERSEDED GB-110-V#212 = RED, overtaken by GB-110 (successor sha None) for GB-110#211
+  SUPERSEDED GB-114-V#229 = RED, overtaken by GB-114 (successor sha 899d2a8) for GB-114#228
+  SUPERSEDED GB-116-V2#236 = RED, overtaken by GB-116 (successor sha None) for GB-116#234
+  SUPERSEDED GB-116-V#235 = RED, overtaken by GB-116 (successor sha None) for GB-116#234
+  SUPERSEDED GB-117-V3#242 = RED, overtaken by GB-117-V2 (successor sha None) for GB-117#238
+  SUPERSEDED GB-117-V#239 = RED, overtaken by GB-117-V2 (successor sha None) for GB-117#238
+  SUPERSEDED GB-118-V#246 = RED, overtaken by GB-118-V3 (successor sha None) for GB-118#245
+  MISMATCH GB-120 = RED but GB-120#261 is in 'Done' (want 'In Progress')
+           verdict line: (loose match)
+  MISMATCH GB-126-V = RED but GB-126#276 is in 'Done' (want 'In Progress')
+           verdict line: (loose match)
+  MISMATCH GB-136-V3 = RED but GB-136#292 is in 'In Review' (want 'In Progress')
+           verdict line: (loose match)
+verdicts checked: 72, mismatched parents: 12, superseded REDs: 38, orphaned REDs in Merge Gate: 0
