@@ -1,0 +1,7 @@
+# icewm stage pins (lane icewm).  Format: <tarball> <source>
+# IceWM 4.1.0 (2026-08-06, latest stable release as of 2026-10-30).  Upstream
+# development repo is github.com/bbidulock/icewm; its release tarballs are
+# published as .tar.lz on github.com/ice-wm/icewm, but the host has no lzip,
+# so we pin GitHub's archive of the bbidulock tag 4.1.0
+# (commit 3a19fee0b5c99573aaf23ded451868d34ce3a972).
+icewm-4.1.0.tar.gz  https://github.com/bbidulock/icewm/archive/refs/tags/4.1.0.tar.gz
