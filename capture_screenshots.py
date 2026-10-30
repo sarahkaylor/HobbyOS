@@ -132,7 +132,7 @@ def main():
 
     log("[CAP] booting desktop...")
     subprocess.Popen(
-        ["stdbuf", "-oL", "make", "run", "ARCH=arm",
+        ["stdbuf", "-oL", "make", "run", "DESKTOP=hobby", "ARCH=arm",
          f"QEMU_ARGS=-display none -qmp unix:{QMP_SOCK},server,nowait"],
         stdout=open(SERIAL, "w"), stderr=subprocess.STDOUT)
     q = Qmp(QMP_SOCK)

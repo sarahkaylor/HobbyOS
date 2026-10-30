@@ -283,7 +283,7 @@ def boot():
     logf = open(SERIAL, "w")
 
     proc = subprocess.Popen(
-        ["make", "run", f"ARCH={ARCH}",
+        ["make", "run", "DESKTOP=hobby", f"ARCH={ARCH}",
          "QEMU_ARGS=-display none -qmp unix:" + QMP_SOCK + ",server,nowait " +
          os.environ.get("EXTRA_QEMU", "")],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -336,7 +336,7 @@ def main():
             os.remove(stale)
         except FileNotFoundError:
             pass
-    if subprocess.run(["make", "disk.img", f"ARCH={ARCH}",
+    if subprocess.run(["make", "disk.img", "DESKTOP=hobby", f"ARCH={ARCH}",
                        "-j4"]).returncode != 0:
         print("build failed", flush=True)
         return 1

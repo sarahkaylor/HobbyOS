@@ -29,7 +29,7 @@ Don't use for: interpreting test *results* (→ [[hobbyos-run-tests]]), taking s
 
 ## The Build Matrix
 
-`ARCH` defaults to `arm`; `MODE` defaults to `desktop`. Override on the command line: `make run ARCH=intel MODE=test`.
+`ARCH` defaults to `arm`; `MODE` defaults to `desktop`. `DESKTOP` defaults to `icewm` for `MODE=desktop` (`make run` boots IceWM; `DESKTOP=hobby` boots the original native desktop) and to `hobby` for every test mode. Override on the command line: `make run ARCH=intel MODE=test`.
 
 | ARCH | CPU / QEMU | Notes |
 |------|-----------|-------|

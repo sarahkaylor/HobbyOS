@@ -165,7 +165,7 @@ def main():
     log("[INFO] booting desktop...")
     serial = open(SERIAL_LOG, "w")
     proc = subprocess.Popen(
-        ["stdbuf", "-oL", "-eL", "make", "run", "ARCH=arm",
+        ["stdbuf", "-oL", "-eL", "make", "run", "DESKTOP=hobby", "ARCH=arm",
          f"QEMU_ARGS=-display none -qmp unix:{QMP_SOCK},server,nowait"],
         stdout=serial, stderr=subprocess.STDOUT)
 

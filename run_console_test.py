@@ -133,7 +133,7 @@ for f in (SERIAL, QMP):
     if os.path.exists(f):
         os.remove(f)
 serial = open(SERIAL, "w")
-subprocess.Popen(["stdbuf", "-oL", "make", "run", "ARCH=arm",
+subprocess.Popen(["stdbuf", "-oL", "make", "run", "DESKTOP=hobby", "ARCH=arm",
                   f"QEMU_ARGS=-display none -qmp unix:{QMP},server,nowait"],
                  stdout=serial, stderr=subprocess.STDOUT)
 q = Q(QMP)

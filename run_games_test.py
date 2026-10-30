@@ -144,7 +144,7 @@ def check(cond, what, detail=""):
 subprocess.run(["pkill", "-9", "-f", "qemu-system[-]aarch64"], stderr=subprocess.DEVNULL)
 for f in (SER, QMP):
     if os.path.exists(f): os.remove(f)
-subprocess.Popen(["stdbuf", "-oL", "make", "run", "ARCH=arm",
+subprocess.Popen(["stdbuf", "-oL", "make", "run", "DESKTOP=hobby", "ARCH=arm",
                   f"QEMU_ARGS=-display none -qmp unix:{QMP},server,nowait"],
                  stdout=open(SER, "w"), stderr=subprocess.STDOUT)
 q = Q(QMP)
