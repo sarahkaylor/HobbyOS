@@ -1246,6 +1246,21 @@ $(OBJ_DIR)/builtins/%.o: $(LIBCXX_ROOT)/compiler-rt/lib/builtins/%.c $(LIBCXX_VE
 LIBC_X11_OBJS = $(OBJ_DIR)/libc_inet.o $(OBJ_DIR)/libc_utsname.o $(OBJ_DIR)/libc_select_posix.o
 $(OBJ_DIR)/libc.a: $(LIBC_X11_OBJS)
 
+# icewm.md M2 (lane xlibs-ext): rmdir() over SYS_RMDIR (fontconfig) and the
+# frexp/ldexp/scalbn families (libpng via freetype/Xft).  Same
+# prerequisite-only pattern as LIBC_X11_OBJS above.
+LIBC_X11EXT_OBJS = $(OBJ_DIR)/libc_fsext.o $(OBJ_DIR)/libc_math_ext.o
+$(OBJ_DIR)/libc.a: $(LIBC_X11EXT_OBJS)
+# ...plus the rest of compiler-rt's binary128 soft-float set: on aarch64
+# `long double` is IEEE quad, so any long double arithmetic in ported C
+# (fontconfig's fcfreetype.c: twips / 20.0L) needs __divtf3/__floatunsitf...
+# LIBC_BUILTIN_SRCS (above) already carries the conversions libc++ needed.
+LIBC_X11EXT_BUILTIN_SRCS = addtf3.c subtf3.c multf3.c divtf3.c comparetf2.c extendsftf2.c \
+  floatsitf.c floatunsitf.c floatditf.c floatunditf.c fixtfsi.c fixtfdi.c fixunstfsi.c fixunstfdi.c
+LIBC_X11EXT_BUILTIN_OBJS = $(addprefix $(OBJ_DIR)/builtins/,$(LIBC_X11EXT_BUILTIN_SRCS:.c=.o))
+$(OBJ_DIR)/libc.a: $(LIBC_X11EXT_BUILTIN_OBJS)
+.SECONDARY: $(addprefix $(LIBCXX_ROOT)/compiler-rt/lib/builtins/,$(LIBC_X11EXT_BUILTIN_SRCS))
+
 $(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/cxxrt.o $(OBJ_DIR)/libc_pthread.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o $(OBJ_DIR)/libc_mman.o $(OBJ_DIR)/libc_regex.o $(OBJ_DIR)/libc_langinfo.o $(OBJ_DIR)/libc_wchar.o $(OBJ_DIR)/libc_wctype.o $(OBJ_DIR)/libc_locale.o $(OBJ_DIR)/libc_selinux.o $(OBJ_DIR)/libc_dirent.o $(OBJ_DIR)/libc_time.o $(OBJ_DIR)/libc_time_math.o $(OBJ_DIR)/libc_libgen.o $(OBJ_DIR)/libc_realpath.o $(OBJ_DIR)/libc_xlocale.o $(OBJ_DIR)/libc_strtod.o $(OBJ_DIR)/libc_strftime.o $(OBJ_DIR)/libc_math.o $(OBJ_DIR)/libc_pwd.o $(OBJ_DIR)/libc_setjmp.o $(OBJ_DIR)/libc_dlfcn.o $(OBJ_DIR)/libc_resource.o $(OBJ_DIR)/libc_statvfs.o $(OBJ_DIR)/libc_syscall.o $(OBJ_DIR)/libc_ioctl.o $(OBJ_DIR)/libc_socket.o $(LIBC_BUILTIN_OBJS)
 	$(AR) rcs $@ $^
 
@@ -3121,6 +3136,15 @@ x11_libc_test_run: $(X11_LIBC_TEST)
 	./$(X11_LIBC_TEST)
 host_tests: x11_libc_test_run
 .PHONY: x11_libc_test_run
+
+# icewm.md M2 (lane xlibs-ext): math_ext.c (frexp/ldexp/scalbn) bit-exact vs glibc.
+X11EXT_LIBC_TEST = x11ext_libc_test_host
+$(X11EXT_LIBC_TEST): obj/host_x11ext_libc_test.o obj/host_hb_math_ext.o
+	$(HOST_CC) -o $@ $^ -lm
+x11ext_libc_test_run: $(X11EXT_LIBC_TEST)
+	./$(X11EXT_LIBC_TEST)
+host_tests: x11ext_libc_test_run
+.PHONY: x11ext_libc_test_run
 
 STRING_TEST = libc_string_test_host
 $(STRING_TEST): obj/host_libc_string_test.o obj/host_hb_string.o
