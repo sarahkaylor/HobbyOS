@@ -66,13 +66,8 @@ bash third_party/x11/build.sh --arch arm --stage all -j8 --prefix ~/hobbyos-icew
   plain `select` symbol with a millisecond timeout). These are deliberately
   NOT in `src/libc/include`: several in-tree ports pick their own `PATH_MAX`
   when it is undefined, so adding it there would change default binaries.
-* `cross/compat/` (transitional): while `src/libc/include/sys/socket.h` lacks
-  `bind()`, the wrappers force-include `hb-socket-compat.h` (POSIX socket
-  prototypes) and link `libhbsockcompat.a` (weak ENOSYS stubs). Both switch
-  off automatically once lane `kern`'s wrappers are merged — which this
-  branch now has (lane/kern cb0a2acd merged), so the compat path is inactive
-  here and kept only for trees without kern. The compat state is part of the
-  package cache key.
+* (The transitional `cross/compat/` socket shims were removed at integration:
+  lane `kern`'s POSIX socket wrappers are in libc.)
 * Package cache keys include a hash of everything under `cross/`, so a flag
   or overlay change rebuilds the stage.
 * intel links go through the host gcc driver (clang's x86_64-none-elf

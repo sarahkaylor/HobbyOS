@@ -61,7 +61,7 @@ export HB_BUILD HB_SRC_DIR HB_OBJ_DIR HB_BIN_DIR HB_DISK_DIR HB_LOG_DIR HB_DL HB
 
 # Toolchain identity folded into every package key: the cross/ tree (flags,
 # overlays, transitional compat) and the arch.  Changing any of it rebuilds.
-HB_ENV_KEY="$(cd "$HB_X11_DIR/cross" && find . -type f | LC_ALL=C sort | xargs cat | sha256sum | cut -c1-16) $HB_ARCH compat=${HB_COMPAT_INC:+on} $(clang --version | head -1)"
+HB_ENV_KEY="$(cd "$HB_X11_DIR/cross" && find . -type f | LC_ALL=C sort | xargs cat | sha256sum | cut -c1-16) $HB_ARCH $(clang --version | head -1)"
 
 hb_log() { printf '[x11:%s] %s\n' "$HB_ARCH" "$*"; }
 hb_die() { printf '[x11:%s] ERROR: %s\n' "$HB_ARCH" "$*" >&2; exit 1; }
