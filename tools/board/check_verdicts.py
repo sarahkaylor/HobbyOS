@@ -73,26 +73,62 @@ def gate_ordinal(gid):
     return int(m.group(2)) if m.group(2) else 1
 
 
+def verdict_line_of(body):
+    """The verdict a comment actually declares, from a VERDICT-SHAPED line only.
+
+    GB-136's third defect (found by GB-136-V, #301): the old code took the value from
+    `groom.verdict_in()` — a loose substring match — and then reported the *first* line
+    mentioning GREEN/RED as its evidence.  That made prose into verdicts:
+
+        "verdicts checked: 66, ... superseded REDs: 60 ..."   -> read as RED (plural!)
+        "GREEN-gated merge helper ..."                        -> read as GREEN
+
+    so the tool both suppressed real violations (a parent card whose comment merely
+    mentioned GREEN became the governing GREEN) and manufactured fake ones.  A verdict
+    must START a line (after optional markdown), and the token must not be part of a
+    longer word: `REDs`, `GREEN-gated`, `REDUCE` are not verdicts.
+    """
+    for ln_raw in (body or "").replace("\r", "").split("\n"):
+        # GB-136-V4: a line that QUOTES a verdict shape is not a verdict.  Strip inline
+        # code spans before matching, so `VERDICT: GREEN|RED` written as documentation —
+        # including the line that documents this very parser — cannot become one.  The
+        # evidence string still quotes the original line.
+        ln = re.sub(r"`[^`]*`", "", ln_raw)
+        # (A) an explicit marker, line-initial only (the shape every Verifier uses).
+        m = re.match(r"^\s*(?:[-*]\s*)?(?:#{1,6}\s*)?\**\s*VERDICT\s*:\s*\**\s*(GREEN|RED)(?![|\w-])",
+                     ln, re.I)
+        if m:
+            return m.group(1).upper(), ln_raw.strip()[:160]
+        # (B) a line-initial, UPPER-CASE verdict token, optionally bold, followed by a
+        # separator or end-of-line.  GB-136-V3 found three prose lines that this must
+        # reject: `red or pending run …`, `RED fixed (F1 + F2) …`, `red log: …`.
+        m = re.match(r"^\s*(?:[-*]\s*)?\**\s*(GREEN|RED)(?![|\w-])\**\s*(?:[—–\-:.,;!)]|$)", ln)
+        if m:
+            return m.group(1), ln_raw.strip()[:160]
+        # (C) a heading that names the card, an em dash, then the verdict:
+        #     `## GB-136-V3 — **RED** at a1f4fd4. …`
+        m = re.match(r"^\s*#{1,6}\s+\S.*?[—–]\s*\**\s*(GREEN|RED)(?![|\w-])", ln)
+        if m:
+            return m.group(1), ln_raw.strip()[:160]
+    return None, None
+
+
 def verdict_of(number):
     """Newest GREEN/RED verdict posted on a verification ticket.
 
-    GB-114: accepts `**GREEN — …**` as well as `VERDICT: GREEN` (shared with groom.py so
-    the lint and this check cannot disagree about what a verdict looks like).
+    GB-114: accepts `**GREEN — …**` as well as `VERDICT: GREEN`, and GB-136: only a
+    verdict-SHAPED line counts (see verdict_line_of), so a summary line that mentions
+    "superseded REDs" can no longer become a verdict.
     """
     cs = api(f"/issues/{number}/comments")
     for c in reversed(cs):
-        body = (c.get("body") or "").replace("\r", "")
-        try:
-            from groom import verdict_in
-            v = verdict_in(body)
-        except Exception:
-            m = re.search(r"VERDICT[^\n]{0,40}?\b(GREEN|RED)\b", body, re.I)
-            v = m.group(1).upper() if m else None
+        v, line = verdict_line_of((c.get("body") or ""))
         if v:
-            line = next((ln.strip() for ln in body.split("\n")
-                        if re.search(r"VERDICT|\bGREEN\b|\bRED\b", ln, re.I)), "")
-            return v, line[:160]
-    return None, None
+            # GB-136: the timestamp matters because two cards can share one gate id
+            # (#300 and #301 are both "GB-136-V"), and then "the newest verdict" is a
+            # question about time, not about card identity.
+            return v, line, c.get("created_at")
+    return None, None, None
 
 
 def gate_sha(line):
@@ -113,19 +149,24 @@ def governing(gates):
 
     gates: list of (gid, verdict, ordinal) — every gate card for the SAME parent,
     each with its newest verdict.  ordinal: base `-V`=1, `-V2`=2, …; the PARENT
-    card itself is passed with ordinal 0.  Returns the (governing_gid, verdict)
-    — the highest-ordinal member that carries a verdict, except a GREEN on the
-    PARENT (ordinal 0) supersedes an earlier gate RED.
+    card itself is passed with ordinal 0.
+
+    GB-136-V (#301) defect 1: the first version returned the highest-ordinal member
+    whatever its verdict, so a LATER RED "superseded" an earlier RED — the standing
+    failure was silently labelled overturned at the very sha that failed.  **Only a
+    GREEN can supersede.**  If any gate carries a GREEN the highest-ordinal GREEN
+    governs; otherwise the highest-ordinal verdict governs and stays reported.
     """
-    has = [(ord_, g, v) for ord_, g, v in gates if v]
+    has = [(ord_, g, v, ts or "") for ord_, g, v, ts in gates if v]
     if not has:
         return None, None
-    # A GREEN carried directly on the parent beats any earlier gate verdict.
-    for ord_, g, v in has:
-        if ord_ == 0 and v == "GREEN":
-            return g, v
-    gov_gid, gov_v = max(has, key=lambda x: x[0])[1], max(has, key=lambda x: x[0])[2]
-    return gov_gid, gov_v
+    # GB-136-V (#301) defect 1, corrected: the NEWEST verdict wins, where "newest" is
+    # a question of time (two cards can share one gate id — #300 and #301 are both
+    # "GB-136-V"), and ordinal only breaks ties.  A later RED therefore re-confirms a
+    # standing failure instead of being ignored because an older GREEN exists; a GREEN
+    # supersedes only when it is itself the newest word.
+    _o, g, v, _ts = max(has, key=lambda x: (x[3], x[0]))
+    return g, v
 
 
 def is_superseded(gid, gov_gid):
@@ -156,7 +197,7 @@ def self_test():
     # GB-136 supersession — both directions.
     # Direction 1: an EARLIER gate's RED with a LATER gate's GREEN is superseded,
     # so it is NOT reported; the governing GREEN is the higher ordinal.
-    gov_gid, gov_v = governing([(1, "GB-117-V", "RED"), (5, "GB-117-V5", "GREEN")])
+    gov_gid, gov_v = governing([(1, "GB-117-V", "RED", "t1"), (5, "GB-117-V5", "GREEN", "t5")])
     dir1 = (gov_gid == "GB-117-V5" and gov_v == "GREEN"
             and is_superseded("GB-117-V", gov_gid))
     if not dir1:
@@ -164,7 +205,7 @@ def self_test():
     print(f"  [{'OK  ' if dir1 else 'FAIL'}] GB-136: earlier RED superseded by a later GREEN -> not a mismatch; governing={gov_gid}={gov_v}")
     # Direction 2: a RED with NO successor is still reported (stands as the governor
     # and the lane truth disagrees).
-    gov2, v2 = governing([(1, "GB-121-V", "RED")])
+    gov2, v2 = governing([(1, "GB-121-V", "RED", "t1")])
     dir2 = (gov2 == "GB-121-V" and v2 == "RED"
             and not is_superseded("GB-121-V", gov2))
     if not dir2:
@@ -176,6 +217,48 @@ def self_test():
     if dir1:
         ok_load = dir1
     print(f"  [{'OK  ' if dir1 else 'FAIL'}] GB-136: supersession is load-bearing (a re-verified RED would otherwise misfire)")
+
+    # GB-136 defect 3 (found by GB-136-V, #301): verdict_of() read prose.  The parser
+    # must take a verdict only from a VERDICT-SHAPED line, and this test exercises the
+    # SAME function the board loop calls (verdict_line_of), not an adjacent helper.
+    parse_cases = [
+        ("**VERDICT: RED** — clause 1 fails", "RED"),
+        ("## VERDICT: **GREEN** — all clauses", "GREEN"),
+        ("**VERDICT: RED at `721650e` — ...", "RED"),
+        ("GREEN — GB-114-V2, verified on this VM", "GREEN"),
+        # the three that must NOT be verdicts (observed on the live board)
+        ("verdicts checked: 66, mismatched parents: 2, superseded REDs: 60", None),
+        ("a GREEN-gated merge helper that refuses", None),
+        # GB-136-V3 (the three fictions found on the live board, plus the heading shape)
+        ("red or pending run is not a defect and a green run is not correctness", None),
+        ("RED fixed (F1 + F2) — pushed to ticket/GB-098-stale / PR #157", None),
+        ("red log:   T3_intel: FAIL — 1 FAIL line(s)", None),
+        ("## GB-136-V3 — **RED** at `a1f4fd4`. The fix is real; …", "RED"),
+        ("**GREEN.** None of the RED conditions tripped", "GREEN"),
+        # GB-136-V4: the line that DOCUMENTS this parser must not become a verdict —
+        # it was the newest "verdict" on GB-136 and read as GREEN over a standing RED.
+        ("- **(A)** explicit `VERDICT: GREEN|RED` marker anywhere.", None),
+        ("| (A) | an explicit `VERDICT: GREEN|RED` marker |", None),
+        ("**MERGED — `b1594f9` on `main`. GB-005 → Done.**", None),
+    ]
+    for text, want in parse_cases:
+        got, _line = verdict_line_of(text)
+        ok = got == want
+        if not ok:
+            bad += 1
+        print(f"  [{'OK  ' if ok else 'FAIL'}] GB-136 parse: {text[:48]!r} -> {got} (want {want})")
+
+    # A later RED must not supersede an earlier RED (defect 1, live path).
+    red_only = governing([(1, "GB-016-V", "RED", "t1")])
+    ok_red = red_only == ("GB-016-V", "RED")
+    if not ok_red:
+        bad += 1
+    print(f"  [{'OK  ' if ok_red else 'FAIL'}] GB-136: RED-only chain still governs (no supersession) -> {red_only}")
+    green_beats = governing([(1, "GB-117-V", "RED", "t1"), (5, "GB-117-V5", "GREEN", "t5")])
+    ok_green = green_beats == ("GB-117-V5", "GREEN")
+    if not ok_green:
+        bad += 1
+    print(f"  [{'OK  ' if ok_green else 'FAIL'}] GB-136: a GREEN supersedes an earlier RED -> {green_beats}")
 
     print(f"self-test result: fails={bad}")
     return 0 if bad == 0 else 1
@@ -213,42 +296,46 @@ def main():
         parent_it = by_id.get(parent)
         gates = []
         for gi in chain[parent]:
-            v, line = verdict_of(gi["number"])
+            v, line, ts = verdict_of(gi["number"])
             if v:
                 gates.append((gate_ordinal(base_id(gi.get("title") or "")) or 1,
-                              base_id(gi.get("title") or ""), v, gi["number"], line))
+                              base_id(gi.get("title") or ""), v, gi["number"], line, ts))
         # The PARENT's own card can also carry a GREEN that supersedes an earlier gate
         # RED (GB-120: parent #261 re-verified GREEN 2026-10-28T15:05Z after -V#262 RED).
         if parent_it is not None:
-            pv, pline = verdict_of(parent_it["number"])
+            pv, pline, pts = verdict_of(parent_it["number"])
             if pv:
-                gates.append((0, parent, pv, parent_it["number"], pline))
+                gates.append((0, parent, pv, parent_it["number"], pline, pts))
         if not gates:
             continue
-        gov_gid, gov_v = governing([(g[0], g[1], g[2]) for g in gates])
+        gov_gid, gov_v = governing([(g[0], g[1], g[2], g[5]) for g in gates])
         if parent_it is None:
             lines.append(f"  [{gov_gid}] no parent ticket {parent} on the board")
             mismatched += 1
             continue
         checked += 1
-        # show every gate, marking the ones superseded by a later gate.
-        for ord_, gid, gv, gnum, gline in gates:
+        # show every gate, marking the ones superseded by a later GREEN gate.
+        # GB-136-V defect 1: a later RED does not supersede anything.
+        for ord_, gid, gv, gnum, gline, _gts in gates:
+            if gov_v != "GREEN":
+                break
             if gid != gov_gid and gv == "RED":
                 superseded += 1
+                succ_line = next((g[4] for g in gates if g[1] == gov_gid), "")
                 lines.append(f"  SUPERSEDED {gid}#{gnum} = RED, overtaken by {gov_gid} "
-                             f"(successor sha {gate_sha(gline)}) for {parent}#{parent_it['number']}")
+                             f"(successor sha {gate_sha(succ_line)}) for {parent}#{parent_it['number']}")
         pl = lane_of(parent_it)
         okv, want = classify(gov_v, pl)
         if not okv:
             mismatched += 1
             lines.append(f"  MISMATCH {gov_gid} = {gov_v} "
                          f"but {parent}#{parent_it['number']} is in {pl!r} (want {want!r})")
-            lines.append(f"           verdict line: {gates and next((g[3] for g in gates if g[0]==gov_gid), '')}")
+            lines.append(f"           verdict line: {next((g[4] for g in gates if g[1]==gov_gid), '')}")
 
     # gates without a matching parent issue are still surfaced.
     for parent in sorted(set(chain) - set(by_id)):
         for gi in chain[parent]:
-            v, line = verdict_of(gi["number"])
+            v, line, _ts = verdict_of(gi["number"])
             if v:
                 lines.append(f"  [{base_id(gi.get('title') or '')}] no parent ticket {parent} on the board")
                 mismatched += 1
@@ -260,7 +347,7 @@ def main():
             continue
         if lane_of(pi) != "Merge Gate":
             continue
-        verdict, line = verdict_of(pi["number"])
+        verdict, line, _ts = verdict_of(pi["number"])
         if verdict != "RED":
             continue
         orphan += 1
