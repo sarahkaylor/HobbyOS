@@ -3061,6 +3061,13 @@ static int process_wait_common(struct trap_frame *tf, int want_pid,
      (x64's scattered register positions never reach this code), and a
      wait4 request parks its rusage pointer in the one-shot
      caller->wait4_rusage field for the delivery to fill. */
+  /* The live frame's return register carries the wanted pid too: schedule()
+     RE-SAVES the context of a WAIT_CHILD (and of a just-woken READY) caller
+     from tf, and on x64 regs[0] is rax = the syscall NUMBER, so the wanted
+     pid that reap_deliver_locked() matches on became 39/90 and a parent
+     that parked before its child exited was never woken (SH hung after
+     `ls`, both desktops).  ARM's x0 already held the pid, which masked it. */
+  tf->regs[0] = (uint64_t)(int64_t)want_pid;
   save_context(caller, tf);
   caller->context[0] = (uint64_t)want_pid;
   /* The status pointer rides its own PCB field, never context[1]: on x64

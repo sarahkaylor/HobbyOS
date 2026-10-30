@@ -1110,6 +1110,19 @@ int process_exec_current(struct trap_frame *tf, const char *path,
     grp->context[33] = USER_MAIN_STK_TOP_V2;
 #endif
     arch_set_user_sp(grp->context[33]);
+#ifdef __x86_64__
+    /* GB-068 follow-on, exec flavour: the spawn loader pre-materializes the
+       top USER_MAIN_STK_GUARD of the fresh stack because the x64 resume
+       path runs ON the user stack at CPL0 and cannot demand-page it; the
+       exec path did not.  The exec'd image's start-up frame sits below the
+       argv/env strings, so a big enough environment (the IceWM session's:
+       DISPLAY, FONTCONFIG_FILE, PATH, ...) put RSP on the second page:
+       -d int showed  v=0e cpl=0 SP=17fffff000 CR2=17ffffeff8 -> #DF ->
+       triple fault (`ls` in a shell under HBHOST rebooted the VM). */
+    if (vm_touch(grp, USER_MAIN_STK_TOP_V2 - USER_MAIN_STK_GUARD,
+                 USER_MAIN_STK_GUARD, /*write=*/1) != 0)
+      uart_puts("v2 exec: stack prefault failed\n");
+#endif
     tf->regs[0] = 0;
     /* L9 (prefetch): same background-load hand-off as the spawn loaders
        (self-gating; non-fatal when the spawn fails). */
