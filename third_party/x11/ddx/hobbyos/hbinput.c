@@ -286,10 +286,10 @@ hbHandleEvent(const struct hb_input_event *ev)
 
 /*
  * Both syscalls drain the same kernel ring.  SYS_INPUT_READ (Linux 24-byte
- * records) is preferred; as of 2026-10-30 its range check is inverted on
- * both arches (src/kernel/arch/{x64,arm}/trap.c sys_input_read: a VALID
- * buffer gets -EFAULT), so on -EFAULT the DDX switches for good to
- * SYS_GET_EVENTS, the desktop's call, which returns the raw triples.
+ * records) is preferred.  Kernels before the icewm-port integration fix
+ * had its range check inverted (a VALID buffer got -EFAULT); on -EFAULT the
+ * DDX still switches for good to SYS_GET_EVENTS, the desktop's call, which
+ * returns the raw triples.
  */
 static Bool hbUseGetEvents;
 
