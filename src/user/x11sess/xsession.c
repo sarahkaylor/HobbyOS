@@ -228,7 +228,6 @@ static void setup_stdio(void) {
     if (p[1] != i) xs_dup2(p[1], i);
   if (p[1] > 2) close(p[1]);
   fcntl(rd, F_SETFD, FD_CLOEXEC);
-  fcntl(rd, F_SETFL, fcntl(rd, F_GETFL) | O_NONBLOCK);
   g_relay_fd = rd;
   log_sd("children's stdout/stderr relayed to the console (pipe fd ", rd, ")");
 }
@@ -241,12 +240,22 @@ static void relay_pump(int timeout_ms) {
     if (timeout_ms > 0) usleep(timeout_ms * 1000);
     return;
   }
-  struct pollfd pfd = {g_relay_fd, POLLIN, 0};
-  if (poll(&pfd, 1, timeout_ms) <= 0) return;
+  /* Pipes ignore O_NONBLOCK on HobbyOS (F_SETFL is socket-only), so read
+     exactly once per readable poll: a second read on a drained pipe would
+     block XSESSION until some child writes again. */
   char buf[256];
   for (int rounds = 0; rounds < 64; rounds++) {
+    struct pollfd pfd = {g_relay_fd, POLLIN, 0};
+    if (poll(&pfd, 1, rounds == 0 ? timeout_ms : 0) <= 0) return;
+    if (!(pfd.revents & POLLIN)) {
+      if (pfd.revents & (POLLHUP | POLLERR | POLLNVAL)) {
+        close(g_relay_fd);   /* no writer left: stop relaying */
+        g_relay_fd = -1;
+      }
+      return;
+    }
     int n = (int)read(g_relay_fd, buf, sizeof(buf));
-    if (n <= 0) break;
+    if (n <= 0) return;
     for (int i = 0; i < n; i++) {
       char c = buf[i];
       if (c == '\n' || g_relay_len == (int)sizeof(g_relay_line) - 1) {
