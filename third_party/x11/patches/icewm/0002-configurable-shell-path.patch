@@ -1,0 +1,74 @@
+Make the 'sh -c' fallback shell configurable (ICE_BINSH; HobbyOS uses /SH.BIN)
+
+--- a/src/appnames.h	2026-08-06 16:15:47.000000000 -0500
++++ b/src/appnames.h	2026-10-30 11:11:48.330833706 -0500
+@@ -36,6 +36,11 @@
+ #define ICESOUNDEXE "icesound" QUOTE(EXEEXT)
+ #endif
+ 
++/* POSIX shell for "sh -c" fallbacks (HobbyOS: -DICE_BINSH=\"/SH.BIN\"). */
++#ifndef ICE_BINSH
++#define ICE_BINSH "/bin/sh"
++#endif
++
+ #ifndef ICESPLASH
+ #define ICESPLASH nullptr
+ #endif
+--- a/src/aaddressbar.cc	2026-08-06 16:15:47.000000000 -0500
++++ b/src/aaddressbar.cc	2026-10-30 11:11:48.330867750 -0500
+@@ -6,6 +6,7 @@
+  * AddressBar
+  */
+ #include "config.h"
++#include "appnames.h"
+ #include "aaddressbar.h"
+ #include "yxapp.h"
+ #include "wmmgr.h"
+@@ -85,7 +86,7 @@
+         args += "-e";
+     }
+     if ( ! appendCommand(addressBarCommand, args)) {
+-        args += "/bin/sh";
++        args += ICE_BINSH;
+         args += "-c";
+     }
+     args += line;
+--- a/src/wmapp.cc	2026-08-06 16:15:47.000000000 -0500
++++ b/src/wmapp.cc	2026-10-30 11:11:48.330971986 -0500
+@@ -895,7 +895,7 @@
+         wordfree(&exp);
+     }
+     else {
+-        char const * argv[] = { "/bin/sh", "-c", cmdline, nullptr };
++        char const * argv[] = { ICE_BINSH, "-c", cmdline, nullptr };
+         runProgram(argv[0], argv);
+     }
+ }
+@@ -916,7 +916,7 @@
+         wordfree(&exp);
+     }
+     else {
+-        char const *const argv[] = { "/bin/sh", "-c", cmdline, nullptr };
++        char const *const argv[] = { ICE_BINSH, "-c", cmdline, nullptr };
+         *pid = runProgram(argv[0], argv);
+     }
+ }
+--- a/src/yapp.cc	2026-08-06 16:15:47.000000000 -0500
++++ b/src/yapp.cc	2026-10-30 11:11:48.331024194 -0500
+@@ -4,6 +4,7 @@
+  * Copyright (C) 1998-2002 Marko Macek
+  */
+ #include "config.h"
++#include "appnames.h"
+ #include "yapp.h"
+ #include "ypoll.h"
+ #include "ytimer.h"
+@@ -459,7 +460,7 @@
+         wordfree(&exp);
+     }
+     else {
+-        char const * argv[] = { "/bin/sh", "-c", cmdline, nullptr };
++        char const * argv[] = { ICE_BINSH, "-c", cmdline, nullptr };
+         runProgram(argv[0], argv);
+     }
+ }
