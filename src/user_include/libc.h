@@ -328,7 +328,13 @@ extern "C" {
    * eight 32-bit words.  timeout_ms < 0 waits forever, 0 polls.  Returns the
    * number of ready descriptors, 0 on timeout, -1/errno on error. */
 #define FD_SETSIZE 256
-  typedef struct { unsigned int bits[FD_SETSIZE / 32]; } fd_set;
+  /* `fds_bits` aliases `bits` (same storage) -- see <sys/select.h>. */
+  typedef struct {
+    union {
+      unsigned int bits[FD_SETSIZE / 32];
+      unsigned int fds_bits[FD_SETSIZE / 32];
+    };
+  } fd_set;
 #define FD_ZERO(set)       memset((set), 0, sizeof(fd_set))
 #define FD_SET(fd, set)    ((set)->bits[(fd) / 32] |= (1u << ((fd) % 32)))
 #define FD_CLR(fd, set)    ((set)->bits[(fd) / 32] &= ~(1u << ((fd) % 32)))

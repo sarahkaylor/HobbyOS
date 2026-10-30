@@ -1240,6 +1240,12 @@ $(OBJ_DIR)/builtins/%.o: $(LIBCXX_ROOT)/compiler-rt/lib/builtins/%.c $(LIBCXX_VE
 	@mkdir -p $(OBJ_DIR)/builtins
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
+# icewm.md M2 (lane xlibs-core): <arpa/inet.h>/<netdb.h>,
+# uname/gethostname, POSIX select (hb_select_posix) for the X11 client stack.  A separate prerequisite-only
+# rule: the recipe's $^ picks these up without touching the line below.
+LIBC_X11_OBJS = $(OBJ_DIR)/libc_inet.o $(OBJ_DIR)/libc_utsname.o $(OBJ_DIR)/libc_select_posix.o
+$(OBJ_DIR)/libc.a: $(LIBC_X11_OBJS)
+
 $(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/cxxrt.o $(OBJ_DIR)/libc_pthread.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o $(OBJ_DIR)/libc_mman.o $(OBJ_DIR)/libc_regex.o $(OBJ_DIR)/libc_langinfo.o $(OBJ_DIR)/libc_wchar.o $(OBJ_DIR)/libc_wctype.o $(OBJ_DIR)/libc_locale.o $(OBJ_DIR)/libc_selinux.o $(OBJ_DIR)/libc_dirent.o $(OBJ_DIR)/libc_time.o $(OBJ_DIR)/libc_time_math.o $(OBJ_DIR)/libc_libgen.o $(OBJ_DIR)/libc_realpath.o $(OBJ_DIR)/libc_xlocale.o $(OBJ_DIR)/libc_strtod.o $(OBJ_DIR)/libc_strftime.o $(OBJ_DIR)/libc_math.o $(OBJ_DIR)/libc_pwd.o $(OBJ_DIR)/libc_setjmp.o $(OBJ_DIR)/libc_dlfcn.o $(OBJ_DIR)/libc_resource.o $(OBJ_DIR)/libc_statvfs.o $(OBJ_DIR)/libc_syscall.o $(OBJ_DIR)/libc_ioctl.o $(OBJ_DIR)/libc_socket.o $(LIBC_BUILTIN_OBJS)
 	$(AR) rcs $@ $^
 
@@ -3105,6 +3111,16 @@ $(IPC_PROTO_TEST): src/host/ipc_proto_test.c src/kernel/ipc_proto.c src/include/
 # property-tested byte-exact against glibc on literal + randomized inputs.
 obj/host_hb_%.o: src/libc/src/%.c src/libc/include/*.h
 	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+
+# icewm.md M2 (lane xlibs-core): inet/netdb, uname vs glibc.
+# Wired into host_tests through a prerequisite-only run target.
+X11_LIBC_TEST = x11_libc_test_host
+$(X11_LIBC_TEST): obj/host_x11_libc_test.o obj/host_hb_inet.o obj/host_hb_utsname.o
+	$(HOST_CC) -o $@ $^
+x11_libc_test_run: $(X11_LIBC_TEST)
+	./$(X11_LIBC_TEST)
+host_tests: x11_libc_test_run
+.PHONY: x11_libc_test_run
 
 STRING_TEST = libc_string_test_host
 $(STRING_TEST): obj/host_libc_string_test.o obj/host_hb_string.o
