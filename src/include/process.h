@@ -102,7 +102,7 @@
 #define GICC_BASE 0x08010000 // CPU Interface base address (v2)
 #define GICR_BASE 0x080A0000 // Redistributor base address (v3)
 
-#define MAX_OPEN_FDS 32 // Increased per user request
+#define MAX_OPEN_FDS 64 // IceWM M1: X server + clients (was 32); fd_cloexec is 64-bit
 
 /* P2.2: the address-space object (src/include/vm.h) — only ever a pointer
    here, so the kernel headers don't grow a hard include chain. */
@@ -319,7 +319,7 @@ struct process {
    * closed at exec.  fcntl F_GETFD/F_SETFD read/write bit 0; dup2/dup and
    * spawn2's 0/1/2 grants clear the bit on the new fd; P5's execve runs
    * the sweep.  Appended at the END so parallel lanes merge additively. */
-  uint32_t fd_cloexec;
+  uint64_t fd_cloexec; /* IceWM M1: 64 bits, one per fd (MAX_OPEN_FDS 64) */
 
   /* --- P5 (docs/browser/p5-exec-signals-design.md D7): exec + signals --- *
    * Appended at the END so parallel lanes merge additively.  All of this

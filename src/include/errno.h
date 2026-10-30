@@ -76,6 +76,17 @@
 #define EPROTONOSUPPORT 93
 #define EAFNOSUPPORT    97
 #define EWOULDBLOCK  EAGAIN
+/* IceWM M1 (icewm.md section 4.1): named AF_UNIX surface (Linux values). */
+#define EDESTADDRREQ  89
+#define EPROTOTYPE    91
+#define ESOCKTNOSUPPORT 94
+#define EADDRNOTAVAIL 99
+#define ENETDOWN     100
+#define ECONNABORTED 103
+#define ENOBUFS      105
+#define EISCONN      106
+#define ESHUTDOWN    108
+#define EALREADY     114
 
 #ifndef HOST_TEST
 #ifdef __cplusplus

@@ -19,7 +19,18 @@
 #define K_UNIX_MSGS       8     /* queued messages per direction        */
 #define K_UNIX_MAX_FDS    K_IPC_MAX_FDS   /* fds per message            */
 #define K_UNIX_MAX_IOV    K_IPC_MAX_IOV   /* iovecs per sendmsg/recvmsg */
-#define MAX_UNIX_PAIRS    16    /* static pool: 16 pairs              */
+/* IceWM M1 (icewm.md section 4.1): raised from 16 so an X server plus its
+ * clients (one connected pair per client, plus listeners) fit.  The pool
+ * entries themselves are small; the 2 x 64 KiB byte rings live in the
+ * frame pool and are only allocated for CONNECTED pairs (socketpair, or a
+ * connect()), so listeners and unconnected endpoints cost no ring memory
+ * and .bss stays far below the ARM limine window (linker.ld ASSERT). */
+#define MAX_UNIX_PAIRS    128
+#define K_UNIX_BACKLOG    32    /* max pending connections per listener */
+#define K_UNIX_PATH_MAX   108   /* sizeof(sun_path)                     */
+#define K_UNIX_SUN_LEN    110   /* sizeof(struct sockaddr_un) (Linux)   */
+#define K_UNIX_SHUT_RD    1     /* usock.shut[end] bits                 */
+#define K_UNIX_SHUT_WR    2
 
 /* One direction of a pair: sender -> receiver.  STREAM uses ring/head/tail/
  * used as a 65536-byte byte ring; SEQPACKET/DGRAM use them as a byte arena
@@ -28,7 +39,8 @@
  * rwait/wwait are pid masks of parked readers/writers, exactly like
  * struct pipe's (wakes are drained only after the lock is dropped). */
 struct usock_chan {
-  uint8_t ring[K_UNIX_RING];
+  uint8_t *ring; /* K_UNIX_RING bytes in the frame pool (NULL until the
+                    pair is connected; see usock.ring_base) */
   uint16_t msg_len[K_UNIX_MSGS];
   int16_t msg_fds[K_UNIX_MSGS][K_UNIX_MAX_FDS]; /* global fd indices, -1 */
   uint8_t msg_nfds[K_UNIX_MSGS];
@@ -46,6 +58,28 @@ struct usock {
   uint32_t refs[2]; /* open-fd refs per end (0 = side gone) */
   int nonblock[2];  /* per-end O_NONBLOCK (fcntl F_SETFL) */
   struct usock_chan chan[2]; /* chan[d]: d=0 -> A->B, d=1 -> B->A */
+
+  /* --- IceWM M1 (icewm.md section 4.1): named AF_UNIX ------------------ *
+   * Names live in this kernel table (the pool itself), never in the
+   * filesystem.  name[e] is end e's LOCAL address: for a connected pair
+   * made by connect(), end 0 is the connecting client (name[0] = what it
+   * bound, usually unnamed) and end 1 is the accepted server end (name[1]
+   * = the listener's name), so getpeername(e) reads name[1 - e].  Fields
+   * bound/listening/name[0] of an end-0 endpoint and the accept queue are
+   * written under unix_name_lock (unix.c). */
+  struct usock_name {
+    uint8_t len;                    /* bytes of sun_path used; 0 = unnamed */
+    uint8_t bytes[K_UNIX_PATH_MAX]; /* path (no NUL) or abstract ([0]==0) */
+  } name[2];
+  uint8_t bound;     /* name[0] is registered in the namespace */
+  uint8_t listening; /* listen() was called: accq is live */
+  uint8_t shut[2];   /* K_UNIX_SHUT_RD|WR per end (shutdown(2)) */
+  int backlog;       /* accept-queue capacity (1..K_UNIX_BACKLOG) */
+  struct usock *accq[K_UNIX_BACKLOG]; /* pending connections (ring) */
+  uint32_t qhead, qcount;
+  uint64_t acc_wait;  /* pid mask: parked accept() callers  */
+  uint64_t conn_wait; /* pid mask: parked connect() callers (queue full) */
+  uint8_t *ring_base; /* frame-pool block: chan[0].ring | chan[1].ring */
 };
 
 /* Static pool init (main.c, next to pipes_init). */
@@ -96,5 +130,42 @@ int usock_recv_msg(struct usock *u, int end, const struct k_iovec *io,
                    int niov, int bufcap, int *got, int *trunc,
                    int *gfds_out, int maxfds, int *nfds_out, int *ctrl_trunc,
                    int nonblock, int cmsg_cloexec);
+
+/* --- IceWM M1 (icewm.md section 4.1): named sockets ---------------------
+ * All of these take KERNEL buffers (the fs.c syscall layer copies the user
+ * struct sockaddr_un in/out byte-wise).  Return 0 / -errno; -2 is the
+ * "parked, restart the syscall" marker for blocking connect/accept. */
+
+/* Parse a Linux struct sockaddr_un of `salen` bytes.  Path names are the
+ * bytes up to the first NUL; abstract names (sun_path[0] == 0) are all
+ * salen - 2 bytes, leading NUL included -- distinct keys from any path.
+ * salen == 2 (family only) yields an unnamed result (len 0): bind() treats
+ * it as autobind, connect() rejects it.  -EINVAL bad length,
+ * -EAFNOSUPPORT wrong family. */
+int usock_name_parse(const uint8_t *sa, int salen, struct usock_name *out);
+/* Format `n` as a struct sockaddr_un into `sa` (K_UNIX_SUN_LEN bytes);
+ * returns the Linux address length (2 unnamed, 2+len+1 path, 2+len abstract). */
+int usock_name_format(const struct usock_name *n, uint8_t *sa);
+
+int usock_bind(struct usock *u, int end, const struct usock_name *n);
+int usock_listen(struct usock *u, int end, int backlog);
+/* Connect the unconnected endpoint `u` (end 0) to the listener named `n`.
+ * On success the pair is connected immediately (Linux AF_UNIX semantics:
+ * data may flow before accept) and queued on the listener.  -ENOENT (no
+ * such path name), -ECONNREFUSED (abstract name absent, or bound but not
+ * listening), -EPROTOTYPE (type mismatch), -EISCONN, -EINVAL (listener),
+ * -EAGAIN (nonblocking, queue full), -ENOBUFS (no ring memory), -2. */
+int usock_connect(struct usock *u, int end, const struct usock_name *n,
+                  int nonblock);
+/* Pop one pending connection off listener `l`; *out is the connected pair
+ * whose END 1 the caller now owns (the queue's reference transfers).
+ * -EINVAL not listening, -EAGAIN empty+nonblocking, -2 parked. */
+int usock_accept(struct usock *l, int end, int nonblock, struct usock **out);
+/* Local (peer == 0) or peer (peer == 1) name of `end`; -ENOTCONN for the
+ * peer of an unconnected endpoint. */
+int usock_getname(struct usock *u, int end, int peer, struct usock_name *out);
+/* shutdown(2): how 0 RD, 1 WR, 2 RDWR.  -EINVAL bad how, -ENOTCONN. */
+int usock_shutdown(struct usock *u, int end, int how);
+int usock_is_listening(struct usock *u);
 
 #endif /* UNIX_H */
