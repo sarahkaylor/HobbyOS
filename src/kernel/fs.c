@@ -144,6 +144,7 @@ int file_open(struct process *cur, const char *filename, int flags) {
 
   struct file *f = file_alloc();
   if (!f) return -EMFILE;
+  f->open_flags = (uint32_t)flags;
 
   /* GB-017: /dev/null and /dev/urandom are virtual device nodes served by
    * the file layer (independent of GB-014's syscall-table routing, per the
@@ -162,8 +163,10 @@ int file_open(struct process *cur, const char *filename, int flags) {
                    rest[6] == 'o' && rest[7] == 'm' && rest[8] == '\0');
     if (isnull) {
       f->type = FILE_TYPE_DEVNULL;
+      f->open_flags = (uint32_t)flags;
     } else if (isurand) {
       f->type = FILE_TYPE_DEVURANDO;
+      f->open_flags = (uint32_t)flags;
     } else {
       f->type = FILE_TYPE_EMPTY;
       f->ref_count = 0;
@@ -810,7 +813,20 @@ int file_fcntl(struct process *p, int fd, int cmd, uint64_t arg) {
       return -EINVAL;
     }
   }
-  return -ENOTSOCK; /* historical behavior for open non-socket fds */
+  /* GB-019: a non-socket fd's F_GETFL returns the O_* flags it was opened with
+     (Linux semantics; previously fell through to -ENOTSOCK, so a regular file
+     or /dev/null answered -88 instead of its flags).  F_SETFL applies the
+     status bits (O_NONBLOCK/O_APPEND) onto that stored word. */
+  switch (cmd) {
+  case K_F_GETFL:
+    return (int)f->open_flags;
+  case K_F_SETFL:
+    f->open_flags = (f->open_flags & ~(uint32_t)(K_O_NONBLOCK | K_O_APPEND)) |
+                    ((uint32_t)arg & (uint32_t)(K_O_NONBLOCK | K_O_APPEND));
+    return 0;
+  default:
+    return -EINVAL;
+  }
 }
 
 /* Readiness probe for one fd, setting the r/w/e/hup out-parameters.
