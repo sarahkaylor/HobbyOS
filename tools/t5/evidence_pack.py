@@ -12,7 +12,7 @@ perf baseline, and gate history, with real paths and sha256 provenance.
 
 The scan/aggregate helpers are import-testable (T1).
 """
-import argparse, glob, hashlib, json, os, re, time
+import argparse, glob, hashlib, json, os, re, sys, time
 
 # evidence markers the pack treats as an S0/S1 artifact
 MARKERS = {
@@ -103,6 +103,11 @@ def main():
     print("".join(L))
     print(f"[pack] wrote {args.out} + S0-S1-EVIDENCE-MANIFEST.json "
           f"({len(manifest['artifacts'])} artifacts)")
+    if not manifest["artifacts"]:
+        print("[pack] FAIL: zero artifacts found under --root %s — an empty tree is not an "
+              "acceptance evidence pack (GB-047-V criterion 2: this must not exit 0)" % root)
+        return 1
+    return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
