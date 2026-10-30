@@ -215,6 +215,10 @@ HobbyOS adaptations:
 * `patches/icewm/0002` -- the `sh -c` fallback is `ICE_BINSH` (= `/SH.BIN`).
 * `patches/icewm/0003` -- `isExeFile()` accepts any regular file: FAT has no
   execute bits (files stat 0644), so menu `prog` lookups would all fail.
+* `patches/icewm/0004` -- pixmap resource scan matches file names
+  case-insensitively: the FAT driver returns 8.3 names that mtools stored
+  lower-case (`taskbar/start.xpm`, `mailbox/mail.xpm`, `ledclock/*.xpm`) in
+  upper case, so the start button image was never found.
 * `icewm/include/hb_icewm_compat.h` (force-included): declarations missing
   from the repo headers, the `.BIN` program names (`ICEWMEXE`=ICEWM.BIN,
   `ICEWMBGEXE`=ICEWMBG.BIN, ...), C linkage for `main` (`-ffreestanding`

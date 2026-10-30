@@ -1,0 +1,42 @@
+wpixres: match resource file names case-insensitively on HobbyOS (FAT reports lower-case 8.3 names in upper case)
+
+--- a/src/wpixres.cc	2026-08-06 16:15:47.000000000 -0500
++++ b/src/wpixres.cc	2026-10-30 11:26:01.580064402 -0500
+@@ -21,6 +21,15 @@
+     void set(bool value) { flag = value; }
+ };
+ 
++/* HobbyOS: the FAT driver reports 8.3 names created lower-case (e.g.
++   taskbar/start.xpm, mailbox/mail.xpm) in upper case, so resource file
++   names found by readdir() are matched case-insensitively there. */
++#ifdef HOBBYOS_ICEWM
++#define hb_namecmp strcasecmp
++#else
++#define hb_namecmp strcmp
++#endif
++
+ class PixmapResource {
+ private:
+     ref<YPixmap> *pixmapRef;
+@@ -71,7 +80,7 @@
+ private:
+ 
+     bool checkName(const char *wanted, const char *given) const {
+-        if (0 == strcmp(wanted, given)) {
++        if (0 == hb_namecmp(wanted, given)) {
+             if (isGradient) {
+                 extern const char* gradients;
+                 return gradients && strstr(gradients, wanted);
+@@ -376,10 +385,10 @@
+     upath subdir(path + this->subdir);
+     for (cdir dir(subdir.string()); dir.next(); ) {
+         const char* ext = extension(dir.entry());
+-        if (0 == strcmp(ext, ".xpm")) {
++        if (0 == hb_namecmp(ext, ".xpm")) {
+             xpm += dir.entry();
+         }
+-        else if (0 == strcmp(ext, ".png")) {
++        else if (0 == hb_namecmp(ext, ".png")) {
+             png += dir.entry();
+         }
+     }
