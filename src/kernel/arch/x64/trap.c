@@ -2027,11 +2027,39 @@ void sync_lower_handler_c(struct trap_frame *tf) {
                             : (uint64_t)(int64_t)(-22);
           return;
         }
-        case 2:  syscall_num = SYS_OPEN;  break;   /* open(path, fl, md) */
-        case 3:  syscall_num = SYS_CLOSE; break;   /* close(fd)          */
-        case 60: syscall_num = SYS_EXIT;  break;   /* exit(code)         */
+        case 2:  syscall_num = SYS_OPEN;   break;  /* open(path, fl, md) */
+        case 3:  syscall_num = SYS_CLOSE;  break;  /* close(fd)          */
+        case 60: case 231: syscall_num = SYS_EXIT; break; /* exit(code) / exit_group(code) */
         /* GB-020: getdents64(fd, dirp, count).  Linux number 217. */
         case 217: syscall_num = SYS_GETDENTS64; break;
+        /* GB-014 (2026-10-30): extend the compat table with the rest of the
+           W0-core set whose native handler already speaks Linux shape.
+           regs[5]=rdi, [4]=rsi, [3]=rdx, [9]=r10, [7]=r8 — Linux's first-3
+           args land in place with no shuffle, and every handler here returns
+           -errno (Linux numbering), so each is a pure NUMBER translation.
+           Layout-sensitive syscalls (stat/fstat -> linux_stat_t, ioctl, signal,
+           time) are deliberately NOT number-mapped: k_stat's layout differs
+           from linux_stat_t, so a blind map would corrupt the guest struct —
+           those need a real shim and stay -ENOSYS (GB-015/GB-016/GB-019). */
+        case 7:  syscall_num = SYS_POLL;   break;  /* poll(fds, nfds, timeout_ms) */
+        case 8:  syscall_num = SYS_LSEEK;  break;  /* lseek(fd, off, whence) */
+        case 9:  syscall_num = SYS_MMAP;   break;  /* mmap(addr,len,prot,flags,fd,off) */
+        case 10: syscall_num = SYS_MPROTECT; break;/* mprotect(addr,len,prot) */
+        case 11: syscall_num = SYS_MUNMAP; break;  /* munmap(addr,len) */
+        case 12: syscall_num = SYS_BRK;    break;  /* brk(addr) */
+        case 22: syscall_num = SYS_PIPE;   break;  /* pipe(fds[2]) */
+        case 32: syscall_num = SYS_DUP;    break;  /* dup(fd) */
+        case 33: syscall_num = SYS_DUP2;   break;  /* dup2(old,new) */
+        case 39: syscall_num = SYS_GETPID; break;  /* getpid() */
+        case 110: syscall_num = SYS_GETPPID; break;/* getppid() */
+        case 57: syscall_num = SYS_FORK;   break;  /* fork() */
+        case 59: syscall_num = SYS_EXEC;   break;  /* execve(path, argv, envp) */
+        case 61: syscall_num = SYS_WAIT4;  break;  /* wait4(pid, st, opt, ru) */
+        case 62: syscall_num = SYS_KILL;   break;  /* kill(pid, sig) */
+        case 72: syscall_num = SYS_FCNTL;  break;  /* fcntl(fd, cmd, arg) — K_F_* == Linux F_* */
+        case 79: syscall_num = SYS_GETCWD; break;  /* getcwd(buf, size) */
+        case 80: syscall_num = SYS_CHDIR;  break;  /* chdir(path) */
+        case 318: syscall_num = SYS_GETRANDOM; break;/* getrandom(buf,len,flags) */
         default:
           tf->regs[0] = (uint64_t)(int64_t)(-38);  /* -ENOSYS */
           return;
