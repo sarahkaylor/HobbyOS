@@ -1,0 +1,95 @@
+HobbyOS xserver patch (lane xserver, icewm.md M3).
+os: HobbyOS portability. No si_addr in siginfo_t (osinit.c), no F_DUPFD 
+(os_move_fd keeps the fd), <sys/utsname.h> for DefineSelf (access.c), no 
+lock file by default (FAT16 has no link(); a stale lock would survive 
+reboot with a reused pid), log stderr text through the DDX's hbConsoleWrite 
+(fds 0-2 are pinned to /dev/null so accept() never hands them to clients).
+
+diff --git a/os/access.c b/os/access.c
+index bf8e961..1bf67fe 100644
+--- a/os/access.c
++++ b/os/access.c
+@@ -120,7 +120,7 @@ SOFTWARE.
+ #include <sys/un.h>
+ #endif
+ 
+-#if defined(SVR4) ||  (defined(SYSV) && defined(__i386__)) || defined(__GNU__)
++#if defined(SVR4) ||  (defined(SYSV) && defined(__i386__)) || defined(__GNU__) || defined(__hobbyos__)
+ #include <sys/utsname.h>
+ #endif
+ #if defined(SYSV) &&  defined(__i386__)
+diff --git a/os/log.c b/os/log.c
+index 7364215..d106264 100644
+--- a/os/log.c
++++ b/os/log.c
+@@ -594,6 +594,10 @@ pnprintf(char *string, int size, const char *f, ...)
+ /* This function does the actual log message writes. It must be signal safe.
+  * When attempting to call non-signal-safe functions, guard them with a check
+  * of the inSignalContext global variable. */
++#ifdef __hobbyos__
++extern int hbConsoleWrite(const void *buf, size_t len);
++#endif
++
+ static void
+ LogSWrite(int verb, const char *buf, size_t len, Bool end_line)
+ {
+@@ -601,7 +605,13 @@ LogSWrite(int verb, const char *buf, size_t len, Bool end_line)
+     int ret;
+ 
+     if (verb < 0 || logVerbosity >= verb)
++#ifdef __hobbyos__
++        /* fds 0-2 are pinned to /dev/null by the DDX (else accept() hands
++         * them to clients); stderr text goes to the console (hw/hobbyos). */
++        ret = hbConsoleWrite(buf, len);
++#else
+         ret = write(2, buf, len);
++#endif
+ 
+     if (verb < 0 || logFileVerbosity >= verb) {
+         if (inSignalContext && logFileFd >= 0) {
+diff --git a/os/osinit.c b/os/osinit.c
+index 8575319..d8cd852 100644
+--- a/os/osinit.c
++++ b/os/osinit.c
+@@ -145,7 +145,12 @@ OsSigHandler(int signo)
+         case SIGBUS:
+         case SIGILL:
+         case SIGFPE:
++#ifdef __hobbyos__
++            /* HobbyOS siginfo_t has no si_addr */
++            ErrorFSigSafe("%s\n", strsignal(signo));
++#else
+             ErrorFSigSafe("%s at address %p\n", strsignal(signo), sip->si_addr);
++#endif
+         }
+     }
+ #endif
+diff --git a/os/utils.c b/os/utils.c
+index 79b36b7..017ea2a 100644
+--- a/os/utils.c
++++ b/os/utils.c
+@@ -254,7 +254,13 @@ UnlockServer(void)
+ #else /* LOCK_SERVER */
+ static Bool StillLocking = FALSE;
+ static char LockFile[PATH_MAX];
++#ifdef __hobbyos__
++/* HobbyOS: FAT16 has no link(), and a lock file would survive a reboot
++ * naming a pid that is reused at once; one server per boot -- no lock. */
++static Bool nolock = TRUE;
++#else
+ static Bool nolock = FALSE;
++#endif
+ 
+ /*
+  * LockServer --
+@@ -2204,6 +2210,10 @@ os_move_fd(int fd)
+ {
+     int newfd;
+ 
++#ifdef __hobbyos__
++    /* No F_DUPFD on HobbyOS: keep the descriptor where it is. */
++    return fd;
++#endif
+ #ifdef F_DUPFD_CLOEXEC
+     newfd = fcntl(fd, F_DUPFD_CLOEXEC, MAXCLIENTS);
+ #else
