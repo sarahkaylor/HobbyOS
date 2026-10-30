@@ -133,7 +133,17 @@ With `DESKTOP=icewm`:
 
 What you get: the X.Org-based server `XHOBBY.BIN` (hw/hobbyos DDX), IceWM 4.1.0 with its
 taskbar, start menu, toolbar and workspaces, and two real-Xlib demo clients (XEyes,
-XCalc). Programs launched from IceWM's menus are the `.BIN` images on the disk root.
+XCalc). The start menu mirrors the HobbyOS desktop's Apps menu: **Apps** (the desktop's
+pinned apps — BROWSER, CONSOLE, FILES, CALC, XCALC, ANTFARM, XEYES, CLOCK, SYSMON, HEX,
+TASKS, FIND, DIFF, NOTES, NANO, UNIT), **Games** (PONG, MILLIPED, DOOM, STARDUST,
+XNIBBLER, XCRYPT, NES and anything in `/GAMES`) and **All programs** (every other `.BIN`
+on the disk). These native programs run in normal IceWM windows through `HBHOST.BIN`
+(`src/user/hbhost/`), which gives each one a private framebuffer and input queue (the
+kernel's virtual display) and draws its window exactly as the HobbyOS desktop would; the
+games show their whole screen scaled into the window. The toolbar has CONSOLE, FILES,
+XEyes and XCalc. Close a window with IceWM's X button or F4. The menu is generated when
+`disk.img` is built (`src/user/x11sess/gen-icewm-menu.sh`), from `desktop.c`'s pinned
+lists and the files on that disk. Details: `icewm.md` §9.
 The children's stdout/stderr appear on the serial console as `[X] ...` lines.
 IceWM's Logout ends the session and drops you to the HobbyOS desktop.
 
@@ -143,12 +153,16 @@ This is the only extra network access `DESKTOP=icewm` needs (the default build a
 fetches the llvm-project and ICU sources the same way on a fresh checkout). Host tools:
 meson, ninja, cmake, xkbcomp and xkb-data.
 
+`HBHOST.BIN` is rebuilt by `make` whenever the desktop/window code it shares changes; it
+links the X client libraries from `X11_PREFIX` (default `$(X11_BUILD_DIR)/prefix`; point
+it at a shared prefix when the build dir has none).
+
 Switching `DESKTOP` rebuilds the kernel's `main.o` and `disk.img`
 (stamp file `obj/<arch>/.desktop`).
 
 Headless test (QMP screenshots in `/tmp/hobbyos_icewm_<arch>/`):
 ```bash
-make icewm_test                                   # real X stack: taskbar + start-menu click (M6)
+make icewm_test                                   # real X stack: taskbar, start menu, CONSOLE + XCALC via HBHOST
 make icewm_test ICEWM_TEST_ARGS=--stubs           # launcher + fallback with stub X binaries
 make icewm-stubs && make run DESKTOP=icewm X11_BUILD_DIR=obj/intel/x11stub
 ```

@@ -180,7 +180,102 @@ Root: `~/hobbyos-icewm-lanes/` — `integ/` = integration worktree (branch `icew
 | `session` | `src/user/x11sess/` XSESSION.BIN, Makefile `DESKTOP` knob + disk rules, `src/kernel/main.c` launch branch, real-Xlib demo clients, `run_icewm_test.py`, README section | — (stub-tolerant: missing X bins = clear error) | M5 gate (with stubs), default build unchanged |
 | `integ` | merging lanes into `icewm-port`, end-to-end bring-up fixes, M6/M7 | all | M6 (+M7 or recorded blocker) |
 
+## 9. Native HobbyOS apps under IceWM: HBHOST + the virtual display (lane apps, 2026-10-30)
+
+Goal: every program the default desktop offers (its Apps / right-click menu) launches from
+IceWM's start menu and works in a normal IceWM-managed window.
+
+Why it needs more than menu entries: native apps don't speak X.  Text apps print text/ANSI
+on stdout and read the desktop's escape-encoded input on stdin; pixel apps (the shim-Xlib
+XCALC/XEYES/ANTFARM/XNIBBLER, BROWSER) map the framebuffer (SYS_MAP_FB) and paint their
+content rect; the games map it, paint the whole screen and also read raw input through
+SYS_GET_EVENTS -- the same kernel ring XHOBBY's DDX drains.  Run directly they would
+scribble over the X screen and steal the server's input.
+
+**Kernel: per-process virtual display** (`src/kernel/vdisplay.c`, `src/include/vdisplay.h`,
+row `SYS_VDISPLAY` = 103, both arches).  `VDISP_OP_ATTACH(memfd)` attaches a private
+screen-sized surface (same geometry as the real fb, so SYS_FB_IOCTL is unchanged) and a
+private input queue to the caller; children spawned/forked afterwards inherit it (PCB
+fields `vdisp_id/gen`, `vdisp_own/gen`, appended at the end of `struct process`).  For an
+attached process SYS_MAP_FB maps the memfd at the usual USER_FB slot (`vm_map_fb_obj`),
+SYS_FLUSH_FB(_RECTS) record a damage union + sequence number and are paced to ~60/s
+(VDISP_FRAME_MS; a virtual present is otherwise free and loop-paced games ran unbounded),
+FBIOBLANK is a no-op, and SYS_GET_EVENTS/SYS_INPUT_READ read the private queue, which the
+host fills with `VDISP_OP_INJECT`; `VDISP_OP_STATUS` returns damage/flush/map/read
+counters.  A display dies with its owner (generation check; slot reclaimed on the next
+attach) or on DETACH.  Unattached processes -- XHOBBY, the default desktop -- are untouched.
+Tests: kernel `vdisplay_test_suite`, host `vdisplay_test_run`.
+
+**HBHOST.BIN** (`src/user/hbhost/`, real libX11; built by build.sh's icewm `hbhost`
+sub-step, which `make` re-runs when the shared desktop sources change):
+`HBHOST.BIN <PROGRAM.BIN> [args]` attaches a virtual display, spawns the app with
+stdin/stdout pipes and plays the desktop for that one window.  `hbhost_desk.c` compiles
+the default desktop's own `desktop.c` (unchanged; `main` renamed, `_start` compiled out by
+`DESKTOP_TEST_WRAPPER`) plus `window.c`/`graphics.c`, so the escape parser, terminal mode,
+pixel-mode geometry/expose messages, menus, key byte mapping (+ `ESC [ K` mods), mouse
+P/G/R (cells or pixels), wheel, `ESC [ T` tracking and `ESC [ D` are the desktop's code
+paths, painting into the virtual surface.  Its one window sits at (-2,-18) so the desktop
+title bar and side frame are off-surface (IceWM draws the frame); the menu bar is the top
+16 rows of the X window, dropdowns are drawn with Xlib.  `hbhost.c` blits damaged surface
+rects into the X window with XPutImage (no MIT-SHM), maps X events to the desktop's
+encodings (X keycode - 8 = evdev code), sets WM_NAME/_NET_WM_NAME from `ESC ] T`, resizes
+to a pixel app's `ESC ] X` preference, and turns `ESC ] R` into another HBHOST window.  A
+fullscreen framebuffer app (maps + flushes without `ESC ] X`: the games) switches to a game
+view: the whole surface scaled into the window (960x540 to start, resizable).  Keys: presses
+go to stdin in the desktop's encoding (under the desktop the desktop "usually wins" the raw
+ring and every game drains stdin for it); key releases and byte-less presses (Ctrl/Alt/
+Shift) are injected into the private raw queue when the app reads it (DOOM's key-up).
+WM_DELETE_WINDOW / F4: pixel and game windows get `ESC [ D` and 250 ms before the kill, text
+windows are killed at once (the desktop's rules); the app's exit closes the window.
+
+**Menu** (`src/user/x11sess/gen-icewm-menu.sh`, run by `stage-disk.sh` at `disk.img` time):
+`/ICEWM/menu` = Apps (`pinned_apps[]` read out of desktop.c, in that order), Games
+(`pinned_games[]` + `/GAMES`), All programs (every other root `.BIN` on that disk, sorted,
+submenus of 24), then the real-X XEyes/XCalc; `/ICEWM/toolbar` = CONSOLE, FILES, XEyes,
+XCalc.  Only files present on the disk are listed; X-stack binaries are left out.  (The
+default desktop itself shows pinned apps in directory order, not `pinned_apps[]` order.)
+
+Verified (intel, KVM; screenshots under `~/hobbyos-icewm-lanes/evidence/apps/`): all 16 Apps
+entries launch and render; CALC computes 2+3 by clicks; FILES lists, navigates and its
+menu-bar `Go > Root` works; CONSOLE runs `ls`, `ls /home`, `HELLO.BIN`, `seq`; NANO edits
+(terminal mode); CLOCK/SYSMON/HEX/TASKS/FIND/DIFF/NOTES/UNIT render; XCALC computes via
+clicks; XEYES follows the pointer; ANTFARM animates around the pointer; BROWSER renders
+HOME.HTM, follows a link and scrolls with the wheel.  Games: PONG, MILLIPED, STARDUST, NES
+(game view, keys move/act), XNIBBLER and XCRYPT (pixel/terminal windows, keys work); DOOM
+starts and exits "No IWAD file was found" (no WAD on the disk, same as the default
+desktop).  After the games exit IceWM keeps the mouse and keyboard.  ARM (TCG): boots to
+IceWM, CONSOLE runs `ls /home`, XCALC computes 2 ENTER 3 + by clicks.
+`run_icewm_test.py` now launches CONSOLE and XCALC from the start menu (PASS, intel).
+
+Known limits: text apps open 800x560 (resizable; the desktop tiles them full-screen);
+`ESC [ T` tracking reports window-relative coordinates clamped at 0 (pointer left/above
+the window reads as 0); the game view scales with nearest-neighbour; a game window may need
+a click before IceWM gives it the keyboard; the first start-menu open takes a few seconds
+(fontconfig scan, pre-existing).
+
 ## 8. Fix log (newest first)
+- 2026-10-30 lane apps (branch `icewm-apps`, §9):
+  - **virtual display + HBHOST.BIN + generated start menu**: see §9.
+  - **kernel (x64) waitpid lost wake-up** (pre-existing, also on the default desktop with the
+    unmodified kernel): schedule() re-saves a WAIT_CHILD caller's context from the live frame
+    and `reap_deliver_locked` matched the wanted pid in `context[0]`, which on x64 became rax
+    = the syscall number; a parent that parked before its child exited was never woken (the
+    shell hung after its first external command).  The frame's return register now carries
+    the wanted pid too (ARM's x0 already did).
+  - **kernel (x64) CPL0 resume on an unmaterialized user-stack page -> triple fault**: the x64
+    resume runs on the user stack (frame at sp-320, RSP at sp-616, a C call from there);
+    exec'd images with a bigger environment (the IceWM session's) and forked children (IceWM's
+    fork+exec of HBHOST) could start on a demand-zero page -> #PF at CPL0 with no usable
+    stack -> #DF -> reset (TCG `-d int`: `v=0e cpl=0 SP=17fffff000 CR2=17ffffeff8`).  The exec
+    path now pre-faults the stack top like spawn (GB-068), and schedule() vm_touch()es the
+    page window below a user SP before every x64 user resume.
+  - **intel boot**: Limine's multiboot1 loader panicked "Cannot allocate elf sections" once
+    the kernel's DWARF grew past what it can place (any kernel growth hits it); `disk.img`
+    now boots `obj/<arch>/hobbyos.boot.elf` (`--strip-debug`, same loadable segments) and
+    `hobbyos.elf` keeps the symbols.
+  - unit tests 383/383 intel, 379/379 arm (+ the 4 vdisplay tests); host `vdisplay_test_run`.
+  - open: the default desktop lists DESKTOP=icewm's X binaries (pre-existing); text apps'
+    initial size is fixed; DOOM needs a WAD on the disk to show anything.
 - 2026-10-30 integ (M5-M7), all on `icewm-port`:
   - merged lane/kern, xlibs-core, xlibs-ext, xserver, icewm, session (no conflicts); removed the
     transitional `cross/compat` socket shims and XSESSION's inline-asm waitpid.
