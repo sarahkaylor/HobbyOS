@@ -56,6 +56,39 @@ bash third_party/x11/build.sh --arch arm --stage all -j8 --prefix ~/hobbyos-icew
   options, `flock`-serialised per package so lanes can share a prefix),
   `hb_link_flat [--cxx] OUT.BIN inputs…`, `hb_need_libcxx`, `hb_log/hb_die`.
 
+### Header overlay and transitional compat (cross/)
+
+* `cross/include/` is searched **before** the repo sysroot, by the X11 wrappers
+  only: `limits.h` (PATH_MAX, NAME_MAX, SSIZE_MAX, IOV_MAX, HOST_NAME_MAX…),
+  `unistd.h` (`_POSIX_THREAD_SAFE_FUNCTIONS`, so Xos_r.h picks the POSIX
+  5-argument `getpw*_r`), `sys/select.h` (POSIX `select()` bound by asm
+  label to libc's `hb_select_posix` — the device API in `libc.h` owns the
+  plain `select` symbol with a millisecond timeout). These are deliberately
+  NOT in `src/libc/include`: several in-tree ports pick their own `PATH_MAX`
+  when it is undefined, so adding it there would change default binaries.
+* `cross/compat/` (transitional): while `src/libc/include/sys/socket.h` lacks
+  `bind()`, the wrappers force-include `hb-socket-compat.h` (POSIX socket
+  prototypes) and link `libhbsockcompat.a` (weak ENOSYS stubs). Both switch
+  off automatically once lane `kern`'s wrappers are merged.
+* Package cache keys include a hash of everything under `cross/`, so a flag
+  or overlay change rebuilds the stage.
+* intel links go through the host gcc driver (clang's x86_64-none-elf
+  toolchain does that; `-fuse-ld=lld` keeps ld.lld doing the work), hence
+  `-Wl,--build-id=none` in the link mode — a build-id note would otherwise sit
+  at the image base in front of `_start`.
+
+### Configuration choices (clientlibs)
+
+* libxcb: unix transport only (no abstract sockets: `HAVE_ABSTRACT_SOCKETS`
+  undefined), default socket path `/tmp/.X11-unix/X<n>`; extensions built:
+  core + composite, damage, dbe, randr, render, res, shape, xf86dri, xfixes,
+  xinerama (static archives; unused ones cost nothing at link).
+* libX11: static, `--disable-loadable-i18n --disable-loadable-xcursor
+  --disable-xf86bigfont --disable-tcp-transport --disable-ipv6
+  --disable-xlocaledir`, XTHREADS on (pthread from libc.a; the thread-safety
+  constructor runs from `.init_array`), XKB on, `malloc0returnsnull=no`.
+* libpng: no NEON/SSE paths; freetype: zlib + png, no bzip2/brotli/harfbuzz.
+
 ## Pins (clientlibs stage)
 
 Versions are the latest upstream releases as of 2026-10-30. sha256 values were
