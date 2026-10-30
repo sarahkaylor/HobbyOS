@@ -41,7 +41,7 @@ int main(void) {
   print(argv[0]);
   print(" with 4 bytes of data:\n");
 
-  int fd = connect(ip, 7, 17);
+  int fd = net_connect(ip, 7, 17);
   if (fd < 0) {
     print("ping: failed to connect/create socket\n");
     return 1;

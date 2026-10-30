@@ -14,7 +14,7 @@ __attribute__((section(".text._start"))) void _start(void) {
   uint16_t target_port = 80;
 
   print("Connecting to 1.1.1.1:80...\n");
-  int fd = connect(target_ip, target_port, IP_PROTO_TCP);
+  int fd = net_connect(target_ip, target_port, IP_PROTO_TCP);
   if (fd < 0) {
     print("net_test failed: connect returned error\n");
     sleep(3);

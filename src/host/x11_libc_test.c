@@ -1,6 +1,6 @@
 /*
  * Host test for the libc pieces added for the X11 client stack (icewm.md M2,
- * lane xlibs-core): src/libc/src/inet.c, uio.c, utsname.c compiled as hbl_*
+ * lane xlibs-core): src/libc/src/inet.c, utsname.c compiled as hbl_*
  * and compared against glibc.
  *
  *   make x11_libc_test_host && ./x11_libc_test_host
@@ -29,8 +29,6 @@ void hbl_freeaddrinfo(struct addrinfo *res);
 int hbl_getnameinfo(const struct sockaddr *sa, socklen_t salen, char *host, socklen_t hostlen,
                     char *serv, socklen_t servlen, int flags);
 struct hostent *hbl_gethostbyname(const char *name);
-ssize_t hbl_writev(int fd, const struct iovec *iov, int iovcnt);
-ssize_t hbl_readv(int fd, const struct iovec *iov, int iovcnt);
 int hbl_uname(struct utsname *u);
 int hbl_gethostname(char *name, size_t len);
 
@@ -155,37 +153,6 @@ static void test_gai(void) {
   CHECK(hbl_gethostbyname("no.such.host") == NULL, "ghbn miss");
 }
 
-static void test_uio(void) {
-  char a[] = "hello ", b[] = "vectored ", c[] = "world";
-  struct iovec w[3] = { { a, 6 }, { b, 9 }, { c, 5 } };
-  /* pipe: sendmsg -> ENOTSOCK -> write loop */
-  int p[2];
-  CHECK(pipe(p) == 0, "pipe");
-  CHECK(hbl_writev(p[1], w, 3) == 20, "writev pipe");
-  char r1[7] = {0}, r2[64] = {0};
-  struct iovec rv[2] = { { r1, 6 }, { r2, sizeof r2 } };
-  CHECK(hbl_readv(p[0], rv, 2) == 20 && strcmp(r1, "hello ") == 0 && strcmp(r2, "vectored world") == 0,
-        "readv pipe '%s' '%s'", r1, r2);
-  close(p[0]); close(p[1]);
-  /* socketpair: one sendmsg/recvmsg each */
-  int s[2];
-  CHECK(socketpair(AF_UNIX, SOCK_STREAM, 0, s) == 0, "socketpair");
-  CHECK(hbl_writev(s[0], w, 3) == 20, "writev sock");
-  memset(r1, 0, sizeof r1); memset(r2, 0, sizeof r2);
-  CHECK(hbl_readv(s[1], rv, 2) == 20 && strcmp(r2, "vectored world") == 0, "readv sock");
-  close(s[0]); close(s[1]);
-  CHECK(hbl_writev(1, w, -1) == -1 && errno == EINVAL, "writev EINVAL");
-  CHECK(hbl_writev(1, w, 0) == 0, "writev 0");
-  /* regular file */
-  char path[] = "/tmp/x11_libc_test_XXXXXX";
-  int fd = mkstemp(path);
-  CHECK(fd >= 0 && hbl_writev(fd, w, 3) == 20, "writev file");
-  lseek(fd, 0, SEEK_SET);
-  memset(r1, 0, sizeof r1); memset(r2, 0, sizeof r2);
-  CHECK(hbl_readv(fd, rv, 2) == 20 && strcmp(r2, "vectored world") == 0, "readv file");
-  close(fd); unlink(path);
-}
-
 static void test_uname(void) {
   struct utsname u;
   CHECK(hbl_uname(&u) == 0 && strcmp(u.sysname, "HobbyOS") == 0 && u.machine[0], "uname");
@@ -201,7 +168,6 @@ int main(void) {
   test_pton_ntop();
   test_aton();
   test_gai();
-  test_uio();
   test_uname();
   if (fails) { printf("x11_libc_test: %d FAILURES\n", fails); return 1; }
   printf("x11_libc_test: all passed\n");

@@ -216,8 +216,30 @@
  * bytes written | -errno.  Native number 95 (next free above 94). */
 #define SYS_GETDENTS64    (95)
 
+/* IceWM M1 (docs: icewm.md section 4.1): named AF_UNIX stream sockets,
+ * appended after the previous top (95).  Linux argument shapes; addresses
+ * are struct sockaddr_un (sockaddr_in for an INET connect), lengths are
+ * socklen_t (u32) and `lenp` is value-result.  All return 0 / fd | -errno;
+ * blocking ACCEPT4/CONNECT_ADDR park and restart like SYS_READ on a pipe.
+ * Names live in a kernel table (src/kernel/unix.c), never the filesystem.
+ *   SYS_BIND         (fd, addr*, addrlen)
+ *   SYS_LISTEN       (fd, backlog)
+ *   SYS_ACCEPT4      (fd, addr*, lenp*, flags SOCK_NONBLOCK|SOCK_CLOEXEC)
+ *   SYS_CONNECT_ADDR (fd, addr*, addrlen)   POSIX connect: AF_UNIX by name,
+ *                    AF_INET routed to the SYS_CONNECT_FD engine
+ *   SYS_GETSOCKNAME  (fd, addr*, lenp*)
+ *   SYS_GETPEERNAME  (fd, addr*, lenp*)
+ *   SYS_SHUTDOWN     (fd, how) */
+#define SYS_BIND          (96)
+#define SYS_LISTEN        (97)
+#define SYS_ACCEPT4       (98)
+#define SYS_CONNECT_ADDR  (99)
+#define SYS_GETSOCKNAME   (100)
+#define SYS_GETPEERNAME   (101)
+#define SYS_SHUTDOWN      (102)
+
 /* Highest defined syscall number. Dispatch tables are sized SYS_MAX + 1.
  * 90/91 were the next FREE numbers above the previous SYS_MAX (89). */
-#define SYS_MAX           (95)
+#define SYS_MAX           (102)
 
 #endif /* SYSCALL_H */

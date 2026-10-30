@@ -724,7 +724,7 @@ static void test_p5_exec_env_and_apply(void) {
   const char envblob[] = "A=1\0B=22\0";
   process_exec_apply(p, envblob, 2);
 
-  EXPECT_EQ((p->fd_cloexec & (1u << fd1)) != 0, 0); /* bit cleared */
+  EXPECT_EQ((p->fd_cloexec & (1ull << fd1)) != 0, 0); /* bit cleared */
   EXPECT_EQ(p->open_fds[fd1], -1);                  /* sweep closed it */
   EXPECT_EQ((p->open_fds[fd2] != -1), 1);           /* others survive */
   EXPECT_EQ(p->envc, 2);
