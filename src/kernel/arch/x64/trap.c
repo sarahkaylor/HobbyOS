@@ -2851,6 +2851,37 @@ static void general_interrupt_inner(struct trap_frame *tf) {
             fl_s(&fl, " ret=");
             fl_hex(&fl, up[1]);
           }
+          /* GB-077 forensics (2026-10-28): the PROC_TEST-only wave faults with
+             PC == VA == a user-stack address, and EXITPC names the fork
+             syscall's return site.  Dump the user RSP and the three words it
+             would pop so "the child resumed with an RSP off by N" is measured,
+             not inferred.  Guarded: only read inside the user stack window. */
+          {
+            uint64_t ursp = tf->lr;
+            fl_s(&fl, " rsp=");
+            fl_hex(&fl, ursp);
+            fl_s(&fl, " cs=");
+            fl_hex(&fl, tf->cs);
+            fl_s(&fl, " rax=");
+            fl_hex(&fl, tf->regs[0]);
+            fl_s(&fl, " r12=");
+            fl_hex(&fl, tf->regs[2]);
+            fl_s(&fl, " r13=");
+            fl_hex(&fl, tf->regs[3]);
+            fl_s(&fl, " r14=");
+            fl_hex(&fl, tf->regs[7]);
+            fl_s(&fl, " r15=");
+            fl_hex(&fl, tf->regs[8]);
+            if (ursp >= 0x17FF800000ULL && ursp < 0x1800000000ULL) {
+              volatile uint64_t *sp = (volatile uint64_t *)ursp;
+              fl_s(&fl, " sp0=");
+              fl_hex(&fl, sp[0]);
+              fl_s(&fl, " sp1=");
+              fl_hex(&fl, sp[1]);
+              fl_s(&fl, " sp2=");
+              fl_hex(&fl, sp[2]);
+            }
+          }
         }
         fl_s(&fl, " -> killed");
         fl_c(&fl, '\n');
