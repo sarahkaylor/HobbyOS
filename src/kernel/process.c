@@ -1,4 +1,5 @@
 #include "process.h"
+#include "vdisplay.h"
 #include "kline.h"
 #include "frame.h"
 #include "vm.h"
@@ -1073,6 +1074,7 @@ static int process_create_internal_ver(int ver) {
   p->eargv[0] = 0;
   p->cwd[0] = '/';
   p->cwd[1] = '\0';
+  vdisp_pcb_init(p); /* icewm.md §9: no virtual display */
   p->num_open_fds = 0;
   p->wake_ms = 0;
   p->spawn_retval = -1;
@@ -3146,6 +3148,7 @@ int process_fork(struct trap_frame *tf) {
   for (int i = 0; i < 128; i++) {
     child->cwd[i] = group->cwd[i];
   }
+  vdisp_inherit(child, group); /* fork keeps the virtual display */
 
   save_context(child, tf);
   child->context[0] = 0; // x0 = 0 for child
@@ -4400,6 +4403,7 @@ int process_thread_create(struct process *caller, uint64_t entry, uint64_t arg,
      double-closing the group's table. */
   for (int i = 0; i < 128; i++)
     t->cwd[i] = grp->cwd[i];
+  vdisp_pcb_init(t); /* threads use the anchor's (process_group) */
   t->heap_brk = grp->heap_brk;
   t->user_phys_base = grp->user_phys_base;
   t->user_l2_table = grp->user_l2_table;

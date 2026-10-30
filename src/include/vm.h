@@ -344,6 +344,7 @@ struct addr_space *vm_as_clone(struct addr_space *src, uint64_t tgid);
  * the leaves point at `fb_phys` and are never freed by teardown.
  * Returns the VA or a negative errno. */
 int64_t vm_map_fb(struct process *grp, uint64_t fb_phys);
+int64_t vm_map_fb_obj(struct process *grp, struct vm_object *obj, uint64_t len);
 
 /* --- mmap family v2 (S3; design section 4.1) ------------------------- */
 

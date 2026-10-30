@@ -53,6 +53,7 @@ void blk_cache_press_suite(void);
 void virtio_gpu_test_suite(void);
 void virtio_input_test_suite(void);
 void fb_ioctl_test_suite(void);
+void vdisplay_test_suite(void);
 void evdev_test_suite(void);
 void input_node_test_suite(void);
 void fb_mmap_test_suite(void);

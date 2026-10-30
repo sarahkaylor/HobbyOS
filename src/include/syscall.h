@@ -238,8 +238,14 @@
 #define SYS_GETPEERNAME   (101)
 #define SYS_SHUTDOWN      (102)
 
+/* icewm.md §9 (HBHOST): per-process virtual display -- a private
+ * framebuffer (memfd) + private input queue, inherited by children; see
+ * src/include/vdisplay.h for the ops and semantics.  Appended after 102.
+ *   SYS_VDISPLAY (op, a1, a2) -> >= 0 | -errno */
+#define SYS_VDISPLAY      (103)
+
 /* Highest defined syscall number. Dispatch tables are sized SYS_MAX + 1.
  * 90/91 were the next FREE numbers above the previous SYS_MAX (89). */
-#define SYS_MAX           (102)
+#define SYS_MAX           (103)
 
 #endif /* SYSCALL_H */

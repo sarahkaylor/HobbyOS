@@ -373,6 +373,15 @@ struct process {
    * caused).  One line per process keeps the diagnostic and drops the
    * storm.  Appended at the END so parallel lanes merge additively. */
   uint32_t echild_logged;
+
+  /* Virtual display (icewm.md §9, src/kernel/vdisplay.c).  Appended at the END.  Group-anchor
+   * state: the display this group is attached to (inherited by spawned /
+   * forked children) and the one it OWNS (created by VDISP_OP_ATTACH).
+   * 0 = none; *_gen guards against slot reuse. */
+  int vdisp_id;
+  uint32_t vdisp_gen;
+  int vdisp_own;
+  uint32_t vdisp_own_gen;
 };
 
 /* Linux-compat process flag (GB-013): route syscalls through the Linux

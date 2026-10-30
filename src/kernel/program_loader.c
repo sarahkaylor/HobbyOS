@@ -3,6 +3,7 @@
 #include "fs.h"
 #include "setjmp.h"
 #include "process.h"
+#include "vdisplay.h"
 #include "arch/cpu.h"
 #include "errno.h"
 #include "timer.h"
@@ -240,6 +241,7 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
       for (int i = 0; i < 128; i++) {
         child->cwd[i] = parent->cwd[i];
       }
+      vdisp_inherit(child, parent); /* icewm.md §9 */
       /* P6.3: a spawned child inherits the group's environment blob (set
          by execve(envp); execv() forwards `environ`, so an exec'd parent
          hands its environment down).  The spawn contract carries no envp
@@ -630,6 +632,7 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     child->parent_pid = parent->pid;
     for (int i = 0; i < 128; i++)
       child->cwd[i] = parent->cwd[i];
+    vdisp_inherit(child, parent); /* icewm.md §9 */
     /* P6.3: a spawned child inherits the group's environment blob (set
        by execve(envp); execv() forwards `environ`, so an exec'd parent
        hands its environment down).  The spawn contract carries no envp
