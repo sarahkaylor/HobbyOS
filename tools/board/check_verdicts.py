@@ -88,7 +88,14 @@ def verdict_line_of(body):
     must START a line (after optional markdown), and the token must not be part of a
     longer word: `REDs`, `GREEN-gated`, `REDUCE` are not verdicts.
     """
-    for ln_raw in re.sub(r"```.*?```", "", (body or "").replace("\r", ""), flags=re.S).split("\n"):
+    # GB-139-V2 (the hole it found): normalising `>` made a QUOTED verdict indistinguishable
+    # from a DECLARED one — and quoting the prior verdict and answering it is this board's
+    # dominant reply style (GB-104's governing RED is itself a blockquote).  So a `>` line
+    # is a quote unless NOTHING outside a quote declares; two passes, unquoted first.
+    _lines = re.sub(r"```.*?```", "", (body or "").replace("\r", ""), flags=re.S).split("\n")
+    _unquoted = [l for l in _lines if not l.lstrip().startswith(">")]
+    _quoted = [l for l in _lines if l.lstrip().startswith(">")]
+    for ln_raw in _unquoted + _quoted:
         # GB-136-V4: a line that QUOTES a verdict shape is not a verdict.  Strip inline
         # code spans before matching, so `VERDICT: GREEN|RED` written as documentation —
         # including the line that documents this very parser — cannot become one.  The
@@ -266,6 +273,9 @@ def self_test():
         ("> **VERDICT: RED sha=none** — clause 3", "RED"),
         ("<!-- VERDICT: RED sha=ce906f00 -->", "RED"),
         ("VERDICT: GREEN sha=none", None),
+        # GB-139-V2's hole: quoting the prior verdict and answering it is this board's
+        # dominant reply style — the QUOTE must not beat the declaration.
+        ("> **VERDICT: GREEN sha=aaa1111** — the earlier gate\n\nVERDICT: RED sha=bbb2222", "RED"),
         # the 16 live lines that are byte-identical to a verdict and are DoD text
         ("GREEN → this ticket to Merge Gate. RED → back to In Progress with the failing output quoted.", None),
         # the three that must NOT be verdicts (observed on the live board)
