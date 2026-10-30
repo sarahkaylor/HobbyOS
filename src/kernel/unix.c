@@ -1034,3 +1034,12 @@ int usock_shutdown(struct usock *u, int end, int how) {
   drain_wakeup_mask(wake);
   return 0;
 }
+
+#ifdef KERNEL_MODE_UNIT_TEST
+/* Test hook: live pool entries (leak checks in unix_test.c). */
+int usock_test_live(void) {
+  int n = 0;
+  for (int i = 0; i < MAX_UNIX_PAIRS; i++) n += unix_pool[i].in_use ? 1 : 0;
+  return n;
+}
+#endif

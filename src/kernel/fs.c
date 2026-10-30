@@ -2523,6 +2523,14 @@ int file_sockname_user(struct process *p, int fd, int peer, uint64_t usa,
 /* SEC-6 regression hook: expose a slot's type so tests can assert that no
  * allocation path ever strands a slot in UNINIT (or, before this fix, as a
  * fake FAT16 with garbage fields).  Test builds only. */
+/* IceWM M1 test hook: the usock behind a unix fd (NULL otherwise). */
+struct usock *fs_test_usock(struct process *p, int fd) {
+  struct process *pg = process_group(p);
+  int err = 0;
+  struct file *f = f1_unix_file(pg, fd, &err);
+  return f ? f->usock.ptr : 0;
+}
+
 int fs_test_slot_type(int gfd) {
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return -1;
   return (int)global_file_table[gfd].type;
