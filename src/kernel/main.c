@@ -622,6 +622,19 @@ void main(void) {
   uart_puts("Mode: SELFHOST - Running in-OS acceptance build driver...\n");
   load_and_run_program_in_scheduler_args("SELFHOST.BIN", -1, -1, -1, -1,
                                          "/SRC/SELFHOST.RUN");
+#elif defined(KERNEL_DESKTOP_ICEWM)
+  /* icewm.md §4.5 (DESKTOP=icewm): the X11 session launcher replaces the
+     native desktop.  XSESSION.BIN starts XHOBBY.BIN + IceWM and itself
+     falls back to DESKTOP.BIN when the X session dies; if XSESSION.BIN
+     cannot even be loaded (disk built without the icewm payload) the
+     kernel launches the native desktop directly, so the user is never
+     left on a black screen. */
+  uart_puts("Mode: DESKTOP (icewm) - Launching X session...\n");
+  if (load_and_run_program_in_scheduler("XSESSION.BIN", -1, -1, -1, -1) < 0) {
+    uart_puts("[XSESS] kernel: XSESSION.BIN failed to load; "
+              "launching DESKTOP.BIN\n");
+    load_and_run_program_in_scheduler("DESKTOP.BIN", -1, -1, -1, -1);
+  }
 #else
   uart_puts("Mode: DESKTOP - Launching desktop...\n");
   load_and_run_program_in_scheduler("DESKTOP.BIN", -1, -1, -1, -1);
