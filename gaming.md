@@ -511,6 +511,7 @@ final list.
 | GB-031 | **[DEEP]** SDL2 static-musl build profile: fbcon + evdev drivers, no X11; freeze exact flag set | L | GB-027 | build reproducibly |
 | GB-032 | SDL test app (`surface`, 2D blit, input echo) under compat | M | GB-031 | draws + echoes input |
 | GB-033 | **M2 gate:** static-musl SDL app on intel shows window, responds to input, quits clean | M | GB-032 | gate evidence |
+| GB-137 | **A static-PIE's absolute addresses never receive the load base: `R_X86_64_RELATIVE` relocations are not applied in the v2 address space.** Measured by GB-033's worker: `[ARRIVED] SDLAPP.BIN rc>0` then `memory fault VA=0xCF8 PC=0x100000A997 rw=w in=PROT region=NONE`, where `PC` is inside the image (`USER_VA_BASE 0x1000000000`) and the faulting address is exactly one load base below it. Clause 0 must exclude the two cheap explanations first (an errno used as a pointer; a base applied twice). Deliverable: walk `.rela.dyn`, apply `base + addend` for every `R_X86_64_RELATIVE`, **refuse unknown relocation types by name** rather than silently skipping | L | GB-013, GB-032 | `SDLAPP.BIN` and the GB-066 probe run without a memory fault; a build with the relocation pass disabled reproduces the `VA=0xCF8` class of fault (the falsifier); a fixed-base `Type: EXEC` image still loads; both arches build, with an unimplemented aarch64 path refused by name rather than silently skipped |
 
 ### Milestone M3 — Games (GB-034 … GB-042, native catalog = the parallel swarm)
 
