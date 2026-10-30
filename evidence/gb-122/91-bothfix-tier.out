@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1500s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb125-verify/evidence/gb-122/91-bothfix-wave.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 35966 console lines, 372 FAIL lines, 30 user memory fault records across 24 processes, 88 programs exited, halted=1
+T3_intel: FAIL — 2 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 372 FAIL line(s); first 20:
+2826:[SIGTEST] FAIL waitpid returns the child got=33 want=4294964048
+2986:[SEDTEST] FAIL basic_s (spawn SED.BIN failed)
+3038:[SEDTEST] FAIL s_g (spawn SED.BIN failed)
+3053:[CKSUMTEST] FAIL 'abc\n' (4 bytes)
+3062:[PASTETEST] FAIL three files default TAB
+3093:/CKSUM.BINMD5SUM.BIN: MMTEST FAIL /MD5MSG.TXT1: Too many open files
+3112:[PASTETEST] FAIL -s serial two files
+3190:  TLS_T errno-isolation: FAIL
+3197:[TEST] DIRECT-ext-cat FAIL (empty target, no load failure)
+3289:[SEDTEST] FAIL s_2nd (stdout)
+3307:[SIGTEST] FAIL open cloexec fd got=0 want=1
+3348:[SEDTEST] FAIL s_2nd (status) got 2, want 0
+3373:[MD5TEST] FAIL multi-file order
+3383:[PASTETEST] FAIL -d comma
+3384:[EXPANDTEST] FAIL -t 4,8 list + past last stop
+3394:[CKSUMTEST] FAIL 4000-byte pattern
+3401:[TRTEST] FAIL -cd complement delete
+3420:[COMMTEST] FAIL -2 suppress right-unique
+3422:[HEDTEST] FAIL old -2c
+3498:[CKSUMTEST] FAIL 70000-byte pattern
+T3_intel EXIT=1
