@@ -1,0 +1,14 @@
+# extlibs stage pins (lane xlibs-ext).  Format: <tarball> <source>
+# <source> is an https URL (fetch.sh downloads into dl/) or vendored:<repo path>.
+# The sha256 of every tarball lives in ../sums/<tarball>.sha256.
+libXdamage-1.1.7.tar.xz     https://www.x.org/archive/individual/lib/libXdamage-1.1.7.tar.xz
+libXcomposite-0.4.7.tar.xz  https://www.x.org/archive/individual/lib/libXcomposite-0.4.7.tar.xz
+libXcursor-1.2.3.tar.xz     https://www.x.org/archive/individual/lib/libXcursor-1.2.3.tar.xz
+libXrandr-1.5.5.tar.xz      https://www.x.org/archive/individual/lib/libXrandr-1.5.5.tar.xz
+libXinerama-1.1.6.tar.xz    https://www.x.org/archive/individual/lib/libXinerama-1.1.6.tar.xz
+libXres-1.2.3.tar.xz        https://www.x.org/archive/individual/lib/libXres-1.2.3.tar.xz
+libXpm-3.5.20.tar.xz        https://www.x.org/archive/individual/lib/libXpm-3.5.20.tar.xz
+libjpeg-turbo-3.1.0.tar.gz  vendored:third_party/libjpeg-turbo-3.1.0/libjpeg-turbo-3.1.0.tar.gz
+expat-2.9.0.tar.xz          https://github.com/libexpat/libexpat/releases/download/R_2_9_0/expat-2.9.0.tar.xz
+fontconfig-2.18.3.tar.xz    https://gitlab.freedesktop.org/api/v4/projects/890/packages/generic/fontconfig/2.18.3/fontconfig-2.18.3.tar.xz
+libXft-2.3.9.tar.xz         https://www.x.org/archive/individual/lib/libXft-2.3.9.tar.xz
