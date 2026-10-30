@@ -3,8 +3,8 @@
  *
  * P5 (docs/browser/p5-exec-signals-design.md): the device path now talks
  * to the kernel.  sigaction() marshals the OQ4 struct through row 83
- * (filling sa_restorer with the libc sigreturn trampoline when the caller
- * left it 0), signal() is sigaction + old-handler return, raise() is
+ * (filling sa_restorer with the libc sigreturn trampoline unless the caller
+ * set SA_RESTORER, as on Linux), signal() is sigaction + old-handler return, raise() is
  * kill(self, sig).  Dispositions live kernel-side; SIGCHLD/SIGPIPE/SIGTERM
  * handlers run (P5 delivery engine), while fault-class (SEGV/BUS/ILL/ABRT)
  * and SIGUSR1/SIGUSR2 handlers are accepted-and-recorded but never invoked
@@ -165,7 +165,13 @@ int sigaction(int signum, const struct sigaction *act, struct sigaction *oldact)
   const struct sigaction *actp = act;
   if (act && act->sa_handler != SIG_DFL && act->sa_handler != SIG_IGN) {
     local = *act;
-    if (local.sa_restorer == 0)
+    /* Linux semantics: sa_restorer is only honoured with SA_RESTORER
+       (0x04000000).  Portable code never sets it and often leaves it
+       uninitialised (X.Org's OsSignal builds `act` on the stack), and the
+       kernel uses it as the handler's return address -- stack garbage
+       there sent XHOBBY.BIN's SIGTERM handler "returning" into a random
+       function. */
+    if (!(local.sa_flags & 0x04000000) || local.sa_restorer == 0)
       local.sa_restorer = __ho_sigreturn_trampoline;
     actp = &local;
   }
