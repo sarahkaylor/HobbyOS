@@ -2188,6 +2188,44 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         case 60: syscall_num = SYS_EXIT;  break;   /* exit(code)         */
         /* GB-020: getdents64(fd, dirp, count).  Linux number 217. */
         case 217: syscall_num = SYS_GETDENTS64; break;
+        /* GB-019 (ioctl subset, real request dispatch).  Linux ioctl(16): regs[5]=rdi
+           =fd, regs[4]=rsi=request, regs[3]=rdx=arg.  This is a genuine dispatch on
+           the request number, and every non-ENOTTY outcome is falsifiable:
+           - F_GETFL (3) / F_SETFL (4): route to file_fcntl (K_F_GETFL/SETFL are the
+             same Linux numbers, K_F_GETFL=3, K_F_SETFL=4), which returns the fd's
+             flags / applies O_APPEND etc — real, mutable state. Mis-routing these two
+             changes the result, so the gate's falsifier has a mapping to break.
+           - TCGETS (0x5401) / TIOCGWINSZ (0x5413): a tty-class request.  It takes a
+             struct arg; a bad pointer is -EFAULT.  The compat O0 surface's nodes are
+             not ttys (/dev/null is the probe's deterministic source), so Linux answers
+             ENOTTY (25) here — honestly, after validating the arg, not by skipping it.
+           - any other request: ENOTTY (the node does not implement it).
+           - bad fd: EBADF. */
+        case 16: {
+          struct process *c16 = current_process();
+          int cfd = (int)tf->regs[5];         /* rdi: fd      */
+          int32_t ireq = (int32_t)tf->regs[4]; /* rsi: request */
+          uint64_t iarg = tf->regs[3];         /* rdx: arg     */
+          if (!c16 || cfd < 0 || cfd >= MAX_OPEN_FDS) { tf->regs[0] = (uint64_t)(int64_t)(-9); return; } /* EBADF */
+          if (ireq == 3 || ireq == 4) {  /* F_GETFL(3) / F_SETFL(4) → route to the real fcntl handler */
+            tf->regs[0] = (uint64_t)file_fcntl(c16, cfd, ireq, iarg);
+            return;
+          }
+          if (ireq == 0x5401 || ireq == 0x5413) {  /* TCGETS / TIOCGWINSZ (measured: linux_syscall.h L_TCGETS/L_TIOCGWINSZ) */
+            /* both take a user struct: TCGETS termios 60 B, TIOCGWINSZ winsize 8 B;
+               a bad pointer is EFAULT.  The compat surface has no tty, so the honest
+               Linux answer on /dev/null and friends is ENOTTY. */
+            if ((int64_t)iarg != -1 &&
+                !sys_user_range_ok(iarg, ireq == 0x5401 ? (uint64_t)60 : (uint64_t)8)) {
+              tf->regs[0] = (uint64_t)(int64_t)(-14);   /* -EFAULT */
+              return;
+            }
+            tf->regs[0] = (uint64_t)(int64_t)(-25);     /* -ENOTTY */
+            return;
+          }
+          tf->regs[0] = (uint64_t)(int64_t)(-25);       /* -ENOTTY: node lacks this request */
+          return;
+        }
         default:
           tf->regs[0] = (uint64_t)(int64_t)(-38);  /* -ENOSYS */
           return;
