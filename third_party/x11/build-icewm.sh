@@ -165,6 +165,30 @@ _iw_clients() {
   done
 }
 
+# "hbhost" sub-step (icewm.md §9, lane apps): HBHOST.BIN, the native-app
+# host -- one native HobbyOS app in a real X window over a virtual display.
+# Compiles the default desktop's own window-protocol code unchanged
+# (src/user/desktop.c via hbhost_desk.c, src/user/graphics/{graphics,window}.c,
+# src/user/games_scan.c) with this stage's CC, plus the libX11 side.
+# Runs with "clients" (or alone: --only hbhost).
+_iw_hbhost() {
+  { hb_want hbhost || hb_want clients; } || { hb_log "hbhost: skipped (--only)"; return 0; }
+  local o="$HB_OBJ_DIR/hbhost"; mkdir -p "$o"
+  : > "$HB_LOG_DIR/hbhost.log"
+  local inc="-I$HB_REPO/src/user_include/graphics -I$HB_REPO/src/user/hbhost"
+  local f objs=""
+  for f in hbhost/hbhost.c hbhost/hbhost_desk.c graphics/graphics.c graphics/window.c games_scan.c; do
+    local n; n=$(basename "$f" .c)
+    # shellcheck disable=SC2046,SC2086
+    hb_run hbhost "$CC" $CFLAGS $inc $("$PKG_CONFIG" --cflags x11) -c "$HB_REPO/src/user/$f" -o "$o/$n.o"
+    objs="$objs $o/$n.o"
+  done
+  # shellcheck disable=SC2046,SC2086
+  hb_run hbhost hb_link_flat "$o/HBHOST.BIN" $objs $("$PKG_CONFIG" --libs x11)
+  cp "$o/HBHOST.BIN" "$HB_BIN_DIR/HBHOST.BIN"
+  hb_log "hbhost: HBHOST.BIN ($(stat -c %s "$HB_BIN_DIR/HBHOST.BIN") bytes)"
+}
+
 # Host golden test of icewm/compat (fnmatch/wordexp/glob vs glibc).
 _iw_hosttest() {
   hb_want icewm-hosttest || return 0
@@ -186,4 +210,5 @@ stage_icewm() {
   _iw_build
   _iw_data
   _iw_clients
+  _iw_hbhost
 }
