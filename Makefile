@@ -62,12 +62,14 @@ QEMU_SMP ?= 8
 #     resolves to soft, so every headless tier (test/unit_tests/desktop_test
 #     modes, the run_*.py E2E overrides, CI) keeps its exact current
 #     behavior: plain 2D device + `-display none`.
-#     ARCH=intel: auto always resolves to soft (plain `gtk`, BGA).  On this
-#     workstation (QEMU 10.2.1 3.3, KDE Wayland, 2026-10-29) `gtk,gl=on`
-#     starts but every frame logs "Gdk-WARNING: eglMakeCurrent failed" and
-#     the window never gets a surface, so the desktop stays blank; the guest
-#     only negotiates VIRTIO_F_VERSION_1 (no virgl), so GL buys nothing.
-#     QEMU_GPU=gl still opts in.
+#     ARCH=intel: auto picks GL only when the patched QEMU from
+#     tools/qemu-glfix/ is installed (QEMU_GLFIX_DIR), and then runs that
+#     binary.  Stock QEMU 10.2.1 has two GL-display bugs that make
+#     `gtk,gl=on` unusable here: OVMF's ExitBootServices virtio reset steals
+#     GTK's EGL context onto a vCPU thread ("Gdk-WARNING: eglMakeCurrent
+#     failed" ~5x/s), and a guest resolution change drops the window back to
+#     a blank 2D surface (tools/qemu-glfix/README.md).  Without the patched
+#     build, auto stays soft (plain `gtk`, BGA).  QEMU_GPU=gl still opts in.
 #   gl:   force the GL path.  NOTE: combining QEMU_GPU=gl with a
 #     `-display none` override fails by design — QEMU rejects
 #     virtio-gpu-gl-device when the display backend has no OpenGL support
@@ -77,6 +79,8 @@ QEMU_SMP ?= 8
 # headless tiers stay on the plain device forever.  `make gpu-check` probes
 # this host and prints which mode `auto` will pick.
 QEMU_GPU ?= auto
+QEMU_GLFIX_DIR ?= $(HOME)/.local/share/hobbyos-tools/qemu-glfix/prefix/bin
+QEMU_GLFIX_X64 := $(wildcard $(QEMU_GLFIX_DIR)/qemu-system-x86_64)
 OBJ_DIR = obj/$(ARCH)
 MODE_FILE = $(OBJ_DIR)/.mode
 
@@ -454,6 +458,8 @@ ifeq ($(QEMU_GPU),auto)
       ifeq ($(findstring -display none,$(QEMU_ARGS)),)
         ifneq ($(ARCH),intel)
           GX_GPU_GL := 1
+        else ifneq ($(QEMU_GLFIX_X64),)
+          GX_GPU_GL := 1
         endif
       endif
     endif
@@ -478,6 +484,11 @@ endif
 # test/unit/soak/desktop_test waves keep their exact historical qemu lines.
 ifeq ($(GX_GPU_GL),1)
   GX_X64_GPU_DEV := -device virtio-gpu-gl-pci -vga none
+  ifeq ($(ARCH),intel)
+    ifneq ($(QEMU_GLFIX_X64),)
+      QEMU := $(QEMU_GLFIX_X64)
+    endif
+  endif
 else
   GX_X64_GPU_DEV :=
 endif
@@ -2690,13 +2701,16 @@ gpu-check:
 	  else \
 	    echo "  => ARM verdict: GL unavailable — auto falls back to soft (virtio-gpu-device + plain display)"; \
 	  fi; \
-	  echo "-- x64 (qemu-system-x86_64) --"; \
-	  if command -v qemu-system-x86_64 >/dev/null 2>&1; then \
+	  X64Q="$(QEMU_GLFIX_X64)"; [ -n "$$X64Q" ] || X64Q=qemu-system-x86_64; \
+	  echo "-- x64 ($$X64Q) --"; \
+	  if command -v "$$X64Q" >/dev/null 2>&1; then \
 	    probe "gtk,gl=on + virtio-gpu-gl-pci + -vga none (the GL config)" \
-	      qemu-system-x86_64 -M q35 -m 512M -display gtk,gl=on -device virtio-gpu-gl-pci -vga none -S -monitor none -serial none -nodefaults && GLX64=1 || true; \
+	      "$$X64Q" -M q35 -m 512M -display gtk,gl=on -device virtio-gpu-gl-pci -vga none -S -monitor none -serial none -nodefaults && GLX64=1 || true; \
 	  else echo "  (qemu-system-x86_64 not on PATH)"; fi; \
-	  if [ "$$GLX64" = "1" ]; then \
-	    echo "  => x64 verdict: gtk,gl=on starts — but auto stays soft on x64 (paused probes cannot see the runtime eglMakeCurrent failure); opt in with QEMU_GPU=gl"; \
+	  if [ "$$GLX64" = "1" ] && [ -n "$(QEMU_GLFIX_X64)" ]; then \
+	    echo "  => x64 verdict: GL OK with the patched QEMU — auto picks virtio-gpu-gl-pci + -vga none + gtk,gl=on for interactive desktop boots"; \
+	  elif [ "$$GLX64" = "1" ]; then \
+	    echo "  => x64 verdict: stock QEMU starts gtk,gl=on but its GL display is broken (tools/qemu-glfix/README.md) — auto stays soft; run tools/qemu-glfix/build.sh to enable GL"; \
 	  else \
 	    echo "  => x64 verdict: gtk,gl=on unavailable — auto falls back to plain gtk (no virtio device; guest uses BGA/std-VGA)"; \
 	  fi; \
