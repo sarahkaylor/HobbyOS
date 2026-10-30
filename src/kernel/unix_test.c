@@ -14,6 +14,8 @@
  * bit, no scheduler needed. */
 
 extern int process_kill(int pid); /* fs_test precedent (not in process.h) */
+extern struct usock *fs_test_usock(struct process *p, int fd); /* fs.c */
+extern int usock_test_live(void);                              /* unix.c */
 
 /* Runtime-computed address of a kernel symbol.  The AArch64 kernel boots
  * relocated (limine places the raw image at a slide; boot.s's adrp-based
@@ -591,6 +593,374 @@ static void test_fd_cloexec_flags(void) {
   process_kill(pid);
 }
 
+
+/* --- IceWM M1 (icewm.md section 4.1): named AF_UNIX stream sockets ------ */
+
+/* Build a struct sockaddr_un in `sa`; abstract names get the leading NUL.
+ * Returns the address length a client would pass (Linux convention: path
+ * includes the terminating NUL, abstract is exact). */
+static int mk_sun(uint8_t *sa, const char *path, int abstract) {
+  for (int i = 0; i < K_UNIX_SUN_LEN; i++) sa[i] = 0;
+  sa[0] = K_AF_UNIX;
+  int n = 0;
+  int off = abstract ? 3 : 2;
+  while (path[n]) {
+    sa[off + n] = (uint8_t)path[n];
+    n++;
+  }
+  return abstract ? 3 + n : 2 + n + 1;
+}
+
+struct named_env {
+  int pid, old_pid, baseline, live;
+  struct process *cur;
+};
+
+static void named_env_enter(struct named_env *e) {
+  e->pid = process_create();
+  process_get_pcb(e->pid)->is_kernel_process = 1;
+  e->old_pid = cpu_current_pids[0];
+  set_current_process_pid(0, e->pid);
+  e->cur = current_process();
+  e->baseline = process_group(e->cur)->num_open_fds;
+  e->live = usock_test_live();
+}
+
+static void named_env_leave(struct named_env *e) {
+  EXPECT_EQ(process_group(e->cur)->num_open_fds, e->baseline);
+  EXPECT_EQ(usock_test_live(), e->live); /* no pool entry leaked */
+  set_current_process_pid(0, e->old_pid);
+  process_kill(e->pid);
+}
+
+static int nb_stream(struct process *cur) {
+  return file_socket(cur, K_AF_UNIX, K_SOCK_STREAM | K_SOCK_NONBLOCK, 0);
+}
+
+static void test_unix_named_roundtrip(void) {
+  uart_puts("  Running test_unix_named_roundtrip...\n");
+  tests_run++;
+  struct named_env e;
+  named_env_enter(&e);
+  ASSERT(e.pid >= 0);
+  struct process *cur = e.cur;
+
+  uint8_t sa[K_UNIX_SUN_LEN], out[K_UNIX_SUN_LEN];
+  int salen = mk_sun(sa, "/tmp/.X11-unix/X0", 0);
+  int olen = 0;
+
+  int lfd = nb_stream(cur);
+  ASSERT(lfd >= 0);
+  /* Unbound: getsockname reports the bare family. */
+  EXPECT_EQ(file_sockname(cur, lfd, 0, out, &olen), 0);
+  EXPECT_EQ(olen, 2);
+  EXPECT_EQ(file_bind(cur, lfd, sa, salen), 0);
+  EXPECT_EQ(file_bind(cur, lfd, sa, salen), -EINVAL); /* already bound */
+  EXPECT_EQ(file_listen(cur, lfd, 4), 0);
+  EXPECT_EQ(file_sockname(cur, lfd, 0, out, &olen), 0);
+  EXPECT_EQ(olen, salen);
+  EXPECT_EQ(out[2], '/');
+  EXPECT_EQ(out[2 + 16], '0');
+  EXPECT_EQ(out[2 + 17], 0);
+  EXPECT_EQ(file_sockname(cur, lfd, 1, out, &olen), -ENOTCONN);
+
+  /* Listener: not readable until a connection is pending. */
+  struct k_pollfd pf = {lfd, K_POLLIN, 0};
+  EXPECT_EQ(file_poll(cur, &pf, 1, 0), 0);
+
+  int cfd = nb_stream(cur);
+  ASSERT(cfd >= 0);
+  EXPECT_EQ(file_connect_sa(cur, cfd, sa, salen), 0);
+  EXPECT_EQ(file_connect_sa(cur, cfd, sa, salen), -EISCONN);
+  EXPECT_EQ(file_poll(cur, &pf, 1, 0), 1);
+  EXPECT_EQ(pf.revents, K_POLLIN);
+
+  /* Linux AF_UNIX: the client may write before accept. */
+  EXPECT_EQ(file_write(cur, cfd, "hi", 2, 0), 2);
+
+  olen = 0;
+  int sfd = file_accept(cur, lfd, 0, out, &olen);
+  ASSERT(sfd >= 0);
+  EXPECT_EQ(olen, 2); /* unnamed client */
+  EXPECT_EQ(file_poll(cur, &pf, 1, 0), 0); /* queue drained */
+  EXPECT_EQ(file_accept(cur, lfd, 0, 0, 0), -EAGAIN); /* nonblocking */
+
+  /* Names: client's peer is the listener path; server's peer unnamed;
+   * the accepted end's local name is the listener's. */
+  EXPECT_EQ(file_sockname(cur, cfd, 1, out, &olen), 0);
+  EXPECT_EQ(olen, salen);
+  EXPECT_EQ(file_sockname(cur, sfd, 1, out, &olen), 0);
+  EXPECT_EQ(olen, 2);
+  EXPECT_EQ(file_sockname(cur, sfd, 0, out, &olen), 0);
+  EXPECT_EQ(olen, salen);
+
+  char buf[8];
+  EXPECT_EQ(file_read(cur, sfd, buf, 8, 0), 2);
+  EXPECT_EQ(buf[0], 'h');
+  EXPECT_EQ(buf[1], 'i');
+  EXPECT_EQ(file_write(cur, sfd, "xyz", 3, 0), 3);
+  struct k_pollfd cp = {cfd, K_POLLIN | K_POLLOUT, 0};
+  EXPECT_EQ(file_poll(cur, &cp, 1, 0), 1);
+  EXPECT_EQ(cp.revents, K_POLLIN | K_POLLOUT);
+  EXPECT_EQ(file_read(cur, cfd, buf, 8, 0), 3);
+  EXPECT_EQ(buf[2], 'z');
+  /* Empty, peer alive, O_NONBLOCK (SOCK_NONBLOCK): EAGAIN. */
+  EXPECT_EQ(file_read(cur, cfd, buf, 8, 0), -EAGAIN);
+
+  /* SO_ACCEPTCONN / SO_PEERCRED (zeroed ucred) / SO_SNDBUF. */
+  int v = -1, vlen = 4;
+  EXPECT_EQ(file_socket_getopt(cur, lfd, K_SOL_SOCKET, K_SO_ACCEPTCONN, &v,
+                               &vlen), 0);
+  EXPECT_EQ(v, 1);
+  EXPECT_EQ(file_socket_getopt(cur, cfd, K_SOL_SOCKET, K_SO_ACCEPTCONN, &v,
+                               &vlen), 0);
+  EXPECT_EQ(v, 0);
+  uint32_t cred[3] = {7, 7, 7};
+  int clen = 12;
+  EXPECT_EQ(file_socket_getopt(cur, sfd, K_SOL_SOCKET, K_SO_PEERCRED, cred,
+                               &clen), 0);
+  EXPECT_EQ(clen, 12);
+  EXPECT_EQ(cred[0] | cred[1] | cred[2], 0);
+  clen = 4;
+  EXPECT_EQ(file_socket_getopt(cur, sfd, K_SOL_SOCKET, K_SO_PEERCRED, cred,
+                               &clen), -EINVAL);
+  EXPECT_EQ(file_socket_setopt(cur, cfd, K_SOL_SOCKET, K_SO_SNDBUF, &v, 4), 0);
+
+  /* Peer close: the survivor reads EOF and polls POLLIN|POLLHUP. */
+  EXPECT_EQ(file_close(cur, cfd), 0);
+  struct k_pollfd sp = {sfd, K_POLLIN, 0};
+  EXPECT_EQ(file_poll(cur, &sp, 1, 0), 1);
+  /* POLLERR rides along: the P4 probe reports a dead peer's write side
+   * as POLLOUT|POLLERR and POLLERR is always reported (unchanged P4). */
+  EXPECT_EQ(sp.revents, K_POLLIN | K_POLLHUP | K_POLLERR);
+  EXPECT_EQ(file_read(cur, sfd, buf, 8, 0), 0);
+  EXPECT_EQ(file_write(cur, sfd, "x", 1, 0), -EPIPE);
+
+  EXPECT_EQ(file_close(cur, sfd), 0);
+  EXPECT_EQ(file_close(cur, lfd), 0);
+  named_env_leave(&e);
+}
+
+static void test_unix_named_errors(void) {
+  uart_puts("  Running test_unix_named_errors...\n");
+  tests_run++;
+  struct named_env e;
+  named_env_enter(&e);
+  ASSERT(e.pid >= 0);
+  struct process *cur = e.cur;
+
+  uint8_t pa[K_UNIX_SUN_LEN], ab[K_UNIX_SUN_LEN], xx[K_UNIX_SUN_LEN];
+  int palen = mk_sun(pa, "/tmp/sock-e", 0);
+  int ablen = mk_sun(ab, "/tmp/sock-e", 1); /* same text, abstract key */
+  int xxlen = mk_sun(xx, "/tmp/absent", 0);
+
+  int a = nb_stream(cur), b = nb_stream(cur), c = nb_stream(cur);
+  ASSERT(a >= 0 && b >= 0 && c >= 0);
+  EXPECT_EQ(file_bind(cur, a, pa, palen), 0);
+  EXPECT_EQ(file_bind(cur, b, pa, palen), -EADDRINUSE);
+  /* Path and abstract names are distinct keys. */
+  EXPECT_EQ(file_bind(cur, b, ab, ablen), 0);
+
+  /* Bound but not listening: ECONNREFUSED (path and abstract). */
+  EXPECT_EQ(file_connect_sa(cur, c, pa, palen), -ECONNREFUSED);
+  EXPECT_EQ(file_connect_sa(cur, c, ab, ablen), -ECONNREFUSED);
+  /* No such name: path ENOENT, abstract ECONNREFUSED (Linux). */
+  EXPECT_EQ(file_connect_sa(cur, c, xx, xxlen), -ENOENT);
+  uint8_t ax[K_UNIX_SUN_LEN];
+  int axlen = mk_sun(ax, "nobody", 1);
+  EXPECT_EQ(file_connect_sa(cur, c, ax, axlen), -ECONNREFUSED);
+
+  /* Bad addresses. */
+  uint8_t bad[K_UNIX_SUN_LEN];
+  for (int i = 0; i < K_UNIX_SUN_LEN; i++) bad[i] = 0;
+  bad[0] = K_AF_INET;
+  EXPECT_EQ(file_bind(cur, c, bad, 16), -EINVAL);
+  EXPECT_EQ(file_bind(cur, c, pa, 1), -EINVAL);
+  EXPECT_EQ(file_bind(cur, c, pa, K_UNIX_SUN_LEN + 1), -EINVAL);
+  EXPECT_EQ(file_connect_sa(cur, c, pa, 2), -EINVAL); /* unnamed */
+
+  /* accept on a non-listener; listen on DGRAM; ops on a pipe. */
+  EXPECT_EQ(file_accept(cur, a, 0, 0, 0), -EINVAL);
+  int d = file_socket(cur, K_AF_UNIX, K_SOCK_DGRAM, 0);
+  ASSERT(d >= 0);
+  EXPECT_EQ(file_listen(cur, d, 1), -EOPNOTSUPP);
+  int pfd[2];
+  EXPECT_EQ(file_pipe(cur, pfd), 0);
+  EXPECT_EQ(file_bind(cur, pfd[0], pa, palen), -ENOTSOCK);
+  EXPECT_EQ(file_listen(cur, 50, 1), -EBADF);
+  EXPECT_EQ(file_accept(cur, 60, 0, 0, 0), -EBADF);
+  EXPECT_EQ(file_shutdown(cur, a, 0), -ENOTCONN); /* unconnected */
+
+  /* Type mismatch: a SEQPACKET client at a STREAM listener. */
+  EXPECT_EQ(file_listen(cur, a, 2), 0);
+  int q = file_socket(cur, K_AF_UNIX, K_SOCK_SEQPACKET, 0);
+  ASSERT(q >= 0);
+  EXPECT_EQ(file_connect_sa(cur, q, pa, palen), -EPROTOTYPE);
+
+  /* Listener close frees the name: rebinding it now succeeds. */
+  EXPECT_EQ(file_close(cur, a), 0);
+  EXPECT_EQ(file_connect_sa(cur, c, pa, palen), -ENOENT);
+  int a2 = nb_stream(cur);
+  ASSERT(a2 >= 0);
+  EXPECT_EQ(file_bind(cur, a2, pa, palen), 0);
+
+  /* Autobind: family-only bind picks a unique abstract name. */
+  int z = nb_stream(cur);
+  ASSERT(z >= 0);
+  uint8_t fam[2] = {K_AF_UNIX, 0};
+  EXPECT_EQ(file_bind(cur, z, fam, 2), 0);
+  uint8_t out[K_UNIX_SUN_LEN];
+  int olen = 0;
+  EXPECT_EQ(file_sockname(cur, z, 0, out, &olen), 0);
+  EXPECT_EQ(olen, 2 + 6);
+  EXPECT_EQ(out[2], 0);
+
+  int fds[] = {b, c, d, pfd[0], pfd[1], q, a2, z};
+  for (unsigned i = 0; i < sizeof fds / sizeof fds[0]; i++)
+    EXPECT_EQ(file_close(cur, fds[i]), 0);
+  named_env_leave(&e);
+}
+
+static void test_unix_named_backlog_park(void) {
+  uart_puts("  Running test_unix_named_backlog_park...\n");
+  tests_run++;
+  struct named_env e;
+  named_env_enter(&e);
+  ASSERT(e.pid >= 0);
+  struct process *cur = e.cur;
+  struct process *pcb = process_get_pcb(e.pid);
+
+  uint8_t sa[K_UNIX_SUN_LEN];
+  int salen = mk_sun(sa, "bl", 1);
+
+  /* Blocking listener, empty queue: accept parks (acc_wait + BLOCKED). */
+  int l = file_socket(cur, K_AF_UNIX, K_SOCK_STREAM, 0);
+  ASSERT(l >= 0);
+  EXPECT_EQ(file_bind(cur, l, sa, salen), 0);
+  EXPECT_EQ(file_listen(cur, l, 0), 0); /* backlog 0 admits one (Linux) */
+  struct usock *lu =
+      fs_test_usock(cur, l);
+  ASSERT(lu != 0);
+  int r = file_accept(cur, l, 0, 0, 0);
+  EXPECT_EQ(r, -2);
+  EXPECT_EQ(pcb->state, PROC_STATE_BLOCKED);
+  ASSERT((lu->acc_wait & (1ULL << e.pid)) != 0);
+  pcb->state = PROC_STATE_RUNNING;
+  lu->acc_wait = 0;
+  EXPECT_EQ(process_group(cur)->num_open_fds, e.baseline + 1); /* no leak */
+
+  /* Queue capacity 1: the second nonblocking connect is EAGAIN, a
+   * blocking one parks on conn_wait. */
+  int c1 = nb_stream(cur), c2 = nb_stream(cur);
+  int c3 = file_socket(cur, K_AF_UNIX, K_SOCK_STREAM, 0);
+  ASSERT(c1 >= 0 && c2 >= 0 && c3 >= 0);
+  EXPECT_EQ(file_connect_sa(cur, c1, sa, salen), 0);
+  EXPECT_EQ(file_connect_sa(cur, c2, sa, salen), -EAGAIN);
+  r = file_connect_sa(cur, c3, sa, salen);
+  EXPECT_EQ(r, -2);
+  EXPECT_EQ(pcb->state, PROC_STATE_BLOCKED);
+  ASSERT((lu->conn_wait & (1ULL << e.pid)) != 0);
+  pcb->state = PROC_STATE_RUNNING;
+
+  /* accept4 flags: CLOEXEC + NONBLOCK land on the new fd; accepting wakes
+   * (clears) the parked connector mask. */
+  int s1 = file_accept(cur, l, K_SOCK_CLOEXEC | K_SOCK_NONBLOCK, 0, 0);
+  ASSERT(s1 >= 0);
+  EXPECT_EQ(lu->conn_wait, 0);
+  EXPECT_EQ(file_fcntl(cur, s1, K_F_GETFD, 0), K_FD_CLOEXEC);
+  EXPECT_EQ(file_fcntl(cur, s1, K_F_GETFL, 0) & K_O_NONBLOCK, K_O_NONBLOCK);
+  EXPECT_EQ(file_accept(cur, l, 0x4, 0, 0), -EINVAL); /* bad flag */
+  /* Room again: the retried connect succeeds. */
+  EXPECT_EQ(file_connect_sa(cur, c2, sa, salen), 0);
+
+  /* shutdown(SHUT_WR) on the client: server drains then EOF; client
+   * writes fail EPIPE; the server can still write back. */
+  EXPECT_EQ(file_write(cur, c1, "ab", 2, 0), 2);
+  EXPECT_EQ(file_shutdown(cur, c1, 1), 0);
+  EXPECT_EQ(file_shutdown(cur, c1, 3), -EINVAL);
+  EXPECT_EQ(file_write(cur, c1, "c", 1, 0), -EPIPE);
+  char buf[4];
+  EXPECT_EQ(file_read(cur, s1, buf, 4, 0), 2);
+  struct k_pollfd sp = {s1, K_POLLIN, 0};
+  EXPECT_EQ(file_poll(cur, &sp, 1, 0), 1);
+  EXPECT_EQ(sp.revents, K_POLLIN); /* half-close: no POLLHUP */
+  EXPECT_EQ(file_read(cur, s1, buf, 4, 0), 0);
+  EXPECT_EQ(file_write(cur, s1, "k", 1, 0), 1);
+  EXPECT_EQ(file_read(cur, c1, buf, 4, 0), 1);
+  EXPECT_EQ(buf[0], 'k');
+
+  /* Listener closes with c2 still queued: c2's client sees EOF/EPIPE. */
+  EXPECT_EQ(file_close(cur, l), 0);
+  EXPECT_EQ(file_read(cur, c2, buf, 4, 0), 0);
+  EXPECT_EQ(file_write(cur, c2, "x", 1, 0), -EPIPE);
+
+  int fds[] = {c1, c2, c3, s1};
+  for (unsigned i = 0; i < sizeof fds / sizeof fds[0]; i++)
+    EXPECT_EQ(file_close(cur, fds[i]), 0);
+  named_env_leave(&e);
+}
+
+/* An X server's shape: one listener, many clients alive at once (> the
+ * old 16-pair pool and > the old 32-fd table), all torn down cleanly. */
+static void test_unix_named_many_clients(void) {
+  uart_puts("  Running test_unix_named_many_clients...\n");
+  tests_run++;
+  struct named_env e;
+  named_env_enter(&e);
+  ASSERT(e.pid >= 0);
+  struct process *cur = e.cur;
+
+  uint8_t sa[K_UNIX_SUN_LEN];
+  int salen = mk_sun(sa, "/tmp/.X11-unix/X9", 0);
+  int l = nb_stream(cur);
+  ASSERT(l >= 0);
+  EXPECT_EQ(file_bind(cur, l, sa, salen), 0);
+  EXPECT_EQ(file_listen(cur, l, 128), 0); /* clamped to the kernel queue */
+
+#define NCLI 20
+  int cli[NCLI], srv[NCLI];
+  int ok = 1;
+  for (int i = 0; i < NCLI; i++) {
+    cli[i] = nb_stream(cur);
+    srv[i] = -1;
+    if (cli[i] < 0 || file_connect_sa(cur, cli[i], sa, salen) != 0) ok = 0;
+    if (ok) srv[i] = file_accept(cur, l, K_SOCK_NONBLOCK, 0, 0);
+    if (srv[i] < 0) ok = 0;
+    if (!ok) break;
+  }
+  EXPECT_EQ(ok, 1);
+  EXPECT_EQ(process_group(cur)->num_open_fds, e.baseline + 1 + 2 * NCLI);
+  if (ok) {
+    for (int i = 0; i < NCLI; i++) {
+      char m = (char)('A' + i);
+      EXPECT_EQ(file_write(cur, cli[i], &m, 1, 0), 1);
+    }
+    for (int i = NCLI - 1; i >= 0; i--) {
+      char m = 0;
+      EXPECT_EQ(file_read(cur, srv[i], &m, 1, 0), 1);
+      EXPECT_EQ(m, (char)('A' + i));
+    }
+  }
+  for (int i = 0; i < NCLI; i++) {
+    if (cli[i] >= 0) file_close(cur, cli[i]);
+    if (srv[i] >= 0) file_close(cur, srv[i]);
+  }
+#undef NCLI
+  EXPECT_EQ(file_close(cur, l), 0);
+  named_env_leave(&e);
+
+  /* Every pair went back to the pool: a full pool's worth allocates. */
+  struct usock *held[MAX_UNIX_PAIRS];
+  int n = 0;
+  while (n < MAX_UNIX_PAIRS && (held[n] = usock_alloc_pair(K_UNIX_STREAM)))
+    n++;
+  EXPECT_EQ(n, MAX_UNIX_PAIRS);
+  for (int i = 0; i < n; i++) {
+    usock_close(held[i], 0);
+    usock_close(held[i], 1);
+  }
+}
+
 void unix_test_suite(void) {
   uart_puts("unix_test_suite:\n");
   test_unix_pair_alloc_close();
@@ -603,6 +973,10 @@ void unix_test_suite(void) {
   test_file_poll_engine();
   test_unix_fd_message_machine();
   test_fd_cloexec_flags();
+  test_unix_named_roundtrip();
+  test_unix_named_errors();
+  test_unix_named_backlog_park();
+  test_unix_named_many_clients();
 }
 
 #endif // KERNEL_MODE_UNIT_TEST
