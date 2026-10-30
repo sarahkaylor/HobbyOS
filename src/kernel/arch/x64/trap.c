@@ -3,6 +3,8 @@
 #include "fs.h"
 #include "net.h"
 #include "process.h"
+#include "vdisplay.h"
+#include "display_mode.h"
 #include "setjmp.h"
 #include "timer.h"
 #include "lock.h"
@@ -1289,6 +1291,14 @@ extern int virtio_gpu_flush_args_ok(const struct virtio_gpu_xrect *rects,
 
 static void sys_map_fb(struct trap_frame *tf) {
   uint64_t phys_addr = (uint64_t)virtio_gpu_get_framebuffer();
+  {
+    /* icewm.md §9: an attached process maps its private surface. */
+    int vd = vdisp_attached(current_process());
+    if (vd) {
+      tf->regs[0] = (uint64_t)vdisp_map_fb(current_process(), vd);
+      return;
+    }
+  }
   struct process *cur = current_process();
   if (cur)
     cur = process_group(cur);
@@ -1332,6 +1342,10 @@ static void sys_fb_ioctl(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
     return;
   }
+  if (sz == 0 && vdisp_attached(current_process())) {
+    tf->regs[0] = 0; /* icewm.md §9: FBIOBLANK never reaches the real display */
+    return;
+  }
   /* FBIOBLANK (sz==0) takes a value, not a buffer: nothing to validate. */
   if (sz != 0 && !sys_user_range((uint64_t)arg, sz, 1)) { /* 1 = ok */
     tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
@@ -1350,6 +1364,14 @@ static void sys_flush_fb(struct trap_frame *tf) {
   print_int(pid);
   uart_puts("\n");
 #endif
+  {
+    int vd = vdisp_attached(current_process());
+    if (vd) { /* icewm.md §9: record damage for the host, not the display */
+      vdisp_flush(vd, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+      tf->regs[0] = 0;
+      return;
+    }
+  }
   virtio_gpu_flush();
   tf->regs[0] = 0;
 }
@@ -1389,6 +1411,15 @@ static void sys_flush_fb_rects(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)-EINVAL;
     return;
   }
+  {
+    int vd = vdisp_attached(current_process());
+    if (vd) { /* icewm.md §9 */
+      for (int i = 0; i < count; i++)
+        vdisp_flush(vd, krects[i].x, krects[i].y, krects[i].w, krects[i].h);
+      tf->regs[0] = 0;
+      return;
+    }
+  }
   virtio_gpu_flush_rects(krects, count);
   tf->regs[0] = 0;
 }
@@ -1398,7 +1429,13 @@ static void sys_get_events(struct trap_frame *tf) {
   int max_events = (int)tf->regs[4]; // rsi
   if (sys_user_range((uint64_t)buf,
                      max_events > 0 ? (uint64_t)max_events * 8 : 8, 1)) {
-    tf->regs[0] = virtio_input_get_events(buf, max_events);
+    int vd = vdisp_attached(current_process()); /* icewm.md §9 */
+    if (vd)
+      tf->regs[0] = max_events > 0
+          ? (uint64_t)(int64_t)vdisp_get_events(vd, (struct vdisp_event *)buf, max_events)
+          : 0;
+    else
+      tf->regs[0] = virtio_input_get_events(buf, max_events);
   } else {
     tf->regs[0] = -1;
   }
@@ -1446,13 +1483,61 @@ static void sys_input_read(struct trap_frame *tf) {
   extern uint64_t timer_get_ms(void);
   struct virtio_input_event raw[32];
   int want = max > 32 ? 32 : max;         /* bounded scratch: non-blocking */
-  int got = virtio_input_get_events(raw, want);
+  int vdr = vdisp_attached(current_process()); /* icewm.md §9 */
+  int got = vdr ? vdisp_get_events(vdr, (struct vdisp_event *)raw, want)
+                : virtio_input_get_events(raw, want);
   uint64_t t = timer_get_ms();
   uint64_t sec = t / 1000u, usec = (t % 1000u) * 1000u;
   for (int i = 0; i < got; i++)
     hb_input_fill_event(&ubuf[i], raw[i].type, raw[i].code, raw[i].value,
                         sec, usec);
   tf->regs[0] = (uint64_t)got;
+}
+
+/* icewm.md §9: SYS_VDISPLAY (op, a1, a2) -- see src/include/vdisplay.h. */
+static void sys_vdisplay(struct trap_frame *tf) {
+  int op = (int)tf->regs[5];
+  uint64_t a1 = tf->regs[4];
+  uint64_t a2 = tf->regs[3];
+  struct process *cur = current_process();
+  int64_t r;
+  if (op == VDISP_OP_ATTACH) {
+    r = vdisp_sys_attach(cur, (int)a1);
+  } else if (op == VDISP_OP_DETACH) {
+    r = vdisp_sys_detach(cur);
+  } else if (op == VDISP_OP_INJECT) {
+    int n = (int)a2;
+    struct vdisp_event k[64];
+    if (n < 0 || n > 64) {
+      r = -EINVAL;
+    } else if (n == 0) {
+      r = 0;
+    } else if (!a1 || (a1 & 3) ||
+               vm_user_read(cur, a1, k, n * (int)sizeof(struct vdisp_event)) != 0) {
+      r = -EFAULT;
+    } else {
+      r = vdisp_sys_inject(cur, k, n);
+    }
+  } else if (op == VDISP_OP_STATUS) {
+    if (!a1 || (a1 & 3) || !sys_user_range(a1, sizeof(struct vdisp_status), 1)) {
+      r = -EFAULT;
+    } else {
+      struct vdisp_status st;
+      r = vdisp_sys_status(cur, &st);
+      if (r == 0) {
+        struct vdisp_status *u = (struct vdisp_status *)a1;
+        u->flush_seq = st.flush_seq;
+        u->dx = st.dx; u->dy = st.dy; u->dw = st.dw; u->dh = st.dh;
+        u->mapped = st.mapped;
+        u->reads = st.reads;
+        u->read_age_ms = st.read_age_ms;
+        u->queued = st.queued;
+      }
+    }
+  } else {
+    r = -EINVAL;
+  }
+  tf->regs[0] = (uint64_t)r;
 }
 
 static void sys_get_cpuid(struct trap_frame *tf) {
@@ -2284,6 +2369,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_getpeername(tf);
   } else if (syscall_num == SYS_SHUTDOWN) {
     sys_shutdown(tf);
+  } else if (syscall_num == SYS_VDISPLAY) {
+    sys_vdisplay(tf);
   } else {
     uart_puts("Unknown System Call Invoked!\n");
     tf->regs[0] = -ENOSYS;
