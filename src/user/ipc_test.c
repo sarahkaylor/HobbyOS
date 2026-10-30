@@ -1139,6 +1139,10 @@ int main(void) {
   signal(SIGPIPE, SIG_IGN);
 #endif
 
+  /* IceWM M1 first: the named-socket surface is the newest and the one
+   * the X11 session depends on; run it before the older P4 sections so a
+   * late-wave fault elsewhere cannot hide its verdict. */
+  t_named();
   t_stream_fork();
   t_stream_ring();
   t_seqpacket();
@@ -1147,7 +1151,6 @@ int main(void) {
   t_blocking_park();
   t_error_paths();
   t_select_unix();
-  t_named();
 
   if (fails == 0) {
     print_console("ALL TESTS PASSED SUCCESSFULLY!\n");
