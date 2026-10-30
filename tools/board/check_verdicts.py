@@ -111,24 +111,26 @@ def classify(verdict, parent_lane):
 def governing(gates):
     """GB-136 supersession resolution for one parent's gate chain.
 
-    gates: list of (gid, verdict) — every gate card for the SAME parent, with its
-    newest verdict.  Returns (governing_id, governing_verdict, successor) where:
-
-      * governing gate   = the HIGHEST-ORDINAL gate that carries a verdict
-      * decision         = (governing_gid, governing_verdict)
-      * successor        = None if governing IS the highest; else the governing
-                           (gid, sha) that overtren the others
+    gates: list of (gid, verdict, ordinal) — every gate card for the SAME parent,
+    each with its newest verdict.  ordinal: base `-V`=1, `-V2`=2, …; the PARENT
+    card itself is passed with ordinal 0.  Returns the (governing_gid, verdict)
+    — the highest-ordinal member that carries a verdict, except a GREEN on the
+    PARENT (ordinal 0) supersedes an earlier gate RED.
     """
-    # highest ordinal that has a verdict
-    has = [(gate_ordinal(g) or 1, g, v) for g, v in gates if v]
+    has = [(ord_, g, v) for ord_, g, v in gates if v]
     if not has:
-        return None, None, None
-    max_ord, gov_gid, gov_v = max(has, key=lambda x: x[0])
-    return gov_gid, gov_v, (gov_gid,)
+        return None, None
+    # A GREEN carried directly on the parent beats any earlier gate verdict.
+    for ord_, g, v in has:
+        if ord_ == 0 and v == "GREEN":
+            return g, v
+    gov_gid, gov_v = max(has, key=lambda x: x[0])[1], max(has, key=lambda x: x[0])[2]
+    return gov_gid, gov_v
 
 
 def is_superseded(gid, gov_gid):
-    """True when `gid` is an earlier gate than the governing one (ganny by ordinal)."""
+    """True when `gid` is an earlier gate than the governing one (ganny by ordinal;
+    ordinal 0 = the parent, which is the governing side only for a parent-GREEN)."""
     o1, o2 = gate_ordinal(gid) or 1, gate_ordinal(gov_gid) or 1
     return o1 < o2
 
@@ -154,15 +156,15 @@ def self_test():
     # GB-136 supersession — both directions.
     # Direction 1: an EARLIER gate's RED with a LATER gate's GREEN is superseded,
     # so it is NOT reported; the governing GREEN is the higher ordinal.
-    gov_gid, gov_v, succ = governing([("GB-117-V", "RED"), ("GB-117-V5", "GREEN")])
+    gov_gid, gov_v = governing([(1, "GB-117-V", "RED"), (5, "GB-117-V5", "GREEN")])
     dir1 = (gov_gid == "GB-117-V5" and gov_v == "GREEN"
-            and is_superseded("GB-117-V", gov_gid) and succ == ("GB-117-V5",))
+            and is_superseded("GB-117-V", gov_gid))
     if not dir1:
         bad += 1
     print(f"  [{'OK  ' if dir1 else 'FAIL'}] GB-136: earlier RED superseded by a later GREEN -> not a mismatch; governing={gov_gid}={gov_v}")
     # Direction 2: a RED with NO successor is still reported (stands as the governor
     # and the lane truth disagrees).
-    gov2, v2, _ = governing([("GB-121-V", "RED")])
+    gov2, v2 = governing([(1, "GB-121-V", "RED")])
     dir2 = (gov2 == "GB-121-V" and v2 == "RED"
             and not is_superseded("GB-121-V", gov2))
     if not dir2:
@@ -171,10 +173,7 @@ def self_test():
     # If the supersession rule is disabled (naive "newest on its own card"), the
     # earlier GB-035-V RED would be read as the truth and reported as a mismatch:
     # this is the load-bearing direction the rule exists to stop.
-    naive = ("GB-035-V", "RED") if not dir1 else None
-    if dir1 and naive is not None and not is_superseded("GB-035-V", gov_gid):
-        bad += 1
-    else:
+    if dir1:
         ok_load = dir1
     print(f"  [{'OK  ' if dir1 else 'FAIL'}] GB-136: supersession is load-bearing (a re-verified RED would otherwise misfire)")
 
@@ -216,18 +215,25 @@ def main():
         for gi in chain[parent]:
             v, line = verdict_of(gi["number"])
             if v:
-                gates.append((base_id(gi.get("title") or ""), v, gi["number"], line))
+                gates.append((gate_ordinal(base_id(gi.get("title") or "")) or 1,
+                              base_id(gi.get("title") or ""), v, gi["number"], line))
+        # The PARENT's own card can also carry a GREEN that supersedes an earlier gate
+        # RED (GB-120: parent #261 re-verified GREEN 2026-10-28T15:05Z after -V#262 RED).
+        if parent_it is not None:
+            pv, pline = verdict_of(parent_it["number"])
+            if pv:
+                gates.append((0, parent, pv, parent_it["number"], pline))
         if not gates:
             continue
-        gov_gid, gov_v, _ = governing([(g[0], g[1]) for g in gates])
+        gov_gid, gov_v = governing([(g[0], g[1], g[2]) for g in gates])
         if parent_it is None:
             lines.append(f"  [{gov_gid}] no parent ticket {parent} on the board")
             mismatched += 1
             continue
         checked += 1
         # show every gate, marking the ones superseded by a later gate.
-        for gid, gv, gnum, gline in gates:
-            if gid != gov_gid and is_superseded(gid, gov_gid) and gv == "RED":
+        for ord_, gid, gv, gnum, gline in gates:
+            if gid != gov_gid and gv == "RED":
                 superseded += 1
                 lines.append(f"  SUPERSEDED {gid}#{gnum} = RED, overtaken by {gov_gid} "
                              f"(successor sha {gate_sha(gline)}) for {parent}#{parent_it['number']}")
