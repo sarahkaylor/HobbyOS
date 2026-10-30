@@ -1,0 +1,69 @@
+handler                      regs[] read        as argument        registers
+sys_write_console            [0, 4, 5]          []                 
+sys_exit                     [0, 5]             []                 
+sys_fork                     [0]                []                 
+sys_open                     [0, 4, 5]          [4, 5]             4=rsi,5=rdi
+sys_close                    [0, 5]             [5]                5=rdi
+sys_dup                      [0, 5]             []                 
+sys_dup2                     [0, 4, 5]          []                 
+sys_read                     [0, 3, 4, 5]       [3, 4, 5]          3=rdx,4=rsi,5=rdi
+sys_get_args                 [0, 4, 5]          [4, 5]             4=rsi,5=rdi
+sys_sysinfo                  [0, 3, 4, 5]       [3, 4, 5]          3=rdx,4=rsi,5=rdi
+sys_unlink                   [0, 5]             [5]                5=rdi
+sys_rename                   [0, 4, 5]          [4, 5]             4=rsi,5=rdi
+sys_connect                  [0, 3, 4, 5]       [3, 4, 5]          3=rdx,4=rsi,5=rdi
+sys_socket                   [0, 3, 4, 5]       []                 
+sys_connect_fd               [0, 3, 4, 5]       []                 
+sys_fcntl                    [0, 3, 4, 5]       [3, 4]             3=rdx,4=rsi
+sys_select                   [0, 3, 4, 5, 7, 9] [3, 4, 5, 7, 9]    3=rdx,4=rsi,5=rdi,7=r8,9=r10
+sys_poll                     [0, 3, 4, 5]       [3, 4, 5]          3=rdx,4=rsi,5=rdi
+sys_socketpair               [0, 3, 4, 5, 9]    [3, 4, 5, 9]       3=rdx,4=rsi,5=rdi,9=r10
+sys_sendmsg                  [0, 3, 4, 5]       [3, 4, 5]          3=rdx,4=rsi,5=rdi
+sys_recvmsg                  [0, 3, 4, 5]       [3, 4, 5]          3=rdx,4=rsi,5=rdi
+sys_thread_create            [0, 3, 4, 5, 9]    []                 
+sys_futex                    [0, 3, 4, 5, 9]    []                 
+sys_thread_exit              [5]                []                 
+sys_set_tls                  [0, 5]             []                 
+sys_getsockopt               [0, 3, 4, 5, 7, 9] [7, 9]             7=r8,9=r10
+sys_setsockopt               [0, 3, 4, 5, 7, 9] [7, 9]             7=r8,9=r10
+sys_getrandom                [0, 3, 4, 5]       [3, 4, 5]          3=rdx,4=rsi,5=rdi
+sys_gettime                  [0, 4, 5]          [4, 5]             4=rsi,5=rdi
+sys_getstack                 [0, 5]             [5]                5=rdi
+sys_sleep                    [0, 5]             [5]                5=rdi
+sys_write                    [0, 3, 4, 5]       [3, 4, 5]          3=rdx,4=rsi,5=rdi
+sys_spawn                    [0, 3, 4, 5, 7, 9] [3, 4, 5, 7, 9]    3=rdx,4=rsi,5=rdi,7=r8,9=r10
+sys_spawn_ex                 [0, 3, 4, 5, 7, 9] []                 
+sys_pipe                     [0, 5]             [5]                5=rdi
+sys_map_fb                   [0]                []                 
+sys_fb_ioctl                 [0, 4, 5]          []                 
+sys_flush_fb                 [0]                []                 
+sys_flush_fb_rects           [0, 4, 5]          [4, 5]             4=rsi,5=rdi
+sys_get_events               [0, 4, 5]          [4, 5]             4=rsi,5=rdi
+sys_input_ioctl              [0, 4, 5]          []                 
+sys_input_read               [0, 4, 5]          []                 
+sys_get_cpuid                [0]                []                 
+sys_available                [0, 5]             [5]                5=rdi
+sys_read_dir                 [0, 3, 4, 5]       [3, 4, 5]          3=rdx,4=rsi,5=rdi
+sys_getdents64               [0, 3, 4, 5]       [3, 4, 5]          3=rdx,4=rsi,5=rdi
+sys_mkdir                    [0, 5]             [5]                5=rdi
+sys_rmdir                    [0, 5]             [5]                5=rdi
+sys_mount                    [0, 4, 5]          [4, 5]             4=rsi,5=rdi
+sys_umount                   [0, 5]             [5]                5=rdi
+sys_getcwd                   [0, 4, 5]          [4, 5]             4=rsi,5=rdi
+sys_lseek                    [0, 3, 4, 5]       [3, 4, 5]          3=rdx,4=rsi,5=rdi
+sys_ftruncate                [0, 4, 5]          [4, 5]             4=rsi,5=rdi
+sys_stat                     [0, 4, 5]          [4, 5]             4=rsi,5=rdi
+sys_fstat                    [0, 4, 5]          [4, 5]             4=rsi,5=rdi
+sys_chdir                    [0, 5]             [5]                5=rdi
+sys_kill                     [0, 4, 5]          [4, 5]             4=rsi,5=rdi
+sys_get_progname             [0, 4, 5]          [4, 5]             4=rsi,5=rdi
+sys_getpid                   [0]                []                 
+sys_getppid                  [0]                []                 
+sys_waitpid                  [0, 1, 2, 3, 4, 5] []                 
+sys_wait4                    [0, 1, 2, 3, 4, 5, 9] []                 
+sys_exec                     [0, 3, 4, 5]       [4, 5]             4=rsi,5=rdi
+sys_sigaction                [0, 3, 4, 5]       [3, 4, 5]          3=rdx,4=rsi,5=rdi
+sys_getenv                   [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] [3, 4, 5]          3=rdx,4=rsi,5=rdi
+
+suspects (argument read from a clobbered register): none
+handlers scanned: 65
