@@ -2285,6 +2285,25 @@ x11-staged:
 	bash third_party/x11/build.sh --arch $(ARCH) --stage all -j $(or $(X11_JOBS),8); \
 	for b in $(X11_REQUIRED_BINS); do [ -f "$(X11_BUILD_DIR)/bin/$$b" ] || { echo "[x11] ERROR: build.sh did not produce $(X11_BUILD_DIR)/bin/$$b"; exit 1; }; done
 
+# icewm.md §9 (lane apps): HBHOST.BIN, the native-app host IceWM's menu
+# launches every HobbyOS program through.  It compiles this tree's desktop
+# code (desktop.c, window.c, graphics.c) so it is rebuilt here whenever
+# those change -- via build.sh's "hbhost" sub-step, against the X client
+# libraries in X11_PREFIX (default: the build dir's own prefix).
+X11_PREFIX ?= $(X11_BUILD_DIR)/prefix
+HBHOST_SRCS = src/user/hbhost/hbhost.c src/user/hbhost/hbhost_desk.c src/user/hbhost/hbhost.h \
+  src/user/desktop.c src/user/graphics/graphics.c src/user/graphics/window.c src/user/games_scan.c \
+  src/include/vdisplay.h src/include/syscall.h src/user_include/graphics/window.h
+$(X11_BUILD_DIR)/bin/HBHOST.BIN: $(HBHOST_SRCS) $(OBJ_DIR)/libc.a $(OBJ_DIR)/crt0.o | x11-staged
+	@if [ -f "$(X11_PREFIX)/lib/libX11.a" ]; then \
+	  X11_BUILD_DIR=$(abspath $(X11_BUILD_DIR)) bash third_party/x11/build.sh --arch $(ARCH) \
+	    --prefix $(abspath $(X11_PREFIX)) --stage icewm --only hbhost -j $(or $(X11_JOBS),8); \
+	elif [ -f "$@" ]; then echo "[hbhost] WARN: no libX11 under X11_PREFIX=$(X11_PREFIX); keeping $@"; touch "$@"; \
+	else echo "[hbhost] ERROR: building HBHOST.BIN needs the X client libs: set X11_PREFIX (no $(X11_PREFIX)/lib/libX11.a)"; exit 1; fi
+ifeq ($(DESKTOP),icewm)
+disk.img: $(X11_BUILD_DIR)/bin/HBHOST.BIN
+endif
+
 # The DESKTOP knob's disk/kernel wiring.  The stamp prerequisites change no
 # file on the hobby disk; the icewm ones only exist under DESKTOP=icewm.
 $(OBJ_DIR)/main.o: $(DESKTOP_FILE)

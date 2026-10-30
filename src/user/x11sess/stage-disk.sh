@@ -58,3 +58,14 @@ if [ -d "$XDIR/disk" ]; then
 else
   echo "[x11-stage] WARN: $XDIR/disk missing - no /X11 or /ICEWM data tree on the disk"
 fi
+
+# icewm.md §9: IceWM's start menu + toolbar mirror the default desktop's
+# Apps menu (pinned lists read from desktop.c; files from THIS disk).
+HERE=$(cd "$(dirname "$0")" && pwd)
+REPO=$(cd "$HERE/../../.." && pwd)
+gen=$(mktemp -d)
+sh "$HERE/gen-icewm-menu.sh" "$DISK" "$REPO/src/user/desktop.c" "$gen"
+mdir -i "$DISK" ::/ICEWM >/dev/null 2>&1 || "$MMD" -i "$DISK" ::/ICEWM
+"$MCOPY" -o -i "$DISK" "$gen/menu" ::/ICEWM/menu
+"$MCOPY" -o -i "$DISK" "$gen/toolbar" ::/ICEWM/toolbar
+rm -rf "$gen"
