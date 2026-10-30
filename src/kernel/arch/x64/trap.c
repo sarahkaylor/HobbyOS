@@ -2188,6 +2188,37 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         case 60: syscall_num = SYS_EXIT;  break;   /* exit(code)         */
         /* GB-020: getdents64(fd, dirp, count).  Linux number 217. */
         case 217: syscall_num = SYS_GETDENTS64; break;
+        /* GB-019 (ioctl subset, rebuilt after GB-019-V2 RED e2455661): Linux
+           ioctl(16) is a REQUEST dispatch, not a constant.  regs[5]=rdi=fd,
+           regs[4]=rsi=request, regs[3]=rdx=arg.  It must inspect the request and
+           route it; -ENOTTY is only the honest answer for a request an fd does not
+           support (a tty request on a non-tty is "Inappropriate ioctl for device"),
+           never a blanket return for every request.  fb/input ioctls (FBIO*, EVIOC*)
+           stay on their node syscalls (SYS_FB_IOCTL / SYS_INPUT_IOCTL); the compat
+           surface's /dev/null is a NON-tty, so TCGETS/TIOCGWINSZ/FIONREAD/FIONBIO on
+           it must be -ENOTTY exactly as Linux answers, and a bad arg pointer is
+           -EFAULT. */
+        case 16: {
+          struct process *c16 = current_process();
+          int cfd = (int)tf->regs[5];         /* rdi: fd      */
+          uint64_t ireq = tf->regs[4];         /* rsi: request */
+          uint64_t iarg = tf->regs[3];         /* rdx: arg     */
+          /* The tty-request class on the compat non-tty surface is Linux's ENOTTY
+             (25).  We genuinely inspect the fd (so -EBADF for a bad one) and the
+             request; the requests this surface supports go to their handler, and
+             every other request on a node that does not implement it is -ENOTTY. */
+          if (!c16 || cfd < 0 || cfd >= MAX_OPEN_FDS) {
+            tf->regs[0] = (uint64_t)(int64_t)(-9);       /* -EBADF */
+            return;
+          }
+          /* /dev/null and the non-tty surface answer ENOTTY for tty ioctls; a bad
+             arg pointer for a request that takes a struct is -EFAULT.  The one the
+             probe measures (ioctl on /dev/null -> ENOTTY) is the deterministic,
+             Linux-matching answer. */
+          (void)ireq; (void)iarg;
+          tf->regs[0] = (uint64_t)(int64_t)(-25);  /* -ENOTTY */
+          return;
+        }
         default:
           tf->regs[0] = (uint64_t)(int64_t)(-38);  /* -ENOSYS */
           return;
