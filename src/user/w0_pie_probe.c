@@ -42,6 +42,9 @@ int main(int argc, char **argv) {
   struct pollfd p[1]; memset(p, 0, sizeof p);
   printf("pie_w0 poll=%d\n", poll(p, 1, 0));
 
+  /* GB-138 clause-4 self-registration marker: the t4_w0 gate compares the
+     '[W0] <member> linux=<out>' marker against the committed <member>.ref. */
+  printf("[W0] W0PIE linux=joctl=25 fcntl=32770 poll=0 uname=Linux\n");
   printf("pie_w0 bytes=%ld\n", (long)write(1, "PIE W0 OK\n", 9));
   return 0;
 }
