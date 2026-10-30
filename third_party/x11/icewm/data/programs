@@ -1,0 +1,7 @@
+# /ICEWM/programs -- the "Programs" submenu: HobbyOS X clients (real Xlib).
+menu "Accessories" folder {
+    prog "XCalc (calculator)" app XCALCR.BIN
+}
+menu "Toys" folder {
+    prog "XEyes" xload XEYESR.BIN
+}
