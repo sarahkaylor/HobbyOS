@@ -609,6 +609,58 @@ static void sys_set_tls(struct trap_frame *tf) {
   tf->regs[0] = (uint64_t)(int64_t)r;
 }
 
+/* --- IceWM M1 (icewm.md section 4.1): named AF_UNIX (96-102).  Thin
+ * layer over fs.c, which validates every user range before changing any
+ * state; -2 parks (blocking accept/connect) ride the pipe restart. ---- */
+
+static void sys_bind(struct trap_frame *tf) {
+  tf->regs[0] = (uint64_t)(int64_t)file_bind_user(
+      current_process(), (int)tf->regs[0], tf->regs[1], (int)tf->regs[2]);
+}
+
+static void sys_listen(struct trap_frame *tf) {
+  tf->regs[0] = (uint64_t)(int64_t)file_listen(current_process(),
+                                               (int)tf->regs[0], (int)tf->regs[1]);
+}
+
+static void sys_accept4(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  int r = file_accept_user(caller, (int)tf->regs[0], tf->regs[1], tf->regs[2],
+                           (int)tf->regs[3]);
+  if (r == -2) {
+    tf->elr -= 4; /* restart when woken (pipe park model) */
+    schedule(tf, 0);
+  } else {
+    tf->regs[0] = (uint64_t)(int64_t)r;
+  }
+}
+
+static void sys_connect_addr(struct trap_frame *tf) {
+  struct process *caller = current_process();
+  int r = file_connect_user(caller, (int)tf->regs[0], tf->regs[1], (int)tf->regs[2]);
+  if (r == -2) {
+    tf->elr -= 4; /* restart when woken (pipe park model) */
+    schedule(tf, 0);
+  } else {
+    tf->regs[0] = (uint64_t)(int64_t)r;
+  }
+}
+
+static void sys_getsockname(struct trap_frame *tf) {
+  tf->regs[0] = (uint64_t)(int64_t)file_sockname_user(
+      current_process(), (int)tf->regs[0], 0, tf->regs[1], tf->regs[2]);
+}
+
+static void sys_getpeername(struct trap_frame *tf) {
+  tf->regs[0] = (uint64_t)(int64_t)file_sockname_user(
+      current_process(), (int)tf->regs[0], 1, tf->regs[1], tf->regs[2]);
+}
+
+static void sys_shutdown(struct trap_frame *tf) {
+  tf->regs[0] = (uint64_t)(int64_t)file_shutdown(current_process(),
+                                                 (int)tf->regs[0], (int)tf->regs[1]);
+}
+
 static void sys_getsockopt(struct trap_frame *tf) {
   void *val = (void *)tf->regs[3];
   int *len = (int *)tf->regs[4];
@@ -616,6 +668,13 @@ static void sys_getsockopt(struct trap_frame *tf) {
 
   if (!val || !len || !sys_user_range((uint64_t)val, sizeof(int), 1) ||
       !sys_user_range((uint64_t)len, sizeof(int), 1)) {
+    tf->regs[0] = -EFAULT;
+    return;
+  }
+  /* IceWM M1: SO_PEERCRED writes a 12-byte struct ucred; validate what
+   * the caller's *len offers beyond one int (capped). */
+  if (*len > (int)sizeof(int) &&
+      !sys_user_range((uint64_t)val, (uint64_t)(*len > 64 ? 64 : *len), 1)) {
     tf->regs[0] = -EFAULT;
     return;
   }
@@ -2110,6 +2169,20 @@ void sync_lower_handler_c(struct trap_frame *tf) {
       sys_sendmsg(tf);
     } else if (syscall_num == SYS_RECVMSG) {
       sys_recvmsg(tf);
+    } else if (syscall_num == SYS_BIND) {         /* IceWM M1 (96-102) */
+      sys_bind(tf);
+    } else if (syscall_num == SYS_LISTEN) {
+      sys_listen(tf);
+    } else if (syscall_num == SYS_ACCEPT4) {
+      sys_accept4(tf);
+    } else if (syscall_num == SYS_CONNECT_ADDR) {
+      sys_connect_addr(tf);
+    } else if (syscall_num == SYS_GETSOCKNAME) {
+      sys_getsockname(tf);
+    } else if (syscall_num == SYS_GETPEERNAME) {
+      sys_getpeername(tf);
+    } else if (syscall_num == SYS_SHUTDOWN) {
+      sys_shutdown(tf);
     } else {
       uart_puts("Unknown System Call Invoked!\n");
       tf->regs[0] = -ENOSYS;

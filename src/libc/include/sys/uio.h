@@ -13,7 +13,7 @@
 #else
 
 #include <stddef.h>
-#include <sys/types.h> /* ssize_t */
+#include <sys/types.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,11 +24,12 @@ extern "C" {
     size_t iov_len;
   };
 
-#ifndef IOV_MAX
+  /* IceWM M1: scatter/gather I/O (src/libc/src/socket.c).  On sockets with
+   * <= UIO_FASTIOV vectors the call is one sendmsg/recvmsg (atomic for the
+   * kernel); otherwise the vectors are walked in order with write/read,
+   * stopping at the first short transfer (valid POSIX partial semantics). */
 #define IOV_MAX 1024
-#endif
-  /* icewm.md M2 (src/libc/src/uio.c): sockets via sendmsg/recvmsg (one
-   * syscall), other fds via a read/write loop. */
+#define UIO_MAXIOV IOV_MAX
   ssize_t readv(int fd, const struct iovec *iov, int iovcnt);
   ssize_t writev(int fd, const struct iovec *iov, int iovcnt);
 

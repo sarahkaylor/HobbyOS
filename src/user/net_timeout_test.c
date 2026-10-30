@@ -15,7 +15,7 @@ __attribute__((section(".text._start"))) void _start(void) {
   uint16_t target_port = 80;
 
   print("Connecting to 10.0.2.16:80 (expecting timeout)...\n");
-  int fd = connect(target_ip, target_port, IP_PROTO_TCP);
+  int fd = net_connect(target_ip, target_port, IP_PROTO_TCP);
   if (fd < 0) {
     print("net_timeout_test success: connect timed out and returned error as expected.\n");
     exit(0);

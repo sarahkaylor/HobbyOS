@@ -2434,7 +2434,7 @@ void process_exec_apply(struct process *grp, const char *env, int envc) {
     for (int fd = 0; fd < MAX_OPEN_FDS; fd++) {
       if ((grp->fd_cloexec >> fd) & 1u) {
         file_close(grp, fd); /* no-op -1 when the slot was already empty */
-        grp->fd_cloexec &= ~(1u << fd);
+        grp->fd_cloexec &= ~(1ull << fd);
       }
     }
   }
