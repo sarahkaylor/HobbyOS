@@ -94,11 +94,19 @@ def verdict_line_of(body):
         # including the line that documents this very parser — cannot become one.  The
         # evidence string still quotes the original line.
         ln = re.sub(r"`[^`]*`", "", ln_raw)
-        # (A) an explicit marker, line-initial only (the shape every Verifier uses).
-        m = re.match(r"^\s*(?:[-*]\s*)?(?:#{1,6}\s*)?\**\s*VERDICT\s*:\s*\**\s*(GREEN|RED)(?![|\w-])",
+        # (A) an explicit marker, line-initial only.  GB-139: the DOMINANT Verifier shape on
+        # this board is `**VERDICT — GREEN (GB-nnn-V2).**` — an em dash, not a colon — which
+        # the colon-only rule missed on six cards, so older REDs governed and the board read
+        # as if six Done cards had failed their last gate.
+        m = re.match(r"^\s*(?:[-*]\s*)?(?:#{1,6}\s*)?\**\s*VERDICT\s*(?::|—|–|-)\s*\**\s*(GREEN|RED)(?![|\w-])",
                      ln, re.I)
         if m:
             return m.group(1).upper(), ln_raw.strip()[:160]
+        # (A2) `**GB-101-V6 — GREEN at PR #243 head …` — a bolded card id, an em dash,
+        # then the verdict, with no heading and no VERDICT word at all.
+        m = re.match(r"^\s*\**\s*[A-Za-z0-9_-]*GB-\d{3}[A-Za-z0-9-]*\s*[—–-]\s*\**\s*(GREEN|RED)(?![|\w-])", ln)
+        if m:
+            return m.group(1), ln_raw.strip()[:160]
         # (B) a line-initial, UPPER-CASE verdict token, optionally bold, followed by a
         # separator or end-of-line.  GB-136-V3 found three prose lines that this must
         # reject: `red or pending run …`, `RED fixed (F1 + F2) …`, `red log: …`.
@@ -239,6 +247,10 @@ def self_test():
         # it was the newest "verdict" on GB-136 and read as GREEN over a standing RED.
         ("- **(A)** explicit `VERDICT: GREEN|RED` marker anywhere.", None),
         ("| (A) | an explicit `VERDICT: GREEN|RED` marker |", None),
+        # GB-139: the shapes the board actually uses and the colon-only rule missed
+        ("**VERDICT — GREEN (GB-060-V2).** Gate tree `832342f`", "GREEN"),
+        ("**VERDICT — GREEN (GB-044-V).** Gate run by the DEEP Verifier", "GREEN"),
+        ("**GB-101-V6 — GREEN at PR #243 head `1dd7160`", "GREEN"),
         ("**MERGED — `b1594f9` on `main`. GB-005 → Done.**", None),
     ]
     for text, want in parse_cases:
