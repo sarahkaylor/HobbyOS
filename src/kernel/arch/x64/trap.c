@@ -932,7 +932,9 @@ static void sys_spawn(struct trap_frame *tf) {
   const char *filename = (const char *)tf->regs[5]; // rdi
   int stdin_fd = (int)tf->regs[4]; // rsi
   int stdout_fd = (int)tf->regs[3]; // rdx
-  int stderr_fd = (int)tf->regs[2]; // rcx
+  int stderr_fd = (int)tf->regs[9]; // r10 — the 4th syscall arg.  (regs[2] is
+  /* rcx, clobbered by the syscall instruction to hold the return address --
+     reading stderr_fd from it handed the child a garbage fd (GB-095).) */
   const char *args_ptr = (const char *)tf->regs[7]; // r8
 
   struct process *caller = current_process();
