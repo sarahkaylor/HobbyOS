@@ -89,10 +89,23 @@ def verdict_line_of(body):
     longer word: `REDs`, `GREEN-gated`, `REDUCE` are not verdicts.
     """
     for ln in (body or "").replace("\r", "").split("\n"):
-        m = re.match(r"^\s*(?:[-*]\s*)?(?:#{1,6}\s*)?\**\s*(?:VERDICT\s*:\s*)?\**\s*"
-                     r"(GREEN|RED)(?![\w-])", ln, re.I)
+        # (A) an explicit marker — the shape every Verifier uses.
+        m = re.search(r"\bVERDICT\s*:\s*\**\s*(GREEN|RED)\b", ln, re.I)
         if m:
             return m.group(1).upper(), ln.strip()[:160]
+        # (B) a line-initial, UPPER-CASE verdict token, optionally bold, followed by a
+        # separator or end-of-line.  GB-136-V3 found three prose lines that this must
+        # reject: `red or pending run …`, `RED fixed (F1 + F2) …`, `red log: …`.  The
+        # separator requirement rejects the first two (a following lowercase word), and
+        # requiring upper case rejects the lowercase sentences.
+        m = re.match(r"^\s*(?:[-*]\s*)?\**\s*(GREEN|RED)\**\s*(?:[—–\-:.,;!)]|$)", ln)
+        if m:
+            return m.group(1), ln.strip()[:160]
+        # (C) a heading that names the card, an em dash, then the verdict:
+        #     `## GB-136-V3 — **RED** at a1f4fd4. …`
+        m = re.match(r"^\s*#{1,6}\s+\S.*?[—–]\s*\**\s*(GREEN|RED)\b", ln)
+        if m:
+            return m.group(1), ln.strip()[:160]
     return None, None
 
 
@@ -212,6 +225,12 @@ def self_test():
         # the three that must NOT be verdicts (observed on the live board)
         ("verdicts checked: 66, mismatched parents: 2, superseded REDs: 60", None),
         ("a GREEN-gated merge helper that refuses", None),
+        # GB-136-V3 (the three fictions found on the live board, plus the heading shape)
+        ("red or pending run is not a defect and a green run is not correctness", None),
+        ("RED fixed (F1 + F2) — pushed to ticket/GB-098-stale / PR #157", None),
+        ("red log:   T3_intel: FAIL — 1 FAIL line(s)", None),
+        ("## GB-136-V3 — **RED** at `a1f4fd4`. The fix is real; …", "RED"),
+        ("**GREEN.** None of the RED conditions tripped", "GREEN"),
         ("**MERGED — `b1594f9` on `main`. GB-005 → Done.**", None),
     ]
     for text, want in parse_cases:
