@@ -197,6 +197,58 @@ extern void arch_fpu_reset(struct process *p);
 // Process table
 static struct process proc_table[MAX_PROCESSES];
 
+/* GB-122 (fix): commit the resume frame's destination page when it is absent.
+ *
+ * enter_user_space copies 296 bytes to `dest` from CPL0, and a CPL0 store
+ * cannot demand-page a hole in the stack's demand-zero reserve -- it takes
+ * #PF mid-copy (measured: `Vector: 14 Error Code: 0x2`, RDI == dest ==
+ * gs:[24]-0x140, RCX == 0x25).  The page is not unmapped; it was never
+ * committed, because the only committer is the USER fault path and the copy
+ * runs before the user ever executes.
+ *
+ * Four resume-frame combinations exist (schedule() and start_scheduler(), each
+ * with a kernel branch at gs:[24]-320 and a user branch at target_sp-320); the
+ * sampler proved absent destinations occur at BOTH call sites, so the commit
+ * is applied at both.  `cs` selects the branch that will actually be taken --
+ * printing both, as the first sampler did, inflates the count (144 upper bound
+ * vs 17 real faults in one wave).
+ *
+ * Only inside [USER_MAIN_STK_LIMIT_V2, USER_MAIN_STK_TOP_V2): a resume outside
+ * the stack window is not this card's population and must not be "repaired".
+ * One [GB122-COMMIT] per occurrence; the count is the evidence. */
+static void gb122_commit_resume(const char *site, struct process *p,
+                                uint64_t target_sp, uint64_t cs) {
+  extern int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *l);
+  if (!p || !p->as)
+    return;
+  int user = ((cs & 3u) == 3u);
+  uint64_t dest = user ? (target_sp - 320) : (arch_get_user_sp() - 320);
+  uint64_t page = dest & ~0xFFFULL;
+  uint64_t leaf = 0;
+  if (page < USER_MAIN_STK_LIMIT_V2 || page >= USER_MAIN_STK_TOP_V2)
+    return;
+  if (vm_arch_walk(p->as, page, &leaf) == 0)
+    return; /* present: the normal path, untouched */
+  if (vm_touch(p, page, 0x1000, /*write=*/1) != 0)
+    return;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[GB122-COMMIT] site=");
+  kl_s(&kl, site);
+  kl_s(&kl, " br=");
+  kl_c(&kl, user ? 'u' : 'k');
+  kl_s(&kl, " pid=");
+  kl_i(&kl, p->pid);
+  kl_s(&kl, " parent=");
+  kl_i(&kl, p->parent_pid);
+  kl_s(&kl, " sp=");
+  kl_hex(&kl, target_sp);
+  kl_s(&kl, " page=");
+  kl_hex(&kl, page);
+  kl_s(&kl, "\n");
+  kl_emit(&kl);
+}
+
 /* GB-057: bounded count for the [IDLECLAIM] report (a leaked per-CPU claim seen
    on idle entry).  Rare-event report, not a per-idle log. */
 static int idleclaim_reported;
@@ -1120,20 +1172,6 @@ static int process_create_internal_ver(int ver) {
       uart_puts("Inside process_create: kmemset done.\n");
   }
 
-  /* GB-071 (family-B bootstrap): a fresh create shall start with rdi=0 (context[5]
-     is zeroed next), so a non-zero high-band value HERE means this slot arrived with
-     a stale kernel/stack-band context[5] that the next statement wipes — that
-     arrival is the unnamed bootstrap.  One kline write. */
-  if (p->context[5] >= 0x70000000ULL) {
-    struct kline kl;
-    kl_init(&kl);
-    kl_s(&kl, "[GB071-CREATE] pid=");
-    kl_i(&kl, pid);
-    kl_s(&kl, " ctx5=");
-    kl_hex(&kl, p->context[5]);
-    kl_s(&kl, "\n");
-    kl_emit(&kl);
-  }
   for (int i = 0; i < 36; i++) {
     p->context[i] = 0;
   }
@@ -1808,6 +1846,13 @@ void schedule(struct trap_frame *tf, int is_yield) {
           }
         }
       }
+      #if defined(__x86_64__)
+      uint64_t gb122_cs = local_tf.cs;
+#else
+      /* arm: SPSR M[3:0] == 0 is EL0t (user). */
+      uint64_t gb122_cs = ((local_tf.spsr & 0xFULL) == 0ULL) ? 3u : 0u;
+#endif
+      gb122_commit_resume("sch", &proc_table[next], target_sp, gb122_cs);
       enter_user_space(&local_tf, target_sp);
       /* GB-060 (cheap half): a resume call that returns is a defect --
          enter_user_space iretqs into the target and must never come back.  The
@@ -3136,23 +3181,8 @@ int process_fork(struct trap_frame *tf) {
 
   save_context(child, tf);
   child->context[0] = 0; // x0 = 0 for child
+
 #ifdef __x86_64__
-  /* GB-071 (family-B bootstrap, #2): fork gives the child the parent's rdi.  If
-     the fork's trap frame was taken in KERNEL mode (cs&3==0) the child starts a
-     USER child holding a kernel-origin rdi — one candidate bootstrap.  Report
-     only the high-band case, one kline write. */
-  if ((tf->cs & 3) == 0 || child->context[5] >= 0x70000000ULL) {
-    struct kline kl;
-    kl_init(&kl);
-    kl_s(&kl, "[GB071-FORK] childpid=");
-    kl_i(&kl, child->pid);
-    kl_s(&kl, " cs=");
-    kl_i(&kl, (long)(tf->cs & 3));
-    kl_s(&kl, " ctx5=");
-    kl_hex(&kl, child->context[5]);
-    kl_s(&kl, "\n");
-    kl_emit(&kl);
-  }
   /* Frame-carried RSP (see save_context): the child inherits the parent's
      user RSP from THIS trap frame, not from the per-CPU slot. */
   child->context[33] = tf->lr;
@@ -3582,6 +3612,12 @@ void start_scheduler(void) {
         extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
         extern void resume_mark(int pid, uint64_t target_sp);
         resume_mark(proc_table[i].pid, target_sp);
+        #if defined(__x86_64__)
+        uint64_t gb122_cs = local_tf.cs;
+#else
+        uint64_t gb122_cs = ((local_tf.spsr & 0xFULL) == 0ULL) ? 3u : 0u;
+#endif
+        gb122_commit_resume("boot", &proc_table[i], target_sp, gb122_cs);
         enter_user_space(&local_tf, target_sp);
 
         /* Same rule as schedule()'s resume boundary: if this returns, the CPU
