@@ -1,0 +1,11 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1500s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb125-verify/evidence/gb-133/81-execfix-wave.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 9326 console lines, 3 FAIL lines, 1 user memory fault records across 1 processes, 8 programs exited, halted=1
+T3_intel: FAIL — 5 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — only 8 programs exited (floor 55): too little work for a complete wave, so this cannot be a pass
+T3_intel: FAIL — 3 FAIL line(s); first 20:
+3340:shell_test3: FAILED attributes of nested.txt. Output was:
+9274:SHELLTEST WATCHDOG: protocol stalled 240 s; FAILING TEST. Process table:
+9301:SHELLTEST WATCHDOG: protocol stalled 240 s; FAILING TEST. Process table:
+T3_intel EXIT=1

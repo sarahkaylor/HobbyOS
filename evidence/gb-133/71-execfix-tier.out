@@ -1,0 +1,5 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1500s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb125-verify/evidence/gb-133/71-execfix-wave.log) ===
+T3_intel: REFUSING TO START — /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb125-verify/disk.img is in use by another QEMU.
+T3_intel: a stale frozen guest must be killed first (its monitor socket is usually /tmp/t3_monitor_*.sock)
+T3_intel EXIT=2 (environment, not a tier result)
