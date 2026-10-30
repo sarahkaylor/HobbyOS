@@ -1243,7 +1243,7 @@ $(OBJ_DIR)/builtins/%.o: $(LIBCXX_ROOT)/compiler-rt/lib/builtins/%.c $(LIBCXX_VE
 # icewm.md M2 (lane xlibs-core): <arpa/inet.h>/<netdb.h>, readv/writev,
 # uname/gethostname for the X11 client stack.  A separate prerequisite-only
 # rule: the recipe's $^ picks these up without touching the line below.
-LIBC_X11_OBJS = $(OBJ_DIR)/libc_inet.o $(OBJ_DIR)/libc_uio.o $(OBJ_DIR)/libc_utsname.o
+LIBC_X11_OBJS = $(OBJ_DIR)/libc_inet.o $(OBJ_DIR)/libc_uio.o $(OBJ_DIR)/libc_utsname.o $(OBJ_DIR)/libc_sockio.o $(OBJ_DIR)/libc_select_posix.o
 $(OBJ_DIR)/libc.a: $(LIBC_X11_OBJS)
 
 $(OBJ_DIR)/libc.a: $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/crt0.o $(OBJ_DIR)/cxxrt.o $(OBJ_DIR)/libc_pthread.o $(OBJ_DIR)/libc_string.o $(OBJ_DIR)/libc_ctype.o $(OBJ_DIR)/libc_stdlib.o $(OBJ_DIR)/libc_stdio.o $(OBJ_DIR)/libc_file.o $(OBJ_DIR)/libc_getopt.o $(OBJ_DIR)/libc_error.o $(OBJ_DIR)/libc_stat.o $(OBJ_DIR)/libc_signal.o $(OBJ_DIR)/libc_mman.o $(OBJ_DIR)/libc_regex.o $(OBJ_DIR)/libc_langinfo.o $(OBJ_DIR)/libc_wchar.o $(OBJ_DIR)/libc_wctype.o $(OBJ_DIR)/libc_locale.o $(OBJ_DIR)/libc_selinux.o $(OBJ_DIR)/libc_dirent.o $(OBJ_DIR)/libc_time.o $(OBJ_DIR)/libc_time_math.o $(OBJ_DIR)/libc_libgen.o $(OBJ_DIR)/libc_realpath.o $(OBJ_DIR)/libc_xlocale.o $(OBJ_DIR)/libc_strtod.o $(OBJ_DIR)/libc_strftime.o $(OBJ_DIR)/libc_math.o $(OBJ_DIR)/libc_pwd.o $(OBJ_DIR)/libc_setjmp.o $(OBJ_DIR)/libc_dlfcn.o $(OBJ_DIR)/libc_resource.o $(OBJ_DIR)/libc_statvfs.o $(OBJ_DIR)/libc_syscall.o $(OBJ_DIR)/libc_ioctl.o $(LIBC_BUILTIN_OBJS)

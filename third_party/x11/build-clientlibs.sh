@@ -67,13 +67,28 @@ _cl_x11() {
   hb_autotools libX11 libX11-1.8.14.tar.xz -- \
     --disable-specs --without-xmlto --without-fop --without-xsltproc --without-perl \
     --disable-loadable-i18n --disable-loadable-xcursor --disable-xf86bigfont \
-    --disable-xthreads --disable-ipv6 --disable-tcp-transport --enable-unix-transport \
+    --disable-ipv6 --disable-tcp-transport --enable-unix-transport \
     --disable-local-transport --enable-malloc0returnsnull=no --disable-xlocaledir
 }
 
 _cl_xext()    { hb_autotools libXext libXext-1.3.7.tar.xz -- --disable-specs --without-xmlto --without-fop --without-xsltproc --enable-malloc0returnsnull=no; }
 _cl_xrender() { hb_autotools libXrender libXrender-0.9.13.tar.xz -- --enable-malloc0returnsnull=no; }
 _cl_xfixes()  { hb_autotools libXfixes libXfixes-6.0.2.tar.xz; }
+
+# M2 link-model proof: a real Xlib client linked as a flat .BIN (it cannot
+# run until the server lane exists).  Lands in build/<arch>/smoke/, NOT in
+# bin/, so it never reaches a disk image by accident.
+_cl_smoke() {
+  hb_want smoke || return 0
+  local o="$HB_OBJ_DIR/smoke"; mkdir -p "$o" "$HB_BUILD/smoke"
+  # shellcheck disable=SC2046
+  hb_run smoke "$CC" $CFLAGS $("$PKG_CONFIG" --cflags x11 xext xrender xfixes) \
+    -c "$HB_X11_DIR/smoke/xsmoke.c" -o "$o/xsmoke.o"
+  # shellcheck disable=SC2046
+  hb_run smoke hb_link_flat "$HB_BUILD/smoke/XSMOKE.BIN" "$o/xsmoke.o" \
+    $("$PKG_CONFIG" --libs x11 xext xrender xfixes)
+  hb_log "smoke: $HB_BUILD/smoke/XSMOKE.BIN ($(stat -c %s "$HB_BUILD/smoke/XSMOKE.BIN") bytes)"
+}
 
 stage_clientlibs() {
   _cl_zlib
@@ -89,4 +104,5 @@ stage_clientlibs() {
   _cl_xext
   _cl_xrender
   _cl_xfixes
+  _cl_smoke
 }
