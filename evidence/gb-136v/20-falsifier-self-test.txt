@@ -1,0 +1,10 @@
+  [OK  ] verdict=RED   parent in 'In Review'   -> ok=False (expected False, want-lane 'In Progress')
+  [OK  ] verdict=RED   parent in 'In Progress' -> ok=True (expected True, want-lane 'In Progress')
+  [OK  ] verdict=GREEN parent in 'In Review'   -> ok=False (expected False, want-lane 'Merge Gate')
+  [OK  ] verdict=GREEN parent in 'Merge Gate'  -> ok=True (expected True, want-lane 'Merge Gate')
+  [OK  ] verdict=GREEN parent in 'In Progress' -> ok=False (expected False, want-lane 'Merge Gate')
+  [OK  ] verdict=RED   parent in 'Done'        -> ok=False (expected False, want-lane 'In Progress')
+  [FAIL] GB-136: earlier RED superseded by a later GREEN -> not a mismatch; governing=GB-117-V5=GREEN
+  [OK  ] GB-136: RED with no successor is still reported (governing=GB-121-V=RED)
+  [FAIL] GB-136: supersession is load-bearing (a re-verified RED would otherwise misfire)
+self-test result: fails=1

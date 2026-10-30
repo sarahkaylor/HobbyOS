@@ -1,0 +1,219 @@
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/abi_t2_test.c -o obj/intel/abi_t2_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/audio_stub.c -o obj/intel/audio_stub.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/blk_cache.c -o obj/intel/blk_cache.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/blk_cache_press_test.c -o obj/intel/blk_cache_press_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/blk_cache_test.c -o obj/intel/blk_cache_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/dhcp.c -o obj/intel/dhcp.o
+src/kernel/dhcp.c:42:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   42 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:82:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   82 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:135:19: warning: unused variable 'udp' [-Wunused-variable]
+  135 |   struct udp_hdr* udp = (struct udp_hdr*)(packet + sizeof(struct ipv4_hdr));
+      |                   ^~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/elf_image.c -o obj/intel/elf_image.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/elf_loader.c -o obj/intel/elf_loader.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/evdev.c -o obj/intel/evdev.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/evdev_test.c -o obj/intel/evdev_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fat16.c -o obj/intel/fat16.o
+src/kernel/fat16.c:2041:26: warning: result of comparison of constant -27 with expression of type 'unsigned char' is always false [-Wtautological-constant-out-of-range-compare]
+ 2041 |     if (b0 == 0x00 || b0 == (char)0xE5) {
+      |                       ~~ ^  ~~~~~~~~~~
+src/kernel/fat16.c:2178:25: warning: comparison of integers of different signs: 'int' and 'uint32_t' (aka 'unsigned int') [-Wsign-compare]
+ 2178 |       if ((int)old_size > f->fat16.cursor) f->fat16.cursor = (int)old_size;
+      |           ~~~~~~~~~~~~~ ^ ~~~~~~~~~~~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -Iobj/intel -c src/kernel/fat16_test.c -o obj/intel/fat16_test.o
+src/kernel/fat16_test.c:1146:64: warning: taking address of packed member 'file_size' of class or structure 'fat16_dir_entry' may result in an unaligned pointer value [-Waddress-of-packed-member]
+ 1146 |   EXPECT_EQ(fat16_read_dir(dir, 0, (char *)names[0], &e.attr, &e.file_size) == 0, 1);
+      |                                                                ^~~~~~~~~~~
+src/kernel/unit_test.h:23:19: note: expanded from macro 'EXPECT_EQ'
+   23 |         int _a = (a); \
+      |                   ^
+src/kernel/fat16_test.c:26:22: warning: unused function 'test_lfn_checksum' [-Wunused-function]
+   26 | static unsigned char test_lfn_checksum(const char *name) {
+      |                      ^~~~~~~~~~~~~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fb_ioctl.c -o obj/intel/fb_ioctl.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fb_ioctl_test.c -o obj/intel/fb_ioctl_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fb_mmap.c -o obj/intel/fb_mmap.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fb_mmap_test.c -o obj/intel/fb_mmap_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/frame.c -o obj/intel/frame.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/frame_test.c -o obj/intel/frame_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fs.c -o obj/intel/fs.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/fs_test.c -o obj/intel/fs_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/input_node.c -o obj/intel/input_node.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/input_node_test.c -o obj/intel/input_node_test.o
+src/kernel/input_node_test.c:44:47: warning: implicit conversion from 'size_t' (aka 'unsigned long') to 'int' changes value from 18446744073709551615 to -1 [-Wconstant-conversion]
+   44 |   EXPECT_EQ(hb_input_ioctl_arg_size(0x4600u), (size_t)-1);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~
+src/kernel/unit_test.h:24:19: note: expanded from macro 'EXPECT_EQ'
+   24 |         int _b = (b); \
+      |             ~~    ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/iommu_vtd.c -o obj/intel/iommu_vtd.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/ipc_proto.c -o obj/intel/ipc_proto.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/linux_uname.c -o obj/intel/linux_uname.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/lock_order.c -o obj/intel/lock_order.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/locks_test.c -o obj/intel/locks_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/main.c -o obj/intel/main.o
+src/kernel/main.c:52:39: warning: unused parameter 'tf' [-Wunused-parameter]
+   52 | void irq_handler_c(struct trap_frame *tf) {
+      |                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/math_test.c -o obj/intel/math_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/mmu_test.c -o obj/intel/mmu_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/net.c -o obj/intel/net.o
+src/kernel/net.c:552:18: warning: variable 'stored' set but not used [-Wunused-but-set-variable]
+  552 |         uint32_t stored = 0;
+      |                  ^
+src/kernel/net.c:815:21: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+  815 |   for (int i = 0; i < sizeof(struct pseudo_hdr)/2; i++) {
+      |                   ~ ^ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/net.c:657:39: warning: unused function 'safe_print_int' [-Wunused-function]
+  657 | __attribute__((noinline)) static void safe_print_int(int val) {
+      |                                       ^~~~~~~~~~~~~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/net_rdma.c -o obj/intel/net_rdma.o
+src/kernel/net_rdma.c:774:12: warning: unused variable 'rx_count' [-Wunused-variable]
+  774 |   uint32_t rx_count = 0;
+      |            ^~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/net_rdma_test.c -o obj/intel/net_rdma_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/net_test.c -o obj/intel/net_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/nfs.c -o obj/intel/nfs.o
+src/kernel/nfs.c:157:12: warning: '/*' within block comment [-Wcomment]
+  157 |  * is *body/*body_len, valid until the next rpc_call (static buffer). */
+      |            ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/nfs_proto.c -o obj/intel/nfs_proto.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/nfs_test.c -o obj/intel/nfs_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/pipe.c -o obj/intel/pipe.o
+src/kernel/pipe.c:142:7: warning: unused variable 'i' [-Wunused-variable]
+  142 |   int i = 0;
+      |       ^
+src/kernel/pipe.c:139:68: warning: unused parameter 'tf' [-Wunused-parameter]
+  139 | int pipe_read(struct pipe *p, void *buf, int n, struct trap_frame *tf) {
+      |                                                                    ^
+src/kernel/pipe.c:219:7: warning: unused variable 'i' [-Wunused-variable]
+  219 |   int i = 0;
+      |       ^
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/pipe_test.c -o obj/intel/pipe_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/process.c -o obj/intel/process.o
+src/kernel/process.c:1430:42: warning: unused parameter 'is_yield' [-Wunused-parameter]
+ 1430 | void schedule(struct trap_frame *tf, int is_yield) {
+      |                                          ^
+src/kernel/process.c:4107:50: warning: unused parameter 'prot' [-Wunused-parameter]
+ 4107 | int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags) {
+      |                                                  ^
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/process_test.c -o obj/intel/process_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/program_loader.c -o obj/intel/program_loader.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/program_loader_test.c -o obj/intel/program_loader_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/ssp.c -o obj/intel/ssp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/test_fw_cfg.c -o obj/intel/test_fw_cfg.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/test_smp.c -o obj/intel/test_smp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/time.c -o obj/intel/time.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/time_test.c -o obj/intel/time_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/timer_test.c -o obj/intel/timer_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/trap_test.c -o obj/intel/trap_test.o
+src/kernel/trap_test.c:60:25: warning: implicit conversion from 'uint64_t' (aka 'unsigned long') to 'int' changes value from 18446744073709551578 to -38 [-Wconstant-conversion]
+   60 |   EXPECT_EQ(tf.regs[0], (uint64_t)-ENOSYS); /* negative-errno convention */
+      |   ~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~
+src/kernel/unit_test.h:24:19: note: expanded from macro 'EXPECT_EQ'
+   24 |         int _b = (b); \
+      |             ~~    ^
+src/kernel/trap_test.c:92:25: warning: implicit conversion from 'uint64_t' (aka 'unsigned long') to 'int' changes value from 18446744073709551602 to -14 [-Wconstant-conversion]
+   92 |   EXPECT_EQ(tf.regs[0], (uint64_t)-EFAULT); /* invalid user ptr -> -EFAULT */
+      |   ~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~
+src/kernel/unit_test.h:24:19: note: expanded from macro 'EXPECT_EQ'
+   24 |         int _b = (b); \
+      |             ~~    ^
+src/kernel/trap_test.c:81:13: warning: unused function 'test_trap_sys_open_invalid_ptr' [-Wunused-function]
+   81 | static void test_trap_sys_open_invalid_ptr(void) {
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/trap_test.c:95:13: warning: unused function 'test_trap_sys_open_valid_ptr' [-Wunused-function]
+   95 | static void test_trap_sys_open_valid_ptr(void) {
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/trap_test.c:125:13: warning: unused function 'test_trap_sys_write_console' [-Wunused-function]
+  125 | static void test_trap_sys_write_console(void) {
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/trap_test.c:142:13: warning: unused function 'test_trap_sys_pipe' [-Wunused-function]
+  142 | static void test_trap_sys_pipe(void) {
+      |             ^~~~~~~~~~~~~~~~~~
+src/kernel/trap_test.c:170:13: warning: unused function 'test_trap_data_abort' [-Wunused-function]
+  170 | static void test_trap_data_abort(void) {
+      |             ^~~~~~~~~~~~~~~~~~~~
+7 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/unit_test.c -o obj/intel/unit_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/unix.c -o obj/intel/unix.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/unix_test.c -o obj/intel/unix_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/vfs.c -o obj/intel/vfs.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/virtio_blk.c -o obj/intel/virtio_blk.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/virtio_blk_test.c -o obj/intel/virtio_blk_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/virtio_gpu.c -o obj/intel/virtio_gpu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/virtio_gpu_test.c -o obj/intel/virtio_gpu_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/virtio_gpu_x64.c -o obj/intel/virtio_gpu_x64.o
+src/kernel/virtio_gpu_x64.c:586:12: warning: unused variable 'feat_lo' [-Wunused-variable]
+  586 |   uint32_t feat_lo = gpu_cc_r32(VPCI_CC_DEV_FEAT);
+      |            ^~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/virtio_input.c -o obj/intel/virtio_input.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/virtio_input_test.c -o obj/intel/virtio_input_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/virtio_net.c -o obj/intel/virtio_net.o
+src/kernel/virtio_net.c:552:7: warning: variable 'poll_processed' set but not used [-Wunused-but-set-variable]
+  552 |   int poll_processed = 0;
+      |       ^
+src/kernel/virtio_net.c:124:30: warning: unused variable 'tx_hdr' [-Wunused-variable]
+  124 | static struct virtio_net_hdr tx_hdr __attribute__((aligned(4096)));
+      |                              ^~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/virtio_net_test.c -o obj/intel/virtio_net_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/vm.c -o obj/intel/vm.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/vm_test.c -o obj/intel/vm_test.o
+src/kernel/vm_test.c:611:40: warning: implicit conversion from 'unsigned long long' to 'int' changes value from 1229801703532086340 to 858997828 [-Wconstant-conversion]
+  611 |   EXPECT_EQ(*(volatile uint64_t *)lo2, 0x1111222233334444ULL);
+      |   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~
+src/kernel/unit_test.h:24:19: note: expanded from macro 'EXPECT_EQ'
+   24 |         int _b = (b); \
+      |             ~~    ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/arch/x64/cpu.c -o obj/intel/cpu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/arch/x64/fpu.c -o obj/intel/fpu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/arch/x64/gic.c -o obj/intel/gic.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/arch/x64/locks.c -o obj/intel/locks.o
+src/kernel/arch/x64/locks.c:150:40: warning: calling '__builtin_return_address' with a nonzero argument is unsafe [-Wframe-address]
+  150 |     lock_wait_caller2[cpu] = (uint64_t)__builtin_return_address(1);
+      |                                        ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/arch/x64/locks.c:180:39: warning: calling '__builtin_return_address' with a nonzero argument is unsafe [-Wframe-address]
+  180 |         scream_hex(" pc2=", (uint64_t)__builtin_return_address(1));
+      |                                       ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/arch/x64/mmu.c -o obj/intel/mmu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/arch/x64/rtc.c -o obj/intel/rtc.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/arch/x64/smp.c -o obj/intel/smp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/arch/x64/timer.c -o obj/intel/timer.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/arch/x64/trap.c -o obj/intel/trap.o
+src/kernel/arch/x64/trap.c:1965:5: warning: use of out-of-scope declaration of 'uart_puts_raw' [-Wout-of-scope-function]
+ 1965 |     uart_puts_raw(pb);
+      |     ^
+src/kernel/arch/x64/trap.c:105:15: note: previous declaration is here
+  105 |   extern void uart_puts_raw(const char *s);
+      |               ^
+src/kernel/arch/x64/trap.c:81:13: warning: unused function 'dbg_resume' [-Wunused-function]
+   81 | static void dbg_resume(const char *tag, uint64_t v) {
+      |             ^~~~~~~~~~
+src/kernel/arch/x64/trap.c:2231:13: warning: unused function 'safe_print_int' [-Wunused-function]
+ 2231 | static void safe_print_int(int val) {
+      |             ^~~~~~~~~~~~~~
+src/kernel/arch/x64/trap.c:2250:13: warning: unused function 'safe_print_hex' [-Wunused-function]
+ 2250 | static void safe_print_hex(uint64_t val) {
+      |             ^~~~~~~~~~~~~~
+4 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_UNIT_TEST -c src/kernel/arch/x64/uart.c -o obj/intel/uart.o
+ld.lld -T linker_x64.ld -o hobbyos.elf obj/intel/boot.o obj/intel/setjmp.o obj/intel/abi_t2_test.o obj/intel/audio_stub.o obj/intel/blk_cache.o obj/intel/blk_cache_press_test.o obj/intel/blk_cache_test.o obj/intel/dhcp.o obj/intel/elf_image.o obj/intel/elf_loader.o obj/intel/evdev.o obj/intel/evdev_test.o obj/intel/fat16.o obj/intel/fat16_test.o obj/intel/fb_ioctl.o obj/intel/fb_ioctl_test.o obj/intel/fb_mmap.o obj/intel/fb_mmap_test.o obj/intel/frame.o obj/intel/frame_test.o obj/intel/fs.o obj/intel/fs_test.o obj/intel/input_node.o obj/intel/input_node_test.o obj/intel/iommu_vtd.o obj/intel/ipc_proto.o obj/intel/linux_uname.o obj/intel/lock_order.o obj/intel/locks_test.o obj/intel/main.o obj/intel/math_test.o obj/intel/mmu_test.o obj/intel/net.o obj/intel/net_rdma.o obj/intel/net_rdma_test.o obj/intel/net_test.o obj/intel/nfs.o obj/intel/nfs_proto.o obj/intel/nfs_test.o obj/intel/pipe.o obj/intel/pipe_test.o obj/intel/process.o obj/intel/process_test.o obj/intel/program_loader.o obj/intel/program_loader_test.o obj/intel/ssp.o obj/intel/test_fw_cfg.o obj/intel/test_smp.o obj/intel/time.o obj/intel/time_test.o obj/intel/timer_test.o obj/intel/trap_test.o obj/intel/unit_test.o obj/intel/unix.o obj/intel/unix_test.o obj/intel/vfs.o obj/intel/virtio_blk.o obj/intel/virtio_blk_test.o obj/intel/virtio_gpu.o obj/intel/virtio_gpu_test.o obj/intel/virtio_gpu_x64.o obj/intel/virtio_input.o obj/intel/virtio_input_test.o obj/intel/virtio_net.o obj/intel/virtio_net_test.o obj/intel/vm.o obj/intel/vm_test.o obj/intel/cpu.o obj/intel/fpu.o obj/intel/gic.o obj/intel/locks.o obj/intel/mmu.o obj/intel/rtc.o obj/intel/smp.o obj/intel/timer.o obj/intel/trap.o obj/intel/uart.o
+llvm-objcopy -I elf64-x86-64 -O elf32-i386 hobbyos.elf

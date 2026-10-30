@@ -1,0 +1,8 @@
+  PASS: GB-136: earlier RED superseded by a later GREEN -> not a mismatch (governing=GB-117-V5=GREEN, successor named)
+  FAIL: GB-136: is_superseded marks the earlier -V as overtren
+  PASS: GB-136: RED with no successor is still reported (governing=GB-121-V=RED)
+  PASS: GB-136: a GREEN on the parent (ordinal 0) supersedes an earlier gate RED (governing=GB-120=GREEN)
+  PASS: GB-136: naive reading of a lone GB-035-V RED is the load-bearing misfire this rule stops
+  FAIL: GB-136: ALL PASSED -> CHECK_VERDICTS_GB136: ALL PASSED
+check_verdicts_test: FAILED
+CHECK_VERDICTS_GB136: FAILED
