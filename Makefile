@@ -1,5 +1,5 @@
 # Default architecture
-ARCH ?= arm
+ARCH ?= intel
 
 # --- OS Detection ---
 # Detect whether we are on macOS (Homebrew) or Linux (system packages)
@@ -62,6 +62,12 @@ QEMU_SMP ?= 8
 #     resolves to soft, so every headless tier (test/unit_tests/desktop_test
 #     modes, the run_*.py E2E overrides, CI) keeps its exact current
 #     behavior: plain 2D device + `-display none`.
+#     ARCH=intel: auto always resolves to soft (plain `gtk`, BGA).  On this
+#     workstation (QEMU 10.2.1 3.3, KDE Wayland, 2026-10-29) `gtk,gl=on`
+#     starts but every frame logs "Gdk-WARNING: eglMakeCurrent failed" and
+#     the window never gets a surface, so the desktop stays blank; the guest
+#     only negotiates VIRTIO_F_VERSION_1 (no virgl), so GL buys nothing.
+#     QEMU_GPU=gl still opts in.
 #   gl:   force the GL path.  NOTE: combining QEMU_GPU=gl with a
 #     `-display none` override fails by design — QEMU rejects
 #     virtio-gpu-gl-device when the display backend has no OpenGL support
@@ -414,7 +420,9 @@ ifeq ($(QEMU_GPU),auto)
   ifeq ($(MODE),desktop)
     ifneq ($(DISPLAY),)
       ifeq ($(findstring -display none,$(QEMU_ARGS)),)
-        GX_GPU_GL := 1
+        ifneq ($(ARCH),intel)
+          GX_GPU_GL := 1
+        endif
       endif
     endif
   endif
@@ -2515,7 +2523,7 @@ gpu-check:
 	      qemu-system-x86_64 -M q35 -m 512M -display gtk,gl=on -device virtio-gpu-gl-pci -vga none -S -monitor none -serial none -nodefaults && GLX64=1 || true; \
 	  else echo "  (qemu-system-x86_64 not on PATH)"; fi; \
 	  if [ "$$GLX64" = "1" ]; then \
-	    echo "  => x64 verdict: GL OK — auto picks virtio-gpu-gl-pci + -vga none + gtk,gl=on for interactive desktop boots"; \
+	    echo "  => x64 verdict: gtk,gl=on starts — but auto stays soft on x64 (paused probes cannot see the runtime eglMakeCurrent failure); opt in with QEMU_GPU=gl"; \
 	  else \
 	    echo "  => x64 verdict: gtk,gl=on unavailable — auto falls back to plain gtk (no virtio device; guest uses BGA/std-VGA)"; \
 	  fi; \
