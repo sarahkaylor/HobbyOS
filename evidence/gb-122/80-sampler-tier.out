@@ -1,0 +1,27 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1500s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb125-verify/evidence/gb-122/80-sampler-wave.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 25750 console lines, 133 FAIL lines, 17 user memory fault records across 15 processes, 88 programs exited, halted=1
+T3_intel: FAIL — 17 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 133 FAIL line(s); first 20:
+2597:MMTEST FAIL /BLKT1.TXT
+2758:[SIGTEST] FAIL waitpid returns the child got=26 want=4294964048
+3273:[TEST] DIRECT-ext-cat FAIL (empty target, no load failure)
+3688:/TEST2.TXT  FPU_T torture-child: FAIL
+3809:[SEDTEST] FAIL basic_s (stdout)
+4130:  FPU_T fork-inherit: FAIL
+4172:FPU_T FAILED: 2
+4430:[SEDTEST] FAIL s_g (stdout)
+5492:[SEDTEST] FAIL s_2nd (stdout)
+5769:/SED.BIN/PASTE.BIN[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+6062:[CMPTEST] FAIL EOF message on stderr
+6070:[CMPTEST] FAIL empty EOF message
+6075:[CMPTEST] FAIL missing file diagnostic
+6089:[CMPTEST] FAIL -i 4:0 skips prefix
+6100:[CMPTEST] FAIL - stdin EOF diagnostic
+6110:[CMPTEST] FAILURES: 5
+6175:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+6211:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+6223:[TSORTTEST] FAILURES: 4
+6331:[TACTEST] FAIL missing file
+T3_intel EXIT=1
