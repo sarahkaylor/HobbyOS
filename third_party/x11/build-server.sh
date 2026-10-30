@@ -85,6 +85,9 @@ _sv_env() {
 # product is build/<arch>/bin/XHOBBY.BIN (+ build/<arch>/sym/XHOBBY.elf with
 # symbols), cached by a stamp in the per-lane build dir.
 SV_XSERVER_TB=xorg-server-21.1.25.tar.xz
+# listen_local=true is load-bearing: without LOCALCONN and abstract sockets
+# (both Linux/SVR4-only) xtrans makes "unix" an alias and the real
+# /tmp/.X11-unix/X<n> listener is the transport named "local".
 _sv_xserver_meson_args() {
   local c_args="'-D__hobbyos__=1','-O2','-g','-fno-common','-I$HB_X11_DIR/ddx/include','-I$HB_PREFIX/include'"
   printf '%s\n' \
@@ -95,7 +98,7 @@ _sv_xserver_meson_args() {
     -Dipv6=false -Dinput_thread=false \
     -Dxkb_dir=/X11/XKB -Dxkb_output_dir=/tmp -Dxkb_bin_dir=/X11 \
     -Ddefault_font_path=built-ins \
-    -Dlisten_tcp=false -Dlisten_unix=true -Dlisten_local=false \
+    -Dlisten_tcp=false -Dlisten_unix=true -Dlisten_local=true \
     -Dint10=false -Dsuid_wrapper=false -Dpciaccess=false -Dudev=false -Dudev_kms=false \
     -Dhal=false -Dsystemd_logind=false -Dvgahw=false -Ddpms=true -Dxf86bigfont=false \
     -Dscreensaver=true -Dxres=true -Dxace=true -Dxselinux=false -Dxinerama=true \

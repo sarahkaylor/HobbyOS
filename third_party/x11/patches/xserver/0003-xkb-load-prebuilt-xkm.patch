@@ -1,10 +1,11 @@
 HobbyOS xserver patch (lane xserver, icewm.md M3).
-xkb: no xkbcomp on HobbyOS. XkbDDXLoadKeymapByNames answers every request 
+xkb: no xkbcomp and no rules files on HobbyOS. XkbRMLVOtoKcCGST reports the 
+fixed component names and XkbDDXLoadKeymapByNames answers every request 
 from one host-compiled keymap (/X11/US.XKM, evdev/pc105/us; 
-XkbHobbyKeymapFile, DDX option -xkm) and never unlinks it.
+XkbHobbyKeymapFile, DDX option -xkm), never unlinking it.
 
 diff --git a/xkb/ddxLoad.c b/xkb/ddxLoad.c
-index f9b7b06..c7dffb7 100644
+index f9b7b06..59477bd 100644
 --- a/xkb/ddxLoad.c
 +++ b/xkb/ddxLoad.c
 @@ -358,6 +358,40 @@ LoadXKM(unsigned want, unsigned need, const char *keymap, XkbDescPtr *xkbRtrn)
@@ -60,3 +61,21 @@ index f9b7b06..c7dffb7 100644
      if ((names->keycodes == NULL) && (names->types == NULL) &&
          (names->compat == NULL) && (names->symbols == NULL) &&
          (names->geometry == NULL)) {
+@@ -445,6 +484,17 @@ XkbRMLVOtoKcCGST(DeviceIntPtr dev, XkbRMLVOSet * rmlvo,
+ {
+     XkbRF_VarDefsRec mlvo;
+ 
++#ifdef __hobbyos__
++    /* No rules files on disk: report the components the prebuilt keymap
++     * was compiled from (ddx/keymap/us.xkb); LoadFixedXKM supplies it. */
++    memset(kccgst, 0, sizeof(*kccgst));
++    kccgst->keycodes = Xstrdup("evdev+aliases(qwerty)");
++    kccgst->types = Xstrdup("complete");
++    kccgst->compat = Xstrdup("complete");
++    kccgst->symbols = Xstrdup("pc+us+inet(evdev)");
++    kccgst->geometry = Xstrdup("pc(pc105)");
++    return kccgst->keycodes && kccgst->symbols;
++#endif
+     mlvo.model = rmlvo->model;
+     mlvo.layout = rmlvo->layout;
+     mlvo.variant = rmlvo->variant;

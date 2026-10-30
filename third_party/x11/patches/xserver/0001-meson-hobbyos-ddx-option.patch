@@ -1,7 +1,9 @@
 HobbyOS xserver patch (lane xserver, icewm.md M3).
 meson: add -Dhobbyos (hw/hobbyos DDX, sources copied in by build-server.sh) 
-and -Dhobbyos_link_args; no BUSFAULT on host system 'hobbyos' (no si_addr, 
-SA_SIGINFO handlers never run).
+and -Dhobbyos_link_args; on host system 'hobbyos': no BUSFAULT (no si_addr, 
+SA_SIGINFO handlers never run) and no XTRANS_SEND_FDS (xtrans's 528-byte 
+SCM_RIGHTS recvmsg buffer exceeds the kernel's 512-byte K_IPC_CTRL_MAX -> 
+EINVAL; nothing here passes fds).
 
 diff --git a/hw/meson.build b/hw/meson.build
 index f8bd28a..9491048 100644
@@ -19,7 +21,7 @@ index f8bd28a..9491048 100644
      subdir('vfb')
  endif
 diff --git a/include/meson.build b/include/meson.build
-index bda84bd..c19d69d 100644
+index bda84bd..5566a08 100644
 --- a/include/meson.build
 +++ b/include/meson.build
 @@ -181,7 +181,13 @@ conf_data.set('HAVE_VASPRINTF', cc.has_function('vasprintf') ? '1' : false)
@@ -37,6 +39,18 @@ index bda84bd..c19d69d 100644
  
  # Don't let X dependencies typedef 'pointer'
  conf_data.set('_XTYPEDEF_POINTER', '1')
+@@ -191,7 +197,10 @@ conf_data.set('LISTEN_TCP', get_option('listen_tcp'))
+ conf_data.set('LISTEN_UNIX', get_option('listen_unix'))
+ conf_data.set('LISTEN_LOCAL', get_option('listen_local'))
+ 
+-if cc.has_header_symbol('sys/socket.h', 'SCM_RIGHTS')
++# HobbyOS: no fd-passing extension is built (no DRI3/MIT-SHM), and xtrans
++# reads with a 528-byte SCM_RIGHTS control buffer that the kernel's
++# recvmsg() rejects (> K_IPC_CTRL_MAX 512 -> EINVAL); plain read() instead.
++if cc.has_header_symbol('sys/socket.h', 'SCM_RIGHTS') and host_machine.system() != 'hobbyos'
+   conf_data.set('XTRANS_SEND_FDS', '1')
+ endif
+ 
 diff --git a/meson_options.txt b/meson_options.txt
 index 536e15d..627eeb0 100644
 --- a/meson_options.txt
