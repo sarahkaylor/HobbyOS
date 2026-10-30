@@ -488,6 +488,7 @@ static void test_p5_reap_delivery_on_kill(void) {
   parent->state = PROC_STATE_WAIT_CHILD;
   parent->context[0] = cpid;
   parent->context[1] = USER_VIRT_BASE + 0x120;
+  parent->wait_status_va = USER_VIRT_BASE + 0x120;
   parent2->state = PROC_STATE_WAIT_CHILD;
   parent2->context[0] = 9999;
 

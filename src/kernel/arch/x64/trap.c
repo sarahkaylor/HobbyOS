@@ -1333,7 +1333,7 @@ static void sys_fb_ioctl(struct trap_frame *tf) {
     return;
   }
   /* FBIOBLANK (sz==0) takes a value, not a buffer: nothing to validate. */
-  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+  if (sz != 0 && !sys_user_range((uint64_t)arg, sz, 1)) { /* 1 = ok */
     tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
     return;
   }
@@ -1416,7 +1416,7 @@ static void sys_input_ioctl(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)-1;   /* unknown request */
     return;
   }
-  if (sz != 0 && sys_user_range((uint64_t)arg, sz, 1) != 0) {
+  if (sz != 0 && !sys_user_range((uint64_t)arg, sz, 1)) { /* 1 = ok */
     tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
     return;
   }
@@ -1438,7 +1438,7 @@ static void sys_input_read(struct trap_frame *tf) {
     tf->regs[0] = 0;
     return;
   }
-  if (sys_user_range((uint64_t)ubuf,
+  if (!sys_user_range((uint64_t)ubuf, /* returns 1 when the range is OK */
                      (uint64_t)max * sizeof(struct hb_input_event), 1)) {
     tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
     return;
@@ -1733,28 +1733,19 @@ static void sys_getppid(struct trap_frame *tf) {
  * rsi->regs[4], rdx->regs[3]); remap here so real userland waitpid calls
  * -- and the blocking save_context below -- carry the right values. */
 static void sys_waitpid(struct trap_frame *tf) {
-  uint64_t pid = tf->regs[5];  /* rdi */
-  uint64_t st = tf->regs[4];   /* rsi */
-  uint64_t opt = tf->regs[3];  /* rdx */
-  tf->regs[0] = pid;
-  tf->regs[1] = st;
-  tf->regs[2] = opt;
-  tf->regs[0] = process_waitpid(tf);
+  /* icewm.md fix log: never rewrite regs[1..3] (rbx/rcx/rdx) -- regs[1] is
+     the caller's callee-saved rbx; the old remap returned it holding the
+     status pointer (clang -mcmodel=large code keeps addresses in rbx). */
+  tf->regs[0] = (uint64_t)(int64_t)process_wait_args(
+      tf, (int)tf->regs[5], (int *)tf->regs[4], (int)tf->regs[3], 0);
 }
 
 /* W2-5 (selfhost): SYS_WAIT4 -- wait4(pid, status, options, rusage):
- * rdi->regs[5], rsi->regs[4], rdx->regs[3], r10->regs[9].  Remap onto
- * the canonical regs[0..3] the shared core reads (regs[3] = rusage). */
+ * rdi->regs[5], rsi->regs[4], rdx->regs[3], r10->regs[9]. */
 static void sys_wait4(struct trap_frame *tf) {
-  uint64_t pid = tf->regs[5];  /* rdi */
-  uint64_t st = tf->regs[4];   /* rsi */
-  uint64_t opt = tf->regs[3];  /* rdx */
-  uint64_t ru = tf->regs[9];   /* r10 */
-  tf->regs[0] = pid;
-  tf->regs[1] = st;
-  tf->regs[2] = opt;
-  tf->regs[3] = ru;
-  tf->regs[0] = process_wait4(tf);
+  tf->regs[0] = (uint64_t)(int64_t)process_wait_args(
+      tf, (int)tf->regs[5], (int *)tf->regs[4], (int)tf->regs[3],
+      tf->regs[9]);
 }
 
 /* SYS_EXEC: replace the current image. Shared loader helper in
