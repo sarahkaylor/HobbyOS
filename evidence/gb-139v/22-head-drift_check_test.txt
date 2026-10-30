@@ -1,0 +1,10 @@
+  PASS: title attribution: GB-017 -> PR #25
+  PASS: title attribution: GB-064 -> PR #40
+  PASS: title attribution: GB-053 -> PR #41
+  PASS: a ticket MENTIONED only in a body is not attributed (the first run's false positive)
+  PASS: the same for every ticket PR #25 merely mentioned
+  PASS: --bodies finds the mention, so the imprecision is available on request, not by default
+  PASS: an UNMERGED PR never counts, whatever it is about
+  PASS: and its number never appears in any list
+  PASS: one title naming two tickets attributes both
+drift_check_test: 9 checks, 0 failed -- ALL PASSED
