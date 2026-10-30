@@ -3566,14 +3566,28 @@ $(OPEN_MODE_SCAN): tools/gate/open_mode_scan.py
 # and ASSERT the result is ET_DYN (readelf -h Type: DYN) so a regression to
 # -static fails the build loudly instead of silently shipping a probe the guest
 # rejects (the GB-066-V2 RED's clause-1 failure).
+# GB-138 (2026-10-30): the W0 corpus is native flat .bin, so no process in a
+# T4/T3 wave ever carries PROC_FLAG_LINUX_ABI and the compat table cannot be
+# measured.  A W0 HELLO member built as a Linux-ABI static-PIE ELF is the fix:
+# same hello source, musl -static-pie, asserted ET_DYN so a flat-only regression
+# fails loudly, staged on the image and dispatched through elf_loader_load
+# (program_loader.c:865 sets the flag for ELF).  The `[..] abi=0x1` loader line
+# then proves the flag at runtime (GB-138 clause 2).
 T4_DEVICE_GATE = t4_device_gate
 T4_DEVICE_SELFTEST = t4_device_selftest
 T4_DEVICE_CHECK = t4_device_check
 T4_LEGA_OUT = $(OBJ_DIR)/t4_legA.out
 T4_PROBE_ELF = $(OBJ_DIR)/t4_probe.elf
+W0_PIE_ELF = $(OBJ_DIR)/w0_hello_pie.elf
 $(T4_PROBE_ELF): src/user/t4_probe.c
 	@musl-gcc -static-pie -fPIE -O2 -Wall src/user/t4_probe.c -o $(T4_PROBE_ELF)
 	@readelf -h $(T4_PROBE_ELF) | grep -q 'Type: *DYN' || ( echo "t4_probe: build is not ET_DYN/static-PIE — the v2 ELF loader rejects it (GB-066-V2)"; readelf -h $(T4_PROBE_ELF) | head -4; exit 1 )
+# GB-138 clause 1: the W0 HELLO member also ships as a static-PIE ELF so the W0
+# gate can exercise the compat path; build + assert ET_DYN + assert it parses with
+# is_pie (elf_parse accepts ET_DYN, no PT_INTERP) via the T1 loader host binary.
+$(W0_PIE_ELF): src/user/w0_pie_probe.c
+	@musl-gcc -static-pie -fPIE -O2 -Wall src/user/w0_pie_probe.c -o $(W0_PIE_ELF)
+	@readelf -h $(W0_PIE_ELF) | grep -q 'Type: *DYN' || ( echo "w0_hello_pie: build is not ET_DYN/static-PIE — the v2 ELF loader rejects it (GB-138)"; readelf -h $(W0_PIE_ELF) | head -4; exit 1 )
 $(T4_LEGA_OUT): $(T4_PROBE_ELF)
 	@./$(T4_PROBE_ELF) > $(T4_LEGA_OUT) && echo "[t4-device] leg A captured -> $(T4_LEGA_OUT)"
 $(T4_DEVICE_GATE): tools/gate/t4_device.sh $(T4_LEGA_OUT)
