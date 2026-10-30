@@ -1700,6 +1700,23 @@ void schedule(struct trap_frame *tf, int is_yield) {
          the iretq restore the target's own RFLAGS. */
       interrupts_disable();
       spinlock_release(&proc_lock);
+#ifdef __x86_64__
+      /* x64 user resume runs ON the user stack at CPL0: enter_user_space
+         copies its frame to [target_sp-320, target_sp-24), moves RSP to
+         target_sp-616 and calls C from there.  A page below the user SP that
+         the process never touched is demand-zero and NOT resident; a #PF
+         with RSP on it cannot be delivered (#DF -> triple fault, the VM
+         resets).  GB-068 pre-faults the top of a FRESH stack (spawn, and now
+         exec); a forked child or a process preempted near a page boundary has
+         the same exposure.  Materialize the window here, outside proc_lock
+         (vm_touch takes vm_lock; it never sleeps for a stack page).
+         Observed: IceWM fork()+exec of HBHOST.BIN reset the VM (icewm.md §9). */
+      if (proc_table[next].as && !proc_table[next].is_kernel_process &&
+          target_sp > USER_VA_BASE + 0x1000 && target_sp <= USER_VA_TOP) {
+        uint64_t lo = (target_sp - 0x1000) & ~0xFFFULL;
+        (void)vm_touch(&proc_table[next], lo, target_sp - lo, /*write=*/1);
+      }
+#endif
 
       /* P5 S3 (D8.4a/b): the resume boundary — timer-preempt resume of a
          leader and the restart of a parked slice.  The resumed AS is
