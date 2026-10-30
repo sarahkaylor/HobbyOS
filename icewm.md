@@ -1,6 +1,7 @@
 # IceWM on HobbyOS — secondary desktop environment (plan v1, 2026-10-30)
 
-Status: **v1, executing.** Interfaces frozen in §4 (M0). Owner: the swarm coordinator. Lanes in §7.
+Status: **v1 integrated (2026-10-30)** on `icewm-port`: M0-M6 done on intel, M7 done on ARM (TCG boot + same
+checklist). Interfaces frozen in §4 (M0). Owner: the swarm coordinator. Lanes in §7. Status table: §3a.
 Goal: `make run DESKTOP=icewm` boots HobbyOS into a real X11 session (an X.Org-derived X server
 with a HobbyOS DDX), managed by an unmodified-as-possible **IceWM** (https://github.com/bbidulock/icewm),
 with a taskbar, start menu, and at least one real X client app. Plain `make run` (the
@@ -72,6 +73,20 @@ rebuilds get new names (§4.3).
 | M5 | Session + build integration | `make ARCH=intel DESKTOP=icewm disk.img` puts all bins+data on disk; `make ARCH=intel disk.img` (default) is byte-for-byte unchanged in its file list | `mdir` listings both ways |
 | M6 | **Boots to IceWM on intel** | `make run ARCH=intel DESKTOP=icewm` (and the headless test target) shows IceWM taskbar + start menu; clicking start opens the menu; a client window can be launched, moved, focused, closed | QMP screenshots + serial log |
 | M7 | ARM parity | same on `ARCH=arm` (TCG; slow). If host QEMU aarch64 is broken (module mismatch, see notes) the ARM *build* gate still applies and the boot is recorded as blocked | build log / screenshots |
+
+## 3a. Status (integration, 2026-10-30)
+
+| M | Status | Evidence (under `~/hobbyos-icewm-lanes/evidence/`) |
+|---|---|---|
+| M1 | done (lane kern) | unit tests 379/379 intel + arm after integration (`unit-tests-{intel,arm}.log`) |
+| M2 | done (xlibs-core, xlibs-ext) | `build-intel-shared*.log`, `build-arm-shared.log` |
+| M3 | done (xserver) | same build logs (XHOBBY.BIN both arches) |
+| M4 | done (icewm) | same build logs (ICEWM/ICEWMBG/ICESH/ICEWMHNT + XEYESR/XCALCR) |
+| M5 | done | `default-{main,integ}-intel.mdir.txt`: same 911 file names; size deltas all explained (§8); kernel compile flags identical (`kernel-flags-*`) |
+| M6 | done, intel | `m6-intel-headless-*` (QMP) and `m6-intel-gtk-*` (GTK window + host XTEST): taskbar, start-menu click, XCalc from menu, typing reaches XCalc, title-bar drag, click-to-focus, close via Kill Client, XEyes from toolbar, Logout -> clean server exit -> DESKTOP.BIN fallback |
+| M7 | done, arm (TCG) | `m7-arm-*`: the same checklist, all steps pass; host qemu-system-aarch64 ran fine headless |
+
+Known gaps: see §8 "open items".
 
 ## 4. Frozen interfaces (single writer each)
 
@@ -166,4 +181,35 @@ Root: `~/hobbyos-icewm-lanes/` — `integ/` = integration worktree (branch `icew
 | `integ` | merging lanes into `icewm-port`, end-to-end bring-up fixes, M6/M7 | all | M6 (+M7 or recorded blocker) |
 
 ## 8. Fix log (newest first)
+- 2026-10-30 integ (M5-M7), all on `icewm-port`:
+  - merged lane/kern, xlibs-core, xlibs-ext, xserver, icewm, session (no conflicts); removed the
+    transitional `cross/compat` socket shims and XSESSION's inline-asm waitpid.
+  - **kernel (x64)**: `sys_waitpid`/`sys_wait4` rewrote the user trap frame's regs[1..3]; regs[1] is the
+    caller's rbx, so every waitpid returned (and every blocking wait resumed) with rbx = &status.  Now
+    `process_wait_args()` takes explicit args and the blocking status pointer lives in a new PCB field
+    `wait_status_va` (not context[1]).
+  - **kernel (both arches)**: `sys_input_read`, `sys_input_ioctl`, `sys_fb_ioctl` treated
+    `sys_user_range()==1` (OK) as failure.  Fixed; the DDX keeps its GET_EVENTS fallback.
+  - **XSESSION stdio** (root cause of the "IceWM hangs after Kill" and the freeze when dragging a title
+    bar): XSESSION started with no fds, so IceWM's X socket became fd 2 and its stderr warnings went into
+    the X protocol stream.  XSESSION now pins fd 0 to /dev/null and fds 1/2 to a pipe it relays to the
+    serial console as `[X] ...`; resets 0-2 before the DESKTOP.BIN fallback.  Pipes ignore O_NONBLOCK on
+    HobbyOS, so the relay reads once per readable poll.
+  - **libc**: `sigaction` honoured a caller's garbage `sa_restorer` (X.Org's `OsSignal` leaves it
+    uninitialised), so XHOBBY's SIGTERM handler "returned" into a random function.  Now Linux semantics:
+    the libc trampoline unless `SA_RESTORER` is set.
+  - **DDX**: `hbCloseScreen` freed the screen pixmap before shadow's CloseScreen unregistered its damage
+    (crash in `DamageUnregister` on every server exit).  Server now exits 0 at logout.
+  - **build.sh**: XHOBBY/IceWM final-link stamps now include a hash of crt0.o/libc.a/libcxx.a/linker.ld,
+    so libc fixes relink them.
+  - **tests**: `run_icewm_test.py` real-stack mode checks the taskbar, a start-menu click, and no X
+    process memory fault.  The "click lands at (0,0)" seen by lane icewm was the test driver: on intel the
+    vmmouse reports QEMU's absolute position, so drive with absolute events (`q.py abs`), not PS/2 `goto`.
+  - default build: same file list as main; binaries grew +848 B (kern's libc socket member), +16 B more
+    in the 6 sigaction users, the kernel +24 KB; kernel compile flags identical.
+  - open items: FAT readdir ignores the VFAT lower-case flag (IceWM patched around it); IceWM's upstream
+    `FMONB` default font string lacks a comma (harmless warning); XEYESR/XCALCR lack WM_DELETE_WINDOW, so
+    close goes through IceWM's Kill dialog; XCALCR.BIN was seen holding IceWM's X socket after
+    fork/exec (before the stdio fix; whether libxcb marks its fd close-on-exec here is unverified); the HobbyOS Apps menu lists the X binaries after a fallback;
+    xtrans warns that /tmp/.X11-unix is not mode 1777 (FAT has no modes).
 - 2026-10-30 v1: plan written; swarm started.
