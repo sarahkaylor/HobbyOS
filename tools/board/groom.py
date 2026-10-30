@@ -154,6 +154,35 @@ def dependency_cycles(open_issues):
     return seen
 
 
+# GB-005/GB-110-V4: groom exposes the gate-selection helper merge_pr.py shares —
+# the HIGHEST-ORDINAL gate ticket for a parent (GB-nnn-V < GB-nnn-V2 < GB-nnn-V3),
+# on bare-id keys (title.split()[0]).  merge_pr imports this; it is how the merge
+# helper knows WHICH -V's GREEN governs (never the first match).  [GB-005 restores
+# it: a main that dropped it made merge_pr._newest_gate=None and its gate tests red.]
+GATE_RE = re.compile(r"^(GB-\d{3})-V(\d*)$")
+
+
+def newest_gate(gid, by_title):
+    """The highest-ordinal -V ticket for `gid` ('GB-106' -> 'GB-106-V2' wins)."""
+    best = None
+    for k in by_title:
+        m = GATE_RE.match(k)
+        if not m or m.group(1) != gid:
+            continue
+        ordinal = int(m.group(2) or 1)
+        if best is None or ordinal > best[0]:
+            best = (ordinal, k)
+    return by_title[best[1]] if best else None
+
+
+def verdict_in(body):
+    """GREEN/RED verdict in a single comment body, or None.  merge_pr imports this
+    from groom (groom is the one verdict parser every reader shares); `newest_verdict`
+    is the plural/list form.  Returns 'GREEN'/'RED' or None."""
+    m = re.search(r"VERDICT[^\n]{0,40}?\b(GREEN|RED)\b", body or "", re.I)
+    return m.group(1).upper() if m else None
+
+
 def newest_verdict(comments):
     """Newest GREEN/RED verdict body marker from a comment list.
 
