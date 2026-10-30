@@ -2032,6 +2032,15 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         case 60: syscall_num = SYS_EXIT;  break;   /* exit(code)         */
         /* GB-020: getdents64(fd, dirp, count).  Linux number 217. */
         case 217: syscall_num = SYS_GETDENTS64; break;
+        /* GB-019 (ioctl subset, 2026-10-30): Linux ioctl(16).  The compat
+           surface's /dev/null is a NON-tty, so TIOCGWINSZ/TCGETS on it return
+           -ENOTTY (Linux answer for a non-tty; a blind number-map would fall
+           through to a native handler and corrupt a guest struct).  /dev/fb0 /
+           evdev ioctls (FBIOGET_*, EVIOC*) belong on that node's own shim
+           (GB-025/026/027) — they stay on their own path.  Returns the
+           deterministic non-tty answer: -ENOTTY. */
+        case 16: tf->regs[0] = (uint64_t)(int64_t)(-25);  /* -ENOTTY */
+          return;
         default:
           tf->regs[0] = (uint64_t)(int64_t)(-38);  /* -ENOSYS */
           return;
