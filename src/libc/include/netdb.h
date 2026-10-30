@@ -25,6 +25,10 @@
 extern "C" {
 #endif
 
+#ifndef MAXHOSTNAMELEN
+#define MAXHOSTNAMELEN 64   /* Linux value (glibc exposes it via netdb.h too) */
+#endif
+
   struct hostent {
     char *h_name;
     char **h_aliases;

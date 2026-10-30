@@ -57,23 +57,34 @@ HB_OBJ="$HB_REPO/obj/$HB_ARCH"
 HB_LSCRIPT="$HB_REPO/src/user/linker.ld"
 HB_CLANG_RES="$(clang -print-resource-dir)/include"
 HB_LIBCXX_INC="$HB_REPO/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include"
-# Search order: repo libc headers first (they own stdint/limits/stdarg...),
+# Search order: the X11-only overlay (cross/include: POSIX limits the repo
+# libc deliberately lacks), then repo libc headers (they own stdint/limits/stdarg...),
 # then the kernel/user shared headers, then clang's freestanding resource
 # headers.  -isystem keeps package -I dirs (automake/meson) ahead of them.
-HB_SYSINC="-nostdinc -isystem $HB_REPO/src/libc/include -isystem $HB_REPO/src/include -isystem $HB_REPO/src/user_include -isystem $HB_CLANG_RES"
+HB_SYSINC="-nostdinc -isystem $HB_X11/cross/include -isystem $HB_REPO/src/libc/include -isystem $HB_REPO/src/include -isystem $HB_REPO/src/user_include -isystem $HB_CLANG_RES"
 HB_TARGET="--target=$HB_TRIPLE -ffreestanding $HB_ARCH_CFLAGS"
+# Transitional: until lane kern's named-socket wrappers are merged, force-
+# include POSIX socket prototypes (cross/compat/hb-socket-compat.h).
+HB_COMPAT_INC=""
+if ! grep -Eq '\<bind[[:space:]]*\(' "$HB_REPO/src/libc/include/sys/socket.h"; then
+  HB_COMPAT_INC="-include $HB_X11/cross/compat/hb-socket-compat.h"
+fi
 HB_CFLAGS="-O2 -g -fno-common -Wno-error"
 # C++ (icewm lane): libc++ first (its C-compat wrappers #include_next the
 # sysroot C headers), no exceptions, RTTI on (libcxx.a has the closure).
 HB_CXXFLAGS="-O2 -g -std=c++17 -fno-exceptions -frtti -nostdinc++ -isystem $HB_LIBCXX_INC"
 
 # ---- wrapper tools -------------------------------------------------------
+# Link note: on intel clang's x86_64-none-elf driver links through the host
+# gcc driver (-fuse-ld=lld still makes ld.lld do the work); gcc adds
+# --build-id, whose .note section would land at the image base ahead of
+# _start, so --build-id=none is mandatory (the flat loader enters at base).
 _hb_write_cc() { # _hb_write_cc <path> <c|c++>
-  local cxx_inc="" cxx_lang="" closure="$HB_OBJ/libc.a"
+  local cxx_inc="" cxx_lang="" closure="$HB_COMPAT_LIB $HB_OBJ/libc.a"
   if [ "$2" = c++ ]; then
     cxx_lang="-fno-exceptions -frtti"
     cxx_inc="-nostdinc++ -isystem $HB_LIBCXX_INC"
-    closure="$HB_OBJ/libcxx.a $HB_OBJ/libc.a"
+    closure="$HB_COMPAT_LIB $HB_OBJ/libcxx.a $HB_OBJ/libc.a"
   fi
   cat > "$1.tmp" <<EOF
 #!/usr/bin/env bash
@@ -84,13 +95,33 @@ for a in "\$@"; do
 done
 if [ \$link = 1 ]; then
   exec clang $HB_TARGET $cxx_lang $cxx_inc $HB_SYSINC \\
-    -nostdlib -static -fuse-ld=lld $HB_ARCH_LDFLAGS -Wl,-T,$HB_LSCRIPT -Wl,-e,_start \\
-    $HB_OBJ/crt0.o "\$@" -Wl,--start-group $closure -Wl,--end-group
+    -nostdlib -static -fuse-ld=lld $HB_ARCH_LDFLAGS -Wl,--build-id=none -Wl,-T,$HB_LSCRIPT -Wl,-e,_start \\
+    $HB_OBJ/crt0.o "\$@" -L$HB_TOOLS/lib -Wl,--start-group $closure -Wl,--end-group
 fi
-exec clang $HB_TARGET $cxx_lang $cxx_inc $HB_SYSINC "\$@"
+exec clang $HB_TARGET $cxx_lang $cxx_inc $HB_SYSINC $HB_COMPAT_INC "\$@"
 EOF
   chmod +x "$1.tmp"; mv "$1.tmp" "$1"
 }
+# Empty libc.a/libm.a/libpthread.a/... so `-lc -lm -lpthread` probes
+# (AC_CHECK_LIB(c, ...), meson dependency('threads')) resolve: the real
+# closure (one libc.a holds libc+libm+pthread) is appended by the wrapper.
+mkdir -p "$HB_TOOLS/lib"
+for _l in c m pthread rt dl util; do
+  [ -f "$HB_TOOLS/lib/lib$_l.a" ] || llvm-ar rcs "$HB_TOOLS/lib/lib$_l.a"
+done
+# Transitional (see HB_COMPAT_INC): ENOSYS link stubs for the named-socket
+# API until lane kern's libc wrappers are merged.
+HB_COMPAT_LIB=""
+if [ -n "$HB_COMPAT_INC" ]; then
+  if [ ! -f "$HB_TOOLS/lib/libhbsockcompat.a" ] || [ "$HB_X11/cross/compat/hb-socket-stubs.c" -nt "$HB_TOOLS/lib/libhbsockcompat.a" ]; then
+    clang $HB_TARGET $HB_SYSINC $HB_COMPAT_INC -O2 -c "$HB_X11/cross/compat/hb-socket-stubs.c" -o "$HB_TOOLS/lib/hb-socket-stubs.o" &&
+      rm -f "$HB_TOOLS/lib/libhbsockcompat.a" &&
+      llvm-ar rcs "$HB_TOOLS/lib/libhbsockcompat.a" "$HB_TOOLS/lib/hb-socket-stubs.o"
+  fi
+  HB_COMPAT_LIB="$HB_TOOLS/lib/libhbsockcompat.a"
+else
+  rm -f "$HB_TOOLS/lib/libhbsockcompat.a" "$HB_TOOLS/lib/hb-socket-stubs.o"
+fi
 _hb_write_cc "$HB_TOOLS/hobbyos-cc" c
 _hb_write_cc "$HB_TOOLS/hobbyos-c++" c++
 
@@ -116,7 +147,7 @@ EOF
 
 # ---- exported environment (autotools) -------------------------------------
 export HB_ARCH HB_TRIPLE HB_CPU HB_REPO HB_X11 HB_PREFIX HB_TOOLS HB_OBJ HB_LSCRIPT \
-       HB_ARCH_CFLAGS HB_ARCH_LDFLAGS HB_SYSINC HB_TARGET HB_CFLAGS HB_CXXFLAGS HB_LIBCXX_INC
+       HB_ARCH_CFLAGS HB_ARCH_LDFLAGS HB_SYSINC HB_COMPAT_INC HB_COMPAT_LIB HB_TARGET HB_CFLAGS HB_CXXFLAGS HB_LIBCXX_INC
 export CC="$HB_TOOLS/hobbyos-cc"
 export CXX="$HB_TOOLS/hobbyos-c++"
 export CPP="$HB_TOOLS/hobbyos-cc -E"

@@ -31,6 +31,12 @@ extern "C" {
   };
 #define TIOCGWINSZ 0x5413
 
+  /* Linux request numbers for byte-count / non-blocking probes (X.Org's
+   * Xtrans BytesReadable, icewm.md M2).  The stub answers ENOTTY until a
+   * kernel ioctl class exists; callers treat that as "unknown". */
+#define FIONREAD 0x541B
+#define FIONBIO  0x5421
+
 #ifdef __cplusplus
 }
 #endif

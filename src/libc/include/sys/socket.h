@@ -131,6 +131,11 @@ extern "C" {
   ssize_t recvmsg(int fd, struct msghdr *msg, int flags);
   int shutdown(int fd, int how);
 
+  /* icewm.md M2 (lane xlibs-core, src/libc/src/sockio.c): send/recv as
+   * single-iovec sendmsg/recvmsg. */
+  ssize_t send(int fd, const void *buf, size_t len, int flags);
+  ssize_t recv(int fd, void *buf, size_t len, int flags);
+
 #ifdef __cplusplus
 }
 #endif
