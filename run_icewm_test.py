@@ -309,6 +309,52 @@ def main():
             frac, ncol, strip = shot("1-icewm")
             if frac < 0.05 or ncol < 2:
                 failures.append("IceWM session screenshot is black/flat")
+            # M6 (integ): IceWM's taskbar is up, and clicking the start
+            # button (bottom-left) opens the start menu above it.
+            tb_end = time.time() + (90 if args.arch == "intel" else 900)
+            while not strip and time.time() < tb_end and proc.poll() is None:
+                time.sleep(3)
+                frac, ncol, strip = shot("2-taskbar")
+            if not strip:
+                failures.append("no IceWM taskbar (bottom strip equals the screen middle)")
+            else:
+                log("[TEST] ok   IceWM taskbar visible")
+                before = shots[-1]
+                def absmove(x, y):
+                    qmp.cmd("input-send-event", {"events": [
+                        {"type": "abs", "data": {"axis": "x", "value": x * 32767 // W}},
+                        {"type": "abs", "data": {"axis": "y", "value": y * 32767 // H}}]})
+                def button(down):
+                    qmp.cmd("input-send-event", {"events": [
+                        {"type": "btn", "data": {"button": "left", "down": down}}]})
+                absmove(25, H - TASKBAR_H // 2)
+                time.sleep(0.5)
+                button(True); time.sleep(0.1); button(False)
+                # First open scans the fonts (fontconfig): give it time.
+                changed = 0
+                menu_end = time.time() + (30 if args.arch == "intel" else 300)
+                while time.time() < menu_end and proc.poll() is None:
+                    time.sleep(3)
+                    shot("3-startmenu")
+                    a, aw, _ = ppm_pixels(before)
+                    b, _, _ = ppm_pixels(shots[-1])
+                    changed = 0
+                    if a and b:
+                        for y in range(H - 220, H - TASKBAR_H - 4, 4):
+                            for x in range(4, 140, 4):
+                                o = (y * aw + x) * 3
+                                if a[o:o + 3] != b[o:o + 3]:
+                                    changed += 1
+                    if changed > 200:
+                        break
+                if changed > 200:
+                    log(f"[TEST] ok   start menu opened ({changed} sampled pixels changed)")
+                else:
+                    failures.append(f"start menu did not open ({changed} sampled pixels changed)")
+            text = ser.text()
+            for proc_name in ("XHOBBY.BIN", "ICEWM.BIN", "XSESSION.BIN"):
+                if f"({'/' if proc_name != 'XSESSION.BIN' else ''}{proc_name}) memory fault" in text:
+                    failures.append(f"{proc_name} memory fault (see serial log)")
         if proc.poll() is not None:
             failures.append(f"QEMU exited early (rc={proc.returncode})")
     except Exception as e:  # bounded harness: report, never hang
