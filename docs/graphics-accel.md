@@ -286,3 +286,19 @@ unit-arm, unit-x64, ARM wave + x64 wave characterization on the CI VM
   fallback both arches) + x64 driver split (`virtio_gpu_x64.c`) +
   `GFXBENCH.BIN` wired into the test wave + this document. Lanes G1–G4
   dispatched from the freeze commit.
+
+- 2026-10-30 — **x64 GL path restored on a patched QEMU.** eb45a603 had made
+  x64 `auto` resolve to soft after `gtk,gl=on` was judged "blank". That
+  verdict came from QMP screendump, which is unavailable under GL windows
+  (§1); the real symptoms were two QEMU 10.2.1 bugs that are still on
+  upstream master. (1) OVMF's ExitBootServices virtio reset runs
+  `virtio_gpu_virgl_reset_scanout()` on a vCPU thread, which steals GTK's
+  EGL context: `eglMakeCurrent failed` ~5x/s on Wayland, and an epoxy abort
+  on X11. (2) The console resize that precedes every `set_scanout` leaves a
+  pending 2D update, so the next refresh drops the GTK GL backends out of
+  scanout mode onto a blank surface. Fixes in `tools/qemu-glfix/` (two
+  patches + `build.sh`). x64 `auto` picks GL only when that build is
+  installed and runs that binary; otherwise it stays soft. Verified with
+  `make run ARCH=intel` in an offscreen nested KWin: patched QEMU,
+  `gtk,gl=on`, 0 EGL warnings, desktop and Apps menu rendered (5/5 nested
+  boots). The X11 GL path and ARM were not re-verified.

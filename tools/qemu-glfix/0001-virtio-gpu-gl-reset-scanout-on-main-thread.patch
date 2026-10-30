@@ -1,0 +1,53 @@
+--- a/hw/display/virtio-gpu-gl.c
++++ b/hw/display/virtio-gpu-gl.c
+@@ -17,6 +17,8 @@
+ #include "qemu/error-report.h"
+ #include "qapi/error.h"
+ #include "system/system.h"
++#include "system/cpus.h"
++#include "qemu/main-loop.h"
+ #include "hw/virtio/virtio.h"
+ #include "hw/virtio/virtio-gpu.h"
+ #include "hw/virtio/virtio-gpu-bswap.h"
+@@ -101,6 +103,15 @@
+     virtio_gpu_virgl_fence_poll(g);
+ }
+ 
++static void virtio_gpu_gl_reset_scanout_bh(void *opaque)
++{
++    VirtIOGPU *g = opaque;
++
++    virtio_gpu_virgl_reset_scanout(g);
++    g->reset_finished = true;
++    qemu_cond_signal(&g->reset_cond);
++}
++
+ static void virtio_gpu_gl_reset(VirtIODevice *vdev)
+ {
+     VirtIOGPU *g = VIRTIO_GPU(vdev);
+@@ -110,10 +121,23 @@
+ 
+     /*
+      * GL functions must be called with the associated GL context in main
+-     * thread, and when the renderer is unblocked.
++     * thread, and when the renderer is unblocked.  A guest-initiated reset
++     * arrives on a vCPU thread, so hand the scanout reset to the main loop
++     * the same way virtio_gpu_reset() does; otherwise the display backend
++     * makes its GL context current on the vCPU thread (GTK: every later
++     * main-thread eglMakeCurrent then fails with EGL_BAD_ACCESS).
+      */
+     if (gl->renderer_state == RS_INITED) {
+-        virtio_gpu_virgl_reset_scanout(g);
++        if (qemu_in_vcpu_thread()) {
++            g->reset_finished = false;
++            aio_bh_schedule_oneshot(qemu_get_aio_context(),
++                                    virtio_gpu_gl_reset_scanout_bh, g);
++            while (!g->reset_finished) {
++                qemu_cond_wait_bql(&g->reset_cond);
++            }
++        } else {
++            virtio_gpu_virgl_reset_scanout(g);
++        }
+         gl->renderer_state = RS_RESET;
+     }
+ }
