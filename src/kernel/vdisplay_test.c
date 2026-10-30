@@ -87,11 +87,25 @@ static void test_vdisp_damage(void) {
   vdisp_core_reset();
 }
 
+static void test_vdisp_pace(void) {
+  uart_puts("  Running test_vdisp_pace...\n");
+  tests_run++;
+  vdisp_core_reset();
+  int marker = 0;
+  int id = vdisp_core_alloc(1, &marker);
+  EXPECT_EQ(vdisp_core_pace(id, 1000), 0);
+  EXPECT_EQ(vdisp_core_pace(id, 1004), VDISP_FRAME_MS - 4);
+  EXPECT_EQ(vdisp_core_pace(id, 2000), 0);
+  EXPECT_EQ(vdisp_core_pace(0, 2000), 0);           /* no display: no wait */
+  vdisp_core_reset();
+}
+
 void vdisplay_test_suite(void) {
   uart_puts("vdisplay_test_suite:\n");
   test_vdisp_alloc_free();
   test_vdisp_ring();
   test_vdisp_damage();
+  test_vdisp_pace();
 }
 
 #endif // KERNEL_MODE_UNIT_TEST

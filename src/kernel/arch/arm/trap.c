@@ -1200,12 +1200,27 @@ static void sys_fb_ioctl(struct trap_frame *tf) {
   tf->regs[0] = (uint64_t)(int64_t)hb_fb_ioctl_route(req, arg, smem_start);
 }
 
+/* icewm.md §9: an attached process's present sleeps until its frame slot
+ * (vdisp_flush_pace); same park as SYS_SLEEP, returning 0. */
+static void vdisp_present_pace(struct trap_frame *tf, int vd) {
+  int ms = vdisp_flush_pace(vd);
+  tf->regs[0] = 0;
+  struct process *cur = current_process();
+  if (cur && ms > 0) {
+    uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+    cur->wake_ms = timer_get_ms() + ms;
+    cur->state = PROC_STATE_BLOCKED;
+    spinlock_release_irqrestore(&proc_lock, flags);
+    schedule(tf, 0);
+  }
+}
+
 static void sys_flush_fb(struct trap_frame *tf) {
   {
     int vd = vdisp_attached(current_process());
     if (vd) { /* icewm.md §9: record damage for the host, not the display */
       vdisp_flush(vd, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
-      tf->regs[0] = 0;
+      vdisp_present_pace(tf, vd);
       return;
     }
   }
@@ -1253,7 +1268,7 @@ static void sys_flush_fb_rects(struct trap_frame *tf) {
     if (vd) { /* icewm.md §9 */
       for (int i = 0; i < count; i++)
         vdisp_flush(vd, krects[i].x, krects[i].y, krects[i].w, krects[i].h);
-      tf->regs[0] = 0;
+      vdisp_present_pace(tf, vd);
       return;
     }
   }

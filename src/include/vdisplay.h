@@ -14,7 +14,10 @@
  *                       of the real framebuffer, so SYS_FB_IOCTL needs no
  *                       change) at the usual USER_FB_BASE_V2 slot;
  *   SYS_FLUSH_FB(_RECTS) never touch the real display: they record damage
- *                       (a union rect + a sequence number) for the host;
+ *                       (a union rect + a sequence number) for the host,
+ *                       and are paced to ~60/s (an early flush sleeps until
+ *                       its frame slot -- a virtual present is otherwise
+ *                       free and loop-paced games would run unbounded);
  *   SYS_FB_IOCTL        FBIOBLANK is a no-op (geometry queries unchanged);
  *   SYS_GET_EVENTS /    read the private queue, which the host fills with
  *   SYS_INPUT_READ      VDISP_OP_INJECT.
@@ -42,6 +45,7 @@
 
 #define VDISP_MAX 16       /* displays system-wide */
 #define VDISP_RING 256     /* queued input events per display */
+#define VDISP_FRAME_MS 16  /* present pacing: ~60 flushes/s per display */
 
 /* Same layout as struct virtio_input_event (the SYS_GET_EVENTS record). */
 struct vdisp_event {
@@ -72,6 +76,7 @@ int vdisp_core_read(int id, struct vdisp_event *out, int max, uint64_t now_ms);
 void vdisp_core_damage(int id, int x, int y, int w, int h);
 void vdisp_core_mapped(int id);
 void vdisp_core_status(int id, struct vdisp_status *out, uint64_t now_ms);
+int vdisp_core_pace(int id, uint64_t now_ms);    /* ms the flusher waits */
 
 
 /* ---- kernel glue (src/kernel/vdisplay.c; both arch dispatchers) ---- */
@@ -85,6 +90,7 @@ int64_t vdisp_sys_inject(struct process *caller, const struct vdisp_event *kev, 
 int64_t vdisp_sys_status(struct process *caller, struct vdisp_status *out);
 int64_t vdisp_map_fb(struct process *caller, int id);
 void vdisp_flush(int id, int x, int y, int w, int h);
+int vdisp_flush_pace(int id);                       /* ms to sleep */
 int vdisp_get_events(int id, struct vdisp_event *out, int max);
 
 #endif
