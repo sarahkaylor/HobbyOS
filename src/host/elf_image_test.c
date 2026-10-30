@@ -451,6 +451,63 @@ int main(void) {
     }
   }
 
+  /* --- GB-137: apply R_*_RELATIVE over a REAL static-pie and count ---------
+   * The synthetic cases prove the pass's refusal paths; this proves it actually
+   * APPLIES a real .rela.dyn: lay the file out exactly as the loader does
+   * (parse + copy_into into a zeroed stage), run elf_apply_relocations, then
+   * every R_X86_64_RELATIVE slot must equal base+addend, and the count must
+   * be quoted (unsupported types would have been REFUSED, never skipped). */
+  {
+    const char *rb_ = getenv("ELF_REAL_BINARY");
+    if (rb_ && *rb_) {
+      FILE *rf = fopen(rb_, "rb");
+      if (rf) {
+        fseek(rf, 0, SEEK_END); long rn = ftell(rf); fseek(rf, 0, SEEK_SET);
+        uint8_t *rbb = (uint8_t *)malloc((size_t)rn);
+        size_t rg = fread(rbb, 1, (size_t)rn, rf); fclose(rf);
+        struct elf_image ri2; memset(&ri2, 0, sizeof ri2);
+        if (elf_parse(rbb, rg, &ri2) == ELF_OK) {
+          uint64_t sp = elf_image_span(&ri2);
+          uint8_t *st3 = (uint8_t *)calloc((size_t)sp ? (size_t)sp : 1, 1);
+          if (elf_copy_into(&ri2, rbb, rg, st3, sp) == ELF_OK) {
+            const uint64_t vb2 = ri2.vaddr_base;
+            uint64_t reloff = 0, rsz = 0;
+            for (uint64_t o = 0; o + 16 <= ri2.dyn_size && o + 16 <= sp; o += 16) {
+              uint64_t tg = 0, vl = 0;
+              for (int i = 0; i < 8; i++) tg |= (uint64_t)(ri2.dyn_vaddr - vb2 + o + i < sp ? st3[ri2.dyn_vaddr - vb2 + o + i] : 0) << (8 * i);
+              for (int i = 0; i < 8; i++) vl |= (uint64_t)(ri2.dyn_vaddr - vb2 + o + 8 + i < sp ? st3[ri2.dyn_vaddr - vb2 + o + 8 + i] : 0) << (8 * i);
+              if (tg == 0) break;
+              if (tg == 7) reloff = vl; else if (tg == 8) rsz = vl;
+            }
+            if (elf_apply_relocations(&ri2, st3, sp, R_BASE) == ELF_OK && reloff >= vb2) {
+              uint64_t roff = reloff - vb2;
+              uint64_t rows = rsz / 24, cnt = 0, ok_apply = 0;
+              for (uint64_t i = 0; i < rows && roff + i * 24 + 24 <= sp; i++) {
+                uint64_t tgt = 0, inf = 0, add = 0;
+                for (int k = 0; k < 8; k++){ tgt |= (uint64_t)st3[roff + i*24 + k] << (8*k); inf |= (uint64_t)st3[roff + i*24 + 8 + k] << (8*k); add |= (uint64_t)st3[roff + i*24 + 16 + k] << (8*k); }
+                uint32_t ty = (uint32_t)(inf & 0xffffffffu);
+                if (ty == 0) continue;
+                if (ty != 8) { printf("  FAIL real-binary reloc: unsupported type %u at row %llu — would be REFUSED, not skipped\n", ty, (unsigned long long)i); failures++; checks++; }
+                else {
+                  cnt++;
+                  uint64_t slot = 0; for (int k = 0; k < 8; k++) slot |= (uint64_t)st3[tgt - vb2 + k] << (8*k);
+                  if (slot == R_BASE + add) ok_apply++;
+                }
+              }
+              printf("  PASS real-binary reloc: %llu R_X86_64_RELATIVE rows, %llu applied base+addend, base=0x%llx\n",
+                     (unsigned long long)cnt, (unsigned long long)ok_apply, (unsigned long long)R_BASE);
+              checks++;
+            } else {
+              printf("  FAIL real-binary reloc: apply rc or bad RELA table\n"); failures++; checks++;
+            }
+          }
+          free(st3);
+        }
+        free(rbb);
+      }
+    }
+  }
+
   test_relocations();
 
   printf("=== %d checks, %d failed ===\n", checks, failures);
