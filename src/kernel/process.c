@@ -130,17 +130,17 @@ volatile uint64_t sched_badelr_seen;
 
 
 static void resume_returned_halt(int pid, const struct trap_frame *tf) {
-  extern void uart_puts_raw(const char *s);
-  extern void uart_print_hex_raw(uint64_t v);
-  uart_puts_raw("[KERNEL] resume call RETURNED (must never happen): cpu=");
+  extern void panic_puts(const char *s);
+  extern void panic_print_hex(uint64_t v);
+  panic_puts("[KERNEL] resume call RETURNED (must never happen): cpu=");
   /* Read the CPU here rather than trusting the caller's argument: in the wild
      (probe v16) both call sites passed a garbage value that printed as
      cpu=0x24848B4800000120 next to a perfectly plausible pid.  A field that
      prints nonsense is worse than an absent one -- it invites a wrong
      conclusion about which CPU was lost. */
-  uart_print_hex_raw((uint64_t)get_cpuid());
-  uart_puts_raw(" pid=");
-  uart_print_hex_raw((uint64_t)(uint32_t)pid);
+  panic_print_hex((uint64_t)get_cpuid());
+  panic_puts(" pid=");
+  panic_print_hex((uint64_t)(uint32_t)pid);
   /* GB-057: and the FRAME it failed to enter.  Returning from
      enter_user_space means the iretq did not take -- which happens when the
      frame is not a legal return (non-canonical RIP, bad CS/SS, nonsense RFLAGS).
@@ -148,15 +148,15 @@ static void resume_returned_halt(int pid, const struct trap_frame *tf) {
      handed, which is the difference between naming a bug and describing a
      symptom (probe22 printed only cpu and pid, and I could not tell which). */
   if (tf) {
-    uart_puts_raw(" frame.elr=");
-    uart_print_hex_raw(tf->elr);
-    uart_puts_raw(" frame.spsr=");
-    uart_print_hex_raw(tf->spsr);
+    panic_puts(" frame.elr=");
+    panic_print_hex(tf->elr);
+    panic_puts(" frame.spsr=");
+    panic_print_hex(tf->spsr);
 #ifdef __x86_64__
-    uart_puts_raw(" frame.cs=");
-    uart_print_hex_raw(tf->cs);
-    uart_puts_raw(" frame.ss=");
-    uart_print_hex_raw(tf->ss);
+    panic_puts(" frame.cs=");
+    panic_print_hex(tf->cs);
+    panic_puts(" frame.ss=");
+    panic_print_hex(tf->ss);
 #endif
   }
   /* GB-060: a CPU that has to stop must not take the machine with it.  If this
@@ -171,12 +171,12 @@ static void resume_returned_halt(int pid, const struct trap_frame *tf) {
     extern int spinlock_release_if_held_by_me(spinlock_t *lock);
     extern spinlock_t proc_lock;
     if (spinlock_release_if_held_by_me(&proc_lock)) {
-      uart_puts_raw(" -- released proc_lock (GB-060)\n");
+      panic_puts(" -- released proc_lock (GB-060)\n");
     } else {
-      uart_puts_raw(" -- proc_lock not ours to release\n");
+      panic_puts(" -- proc_lock not ours to release\n");
     }
   }
-  uart_puts_raw(" -- halting this CPU\n");
+  panic_puts(" -- halting this CPU\n");
   /* GB-060: record it BEFORE stopping, so any CPU waiting on a lock this one
      holds can tell the holder is gone and take it over instead of spinning
      forever behind a core that will never run again. */
@@ -1305,46 +1305,46 @@ void save_context(struct process *p, struct trap_frame *tf) {
 }
 
 void wd_dump_proc_table(void) {
-  extern void uart_puts_raw2(const char *s);
-  extern void uart_print_hex_raw2(uint64_t v);
+  extern void panic_puts2(const char *s);
+  extern void panic_print_hex2(uint64_t v);
   extern void print_int_raw2(int val);
   /* Snapshot under proc_lock: the state values and the per-CPU claims are
      both written under it, so reading both inside the lock gives a
      consistent picture of stranded processes. */
   spinlock_acquire(&proc_lock);
   extern int cpu_current_pids[MAX_CPUS];
-  uart_puts_raw2("   claim:");
+  panic_puts2("   claim:");
   for (int c = 0; c < MAX_CPUS; c++) {
-    uart_puts_raw2(" c");
+    panic_puts2(" c");
     print_int_raw2(c);
-    uart_puts_raw2("=");
+    panic_puts2("=");
     print_int_raw2(cpu_current_pids[c]);
   }
-  uart_puts_raw2("\n");
+  panic_puts2("\n");
   for (int i = 0; i < MAX_PROCESSES; i++) {
     if (proc_table[i].state == PROC_STATE_FREE)
       continue;
-    uart_puts_raw2("   p");
+    panic_puts2("   p");
     print_int_raw2(i);
-    uart_puts_raw2(" st=");
+    panic_puts2(" st=");
     print_int_raw2(proc_table[i].state);
-    uart_puts_raw2(" w=");
+    panic_puts2(" w=");
     print_int_raw2((int)proc_table[i].wake_ms);
     if (proc_table[i].name[0]) {
-      uart_puts_raw2(" ");
-      uart_puts_raw2(proc_table[i].name);
+      panic_puts2(" ");
+      panic_puts2(proc_table[i].name);
     }
     /* For every process, show the first words of its loaded image so a
        'stuck at user entry' process can be checked against real code
        (zeros / 0x90 NOP sled / garbage => image never landed). */
     if (!proc_table[i].is_kernel_process && proc_table[i].user_phys_base) {
       uint64_t pb = proc_table[i].user_phys_base;
-      uart_puts_raw2(" img=");
-      uart_print_hex_raw2(*(volatile uint64_t *)pb);
-      uart_puts_raw2("/");
-      uart_print_hex_raw2(*(volatile uint64_t *)(pb + 8));
+      panic_puts2(" img=");
+      panic_print_hex2(*(volatile uint64_t *)pb);
+      panic_puts2("/");
+      panic_print_hex2(*(volatile uint64_t *)(pb + 8));
     }
-    uart_puts_raw2("\n");
+    panic_puts2("\n");
   }
   spinlock_release(&proc_lock);
 }
@@ -1620,12 +1620,12 @@ void schedule(struct trap_frame *tf, int is_yield) {
           proc_table[idx].user_phys_base == 0) {
         static volatile uint32_t unresumable_shouts;
         if (unresumable_shouts < 8) {
-          extern void uart_puts_raw(const char *s);
-          extern void uart_print_hex_raw(uint64_t v);
+          extern void panic_puts(const char *s);
+          extern void panic_print_hex(uint64_t v);
           unresumable_shouts++;
-          uart_puts_raw("[KERNEL] refusing to resume slot ");
-          uart_print_hex_raw((uint64_t)idx);
-          uart_puts_raw(": no address space (v2 exec window?) -- skipped\n");
+          panic_puts("[KERNEL] refusing to resume slot ");
+          panic_print_hex((uint64_t)idx);
+          panic_puts(": no address space (v2 exec window?) -- skipped\n");
         }
         continue;
       }
@@ -1761,7 +1761,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
           struct vm_region *rr = vm_region_find(tas, dv);
           rdiag_n++;
           {
-            /* GB-097: uart_puts_raw takes NO lock, so a single buffered write
+            /* GB-097: panic_puts takes NO lock, so a single buffered write
                through it is still not atomic -- measured: this very line came
                out as "[RESUME-3D IbAlGoc]k _piiddx==2- 1r\re" interleaved with
                process_create's output.  "Build the record, emit it once" only
