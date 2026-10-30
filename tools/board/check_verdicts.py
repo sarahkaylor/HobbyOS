@@ -88,24 +88,28 @@ def verdict_line_of(body):
     must START a line (after optional markdown), and the token must not be part of a
     longer word: `REDs`, `GREEN-gated`, `REDUCE` are not verdicts.
     """
-    for ln in (body or "").replace("\r", "").split("\n"):
-        # (A) an explicit marker — the shape every Verifier uses.
-        m = re.search(r"\bVERDICT\s*:\s*\**\s*(GREEN|RED)\b", ln, re.I)
+    for ln_raw in (body or "").replace("\r", "").split("\n"):
+        # GB-136-V4: a line that QUOTES a verdict shape is not a verdict.  Strip inline
+        # code spans before matching, so `VERDICT: GREEN|RED` written as documentation —
+        # including the line that documents this very parser — cannot become one.  The
+        # evidence string still quotes the original line.
+        ln = re.sub(r"`[^`]*`", "", ln_raw)
+        # (A) an explicit marker, line-initial only (the shape every Verifier uses).
+        m = re.match(r"^\s*(?:[-*]\s*)?(?:#{1,6}\s*)?\**\s*VERDICT\s*:\s*\**\s*(GREEN|RED)(?![|\w-])",
+                     ln, re.I)
         if m:
-            return m.group(1).upper(), ln.strip()[:160]
+            return m.group(1).upper(), ln_raw.strip()[:160]
         # (B) a line-initial, UPPER-CASE verdict token, optionally bold, followed by a
         # separator or end-of-line.  GB-136-V3 found three prose lines that this must
-        # reject: `red or pending run …`, `RED fixed (F1 + F2) …`, `red log: …`.  The
-        # separator requirement rejects the first two (a following lowercase word), and
-        # requiring upper case rejects the lowercase sentences.
-        m = re.match(r"^\s*(?:[-*]\s*)?\**\s*(GREEN|RED)\**\s*(?:[—–\-:.,;!)]|$)", ln)
+        # reject: `red or pending run …`, `RED fixed (F1 + F2) …`, `red log: …`.
+        m = re.match(r"^\s*(?:[-*]\s*)?\**\s*(GREEN|RED)(?![|\w-])\**\s*(?:[—–\-:.,;!)]|$)", ln)
         if m:
-            return m.group(1), ln.strip()[:160]
+            return m.group(1), ln_raw.strip()[:160]
         # (C) a heading that names the card, an em dash, then the verdict:
         #     `## GB-136-V3 — **RED** at a1f4fd4. …`
-        m = re.match(r"^\s*#{1,6}\s+\S.*?[—–]\s*\**\s*(GREEN|RED)\b", ln)
+        m = re.match(r"^\s*#{1,6}\s+\S.*?[—–]\s*\**\s*(GREEN|RED)(?![|\w-])", ln)
         if m:
-            return m.group(1), ln.strip()[:160]
+            return m.group(1), ln_raw.strip()[:160]
     return None, None
 
 
@@ -231,6 +235,10 @@ def self_test():
         ("red log:   T3_intel: FAIL — 1 FAIL line(s)", None),
         ("## GB-136-V3 — **RED** at `a1f4fd4`. The fix is real; …", "RED"),
         ("**GREEN.** None of the RED conditions tripped", "GREEN"),
+        # GB-136-V4: the line that DOCUMENTS this parser must not become a verdict —
+        # it was the newest "verdict" on GB-136 and read as GREEN over a standing RED.
+        ("- **(A)** explicit `VERDICT: GREEN|RED` marker anywhere.", None),
+        ("| (A) | an explicit `VERDICT: GREEN|RED` marker |", None),
         ("**MERGED — `b1594f9` on `main`. GB-005 → Done.**", None),
     ]
     for text, want in parse_cases:
