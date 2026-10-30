@@ -1,0 +1,111 @@
+diff --git a/src/kernel/process.c b/src/kernel/process.c
+index 3c47bc3..b1e3434 100755
+--- a/src/kernel/process.c
++++ b/src/kernel/process.c
+@@ -197,6 +197,36 @@ extern void arch_fpu_reset(struct process *p);
+ // Process table
+ static struct process proc_table[MAX_PROCESSES];
+ 
++/* GB-133 bracket: print the leaf state of the resume copy's destination page at
++ * EVERY resume, so a 1->0 transition has a line on each side.  Companion to the
++ * [GB133] op= markers on the region-removal path in vm.c: whichever op line
++ * falls between a pte=1 and the next pte=0 for the same pid is the writer. */
++static void gb133_resume_probe(const char *site, struct process *p,
++                               uint64_t target_sp, uint64_t cs) {
++  extern int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *l);
++  if (!p || !p->as)
++    return;
++  int usr = ((cs & 3u) == 3u);
++  uint64_t d = (usr ? target_sp : arch_get_user_sp()) - 320;
++  uint64_t pg = d & ~0xFFFULL;
++  if (pg < USER_MAIN_STK_LIMIT_V2 || pg >= USER_MAIN_STK_TOP_V2)
++    return;
++  uint64_t lf = 0;
++  int pr = (vm_arch_walk(p->as, pg, &lf) == 0);
++  struct kline kb;
++  kl_init(&kb);
++  kl_s(&kb, "[GB133-R] ");
++  kl_s(&kb, site);
++  kl_s(&kb, " pid=");
++  kl_i(&kb, p->pid);
++  kl_s(&kb, " pg=");
++  kl_hex(&kb, pg);
++  kl_s(&kb, " pte=");
++  kl_c(&kb, pr ? '1' : '0');
++  kl_s(&kb, "\n");
++  kl_emit(&kb);
++}
++
+ /* GB-057: bounded count for the [IDLECLAIM] report (a leaked per-CPU claim seen
+    on idle entry).  Rare-event report, not a per-idle log. */
+ static int idleclaim_reported;
+@@ -1794,6 +1824,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
+           }
+         }
+       }
++      gb133_resume_probe("sch", &proc_table[next], target_sp, local_tf.cs);
+       enter_user_space(&local_tf, target_sp);
+       /* GB-060 (cheap half): a resume call that returns is a defect --
+          enter_user_space iretqs into the target and must never come back.  The
+@@ -3553,6 +3584,7 @@ void start_scheduler(void) {
+         extern void enter_user_space(struct trap_frame *tf, uint64_t target_sp);
+         extern void resume_mark(int pid, uint64_t target_sp);
+         resume_mark(proc_table[i].pid, target_sp);
++        gb133_resume_probe("boot", &proc_table[i], target_sp, local_tf.cs);
+         enter_user_space(&local_tf, target_sp);
+ 
+         /* Same rule as schedule()'s resume boundary: if this returns, the CPU
+diff --git a/src/kernel/vm.c b/src/kernel/vm.c
+index f953398..9828f42 100644
+--- a/src/kernel/vm.c
++++ b/src/kernel/vm.c
+@@ -22,6 +22,41 @@
+ #include "process.h"
+ 
+ extern void uart_puts(const char *s);
++
++/* GB-133: one line whenever a region operation could take the resume page
++   away.  Bracket by measurement -- the page-watch proved the commit sticks
++   (post=1 68/68) and the page is absent again at the next resume, so some
++   region op between two resumes covers 0x17FFFFF000.  These markers say
++   which op, and the seq number says when. */
++static int gb133_seq;
++static void gb133_mark(const char *what, uint64_t base, uint64_t len) {
++  const uint64_t page = 0x17FFFFF000ULL;
++  if (base > page || base + len <= page)
++    return;
++  extern void uart_puts(const char *s);
++  char b[72];
++  int n = 0;
++  const char *p = "[GB133] op=";
++  while (*p && n < 20) b[n++] = *p++;
++  while (*what && n < 32) b[n++] = *what++;
++  const char *p2 = " seq=";
++  while (*p2 && n < 40) b[n++] = *p2++;
++  char t[12];
++  int ti = 0;
++  int v = gb133_seq++;
++  if (v == 0) t[ti++] = '0';
++  while (v > 0 && ti < 11) { t[ti++] = (char)('0' + (v % 10)); v /= 10; }
++  while (ti > 0 && n < 50) b[n++] = t[--ti];
++  const char *p3 = " base=0x";
++  while (*p3 && n < 60) b[n++] = *p3++;
++  static const char hx[] = "0123456789ABCDEF";
++  for (int sh = 60; sh >= 0 && n < 78; sh -= 4)
++    b[n++] = hx[(base >> sh) & 0xF];
++  const char *p4 = "\n";
++  while (*p4 && n < 90) b[n++] = *p4++;
++  b[n] = 0;
++  uart_puts(b);
++}
+ extern void print_int(int v);
+ extern void uart_print_hex(uint64_t v);
+ 
+@@ -536,6 +571,7 @@ static int vm_region_remove_locked(struct addr_space *as, uint64_t base,
+                                    uint64_t len) {
+   if (!as || as->ver != AS_V2 || len == 0)
+     return -1;
++  gb133_mark("region_rm", base, len);
+   uint64_t end = base + len;
+   for (int i = 0; i < as->nr;) {
+     struct vm_region *r = &as->regions[i];
