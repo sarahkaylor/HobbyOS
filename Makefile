@@ -2280,8 +2280,12 @@ icewm-stubs: $(X11STUB_BINS)
 # source with third_party/x11/build.sh (default build dir only — an explicit
 # X11_BUILD_DIR that lacks them is an error, never a silent rebuild).
 X11_REQUIRED_BINS = XHOBBY.BIN ICEWM.BIN
+# The runtime prerequisites build.sh links every flat .BIN against: listing
+# them here makes the outer make build them first, so build.sh's own
+# `make obj/<arch>/libc.a` is a no-op instead of rewriting libc.a while a
+# parallel sibling recipe is linking against it.
 .PHONY: x11-staged
-x11-staged:
+x11-staged: $(OBJ_DIR)/libc.a $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libcxx.a
 	@missing=""; for b in $(X11_REQUIRED_BINS); do [ -f "$(X11_BUILD_DIR)/bin/$$b" ] || missing="$$missing $$b"; done; \
 	if [ -z "$$missing" ]; then echo "[x11] using $(X11_BUILD_DIR)"; exit 0; fi; \
 	if [ "$(X11_BUILD_DIR)" != "third_party/x11/build/$(ARCH)" ]; then \
