@@ -80,6 +80,22 @@ QEMU_GPU ?= auto
 OBJ_DIR = obj/$(ARCH)
 MODE_FILE = $(OBJ_DIR)/.mode
 
+# IceWM secondary desktop (icewm.md §4.5).  DESKTOP selects what the kernel
+# launches in the default (MODE=desktop) branch:
+#   hobby (default): DESKTOP.BIN, the native HobbyOS desktop — unchanged.
+#   icewm:           XSESSION.BIN (src/user/x11sess/), which starts the X
+#                    server XHOBBY.BIN + IceWM and falls back to DESKTOP.BIN
+#                    if the X session dies.  The disk additionally gets the
+#                    X binaries (icewm.md §4.3) and data tree (§4.4) from
+#                    $(X11_BUILD_DIR), built by third_party/x11/build.sh
+#                    when missing.  `make run DESKTOP=icewm [ARCH=arm]`.
+# DESKTOP_FILE is the knob's stamp (like MODE_FILE): switching DESKTOP
+# rebuilds main.o and disk.img.  DESKTOP=hobby adds no compiler flag and no
+# disk file (verified by diffing kernel build lines + mdir listings, M5).
+DESKTOP ?= hobby
+DESKTOP_FILE = $(OBJ_DIR)/.desktop
+X11_BUILD_DIR ?= third_party/x11/build/$(ARCH)
+
 # Flat WebProcess binary (WK-5 windowed browser shell).  The browser SOURCE is
 # vendored in this repo since 2026-10-07 — third_party/webkit-hobbyos/
 # (sha-verified snapshot parts + extract.sh + build.sh; see its README.md).
@@ -215,6 +231,15 @@ X11_INC = -Isrc/user/x11/include
 CURRENT_MODE := $(shell [ -f $(MODE_FILE) ] && cat $(MODE_FILE) || echo none)
 ifneq ($(CURRENT_MODE),$(MODE))
 $(shell mkdir -p $(OBJ_DIR) && echo $(MODE) > $(MODE_FILE))
+endif
+
+# Same tracker for the DESKTOP knob (icewm.md §4.5).
+ifeq ($(filter hobby icewm,$(DESKTOP)),)
+$(error DESKTOP must be 'hobby' (default) or 'icewm', got '$(DESKTOP)')
+endif
+CURRENT_DESKTOP := $(shell [ -f $(DESKTOP_FILE) ] && cat $(DESKTOP_FILE) || echo none)
+ifneq ($(CURRENT_DESKTOP),$(DESKTOP))
+$(shell mkdir -p $(OBJ_DIR) && echo $(DESKTOP) > $(DESKTOP_FILE))
 endif
 
 ifeq ($(ARCH),intel)
@@ -375,6 +400,13 @@ else ifeq ($(MODE),soak)
   USER_CFLAGS += -DKERNEL_MODE_TEST
 else
   CFLAGS += -DKERNEL_MODE_DESKTOP
+endif
+
+# DESKTOP=icewm (icewm.md §4.5): main.c's default desktop branch launches
+# XSESSION.BIN.  Only src/kernel/main.c reads this macro, so only main.o
+# carries the stamp dependency (see the DESKTOP_FILE rule by XSESSION_BIN).
+ifeq ($(DESKTOP),icewm)
+  CFLAGS += -DKERNEL_DESKTOP_ICEWM
 endif
 
 # W4-kernel (selfhost): in-OS MKFSFAT TCG-timing probe (Mission B).  Set
@@ -2162,6 +2194,84 @@ $(SQLTEST_BIN): $(OBJ_DIR)/sqlite_test.o $(OBJ_DIR)/sqlite_os.o $(OBJ_DIR)/sqlit
 	$(LD) -T src/user/linker.ld -e _start --gc-sections -o $(OBJ_DIR)/sqltest.elf $(OBJ_DIR)/sqlite_test.o $(OBJ_DIR)/sqlite_os.o $(OBJ_DIR)/sqlite3.o $(OBJ_DIR)/libc.a
 	$(OBJCOPY) -O binary $(OBJ_DIR)/sqltest.elf $(SQLTEST_BIN)
 
+# --- IceWM session (icewm.md §4.3/§4.5, lane session) --------------------
+# XSESSION.BIN: the X session launcher (src/user/x11sess/xsession.c).  The
+# named-AF_UNIX readiness probe compiles in only when the kernel ABI has the
+# lane-kern named-socket rows (icewm.md §4.1); before that XSESSION uses a
+# fixed grace period and logs that it does.
+XSESSION_BIN = $(OBJ_DIR)/xsession.bin
+X11SESS_DEFS := $(if $(shell grep -qs 'SYS_BIND' src/include/syscall.h && echo y),-DX11SESS_HAVE_NAMED_UNIX)
+X11SESS_HDRS = src/user/x11sess/xsess_probe.h $(USER_HDRS)
+$(OBJ_DIR)/x11sess_xsession.o: src/user/x11sess/xsession.c $(X11SESS_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(X11SESS_DEFS) -c $< -o $@
+$(OBJ_DIR)/x11sess_probe.o: src/user/x11sess/xsess_probe.c $(X11SESS_HDRS) src/include/syscall.h
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) $(X11SESS_DEFS) -c $< -o $@
+$(XSESSION_BIN): $(OBJ_DIR)/x11sess_xsession.o $(OBJ_DIR)/x11sess_probe.o $(OBJ_DIR)/libc.a src/user/linker.ld
+	$(LD) -T src/user/linker.ld -e _start --gc-sections -o $(OBJ_DIR)/xsession.elf $(OBJ_DIR)/x11sess_xsession.o $(OBJ_DIR)/x11sess_probe.o $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(OBJ_DIR)/xsession.elf $(XSESSION_BIN)
+.PHONY: xsession
+xsession: $(XSESSION_BIN)
+
+# Stub X binaries (src/user/x11sess/xstub.c) laid out like a real
+# $(X11_BUILD_DIR) (bin/ + disk/), for exercising XSESSION.BIN before the
+# X stack exists:  make icewm-stubs && make DESKTOP=icewm X11_BUILD_DIR=obj/<arch>/x11stub disk.img
+# The server stub "crashes" after 4 s, so the session must fall back to
+# DESKTOP.BIN (run_icewm_test.py --stubs checks exactly that).
+X11STUB_DIR = $(OBJ_DIR)/x11stub
+X11STUB_BINS = $(X11STUB_DIR)/bin/XHOBBY.BIN $(X11STUB_DIR)/bin/ICEWM.BIN $(X11STUB_DIR)/bin/ICEWMBG.BIN
+$(OBJ_DIR)/x11stub_role%.o: src/user/x11sess/xstub.c $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -DXSTUB_ROLE=$* -c $< -o $@
+$(X11STUB_DIR)/role%.bin: $(OBJ_DIR)/x11stub_role%.o $(OBJ_DIR)/libc.a src/user/linker.ld
+	@mkdir -p $(X11STUB_DIR)
+	$(LD) -T src/user/linker.ld -e _start --gc-sections -o $(X11STUB_DIR)/role$*.elf $< $(OBJ_DIR)/libc.a
+	$(OBJCOPY) -O binary $(X11STUB_DIR)/role$*.elf $@
+$(X11STUB_DIR)/bin/XHOBBY.BIN: $(X11STUB_DIR)/role1.bin
+	@mkdir -p $(dir $@) && cp $< $@
+$(X11STUB_DIR)/bin/ICEWM.BIN: $(X11STUB_DIR)/role2.bin
+	@mkdir -p $(dir $@) && cp $< $@
+$(X11STUB_DIR)/bin/ICEWMBG.BIN: $(X11STUB_DIR)/role3.bin
+	@mkdir -p $(dir $@) && cp $< $@
+.PHONY: icewm-stubs
+icewm-stubs: $(X11STUB_BINS)
+	@mkdir -p $(X11STUB_DIR)/disk/X11 $(X11STUB_DIR)/disk/ICEWM/themes/default
+	@printf '# stub session env (lane session test)\nXSTUB=1\n' > $(X11STUB_DIR)/disk/X11/XSESSION.ENV
+	@printf '<fontconfig></fontconfig>\n' > $(X11STUB_DIR)/disk/X11/FONTS.CNF
+	@printf '# stub IceWM preferences (long-name staging probe)\n' > $(X11STUB_DIR)/disk/ICEWM/preferences
+	@printf 'Look="flat"\n' > $(X11STUB_DIR)/disk/ICEWM/themes/default/default.theme
+	@echo "[icewm-stubs] stub X11 build dir: $(X11STUB_DIR)"
+
+# Resolve the X stack for a DESKTOP=icewm disk (icewm.md §4.5): use
+# $(X11_BUILD_DIR) when it carries the required binaries, else build it from
+# source with third_party/x11/build.sh (default build dir only — an explicit
+# X11_BUILD_DIR that lacks them is an error, never a silent rebuild).
+X11_REQUIRED_BINS = XHOBBY.BIN ICEWM.BIN
+.PHONY: x11-staged
+x11-staged:
+	@missing=""; for b in $(X11_REQUIRED_BINS); do [ -f "$(X11_BUILD_DIR)/bin/$$b" ] || missing="$$missing $$b"; done; \
+	if [ -z "$$missing" ]; then echo "[x11] using $(X11_BUILD_DIR)"; exit 0; fi; \
+	if [ "$(X11_BUILD_DIR)" != "third_party/x11/build/$(ARCH)" ]; then \
+	  echo "[x11] ERROR: X11_BUILD_DIR=$(X11_BUILD_DIR) lacks:$$missing (expected in $(X11_BUILD_DIR)/bin/)"; exit 1; fi; \
+	if [ ! -f third_party/x11/build.sh ]; then \
+	  echo "[x11] ERROR: DESKTOP=icewm needs the X11 stack (missing:$$missing in $(X11_BUILD_DIR)/bin/)"; \
+	  echo "[x11]        and third_party/x11/build.sh is not in this tree yet (icewm.md §4.2)."; \
+	  echo "[x11]        Point X11_BUILD_DIR at a prebuilt tree, or try the launcher with stubs:"; \
+	  echo "[x11]          make ARCH=$(ARCH) icewm-stubs && make ARCH=$(ARCH) DESKTOP=icewm X11_BUILD_DIR=$(X11STUB_DIR) run"; \
+	  exit 1; fi; \
+	echo "[x11] missing:$$missing - building the X11 stack from source (third_party/x11/build.sh --arch $(ARCH) --stage all)"; \
+	bash third_party/x11/build.sh --arch $(ARCH) --stage all -j $(or $(X11_JOBS),8); \
+	for b in $(X11_REQUIRED_BINS); do [ -f "$(X11_BUILD_DIR)/bin/$$b" ] || { echo "[x11] ERROR: build.sh did not produce $(X11_BUILD_DIR)/bin/$$b"; exit 1; }; done
+
+# The DESKTOP knob's disk/kernel wiring.  The stamp prerequisites change no
+# file on the hobby disk; the icewm ones only exist under DESKTOP=icewm.
+$(OBJ_DIR)/main.o: $(DESKTOP_FILE)
+disk.img: $(DESKTOP_FILE)
+ifeq ($(DESKTOP),icewm)
+disk.img: $(XSESSION_BIN) x11-staged
+endif
+
 # GNU make port: stay out of the giant prerequisite lists above (they are
 # merge-owner territory) and hang MAKE.BIN off linker.ld + the disk recipe
 # with target-specific rules of its own.
@@ -2472,6 +2582,10 @@ endif
 	# for whoever remembered to stage it.
 	perl -e 'print chr($$_ % 251) for (0..4095)' > STAGE4K.BIN
 	$(MCOPY) -i disk.img STAGE4K.BIN ::/STAGE4K.BIN
+ifeq ($(DESKTOP),icewm)
+	# icewm.md §4.3/§4.4: X binaries + data tree + XSESSION.BIN (DESKTOP=icewm only).
+	sh src/user/x11sess/stage-disk.sh disk.img "$(X11_BUILD_DIR)" $(XSESSION_BIN) "$(MCOPY)" "$(MMD)"
+endif
 	rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT STAGE4K.BIN
 
 # Target to run the OS inside QEMU
@@ -2647,6 +2761,11 @@ antfarm_test:
 
 xeyes_test:
 	python3 ./run_xeyes_test.py
+
+# IceWM secondary desktop (icewm.md §4.5): headless DESKTOP=icewm boot with
+# QMP screenshots.  M5 stub scenario: make icewm_test ICEWM_TEST_ARGS=--stubs
+icewm_test:
+	python3 ./run_icewm_test.py --arch $(ARCH) $(ICEWM_TEST_ARGS)
 
 files_nav_test:
 	python3 ./run_files_nav_test.py
@@ -3876,4 +3995,5 @@ parity_ci:
 test_parity_ci:
 	bash tools/gate/parity_ci_test.sh
 
+.PHONY: icewm_test
 .PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test desktop_test_build host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test merge_gate merge_gate_ci test_merge_gate parity_ci test_parity_ci cache_setup cold_vs_cached test_cache test_diff_harness bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest t4_glued_selftest t4_compat_selftest open_mode_scan uname_parity_host t3_pollbrk t3_nullentry
