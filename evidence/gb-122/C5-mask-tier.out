@@ -1,0 +1,26 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1500s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb125-verify/evidence/gb-122/C5-mask-wave.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 11087 console lines, 86 FAIL lines, 6 user memory fault records across 6 processes, 85 programs exited, halted=1
+T3_intel: FAIL — 86 FAIL line(s); first 20:
+3675:MMTEST FAIL 13
+4473:[SEDTEST] FAIL basic_s (stdout)
+5115:[SIGTEST] FAIL waitpid returns the child got=38 want=4294964048
+5199:[SEDTEST] FAIL s_g (stdout)
+5487:  FPU_T torture-child: FAIL
+6181:[SEDTEST] FAIL s_2nd (stdout)
+6221:  FPU_T fork-inherit: FAIL
+6259:FPU_T FAILED: 2
+6280:/MD5NOPE.XXX/BLKT2.TXTUNEXPAND.BIN: : No such file or directory[TACTEST] FAIL missing file
+6289:[TACTEST] FAIL empty separator
+6306:[TACTEST] FAILURES: 4
+6322:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+6352:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+6398:[CMPTEST] FAIL EOF message on stderr
+6404:[CMPTEST] FAIL empty EOF message
+6410:[CMPTEST] FAIL missing file diagnostic
+6465:[CMPTEST] FAIL -i 4:0 skips prefix
+6474:[CMPTEST] FAIL - stdin EOF diagnostic
+6498:[CMPTEST] FAILURES: 5
+6571:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+T3_intel EXIT=1

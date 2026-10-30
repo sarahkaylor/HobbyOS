@@ -1,2 +1,27 @@
 === T3 (intel): build ===
 === T3 (intel): run (deadline 1200s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb125-verify/evidence/gb-134/10-inst-wave.log) ===
+T3_intel: 22005 console lines, 86 FAIL lines, 6 user memory fault records across 6 processes, 83 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 1200s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 4 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 86 FAIL line(s); first 20:
+3506:MMTEST FAIL 16
+6013:[SEDTEST] FAIL basic_s (stdout)
+7069:[SIGTEST] FAIL waitpid returns the child got=41 want=4294964048
+8117:[CMPTEST] FAIL EOF message on stderr
+8154:[CMPTEST] FAIL empty EOF message
+8171:[CMPTEST] FAIL missing file diagnostic
+8265:[CMPTEST] FAIL -i 4:0 skips prefix
+8268:[CMPTEST] FAIL - stdin EOF diagnostic
+8288:[CMPTEST] FAILURES: 5
+8553:  TORTURE threads-churn-64: FAIL
+9294:[SEDTEST] FAIL s_g (stdout)
+10875:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+10961:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+11078:[SEDTEST] FAIL s_2nd (stdout)
+11199:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+11437:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+11518:[TACTEST] FAIL missing file
+11544:[TSORTTEST] FAILURES: 4
+11549:[TACTEST] FAIL empty separator
+11582:[TACTEST] FAILURES: 4
+T3_intel EXIT=1

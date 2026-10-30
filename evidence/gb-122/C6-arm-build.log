@@ -1,0 +1,16 @@
+clang -O2 -Wall -Wextra -g -Isrc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53 -mgeneral-regs-only -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/process.c -o obj/arm/process.o
+src/kernel/process.c:1849:73: error: no member named 'cs' in 'struct trap_frame'
+ 1849 |       gb122_commit_resume("sch", &proc_table[next], target_sp, local_tf.cs);
+      |                                                                ~~~~~~~~ ^
+src/kernel/process.c:1468:42: warning: unused parameter 'is_yield' [-Wunused-parameter]
+ 1468 | void schedule(struct trap_frame *tf, int is_yield) {
+      |                                          ^
+src/kernel/process.c:3609:73: error: no member named 'cs' in 'struct trap_frame'
+ 3609 |         gb122_commit_resume("boot", &proc_table[i], target_sp, local_tf.cs);
+      |                                                                ~~~~~~~~ ^
+src/kernel/process.c:4132:50: warning: unused parameter 'prot' [-Wunused-parameter]
+ 4132 | int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags) {
+      |                                                  ^
+2 warnings and 2 errors generated.
+make: *** [Makefile:745: obj/arm/process.o] Error 1
+ARM=2

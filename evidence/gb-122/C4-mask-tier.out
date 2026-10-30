@@ -1,0 +1,26 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1500s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb125-verify/evidence/gb-122/C4-mask-wave.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 10133 console lines, 85 FAIL lines, 5 user memory fault records across 5 processes, 85 programs exited, halted=1
+T3_intel: FAIL — 85 FAIL line(s); first 20:
+2630:MMTEST FAIL 13
+2756:[SIGTEST] FAIL waitpid returns the child got=63 want=4294964048
+3516:[SEDTEST] FAIL basic_s (stdout)
+4404:[SEDTEST] FAIL s_g (stdout)
+5042:[SEDTEST] FAIL s_2nd (stdout)
+5114:[CMPTEST] FAIL EOF message on stderr
+5148:[CMPTEST] FAIL empty EOF message
+5167:Loading program for scheduler (v2 AS): [CMPTEST] FAIL missing file diagnostic
+5190:[TSORTTEST] FAIL cycle from FILE (stderr + rc 1) (stderr)
+5204:[TSORTTEST] FAIL cycle from stdin names '-' (stderr)
+5245:[CMPTEST] FAIL -i 4:0 skips prefix
+5252:[CMPTEST] FAIL - stdin EOF diagnostic
+5316:[CMPTEST] FAILURES: 5
+5348:[TSORTTEST] FAIL missing file (rc 1 + stderr) (stderr)
+5377:[TSORTTEST] FAIL two operands rejected (rc 1 + stderr) (stderr)
+5412:[TSORTTEST] FAILURES: 4
+5525:  FPU_T torture-child: FAIL
+5632:/TEST4.TXT[SEDTEST] FAIL s_p_n (stdout)
+5877:[TACTEST] FAIL missing file
+5882:[TACTEST] FAIL empty separator
+T3_intel EXIT=1
