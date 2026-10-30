@@ -88,17 +88,58 @@ def verdict_line_of(body):
     must START a line (after optional markdown), and the token must not be part of a
     longer word: `REDs`, `GREEN-gated`, `REDUCE` are not verdicts.
     """
-    for ln_raw in (body or "").replace("\r", "").split("\n"):
+    # GB-139-V2 (the hole it found): normalising `>` made a QUOTED verdict indistinguishable
+    # from a DECLARED one — and quoting the prior verdict and answering it is this board's
+    # dominant reply style (GB-104's governing RED is itself a blockquote).  So a `>` line
+    # is a quote unless NOTHING outside a quote declares; two passes, unquoted first.
+    _lines = re.sub(r"```.*?```", "", (body or "").replace("\r", ""), flags=re.S).split("\n")
+    _unquoted = [l for l in _lines if not l.lstrip().startswith(">")]
+    _quoted = [l for l in _lines if l.lstrip().startswith(">")]
+    for ln_raw in _unquoted + _quoted:
         # GB-136-V4: a line that QUOTES a verdict shape is not a verdict.  Strip inline
         # code spans before matching, so `VERDICT: GREEN|RED` written as documentation —
         # including the line that documents this very parser — cannot become one.  The
         # evidence string still quotes the original line.
         ln = re.sub(r"`[^`]*`", "", ln_raw)
-        # (A) an explicit marker, line-initial only (the shape every Verifier uses).
-        m = re.match(r"^\s*(?:[-*]\s*)?(?:#{1,6}\s*)?\**\s*VERDICT\s*:\s*\**\s*(GREEN|RED)(?![|\w-])",
+        # GB-139 / gaming.md §4.2 step 5: the MARKER is authoritative and needs no shape
+        # guessing.  Every markdown prefix is normalised rather than enumerated (`>`
+        # blockquote, `#` heading, `-`/`*` list, `**` bold) — seven gates were spent
+        # discovering the prefixes one at a time, and a blockquote was still missing.
+        # A GREEN must carry `sha=`; RED may say `none`.  DoD text such as
+        # "GREEN → this ticket to Merge Gate." cannot match: it has no sha and no marker.
+        norm = re.sub(r"^\s*(?:[>#*_\-]+\s*)+", "", ln)
+        norm = re.sub(r"^<!--\s*", "", norm)          # `<!-- VERDICT: RED sha=… -->`
+        m = re.match(r"VERDICT\s*:\s*\**\s*(GREEN|RED)\s*\**\s+sha\s*=\s*([0-9a-f]{7,40}|none)\b",
+                     norm, re.I)
+        if not m:
+            # marker-shaped but the sha is unusable (`sha=<7–40 hex>`, `sha=none` on a
+            # GREEN): NOT a verdict, and it must not fall through to the legacy shapes —
+            # that is how my own documentation became a GREEN, one level below #304.
+            if re.search(r"\bsha\s*=\s*\S", norm):
+                continue
+            # (D) a bare `VERDICT: GREEN|RED` with no sha at all: legacy, keep reading it,
+            # but only because history predates §4.2 step 5.
+            m2 = re.match(r"VERDICT\s*:\s*\**\s*(GREEN|RED)(?![|\w-])", norm, re.I)
+            if m2:
+                return m2.group(1).upper(), ln_raw.strip()[:160]
+        if m:
+            v = m.group(1).upper()
+            if v == "GREEN" and m.group(2).lower() == "none":
+                continue          # a GREEN with no sha is not a verdict (GB-106/GB-110)
+            return v, ln_raw.strip()[:160]
+        # (A) an explicit marker whose separator is a colon OR an em/en dash.  The em
+        # dash is the DOMINANT house style here (`**VERDICT — GREEN (GB-060-V2).**`), and
+        # the colon-only rule missed it on six cards, so an older RED governed the parent
+        # and six Done cards read as failing their last gate.
+        m = re.match(r"^\s*(?:[-*]\s*)?(?:#{1,6}\s*)?\**\s*VERDICT\s*(?::|—|–|-)\s*\**\s*(GREEN|RED)(?![|\w-])",
                      ln, re.I)
         if m:
             return m.group(1).upper(), ln_raw.strip()[:160]
+        # (A2) `**GB-101-V6 — GREEN at PR #243 head …` — a bolded card id, an em dash,
+        # then the verdict, with no heading and no VERDICT word at all.
+        m = re.match(r"^\s*\**\s*[A-Za-z0-9_-]*GB-\d{3}[A-Za-z0-9-]*\s*[—–-]\s*\**\s*(GREEN|RED)(?![|\w-])", ln)
+        if m:
+            return m.group(1), ln_raw.strip()[:160]
         # (B) a line-initial, UPPER-CASE verdict token, optionally bold, followed by a
         # separator or end-of-line.  GB-136-V3 found three prose lines that this must
         # reject: `red or pending run …`, `RED fixed (F1 + F2) …`, `red log: …`.
@@ -226,6 +267,17 @@ def self_test():
         ("## VERDICT: **GREEN** — all clauses", "GREEN"),
         ("**VERDICT: RED at `721650e` — ...", "RED"),
         ("GREEN — GB-114-V2, verified on this VM", "GREEN"),
+        # GB-139: the marker, gaming.md §4.2 step 5 — authoritative, prefix-normalised,
+        # and a GREEN without a sha is not a verdict.
+        ("VERDICT: GREEN sha=770152d189", "GREEN"),
+        ("> **VERDICT: RED sha=none** — clause 3", "RED"),
+        ("<!-- VERDICT: RED sha=ce906f00 -->", "RED"),
+        ("VERDICT: GREEN sha=none", None),
+        # GB-139-V2's hole: quoting the prior verdict and answering it is this board's
+        # dominant reply style — the QUOTE must not beat the declaration.
+        ("> **VERDICT: GREEN sha=aaa1111** — the earlier gate\n\nVERDICT: RED sha=bbb2222", "RED"),
+        # the 16 live lines that are byte-identical to a verdict and are DoD text
+        ("GREEN → this ticket to Merge Gate. RED → back to In Progress with the failing output quoted.", None),
         # the three that must NOT be verdicts (observed on the live board)
         ("verdicts checked: 66, mismatched parents: 2, superseded REDs: 60", None),
         ("a GREEN-gated merge helper that refuses", None),
