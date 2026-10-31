@@ -31,10 +31,11 @@ respectively, which are not one-month builds for any swarm. The plan therefore s
 week 4 we expect: **a playable game delivered through each of the two tracks** (native port +
 unmodified Linux static-ELF binary), plus a game launcher, plus full multiplan testing.
 
-**Autonomy model:** one **Coordinator** agent (the only agent allowed to call the deep model)
-runs the board, the plan, and a **hourly/daily re-plan loop** that invokes **DeepSeek v4.1
-Flash** to re-assess and mint new tickets. Every other agent runs almost entirely on the **much
-faster DeepSeek V4 Flash** workhorse.
+**Autonomy model:** one **Coordinator** agent (the only agent that may hold deep-class
+planning/verification work) runs the board, the plan, and a **12-hourly re-plan loop** that
+invokes **DeepSeek v4.1 Flash** to re-assess and mint new tickets. Every agent — Coordinator,
+workers, Verifiers, reviewer — runs on the **same single model, DeepSeek v4.1 Flash at
+`llm.localdomain:8000`** (§3.1). There is no second endpoint and no second model tier.
 
 ---
 
@@ -153,41 +154,43 @@ HobbyOS (QEMU: -M virt aarch64 / -M q35 x86_64)
 
 ## 3. Environment & hardware
 
-### 3.1 Inference servers — model-tier policy (how we use the fast model as much as possible)
+### 3.1 Inference server — single-model policy (in force 2026-10-31)
+
+**Every agent uses one endpoint and one model: `http://llm.localdomain:8000/v1`, serving
+DeepSeek V4.1 Flash.** Sarah's standing instruction (2026-10-31): the swarm uses
+`llm.localdomain` only. There is no second inference tier.
 
 | Tier | Model | Endpoint | Used by | Policy |
 |---|---|---|---|---|
-| **FLASH (workhorse)** | DeepSeek **V4 Flash** | `http://llm.localdomain:8000/v1` (vLLM, RTX 6000 pair box) | **every** worker / reviewer / tester agent | **Default for ~all tickets.** Target >90% of fleet tokens. |
-| **DEEP (planner)** | DeepSeek **v4.1 Flash** (8× DGX Spark) | `http://dgx1.localdomain:8000/v1` (vLLM; alias `dgx-main`) | **Coordinator + farm Verifiers** | Planning, re-planning, ABI/architecture design, blocked-root-cause after 1 FLASH retry, milestone reviews, **and verification/gate verdicts (`verify` tickets)**. |
+| **the only tier** | DeepSeek **V4.1 Flash** | `http://llm.localdomain:8000/v1` (vLLM, RTX 6000 pair box) | **every** agent — Coordinator, Workers, Verifiers, Reviewer, Tester, Infra | **All work**: routine tickets, planning, re-plan, ABI/architecture design, root-cause, and gate verdicts. |
 
-Measures behind us (Sept/Oct 2026 community benchmarks for exactly this class of hardware):
-~156–241 tok/s aggregate on the 8-Spark v4.1 box; ~47 tok/s single-stream per RTX 6000 card;
-cold prefill ~840–2,100 tok/s depending on context. Consequences coded into the plan:
+Why: the box now hosts the v4.1-Flash weights, which are both faster and more capable than the old
+V4 workhorse it used to serve, so the two-endpoint split only bought latency and a model-id
+mismatch. Consequences coded into the plan:
 
-- **Agent count ≈ 8–12 full-speed agents** (fleet ceiling ~250–335 tok/s sustained). Configure
-  10–14 agents; expect ~8 actively generating at any time. More agents ≠ faster; deeper/batched
-  tickets get more throughput, not more agents.
-- **Long-lived sessions, never churn.** Restarting a 300K-context agent costs minutes of
-  prefill. Agents stay on their subsystem; new work = new ticket, not new session.
+- **Two ids, one model.** `GET /v1/models` lists `deepseek-v4.1-flash` (canonical) and
+  `deepseek-v4-flash` (legacy alias). Both resolve to root
+  `/home/sarah/models/deepseek-v4.1-flash-1017`, and every completion reports
+  `"model": "deepseek-v4.1-flash"`. The legacy id is **not** a weaker model — never reason about it
+  as one — but new config uses the canonical id.
+- **`dgx1.localdomain` is retired for swarm work.** No lane calls it, no config carries a `dgx`
+  provider, and no charter or prompt offers it as a fallback. The 2026-10-17…10-30 `DEEP`/`FLASH`
+  two-tier split survives only in dated log entries as history.
+- **`reasoning_effort` on this server:** `low`, `high`, `xhigh`, `max`, or an integer 1–100.
+  `medium` is rejected with HTTP 400. Deep-class lanes run `--reasoning high`.
+- **Deep-class work is a classification, not a model.** Planning, re-plan, ABI/architecture design,
+  blocked-root-cause after 1 retry and gate verdicts keep the `deep` label and still belong to the
+  Coordinator and the farm Verifiers; they run on the same v4.1 Flash endpoint.
 - **Deterministic work stays in tools** (grep/sed/test/CI), never in model tokens.
-- **Verification is DEEP-class work.** Every `verify`-labeled gate ticket (T3 QEMU intel+arm, merge-gate,
-  device-tier) is run by a farm **Verifier** session on **DeepSeek v4.1 Flash (`dgx1`)** via
-  `--provider dgx -m deepseek-v4.1-flash --reasoning high` — never on the FLASH workhorse. A wrong verdict
-  is the costliest mistake a swarm can make, so gate judgment gets the stronger model; gates stay
-  scripted/deterministic, so DEEP stays ~10% of tokens even with verification parallelized.
-- Endpoints recorded and verified 2026-10-17 (GB-004), see §11.3 for the probe evidence. Mapping the
-  tiers to the built infra: **FLASH = DeepSeek V4 on the RTX-6000 pair box** (workhorse),
-  **DEEP = DeepSeek v4.1 on the 8× DGX Spark fleet** (planner/coordinator only).
-- **Measured 2026-10-17 (single stream, GB-004, `max_tokens=200`, temp 0):** FLASH
-  `llm.localdomain:8000` **57.7 tok/s** (196 completion tokens); DEEP `dgx1.localdomain:8000`
-  **40.5 tok/s** (119 tokens). Both serve `max_model_len: 1048576`. These are *single-stream*
-  numbers on a shared box — §3.1's 94–150 tok/s is an aggregate/community figure, so cap active
-  workers from measurement, not from the table.
-- **Model budget (validated 2026-10-17):** split lands ~90% FLASH / ~10% DEEP tokens; DEEP duty
-  ~3% (it is mostly parked — that is intended). The binding constraint is FLASH throughput:
-  the RTX pair measures ~94–150 tok/s, which feeds only **~3–5 agents** at full clip (the
-  8–11 named in §5 is optimistic). Before scaling agents past ~4–6, benchmark both endpoints
-  at GB-004 and cap concurrency at what FLASH sustains; keep DEEP reserved for planning + verification verdicts.
+- **Capacity:** one box now carries the whole fleet (it used to take ~90% of tokens on a two-box
+  split), so cap active lanes by measured throughput — start from the fleet as provisioned (≤6
+  lanes) and raise it only on a benchmark. Never put build/test load on the inference box.
+- **The old "8–12 full-speed agents" ceiling was a two-endpoint figure.** The 2026-10-17
+  single-stream measurements (57.7 tok/s FLASH / 40.5 tok/s DEEP) belong to that retired
+  deployment; re-measure before sizing any lane increase, and prefer deeper/batched tickets over
+  more agents.
+- **Long-lived sessions, never churn.** Restarting a 300K-context agent costs minutes of prefill.
+  Agents stay on their subsystem; new work = new ticket, not new session.
 
 ### 3.2 QEMU focus (scope boundary)
 
@@ -210,7 +213,7 @@ physical GPU**. All guests Ubuntu 26.04.1; dev VMs run the Kubuntu desktop (like
 | 140 | `swarm-farm-1` | 192.168.0.230 | 32 / 64 GiB / 128 G | QEMU build/test farm + worker agents |
 | 141 | `swarm-farm-2` | 192.168.0.231 | 32 / 64 GiB / 128 G | same |
 | 142 | `swarm-farm-3` | 192.168.0.232 | 32 / 64 GiB / 128 G | same |
-| 143 | `swarm-coordinator` | 192.168.0.233 | 32 / 64 GiB / 128 G | coordinator Hermes (DEEP), re-plan cron |
+| 143 | `swarm-coordinator` | 192.168.0.233 | 32 / 64 GiB / 128 G | coordinator Hermes (v4.1 Flash), re-plan cron |
 | 144 | `swarm-ticketing` | 192.168.0.234 | 8 / 16 GiB / 64 G | Forgejo (git + issues + projects) |
 
 Every dev VM already has: clang/lld/llvm, `qemu-system-arm`+`qemu-system-x86`, `qemu-efi-aarch64`
@@ -237,7 +240,7 @@ boards in one, milestones and labels, light enough for a VM.
 
 - **Project:** `GAMING-BOARD` (kanban).
 - Lanes: `📋 Backlog` → `🟦 Ready` → `🟨 In Progress` → `🟧 In Review` → `🚦 Merge Gate` → `✅ Done`; plus `🧊 Icebox` (Program-2 vision epics).
-- Labels: `infra`, `abi`, `loader`, `libc`, `elf-compat`, `graphics`, `input`, `audio`, `native-port`, `game`, `tests`, `perf`, `docs`, `decision` (needs Sarah's sign-off), `deep` (DEEP-model required), `blocked`, `debug` (DEEP root-cause / design-freeze work claimed by a farm Verifier only when no `verify` ticket is Ready — §5.1 debug reserve), `parity-ar` (ARM), `parity-x64`.
+- Labels: `infra`, `abi`, `loader`, `libc`, `elf-compat`, `graphics`, `input`, `audio`, `native-port`, `game`, `tests`, `perf`, `docs`, `decision` (needs Sarah's sign-off), `deep` (deep-class work: planning/design/gate verdicts — same v4.1 Flash model as everything else, §3.1), `blocked`, `debug` (root-cause / design-freeze work claimed by a farm Verifier only when no `verify` ticket is Ready — §5.1 debug reserve), `parity-ar` (ARM), `parity-x64`.
 - Milestones: `M0·infra` `M1·abi-core` `M2·devices-sdl` `M3·games` `M4·acceptance`.
 - Ticket skeleton: ID, workstream, weight S/M/L, depends-on, DoD + test, evidence link.
 - Bot user: `swarm-bot` (API token) — the Coordinator and workers move/annotate tickets through it. Webhook on the board posts to the Coordinator.
@@ -264,7 +267,7 @@ skeleton as an issue header block (see `tools/board/README.md`).
    exact gate command(s) + pass criteria per §6 + two-arch parity). Minting happens at every re-plan for the
    `In Review` backlog, so gates run **in parallel** with new production tickets instead of queueing behind
    a single verifier.
-5. A farm **Verifier** (DEEP session, §5.1) claims `GB-nnn-V` → `In Progress` → runs the gate on its own VM →
+5. A farm **Verifier** (deep-class session, §5.1) claims `GB-nnn-V` → `In Progress` → runs the gate on its own VM →
    posts evidence + a **RED/GREEN** verdict on both the verification and the implementation ticket.
    **Verdict format (binding from 2026-10-30, ruled on GB-139 after GB-139-V's census):** the verdict is one line
    `VERDICT: GREEN sha=<7–40 hex>` or `VERDICT: RED sha=<hex>|none`, optionally inside an HTML comment
@@ -318,12 +321,12 @@ The loop:
 
 | Role | Count | Model | Where | Responsibility |
 |---|---|---|---|---|
-| **Coordinator** | 1 | DEEP | `swarm-coordinator` (.233) | plan + board + re-plan loop + merges + escalation; primary DEEP consumer |
-| **Worker** | 3–8 | FLASH | `swarm-farm-1..3` | claim tickets, branch, code+tests, MR — one long-lived session per subsystem |
-| **Verifier** | 3 (one per farm) | DEEP | `swarm-farm-1..3` | claim `verify`+`deep` tickets, run §6 gates on own VM, post RED/GREEN verdicts; gate-running is its own role so gates parallelize. **Debug reserve:** when no `verify`+`deep` Ready ticket exists, a farm Verifier may claim a Ready `debug`+`deep` ticket (root-cause / design-freeze work that is DEEP-class but not a gate, e.g. kernel-wall debugging, build-profile freezes) and work it — this keeps DEEP wall work from serializing on the Coordinator alone |
-| **Reviewer** | 1 (dedicated cross-lane loop `wrev`, FLASH, farm-3) | FLASH | farm-3 + any farm | contract/diff/DoD review of In-Review + In-Progress-with-PR cards across ALL workstreams; posts APPROVE/BOUNCE/FLAG verdicts; **mints missing `GB-nnn-V` gate tickets (§4.2 step 4) for gate-ready In-Review cards so farm Verifiers gate in parallel**; flags `decision`. Review verdicts are NOT gate verdicts — Verifiers own RED/GREEN |
-| **Tester** | 1 | FLASH | `swarm-farm-1..3` | playthrough + stress harnesses, flaky triage |
-| **Infra worker** | 1 (`winf`, farm-1) | FLASH | `swarm-farm-1` | owns the **`infra`** label, which no subsystem worker lane covers: board tooling + hygiene (`tools/board`), host-test harness and its fixtures, CI/heartbeat scripts, evidence/staging plumbing. Claims Ready `infra` cards only; never kernel/ABI code unless the ticket says so. Its lane exists because `infra` cards were left Ready and unclaimed while all three subsystem workers reported an empty lane |
+| **Coordinator** | 1 | v4.1 Flash (deep-class) | `swarm-coordinator` (.233) | plan + board + re-plan loop + merges + escalation; primary DEEP consumer |
+| **Worker** | 3–8 | v4.1 Flash | `swarm-farm-1..3` | claim tickets, branch, code+tests, MR — one long-lived session per subsystem |
+| **Verifier** | 3 (one per farm) | v4.1 Flash (deep-class) | `swarm-farm-1..3` | claim `verify`+`deep` tickets, run §6 gates on own VM, post RED/GREEN verdicts; gate-running is its own role so gates parallelize. **Debug reserve:** when no `verify`+`deep` Ready ticket exists, a farm Verifier may claim a Ready `debug`+`deep` ticket (root-cause / design-freeze work that is DEEP-class but not a gate, e.g. kernel-wall debugging, build-profile freezes) and work it — this keeps DEEP wall work from serializing on the Coordinator alone |
+| **Reviewer** | 1 (dedicated cross-lane loop `wrev`, farm-3) | v4.1 Flash | farm-3 + any farm | contract/diff/DoD review of In-Review + In-Progress-with-PR cards across ALL workstreams; posts APPROVE/BOUNCE/FLAG verdicts; **mints missing `GB-nnn-V` gate tickets (§4.2 step 4) for gate-ready In-Review cards so farm Verifiers gate in parallel**; flags `decision`. Review verdicts are NOT gate verdicts — Verifiers own RED/GREEN |
+| **Tester** | 1 | v4.1 Flash | `swarm-farm-1..3` | playthrough + stress harnesses, flaky triage |
+| **Infra worker** | 1 (`winf`, farm-1) | v4.1 Flash | `swarm-farm-1` | owns the **`infra`** label, which no subsystem worker lane covers: board tooling + hygiene (`tools/board`), host-test harness and its fixtures, CI/heartbeat scripts, evidence/staging plumbing. Claims Ready `infra` cards only; never kernel/ABI code unless the ticket says so. Its lane exists because `infra` cards were left Ready and unclaimed while all three subsystem workers reported an empty lane |
 
 ### 5.2 Agent mechanics (existing Hermes capabilities; no custom build)
 
@@ -331,10 +334,10 @@ The loop:
   `HERMES_HOME`; workers use `hermes -w` (worktree mode) so parallel agents never collide on
   files. Sessions under `tmux` on their VM; transcripts/evidence land on the shared NFS store so
   the Coordinator/planner can read them.
-- **Verifier session** = a second headless session on each farm running at the DEEP provider
-  (`--provider dgx -m deepseek-v4.1-flash --reasoning high`), same `~/.hermes`, its own worktree,
-  kept alive by a `swarm-verify@<agent>` systemd unit (clone of `swarm-driver@` carrying the DEEP
-  provider flags) — see §11.4/§11.5.
+- **Verifier session** = a second headless session on each farm doing deep-class work on the same
+  model (`--provider llm -m deepseek-v4.1-flash --reasoning high`), same `~/.hermes`, its own
+  worktree, kept alive by a `swarm-verify@<agent>` systemd unit (clone of `swarm-driver@` carrying
+  the provider flags) — see §11.4/§11.5.
 - Re-plan cadence via `hermes cronjob` (every 12 h) on `swarm-coordinator`.
 - **Session rotation:** an agent session is cleared at a **ticket boundary once it is older than 2 days**. The charter has the agent record each finished ticket with `printf '%s %s\n' "$(date -u +%FT%TZ)" "<TICKET-ID>" >> ~/.swarm/<agent>.ticketclose`; the driver (`ROTATE_DAYS=2`) sees a marker newer than its last launch plus a session age > 2 days, archives the old session id to `<agent>.sessions.log` and starts a fresh session from the charter on the next tick. Never rotate mid-ticket (no marker = no rotation). This keeps one ticket's working context but stops an eight-day session from re-prefeeding thousands of stale messages on every 25-minute resume.
 - `gaming.md`, `docs/linux-abi.md`, and this board are the only cross-agent interface points —
@@ -391,7 +394,7 @@ compat layer's numbers are T4-locked before any T3/T5 work depends on them.
 
 ## 8. Seed backlog (first wave of tickets)
 
-~55 tickets, `GB-001+`. Weights S/M/L; `[DEEP]` = v4.1-only (all others are FLASH). The
+~55 tickets, `GB-001+`. Weights S/M/L; `[DEEP]` marks deep-class work (planning/design/root-cause — same v4.1 Flash model as every other card, §3.1). The
 re-plan loop (GB-048) will grow/re-prioritize this continuously — this is the seed, not the
 final list.
 
@@ -682,27 +685,27 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
    still expensive. Tracked as part of GB-006's provisioning checklist. `tools/t3_tier.sh` takes
    `T3_QEMU_ARGS` so the fix is a one-liner away: `T3_QEMU_ARGS="-enable-kvm" make test_intel`.
 
-### 11.3 Model endpoints & Hermes profiles
-- Two vLLM OpenAI-compatible endpoints, **recorded + verified 2026-10-17 (GB-004)**:
-  - **FLASH — DeepSeek V4 Flash** = `http://llm.localdomain:8000/v1`, `GET /v1/models` →
-    `["deepseek-v4-flash"]` (root `/mnt/fast/deepseek-v4-flash-0731`), `max_model_len` 1048576.
-    Default for every role; all routine work. Measured **57.7 tok/s** single-stream.
-  - **DEEP — DeepSeek v4.1 Flash** = `http://dgx1.localdomain:8000/v1`, `GET /v1/models` →
-    `["deepseek-v4.1-flash", "dgx-main"]` (root `/models/deepseek-v4.1-flash`), `max_model_len`
-    1048576. Coordinator + farm Verifiers: planning/re-plan/review/verification. Measured **40.5 tok/s** single-stream.
-- Verification (GB-004): `swarm-coordinator` resolved `model.default=deepseek-v4.1-flash`,
-  `model.provider=dgx` → `hermes chat -q` answered (DEEP-LINK-OK); `swarm-farm-1..3` resolved
-  `model.default=deepseek-v4-flash`, `model.provider=flash`, `model.base_url=http://llm.localdomain:8000/v1`
-  → answered (FLASH-LINK-OK) with only `llm.localdomain:8000` in the logs. Role provisioning is
-  scripted: `tools/swarm/provision-hermes-role.sh` (`ROLE=flash|deep`); it uses `hermes config set`
-  only (never hand-edits `config.yaml`) and writes `FORGEJO_TOKEN` to `~/.hermes/.env` (chmod 600),
-  never to a tracked file.
-- Budget (validated 2026-10-17): ~90% FLASH / ~10% DEEP tokens. FLASH sustains ~94–150 tok/s →
-  cap active workers at ~3–5 until GB-004 benchmarks say otherwise. Never put build/test load on
-  the inference boxes.
-- Per-role Hermes config: one profile per role (`swarm-coordinator`→DEEP, `swarm-worker`→FLASH),
-  distinct `HERMES_HOME`; workers run `hermes -w` (worktree) so parallel agents never collide on
-  files. Hermes is installed at `sarah:~/.hermes` on every VM.
+### 11.3 Model endpoint & Hermes profiles
+- **One OpenAI-compatible endpoint (in force 2026-10-31):** `http://llm.localdomain:8000/v1`.
+  `GET /v1/models` → `["deepseek-v4.1-flash", "deepseek-v4-flash"]`, both aliasing the same
+  v4.1-Flash weights (root `/home/sarah/models/deepseek-v4.1-flash-1017`), `max_model_len`
+  1048576. Every role — coordinator, worker, verifier, reviewer — resolves
+  `model.provider=llm`, `model.default=deepseek-v4.1-flash`,
+  `model.base_url=http://llm.localdomain:8000/v1`. `dgx1.localdomain` and provider `dgx` are
+  retired (§3.1); no lane may call them.
+- **Reasoning gate:** the server accepts `reasoning_effort` of `low|high|xhigh|max` or an integer
+  1–100, and rejects `medium` with HTTP 400. Deep-class lanes (coordinator, verifiers) send `high`.
+- **Verified 2026-10-31:** all four agent VMs answer a `hermes chat -q` ping on the `llm` provider
+  and the reply's `model` field is `deepseek-v4.1-flash`; `dgx1` appears in no config, charter,
+  prompt or driver flag.
+- Lanes are resumed, not re-created: `model.*` is read from `~/.hermes/config.yaml` at each
+  `hermes chat` launch, so a config change lands on the lane's next pass with no driver restart.
+- Provisioning is scripted: `tools/swarm/provision-hermes-role.sh`; it uses `hermes config set`
+  only (never hand-edits `config.yaml`) and writes `FORGEJO_TOKEN` to `~/.hermes/.env`
+  (chmod 600), never to a tracked file.
+- Per-role Hermes config: one profile per role (`swarm-coordinator`, `swarm-worker`), distinct
+  `HERMES_HOME`; workers run `hermes -w` (worktree) so parallel agents never collide on files.
+  Hermes is installed at `sarah:~/.hermes` on every VM.
 
 ### 11.4 Standing the swarm up (order matters)
 1. **Coordinator first** on `swarm-coordinator` (.233): start in a tmux session with the
@@ -739,6 +742,16 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 - LLVM 21.1.8 dist-staging cached on farm-1.
 
 ### 11.8 Execution log (newest first, maintained by the Coordinator)
+
+**2026-10-31 — SINGLE-MODEL POLICY: the swarm runs on `llm.localdomain` only (v4.1 Flash); fleet rebooted.**
+
+| | |
+|---|---|
+| **Sarah's directive** | The swarm uses **`http://llm.localdomain:8000/v1` only** going forward. That box now serves **DeepSeek V4.1 Flash** despite listing the model as v4 Flash — faster and more capable than what it replaced — so all work uses it. |
+| **What that retired** | The `DEEP`/`FLASH` two-tier split (§3.1): `dgx1.localdomain:8000`, provider `dgx`, and the `--provider dgx -m deepseek-v4.1-flash` flags on the verifier loops. `deep` stays a **work-class label** (planning/design/root-cause/gate verdicts), not a different model. |
+| **Fleet** | All six VMs were stopped; booted in order (ticketing 144 → coordinator 143 → farms 140-142 → dashboard 145) and every swarm unit came back `active`. |
+| **Wired on every agent VM (140-143)** | `providers.llm` → `llm.localdomain:8000/v1`; `model.provider=llm`, `model.default=deepseek-v4.1-flash`; `providers.dgx` removed; `/opt/swarm/MODEL-POLICY.txt` added as the canonical copy the charters point at; charters (`.txt`, `.continue.txt`, `.verify.*`, `.review.*`) and `healthcheck.prompt.txt` de-`dgx`'d; `swarm-driver.py` `DEEP` lanes now launch `--provider llm -m deepseek-v4.1-flash --reasoning high`. |
+| **Model-id note** | `deepseek-v4-flash` still answers on this endpoint — it is an **alias for the same v4.1 weights**, not a different or weaker model. New config uses `deepseek-v4.1-flash`. |
 
 **2026-10-28 — coordinator pass: the "board is static" verdict was wrong about its cause. The lanes were empty because *claims* were holding cards, and one `In Review` card had no gate card at all.**
 
@@ -1067,7 +1080,7 @@ long-lived `hermes -w` tmux sessions).**
 |---|---|
 | Board (GB-002) | 55 seed tickets + PLAN-001; lanes are labels (no Projects REST in this Forgejo build, §4.1) |
 | Board automation (GB-003) | webhook `coordinator-board-hook` + 60 s poll, both systemd units on .233 (§11.2a) |
-| Model split (GB-004) | DEEP `dgx1:8000` on the coordinator, FLASH `llm:8000` on farms 1-3 (§11.3) |
+| Model split (GB-004) | DEEP `dgx1:8000` on the coordinator, FLASH `llm:8000` on farms 1-3 (§11.3) — **superseded 2026-10-31, single endpoint `llm.localdomain`** |
 | Plan sync (GB-008) | `tools/board/sync_gaming_md.py` — IN SYNC, drift detection proven |
 | Baseline (GB-009) | T1 green (coordinator + farm-1); **T2 green arm + intel** (344/0 intel); **T3 ARM green (0 FAIL lines), T3 intel red-but-exit-0** (222 FAIL lines) → GB-057. The baseline is **not** complete on intel and no intel gate may cite T3 until it is |
 | ABI contract (GB-010) | `docs/linux-abi.md` v1 (measured; `gen_abi_doc.py --check` guards drift) — In Review |
