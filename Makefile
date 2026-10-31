@@ -3801,6 +3801,14 @@ $(T4_PROBE_ELF): src/user/t4_probe.c
 $(W0_PIE_ELF): src/user/w0_pie_probe.c
 	@musl-gcc -static-pie -fPIE -O2 -Wall src/user/w0_pie_probe.c -o $(W0_PIE_ELF)
 	@readelf -h $(W0_PIE_ELF) | grep -q 'Type: *DYN' || ( echo "w0_hello_pie: build is not ET_DYN/static-PIE — the v2 ELF loader rejects it (GB-138)"; readelf -h $(W0_PIE_ELF) | head -4; exit 1 )
+
+# GB-019 compat ioctl(16) dispatch probe — same W0 static-PIE vehicle as W0PIE, but
+# this member exercises the ioctl dispatch rows (TIOCGWINSZ/TCGETS/F_GETFL/F_SETFL/
+# default -ENOTTY) so GB-019-V7 can grade them from a Linux-ABI proc.
+GB019_IOCTL_ELF = $(OBJ_DIR)/gb019_ioctl.elf
+$(GB019_IOCTL_ELF): src/user/gb019_ioctl_probe.c
+	@musl-gcc -static-pie -fPIE -O2 -Wall src/user/gb019_ioctl_probe.c -o $(GB019_IOCTL_ELF)
+	@readelf -h $(GB019_IOCTL_ELF) | grep -q 'Type: *DYN' || ( echo "gb019_ioctl: build is not ET_DYN/static-PIE"; readelf -h $(GB019_IOCTL_ELF) | head -4; exit 1 )
 $(T4_LEGA_OUT): $(T4_PROBE_ELF)
 	@./$(T4_PROBE_ELF) > $(T4_LEGA_OUT) && echo "[t4-device] leg A captured -> $(T4_LEGA_OUT)"
 $(T4_DEVICE_GATE): tools/gate/t4_device.sh $(T4_LEGA_OUT)
@@ -3850,6 +3858,14 @@ T4_W0_DISPATCH = t4_w0_dispatch
 T4_W0_DISPATCH_SELFTEST = t4_w0_dispatch_selftest
 $(T4_W0_DISPATCH): tools/gate/t4_w0_dispatch.sh
 	@bash tools/gate/t4_w0_dispatch.sh
+# GB-019 gate: dispatch the ioctl(16) probe as a Linux-ABI member and assert the
+# five dispatch rows + three negatives from the console (T3_LOG contract).
+T4_GB019_IOCTL = t4_gb019_ioctl
+T4_GB019_IOCTL_SELFTEST = t4_gb019_ioctl_selftest
+$(T4_GB019_IOCTL): tools/gate/t4_gb019_ioctl.sh
+	@bash tools/gate/t4_gb019_ioctl.sh
+$(T4_GB019_IOCTL_SELFTEST): tools/gate/t4_gb019_ioctl.sh
+	@bash tools/gate/t4_gb019_ioctl.sh --self-test
 # self-test: the gate FAILs (exit 1) when the expected observations are absent —
 # proves the gate cannot be painted green by silence.  This runs the GREP logic on
 # an empty capture and on a capture naming W0PIE but no abi line.

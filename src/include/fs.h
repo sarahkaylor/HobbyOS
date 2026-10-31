@@ -51,6 +51,11 @@ struct file {
   file_type_t type;   /**< Type of the file */
   int ref_count;      /**< Number of processes currently using this file */
   spinlock_t lock;    /**< Lock for atomic access to file state */
+  /* GB-019: the O_* flags this file was opened with (access mode + status bits).
+     Linux F_GETFL (and compat ioctl F_GETFL) must return these on ANY fd, not
+     just sockets; without it a regular file //dev/null answers -ENOTSOCK instead
+     of its flags.  Set at open, read by file_fcntl F_GETFL, written by F_SETFL. */
+  uint32_t open_flags;
   union {
     struct {
       struct fat16_dir_entry entry; /**< FAT16 directory entry copy */
@@ -196,6 +201,9 @@ struct fd_set_k {
 #define K_F_SETFL      4
 #define K_FD_CLOEXEC   1
 #define K_O_NONBLOCK   0x800
+/* GB-019: O_APPEND — Linux value (02000 = 0x400), distinct from the userlibc's
+ * 8.  F_GETFL returns it; F_SETFL(O_APPEND) sets it on the stored word. */
+#define K_O_APPEND    0x400
 /* P2.4 (S4, design section 4.3): memfd sealing commands + seal bits
  * (Linux numbers; SHRINK/GROW enforced at ftruncate, WRITE advisory). */
 #define K_F_ADD_SEALS  1033
