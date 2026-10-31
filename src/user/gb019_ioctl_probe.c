@@ -45,6 +45,12 @@ static int do_ioctl(int fd, unsigned long req, unsigned long arg, const char *na
 }
 
 int main(int argc, char **argv) {
+  /* GB-141: musl FULLY-buffers stdout on a non-tty, and this compat probe dies
+     (rc>0, last_user_pc mid-probe — measured, same as W0PIE) before musl's exit
+     flushes, so printf rows were dropped in musl's user buffer and never reached
+     write(1) → file_write's WK-1 console route.  Unbuffer stdout so every row is
+     written immediately. */
+  setvbuf(stdout, NULL, _IONBF, 0);
   int nt = open("/dev/null", O_RDWR);
 
   /* clause 2 + clause 3: TIOCGWINSZ on a non-tty -> -ENOTTY (25). */
