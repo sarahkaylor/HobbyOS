@@ -1,0 +1,1 @@
+make: *** No rule to make target 't4_t3log_selftest'.  Stop.

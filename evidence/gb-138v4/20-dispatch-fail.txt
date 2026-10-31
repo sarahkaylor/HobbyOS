@@ -1,0 +1,3 @@
+=== t4_w0_dispatch: booting intel guest with W0PIE-only manifest (GB-138) ===
+t4_w0_dispatch: FAIL — t3_tier printed no usable T3_LOG (GB-140 clause 3)
+DISPATCH_RC=1

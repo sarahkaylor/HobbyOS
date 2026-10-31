@@ -1,0 +1,7 @@
+Part A: T3 gate verdict over a captured log (no QEMU)
+  PASS: clean log -> GREEN
+  PASS: dummy (FAIL-injected) log -> RED
+  PASS: dummy (FATAL fault) log -> RED
+Part B: skipped (TEST_RUN_T1=1 to run the real T1 gate)
+
+MERGE_GATE_TEST: PASS — a dummy branch fails, a clean branch passes
