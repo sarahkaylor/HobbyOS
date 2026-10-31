@@ -2186,6 +2186,12 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         case 2:  syscall_num = SYS_OPEN;  break;   /* open(path, fl, md) */
         case 3:  syscall_num = SYS_CLOSE; break;   /* close(fd)          */
         case 60: syscall_num = SYS_EXIT;  break;   /* exit(code)         */
+        /* GB-141 (V evidence): musl's _Exit calls exit_group(231), not exit(60)
+           when the program has a thread/group — the compat table had NO 231, so it
+           fell to the default -ENOSYS and the probe "died inside _Exit" (GB-113
+           signature: exit-0 observed as a signal death, last_user_pc in _Exit),
+           rows never flushed to write(1).  exit_group(code) with code in rdi. */
+        case 231: syscall_num = SYS_EXIT;  break;  /* exit_group(code)  */
         /* GB-020: getdents64(fd, dirp, count).  Linux number 217. */
         case 217: syscall_num = SYS_GETDENTS64; break;
         /* GB-019 clause 4: Linux fcntl(72)(fd, cmd, arg) SHARES file_fcntl with the
