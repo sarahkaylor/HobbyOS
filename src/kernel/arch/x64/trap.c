@@ -958,6 +958,35 @@ static void sys_write(struct trap_frame *tf) {
   }
 }
 
+/* GB-141 (mechanism, V2): musl's stdio writes through writev(2), NOT write(2) —
+   __stdio_write builds an iovec and calls writev.  The compat table had no case 20,
+   so every printf byte fell to -ENOSYS and died (raw write(1) landed via file_write's
+   fd-1 walk).  Loop the iovec array, validating each range, and write each segment
+   through file_write (which carries the WK-1 fd-1/2 console fallback). */
+static void compat_writev(struct trap_frame *tf) {
+  struct process *c = current_process();
+  int fd = (int)tf->regs[5];
+  uint64_t iov = tf->regs[4];
+  long cnt = (long)tf->regs[3];
+  if (cnt < 0 || cnt > 1024) { tf->regs[0] = (uint64_t)(int64_t)-EINVAL; return; }
+  if (cnt == 0) { tf->regs[0] = 0; return; }
+  if (!sys_user_range_ok(iov, (uint64_t)cnt * 16)) { tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return; }
+  int64_t total = 0;
+  for (long i = 0; i < cnt; i++) {
+    uint64_t base = 0, len = 0;
+    if (vm_user_read(c, iov + (uint64_t)i * 16, &base, 8) != 0 ||
+        vm_user_read(c, iov + (uint64_t)i * 16 + 8, &len, 8) != 0) {
+      tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return;
+    }
+    if (len == 0) continue;
+    int r = file_write(c, fd, (const void *)(uintptr_t)base, (int)len, tf);
+    if (r == -2) { return; }
+    if (r < 0) { tf->regs[0] = (uint64_t)(int64_t)r; return; }
+    total += r;
+  }
+  tf->regs[0] = (uint64_t)total;
+}
+
 extern int load_and_run_program_in_scheduler(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid);
 extern int load_and_run_program_in_scheduler_args(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid, const char *args);
 extern struct process *process_get_pcb(int pid);
@@ -2186,8 +2215,60 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         case 2:  syscall_num = SYS_OPEN;  break;   /* open(path, fl, md) */
         case 3:  syscall_num = SYS_CLOSE; break;   /* close(fd)          */
         case 60: syscall_num = SYS_EXIT;  break;   /* exit(code)         */
+        /* GB-141 (V evidence): musl's _Exit calls exit_group(231), not exit(60)
+           when the program has a thread/group — the compat table had NO 231, so it
+           fell to the default -ENOSYS and the probe "died inside _Exit" (GB-113
+           signature: exit-0 observed as a signal death, last_user_pc in _Exit),
+           rows never flushed to write(1).  exit_group(code) with code in rdi. */
+        case 231: syscall_num = SYS_EXIT;  break;  /* exit_group(code)  */
+        /* GB-141 (V2 mechanism): musl stdio calls writev(20), not write — the compat
+           table had no case 20, so every printf byte hit -ENOSYS. */
+        case 20: compat_writev(tf); return;
         /* GB-020: getdents64(fd, dirp, count).  Linux number 217. */
         case 217: syscall_num = SYS_GETDENTS64; break;
+        /* GB-019 clause 4: Linux fcntl(72)(fd, cmd, arg) SHARES file_fcntl with the
+           ioctl(16) F_GETFL/F_SETFL dispatch.  cmd=3/4 (K_F_GETFL/K_F_SETFL are 3/4)
+           route to file_fcntl; a non-3/4 cmd is file_fcntl's own decision.  regs:
+           rdi=fd, rsi=cmd, rdx=arg. */
+        case 72: syscall_num = SYS_FCNTL; break;   /* fcntl(fd, cmd, arg) */
+        /* GB-019 (ioctl subset, real request dispatch).  Linux ioctl(16): regs[5]=rdi
+           =fd, regs[4]=rsi=request, regs[3]=rdx=arg.  This is a genuine dispatch on
+           the request number, and every non-ENOTTY outcome is falsifiable:
+           - F_GETFL (3) / F_SETFL (4): route to file_fcntl (K_F_GETFL/SETFL are the
+             same Linux numbers, K_F_GETFL=3, K_F_SETFL=4), which returns the fd's
+             flags / applies O_APPEND etc — real, mutable state. Mis-routing these two
+             changes the result, so the gate's falsifier has a mapping to break.
+           - TCGETS (0x5401) / TIOCGWINSZ (0x5413): a tty-class request.  It takes a
+             struct arg; a bad pointer is -EFAULT.  The compat O0 surface's nodes are
+             not ttys (/dev/null is the probe's deterministic source), so Linux answers
+             ENOTTY (25) here — honestly, after validating the arg, not by skipping it.
+           - any other request: ENOTTY (the node does not implement it).
+           - bad fd: EBADF. */
+        case 16: {
+          struct process *c16 = current_process();
+          int cfd = (int)tf->regs[5];         /* rdi: fd      */
+          int32_t ireq = (int32_t)tf->regs[4]; /* rsi: request */
+          uint64_t iarg = tf->regs[3];         /* rdx: arg     */
+          if (!c16 || cfd < 0 || cfd >= MAX_OPEN_FDS) { tf->regs[0] = (uint64_t)(int64_t)(-9); return; } /* EBADF */
+          if (ireq == 3 || ireq == 4) {  /* F_GETFL(3) / F_SETFL(4) → route to the real fcntl handler */
+            tf->regs[0] = (uint64_t)file_fcntl(c16, cfd, ireq, iarg);
+            return;
+          }
+          if (ireq == 0x5401 || ireq == 0x5413) {  /* TCGETS / TIOCGWINSZ (measured: linux_syscall.h L_TCGETS/L_TIOCGWINSZ) */
+            /* both take a user struct: TCGETS termios 60 B, TIOCGWINSZ winsize 8 B;
+               a bad pointer is EFAULT.  The compat surface has no tty, so the honest
+               Linux answer on /dev/null and friends is ENOTTY. */
+            if ((int64_t)iarg != -1 &&
+                !sys_user_range_ok(iarg, ireq == 0x5401 ? (uint64_t)60 : (uint64_t)8)) {
+              tf->regs[0] = (uint64_t)(int64_t)(-14);   /* -EFAULT */
+              return;
+            }
+            tf->regs[0] = (uint64_t)(int64_t)(-25);     /* -ENOTTY */
+            return;
+          }
+          tf->regs[0] = (uint64_t)(int64_t)(-25);       /* -ENOTTY: node lacks this request */
+          return;
+        }
         default:
           tf->regs[0] = (uint64_t)(int64_t)(-38);  /* -ENOSYS */
           return;
