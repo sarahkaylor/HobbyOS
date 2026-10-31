@@ -958,6 +958,35 @@ static void sys_write(struct trap_frame *tf) {
   }
 }
 
+/* GB-141 (mechanism, V2): musl's stdio writes through writev(2), NOT write(2) —
+   __stdio_write builds an iovec and calls writev.  The compat table had no case 20,
+   so every printf byte fell to -ENOSYS and died (raw write(1) landed via file_write's
+   fd-1 walk).  Loop the iovec array, validating each range, and write each segment
+   through file_write (which carries the WK-1 fd-1/2 console fallback). */
+static void compat_writev(struct trap_frame *tf) {
+  struct process *c = current_process();
+  int fd = (int)tf->regs[5];
+  uint64_t iov = tf->regs[4];
+  long cnt = (long)tf->regs[3];
+  if (cnt < 0 || cnt > 1024) { tf->regs[0] = (uint64_t)(int64_t)-EINVAL; return; }
+  if (cnt == 0) { tf->regs[0] = 0; return; }
+  if (!sys_user_range_ok(iov, (uint64_t)cnt * 16)) { tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return; }
+  int64_t total = 0;
+  for (long i = 0; i < cnt; i++) {
+    uint64_t base = 0, len = 0;
+    if (vm_user_read(c, iov + (uint64_t)i * 16, &base, 8) != 0 ||
+        vm_user_read(c, iov + (uint64_t)i * 16 + 8, &len, 8) != 0) {
+      tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return;
+    }
+    if (len == 0) continue;
+    int r = file_write(c, fd, (const void *)(uintptr_t)base, (int)len, tf);
+    if (r == -2) { return; }
+    if (r < 0) { tf->regs[0] = (uint64_t)(int64_t)r; return; }
+    total += r;
+  }
+  tf->regs[0] = (uint64_t)total;
+}
+
 extern int load_and_run_program_in_scheduler(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid);
 extern int load_and_run_program_in_scheduler_args(const char *filename, int stdin_fd, int stdout_fd, int stderr_fd, int caller_pid, const char *args);
 extern struct process *process_get_pcb(int pid);
@@ -2192,6 +2221,9 @@ void sync_lower_handler_c(struct trap_frame *tf) {
            signature: exit-0 observed as a signal death, last_user_pc in _Exit),
            rows never flushed to write(1).  exit_group(code) with code in rdi. */
         case 231: syscall_num = SYS_EXIT;  break;  /* exit_group(code)  */
+        /* GB-141 (V2 mechanism): musl stdio calls writev(20), not write — the compat
+           table had no case 20, so every printf byte hit -ENOSYS. */
+        case 20: compat_writev(tf); return;
         /* GB-020: getdents64(fd, dirp, count).  Linux number 217. */
         case 217: syscall_num = SYS_GETDENTS64; break;
         /* GB-019 clause 4: Linux fcntl(72)(fd, cmd, arg) SHARES file_fcntl with the
