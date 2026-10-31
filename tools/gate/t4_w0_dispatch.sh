@@ -43,18 +43,24 @@ fi
 # 2. stage the member + its manifest onto disk.img via T3_STAGE, then boot.
 STAGE="mcopy -o -i $ROOT/disk.img $PIE ::W0PIE.BIN; mcopy -o -i $ROOT/disk.img $CFG ::WAVE.CFG"
 echo "=== t4_w0_dispatch: booting $ARCH guest with W0PIE-only manifest (GB-138) ==="
-# t3_tier.sh writes the CONSOLE serial to T3_LOG (the verdict/summary goes to
-# stdout); the DoD reads [ARRIVED] + abi=0x1 out of the console, so point it at
-# $OUT and grep THERE — GB-138-V3 #314: grepping t3_tier's stdout saw 0 while
-# the console held the evidence.
-T3_STAGE="$STAGE" T3_LOG="$OUT" bash "$ROOT/tools/t3_tier.sh" "$ARCH" > /dev/null 2>&1
+# t3_tier.sh writes the CONSOLE to T3_LOG and the verdict summary to stdout; the
+# DoD reads [ARRIVED] + abi=0x1 out of the console.  GB-140 contract (main
+# 74a6adf): t3_tier prints T3_LOG=<console> as its last stdout line — DERIVE the
+# log path from it (never hard-code, never grep the summary $OUT), and FAIL LOUDLY
+# when a usable T3_LOG is absent (a gate that greps an empty file reports "never
+# arrived" on a FEATURE that ran — GB-138-V3/GB-140).
+T3_STAGE="$STAGE" bash "$ROOT/tools/t3_tier.sh" "$ARCH" > "$OUT" 2>&1
 boot_rc=$?
+LOG="$(sed -n 's/^T3_LOG=//p' "$OUT" | tail -1)"
+if [ -z "$LOG" ] || [ ! -f "$LOG" ]; then
+  echo "t4_w0_dispatch: FAIL — t3_tier printed no usable T3_LOG (GB-140 clause 3)"; exit 1
+fi
 
 # 3. read the two observations the DoD names.
-arrived=$(grep -ac "\[ARRIVED\] W0PIE.BIN" "$OUT" || true)
-abi=$(grep -ac "abi=0x1" "$OUT" || true)
+arrived=$(grep -ac "\[ARRIVED\] W0PIE.BIN" "$LOG" || true)
+abi=$(grep -ac "abi=0x1" "$LOG" || true)
 echo "=== t4_w0_dispatch: [ARRIVED] W0PIE.BIN x$arrived, abi=0x1 x$abi (boot rc=$boot_rc) ==="
-grep -aE "\[ARRIVED\] W0PIE.BIN|abi=0x1|v2 loader: PID=" "$OUT" | tail -6
+grep -aE "\[ARRIVED\] W0PIE.BIN|abi=0x1|v2 loader: PID=" "$LOG" | tail -6
 
 if [ "$arrived" -lt 1 ]; then
   echo "t4_w0_dispatch: FAIL — W0PIE.BIN never arrived in the guest (staged but not dispatched; GB-138)" ; exit 1
