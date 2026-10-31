@@ -30,8 +30,10 @@ if [ ! -f "$PIE" ]; then
   # the Makefile's recipe for $(OBJ_DIR)/w0_hello_pie.elf (philosophy: a file
   # target named by path, not a phony).  Run that file's recipe directly to stay
   # out of the disk.img dependency graph — clause 5: staging happens HERE, on
-  # disk.img, only for this gate's boot.
-  TGT="$ROOT/obj/$ARCH/w0_hello_pie.elf"
+  # disk.img, only for this gate's boot.  NB: `make -C` resolves the target
+  # relative to $ROOT, so it must be the RELATIVE path obj/$ARCH/... (an
+  # absolute path is not a make target — GB-138-V3 #314).
+  TGT="obj/$ARCH/w0_hello_pie.elf"
   if ! make -C "$ROOT" ARCH="$ARCH" "$TGT" >/dev/null 2>&1; then
     echo "t4_w0_dispatch: FAIL — W0_PIE_ELF build failed (see 'make $TGT ARCH=$ARCH')"; exit 2
   fi
@@ -41,7 +43,11 @@ fi
 # 2. stage the member + its manifest onto disk.img via T3_STAGE, then boot.
 STAGE="mcopy -o -i $ROOT/disk.img $PIE ::W0PIE.BIN; mcopy -o -i $ROOT/disk.img $CFG ::WAVE.CFG"
 echo "=== t4_w0_dispatch: booting $ARCH guest with W0PIE-only manifest (GB-138) ==="
-T3_STAGE="$STAGE" bash "$ROOT/tools/t3_tier.sh" "$ARCH" > "$OUT" 2>&1
+# t3_tier.sh writes the CONSOLE serial to T3_LOG (the verdict/summary goes to
+# stdout); the DoD reads [ARRIVED] + abi=0x1 out of the console, so point it at
+# $OUT and grep THERE — GB-138-V3 #314: grepping t3_tier's stdout saw 0 while
+# the console held the evidence.
+T3_STAGE="$STAGE" T3_LOG="$OUT" bash "$ROOT/tools/t3_tier.sh" "$ARCH" > /dev/null 2>&1
 boot_rc=$?
 
 # 3. read the two observations the DoD names.
