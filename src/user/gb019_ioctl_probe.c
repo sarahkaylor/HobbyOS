@@ -53,10 +53,15 @@ int main(int argc, char **argv) {
   setvbuf(stdout, NULL, _IONBF, 0);
   int nt = open("/dev/null", O_RDWR);
 
-  /* clause 2 + clause 3: TIOCGWINSZ on a non-tty -> -ENOTTY (25). */
-  do_ioctl(nt, TIOCGWINSZ, 0, "TIOCGWINSZ");           /* expect r=-1 errno=25 */
-  /* clause 2: TCGETS on a non-tty -> -ENOTTY. */
-  do_ioctl(nt, TCGETS, 0, "TCGETS");                  /* expect r=-1 errno=25 */
+  /* clause 2 + clause 3: TIOCGWINSZ on a non-tty -> -ENOTTY (25).  A VALID user
+     buffer: Linux answers ENOTTY without touching the arg on a non-tty, and HobbyOS
+     rejects a bad pointer as EFAULT before it knows the fd is not a tty — so arg=0
+     measured EFAULT, not ENOTTY (the case-16 ordering the reviewer flagged). */
+  struct winsize ws; memset(&ws, 0, sizeof ws);
+  do_ioctl(nt, TIOCGWINSZ, (unsigned long)&ws, "TIOCGWINSZ"); /* r=-1 errno=25 */
+  /* clause 2: TCGETS on a non-tty -> -ENOTTY (valid termios buffer, same reason). */
+  unsigned char tio[64]; memset(tio, 0, sizeof tio);
+  do_ioctl(nt, TCGETS, (unsigned long)tio, "TCGETS");        /* r=-1 errno=25 */
 
   /* clause 2 F_GETFL on /dev/null: the O_* flags, NOT -ENOTSOCK(88). */
   do_ioctl(nt, L_F_GETFL, 0, "F_GETFL");              /* expect r>=0, r != -88 */
@@ -69,10 +74,8 @@ int main(int argc, char **argv) {
 
   /* GB-019 marker: deterministic values the gate compares against the Linux-leg
      reference.  Capture, then print once (don't re-issue ioctls inside printf). */
-  int g1 = ioctl(nt, TIOCGWINSZ, 0);  errno = 0;
-  int ge = errno;
-  int g2 = ioctl(nt, TCGETS, 0);      errno = 0;
-  int te = errno;
+  int g1 = ioctl(nt, TIOCGWINSZ, &ws); int ge = errno;
+  int g2 = ioctl(nt, TCGETS, tio);      int te = errno;
   errno = 0; int g3 = ioctl(nt, L_F_GETFL, 0); int gf = errno;
   int g4 = ioctl(nt, L_F_SETFL, L_O_NONBLOCK);
   errno = 0; int g5 = ioctl(nt, L_F_GETFL, 0);

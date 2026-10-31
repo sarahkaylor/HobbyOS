@@ -962,7 +962,11 @@ static void sys_write(struct trap_frame *tf) {
    __stdio_write builds an iovec and calls writev.  The compat table had no case 20,
    so every printf byte fell to -ENOSYS and died (raw write(1) landed via file_write's
    fd-1 walk).  Loop the iovec array, validating each range, and write each segment
-   through file_write (which carries the WK-1 fd-1/2 console fallback). */
+   through file_write (which carries the WK-1 fd-1/2 console fallback).
+   GB-143 (reviewer bounce): honour file_write's OTHER return shapes, not just full
+   size/negative errno — a parked write (-2), a short write (0 <= r < len), and one
+   over-2GiB iovec_len would otherwise fabricate a byte count the caller never wrote. */
+#define COMPAT_MAX_RW_COUNT 0x7ffff000ULL  /* Linux MAX_RW_COUNT per write() */
 static void compat_writev(struct trap_frame *tf) {
   struct process *c = current_process();
   int fd = (int)tf->regs[5];
@@ -979,10 +983,24 @@ static void compat_writev(struct trap_frame *tf) {
       tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return;
     }
     if (len == 0) continue;
+    if (len > COMPAT_MAX_RW_COUNT) len = COMPAT_MAX_RW_COUNT; /* clamp one write() */
     int r = file_write(c, fd, (const void *)(uintptr_t)base, (int)len, tf);
-    if (r == -2) { return; }
+    if (r == -2) {
+      /* A parked write (full pipe / unix socket).  Mirror sys_write: rewind the
+         2-byte `syscall` and re-schedule so the write RESTARTS on wake; the parked
+         segment resumes as if nothing was written.  A subsequent iovec segment that
+         already advanced total is a short write, not a park — see below. */
+      if (total > 0) { tf->regs[0] = (uint64_t)total; return; }
+      if ((tf->cs & 3) == 3) tf->elr -= 2;
+      save_context(c, tf);
+      schedule(tf, 0);
+      return;
+    }
     if (r < 0) { tf->regs[0] = (uint64_t)(int64_t)r; return; }
     total += r;
+    /* Short write: Linux stops here and returns the partial total, NOT the next
+       segment (a reordered stream with a matching count would hide the loss). */
+    if ((uint64_t)r < len) { tf->regs[0] = (uint64_t)total; return; }
   }
   tf->regs[0] = (uint64_t)total;
 }
