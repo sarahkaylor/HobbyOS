@@ -2188,6 +2188,11 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         case 60: syscall_num = SYS_EXIT;  break;   /* exit(code)         */
         /* GB-020: getdents64(fd, dirp, count).  Linux number 217. */
         case 217: syscall_num = SYS_GETDENTS64; break;
+        /* GB-019 clause 4: Linux fcntl(72)(fd, cmd, arg) SHARES file_fcntl with the
+           ioctl(16) F_GETFL/F_SETFL dispatch.  cmd=3/4 (K_F_GETFL/K_F_SETFL are 3/4)
+           route to file_fcntl; a non-3/4 cmd is file_fcntl's own decision.  regs:
+           rdi=fd, rsi=cmd, rdx=arg. */
+        case 72: syscall_num = SYS_FCNTL; break;   /* fcntl(fd, cmd, arg) */
         /* GB-019 (ioctl subset, real request dispatch).  Linux ioctl(16): regs[5]=rdi
            =fd, regs[4]=rsi=request, regs[3]=rdx=arg.  This is a genuine dispatch on
            the request number, and every non-ENOTTY outcome is falsifiable:

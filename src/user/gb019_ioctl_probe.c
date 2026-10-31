@@ -70,8 +70,12 @@ int main(int argc, char **argv) {
   errno = 0; int g3 = ioctl(nt, L_F_GETFL, 0); int gf = errno;
   int g4 = ioctl(nt, L_F_SETFL, L_O_NONBLOCK);
   errno = 0; int g5 = ioctl(nt, L_F_GETFL, 0);
+  /* clause 4: fcntl(72) SHARES file_fcntl — the same fd's F_GETFL via the Linux
+     fcntl syscall (72), not just ioctl(16)-with-request-3. */
+  errno = 0; int fc = fcntl(nt, L_F_GETFL);
+  errno = 0; int fc2 = fcntl(nt, L_F_SETFL, 0);
   errno = 0; int g6 = ioctl(nt, 0x9999, 0); int ue = errno;
-  printf("[GB019] tw=r%d/er%d tc=r%d/er%d gf=r%d/er%d set=r%d gf2=r%d/nb=%d unk=r%d/er%d\n",
-         g1, ge, g2, te, g3, gf, g4, g5, !!(g5 & L_O_NONBLOCK), g6, ue);
+  printf("[GB019] tw=r%d/er%d tc=r%d/er%d gf=r%d/er%d set=r%d gf2=r%d/nb=%d unk=r%d/er%d fc=r%d fc2=r%d\n",
+         g1, ge, g2, te, g3, gf, g4, g5, !!(g5 & L_O_NONBLOCK), g6, ue, fc, fc2);
   return 0;
 }
