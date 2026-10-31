@@ -1,0 +1,13 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 1500s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb142base/t3_intel_base3.log) ===
+T3_intel: 9781 console lines, 2 FAIL lines, 5 user memory fault records across 5 processes, 87 programs exited, halted=0
+T3_intel: FAIL — the console has no 'System halt' line (idle/hung wave, or the 1500s deadline hit; a hang is a defect, not a flake)
+T3_intel: FAIL — 2 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 2 FAIL line(s); first 20:
+7506:/TEST1.TXT  TORTURE poll-many-fds: FAIL
+7511:/TEST1.TXTTORTURE FAILED: 1
+T3_intel EXIT=1
+T3_LOG=/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb142base/t3_intel_base3.log
+T3_ARCH=intel
+T3_FAILS=2
+BASE3_T3_RC=1

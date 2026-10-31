@@ -1,0 +1,46 @@
+Part A: T3 gate verdict over a captured log (no QEMU)
+  PASS: clean log -> GREEN
+  PASS: dummy (FAIL-injected) log -> RED
+  PASS: dummy (FATAL fault) log -> RED
+Part B: real gate, T1 tier (make host_tests)
+  FAIL: merge_gate.sh (T1) should be GREEN on a clean tree
+    [GATE] T1_host: make host_tests
+    [GATE] T1_host: FAIL (exit 2) — log: obj/gate/T1_host.log
+          PASS  tools/board/merge_pr_test.py
+          PASS  tools/differential/diff_harness_test.py
+          PASS  tools/evidence_rig_test.py
+          PASS  tools/gate/t3_fatal_count_test.py
+          PASS  tools/gate/trap_exit_frame_order_test.py
+          PASS  tools/perf_game_cycle_test.py
+          PASS  tools/swarm/resume_guard_test.py
+          PASS  tools/t3/serial_classifier_test.py
+          PASS  tools/t3/t3_classifier_coupling_test.py
+          PASS  tools/t3/t3_instrument_failure_test.py
+          PASS  tools/t3/t3_three_outcome_test.py
+          PASS  tools/t3/t4_probe_guard_test.py
+          PASS  tools/t5/acceptance_gate_test.py
+          PASS  tools/t5/acceptance_test.py
+          PASS  tools/t5/evidence_pack_test.py
+          PASS  tools/t5/fatbig_tail_test.py
+          PASS  tools/t5/feasibility_doc_test.py
+          PASS  tools/t5/flaky_triage_test.py
+          PASS  tools/t5/game_docs_test.py
+          PASS  tools/t5/perf_report_test.py
+          PASS  tools/t5/replay_test.py
+          PASS  tools/t5/retro_skill_test.py
+          PASS  tools/t5/selfreg_test.py
+        [host-tests] done: 34/35 passed
+        make: *** [Makefile:3967: host_tests] Error 1
+    
+    === GATE SUMMARY ===
+      T1_host          FAIL
+      T2_unit_arm      skip
+      T2_unit_intel    skip
+      T3_int_arm       skip
+      T3_int_intel     skip
+      STYLE_check      skip
+      STYLE_test       skip
+    
+    GATE: FAIL — at least one required tier failed. Logs in obj/gate/.
+
+MERGE_GATE_TEST: FAIL

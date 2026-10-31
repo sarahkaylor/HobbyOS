@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb142base/tools/board/check_verdicts_test.py", line 27, in <module>
+    gov_gid, gov_v = C.governing([(1, "GB-117-V", "RED"), (5, "GB-117-V5", "GREEN")])
+                     ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb142base/tools/board/check_verdicts.py", line 201, in governing
+    has = [(ord_, g, v, ts or "") for ord_, g, v, ts in gates if v]
+                                      ^^^^^^^^^^^^^^
+ValueError: not enough values to unpack (expected 4, got 3)
