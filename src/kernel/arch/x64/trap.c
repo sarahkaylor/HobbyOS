@@ -2273,14 +2273,12 @@ void sync_lower_handler_c(struct trap_frame *tf) {
             return;
           }
           if (ireq == 0x5401 || ireq == 0x5413) {  /* TCGETS / TIOCGWINSZ (measured: linux_syscall.h L_TCGETS/L_TIOCGWINSZ) */
-            /* both take a user struct: TCGETS termios 60 B, TIOCGWINSZ winsize 8 B;
-               a bad pointer is EFAULT.  The compat surface has no tty, so the honest
-               Linux answer on /dev/null and friends is ENOTTY. */
-            if ((int64_t)iarg != -1 &&
-                !sys_user_range_ok(iarg, ireq == 0x5401 ? (uint64_t)60 : (uint64_t)8)) {
-              tf->regs[0] = (uint64_t)(int64_t)(-14);   /* -EFAULT */
-              return;
-            }
+            /* GB-019 (V3 ordering): Linux answers ENOTTY for a tty-class ioctl on a
+               NON-tty WITHOUT dereferencing the arg — the pointer is never read, so a
+               NULL/garbage arg is still ENOTTY, not EFAULT.  The compat surface has no
+               tty (the probe's /dev/null is the deterministic source), so the honest
+               answer is ENOTTY regardless of iarg; validating the pointer first made a
+               non-tty return EFAULT and failed the gate's clause-2 rows. */
             tf->regs[0] = (uint64_t)(int64_t)(-25);     /* -ENOTTY */
             return;
           }
