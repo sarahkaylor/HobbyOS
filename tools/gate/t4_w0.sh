@@ -96,6 +96,15 @@ EOF
   if verdict "$TMP/broken_hello.log" HELLO >/dev/null 2>&1; then echo "  UNEXPECTED PASS — broken member did not fail"; FAILS=$((FAILS+1));
   else echo "  OK — broken member FAILED as required"; fi
 
+  echo "[self-test] absent .ref for a member that emits a marker (must FAIL):"
+  # A wave whose member emits '[W0] X linux=...' but whose .ref is not committed
+  # must FAIL (an absent reference is a missing comparison, not a pass).  Point a
+  # scratch corpus at an empty dir so the member's marker can never match a ref.
+  printf 'marker-writer\n' > "$TMP/marker_only.log"
+  printf '[W0] NOENTS linux=hello\n[W0-ARRIVED] NOENTS\nSystem halt\n' >> "$TMP/marker_only.log"
+  if W0_OUT_DIR="$TMP/emptydir" bash "${BASH_SOURCE[0]}" --serial "$TMP/marker_only.log" --members NOENTS >/dev/null 2>&1; then echo "  UNEXPECTED PASS — member with an absent .ref did not fail"; FAILS=$((FAILS+1));
+  else echo "  OK — member emitting a marker with no .ref FAILED (absent ref is no longer a pass)"; fi
+
   echo "self-test result: fails=$FAILS"
   [ "$FAILS" = "0" ]; exit $?
 fi
@@ -139,7 +148,16 @@ for m in $MEMS; do
   if [ -n "$line" ]; then
     expected=$(grep "\[W0\] $m linux=" "$LOG" | sed 's/.*linux=//' | head -1 | tr -d '\r')
     linuxref=$(cat "$W0_OUT_DIR/$m.ref" 2>/dev/null | tr -d '\r' || true)
-    if [ -n "$linuxref" ] && [ "$expected" != "$linuxref" ]; then
+    # GB-024-V (10-25, RED): a member that emits a '[W0] <m> linux=' marker but has
+    # NO committed .ref used to print "PASS ... == ''" — an absent reference turned
+    # the verification off without failing the gate.  A marker names Linux-leg
+    # output that MUST be compared; if the reference is missing, that is a failing
+    # corpus (the gate cannot verify the very thing its member claims to emit),
+    # not a pass-by-construction.  Absent ref -> FAIL, never a silent skip.
+    if [ -z "$linuxref" ]; then
+      echo "  FAIL $m — emits a '[W0] $m linux=' marker but '$W0_OUT_DIR/$m.ref' is absent: the Linux-leg reference its output must match does not exist (GB-024-V)"
+      fail=1
+    elif [ "$expected" != "$linuxref" ]; then
       echo "  FAIL $m — guest output marker '$expected' != Linux-leg '$linuxref' (writes expected output: NO)"
       fail=1
     else
