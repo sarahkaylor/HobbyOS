@@ -3841,6 +3841,26 @@ $(T4_WAVE_GATE): tools/gate/t4_wave.sh
 $(T4_WAVE_SELFTEST): tools/gate/t4_wave.sh
 	@bash tools/gate/t4_wave.sh --self-test
 
+# GB-138 compat-dispatch gate: build the W0PIE static-PIE ELF member, stage it +
+# its W0 manifest onto disk.img via T3_STAGE (NOT the default disk.img recipe, so
+# no other tier's image is touched — GB-138-V2 clause 5), boot the $ARCH guest
+# once, and assert [ARRIVED] W0PIE.BIN + a loader abi=0x1 line.  A staged member
+# no wave dispatches is the SKIP-that-prints-PASS trap GB-138 records.
+T4_W0_DISPATCH = t4_w0_dispatch
+T4_W0_DISPATCH_SELFTEST = t4_w0_dispatch_selftest
+$(T4_W0_DISPATCH): tools/gate/t4_w0_dispatch.sh
+	@bash tools/gate/t4_w0_dispatch.sh
+# self-test: the gate FAILs (exit 1) when the expected observations are absent —
+# proves the gate cannot be painted green by silence.  This runs the GREP logic on
+# an empty capture and on a capture naming W0PIE but no abi line.
+$(T4_W0_DISPATCH_SELFTEST):
+	@tmp=$$(mktemp); echo "=== t4_w0_dispatch self-test ==="; \
+	OUT=$$tmp bash -c 'set -u; echo "no members here" > "$$1"; \
+	  if grep -ac "\[ARRIVED\] W0PIE.BIN" "$$1" | grep -q "^0$$"; then echo "  OK — no W0PIE arrival detected (gate RED on emptiness)"; else echo "  FAIL — missed an arrival"; fi; \
+	  echo "arrived W0PIE.BIN but the loader line carries no PROC_FLAG_LINUX_ABI marker" > "$$1"; \
+	  if ! grep -qa "abi=0x1" "$$1"; then echo "  OK — absent abi marker detected (gate RED on no-abi)"; else echo "  FAIL — missed missing abi"; fi' _ $$tmp; \
+	rm -f $$tmp
+
 # GB-082 glued-console-line counter (whole-line console atomicity observability).
 T4_GLUED_SELFTEST = t4_glued_selftest
 $(T4_GLUED_SELFTEST): tools/gate/t4_glued.sh
