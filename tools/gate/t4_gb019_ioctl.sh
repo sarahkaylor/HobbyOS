@@ -82,8 +82,13 @@ OK=1
 grep -q "abi=0x1" "$LOG" || { echo "t4_gb019_ioctl: FAIL — no Linux-ABI proc (no abi=0x1)"; OK=0; }
 grep -q "req=0x5413 r=-1 errno=25" "$LOG" || { echo "t4_gb019_ioctl: FAIL — TIOCGWINSZ non-tty != -ENOTTY"; OK=0; }
 grep -q "req=0x5401 r=-1 errno=25" "$LOG" || { echo "t4_gb019_ioctl: FAIL — TCGETS != -ENOTTY"; OK=0; }
-grep -q "req=0x0003 r=-88" "$LOG" && { echo "t4_gb019_ioctl: FAIL — F_GETFL returned -ENOTSOCK (the V4 gap!)"; OK=0; }
+# clause 3 STRICT: F_GETFL on a non-socket must return the stored O_* (r>=0), NOT
+# -ENOTSOCK(-88) and NOT -ENOTTY(-1); F_SETFL must return 0; via ioctl(16) req 3/4.
+grep -q "req=0x0003 r=-1 errno=25" "$LOG" && { echo "t4_gb019_ioctl: FAIL — F_GETFL returned -ENOTTY (wrong: a non-socket reflects O_*)"; OK=0; }
+grep -q "req=0x0003 r=-88" "$LOG"       && { echo "t4_gb019_ioctl: FAIL — F_GETFL returned -ENOTSOCK (the V4 gap!)"; OK=0; }
+grep -qEi "req=0x0003 r=[0-9]" "$LOG"   || { echo "t4_gb019_ioctl: FAIL — F_GETFL not a stored O_* value"; OK=0; }
 grep -q "req=0x9999 r=-1 errno=25" "$LOG" || { echo "t4_gb019_ioctl: FAIL — unknown request != -ENOTTY"; OK=0; }
-[ "$OK" = "1" ] && echo "t4_gb019_ioctl: PASS — 5 dispatch rows + 3 negatives from a Linux-ABI proc (clauses 2/3)"
+grep -q "fc=r[0-9]" "$LOG" || { echo "t4_gb019_ioctl: FAIL — fcntl(72) F_GETFL not O_* (clause 4)"; OK=0; }
+[ "$OK" = "1" ] && echo "t4_gb019_ioctl: PASS — 5 dispatch rows + 3 negatives + fcntl(72) from a Linux-ABI proc (clauses 2/3/4)"
 echo "t4_gb019_ioctl: $([ $OK -eq 1 ] && echo PASS || echo FAIL)"
 exit $([ $OK -eq 1 ] && echo 0 || echo 1)
