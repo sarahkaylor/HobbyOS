@@ -210,7 +210,7 @@ def build_body(gid, t, lane=None):
 | Weight | {t['weight']} |
 | Milestone | {t['ms']} |
 | Depends on | {t['depends']} |
-| Model tier | {'DEEP (design/review) + FLASH (exec)' if deep else 'FLASH (workhorse)'} |
+| Class | {'deep (work classification — same v4.1 Flash endpoint as every card)' if deep else 'worker (same v4.1 Flash endpoint as every card)'} |
 | Lane | see kanban lane label (Forgejo 17 has no Projects REST → lanes are labels; GB-002) |
 
 ### Definition of Done
