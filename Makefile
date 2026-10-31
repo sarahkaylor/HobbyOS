@@ -3779,14 +3779,28 @@ $(OPEN_MODE_SCAN): tools/gate/open_mode_scan.py
 # and ASSERT the result is ET_DYN (readelf -h Type: DYN) so a regression to
 # -static fails the build loudly instead of silently shipping a probe the guest
 # rejects (the GB-066-V2 RED's clause-1 failure).
+# GB-138 (2026-10-30): the W0 corpus is native flat .bin, so no process in a
+# T4/T3 wave ever carries PROC_FLAG_LINUX_ABI and the compat table cannot be
+# measured.  A W0 HELLO member built as a Linux-ABI static-PIE ELF is the fix:
+# same hello source, musl -static-pie, asserted ET_DYN so a flat-only regression
+# fails loudly, staged on the image and dispatched through elf_loader_load
+# (program_loader.c:865 sets the flag for ELF).  The `[..] abi=0x1` loader line
+# then proves the flag at runtime (GB-138 clause 2).
 T4_DEVICE_GATE = t4_device_gate
 T4_DEVICE_SELFTEST = t4_device_selftest
 T4_DEVICE_CHECK = t4_device_check
 T4_LEGA_OUT = $(OBJ_DIR)/t4_legA.out
 T4_PROBE_ELF = $(OBJ_DIR)/t4_probe.elf
+W0_PIE_ELF = $(OBJ_DIR)/w0_hello_pie.elf
 $(T4_PROBE_ELF): src/user/t4_probe.c
 	@musl-gcc -static-pie -fPIE -O2 -Wall src/user/t4_probe.c -o $(T4_PROBE_ELF)
 	@readelf -h $(T4_PROBE_ELF) | grep -q 'Type: *DYN' || ( echo "t4_probe: build is not ET_DYN/static-PIE — the v2 ELF loader rejects it (GB-066-V2)"; readelf -h $(T4_PROBE_ELF) | head -4; exit 1 )
+# GB-138 clause 1: the W0 HELLO member also ships as a static-PIE ELF so the W0
+# gate can exercise the compat path; build + assert ET_DYN + assert it parses with
+# is_pie (elf_parse accepts ET_DYN, no PT_INTERP) via the T1 loader host binary.
+$(W0_PIE_ELF): src/user/w0_pie_probe.c
+	@musl-gcc -static-pie -fPIE -O2 -Wall src/user/w0_pie_probe.c -o $(W0_PIE_ELF)
+	@readelf -h $(W0_PIE_ELF) | grep -q 'Type: *DYN' || ( echo "w0_hello_pie: build is not ET_DYN/static-PIE — the v2 ELF loader rejects it (GB-138)"; readelf -h $(W0_PIE_ELF) | head -4; exit 1 )
 $(T4_LEGA_OUT): $(T4_PROBE_ELF)
 	@./$(T4_PROBE_ELF) > $(T4_LEGA_OUT) && echo "[t4-device] leg A captured -> $(T4_LEGA_OUT)"
 $(T4_DEVICE_GATE): tools/gate/t4_device.sh $(T4_LEGA_OUT)
@@ -3826,6 +3840,26 @@ $(T4_WAVE_GATE): tools/gate/t4_wave.sh
 	@bash tools/gate/t4_wave.sh --serial $(T3_LOG) --manifest "$(WAVE_MANIFEST)"
 $(T4_WAVE_SELFTEST): tools/gate/t4_wave.sh
 	@bash tools/gate/t4_wave.sh --self-test
+
+# GB-138 compat-dispatch gate: build the W0PIE static-PIE ELF member, stage it +
+# its W0 manifest onto disk.img via T3_STAGE (NOT the default disk.img recipe, so
+# no other tier's image is touched — GB-138-V2 clause 5), boot the $ARCH guest
+# once, and assert [ARRIVED] W0PIE.BIN + a loader abi=0x1 line.  A staged member
+# no wave dispatches is the SKIP-that-prints-PASS trap GB-138 records.
+T4_W0_DISPATCH = t4_w0_dispatch
+T4_W0_DISPATCH_SELFTEST = t4_w0_dispatch_selftest
+$(T4_W0_DISPATCH): tools/gate/t4_w0_dispatch.sh
+	@bash tools/gate/t4_w0_dispatch.sh
+# self-test: the gate FAILs (exit 1) when the expected observations are absent —
+# proves the gate cannot be painted green by silence.  This runs the GREP logic on
+# an empty capture and on a capture naming W0PIE but no abi line.
+$(T4_W0_DISPATCH_SELFTEST):
+	@tmp=$$(mktemp); echo "=== t4_w0_dispatch self-test ==="; \
+	OUT=$$tmp bash -c 'set -u; echo "no members here" > "$$1"; \
+	  if grep -ac "\[ARRIVED\] W0PIE.BIN" "$$1" | grep -q "^0$$"; then echo "  OK — no W0PIE arrival detected (gate RED on emptiness)"; else echo "  FAIL — missed an arrival"; fi; \
+	  echo "arrived W0PIE.BIN but the loader line carries no PROC_FLAG_LINUX_ABI marker" > "$$1"; \
+	  if ! grep -qa "abi=0x1" "$$1"; then echo "  OK — absent abi marker detected (gate RED on no-abi)"; else echo "  FAIL — missed missing abi"; fi' _ $$tmp; \
+	rm -f $$tmp
 
 # GB-082 glued-console-line counter (whole-line console atomicity observability).
 T4_GLUED_SELFTEST = t4_glued_selftest
