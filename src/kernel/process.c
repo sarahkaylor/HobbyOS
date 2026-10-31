@@ -2127,7 +2127,12 @@ void process_exit(struct trap_frame *tf) {
   uart_puts(buf);
 
   /* GB-014: name the last user PC we saw trapped, so a program that stops
-     silently reports where it got to instead of just its entry point. */
+     silently reports where it got to instead of just its entry point.
+     GB-142: also log the exit code (regs[0], raw from SYS_EXIT / exit_group) so a
+     normal return 0 and an explicit exit(N) are distinguishable in the serial —
+     native and compat alike, both paths land here.  The EXITPC line count is
+     unchanged (the code is appended, not a new line). */
+  int exit_code = (int)tf->regs[0];
   if (!cur->is_kernel_process) {
     struct kline ku;
     kl_init(&ku);
@@ -2135,11 +2140,13 @@ void process_exit(struct trap_frame *tf) {
     kl_i(&ku, (long)cur->pid);
     kl_s(&ku, " last_user_pc=");
     kl_hex(&ku, (unsigned long)cur->last_user_pc);
+    kl_s(&ku, " code=");
+    kl_hex(&ku, (unsigned long)(unsigned int)exit_code);
     kl_s(&ku, "\n");
     kl_emit(&ku);
   }
 
-  int code = (int)tf->regs[0];
+  int code = exit_code;
 
   if (cur->is_kernel_process) {
     /* Kernel tasks keep the legacy path: FREE + block release, no groups. */
