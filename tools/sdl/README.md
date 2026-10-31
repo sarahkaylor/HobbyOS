@@ -56,6 +56,18 @@ sdl2_static_test  sha256 = dee38e40f70ec82b2aadecb4f215cd59e42d6d7c15f80bfb81e1a
 `file` on the linked app: `ELF 64-bit LSB executable, x86-64, statically linked`.
 `nm` shows musl's `libc_start_main_stage2` and **no** `__libc_start_main_impl`.
 
+The gate **asserts**, rather than prints, the ELF class the loader needs — a PIE
+or dynamically-linked artifact is a failure on exit status, not a line in a log:
+
+```
+readelf -h <app> | grep -q 'Type:.*EXEC'        # non-PIE
+readelf -h <app> | grep -q 'Machine:.*X86-64'
+readelf -l <app> | grep -q 'INTERP'  -> FAIL    # no PT_INTERP (not dynamic)
+```
+
+The cross-dest comparison also fails if either build produced no artifact, so
+two missing files can never compare "IDENTICAL".
+
 ## Remaining halves (not claimed here)
 
 - **/dev/fb0 fbcon video driver integration.** SDL 2.30 dropped the legacy
