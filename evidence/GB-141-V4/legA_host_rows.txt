@@ -1,0 +1,7 @@
+gb019 TIOCGWINSZ     req=0x5413 r=-1 errno=25
+gb019 TCGETS         req=0x5401 r=-1 errno=25
+gb019 F_GETFL        req=0x0003 r=-1 errno=25
+gb019 F_SETFL        req=0x0004 r=-1 errno=25
+gb019 F_GETFL+       req=0x0003 r=-1 errno=25
+gb019 unknown        req=0x9999 r=-1 errno=25
+[GB019] tw=r-1/er25 tc=r-1/er25 gf=r-1/er25 set=r-1 gf2=r-1/nb=1 unk=r-1/er25 fc=r32770 fc2=r0
