@@ -177,7 +177,10 @@ mismatch. Consequences coded into the plan:
   provider, and no charter or prompt offers it as a fallback. The 2026-10-17…10-30 `DEEP`/`FLASH`
   two-tier split survives only in dated log entries as history.
 - **`reasoning_effort` on this server:** `low`, `high`, `xhigh`, `max`, or an integer 1–100.
-  `medium` is rejected with HTTP 400. Deep-class lanes run `--reasoning high`.
+  `medium` is rejected with HTTP 400, and `ultra` is not served either (its ceiling is `max`).
+  **Standing setting (2026-10-31): `max` on every lane** — `agent.reasoning_effort: max` in every
+  VM config and `--reasoning max` on the verifier loops. Sarah's call: the thinking is affordable,
+  so do not lower it without her say-so.
 - **Deep-class work is a classification, not a model.** Planning, re-plan, ABI/architecture design,
   blocked-root-cause after 1 retry and gate verdicts keep the `deep` label and still belong to the
   Coordinator and the farm Verifiers; they run on the same v4.1 Flash endpoint.
@@ -335,7 +338,7 @@ The loop:
   files. Sessions under `tmux` on their VM; transcripts/evidence land on the shared NFS store so
   the Coordinator/planner can read them.
 - **Verifier session** = a second headless session on each farm doing deep-class work on the same
-  model (`--provider llm -m deepseek-v4.1-flash --reasoning high`), same `~/.hermes`, its own
+  model (`--provider llm -m deepseek-v4.1-flash --reasoning max`), same `~/.hermes`, its own
   worktree, kept alive by a `swarm-verify@<agent>` systemd unit (clone of `swarm-driver@` carrying
   the provider flags) — see §11.4/§11.5.
 - Re-plan cadence via `hermes cronjob` (every 12 h) on `swarm-coordinator`.
@@ -694,7 +697,8 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
   `model.base_url=http://llm.localdomain:8000/v1`. `dgx1.localdomain` and provider `dgx` are
   retired (§3.1); no lane may call them.
 - **Reasoning gate:** the server accepts `reasoning_effort` of `low|high|xhigh|max` or an integer
-  1–100, and rejects `medium` with HTTP 400. Deep-class lanes (coordinator, verifiers) send `high`.
+  1–100, and rejects `medium` with HTTP 400 (`ultra` is also unserved: `max` is the ceiling).
+  Every lane — coordinator, workers, verifiers — sends **`max`** (§3.1).
 - **Verified 2026-10-31:** all four agent VMs answer a `hermes chat -q` ping on the `llm` provider
   and the reply's `model` field is `deepseek-v4.1-flash`; `dgx1` appears in no config, charter,
   prompt or driver flag.
@@ -750,7 +754,7 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 | **Sarah's directive** | The swarm uses **`http://llm.localdomain:8000/v1` only** going forward. That box now serves **DeepSeek V4.1 Flash** despite listing the model as v4 Flash — faster and more capable than what it replaced — so all work uses it. |
 | **What that retired** | The `DEEP`/`FLASH` two-tier split (§3.1): `dgx1.localdomain:8000`, provider `dgx`, and the `--provider dgx -m deepseek-v4.1-flash` flags on the verifier loops. `deep` stays a **work-class label** (planning/design/root-cause/gate verdicts), not a different model. |
 | **Fleet** | All six VMs were stopped; booted in order (ticketing 144 → coordinator 143 → farms 140-142 → dashboard 145) and every swarm unit came back `active`. |
-| **Wired on every agent VM (140-143)** | `providers.llm` → `llm.localdomain:8000/v1`; `model.provider=llm`, `model.default=deepseek-v4.1-flash`; `providers.dgx` removed; `/opt/swarm/MODEL-POLICY.txt` added as the canonical copy the charters point at; charters (`.txt`, `.continue.txt`, `.verify.*`, `.review.*`) and `healthcheck.prompt.txt` de-`dgx`'d; `swarm-driver.py` `DEEP` lanes now launch `--provider llm -m deepseek-v4.1-flash --reasoning high`. |
+| **Wired on every agent VM (140-143)** | `providers.llm` → `llm.localdomain:8000/v1`; `model.provider=llm`, `model.default=deepseek-v4.1-flash`; `providers.dgx` removed; `/opt/swarm/MODEL-POLICY.txt` added as the canonical copy the charters point at; charters (`.txt`, `.continue.txt`, `.verify.*`, `.review.*`) and `healthcheck.prompt.txt` de-`dgx`'d; `swarm-driver.py` `DEEP` lanes now launch `--provider llm -m deepseek-v4.1-flash --reasoning max`; `agent.reasoning_effort: max` on all four VMs (Sarah: raise it, we can afford it — `max` is this server's ceiling, `ultra` is rejected). |
 | **Model-id note** | `deepseek-v4-flash` still answers on this endpoint — it is an **alias for the same v4.1 weights**, not a different or weaker model. New config uses `deepseek-v4.1-flash`. |
 
 **2026-10-28 — coordinator pass: the "board is static" verdict was wrong about its cause. The lanes were empty because *claims* were holding cards, and one `In Review` card had no gate card at all.**
