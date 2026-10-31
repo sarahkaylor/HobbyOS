@@ -585,7 +585,8 @@ final list.
 | Licensing (DOOM shareware WAD, game ROMs, TA content) | Ship only freely-distributable assets; document provenance per title |
 | Legacy `-mgeneral-regs-only`/parity regressions | two-arch gate; kernel constraint checklist in review |
 
-**Open (Sarah or `decision` tickets):** final endpoint/IP mapping for the two model tiers;
+**Open (Sarah or `decision` tickets):** final IP mapping for the single model endpoint
+(`llm.localdomain:8000`; the two-tier split is retired — §3.1);
 whether audio is in-scope this month; `ARCH=intel` promotion stakes for ARM primary target
 (compat is intel-only by design — no ARM ABI change); optional nested-KVM enablement.
 
@@ -756,6 +757,7 @@ Companion to §5 — the concrete "how to run it" given the built fleet (§3.3) 
 | **Fleet** | All six VMs were stopped; booted in order (ticketing 144 → coordinator 143 → farms 140-142 → dashboard 145) and every swarm unit came back `active`. |
 | **Wired on every agent VM (140-143)** | `providers.llm` → `llm.localdomain:8000/v1`; `model.provider=llm`, `model.default=deepseek-v4.1-flash`; `providers.dgx` removed; `/opt/swarm/MODEL-POLICY.txt` added as the canonical copy the charters point at; charters (`.txt`, `.continue.txt`, `.verify.*`, `.review.*`) and `healthcheck.prompt.txt` de-`dgx`'d; `swarm-driver.py` `DEEP` lanes now launch `--provider llm -m deepseek-v4.1-flash --reasoning max`; `agent.reasoning_effort: max` on all four VMs (Sarah: raise it, we can afford it — `max` is this server's ceiling, `ultra` is rejected). |
 | **Model-id note** | `deepseek-v4-flash` still answers on this endpoint — it is an **alias for the same v4.1 weights**, not a different or weaker model. New config uses `deepseek-v4.1-flash`. |
+| **Terminology swept off the board** | `DEEP`/`FLASH` are retired as *model* names: label descriptions (`deep`/`verify`/`debug`) rewritten, the 41 open cards' `\| Model tier \|` row replaced with `\| Class \| deep\|worker \|`, and `tools/board/import_seed.py` + the `wrev` minting instruction changed so no new card emits a model tier. `[DEEP]` in a pre-2026-10-31 title means the work class. |
 
 **2026-10-28 — coordinator pass: the "board is static" verdict was wrong about its cause. The lanes were empty because *claims* were holding cards, and one `In Review` card had no gate card at all.**
 
