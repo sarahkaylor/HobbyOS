@@ -1,0 +1,17 @@
+=== T3 (intel): build ===
+=== T3 (intel): run (deadline 900s, log /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb142v/evidence/GB-142-V/t3_intel_1f22f41b.log) ===
+T3_intel: note — halt marker found after make exited (poll raced the exit)
+T3_intel: 13698 console lines, 7 FAIL lines, 8 user memory fault records across 7 processes, 85 programs exited, halted=1
+T3_intel: FAIL — 5 FATAL kernel-mode fault line(s): the guest halted because the kernel crashed, not because the wave completed
+T3_intel: FAIL — 7 FAIL line(s); first 20:
+2659:[SIGTEST] FAIL pipe() for the spawn_ex fdmap got=-1 want=0
+2660:[SIGTEST] FAIL open kept fd got=0 want=1
+2661:[SIGTEST] FAIL open cloexec fd got=0 want=1
+2804:[SIGTEST] FAIL spawn_ex(SPAWNEX.BIN) returns a pid got=0 want=1
+4078:[SIGTEST] TESTS FINISHED WITH FAILURES
+11457:  TORTURE poll-many-fds: FAIL
+11470:TORTURE FAILED: 1
+T3_intel EXIT=1
+T3_LOG=/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb142v/evidence/GB-142-V/t3_intel_1f22f41b.log
+T3_ARCH=intel
+T3_FAILS=7
