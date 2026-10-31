@@ -27,11 +27,18 @@ if [ -f "$WAD" ]; then
 fi
 STAGE="$STAGE && mcopy -o -i \"\$ROOT/disk.img\" \"$CFG\" ::WAVE.CFG"
 
-echo "=== booting intel guest (deadline ${TIMEOUT_S}s), log $OUT"
+echo "=== booting intel guest (deadline ${TIMEOUT_S}s), log $OUT ==="
 T3_TIMEOUT="$TIMEOUT_S" T3_STAGE="$STAGE" bash "$ROOT/tools/t3_tier.sh" intel > "$OUT" 2>&1
 RC=$?
-echo "=== tier exit: $RC"
+# GB-140: the guest console is T3_LOG, NOT the captured stdout (which holds the
+# verdict summary).  Derive the console path from the machine contract, fail
+# loudly if the tier did not print it — never grep $OUT for program markers.
+CONSOLE="$(sed -n 's/^T3_LOG=//p' "$OUT" | tail -1)"
+if [ -z "$CONSOLE" ] || [ ! -r "$CONSOLE" ]; then
+  echo "t5_doom_manifest: FAIL — t3_tier did not print a readable T3_LOG (GB-140 clause 3)"; exit 1
+fi
+echo "=== tier exit: $RC (console $CONSOLE)"
 echo "=== verdict line:"
 grep -aE "T3_intel: [0-9]+ console" "$OUT" | tail -1
 echo "=== guest evidence:"
-grep -aE "\[WAVE-TRY\] DOOM|\[ARRIVED\] DOOM|\[KERNEL\] pid=[0-9]+ \(DOOM|DOOM.*(IWAD|WAD|exit|fault)|memory fault|System halt|\[WAVE-CFG\]|manifest" "$OUT" | tail -20
+grep -aE "\[WAVE-TRY\] DOOM|\[ARRIVED\] DOOM|\[KERNEL\] pid=[0-9]+ \(DOOM|DOOM.*(IWAD|WAD|exit|fault)|memory fault|System halt|\[WAVE-CFG\]|manifest" "$CONSOLE" | tail -20

@@ -23,6 +23,22 @@
 # Env:    T3_TIMEOUT (default 2700 s), T3_LOG (default obj/t3_<arch>.log)
 set -euo pipefail
 
+# GB-140: the machine-readable console contract.  A gate that needs the guest
+# console MUST derive the path from T3_LOG, never from the captured stdout (the
+# stdout verdict summary does not contain program markers; grepping it reports a
+# running member as "never arrived" — GB-138-V3 went RED on a working feature for
+# exactly that reason).  Prints via EXIT trap so it is the LAST stdout line on
+# EVERY exit path (run and police).  Defined at the top so police mode (which
+# exits before the run path) still emits it.
+_report_contract() {
+  [ -n "${LOG:-}" ] || return 0
+  echo "T3_LOG=$LOG"
+  echo "T3_ARCH=${ARCH:-}"
+  echo "T3_FAILS=${FAIL_LINES:-0}"
+}
+_exit_hook() { cleanup 2>/dev/null || true; _report_contract; }
+trap '_exit_hook' EXIT
+
 ARCH_ARG="${1:-arm}"
 POLICE_ONLY=""
 if [ "$ARCH_ARG" = "police" ]; then
@@ -269,12 +285,11 @@ fi
 make -o disk.img ARCH="$ARCH" MODE=test run ${T3_SMP:+QEMU_SMP=$T3_SMP} QEMU_ARGS="-display none ${T3_QEMU_ARGS:-}" >>"$LOG" 2>&1 &
 MAKE_PID=$!
 cleanup() {
+  [ -n "${MAKE_PID:-}" ] || return 0
   pkill -P "$MAKE_PID" 2>/dev/null || true
   kill "$MAKE_PID" 2>/dev/null || true
   wait "$MAKE_PID" 2>/dev/null || true
 }
-trap cleanup EXIT
-
 # GB-057 (Coordinator 2026-10-24): the post-freeze sample as a FUNCTION, called
 # the moment a stall marker appears -- on a freeze QEMU is still alive then, and
 # by the end of the wait loop it usually is not (measured: three passes of a
@@ -403,7 +418,7 @@ if [ "$probed" = 0 ] && ! grep -aq "System halt" "$LOG"; then
 fi
 
 cleanup
-trap - EXIT
+trap '_report_contract' EXIT
 
 # Re-read the log: the guest can halt and make can exit between two polls, so
 # the loop above may leave `halted` at 0 for a run that DID halt (observed on
