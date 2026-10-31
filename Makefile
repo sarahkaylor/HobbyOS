@@ -3832,6 +3832,16 @@ T4_GLUED_SELFTEST = t4_glued_selftest
 $(T4_GLUED_SELFTEST): tools/gate/t4_glued.sh
 	@bash tools/gate/t4_glued.sh --self-test
 
+# GB-140 t3_tier console-contract gate: prove a gate DERIVES the console path from
+# the T3_LOG machine line (never greps the captured summary), fails LOUDLY when a
+# T3_LOG is absent/unreadable, and that the real tier actually emits it.  The trap
+# this blocks: t3_tier writes the guest console to T3_LOG and the summary to
+# stdout; grepping stdout reported a RUNNING member as "never arrived" — GB-138-V3
+# went RED on a working feature for exactly that (the -V -> GB-140 path).
+T4_T3LOG_SELFTEST = t4_t3log_selftest
+$(T4_T3LOG_SELFTEST): tools/gate/t4_t3log.sh tools/t3_tier.sh
+	@bash tools/gate/t4_t3log.sh --self-test
+
 # GB-086 clause-3 gate: boot the broken-select control (POLLBRK.BIN) and assert
 # the >=85ms select-timeout check FAILs (elapsed_ms=0, POLLTST FAILED) with the
 # guest halted.  A control that PASSES fails the gate — proves the gate cannot
