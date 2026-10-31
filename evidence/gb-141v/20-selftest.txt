@@ -1,0 +1,6 @@
+=== t4_gb019_ioctl self-test ===
+  OK — 5 dispatch rows present (x5)
+  OK — TIOCGWINSZ non-tty -> ENOTTY (clause 3)
+  OK — Linux-ABI proc carried PROC_FLAG_LINUX_ABI
+  OK — F_GETFL non-socket returns O_*, not -ENOTSOCK (clause 3)
+t4_gb019_ioctl self-test: 4/4

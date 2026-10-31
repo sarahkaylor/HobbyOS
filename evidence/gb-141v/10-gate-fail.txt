@@ -1,0 +1,11 @@
+t4_gb019_ioctl: building /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb141v/obj/intel/gb019_ioctl.elf...
+=== t4_gb019_ioctl: booting intel guest with GB019-only manifest (GB-019-V7) ===
+=== console rows (T3_LOG=/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb141v/obj/t3_intel.log) ===
+t4_gb019_ioctl: FAIL — <5 dispatch rows
+t4_gb019_ioctl: FAIL — TIOCGWINSZ non-tty != -ENOTTY
+t4_gb019_ioctl: FAIL — TCGETS != -ENOTTY
+t4_gb019_ioctl: FAIL — F_GETFL not a stored O_* value
+t4_gb019_ioctl: FAIL — unknown request != -ENOTTY
+t4_gb019_ioctl: FAIL — fcntl(72) F_GETFL not O_* (clause 4)
+t4_gb019_ioctl: FAIL
+GATE_RC=1
