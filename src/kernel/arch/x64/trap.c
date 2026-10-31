@@ -104,8 +104,8 @@ static void dbg_resume(const char *tag, uint64_t v) {
    RPL==3 returns are user returns, and only those are judged. */
 void trap_exit_frame_check(uint64_t *frame) {
   extern volatile uint64_t trap_exit_bad_rip_seen;
-  extern void uart_puts_raw(const char *s);
-  extern void uart_print_hex_raw(uint64_t v);
+  extern void panic_puts(const char *s);
+  extern void panic_print_hex(uint64_t v);
   uint64_t rip = frame[0];
   uint64_t cs = frame[1];
   int implausible;
@@ -130,17 +130,17 @@ void trap_exit_frame_check(uint64_t *frame) {
   if (trap_exit_bad_rip_seen >= 20)
     return;
   trap_exit_bad_rip_seen++;
-  uart_puts_raw("[BADIRET] about to return to an implausible user RIP=");
-  uart_print_hex_raw(rip);
-  uart_puts_raw(" cs=");
-  uart_print_hex_raw(cs);
-  uart_puts_raw(" rsp=");
-  uart_print_hex_raw(frame[3]);
-  uart_puts_raw(" eflags=");
-  uart_print_hex_raw(frame[2]);
-  uart_puts_raw(" cpu=");
-  uart_print_hex_raw((uint64_t)get_cpuid());
-  uart_puts_raw("\n");
+  panic_puts("[BADIRET] about to return to an implausible user RIP=");
+  panic_print_hex(rip);
+  panic_puts(" cs=");
+  panic_print_hex(cs);
+  panic_puts(" rsp=");
+  panic_print_hex(frame[3]);
+  panic_puts(" eflags=");
+  panic_print_hex(frame[2]);
+  panic_puts(" cpu=");
+  panic_print_hex((uint64_t)get_cpuid());
+  panic_puts("\n");
 }
 
 /* GB-057: bounded count for the pre-iretq frame report (a rare event, not a
@@ -2118,7 +2118,7 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     }
     pb[pi++] = '\n';
     pb[pi] = 0;
-    uart_puts_raw(pb);
+    panic_puts(pb);
     for (;;)
       ;
   }
@@ -2538,8 +2538,8 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
   extern volatile uint64_t lock_wait_caller2[MAX_CPUS];
   /* Stall-watchdog prints must be able to diagnose a wedge in uart_lock
      itself, so they go out through the lock-free raw sink. */
-  extern void uart_puts_raw(const char *s);
-  extern void uart_print_hex_raw(uint64_t v);
+  extern void panic_puts(const char *s);
+  extern void panic_print_hex(uint64_t v);
   extern void print_int_raw(int val);
   extern volatile uint64_t cpu_heartbeat_ms[];
   struct process *cur = current_process();
@@ -2584,131 +2584,131 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
     return;
   }
   wd_next_report_ms = now + WATCHDOG_COOLDOWN_MS;
-  uart_puts_raw("[WATCHDOG] console silent for more than 20s\n");
+  panic_puts("[WATCHDOG] console silent for more than 20s\n");
   for (uint32_t c = 0; c < MAX_CPUS; c++) {
-    uart_puts_raw("  CPU");
+    panic_puts("  CPU");
     print_int_raw((int)c);
-    uart_puts_raw(" rip=");
-    uart_print_hex_raw(wd_last_seen_rip[c]);
-    uart_puts_raw(" rflags=");
-    uart_print_hex_raw(wd_last_seen_rflags[c]);
+    panic_puts(" rip=");
+    panic_print_hex(wd_last_seen_rip[c]);
+    panic_puts(" rflags=");
+    panic_print_hex(wd_last_seen_rflags[c]);
     if (wd_last_seen_pid[c] >= 0 && wd_last_vector[c] != 0) {
-      uart_puts_raw(" vec=");
+      panic_puts(" vec=");
       print_int_raw((int)wd_last_vector[c]);
-      uart_puts_raw(" err=");
-      uart_print_hex_raw(wd_last_err[c]);
+      panic_puts(" err=");
+      panic_print_hex(wd_last_err[c]);
       if (wd_last_cr2[c]) {
-        uart_puts_raw(" cr2=");
-        uart_print_hex_raw(wd_last_cr2[c]);
+        panic_puts(" cr2=");
+        panic_print_hex(wd_last_cr2[c]);
       }
     }
-    uart_puts_raw(" pid=");
+    panic_puts(" pid=");
     print_int_raw(wd_last_seen_pid[c]);
     /* GB-057: the resume mark the CPU itself wrote immediately before
        enter_user_space.  If this names a different pid than the watchdog's
        `pid=`, the RIP above is a stale trap frame and every "parked in the
        frame copy" conclusion drawn from it is an artefact. */
     if (resume_mark_pid[c] != 0) {
-      uart_puts_raw(" resume_pid=");
+      panic_puts(" resume_pid=");
       print_int_raw((int)resume_mark_pid[c]);
-      uart_puts_raw(" resume_sp=");
-      uart_print_hex_raw(resume_mark_sp[c]);
+      panic_puts(" resume_sp=");
+      panic_print_hex(resume_mark_sp[c]);
     }
-    uart_puts_raw(" age_ms=");
+    panic_puts(" age_ms=");
     print_int_raw((int)(now - wd_last_seen_ms[c]));
     if (core_in_syscall[c] != 0) {
-      uart_puts_raw(" syscall=");
+      panic_puts(" syscall=");
       print_int_raw(core_in_syscall[c]);
     }
     if (lock_wait_addr[c] != 0) {
-      uart_puts_raw(" wait_lock=");
-      uart_print_hex_raw(lock_wait_addr[c]);
-      uart_puts_raw(" caller=");
-      uart_print_hex_raw(lock_wait_caller[c]);
+      panic_puts(" wait_lock=");
+      panic_print_hex(lock_wait_addr[c]);
+      panic_puts(" caller=");
+      panic_print_hex(lock_wait_caller[c]);
       if (lock_wait_caller2[c] != 0) {
-        uart_puts_raw(" caller2=");
-        uart_print_hex_raw(lock_wait_caller2[c]);
+        panic_puts(" caller2=");
+        panic_print_hex(lock_wait_caller2[c]);
       }
     }
-    uart_puts_raw("\n");
+    panic_puts("\n");
   }
 
   /* Same dump on COM2 — a side-channel that never interleaves with the
      console, so the stall forensics come out byte-exact. */
-  extern void uart_puts_raw2(const char *s);
-  extern void uart_print_hex_raw2(uint64_t v);
+  extern void panic_puts2(const char *s);
+  extern void panic_print_hex2(uint64_t v);
   extern void print_int_raw2(int val);
   extern void wd_dump_proc_table(void);
-  uart_puts_raw2("[WD2] stall dump\n");
+  panic_puts2("[WD2] stall dump\n");
   wd_dump_proc_table();
   for (uint32_t c = 0; c < MAX_CPUS; c++) {
-    uart_puts_raw2(" CPU");
+    panic_puts2(" CPU");
     print_int_raw2((int)c);
-    uart_puts_raw2(" rip=");
-    uart_print_hex_raw2(wd_last_seen_rip[c]);
-    uart_puts_raw2(" pid=");
+    panic_puts2(" rip=");
+    panic_print_hex2(wd_last_seen_rip[c]);
+    panic_puts2(" pid=");
     print_int_raw2(wd_last_seen_pid[c]);
-    uart_puts_raw2(" tks=");
+    panic_puts2(" tks=");
     print_int_raw2((int)wd_ticks[c]);
-    uart_puts_raw2(" cs=");
-    uart_print_hex_raw2(wd_last_frame[c].cs);
-    uart_puts_raw2(" fl=");
-    uart_print_hex_raw2(wd_last_frame[c].spsr);
-    uart_puts_raw2(" age=");
+    panic_puts2(" cs=");
+    panic_print_hex2(wd_last_frame[c].cs);
+    panic_puts2(" fl=");
+    panic_print_hex2(wd_last_frame[c].spsr);
+    panic_puts2(" age=");
     print_int_raw2((int)(now - wd_last_seen_ms[c]));
-    uart_puts_raw2(" vec=");
+    panic_puts2(" vec=");
     print_int_raw2((int)wd_last_frame[c].vector);
     if (lock_wait_addr[c] != 0) {
-      uart_puts_raw2(" wl=");
-      uart_print_hex_raw2(lock_wait_addr[c]);
-      uart_puts_raw2(" cl=");
-      uart_print_hex_raw2(lock_wait_caller[c]);
+      panic_puts2(" wl=");
+      panic_print_hex2(lock_wait_addr[c]);
+      panic_puts2(" cl=");
+      panic_print_hex2(lock_wait_caller[c]);
       if (lock_wait_caller2[c] != 0) {
-        uart_puts_raw2(" c2=");
-        uart_print_hex_raw2(lock_wait_caller2[c]);
+        panic_puts2(" c2=");
+        panic_print_hex2(lock_wait_caller2[c]);
       }
     }
-    uart_puts_raw2("\n");
+    panic_puts2("\n");
     /* Full frame regs from the stored last frame (the mapping of
        regs[0..9] := rax..r9 as pushed by the trap wrapper). */
-    uart_puts_raw2("   fr:");
+    panic_puts2("   fr:");
     for (int r = 0; r < 10; r++) {
-      uart_puts_raw2(" ");
-      uart_print_hex_raw2(wd_last_frame[c].regs[r]);
+      panic_puts2(" ");
+      panic_print_hex2(wd_last_frame[c].regs[r]);
     }
-    uart_puts_raw2("\n");
+    panic_puts2("\n");
     /* The last interrupt's kernel stack region (below the frame) — the
        caller chain of what the core was actually executing. */
     uint64_t frp = wd_last_tfp[c];
-    uart_puts_raw2("  deep:");
+    panic_puts2("  deep:");
     if (frp >= 0x70000000ULL && frp < 0x75000000ULL) {
       for (uint64_t a = frp + 8; a < frp + 8 + 96; a += 8) {
         uint64_t v = *(volatile uint64_t *)a;
-        uart_puts_raw2(" ");
-        uart_print_hex_raw2(v);
+        panic_puts2(" ");
+        panic_print_hex2(v);
       }
     }
-    uart_puts_raw2("\n");
+    panic_puts2("\n");
     /* Full stack chain: every .text return address, deepest first.
        Guard against cores that never powered on (kernel_stack == 0): the
        loop start (top - 8) would dereference negative addresses and fault
        the very watchdog that is supposed to report the stall. */
     uint64_t top = cpu_locals[c].kernel_stack;
     int hits = 0;
-    uart_puts_raw2("  stk");
+    panic_puts2("  stk");
     print_int_raw2((int)c);
-    uart_puts_raw2(":");
+    panic_puts2(":");
     if (watchdog_stack_scan_ok(top)) {
       for (uint64_t a = top - 8; a > (top - 24576) && hits < 20; a -= 8) {
         uint64_t v = *(volatile uint64_t *)a;
         if (v >= 0x70000000ULL && v < 0x70080000ULL) {
-          uart_puts_raw2(" ");
-          uart_print_hex_raw2(v);
+          panic_puts2(" ");
+          panic_print_hex2(v);
           hits++;
         }
       }
     }
-    uart_puts_raw2("\n");
+    panic_puts2("\n");
   }
 
   /* Deep-freeze forensics: for any core silent >60s, scan its kernel stack for
@@ -2720,37 +2720,37 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
     /* Same guard as the WD2 stall dump: a core that never powered on has
        kernel_stack == 0, and the scan below would read (top - 8) = -8. */
     if (!watchdog_stack_scan_ok(top)) {
-      uart_puts_raw("  CSTK cpu");
+      panic_puts("  CSTK cpu");
       print_int_raw((int)c);
-      uart_puts_raw(": (uninitialized kstack, skip)\n");
+      panic_puts(": (uninitialized kstack, skip)\n");
       continue;
     }
     uint64_t last_hit = 0;
     int hits = 0;
-    uart_puts_raw("  CSTK cpu");
+    panic_puts("  CSTK cpu");
     print_int_raw((int)c);
-    uart_puts_raw(":");
+    panic_puts(":");
     for (uint64_t a = top - 8; a > (top - 24576) && hits < 16; a -= 8) {
       uint64_t v = *(volatile uint64_t *)a;
       if (v >= 0x70000000ULL && v < 0x70080000ULL) {
-        uart_puts_raw(" ");
-        uart_print_hex_raw(v);
+        panic_puts(" ");
+        panic_print_hex(v);
         last_hit = a;
         hits++;
       }
     }
-    uart_puts_raw("\n");
+    panic_puts("\n");
     if (last_hit) {
-      uart_puts_raw("  CDATA cpu");
+      panic_puts("  CDATA cpu");
       print_int_raw((int)c);
-      uart_puts_raw(" cur~=");
-      uart_print_hex_raw(last_hit);
-      uart_puts_raw(":");
+      panic_puts(" cur~=");
+      panic_print_hex(last_hit);
+      panic_puts(":");
       for (int q = 0; q < 12; q++) {
-        uart_puts_raw(" ");
-        uart_print_hex_raw(*(volatile uint64_t *)(last_hit + 8 * q));
+        panic_puts(" ");
+        panic_print_hex(*(volatile uint64_t *)(last_hit + 8 * q));
       }
-      uart_puts_raw("\n");
+      panic_puts("\n");
     }
   }
 }
@@ -2837,26 +2837,26 @@ static void general_interrupt_inner(struct trap_frame *tf) {
      CPU held is recoverable and other cores don't spin behind it forever), and
      stop THIS CPU rather than run an unknown-vector path on a bogus frame. */
   {
-    extern void uart_puts_raw(const char *s);
-    extern void uart_print_hex_raw(uint64_t v);
+    extern void panic_puts(const char *s);
+    extern void panic_print_hex(uint64_t v);
     extern void print_int_raw(int val);
     extern void cpu_halt_record(uint32_t cpu);
     uint64_t frame_cs = tf->cs;
     int bad_vec = ((uint64_t)tf->vector > 0xFFu);
     int bad_cs  = (frame_cs != 0x08u && frame_cs != 0x1Bu);
     if (bad_vec || bad_cs) {
-      uart_puts_raw("[TORNFRAME] FAIL - interrupt/fault handler read a torn frame: vector=");
+      panic_puts("[TORNFRAME] FAIL - interrupt/fault handler read a torn frame: vector=");
       print_int_raw((int)(uint64_t)tf->vector);
-      uart_puts_raw(" rip="); uart_print_hex_raw((uint64_t)tf->elr);
-      uart_puts_raw(" cs=");   uart_print_hex_raw(frame_cs);
-      uart_puts_raw(" (impossible vector="); print_int_raw((int)(uint64_t)tf->vector);
-      uart_puts_raw(" or invalid cs; a real gate entry pushes cs 0x08/0x1B\n");
-      uart_puts_raw("\n");
+      panic_puts(" rip="); panic_print_hex((uint64_t)tf->elr);
+      panic_puts(" cs=");   panic_print_hex(frame_cs);
+      panic_puts(" (impossible vector="); print_int_raw((int)(uint64_t)tf->vector);
+      panic_puts(" or invalid cs; a real gate entry pushes cs 0x08/0x1B\n");
+      panic_puts("\n");
       cpu_halt_record(cpu);
       extern int spinlock_release_if_held_by_me(spinlock_t *lock);
       extern spinlock_t proc_lock;
       if (spinlock_release_if_held_by_me(&proc_lock))
-        uart_puts_raw("[KERNEL] released proc_lock before halting (GB-060)\n");
+        panic_puts("[KERNEL] released proc_lock before halting (GB-060)\n");
       while (1);
     }
   }
@@ -3074,71 +3074,75 @@ static void general_interrupt_inner(struct trap_frame *tf) {
          may be garbage, so the stack window below is range-guarded: an
          unchecked dereference of tf[38] was itself faulting (#PF -> #DF
          -> CPU reset) before the dump could finish. */
-      extern void uart_puts_raw(const char *s);
-      extern void uart_print_hex_raw(uint64_t v);
+      extern void panic_puts(const char *s);
+      extern void panic_print_hex(uint64_t v);
       extern void print_int_raw(int val);
-      uart_puts_raw("[KERNEL] FATAL: Exception in Kernel Mode! Vector: ");
+      extern void panic_enter(void);
+      extern void panic_leave(void);
+      panic_enter(); /* GB-097: this path never returns; the raw sink is legal here */
+      panic_puts("[KERNEL] FATAL: Exception in Kernel Mode! Vector: ");
       print_int_raw((int)tf->vector);
-      uart_puts_raw(" Error Code: ");
-      uart_print_hex_raw(tf->error_code);
-      uart_puts_raw("\n");
-      uart_puts_raw("  RIP: ");
-      uart_print_hex_raw(tf->elr);
-      uart_puts_raw("  RSP: ");
-      uart_print_hex_raw(((uint64_t*)tf)[38]);
-      uart_puts_raw("\n");
-      uart_puts_raw("  CS:  ");
-      uart_print_hex_raw(tf->cs);
-      uart_puts_raw("  SS:  ");
-      uart_print_hex_raw(tf->ss);
-      uart_puts_raw("  RFLAGS: ");
-      uart_print_hex_raw(tf->spsr);
-      uart_puts_raw("\n");
-      uart_puts_raw("  RAX: ");
-      uart_print_hex_raw(tf->regs[0]);
-      uart_puts_raw("  RBX: ");
-      uart_print_hex_raw(tf->regs[1]);
-      uart_puts_raw("  RCX: ");
-      uart_print_hex_raw(tf->regs[2]);
-      uart_puts_raw("  RDX: ");
-      uart_print_hex_raw(tf->regs[3]);
-      uart_puts_raw("\n");
-      uart_puts_raw("  RDI: ");
-      uart_print_hex_raw(tf->regs[5]);
-      uart_puts_raw("  RSI: ");
-      uart_print_hex_raw(tf->regs[4]);
-      uart_puts_raw("  RBP: ");
-      uart_print_hex_raw(tf->regs[6]);
-      uart_puts_raw("\n");
-      uart_puts_raw("  ERR: ");
-      uart_print_hex_raw(tf->error_code);
-      uart_puts_raw("  R8:  ");
-      uart_print_hex_raw(tf->regs[7]);
-      uart_puts_raw("  R9:  ");
-      uart_print_hex_raw(tf->regs[8]);
-      uart_puts_raw("  R10: ");
-      uart_print_hex_raw(tf->regs[9]);
-      uart_puts_raw("\n");
-      uart_puts_raw("  CPU: ");
+      panic_puts(" Error Code: ");
+      panic_print_hex(tf->error_code);
+      panic_puts("\n");
+      panic_puts("  RIP: ");
+      panic_print_hex(tf->elr);
+      panic_puts("  RSP: ");
+      panic_print_hex(((uint64_t*)tf)[38]);
+      panic_puts("\n");
+      panic_puts("  CS:  ");
+      panic_print_hex(tf->cs);
+      panic_puts("  SS:  ");
+      panic_print_hex(tf->ss);
+      panic_puts("  RFLAGS: ");
+      panic_print_hex(tf->spsr);
+      panic_puts("\n");
+      panic_puts("  RAX: ");
+      panic_print_hex(tf->regs[0]);
+      panic_puts("  RBX: ");
+      panic_print_hex(tf->regs[1]);
+      panic_puts("  RCX: ");
+      panic_print_hex(tf->regs[2]);
+      panic_puts("  RDX: ");
+      panic_print_hex(tf->regs[3]);
+      panic_puts("\n");
+      panic_puts("  RDI: ");
+      panic_print_hex(tf->regs[5]);
+      panic_puts("  RSI: ");
+      panic_print_hex(tf->regs[4]);
+      panic_puts("  RBP: ");
+      panic_print_hex(tf->regs[6]);
+      panic_puts("\n");
+      panic_puts("  ERR: ");
+      panic_print_hex(tf->error_code);
+      panic_puts("  R8:  ");
+      panic_print_hex(tf->regs[7]);
+      panic_puts("  R9:  ");
+      panic_print_hex(tf->regs[8]);
+      panic_puts("  R10: ");
+      panic_print_hex(tf->regs[9]);
+      panic_puts("\n");
+      panic_puts("  CPU: ");
       print_int_raw((int)get_cpuid());
       struct process *curproc = current_process();
-      uart_puts_raw("  pid: ");
+      panic_puts("  pid: ");
       print_int_raw(curproc ? curproc->pid : -1);
-      uart_puts_raw("\n");
+      panic_puts("\n");
       /* Raw stack window: even when RIP is garbage, the return addresses
          on the stack tell where the fault came from. */
       uint64_t fsp = ((uint64_t*)tf)[38];
       if (fsp >= 0x00000000ULL && fsp < 0x80000000ULL) {
         for (int si = 0; si < 16; si++) {
-          uart_puts_raw("  STACK[");
+          panic_puts("  STACK[");
           print_int_raw(si);
-          uart_puts_raw("]: ");
-          uart_print_hex_raw(((volatile uint64_t *)fsp)[si]);
-          uart_puts_raw("\n");
+          panic_puts("]: ");
+          panic_print_hex(((volatile uint64_t *)fsp)[si]);
+          panic_puts("\n");
         }
       } else {
-        uart_puts_raw("  STACK: skipped (RSP outside identity-mapped RAM)\n");
+        panic_puts("  STACK: skipped (RSP outside identity-mapped RAM)\n");
       }
+      panic_leave(); /* GB-097: the dump is over; anything after here returns */
       /* WK-3 (draft 0007, x64 mirror of the ARM EL1 fix): a kernel-mode
          #PF (vector 14) whose faulting address references USER address
          space while a process is current is normally the process's bug
@@ -3180,15 +3184,15 @@ static void general_interrupt_inner(struct trap_frame *tf) {
           }
           int kpf_looping = (kpf_n > 8);
           if (kpf_n == 9) {
-            uart_puts_raw("[KPFLOOP] kernel-mode #PF repeating: cpu=");
+            panic_puts("[KPFLOOP] kernel-mode #PF repeating: cpu=");
             print_int_raw((int)kc);
-            uart_puts_raw(" cr2=");
-            uart_print_hex_raw(kcr2);
-            uart_puts_raw(" rip=");
-            uart_print_hex_raw(tf->elr);
-            uart_puts_raw(" pid=");
+            panic_puts(" cr2=");
+            panic_print_hex(kcr2);
+            panic_puts(" rip=");
+            panic_print_hex(tf->elr);
+            panic_puts(" pid=");
             print_int_raw(cur ? (int)cur->pid : -1);
-            uart_puts_raw(" -> killing, the mapping is not advancing\n");
+            panic_puts(" -> killing, the mapping is not advancing\n");
           }
           if (cur->as && !kpf_looping) {
             /* vm_handle_fault may do device I/O; the write-fallback to a
@@ -3243,9 +3247,9 @@ static void general_interrupt_inner(struct trap_frame *tf) {
               return; /* PTE live; iretq retries the faulting instruction */
             }
           }
-          uart_puts_raw("[KERNEL] Kernel-mode #PF in user address space -> killing pid=");
+          panic_puts("[KERNEL] Kernel-mode #PF in user address space -> killing pid=");
           print_int_raw(cur->pid);
-          uart_puts_raw("\n");
+          panic_puts("\n");
           process_fault_exit(tf, 11); /* SIGSEGV status byte */
           /* process_fault_exit -> process_exit -> schedule() never
              returns (it resumes another process or idles forever). */
@@ -3261,17 +3265,17 @@ static void general_interrupt_inner(struct trap_frame *tf) {
          The raw sink takes no lock (it cannot deadlock the console it is
          reporting on), so this costs nothing on the happy path and names the
          fault for whoever reads the log next. */
-      uart_puts_raw("[KERNEL] FATAL kernel-mode fault, halting this CPU: vector=");
+      panic_puts("[KERNEL] FATAL kernel-mode fault, halting this CPU: vector=");
       print_int_raw((int)tf->vector);
-      uart_puts_raw(" rip=");
-      uart_print_hex_raw((uint64_t)tf->elr);
-      uart_puts_raw(" cr2=");
+      panic_puts(" rip=");
+      panic_print_hex((uint64_t)tf->elr);
+      panic_puts(" cr2=");
       {
         uint64_t fatal_cr2;
         __asm__ volatile("mov %%cr2, %0" : "=r"(fatal_cr2));
-        uart_print_hex_raw(fatal_cr2);
+        panic_print_hex(fatal_cr2);
       }
-      uart_puts_raw(" pid=");
+      panic_puts(" pid=");
       print_int_raw(cur ? cur->pid : -1);
       /* GB-069 discriminator: a #PF at cr2=0x1FC001008 lands INSIDE the 2 MiB page
          cpu_pd7[480] installs (0x9B = P|RW|PWT|PCD|PS, VA 0x1FC000000-0x1FDFFFFF), so
@@ -3279,20 +3283,20 @@ static void general_interrupt_inner(struct trap_frame *tf) {
          PD-entry reuse, a wrong CR3, and a protection fault; these fields name which.
          err bit0=P (0 = not present), bit1=W/R, bit2=U/S.  pd480 should still equal
          (phys|0x9B) for the BAR page to exist in this table. */
-      uart_puts_raw(" err=");
+      panic_puts(" err=");
       print_int_raw((int)(tf->error_code & 7));
-      uart_puts_raw(" cr3=");
+      panic_puts(" cr3=");
       {
         uint64_t fatal_cr3;
         __asm__ volatile("mov %%cr3, %0" : "=r"(fatal_cr3));
-        uart_print_hex_raw(fatal_cr3);
+        panic_print_hex(fatal_cr3);
       }
-      uart_puts_raw(" pd480=");
+      panic_puts(" pd480=");
       {
         extern uint64_t cpu_pd7[512];
-        uart_print_hex_raw(cpu_pd7[480]);
+        panic_print_hex(cpu_pd7[480]);
       }
-      uart_puts_raw("\n");
+      panic_puts("\n");
       /* GB-060: same rule as the resume-return halt -- if this CPU is holding
          proc_lock, give it back before stopping, so the survivors are not left
          spinning behind a CPU that will never run again.  Only if the lock
@@ -3302,7 +3306,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         extern int spinlock_release_if_held_by_me(spinlock_t *lock);
         extern spinlock_t proc_lock;
         if (spinlock_release_if_held_by_me(&proc_lock))
-          uart_puts_raw("[KERNEL] released proc_lock before halting (GB-060)\n");
+          panic_puts("[KERNEL] released proc_lock before halting (GB-060)\n");
       }
       /* GB-060: and record the halt, so a CPU waiting on any OTHER lock this one
          still holds can take it over rather than spinning behind a stopped core
