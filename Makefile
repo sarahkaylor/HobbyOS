@@ -3127,14 +3127,16 @@ $(FB_MMAP_TEST): src/host/fb_mmap_test.c src/kernel/fb_mmap.c src/kernel/fb_ioct
 # the REAL static-PIE binary with src/kernel/elf_image.c and cross-checks the
 # type against readelf — a differential, and it runs inside host_tests.
 #
-# GB-137 (2026-11-01): `clang --target=x86_64-linux-musl` is NOT a musl build
-# on this fleet — the driver compiles for the musl triple but links through
-# the host ld with glibc paths (`/usr/bin/ld -L/lib/x86_64-linux-gnu`),
-# producing an 862,760-byte glibc static-PIE whose startup walks DT_RELA at
-# its link-time addresses and faults at VA=0xCF8.  musl-gcc is the real musl
-# static-PIE toolchain here (46,800 bytes, 11 R_X86_64_RELATIVE), and that
-# artifact runs clean on the same loader.  A missing musl-gcc must fail the
-# build loudly, not silently ship a glibc binary.
+# GB-137 (2026-11-01): build SDLAPP.BIN with musl-gcc.  `clang
+# --target=x86_64-linux-musl` is not a musl build on this fleet: the driver
+# compiles for the musl triple but links through the host ld with glibc paths
+# (`/usr/bin/ld -L/lib/x86_64-linux-gnu`), producing an 862,760-byte glibc
+# static-PIE regardless of the triple.  musl-gcc produces a real musl
+# static-PIE here (46,800 bytes, 11 R_X86_64_RELATIVE) and it runs clean on the
+# loader.  The build fix stands on that measurement alone; it is NOT evidence
+# about any earlier 0xCF8 fault (that control rebuilt a third, non-identical
+# binary — see GB-137's card).  A missing musl-gcc must fail the build loudly
+# rather than silently shipping a glibc binary.
 MUSL_CC ?= musl-gcc
 SDL_APP_PIE = obj/sdl_test_app_pie
 $(SDL_APP_PIE): tools/sdl/sdl_test_app.c src/include/fb_pixel.h src/include/linux_input.h src/include/display_mode.h
