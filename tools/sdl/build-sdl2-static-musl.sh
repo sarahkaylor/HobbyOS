@@ -57,12 +57,25 @@ echo
 echo "== libSDL2.a =="
 sha256sum build/.libs/libSDL2.a | tee "$DEST/libSDL2.a.sha256"
 
-# Link the hello app as a static musl ELF.  -static gives a static link; the
-# app must also link as non-PIE for the HobbyOS loader (checked by `file`).
-musl-gcc -static -no-pie \
+# Link the test app as a static-PIE musl ELF.  The HobbyOS v2 loader requires
+# static-PIE: a static non-PIE ET_EXEC linked at 0x400000 is refused with
+# "ET_EXEC linked below the user window; a -static-pie build is required"
+# (GB-031-V measured, docs/elf-loader.md §1).
+musl-gcc -fPIE -static-pie \
   -ffile-prefix-map="$PWD"=. -fdebug-prefix-map="$PWD"=. \
   -I include "${SDL2_STATIC_TEST_SRC:-$SCRIPT_DIR/sdl2_static_test.c}" \
   build/.libs/libSDL2.a -lm -lpthread -ldl -o "$DEST/sdl2_static_test"
+
+# Assert the artifact shape the loader actually accepts: static-PIE (ET_DYN)
+# with no PT_INTERP.  Printing the type is not asserting it (GB-024's lesson).
+if ! readelf -h "$DEST/sdl2_static_test" 2>/dev/null | grep -q 'Type:.*DYN'; then
+  echo "FATAL: linked app is not ET_DYN (static-PIE) — the v2 loader refuses ET_EXEC below the window" >&2
+  exit 1
+fi
+if readelf -l "$DEST/sdl2_static_test" 2>/dev/null | grep -q 'INTERP'; then
+  echo "FATAL: linked app has PT_INTERP (dynamically linked) — not a static-PIE" >&2
+  exit 1
+fi
 
 # Assert the artifact is genuinely musl on the LINKED binary (the SDL archive
 # is libc-agnostic; the libc markers appear only once musl's libc.a is pulled
