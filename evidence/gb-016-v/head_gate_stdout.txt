@@ -1,0 +1,12 @@
+t4_gb016_uname: building /home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb016v/obj/intel/gb016_uname.elf...
+=== t4_gb016_uname: booting intel guest with GB016-only manifest ===
+=== console rows (T3_LOG=/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb016v/evidence/gb-016-v/head_t3_intel.log) ===
+gb016 BEGIN
+gb016 rc=0
+gb016 sysname=Linux
+gb016 machine=x86_64
+gb016 release=6.1-hobbyos
+gb016 efaul rc=-14
+gb016 END
+t4_gb016_uname: PASS — uname(63) dispatched, sysname=Linux machine=x86_64, bad pointer -> EFAULT, from a Linux-ABI proc
+HEAD_GATE_RC=0

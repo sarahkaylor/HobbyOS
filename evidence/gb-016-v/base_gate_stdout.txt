@@ -1,0 +1,14 @@
+=== t4_gb016_uname: booting intel guest with GB016-only manifest ===
+=== console rows (T3_LOG=/home/sarah/Documents/GitHub/HobbyOS/.worktrees/gb016v/evidence/gb-016-v/base_t3_intel.log) ===
+gb016 BEGIN
+gb016 rc=-38
+gb016 sysname=
+gb016 machine=
+gb016 release=[RESUME-DIAG] pid=2 region=yes prot=3 dest=0x00000017FFFFFAF0 covers=1
+gb016 efaul rc=-38
+gb016 END
+t4_gb016_uname: FAIL — uname did not return 0 (rc=-38 means no dispatch)
+t4_gb016_uname: FAIL — sysname is not Linux
+t4_gb016_uname: FAIL — machine is not x86_64
+t4_gb016_uname: FAIL — bad pointer did not return -EFAULT
+BASE_GATE_RC=1
