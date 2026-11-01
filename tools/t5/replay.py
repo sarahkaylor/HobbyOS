@@ -76,7 +76,7 @@ def main():
     os.makedirs(path, exist_ok=True)
     serial_log = os.path.join(path, "serial.log")
     qmp_sock = f"/tmp/replay-qmp-{args.game.replace('.', '')}"
-    qemu_make = ["make", "run", f"ARCH={args.arch}",
+    qemu_make = ["make", "run", "DESKTOP=hobby", f"ARCH={args.arch}",
                  f"QEMU_ARGS=-display none -qmp unix:{qmp_sock},server,nowait"]
 
     from evidence_rig import boot

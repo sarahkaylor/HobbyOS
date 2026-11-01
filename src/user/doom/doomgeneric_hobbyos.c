@@ -107,7 +107,7 @@ static void kq_drain(void) {
     if (m <= 0) break;
     for (int i = 0; i < m; i++) {
       char c = buf[i];
-      if (c == '\033') {                       /* ESC sequence */
+      if (c == '\033') {                       /* ESC sequence, or a lone ESC */
         if (i + 2 < m && buf[i+1] == '[') {
           switch (buf[i+2]) {
           case 'A': kq_push(1, 0xad); break; /* Up    */
@@ -117,6 +117,11 @@ static void kq_drain(void) {
           default: break;
           }
           i += 2;
+        } else {
+          /* The desktop forwards the Escape key as one 0x1B byte (keymap[1]),
+           * not as a CSI sequence.  Dropping it meant DOOM's menu could not
+           * be opened from the keyboard at all (GB-091). */
+          kq_push(1, 27);
         }
         continue;
       }
@@ -169,7 +174,12 @@ void DG_DrawFrame(void) {
 }
 
 void DG_SleepMs(uint32_t ms) {
-  sleep((int)ms);
+  /* libc's sleep() is POSIX SECONDS (sleep(1) == 1000 ms), so the engine's
+   * per-tic I_Sleep(1) was a one-second nap: DOOM ran at ~1 tic/s instead of
+   * 35, the title screen never reached its demo, and a keypress advanced the
+   * frame by one tic and then looked frozen (GB-091).  usleep() is the
+   * millisecond-granular path (SYS_SLEEP takes ms underneath). */
+  usleep(ms * 1000u);
 }
 
 uint32_t DG_GetTicksMs(void) {
