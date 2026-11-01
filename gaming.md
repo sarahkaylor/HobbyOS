@@ -430,6 +430,8 @@ final list.
 
 ### Milestone M1 — ABI core / ELF loader (GB-013 … GB-024)
 
+> **M1 CLOSED 2026-11-01** — GB-024's gate (`GB-024-V3` #339) GREEN at `2d7605d`, merged `9f35f66` (PR #289). The W0 corpus runs, matches its `.ref`, **and includes a Linux-ABI member whose output is compared rather than skipped**. What it took: GB-138 (`6b91bad`, a dispatched `abi=0x1` member), GB-141/143 (`06a3397`, `writev(20)` — compat `printf` had never reached the console because musl's stdio calls `writev` and the compat table had no `case 20`), GB-142 (`67ebde6`, the exit code was read and never printed), GB-137 (`634b5fa`, the musl SDL build, which also supplies M2's drawing evidence). **Most of M1's failures were instruments, not kernel code** — the kernel work was correct for most of those hours and the program could not see it. Carried forward: **GB-031's `fbcon` question** (the pinned SDL 2.30.10 has no `fbcon` driver, so M2's DoD names a driver that does not exist in the library it builds) is a decision, not an implementation increment.
+
 | ID | Ticket | Wt | Depends | DoD |
 |---|---|---|---|---|
 | GB-013 | **[DEEP design, FLASH exec]** ELF static loader (static-PIE `ET_DYN`; `ET_EXEC` parsed-but-refused) in loader path; coexist w/ flat loader; magic dispatch | L | GB-012 | static-PIE binary maps+boot, entry set right (`docs/elf-loader.md`) |
