@@ -1,0 +1,5 @@
+=== t4_w0: W0 corpus gate over /tmp/w0_arrive_noref_nomarker.log ===
+  PASS NOPE (arrived in guest)
+t4_w0: PASS — every W0 corpus member arrived in the intel wave; members emitting a
+               '[W0] <member> linux=' marker had their output verified against the
+               Linux-leg .ref corpus (a mismatched marker FAILs).
