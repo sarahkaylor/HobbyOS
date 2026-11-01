@@ -2157,6 +2157,23 @@ static void compat_pselect6(struct trap_frame *tf) {
   sys_select(tf);
 }
 
+/* GB-148: musl's mkdir()/mkdirat() both use mkdirat(258) (dirfd, path, mode).
+ * HobbyOS SYS_MKDIR takes only (path) in rdi, so shift rsi -> rdi.  Only
+ * AT_FDCWD (-100) is supported: there is no per-directory fd resolution for
+ * mkdir on this surface, and a real dirfd answers -EBADF rather than silently
+ * creating the path relative to the process cwd.  mode is ignored by the FAT
+ * layer (existing behaviour of SYS_MKDIR). */
+static void compat_mkdirat(struct trap_frame *tf) {
+  int dirfd = (int)tf->regs[5];       /* rdi */
+  uint64_t path = tf->regs[4];        /* rsi */
+  if (dirfd != -100) {                /* AT_FDCWD */
+    tf->regs[0] = (uint64_t)(int64_t)(-EBADF);
+    return;
+  }
+  tf->regs[5] = path;
+  sys_mkdir(tf);
+}
+
 /* Last syscall each core entered; 0 = not in a syscall.  A core wedged
    inside a syscall leaves this set, which the stall watchdog prints. */
 static volatile int core_in_syscall[MAX_CPUS];
@@ -2307,6 +2324,11 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         case 270: compat_pselect6(tf);          return; /* pselect6(..., ts*) */
         case 293: syscall_num = SYS_PIPE;       break;  /* pipe2(fds, 0)    */
         case 318: syscall_num = SYS_GETRANDOM;  break;  /* getrandom(...)   */
+        /* GB-148: mkdir(83) is (path, mode) = rdi, rsi — SYS_MKDIR takes rdi.
+           mkdirat(258) is (dirfd, path, mode); musl uses it for BOTH mkdir and
+           mkdirat, so the dent block's mkdir() was -ENOSYS without this. */
+        case 83:  syscall_num = SYS_MKDIR;      break;  /* mkdir(path, mode) */
+        case 258: compat_mkdirat(tf);           return; /* mkdirat(dirfd, path, mode) */
         /* GB-019 (ioctl subset, real request dispatch).  Linux ioctl(16): regs[5]=rdi
            =fd, regs[4]=rsi=request, regs[3]=rdx=arg.  This is a genuine dispatch on
            the request number, and every non-ENOTTY outcome is falsifiable:
