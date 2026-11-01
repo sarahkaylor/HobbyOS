@@ -181,10 +181,10 @@ That launches QEMU with:
 - the kernel's serial console on stdio.
 
 Extra QEMU flags go through `QEMU_ARGS`, e.g. a headless boot with a QMP socket
-for scripted screenshots:
+for scripted screenshots (the serial console stays on stdout, so tee it):
 
 ```bash
-make run QEMU_ARGS="-display none -serial file:serial.log -qmp unix:./qmp-sock,server,nowait"
+make run QEMU_ARGS="-display none -qmp unix:./qmp-sock,server,nowait" | tee serial.log
 ```
 
 ### QEMU Controls
